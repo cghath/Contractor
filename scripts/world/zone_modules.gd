@@ -572,6 +572,7 @@ static func _hq() -> Array:
 	out.append([Vector3(2.4, 0, 15.6), Vector3(5.0, 1.1, 16.0), M.SANDBAG])
 	_crates(out, Vector3(8.0, 0, 8.4))
 	_aa_site(out, Vector2(-11.0, 9.0))
+	_fuel_drums(out, Vector3(12.0, 0, -6.5))  # the fuel store (a sabotage target, 2026-10-20)
 	return out
 
 
@@ -593,6 +594,7 @@ static func _qrf_base() -> Array:
 		out.append([Vector3(p.x, 0, p.y), Vector3(p.x + 0.2, 3.0, p.y + 0.2), M.STEEL])
 	out.append([Vector3(2.0, 3.0, -9.0), Vector3(13.0, 3.1, -2.0), M.SHEET_METAL])
 	_crates(out, Vector3(8.0, 0, 4.4))
+	_fuel_drums(out, Vector3(10.6, 0, 0.2))  # the vehicles' fuel store by the shed (a sabotage target, 2026-10-20)
 	return out
 
 
@@ -649,6 +651,16 @@ static func _crates(out: Array, corner: Vector3) -> void:
 	out.append([corner, corner + crate, W])
 	out.append([corner + Vector3(1, 0, 0), corner + Vector3(1, 0, 0) + crate, W])
 	out.append([corner + Vector3(0, 1, 0), corner + Vector3(0, 1, 0) + crate, W])
+
+
+## A fuel store (a sabotage target, mission variety 2026-10-20): two rows of four steel fuel drums
+## (0.6 x 0.9 m, 0.1 m apart) from `corner` (their low corner) along +x and +z. Its box is
+## `corner` to `corner` + (2.7, 0.9, 1.3) (contracts.json "fuel"). Steel: it takes a placed charge.
+static func _fuel_drums(out: Array, corner: Vector3) -> void:
+	for row in 2:
+		for col in 4:
+			var at := corner + Vector3(col * 0.7, 0, row * 0.7)
+			out.append([at, at + Vector3(0.6, 0.9, 0.6), VoxelWorld.Mat.STEEL])
 
 
 ## An AA emplacement centred on `c` (x, z): a 3.6 m sandbag ring 0.8 m high, open to the east,

@@ -42,6 +42,7 @@ func _ready() -> void:
 		await _run_client()
 		return
 	_test_generation()
+	_test_variety_board()
 	_register_clear_compound()
 	_test_rating_and_understatement()
 	_test_negotiation()
@@ -159,6 +160,61 @@ func _test_generation() -> void:
 		"a module placed away from the origin moves its sites with it")
 	MissionRegistry.unregister_type("test_rescue")
 	check(not "test_rescue" in MissionRegistry.types(), "and unregisters")
+
+
+## Task 8 (mission variety, 2026-10-20): convoy ambush, hold the line, downed crew rescue,
+## sabotage and recon come up on the board (offers made as Contracts.server_refresh_board makes
+## them) often enough to be seen, in zones holding a module each plays in, in contract and hot
+## zones alike; sabotage's target is a fuel store, a vehicle park or a radio mast (a weapons cache
+## is the raid's), and a park plays as destroy_vehicles with its vehicles listed. missions_test
+## "Mission variety: from the board, played through" plays each one to the end.
+func _test_variety_board() -> void:
+	print("Mission variety on the board")
+	var five: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2026
+	var n := 650
+	var count := {}
+	var zone_kinds := {}
+	var targets := {}
+	var misfit := ""
+	for i in n:
+		var o := ContractGen.generate(rng, {"day": 1, "source": "board"})
+		if not o.type in five:
+			continue
+		count[o.type] = int(count.get(o.type, 0)) + 1
+		if not zone_kinds.has(o.type):
+			zone_kinds[o.type] = {}
+		zone_kinds[o.type][o.zone_kind] = true
+		var zone := MissionRegistry.zone(String(o.zone_id))
+		var def := MissionRegistry.type_def(String(o.type))
+		var problem := ""
+		if not (ZoneModules.base(String(o.module)) in MissionRegistry.type_modules(def) and ZoneModules.base(String(o.module)) in zone.modules):
+			problem = "module %s" % o.module
+		var required: Array = (o.objectives as Array).filter(func(x: Dictionary) -> bool: return not bool(x.get("optional", false)))
+		if required.is_empty() or (o.objectives as Array).any(func(x: Dictionary) -> bool: return String(x.text).contains("{") or not String(x.kind) in Objectives.KINDS):
+			problem = "objectives"
+		if o.type == "sabotage" and problem == "":
+			var main: Dictionary = required[0]
+			var site := String(main.site)
+			targets[site] = int(targets.get(site, 0)) + 1
+			var park := site == "park"
+			var site_def := MissionRegistry.site(String(o.module), site)
+			if not site in ["fuel", "park", "mast"] or (String(main.kind) == Objectives.DESTROY_VEHICLES) != park \
+					or (park and (site_def.get("vehicles", []) as Array).is_empty()) or (not park and int(site_def.get("voxels", 0)) <= 0):
+				problem = "sabotage target %s (%s, %s)" % [site, main.kind, o.module]
+		if problem != "" and misfit == "":
+			misfit = " (%s in %s: %s)" % [o.type, o.zone_id, problem]
+	check(five.all(func(t: String) -> bool: return int(count.get(t, 0)) >= n / 13 / 2),
+		"each of the five comes up on the board, about one offer in 13 (%s of %d offers)" % [count, n])
+	check(misfit == "", "each in a zone holding a module it plays in, its objectives filled in" + misfit)
+	check(five.all(func(t: String) -> bool: return (zone_kinds.get(t, {}) as Dictionary).has("contract") and (zone_kinds.get(t, {}) as Dictionary).has("hot")),
+		"in contract zones and hot zones alike (%s)" % [zone_kinds])
+	check(targets.has("fuel") and targets.has("park") and targets.has("mast") and not targets.has("cache"),
+		"sabotage hits a fuel store, a vehicle park or a radio mast, never the raid's weapons cache (%s)" % [targets])
+	var outpost := ContractGen.mission_target(rng, MissionRegistry.type_def("sabotage"), "")
+	check(String(outpost.module) == "outpost" and (outpost.objectives as Array).size() >= 1 and String(outpost.objectives[0].kind) == Objectives.DESTROY_VEHICLES
+		and String(outpost.title_extra) == " (vehicle park)", "an outpost's sabotage target is its vehicle park (%s)" % outpost.title_extra)
 
 
 func _test_rating_and_understatement() -> void:

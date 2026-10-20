@@ -1,7 +1,8 @@
 class_name MissionScenario
 extends Node
 ## Plays the scenario mission types in the level (mission variety, 2026-10-15; docs/missions.md):
-## convoy ambush, hold the line, downed crew rescue, recon and the "never spotted" bonus. Host
+## convoy ambush, hold the line, downed crew rescue, recon, the "never spotted" bonus and
+## sabotage's vehicle park (2026-10-20: its own section at the end). Host
 ## only (everything it spawns replicates like any AI, vehicle or person); one node per level,
 ## "MissionScenario", installed by MapNodes.install on every peer and idle off the host.
 ##
@@ -99,6 +100,8 @@ func _step(dt: float) -> void:
 				_recon_tick(run, o, dt)
 			Objectives.UNDETECTED:
 				_unseen_tick(run, o)
+			Objectives.DESTROY_VEHICLES:
+				_park_tick(run, o)
 
 
 ## A run that ended (objective done, failed or gone): a convoy that is still rolling is left to it.
@@ -598,3 +601,93 @@ func server_spotted() -> void:
 	for oid: String in runs.keys():
 		if String(runs[oid].kind) == Objectives.UNDETECTED:
 			Contracts.objectives.server_set_state(oid, Objectives.FAILED, "spotted")
+
+
+# --- Sabotage: a vehicle park (mission variety, 2026-10-20) ------------------------------------
+## Sabotage's vehicle park (Objectives.DESTROY_VEHICLES, contracts.json module site "park"): its
+## "vehicles" parked side by side "spacing_m" apart about "pos", facing "yaw_deg", when the
+## contract goes live: empty and hostile, out of the zone save while whole (a wreck stays). Done
+## when every one burns, is a wreck or can't drive (a charge set on each: Charges rides it and
+## calls Vehicle.server_explosion; rockets and fire do as well). Kept apart from _on_live and its
+## runs above (its own handlers) so it merges cleanly with their checkpoints.
+##
+## The objective's params keep "ids" (the vehicles', given when first parked) and "down" (those
+## out of action), so a squad back in the zone (contract_returned) finds the same park: the ones
+## still whole parked again, a wreck back from the zone save. Run keys: "kind", "oid", "cid",
+## "ids", "down" (vehicle ids, strings; no node references).
+
+func _enter_tree() -> void:
+	if not Contracts.contract_live.is_connected(_on_park_live):
+		Contracts.contract_live.connect(_on_park_live)
+		Contracts.contract_returned.connect(_on_park_live)
+
+
+func _on_park_live(_cid: String, objectives: Array) -> void:
+	if not multiplayer.is_server() or level == null:
+		return
+	for given: Dictionary in objectives:
+		if String(given.get("kind", "")) != Objectives.DESTROY_VEHICLES or runs.has(String(given.oid)) or not Objectives.here(given, level):
+			continue
+		var o := Contracts.objectives.get_objective(String(given.oid))
+		if not o.is_empty() and o.state == Objectives.ACTIVE:
+			_park_begin(o)
+
+
+## Host: parks objective `o`'s vehicles (those not yet out of action) and starts its run.
+func _park_begin(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer
+	var models: Array = p.get("vehicles", [])
+	if layer == null or models.is_empty():
+		return
+	if (p.get("ids", []) as Array).size() != models.size():
+		var stamp := Time.get_ticks_msec()
+		p["ids"] = range(models.size()).map(func(i: int) -> String: return ("park_%s_%d_%d" % [String(o.oid), stamp, i]).validate_node_name())
+	var ids: Array = p.ids
+	var down: Array = p.get("down", [])
+	var yaw := float(p.get("yaw_deg", 0.0))
+	var across := Basis(Vector3.UP, deg_to_rad(yaw)) * Vector3.RIGHT
+	var spacing := float(p.get("spacing_m", 4.5))
+	var centre := _p3(p.pos)
+	var entries: Array = []
+	for i in ids.size():
+		if ids[i] in down:
+			continue  # out of action already (a wreck comes back with the zone save)
+		var at := _ground(centre + across * spacing * (i - (ids.size() - 1) * 0.5)) + Vector3.UP * 0.2
+		entries.append({"id": String(ids[i]), "model": String(models[i]), "pos": at, "yaw": yaw, "faction": "hostile"})
+	layer.server_place_parked(entries)
+	for id: Variant in ids:
+		var v := layer.find(String(id))
+		if v and not v.wrecked:
+			v.set_meta(&"no_save", true)
+	var run := {"kind": Objectives.DESTROY_VEHICLES, "oid": String(o.oid), "cid": String(o.cid), "ids": ids.duplicate(), "down": down.duplicate()}
+	runs[run.oid] = run
+	print("[mission] vehicle park %s: %d vehicles at (%.0f, %.0f)" % [run.oid, entries.size(), centre.x, centre.z])
+	_park_tick(run, o)
+
+
+func _park_tick(run: Dictionary, o: Dictionary) -> void:
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer if level else null
+	if layer == null:
+		return
+	var down: Array = run.down
+	for id: Variant in run.ids:
+		if id in down:
+			continue
+		var v := layer.find(String(id))
+		if v == null or v.wrecked or v.is_burning() or not v.can_drive():
+			down.append(id)
+	o.params["down"] = down.duplicate()
+	var progress := "%d of %d out of action" % [down.size(), (run.ids as Array).size()]
+	_mark(run, o, Objectives.DONE if down.size() >= (run.ids as Array).size() else Objectives.ACTIVE, progress)
+
+
+## The parked vehicles of park objective `oid` still in the level (tests).
+func park_vehicles(oid: String) -> Array[Vehicle]:
+	var out: Array[Vehicle] = []
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer if level else null
+	for id: Variant in run_of(oid).get("ids", []):
+		var v := layer.find(String(id)) if layer else null
+		if v:
+			out.append(v)
+	return out

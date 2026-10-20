@@ -68,6 +68,7 @@ func _ready() -> void:
 	await _test_roadside_ieds()
 	_test_enemy_drones()
 	_test_strongbox()
+	await _test_variety_played()  # late: it blows the comms site's mast, which stays down (the hot zone ops checks want it standing)
 	await _test_respawn_points()
 	_finish()
 
@@ -1830,7 +1831,7 @@ func _test_scenarios() -> void:
 	var crate_id := String(main.params.cargo_ids[0])
 	check(bool(run.dropped) and _item(crate_id) != null, "the cargo crate is on the ground to seize")
 	var bonus := _kind(d.objectives, Objectives.EXTRACT_ITEM, true)
-	Contracts.objectives.server_items_out([{"id": "hvt_case", "count": 1, "state": {"intel_id": crate_id}}])
+	Contracts.objectives.server_items_out([{"id": ScenarioGen.CONVOY_CARGO, "count": 1, "state": {}}])  # (a two-handed carry keeps no state)
 	check(Contracts.objectives.get_objective(bonus.oid).state == Objectives.DONE, "carrying the crate out earns the bonus")
 	var debrief := _end_deployment()
 	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("cargo"),
@@ -1982,14 +1983,14 @@ func _test_scenarios() -> void:
 
 	# Sabotage: destroy the target; the unseen bonus.
 	d = await _deploy_new("sabotage")
-	main = _kind(d.objectives, Objectives.DESTROY_CACHE)
+	main = _sabotage_target(d.objectives)
 	unseen = _kind(d.objectives, Objectives.UNDETECTED, true)
 	check(not main.is_empty() and not unseen.is_empty(), "a sabotage contract: a target to destroy (%s) and an unseen bonus" % main.get("text", ""))
 	Contracts.server_cache_destroyed(String(main.params.cache))
 	debrief = _end_deployment()
 	check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("unseen"), "debrief: target destroyed and never spotted: completed with the bonus (%s)" % _bonus_texts(debrief))
 	d = await _deploy_new("sabotage")
-	main = _kind(d.objectives, Objectives.DESTROY_CACHE)
+	main = _sabotage_target(d.objectives)
 	scen.server_spotted()
 	Contracts.server_cache_destroyed(String(main.params.cache))
 	debrief = _end_deployment()
@@ -2040,3 +2041,249 @@ func _test_scenario_generation() -> void:
 		for o: Dictionary in ContractGen.generate_board(500 + seed_i, 1, {}, 6):
 			board[o.type] = true
 	check(NEW_TYPES.all(func(t: String) -> bool: return board.has(t)), "the contract board offers all of them (%s)" % [board.keys()])
+
+
+# --- Mission variety, from the board and played through (task 8, 2026-10-20) ---------------------
+
+const FIVE: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
+
+
+## Sabotage's required target: a fuel store or a mast (destroy_cache) or a vehicle park
+## (destroy_vehicles), as it stands now.
+func _sabotage_target(list: Array) -> Dictionary:
+	for o: Dictionary in list:
+		if String(o.kind) in [Objectives.DESTROY_CACHE, Objectives.DESTROY_VEHICLES] and not bool(o.optional):
+			return Contracts.objectives.get_objective(String(o.oid))
+	return {}
+
+
+## An offer as the board makes them for this zone (ContractGen.generate as
+## Contracts.server_refresh_board calls it, no type asked for; the zone fixed as the faction war's
+## own offers fix it): the first of `type` that `want` (the offer) takes, briefed truthfully. {} if
+## none came up in `tries` offers.
+func _board_offer(type: String, want := Callable(), tries := 500) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7100 + _made
+	_made += 1
+	for i in tries:
+		var c := ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": ZONE})
+		if c.type == type and (not want.is_valid() or bool(want.call(c))):
+			c.understated = false
+			c.true_rating = c.rated
+			c.enemy_count = c.enemy_est
+			return c
+	return {}
+
+
+func _deploy_offer(c: Dictionary) -> Dictionary:
+	var cid := _add(c)
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	var why := Contracts.server_start_deployment([cid], ZONE)
+	await _frames(3)
+	return {"cid": cid, "why": why, "objectives": Contracts.objectives.for_contract(cid)}
+
+
+## The sabotage target site an offer picked ("fuel", "park", "mast").
+static func _sabotage_site(c: Dictionary) -> String:
+	for o: Dictionary in c.get("objectives", []):
+		if not bool(o.get("optional", false)) and String(o.kind) in [Objectives.DESTROY_CACHE, Objectives.DESTROY_VEHICLES]:
+			return String(o.get("site", ""))
+	return ""
+
+
+## Task 8 (Captain's tasking, 2026-10-19): convoy ambush, hold the line, downed crew rescue,
+## sabotage and recon each taken as the board offers it here and played to the end through the
+## objective code itself (no test hooks): the convoy's crews killed in the ambush, the crate
+## carried out; the position held on the clock; the crew walked to a landing zone and delivered by
+## the People ledger; every recon site watched in line of sight; sabotage's fuel store and mast
+## blown by a placed charge, its vehicle park by a charge on each vehicle. Each then extracts, with
+## the debrief and pay, and a vehicle park left standing pays nothing.
+func _test_variety_played() -> void:
+	print("Mission variety: from the board, played through")
+	var scen := MissionScenario.of(level)
+	if scen == null:
+		check(false, "the level has its MissionScenario node")
+		return
+	Contracts.new_full_campaign(89, 900000)
+	_command_on(false)  # the enemy's own orders stand down: the contracts below play alone
+	_calm()
+	_clear_waves()
+	var r := MapNodes.reinforcements(level)
+	r.params.max_alive = 8  # keep the waves small
+	r.params.max_pairs = 1
+	var before := level.ai.get_children()
+	var charges := Charges.of(level)
+	var settings: Dictionary = MissionRegistry.data().settings
+	var fuse: Variant = settings.charge_fuse_s
+	settings.charge_fuse_s = 0.5
+	var lz := level.extraction_points()[0]
+	var offers := {}
+	for type: String in FIVE:
+		offers[type] = _board_offer(type)
+	for site: String in ["fuel", "park", "mast"]:
+		offers["sabotage_" + site] = _board_offer("sabotage", func(x: Dictionary) -> bool: return _sabotage_site(x) == site)
+	var titles: Array = offers.values().map(func(x: Dictionary) -> String: return String(x.get("title", "none")))
+	check(offers.values().all(func(x: Dictionary) -> bool: return not x.is_empty()),
+		"the board offers each of the five here, and sabotage at a fuel store, a vehicle park and a radio mast (%s)" % [titles])
+
+	# Convoy ambush: every crew killed in the ambush stops it; the crate goes out with the squad.
+	var c: Dictionary = offers.convoy_ambush
+	if not c.is_empty():
+		_place(player, level.insertion_points()[0])
+		var d := await _deploy_offer(c)
+		var main := _kind(d.objectives, Objectives.CONVOY)
+		scen.server_advance(float(main.params.depart_s) + 2.0)
+		var run := scen.run_of(String(main.oid))
+		var crews := 0
+		for e: Dictionary in run.get("vehicles", []):
+			for s: Variant in e.crew:
+				if is_instance_valid(s) and (s as Soldier).vitals.is_up():
+					(s as Soldier).vitals.server_kill()
+					crews += 1
+		await _frames(2)
+		scen.server_advance(1.0)
+		main = Contracts.objectives.get_objective(String(main.oid))
+		check(d.why == "" and crews > 0 and main.state == Objectives.DONE,
+			"convoy from the board: its %d crew killed in the ambush, the convoy is stopped (%s)" % [crews, main.progress])
+		var crate := _item(String(main.params.cargo_ids[0]))
+		check(crate != null and crate.item_id == StringName(ScenarioGen.CONVOY_CARGO), "its cargo crate lies by the first cargo truck")
+		if crate:
+			_drop_all(player, StringName(ScenarioGen.CONVOY_CARGO))
+			player.inventory.release_hands()
+			check(player.inventory.take(crate.item_id, 1, crate.state) == 1, "picked up in both hands")
+			crate.queue_free()
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("cargo") and int(debrief.contracts[0].completion) > 0,
+			"carried out at extraction: completed and paid, with the cargo bonus (%s)" % _bonus_texts(debrief))
+		player.inventory.release_hands()
+		await _clean_scenario(before)
+
+	# Hold the line: the clock runs out with one of ours in the position, waves or not.
+	c = offers.defend_hold
+	if not c.is_empty():
+		var d := await _deploy_offer(c)
+		var main := _kind(d.objectives, Objectives.HOLD_POINT)
+		var point := _v(main.params.pos)
+		_place(player, point)
+		scen.server_advance(float(main.params.hold_s) + 1.0)
+		main = Contracts.objectives.get_objective(String(main.oid))
+		check(d.why == "" and main.state == Objectives.DONE,
+			"hold from the board: held for %d min at the %s, done (%s)" % [roundi(float(main.params.hold_s) / 60.0), String(main.params.name), main.progress])
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and int(debrief.contracts[0].completion) > 0, "extracted: completed and paid (%s)" % debrief.contracts[0].outcome)
+		await _clean_scenario(before)
+
+	# Downed crew: each one walked to the landing zone, delivered through the People ledger.
+	c = offers.crew_rescue
+	if not c.is_empty():
+		var d := await _deploy_offer(c)
+		var main := _kind(d.objectives, Objectives.RESCUE_CREW)
+		var all := _kind(d.objectives, Objectives.RESCUE_CREW, true)
+		var crew: Array = scen.run_of(String(main.oid)).get("crew", [])
+		_place(player, lz + Vector3(1.5, 0, 0))
+		var k := 0
+		for s: Variant in crew:
+			if not is_instance_valid(s):
+				continue
+			var person := s as Soldier
+			var brain := person.get_node_or_null(^"PersonAI")
+			if brain:
+				brain.process_mode = Node.PROCESS_MODE_DISABLED  # the walk is ours
+			level.people.server_lead(player, person)
+			_place(person, lz + Vector3(-1.0 - k, 0, 1.0))
+			k += 1
+		await _wait_for(func() -> bool: return Contracts.objectives.get_objective(String(all.oid)).state != Objectives.ACTIVE, 4.0)
+		main = Contracts.objectives.get_objective(String(main.oid))
+		all = Contracts.objectives.get_objective(String(all.oid))
+		check(d.why == "" and crew.size() >= 2 and main.state == Objectives.DONE and all.state == Objectives.DONE,
+			"crew rescue from the board: all %d crew brought to %s, delivered: done with the whole-crew bonus (%s)" % [crew.size(), "the landing zone", all.progress])
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("whole crew"), "extracted: completed, the bonus paid (%s)" % _bonus_texts(debrief))
+		await _clean_scenario(before)
+
+	# Recon: each site watched from close by, in line of sight, until its dwell is done.
+	c = offers.recon
+	if not c.is_empty():
+		var d := await _deploy_offer(c)
+		var sites: Array = d.objectives.filter(func(x: Dictionary) -> bool: return x.kind == Objectives.RECON_SITE)
+		var watched := 0
+		for site_o: Dictionary in sites:
+			_place(player, _v(site_o.params.pos) + Vector3(0, 0, 4))
+			await _frames(2)
+			scen.server_advance(float(site_o.params.dwell_s) + 1.0)
+			if Contracts.objectives.get_objective(String(site_o.oid)).state == Objectives.DONE:
+				watched += 1
+		check(d.why == "" and sites.size() >= 2 and watched == sites.size() and Contracts.objectives.contract_done(d.cid),
+			"recon from the board: %d of %d sites watched in line of sight, each done" % [watched, sites.size()])
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and _bonus_texts(debrief).contains("never spotted"), "extracted unseen: completed with the bonus (%s)" % _bonus_texts(debrief))
+		await _clean_scenario(before)
+
+	# Sabotage: a fuel store and a mast blown by a placed charge.
+	for site: String in ["fuel", "mast"]:
+		c = offers["sabotage_" + site]
+		if c.is_empty():
+			continue
+		var d := await _deploy_offer(c)
+		var main := _sabotage_target(d.objectives)
+		var at := _v(main.pos)
+		_place(player, at + Vector3(1.8, 0, 0))
+		player.inventory.take(Charges.ITEM, 1)
+		var placed_ok := Contracts.objectives.server_place_charge(player, String(main.oid))
+		_place(player, at + Vector3(40, 0, 0))  # clear of the blast
+		await _wait_for(func() -> bool: return Contracts.objectives.get_objective(String(main.oid)).state == Objectives.DONE, 3.0)
+		check(d.why == "" and main.kind == Objectives.DESTROY_CACHE and placed_ok and Contracts.objectives.get_objective(String(main.oid)).state == Objectives.DONE,
+			"sabotage from the board (%s): a charge set on the %s goes off, it's destroyed" % [c.title, String(main.params.name)])
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and int(debrief.contracts[0].completion) > 0 and _bonus_texts(debrief).contains("unseen"),
+			"extracted: completed and paid, never seen (%s)" % _bonus_texts(debrief))
+		await _clean_scenario(before)
+
+	# Sabotage: a vehicle park, a charge on each vehicle; and one left standing pays nothing.
+	c = offers.sabotage_park
+	if not c.is_empty():
+		var d := await _deploy_offer(c)
+		var main := _sabotage_target(d.objectives)
+		var parked := scen.park_vehicles(String(main.oid))
+		var centre := _v(main.params.pos)
+		var sound := parked.size() == (main.params.vehicles as Array).size()
+		for v: Vehicle in parked:
+			sound = sound and v.faction == &"hostile" and v.occupants().is_empty() and v.can_drive() and not v.wrecked and _flat_m(v.global_position, centre) < 12.0
+		check(d.why == "" and main.kind == Objectives.DESTROY_VEHICLES and sound and main.state == Objectives.ACTIVE,
+			"sabotage from the board (%s): %d vehicles parked there, hostile, empty and whole (%s)" % [c.title, parked.size(), main.progress])
+		await _frames(30)
+		var still := parked.all(func(x: Vehicle) -> bool: return is_instance_valid(x) and _flat_m(x.global_position, centre) < 12.0 and x.global_position.y > level.ground_height(x.global_position.x, x.global_position.z) - 1.0)
+		check(still, "they stay parked, on the ground")
+		var used := 0
+		for v: Vehicle in parked:
+			for attempt in 3:
+				if not is_instance_valid(v) or v.wrecked or v.is_burning() or not v.can_drive():
+					break
+				player.inventory.take(Charges.ITEM, 1)
+				_place(player, v.global_position + Vector3(2.5, 0, 0))
+				var id := charges.server_place_at(player, Transform3D(Basis.IDENTITY, v.global_position + Vector3.UP * 1.0), v)
+				_place(player, centre + Vector3(45, 0, 0))  # clear of the blast
+				if id == "":
+					break
+				used += 1
+				charges._due[id] = Charges._now()
+				await _frames(3)
+		scen.server_advance(1.0)
+		main = Contracts.objectives.get_objective(String(main.oid))
+		check(main.state == Objectives.DONE and used <= parked.size() * 2,
+			"a charge set on each vehicle (%d for %d): every one out of action, the park is done (%s)" % [used, parked.size(), main.progress])
+		var debrief := _end_deployment()
+		check(debrief.contracts[0].outcome == "completed" and int(debrief.contracts[0].completion) > 0, "extracted: completed and paid (%s)" % debrief.contracts[0].outcome)
+		await _clean_scenario(before)
+		# The same park left standing.
+		d = await _deploy_offer(_board_offer("sabotage", func(x: Dictionary) -> bool: return _sabotage_site(x) == "park"))
+		main = _sabotage_target(d.objectives)
+		scen.server_advance(2.0)
+		var standing := String(Contracts.objectives.get_objective(String(main.oid)).get("state", ""))
+		debrief = _end_deployment()
+		check(standing == Objectives.ACTIVE and debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0,
+			"a vehicle park left standing: not completed, no pay (%s)" % debrief.contracts[0].outcome)
+		await _clean_scenario(before)
+	settings.charge_fuse_s = fuse
+	r.params = Reinforcements.DEFAULTS.duplicate()
+	_command_on(true)

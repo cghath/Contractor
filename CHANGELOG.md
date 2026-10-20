@@ -66,6 +66,23 @@ all six are fixed (`FIXES.md`), then reviewed, and the review's problems fixed t
   up (same cause as E-01, not yet fixed for people).
 - On cghath's machine `map` (extraction countdown) and `ui` (vehicle readout) fail even on dev
   38f5825 (R0146); both pass on CI.
+### Mission variety: sabotage done properly, every type played through (task 8, 2026-10-20)
+
+#### Added
+- **Sabotage hits what the enemy fights with**: a fuel store (the compound's generators and fuel
+  drums; new steel drum stores at the HQ and the QRF base), a vehicle park (two or three technicals
+  parked at an outpost, checkpoint, compound, QRF base or HQ) or the comms site's radio mast. A
+  park counts once every vehicle burns, is a wreck or can't drive: a breaching charge set on each
+  does it. Sabotage now comes up at checkpoints and compounds too, so contract zones get it.
+- Tests: contracts checks the five mission-variety types on the board (in fitting zones, contract
+  and hot); missions takes each from the board and plays it to the end through the real objective
+  code (crews killed, crate carried out, position held, crew walked to the LZ, sites watched,
+  charges set), plus a vehicle park left standing that pays nothing.
+
+#### Fixed
+- **The convoy's cargo bonus can be earned**: the crate is now a supply crate, and any one carried
+  out counts. A crate carried in both hands kept no intel id, so the old hard case never counted.
+
 ### Day and night, weather: wave 7 S1 MVP (Captain, 2026-10-18)
 
 #### Added
