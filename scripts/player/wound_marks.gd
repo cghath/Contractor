@@ -54,6 +54,9 @@ const EXPIRE_TICK_S := 10.0
 ## within POOL_STEP of its cell.
 const LAND_MASK := (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | Ragdoll.LAYER
 const WORLD_MASK := 1
+## How far above a drop's start the floor is looked for again when nothing is below it
+## (_floor_below: a drop starting just under the floor's surface).
+const FLOOR_LOOK_UP_M := 0.3
 const POOL_STEP := 0.15
 const MAX_STUCK_HOLDERS := 24
 const MAX_STUCK_CELLS := 48
@@ -345,9 +348,17 @@ func _spatter(spot: Dictionary) -> void:
 ## far "landed" there as a pool cell left hanging in the air once the body fell or moved
 ## (0.45-0.9 m up, R0950-R0953). What a drop really meets on the way down (a person, an item, a
 ## vehicle) is _surface_between's, and it rides on that.
+## A drop that starts a little under the floor's surface (the lowest skin of a body lying on
+## it, pressed in by the ragdoll's contact) is looked up again from FLOOR_LOOK_UP_M above: a ray
+## starting inside the ground meets nothing, and those drops fell the whole 2.5 m and lay as
+## pool cells under the yard (CI, interaction "his blood is on the ground": off it -2.50).
 func _floor_below(from: Vector3) -> float:
+	var space := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 2.5, WORLD_MASK, _own_rids())
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		query.from = from + Vector3.UP * FLOOR_LOOK_UP_M
+		hit = space.intersect_ray(query)
 	return hit.position.y if not hit.is_empty() else from.y - 2.5
 
 

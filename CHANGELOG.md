@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### CI flakes (cghath's side, 2026-10-20)
+
+#### Fixed
+
+- **Test flakes** that turned most CI runs red, each now waiting on what its check needs:
+  world (the ground guard's own round no longer races the test's check; the fall spot is clear
+  of rocks round the whole capsule), map (the staged squad stands still in the LZ before the
+  extraction countdown), loop (the casualty lies out of the helicopter's own loading reach
+  until the player carries him over), base_zone (confirming waits until the crossing counts the
+  player in; a fly-on that doesn't board him now says where he and the helicopters are), voice
+  (asking waits until the crosshair finds the soldier, and nobody else stands on the line).
+- **A squadmate's slot no longer goes behind a wall for a moment** (casualty soak "stuck"): a
+  wall coming between the team's place and a slot pulls the slot at once; the 2 s hold that
+  stops slots flipping by a doorway now only delays letting it go. Turning a corner by the
+  compound's back wall, Golf's slot sat outside it for about 2 s and he set off round by the
+  gate.
+- **Blood no longer falls through the ground under a body lying on it** (interaction, CI): a drop
+  from the lowest skin, pressed a little into the ground, found no floor below it and lay as a
+  pool cell 2.5 m under the yard; the floor is looked for again from just above it.
+- **CI pinned to ubuntu-24.04** (both jobs): `ubuntu-latest` moves to Ubuntu 26 from
+  2026-10-19, and the suites aren't proven there yet.
+
+#### Added
+
+- **A manual CI run can name its suites**: `gh workflow run tests.yml --ref <branch> -f
+  suites="world map"` runs only those (space- or comma-separated); push and pull request runs
+  still run every suite. `tools/check_ci_suites.sh` checks the workflow's list against the
+  local default.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;

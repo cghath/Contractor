@@ -1,12 +1,23 @@
 # Runs the headless test suites (tools/run_tests.sh) on every push and pull request, one job
 # per suite so a failure names its suite. Uses the Linux editor of the Voxel Tools release the
 # README points at (Godot 4.7.2 + Voxel Tools 1.7, standard precision), cached between runs.
+# A manual run (workflow_dispatch) can name only some suites (input "suites", e.g.
+# `gh workflow run tests.yml --ref <branch> -f suites="world casualty"`): repeat runs of a few
+# suites without the whole matrix. Push and pull_request runs always run every suite.
+# Runners pinned to ubuntu-24.04: ubuntu-latest moves to Ubuntu 26 from 2026-10-19, and the
+# suites aren't proven there yet.
 name: Tests
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      suites:
+        description: "Only these suites (space- or comma-separated); empty: every suite"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: tests-${{ github.ref }}
@@ -21,7 +32,9 @@ jobs:
   # failed import fail (no Godot needed).
   runner:
     name: test runner
-    runs-on: ubuntu-latest
+    # A manual run naming suites runs only those (no runner check).
+    if: ${{ !inputs.suites }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -42,14 +55,42 @@ jobs:
           path: ${{ runner.temp }}/contractor-test-logs
           if-no-files-found: warn
 
+  # Which suites this run runs: every one (ALL_SUITES, the same as tools/run_tests.sh runs by
+  # default: tools/check_ci_suites.sh checks they match), or a manual run's "suites".
+  plan:
+    name: pick the suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.pick.outputs.suites }}
+    steps:
+      - name: Pick the suites
+        id: pick
+        env:
+          ALL_SUITES: smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports heliflight bay aav sound loop ui loadout weapons forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone
+          ONLY: ${{ inputs.suites }}
+        run: |
+          want="$(echo "${ONLY:-}" | tr ',' ' ')"
+          [ -n "${want// /}" ] || want="$ALL_SUITES"
+          for s in $want; do
+            case " $ALL_SUITES " in
+              *" $s "*) ;;
+              *) echo "::error title=suites::no suite named '$s' (suites: $ALL_SUITES)"; exit 1 ;;
+            esac
+          done
+          json="$(printf '%s\n' $want | awk '!seen[$0]++' | jq -R . | jq -cs .)"
+          echo "suites: $json"
+          echo "suites=$json" >> "$GITHUB_OUTPUT"
+
   suite:
     name: ${{ matrix.suite }}
-    runs-on: ubuntu-latest
+    needs: plan
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        suite: [smoke, gameplay, squad, spacing, net, levelswitch, wounds, armor, exo, mech, movement, mantle, interaction, roles, medical, logistics, casualty, materials, animations, scavenge, contracts, people, map, base, world, missions, vehicles, antiarmor, session_log, supports, heliflight, bay, aav, sound, loop, ui, loadout, weapons, forest, townperf, markers, pallets, voice, compass, audit_fixes, garrison, daynight, nvg, attachments, controller, base_zone]
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
     steps:
       - uses: actions/checkout@v4
 

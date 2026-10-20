@@ -496,7 +496,7 @@ func _test_extraction() -> void:
 	var golf: Soldier = mates.back()  # the last slot's squadmate (Golf) stays out west
 	var i := 0
 	for s: Soldier in mates:
-		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		_hold_still(s)
 		_place(s, Vector3(lz.x - 4.0 + 1.5 * i, 0.1, lz.y + 3.0) if s != golf else Vector3(-15, 0.1, -15))
 		i += 1
 	var hvt := Node3D.new()
@@ -522,6 +522,14 @@ func _test_extraction() -> void:
 	slid = await _slide_body(slid_out, Vector3(0, 0, -8)) and slid
 	await _seconds(0.5)
 	check(mates.size() == 7, "seven squadmates to bring (%d)" % mates.size())
+	# The countdown stops when anyone it waits for is outside the LZ (Extraction._run_countdown):
+	# everyone but Golf in it and standing still before the first confirm (R0191: Foxtrot left
+	# it in the last 0.05 s of the countdown).
+	var south := ext.points.filter(func(p: Dictionary) -> bool: return p.get("name", "") == "LZ South")
+	var lz_point: Dictionary = south[0] if not south.is_empty() else {}
+	await _wait_for(func() -> bool: return _settled_in(mates.filter(func(s: Soldier) -> bool: return s != golf), lz_point), 5.0)
+	check(_settled_in(mates.filter(func(s: Soldier) -> bool: return s != golf), lz_point),
+		"the six squadmates stand still in the LZ (%s)" % [mates.map(func(s: Soldier) -> String: return "%s %s %.1f m/s" % [s.name, s.body_point(), s.velocity.length()])])
 	var why := ext.server_confirm()
 	check(why.contains(String(golf.name)) and ext.state == Extraction.State.ACTIVE, "with %s away, the host can't extract: %s" % [golf.name, why])
 	ext.server_set_bring(String(golf.name), false)
@@ -854,6 +862,22 @@ func _remove_hostiles() -> void:
 func _place(s: Soldier, pos: Vector3) -> void:
 	s.global_position = pos
 	s.velocity = Vector3.ZERO
+
+
+## Staged by hand: his SquadAI off and its last intent cleared, or the body goes on walking
+## where it last told him to (SoldierMovement.step reads move_input every physics frame).
+func _hold_still(s: Soldier) -> void:
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	s.move_input = Vector2.ZERO
+	s.want_sprint = false
+	s.want_mantle = false
+
+
+## Whether every one of `who` is inside extraction point `point` (where it counts them:
+## Soldier.body_point) and standing still.
+func _settled_in(who: Array, point: Dictionary) -> bool:
+	return not point.is_empty() and who.all(func(s: Soldier) -> bool:
+		return Extraction.inside(point, s.body_point()) and Vector2(s.velocity.x, s.velocity.z).length() < 0.1)
 
 
 func _flat(a: Vector3, b: Variant) -> float:

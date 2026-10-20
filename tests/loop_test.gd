@@ -51,6 +51,10 @@ var _failures_at_start := 0
 ## above the ground at any tick is a body thrown or put where nobody can be. The first time
 ## each one is, by instance id -> what was seen.
 const LAUNCH_M := 50.0
+## The heli step: how far out from the extraction helicopter's door the player sets the casualty
+## down before carrying him to it (m): past HeliCall.LOAD_REACH_M and its margin, so the
+## helicopter doesn't load him itself (HeliCall._load_people).
+const CASUALTY_OFF_DOOR_M := 9.0
 var _launched := {}
 ## Each body's position on the tick before (instance id -> Vector3): a launch or a teleport.
 var _last_at := {}
@@ -1155,18 +1159,31 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	# The squad comes over; the player sets his rifle down in the point, carries the casualty in.
 	var door := c.heli.global_transform * Vector3(-2.2, 0.0, -2.4)
 	var by_door := level.ground_point(door)
-	_put(player, by_door + Vector3(-6.0, 0, 3.0))
+	# Out from the door, away from the airframe (its left side, wherever it faces). The casualty
+	# lies well past the door's reach: a downed squadmate whose body is within it is loaded by the
+	# helicopter itself (HeliCall._load_people), and he was put about that far off along the
+	# world's axes, so with some headings he went aboard before the player got to him (CI: 6.3 m
+	# off, him in his seat).
+	var away := c.heli.global_transform.basis * Vector3.LEFT
+	away = Vector3(away.x, 0.0, away.z).normalized()
+	_put(player, by_door + away * (CASUALTY_OFF_DOOR_M + 1.2))
 	var i := 0
 	for mid: String in squad:
 		if mid == casualty:
 			continue
 		i += 1
 		_put(_roster_soldier(mid), by_door + Vector3(-4.0 - 1.5 * i, 0, -3.0))
-	_put(hurt, player.global_position + Vector3(1.2, 0, 0))
-	await _frames(2)
+	_put(hurt, by_door + away * CASUALTY_OFF_DOOR_M)
 	# A ragdolled casualty lies where its ragdoll is, not where its capsule was put
-	# (Soldier.body_point, what a pick-up measures to): the player goes to it.
-	_put(player, hurt.body_point() + Vector3(-1.0, 0, 0))
+	# (Soldier.body_point, what a pick-up measures to): the player goes to it once it lies still.
+	var lay := [hurt.body_point()]
+	await _wait_until(func() -> bool:
+		var now := hurt.body_point()
+		var still := now.distance_to(lay[0]) < 0.05
+		lay[0] = now
+		return still, 3.0)
+	_put(player, hurt.body_point() + away * 1.0)
+	await _frames(2)
 	if player.inventory.slots[&"primary"] == &"":  # (the raid left his rifle at its point: the spare from the pack)
 		for container: StringName in player.inventory.search_containers():
 			var at: int = (player.inventory.containers.get(container, []) as Array).find_custom(func(e: Dictionary) -> bool: return e.id == &"m4a1")
@@ -1198,10 +1215,10 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	# bodies (Soldier.server_enforce_body_cap), these among them, before the heli takes them (the
 	# caller puts the cap back).
 	Soldier.body_cap = Soldier.MAX_BODIES + 20
-	check(lifted, "the player picks up the casualty (%.1f m off; casualty up=%s wake in %.0f s (%s), carried by %s; player up=%s hands=%s carrying %s)" % [
+	check(lifted, "the player picks up the casualty (%.1f m off; casualty up=%s wake in %.0f s (%s), carried by %s, aboard %s; player up=%s hands=%s carrying %s)" % [
 		hurt.body_point().distance_to(player.global_position), hurt.vitals.is_up(), hurt.vitals.wake_eta(), ", ".join(PackedStringArray(hurt.vitals.why_unconscious())),
-		hurt.carried_by.name if is_instance_valid(hurt.carried_by) else "nobody", player.vitals.is_up(), player.inventory.hands,
-		player.carrying.name if is_instance_valid(player.carrying) else "nobody"])
+		hurt.carried_by.name if is_instance_valid(hurt.carried_by) else "nobody", Vehicle.ride_of(hurt).name if Vehicle.ride_of(hurt) else "nothing",
+		player.vitals.is_up(), player.inventory.hands, player.carrying.name if is_instance_valid(player.carrying) else "nobody"])
 	await _seconds(2.0)
 	_put(player, by_door + Vector3(-1.0, 0, 0))
 	var loaded := await _wait_until(func() -> bool:

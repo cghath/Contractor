@@ -168,14 +168,42 @@ func _test_questions() -> void:
 # --- Helpers --------------------------------------------------------------
 
 ## Stands the player 3 m from `target` (if any), looking straight at it, both level, and
-## waits a couple of frames for the new transforms to reach the physics server.
+## waits until the crosshair finds it (CommandMenu.soldier_under_crosshair, what asking aims
+## with): the new transforms reach the physics server and the target's hitboxes their pose a
+## frame or more later, and a squadmate following the player can be crossing the line (CI and
+## R0245: three frames weren't always enough, and the question went to the order parser).
+## Anyone else standing on the line (the civilian spawns where Alpha was put) steps aside first.
 func _place_looking_at(target: Soldier) -> void:
-	player.global_position = Vector3(0, 0.1, 30)
-	player.rotation = Vector3.ZERO
-	player.head.rotation = Vector3.ZERO
+	var stand := Vector3(0, 0.1, 30)
+	var put := func() -> void:
+		player.global_position = stand
+		player.rotation = Vector3.ZERO
+		player.head.rotation = Vector3.ZERO
+		player.velocity = Vector3.ZERO
+		if target:
+			target.global_position = stand + Vector3(0, 0, -3.0)
+			target.velocity = Vector3.ZERO
+	put.call()
 	if target:
-		target.global_position = player.global_position + Vector3(0, 0, -3.0)
+		for s: Soldier in level.ai.get_children():
+			if s != target and not s.is_queued_for_deletion() and absf(s.global_position.x - stand.x) < 1.5 \
+					and s.global_position.z > stand.z - 4.5 and s.global_position.z < stand.z + 0.5:
+				s.global_position = s.global_position + Vector3(4.0, 0, 0)
 	await _frames(3)
+	if target == null:
+		return
+	var deadline := Time.get_ticks_msec() + 3000
+	while menu_crosshair() != target and Time.get_ticks_msec() < deadline:
+		put.call()
+		await get_tree().physics_frame
+	if menu_crosshair() != target:
+		var under := menu_crosshair()
+		print("  (under the crosshair: %s, not %s at %s)" % [under.name if under else "nobody", target.name, target.global_position])
+
+
+## Who the command menu's crosshair ray finds now (VoiceOrder.askable_target asks it).
+func menu_crosshair() -> Soldier:
+	return player._hud.command_menu.soldier_under_crosshair()
 
 
 func _ai(callsign: String) -> Soldier:

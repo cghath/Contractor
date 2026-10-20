@@ -278,9 +278,15 @@ func _test_crossings() -> void:
 		if n is Soldier and (n as Soldier).has_meta(&"roster_id") and not (n as Soldier).vitals.is_dead():
 			(n as Soldier).global_position = me.global_position + Vector3(k * 1.5 - 1.0, 0, 1.5)  # the squad comes home too
 			k += 1
-	await get_tree().physics_frame
+	# The extraction counts him in once he stands inside the point (Extraction.point_of_player).
+	var in_ms := Time.get_ticks_msec()
+	var counted_in := func() -> bool: return me != null and zx.point_of_player(me).get("id", -1) == home.get("id")
+	await _wait_until(counted_in, 5.0)
+	var seen_in := "in after %.1f s" % ((Time.get_ticks_msec() - in_ms) / 1000.0)
+	if not counted_in.call():
+		seen_in = "never in: %s, the crossing at (%.0f, %.0f)" % [_air_state(zone, me), home.pos.x, home.pos.y]
 	why = zx.server_confirm(1)
-	check(why == "", "walking home through it (%s)" % why)
+	check(why == "", "walking home through it (%s; %s)" % [why, seen_in])
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 40.0)
 	base = CompoundLevel.current(self) as BaseZoneLevel
 	check(base != null and not RosterDeployment.is_running(BaseHub.roster()), "back at the base zone, the deployment over")
@@ -427,10 +433,11 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 		"in %s, half an hour on the clock (%.1f h travelled)" % [to, float(dep.get("travel_h", 0.0))])
 	if there == null:
 		return null
+	var up_ms := Time.get_ticks_msec()
 	await _wait_until(func() -> bool: return there.players.get_node_or_null(^"1") != null, 10.0)
 	me = there.players.get_node_or_null(^"1") as Soldier
 	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 25.0)  # (CI runs slower)
-	check(aboard, "flown in aboard a helicopter to its insertion LZ")
+	check(aboard, "flown in aboard a helicopter to its insertion LZ (after %.1f s: %s)" % [(Time.get_ticks_msec() - up_ms) / 1000.0, _air_state(there, me)])
 	var down_to_earth := func() -> void:
 		HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
 		if me:
@@ -445,6 +452,19 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 	down_to_earth.call()  # (one launched late doesn't board him after all)
 	await get_tree().physics_frame
 	return there
+
+
+## Where `me` is and what the helicopters in `lvl` are doing (a failed check's message).
+func _air_state(lvl: CompoundLevel, me: Soldier) -> String:
+	var out := "player %s" % ("gone" if me == null or not is_instance_valid(me) else "at %s up=%s respawn=%d aboard %s" % [
+		me.global_position, me.vitals.is_up(), me.respawn_state, Vehicle.ride_of(me).name if Vehicle.ride_of(me) else "nothing"])
+	var helis := HeliSupports.of(lvl) if lvl and is_instance_valid(lvl) else null
+	if helis == null:
+		return out + "; no helicopter supports"
+	var calls := PackedStringArray()
+	for c: HeliCall in helis.calls:
+		calls.append("%s %s/%d heli %s" % [c.kind, c.stage, c.phase, c.heli.global_position if is_instance_valid(c.heli) else "none"])
+	return out + "; helicopter calls: %s; switch pending %s" % [", ".join(calls) if not calls.is_empty() else "none", BaseHub.switch_pending()]
 
 
 func _cheapest(pool: Array) -> Dictionary:
