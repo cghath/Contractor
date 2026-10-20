@@ -30,8 +30,15 @@ extends RefCounted
 ## (WorldCache.server_fill, GameState.caches), so a looted box stays looted after a reload. A type
 ## with no entry (a generated town) gets a few boxes by its own proven-safe ZoneModules.LOOT spots
 ## (a small offset off each one so a box doesn't sit on the WorldItem already there).
+##
+## Pools (Captain, 2026-10-20, loot rotation): the open-terrain dead drops and hidden caches and the
+## HQ strongbox roll tiers too (loot_tables.json "pools": a table and tier weights each), the same
+## way a site box does: one tier by the pool's weights (very rare only in a hot zone), then one
+## bundle of that tier.
 
 const DEAD_DROP_SHARE := 0.55
+## The pre-rotation fixed pools: the loot tables' pools (dead_drop, field_cache, strongbox) replaced them in
+## the game; tools/economy_sim.gd still models a drop and a cache from these.
 const CACHE_GUNS: Array[String] = ["akm", "ak74", "rpk"]
 const CACHE_MEDICAL: Array[String] = ["ifak", "trauma_kit", "tourniquet"]
 const VALUABLE_ITEMS: Array[String] = ["cash_bundle", "gold_bars", "jewelry_case", "smuggled_relic"]
@@ -48,8 +55,8 @@ const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 
 ## one of these anchors has to come back down by the same amount or it floats at the WorldItem's
 ## drop height instead of resting on the floor (Captain, 2026-10-16: "lootboxes float").
 const LOOT_ANCHOR_LIFT_M := 0.5
-## Contraband (wave 6, the item catalogue): the strongbox holds one (the loot tables have the rest).
-const CONTRABAND_ITEMS: Array[String] = ["smuggled_cigarettes", "captagon", "counterfeit_dollars", "unregistered_weapons"]
+## Contraband (wave 6, the item catalogue): the strongbox always holds one (the loot tables have the rest).
+const CONTRABAND_ITEMS: Array[String] = ["smuggled_cigarettes", "captagon", "counterfeit_dollars", "hashish", "tramadol", "unregistered_weapons"]
 ## Wave 6 (keys): every HQ has a locked strongbox, opened by the key its officer carries
 ## (ZoneLevel's garrison: the HQ's first post); valuables, contraband and intel inside, and half
 ## the time a Vantage ledger (story intel, it opens a lead).
@@ -81,21 +88,17 @@ static func _spawn_site(level: ZoneLevel, site: Dictionary, uid: String, index: 
 	var ground: Vector3 = level.ground_point(Vector3(pos.x, 0.0, pos.z))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = level.terrain.seed_value ^ 0x7A1E ^ index
+	var hot := String(level.def.get("kind", "")) == "hot"
+	var seed_key := "%d|%s" % [level.terrain.seed_value, uid]
 	if rng.randf() < DEAD_DROP_SHARE:
-		var pool := INTEL_ITEMS if rng.randf() < 0.5 else VALUABLE_ITEMS
 		var drop_uid := "%s_d" % uid
 		if not GameState.is_looted(drop_uid):
-			level.spawn_item(StringName(pool[rng.randi() % pool.size()]), 1, ground + Vector3.UP * LIFT_M, drop_uid)
+			var row: Dictionary = (pool_roll("dead_drop", seed_key, hot).items as Array)[0]  # a drop is one WorldItem: its bundles are one row
+			level.spawn_item(StringName(String(row.id)), int(row.count), ground + Vector3.UP * LIFT_M, drop_uid)
 		return
-	var gun := CACHE_GUNS[rng.randi() % CACHE_GUNS.size()]
-	var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
-	var items: Array = [{"id": gun, "count": 1}]
-	if kit.size() > 1:
-		items.append({"id": String(kit[1]), "count": kit.size() - 1})
-	items.append({"id": SALVAGE_ITEMS[rng.randi() % SALVAGE_ITEMS.size()] if rng.randf() < 0.4 else CACHE_MEDICAL[rng.randi() % CACHE_MEDICAL.size()], "count": 1})
 	var cache := level.cache_spawner.spawn({"uid": uid, "pos": ground, "yaw": float(site.yaw), "label": "Cache"}) as WorldCache
 	if cache:
-		cache.server_fill(items)
+		cache.server_fill(pool_roll("field_cache", seed_key, hot).items)
 
 
 ## Host: the site boxes at every real module (site_plan), and an HQ's strongbox. Each box is a
@@ -117,7 +120,7 @@ static func server_spawn_site_boxes(level: ZoneLevel) -> void:
 			var strongbox := level.cache_spawner.spawn({"uid": "%s_strongbox" % module.module_id, "key": String(STRONGBOX_KEY), "label": STRONGBOX_LABEL,
 				"pos": module.to_global((spots[0] as Dictionary).pos - Vector3(0, LOOT_ANCHOR_LIFT_M, 0) + STRONGBOX_OFFSET), "yaw": 0.0}) as WorldCache
 			if strongbox:
-				strongbox.server_fill(strongbox_contents(module.module_id))
+				strongbox.server_fill(strongbox_contents(module.module_id, hot))
 
 
 ## The loot tables (data/loot_tables.json), read once.
@@ -222,11 +225,26 @@ static func roll_tier(rng: RandomNumberGenerator, weights: Dictionary) -> String
 	return TIERS[0]
 
 
-## An HQ strongbox's contents (by the module id: the same HQ always holds the same).
-static func strongbox_contents(module_id: String) -> Array:
+## A pool's roll (the loot tables' "pools": dead_drop, field_cache, strongbox): a tier by the pool's
+## own weights (capped outside a hot zone), then one bundle of that tier from its table; the same
+## {"tier", "items"} as roll_box. Seeded by `seed_key` alone.
+static func pool_roll(pool: String, seed_key: String, hot: bool) -> Dictionary:
+	var spec: Dictionary = (loot_data().get("pools", {}) as Dictionary).get(pool, {})
+	if spec.is_empty():
+		push_error("WorldValuables: no loot pool %s" % pool)
+		return {"tier": TIERS[0], "items": []}
+	return roll_box(String(spec.table), spec.tier_weights, "%s|%s" % [pool, seed_key], hot)
+
+
+## An HQ strongbox's contents (by the module id: the same HQ always holds the same): always one
+## piece of contraband and one of intel, and a roll of the strongbox pool's valuables (a modest
+## stack most times, now and then a real prize), half the time a Vantage ledger too. `hot`: a hot
+## zone (a very rare prize; elsewhere capped to rare).
+static func strongbox_contents(module_id: String, hot := true) -> Array:
 	var h := hash("strongbox:" + module_id)
-	var items: Array = [{"id": "gold_bars", "count": 2}, {"id": CONTRABAND_ITEMS[posmod(h, CONTRABAND_ITEMS.size() - 1)], "count": 1},
-		{"id": INTEL_ITEMS[posmod(h >> 4, INTEL_ITEMS.size())], "count": 1}, {"id": "cash_bundle", "count": 3}]
+	var items: Array = (pool_roll("strongbox", module_id, hot).items as Array).duplicate(true)
+	items.append({"id": CONTRABAND_ITEMS[posmod(h, CONTRABAND_ITEMS.size() - 1)], "count": 1})
+	items.append({"id": INTEL_ITEMS[posmod(h >> 4, INTEL_ITEMS.size())], "count": 1})
 	if posmod(h >> 8, 2) == 0:
 		items.append({"id": "vantage_ledger", "count": 1})
 	return items
