@@ -863,6 +863,10 @@ func _test_enemy_response() -> void:
 		check(DynamicSim.of(level) != null and DynamicSim.should_sleep(walker, far, false) and not DynamicSim.should_sleep(walker, near, true)
 			and DynamicSim.should_sleep(walker, between, true) and not DynamicSim.should_sleep(walker, between, false),
 			"dynamic sim: a patrol far from every player sleeps, wakes as one comes near (between the two it stays as it was)")
+		# G-26: half the patrols lie in wait when they suspect someone; the same for every man of one.
+		var pai := SquadAI.of(walker)
+		var same := (er._living(looker.soldiers) as Array).all(func(m: Soldier) -> bool: return SquadAI.of(m) == null or SquadAI.of(m).ambusher() == pai.ambusher())
+		check(same and pai.post == null, "a patrol ambushes or goes to look as one (this one: %s)" % ("lies in wait" if pai.ambusher() else "goes to look"))
 		# Going to sleep he settles first (Captain, 2026-10-19: frozen walking poses in MP): brain
 		# off, standing still, so the model eases out of its stride before the body freezes.
 		var wb := SquadAI.of(walker)

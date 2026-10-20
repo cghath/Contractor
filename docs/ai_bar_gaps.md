@@ -60,7 +60,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-23 | ~~Few visible reactions to being hit~~ (done 2026-10-20: flinch and limp were in; a forearm hit can knock the weapon out (picked back up), a badly hurt man crawls to cover) | P2 | M |
 | G-24 | ~~No night, light, NVG, fog or weather in spotting~~ (done in wave 7: darkness, weather sight and fog, NVGs, flash and lights at night; enemy flares still to do) | P2 | M |
 | G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed (done 2026-10-20 for both sides and players, first pass: see docs/static_weapons.md) | P1 | L |
-| G-26 | Patrols don't ambush; no mines | P3 | M |
+| G-26 | ~~Patrols don't ambush; no mines~~ (done 2026-10-20: half the enemy's patrols lie in wait when they suspect someone; roadside IEDs are the mines; formation variety still to do) | P3 | M |
 
 G-27 to G-30 were added from the critic's pass (the gaps are numbered in the order they were
 found, not by priority).

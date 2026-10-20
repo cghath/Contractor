@@ -564,6 +564,14 @@ const REACT_CLOSE := 0.2
 ## (crouched; prone by G-05's rules) before the plan takes over. Not while treating, carrying,
 ## riding or on an ordered move. Proposed.
 const DRILL_S := Vector2(1.0, 2.5)
+## Patrol ambushes (AI bar G-26; LAMBS's creep and ambush): half the enemy's patrols (by squad,
+## AMBUSH_SHARE) lie in wait when they suspect someone near instead of going to look: cover near
+## where they are facing the sound, down, holding fire until he's within AMBUSH_SPRING_M or they're
+## fired on. Roadside IEDs (RoadsideIeds) are the mines. Proposed.
+const AMBUSH_SHARE := 0.5
+const AMBUSH_SPRING_M := 40.0
+const AMBUSH_COVER_M := 8.0
+var _ambush_spot: Variant = null
 ## Ground being shot up (AI bar G-19; Arma's AI avoids crossing impact zones): where rounds struck
 ## is kept IMPACT_KEEP_S (IMPACT_MAX of them, the level's), and a cover spot within IMPACT_NEAR_M
 ## of one an enemy's round struck scores IMPACT_PENALTY worse (find_cover: so bounds and cover
@@ -1185,6 +1193,8 @@ func weapons_free() -> bool:
 		return false
 	if post:
 		return post.sprung  # a garrison holds its fire in ambush, then every man opens up (GarrisonPost)
+	if _lying_in_wait():
+		return engaged() or (target != null and body.global_position.distance_to(target.global_position) <= AMBUSH_SPRING_M)
 	if StringName(_tactic().get("kind", &"")) == &"suppress":
 		return true  # ordered to: whatever the combat mode
 	match combat_mode:
@@ -1460,7 +1470,10 @@ func _act() -> void:
 		Intent.PATROL:
 			_patrol()
 		Intent.INVESTIGATE:
-			_go(_suspect_pos if suspecting() and _suspect_at > _last_contact else body.threat_pos, false)
+			if ambusher() and suspecting() and not in_contact():
+				_lie_in_wait()  # (G-26: an ambushing patrol waits for him to come)
+			else:
+				_go(_suspect_pos if suspecting() and _suspect_at > _last_contact else body.threat_pos, false)
 		Intent.FIGHT:
 			_fight_from_context()
 		Intent.RELOAD:
@@ -1478,6 +1491,8 @@ func _act() -> void:
 		Intent.TACTIC:
 			_do_tactic(_tactic())
 	_watch_armour()  # (G-20: enemy armour in sight is a threat to hide from)
+	if _ambush_spot != null and not _lying_in_wait():
+		_ambush_spot = null  # the next ambush picks its own spot
 	_recover_weapon()  # (G-23: his weapon knocked out of his hands: he picks it back up)
 	_contact_drill()  # (G-18: the first moments of a contact, before the plan)
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
@@ -3943,6 +3958,34 @@ func _badly_hurt() -> bool:
 			return true
 	return false
 const BADLY_HURT_BLOOD := 0.7
+
+
+## Whether this unit's patrol is one that sets ambushes (G-26): a hostile patrol, not a garrison,
+## half of them by the squad's name.
+func ambusher() -> bool:
+	if body == null or squad == null or post != null or body.faction != &"hostile" or squad.patrol.is_empty() 			or not squad.get_parent() is EnemyResponse:
+		return false  # (the enemy response's patrols: not a level's own squad, nor a garrison)
+	return float(absi(String(squad.name).hash()) % 100) / 100.0 < AMBUSH_SHARE
+
+
+func _lying_in_wait() -> bool:
+	return intent == Intent.INVESTIGATE and ambusher() and suspecting() and not in_contact()
+
+
+## Lying in wait: into cover near where he is, against the sound, down, facing it.
+func _lie_in_wait() -> void:
+	if _ambush_spot == null:
+		var keep := body.threat_pos
+		body.threat_pos = _suspect_pos  # cover against where the sound came from
+		var spot: Variant = find_cover(body.global_position, AMBUSH_COVER_M)
+		body.threat_pos = keep
+		_ambush_spot = spot if spot != null else body.global_position
+	if _flat_distance(_ambush_spot) > ARRIVE + 0.3:
+		_go(_ambush_spot, false)
+	else:
+		_has_destination = false
+		_face(_suspect_pos)
+		body.want_crouch = true
 
 
 ## Enemy armour in sight (see ARMOUR_CLASSES): his threat, and smoke when it's close.
