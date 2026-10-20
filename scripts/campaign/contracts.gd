@@ -1251,7 +1251,8 @@ func _close(c: Dictionary, outcome: String) -> void:
 	c.state = outcome
 	(s.held as Array).erase(c)
 	var hist: Array = s.history
-	hist.append({"cid": c.cid, "title": c.title, "employer": c.employer, "outcome": outcome, "day": Economy.day()})
+	hist.append({"cid": c.cid, "title": c.title, "employer": c.employer, "outcome": outcome, "day": Economy.day(),
+		"zone_id": String(c.get("zone_id", ""))})  # (the world map's recent fights, Theatre)
 	while hist.size() > HISTORY_KEEP:
 		hist.pop_front()
 	contract_closed.emit(c, outcome)

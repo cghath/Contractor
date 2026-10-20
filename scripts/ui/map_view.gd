@@ -59,6 +59,8 @@ const BACKDROP := Color(0.12, 0.13, 0.12)
 const LABEL_MAX_PX := 230.0
 const LABEL_GAP_PX := 8.0
 const SYMBOL_PX := 9.0  # half the box a symbol keeps clear of labels
+## Every label on the map (Captain, 2026-10-20 UI pass: none under UiKit.FONT_SMALL; they were 11-13 px).
+const LABEL_FONT := UiKit.FONT_SMALL
 ## What a label's symbol is, most important first: which keeps the best spot.
 const LABEL_PRIORITY := {"self": 9, "objective": 8, "insert_chosen": 7, "extract": 6, "intel": 5, "marker": 4, "insert": 3, "player": 3, "allied": 2, "gear": 2, "squad": 1}
 
@@ -552,7 +554,7 @@ func _draw_allied() -> void:
 			draw_dashed_line(c, t, ALLIED_COLOUR, ROUTE_WIDTH, ROUTE_DASH_PX)
 			draw_line(t + Vector2(-5, -5), t + Vector2(5, 5), ALLIED_COLOUR, 2.0)
 			draw_line(t + Vector2(-5, 5), t + Vector2(5, -5), ALLIED_COLOUR, 2.0)
-		_label(c, String(e.label), ALLIED_COLOUR, "allied", 12)
+		_label(c, String(e.label), ALLIED_COLOUR, "allied", LABEL_FONT)
 
 
 ## During the briefing, clicking an insertion candidate picks it.
@@ -654,8 +656,8 @@ func _draw_grid() -> void:
 ## A grid number: dark on a light halo, readable on any ground.
 func _grid_label(at: Vector2, text: String) -> void:
 	var font := get_theme_default_font()
-	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, 3, Color(1, 1, 1, 0.45))
-	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0, 0, 0, 0.9))
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT, 3, Color(1, 1, 1, 0.45))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT, Color(0, 0, 0, 0.9))
 
 
 func _draw_objectives() -> void:
@@ -734,7 +736,7 @@ func _draw_routes() -> void:
 			draw_dashed_line(map_to_screen(points[i - 1]), map_to_screen(points[i]), INSERT_COLOUR, ROUTE_WIDTH, ROUTE_DASH_PX, true)
 		var s := map_to_screen(points[0])
 		draw_arc(s, 5.0, 0.0, TAU, 16, INSERT_COLOUR, ROUTE_WIDTH, true)
-		_label(s, "IN", INSERT_COLOUR, "insert", 11)
+		_label(s, "IN", INSERT_COLOUR, "insert", LABEL_FONT)
 
 
 func _draw_extraction() -> void:
@@ -829,13 +831,13 @@ func _draw_squad() -> void:
 		var s := map_to_screen(point.pos)
 		if point.kind == "squad":
 			draw_circle(s, 4.0, SQUAD_COLOUR if point.up else SQUAD_COLOUR.darkened(0.5))
-			_label(s, point.text, SQUAD_COLOUR, "squad", 11)
+			_label(s, point.text, SQUAD_COLOUR, "squad", LABEL_FONT)
 			continue
 		var dir: Vector2 = point.dir
 		var side := dir.orthogonal()
 		var colour := SELF_COLOUR if point.kind == "self" else SQUAD_COLOUR.lightened(0.3)
 		draw_colored_polygon(PackedVector2Array([s + dir * 10.0, s - dir * 6.0 + side * 6.0, s - dir * 3.0, s - dir * 6.0 - side * 6.0]), colour)
-		_label(s, point.text, colour, String(point.kind), 12)
+		_label(s, point.text, colour, String(point.kind), LABEL_FONT)
 
 
 func _polyline(points: PackedVector2Array, colour: Color, width: float) -> void:
@@ -848,7 +850,7 @@ func _polyline(points: PackedVector2Array, colour: Color, width: float) -> void:
 
 ## Queues a label for the symbol at `anchor` (screen); `kind` is a LABEL_PRIORITY key. Laid
 ## out and drawn at the end of the frame (_layout_labels).
-func _label(anchor: Vector2, text: String, colour: Color, kind := "marker", font_size := 13) -> void:
+func _label(anchor: Vector2, text: String, colour: Color, kind := "marker", font_size := LABEL_FONT) -> void:
 	_symbol(anchor)
 	if text != "":
 		_labels.append({"anchor": anchor, "text": text, "colour": colour, "size": font_size,
@@ -860,7 +862,7 @@ func _symbol(at: Vector2) -> void:
 	_symbols.append(Rect2(at - Vector2(SYMBOL_PX, SYMBOL_PX), Vector2(SYMBOL_PX, SYMBOL_PX) * 2.0))
 
 
-func _label_raw(at: Vector2, text: String, colour: Color, font_size := 13) -> void:
+func _label_raw(at: Vector2, text: String, colour: Color, font_size := LABEL_FONT) -> void:
 	var font := get_theme_default_font()
 	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 3, Color(0, 0, 0, 0.75))
 	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, colour)
@@ -932,11 +934,11 @@ func _layout_labels(map_rect: Rect2) -> void:
 		draw_rect(r, Color(0.06, 0.06, 0.05, 0.72))  # dark plate: readable on the pale map
 		_label_raw(r.position + Vector2(2, r.size.y - 5), entry.text, colour, entry.size)
 	if not hovered.is_empty():  # the whole text of a label cut short, under the cursor
-		var full_box := font.get_string_size(hovered.full, HORIZONTAL_ALIGNMENT_LEFT, -1, 13) + Vector2(12, 8)
+		var full_box := font.get_string_size(hovered.full, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_FONT) + Vector2(12, 8)
 		var tip := _clamp_rect(Rect2(_cursor_screen + Vector2(14, 14), full_box), Rect2(Vector2.ZERO, size))
 		draw_rect(tip, Color(0.05, 0.05, 0.05, 0.92))
 		draw_rect(tip, Color(hovered.colour, 0.9), false, 1.0)
-		_label_raw(tip.position + Vector2(6, full_box.y - 8), hovered.full, Color.WHITE, 13)
+		_label_raw(tip.position + Vector2(6, full_box.y - 8), hovered.full, Color.WHITE, LABEL_FONT)
 
 
 static func _clamp_rect(r: Rect2, bounds: Rect2) -> Rect2:

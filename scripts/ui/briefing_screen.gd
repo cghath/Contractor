@@ -3,7 +3,9 @@ extends PanelContainer
 ## The briefing's side panel on the map (MapScreen): the contract, its objectives, how many
 ## enemy positions intel gives (red on the map), the insertion point, the supports to bring,
 ## who is ready, a Ready button for everyone and Start for the host. Plan marks are drawn on
-## the map itself. Everything goes through Briefing's requests; the host decides.
+## the map itself. Everything goes through Briefing's requests; the host decides. In the shared
+## look (UiKit, from MapScreen): body text 16 px, section heads and notes 14 px, nothing smaller
+## and nothing faded (the UI audit found 12-13 px at 60%).
 
 ## The panel's widest, and narrowest (Captain, 2026-10-14, B0912: the panel ran off the window's
 ## right edge: the insertion list was as wide as its longest name). Its width follows the window
@@ -28,7 +30,6 @@ var _players: Label
 var _ready_button: Button
 var _start: Button
 var _width := WIDTH
-var _labels: Array[Label] = []
 
 
 ## The panel's width in a window (or map screen) `screen_width` wide.
@@ -40,8 +41,6 @@ static func width_for(screen_width: float) -> float:
 func set_panel_width(w: float) -> void:
 	_width = w
 	custom_minimum_size = Vector2(w, 0)
-	for label in _labels:
-		label.custom_minimum_size = Vector2(maxf(w - 30.0, 0.0), 0)
 
 
 func _ready() -> void:
@@ -53,14 +52,14 @@ func _ready() -> void:
 	add_child(scroll)
 	_box = VBoxContainer.new()
 	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_box.add_theme_constant_override(&"separation", 8)
+	_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	scroll.add_child(_box)
-	_title = _add_label("", 20)
-	_summary = _add_label("", 14)
-	_add_label("OBJECTIVES", 13).modulate = Color(1, 1, 1, 0.6)
-	_objectives = _add_label("", 14)
-	_intel = _add_label("", 14)
-	_add_label("INSERTION", 13).modulate = Color(1, 1, 1, 0.6)
+	_title = _add_label("", &"HeadingLabel")
+	_summary = _add_label("")
+	_add_head("OBJECTIVES")
+	_objectives = _add_label("")
+	_intel = _add_label("")
+	_add_head("INSERTION")
 	_insertion = OptionButton.new()
 	_insertion.fit_to_longest_item = false
 	_insertion.clip_text = true
@@ -89,11 +88,11 @@ func _ready() -> void:
 		if _briefing:
 			_briefing.request_drop(String(_drop.get_item_metadata(index))))
 	_box.add_child(_drop)
-	_add_label("SUPPORTS (wave 5 builds them)", 13).modulate = Color(1, 1, 1, 0.6)
+	_add_head("SUPPORTS")
 	_supports = VBoxContainer.new()
 	_box.add_child(_supports)
-	_add_label("PLAYERS", 13).modulate = Color(1, 1, 1, 0.6)
-	_players = _add_label("", 14)
+	_add_head("PLAYERS")
+	_players = _add_label("")
 	_ready_button = Button.new()
 	_ready_button.toggle_mode = true
 	_fit_button(_ready_button)
@@ -109,7 +108,7 @@ func _ready() -> void:
 		if _briefing:
 			_briefing.request_start())
 	_box.add_child(_start)
-	_add_label("Plan on the map: double-click for a marker, Ctrl + drag for a line, drag to move, Delete to remove. Click a green triangle to pick the insertion point.", 12).modulate = Color(1, 1, 1, 0.6)
+	_add_label("Plan on the map: double-click for a marker, Ctrl + drag for a line, drag to move, Delete to remove. Click a green triangle to pick the insertion point. \"?\" lists every control.", &"HintLabel")
 
 
 ## Shows `briefing`'s state (call again whenever it changes).
@@ -160,14 +159,22 @@ func show_briefing(briefing: Briefing) -> void:
 	_start.disabled = not briefing.all_ready()
 
 
-func _add_label(text: String, font_size: int) -> Label:
+## A wrapping line of text in label style `variation` ("" for body text).
+func _add_label(text: String, variation := &"") -> Label:
 	var label := Label.new()
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.custom_minimum_size = Vector2(_width - 30.0, 0)
-	label.add_theme_font_size_override(&"font_size", font_size)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # (the panel's width, less the theme's padding)
+	if variation != &"":
+		label.theme_type_variation = variation
 	_box.add_child(label)
-	_labels.append(label)
+	return label
+
+
+## A section's head: small, in the accent colour.
+func _add_head(text: String) -> Label:
+	var label := _add_label(text, &"HintLabel")
+	label.add_theme_color_override(&"font_color", UiKit.ACCENT)
 	return label
 
 

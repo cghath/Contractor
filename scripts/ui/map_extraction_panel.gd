@@ -4,7 +4,8 @@ extends PanelContainer
 ## points, which AI squadmates come along (untick to leave one behind), what's happening,
 ## and the Extract button that confirms once the squad is at a point (Captain, 2026-10-14: any
 ## player standing inside a point, not only the host; the host says why when it can't).
-## Points are set on the map (right click) or by throwing a purple smoke.
+## Points are set on the map (right click) or by throwing a purple smoke. In the shared look
+## (UiKit, from MapScreen): nothing under 14 px.
 
 const WIDTH := 300.0
 
@@ -20,23 +21,23 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(WIDTH, 0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_box = VBoxContainer.new()
-	_box.add_theme_constant_override(&"separation", 6)
+	_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	add_child(_box)
-	_add_label("EXTRACTION", 16)
-	_points = _add_label("", 13)
-	_add_label("Bring along (untick to leave behind):", 13).modulate = Color(1, 1, 1, 0.7)
+	_add_label("EXTRACTION", &"HeadingLabel")
+	_points = _add_label("")
+	_add_label("Bring along (untick to leave behind):", &"HintLabel")
 	_mates = VBoxContainer.new()
 	_box.add_child(_mates)
-	_status = _add_label("", 13)
+	_status = _add_label("")
 	_confirm = Button.new()
 	_confirm.text = "Extract (squad at the point)"
 	_confirm.pressed.connect(func() -> void:
 		if _extraction:
 			_extraction.request_confirm())
 	_box.add_child(_confirm)
-	_add_label("Right click the map for a grid extraction point, or throw a purple smoke.", 12).modulate = Color(1, 1, 1, 0.6)
+	_add_label("Right click the map for a grid extraction point, or throw a purple smoke.", &"HintLabel")
 	# Captain, 2026-10-14: walking out only at the zone's edge.
-	_add_label("On foot only at the zone edge; further in a point is a helicopter LZ. Or drive out across the edge.", 12).modulate = Color(1, 1, 1, 0.6)
+	_add_label("On foot only at the zone edge; further in a point is a helicopter LZ. Or drive out across the edge.", &"HintLabel")
 
 
 ## Shows `extraction`'s state (call again whenever it changes).
@@ -72,11 +73,13 @@ func show_extraction(extraction: Extraction) -> void:
 	_confirm.visible = extraction.state == Extraction.State.ACTIVE
 
 
-func _add_label(text: String, font_size: int) -> Label:
+## A wrapping line of text in label style `variation` ("" for body text).
+func _add_label(text: String, variation := &"") -> Label:
 	var label := Label.new()
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.custom_minimum_size = Vector2(WIDTH - 20.0, 0)
-	label.add_theme_font_size_override(&"font_size", font_size)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL  # (the panel's width, less the theme's padding)
+	if variation != &"":
+		label.theme_type_variation = variation
 	_box.add_child(label)
 	return label

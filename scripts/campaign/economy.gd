@@ -56,7 +56,7 @@ var _dirty := false
 func _ready() -> void:
 	Net.peer_joined.connect(_on_peer_joined)
 	Campaign.changed.connect(func(section_name: StringName) -> void:
-		if section_name == SECTION and _is_host():
+		if (section_name == SECTION or section_name == ZoneControl.SECTION) and _is_host():
 			_queue_sync())
 
 
@@ -728,6 +728,7 @@ func _flush() -> void:
 func _public() -> Dictionary:
 	var out := _section().duplicate(true)
 	out["world_sites"] = WorldSites.rows()  # wave 6c: who holds each hot zone, for every peer's board
+	out[String(ZoneControl.SECTION)] = Campaign.section(ZoneControl.SECTION).duplicate(true)  # who controls each zone (the world map)
 	return out
 
 
