@@ -128,6 +128,7 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		style = STYLES.keys()[rng.randi() % STYLES.size()]
 	var st: Dictionary = STYLES[style]
 	var spec: Dictionary = TYPES[type]
+	var look := _look(style, type, seed)  # its own colours (a random stream of its own: the layout below is as it was)
 	var w := snappedf(rng.randf_range(spec.w[0], spec.w[1]), 0.1)
 	var d := snappedf(rng.randf_range(spec.d[0], spec.d[1]), 0.1)
 	var t: float = st.t
@@ -230,8 +231,9 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 						"out": outward[side], "floor": fi, "room": int(f.first) + i})
 	# The walls, floor by floor; the slab between, the roof (with its parapet when it's used).
 	var boxes: Array = []
+	var walls: Array = []  # the outside walls as built, for the skin (_shell)
 	for f: Dictionary in floors:
-		_shell(boxes, f.rects, f.gaps, t, f.y, h, st.wall)
+		_shell(boxes, f.rects, f.gaps, t, f.y, h, look.wall, walls)
 		for sp: Array in f.splits:
 			var key := "in:%d:%s" % [sp[0], snappedf(sp[1], 0.01)]
 			_wall(boxes, 1 if sp[0] == 0 else 0, float(sp[1]) - INNER_T * 0.5, float(sp[1]) + INNER_T * 0.5, sp[2], sp[3], h, st.inner, f.gaps.get(key, []), f.y)
@@ -239,11 +241,11 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 		_slab(boxes, rects, t, [up.foot], h, fh, slab_mat)
 		_stair_boxes(boxes, up, 0.0, fh, slab_mat)
 		_rails(boxes, up, fh)
-	_slab(boxes, top.rects, t, [roof.foot] if not roof.is_empty() else [], roof_y, roof_y + roof_t, st.roof)
+	_slab(boxes, top.rects, t, [roof.foot] if not roof.is_empty() else [], roof_y, roof_y + roof_t, look.roof)
 	if not roof.is_empty():
 		_stair_boxes(boxes, roof, top.y, h + roof_t, slab_mat)
 		_rails(boxes, roof, roof_y + roof_t)
-		_shell(boxes, top.rects, {}, t, roof_y + roof_t, PARAPET_H, st.wall)
+		_shell(boxes, top.rects, {}, t, roof_y + roof_t, PARAPET_H, look.wall, walls, true)
 	# Furnish each room, floor by floor.
 	var rooms: Array = []
 	var loot: Array = []
@@ -264,14 +266,17 @@ static func building(type: String, seed: int, style := "") -> Dictionary:
 	# Yards: walled, a gate to the side, a chunk of yard things.
 	var yards: Array = []
 	if yard_d > 0.0:
-		yards.append(_yard(boxes, loot, Rect2(outer.position.x, -depth * 0.5, w, yard_d), ["n", "e", "w"], st.wall, doors, rng))
+		yards.append(_yard(boxes, loot, Rect2(outer.position.x, -depth * 0.5, w, yard_d), ["n", "e", "w"], look.wall, doors, rng))
 	elif cut.has_area() and rng.randf() < L_YARD_CHANCE:
 		var left := cut.position.x <= inner.position.x + 0.01
 		var yr := Rect2(outer.position.x, outer.position.y, cut.end.x - t - outer.position.x, cut.end.y - t - outer.position.y) if left \
 			else Rect2(cut.position.x + t, outer.position.y, outer.end.x - cut.position.x - t, cut.end.y - t - outer.position.y)
-		yards.append(_yard(boxes, loot, yr, ["n", "w" if left else "e"], st.wall, doors, rng))
+		yards.append(_yard(boxes, loot, yr, ["n", "w" if left else "e"], look.wall, doors, rng))
 	var height := roof_y + roof_t + (maxf(PARAPET_H, RAIL_H) if not roof.is_empty() else 0.0)
-	return {"boxes": boxes, "rooms": rooms, "doors": doors, "loot": loot, "stairs": stairs, "yards": yards,
+	var skin := _skin(look, walls, yards, roof_y, roof_t, type)
+	if roof.is_empty():
+		_roof_things(skin, top.rects, t, roof_y + roof_t, look)
+	return {"boxes": boxes, "skin": skin, "rooms": rooms, "doors": doors, "loot": loot, "stairs": stairs, "yards": yards,
 		"size": Vector2(w, depth), "storeys": storeys, "shape": "l" if cut.has_area() else "rect",
 		"roof_access": not roof.is_empty(), "height": height, "style": style, "type": type,
 		"windows": windows, "roof_y": roof_y + roof_t}
@@ -286,6 +291,265 @@ static func style_for(preset: String, seed: int) -> String:
 	}
 	var list: Array = pick.get(preset, ["block", "brick"])
 	return list[absi(seed) % list.size()]
+
+
+# --- Looks (world visual pass, cghath 2026-10-20) ------------------------------------------------
+
+## Each building has its own look, so a street isn't one colour and a house isn't a plain box: its
+## walls one of its style's "walls" shades, and a skin over them (_skin): frames round its windows
+## and doors (a wooden lintel on mud brick), a darker plinth, a cornice or eaves at the roof (roof
+## beam ends on mud brick), shutters on some, a shop's or clinic's or police station's sign over
+## its front door, corner stones on brick and stone, weathered patches, a coping on parapets and
+## yard walls. Every colour is a VoxelWorld variant of a material the wall already is or is as
+## hard as (VoxelWorld.VARIANT_OF), the skin lies in the outermost voxels of the walls or above
+## head height, and nothing of it is in a doorway or a window: rounds, blasts, the navmesh and the
+## garrison posts are as they were. Picked from the seed on a random stream of its own.
+const LOOKS := {
+	"mud": {"walls": [VoxelWorld.Mat.MUD_BRICK, VoxelWorld.Mat.MUD_BRICK, VoxelWorld.Mat.MUD_LIGHT, VoxelWorld.Mat.MUD_RED, VoxelWorld.Mat.MUD_WASH],
+		"trim": VoxelWorld.Mat.MUD_WASH, "trim_alt": VoxelWorld.Mat.MUD_LIGHT, "plinth": VoxelWorld.Mat.MUD_DARK, "dirty": VoxelWorld.Mat.MUD_DARK,
+		"lintel": VoxelWorld.Mat.WOOD_DARK, "shutters": 0.0, "beams": true, "quoins": false},
+	"brick": {"walls": [VoxelWorld.Mat.BRICK, VoxelWorld.Mat.BRICK, VoxelWorld.Mat.BRICK_DARK, VoxelWorld.Mat.BRICK_TAN],
+		"trim": VoxelWorld.Mat.TRIM_WHITE, "trim_alt": VoxelWorld.Mat.LIMESTONE, "plinth": VoxelWorld.Mat.TRIM_DARK, "dirty": VoxelWorld.Mat.BRICK_DARK,
+		"lintel": VoxelWorld.Mat.TRIM_WHITE, "shutters": 0.5, "beams": false, "quoins": true},
+	"block": {"walls": [VoxelWorld.Mat.CINDER_BLOCK, VoxelWorld.Mat.RENDER_CREAM, VoxelWorld.Mat.RENDER_OCHRE, VoxelWorld.Mat.RENDER_BLUE,
+			VoxelWorld.Mat.RENDER_GREEN, VoxelWorld.Mat.RENDER_PINK, VoxelWorld.Mat.RENDER_CREAM],
+		"trim": VoxelWorld.Mat.TRIM_WHITE, "trim_alt": VoxelWorld.Mat.CONCRETE, "plinth": VoxelWorld.Mat.BLOCK_DIRTY, "dirty": VoxelWorld.Mat.CINDER_BLOCK,
+		"lintel": VoxelWorld.Mat.CONCRETE, "shutters": 0.45, "beams": false, "quoins": false,
+		"roofs": [VoxelWorld.Mat.SHEET_METAL, VoxelWorld.Mat.SHEET_RUST, VoxelWorld.Mat.SHEET_GREEN, VoxelWorld.Mat.SHEET_METAL]},
+	"stone": {"walls": [VoxelWorld.Mat.STONE, VoxelWorld.Mat.STONE_WARM, VoxelWorld.Mat.STONE_GREY],
+		"trim": VoxelWorld.Mat.LIMESTONE, "trim_alt": VoxelWorld.Mat.TRIM_WHITE, "plinth": VoxelWorld.Mat.STONE_GREY, "dirty": VoxelWorld.Mat.STONE_GREY,
+		"lintel": VoxelWorld.Mat.LIMESTONE, "shutters": 0.5, "beams": false, "quoins": true},
+}
+const SHUTTERS: Array[int] = [VoxelWorld.Mat.WOOD_GREEN, VoxelWorld.Mat.WOOD_BLUE, VoxelWorld.Mat.WOOD_DARK]
+const SIGNS: Array[int] = [VoxelWorld.Mat.SIGN_RED, VoxelWorld.Mat.SIGN_YELLOW, VoxelWorld.Mat.SIGN_BLUE]
+## The skin's sizes (m): plinth height, frame width round a window (a door's DOOR_FRAME), how far
+## a cornice stands out, eaves over a sheet-metal or tiled roof, roof beam ends (how far out, how
+## far apart), and corner stones' courses.
+const PLINTH_H := 0.4
+const FRAME := 0.1
+const DOOR_FRAME := 0.2
+const CORNICE := 0.1
+const EAVES := 0.4
+const BEAM_OUT := 0.3
+const BEAM_EVERY := 1.0
+const QUOIN_H := 0.4
+## Below this height nothing stands out of a wall (the navmesh's agent is 1.75 m tall; cornices,
+## eaves and beam ends are all up at the roof).
+const PROUD_ABOVE := 2.3
+
+
+## Building `seed`'s look in `style` (LOOKS): {"wall", "roof", "trim", "plinth", "dirty",
+## "lintel", "shutter" (-1: none), "sign", "beams", "quoins", "seed"}.
+static func _look(style: String, type: String, seed: int) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed, "look"])
+	var l: Dictionary = LOOKS[style]
+	var walls: Array = l.walls
+	var wall: int = walls[rng.randi() % walls.size()]
+	var trim: int = l.trim if l.trim != wall else l.trim_alt
+	var plinth: int = l.plinth if l.plinth != wall else VoxelWorld.Mat.TRIM_DARK
+	var dirty: int = l.dirty if l.dirty != wall else plinth
+	var roofs: Array = l.get("roofs", [STYLES[style].roof])
+	var roof: int = roofs[rng.randi() % roofs.size()]
+	var shutter: int = SHUTTERS[rng.randi() % SHUTTERS.size()] if rng.randf() < float(l.shutters) else -1
+	var sign: int = SIGNS[rng.randi() % SIGNS.size()]
+	if type == "police":
+		sign = VoxelWorld.Mat.SIGN_BLUE
+	return {"wall": wall, "roof": roof, "trim": trim, "plinth": plinth, "dirty": dirty, "lintel": l.lintel, "shutter": shutter,
+		"sign": sign, "beams": l.beams, "quoins": l.quoins, "seed": rng.randi(), "roof_kind": STYLES[style].roof}
+
+
+## The building's skin (see LOOKS) over its outside `walls` (_shell's records) and `yards`' walls,
+## as [lo, hi, Mat] boxes in its own metres. `roof_y`, `roof_t`: its roof slab.
+static func _skin(look: Dictionary, walls: Array, yards: Array, roof_y: float, roof_t: float, type: String) -> Array:
+	var out: Array = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(look.seed)
+	var trim: int = look.trim
+	var top := -INF  # the top floor's walls hold the roof
+	for w: Dictionary in walls:
+		if not w.parapet:
+			top = maxf(top, float(w.base))
+	var roof_kind: int = look.roof_kind
+	for w: Dictionary in walls:
+		var h: float = w.h
+		var t: float = w.t
+		if w.parapet:
+			_face_boxes(out, w, w.from, w.to, h - 0.1, h, trim, t)  # a coping along its top
+			continue
+		var ground := float(w.base) < 0.01
+		if ground:
+			_face_boxes(out, w, w.from, w.to, 0.0, PLINTH_H, look.plinth)
+		# Corner stones, a long one and a short one in turn, up each outside corner.
+		if look.quoins:
+			for end: int in [0, 1]:
+				if not (w.c0 if end == 0 else w.c1):
+					continue
+				var y := PLINTH_H if ground else 0.0
+				var k := 0
+				while y + QUOIN_H <= h - 0.2:
+					var long := (0.5 if k % 2 == 0 else 0.3) + t
+					var a0: float = w.from if end == 0 else float(w.to) - long
+					_face_boxes(out, w, a0, a0 + long, y, y + QUOIN_H - 0.1, trim)
+					y += QUOIN_H
+					k += 1
+		for g: Array in w.gaps:
+			var g0 := float(g[0])
+			var g1 := float(g[1])
+			var bottom := float(g[2])
+			var head := float(g[3])
+			if g1 <= float(w.from) + 0.01 or g0 >= float(w.to) - 0.01:
+				continue  # (a line's gaps are kept together: this one is in another room's stretch of it)
+			if bottom > 0.01:  # a window: its frame and sill, shutters, a stain under it
+				_face_boxes(out, w, g0 - FRAME, g1 + FRAME, bottom - FRAME, head + FRAME, trim)
+				_face_boxes(out, w, g0 - FRAME * 2.0, g1 + FRAME * 2.0, bottom - FRAME, bottom, trim)
+				if look.beams:
+					_face_boxes(out, w, g0 - 0.2, g1 + 0.2, head, head + 0.2, look.lintel)
+				var shutter: int = look.shutter
+				if shutter >= 0:
+					var sw := (g1 - g0) * 0.5
+					for a: float in [g0 - FRAME - sw, g1 + FRAME]:
+						if _solid_between(w, a, a + sw, bottom, head):
+							_face_boxes(out, w, a, a + sw, bottom, head, shutter)
+				var stain := rng.randf_range(0.3, 0.5)
+				if rng.randf() < 0.5 and bottom - FRAME - stain >= (PLINTH_H if ground else 0.05):
+					_face_boxes(out, w, g0 + 0.1, g1 - 0.1, bottom - FRAME - stain, bottom - FRAME, look.dirty)
+			else:  # a doorway: jambs and a lintel; a sign over a shop's, a clinic's, a police station's front door
+				_face_boxes(out, w, g0 - DOOR_FRAME, g1 + DOOR_FRAME, 0.0, head + DOOR_FRAME, look.lintel if look.beams else trim)
+				var s0 := head + 0.1
+				var s1 := minf(s0 + 0.45, h - 0.2)
+				if ground and w.side == "s" and type in ["shop", "clinic", "police"] and s1 - s0 >= 0.2:
+					if type == "clinic":  # a white board with a red cross
+						var mid := (g0 + g1) * 0.5
+						_face_boxes(out, w, mid - 0.6, mid + 0.6, s0, s1, VoxelWorld.Mat.TRIM_WHITE)
+						var mid_y := snappedf((s0 + s1) * 0.5, 0.1)
+						_face_boxes(out, w, mid - 0.15, mid + 0.15, mid_y - 0.05, mid_y + 0.05, VoxelWorld.Mat.SIGN_RED)
+						_face_boxes(out, w, mid - 0.05, mid + 0.05, mid_y - 0.15, mid_y + 0.15, VoxelWorld.Mat.SIGN_RED)
+					else:
+						_face_boxes(out, w, g0 - 0.4, g1 + 0.4, s0, s1, look.sign)
+		# Weathering: damp creeping up from the plinth here and there, ragged.
+		var length := float(w.to) - float(w.from)
+		if ground and length > 2.0:
+			var a := float(w.from) + rng.randf_range(0.0, 1.5)
+			while a < float(w.to) - 0.3:
+				var pw := rng.randf_range(0.5, 1.6)
+				if rng.randf() < 0.45:
+					_face_boxes(out, w, a, minf(a + pw, float(w.to)), PLINTH_H, PLINTH_H + snappedf(rng.randf_range(0.1, 0.4), 0.1), look.dirty)
+				a += pw
+		# At the roof: eaves over sheet metal and tiles, beam ends out of mud brick, else a cornice.
+		if absf(float(w.base) - top) < 0.01:
+			var lo := float(w.from) - (CORNICE if w.c0 else 0.0)
+			var hi := float(w.to) + (CORNICE if w.c1 else 0.0)
+			if look.beams:
+				var a := float(w.from) + 0.45
+				while a < float(w.to) - 0.4:
+					_face_boxes(out, w, a, a + 0.15, h - 0.35, h - 0.2, look.lintel, 0.0, BEAM_OUT)
+					a += BEAM_EVERY
+				_face_boxes(out, w, w.from, w.to, h - 0.1, h, trim)
+			elif roof_kind in [VoxelWorld.Mat.SHEET_METAL, VoxelWorld.Mat.ROOF_TILE]:
+				var e0 := float(w.from) - (EAVES if w.c0 else 0.0)
+				var e1 := float(w.to) + (EAVES if w.c1 else 0.0)
+				_face_boxes(out, w, e0, e1, h, h + roof_t, look.roof, 0.0, EAVES)
+				_face_boxes(out, w, w.from, w.to, h - 0.2, h, trim)
+			else:
+				_face_boxes(out, w, lo, hi, h - 0.2, h + roof_t, trim, 0.1, CORNICE)
+	# Yard walls: a coping along the top.
+	for y: Dictionary in yards:
+		for wl: Array in y.get("walls", []):
+			var axis: int = wl[0]
+			var a := float(wl[3])
+			var gaps: Array = (wl[5] as Array).duplicate()
+			gaps.sort_custom(func(p: Array, q: Array) -> bool: return p[0] < q[0])
+			for g: Array in gaps + [[float(wl[4]), float(wl[4])]]:
+				var b := minf(float(g[0]), float(wl[4]))
+				if b - a > 0.05:
+					var y0 := YARD_WALL_H - 0.1
+					if axis == 0:
+						out.append([Vector3(a, y0, wl[1]), Vector3(b, YARD_WALL_H, wl[2]), trim])
+					else:
+						out.append([Vector3(wl[1], y0, a), Vector3(wl[2], YARD_WALL_H, b), trim])
+				a = maxf(a, float(g[1]))
+	return out
+
+
+## On a roof nobody goes up to (`rects`, a floor's rooms; `t` its walls, `y` the roof's top): a
+## water tank on a stand in one corner now and then, and a vent box in another. Skin: no one
+## stands up there, and the garrison posts on roofs are only on the ones with a stair.
+static func _roof_things(out: Array, rects: Array[Rect2], t: float, y: float, look: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(look.seed) + 17
+	var r: Rect2 = rects[rng.randi() % rects.size()]
+	if r.size.x < 2.4 or r.size.y < 2.4:
+		return
+	var corners: Array[Vector2] = [r.position + Vector2(0.4, 0.4), Vector2(r.end.x - 1.4, r.position.y + 0.4),
+		Vector2(r.position.x + 0.4, r.end.y - 1.4), r.end - Vector2(1.4, 1.4)]
+	var k := rng.randi() % 4
+	if rng.randf() < 0.6:
+		var c := corners[k]
+		for leg: Vector2 in [Vector2(0.05, 0.05), Vector2(0.85, 0.05), Vector2(0.05, 0.85), Vector2(0.85, 0.85)]:
+			out.append([Vector3(c.x + leg.x, y, c.y + leg.y), Vector3(c.x + leg.x + 0.1, y + 0.4, c.y + leg.y + 0.1), VoxelWorld.Mat.STEEL])
+		out.append([Vector3(c.x, y + 0.4, c.y), Vector3(c.x + 1.0, y + 1.3, c.y + 1.0), VoxelWorld.Mat.TRIM_DARK])
+		out.append([Vector3(c.x + 0.4, y + 1.3, c.y + 0.4), Vector3(c.x + 0.6, y + 1.4, c.y + 0.6), VoxelWorld.Mat.TRIM_DARK])
+	if rng.randf() < 0.5:
+		var c := corners[(k + 2) % 4] + Vector2(0.2, 0.2)
+		out.append([Vector3(c.x, y, c.y), Vector3(c.x + 0.8, y + 0.5, c.y + 0.6), VoxelWorld.Mat.TRIM_WHITE])
+		out.append([Vector3(c.x + 0.1, y + 0.1, c.y - 0.1), Vector3(c.x + 0.5, y + 0.4, c.y + 0.1), VoxelWorld.Mat.TRIM_DARK])  # its grille
+
+
+## Whether outside wall `w` is solid (no doorway or window, and the wall's own) from `a0` to `a1`
+## along it, between `y0` and `y1` over its base.
+static func _solid_between(w: Dictionary, a0: float, a1: float, y0: float, y1: float) -> bool:
+	if a0 < float(w.from) - 0.001 or a1 > float(w.to) + 0.001:
+		return false
+	for g: Array in w.gaps:
+		if float(g[0]) < a1 and float(g[1]) > a0 and float(g[2]) < y1 and float(g[3]) > y0:
+			return false
+	return true
+
+
+## Boxes on outside wall `w`'s face (_shell's record) from `a0` to `a1` along it and `y0` to `y1`
+## over its base, `depth` into the wall from its face and `proud` out past it, cut back to the wall's
+## ends and round every doorway and window in it (so nothing of a skin ever stands in one). Nothing
+## stands out of a wall below PROUD_ABOVE.
+static func _face_boxes(out: Array, w: Dictionary, a0: float, a1: float, y0: float, y1: float, mat: int, depth := 0.1, proud := 0.0) -> void:
+	if proud > 0.0 and y0 + float(w.base) < PROUD_ABOVE:
+		proud = 0.0
+	if proud <= 0.0:
+		a0 = maxf(a0, float(w.from))
+		a1 = minf(a1, float(w.to))
+	if a1 - a0 < 0.05 or y1 - y0 < 0.05:
+		return
+	var pieces: Array = [Rect2(a0, y0, a1 - a0, y1 - y0)]
+	for g: Array in w.gaps:
+		var hole := Rect2(float(g[0]), float(g[2]), float(g[1]) - float(g[0]), float(g[3]) - float(g[2]))
+		var next: Array = []
+		for p: Rect2 in pieces:
+			var c := p.intersection(hole)
+			if not c.has_area():
+				next.append(p)
+				continue
+			if c.position.y > p.position.y:
+				next.append(Rect2(p.position.x, p.position.y, p.size.x, c.position.y - p.position.y))
+			if c.end.y < p.end.y:
+				next.append(Rect2(p.position.x, c.end.y, p.size.x, p.end.y - c.end.y))
+			if c.position.x > p.position.x:
+				next.append(Rect2(p.position.x, c.position.y, c.position.x - p.position.x, c.size.y))
+			if c.end.x < p.end.x:
+				next.append(Rect2(c.end.x, c.position.y, p.end.x - c.end.x, c.size.y))
+		pieces = next
+	var line: float = w.line
+	var t: float = w.t
+	var base: float = w.base
+	for p: Rect2 in pieces:
+		if p.size.x < 0.05 or p.size.y < 0.05:
+			continue
+		var lo_y := base + p.position.y
+		var hi_y := base + p.end.y
+		match String(w.side):
+			"n": out.append([Vector3(p.position.x, lo_y, line - t - proud), Vector3(p.end.x, hi_y, line - t + depth), mat])
+			"s": out.append([Vector3(p.position.x, lo_y, line + t - depth), Vector3(p.end.x, hi_y, line + t + proud), mat])
+			"w": out.append([Vector3(line - t - proud, lo_y, p.position.x), Vector3(line - t + depth, hi_y, p.end.x), mat])
+			_: out.append([Vector3(line + t - depth, lo_y, p.position.x), Vector3(line + t + proud, hi_y, p.end.x), mat])
 
 
 # --- Rooms -----------------------------------------------------------------------------------
@@ -763,15 +1027,18 @@ static func _wall(out: Array, axis: int, lo: float, hi: float, from: float, to: 
 ## A floor's outside walls (`t` thick, outside its rooms' edges, `h` tall from `base`) round
 ## whatever shape its rooms make, with their gaps (keyed by _out_key); turned out at the
 ## outside corners so they close.
-static func _shell(out: Array, rects: Array[Rect2], gaps: Dictionary, t: float, base: float, h: float, mat: int) -> void:
+static func _shell(out: Array, rects: Array[Rect2], gaps: Dictionary, t: float, base: float, h: float, mat: int, walls: Array = [], parapet := false) -> void:
 	for i in rects.size():
 		var r := rects[i]
 		for side: String in ["n", "s", "w", "e"]:
 			var line := _line(r, side)
 			var g: Array = gaps.get(_out_key(r, side), [])
 			for iv: Vector2 in _exterior(i, rects, side):
-				var from := iv.x - (t if _corner(rects, side, line, iv.x, -1.0) else 0.0)
-				var to := iv.y + (t if _corner(rects, side, line, iv.y, 1.0) else 0.0)
+				var c0 := _corner(rects, side, line, iv.x, -1.0)
+				var c1 := _corner(rects, side, line, iv.y, 1.0)
+				var from := iv.x - (t if c0 else 0.0)
+				var to := iv.y + (t if c1 else 0.0)
+				walls.append({"side": side, "line": line, "from": from, "to": to, "c0": c0, "c1": c1, "t": t, "base": base, "h": h, "gaps": g, "parapet": parapet})
 				match side:
 					"n": _wall(out, 0, line - t, line, from, to, h, mat, g, base)
 					"s": _wall(out, 0, line, line + t, from, to, h, mat, g, base)
@@ -842,9 +1109,11 @@ static func _yard(out: Array, loot: Array, yr: Rect2, sides: Array, mat: int, do
 			var c := g0 + GATE_W * 0.5
 			var mid := (float(wl[1]) + float(wl[2])) * 0.5
 			gate = Vector3(c, 0, mid) if int(wl[0]) == 0 else Vector3(mid, 0, c)
+	var built: Array = []
 	for side: String in sides:
 		var wl: Array = walls[side]
 		_wall(out, wl[0], wl[1], wl[2], wl[3], wl[4], YARD_WALL_H, mat, gaps.get(side, []))
+		built.append(wl + [gaps.get(side, [])])
 	var inside := yr.grow_individual(-yt if "w" in sides else 0.0, -yt, -yt if "e" in sides else 0.0, 0.0)
 	var ways: Array = []
 	if gate != null:
@@ -853,7 +1122,7 @@ static func _yard(out: Array, loot: Array, yr: Rect2, sides: Array, mat: int, do
 		if int(dr.rooms[1]) == -1 and inside.grow(0.6).has_point(Vector2((dr.at as Vector3).x, (dr.at as Vector3).z)):
 			ways.append({"at": dr.at, "rooms": [-9, -1]})
 	var chunk := _furnish(out, loot, inside, "yard", ways, -9, rng)
-	return {"rect": inside, "gate": gate, "chunk": chunk}
+	return {"rect": inside, "gate": gate, "chunk": chunk, "walls": built}
 
 
 # --- Furnishing ------------------------------------------------------------------------------
@@ -1028,6 +1297,7 @@ static func town(seed: int, style := "") -> Dictionary:
 	if style == "":
 		style = STYLES.keys()[rng.randi() % STYLES.size()]
 	var boxes: Array = []
+	var skin: Array = []  # the buildings' skins (_skin), town metres
 	var ramps := PackedVector3Array()  # the stairs' ramps for the navmesh (ramp_faces), town metres
 	var buildings: Array = []
 	var once := {}
@@ -1052,15 +1322,8 @@ static func town(seed: int, style := "") -> Dictionary:
 				var z := side * (STREET_W * 0.5 + SETBACK + size.y * 0.5)  # north (-z) faces +z as built; south turned
 				var turned := side == 1
 				var origin := Vector3(x, 0, z)
-				for bx: Array in b.boxes:
-					var lo: Vector3 = bx[0]
-					var hi: Vector3 = bx[1]
-					if turned:
-						var nlo := Vector3(-hi.x, lo.y, -hi.z)
-						var nhi := Vector3(-lo.x, hi.y, -lo.z)
-						lo = nlo
-						hi = nhi
-					boxes.append([lo + origin, hi + origin, bx[2]])
+				_place_boxes(boxes, b.boxes, origin, turned)
+				_place_boxes(skin, b.skin, origin, turned)
 				for p: Vector3 in ramp_faces(b):  # (turned round: a rotation, the faces still face up)
 					ramps.append((Vector3(-p.x, p.y, -p.z) if turned else p) + origin)
 				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b})
@@ -1093,15 +1356,8 @@ static func town(seed: int, style := "") -> Dictionary:
 				var z := side * (front_d + ALLEY_W + SETBACK + size.y * 0.5)
 				var turned := side == -1  # faces out, away from the main street
 				var origin := Vector3(x, 0, z)
-				for bx: Array in b.boxes:
-					var lo: Vector3 = bx[0]
-					var hi: Vector3 = bx[1]
-					if turned:
-						var nlo := Vector3(-hi.x, lo.y, -hi.z)
-						var nhi := Vector3(-lo.x, hi.y, -lo.z)
-						lo = nlo
-						hi = nhi
-					boxes.append([lo + origin, hi + origin, bx[2]])
+				_place_boxes(boxes, b.boxes, origin, turned)
+				_place_boxes(skin, b.skin, origin, turned)
 				for p: Vector3 in ramp_faces(b):
 					ramps.append((Vector3(-p.x, p.y, -p.z) if turned else p) + origin)
 				buildings.append({"type": type, "origin": origin, "turned": turned, "data": b, "back": true})
@@ -1177,10 +1433,24 @@ static func town(seed: int, style := "") -> Dictionary:
 	var at := _town_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, STREET_W * 0.5 + SETBACK + 3.0)) - Vector3(0, 0.1, 0)
 	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
 	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
-	return {"boxes": boxes, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
+	return {"boxes": boxes, "skin": skin, "buildings": buildings, "half": half, "points": points, "garrison": garrison,
 		"garrison_face": face, "garrison_high": high, "garrison_deep": deep, "garrison_reserve": reserve, "fallback": fallback, "ramps": ramps, "loot": loot, "civilians": civilians, "style": style, "cache": cache,
 		"hvt": _town_room(buildings, ["office", "living"], Vector3(-CROSS_W, 0.1, 0)),
 		"hostage": _town_room(buildings, ["cells", "bedroom"], Vector3(CROSS_W, 0.1, 0))}
+
+
+## A building's `list` of [lo, hi, Mat] boxes (its own metres) into `out` at `origin`, turned round
+## (180 degrees about y) when `turned`.
+static func _place_boxes(out: Array, list: Array, origin: Vector3, turned: bool) -> void:
+	for bx: Array in list:
+		var lo: Vector3 = bx[0]
+		var hi: Vector3 = bx[1]
+		if turned:
+			var nlo := Vector3(-hi.x, lo.y, -hi.z)
+			var nhi := Vector3(-lo.x, hi.y, -lo.z)
+			lo = nlo
+			hi = nhi
+		out.append([lo + origin, hi + origin, bx[2]])
 
 
 ## A town's building posts into `posts` (town metres) and the way each looks out into `face`:

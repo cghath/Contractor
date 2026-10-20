@@ -146,6 +146,11 @@ const SCRUB_TOP := 0.6
 const CROWN_R := 1.1
 const CROWN_LOW := 2.0
 const CROWN_HIGH := 4.9
+## A conifer's crown (_conifer_mesh) is a narrowing stack, not a round blob (world visual pass,
+## cghath 2026-10-20: its top hid people where no needle was): its cylinder is CONIFER_R x its size
+## round, from CROWN_LOW up to CONIFER_HIGH x its size (above that it's a spike).
+const CONIFER_R := 0.85
+const CONIFER_HIGH := 3.9
 const FOLIAGE_PAD_M := 3.0
 ## Ground cover (visual only, not in `items`, no collision, no effect on sight or the layout's
 ## checksum): grass tufts and pebbles laid out per cell when it builds, from the cell and the
@@ -808,6 +813,8 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 
 
 func _add(item: Dictionary) -> void:
+	if int(item.kind) == Kind.TREE:
+		item["conifer"] = _is_conifer(item)  # (from where it stands: the same from a cache too)
 	if item.solid:
 		solid_count += 1
 	counts[int(item.kind)] += 1
@@ -1061,14 +1068,15 @@ static func _through(item: Dictionary, kind: int, from: Vector3, to: Vector3) ->
 	var p: Vector3 = item.pos
 	var size: Vector3 = item.size
 	var bush := kind != Kind.TREE
-	var r := size.x * (SCRUB_R if bush else CROWN_R)
+	var conifer := not bush and bool(item.get("conifer", false))
+	var r := size.x * (SCRUB_R if bush else (CONIFER_R if conifer else CROWN_R))
 	var c := Vector2(p.x - from.x, p.z - from.z)
 	var along := c.dot(flat) / (flat_len * flat_len)
 	var miss := (c - flat * along).length()
 	if miss >= r:
 		return 0.0
 	var y0 := p.y + (0.0 if bush else size.y * CROWN_LOW)
-	var y1 := p.y + size.y * (SCRUB_TOP if bush else CROWN_HIGH)
+	var y1 := p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH))
 	var half_t := sqrt(r * r - miss * miss) / flat_len
 	var t0 := maxf(along - half_t, 0.0)
 	var t1 := minf(along + half_t, 1.0)
@@ -1087,7 +1095,7 @@ static func _through(item: Dictionary, kind: int, from: Vector3, to: Vector3) ->
 ## Metres of foliage (scrub, thickets, and tree crowns) the straight line `from` -> `to` passes
 ## through, for spotting (Spotting.foliage_m). Each is a vertical cylinder about its mesh: scrub
 ## and thickets SCRUB_R x their width, up to SCRUB_TOP x their height; a crown CROWN_R x its
-## size, from CROWN_LOW to CROWN_HIGH x its size up. Trunks and rocks are solid: rays see to
+## size, from CROWN_LOW to CROWN_HIGH x its size up (a conifer's CONIFER_R, to CONIFER_HIGH). Trunks and rocks are solid: rays see to
 ## those. A wood's thickets and low crowns add up: a few trees deep hides a standing man.
 func foliage_between(from: Vector3, to: Vector3) -> float:
 	if _cells.is_empty():
@@ -1117,9 +1125,10 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 					continue  # past where it's drawn it hides nobody (what players see is what counts)
 				var size: Vector3 = item.size
 				var bush := kind != Kind.TREE
-				var r := size.x * (SCRUB_R if bush else CROWN_R)
+				var conifer := not bush and bool(item.get("conifer", false))
+				var r := size.x * (SCRUB_R if bush else (CONIFER_R if conifer else CROWN_R))
 				var y0 := p.y + (0.0 if bush else size.y * CROWN_LOW)
-				var y1 := p.y + size.y * (SCRUB_TOP if bush else CROWN_HIGH)
+				var y1 := p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH))
 				# The flat line against the circle: t runs 0..1 along it.
 				var c := Vector2(p.x - from.x, p.z - from.z)
 				var along := c.dot(flat) / (flat_len * flat_len)
@@ -1168,14 +1177,26 @@ func _solid_half(item: Dictionary) -> Vector3:
 # --- Collision -------------------------------------------------------------------------------
 
 ## A tree's collision is its drawn trunk (_trunk_mesh: 2.6 tall, 0.38 wide at the foot and 0.28 at
-## the top, x the tree's size): a cylinder TRUNK_HALF round and TRUNK_TALL high. It was 0.3 round
-## and 3.0 high, half again as wide as the trunk drawn (Captain, 2026-10-18: "the hitboxes of
-## trees": stopped by, and shots stopping on, the air beside a trunk).
+## the top, x the tree's size). It was 0.3 round and 3.0 high, half again as wide as the trunk
+## drawn (Captain, 2026-10-18: "the hitboxes of trees": stopped by, and shots stopping on, the air
+## beside a trunk); then a cylinder TRUNK_HALF round, a little narrower than the trunk's foot and
+## its octagon's corners (rounds through the corners went through). World visual pass (cghath,
+## 2026-10-20): now the trunk's own octagonal frustum, turned and sunk as it's drawn (_trunk_points).
+## TRUNK_HALF stays the trunk's footprint for the navmesh (boxes_in).
 const TRUNK_HALF := 0.17
 const TRUNK_TALL := 2.6
+const TRUNK_FOOT_R := 0.19
+const TRUNK_TOP_R := 0.14
+const TRUNK_SINK := 0.1
+## Trunk shapes by size, shared (sizes snapped to TRUNK_SHAPE_STEP: a few millimetres at most).
+const TRUNK_SHAPE_STEP := 0.02
+static var _trunk_shapes := {}
 
 
-## One static body per cell holding every solid item's shape in it (large rocks and trunks).
+## One static body per cell holding every solid item's shape in it (large rocks, trunks and props),
+## each the shape it's drawn as (world visual pass, 2026-10-20: rocks and props were a box 0.9 of
+## their size, the rocks' drawn corners pulled in and out of it, and both drawn sheared when turned):
+## a trunk its octagonal frustum, a rock the hull of its rock mesh, a prop each of its parts.
 func build_collision() -> void:
 	for cell: Vector2i in _cells:
 		var body: StaticBody3D = null
@@ -1189,21 +1210,67 @@ func build_collision() -> void:
 				body.collision_layer = 1
 				body.collision_mask = 0
 				add_child(body)
-			var shape := CollisionShape3D.new()
-			var s: Vector3 = item.size
-			if item.kind == Kind.TREE:
-				var cylinder := CylinderShape3D.new()
-				cylinder.radius = TRUNK_HALF * s.x
-				cylinder.height = TRUNK_TALL * s.y
-				shape.shape = cylinder
-				shape.position = (item.pos as Vector3) + Vector3(0, TRUNK_TALL * 0.5 * s.y, 0)
-			else:
-				var box := BoxShape3D.new()
-				box.size = Vector3(s.x * 0.9, s.y, s.z * 0.9)
-				shape.shape = box
-				shape.position = item.pos
-				shape.rotation.y = item.yaw
-			body.add_child(shape)
+			for part: Array in collision_parts(item):
+				var shape := CollisionShape3D.new()
+				shape.shape = part[0]
+				shape.transform = part[1]
+				body.add_child(shape)
+
+
+## The shapes item `item` collides as, each [Shape3D, Transform3D (world)], exactly as it's drawn
+## (_cell_parts): [] for one that doesn't collide (scrub, thickets, small rocks, valuables).
+func collision_parts(item: Dictionary) -> Array:
+	var s: Vector3 = item.size
+	var p: Vector3 = item.pos
+	match int(item.kind):
+		Kind.TREE:
+			var key := snappedf(s.x, TRUNK_SHAPE_STEP)
+			if not _trunk_shapes.has(key):
+				var trunk := ConvexPolygonShape3D.new()
+				trunk.points = _trunk_points(key)
+				_trunk_shapes[key] = trunk
+			return [[_trunk_shapes[key], Transform3D(Basis(Vector3.UP, float(item.yaw)), p - Vector3(0, TRUNK_SINK, 0))]]
+		Kind.ROCK:
+			if not item.solid:
+				return []
+			var rock := ConvexPolygonShape3D.new()
+			var points := PackedVector3Array()
+			for c: Vector3 in _blocky_corners(Vector3.ONE, ROCK_JITTER, ROCK_SEED, true):
+				points.append(c * s)
+			rock.points = points
+			return [[rock, Transform3D(Basis(Vector3.UP, float(item.yaw)), p - Vector3(0, _sink(item, ROCK_BURIED), 0))]]
+		Kind.PROP:
+			var out: Array = []
+			var xf := _prop_transform(item)
+			var size: Vector3 = xf[1]
+			var place := Transform3D(Basis(Vector3.UP, float(xf[0])), p - Vector3(0, _sink(item, 0.0), 0))
+			for part: Array in PROP_SHAPES[_prop_kind(item)]:
+				if part.size() > 4 and not part[4]:
+					continue  # a painted detail on another part's face
+				var hull := ConvexPolygonShape3D.new()
+				var points := PackedVector3Array()
+				for c: Vector3 in _part_points(part):
+					points.append(c * size)
+				hull.points = points
+				out.append([hull, place])
+			return out
+	return []
+
+
+## The trunk's octagonal frustum (as _trunk_mesh draws it) for a tree of size `s`: its 16 corners,
+## from its foot (at 0) to TRUNK_TALL x `s` up.
+static func _trunk_points(s: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for ring: Vector2 in [Vector2(0.0, TRUNK_FOOT_R), Vector2(TRUNK_TALL, TRUNK_TOP_R)]:
+		for v: Vector2 in _octagon(ring.y * s):
+			out.append(Vector3(v.x, ring.x * s, v.y))
+	return out
+
+
+## An octagon's corners (a square of half-width `r` with its corners cut at 45 degrees, as _tier).
+static func _octagon(r: float) -> Array[Vector2]:
+	var c := r * 0.7
+	return [Vector2(c, -r), Vector2(r, -c), Vector2(r, c), Vector2(c, r), Vector2(-c, r), Vector2(-r, c), Vector2(-r, -c), Vector2(-c, -r)]
 
 
 # --- Visuals ---------------------------------------------------------------------------------
@@ -1242,8 +1309,7 @@ static func _shared_material_once() -> StandardMaterial3D:
 func _shared_meshes(trunk_hex: String) -> Dictionary:
 	if _shapes.is_empty():
 		_shapes = {
-			Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.22, 1, true),
-			Kind.PROP: _blocky(Vector3(1, 1, 1), Color.WHITE, 0.08, 11, true),
+			Kind.ROCK: _blocky(Vector3(1, 1, 1), Color.WHITE, ROCK_JITTER, ROCK_SEED, true),
 			Kind.SCRUB: _scrub_mesh(),
 			"crown": _crown_mesh(),
 			"conifer": _conifer_mesh(),
@@ -1253,6 +1319,8 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 			"far": _far_mesh(),
 		}
 		_shapes["thicket"] = _shapes[Kind.SCRUB]
+		for kind: String in PROP_SHAPES:
+			_shapes["prop_" + kind] = _prop_mesh(kind)
 	var trunk_key := "trunk:" + trunk_hex
 	if not _shapes.has(trunk_key):
 		_shapes[trunk_key] = _trunk_mesh(Color(trunk_hex))
@@ -1319,33 +1387,18 @@ func _build_cell(cell: Vector2i) -> void:
 
 ## Draw distance by group key.
 const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M,
-	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M, Kind.PROP: SEE_ROCK_M}
+	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M,
+	"prop_crates": SEE_ROCK_M, "prop_drums": SEE_ROCK_M, "prop_debris": SEE_ROCK_M, "prop_wall": SEE_ROCK_M, "prop_wreck": SEE_ROCK_M, "prop_mound": SEE_ROCK_M}
 
 
 ## Cell `cell`'s MultiMeshes: [[group key, MultiMesh], ...].
 func _cell_parts(cell: Vector2i) -> Array:
-	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": [], Kind.PROP: []}
+	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": []}
+	for kind: String in PROP_SHAPES:
+		groups["prop_" + kind] = []
 	for index: int in _cells[cell]:
-		var item: Dictionary = items[index]
-		var basis := Basis(Vector3.UP, float(item.yaw))
-		var xf := Transform3D(basis.scaled(item.size), item.pos)
-		match int(item.kind):
-			Kind.ROCK:
-				groups[Kind.ROCK].append([xf, item.colour])
-			Kind.SCRUB:
-				groups[Kind.SCRUB].append([xf, item.colour])
-			Kind.PROP:
-				groups[Kind.PROP].append([xf, item.colour])
-			Kind.THICKET:
-				# The scrub mesh (0.58 high), its height scaled so the thicket stands size.y * SCRUB_TOP
-				# tall, as foliage_between counts it.
-				var size: Vector3 = item.size
-				var tall := Transform3D(basis.scaled(Vector3(size.x, size.y * SCRUB_TOP / 0.58, size.z)), item.pos)
-				groups["thicket"].append([tall, item.colour])
-			Kind.TREE:
-				var trunk := Transform3D(basis.scaled(item.size), (item.pos as Vector3) - Vector3(0, 0.1, 0))
-				groups["trunk"].append([trunk, Color.WHITE])
-				groups["conifer" if _is_conifer(item) else "crown"].append([xf, item.colour])
+		for part: Array in visual_parts(items[index]):
+			groups[part[0]].append([part[1], part[2]])
 	_ground_cover(cell, groups)
 	var parts: Array = []
 	for key in groups:
@@ -1354,6 +1407,51 @@ func _cell_parts(cell: Vector2i) -> Array:
 			continue
 		parts.append([key, _multimesh(_meshes[key], list)])
 	return parts
+
+
+## How item `item` is drawn: [group key (its mesh in _shared_meshes), Transform3D (world), colour]
+## for each of its meshes. Rocks and props are scaled along their own axes, then turned (they were
+## scaled after turning, which sheared a turned one off its collision box), and a prop sinks into
+## a slope (_sink), a rock too, all as they collide (collision_parts).
+func visual_parts(item: Dictionary) -> Array:
+	var basis := Basis(Vector3.UP, float(item.yaw))
+	var size: Vector3 = item.size
+	var p: Vector3 = item.pos
+	var xf := Transform3D(basis.scaled(size), p)  # (x and z the same for these: turned, not sheared)
+	match int(item.kind):
+		Kind.ROCK:
+			return [[Kind.ROCK, Transform3D(basis * Basis.from_scale(size), p - Vector3(0, _sink(item, ROCK_BURIED), 0)), item.colour]]
+		Kind.SCRUB:
+			return [[Kind.SCRUB, xf, item.colour]]
+		Kind.PROP:
+			var px := _prop_transform(item)
+			var kind := _prop_kind(item)
+			var colour: Color = item.colour
+			if kind in ["wall", "mound"]:
+				colour = colour.lightened(RUIN_LIGHTEN)  # weathered masonry, not a dark slab
+			elif PROP_PAINT.has(kind):
+				var paint: Array = PROP_PAINT[kind]
+				colour = paint[absi(hash(Vector2i(roundi(p.z * 10.0), roundi(p.x * 10.0)))) % paint.size()]
+			return [["prop_" + kind, Transform3D(Basis(Vector3.UP, float(px[0])) * Basis.from_scale(px[1]), p - Vector3(0, _sink(item, 0.0), 0)), colour]]
+		Kind.THICKET:
+			# The scrub mesh (0.58 high), its height scaled so the thicket stands size.y * SCRUB_TOP
+			# tall, as foliage_between counts it.
+			return [["thicket", Transform3D(basis.scaled(Vector3(size.x, size.y * SCRUB_TOP / 0.58, size.z)), p), item.colour]]
+		Kind.TREE:
+			return [["trunk", Transform3D(basis.scaled(size), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE],
+				["conifer" if (bool(item.conifer) if item.has("conifer") else _is_conifer(item)) else "crown", xf, item.colour]]
+	return []
+
+
+## How far a prop or rock `item` sits down into the ground it stands on (m): on a slope its low
+## side would stand in the air, so it sinks till that side is in, less the share of its height
+## already `buried` (a rock's), and at most PROP_SINK_MAX of its height.
+func _sink(item: Dictionary, buried: float) -> float:
+	var p: Vector3 = item.pos
+	var size: Vector3 = item.size
+	var up := clampf(_terrain.normal_at(p.x, p.z).y, 0.3, 1.0) if _terrain else 1.0
+	var tan_slope := sqrt(1.0 - up * up) / up
+	return clampf(0.5 * maxf(size.x, size.z) * tan_slope - buried * size.y, 0.0, size.y * PROP_SINK_MAX)
 
 
 ## A MultiMesh of `mesh` at `list`'s [transform, colour] pairs.
@@ -1544,9 +1642,26 @@ func _ground_blocked(x: float, z: float) -> bool:
 
 # --- Shapes: low-poly blocks, flat shaded ----------------------------------------------------
 
+## The rock mesh's corner nudge and seed (one shape for every rock, scaled and turned: its
+## collision is the hull of the same corners, collision_parts).
+const ROCK_JITTER := 0.22
+const ROCK_SEED := 1
+## A rock stands with this share of its height in the ground (_lay_out: its middle 0.3 of its
+## height up); on a slope it sinks further (_sink).
+const ROCK_BURIED := 0.2
+
+
 ## A box `size` m with its corners nudged by `jitter` (a fraction of its size), seeded by
 ## `seed`, flat shaded, in `colour`; centred on the origin, or standing on y = 0.
 func _blocky(size: Vector3, colour: Color, jitter: float, seed: int, centred: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_add_box(st, _blocky_corners(size, jitter, seed, centred), colour)
+	return st.commit()
+
+
+## _blocky's eight corners.
+static func _blocky_corners(size: Vector3, jitter: float, seed: int, centred: bool) -> Array[Vector3]:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	var corners: Array[Vector3] = []
@@ -1557,9 +1672,104 @@ func _blocky(size: Vector3, colour: Color, jitter: float, seed: int, centred: bo
 		var v := Vector3(sx * size.x, sy * size.y, sz * size.z)
 		v += Vector3(rng.randf_range(-jitter, jitter) * size.x, rng.randf_range(-jitter, jitter) * size.y, rng.randf_range(-jitter, jitter) * size.z)
 		corners.append(v)
+	return corners
+
+
+# --- Props (world visual pass, cghath 2026-10-20) --------------------------------------------------
+
+## Man-made clutter was one dark box per item. Now each is one of a few shapes, picked by where it
+## stands (the layout, its checksum and the caches are as they were): the roadside props (up to
+## PROP_SMALL_M) a crate stack, a cluster of drums or a debris pile; the ruins and wrecks a broken
+## wall corner with its rubble, a rubble mound, or (a long one) a car wreck. Each shape is parts in
+## a unit box (x, z -0.5..0.5, y -0.5 at the ground to 0.5), scaled by the item's size along its
+## own axes and turned by its yaw, drawn and collided the same (collision_parts). A part: [0 (a
+## box), lo, hi, shade] or [1 (a drum: an upright octagonal prism), foot centre, Vector3(half
+## width, height, 0), shade]; a fifth element false: drawn only (a painted detail on another
+## part's face, standing out of it by a hair).
+const PROP_SHAPES := {
+	"crates": [[0, Vector3(-0.5, -0.5, -0.5), Vector3(0.5, 0.1, 0.5), 1.0], [0, Vector3(-0.42, 0.1, -0.38), Vector3(0.18, 0.5, 0.22), 0.92],
+		[0, Vector3(-0.51, -0.24, -0.51), Vector3(0.51, -0.14, 0.51), 0.7, false]],
+	"drums": [[1, Vector3(-0.24, -0.5, -0.24), Vector3(0.22, 1.0, 0), 1.0], [1, Vector3(0.24, -0.5, -0.2), Vector3(0.22, 1.0, 0), 0.9],
+		[1, Vector3(0.0, -0.5, 0.25), Vector3(0.22, 0.85, 0), 0.82]],
+	"debris": [[0, Vector3(-0.5, -0.5, -0.5), Vector3(0.5, -0.2, 0.5), 0.95], [0, Vector3(-0.35, -0.2, -0.3), Vector3(0.3, 0.1, 0.35), 1.0],
+		[0, Vector3(-0.15, 0.1, -0.1), Vector3(0.2, 0.5, 0.2), 0.88]],
+	"wall": [[0, Vector3(-0.5, -0.5, -0.5), Vector3(-0.1, 0.5, -0.32), 1.0], [0, Vector3(-0.1, -0.5, -0.5), Vector3(0.25, 0.1, -0.32), 1.0],
+		[0, Vector3(0.25, -0.5, -0.5), Vector3(0.5, -0.25, -0.32), 1.0], [0, Vector3(-0.5, -0.5, -0.32), Vector3(-0.32, 0.25, 0.0), 0.94],
+		[0, Vector3(-0.5, -0.5, 0.0), Vector3(-0.32, -0.15, 0.3), 0.94], [0, Vector3(-0.2, -0.5, -0.2), Vector3(0.3, -0.35, 0.3), 0.82],
+		[0, Vector3(0.1, -0.5, 0.05), Vector3(0.45, -0.28, 0.45), 0.78]],
+	"wreck": [[0, Vector3(-0.5, -0.3, -0.48), Vector3(0.5, 0.05, 0.48), 1.0], [0, Vector3(-0.25, 0.05, -0.42), Vector3(0.25, 0.5, 0.42), 0.92],
+		[0, Vector3(-0.22, 0.18, -0.43), Vector3(0.22, 0.42, 0.43), 0.35, false], [0, Vector3(-0.42, -0.5, -0.5), Vector3(-0.18, -0.15, -0.36), 0.3],
+		[0, Vector3(0.18, -0.5, -0.5), Vector3(0.42, -0.15, -0.36), 0.3], [0, Vector3(-0.42, -0.5, 0.36), Vector3(-0.18, -0.15, 0.5), 0.3],
+		[0, Vector3(0.18, -0.5, 0.36), Vector3(0.42, -0.15, 0.5), 0.3]],
+	"mound": [[0, Vector3(-0.5, -0.5, -0.45), Vector3(0.45, -0.32, 0.5), 0.9], [0, Vector3(-0.45, -0.32, -0.4), Vector3(-0.05, 0.0, 0.05), 1.0],
+		[0, Vector3(-0.1, -0.32, -0.1), Vector3(0.35, -0.05, 0.4), 0.94], [0, Vector3(0.15, -0.32, -0.5), Vector3(0.5, -0.12, -0.15), 0.86],
+		[0, Vector3(-0.35, 0.0, -0.3), Vector3(-0.1, 0.22, -0.05), 0.97], [0, Vector3(0.0, -0.05, 0.05), Vector3(0.22, 0.12, 0.3), 0.88],
+		[0, Vector3(-0.22, -0.32, 0.12), Vector3(-0.08, 0.5, 0.38), 0.82]],
+}
+## Roadside props are up to this big (m, _lay_out: 0.5 to 1.1); ruins are bigger. A ruin this
+## much longer than wide is a car wreck (most of the time).
+const PROP_SMALL_M := 1.15
+const WRECK_RATIO := 1.35
+## Ruins (broken walls, rubble) are drawn this much lighter than their colour; a prop sinks into
+## a slope by at most this share of its height (_sink).
+const RUIN_LIGHTEN := 0.22
+const PROP_SINK_MAX := 0.35
+
+
+## Paint for the shapes that have their own (a drum is olive, blue or rust, not the colour of the
+## crates it would have been), picked by where it stands.
+const PROP_PAINT := {"drums": [Color("5b6340"), Color("3f5a78"), Color("8a4e2e"), Color("6b6f6a")]}
+
+
+## Which PROP_SHAPES shape prop `item` is, from where it stands and its size.
+static func _prop_kind(item: Dictionary) -> String:
+	var p: Vector3 = item.pos
+	var s: Vector3 = item.size
+	var roll := absi(hash(Vector2i(roundi(p.x * 10.0), roundi(p.z * 10.0)))) % 1000
+	if maxf(s.x, s.z) <= PROP_SMALL_M:
+		return ["crates", "drums", "debris"][roll % 3]
+	if maxf(s.x, s.z) >= minf(s.x, s.z) * WRECK_RATIO and roll % 5 < 3:
+		return "wreck"
+	return ["wall", "mound"][roll % 2]
+
+
+## Prop `item`'s turn and size as drawn: [yaw, size]; a wreck lies along its longer side (its shape
+## is long in x), so one longer in z is turned a quarter more with its x and z swapped.
+static func _prop_transform(item: Dictionary) -> Array:
+	var s: Vector3 = item.size
+	var yaw := float(item.yaw)
+	if _prop_kind(item) == "wreck" and s.z > s.x:
+		return [yaw + PI * 0.5, Vector3(s.z, s.y, s.x)]
+	return [yaw, s]
+
+
+## A prop part's corners in the unit box (8 for a box, 16 for a drum).
+static func _part_points(part: Array) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var a: Vector3 = part[1]
+	var b: Vector3 = part[2]
+	if int(part[0]) == 0:
+		for k in 8:
+			out.append(Vector3(a.x if (k & 1) == 0 else b.x, a.y if (k & 2) == 0 else b.y, a.z if (k & 4) == 0 else b.z))
+	else:
+		for y: float in [a.y, a.y + b.y]:
+			for v: Vector2 in _octagon(b.x):
+				out.append(Vector3(a.x + v.x, y, a.z + v.y))
+	return out
+
+
+## The mesh of prop shape `kind` (PROP_SHAPES), flat shaded like the rest, each part its shade.
+func _prop_mesh(kind: String) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_add_box(st, corners, colour)
+	for part: Array in PROP_SHAPES[kind]:
+		var shade := Color.WHITE * float(part[3])
+		if int(part[0]) == 0:
+			_add_box(st, _part_points(part), shade)
+		else:
+			var a: Vector3 = part[1]
+			var b: Vector3 = part[2]
+			_tier(st, a.x, a.z, a.y, a.y + b.y, b.x, b.x, shade / SIDE_SHADE)
 	return st.commit()
 
 
@@ -1650,11 +1860,15 @@ func _face(st: SurfaceTool, points: Array, inside: Vector3, colour: Color, up_no
 
 
 ## Scrub: four small octagonal clumps on the ground, the middle one tallest (within SCRUB_R,
-## up to SCRUB_TOP of its height).
+## up to SCRUB_TOP of its height). World visual pass (cghath, 2026-10-20): the outer clumps were
+## small and low (out to about 0.42 of its width and 0.34 to 0.42 of its height), so the cylinder
+## spotting hides people in (SCRUB_R, SCRUB_TOP) stood well clear of the leaves round its edge and
+## top: a thicket hid a man through air. Now they reach out to 0.46-0.49 and up to 0.46-0.5, the
+## same four clumps (no more triangles), filling that cylinder.
 func _scrub_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for c: Array in [[0.0, 0.0, 0.26, 0.58], [0.2, 0.1, 0.18, 0.42], [-0.17, 0.14, 0.17, 0.38], [0.03, -0.21, 0.16, 0.34]]:
+	for c: Array in [[0.0, 0.0, 0.27, 0.58], [0.22, 0.1, 0.2, 0.5], [-0.19, 0.14, 0.19, 0.48], [0.03, -0.23, 0.19, 0.46]]:
 		var r: float = c[2]
 		var h: float = c[3]
 		_tier(st, c[0], c[1], 0.0, h * 0.7, r * 0.75, r)
@@ -1708,5 +1922,5 @@ func _conifer_mesh() -> ArrayMesh:
 func _trunk_mesh(colour: Color) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_tier(st, 0.0, 0.0, 0.0, 2.6, 0.19, 0.14, colour / SIDE_SHADE)
+	_tier(st, 0.0, 0.0, 0.0, TRUNK_TALL, TRUNK_FOOT_R, TRUNK_TOP_R, colour / SIDE_SHADE)
 	return st.commit()

@@ -94,6 +94,27 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
 4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
    that many buildings (budgets measured with the session log's performance lines).
 
+## Looks and skin (world visual pass, cghath, 2026-10-20)
+
+- Each building has a look (`BuildingGen._look`, `LOOKS`). Its wall material is one of its style's
+  shades, and the trim, plinth, weathering, lintels, shutters, sign and roof go with it. All are
+  picked from the seed on a random stream of their own, so rooms, furniture, loot spots and
+  garrison posts are as they were.
+- The skin (`BuildingGen._skin`, `building().skin`, `town().skin`) is boxes over the outside walls:
+  frames, sills, a plinth, rising damp, a cornice or eaves (beam ends on mud brick), corner stones,
+  shutters, signs, copings and roof tanks. It is all in the walls' outermost voxels or above
+  `PROUD_ABOVE` (2.3 m). It is cut round every doorway and window (`_face_boxes`), so nothing of it
+  stands in one.
+- Every skin colour is a `VoxelWorld` variant of the material the wall is, or one as hard
+  (`VoxelWorld.VARIANT_OF`, `base_mat`): rounds, chips, holes and blasts are unchanged.
+- Zone modules stamp the skin after their structure as skin boxes (`ZoneModules.skin`,
+  `VoxelWorld.add_box_m(..., skin = true)`). Those boxes are carved like any voxels but kept out
+  of the navmesh's boxes, the proxies and the cache-site voxel counts. Hand-built modules get theirs
+  from their own boxes (`ZoneModules._dress`: sandbags' bags, HESCO frames, wall plinths and
+  copings, crates, drums, tents, the compound's gate).
+- Screenshots: `tests/world_shots.tscn` (a compound, outpost, village, HQ and town, the ground,
+  props and a wood).
+
 ## Open (Captain)
 
 - Replace the village's hand-built houses with generated ones after phase 1, or keep both.

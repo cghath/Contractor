@@ -1127,6 +1127,19 @@ func _test_foliage_lines() -> void:
 	var under := sc.foliage_between(Vector3(20, 1.0, -20), Vector3(20, 1.0, 20))
 	check(is_equal_approx(through, 1.4) and over == 0.0 and past == 0.0 and crown > 2.0 and under == 0.0,
 		"foliage lines: %.2f m through a bush, none over or past it, %.1f m through a crown, none under it" % [through, crown])
+	# A conifer's crown narrows to a spike (world visual pass, 2026-10-20): it hides people low down
+	# in its needles, not up by its tip or out past its narrower skirt, where a round crown would.
+	var firs := _scatter_with([
+		{"kind": ZoneScatter.Kind.TREE, "pos": Vector3(0, 0, 0), "size": Vector3(1, 1, 1), "conifer": true},
+		{"kind": ZoneScatter.Kind.TREE, "pos": Vector3(20, 0, 0), "size": Vector3(1, 1, 1), "conifer": false},
+	])
+	var low := firs.foliage_between(Vector3(0, 2.6, -20), Vector3(0, 2.6, 20))
+	var tip := firs.foliage_between(Vector3(0, 4.4, -20), Vector3(0, 4.4, 20))
+	var skirt := firs.foliage_between(Vector3(0.95, 2.6, -20), Vector3(0.95, 2.6, 20))
+	var round_tip := firs.foliage_between(Vector3(20, 4.4, -20), Vector3(20, 4.4, 20))
+	check(low > 1.5 and tip == 0.0 and skirt == 0.0 and round_tip > 1.0,
+		"foliage lines: %.1f m through a conifer's needles, none by its tip or past its skirt (a round crown there: %.1f m)" % [low, round_tip])
+	firs.free()
 	# foliage_least walks the foliage once for two lines (Spotting.foliage_m: head and chest).
 	var eyes := Vector3(1, 1.6, -20)
 	var pairs := [[Vector3(0, 0.3, 20), Vector3(0, 1.6, 20)], [Vector3(20, 3.0, 20), Vector3(20, 1.0, 20)],

@@ -11,6 +11,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### World visual pass: buildings, compounds, the AA gun, props, the ground, tree and bush hitboxes (cghath's side)
+
+#### Changed
+- Generated buildings each get their own wall colour from a small palette for their style
+  (rendered block in cream, ochre, pale blue, green or pink; three brick and stone shades; four
+  mud shades, some lime-washed) and a skin: window and door frames and sills, a dark plinth,
+  rising damp, eaves over sheet-metal and tiled roofs, a cornice on concrete ones, roof beam ends
+  and wooden lintels on mud brick, corner stones on brick and stone, shutters on some, signs over
+  shops, police stations and clinics (a red cross), copings on parapets and yard walls, and water
+  tanks and vents on roofs nobody goes up to.
+- Hand-built modules are dressed from their own boxes: a bag pattern on every sandbag wall, frames
+  and soil on HESCO, plinths and copings on walls, a gable on tents, crates and fuel drums with
+  bands, and the compound gets pillars along its wall and a gate (posts, a beam overhead and
+  steel leaves opened back against the wall).
+- The AA emplacement's gun is olive with its barrels raised over the bags, magazines, jacketed
+  barrels and muzzle brakes, and ammo boxes in the pit.
+- Pads under modules are no longer one flat square of earth: gravel and trodden patches, and
+  dry grass worn in round the edge.
+- Roadside props are crate stacks, painted drums or debris piles; ruins are broken wall corners,
+  rubble mounds or car wrecks. A prop on a slope sits down into it.
+- The skin is new colour variants of the materials walls already are
+  (`VoxelWorld.VARIANT_OF`): they take rounds and blasts exactly as before. It is stamped after
+  the structure and kept out of navigation (`ZoneModules.skin`, `VoxelWorld.add_box_m(..., skin)`),
+  so cover, navmeshes, garrison posts and loot spots are unchanged.
+
+#### Fixed
+- Tree trunks collide as the trunk is drawn (an octagonal frustum), not as a thinner cylinder:
+  rounds through the octagon's corners went through the trunk.
+- Rocks and props collide as drawn. They were a box 0.9 of their size, and turned ones were drawn
+  sheared, off their own collision.
+- Conifers hid people up by their tip and out past their skirt. Their sight cylinder is now
+  narrower and lower (`ZoneScatter.CONIFER_R`, `CONIFER_HIGH`).
+- Scrub and thickets filled about two thirds of the cylinder they hide people in. Their clumps now
+  fill it.
+- New checks: the forest suite's hitbox checks and the squad suite's conifer lines.
+  `tests/world_shots.tscn` takes the look's screenshots.
+
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.
