@@ -131,3 +131,19 @@ Suggested fix: use `Vitals.has_item(s.inventory, id)` there (it counts loose ite
 and items that need none), so "on its own" only covers a wound he really can't treat. The tutorial
 works around it by handing out two loose bandages (`TutorialGuide.KIT`), so its "treat yourself"
 step isn't done for the player by a medic.
+
+## F-80: with a collection point set, no squadmate picks the body up (casualty suite, CI only)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), the "ccp" order (`Squad.order_command(...,
+"ccp", ...)`) and the bearer it should send. Found by cghath's agent on `feat/assault-warning`
+(2026-10-20). That change doesn't reach it (the debrief, BaseHub's deployment end, BaseAssault, the
+supports origin lookup, and the base_zone and ui tests).
+
+What happens: `casualty_test` failed two checks on CI twice in a row on `feat/assault-warning`
+(run 39496388734, first try and its re-run of the failed jobs). "saying so ([])": the "ccp" order
+gave no radio line. "with a collection point set, a squadmate picks his body up": nobody took
+Echo's body in 25 s. All six squadmates stayed "Following (dynamic: wedge, normal)" with no speed,
+and five of them were touching the same StaticBody3D. It passes locally (R0314) and passed on dev's
+52037f2. It may be the same as F-08 and F-90 (squadmates held against the target dummies on the
+Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
+whether "ccp" finds a bearer when every squadmate is blocked on the dummies.
