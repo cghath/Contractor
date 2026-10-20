@@ -134,6 +134,10 @@ step isn't done for the player by a medic.
 
 ## F-80: with a collection point set, no squadmate picks the body up (casualty suite, CI only)
 
+**Same failure as F-08** (squadmates held against the target dummies; logged on `fix/ci-flakes`,
+cghath/Contractor#10, which this branch didn't have). F-08 already lists this collection-point check.
+Kept as extra evidence: five of the six were touching the same StaticBody3D.
+
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), the "ccp" order (`Squad.order_command(...,
 "ccp", ...)`) and the bearer it should send. Found by cghath's agent on `feat/assault-warning`
 (2026-10-20). That change doesn't reach it (the debrief, BaseHub's deployment end, BaseAssault, the
