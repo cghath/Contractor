@@ -171,6 +171,7 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))
 	page.add_child(_toggle("Head bob (the view moves with your steps)", "video", "head_bob"))
+	page.add_child(_choice("Scope picture-in-picture (magnified optics)", "video", "scope_pip", GameSettings.SCOPE_PIP))
 	page.add_child(_ui_scale_row())
 	return page.get_parent()
 

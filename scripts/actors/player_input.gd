@@ -626,9 +626,11 @@ func _physics_process(delta: float) -> void:
 	# from a seat, and in first person it hid the cabin and poked through the dash), unless it's a
 	# fire-from-vehicle seat (VehicleBay: your own weapon up); nor dead, waiting to respawn.
 	# Through a scope the gun still shows peripherally (P0362 PIP rework: the magnified glass is
-	# GunSight's own SubViewport, which skips it on VIEW_MODEL_LAYER instead).
+	# GunSight's own SubViewport, which skips it on VIEW_MODEL_LAYER instead); with PiP off the
+	# whole view is the glass, as before PiP, and the gun goes.
 	body.view_model.visible = body.carry_mode == &"" and not waiting \
-		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))
+		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body)) \
+		and (GunSight.pip_on(body) or not GunSight.scoped(body))
 	_settle_recoil(delta)
 	_update_feel_pitch(delta)
 	_update_sway(delta)
@@ -949,9 +951,10 @@ func _update_aim(delta: float) -> void:
 	# only follows it for irons and open optics (the whole screen zooms, as before); behind a tube
 	# optic's glass (or a flipped-up magnifier) it eases back to the peripheral view instead — a
 	# real PIP (GunSight), not the whole screen narrowing, so the gun's surroundings stay visible
-	# around the scope picture (Captain: "better scopes and PIP").
+	# around the scope picture (Captain: "better scopes and PIP"). With PiP off (the setting, or
+	# headless: GunSight.pip_on) the whole view zooms behind the ring, as before PiP.
 	GunSight.ease_glass(body, fov, fov_k)
-	var peripheral := GameSettings.view_fov() if GunSight.scoped(body) else fov
+	var peripheral := GameSettings.view_fov() if GunSight.pip_on(body) else fov
 	body.camera.fov = lerpf(body.camera.fov, peripheral, fov_k)
 	var hip_view := HIP_VIEW * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)  # off the firing shoulder
 	var aimed_view := ads_view(weapon, body.inventory.state_of(body.active_slot)) if weapon and not Launchers.is_launcher(weapon) else hip_view

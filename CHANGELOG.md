@@ -560,6 +560,29 @@ Design: docs/lhd_home.md (the Captain's calls, and the Proposed ones for him to 
   fill it.
 - New checks: the forest suite's hitbox checks and the squad suite's conifer lines.
   `tests/world_shots.tscn` takes the look's screenshots.
+### Picture-in-picture scopes (art task; cghath's side)
+
+#### Changed
+- A magnified optic (the 4x prism, the LPVO, the DMR scopes, the holo's magnifier when it's up)
+  shows its own picture in the lens at exactly the optic's power. The rest of the view stays at
+  normal width around it, and the black ring stays. The picture looks where the shot goes, so
+  aim sway, breathing and recoil move it. The gun's own kick and settle move the lens across the
+  screen. Red dots and holographic sights at 1x are unchanged.
+- Under NVG the scope picture is green and grainy like the rest of the goggles' view.
+- The picture renders only while you're aimed through a magnified optic. It uses the level's
+  world, a size set by the lens on screen and the render scale, cheap anti-aliasing, and is off
+  on a weapon switch, when down or dead, in a vehicle seat and on headless runs.
+
+#### Added
+- Video setting "Scope picture-in-picture": Off (the old full-screen zoom behind the ring), Low,
+  Medium (default) or Full resolution.
+- `tests/pip_shots.tscn`: screenshots of the prism and the 3.5-10x by day, at dusk and through
+  NVG, with each picture's render cost. The attachments suite checks when PiP is on and at what
+  power.
+
+#### Fixed
+- A tube optic in a fire-from-vehicle seat now shows its glass and reticle. It used to zoom the
+  whole view with no reticle.
 
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 

@@ -13,9 +13,16 @@ const GRAIN := 0.12
 ## Outside the tube: how much of the plain (unaided) view is still seen.
 const OUTSIDE := 0.18
 
-const SHADER := """
+## The intensifier, over the screen behind it (SHADER_HEAD's sampler, SEEN_SCREEN) or over a
+## texture drawn on top (SEEN_TEXTURE: scope_material, a magnified optic's picture-in-picture in
+## GunSight, seen through the goggles like the rest of the view).
+const SHADER_HEAD := """
 shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+"""
+const SEEN_SCREEN := "texture(screen_tex, SCREEN_UV).rgb"
+const SEEN_TEXTURE := "texture(TEXTURE, UV).rgb"
+const SHADER := """
 uniform float gain = 3.0;
 uniform vec3 tint = vec3(0.32, 1.0, 0.42);
 uniform float grain = 0.12;
@@ -28,7 +35,7 @@ float hash(vec2 p) {
 }
 
 void fragment() {
-	vec3 seen = texture(screen_tex, SCREEN_UV).rgb;
+	vec3 seen = SEEN;
 	float lum = dot(seen, vec3(0.299, 0.587, 0.114));
 	float lit = 1.0 - exp(-lum * gain);
 	float noise = hash(floor(FRAGCOORD.xy * 0.75) + fract(TIME * 7.0) * 113.0) - 0.5;
@@ -55,17 +62,39 @@ func _init(p_body: Soldier = null) -> void:
 	rect.name = "NvgEffect"
 	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	var shader := Shader.new()
-	shader.code = SHADER
-	_material = ShaderMaterial.new()
-	_material.shader = shader
-	_material.set_shader_parameter(&"gain", GAIN)
-	_material.set_shader_parameter(&"tint", Vector3(TINT.r, TINT.g, TINT.b))
-	_material.set_shader_parameter(&"grain", GRAIN)
-	_material.set_shader_parameter(&"outside", OUTSIDE)
+	_material = _make_material(SHADER_HEAD + SHADER.replace("SEEN", SEEN_SCREEN))
 	rect.material = _material
 	add_child(rect)
 	rect.visible = false
+
+
+static func _make_material(code: String) -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = code
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	material.set_shader_parameter(&"gain", GAIN)
+	material.set_shader_parameter(&"tint", Vector3(TINT.r, TINT.g, TINT.b))
+	material.set_shader_parameter(&"grain", GRAIN)
+	material.set_shader_parameter(&"outside", OUTSIDE)
+	return material
+
+
+## The goggles' effect for a texture drawn over the view rather than the screen behind it: a
+## magnified optic's picture-in-picture (GunSight), which the HUD draws above this layer. Same
+## gain, tint, grain and tube (set_view), with no copy of the screen.
+static func scope_material() -> ShaderMaterial:
+	return _make_material("shader_type canvas_item;\n" + SHADER.replace("SEEN", SEEN_TEXTURE))
+
+
+## Points `material`'s tube at `body`'s NVG, sized against their real camera, over a screen
+## `size` across (the tube is a circle on the screen whatever's drawn under it), at least
+## `at_least` (a share of half the screen's height: a scope's eyepiece held up to the goggles
+## fills the tube, so its whole lens is seen through it).
+static func set_view(material: ShaderMaterial, body: Soldier, size: Vector2, at_least := 0.0) -> void:
+	var cam_fov := body.camera.fov if body.camera else 75.0
+	material.set_shader_parameter(&"tube", maxf(tube_radius(Nvg.fov_of(body), cam_fov), at_least))
+	material.set_shader_parameter(&"aspect", size.x / size.y if size.y > 0.0 else 16.0 / 9.0)
 
 
 func _process(_delta: float) -> void:
@@ -79,10 +108,7 @@ func update() -> void:
 	GearRig.set_iff_nvg(on)  # our side's IFF marks glow under it
 	if not on:
 		return
-	var cam_fov := body.camera.fov if body.camera else 75.0
-	_material.set_shader_parameter(&"tube", tube_radius(Nvg.fov_of(body), cam_fov))
-	var size := rect.get_viewport_rect().size
-	_material.set_shader_parameter(&"aspect", size.x / size.y if size.y > 0.0 else 16.0 / 9.0)
+	set_view(_material, body, rect.get_viewport_rect().size)
 
 
 ## The tube's radius as a share of half the screen's height: a tube of `tube_deg` seen by a
