@@ -157,6 +157,7 @@ func _ready() -> void:
 	corpse.queue_free()
 	body.queue_free()
 	await _frames(2)
+	await _fit_map_screens()
 	await _test_hud()
 	_summary()
 	GameSettings.reset_all()
@@ -165,6 +166,71 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	print("UI TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## The map screens (world-map branch, 2026-10-20): the zone map with its "?" controls open, the
+## theatre map (and its controls), and the briefing and extraction side panels with a full
+## contract and squad, each in the shared look.
+func _fit_map_screens() -> void:
+	await _fit("zone map (controls shown)", func() -> Node:
+		var m := MapScreen.new()
+		m.ready.connect(func() -> void:
+			m.visible = true
+			m._help_button.button_pressed = true)
+		return _in_layer(m))
+	await _fit("theatre map", func() -> Node: return _in_layer(WorldMapScreen.new(true)))
+	await _fit("theatre map (controls shown)", func() -> Node:
+		var w := WorldMapScreen.new(true)
+		w.ready.connect(func() -> void: w.show_help(true))
+		return _in_layer(w))
+	await _fit("map: briefing panel", func() -> Node:
+		var frame := _map_side_frame()
+		var briefing := Briefing.new()
+		briefing.contract = {"title": "Recover the field laptop from the farm compound", "difficulty": 4,
+			"summary": "A courier went down near the farm with the company's laptop. Get it back before Black Ridge reads it.",
+			"objectives": [{"title": "Recover the field laptop"}, {"title": "Bonus: destroy the weapons cache in the farmhouse cellar"}],
+			"known_enemies": [{"pos": [0, 0]}, {"pos": [5, 5]}]}
+		briefing.zone = {"kind": "hot", "insertion_points": [{"id": "south", "name": "South road by the long irrigation ditch", "pos": [0, 30], "method": "heli"},
+			{"id": "east", "name": "East field", "pos": [30, 0], "method": "foot"}]}
+		briefing.insertion_id = "south"
+		frame.add_child(briefing)
+		var panel := BriefingScreen.new()
+		frame.add_child(panel)
+		panel.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+		panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		panel.ready.connect(func() -> void:
+			panel.show_briefing(briefing)
+			var fit := func() -> void:
+				var w := BriefingScreen.width_for(frame.size.x)
+				panel.set_panel_width(w)
+				panel.offset_left = -w - 8
+				panel.offset_right = -8
+				panel.offset_top = 52
+				panel.offset_bottom = -8
+			fit.call()
+			frame.resized.connect(fit))
+		return frame.get_parent())
+	await _fit("map: extraction panel", func() -> Node:
+		var frame := _map_side_frame()
+		var panel := MapExtractionPanel.new()
+		frame.add_child(panel)
+		panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		panel.offset_left = -MapExtractionPanel.WIDTH - 8
+		panel.offset_top = 52
+		panel.offset_right = -8
+		return frame.get_parent())
+
+
+## A CanvasLayer holding a full-window frame in the shared look, for a map side panel on its own.
+func _map_side_frame() -> Control:
+	var layer := CanvasLayer.new()
+	var frame := Control.new()
+	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.apply(frame)
+	layer.add_child(frame)
+	return frame
 
 
 func check(condition: bool, what: String) -> void:

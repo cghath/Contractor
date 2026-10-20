@@ -1,6 +1,6 @@
 extends Node
 ## The map, briefing, extraction and reinforcement timer (W13): grid references, the map
-## picture and view on the compound and on a 2 km zone, shared markers and the briefing over
+## picture and view on the compound and on a 2 km zone, the theatre map, shared markers and the briefing over
 ## real ENet (a client that joins during the briefing and one that joins late, both started
 ## by this test as separate processes), extraction (only with the squad inside, the report
 ## of who and what got out, purple smoke and grid points) and the reinforcement waves.
@@ -68,6 +68,7 @@ func _ready() -> void:
 	add_to_group(Extraction.END_GROUP)
 	_test_grid()
 	await _test_large_map()
+	await _test_world_map()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -164,6 +165,141 @@ func _test_large_map() -> void:
 	view.queue_free()
 	zone.queue_free()
 	await get_tree().process_frame
+
+
+## The theatre map (world-map branch, Captain 2026-10-20: "a visual world map that shows
+## boundaries and conflicts"): who controls each zone (ZoneControl), what Theatre says about
+## it, the shapes (every zone its own area, neighbours sharing their border), and the view's
+## mouse, keys and tooltip. Before the level: it needs only the campaign.
+func _test_world_map() -> void:
+	print("The theatre map")
+	Contracts.new_campaign(5)
+	var control := Campaign.section(ZoneControl.SECTION)
+	control.clear()
+	var hot := "ridge_hot"
+	var quiet := ""
+	var offers := Contracts.board().map(func(c: Dictionary) -> String: return String(c.get("zone_id", "")))
+	for z: Dictionary in MissionRegistry.data().zones:
+		if String(z.kind) == "contract" and String(z.zone_id) not in offers and Contracts.held().is_empty():
+			quiet = String(z.zone_id)
+			break
+	# Who holds what: the base the company, a hot zone its WorldSites holder, a quiet contract
+	# zone the insurgents; what the zone-flip work writes wins.
+	var site := WorldSites.site(hot)
+	var was: Dictionary = site.duplicate()
+	site.grip = WorldSites.START_GRIP
+	site.flashpoint = false
+	check(ZoneControl.controller(RegionMap.BASE) == ZoneControl.PLAYER and ZoneControl.side(RegionMap.BASE) == "player",
+		"the base zone is the company's (blue)")
+	check(ZoneControl.controller(hot) == WorldSites.holder(hot) and not ZoneControl.is_contested(hot),
+		"a hot zone is its WorldSites holder's (%s)" % ZoneControl.controller(hot))
+	check(quiet != "" and ZoneControl.controller(quiet) == ZoneControl.DEFAULT and ZoneControl.side(quiet) == "militia",
+		"a contract zone with no contract is Black Ridge's, in militia orange (%s: %s)" % [quiet, ZoneControl.controller(quiet)])
+	check(ZoneControl.side_of_faction("meridian") == "allied" and ZoneControl.side_of_faction("eastern_concord") == "hostile"
+		and ZoneControl.side_of_faction("salvage_union") == "neutral" and ZoneControl.side_of_faction("black_ridge") == "militia",
+		"the IFF palette: employers allied green, the army hostile red, the Salvage Union neutral, Black Ridge militia orange")
+	site.grip = WorldSites.CONTESTED_GRIP
+	check(ZoneControl.is_contested(hot) and ZoneControl.side(hot) == "contested", "a weak grip makes a hot zone contested")
+	site.grip = WorldSites.START_GRIP
+	ZoneControl.server_set_controller(quiet, ZoneControl.PLAYER)
+	check(ZoneControl.controller(quiet) == ZoneControl.PLAYER and ZoneControl.side(quiet) == "player", "a zone written to the company is the company's")
+	check(ZoneControl.home() == ZoneControl.HOME_FOB, "home is the FOB until the LHD work says otherwise")
+	# What the map says about a zone: an offer there, a fight there this week.
+	var offered := String(offers[0]) if not offers.is_empty() else ""
+	(Contracts._s().history as Array).append({"cid": "t1", "title": "Test fight", "employer": "meridian", "outcome": "completed",
+		"day": Economy.day(), "zone_id": hot})
+	var rows := Theatre.zones()
+	check(rows.size() == RegionMap.layout().size() and offered != "" and not (rows[offered].offered as Array).is_empty(),
+		"every zone has a row; an offered contract shows on its zone (%s)" % offered)
+	var kinds := WorldMapView.badges_of(rows[hot]).map(func(b: Array) -> String: return String(b[0]))
+	check("hot" in kinds and "recent" in kinds and (rows[hot].recent as Array).size() == 1, "the hot zone shows its hot badge and this week's fight (%s)" % [kinds])
+	var tip := Theatre.describe(rows[hot])
+	check("Controlled by: " in tip and "Threat: High" in tip and "Rebel support" in tip and "Test fight" in tip,
+		"a zone's tooltip: controller, threat, contracts, fights, rebel support")
+	# The shapes: each zone's middle is in its own area and no other; neighbours share their border.
+	var polys := {}
+	for id: String in RegionMap.layout():
+		polys[id] = WorldMapView.cell_polygon(RegionMap.layout()[id])
+	var own := true
+	for id: String in polys:
+		for other: String in polys:
+			own = own and Geometry2D.is_point_in_polygon(WorldMapView.zone_centre(id), polys[other]) == (id == other)
+	var shared := true
+	for id: String in RegionMap.layout():
+		for l: Dictionary in RegionMap.links(id):
+			var a := WorldMapView.cell_side(RegionMap.layout()[id], int(l.side))
+			var b := WorldMapView.cell_side(RegionMap.layout()[String(l.to)], RegionMap.opposite(int(l.side)))
+			shared = shared and a == b
+	check(own and shared and not Geometry2D.triangulate_polygon(polys[hot]).is_empty(),
+		"every zone is its own shaped area, and linked zones share one border")
+	# The view: fitted, a zone under its middle, zoom, pan, keys, tooltip.
+	var frame := Control.new()
+	frame.size = Vector2(1280, 720)
+	add_child(frame)
+	var screen := WorldMapScreen.new(true)
+	frame.add_child(screen)
+	await _frames(3)
+	var view := screen.view
+	var all_in := RegionMap.layout().keys().all(func(id: String) -> bool:
+		return view.zone_at(view.to_screen(WorldMapView.zone_centre(id))) == id and Rect2(Vector2.ZERO, view.size).has_point(view.to_screen(WorldMapView.zone_centre(id))))
+	check(screen.theme == UiKit.THEME and view.size.x > 600.0 and all_in, "the screen fits every zone in view, in the shared look (view %s)" % view.size)
+	var fitted := view.scale_px
+	view.zoom_at(view.size * 0.5, 100.0)
+	check(is_equal_approx(view.scale_px, fitted * WorldMapView.MAX_ZOOM), "zoom stops at %.0fx" % WorldMapView.MAX_ZOOM)
+	var c0 := view.centre
+	view.pan(Vector2(50, 0))
+	check(view.centre.x < c0.x, "a drag pans")
+	view.fit()
+	view.select(hot)
+	var at: Vector2i = RegionMap.layout()[hot]
+	var east := RegionMap.zone_at(at + Vector2i(1, 0))
+	var key := InputEventAction.new()
+	key.action = &"ui_right"
+	key.pressed = true
+	view._gui_input(key)
+	check(east == "" or view.selected == east, "the right arrow moves to the zone east (%s -> %s)" % [hot, view.selected])
+	var picked := [""]
+	screen.zone_picked.connect(func(id: String) -> void: picked[0] = id)
+	var enter := InputEventAction.new()
+	enter.action = &"ui_accept"
+	enter.pressed = true
+	view._gui_input(enter)
+	check(picked[0] == view.selected and picked[0] != "", "Enter opens the picked zone (%s)" % picked[0])
+	check("Controlled by" in view._get_tooltip(view.to_screen(WorldMapView.zone_centre(hot))), "hovering a zone shows its tooltip")
+	var back := [false]
+	screen.back_to_zone.connect(func() -> void: back[0] = true)
+	var tab := InputEventKey.new()
+	tab.physical_keycode = KEY_TAB
+	tab.pressed = true
+	view._gui_input(tab)
+	check(back[0], "Tab goes back to the zone map")
+	frame.queue_free()
+	# The zone map's World button (and Tab) switch to it and back.
+	var map_frame := Control.new()
+	map_frame.size = Vector2(1280, 720)
+	add_child(map_frame)
+	var map_screen := MapScreen.new()
+	map_frame.add_child(map_screen)
+	await _frames(2)
+	map_screen.visible = true
+	var inventory_key := InputEventAction.new()
+	inventory_key.action = &"inventory"
+	inventory_key.pressed = true
+	map_screen._input(inventory_key)
+	await _frames(2)
+	var world_shown := map_screen.is_world_open() and map_screen.world.view.size.x > 600.0
+	map_screen.world.back_to_zone.emit()
+	var back_again := not map_screen.is_world_open()
+	map_screen._input(inventory_key)
+	map_screen._input(inventory_key)
+	check(world_shown and back_again and not map_screen.is_world_open() and map_screen.theme == UiKit.THEME,
+		"Tab opens the theatre map over the zone map, its Zone map goes back, and Tab toggles it")
+	map_frame.queue_free()
+	(Contracts._s().history as Array).pop_back()
+	for k: String in was:
+		site[k] = was[k]
+	control.clear()
+	await _frames(2)
 
 
 func _test_render() -> void:

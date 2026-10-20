@@ -11,6 +11,36 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The theatre map and the map screens in the shared look (Captain, 2026-10-20)
+
+#### Added
+- A theatre (world) map. Open it with World or Tab on the map (M), or with Theatre map over the
+  ops desk's region map. Every zone is drawn as its own shaped area: neighbours share a border,
+  region borders are drawn heavier, and the sea and the LHD lie to the west. Each zone is filled
+  in the colour of whoever controls it: the company blue, allies green, Black Ridge militia
+  orange, hostile armies red, neutral grey, and hatched when contested. Badges mark hot zones,
+  contracts held and offered, a skirmish going on now, the enemy's alert while you're there,
+  fights there this week, and flashpoints. The squad's zone is ringed, home (the FOB, or the
+  LHD) is marked, links show their crossings, and each region's name gives its travel days from
+  home. Hover a zone for who holds it, the threat, the contracts, recent fights and the rebel
+  support tier there; the side panel shows the same for the picked zone, plus the legend.
+  Pan and zoom with the mouse, keys (arrows move between zones, WASD pans, + and - zoom, F fits)
+  or pad (d-pad and left stick, right stick pans, shoulders zoom).
+- Zone control (`scripts/campaign/zone_control.gd`): who holds each zone, read-only for now.
+  The base is the company's, a hot zone its faction-war holder's, any other zone the target of
+  a contract there, else Black Ridge. A "zone_control" campaign section (synced to clients)
+  overrides it and holds the home, for the zone-flip work to write.
+- Closed contracts remember their zone, so the map can show where the fights were.
+
+#### Changed
+- The map screen (M) is in the shared look. Its bar wraps onto a second line in a small
+  window, and a "?" button opens its controls (now including Tab for the theatre map).
+- The briefing and extraction panels on the map use the shared text styles: 16 px body, 14 px
+  notes and section heads, nothing smaller and nothing faded. Map labels and the ops desk's
+  region map are 14 px or more, and the region map shows each zone's controller colour.
+- The UI fit checks cover the zone map, the theatre map, and the briefing and extraction panels
+  at all 10 window sizes and 4 UI scales.
+
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 
 #### Added
