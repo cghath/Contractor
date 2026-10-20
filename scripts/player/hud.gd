@@ -19,6 +19,11 @@ const TOP_RIGHT_GROUP := &"hud_top_right"
 ## Widths (logical px) of the centre lines; each is cut to the window less UiKit.EDGE a side.
 const PROMPT_WIDTH := 640.0
 const CENTRE_WIDTH := 760.0
+## Below this logical window height (1280x720 at a 1.5 Menu and HUD size and up) the centre
+## column's lines (prompt, the downed text's detail, the radio and the vehicle readout) drop to
+## the small HUD size, as the squad list does under an open command menu: at the HUD's 20 px
+## (ui-modern) they didn't fit between the middle and the bottom.
+const COMPACT_HEIGHT := 600.0
 
 ## Set by the owning Soldier before the HUD enters the tree.
 var player: Soldier
@@ -59,11 +64,17 @@ var _status_lines := PackedStringArray()
 var _centred: Array = []
 ## The left column's height (logical px), from _layout.
 var _left_height := 0.0
+## Whether the window is short enough for the small centre lines (COMPACT_HEIGHT), from _layout.
+var compact := false
+## The HUD layout setting (HudLayout) as last applied: its change counter.
+var _layout_changes := -1
 var _message_time := 0.0
 var _white: ColorRect
 var _white_left := 0.0  # seconds of whiteout remaining
 ## Blood loss, concussion and unconsciousness drawn over the view (Vitals.vision).
 var _vision: ColorRect
+## The wound silhouette (top left).
+var _bleed: Control
 var _vision_material: ShaderMaterial
 
 
@@ -156,7 +167,8 @@ func _ready() -> void:
 	add_child(compass)
 	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
-	add_child(BleedSilhouette.new(player))
+	_bleed = BleedSilhouette.new(player)
+	add_child(_bleed)
 	map_screen = MapScreen.new(player)
 	add_child(map_screen)
 	move_child(_message, -1)  # messages stay readable over the map
@@ -175,22 +187,50 @@ static func of(node: Node) -> Hud:
 ## Menu and HUD size setting counts): runs at the start and on every resize.
 func _layout() -> void:
 	var view := get_viewport().get_visible_rect().size
+	_layout_changes = HudLayout.changes()
+	var s_squad := HudLayout.scale_of("squad")
+	var s_right := HudLayout.scale_of("objectives")
+	var s_weapon := HudLayout.scale_of("weapon")
+	var s_wounds := HudLayout.scale_of("wounds")
 	var side := clampf(view.x * 0.28, 220.0, 400.0)
 	var right := clampf(view.x * 0.3, 240.0, ObjectivesPanel.WIDTH)
-	var left_top := MARGIN + MedicalMenu.FIGURE_SIZE.y * BleedSilhouette.SCALE + UiKit.SPACE_S  # under the bleed silhouette
-	_set_rect(zone_left, Vector4(0, 0, 0, 1), Vector4(MARGIN, left_top, MARGIN + side, -MARGIN))
+	var left_top := MARGIN + MedicalMenu.FIGURE_SIZE.y * BleedSilhouette.SCALE * s_wounds + UiKit.SPACE_S  # under the bleed silhouette
+	# A part made bigger (HudLayout) is laid out in its zone's room over its scale, then scaled
+	# up from its corner: it fills the same part of the screen, with bigger contents.
+	_left_height = (view.y - left_top - MARGIN) / s_squad
+	_set_rect(zone_left, Vector4(0, 0, 0, 0), Vector4(MARGIN, left_top, MARGIN + side / s_squad, left_top + _left_height))
+	zone_left.scale = Vector2.ONE * s_squad
 	# The command menu's path wraps inside the left column, so the open menu stays in it.
-	command_menu.title_width = minf(CommandMenu.TITLE_W, side - command_menu.get_theme_stylebox(&"panel").get_minimum_size().x)
-	_set_rect(zone_top_right, Vector4(1, 0, 1, 0), Vector4(-MARGIN - right, MARGIN, -MARGIN, MARGIN))
+	command_menu.title_width = minf(CommandMenu.TITLE_W, side / s_squad - command_menu.get_theme_stylebox(&"panel").get_minimum_size().x)
+	_set_rect(zone_top_right, Vector4(1, 0, 1, 0), Vector4(-MARGIN - right, MARGIN, -MARGIN - right + right / s_right, MARGIN))
 	zone_top_right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	zone_top_right.scale = Vector2.ONE * s_right
 	# Top-centre: the bearing strip, clear of the squad list and objectives on either side.
 	var compass_w := clampf(view.x * 0.22, 240.0, 420.0)
 	_set_rect(compass, Vector4(0.5, 0, 0.5, 0), Vector4(-compass_w * 0.5, MARGIN, compass_w * 0.5, MARGIN + Compass.HEIGHT))
-	_left_height = view.y - left_top - MARGIN
+	compass.pivot_offset = Vector2(compass_w * 0.5, 0.0)
+	compass.scale = Vector2.ONE * HudLayout.scale_of("compass")
+	# The weapon and armour readouts grow from the bottom-right corner together.
+	ammo_readout.pivot_offset = Vector2(AmmoReadout.WIDTH, AmmoReadout.HEIGHT)
+	ammo_readout.scale = Vector2.ONE * s_weapon
+	armor_readout.pivot_offset = Vector2(ArmorReadout.WIDTH, ArmorReadout.ROW * ArmorReadout.MAX_ROWS + 8.0 + AmmoReadout.HEIGHT)
+	armor_readout.scale = Vector2.ONE * s_weapon
+	_bleed.scale = Vector2.ONE * s_wounds
+	for pair: Array in [[zone_top_right, "objectives"], [compass, "compass"], [zone_left, "squad"], [zone_bottom_centre, "radio"],
+			[ammo_readout, "weapon"], [armor_readout, "weapon"], [_bleed, "wounds"], [objective_helper, "markers"]]:
+		(pair[0] as CanvasItem).modulate.a = HudLayout.opacity_of(pair[1])
+	var was_compact := compact
+	compact = view.y < COMPACT_HEIGHT and not _headless_size()
+	for label: Label in [_prompt, _downed_detail, _subtitles]:
+		label.theme_type_variation = &"HudSmallLabel" if compact else &"HudLabel"
+	if compact != was_compact:
+		_subtitles._shown = ""  # refit again in the new size
 	# Three columns: left, centre and right. The centre one (prompt, downed text, messages,
 	# radio, vehicle) is what the side columns leave, so nothing in it runs under them.
-	var centre := minf(CENTRE_WIDTH, view.x - 2.0 * (maxf(maxf(side, right), AmmoReadout.WIDTH) + MARGIN + UiKit.SPACE_M))
-	_set_rect(zone_bottom_centre, Vector4(0.5, 1, 0.5, 1), Vector4(-centre * 0.5, -MARGIN, centre * 0.5, -MARGIN))
+	var centre := minf(CENTRE_WIDTH, view.x - 2.0 * (maxf(maxf(side, right), AmmoReadout.WIDTH * s_weapon) + MARGIN + UiKit.SPACE_M))
+	var s_radio := HudLayout.scale_of("radio")
+	_set_rect(zone_bottom_centre, Vector4(0.5, 1, 0.5, 1), Vector4(-centre * 0.5 / s_radio, -MARGIN, centre * 0.5 / s_radio, -MARGIN))
+	zone_bottom_centre.scale = Vector2.ONE * s_radio
 	zone_bottom_centre.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	zone_bottom_centre.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	# Top to bottom: [control, width, y (from the top for the message, else from the middle), grow].
@@ -308,7 +348,9 @@ func _fit_bottom_centre() -> void:
 	for c: Control in [_prompt, _downed_box]:
 		if c.visible and c.get_combined_minimum_size().y > 0.0:
 			top = maxf(top, c.get_global_rect().end.y)
-	var room := 1.0e9 if _headless_size() else view.y - MARGIN - top - UiKit.SPACE_M
+	var room := 1.0e9 if _headless_size() else (view.y - MARGIN - top - UiKit.SPACE_M) / zone_bottom_centre.scale.y
+	# Scaled from its bottom middle (HudLayout), whatever its height now.
+	zone_bottom_centre.pivot_offset = Vector2(zone_bottom_centre.size.x * 0.5, zone_bottom_centre.size.y)
 	_vehicle.visible = _vehicle_left > 0.0 and not _vehicle_parts.is_empty()
 	if _vehicle.visible:
 		room -= _fit_vehicle(room, zone_bottom_centre.size.x) + UiKit.SPACE_S
@@ -330,7 +372,10 @@ func _fit_vehicle(room: float, width: float) -> float:
 			var part: Dictionary = _vehicle_parts[i]
 			label.text = String(part.text)
 			var style := StringName(part.get("style", &""))
-			label.theme_type_variation = &"HudWarnLabel" if style == &"warn" else (&"HudSmallLabel" if style == &"key" else &"HudLabel")
+			if style == &"warn":
+				label.theme_type_variation = &"HudSmallWarnLabel" if compact else &"HudWarnLabel"
+			else:
+				label.theme_type_variation = &"HudSmallLabel" if style == &"key" or compact else &"HudLabel"
 			if style == &"key":
 				keys.append(i)
 			elif style != &"warn" and i > 0:
@@ -438,7 +483,8 @@ func vehicle_text() -> String:
 ## A small body silhouette in the top-left corner while the local player has an untreated bleed,
 ## an unsplinted fracture or a tourniquet on: those parts coloured, hidden when nothing to show.
 class BleedSilhouette extends Control:
-	const SCALE := 0.22
+	## ui-modern (2026-10-20): 0.22 made it about 48 x 88 px, hard to read at a glance.
+	const SCALE := 0.3
 	var player: Soldier
 	var parts: Array[StringName] = []
 
@@ -462,6 +508,8 @@ class BleedSilhouette extends Control:
 
 
 func _process(delta: float) -> void:
+	if HudLayout.changes() != _layout_changes:
+		_layout()  # the HUD layout setting changed
 	_message_time -= delta
 	_message.visible = _message_time > 0.0
 	_vehicle_left -= delta

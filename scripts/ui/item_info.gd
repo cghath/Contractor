@@ -13,10 +13,10 @@ extends RefCounted
 
 const PANEL_NAME := &"ItemInspect"
 const PANEL_W := 420.0
-const COL_BG := Color(0.05, 0.08, 0.09, 0.95)
-const COL_EDGE := Color(0.33, 0.85, 0.95)
-const COL_TITLE := "ffd35a"
-const COL_MUTED := "9fb3b8"
+## The kit's colours for the markup (ui-modern, 2026-10-20: it kept the old teal look): the
+## name in the accent, the numbers dim. The panel is the theme's (SolidPanel).
+static var COL_TITLE := UiKit.ACCENT.to_html(false)
+static var COL_MUTED := UiKit.TEXT_DIM.to_html(false)
 
 const TYPE_NAMES := {
 	"weapon": "Weapon", "optic": "Optic", "ammo": "Ammunition", "armor": "Armour", "plate": "Armour plate",
@@ -163,12 +163,8 @@ static func panel(id: StringName, footer := "", width := PANEL_W) -> PanelContai
 	var box := PanelContainer.new()
 	box.name = PANEL_NAME
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = COL_BG
-	style.border_color = COL_EDGE
-	style.set_border_width_all(1)
-	style.set_content_margin_all(12)
-	box.add_theme_stylebox_override(&"panel", style)
+	UiKit.apply(box)
+	box.theme_type_variation = &"SolidPanel"
 	var text := RichTextLabel.new()
 	text.name = "Text"
 	text.bbcode_enabled = true

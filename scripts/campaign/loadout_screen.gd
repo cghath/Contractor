@@ -18,6 +18,12 @@ extends Control
 ## colours or sizes of its own; no text clipped silently (the title, headings and status wrap,
 ## a person's button cuts with "..." and has the whole line in its tooltip, a drop-down is as
 ## wide as its prompt); every row's buttons wrap under it (UiKit.action_row). ui_test fits it.
+##
+## ui-modern (Captain, 2026-10-20: "common sense layout tools", "better explanations"): a
+## subtitle and a "?" help panel; the stash has a search box, a kind filter and a sort; every
+## row has the item's picture (ItemIcons, in a windowed game) and its ItemInfo tooltip; a stash
+## row dragged onto the Kit column goes on the selected person (as its Wear / Mount / +1 button
+## does) and a kit row dragged onto the Stash column goes back; Sell asks first.
 
 signal closed
 
@@ -25,6 +31,17 @@ signal closed
 const RATIOS := [1.0, 2.0, 1.4]
 ## How often the selected person's kit is looked at for changes made by hand (seconds).
 const POLL_S := 0.5
+## A row's item picture (logical px).
+const ICON := 36
+## The stash's sorts: [id, label].
+const SORTS := [["name", "Sort: name"], ["count", "Sort: most first"], ["weight", "Sort: heaviest first"], ["value", "Sort: most valuable"]]
+const HELP := [
+	"Pick a person on the left; the middle shows what they wear and carry, the right what the company's stash holds.",
+	"Wear, Mount and +1 move an item from the stash onto them; -1 and Take off put it back. Or drag a stash row onto the Kit column, or a kit row onto the Stash column.",
+	"Quick kit fills ammo, a medic kit or a whole role kit from the stash. The standing loadout is what Restock refills them to after a deployment.",
+	"Search, filter and sort the stash from the boxes over it. Hover any row for what the item is and does.",
+	"Sell sells one item to the shop for the price shown (it asks first). Other players set their own kit; you can give them items.",
+]
 
 ## The person shown: a member id or "player:<key>".
 var selected := ""
@@ -35,6 +52,11 @@ var columns: Array[Control] = []
 var status: Label
 var _poll := 0.0
 var _seen_hash := 0
+## The stash's search text (lowered), kind filter ("" all, else a Loadouts group) and sort.
+var stash_query := ""
+var stash_group := ""
+var stash_sort := "name"
+var _icons_waiting := false
 
 
 func _ready() -> void:
@@ -49,28 +71,27 @@ func _ready() -> void:
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	panel.add_child(root)
-	var top := HBoxContainer.new()
-	top.add_theme_constant_override(&"separation", UiKit.SPACE_M)
-	var title := UiKit.title("Loadouts: kit yourself and your squad from the stash")
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top.add_child(title)
+	var head := UiKit.header("Loadouts", "Kit yourself and your squad from the company stash before the next deployment.",
+		PackedStringArray(HELP), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"], ["Drag", "Stash to kit and back"]], false)
+	var top := head.get_child(0) as HBoxContainer
 	var close_button := UiKit.button("Close", close, "Close the loadouts (Esc)")
 	close_button.name = "Close"
 	close_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(close_button)
-	root.add_child(top)
+	root.add_child(head)
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	root.add_child(body)
 	people_box = _column(body, "People", RATIOS[0])
 	doll_box = _column(body, "Kit", RATIOS[1])
-	stash_box = _column(body, "Stash", RATIOS[2])
+	stash_box = _column(body, "Stash", RATIOS[2], _stash_tools())
+	_drop_zone(columns[1], "kit")
+	_drop_zone(columns[2], "stash")
 	status = UiKit.text("")
 	status.name = "Status"
 	root.add_child(status)
-	root.add_child(UiKit.key_hint("Esc", "Close"))
+	root.add_child(UiKit.key_hints([["Esc", "Close"], ["Drag", "Stash to kit and back"], ["Hover", "What an item is"]]))
 	BaseHub.view_changed.connect(refresh)
 	BaseHub.note.connect(_on_note)
 	BaseHub.request("loadout", ["", "sync", {}])  # the muster line's gear into the roster's copy
@@ -266,6 +287,8 @@ func _build_doll(p: Dictionary) -> void:
 			var optic := Optics.mounted(item, slot_state.get(String(slot), {}))
 			text += " (%s)" % (optic.name if optic else "irons")
 		var row := _row(text, id)
+		if editable and item:
+			_draggable(row, {"from": "worn", "id": id, "slot": String(slot)})
 		if editable:
 			var choices: Array = [["Swap...", ""]]
 			if item:
@@ -305,10 +328,10 @@ func _build_doll(p: Dictionary) -> void:
 			var row := _row("%s x%d" % [_name(id), int(carried[id])], id)
 			if editable:
 				var flow: HFlowContainer = row.get_meta(&"controls")
-				var minus := UiKit.button("-1", func() -> void: ask("remove", {"id": id, "count": 1}))
+				var minus := UiKit.button("-1", func() -> void: ask("remove", {"id": id, "count": 1}), "One back to the stash")
 				minus.name = "Remove_" + id
-				minus.tooltip_text = "One back to the stash"
 				flow.add_child(minus)
+				_draggable(row, {"from": "kit", "id": id})
 				if not others.is_empty():
 					var to: Array = [["Give 1 to...", ""]]
 					for o: Dictionary in others:
@@ -354,6 +377,7 @@ func _build_doll(p: Dictionary) -> void:
 	var standing_row := UiKit.button_row([])
 	var save := UiKit.button("Save as standing", func() -> void: ask("save"))
 	save.name = "SaveStanding"
+	save.tooltip_text = "Write down this kit as what Restock refills to after each deployment"
 	standing_row.add_child(save)
 	var role_standing: Array = [["Standing = role kit...", ""]]
 	for role in Roles.ids():
@@ -369,6 +393,7 @@ func _build_doll(p: Dictionary) -> void:
 	var restock := UiKit.button("Restock to standing", func() -> void: ask("restock"))
 	restock.name = "RestockStanding"
 	restock.disabled = n == 0
+	restock.tooltip_text = "Fill this kit back up to the standing loadout from the stash" if n > 0 else "Save a standing loadout first"
 	standing_row.add_child(restock)
 	doll_box.add_child(standing_row)
 
@@ -382,10 +407,15 @@ func _build_stash(p: Dictionary) -> void:
 	var editable: bool = not p.is_empty() and p.mine
 	if not p.is_empty():
 		stash_box.add_child(UiKit.hint("Onto %s:" % p.name))
+	var shown := 0
 	for group in Loadouts.GROUPS:
-		var ids: Array = _sorted(have.keys()).filter(func(id: String) -> bool: return Loadouts.group_of(ItemDB.get_item(StringName(id))) == group)
+		if stash_group != "" and group != stash_group:
+			continue
+		var ids: Array = stash_order(have, stash_sort).filter(func(id: String) -> bool:
+			return Loadouts.group_of(ItemDB.get_item(StringName(id))) == group and UiKit.matches(_name(id), stash_query))
 		if ids.is_empty():
 			continue
+		shown += ids.size()
 		stash_box.add_child(UiKit.heading(Loadouts.GROUP_NAMES[group]))
 		for id: String in ids:
 			var row := _row("%s x%d" % [_name(id), int(have[id])], id)
@@ -394,30 +424,35 @@ func _build_stash(p: Dictionary) -> void:
 				var item := ItemDB.get_item(StringName(id))
 				var slot := _slot_for(item, gear_of(selected))
 				if slot != &"":
-					var wear := UiKit.button("Wear", func() -> void: ask("slot", {"slot": String(slot), "id": id}))
+					var wear := UiKit.button("Wear", func() -> void: ask("slot", {"slot": String(slot), "id": id}),
+						"Put it on %s (what's worn there goes back to the stash)" % p.name)
 					wear.name = "Wear_" + id
 					flow.add_child(wear)
 				elif Optics.is_optic(item):
-					var mount := UiKit.button("Mount", func() -> void: ask("optic", {"slot": "primary", "id": id}))
+					var mount := UiKit.button("Mount", func() -> void: ask("optic", {"slot": "primary", "id": id}),
+						"Mount it on %s's primary weapon (the old optic goes back to the stash)" % p.name)
 					mount.name = "Mount_" + id
-					mount.tooltip_text = "On the primary"
 					flow.add_child(mount)
 				else:
-					var one := UiKit.button("+1", func() -> void: ask("add", {"id": id, "count": 1}))
+					var one := UiKit.button("+1", func() -> void: ask("add", {"id": id, "count": 1}), "One onto %s, from the stash" % p.name)
 					one.name = "Add_" + id
 					flow.add_child(one)
 					if group in ["ammo", "medical", "grenades"] and int(have[id]) > 1:
-						var bulk := UiKit.button("+%d" % Loadouts.BULK, func() -> void: ask("add", {"id": id, "count": Loadouts.BULK}))
+						var bulk := UiKit.button("+%d" % Loadouts.BULK, func() -> void: ask("add", {"id": id, "count": Loadouts.BULK}),
+							"%d onto %s, from the stash" % [Loadouts.BULK, p.name])
 						bulk.name = "AddBulk_" + id
 						flow.add_child(bulk)
+				_draggable(row, {"from": "stash", "id": id})
 			var sell_flow: HFlowContainer = row.get_meta(&"controls")
 			var price := Prices.sell_price(StringName(id), 1, {})
 			if sell_flow and price > 0:
-				var sell := UiKit.button("Sell $%s" % DebriefCalc.money(price), func() -> void: Economy.sell_from_stash(StringName(id), 1))
+				var sell := UiKit.danger_button("Sell $%s" % DebriefCalc.money(price), func() -> void: ask_sell(id, price))
 				sell.name = "Sell_" + id
-				sell.tooltip_text = "Sell one to the shop (Captain: loot means money)"
+				sell.tooltip_text = "Sell one %s to the shop for $%s (asks first)" % [_name(id), DebriefCalc.money(price)]
 				sell_flow.add_child(sell)
 			stash_box.add_child(row)
+	if shown == 0:
+		stash_box.add_child(UiKit.hint("Nothing in the stash matches the search or filter."))
 	var inside := BaseArmory.contents_counts(stash)
 	if not inside.is_empty():
 		var n := 0
@@ -452,9 +487,10 @@ static func _tier_hint(tier: int) -> String:
 
 # --- Bits ------------------------------------------------------------------------------------
 
-func _column(parent: HBoxContainer, title: String, ratio: float) -> VBoxContainer:
+func _column(parent: HBoxContainer, title: String, ratio: float, tools: Control = null) -> VBoxContainer:
 	var panel := PanelContainer.new()
 	panel.name = title
+	panel.theme_type_variation = &"CardPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_stretch_ratio = ratio
 	parent.add_child(panel)
@@ -462,6 +498,8 @@ func _column(parent: HBoxContainer, title: String, ratio: float) -> VBoxContaine
 	var box := VBoxContainer.new()
 	panel.add_child(box)
 	box.add_child(UiKit.heading(title))
+	if tools:
+		box.add_child(tools)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -474,11 +512,152 @@ func _column(parent: HBoxContainer, title: String, ratio: float) -> VBoxContaine
 
 ## A row: its text (wrapping) and a wrapping row of controls under it (UiKit.action_row, meta
 ## "controls").
-func _row(text: String, id: String) -> VBoxContainer:
+func _row(text: String, id: String) -> Control:
 	var label := UiKit.text(text)
-	label.tooltip_text = item_tooltip(id)
+	label.tooltip_text = ItemInfo.tooltip(StringName(id)) if ItemDB.has_item(StringName(id)) else item_tooltip(id)
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	return UiKit.action_row(text, [], label)
+	var inner := UiKit.action_row(text, [], label)
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	row.add_child(_icon(id))
+	row.add_child(inner)
+	row.set_meta(&"controls", inner.get_meta(&"controls"))
+	return row
+
+
+## The item's picture (ItemIcons), or an empty square while it's made (the screen refreshes
+## when it's ready) and in a headless run.
+func _icon(id: String) -> Control:
+	var rect := TextureRect.new()
+	rect.custom_minimum_size = Vector2(ICON, ICON)
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if id == "" or not ItemDB.has_item(StringName(id)):
+		return rect
+	rect.texture = ItemIcons.get_icon(StringName(id))
+	if rect.texture == null and ItemIcons.can_render():
+		var icons := ItemIcons.instance()
+		if icons and not icons.icon_ready.is_connected(_on_icon_ready):
+			icons.icon_ready.connect(_on_icon_ready)
+	return rect
+
+
+func _on_icon_ready(_id: StringName) -> void:
+	if _icons_waiting:
+		return
+	_icons_waiting = true
+	(func() -> void:
+		_icons_waiting = false
+		if is_inside_tree():
+			refresh()).call_deferred()
+
+
+## The stash's search box, kind filter and sort, over its list.
+func _stash_tools() -> Control:
+	var flow := HFlowContainer.new()
+	flow.name = "StashTools"
+	flow.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
+	flow.add_theme_constant_override(&"v_separation", UiKit.SPACE_XS)
+	var search := UiKit.search_field("Search the stash...", func(q: String) -> void:
+		stash_query = q
+		refresh())
+	search.name = "StashSearch"
+	flow.add_child(search)
+	var kinds: Array = [["", "All kinds"]]
+	for g: String in Loadouts.GROUPS:
+		kinds.append([g, Loadouts.GROUP_NAMES[g]])
+	var kind := UiKit.picker(kinds, func(v: Variant) -> void:
+		stash_group = String(v)
+		refresh(), "Show one kind of item only", stash_group)
+	kind.name = "StashKind"
+	flow.add_child(kind)
+	var sort := UiKit.picker(SORTS, func(v: Variant) -> void:
+		stash_sort = String(v)
+		refresh(), "The order the stash lists items in, within each kind", stash_sort)
+	sort.name = "StashSort"
+	flow.add_child(sort)
+	return flow
+
+
+## `have`'s item ids (id -> count) in `sort` order: "name", "count" (most first), "weight"
+## (heaviest first) or "value" (best sell price first); ties by name.
+static func stash_order(have: Dictionary, sort: String) -> Array:
+	var ids := _sorted(have.keys())
+	var key := func(id: String) -> float:
+		match sort:
+			"count":
+				return float(have[id])
+			"weight":
+				var it := ItemDB.get_item(StringName(id))
+				return it.mass_kg if it else 0.0
+			"value":
+				return float(Prices.sell_price(StringName(id), 1, {}))
+		return 0.0
+	if sort != "name":
+		ids.sort_custom(func(a: Variant, b: Variant) -> bool:
+			var ka: float = key.call(String(a))
+			var kb: float = key.call(String(b))
+			return ka > kb or (is_equal_approx(ka, kb) and _name(String(a)) < _name(String(b))))
+	return ids
+
+
+## Asks before selling one `id` from the stash for `price`.
+func ask_sell(id: String, price: int) -> void:
+	UiKit.confirm(self, "Sell one %s to the shop for $%s? It leaves the stash for good." % [_name(id), DebriefCalc.money(price)],
+		"Sell for $%s" % DebriefCalc.money(price), func() -> void: Economy.sell_from_stash(StringName(id), 1))
+
+
+## Makes `row` draggable with `data` ({"from": "stash" | "kit" | "worn", "id", "slot"}).
+func _draggable(row: Control, data: Dictionary) -> void:
+	row.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	row.set_drag_forwarding(func(_at: Vector2) -> Variant:
+		var preview := UiKit.cell(_name(String(data.id)))
+		preview.theme_type_variation = &"HeadingLabel"
+		row.set_drag_preview(preview)
+		return {"loadout": data}, Callable(), Callable())
+
+
+## Makes `column` (and what's in it) take dropped rows for `side` ("kit" or "stash").
+func _drop_zone(column: Control, side: String) -> void:
+	column.mouse_filter = Control.MOUSE_FILTER_PASS
+	column.set_drag_forwarding(Callable(),
+		func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
+		func(_at: Vector2, d: Variant) -> void: drop(d, side))
+
+
+## Whether dropped `d` goes somewhere on `side`: a stash row on the kit, a kit or worn row on
+## the stash, for someone whose kit you may change.
+func can_drop(d: Variant, side: String) -> bool:
+	if not (d is Dictionary and d.has("loadout")) or not _person(selected).get("mine", false):
+		return false
+	var from := String(d.loadout.get("from", ""))
+	return (side == "kit" and from == "stash") or (side == "stash" and from in ["kit", "worn"])
+
+
+## Does a drop: the same request as the row's own button.
+func drop(d: Variant, side: String) -> void:
+	if not can_drop(d, side):
+		return
+	var data: Dictionary = d.loadout
+	var id := String(data.id)
+	match String(data.from):
+		"stash":
+			var item := ItemDB.get_item(StringName(id))
+			var slot := _slot_for(item, gear_of(selected))
+			if slot != &"":
+				ask("slot", {"slot": String(slot), "id": id})
+			elif Optics.is_optic(item):
+				ask("optic", {"slot": "primary", "id": id})
+			else:
+				ask("add", {"id": id, "count": 1})
+		"kit":
+			ask("remove", {"id": id, "count": 1})
+		"worn":
+			ask("slot", {"slot": String(data.slot), "id": ""})
 
 
 ## An item's tooltip: its name, and its description and uses when ItemDB has them

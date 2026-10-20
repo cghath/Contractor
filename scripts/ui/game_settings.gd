@@ -42,7 +42,12 @@ const DEFAULTS := {
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
-	"hud": {"objective_markers": true, "objectives_expanded": true},
+	# The HUD layout (HudLayout, ui-modern): each part's size and opacity.
+	"hud": {"objective_markers": true, "objectives_expanded": true,
+		"objectives_scale": 1.0, "objectives_opacity": 1.0, "compass_scale": 1.0, "compass_opacity": 1.0,
+		"squad_scale": 1.0, "squad_opacity": 1.0, "radio_scale": 1.0, "radio_opacity": 1.0,
+		"weapon_scale": 1.0, "weapon_opacity": 1.0, "wounds_scale": 1.0, "wounds_opacity": 1.0,
+		"markers_scale": 1.0, "markers_opacity": 1.0},
 	# The gamepad's right stick (wave 7, S4: stick_look). curve: the stick's travel to the power
 	# of this (1 straight, higher finer near the centre).
 	"gamepad": {"stick_sensitivity": 1.0, "stick_deadzone": 0.15, "stick_curve": 1.6, "stick_invert_y": false},

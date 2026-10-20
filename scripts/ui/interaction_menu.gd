@@ -217,6 +217,7 @@ var _sub_step_left := 0.0
 
 func _init(p_player: Soldier = null) -> void:
 	player = p_player
+	UiKit.apply(self)  # its drawn text in the theme's font (ui-modern: Inter)
 
 
 func _ready() -> void:

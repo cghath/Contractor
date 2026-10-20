@@ -14,6 +14,10 @@ extends PanelContainer
 ## and keep the menu open. Status > Report enemy position ("radio_report", people, wave 4)
 ## reports the enemies under the crosshair by radio (PeopleLayer.request_report).
 ##
+## ui-modern (Captain, 2026-10-20: "common sense layout tools"): the highlighted row has a
+## background and an accent bar, and with the mouse free (Alt, or any screen that frees it) a
+## row is hovered and clicked like a button. A footer says the keys.
+##
 ## Holding T and saying an order (VoiceOrder, voice_commands.gd) is an alternate way to send
 ## the same key presses through handle_input() - it isn't a second command path. Holding T
 ## while looking at a friendly or civilian instead asks them a question (VoiceQuestions).
@@ -233,12 +237,17 @@ const AIM_RANGE := 300.0
 
 ## The selection path wraps past this width (logical px).
 const TITLE_W := 300.0
+## The footer of keys shows on windows at least this tall (logical px): the longest menus need
+## the room on a short one.
+const KEYS_MIN_HEIGHT := 700.0
 
 var player: Soldier
 ## Names of the selected squadmates.
 var selected := PackedStringArray()
 var _stack: Array = []  # menu levels from the root down
 var _highlight := 0
+## The row under the mouse (-1: none).
+var _hovered := -1
 var _title: Label
 ## A short note after the title (the HUD's "+n squad lines below" when the open menu leaves the
 ## squad list no line at all; review of ui/hud-pass, 2026-10-14: cut to fit, never silently).
@@ -249,6 +258,8 @@ var note := "":
 			if visible and not _stack.is_empty():
 				_redraw()
 var _rows: VBoxContainer
+## The footer line of keys.
+var _keys: Label
 ## The width the selection path wraps at: TITLE_W, or less in the HUD's left column (Hud._layout
 ## sets it) so the open menu stays out of the centre column at a big UI scale.
 var title_width := TITLE_W:
@@ -276,8 +287,12 @@ func _ready() -> void:
 	UiKit._follow_window(_title, _fit_title)
 	box.add_child(_title)
 	_rows = VBoxContainer.new()
-	_rows.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
+	_rows.add_theme_constant_override(&"separation", 2)
 	box.add_child(_rows)
+	_keys = UiKit.hint("1-9 pick   Wheel + middle click   Backspace back   Esc close")
+	_keys.name = "Keys"
+	_keys.custom_minimum_size.x = TITLE_W
+	box.add_child(_keys)
 	set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
 	## Grows both ways from the left middle (a long submenu stayed below the centre line), kept
 	## UiKit.EDGE from the window's edge.
@@ -290,8 +305,14 @@ func _ready() -> void:
 func _fit_title() -> void:
 	if _title == null or not _title.is_inside_tree():
 		return
-	var room := get_viewport().get_visible_rect().size.x - UiKit.EDGE * 2.0 - 40.0
+	var view := get_viewport().get_visible_rect().size
+	var room := view.x - UiKit.EDGE * 2.0 - 40.0
 	_title.custom_minimum_size.x = maxf(minf(title_width, room), 120.0)
+	if _keys != null:
+		# As wide as the title (a wrapping label with no width asks to be one word wide and very
+		# tall, and the panel, growing both ways from the middle, kept that height).
+		_keys.custom_minimum_size.x = _title.custom_minimum_size.x
+		_keys.visible = view.y >= KEYS_MIN_HEIGHT  # a short window keeps its room for the rows
 
 
 func is_open() -> bool:
@@ -359,11 +380,11 @@ func handle_input(event: InputEvent) -> bool:
 		match event.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
 				_highlight = posmod(_highlight - 1, _level_items().size())
-				_redraw()
+				_restyle()
 				return true
 			MOUSE_BUTTON_WHEEL_DOWN:
 				_highlight = posmod(_highlight + 1, _level_items().size())
-				_redraw()
+				_restyle()
 				return true
 			MOUSE_BUTTON_MIDDLE:
 				_pick(_highlight)
@@ -591,18 +612,58 @@ func _redraw() -> void:
 	for i in items.size():
 		var item: Dictionary = items[i]
 		var disabled: bool = (item.has("items") and (item["items"] as Array).is_empty()) or (item.has("cmd") and item["cmd"] == "")
+		## A row: the key chip and the label in a box that shows the highlight (HudRowHot) and
+		## the hover (HudRowHover), and takes a click.
+		var frame := PanelContainer.new()
+		frame.name = "Row%d" % i
+		frame.mouse_filter = Control.MOUSE_FILTER_STOP
+		frame.tooltip_text = ""
+		frame.set_meta(&"disabled", disabled)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame.add_child(row)
 		var chip := Label.new()
-		chip.text = " %s " % item["key"]
+		chip.text = String(item["key"])
 		chip.theme_type_variation = &"KeyLabel"
+		chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(chip)
 		var label := Label.new()
 		label.text = "%s%s" % [item["label"], "  >" if item.has("items") and not disabled else ""]
-		## Theme colours: text, dim when it can't be picked, the accent on the highlighted row.
-		var colour := UiKit.TEXT if not disabled else UiKit.TEXT_DIM
-		if i == _highlight:
-			colour = UiKit.ACCENT if not disabled else UiKit.ACCENT.lerp(UiKit.TEXT_DIM, 0.5)
-		label.add_theme_color_override(&"font_color", colour)
+		label.theme_type_variation = &"MutedLabel" if disabled else &""
 		row.add_child(label)
-		_rows.add_child(row)
+		var index := i
+		frame.mouse_entered.connect(func() -> void:
+			_hovered = index
+			_restyle())
+		frame.mouse_exited.connect(func() -> void:
+			if _hovered == index:
+				_hovered = -1
+				_restyle())
+		frame.gui_input.connect(func(event: InputEvent) -> void:
+			var click := event as InputEventMouseButton
+			if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
+				frame.accept_event()
+				_highlight = index
+				_pick.call_deferred(index))
+		_rows.add_child(frame)
+	_restyle()
+
+
+## The rows' looks: the highlighted one (keys, wheel) bright with an accent bar, the hovered one
+## faintly lit, a row that can't be picked dim.
+func _restyle() -> void:
+	if _rows == null:
+		return
+	var i := 0
+	for frame: Node in _rows.get_children():
+		if frame.is_queued_for_deletion() or not frame is PanelContainer:
+			continue
+		var f := frame as PanelContainer
+		f.theme_type_variation = &"HudRowHot" if i == _highlight else (&"HudRowHover" if i == _hovered else &"HudRow")
+		var label := f.get_child(0).get_child(1) as Label
+		if bool(f.get_meta(&"disabled", false)):
+			label.theme_type_variation = &"MutedLabel"
+		else:
+			label.theme_type_variation = &"HeadingLabel" if i == _highlight else &""
+		i += 1

@@ -192,6 +192,25 @@ func _test_kit() -> void:
 	check(theme != null and theme.default_font_size == UiKit.FONT_BODY and theme.has_stylebox(&"panel", &"PanelContainer")
 		and theme.has_stylebox(&"focus", &"Button") and theme.get_font_size(&"font_size", &"HeadingLabel") == UiKit.FONT_HEADING
 		and theme.get_type_variation_base(&"HintLabel") == &"Label", "the theme: 16 px body, panel, button focus, heading and hint variations")
+	## ui-modern: the HUD sizes the kit names are the theme's (the .tres had 18/14/26 while the
+	## constants said 20/28, and nothing read them), and the UI font is the bundled one.
+	check(theme.get_font_size(&"font_size", &"HudLabel") == UiKit.FONT_HUD and theme.get_font_size(&"font_size", &"HudSmallLabel") == UiKit.FONT_HUD_SMALL
+		and theme.get_font_size(&"font_size", &"HudAlertLabel") == UiKit.FONT_HUD_ALERT and theme.get_font_size(&"font_size", &"TitleLabel") == UiKit.FONT_TITLE
+		and theme.get_font_size(&"font_size", &"HintLabel") == UiKit.FONT_SMALL,
+		"the theme's HUD, title and hint sizes are UiKit's (%d/%d/%d)" % [theme.get_font_size(&"font_size", &"HudLabel"),
+		theme.get_font_size(&"font_size", &"HudSmallLabel"), theme.get_font_size(&"font_size", &"HudAlertLabel")])
+	var regular: Variant = UiKit.FONT_REGULAR
+	check(theme.default_font == UiKit.FONT_REGULAR and regular is FontVariation
+		and (regular as FontVariation).base_font.get_font_name() == "Inter", "the theme's font is the bundled Inter (fonts/OFL.txt)")
+	var head := UiKit.header("Title", "What it's for", PackedStringArray(["How it works."]), [["Esc", "Close"]])
+	var help: Control = head.get_meta(&"help")
+	var q: Button = head.get_meta(&"help_button")
+	check(not help.visible and q.text == "?" and q.tooltip_text != "", "a header has a '?' button and its help starts hidden")
+	q.button_pressed = true
+	check(help.visible, "'?' shows the help")
+	head.free()
+	check(UiKit.matches("M855 magazine", "855 mag") and not UiKit.matches("Bandage", "mag") and UiKit.matches("x", ""),
+		"search matches every word anywhere in the name")
 	var layer := CanvasLayer.new()
 	_vp.size = Vector2i(800, 600)
 	_vp.add_child(layer)

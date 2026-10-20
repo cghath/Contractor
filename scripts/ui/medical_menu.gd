@@ -22,8 +22,10 @@ const TREATED := &"treated"
 ## 3 for an arterial or junctional bleed, 2 for venous or muscle, 1 for a graze).
 const SEVERE_RATE := 0.8
 const MODERATE_RATE := 0.2
-const BLEED_COLORS := [Color(0.8, 0.35, 0.35), Color(0.85, 0.45, 0.3), Color(0.85, 0.2, 0.15), Color(0.65, 0.0, 0.0)]
-const STATE_COLORS := {OK: Color(0.55, 0.57, 0.6), UNTREATED: Color(0.9, 0.65, 0.15), TREATED: Color(0.3, 0.65, 0.35)}
+## In the kit's palette (ui-modern, 2026-10-20): bleeding from UiKit.WARN to UiKit.BAD and darker,
+## untreated the accent, treated UiKit.GOOD, nothing wrong a neutral grey.
+const BLEED_COLORS := [Color(0.95, 0.47, 0.38), Color(0.92, 0.36, 0.29), Color(0.88, 0.25, 0.2), Color(0.62, 0.1, 0.08)]
+const STATE_COLORS := {OK: Color(0.55, 0.57, 0.6), UNTREATED: UiKit.ACCENT, TREATED: UiKit.GOOD}
 ## Markers on a part.
 const TOURNIQUET := &"tourniquet"
 const SPLINT := &"splint"
@@ -65,16 +67,20 @@ const ROWS_Y := 230.0
 const ITEMS_W := 414.0
 const COLUMN_GAP := 16.0
 const LEGEND_H := 88.0
-const CLOSE_HINT_W := 150.0
+const CLOSE_HINT_W := 200.0
 ## Most lines of the chosen part's injuries, and of the signs.
 const INJURY_LINES := 5
 const SIGN_LINES := 8
 ## The activity log's text size (UiKit's smallest: nothing under 14 px).
 const LOG_FONT := UiKit.FONT_SMALL
-## The theme's panel border, and the hovered row (the accent, faint).
-const BORDER := Color(0.32, 0.35, 0.29)
-const HOVER_BG := Color(0.91, 0.67, 0.25, 0.25)
-const ROW_H := 24.0
+## The theme's panel border, and the hovered or keyboard-picked row (the accent, faint).
+const BORDER := UiKit.BORDER
+const HOVER_BG := UiKit.HOVER_BG
+## A row's height and text (ui-modern: 24 px rows of 14 px text were hard to hit and read).
+const ROW_H := 30.0
+const ROW_FONT := UiKit.FONT_BODY
+## The help box ("?", F1 or a click on the hint at the top right): how the menu works, its keys.
+const HELP_TEXT := "How it works\nPick a body part on the figure (or Left / Right), then a treatment from the list (Up / Down and Enter, or click it). A greyed row says why it can't be used now. Signs are what you can tell without kit; a pulse oximeter gives numbers. The triage cards along the foot tag the casualty for the team.\n\nKeys: Left / Right body part  -  Up / Down treatment  -  Enter use  -  Page Up / Down a page  -  mouse wheel scroll  -  ? or F1 this help  -  H / Esc close"
 ## The item list's scroll bar, right of the rows (click above or below the thumb: a page).
 const SCROLL_BAR_W := 10.0
 const MAX_LOG := 14
@@ -96,12 +102,17 @@ var log_lines: PackedStringArray = []
 ## couldn't be reached, yet were still clickable unseen).
 var scroll := 0
 var _hover := -1
+## Whether the help box is up (HELP_TEXT).
+var help_open := false
+## The row the keyboard picked (-1: none yet); Up / Down move it and Enter uses it.
+var cursor := -1
 var _refresh_left := 0.0
 var _seen := {}  # part -> its summary last refresh, for the log
 
 
 func _init(p_actor: Soldier = null) -> void:
 	actor = p_actor
+	UiKit.apply(self)  # its drawn text in the theme's font (ui-modern: Inter)
 	visible = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -121,6 +132,8 @@ func open(who: Node3D) -> void:
 		_add_log("Opened on %s" % _who())
 	_log_target = target
 	scroll = 0
+	cursor = -1
+	help_open = false
 	visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	refresh()
@@ -144,6 +157,7 @@ func select_part(p: StringName) -> void:
 	if Vitals.BODY_PARTS.has(p):
 		if p != part:
 			scroll = 0
+			cursor = -1
 		part = p
 		refresh()
 
@@ -202,12 +216,25 @@ func refresh() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if event.is_action_pressed(&"medical_menu") or event.is_action_pressed(&"pause"):
+	var key := event as InputEventKey
+	if key != null and key.pressed and not key.echo and (key.keycode == KEY_F1 or key.keycode == KEY_QUESTION or (key.keycode == KEY_SLASH and key.shift_pressed)):
+		help_open = not help_open
+		queue_redraw()
+	elif event.is_action_pressed(&"pause") and help_open:
+		help_open = false
+		queue_redraw()
+	elif event.is_action_pressed(&"medical_menu") or event.is_action_pressed(&"pause"):
 		close()
 	elif event.is_action_pressed(&"ui_up", true) or event.is_action_pressed(&"ui_down", true):
-		scroll_rows(-1 if event.is_action(&"ui_up") else 1)
+		move_cursor(-1 if event.is_action(&"ui_up") else 1)
 	elif event.is_action_pressed(&"ui_page_up", true) or event.is_action_pressed(&"ui_page_down", true):
-		scroll_rows(visible_rows() * (-1 if event.is_action(&"ui_page_up") else 1))
+		move_cursor(visible_rows() * (-1 if event.is_action(&"ui_page_up") else 1))
+	elif event.is_action_pressed(&"ui_left", true) or event.is_action_pressed(&"ui_right", true):
+		step_part(-1 if event.is_action(&"ui_left") else 1)
+	elif event.is_action_pressed(&"ui_accept") and cursor >= 0:
+		var said := choose(cursor)
+		if said != "" and actor.player_input:
+			actor.player_input.flash(said)
 	if event is InputEventKey:
 		get_viewport().set_input_as_handled()  # the menu has the keys: no reloading or throwing behind it
 
@@ -224,7 +251,10 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var p := part_at(event.position)
-		if p != &"":
+		if (layout_rects()["close hint"] as Rect2).has_point(event.position):
+			help_open = not help_open
+			queue_redraw()
+		elif p != &"":
 			select_part(p)
 		elif triage_at(event.position) != &"":
 			set_triage(triage_at(event.position))
@@ -237,6 +267,29 @@ func _gui_input(event: InputEvent) -> void:
 			if text != "" and actor.player_input:
 				actor.player_input.flash(text)
 		accept_event()
+
+
+## Moves the keyboard's row by `rows` (the first Down picks the first row), scrolling to keep
+## it in the list.
+func move_cursor(rows: int) -> void:
+	if options.is_empty():
+		cursor = -1
+		return
+	cursor = clampi(cursor + rows if cursor >= 0 else (0 if rows > 0 else options.size() - 1), 0, options.size() - 1)
+	if cursor < scroll:
+		scroll = cursor
+	elif cursor >= scroll + visible_rows():
+		scroll = cursor - visible_rows() + 1
+	_clamp_scroll()
+	_hover = cursor
+	queue_redraw()
+
+
+## The next (`dir` 1) or previous (-1) body part, in the figure's order (head to feet).
+func step_part(dir: int) -> void:
+	var parts: Array = PART_RECTS.keys()
+	var i := parts.find(part)
+	select_part(parts[posmod(i + dir, parts.size())])
 
 
 # --- What it shows (static: tests and other views use these) -------------------------------
@@ -293,7 +346,7 @@ static func worst_part(vitals: Vitals) -> StringName:
 ## parts are coloured, the rest drawn faint (the HUD silhouette).
 static func draw_diagram(ci: CanvasItem, vitals: Vitals, origin: Vector2, k: float, selected: StringName = &"",
 		only: Array[StringName] = []) -> void:
-	var font := ThemeDB.fallback_font
+	var font := UiKit.FONT_STRONG
 	for p: StringName in PART_RECTS:
 		var r: Rect2 = PART_RECTS[p]
 		r = Rect2(origin + r.position * k, r.size * k)
@@ -693,7 +746,7 @@ func _draw() -> void:
 	var top := panel.position
 	draw_string(font, top + Vector2(UiKit.SPACE_L, 32), elide(font, "Medical: %s  (%s)" % [_who(), vitals.condition_text()], _title_w(), UiKit.FONT_HEADING),
 		HORIZONTAL_ALIGNMENT_LEFT, _title_w(), UiKit.FONT_HEADING, UiKit.TEXT)
-	draw_string(font, top + Vector2(panel.size.x - UiKit.SPACE_L - CLOSE_HINT_W, 32), "H / Esc to close", HORIZONTAL_ALIGNMENT_RIGHT, CLOSE_HINT_W, small, UiKit.TEXT_DIM)
+	draw_string(font, top + Vector2(panel.size.x - UiKit.SPACE_L - CLOSE_HINT_W, 32), elide(font, "? help   H / Esc close", CLOSE_HINT_W, small), HORIZONTAL_ALIGNMENT_RIGHT, CLOSE_HINT_W, small, UiKit.ACCENT if help_open else UiKit.TEXT_DIM)
 	# Body diagram.
 	var origin := _figure_origin()
 	var k := _figure_k()
@@ -721,11 +774,12 @@ func _draw() -> void:
 		var rect := _row_rect(i)
 		var entry := options[i]
 		var greyed := String(entry.disabled) != ""
-		if i == _hover and not greyed:
-			draw_rect(rect, HOVER_BG)
+		if i == _hover:
+			draw_rect(rect, HOVER_BG if not greyed else Color(UiKit.TEXT_DIM, 0.12))
+			draw_rect(Rect2(rect.position, Vector2(3, rect.size.y)), UiKit.ACCENT if not greyed else UiKit.TEXT_DIM)
 		var text: String = entry.label + ("  -  " + String(entry.disabled) if greyed else "")
-		var baseline := rect.position.y + (rect.size.y + font.get_ascent(small) - font.get_descent(small)) * 0.5
-		draw_string(font, Vector2(rect.position.x + 6, baseline), elide(font, text, rect.size.x - 10, small), HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 8, small,
+		var baseline := rect.position.y + (rect.size.y + font.get_ascent(ROW_FONT) - font.get_descent(ROW_FONT)) * 0.5
+		draw_string(font, Vector2(rect.position.x + 8, baseline), elide(font, text, rect.size.x - 12, ROW_FONT), HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 10, ROW_FONT,
 			UiKit.TEXT_DIM if greyed else UiKit.TEXT)
 	# Triage card buttons.
 	var card := vitals.triage()
@@ -752,7 +806,15 @@ func _draw() -> void:
 		draw_string(font, log_top + Vector2(0, 22 + n * line_h), elide(font, line, right_w, LOG_FONT), HORIZONTAL_ALIGNMENT_LEFT, right_w, LOG_FONT, UiKit.TEXT_DIM)
 	# The row under the mouse: why it's greyed out, and what that treatment does, over the
 	# right-hand column (a narrow row cuts the reason short; the box has it whole).
-	if _hover >= 0 and _hover < options.size() and row_shown(_hover):
+	if help_open:
+		var column := _hint_column()
+		var text_w := column.size.x - 20.0
+		var lines := maxi(int((column.size.y - 20) / font.get_height(small)), 1)
+		draw_rect(column, UiKit.PANEL_BG.lerp(Color.BLACK, 0.5))
+		draw_rect(Rect2(column.position, Vector2(3, column.size.y)), UiKit.ACCENT)
+		draw_rect(column, UiKit.BORDER, false, 1.0)
+		draw_multiline_string(font, column.position + Vector2(12, 10 + font.get_ascent(small)), HELP_TEXT, HORIZONTAL_ALIGNMENT_LEFT, text_w, small, lines, UiKit.TEXT)
+	elif _hover >= 0 and _hover < options.size() and row_shown(_hover):
 		var hint := row_hint(options[_hover])
 		var why := String(options[_hover].get("disabled", ""))
 		if why != "":

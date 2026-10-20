@@ -53,11 +53,12 @@ const STEP_S := 0.25
 ## Marker look: alpha and size near and far (they fade and shrink out to FADE_M), the inset
 ## from the screen's edge for the edge arrows, and the colours.
 const FADE_M := 1500.0
-const ALPHA_NEAR := 0.7
+## ui-modern (2026-10-20): 70% near and 45% far were still hard to pick out over bright ground.
+const ALPHA_NEAR := 0.95
 ## docs/ui_audit.md P1-13: far diamonds were 3.5 px at 30%, too faint to find.
-const ALPHA_FAR := 0.45
-const SIZE_NEAR := 7.0
-const SIZE_FAR := 5.0
+const ALPHA_FAR := 0.75
+const SIZE_NEAR := 8.0
+const SIZE_FAR := 6.0
 const EDGE_PX := 26.0
 const OBJECTIVE_COLOUR := Color(1.0, 0.9, 0.55)
 const EXTRACT_COLOUR := Color(0.82, 0.7, 1.0)
@@ -627,14 +628,15 @@ func layout_markers() -> Array:
 
 
 func _draw() -> void:
-	var font := get_theme_default_font()
+	var font := UiKit.FONT_STRONG
+	var fs := UiKit.FONT_HUD_SMALL
 	for m: Dictionary in drawn:
 		var alpha: float = m.alpha
 		var s: float = m.size
 		var colour: Color = EXTRACT_COLOUR if bool(m.extract) else OBJECTIVE_COLOUR
 		colour.a = alpha
 		var at: Vector2 = m.screen
-		var shadow := Color(0, 0, 0, alpha * 0.6)
+		var shadow := Color(UiKit.OUTLINE, alpha * UiKit.OUTLINE.a)
 		if m.edge:
 			# Off screen or behind: a small arrow at the edge, nothing else.
 			var dir := (at - size * 0.5).normalized()
@@ -647,10 +649,10 @@ func _draw() -> void:
 		draw_colored_polygon(diamond, colour)
 		var label := String(m.label)
 		if label != "":
-			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL).x
-			draw_string_outline(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, shadow)
-			draw_string(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
+			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			draw_string_outline(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, shadow)
+			draw_string(font, at + Vector2(-w * 0.5, -s - 5.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, colour)
 		var dist := distance_text(float(m.distance))
-		var dw := font.get_string_size(dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL).x
-		draw_string_outline(font, at + Vector2(-dw * 0.5, s + 15.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, shadow)
-		draw_string(font, at + Vector2(-dw * 0.5, s + 15.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
+		var dw := font.get_string_size(dist, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string_outline(font, at + Vector2(-dw * 0.5, s + 17.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, shadow)
+		draw_string(font, at + Vector2(-dw * 0.5, s + 17.0), dist, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, colour)
