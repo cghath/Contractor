@@ -870,6 +870,10 @@ func _test_downed_enemy() -> void:
 	# floor a drop falls to is looked up through the body (R0953: pool cells 0.45-0.9 m up).
 	var floor_y := marks._floor_below(torso.global_position + Vector3.UP * 0.5)
 	check(absf(floor_y - ground) < 0.05, "a drop over him falls through to the ground (%.2f m up)" % (floor_y - ground))
+	# A drop from his lowest skin, pressed a little into the yard by the ragdoll, lands on the
+	# yard, not 2.5 m under it (CI: pool cells at -2.50).
+	var under_y := marks._floor_below(Vector3(torso.global_position.x, ground - 0.03, torso.global_position.z))
+	check(absf(under_y - ground) < 0.05, "a drop starting just under the ground lands on it (%.2f m up)" % (under_y - ground))
 	for i in 60:
 		if marks.drops_in_air() == 0:
 			break

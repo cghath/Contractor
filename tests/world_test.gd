@@ -30,6 +30,9 @@ const LIVE_MARK := Vector3(8.0, 1.2, 29.4)  # the zone compound's south wall, in
 ## Dig phase 2: a crater on open ground this far from the first insertion point (host), and a
 ## berm next to it; the late joiner checks it gets both.
 const CRATER_FROM_INSERTION := Vector3(18, 0, 14)
+## Ground guard: the fall spot is clear of everything solid (rocks, trunks) this far round (m):
+## the capsule's radius (SoldierMovement.CAPSULE_RADIUS) and then some.
+const CLEAR_ROUND_M := 1.0
 
 var failures := 0
 var level: ZoneLevel
@@ -460,10 +463,22 @@ func _test_ground_guard() -> void:
 	var ground := t.get_node("Ground_%d_%d" % [c.x, c.y]) as StaticBody3D
 	ground.collision_layer = 0  # this chunk's collision isn't there yet
 	await get_tree().physics_frame
-	# Clear of the scatter's rocks and trees (they have collision of their own).
+	# Clear of the scatter's rocks and trees (they have collision of their own): not just
+	# straight under the spot but anywhere under his capsule and round it. Only clear under its
+	# middle, he came down on a rock's edge beside it (CI: y 1.4 and 1.9 over ground at 1.0,
+	# nothing on the ray straight down).
+	var space := level.get_world_3d().direct_space_state
+	var round_him := CylinderShape3D.new()
+	round_him.radius = CLEAR_ROUND_M
+	round_him.height = 8.0
+	var near := PhysicsShapeQueryParameters3D.new()
+	near.shape = round_him
+	near.collision_mask = 1
 	for i in 64:
 		var at := centre + Vector2(i % 8 - 3.5, i / 8 - 3.5) * 12.0
-		if not GroundGuard.floor_below(level.get_world_3d(), Vector3(at.x, t.height_at(at.x, at.y) + 2.0, at.y)):
+		near.transform = Transform3D(Basis(), Vector3(at.x, t.height_at(at.x, at.y) + 1.0, at.y))
+		if not GroundGuard.floor_below(level.get_world_3d(), Vector3(at.x, t.height_at(at.x, at.y) + 2.0, at.y)) \
+				and space.intersect_shape(near, 1).is_empty():
 			centre = at
 			break
 	var h := t.height_at(centre.x, centre.y)
@@ -474,16 +489,26 @@ func _test_ground_guard() -> void:
 	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
 		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
 	ground.collision_layer = 1
-	await _wait_for(func() -> bool: return guy.is_on_floor() and not guy.movement.holding, 6.0)
 	# He lands on whatever is under him: the ground, or (a slow runner) a rock the scatter's
 	# collision streamed in after the spot was picked (CI, a metre up). Either way he stopped
-	# holding and stands on it.
-	var under := guy.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(
-		guy.global_position + Vector3.UP * 0.5, guy.global_position + Vector3.DOWN * 3.0, 1, [guy.get_rid()]))
-	var on := not under.is_empty() and absf(float(under.position.y) - guy.global_position.y) < 0.3
-	check(guy.is_on_floor() and on and not guy.movement.holding,
-		"once it's there he lands on it (y %.1f, ground %.1f, on %s)" % [guy.global_position.y, h, under.get("collider", "nothing")])
+	# holding and stands on it. Waited for as a whole: down, not holding, and on what's under him.
+	var seen := [{}]  # (what's under him, as the lambda last saw it)
+	var landed := func() -> bool:
+		var under: Dictionary = guy.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(
+			guy.global_position + Vector3.UP * 0.5, guy.global_position + Vector3.DOWN * 3.0, 1, [guy.get_rid()]))
+		seen[0] = under
+		var on := not under.is_empty() and absf(float(under.position.y) - guy.global_position.y) < 0.3
+		return guy.is_on_floor() and on and not guy.movement.holding
+	await _wait_for(landed, 6.0)
+	var under_him: Dictionary = seen[0]
+	check(landed.call(), "once it's there he lands on it (at %s, ground %.1f, on %s at %.2f, floor %s, holding %s, velocity %s, slope %.0f deg)" % [
+		guy.global_position, h, under_him.get("collider", "nothing"), float(under_him.position.y) if not under_him.is_empty() else INF, guy.is_on_floor(),
+		guy.movement.holding, guy.velocity, rad_to_deg(t.normal_at(centre.x, centre.y).angle_to(Vector3.UP))])
 	var guard := level.get_node(^"GroundGuard") as GroundGuard
+	# Only the test's own check_now() below: the guard's every-CHECK_S round, landing in the
+	# physics frame after a teleport, put him back first and the count read before it didn't
+	# move (CI: "past the zone's edge" failed at (957, 0.4), right where it puts him).
+	guard.set_physics_process(false)
 	guy.global_position = Vector3(centre.x, h - 20.0, centre.y)
 	await get_tree().physics_frame
 	var before := guard.rescued
@@ -497,6 +522,7 @@ func _test_ground_guard() -> void:
 	guard.check_now()
 	check(guard.rescued > before and guy.global_position.x <= half - GroundGuard.INSET_M + 0.01 and absf(guy.global_position.y - edge_h) < 1.0,
 		"past the zone's edge, back inside on the ground (%.0f, %.1f)" % [guy.global_position.x, guy.global_position.y])
+	guard.set_physics_process(true)
 	var farid := Vector3(-8, 0.1, 12)  # PeopleLayer.COMPOUND's first civilian
 	check(absf(level.above_ground(farid).y - t.height_at(farid.x, farid.z) - 0.1) < 0.01,
 		"B-05: the compound's fixed placements go on the terrain in a zone")
