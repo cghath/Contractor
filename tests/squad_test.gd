@@ -113,6 +113,9 @@ func _test_fire_fix() -> void:
 	alpha_ai.target = keep_t
 	mg.queue_free()
 	rifle.queue_free()
+	# G-16: no card, the AI reads how badly hurt: an arterial bleed before a graze.
+	check(SquadAI.IMMEDIATE_KINDS.has("arterial") and not SquadAI.MINIMAL_KINDS.has("arterial") and SquadAI.MINIMAL_KINDS.has("graze")
+		and SquadAI.triage_tier(alpha) == SquadAI.auto_tier(alpha) * 2 + 1, "no triage card: the AI's own read of the wounds sets the order (G-16)")
 	# G-08: a clearance with rooms left carries on through a quiet moment; done, or a man down, it ends.
 	var op_left := {"op": {"rooms": [1, 2], "called": false}}
 	check(SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, false) and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, true)

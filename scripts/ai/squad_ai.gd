@@ -109,6 +109,12 @@ const TACTIC_SCORE := 0.75
 const ORDERED_SCORE := 0.93
 const PLAYER_ORDER_SCORE := 0.93
 const CASUALTY_CONTACT_SCORE := 0.82
+## In contact only so many leave the fight for the wounded (AI bar G-12; Lifeline's medic limit,
+## "to keep combat effectiveness up"): CARE_CAP_BASE plus every medic up, counting carers out in
+## the open (one at cover isn't out of the fight); a medic always may, and so may anyone for a
+## casualty within CARE_CAP_NEAR_M. Out of contact, no cap. Proposed.
+const CARE_CAP_BASE := 1
+const CARE_CAP_NEAR_M := 3.0
 ## Captain, 2026-10-17: "enemy medics are still medicing under fire, and the new teams even come in
 ## and start aid on downed enemy teams instead of focusing on player teams". The enemy fights
 ## first: in contact its casualty care scores HOSTILE_CARE_CONTACT_SCORE, under fighting (0.7),
@@ -1291,6 +1297,8 @@ func _choose_intent() -> void:
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
+	if contact and care == Care.NONE and _candidate != null and not _may_leave_fight(_candidate):
+		_candidate = null  # the squad can't spare another out there: he fights and covers them (G-12)
 	if (care != Care.NONE and care != Care.BODY) or _candidate != null:
 		# In contact a casualty waits on the squad's tactics; ordered to hold, one near the spot
 		# is still seen to (above the hold), farther ones wait on the order.
@@ -1871,15 +1879,52 @@ func _find_casualty() -> Soldier:
 
 ## How soon a triage card (Vitals.triage) puts a casualty in line: immediate first, then
 ## delayed and uncarded alike (the usual order), then minimal, expectant last.
+## A card a player set comes before the AI's own read of the same tier (G-16): card immediate 0,
+## read immediate 1, card delayed 2, read delayed 3, card minimal 4, read minimal 5, expectant 6.
 static func triage_tier(s: Soldier) -> int:
 	match s.vitals.triage():
 		Vitals.TRIAGE_IMMEDIATE:
 			return 0
 		Vitals.TRIAGE_MINIMAL:
-			return 2
+			return 4
 		Vitals.TRIAGE_EXPECTANT:
-			return 3
-	return 1
+			return 6
+		Vitals.TRIAGE_NONE:
+			return auto_tier(s) * 2 + 1
+	return 2
+
+
+## Whether this unit may leave the fight for `c` now (G-12, CARE_CAP_BASE).
+func _may_leave_fight(c: Soldier) -> bool:
+	if body.role == Roles.MEDIC or squad == null or body.global_position.distance_to(c.global_position) <= CARE_CAP_NEAR_M:
+		return true
+	var out := 0
+	var medics := 0
+	for m in squad.members():
+		if m == body or not m.vitals.is_up():
+			continue
+		if m.role == Roles.MEDIC:
+			medics += 1
+		var ai := SquadAI.of(m)
+		if ai and ai.care in [Care.REACH, Care.DRAG, Care.TREAT, Care.CARRY] and not ai._at_cover():
+			out += 1
+	return out < CARE_CAP_BASE + medics
+
+
+## With no card on him (G-16: nobody in the bar sorts by how badly hurt), the AI's own read of
+## `s` from what he needs: IMMEDIATE_KINDS (a life about to go) 0, only MINIMAL_KINDS and awake 2,
+## anything else 1.
+const IMMEDIATE_KINDS: Array[String] = ["arterial", "junctional", "airway", "tension", "pelvis", "cpr", "defib", "epinephrine"]
+const MINIMAL_KINDS: Array[String] = ["graze", "muscle", "pain", "fracture", "burn", "wake"]
+static func auto_tier(s: Soldier) -> int:
+	var minimal := s.vitals.is_up()
+	for t: Dictionary in s.vitals.care_needed():
+		var kind := String(t.get("kind", ""))
+		if kind in IMMEDIATE_KINDS:
+			return 0
+		if kind not in MINIMAL_KINDS:
+			minimal = false
+	return 2 if minimal else 1
 
 
 ## Who is really looking after `s`: a player who took hold of them, or an AI whose casualty

@@ -45,11 +45,11 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-09 | ~~The same bursts at every range~~ (done 2026-10-19) | P1 | S |
 | G-10 | ~~The AI shoots the nearest enemy it sees, not the most dangerous~~ (done 2026-10-19: guns, who's on me, keep, low, spread) | P1 | M |
 | G-11 | ~~One small suppression radius for every round~~ (done 2026-10-19) | P1 | S |
-| G-12 | No cap on how many leave the fight for casualties | P1 | S |
+| G-12 | ~~No cap on how many leave the fight for casualties~~ (done 2026-10-19: 1 plus the medics, in contact) | P1 | S |
 | G-13 | A carer stays with a casualty who is already stable | P1 | M |
 | G-14 | Smoke and bangs only on break contact, casualty reach or an order (part done 2026-10-19: smoke when pinned, smoke over the flank's open ground; entry bangs were already in the clear op's breach) | P1 | M |
 | G-15 | Doctrine numbers still don't act (audit A3-07; burst and burst_pause wired 2026-10-19) | P1 | M |
-| G-16 | The AI never judges which casualty is worst | P2 | S |
+| G-16 | ~~The AI never judges which casualty is worst~~ (done 2026-10-19: its own read when no card) | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
 | G-17 | Positions are picked without terrain, height or a second threat (part done 2026-10-19: base of fire takes high ground, flanks like height, folds count as cover, gun teams pick defilade against every known enemy; riflemen's cover against a second threat still to do) | P2 | M |
 | G-18 | No first-contact drill (freeze, face, get down) | P2 | S |
