@@ -258,24 +258,32 @@ func _test_story() -> void:
 	check(_offered() == ["s2_quartermaster"], "and back on it the next day")
 	_close_story("s2_quartermaster", "completed")
 	check(Story.evidence() == 2 and _offered() == ["s3_crates"], "The quartermaster done: evidence 2, The crates on the board")
-	# Intel advances the arc: Vantage point waits on the evidence as well as on The crates.
+	# Each needs the clue of the one before it (Captain, 2026-10-20: "both").
 	_close_story("s3_crates", "completed")
-	check(Story.evidence() == 3 and _offered() == ["s4_vantage_point"], "The crates done: evidence 3, Vantage point on the board")
+	check(Story.evidence() == 3 and _offered() == ["s4_vantage_point"], "The crates done: its clue found, Vantage point on the board")
 	var v := _story_contract("s4_vantage_point")
 	(Contracts._s().board as Array).erase(v)
 	(s.offered as Dictionary).erase("s4_vantage_point")
-	s.evidence = 2  # (as if a clue had been lost)
+	var waybills: Dictionary = (s.clues as Array).pop_back()  # (as if its clue had been lost)
 	Story.server_update()
-	check(_offered().is_empty() and Story.leads_text().contains("evidence 3 (have 2)"),
-		"one evidence short, Vantage point waits, and the Leads say so (%s)" % Story.leads_text().split("\n")[1])
-	check(Story.on_intel_turned_in("intel_laptop", 3) == 0 and _offered().is_empty(), "three ordinary pieces of intel aren't enough")
-	check(Story.on_intel_turned_in("intel_documents", 1) == 1 and Story.evidence() == 3 and _offered() == ["s4_vantage_point"],
-		"the fourth makes an evidence point: Vantage point on the board")
+	check(_offered().is_empty() and Story.leads_text().contains("the clue from The crates"),
+		"without The crates' clue, Vantage point waits, and the Leads say so (%s)" % Story.leads_text().split("\n")[1])
+	(s.clues as Array).append(waybills)
+	Story.server_update()
+	check(_offered() == ["s4_vantage_point"], "with it, it's back on the board")
 	check(Story.on_intel_turned_in(Story.LEDGER, 5) == Story.LEDGER_EVIDENCE_MAX and Story.on_intel_turned_in(Story.LEDGER, 1) == 0,
 		"Vantage ledgers turned in count, up to %d" % Story.LEDGER_EVIDENCE_MAX)
+	s.ledgers = 0
+	s.evidence = 3  # (back to the clues' own)
 	_close_story("s4_vantage_point", "completed")
-	check(1 in (s.acts_done as Array) and Story.act() == 1 and Story.clues().size() == 4 and Story.leads_text().contains("Act 2 (Ashore) is still to come"),
-		"Vantage point done: act 1 closes with 4 clues; act 2 is a stub (%s)" % Story.leads_text().split("\n")[1])
+	check(1 in (s.acts_done as Array) and Story.act() == 1 and Story.clues().size() == 4 and Story.evidence() == 5,
+		"Vantage point done: act 1 closes with 4 clues, evidence 5")
+	# Intel advances the arc: the count gates act 2.
+	check(Story.leads_text().contains("evidence 6 (have 5)"), "act 2 waits on the evidence (%s)" % Story.leads_text().split("\n")[1])
+	check(Story.on_intel_turned_in("intel_laptop", 3) == 0 and Story.act_waits(2).has("evidence 6 (have 5)"), "three ordinary pieces of intel aren't enough")
+	check(Story.on_intel_turned_in("intel_documents", 1) == 1 and Story.evidence() == 6 and not Story.leads_text().contains("evidence 6"),
+		"the fourth makes an evidence point: act 2 no longer waits on the count (%s)" % ", ".join(Story.act_waits(2)))
+	check(Story.act() == 1 and Story.act_waits(2).has("its contracts, still to be written"), "act 2 is still a stub, so the story stays at act 1")
 	check(Story.leads_text().contains("Halden Maritime") and int((Contracts._public().story as Dictionary).get("evidence", -1)) == Story.evidence(),
 		"the Leads list every clue, and the contracts' view carries the story to clients")
 	# The save round trip.

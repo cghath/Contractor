@@ -10,13 +10,15 @@ extends RefCounted
 ## - "done": story contract ids done; "offered": {story id: cid} on the board or held;
 ##   "back_day": {story id: the day a failed one comes back}; "acts_done": [acts closed].
 ##
-## A story contract goes on the board once those it comes "after" are done and the evidence count
-## reaches its "evidence" (server_update: a new campaign, each day, each contract closed). It's an
+## Captain, 2026-10-20 ("both"): a story contract goes on the board once those it comes "after"
+## are done and the "clues" it needs are found (server_update: a new campaign, each day, each
+## contract closed); an act after the first opens at its "evidence" count. It's an
 ## existing contract type with its own title, brief and objectives ("def": ContractGen's ctx
 ## "def"), "story" naming it; it never expires on the board. Done, its clue is found (its intel
 ## came out: the required objective is the intel); failed, aborted or lapsed, it comes back
-## REOFFER_DAYS later. An act closes with its last contract; the next opens when it's built and
-## its "needs_fob" is met (ZoneControl.home()). Read-only accessors work on clients too (the
+## REOFFER_DAYS later. An act closes with its last contract; the next opens when it's built, the
+## evidence reaches its "evidence" and its "needs_fob" is met (ZoneControl.home()). Read-only
+## accessors work on clients too (the
 ## contracts' view carries the section, Contracts._public "story").
 
 const SECTION := &"story"
@@ -44,7 +46,7 @@ static func data() -> Dictionary:
 	return MissionRegistry.data().get("story", {}) as Dictionary
 
 
-## The acts: [{"act", "name", "summary", "built", "needs_fob"}].
+## The acts: [{"act", "name", "summary", "built", "needs_fob", "evidence"}].
 static func acts() -> Array:
 	return data().get("acts", [])
 
@@ -104,6 +106,31 @@ static func clues() -> Array:
 	return _s().get("clues", [])
 
 
+static func has_clue(id: String) -> bool:
+	return clues().any(func(k: Dictionary) -> bool: return String(k.get("id", "")) == id)
+
+
+## The clue ids story contract `d` needs that aren't found yet.
+static func missing_clues(d: Dictionary) -> Array:
+	return (d.get("clues", []) as Array).filter(func(k: Variant) -> bool: return not has_clue(String(k)))
+
+
+## What act `n` still waits for before it opens (words; [] when it can): its contracts written,
+## the evidence count, a FOB ashore.
+static func act_waits(n: int) -> PackedStringArray:
+	var out := PackedStringArray()
+	var a := act_def(n)
+	if a.is_empty():
+		return out
+	if evidence() < int(a.get("evidence", 0)):
+		out.append("evidence %d (have %d)" % [int(a.evidence), evidence()])
+	if bool(a.get("needs_fob", false)) and ZoneControl.home_is_lhd():
+		out.append("a FOB ashore")
+	if not bool(a.get("built", false)):
+		out.append("its contracts, still to be written")
+	return out
+
+
 static func is_done(id: String) -> bool:
 	return id in (_s().get("done", []) as Array)
 
@@ -154,13 +181,13 @@ static func server_update() -> Array:
 
 
 ## Whether story contract `d` should go on the board now: not done, not on offer, those it
-## comes after done, the evidence count reached, its come-back day passed, and not a stub.
+## comes after done, the clues it needs found, its come-back day passed, and not a stub.
 static func due(d: Dictionary) -> bool:
 	var s := _s()
 	var id := String(d.get("id", ""))
 	if bool(d.get("stub", false)) or is_done(id) or (s.get("offered", {}) as Dictionary).has(id):
 		return false
-	if int(d.get("act", 1)) != act() or evidence() < int(d.get("evidence", 0)):
+	if int(d.get("act", 1)) != act() or not missing_clues(d).is_empty():
 		return false
 	if int((s.get("back_day", {}) as Dictionary).get(id, 0)) > Economy.day():
 		return false
@@ -290,8 +317,8 @@ static func on_day_advanced(_today: int, _days: int) -> void:
 		server_update()
 
 
-## Host: the act closes when all its built contracts are done; the next opens when it's built
-## and, if it "needs_fob", home is the FOB.
+## Host: the act closes when all its built contracts are done; the next opens when nothing in
+## act_waits holds it (built, its evidence count reached, the FOB if it "needs_fob").
 static func _advance_act(s: Dictionary) -> void:
 	var a := int(s.act)
 	var mine := contract_defs(a).filter(func(d: Dictionary) -> bool: return not bool(d.get("stub", false)))
@@ -304,9 +331,7 @@ static func _advance_act(s: Dictionary) -> void:
 			Contracts._notify_all(LINE_ACT_DONE_LHD % a)
 		_changed()
 	var next := act_def(a + 1)
-	if next.is_empty() or not bool(next.get("built", false)):
-		return
-	if bool(next.get("needs_fob", false)) and ZoneControl.home_is_lhd():
+	if next.is_empty() or not act_waits(a + 1).is_empty():
 		return
 	s.act = a + 1
 	Contracts._notify_all(LINE_ACT_OPEN % String(next.get("name", "Act %d" % (a + 1))))
@@ -344,18 +369,16 @@ static func leads_text() -> String:
 			for after: Variant in d.get("after", []):
 				if not is_done(String(after)):
 					need.append(String(contract_def(String(after)).get("name", after)))
-			if evidence() < int(d.get("evidence", 0)):
-				need.append("evidence %d (have %d)" % [int(d.evidence), evidence()])
+			for k: Variant in missing_clues(d):
+				need.append("the clue from %s" % _clue_source(String(k)))
 			waiting = "Next: %s, once %s." % [String(d.get("name", id)), ", ".join(need)] if not need.is_empty() else "Next: %s." % String(d.get("name", id))
 		break
 	if waiting == "":
 		var next := act_def(a + 1)
 		if next.is_empty():
 			waiting = "The trail goes cold here for now."
-		elif not bool(next.get("built", false)):
-			waiting = "Act %d (%s) is still to come." % [a + 1, String(next.get("name", "?"))]
-		elif bool(next.get("needs_fob", false)) and ZoneControl.home_is_lhd():
-			waiting = "Act %d (%s) waits for a FOB ashore." % [a + 1, String(next.get("name", "?"))]
+		else:
+			waiting = "Act %d (%s) waits for %s." % [a + 1, String(next.get("name", "?")), ", ".join(act_waits(a + 1))]
 	lines.append(waiting)
 	var found := clues()
 	if found.is_empty():
@@ -363,3 +386,11 @@ static func leads_text() -> String:
 	for k: Dictionary in found:
 		lines.append("- %s" % String(k.get("text", "")))
 	return "\n".join(lines)
+
+
+## The story contract whose clue `clue_id` is, by name (for the Leads).
+static func _clue_source(clue_id: String) -> String:
+	for d: Dictionary in data().get("contracts", []):
+		if String((d.get("clue", {}) as Dictionary).get("id", "")) == clue_id:
+			return String(d.get("name", d.get("id", clue_id)))
+	return clue_id

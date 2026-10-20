@@ -1,103 +1,138 @@
-# The story
+# The story: a proposal
 
-The campaign's story as decided, and how it plays. **Captain** marks his calls (from the design doc,
-"Missions"); **Proposed** marks mine, for him to confirm or change. Code: `scripts/campaign/story.gd`
-(class `Story`, campaign section `"story"`), data: `data/contracts.json` `"story"`. Tests:
-`tests/story_test.gd`.
+**Status:** drafted for the Captain's review (Captain, 2026-10-20: "Draft, then I review"). He
+then picked four of the big calls the same day: **the mastermind is the consortium (A)**, **four
+acts**, **act 1 is the four beats with the FOB after**, and **intel moves the arc both ways** (each
+story contract needs its own clue; the evidence count gates the acts). Act 1 is built on that.
+Everything else is still **Proposed**, and the calls left open are listed in section 8.
 
-## 1. The shape
+## 1. What's decided (Captain)
 
-- **Captain:** a loose main storyline plus per-faction arcs that unlock with reputation. Contracts are
-  mostly generated from templates; a few handmade story contracts carry the key beats.
-- **Captain:** the main plot: a rival PMC, the **Vantage Group**, is the face of a conspiracy fuelling
-  the regional war. The player's intel slowly uncovers who is behind it, leading toward the late-game
-  player faction. The early game is mostly fighting terrorist factions (Black Ridge).
-- **Captain:** intel is a physical item that opens leads. The rival PMC can later send hit teams; heat
-  brings bounty hunters, and Nemesis-style named hunter squads at high heat.
+From mission_brainstorm.md ("Story", "Rival PMC in play"), the design doc ("Missions") and
+ChrisPlan_handoff.md ("Quest, story" items):
 
-## 2. The main arc, in acts
+- A **loose main storyline that surfaces every few weeks of campaign time** and leads into the
+  late-game player faction, plus **short arcs for each major faction** that unlock as reputation
+  with it grows.
+- **Main plot:** someone is deliberately fuelling the regional war, and a bigger, ruthless rival PMC
+  is the public face of that conspiracy. The PMC keeps turning up on the other side of the player's
+  jobs; **intel slowly reveals who is behind it**; the story builds to **taking them down as the
+  player's faction rises**.
+- The story PMC is the **Vantage Group** (faction set, wave 6b call 4). It's often the rival team on
+  regular jobs (RivalTeam already races the squad and its leaders carry a `vantage_ledger`), the
+  enemy in story contracts, and later it **sends hit teams** after the squad.
+- **The early game is mostly fighting terrorist factions** (Black Ridge).
+- Contracts are mostly generated; **a few handmade story contracts mark the key beats**.
+- **Intel is a physical item that opens leads.** Story items are "rival PMC evidence (ledgers,
+  contracts, a drive), crash-site flight recorder", set by the contract.
+- Heat brings bounty hunters; at high heat, **Nemesis-style named hunter squads** (built in wave 6d).
+- Home is the LHD until the company takes a zone for its FOB (docs/lhd_home.md, built).
 
-| Act | Name | Where home is | What the player learns | Status |
-| --- | --- | --- | --- | --- |
-| 1 | The coast | the LHD | Black Ridge isn't smuggling its weapons; a contractor ships them, and that contractor is Vantage. | **Built** |
-| 2 | Ashore | the FOB | Vantage isn't freelancing: it arms both Black Ridge and the Eastern Concord's officers, and its pay comes through a shipping front (Halden Maritime). | Data stub |
-| 3 | The money | the FOB | Who owns Halden: a consortium that profits from the war going on (contracts, reconstruction, the ports). Vantage hit teams come after the company. | Data stub |
-| 4 | The company's own | the FOB | The allies won't move against the backers. The company becomes its own faction (the late-game player faction, campaign operations). | Data stub |
+## 2. Who's behind it: the mastermind (Captain: A, the consortium)
 
-All of act 1 and the names in acts 2-4 (Halden Maritime, the consortium) are **Proposed**.
-
-**Proposed, how an act moves on:** each act has its story contracts in order. A story contract goes on
-the board once the ones before it are done and the evidence count reaches its number; it stays there
-until taken (no expiry), and a failed, aborted or lapsed one comes back the next day. An act closes
-when its last contract is done. Act 2 also waits for the FOB (section 7).
-
-## 3. Act 1, "The coast" (built)
-
-The client is **Meridian Logistics** (the company's first employer); the enemy is **Black Ridge**
-until the finale, which is against **Vantage**. All four are existing contract types with their own
-title, brief and objectives (data/contracts.json `"story"."contracts"`). **Proposed**, all of it.
-
-| # | Contract | Type | Unlocks when | The intel, and what it says (the clue) |
-| --- | --- | --- | --- | --- |
-| 1 | **Paper trail** | intel grab | the campaign starts | Black Ridge's laptop: their rifles came in sealed crates with a contractor's shipping marks, not smuggled. |
-| 2 | **The quartermaster** | manhunt (two zones) | 1 done, evidence 1 | Black Ridge's quartermaster, taken alive next door: he names who he paid, a Vantage Group account. |
-| 3 | **The crates** | supply line (two zones) | 2 done, evidence 2 | The waybills at the cache: Vantage escorts the convoys that bring the crates in. |
-| 4 | **Vantage point** | raid | 3 done, evidence 3 | A Vantage team's field ledger (`vantage_ledger`): Vantage pays Black Ridge's commanders, and the money comes through Halden Maritime. Act 1 closes. |
-
-The liaison calls each one in on the radio when it goes on the board, and again when it's done
-(`Story.LINE_*`, in the style of zone_control.gd's).
-
-## 4. Intel and the evidence count (the clue board)
-
-- **Proposed:** the story keeps a list of **clues**, each a line of what a piece of intel said, and an
-  **evidence** count. The contract board shows them under **Leads** (text only): the act, the evidence
-  count, what the next story contract waits for, and every clue so far.
-- A story contract's clue comes from its intel: its required objective is the intel itself (the laptop,
-  the quartermaster, the waybills, the ledger), so a contract done means the intel came out with it.
-  Each clue is worth 1 evidence, the ledger 2.
-- Other intel counts too, so ordinary work moves the story along: every 4 pieces of ordinary intel
-  turned in at a debrief is 1 evidence ("scraps"), and each Vantage ledger turned in (the rival teams'
-  leaders carry them) is 1 more, up to 3. Selling intel to another faction gives no evidence.
-- The evidence count only opens a story contract once the one before it is done, so it can't skip the
-  story ahead. It does mean a player who sells or loses a clue can still go on.
-
-## 5. Faction arcs (data stubs)
-
-**Captain:** per-faction arcs unlock with reputation. **Proposed:** three, each opening at the
-Trusted tier (30) with that faction, two or three story contracts long:
-
-| Arc | Faction | Opens at | The thread |
+| | Who | The twist | What it does to the late game |
 | --- | --- | --- | --- |
-| Company man | Meridian Logistics | Trusted | A Meridian manager has been signing Vantage's escort contracts. Expose him or keep it quiet for a price. |
-| Salvage rights | Coastal Salvage Union | Trusted | The Union's boats see every ship that comes in. Protect a salvage job; they trade what they know of Halden's shipping. |
-| Liaison | US Forces | Trusted | Joint operations with the allies: a downed crew, a defend-and-hold. They share what they have on Vantage, and later won't act on it. |
+| **A** | A **reconstruction and shipping consortium** (working name: Halden). It wins the rebuilding contracts, runs the ports and sells to every side. | Nobody in uniform. The war is a business plan. | The player faction's rise is economic as much as military: take their ports, contracts and backers away. |
+| **B** | An **allied government's intelligence service**, running a deniable proxy war through Vantage to keep a rival power bogged down. | The company's own allies (the US, UK or Canada employers) are paying for it. Reputation with them turns double-edged. | The player faction breaks from the allies. A real choice: expose them and lose allied gear and support, or stay quiet and keep it. |
+| **C** | **Meridian Logistics**, the company's first employer. It hires the player to clean up the fires its own partner, Vantage, keeps lighting. | The client who's been paying you since day 1. | Meridian goes from employer to enemy mid-campaign. The player faction takes over its contracts and its region. |
 
-## 6. Hit teams and named hunters
+**Captain, 2026-10-20: A.** The consortium's name (Halden) is still a working name (Proposed).
+**Proposed:** B's allied officials appear as its customers in act 3.
 
-What's already built carries on: rival Vantage teams race the squad for some contracts (RivalTeam),
-heat brings hunter teams, and named hunter squads come back at high heat (EnemyResponse, Economy's
-nemesis records, wave 6d). **Proposed** for the story:
+## 3. The main arc in acts (Captain: four acts)
 
-- From act 2, Vantage itself sends **hit teams**: at high Vantage heat, one of its named hunter squads
-  comes after the company on a deployment, whatever the contract, and its leader carries a ledger.
-- From act 3, a hit team can come for a squadmate at the FOB (a defend-the-base beat, LZ-5's assaults).
-- Not built yet: acts 2-4 are data stubs, so nothing here changes how the hunters work today.
+The acts' names, reveals and endings are Proposed.
 
-## 7. The LHD and the FOB
+| Act | Working name | Home | What the intel shows | Ends with |
+| --- | --- | --- | --- | --- |
+| 1 | The coast | the LHD | Black Ridge's new weapons aren't smuggled. They're delivered, and Vantage is the one delivering them. | Proof that Vantage arms Black Ridge. |
+| 2 | Ashore | the FOB | Vantage works for someone. The money trail leads to the mastermind's front. Vantage starts sending hit teams. | The front's name. |
+| 3 | The money | the FOB | Who the mastermind is, and who protects them (section 2). | A turning point: the allies won't act, or can't. |
+| 4 | The company's own | the FOB | The player faction goes after the mastermind directly (the campaign-operation tier). | Taking them down. |
 
-The LHD session's beat (docs/lhd_home.md, zone_control.gd) stays as it is: a zone flips once its HQ
-and QRF bases are down, the client's liaison says the LHD's charter is running out, and a
-seize-and-hold contract there makes it the FOB. **Proposed:** act 1 plays from the LHD, and **act 2
-opens once act 1 is done and the FOB is built**, in either order. Done with act 1 while still on the
-LHD, the liaison says the next leads are inland and the company will need ground of its own.
+**Pacing (Proposed, from "surfaces every few weeks"):** a story contract can't come up within
+STORY_GAP_DAYS (Proposed: 10) of the last one. Act 1 runs 3-4 story contracts over the first
+4-6 campaign weeks, while generated work fills the time between.
 
-## 8. Calls for the Captain
+**Pacing is not built yet:** the gap between story contracts waits for the Captain's call.
 
-1. Act 1's four contracts, their order and their clues (section 3).
-2. The evidence rules: clue 1 each (the ledger 2), 4 ordinary intel = 1, Vantage ledgers 1 each up to
-   3, selling gives none (section 4).
-3. Story contracts never expire, and come back the day after a failure.
-4. The names: Halden Maritime (Vantage's paymaster) and an unnamed consortium behind it; acts 2-4.
-5. The three faction arcs, opening at Trusted (section 5).
-6. Act 2 waits for both act 1 and the FOB (section 7).
-7. Leads on the contract board, as text (section 4).
+**Act 1 (Captain: these four beats, built; the FOB comes after).** The client is Meridian. Each beat
+is an existing contract type (data/contracts.json `"story"`). Titles, briefs, clue text and the
+liaison's lines are Proposed:
+
+| # | Contract | Type | Needs | Its clue (evidence) |
+| --- | --- | --- | --- | --- |
+| 1 | Paper trail | intel grab, against Black Ridge | the campaign's start | Crates with a contractor's shipping marks (1) |
+| 2 | The quartermaster | two-zone manhunt | 1 done, its clue | He paid a Vantage Group account (1) |
+| 3 | The crates | two-zone supply line, plus the waybills | 2 done, its clue | Vantage escorts the convoys (1) |
+| 4 | Vantage point | raid against Vantage, for its ledger | 3 done, its clue | Vantage pays Black Ridge, and is paid through Halden Maritime (2) |
+
+## 4. Named characters (Proposed, all names placeholders)
+
+- **The client's liaison**: the voice on the radio who calls story contracts in, in the style of
+  the LHD's liaison lines (zone_control.gd). Alternatives: one liaison for the whole story, or one
+  per employer.
+- **A Vantage field commander**: the face of Vantage, who leads the hit teams from act 2. Tie them
+  to the Nemesis system: a named hunter squad that remembers the company. Killed, they're replaced
+  by a worse one. Alternative: they survive to act 4 however often their teams are beaten.
+- **Someone inside the conspiracy who wants out**: a source who feeds the company leads in act 3.
+  Alternatives: a Vantage contractor, a consortium accountant, or an allied officer (fits B).
+
+## 5. How intel moves the arc (Captain: both, C)
+
+- **A. Evidence count (built as plumbing).** Clues found add evidence. A story contract opens once
+  the one before it is done and the count reaches its number. Ordinary intel adds to it too
+  (Proposed: 4 pieces turned in = 1 evidence; each Vantage ledger = 1, up to 3), so normal work
+  moves the story along. Selling intel gives none. Simple, and hard to soft-lock.
+- **B. Clue board.** Named clues, each from a specific item (the ledger, the drive, the flight
+  recorder). A story contract needs particular clues, not a count. More authored; a lost clue needs
+  a way back in (re-offered intel).
+- **C. Both (Captain, 2026-10-20; built).** Each story contract needs the clue of the one before
+  it. The evidence count gates the acts: Proposed, act 2 at 6, act 3 at 10, act 4 at 14. Act 1's
+  clues make 5, so a little ordinary intel (or one Vantage ledger) is needed on top to open act 2.
+  A done contract always brings its clue (its required objective is the intel), so no clue can be
+  lost.
+
+Either way the Leads section on the contract board shows the act, the evidence, what the next
+story contract waits for, and every clue's line so far (text only).
+
+## 6. Faction arcs, hit teams, the LHD (Proposed)
+
+- **Faction arcs**, each opening at Trusted (30), 2-3 story contracts long. Candidates:
+  - Meridian: a manager signing Vantage's escort deals (this clashes with mastermind C).
+  - The Coastal Salvage Union: their boats see every ship, so they trade shipping intel.
+  - The US forces: joint operations, and they share what they know of Vantage (this becomes
+    double-edged under B).
+- **Hit teams:** from act 2, at high Vantage heat, a named Vantage hunter squad comes on any
+  deployment. From act 3, they can raid the FOB (LZ-5's assaults). These use what's built
+  (EnemyResponse hunters, Economy's nemesis records, RivalTeam).
+- **The LHD-to-FOB beat** stays as built. **Captain:** act 1 plays from the LHD, and act 2 opens
+  once act 1 is done and the FOB is built, in either order (and the evidence count is reached).
+
+## 7. What's built
+
+`scripts/campaign/story.gd` (class `Story`), campaign section `"story"`, data in
+data/contracts.json `"story"`. Tests: `tests/story_test.gd`.
+
+- **State:** act, evidence, scraps, ledgers, clues, done, offered, back_day, acts_done. Saved with
+  the campaign; clients get it in the contracts' view.
+- **Story contracts from data:** an existing type with its own name, brief and objectives
+  (ContractGen's `"def"`; an objective may place its own piece, such as the ledger). One goes on the
+  board once the contracts in its "after" are done and its "clues" are found. It never expires
+  there, and comes back the day after a failure. Done, it brings its clue, and the liaison says so.
+- **Acts:** an act closes with its last contract. The next opens once it's written, its "evidence"
+  count is reached and the FOB is built ("needs_fob").
+- **Intel advancing the count:** ordinary intel and Vantage ledgers turned in at the debrief add
+  evidence (section 5's numbers).
+- **Leads:** a text section on the contract board: the act, the evidence, what the next story
+  contract or act waits for, and every clue so far.
+- **Act 1's four contracts** (section 3). Acts 2-4 and the faction arcs are data stubs.
+
+## 8. Calls still open for the Captain
+
+1. The names and text: Halden, the clue lines, the liaison's lines, the act names.
+2. The pacing gap between story contracts (Proposed: 10 days; not built).
+3. The characters: one liaison or one per employer, and the Vantage commander as a Nemesis hunter (section 4).
+4. The evidence numbers: 4 ordinary intel = 1, ledgers 1 each up to 3, acts at 6 / 10 / 14 (section 5).
+5. The faction arcs, and whether they open at Trusted (section 6).
+6. The hit teams' timing: from act 2 on deployments, from act 3 at the FOB (section 6).

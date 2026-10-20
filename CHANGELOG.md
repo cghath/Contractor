@@ -30,10 +30,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - **The quartermaster**, a two-zone manhunt.
   - **The crates**, a two-zone supply line.
   - **Vantage point**, a raid for a Vantage team's ledger.
-  - Each one unlocks after the one before it, once the evidence count is high enough.
+  - Each one unlocks once the one before it is done and its clue is found (Captain: "both").
   - The client's liaison calls each one in on the radio.
-- **Clues and evidence.** Each story contract's intel adds a clue and evidence. Ordinary intel
-  turned in counts too: 4 pieces make 1 evidence, and each Vantage ledger is 1, up to 3.
+- **Clues and evidence.** Each story contract's intel adds a clue and evidence, and the evidence
+  count opens each later act. Ordinary intel turned in counts too: 4 pieces make 1 evidence, and
+  each Vantage ledger is 1, up to 3.
 - **Leads on the contract board.** It shows the act, the evidence, what the next story contract
   waits for, and every clue so far.
 - **Later acts and three faction arcs are data stubs**, waiting to be written.
