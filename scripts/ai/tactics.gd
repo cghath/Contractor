@@ -150,6 +150,14 @@ const AMMO_FULL_MAGS := 5.0
 ## STACK_READY_M of their places (or STACK_WAIT_S after the first got there) they go in one
 ## after the other, ENTRY_GAP_S apart.
 const STACK_OUT_M := 0.6
+## Stacking outside, never in (Captain, 2026-10-20: on a clear order "stacking ... inside instead of
+## outside"): a stack spot along the wall is tried STACK_OUT_M out, then each of these further out,
+## then on the door's other side, then in a column straight out from it; it's kept only if the
+## navmesh's nearest point is within STACK_SNAP_M of it (not through a wall), outside the building
+## and on the door's outer side. The nearest-point snap used to pull a spot by a corner or an
+## uneven wall in through the wall, into the rooms.
+const STACK_OUT_TRIES: Array[float] = [0.6, 1.2, 2.0]
+const STACK_SNAP_M := 0.6
 const STACK_FIRST_M := 1.1
 const STACK_GAP_M := 0.9
 const STACK_READY_M := 1.0
@@ -880,8 +888,7 @@ static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 	var map := (units[0] as SquadAI).body.get_world_3d().navigation_map
 	var stack: Array[Vector3] = []
 	for i in units.size():
-		var p: Vector3 = e.door + normal * STACK_OUT_M + along * side * (STACK_FIRST_M + STACK_GAP_M * i)
-		stack.append(NavigationServer3D.map_get_closest_point(map, p))
+		stack.append(stack_spot(b, e, map, side, i, stack))
 	# Each floor's rooms (a building scanned before floors were kept is all one floor).
 	var per_floor: Array = []
 	for f: Dictionary in b.get("floors", []):
@@ -905,6 +912,28 @@ static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 	return {"building": b, "entrance": e, "stack": stack, "rooms": floors[0], "floors": floors, "units": units.size(),
 		"ready": {}, "first_ready_at": INF, "go_at": INF, "done": {}, "floor_of": {}, "floor_done": floor_done,
 		"floor_first": floor_go.duplicate(), "floor_go": floor_go}
+
+
+## Stack spot `i` beside entrance `e` of building `b` (STACK_OUT_TRIES): outside it, on the
+## door's outer side, the `side` of the door the team came from first; clear of the spots `taken`.
+static func stack_spot(b: Dictionary, e: Dictionary, map: RID, side: float, i: int, taken: Array[Vector3] = []) -> Vector3:
+	var door: Vector3 = e.door
+	var normal: Vector3 = e.normal
+	var along := normal.cross(Vector3.UP)
+	for s: float in [side, -side]:
+		for out_m: float in STACK_OUT_TRIES:
+			var want := door + normal * out_m + along * s * (STACK_FIRST_M + STACK_GAP_M * i)
+			var got := NavigationServer3D.map_get_closest_point(map, want)
+			if stack_spot_ok(b, door, normal, want, got) and not taken.any(func(p: Vector3) -> bool: return p.distance_to(got) < STACK_GAP_M * 0.6):
+				return got
+	return NavigationServer3D.map_get_closest_point(map, door + normal * (STACK_FIRST_M + STACK_GAP_M * i + 0.5))  # a column, straight out
+
+
+## Whether a stack spot the navmesh gave (`got`, asked for `want`) is a good one: not pulled
+## through a wall, outside building `b`, on the door's outer side.
+static func stack_spot_ok(b: Dictionary, door: Vector3, normal: Vector3, want: Vector3, got: Vector3) -> bool:
+	return Vector2(got.x - want.x, got.z - want.z).length() <= STACK_SNAP_M and not Buildings.contains(b, got) \
+		and Vector3(got.x - door.x, 0.0, got.z - door.z).dot(normal) > 0.2
 
 
 ## Where unit `index` of `count` falls back to from a threat at `threat`: BREAK_BEHIND_LEAD_M

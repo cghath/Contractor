@@ -177,6 +177,7 @@ func _physics_process(delta: float) -> void:
 	_update_heading()
 	_update_trail()
 	_tick_town()
+	_tick_follow_in(delta)
 	_context_cd -= delta
 	if _context_cd <= 0.0:
 		_context_cd = CONTEXT_S
@@ -188,6 +189,103 @@ func _physics_process(delta: float) -> void:
 	if tactics == null:
 		tactics = SquadTactics.new(self)
 	tactics.think(Soldier._now())
+
+
+## Following the leader into a building (Captain, 2026-10-20: ordered "clear on me" they clear on
+## him; "otherwise they should stack up and clear on their own"): a friendly squad following a
+## human leader, out of Safe and away from the base, whose leader walks into a building with
+## rooms, stacks on its door (the one nearest them: the one he used) and clears it on its own,
+## the followers who aren't busy (FOLLOW_IN_MIN of them at least). Once per building per time he
+## goes in; given up once he's FOLLOW_IN_LEAVE_M from it, back to following.
+const FOLLOW_IN_CHECK_S := 0.5
+const FOLLOW_IN_MIN := 2
+const FOLLOW_IN_LEAVE_M := 12.0
+## Only a walk in counts: moved further than this between checks (a respawn, a level switch, a
+## teleport) he's "placed", and a building he's placed in only counts once he's left it.
+const FOLLOW_IN_JUMP_M := 6.0
+var _follow_in_cd := 0.0
+var _follow_in_last := Vector3.INF
+var _follow_in_placed := false  # put inside a building, not walked in: wait till he's out
+var _follow_in := {}  # the building being cleared after him: {"centre", "op"}
+
+
+func _tick_follow_in(delta: float) -> void:
+	_follow_in_cd -= delta
+	if _follow_in_cd > 0.0:
+		return
+	_follow_in_cd = FOLLOW_IN_CHECK_S
+	var lead: Variant = leader
+	if lead == null or not is_instance_valid(lead) or (lead as Soldier).is_ai() or (lead as Soldier).faction != &"friendly" \
+			or not (lead as Soldier).vitals.is_up():
+		return
+	var at := (lead as Soldier).global_position
+	var jumped := _follow_in_last != Vector3.INF and at.distance_to(_follow_in_last) > FOLLOW_IN_JUMP_M
+	_follow_in_last = at
+	if jumped:
+		_follow_in_placed = true
+	if not _follow_in.is_empty():
+		var centre: Vector3 = _follow_in.centre
+		var inside := Buildings.contains(_follow_in.op.building, at)
+		var on_it := brains().filter(func(ai: SquadAI) -> bool: return is_same(ai.ordered.get("op"), _follow_in.op))
+		if on_it.is_empty():
+			if not inside:
+				_follow_in = {}  # done (or ordered to something else) and he's out: ready for the next one
+			return
+		if Vector2(at.x - centre.x, at.z - centre.z).length() > FOLLOW_IN_LEAVE_M and not inside:
+			for ai: SquadAI in on_it:
+				ai.give_tactic({})  # he's moved on: back to following him
+			_follow_in = {}
+		return
+	var lvl: Variant = CompoundLevel.current(lead)
+	if lvl != null and (lvl as Node).has_method(&"is_base") and bool((lvl as Node).call(&"is_base")):
+		return
+	var b := Buildings.at(lead, at)
+	if b.is_empty():
+		_follow_in_placed = false  # out in the open: the next building he walks into counts
+		return
+	if _follow_in_placed or (b.get("rooms", []) as Array).is_empty():
+		return
+	var units: Array[SquadAI] = []
+	for ai: SquadAI in brains():
+		if ai.order == Order.FOLLOW and ai.ordered.is_empty() and ai.body.vitals.is_up() and ai.combat_mode != CombatMode.SAFE \
+				and not ai.intent in [SquadAI.Intent.CASUALTY, SquadAI.Intent.HEAL, SquadAI.Intent.RELOAD]:
+			units.append(ai)
+	if units.size() < FOLLOW_IN_MIN:
+		return
+	var op := SquadTactics.clear_op(b, units)
+	if op.is_empty():
+		return
+	op["breach"] = auto_breach(b, units)
+	op["auto"] = true
+	for i in units.size():
+		units[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
+	_follow_in = {"centre": b.get("centre", at), "op": op}
+	units[0]._callout(&"tactic", "Stacking up!")
+	SessionLog.note("follow-in: %d of %s's squad stack on the building at %s and clear it (breach '%s')" % [units.size(), (lead as Soldier).name, b.get("centre", at), op.breach])
+
+
+## The breach a team clearing building `b` on its own uses (G-14, 2026-10-20: "the entry team
+## bangs a room before entry, never with civilians or an HVT inside as far as the squad knows"):
+## with an enemy it knows of inside, a flashbang, else a frag (a charge is for when it's ordered:
+## slow and loud); none with no enemy known inside, or with a civilian or any noncombatant seen in
+## there.
+func auto_breach(b: Dictionary, units: Array) -> String:
+	var enemy_in := false
+	for e: Dictionary in enemy_picture():
+		if Buildings.contains(b, e.pos as Vector3):
+			enemy_in = true
+			break
+	if not enemy_in:
+		return ""
+	for n: Node in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and s.vitals.is_up() and Person.is_noncombatant(s) and Buildings.contains(b, s.global_position):
+			return ""  # someone inside who mustn't be hurt
+	for how: String in ["flash", "frag"]:
+		for ai: SquadAI in units:
+			if Vitals.has_item(ai.body.inventory, SquadAI.BREACH_ITEMS[how]):
+				return how
+	return ""
 
 
 ## The AI brains of this squad's living soldiers, in members() order. Only those whose
@@ -485,6 +583,11 @@ func order_garrison(from: Soldier, point: Vector3, names := PackedStringArray())
 ## "Clear that building": the named units stack beside the building's entrance nearest them,
 ## then go in one after the other, pair by pair, room by room (SquadTactics.clear_op), and
 ## hold inside once it's clear.
+##
+## "On me" (`breach` "onme"; Captain, 2026-10-20: "when ordered to clear with me clear on me,
+## otherwise they should stack up and clear on their own"): they stack the same, say so, and
+## hold until `from` goes in through the door (CLEAR_ON_ME_M inside it), then follow him in one
+## after the other; if he goes down, they go in on their own.
 func order_clear(from: Soldier, point: Vector3, names := PackedStringArray(), breach := "") -> String:
 	leader = from
 	var b := Buildings.nearest(from, point, ORDER_BUILDING_M)
@@ -493,7 +596,14 @@ func order_clear(from: Soldier, point: Vector3, names := PackedStringArray(), br
 	var units := _able(names)
 	if units.is_empty():
 		return "Nobody selected can"
-	return _start_clear(b, units, breach)
+	var on_me := breach == ON_ME
+	var why := _start_clear(b, units, "" if on_me else breach)
+	if why == "" and on_me:
+		_town_op["on"] = from
+	return why
+
+
+const ON_ME := "onme"
 
 
 ## The stack on building `b` (SquadTactics.clear_op) with `breach` ("", "flash", "frag",

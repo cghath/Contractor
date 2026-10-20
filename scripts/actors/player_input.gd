@@ -665,10 +665,15 @@ func _tag_enemy() -> void:
 	body._server_tag_enemy.rpc_id(1, (node as Soldier).name)
 
 
+## How far the crosshair reaches for an order's point or target (Captain, 2026-10-20: "increase
+## the range the player can give squad ai orders"; was 150 m for a point, 300 m for a target).
+const ORDER_RANGE_M := 800.0
+
+
 func crosshair_ground() -> Variant:
 	var from := body.camera.global_position
 	var hit := body.get_world_3d().direct_space_state.intersect_ray(
-		PhysicsRayQueryParameters3D.create(from, from - body.camera.global_basis.z * 150.0, 1, [body.get_rid()]))
+		PhysicsRayQueryParameters3D.create(from, from - body.camera.global_basis.z * ORDER_RANGE_M, 1, [body.get_rid()]))
 	return null if hit.is_empty() else hit.position
 
 

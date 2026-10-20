@@ -41,6 +41,7 @@ const MENU := {
 				{"key": "4", "label": "That building, blow a way in (charge)", "cmd": "clear:charge", "point": true},
 				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
 				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
+				{"key": "7", "label": "That building, on me (they stack, you lead in)", "cmd": "clear:onme", "point": true},
 			]},
 			## Captain, 2026-10-17: a squad he leads no longer flanks or assaults on its own.
 			{"key": "0", "label": "Attack", "items": [
@@ -233,7 +234,7 @@ const MENU := {
 const NUMBER_KEYS := {KEY_1: "1", KEY_2: "2", KEY_3: "3", KEY_4: "4", KEY_5: "5", KEY_6: "6", KEY_7: "7", KEY_8: "8", KEY_9: "9", KEY_0: "0"}
 const F_KEYS := [KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12]
 ## How far "Target that enemy" looks under the crosshair.
-const AIM_RANGE := 300.0
+const AIM_RANGE := PlayerInput.ORDER_RANGE_M  # (was 300 m: Captain, 2026-10-20, longer order range)
 
 ## The selection path wraps past this width (logical px).
 const TITLE_W := 300.0

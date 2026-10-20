@@ -728,8 +728,20 @@ func _test_doctrine_pending() -> void:
 		for key: String in (file.doctrines[String(id)] as Dictionary):
 			if key != "name" and not (key in Doctrine.PENDING and key in pending) and not (key in Doctrine.WIRED and key in file.get("_wired", [])):
 				unmarked.append("%s.%s" % [id, key])
-	check(not Doctrine.ids().is_empty() and unmarked.is_empty() and pending.size() == Doctrine.PENDING.size() and String(file.get("_notes", "")).begins_with("PENDING"),
-		"every doctrine number is marked pending or wired, in the code and the file (unmarked: %s)" % [unmarked])
+	check(not Doctrine.ids().is_empty() and unmarked.is_empty() and pending.is_empty() and Doctrine.PENDING.is_empty() and String(file.get("_notes", "")).begins_with("Every number acts"),
+		"every doctrine number is wired, in the code and the file (G-15, 2026-10-20; unmarked: %s)" % [unmarked])
+	# G-15: the numbers act, each as a lean against its side's usual doctrine: the usual enemy
+	# (insurgents) and the squad (the PMC) fight exactly as tuned; a regular army on the hostile
+	# side reacts quicker, aims tighter, frags more, pushes sooner and holds steadier.
+	var h := &"hostile"
+	var same := true
+	for key: String in ["engage_m", "reaction", "frag_cooldown_s", "frag_wait_s", "advance_after_s", "morale_broken", "cover_fire_s"]:
+		same = same and is_equal_approx(Doctrine.factor(Doctrine.default_for(h), key, h), 1.0) and is_equal_approx(Doctrine.factor(Doctrine.default_for(&"friendly"), key, &"friendly"), 1.0)
+	check(same and is_zero_approx(Doctrine.offset(Doctrine.default_for(h), "aim_deg", h))
+		and Doctrine.factor(Doctrine.REGULAR, "reaction", h) < 1.0 and Doctrine.offset(Doctrine.REGULAR, "aim_deg", h) < 0.0
+		and Doctrine.factor(Doctrine.REGULAR, "frag_cooldown_s", h) < 1.0 and Doctrine.factor(Doctrine.REGULAR, "advance_after_s", h) < 1.0
+		and Doctrine.factor(Doctrine.REGULAR, "morale_broken", h) < 1.0 and Doctrine.offset(Doctrine.REGULAR, "flank", h) > 0.0,
+		"G-15: each side's usual enemy fights as tuned; a regular army reacts quicker, aims tighter, frags more, pushes sooner and wider, holds steadier")
 	# G-09: bursts by range; machine guns keep theirs; doctrine scales them.
 	var m4 := ItemDB.get_item(&"m4a1")
 	var close := SquadAI.burst_rounds(m4, 15.0, false, Doctrine.REGULAR)
@@ -1055,6 +1067,12 @@ func _test_multi_storey() -> void:
 	var names := PackedStringArray(mates.map(func(ai: SquadAI) -> String: return String(ai.body.name)))
 	var why := squad.order_clear(player, front_room, names)
 	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	if not op.is_empty():
+		var door: Vector3 = op.entrance.door
+		var outer: Vector3 = op.entrance.normal
+		var bad := (op.stack as Array).filter(func(p: Vector3) -> bool:
+			return Buildings.contains(found, p) or Vector3(p.x - door.x, 0.0, p.z - door.z).dot(outer) <= 0.2)
+		check(bad.is_empty(), "the stack forms outside the door, never inside (%s)" % [bad])
 	var up := {"first": -1.0, "gone_at": INF, "who": ""}  # (a lambda can't set the function's locals)
 	var visited := await _wait_until(func() -> bool:
 		for ai: SquadAI in mates:
@@ -1071,6 +1089,55 @@ func _test_multi_storey() -> void:
 		"floor by floor: nobody goes up before the ground floor's rooms are done (went up at %.1f, first upstairs at %.1f)" % [up.gone_at, up.first])
 	for ai: SquadAI in mates:
 		ai.give_tactic({})
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	await _seconds(0.5)
+	# Clear on me (Captain, 2026-10-20): they stack outside and hold, past STACK_WAIT_S, until he
+	# goes in; then in after him.
+	var outside_at: Vector3 = (found.entrances[0].outside as Vector3) + (found.entrances[0].normal as Vector3) * 6.0
+	_place(player, outside_at + Vector3.UP * 0.1)
+	await _seconds(0.5)
+	why = squad.order_clear(player, front_room, names, Squad.ON_ME)
+	var on_op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	var stacked := await _wait_until(func() -> bool: return not on_op.is_empty() and (on_op.ready as Dictionary).size() >= mates.size() - 1, 40.0)  # (one may still be walking up)
+	await _seconds(SquadTactics.STACK_WAIT_S + 1.0)
+	var held := not on_op.is_empty() and not is_finite(float(on_op.go_at))
+	var room: Dictionary = found.rooms[0]
+	_place(player, (room.centre as Vector3) + Vector3.UP * 0.1)
+	var went := await _wait_until(func() -> bool: return not on_op.is_empty() and is_finite(float(on_op.go_at)), 5.0)
+	check(why == "" and stacked and held and went,
+		"clear on me: they stack outside (%d of %d), hold past the usual wait (%s), and go in once he's inside (%s; %s)"
+		% [(on_op.get("ready", {}) as Dictionary).size(), mates.size(), held, went, why])
+	for ai: SquadAI in mates:
+		ai.give_tactic({})
+	# Following him into a building with no order: they stack on its door and clear it on their own,
+	# and drop it once he's walked away (Squad._tick_follow_in).
+	_place(player, outside_at + Vector3.UP * 0.1)
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	await _seconds(2.0)
+	# He walks in (steps, not a jump: a teleport inside doesn't count, Squad.FOLLOW_IN_JUMP_M).
+	var door_out: Vector3 = found.entrances[0].outside
+	var walk: Array[Vector3] = []
+	for p: Vector3 in [outside_at, door_out, found.entrances[0].door, found.entrances[0].inside, room.centre]:
+		walk.append(p)
+	for i in range(1, walk.size()):
+		var a: Vector3 = walk[i - 1]
+		var z: Vector3 = walk[i]
+		var steps := maxi(ceili(a.distance_to(z) / 2.0), 1)
+		for k in range(1, steps + 1):
+			_place(player, a.lerp(z, float(k) / steps) + Vector3.UP * 0.1)
+			await _seconds(0.3)
+	var auto := await _wait_until(func() -> bool:
+		return mates.any(func(ai: SquadAI) -> bool: return bool((ai.ordered.get("op", {}) as Dictionary).get("auto", false))), 4.0)
+	_place(player, outside_at + (found.entrances[0].normal as Vector3) * (Squad.FOLLOW_IN_LEAVE_M + 4.0) + Vector3.UP * 0.1)
+	var dropped := await _wait_until(func() -> bool: return mates.all(func(ai: SquadAI) -> bool: return ai.ordered.is_empty()), 4.0)
+	# Put inside it (a respawn, a teleport): not a walk in, no clear.
+	await _seconds(1.0)
+	_place(player, (room.centre as Vector3) + Vector3.UP * 0.1)
+	await _seconds(2.0)
+	var placed_no := not mates.any(func(ai: SquadAI) -> bool: return bool((ai.ordered.get("op", {}) as Dictionary).get("auto", false)))
+	check(placed_no, "put inside a building (a teleport, not a walk in): no clear")
+	_place(player, outside_at + Vector3.UP * 0.1)
+	check(auto and dropped, "following him in, they stack and clear it on their own (%s), and drop it when he walks off (%s)" % [auto, dropped])
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
 	await _seconds(0.5)
 	# A man on the roof behind the parapet sees a hostile in the street and takes him on.

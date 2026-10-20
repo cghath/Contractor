@@ -9,24 +9,35 @@ extends RefCounted
 ## friendly squad fights as a PMC; hostiles as their zone's people (an insurgent region's are
 ## insurgents, a regional army's regulars). A squad (Squad.doctrine) can be given another.
 ##
-## PENDING (audit A3-07, 2026-10-13): today only the doctrine's id acts, through SquadTactics'
-## option biases (SquadTactics.DOCTRINES). The numeric weights below and in the file are
-## proposals for Captain's tactics work that no AI code reads yet: the squad AI still uses its
-## own constants (hostiles pick targets out to SquadAI.SIGHT_RANGE, 300 m, the squad out to
-## SQUAD_SIGHT_RANGE, 300 m, whatever engage_m says; morale uses SquadAI.MORALE_SHAKEN/BROKEN...). Changing them changes nothing in a
-## fight until each is wired into the decision its note names, with a check, and taken off
-## PENDING and the file's "_pending". A per-unit doctrine (SquadAI.doctrine) is pending too.
+## Every weight acts now (AI bar G-15, finished 2026-10-20; Captain: the last AI bar gaps). Each
+## leans the squad AI's own tuned number by factor(): the weight over the same weight of its
+## side's usual doctrine (default_for: insurgents for the hostile side, the PMC for the squad), so
+## each side's usual enemy fights exactly as tuned (the P0362 accuracy and reaction calibration
+## was against insurgents) and another doctrine on that side is sharper or looser than it, a
+## regular army or the rival PMC among the hostiles. aim_deg adds its difference the same way:
+##   engage_m       how far out it picks targets (SquadAI target scan: reach x factor, never more
+##                  than the weapon and optic reach, G-27),
+##   reaction       the time to spot and react to a new target (SquadAI._build_awareness),
+##   aim_deg        degrees of aim error added (SquadAI._aim_error_deg),
+##   burst, burst_pause   burst length and the pause between (SquadAI.burst_rounds, pause_mult),
+##   cover_fire_s   how long after the last contact it keeps covering a moving buddy (SquadAI._shoot),
+##   frag_cooldown_s, frag_wait_s   a unit's frag rhythm (SquadAI._maybe_frag),
+##   morale_shaken, morale_broken   where aim suffers and where it breaks (SquadAI morale),
+##   advance_after_s   how long a hostile waits without sight before pushing a bound,
+##   flank          how far to the side of the enemy that bound goes (0 straight at him, 1 wide).
+## A per-unit doctrine (SquadAI.doctrine) is still to come: a squad's, or its side's.
 
 const PATH := "res://data/doctrines.json"
 const INSURGENT := &"insurgent"
 const REGULAR := &"regular"
 const PMC := &"pmc"
 ## The weights no AI reads yet (see the class notes); the file's "_pending" lists the same.
-const PENDING: Array[String] = ["engage_m", "reaction", "aim_deg", "cover_fire_s",
-	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
+const PENDING: Array[String] = []
 ## The weights the AI reads now (AI bar G-15, one at a time): burst and burst_pause (SquadAI
 ## burst_rounds and pause_mult, G-09). The file's "_wired" lists the same.
-const WIRED: Array[String] = ["burst", "burst_pause"]
+const WIRED: Array[String] = ["burst", "burst_pause", "engage_m", "reaction", "aim_deg", "cover_fire_s",
+	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
+
 ## What a weight is when the file lacks it: the squad AI's numbers before doctrines (engage_m:
 ## a hostile's sight, SquadAI.SIGHT_RANGE).
 const FALLBACK := {"engage_m": 200.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,
@@ -62,6 +73,18 @@ static func value(id: StringName, key: String) -> float:
 ## M4/Mk18, 600 m for an M110, 50 m for an M17). A doctrine can be set on either side's squad
 ## (Squad.doctrine), so a PMC's 300 m on a hostile still stops at 200 m. engage_m is pending:
 ## wiring it into target picking goes through here, so no doctrine can engage what it can't see.
+## Doctrine `id`'s `key` over its side's usual doctrine's (`side`: a faction, default_for): how
+## much it scales the AI's own number (1 for the usual doctrine itself, or a zero reference).
+static func factor(id: StringName, key: String, side: StringName) -> float:
+	var ref := value(default_for(side), key)
+	return value(id, key) / ref if ref > 0.0 else 1.0
+
+
+## Doctrine `id`'s `key` less its side's usual doctrine's: what it adds (aim_deg).
+static func offset(id: StringName, key: String, side: StringName) -> float:
+	return value(id, key) - value(default_for(side), key)
+
+
 static func engage_m(id: StringName, sight_m: float, weapon_m := INF) -> float:
 	return minf(value(id, "engage_m"), minf(sight_m, weapon_m))
 

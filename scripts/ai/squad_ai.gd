@@ -1372,7 +1372,7 @@ func _choose_intent() -> void:
 				scores[Intent.FALL_BACK] = 0.92  # a broken garrison runs: above fighting and care in contact
 		if Soldier._now() - _last_contact < INVESTIGATE_MEMORY_S or suspecting():
 			# Shaken (losses, suppression), it stays put in cover rather than searching the kill zone.
-			scores[Intent.INVESTIGATE] = 0.55 if morale >= MORALE_SHAKEN + 0.2 or suspecting() else 0.2
+			scores[Intent.INVESTIGATE] = 0.55 if morale >= morale_shaken() + 0.2 or suspecting() else 0.2
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
 	if care == Care.GUARD and is_instance_valid(casualty) and auto_tier(casualty) >= 1:
@@ -1565,10 +1565,18 @@ func _notice_fire(now: float) -> void:
 
 func _fight_from_context() -> void:
 	if body.faction != &"friendly":
-		if target == null and _no_los_s > ADVANCE_AFTER_S and not _buddy_bounding() and not _advancing:
+		var doctrine := _doctrine_id()
+		if target == null and _no_los_s > ADVANCE_AFTER_S * Doctrine.factor(doctrine, "advance_after_s", body.faction) and not _buddy_bounding() and not _advancing:
 			_no_los_s = 0.0
-			# Push one bound toward where the enemy was last seen: to cover, and only in good heart.
-			var spot: Variant = find_cover(body.global_position.move_toward(body.threat_pos, ADVANCE_STEP), ADVANCE_COVER_M) if morale >= ADVANCE_MORALE else null
+			# Push one bound toward where the enemy was last seen: to cover, and only in good heart;
+			# out to the side by the doctrine's flank (G-15: 0 straight at him, 1 a wide hook).
+			var toward := body.global_position.move_toward(body.threat_pos, ADVANCE_STEP)
+			var flank := maxf(Doctrine.offset(doctrine, "flank", body.faction), 0.0)  # (wider than his side's usual)
+			if flank > 0.0:
+				var to := Vector3(body.threat_pos.x - body.global_position.x, 0.0, body.threat_pos.z - body.global_position.z)
+				var side := 1.0 if (body.get_instance_id() & 1) == 0 else -1.0  # half go each way
+				toward += to.normalized().cross(Vector3.UP) * side * ADVANCE_STEP * flank * 0.75 if to.length() > 0.5 else Vector3.ZERO
+			var spot: Variant = find_cover(toward, ADVANCE_COVER_M) if morale >= ADVANCE_MORALE else null
 			if spot != null:
 				_advancing = true
 				_advance_anchor = spot
@@ -2998,7 +3006,7 @@ func _update_morale(dt: float) -> void:
 	var t := morale_target()
 	t0 = _p(&"morale_target", t0)
 	morale = move_toward(morale, t, (MORALE_FALL_PER_S if t < morale else MORALE_RISE_PER_S) * dt)
-	var state := "broken" if morale < MORALE_BROKEN else ("shaken" if morale < MORALE_SHAKEN else "steady")
+	var state := "broken" if morale < morale_broken() else ("shaken" if morale < morale_shaken() else "steady")
 	if state != _morale_state:
 		print("[tactics] %s %s (morale %.2f)" % [body.name, state, morale])
 		t0 = _p(&"morale_print", t0)
@@ -3008,7 +3016,7 @@ func _update_morale(dt: float) -> void:
 
 
 func broken() -> bool:
-	return morale < MORALE_BROKEN
+	return morale < morale_broken()
 
 
 ## Falls back (Intent.FALL_BACK): to cover FALL_BACK_M away from the threat (a friendly: toward
@@ -3586,6 +3594,8 @@ static func preferred_breach(units: Array) -> String:
 
 ## How far inside the doorway each man steps before his corner (the threshold).
 const DOORWAY_STEP_M := 0.9
+## Clearing on the leader (Squad.order_clear "onme"): he's gone in once this far past the doorway.
+const CLEAR_ON_ME_M := 0.5
 
 
 ## Clearing (SquadTactics.clear_op): to this unit's place in the stack, wait for the rest (or
@@ -3606,6 +3616,18 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		op.ready[slot] = true
 		op.first_ready_at = minf(float(op.first_ready_at), now)
 		body.want_crouch = true  # low in the stack
+		var lead: Variant = op.get("on")
+		if lead != null and is_instance_valid(lead) and (lead as Soldier).vitals.is_up():
+			# Clear on me: hold the stack until he goes in, then in after him.
+			if (op.ready as Dictionary).size() >= int(op.units) and not bool(op.get("told", false)):
+				op.told = true
+				_callout(&"tactic", "Stacked up. On you.")
+			var at := (lead as Soldier).global_position
+			var past := Vector3(at.x - door.x, 0.0, at.z - door.z).dot(op.entrance.normal as Vector3)
+			if past < -CLEAR_ON_ME_M or Buildings.contains(op.building, at):
+				op.go_at = now + SquadTactics.ENTRY_GAP_S  # he's in: after him
+				_callout(&"tactic", "Moving in!")
+			return
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
 			var wait := 0.0
 			if String(op.get("breach", "")) != "" and not op.get("breached", false):
@@ -3808,7 +3830,7 @@ func _find_target() -> Soldier:
 		return focus  # (deep in the leaves he's lost even when ordered: the search below takes over)
 	var best: Soldier = null
 	var best_score := INF
-	var reach := reach_m(body)  # (was SQUAD_SIGHT_RANGE / SIGHT_RANGE for all, 300 m)
+	var reach := reach_m(body) * minf(Doctrine.factor(_doctrine_id(), "engage_m", body.faction), 1.0)  # (was SQUAD_SIGHT_RANGE / SIGHT_RANGE for all, 300 m; G-15: an insurgent holds fire till nearer)
 	var limit := reach  # how far a man still counts: TARGET_CONSIDER_M past the nearest one spotted (G-10)
 	var nearest := INF
 	var taken := {}  # squadmates' targets, counted once this scan when the first is spotted
@@ -4156,7 +4178,8 @@ func _build_awareness(s: Soldier, leaves := 0.0) -> float:
 		if _preset == "":
 			_preset = Spotting.preset_of(body)
 		var suppressed := body.suppression >= SUPPRESSED
-		var t := Spotting.spot_seconds(body, s, _preset, _react_combat(), suppressed, Soldier._now(), leaves, not in_contact() and not suppressed)
+		var t := Spotting.spot_seconds(body, s, _preset, _react_combat(), suppressed, Soldier._now(), leaves, not in_contact() and not suppressed) \
+			* Doctrine.factor(_doctrine_id(), "reaction", body.faction)  # (G-15: some armies are quicker on the trigger)
 		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
 		_aware[id] = a
 	return a
@@ -4552,7 +4575,7 @@ func _shoot() -> void:
 	elif _suppress_point() != null:
 		aim_at = _suppress_point()
 		tactic_fire = true
-	elif intent != Intent.CASUALTY and (_buddy_bounding() or _cover_medic) and in_contact() and now - _last_contact < 5.0:
+	elif intent != Intent.CASUALTY and (_buddy_bounding() or _cover_medic) and in_contact() and now - _last_contact < 5.0 * Doctrine.factor(_doctrine_id(), "cover_fire_s", body.faction):
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # covering fire while the buddy (or a medic) moves
 	elif intent == Intent.FIGHT:
 		_maybe_frag()
@@ -4786,8 +4809,20 @@ func _no_shot_text() -> String:
 ## The aim error (degrees) this unit adds to its weapon's own spread: less skill, suppression,
 ## firing at a point rather than a seen foe, and shaken morale all widen it.
 func _aim_error_deg(seen_foe: bool) -> float:
-	var shaken := maxf(MORALE_SHAKEN - morale, 0.0) / MORALE_SHAKEN  # 0 steady .. 1 no morale left
-	return (1.0 - combat) * AIM_UNSKILLED_DEG + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG
+	var doctrine := _doctrine_id()
+	var shaken_at := morale_shaken()
+	var shaken := maxf(shaken_at - morale, 0.0) / shaken_at  # 0 steady .. 1 no morale left
+	return (1.0 - combat) * AIM_UNSKILLED_DEG + body.suppression * 4.0 + (0.0 if seen_foe else 3.0) + shaken * MORALE_SHAKEN_AIM_DEG \
+		+ Doctrine.offset(doctrine, "aim_deg", body.faction)  # (G-15: tighter or looser than his side's usual)
+
+
+## Where this unit's morale counts as shaken (aim suffers) and broken: its doctrine's (G-15).
+func morale_shaken() -> float:
+	return MORALE_SHAKEN * Doctrine.factor(_doctrine_id(), "morale_shaken", body.faction)
+
+
+func morale_broken() -> float:
+	return MORALE_BROKEN * Doctrine.factor(_doctrine_id(), "morale_broken", body.faction)
 
 
 ## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus
@@ -4882,7 +4917,7 @@ func _frag_safe(from: Vector3, at: Vector3) -> bool:
 
 
 func _maybe_frag() -> void:
-	if _grenade_cd > 0.0 or _no_los_s < 4.0 or not in_contact():
+	if _grenade_cd > 0.0 or _no_los_s < 4.0 * Doctrine.factor(_doctrine_id(), "frag_wait_s", body.faction) or not in_contact():
 		return
 	var d := body.global_position.distance_to(body.threat_pos)
 	if d < 8.0 or d > 25.0:
@@ -4897,7 +4932,7 @@ func _maybe_frag() -> void:
 	var now := Soldier._now()
 	if squad and now - squad.frag_at < SQUAD_FRAG_GAP_S and squad.frag_point.distance_to(body.threat_pos) < SQUAD_FRAG_SPREAD_M:
 		return  # a squadmate just threw one there: the whole squad dumped frags on one spot (roles, R0203)
-	_grenade_cd = GRENADE_COOLDOWN_S
+	_grenade_cd = GRENADE_COOLDOWN_S * Doctrine.factor(_doctrine_id(), "frag_cooldown_s", body.faction)
 	if squad:
 		squad.frag_at = now
 		squad.frag_point = body.threat_pos

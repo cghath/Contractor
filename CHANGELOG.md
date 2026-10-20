@@ -11,6 +11,36 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Squad AI: stacking outside, clearing on you, longer order range, doctrines that act (Captain, 2026-10-20)
+
+#### Fixed
+- On a clear order, the stack forms outside the door. Before, a stack spot could be placed
+  through the wall, inside the building, by a corner or an uneven wall. Each spot is now checked:
+  outside the building, on the door's outer side, and not pulled through a wall. If not, it's
+  moved further out or to the door's other side.
+
+#### Added
+- **Clear on me** (Command > Move > Clear > 7, or say "clear on me"): they stack outside the
+  door, call "Stacked up. On you.", and hold until you go in. Then they follow you in, one after
+  another. If you go down, they go in on their own.
+- **Following you into a building**: walk into a building while your squad follows you (not in
+  Safe mode, not at the base) and they stack on its door and clear it on their own. If they know
+  of an enemy inside, they flashbang it first (a frag if no one has a flashbang), but never with a
+  civilian or HVT seen inside. Walk away and they drop it and follow you again.
+- Voice orders: "clear that building", "breach and clear", "clear on me".
+
+#### Changed
+- Orders reach 800 m: the crosshair finds a point or a target that far out (was 150 m for a point
+  and 300 m for a target).
+- Doctrines now shape how each side fights (AI bar G-15). Every number in the doctrine file acts,
+  each as a lean against its side's usual doctrine:
+  - the usual enemy (insurgents) and your squad (the PMC) fight exactly as tuned;
+  - a regular army on the hostile side (the Eastern Concord's) reacts quicker, aims tighter,
+    frags more often, pushes a bound sooner and hooks wider, and holds together longer;
+  - the rival PMC among the hostiles is sharper again.
+- AI bar G-04 marked done: the base of fire already checks its line before firing, standing over
+  its cover or moving to a fire spot.
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

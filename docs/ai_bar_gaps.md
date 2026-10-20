@@ -35,7 +35,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-01 | ~~A squadmate sitting in a vehicle blocks casualty care for everyone~~ (done 2026-10-19) | P0 | S |
 | G-02 | ~~Every garrison and patrol in a zone is one hostile squad~~ (done 2026-10-19: a squad per site) | P0 | M |
 | G-03 | ~~Incoming fire tells the AI exactly where the shooter is~~ (done 2026-10-19) | P0 | S |
-| G-04 | The base of fire may be shooting into its own cover | P0 | S |
+| G-04 | ~~The base of fire may be shooting into its own cover~~ (done: _fire_line_state stands him over his cover or moves him to a fire spot) | P0 | S |
 | G-28 | ~~A heard shot tells the AI who fired and which side he is on~~ (done 2026-10-19) | P1 | S |
 | G-29 | ~~Walls don't muffle shots or footsteps~~ (done 2026-10-19) | P1 | M |
 | G-05 | ~~The AI never chooses to go prone~~ (done 2026-10-19: prone in a fight behind folds or far out, flat when pinned in the open) | P1 | M |
@@ -48,7 +48,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-12 | ~~No cap on how many leave the fight for casualties~~ (done 2026-10-19: 1 plus the medics, in contact) | P1 | S |
 | G-13 | ~~A carer stays with a casualty who is already stable~~ (done 2026-10-20: leaves for a worse one nobody can answer, comes back) | P1 | M |
 | G-14 | Smoke and bangs only on break contact, casualty reach or an order (part done 2026-10-19: smoke when pinned, smoke over the flank's open ground; entry bangs were already in the clear op's breach) | P1 | M |
-| G-15 | Doctrine numbers still don't act (audit A3-07; burst and burst_pause wired 2026-10-19) | P1 | M |
+| G-15 | ~~Doctrine numbers still don't act~~ (done 2026-10-20: every number scales the AI's own, Doctrine.factor) | P1 | M |
 | G-16 | ~~The AI never judges which casualty is worst~~ (done 2026-10-19: its own read when no card) | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
 | G-17 | Positions are picked without terrain, height or a second threat (done 2026-10-20: base of fire takes high ground, flanks like height, folds count as cover, gun teams pick defilade against every known enemy, cover against a second group) | P2 | M |
