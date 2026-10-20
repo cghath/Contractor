@@ -11,15 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Footsteps (Captain, 2026-10-20: "the current ones are terribleee")
+### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed
-- Footsteps are now built like a real boot landing: a low heel strike, then the toe rolling
-  down, plus the ground's crunch (grit and grass on soft ground; a sharper tap with a little
-  ring on concrete, wood and metal) and a soft rustle of kit. There are 8 variations of each
-  (was 3), so a run doesn't repeat. Walking is quieter, sprinting louder.
-- The sound generator has new layers for this (thumps, grains, rustle) and a per-sound
-  variation count, which other sounds can use too.
+- **A sound per pace.** Footsteps now have their own sound for each pace: sprinting, jogging,
+  walking, a slow walk and crouching. Each comes in a soft-ground version (dirt, grass) and a
+  hard-floor version (concrete, wood, metal), so 10 sounds with 8 variations each.
+- **Lighter.** No deep thud any more:
+  - a light heel tick and a heel-to-toe roll;
+  - the ground's fine grit, or a crisp tap on hard floors;
+  - a scuff, which becomes a skid at a sprint, plus a little kit jingle when sprinting;
+  - crouching is a muffled shuffle with cloth rustle.
+  Each step slower is quieter.
+- **New generator layers.** The sound generator has new layers (thumps, grains, rustle) and a
+  per-sound variation count, so other sounds can use them too.
 
 ### Reloads reworked, and the L85's (Captain, 2026-10-20: "reload anims also need work")
 

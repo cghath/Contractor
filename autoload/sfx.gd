@@ -333,16 +333,34 @@ func _airborne(s: Soldier, rise: float, delta: float) -> bool:
 	return delta > 0.0 and rise / delta > STEP_AIR_SPEED
 
 
-## A footstep's loudness by pace (the drawn gait, the same on every peer): a walk softer, a
-## sprint harder (Captain, 2026-10-20: better footsteps).
-const STEP_WALK_DB := -4.0
-const STEP_SPRINT_DB := 3.0
+## Footsteps by pace (Captain, 2026-10-20: "running, walking, slow walking, crouching sounds"):
+## "step_<pace>" on the ground, "step_hard_<pace>" on anything built, each its own sound and
+## level. The pace comes from the drawn gait (the same on every peer); a walk under SLOW_STEP_MPS
+## is a slow walk.
+const SLOW_STEP_MPS := 1.1
+
+
+## The footstep pace of `s`: &"sprint", &"jog", &"walk", &"slow" or &"crouch".
+static func step_pace(s: Soldier) -> StringName:
+	var gait: StringName = s.model.gait() if is_instance_valid(s.model) else CharacterModel.JOG
+	if s.is_crouching() or gait == CharacterModel.CROUCH_WALK:
+		return &"crouch"
+	match gait:
+		CharacterModel.SPRINT:
+			return &"sprint"
+		CharacterModel.WALK:
+			return &"slow" if s.model.gait_speed() < SLOW_STEP_MPS else &"walk"
+	return &"jog"
+
+
+## Whether sound `id` is a footstep (any pace, any ground).
+static func is_step(id: StringName) -> bool:
+	return String(id).begins_with("step_")
 
 
 func _step(s: Soldier, volume_db: float) -> void:
-	var gait: StringName = s.model.gait() if is_instance_valid(s.model) else &""
-	var pace := STEP_WALK_DB if gait == CharacterModel.WALK else (STEP_SPRINT_DB if gait == CharacterModel.SPRINT else 0.0)
-	play_at(&"step_hard" if hard_ground(s) else &"step", s.global_position, volume_db + pace + (-8.0 if s.is_crouching() else 0.0))
+	var id := StringName("%s_%s" % ["step_hard" if hard_ground(s) else "step", step_pace(s)])
+	play_at(id, s.global_position, volume_db)
 
 
 ## Whether `pos` is under a roof (world geometry within ROOF_M above): indoors, with reverb.

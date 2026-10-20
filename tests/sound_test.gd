@@ -52,7 +52,7 @@ func _test_streams() -> void:
 	var a := (Sfx.streams(&"shot_rifle")[0] as AudioStreamWAV).data
 	var b := (Sfx.streams(&"shot_rifle")[1] as AudioStreamWAV).data
 	check(a != b, "variants differ, so repeats don't sound identical")
-	check(Sfx.synth(Sfx.defs["step"].synth, 42).data == Sfx.synth(Sfx.defs["step"].synth, 42).data, "the same seed makes the same sound")
+	check(Sfx.synth(Sfx.defs["step_jog"].synth, 42).data == Sfx.synth(Sfx.defs["step_jog"].synth, 42).data, "the same seed makes the same sound")
 	check(AudioServer.get_bus_index(&"SFX") >= 0 and AudioServer.get_bus_index(&"Voice") >= 0 and AudioServer.get_bus_index(&"SFX_Room") >= 0,
 		"SFX, Voice and room (reverb) buses exist")
 	var engine := Sfx.streams(&"engine_mbt")[0] as AudioStreamWAV
@@ -135,12 +135,12 @@ func _test_in_level() -> void:
 	for i in 40:
 		walker.global_position += Vector3(0, 0, -0.1)  # 4 m at walking pace
 		await get_tree().process_frame
-	var steps := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return id == &"step").size()
+	var steps := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return Sfx.is_step(id)).size()
 	check(steps >= 3 and steps <= 7, "a soldier walking 4 m: footsteps (%d)" % steps)
 	t = Sfx.heard_count()
 	walker.global_position += Vector3(0, 0, -30)
 	await _frames(3)
-	check(not &"step" in Sfx.heard_after(t), "a teleport isn't a step")
+	check(not Sfx.heard_after(t).any(Sfx.is_step), "a teleport isn't a step")
 	# Standing still, jittering a few mm every frame (as a soldier at rest does): no steps
 	# (Captain's playtest P0164: steps like physics glitching).
 	await _frames(3)
@@ -152,14 +152,14 @@ func _test_in_level() -> void:
 		flip = -flip
 		walker.global_position = rest + Vector3(0.004 * flip, 0, 0.003 * flip)
 		await get_tree().process_frame
-	check(not &"step" in Sfx.heard_after(t), "standing still, jittering: no footsteps (%d)" % Sfx.heard_after(t).count(&"step"))
+	check(not Sfx.heard_after(t).any(Sfx.is_step), "standing still, jittering: no footsteps (%d)" % Sfx.heard_after(t).filter(Sfx.is_step).size())
 	# Jumping while moving: no steps in the air (Captain's playtest). Up then down 0.1 m a
 	# frame while going 2.4 m forward.
 	t = Sfx.heard_count()
 	for i in 24:
 		walker.global_position += Vector3(0, 0.1 if i < 12 else -0.1, -0.1)
 		await get_tree().process_frame
-	check(not &"step" in Sfx.heard_after(t), "a jump going forward 2.4 m: no footsteps in the air (%d)" % Sfx.heard_after(t).count(&"step"))
+	check(not Sfx.heard_after(t).any(Sfx.is_step), "a jump going forward 2.4 m: no footsteps in the air (%d)" % Sfx.heard_after(t).filter(Sfx.is_step).size())
 	walker.queue_free()
 	# A squad of six walking around you: only the three nearest are heard (it sounded like a
 	# crowd, P0164).
@@ -178,7 +178,7 @@ func _test_in_level() -> void:
 		await get_tree().physics_frame
 	var heard_from := {}
 	for h in Sfx.history:
-		if int(h.n) > t and h.id == &"step":
+		if int(h.n) > t and Sfx.is_step(h.id):
 			var nearest := 0
 			for i in squad.size():
 				if absf((h.pos as Vector3).x - squad[i].global_position.x) < absf((h.pos as Vector3).x - squad[nearest].global_position.x):  # (side by side in x)
