@@ -336,6 +336,11 @@ static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 			out.append([model, variant])
 			if has_magazine(model):  # a reload draws it in two (CharacterModel._pose_reload_mags)
 				out.append_array([[WITHOUT_MAG + model, variant], [MAG + model, variant]])
+			var moving := moving_parts(model)
+			if not moving.is_empty():  # near the view, it works the action or cover apart too
+				out.append([FIXED + model, variant])
+				for tag in moving:
+					out.append([(BOLT if tag == BOLT_TAG else COVER) + model, variant])
 	return out
 
 

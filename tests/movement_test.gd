@@ -52,6 +52,9 @@ func _ready() -> void:
 	await _test_load_tiers()
 	_test_directions()
 	_test_arms_and_ads()
+	_test_breath_cycle()
+	_test_carry_states()
+	await _test_paces()
 	_test_turn_cap()
 	await _test_wall_pull()
 	await _test_ai_body()
@@ -633,8 +636,10 @@ func _test_arms_and_ads() -> void:
 		held += 0.1
 	check(held > MovementRules.BREATH_HOLD_S - 0.5 and held < MovementRules.BREATH_HOLD_S + 0.5 and move.gasp_left() > 0.0 and move.breath_sway_mult() > 1.0,
 		"fresh, a breath holds %.1f s, then a gasp: sway x%.1f" % [held, move.breath_sway_mult()])
-	move.update_arms(3.0, true, true)
-	check(not move.breath_held, "keeping the key down after it runs out doesn't hold again")
+	var gasp := move.gasp_left()
+	move.update_arms(gasp + 0.2, true, true)
+	check(not move.breath_held and gasp >= MovementRules.BREATH_RECOVER_S - 0.01 and gasp < MovementRules.BREATH_RECOVER_WINDED_S,
+		"keeping the key down after it runs out doesn't hold again (through a %.1f s gasp)" % gasp)
 	move.update_arms(0.1, true, false)
 	move.update_arms(0.1, true, true)
 	check(move.breath_held, "let go and press again: holding again")
@@ -664,6 +669,172 @@ func _test_arms_and_ads() -> void:
 	move.stamina = 1.0
 	move.arm_stamina = 1.0
 	move.update_stamina(0.0, false, false)
+
+
+## The breath's cycle (feel round 2, MovementRules.BREATH_*): in, a pause at the top, out, a
+## pause at the bottom, the aim still through each pause; 6 s a breath fresh, 2.5 s winded; held,
+## it stops; the hold and the gasp after it scale with fitness (10 s then 3 s fresh, 1 s then 6 s
+## spent).
+func _test_breath_cycle() -> void:
+	print("Breath cycle (feel round 2)")
+	var top_in := MovementRules.BREATH_IN
+	var top_out := MovementRules.BREATH_IN + MovementRules.BREATH_TOP
+	var out_end := top_out + MovementRules.BREATH_OUT
+	check(MovementRules.breath_wave(top_in + 0.001) == 1.0 and MovementRules.breath_wave(top_out - 0.001) == 1.0
+		and MovementRules.breath_wave(out_end + 0.01) == -1.0 and MovementRules.breath_wave(0.999) == -1.0
+		and absf(MovementRules.breath_wave(top_in * 0.5)) < 0.2 and absf(MovementRules.breath_wave(top_out + MovementRules.BREATH_OUT * 0.5)) < 0.2,
+		"the breath rises, holds at the top, falls and holds at the bottom")
+	var still := 0
+	for i in 600:
+		if MovementRules.breath_dwell(i / 600.0):
+			still += 1
+	check(still > 210 and still < 270 and MovementRules.breath_dwell(top_in + 0.01) and MovementRules.breath_dwell(0.95) and not MovementRules.breath_dwell(0.1),
+		"%.0f%% of each breath is a pause (top and bottom) to time a shot into" % (still / 6.0))
+	var m4 := ItemDB.get_item(&"m4a1")
+	player.select_weapon(&"primary")
+	move.stamina = 1.0
+	move.arm_stamina = 1.0
+	move.update_arms(30.0, false, false)  # no gasp left over
+	var u0 := move.breath_u
+	for i in 60:
+		move.update_arms(0.1, false, false)
+	var fresh := move.breath_u - u0
+	move.stamina = 0.0
+	u0 = move.breath_u
+	for i in 25:
+		move.update_arms(0.1, false, false)
+	var winded := move.breath_u - u0
+	check(absf(fresh - 1.0) < 0.02 and absf(winded - 1.0) < 0.02,
+		"a breath takes %.1f s fresh, %.1f s winded" % [6.0 / maxf(fresh, 0.01), 2.5 / maxf(winded, 0.01)])
+	move.stamina = 1.0
+	# In a pause the breath doesn't move the sight (the drift sampled at one time, so only the breath changes).
+	player.is_aiming = true
+	move.breath_u = float(int(move.breath_u)) + top_in + 0.01
+	var a := player.aim_sway(m4, 5.0)
+	move.update_arms(0.5, false, false)
+	var b := player.aim_sway(m4, 5.0)
+	var dwelling := move.breath_dwell()
+	move.update_arms(1.0, false, false)
+	var c := player.aim_sway(m4, 5.0)
+	check(dwelling and a.is_equal_approx(b) and not b.is_equal_approx(c),
+		"aimed, the sight holds still through the pause at the top and moves again breathing out")
+	move.update_arms(0.1, true, true)
+	var held_at := move.breath_u
+	move.update_arms(2.0, true, true)
+	check(move.breath_held and is_equal_approx(move.breath_u, held_at), "held, the breath stops where it is")
+	move.update_arms(0.1, true, false)
+	player.is_aiming = false
+	check(is_equal_approx(MovementRules.hold_seconds(1.0), 10.0) and is_equal_approx(MovementRules.hold_seconds(0.0), 1.0)
+		and is_equal_approx(MovementRules.gasp_seconds(1.0), 3.0) and is_equal_approx(MovementRules.gasp_seconds(0.0), 6.0),
+		"a breath holds 10 s fresh (then 3 s of gasp) to 1 s spent (then 6 s)")
+	move.update_arms(10.0, false, false)
+	move.stamina = 0.0
+	move.update_arms(0.1, true, true)
+	var t := 0.1
+	while move.breath_held and t < 5.0:
+		move.update_arms(0.1, true, true)
+		t += 0.1
+	check(t < 1.6 and move.gasp_left() > MovementRules.BREATH_RECOVER_WINDED_S - 0.5 and move.breath_sway_mult() > 1.5,
+		"spent: held %.1f s, then %.1f s of gasping (sway x%.1f)" % [t, move.gasp_left(), move.breath_sway_mult()])
+	move.update_arms(move.gasp_left() * 0.8, true, false)
+	check(move.gasp_left() > 0.0 and move.breath_sway_mult() > 1.0 and move.breath_sway_mult() < MovementRules.BREATH_GASP_SWAY - 0.2,
+		"the gasp eases off towards its end (x%.2f)" % move.breath_sway_mult())
+	move.update_arms(10.0, false, false)
+	move.stamina = 1.0
+	move.arm_stamina = 1.0
+
+
+## Carry states (feel round 2): from low the weapon comes up slower; after a sprint the aim is
+## unsteady for a moment; sprinting and climbing force the weapon low (the AI body's sprint is
+## checked in _test_ai_body, the drawn carry in animations).
+func _test_carry_states() -> void:
+	print("Carry states (feel round 2)")
+	check(absf(MovementRules.ads_seconds(3.4, 1.0, 1.0) / MovementRules.ads_seconds(3.4, 1.0, 0.0) - MovementRules.ADS_FROM_LOW_MULT) < 0.01
+		and absf(move.ads_seconds(1.0) / move.ads_seconds() - MovementRules.ADS_FROM_LOW_MULT) < 0.01,
+		"up to the eye from low takes x%.2f the time from ready" % MovementRules.ADS_FROM_LOW_MULT)
+	var m4 := ItemDB.get_item(&"m4a1")
+	player.is_aiming = true
+	move.sprint_unsteady = 0.0
+	var steady := player.aim_sway_deg(m4)
+	move.sprint_unsteady = 1.0
+	var winded := player.aim_sway_deg(m4)
+	player.is_aiming = false
+	check(steady > 0.0 and absf(winded / steady - (1.0 + MovementRules.SPRINT_UNSTEADY_SWAY)) < 0.01,
+		"straight after a sprint the aim sways x%.1f" % (winded / maxf(steady, 0.0001)))
+	move.sprint_unsteady = 0.0
+	move.mantling = true
+	var low := move.weapon_forced_low()
+	move.mantling = false
+	check(low and not move.weapon_forced_low(), "climbing forces the weapon low")
+
+
+## Paces (feel round 2): the mouse wheel steps a slow walk, a walk, a brisk walk and the jog
+## (sprint stays on Shift); P toggles the jog and the last slower pace; the wheel's other uses
+## (the command menu, aiming) keep it.
+func _test_paces() -> void:
+	print("Paces (feel round 2: the wheel)")
+	move.set_stance(S.STAND_HIGH)
+	move.side = 0
+	move._stance_shift_until = -1000.0  # (getting up's slowing: not what's measured here)
+	move.pace = SoldierMovement.Pace.JOG
+	var input := Vector2(0, -1)
+	var speeds := []
+	for p in SoldierMovement.PACE_MULT.size():
+		move.pace = p
+		speeds.append(move.top_speed(false, false, input))
+	check(speeds.size() == 4 and speeds[0] < speeds[1] and speeds[1] < speeds[2] and speeds[2] < speeds[3]
+		and absf(float(speeds[0]) / float(speeds[3]) - 0.3) < 0.01 and absf(float(speeds[1]) / float(speeds[3]) - 0.5) < 0.01,
+		"four paces on foot: %s m/s" % [speeds.map(func(v: float) -> String: return "%.2f" % v)])
+	move.pace = SoldierMovement.Pace.JOG
+	var names := []
+	for i in 4:
+		names.append(move.step_pace(-1))
+	check(names == ["Brisk walk", "Walk", "Slow walk", ""] and move.pace == SoldierMovement.Pace.SLOW_WALK, "stepping down: %s" % [names])
+	move.pace = SoldierMovement.Pace.JOG
+	move.step_pace(-1)
+	move.step_pace(1)
+	var from_jog := move.pace
+	move.walk_pace = true
+	var toggled := move.pace
+	move.walk_pace = not move.walk_pace
+	check(from_jog == SoldierMovement.Pace.JOG and toggled == SoldierMovement.Pace.BRISK and move.pace == SoldierMovement.Pace.JOG,
+		"P toggles the jog and the last slower pace the wheel picked (brisk walk)")
+	move.pace = SoldierMovement.Pace.SLOW_WALK
+	var ramp := move.sprint_ramp
+	move.sprint_ramp = 1.0
+	var sprint := move.top_speed(true, false, input)
+	move.sprint_ramp = ramp
+	move.pace = SoldierMovement.Pace.JOG
+	move._slow_pace = SoldierMovement.Pace.WALK
+	check(sprint > float(speeds[3]) + 1.0, "sprint stays on its own key, whatever the pace (%.1f m/s from a slow walk)" % sprint)
+	# Through the real input path: a wheel notch down, another at once (one a notch-gap), one aimed.
+	var pi: PlayerInput = player.player_input
+	var notch := func(up: bool) -> void:
+		var ev := InputEventMouseButton.new()
+		ev.button_index = MOUSE_BUTTON_WHEEL_UP if up else MOUSE_BUTTON_WHEEL_DOWN
+		ev.pressed = true
+		pi._unhandled_input(ev)
+	notch.call(false)
+	var first := move.pace
+	notch.call(false)
+	var spun := move.pace
+	await get_tree().create_timer(PlayerInput.PACE_WHEEL_GAP_S + 0.05).timeout
+	notch.call(true)
+	var back_up := move.pace
+	check(first == SoldierMovement.Pace.BRISK and spun == SoldierMovement.Pace.BRISK and back_up == SoldierMovement.Pace.JOG,
+		"the wheel: down a pace, a free spin only one, up again to the jog (%s, %s, %s)" % [first, spun, back_up])
+	var hud_menu: Node = pi.hud.command_menu
+	hud_menu.open()
+	await get_tree().create_timer(PlayerInput.PACE_WHEEL_GAP_S + 0.05).timeout
+	notch.call(false)
+	var with_menu := move.pace
+	hud_menu.close()
+	player.is_aiming = true
+	var aimed := pi.wheel_pace(-1)
+	player.is_aiming = false
+	check(with_menu == SoldierMovement.Pace.JOG and not aimed and move.pace == SoldierMovement.Pace.JOG,
+		"the command menu and aiming keep the wheel (%s, %s, %s)" % [with_menu, aimed, move.pace])
+	move.pace = SoldierMovement.Pace.JOG
 
 
 ## Turn cap under load (players, movement phase 1): a light soldier flicks at once, a loaded
@@ -747,8 +918,11 @@ func _test_ai_body() -> void:
 	mover.want_sprint = true
 	await _seconds(1.0)
 	check(m.is_sprinting and m.stamina < 1.0 and _speed(mover) > 5.0, "sprints, using stamina (%.2f left)" % m.stamina)
+	check(m.weapon_forced_low() and m.sprint_unsteady > 0.5, "sprinting, the weapon is forced low and the aim grows unsteady (%.2f)" % m.sprint_unsteady)
+	var unsteady := m.sprint_unsteady
 	mover.want_crouch = true
 	await _seconds(0.8)
+	check(not m.weapon_forced_low() and m.sprint_unsteady < unsteady - 0.4, "stopped, the unsteadiness fades (%.2f)" % m.sprint_unsteady)
 	check(m.stance == S.CROUCH_MID and not m.is_sprinting and _speed(mover) <= SoldierMovement.CROUCH_SPEED + 0.05, "want_crouch: crouches, no sprint (%.1f m/s)" % _speed(mover))
 	mover.want_stance = S.PRONE
 	await _seconds(1.5)

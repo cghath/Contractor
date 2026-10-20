@@ -245,6 +245,35 @@ func _test_stance_and_carry() -> void:
 	check((-kicked.basis.z).y > (-aimed.basis.z).y + 0.05 and kicked.origin.z > aimed.origin.z, "a shot kicks the rifle back and its muzzle up")
 	var walled := GearRig.held_transform(art, false, false, NAN, 0.0, 0.0, 0.0, 1.0)
 	check((-walled.basis.z).y > (-ready.basis.z).y + 0.3 and walled.origin.z > ready.origin.z + 0.1, "against a wall the rifle comes back and tips up (compressed)")
+	# Feel round 2: third person follows the reload's own keys (CharacterModel.reload_pose), as first
+	# person does: rolled in and brought in for the new magazine, back at the ready at either end.
+	var gain := CharacterModel.RELOAD_POSE_GAIN
+	var keyed := func(fam: StringName, u: float) -> Transform3D:
+		var at := Reloads.sample(Reloads.keys(fam, false), u)
+		return GearRig.held_transform(art, false, false, NAN, 0.0, 1.0, 0.0, 0.0, [(at.pos as Vector3) * gain, (at.rot as Vector3) * gain])
+	var look: Transform3D = keyed.call(Reloads.AR, 0.62)
+	check(absf(look.basis.x.y) > 0.4 and look.origin.distance_to(ready.origin) > 0.03 and (keyed.call(Reloads.AR, 0.0) as Transform3D).is_equal_approx(ready)
+		and (keyed.call(Reloads.AR, 1.0) as Transform3D).is_equal_approx(ready),
+		"third person, the reload's keys pose the rifle: rolled %.2f and brought in for the magazine, at the ready at the ends" % look.basis.x.y)
+	check(not (keyed.call(Reloads.BULLPUP, 0.62) as Transform3D).is_equal_approx(look), "each family its own pose (the L85 forward and down out of the shoulder)")
+	# Feel round 2: climbing forces the weapon low (the run carry), standing still or not.
+	var climb_at := Node3D.new()
+	climb_at.position = Vector3(430, 0, 420)
+	add_child(climb_at)
+	var climber := CharacterModel.new()
+	climber.lod = false
+	climb_at.add_child(climber)
+	climber.set_process(false)
+	climber.pose = SoldierMovement.pose_for(SoldierMovement.Stance.STAND_HIGH, 0, 0.0)
+	climber.climbing = true
+	for i in 30:
+		climber._process(dt)
+	var low := climber.run_carry()
+	climber.climbing = false
+	for i in 60:
+		climber._process(dt)
+	check(low > 0.9 and climber.run_carry() < 0.1, "climbing, the rifle's carried low (%.2f), then back up (%.2f)" % [low, climber.run_carry()])
+	climb_at.queue_free()
 
 
 ## First person: not aiming or firing for a moment, the weapon eases down to the low ready.
@@ -308,6 +337,10 @@ func _test_replication_config() -> void:
 		check(config.has_property(prop) and config.property_get_spawn(prop)
 			and config.property_get_replication_mode(prop) == SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE,
 			"%s replicates from the host on change, and to late joiners on spawn" % prop)
+	var owner: SceneReplicationConfig = soldier.get_node(^"Sync").replication_config
+	check(owner.has_property(^"Movement:mantling") and owner.property_get_spawn(^"Movement:mantling")
+		and owner.property_get_replication_mode(^"Movement:mantling") == SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE,
+		"climbing (Movement:mantling) replicates from its owner on change: every peer lowers the weapon for it (feel round 2)")
 	soldier.free()
 
 

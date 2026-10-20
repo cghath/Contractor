@@ -388,6 +388,16 @@ var reloading := false
 var reload_keys: Array = []
 var reload_u := -1.0
 var reload_len := 1.0
+## The reload's moving-part tracks (Reloads.parts: the bolt worked, a feed cover opened), from
+## Soldier (feel round 2): near the view, the held weapon's action and cover move on them too.
+var reload_parts: Dictionary = {}
+## Third person reloads as first person does (feel round 2, Captain 2026-10-20): the weapon
+## turns and moves on the keys' own pose (Reloads.POSE, LOOK, BUMP and the rest; GearRig), this
+## much more than in first person so it reads from across a street.
+const RELOAD_POSE_GAIN := 1.25
+## Climbing a ledge (Soldier, from SoldierMovement.mantling, replicated): the weapon low for it,
+## as at a run (feel round 2: carry states).
+var climbing := false
 ## Reloading in third person, the support hand's pouch: below and behind its place on the
 ## handguard (in the held weapon's space), like first person's (PlayerInput.RELOAD_POUCH).
 const RELOAD_POUCH := Vector3(-0.1, -0.3, 0.2)
@@ -474,6 +484,13 @@ var _reload_pts := {}  # all the held weapon's VoxelArt.reload_points
 var _split_held: MeshInstance3D
 var _split_whole: Mesh
 var _mag_parts: Array[Node3D] = []
+## Near the view (LOD every frame), a reload that works the action or a feed cover draws the
+## weapon with none of its moving parts (VoxelArt.FIXED) and those parts of their own: the
+## action (VoxelArt.BOLT), the feed cover (COVER), and how they move (VoxelArt.part_motion).
+var _bolt_part: Node3D
+var _cover_part: Node3D
+var _part_motion: Dictionary = {}
+var _lod_shown_every := 1  # the level of detail's frames between draws, as last found
 var _last_position: Vector3
 var _move_dt := 0.0  # time since the body last moved (MOVE_WINDOW_S)
 var _speed := 0.0
@@ -1292,7 +1309,8 @@ func _process(frame_delta: float) -> void:
 	# Level of detail: far off or behind the view, drawn every few frames.
 	_lod_dt += frame_delta
 	_lod_n += 1
-	if lod and _lod_n < _lod_every():
+	_lod_shown_every = _lod_every() if lod else 1
+	if _lod_n < _lod_shown_every:
 		return
 	_lod_n = 0
 	var delta := _lod_dt
@@ -1872,7 +1890,7 @@ func _update_stance_move(delta: float) -> void:
 		var kneel := RISE_KNEEL.duplicate()
 		kneel["yaw"] = pose.get("yaw", 0.0)
 		pose = kneel  # (the body sets `pose` again every frame: this only holds while it lasts)
-	var running := (_gait == JOG or _gait == SPRINT) and not aiming and not reloading and not downed and not is_seated()
+	var running := ((_gait == JOG or _gait == SPRINT) and not aiming and not reloading or climbing) and not downed and not is_seated()
 	_run_carry = move_toward(_run_carry, 1.0 if running else 0.0, delta * RUN_CARRY_EASE)
 	_reload_w = move_toward(_reload_w, 1.0 if reloading else 0.0, delta * RELOAD_EASE)
 	_kick = move_toward(_kick, 0.0, delta * KICK_DECAY)
@@ -1896,6 +1914,15 @@ func run_carry() -> float:
 ## 0..1: the weapon rolled in to work the magazine (GearRig).
 func reload_roll() -> float:
 	return _reload_w
+
+
+## The weapon's offset and turn on the reload's keys now (Reloads.sample's "pos" and "rot", times
+## RELOAD_POSE_GAIN), or [] when the keys aren't known (GearRig then rolls it in by RELOAD_ROLL).
+func reload_pose() -> Array:
+	if not reloading or reload_u < 0.0 or reload_keys.is_empty():
+		return []
+	var at := Reloads.sample(reload_keys, reload_u)
+	return [(at.pos as Vector3) * RELOAD_POSE_GAIN, (at.rot as Vector3) * RELOAD_POSE_GAIN]
 
 
 ## The stance move under way: {"kind": &"down"/&"up", "u": 0..1}, or {} for none.
@@ -1993,7 +2020,9 @@ func _reload_anchor(anchor: StringName) -> Vector3:
 
 ## The magazines in third person, while a reload's keys play: the held weapon drawn without its
 ## magazine, the old one in it, in the hand, falling free or gone, the new one in the hand or in
-## (as PlayerInput does in first person). Not on a weapon whose mesh is its own (carved by hits).
+## (as PlayerInput does in first person). Near the view, a reload that works the action or opens
+## a feed cover draws those apart and moves them on its tracks too (_split_parts). Not on a
+## weapon whose mesh is its own (carved by hits).
 func _pose_reload_mags() -> void:
 	var on := reloading and reload_u >= 0.0 and not reload_keys.is_empty() and _held_weapon and is_instance_valid(_held) and _held.has_meta(&"voxel_model")
 	var mesh_node: MeshInstance3D = _held.get_child(0) as MeshInstance3D if on and _held.get_child_count() > 0 else null
@@ -2004,17 +2033,30 @@ func _pose_reload_mags() -> void:
 	var model := String(_held.get_meta(&"voxel_model"))
 	var variant := String(_held.get_meta(&"voxel_variant", ""))
 	if _split_held == null:
-		if not VoxelArt.has_magazine(model) or mesh_node.mesh != VoxelArt.mesh(model, variant):
+		var has_mag := VoxelArt.has_magazine(model)
+		var moving := VoxelArt.moving_parts(model) if not reload_parts.is_empty() and _lod_shown_every <= 1 else []
+		if (not has_mag and moving.is_empty()) or mesh_node.mesh != VoxelArt.mesh(model, variant):
 			return
 		_split_held = mesh_node
 		_split_whole = mesh_node.mesh
-		mesh_node.mesh = VoxelArt.mesh(VoxelArt.WITHOUT_MAG + model, variant)
-		for i in 2:
-			var mag := VoxelArt.instance(VoxelArt.MAG + model, variant, mesh_node.layers)
-			mag.name = "ReloadMagazine"
-			(mag.get_child(0) as MeshInstance3D).cast_shadow = mesh_node.cast_shadow
-			_held.add_child(mag)
-			_mag_parts.append(mag)
+		mesh_node.mesh = VoxelArt.mesh((VoxelArt.FIXED if not moving.is_empty() else VoxelArt.WITHOUT_MAG) + model, variant)
+		if not moving.is_empty():
+			_split_parts(model, variant, moving, mesh_node)
+		if has_mag:
+			for i in 2:
+				var mag := VoxelArt.instance(VoxelArt.MAG + model, variant, mesh_node.layers)
+				mag.name = "ReloadMagazine" if i == 0 else "ReloadMagazineNew"  # (the old one, the new: names of their own)
+				(mag.get_child(0) as MeshInstance3D).cast_shadow = mesh_node.cast_shadow
+				_held.add_child(mag)
+				_mag_parts.append(mag)
+	if is_instance_valid(_bolt_part) or is_instance_valid(_cover_part):
+		var parts := Reloads.part_transforms(reload_parts, _part_motion, reload_u)
+		if is_instance_valid(_bolt_part):
+			_bolt_part.transform = parts.bolt
+		if is_instance_valid(_cover_part):
+			_cover_part.transform = parts.cover
+	if _mag_parts.size() < 2:
+		return
 	var at := Reloads.sample(reload_keys, reload_u)
 	var support: Vector3 = (_reload_anchor(at.anchor_a) + (at.hand_a as Vector3)).lerp(_reload_anchor(at.anchor_b) + (at.hand_b as Vector3), at.w)
 	var held := support - _reload_mag  # the magazine where the hand holds it
@@ -2030,13 +2072,40 @@ func _pose_reload_mags() -> void:
 	new.transform = Transform3D(Basis(Vector3.RIGHT, float(at.tip)), held) if at.new == &"hand" else Transform3D.IDENTITY
 
 
-## The held weapon whole again, its magazine parts gone (a reload ended, or the weapon changed).
+## The held weapon's action and feed cover as parts of their own (VoxelArt.BOLT, COVER: `moving`
+## names which it has), each on the weapon's pivot so at rest they sit as one.
+func _split_parts(model: String, variant: String, moving: Array, mesh_node: MeshInstance3D) -> void:
+	_part_motion = VoxelArt.part_motion(model)
+	for tag: String in moving:
+		var part := VoxelArt.instance((VoxelArt.BOLT if tag == VoxelArt.BOLT_TAG else VoxelArt.COVER) + model, variant, mesh_node.layers)
+		part.name = "ReloadBolt" if tag == VoxelArt.BOLT_TAG else "ReloadFeedCover"
+		(part.get_child(0) as MeshInstance3D).cast_shadow = mesh_node.cast_shadow
+		_held.add_child(part)
+		if tag == VoxelArt.BOLT_TAG:
+			_bolt_part = part
+		else:
+			_cover_part = part
+
+
+## Tests: the third-person action's travel back (m) and feed cover's angle (rad) now, -1 for a
+## part not drawn apart.
+func reload_parts_shown() -> Dictionary:
+	return {"bolt": _bolt_part.position.z if is_instance_valid(_bolt_part) else -1.0,
+		"cover": -_cover_part.transform.basis.get_euler().x if is_instance_valid(_cover_part) else -1.0}
+
+
+## The held weapon whole again, its magazine and moving parts gone (a reload ended, or the
+## weapon changed).
 func _end_split() -> void:
 	if is_instance_valid(_split_held) and _split_whole != null:
 		_split_held.mesh = _split_whole
-	for mag in _mag_parts:
-		if is_instance_valid(mag):
-			mag.queue_free()
+	var parts: Array = [_bolt_part, _cover_part]
+	parts.append_array(_mag_parts)
+	for part: Variant in parts:
+		if is_instance_valid(part):
+			(part as Node).queue_free()
+	_bolt_part = null
+	_cover_part = null
 	_mag_parts.clear()
 	_split_held = null
 	_split_whole = null

@@ -59,6 +59,7 @@ func _ready() -> void:
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
 	await _test_reload_beats()
+	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
 	await _test_rival_pmc_kits()
@@ -370,13 +371,16 @@ func _test_reload_beats() -> void:
 	var length := player.reload_seconds(ItemDB.get_item(&"pkm"), true)
 	check(player.is_reloading and player.reload_item == &"pkm" and player.reload_empty and is_equal_approx(player.reload_len, length),
 		"the reload begins here at once: the PKM, empty, %.1f s" % length)
-	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0}
+	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0, "bolt3": -1.0, "cover3": -1.0}
 	var start := Soldier._now()
 	while Soldier._now() - start < length + 0.4:
 		var parts := pi.view_parts()
 		seen.bolt = maxf(seen.bolt, float(parts.bolt))
 		seen.cover = maxf(seen.cover, float(parts.cover))
 		seen.u = maxf(seen.u, player.model.reload_u)
+		var shown := player.model.reload_parts_shown()  # feel round 2: third person too
+		seen.bolt3 = maxf(seen.bolt3, float(shown.bolt))
+		seen.cover3 = maxf(seen.cover3, float(shown.cover))
 		await get_tree().process_frame
 	var heard := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return String(id).begins_with("reload_"))
 	var want: Array = Reloads.beats(Reloads.BELT, true).map(func(b: Array) -> StringName: return b[1])
@@ -385,6 +389,59 @@ func _test_reload_beats() -> void:
 	check(is_zero_approx(float(after.bolt)) and absf(float(after.cover)) < 0.01, "and both are home after (%s)" % after)
 	check(str(heard) == str(want), "each beat heard in turn (%s)" % [heard])
 	check(seen.u > 0.9 and player.model.reload_u < 0.0 and inv.rounds_in(&"primary") == 100, "third person followed it to the end; 100 loaded")
+	check(seen.bolt3 > 0.08 and seen.cover3 > 1.0 and float(player.model.reload_parts_shown().bolt) < 0.0,
+		"third person, near: the charging handle went back %.2f m, the cover up %.2f rad, and the weapon's whole again after" % [seen.bolt3, seen.cover3])
+
+
+## Feel round 2 (2026-10-20): an AI's reload drawn in third person as first person plays it.
+## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
+## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
+## the new one carried up and in, and the carrier locked back until the catch is slapped.
+func _test_third_person_reload() -> void:
+	print("Third person: an AI's empty M4 reload")
+	var s := level.spawn_soldier({"name": "WpnReloader", "faction": "hostile", "variant": "urban",
+		"pos": player.global_position + Vector3(3, 0, 0), "loadout": ["plate_carrier", "m4a1", "mag_556", "mag_556"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).set_physics_process(false)
+	await _frames(20)
+	s.active_slot = &"primary"
+	await _frames(5)
+	while s.inventory.consume_round(&"primary"):
+		pass
+	var gun := ItemDB.get_item(&"m4a1")
+	var length := s.reload_seconds(gun, true)
+	s.is_reloading = true
+	s._busy_until = Soldier._now() + length
+	s._server_reload.rpc_id(1, &"primary")
+	await _frames(1)
+	check(s.reload_item == &"m4a1" and s.reload_empty and is_equal_approx(s.reload_len, length) and str(s.model.reload_keys) == str(Reloads.keys(Reloads.AR, true))
+		and s.model.reload_parts.has("bolt"),
+		"the host's word reached the body: the M4, empty, %.1f s, the AR's empty keys and its bolt track" % length)
+	var seen := {"u": -1.0, "pose": 0.0, "mags": 0, "dropped": 0.0, "carried": false, "bolt": -1.0, "seated": false}
+	var start := Soldier._now()
+	while Soldier._now() - start < length + 0.4:
+		var m := s.model
+		seen.u = maxf(seen.u, m.reload_u)
+		var pose := m.reload_pose()
+		if pose.size() == 2:
+			seen.pose = maxf(seen.pose, absf((pose[1] as Vector3).z))
+		var held: Node3D = m._held
+		var mags: Array = held.get_children().filter(func(c: Node) -> bool: return String(c.name).contains("ReloadMagazine") and not c.is_queued_for_deletion()) if is_instance_valid(held) else []
+		seen.mags = maxi(seen.mags, mags.size())
+		if mags.size() == 2:
+			seen.dropped = minf(seen.dropped, (mags[0] as Node3D).position.y)
+			seen.carried = seen.carried or ((mags[1] as Node3D).visible and not (mags[1] as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))
+			seen.seated = seen.seated or (m.reload_u > 0.7 and (mags[1] as Node3D).visible and (mags[1] as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))
+		seen.bolt = maxf(seen.bolt, float(m.reload_parts_shown().bolt))
+		await get_tree().process_frame
+	await _frames(2)
+	var held_after: Node3D = s.model._held
+	var whole := is_instance_valid(held_after) and held_after.get_children().all(func(c: Node) -> bool: return not String(c.name).contains("Reload") or c.is_queued_for_deletion())
+	check(seen.u > 0.9 and seen.pose > 0.5, "it played to the end (%.2f), the rifle turned on the keys (rolled %.2f rad)" % [seen.u, seen.pose])
+	check(seen.mags == 2 and seen.dropped < -0.2 and seen.carried and seen.seated,
+		"the magazine came out of the gun: the empty fell free (%.2f m), the new one carried up and seated (%s)" % [seen.dropped, seen])
+	check(seen.bolt > 0.04, "the carrier locked back %.2f m, then home" % seen.bolt)
+	check(whole and s.model.reload_u < 0.0 and s.inventory.rounds_in(&"primary") > 0, "after: the rifle whole again and loaded (%d)" % s.inventory.rounds_in(&"primary"))
+	s.queue_free()
 
 
 ## Wave 6b (2026-10-18): each enemy faction fields its own kit (factions.json "kits"); Black

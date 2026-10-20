@@ -103,22 +103,46 @@ const ADS_EASE_K := 3.0
 # --- Breathing sway and holding the breath (Soldier.aim_sway) ----------------------------------
 
 ## A breathing rise and fall of the aim, degrees at its widest: rested, then up to
-## (1 + BREATH_ARMS_GAIN) x with empty arms and (1 + BREATH_LEGS_GAIN) x out of breath, at
-## BREATH_HZ rested to BREATH_HZ_WINDED out of breath (research A5: breathing sway scaled by arm
-## and legs deficit; rates are a resting and a hard-breathing human).
+## (1 + BREATH_ARMS_GAIN) x with empty arms and (1 + BREATH_LEGS_GAIN) x out of breath (research
+## A5: breathing sway scaled by arm and legs deficit).
 const BREATH_SWAY_DEG := 0.05
 const BREATH_ARMS_GAIN := 2.0
 const BREATH_LEGS_GAIN := 1.5
-const BREATH_HZ := 0.25
-const BREATH_HZ_WINDED := 0.7
+## The breath's cycle (feel round 2, Captain 2026-10-20; learned from Star Citizen's on-foot
+## breathing): in, a pause at the top, out, and a longer pause at the bottom (the natural
+## respiratory pause), with the aim still in both pauses, so a patient shot can be timed into
+## one. A cycle takes BREATH_CYCLE_S with fresh legs to BREATH_CYCLE_WINDED_S out of breath
+## (about 10 and 24 breaths a minute); BREATH_IN, BREATH_TOP and BREATH_OUT are its shares, the
+## bottom pause the rest.
+const BREATH_CYCLE_S := 6.0
+const BREATH_CYCLE_WINDED_S := 2.5
+const BREATH_IN := 0.3
+const BREATH_TOP := 0.15
+const BREATH_OUT := 0.3
 ## Hold breath (its own rebindable key, Shift by default while aiming: Shift is sprint, and
-## there is no sprint while aiming): sway x BREATH_HOLD_SWAY for up to BREATH_HOLD_S, longer with
-## fresh legs, then BREATH_RECOVER_S of gasping at x BREATH_GASP_SWAY with no hold (research A5).
+## there is no sprint while aiming): sway x BREATH_HOLD_SWAY for up to BREATH_HOLD_S fresh (legs
+## and arms) down to BREATH_HOLD_MIN_S spent, then a gasp with no hold at x BREATH_GASP_SWAY
+## (easing off towards its end) for BREATH_RECOVER_S fresh to BREATH_RECOVER_WINDED_S spent
+## (Star Citizen's numbers: 10 s then 3 s rested, 1 s then 6 s exhausted). Let go early, the
+## gasp is shorter by the share of the hold left.
 const BREATH_HOLD_SWAY := 0.25
-const BREATH_HOLD_S := 6.0
-const BREATH_HOLD_MIN_S := 3.0
-const BREATH_RECOVER_S := 2.0
+const BREATH_HOLD_S := 10.0
+const BREATH_HOLD_MIN_S := 1.0
+const BREATH_RECOVER_S := 3.0
+const BREATH_RECOVER_WINDED_S := 6.0
 const BREATH_GASP_SWAY := 1.8
+
+# --- Carry states (PlayerInput, CharacterModel, Soldier.aim_sway_deg) ---------------------------
+
+## Sprinting, vaulting and mantling force the weapon low (feel round 2, Captain 2026-10-20: Star
+## Citizen's carry states). Bringing it to the eye from low (a sprint carry, the low ready, a
+## climb) takes up to ADS_FROM_LOW_MULT x its ADS time, from ready x1. After a sprint the aim is
+## unsteady: the unsteadiness builds over SPRINT_UNSTEADY_BUILD_S of sprinting and fades over
+## SPRINT_UNSTEADY_S after it, the aimed sway up to (1 + SPRINT_UNSTEADY_SWAY) x at its worst.
+const ADS_FROM_LOW_MULT := 1.35
+const SPRINT_UNSTEADY_BUILD_S := 1.5
+const SPRINT_UNSTEADY_S := 1.2
+const SPRINT_UNSTEADY_SWAY := 1.5
 
 # --- Turning (players only: PlayerInput) ------------------------------------------------------
 
@@ -213,10 +237,11 @@ static func weapon_mass(weapon: ItemData, state := {}) -> float:
 	return weapon.mass_kg + Optics.extra_mass(weapon, state) + Suppressors.extra_mass(weapon, state) + GunAttachments.extra_mass(weapon, state)
 
 
-## Seconds to aim a weapon of `kg`, with `arms` stamina (0..1) left.
-static func ads_seconds(kg: float, arms := 1.0) -> float:
+## Seconds to aim a weapon of `kg`, with `arms` stamina (0..1) left, from `low` (0 at the
+## ready to 1 fully low: ADS_FROM_LOW_MULT).
+static func ads_seconds(kg: float, arms := 1.0, low := 0.0) -> float:
 	var t := clampf((kg - ADS_LIGHT_KG) / (ADS_HEAVY_KG - ADS_LIGHT_KG), 0.0, 1.0)
-	return lerpf(ADS_LIGHT_S, ADS_HEAVY_S, t) * (1.0 + ADS_TIRED_MULT * (1.0 - clampf(arms, 0.0, 1.0)))
+	return lerpf(ADS_LIGHT_S, ADS_HEAVY_S, t) * (1.0 + ADS_TIRED_MULT * (1.0 - clampf(arms, 0.0, 1.0))) 		* lerpf(1.0, ADS_FROM_LOW_MULT, clampf(low, 0.0, 1.0))
 
 
 ## Arm stamina used per second holding a weapon of `kg` aimed (before the stance multiplier).
@@ -230,3 +255,36 @@ static func capped_turn(pending: float, rate_deg: float, delta: float) -> float:
 		return pending
 	var most := deg_to_rad(rate_deg) * delta
 	return clampf(pending, -most, most)
+
+
+## Seconds a breath cycle takes with `stamina` (legs, 0..1) left.
+static func breath_cycle_s(stamina: float) -> float:
+	return lerpf(BREATH_CYCLE_WINDED_S, BREATH_CYCLE_S, clampf(stamina, 0.0, 1.0))
+
+
+## The breath at share `u` (0..1) of its cycle: -1 breathed out to 1 breathed in, eased in and
+## out, still through the pause at the top (1) and the one at the bottom (-1).
+static func breath_wave(u: float) -> float:
+	u = fposmod(u, 1.0)
+	if u < BREATH_IN:
+		return lerpf(-1.0, 1.0, smoothstep(0.0, 1.0, u / BREATH_IN))
+	if u < BREATH_IN + BREATH_TOP:
+		return 1.0
+	if u < BREATH_IN + BREATH_TOP + BREATH_OUT:
+		return lerpf(1.0, -1.0, smoothstep(0.0, 1.0, (u - BREATH_IN - BREATH_TOP) / BREATH_OUT))
+	return -1.0
+
+
+## Whether share `u` of the cycle is in one of its pauses (top or bottom: the aim still).
+static func breath_dwell(u: float) -> bool:
+	u = fposmod(u, 1.0)
+	return (u >= BREATH_IN and u < BREATH_IN + BREATH_TOP) or u >= BREATH_IN + BREATH_TOP + BREATH_OUT
+
+
+## Seconds a breath can be held at `fit` (0 spent .. 1 fresh), and the gasp after a full hold.
+static func hold_seconds(fit: float) -> float:
+	return lerpf(BREATH_HOLD_MIN_S, BREATH_HOLD_S, clampf(fit, 0.0, 1.0))
+
+
+static func gasp_seconds(fit: float) -> float:
+	return lerpf(BREATH_RECOVER_WINDED_S, BREATH_RECOVER_S, clampf(fit, 0.0, 1.0))
