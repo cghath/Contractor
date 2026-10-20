@@ -26,9 +26,19 @@ For cghath and cghath's agent. dev now holds everything below. Please base new w
   - Villagers' jobs join the live hot zone.
   - Your write-up and measurements are kept in docs/economy.md ("cghath's balance pass"). Please
     close #14 rather than merge it.
-- **Open on our side:** your tutorial-2 medic step ("a squadmate bandaging your leg") fails on the
-  merged branch. The squad treats the frozen TutorialTarget as a live fight while holding fire, so
-  a graze waits. It passes on your base; we're bisecting which of our changes does it.
+- **Your tutorial-2 medic step** ("a squadmate bandaging your leg") failed now and then on the merged
+  branch. The squad saw the frozen TutorialTarget and, though holding fire, stayed "in contact"
+  (bounding, in cover), so a graze waited. It wasn't one commit, it was timing. Fixed: the target
+  carries `SquadAI.STAND_IN`, and a squad holding fire leaves it out of its picture
+  (tutorial_guide.gd sets it).
+- **The task list we sent you** (models, wounding, medical animations, dismemberment): the Captain
+  has us building items 1-5 ourselves now, in parallel. Please don't start them:
+  1. treatment props and first-person medic hands;
+  2. fingers;
+  3. visible tourniquets, splints and IVs;
+  4. faces and per-soldier variety;
+  5. blast dismemberment and synced pieces.
+  Item 6, "the rest", is still open; check with the Captain before picking from it.
 
 ## Builds
 

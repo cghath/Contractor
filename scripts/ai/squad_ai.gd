@@ -3592,6 +3592,13 @@ static func preferred_breach(units: Array) -> String:
 	return ""
 
 
+## A stand-in enemy (meta, set by the tutorial on its target): a squad holding fire leaves it out
+## of its picture, so it isn't held in a fight forever by a target that never moves or shoots (the
+## tutorial's "a squadmate bandages your leg" step: a squad "in contact" with it only treated
+## massive bleeding). Ordered to open fire, they take it on as any enemy.
+const STAND_IN := &"stand_in"
+
+
 ## How far inside the doorway each man steps before his corner (the threshold).
 const DOORWAY_STEP_M := 0.9
 ## Clearing on the leader (Squad.order_clear "onme"): he's gone in once this far past the doorway.
@@ -3846,6 +3853,8 @@ func _find_target() -> Soldier:
 			continue
 		if Person.is_noncombatant(s):
 			continue  # civilians, HVTs and hostiles who gave up are never targets (people, wave 4)
+		if hold_fire and s.has_meta(STAND_IN):
+			continue  # a stand-in enemy (the tutorial's target: it neither moves nor shoots) holds no squad holding fire in a fight
 		var d := body.global_position.distance_to(s.global_position)
 		if not s.vitals.is_up():
 			# Unconscious foes are left alone, except for a dead-check while clearing (once

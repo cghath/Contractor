@@ -122,7 +122,16 @@ func _stays(what: String, seconds := 1.0) -> void:
 func _ticks(check_name: String, what: String, seconds: float) -> void:
 	var at := guide.index_of(check_name)
 	var ok := await _wait_for(func() -> bool: return guide.step > at, seconds)
-	check(ok and guide.done == _done_at + 1, "%s ticks the step off (now %d: %s)" % [what, guide.step, guide._title.text])
+	var squad_now := ""
+	if not ok:  # (who was doing what: the squad's statuses, when a step waits on them)
+		for n: Node in get_tree().get_nodes_in_group(&"combatants"):
+			var s := n as Soldier
+			if s and s != player and s.faction == player.faction and s.is_ai():
+				var ai := SquadAI.of(s)
+				var tgt: Variant = ai.target if ai else null
+				squad_now += "%s %s %.0f m%s; " % [s.name, s.ai_status, s.global_position.distance_to(player.global_position),
+					(" at %s (%s, %.0f m)" % [(tgt as Soldier).name, (tgt as Soldier).faction, (tgt as Soldier).global_position.distance_to(s.global_position)]) if tgt != null and is_instance_valid(tgt) else ""]
+	check(ok and guide.done == _done_at + 1, "%s ticks the step off (now %d: %s)%s" % [what, guide.step, guide._title.text, (" [" + squad_now + "]") if squad_now != "" else ""])
 
 
 ## A key pressed in the command menu (the HUD's, as the player's keys reach it).

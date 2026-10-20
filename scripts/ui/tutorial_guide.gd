@@ -307,6 +307,7 @@ func _set_up_session() -> void:
 			var brain := SquadAI.of(target)
 			if brain:
 				brain.process_mode = Node.PROCESS_MODE_DISABLED  # a stand-in: it doesn't move or shoot
+			target.set_meta(SquadAI.STAND_IN, true)  # (the squad, holding fire, doesn't fight it: SquadAI.STAND_IN)
 	var layer := VehicleLayer.of(self)
 	if layer and layer.find(VEHICLE_ID) == null:  # facing south, the open ground ahead
 		layer.server_spawn(VEHICLE_MODEL, Transform3D(Basis(Vector3.UP, PI), lvl.above_ground(VEHICLE_AT) + Vector3.UP * 0.6), "", &"player", VEHICLE_ID)
