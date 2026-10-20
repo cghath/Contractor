@@ -34,6 +34,9 @@ enum C {
 	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
 	WOUND, WOUND_DARK,  # torn flesh round a hole BodyDeform carved
 	BRASS,  # cartridge cases (a belt-fed's belt)
+	# Inside a body (BodyDeform: crater walls and stumps go skin, then fat, flesh, bone) and
+	# what a blast leaves on it (charred).
+	FLESH, FAT, BONE, BONE_SHADE, CHAR, CHAR_DARK,
 }
 
 const VARIANTS := {
@@ -554,6 +557,8 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 			C.WOUND: Color("6e1712"), C.WOUND_DARK: Color("2a0605"),
 			C.BRASS: Color("a8873f"),
+			C.FLESH: Color("8f2a22"), C.FAT: Color("c9a86a"), C.BONE: Color("e3dccb"), C.BONE_SHADE: Color("b8ad94"),
+			C.CHAR: Color("2b2420"), C.CHAR_DARK: Color("120f0d"),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:

@@ -19,6 +19,7 @@ const TIPS := {
 	"shadows": "How sharp shadows are and how far out they're drawn. Higher costs more frame rate.",
 	"hfov": "How wide you see, across the screen. Wider shows more at the sides but makes far things smaller.",
 	"head_bob": "The view moves a little with your steps. Off keeps it steady.",
+	"gore": "How bodies show wounds: Full shows torn limbs, bone and blast damage; Reduced keeps the wounds and lost limbs without bone or gibs; Off draws bodies whole.",
 	"ui_scale": "Makes every menu and the HUD bigger or smaller, on top of the size the window picks by itself.",
 	"master": "The volume of everything.",
 	"effects": "Guns, explosions, footsteps, vehicles and the world.",
@@ -172,6 +173,7 @@ func _video_tab() -> Control:
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))
 	page.add_child(_toggle("Head bob (the view moves with your steps)", "video", "head_bob"))
 	page.add_child(_choice("Scope picture-in-picture (magnified optics)", "video", "scope_pip", GameSettings.SCOPE_PIP))
+	page.add_child(_choice("Gore", "video", "gore", GameSettings.GORE))
 	page.add_child(_ui_scale_row())
 	return page.get_parent()
 

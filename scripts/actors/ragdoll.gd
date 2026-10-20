@@ -93,6 +93,16 @@ const UPRIGHT_DOT := 0.6
 const TOPPLE_IMPULSE := 30.0
 const TOPPLE_MAX := 2
 
+## Cut-off parts (blast-gore, 2026-10-20: a severed limb's physics body stayed and the hidden limb
+## still propped the corpse up): a part cut off a body (BodyDeform, Vitals) takes its ragdoll part
+## along (CUT_KEY) and everything under it (CUT_BELOW); the part's own stays as a stump as long as
+## what's left of it (BodyDeform.stump_of), or goes if hardly any is left (MIN_STUMP). The head
+## goes whole. A frozen ragdoll falls again (it may have been resting on what went).
+const CUT_KEY := {Vitals.HEAD: "head", Vitals.THIGH_L: "leg_l", Vitals.THIGH_R: "leg_r", Vitals.SHIN_L: "shin_l", Vitals.SHIN_R: "shin_r",
+	Vitals.UPPER_ARM_L: "arm_l", Vitals.UPPER_ARM_R: "arm_r", Vitals.FOREARM_L: "fore_l", Vitals.FOREARM_R: "fore_r"}
+const CUT_BELOW := {"leg_l": ["shin_l"], "leg_r": ["shin_r"], "arm_l": ["fore_l"], "arm_r": ["fore_r"]}
+const MIN_STUMP := 0.15
+
 ## Turn off for a session (the older suites that check the fixed downed pose).
 static var enabled := true
 
@@ -108,6 +118,7 @@ var _support_left := SUPPORT_CHECK_S
 var _woke_at: Variant = null  # where the torso was when it last fell again for want of support
 var _topples := 0
 var _hit_dir := Vector3.ZERO  # the dropping shot's way (flat), for _topple
+var cut_away := {}  # ragdoll part key -> true: gone with a cut (no collider, no joint)
 
 
 ## Host: starts a ragdoll for `soldier` from the pose it's drawn in (or its saved ragdoll pose).
@@ -121,6 +132,7 @@ static func start(soldier: Soldier) -> Ragdoll:
 	r.global_transform = Transform3D.IDENTITY
 	var start_bones: Dictionary = part_bones(soldier.model) if soldier.model.ragdolled() else r._drawn_bones()
 	r._build(start_bones)
+	r._cut_severed()
 	r._root_last = soldier.global_transform  # parts built where the body is: carried along from here, even before the first step
 	var push := soldier.velocity if soldier.velocity.is_finite() else Vector3.ZERO
 	for p: RigidBody3D in r.parts.values():
@@ -169,7 +181,68 @@ static func follow(soldier: Soldier) -> Ragdoll:
 	soldier.add_child(r)
 	r.global_transform = Transform3D.IDENTITY
 	r._build(part_bones(soldier.model))
+	r._cut_severed()
 	return r
+
+
+## The parts the body has lost already (BodyDeform) taken off as the ragdoll starts.
+func _cut_severed() -> void:
+	var deform := body.model.get_node_or_null(^"BodyDeform") as BodyDeform if body.model else null
+	if deform == null:
+		return
+	for part: StringName in deform.severed():
+		cut(part, deform.stump_of(part))
+
+
+## `part` (a Vitals part) was cut off with `stump` (0..1) of it left: its ragdoll part shrinks to
+## the stump (or goes, under MIN_STUMP; the head always), and what hangs below it goes.
+func cut(part: StringName, stump := 0.5) -> void:
+	var key: String = CUT_KEY.get(part, "")
+	if key == "" or cut_away.has(key):
+		return
+	if part == Vitals.HEAD or stump < MIN_STUMP:
+		_remove_part(key)
+	else:
+		_shorten(key, stump)
+	for below: String in CUT_BELOW.get(key, []):
+		_remove_part(below)
+	if simulated and frozen:
+		unfreeze()
+
+
+## A part gone: no collider, no joint; the host's held where it is (its bone, drawn hidden).
+func _remove_part(key: String) -> void:
+	if cut_away.has(key) or not parts.has(key):
+		return
+	cut_away[key] = true
+	var p := parts[key] as PhysicsBody3D
+	for child in p.get_children():
+		if child is CollisionShape3D:
+			(child as CollisionShape3D).disabled = true
+	if not simulated:
+		return
+	for child in get_children():
+		var joint := child as Generic6DOFJoint3D
+		if joint and (String(joint.name).begins_with(key + "_") or String(joint.name).ends_with("_" + key)):
+			joint.queue_free()
+	(p as RigidBody3D).freeze = true
+
+
+## A part cut part-way: its box is the stump's length, from the joint.
+func _shorten(key: String, share: float) -> void:
+	var p := parts.get(key) as Node3D
+	if p == null:
+		return
+	for child in p.get_children():
+		var shape := child as CollisionShape3D
+		if shape and shape.shape is BoxShape3D:
+			var box := (shape.shape as BoxShape3D).duplicate() as BoxShape3D
+			box.size.y *= share
+			shape.shape = box
+			shape.position.y *= share
+			if p is RigidBody3D:
+				(p as RigidBody3D).center_of_mass = shape.position
+				(p as RigidBody3D).mass = maxf(float(PARTS[key].mass) * share, 0.5)
 
 
 ## Proposed: where a body stands up from its ragdoll (rest_spot): ground found by a ray from this
@@ -361,7 +434,10 @@ func _physics_process(delta: float) -> void:
 		return
 	_age_s += delta
 	var still := true
-	for p: RigidBody3D in parts.values():
+	for key: String in parts:
+		var p := parts[key] as RigidBody3D
+		if cut_away.has(key):
+			continue
 		if p.linear_velocity.length() > SETTLE_SPEED or p.angular_velocity.length() > SETTLE_SPEED * 3.0:
 			still = false
 			break
@@ -466,7 +542,10 @@ func unfreeze() -> void:
 	frozen = false
 	_still_s = 0.0
 	_age_s = 0.0
-	for p: RigidBody3D in parts.values():
+	for key: String in parts:
+		if cut_away.has(key):
+			continue  # gone with a cut: held, it has no collider to land on
+		var p := parts[key] as RigidBody3D
 		p.freeze = false
 		p.sleeping = false
 

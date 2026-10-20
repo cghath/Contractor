@@ -2624,7 +2624,8 @@ func body_record() -> Dictionary:
 		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
-		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}
+		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net),
+		"gore": BodyDeform.save_record(vitals)}  # its holes, cuts and where its pieces lie (CompoundLevel.server_spawn_body)
 
 
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the
