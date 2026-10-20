@@ -14,6 +14,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-05 | P2 | Element men told to board from a distance never get the walk order (audit A2-10) |
 | F-06 | P2 | An ammo bearer's belt handoff turns a part-used belt into a full one (audit A2-11) |
 
+| F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK |
+
 ## F-01: the building scan only sees one floor
 
 Location: [buildings.gd](../../scripts/ai/buildings.gd), the inside-spot grid in `_scan`.
@@ -112,3 +114,20 @@ and hand it over with its state. If the gunner has no room, the bearer keeps the
 Test: `roles_test._test_ammo_bearer` (with a `_belt_rounds` helper). Belts of 7, 0 and 100 rounds
 arrive with exactly their own rounds, and with no room the bearer keeps his.
 
+## F-20: a medic walks over unasked to a player whose bandages are in his IFAK
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `SquadAI.player_wants_care` (the line
+"nothing of his own for it: a squadmate comes"). Found by cghath's agent on `feat/tutorial`
+(2026-10-20), writing the tutorial's medical steps.
+
+Cause: it asks `s.inventory.count_of(id)` whether the player carries an item for each care task.
+`Inventory.count_of` counts loose items only, not what's inside a kit, so a player whose only
+pressure bandages are the two in his IFAK (the usual kit) counts as carrying nothing for a graze
+or a venous bleed, and out of a firefight a squadmate comes to treat him though he never called.
+The treatments themselves do use kit contents (`Vitals.has_item`, `Inventory.medical_count`), so
+he could have treated himself.
+
+Suggested fix: use `Vitals.has_item(s.inventory, id)` there (it counts loose items, kit contents,
+and items that need none), so "on its own" only covers a wound he really can't treat. The tutorial
+works around it by handing out two loose bandages (`TutorialGuide.KIT`), so its "treat yourself"
+step isn't done for the player by a medic.

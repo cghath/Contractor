@@ -716,10 +716,7 @@ func _test_tutorial() -> void:
 	skip.pressed = true
 	g._input(skip)
 	check(g.step == 3 and g.done == 2, "Page Down skips a step without counting it")
-	var tag_step := -1
-	for i in TutorialGuide.STEPS.size():
-		if String((TutorialGuide.STEPS[i] as Dictionary).get("check", "")) == "_tagged":
-			tag_step = i
+	var tag_step := g.index_of("_tagged")
 	g.step = tag_step
 	g._show()
 	var tags := EnemyTags.of(level)
@@ -728,7 +725,7 @@ func _test_tutorial() -> void:
 		tags._send()
 	await _seconds(0.5)
 	check(g.step == tag_step + 1, "tagging the target ticks off the tag step")
-	g.step = TutorialGuide.STEPS.size()
+	g.step = g.steps.size()
 	g._show()
 	check(g._title.text.begins_with("Tutorial: done"), "and the end says what to do next")
 	g.queue_free()

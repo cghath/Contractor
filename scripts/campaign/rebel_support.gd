@@ -178,10 +178,12 @@ static func favours() -> int:
 
 
 ## Host (a villager asked, Soldier._server_ask_locals): one of the locals' jobs in this zone goes
-## on the board, once a zone a day. Returns what the player hears.
+## on the board, once a zone a day. Returns what the player hears. Outside a campaign only the
+## tutorial's villager answers (TutorialGuide).
 static func server_ask(by: Soldier, villager: Soldier) -> String:
 	if not BaseHub.campaign_running:
-		return "Not now"
+		var tutorial := TutorialGuide.of(villager)
+		return tutorial.server_locals_asked(by, villager) if tutorial else "Not now"
 	var lvl := CompoundLevel.current(villager)
 	var def: Variant = lvl.get(&"def") if lvl else null
 	var zone_id := String((def as Dictionary).get("id", "")) if def is Dictionary else ""
@@ -210,10 +212,11 @@ const SUPPLIES_PER_FAVOUR := 3
 
 
 ## Host (Soldier._server_give_locals): `by` gave villager `villager` one medical item `id`.
-## Returns what the player hears.
+## Returns what the player hears (outside a campaign, the tutorial's: TutorialGuide).
 static func server_given(by: Soldier, villager: Soldier, id: StringName) -> String:
 	if not BaseHub.campaign_running:
-		return "They thank you"
+		var tutorial := TutorialGuide.of(villager)
+		return tutorial.server_locals_given(by, villager, id) if tutorial else "They thank you"
 	var region := region_here(villager)
 	var s := _s()
 	if int(s.get("given_day", -1)) != BaseHub.day():

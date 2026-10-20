@@ -425,8 +425,8 @@ static func part_report(target: Node, region: StringName, actor: Soldier = null)
 ## "" if the condition is met, _HIDE to leave the entry out, or why it's greyed out.
 static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 	match need:
-		&"villager":  # a civilian, in a campaign (rebel support: the locals)
-			return "" if Person.is_civilian(target) and BaseHub.campaign_running else _HIDE
+		&"villager":  # a civilian, in a campaign or the tutorial (rebel support: the locals)
+			return "" if Person.is_civilian(target) and (BaseHub.campaign_running or TutorialGuide.of(target) != null) else _HIDE
 		&"treatable":
 			if _is_enemy(actor, target) or treatments(actor, target).is_empty():
 				return _HIDE
