@@ -4,7 +4,7 @@ These repairs follow the audit of `68a1b8336013a8170b22d2a4b66e15a626feb84b`.
 They remain local working-tree changes; no push, merge or publication was performed.
 The audit reports describe the original checkout. This file tracks subsequent repairs.
 
-**Progress: three of five P1 findings fixed locally (A2-01, A2-02, A2-03); A2-09 and A2-12 remain open.**
+**Progress: all 13 findings fixed locally (five P1, eight P2), on branch `cghath/exec-audit-2026-10-19`.**
 
 ## A2-01 — raids inherit an unrelated prepared contract
 
@@ -127,6 +127,57 @@ Validation (shared log counter, `Documents/Contractor-test-logs`):
 Not covered: two-process co-op. Clients never receive the checkpoints, and the host
 restores the scenario state.
 
-No remote CI or full default suite is claimed. The two remaining P1 findings are A2-09
-(heavy-suit takeover) and A2-12 (stale casualty-care claims after boarding). All changes remain
-local and uncommitted, on branch `cghath/exec-audit-2026-10-19`.
+## A2-04 to A2-13 (October 20)
+
+Four agents worked in parallel, each on its own branch from `3e5a1ee`, grouped by file:
+`fix/a2-campaign` (c4edc4a), `fix/a2-rebels` (d0407bd), `fix/a2-exo-assist` (e1a7efc) and
+`fix/a2-ai-vehicles` (184f408). All four are merged into `cghath/exec-audit-2026-10-19`. Every
+finding has a regression test, and each agent saw its tests fail on the unfixed code before fixing it.
+
+| Finding | Root cause | Fix | Regression | Failed before / passes |
+| --- | --- | --- | --- | --- |
+| A2-04 (P2) | Assault booking and the rebel week ran only in `BaseHub.server_advance_days`; debriefs and board waits call `Economy.advance_days` directly | Both rules moved into `BaseHub._on_day_advanced`, which every clock advance reaches; the rebel decay runs once per week boundary passed | `base_zone_test._test_every_clock_books` | R0207 / R0205 |
+| A2-05 (P2) | `RebelCalls._send_fighters` called an 8-man rifle squad and could only free extras | `AlliedTroops.server_call(..., men)` spawns the count asked for: 6/8/10 by level (4/5/6 in a hot zone), as the upgrade text and `FIGHTERS` intend | `base_zone_test._test_rebel_fighters` | R0199 / R0203 |
+| A2-06 (P2) | Element and follower records dropped the rebel flag; follow-in spawned the kind's size | `"rebel"` kept on the element and follower records and passed back on follow-in, with exactly the men still up | same test, "following over a crossing" | R0199 / R0203 |
+| A2-07 (P2) | Banking of deposited loot and bodies' gear, and their removal from the zone, sat inside `if contract_ran` | Built for every extraction; a raid banks them as "carried out", a contract through its debrief as before | `base_zone_test._test_raid_banks` | R0207 / R0205 |
+| A2-08 (P2) | `DayNight.server_restore` let a remembered zone's saved hour beat the travel hour | `server_cross_on` marks the arrival `DayNight.TRAVELLED`; marked arrivals keep the travel hour, a resumed save keeps the saved one | `base_test._test_travel_clock` | R0207 / R0205 |
+| A2-09 (P1) | `climb_in_body_problem` never checked the new pilot's exo slot; `put_on` failed after the suit came off the casualty | One pilot check (`ExoMech._pilot_problem`: exo slot, hands, carrying, vehicle) for parked suits and takeovers, re-run in the same frame before the suit comes off; refused with "Take off your exo frame first"; the menu shows why | `mech_test._test_take_over` | R0197 / R0204 |
+| A2-10 (P2) | `VehicleLayer.server_board` ordered the walk through the commander's main squad, which skips element men | The order goes through the man's own squad, falling back to the main squad | `vehicles_test._test_squad_drivers`, distant element medics | R0198 / R0208 |
+| A2-11 (P2) | The belt handoff dropped the belt's `rounds` state and ignored a failed `take` | `_maybe_resupply_gunner` hands the entry over with its state (as magazines do); the bearer keeps it when the gunner has no room | `roles_test._test_ammo_bearer`, 7/0/100-round belts and no room | R0198 / R0208 |
+| A2-12 (P1) | Boarding turned the carer's brain off with his care job and the casualty's `care_by` still set | `Vehicle.server_enter` calls `SquadAI.drop_care()` (the existing `_end_care`); `_carer_of` ignores a seated AI carer | `casualty_test._test_carer_boards` | R0198 / R0206 |
+| A2-13 (P2) | `Assists.slowdown_near` took any other-faction soldier, with no line of sight | Non-combatants (`Person.is_noncombatant`) are skipped, and a clear line to the target is required (`Squad.sees`' heights, `Throwables.clear_line`) | `controller_test._test_slowdown_targets` | R0201 / R0204 |
+
+Choices made along the way, for review:
+
+- **A2-04:** a debrief's days pass while the deployment is still running. An assault that falls
+  due then is handled as "squad out": near the base it holds out, otherwise it resolves off-screen.
+- **A2-08:** after travel, the travel hour also beats a contract's own `"hour"`. That hour isn't
+  tied to a zone, so it used to rewind the clock in any fresh zone after a crossing. Walking out of
+  the base into a contract zone is unaffected. If the contract's hour should win, it's a one-line
+  change in `DayNight.server_restore`.
+- **A2-09:** wearing an LX-3, a takeover is refused rather than the LX-3 being moved. Worn gear
+  only ever comes off by the wearer's own action.
+- **A2-10:** when it gives the order, `server_board` names the high-command player as the element
+  squad's leader, as `server_squad_dismount` and AlliedTroops already do.
+
+**Combined run, R0209 at `54a1c45`:** all four branches merged. These 15 passed with zero
+failures: smoke, base, contracts, daynight, missions, mech, exo, controller, interaction,
+casualty, medical, squad, logistics, roles and scavenge. base_zone failed only its load
+budget (5,333 ms). vehicles failed only its known co-op checks, and this time the client ran out
+of its 480 s before the last of them, "mans the M-ATV's turret".
+
+Known failures elsewhere, which these fixes don't touch:
+
+- vehicles' two-process co-op part fails 7 client checks and 1 host check. The audit's R0042 on
+  `68a1b83` shows the same list (R0208).
+- base_zone's 5 s load budget is borderline on this machine: 5,017 to 7,659 ms while other agents
+  ran Godot, but it passed in R0200 and R0205.
+- One roles check, "halted squadmates crouch (6 of 7)", failed once (R0206) and passed in R0208.
+
+Left open:
+
+- Raids don't haul tagged pallet lots home.
+- Only the count and the rebel flag cross with rebel followers, not their wounds or kit.
+- A rebel element's call message and map label still say "Allied".
+- The aim slowdown sees through vehicle hulls, as `Squad.sees` does.
+- No full default suite or CI run has been made on the combined branch yet; CI on a pushed branch would be the full check.

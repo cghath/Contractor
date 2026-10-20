@@ -11,7 +11,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Executive audit of 2026-10-19: the first three P1 fixes (cghath's side)
+### Executive audit of 2026-10-19: all 13 findings fixed (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.
 
@@ -24,6 +24,22 @@ The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). Th
   leaving and coming back to their zone or reloading a save. They no longer sit "active" for good
   with nothing running them. Their crews, waves, wrecks and convoy vehicles return once each, by
   their saved ids (`ScenarioCheckpoint`).
+- A2-04: the days a debrief or a board wait passes now book base assaults and turn the rebel
+  week too, as the base's own day advance always did. Several weeks at once each count.
+- A2-05: the second fighter upgrade sends ten fighters, as paid for (6/8/10; 4/5/6 in a hot zone).
+- A2-06: rebel fighters who follow the squad across a crossing stay rebels, and as many come over
+  as were still up.
+- A2-07: a raid banks the loot set down in the LZ, the holds and the gear on bodies carried out,
+  and takes them out of the zone, as a contract does.
+- A2-08: arriving in a remembered zone after travel keeps the travel time; a resumed save still
+  keeps its own.
+- A2-09: taking over a casualty's HX-1 while wearing an LX-3 is refused ("Take off your exo frame
+  first") instead of deleting the HX-1.
+- A2-10: element men told to board from a distance walk over to the vehicle.
+- A2-11: an ammo bearer hands over a belt with the rounds it has, and keeps it if the gunner has
+  no room, instead of it turning into a full belt or vanishing.
+- A2-12: an AI carer who boards a vehicle lets their casualty go, so another medic can take over.
+- A2-13: the aim slowdown assist ignores civilians, captives and enemies behind walls.
 
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
