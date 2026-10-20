@@ -200,6 +200,9 @@ func _run_host(wait_for_client: bool) -> void:
 	if _want("ai_driver"):
 		await _test_ai_driver()
 		await _test_squad_drivers()
+		await _test_drivers_part2()
+	if _want("drivers_unstuck"):
+		await _test_drivers_unstuck()
 	if _want("ragdoll_and_run_over"):
 		await _test_ragdoll_and_run_over()
 	if not wait_for_client:
@@ -2118,13 +2121,14 @@ func _test_squad_drivers() -> void:
 	layer.server_cancel_boarding(v)
 	if v.seat_of(walker) < 0:
 		v.server_enter(walker)  # (the range has no navmesh to walk them over: seat him for the contact drill)
-	# Contact: under orders and hit, it stops and the passengers get out; the driver stays.
+	# Contact: under orders and hit by an RPG, it stops and the passengers get out; the driver
+	# stays. (A rifle round or two it drives through: part 2's DriveContact.)
 	drivers.server_command(player, "drive_to", Vector3(-12, 0, -20), PackedStringArray())
 	await _seconds(1.0)
-	v.damaged.emit(&"hull", {})
+	v.damaged.emit(&"hull", {"kind": Vehicle.HEAT})
 	await _wait_for(func() -> bool: return drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0, 6.0)
 	check(drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0 and v.driver() == rifle,
-		"hit on the move: it stops, the squadmate in the back gets out, the driver stays")
+		"hit by an RPG on the move: it stops, the squadmate in the back gets out, the driver stays")
 	# A column behind the commander (on foot).
 	player.global_position = Vector3(-30, 0.1, -10)
 	await _seconds(0.5)
@@ -2226,6 +2230,214 @@ func _test_squad_drivers() -> void:
 		s.queue_free()
 	player.global_position = Vector3(0, 0.1, 10)
 	await _reset(v, Vector3(-12, 0, 6))
+
+
+## Host: an AI squadmate of `role` in `v`'s seat `seat` (-1: any free one).
+func _crew(v: Vehicle, callsign: String, role: StringName, seat := -1) -> Soldier:
+	var s := _soldier("friendly", layer._nearest_door(v, v.global_position + v.global_basis.x * 4.0) + Vector3(0, 0.1, 0), callsign)
+	s.role = role
+	await get_tree().physics_frame
+	if seat >= 0:
+		v.server_enter(s, seat)
+	else:
+		v.server_enter(s)
+	return s
+
+
+static func _flat_gap(a: Node3D, b: Node3D) -> float:
+	return Vector2(a.global_position.x - b.global_position.x, a.global_position.z - b.global_position.z).length()
+
+
+## The squad's drivers part 2 (2026-10-20): contact by threat and armour, a column behind an AI
+## lead round a corner and behind the player at the wheel (keeping its gaps, never ramming),
+## mount up - carry us there - dismount short, the contact drill live (drive through, stop and
+## get out with the gunner firing on, abandon), and getting unstuck (round a wall; plan again).
+func _test_drivers_part2() -> void:
+	print("Squad drivers part 2")
+	var drivers := SquadDrivers.of(level)
+	var matv := _vehicle("range_matv")
+	var maxx := _vehicle("range_maxxpro")
+	# (A technical of its own: the range's burned out in the fire checks.)
+	var tech := layer.server_spawn("technical_dshk", Transform3D(Basis(Vector3.UP, deg_to_rad(-90.0)), Vector3(-70, 0, -65)), "", &"player", "test_column_tech")
+	tech.set_meta(&"no_save", true)
+	await _seconds(1.0)  # (down on its wheels)
+	# The contact calls (DriveContact.decide: class, disabled, judging off, nearest enemy, AT, threat).
+	check(DriveContact.decide("soft", false, false, INF, false, 0.5) == DriveContact.THROUGH, "contact: a round or two at a technical, it drives on")
+	check(DriveContact.decide("soft", false, false, 200.0, false, 3.0) == DriveContact.DISMOUNT, "three enemies 200 m off: the technical stops and its men get out")
+	check(DriveContact.decide("mrap", false, false, 200.0, false, 3.0) == DriveContact.THROUGH, "the same at an M-ATV: its armour takes it")
+	check(DriveContact.decide("mrap", false, false, 200.0, true, 0.0) == DriveContact.DISMOUNT and DriveContact.decide("mbt", false, false, 200.0, true, 4.0) == DriveContact.THROUGH,
+		"an RPG team: the M-ATV dismounts its men, a tank drives on")
+	check(DriveContact.decide("soft", false, false, 30.0, true, 8.0) == DriveContact.THROUGH, "an ambush 30 m off: drive through the kill zone")
+	check(DriveContact.decide("ifv", true, false, 200.0, false, 0.0) == DriveContact.ABANDON and DriveContact.decide("soft", false, true, 200.0, true, 9.0) == DriveContact.THROUGH,
+		"disabled: abandon it; judging turned off: drive through")
+	var way := SquadDrivers.cut_short(PackedVector3Array([Vector3(100, 0, 0), Vector3(100, 0, 100)]), Vector3.ZERO, 30.0)
+	check(way.size() == 2 and way[1].distance_to(Vector3(100, 0, 70)) < 0.1 and SquadDrivers.cut_short(way, Vector3.ZERO, 500.0).is_empty(),
+		"a carry's way is cut short along the road, round the corner (%s)" % [way])
+	# A column behind an AI lead, round a corner.
+	player.global_position = Vector3(-60, 0.1, -40)
+	await _reset(matv, Vector3(-30, 0, -65), -90.0)
+	await _reset(maxx, Vector3(-50, 0, -65), -90.0)
+	await _reset(tech, Vector3(-70, 0, -65), -90.0)
+	var crew: Array[Soldier] = []
+	crew.append(await _crew(matv, "CvA", Roles.RIFLEMAN, matv.driver_seat()))
+	crew.append(await _crew(maxx, "CvB", Roles.RIFLEMAN, maxx.driver_seat()))
+	crew.append(await _crew(tech, "CvC", Roles.RIFLEMAN, tech.driver_seat()))
+	drivers._hit_at.clear()
+	var why := drivers.server_command(player, "drive_to", Vector3(50, 0, -65), PackedStringArray())
+	await get_tree().physics_frame
+	check(why == "" and drivers.order_of(matv) == SquadDrivers.Order.DRIVE and drivers.column_of(matv) == ([maxx, tech] as Array[Vehicle]),
+		"Drive there with three: the one nearest leads, the other two fall in behind it (%s)" % why)
+	matv.server_follow_path(PackedVector3Array([Vector3(50, 0, -65), Vector3(50, 0, 25)]), SquadDrivers.COLUMN_KMH)  # (round a corner)
+	var min_gap := INF
+	var corner := INF
+	var deadline := Time.get_ticks_msec() + 60000
+	while Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+		min_gap = minf(min_gap, minf(_flat_gap(matv, maxx), _flat_gap(maxx, tech)))
+		corner = minf(corner, Vector2(maxx.global_position.x - 50.0, maxx.global_position.z + 65.0).length())
+		if matv.ai.status == "arrived" and maxx.linear_velocity.length() < 0.4 and tech.linear_velocity.length() < 0.4 and maxx.global_position.z > -40.0:
+			break
+	var g1 := _flat_gap(matv, maxx)
+	var g2 := _flat_gap(maxx, tech)
+	var near_enough := SquadDrivers.CONVOY_GAP_M + SquadDrivers.CONVOY_HOLD_M + 6.0
+	check(matv.ai.status == "arrived" and g1 < near_enough and g2 < near_enough and g1 > 9.0 and g2 > 9.0,
+		"the column follows the lead 90 m round the corner and closes up behind it (gaps %.0f m and %.0f m)" % [g1, g2])
+	check(min_gap > 8.0, "never closer than %.0f m to the one ahead on the way (no ramming)" % min_gap)
+	check(corner < 12.0, "and the second takes the corner where the lead did, not cutting across (%.0f m from it)" % corner)
+	# The player at the wheel of the lead: the column follows him.
+	for s in crew:
+		s.queue_free()
+	crew.clear()
+	await get_tree().physics_frame
+	await _reset(matv, Vector3(-30, 0, -72), -90.0)
+	await _reset(maxx, Vector3(-52, 0, -72), -90.0)
+	await _reset(tech, Vector3(-74, 0, -72), -90.0)
+	crew.append(await _crew(maxx, "CvB2", Roles.RIFLEMAN, maxx.driver_seat()))
+	crew.append(await _crew(tech, "CvC2", Roles.RIFLEMAN, tech.driver_seat()))
+	check(matv.server_enter(player, matv.driver_seat()), "the player takes the lead's wheel")
+	why = drivers.server_command(player, "convoy", Vector3.ZERO, PackedStringArray())
+	check(why == "" and drivers.column_of(matv) == ([maxx, tech] as Array[Vehicle]), "Follow me in vehicles: both fall in behind him (%s)" % why)
+	var start_x := tech.global_position.x
+	var lead_x := matv.global_position.x
+	min_gap = INF
+	var end := Time.get_ticks_msec() + 6000
+	while Time.get_ticks_msec() < end:
+		matv.request_drive(1.0, 0.0, false)
+		await get_tree().physics_frame
+		min_gap = minf(min_gap, minf(_flat_gap(matv, maxx), _flat_gap(maxx, tech)))
+	var mid1 := _flat_gap(matv, maxx)
+	var mid2 := _flat_gap(maxx, tech)
+	var lead_ms := matv.linear_velocity.length()
+	var lead_went := matv.global_position.x - lead_x
+	end = Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < end:
+		matv.request_drive(0.0, 0.0, true)
+		await get_tree().physics_frame
+		min_gap = minf(min_gap, minf(_flat_gap(matv, maxx), _flat_gap(maxx, tech)))
+	await _wait_for(func() -> bool: return maxx.linear_velocity.length() < 0.4 and tech.linear_velocity.length() < 0.4, 12.0)
+	g1 = _flat_gap(matv, maxx)
+	g2 = _flat_gap(maxx, tech)
+	var tech_went := tech.global_position.x - start_x
+	check(lead_went > 20.0 and tech_went > lead_went - SquadDrivers.CONVOY_GAP_M and mid1 < 45.0 and mid2 < 45.0,
+		"he drives off at %.0f km/h: they keep up (gaps %.0f and %.0f m on the move; he went %.0f m, the last of them %.0f m)" % [lead_ms * 3.6, mid1, mid2, lead_went, tech_went])
+	check(min_gap > 8.0 and g1 < near_enough and g2 < near_enough, "he stops: they close up and stop behind him, never ramming (closest %.0f m; %.0f, %.0f)" % [min_gap, g1, g2])
+	matv.server_exit(player)
+	drivers.server_command(player, "drive_stop", Vector3.ZERO, PackedStringArray())
+	for s in crew:
+		s.queue_free()
+	crew.clear()
+	# Mount up, carry us there, dismount short.
+	await _reset(maxx, Vector3(-4, 0, 6))
+	await _reset(tech, Vector3(-70, 0, 60))  # (out of the way of the carry)
+	await _reset(matv, Vector3(-50, 0, -50), -90.0)
+	player.global_position = Vector3(-50, 0.1, -36)
+	var door := layer._nearest_door(matv, matv.global_position + matv.global_basis.x * 4.0) + Vector3(0, 0.1, 0)
+	var rifle := _soldier("friendly", door, "CarryRifle")
+	rifle.role = Roles.RIFLEMAN
+	var ar := _soldier("friendly", door + Vector3(0, 0, 0.5), "CarryAR")
+	ar.role = Roles.AUTORIFLEMAN
+	var rifle2 := _soldier("friendly", door + Vector3(0, 0, -0.5), "CarryRifle2")
+	rifle2.role = Roles.RIFLEMAN
+	await get_tree().physics_frame
+	drivers.carry_standoff_m = 30.0
+	var goal := Vector3(50, 0, -50)
+	why = drivers.server_command(player, "carry", goal, PackedStringArray(["CarryRifle", "CarryAR", "CarryRifle2"]))
+	await get_tree().physics_frame
+	var gun_seat := int(matv.gun_info().get("seat", -1))
+	check(why == "" and matv.driver() in [rifle, rifle2] and gun_seat >= 0 and matv.occupant(gun_seat) == ar and matv.seat_of(rifle) >= 0 and matv.seat_of(rifle2) >= 0,
+		"Carry us there: they mount up, a rifleman at the wheel, the autorifleman on the M2, the other in the back (%s)" % why)
+	var passenger: Soldier = rifle2 if matv.driver() == rifle else rifle
+	await _wait_for(func() -> bool: return drivers.carries.is_empty(), 40.0)
+	await _wait_for(func() -> bool: return matv.seat_of(passenger) < 0 and matv.linear_velocity.length() < 0.5, 5.0)
+	var short := Vector2(matv.global_position.x - goal.x, matv.global_position.z - goal.z).length()
+	check(drivers.carries.is_empty() and drivers.order_of(matv) == SquadDrivers.Order.HOLD and absf(short - 30.0) < 8.0,
+		"it drives them there and stops short of the point (%.0f m short, 30 asked)" % short)
+	check(matv.seat_of(passenger) < 0 and matv.driver() != null and matv.occupant(gun_seat) == ar and SquadAI.of(passenger).order == Squad.Order.HOLD,
+		"the rifleman in the back gets out and holds there (the commander's far off); the driver and the gunner stay")
+	drivers.carry_standoff_m = SquadDrivers.CARRY_STANDOFF_M
+	# Contact live: a rifle round, it drives through; an RPG, it stops and the back gets out
+	# (the gunner keeps the gun); its engine shot out, everyone abandons it.
+	matv.server_enter(passenger)
+	drivers._hit_at.clear()
+	drivers.server_command(player, "drive_to", Vector3(-40, 0, -50), PackedStringArray())
+	await _seconds(1.0)
+	matv.damaged.emit(&"hull", {"kind": Vehicle.KINETIC})
+	await _seconds(SquadDrivers.TICK_S + 0.2)
+	check(drivers.order_of(matv) == SquadDrivers.Order.DRIVE and matv.ai.active and drivers.last_contact.get(matv.get_instance_id(), "") == DriveContact.THROUGH
+		and matv.seat_of(passenger) >= 0, "a rifle round on the move: the M-ATV drives through, everyone aboard")
+	matv.damaged.emit(&"hull", {"kind": Vehicle.HEAT})
+	await _wait_for(func() -> bool: return drivers.order_of(matv) == SquadDrivers.Order.HOLD and matv.seat_of(passenger) < 0, 4.0)
+	check(drivers.order_of(matv) == SquadDrivers.Order.HOLD and matv.seat_of(passenger) < 0 and matv.occupant(gun_seat) == ar
+		and matv.get_node_or_null(NodePath(AavGunner.NODE_NAME)) != null, "an RPG: it stops, the back gets out, the gunner stays on the gun (its AI gunner fires on)")
+	matv.server_set_zone(Vehicle.ZONE_ENGINE, 0.0)
+	await _wait_for(func() -> bool: return matv.occupants().is_empty(), 4.0)
+	check(matv.occupants().is_empty() and drivers.order_of(matv) == SquadDrivers.Order.NONE, "its engine shot out: abandoned, driver and gunner out too")
+	for s: Soldier in [rifle, ar, rifle2]:
+		s.queue_free()
+	player.global_position = Vector3(0, 0.1, 10)
+	await _reset(matv, Vector3(-12, 0, 6))
+	await _reset(maxx, Vector3(-4, 0, 6))
+	tech.queue_free()
+
+
+## Unstuck (VehicleAI, SquadDrivers): a wall across its way, it backs off, goes round and
+## arrives; given up, the order plans again twice, then holds and says so.
+func _test_drivers_unstuck() -> void:
+	print("Squad drivers: unstuck")
+	var drivers := SquadDrivers.of(level)
+	var matv := _vehicle("range_matv")
+	var why := ""
+	# Unstuck: a wall across its way; it backs off and goes round, and arrives.
+	await _reset(matv, Vector3(40, 0, 0))
+	var wall := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(12, 2, 1)
+	shape.shape = box
+	wall.add_child(shape)
+	level.add_child(wall)
+	wall.global_position = Vector3(40, 1, -20)
+	var driver := await _crew(matv, "StuckDrv", Roles.RIFLEMAN, matv.driver_seat())
+	drivers._hit_at.clear()
+	var stuck_goal := Vector3(40, 0, -50)
+	why = drivers.server_command(player, "drive_to", stuck_goal, PackedStringArray())
+	await _wait_for(func() -> bool: return matv.ai.status == "arrived", 60.0)
+	var off := Vector2(matv.global_position.x - stuck_goal.x, matv.global_position.z - stuck_goal.z).length()
+	check(why == "" and matv.ai.status == "arrived" and matv.ai.detours >= 1 and off < VehicleAI.ARRIVE_M + 2.0,
+		"a wall across its way: it backs off, goes round (%d detours) and gets there (%.1f m off, %s)" % [matv.ai.detours, off, matv.ai.status])
+	# Given up (VehicleAI.gave_up): it plans again twice, then holds and says it's stuck.
+	drivers.server_command(player, "drive_to", Vector3(40, 0, 10), PackedStringArray())
+	for k in SquadDrivers.REPATHS:
+		matv.ai.gave_up.emit()
+	var repaths := int(drivers.orders[matv.get_instance_id()].repaths)
+	var still := drivers.order_of(matv) == SquadDrivers.Order.DRIVE and matv.ai.active
+	matv.ai.gave_up.emit()
+	check(repaths == SquadDrivers.REPATHS and still and drivers.order_of(matv) == SquadDrivers.Order.HOLD,
+		"stuck for good: it plans its way again %d times, then holds and reports it" % repaths)
+	wall.queue_free()
+	driver.queue_free()
+	player.global_position = Vector3(0, 0.1, 10)
+	await _reset(matv, Vector3(-12, 0, 6))
 
 
 func _test_ragdoll_and_run_over() -> void:

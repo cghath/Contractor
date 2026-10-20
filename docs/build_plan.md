@@ -318,6 +318,15 @@ drive there, follow me in a column, come pick us up, stop, and dismount on conta
 Part 2 (same day): the map's "Our drivers: drive here"; by road when the zone's roads make the
 better way (`scripts/vehicles/road_route.gd`); and the host's high command gives an element
 "Mount the vehicle here", "Drive here" and "Dismount" from the map (AlliedTroops, SquadDrivers).
+AI driving part 2 (Captain's major batch, 2026-10-20; numbers Proposed):
+- Columns along the lead's trail (`convoy_column.gd`): behind the player's vehicle, an AI one or
+  the player on foot, keeping a 22 m gap by speed.
+- Mount up and "carry us there": the squad gets out 100 m short, further back from known enemies.
+- Contact while driving (`drive_contact.gd`): drive through, dismount (the gunner keeps firing)
+  or abandon, by threat and armour class.
+- VehicleAI backs off and detours round walls and wrecks; the squad's drivers re-plan and report
+  "stuck".
+- Mount menu: Mount up, a Drive submenu, On contact. Map: cross-country, mount up and carry.
 
 ### Wave 7: art, world and weapons
 
