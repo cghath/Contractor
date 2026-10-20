@@ -11,16 +11,18 @@ extends Control
 ## It fills whatever window it's in (BaseHub.open_loadout puts it on its own layer): the columns
 ## share the width and scroll on their own, and every row of buttons wraps (HFlowContainer), so
 ## it fits 1280x720 to 3840x2160 at UI scale 0.75 to 1.5 (the loadout suite's fit check).
-## Keyboard: Tab / arrows move between the controls, Enter presses, Esc closes.
+## Keyboard: Tab / arrows move between the controls, Enter presses, Esc closes; the first
+## button has the focus when it opens.
+##
+## feat/ui-pass (Captain's tasking, 2026-10-19): in the shared look (UiKit, the theme) with no
+## colours or sizes of its own; no text clipped silently (the title, headings and status wrap,
+## a person's button cuts with "..." and has the whole line in its tooltip, a drop-down is as
+## wide as its prompt); every row's buttons wrap under it (UiKit.action_row). ui_test fits it.
 
 signal closed
 
 ## The columns' share of the width (people, doll, stash).
 const RATIOS := [1.0, 2.0, 1.4]
-const MARGIN := 16
-const COL_HEAD := Color("ffd35a")
-const COL_SHORT := Color(1.0, 0.75, 0.4)
-const COL_DIM := Color(0.7, 0.7, 0.7)
 ## How often the selected person's kit is looked at for changes made by hand (seconds).
 const POLL_S := 0.5
 
@@ -39,39 +41,41 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	var panel := PanelContainer.new()
+	UiKit.apply(self)
+	var panel := UiKit.panel(true)  # opaque: it opens over the base screen
 	panel.name = "Panel"
 	add_child(panel)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var margin := MarginContainer.new()
-	for side: String in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, MARGIN)
-	panel.add_child(margin)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override(&"separation", 8)
-	margin.add_child(root)
+	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	panel.add_child(root)
 	var top := HBoxContainer.new()
-	var title := _label("Loadouts: kit yourself and your squad from the stash", COL_HEAD)
+	top.add_theme_constant_override(&"separation", UiKit.SPACE_M)
+	var title := UiKit.title("Loadouts: kit yourself and your squad from the stash")
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(title)
-	var close_button := _button("Close (Esc)", close)
+	var close_button := UiKit.button("Close", close, "Close the loadouts (Esc)")
 	close_button.name = "Close"
+	close_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(close_button)
 	root.add_child(top)
 	var body := HBoxContainer.new()
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override(&"separation", 10)
+	body.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	root.add_child(body)
 	people_box = _column(body, "People", RATIOS[0])
 	doll_box = _column(body, "Kit", RATIOS[1])
 	stash_box = _column(body, "Stash", RATIOS[2])
-	status = _label("", COL_SHORT)
+	status = UiKit.text("")
 	status.name = "Status"
 	root.add_child(status)
+	root.add_child(UiKit.key_hint("Esc", "Close"))
 	BaseHub.view_changed.connect(refresh)
 	BaseHub.note.connect(_on_note)
 	BaseHub.request("loadout", ["", "sync", {}])  # the muster line's gear into the roster's copy
 	refresh()
+	UiKit.focus_first(people_box)  # the people first (Close would shut it on Enter)
 
 
 func _exit_tree() -> void:
@@ -197,22 +201,27 @@ func refresh() -> void:
 
 func _build_people(list: Array) -> void:
 	if list.is_empty():
-		people_box.add_child(_wrap("Nobody here: the menu works at the FOB, between deployments."))
+		people_box.add_child(UiKit.text("Nobody here: the menu works at the FOB, between deployments."))
 		return
 	var picked: Array = BaseHub.view.get("prep", {}).get("squad", [])
 	for p: Dictionary in list:
 		var gear := gear_of(String(p.who))
 		var load := Loadouts.load_of(gear)
-		var b := _button("%s  %s\n%.1f kg %s%s" % [p.name, Roles.short_name(p.role), float(load.kg), Loadouts.tier_name(int(load.tier)),
-			"  (short)" if not Roster.restock_short_of(entry_of(String(p.who))).is_empty() else ""], func() -> void: select(String(p.who)))
+		var b := Button.new()
+		b.text = "%s  %s\n%.1f kg %s%s" % [p.name, Roles.short_name(p.role), float(load.kg), Loadouts.tier_name(int(load.tier)),
+			"  (short)" if not Roster.restock_short_of(entry_of(String(p.who))).is_empty() else ""]
+		b.pressed.connect(func() -> void: select(String(p.who)))
 		b.name = "Person_" + String(p.who).validate_node_name()
 		b.toggle_mode = true
-		b.clip_text = true  # the column can be narrow (1280x720 at UI scale 1.5)
+		## The column can be narrow (1280x720 at UI scale 1.5): the text cuts with "..." and the
+		## tooltip has it whole (it was clipped silently before).
+		b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		b.tooltip_text = b.text
 		b.set_pressed_no_signal(p.who == selected)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		people_box.add_child(b)
 	if picked.is_empty():
-		people_box.add_child(_wrap("Nobody picked for the next deployment yet: everyone at the muster line is listed.", COL_DIM))
+		people_box.add_child(UiKit.hint("Nobody picked for the next deployment yet: everyone at the muster line is listed."))
 
 
 func select(who: String) -> void:
@@ -233,16 +242,16 @@ func _build_doll(p: Dictionary) -> void:
 	var gear := gear_of(who)
 	var editable: bool = p.mine
 	var load := Loadouts.load_of(gear)
-	doll_box.add_child(_label("%s, %s" % [p.name, Roles.display_name(p.role)], COL_HEAD))
-	doll_box.add_child(_wrap("Load %.1f kg: %s (movement: %s)" % [float(load.kg), Loadouts.tier_name(int(load.tier)), _tier_hint(int(load.tier))]))
+	doll_box.add_child(UiKit.heading("%s, %s" % [p.name, Roles.display_name(p.role)]))
+	doll_box.add_child(UiKit.text("Load %.1f kg: %s (movement: %s)" % [float(load.kg), Loadouts.tier_name(int(load.tier)), _tier_hint(int(load.tier))]))
 	if not editable:
-		doll_box.add_child(_wrap("View only: other players set their own kit (you can give them items).", COL_DIM))
+		doll_box.add_child(UiKit.hint("View only: other players set their own kit (you can give them items)."))
 	if editable:
 		_build_buy(who)
 	var stash: Array = BaseHub.view.get("stash", [])
 	var have := BaseArmory.counts(stash)
 	# Worn: each slot with what the stash has for it.
-	doll_box.add_child(_heading("Worn"))
+	doll_box.add_child(UiKit.heading("Worn"))
 	var slots: Dictionary = gear.get("slots", {})
 	var slot_state: Dictionary = gear.get("slot_state", {})
 	var carrier := ItemDB.get_item(StringName(String(slots.get("vest", ""))))
@@ -267,7 +276,7 @@ func _build_doll(p: Dictionary) -> void:
 					choices.append(["%s (x%d)" % [it.name, int(have[sid])], sid])
 			if choices.size() > 1:
 				var s := slot
-				row.get_meta(&"flow").add_child(_picker("Swap_" + String(slot), choices, func(v: String) -> void:
+				row.get_meta(&"controls").add_child(_picker("Swap_" + String(slot), choices, func(v: String) -> void:
 					ask("slot", {"slot": String(s), "id": "" if v == "-" else v})))
 			if item and Optics.has_rail(item):
 				var optics: Array = [["Optic...", ""], ["Irons (optic to stash)", "-"]]
@@ -275,7 +284,7 @@ func _build_doll(p: Dictionary) -> void:
 					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
 						optics.append(["%s (x%d)" % [ItemDB.get_item(StringName(sid)).name, int(have[sid])], sid])
 				var s2 := slot
-				row.get_meta(&"flow").add_child(_picker("Optic_" + String(slot), optics, func(v: String) -> void:
+				row.get_meta(&"controls").add_child(_picker("Optic_" + String(slot), optics, func(v: String) -> void:
 					ask("optic", {"slot": String(s2), "id": "" if v == "-" else v})))
 		doll_box.add_child(row)
 	# Carried, by group.
@@ -291,12 +300,12 @@ func _build_doll(p: Dictionary) -> void:
 		var ids: Array = _sorted(carried.keys()).filter(func(id: String) -> bool: return Loadouts.group_of(ItemDB.get_item(StringName(id))) == group)
 		if ids.is_empty():
 			continue
-		doll_box.add_child(_heading(Loadouts.GROUP_NAMES[group]))
+		doll_box.add_child(UiKit.heading(Loadouts.GROUP_NAMES[group]))
 		for id: String in ids:
 			var row := _row("%s x%d" % [_name(id), int(carried[id])], id)
 			if editable:
-				var flow: HFlowContainer = row.get_meta(&"flow")
-				var minus := _button("-1", func() -> void: ask("remove", {"id": id, "count": 1}))
+				var flow: HFlowContainer = row.get_meta(&"controls")
+				var minus := UiKit.button("-1", func() -> void: ask("remove", {"id": id, "count": 1}))
 				minus.name = "Remove_" + id
 				minus.tooltip_text = "One back to the stash"
 				flow.add_child(minus)
@@ -307,17 +316,17 @@ func _build_doll(p: Dictionary) -> void:
 					flow.add_child(_picker("Give_" + id, to, func(v: String) -> void: ask("give", {"id": id, "count": 1, "to": v})))
 			doll_box.add_child(row)
 	if carried.is_empty():
-		doll_box.add_child(_wrap("Carrying nothing else.", COL_DIM))
+		doll_box.add_child(UiKit.hint("Carrying nothing else."))
 	if not editable:
 		return
 	# Helpers.
-	doll_box.add_child(_heading("Quick kit (from the stash)"))
-	var helpers := _flow()
-	var fill := _button("Fill ammo", func() -> void: ask("fill_ammo"))
+	doll_box.add_child(UiKit.heading("Quick kit (from the stash)"))
+	var helpers := UiKit.button_row([])
+	var fill := UiKit.button("Fill ammo", func() -> void: ask("fill_ammo"))
 	fill.name = "FillAmmo"
 	fill.tooltip_text = "Each gun's magazines up to the role kit's count (full ones from the stash first)"
 	helpers.add_child(fill)
-	var medic := _button("Medic kit", func() -> void: ask("medic_kit"))
+	var medic := UiKit.button("Medic kit", func() -> void: ask("medic_kit"))
 	medic.name = "MedicKit"
 	medic.tooltip_text = "The medic kit's medical items, aid bag and sustainment pouch, as far as the stash has them"
 	helpers.add_child(medic)
@@ -332,18 +341,18 @@ func _build_doll(p: Dictionary) -> void:
 		helpers.add_child(_picker("CopyKit", froms, func(v: String) -> void: ask("copy_kit", {"from": v})))
 	doll_box.add_child(helpers)
 	# The standing loadout: what Restock refills to.
-	doll_box.add_child(_heading("Standing loadout (what Restock refills to)"))
+	doll_box.add_child(UiKit.heading("Standing loadout (what Restock refills to)"))
 	var entry := entry_of(who)
 	var standing := Roster.loadout_of(entry)
 	var n := 0
 	for c: Variant in Restock.counts(standing).values():
 		n += int(c)
-	doll_box.add_child(_wrap("%d items saved" % n if n > 0 else "None yet: save this kit, pick a role kit, or deploy (the kit you deploy in is written down)."))
+	doll_box.add_child(UiKit.text("%d items saved" % n if n > 0 else "None yet: save this kit, pick a role kit, or deploy (the kit you deploy in is written down)."))
 	var short := Roster.restock_short_of(entry)
 	if not short.is_empty():
-		doll_box.add_child(_wrap("Short after the last restock: " + Restock.list_text(short), COL_SHORT))
-	var standing_row := _flow()
-	var save := _button("Save as standing", func() -> void: ask("save"))
+		doll_box.add_child(UiKit.warn("Short after the last restock: " + Restock.list_text(short)))
+	var standing_row := UiKit.button_row([])
+	var save := UiKit.button("Save as standing", func() -> void: ask("save"))
 	save.name = "SaveStanding"
 	standing_row.add_child(save)
 	var role_standing: Array = [["Standing = role kit...", ""]]
@@ -352,12 +361,12 @@ func _build_doll(p: Dictionary) -> void:
 	standing_row.add_child(_picker("StandingRole", role_standing, func(v: String) -> void: ask("standing_role", {"role": v})))
 	var squad: Array = others.filter(func(o: Dictionary) -> bool: return not o.player)
 	if not squad.is_empty() and n > 0:
-		var copy := _button("Copy standing to squad", func() -> void:
+		var copy := UiKit.button("Copy standing to squad", func() -> void:
 			ask("copy_standing", {"to": squad.map(func(o: Dictionary) -> String: return String(o.who))}))
 		copy.name = "CopyStanding"
 		copy.tooltip_text = "Give every listed squadmate this standing loadout (Restock then draws it for them)"
 		standing_row.add_child(copy)
-	var restock := _button("Restock to standing", func() -> void: ask("restock"))
+	var restock := UiKit.button("Restock to standing", func() -> void: ask("restock"))
 	restock.name = "RestockStanding"
 	restock.disabled = n == 0
 	standing_row.add_child(restock)
@@ -368,43 +377,43 @@ func _build_stash(p: Dictionary) -> void:
 	var stash: Array = BaseHub.view.get("stash", [])
 	var have := BaseArmory.counts(stash)
 	if have.is_empty():
-		stash_box.add_child(_wrap("The stash is empty: buy at the shop, or bring kit back.", COL_DIM))
+		stash_box.add_child(UiKit.hint("The stash is empty: buy at the shop, or bring kit back."))
 		return
 	var editable: bool = not p.is_empty() and p.mine
 	if not p.is_empty():
-		stash_box.add_child(_wrap("Onto %s:" % p.name, COL_DIM))
+		stash_box.add_child(UiKit.hint("Onto %s:" % p.name))
 	for group in Loadouts.GROUPS:
 		var ids: Array = _sorted(have.keys()).filter(func(id: String) -> bool: return Loadouts.group_of(ItemDB.get_item(StringName(id))) == group)
 		if ids.is_empty():
 			continue
-		stash_box.add_child(_heading(Loadouts.GROUP_NAMES[group]))
+		stash_box.add_child(UiKit.heading(Loadouts.GROUP_NAMES[group]))
 		for id: String in ids:
 			var row := _row("%s x%d" % [_name(id), int(have[id])], id)
 			if editable:
-				var flow: HFlowContainer = row.get_meta(&"flow")
+				var flow: HFlowContainer = row.get_meta(&"controls")
 				var item := ItemDB.get_item(StringName(id))
 				var slot := _slot_for(item, gear_of(selected))
 				if slot != &"":
-					var wear := _button("Wear", func() -> void: ask("slot", {"slot": String(slot), "id": id}))
+					var wear := UiKit.button("Wear", func() -> void: ask("slot", {"slot": String(slot), "id": id}))
 					wear.name = "Wear_" + id
 					flow.add_child(wear)
 				elif Optics.is_optic(item):
-					var mount := _button("Mount", func() -> void: ask("optic", {"slot": "primary", "id": id}))
+					var mount := UiKit.button("Mount", func() -> void: ask("optic", {"slot": "primary", "id": id}))
 					mount.name = "Mount_" + id
 					mount.tooltip_text = "On the primary"
 					flow.add_child(mount)
 				else:
-					var one := _button("+1", func() -> void: ask("add", {"id": id, "count": 1}))
+					var one := UiKit.button("+1", func() -> void: ask("add", {"id": id, "count": 1}))
 					one.name = "Add_" + id
 					flow.add_child(one)
 					if group in ["ammo", "medical", "grenades"] and int(have[id]) > 1:
-						var bulk := _button("+%d" % Loadouts.BULK, func() -> void: ask("add", {"id": id, "count": Loadouts.BULK}))
+						var bulk := UiKit.button("+%d" % Loadouts.BULK, func() -> void: ask("add", {"id": id, "count": Loadouts.BULK}))
 						bulk.name = "AddBulk_" + id
 						flow.add_child(bulk)
-			var sell_flow: HFlowContainer = row.get_meta(&"flow")
+			var sell_flow: HFlowContainer = row.get_meta(&"controls")
 			var price := Prices.sell_price(StringName(id), 1, {})
 			if sell_flow and price > 0:
-				var sell := _button("Sell $%s" % DebriefCalc.money(price), func() -> void: Economy.sell_from_stash(StringName(id), 1))
+				var sell := UiKit.button("Sell $%s" % DebriefCalc.money(price), func() -> void: Economy.sell_from_stash(StringName(id), 1))
 				sell.name = "Sell_" + id
 				sell.tooltip_text = "Sell one to the shop (Captain: loot means money)"
 				sell_flow.add_child(sell)
@@ -414,7 +423,7 @@ func _build_stash(p: Dictionary) -> void:
 		var n := 0
 		for c: Variant in inside.values():
 			n += int(c)
-		stash_box.add_child(_wrap("Plus %d items on the stash's carriers and packs and in their pouches (drawn when needed)." % n, COL_DIM))
+		stash_box.add_child(UiKit.hint("Plus %d items on the stash's carriers and packs and in their pouches (drawn when needed)." % n))
 
 
 ## The body slot a stash item goes in from the "Wear" button (a plate's first pocket of its
@@ -452,7 +461,7 @@ func _column(parent: HBoxContainer, title: String, ratio: float) -> VBoxContaine
 	columns.append(panel)
 	var box := VBoxContainer.new()
 	panel.add_child(box)
-	box.add_child(_label(title, COL_HEAD))
+	box.add_child(UiKit.heading(title))
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -463,18 +472,13 @@ func _column(parent: HBoxContainer, title: String, ratio: float) -> VBoxContaine
 	return rows
 
 
-## A row: its text (wrapping) and a flow of controls under it (meta "flow").
+## A row: its text (wrapping) and a wrapping row of controls under it (UiKit.action_row, meta
+## "controls").
 func _row(text: String, id: String) -> VBoxContainer:
-	var row := VBoxContainer.new()
-	row.add_theme_constant_override(&"separation", 2)
-	var label := _wrap(text)
+	var label := UiKit.text(text)
 	label.tooltip_text = item_tooltip(id)
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	row.add_child(label)
-	var flow := _flow()
-	row.add_child(flow)
-	row.set_meta(&"flow", flow)
-	return row
+	return UiKit.action_row(text, [], label)
 
 
 ## An item's tooltip: its name, and its description and uses when ItemDB has them
@@ -496,20 +500,13 @@ static func item_tooltip(id: String) -> String:
 	return "%s (%s, %.2f kg)" % [item.name, item.type, item.mass_kg]
 
 
-func _flow() -> HFlowContainer:
-	var flow := HFlowContainer.new()
-	flow.add_theme_constant_override(&"h_separation", 4)
-	flow.add_theme_constant_override(&"v_separation", 4)
-	return flow
-
-
 ## A drop-down whose first entry is its prompt; picking another sends `value` and goes back.
 func _picker(node_name: String, choices: Array, on_pick: Callable) -> OptionButton:
 	var picker := OptionButton.new()
 	picker.name = node_name.validate_node_name()
-	picker.clip_text = true
+	## As wide as its prompt (the entry it always shows): it was cut at 120 px, with no tooltip.
 	picker.fit_to_longest_item = false
-	picker.custom_minimum_size.x = 120
+	picker.tooltip_text = String(choices[0][0]).trim_suffix("...")
 	for c: Array in choices:
 		picker.add_item(String(c[0]))
 		picker.set_item_metadata(picker.item_count - 1, String(c[1]))
@@ -523,35 +520,6 @@ func _picker(node_name: String, choices: Array, on_pick: Callable) -> OptionButt
 		if i > 0 and v != "":
 			on_pick.call(v))
 	return picker
-
-
-func _button(text: String, action: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.pressed.connect(action)
-	return b
-
-
-func _label(text: String, colour := Color.WHITE) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.clip_text = true
-	label.custom_minimum_size.x = 40
-	if colour != Color.WHITE:
-		label.add_theme_color_override(&"font_color", colour)
-	return label
-
-
-func _wrap(text: String, colour := Color.WHITE) -> Label:
-	var label := _label(text, colour)
-	label.clip_text = false
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	return label
-
-
-func _heading(text: String) -> Label:
-	return _label(text, COL_HEAD)
 
 
 static func _name(id: String) -> String:
@@ -573,24 +541,24 @@ func _build_buy(who: String) -> void:
 		return
 	var funds := int(BaseHub.view.get("funds", 0))
 	var all := BaseHub.missing_cost(missing)
-	doll_box.add_child(_wrap("Short of: " + Restock.list_text(missing), COL_SHORT))
+	doll_box.add_child(UiKit.warn("Short of: " + Restock.list_text(missing)))
 	if int(all.units) <= 0:
-		doll_box.add_child(_wrap("The shop doesn't sell these.", COL_DIM))
+		doll_box.add_child(UiKit.hint("The shop doesn't sell these."))
 		return
-	var buy := _button("Buy missing (%d items, $%d)" % [int(all.units), int(all.cost)], func() -> void: ask("buy_missing"))
+	var buy := UiKit.button("Buy missing (%d items, $%d)" % [int(all.units), int(all.cost)], func() -> void: ask("buy_missing"))
 	buy.name = "BuyMissing"
 	buy.disabled = funds < int(all.cost)
 	buy.tooltip_text = "Not enough cash: $%d of $%d" % [funds, int(all.cost)] if buy.disabled else "Buy it all from the shop, then redo the change"
 	doll_box.add_child(buy)
 	if buy.disabled:
-		doll_box.add_child(_wrap("Not enough cash: $%d of the $%d needed." % [funds, int(all.cost)], COL_SHORT))
+		doll_box.add_child(UiKit.warn("Not enough cash: $%d of the $%d needed." % [funds, int(all.cost)]))
 	if missing.size() > 1:
-		var row := _flow()
+		var row := UiKit.button_row([])
 		for id: String in _sorted(missing.keys()):
 			var price := BaseEconomy.item_price(StringName(id)) * int(missing[id])
 			if price <= 0:
 				continue
-			var one := _button("Buy %s x%d ($%d)" % [_name(id), int(missing[id]), price], func() -> void: ask("buy_missing", {"id": id}))
+			var one := UiKit.button("Buy %s x%d ($%d)" % [_name(id), int(missing[id]), price], func() -> void: ask("buy_missing", {"id": id}))
 			one.name = "BuyOne_" + id
 			one.disabled = funds < price
 			row.add_child(one)
