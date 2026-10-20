@@ -366,6 +366,7 @@ func _test_senses() -> void:
 	SquadAI.server_heard_shot(shooter, shooter.global_position, false)
 	var off := _flat(alpha.threat_pos, shooter.global_position)
 	check(alpha.threat_time > before and off <= SquadAI.HEARD_ERROR_PER_100M * 0.85, "a plain one is heard: contact toward it (%.1f m off)" % off)
+	check(float(SquadAI.of(alpha)._aware.get(shooter.get_instance_id(), 0.0)) == 0.0, "a sound from over there: nobody's awareness of who fired rises (G-28)")
 	# Contact (SquadAI._last_contact) is taken up in the AI's physics step, and a process frame
 	# can pass with no physics step at all (0 in 52 of 300 two-frame windows here, R0125): wait
 	# for physics steps, not frames (CI run 38422752494 failed this check after two frames).

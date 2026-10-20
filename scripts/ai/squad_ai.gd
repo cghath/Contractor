@@ -556,6 +556,18 @@ const REACT_CLOSE := 0.2
 ## Assaults and the flank's maneuver legs go in bounds, buddy pairs taking turns (_bound_toward;
 ## AI bar G-06), in contact; the last ASSAULT_RUSH_M onto the position is one rush. Proposed.
 const ASSAULT_RUSH_M := 12.0
+## Hearing (AI bar G-28, G-29). A heard shot is a sound from roughly over there (the error a disc,
+## HEARD_ERROR_PER_100M of the range): the listener's side learns of it and he goes to look, but
+## it doesn't build his awareness of the man who fired (that takes sight). By ear a shot is a shot:
+## a hostile hears his own side's fire too, from another group and OWN_SIDE_CLEAR_M from his own
+## men, and goes to see (the squad knows its own and its allies' positions: it doesn't). A wall
+## between the shot and the listener halves its reach (WALL_SHOT_MULT); footsteps through a wall
+## carry WALL_STEPS_MULT as far, and are placed STEPS_ERROR_M off. One ray a listener in range.
+## Proposed.
+const OWN_SIDE_CLEAR_M := 30.0
+const WALL_SHOT_MULT := 0.5
+const WALL_STEPS_MULT := 0.4
+const STEPS_ERROR_M := 1.5
 const REACT_SUPPRESSION := 0.5
 const REACT_COVER_M := 3.0
 const REACT_S := 1.5
@@ -914,21 +926,39 @@ static func server_heard_shot(shooter: Soldier, origin: Vector3, suppressed: boo
 		return
 	var reach := HEAR_SUPPRESSED_M if suppressed else HEAR_SHOT_M
 	var now := Soldier._now()
+	var world := shooter.get_world_3d()
+	var shooter_squad: Squad = SquadAI.of(shooter).squad if SquadAI.of(shooter) else null
 	for n in shooter.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s == shooter or not s.is_ai() or s.faction == shooter.faction or not s.vitals.is_up() or SquadAI.of(s) == null:
+		if s == null or s == shooter or not s.is_ai() or not s.vitals.is_up() or SquadAI.of(s) == null:
 			continue
 		var d := s.global_position.distance_to(origin)
 		if d > reach:
 			continue
+		var ai := SquadAI.of(s)
+		var own_side := s.faction == shooter.faction
+		if own_side and (s.faction == &"friendly" or ai.squad == shooter_squad or not ai.squad \
+				or ai.squad.members().any(func(m: Soldier) -> bool: return m.global_position.distance_to(origin) < OWN_SIDE_CLEAR_M)):
+			continue  # his own people over there: he knows it's theirs
+		if d > reach * WALL_SHOT_MULT and not Throwables.clear_line(world, origin + Vector3.UP * 0.3, s.camera.global_position):
+			continue  # through a wall it carries half as far (G-29)
 		var error := HEARD_ERROR_PER_100M * d / 100.0
-		var heard_at := origin + Vector3(randf_range(-error, error), 0.0, randf_range(-error, error))
-		# Hearing feeds spotting (queue 17 part 2): the shooter is half found already.
-		SquadAI.of(s).hear(shooter, heard_at, Spotting.HEARD_SHOT)
+		var angle := randf() * TAU
+		var heard_at := origin + Vector3(cos(angle), 0.0, sin(angle)) * error * sqrt(randf())  # a disc, not a square
+		ai.hear_sound(heard_at)
+		if not own_side and ai.squad:
+			ai.squad.note_enemy(shooter, heard_at, true)  # (the picture keeps a heard fix apart from a seen one)
 		if s.faction != &"friendly" or now - s.threat_time < 1.0:
 			continue  # the squad takes a heard shot as contact; hostiles go and search
 		s.threat_pos = heard_at
 		s.threat_time = now
+
+
+## A sound heard at about `where` (a shot, G-28): something's there, whoever it was. He suspects
+## it and goes to look; nobody's awareness rises (that takes sight or footsteps close by).
+func hear_sound(where: Vector3) -> void:
+	_suspect_pos = where
+	_suspect_at = Soldier._now()
 
 
 ## Heard `who` at about `where`: awareness of them rises by `amount` (never to a full spot:
@@ -3625,9 +3655,10 @@ func _find_target() -> Soldier:
 		if (d <= steps or d < best_dist) and can_see(s):
 			leaves = Spotting.foliage_m(_zone_scatter(), body, s)
 		var in_sight := leaves < Spotting.FOLIAGE_OPAQUE_M  # deep in the leaves: lost, awareness fades
-		if d <= steps and not in_sight:
+		if d <= steps and not in_sight and (leaves < INF or d <= steps * WALL_STEPS_MULT):  # (a wall muffles them, G-29)
 			seen[s.get_instance_id()] = true  # heard, not seen: keeps awareness from fading
-			hear(s, s.global_position, Spotting.HEARD_STEPS_PER_S * SCAN_S)
+			var ang := randf() * TAU
+			hear(s, s.global_position + Vector3(cos(ang), 0.0, sin(ang)) * STEPS_ERROR_M * sqrt(randf()), Spotting.HEARD_STEPS_PER_S * SCAN_S)
 			continue
 		if d < best_dist and in_sight:
 			seen[s.get_instance_id()] = true
