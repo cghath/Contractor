@@ -27,7 +27,7 @@ func _ready() -> void:
 	## key hints, instead of a default-theme box whose 440 px title ran past its 420 px panel.
 	var box := UiKit.screen(self, WIDTH)
 	_panel = box.get_parent() as PanelContainer
-	box.add_child(UiKit.title("Bug report"))
+	box.add_child(UiKit.header("Bug report", "Say what went wrong. It's saved with the session log for the developers."))
 	box.add_child(UiKit.hint("What went wrong? The note, a screenshot and the game's state are saved in this session's folder."))
 	_edit = LineEdit.new()
 	_edit.placeholder_text = "a short note"

@@ -33,7 +33,8 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var box := UiKit.screen(self, WIDTH)
 	var m := MortarFire.spec_of(gun)
-	box.add_child(UiKit.title("%s: lay and fire" % String(StaticWeapons.KITS.get(gun.model, {}).get("name", "Mortar"))))
+	box.add_child(UiKit.header("%s: lay and fire" % String(StaticWeapons.KITS.get(gun.model, {}).get("name", "Mortar")),
+		"Aim the mortar by hand from its firing table, then fire one round."))
 	box.add_child(UiKit.hint("Read the range and the bearing to the target off the map. Pick a charge, find the elevation for that range in the table, set them, fire. The table is for a target level with the tube."))
 	_bearing = SpinBox.new()
 	_bearing.min_value = 0.0
@@ -63,8 +64,9 @@ func _ready() -> void:
 	_table.add_theme_font_override(&"font", ThemeDB.fallback_font)
 	box.add_child(_table)
 	box.add_child(UiKit.button_row([
-		UiKit.button("Fire", func() -> void: gun.request_mortar_fire.rpc_id(1, _bearing.value, _charge.get_selected_id(), _elevation.value)),
-		UiKit.button("Close", close)], true))
+		UiKit.accent_button("Fire", func() -> void: gun.request_mortar_fire.rpc_id(1, _bearing.value, _charge.get_selected_id(), _elevation.value),
+			"Fire one round at the bearing, charge and elevation set above (from the mortar's hold or your kit)"),
+		UiKit.button("Close", close, "Close the panel (Esc)")], true))
 	_update()
 
 

@@ -7,6 +7,36 @@ extends CanvasLayer
 
 signal closed
 
+## Every setting's tooltip, in plain words (ui-modern, Captain 2026-10-20: "all menus should
+## have better explanations").
+const TIPS := {
+	"window_mode": "Windowed, a borderless window the size of the screen, or exclusive fullscreen (can be a little faster, slower to switch away from).",
+	"resolution": "The window's size when windowed. Fullscreen modes use the screen's own size.",
+	"vsync": "Waits for the screen before showing each frame: no tearing, but the frame rate stops at the screen's refresh rate.",
+	"fps_cap": "The most frames a second the game draws. Lower keeps the PC cooler and quieter.",
+	"render_scale": "How many pixels the 3D view is drawn with. Lower is faster and softer; over 100% is sharper far off and slower. Menus and the HUD stay sharp either way.",
+	"antialiasing": "Smooths jagged edges. FXAA is cheap; MSAA smooths edges; TAA steadies thin far-off detail (trees, wires) but can blur a little in motion.",
+	"shadows": "How sharp shadows are and how far out they're drawn. Higher costs more frame rate.",
+	"hfov": "How wide you see, across the screen. Wider shows more at the sides but makes far things smaller.",
+	"head_bob": "The view moves a little with your steps. Off keeps it steady.",
+	"ui_scale": "Makes every menu and the HUD bigger or smaller, on top of the size the window picks by itself.",
+	"master": "The volume of everything.",
+	"effects": "Guns, explosions, footsteps, vehicles and the world.",
+	"voice": "Squadmates' callouts, the radio and other voices.",
+	"music": "Music, when there is any.",
+	"infil_music": "Music on helicopter insertions.",
+	"mute_unfocused": "No sound while another window is in front of the game.",
+	"mouse_sensitivity": "How fast the view turns with the mouse.",
+	"aim_sensitivity": "How fast the view turns while aiming down sights, on top of the mouse sensitivity.",
+	"invert_y": "Mouse forward looks down instead of up.",
+	"stick_sensitivity": "How fast the view turns with the right stick.",
+	"stick_deadzone": "How far the stick must move before it counts (stops a worn stick drifting).",
+	"stick_curve": "Higher makes small stick moves finer for aiming, with full speed still at the edge.",
+	"stick_invert_y": "Stick forward looks down instead of up.",
+	"objective_markers": "Diamonds over where the current objective is, with how far it is. Off: only the hint line under the objectives.",
+	"objectives_expanded": "Show every objective in the top-right list, or only the one you're on.",
+}
+
 var _tabs: TabContainer
 ## The Keys tab's buttons, by action, and the action waiting for a key press (or &"").
 var _key_buttons := {}
@@ -27,14 +57,20 @@ func _ready() -> void:
 	add_child(UiKit.dim(0.7))
 	var box := UiKit.screen(self, 680.0, true)
 	UiKit.fit_height(box, 560.0, 40.0)
-	box.add_child(UiKit.title("Settings"))
+	box.add_child(UiKit.header("Settings", "Video, sound, controls, keys and the HUD. Every change takes effect at once and is saved.",
+		PackedStringArray(["Pick a tab along the top. Sliders save when you let go; drop-downs and boxes save at once.",
+			"Hover any setting for what it does. The Keys tab rebinds keys: click one, then press the new key (Esc keeps the old one).",
+			"The HUD tab sets how big and how see-through each part of the HUD is; Reset HUD layout puts them back.",
+			"Reset everything to defaults puts every setting and key back (it can't be undone)."]),
+		[["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Change"]]))
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(_tabs)
 	_build()
-	var reset := UiKit.button("Reset everything to defaults", func() -> void:
-		GameSettings.reset_all()
-		_rebuild())
+	var reset := UiKit.danger_button("Reset everything to defaults", func() -> void:
+		UiKit.confirm(self, "Every setting and key binding goes back to its default.", "Reset everything", func() -> void:
+			GameSettings.reset_all()
+			_rebuild()), "Every setting and key back to its default (asks first)")
 	var done := UiKit.button("Close", close)
 	var row := HBoxContainer.new()
 	var keys := UiKit.key_hint("Esc", "Close")
@@ -109,6 +145,7 @@ func _build() -> void:
 	_tabs.add_child(_audio_tab())
 	_tabs.add_child(_controls_tab())
 	_tabs.add_child(_keys_tab())
+	_tabs.add_child(_hud_tab())
 
 
 func _page(title: String) -> VBoxContainer:
@@ -135,7 +172,33 @@ func _video_tab() -> Control:
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))
 	page.add_child(_toggle("Head bob (the view moves with your steps)", "video", "head_bob"))
 	page.add_child(_ui_scale_row())
-	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers"))
+	return page.get_parent()
+
+
+## The HUD tab (ui-modern, Captain 2026-10-20: "common sense layout tools"): the markers and the
+## objectives list, then each part's size and opacity (HudLayout), and a reset.
+func _hud_tab() -> Control:
+	var page := _page("HUD")
+	page.add_child(UiKit.hint("What shows over the game view, and how big and how see-through each part is. Changes show at once, behind this menu."))
+	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers",
+		"Diamonds over where the current objective is, with how far it is. Off: only the hint line under the objectives."))
+	page.add_child(_toggle("Objectives list starts in full (else one line)", "hud", "objectives_expanded",
+		"Show every objective in the top-right list, or only the one you're on (the objectives list key switches it in play)."))
+	var pct := func(v: float) -> String: return "%d%%" % roundi(v * 100.0)
+	for e: Array in HudLayout.ELEMENTS:
+		var id := String(e[0])
+		page.add_child(UiKit.heading(String(e[1])))
+		if bool(e[2]):
+			page.add_child(_slider("Size", "hud", id + "_scale", pct, HudLayout.SCALE_RANGE,
+				"How big this part is drawn (100% is the normal size; it keeps its corner of the screen)."))
+		page.add_child(_slider("Opacity", "hud", id + "_opacity", pct, HudLayout.OPACITY_RANGE,
+			"How solid this part is drawn: lower lets more of the world show through."))
+	var reset := UiKit.button("Reset HUD layout", func() -> void:
+		HudLayout.reset()
+		_rebuild()
+		_tabs.current_tab = _tabs.get_tab_count() - 1, "Every HUD part back to full size and opacity")
+	reset.name = "ResetHud"
+	page.add_child(reset)
 	return page.get_parent()
 
 
@@ -148,7 +211,7 @@ func _ui_scale_row() -> Control:
 	box.add_child(row)
 	var note := Label.new()
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.modulate = Color(1, 1, 1, 0.7)
+	note.theme_type_variation = &"HintLabel"
 	box.add_child(note)
 	var show := func(v: float) -> void:
 		var window := get_tree().root.size if is_inside_tree() else DisplayServer.window_get_size()
@@ -273,7 +336,10 @@ func _row(text: String) -> HBoxContainer:
 ## A dropdown of `options` ([value, label]) for a setting.
 func _choice(text: String, section: String, key: String, options: Array) -> Control:
 	var row := _row(text)
+	row.tooltip_text = TIPS.get(key, "")
+	(row.get_child(0) as Control).mouse_filter = Control.MOUSE_FILTER_PASS
 	var picker := OptionButton.new()
+	picker.tooltip_text = row.tooltip_text
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var now: Variant = GameSettings.get_value(section, key)
 	for option: Array in options:
@@ -285,18 +351,22 @@ func _choice(text: String, section: String, key: String, options: Array) -> Cont
 	return row
 
 
-func _toggle(text: String, section: String, key: String) -> CheckBox:
+func _toggle(text: String, section: String, key: String, tip := "") -> CheckBox:
 	var check := CheckBox.new()
 	check.text = text
+	check.tooltip_text = tip if tip != "" else TIPS.get(key, "")
 	check.button_pressed = bool(GameSettings.get_value(section, key))
 	check.toggled.connect(func(on: bool) -> void: GameSettings.set_value(section, key, on))
 	return check
 
 
 ## A slider over the setting's range (GameSettings.RANGES) with its value shown by `shown`.
-func _slider(text: String, section: String, key: String, shown: Callable) -> Control:
+func _slider(text: String, section: String, key: String, shown: Callable, range_spec: Array = [], tip := "") -> Control:
 	var row := _row(text)
-	var range_spec: Array = GameSettings.RANGES[key]
+	if range_spec.is_empty():
+		range_spec = GameSettings.RANGES[key]
+	row.tooltip_text = tip if tip != "" else TIPS.get(key, "")
+	(row.get_child(0) as Control).mouse_filter = Control.MOUSE_FILTER_PASS
 	var slider := HSlider.new()
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -304,6 +374,7 @@ func _slider(text: String, section: String, key: String, shown: Callable) -> Con
 	slider.max_value = range_spec[1]
 	slider.step = range_spec[2]
 	slider.value = float(GameSettings.get_value(section, key))
+	slider.tooltip_text = row.tooltip_text
 	var value := Label.new()
 	value.custom_minimum_size = Vector2(64, 0)
 	value.text = shown.call(slider.value)
@@ -314,7 +385,9 @@ func _slider(text: String, section: String, key: String, shown: Callable) -> Con
 			GameSettings.set_value(section, key, slider.value))
 	slider.value_changed.connect(func(v: float) -> void:
 		if not slider.has_meta(&"dragging"):
-			GameSettings.set_value(section, key, v))
+			GameSettings.set_value(section, key, v)
+		if section == "hud":
+			HudLayout._changed())  # the HUD follows while dragging
 	slider.drag_started.connect(func() -> void: slider.set_meta(&"dragging", true))
 	slider.drag_ended.connect(func(_changed: bool) -> void: slider.remove_meta(&"dragging"))
 	row.add_child(slider)

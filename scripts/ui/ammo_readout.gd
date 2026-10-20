@@ -22,9 +22,10 @@ const MAX_PIPS := 8
 ## 75% and the grenade line 12 px at 40%, drawn under the control's own box).
 const PIP := Vector2(6, 14)
 const PIP_GAP := 3.0
-const COLOUR := Color(UiKit.TEXT, 0.95)
-const DIM_COLOUR := Color(UiKit.TEXT, 0.7)
-const OUTLINE := Color(0, 0, 0, 0.7)
+## ui-modern (2026-10-20): the spare and grenade lines were 14 px at 70%; now 16 px at 88%, outlined.
+const COLOUR := Color(UiKit.TEXT_BRIGHT, 0.97)
+const DIM_COLOUR := Color(UiKit.TEXT, 0.88)
+const OUTLINE := UiKit.OUTLINE
 ## Its box (logical px) in the HUD's bottom-right zone: the pips and fill word over the grenades.
 const WIDTH := 280.0
 const HEIGHT := 56.0
@@ -156,11 +157,11 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	if shown.is_empty():
 		return
-	var font := get_theme_default_font()
+	var font := UiKit.FONT_STRONG
 	var right := size.x
 	var y := 4.0  # the pips' top; the word sits on their baseline, the grenades a line under
-	var body := UiKit.FONT_BODY
-	var small := UiKit.FONT_SMALL
+	var body := UiKit.FONT_HUD_SMALL
+	var small := UiKit.FONT_HUD_SMALL
 	if shown.has("loaded"):
 		# Pips, right to left: fullest on the right; a part-used one dimmer, an empty one hollow.
 		var spares: Array = shown.spares

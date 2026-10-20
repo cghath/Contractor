@@ -85,6 +85,19 @@ var _left_column: Control
 var _right_column: Control
 ## The width of the wide tiles beside the soldier just now (_fit_columns).
 var _wide_w := WIDE_TILE.x
+## The containers column's search (lowered), kind filter ("" all, else a Loadouts group) and
+## sort ("packed": as packed, "name", "weight"; ui-modern, Captain 2026-10-20: "common sense
+## layout tools"). They only change what the column shows and in what order, never the packing.
+var filter_query := ""
+const HELP := [
+	"Containers (carrier, pouches, pack, hands) and what's on the ground nearby are on the left; your soldier and worn slots in the middle; the picked item's details and what you can do with it on the right.",
+	"Drag an item onto a container, a slot or a pouch point to move it there, or onto Nearby (ground) to drop it. Right-click it (or press the Menu key) for every action.",
+	"The buttons over the soldier switch the middle view: the MOLLE view shows where pouches attach and what fits.",
+	"The search box, kind filter and sort over the containers only change what's shown, never how it's packed.",
+]
+var filter_kind := ""
+var sort_by := "packed"
+const SORTS := [["packed", "As packed"], ["name", "By name"], ["weight", "Heaviest first"], ["kind", "By kind"]]
 
 
 func _init(p_player: Soldier) -> void:
@@ -215,7 +228,11 @@ func _deferred_redraw() -> void:
 func _build_header() -> Control:
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override(&"separation", UiKit.SPACE_L)
-	header.add_child(_label("Personal inventory", &"TitleLabel"))
+	var head := UiKit.header("Personal inventory", "What you wear and carry. Drag items between containers, the soldier and the ground.",
+		PackedStringArray(HELP), [["Tab / Esc", "Close"], ["Arrows", "Move"], ["Enter", "Use"], ["Right-click", "Actions"], ["Drag", "Move"]], false)
+	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.size_flags_stretch_ratio = 1.4
+	header.add_child(head)
 	# The mass and the key hints wrap under each other in a narrow window instead of pushing
 	# the header off it.
 	var right := HFlowContainer.new()
@@ -234,7 +251,7 @@ func _build_header() -> Control:
 	_mass_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_mass_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	right.add_child(_mass_bar)
-	for hint: Array in [["Tab / Esc", "Close"], ["Arrows", "Move"], ["Enter", "Use"], ["Menu", "Actions"]]:
+	for hint: Array in [["Tab / Esc", "Close"], ["Arrows", "Move"], ["Enter", "Use"], ["Menu", "Actions"], ["Drag", "Move an item"]]:
 		var key := UiKit.key_hint(hint[0], hint[1])
 		key.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		right.add_child(key)
@@ -247,6 +264,7 @@ func _build_left() -> Control:
 	column.size_flags_stretch_ratio = 0.9
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(_label("Containers", &"HeadingLabel"))
+	column.add_child(_build_tools())
 	_quick_box = UiKit.button_row([])
 	column.add_child(_quick_box)
 	var scroll := ScrollContainer.new()
@@ -547,6 +565,8 @@ func _redraw_containers() -> void:
 	var ground := _section("Nearby (ground)", "drop here", {"kind": "nearby"})
 	var grid := _grid()
 	for node: WorldItem in nearby:
+		if not passes(node.item_id):
+			continue
 		var item := ItemDB.get_item(node.item_id)
 		var src := {"kind": "nearby", "path": node.get_path(), "id": node.item_id}
 		grid.add_child(_tile(src, item.name, "x%d" % node.count if node.count > 1 else _condition(item, node.state), node.item_id))
@@ -564,12 +584,19 @@ func _entry_grid(container: StringName, compact: bool) -> HFlowContainer:
 	grid.mouse_filter = Control.MOUSE_FILTER_STOP
 	grid.set_drag_forwarding(Callable(), _can_drop.bind(dst), _drop.bind(dst))
 	var entries: Array = inv.containers.get(container, [])
-	for i in entries.size():
+	var shown := 0
+	for i: int in entry_order(entries):
 		var entry: Dictionary = entries[i]
+		if not passes(entry.id):
+			continue
+		shown += 1
 		var src := {"kind": "entry", "container": container, "index": i, "id": entry.id}
 		grid.add_child(_tile(src, ItemDB.get_item(entry.id).name, _entry_readout(entry), entry.id))
 	if entries.is_empty():
 		grid.add_child(_wrapped("empty" if compact else "(empty)  drag items here", &"HintLabel"))
+		grid.custom_minimum_size.y = 26
+	elif shown == 0:
+		grid.add_child(_wrapped("%d hidden by the search or filter" % entries.size(), &"HintLabel"))
 		grid.custom_minimum_size.y = 26
 	return grid
 
@@ -1126,6 +1153,64 @@ func _on_icon_ready(_id: StringName) -> void:
 	_queue_redraw()
 
 
+# --- Search, filter, sort --------------------------------------------------------------------
+
+## The search box, kind filter and sort over the containers.
+func _build_tools() -> Control:
+	var flow := HFlowContainer.new()
+	flow.name = "Tools"
+	flow.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
+	flow.add_theme_constant_override(&"v_separation", UiKit.SPACE_XS)
+	var search := UiKit.search_field("Search your kit...", func(q: String) -> void:
+		filter_query = q
+		_queue_redraw())
+	flow.add_child(search)
+	var kinds: Array = [["", "All kinds"]]
+	for g: String in Loadouts.GROUPS:
+		kinds.append([g, Loadouts.GROUP_NAMES[g]])
+	var kind := UiKit.picker(kinds, func(v: Variant) -> void:
+		filter_kind = String(v)
+		_queue_redraw(), "Show one kind of item only (the rest are still there)")
+	kind.name = "Kind"
+	flow.add_child(kind)
+	var sort := UiKit.picker(SORTS, func(v: Variant) -> void:
+		sort_by = String(v)
+		_queue_redraw(), "The order items show in, in each container (it doesn't repack them)")
+	sort.name = "Sort"
+	flow.add_child(sort)
+	return flow
+
+
+## Whether item `id` passes the search and the kind filter.
+func passes(id: StringName) -> bool:
+	var item := ItemDB.get_item(id)
+	if item == null:
+		return true
+	return (filter_kind == "" or Loadouts.group_of(item) == filter_kind) and UiKit.matches(item.name, filter_query)
+
+
+## The order `entries` (a container's) show in, as indices: as packed, or by sort_by.
+func entry_order(entries: Array) -> Array:
+	var order: Array = range(entries.size())
+	if sort_by == "packed":
+		return order
+	var key := func(i: int) -> Variant:
+		var item := ItemDB.get_item(entries[i].id)
+		if item == null:
+			return ""
+		match sort_by:
+			"weight":
+				return -item.mass_kg * maxf(float(entries[i].get("count", 1)), 1.0)
+			"kind":
+				return "%02d %s" % [Loadouts.GROUPS.find(Loadouts.group_of(item)), item.name]
+		return item.name
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var ka: Variant = key.call(a)
+		var kb: Variant = key.call(b)
+		return ka < kb or (ka == kb and a < b))
+	return order
+
+
 # --- Helpers --------------------------------------------------------------------------------
 
 ## A container's panel (the theme's) with a heading and a note (its fill) that wraps under the
@@ -1193,7 +1278,33 @@ func _wrapped(text: String, variation: StringName = &"") -> Label:
 ## A themed button the keyboard can reach (audit item 6, P1-15: they were FOCUS_NONE, so the
 ## screen was mouse only); long text is cut with "..." and kept whole in the tooltip (UiKit).
 func _button(text: String, action: Callable) -> Button:
-	return UiKit.button(text, action)
+	return UiKit.button(text, action, tip_for(text))
+
+
+## What an action button does, in plain words, by the start of its label (ui-modern: every
+## button gets a tooltip); the label itself when there's nothing more to say.
+const ACTION_TIPS := [
+	["Load magazines", "Fill your empty and part-used magazines from these rounds"],
+	["Loadout menu", "Open the loadout menu: kit yourself and the squad from the company stash"],
+	["Restock last loadout", "Refill your kit to the last loadout you deployed with, from the stash"],
+	["Loadout", "Show your worn slots around the soldier"],
+	["MOLLE", "Show where pouches attach on your carrier and pack, and what fits where"],
+	["Attach", "Put this pouch on a free attach point it fits"],
+	["Detach", "Take this pouch off its attach point"],
+	["Drop", "Put it on the ground at your feet"],
+	["Equip", "Wear it, or carry it in its slot"],
+	["Mount on", "Mount it on that weapon"],
+	["Pick up", "Take it from the ground into your kit, where it fits"],
+	["Stow", "Put it in your containers, where it fits"],
+	["Use", "Use it now"],
+]
+
+
+static func tip_for(label: String) -> String:
+	for pair: Array in ACTION_TIPS:
+		if label.begins_with(String(pair[0])):
+			return String(pair[1])
+	return label
 
 
 ## A tile's box, from the theme's button style: the selected tile's edge in the accent, the

@@ -29,6 +29,8 @@ func _ready() -> void:
 	theme_type_variation = &"HudPanel"
 	_label = Label.new()
 	_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	## ui-modern: the HUD's outlined small style (a shadowed 16 px label read badly over bright sky).
+	_label.theme_type_variation = &"HudSmallLabel"
 	add_child(_label)
 	Contracts.objectives.changed.connect(refresh)
 	get_viewport().size_changed.connect(refresh)

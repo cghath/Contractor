@@ -258,6 +258,25 @@ func _test_kit() -> void:
 	check(theme != null and theme.default_font_size == UiKit.FONT_BODY and theme.has_stylebox(&"panel", &"PanelContainer")
 		and theme.has_stylebox(&"focus", &"Button") and theme.get_font_size(&"font_size", &"HeadingLabel") == UiKit.FONT_HEADING
 		and theme.get_type_variation_base(&"HintLabel") == &"Label", "the theme: 16 px body, panel, button focus, heading and hint variations")
+	## ui-modern: the HUD sizes the kit names are the theme's (the .tres had 18/14/26 while the
+	## constants said 20/28, and nothing read them), and the UI font is the bundled one.
+	check(theme.get_font_size(&"font_size", &"HudLabel") == UiKit.FONT_HUD and theme.get_font_size(&"font_size", &"HudSmallLabel") == UiKit.FONT_HUD_SMALL
+		and theme.get_font_size(&"font_size", &"HudAlertLabel") == UiKit.FONT_HUD_ALERT and theme.get_font_size(&"font_size", &"TitleLabel") == UiKit.FONT_TITLE
+		and theme.get_font_size(&"font_size", &"HintLabel") == UiKit.FONT_SMALL,
+		"the theme's HUD, title and hint sizes are UiKit's (%d/%d/%d)" % [theme.get_font_size(&"font_size", &"HudLabel"),
+		theme.get_font_size(&"font_size", &"HudSmallLabel"), theme.get_font_size(&"font_size", &"HudAlertLabel")])
+	var regular: Variant = UiKit.FONT_REGULAR
+	check(theme.default_font == UiKit.FONT_REGULAR and regular is FontVariation
+		and (regular as FontVariation).base_font.get_font_name() == "Inter", "the theme's font is the bundled Inter (fonts/OFL.txt)")
+	var head := UiKit.header("Title", "What it's for", PackedStringArray(["How it works."]), [["Esc", "Close"]])
+	var help: Control = head.get_meta(&"help")
+	var q: Button = head.get_meta(&"help_button")
+	check(not help.visible and q.text == "?" and q.tooltip_text != "", "a header has a '?' button and its help starts hidden")
+	q.button_pressed = true
+	check(help.visible, "'?' shows the help")
+	head.free()
+	check(UiKit.matches("M855 magazine", "855 mag") and not UiKit.matches("Bandage", "mag") and UiKit.matches("x", ""),
+		"search matches every word anywhere in the name")
 	var layer := CanvasLayer.new()
 	_vp.size = Vector2i(800, 600)
 	_vp.add_child(layer)
@@ -530,6 +549,28 @@ func _test_hud() -> void:
 	check(hud._subtitles.theme_type_variation == &"HudLabel" and hud._status.theme_type_variation == &"HudLabel" and hud._downed.theme_type_variation == &"HudAlertLabel"
 		and UiKit.THEME.get_constant(&"outline_size", &"HudLabel") > 0 and UiKit.THEME.get_font_size(&"font_size", &"HudSmallLabel") >= UiKit.FONT_SMALL,
 		"the HUD lines share the theme's outlined style, nothing under 14 px")
+	# The HUD layout setting (HudLayout, ui-modern): every part at its biggest and half see-through
+	# still fits the window, and the reset puts it back. On a test settings file (never the player's).
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_hudlayout_settings.cfg"))
+	for e: Array in HudLayout.ELEMENTS:
+		HudLayout.set_value(String(e[0]), "scale", HudLayout.SCALE_RANGE[1])
+		HudLayout.set_value(String(e[0]), "opacity", 0.5)
+	await _frames(3)
+	var view := Rect2(Vector2.ZERO, root.get_visible_rect().size).grow(1.0)
+	var outside := PackedStringArray()
+	for part: Array in [["objectives", hud.zone_top_right], ["squad", hud.zone_left], ["compass", hud.compass], ["weapon", hud.ammo_readout],
+			["armour", hud.armor_readout], ["radio", hud.zone_bottom_centre]]:
+		var r := (part[1] as Control).get_global_rect()
+		if not view.encloses(r):
+			outside.append("%s %s" % [part[0], r])
+	check(outside.is_empty() and is_equal_approx(hud.zone_left.scale.x, HudLayout.SCALE_RANGE[1]) and is_equal_approx(hud.compass.modulate.a, 0.5),
+		"HUD layout at %d%% size and 50%% opacity: every part still in the window (%s)" % [roundi(HudLayout.SCALE_RANGE[1] * 100.0), ", ".join(outside)])
+	HudLayout.reset()
+	await _frames(2)
+	check(HudLayout.is_default() and is_equal_approx(hud.zone_left.scale.x, 1.0) and is_equal_approx(hud.compass.modulate.a, 1.0),
+		"Reset HUD layout puts every part back to full size and opacity")
+	GameSettings.reset_all()
+	GameSettings.use_file("")
 	root.content_scale_mode = keep[0]
 	root.content_scale_aspect = keep[1]
 	root.content_scale_size = keep[2]
@@ -587,8 +628,35 @@ func _fit(screen: String, make: Callable, strict := true) -> void:
 			check(not bad.is_empty(), "%s is listed as KNOWN but now fits at every size: take it off KNOWN" % key)
 		else:
 			check(bad.is_empty(), "%s fits at %d window sizes%s" % [key, SIZES.size(), "" if bad.is_empty() else ": " + "; ".join(bad)])
+	if strict and not EXPLAINED_EXEMPT.any(func(prefix: String) -> bool: return screen.begins_with(prefix)):
+		await _check_explained(screen, node)
 	node.queue_free()
 	await _frames(2)
+
+
+## Screens that are HUD parts, not menus: no subtitle or "?" help.
+const EXPLAINED_EXEMPT := ["objectives panel", "ammo readout", "command menu"]
+
+
+## ui-modern (Captain, 2026-10-20: "all menus should have better explanations"): `node` (a menu
+## screen) says what it's for (a SubtitleLabel) and, with a "?" help button, its help opens and
+## still fits at the smallest window at the biggest UI scale.
+func _check_explained(screen: String, node: Node) -> void:
+	var subtitles := node.find_children("*", "Label", true, false).filter(func(l: Label) -> bool: return l.theme_type_variation == &"SubtitleLabel")
+	var helps := node.find_children("*", "Button", true, false).filter(func(b: Button) -> bool: return b.theme_type_variation == &"HelpButton")
+	check(not subtitles.is_empty(), "%s says what it's for (a subtitle)" % screen)
+	if helps.is_empty():
+		return
+	for b: Button in helps:
+		b.button_pressed = true
+	var res: Vector2i = SIZES[0]
+	_vp.size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, UI_SCALES[-1])).floor())
+	await _frames(3)
+	var off := _layout_problems(node, Rect2(Vector2.ZERO, Vector2(_vp.size)))
+	check(off.is_empty(), "%s: its '?' help opens and still fits at %dx%d @%.1f%s" % [screen, res.x, res.y, UI_SCALES[-1],
+		"" if off.is_empty() else ": " + ", ".join(off.slice(0, 4))])
+	for b: Button in helps:
+		b.button_pressed = false
 
 
 ## Like _fit, for a menu drawn by hand (no Controls to walk): `rects` gives the boxes it draws

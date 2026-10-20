@@ -36,6 +36,20 @@ var _right_box: VBoxContainer
 var _left_title: Label
 var _right_title: Label
 var _buttons: HFlowContainer
+## The panes' scroll areas, and the help box ("?"), which takes its height from them when open.
+var _pane_scrolls: Array[ScrollContainer] = []
+var _help: Control
+## Both panes' search (lowered), kind filter ("" all, else a Loadouts group) and sort ("packed",
+## "name", "weight", "kind"; ui-modern, Captain 2026-10-20: "common sense layout tools").
+var filter_query := ""
+var filter_kind := ""
+var sort_by := "packed"
+const HELP := [
+	"Left is what they have (or what's in the hold or cache), right is you. Click an item, or drag it across, to move it.",
+	"Take all ammo and Take all meds sweep those from their pockets and pouches into yours, as far as they fit; Take everything takes the lot.",
+	"Worn gear on a body comes off it; your own worn gear is shown but stays on you (change it in the inventory, Tab).",
+	"The search box, kind filter and sort change what both sides show, not what's there. Walking away, being hit or the body going closes the window.",
+]
 
 
 class LootTile extends Button:
@@ -77,8 +91,21 @@ func _ready() -> void:
 	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	panel.add_child(root)
 	UiKit.fit_width(root, PANEL_W)
+	var top := HBoxContainer.new()
+	root.add_child(top)
 	_title = UiKit.heading("")
-	root.add_child(_title)
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(_title)
+	var help := UiKit.help_panel(PackedStringArray(HELP), [["Click / drag", "Move an item"], ["Esc / Tab", "Close"]])
+	help.visible = false
+	_help = help
+	help.visibility_changed.connect(_fit_panes.call_deferred)
+	help.minimum_size_changed.connect(_fit_panes.call_deferred)
+	var q := UiKit.help_button(help)
+	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(q)
+	root.add_child(UiKit.subtitle("Take what you need from them: click an item or drag it across. You are on the right.", false))
+	root.add_child(help)
 	_bar = ProgressBar.new()
 	_bar.max_value = 1.0
 	_bar.show_percentage = false
@@ -86,6 +113,7 @@ func _ready() -> void:
 	root.add_child(_bar)
 	_status = UiKit.hint("")
 	root.add_child(_status)
+	root.add_child(_build_tools())
 	var panes := HBoxContainer.new()
 	panes.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	root.add_child(panes)
@@ -98,7 +126,7 @@ func _ready() -> void:
 	_buttons = HFlowContainer.new()
 	_buttons.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
 	root.add_child(_buttons)
-	root.add_child(UiKit.hint("Click an item or drag it across to move it. Esc or Tab closes; walking away or being hit closes it too."))
+	root.add_child(UiKit.key_hints([["Click / drag", "Move an item"], ["Esc / Tab", "Close"], ["Walk away", "Closes it too"]]))
 
 
 ## One pane (title, scrolling sections) that takes drops for `side`.
@@ -112,7 +140,8 @@ func _pane(side: StringName, parent: Control) -> Array:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	UiKit.fit_height(scroll, PANE_H, 170.0)
+	_pane_scrolls.append(scroll)
+	UiKit._follow_window(scroll, _fit_panes)
 	scroll.set_drag_forwarding(Callable(),
 		func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
 		func(_at: Vector2, d: Variant) -> void: drop(d, side))
@@ -122,6 +151,19 @@ func _pane(side: StringName, parent: Control) -> Array:
 	sections.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	scroll.add_child(sections)
 	return [title, sections]
+
+
+## The panes' height: PANE_H, or what the window leaves under the title, subtitle, search row,
+## buttons and keys (and the open help box).
+func _fit_panes() -> void:
+	if not is_inside_tree():
+		return
+	var room := get_viewport().get_visible_rect().size.y - UiKit.EDGE * 2.0 - 250.0
+	if _help != null and _help.visible:
+		room -= _help.custom_minimum_size.y + UiKit.SPACE_S
+	for s: ScrollContainer in _pane_scrolls:
+		if is_instance_valid(s):
+			s.custom_minimum_size.y = maxf(minf(PANE_H, room), 60.0)
 
 
 # --- Opening and closing ----------------------------------------------------------------
@@ -343,6 +385,11 @@ func _section(box: VBoxContainer, heading: String, tiles: Array) -> void:
 	if tiles.is_empty():
 		box.add_child(UiKit.hint("(empty)"))
 		return
+	var all := tiles.size()
+	tiles = _shown_tiles(tiles)
+	if tiles.is_empty():
+		box.add_child(UiKit.hint("(%d hidden by the search or filter)" % all))
+		return
 	var grid := HFlowContainer.new()
 	grid.add_theme_constant_override(&"h_separation", 6)
 	grid.add_theme_constant_override(&"v_separation", 6)
@@ -382,13 +429,77 @@ func _rebuild_buttons() -> void:
 		_buttons.remove_child(c)
 		c.queue_free()
 	var can := not searching()
-	var ammo := UiKit.button("Take all ammo", func() -> void: take_class(&"ammo"))
-	var meds := UiKit.button("Take all meds", func() -> void: take_class(&"medical"))
-	var everything := UiKit.button("Take everything", take_everything)
+	var ammo := UiKit.button("Take all ammo", func() -> void: take_class(&"ammo"), "Every magazine, belt and round they carry into your kit, as far as it fits")
+	var meds := UiKit.button("Take all meds", func() -> void: take_class(&"medical"), "Every medical item they carry into your kit, as far as it fits")
+	var everything := UiKit.accent_button("Take everything", take_everything, "Everything you can carry from them, worn gear included on a body")
 	for b: Button in [ammo, meds, everything]:
 		b.disabled = not can
 		_buttons.add_child(b)
-	_buttons.add_child(UiKit.button("Close", close))
+	_buttons.add_child(UiKit.button("Close", close, "Close the window (Esc or Tab)"))
+
+
+# --- Search, filter, sort ------------------------------------------------------------------
+
+## The search box, kind filter and sort over both panes.
+func _build_tools() -> Control:
+	var flow := HFlowContainer.new()
+	flow.name = "Tools"
+	flow.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
+	flow.add_theme_constant_override(&"v_separation", UiKit.SPACE_XS)
+	var search := UiKit.search_field("Search both sides...", func(q: String) -> void:
+		filter_query = q
+		_queue_redraw())
+	flow.add_child(search)
+	var kinds: Array = [["", "All kinds"]]
+	for g: String in Loadouts.GROUPS:
+		kinds.append([g, Loadouts.GROUP_NAMES[g]])
+	var kind := UiKit.picker(kinds, func(v: Variant) -> void:
+		filter_kind = String(v)
+		_queue_redraw(), "Show one kind of item only (the rest are still there)")
+	kind.name = "Kind"
+	flow.add_child(kind)
+	var sort := UiKit.picker(InventoryScreen.SORTS, func(v: Variant) -> void:
+		sort_by = String(v)
+		_queue_redraw(), "The order items show in, in each section")
+	sort.name = "Sort"
+	flow.add_child(sort)
+	return flow
+
+
+## Whether item `id` passes the search and the kind filter.
+func passes(id: StringName) -> bool:
+	var item := ItemDB.get_item(id)
+	if item == null:
+		return true
+	return (filter_kind == "" or Loadouts.group_of(item) == filter_kind) and UiKit.matches(item.name, filter_query)
+
+
+## `tiles` that pass the filter, in sort_by order (the rest are freed).
+func _shown_tiles(tiles: Array) -> Array:
+	var out: Array = []
+	for t: LootTile in tiles:
+		if passes(StringName(t.data.id)):
+			out.append(t)
+		else:
+			t.free()
+	if sort_by == "packed":
+		return out
+	var key := func(t: LootTile) -> Variant:
+		var item := ItemDB.get_item(StringName(t.data.id))
+		if item == null:
+			return ""
+		match sort_by:
+			"weight":
+				return -item.mass_kg
+			"kind":
+				return "%02d %s" % [Loadouts.GROUPS.find(Loadouts.group_of(item)), item.name]
+		return item.name
+	var order: Array = range(out.size())
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var ka: Variant = key.call(out[a])
+		var kb: Variant = key.call(out[b])
+		return ka < kb or (ka == kb and a < b))
+	return order.map(func(i: int) -> LootTile: return out[i])
 
 
 # --- Doing it (every one a host request) -------------------------------------------------

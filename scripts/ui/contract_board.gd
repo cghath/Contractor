@@ -49,6 +49,13 @@ var _refreshing := false
 
 ## Below this logical width (window / Menu and HUD size) the lists go above the details.
 const NARROW_WIDTH := 1000.0
+## What each negotiation field does (ui-modern: every field gets a tooltip).
+const SPIN_TIPS := {
+	"Pay points": "More cash when the contract is done.",
+	"Salvage points": "A bigger share of what you bring back counts as yours (the rest goes to the client).",
+	"Support points": "A bigger budget for support calls (helicopters, fire support) during the job.",
+	"Advance %": "How much of the pay comes up front when you accept; the rest on completion.",
+}
 
 
 func _ready() -> void:
@@ -75,7 +82,13 @@ func _ready() -> void:
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	panel.add_child(root)
-	root.add_child(UiKit.title("Contract board"))
+	root.add_child(UiKit.header("Contract board", "Pick the company's next job: compare offers, negotiate the terms, accept, then prepare the deployment.",
+		PackedStringArray([
+			"Offers come from the regional board, fixers and intel leads. Pick one for what the briefing knows, its difficulty and the pay.",
+			"Negotiation: spend the points between pay, salvage share (how much of what you bring back is yours) and support budget (paid support calls). Advance % is paid when you accept, the rest on completion.",
+			"Held contracts are the ones the company has taken. Renegotiate (once, when the briefing understated the threat) or Abort one; Prepare deployment sends it to the base's prep.",
+			"Hot zones shows who holds each zone and how firmly; it shifts while days pass. Shop buys kit into the stash; a loan gives cash now, paid back with interest.",
+		]), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))
 	_header = UiKit.text("")
 	root.add_child(_header)
 	var scroll := ScrollContainer.new()
@@ -92,10 +105,12 @@ func _ready() -> void:
 	_body.add_child(_left)
 	_left.add_child(UiKit.heading("Offers (board, fixers, leads)"))
 	_offers = UiKit.list(140.0)
+	_offers.tooltip_text = "Contracts on offer. Pick one to see its briefing and negotiate it"
 	_left.add_child(_offers)
 	_offers.item_selected.connect(func(i: int) -> void: _select(_offer_ids[i], false))
 	_left.add_child(UiKit.heading("Held contracts"))
 	_held = UiKit.list(140.0)
+	_held.tooltip_text = "Contracts the company holds. Pick one to see it, renegotiate, abort or deploy"
 	_left.add_child(_held)
 	_held.item_selected.connect(func(i: int) -> void: _select(_held_ids[i], true))
 	_left.add_child(UiKit.heading("Hot zones: who holds them"))  # wave 6c: WorldSites, the faction war between deployments
@@ -121,24 +136,31 @@ func _ready() -> void:
 	_advance = _spin(fields, "Advance %", 10, 50, 10)
 	_deal = UiKit.text("")
 	right.add_child(_deal)
-	_accept = UiKit.button("Accept contract", accept_selected)
-	_renegotiate = UiKit.button("Renegotiate", func() -> void: Contracts.renegotiate(_selected))
-	_abort = UiKit.button("Abort", func() -> void: Contracts.abort(_selected))
-	_deploy = UiKit.button("Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected)
+	_accept = UiKit.accent_button("Accept contract", accept_selected, "Take the picked offer on the terms set above (the advance is paid now)")
+	_renegotiate = UiKit.button("Renegotiate", func() -> void: Contracts.renegotiate(_selected),
+		"Once per contract, when the briefing understated the threat: the pay on completion goes up")
+	_abort = UiKit.danger_button("Abort", func() -> void: Contracts.abort(_selected), "Give the held contract up. The advance is kept; your standing with the employer drops, unless the briefing was shown to have lied")
+	_deploy = UiKit.button("Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected,
+		"Send the held contract to the base's deployment prep: pick the squad and kit there")
 	right.add_child(UiKit.button_row([_accept, _renegotiate, _abort, _deploy]))
 	# The bottom row's seven buttons wrap onto a second line rather than off the window (P0-5).
-	var bottom: Array = [UiKit.button("Shop", open_shop), UiKit.button("Take a loan", func() -> void: Economy.take_loan())]
-	_host_buttons.append(UiKit.button("Wait a day", func() -> void: Economy.advance_days(1, "waiting at base")))
-	_host_buttons.append(UiKit.button("Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base")))
+	var bottom: Array = [UiKit.button("Shop", open_shop, "Buy kit into the company stash"),
+		UiKit.button("Take a loan", func() -> void: Economy.take_loan(), "Cash now from a lender, paid back with interest a share each week")]
+	_host_buttons.append(UiKit.button("Wait a day", func() -> void: Economy.advance_days(1, "waiting at base"),
+		"Let a day pass: offers expire and new ones come, the hot zones shift, and each week the bill (wages, upkeep, loans) falls due"))
+	_host_buttons.append(UiKit.button("Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base"),
+		"Let a week pass (as Wait a day, seven times)"))
 	if not BaseHub.campaign_running:  # a campaign deploys from the base and ends at extraction
 		_host_buttons.append(UiKit.button("End deployment (debug)", _debug_extract))
 		_host_buttons.append(UiKit.button("Reset campaign", func() -> void: Contracts.new_full_campaign()))
 	bottom.append_array(_host_buttons)
-	bottom.append(UiKit.button("Close", close))
+	bottom.append(UiKit.button("Close", close, "Close the board (Esc)"))
+	var esc := UiKit.key_hint("Esc", "Close")  # in the row, not a line of its own (room for the open help)
+	esc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bottom.append(esc)
 	root.add_child(UiKit.button_row(bottom))
 	_notice = UiKit.text("")
 	root.add_child(_notice)
-	root.add_child(UiKit.key_hint("Esc", "Close"))
 	_layout()
 	get_viewport().size_changed.connect(_layout)
 	Contracts.changed.connect(refresh)
@@ -392,8 +414,11 @@ func _spin(parent: Control, label_text: String, lo: float, hi: float, step: floa
 	parent.add_child(pair)
 	var label := Label.new()
 	label.text = label_text
+	label.tooltip_text = SPIN_TIPS.get(label_text, "")
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	pair.add_child(label)
 	var spin := SpinBox.new()
+	spin.tooltip_text = label.tooltip_text
 	spin.min_value = lo
 	spin.max_value = hi
 	spin.step = step

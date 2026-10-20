@@ -13,13 +13,33 @@ extends RefCounted
 const THEME: Theme = preload("res://themes/contractor_ui.tres")
 
 ## The palette, for the few places a colour is set by hand (drawn things, rich text, bars).
-const TEXT := Color(0.9, 0.91, 0.87)
-const TEXT_DIM := Color(0.64, 0.67, 0.61)
-const ACCENT := Color(0.91, 0.67, 0.25)
-const GOOD := Color(0.47, 0.76, 0.42)
-const WARN := Color(0.93, 0.45, 0.36)
-const PANEL_BG := Color(0.07, 0.08, 0.07, 0.9)
+## Kept in step with the theme (ui-modern, 2026-10-20: one palette, brighter dim text for
+## contrast over the 3D view).
+const TEXT := Color(0.92, 0.93, 0.89)
+const TEXT_BRIGHT := Color(0.97, 0.97, 0.94)
+const TEXT_DIM := Color(0.7, 0.73, 0.67)
+const TEXT_OFF := Color(0.5, 0.52, 0.48)
+const ACCENT := Color(0.93, 0.69, 0.27)
+const ACCENT_HOT := Color(1.0, 0.8, 0.42)
+const GOOD := Color(0.5, 0.8, 0.45)
+const WARN := Color(0.95, 0.47, 0.38)
+## Worse than WARN: a broken plate, an arterial bleed.
+const BAD := Color(0.88, 0.25, 0.2)
+const PANEL_BG := Color(0.065, 0.075, 0.065, 0.93)
 const DIM_BG := Color(0, 0, 0, 0.55)
+## A panel's hairline edge, and a hovered or keyboard-picked row (the accent, faint).
+const BORDER := Color(0.3, 0.33, 0.27)
+const HOVER_BG := Color(0.93, 0.69, 0.27, 0.2)
+## The outline under HUD text and drawn readouts (readable over bright ground).
+const OUTLINE := Color(0, 0, 0, 0.9)
+## The ink on an amber chip (a key hint, the primary button).
+const INK := Color(0.06, 0.07, 0.06)
+
+## The fonts (Inter, SIL Open Font License: fonts/OFL.txt): the theme's default (medium), a
+## semibold for headings, buttons and the HUD, and a bold for titles. Drawn UIs use these.
+const FONT_REGULAR: Font = preload("res://themes/inter_body.tres")
+const FONT_STRONG: Font = preload("res://themes/inter_strong.tres")
+const FONT_BOLD: Font = preload("res://themes/inter_bold.tres")
 
 ## The spacing scale: between a label and its control, between rows, between sections, and the
 ## gap kept between a screen's panel and the window's edge.
@@ -35,10 +55,12 @@ const FONT_SMALL := 14
 const FONT_BODY := 16
 const FONT_HEADING := 20
 const FONT_TITLE := 26
-## The HUD's text over the 3D view (docs/ui_audit.md item 4, P1-9/P1-11): 18 px with a black
-## outline (HudLabel), 14 px for its small lines (HudSmallLabel), 26 px warn-red for the downed
-## and killed titles (HudAlertLabel). One outlined style, readable over bright ground.
+## The HUD's text over the 3D view (docs/ui_audit.md item 4, P1-9/P1-11): one outlined style,
+## readable over bright ground, in the theme's HudLabel (FONT_HUD), HudSmallLabel
+## (FONT_HUD_SMALL) and HudAlertLabel (FONT_HUD_ALERT, warn-red, the downed and killed titles).
+## ui_test checks the theme matches these.
 const FONT_HUD := 20  # Captain, 2026-10-16: HUD "sized up a tiny bit" (was 18)
+const FONT_HUD_SMALL := 16  # (was 14)
 const FONT_HUD_ALERT := 28  # (was 26)
 
 
@@ -393,7 +415,7 @@ static func key_hint(key: String, what: String) -> HBoxContainer:
 	var r := HBoxContainer.new()
 	r.add_theme_constant_override(&"separation", SPACE_XS + 2)
 	var chip := Label.new()
-	chip.text = " %s " % key
+	chip.text = key
 	chip.theme_type_variation = &"KeyLabel"
 	r.add_child(chip)
 	var label := Label.new()
@@ -443,3 +465,239 @@ static func focus_first(root: Node) -> void:
 				c.grab_focus()
 				return
 	pick.call_deferred()
+
+
+# --- ui-modern (Captain, 2026-10-20: "the ui should have a nice modern feel with common sense
+# layout tools etc. all menus should have better explanations") ------------------------------
+
+## A screen's one-line "what this is for" under its title (dim, wraps).
+static func subtitle(value: String, centred := true) -> Label:
+	var label := text(value)
+	label.theme_type_variation = &"SubtitleLabel"
+	if centred:
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return label
+
+
+## A screen's header: its title with a "?" button on the right, the one-line subtitle under it,
+## and a help panel (hidden until "?" is pressed) with `help` (how it works, a line each) and
+## `keys` ([key, what] pairs). Add it where the title went; the help pushes the rest down, so a
+## screen in a scroll area still fits. The help panel is the meta "help", the button "help_button".
+static func header(title_text: String, subtitle_text: String, help: PackedStringArray = PackedStringArray(),
+		keys: Array = [], centred := true) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.name = "Header"
+	box.add_theme_constant_override(&"separation", SPACE_XS)
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override(&"separation", SPACE_S)
+	box.add_child(top)
+	var t := title(title_text)
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not centred:
+		t.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	top.add_child(t)
+	if subtitle_text != "":
+		box.add_child(subtitle(subtitle_text, centred))
+	if help.is_empty() and keys.is_empty():
+		return box
+	var panel := help_panel(help, keys)
+	panel.visible = false
+	var q := help_button(panel)
+	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(q)
+	if centred:  # the title stays centred: a gap as wide as the button on its left
+		var pad := Control.new()
+		pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		top.add_child(pad)
+		top.move_child(pad, 0)
+		var match_width := func() -> void:
+			if is_instance_valid(pad) and is_instance_valid(q):
+				pad.custom_minimum_size.x = q.get_combined_minimum_size().x
+		q.minimum_size_changed.connect(match_width)
+		q.theme_changed.connect(match_width)
+		match_width.call()
+	box.add_child(panel)
+	box.set_meta(&"help", panel)
+	box.set_meta(&"help_button", q)
+	return box
+
+
+## The "?" button that shows and hides `panel` (a help_panel).
+static func help_button(panel: Control) -> Button:
+	var q := Button.new()
+	q.name = "Help"
+	q.text = "?"
+	q.theme_type_variation = &"HelpButton"
+	q.toggle_mode = true
+	q.tooltip_text = "How this screen works, and its keys"
+	q.toggled.connect(func(on: bool) -> void:
+		if is_instance_valid(panel):
+			panel.visible = on)
+	return q
+
+
+## A help box: "How it works" over `lines` (one wrapping line each) and the `keys` hints, in a
+## scroll area no taller than HELP_SHARE of the window (a full-window screen has no room to give
+## it more: its open help would push the screen's own rows off a small window). Show or hide the
+## returned control (help_button does).
+static func help_panel(lines: PackedStringArray, keys: Array = []) -> Control:
+	var holder := ScrollContainer.new()
+	holder.name = "HelpPanel"
+	holder.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = &"HelpPanel"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	holder.add_child(panel)
+	var fit := func() -> void:
+		if is_instance_valid(holder) and holder.is_inside_tree():
+			var cap := clampf(holder.get_viewport().get_visible_rect().size.y * HELP_SHARE, 80.0, 260.0)
+			holder.custom_minimum_size.y = minf(panel.get_combined_minimum_size().y, cap)
+	panel.minimum_size_changed.connect(fit, CONNECT_DEFERRED)
+	holder.visibility_changed.connect(fit)
+	_follow_window(holder, fit)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", SPACE_XS + 2)
+	panel.add_child(box)
+	var head := Label.new()
+	head.text = "How it works"
+	head.theme_type_variation = &"HelpTitleLabel"
+	box.add_child(head)
+	for line in lines:
+		var l := text(line)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		box.add_child(l)
+	if not keys.is_empty():
+		box.add_child(key_hints(keys))
+	return holder
+
+
+## The most of the window's height a help box takes (it scrolls past that).
+const HELP_SHARE := 0.25
+
+
+## A row of key hints that wraps ([[key, what], ...]): a screen's footer.
+static func key_hints(keys: Array) -> HFlowContainer:
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override(&"h_separation", SPACE_L)
+	flow.add_theme_constant_override(&"v_separation", SPACE_XS)
+	for pair: Array in keys:
+		flow.add_child(key_hint(String(pair[0]), String(pair[1])))
+	return flow
+
+
+## The main action on a screen (amber).
+static func accent_button(label: String, pressed: Callable, tooltip := "") -> Button:
+	var b := button(label, pressed, tooltip)
+	b.theme_type_variation = &"AccentButton"
+	return b
+
+
+## An action that can't be undone (sell, discard): a red edge.
+static func danger_button(label: String, pressed: Callable, tooltip := "") -> Button:
+	var b := button(label, pressed, tooltip)
+	b.theme_type_variation = &"DangerButton"
+	return b
+
+
+## A search box: calls `changed` with the lowered, trimmed text as it is typed. Esc in it
+## clears it first where the screen lets the key reach it (most close on Esc before that).
+static func search_field(placeholder := "Search...", changed: Callable = Callable()) -> LineEdit:
+	var field := LineEdit.new()
+	field.name = "Search"
+	field.placeholder_text = placeholder
+	field.clear_button_enabled = true
+	field.tooltip_text = "Type part of a name to show only the matches (the x at its end clears it)"
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	field.custom_minimum_size.x = 140.0
+	if changed.is_valid():
+		field.text_changed.connect(func(t: String) -> void: changed.call(t.strip_edges().to_lower()))
+	field.gui_input.connect(func(event: InputEvent) -> void:
+		if event.is_action_pressed(&"pause") and field.text != "":
+			field.clear()
+			field.text_changed.emit("")
+			field.accept_event())
+	return field
+
+
+## A drop-down of `options` ([value, label]) that calls `picked` with the value; `tip` says
+## what it does; `now` is the value shown first.
+static func picker(options: Array, picked: Callable, tip := "", now: Variant = null) -> OptionButton:
+	var p := OptionButton.new()
+	p.tooltip_text = tip
+	for o: Array in options:
+		p.add_item(String(o[1]))
+		p.set_item_metadata(p.item_count - 1, o[0])
+		if now != null and str(o[0]) == str(now):
+			p.select(p.item_count - 1)
+	p.item_selected.connect(func(i: int) -> void: picked.call(p.get_item_metadata(i)))
+	return p
+
+
+## Whether `item_name` passes a search `query` (lowered; "" passes everything): every word of
+## the query is somewhere in the name.
+static func matches(item_name: String, query: String) -> bool:
+	if query == "":
+		return true
+	var low := item_name.to_lower()
+	for word in query.split(" ", false):
+		if not low.contains(word):
+			return false
+	return true
+
+
+## Asks before something that can't be undone: a modal box over `parent` (a Control filling
+## its window, or a CanvasLayer) with `question`, Cancel and `ok_label` (red when `danger`).
+## Enter confirms, Esc cancels. Returns the box (it frees itself when answered).
+static func confirm(parent: Node, question: String, ok_label: String, on_ok: Callable, danger := true) -> Control:
+	var overlay := ConfirmBox.new()
+	overlay.name = "Confirm"
+	overlay.on_ok = on_ok
+	apply(overlay)
+	parent.add_child(overlay)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.add_child(dim(0.5))
+	var centre := CenterContainer.new()
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(centre)
+	var p := panel(true)
+	centre.add_child(p)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", SPACE_M)
+	p.add_child(box)
+	fit_width(box, 420.0)
+	box.add_child(heading("Are you sure?"))
+	box.add_child(text(question))
+	var cancel := button("Cancel", overlay.answer.bind(false), "Keep it (Esc)")
+	cancel.name = "Cancel"
+	var ok := danger_button(ok_label, overlay.answer.bind(true), "%s (Enter)" % ok_label) if danger \
+		else accent_button(ok_label, overlay.answer.bind(true), "%s (Enter)" % ok_label)
+	ok.name = "Ok"
+	box.add_child(button_row([cancel, ok], true))
+	box.add_child(key_hints([["Enter", ok_label], ["Esc", "Cancel"]]))
+	ok.grab_focus.call_deferred()
+	return overlay
+
+
+## The confirmation box (confirm()): takes every key while it's up.
+class ConfirmBox extends Control:
+	var on_ok: Callable
+
+	func answer(yes: bool) -> void:
+		if is_queued_for_deletion():
+			return
+		queue_free()
+		if yes and on_ok.is_valid():
+			on_ok.call()
+
+	func _input(event: InputEvent) -> void:
+		if not is_visible_in_tree() or is_queued_for_deletion():
+			return
+		if event.is_action_pressed(&"pause"):
+			get_viewport().set_input_as_handled()
+			answer(false)
+		elif event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode in [KEY_ENTER, KEY_KP_ENTER]:
+			var focus := get_viewport().gui_get_focus_owner()
+			get_viewport().set_input_as_handled()
+			answer(not (focus != null and focus.name == &"Cancel"))

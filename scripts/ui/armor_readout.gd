@@ -8,12 +8,13 @@ extends Control
 
 const WARN := 0.6
 const BAD := 0.3
-const GOOD_COLOUR := Color("7fc77a")
-const WARN_COLOUR := Color("e0b44a")
-const BAD_COLOUR := Color("e0574a")
-const COLOUR := Color(UiKit.TEXT, 0.95)
-const DIM_COLOUR := Color(UiKit.TEXT, 0.7)
-const OUTLINE := Color(0, 0, 0, 0.7)
+## The kit's colours (ui-modern, 2026-10-20: it had its own greens, ambers and reds).
+const GOOD_COLOUR := UiKit.GOOD
+const WARN_COLOUR := UiKit.ACCENT
+const BAD_COLOUR := UiKit.BAD
+const COLOUR := Color(UiKit.TEXT_BRIGHT, 0.97)
+const DIM_COLOUR := Color(UiKit.TEXT, 0.88)
+const OUTLINE := UiKit.OUTLINE
 const ROW := 22.0
 const BAR := Vector2(70, 7)
 const NAME_W := 104.0
@@ -81,20 +82,20 @@ static func colour_for(left: float, broken: bool) -> Color:
 func _draw() -> void:
 	if shown.is_empty():
 		return
-	var font := get_theme_default_font()
-	var fs := UiKit.FONT_BODY
+	var font := UiKit.FONT_STRONG
+	var fs := UiKit.FONT_HUD_SMALL
 	var y := size.y - ROW * shown.size()
 	for row: Dictionary in shown:
 		var base := y + ROW * 0.75
 		var label := "%s %s" % [row.name, row.rating]
 		var x := size.x - NAME_W - BAR.x - 56.0
-		draw_string_outline(font, Vector2(x, base), label, HORIZONTAL_ALIGNMENT_LEFT, NAME_W, fs, 3, OUTLINE)
+		draw_string_outline(font, Vector2(x, base), label, HORIZONTAL_ALIGNMENT_LEFT, NAME_W, fs, 4, OUTLINE)
 		draw_string(font, Vector2(x, base), label, HORIZONTAL_ALIGNMENT_LEFT, NAME_W, fs, COLOUR)
 		var bar := Rect2(Vector2(x + NAME_W, base - BAR.y - 2.0), BAR)
 		var tint := colour_for(row.left, row.broken)
 		draw_rect(bar.grow(1.0), Color(0, 0, 0, 0.55))
 		draw_rect(Rect2(bar.position, Vector2(BAR.x * (0.0 if row.broken else float(row.left)), BAR.y)), tint)
 		var tail := "BROKEN" if row.broken else "%d%%%s" % [roundi(float(row.left) * 100.0), (" %dx" % row.cracks) if int(row.cracks) > 0 else ""]
-		draw_string_outline(font, Vector2(bar.end.x + 6.0, base), tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, OUTLINE)
+		draw_string_outline(font, Vector2(bar.end.x + 6.0, base), tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 4, OUTLINE)
 		draw_string(font, Vector2(bar.end.x + 6.0, base), tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, tint if row.broken or row.left < WARN else DIM_COLOUR)
 		y += ROW

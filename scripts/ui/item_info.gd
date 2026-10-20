@@ -13,10 +13,30 @@ extends RefCounted
 
 const PANEL_NAME := &"ItemInspect"
 const PANEL_W := 420.0
-const COL_BG := Color(0.05, 0.08, 0.09, 0.95)
-const COL_EDGE := Color(0.33, 0.85, 0.95)
-const COL_TITLE := "ffd35a"
-const COL_MUTED := "9fb3b8"
+## The kit's colours for the markup (ui-modern, 2026-10-20: it kept the old teal look): the
+## name in the accent, the numbers dim. The panel is the theme's (SolidPanel).
+static var COL_TITLE := UiKit.ACCENT.to_html(false)
+static var COL_MUTED := UiKit.TEXT_DIM.to_html(false)
+## An item's rarity (data/items.json "rarity", from the loot work): its word and the colour its
+## name is written in. An item without one keeps the accent.
+const RARITY := {
+	"common": ["Common", Color(0.92, 0.93, 0.89)], "uncommon": ["Uncommon", Color(0.5, 0.8, 0.45)],
+	"rare": ["Rare", Color(0.45, 0.68, 0.98)], "very_rare": ["Very rare", Color(0.78, 0.55, 0.98)],
+}
+
+
+## The rarity word for `id` ("Rare"), or "" when it has none.
+static func rarity_text(id: StringName) -> String:
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	var r: Array = RARITY.get(String(item.stats.get("rarity", "")), []) if item else []
+	return String(r[0]) if not r.is_empty() else ""
+
+
+## The colour `id`'s name is written in: its rarity's, else the accent.
+static func name_colour(id: StringName) -> Color:
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	var r: Array = RARITY.get(String(item.stats.get("rarity", "")), []) if item else []
+	return r[1] if not r.is_empty() else UiKit.ACCENT
 
 const TYPE_NAMES := {
 	"weapon": "Weapon", "optic": "Optic", "ammo": "Ammunition", "armor": "Armour", "plate": "Armour plate",
@@ -46,7 +66,8 @@ static func stats_text(id: StringName) -> String:
 		return ""
 	var s: Dictionary = info.stats
 	var parts := PackedStringArray()
-	parts.append(TYPE_NAMES.get(s.type, String(s.type).capitalize()))
+	var rarity := rarity_text(id)
+	parts.append(TYPE_NAMES.get(s.type, String(s.type).capitalize()) + (" (%s)" % rarity.to_lower() if rarity != "" else ""))
 	if s.has("slot"):
 		parts.append("%s slot" % SLOT_NAMES.get(s.slot, String(s.slot).capitalize()))
 	parts.append("%s kg" % _num(s.weight))
@@ -117,7 +138,7 @@ static func bbcode(id: StringName) -> String:
 	var info := ItemDB.describe(id)
 	if info.is_empty():
 		return ""
-	var out := "[b][color=#%s]%s[/color][/b]\n" % [COL_TITLE, _escape(info.name)]
+	var out := "[b][color=#%s]%s[/color][/b]\n" % [name_colour(id).to_html(false), _escape(info.name)]
 	if info.desc != "":
 		out += _escape(info.desc) + "\n"
 	if not info.uses.is_empty():
@@ -163,12 +184,8 @@ static func panel(id: StringName, footer := "", width := PANEL_W) -> PanelContai
 	var box := PanelContainer.new()
 	box.name = PANEL_NAME
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = COL_BG
-	style.border_color = COL_EDGE
-	style.set_border_width_all(1)
-	style.set_content_margin_all(12)
-	box.add_theme_stylebox_override(&"panel", style)
+	UiKit.apply(box)
+	box.theme_type_variation = &"SolidPanel"
 	var text := RichTextLabel.new()
 	text.name = "Text"
 	text.bbcode_enabled = true

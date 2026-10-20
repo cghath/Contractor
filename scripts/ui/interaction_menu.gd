@@ -217,6 +217,7 @@ var _sub_step_left := 0.0
 
 func _init(p_player: Soldier = null) -> void:
 	player = p_player
+	UiKit.apply(self)  # its drawn text in the theme's font (ui-modern: Inter)
 
 
 func _ready() -> void:
@@ -1316,6 +1317,8 @@ static func item_of(action: Dictionary) -> StringName:
 static func entry_hint(action: Dictionary) -> String:
 	if action.is_empty():
 		return ""
+	if String(action.get("hint", "")) != "":  # an entry that says what it does (a base terminal)
+		return String(action.hint)
 	var id := item_of(action)
 	if id == &"":
 		return ""
