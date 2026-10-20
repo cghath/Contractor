@@ -1087,6 +1087,11 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 			var why := "No vehicles here" if drivers == null else drivers.server_command(self, cmd, point, names)
 			if why != "":
 				_client_message.rpc_id(owner_peer(), why)
+		"wt_setup", "wt_high", "wt_fire", "wt_pack":  # static weapon teams (G-25 part d, StaticWeapons)
+			var sw := StaticWeapons.of(self)
+			var why := sw.server_command(self, cmd, point, names) if sw else "Not here"
+			if why != "":
+				_client_message.rpc_id(owner_peer(), why)
 		"call_medic", "treat_me":  # a player asks for a medic, or tells a squadmate to treat him (SquadAI.needs_help)
 			if vitals.care_needed().is_empty():
 				_client_message.rpc_id(owner_peer(), "Nothing to treat")

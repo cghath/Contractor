@@ -201,6 +201,11 @@ func brains() -> Array[SquadAI]:
 	return out
 
 
+## A lost enemy is placed where his last heading and speed would take him, for up to this long
+## (G-22). Proposed.
+const LEAD_S := 4.0
+
+
 ## Host: a member saw `who` at `pos` (or, `heard`, heard him there: a rougher fix).
 func note_enemy(who: Soldier, pos: Vector3, heard := false) -> void:
 	if who == null or not is_instance_valid(who):
@@ -210,7 +215,8 @@ func note_enemy(who: Soldier, pos: Vector3, heard := false) -> void:
 	var was: Dictionary = known.get(id, {})
 	if heard and not was.is_empty() and not bool(was.heard) and now - float(was.at) < HEARD_KEEP_S:
 		return  # seen there a moment ago: a heard bearing is worse
-	known[id] = {"who": who, "pos": pos, "at": now, "heard": heard}
+	var vel := Vector3.ZERO if heard else Vector3(who.velocity.x, 0.0, who.velocity.z)  # where he was going (G-22)
+	known[id] = {"who": who, "pos": pos, "at": now, "heard": heard, "vel": vel}
 
 
 ## The enemy picture now: every known enemy still up and not forgotten, each entry with its
@@ -227,6 +233,10 @@ func enemy_picture() -> Array[Dictionary]:
 			continue
 		var entry := e.duplicate()
 		entry.age = now - float(e.at)
+		if not bool(e.heard) and float(entry.age) > 1.0:
+			# Out of sight a while: he's looked for where he was going, not where he was (G-22;
+			# Arma leads a lost target by its last heading and speed), up to LEAD_S of it.
+			entry.pos = (e.pos as Vector3) + (e.get("vel", Vector3.ZERO) as Vector3) * minf(float(entry.age), LEAD_S)
 		out.append(entry)
 	return out
 

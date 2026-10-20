@@ -105,6 +105,12 @@ const MENU := {
 				{"key": "3", "label": "Bring casualties to me", "cmd": "ccp_me"},
 				{"key": "4", "label": "Stop bringing casualties", "cmd": "ccp_off"},
 			]},
+			{"key": "0", "label": "Weapons team", "items": [  # G-25 part d: the squadmates carrying a static weapon's loads
+				{"key": "1", "label": "Set up the gun there", "cmd": "wt_setup", "point": true},
+				{"key": "2", "label": "Set up on high ground", "cmd": "wt_high"},
+				{"key": "3", "label": "Mortar: fire on that point", "cmd": "wt_fire", "point": true},
+				{"key": "4", "label": "Pack up and follow", "cmd": "wt_pack"},
+			]},
 			{"key": "8", "label": "Escort that HVT", "cmd": "escort", "hvt": true},
 			{"key": "9", "label": "Stop escorting", "cmd": "escort:"},
 		]},

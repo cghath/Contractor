@@ -185,6 +185,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_static_gun()
 		await _test_gun_team()
 		await _test_mortar_team()
+		await _test_weapons_team_orders()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -1312,6 +1313,40 @@ func _test_mortar_team() -> void:
 	if is_instance_valid(team):
 		team.queue_free()
 	for s: Soldier in [a, b, foe]:
+		s.queue_free()
+	await _seconds(0.3)
+
+
+## G-25 part d: the command menu's Weapons team: two squadmates carrying the M2's loads set it
+## up where they're told, man it, and pack it up and come back on the order.
+func _test_weapons_team_orders() -> void:
+	print("Static weapons: weapons team orders")
+	var at := level.ground_point(Vector3(-20, 0, 40))
+	var a := _soldier("friendly", at + Vector3(0, 0.1, 0), "OrderGunA")
+	var b := _soldier("friendly", at + Vector3(1.5, 0.1, 0), "OrderGunB")
+	await _seconds(0.3)
+	for s: Soldier in [a, b]:
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_INHERIT
+	a.inventory.release_hands()
+	a.inventory.take(&"static_m2_gun")
+	b.inventory.release_hands()
+	b.inventory.take(&"static_m3_tripod")
+	var sw := StaticWeapons.of(level)
+	var spot := level.ground_point(at + Vector3(0, 0, -12))
+	var why := sw.server_command(player, "wt_setup", spot, PackedStringArray([String(a.name), String(b.name)]))
+	check(why == "", "Set up the gun there: the two carrying the M2 take it on (%s)" % why)
+	var team: GunTeam = null
+	for t in get_tree().get_nodes_in_group(StaticWeapons.TEAMS_GROUP):
+		if t is GunTeam and (t as GunTeam).gunner == a:
+			team = t
+	await _wait_for(func() -> bool: return team != null and team.state == GunTeam.State.MANNED, 70.0)
+	check(team != null and team.state == GunTeam.State.MANNED and team.gun.global_position.distance_to(spot) < 3.0,
+		"they carry it there, set it up and man it (%s)" % (GunTeam.STATE_NAMES[team.state] if team else "no team"))
+	why = sw.server_command(player, "wt_pack", Vector3.ZERO, PackedStringArray([String(a.name), String(b.name)]))
+	await _wait_for(func() -> bool: return not is_instance_valid(team), 30.0)
+	check(not is_instance_valid(team) and StaticWeapons.kit_of_load(a.inventory.hands) == "tripod_m2" and StaticWeapons.kit_of_load(b.inventory.hands) == "tripod_m2",
+		"Pack up and follow: packed, the loads back in their hands, the team done (%s, %s)" % [a.inventory.hands, b.inventory.hands])
+	for s: Soldier in [a, b]:
 		s.queue_free()
 	await _seconds(0.3)
 

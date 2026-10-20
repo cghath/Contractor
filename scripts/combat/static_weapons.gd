@@ -103,6 +103,76 @@ static func pack_problem(s: Soldier, gun: Vehicle) -> String:
 	return ""
 
 
+## Host: the command menu's "Weapons team" orders (G-25 part d) from `from` for the squadmates
+## `names` (all when empty): "wt_setup" (set up at `point`), "wt_high" (set up on high ground),
+## "wt_fire" (the mortar team fires on `point`), "wt_pack" (pack up and follow). Returns "" or why.
+func server_command(from: Soldier, cmd: String, point: Vector3, names: PackedStringArray) -> String:
+	if not multiplayer.is_server() or from == null:
+		return ""
+	var lvl := CompoundLevel.current(from)
+	var squad := lvl.squad_for(from.faction) if lvl else null
+	if squad == null:
+		return "No squad"
+	var men: Array[Soldier] = []
+	for s: Soldier in squad.pick(names):
+		if s.is_ai() and s.vitals.is_up():
+			men.append(s)
+	match cmd:
+		"wt_pack":
+			var n := 0
+			for t in get_tree().get_nodes_in_group(TEAMS_GROUP):
+				var crew: Array = t.get(&"crew") if t is MortarTeam else [t.get(&"gunner"), t.get(&"assistant")]
+				if crew.any(func(c: Variant) -> bool: return is_instance_valid(c) and c in men):
+					t.call(&"server_pack_up")
+					n += 1
+			return "" if n > 0 else "Nobody there has a gun set up"
+		"wt_fire":
+			for t in get_tree().get_nodes_in_group(TEAMS_GROUP):
+				if t is MortarTeam and (t as MortarTeam).ordered and (t as MortarTeam).crew.any(func(c: Variant) -> bool: return is_instance_valid(c) and c in men):
+					var mt := t as MortarTeam
+					mt.ordered_target = point
+					if is_instance_valid(mt.gun) and not MortarFire.in_range(mt.gun, point):
+						return "Out of the mortar's range from there: they'll move it"
+					return ""
+			return _form_from(men, point, squad, true)
+		"wt_setup", "wt_high":
+			return _form_from(men, point if cmd == "wt_setup" else Vector3.INF, squad, false)
+	return "Order not understood"
+
+
+const TEAMS_GROUP := &"weapon_teams"
+
+
+## Host: a team from the squadmates in `men` carrying every load of one kit: a gun team (set up
+## at `at`, or on high ground when INF) or a mortar team (`mortar`: firing on `at`).
+func _form_from(men: Array[Soldier], at: Vector3, squad: Squad, mortar: bool) -> String:
+	for kit: String in KITS:
+		var is_mortar := (KITS[kit] as Dictionary).has("mortar")
+		if is_mortar != mortar:
+			continue
+		var carriers: Array[Soldier] = []
+		for id: StringName in KITS[kit].loads:
+			for s in men:
+				if s.inventory.hands == id and s not in carriers:
+					carriers.append(s)
+					break
+		if carriers.size() < (KITS[kit].loads as Array).size():
+			continue
+		if mortar:
+			var mt := MortarTeam.form(CompoundLevel.current(carriers[0]), carriers, kit, squad, null, true)
+			if mt:
+				mt.ordered_target = at
+				mt.add_to_group(TEAMS_GROUP)
+				return ""
+		else:
+			var gt := GunTeam.form(CompoundLevel.current(carriers[0]), carriers[0], carriers[1], kit, squad, null, true)
+			if gt:
+				gt.forced_spot = at
+				gt.add_to_group(TEAMS_GROUP)
+				return ""
+	return "Nobody there carries all of a %s's loads" % ("mortar" if mortar else "gun")
+
+
 ## Host: `s` starts setting up the gun he carries. Returns "" or why not.
 func server_start_setup(s: Soldier) -> String:
 	if not multiplayer.is_server():

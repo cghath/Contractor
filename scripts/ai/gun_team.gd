@@ -62,12 +62,17 @@ var _think := 0.0
 var _last_seen := -1000.0
 var _dug := false  # the parapet for this spot is up (or started)
 var _flanked_since := -1.0  # when an enemy off the parapet's arc first saw the crew (-1: none)
+## Ordered (part d, the company's command menu): set up at `forced_spot` (INF: pick high ground),
+## stay in the squad it was ordered from, no moving on by itself; packing up on an order ends it.
+var ordered := false
+var forced_spot := Vector3.INF
+var dissolve_on_pack := false
 static var _count := 0
 
 
 ## Host: `a` (the gunner) and `b` (his assistant) become a gun team for `p_kit`, each with one
 ## of its loads in his hands. `with` is the squad it fights alongside; `p_post` a garrison's.
-static func form(level: Node, a: Soldier, b: Soldier, p_kit := "tripod_m2", with: Squad = null, p_post: GarrisonPost = null) -> GunTeam:
+static func form(level: Node, a: Soldier, b: Soldier, p_kit := "tripod_m2", with: Squad = null, p_post: GarrisonPost = null, keep_squad := false) -> GunTeam:
 	if not StaticWeapons.KITS.has(p_kit) or a == null or b == null:
 		return null
 	_count += 1
@@ -79,23 +84,26 @@ static func form(level: Node, a: Soldier, b: Soldier, p_kit := "tripod_m2", with
 	team.gunner = a
 	team.assistant = b
 	level.add_child(team)
-	var sq := Squad.new()
-	sq.name = "GunTeam%dSquad" % _count
-	sq.faction = a.faction
-	sq.patrol = []
-	team.add_child(sq)
+	var sq: Squad = with if keep_squad and with else Squad.new()
+	if sq != with:
+		sq.name = "GunTeam%dSquad" % _count
+		sq.faction = a.faction
+		sq.patrol = []
+		team.add_child(sq)
 	team.squad = sq
+	team.ordered = keep_squad
 	var loads: Array = StaticWeapons.KITS[p_kit].loads
 	for i in 2:
 		var s: Soldier = [a, b][i]
 		var ai := SquadAI.of(s)
-		if ai:
+		if ai and not keep_squad:
 			ai.squad = sq
-		s.inventory.release_hands()
-		s.inventory.take(loads[i])
+		if not keep_squad:  # (an ordered team already carries its loads)
+			s.inventory.release_hands()
+			s.inventory.take(loads[i])
 		s.set_meta(&"gun_team", team.name)
 	var feed := StringName(VehicleSpecs.gun(String(VehicleSpecs.spec(p_kit).get("gun", {}).get("weapon", ""))).get("feed", ""))
-	if feed != &"":
+	if feed != &"" and not keep_squad:
 		var given := b.inventory.take(feed, BELTS)
 		if given < BELTS:
 			a.inventory.take(feed, BELTS - given)  # no room on him: the gunner takes the rest
@@ -123,7 +131,14 @@ func _physics_process(delta: float) -> void:
 		_last_seen = now
 	match state:
 		State.PACKED:
-			if target.is_finite() and now - _last_seen < MOVE_ON_S and _ready_to_go():
+			if dissolve_on_pack:
+				_dissolve()
+				return
+			if forced_spot.is_finite() and _ready_to_go():
+				spot = NavigationServer3D.map_get_closest_point(gunner.get_world_3d().navigation_map, forced_spot)
+				_go_to_spot()
+				_to(State.MOVING)
+			elif (target.is_finite() and now - _last_seen < MOVE_ON_S or ordered and target.is_finite()) and _ready_to_go():
 				var found: Variant = _pick_spot(target)
 				if found is Vector3:
 					spot = found
@@ -165,6 +180,8 @@ func _physics_process(delta: float) -> void:
 				_man()
 			if not _dug:
 				_dig_in()
+			if ordered:
+				return  # set up on an order: it stays until told to pack up
 			if _flanked():
 				if _flanked_since < 0.0:
 					_flanked_since = now
@@ -352,11 +369,40 @@ func _flanked() -> bool:
 	return false
 
 
+## Host (the command menu's "Pack up and follow"): pack up now, then back to the squad.
+func server_pack_up() -> void:
+	dissolve_on_pack = true
+	if state == State.MANNED and is_instance_valid(gun):
+		_pack()
+	elif state != State.PACKING:
+		_dissolve()
+
+
+## The team ends: its men back to following, the loads still in their hands.
+func _dissolve() -> void:
+	for s: Variant in [gunner, assistant]:
+		if _up(s):
+			(s as Soldier).remove_meta(&"gun_team")
+			var ai := SquadAI.of(s)
+			if ai:
+				ai.give_tactic({})
+	queue_free()
+
+
 ## Off the gun and pack it up (the assistant beside him takes the other load).
 func _pack() -> void:
 	var on := gun.gunner()
 	if on:
 		gun.server_exit(on)
+	var dig := Digging.of(gun)
+	for s: Variant in [gunner, assistant]:
+		if not _up(s):
+			continue
+		if dig:
+			dig.server_stop(s)  # down tools: the gun's going
+		var ai := SquadAI.of(s)
+		if ai:
+			ai.give_tactic({"kind": &"garrison", "spot": (s as Soldier).global_position, "face": Vector3.FORWARD, "port": "gun", "id": name})  # still while it's packed
 	var packer := on if on and _up(on) else (gunner if _up(gunner) else assistant)
 	var sw := StaticWeapons.of(self)
 	if sw and sw.server_start_pack(packer, gun) == "":

@@ -559,6 +559,11 @@ const FOLD_BONUS := 2.0
 ## PRONE_MIN_M or more off. Pinned in the open he throws smoke toward the shooter if he has one. Not
 ## while treating, healing, carrying or in a vehicle; once each REACT_GAP_S. Proposed.
 const REACT_CLOSE := 0.2
+## The first-contact drill (AI bar G-18; LAMBS's contact drill): the moment a unit comes into
+## contact out of none, for DRILL_S (random in the range) it stops, faces the threat and gets down
+## (crouched; prone by G-05's rules) before the plan takes over. Not while treating, carrying,
+## riding or on an ordered move. Proposed.
+const DRILL_S := Vector2(1.0, 2.5)
 ## Assaults and the flank's maneuver legs go in bounds, buddy pairs taking turns (_bound_toward;
 ## AI bar G-06), in contact; the last ASSAULT_RUSH_M onto the position is one rush. Proposed.
 const ASSAULT_RUSH_M := 12.0
@@ -748,6 +753,8 @@ var _fire_spot: Variant = null  # where a base of fire / Suppress unit moves to 
 var _overwatch_taken: Variant = null  # the plan's high ground last taken up (_take_overwatch)
 var _auto_prone := false  # down on his own (G-05), not by an order
 var _fire_react_at := -1000.0   # the last reaction to fire (G-07)
+var _was_in_contact := false
+var _drill_until := -1000.0  # the first-contact drill runs until then (G-18)
 var _react_until := -1000.0  # dropped flat until then
 var _stance_at := -1000.0  # when _auto_stance last cast its rays
 ## Men of a base of fire on high ground stand this far round its spot (G-17). Proposed.
@@ -1408,6 +1415,7 @@ func _act() -> void:
 			_do_fall_back()
 		Intent.TACTIC:
 			_do_tactic(_tactic())
+	_contact_drill()  # (G-18: the first moments of a contact, before the plan)
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	_apply_combat_mode()
 	if _care_prone and intent != Intent.HEAL:
@@ -3835,6 +3843,21 @@ func _auto_stance() -> int:
 	if hidden or body.global_position.distance_to(threat) >= PRONE_OPEN_M:
 		return SoldierMovement.Stance.PRONE
 	return -1
+
+
+## The first-contact drill (see DRILL_S): stop, face the threat, get down.
+func _contact_drill() -> void:
+	var contact := in_contact()
+	var now := Soldier._now()
+	if contact and not _was_in_contact:
+		_drill_until = now + randf_range(DRILL_S.x, DRILL_S.y)
+	_was_in_contact = contact
+	if now >= _drill_until or intent in [Intent.CASUALTY, Intent.HEAL] or body.carrying != null or Vehicle.ride_of(body) != null 			or not ordered.is_empty() or (order == Squad.Order.MOVE and _friendly()):
+		return
+	_has_destination = false
+	if body.threat_pos != Vector3.ZERO:
+		_face(body.threat_pos)
+	body.want_crouch = true
 
 
 ## Host (Soldier.suppress_fire, after the suppression is added): fire came close; `amount` of

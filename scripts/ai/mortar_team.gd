@@ -55,11 +55,16 @@ var _next_round := 0.0
 var _mission_gap_until := 0.0
 var _since := 0.0
 var _think := 0.0
+## Ordered (part d): stays in the squad it was ordered from; `ordered_target` a fire mission's
+## point (INF: none); packing up on an order ends it.
+var ordered := false
+var ordered_target := Vector3.INF
+var dissolve_on_pack := false
 static var _count := 0
 
 
 ## Host: `men` (2 or 3) become a mortar team for `p_kit`, its loads shared out among them.
-static func form(level: Node, men: Array[Soldier], p_kit := "mortar_2b14", with: Squad = null, p_post: GarrisonPost = null) -> MortarTeam:
+static func form(level: Node, men: Array[Soldier], p_kit := "mortar_2b14", with: Squad = null, p_post: GarrisonPost = null, keep_squad := false) -> MortarTeam:
 	if not StaticWeapons.KITS.has(p_kit) or men.is_empty():
 		return null
 	var loads: Array = StaticWeapons.KITS[p_kit].loads
@@ -72,18 +77,20 @@ static func form(level: Node, men: Array[Soldier], p_kit := "mortar_2b14", with:
 	team.works_with = with
 	team.post = p_post
 	level.add_child(team)
-	var sq := Squad.new()
-	sq.name = "MortarTeam%dSquad" % _count
-	sq.faction = men[0].faction
-	sq.patrol = []
-	team.add_child(sq)
+	var sq: Squad = with if keep_squad and with else Squad.new()
+	if sq != with:
+		sq.name = "MortarTeam%dSquad" % _count
+		sq.faction = men[0].faction
+		sq.patrol = []
+		team.add_child(sq)
 	team.squad = sq
+	team.ordered = keep_squad
 	for i in men.size():
 		var s := men[i]
 		var ai := SquadAI.of(s)
-		if ai:
+		if ai and not keep_squad:
 			ai.squad = sq
-		if i < loads.size():
+		if i < loads.size() and not keep_squad:
 			s.inventory.release_hands()
 			s.inventory.take(loads[i])
 		s.set_meta(&"gun_team", team.name)
@@ -112,6 +119,9 @@ func _physics_process(delta: float) -> void:
 		target = t
 	match state:
 		State.PACKED:
+			if dissolve_on_pack:
+				_dissolve()
+				return
 			if target.is_finite() and _ready_to_go():
 				var found: Variant = _pick_spot(target)
 				if found is Vector3:
@@ -231,6 +241,8 @@ func _target() -> Vector3:
 	var c := _up_crew()
 	if c.is_empty():
 		return Vector3.INF
+	if ordered:
+		return ordered_target  # the company's mortar fires where it's told
 	var from := c[0].global_position
 	var best := Vector3.INF
 	for sq: Squad in [squad, works_with]:
@@ -343,10 +355,32 @@ func _own_side_near(at: Vector3) -> bool:
 	return false
 
 
+## Host (the command menu): pack up now, then back to the squad.
+func server_pack_up() -> void:
+	dissolve_on_pack = true
+	if state == State.READY and is_instance_valid(gun):
+		_pack()
+	elif state != State.PACKING:
+		_dissolve()
+
+
+func _dissolve() -> void:
+	for s in _up_crew():
+		s.remove_meta(&"gun_team")
+		var ai := SquadAI.of(s)
+		if ai:
+			ai.give_tactic({})
+	queue_free()
+
+
 func _pack() -> void:
 	var c := _up_crew()
 	if c.is_empty() or not is_instance_valid(gun):
 		return
+	for s in c:
+		var ai := SquadAI.of(s)
+		if ai:
+			ai.give_tactic({"kind": &"garrison", "spot": s.global_position, "face": Vector3.FORWARD, "port": "mortar", "id": name})  # still while it's packed
 	var sw := StaticWeapons.of(self)
 	if sw and sw.server_start_pack(c[0], gun) == "":
 		_to(State.PACKING)
