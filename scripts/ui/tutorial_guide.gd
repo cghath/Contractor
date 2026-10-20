@@ -522,6 +522,7 @@ func _fill_sections() -> void:
 		c.queue_free()
 	section_ticks.clear()
 	_section_box.add_child(UiKit.title("Tutorial sections"))
+	_section_box.add_child(UiKit.subtitle("Pick what to learn: skip what you know or a teammate will teach"))  # (ui-modern: what it's for)
 	_section_box.add_child(UiKit.hint("Tick a section a teammate will teach you (or one you know): the tutorial skips it. Start here goes to a section now. Your ticks last until you quit the game."))
 	var names := sections()
 	for n in names.size():

@@ -1131,10 +1131,10 @@ func _assault_warning_trip(choice: String) -> void:
 		var cash := Economy.cash()
 		var bills := [0]
 		var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
-		Economy.week_paid.connect(on_week)
+		Economy.bill_paid.connect(on_week)  # (daily bills since the economy overhaul: was week_paid)
 		var last_assault := int(base_sec.get("last_assault_day", -1000))
 		Contracts.assault_choice(choice)  # (the host's request, as its button sends it)
-		Economy.week_paid.disconnect(on_week)
+		Economy.bill_paid.disconnect(on_week)
 		var after := Contracts.last_debrief()
 		var same: bool = after.contracts == d.contracts and after.totals == d.totals and after.salvage == d.salvage and after.rep == d.rep and int(after.fines) == int(d.fines)
 		var charged: int = (after.get("expenses", []) as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.get("charge", false)) else 0), 0)

@@ -671,7 +671,7 @@ func _fit(screen: String, make: Callable, strict := true) -> void:
 
 
 ## Screens that are HUD parts, not menus: no subtitle or "?" help.
-const EXPLAINED_EXEMPT := ["objectives panel", "ammo readout", "command menu"]
+const EXPLAINED_EXEMPT := ["objectives panel", "ammo readout", "command menu", "tutorial (longest step)"]  # (the tutorial's step panel: an overlay, its step says what to do)
 
 
 ## ui-modern (Captain, 2026-10-20: "all menus should have better explanations"): `node` (a menu
