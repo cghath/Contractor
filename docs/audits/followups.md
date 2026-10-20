@@ -10,11 +10,11 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-01 | P2 | The AI building scan only finds one floor; upper floors and roofs are never garrisoned or cleared |
 | F-02 | P2 | Town garrison posts are all on the ground floor |
 | F-03 | P2 | Doctrine `engage_m` numbers sit below the new sight ranges |
-| F-04 | P1 | A carer who boards a vehicle keeps his casualty claimed, so no backup medic comes (audit A2-12) |
-| F-05 | P2 | Element men told to board from a distance never get the walk order (audit A2-10) |
-| F-06 | P2 | An ammo bearer's belt handoff turns a part-used belt into a full one (audit A2-11) |
+| F-04 | P1 | ~~A carer who boards a vehicle keeps his casualty claimed, so no backup medic comes (audit A2-12)~~ fixed 2026-10-20 (Claude, cghath's fix/a2-ai-vehicles) |
+| F-05 | P2 | ~~Element men told to board from a distance never get the walk order (audit A2-10)~~ fixed 2026-10-20 (Claude, cghath's fix/a2-ai-vehicles) |
+| F-06 | P2 | ~~An ammo bearer's belt handoff turns a part-used belt into a full one (audit A2-11)~~ fixed 2026-10-20 (Claude, cghath's fix/a2-ai-vehicles) |
 
-| F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK |
+| F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 
 ## F-01: the building scan only sees one floor
 

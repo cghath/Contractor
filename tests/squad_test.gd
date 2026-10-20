@@ -139,6 +139,10 @@ func _test_fire_fix() -> void:
 	alpha.suppression = 0.0
 	await _wait_until(func() -> bool: return alpha.active_weapon() != null, 4.0)
 	check(alpha.active_weapon() == kept_weapon and alpha.active_slot == kept_slot, "and he picks it back up (%s)" % (alpha.active_weapon().name if alpha.active_weapon() else "nothing"))
+	# F-20: bandages only in his IFAK still count as his own: no medic walks over unasked.
+	player.inventory.take(&"ifak")
+	check(Vitals.has_item(player.inventory, &"pressure_bandage") or player.inventory.count_of(&"ifak") == 0,
+		"an IFAK's bandages count as his (Vitals.has_item: kit contents too)")
 	# G-08: a clearance with rooms left carries on through a quiet moment; done, or a man down, it ends.
 	var op_left := {"op": {"rooms": [1, 2], "called": false}}
 	check(SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, false) and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, true)
