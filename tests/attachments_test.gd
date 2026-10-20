@@ -12,7 +12,9 @@ extends Node
 ##   draws its beam when switched on; an IR laser doesn't draw for the naked eye;
 ## - a suppressed shot is quiet for the AI (its hearing range is shorter) and marks him so;
 ## - a 4x prism zooms the aimed view in past the red dot's;
-## - taking the grip off puts it back in his kit, and the kick is back to full.
+## - taking the grip off puts it back in his kit, and the kick is back to full;
+## - a magnified optic's picture-in-picture (GunSight PiP): only behind its glass, at its power,
+##   never headless, off unaimed, on a weapon switch, dead, in a vehicle and with the setting off.
 ##   <godot> --headless --path . res://tests/attachments_test.tscn
 
 var failures := 0
@@ -46,6 +48,7 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	await _frame()
 	await _run()
+	await _test_pip()
 	_finish()
 
 
@@ -206,6 +209,123 @@ func _run() -> void:
 	check(inv.count_of(&"grip_vertical") == 1, "taking off what isn't there does nothing")
 	loaded.queue_free()
 	copy.queue_free()
+
+
+## Picture-in-picture scopes (art task "PiP scopes"; GunSight.pip_wanted, pip_on): wanted only
+## behind a magnified optic's glass while aimed, at the optic's power; never for a red dot or a
+## holo at 1x; never headless (the whole view zooms behind the ring instead); off unaimed, on a
+## weapon switch, dead, in a vehicle's seat and with the setting off. Forced on (a test-only
+## switch, as it can't render headless), the picture renders at the optic's power and stops when
+## it's no longer wanted.
+func _test_pip() -> void:
+	var inv := player.inventory
+	var m4 := ItemDB.get_item(&"m4a1")
+	var sight := GunSight.of(player)
+	var settings := OS.get_user_data_dir().path_join("test_pip_settings%s.cfg" % OS.get_environment("CONTRACTOR_TEST_TAG"))
+	DirAccess.remove_absolute(settings)
+	GameSettings.use_file(settings)  # never the player's
+	player.player_input.set_physics_process(false)  # it would lower the aim (no mouse here)
+	player.active_slot = &"primary"
+	var mount := func(id: StringName) -> void:
+		inv.set_slot_state(&"primary", Optics.with_optic(m4, inv.state_of(&"primary"), id))
+	check(String(GameSettings.DEFAULTS.video.scope_pip) != "off" and GameSettings.scope_pip_scale() > 0.0, "PiP scopes are on by default (%s)" % GameSettings.DEFAULTS.video.scope_pip)
+
+	mount.call(&"optic_prism_4x")
+	_aim(true)
+	check(GunSight.pip_wanted(player) and absf(GunSight.glass_power(player) - 4.0) < 0.01,
+		"aimed through the 4x prism: its picture-in-picture, at 4x (%.2f)" % GunSight.glass_power(player))
+	await _frames(2)
+	check(not GunSight.pip_on(player) and not sight.pip_rendering() and sight.pip_camera() == null,
+		"headless: no scope picture made (the whole view zooms behind the ring instead)")
+	_aim(false)
+	check(not GunSight.pip_wanted(player), "lowered: none")
+	mount.call(&"optic_red_dot")
+	_aim(true)
+	check(not GunSight.pip_wanted(player), "a red dot: none (it stays an open sight)")
+	mount.call(&"optic_holo")
+	_aim(true)
+	var holo_1x := GunSight.pip_wanted(player)
+	GunSight.zoom_step(player, 1)
+	_aim(true)
+	check(not holo_1x and GunSight.pip_wanted(player) and absf(GunSight.glass_power(player) - 3.0) < 0.01,
+		"a holo: none at 1x, its magnifier's picture at 3x once that's up (%.2f)" % GunSight.glass_power(player))
+	GunSight.zoom_step(player, -1)
+	mount.call(&"optic_dmr_3_5_10")
+	_aim(true)
+	var at_start := GunSight.glass_power(player)
+	GunSight.zoom_step(player, 1)
+	_aim(true)
+	check(GunSight.pip_wanted(player) and absf(at_start - 6.0) < 0.01 and absf(GunSight.glass_power(player) - 7.5) < 0.01,
+		"the 3.5-10x: its picture at 6x, 7.5x a step up (%.2f, %.2f)" % [at_start, GunSight.glass_power(player)])
+	GameSettings.set_value("video", "scope_pip", "off")
+	check(GunSight.scoped(player) and not GunSight.pip_wanted(player), "the setting off: behind the glass, but no picture")
+	GameSettings.set_value("video", "scope_pip", "medium")
+
+	if not DevTools.on():
+		print("  [skip] the scope picture's own render (forcing it is test-only: DevTools.on() is off)")
+	else:
+		GunSight.force_pip_for_tests(true)
+		mount.call(&"optic_prism_4x")
+		_aim(true)
+		await _frames(2)
+		var cam := sight.pip_camera()
+		var lens := 2.0 * float(ItemDB.get_item(&"optic_prism_4x").stats.ring)  # the lens across, a share of the screen's height
+		var shown := lens * tan(deg_to_rad(GameSettings.view_fov() * 0.5)) / tan(deg_to_rad(cam.fov * 0.5)) if cam else 0.0
+		check(sight.pip_rendering() and cam != null and absf(shown - 4.0) < 0.02 and cam.global_position.distance_to(player.camera.global_position) < 0.001
+			and cam.cull_mask & PlayerInput.VIEW_MODEL_LAYER == 0,
+			"forced on: the 4x picture renders from the eye, 4x the unaimed view (%.2f), without the gun in it" % shown)
+		var vp := cam.get_viewport() as SubViewport if cam else null
+		check(vp != null and vp.size.x >= GunSight.SCOPE_MIN_PX and vp.size.x <= GunSight.SCOPE_MAX_PX and vp.world_3d == null and not vp.own_world_3d,
+			"its viewport %s, sharing the level's world" % (vp.size if vp else Vector2i.ZERO))
+		await _pip_stops(sight, "lowered", func() -> void: _aim(false), func() -> void: pass)
+		await _pip_stops(sight, "on a switch to the sidearm", func() -> void: player.active_slot = &"sidearm", func() -> void: player.active_slot = &"primary")
+		await _pip_stops(sight, "dead, waiting to respawn", func() -> void: player.respawn_state = Soldier.RESPAWN_WAITING,
+			func() -> void: player.respawn_state = Soldier.RESPAWN_NONE)
+		await _pip_stops(sight, "with the setting off", func() -> void: GameSettings.set_value("video", "scope_pip", "off"),
+			func() -> void: GameSettings.set_value("video", "scope_pip", "medium"))
+		var layer := level.get_node_or_null(^"Vehicles")
+		var rides: Array = layer.get_children().filter(func(v: Node) -> bool: return v is Vehicle) if layer else []
+		var ride: Array[Vehicle] = []  # the one he got into (a lambda can't set a local)
+		var get_in := func() -> void:
+			for v: Vehicle in rides:
+				if v.server_enter(player, 0):
+					ride.append(v)
+					return
+		var get_out := func() -> void:
+			if not ride.is_empty():
+				ride[0].server_exit(player)
+		await _pip_stops(sight, "at the wheel of a vehicle", get_in, get_out)
+		check(not ride.is_empty(), "(a vehicle on the range he could get into)")
+		await _wait_for(func() -> bool: return not is_instance_valid(player.vehicle), 3.0)
+		GunSight.force_pip_for_tests(false)
+	_aim(false)
+	player.player_input.set_physics_process(true)
+	GameSettings.use_file("")
+	DirAccess.remove_absolute(settings)
+
+
+## Aims `player` (or lowers), up to the eye at once: the sight's glass eased straight to its
+## target (the real ease takes a while).
+func _aim(on: bool) -> void:
+	player.is_aiming = on
+	if on:
+		GunSight.ease_glass(player, GunSight.aimed_fov_of(player, player.active_weapon(), GameSettings.view_fov()), 1.0)
+
+
+## Aimed with the scope picture rendering (forced on), `change` stops it within a couple of
+## frames (what: when); `undo` puts things back.
+func _pip_stops(sight: GunSight, what: String, change: Callable, undo: Callable) -> void:
+	_aim(true)
+	await _frames(2)
+	var was := sight.pip_rendering()
+	change.call()
+	await _frames(3)
+	_aim(player.is_aiming)  # still holding aim, where that's up to him
+	await _frames(1)
+	var picture := sight.get_node_or_null(^"ScopePicture") as Control
+	check(was and not sight.pip_rendering() and picture != null and not picture.visible, "the scope picture stops rendering %s" % what)
+	undo.call()
+	await _frames(2)
 
 
 ## Degrees the view kicks up for one shot of `weapon`, from level.

@@ -310,7 +310,7 @@ a release:
 - The play entries start players in their role's kit (`CompoundLevel.player_role_kits`). In the campaign a player's own saved gear (their main character's) is what they carry and no role kit goes on top; a brand-new player gets their role's kit once (B-23). Autoriflemen and grenadiers carry M4s until there are LMG and launcher items.
 - Squad AI doesn't use the new stances, leaning or mounting yet, and callouts have no voice audio (subtitles only).
 - A player who joins while someone is being carried sees that body as solid until it's put down.
-- A tube optic's scope picture is a real PIP now (a SubViewport + Camera3D per aiming player, `GunSight`), not profiled under real GPU load or with several players scoped in at once; `GunSight.SCOPE_RENDER_SCALE` is the knob if it costs too much on lower-end machines.
+- A magnified optic's scope picture is a real PIP (a SubViewport + Camera3D for the local player only, `GunSight`). It has been measured only on the flat compound (`tests/pip_shots.tscn`: about 0.13 ms GPU and 43 draw calls for the picture), not in the woods or a town. The video setting "Scope picture-in-picture" sets its resolution, or turns it off to go back to the full-screen zoom.
 ## Revised roadmap
 
 > **Note for cghath's agent (Captain, 2026-10-11):** wave 3 of [docs/build_plan.md](docs/build_plan.md) (medical depth) is built by Captain's side and lands on `dev` from there. Don't start any wave 3 work. Work on the wave in active development instead: the next one after the last wave marked done (wave 4, once wave 3 is on `dev`).

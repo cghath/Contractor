@@ -10,13 +10,19 @@ extends Control
 ##   holographic sight's flip-up magnifier ("magnifier", its power) flips up on zoom in and
 ##   down on zoom out (zoom_step), and while it's up you look through its glass.
 ## - a tube optic ("view": "tube": LPVO, prism, DMR scopes): once zoomed in you're behind the
-##   glass: a real picture-in-picture (P0362 PIP rework, Captain: "better scopes and PIP") — a
-##   SubViewport with its own Camera3D at the optic's actual magnification, synced to the eye
-##   every frame, composited into the eyepiece ring ("ring", a share of the screen's height) with
-##   the optic's reticle drawn over it: "lpvo" (lit centre dot, crosshair with mil hashes, heavy
-##   posts), "chevron" (a lit chevron and its BDC holds, "bdc") or "mil_dot". The player's own
-##   camera stays at the peripheral (unaimed) field of view the whole time, so the gun and its
-##   surroundings around the scope picture don't narrow with it — only the glass magnifies.
+##   glass: a real picture-in-picture (P0362 PIP rework, Captain: "better scopes and PIP"; art
+##   task "PiP scopes") — a SubViewport with its own Camera3D at the optic's actual
+##   magnification, synced to the eye every frame, shown in the eyepiece ring ("ring", a share of
+##   the screen's height) with the optic's reticle drawn over it: "lpvo" (lit centre dot,
+##   crosshair with mil hashes, heavy posts), "chevron" (a lit chevron and its BDC holds, "bdc")
+##   or "mil_dot". The player's own camera stays at the peripheral (unaimed) field of view, so
+##   the gun and its surroundings around the scope picture don't narrow with it — only the glass
+##   magnifies. The picture looks where the eye does (the aim sway and the recoil turn the eye
+##   itself, Soldier.aim_sway and _kick: where the shot goes); the gun's own kick and settle
+##   carry the lens about on the screen with it (_lens_shift). Under NVG the picture is seen
+##   through the goggles like the rest (NvgView.scope_material). The video setting "scope_pip"
+##   (GameSettings.scope_pip_scale) sets its resolution or turns it off, and it's off headless:
+##   off, the whole view zooms behind the ring as it did before PiP (pip_on).
 ## Power (Captain, 2026-10-13) is against the player's own unaimed view: 10x makes things ten
 ## times bigger than the base field of view shows them (its tangent over 10: about 6.4 degrees
 ## at the default 58.7 vertical, 90 across 16:9), the same rule for every magnified optic; at 1x the weapon's ads_fov, or
@@ -55,10 +61,19 @@ const LIT_GLOW := Color(1.0, 0.2, 0.1, 0.25)
 ## A man's shoulders (m): a BDC hold's stadia line is this wide at its range.
 const SHOULDERS_M := 0.48
 const MOA_PER_MIL := 3.4377
-## The scope SubViewport's render size against the ring it's shown at (PIP rework): a scope is
-## read through a narrow, slightly soft tube anyway, so rendering it a little under the
-## displayed size (and letting the texture stretch up) costs less for no real loss of clarity.
-const SCOPE_RENDER_SCALE := 0.65
+## The scope picture's render size (PiP), in real pixels: the lens' size on screen times the
+## setting's scale (GameSettings.scope_pip_scale: a scope is read through a narrow, slightly
+## soft tube anyway, so a little under the displayed size costs less for no real loss), never
+## more than the render scale, within these.
+const SCOPE_MIN_PX := 64
+const SCOPE_MAX_PX := 2048
+## How far the gun's own kick and settle can carry the lens off the middle of the screen, as a
+## share of the ring (_lens_shift).
+const LENS_SHIFT_MAX := 0.35
+
+## Test-only (DevTools.on(): the test runs): builds and drives the scope picture where nothing
+## renders (headless), so a test can watch it switch on and off. Never set in a player's game.
+static var _force_pip := false
 
 var body: Soldier
 var _drawn := false
@@ -74,10 +89,17 @@ var _glass_fov := 0.0
 ## camera every frame while behind a tube optic's glass, instead of the whole screen zooming.
 var _scope_vp: SubViewport
 var _scope_cam: Camera3D
-## True for the one _draw() right after _scope_vp is made or resized: Godot doesn't repaint a
+## The scope picture on the screen: _scope_vp's texture in the lens, drawn behind the sight's own
+## ring and reticle (show_behind_parent), with the goggles' effect on it under NVG (_nvg_material).
+var _scope_pic: TextureRect
+var _nvg_material: ShaderMaterial
+## Where the lens sits off the middle of the screen (pixels): the gun's own kick and settle
+## (the view model's turn off the eye's line), at most LENS_SHIFT_MAX of the ring. 0 without PiP.
+var _lens_shift := Vector2.ZERO
+## True for the one frame right after _scope_vp is made or resized: Godot doesn't repaint a
 ## SubViewport in the same frame as that, so its texture is stale or blank that frame (Captain,
 ## playtest v0.4.26: scopes "sometimes go black" on a magnifier flip, an optic swap, or a window
-## resize - all of which resize it). Skip compositing it that one frame rather than draw the bad
+## resize - all of which resize it). Hide the picture that one frame rather than show the bad
 ## texture; the ring mask (by-design black) still draws either way.
 var _scope_stale := false
 
@@ -87,6 +109,12 @@ func _init(s: Soldier) -> void:
 	name = "GunSight"
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	process_priority = 110  # after the view has turned and moved this frame (PlayerInput; VehicleCamera is 100)
+
+
+## Test-only: see _force_pip. Ignored outside DevTools.on().
+static func force_pip_for_tests(on: bool) -> void:
+	_force_pip = on and DevTools.on()
 
 
 ## The optic on `s`'s weapon in hand (null: irons, or not a gun).
@@ -156,9 +184,14 @@ static func aimed_fov_of(s: Soldier, weapon: ItemData, base_fov: float) -> float
 ## True while `s` is aimed through glass: a tube optic, or a magnifier that's in, zoomed in
 ## far enough (SCOPE_IN) to be behind it. Checked against the sight's own eased "glass" field of
 ## view (ease_glass), not the real camera: a tube optic's periphery no longer narrows with it
-## (PIP rework), only the scope's own SubViewport does.
+## (PIP rework), only the scope's own SubViewport does. Never down or dead, nor in a vehicle's
+## seat but a fire-from-vehicle one seen through your own eyes (Captain, 2026-10-17: "scopes dont
+## work in ffv"; _active already drew the sight there, but with no glass a tube optic zoomed the
+## whole view with no reticle).
 static func scoped(s: Soldier) -> bool:
-	if not s.is_aiming or is_instance_valid(s.vehicle):
+	if not s.is_aiming or (s.vitals and not s.vitals.is_up()) or s.respawn_state == Soldier.RESPAWN_WAITING:
+		return false
+	if is_instance_valid(s.vehicle) and not (s.vehicle.ffv_seat(s) and s.camera.current):
 		return false
 	var optic := optic_of(s)
 	var magnifier := magnified(s, optic)
@@ -168,6 +201,38 @@ static func scoped(s: Soldier) -> bool:
 	var sight := of(s)
 	var glass := sight._glass_fov if sight and sight._glass_fov > 0.0 else GameSettings.view_fov()
 	return glass <= aimed_fov(s.active_weapon(), GameSettings.view_fov(), lowest, optic) * SCOPE_IN
+
+
+## True while `s` should see a magnified optic's own picture (picture-in-picture): behind its
+## glass (scoped: a tube optic, or a holographic sight's magnifier while it's up; never a red dot
+## or a holographic sight at 1x) with the setting on (GameSettings.scope_pip_scale). Whether it
+## can render here is pip_on's.
+static func pip_wanted(s: Soldier) -> bool:
+	return GameSettings.scope_pip_scale() > 0.0 and scoped(s)
+
+
+## pip_wanted where a picture can render: never headless (unless a test forces it,
+## force_pip_for_tests). Off, the whole view zooms behind the ring instead, as before PiP
+## (PlayerInput._update_aim).
+static func pip_on(s: Soldier) -> bool:
+	return pip_wanted(s) and (ItemIcons.can_render() or _force_pip)
+
+
+## The power the glass shows now: the unaimed view's tangent over the sight's eased "glass"
+## field of view (ease_glass); 1 before it's first aimed. The optic's power once eased in.
+static func glass_power(s: Soldier) -> float:
+	var sight := of(s)
+	if sight == null or sight._glass_fov <= 0.0:
+		return 1.0
+	return tan(deg_to_rad(GameSettings.view_fov() * 0.5)) / tan(deg_to_rad(sight._glass_fov * 0.5))
+
+
+## The scope picture camera's (vertical) field of view for a glass field of view `glass` shown
+## in a lens `lens_share` of the screen's height across: what that much of a screen zoomed to
+## `glass` would show, so things are exactly the optic's power bigger than the unaimed view shows
+## them, as with PiP off (and the reticle's mils read the same either way).
+static func picture_fov(glass: float, lens_share: float) -> float:
+	return rad_to_deg(2.0 * atan(tan(deg_to_rad(glass * 0.5)) * lens_share))
 
 
 ## Eases `s`'s sight's "glass" field of view toward `target` by `k` (0–1, this frame's lerp
@@ -245,8 +310,37 @@ func _process(_delta: float) -> void:
 	if on or _drawn:
 		queue_redraw()
 	_drawn = on
-	if _scope_vp and not (on and scoped(body)):
-		_scope_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED  # not behind glass: don't pay for the extra render
+	_update_pip(on)
+
+
+## The scope picture on and in step this frame while pip_on, else off: not aimed, irons or an
+## open sight, another weapon in hand, down or dead, in a vehicle's seat, the setting off, or
+## headless. Off, it costs nothing: no render (UPDATE_DISABLED) and nothing drawn.
+func _update_pip(active: bool) -> void:
+	var optic := optic_of(body) if active else null
+	if optic and pip_on(body):
+		_sync_scope_viewport(_ring_px(optic))
+		return
+	_lens_shift = Vector2.ZERO
+	if _scope_vp:
+		_scope_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		_scope_pic.visible = false
+
+
+## True while the scope picture renders (a test's view of _update_pip).
+func pip_rendering() -> bool:
+	return _scope_vp != null and _scope_vp.render_target_update_mode == SubViewport.UPDATE_ALWAYS
+
+
+## The scope picture's camera (null until first shown): for tests.
+func pip_camera() -> Camera3D:
+	return _scope_cam
+
+
+## The eyepiece ring's radius (pixels) for `optic`: its own "ring" share of the screen's height,
+## a magnifier's while that's up.
+func _ring_px(optic: ItemData) -> float:
+	return get_viewport_rect().size.y * (MAGNIFIER_RING if magnified(body, optic) else float(optic.stats.get("ring", RING)))
 
 
 func _draw() -> void:
@@ -259,60 +353,103 @@ func _draw() -> void:
 	var centre := size * 0.5
 	var reticle := String(optic.stats.get("reticle", "dot"))
 	if scoped(body):
-		var magnifier := magnified(body, optic)
-		var ring := size.y * (MAGNIFIER_RING if magnifier else float(optic.stats.get("ring", RING)))
-		var px := px_per_mil(_glass_fov, ring * 2.0)  # the magnified picture's own scale, not the (now peripheral) real camera's
-		_draw_scope_pip(centre, ring)
+		var ring := _ring_px(optic)
+		# Mils against the glass over the whole screen's height: with PiP the picture shows that
+		# much of it in the lens (picture_fov), without it the real camera is zoomed to it.
+		var px := px_per_mil(_glass_fov if _glass_fov > 0.0 else body.camera.fov, size.y)
+		var pip := pip_rendering()
+		var lens := centre + _lens_shift
+		_draw_ring(lens, ring, ring * sqrt(2.0) + 2.0 if pip else centre.length() + 2.0)
 		match reticle:
-			"lpvo": _draw_lpvo(centre, ring, px)
-			"chevron": _draw_chevron(centre, ring, px, optic.stats.get("bdc", []))
-			"mil_dot": _draw_scale(centre, ring, px, true)
-			_: _draw_lit(centre, px, optic)  # a magnified red dot or holographic reticle
+			"lpvo": _draw_lpvo(lens, ring, px)
+			"chevron": _draw_chevron(lens, ring, px, optic.stats.get("bdc", []))
+			"mil_dot": _draw_scale(lens, ring, px, true)
+			_: _draw_lit(lens, px, optic)  # a magnified red dot or holographic reticle
 	elif view_of(optic) == "open":
 		var px := px_per_mil(body.camera.fov, size.y)
 		_draw_lit(centre, px, optic)
 
 
-## The scope's magnified picture (PIP rework): a SubViewport with its own Camera3D, synced to
-## the player's every frame and rendered at SCOPE_RENDER_SCALE of the ring's screen size,
-## composited into the eyepiece ring with the same black-corner mask the old whole-screen ring
-## used, just over a render sized to the ring instead of the full screen. Falls back to the old
-## bare mask where nothing can render (headless runs): the real camera's own (unmagnified, with
-## PIP) picture shows through undecorated rather than nothing at all.
-func _draw_scope_pip(centre: Vector2, ring: float) -> void:
-	_sync_scope_viewport(ring)
-	if _scope_vp and not _scope_stale:
-		draw_texture_rect(_scope_vp.get_texture(), Rect2(centre - Vector2.ONE * ring, Vector2.ONE * ring * 2.0), false)
-	_draw_ring(centre, ring, ring * sqrt(2.0) + 2.0 if _scope_vp else centre.length() + 2.0)
-
-
-## Makes (once) the scope's SubViewport and its own Camera3D, sized to the ring and kept in
-## step with the player's real camera (same place and look — weapon sway only moves the view
-## model, not the camera itself, so a plain transform copy lines the glass up) at the sight's
-## own magnified field of view (_glass_fov). Its cull_mask drops VIEW_MODEL_LAYER so the gun
-## doesn't show up (huge, in the way) inside its own magnified picture. No-ops where nothing
-## can render (headless runs: ItemIcons.can_render()).
+## Makes (once) the scope's SubViewport, its own Camera3D and the picture that shows it, then
+## keeps them in step with the player's real camera: the same eye and look (the aim sway and the
+## recoil turn the eye itself, so a plain transform copy points the glass where the shot goes),
+## at picture_fov of the sight's eased glass. It shares the level's World3D (a SubViewport's by
+## default), skips VIEW_MODEL_LAYER (the gun would show up huge, in the way, inside its own
+## picture), renders at the setting's share of the lens' real pixels (GameSettings.scope_pip_scale,
+## no more than the render scale) with no MSAA or TAA (FXAA), and only while shown (_update_pip).
 func _sync_scope_viewport(ring: float) -> void:
 	_scope_stale = false
+	var root := get_viewport()
 	if _scope_vp == null:
-		if not ItemIcons.can_render():
-			return
 		_scope_vp = SubViewport.new()
 		_scope_vp.name = "ScopeView"
+		_scope_vp.msaa_3d = Viewport.MSAA_DISABLED
+		_scope_vp.use_taa = false
+		_scope_vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
+		_scope_vp.positional_shadow_atlas_size = 1024
+		_scope_vp.gui_disable_input = true
+		_scope_vp.mesh_lod_threshold = root.mesh_lod_threshold
+		_scope_vp.use_occlusion_culling = root.use_occlusion_culling
 		add_child(_scope_vp)
 		_scope_cam = Camera3D.new()
 		_scope_vp.add_child(_scope_cam)
-		_scope_cam.cull_mask = body.camera.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER
-		_scope_cam.near = body.camera.near
 		_scope_cam.current = true
+		_scope_pic = TextureRect.new()
+		_scope_pic.name = "ScopePicture"
+		_scope_pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_scope_pic.show_behind_parent = true  # under the ring and the reticle (this Control's own _draw)
+		_scope_pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_scope_pic.stretch_mode = TextureRect.STRETCH_SCALE
+		_scope_pic.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		_scope_pic.texture = _scope_vp.get_texture()
+		add_child(_scope_pic)
 		_scope_stale = true  # not rendered even once yet
-	var side := maxi(roundi(ring * 2.0 * SCOPE_RENDER_SCALE), 2)
+	var size := get_viewport_rect().size
+	var real_px := float(get_tree().root.size.y)  # the window's own pixels: the UI scale shrinks `size`
+	var scale := GameSettings.scope_pip_scale() * minf(root.scaling_3d_scale, 1.0) * (real_px / size.y if size.y > 0.0 else 1.0)
+	var side := clampi(roundi(ring * 2.0 * scale), SCOPE_MIN_PX, SCOPE_MAX_PX)
 	if _scope_vp.size.x != side:
 		_scope_vp.size = Vector2i(side, side)
 		_scope_stale = true  # resized: repaints next frame, not this one
 	_scope_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_scope_cam.fov = clampf(_glass_fov if _glass_fov > 0.0 else body.camera.fov, 0.1, 170.0)
-	_scope_cam.global_transform = body.camera.global_transform
+	var cam := body.camera
+	_scope_cam.cull_mask = cam.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER
+	_scope_cam.near = cam.near
+	_scope_cam.far = cam.far
+	_scope_cam.environment = cam.environment
+	_scope_cam.attributes = cam.attributes
+	_scope_cam.h_offset = cam.h_offset
+	_scope_cam.v_offset = cam.v_offset
+	var glass := _glass_fov if _glass_fov > 0.0 else cam.fov
+	_scope_cam.fov = clampf(picture_fov(glass, ring * 2.0 / size.y if size.y > 0.0 else 1.0), 0.1, 170.0)
+	_scope_cam.global_transform = cam.global_transform
+	_lens_shift = _lens_shift_px(ring, size)
+	_scope_pic.position = size * 0.5 + _lens_shift - Vector2.ONE * ring
+	_scope_pic.size = Vector2.ONE * ring * 2.0
+	_scope_pic.visible = not _scope_stale
+	if Nvg.is_on(body):  # seen through the goggles like the rest, the eyepiece filling the tube
+		if _nvg_material == null:
+			_nvg_material = NvgView.scope_material()
+		NvgView.set_view(_nvg_material, body, size, (ring + _lens_shift.length()) / (size.y * 0.5) * 1.08 if size.y > 0.0 else 0.0)
+		_scope_pic.material = _nvg_material
+	else:
+		_scope_pic.material = null
+
+
+## Where the gun's own kick and settle (the view model turned off the eye's line: PlayerInput's
+## VIEW_KICK_PITCH, SoldierMovement.weapon_sway) put the lens on a screen `size` across, off its
+## middle: where the optic's line points in the real (unzoomed) view, at most LENS_SHIFT_MAX of
+## the `ring`. The picture inside stays on the eye's line, so the reticle still shows where the
+## shot goes; the eyepiece just moves about with the gun.
+func _lens_shift_px(ring: float, size: Vector2) -> Vector2:
+	var vm := body.view_model
+	if vm == null or not vm.visible:
+		return Vector2.ZERO
+	var d := vm.basis.orthonormalized() * Vector3.FORWARD  # the view model hangs off the camera
+	if d.z > -0.2:
+		return Vector2.ZERO
+	var half := size.y * 0.5 / tan(deg_to_rad(body.camera.fov * 0.5))
+	return (Vector2(d.x, -d.y) / -d.z * half).limit_length(ring * LENS_SHIFT_MAX)
 
 
 ## Black beyond the eyepiece ring (`ring` pixels across the middle) out to `reach`: a thick

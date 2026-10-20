@@ -36,9 +36,17 @@ const SHADOW_LEVELS := {
 	"medium": {"atlas": 4096, "reach_m": 320.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_LOW},
 	"high": {"atlas": 8192, "reach_m": 500.0, "soft": RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM},
 }
+## A magnified optic's picture-in-picture (GunSight): "off" zooms the whole view behind the
+## eyepiece ring, as before PiP; the others render the scope's own picture at SCOPE_PIP_SCALE of
+## the lens' size on screen (real pixels, and no more than the render scale), the rest unzoomed.
+const SCOPE_PIP := [
+	["off", "Off (zoom the whole view)"], ["low", "Low resolution (fastest)"], ["medium", "Medium resolution"], ["high", "Full resolution"],
+]
+const SCOPE_PIP_SCALE := {"low": 0.45, "medium": 0.65, "high": 1.0}
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
-		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true},
+		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true,
+		"scope_pip": "medium"},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
@@ -289,6 +297,12 @@ static func fov() -> float:
 ## Whether the view bobs with the steps (docs/animation.md, "First person").
 static func head_bob() -> bool:
 	return bool(get_value("video", "head_bob"))
+
+
+## The scope picture's render size against the lens' size on screen (SCOPE_PIP_SCALE); 0 with
+## picture-in-picture scopes off (GunSight zooms the whole view instead).
+static func scope_pip_scale() -> float:
+	return float(SCOPE_PIP_SCALE.get(String(get_value("video", "scope_pip")), 0.0))
 
 
 ## The camera's (vertical) field of view for the setting: what Camera3D.fov takes. Hor+: wider
