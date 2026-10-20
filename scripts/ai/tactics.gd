@@ -117,6 +117,11 @@ const REPLAN_M := 8.0
 const ASSAULT_M := 35.0
 const ASSAULT_RATIO := 2.0
 const CLEAR_M := 60.0
+## A clearance under way is finished (AI bar G-08: LAMBS keeps a building's rooms until each is
+## seen): while its op has rooms nobody has reached, CLEAR holds at CLEAR_KEEP at least, so quiet
+## doesn't end it; a new casualty, being out-shot (break contact scores higher) or an order still
+## do. Proposed.
+const CLEAR_KEEP := 0.62
 const CLEAR_RATIO := 1.5
 ## A building this close to the squad's middle can be defended.
 const DEFEND_M := 20.0
@@ -196,6 +201,11 @@ func think(now: float) -> void:
 	var result := score(situation, doctrine())
 	var best := _best(result.scores)
 	var urgent := int(situation.down) > _down_at_pick
+	if keeps_clear(option, plan, urgent):
+		result.scores[Option.CLEAR] = maxf(float(result.scores.get(Option.CLEAR, -1.0)), CLEAR_KEEP)
+		if not (result.why as Dictionary).has(Option.CLEAR):
+			result.why[Option.CLEAR] = "rooms still to clear"
+		best = _best(result.scores)
 	var drill := {}
 	if best == Option.SUPPRESS_FLANK and best != option and switches(result.scores.get(option, -1.0), result.scores[best], now - since, urgent):
 		# Draw the drill before calling it: with no flank to take it's a base of fire sitting still.
@@ -219,6 +229,15 @@ func think(now: float) -> void:
 	_down_at_pick = mini(_down_at_pick, int(situation.down))
 	option_score = scores.get(option, 0.0)
 	_carry_out(now)
+
+
+## Whether a clearance under way carries on (G-08): CLEAR chosen, its op drawn, rooms still to
+## reach (it hasn't called "Clear!"), and nobody newly down.
+static func keeps_clear(current: Option, the_plan: Dictionary, urgent: bool) -> bool:
+	if current != Option.CLEAR or urgent:
+		return false
+	var op: Dictionary = the_plan.get("op", {})
+	return not op.is_empty() and not bool(op.get("called", false))
 
 
 ## Whether the option scoring `current` (-1: it no longer applies) gives way to one scoring

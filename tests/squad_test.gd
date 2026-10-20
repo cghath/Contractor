@@ -94,6 +94,31 @@ func _test_fire_fix() -> void:
 	var d300 := Ballistics.drop_m(m4, 300.0)
 	var d500 := Ballistics.drop_m(m4, 500.0)
 	check(absf(Ballistics.drop_m(m4, Ballistics.ZERO_M)) < 0.05 and d300 > 0.1 and d500 > d300, "the round drops past its zero (%.2f m at 300, %.2f m at 500)" % [d300, d500])
+	# G-10: of two seen, the machine gunner farther off before the rifleman nearer; the one on him first.
+	var alpha_ai := SquadAI.of(alpha)
+	var mg := level.spawn_soldier({"name": "ScoreMG", "faction": "hostile", "variant": "urban", "pos": alpha.global_position + Vector3(0, 0, -80),
+		"loadout": ["m249"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	var rifle := level.spawn_soldier({"name": "ScoreRifle", "faction": "hostile", "variant": "urban", "pos": alpha.global_position + Vector3(10, 0, -60),
+		"loadout": ["akm"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	for h: Soldier in [mg, rifle]:
+		SquadAI.of(h).process_mode = Node.PROCESS_MODE_DISABLED
+	var keep_t := alpha_ai.target
+	alpha_ai.target = null
+	var mg_sc := alpha_ai.target_score(mg, 80.0)
+	var rifle_sc := alpha_ai.target_score(rifle, 61.0)
+	check(mg_sc < rifle_sc, "the machine gunner 80 m off before a rifleman 61 m off (%.0f vs %.0f)" % [mg_sc, rifle_sc])
+	SquadAI.of(rifle).target = alpha
+	check(alpha_ai.target_score(rifle, 61.0) < mg_sc, "but the rifleman shooting at him first")
+	alpha_ai.target = keep_t
+	mg.queue_free()
+	rifle.queue_free()
+	# G-08: a clearance with rooms left carries on through a quiet moment; done, or a man down, it ends.
+	var op_left := {"op": {"rooms": [1, 2], "called": false}}
+	check(SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, false) and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, true)
+		and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, {"op": {"called": true}}, false)
+		and not SquadTactics.keeps_clear(SquadTactics.Option.ASSAULT, op_left, false),
+		"a clearance with rooms left carries on when it goes quiet; not once called clear, nor with a man newly down (G-08)")
 	# G-05: getting down on his own: prone to fire at a man far off in the open, not at one close in,
 	# not on the move, not when ordered a stance.
 	var bravo_ai := SquadAI.of(_ai("Bravo"))

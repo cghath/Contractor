@@ -556,6 +556,17 @@ const REACT_CLOSE := 0.2
 ## Assaults and the flank's maneuver legs go in bounds, buddy pairs taking turns (_bound_toward;
 ## AI bar G-06), in contact; the last ASSAULT_RUSH_M onto the position is one rush. Proposed.
 const ASSAULT_RUSH_M := 12.0
+## Target choice (AI bar G-10): of the enemies he has spotted, within TARGET_CONSIDER_M of the
+## nearest, the one with the lowest score: his range in metres, less TARGET_GUN for a machine gun or
+## a launcher, less TARGET_ON_ME when he's shooting at this unit, less TARGET_KEEP for the one he's
+## already on (no flicking between targets), plus TARGET_LOW when he's down low (harder to hit) and
+## TARGET_TAKEN for each squadmate already on him (spread the squad's fire). Proposed.
+const TARGET_CONSIDER_M := 50.0
+const TARGET_GUN := 40.0
+const TARGET_ON_ME := 50.0
+const TARGET_KEEP := 25.0
+const TARGET_LOW := 10.0
+const TARGET_TAKEN := 15.0
 ## Hearing (AI bar G-28, G-29). A heard shot is a sound from roughly over there (the error a disc,
 ## HEARD_ERROR_PER_100M of the range): the listener's side learns of it and he goes to look, but
 ## it doesn't build his awareness of the man who fired (that takes sight). By ear a shot is a shot:
@@ -3353,6 +3364,9 @@ func _tactic_maneuver(t: Dictionary) -> void:
 		_fight(route[-1] if not route.is_empty() and leg >= route.size() else body.global_position, 6.0 if leg >= route.size() else PINNED_COVER_M)
 		return
 	if in_contact():
+		if not t.get("smoked", false):
+			t["smoked"] = true
+			_screen_toward_threat(route[leg])  # smoke over the open ground first (G-14; once a squad, _screened)
 		_bound_toward(route[leg], t)  # under fire the flank goes in bounds, buddy covering buddy (G-06)
 		return
 	_go(route[leg], true)
@@ -3629,7 +3643,12 @@ func _find_target() -> Soldier:
 			and Spotting.foliage_m(_zone_scatter(), body, focus) < Spotting.FOLIAGE_OPAQUE_M:
 		return focus  # (deep in the leaves he's lost even when ordered: the search below takes over)
 	var best: Soldier = null
-	var best_dist := reach_m(body)  # (was SQUAD_SIGHT_RANGE / SIGHT_RANGE for all, 300 m)
+	var best_score := INF
+	var reach := reach_m(body)  # (was SQUAD_SIGHT_RANGE / SIGHT_RANGE for all, 300 m)
+	var limit := reach  # how far a man still counts: TARGET_CONSIDER_M past the nearest one spotted (G-10)
+	var nearest := INF
+	var taken := {}  # squadmates' targets, counted once this scan when the first is spotted
+	var _taken_done := false
 	var check: Soldier = null
 	var check_dist := DEAD_CHECK_M
 	var clearing := _clearing()
@@ -3652,7 +3671,7 @@ func _find_target() -> Soldier:
 		_checked.erase(s.get_instance_id())  # up again (revived): he can be checked again if he goes down
 		var steps := Spotting.footsteps_m(s)
 		var leaves := INF  # metres of foliage in the way; INF: not in sight at all
-		if (d <= steps or d < best_dist) and can_see(s):
+		if (d <= steps or d < limit) and can_see(s):
 			leaves = Spotting.foliage_m(_zone_scatter(), body, s)
 		var in_sight := leaves < Spotting.FOLIAGE_OPAQUE_M  # deep in the leaves: lost, awareness fades
 		if d <= steps and not in_sight and (leaves < INF or d <= steps * WALL_STEPS_MULT):  # (a wall muffles them, G-29)
@@ -3660,12 +3679,20 @@ func _find_target() -> Soldier:
 			var ang := randf() * TAU
 			hear(s, s.global_position + Vector3(cos(ang), 0.0, sin(ang)) * STEPS_ERROR_M * sqrt(randf()), Spotting.HEARD_STEPS_PER_S * SCAN_S)
 			continue
-		if d < best_dist and in_sight:
+		if d < limit and in_sight:
 			seen[s.get_instance_id()] = true
 			var a := _build_awareness(s, leaves)
 			if a >= 1.0:
-				best = s
-				best_dist = d
+				if d < nearest:
+					nearest = d
+					limit = minf(reach, nearest + TARGET_CONSIDER_M)
+				if taken.is_empty() and not _taken_done:
+					taken = _targets_taken()
+					_taken_done = true
+				var sc := target_score(s, d, taken)
+				if sc < best_score:
+					best = s
+					best_score = sc
 			elif a >= Spotting.SUSPECT and a > suspect_a:
 				suspect_a = a
 				_suspect_pos = s.global_position
@@ -3781,6 +3808,36 @@ func _fold_at(world: World3D, q: Vector3) -> bool:
 	var from := body.threat_pos + Vector3.UP * 1.5
 	return not Throwables.clear_line(world, from, q + Vector3.UP * FOLD_HIDDEN_M) \
 		and Throwables.clear_line(world, q + Vector3.UP * PRONE_EYE_M, body.threat_pos + Vector3.UP * 1.2)
+
+
+## How much `s`, spotted `d` metres off, is the one to shoot (lower first; see TARGET_GUN).
+func target_score(s: Soldier, d: float, taken: Dictionary = {}) -> float:
+	var sc := d
+	var w := s.active_weapon() if s.inventory else null
+	if w and (w.tags.has("lmg") or w.tags.has("hmg") or Launchers.is_launcher(w)):
+		sc -= TARGET_GUN
+	var his := SquadAI.of(s)
+	if his and his.target == body:
+		sc -= TARGET_ON_ME
+	if s == target:
+		sc -= TARGET_KEEP
+	if s.movement and (s.movement.is_prone() or s.is_crouching()):
+		sc += TARGET_LOW
+	sc += TARGET_TAKEN * int(taken.get(s.get_instance_id(), 0))
+	return sc
+
+
+## Who his squadmates are on now: target instance id -> how many (once a scan, for target_score).
+func _targets_taken() -> Dictionary:
+	var out := {}
+	if squad == null:
+		return out
+	for m in squad.members():
+		var mate := SquadAI.of(m)
+		if m != body and mate and mate.target != null and is_instance_valid(mate.target):
+			var id := mate.target.get_instance_id()
+			out[id] = int(out.get(id, 0)) + 1
+	return out
 
 
 ## How far out `s` picks targets with the weapon in hand (G-27; see REACH_IRONS_M).
