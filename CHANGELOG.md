@@ -11,6 +11,29 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Fingers (Captain, 2026-10-20: more realistic character models)
+
+#### Added
+- **Hands have fingers.** Every soldier's hand is a palm, four fingers and a thumb in 0.5 cm
+  voxels, with knuckles and a slightly cupped palm. Women's hands are smaller and slimmer.
+  Contractors and the other armies wear gloves (a knuckle guard, a palm patch). The militia and
+  civilians are bare-handed, with nails and knuckle creases.
+- **Hands grip what they hold.** On a weapon the firing hand wraps the pistol grip, with the
+  index straight along the frame. It moves onto the trigger while aiming and for a moment after a
+  shot, and squeezes on each shot. The support hand cups the handguard. In a reload it takes the
+  magazine, pinches the charging handle, presses the catch and opens on a feed cover. Holding
+  anything else (straps, handles, the fast-rope, a radio, treatment kit) the hand closes round it.
+  Planting on the floor it opens. The forearm turns so the palm faces the grip.
+- **First person shows the same hands**, and the trigger finger moves when you fire.
+- For whoever puts props in a hand: `CharacterModel.set_hand_pose(hand, pose)` holds a pose, and
+  `hand_anchor(hand)` is a node at the hand's grasp centre to parent a prop to.
+
+#### Changed
+- Each hand pose is a whole forearm mesh, swapped as the hand's work changes. That costs no extra
+  nodes or draw calls, and the meshes are shared by every body in the same colour scheme. A posed
+  forearm is about 2,300 to 3,200 triangles. The common poses are built ahead on a worker thread
+  as a level starts. Far off, the trigger squeeze isn't drawn.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

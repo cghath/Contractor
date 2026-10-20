@@ -161,6 +161,13 @@ var _reload_len := 1.0
 var _support_arm: Node3D   # the support hand's view forearm, and where it rests
 var _support_rest := Transform3D.IDENTITY
 var _support_palm := Vector3.ZERO  # view-model space: the support palm at rest
+## The view forearms' hands (HandPose, fingers pass 2026-10-20): [firing, support] forearms, the
+## pose each is drawn in, and the trigger's squeeze after a shot (CharacterModel.PRESS_S).
+var _view_arms: Array[Node3D] = []
+var _view_poses: Array[StringName] = [&"", &""]
+var _view_press_t := 0.0
+var _view_shot_t := 99.0
+var _view_pistol := false
 var _reload_points := {}  # VoxelArt.reload_points of the weapon in view
 var _reload_keys: Array = []  # Reloads.keys of the reload under way
 var _reload_pos := Vector3.ZERO  # its weapon offset and turn this frame (Reloads)
@@ -611,11 +618,14 @@ func _physics_process(delta: float) -> void:
 		_update_aim(delta)
 		_try_fire()
 	_update_reload_hand()
+	_update_view_hands(delta)
 	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
 	tilt = lerpf(minf(tilt, LOW_READY_TILT.x * _low_w), _reload_rot.x, _reload_w)
 	_vm_pitch = move_toward(_vm_pitch, tilt, delta * 6.0)
 	body.view_model.rotation.x = _vm_pitch
 	if body.recoil_return > _last_recoil + 0.0001:  # a shot: the weapon kicks
+		_view_press_t = CharacterModel.PRESS_S  # and the trigger finger squeezes
+		_view_shot_t = 0.0
 		var w := body.active_weapon()
 		_view_kick = clampf(_view_kick + (clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0), 0.0, 2.0)
 	_last_recoil = body.recoil_return
@@ -1113,6 +1123,8 @@ func _update_view_model() -> void:
 	_bolt_part = null
 	_cover_part = null
 	_reload_points = {}
+	_view_arms.clear()
+	_view_poses = [&"", &""]
 	if nade_up:
 		_build_nade_view()
 		return
@@ -1152,22 +1164,91 @@ func _update_view_model() -> void:
 	if points.is_empty():
 		return
 	var side := -1.0 if body.left_handed else 1.0  # the firing hand's side
+	_view_pistol = model.begins_with("pistol")
 	for hand: Array in [[points.grip, VIEW_FIRING_ELBOW], [points.support, VIEW_SUPPORT_ELBOW]]:
 		var palm: Vector3 = hand[0]
 		var elbow: Vector3 = palm + (hand[1] as Vector3) * Vector3(side, 1, 1)
-		var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant, VIEW_MODEL_LAYER)
+		var firing: bool = hand[1] == VIEW_FIRING_ELBOW
+		var pose := _view_pose(firing)
+		var forearm := VoxelArt.instance(HandPose.model(pose, firing == body.left_handed, VoxelArt.hands_bare(body.model.variant), body.model.body), body.model.variant, VIEW_MODEL_LAYER)
 		forearm.name = "ViewForearm"
-		# The forearm's pivot is the elbow and its palm FOREARM down its -y: point -y at the palm.
-		var up := (elbow - palm).normalized()
-		var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
-		var basis := Basis(across, up, across.cross(up)).orthonormalized()
-		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
-		ExoFrame.dress_view_forearm(forearm, frame, (hand[1] == VIEW_FIRING_ELBOW) != body.left_handed, GearRig.armor_color_for(body.model.variant))
+		forearm.set_meta(&"hand_pose", pose)
+		forearm.transform = _view_arm_transform(palm, elbow, firing, pose)
+		ExoFrame.dress_view_forearm(forearm, frame, firing != body.left_handed, GearRig.armor_color_for(body.model.variant))
 		body.view_model.add_child(forearm)
+		_view_arms.append(forearm)
+		_view_poses[_view_arms.size() - 1] = pose
 		if hand[1] == VIEW_SUPPORT_ELBOW:
 			_support_arm = forearm
 			_support_rest = forearm.transform
 			_support_palm = palm
+
+
+## A view forearm's place: its elbow at `elbow` and its -y down the arm to the hand, rolled about
+## its own axis so the palm faces the weapon (in from the firing hand's side, up and in under the
+## handguard: as CharacterModel._palm_want), and moved so pose `pose`'s grasp centre
+## (HandPose.reach_point) is on the hand point `palm`. Scaled to the arm's length.
+func _view_arm_transform(palm: Vector3, elbow: Vector3, firing: bool, pose: StringName) -> Transform3D:
+	var left := firing == body.left_handed  # the mirrored (left) hand's mesh
+	var up := (elbow - palm).normalized()
+	var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
+	var basis := Basis(across, up, across.cross(up)).orthonormalized()
+	var inward := Vector3(1.0 if left else -1.0, 0, 0)
+	var want := inward if firing or _view_pistol else Vector3.UP + inward * 0.6
+	basis = basis * Basis(Vector3.UP, clampf(HandPose.roll_to(basis.inverse() * want, left), -CharacterModel.ROLL_MAX, CharacterModel.ROLL_MAX))
+	var scaled := basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM)
+	var reach := scaled * HandPose.reach_point(pose, left, body.model.body == VoxelArt.FEMALE)
+	return Transform3D(scaled, palm - reach)
+
+
+## The pose a view hand is in now: the firing hand's grip (TRIGGER aimed or just after a shot, PRESS
+## as one goes, else the index along the frame), the support hand's (a reload's by its anchor:
+## HandPose.RELOAD_POSES; cupping the firing hand on a pistol).
+func _view_pose(firing: bool) -> StringName:
+	if firing:
+		if _view_press_t > 0.0:
+			return HandPose.PRESS
+		return HandPose.TRIGGER if body.is_aiming or _view_shot_t < CharacterModel.TRIGGER_HOLD_S else HandPose.GRIP
+	if body.is_reloading:
+		var ks: Array = _reload_keys if not _reload_keys.is_empty() else Reloads.keys(Reloads.AR, false)
+		var at := Reloads.sample(ks, clampf((Soldier._now() - _reload_from) / _reload_len, 0.0, 1.0))
+		return HandPose.RELOAD_POSES.get(at.anchor_a if float(at.w) < 0.5 else at.anchor_b, HandPose.MAG)
+	return HandPose.HOLD if _view_pistol else HandPose.SUPPORT
+
+
+## Each frame: the view hands' poses, their meshes swapped when one changes (the support forearm's
+## rest moved so the new pose's grasp centre stays on the hand point).
+func _update_view_hands(delta: float) -> void:
+	_view_press_t -= delta
+	_view_shot_t += delta
+	for i in _view_arms.size():
+		var arm := _view_arms[i]
+		if not is_instance_valid(arm):
+			continue
+		var firing := i == 0
+		var pose := _view_pose(firing)
+		if pose == _view_poses[i]:
+			continue
+		_view_poses[i] = pose
+		var left := firing == body.left_handed
+		var mi := arm.get_child(0) as MeshInstance3D
+		var model := HandPose.model(pose, left, VoxelArt.hands_bare(body.model.variant), body.model.body)
+		mi.mesh = VoxelArt.mesh(model, body.model.variant)
+		var was: StringName = arm.get_meta(&"hand_pose")
+		var shift := arm.transform.basis * (HandPose.reach_point(was, left, body.model.body == VoxelArt.FEMALE) - HandPose.reach_point(pose, left, body.model.body == VoxelArt.FEMALE))
+		arm.set_meta(&"hand_pose", pose)
+		if arm == _support_arm:
+			_support_rest.origin += shift
+		else:
+			arm.position += shift
+
+
+## Tests: the first-person hands' poses now, [firing, support] (HandPose.POSES; empty with none).
+func view_hand_poses() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for i in _view_arms.size():
+		out.append(_view_poses[i])
+	return out
 
 
 ## Reloading in first person (Reloads): the reload's keys at its share so far move the support
@@ -1262,12 +1343,10 @@ func _build_nade_view() -> void:
 	nade.position = palm + Vector3(0.0, 0.03, 0.0)
 	body.view_model.add_child(nade)
 	var elbow := palm + Vector3(0.09 * side, -0.12, 0.2)
-	var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant)
+	var forearm := VoxelArt.instance(HandPose.model(HandPose.HOLD, body.left_handed, VoxelArt.hands_bare(body.model.variant), body.model.body), body.model.variant)
 	forearm.name = "ViewForearm"
-	var up := (elbow - palm).normalized()
-	var across := up.cross(Vector3.BACK).normalized()
-	var basis := Basis(across, up, across.cross(up)).orthonormalized()
-	forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+	_view_pistol = true  # (the palm in round the grenade, as on a grip)
+	forearm.transform = _view_arm_transform(palm + Vector3(0.0, 0.03, 0.0), elbow, true, HandPose.HOLD)
 	ExoFrame.dress_view_forearm(forearm, ExoFrame.worn(body.inventory), not body.left_handed, GearRig.armor_color_for(body.model.variant))
 	body.view_model.add_child(forearm)
 

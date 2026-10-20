@@ -528,6 +528,27 @@ var _gait_w := 0.0              # how much the cycle shows over the stance pose,
 var _gait := &"idle"
 var _gait_lean := 0.0
 var _gait_bob := 0.0            # the hips' bob this frame (m)
+## Fingers (HandPose, 2026-10-20): each forearm's mesh is its hand in a pose, swapped as the hand's
+## work changes (the firing grip on a weapon, the support grip, a magazine in a reload, a held
+## object, open, relaxed, pointing, a fist). The forearm rolls about its own axis so the palm faces
+## what it holds, and the IK puts the pose's grasp centre on the goal. A shot squeezes the trigger
+## for PRESS_S; the index stays on the trigger while aiming or TRIGGER_HOLD_S after a shot, and
+## lies straight along the frame otherwise. Far off (LOD_FAR) the squeeze isn't drawn.
+const PRESS_S := 0.09
+const TRIGGER_HOLD_S := 1.2
+## How fast the forearm rolls round to its grip (per second, eased), and how far it can (radians
+## either way: a forearm turns about a quarter turn each way from palm-in).
+const ROLL_EASE := 14.0
+const ROLL_MAX := 1.75
+var _hand_shown: Array[StringName] = [HandPose.RELAXED, HandPose.RELAXED]
+var _hand_override: Array[StringName] = [&"", &""]
+var _hand_mesh: Array[Mesh] = [null, null]  # the forearm meshes this model last put on
+var _hand_meshes: Dictionary = {}  # every pose mesh it has put on (a carved one is BodyDeform's)
+var _hand_anchor: Array[Node3D] = []
+var _hands_bare := false
+var _roll: Array[float] = [0.0, 0.0]
+var _press_t := 0.0
+var _shot_t := 99.0
 ## Level of detail on (tests drawing a body by hand turn it off).
 var lod := true
 var _lod_n := 0
@@ -596,10 +617,23 @@ func _ready() -> void:
 	hands_anchor = Node3D.new()
 	hands_anchor.position = HANDS_ANCHOR
 	torso.add_child(hands_anchor)
+	_hands_bare = VoxelArt.hands_bare(variant)
 	for side in [1.0, -1.0]:
 		var upper := _part("upper_arm", torso, shoulder() * Vector3(side, 1, 1))
 		_upper.append(upper)
-		_forearm.append(_part("forearm", upper, Vector3(0, -UPPER_ARM, 0)))
+		var left: bool = side < 0.0
+		var fore := VoxelArt.instance(HandPose.model(HandPose.RELAXED, left, _hands_bare, body), variant, render_layers)
+		fore.position = Vector3(0, -UPPER_ARM, 0)
+		upper.add_child(fore)
+		_forearm.append(fore)
+		var mi := fore.get_child(0) as MeshInstance3D
+		_hand_mesh[_forearm.size() - 1] = mi.mesh
+		_hand_meshes[mi.mesh] = true
+		var anchor := Node3D.new()  # a held prop's place in the hand (hand_anchor)
+		anchor.name = "HandAnchor"
+		anchor.transform = HandPose.grasp(HandPose.RELAXED, left, body == VoxelArt.FEMALE)
+		fore.add_child(anchor)
+		_hand_anchor.append(anchor)
 	_leg_left = _part("thigh", _root, HIP * Vector3(-1, 1, 1))
 	_leg_right = _part("thigh", _root, HIP)
 	_shin_left = _part("shin", _leg_left, Vector3(0, -THIGH, 0))
@@ -963,9 +997,29 @@ func clear_held() -> void:
 	_held = null
 
 
-## Global position of a palm (for tests and tools).
+## Global position of a hand (for tests and tools): where it holds what it holds (its pose's grasp
+## centre, HandPose.reach_point), or its palm's centre when open or empty.
 func hand_position(right: bool) -> Vector3:
-	return _forearm[0 if right else 1].to_global(Vector3(0, -FOREARM, 0))
+	var i := 0 if right else 1
+	return _forearm[i].to_global(HandPose.reach_point(_hand_shown[i], i == 1, body == VoxelArt.FEMALE))
+
+
+## The pose hand `hand` (0 the right, 1 the left) is drawn in now (HandPose.POSES).
+func hand_pose(hand: int) -> StringName:
+	return _hand_shown[hand]
+
+
+## Holds hand `hand` (0 right, 1 left) in pose `pose` (HandPose.POSES) whatever it's doing, until
+## called again with &"" (its own pose by what it's doing, again). For whoever puts something in
+## the hand (a treatment's prop): parent it to hand_anchor().
+func set_hand_pose(hand: int, pose_name: StringName) -> void:
+	_hand_override[hand] = pose_name if HandPose.TABLE.has(pose_name) else &""
+
+
+## A node in hand `hand` (0 right, 1 left), at its pose's grasp centre: +y along what it holds,
+## +z out of the palm (HandPose.grasp). A held prop parented to it follows the hand.
+func hand_anchor(hand: int) -> Node3D:
+	return _hand_anchor[hand]
 
 
 ## Largest palm-to-target distance in metres while holding something; -1 if nothing is held.
@@ -1827,6 +1881,7 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 			var arm: Transform3D = parts["arm_" + side]
 			_upper[i].transform = torso_t.affine_inverse() * arm
 			_forearm[i].transform = arm.affine_inverse() * (parts["fore_" + side] as Transform3D)
+			_show_hand(i, HandPose.RELAXED)
 		_arms_ragdolled = true
 		return
 	if _arms_ragdolled:
@@ -1838,9 +1893,12 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 			_forearm[i].position = Vector3(0, -UPPER_ARM, 0)
 	var goals := _arm_goals(carry)
 	_place_shoulders(delta)
+	_press_t -= delta
+	_shot_t += delta
 	for i in 2:
 		var key: String = goals[i][0]
 		var point: Variant = goals[i][1]
+		_show_hand(i, _hand_override[i] if _hand_override[i] != &"" else _goal_pose(i, key))
 		if key != _hand_source[i]:
 			_hand_source[i] = key
 			_hand_from[i] = torso.to_local(hand_position(i == 0))
@@ -1853,12 +1911,97 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 			var upper := Basis.from_euler(Vector3(arm_swing, 0, 0.05 * (1.0 if i == 0 else -1.0)))
 			var fore := Basis.from_euler(Vector3(0.15 + maxf(arm_swing, 0.0) * 0.6, 0, 0))
 			if w >= 1.0:
+				_roll[i] = lerpf(_roll[i], 0.0, minf(delta * ROLL_EASE, 1.0))
 				_upper[i].transform.basis = upper
-				_forearm[i].transform.basis = fore
+				_forearm[i].transform.basis = fore * Basis(Vector3.UP, _roll[i])
 				continue
 			point = _upper[i].position + upper * (Vector3(0, -UPPER_ARM, 0) + fore * Vector3(0, -FOREARM, 0))
-		_reach(i, _hand_from[i].lerp(point, w))
+		_reach_hand(i, _hand_from[i].lerp(point, w), _palm_want(i, key), delta)
 	_arms_posed = true
+
+
+## The pose for hand `i` at arm goal `key` (_arm_goals): on a weapon, the firing grip (GRIP, TRIGGER
+## while aiming or just after a shot, PRESS as one goes) or the support grip (SUPPORT; in a reload,
+## by the anchor the hand is at: HandPose.RELOAD_POSES); holding anything else, HOLD; else by the
+## goal (HandPose.GOAL_POSES).
+func _goal_pose(i: int, key: String) -> StringName:
+	if not key.begins_with("held:"):
+		if key == "seat" and not (pose.has("grip_r") or pose.get("station", false)):
+			return HandPose.RELAXED  # riding, the hands on the thighs
+		return HandPose.GOAL_POSES.get(key, HandPose.HOLD if key == "seat" else HandPose.RELAXED)
+	if not _held_weapon:
+		return HandPose.HOLD
+	var firing := 1 if left_handed else 0
+	if i == firing:
+		if _press_t > 0.0 and _lod_shown_every < LOD_FAR:
+			return HandPose.PRESS
+		return HandPose.TRIGGER if aiming or _shot_t < TRIGGER_HOLD_S else HandPose.GRIP
+	if reloading:
+		if reload_u >= 0.0 and not reload_keys.is_empty():
+			var at := Reloads.sample(reload_keys, reload_u)
+			return HandPose.RELOAD_POSES.get(at.anchor_a if float(at.w) < 0.5 else at.anchor_b, HandPose.MAG)
+		return HandPose.MAG
+	if is_instance_valid(_held) and String(_held.get_meta(&"voxel_model", "")).begins_with("pistol"):
+		return HandPose.HOLD  # cupping the firing hand
+	if is_seated() and not is_ffv():
+		return HandPose.HOLD  # over the firing hand on the rifle stood up
+	return HandPose.SUPPORT
+
+
+## Which way hand `i`'s palm should face (torso space) at arm goal `key`, or null to leave the
+## forearm unrolled: on a weapon in towards its middle from the hand's side (the grip, a magazine),
+## up and in under a handguard.
+func _palm_want(i: int, key: String) -> Variant:
+	if not key.begins_with("held:") or not is_instance_valid(_held):
+		return null
+	var b := (torso.global_basis.inverse() * _held.global_basis).orthonormalized()
+	var inward := b.x * (1.0 if i == 1 else -1.0)
+	match _hand_shown[i]:
+		HandPose.SUPPORT:
+			return b.y + inward * 0.6
+		HandPose.GRIP, HandPose.TRIGGER, HandPose.PRESS, HandPose.MAG, HandPose.HOLD, HandPose.PINCH:
+			return inward
+	return null
+
+
+## Puts hand `i` on `target` (torso space): the arm's IK, the forearm rolled so the palm faces
+## `want` (or back to palm-in), and the pose's grasp centre (HandPose.reach_point), not the palm's
+## centre, on the target: solved once, then again from where that left the hand.
+func _reach_hand(i: int, target: Vector3, want: Variant, delta: float) -> void:
+	_reach(i, target)
+	var fore := _forearm[i]
+	var roll := 0.0
+	if want != null:
+		var arm := (_upper[i].transform.basis * fore.transform.basis).orthonormalized()
+		roll = clampf(HandPose.roll_to(arm.inverse() * (want as Vector3), i == 1), -ROLL_MAX, ROLL_MAX)
+	_roll[i] = lerp_angle(_roll[i], roll, minf(delta * ROLL_EASE, 1.0)) if _arms_posed else roll
+	var turn := Basis(Vector3.UP, _roll[i])
+	fore.transform.basis = fore.transform.basis * turn
+	var off := HandPose.reach_point(_hand_shown[i], i == 1, body == VoxelArt.FEMALE) - Vector3(0, -FOREARM, 0)
+	if off.length_squared() < 1e-8:
+		return
+	_reach(i, target - _upper[i].transform.basis * (fore.transform.basis * off))
+	fore.transform.basis = fore.transform.basis * turn
+
+
+## Draws hand `i` in pose `hand_pose_now`: its forearm's mesh swapped for that pose's (VoxelArt,
+## shared by every body in this colour scheme), unless hits have carved the forearm a mesh of its
+## own (BodyDeform), which stays as it is.
+func _show_hand(i: int, hand_pose_now: StringName) -> void:
+	var fore := _forearm[i]
+	var mi := fore.get_child(0) as MeshInstance3D if fore.get_child_count() > 0 else null
+	if mi == null or (hand_pose_now == _hand_shown[i] and mi.mesh == _hand_mesh[i]):
+		return
+	if not _hand_meshes.has(mi.mesh):
+		return  # carved
+	var model := HandPose.model(hand_pose_now, i == 1, _hands_bare, body)
+	var mesh := VoxelArt.mesh(model, variant)
+	mi.mesh = mesh
+	_hand_mesh[i] = mesh
+	_hand_meshes[mesh] = true
+	fore.set_meta(&"voxel_model", model)
+	_hand_shown[i] = hand_pose_now
+	_hand_anchor[i].transform = HandPose.grasp(hand_pose_now, i == 1, body == VoxelArt.FEMALE)
 
 
 ## Shoulders: at SHOULDER, except that the support shoulder comes forward (SUPPORT_REACH)
@@ -1899,6 +2042,8 @@ func _update_stance_move(delta: float) -> void:
 ## A shot fired: the held weapon kicks (`strength` 0..2, the weapon's recoil against a rifle's).
 func kick(strength := 1.0) -> void:
 	_kick = clampf(maxf(_kick, 0.0) + strength, 0.0, 2.0)
+	_press_t = PRESS_S  # the trigger finger squeezes (HandPose.PRESS)
+	_shot_t = 0.0
 
 
 ## 0..2: the weapon's kick now (GearRig).
