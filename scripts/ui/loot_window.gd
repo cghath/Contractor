@@ -36,6 +36,9 @@ var _right_box: VBoxContainer
 var _left_title: Label
 var _right_title: Label
 var _buttons: HFlowContainer
+## The panes' scroll areas, and the help box ("?"), which takes its height from them when open.
+var _pane_scrolls: Array[ScrollContainer] = []
+var _help: Control
 ## Both panes' search (lowered), kind filter ("" all, else a Loadouts group) and sort ("packed",
 ## "name", "weight", "kind"; ui-modern, Captain 2026-10-20: "common sense layout tools").
 var filter_query := ""
@@ -95,6 +98,9 @@ func _ready() -> void:
 	top.add_child(_title)
 	var help := UiKit.help_panel(PackedStringArray(HELP), [["Click / drag", "Move an item"], ["Esc / Tab", "Close"]])
 	help.visible = false
+	_help = help
+	help.visibility_changed.connect(_fit_panes.call_deferred)
+	help.minimum_size_changed.connect(_fit_panes.call_deferred)
 	var q := UiKit.help_button(help)
 	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(q)
@@ -134,7 +140,8 @@ func _pane(side: StringName, parent: Control) -> Array:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	UiKit.fit_height(scroll, PANE_H, 250.0)  # the title, subtitle, search row, buttons and keys
+	_pane_scrolls.append(scroll)
+	UiKit._follow_window(scroll, _fit_panes)
 	scroll.set_drag_forwarding(Callable(),
 		func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
 		func(_at: Vector2, d: Variant) -> void: drop(d, side))
@@ -144,6 +151,19 @@ func _pane(side: StringName, parent: Control) -> Array:
 	sections.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	scroll.add_child(sections)
 	return [title, sections]
+
+
+## The panes' height: PANE_H, or what the window leaves under the title, subtitle, search row,
+## buttons and keys (and the open help box).
+func _fit_panes() -> void:
+	if not is_inside_tree():
+		return
+	var room := get_viewport().get_visible_rect().size.y - UiKit.EDGE * 2.0 - 250.0
+	if _help != null and _help.visible:
+		room -= _help.custom_minimum_size.y + UiKit.SPACE_S
+	for s: ScrollContainer in _pane_scrolls:
+		if is_instance_valid(s):
+			s.custom_minimum_size.y = maxf(minf(PANE_H, room), 60.0)
 
 
 # --- Opening and closing ----------------------------------------------------------------

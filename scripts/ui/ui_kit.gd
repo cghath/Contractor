@@ -536,11 +536,26 @@ static func help_button(panel: Control) -> Button:
 	return q
 
 
-## A help box: "How it works" over `lines` (one wrapping line each) and the `keys` hints.
-static func help_panel(lines: PackedStringArray, keys: Array = []) -> PanelContainer:
+## A help box: "How it works" over `lines` (one wrapping line each) and the `keys` hints, in a
+## scroll area no taller than HELP_SHARE of the window (a full-window screen has no room to give
+## it more: its open help would push the screen's own rows off a small window). Show or hide the
+## returned control (help_button does).
+static func help_panel(lines: PackedStringArray, keys: Array = []) -> Control:
+	var holder := ScrollContainer.new()
+	holder.name = "HelpPanel"
+	holder.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var panel := PanelContainer.new()
-	panel.name = "HelpPanel"
 	panel.theme_type_variation = &"HelpPanel"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	holder.add_child(panel)
+	var fit := func() -> void:
+		if is_instance_valid(holder) and holder.is_inside_tree():
+			var cap := clampf(holder.get_viewport().get_visible_rect().size.y * HELP_SHARE, 80.0, 260.0)
+			holder.custom_minimum_size.y = minf(panel.get_combined_minimum_size().y, cap)
+	panel.minimum_size_changed.connect(fit, CONNECT_DEFERRED)
+	holder.visibility_changed.connect(fit)
+	_follow_window(holder, fit)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override(&"separation", SPACE_XS + 2)
 	panel.add_child(box)
@@ -554,7 +569,11 @@ static func help_panel(lines: PackedStringArray, keys: Array = []) -> PanelConta
 		box.add_child(l)
 	if not keys.is_empty():
 		box.add_child(key_hints(keys))
-	return panel
+	return holder
+
+
+## The most of the window's height a help box takes (it scrolls past that).
+const HELP_SHARE := 0.25
 
 
 ## A row of key hints that wraps ([[key, what], ...]): a screen's footer.

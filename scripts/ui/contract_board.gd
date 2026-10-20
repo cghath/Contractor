@@ -155,10 +155,12 @@ func _ready() -> void:
 		_host_buttons.append(UiKit.button("Reset campaign", func() -> void: Contracts.new_full_campaign()))
 	bottom.append_array(_host_buttons)
 	bottom.append(UiKit.button("Close", close, "Close the board (Esc)"))
+	var esc := UiKit.key_hint("Esc", "Close")  # in the row, not a line of its own (room for the open help)
+	esc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bottom.append(esc)
 	root.add_child(UiKit.button_row(bottom))
 	_notice = UiKit.text("")
 	root.add_child(_notice)
-	root.add_child(UiKit.key_hint("Esc", "Close"))
 	_layout()
 	get_viewport().size_changed.connect(_layout)
 	Contracts.changed.connect(refresh)
