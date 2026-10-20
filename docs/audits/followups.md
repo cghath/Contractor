@@ -134,6 +134,11 @@ step isn't done for the player by a medic.
 
 ## F-90: a squadmate stuck on his way back to formation (casualty suite, CI only)
 
+**Same failure as F-08** (a following squadmate pushing with no speed; logged on `fix/ci-flakes`,
+cghath/Contractor#10, which this branch didn't have). Kept as extra evidence for F-08: it also
+happens away from the target dummies, around (5, 5), so a side-step/repath in SquadAI is the fix to
+look at, not only baking the dummies into the navmesh.
+
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), following the lead (`Following (dynamic: ...)`).
 Found by cghath's agent on `feat/tutorial-2` (2026-10-20), whose change doesn't reach it (the
 tutorial guide, its test and the ui test only).
