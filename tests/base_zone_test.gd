@@ -414,6 +414,11 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 	if to == "":
 		return null
 	var me := zone.players.get_node(^"1") as Soldier
+	# The crossing on hurt him on purpose (the wound comes along) and nothing has treated it since:
+	# still bleeding, he could be out cold by the time the transport lands, and an unconscious
+	# player isn't seated for the flight (CI 39428983040: down at the insertion LZ, never aboard,
+	# and then he couldn't confirm the way home). This part is about the flight: whole again.
+	me.vitals.server_reset_health()
 	var k := 0
 	for n: Node in zone.ai.get_children():
 		if n is Soldier and (n as Soldier).has_meta(&"roster_id") and not (n as Soldier).vitals.is_dead():
