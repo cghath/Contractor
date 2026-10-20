@@ -163,6 +163,7 @@ const ACTIONS := {
 		{"id": &"drop_held", "label": "Drop held item", "needs": &"held_item", "request": &"_server_drop", "with": &"slot"},
 		{"id": &"exit_mech", "label": "Climb out", "needs": &"in_mech", "request": &"_server_exit_mech", "with": &"none"},
 		{"id": &"dig", "label": "Build cover in front (20 s)", "needs": &"etool", "request": &"_server_dig", "with": &"none"},
+		{"id": &"set_up_static", "label": "Set up the gun (20 s)", "needs": &"static_load", "request": &"_server_set_up_static", "with": &"none"},
 		{"id": &"dig_hole", "label": "Dig a foxhole (20 s)", "needs": &"etool", "request": &"_server_dig_hole", "with": &"none"},
 		{"id": &"radio_contract", "label": "Radio for a contract", "needs": &"field_radio", "request": &"_server_radio_contract", "with": &"none", "group": MORE},
 		{"id": &"spoof_radio", "label": "Fake a contact report", "needs": &"enemy_net", "request": &"_server_spoof_radio", "with": &"none", "group": MORE},
@@ -447,6 +448,10 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			if not (target is Soldier and (target as Soldier).lootable_by(actor)):
 				return _HIDE
 			return "" if (target as Soldier).has_gear() else "Nothing left on them"
+		&"static_load":  # a static weapon's load in his hands (G-25, StaticWeapons)
+			if StaticWeapons.kit_in_hands(actor) == "":
+				return _HIDE
+			return StaticWeapons.setup_problem(actor)
 		&"etool":  # Digging (Captain, 2026-10-19: e-tool fighting positions)
 			if actor.inventory.count_of(Digging.ITEM) <= 0 and not actor.inventory.slots.values().has(Digging.ITEM):
 				return _HIDE

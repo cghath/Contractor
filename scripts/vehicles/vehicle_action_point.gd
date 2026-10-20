@@ -148,6 +148,9 @@ func _door_actions(actor: Soldier) -> Array[Dictionary]:
 		out.append(_entry(&"enter", "Get in", Callable(), why))
 	if v.bay:
 		out.append(_bay_entry())
+	if v.kind == Vehicle.STATIC and StaticWeapons.KITS.has(v.model):  # G-25: back to its loads
+		out.append(_entry(&"pack_static", "Pack up the gun (%d s)" % int(StaticWeapons.KITS[v.model].pack_s), func() -> void: v.request_pack.rpc_id(1),
+			StaticWeapons.pack_problem(actor, v)))
 	for i: int in seat_list:
 		var s := v.occupant(i)
 		if s and not s.vitals.is_up():

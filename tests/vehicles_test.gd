@@ -1167,9 +1167,37 @@ func _test_static_gun() -> void:
 	check(g != null and g.fired > 0, "and engages the enemy 60 m out (%d rounds)" % (g.fired if g else 0))
 	check(gun.global_position.distance_to(at) < 0.05, "it hasn't moved an inch firing (%.3f m)" % gun.global_position.distance_to(at))
 	gun.server_exit(crew)
-	crew.queue_free()
 	foe.queue_free()
-	gun.queue_free()
+	# Pack up: two men beside it, each takes a load (38 kg gun, 20 kg tripod).
+	var brain := SquadAI.of(crew)
+	if brain:
+		brain.process_mode = Node.PROCESS_MODE_DISABLED
+	crew.move_input = Vector2.ZERO
+	player.global_position = at + Vector3(0, 0.1, 2.0)
+	crew.global_position = at + Vector3(1.0, 0.1, 2.0)
+	await _seconds(0.3)
+	var sw := StaticWeapons.of(gun)
+	var why := sw.server_start_pack(player, gun)
+	check(why == "", "packing up starts (%s)" % why)
+	await _seconds(StaticWeapons.KITS.tripod_m2.pack_s + 0.6)
+	check(not is_instance_valid(gun) or gun.is_queued_for_deletion(), "after 15 s the gun is packed away")
+	var loads := [player.inventory.hands, crew.inventory.hands]
+	check(&"static_m2_gun" in loads and &"static_m3_tripod" in loads, "the gun in one man's hands, the tripod in the other's (%s)" % [loads])
+	# Set up again, the gun and the tripod a few metres apart.
+	crew.global_position = player.global_position + Vector3(2.0, 0, 0)
+	await _seconds(0.2)
+	why = sw.server_start_setup(player)
+	check(why == "", "setting it up starts with the other load 2 m off (%s)" % why)
+	await _seconds(StaticWeapons.KITS.tripod_m2.set_s + 0.6)
+	var again: Vehicle = null
+	for x in layer.vehicles():
+		if x.model == "tripod_m2" and not x.is_queued_for_deletion():
+			again = x
+	check(again != null and player.inventory.hands == &"" and crew.inventory.hands == &"",
+		"after 20 s it stands again and both men's hands are free (%s, %s)" % [player.inventory.hands, crew.inventory.hands])
+	crew.queue_free()
+	if again:
+		again.queue_free()
 	await _seconds(0.3)
 
 

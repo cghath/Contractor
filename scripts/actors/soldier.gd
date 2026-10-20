@@ -981,6 +981,18 @@ func _server_dig_hole() -> void:
 	_start_dig(Digging.HOLE)
 
 
+## Self-interaction "Set up the gun" (G-25): the host starts setting up the static weapon whose
+## load he carries (StaticWeapons).
+@rpc("any_peer", "call_local", "reliable")
+func _server_set_up_static() -> void:
+	if not _from_owner():
+		return
+	var sw := StaticWeapons.of(self)
+	var why := sw.server_start_setup(self) if sw else "Not here"
+	if why != "":
+		_client_message.rpc_id(owner_peer(), why)
+
+
 func _start_dig(kind: StringName) -> void:
 	if not _from_owner():
 		return

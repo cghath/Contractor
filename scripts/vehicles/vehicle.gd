@@ -2521,6 +2521,18 @@ func request_enter(index: int) -> void:
 			_tell(actor, "Can't get in there")
 
 
+## A static weapon's "Pack up the gun" (G-25, StaticWeapons): the host starts it.
+@rpc("any_peer", "call_local", "reliable")
+func request_pack() -> void:
+	var actor := _sender()
+	if not multiplayer.is_server() or actor == null or not in_reach(actor):
+		return
+	var sw := StaticWeapons.of(self)
+	var why := sw.server_start_pack(actor, self) if sw else "Not here"
+	if why != "":
+		_tell(actor, why)
+
+
 @rpc("any_peer", "call_local", "reliable")
 func request_exit() -> void:
 	var actor := _sender()
