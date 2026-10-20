@@ -18,7 +18,39 @@ const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
 ## cycle at a sprint (less slower; off with the "head_bob" setting, and while aiming); the
 ## weapon bobs WEAPON_BOB (m: across, down) at a sprint, and sprinting comes down and across
 ## by SPRINT_VIEW (m) and SPRINT_TILT (radians: muzzle down, turned in, canted).
-const HEAD_BOB := 0.5
+const HEAD_BOB := 0.8
+## Weight in the view (Captain, 2026-10-20: movement "floaty / slidey", the camera feel): a dip
+## on each footfall (FOOT_DIP m at a sprint, less slower: a quick drop, a slower rise); a dip
+## on landing, LAND_DIP_PER_MPS for each m/s he came down at (up to LAND_DIP_MAX), sprung back
+## (LAND_SPRING, LAND_DAMP); the view nods with the body's pace changes along it, down braking
+## and up setting off (ACCEL_PITCH rad per m/s^2, up to ACCEL_PITCH_MAX); the view widens
+## SPRINT_FOV degrees at a sprint; the weapon trails the mouse (LOOK_LAG rad per pixel, up to
+## LOOK_LAG_MAX, coming back at LOOK_LAG_RETURN per second; LOOK_LAG_AIMED of that aimed).
+const FOOT_DIP := 0.014
+const FOOT_DIP_SHARP := 8.0
+const LAND_DIP_PER_MPS := 0.016
+const LAND_DIP_MAX := 0.12
+const LAND_SPRING := 140.0
+const LAND_DAMP := 0.75
+## Only a fall of at least this long (s) dips the view: not a step down, a stair's lip or the
+## settle at a spawn (a jump is about 0.7 s in the air).
+const LAND_MIN_AIR_S := 0.25
+const ACCEL_PITCH := 0.0035
+const ACCEL_PITCH_MAX := 0.035
+const SPRINT_FOV := 2.0
+const LOOK_LAG := 0.0008
+const LOOK_LAG_MAX := 0.05
+const LOOK_LAG_RETURN := 10.0
+const LOOK_LAG_AIMED := 0.15
+var _land_y := 0.0
+var _land_v := 0.0
+var _was_floor := true
+var _air_vy := 0.0
+var _air_t := 0.0
+var _feel_pitch := 0.0
+var _last_fwd_speed := 0.0
+var _look_lag := Vector2.ZERO
+var _sprint_fov_w := 0.0
 const HEAD_SWAY := 0.008
 const WEAPON_BOB := Vector2(0.012, 0.012)
 const SPRINT_VIEW := Vector3(-0.03, -0.05, 0.05)
@@ -212,6 +244,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			turn *= lerpf(1.0, MovementRules.SPRINT_TURN_LOADED, MovementRules.load_fraction(body.load_kg))
 		turn_view(-event.relative.x * turn)
 		body.set_pitch(body.head.rotation.x - event.relative.y * turn * (-1.0 if GameSettings.invert_y() else 1.0))
+		_look_lag = (_look_lag + Vector2(event.relative.x, event.relative.y * (-1.0 if GameSettings.invert_y() else 1.0)) * LOOK_LAG).limit_length(LOOK_LAG_MAX)
 	elif hud.map_screen and hud.map_screen.is_open():
 		return  # the map (M) has the mouse and the keys: no reloading or throwing behind it
 	elif hud.voice_order.listening and event.is_action_pressed(&"pause"):
@@ -288,6 +321,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_placing()
 		else:
 			equip_nade()
+	elif event.is_action_pressed(&"walk") and not is_instance_valid(body.vehicle):
+		body.movement.walk_pace = not body.movement.walk_pace
+		hud.flash("Walking" if body.movement.walk_pace else "Jogging")
 	elif event.is_action_pressed(&"auto_walk") and not is_instance_valid(body.vehicle):
 		body.movement.auto_walk = not body.movement.auto_walk and body.vitals.is_up()
 		hud.flash("Auto-walk on (W or S to stop)" if body.movement.auto_walk else "Auto-walk off")
@@ -420,12 +456,49 @@ func _update_bob(delta: float) -> void:
 	_bob_w = move_toward(_bob_w, w, delta * 4.0)
 	var jogging := walking and not body.is_aiming and body.model.gait() == CharacterModel.JOG
 	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else (JOG_CARRY if jogging else 0.0), delta * 5.0)
+	_sprint_fov_w = move_toward(_sprint_fov_w, 1.0 if body.movement.is_sprinting and walking else 0.0, delta * 3.0)
 	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
 	var phase := TAU * body.model.gait_phase()
+	_update_landing(minf(delta, 0.05))
 	if GameSettings.head_bob():
-		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w, 0.0)
+		var d := fposmod(body.model.gait_phase() * 2.0, 1.0) * FOOT_DIP_SHARP  # a footfall twice a stride
+		var dip := -FOOT_DIP * pace * d * exp(1.0 - d)
+		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y, 0.0)
 	else:
 		body.camera.position = Vector3.ZERO
+
+
+## The landing dip (LAND_*): the fall's speed, taken on touching down, kicks a damped spring.
+func _update_landing(delta: float) -> void:
+	var on_floor := body.is_on_floor() and not is_instance_valid(body.vehicle)
+	if not on_floor:
+		_air_vy = minf(_air_vy, body.velocity.y)
+		_air_t += delta
+	elif not _was_floor:
+		if _air_t >= LAND_MIN_AIR_S:
+			var dip := minf(-_air_vy * LAND_DIP_PER_MPS, LAND_DIP_MAX)
+			_land_v -= dip * sqrt(LAND_SPRING) * 1.8  # (peaks near `dip` at this damping)
+		_air_vy = 0.0
+		_air_t = 0.0
+	_was_floor = on_floor
+	_land_v += (-LAND_SPRING * _land_y - 2.0 * LAND_DAMP * sqrt(LAND_SPRING) * _land_v) * delta
+	_land_y += _land_v * delta
+	if absf(_land_y) < 0.0005 and absf(_land_v) < 0.005:
+		_land_y = 0.0  # settled: the view stands still again
+		_land_v = 0.0
+
+
+## The view's nod with pace changes along it (ACCEL_PITCH), eased; none in a vehicle or down.
+func _update_feel_pitch(delta: float) -> void:
+	var fwd := -body.global_basis.z
+	var flat := Vector2(fwd.x, fwd.z)
+	var fwd_speed := Vector2(body.velocity.x, body.velocity.z).dot(flat.normalized()) if flat.length() > 0.01 else 0.0
+	var accel := (fwd_speed - _last_fwd_speed) / maxf(delta, 0.001)
+	_last_fwd_speed = fwd_speed
+	var target := 0.0
+	if body.is_on_floor() and body.vitals.is_up() and not is_instance_valid(body.vehicle) and GameSettings.head_bob():
+		target = clampf(accel * ACCEL_PITCH, -ACCEL_PITCH_MAX, ACCEL_PITCH_MAX) * (0.3 if body.is_aiming else 1.0)
+	_feel_pitch = lerpf(_feel_pitch, target, 1.0 - exp(-10.0 * delta))
 
 
 ## The weapon's bob this frame (camera-local), on top of where it sits.
@@ -509,13 +582,17 @@ func _physics_process(delta: float) -> void:
 	body.view_model.visible = body.carry_mode == &"" and not waiting \
 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body))
 	_settle_recoil(delta)
+	_update_feel_pitch(delta)
 	_update_sway(delta)
 	_hide_shouldered()
 	# Settle sway after a stop (W3, SoldierMovement.weapon_sway).
 	var sway := body.movement.weapon_sway()
 	var side := -1.0 if body.left_handed else 1.0
-	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w
-	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + RELOAD_ROLL * side * _reload_w
+	_look_lag = _look_lag.lerp(Vector2.ZERO, 1.0 - exp(-LOOK_LAG_RETURN * delta))
+	var lag := _look_lag * (LOOK_LAG_AIMED if body.is_aiming else 1.0)  # the weapon trails the mouse
+	body.view_model.rotation.x += lag.y
+	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w + lag.x
+	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + RELOAD_ROLL * side * _reload_w - lag.x * 0.5
 	_update_reload_hand()
 	hud.update_status(body)
 
@@ -736,7 +813,7 @@ func _update_sway(delta: float) -> void:
 	var weapon := body.active_weapon()
 	var sway := body.aim_sway(weapon, Soldier._now()) if weapon and weapon.type == "weapon" and not Launchers.is_launcher(weapon) else Vector2.ZERO
 	var k := minf(delta * 8.0, 1.0)
-	body.camera.rotation.x = lerpf(body.camera.rotation.x, sway.x, k)
+	body.camera.rotation.x = lerpf(body.camera.rotation.x, sway.x + _feel_pitch, k)
 	body.camera.rotation.y = lerpf(body.camera.rotation.y, sway.y, k)
 
 
@@ -781,7 +858,7 @@ func _update_aim(delta: float) -> void:
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
-	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov()
+	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov() + SPRINT_FOV * _sprint_fov_w
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
 	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0

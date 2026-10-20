@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Movement feel pass (Captain, 2026-10-20: floaty/slidey, camera, speeds, clunky actions; Star Citizen as the target)
+
+#### Changed
+- Paces for a man in kit: jog 3.6 m/s (was 4.0), sprint 6.0 (6.5), crouched 1.7 (2.0), prone
+  0.7 (0.8), aimed half pace (was x0.6). Starts take 0.4 s to a jog and stops 0.28 s (were 0.3
+  and 0.2), so moving has some weight without sliding.
+- Jumps are a 0.6 m hop (were 0.9 m) with much less steering in the air.
+- Going prone takes 0.7 s and getting up 0.9 s for players, slowed meanwhile. The view eases
+  between stances instead of moving at a flat rate, and leaning rolls the view less.
+- The view has weight: a dip on each footfall, a dip on landing that grows with the fall, a
+  small nod when you set off or stop, a slightly wider view at a sprint, and the weapon trails
+  your mouse a little (much less aimed). Turning head bob off in Settings turns these off too.
+
+#### Added
+- Walk: P toggles a walk (half pace) and back to the jog. Sprint still sprints. Rebindable.
+
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 
 #### Added

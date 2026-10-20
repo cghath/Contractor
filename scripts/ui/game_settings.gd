@@ -83,6 +83,7 @@ const BINDABLE := [
 	[&"nvg_toggle", "NVG down / up"], [&"tag_enemy", "Tag enemy (radio)"],
 	[&"binoculars", "Binoculars (raise / lower, on foot)"],
 	[&"auto_walk", "Auto-walk (on / off)"],
+	[&"walk", "Walk / jog (toggle)"],
 ]
 ## Pairs of bindable actions that may share a key, because they never apply at the same time:
 ## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them

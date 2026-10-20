@@ -17,16 +17,25 @@ extends Node
 
 enum Stance { PRONE, CROUCH_LOW, CROUCH_MID, CROUCH_HIGH, STAND_LOW, STAND_MID, STAND_HIGH }
 
-const WALK_SPEED := 4.0      # a jog: the normal standing pace
-const SPRINT_SPEED := 6.5
-const CROUCH_SPEED := 2.0
-const PRONE_SPEED := 0.8     # crawling
+## Paces (Captain, 2026-10-20: "the feel of movement", speeds wrong): a kitted man's jog and
+## sprint, slower crouched, prone and aimed than before (4.0, 6.5, 2.0, 0.8, x0.6).
+const WALK_SPEED := 3.6      # a jog: the normal standing pace
+const SPRINT_SPEED := 6.0
+const CROUCH_SPEED := 1.7
+const PRONE_SPEED := 0.7     # crawling
 const CRAWL_SPEED := 0.6     # a body moving while down (nothing moves one now; kept for the speed table)
-const JUMP_VELOCITY := 4.2
+const JUMP_VELOCITY := 3.4  # about 0.6 m: a man in kit (4.2 was a 0.9 m hop, "floaty")
 const STAND_HEAD_Y := 1.65
 const CROUCH_HEAD_Y := 1.0
 const DOWNED_HEAD_Y := 0.35
-const ADS_SPEED_MULT := 0.6
+const ADS_SPEED_MULT := 0.5
+## A human's walk (the walk key, a toggle): this share of the stance's pace, about 1.8 m/s standing.
+const WALK_PACE_MULT := 0.5
+## Going prone or getting up (a human's) takes PRONE_DOWN_S / PRONE_UP_S: he moves at
+## STANCE_SHIFT_MULT of his pace meanwhile and the view eases down or up over it.
+const PRONE_DOWN_S := 0.7
+const PRONE_UP_S := 0.9
+const STANCE_SHIFT_MULT := 0.2
 
 ## Per stance, indexed by Stance (proposed values):
 ## eye height in metres (prone takes its height from the lying pose instead),
@@ -34,7 +43,7 @@ const STANCE_EYE: Array[float] = [0.3, 0.85, CROUCH_HEAD_Y, 1.15, 1.35, 1.5, STA
 ## upper-body lean in radians (negative leans forward; prone: chest raised),
 const STANCE_PITCH: Array[float] = [0.2, -0.55, -0.4, -0.3, -0.3, -0.15, 0.0]
 ## top speed in m/s,
-const STANCE_SPEED: Array[float] = [PRONE_SPEED, 1.6, CROUCH_SPEED, 2.4, 3.0, 3.5, WALK_SPEED]
+const STANCE_SPEED: Array[float] = [PRONE_SPEED, 1.4, CROUCH_SPEED, 2.0, 2.6, 3.1, WALK_SPEED]
 ## movement capsule height in metres (prone uses a capsule lying down),
 const STANCE_CAPSULE: Array[float] = [0.0, 1.1, 1.25, 1.4, 1.55, 1.7, 1.8]
 ## and weapon spread (sway) and recoil multipliers.
@@ -79,10 +88,16 @@ const LEAN_RATE := 5.0              # full lean in 0.2 s
 const LEAN_MARGIN := 0.15           # keep the head this far off walls
 const DOUBLE_TAP_S := 0.3
 ## The camera rolls this fraction of the upper body's tilt.
-const CAMERA_ROLL := 0.5
+const CAMERA_ROLL := 0.32
 const CAMERA_PRONE_ROLL := 0.25
-const HEAD_SPEED := 4.0             # m/s the camera moves between stances
-const ROLL_SPEED := 2.0             # rad/s
+## The eye eases between stances (exponential, per second: 95% in about 0.27 s), slower going to
+## or from prone (HEAD_EASE_PRONE, over PRONE_DOWN_S / PRONE_UP_S); HEAD_SPEED finishes the last
+## millimetres. The lean's roll eases the same way (ROLL_EASE). They moved at a constant rate,
+## starting and stopping dead (Captain, 2026-10-20: stance changes "clunky").
+const HEAD_EASE := 11.0
+const HEAD_EASE_PRONE := 4.5
+const HEAD_SPEED := 0.3             # m/s
+const ROLL_EASE := 9.0
 ## Crouched, the hips go back so the eyes stay at most this far ahead of the body's centre
 ## (keeps the camera inside the capsule, out of walls).
 const EYE_FORWARD := 0.1
@@ -91,15 +106,15 @@ const EYE_FORWARD := 0.1
 ## (or from a sprint) in about STOP_TIME; drift across the way it now wants to go (the old
 ## heading after a turn) is shed in GRIP_TIME. A full load adds HEAVY_TIME_MULT times as
 ## much to all three (roughly doubles them).
-const ACCEL_TIME := 0.3
-const STOP_TIME := 0.2
+const ACCEL_TIME := 0.4   # (was 0.3: weightier starts; Captain, 2026-10-20, "floaty / slidey")
+const STOP_TIME := 0.28
 const GRIP_TIME := 0.1
 ## AI soldiers keep the older, looser momentum (a plain ease towards the wanted velocity, braking
 ## over AI_STOP_TIME): their path following leans on sliding round corners, and the tight grip
 ## left them stuck on door frames. The grip is for the player's feel.
 const AI_STOP_TIME := 0.3
 const HEAVY_TIME_MULT := 1.0
-const AIR_CONTROL := 0.3
+const AIR_CONTROL := 0.12  # (was 0.3: in the air you keep what you jumped with)
 ## Settle sway after a stop: speed lost (m/s) builds it up to 1, then it fades.
 const SETTLE_GAIN := 0.25
 const SETTLE_DECAY := 1.4           # per second
@@ -190,6 +205,9 @@ var lean := 0.0
 var mounted := false
 ## Owner-side: 0..1, drained by sprinting and jumping (the legs).
 var stamina := 1.0
+## Owner-side (a human's): the walk key's toggle (WALK_PACE_MULT); sprinting overrides it.
+var walk_pace := false
+var _stance_shift_until := -1000.0  # a human going prone or getting up: slowed until then
 ## Owner-side (a human's): auto-walk is on (Captain, 2026-10-20). The body walks forward with no
 ## key held; the sprint key still sprints and A/D still steer. W or S, going down or getting in
 ## a vehicle turns it off (PlayerInput toggles it on the auto_walk key).
@@ -738,6 +756,8 @@ func set_stance(new_stance: int) -> bool:
 		return false
 	if new_stance == Stance.PRONE:
 		_before_prone = stance
+	if (new_stance == Stance.PRONE or stance == Stance.PRONE) and body and not body.is_ai():
+		_stance_shift_until = Soldier._now() + (PRONE_DOWN_S if new_stance == Stance.PRONE else PRONE_UP_S)
 	stance = new_stance
 	mounted = false
 	return true
@@ -849,8 +869,14 @@ func _update_head(delta: float, down: bool) -> void:
 	# The eye is drawn at the body's scale (CharacterModel.body_scale): a female soldier's 1.53 m,
 	# not the male 1.65 m near the top of her 1.68 m head (docs/animation.md, "World scale").
 	target *= body.model.body_scale()
-	body.head.position = body.head.position.move_toward(target, HEAD_SPEED * delta)
-	body.head.rotation.z = move_toward(body.head.rotation.z, roll, ROLL_SPEED * delta)
+	var ease := HEAD_EASE_PRONE if stance_shifting() else HEAD_EASE
+	body.head.position = body.head.position.lerp(target, 1.0 - exp(-ease * delta)).move_toward(target, HEAD_SPEED * delta)
+	body.head.rotation.z = lerpf(body.head.rotation.z, roll, 1.0 - exp(-ROLL_EASE * delta))
+
+
+## A human is going prone or getting up (PRONE_DOWN_S / PRONE_UP_S): slowed, the view easing.
+func stance_shifting() -> bool:
+	return Soldier._now() < _stance_shift_until
 
 
 # --- Mount -------------------------------------------------------------------------------
@@ -897,6 +923,10 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 	if sprinting:
 		var full := WALK_SPEED + (SPRINT_SPEED - WALK_SPEED) * MovementRules.sprint_left(body.load_kg)
 		speed = lerpf(STANCE_SPEED[Stance.STAND_HIGH], full, sprint_ramp)
+	elif walk_pace:
+		speed *= WALK_PACE_MULT
+	if stance_shifting():
+		speed *= STANCE_SHIFT_MULT
 	speed *= MovementRules.direction_mult(input, body.load_kg)
 	if body.is_aiming:
 		var weapon := body.active_weapon()
