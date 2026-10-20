@@ -105,8 +105,8 @@ func _test_settings() -> void:
 	screen.open()
 	await get_tree().process_frame
 	var tabs := screen.find_children("*", "TabContainer", true, false)
-	check(screen.is_open() and not tabs.is_empty() and (tabs[0] as TabContainer).get_tab_count() == 4 and screen._key_buttons.size() == GameSettings.BINDABLE.size(),
-		"the settings screen: Video, Audio, Controls and Keys, a button for every bindable key")
+	check(screen.is_open() and not tabs.is_empty() and (tabs[0] as TabContainer).get_tab_count() == 5 and screen._key_buttons.size() == GameSettings.BINDABLE.size(),
+		"the settings screen: Video, Audio, Controls, Keys and HUD (ui-modern's HUD layout), a button for every bindable key")
 	screen.close()
 	check(not screen.is_open(), "and closes")
 	screen.queue_free()

@@ -1687,9 +1687,10 @@ func _test_chase_camera() -> void:
 		and GameSettings.BINDABLE.any(func(pair: Array) -> bool: return pair[0] == VehicleCamera.ACTION),
 		"the vehicle view is on B, and rebindable")
 	var clashes := InputMap.get_actions().filter(func(action: StringName) -> bool:
-		return action != VehicleCamera.ACTION and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
+		var shared := GameSettings.SHARED.any(func(pair: Array) -> bool: return VehicleCamera.ACTION in pair and action in pair)  # binoculars, on foot
+		return action != VehicleCamera.ACTION and not shared and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
 			return e is InputEventKey and ((e as InputEventKey).physical_keycode == KEY_B or (e as InputEventKey).keycode == KEY_B)))
-	check(clashes.is_empty(), "and B does nothing else (%s)" % [clashes])
+	check(clashes.is_empty(), "and B does nothing else in a vehicle (%s; on foot it's the binoculars)" % [clashes])
 	check(VehicleCamera.FIRST_PERSON_DEFAULT, "a session starts in first person now the cabins are hollow and glazed (Captain); B gives the chase view")
 	VehicleCamera.chase = true  # the checks below start from the chase view
 	# Out of the M2 a moment ago (the gun checks): the exit's grace runs out first (a body that

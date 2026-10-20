@@ -1557,7 +1557,9 @@ func _test_strongbox() -> void:
 	if box == null:
 		return
 	var ids := box.cargo_hold.entries().map(func(e: Dictionary) -> String: return String(e.id))
-	check("gold_bars" in ids and ids.any(func(id: String) -> bool: return Fixers.is_contraband(StringName(id))), "valuables and contraband inside (%s)" % [ids])
+	# (The loot rotation, 2026-10-20: its valuables are rolled by tier now, not always gold bars.)
+	var valuable := ids.any(func(id: String) -> bool: return ItemDB.has_item(StringName(id)) and ItemDB.get_item(StringName(id)).type == "valuable" and not Fixers.is_contraband(StringName(id)))
+	check(valuable and ids.any(func(id: String) -> bool: return Fixers.is_contraband(StringName(id))), "valuables and contraband inside (%s)" % [ids])
 	player.inventory.remove_one(WorldValuables.STRONGBOX_KEY)
 	check(box.is_locked() and box.lock_problem(player).contains("Locked") and box.server_open_for(player) != "" and box.is_locked(), "without the key it stays shut")
 	check(player.inventory.take(WorldValuables.STRONGBOX_KEY) == 1 and box.server_open_for(player) == "" and not box.is_locked(), "the officer's key opens it")
