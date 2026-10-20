@@ -489,15 +489,21 @@ func _test_ground_guard() -> void:
 	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
 		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
 	ground.collision_layer = 1
-	await _wait_for(func() -> bool: return guy.is_on_floor() and not guy.movement.holding, 6.0)
 	# He lands on whatever is under him: the ground, or (a slow runner) a rock the scatter's
 	# collision streamed in after the spot was picked (CI, a metre up). Either way he stopped
-	# holding and stands on it.
-	var under := guy.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(
-		guy.global_position + Vector3.UP * 0.5, guy.global_position + Vector3.DOWN * 3.0, 1, [guy.get_rid()]))
-	var on := not under.is_empty() and absf(float(under.position.y) - guy.global_position.y) < 0.3
-	check(guy.is_on_floor() and on and not guy.movement.holding,
-		"once it's there he lands on it (y %.1f, ground %.1f, on %s)" % [guy.global_position.y, h, under.get("collider", "nothing")])
+	# holding and stands on it. Waited for as a whole: down, not holding, and on what's under him.
+	var seen := [{}]  # (what's under him, as the lambda last saw it)
+	var landed := func() -> bool:
+		var under: Dictionary = guy.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(
+			guy.global_position + Vector3.UP * 0.5, guy.global_position + Vector3.DOWN * 3.0, 1, [guy.get_rid()]))
+		seen[0] = under
+		var on := not under.is_empty() and absf(float(under.position.y) - guy.global_position.y) < 0.3
+		return guy.is_on_floor() and on and not guy.movement.holding
+	await _wait_for(landed, 6.0)
+	var under_him: Dictionary = seen[0]
+	check(landed.call(), "once it's there he lands on it (at %s, ground %.1f, on %s at %.2f, floor %s, holding %s, velocity %s, slope %.0f deg)" % [
+		guy.global_position, h, under_him.get("collider", "nothing"), float(under_him.position.y) if not under_him.is_empty() else INF, guy.is_on_floor(),
+		guy.movement.holding, guy.velocity, rad_to_deg(t.normal_at(centre.x, centre.y).angle_to(Vector3.UP))])
 	var guard := level.get_node(^"GroundGuard") as GroundGuard
 	# Only the test's own check_now() below: the guard's every-CHECK_S round, landing in the
 	# physics frame after a teleport, put him back first and the count read before it didn't
