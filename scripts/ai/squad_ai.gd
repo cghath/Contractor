@@ -553,6 +553,9 @@ const FOLD_BONUS := 2.0
 ## PRONE_MIN_M or more off. Pinned in the open he throws smoke toward the shooter if he has one. Not
 ## while treating, healing, carrying or in a vehicle; once each REACT_GAP_S. Proposed.
 const REACT_CLOSE := 0.2
+## Assaults and the flank's maneuver legs go in bounds, buddy pairs taking turns (_bound_toward;
+## AI bar G-06), in contact; the last ASSAULT_RUSH_M onto the position is one rush. Proposed.
+const ASSAULT_RUSH_M := 12.0
 const REACT_SUPPRESSION := 0.5
 const REACT_COVER_M := 3.0
 const REACT_S := 1.5
@@ -3066,8 +3069,10 @@ func _do_tactic(t: Dictionary) -> void:
 			var point: Vector3 = t.point
 			if body.suppression >= PINNED or _flat_distance(point) <= ARRIVE + 2.0:
 				_fight(point if _flat_distance(point) <= ARRIVE + 2.0 else body.global_position, 4.0)
+			elif in_contact() and _flat_distance(point) > ASSAULT_RUSH_M:
+				_bound_toward(point, t)  # in turns with his buddy, one moving while the other covers (G-06)
 			else:
-				_go(point, true)
+				_go(point, true)  # the last rush onto the position
 				bounding = true
 		&"clear":
 			_tactic_clear(t, now)
@@ -3316,6 +3321,9 @@ func _tactic_maneuver(t: Dictionary) -> void:
 	t["leg"] = leg
 	if body.suppression >= PINNED or leg >= route.size():
 		_fight(route[-1] if not route.is_empty() and leg >= route.size() else body.global_position, 6.0 if leg >= route.size() else PINNED_COVER_M)
+		return
+	if in_contact():
+		_bound_toward(route[leg], t)  # under fire the flank goes in bounds, buddy covering buddy (G-06)
 		return
 	_go(route[leg], true)
 	bounding = true

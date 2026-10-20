@@ -127,6 +127,7 @@ func _test_fire_fix() -> void:
 	# G-07: a round cracks close in the open with nothing near to hide behind: he drops flat at once.
 	bravo_ai._fire_react_at = -1000.0
 	bravo_ai._has_cover = false
+	bravo.stunned_s = 0.0  # (the flashbang test may have left him dazed: a stunned man doesn't react)
 	bravo.threat_pos = bravo.global_position + Vector3(0, 0, -140)
 	bravo_ai.react_to_fire(0.3)
 	var reacted := bravo_ai._react_until > Soldier._now() or bravo_ai._has_destination

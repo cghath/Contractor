@@ -39,7 +39,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-28 | A heard shot tells the AI who fired and which side he is on | P1 | S |
 | G-29 | Walls don't muffle shots or footsteps | P1 | M |
 | G-05 | ~~The AI never chooses to go prone~~ (done 2026-10-19: prone in a fight behind folds or far out, flat when pinned in the open) | P1 | M |
-| G-06 | Assault and the flank's maneuver element run, they don't bound | P1 | M |
+| G-06 | ~~Assault and the flank's maneuver element run, they don't bound~~ (done 2026-10-19: buddy-pair bounds in contact, one rush for the last 12 m) | P1 | M |
 | G-07 | ~~No instant reaction to a near miss or a blast~~ (done 2026-10-19 for near misses: duck, dash, drop, smoke; blasts still to do) | P1 | M |
 | G-08 | A building clearance is dropped when contact goes quiet | P1 | S |
 | G-09 | ~~The same bursts at every range~~ (done 2026-10-19) | P1 | S |
