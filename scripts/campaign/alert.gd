@@ -316,7 +316,8 @@ func _check_in() -> void:
 		var garrison := _hostiles().filter(func(s: Soldier) -> bool: return String(s.name).begins_with(prefix))
 		var had := level.get(&"_garrisoned") as Dictionary
 		var coming := int(level.call(&"garrison_pending", m.module_id)) if level.has_method(&"garrison_pending") else 0
-		if garrison.is_empty() and had != null and int(had.get(m.module_id, 0)) > 0 and coming == 0:  # not while it's still coming out
+		var virtual_men := Virtualizer.of(self).garrison_up(m.module_id) if Virtualizer.of(self) else 0  # at its posts as a profile: it answers
+		if garrison.is_empty() and virtual_men == 0 and had != null and int(had.get(m.module_id, 0)) > 0 and coming == 0:  # not while it's still coming out
 			var pos: Vector3 = m.global_position
 			get_tree().create_timer(CHECK_IN_CALL_S).timeout.connect(func() -> void:
 				_receive({"kind": &"missed_checkin", "pos": pos, "area": m.module_id, "by": ""}))

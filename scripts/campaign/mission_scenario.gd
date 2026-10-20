@@ -123,6 +123,8 @@ func _on_live(_cid: String, objectives: Array) -> void:
 				_begin(o)  # older saves have no checkpoint; never restart a run already present
 			else:
 				runs[String(o.oid)] = ScenarioCheckpoint.restore(self, saved)
+				if o.kind == Objectives.CONVOY:
+					_track_convoy(runs[String(o.oid)])
 				if o.kind in [Objectives.HOLD_POINT, Objectives.RESCUE_CREW]:
 					_aim_waves(_p3(o.params.pos))
 				if is_instance_valid(_squad) and (o.kind != Objectives.CONVOY or (runs[String(o.oid)].get("vehicles", []) as Array).any(func(e: Dictionary) -> bool: return bool(e.out))):
@@ -134,6 +136,12 @@ func _on_live(_cid: String, objectives: Array) -> void:
 func server_checkpoint() -> void:
 	if not multiplayer.is_server():
 		return
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		for run: Dictionary in runs.values():
+			if run.has("group") and Virtualizer.is_virtual(run.group):
+				virtualizer.server_wake(run.group)  # a convoy out of everyone's way as a profile: back in the world to be saved as one
+		virtualizer.server_flush()
 	var dep: Dictionary = Campaign.section(&"contracts").get("deployment", {})
 	if dep.is_empty():
 		return
@@ -289,6 +297,9 @@ func _convoy_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 		return
 	if String(run.phase) != "rolling":
 		return
+	if run.has("group") and Virtualizer.is_virtual(run.group):
+		_virtual_convoy_tick(run, o)  # out of everyone's way, a profile drives it on (Virtualizer)
+		return
 	var cargo_down := 0
 	var cargo_total := 0
 	var route: PackedVector3Array = run.route
@@ -392,6 +403,78 @@ func _convoy_spawn(run: Dictionary, o: Dictionary) -> void:
 		run.vehicles.append(e)
 		v.server_follow_path(path, float(p.get("speed_kmh", 28.0)))
 	print("[mission] convoy %s sets out: %d vehicles, %d crew" % [run.oid, (run.vehicles as Array).size(), made])
+	_track_convoy(run)
+
+
+## The convoy of `run`, while it rolls with everyone aboard, may go virtual far from the squad (AI
+## virtualization: Virtualizer, rides): "group" is its crews as one group, this node vouching for
+## its vehicles (virtual_ride) and driving them on when they're back (virtual_ride_back). It isn't
+## in the zone save's profiles: the scenario checkpoint keeps it (server_checkpoint wakes it first).
+func _track_convoy(run: Dictionary) -> void:
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer == null or not run.has("vehicles"):
+		return
+	var crew: Array = []
+	for e: Dictionary in run.vehicles:
+		crew.append_array((e.crew as Array).filter(func(s: Variant) -> bool: return is_instance_valid(s)))
+	run["group"] = {"squad": _squad, "soldiers": crew, "v_owner": self, "v_nosave": true, "v_keep_squad": true, "oid": String(run.get("oid", ""))}
+	virtualizer.track(run.group, "convoy", false)
+
+
+## Virtualizer: where convoy vehicle `v` is going while every one of its convoy still rolls ({} once
+## any has stopped, been hit or got out): the rest of its path and its speed, and which it is ("key").
+func virtual_ride(v: Vehicle) -> Dictionary:
+	for oid: String in runs:
+		var run: Dictionary = runs[oid]
+		if String(run.get("kind", "")) != Objectives.CONVOY or String(run.get("phase", "")) != "rolling" or bool(run.get("ambushed", false)):
+			continue
+		var vehicles: Array = run.get("vehicles", [])
+		for i in vehicles.size():
+			var e: Dictionary = vehicles[i]
+			if e.v != v:
+				continue
+			if vehicles.any(func(x: Dictionary) -> bool: return bool(x.out) or bool(x.get("down", false)) or bool(x.hit)):
+				return {}
+			if not is_instance_valid(v.ai) or not v.ai.active:
+				return {}
+			var path: Array[Vector3] = []
+			for k in range(v.ai.index, v.ai.path.size()):
+				path.append(v.ai.path[k])
+			return {"key": "%s|%d" % [oid, i], "path": path, "speed_kmh": v.ai.cruise_ms * 3.6}
+	return {}
+
+
+## Virtualizer: convoy vehicle `key` ("<oid>|<index>") is back as `v` with `riders` aboard: it's that
+## vehicle of its run again (crew, hits, gun) and drives on along `path` at `speed_kmh`.
+func virtual_ride_back(key: String, v: Vehicle, riders: Array, path: Array[Vector3], speed_kmh: float) -> void:
+	var parts := key.split("|")
+	var run: Dictionary = runs.get(parts[0], {})
+	var vehicles: Array = run.get("vehicles", [])
+	if parts.size() < 2 or not parts[1].is_valid_int() or int(parts[1]) >= vehicles.size():
+		return
+	var e: Dictionary = vehicles[int(parts[1])]
+	e.v = v
+	e.crew = riders.duplicate()
+	AavGunner.attach(v)
+	v.damaged.connect(_on_convoy_hit.bind(e))
+	if not path.is_empty():
+		v.server_follow_path(PackedVector3Array(path), speed_kmh)
+
+
+## A virtual convoy's tick: still on its way, or (its lead within ESCAPE_M of the route's end) it got
+## away, profile and all.
+func _virtual_convoy_tick(run: Dictionary, o: Dictionary) -> void:
+	var route: PackedVector3Array = run.route
+	var end := route[route.size() - 1] if not route.is_empty() else Vector3.ZERO
+	var at := Virtualizer.lead(run.group)
+	if at.is_finite() and Vector2(at.x - end.x, at.z - end.z).length() <= ESCAPE_M:
+		var virtualizer := Virtualizer.of(self)
+		if virtualizer:
+			virtualizer.server_forget(run.group)
+		_convoy_leave(run)
+		_mark(run, o, Objectives.FAILED, "the convoy got away")
+		return
+	_mark(run, o, Objectives.ACTIVE, _progress(run, o))
 
 
 func _convoy_soldier(_run: Dictionary, soldier_name: String, at: Vector3, quality: float, identity := {}) -> Soldier:

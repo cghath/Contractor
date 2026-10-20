@@ -26,6 +26,7 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	HotZoneOps.enabled = false  # one contract at a time below; _test_hot_zone_ops turns it on
 	EnemyDrones.enabled = false  # none on their own (wave 6): _test_enemy_drones sends its own
+	Virtualizer.enabled = false  # the response's groups stay real here (they're checked man by man); virtualization_test has its own
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_generation()
@@ -1845,6 +1846,26 @@ func _test_scenarios() -> void:
 	var cargo: Array = vehicles.filter(func(e: Dictionary) -> bool: return bool(e.cargo))
 	check(not cargo.is_empty() and Contracts.objectives.get_objective(main.oid).state == Objectives.ACTIVE,
 		"%d cargo truck%s still moving, the objective open" % [cargo.size(), "" if cargo.size() == 1 else "s"])
+	# AI virtualization (phase 3): out of everyone's way the rolling convoy is a profile, vehicles and
+	# all; the objective stays open, it drives on, and it comes back as it was, crews in their seats.
+	var vz := Virtualizer.of(level)
+	var ids: Array = vehicles.map(func(e: Dictionary) -> String: return (e.v as Vehicle).vehicle_id)
+	var went := vz != null and run.has("group") and vz.server_virtualize(run.group, true)
+	await _frames(2)
+	scen.server_advance(1.0)
+	check(went and vehicles.all(func(e: Dictionary) -> bool: return not is_instance_valid(e.v)) and Contracts.objectives.get_objective(main.oid).state == Objectives.ACTIVE,
+		"virtual, the convoy's vehicles leave the world and the objective stays open (not read as stopped)")
+	if went:
+		var from := Virtualizer.lead(run.group)
+		vz.server_advance(20.0)
+		check(Virtualizer._flat(from, Virtualizer.lead(run.group)) > 30.0, "it drives on along its route off-screen (%.0f m in 20 s)" % Virtualizer._flat(from, Virtualizer.lead(run.group)))
+		vz.server_wake(run.group)
+		vz.server_flush()
+		await _frames(2)
+		var driving := func(e: Dictionary) -> bool:
+			var tv := e.v as Vehicle if is_instance_valid(e.v) else null
+			return tv != null and ids.has(tv.vehicle_id) and tv.driver() != null and is_instance_valid(tv.ai) and tv.ai.active
+		check(vehicles.all(driving), "back in the world: the same vehicles, each with its driver, driving the rest of the route")
 	scen.server_neutralize_convoy(String(main.oid))
 	scen.server_advance(1.0)
 	check(Contracts.objectives.get_objective(main.oid).state == Objectives.DONE, "every cargo truck out of action: the convoy is stopped")
@@ -1872,6 +1893,20 @@ func _test_scenarios() -> void:
 	debrief = _end_deployment()
 	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0,
 		"debrief: the convoy got away, no completion pay (%s)" % debrief.contracts[0].outcome)
+	await _clean_scenario(before)
+	# A virtual convoy gets away too: its profile reaching the far end fails the objective.
+	d = await _deploy_new("convoy_ambush")
+	main = _kind(d.objectives, Objectives.CONVOY)
+	scen.server_advance(float(main.params.depart_s) + 2.0)
+	run = scen.run_of(String(main.oid))
+	if vz and run.has("group") and vz.server_virtualize(run.group, true):
+		vz.server_advance(3600.0)
+		scen.server_advance(1.0)
+		check(Contracts.objectives.get_objective(main.oid).state == Objectives.FAILED and not Virtualizer.is_virtual(run.group),
+			"a virtual convoy that drives to the far end gets away: the objective fails, the profile goes")
+	else:
+		check(false, "a rolling convoy can go virtual")
+	_end_deployment()
 	await _clean_scenario(before)
 
 	# Hold the line: the clock runs while we hold, waves from several sides, the position can fall.

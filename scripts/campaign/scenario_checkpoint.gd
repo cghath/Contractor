@@ -5,7 +5,7 @@ extends RefCounted
 static func capture(run: Dictionary, previous := {}) -> Dictionary:
 	var out := {}
 	for key: String in run:
-		if key not in ["vehicles", "crew", "ambush", "waves", "wreck", "route"]:
+		if key not in ["vehicles", "crew", "ambush", "waves", "wreck", "route", "group"]:  # ("group": the convoy as the Virtualizer tracks it)
 			out[key] = run[key]
 	if run.has("route"):
 		out["route"] = _points(run.route)

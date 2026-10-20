@@ -174,6 +174,7 @@ func capped_alive() -> int:
 		for s: Variant in wave.soldiers:
 			if is_instance_valid(s) and not (s as Soldier).vitals.is_dead():
 				count += 1
+		count += Virtualizer.virtual_men(wave).size()  # a wave out of everyone's way as a profile (Virtualizer)
 	return count
 
 
@@ -242,6 +243,9 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, 
 		soldiers[i + 1].buddy = soldiers[i]
 	record.soldiers = soldiers
 	_route(squad, level, edge, target)
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		virtualizer.track(record, "qrf")  # far from the squad it walks on as a profile (docs/virtualization.md)
 	print("[reinforcements] wave %d: %d hostiles from (%.0f, %.0f) at %.0f s" % [index + 1, soldiers.size(), edge.x, edge.z, elapsed])
 	wave_spawned.emit(index, soldiers)
 
@@ -345,10 +349,9 @@ func _retarget_waves() -> void:
 			continue  # waiting at a rally point for the rest of a push (EnemyResponse, server_release)
 		if t - float(wave.get("sent_at", t)) > hunt_s:
 			continue  # done hunting: holds round the last spot it was sent to
-		var living: Array = wave.soldiers.filter(func(s: Variant) -> bool:
-			return is_instance_valid(s) and not (s as Soldier).vitals.is_dead())
-		if is_instance_valid(squad) and not living.is_empty():
-			_route(squad, level, (living[0] as Soldier).global_position)
+		var lead := Virtualizer.lead(wave)  # its first man up, live or virtual
+		if is_instance_valid(squad) and lead.is_finite():
+			_route(squad, level, lead)
 
 
 func _players_centre(level: Node) -> Vector3:

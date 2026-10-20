@@ -552,6 +552,9 @@ func hostiles_in(o: Dictionary) -> int:
 		if s and s.faction == &"hostile" and not s.is_queued_for_deletion() and s.vitals.is_up() \
 				and rect.has_point(Vector2(s.global_position.x, s.global_position.z)):
 			n += 1
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		n += virtualizer.count_in(rect, &"hostile")  # a garrison at its posts as a profile is still there
 	return n
 
 

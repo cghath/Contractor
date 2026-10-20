@@ -30,6 +30,13 @@ const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
 ## age): the client's copy must be at least this old.
 const SMOKE_AGE_S := 3.0
 
+## A hostile pair the host puts in the zone and turns into a profile (Virtualizer) before the client
+## gets there: the client must see none of it until the host brings it back, and then both men
+## with the rounds they had (VIRTUAL_ROUNDS).
+const VIRTUAL_MEN: Array[String] = ["NetVirtual_1", "NetVirtual_2"]
+const VIRTUAL_ROUNDS := 13
+var _virtual_group := {}
+
 ## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
 const DRAGGER := "Dragger"
 const DRAGGED := "Dragged"
@@ -219,6 +226,42 @@ func _on_host_switched(fresh: CompoundLevel) -> void:
 	level.players.add_child(ghost, true)
 	_ghost_at.rpc(ghost.position)
 	print("[host] switched to %s; stand-in player body at %s" % [level.level_info().level, ghost.position])
+	if fresh is ZoneLevel:
+		_stage_virtual(fresh as ZoneLevel)
+
+
+## Host, in the zone: VIRTUAL_MEN go into a profile at once (nothing of them is sent to anyone).
+func _stage_virtual(zone: ZoneLevel) -> void:
+	var v := Virtualizer.of(zone)
+	if v == null:
+		print("[host] the zone has no virtualizer")
+		return
+	Virtualizer.enabled = false  # it waits for the client's word, not for distances
+	var squad := Squad.new()
+	squad.name = "NetVirtual"
+	squad.faction = &"hostile"
+	zone.add_child(squad)
+	var men: Array = []
+	for i in VIRTUAL_MEN.size():
+		var s := zone.spawn_soldier({"name": VIRTUAL_MEN[i], "faction": "hostile", "variant": "urban", "pos": zone.spawn_point(0) + Vector3(30.0 + i * 2.0, 0.0, 30.0),
+			"loadout": ["plate_carrier", "m4a1", "mag_556"], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(s).squad = squad
+		while s.inventory.rounds_in(&"primary") > VIRTUAL_ROUNDS:
+			s.inventory.consume_round(&"primary")
+		men.append(s)
+	_virtual_group = {"squad": squad, "soldiers": men}
+	v.track(_virtual_group, "patrol", false)
+	print("[host] %s" % ("staged a virtual pair" if v.server_virtualize(_virtual_group, true) else "FAILED to virtualize the pair"))
+
+
+## Host: the client has looked; the virtual pair comes back.
+@rpc("any_peer", "call_remote", "reliable")
+func _host_wake_virtual() -> void:
+	var v := Virtualizer.of(level)
+	if multiplayer.is_server() and v and not _virtual_group.is_empty():
+		v.server_wake(_virtual_group)
+		v.server_flush()
+		Virtualizer.enabled = true
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -477,6 +520,22 @@ func _check_late_drag() -> void:
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
 
 
+## AI virtualization in co-op (docs/virtualization.md): a group the host holds as a profile isn't
+## in this client's world at all (nothing replicated, late or not); brought back, its men are here
+## like any AI, with what they had.
+func _check_virtual() -> void:
+	await get_tree().create_timer(1.0).timeout
+	var none := VIRTUAL_MEN.all(func(n: String) -> bool: return level.ai.get_node_or_null(NodePath(n)) == null)
+	check(none, "  a group the host holds virtual isn't here: nothing of it replicates")
+	_host_wake_virtual.rpc_id(1)
+	var here := func() -> bool:
+		return VIRTUAL_MEN.all(func(n: String) -> bool:
+			var s := level.ai.get_node_or_null(NodePath(n)) as Soldier
+			return s != null and s.inventory.rounds_in(&"primary") == VIRTUAL_ROUNDS)
+	await _wait_for(here, 8.0)
+	check(here.call(), "  brought back by the host, both men are here with the rounds they had (%d)" % VIRTUAL_ROUNDS)
+
+
 ## B-07 (co-op soak S0520, S0578, S0672: a rejoined client "never saw" its dropped helmet
 ## picked up again): this client leaves on its feet and joins again (a new peer id; the host
 ## kits the new body), sees the helmet it dropped and shot before leaving, damage and all,
@@ -601,6 +660,8 @@ func _check_level_switches(me: Soldier) -> Soldier:
 		check(ghost != null and _ghost_pos != null and ghost.position.distance_to(_ghost_pos) < 0.05,
 			"  a player whose owner sends no position stands where the host put it, not at the origin (%s, host %s)" % [ghost.position if ghost else "missing", _ghost_pos])
 		me = level.players.get_node_or_null(str(multiplayer.get_unique_id())) as Soldier
+		if kind == "zone":
+			await _check_virtual()
 	if me:
 		me.set_physics_process(false)
 		var mine := me

@@ -29,6 +29,10 @@ var ground: Dictionary = {}
 ## (WorldCache.server_fill), so a looted box stays looted. Updated from the live caches on every
 ## save; a cache not in the zone just then keeps its record.
 var caches: Dictionary = {}
+## The zone's groups as profiles (Virtualizer.to_save: virtual ones, and live ones snapshotted where
+## they stood), put back by the zone's Virtualizer on load, so a squad that leaves and comes back
+## meets the same men (docs/virtualization.md). Rebuilt from the level's Virtualizer on every save.
+var profiles: Array = []
 
 
 func post_fell(spawn_id: String) -> void:
@@ -94,6 +98,8 @@ func save_zone() -> bool:
 			vehicles.append(node.to_save())
 	var digging := get_tree().get_first_node_in_group(&"digging")
 	ground = digging.to_save() if digging and digging.has_method(&"to_save") else {}
+	var virtualizer := get_tree().get_first_node_in_group(&"virtualizer")
+	profiles = virtualizer.to_save() if virtualizer and virtualizer.has_method(&"to_save") else []
 	# Caches and site boxes as they are now: looted, or used as a stash (compound loot).
 	for node in get_tree().get_nodes_in_group(&"world_caches"):
 		if node.has_method(&"to_save") and not node.is_queued_for_deletion() and String(node.get(&"uid")) != "":
@@ -108,12 +114,13 @@ func save_zone() -> bool:
 		"vehicles": vehicles,
 		"ground": ground,
 		"caches": caches,
+		"profiles": profiles,
 		"sky": sky,
 		"left_day": BaseHub.day() if BaseHub.campaign_running else -1,  # zone memory (LZ-2): it fades from here
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
-	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies, %d vehicles, %d caches)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size(), vehicles.size(), caches.size()])
+	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies, %d vehicles, %d caches, %d profiles)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size(), vehicles.size(), caches.size(), profiles.size()])
 	return true
 
 
@@ -130,6 +137,7 @@ func load_zone() -> void:
 	ground = {}
 	sky = {}
 	caches = {}
+	profiles = []
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -151,9 +159,11 @@ func load_zone() -> void:
 	ground = zone.get("ground", {})
 	sky = zone.get("sky", {})
 	caches = zone.get("caches", {})  # boxes stay as they were left even when the loose gear fades
+	profiles = zone.get("profiles", [])
 	if fade_loose:
 		bodies.clear()  # gone in the days since (zone memory, LZ-2)
 		dropped.clear()
+		profiles.clear()  # moved on in the days since: the zone's enemy is fresh
 	fade_loose = false
 
 
@@ -325,6 +335,14 @@ static func read_save(path: String) -> Dictionary:
 				push_warning("GameState: %s: skipping a bad cache record (%s)" % [path, uid])
 	else:
 		push_warning("GameState: %s: the caches section has the wrong type; boxes roll afresh" % path)
+	var profiles_in: Variant = data.get("profiles", [])  # nor profiles before virtualization
+	out["profiles"] = []
+	if typeof(profiles_in) == TYPE_ARRAY:
+		for p: Variant in profiles_in:
+			if Virtualizer.save_ok(p):
+				out.profiles.append(p)
+			else:
+				push_warning("GameState: %s: skipping a bad profile" % path)
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)
