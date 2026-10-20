@@ -13,19 +13,23 @@ extends RefCounted
 ## automatically); a cache is spawned through the zone's CacheSpawner (ZoneLevel.cache_spawner,
 ## _make_cache) like a vehicle would be, so every peer and a late joiner get it the same way.
 ## Host only, spawned once a zone hosts (ZoneLevel._on_hosted). A dead drop gets a stable uid so
-## GameState.is_looted keeps a taken one from coming back; a cache's contents are rolled fresh
-## each time the zone hosts instead (WorldCache's own doc comment) - simpler than tracking what
-## was taken from inside it across a reload.
+## GameState.is_looted keeps a taken one from coming back; a cache's contents are rolled the
+## first time the zone hosts and kept by the zone save from then on (WorldCache.server_fill,
+## GameState.caches): what was taken from inside it stays taken across a reload.
 ##
-## Site boxes (Captain, 2026-10-16, three asks that are really one mechanic): 1-4 WorldCaches at
-## every hand-built module (compound, outpost, village, checkpoint, hq, qrf_base, comms), not out
-## in the open terrain - "common sense" places a player would actually search (offices, safes,
-## command posts, desks), reusing that module's own proven-safe loot spots (ZoneModules.LOOT, a
-## small offset off each one so a box doesn't sit on top of the WorldItem already there). How
-## many: weighted toward 1-2, more at a site worth more trouble (IMPORTANT_TYPES). Most boxes
-## roll a common find (one piece of cash or intel); RARE_SHARE of them roll something better
-## instead - half the time a rarer weapon and its mags, half the time more intel and an optic
-## ("a couple maps plus a scope").
+## Site boxes (Captain, 2026-10-16, three asks that are really one mechanic; compound loot,
+## Captain's tasking 2026-10-19 task 6): WorldCaches at every hand-built module (compound, outpost,
+## village, checkpoint, hq, qrf_base, comms), in the rooms where that kind of thing would really be:
+## valuables and intel in an HQ's office and radio room, a compound's command building; weapons in
+## its armory tent; ammo by the crate stacks; medical chests, footlockers, parts bins. Data-driven
+## (data/loot_tables.json, loot_data): each site type lists its box spots (room, position, loot
+## table, label; the fitting rooms always, a few of the rest picked per site), each box rolls a
+## rarity tier by the site's stated weights (common, uncommon, rare, very rare; very rare only in a
+## hot zone) and then one bundle of that tier from its table. Rolled from the zone's id and the
+## module's id (site_plan: the same every visit), once: the zone save keeps what's in every box
+## (WorldCache.server_fill, GameState.caches), so a looted box stays looted after a reload. A type
+## with no entry (a generated town) gets a few boxes by its own proven-safe ZoneModules.LOOT spots
+## (a small offset off each one so a box doesn't sit on the WorldItem already there).
 
 const DEAD_DROP_SHARE := 0.55
 const CACHE_GUNS: Array[String] = ["akm", "ak74", "rpk"]
@@ -34,14 +38,9 @@ const VALUABLE_ITEMS: Array[String] = ["cash_bundle", "gold_bars", "jewelry_case
 const INTEL_ITEMS: Array[String] = ["intel_documents", "intel_phone", "intel_usb_drive", "intel_ledger"]
 const SALVAGE_ITEMS: Array[String] = ["scrap_copper", "machine_parts", "electronics_salvage"]
 const LIFT_M := 0.35
-## A site box's chance of a rare roll (a better weapon, or more intel and an optic) instead of
-## the common one, and the even split between those two rare outcomes.
-const RARE_SHARE := 0.18
-const RARE_OPTICS: Array[String] = ["optic_lpvo", "optic_prism_4x", "optic_dmr_3_5_10"]
-const RARE_GUNS: Array[String] = ["svd", "pkm", "rpk"]
-const RARE_INTEL_COUNT := 2
-## Off each used ZoneModules.LOOT spot (module space, m), clear of the WorldItem already there
-## and of each other; at most this many boxes a site.
+## A site with no loot_tables.json entry (a generated town): off each used ZoneModules.LOOT spot
+## (module space, m), clear of the WorldItem already there and of each other; at most this many
+## boxes a site.
 const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 0.0, 0.5), Vector3(0.8, 0.0, -0.5), Vector3(-0.8, 0.0, -0.5)]
 ## Every ZoneModules.LOOT (and BuildingGen.town loot) anchor sits this high above the floor it's
 ## on: clearance for the WorldItem already there, a RigidBody3D that drops and settles onto that
@@ -49,20 +48,20 @@ const SITE_BOX_OFFSETS: Array[Vector3] = [Vector3(0.8, 0.0, 0.5), Vector3(-0.8, 
 ## one of these anchors has to come back down by the same amount or it floats at the WorldItem's
 ## drop height instead of resting on the floor (Captain, 2026-10-16: "lootboxes float").
 const LOOT_ANCHOR_LIFT_M := 0.5
-## Wave 6 (item catalogue: contraband at "smuggler compounds, checkpoints, caches"): at these
-## sites a common box find is contraband instead, CONTRABAND_PCT of the time (by the box's id, no
-## RNG drawn: every other roll stays as it was).
+## Contraband (wave 6, the item catalogue): the strongbox holds one (the loot tables have the rest).
 const CONTRABAND_ITEMS: Array[String] = ["smuggled_cigarettes", "captagon", "counterfeit_dollars", "unregistered_weapons"]
-const CONTRABAND_TYPES: Array[String] = ["checkpoint", "compound", "hq"]
-const CONTRABAND_PCT := 40
 ## Wave 6 (keys): every HQ has a locked strongbox, opened by the key its officer carries
 ## (ZoneLevel's garrison: the HQ's first post); valuables, contraband and intel inside, and half
 ## the time a Vantage ledger (story intel, it opens a lead).
 const STRONGBOX_KEY := &"hq_strongbox_key"
 const STRONGBOX_LABEL := "Strongbox"
 const STRONGBOX_OFFSET := Vector3(0.0, 0.0, 1.0)
-## Sites worth more trouble: weighted toward more boxes.
-const IMPORTANT_TYPES: Array[String] = ["hq", "qrf_base", "compound"]
+## The compound loot tables (the file's _note says how they read).
+const TABLES_PATH := "res://data/loot_tables.json"
+## The rarity tiers, commonest first.
+const TIERS: Array[String] = ["common", "uncommon", "rare", "very_rare"]
+
+static var _data: Dictionary = {}
 
 
 ## Host: every VALUABLE site the zone's scatter marked.
@@ -96,38 +95,131 @@ static func _spawn_site(level: ZoneLevel, site: Dictionary, uid: String, index: 
 	items.append({"id": SALVAGE_ITEMS[rng.randi() % SALVAGE_ITEMS.size()] if rng.randf() < 0.4 else CACHE_MEDICAL[rng.randi() % CACHE_MEDICAL.size()], "count": 1})
 	var cache := level.cache_spawner.spawn({"uid": uid, "pos": ground, "yaw": float(site.yaw), "label": "Cache"}) as WorldCache
 	if cache:
-		cache.server_seed(items)
+		cache.server_fill(items)
 
 
-## Host: 1-4 valuables/intel boxes at every real module (not a generated town, which has its own
-## loot through BuildingGen), near spots already proven safe (ZoneModules.LOOT places a
-## WorldItem there today).
+## Host: the site boxes at every real module (site_plan), and an HQ's strongbox. Each box is a
+## WorldCache through the zone's CacheSpawner (every peer and a late joiner get it), filled with
+## what the zone save kept in it, else its roll (WorldCache.server_fill).
 static func server_spawn_site_boxes(level: ZoneLevel) -> void:
 	if not level.multiplayer.is_server() or level.cache_spawner == null:
 		return
+	var zone_id := String(level.def.get("id", GameState.zone_id))
+	var hot := String(level.def.get("kind", "")) == "hot"
 	for module: ZoneModule in level.modules():
-		var spots: Array = ZoneModules.LOOT.get(module.type, [])
-		if spots.is_empty():
-			continue
-		var rng := RandomNumberGenerator.new()
-		rng.seed = hash("%s|valbox" % module.module_id)
-		var count := mini(_site_box_count(rng, module.type), mini(spots.size(), SITE_BOX_OFFSETS.size()))
-		for k in count:
-			var anchor: Vector3 = (spots[spots.size() - 1 - k] as Dictionary).pos
-			var floor_spot := anchor - Vector3(0, LOOT_ANCHOR_LIFT_M, 0)
-			var cache := level.cache_spawner.spawn({"uid": "%s_valbox%d" % [module.module_id, k],
-				"pos": module.to_global(floor_spot + SITE_BOX_OFFSETS[k]), "yaw": 0.0, "label": "Cache"}) as WorldCache
+		for box: Dictionary in site_plan(module.type, "%s|%s" % [zone_id, module.module_id], hot):
+			var uid := "%s_box_%s" % [module.module_id, box.key]
+			var cache := level.cache_spawner.spawn({"uid": uid, "pos": module.to_global(box.pos), "yaw": 0.0, "label": String(box.label)}) as WorldCache
 			if cache:
-				var contents := _roll_site_box(rng)
-				var box_id := "%s_valbox%d" % [module.module_id, k]
-				if (module.type in CONTRABAND_TYPES or ZoneModules.base(module.type) in CONTRABAND_TYPES) and contents.size() == 1 						and String(contents[0].id) not in RARE_GUNS and posmod(hash("contraband:" + box_id), 100) < CONTRABAND_PCT:
-					contents = [{"id": CONTRABAND_ITEMS[posmod(hash("contraband_kind:" + box_id), CONTRABAND_ITEMS.size())], "count": 1}]
-				cache.server_seed(contents)
-		if module.type == "hq":
-			var box := level.cache_spawner.spawn({"uid": "%s_strongbox" % module.module_id, "key": String(STRONGBOX_KEY), "label": STRONGBOX_LABEL,
+				cache.server_fill(box.items)
+		var spots: Array = ZoneModules.LOOT.get(module.type, [])
+		if module.type == "hq" and not spots.is_empty():
+			var strongbox := level.cache_spawner.spawn({"uid": "%s_strongbox" % module.module_id, "key": String(STRONGBOX_KEY), "label": STRONGBOX_LABEL,
 				"pos": module.to_global((spots[0] as Dictionary).pos - Vector3(0, LOOT_ANCHOR_LIFT_M, 0) + STRONGBOX_OFFSET), "yaw": 0.0}) as WorldCache
-			if box:
-				box.server_seed(strongbox_contents(module.module_id))
+			if strongbox:
+				strongbox.server_fill(strongbox_contents(module.module_id))
+
+
+## The loot tables (data/loot_tables.json), read once.
+static func loot_data() -> Dictionary:
+	if _data.is_empty():
+		var file := FileAccess.open(TABLES_PATH, FileAccess.READ)
+		var parsed: Variant = JSON.parse_string(file.get_as_text()) if file else null
+		if typeof(parsed) != TYPE_DICTIONARY:
+			push_error("WorldValuables: cannot read %s" % TABLES_PATH)
+			return {"sites": {}, "tables": {}, "default_weights": {"common": 1}, "fallback": {}}
+		_data = parsed
+	return _data
+
+
+## A module type's site entry in the tables (by its base type: a grown outpost is an outpost), {}
+## for a type with none.
+static func site_spec(module_type: String) -> Dictionary:
+	return (loot_data().sites as Dictionary).get(ZoneModules.base(module_type), {})
+
+
+## The tier weights a site type's boxes roll by (its own, else the default), in percent.
+static func tier_weights(module_type: String) -> Dictionary:
+	return site_spec(module_type).get("tier_weights", loot_data().default_weights)
+
+
+## Where a module of `module_type` gets its boxes and what is in each: [{"key" (the spot's id),
+## "pos" (module space, on its floor), "label", "table", "tier", "items" ([{"id", "count"}])}].
+## `seed_key` names the site (the zone's id and the module's id): the same key always gives the
+## same boxes and the same loot. `hot`: a hot zone (very rare finds; elsewhere capped to rare).
+static func site_plan(module_type: String, seed_key: String, hot: bool) -> Array:
+	var out: Array = []
+	var spec := site_spec(module_type)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(seed_key + "|boxes")
+	var weights := tier_weights(module_type)
+	if spec.is_empty():
+		var loot: Array = ZoneModules.LOOT.get(module_type, []) if ZoneModules.has_type(module_type) else []
+		var fallback: Dictionary = loot_data().get("fallback", {})
+		if loot.is_empty() or fallback.is_empty():
+			return out
+		var count := mini(rng.randi_range(int(fallback.extra[0]), int(fallback.extra[1])), mini(loot.size(), SITE_BOX_OFFSETS.size()))
+		for k in count:
+			var anchor: Vector3 = (loot[loot.size() - 1 - k] as Dictionary).pos
+			var key := "loot%d" % k
+			var roll := roll_box(String(fallback.table), weights, "%s|%s" % [seed_key, key], hot)
+			out.append({"key": key, "pos": anchor - Vector3(0, LOOT_ANCHOR_LIFT_M, 0) + SITE_BOX_OFFSETS[k], "label": String(fallback.get("label", "Cache")),
+				"table": String(fallback.table), "tier": roll.tier, "items": roll.items})
+		return out
+	var spots: Array = spec.spots
+	var others: Array = []
+	for i in spots.size():
+		if not bool((spots[i] as Dictionary).get("always", false)):
+			others.append(i)
+	for i in range(others.size() - 1, 0, -1):  # a shuffle of the others, by the site
+		var j := rng.randi_range(0, i)
+		var t: int = others[i]
+		others[i] = others[j]
+		others[j] = t
+	var extra: Array = spec.get("extra", [0, 0])
+	var chosen := others.slice(0, mini(rng.randi_range(int(extra[0]), int(extra[1])), others.size()))
+	for i in spots.size():
+		var spot: Dictionary = spots[i]
+		if not bool(spot.get("always", false)) and i not in chosen:
+			continue
+		var roll := roll_box(String(spot.table), weights, "%s|%s" % [seed_key, spot.id], hot)
+		out.append({"key": String(spot.id), "pos": Vector3(float(spot.pos[0]), 0.0, float(spot.pos[1])), "label": String(spot.get("label", "Cache")),
+			"table": String(spot.table), "tier": roll.tier, "items": roll.items})
+	return out
+
+
+## One box's roll: a tier by `weights` (capped outside a hot zone, cap_outside_hot), then one
+## bundle of that tier from `table`, its counts rolled. Seeded by `seed_key` alone (the site and
+## the spot), so one box's roll never shifts another's. {"tier", "items": [{"id", "count"}]}.
+static func roll_box(table: String, weights: Dictionary, seed_key: String, hot: bool) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(seed_key + "|loot")
+	var tier := roll_tier(rng, weights)
+	if not hot:
+		tier = String((loot_data().get("cap_outside_hot", {}) as Dictionary).get(tier, tier))
+	var bundles: Array = ((loot_data().tables as Dictionary).get(table, {}) as Dictionary).get(tier, [])
+	var items: Array = []
+	if bundles.is_empty():
+		push_error("WorldValuables: loot table %s has no %s tier" % [table, tier])
+		return {"tier": tier, "items": items}
+	for row: Array in bundles[rng.randi_range(0, bundles.size() - 1)]:
+		var count := int(row[1]) if row.size() < 3 else rng.randi_range(int(row[1]), int(row[2]))
+		items.append({"id": String(row[0]), "count": count})
+	return {"tier": tier, "items": items}
+
+
+## A tier by `weights` (tier -> weight; any scale), in TIERS order.
+static func roll_tier(rng: RandomNumberGenerator, weights: Dictionary) -> String:
+	var total := 0.0
+	for tier: String in TIERS:
+		total += float(weights.get(tier, 0.0))
+	var roll := rng.randf() * total
+	for tier: String in TIERS:
+		var w := float(weights.get(tier, 0.0))
+		if w > 0.0 and roll < w:
+			return tier
+		roll -= w
+	return TIERS[0]
 
 
 ## An HQ strongbox's contents (by the module id: the same HQ always holds the same).
@@ -138,40 +230,3 @@ static func strongbox_contents(module_id: String) -> Array:
 	if posmod(h >> 8, 2) == 0:
 		items.append({"id": "vantage_ledger", "count": 1})
 	return items
-
-
-## How many boxes a site gets: weighted toward 1-2, a point more (capped at 4) for an
-## IMPORTANT_TYPES site.
-static func _site_box_count(rng: RandomNumberGenerator, module_type: String) -> int:
-	var roll := rng.randf()
-	var count := 1
-	if roll < 0.15:
-		count = 4
-	elif roll < 0.35:
-		count = 3
-	elif roll < 0.65:
-		count = 2
-	if module_type in IMPORTANT_TYPES or ZoneModules.base(module_type) in IMPORTANT_TYPES:
-		count = mini(count + 1, 4)
-	return count
-
-
-## One box's contents: usually one piece of cash or intel; RARE_SHARE of the time something
-## better instead, half a rarer weapon and its mags, half more intel and an optic.
-static func _roll_site_box(rng: RandomNumberGenerator) -> Array:
-	var roll := rng.randf()
-	if roll < RARE_SHARE * 0.5:
-		var gun := RARE_GUNS[rng.randi() % RARE_GUNS.size()]
-		var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
-		var items: Array = [{"id": gun, "count": 1}]
-		if kit.size() > 1:
-			items.append({"id": String(kit[1]), "count": kit.size() - 1})
-		return items
-	if roll < RARE_SHARE:
-		var items: Array = []
-		for i in RARE_INTEL_COUNT:
-			items.append({"id": INTEL_ITEMS[rng.randi() % INTEL_ITEMS.size()], "count": 1})
-		items.append({"id": RARE_OPTICS[rng.randi() % RARE_OPTICS.size()], "count": 1})
-		return items
-	var pool := INTEL_ITEMS if rng.randf() < 0.5 else VALUABLE_ITEMS
-	return [{"id": pool[rng.randi() % pool.size()], "count": 1}]

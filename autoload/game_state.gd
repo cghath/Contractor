@@ -24,6 +24,11 @@ var vehicles: Array = []
 ## The ground as dug and blasted (Digging.to_save: {"cuts", "berms"}), put back by Digging on
 ## load ({} for a zone never saved). Rebuilt from the level's Digging on every save.
 var ground: Dictionary = {}
+## Lootable caches and site boxes (WorldCache.to_save, by uid: {"items": [{"id", "count",
+## "state"?}], "unlocked"}): what's in each as it was left, put back instead of a fresh roll
+## (WorldCache.server_fill), so a looted box stays looted. Updated from the live caches on every
+## save; a cache not in the zone just then keeps its record.
+var caches: Dictionary = {}
 
 
 func post_fell(spawn_id: String) -> void:
@@ -86,6 +91,10 @@ func save_zone() -> bool:
 			vehicles.append(node.to_save())
 	var digging := get_tree().get_first_node_in_group(&"digging")
 	ground = digging.to_save() if digging and digging.has_method(&"to_save") else {}
+	# Caches and site boxes as they are now: looted, or used as a stash (compound loot).
+	for node in get_tree().get_nodes_in_group(&"world_caches"):
+		if node.has_method(&"to_save") and not node.is_queued_for_deletion() and String(node.get(&"uid")) != "":
+			caches[String(node.get(&"uid"))] = node.to_save()
 	var text := JSON.stringify({
 		"version": SAVE_VERSION,
 		"looted": looted.keys(),
@@ -95,12 +104,13 @@ func save_zone() -> bool:
 		"fallen_posts": fallen_posts.keys(),
 		"vehicles": vehicles,
 		"ground": ground,
+		"caches": caches,
 		"sky": sky,
 		"left_day": BaseHub.day() if BaseHub.campaign_running else -1,  # zone memory (LZ-2): it fades from here
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
 	if not write_safely(save_path(), text):
 		return false
-	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies, %d vehicles)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size(), vehicles.size()])
+	print("Saved zone '%s' (%d looted, %d dropped, %d voxel edits, %d bodies, %d vehicles, %d caches)" % [zone_id, looted.size(), dropped.size(), voxel_edits.size(), bodies.size(), vehicles.size(), caches.size()])
 	return true
 
 
@@ -116,6 +126,7 @@ func load_zone() -> void:
 	vehicles.clear()
 	ground = {}
 	sky = {}
+	caches = {}
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -136,6 +147,7 @@ func load_zone() -> void:
 	vehicles = zone.get("vehicles", [])
 	ground = zone.get("ground", {})
 	sky = zone.get("sky", {})
+	caches = zone.get("caches", {})  # boxes stay as they were left even when the loose gear fades
 	if fade_loose:
 		bodies.clear()  # gone in the days since (zone memory, LZ-2)
 		dropped.clear()
@@ -299,11 +311,32 @@ static func read_save(path: String) -> Dictionary:
 			out.vehicles.append(v)
 		else:
 			push_warning("GameState: %s: skipping a bad vehicle record" % path)
+	var caches_in: Variant = data.get("caches", {})  # nor caches before compound loot
+	out["caches"] = {}
+	if typeof(caches_in) == TYPE_DICTIONARY:
+		for uid: Variant in caches_in:
+			var c: Variant = caches_in[uid]
+			if typeof(uid) == TYPE_STRING and _cache_ok(c):
+				out.caches[uid] = {"items": c.get("items", []), "unlocked": bool(c.get("unlocked", false))}
+			else:
+				push_warning("GameState: %s: skipping a bad cache record (%s)" % [path, uid])
+	else:
+		push_warning("GameState: %s: the caches section has the wrong type; boxes roll afresh" % path)
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)
 		out["sky"] = {"hour": float(sky_in.hour), "weather": String(sky_in.weather)}
 	return out
+
+
+## Whether `c` is a saved cache (WorldCache.to_save): its items known ones, each a count of 1 or
+## more, shaped like a dropped item's (DROPPED_FIELDS), and "unlocked" a bool.
+static func _cache_ok(c: Variant) -> bool:
+	if typeof(c) != TYPE_DICTIONARY or typeof(c.get("items", [])) != TYPE_ARRAY or typeof(c.get("unlocked", false)) != TYPE_BOOL:
+		return false
+	return (c.get("items", []) as Array).all(func(e: Variant) -> bool:
+		return typeof(e) == TYPE_DICTIONARY and fields_ok(e, DROPPED_FIELDS) and ItemDB.has_item(StringName(String(e.get("id", "")))) \
+			and float(e.get("count", 0)) >= 1.0)
 
 
 ## Whether `e` is a voxel edit replay can apply (EDIT_NEEDS, EDIT_FIELDS).

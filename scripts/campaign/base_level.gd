@@ -58,6 +58,7 @@ func _on_hosted() -> void:
 	GameState.dropped.clear()
 	GameState.voxel_edits.clear()
 	GameState.bodies.clear()
+	GameState.caches.clear()
 	server_spawn_stash(BaseHub.stash())
 	player_roles[1] = Roles.local_choice
 	_add_player(1)

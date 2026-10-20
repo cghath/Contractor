@@ -1,0 +1,149 @@
+{
+	"_note": "Compound loot (WorldValuables.server_spawn_site_boxes; docs/loot_window.md). Each site type (a module's base type: ZoneModules.base) lists its box spots: room = the room it stands in, pos = [x, z] metres from the module's origin on its floor, table = the loot table it rolls, label = what the box is called in the loot window. Spots with always = true are placed at every such site (the fitting rooms: an HQ's office and radio room, a compound's command building and armory); extra = [min, max] of the other spots are placed too, picked by the zone's id and the module's id (the same every visit). A box rolls a tier by the site's tier_weights (stated in percent: they add up to 100), then one bundle of that tier from its table, uniformly; a bundle is [item id, count] or [item id, min, max] rows. Outside a hot zone a very_rare roll is capped to rare (cap_outside_hot: contract zones roll up to medium, docs/ChrisPlan_handoff.md 'Item catalogue plan'). A type with no entry here (a generated town) puts fallback.extra boxes by its own ZoneModules.LOOT spots, rolling fallback.table at the default weights. Every table has all four tiers. Contents are rolled once: the zone save keeps what is in each box (GameState.caches), so a looted box stays looted.",
+	"tiers": ["common", "uncommon", "rare", "very_rare"],
+	"cap_outside_hot": {"very_rare": "rare"},
+	"default_weights": {"common": 70, "uncommon": 23, "rare": 6, "very_rare": 1},
+	"fallback": {"table": "home", "label": "Cache", "extra": [1, 3]},
+	"sites": {
+		"compound": {
+			"tier_weights": {"common": 60, "uncommon": 28, "rare": 9.5, "very_rare": 2.5},
+			"extra": [0, 2],
+			"spots": [
+				{"id": "office", "room": "command building", "pos": [4.0, -11.0], "table": "office", "label": "Desk", "always": true},
+				{"id": "armory", "room": "armory tent", "pos": [11.0, -22.8], "table": "armory", "label": "Weapons crate", "always": true},
+				{"id": "barracks", "room": "barracks tent", "pos": [-22.8, -20.6], "table": "barracks", "label": "Footlocker"},
+				{"id": "shed", "room": "store shed", "pos": [19.1, -10.3], "table": "stores", "label": "Supply box"},
+				{"id": "generators", "room": "generator yard", "pos": [13.0, 8.0], "table": "stores", "label": "Parts bin"},
+				{"id": "container", "room": "shipping container", "pos": [-17.6, 13.2], "table": "stash", "label": "Stash"}
+			]
+		},
+		"hq": {
+			"tier_weights": {"common": 52, "uncommon": 31, "rare": 13, "very_rare": 4},
+			"extra": [1, 3],
+			"spots": [
+				{"id": "office", "room": "commander's office", "pos": [-9.4, -15.0], "table": "office", "label": "Desk", "always": true},
+				{"id": "radio", "room": "radio room", "pos": [-2.9, -15.0], "table": "radio_room", "label": "Radio desk", "always": true},
+				{"id": "radio_cabinet", "room": "radio room", "pos": [-7.8, -15.0], "table": "radio_room", "label": "Cabinet"},
+				{"id": "barracks", "room": "barracks", "pos": [5.0, -15.0], "table": "barracks", "label": "Footlocker"},
+				{"id": "aid", "room": "barracks", "pos": [5.0, -12.0], "table": "medical", "label": "Medical chest"},
+				{"id": "weapons", "room": "weapons cache", "pos": [7.2, 9.0], "table": "armory", "label": "Weapons crate"}
+			]
+		},
+		"qrf_base": {
+			"tier_weights": {"common": 58, "uncommon": 29, "rare": 10, "very_rare": 3},
+			"extra": [1, 2],
+			"spots": [
+				{"id": "office", "room": "barracks command desk", "pos": [-12.2, -8.2], "table": "office", "label": "Desk", "always": true},
+				{"id": "locker", "room": "barracks", "pos": [-3.8, -8.2], "table": "barracks", "label": "Footlocker"},
+				{"id": "motor_pool", "room": "vehicle shed", "pos": [12.3, -8.4], "table": "stores", "label": "Parts bin"},
+				{"id": "ammo", "room": "ammunition crates", "pos": [10.8, 5.0], "table": "ammo", "label": "Ammo crate"}
+			]
+		},
+		"comms": {
+			"tier_weights": {"common": 58, "uncommon": 29, "rare": 10, "very_rare": 3},
+			"extra": [0, 1],
+			"spots": [
+				{"id": "radio", "room": "radio shed", "pos": [-5.1, -3.3], "table": "radio_room", "label": "Radio desk", "always": true},
+				{"id": "mast", "room": "mast", "pos": [3.6, -1.8], "table": "radio_room", "label": "Equipment case"}
+			]
+		},
+		"outpost": {
+			"tier_weights": {"common": 64, "uncommon": 26, "rare": 8, "very_rare": 2},
+			"extra": [0, 2],
+			"spots": [
+				{"id": "bunker", "room": "bunker", "pos": [-7.2, -7.2], "table": "command_post", "label": "Map case", "always": true},
+				{"id": "ammo", "room": "crate stack", "pos": [4.2, -1.7], "table": "ammo", "label": "Ammo crate"},
+				{"id": "aa_ammo", "room": "AA emplacement", "pos": [-3.2, 4.2], "table": "ammo", "label": "Ammo crate"},
+				{"id": "aid", "room": "under the watchtower", "pos": [6.0, -6.2], "table": "medical", "label": "Medical chest"}
+			]
+		},
+		"checkpoint": {
+			"tier_weights": {"common": 66, "uncommon": 25, "rare": 7.5, "very_rare": 1.5},
+			"extra": [0, 1],
+			"spots": [
+				{"id": "seized", "room": "by the crates", "pos": [5.6, 6.6], "table": "seized", "label": "Seized goods", "always": true},
+				{"id": "nest", "room": "sandbag nest", "pos": [-11.0, 7.6], "table": "ammo", "label": "Ammo crate"},
+				{"id": "booth", "room": "behind the booth", "pos": [10.9, 5.1], "table": "barracks", "label": "Guard's locker"}
+			]
+		},
+		"village": {
+			"tier_weights": {"common": 72, "uncommon": 22, "rare": 5, "very_rare": 1},
+			"extra": [0, 2],
+			"spots": [
+				{"id": "house", "room": "cinder-block house", "pos": [3.3, -11.3], "table": "home", "label": "Cupboard", "always": true},
+				{"id": "mud_house", "room": "mud-brick house", "pos": [-17.0, -11.0], "table": "home", "label": "Cupboard"},
+				{"id": "brick_back", "room": "brick house, back room", "pos": [16.3, -12.3], "table": "home", "label": "Chest"},
+				{"id": "brick_front", "room": "brick house, front room", "pos": [9.8, -12.3], "table": "home", "label": "Cupboard"},
+				{"id": "shack", "room": "plank shack", "pos": [-15.3, 7.7], "table": "stash", "label": "Stash"}
+			]
+		}
+	},
+	"tables": {
+		"office": {
+			"common": [[["cash_bundle", 1]], [["intel_documents", 1]], [["intel_usb_drive", 1]], [["smuggled_cigarettes", 1]], [["zip_cuffs", 2], ["intel_documents", 1]]],
+			"uncommon": [[["cash_bundle", 2, 3]], [["intel_phone", 1]], [["intel_ledger", 1]], [["jewelry_case", 1]], [["counterfeit_dollars", 1]], [["binoculars", 1], ["intel_documents", 1]]],
+			"rare": [[["gold_bars", 1], ["cash_bundle", 2]], [["intel_laptop", 1]], [["intel_ledger", 1], ["intel_usb_drive", 1], ["intel_documents", 1]], [["captagon", 1], ["cash_bundle", 1]]],
+			"very_rare": [[["gold_bars", 2, 3]], [["smuggled_relic", 1]], [["intel_laptop", 1], ["intel_phone", 1], ["gold_bars", 1]]]
+		},
+		"radio_room": {
+			"common": [[["intel_documents", 1]], [["intel_usb_drive", 1]], [["electronics_salvage", 1, 2]], [["scrap_copper", 2]]],
+			"uncommon": [[["enemy_radio", 1]], [["intel_phone", 1]], [["electronics_salvage", 3]], [["intel_usb_drive", 2], ["intel_documents", 1]]],
+			"rare": [[["intel_laptop", 1]], [["enemy_radio", 1], ["intel_ledger", 1]], [["radio", 1]], [["binoculars", 1], ["intel_phone", 1]]],
+			"very_rare": [[["intel_laptop", 1], ["intel_phone", 1], ["intel_usb_drive", 1]], [["jammer", 1]], [["nvg_gen1", 1]]]
+		},
+		"command_post": {
+			"common": [[["intel_documents", 1]], [["mag_762x39", 3]], [["pressure_bandage", 2], ["tourniquet", 1]], [["cash_bundle", 1]], [["frag_grenade", 1]]],
+			"uncommon": [[["intel_phone", 1]], [["enemy_radio", 1]], [["ifak", 1]], [["binoculars", 1]], [["cash_bundle", 2]]],
+			"rare": [[["intel_ledger", 1], ["intel_documents", 1]], [["trauma_kit", 1]], [["svd", 1], ["mag_svd", 3]], [["optic_pu_scope", 1], ["intel_usb_drive", 1]]],
+			"very_rare": [[["intel_laptop", 1]], [["nvg_gen1", 1]], [["gold_bars", 1], ["intel_phone", 1]]]
+		},
+		"armory": {
+			"common": [[["mag_762x39", 2, 4]], [["mag_545", 2, 4]], [["rounds_762x39", 30, 60]], [["frag_grenade", 1, 2]], [["smoke_grenade", 2]]],
+			"uncommon": [[["akm", 1], ["mag_762x39", 3]], [["ak74", 1], ["mag_545", 3]], [["belt_762x54r", 2]], [["og7v_round", 1]], [["frag_grenade", 2], ["flashbang", 1]], [["helmet_bump", 1]]],
+			"rare": [[["rpk", 1], ["mag_rpk40", 3]], [["rpg7", 1], ["pg7v_round", 2]], [["svd", 1], ["mag_svd", 3]], [["helmet", 1], ["plate_steel_l3", 1]]],
+			"very_rare": [[["pkm", 1], ["belt_762x54r", 2]], [["rpg7", 1], ["pg7v_round", 2], ["og7v_round", 2]], [["optic_lpvo", 1], ["suppressor_rifle", 1]], [["nvg_gen1", 1]]]
+		},
+		"ammo": {
+			"common": [[["mag_762x39", 2, 3]], [["rounds_762x39", 30, 60]], [["rounds_545", 30, 60]], [["rounds_556", 30, 60]], [["smoke_grenade", 1, 2]]],
+			"uncommon": [[["belt_762x54r", 1, 2]], [["mag_svd", 2]], [["frag_grenade", 2, 3]], [["og7v_round", 1]], [["mag_545", 3]]],
+			"rare": [[["pg7v_round", 2]], [["belt_762x54r", 3], ["frag_grenade", 2]], [["rpg7", 1], ["og7v_round", 1]]],
+			"very_rare": [[["pkm", 1], ["belt_762x54r", 2]], [["rpg7", 1], ["pg7v_round", 3]]]
+		},
+		"barracks": {
+			"common": [[["mag_762x39", 2]], [["tourniquet", 1]], [["pressure_bandage", 2]], [["smuggled_cigarettes", 1]], [["zip_cuffs", 2]], [["rounds_762x39", 30]]],
+			"uncommon": [[["ifak", 1]], [["morphine", 2]], [["frag_grenade", 1]], [["cash_bundle", 1]], [["enemy_radio", 1]], [["helmet_bump", 1]]],
+			"rare": [[["trauma_kit", 1]], [["plate_steel_l3", 1]], [["jewelry_case", 1]], [["akm", 1], ["mag_762x39", 2]]],
+			"very_rare": [[["nvg_gen1", 1]], [["gold_bars", 1]], [["helmet", 1], ["plate_steel_l3", 1]]]
+		},
+		"medical": {
+			"common": [[["pressure_bandage", 2, 3]], [["tourniquet", 1, 2]], [["hemostatic_gauze", 1, 2]], [["ifak", 1]]],
+			"uncommon": [[["saline_500", 1], ["iv_18", 1]], [["morphine", 2]], [["chest_seal", 2], ["decompression_needle", 1]], [["splint", 1], ["pressure_bandage", 2]]],
+			"rare": [[["trauma_kit", 1]], [["blood_500", 1], ["iv_14", 1]], [["saline_1000", 1], ["io_kit", 1]]],
+			"very_rare": [[["blood_1000", 1], ["pressure_bag", 1]], [["surgery_kit_2", 1]], [["trauma_kit", 1], ["blood_500", 1]]]
+		},
+		"stores": {
+			"common": [[["scrap_copper", 1, 3]], [["jerrycan", 1]], [["machine_parts", 1]], [["electronics_salvage", 1]]],
+			"uncommon": [[["vehicle_battery", 1]], [["machine_parts", 2]], [["spare_wheel", 1]], [["electronics_salvage", 2], ["scrap_copper", 2]]],
+			"rare": [[["engine_parts", 1]], [["repair_kit", 1]], [["electronics_salvage", 4]]],
+			"very_rare": [[["engine_parts", 1], ["repair_kit", 1]], [["unregistered_weapons", 1]]]
+		},
+		"home": {
+			"common": [[["pressure_bandage", 1]], [["scrap_copper", 1]], [["rounds_762x39", 20]], [["tourniquet", 1]], [["smoke_grenade", 1]]],
+			"uncommon": [[["ifak", 1]], [["cash_bundle", 1]], [["mag_762x39", 2]], [["intel_documents", 1]], [["machine_parts", 1]]],
+			"rare": [[["jewelry_case", 1]], [["akm", 1], ["mag_762x39", 2]], [["intel_phone", 1]], [["cash_bundle", 2]]],
+			"very_rare": [[["gold_bars", 1]], [["smuggled_relic", 1]]]
+		},
+		"stash": {
+			"common": [[["smuggled_cigarettes", 1, 2]], [["rounds_762x39", 30, 60]], [["mag_762x39", 2]], [["scrap_copper", 2]]],
+			"uncommon": [[["captagon", 1]], [["counterfeit_dollars", 1]], [["akm", 1], ["mag_762x39", 2]], [["cash_bundle", 1, 2]]],
+			"rare": [[["unregistered_weapons", 1]], [["rpg7", 1], ["pg7v_round", 1]], [["captagon", 2]], [["jewelry_case", 1], ["cash_bundle", 1]]],
+			"very_rare": [[["smuggled_relic", 1]], [["gold_bars", 2]], [["pkm", 1], ["belt_762x54r", 2]]]
+		},
+		"seized": {
+			"common": [[["smuggled_cigarettes", 1, 2]], [["zip_cuffs", 2]], [["scrap_copper", 1]], [["intel_documents", 1]]],
+			"uncommon": [[["cash_bundle", 1]], [["counterfeit_dollars", 1]], [["captagon", 1]], [["intel_phone", 1]]],
+			"rare": [[["unregistered_weapons", 1]], [["jewelry_case", 1]], [["captagon", 2], ["cash_bundle", 1]]],
+			"very_rare": [[["smuggled_relic", 1]], [["gold_bars", 1], ["counterfeit_dollars", 1]]]
+		}
+	}
+}

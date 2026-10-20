@@ -43,7 +43,7 @@ suite_timeout() {
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports heliflight bay aav sound loop ui loadout weapons forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor session_log supports heliflight bay aav sound loop ui loadout weapons forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot)
 status=0
 finished=""
 keep_root="$(run_log_parent)"

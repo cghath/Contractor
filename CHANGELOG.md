@@ -11,6 +11,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Compound loot (cghath's side, 2026-10-20)
+
+#### Added
+
+- **Loot boxes by rarity, in the rooms where they'd be** (`data/loot_tables.json`,
+  `WorldValuables`): every enemy site has box spots by room: an HQ's office desk and radio room,
+  a compound's command-building desk, armory crate, footlockers, store shed and container, an
+  outpost's bunker and ammo crates, a checkpoint's seized goods, village cupboards. The fitting
+  rooms always get one, a few of the rest are picked per site. Each box rolls common, uncommon,
+  rare or very rare by its site's stated weights (rare and very rare together 6% at a village
+  up to 17% at an HQ), then a bundle from its table; very rare only in hot zones. The same zone
+  rolls the same loot every visit.
+- New `loot` test suite (local default list and CI).
+
+#### Changed
+
+- **Looted boxes stay looted:** caches and site boxes are saved with the zone (what's in them,
+  and whether a strongbox was opened) instead of restocking on every reload.
+- Site boxes replace the old "one piece of cash or intel, 18% something better" roll and the
+  contraband swap; the HQ strongbox is unchanged.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
