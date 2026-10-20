@@ -124,6 +124,17 @@ to F-06 in `docs/audits/followups.md`, with a ready fix on branch `fix/a2-ai-veh
   outside what clips them, and overlapping controls. It now also fits a full debrief (salvage open
   and closed) and the loadout menu, and self-tests that each check still catches its problem.
 
+### Economy balance proposal (cghath's side, 2026-10-20)
+
+#### Added
+
+- `docs/economy_proposal_2026-10-20.md`: measured economy balance numbers for the Captain to
+  approve (contract pay, hot zones, intel, daily wages and upkeep, capped shock costs). Proposed
+  only: no game number or code changed.
+- `tools/economy_sim.tscn`: a headless economy simulation that plays short campaigns through the
+  real board, debrief, bill and loot code with play profiles standing in for the fighting
+  (`--runs`, `--days`, `--variant current|proposed|both`). Not a test suite; CI never runs it.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
