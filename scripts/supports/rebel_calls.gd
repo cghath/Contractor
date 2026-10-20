@@ -138,14 +138,12 @@ func _send_fighters(by: Soldier, men: int, lv := 0) -> String:
 	if not from.is_finite():
 		from = by.global_position + by.global_basis.z * 60.0  # behind the caller
 	var before := allies.out().size()
-	var why := allies.server_call(by, true, "rifle", false, from, true)
+	var why := allies.server_call(by, true, "rifle", false, from, true, men)  # all `men` of them (audit A2-05: ten at the top level, not the rifle squad's eight)
 	if why != "":
 		return why
 	if allies.out().size() > before:
 		var e: Dictionary = allies.out().back()
 		var members := (e.squad as Squad).members()
-		for i in range(men, members.size()):
-			(members[i] as Soldier).queue_free()
 		if lv >= 1 and men >= 4:  # upgraded: two of them bring a DShK (G-25)
 			StaticWeapons.arm_gun_team(CompoundLevel.current(self), members[0], members[1], "tripod_dshk", e.squad)
 	return ""

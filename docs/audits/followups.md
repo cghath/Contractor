@@ -10,6 +10,9 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-01 | P2 | The AI building scan only finds one floor; upper floors and roofs are never garrisoned or cleared |
 | F-02 | P2 | Town garrison posts are all on the ground floor |
 | F-03 | P2 | Doctrine `engage_m` numbers sit below the new sight ranges |
+| F-04 | P1 | A carer who boards a vehicle keeps his casualty claimed, so no backup medic comes (audit A2-12) |
+| F-05 | P2 | Element men told to board from a distance never get the walk order (audit A2-10) |
+| F-06 | P2 | An ammo bearer's belt handoff turns a part-used belt into a full one (audit A2-11) |
 
 ## F-01: the building scan only sees one floor
 
@@ -51,3 +54,61 @@ Captain raised the engagement ranges (ai/ranges, on dev): hostiles see 200 m (wa
 squad 300 m (was 120), aim error at skill 0 is 1.2 degrees (was 2.0). When the doctrine numbers
 are wired in, `engage_m` should be raised to match, or the doctrines will pull the new ranges
 back down.
+
+## F-04 to F-06: three audit findings in Claude's files (cghath's side, 2026-10-20)
+
+These come from the executive audit of `68a1b83` (`docs/audits/executive-2026-10-19/PART-2.md`).
+They sit in Claude's files (`scripts/ai/squad_ai.gd`, `scripts/vehicles/`), so per the Captain's
+tasking they are logged here, not fixed on cghath's branch.
+
+**A fix with tests is already built and ready to take or adapt:** branch `fix/a2-ai-vehicles`
+(commit `184f408`, pushed, based on `3e5a1ee`). Each test failed on the unfixed code (R0198).
+With the fix, casualty, medical, squad, logistics, roles and scavenge passed (R0206; one roles flake
+passed in R0208), and the vehicles host passed apart from the co-op checks dev already fails (R0208).
+
+### F-04 (P1, audit A2-12): a carer who boards keeps his casualty claimed
+
+Location: [vehicle.gd](../../scripts/vehicles/vehicle.gd) `server_enter`;
+[squad_ai.gd](../../scripts/ai/squad_ai.gd) `_carer_of`, `_find_casualty`.
+
+`Vehicle.server_enter` turns the soldier's brain off but leaves his care job running: `casualty`,
+`care` and the casualty's `care_by` all stay set. `SquadAI._carer_of` still counts that carer, so
+other responders' `_find_casualty` skips the casualty for as long as he sits there.
+
+The fix on the branch:
+- `server_enter` calls a new `SquadAI.drop_care()` (a public wrapper on `_end_care`, which clears
+  `care_by`, the HVT handoff claim and any carry) before turning the brain off.
+- `_carer_of` ignores a seated AI carer.
+
+Test: `casualty_test._test_carer_boards`. A medic treating, or walking to, a casualty is seated
+directly, or boards through `VehicleLayer.server_board`, and a backup takes the casualty.
+
+### F-05 (P2, audit A2-10): distant element men never walk over to board
+
+Location: [vehicle_layer.gd](../../scripts/vehicles/vehicle_layer.gd) `server_board`.
+
+The move-to-door order always goes through the commander's main squad
+(`lvl.squad_for(from.faction)`). `Squad.pick` skips men owned by another squad, so an element man
+is queued for boarding but stays on HOLD.
+
+The fix on the branch: the order goes through the man's own squad (`SquadAI.of(s).squad`), and
+falls back to the main squad when he has none. As `server_squad_dismount` already does, it names the
+high-command player as that squad's leader.
+
+Test: `vehicles_test._test_squad_drivers`. Two element medics 25 m out get MOVE; the first takes the
+last seat, and the second finds the vehicle full and leaves the queue.
+
+### F-06 (P2, audit A2-11): the ammo bearer's belt handoff makes ammunition
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) `_maybe_resupply_gunner`.
+
+`remove_one(ammo)` followed by `gunner.inventory.take(ammo, 1)` drops the belt's `"rounds"` state,
+so a part-used belt arrives as a full 100-round belt. The result of `take` is ignored, so a belt
+that doesn't fit vanishes.
+
+The fix on the branch: take the belt entry out with `_take_out(ammo)`, as the magazine handoff does,
+and hand it over with its state. If the gunner has no room, the bearer keeps the belt.
+
+Test: `roles_test._test_ammo_bearer` (with a `_belt_rounds` helper). Belts of 7, 0 and 100 rounds
+arrive with exactly their own rounds, and with no room the bearer keeps his.
+

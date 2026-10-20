@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
+
+The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.
+
+#### Fixed
+- A2-01: a raid (by air or through a crossing) no longer picks up a job prepared for another
+  zone. The job stays accepted and prepared for later.
+- A2-02: saving during a deployment keeps the helicopters lost and their cooldowns, so a lost
+  helicopter no longer comes back after a reload, and an expired cooldown doesn't return.
+- A2-03: recon, hold, convoy, rescue and escort objectives carry on where they were after
+  leaving and coming back to their zone or reloading a save. They no longer sit "active" for good
+  with nothing running them. Their crews, waves, wrecks and convoy vehicles return once each, by
+  their saved ids (`ScenarioCheckpoint`).
+- A2-04: the days a debrief or a board wait passes now book base assaults and turn the rebel
+  week too, as the base's own day advance always did. Several weeks at once each count.
+- A2-05: the second fighter upgrade sends ten fighters, as paid for (6/8/10; 4/5/6 in a hot zone).
+- A2-06: rebel fighters who follow the squad across a crossing stay rebels, and as many come over
+  as were still up.
+- A2-07: a raid banks the loot set down in the LZ, the holds and the gear on bodies carried out,
+  and takes them out of the zone, as a contract does.
+- A2-08: arriving in a remembered zone after travel keeps the travel time; a resumed save still
+  keeps its own.
+- A2-09: taking over a casualty's HX-1 while wearing an LX-3 is refused ("Take off your exo frame
+  first") instead of deleting the HX-1.
+- A2-13: the aim slowdown assist ignores civilians, captives and enemies behind walls.
+
+A2-10, A2-11 and A2-12 are in Claude's files (the squad AI and vehicles). They are logged as F-04
+to F-06 in `docs/audits/followups.md`, with a ready fix on branch `fix/a2-ai-vehicles`.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;

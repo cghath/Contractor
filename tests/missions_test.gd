@@ -69,6 +69,7 @@ func _ready() -> void:
 	_test_enemy_drones()
 	_test_strongbox()
 	await _test_respawn_points()
+	await _test_scenario_resume()
 	_finish()
 
 
@@ -2013,6 +2014,131 @@ func _test_scenarios() -> void:
 	check(debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0, "target left standing: not completed (%s)" % debrief.contracts[0].outcome)
 	await _clean_scenario(before)
 	r.params = Reinforcements.DEFAULTS.duplicate()
+
+
+func _scenario_nodes(run: Dictionary) -> Array:
+	var out: Array = []
+	for key: String in ["crew", "ambush", "waves"]:
+		out.append_array(run.get(key, []))
+	if is_instance_valid(run.get("wreck")):
+		out.append(run.wreck)
+	for e: Dictionary in run.get("vehicles", []):
+		out.append_array(e.crew)
+		if is_instance_valid(e.v):
+			out.append(e.v)
+	return out
+
+
+## A2-03: serialize partial runs, retire their controller/entities, load the campaign and
+## return. This covers every scenario family and repeated arrival events without respawning.
+func _test_scenario_resume() -> void:
+	print("Scenario checkpoints across return and reload (A2-03)")
+	_clear_waves()
+	for type: String in ["recon", "defend_hold", "convoy_ambush", "crew_rescue", "psd_escort"]:
+		Contracts.new_full_campaign(88, 900000)
+		var d := await _deploy_new(type)
+		var scen := MissionScenario.of(level)
+		scen.set_physics_process(false)
+		var kind := Objectives.RECON_SITE if type == "recon" else Objectives.HOLD_POINT if type == "defend_hold" else Objectives.CONVOY if type == "convoy_ambush" else Objectives.RESCUE_CREW
+		var main := _kind(d.objectives, kind)
+		var oid := String(main.oid)
+		var run := scen.run_of(oid)
+		if kind == Objectives.RECON_SITE:
+			run.dwell = 7.0
+		elif kind == Objectives.HOLD_POINT:
+			run.clock = 7.0
+			run.started = true
+			run.away_s = 3.0
+			run.lose_s = 2.0
+		elif kind == Objectives.CONVOY:
+			scen.server_advance(float(main.params.depart_s) + 1.0)
+			run = scen.run_of(oid)
+			run.ambushed = true
+		else:
+			run.t = 7.0
+			run.wave = 1
+		var before: Array = _scenario_nodes(run)
+		var ids: Array = (run.get("vehicles", []) as Array).map(func(e: Dictionary) -> String: return (e.v as Vehicle).vehicle_id)
+		check(GameState.save_zone() and Campaign.save_campaign(), "A2-03: %s checkpoint saves to disk" % type)
+		var saved: Dictionary = Campaign.section(&"contracts").deployment.scenario_runs[oid].duplicate(true)
+		check(not Contracts.deployment().has("scenario_runs"), "A2-03: private entity checkpoints stay out of the public deployment")
+		# Returning while this controller is still present must not reset or duplicate anything.
+		Contracts.server_arrived(ZONE)
+		check(scen.run_of(oid) == run and _scenario_nodes(run).size() == before.size(), "A2-03: repeated %s arrival is idempotent" % type)
+		for n: Variant in before:
+			if is_instance_valid(n) and not n.is_queued_for_deletion():
+				n.queue_free()
+		scen.queue_free()
+		await _frames(2)
+		check(Campaign.load_campaign(), "A2-03: %s campaign loads from disk" % type)
+		if kind == Objectives.CONVOY:
+			# The normal world loader restores the vehicles first; the scenario must reuse them.
+			BaseHub.server_switch_level(level.level_info(), GameState.zone_id)
+			level = CompoundLevel.current(self) as ZoneLevel
+			player = level.players.get_node(^"1") as Soldier
+			player.set_physics_process(false)
+			scen = MissionScenario.of(level)
+		else:
+			scen = MissionScenario.new()
+			level.add_child(scen)
+		scen.set_physics_process(false)
+		Contracts.server_arrived(ZONE)
+		var restored := scen.run_of(oid)
+		check(not restored.is_empty(), "A2-03: %s active controller returns" % type)
+		if restored.is_empty():
+			continue
+		for key: String in ["t", "dwell", "clock", "started", "wave", "away_s", "lose_s", "phase", "ambushed", "dropped"]:
+			if saved.has(key):
+				check(restored.get(key) == saved[key], "A2-03: %s preserves %s" % [type, key])
+		var entities := _scenario_nodes(restored)
+		check(entities.size() == before.size() and entities.all(func(n: Variant) -> bool: return is_instance_valid(n)),
+			"A2-03: %s tracked entities return exactly once" % type)
+		if kind == Objectives.CONVOY:
+			check((restored.vehicles as Array).map(func(e: Dictionary) -> String: return (e.v as Vehicle).vehicle_id) == ids,
+				"A2-03: convoy vehicle identities survive")
+			check((restored.vehicles as Array).all(func(e: Dictionary) -> bool: return (e.v as Vehicle).driver() != null), "A2-03: convoy crews regain their seats")
+		Contracts.server_arrived(ZONE)
+		check(_scenario_nodes(scen.run_of(oid)) == entities, "A2-03: second %s return duplicates no entities" % type)
+		var terminal := main.duplicate(true)
+		terminal.oid = oid + "_finished"
+		terminal.state = Objectives.DONE
+		var elsewhere := main.duplicate(true)
+		elsewhere.oid = oid + "_elsewhere"
+		elsewhere.params = main.params.duplicate(true)
+		elsewhere.params.zone_id = "another_zone"
+		Contracts.contract_returned.emit(String(d.cid), [terminal, elsewhere])
+		check(scen.run_of(String(terminal.oid)).is_empty() and scen.run_of(String(elsewhere.oid)).is_empty(), "A2-03: completed and other-zone scenarios stay inactive")
+		Contracts.server_abandon_deployment()
+		for n: Variant in entities:
+			if is_instance_valid(n) and not n.is_queued_for_deletion():
+				n.queue_free()
+		scen.runs.clear()
+		await _frames(2)
+	# Actual level replacement: a partial recon must remain completable after a cold load.
+	Contracts.new_full_campaign(88, 900000)
+	var d := await _deploy_new("recon")
+	var scen := MissionScenario.of(level)
+	scen.set_physics_process(false)
+	var main := _kind(d.objectives, Objectives.RECON_SITE)
+	var oid := String(main.oid)
+	var clear_spot: Vector3 = level.insertion_points()[0]
+	main.params.pos = [clear_spot.x, clear_spot.y, clear_spot.z]
+	scen.run_of(oid).dwell = 7.0
+	Contracts.store_objectives(Contracts.objectives.list)
+	check(GameState.save_zone() and Campaign.save_campaign() and Campaign.load_campaign(), "A2-03: recon saves and cold-loads before level replacement")
+	var old_id := level.get_instance_id()
+	BaseHub.server_switch_level(level.level_info(), GameState.zone_id)
+	level = CompoundLevel.current(self) as ZoneLevel
+	player = level.players.get_node(^"1") as Soldier
+	player.set_physics_process(false)
+	scen = MissionScenario.of(level)
+	scen.set_physics_process(false)
+	Contracts.server_arrived(ZONE)
+	check(level.get_instance_id() != old_id and float(scen.run_of(oid).get("dwell", 0.0)) == 7.0,
+		"A2-03: a replacement level restores partial recon")
+	_place(player, _v(main.params.pos) + Vector3.UP * 4.0)
+	scen.server_advance(float(main.params.dwell_s))
+	check(Contracts.objectives.get_objective(oid).state == Objectives.DONE, "A2-03: restored recon can finish")
 
 
 ## Generation, no deployment: every new type in every zone, positions inside the zone, text filled

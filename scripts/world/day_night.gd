@@ -12,8 +12,9 @@ extends Node
 ##   darkness it adds (dark_add: clouds make a darker night), sight (spot_x on the time to spot,
 ##   sight_m the furthest anyone is seen at all), hearing (hear_x on footsteps), rain (drops
 ##   near the camera, none headless) and whether it grounds helicopters (grounds).
-## - Saved with the zone (GameState.sky: the save wins over the definition) and replicated:
-##   a client asks the host on _ready, and the host sends it to everyone every SYNC_S.
+## - Saved with the zone (GameState.sky: the save wins over the definition, except the hour
+##   after travel: TRAVELLED) and replicated: a client asks the host on _ready, and the host
+##   sends it to everyone every SYNC_S.
 ##
 ## Readers: Spotting (darkness_at, sight_m, spot_x, hearing_x; NVGs, wave 7 S2, restore sight
 ## in the dark there), Supports.can_fly (CompoundLevel.weather_grounds_aircraft ->
@@ -23,6 +24,9 @@ const NODE_NAME := "DayNight"
 ## Mid-morning: the sun at about the elevation zones were lit at before (ZoneLevel.SUN_ELEVATION_DEG).
 const DEFAULT_HOUR := 8.5
 const DEFAULT_WEATHER := "clear"
+## The def's key for an arrival after travel (BaseHub.server_cross_on): its "hour" is the clock
+## the squad brought with it, over the zone's save and a contract's own hour (audit A2-08).
+const TRAVELLED := "travelled"
 ## Game seconds per real second in a contract zone: an hour passes in 10 minutes.
 const TIME_SCALE := 6.0
 ## The host sends the time and weather to every client this often (s).
@@ -190,11 +194,18 @@ func to_save() -> Dictionary:
 
 
 ## Host (CompoundLevel._on_hosted, after GameState.load_zone): the saved time and weather, if
-## the zone has any, over the definition's.
+## the zone has any, over the definition's. Walked or flown in from another zone (TRAVELLED),
+## the hour is the travel clock's, not the one the zone was left at: only a resume of the save
+## (BaseHub.resume_info) takes its hour back. The saved weather stays either way.
 func server_restore() -> void:
 	var saved: Dictionary = GameState.sky
 	if not (saved.has("hour") or saved.has("weather")):
 		saved = _contract_sky()
+	var level := get_parent()
+	var def: Dictionary = level.get(&"def") if level and "def" in level and level.get(&"def") is Dictionary else {}
+	if bool(def.get(TRAVELLED, false)) and def.has("hour"):
+		saved = saved.duplicate()
+		saved["hour"] = float(def.hour)
 	if saved.has("hour") or saved.has("weather"):
 		_set_state(float(saved.get("hour", hour)), String(saved.get("weather", weather)))
 		_apply_look()

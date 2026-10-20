@@ -47,7 +47,7 @@ const ORDERS := ["move", "hold", "defend", "assault", "flank", "follow", "regrou
 const SHOW_EVERY_S := 2.0
 
 ## Host: what's out, by slot: {"id": slot + 1, "kind", "squad": Squad, "kit", "employer",
-## "order", "point": Vector3}. null for an empty slot.
+## "order", "point": Vector3, "company", "rebel"}. null for an empty slot.
 var elements: Array = []
 ## Host: when each slot's element was last released or lost (Soldier._now(), engine uptime);
 ## COOLDOWN_S must pass before that slot lends another. -INF: never yet (COOLDOWN_S is long
@@ -115,26 +115,25 @@ func is_out() -> bool:
 
 
 ## Host (BaseHub, the squad crossing on): the elements out follow it (call 19: they're within a
-## link); each one's kind, whether it's the company's, and how many are still up.
+## link); each one's kind, whether it's the company's or the rebels' (audit A2-06: they come in
+## as what they were, not as regular allied troops), and how many are still up.
 func server_take_followers() -> Array:
 	var out_now: Array = []
 	for e: Dictionary in out():
 		var up := (e.squad as Squad).members().filter(func(s: Soldier) -> bool: return s.vitals.is_up()).size()
-		out_now.append({"kind": String(e.kind), "company": bool(e.get("company", false)), "up": up})
+		out_now.append({"kind": String(e.kind), "company": bool(e.get("company", false)), "rebel": bool(e.get("rebel", false)), "up": up})
 	return out_now
 
 
 ## Host, the squad's new zone: elements that followed come in at `at` (where the squad arrived),
-## free, as many as were still up, following `by`.
+## free, the company's or the rebels' as they were, as many as were still up (only those came
+## along: ten rebels at the fighters' top level too, past the rifle squad's size), following `by`.
 func server_follow_in(followers: Array, by: Soldier, at: Vector3) -> void:
 	for f: Dictionary in followers:
 		var before := out().size()
-		if server_call(by, true, String(f.kind), bool(f.company), at) != "" or out().size() == before:
+		if server_call(by, true, String(f.kind), bool(f.company), at, bool(f.get("rebel", false)), maxi(int(f.up), 1)) != "" or out().size() == before:
 			continue
 		var e: Dictionary = out().back()
-		var members := (e.squad as Squad).members()
-		for i in range(int(f.up), members.size()):
-			(members[i] as Soldier).queue_free()  # (only those still up came along)
 		(e.squad as Squad).give_order(by, Squad.Order.FOLLOW, by.global_position)
 		e["order"] = "follow"
 		last_message = "Element %d followed you over" % int(e.id)
@@ -215,7 +214,10 @@ static func kit_for(employer: String) -> String:
 ##
 ## `rebel` (RebelCalls: the locals' fighters): free, in local kit (AKs, the woodland look) and
 ## the rebels' own marks ("rebel": never the company's for its casualties, Harm.is_company).
-func server_call(by: Soldier, dev := false, kind := "rifle", company := false, at_point: Variant = null, rebel := false) -> String:
+##
+## `men` (> 0): that many instead of the kind's size (audit A2-05: the rebels' fighters, six to
+## ten by their upgrades; followers over a crossing, as many as were still up).
+func server_call(by: Soldier, dev := false, kind := "rifle", company := false, at_point: Variant = null, rebel := false, men := 0) -> String:
 	if not multiplayer.is_server() or by == null:
 		return ""
 	if not KINDS.has(kind):
@@ -256,7 +258,7 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 	var employer := String(_best_standing().employer)
 	var kit := kit_for(employer) if not company else DEFAULT_KIT
 	var spec: Dictionary = KINDS[kind]
-	var size := int(spec.size)
+	var size := men if men > 0 else int(spec.size)
 	var k := Kits.data(kit)
 	var origin := Supports.origin_for(level, &"allied", by.global_position, 1.0)  # on foot: ground level, not a helicopter's altitude
 	if at_point is Vector3:
@@ -282,7 +284,7 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 	if kind == "weapons" and not rebel and members.size() >= 2:
 		StaticWeapons.arm_gun_team(level, members[0], members[1], "tripod_m2", sq)  # the weapons team brings an M2 (G-25)
 	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": "rebels" if rebel else ("company" if company else employer), "order": "move",
-		"point": by.global_position, "company": company}
+		"point": by.global_position, "company": company, "rebel": rebel}
 	caller = by
 	calls += 1
 	sq.give_order(by, Squad.Order.MOVE, by.global_position)

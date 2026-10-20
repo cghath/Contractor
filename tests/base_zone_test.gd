@@ -774,7 +774,56 @@ func _test_rebel_calls() -> void:
 		"rebel fighters come under the high command, in their own marks (never the company's: %d, %s)" % [men.size(), why])
 	if allies:
 		allies.server_release(me)
+		await _test_rebel_fighters(base, calls, me, allies)
 	RebelSupport.change("inland", was - RebelSupport.support("inland"), "test reset")
+
+
+## Audit A2-05: every fighters level brings what it's sold as (six, eight, ten: two more a
+## level, UPGRADE_TEXT), fewer in a hot zone, even past the rifle squad's eight. A2-06: rebels
+## following the squad over a crossing (the follower records BaseHub carries) come in as rebels,
+## all of them still up, not as a regular allied rifle squad.
+func _test_rebel_fighters(base: BaseZoneLevel, calls: RebelCalls, me: Soldier, allies: AlliedTroops) -> void:
+	var ups: Dictionary = RebelSupport._s().upgrades
+	var lv_was := RebelSupport.level("fighters")
+	var kind_was := String(base.def.get("kind", ""))
+	var got: Array = []
+	var want: Array = []
+	for hot: bool in [false, true]:
+		base.def["kind"] = "hot" if hot else kind_was
+		for lv in RebelSupport.MAX_LEVEL + 1:
+			ups["fighters"] = lv
+			calls._cooldown.erase("fighters")
+			var dep := RosterDeployment.active(BaseHub.roster()) if BaseHub.campaign_running else {}
+			(dep.get("rebel_cooldown", {}) as Dictionary).erase("fighters")
+			await get_tree().physics_frame
+			var n_before := allies.out().size()
+			var why := calls.server_call("fighters", me, Vector3.INF)
+			got.append((allies.out().back().squad as Squad).members().size() if why == "" and allies.out().size() > n_before else -1)
+			var men := RebelCalls.FIGHTERS + 2 * lv
+			want.append(maxi(roundi(men * RebelCalls.HOT_WEAKER), 2) if hot else men)
+			allies.server_release(me)
+	base.def["kind"] = kind_was
+	check(got == want and want.slice(0, 3) == [6, 8, 10], "rebel fighters by upgrade level: %s men (want %s; a hot zone fewer)" % [got, want])
+	# The top level's ten, out of the hot zone, follow the squad over a crossing.
+	ups["fighters"] = RebelSupport.MAX_LEVEL
+	calls._cooldown.erase("fighters")
+	var dep2 := RosterDeployment.active(BaseHub.roster()) if BaseHub.campaign_running else {}
+	(dep2.get("rebel_cooldown", {}) as Dictionary).erase("fighters")
+	await get_tree().physics_frame
+	var called := calls.server_call("fighters", me, Vector3.INF)
+	var first: Array = (allies.out().back().squad as Squad).members() if called == "" and allies.is_out() else []
+	var was_rebel := first.size() == 10 and first.all(func(m: Soldier) -> bool: return m.iff == &"rebel")
+	var followers := allies.server_take_followers()
+	allies.server_release(me)
+	await get_tree().physics_frame
+	allies.server_follow_in(followers, me, me.global_position + Vector3(6, 0, 6))
+	var e: Dictionary = allies.out().back() if allies.is_out() else {}
+	var came: Array = (e.squad as Squad).members() if not e.is_empty() else []
+	check(was_rebel and came.size() == 10 and String(e.get("employer", "")) == "rebels"
+		and came.all(func(m: Soldier) -> bool: return m.iff == &"rebel" and String(m.variant) == "woodland" and not Harm.is_company(m)),
+		"rebels following over a crossing come in as rebels, all ten (%d of %s, %s)" % [came.size(), String(e.get("employer", "")), ", ".join(came.map(func(m: Soldier) -> String: return String(m.iff)))])
+	allies.server_release(me)
+	ups["fighters"] = lv_was
 
 
 ## Rebel support part 3: the locals' own jobs (on the board, paid in support and favours) and
@@ -893,8 +942,40 @@ func _test_assault() -> void:
 	var held := BaseAssault.server_day_passed(false)
 	check(held.contains("guards (4) held") and BaseArmory.counts(BaseHub.stash()) == before, "with four guards an assault while you're out costs nothing (%s)" % held)
 	BaseHub.server_set_guards(0)
+	_test_every_clock_books()
 	heat.clear()
 	heat.merge(saved)
+
+
+## Audit A2-04: a debrief and the contract board's waits move the clock with Economy.advance_days,
+## not BaseHub.server_advance_days. The same day passing books the same assault and costs the
+## locals the same week, whichever moved it.
+func _test_every_clock_books() -> void:
+	print("Every clock books assaults and the locals' week (A2-04)")
+	var base_sec := BaseHub.base()
+	var heat: Dictionary = Campaign.section(&"economy").get("heat", {})
+	base_sec.erase("assault")
+	base_sec["last_assault_day"] = -1000
+	heat.clear()
+	Economy.add_heat("black_ridge", 90.0)
+	var week_days := maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	base_sec["rebel_week"] = (BaseHub.day() + 1) / week_days - 1  # one week's turn due tomorrow
+	var coast := RebelSupport.support("coast")
+	var inland := RebelSupport.support("inland")
+	Economy.advance_days(1, "A2-04: a debrief's days")  # (what the debrief and the board's "Wait a day" call)
+	var booked: Dictionary = base_sec.get("assault", {})
+	check(not booked.is_empty() and int(booked.day) == BaseHub.day() + 1 and String(booked.faction) == "black_ridge",
+		"a day passed by the economy's clock books the assault for tomorrow (%s)" % str(booked))
+	check(int(base_sec.get("rebel_week", -1)) == BaseHub.day() / week_days and RebelSupport.support("coast") < coast and RebelSupport.support("inland") < inland,
+		"and the week's turn cools the locals on the company (coast %.1f -> %.1f)" % [coast, RebelSupport.support("coast")])
+	var turned := RebelSupport.support("coast")
+	Economy.advance_days(1, "A2-04: the same week")
+	check(is_equal_approx(RebelSupport.support("coast"), turned) or BaseHub.day() % week_days == 0,
+		"once a week, not every day (%.1f, %.1f)" % [turned, RebelSupport.support("coast")])
+	base_sec.erase("assault")
+	base_sec.erase("last_assault_day")
+	RebelSupport.change("coast", coast - RebelSupport.support("coast"), "test reset")
+	RebelSupport.change("inland", inland - RebelSupport.support("inland"), "test reset")
 
 
 ## LZ-6: a defence bought at the ops desk goes up at its slot (the base reloads with it), paid for.
@@ -926,7 +1007,34 @@ func _test_raid_by_air() -> void:
 		return l != null and String(l.def.id) == "wadi_farm" and not BaseHub.switch_pending(), 30.0)
 	var dep := RosterDeployment.active(BaseHub.roster())
 	check(String(dep.get("zone_kind", "")) == RosterDeployment.RAID and String(dep.get("zone_id", "")) == "wadi_farm", "a raid there")
-	BaseHub.server_end_deployment([])
+	await _test_raid_banks()
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
 	var home := CompoundLevel.current(self) as BaseZoneLevel
 	await _wait_until(func() -> bool: return home != null and home.players.get_node_or_null(^"1") != null, 10.0)
+
+
+## Audit A2-07: a raid has no contract, but what came out at its extraction (salvage set down in
+## the point, a body's kit carried out) still goes to the stash, once, and leaves the zone's
+## memory. Ends the raid through the real handler (BaseHub.end_deployment, Extraction's report).
+func _test_raid_banks() -> void:
+	var zone := CompoundLevel.current(self) as ZoneLevel
+	var me := zone.players.get_node_or_null(^"1") as Soldier if zone else null
+	if me == null:
+		check(false, "A2-07: the raider is in the zone")
+		BaseHub.server_end_deployment([])
+		return
+	var at := zone.ground_point(me.global_position + Vector3(2.0, 0, 0))
+	var uid := zone.server_spawn_dropped(&"scrap_copper", 1, at + Vector3(0, 0.3, 0))
+	var body := zone.server_spawn_body({"uid": "a207_body" + tag, "label": "Hostile A207", "faction": "hostile", "pos": [at.x, at.y + 0.1, at.z + 2.0]})
+	await get_tree().physics_frame
+	var save_path := GameState.save_path()
+	var copper := int(BaseArmory.counts(BaseHub.stash()).get(&"scrap_copper", 0))
+	BaseHub.end_deployment({"players": [{"node": "1", "peer": 1}], "squad": [], "point": {"pos": [at.x, at.z]},
+		"bodies": [{"uid": body.body_uid, "items": [{"id": "scrap_copper", "count": 2}]}],
+		"deposited": [{"uid": uid, "id": "scrap_copper", "count": 1, "where": "deposited"}]})
+	var banked := int(BaseArmory.counts(BaseHub.stash()).get(&"scrap_copper", 0)) - copper
+	check(banked == 3, "A2-07: the raid's extraction banks the salvage set down and the body's kit, once (%d of 3)" % banked)
+	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(save_path))
+	check(saved is Dictionary and not (saved.get("dropped", {}) as Dictionary).has(uid)
+		and not (saved.get("bodies", []) as Array).any(func(b: Dictionary) -> bool: return String(b.get("uid", "")) == body.body_uid),
+		"A2-07: and both leave the raided zone's memory (not banked again on a return)")

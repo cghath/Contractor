@@ -187,6 +187,19 @@ static func cert_problem(s: Soldier) -> String:
 
 ## Why `s` can't climb into `suit` now ("" if it can); `reach`: check the distance too.
 static func enter_problem(s: Soldier, suit: WorldItem, reach := true) -> String:
+	var why := _pilot_problem(s)
+	if why != "":
+		return why
+	if reach and parked_point(suit).distance_to(s.global_position + Vector3.UP * 1.2) > REACH_M:
+		return "Too far away"
+	return cert_problem(s)
+
+
+## Why `s` can't become a suit's pilot now, wherever the suit is ("" if he can): his exo slot
+## free (the suit goes on there: an LX-3 or another suit comes off first, by his own hand),
+## his hands free, nobody being moved, not in a vehicle. Every way in checks it (enter_problem,
+## climb_in_body_problem), before and after the release's wait.
+static func _pilot_problem(s: Soldier) -> String:
 	if s.inventory.slots.get(SLOT, &"") != &"":
 		return "Climb out of your suit first" if piloting(s.inventory) else "Take off your exo frame first"
 	if s.inventory.hands != &"":
@@ -195,9 +208,7 @@ static func enter_problem(s: Soldier, suit: WorldItem, reach := true) -> String:
 		return "You're already moving someone"
 	if is_instance_valid(s.vehicle):
 		return "Get out of the vehicle first"
-	if reach and parked_point(suit).distance_to(s.global_position + Vector3.UP * 1.2) > REACH_M:
-		return "Too far away"
-	return cert_problem(s)
+	return ""
 
 
 ## Host: `s` climbs into the suit standing at `suit` (check enter_problem first). He hits the
@@ -318,9 +329,13 @@ static func server_punch_out(actor: Soldier, body: Soldier) -> void:
 ## Why `actor` can't climb straight into downed or dead pilot `body`'s suit now ("" if he
 ## can): the same manual release as punching him out (punch_out_problem) — climbing in pulls
 ## the old pilot out as part of getting in, so needs exactly what punching out needs, plus
-## `actor`'s own certification (cert_problem) since he's the one piloting it after.
+## what any way into a suit needs (_pilot_problem: A2-09, an LX-3 wearer passed and the suit
+## he pulled off its pilot had nowhere to go) and `actor`'s own certification (cert_problem)
+## since he's the one piloting it after.
 static func climb_in_body_problem(actor: Soldier, body: Soldier) -> String:
 	var why := punch_out_problem(actor, body)
+	if why == "":
+		why = _pilot_problem(actor)
 	return why if why != "" else cert_problem(actor)
 
 

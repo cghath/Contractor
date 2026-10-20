@@ -264,7 +264,7 @@ func server_save() -> bool:
 ## stands, and everyone's gear goes onto their records (players' main characters, squadmates'),
 ## so loading puts the squad back there (resume_info), each with their wounds as they were
 ## ("vitals": Vitals.server_snapshot as var_to_str text, by "pk:<player key>" and "m:<member id>",
-## put back as they spawn: _apply_resume).
+## put back as they spawn: _apply_resume). Live support cooldowns and losses are saved too.
 func _note_resume() -> void:
 	if not RosterDeployment.is_running(roster()) or in_base():
 		return
@@ -274,6 +274,8 @@ func _note_resume() -> void:
 	var dep := RosterDeployment.active(roster())
 	var vitals := {}
 	dep["resume"] = {"zone_id": String(lvl.def.get("id", dep.get("zone_id", ""))), "arrive": String(dep.get("last_crossing", "")), "vitals": vitals}
+	var helis := HeliSupports.of(lvl)
+	dep["support_limits"] = helis.limits() if helis else {}
 	GameState.save_zone()
 	for p: Node in lvl.players.get_children():
 		var s := p as Soldier
@@ -623,6 +625,7 @@ func server_cross_on(to: String, to_crossing: String, extraction: Extraction, ai
 	var sky := DayNight.current()
 	var hour_now: float = sky.hour if sky else float(def.get("hour", 9.0))
 	arrive["hour"] = fposmod(hour_now + leg_h, 24.0)
+	arrive[DayNight.TRAVELLED] = true  # that hour, not the one a remembered zone was left at (A2-08)
 	if hour_now + leg_h >= 24.0:
 		server_advance_days(1, "walking on to %s" % to)
 	dep["travel_h"] = hours
@@ -1619,8 +1622,9 @@ func server_count_respawn() -> String:
 
 ## Host: takes the picked squad into the zone. `options` may override the prep: "squad"
 ## (member ids), "zone_kind", "zone_id", "scene"; "no_contract": true deploys without a prepped
-## contract (code and tests only: the Deploy request never sends it). Every player must be
-## ready first (FOB ready-up): it returns WAITING_FOR and who isn't, and readiness clears once
+## contract, leaving any prepared job for later (raids; the Deploy request never sends it).
+## Every player must be ready first (FOB ready-up): it returns WAITING_FOR and who isn't,
+## and readiness clears once
 ## the deployment starts. Players whose main character is recovering get a stand-in (an
 ## available member not in the squad, else a free rookie). Returns "" or why it can't.
 func server_deploy(options := {}) -> String:
@@ -1631,8 +1635,9 @@ func server_deploy(options := {}) -> String:
 	RebelSupport.on_deployment_started()
 	_read_back_base()
 	var prep := _prep()
+	var contract: Dictionary = {} if options.get("no_contract", false) else prep.get("contract", {})
 	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
-	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
+	if contract.is_empty() and not options.get("no_contract", false):
 		return NO_CONTRACT
 	if not all_ready() and not options.get("crossing", false):  # walking out through a crossing together is the ready-up (LZ-2)
 		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
@@ -1652,13 +1657,14 @@ func server_deploy(options := {}) -> String:
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
-	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
+	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), contract, stand_ins)
 	_record_loadouts(dep)  # S2: what everyone deploys in, for "Restock last loadout" back at the base
 	SessionLog.note("deployment started: zone %s (%s), contract %s, day %d; squad %s; %d player%s; %d free respawns" % [zone_id, zone_kind,
-		_contract_text(prep.get("contract", {})), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
+		_contract_text(contract), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
 		int(dep.respawns_free)])
-	prep["contract"] = {}
-	prep["level"] = {}
+	if not contract.is_empty():
+		prep["contract"] = {}
+		prep["level"] = {}
 	_ready_peers.clear()  # back at the FOB everyone readies again for the next one
 	_changed_all()
 	_fade_zone_save(zone_id)  # zone memory (LZ-2): fresh after a week, emptier before that
@@ -1900,27 +1906,32 @@ func end_deployment(report: Dictionary) -> void:
 				and Vector2(s.global_position.x, s.global_position.z).distance_to(Vector2(float(point[0]), float(point[1]))) <= Extraction.RADIUS_M:
 			hvts.append({"hvt": Contracts.MIA_HVT_PREFIX + String(s.get_meta(&"roster_id")), "alive": true})
 			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
+	# The people bring their own gear home; what else came out (bodies carried in, items set
+	# down at the point, a helicopter's hold) goes to the stash, and so leaves the zone: it isn't
+	# salvage too, and the zone save doesn't keep it to be banked again (the loop test caught
+	# both). A raid has no contract but banks the same (audit A2-07); with a contract the
+	# debrief banks it, once.
+	var bank: Array = []
+	var banked := {}
+	for body: Dictionary in report.get("bodies", []):
+		banked[String(body.get("uid", ""))] = true
+		for entry: Dictionary in body.get("items", []):
+			bank.append_array(Contracts.flatten_entry(entry))
+	for entry: Dictionary in report.get("deposited", []):
+		banked[String(entry.get("uid", ""))] = true
+		bank.append_array(Contracts.flatten_entry(entry))
+	banked.erase("")
 	var contract_ran := Contracts.is_deployed()
 	if contract_ran:
-		# The people bring their own gear home; what else came out (bodies carried in, items set
-		# down at the point) goes to the stash, and so leaves the zone: it isn't salvage too,
-		# and the zone save doesn't keep it to be banked again (the loop test caught both).
-		var bank: Array = []
-		var banked := {}
-		for body: Dictionary in report.get("bodies", []):
-			banked[String(body.get("uid", ""))] = true
-			for entry: Dictionary in body.get("items", []):
-				bank.append_array(Contracts.flatten_entry(entry))
-		for entry: Dictionary in report.get("deposited", []):
-			banked[String(entry.get("uid", ""))] = true
-			bank.append_array(Contracts.flatten_entry(entry))
-		banked.erase("")
-		var debrief_report := Contracts.report_from_level(lvl, extracted, banked)
+		var debrief_report := Contracts.report_from_level(lvl, extracted, banked)  # (before the bodies go: its casualties)
 		debrief_report["hvts"] = hvts
 		debrief_report["bank"] = bank
 		debrief_report["driven_out"] = report.get("driven_out", [])  # B-18: in a pool vehicle's hold going home (it stays there)
 		_take_out_of_zone(banked)
 		Contracts.server_end_deployment(debrief_report)
+	else:
+		_take_out_of_zone(banked)
+		Economy.bank_items(bank, "carried out")
 	server_end_deployment(extracted, true, not contract_ran)
 
 
@@ -2091,26 +2102,31 @@ func server_write_off_member(mid: String) -> bool:
 # --- Days, hiring, medbay, shop -----------------------------------------------------------
 
 ## Host: `days` campaign days pass at the base (resting), on the economy's clock: the weekly
-## bill falls due on its day (the roster's wages in it), and the roster and hiring board
-## follow (_on_day_advanced).
+## bill falls due on its day (the roster's wages in it), and the roster, the hiring board,
+## assaults on the base and the locals' week follow (_on_day_advanced).
 func server_advance_days(days: int, reason := "at the base") -> void:
 	if days > 0:
 		Economy.advance_days(days, reason)
-		BaseAssault.server_day_passed(not RosterDeployment.is_running(roster()))  # heat brings assaults on the base (LZ-5)
-		var week := day() / maxi(MissionRegistry.setting_i("week_days", 7), 1)
-		if week > int(base().get("rebel_week", week - 1)):
-			base()["rebel_week"] = week
-			RebelSupport.on_week()  # heat cools the locals on the company (rebel support)
 
 
 ## Host (Economy.day_advanced): `days` days passed, whatever moved the clock (resting, a
-## deployment's debrief, travel): the wounded recover, the hiring board turns over every
-## Hiring.REFRESH_DAYS.
+## deployment's debrief, the contract board's waits, travel): the wounded recover, the hiring
+## board turns over every Hiring.REFRESH_DAYS, heat brings assaults on the base (LZ-5) and each
+## week passed cools the locals on the company. These live here, not in server_advance_days,
+## so every path that moves the clock has the same consequences (audit A2-04: a debrief and the
+## board's waits went straight to Economy.advance_days, and never booked an assault).
 func _on_day_advanced(today: int, days: int) -> void:
 	if not started() or (multiplayer.has_multiplayer_peer() and not multiplayer.is_server()):
 		return
 	Roster.advance_days(roster(), days, today)
 	Hiring.refresh_if_due(hiring(), today)
+	BaseAssault.server_day_passed(not RosterDeployment.is_running(roster()))  # (a debrief's days: the squad was out)
+	var week := today / maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	var last := int(base().get("rebel_week", week - 1))
+	if week > last:
+		base()["rebel_week"] = week
+		for i in week - last:
+			RebelSupport.on_week()  # heat cools the locals on the company (rebel support), once a week
 	_changed_all()
 	_refresh_muster()
 

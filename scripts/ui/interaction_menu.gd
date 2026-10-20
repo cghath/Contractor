@@ -115,7 +115,7 @@ const ACTIONS := {
 	],
 	DOWNED: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
-		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot", "request": &"_server_climb_in_body", "with": &"target"},
+		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot_in", "request": &"_server_climb_in_body", "with": &"target"},
 		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target", "group": MORE},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"loot", "label": "Loot", "needs": &"lootable", "window": true},
@@ -128,7 +128,7 @@ const ACTIONS := {
 	],
 	DEAD: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
-		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot", "request": &"_server_climb_in_body", "with": &"target"},
+		{"id": &"climb_in_body", "label": "Climb in", "needs": &"mech_pilot_in", "request": &"_server_climb_in_body", "with": &"target"},
 		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target", "group": MORE},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
@@ -468,6 +468,10 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			if not (target is Soldier and ExoMech.piloting((target as Soldier).inventory)):
 				return _HIDE
 			return ExoMech.punch_out_problem(actor, target)
+		&"mech_pilot_in":  # climbing into his suit yourself: punching him out, and what any way in needs
+			if not (target is Soldier and ExoMech.piloting((target as Soldier).inventory)):
+				return _HIDE
+			return ExoMech.climb_in_body_problem(actor, target)
 		&"in_mech":
 			if not ExoMech.piloting(actor.inventory):
 				return _HIDE

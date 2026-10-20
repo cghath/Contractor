@@ -47,6 +47,7 @@ func _init() -> void:
 func _ready() -> void:
 	level = get_parent() as Node3D
 	Contracts.contract_live.connect(_on_live)
+	Contracts.contract_returned.connect(_on_live)
 
 
 ## The node of the level `from` is in, or null.
@@ -111,8 +112,34 @@ func _on_live(_cid: String, objectives: Array) -> void:
 	if not multiplayer.is_server():
 		return
 	for o: Dictionary in objectives:
+		if o.get("state") != Objectives.ACTIVE or not Objectives.here(o, level) or runs.has(String(o.oid)):
+			continue
 		if String(o.kind) in [Objectives.CONVOY, Objectives.HOLD_POINT, Objectives.RESCUE_CREW, Objectives.RECON_SITE, Objectives.UNDETECTED]:
-			_begin(o)
+			var saved: Dictionary = Campaign.section(&"contracts").get("deployment", {}).get("scenario_runs", {}).get(String(o.oid), {})
+			if saved.is_empty():
+				_begin(o)  # older saves have no checkpoint; never restart a run already present
+			else:
+				runs[String(o.oid)] = ScenarioCheckpoint.restore(self, saved)
+				if o.kind in [Objectives.HOLD_POINT, Objectives.RESCUE_CREW]:
+					_aim_waves(_p3(o.params.pos))
+				if is_instance_valid(_squad) and (o.kind != Objectives.CONVOY or (runs[String(o.oid)].get("vehicles", []) as Array).any(func(e: Dictionary) -> bool: return bool(e.out))):
+					_squad.patrol = [_ground(_p3(o.params.pos))]
+	server_checkpoint()
+
+
+## The deployment owns checkpoints across zones; only this level's runs are updated here.
+func server_checkpoint() -> void:
+	if not multiplayer.is_server():
+		return
+	var dep: Dictionary = Campaign.section(&"contracts").get("deployment", {})
+	if dep.is_empty():
+		return
+	if not dep.has("scenario_runs"):
+		dep["scenario_runs"] = {}
+	for oid: String in runs:
+		var o := Contracts.objectives.get_objective(oid)
+		if not o.is_empty() and o.state == Objectives.ACTIVE:
+			dep.scenario_runs[oid] = ScenarioCheckpoint.capture(runs[oid], dep.scenario_runs.get(oid, {}))
 
 
 ## Host: a run for objective `o`: its clock, and whatever it puts in the level at once (a
@@ -364,15 +391,17 @@ func _convoy_spawn(run: Dictionary, o: Dictionary) -> void:
 	print("[mission] convoy %s sets out: %d vehicles, %d crew" % [run.oid, (run.vehicles as Array).size(), made])
 
 
-func _convoy_soldier(_run: Dictionary, soldier_name: String, at: Vector3, quality: float) -> Soldier:
+func _convoy_soldier(_run: Dictionary, soldier_name: String, at: Vector3, quality: float, identity := {}) -> Soldier:
 	if _squad == null or not is_instance_valid(_squad):
 		_squad = Squad.new()
 		_squad.name = "ConvoyCrews"
 		_squad.faction = &"hostile"
 		add_child(_squad)
 	var loadout: Variant = level.get(&"HOSTILE_LOADOUT")
-	var s: Soldier = level.call(&"spawn_soldier", {"name": soldier_name, "faction": "hostile", "variant": "urban", "pos": at + Vector3.UP * 0.5,
-		"loadout": loadout if loadout is Array else Reinforcements.LOADOUT, "combat": clampf(quality, 0.2, 0.9), "discipline": 0.5, "guard": false, "mode": "aware"})
+	var data := {"name": soldier_name, "faction": "hostile", "variant": "urban", "pos": at + Vector3.UP * 0.5,
+		"loadout": loadout if loadout is Array else Reinforcements.LOADOUT, "combat": clampf(quality, 0.2, 0.9), "discipline": 0.5, "guard": false, "mode": "aware"}
+	data.merge(identity, true)
+	var s: Soldier = level.call(&"spawn_soldier", data)
 	if s == null:
 		return null
 	var brain := SquadAI.of(s)
@@ -462,7 +491,9 @@ func _hold_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 		run.lose_s = float(run.lose_s) + dt if foes > 0 else 0.0
 	if bool(run.started):
 		while float(run.clock) >= float(p.first_wave_s) + float(p.gap_s) * int(run.wave):
-			_send_wave(pos, int(run.wave), int(p.dirs), float(p.bearing), float(p.approach_m))
+			if not run.has("waves"):
+				run["waves"] = []
+			run.waves.append_array(_send_wave(pos, int(run.wave), int(p.dirs), float(p.bearing), float(p.approach_m)))
 			run.wave += 1
 	if float(run.clock) >= float(p.hold_s):
 		_mark(run, o, Objectives.DONE, "held")
@@ -533,7 +564,9 @@ func _rescue_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 			if client.vitals.injury() > 0.0:
 				_fail_unhurt(run)
 	while float(run.t) >= float(p.first_wave_s) + float(p.gap_s) * int(run.wave):
-		_send_wave(pos, int(run.wave), 3, float(p.get("yaw", 0.0)) + 0.7, float(p.approach_m))
+		if not run.has("waves"):
+			run["waves"] = []
+		run.waves.append_array(_send_wave(pos, int(run.wave), 3, float(p.get("yaw", 0.0)) + 0.7, float(p.approach_m)))
 		run.wave += 1
 
 
