@@ -485,6 +485,12 @@ func _test_ground_guard() -> void:
 	var guy := level.spawn_soldier({"name": "FallGuy", "person_name": "FallGuy", "faction": "hostile", "variant": "urban",
 		"pos": Vector3(centre.x, h + 2.0, centre.y), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	SquadAI.of(guy).process_mode = Node.PROCESS_MODE_DISABLED
+	# He's a hostile hundreds of metres from every player: the far-AI sleep (DynamicSim) froze
+	# him mid-fall in the last metre above the ground (CI: y 1.73 over 0.99, falling at 4.9 m/s,
+	# not on the floor; docs/audits/followups.md F-07). Not what this checks: it stays off here.
+	var sim := DynamicSim.of(level)
+	if sim:
+		sim.process_mode = Node.PROCESS_MODE_DISABLED
 	await get_tree().create_timer(1.0).timeout
 	check(absf(guy.global_position.y - (h + 2.0)) < 0.2 and guy.movement.holding,
 		"spawned where the ground's chunk has no collision yet, he waits there (y %.1f, ground %.1f)" % [guy.global_position.y, h])
@@ -527,6 +533,8 @@ func _test_ground_guard() -> void:
 	check(absf(level.above_ground(farid).y - t.height_at(farid.x, farid.z) - 0.1) < 0.01,
 		"B-05: the compound's fixed placements go on the terrain in a zone")
 	guy.queue_free()
+	if sim:
+		sim.process_mode = Node.PROCESS_MODE_INHERIT
 	await get_tree().physics_frame
 
 

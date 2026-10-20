@@ -10,6 +10,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-01 | P2 | The AI building scan only finds one floor; upper floors and roofs are never garrisoned or cleared |
 | F-02 | P2 | Town garrison posts are all on the ground floor |
 | F-03 | P2 | Doctrine `engage_m` numbers sit below the new sight ranges |
+| F-07 | P2 | The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground |
 
 ## F-01: the building scan only sees one floor
 
@@ -51,3 +52,25 @@ Captain raised the engagement ranges (ai/ranges, on dev): hostiles see 200 m (wa
 squad 300 m (was 120), aim error at skill 0 is 1.2 degrees (was 2.0). When the doctrine numbers
 are wired in, `engage_m` should be raised to match, or the doctrines will pull the new ranges
 back down.
+
+## F-07: the far-AI sleep can freeze a soldier mid-fall
+
+Found by cghath's side (fix/ci-flakes, 2026-10-20) in world_test's ground guard check; the file
+is Claude's (Captain's side), so it isn't changed here.
+
+Location: [dynamic_sim.gd](../../scripts/world/dynamic_sim.gd), `should_sleep`, the
+`OFF_GROUND_M` test.
+
+A hostile far from every player (world_test's FallGuy, ~800 m off) that falls is only kept
+awake while he's more than `OFF_GROUND_M` (1 m) above `ground_point`. In his last metre he can
+be put to sleep mid-fall, `process_mode` disabled with his velocity still set: CI run
+39421584652 left him at y 1.73 over ground at 0.99, falling at 4.9 m/s, not on the floor, until
+the test gave up. A slow runner makes it likelier (a fall spread over more ticks), and a body
+frozen like that floats in the air until a player comes within `WAKE_M`. The doc comment says
+"nobody is frozen mid-fall".
+
+Suggested fix: don't sleep a soldier that isn't on the floor (`not s.is_on_floor()`), or whose
+`velocity` isn't about zero, as well as the height test; or sleep him only after he has been
+on the floor for a tick or two. world_test now turns DynamicSim off during its ground guard
+check (that check isn't about the sleep); a test of the fix could drop a far hostile 2 m onto
+the ground with DynamicSim running and check he lands.
