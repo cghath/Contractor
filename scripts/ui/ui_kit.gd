@@ -167,6 +167,99 @@ static func warn(value: String) -> Label:
 	return label
 
 
+## Body text in the good (green) colour: a claimed row, a done thing.
+static func good(value: String) -> Label:
+	var label := text(value)
+	label.theme_type_variation = &"GoodLabel"
+	return label
+
+
+## Body text, dimmed (body size, unlike hint): a row that can't be acted on now.
+static func muted(value: String) -> Label:
+	var label := text(value)
+	label.theme_type_variation = &"MutedLabel"
+	return label
+
+
+## A table cell: one line of text (no wrapping: numbers and short words) in a label `variation`
+## ("" for body text). Give the table's widest column wrapping text (text()) with
+## SIZE_EXPAND_FILL so it takes the room the others leave.
+static func cell(value: String, variation := &"") -> Label:
+	var label := Label.new()
+	label.text = value
+	if variation != &"":
+		label.theme_type_variation = variation
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return label
+
+
+## Makes `label` a one-line label that cuts its text with "..." past `cap` px, keeping the
+## whole text in its tooltip, instead of widening its row (a long item name or injury in a flow
+## of them). Its minimum width is its whole text up to `cap`: Godot leaves a trimmed label's
+## text out of its minimum size, so in a flow it would shrink to nothing (as buttons did,
+## fit_button_text). Kept up to date when the theme changes.
+static func fit_label_text(label: Label, cap := BUTTON_TEXT_CAP) -> void:
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	if label.tooltip_text == "":
+		label.tooltip_text = label.text
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	var refit := func() -> void:
+		if not is_instance_valid(label):
+			return
+		var font := label.get_theme_font(&"font")
+		var full := 0.0
+		if font != null and label.text != "":
+			full = font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.get_theme_font_size(&"font_size")).x + 2.0
+		var style := label.get_theme_stylebox(&"normal")
+		if style != null:
+			full += style.get_minimum_size().x
+		label.custom_minimum_size.x = ceilf(minf(full, cap))
+	label.theme_changed.connect(refit)
+	refit.call()
+
+
+## A table: a GridContainer of `headers.size()` columns with a header row in the hint style.
+## The first column expands (put its wrapping text there); add the rows' cells in order.
+static func table(headers: Array) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = headers.size()
+	grid.add_theme_constant_override(&"h_separation", SPACE_M)
+	grid.add_theme_constant_override(&"v_separation", SPACE_XS)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for i in headers.size():
+		var head := cell(String(headers[i]), &"HintLabel")
+		if i == 0:
+			head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(head)
+	return grid
+
+
+## A figure for a summary header: a small dim caption over its value.
+static func stat(caption: String, value: String) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override(&"separation", 0)
+	box.add_child(cell(caption, &"HintLabel"))
+	box.add_child(cell(value, &"StatLabel"))
+	return box
+
+
+## A row for a thing and what can be done with it: its text (wrapping, the whole width) over a
+## wrapping row of `controls`, so a narrow panel takes it on two lines instead of running off
+## (an item with five buttons and a drop-down doesn't fit beside its name at 1280x720 and 1.5).
+## The row's button_row is the meta "controls", for adding more.
+static func action_row(value: String, controls: Array = [], label: Label = null) -> VBoxContainer:
+	var r := VBoxContainer.new()
+	r.add_theme_constant_override(&"separation", SPACE_XS)
+	var l := label if label else text(value)
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r.add_child(l)
+	var buttons := button_row(controls)
+	r.add_child(buttons)
+	r.set_meta(&"controls", buttons)
+	return r
+
+
 ## A HUD line in the one outlined HUD style (`variation`: HudLabel, HudSmallLabel, HudAlertLabel
 ## or HudWarnLabel). It carries the theme itself, as HUD labels sit straight on a CanvasLayer,
 ## and never takes the mouse.
@@ -350,10 +443,16 @@ static func budget_bar(value: float, maximum: float, caption := "") -> ProgressB
 
 
 ## Focuses the first focusable Button under `root` (keyboard: Tab, arrows and Enter work from
-## the moment a menu opens). Deferred, as a freshly built control can't take focus yet.
+## the moment a menu opens). Deferred, as a freshly built control can't take focus yet; and
+## looked up then, not now: a screen rebuilt in the same frame (the loadout menu's first
+## select) would leave the grab on a button already out of the tree.
 static func focus_first(root: Node) -> void:
-	for b in root.find_children("*", "BaseButton", true, false):
-		var c := b as Control
-		if c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE and not (c as BaseButton).disabled:
-			c.call_deferred(&"grab_focus")
+	var pick := func() -> void:
+		if not is_instance_valid(root) or not root.is_inside_tree():
 			return
+		for b in root.find_children("*", "BaseButton", true, false):
+			var c := b as Control
+			if c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE and not (c as BaseButton).disabled:
+				c.grab_focus()
+				return
+	pick.call_deferred()

@@ -691,10 +691,11 @@ func _role_picker(mid: String, current: StringName) -> OptionButton:
 ## certified, nothing once there's neither (keeps the row short for everyone who'll never fly
 ## the heavy exo).
 func _hx1_cert_button(mid: String, m: Dictionary) -> Control:
+	## One-line cells: a wrapping hint in the row's HBox was squeezed to nothing (feat/ui-pass).
 	if Roster.hx1_certified(m):
-		return UiKit.hint("HX-1 certified")
+		return UiKit.cell("HX-1 certified", &"HintLabel")
 	if not Roster.hx1_eligible(m):
-		return UiKit.hint("HX-1: %d/%d missions" % [int(m.get("missions", 0)), Roster.HX1_CERT_MISSIONS])
+		return UiKit.cell("HX-1: %d/%d missions" % [int(m.get("missions", 0)), Roster.HX1_CERT_MISSIONS], &"HintLabel")
 	var button := UiKit.button("Certify HX-1 ($%d)" % Roster.HX1_CERT_COST,
 		func() -> void: BaseHub.request("certify_hx1", [mid]), "Certify %s to pilot the HX-1 Assault Frame" % m.name)
 	button.disabled = not multiplayer.is_server()  # the host's call, same as hiring and release

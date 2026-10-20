@@ -1113,7 +1113,9 @@ func _icon(id: StringName, edge: int) -> Control:
 	text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Cut with "..." (the tile's tooltip has the name), not wrapped mid-word on a small swatch
+	# (feat/ui-pass: "Assault" broke over two lines on a 48 px one).
+	text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	text.add_theme_font_size_override(&"font_size", UiKit.FONT_SMALL if edge < 100 else UiKit.FONT_HEADING)  # on a swatch: the kit's sizes
 	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	swatch.add_child(text)

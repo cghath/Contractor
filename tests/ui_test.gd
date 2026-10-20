@@ -37,6 +37,7 @@ func _ready() -> void:
 	_vp.gui_disable_input = true
 	add_child(_vp)
 	_test_kit()
+	await _test_checks()
 	_test_auto_scale()
 	await _fit("pause menu", func() -> Node:
 		var p := PauseMenu.new()
@@ -61,13 +62,41 @@ func _ready() -> void:
 		b.ready.connect(func() -> void: b.select_offer(0))
 		return b)
 	await _fit("debrief (empty)", func() -> Node: return DebriefScreen.new())
+	# The debrief at its longest, with the salvage still open and then closed (feat/ui-pass).
+	for finished: bool in [false, true]:
+		_full_debrief(finished)
+		await _fit("debrief (full, salvage %s)" % ("closed" if finished else "open"), func() -> Node: return DebriefScreen.new())
+	Contracts._s().debrief = {}
 	BaseHub.new_campaign(7)
+	for hire: Dictionary in Hiring.pool(BaseHub.hiring(), BaseHub.day()).slice(0, 3):  # a squad on the pages and to kit
+		BaseHub.server_hire(String(hire.cid))
 	BaseHub.view = BaseHub.build_view()
 	for page: String in BaseUI.PAGES:
 		await _fit("base: " + page, func() -> Node:
 			var ui := BaseUI.new()
 			ui.ready.connect(func() -> void: ui.open(page))
 			return ui)
+	# The loadout menu (feat/ui-pass): you with nothing on, and a squadmate in full kit who was
+	# short of things on the last change (the Buy rows), as BaseHub.open_loadout shows it.
+	var kitted := _inventory_body()
+	var members: Dictionary = BaseHub.view.get("roster", {}).get("members", {})
+	var mids := members.keys()
+	mids.sort()
+	var mate := String(mids[0]) if not mids.is_empty() else ""
+	check(mate != "", "the new campaign has a squad to kit (%d)" % mids.size())
+	if mate != "":
+		members[mate]["gear"] = Roster.json_safe(kitted.inventory.net_state)
+		members[mate]["edit_missing"] = {"m4a1": 1, "mag_556": 6, "ifak": 2, "frag_grenade": 4}
+	kitted.queue_free()
+	for who: String in ["", mate]:
+		await _fit("loadout: " + ("a kitted squadmate" if who != "" else "you"), func() -> Node:
+			var layer := CanvasLayer.new()
+			layer.layer = 21
+			var screen := LoadoutScreen.new()
+			layer.add_child(screen)
+			if who != "":
+				screen.ready.connect(func() -> void: screen.select(who))
+			return layer)
 	# Full and compact, with several contracts' worth of lines (feat/objective-list).
 	for expanded: bool in [true, false]:
 		GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_objlist_settings.cfg"))
@@ -463,20 +492,26 @@ func _menu_levels(level: Dictionary, stack: Array) -> Array:
 	return out
 
 
-func _fit(screen: String, make: Callable) -> void:
+func _fit(screen: String, make: Callable, strict := true) -> void:
 	print(screen)
 	_vp.size = SIZES[0]
 	var node: Node = make.call()
 	_vp.add_child(node)
 	await _frames(3)
+	if strict and not node.find_children("*", "Label", true, false).is_empty():  # (a drawn readout has none)
+		check(node.find_children("*", "Control", true, false).any(func(c: Control) -> bool: return c.theme == UiKit.THEME),
+			"%s is in the shared theme (UiKit.apply)" % screen)
 	for ui_scale: float in UI_SCALES:
 		var bad := PackedStringArray()
 		for res in SIZES:
 			_vp.size = Vector2i((Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor())
 			await _frames(2)
-			var off := _off_screen(node, Rect2(Vector2.ZERO, Vector2(_vp.size)).grow(1.0))
+			var window := Rect2(Vector2.ZERO, Vector2(_vp.size))
+			var off := _layout_problems(node, window) if strict else _off_screen(node, window.grow(1.0))
 			off.append_array(_blank_buttons(node))
 			if not off.is_empty():
+				if bad.is_empty():  # the first size that fails at this scale: all it found, for the fix
+					print("    %dx%d @%.1f: %s%s" % [res.x, res.y, ui_scale, "; ".join(off.slice(0, 24)), " (+%d more)" % (off.size() - 24) if off.size() > 24 else ""])
 				bad.append("%dx%d: %s" % [res.x, res.y, ", ".join(off.slice(0, 3)) + (" (+%d more)" % (off.size() - 3) if off.size() > 3 else "")])
 		var key := "%s @%.1f" % [screen, ui_scale]
 		_report[key] = bad
@@ -659,6 +694,251 @@ func _off_screen(node: Node, window: Rect2) -> PackedStringArray:
 				continue
 		out.append_array(_off_screen(child, window))
 	return out
+
+
+## The strict checks (feat/ui-pass, the Captain's tasking of 2026-10-19: "every screen fits and
+## reads at all 10 test resolutions, with nothing clipped or overlapping"). On top of what
+## _off_screen finds, under `node`:
+## - nothing that matters runs past what clips it: the window, a scroll area's sides (they only
+##   scroll up and down), a clipping control;
+## - no text under UiKit.FONT_SMALL;
+## - no line cut short without "..." and a tooltip, no wrapping text squeezed narrower than
+##   MIN_TEXT_WIDTH (or its own width) and no wrapped lines cut off at the bottom;
+## - no two children of a box, flow or grid overlap, and none sticks out of it.
+func _layout_problems(node: Node, clip: Rect2) -> PackedStringArray:
+	var out := PackedStringArray()
+	for child in node.get_children():
+		if (child is CanvasItem and not (child as CanvasItem).visible) or (child is CanvasLayer and not (child as CanvasLayer).visible):
+			continue
+		var inner := clip
+		if child is Control:
+			var c := child as Control
+			var r := c.get_global_rect()
+			if r.size.x <= 0.0 or r.size.y <= 0.0:
+				if (c is Label or c is Button) and _matters(c) and (c is Button or (c as Label).text.strip_edges() != ""):
+					out.append("%s '%s' squeezed to nothing (%s)" % [c.get_class(), _name(c), r.size])
+				continue  # takes no room (an empty flow, a collapsed row): nothing of it shows
+			if _matters(c) and not clip.grow(1.0).encloses(r):
+				out.append("%s '%s' %s outside %s" % [c.get_class(), _name(c), r, clip])
+				continue
+			out.append_array(_text_problems(c))
+			if c is BoxContainer or c is FlowContainer or c is GridContainer:
+				out.append_array(_overlaps(c))
+			elif not c is Container:
+				out.append_array(_overlaps(c, false))  # placed by hand: what shows text mustn't overlap
+			if c is ScrollContainer:
+				var sc := c as ScrollContainer
+				var sideways := sc.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
+				var updown := sc.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED
+				inner = Rect2(Vector2(-1e6 if sideways else r.position.x, -1e6 if updown else r.position.y),
+					Vector2(2e6 if sideways else r.size.x, 2e6 if updown else r.size.y))
+			elif c.clip_contents:
+				inner = r.intersection(clip) if r.intersects(clip) else Rect2(r.position, Vector2.ZERO)
+		out.append_array(_layout_problems(child, inner))
+	return out
+
+
+## What a reader needs whole: a button, field, slider, list, tab set, scroll area or line of text.
+func _matters(c: Control) -> bool:
+	return c is BaseButton or c is LineEdit or c is Range or c is ItemList or c is TabContainer or c is ScrollContainer \
+		or (c is Label and (c as Label).text.strip_edges() != "")
+
+
+## Narrowest a wrapping line of text may be squeezed (or its whole text, if shorter).
+const MIN_TEXT_WIDTH := 80.0
+
+
+## A label's or button's text: big enough, and shown whole (or cut with "..." and a tooltip).
+func _text_problems(c: Control) -> PackedStringArray:
+	var out := PackedStringArray()
+	var text := ""
+	if c is Label:
+		text = (c as Label).text
+	elif c is Button:
+		text = (c as Button).text
+	text = text.strip_edges()
+	if text == "":
+		return out
+	var font_size := c.get_theme_font_size(&"font_size")
+	if font_size < UiKit.FONT_SMALL:
+		out.append("%s '%s' %d px, under %d" % [c.get_class(), text.left(24), font_size, UiKit.FONT_SMALL])
+	var font := c.get_theme_font(&"font")
+	var widest := 0.0
+	for line: String in text.split("\n"):
+		widest = maxf(widest, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x)
+	var style := c.get_theme_stylebox(&"normal")
+	var room := c.size.x - (style.get_minimum_size().x if style else 0.0)
+	var tip := _tooltip_shown(c)
+	if c is Label:
+		var l := c as Label
+		if l.autowrap_mode == TextServer.AUTOWRAP_OFF:
+			if widest > room + 1.0 and not (tip and l.text_overrun_behavior != TextServer.OVERRUN_NO_TRIMMING):
+				out.append("label '%s' cut (%.0f of %.0f px)%s" % [text.left(24), room, widest, "" if tip else ", no tooltip"])
+		else:
+			if room + 0.5 < minf(widest, MIN_TEXT_WIDTH):
+				out.append("label '%s' squeezed to %.0f px" % [text.left(24), room])
+			if l.max_lines_visible < 0 and l.get_visible_line_count() < l.get_line_count():
+				out.append("label '%s' shows %d of %d lines" % [text.left(24), l.get_visible_line_count(), l.get_line_count()])
+	else:
+		var b := c as Button
+		var need := widest
+		if b.icon != null and not b.expand_icon:
+			need += b.icon.get_width() + b.get_theme_constant(&"h_separation")
+		if b is OptionButton:
+			var arrow := b.get_theme_icon(&"arrow")
+			need += (arrow.get_width() if arrow else 0.0) + b.get_theme_constant(&"arrow_margin")
+		if b is CheckBox or b is CheckButton:
+			var box := b.get_theme_icon(&"unchecked")
+			need += (box.get_width() if box else 0.0) + b.get_theme_constant(&"h_separation")
+		var item_tip := b is OptionButton and (b as OptionButton).selected >= 0 and (b as OptionButton).get_item_tooltip((b as OptionButton).selected) != ""
+		if need > room + 1.0 and not tip and not item_tip:
+			out.append("button '%s' cut (%.0f of %.0f px), no tooltip" % [text.left(24), room, need])
+	return out
+
+
+## Whether hovering `c` shows a tooltip: its own, or (when it lets the mouse through, as a cut
+## line on an inventory tile does) the nearest one of the controls it sits on.
+func _tooltip_shown(c: Control) -> bool:
+	var at: Node = c
+	while at is Control:
+		if (at as Control).tooltip_text != "":
+			return true
+		if (at as Control).mouse_filter == Control.MOUSE_FILTER_STOP:
+			return false
+		at = at.get_parent()
+	return false
+
+
+## The children of a box, flow or grid (`laid_out`): none over another, none out of it. Of a
+## plain Control (children placed by hand): none of those showing text or controls over another
+## (a backdrop or a drawing under them is fine).
+func _overlaps(box: Control, laid_out := true) -> PackedStringArray:
+	var out := PackedStringArray()
+	var kids: Array[Control] = []
+	for k in box.get_children():
+		var kc := k as Control
+		if kc and kc.visible and not kc.top_level and kc.size.x > 0.0 and kc.size.y > 0.0 and (laid_out or _shows_content(kc)):
+			kids.append(kc)
+	var area := box.get_global_rect().grow(1.0)
+	for i in kids.size():
+		var a := kids[i].get_global_rect()
+		if laid_out and not area.encloses(a):
+			out.append("%s '%s' %s sticks out of its %s %s" % [kids[i].get_class(), _name(kids[i]), a, box.get_class(), box.get_global_rect()])
+		for j in range(i + 1, kids.size()):
+			var b := kids[j].get_global_rect()
+			if _inset(a).intersects(_inset(b)):
+				out.append("%s '%s' %s over %s '%s' %s" % [kids[i].get_class(), _name(kids[i]), a, kids[j].get_class(), _name(kids[j]), b])
+	return out
+
+
+## Whether `c` is, or holds, something that shows (_matters).
+func _shows_content(c: Control) -> bool:
+	if _matters(c):
+		return true
+	for d in c.find_children("*", "Control", true, false):
+		if (d as Control).is_visible_in_tree() and _matters(d as Control):
+			return true
+	return false
+
+
+## The strict checks themselves (feat/ui-pass): a small screen built wrong in each way they look
+## for, so a check that stops finding anything fails here rather than passing every screen.
+func _test_checks() -> void:
+	print("The strict fit checks catch what they look for")
+	_vp.size = Vector2i(800, 600)
+	var layer := CanvasLayer.new()
+	_vp.add_child(layer)
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UiKit.apply(root)
+	layer.add_child(root)
+	var row := HBoxContainer.new()
+	row.position = Vector2(400, 20)
+	row.size = Vector2(300, 40)  # (the squeezed label makes it tall: kept clear of the rest)
+	root.add_child(row)
+	var cut := Label.new()
+	cut.text = "A long line of text cut off silently"
+	cut.clip_text = true
+	cut.custom_minimum_size.x = 60
+	row.add_child(cut)
+	var squeezed := UiKit.text("Squeezed text that wraps")
+	row.add_child(squeezed)
+	var small := Label.new()
+	small.text = "Tiny"
+	small.add_theme_font_size_override(&"font_size", 11)
+	row.add_child(small)
+	var a := UiKit.text("Placed by hand")
+	a.position = Vector2(20, 200)
+	a.size = Vector2(200, 30)
+	root.add_child(a)
+	var b := UiKit.button("Over it", func() -> void: pass)
+	b.position = Vector2(60, 205)
+	root.add_child(b)
+	var off := UiKit.button("Off the window", func() -> void: pass)
+	off.position = Vector2(760, 560)
+	root.add_child(off)
+	await _frames(2)
+	var found := " | ".join(_layout_problems(layer, Rect2(Vector2.ZERO, Vector2(_vp.size))))
+	for want: String in ["label 'A long line of text", "'Squeezed text that wraps' squeezed", "'Tiny' 11 px", "'Placed by hand'", "'Off the window'"]:
+		check(found.contains(want), "it finds %s (%s)" % [want, found.left(400) if not found.contains(want) else "found"])
+	check(found.contains("over Button 'Over it'"), "it finds two hand-placed controls over each other")
+	layer.queue_free()
+	await _frames(1)
+
+
+## `r` a pixel in from each side (touching edges aren't an overlap), never below zero size.
+func _inset(r: Rect2) -> Rect2:
+	return Rect2(r.position + Vector2.ONE, (r.size - Vector2(2, 2)).max(Vector2.ZERO))
+
+
+## The longest debrief the screen shows (feat/ui-pass), installed as the campaign's last one: a
+## completed contract with bonuses and a voided one clawed back, nine casualties, everything a
+## full squad carried out, a salvage pool of the 26 longest-named items of value (some claimed),
+## tagged pallets and a vehicle, intel, and the expenses. `finished`: the salvage is closed.
+func _full_debrief(finished: bool) -> void:
+	var employers := MissionRegistry.employers()
+	var contracts: Array = []
+	var objectives: Array = []
+	for n in 2:
+		var cid := "ui_test_%d" % n
+		contracts.append({"cid": cid, "title": "Recover the field laptop and the courier's ledgers from the Kessler farm compound (%d)" % (n + 1),
+			"employer": employers[n % employers.size()], "target": "", "state": "voided" if n == 1 else "deployed", "zone_kind": "contract",
+			"region": "", "days": 3, "deal": {"pay_total": 84000, "advance": 25000, "completion": 59000, "salvage_share": 0.35}})
+		objectives.append({"cid": cid, "optional": false, "state": Objectives.DONE if n == 0 else Objectives.ACTIVE, "text": "Recover the field laptop from the farmhouse cellar"})
+		objectives.append({"cid": cid, "optional": true, "state": Objectives.DONE, "text": "Bonus: destroy the weapons cache under the barn floor", "bonus_share": 0.1})
+	var ids: Array = ItemDB.all_ids().filter(func(id: Variant) -> bool: return Prices.value_of(StringName(id), 1, {}) > 0)
+	ids.sort_custom(func(a: Variant, b: Variant) -> bool: return DebriefCalc.item_name(a).length() > DebriefCalc.item_name(b).length())
+	var field: Array = []
+	for id: Variant in ids.slice(0, 26):
+		field.append_array([{"id": String(id), "count": 1}, {"id": String(id), "count": 2}])
+	var carried: Array = [{"id": "hvt_case", "count": 2}]
+	for id: Variant in ids.slice(0, 40):
+		carried.append({"id": String(id), "count": 3})
+	var casualties: Array = []
+	for n in 9:
+		casualties.append({"name": "Squadmate %d" % n, "status": ["kia", "wounded", "mia"][n % 3], "injury": "Gunshot wound to the left thigh, tourniquet" if n % 3 == 1 else ""})
+	var report := {"items": carried, "field_items": field, "casualties": casualties,
+		"extracted": ["You", "Player 2", "Golf", "Hotel", "India", "Juliet", "Kilo", "Lima"]}
+	var d := DebriefCalc.compute(contracts, objectives, 2, report)
+	d["zone_name"] = "Kessler Farm compound and the north road checkpoint"
+	d["day"] = 12
+	d["extracted"] = report.extracted
+	d["tagged"] = [Pallets.pallet_lot("fuel_drums", "ui0"), Pallets.pallet_lot("ammo", "ui1"), Pallets.pallet_lot("mixed", "ui2"),
+		Pallets.vehicle_lot("technical_dshk", false, "v:ui", "Technical with a DShK")]
+	d.tagged[1]["tag"] = "gift"
+	d.tagged[1]["faction"] = employers[0]
+	var spent := DebriefCalc.expenses(report, int(d.days), [{"what": "Respawns bought (2)", "amount": 9000}, {"what": "Fire support: 81 mm mortar, two missions", "amount": 14000}])
+	d["expenses"] = spent.lines
+	d["expenses_total"] = spent.total
+	d["net"] = int(d.totals.contract_value) - int(spent.total)
+	for i: int in DebriefCalc.best_value_picks(d).slice(0, 3):
+		d.salvage.picked.append(i)
+		d.salvage.spent = int(d.salvage.spent) + int(d.salvage.pool[i].value)
+	d["finished"] = finished
+	check((d.salvage.pool as Array).size() >= 40 and not (d.intel as Array).is_empty() and int(d.salvage.budget) > 0,
+		"a full debrief: %d salvage lots, %d intel, budget $%s" % [(d.salvage.pool as Array).size(), (d.intel as Array).size(), DebriefCalc.money(d.salvage.budget)])
+	Contracts._s().debrief = d
+	Contracts._commit()
 
 
 ## How many characters of its text every button must show (or all of it, if shorter).

@@ -14,15 +14,20 @@ extends CanvasLayer
 ## row per item type (DebriefCalc.salvage_groups) with the claim controls next to the item,
 ## a budget bar, sorting and a "claim best value" helper. The claims are still the host's
 ## per-lot pick/unpick requests: the screen only chooses which lots to ask for.
+##
+## feat/ui-pass (Captain's tasking, 2026-10-19): built from the shared kit (UiKit, the theme)
+## with no sizes or colours of its own, nothing under 14 px; the salvage table's item column
+## wraps and takes what the numbers leave; a tagged lot's or intel's buttons wrap under its
+## line (UiKit.action_row); casualties one each. ui_test's strict checks fit it full.
 
 signal closed
 
 ## The panel's widest (so the claim buttons stay next to the items on wide screens).
 const MAX_WIDTH := 1100.0
-const TITLE_COLOR := Color("c8d6a0")
-const DIM_COLOR := Color(0.62, 0.64, 0.6)
 const SORTS := ["value", "category", "name"]
 const SORT_NAMES := {"value": "Total value", "category": "Category", "name": "Name"}
+## The salvage table's item column at its narrowest (it wraps; the numbers and buttons don't).
+const ITEM_MIN := 140.0
 
 var _panel: PanelContainer
 var _scroll: ScrollContainer
@@ -43,51 +48,38 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	## A dimmed backdrop: the panel reads on its own, and the HUD (the squad list bottom left)
 	## sits muted under it instead of showing through the text.
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.0, 0.0, 0.0, 0.72)
-	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(backdrop)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_panel = PanelContainer.new()
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.07, 0.05, 0.96)
-	style.border_color = Color(0.3, 0.36, 0.26)
-	style.set_border_width_all(1)
-	style.set_content_margin_all(14)
-	_panel.add_theme_stylebox_override(&"panel", style)
+	add_child(UiKit.dim(0.72))
+	_panel = UiKit.panel(true)
+	UiKit.apply(_panel)
 	add_child(_panel)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override(&"separation", 8)
 	_panel.add_child(root)
-	_title = Label.new()
-	_title.add_theme_font_size_override(&"font_size", 22)
-	_title.add_theme_color_override(&"font_color", TITLE_COLOR)
-	_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_title = UiKit.title("")
+	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	root.add_child(_title)
 	root.add_child(HSeparator.new())
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.follow_focus = true
 	root.add_child(_scroll)
 	_box = VBoxContainer.new()
 	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_box.add_theme_constant_override(&"separation", 6)
 	_scroll.add_child(_box)
 	root.add_child(HSeparator.new())
+	## Continue pinned under the scroll (docs/ui_audit.md P1-16), beside what Esc does.
 	var footer := HBoxContainer.new()
-	footer.add_theme_constant_override(&"separation", 12)
+	footer.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	root.add_child(footer)
-	var hint := Label.new()
-	hint.text = "Esc also continues. Salvage claims are banked when the host continues."
-	hint.add_theme_color_override(&"font_color", DIM_COLOR)
-	hint.add_theme_font_size_override(&"font_size", 13)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
-	var cont := Button.new()
-	cont.text = "Continue"
-	cont.custom_minimum_size = Vector2(140, 34)
-	cont.pressed.connect(close)
+	var keys := VBoxContainer.new()
+	keys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	keys.add_theme_constant_override(&"separation", 0)
+	keys.add_child(UiKit.key_hint("Esc", "Continue"))
+	keys.add_child(UiKit.hint("Salvage claims are banked when the host continues."))
+	footer.add_child(keys)
+	var cont := UiKit.button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
+	cont.name = "Continue"
+	cont.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	footer.add_child(cont)
 	get_viewport().size_changed.connect(_fit)
 	## A container grows to its minimum but never shrinks back: the wrapped title and footer
@@ -98,6 +90,7 @@ func _ready() -> void:
 	_fit()
 	Contracts.changed.connect(refresh)
 	refresh()
+	UiKit.focus_first(_panel)
 
 
 ## Where the panel goes on a `viewport` of that size (in UI units, so the UI scale is already
@@ -163,97 +156,107 @@ func _header(d: Dictionary) -> void:
 	var totals: Dictionary = d.get("totals", {})
 	var outcomes := PackedStringArray((d.get("contracts", []) as Array).map(func(c: Dictionary) -> String: return String(c.outcome).to_upper()))
 	var stats := HFlowContainer.new()
-	stats.add_theme_constant_override(&"h_separation", 28)
+	stats.add_theme_constant_override(&"h_separation", UiKit.SPACE_L + UiKit.SPACE_S)
+	stats.add_theme_constant_override(&"v_separation", UiKit.SPACE_S)
 	_box.add_child(stats)
-	_stat(stats, "Outcome", ", ".join(outcomes) if not outcomes.is_empty() else "-")
-	_stat(stats, "Paid now", "$" + DebriefCalc.money(totals.get("paid_now", 0)))
-	_stat(stats, "Fines", ("-$" + DebriefCalc.money(d.get("fines", 0))) if int(d.get("fines", 0)) > 0 else "none")
-	_stat(stats, "Days", str(int(d.get("days", 0))))
+	stats.add_child(UiKit.stat("Outcome", ", ".join(outcomes) if not outcomes.is_empty() else "-"))
+	stats.add_child(UiKit.stat("Paid now", "$" + DebriefCalc.money(totals.get("paid_now", 0))))
+	stats.add_child(UiKit.stat("Fines", ("-$" + DebriefCalc.money(d.get("fines", 0))) if int(d.get("fines", 0)) > 0 else "none"))
+	stats.add_child(UiKit.stat("Days", str(int(d.get("days", 0)))))
 	if d.has("expenses_total"):
-		_stat(stats, "Expenses", "-$" + DebriefCalc.money(d.expenses_total))
-		_stat(stats, "Net after expenses", "$" + DebriefCalc.money(d.get("net", 0)))
+		stats.add_child(UiKit.stat("Expenses", "-$" + DebriefCalc.money(d.expenses_total)))
+		stats.add_child(UiKit.stat("Net after expenses", "$" + DebriefCalc.money(d.get("net", 0))))
 	_line("Got out: %s" % ", ".join(PackedStringArray(d.get("extracted", []))) if not (d.get("extracted", []) as Array).is_empty() else "Got out: (not reported)")
+	## One entry each, the dead in the warning colour (one comma-separated run-on line before,
+	## docs/ui_audit.md P1-16).
 	var casualties: Array = d.get("casualties", [])
-	_line("Casualties and injuries: %s" % ("none" if casualties.is_empty() else ", ".join(PackedStringArray(casualties.map(func(c: Dictionary) -> String:
-		return "%s (%s%s)" % [c.get("name", "?"), String(c.get("status", "")).to_upper(), ": " + String(c.injury) if String(c.get("injury", "")) != "" else ""])))))
-	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total), 15):
+	if casualties.is_empty():
+		_line("Casualties and injuries: none")
+	else:
+		_box.add_child(UiKit.hint("Casualties and injuries (%d)" % casualties.size()))
+		var list := HFlowContainer.new()
+		list.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
+		_box.add_child(_indent(list, UiKit.SPACE_L))
+		for c: Dictionary in casualties:
+			var who := "%s (%s%s)" % [c.get("name", "?"), String(c.get("status", "")).to_upper(), ": " + String(c.injury) if String(c.get("injury", "")) != "" else ""]
+			var label := UiKit.cell(who, &"WarnLabel" if String(c.get("status", "")) == "kia" else &"")
+			UiKit.fit_label_text(label)
+			list.add_child(label)
+	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total)):
 		for l: Dictionary in d.get("expenses", []):
-			_line("  %s: -$%s" % [l.what, DebriefCalc.money(l.amount)], 14)
+			_line("%s: -$%s" % [l.what, DebriefCalc.money(l.amount)], UiKit.SPACE_L)
 		var bill := Economy.weekly_bill()
-		_line("  Next weekly bill: $%s in %d days (wages $%s, upkeep $%s)" % [DebriefCalc.money(bill.total), Economy.days_to_bill(), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep)], 14)
-	if _section("details", "Contract details, pay and reputation", 15):
+		_line("Next weekly bill: $%s in %d days (wages $%s, upkeep $%s)" % [DebriefCalc.money(bill.total), Economy.days_to_bill(), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep)], UiKit.SPACE_L)
+	if _section("details", "Contract details, pay and reputation"):
 		for l: String in DebriefCalc.summary(d):
-			_line(l, 14)
-
-
-func _stat(parent: Control, what: String, value: String) -> void:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override(&"separation", 0)
-	parent.add_child(box)
-	var key := Label.new()
-	key.text = what
-	key.add_theme_font_size_override(&"font_size", 12)
-	key.add_theme_color_override(&"font_color", DIM_COLOR)
-	box.add_child(key)
-	var val := Label.new()
-	val.text = value
-	val.add_theme_font_size_override(&"font_size", 18)
-	box.add_child(val)
+			var depth := 2 if l.begins_with("    ") else (1 if l.begins_with("  ") else 0)
+			_line(l.strip_edges(), UiKit.SPACE_L + UiKit.SPACE_M * depth)
 
 
 ## What was carried out, summed per item type, in collapsible categories.
 func _carried(d: Dictionary) -> void:
 	var groups := DebriefCalc.group_items(d.get("items_out", []))
 	var total: int = groups.reduce(func(acc: int, g: Dictionary) -> int: return acc + int(g.count), 0)
-	_line("")
-	if not _section("carried", "CARRIED OUT (banked at base): %s" % ("nothing" if groups.is_empty() else "%d items, %d kinds" % [total, groups.size()]), 17):
+	if not _section("carried", "CARRIED OUT (banked at base): %s" % ("nothing" if groups.is_empty() else "%d items, %d kinds" % [total, groups.size()])):
 		return
 	for cat: String in DebriefCalc.CATEGORIES:
 		var mine := groups.filter(func(g: Dictionary) -> bool: return g.category == cat)
 		if mine.is_empty():
 			continue
 		var n: int = mine.reduce(func(acc: int, g: Dictionary) -> int: return acc + int(g.count), 0)
-		if not _section("carried:" + cat, "%s (%d)" % [DebriefCalc.CATEGORY_NAMES[cat], n], 15, 16):
+		if not _section("carried:" + cat, "%s (%d)" % [DebriefCalc.CATEGORY_NAMES[cat], n], false, UiKit.SPACE_L):
 			continue
 		var flow := HFlowContainer.new()
-		flow.add_theme_constant_override(&"h_separation", 22)
-		var pad := MarginContainer.new()
-		pad.add_theme_constant_override(&"margin_left", 46)
-		pad.add_child(flow)
-		_box.add_child(pad)
+		flow.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
+		_box.add_child(_indent(flow, UiKit.SPACE_L * 2))
 		for g: Dictionary in mine:
-			var label := Label.new()
-			label.text = "%d x %s" % [int(g.count), g.name]
+			var label := UiKit.cell("%d x %s" % [int(g.count), g.name])
 			label.tooltip_text = item_tip(g.id)
-			label.mouse_filter = Control.MOUSE_FILTER_PASS if label.tooltip_text != "" else Control.MOUSE_FILTER_IGNORE
+			UiKit.fit_label_text(label)
 			flow.add_child(label)
 
 
-## A section heading with a fold button; returns whether it is open.
-func _section(key: String, text: String, size := 15, indent := 0) -> bool:
-	var row := HBoxContainer.new()
+## `control` moved in from the left by `px`.
+func _indent(control: Control, px: int) -> MarginContainer:
 	var pad := MarginContainer.new()
-	pad.add_theme_constant_override(&"margin_left", indent)
-	pad.add_child(row)
-	_box.add_child(pad)
+	pad.add_theme_constant_override(&"margin_left", px)
+	pad.add_child(control)
+	return pad
+
+
+## A section heading with a fold button; returns whether it is open. `top`: a main section
+## (the heading style, a gap above it); else a sub-section in body text, `indent` px in.
+func _section(key: String, text: String, top := true, indent := 0) -> bool:
+	if top:
+		_gap()
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override(&"separation", UiKit.SPACE_S)
+	_box.add_child(_indent(row, indent))
 	var open: bool = not _collapsed.get(key, false)
-	var fold := Button.new()
-	fold.text = "-" if open else "+"
-	fold.flat = true
-	fold.custom_minimum_size = Vector2(26, 0)
-	fold.tooltip_text = "Fold" if open else "Unfold"
-	fold.pressed.connect(func() -> void:
+	var fold := UiKit.button("-" if open else "+", func() -> void:
 		_collapsed[key] = open
-		refresh())
+		refresh(), "Fold" if open else "Unfold")
+	fold.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(fold)
-	var label := Label.new()
-	label.text = text
-	label.add_theme_font_size_override(&"font_size", size)
-	label.add_theme_color_override(&"font_color", TITLE_COLOR)
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var label := UiKit.heading(text) if top else UiKit.text(text)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(label)
 	return open
+
+
+## A main section's heading without a fold.
+func _heading(text: String) -> void:
+	_gap()
+	_box.add_child(UiKit.heading(text))
+
+
+## The space above a main section.
+func _gap() -> void:
+	var gap := Control.new()
+	gap.custom_minimum_size.y = UiKit.SPACE_S
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_box.add_child(gap)
 
 
 func _salvage(d: Dictionary) -> void:
@@ -261,122 +264,77 @@ func _salvage(d: Dictionary) -> void:
 	var budget := int(salvage.get("budget", 0))
 	var spent := int(salvage.get("spent", 0))
 	var finished: bool = d.get("finished", false)
-	_line("")
-	_line("SALVAGE: share %d%% of $%s left in the field" % [roundi(float(salvage.get("share", 0)) * 100.0), DebriefCalc.money(salvage.get("pool_value", 0))], 17, TITLE_COLOR)
-	var bar_row := HBoxContainer.new()
-	bar_row.add_theme_constant_override(&"separation", 12)
-	_box.add_child(bar_row)
-	var bar := ProgressBar.new()
-	bar.max_value = maxi(budget, 1)
-	bar.value = spent
-	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(220, 16)
-	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_heading("SALVAGE: share %d%% of $%s left in the field" % [roundi(float(salvage.get("share", 0)) * 100.0), DebriefCalc.money(salvage.get("pool_value", 0))])
+	var bar := UiKit.budget_bar(spent, maxi(budget, 1), "Claimed $%s of $%s budget ($%s left)" % [DebriefCalc.money(spent), DebriefCalc.money(budget), DebriefCalc.money(budget - spent)])
 	bar.tooltip_text = "Claimed against the salvage budget"
-	bar_row.add_child(bar)
-	var budget_label := Label.new()
-	budget_label.text = "Claimed $%s of $%s budget ($%s left)" % [DebriefCalc.money(spent), DebriefCalc.money(budget), DebriefCalc.money(budget - spent)]
-	budget_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	budget_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar_row.add_child(budget_label)
+	_box.add_child(bar)
 	var groups := DebriefCalc.salvage_groups(d, _sort)
 	if groups.is_empty():
 		_line("Nothing of value was left in the field.")
 		return
-	var tools := HFlowContainer.new()
-	tools.add_theme_constant_override(&"h_separation", 10)
-	_box.add_child(tools)
-	var sort_label := Label.new()
-	sort_label.text = "Sort by"
-	tools.add_child(sort_label)
 	var sort := OptionButton.new()
 	for s: String in SORTS:
 		sort.add_item(SORT_NAMES[s])
 	sort.selected = SORTS.find(_sort)
+	sort.tooltip_text = "Sort the salvage table"
 	sort.item_selected.connect(func(i: int) -> void:
 		_sort = SORTS[i]
 		refresh())
-	tools.add_child(sort)
+	var tools: Array = [UiKit.cell("Sort by"), sort]
 	if not finished:
 		var best_picks := DebriefCalc.best_value_picks(d)
-		var best := Button.new()
-		best.text = "Claim best value"
-		best.tooltip_text = "Fill what's left of the budget with the most valuable lots"
+		var best := UiKit.button("Claim best value", func() -> void: _pick(best_picks), "Fill what's left of the budget with the most valuable lots")
 		best.disabled = best_picks.is_empty()
-		best.pressed.connect(func() -> void: _pick(best_picks))
-		tools.add_child(best)
+		tools.append(best)
 		var picked: Array = (salvage.get("picked", []) as Array).duplicate()
-		var none := Button.new()
-		none.text = "Return all"
+		var none := UiKit.button("Return all", func() -> void: _unpick(picked), "Give back every lot claimed")
 		none.disabled = picked.is_empty()
-		none.pressed.connect(func() -> void: _unpick(picked))
-		tools.add_child(none)
-	var grid := GridContainer.new()
-	grid.columns = 5
-	grid.add_theme_constant_override(&"h_separation", 18)
-	grid.add_theme_constant_override(&"v_separation", 4)
+		tools.append(none)
+	_box.add_child(UiKit.button_row(tools))
+	var grid := UiKit.table(["Item", "Claimed / qty", "Each", "Total"] + ([] if finished else ["Claim"]))
 	_box.add_child(grid)
-	for h: String in ["Item", "Claimed / qty", "Each", "Total", "" if finished else "Claim"]:
-		var head := Label.new()
-		head.text = h
-		head.add_theme_color_override(&"font_color", DIM_COLOR)
-		head.add_theme_font_size_override(&"font_size", 13)
-		grid.add_child(head)
 	for g: Dictionary in groups:
 		_salvage_row(grid, d, g, finished)
 
 
 ## One item type's row: name, claimed / quantity, value each and in all, and (still open)
-## return one, claim one, claim as many as fit. A row nothing more of fits is dimmed, its
-## buttons off with the reason as their tooltip.
+## return one, claim one, claim as many as fit. A claimed row is green; a row nothing more of
+## fits is dimmed, its buttons off with the reason as their tooltip.
 func _salvage_row(grid: GridContainer, d: Dictionary, g: Dictionary, finished: bool) -> void:
 	var why := DebriefCalc.pick_block_reason(d, g.id)
 	var some := int(g.picked_count) > 0
 	var all_in: bool = (g.picked as Array).size() == (g.lots as Array).size()
-	var tint := Color(0.7, 0.95, 0.6) if some else (Color(1, 1, 1, 0.5) if why != "" else Color.WHITE)
+	var style := &"GoodLabel" if some else (&"MutedLabel" if why != "" else &"")
 	var lots := (g.lots as Array).size()
-	var item := Label.new()
-	item.text = String(g.name)
-	item.custom_minimum_size = Vector2(230, 0)
-	item.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var item := UiKit.text(String(g.name))
+	item.theme_type_variation = style
+	item.custom_minimum_size.x = ITEM_MIN
+	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	item.mouse_filter = Control.MOUSE_FILTER_PASS
 	var tip := item_tip(g.id)
 	item.tooltip_text = "%s%s, %d lot%s in the field%s" % [(tip + "\n\n") if tip != "" else "", DebriefCalc.CATEGORY_NAMES[g.category], lots,
 		"" if lots == 1 else "s", ("\n" + why) if why != "" and not all_in else ""]
-	var qty := Label.new()
-	qty.text = "%d / %d%s" % [int(g.picked_count), int(g.count), "  CLAIMED" if all_in else ""]
-	var each := Label.new()
-	each.text = "$" + DebriefCalc.money(g.each)
-	var total := Label.new()
-	total.text = "$" + DebriefCalc.money(g.value)
-	for label: Label in [item, qty, each, total]:
-		label.modulate = tint
-		grid.add_child(label)
-	var controls := HBoxContainer.new()
-	controls.add_theme_constant_override(&"separation", 4)
-	grid.add_child(controls)
+	grid.add_child(item)
+	var qty := UiKit.cell("%d / %d%s" % [int(g.picked_count), int(g.count), "  CLAIMED" if all_in else ""], style)
+	grid.add_child(qty)
+	grid.add_child(UiKit.cell("$" + DebriefCalc.money(g.each), style))
+	grid.add_child(UiKit.cell("$" + DebriefCalc.money(g.value), style))
 	if finished:
 		return
-	var less := _small("-", "Return one lot")
+	var controls := HBoxContainer.new()
+	controls.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
+	controls.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	grid.add_child(controls)
+	var less := UiKit.button("-", func() -> void: _unpick(DebriefCalc.unpicks_for(d, g.id, 1)), "Return one lot")
 	less.disabled = not some
-	less.pressed.connect(func() -> void: _unpick(DebriefCalc.unpicks_for(d, g.id, 1)))
 	controls.add_child(less)
-	var more := _small("+", why if why != "" else "Claim one more lot")
+	var more := UiKit.button("+", func() -> void: _pick(DebriefCalc.picks_for(d, g.id, 1)), why if why != "" else "Claim one more lot")
 	more.disabled = why != ""
-	more.pressed.connect(func() -> void: _pick(DebriefCalc.picks_for(d, g.id, 1)))
 	controls.add_child(more)
-	var most := _small("Max", why if why != "" else "Claim as many as fit the budget")
+	var most := UiKit.button("Max", func() -> void: _pick(DebriefCalc.picks_for(d, g.id, -1)), why if why != "" else "Claim as many as fit the budget")
 	most.disabled = why != ""
-	most.pressed.connect(func() -> void: _pick(DebriefCalc.picks_for(d, g.id, -1)))
 	controls.add_child(most)
-
-
-func _small(text: String, tip: String) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.tooltip_text = tip
-	b.custom_minimum_size = Vector2(34, 0)
-	return b
 
 
 ## Asks the host for these pool lots (in order: each fits after the ones before it).
@@ -391,98 +349,73 @@ func _unpick(indices: Array) -> void:
 
 
 ## Tagged pallets and vehicles hauled home (feat/pallet-tagging, Pallets): sell now at the quick
-## price, store, gift to a faction, or keep as the FOB's own stocks.
+## price, store, gift to a faction, or keep as the FOB's own stocks. A lot's buttons wrap under
+## its line (UiKit.action_row): five controls beside the text ran off a narrow panel.
 func _tagged(d: Dictionary) -> void:
 	var lots: Array = d.get("tagged", [])
 	if lots.is_empty():
 		return
-	_line("")
-	_line("TAGGED PALLETS AND VEHICLES hauled home", 17, TITLE_COLOR)
+	_heading("TAGGED PALLETS AND VEHICLES hauled home")
 	for i in lots.size():
 		var lot: Dictionary = lots[i]
 		var status := String(lot.get("status", "pending"))
 		var tag := "tagged to sell" if String(lot.get("tag", "")) == "sell" else "tagged for %s" % MissionRegistry.faction_name(String(lot.get("faction", "")))
 		var verdict: String = {"pending": "undecided", "sold": "sold", "gifted": "gifted to %s" % MissionRegistry.faction_name(String(lot.get("gifted_to", ""))),
 			"kept": "kept for the FOB's stocks", "stored": "in FOB storage"}.get(status, status)
-		var row := HBoxContainer.new()
-		_box.add_child(row)
-		var label := Label.new()
-		label.text = "%s, %s: %s" % [Pallets.lot_text(lot), tag, verdict]
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.custom_minimum_size = Vector2(160, 0)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
+		var text := "%s, %s: %s" % [Pallets.lot_text(lot), tag, verdict]
 		if status != "pending" or d.get("finished", false):
+			_line(text)
 			continue
-		var sell := Button.new()
-		sell.text = "Sell now ($%s)" % DebriefCalc.money(Pallets.sell_price(lot))
-		sell.tooltip_text = "The quick price. In FOB storage it sells for more later ($%s)." % DebriefCalc.money(Pallets.sell_price(lot, true))
-		sell.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "sell"))
-		row.add_child(sell)
-		var store := Button.new()
-		store.text = "Store"
-		store.tooltip_text = "Keep it in FOB storage to sell, gift or keep later."
-		store.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "store"))
-		row.add_child(store)
+		var controls: Array = []
+		controls.append(UiKit.button("Sell now ($%s)" % DebriefCalc.money(Pallets.sell_price(lot)), func() -> void: Contracts.pallet_action("debrief", i, "sell"),
+			"The quick price. In FOB storage it sells for more later ($%s)." % DebriefCalc.money(Pallets.sell_price(lot, true))))
+		controls.append(UiKit.button("Store", func() -> void: Contracts.pallet_action("debrief", i, "store"), "Keep it in FOB storage to sell, gift or keep later."))
 		if Pallets.can_keep(lot):
-			var keep := Button.new()
-			keep.text = "Keep for FOB"
-			keep.tooltip_text = "Add it to the FOB's stocks: fuel and parts cut support and repair costs, ammo, supplies and medical restock the stash."
-			keep.pressed.connect(func() -> void: Contracts.pallet_action("debrief", i, "keep"))
-			row.add_child(keep)
+			controls.append(UiKit.button("Keep for FOB", func() -> void: Contracts.pallet_action("debrief", i, "keep"),
+				"Add it to the FOB's stocks: fuel and parts cut support and repair costs, ammo, supplies and medical restock the stash."))
 		var factions := OptionButton.new()
+		factions.tooltip_text = "The faction to gift it to"
 		for f: String in Pallets.gift_factions():
 			factions.add_item(MissionRegistry.faction_name(f))
 			factions.set_item_metadata(factions.item_count - 1, f)
 			if f == String(lot.get("faction", "")):
 				factions.select(factions.item_count - 1)
-		row.add_child(factions)
-		var gift := Button.new()
-		gift.text = "Gift (+%d rep)" % Pallets.gift_rep(lot)
-		gift.pressed.connect(func() -> void:
+		controls.append(factions)
+		controls.append(UiKit.button("Gift (+%d rep)" % Pallets.gift_rep(lot), func() -> void:
 			if factions.item_count > 0:
-				Contracts.pallet_action("debrief", i, "gift", String(factions.get_item_metadata(factions.selected))))
-		row.add_child(gift)
-	_line("Anything undecided when you continue: a gift tag is gifted, the rest goes to FOB storage.", 14)
+				Contracts.pallet_action("debrief", i, "gift", String(factions.get_item_metadata(factions.selected))),
+			"Give it to the faction picked beside it, for reputation"))
+		_box.add_child(UiKit.action_row(text, controls))
+	_box.add_child(UiKit.hint("Anything undecided when you continue: a gift tag is gifted, the rest goes to FOB storage."))
 
 
 func _intel(d: Dictionary) -> void:
 	var intel: Array = d.get("intel", [])
 	if intel.is_empty():
 		return
-	_line("")
-	_line("INTEL brought out", 17, TITLE_COLOR)
+	_heading("INTEL brought out")
 	var client := String((d.contracts as Array)[0].employer) if not (d.get("contracts", []) as Array).is_empty() else ""
 	for i in intel.size():
 		var e: Dictionary = intel[i]
-		var row := HBoxContainer.new()
-		_box.add_child(row)
-		var label := Label.new()
 		var status := String(e.get("status", "pending"))
-		label.text = "%d x %s: %s" % [int(e.count), _name(e.id), {"pending": "undecided", "turned_in": "turned in (new leads on the board)",
+		var text := "%d x %s: %s" % [int(e.count), _name(e.id), {"pending": "undecided", "turned_in": "turned in (new leads on the board)",
 			"sold": "sold to %s%s" % [MissionRegistry.faction_name(String(e.get("buyer", ""))), " (the client found out)" if e.get("caught", false) else ""]}.get(status, status)]
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.custom_minimum_size = Vector2(160, 0)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(label)
 		if status != "pending" or d.get("finished", false):
+			_line(text)
 			continue
-		var turn_in := Button.new()
-		turn_in.text = "Turn in to %s" % MissionRegistry.faction_name(client)
-		turn_in.pressed.connect(func() -> void: Contracts.turn_in_intel(i))
-		row.add_child(turn_in)
+		var turn_in := UiKit.button("Turn in to %s" % MissionRegistry.faction_name(client), func() -> void: Contracts.turn_in_intel(i),
+			"Hand it to the client: new leads on the board")
 		var buyers := OptionButton.new()
+		buyers.tooltip_text = "Who to sell it to (the client may find out)"
 		for f: String in MissionRegistry.faction_ids():
 			if f != client:
 				buyers.add_item(MissionRegistry.faction_name(f))
 				buyers.set_item_metadata(buyers.item_count - 1, f)
-		row.add_child(buyers)
-		var sell := Button.new()
-		sell.text = "Sell ($%s)" % DebriefCalc.money(MissionRegistry.setting_i("intel_sale_price", 6000) * int(e.count))
-		sell.pressed.connect(func() -> void:
+		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(MissionRegistry.setting_i("intel_sale_price", 6000) * int(e.count)), func() -> void:
 			if buyers.item_count > 0:
-				Contracts.sell_intel(i, String(buyers.get_item_metadata(buyers.selected))))
-		row.add_child(sell)
+				Contracts.sell_intel(i, String(buyers.get_item_metadata(buyers.selected))),
+			"Sell it to the faction picked beside it (risks the client's anger)")
+		_box.add_child(UiKit.action_row(text, [turn_in, buyers, sell]))
 
 
 ## A screen to click on, as the contract board is: whatever loads under it, the mouse stays
@@ -519,14 +452,10 @@ func text() -> String:
 	return "\n".join(out)
 
 
-func _line(text: String, size := 15, color := Color.WHITE) -> void:
-	var label := Label.new()
-	label.text = text
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override(&"font_size", size)
-	if color != Color.WHITE:
-		label.add_theme_color_override(&"font_color", color)
-	_box.add_child(label)
+## A line of body text that wraps, `indent` px in.
+func _line(text: String, indent := 0) -> void:
+	var label := UiKit.text(text)
+	_box.add_child(_indent(label, indent) if indent > 0 else label)
 
 
 static func _name(id: Variant) -> String:
