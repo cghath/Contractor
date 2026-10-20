@@ -108,6 +108,10 @@ func _bar() -> PanelContainer:
 	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	flow.add_child(title)
+	var what := UiKit.subtitle("Who holds each zone, and where the fighting is", false)  # (ui-modern: what it's for)
+	what.autowrap_mode = TextServer.AUTOWRAP_OFF
+	what.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	flow.add_child(what)
 	_back_button = UiKit.button("Zone map  [Tab]", func() -> void: back_to_zone.emit(), "Back to the map of the zone you're in")
 	_back_button.visible = from_zone_map
 	flow.add_child(_back_button)

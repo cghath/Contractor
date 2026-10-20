@@ -243,6 +243,10 @@ func _toolbar() -> PanelContainer:
 	title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(title)
+	var what := UiKit.subtitle("Plan, mark and order in this zone", false)  # (ui-modern: every menu says what it's for)
+	what.autowrap_mode = TextServer.AUTOWRAP_OFF
+	what.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(what)
 	_reference = Label.new()
 	_reference.custom_minimum_size = Vector2(150, 0)
 	_reference.size_flags_vertical = Control.SIZE_SHRINK_CENTER

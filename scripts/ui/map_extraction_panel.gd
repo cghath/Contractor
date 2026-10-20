@@ -24,6 +24,7 @@ func _ready() -> void:
 	_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	add_child(_box)
 	_add_label("EXTRACTION", &"HeadingLabel")
+	_box.add_child(UiKit.subtitle("Leave the zone: pick who comes out with you, then confirm", false))  # (ui-modern)
 	_points = _add_label("")
 	_add_label("Bring along (untick to leave behind):", &"HintLabel")
 	_mates = VBoxContainer.new()

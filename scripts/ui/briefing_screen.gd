@@ -55,6 +55,7 @@ func _ready() -> void:
 	_box.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	scroll.add_child(_box)
 	_title = _add_label("", &"HeadingLabel")
+	_box.add_child(UiKit.subtitle("Plan the insertion: how you go in, where, and which supports come with you", false))  # (ui-modern)
 	_summary = _add_label("")
 	_add_head("OBJECTIVES")
 	_objectives = _add_label("")
