@@ -192,7 +192,7 @@ func _to(s: State) -> void:
 	_since = Soldier._now()
 
 
-static func _up(s: Object) -> bool:
+static func _up(s: Variant) -> bool:  # (untyped: a typed parameter errors on a freed man)
 	return is_instance_valid(s) and not (s as Soldier).is_queued_for_deletion() and (s as Soldier).vitals.is_up()
 
 

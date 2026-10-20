@@ -546,6 +546,17 @@ const PRONE_EYE_M := 0.4
 const FOLD_HIDDEN_M := 0.2
 const STANCE_CHECK_S := 1.0
 const FOLD_BONUS := 2.0
+## The first reaction to fire (AI bar G-07: LAMBS's immediate layer): a round cracking close
+## (REACT_CLOSE amount of suppression in one go) or suppression passing REACT_SUPPRESSION, and
+## before the next think he reacts: at cover he ducks; with cover within REACT_COVER_M he dashes to
+## it (not on a Hold order); otherwise he drops flat (prone, G-05) for REACT_S, when the shooter is
+## PRONE_MIN_M or more off. Pinned in the open he throws smoke toward the shooter if he has one. Not
+## while treating, healing, carrying or in a vehicle; once each REACT_GAP_S. Proposed.
+const REACT_CLOSE := 0.2
+const REACT_SUPPRESSION := 0.5
+const REACT_COVER_M := 3.0
+const REACT_S := 1.5
+const REACT_GAP_S := 3.0
 ## Fire by range (AI bar G-09): full bursts inside BURST_CLOSE_M, short ones out to BURST_FAR_M,
 ## single aimed shots past it; the pause between bursts grows PAUSE_PER_M a metre past
 ## BURST_CLOSE_M, to PAUSE_MAX_MULT. Machine guns keep their bursts at every range. Doctrine's
@@ -704,6 +715,8 @@ var _no_shot_since := -1.0  # when this unit last found it had a mark but no lin
 var _fire_spot: Variant = null  # where a base of fire / Suppress unit moves to get its shot (_find_fire_spot)
 var _overwatch_taken: Variant = null  # the plan's high ground last taken up (_take_overwatch)
 var _auto_prone := false  # down on his own (G-05), not by an order
+var _fire_react_at := -1000.0   # the last reaction to fire (G-07)
+var _react_until := -1000.0  # dropped flat until then
 var _stance_at := -1000.0  # when _auto_stance last cast its rays
 ## Men of a base of fire on high ground stand this far round its spot (G-17). Proposed.
 const OVERWATCH_SPREAD_M := 3.0
@@ -1346,7 +1359,7 @@ func _act() -> void:
 	if stance_order >= 0 and not _care_prone:
 		body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
 	elif not _care_prone:
-		var low := _auto_stance() if intent == Intent.FIGHT else -1
+		var low := _auto_stance() if intent == Intent.FIGHT or Soldier._now() < _react_until else -1
 		if low >= 0:
 			body.want_stance = low
 			_auto_prone = true
@@ -3667,6 +3680,8 @@ func _doctrine_id() -> StringName:
 func _auto_stance() -> int:
 	if not body.vitals.is_up() or body.carrying != null or Vehicle.ride_of(body) != null or body.inventory.hands != &"":
 		return -1
+	if Soldier._now() < _react_until:
+		return SoldierMovement.Stance.PRONE  # dropped at a near miss (G-07)
 	var pinned := body.suppression >= PINNED
 	if _has_destination and not pinned:
 		return -1  # on the move: on his feet (a pinned man crawls)
@@ -3689,6 +3704,36 @@ func _auto_stance() -> int:
 	if hidden or body.global_position.distance_to(threat) >= PRONE_OPEN_M:
 		return SoldierMovement.Stance.PRONE
 	return -1
+
+
+## Host (Soldier.suppress_fire, after the suppression is added): fire came close; `amount` of
+## suppression in this one. The reaction before the next think (see REACT_CLOSE).
+func react_to_fire(amount: float) -> void:
+	var now := Soldier._now()
+	if now - _fire_react_at < REACT_GAP_S or not _ready_done or body == null or not body.vitals.is_up():
+		return
+	if amount < REACT_CLOSE and body.suppression < REACT_SUPPRESSION:
+		return
+	if intent in [Intent.CASUALTY, Intent.HEAL] or body.carrying != null or Vehicle.ride_of(body) != null or body.stunned_s > 0.0:
+		return
+	_fire_react_at = now
+	_think_cd = 0.0  # and think again right after
+	if _at_cover():
+		_pause_until = maxf(_pause_until, now + 0.6)
+		body.want_crouch = true  # duck
+		return
+	var hold := _friendly() and order == Squad.Order.HOLD
+	var spot: Variant = null if hold else find_cover(body.global_position, REACT_COVER_M)
+	if spot != null:
+		_cover_point = spot
+		_has_cover = true
+		_go(spot, true)  # a dash for it
+	elif body.global_position.distance_to(body.threat_pos) >= PRONE_MIN_M and body.inventory.hands == &"":
+		_react_until = now + REACT_S
+		body.want_stance = SoldierMovement.Stance.PRONE  # down, now
+		_auto_prone = true
+	if body.suppression >= PINNED and spot == null:
+		_screen_toward_threat(body.threat_pos)  # pinned in the open: smoke between him and the shooter
 
 
 ## Whether `q` is a fold in the ground against the threat (G-17): lying there he's hidden

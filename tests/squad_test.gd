@@ -124,6 +124,21 @@ func _test_fire_fix() -> void:
 	bravo_ai.stance_order = keep_order
 	bravo_ai._auto_prone = false
 	bravo.want_stance = -1
+	# G-07: a round cracks close in the open with nothing near to hide behind: he drops flat at once.
+	bravo_ai._fire_react_at = -1000.0
+	bravo_ai._has_cover = false
+	bravo.threat_pos = bravo.global_position + Vector3(0, 0, -140)
+	bravo_ai.react_to_fire(0.3)
+	var reacted := bravo_ai._react_until > Soldier._now() or bravo_ai._has_destination
+	check(reacted, "a near miss in the open: he drops flat or dashes for cover (flat %s, dash %s)" % [bravo_ai._react_until > Soldier._now(), bravo_ai._has_destination])
+	var again := bravo_ai._fire_react_at
+	bravo_ai.react_to_fire(0.3)
+	check(bravo_ai._fire_react_at == again, "and not again a moment later")
+	bravo_ai._react_until = -1000.0
+	bravo_ai._fire_react_at = -1000.0
+	bravo_ai._auto_prone = false
+	bravo_ai._has_destination = keep_dest
+	bravo.want_stance = -1
 	foe_far.queue_free()
 	# G-17: high ground with a line scores better than low; out of another group's sight better still.
 	var world := player.get_world_3d()

@@ -278,6 +278,9 @@ func suppress_fire(amount: float, from: Vector3) -> void:
 	var seen := threat_err == 0.0 and now - threat_time < 1.0 and threat_pos.distance_to(from) < FIRE_SAME_SPOT_M
 	suppression = minf(suppression + amount, 1.0)
 	threat_time = now
+	var brain := get_node_or_null(^"SquadAI")
+	if brain:
+		brain.call_deferred(&"react_to_fire", amount)  # the first reaction, after the fix below (G-07)
 	if seen:
 		return  # he's in view (SquadAI keeps threat_pos on him): the crack adds nothing
 	var flat := Vector3(from.x - global_position.x, 0.0, from.z - global_position.z)
