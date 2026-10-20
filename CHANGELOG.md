@@ -11,6 +11,42 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Loot rotation and a real rarity spread (Captain, 2026-10-20)
+
+#### Added
+- 72 new items, all priced, described and given a use: 13 guns (M16A4, Colt Canada C7A2, AKS-74U,
+  AK-74M, RPK-74, Type 56, Zastava M70, AK-103, PKP Pecheneg, SVD-S, Glock 17, SIG P226, M1911A1)
+  with .45 ACP magazines and rounds; 8 optics (Aimpoint T-2 and CompM4, EOTech EXPS3, ACOG TA31,
+  Elcan Specter DR, Razor HD 1-10x, Leupold Mark 5HD, Schmidt & Bender PM II); 5 attachments
+  (angled foregrip, M600 light, PEQ-15, 5.56 and 7.62 suppressors); carriers (Crye JPC and AVS),
+  helmets (PASGT, MICH, FAST), plates (AR500 steel, PE medium, ESAPI), 3 packs and 3 pouches;
+  5 grenades (RGD-5, F-1, M67, RDG-2 smoke, multi-bang); valuables (cash roll, euros, cash brick,
+  watch, gold coins, rough gems, silver) and contraband (hashish, heroin, tramadol); 11 intel
+  items (sat phone, SIM bag, hard drive, marked map, codebook, frequency list, tablet, drone
+  controller, SD card, passports, written orders); 4 salvage items (copper wire, filters, solar
+  panel, truck tyre).
+- Item rarity: every item has `stats.rarity` (common, uncommon, rare, very_rare), the commonest
+  tier it turns up in, ready for the tooltip to colour.
+
+#### Changed
+- Loot rotation: the Western rifles and pistols, nearly every optic and attachment, carriers,
+  plates, helmets, packs, pouches, night vision gen 2 and 3, coloured smokes, breaching charges,
+  knives and 19 medical items that never appeared anywhere now turn up in the tables. An HQ's
+  weapons cache has its own table (Western rifles, optics, night vision, most of the very rare
+  prizes); barracks hold personal kit; medical chests carry the full range of drugs, fluids and
+  surgery kits.
+- Rarity: every table's tiers are deeper (common boxes hold 2-3 things or a bundle, very rare
+  holds real prizes: cash bricks, gems, gold, a sat phone with a codebook, a suppressed HK416).
+  Cash and cheap intel are common, the $1,400 cash bundle is uncommon, jewellery and contraband
+  rare. Very rare weights rise a little at hot-zone sites (HQ 4 to 5, QRF 3 to 4, compound 2.5 to 3.5).
+- Dead drops, hidden caches and the HQ strongbox roll a rarity tier too (pools in
+  loot_tables.json), instead of picking from fixed lists. A strongbox's valuables now vary from
+  a modest stack to a real prize; it still always holds one contraband and one intel item.
+
+#### Fixed
+- The shop sold cash bundles, gold bars, jewellery and relics (they were missing from
+  not_for_sale); valuables and contraband are found, never bought.
+
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 
 #### Added
