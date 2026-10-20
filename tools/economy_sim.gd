@@ -3,7 +3,7 @@ extends Node
 ## runs from tools/run_tests.sh or CI. It plays many short campaigns through the real economy
 ## code - the contract board (Contracts, ContractGen: pay, ratings, fixers, clawback terms, hot
 ## zones and their extra contracts), negotiation (ContractGen.deal), the debrief and its expenses
-## (Contracts.server_end_deployment, DebriefCalc), the weekly bill and emergency loans (Economy),
+## (Contracts.server_end_deployment, DebriefCalc), the daily bills and emergency loans (Economy),
 ## support calls (Economy.server_pay_support), salvage picks, intel sales, pallets (Pallets),
 ## the hiring board and wage growth (Hiring, Roster), shop sell prices (Prices) and the loot
 ## that really spawns (CompoundLevel.hostile_loadout, WorldValuables' site boxes) - with the
@@ -67,26 +67,15 @@ const STEALTHY := ["recon", "sabotage", "intel_grab"]
 ## stands in one required objective and the scenario's bonus (its *_bonus_share knob).
 const SCENARIO_BONUS_KNOBS := ["cargo_bonus_share", "all_bonus_share", "unseen_bonus_share", "unhurt_bonus_share"]
 
-## The proposed numbers (docs/economy_proposal_2026-10-20.md). "prices" and "settings" override
-## data/prices.json and data/contracts.json "settings" in memory; "sim" are proposed rules that
-## need a code change, modelled here (see the proposal for where each would go).
+## A proposal's numbers to try against the current ones ("--variant proposed"): "prices" and
+## "settings" override data/prices.json and data/contracts.json "settings" in memory. Empty: the
+## proposal of 2026-10-20 (docs/economy_proposal_2026-10-20.md) was approved and applied, in the
+## data and the code (daily wages and upkeep, intel sold for its intel_value, a hot zone's
+## arrival contracts paid on completion, the respawn cap), so "current" plays it now. Put the
+## next proposal's numbers here; a rule that needs code needs modelling in _deploy as well.
 const PROPOSED := {
-	"prices": {
-		"lost_supports": {"resupply": 15000, "transport": 15000, "extraction": 15000, "medevac": 15000, "cargo": 15000},
-		"respawn_rise": 0.25,
-		"operations": {"per_head_day": 700, "kia_benefit": 10000, "wounded_care": 1200},
-	},
-	"settings": {
-		"difficulty_pay": [0, 0.35, 0.5, 0.6, 0.75, 0.95],
-		"hot_zone_pay_mult": 1.0,
-		"clean_bonus_share": 0.05,
-	},
-	"sim": {
-		"daily_bill": true,           # wages and upkeep charged each day (a 7th of the week's), so each debrief carries its own
-		"intel_by_value": 1.0,        # an intel piece sells for its intel_value (data/items.json) instead of the flat intel_sale_price
-		"arrival_no_advance": true,   # a hot zone's arrival contracts pay nothing up front: all of it on completion
-		"respawn_cap": 8000,          # a bought respawn never costs more than this (prices.json "respawn_max")
-	},
+	"prices": {},
+	"settings": {},
 }
 
 var _orig_prices: Dictionary
@@ -108,7 +97,7 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	_orig_prices = Prices.data().duplicate(true)
 	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
-	Economy.week_paid.connect(_on_week_paid)
+	Economy.bill_paid.connect(_on_bill_paid)
 	var args := _args()
 	var runs := int(args.get("runs", 40))
 	var days := int(args.get("days", 35))
@@ -146,16 +135,7 @@ func _apply_variant(v: String) -> void:
 		Prices._data[k] = (PROPOSED.prices[k] as Variant).duplicate(true) if PROPOSED.prices[k] is Dictionary else PROPOSED.prices[k]
 	for k: String in PROPOSED.settings:
 		MissionRegistry.data().settings[k] = (PROPOSED.settings[k] as Variant).duplicate(true) if PROPOSED.settings[k] is Array else PROPOSED.settings[k]
-	_variant = (PROPOSED.sim as Dictionary).duplicate(true)
-	if _variant.has("sell_ratio"):
-		Prices._data["sell_ratio"] = float(_variant.sell_ratio)
-	if _variant.get("daily_bill", false):
-		# Emulates billing every day with the real Economy.pay_week: a "week" of one day, upkeep a
-		# 7th, loan installments spread over the same 8 weeks.
-		var s: Dictionary = MissionRegistry.data().settings
-		s["loan_weeks"] = int(s.get("loan_weeks", 8)) * int(_orig_settings.get("week_days", 7))
-		s["week_days"] = 1
-		Prices._data["weekly_upkeep"] = roundi(float(_orig_prices.get("weekly_upkeep", 0)) / float(_orig_settings.get("week_days", 7)))
+	_variant = (PROPOSED.get("sim", {}) as Dictionary).duplicate(true)
 
 
 func _week_days() -> int:
@@ -318,15 +298,6 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	var kind := "hot" if hot else "contract"
 	if hot:
 		Contracts.server_note_deployment("hazard_tier", int(prof.hazard))
-	if _variant.get("arrival_no_advance", false):
-		# Proposed (a code change in Contracts._hot_zone_extras): an arrival contract's advance
-		# moves into its completion pay. Modelled by handing the advance back at once.
-		for x: Dictionary in deployed:
-			if String(x.get("in_zone", "")) == "arrival" and int(x.deal.advance) > 0:
-				Economy.add_cash(-int(x.deal.advance), "Advance: %s (moved to completion)" % x.title)
-				x.deal.completion = int(x.deal.completion) + int(x.deal.advance)
-				x.deal.advance = 0
-		_harvest("")
 	var arrival_advance := 0  # what the hot zone's arrival contracts paid up front, kept whatever happens next
 	for x: Dictionary in deployed:
 		if String(x.get("in_zone", "")) == "arrival":
@@ -371,9 +342,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	for i in deaths:
 		if i < free:
 			continue
-		var cost := roundi(Prices.respawn_price() * (1.0 + Prices.respawn_rise() * bought))
-		if _variant.has("respawn_cap"):
-			cost = mini(cost, int(_variant.respawn_cap))
+		var cost := RosterDeployment.bought_respawn_price(Prices.respawn_price(), Prices.respawn_rise(), bought, Prices.respawn_max())
 		bought += 1
 		# As BaseHub.server_count_respawn: cash first, then the support budget, then on credit.
 		var from_cash := clampi(Economy.cash(), 0, cost)
@@ -446,6 +415,8 @@ func _deploy(prof: Dictionary) -> Dictionary:
 			modules.append({"id": String(m.get("id", "")), "type": String(m.get("type", "")), "share": float(prof.boxes)})
 			extra -= 1
 	for m: Dictionary in modules:
+		m["zone"] = String(dep.zone_id)
+		m["hot"] = hot
 		bank.append_array(_site_boxes(m, prof))
 	for i in int(prof.scatter):
 		bank.append_array(_scatter_find())
@@ -483,9 +454,6 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		if sell:
 			var buyer := _intel_buyer(Contracts.debrief_client())
 			if buyer != "":
-				if _variant.has("intel_by_value"):
-					var item := ItemDB.get_item(StringName(intel[i].id))
-					MissionRegistry.data().settings["intel_sale_price"] = roundi(float(item.stats.get("intel_value", 1000)) * float(_variant.intel_by_value))
 				Contracts.server_sell_intel(i, buyer)
 	_harvest("intel")
 	for i in (d.get("tagged", []) as Array).size():
@@ -538,25 +506,14 @@ func _intel_buyer(client: String) -> String:
 	return best
 
 
-## A module's loot boxes, as WorldValuables.server_spawn_site_boxes rolls them (same seed, same
-## contents), each opened with the profile's chance; an HQ's strongbox when its share is full.
-func _site_boxes(m: Dictionary, prof: Dictionary) -> Array:
+## A module's loot boxes, as WorldValuables.server_spawn_site_boxes rolls them (site_plan: the
+## compound loot tables, by rarity, same seed key, same contents), each opened with the
+## profile's chance; an HQ's strongbox when its share is full.
+func _site_boxes(m: Dictionary, _prof: Dictionary) -> Array:
 	var out: Array = []
-	var spots: Array = ZoneModules.LOOT.get(String(m.type), [])
-	if spots.is_empty():
-		return out
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash("%s|valbox" % String(m.id))
-	var count := mini(WorldValuables._site_box_count(rng, String(m.type)), mini(spots.size(), WorldValuables.SITE_BOX_OFFSETS.size()))
-	for k in count:
-		var contents := WorldValuables._roll_site_box(rng)
-		var box_id := "%s_valbox%d" % [String(m.id), k]
-		var mt := String(m.type)
-		if (mt in WorldValuables.CONTRABAND_TYPES or ZoneModules.base(mt) in WorldValuables.CONTRABAND_TYPES) and contents.size() == 1 \
-				and String(contents[0].id) not in WorldValuables.RARE_GUNS and posmod(hash("contraband:" + box_id), 100) < WorldValuables.CONTRABAND_PCT:
-			contents = [{"id": WorldValuables.CONTRABAND_ITEMS[posmod(hash("contraband_kind:" + box_id), WorldValuables.CONTRABAND_ITEMS.size())], "count": 1}]
+	for box: Dictionary in WorldValuables.site_plan(String(m.type), "%s|%s" % [String(m.zone), String(m.id)], bool(m.hot)):
 		if _rng.randf() < float(m.share):
-			for e: Dictionary in contents:
+			for e: Dictionary in box.items:
 				out.append({"id": String(e.id), "count": int(e.count), "state": {}})
 	if String(m.type) == "hq" and float(m.share) >= 1.0:
 		for e: Dictionary in WorldValuables.strongbox_contents(String(m.id)):
@@ -601,7 +558,7 @@ func _sell_inbox(tag: String) -> void:
 
 # --- Book-keeping -------------------------------------------------------------------------------
 
-func _on_week_paid(_week: int, bill: Dictionary) -> void:
+func _on_bill_paid(_day: int, bill: Dictionary) -> void:
 	_add("wages", -float(bill.wages))
 	_add("upkeep", -float(bill.upkeep))
 	_add("loan_repay", -float(bill.loans))
@@ -640,8 +597,8 @@ func _harvest(tag: String) -> void:
 			key = "completion"
 		elif what.begins_with("Civilian fines"):
 			key = "fines"
-		elif what.begins_with("Deployment costs") or what.begins_with("Week "):
-			continue  # split by _split_debrief / _on_week_paid
+		elif what.begins_with("Deployment costs") or what.begins_with("Day "):
+			continue  # split by _split_debrief / _on_bill_paid
 		elif what.to_lower().begins_with("emergency loan") or what.to_lower().begins_with("loan from"):
 			key = "loans_in"
 		elif what.begins_with("Support call") or what.begins_with("Support refund"):

@@ -132,12 +132,19 @@ static func mark_fallen(data: Dictionary, mid: String) -> void:
 
 
 ## What the next player respawn costs: 0 while free ones are left, else `price`, rising by
-## `rise` of it with each one already bought (the mission brainstorm: "cost rises with each one").
-static func respawn_cost(data: Dictionary, price: int, rise := 0.0) -> int:
+## `rise` of it with each one already bought (the mission brainstorm: "cost rises with each one"),
+## never more than `max_price` (0: no cap; economy balance 2026-10-20, Prices.respawn_max).
+static func respawn_cost(data: Dictionary, price: int, rise := 0.0, max_price := 0) -> int:
 	var dep := active(data)
 	if dep.is_empty():
 		return 0
-	return 0 if int(dep.respawns_used) < int(dep.respawns_free) else roundi(price * (1.0 + rise * int(dep.get("respawns_bought", 0))))
+	return 0 if int(dep.respawns_used) < int(dep.respawns_free) else bought_respawn_price(price, rise, int(dep.get("respawns_bought", 0)), max_price)
+
+
+## The price of a bought respawn after `bought` others (see respawn_cost).
+static func bought_respawn_price(price: int, rise: float, bought: int, max_price := 0) -> int:
+	var cost := roundi(price * (1.0 + rise * bought))
+	return mini(cost, max_price) if max_price > 0 else cost
 
 
 ## Counts a player respawn (`bought`: past the free ones). Returns the free ones left.

@@ -1596,7 +1596,7 @@ func _on_player_died(player: Soldier) -> void:
 ## the deployed contract's support budget (Captain), and what neither covers goes on credit.
 ## Returns the line the player sees.
 func server_count_respawn() -> String:
-	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	if cost == 0:
 		var left := RosterDeployment.count_respawn(roster(), false)
 		_changed(&"roster")
@@ -2329,7 +2329,9 @@ func server_hire(cid: String) -> String:
 	return "" if mid != "" else "They've moved on"
 
 
-## Host: lets a member go (available ones only); their gear goes into the stash.
+## Host: lets a member go (available ones only); their gear goes into the stash, less the kit
+## they were issued on joining (Hiring: "issued_kit"), which they take with them: only what the
+## company added comes back (hiring and letting go at once filled the stash with free kit).
 func server_release(mid: String) -> String:
 	var m := member(mid)
 	if m.is_empty() or not Roster.is_available(m):
@@ -2337,7 +2339,7 @@ func server_release(mid: String) -> String:
 	var lvl = base_level()
 	var s: Soldier = lvl.muster_soldier(mid) if lvl else null
 	var gear: Dictionary = s.inventory.net_state if s else m.get("gear", {})
-	_stash_gear(GameState.from_json(gear.duplicate(true)))
+	_stash_gear(GameState.from_json(gear.duplicate(true)), (m.get("issued_kit", {}) as Dictionary).duplicate())
 	if s:
 		s.inventory.strip()
 	Roster.members(roster()).erase(mid)
@@ -2347,12 +2349,17 @@ func server_release(mid: String) -> String:
 	return ""
 
 
-## Puts everything in an Inventory.net_state into the stash.
-func _stash_gear(gear: Dictionary) -> void:
+## Puts everything in an Inventory.net_state into the stash, but for `keep` ({item id: count}).
+func _stash_gear(gear: Dictionary, keep := {}) -> void:
 	var inv := Inventory.new()
 	inv.net_state = gear
 	for entry: Dictionary in inv.strip():
-		server_add_to_stash(StringName(entry.id), int(entry.count), entry.get("state", {}))
+		var id := String(entry.id)
+		var kept := mini(int(keep.get(id, 0)), int(entry.count))
+		if kept > 0:
+			keep[id] = int(keep[id]) - kept
+		if int(entry.count) - kept > 0:
+			server_add_to_stash(StringName(id), int(entry.count) - kept, entry.get("state", {}))
 	inv.free()
 
 
@@ -2399,6 +2406,8 @@ func server_add_to_stash(id: StringName, count := 1, state := {}) -> void:
 ## Economy.server_sell prices it, a damaged piece for less). At the hub the armory's items go
 ## (_apply_stash); elsewhere the stash list. Returns what it fetched, 0 if none was there.
 func server_sell_from_stash(id: StringName, count := 1) -> int:
+	if Prices.sell_price(id) <= 0:
+		return 0  # the shop doesn't buy it (intel, worthless pieces): it stays in the stash
 	var took := server_take_from_stash(id, count)
 	if took <= 0:
 		return 0
@@ -3057,7 +3066,8 @@ func build_view() -> Dictionary:
 		"day": day(), "funds": BaseEconomy.funds(),
 		"roster": roster(), "hiring": {"pool": Hiring.pool(hiring(), day()), "refreshed_day": int(hiring().get("refreshed_day", 1))},
 		"stash": stash(), "prep": _prep(), "catalog": BaseEconomy.shop_catalog(), "held": held,
-		"daily_wages": Roster.daily_wages(roster()), "bill_in_days": Economy.days_to_bill(), "weekly_bill": int(Economy.weekly_bill().total),
+		"daily_wages": Roster.daily_wages(roster()), "daily_costs": int(Economy.daily_costs().total),
+		"bill_in_days": Economy.days_to_bill(), "loans_due": int(Economy.weekly_bill().loans),
 		"players": keys, "in_base": in_base(), "ready": _ready_peers.keys(),
 		"guards": guards(), "assault": base().get("assault", {}), "defences": base().get("defences", []), "fob_tier": fob_tier(), "max_guards": max_guards(),
 		"rebels": RebelSupport.view(), "favours": int(RebelSupport._s().get("favours", 0)), "rebel_upgrades": RebelSupport.upgrades_view(),

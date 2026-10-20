@@ -1,5 +1,5 @@
 {
-	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Intel (W11) is worth its intel_value in data/items.json (keep the two equal) and is found, never sold. Tune freely.",
+	"_note": "Proposed prices (dollars) for the base shop, salvage and repairs (wave 4, W10). An item without its own price uses its type's default. Intel (W11) is worth its intel_value in data/items.json (keep the two equal) and is found, never sold: the shop doesn't buy it either (Prices.sell_price); it's sold to a faction from the debrief for its intel_value x intel_sale_mult (data/contracts.json), or turned in. Tune freely.",
 	"sell_ratio": 0.4,
 	"vehicles": {"_note": "What a vehicle costs to buy from an allied quartermaster (Quartermaster.vehicle_deals; wave 6 call #1: MRAPs from Trusted), before its discount. Proposed.", "matv": 95000, "maxxpro": 110000},
 	"default_by_type": {"weapon": 1500, "ammo": 40, "armor": 900, "plate": 700, "backpack": 250, "medical": 60,
@@ -53,12 +53,14 @@
 	"not_for_sale": ["smuggled_cigarettes", "captagon", "counterfeit_dollars", "unregistered_weapons", "hq_strongbox_key", "vantage_ledger", "enemy_radio", "hvt_case", "supply_crate", "supply_pallet", "electronics_salvage", "cpr", "intel_laptop", "intel_phone", "intel_documents", "intel_usb_drive", "intel_ledger", "belt_127x108", "static_dshk_gun", "static_dshk_mount", "static_2b14_tube", "static_2b14_bipod", "static_2b14_plate", "round_82mm_he", "rpg7", "pg7v_round", "og7v_round", "exo_mech_heavy", "wg50_walker"],
 	"repair": {"share_per_integrity": 0.8, "per_chip": 12, "max_share": 0.8},
 	"supports": {"resupply": 12000, "transport": 9000, "aav": 18000, "extraction": 14000, "medevac": 8000, "cargo": 6000, "allied_troops": 26000},
-	"lost_supports": {"resupply": 30000, "transport": 40000, "extraction": 40000, "medevac": 40000, "cargo": 40000},
+	"lost_supports": {"resupply": 15000, "transport": 15000, "extraction": 15000, "medevac": 15000, "cargo": 15000},
+	"_lost_supports": "A helicopter shot down on a support call: the insurance deductible (economy balance 2026-10-20, cghath: was 30,000 for a resupply, 40,000 for the rest), times the airframe's lost_mult (HeliUpgrades: a Petrel x1.3, a Razorback x1.8).",
 	"respawn": 4000,
-	"respawn_rise": 0.5,
-	"_respawn": "A player respawn past the deployment's free ones (4 in a contract zone, 8 in a hot zone), paid from cash first, then the contract's support budget (Captain), then on credit; each one bought costs respawn_rise more of it than the last (1000, 1500, 2000...). Proposed.",
+	"respawn_rise": 0.25,
+	"respawn_max": 8000,
+	"_respawn": "A player respawn past the deployment's free ones (4 in a contract zone, 8 in a hot zone), paid from cash first, then the contract's support budget (Captain), then on credit; each one bought costs respawn_rise more of it than the last (4000, 5000, 6000, 7000), never more than respawn_max (economy balance 2026-10-20, cghath: was a rise of 0.5 with no cap). Proposed.",
 	"weekly_upkeep": 21000,
 	"default_wage_bill": 24000,
-	"operations": {"per_head_day": 700, "kia_benefit": 15000, "wounded_care": 1200},
-	"_operations": "Charged at each debrief (docs/economy.md): field costs (ammo, meds, fuel, comms) per head per campaign day deployed, a death benefit per KIA squadmate, treatment per wounded one. Lost helicopters (lost_supports) and bought supports/respawns are charged the moment they happen. Proposed."
+	"operations": {"per_head_day": 700, "kia_benefit": 10000, "wounded_care": 1200},
+	"_operations": "Charged at each debrief (docs/economy.md): field costs (ammo, meds, fuel, comms) per head per campaign day deployed, a death benefit per KIA squadmate (10,000 since the economy balance of 2026-10-20; was 15,000), treatment per wounded one. Lost helicopters (lost_supports) and bought supports/respawns are charged the moment they happen; weekly_upkeep and the roster's wages a seventh a day (Economy.pay_day). Proposed."
 }

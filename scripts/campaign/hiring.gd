@@ -121,8 +121,21 @@ static func hire(data: Dictionary, roster: Dictionary, cid: String, day: int) ->
 	(data["pool"] as Array).erase(c)
 	var person := c.duplicate(true)
 	person.erase("cid")
-	person["gear"] = Roster.gear_for_kit(Roles.kit(StringName(person.role)))
+	_issue_kit(person)
 	return Roster.add_member(roster, person, day)
+
+
+## Gives `person` their role's kit as their own gear, and notes it as "issued_kit" ({item id:
+## count}): someone let go takes that much of it with them (BaseHub.server_release), so hiring
+## and releasing at once doesn't fill the stash with free kit (the economy proposal's loophole,
+## 2026-10-20). Only what the company added comes back.
+static func _issue_kit(person: Dictionary) -> void:
+	var kit := Roles.kit(StringName(person.role))
+	person["gear"] = Roster.gear_for_kit(kit)
+	var issued := {}
+	for pair: Array in kit:
+		issued[String(pair[0])] = int(issued.get(String(pair[0]), 0)) + int(pair[1])
+	person["issued_kit"] = issued
 
 
 ## A rookie for a player whose main character is recovering and finds nobody free (design
@@ -135,7 +148,7 @@ static func provide_free(roster: Dictionary, role: StringName, day: int, seed_va
 	while int(person.missions) > 2:
 		person = candidate(rng)
 	person["role"] = String(role) if Roles.has(role) else String(Roles.RIFLEMAN)
-	person["gear"] = Roster.gear_for_kit(Roles.kit(StringName(person.role)))
+	_issue_kit(person)
 	var mid := Roster.add_member(roster, person, day)
 	Roster.add_history(Roster.get_member(roster, mid), day, "Provided free while a player recovers")
 	return mid

@@ -14,7 +14,9 @@ extends RefCounted
 ## - "salvage": {"share", "pool": [{"id", "count", "state", "value"}], "pool_value",
 ##   "budget", "picked": [pool indices], "spent"};
 ## - "items_out": everything carried out (banked to the base);
-## - "intel": [{"id", "count", "status": "pending"}] (intel among the items out);
+## - "intel": [{"id", "count", "status": "pending", "intel_ids"}] (intel among the items out;
+##   "intel_ids": the pieces' own ids, from their state, so a piece sold or turned in is
+##   never listed again: Contracts.server_end_deployment);
 ## - "casualties": as the extraction report gave them;
 ## - "days": campaign days the deployment took (mission days plus travel);
 ## - "totals": {"advance", "completion", "bonuses", "fines", "clawback", "paid_now",
@@ -107,7 +109,9 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 	var intel: Array = []
 	for entry: Dictionary in items_out:
 		if MissionRegistry.is_intel(StringName(entry.get("id", ""))):
-			intel.append({"id": String(entry.id), "count": int(entry.get("count", 1)), "status": "pending", "buyer": ""})
+			var intel_id := String((entry.get("state", {}) as Dictionary).get("intel_id", ""))
+			intel.append({"id": String(entry.id), "count": int(entry.get("count", 1)), "status": "pending", "buyer": "",
+				"intel_ids": [intel_id] if intel_id != "" else []})
 	return {
 		"contracts": lines, "civilians": civilians, "fines": totals.fines,
 		"rep": rep, "locals": civilians * int(S.call("civilian_rep_locals")),
@@ -118,7 +122,8 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 
 
 ## What a deployment cost on top of the contract: `run` (expenses already taken from the cash
-## during the run and since: respawns, supports, lost helicopters, weekly bills) summed by
+## during the run and since: respawns, supports, lost helicopters, the days' wages and upkeep,
+## loan installments) summed by
 ## what, plus the field costs per head and day, a death benefit per KIA and treatment per
 ## wounded squadmate (Prices.operations). Returns {"lines": [{"what", "amount", "charge"}],
 ## "total", "charge"}: "charge" marks the lines still to take from the cash.
@@ -169,6 +174,16 @@ static func _add(rep: Dictionary, faction: String, delta: int) -> void:
 	if faction == "" or delta == 0:
 		return
 	rep[faction] = int(rep.get(faction, 0)) + delta
+
+
+## What `count` pieces of intel `item_id` sell for to another faction (Contracts.server_sell_intel,
+## the debrief's Sell button): its own intel_value (data/items.json; 1000 without one, as
+## IntelReveal counts it) times the "intel_sale_mult" setting (economy balance 2026-10-20: it was
+## a flat "intel_sale_price" of $6,000, ten times a USB drive's worth).
+static func intel_price(item_id: StringName, count := 1) -> int:
+	var item: ItemData = ItemDB.get_item(item_id) if ItemDB.has_item(item_id) else null
+	var value := int(item.stats.get("intel_value", 1000)) if item else 1000
+	return roundi(value * MissionRegistry.setting_f("intel_sale_mult", 1.0)) * count
 
 
 ## Whether pool entry `index` still fits the salvage budget.

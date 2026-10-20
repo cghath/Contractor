@@ -134,8 +134,10 @@ func refresh() -> void:
 		return
 	var v := BaseHub.view
 	var bill_days := int(v.get("bill_in_days", 7))
-	_header.text = "Day %d    Funds $%d    Wages $%d/day    Weekly bill $%d in %d day%s" % [int(v.get("day", 1)), int(v.get("funds", 0)),
-		int(v.get("daily_wages", 0)), int(v.get("weekly_bill", 0)), bill_days, "" if bill_days == 1 else "s"]
+	var loans := int(v.get("loans_due", 0))
+	_header.text = "Day %d    Funds $%d    Wages $%d/day    Running costs $%d/day, paid daily%s" % [int(v.get("day", 1)), int(v.get("funds", 0)),
+		int(v.get("daily_wages", 0)), int(v.get("daily_costs", 0)),
+		("    Loan installment $%d in %d day%s" % [loans, bill_days, "" if bill_days == 1 else "s"]) if loans > 0 else ""]
 	var rows: VBoxContainer = _pages[page]
 	## Out of the tree at once, not at the frame's end: focus_first and the tests look for the new rows.
 	for child in rows.get_children():

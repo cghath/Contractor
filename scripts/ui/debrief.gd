@@ -187,8 +187,11 @@ func _header(d: Dictionary) -> void:
 	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total)):
 		for l: Dictionary in d.get("expenses", []):
 			_line("%s: -$%s" % [l.what, DebriefCalc.money(l.amount)], UiKit.SPACE_L)
-		var bill := Economy.weekly_bill()
-		_line("Next weekly bill: $%s in %d days (wages $%s, upkeep $%s)" % [DebriefCalc.money(bill.total), Economy.days_to_bill(), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep)], UiKit.SPACE_L)
+		var daily := Economy.daily_costs()
+		_line("Running costs from now: $%s a day, charged daily (wages $%s, upkeep $%s)" % [DebriefCalc.money(daily.total), DebriefCalc.money(daily.wages), DebriefCalc.money(daily.upkeep)], UiKit.SPACE_L)
+		var loans := int(Economy.weekly_bill().loans)
+		if loans > 0:
+			_line("Loan installments: $%s in %d days" % [DebriefCalc.money(loans), Economy.days_to_bill()], UiKit.SPACE_L)
 	if _section("details", "Contract details, pay and reputation"):
 		for l: String in DebriefCalc.summary(d):
 			var depth := 2 if l.begins_with("    ") else (1 if l.begins_with("  ") else 0)
@@ -413,7 +416,7 @@ func _intel(d: Dictionary) -> void:
 			if f != client:
 				buyers.add_item(MissionRegistry.faction_name(f))
 				buyers.set_item_metadata(buyers.item_count - 1, f)
-		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(MissionRegistry.setting_i("intel_sale_price", 6000) * int(e.count)), func() -> void:
+		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(DebriefCalc.intel_price(StringName(e.id), int(e.count))), func() -> void:
 			if buyers.item_count > 0:
 				Contracts.sell_intel(i, String(buyers.get_item_metadata(buyers.selected))),
 			"Sell it to the faction picked beside it (risks the client's anger)")

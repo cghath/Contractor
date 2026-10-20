@@ -70,8 +70,12 @@ static func value_of(item_id: StringName, count := 1, state := {}) -> int:
 	return roundi(each * count * condition_of(state))
 
 
-## What the shop pays for them.
+## What the shop pays for them. Never anything for intel: it's sold to a faction or turned in
+## from the debrief (Contracts.server_sell_intel), once (the economy proposal 2026-10-20: a
+## piece sold or turned in then sold again at the shop was paid for twice).
 static func sell_price(item_id: StringName, count := 1, state := {}) -> int:
+	if MissionRegistry.is_intel(item_id):
+		return 0
 	return floori(value_of(item_id, count, state) * float(data().get("sell_ratio", 0.4)))
 
 
@@ -127,3 +131,8 @@ static func respawn_price() -> int:
 ## How much more each further bought respawn costs, as a share of respawn_price.
 static func respawn_rise() -> float:
 	return float(data().get("respawn_rise", 0.0))
+
+
+## The most a bought respawn ever costs, however many came before it (0: no cap).
+static func respawn_max() -> int:
+	return int(data().get("respawn_max", 0))

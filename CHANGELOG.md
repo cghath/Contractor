@@ -11,6 +11,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Economy balance of 2026-10-20: the approved proposal applied (cghath's side)
+
+All five changes from `docs/economy_proposal_2026-10-20.md`, approved by cghath for the
+Captain. The reasons and the sim results are in `docs/economy.md` ("Balance pass 2026-10-20").
+
+#### Changed
+- Contract pay is about a third lower at every rating (`difficulty_pay` 0.35 to 0.95). Hot zones
+  pay the normal rate (`hot_zone_pay_mult` 1.0), and the no-civilian-casualties bonus is 5%.
+- Intel sells for what it's worth: its `intel_value` (a USB drive $600, a laptop $3,000) times
+  the new `intel_sale_mult` (1.0), not a flat $6,000.
+- A hot zone's arrival contracts pay nothing up front. All of their pay comes on completion.
+- Wages and upkeep are charged every day, a seventh of the week's bill. Each debrief lists its
+  own days as "Wages and upkeep (N days)". Loan installments are still paid weekly. The
+  debrief, the contract board and the base show the running costs per day.
+- A helicopter lost on a support call costs a $15,000 deductible (times the airframe's
+  multiplier). A bought respawn costs a quarter more each time, $8,000 at most
+  (`respawn_max`). The death benefit is $10,000.
+
+#### Fixed
+- Intel could be sold twice. The shop no longer buys intel, and a piece sold or turned in is
+  never listed again in a later debrief.
+- Hiring someone and letting them go at once no longer fills the stash with their free kit.
+  They take the kit they were issued, and only what the company added comes back.
+
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.

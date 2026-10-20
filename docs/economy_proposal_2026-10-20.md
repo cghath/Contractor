@@ -1,8 +1,14 @@
 # Economy balance proposal (2026-10-20)
 
-**Status: Proposed, awaiting the Captain.** Nothing in the game has changed: no number in
-`data/` and no game code. Once the Captain agrees (all of it, or the items he picks), the
-numbers go in and the reasons go into [economy.md](economy.md), as his tasking asks.
+**Status: Approved and applied (2026-10-20).** cghath approved all five changes; the Captain
+had delegated the call to him. They went in on branch `feat/economy-balance`, in the data and the
+code, and the reasons and the sim results after the change are in [economy.md](economy.md)
+("Balance pass 2026-10-20"). The two loopholes below were fixed too. The tables here are
+what the proposal measured before the change. Its "proposed" column is now the game:
+`tools/economy_sim.tscn -- --variant current` plays it.
+
+*Original status: Proposed, awaiting the Captain. Nothing in the game had changed: no number
+in `data/` and no game code.*
 
 The Captain's read: too easy overall, but mission expenses swing it negative fast. Both are
 true, and they have different causes:
@@ -258,3 +264,5 @@ Tests that read the numbers being changed (they need updating with the change):
 14) and the intel sale check (`cash + 6000`), `tests/base_test.gd` "Wages" (the week's bill paid
 on its day). The "Economy balance" profit checks use a fixed deal and keep passing. The sim's
 `PROPOSED` table in `tools/economy_sim.gd` holds these numbers; rerun it after any change.
+(Applied: those tests now check the new rules, and the sim's `PROPOSED` table is empty, since
+the current data and code are these numbers.)

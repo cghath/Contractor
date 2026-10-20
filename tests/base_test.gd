@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_hiring()
 	_test_callsigns()
 	_test_wages()
+	_test_release_kit()
 	_test_heli_upgrades()
 	_test_growth()
 	_test_injuries_and_medbay()
@@ -488,11 +489,58 @@ func _test_wages() -> void:
 	var funds := BaseEconomy.funds()
 	var bill := Economy.weekly_bill()
 	check(daily > 0 and int(bill.wages) == daily * week, "one clock: the roster's wages are the economy's weekly bill ($%d for two)" % int(bill.wages))
-	BaseHub.server_advance_days(Economy.days_to_bill() - 1)
-	check(BaseEconomy.funds() == funds, "nothing is paid during the week")
+	# Economy balance 2026-10-20: wages and upkeep are paid every day, a seventh of the week's.
 	BaseHub.server_advance_days(1)
-	check(BaseEconomy.funds() == funds - int(bill.total), "the week's bill is paid on its day, base upkeep with it ($%d)" % int(bill.total))
+	var first := Economy.day_share(int(bill.wages), 0, week) + Economy.day_share(int(bill.upkeep), 0, week)
+	check(int(bill.loans) == 0 and first > 0 and BaseEconomy.funds() == funds - first, "a day's wages and upkeep are paid each day ($%d, a seventh of the week's)" % first)
+	BaseHub.server_advance_days(Economy.days_to_bill())
+	check(BaseEconomy.funds() == funds - int(bill.total), "a week of them is the week's bill to the dollar, base upkeep with it ($%d)" % int(bill.total))
 	check(BaseHub.day() == Economy.day() and BaseHub.day() == MissionRegistry.setting_i("start_day", 1) + week, "the base's day is the economy's (day %d)" % BaseHub.day())
+
+
+## Economy balance 2026-10-20 (the proposal's hire-and-release loophole): a new hire brought
+## their role's kit free and letting them go put it all in the stash, so hiring and releasing
+## at once filled the stash with kit worth more than the fee. They take what they were issued.
+func _test_release_kit() -> void:
+	print("Letting a hire go")
+	BaseHub.new_campaign(SEED)
+	var cand := _cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day()))
+	var before: Array = Roster.members(BaseHub.roster()).keys()
+	check(BaseHub.server_hire(String(cand.cid)) == "", "(a hire)")
+	var mid := ""
+	for id: String in Roster.members(BaseHub.roster()):
+		if not id in before:
+			mid = id
+	var issued: Dictionary = BaseHub.member(mid).get("issued_kit", {})
+	check(not issued.is_empty() and int(issued.get("plate_carrier", 0)) == 1, "a new hire's role kit is noted as issued to them (%d kinds)" % issued.size())
+	var stash := BaseArmory.counts(BaseHub.stash())
+	check(BaseHub.server_release(mid) == "" and BaseArmory.counts(BaseHub.stash()) == stash and BaseHub.member(mid).is_empty(),
+		"let go at once, they leave with their kit: nothing new in the stash")
+	# What the company added comes back.
+	before = Roster.members(BaseHub.roster()).keys()
+	BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day())).cid))
+	for id: String in Roster.members(BaseHub.roster()):
+		if not id in before:
+			mid = id
+	var m := BaseHub.member(mid)
+	var inv := Inventory.new()
+	inv.net_state = GameState.from_json((m.gear as Dictionary).duplicate(true))
+	var given := Roles.give(inv, &"etool", 1)
+	m["gear"] = Roster.json_safe(inv.net_state)
+	inv.free()
+	check(given == 1 and BaseHub.server_release(mid) == "" and int(BaseArmory.counts(BaseHub.stash()).get("etool", 0)) == int(stash.get("etool", 0)) + 1
+		and BaseArmory.counts(BaseHub.stash()).size() == stash.size() + (0 if stash.has("etool") else 1),
+		"the entrenching tool the company gave them comes back to the stash, only that")
+	# Someone hired before the fix (nothing noted as issued) brings it all back, as before.
+	before = Roster.members(BaseHub.roster()).keys()
+	BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day())).cid))
+	for id: String in Roster.members(BaseHub.roster()):
+		if not id in before:
+			mid = id
+	BaseHub.member(mid).erase("issued_kit")
+	stash = BaseArmory.counts(BaseHub.stash())
+	check(BaseHub.server_release(mid) == "" and int(BaseArmory.counts(BaseHub.stash()).get("plate_carrier", 0)) == int(stash.get("plate_carrier", 0)) + 1,
+		"a hire from an older save with nothing noted brings all their gear back")
 
 
 func _test_growth() -> void:
@@ -574,7 +622,7 @@ func _test_respawn_pool() -> void:
 	BaseHub.server_count_respawn()
 	var dep := RosterDeployment.active(roster)
 	check(int(dep.respawns_bought) == 1 and BaseEconomy.funds() == funds - BaseEconomy.respawn_price(), "the fifth is bought ($%d)" % BaseEconomy.respawn_price())
-	var second := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var second := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	check(second > BaseEconomy.respawn_price(), "each one bought costs more ($%d next)" % second)
 	# Cash first, then the deployed contract's support budget (Captain), then credit.
 	var offer: Dictionary = Contracts.board().filter(func(c: Dictionary) -> bool: return c.source != "recovery")[0]
@@ -588,9 +636,17 @@ func _test_respawn_pool() -> void:
 	check(int(dep.respawns_bought) == 2 and BaseEconomy.funds() == 0 and Contracts.support_left(cid) == budget - (second - 500),
 		"short of cash: the $500 there, the rest from the support budget ($%d of $%d)" % [second - 500, budget])
 	Contracts.server_draw_support(cid, Contracts.support_left(cid))
-	var third := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var third := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	BaseHub.server_count_respawn()
 	check(int(dep.respawns_bought) == 3 and BaseEconomy.funds() == -third, "with neither, it goes on credit ($%d)" % third)
+	# Economy balance 2026-10-20: a quarter more each time, never past respawn_max.
+	var funds_now := BaseEconomy.funds()
+	BaseHub.server_count_respawn()
+	BaseHub.server_count_respawn()
+	BaseHub.server_count_respawn()
+	var next := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
+	check(second == 5000 and third == 6000 and BaseEconomy.funds() == funds_now - 7000 - 8000 - 8000 and next == 8000 and Prices.respawn_max() == 8000,
+		"bought respawns cost $4,000, $5,000, $6,000, $7,000, then $8,000 each at most (next $%d)" % next)
 	Contracts.server_abandon_deployment()
 	RosterDeployment.begin(roster, [], RosterDeployment.HOT, "z", "", 1)
 	check(RosterDeployment.free_respawns_left(roster) == 8, "a hot zone: 8 free")
@@ -1600,16 +1656,16 @@ func _test_contract_loop() -> void:
 	extraction.countdown_s = 0.2
 	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
 	var cash_before := Economy.cash()
-	var bills := [0]  # weekly bills that fall due in the deployment's days
+	var bills := [0]  # the daily bills paid in the deployment's days
 	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
-	Economy.week_paid.connect(on_week)
+	Economy.bill_paid.connect(on_week)
 	check(extraction.server_confirm() == "", "the squad (one left behind by choice) confirms at the extraction point")
 	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
 	level = CompoundLevel.current(self)
 	var debrief := Contracts.last_debrief()
 	var line: Dictionary = (debrief.get("contracts", [{}]) as Array)[0] if not (debrief.get("contracts", []) as Array).is_empty() else {}
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
-	Economy.week_paid.disconnect(on_week)
+	Economy.bill_paid.disconnect(on_week)
 	_check_story(cid, String(BaseHub.member(lost).callsign))
 	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
