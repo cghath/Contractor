@@ -11,6 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### SVD Dragunov's own model (2026-10-20: realistic weapons)
+
+#### Changed
+- **The SVD has a model of its own** (`model_style` "svd"). Before, it drew as a long AKM with a
+  30-round banana magazine. Now it has:
+  - a short, nearly straight 10-round magazine, 10 cm under the receiver, with its stamped rib;
+  - a skeletonised wooden thumbhole stock: the pistol grip forms the front of the hole, a bar
+    runs under it to the butt, and a cheek rest sits on the comb;
+  - a slim two-piece wooden handguard with vents, between metal rings;
+  - a long thin barrel with a slotted flash hider, and the front sight and bayonet lug behind it;
+  - an AK-style receiver: dust cover, right-side charging handle and carrier (they rack back
+    together), the long safety lever, the magazine release paddle;
+  - the optic's side rail on the left. A mounted optic still sits centred over the bore, as on
+    every rifle, but its mount clamps that rail. Under an optic the irons stay on the gun, below
+    the line of sight.
+- It still reloads like an AK (`Reloads.family`), with the same hand and sight points.
+
 ### Weapon detail pass (Captain, 2026-10-20: "we need to do a weapon detail pass soon")
 
 The parts the reloads work are now on the models, they move in first person, and each reload

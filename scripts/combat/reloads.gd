@@ -68,7 +68,7 @@ static func family(item: ItemData) -> StringName:
 	if item.slot == &"sidearm":
 		return PISTOL
 	match String(item.stats.get("model_style", "")):
-		"ak": return AK
+		"ak", "svd": return AK
 		"bullpup": return BULLPUP
 		"pk", "m240", "m249": return BELT
 		"mosin": return BOLT
