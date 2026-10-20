@@ -3864,8 +3864,8 @@ func _contact_drill() -> void:
 ## suppression in this one. The reaction before the next think (see REACT_CLOSE).
 func react_to_fire(amount: float) -> void:
 	var now := Soldier._now()
-	if now - _fire_react_at < REACT_GAP_S or not _ready_done or body == null or not body.vitals.is_up():
-		return
+	if now - _fire_react_at < REACT_GAP_S or not _ready_done or body == null or not body.vitals.is_up() or not can_process():
+		return  # (a brain switched off, asleep or held by a test, doesn't react)
 	if amount < REACT_CLOSE and body.suppression < REACT_SUPPRESSION:
 		return
 	if intent in [Intent.CASUALTY, Intent.HEAL] or body.carrying != null or Vehicle.ride_of(body) != null or body.stunned_s > 0.0:

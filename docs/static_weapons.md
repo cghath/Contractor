@@ -125,6 +125,29 @@ A mortar team is a gunner and an assistant (plus a third man for the 82 mm), the
 4. Part d: the player's side: buying, carrying and setting up, the command menu and map orders.
 5. The DShK and the 82 mm: the same work for the other side's weapons.
 
+## Status (2026-10-20, branch claude/ai-driving)
+
+- **Part a, done.** The M2 on its M3 tripod and a DShK on a tripod: `Vehicle` kind `static` (frozen,
+  one gunner seat, `AavGunner` mans it), loads as two-handed items (real weights), set up / pack up
+  (`StaticWeapons`), belts the crew carries loaded on set-up.
+- **Part b, done.** `GunTeam`: carries the gun to high ground in defilade (against every enemy it
+  knows, a flank counts against a spot), faces the threat, sets up, digs a parapet in front, mans
+  it; packs up and moves on when the fight leaves it or fire from a flank keeps catching it.
+  Garrisons at HQs, QRF bases and half the compounds and outposts keep a DShK team that sets up
+  inside the site once its ambush is sprung.
+- **Part c, done.** `MortarFire` (rounds in flight, dispersion, HE bursts) and `MortarTeam`: picks a
+  spot in range and out of the target's sight, ranges in (errors halve when one of its side sees
+  the round land; the enemy's need their comms), fires for effect, waits; never danger close.
+  The M224 (60 mm) and the 2B14 (82 mm), real weights and ranges. HQs and QRF bases keep a 2B14
+  team that sets up once the site is alerted.
+- **Part d, done (first pass).** The mortar laid and fired by hand from its firing table
+  (`MortarPanel`, `MortarTable`; rounds from the hold or the player's kit). Command menu, Action >
+  Weapons team: set up the gun there, set up on high ground, mortar fire on a point, pack up and
+  follow. Buying: the M2's and the M224's loads and 60 mm rounds are for sale (priced).
+- **Still to do.** Map orders for weapons teams; the allied weapons team bringing an M2; rebels'
+  DShK with the Fighters call-in; a mortar sound of its own (it uses the far explosion);
+  grenade launchers (Mk19, AGS-17).
+
 ## The Captain's calls (2026-10-19)
 
 1. **Weapons first: as proposed.** The M2 and DShK, the M224 60 mm and 82 mm mortars; grenade

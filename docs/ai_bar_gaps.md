@@ -52,14 +52,14 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-16 | ~~The AI never judges which casualty is worst~~ (done 2026-10-19: its own read when no card) | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
 | G-17 | Positions are picked without terrain, height or a second threat (part done 2026-10-19: base of fire takes high ground, flanks like height, folds count as cover, gun teams pick defilade against every known enemy; riflemen's cover against a second threat still to do) | P2 | M |
-| G-18 | No first-contact drill (freeze, face, get down) | P2 | S |
+| G-18 | ~~No first-contact drill (freeze, face, get down)~~ (done 2026-10-20) | P2 | S |
 | G-19 | Nothing avoids ground that is being shot up | P2 | M |
 | G-20 | Infantry don't react to armour | P2 | M |
 | G-21 | Every flank is the same close hook | P2 | S |
-| G-22 | A lost enemy is searched for where he was, not where he was going | P2 | S |
+| G-22 | ~~A lost enemy is searched for where he was, not where he was going~~ (done 2026-10-20) | P2 | S |
 | G-23 | Few visible reactions to being hit | P2 | M |
 | G-24 | No night, light, NVG, fog or weather in spotting | P2 | M |
-| G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed | P1 | L |
+| G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed (done 2026-10-20 for both sides and players, first pass: see docs/static_weapons.md) | P1 | L |
 | G-26 | Patrols don't ambush; no mines | P3 | M |
 
 G-27 to G-30 were added from the critic's pass (the gaps are numbered in the order they were
