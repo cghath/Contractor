@@ -127,7 +127,7 @@ static func should_sleep(s: Soldier, players: Array[Vector3], sleeping: bool) ->
 	var lvl := CompoundLevel.current(s)
 	if not sleeping and lvl and absf(s.global_position.y - lvl.ground_point(s.global_position).y) > OFF_GROUND_M:
 		return false  # falling, or waiting for the ground under him to load: let him land first
-	if not sleeping and (not s.is_on_floor() or absf(s.velocity.y) > STILL_MPS):
+	if not sleeping and absf(s.velocity.y) > STILL_MPS:
 		return false  # in his last metre of a fall: not frozen in the air (F-07; a walker on the ground settles first)
 	var brain := SquadAI.of(s)
 	if brain:

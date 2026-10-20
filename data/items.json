@@ -375,7 +375,7 @@
 		{"id": "binoculars", "name": "Binoculars", "type": "utility", "volume_l": 0.7, "mass_kg": 0.65, "tags": ["optic"],
 		 "stats": {"short": "Binos", "magnification": 7.0, "size_m": [0.12, 0.06, 0.15]},
 		 "desc": "7x binoculars for watching ground from a distance.",
-		 "uses": ["Squad AI carrying them spots distant enemies sooner while out of contact", "Fits the binocular pouch", "No player view through them yet"]},
+		 "uses": ["B (on foot) raises them: a 7x view with a mil scale, the weapon lowered; B again, sprinting or a weapon key lowers them", "Squad AI carrying them spots distant enemies sooner while out of contact", "Fits the binocular pouch"]},
 
 		{"id": "assault_pack", "name": "Assault Pack (24 L)", "type": "backpack", "slot": "backpack", "volume_l": 4.0, "mass_kg": 1.1, "capacity_l": 24.0, "tags": ["pack"],
 		 "stats": {"rolled_l": 1.5, "molle": [

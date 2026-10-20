@@ -82,6 +82,11 @@ var throwable: StringName = &"frag_grenade"
 ## A grenade is up in your hand (G): the weapon is lowered, Fire throws, Aim lobs, G / the wheel /
 ## the weapon keys put it away with nothing thrown. Nothing throws until it is up.
 var nade_up := false
+## Binoculars (Captain, 2026-10-20): up on the binoculars key when he carries a pair (BINOS);
+## the view zooms by its magnification, the frame shows (BinocularView), the weapon is lowered
+## and doesn't fire; sprinting, a weapon key, going down or getting in a vehicle lowers them.
+const BINOS := &"binoculars"
+var _binos_view: BinocularView
 var _nade_label: Label
 ## An underhand lob goes at this fraction of the throw speed (and a bit less up).
 const LOB_POWER := 0.45
@@ -164,6 +169,8 @@ func _ready() -> void:
 	hud.add_child(LauncherSight.new(body))  # anti-armour launchers: sight, lock, fire (wave 5)
 	hud.add_child(GunSight.new(body))  # rifle and pistol sights (P0362)
 	body.add_child(NvgView.new(body))  # the view through lowered NVGs (wave 7, S2)
+	_binos_view = BinocularView.new()
+	body.add_child(_binos_view)
 	pad_wheel = PadWheel.new()
 	hud.add_child(pad_wheel)
 	assist_line = UiKit.hud_label("", &"HudSmallLabel")
@@ -281,6 +288,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_placing()
 		else:
 			equip_nade()
+	elif event.is_action_pressed(&"binoculars") and not is_instance_valid(body.vehicle):
+		_set_binoculars(not body.binoculars_up)
 	elif event.is_action_pressed(&"nvg_toggle"):
 		body._server_toggle_nvg.rpc_id(1)  # the helmet's NVG down or up (wave 7, S2; Nvg)
 	elif event.is_action_pressed(&"tag_enemy"):
@@ -292,6 +301,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"medical_menu"):
 		medical_menu.open(MedicalMenu.looked_at(body, body.camera))
 	elif event.is_action_pressed(&"weapon_primary"):
+		_set_binoculars(false)
 		put_nade_away()
 		body.select_weapon(&"primary")
 	elif event.is_action_pressed(&"weapon_sidearm"):
@@ -672,6 +682,8 @@ func _update_voice() -> void:
 
 
 func _try_fire() -> void:
+	if body.binoculars_up:
+		return  # glassing: no shooting
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"" or body.movement.mantling:  # both hands on the casualty, or on the ledge
 		return
@@ -734,7 +746,35 @@ static func ads_view(weapon: ItemData, state := {}) -> Vector3:
 	return eye - VoxelArt.sight_point(model)
 
 
+## Raises or lowers the binoculars (BINOS): raising needs a pair carried, hands free and up.
+func _set_binoculars(up: bool) -> void:
+	if up and (body.inventory.count_of(BINOS) <= 0 or body.inventory.hands != &"" or not body.vitals.is_up() or nade_up or placing):
+		if up and body.inventory.count_of(BINOS) <= 0:
+			hud.flash("No binoculars")
+		return
+	body.binoculars_up = up
+	if _binos_view:
+		_binos_view.show_frame(up)
+	if body.view_model:
+		body.view_model.visible = not up  # the weapon's down while he's glassing
+
+
+## The binoculars' field of view: the view narrowed by their magnification (relative to the view,
+## as optics are).
+func _binos_fov() -> float:
+	var item := ItemDB.get_item(BINOS)
+	var x := float(item.stats.get("magnification", 7.0)) if item else 7.0
+	return rad_to_deg(2.0 * atan(tan(deg_to_rad(GameSettings.view_fov()) * 0.5) / maxf(x, 1.0)))
+
+
 func _update_aim(delta: float) -> void:
+	if body.binoculars_up and (not body.vitals.is_up() or is_instance_valid(body.vehicle) or Input.is_action_pressed(&"sprint") \
+			or body.inventory.count_of(BINOS) <= 0 or body.inventory.hands != &""):
+		_set_binoculars(false)  # sprinting, down, aboard, or the pair's gone
+	if body.binoculars_up:
+		body.is_aiming = false
+		body.camera.fov = lerpf(body.camera.fov, _binos_fov(), minf(delta * 10.0, 1.0))
+		return
 	var weapon := body.active_weapon()
 	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")

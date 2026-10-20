@@ -95,6 +95,12 @@ const GAIT_HIP_TURN := 0.5
 ## in over (below it the stance pose stands).
 const GAIT_EASE := 10.0
 const GAIT_IN := Vector2(0.1, 0.5)
+## Speed is measured over the time since the body last moved, up to this long (s): bodies move
+## on physics ticks (60 Hz) but the model draws every frame, so above 60 fps most frames see no
+## move and the next sees a whole tick's worth. Per frame, a jog read as standing still on the
+## empty frames and as a teleport (over MAX_SPEED * 1.5, zeroed) on the others, and AI jogged
+## with their legs still (Captain, 2026-10-20, 157 fps: "sliding, legs still").
+const MOVE_WINDOW_S := 0.1
 ## Hips this low or lower (m, body space) walk as a crouch-walk: no extra hip drop, less lift.
 const CROUCH_GAIT_HIP := 0.65
 ## Prone crawl: the body moves this far a cycle, a knee drawn up and out each half.
@@ -448,6 +454,7 @@ var _held: Node3D
 var _grip := Vector3.ZERO     # right hand, in _held's local space
 var _support := Vector3.ZERO  # left hand, in _held's local space
 var _last_position: Vector3
+var _move_dt := 0.0  # time since the body last moved (MOVE_WINDOW_S)
 var _speed := 0.0
 ## Breathing (the torso's rise and fall): rate and depth multipliers, 1 at rest; the body's
 ## owner raises them as the legs tire (Soldier._process, MovementRules.ANIM_BREATH_*).
@@ -1267,14 +1274,17 @@ func _process(frame_delta: float) -> void:
 	# Speed from position change works the same for local, remote and AI bodies; measured in
 	# the model's own space (its turn and scale), so strides match what the model is drawn at.
 	var moved := global_position - _last_position
-	_last_position = global_position
 	moved.y = 0.0
-	var vel := global_transform.basis.inverse() * (moved / maxf(delta, 0.0001))
-	vel.y = 0.0
-	if vel.length() > MAX_SPEED * 1.5:
-		vel = Vector3.ZERO  # placed, not walked
-	_move = _move.lerp(vel, minf(delta * GAIT_EASE, 1.0))
-	_speed = _move.length()
+	_move_dt += delta
+	if moved.length_squared() > 1e-8 or _move_dt >= MOVE_WINDOW_S:
+		_last_position = global_position
+		var vel := global_transform.basis.inverse() * (moved / maxf(_move_dt, 0.0001))
+		vel.y = 0.0
+		if vel.length() > MAX_SPEED * 1.5:
+			vel = Vector3.ZERO  # placed, not walked
+		_move = _move.lerp(vel, minf(_move_dt * GAIT_EASE, 1.0))
+		_speed = _move.length()
+		_move_dt = 0.0
 	_time += delta
 	var carry_key := "%s/%s/%s" % [carry_net.get("mode", ""), carry_net.get("phase", ""), carry_net.get("n", 0)]
 	if carry_key != _carry_key:

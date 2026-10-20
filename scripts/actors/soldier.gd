@@ -144,6 +144,9 @@ var last_shot_suppressed := false
 ## Which friendly marks he wears (GearRig.iff_of): "allied" for allied troops (AlliedTroops),
 ## "" for everyone else (his faction decides). Set before the body enters the tree.
 @export var iff := &""
+## Local (the owning player's): his binoculars are up (PlayerInput). He walks slowly and can't
+## sprint or fire (SoldierMovement, PlayerInput).
+var binoculars_up := false
 ## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
 @export var variant := ""
 ## Body type for this soldier's model (VoxelArt.BODIES; "" is male). Set before entering the tree.

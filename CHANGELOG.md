@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Binoculars and the legs-still fix (Captain, 2026-10-20)
+
+#### Added
+- Binoculars you can look through. Press B on foot to raise them: a 7x view with a two-circle
+  frame and a mil scale, and the weapon lowered. Press B again, sprint, or press a weapon key to
+  lower them. You walk slowly and can't fire while they're up. Seated, B is still the vehicle
+  view. The key can be rebound in Settings.
+
+#### Fixed
+- AI no longer slide with their legs still at high frame rates. The model measured speed over
+  one drawn frame, but bodies move on 60 Hz physics ticks. Above 60 fps, a jog read as standing
+  still on frames with no tick, and as a teleport (zeroed) on frames with one. Speed is now
+  measured over the time since the body last moved.
+- F-07 (dynamic sim): a body only falls asleep when it isn't moving up or down. It no longer
+  also has to report touching the floor, so patrols far away fall asleep again.
+
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.

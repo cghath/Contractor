@@ -57,6 +57,9 @@ const KEYS := {
 	# Tag the enemy you look at for the squad, by radio (EnemyTags; Captain, 2026-10-16: GR
 	# Wildlands-style tagging). Y is free on foot and in a seat (proposed).
 	&"tag_enemy": [KEY_Y],
+	# Raise or lower your binoculars (BinocularView; Captain, 2026-10-20). B on foot: seated, B is
+	# the vehicle view (GameSettings.SHARED lets them share it).
+	&"binoculars": [KEY_B],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.
@@ -126,6 +129,7 @@ const PAD_WHEEL := [
 	[&"zoom_in", "Zoom in"], [&"zoom_out", "Zoom out"], [&"objectives_next", "Next objective"], [&"objectives_toggle", "Objectives list"],
 	[&"vehicle_view", "Vehicle view"], [&"get_out", "Get out"], [&"quick_save", "Quick save"],
 	[&"nvg_toggle", "NVG up/down"], [&"weapon_light", "Weapon light"], [&"tag_enemy", "Tag enemy"],
+	[&"binoculars", "Binoculars"],
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).

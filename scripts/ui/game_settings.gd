@@ -81,11 +81,12 @@ const BINDABLE := [
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
 	[&"give_up", "Give up while down (hold)"], [&"inspect", "Inspect item (ground)"],
 	[&"nvg_toggle", "NVG down / up"], [&"tag_enemy", "Tag enemy (radio)"],
+	[&"binoculars", "Binoculars (raise / lower, on foot)"],
 ]
 ## Pairs of bindable actions that may share a key, because they never apply at the same time:
 ## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them
 ## to a key never swaps the other away from it.
-const SHARED := [[&"sprint", &"hold_breath"]]
+const SHARED := [[&"sprint", &"hold_breath"], [&"vehicle_view", &"binoculars"]]  # (B: binoculars on foot, the view seated)
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
 const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"], "music": [&"Music"]}
 

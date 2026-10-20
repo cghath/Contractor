@@ -315,7 +315,7 @@ func step(delta: float) -> void:
 		sprint = false
 	# Sprint: forward only (MovementRules.SPRINT_ARC_DEG), never aimed (the sprint key aimed is
 	# holding the breath by default), within the load tier (can_sprint).
-	is_sprinting = sprint and MovementRules.sprint_direction_ok(input) and not body.is_aiming and not down and not burdened \
+	is_sprinting = sprint and MovementRules.sprint_direction_ok(input) and not body.is_aiming and not body.binoculars_up and not down and not burdened \
 		and is_standing() and can_sprint()
 	if is_sprinting and (stance != Stance.STAND_HIGH or side != 0):
 		side = 0
@@ -892,6 +892,8 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 	if body.is_aiming:
 		var weapon := body.active_weapon()
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT * body.vitals.aim_mult(weapon != null and weapon.tags.has("rifle"))
+	elif body.binoculars_up:
+		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT  # glassing: a slow walk
 	if down:
 		speed = CRAWL_SPEED
 	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory)  # a heavy exo walks at its own pace

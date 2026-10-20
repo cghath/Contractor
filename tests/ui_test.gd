@@ -458,6 +458,7 @@ func _test_hud() -> void:
 				% [res.x, res.y, ui_scale, shown.replace("\n", " | "), hud.command_menu._title.text])
 	hud.command_menu.close()
 	root.content_scale_size = Vector2i(1920, 1080)
+	hud.show_vehicle(vehicle)  # (it hides 0.5 s after the last show: the loop above can take longer)
 	await _frames(2)
 	check(hud.vehicle_text().contains("ON FIRE: GET OUT") and hud._vehicle.get_child_count() == vehicle.size(), "the vehicle readout is in parts, one label each")
 	check(hud._subtitles.theme_type_variation == &"HudLabel" and hud._status.theme_type_variation == &"HudLabel" and hud._downed.theme_type_variation == &"HudAlertLabel"
