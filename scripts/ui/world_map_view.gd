@@ -495,18 +495,20 @@ func _draw_zone(id: String, font: Font) -> void:
 	var c := to_screen(zone_centre(id))
 	var width := scale_px * 0.92
 	var lines := _name_lines(font, String(row.get("name", RegionMap.zone_name(id))), width)
-	var y := c.y - (lines.size() - 1) * (FONT_NAME + 2) * 0.5 - 6.0
+	# The name above the middle and the badges below it, clear of the links that cross there.
+	var line_h := FONT_NAME + 2.0
+	var y := c.y - maxf(scale_px * 0.14, 12.0) - (lines.size() - 1) * line_h
+	if bool(row.get("squad", false)):
+		_pill(font, Vector2(c.x, y - line_h - 4.0), "SQUAD", SQUAD)
 	for line in lines:
 		_text_centred(font, Vector2(c.x, y), line, FONT_NAME, UiKit.TEXT, width)
-		y += FONT_NAME + 2
+		y += line_h
 	var badges := badges_of(row)
-	if bool(row.get("squad", false)):
-		_pill(font, Vector2(c.x, c.y - (lines.size() + 1) * (FONT_NAME + 2) * 0.5 - 12.0), "SQUAD", SQUAD)
-	var bw := 26.0
-	var x := c.x - (badges.size() - 1) * bw * 0.5
-	for b: Array in badges:
-		draw_badge(self, font, String(b[0]), Vector2(x, y + 8.0), String(b[1]))
-		x += bw
+	var widths := badges.map(func(b: Array) -> float: return 42.0 if String(b[0]) == "hot" else 28.0)
+	var x: float = c.x - widths.reduce(func(sum: float, w: float) -> float: return sum + w, 0.0) * 0.5
+	for i in badges.size():
+		draw_badge(self, font, String(badges[i][0]), Vector2(x + float(widths[i]) * 0.5, c.y + maxf(scale_px * 0.17, 16.0)), String(badges[i][1]))
+		x += float(widths[i])
 
 
 ## A zone row's badges: [[kind, count text ("" for none)]], in BADGES order.
@@ -533,7 +535,7 @@ static func badges_of(row: Dictionary) -> Array:
 static func draw_badge(ci: CanvasItem, font: Font, kind: String, at: Vector2, count := "") -> void:
 	var b: Dictionary = BADGES.get(kind, BADGES.hot)
 	var colour: Color = b.colour
-	var glyph := count if count != "" else String(b.glyph)
+	var glyph := (String(b.glyph) + count if kind == "recent" else count) if count != "" else String(b.glyph)
 	if kind == "hot":
 		var w := font.get_string_size("HOT", HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_BADGE).x + 8.0
 		ci.draw_rect(Rect2(at - Vector2(w * 0.5, 9), Vector2(w, 18)), colour)
@@ -548,8 +550,9 @@ static func draw_badge(ci: CanvasItem, font: Font, kind: String, at: Vector2, co
 			d.append(d[0])
 			ci.draw_polyline(d, colour, 2.0, true)
 	else:
-		ci.draw_circle(at, 10.0, Color(0.06, 0.06, 0.05, 0.92))
-		ci.draw_arc(at, 10.0, 0.0, TAU, 20, colour, 2.0, true)
+		var r := 12.0 if glyph.length() > 1 else 10.0
+		ci.draw_circle(at, r, Color(0.06, 0.06, 0.05, 0.92))
+		ci.draw_arc(at, r, 0.0, TAU, 24, colour, 2.0, true)
 		if kind == "skirmish":
 			ci.draw_line(at + Vector2(-5, -5), at + Vector2(5, 5), colour, 2.5, true)
 			ci.draw_line(at + Vector2(5, -5), at + Vector2(-5, 5), colour, 2.5, true)
