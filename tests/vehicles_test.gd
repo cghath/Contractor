@@ -1282,9 +1282,35 @@ func _test_mortar_team() -> void:
 	check(team.rounds < MortarTeam.ROUNDS and mf.in_flight() > 0, "and a ranging round goes out (%d left, %d in the air)" % [team.rounds, mf.in_flight()])
 	await _wait_for(func() -> bool: return mf.in_flight() == 0, 45.0)
 	check(mf.in_flight() == 0, "and lands")
+	# Part d: a player lays it by the firing table and fires a round from its hold.
+	var m := MortarFire.spec_of(team.gun) if is_instance_valid(team.gun) else {}
+	check(not m.is_empty() and absf(MortarTable.range_m(m, 4, 800.0) - float(m.max_m)) < 5.0, "the table: top charge at 800 mils reaches its maximum")
 	if is_instance_valid(team.gun):
-		team.gun.queue_free()
-	team.queue_free()
+		var g := team.gun
+		team.queue_free()  # the crew stand off: the player fires it
+		await _seconds(0.2)
+		g.cargo_hold.take(&"round_60mm_he", 2)
+		player.global_position = g.global_position + g.global_basis * Vector3(0.6, 0.1, 0.6)
+		var to := foe.global_position - g.global_position
+		var want := Vector2(to.x, to.z).length()
+		var bearing := wrapf(rad_to_deg(atan2(to.x, -to.z)), 0.0, 360.0)
+		var best := [1, 1100.0, INF]
+		for c in MortarTable.charges(m):
+			var e := MortarTable.ELEVATION_MILS.x
+			while e <= MortarTable.ELEVATION_MILS.y:
+				var off := absf(MortarTable.range_m(m, c, e) - want)
+				if off < float(best[2]):
+					best = [c, e, off]
+				e += 10.0
+		var before := g.cargo_hold.feed_rounds(&"round_60mm_he")
+		var flying := mf.in_flight()
+		g.request_mortar_fire(bearing, int(best[0]), float(best[1]))
+		check(mf.in_flight() == flying + 1 and g.cargo_hold.feed_rounds(&"round_60mm_he") == before - 1,
+			"laid by hand (bearing %.0f, charge %d, %.0f mils for %.0f m), a round from its hold goes" % [bearing, int(best[0]), float(best[1]), want])
+		await _wait_for(func() -> bool: return mf.in_flight() == 0, 45.0)
+		g.queue_free()
+	if is_instance_valid(team):
+		team.queue_free()
 	for s: Soldier in [a, b, foe]:
 		s.queue_free()
 	await _seconds(0.3)

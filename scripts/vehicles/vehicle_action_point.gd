@@ -176,6 +176,11 @@ func _tag_entries(actor: Soldier) -> Array[Dictionary]:
 func _cargo_actions(actor: Soldier) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var v := vehicle
+	if v.kind == Vehicle.STATIC and not v.wrecked and not MortarFire.spec_of(v).is_empty():  # G-25 part d: a mortar
+		out.append(_entry(&"lay_mortar", "Lay and fire (firing table)", func() -> void:
+			MortarPanel.open(v, rad_to_deg(-actor.camera.global_rotation.y))))
+		out.append(_entry(&"pack_static", "Pack up the mortar (%d s)" % int(StaticWeapons.KITS[v.model].pack_s), func() -> void: v.request_pack.rpc_id(1),
+			StaticWeapons.pack_problem(actor, v)))
 	var hold := v.cargo() as VehicleCargo
 	if hold == null:
 		return [_check()]

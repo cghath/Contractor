@@ -2521,6 +2521,36 @@ func request_enter(index: int) -> void:
 			_tell(actor, "Can't get in there")
 
 
+## A mortar laid and fired by hand (G-25 part d, MortarPanel): bearing (degrees from north),
+## charge and elevation (mils) give where the round lands (MortarTable, the panel's numbers); one
+## round from the hold or the actor's kit.
+@rpc("any_peer", "call_local", "reliable")
+func request_mortar_fire(bearing_deg: float, charge: int, mils: float) -> void:
+	var actor := _sender()
+	if not multiplayer.is_server() or actor == null or not actor.vitals.is_up() or not in_reach(actor):
+		return
+	var m := MortarFire.spec_of(self)
+	if m.is_empty():
+		return
+	var r := MortarTable.range_m(m, charge, clampf(mils, MortarTable.ELEVATION_MILS.x, MortarTable.ELEVATION_MILS.y))
+	var at := global_position + MortarTable.bearing_dir(bearing_deg) * r
+	if not MortarFire.in_range(self, at):
+		_tell(actor, "Out of its range at that charge and elevation (%d m)" % roundi(r))
+		return
+	var round_id := StringName(m.get("round", ""))
+	var from_hold := cargo_hold != null and cargo_hold.feed_rounds(round_id) > 0
+	if not from_hold and actor.inventory.count_of(round_id) <= 0:
+		_tell(actor, "No rounds: load %s into the mortar or carry them" % ItemDB.get_item(round_id).name)
+		return
+	var mf := MortarFire.of(self)
+	if mf == null or mf.server_fire(self, at, 0.0, actor) < 0.0:
+		return
+	if from_hold:
+		cargo_hold.take_feed(round_id)
+	else:
+		actor.inventory.remove_one(round_id)
+
+
 ## A static weapon's "Pack up the gun" (G-25, StaticWeapons): the host starts it.
 @rpc("any_peer", "call_local", "reliable")
 func request_pack() -> void:
