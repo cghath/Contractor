@@ -12,6 +12,7 @@ extends Node
 const NODE_NAME := "StaticWeapons"
 const KITS := {
 	"tripod_m2": {"name": "M2", "loads": [&"static_m2_gun", &"static_m3_tripod"], "set_s": 20.0, "pack_s": 15.0},
+	"tripod_dshk": {"name": "DShK", "loads": [&"static_dshk_gun", &"static_dshk_mount"], "set_s": 20.0, "pack_s": 15.0},
 }
 const REACH_M := 3.0
 const MOVE_M := 0.6
@@ -138,7 +139,7 @@ func _physics_process(_delta: float) -> void:
 		return
 	for key: int in _jobs.keys():
 		var j: Dictionary = _jobs[key]
-		var s := j.soldier as Soldier
+		var s: Soldier = j.soldier if is_instance_valid(j.soldier) else null
 		if not is_instance_valid(s) or not s.vitals.is_up() or s.global_position.distance_to(j.from) > MOVE_M:
 			if is_instance_valid(s):
 				s.model.server_stop(int(j.serial))
@@ -167,15 +168,36 @@ func _set_up(s: Soldier, kit: String, fwd: Vector3) -> String:
 	var gun := layer.server_spawn(kit, Transform3D(Basis(Vector3.UP, atan2(-fwd.x, -fwd.z)), at), "", &"hostile" if s.faction == &"hostile" else &"player")
 	if gun == null:
 		return "It won't go there"
+	var crew: Array[Soldier] = [s]
 	for id: StringName in KITS[kit].loads:
 		var src: Variant = loads_near(s, kit).get(id)
 		if src is Soldier:
 			(src as Soldier).inventory.release_hands()
+			if not crew.has(src):
+				crew.append(src)
 		elif src is WorldItem:
 			GameState.item_taken((src as WorldItem).uid)
 			(src as WorldItem).queue_free()
+	var loaded := load_belts(gun, crew)
+	if loaded > 0:
+		print("[static] %d belt%s into the %s" % [loaded, "" if loaded == 1 else "s", String(KITS[kit].name)])
 	print("[static] %s set up the %s at (%.0f, %.0f)" % [s.display_name(), String(KITS[kit].name), at.x, at.z])
 	return ""
+
+
+## Host: the belts `crew` carry for `gun`'s feed go into its hold (as many as it takes). Returns
+## how many.
+static func load_belts(gun: Vehicle, crew: Array[Soldier]) -> int:
+	var feed := StringName(gun.gun_info().get("feed", ""))
+	var hold := gun.cargo_hold
+	if feed == &"" or hold == null:
+		return 0
+	var n := 0
+	for c: Soldier in crew:
+		while c.inventory.count_of(feed) > 0 and hold.take(feed) > 0:
+			c.inventory.remove_one(feed)
+			n += 1
+	return n
 
 
 ## Host: the gun goes back to its loads (free hands within reach, else the ground) and the

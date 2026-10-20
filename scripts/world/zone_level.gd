@@ -768,12 +768,43 @@ func _spawn_queued_garrison() -> void:
 			_garrison_pending.erase(q.module_id)
 			if module:
 				_pair_garrison(module)
+				_maybe_gun_team(module)
 		if Time.get_ticks_usec() >= until:
 			break
 	if _garrison_queue.is_empty() and _garrison_nav_held:
 		_garrison_nav_held = false
 		if is_instance_valid(nav):
 			nav.release()
+
+
+## Static weapon teams (G-25 part b): a site of GUN_TEAM_TYPES with GUN_TEAM_MIN_MEN or more of
+## its garrison up keeps a gun team, always at the HQ and QRF bases and at GUN_TEAM_CHANCE of
+## compounds and outposts (a seed of its id): its last two men carry a DShK and set it up inside
+## the site when the ambush is sprung. Proposed.
+const GUN_TEAM_TYPES := {"hq": 1.0, "qrf_base": 1.0, "compound": 0.5, "outpost": 0.5}
+const GUN_TEAM_MIN_MEN := 5
+var _gun_teams := {}  # host: module id -> GunTeam
+
+
+func _maybe_gun_team(module: ZoneModule) -> void:
+	var base := ZoneModules.base(module.type)
+	if not GUN_TEAM_TYPES.has(base) or _gun_teams.has(module.module_id):
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([module.module_id, "gun_team"])
+	if rng.randf() >= float(GUN_TEAM_TYPES[base]):
+		return
+	var men: Array[Soldier] = []
+	for i in range(int(_garrisoned.get(module.module_id, 0)) - 1, 0, -1):
+		var s := ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) as Soldier
+		if s and s.vitals.is_up() and i % RADIO_EVERY != 0:
+			men.append(s)
+	if men.size() + 2 < GUN_TEAM_MIN_MEN or men.size() < 2:
+		return
+	var team := GunTeam.form(self, men[0], men[1], "tripod_dshk", site_squad(module.module_id), _posts.get(module.module_id))
+	if team:
+		_gun_teams[module.module_id] = team
+		print("[gunteam] %s keeps a %s team (%s, %s)" % [module.module_id, team.kit, men[0].name, men[1].name])
 
 
 ## Buddy pairs in module `module`'s garrison (posts 1 and 2, 3 and 4, ...), for those up.

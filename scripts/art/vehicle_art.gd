@@ -31,6 +31,7 @@ const SCHEMES := {
 ## Models and the schemes they come in (the first is the default).
 const MODELS := {
 	"tripod_m2": ["od", "desert"],
+	"tripod_dshk": ["od"],
 	"uh60": ["army", "od"],
 	"vtol_petrel": ["stealth"],
 	"vtol_razorback": ["desert_camo"],
@@ -186,6 +187,7 @@ static func _shape_for(model: String) -> Canvas:
 		"matv": return _matv()
 		"technical": return _technical("dshk")
 		"tripod_m2": return _tripod_m2()
+		"tripod_dshk": return _tripod_m2("dshk")
 		"bradley": return _bradley()
 		"abrams": return _abrams()
 	if model.begins_with("technical_"):
@@ -1880,7 +1882,7 @@ static func _pickup(c: Canvas, base: String) -> float:
 ## An M2HB .50 on its M3 tripod (G-25, a static weapon): three splayed legs, the gun on the
 ## pintle with its ammo can, spade grips at the back for a gunner sitting behind it. 1.2 x 1.2 x
 ## 2.0 m canvas; the gun turns on the pintle (VehicleTurret: pivot and gun box in the spec).
-static func _tripod_m2() -> Canvas:
+static func _tripod_m2(gun := "m2") -> Canvas:
 	var c := Canvas.new(Vector3i(24, 24, 40), 0.05)
 	var head := Vector3(0, 0.45, 1.2)
 	c.mbar(head, Vector3(0, 0.0, 0.35), 0.03, P.METAL)  # front leg
@@ -1888,6 +1890,14 @@ static func _tripod_m2() -> Canvas:
 	c.mbar(head, Vector3(0.45, 0.0, 1.85), 0.03, P.METAL)
 	c.mbar(Vector3(-0.38, 0.12, 1.75), Vector3(0.38, 0.12, 1.75), 0.025, P.METAL)  # traversing bar
 	c.mbar(head, Vector3(0, 0.55, 1.2), 0.04, P.METAL)  # pintle
+	if gun == "dshk":  # the DShK on its tripod (the enemy's): ribbed barrel, the big muzzle brake
+		c.mbox(-0.09, 0.55, 1.0, 0.09, 0.72, 1.65, P.GUN)  # receiver
+		c.mbox(-0.035, 0.6, 0.14, 0.035, 0.67, 1.0, P.GUN)  # barrel
+		c.mbox(-0.06, 0.58, 0.05, 0.06, 0.69, 0.16, P.GUN)  # muzzle brake
+		c.mbox(-0.055, 0.58, 0.55, 0.055, 0.69, 0.65, P.GUN)  # cooling fins
+		c.mbox(-0.28, 0.48, 1.1, -0.1, 0.64, 1.4, P.SEAT)  # ammo box
+		c.mbar(Vector3(0, 0.64, 1.65), Vector3(0, 0.62, 1.78), 0.03, P.GUN)  # spade grips
+		return c
 	c.mbox(-0.1, 0.55, 1.0, 0.1, 0.72, 1.6, P.GUN)  # receiver
 	c.mbox(-0.03, 0.6, 0.12, 0.03, 0.66, 1.0, P.GUN)  # barrel
 	c.mbox(-0.045, 0.585, 0.08, 0.045, 0.675, 0.16, P.GUN)  # muzzle booster

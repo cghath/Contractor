@@ -183,6 +183,7 @@ func _run_host(wait_for_client: bool) -> void:
 	if _want("vehicle_guns"):
 		await _test_vehicle_guns()
 		await _test_static_gun()
+		await _test_gun_team()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -1198,6 +1199,53 @@ func _test_static_gun() -> void:
 	crew.queue_free()
 	if again:
 		again.queue_free()
+	await _seconds(0.3)
+
+
+## G-25 part b: an AI gun team (GunTeam) with an enemy known carries its loads to a spot with a
+## line on him, sets the gun up, mans it and fires.
+func _test_gun_team() -> void:
+	print("Static weapons: an AI gun team")
+	var at := level.ground_point(Vector3(-60, 0, 60))  # (the range is about 160 m deep)
+	var a := _soldier("friendly", at + Vector3(0, 0.1, 0), "GunTeamA")
+	var b := _soldier("friendly", at + Vector3(1.5, 0.1, 0), "GunTeamB")
+	var foe := _soldier("hostile", level.ground_point(Vector3(-60, 0, -70)) + Vector3(0, 0.1, 0), "GunTeamFoe")
+	await _seconds(0.3)
+	var fb := SquadAI.of(foe)
+	if fb:
+		fb.process_mode = Node.PROCESS_MODE_DISABLED  # a target that stays put and doesn't shoot back
+	foe.vitals.can_go_down = false  # ...and stays up for the gun (the team's rifles would drop him first)
+	for s: Soldier in [a, b]:
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_INHERIT  # (_soldier holds brains still: this team has to think)
+	var team := GunTeam.form(level, a, b, "tripod_m2")
+	check(team != null and a.inventory.hands == &"static_m2_gun" and b.inventory.hands == &"static_m3_tripod",
+		"a gun team: the gun in the gunner's hands, the tripod in his assistant's")
+	if team == null:
+		return
+	team.squad.note_enemy(foe, foe.global_position)
+	await _wait_for(func() -> bool: return team.state == GunTeam.State.MANNED, 100.0)
+	if team.state != GunTeam.State.MANNED:
+		print("    %s; gunner at %s (spot %s), %s" % [GunTeam.STATE_NAMES[team.state], a.global_position, team.spot, a.ai_status])
+	check(team.state == GunTeam.State.MANNED and is_instance_valid(team.gun) and team.gun.gunner() in [a, b],
+		"with an enemy %.0f m off it carries the gun to a spot, sets it up and mans it (%s)" % [at.distance_to(foe.global_position), GunTeam.STATE_NAMES[team.state]])
+	if is_instance_valid(team.gun):
+		var g := team.gun.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
+		await _wait_for(func() -> bool: return g != null and g.fired > 0, 20.0)
+		if g == null or g.fired == 0:
+			var muzzle := team.gun.gun_origin(0)
+			var q := PhysicsRayQueryParameters3D.create(muzzle, foe.aim_point(), 1 | Vehicle.LAYER, [team.gun.get_rid()])
+			print("    gun at %s, muzzle %s, foe %s (%.0f m), line hit %s" % [team.gun.global_position, muzzle, foe.aim_point(),
+				muzzle.distance_to(foe.aim_point()), team.gun.get_world_3d().direct_space_state.intersect_ray(q)])
+		check(g != null and g.fired > 0, "and fires on him (%d rounds)" % (g.fired if g else 0))
+		var dig := Digging.of(team.gun)
+		check(team._dug and (dig.digging(team.assistant) or not dig.records.is_empty()), "and the assistant digs in in front of the gun")
+		var on := team.gun.gunner()
+		if on:
+			team.gun.server_exit(on)
+		team.gun.queue_free()
+	team.queue_free()
+	for s: Soldier in [a, b, foe]:
+		s.queue_free()
 	await _seconds(0.3)
 
 

@@ -248,7 +248,7 @@ func _physics_process(_delta: float) -> void:
 		return
 	for key: int in _digs.keys():
 		var d: Dictionary = _digs[key]
-		var s := d.soldier as Soldier
+		var s: Soldier = d.soldier if is_instance_valid(d.soldier) else null
 		if not is_instance_valid(s) or not s.vitals.is_up() or s.global_position.distance_to(d.from) > DIG_MOVE_M:
 			if is_instance_valid(s):
 				s.model.server_stop(int(d.serial))

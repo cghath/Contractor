@@ -121,6 +121,10 @@
 				{"kind": "cargo", "at": [-0.6, 0.4, 0.3]}
 			]
 		},
+		"tripod_dshk": {
+			"base": "tripod_m2", "name": "DShK (tripod)",
+			"gun": {"weapon": "dshk", "seat": 0, "at": [0.0, 0.63, -0.95]}
+		},
 		"technical": {
 			"name": "Technical (DShK)", "kind": "wheeled", "class": "soft", "mass_kg": 2400, "com": [0.0, 0.6, 0.0],
 			"top_speed_kmh": 130, "reverse_kmh": 25, "accel_ms2": 3.0, "brake_ms2": 7.5, "steer_deg": 34,
