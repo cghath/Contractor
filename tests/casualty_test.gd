@@ -749,7 +749,10 @@ func _test_soak() -> void:
 				var ai := SquadAI.of(s)
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
-					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])]
+					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])] \
+					+ "; on floor %s, holding %s, mantling %s, stance %d, up %s, busy %.1f s, facing %.0f deg, touching %s" % [s.is_on_floor(), s.movement.holding,
+					s.movement.mantling, s.movement.stance, s.vitals.is_up(), s._busy_until - Soldier._now(), rad_to_deg(s.rotation.y),
+					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))]
 	var walked := _sim_s
 	await _seconds(12.0)  # let them settle in formation at the end
 	var settled := _squad().filter(func(s: Soldier) -> bool: return _flat(s.global_position, squad.follow_point(s)) > 4.0)
