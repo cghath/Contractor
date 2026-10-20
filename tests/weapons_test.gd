@@ -244,7 +244,17 @@ func _test_weapon_detail() -> void:
 		var pts := VoxelArt.reload_points(model)
 		check(parts == want[id] and adds and (not parts.has("cover") or pts.has("cover")) and pts.has("bolt"),
 			"%s: moving parts %s, the weapon adds up from them, a place for the hand on each" % [id, parts])
-	check(VoxelArt.moving_parts("pistol") == ["bolt"], "the pistol's slide moves on its own")
+	check(VoxelArt.has_magazine("pistol") and VoxelArt.moving_parts("pistol") == ["bolt"] and _pieces("pistol").size() == 1,
+		"the pistol's magazine and slide are parts of their own (Captain, 2026-10-20), and it's still one piece")
+	var pk_spec := VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(&"pkm")))
+	var pk_box: Array = VoxelArt._part_box(pk_spec, VoxelArt.MAG_TAG)
+	var pk_belt: Array = VoxelArt._part_box(pk_spec, VoxelArt.BELT_TAG)
+	check(((pk_box[0] as Vector3).x + (pk_box[1] as Vector3).x) * 0.5 > 1.5 and (pk_belt[1] as Vector3).x >= 3.0,
+		"a realistic PKM (Captain, 2026-10-20): its box hangs on the right and the belt feeds in from the right")
+	for g: Array in [[&"m4a1", 0.17], [&"hk416", 0.17], [&"akm", 0.18], [&"l85a2", 0.14]]:
+		var box: Array = VoxelArt._part_box(VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(g[0]))), VoxelArt.MAG_TAG)
+		var tall := ((box[1] as Vector3).y - (box[0] as Vector3).y) * VoxelArt.VOXEL_SIZE
+		check(tall >= float(g[1]), "%s's magazine is full length: %.0f cm (a real one's about %.0f)" % [g[0], tall * 100.0, float(g[1]) * 100.0 + 1.0])
 	var belt := VoxelArt.model_for(ItemDB.get_item(&"pkm"))
 	var belted := (VoxelArt._spec(VoxelArt.MAG + belt).boxes as Array).any(func(b: Array) -> bool: return VoxelArt._tag(b) == VoxelArt.BELT_TAG)
 	var motion := VoxelArt.part_motion(belt)

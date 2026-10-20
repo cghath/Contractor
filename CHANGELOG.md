@@ -52,7 +52,33 @@ beat has its own sound.
   - the beat sounds play there too. A player's own reload starts at the key press, not after a
     round trip to the host.
 
+- **The pistol's magazine is its own part** (Captain: "pistola needs a sep mag too"). It sits
+  in a well up the grip and drops out the bottom on a reload; a new one goes up in its place.
+  Its floorplate is the grip's bottom.
+
 #### Changed
+- **The PKM rebuilt to the real gun** (Captain: "realistic pk please"). The old one had the
+  box on the left, a wooden handguard and a perforated barrel jacket. Now:
+  - the 100-round box hangs under the receiver's right side, and the belt feeds in from the
+    right;
+  - the ejection port and its flap are on the left;
+  - a bare fluted barrel with a slotted flash hider;
+  - the gas cylinder under the barrel, with the bipod on the gas block, legs folded back;
+  - the carry handle folded down along the barrel.
+- **Full-length magazines.** Real magazines didn't fit the 26 cm weapon frame, so every rifle
+  but the WG-50 now has 6 cm more frame below (`RIFLE_BELOW`). Every point read off a rifle
+  follows the change, so the weapon sits in the hands and at the eye as before.
+  - AR family: the 30-round magazine is 18.5 cm overall, 12.5 cm below a 6 cm-deep well. The
+    pistol grip is 10 cm, like an A2's.
+  - AK: the banana hangs 17 cm under the receiver.
+  - L85: 11 cm under the housing, at its real depth front to back.
+  - M240 and M249 boxes are real size, and the M249 box's bottom now comes off with it.
+  - Each magazine goes up into a real well, so the well shows open while it's out.
+- **HK416:** the piston rod no longer rides on top of the rail; the real one is hidden. It now
+  has a chunky free-floated quad rail over the gas block and a deep E2-style stock with its
+  storage tubes.
+- **Optics on the M240 and M249** ride the feed cover's rail and lift with it, as on the real
+  guns.
 - **C8 proportions:** it now has its real 15.7 in heavy barrel (longer than the M4's) ahead of
   a carbine-length handguard and an M4-length upper. Before, the upper ran 37 cm, half as long
   again as a real one.

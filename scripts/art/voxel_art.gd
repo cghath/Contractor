@@ -204,13 +204,13 @@ static func hand_points(model: String) -> Dictionary:
 			grip = Vector3(WALKER_AXIS_X, 2, n * 0.807)  # its pistol grip, under the receiver's back end
 			support = Vector3(WALKER_AXIS_X, 2, n - 27.0)  # its vertical foregrip
 		"rifle" when _rifle_style(model) == "bullpup":
-			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip, the magazine behind it
-			support = Vector3(1.5, 6, n - 26.0)  # on the handguard, as far out as the arm reaches
+			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip, the magazine behind it
+			support = Vector3(1.5, 6 + RIFLE_BELOW, n - 26.0)  # on the handguard, as far out as the arm reaches
 		"rifle":
-			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip
+			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip
 			# Under the handguard, no further than 0.52 m from the butt: as far out as the
 			# arms reach with the support shoulder forward (CharacterModel.SUPPORT_REACH).
-			support = Vector3(1.5, 6, maxf(n * 0.42, n - 26.0))
+			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
 		"pistol":
 			grip = Vector3(1, 2.5, 7.5)
 			support = Vector3(-0.5, 2, 7.5)      # cupping the grip from the left
@@ -231,7 +231,7 @@ static func sight_point(model: String) -> Vector3:
 		"rifle":
 			var art := _rifle_art(model)
 			var back := sight_back(art, spec.size.z) + (IRON_EYE_RELIEF if art == IRONS else 0.0)
-			return (Vector3(_axis_x(model), OPTIC_AXIS_Y, back) - centre) * VOXEL_SIZE
+			return (Vector3(_axis_x(model), OPTIC_AXIS_Y + _below(model), back) - centre) * VOXEL_SIZE
 		"pistol":
 			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
@@ -243,7 +243,7 @@ static func butt_point(model: String) -> Vector3:
 	var spec := _spec(model)
 	var centre := Vector3(spec.size) * 0.5
 	if model.get_slice(":", 0) == "rifle":
-		return (Vector3(_axis_x(model), 7.7, spec.size.z) - centre) * VOXEL_SIZE
+		return (Vector3(_axis_x(model), 7.7 + _below(model), spec.size.z) - centre) * VOXEL_SIZE
 	return Vector3.ZERO
 
 
@@ -606,7 +606,9 @@ static func _spec(model: String) -> Dictionary:
 				"mosin": out = _rifle_bolt(arg, art, false)
 				"chassis_bolt": out = _rifle_chassis_bolt(arg, art)
 				_: out = _rifle(arg, art)
-			return _with_suppressor(out) if _rifle_suppressed(model) else out
+			if _rifle_suppressed(model):
+				out = _with_suppressor(out)
+			return _lowered(out, RIFLE_BELOW) if _rifle_style(model) != "walker" else out
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
 		"head_f": return _head_f()
@@ -1174,6 +1176,7 @@ const MAG_TAG := "mag"
 const BELT_TAG := "mag_belt"  # a belt-fed's belt: it goes with the box, but not into the magazine's points
 const BOLT_TAG := "bolt"
 const COVER_TAG := "cover"
+const COVER_OPTIC_TAG := "cover_optic"  # an optic on a feed cover's rail: it lifts with the cover
 ## Model name prefixes: just the magazine of a weapon model (and its belt), the weapon without
 ## it, just its sliding action or its feed cover, or the weapon with none of its moving parts.
 const MAG := "mag|"
@@ -1195,13 +1198,13 @@ static func _in_part(b: Variant, prefix: String) -> bool:
 		MAG: return tag.begins_with(MAG_TAG)
 		WITHOUT_MAG: return not tag.begins_with(MAG_TAG)
 		BOLT: return tag == BOLT_TAG
-		COVER: return tag == COVER_TAG
+		COVER: return tag.begins_with(COVER_TAG)
 	return tag == ""  # FIXED
 
 
 ## Whether weapon model `model` has a magazine part (tagged boxes) to take out.
 static func has_magazine(model: String) -> bool:
-	if not model.begins_with("rifle"):
+	if not (model.begins_with("rifle") or model.begins_with("pistol")):
 		return false
 	return _spec(model).boxes.any(func(b: Variant) -> bool: return _tag(b) == MAG_TAG)
 
@@ -1238,36 +1241,37 @@ static func reload_points(model: String) -> Dictionary:
 	var centre := Vector3(spec.size) * 0.5
 	var z := func(f: float) -> float: return _z_at(model, f)
 	var out := {}
+	var mag := _part_box(spec, MAG_TAG)
+	if not mag.is_empty():
+		var lo: Vector3 = mag[0]
+		var hi: Vector3 = mag[1]
+		out["mag"] = Vector3(lo.x - 0.3, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
+		out["well"] = Vector3((lo.x + hi.x) * 0.5, hi.y, (lo.z + hi.z) * 0.5)
+	var b := _below(model)
 	if model.get_slice(":", 0) == "pistol":
-		out = {"mag": Vector3(0.0, 0.5, 8.0), "well": Vector3(1.0, 0.5, 8.0), "bolt": Vector3(1.0, 6.8, 9.5), "catch": Vector3(0.0, 5.0, 7.0)}
+		out.merge({"bolt": Vector3(1.0, 6.8, 9.5), "catch": Vector3(0.0, 4.25, 5.5)}, true)  # the slide's back, the slide stop
 	elif model.begins_with("rifle"):
-		var mag := _part_box(spec, MAG_TAG)
-		if not mag.is_empty():
-			var lo: Vector3 = mag[0]
-			var hi: Vector3 = mag[1]
-			out["mag"] = Vector3(lo.x - 0.3, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
-			out["well"] = Vector3((lo.x + hi.x) * 0.5, hi.y, (lo.z + hi.z) * 0.5)
-		else:  # an internal magazine: its top, through the open action
-			out["mag"] = Vector3(0.6, 7.5, z.call(0.62))
-			out["well"] = Vector3(1.5, 9.2, z.call(0.62))
+		if mag.is_empty():  # an internal magazine: its top, through the open action
+			out["mag"] = Vector3(0.6, 7.5 + b, z.call(0.62))
+			out["well"] = Vector3(1.5, 9.2 + b, z.call(0.62))
 		var cover := _part_box(spec, COVER_TAG)
 		if not cover.is_empty():
 			var lo: Vector3 = cover[0]
 			var hi: Vector3 = cover[1]
 			out["cover"] = Vector3((lo.x + hi.x) * 0.5, hi.y + 0.3, lerpf(lo.z, hi.z, 0.75))
 		match _rifle_style(model):
-			"ak": out["bolt"] = Vector3(2.75, 8.4, z.call(0.5625))      # the charging handle's knob, right
+			"ak": out["bolt"] = Vector3(2.75, 8.4 + b, z.call(0.5625))      # the charging handle's knob, right
 			"bullpup":
-				out["bolt"] = Vector3(2.5, 8.5, z.call(0.5))           # the cocking handle, right
-				out["catch"] = Vector3(0.5, 7.4, z.call(0.76))         # the bolt release plunger, upper left
-			"pk": out["bolt"] = Vector3(2.75, 7.25, z.call(0.455))     # the charging handles: right, forward
-			"m240": out["bolt"] = Vector3(2.75, 7.75, z.call(0.455))
-			"m249": out["bolt"] = Vector3(2.75, 7.5, z.call(0.435))
-			"mosin": out["bolt"] = Vector3(2.75, 9.0, z.call(0.735))   # the bolt knob
-			"chassis_bolt": out["bolt"] = Vector3(2.75, 8.5, z.call(0.75))
+				out["bolt"] = Vector3(2.5, 8.5 + b, z.call(0.5))           # the cocking handle, right
+				out["catch"] = Vector3(0.5, 7.4 + b, z.call(0.76))         # the bolt release plunger, upper left
+			"pk": out["bolt"] = Vector3(2.75, 7.25 + b, z.call(0.455))     # the charging handles: right, forward
+			"m240": out["bolt"] = Vector3(2.75, 7.75 + b, z.call(0.455))
+			"m249": out["bolt"] = Vector3(2.75, 7.5 + b, z.call(0.435))
+			"mosin": out["bolt"] = Vector3(2.75, 9.0 + b, z.call(0.735))   # the bolt knob
+			"chassis_bolt": out["bolt"] = Vector3(2.75, 8.5 + b, z.call(0.75))
 			_:  # the AR family: the bolt catch paddle on the left behind the well, the T-handle at the back
-				out["catch"] = Vector3(0.5, 6.5, z.call(0.5875))
-				out["bolt"] = Vector3(1.5, 9.3, z.call(0.765))
+				out["catch"] = Vector3(0.5, 6.5 + b, z.call(0.5875))
+				out["bolt"] = Vector3(1.5, 9.3 + b, z.call(0.765))
 	for k: String in out:
 		out[k] = (out[k] - centre) * VOXEL_SIZE
 	return out
@@ -1280,7 +1284,7 @@ static func reload_points(model: String) -> Dictionary:
 static func part_motion(model: String) -> Dictionary:
 	var spec := _spec(model)
 	var centre := Vector3(spec.size) * 0.5
-	var out := {"travel": 0.06, "lift": 0.0, "axis": (Vector3(1.5, 8.5, 0.0) - centre) * VOXEL_SIZE, "open": 1.25}
+	var out := {"travel": 0.06, "lift": 0.0, "axis": (Vector3(1.5, 8.5 + _below(model), 0.0) - centre) * VOXEL_SIZE, "open": 1.25}
 	if model.begins_with("pistol"):
 		out.travel = 0.025  # a slide locked back
 		return out
@@ -1299,6 +1303,11 @@ static func part_motion(model: String) -> Dictionary:
 	return out
 
 
+## Boxes `boxes` (an optic) riding a feed cover's rail (COVER_OPTIC_TAG): they lift with it.
+static func _on_cover(boxes: Array) -> Array:
+	return boxes.map(func(b: Array) -> Array: return [b[0], b[1], b[2], false, COVER_OPTIC_TAG])
+
+
 ## The bounds [lo, hi] (voxels) of `spec`'s boxes tagged `tag`, or [] for none.
 static func _part_box(spec: Dictionary, tag: String) -> Array:
 	var lo := Vector3.INF
@@ -1308,6 +1317,30 @@ static func _part_box(spec: Dictionary, tag: String) -> Array:
 			lo = lo.min(Vector3(b[0]).min(Vector3(b[1])))
 			hi = hi.max(Vector3(b[0]).max(Vector3(b[1])))
 	return [lo, hi] if lo.x < INF else []
+
+
+## Voxels of frame every rifle (but the WG-50) has below y = 0 of the frame it's written in
+## (weapon detail pass, 2026-10-20: real magazines hang 12 to 17 cm under the well and didn't
+## fit; an AR's was 9 cm, an AK's 10). The builders write y down to -RIFLE_BELOW; _spec lifts
+## the boxes into the frame, and every point read off a rifle (hand_points, sight_point,
+## butt_point, reload_points, part_motion) adds it to the heights it names.
+const RIFLE_BELOW := 3.0
+
+
+## RIFLE_BELOW for a rifle model that has it (part prefixes aside), else 0.
+static func _below(model: String) -> float:
+	var plain := model.get_slice("|", model.count("|"))
+	return RIFLE_BELOW if plain.begins_with("rifle") and _rifle_style(plain) != "walker" else 0.0
+
+
+## `spec` with `k` voxels more frame below: every box lifted by `k`.
+static func _lowered(spec: Dictionary, k: float) -> Dictionary:
+	var boxes: Array = []
+	for b: Array in spec.boxes:
+		boxes.append([b[0] + Vector3(0, k, 0), b[1] + Vector3(0, k, 0)] + b.slice(2))
+	var size: Vector3i = spec.size
+	size.y += ceili(k)
+	return {"size": size, "sub": spec.get("sub", 1), "boxes": boxes}
 
 
 ## Height (voxels) of a rifle's line of sight: the middle of its optic, or its irons'
@@ -1603,14 +1636,19 @@ static func _rifle(length: int, art := "dot") -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(0.75, 3.75, f.call(0.47), 2.25, 5.6, f.call(0.6), C.GUN),           # its magazine well, 6 cm deep
+		_fb(1.0, 3.75, f.call(0.5), 2.0, 6.75, f.call(0.575), C.EMPTY),         # the well itself
+		_fbm(0.9, 3.75, f.call(0.5), 2.1, 6.75, f.call(0.575), C.GUN_LIGHT),     # 30-round magazine: up in the well,
+		_fbm(0.9, 2.25, f.call(0.49), 2.1, 3.75, f.call(0.565), C.GUN_LIGHT),    # then 12.5 cm under it, curving forward
+		_fbm(0.9, 0.75, f.call(0.475), 2.1, 2.25, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.9, -0.75, f.call(0.455), 2.1, 0.75, f.call(0.535), C.GUN_LIGHT),
+		_fbm(0.9, -2.0, f.call(0.435), 2.1, -0.75, f.call(0.52), C.GUN_LIGHT),
+		_fbm(0.85, -2.5, f.call(0.43), 2.15, -2.0, f.call(0.52), C.GUN),        # floorplate
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip, raked back
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
 		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(0.9, 0.6, f.call(0.69), 2.1, 1.6, f.call(0.745), C.GUN),            # its bottom: 10 cm of grip, like an A2's
 		_fb(1.1, 7.6, f.call(0.74), 1.9, 8.8, f.call(0.82), C.GUN_LIGHT),       # buffer tube
 		_fb(0.8, 6.0, f.call(0.8), 2.2, 9.4, n, C.GUN_LIGHT),                   # stock
 		_fb(0.95, 9.4, f.call(0.82), 2.05, 9.8, f.call(0.95), C.GUN_LIGHT),     # cheek rest
@@ -1634,10 +1672,13 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 		_fb(0.55, 6.6, f.call(0.16), 2.45, 7.0, f.call(0.46), C.WOOD_DARK),
 		_fb(0.7, 7.0, f.call(0.46), 2.3, 9.6, f.call(0.76), C.GUN),             # receiver and dust cover
 		_fb(0.75, 5.8, f.call(0.48), 2.25, 7.0, f.call(0.72), C.GUN),
-		_fbm(0.9, 4.2, f.call(0.51), 2.1, 5.8, f.call(0.6), C.GUN_LIGHT),        # magazine: a banana curving forward
-		_fbm(0.9, 2.8, f.call(0.485), 2.1, 4.2, f.call(0.59), C.GUN_LIGHT),
-		_fbm(0.9, 1.4, f.call(0.46), 2.1, 2.8, f.call(0.57), C.GUN_LIGHT),
-		_fbm(0.9, 0.6, f.call(0.43), 2.1, 1.4, f.call(0.54), C.GUN),
+		_fb(1.0, 5.8, f.call(0.51), 2.0, 6.6, f.call(0.6), C.EMPTY),            # the well: hooked in at its front, rocked back to the catch
+		_fbm(0.9, 4.2, f.call(0.505), 2.1, 6.6, f.call(0.6), C.GUN_LIGHT),       # magazine: up in the well, then a deep banana
+		_fbm(0.9, 2.6, f.call(0.485), 2.1, 4.2, f.call(0.585), C.GUN_LIGHT),     # 17 cm under the receiver, curving well forward
+		_fbm(0.9, 1.0, f.call(0.46), 2.1, 2.6, f.call(0.565), C.GUN_LIGHT),
+		_fbm(0.9, -0.6, f.call(0.43), 2.1, 1.0, f.call(0.54), C.GUN_LIGHT),
+		_fbm(0.9, -2.0, f.call(0.4), 2.1, -0.6, f.call(0.515), C.GUN_LIGHT),
+		_fbm(0.85, -2.75, f.call(0.385), 2.15, -2.0, f.call(0.505), C.GUN),      # floorplate
 		_fb(1.25, 4.6, f.call(0.62), 1.75, 5.0, f.call(0.68), C.GUN),           # trigger guard
 		_fb(0.9, 4.4, f.call(0.68), 2.1, 5.8, f.call(0.73), C.WOOD),            # pistol grip, raked back
 		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.74), C.WOOD),
@@ -1661,73 +1702,80 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 	]}
 
 
-## A belt-fed's visible belt (BELT_TAG: it comes off with the box): up the receiver's left side
-## from the box, `y0` to the feed tray at `tray_y`, and across the tray to `tray_x`, the rounds
-## lying along the bore (`z0` to `z1`) with dark links between them; and the tray it lies in,
-## cut into the receiver's top under the feed cover (open, the tray and the belt show).
-static func _belt(y0: float, tray_y: float, tray_x: float, z0: float, z1: float) -> Array:
+## A belt-fed's visible belt (BELT_TAG: it comes off with the box): up the receiver's side (the
+## left, or the `right` for a PKM, which feeds right to left) from the box, `y0` to the feed
+## tray at `tray_y`, and across the tray to `tray_x`, the rounds lying along the bore (`z0` to
+## `z1`) with dark links between them; and the tray it lies in, cut into the receiver's top
+## under the feed cover (open, the tray and the belt show).
+static func _belt(y0: float, tray_y: float, tray_x: float, z0: float, z1: float, right := false) -> Array:
+	var side := [2.5, 3.0] if right else [0.0, 0.5]           # the band up the outside
+	var tray := [tray_x, 2.5] if right else [0.5, tray_x]     # and on the tray, from that side
 	var out := [
-		_fb(0.5, tray_y, z0 - 0.5, 2.25, tray_y + 0.25, z1 + 0.5, C.EMPTY),            # the feed tray, open on the left (the belt comes in)
+		_fb(0.75 if right else 0.5, tray_y, z0 - 0.5, 2.5 if right else 2.25, tray_y + 0.25, z1 + 0.5, C.EMPTY),  # the feed tray, open on the feed side
 		_fbp(0.75, tray_y - 0.25, z0 - 0.5, 2.25, tray_y, z1 + 0.5, C.GUN_LIGHT),        # its floor
-		_fbt(0.0, y0, z0, 0.5, tray_y + 0.25, z1, C.BRASS, BELT_TAG),                     # rounds, up the left side
-		_fbt(0.5, tray_y, z0, tray_x, tray_y + 0.25, z1, C.BRASS, BELT_TAG),              # and on the tray
-		_fbt(0.0, y0, z1 - 0.5, 0.5, tray_y + 0.25, z1, C.GUN, BELT_TAG),                 # the links' backs, behind the rims
-		_fbt(0.5, tray_y, z1 - 0.5, tray_x, tray_y + 0.25, z1, C.GUN, BELT_TAG),
+		_fbt(side[0], y0, z0, side[1], tray_y + 0.25, z1, C.BRASS, BELT_TAG),             # rounds, up the side
+		_fbt(tray[0], tray_y, z0, tray[1], tray_y + 0.25, z1, C.BRASS, BELT_TAG),         # and on the tray
+		_fbt(side[0], y0, z1 - 0.5, side[1], tray_y + 0.25, z1, C.GUN, BELT_TAG),         # the links' backs, behind the rims
+		_fbt(tray[0], tray_y, z1 - 0.5, tray[1], tray_y + 0.25, z1, C.GUN, BELT_TAG),
 	]
 	var y := y0 + 0.5
 	while y < tray_y:
-		out.append(_fbt(0.0, y, z0, 0.5, y + 0.25, z1, C.GUN, BELT_TAG))  # a link between two rounds
+		out.append(_fbt(side[0], y, z0, side[1], y + 0.25, z1, C.GUN, BELT_TAG))  # a link between two rounds
 		y += 0.75
 	return out
 
 
-## A PKM: the odd one out of the trio (Captain, reference photo, 2026-10-16) — wood furniture
-## throughout (handguard, grip, skeleton stock) unlike the all-metal M240/M249, a perforated
-## barrel jacket, the ammo box slung off the LEFT side of the receiver (not underneath), a
-## bipod that folds forward near the muzzle, and the AK-pattern leaf-and-post sight (an older
-## sibling of the same action family) sitting mid-receiver.
+## A PKM, to the real gun (Captain, 2026-10-20: "realistic pk please"; the first cut, from a
+## 2026-10-16 photo, had the box off the left, a wooden handguard and a perforated barrel jacket,
+## a Pecheneg's at best): a bare fluted barrel with a slotted flash hider and the front sight out
+## at the muzzle; the gas cylinder under it from the gas block back to the receiver, the bipod
+## on the gas block with its legs folded back under the cylinder; the barrel's carry handle
+## folded down along its left; the stamped receiver with the leaf rear sight on its front and the
+## feed cover hinged behind it; the 100-round box hung under the receiver's RIGHT side, the belt
+## going up into the tray from the right (it feeds right to left); the ejection port and its
+## flap on the LEFT; the charging handle low on the right; a brown pistol grip and the skeleton
+## butt. AK-pattern leaf-and-post irons (the same action family's).
 static func _rifle_pkm(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
 	var sight := ak_iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 9.6)
 	var boxes := sight + [
-		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.37), C.GUN),                        # barrel, on into the receiver (Captain, 2026-10-17: it stopped short of it)
-		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # flash hider / cone
-		_fb(0.35, 5.2, f.call(0.02), 0.8, 7.0, f.call(0.18), C.GUN),            # bipod, folded forward near the muzzle
-		_fb(2.2, 5.2, f.call(0.02), 2.65, 7.0, f.call(0.18), C.GUN),
-		_fb(0.4, 6.4, f.call(0.18), 2.6, 7.6, f.call(0.34), C.WOOD),            # wood foregrip, ahead of the receiver
-		_fb(0.5, 6.8, f.call(0.34), 2.5, 9.9, f.call(0.52), C.GUN),             # receiver, ahead of the feed cover (the rear sight on it)
+		_fb(1.1, 8.0, 0, 1.9, 8.9, f.call(0.37), C.GUN),                        # barrel, on into the receiver
+		_fbp(1.0, 8.25, f.call(0.04), 2.0, 8.5, f.call(0.3), C.GUN_LIGHT),       # its flutes, along the sides
+		_fb(0.9, 7.7, 0, 2.1, 9.2, 1.5, C.GUN),                                 # slotted flash hider
+		_fb(1.25, 7.7, 0.25, 1.75, 7.95, 1.25, C.EMPTY),                        # its slots, top and bottom
+		_fb(1.25, 8.95, 0.25, 1.75, 9.2, 1.25, C.EMPTY),
+		_fb(1.0, 6.75, f.call(0.14), 2.0, 8.9, f.call(0.17), C.GUN),            # gas block, round the barrel and down to the cylinder
+		_fb(1.15, 7.0, f.call(0.17), 1.85, 7.75, f.call(0.35), C.GUN_LIGHT),    # gas cylinder under the barrel, back to the receiver
+		_fb(0.5, 6.5, f.call(0.15), 2.5, 7.0, f.call(0.17), C.GUN),             # the bipod's yoke, on the gas block
+		_fb(0.5, 6.25, f.call(0.17), 0.9, 6.75, f.call(0.33), C.GUN),           # its legs, folded back under the cylinder
+		_fb(2.1, 6.25, f.call(0.17), 2.5, 6.75, f.call(0.33), C.GUN),
+		_fb(0.75, 8.25, f.call(0.3), 1.0, 8.75, f.call(0.32), C.GUN),           # carry handle: its clamp on the barrel, left
+		_fb(0.25, 8.0, f.call(0.22), 0.75, 9.0, f.call(0.33), C.GUN_LIGHT),     # and the handle, folded down along the barrel
+		_fb(0.5, 6.8, f.call(0.34), 2.5, 9.9, f.call(0.52), C.GUN),             # stamped receiver, ahead of the feed cover (the rear sight on it)
 		_fb(0.5, 6.8, f.call(0.52), 2.5, 9.5, f.call(0.72), C.GUN),             # and under it
-	]
-	# Perforated barrel jacket: a vented tube the fore-end of the exposed barrel, holes (EMPTY)
-	# punched through top and bottom rather than one solid shroud.
-	boxes.append(_fb(0.3, 7.6, f.call(0.04), 2.7, 9.3, f.call(0.34), C.GUN_LIGHT))  # up to the receiver's face
-	var z: float = f.call(0.08)  # behind the front sight block (0.06): the vents cut it off
-	while z < f.call(0.3):
-		boxes.append(_fb(0.3, 9.0, z, 2.7, 9.25, z + n * 0.015, C.EMPTY))        # top row of vents
-		boxes.append(_fb(0.3, 7.7, z, 2.7, 7.95, z + n * 0.015, C.EMPTY))        # bottom row
-		z += n * 0.035
-	boxes.append_array([
-		_fbm(-0.5, 4.2, f.call(0.4), 0.9, 7.0, f.call(0.56), C.GUN_LIGHT),       # ammo box, slung off the LEFT side (not underneath), hooked on the receiver
-		_fbm(-0.5, 4.2, f.call(0.4), 0.9, 4.6, f.call(0.56), C.GUN),
+		_fb(0.5, 7.25, f.call(0.55), 0.75, 8.25, f.call(0.66), C.EMPTY),        # ejection port, LEFT (it ejects left)
+		_fb(0.25, 6.75, f.call(0.55), 0.5, 7.25, f.call(0.66), C.GUN_LIGHT),    # its flap, open below it
+		_fbm(1.0, 1.5, f.call(0.42), 3.0, 6.8, f.call(0.56), C.GUN_LIGHT),       # 100-round box, hung under the receiver's RIGHT
+		_fbm(1.0, 1.5, f.call(0.42), 3.0, 2.0, f.call(0.56), C.GUN),             # its bottom
+		_fbm(2.75, 4.0, f.call(0.47), 3.0, 4.75, f.call(0.51), C.GUN),           # its lid's catch
 		_fb(1.25, 5.8, f.call(0.6), 1.75, 6.2, f.call(0.66), C.GUN),            # trigger guard
-		_fb(0.9, 4.4, f.call(0.66), 2.1, 6.8, f.call(0.71), C.WOOD),            # wood pistol grip
+		_fb(0.9, 4.4, f.call(0.66), 2.1, 6.8, f.call(0.71), C.WOOD),            # brown pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.WOOD_DARK),
-		# Skeleton stock: a hollow wood frame (top rail, bottom rail, front strut) round a big
-		# cut-out, closed off by a solid butt pad at the very end (the real PKM's shape).
+		# Skeleton butt: a hollow frame (top rail, bottom rail, front strut) round a big cut-out,
+		# closed off by a solid butt pad at the very end.
 		_fb(1.0, 8.4, f.call(0.68), 2.0, 8.9, n, C.WOOD),                       # top rail
 		_fb(1.0, 5.6, f.call(0.68), 2.0, 6.1, n, C.WOOD),                       # bottom rail
 		_fb(1.0, 5.6, f.call(0.68), 2.0, 8.9, f.call(0.72), C.WOOD_DARK),       # front strut, closes the frame
 		_fb(0.8, 5.0, n - 0.5, 2.2, 9.0, n, C.GUN),                             # butt pad
-		# Weapon detail pass (2026-10-20): the feed cover, hinged at its front (COVER_TAG: a reload
-		# lifts its back end), its latch; the belt from the box over the tray; the charging handle
-		# on the right, forward (BOLT_TAG: charged on an empty reload).
+		# The feed cover, hinged at its front (COVER_TAG: a reload lifts its back end), its latch;
+		# the charging handle low on the right, forward (BOLT_TAG: charged on an empty reload).
 		_fbt(0.5, 9.5, f.call(0.52), 2.5, 9.9, f.call(0.7), C.GUN, COVER_TAG),         # hinged feed cover
 		_fbt(1.0, 9.5, f.call(0.68), 2.0, 10.25, f.call(0.71), C.GUN_LIGHT, COVER_TAG), # its latch, at the back
 		_fbt(2.5, 7.0, f.call(0.44), 2.75, 7.5, f.call(0.47), C.GUN, BOLT_TAG),        # charging handle, right
 		_fbt(2.5, 6.75, f.call(0.445), 3.0, 7.75, f.call(0.465), C.GUN_LIGHT, BOLT_TAG),
-	])
-	boxes.append_array(_belt(6.25, 9.25, 1.75, f.call(0.53), f.call(0.59)))
+	]
+	boxes.append_array(_belt(6.8, 9.25, 1.25, f.call(0.53), f.call(0.59), true))
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
@@ -1739,7 +1787,7 @@ static func _rifle_pkm(length: int, art := IRONS) -> Dictionary:
 static func _rifle_m240(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var sight := iron_boxes(n) if art == IRONS else _on_cover(optic_boxes(art, sight_back(art, n)))  # an optic rides the cover's rail
 	# Captain, 2026-10-16 (v0.4.26 on the ground: "none look right"): every part overlaps or sits
 	# face-on against the next (weapons_test checks it is one piece); the first cut left the
 	# ammo box and the sights hanging in air.
@@ -1758,8 +1806,8 @@ static func _rifle_m240(length: int, art := IRONS) -> Dictionary:
 		_fb(0.4, 6.0, f.call(0.38), 2.6, 9.6, f.call(0.84), C.GUN),             # long, bulky receiver (the longest of the three)
 		_fb(0.9, 9.6, f.call(0.38), 2.1, 9.95, f.call(0.42), C.GUN),            # top rail, ahead of the feed cover
 		_fb(0.9, 9.6, f.call(0.64), 2.1, 9.95, f.call(0.8), C.GUN),             # and behind it (the rear sight)
-		_fbm(0.2, 3.8, f.call(0.48), 2.2, 6.0, f.call(0.62), C.GUN_LIGHT),       # ammo box, hung under the receiver's left
-		_fbm(0.2, 3.8, f.call(0.48), 2.2, 4.2, f.call(0.62), C.GUN),
+		_fbm(0.2, -0.25, f.call(0.48), 2.2, 6.0, f.call(0.62), C.GUN_LIGHT),     # 100-round box (12.5 cm tall), hung under the receiver's left
+		_fbm(0.2, -0.25, f.call(0.48), 2.2, 0.25, f.call(0.62), C.GUN),
 		_fb(1.25, 5.2, f.call(0.61), 1.75, 6.0, f.call(0.66), C.GUN),           # trigger guard
 		_fb(0.9, 4.0, f.call(0.66), 2.1, 6.0, f.call(0.72), C.GUN),             # black synthetic pistol grip, raked back
 		_fb(0.9, 2.6, f.call(0.67), 2.1, 4.0, f.call(0.73), C.GUN),
@@ -1788,7 +1836,7 @@ static func _rifle_m240(length: int, art := IRONS) -> Dictionary:
 static func _rifle_m249(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
-	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n))
+	var sight := iron_boxes(n) if art == IRONS else _on_cover(optic_boxes(art, sight_back(art, n)))  # an optic rides the cover's rail
 	# Captain, 2026-10-16 (v0.4.26 on the ground: "the 249 is just missing a lot of its model"):
 	# the first cut's receiver was a stub (0.56-0.64 of the length), so the grip, stock, ammo box,
 	# bipod and sights all floated apart. Now one piece (weapons_test checks it): a long
@@ -1808,8 +1856,8 @@ static func _rifle_m249(length: int, art := IRONS) -> Dictionary:
 		_fb(0.5, 6.2, f.call(0.36), 2.5, 9.6, f.call(0.72), C.GUN),             # receiver
 		_fb(0.9, 9.6, f.call(0.6), 2.1, 9.95, f.call(0.74), C.GUN),             # top rail behind the feed cover (the rear sight)
 		_fb(0.25, 6.8, f.call(0.6), 0.5, 8.2, f.call(0.68), C.GUN_LIGHT),       # magazine-well door, left side of the receiver
-		_fbm(0.4, 2.4, f.call(0.39), 2.6, 6.2, f.call(0.58), C.GUN_LIGHT),        # 200-round box, directly under the receiver
-		_fb(0.4, 2.4, f.call(0.39), 2.6, 2.8, f.call(0.58), C.GUN),
+		_fbm(0.4, -0.5, f.call(0.39), 2.6, 6.2, f.call(0.58), C.GUN_LIGHT),       # 200-round box (13.5 cm tall), directly under the receiver
+		_fbm(0.4, -0.5, f.call(0.39), 2.6, -0.1, f.call(0.58), C.GUN),           # its bottom (it comes off with the box)
 		_fb(1.25, 5.4, f.call(0.6), 1.75, 6.2, f.call(0.65), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.65), 2.1, 6.2, f.call(0.71), C.GUN),             # pistol grip, raked back (hand_points: 0.68)
 		_fb(0.9, 3.0, f.call(0.66), 2.1, 4.4, f.call(0.72), C.GUN),
@@ -1867,10 +1915,13 @@ static func _rifle_bullpup(length: int, art := IRONS) -> Dictionary:
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.4, f.call(0.71), C.GUN),             # pistol grip (the AR family's usual spot: hand_points)
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
 		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
-		_fbm(0.9, 4.2, f.call(0.76), 2.1, 5.4, f.call(0.88), C.GUN_LIGHT),      # magazine, curving forward, hanging BEHIND the grip
-		_fbm(0.9, 2.8, f.call(0.75), 2.1, 4.2, f.call(0.87), C.GUN_LIGHT),
-		_fbm(0.9, 1.8, f.call(0.74), 2.1, 2.8, f.call(0.86), C.GUN),
 		_fb(0.7, 5.0, f.call(0.745), 2.3, 5.4, f.call(0.895), C.GUN),           # the magazine housing's lip, round the well
+		_fb(1.0, 5.0, f.call(0.78), 2.0, 6.75, f.call(0.86), C.EMPTY),          # the well, up into the body behind the grip
+		_fbm(0.9, 3.9, f.call(0.78), 2.1, 6.75, f.call(0.86), C.GUN_LIGHT),     # 30-round magazine, up in the well, BEHIND the grip,
+		_fbm(0.9, 2.4, f.call(0.77), 2.1, 3.9, f.call(0.85), C.GUN_LIGHT),      # then 11 cm under the housing, curving forward
+		_fbm(0.9, 0.9, f.call(0.755), 2.1, 2.4, f.call(0.835), C.GUN_LIGHT),
+		_fbm(0.9, -0.1, f.call(0.74), 2.1, 0.9, f.call(0.82), C.GUN_LIGHT),
+		_fbm(0.85, -0.6, f.call(0.735), 2.15, -0.1, f.call(0.82), C.GUN),       # floorplate
 		_fb(0.55, 5.9, f.call(0.735), 0.75, 6.3, f.call(0.76), C.GUN_LIGHT),    # magazine release button, left, at the well's front
 		_fb(0.5, 7.2, f.call(0.745), 0.7, 7.6, f.call(0.775), C.GUN_LIGHT),     # bolt release plunger, upper left (pressed down)
 		_fb(2.0, 8.25, f.call(0.48), 2.25, 8.5, f.call(0.62), C.EMPTY),         # the cocking handle's slot, running back
@@ -1904,14 +1955,19 @@ static func _rifle_carbine_short(length: int, art := IRONS) -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.16), 2.4, 9.6, f.call(0.45), C.GUN),
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver, on to the buffer tube
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(0.75, 3.75, f.call(0.47), 2.25, 5.6, f.call(0.6), C.GUN),           # its magazine well, 6 cm deep
+		_fb(1.0, 3.75, f.call(0.5), 2.0, 6.75, f.call(0.575), C.EMPTY),         # the well itself
+		_fbm(0.9, 3.75, f.call(0.5), 2.1, 6.75, f.call(0.575), C.GUN_LIGHT),     # 30-round magazine: up in the well,
+		_fbm(0.9, 2.25, f.call(0.49), 2.1, 3.75, f.call(0.565), C.GUN_LIGHT),    # then 12.5 cm under it, curving forward
+		_fbm(0.9, 0.75, f.call(0.475), 2.1, 2.25, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.9, -0.75, f.call(0.455), 2.1, 0.75, f.call(0.535), C.GUN_LIGHT),
+		_fbm(0.9, -2.0, f.call(0.435), 2.1, -0.75, f.call(0.52), C.GUN_LIGHT),
+		_fbm(0.85, -2.5, f.call(0.43), 2.15, -2.0, f.call(0.52), C.GUN),        # floorplate
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
 		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(0.9, 0.6, f.call(0.69), 2.1, 1.6, f.call(0.745), C.GUN),            # its bottom: 10 cm of grip, like an A2's
 		_fb(1.1, 7.5, f.call(0.74), 1.9, 8.7, f.call(0.95), C.GUN_LIGHT),       # buffer tube, exposed further than a fixed-stock AR's
 	]
 	var z: float = f.call(0.77)
@@ -1926,9 +1982,11 @@ static func _rifle_carbine_short(length: int, art := IRONS) -> Dictionary:
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
-## An HK416: piston-driven, not direct-impingement — a return-rod tube running along the top of
-## the handguard from a taller gas block back toward the upper receiver (where the DI family's
-## slim gas tube hides under the rail, out of sight). Everything else matches the M4 pattern.
+## An HK416, to the real rifle (weapon detail pass, 2026-10-20: the first cut ran its piston rod
+## along the top of the rail, where the real one never shows): its short-stroke piston hides
+## inside a chunky free-floated quad rail that runs out over the gas block, the top rail one flat
+## line from there to the receiver's back, and a deep E2-style stock with its two storage tubes.
+## The receiver and controls are the M4 pattern's.
 static func _rifle_piston_ar(length: int, art := IRONS) -> Dictionary:
 	var n := maxi(length, 20)
 	var f := func(t: float) -> float: return n * t
@@ -1936,26 +1994,34 @@ static func _rifle_piston_ar(length: int, art := IRONS) -> Dictionary:
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": sight + [
 		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                     # barrel
 		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
-		_fb(1.1, 8.75, f.call(0.12), 1.9, 10.0, f.call(0.16), C.GUN),           # gas block tower, taller than the DI family's
-		_fb(1.2, 9.95, f.call(0.16), 1.8, 10.25, f.call(0.44), C.GUN_LIGHT),    # piston rod, riding above the rail
-		_fb(0.6, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN_LIGHT),       # handguard
-		_fb(0.9, 9.6, f.call(0.15), 2.1, 9.95, f.call(0.74), C.GUN),            # top rail, full length (an optic or the rear aperture sits on it)
-		_fb(0.6, 7.0, f.call(0.15), 0.85, 9.6, f.call(0.45), C.GUN),            # side rails
-		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
+		_fb(1.1, 8.75, f.call(0.12), 1.9, 9.9, f.call(0.15), C.GUN),            # gas block and piston, hidden in the rail's front
+		_fb(0.5, 6.75, f.call(0.11), 2.5, 9.6, f.call(0.45), C.GUN_LIGHT),      # free-floated quad rail, out over the gas block
+		_fb(0.9, 9.6, f.call(0.11), 2.1, 9.95, f.call(0.74), C.GUN),            # top rail, one flat line (an optic or the rear aperture sits on it)
+		_fb(0.5, 6.75, f.call(0.11), 0.75, 9.6, f.call(0.45), C.GUN),           # side rails
+		_fb(2.25, 6.75, f.call(0.11), 2.5, 9.6, f.call(0.45), C.GUN),
+		_fb(0.9, 6.5, f.call(0.11), 2.1, 6.75, f.call(0.45), C.GUN),            # bottom rail
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fb(0.75, 3.75, f.call(0.47), 2.25, 5.6, f.call(0.6), C.GUN),           # its magazine well, 6 cm deep
+		_fb(1.0, 3.75, f.call(0.5), 2.0, 6.75, f.call(0.575), C.EMPTY),         # the well itself
+		_fbm(0.9, 3.75, f.call(0.5), 2.1, 6.75, f.call(0.575), C.GUN_LIGHT),     # 30-round magazine: up in the well,
+		_fbm(0.9, 2.25, f.call(0.49), 2.1, 3.75, f.call(0.565), C.GUN_LIGHT),    # then 12.5 cm under it, curving forward
+		_fbm(0.9, 0.75, f.call(0.475), 2.1, 2.25, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.9, -0.75, f.call(0.455), 2.1, 0.75, f.call(0.535), C.GUN_LIGHT),
+		_fbm(0.9, -2.0, f.call(0.435), 2.1, -0.75, f.call(0.52), C.GUN_LIGHT),
+		_fbm(0.85, -2.5, f.call(0.43), 2.15, -2.0, f.call(0.52), C.GUN),        # floorplate
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
 		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
+		_fb(0.9, 0.6, f.call(0.69), 2.1, 1.6, f.call(0.745), C.GUN),            # its bottom: 10 cm of grip, like an A2's
 		_fb(1.1, 7.6, f.call(0.74), 1.9, 8.8, f.call(0.82), C.GUN_LIGHT),       # buffer tube
 		_fb(0.8, 6.0, f.call(0.8), 2.2, 9.4, n, C.GUN_LIGHT),                   # stock
 		_fb(0.95, 9.4, f.call(0.82), 2.05, 9.8, f.call(0.95), C.GUN_LIGHT),     # cheek rest
 		_fb(0.8, 5.6, n - 0.5, 2.2, 9.8, n, C.GUN),                             # butt pad
+		_fb(0.6, 5.25, f.call(0.84), 0.8, 6.5, n - 0.5, C.GUN),                 # the E2 stock's storage tubes, low either side
+		_fb(2.2, 5.25, f.call(0.84), 2.4, 6.5, n - 0.5, C.GUN),
+		_fb(0.8, 5.25, f.call(0.84), 2.2, 6.0, n, C.GUN_LIGHT),                 # and its deep belly between them
 	] + _ar_controls(n)}
 
 
@@ -2065,8 +2131,9 @@ static func _with_suppressor(spec: Dictionary) -> Dictionary:
 	return {"size": size, "sub": spec.get("sub", 1), "boxes": boxes}
 
 
-## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip,
-## trigger guard, a front post and a notched rear sight (Captain, P0362: readable irons).
+## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip with its
+## magazine up it, trigger guard, a front post and a notched rear sight (Captain, P0362:
+## readable irons).
 ## hand_points: grip at (1, 2.5, 7.5); sight_point: the rear notch's top (1, 7.0, 9.4).
 static func _pistol() -> Dictionary:
 	# The slide and its sights are BOLT_TAG (weapon detail pass, 2026-10-20): an empty magazine
@@ -2085,9 +2152,19 @@ static func _pistol() -> Dictionary:
 		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
 		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
 		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),
-		_fb(0.2, 0.0, 6.8, 1.8, 1.2, 9.8, C.GUN_LIGHT),
+		_fb(0.2, 0.25, 6.8, 1.8, 1.2, 9.8, C.GUN_LIGHT),
 		_fb(0.75, 2.6, 4.2, 1.25, 3.6, 4.5, C.GUN),          # trigger guard
 		_fb(0.75, 2.6, 4.2, 1.25, 2.9, 6.0, C.GUN),
+		# Its magazine (Captain, 2026-10-20: "pistola needs a sep mag too"), up a well in the grip
+		# (MAG_TAG: a reload drops it out the bottom and pushes a new one up): the well, the
+		# magazine raked with the grip, and its floorplate, the grip's bottom.
+		_fb(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.EMPTY),
+		_fb(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.EMPTY),
+		_fb(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.EMPTY),
+		_fbm(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.GUN),
+		_fbm(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.GUN),
+		_fbm(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.GUN),
+		_fbm(0.25, 0.0, 7.0, 1.75, 0.25, 9.75, C.GUN),       # floorplate
 	]}
 
 
