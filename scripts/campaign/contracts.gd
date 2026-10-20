@@ -20,7 +20,8 @@ extends Node
 ## 5. server_end_deployment(report) at extraction: the debrief (DebriefCalc) pays out,
 ##    applies reputation, banks what was carried out, moves the clock on and shows the debrief
 ##    screen on every peer. Salvage picks and intel (turn in for leads, or sell) are made on it;
-##    finish_debrief() banks the picks and closes it.
+##    finish_debrief() banks the picks and closes it. A base assault due in its days: the debrief
+##    warns first and its days wait for the host's choice (assault_choice; cghath on audit A2-04).
 ##
 ## Debug path on its own: Contracts.open_board() (the main menu's "Contract board" button)
 ## runs the board, negotiation, shop, days and a stand-in deployment and debrief offline. In
@@ -77,6 +78,9 @@ var _dirty := false
 var _ensuring := false
 var _tried_load := false
 var _shown_debrief := ""  # clients: "<campaign tag>:<serial>" of the last debrief shown
+## Host: a debrief whose days wait on the host's choice (a base assault due in them):
+## {"key", "calc_report", "report"}, or {}.
+var _held_days := {}
 var _debrief_screen: Node
 
 
@@ -774,7 +778,9 @@ func server_draw_support(cid: String, amount: int) -> int:
 ##   bodies brought in); "driven_out": in the hold of a motor-pool vehicle going home (B-18:
 ##   it counts and shows in the debrief, but isn't banked: it stays in the vehicle).
 ## report_from_level(level, soldiers) builds one from the level as it stands.
-func server_end_deployment(report: Dictionary) -> Dictionary:
+## `warn_assault` (BaseHub's extraction, which can wait for the choice): a base assault due in
+## the debrief's days holds them until the host chooses (debrief "assault", BaseAssault.due_within).
+func server_end_deployment(report: Dictionary, warn_assault := false) -> Dictionary:
 	var s := _s()
 	var dep: Dictionary = s.deployment
 	if dep.is_empty():
@@ -829,6 +835,46 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	s.deployment = {}
 	s.debrief = debrief
 	objectives.server_clear()
+	# cghath on audit A2-04, "warn, then resolve": a base assault falls due in these days. The
+	# debrief shows the warning before they pass, and they pass when the host has chosen
+	# (BaseHub.server_assault_choice, server_pass_held_days), the same as below.
+	var due := BaseAssault.due_within(int(debrief.days)) if warn_assault else {}
+	if not due.is_empty():
+		debrief["assault"] = due
+		debrief["day"] = Economy.day()
+		_held_days = {"key": String(debrief.key), "calc_report": calc_report, "report": report}
+		SessionLog.note("debrief held: base assault (%s) due on day %d, in the debrief's %d days; the host chooses" % [due.faction, int(due.day), int(debrief.days)])
+		_commit()
+		debrief_ready.emit(debrief)
+		return debrief
+	_pass_days(debrief, calc_report, report)
+	debrief_ready.emit(debrief)
+	return debrief
+
+
+## Whether the latest debrief waits on the host's choice for a base assault due in its days
+## (every peer).
+func assault_pending() -> bool:
+	var d := last_debrief()
+	return d.has("assault") and String(d.assault.get("choice", "")) == "" and not d.get("finished", false)
+
+
+## Host (BaseHub.server_assault_choice): the held debrief's days pass now, the host having chosen
+## `choice` (BaseAssault.HOME or CARRY_ON). Returns whether a debrief was waiting.
+func server_pass_held_days(choice: String) -> bool:
+	var d: Dictionary = _s().debrief
+	var held := _held_days
+	_held_days = {}
+	if held.is_empty() or d.is_empty() or String(d.get("key", "")) != String(held.key) or not d.has("assault"):
+		return false
+	d.assault["choice"] = choice
+	_notify_all(BaseAssault.choice_text(d.assault))
+	_pass_days(d, held.calc_report, held.report)
+	return true
+
+
+## Host: the debrief's days pass (the clock, with all that follows it) and its expenses are counted.
+func _pass_days(debrief: Dictionary, calc_report: Dictionary, report: Dictionary) -> void:
 	Economy.advance_days(int(debrief.days), "deployment to %s" % debrief.zone_name)
 	debrief["day"] = Economy.day()
 	# Expenses: what the run already cost (respawns, supports, lost helicopters, weekly bills) and
@@ -843,8 +889,6 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()
-	debrief_ready.emit(debrief)
-	return debrief
 
 
 ## The session log's line for a debrief: each contract's outcome, pay and clawback, fines, and
@@ -980,7 +1024,7 @@ func _settle_tagged(d: Dictionary) -> void:
 ## to the client.
 func server_finish_debrief() -> void:
 	var d: Dictionary = _s().debrief
-	if d.is_empty() or d.finished:
+	if d.is_empty() or d.finished or assault_pending():  # (its days haven't passed: the host chooses first)
 		return
 	for i in (d.intel as Array).size():
 		if d.intel[i].status == "pending":
@@ -1119,6 +1163,12 @@ func finish_debrief() -> void:
 	_request("finish", [])
 
 
+## Any peer: the host's choice on a base assault due in the debrief's days (BaseAssault.HOME or
+## CARRY_ON; only the host's counts).
+func assault_choice(choice: String) -> void:
+	_request("assault", [choice])
+
+
 func _request(what: String, args: Array) -> void:
 	if _is_host():
 		_handle(what, args, 1)
@@ -1128,7 +1178,7 @@ func _request(what: String, args: Array) -> void:
 
 ## What each request's arguments must be (audit A1-05), checked before any is read.
 const REQUEST_ARGS := {"accept": [TYPE_STRING, TYPE_DICTIONARY], "renegotiate": [TYPE_STRING], "abort": [TYPE_STRING],
-	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": [],
+	"pick": [TYPE_INT], "unpick": [TYPE_INT], "turn_in": [TYPE_INT], "sell": [TYPE_INT, TYPE_STRING], "finish": [], "assault": [TYPE_STRING],
 	"pallet": [TYPE_STRING, TYPE_INT, TYPE_STRING, TYPE_STRING], "draw": [TYPE_STRING, TYPE_INT]}
 
 
@@ -1184,6 +1234,8 @@ func _handle(what: Variant, args: Variant, peer: int) -> void:
 		"finish":
 			if peer == 1:  # only the host closes the debrief (it banks the picks and the intel)
 				server_finish_debrief()
+		"assault":
+			why = BaseHub.server_assault_choice(String(args[0])) if peer == 1 else "The host decides that"
 	if why != "" and what not in ["accept", "renegotiate", "abort"]:
 		_notify(peer, why)
 

@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Base assault during a debrief's days: warn, then resolve (cghath's call on audit A2-04)
+
+#### Changed
+- When the days a contract's debrief is about to pass include the day a booked base assault
+  falls due, the debrief warns first ("Base assault expected on day N ..., before you're back")
+  and the host chooses. **Head home first:** the deployment ends and the assault meets the squad
+  at the FOB, live. **Carry on:** the days pass with the squad out, and the assault is met
+  without them, as before. Pay, salvage, the days and their costs are the same either way. Clients
+  see the warning and the host's choice. The host can't close the debrief or save until it
+  chooses. With no assault due in those days, nothing changes.
+
+#### Fixed
+- Calling a helicopter or allied troops in an inland zone after a coastal one no longer logs a
+  script error. The coastal zone's LHD deck was freed, and `Supports.origin_for` assigned it to a
+  typed variable. Found by the new trips in `base_zone_test`.
+
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.

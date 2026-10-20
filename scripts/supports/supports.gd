@@ -46,9 +46,13 @@ static func register_origin(kind: StringName, node: Node3D) -> void:
 ## else the LHD, else the FOB, else a point on the map edge nearest `toward`, `height` metres up.
 static func origin_for(level: Node, kind := &"", toward := Vector3.ZERO, height := 120.0) -> Transform3D:
 	for k: StringName in [kind, &"lhd", &"fob"]:
-		var node: Node3D = _origins.get(k)
-		if is_instance_valid(node) and node.is_inside_tree():
-			return node.global_transform
+		# Untyped until it's checked: a coastal zone's LHD deck, freed when the session moved on to
+		# an inland zone (which registers only "fob"), errored assigned to a typed Node3D.
+		var node: Variant = _origins.get(k)
+		if is_instance_valid(node) and (node as Node3D).is_inside_tree():
+			return (node as Node3D).global_transform
+		if not is_instance_valid(node):
+			_origins.erase(k)
 	_origins.erase(kind)
 	var area := Rect2(-1000, -1000, 2000, 2000)
 	if level and level.has_method(&"map_area"):

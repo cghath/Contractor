@@ -66,6 +66,26 @@ func _ready() -> void:
 	for finished: bool in [false, true]:
 		_full_debrief(finished)
 		await _fit("debrief (full, salvage %s)" % ("closed" if finished else "open"), func() -> Node: return DebriefScreen.new())
+	# And with a base assault due in its days (cghath on audit A2-04, "warn, then resolve"): the
+	# warning over it with the host's two choices, before its days pass, then the choice made.
+	_full_debrief(false)
+	var warned: Dictionary = Contracts._s().debrief
+	for key: String in ["expenses", "expenses_total", "net"]:
+		warned.erase(key)  # (its days, and so the expenses, wait for the choice)
+	warned["assault"] = {"faction": "black_ridge", "name": "The Black Ridge Brigade and its allied militias", "day": 14, "links": 5, "hold_min": 54, "choice": ""}
+	Contracts._commit()
+	await _fit("debrief (base assault warning)", func() -> Node: return DebriefScreen.new())
+	warned.assault["links"] = 1
+	await _fit("debrief (base assault warning, near)", func() -> Node:
+		var screen := DebriefScreen.new()
+		screen.ready.connect(func() -> void:
+			check(screen.text().contains("Base assault expected on day 14") and screen.find_child("HeadHome", true, false) != null
+				and screen.find_child("CarryOn", true, false) != null and (screen.find_child("Continue", true, false) as Button).disabled,
+				"the debrief warns of the assault due in its days, with the host's two choices, and Continue waits"))
+		return screen)
+	warned.assault["choice"] = BaseAssault.HOME
+	Contracts._commit()
+	await _fit("debrief (base assault, headed home)", func() -> Node: return DebriefScreen.new())
 	Contracts._s().debrief = {}
 	BaseHub.new_campaign(7)
 	for hire: Dictionary in Hiring.pool(BaseHub.hiring(), BaseHub.day()).slice(0, 3):  # a squad on the pages and to kit
@@ -458,6 +478,7 @@ func _test_hud() -> void:
 				% [res.x, res.y, ui_scale, shown.replace("\n", " | "), hud.command_menu._title.text])
 	hud.command_menu.close()
 	root.content_scale_size = Vector2i(1920, 1080)
+	hud.show_vehicle(vehicle)  # (again: it hides 0.5 s after the last showing, and the squad-list sizes above can take longer on a busy machine)
 	await _frames(2)
 	check(hud.vehicle_text().contains("ON FIRE: GET OUT") and hud._vehicle.get_child_count() == vehicle.size(), "the vehicle readout is in parts, one label each")
 	check(hud._subtitles.theme_type_variation == &"HudLabel" and hud._status.theme_type_variation == &"HudLabel" and hud._downed.theme_type_variation == &"HudAlertLabel"

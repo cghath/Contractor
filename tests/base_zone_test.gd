@@ -139,6 +139,7 @@ func _run() -> void:
 	_test_local_jobs()
 	await _test_rebel_upgrades()
 	await _test_raid_by_air()
+	await _test_assault_warning()
 	await _test_airframes()
 	await _test_crossings()
 
@@ -1014,6 +1015,154 @@ func _test_defences() -> void:
 		"and stands at its slot by the gate when the base is back up")
 	check(BaseHub.server_buy_defence("mg_pit") == "Already built", "a second one isn't sold")
 	await _wait_until(func() -> bool: return base.players.get_node_or_null(^"1") != null, 10.0)
+
+
+## cghath's call on audit A2-04, "warn, then resolve": a contract's debrief passes its days with
+## the squad still out. When they take in the day a booked assault falls due, the debrief warns
+## before they pass and the host chooses: "Carry on" (the days pass with the squad out and it's
+## settled without them) or "Head home first" (the deployment ends and the assault meets the
+## squad at the FOB). No assault in them: no warning. The debrief (pay, salvage, the days, the
+## expenses) is the same either way. Three real contract trips, each ended through the real
+## handler (BaseHub.end_deployment, Extraction's report).
+func _test_assault_warning() -> void:
+	print("A base assault due in a debrief's days (A2-04: warn, then resolve)")
+	var heat: Dictionary = Campaign.section(&"economy").get("heat", {})
+	var saved := heat.duplicate()
+	heat.clear()  # (no bookings of their own while the days pass)
+	var base_sec := BaseHub.base()
+	base_sec.erase("assault")
+	check(BaseAssault.due_within(5).is_empty(), "A2-04 warning: nothing booked, nothing due in a debrief's days")
+	base_sec["assault"] = {"faction": "black_ridge", "day": BaseHub.day() + 4}
+	check(BaseAssault.due_within(3).is_empty() and int(BaseAssault.due_within(4).get("day", 0)) == BaseHub.day() + 4,
+		"A2-04 warning: due on day %d, it's in 4 days' passing, not 3" % (BaseHub.day() + 4))
+	base_sec.erase("assault")
+	for choice: String in ["", BaseAssault.CARRY_ON, BaseAssault.HOME]:
+		await _assault_warning_trip(choice)
+	base_sec.erase("assault")
+	heat.clear()
+	heat.merge(saved)
+
+
+## One contract trip for _test_assault_warning: a contract accepted at the base, flown out to its
+## zone, made live and done there, and extracted. `choice` "": nothing booked; else an assault
+## booked for tomorrow (inside the debrief's days, which are at least one), then the host's choice.
+func _assault_warning_trip(choice: String) -> void:
+	var what := "no assault" if choice == "" else choice
+	var base_sec := BaseHub.base()
+	base_sec["last_assault_day"] = BaseHub.day()  # (no new booking in the days: a week since the last)
+	var offers := Contracts.board().filter(func(c: Dictionary) -> bool:
+		return String(c.zone_kind) == "contract" and String(c.get("source", "")) == "board" and Economy.work_problem(String(c.employer)) == "")
+	var near := offers.filter(func(c: Dictionary) -> bool: return String(c.zone_id) == "wadi_farm")
+	if offers.is_empty():
+		check(false, "A2-04 warning (%s): a contract on the board" % what)
+		return
+	var offer: Dictionary = near[0] if not near.is_empty() else offers[0]
+	var cid := String(offer.cid)
+	var zone_id := String(offer.zone_id)
+	var why := Contracts.server_accept(cid, ContractGen.default_terms())
+	if why == "":
+		why = BaseHub.begin_prep_contract(cid)
+	var picked: Array = Roster.available_ids(BaseHub.roster()).slice(0, 2)
+	if why == "":
+		BaseHub._prep().squad = picked.duplicate()
+		why = BaseHub.server_deploy()
+	if why != "":
+		check(false, "A2-04 warning (%s): deploying to %s on %s (%s)" % [what, zone_id, offer.title, why])
+		return
+	var there := await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return (l != null and String(l.def.id) == zone_id and not BaseHub.switch_pending() and l.players.get_node_or_null(^"1") != null
+			and MapNodes.briefing(l) != null), 60.0)
+	var zone := CompoundLevel.current(self) as ZoneLevel
+	if there:
+		await _wait_until(func() -> bool:  # (the picked squad there, to bring out)
+			return zone.ai.get_children().filter(func(n: Node) -> bool: return n.has_meta(&"roster_id")).size() >= picked.size(), 40.0)
+		MapNodes.briefing(zone).server_start(true)  # (the contract goes live)
+		await get_tree().process_frame
+	if not there or not Contracts.is_deployed():
+		check(false, "A2-04 warning (%s): the contract goes live in %s" % [what, zone_id])
+		BaseHub.server_end_deployment([])
+		await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
+		return
+	for s: Node in zone.ai.get_children():
+		if (s as Soldier) and (s as Soldier).faction == &"hostile":
+			s.queue_free()  # (nobody fighting the squad while it extracts)
+	for o: Dictionary in Contracts.objectives.for_contract(cid):
+		if not o.optional:
+			Contracts.objectives.server_set_state(o.oid, Objectives.DONE)  # (completed: paid, so the pay is worth comparing)
+	var me := zone.players.get_node(^"1") as Soldier
+	var squad: Array = []
+	for n: Node in zone.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"roster_id") and not s.vitals.is_dead():
+			squad.append({"node": String(s.name), "peer": 0})  # (all out: nobody left MIA for the next trip)
+	var day0 := Economy.day()
+	var links := RegionMap.distance(zone_id, RegionMap.BASE)
+	if choice != "":
+		base_sec["assault"] = {"faction": "black_ridge", "day": day0 + 1}
+	BaseHub.end_deployment({"players": [{"node": "1", "peer": 1}], "squad": squad, "point": {"pos": [me.global_position.x, me.global_position.z]}})
+	var d := Contracts.last_debrief()
+	var line: Dictionary = (d.get("contracts", [{}]) as Array)[0] if not (d.get("contracts", []) as Array).is_empty() else {}
+	var screen := Contracts.debrief_screen()
+	if choice == "":
+		check(String(line.get("cid", "")) == cid and not d.has("assault") and not Contracts.assault_pending() and Economy.day() == day0 + int(d.days)
+			and d.has("expenses_total") and screen != null and not screen.text().contains("Base assault expected"),
+			"A2-04 warning: no assault in the debrief's days, no warning: they pass at once (day %d -> %d)" % [day0, Economy.day()])
+	else:
+		var due: Dictionary = d.get("assault", {})
+		var cont := screen.find_child("Continue", true, false) as Button if screen else null
+		check(Contracts.assault_pending() and int(due.get("day", 0)) == day0 + 1 and Economy.day() == day0 and not d.has("expenses_total")
+			and RosterDeployment.is_running(BaseHub.roster()) and not BaseHub.in_base() and not BaseHub.switch_pending(),
+			"A2-04 warning (%s): an assault due on day %d, inside the debrief's %d days: they wait, the deployment still runs" % [what, day0 + 1, int(d.get("days", 0))])
+		check(screen != null and screen.text().contains("Base assault expected on day %d" % (day0 + 1)) and screen.find_child("HeadHome", true, false) != null
+			and screen.find_child("CarryOn", true, false) != null and cont != null and cont.disabled,
+			"A2-04 warning (%s): the debrief shows it with the two choices, and Continue waits" % what)
+		Contracts.server_finish_debrief()
+		check(not Contracts.last_debrief().get("finished", false) and not BaseHub.server_save() and BaseHub.save_note(false).contains("debrief first"),
+			"A2-04 warning (%s): nor can the debrief be closed or the campaign saved before the choice" % what)
+		var cash := Economy.cash()
+		var bills := [0]
+		var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
+		Economy.week_paid.connect(on_week)
+		var last_assault := int(base_sec.get("last_assault_day", -1000))
+		Contracts.assault_choice(choice)  # (the host's request, as its button sends it)
+		Economy.week_paid.disconnect(on_week)
+		var after := Contracts.last_debrief()
+		var same: bool = after.contracts == d.contracts and after.totals == d.totals and after.salvage == d.salvage and after.rep == d.rep and int(after.fines) == int(d.fines)
+		var charged: int = (after.get("expenses", []) as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.get("charge", false)) else 0), 0)
+		check(same and int(line.get("pay", 0)) > 0 and Economy.day() == day0 + int(after.days) and after.has("expenses_total") and String(after.assault.get("choice", "")) == choice
+			and Economy.cash() == cash - bills[0] - charged,
+			"A2-04 warning (%s): pay ($%s), salvage and reputation as the debrief worked them out; the %d days pass and their costs land (bills $%d, charged $%d)" % [
+				what, DebriefCalc.money(after.totals.paid_now), int(after.days), bills[0], charged])
+		var booked: Dictionary = base_sec.get("assault", {})
+		if choice == BaseAssault.CARRY_ON:
+			check(booked.has("hold_left_s") or (booked.is_empty() and int(base_sec.get("last_assault_day", -1)) == Economy.day()),
+				"A2-04 warning (carry on): the days pass with the squad out and it's met without them (%d links out: %s)" % [links, "holding out" if booked.has("hold_left_s") else "held off-screen"])
+		else:
+			check(not RosterDeployment.is_running(BaseHub.roster()) and not booked.is_empty() and not booked.has("hold_left_s")
+				and int(base_sec.get("last_assault_day", -1)) == last_assault,
+				"A2-04 warning (head home first): the deployment ends, and the assault waits for the squad at the FOB (%s)" % str(booked))
+	var home := await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as BaseZoneLevel
+		return l != null and BaseHub.in_base() and not BaseHub.switch_pending() and l.players.get_node_or_null(^"1") != null, 40.0)
+	check(home and not RosterDeployment.is_running(BaseHub.roster()), "A2-04 warning (%s): back at the base" % what)
+	var base := CompoundLevel.current(self) as BaseZoneLevel
+	var node := base.get_node_or_null(NodePath(BaseAssault.NODE_NAME)) as BaseAssault if base else null
+	if choice == BaseAssault.HOME and node:
+		var came := await _wait_until(func() -> bool: return not node.teams.is_empty(), 10.0)
+		var men := 0
+		for team: Array in node.teams:
+			men += team.size()
+		check(came and men >= 4, "A2-04 warning (head home first): it comes in live against the squad at the FOB (%d men)" % men)
+	if node and not node.teams.is_empty():
+		for team: Array in node.teams:
+			for s: Variant in team:
+				if is_instance_valid(s):
+					(s as Soldier).vitals.server_kill()
+		await _wait_until(func() -> bool: return node.teams.is_empty(), 6.0)
+	if is_instance_valid(screen):
+		screen.close()
+	base_sec.erase("assault")
 
 
 ## LZ-4: a raid by helicopter from the ops desk: any zone, the flight paid, a raid's rules.

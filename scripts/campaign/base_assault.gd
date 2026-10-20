@@ -18,6 +18,10 @@ extends Node
 ##   cools by OFFSCREEN_COOL, and a situation report goes out.
 ## The booking lives in the campaign's "base" section ("assault": {"faction", "day"};
 ## "last_assault_day"). Numbers Proposed.
+## A contract's debrief passes its days with the deployment still running (the squad out). When
+## a booked assault falls due in them, the debrief warns first and the host picks (cghath on audit
+## A2-04, "warn, then resolve"; due_within, BaseHub.server_assault_choice): head home first (the
+## squad meets it at the FOB) or carry on (it's settled without them, as above).
 
 const NODE_NAME := "BaseAssault"
 const WEEK_DAYS := 7
@@ -29,6 +33,11 @@ const OFFSCREEN_COOL := 10.0
 const LOSSES := 3
 const CHECK_S := 2.0
 const NEAR_LINKS := 2
+## The debrief's choices for an assault due in its days (due_within): head home first (the
+## deployment ends and the squad meets it at the FOB) or carry on (the days pass with the squad
+## out, as before the warning).
+const HOME := "home"
+const CARRY_ON := "carry_on"
 ## How long the wire holds without the squad (s of play; 6x game time): HOLD_BASE_S, and
 ## HOLD_PER_COVER_S more for each guard and defence. Proposed.
 const HOLD_BASE_S := 240.0
@@ -61,6 +70,47 @@ static func server_day_passed(at_base: bool) -> String:
 			Contracts._notify_all(warn)
 			SessionLog.note("base assault booked: %s on day %d (heat %.0f)" % [hot[0], BaseHub.day() + 1, float(hot[1])])
 			return warn
+	return ""
+
+
+## Host (a contract's debrief, before its days pass; cghath's call on audit A2-04, "warn, then
+## resolve"): the booked assault that falls due within the next `days` days, as the debrief's
+## warning: {"faction", "name", "day", "links" (the squad's zone from the base, -1 unknown),
+## "hold_min" (how long the wire holds without them, game minutes), "choice" ("" until the host
+## picks HOME or CARRY_ON)}; {} when none does (or one is holding out already: the squad comes
+## home to that either way).
+static func due_within(days: int) -> Dictionary:
+	var booked: Dictionary = BaseHub.base().get("assault", {})
+	if booked.is_empty() or booked.has("hold_left_s") or days <= 0 or int(booked.get("day", 0)) > BaseHub.day() + days:
+		return {}
+	var faction := String(booked.get("faction", ""))
+	return {"faction": faction, "name": String(MissionRegistry.faction(faction).get("name", faction.capitalize())), "day": int(booked.day),
+		"links": RegionMap.distance(String(RosterDeployment.active(BaseHub.roster()).get("zone_id", "")), RegionMap.BASE),
+		"hold_min": ceili(hold_out_s() * 6.0 / 60.0), "choice": ""}
+
+
+## The debrief's warning line for `due` (due_within).
+static func warning_text(due: Dictionary) -> String:
+	return "Base assault expected on day %d (%s), before you're back." % [int(due.get("day", 0)), String(due.get("name", "?"))]
+
+
+## What carrying on means for `due`: near the base the wire holds out a while, else it's settled
+## without the squad (server_day_passed).
+static func carry_on_text(due: Dictionary) -> String:
+	var links := int(due.get("links", -1))
+	if links >= 0 and links <= NEAR_LINKS:
+		return "Carry on: the days pass with the squad out. You're %d link%s away: the FOB holds out about %d minutes for you." % [
+			links, "" if links == 1 else "s", int(due.get("hold_min", 0))]
+	return "Carry on: the days pass with the squad out. The guards or the detail hold the wire without you, and some of the stash may be lost."
+
+
+## The host's choice for `due`, as everyone is told it.
+static func choice_text(due: Dictionary) -> String:
+	match String(due.get("choice", "")):
+		HOME:
+			return "The host headed home first: the squad meets the assault at the FOB."
+		CARRY_ON:
+			return "The host carried on: the days pass with the squad out, and the FOB meets the assault without them."
 	return ""
 
 

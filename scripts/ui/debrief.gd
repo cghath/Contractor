@@ -19,6 +19,12 @@ extends CanvasLayer
 ## with no sizes or colours of its own, nothing under 14 px; the salvage table's item column
 ## wraps and takes what the numbers leave; a tagged lot's or intel's buttons wrap under its
 ## line (UiKit.action_row); casualties one each. ui_test's strict checks fit it full.
+##
+## A base assault due in the debrief's days (cghath on audit A2-04, "warn, then resolve";
+## BaseAssault.due_within): the warning heads the screen before those days pass, and the host
+## chooses "Head home first" or "Carry on" (Contracts.assault_choice); a client sees the warning
+## and then the host's choice. The host's Continue waits for it (the days, and so the expenses,
+## come first).
 
 signal closed
 
@@ -42,6 +48,7 @@ var _sort := "value"
 var _scroll_to := -1
 ## The size fit() was last given (ZERO: this screen's own viewport, as in the game).
 var _view := Vector2.ZERO
+var _continue: Button
 
 
 func _ready() -> void:
@@ -79,10 +86,10 @@ func _ready() -> void:
 	keys.add_child(UiKit.key_hint("Esc", "Continue"))
 	keys.add_child(UiKit.hint("Salvage claims are banked when the host continues."))
 	footer.add_child(keys)
-	var cont := UiKit.button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
-	cont.name = "Continue"
-	cont.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	footer.add_child(cont)
+	_continue = UiKit.button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
+	_continue.name = "Continue"
+	_continue.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	footer.add_child(_continue)
 	get_viewport().size_changed.connect(_fit)
 	## A container grows to its minimum but never shrinks back: the wrapped title and footer
 	## hint ask to be very tall while they're still narrow (before the first layout), and the
@@ -136,11 +143,15 @@ func refresh() -> void:
 		_box.remove_child(child)
 		child.queue_free()
 	var d := Contracts.last_debrief()
+	var waiting := Contracts.assault_pending() and Contracts.is_host()  # (a client's Continue only closes its own screen)
+	_continue.disabled = waiting
+	_continue.tooltip_text = "Choose how the debrief's days pass first (the base assault)" if waiting else "Close the debrief (the host's closing banks the salvage claims)"
 	if d.is_empty():
 		_title.text = "DEBRIEF"
 		_line("No debrief yet.")
 		return
 	_title.text = "DEBRIEF - %s (day %d)" % [d.get("zone_name", ""), int(d.get("day", 0))]
+	_assault(d)
 	_header(d)
 	_carried(d)
 	_salvage(d)
@@ -193,6 +204,35 @@ func _header(d: Dictionary) -> void:
 		for l: String in DebriefCalc.summary(d):
 			var depth := 2 if l.begins_with("    ") else (1 if l.begins_with("  ") else 0)
 			_line(l.strip_edges(), UiKit.SPACE_L + UiKit.SPACE_M * depth)
+
+
+## A base assault due in the debrief's days (BaseAssault.due_within): the warning, and the host's
+## two choices (a client waits for them), or the choice made.
+func _assault(d: Dictionary) -> void:
+	var due: Dictionary = d.get("assault", {})
+	if due.is_empty():
+		return
+	var box := VBoxContainer.new()
+	box.name = "AssaultWarning"
+	box.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
+	_box.add_child(box)
+	box.add_child(UiKit.heading("BASE ASSAULT"))
+	box.add_child(UiKit.warn(BaseAssault.warning_text(due)))
+	var choice := String(due.get("choice", ""))
+	if choice != "":
+		box.add_child(UiKit.text(BaseAssault.choice_text(due)))
+		return
+	box.add_child(UiKit.text("The debrief's %d day%s haven't passed yet." % [int(d.get("days", 0)), "" if int(d.get("days", 0)) == 1 else "s"]))
+	box.add_child(UiKit.text("Head home first: the deployment ends now and the squad is at the FOB when it comes in. Pay, salvage and costs are the same either way."))
+	box.add_child(UiKit.text(BaseAssault.carry_on_text(due)))
+	if not Contracts.is_host():
+		box.add_child(UiKit.hint("The host decides."))
+		return
+	var home := UiKit.button("Head home first", func() -> void: Contracts.assault_choice(BaseAssault.HOME), "End the deployment now: the squad meets the assault at the FOB")
+	home.name = "HeadHome"
+	var carry := UiKit.button("Carry on", func() -> void: Contracts.assault_choice(BaseAssault.CARRY_ON), "The days pass with the squad out: the assault is met without them")
+	carry.name = "CarryOn"
+	box.add_child(UiKit.button_row([home, carry]))
 
 
 ## What was carried out, summed per item type, in collapsible categories.
@@ -432,7 +472,8 @@ func _process(_delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"pause"):
 		get_viewport().set_input_as_handled()
-		close()
+		if not (Contracts.assault_pending() and Contracts.is_host()):  # (the host's Continue waits for its choice)
+			close()
 
 
 ## Closes the screen; on the host it also closes the debrief (banks the salvage picks).
