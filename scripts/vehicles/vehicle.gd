@@ -808,6 +808,7 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	add_collision_exception_with(s)
 	var brain := SquadAI.of(s)
 	if brain:
+		brain.drop_care()  # off while seated, it could neither finish nor hand on a casualty (A2-12)
 		brain.process_mode = Node.PROCESS_MODE_DISABLED
 		## Captain, 2026-10-14: its brain is off while seated, so the squad HUD kept what it said
 		## before ("Waiting (briefing)" on the insertion helicopter): it says where it rides.

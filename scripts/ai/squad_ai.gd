@@ -1811,7 +1811,7 @@ static func _carer_of(s: Soldier) -> Soldier:
 	var ai := SquadAI.of(carer)
 	if ai == null:
 		return carer if carer.carrying == s else null  # a player
-	return carer if ai.casualty == s else null
+	return carer if ai.casualty == s and not is_instance_valid(carer.vehicle) else null  # seated: its brain is off (A2-12)
 
 
 ## A friendly's dead body this unit chooses to take somewhere (_body_destination; BODY_QUIET_S
@@ -2332,6 +2332,14 @@ func _end_care() -> void:
 	_has_cover = false
 	wants_medic = false
 	wanted.clear()
+
+
+## Host: this unit lets go of whoever it looks after (a casualty or a body) and of a walk-in
+## handoff claim, so the next responder takes them: getting into a vehicle (Vehicle.server_enter
+## turns its brain off while seated, so it could neither finish the job nor give it up).
+func drop_care() -> void:
+	if care != Care.NONE or casualty != null:
+		_end_care()
 
 
 # --- HVT escort ---------------------------------------------------------------
@@ -2895,10 +2903,13 @@ func _maybe_resupply_gunner(now: float) -> void:
 	var ammo := StringName(ItemDB.get_item(gunner.inventory.slots.get(&"primary", &"")).stats.get("ammo", &""))
 	if ammo == &"" or body.inventory.count_of(ammo) <= 0 or gunner.inventory.count_of(ammo) > GUNNER_LOW_BELTS:
 		return
-	if not body.inventory.remove_one(ammo):
+	# The belt itself, its rounds (state) and all: a part-used one stays part-used (A2-11).
+	var entry := _take_out(ammo)
+	if entry.is_empty():
 		return
-	gunner.inventory.take(ammo, 1)
 	_ammo_given_at = now
+	if gunner.inventory.take(entry.id, 1, entry.get("state", {})) == 0:
+		body.inventory.take(entry.id, 1, entry.get("state", {}))  # no room on him: keep it
 
 
 ## The nearest same-squad soldier still up whose primary is a belt-fed LMG, or null.
