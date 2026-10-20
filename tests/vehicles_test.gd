@@ -2257,7 +2257,10 @@ func _test_drivers_part2() -> void:
 	var drivers := SquadDrivers.of(level)
 	var matv := _vehicle("range_matv")
 	var maxx := _vehicle("range_maxxpro")
-	var tech := _vehicle("range_technical")
+	# (A technical of its own: the range's burned out in the fire checks.)
+	var tech := layer.server_spawn("technical_dshk", Transform3D(Basis(Vector3.UP, deg_to_rad(-90.0)), Vector3(-70, 0, -65)), "", &"player", "test_column_tech")
+	tech.set_meta(&"no_save", true)
+	await _seconds(1.0)  # (down on its wheels)
 	# The contact calls (DriveContact.decide: class, disabled, judging off, nearest enemy, AT, threat).
 	check(DriveContact.decide("soft", false, false, INF, false, 0.5) == DriveContact.THROUGH, "contact: a round or two at a technical, it drives on")
 	check(DriveContact.decide("soft", false, false, 200.0, false, 3.0) == DriveContact.DISMOUNT, "three enemies 200 m off: the technical stops and its men get out")
@@ -2345,7 +2348,7 @@ func _test_drivers_part2() -> void:
 	crew.clear()
 	# Mount up, carry us there, dismount short.
 	await _reset(maxx, Vector3(-4, 0, 6))
-	await _reset(tech, Vector3(4, 0, 6))
+	await _reset(tech, Vector3(-70, 0, 60))  # (out of the way of the carry)
 	await _reset(matv, Vector3(-50, 0, -50), -90.0)
 	player.global_position = Vector3(-50, 0.1, -36)
 	var door := layer._nearest_door(matv, matv.global_position + matv.global_basis.x * 4.0) + Vector3(0, 0.1, 0)
@@ -2394,7 +2397,7 @@ func _test_drivers_part2() -> void:
 	player.global_position = Vector3(0, 0.1, 10)
 	await _reset(matv, Vector3(-12, 0, 6))
 	await _reset(maxx, Vector3(-4, 0, 6))
-	await _reset(tech, Vector3(4, 0, 6))
+	tech.queue_free()
 
 
 ## Unstuck (VehicleAI, SquadDrivers): a wall across its way, it backs off, goes round and
