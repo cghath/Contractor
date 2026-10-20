@@ -11,6 +11,38 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Feel round 2 (Captain, 2026-10-20: his Star Citizen on-foot reference; Contractor learns from it)
+
+#### Added
+- **Pace on the mouse wheel.** On foot and not aiming, the wheel steps through four paces: a
+  slow walk, a walk, a brisk walk and the jog (the default). Sprint stays on Shift. The HUD
+  shows the new pace briefly. P still toggles quickly between the jog and the last slower pace.
+  The command menu, the interaction menu, a grenade in hand and aiming still keep the wheel,
+  and a free-spinning wheel moves one pace at a time.
+- **Breath cycle with pauses.** A breath now goes in, holds at the top, goes out and holds
+  longer at the bottom. The breath doesn't move the sight during either pause, so a patient
+  shot can be timed into one. A breath takes 6 s with fresh legs and 2.5 s winded.
+- **Carry states.** Sprinting, vaulting and mantling force the weapon low. Mantling now reaches
+  other players too, so they see the weapon go low, and you can't aim mid-climb. Bringing the
+  weapon up from low (the sprint carry or the low ready) takes up to x1.35 its usual ADS time.
+  After a sprint the aim sways up to x2.5 for a moment (it builds over 1.5 s of sprinting and
+  fades over 1.2 s).
+- **Steadier head.** As the steps move the view, it turns slightly the other way to keep
+  looking at a point 10 m ahead, so the world in front stays put while the body moves (only
+  with head bob on).
+
+#### Changed
+- **Holding your breath scales with fitness.** Fresh, it lasts 10 s and the gasp after is 3 s.
+  Spent, it lasts 1 s and the gasp is 6 s (it was 6 s / 3 s with a flat 2 s gasp). The gasp's
+  extra sway eases off over its second half.
+- **Third-person reloads match first person.** The weapon now moves on each reload's own keys
+  (tipped and brought in for the magazine, the look and the seat, the bolt work), about 25%
+  bigger so it reads at a distance. Near the view, the action locks back and slams home and a
+  belt-fed's feed cover opens and shuts, as in first person. The parts are warmed with the
+  uniform, so the first reload doesn't hitch. Far bodies (animation LOD) keep the cheaper
+  magazine-only split. The phases already reach every peer and AI through the host's
+  `_reload_began`; tests now check them over ENet and on an AI body.
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

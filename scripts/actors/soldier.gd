@@ -471,6 +471,7 @@ func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
 	model.reloading = is_reloading
+	model.climbing = movement.mantling  # (replicated: the weapon low for the climb)
 	_reload_tick()
 	model.aiming = is_aiming
 	model.left_handed = left_handed
@@ -771,6 +772,7 @@ func aim_sway_deg(weapon: ItemData) -> float:
 	var moving := clampf(Vector2(velocity.x, velocity.z).length() / SoldierMovement.WALK_SPEED, 0.0, 1.5)
 	var tired := 1.0 - clampf(minf(movement.stamina, movement.arm_stamina), 0.0, 1.0)  # out of breath, or tired arms
 	return SWAY_DEG * movement.spread_mult() * (1.0 + SWAY_MOVE_MULT * moving) * (1.0 + SWAY_TIRED_MULT * tired) \
+		* (1.0 + MovementRules.SPRINT_UNSTEADY_SWAY * movement.sprint_unsteady) \
 		* vitals.sway_mult(weapon.tags.has("rifle")) * GunAttachments.sway_mult(weapon, _state_of_weapon(weapon))
 
 
@@ -783,13 +785,14 @@ func breath_sway_deg(weapon: ItemData) -> float:
 
 
 ## The sway's offset (pitch, yaw in radians) at time `t` seconds: a slow, wandering figure of
-## eight, at most aim_sway_deg() across, plus the breath rising and falling
-## (SoldierMovement.breath_phase); holding the breath steadies both, gasping after makes them
-## worse (SoldierMovement.breath_sway_mult).
+## eight, at most aim_sway_deg() across, plus the breath rising and falling and still in its
+## pauses at the top and bottom (SoldierMovement.breath_wave: MovementRules.BREATH_*); holding
+## the breath steadies both, gasping after makes them worse (SoldierMovement.breath_sway_mult).
 func aim_sway(weapon: ItemData, t: float) -> Vector2:
 	var amp := deg_to_rad(aim_sway_deg(weapon))
 	var drift := Vector2(sin(t * 1.3) * 0.8 + sin(t * 0.55 + 1.7) * 0.2, sin(t * 0.7 + 0.4) * 0.8 + sin(t * 1.9) * 0.2) * amp
-	var breath := Vector2(sin(movement.breath_phase), sin(movement.breath_phase * 0.5) * 0.25) * deg_to_rad(breath_sway_deg(weapon))
+	var wave := movement.breath_wave()
+	var breath := Vector2(wave, wave * 0.25) * deg_to_rad(breath_sway_deg(weapon))
 	return (drift + breath) * movement.breath_sway_mult()
 
 
@@ -1212,6 +1215,7 @@ func begin_reload_local(item: StringName, empty: bool, seconds: float) -> void:
 	reload_from = _now()
 	_reload_beats = Reloads.beats(fam, empty)
 	model.reload_keys = Reloads.keys(fam, empty)
+	model.reload_parts = Reloads.parts(fam, empty)
 	model.reload_len = reload_len
 
 

@@ -283,6 +283,23 @@ static func parts(fam: StringName, empty: bool) -> Dictionary:
 	return {"bolt": [[0.0, 1.0], [0.69, 1.0], [0.72, 0.0]]} if empty else {}  # AR: the catch slapped, the carrier slams home
 
 
+## Where a weapon's moving parts sit (in the weapon's space) at share `u` of a reload with part
+## tracks `tracks` (parts; below 0, none: all home), for a weapon whose VoxelArt.part_motion is
+## `motion`: {"bolt": the action slid back along the bore (and a bolt-action's handle turned up
+## round it), "cover": the feed cover turned up on its front hinge}. First person (PlayerInput)
+## and third person (CharacterModel) both pose them from this.
+static func part_transforms(tracks: Dictionary, motion: Dictionary, u: float) -> Dictionary:
+	var at := func(part: String) -> float: return track(tracks.get(part, []), u) if u >= 0.0 else 0.0
+	var axis: Vector3 = motion.get("axis", Vector3.ZERO)
+	var turn := Basis(Vector3.BACK, float(motion.get("lift", 0.0)) * at.call("lift"))
+	var hinge: Vector3 = motion.get("hinge", Vector3.ZERO)
+	var lift := Basis(Vector3.RIGHT, -float(motion.get("open", 0.0)) * at.call("cover"))
+	return {
+		"bolt": Transform3D(turn, axis - turn * axis + Vector3(0.0, 0.0, float(motion.get("travel", 0.0)) * at.call("bolt"))),
+		"cover": Transform3D(lift, hinge - lift * hinge),
+	}
+
+
 ## A part's value at share `u` of its track (parts): eased between points, held past the ends.
 static func track(points: Array, u: float) -> float:
 	if points.is_empty():

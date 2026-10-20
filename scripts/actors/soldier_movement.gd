@@ -31,6 +31,13 @@ const DOWNED_HEAD_Y := 0.35
 const ADS_SPEED_MULT := 0.5
 ## A human's walk (the walk key, a toggle): this share of the stance's pace, about 1.8 m/s standing.
 const WALK_PACE_MULT := 0.5
+## Paces (feel round 2, Captain 2026-10-20; learned from Star Citizen's analog speed): on foot
+## and not aiming, the mouse wheel steps through PACE_MULT shares of the stance's pace (a slow
+## walk, a walk, a brisk walk, the jog); sprint stays on its own key. The walk key toggles between
+## the jog and the last slower pace (a walk until the wheel picks another).
+enum Pace { SLOW_WALK, WALK, BRISK, JOG }
+const PACE_MULT: Array[float] = [0.3, WALK_PACE_MULT, 0.75, 1.0]
+const PACE_NAMES: Array[String] = ["Slow walk", "Walk", "Brisk walk", "Jog"]
 ## Going prone or getting up (a human's) takes PRONE_DOWN_S / PRONE_UP_S: he moves at
 ## STANCE_SHIFT_MULT of his pace meanwhile and the view eases down or up over it.
 const PRONE_DOWN_S := 0.7
@@ -205,8 +212,15 @@ var lean := 0.0
 var mounted := false
 ## Owner-side: 0..1, drained by sprinting and jumping (the legs).
 var stamina := 1.0
-## Owner-side (a human's): the walk key's toggle (WALK_PACE_MULT); sprinting overrides it.
-var walk_pace := false
+## Owner-side (a human's): the pace on foot (Pace: PACE_MULT); sprinting overrides it.
+var pace: int = Pace.JOG
+var _slow_pace: int = Pace.WALK  # where the walk key goes from the jog: the last slower pace
+## The walk key's toggle, on the pace: true at any pace slower than the jog.
+var walk_pace: bool:
+	get:
+		return pace != Pace.JOG
+	set(on):
+		pace = _slow_pace if on else Pace.JOG
 var _stance_shift_until := -1000.0  # a human going prone or getting up: slowed until then
 ## Owner-side (a human's): auto-walk is on (Captain, 2026-10-20). The body walks forward with no
 ## key held; the sprint key still sprints and A/D still steer. W or S, going down or getting in
@@ -219,13 +233,18 @@ var sprint_ramp := 0.0
 var arm_stamina := 1.0
 ## Owner-side: holding the breath (the hold_breath key while aiming), steadying the aim.
 var breath_held := false
-## Owner-side: the breathing cycle (radians), quicker out of breath (Soldier.aim_sway).
+## Owner-side: the breathing cycle (radians), quicker out of breath, and the share of it so far
+## (MovementRules.breath_wave; Soldier.aim_sway). Held, the breath stops where it is.
 var breath_phase := 0.0
+var breath_u := 0.0
+var _gasp_len := 0.0      # the gasp's length as it began (its sway eases off over it)
 var _breath_left := 0.0   # seconds of held breath left
 var _gasp_left := 0.0     # seconds of gasping after a hold: no hold, more sway
 var _hold_spent := false  # a hold ended with the key still down: let go before the next one
 ## Owner-side: 0..1, weapon sway left over from stopping.
 var settle := 0.0
+## Owner-side: 0..1, the aim's unsteadiness after a sprint (MovementRules.SPRINT_UNSTEADY_*).
+var sprint_unsteady := 0.0
 
 var _winded := false
 var _exerting := false    # sprinting, jumping or moving under an extreme load (report_exertion)
@@ -240,7 +259,8 @@ var _lean_last_tap := {-1: -10.0, 1: -10.0}
 var holding := false
 ## Whether the last mantle was an LX-3 leap over a wall (landing on its far side).
 var last_over := false
-## Owner-side: climbing a ledge now (mantle): the step moves the body along the climb.
+## Climbing a ledge now (mantle): the step moves the body along the climb. Set by the owner and
+## replicated (the owner's sync), so every peer draws the weapon low for it (feel round 2).
 var mantling := false
 var _mantle := {}  # "from", "up", "to", "t", "s", "stance", "carry", "dir"
 var _floor_at := -1000.0  # when it was last on the ground (a mantle just after leaving it)
@@ -356,6 +376,10 @@ func step(delta: float) -> void:
 	update_stamina(delta, is_sprinting, input != Vector2.ZERO)
 	update_arms(delta, body.is_aiming and not down, hold and not down)
 	sprint_ramp = minf(sprint_ramp + delta / MovementRules.SPRINT_RAMP_S, 1.0) if is_sprinting else 0.0
+	if is_sprinting:
+		sprint_unsteady = minf(sprint_unsteady + delta / MovementRules.SPRINT_UNSTEADY_BUILD_S, 1.0)
+	else:
+		sprint_unsteady = maxf(sprint_unsteady - delta / MovementRules.SPRINT_UNSTEADY_S, 0.0)
 	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down, input)
 	var before := Vector3(body.velocity.x, 0.0, body.velocity.z)
 	var after := next_velocity(before, target, delta, body.is_on_floor(), not body.is_ai())
@@ -923,8 +947,8 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 	if sprinting:
 		var full := WALK_SPEED + (SPRINT_SPEED - WALK_SPEED) * MovementRules.sprint_left(body.load_kg)
 		speed = lerpf(STANCE_SPEED[Stance.STAND_HIGH], full, sprint_ramp)
-	elif walk_pace:
-		speed *= WALK_PACE_MULT
+	elif pace != Pace.JOG:
+		speed *= PACE_MULT[clampi(pace, 0, Pace.JOG)]
 	if stance_shifting():
 		speed *= STANCE_SHIFT_MULT
 	speed *= MovementRules.direction_mult(input, body.load_kg)
@@ -1004,14 +1028,16 @@ func is_winded() -> bool:
 ## lowered, they refill. `hold`: the hold-breath key is down.
 func update_arms(delta: float, aiming: bool, hold: bool) -> void:
 	var kg := held_weapon_mass()
-	var tired := 1.0 - stamina
-	breath_phase = fmod(breath_phase + delta * TAU * lerpf(MovementRules.BREATH_HZ, MovementRules.BREATH_HZ_WINDED, tired), TAU * 64.0)
+	if not breath_held:  # held, the breath stops where it is; gasping, it comes winded
+		var cycle := MovementRules.breath_cycle_s(0.0 if _gasp_left > 0.0 else stamina)
+		breath_u = fmod(breath_u + delta / cycle, 64.0)
+		breath_phase = fmod(breath_phase + delta * TAU / cycle, TAU * 64.0)
 	_gasp_left = maxf(_gasp_left - delta, 0.0)
 	if not hold:
 		_hold_spent = false
 	if breath_held and (not hold or not aiming):
 		breath_held = false  # let go early: a shorter gasp
-		_gasp_left = MovementRules.BREATH_RECOVER_S * clampf(1.0 - _breath_left / maxf(_hold_limit(), 0.01), 0.0, 1.0)
+		_start_gasp(clampf(1.0 - _breath_left / maxf(_hold_limit(), 0.01), 0.0, 1.0))
 	elif not breath_held and hold and aiming and _gasp_left <= 0.0 and not _hold_spent:
 		breath_held = true
 		_breath_left = _hold_limit()
@@ -1020,7 +1046,7 @@ func update_arms(delta: float, aiming: bool, hold: bool) -> void:
 		if _breath_left <= 0.0:
 			breath_held = false
 			_hold_spent = true
-			_gasp_left = MovementRules.BREATH_RECOVER_S
+			_start_gasp(1.0)
 	if aiming and kg > 0.0:
 		var drain := MovementRules.arm_drain(kg) * _arm_posture() * (MovementRules.BREATH_HOLD_ARM_MULT if breath_held else 1.0) * delta
 		if arm_stamina > 0.0:
@@ -1032,9 +1058,21 @@ func update_arms(delta: float, aiming: bool, hold: bool) -> void:
 		arm_stamina = minf(arm_stamina + delta / MovementRules.ARM_REGEN_S * body.vitals.stamina_mult(), 1.0)
 
 
+## 0 (spent) to 1 (fresh): how long a breath holds and how short the gasp after it is
+## (MovementRules.hold_seconds, gasp_seconds), from the legs and, half as much, the arms.
+func breath_fitness() -> float:
+	return minf(stamina, maxf(arm_stamina, 0.5))
+
+
 ## Seconds a breath can be held now: shorter out of breath or with spent arms.
 func _hold_limit() -> float:
-	return lerpf(MovementRules.BREATH_HOLD_MIN_S, MovementRules.BREATH_HOLD_S, minf(stamina, maxf(arm_stamina, 0.5)))
+	return MovementRules.hold_seconds(breath_fitness())
+
+
+## A held breath let go: a gasp of `share` of the full one at this fitness.
+func _start_gasp(share: float) -> void:
+	_gasp_left = MovementRules.gasp_seconds(breath_fitness()) * share
+	_gasp_len = _gasp_left
 
 
 ## How much the arms pay for holding up the weapon in this stance (rested: little).
@@ -1054,16 +1092,46 @@ func held_weapon_mass() -> float:
 	return MovementRules.weapon_mass(weapon, body.inventory.state_of(body.active_slot))
 
 
-## Seconds to bring the active weapon to the eye now (PlayerInput._update_aim).
-func ads_seconds() -> float:
-	return MovementRules.ads_seconds(held_weapon_mass(), arm_stamina)
+## Seconds to bring the active weapon to the eye now (PlayerInput._update_aim), from `low` (0
+## at the ready to 1 fully low: MovementRules.ADS_FROM_LOW_MULT).
+func ads_seconds(low := 0.0) -> float:
+	return MovementRules.ads_seconds(held_weapon_mass(), arm_stamina, low)
 
 
-## Aimed sway multiplier from the breath: steady while held, worse while gasping after.
+## Whether the weapon is forced low now (MovementRules: carry states): sprinting or climbing.
+func weapon_forced_low() -> bool:
+	return is_sprinting or mantling
+
+
+## The breath now, -1 out to 1 in (MovementRules.breath_wave), and whether it is in a pause.
+func breath_wave() -> float:
+	return MovementRules.breath_wave(breath_u)
+
+
+func breath_dwell() -> bool:
+	return MovementRules.breath_dwell(breath_u)
+
+
+## Steps the pace on foot by `steps` (+1 faster, -1 slower) within Pace: the new pace's name,
+## or "" if it was already at that end.
+func step_pace(steps: int) -> String:
+	var to := clampi(pace + steps, Pace.SLOW_WALK, Pace.JOG)
+	if to == pace:
+		return ""
+	pace = to
+	if pace != Pace.JOG:
+		_slow_pace = pace
+	return PACE_NAMES[pace]
+
+
+## Aimed sway multiplier from the breath: steady while held, worse while gasping after (easing
+## back to 1 over the gasp's second half).
 func breath_sway_mult() -> float:
 	if breath_held:
 		return MovementRules.BREATH_HOLD_SWAY
-	return MovementRules.BREATH_GASP_SWAY if _gasp_left > 0.0 else 1.0
+	if _gasp_left <= 0.0:
+		return 1.0
+	return lerpf(1.0, MovementRules.BREATH_GASP_SWAY, clampf(_gasp_left / maxf(_gasp_len, 0.01) * 2.0, 0.0, 1.0))
 
 
 ## Seconds of gasping left after a held breath (0: none).

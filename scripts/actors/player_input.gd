@@ -129,6 +129,19 @@ var _vm_base := HIP_VIEW   # the view model's place before its bob
 var _bob_w := 0.0          # 0..1: how much the steps move the view (not aiming, on the ground)
 var _sprint_w := 0.0       # 0..1: the weapon in its sprint carry
 var _low_w := 0.0          # 0..1: the weapon down at the low ready
+## How low the weapon was when it last came up to the eye (0 at the ready, 1 fully low: the sprint
+## carry, the low ready, a climb), which makes the ADS slower (MovementRules.ADS_FROM_LOW_MULT).
+var _ads_low := 0.0
+## The wheel's pace (wheel_pace): one step each PACE_WHEEL_GAP_S at most (a free-spinning or
+## high-resolution wheel sends many notches at once), and when the last went.
+const PACE_WHEEL_GAP_S := 0.08
+var _pace_wheel_at := -100.0
+## The view's gaze held on a point GAZE_FOCUS_M ahead (feel round 2, Captain 2026-10-20; learned
+## from Star Citizen's head camera): as the steps move the eye (the bob, the sway, the footfall
+## and landing dips), it turns a little the other way, so the world ahead stays put while the
+## body moves under it. Applied on top of the camera's eased sway (_cam_turn).
+const GAZE_FOCUS_M := 10.0
+var _cam_turn := Vector2.ZERO
 var _view_kick := 0.0      # 0..2: a shot's kick, settling
 var _vm_pitch := 0.0       # the view model's eased pitch, before the kick
 var _last_recoil := 0.0
@@ -298,6 +311,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_throw(LOB_POWER)  # underhand lob
 	elif nade_up and event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		put_nade_away("Grenade put away")  # scroll: nothing thrown
+	elif event is InputEventMouseButton and event.pressed and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		wheel_pace(1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1)  # on foot: the pace
 	elif event.is_action_pressed(&"inspect"):
 		toggle_inspect()  # the item under the crosshair: what it is and how to use it (ItemInfo)
 	elif placing and event.is_action_pressed(&"fire"):
@@ -329,8 +344,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			equip_nade()
 	elif event.is_action_pressed(&"walk") and not is_instance_valid(body.vehicle):
-		body.movement.walk_pace = not body.movement.walk_pace
-		hud.flash("Walking" if body.movement.walk_pace else "Jogging")
+		body.movement.walk_pace = not body.movement.walk_pace  # the jog, or back to the last slower pace
+		hud.flash("Pace: %s" % SoldierMovement.PACE_NAMES[body.movement.pace])
 	elif event.is_action_pressed(&"auto_walk") and not is_instance_valid(body.vehicle):
 		body.movement.auto_walk = not body.movement.auto_walk and body.vitals.is_up()
 		hud.flash("Auto-walk on (W or S to stop)" if body.movement.auto_walk else "Auto-walk off")
@@ -820,8 +835,33 @@ func _update_sway(delta: float) -> void:
 	var weapon := body.active_weapon()
 	var sway := body.aim_sway(weapon, Soldier._now()) if weapon and weapon.type == "weapon" and not Launchers.is_launcher(weapon) else Vector2.ZERO
 	var k := minf(delta * 8.0, 1.0)
-	body.camera.rotation.x = lerpf(body.camera.rotation.x, sway.x + _feel_pitch, k)
-	body.camera.rotation.y = lerpf(body.camera.rotation.y, sway.y, k)
+	_cam_turn = _cam_turn.lerp(Vector2(sway.x + _feel_pitch, sway.y), k)
+	var gaze := gaze_turn(body.camera.position)
+	body.camera.rotation.x = _cam_turn.x + gaze.x
+	body.camera.rotation.y = _cam_turn.y + gaze.y
+
+
+## The turn (pitch, yaw: radians) that keeps the eye, moved `offset` (m, head space) by the steps,
+## looking at the point GAZE_FOCUS_M straight ahead: up a little, it looks down a little.
+static func gaze_turn(offset: Vector3) -> Vector2:
+	return Vector2(-atan2(offset.y, GAZE_FOCUS_M), atan2(offset.x, GAZE_FOCUS_M))
+
+
+## The mouse wheel's pace on foot (feel round 2, Captain 2026-10-20): each notch a pace faster
+## (`steps` 1, up) or slower (-1, down) through SoldierMovement.Pace, shown on the HUD. Not
+## aiming (nor glassing), not aboard a vehicle, not down; the command menu, the interaction
+## menu and a grenade in hand take the wheel before this. Whether it stepped.
+func wheel_pace(steps: int) -> bool:
+	if body.is_aiming or Input.is_action_pressed(&"aim") or body.binoculars_up or is_instance_valid(body.vehicle) \
+			or not body.vitals.is_up() or body.respawn_state == Soldier.RESPAWN_WAITING:
+		return false
+	var now := Soldier._now()
+	if now - _pace_wheel_at < PACE_WHEEL_GAP_S:
+		return false
+	_pace_wheel_at = now
+	body.movement.step_pace(steps)
+	hud.flash("Pace: %s" % SoldierMovement.PACE_NAMES[body.movement.pace])
+	return true
 
 
 ## Where the view model goes aimed with `weapon` (camera-local), its item state `state`
@@ -863,12 +903,16 @@ func _update_aim(delta: float) -> void:
 		body.camera.fov = lerpf(body.camera.fov, _binos_fov(), minf(delta * 10.0, 1.0))
 		return
 	var weapon := body.active_weapon()
+	var was_aiming := body.is_aiming
 	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
-		and body.inventory.hands == &"" and not body.is_reloading and Input.is_action_pressed(&"aim")
+		and body.inventory.hands == &"" and not body.is_reloading and not body.movement.mantling and Input.is_action_pressed(&"aim")
+	if body.is_aiming and not was_aiming:
+		# Up from low (the sprint carry, the low ready) takes longer than from the ready.
+		_ads_low = clampf(maxf(_sprint_w, _low_w), 0.0, 1.0)
 	var fov := GunSight.aimed_fov_of(body, weapon, GameSettings.view_fov()) if body.is_aiming else GameSettings.view_fov() + SPRINT_FOV * _sprint_fov_w
 	# Up to the eye in the weapon's ADS time (its mass with optic, slower on tired arms:
 	# MovementRules.ads_seconds); lowering stays quick.
-	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds() if body.is_aiming else 14.0
+	var rate := MovementRules.ADS_EASE_K / body.movement.ads_seconds(_ads_low) if body.is_aiming else 14.0
 	var fov_k := minf(delta * (rate if body.is_aiming else 12.0), 1.0)
 	# `fov` is what the sight shows: its own eased "glass" field of view (GunSight.ease_glass),
 	# which drives SCOPE_IN (scoped) and the scope's SubViewport camera. The player's real camera
@@ -1141,15 +1185,13 @@ func _update_reload_hand() -> void:
 ## all home): the action slid back along the bore (and a bolt-action's handle turned up round
 ## it), the feed cover turned up on its front hinge.
 func _pose_parts(u: float) -> void:
-	var at := func(part: String) -> float: return Reloads.track(_reload_parts.get(part, []), u) if u >= 0.0 else 0.0
+	if not is_instance_valid(_bolt_part) and not is_instance_valid(_cover_part):
+		return
+	var parts := Reloads.part_transforms(_reload_parts, _part_motion, u)
 	if is_instance_valid(_bolt_part):
-		var axis: Vector3 = _part_motion.get("axis", Vector3.ZERO)
-		var turn := Basis(Vector3.BACK, float(_part_motion.get("lift", 0.0)) * at.call("lift"))
-		_bolt_part.transform = Transform3D(turn, axis - turn * axis + Vector3(0.0, 0.0, float(_part_motion.get("travel", 0.0)) * at.call("bolt")))
+		_bolt_part.transform = parts.bolt
 	if is_instance_valid(_cover_part):
-		var hinge: Vector3 = _part_motion.get("hinge", Vector3.ZERO)
-		var lift := Basis(Vector3.RIGHT, -float(_part_motion.get("open", 0.0)) * at.call("cover"))
-		_cover_part.transform = Transform3D(lift, hinge - lift * hinge)
+		_cover_part.transform = parts.cover
 
 
 ## Tests: the action's travel back (m) and the feed cover's angle (rad) in first person now.
@@ -1172,7 +1214,7 @@ func _reload_anchor(anchor: StringName) -> Vector3:
 
 ## Tests: the first-person carry weights now {"low", "reload", "sprint", "kick"} and the support hand's offset from rest.
 func view_carry() -> Dictionary:
-	return {"low": _low_w, "reload": _reload_w, "sprint": _sprint_w, "kick": _view_kick,
+	return {"low": _low_w, "reload": _reload_w, "sprint": _sprint_w, "kick": _view_kick, "ads_low": _ads_low,
 		"hand": _support_arm.transform.origin - _support_rest.origin if is_instance_valid(_support_arm) else Vector3.ZERO}
 
 

@@ -1166,7 +1166,10 @@ func rest_transform(slot: StringName) -> Transform3D:
 ## Where a held weapon (VoxelArt model `art`) sits in hands_anchor space, aiming or at the
 ## ready, for the firing shoulder (see SHOULDER_POCKET), the upper body twisted by `twist`
 ## (CharacterModel.twist_shown; NAN: fully bladed).
-static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, run := 0.0, reload := 0.0, kick := 0.0, compress := 0.0) -> Transform3D:
+## Reloading (`reload` 0..1, eased in), `reload_pose` is the keys' [offset, turn] now
+## (CharacterModel.reload_pose; feel round 2): the weapon goes where first person puts it; with
+## none known it just rolls in RELOAD_ROLL.
+static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, run := 0.0, reload := 0.0, kick := 0.0, compress := 0.0, reload_pose: Array = []) -> Transform3D:
 	var s := -1.0 if left else 1.0
 	if is_nan(twist):
 		twist = CharacterModel.blade_twist(left)
@@ -1183,7 +1186,13 @@ static func held_transform(art: String, aiming: bool, left: bool, twist := NAN, 
 				var carried := Basis(Vector3.UP, RUN_TURN * s) * Basis(Vector3.RIGHT, -RUN_DIP)
 				basis = basis.slerp(carried, clampf(run, 0.0, 1.0))
 				pocket = pocket.lerp(RUN_POCKET, clampf(run, 0.0, 1.0))
-		if reload > 0.0 and not aiming:
+		if reload > 0.0 and not aiming and reload_pose.size() == 2:
+			var w := clampf(reload, 0.0, 1.0)
+			var off: Vector3 = reload_pose[0]  # across toward the middle, up, back
+			var turn: Vector3 = reload_pose[1]  # muzzle up, turned in, rolled in
+			basis = basis * Basis.from_euler(Vector3(turn.x, turn.y * s, turn.z * s) * w)
+			pocket += Vector3(-off.x, off.y, off.z) * w
+		elif reload > 0.0 and not aiming:
 			basis = basis * Basis(Vector3.BACK, RELOAD_ROLL * s * clampf(reload, 0.0, 1.0))
 			pocket += RELOAD_IN * clampf(reload, 0.0, 1.0)
 		if compress > 0.0:
@@ -1219,7 +1228,7 @@ func _hold_goal(art: String) -> Transform3D:
 	if model.is_seated() and not model.is_ffv():
 		return seated_transform(art, model.left_handed, model.seat_room())
 	return held_transform(art, model.aiming, model.left_handed, model.twist_shown(), model.run_carry(), model.reload_roll(),
-		model.kick_shown(), _compress)
+		model.kick_shown(), _compress, model.reload_pose())
 
 
 ## 0..1: how close a wall ahead has pushed the rifle back (_look_for_wall).

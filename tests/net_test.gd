@@ -262,9 +262,22 @@ func _run_client() -> void:
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
+	# Feel round 2: the reload's phases come from the host (_reload_began: the weapon, the empty
+	# flag, the length), so the third-person model plays the same keys here. Nothing begins it on
+	# this side: the host's word alone must.
+	me.is_reloading = true
+	me._busy_until = Soldier._now() + me.reload_seconds(ItemDB.get_item(&"m4a1"), false)
 	me._server_reload.rpc_id(1, &"primary")
-	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 30, 5.0)
+	var phases := {"keys": false, "u": -1.0, "pose": false}
+	await _wait_for(func() -> bool:
+		phases.keys = phases.keys or (me.reload_item == &"m4a1" and not me.reload_empty and str(me.model.reload_keys) == str(Reloads.keys(Reloads.AR, false)))
+		phases.u = maxf(phases.u, me.model.reload_u)
+		phases.pose = phases.pose or not me.model.reload_pose().is_empty()
+		return me.inventory.rounds_in(&"primary") == 30, 5.0)
+	me.is_reloading = false  # (its physics, which would end it, is off here)
 	check(me.inventory.rounds_in(&"primary") == 30 and me.inventory.spare_rounds(&"mag_556") == 57, "reload over the network (30 loaded, 57 spare)")
+	check(phases.keys and phases.u > 0.5 and phases.pose,
+		"its phases replicated: the M4's tactical keys from the host, played here (to %.2f), the rifle posed on them" % phases.u)
 	var dry: Soldier = _combatant(DRAGGER)
 	await _wait_for(func() -> bool: return dry != null and dry.inventory.rounds_in(&"primary") == 0, 8.0)
 	check(dry != null and dry.inventory.rounds_in(&"primary") == 0 and dry.inventory.count_of(&"mag_556") == 1,
