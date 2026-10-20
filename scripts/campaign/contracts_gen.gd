@@ -235,7 +235,8 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 ## Where a contract of type `def` plays in zone `zone_id` and its objectives there: the target
 ## module (one of the zone layout's modules of a type `def` plays in, else the type's first
 ## module type with no module id), each template's site (a list picks one the module has; an
-## optional one whose site the module lacks is left out), {name} and {module} filled in, a
+## optional one whose site the module lacks is left out; a site with its own "kind" plays that
+## kind: sabotage's vehicle park), {name} and {module} filled in, a
 ## person's real name for an HVT (from the `target` faction's nation) or a hostage (Names.mission_person), and the time limit on the required ones. Picked on a
 ## generator of its own (seeded from `rng`, which it leaves alone) so the boards stay as they
 ## were. {"module", "module_id", "objectives", "title_extra"}. Hot zones (HotZoneOps):
@@ -276,6 +277,8 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 		var site_id := String(choices[pick.randi() % choices.size()])
 		o.site = site_id
 		var site := MissionRegistry.site(module_type, site_id)
+		if site.has("kind"):
+			o.kind = String(site.kind)  # a site that plays its own way (sabotage's vehicle park: destroy_vehicles)
 		var person: Dictionary = site.get("person", {})
 		if site.has("of_hvt"):
 			person = MissionRegistry.site(module_type, String(site.of_hvt)).get("person", {})

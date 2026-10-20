@@ -51,12 +51,16 @@ const DESTROY_CACHE := "destroy_cache"
 ##   (delivered alive: server_hvt_delivered), failed when too many are lost.
 ## - RECON_SITE: someone of ours observed "pos" from "observe_m" for "dwell_s" with a line of sight.
 ## - UNDETECTED (a bonus): done at the end of the deployment unless a hostile was in contact with us.
+## - DESTROY_VEHICLES (sabotage: a vehicle park, 2026-10-20): the "vehicles" parked about "pos"
+##   (MissionScenario parks them when the contract goes live); done when every one burns, is a
+##   wreck or can't drive. server_cache_destroyed("cache" id) completes it too.
 const CONVOY := "convoy"
 const HOLD_POINT := "hold_point"
 const RESCUE_CREW := "rescue_crew"
 const RECON_SITE := "recon_site"
 const UNDETECTED := "undetected"
-const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED]
+const DESTROY_VEHICLES := "destroy_vehicles"
+const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED, DESTROY_VEHICLES]
 ## The breaching charge item that destroys a cache when placed on it.
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5
@@ -402,10 +406,10 @@ func server_deployment_ending() -> void:
 			server_set_state(o.oid, DONE)
 
 
-## Host: a cache was destroyed (by whatever means the caller saw).
+## Host: a cache (or a sabotage target: a vehicle park) was destroyed (by whatever means the caller saw).
 func server_cache_destroyed(cache_id: String) -> void:
 	for o: Dictionary in active():
-		if o.kind == DESTROY_CACHE and String(o.params.get("cache", cache_id)) == cache_id and here(o, CompoundLevel.current(self)):
+		if o.kind in [DESTROY_CACHE, DESTROY_VEHICLES] and String(o.params.get("cache", cache_id)) == cache_id and here(o, CompoundLevel.current(self)):
 			server_set_state(o.oid, DONE)
 
 

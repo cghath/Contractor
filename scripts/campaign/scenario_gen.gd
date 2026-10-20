@@ -14,6 +14,10 @@ const DEFEND := "defend"
 const RESCUE := "rescue"
 const RECON := "recon"
 const ESCORT := "escort"
+## The convoy's cargo: a supply crate (carried in both hands; it sells as salvage). Any crate of
+## it carried out counts: a two-handed carry keeps no state (Inventory.hands), so the crate's own
+## intel id can't be asked for; nothing else in a zone holds one (not for sale, no zone loot).
+const CONVOY_CARGO := "supply_crate"
 ## How far inside the zone's edge a route or an approach may reach (m).
 const EDGE_KEEP_M := 140.0
 
@@ -106,11 +110,11 @@ static func _convoy(pick: RandomNumberGenerator, def: Dictionary, module: Dictio
 	var depart_s := snappedf(pick.randf_range(float(depart[0]), float(depart[1])), 15.0)
 	var cargo_id := "convoy_cargo_%d" % pick.randi()
 	var params := {"scenario": CONVOY, "route": points, "trucks": trucks, "escorts": escorts, "depart_s": depart_s,
-		"speed_kmh": float(knobs.get("speed_kmh", 28.0)), "pos": _v3(ambush), "radius": 60.0, "cargo": "hvt_case", "cargo_ids": [cargo_id]}
+		"speed_kmh": float(knobs.get("speed_kmh", 28.0)), "pos": _v3(ambush), "radius": 60.0, "cargo": CONVOY_CARGO, "cargo_ids": [cargo_id]}
 	var main := {"kind": Objectives.CONVOY, "site": "", "params": params,
 		"text": "Stop the convoy before it leaves the zone (about %s after insertion): destroy its cargo %s or disable and seize it" % [_minutes(depart_s), "truck" if trucks == 1 else "trucks"]}
 	var bonus := {"kind": Objectives.EXTRACT_ITEM, "site": "", "optional": true, "bonus_share": float(knobs.get("cargo_bonus_share", 0.2)),
-		"params": {"items": ["hvt_case"], "intel_ids": [cargo_id], "pos": _v3(ambush), "name": "cargo crate"},
+		"params": {"items": [CONVOY_CARGO], "pos": _v3(ambush), "name": "cargo crate"},
 		"text": "Bonus: carry the convoy's cargo out"}
 	return [main, bonus]
 

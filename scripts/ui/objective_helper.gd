@@ -15,6 +15,7 @@ extends Control
 ## - Otherwise the nearest required objective still to do. Away from its site: "Head to the
 ##   <site> (<dir>, <distance>)". At the site, by kind: CLEAR_AREA "Clear the <site>" with
 ##   the hostiles left; DESTROY_CACHE "Destroy the <name>" (a charge set: "get clear");
+##   DESTROY_VEHICLES (sabotage's vehicle park) "Put every vehicle ... out of action";
 ##   EXTRACT_ITEM "Find the <item> in the building", or for a piece an HVT carries "Search
 ##   <name> for the <item>"; DELIVER_HVT "Capture <name>: cuff them, take them to the LZ"
 ##   ("you need zip cuffs" without any), or for a hostage "Free <name>: have them follow you
@@ -279,6 +280,8 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 			text = "Hold the %s%s" % [String(p.get("name", "position")), ": " + progress if progress != "" else ""]
 		Objectives.RESCUE_CREW:
 			text = "Treat and carry the downed crew to the LZ%s" % (" (" + progress + ")" if progress != "" else "")
+		Objectives.DESTROY_VEHICLES:
+			text = "Put every vehicle in the %s out of action: a charge on each%s" % [String(p.get("name", "vehicle park")), " (" + progress + ")" if progress != "" else ""]
 		Objectives.RECON_SITE:
 			text = "Observe the %s from within %d m%s" % [String(p.get("name", "site")), roundi(float(p.get("observe_m", 75.0))), " (" + progress + ")" if progress != "" else ""]
 		_:
@@ -372,7 +375,7 @@ static func short_label(o: Dictionary, sit: Dictionary) -> String:
 			label = person_name(o)
 		Objectives.EXTRACT_ITEM:
 			label = item_name(o)
-		Objectives.DESTROY_CACHE:
+		Objectives.DESTROY_CACHE, Objectives.DESTROY_VEHICLES:
 			label = String((o.get("params", {}) as Dictionary).get("name", "cache"))
 		Objectives.CONVOY:
 			label = "convoy ambush point"

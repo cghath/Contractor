@@ -49,11 +49,12 @@
 		 "threat_pool": ["sniper", "qrf", "mortar"],
 		 "scenario_knobs": {"site_offset_m": 220, "crew": [2, 4], "first_wave_s": [150, 240], "gap_s": 150, "approach_m": 260, "all_bonus_share": 0.15},
 		 "objectives": []},
-		{"type": "sabotage", "name": "Sabotage", "brief": "Take out the enemy's radio mast or supply stock at a site in the zone with a placed charge or grenades (charges from the base shop), and an AA gun there too if you can. Bonus pay if no hostile ever got eyes on the squad.",
-		 "modules": ["comms", "hq", "outpost", "qrf_base"], "base_pay": 48000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.3, 0.7],
+		{"type": "sabotage", "name": "Sabotage", "brief": "Hit what the enemy fights with, not the fighters: its fuel store, its vehicle park or its radio mast at a site in the zone. Steel fuel drums and a steel mast shrug off grenades: bring breaching charges (base shop) and set one on the target; a park needs one on each vehicle (it counts once it burns or can't drive). Bonus pay for an AA gun there too, and for getting in and out without a hostile ever getting eyes on the squad.",
+		 "modules": ["outpost", "checkpoint", "compound", "qrf_base", "hq", "comms"], "base_pay": 48000, "days": 1, "enemy_count": [4, 10], "enemy_quality": [0.3, 0.7],
 		 "threat_pool": ["mg_nest", "qrf", "sniper"],
+		 "_objectives": "The target is one of the module's sabotage sites (\"fuel\", \"park\", \"mast\"; a module has at least one). A site's own \"kind\" stands in for the template's (a vehicle park: destroy_vehicles, MissionScenario parks them there). Mission variety, 2026-10-20 (docs/missions.md). A bridge waits for roads that cross water.",
 		 "objectives": [
-			{"kind": "destroy_cache", "site": "cache", "text": "Sabotage: destroy the {name}"},
+			{"kind": "destroy_cache", "site": ["fuel", "park", "mast"], "text": "Sabotage: take out the {name}"},
 			{"kind": "destroy_cache", "site": "aa", "text": "Bonus: the {name} too", "optional": true, "bonus_share": 0.1},
 			{"kind": "undetected", "site": "area", "text": "Bonus: in and out unseen (no hostile in contact with the squad)", "optional": true, "bonus_share": 0.2}
 		 ]},
@@ -101,7 +102,7 @@
 		 "objectives": [{"kind": "destroy_cache", "site": "cache", "text": "Destroy the {name}"}]}
 	],
 
-	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between).",
+	"_modules": "Sites per module type, in metres from the module's origin on the ground (the zone module types of ZoneModules; the compound as CompoundLevel builds it). rect [x, z, w, d] (clear an area), pos [x, y, z], box [[x, y, z], [x, y, z]] (a cache: \"voxels\" is its solid count on the pristine module, \"auto\" counts it from the module's boxes). \"place\": an intel item the mission puts there; \"items\"/\"tags\": what counts as carried out; \"hvt\" + \"person\": a person the mission puts there (side hostile: an HVT to capture, friendly: a hostage); \"of_hvt\": an item the HVT of that site carries. \"civilians\": people going about their day there while a contract runs in the zone (\"routine\": points they walk between). Sabotage targets (2026-10-20): \"fuel\" (a fuel store, a box like a cache), \"mast\" (the comms site's mast) and \"park\" (a vehicle park: \"vehicles\" models parked side by side \"spacing_m\" apart about \"pos\", facing \"yaw_deg\"; MissionScenario parks them when the contract goes live); a site's \"kind\" stands in for its objective template's.",
 	"modules": {
 		"compound": {"name": "compound", "scene": "res://scenes/levels/compound.tscn",
 		 "sites": {
@@ -112,7 +113,9 @@
 			"hvt": {"pos": [0, 0.1, -8], "hvt": "hvt_compound", "person": {"side": "hostile", "intel": ["intel_phone"]}},
 			"hvt_phone": {"pos": [0, 0.1, -8], "items": ["intel_phone"], "of_hvt": "hvt"},
 			"hostage": {"pos": [18.3, 0.1, -10.2], "hvt": "hostage_compound", "person": {"side": "friendly"}},
-			"cache": {"box": [[-13, 0, -11], [-11, 2, -10]], "cache": "cache_compound", "name": "weapons cache", "voxels": 3000, "_voxels": "solid voxels in the box on the pristine module (the crate stack: three 1 m crates); the destroyed share is measured against this"}
+			"cache": {"box": [[-13, 0, -11], [-11, 2, -10]], "cache": "cache_compound", "name": "weapons cache", "voxels": 3000, "_voxels": "solid voxels in the box on the pristine module (the crate stack: three 1 m crates); the destroyed share is measured against this"},
+			"fuel": {"box": [[10, 0, 6], [16.8, 1.5, 7.4]], "cache": "fuel_compound", "name": "fuel store", "voxels": "auto", "_note": "the two generators and their fuel drums (steel: it takes a placed charge)"},
+			"park": {"pos": [19, 0, 18], "yaw_deg": 0, "spacing_m": 4.5, "vehicles": ["technical_dshk", "technical", "technical_spg9"], "kind": "destroy_vehicles", "cache": "park_compound", "name": "vehicle park"}
 		 },
 		 "civilians": [
 			{"pos": [-8, 0.1, 12], "routine": [[-8, 0, 12], [-14, 0, 4], [-10, 0, -6], [-6, 0, 2]]},
@@ -126,7 +129,8 @@
 			"intel": {"pos": [-6.5, 0.5, -5.0], "place": "intel_laptop", "name": "laptop"},
 			"docs": {"pos": [5.9, 3.2, -6.3], "place": "intel_documents", "name": "documents"},
 			"hvt": {"pos": [-7.0, 0.1, -5.4], "hvt": "hvt_outpost", "person": {"side": "hostile", "intel": ["intel_phone"]}},
-			"hvt_phone": {"pos": [-7.0, 0.1, -5.4], "items": ["intel_phone"], "of_hvt": "hvt"}
+			"hvt_phone": {"pos": [-7.0, 0.1, -5.4], "items": ["intel_phone"], "of_hvt": "hvt"},
+			"park": {"pos": [8, 0, 17], "yaw_deg": 0, "spacing_m": 4.5, "vehicles": ["technical_dshk", "technical"], "kind": "destroy_vehicles", "cache": "park_outpost", "name": "vehicle park"}
 		 },
 		 "civilians": []},
 		"village": {"name": "village",
@@ -151,7 +155,8 @@
 			"area": {"rect": [-14, -10, 28, 20]},
 			"cache": {"box": [[4.6, 0, 4.6], [6.6, 2, 5.8]], "cache": "cache_checkpoint", "name": "weapons cache", "voxels": "auto"},
 			"intel": {"pos": [9.7, 0.5, 5.8], "place": "intel_laptop", "name": "laptop"},
-			"docs": {"pos": [-10.5, 0.5, 7.6], "place": "intel_documents", "name": "documents"}
+			"docs": {"pos": [-10.5, 0.5, 7.6], "place": "intel_documents", "name": "documents"},
+			"park": {"pos": [9, 0, -9.5], "yaw_deg": 0, "spacing_m": 4.5, "vehicles": ["technical", "technical_dshk"], "kind": "destroy_vehicles", "cache": "park_checkpoint", "name": "vehicle park"}
 		 },
 		 "civilians": [
 			{"pos": [-6, 0.1, -1.2], "routine": [[-6, 0, -1.2], [-3, 0, -1.5]]}
@@ -164,7 +169,9 @@
 			"intel": {"pos": [-5.0, 0.5, -12.5], "place": "intel_laptop", "name": "laptop"},
 			"docs": {"pos": [-12.0, 0.5, -14.5], "place": "intel_documents", "name": "documents"},
 			"hvt": {"pos": [-11.0, 0.1, -12.5], "hvt": "hvt_hq", "person": {"side": "hostile", "intel": ["intel_phone"]}},
-			"hvt_phone": {"pos": [-11.0, 0.1, -12.5], "items": ["intel_phone"], "of_hvt": "hvt"}
+			"hvt_phone": {"pos": [-11.0, 0.1, -12.5], "items": ["intel_phone"], "of_hvt": "hvt"},
+			"fuel": {"box": [[12, 0, -6.5], [14.7, 0.9, -5.2]], "cache": "fuel_hq", "name": "fuel store", "voxels": "auto"},
+			"park": {"pos": [10, 0, 27], "yaw_deg": 0, "spacing_m": 4.5, "vehicles": ["technical_dshk", "technical_zu23", "technical"], "kind": "destroy_vehicles", "cache": "park_hq", "name": "vehicle park"}
 		 },
 		 "civilians": []},
 		"qrf_base": {"name": "QRF base",
@@ -172,7 +179,9 @@
 			"area": {"rect": [-15, -11, 30, 22]},
 			"cache": {"box": [[8, 0, 4.4], [10, 2, 5.6]], "cache": "cache_qrf", "name": "ammunition", "voxels": "auto"},
 			"intel": {"pos": [-11.0, 0.5, -7.0], "place": "intel_documents", "name": "duty roster"},
-			"docs": {"pos": [-5.0, 0.5, -7.5], "place": "intel_documents", "name": "documents"}
+			"docs": {"pos": [-5.0, 0.5, -7.5], "place": "intel_documents", "name": "documents"},
+			"fuel": {"box": [[10.6, 0, 0.2], [13.3, 0.9, 1.5]], "cache": "fuel_qrf", "name": "fuel store", "voxels": "auto"},
+			"park": {"pos": [9, 0, 18], "yaw_deg": 0, "spacing_m": 4.5, "vehicles": ["technical_dshk", "technical", "technical_dshk"], "kind": "destroy_vehicles", "cache": "park_qrf", "name": "vehicle park"}
 		 },
 		 "civilians": []},
 		"comms": {"name": "comms site",
@@ -180,7 +189,8 @@
 			"area": {"rect": [-7, -7, 14, 14]},
 			"cache": {"box": [[1.3, 0, -4.2], [2.9, 4.6, -2.6]], "cache": "comms_mast", "name": "radio mast", "voxels": "auto"},
 			"intel": {"pos": [-4.3, 0.5, -4.3], "place": "intel_documents", "name": "codebook"},
-			"docs": {"pos": [-4.3, 0.5, -4.8], "place": "intel_documents", "name": "documents"}
+			"docs": {"pos": [-4.3, 0.5, -4.8], "place": "intel_documents", "name": "documents"},
+			"mast": {"box": [[1.3, 0, -4.2], [2.9, 4.6, -2.6]], "cache": "comms_mast", "name": "radio mast", "voxels": "auto", "_note": "the cache site's mast, by its sabotage name"}
 		 },
 		 "civilians": []}
 	},
