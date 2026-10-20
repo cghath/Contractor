@@ -1478,6 +1478,7 @@ func _act() -> void:
 		Intent.TACTIC:
 			_do_tactic(_tactic())
 	_watch_armour()  # (G-20: enemy armour in sight is a threat to hide from)
+	_recover_weapon()  # (G-23: his weapon knocked out of his hands: he picks it back up)
 	_contact_drill()  # (G-18: the first moments of a contact, before the plan)
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	_apply_combat_mode()
@@ -1586,7 +1587,7 @@ func _formation_anchor() -> Vector3:
 func _fight(anchor: Vector3, leash: float) -> void:
 	# Pinned in the open, a squadmate crawls to the nearest cover rather than freezing there
 	# (friendly squad; enemies still go to ground where they are).
-	var crawl := _friendly() and body.suppression >= PINNED and body.stunned_s <= 0.0 and not _at_cover()
+	var crawl := (_friendly() and body.suppression >= PINNED or _badly_hurt()) and body.stunned_s <= 0.0 and not _at_cover()  # (badly hurt: crawls too, G-23)
 	if crawl:
 		anchor = body.global_position
 		leash = PINNED_COVER_M
@@ -3885,14 +3886,14 @@ func _auto_stance() -> int:
 	if Soldier._now() < _react_until:
 		return SoldierMovement.Stance.PRONE  # dropped at a near miss (G-07)
 	var pinned := body.suppression >= PINNED
-	if _has_destination and not pinned:
-		return -1  # on the move: on his feet (a pinned man crawls)
+	if _has_destination and not pinned and not _badly_hurt():
+		return -1  # on the move: on his feet (a pinned or badly hurt man crawls)
 	var foe: Soldier = target if target != null and is_instance_valid(target) and target.vitals.is_up() else null
 	var threat := foe.global_position if foe else body.threat_pos
 	if threat == Vector3.ZERO or body.global_position.distance_to(threat) < PRONE_MIN_M:
 		return -1  # close in: on his knees or feet, ready to move
-	if pinned and not _at_cover():
-		return SoldierMovement.Stance.PRONE  # pinned in the open: flat, now
+	if (pinned or _badly_hurt()) and not _at_cover():
+		return SoldierMovement.Stance.PRONE  # pinned (or badly hurt) in the open: flat, now
 	var now := Soldier._now()
 	if now - _stance_at < STANCE_CHECK_S:
 		return SoldierMovement.Stance.PRONE if _auto_prone else -1
@@ -3906,6 +3907,42 @@ func _auto_stance() -> int:
 	if hidden or body.global_position.distance_to(threat) >= PRONE_OPEN_M:
 		return SoldierMovement.Stance.PRONE
 	return -1
+
+
+## A weapon knocked out of his hands (Soldier.server_hit_reaction): after RECOVER_S, not pinned,
+## he picks it back up from where it fell (within RECOVER_M); gone or too far, he does without
+## (scavenging finds another once it's quiet). Proposed.
+const RECOVER_S := 1.5
+const RECOVER_M := 4.0
+func _recover_weapon() -> void:
+	if not body.has_meta(&"knocked_weapon"):
+		return
+	var k: Dictionary = body.get_meta(&"knocked_weapon")
+	if Soldier._now() - float(k.at) < RECOVER_S or body.suppression >= PINNED or not body.vitals.is_up():
+		return
+	body.remove_meta(&"knocked_weapon")
+	for n in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var w := n as WorldItem
+		if w and w.uid == String(k.uid) and not w.is_queued_for_deletion() and w.global_position.distance_to(body.global_position) <= RECOVER_M:
+			if body.inventory.put_on(StringName(k.slot), w.item_id, w.state):
+				GameState.item_taken(w.uid)
+				w.queue_free()
+				body.select_weapon(StringName(k.slot))
+			return
+
+
+## Badly hurt and awake (G-23): a man losing blood fast or with a leg broken crawls for cover
+## in a fight rather than standing there (see _fight).
+func _badly_hurt() -> bool:
+	if not body.vitals.is_up():
+		return false
+	if body.vitals.blood_fraction() < BADLY_HURT_BLOOD:
+		return true
+	for w: Dictionary in body.vitals.wound_list():
+		if String(w.kind) == "fracture" and w.part in [Vitals.THIGH_L, Vitals.THIGH_R, Vitals.SHIN_L, Vitals.SHIN_R] and not w.treated:
+			return true
+	return false
+const BADLY_HURT_BLOOD := 0.7
 
 
 ## Enemy armour in sight (see ARMOUR_CLASSES): his threat, and smoke when it's close.

@@ -1652,6 +1652,28 @@ func _server_swap_pack(entry: Dictionary) -> void:
 		_client_message.rpc_id(owner_peer(), "Swapped packs: dropped the %s" % ItemDB.get_item(old.id).name)
 
 
+## Host (Vitals.server_hit, G-23: PIR knocks weapons out of hands): a hit to an AI's forearm
+## knocks the weapon in hand out at DROP_ON_ARM_HIT; it falls in front of him, and he picks it
+## back up (SquadAI._recover_weapon) when he can. Proposed.
+const DROP_ON_ARM_HIT := 0.2
+func server_hit_reaction(part: StringName) -> void:
+	if not is_ai() or not vitals.is_up() or is_instance_valid(vehicle) or not part in [Vitals.FOREARM_L, Vitals.FOREARM_R]:
+		return
+	if randf() >= DROP_ON_ARM_HIT or not active_slot in Inventory.WEAPON_SLOTS or inventory.hands != &"":
+		return
+	var removed := inventory.unequip(active_slot)
+	if removed.is_empty():
+		return
+	var lvl := CompoundLevel.current(self)
+	if lvl == null:
+		inventory.put_on(active_slot, removed.id, removed.get("state", {}))
+		return
+	var at := global_position + (-global_basis.z) * 0.7 + Vector3.UP * 0.3
+	var uid := lvl.server_spawn_dropped(removed.id, 1, at, removed.get("state", {}))
+	set_meta(&"knocked_weapon", {"uid": uid, "slot": active_slot, "at": _now()})
+	print("[hit] %s's %s knocked out of his hands" % [name, ItemDB.get_item(removed.id).name])
+
+
 func _server_spawn_in_front(id: StringName, count := 1, state := {}) -> void:
 	var pos := global_position - global_basis.z * 0.9 + Vector3.UP * 1.0
 	CompoundLevel.current(self).server_spawn_dropped(id, count, pos, state)

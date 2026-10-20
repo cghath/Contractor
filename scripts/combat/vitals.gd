@@ -830,6 +830,8 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		server_kill()  # a .50 hit (Captain, 2026-10-16: ".50 cal is insta death")
 		return
 	_after_change()
+	if not was_dead and get_parent() is Soldier:
+		(get_parent() as Soldier).server_hit_reaction(part)  # a weapon knocked out of his hands (G-23)
 
 
 

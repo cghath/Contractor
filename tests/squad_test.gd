@@ -126,6 +126,19 @@ func _test_fire_fix() -> void:
 		"rounds landing there: the spot is shot up, ten metres off it isn't (G-19)")
 	SquadAI.note_impact(spot_hit + Vector3(0, 0, 20), &"friendly")
 	check(not SquadAI.of(alpha)._shot_up(spot_hit + Vector3(0, 0, 20)), "his own side's rounds don't count")
+	# G-23: a forearm hit can knock the weapon out of his hands; he picks it back up.
+	var kept_slot := alpha.active_slot
+	var kept_weapon := alpha.active_weapon()
+	var knocked := false
+	for i in 60:
+		alpha.server_hit_reaction(Vitals.FOREARM_R)
+		if alpha.has_meta(&"knocked_weapon"):
+			knocked = true
+			break
+	check(knocked and alpha.active_weapon() == null, "a forearm hit knocks his %s out of his hands" % (kept_weapon.name if kept_weapon else "weapon"))
+	alpha.suppression = 0.0
+	await _wait_until(func() -> bool: return alpha.active_weapon() != null, 4.0)
+	check(alpha.active_weapon() == kept_weapon and alpha.active_slot == kept_slot, "and he picks it back up (%s)" % (alpha.active_weapon().name if alpha.active_weapon() else "nothing"))
 	# G-08: a clearance with rooms left carries on through a quiet moment; done, or a man down, it ends.
 	var op_left := {"op": {"rooms": [1, 2], "called": false}}
 	check(SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, false) and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, true)
@@ -1867,6 +1880,16 @@ func _seconds(s: float) -> void:
 ## goes to his team only, without handing the squad's lead to him.
 func _test_human_team_lead() -> void:
 	print("A human team leader")
+	# Everyone fit first: a squadmate left down by an earlier test kept the team on casualty care
+	# here instead of gathering (R2041: Echo unconscious, 0 of 3 within 30 m).
+	for n in level.ai.get_children():
+		var mate := n as Soldier
+		if mate and mate.faction == &"friendly" and not mate.vitals.is_dead():
+			mate.vitals.server_reset_health()
+			var mate_ai := SquadAI.of(mate)
+			if mate_ai:
+				mate_ai._end_care()
+	await _seconds(1.0)
 	var squad := level.squad_for(&"friendly")
 	var lead := squad.leader
 	var other := _squad().filter(func(s: Soldier) -> bool: return s.fire_team != (lead.fire_team if lead.fire_team >= 0 else 0) and s.fire_team >= 0)

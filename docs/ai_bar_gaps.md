@@ -57,7 +57,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-20 | ~~Infantry don't react to armour~~ (done 2026-10-20, first pass: crewed IFVs and tanks in sight are a threat to take cover from, smoke when close with no launcher near) | P2 | M |
 | G-21 | ~~Every flank is the same close hook~~ (done 2026-10-20: the other side next time, sometimes wide) | P2 | S |
 | G-22 | ~~A lost enemy is searched for where he was, not where he was going~~ (done 2026-10-20) | P2 | S |
-| G-23 | Few visible reactions to being hit | P2 | M |
+| G-23 | ~~Few visible reactions to being hit~~ (done 2026-10-20: flinch and limp were in; a forearm hit can knock the weapon out (picked back up), a badly hurt man crawls to cover) | P2 | M |
 | G-24 | ~~No night, light, NVG, fog or weather in spotting~~ (done in wave 7: darkness, weather sight and fog, NVGs, flash and lights at night; enemy flares still to do) | P2 | M |
 | G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed (done 2026-10-20 for both sides and players, first pass: see docs/static_weapons.md) | P1 | L |
 | G-26 | Patrols don't ambush; no mines | P3 | M |
