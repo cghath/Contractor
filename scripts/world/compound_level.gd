@@ -615,6 +615,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.name = data.name
 	corpse.faction = StringName(data.get("faction", "friendly"))
 	corpse.variant = String(data.get("variant", "woodland"))
+	corpse.iff = StringName(data.get("iff", ""))  # its IFF marks (older saves: by faction and camo)
 	corpse.body = String(data.get("body", ""))
 	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
 	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
@@ -1002,6 +1003,10 @@ func spawn_soldier(data: Dictionary) -> Soldier:
 			d["body"] = VoxelArt.FEMALE if female else VoxelArt.MALE
 		if d.body == VoxelArt.FEMALE:
 			d["person_name"] = Names.feminine(String(d.person_name), String(d.get("nation", "")))
+		if faction == &"hostile" and String(d.get("iff", "")) == "":
+			# His IFF marks (GearRig.side_of): militia or not, by his camo and whose zone this is.
+			var holder: String = call(&"_zone_enemy") if has_method(&"_zone_enemy") else ""
+			d["iff"] = String(GearRig.hostile_tag(String(d.get("variant", "")), Kits.kit_of(holder)))
 	return ai_spawner.spawn(d) as Soldier
 
 

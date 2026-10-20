@@ -137,8 +137,10 @@ var last_shot_suppressed := false
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
-## Which friendly marks he wears (GearRig.iff_of): "allied" for allied troops (AlliedTroops),
-## "" for everyone else (his faction decides). Set before the body enters the tree.
+## Whose IFF marks he wears (GearRig.side_of), as his spawner tagged him: friendly, "" for the
+## company's own, "allied" for allied troops (AlliedTroops, a friendly faction's skirmishers),
+## "rebel" for rebels on our side; hostile, "militia" or "hostile" (CompoundLevel.spawn_soldier
+## tags every hostile). Set before the body enters the tree.
 @export var iff := &""
 ## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
 @export var variant := ""
@@ -2492,8 +2494,9 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
-## name tape, nationality and hand, so the body is the same person after a reload), "role",
+## "uid", "label" (whose it was), "faction", "iff" (its marks, GearRig.side_of), "variant",
+## "person_name", "nation" and "left" (the name tape, nationality and hand, so the body is the
+## same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
 ## CharacterModel.ragdoll_net, or empty) and "gear" (an
@@ -2501,7 +2504,7 @@ func server_leave_body() -> Soldier:
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
+		"iff": String(iff), "variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}
