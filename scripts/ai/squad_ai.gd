@@ -579,6 +579,12 @@ const ARMOUR_SMOKE_M := 150.0
 const ARMOUR_AT_NEAR_M := 40.0
 const ARMOUR_CHECK_S := 2.0
 var _armour_at := -1000.0
+## A second threat (AI bar G-17, the rest): another known group within SECOND_THREAT_M, more than
+## SECOND_THREAT_DEG off the main threat's bearing; a cover spot it can see scores
+## SECOND_THREAT_PENALTY worse (cover that works against both). Proposed.
+const SECOND_THREAT_M := 200.0
+const SECOND_THREAT_DEG := 40.0
+const SECOND_THREAT_PENALTY := 4.0
 const IMPACT_KEEP_S := 15.0
 const IMPACT_MAX := 64
 const IMPACT_NEAR_M := 3.0
@@ -592,6 +598,22 @@ static func note_impact(pos: Vector3, faction: StringName) -> void:
 	while not _impacts.is_empty() and (_impacts.size() >= IMPACT_MAX or now - float(_impacts[0].at) > IMPACT_KEEP_S):
 		_impacts.pop_front()
 	_impacts.append({"pos": pos, "at": now, "by": faction})
+
+
+## Another known group to take cover from as well (see SECOND_THREAT_M), or INF.
+func _second_threat() -> Vector3:
+	if squad == null:
+		return Vector3.INF
+	var here := body.global_position
+	var main := Vector2(body.threat_pos.x - here.x, body.threat_pos.z - here.z)
+	if main.length() < 1.0:
+		return Vector3.INF
+	for c: Dictionary in squad.clusters():
+		var p: Vector3 = c.centre
+		var to := Vector2(p.x - here.x, p.z - here.z)
+		if to.length() <= SECOND_THREAT_M and to.length() > 1.0 and absf(rad_to_deg(main.angle_to(to))) > SECOND_THREAT_DEG:
+			return p
+	return Vector3.INF
 
 
 ## Whether the enemy's rounds have been landing within IMPACT_NEAR_M of `q` lately.
@@ -4118,6 +4140,7 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 	var best: Variant = null
 	var best_score := INF
 	var taken := _covers_taken()  # (once a search, not once a candidate: perf, in-fight AI)
+	var second := _second_threat()  # (G-17: cover against a second group too)
 	for ring in COVER_RINGS:
 		if ring > leash + 0.1:
 			break
@@ -4143,6 +4166,8 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 					score += SOFT_COVER_PENALTY  # only wood or sheet metal in the way: rounds come through
 				if Throwables.clear_line(world, q + Vector3.UP * 1.6, body.threat_pos + Vector3.UP * 1.2):
 					score -= COVER_LOW_BONUS  # low cover: you can stand up and return fire
+			if second.is_finite() and score < best_score and Throwables.clear_line(world, second + Vector3.UP * 1.5, q + Vector3.UP * 0.9):
+				score += SECOND_THREAT_PENALTY  # the other group sees him there
 			score += maxf(0.0, 6.0 - q.distance_to(body.threat_pos)) * 2.0
 			if score < best_score:
 				best = q
