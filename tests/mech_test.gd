@@ -15,7 +15,9 @@ extends Node
 ## - climbs out (Climb out): its back opens, the suit is left standing (open) where he was with
 ##   its damage and its gun, his rifle back in his hands, him a step behind it;
 ## - the suit left standing still takes rounds on its plates (into its state), and climbing
-##   back in brings every chip with it; a disabled suit can be climbed into too.
+##   back in brings every chip with it; a disabled suit can be climbed into too;
+## - a dead pilot's suit: wearing an LX-3, he can't climb into it (nothing is lost, A2-09);
+##   with the frame off, he does, the dead man out of it.
 ##   <godot> --headless --path . res://tests/mech_test.tscn
 
 var failures := 0
@@ -218,6 +220,64 @@ func _test_lying() -> void:
 	await _seconds(ExoMech.RISE_S * 0.3 + 0.4)
 	check(not ExoMech.transitioning(player) and player.model.transform.basis.y.normalized().dot(Vector3.UP) > 0.99, "and up on its feet, shut")
 	check(inv.slots[&"primary"] == &"wg50_walker", "its gun back in his hands")
+	await _test_take_over()
+
+
+## A2-09: climbing into a dead pilot's suit while wearing an LX-3 is refused (as climbing into
+## a parked one is: take the frame off first) and nothing is lost; with the frame off, he
+## climbs in and the suit is his, the dead man out of it.
+func _test_take_over() -> void:
+	var inv := player.inventory
+	var pilot := level.spawn_soldier({"name": "MechPilot", "person_name": "MechPilot", "faction": String(player.faction), "variant": "multicam",
+		"pos": level.ground_point(player.global_position + Vector3(5, 0, 0)), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	var brain := SquadAI.of(pilot)
+	if brain:
+		brain.process_mode = Node.PROCESS_MODE_DISABLED
+	await _frames(2)
+	# The suit off him (its gun with it, his M4 back in his hands) and onto the other man.
+	var state := ExoMech._suit_off(player)
+	var gun: Dictionary = state.get("gun", {})
+	for key: String in ["gun", "yaw", "camo", "open", "prone"]:
+		state.erase(key)
+	pilot.inventory.put_on(ExoMech.SLOT, &"exo_mech_heavy", state)
+	pilot.inventory.put_on(&"primary", StringName(gun.get("id", "wg50_walker")), gun.get("state", {}))
+	check(ExoMech.piloting(pilot.inventory) and not ExoMech.piloting(inv) and inv.slots[&"primary"] == &"m4a1", "another man in the suit, him out of it with his M4")
+	var suits := _suits_anywhere()
+	pilot.vitals.server_kill()
+	await _seconds(1.5)  # (his ragdoll settles: reach is to where it lies, Soldier.body_point)
+	check(inv.take(&"exo_frame_light") == 1 and inv.slots[ExoMech.SLOT] == &"exo_frame_light", "he puts on an LX-3")
+	var at := pilot.body_point()
+	player.global_position = Vector3(at.x, player.global_position.y, at.z) + Basis(Vector3.UP, pilot.global_rotation.y).x * -1.2
+	await _frames(2)
+	check(ExoMech.punch_out_problem(player, pilot) == "", "beside the dead pilot, in reach of the release")
+	check(ExoMech.climb_in_body_problem(player, pilot) == "Take off your exo frame first", "wearing the LX-3 he can't climb into the dead man's suit (%s)" % ExoMech.climb_in_body_problem(player, pilot))
+	check(InteractionMenu._check(&"mech_pilot_in", player, pilot) == "Take off your exo frame first" and InteractionMenu._check(&"mech_pilot", player, pilot) == "",
+		"the menu's Climb in says why; Punch out is still offered")
+	player._server_climb_in_body.rpc_id(1, pilot.get_path())
+	await _seconds(ExoMech.RELEASE_S + 0.4)
+	check(_suits_anywhere() == suits and ExoMech.piloting(pilot.inventory) and inv.slots[ExoMech.SLOT] == &"exo_frame_light",
+		"asked anyway, nothing happens: the suit still on the dead man, the LX-3 on him (%d suit(s), was %d)" % [_suits_anywhere(), suits])
+	# The frame off, he climbs in.
+	var frame := inv.unequip(ExoMech.SLOT)
+	check(String(frame.get("id", "")) == "exo_frame_light" and ExoMech.climb_in_body_problem(player, pilot) == "", "the LX-3 off, he can")
+	player._server_climb_in_body.rpc_id(1, pilot.get_path())
+	await _seconds(ExoMech.RELEASE_S + 0.3)
+	check(_suits_anywhere() == suits and ExoMech.piloting(inv) and not ExoMech.piloting(pilot.inventory), "he's in the suit, the dead man out of it (%d suit(s))" % _suits_anywhere())
+	check(inv.slots[&"primary"] == &"wg50_walker" and String(inv.state_of(ExoMech.SLOT).get("rack", {}).get("id", "")) == "m4a1",
+		"its gun in his hands, his M4 on its rack")
+	await _seconds(ExoMech.RISE_S + 0.4)
+
+
+## How many HX-1s there are: worn by anyone, or left on the ground.
+func _suits_anywhere() -> int:
+	var n := 0
+	for s: Node in get_tree().get_nodes_in_group(&"combatants"):
+		if s is Soldier and (s as Soldier).inventory.slots.get(ExoMech.SLOT, &"") == &"exo_mech_heavy":
+			n += 1
+	for w: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if w is WorldItem and (w as WorldItem).item_id == &"exo_mech_heavy" and not w.is_queued_for_deletion():
+			n += 1
+	return n
 
 
 func _test_movement() -> void:

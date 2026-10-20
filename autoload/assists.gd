@@ -7,7 +7,8 @@ extends Node
 ## sync from anyone but the host is ignored.
 ##
 ## - aim_slowdown: on a gamepad, the right stick turns slower while the crosshair is on or
-##   near an enemy who is up (aim_slowdown_mult; the mouse is never touched).
+##   near an enemy who is up and in sight, never a civilian, captive or anyone behind a wall
+##   (aim_slowdown_mult; the mouse is never touched).
 ## - wound_hints: a HUD line naming your worst wound and what to use on it (wound_hint).
 ## Objective markers were already on the HUD before this (ObjectiveHelper, the player's own
 ## "Objective markers on screen" setting, on by default), so they aren't an assist here.
@@ -127,7 +128,7 @@ func _on_peer_joined(id: int) -> void:
 # --- The assists ------------------------------------------------------------------------------
 
 ## Aim slowdown: what the stick's turn rate is multiplied by now for `body` looking through
-## `camera` (1.0 with the assist off, or no enemy who is up near the crosshair).
+## `camera` (1.0 with the assist off, or no enemy who is up and in sight near the crosshair).
 func aim_slowdown_mult(body: Soldier, camera: Camera3D) -> float:
 	if not is_on("aim_slowdown") or body == null or camera == null:
 		return 1.0
@@ -135,21 +136,33 @@ func aim_slowdown_mult(body: Soldier, camera: Camera3D) -> float:
 
 
 ## The slowdown for a view from `eye` along `forward`: SLOW_MULT on an enemy's chest, easing
-## back to 1.0 at SLOW_ANGLE_DEG off it.
+## back to 1.0 at SLOW_ANGLE_DEG off it. Only an enemy the AI would shoot at (up, not on our
+## side, not a civilian, HVT or captive: Person.is_noncombatant) and one you could see from
+## `eye` (nothing solid in the way: Squad.sees' lines, feet to head), so it never gives away
+## someone behind a wall (A2-13). The lines are cast last, only for one near the crosshair.
 static func slowdown_near(body: Soldier, eye: Vector3, forward: Vector3) -> float:
 	var best := 1.0
 	for node: Node in body.get_tree().get_nodes_in_group(&"combatants"):
 		var other := node as Soldier
-		if other == null or other == body or other.faction == body.faction or not other.vitals.is_up():
+		if other == null or other == body or other.faction == body.faction or not other.vitals.is_up() or Person.is_noncombatant(other):
 			continue
 		var to := other.global_position + Vector3(0, 1.3, 0) - eye
 		var dist := to.length()
 		if dist < 0.5 or dist > SLOW_RANGE_M:
 			continue
 		var off := rad_to_deg(forward.angle_to(to))
-		if off < SLOW_ANGLE_DEG:
+		if off < SLOW_ANGLE_DEG and _seen_from(body, eye, other):
 			best = minf(best, lerpf(SLOW_MULT, 1.0, off / SLOW_ANGLE_DEG))
 	return best
+
+
+## Whether some part of `other` (Squad.SIGHT_HEIGHTS, feet to head) is in clear sight from
+## `eye`: Squad.sees, from the eye the slowdown is asked for.
+static func _seen_from(body: Soldier, eye: Vector3, other: Soldier) -> bool:
+	for height: float in Squad.SIGHT_HEIGHTS:
+		if Throwables.clear_line(body.get_world_3d(), eye, other.global_position + Vector3.UP * height):
+			return true
+	return false
 
 
 ## Wound hints: a short line on your worst wound and what to use on it ("" with the assist off,
