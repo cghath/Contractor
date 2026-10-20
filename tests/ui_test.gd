@@ -48,6 +48,22 @@ func _ready() -> void:
 		s.ready.connect(s.open)
 		return s)
 	await _fit("main menu", func() -> Node: return Menu.new())
+	# The tutorial's panel and its section list (feat/tutorial-2): the list as it opens at the
+	# start, and the panel on its longest step.
+	await _fit("tutorial (section list)", func() -> Node:
+		var g := TutorialGuide.new()
+		g.ready.connect(g.open_sections)
+		return g)
+	await _fit("tutorial (longest step)", func() -> Node:
+		var g := TutorialGuide.new()
+		g.ready.connect(func() -> void:
+			var longest := 0
+			for i in g.steps.size():
+				if TutorialGuide.step_text(g.steps[i]).length() > TutorialGuide.step_text(g.steps[longest]).length():
+					longest = i
+			g.step = longest
+			g._show())
+		return g)
 	await _fit("bug report", func() -> Node:
 		var b := BugReport.new()
 		b.ready.connect(func() -> void: b.visible = true)
