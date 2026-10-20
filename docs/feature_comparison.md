@@ -792,15 +792,19 @@ blocks, and there's an in-fight phase profiler.
 ### 12.1 In-game tutorial
 **Now.** A solo session on the compound with a panel that walks through the controls one step at a
 time, showing the live key bindings, ticking itself off as you do each step, with a stand-in target
-across the yard.
+across the yard. Its sections go past the controls (2026-10-20): gear and MOLLE, squad orders,
+treating yourself and calling a medic, dragging and tourniqueting a casualty, vehicles, rebel
+support, static guns, and short steps to read on the campaign loop. A section list lets a player
+skip what a teammate will teach them.
 
 **Compared with.**
 - *Arma 3 / Reforger*: the Bootcamp campaign and Reforger's training scenario.
 - *Ready or Not*: a training range at the station.
 - *Ground Branch*: a practice range.
 
-**Standing.** Simpler than Arma's Bootcamp: it covers controls, not tactics, medical scenarios,
-vehicles or the campaign loop yet.
+**Standing.** Still simpler than Arma's Bootcamp, which it learns from: it now plays a medical
+scenario and vehicles, but explains the campaign loop rather than playing it, and teaches no
+tactics yet.
 
 ### 12.2 Map, briefing, extraction and debrief
 **Now.** A map (M) with a grid, shared markers and lines, intel positions and objectives. An

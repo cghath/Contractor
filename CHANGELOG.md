@@ -11,6 +11,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The tutorial, round 2: the complex parts, and skipping what a teammate teaches (cghath, 2026-10-20)
+
+#### Added
+
+- **New tutorial sections and steps**, each ticked off by what the game sees you do:
+  **Gear** (hang a spare pouch on your carrier through MOLLE, mount a weapon light on your
+  rifle, switch it on with L; what Mass means), **Squad orders** (send the squad somewhere,
+  bring it back to formation, pick a formation), **Casualties** (a villager down with an open
+  artery: drag him out of the open, let go, put a tourniquet on him; what going down and giving
+  up mean), finer stances (Caps Lock) under Moving, and **The campaign** (short steps to read:
+  the contract board, loadouts and buying missing kit, the briefing, extraction, the debrief).
+- **A section list** (Page Up, and open when the tutorial starts): tick a section "Skip: a
+  teammate teaches it" and the tutorial jumps past it; Start here goes to any section. The ticks
+  are kept until you quit the game. **Shift + Page Down** skips the rest of the current section;
+  Page Down still skips one step. The tutorial is the host's: whoever hosts it is the learner and
+  has the list and the keys.
+- `tutorial` test: the new steps, the section list, skipping a section and the kept ticks. `ui`
+  test: the tutorial's panel and its section list fit at every window size.
+
+#### Changed
+
+- The tutorial's panel uses the shared UI look and moves up to fit a short window.
+- "Gear and orders" is split into **Gear** and **Squad orders**.
+
 ### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.

@@ -1,11 +1,14 @@
 extends Node
 ## The tutorial (TutorialGuide) as the main menu starts it: the compound with the squad's AI, the
-## guide opened before the walls are up. Its setup (the kit, the compound's patrol gone, the squad
-## holding fire, the target in the open, the M-ATV, the villager, a static gun's loads when the
-## game has them), then every step from the medical section on, driven through the requests the
-## real controls send (the self-treatment, the command menu's keys, the vehicle's Left Ctrl
-## requests, the villager's menu, picking up and setting up the gun). Each step is checked to stay
-## put until its thing is done, and to tick off once it is.
+## guide opened before the walls are up, its section list over it. Its setup (the kit, the
+## compound's patrol gone, the squad holding fire, the target in the open, the M-ATV, the villager,
+## a static gun's loads when the game has them); the section list (a section ticked is skipped,
+## Shift + Page Down skips the current one, Start here goes to one, the ticks kept for the next
+## tutorial); then every step from the gear section on, driven through the requests the real
+## controls send (the inventory's actions, the weapon-light key, the command menu's keys and
+## orders, the self-treatment, dragging and treating a casualty, the vehicle's Left Ctrl requests,
+## the villager's menu, picking up and setting up the gun, the steps to read). Each step is
+## checked to stay put until its thing is done, and to tick off once it is.
 ##   <godot> --headless --path . res://tests/tutorial_test.tscn
 
 var failures := 0
@@ -23,7 +26,7 @@ func _ready() -> void:
 	Vehicle.fire_rolls = false
 	ControlOptions._get_out = false  # the seat's Get out, whatever this machine's settings say (never saved)
 	ControlOptions._loaded = true
-	get_tree().create_timer(440.0).timeout.connect(func() -> void:
+	get_tree().create_timer(600.0).timeout.connect(func() -> void:
 		print("TUTORIAL TEST FAILED (timed out at step %d)" % (guide.step if is_instance_valid(guide) else -1))
 		get_tree().quit(99))
 	GameState.delete_save()
@@ -38,18 +41,25 @@ func _ready() -> void:
 		_finish()
 		return
 	(multiplayer.multiplayer_peer as ENetMultiplayerPeer).refuse_new_connections = true
+	TutorialGuide.skip_sections.clear()
 	guide = TutorialGuide.start(level)  # as the menu does, before the compound's walls are up
 	check(guide != null and TutorialGuide.of(level) == guide, "the tutorial opens in the compound")
 	await _wait_for(func() -> bool: return level.voxel_world.is_built() and level.ai.get_node_or_null(NodePath(TutorialGuide.TARGET)) != null, 90.0)
 	await _seconds(1.0)
 	_test_setup()
+	_test_section_list()
+	await _test_gear()
+	await _test_orders()
 	await _test_medical()
+	await _test_casualties()
 	await _test_tagging()
 	await _test_vehicles()
 	await _test_rebels()
 	await _test_static_guns()
+	await _test_campaign()
 	check(guide.step == guide.steps.size() and guide._title.text.begins_with("Tutorial: done"),
 		"the end: done, %d of %d steps done by doing them" % [guide.done, guide.steps.size()])
+	await _test_ticks_kept()
 	_finish()
 
 
@@ -79,15 +89,25 @@ func _seconds(s: float) -> void:
 
 ## Page Down (the guide's own skip) until the step checked by `check` is the current one.
 func _skip_to(check_name: String) -> bool:
-	var at := guide.index_of(check_name)
+	return _skip_to_step(guide.index_of(check_name))
+
+
+## Page Down until step `at` is the current one.
+func _skip_to_step(at: int) -> bool:
 	if at < 0:
 		return false
-	var skip := InputEventKey.new()
-	skip.physical_keycode = TutorialGuide.SKIP_KEY
-	skip.pressed = true
 	while guide.step < at:
-		guide._input(skip)
+		guide._input(_key(TutorialGuide.SKIP_KEY))
 	return guide.step == at
+
+
+## A key pressed (physical keycode), Shift held with `shift`.
+func _key(code: Key, shift := false) -> InputEventKey:
+	var e := InputEventKey.new()
+	e.physical_keycode = code
+	e.shift_pressed = shift
+	e.pressed = true
+	return e
 
 
 ## The current step stays put for `seconds` while nothing is done.
@@ -164,6 +184,74 @@ func _loads_on_ground() -> Array:
 	return out
 
 
+# --- The section list ----------------------------------------------------------------------------
+
+## Open at the start; a section ticked there is skipped, Shift + Page Down skips the one you're in.
+func _test_section_list() -> void:
+	print("The section list")
+	var names := guide.sections()
+	check(guide.sections_open() and names.size() >= 10 and guide.section_ticks.size() == names.size(),
+		"the section list is open at the start, one row and tick per section (%s)" % ", ".join(names))
+	check(names[0] == "Moving" and names[1] == "Shooting" and names[2] == "Gear", "in the tutorial's order (%s)" % ", ".join(names.slice(0, 3)))
+	var tick := guide.section_ticks.get("Shooting") as CheckBox
+	if tick:
+		tick.button_pressed = true  # (the player ticks it: "a teammate teaches it")
+	check(TutorialGuide.skip_sections.has("Shooting"), "ticking Shooting marks it skipped (%s)" % [TutorialGuide.skip_sections.keys()])
+	guide._input(_key(TutorialGuide.SECTIONS_KEY))
+	check(not guide.sections_open() and guide.step == 0, "Page Up closes it; the tutorial starts at the first step (%d)" % guide.step)
+	guide._input(_key(TutorialGuide.SECTIONS_KEY))
+	check(guide.sections_open() and (guide.section_ticks.get("Shooting") as CheckBox).button_pressed, "Page Up opens it again, the tick still there")
+	guide._input(_key(KEY_ESCAPE))
+	check(not guide.sections_open(), "Esc closes it")
+	guide._input(_key(TutorialGuide.SKIP_KEY, true))
+	check(guide.step == guide.first_of("Gear") and guide.done == 0 and guide._title.text.contains("Gear"),
+		"Shift + Page Down skips Moving, and Shooting (ticked) with it: on to Gear, nothing counted done (%s)" % guide._title.text)
+
+
+# --- Gear ----------------------------------------------------------------------------------------
+
+func _test_gear() -> void:
+	print("Gear")
+	check(_skip_to("_pouch_on") and guide._title.text.contains("Gear"), "the pouch step (%s)" % guide._title.text)
+	var pouch: StringName = guide._pouch
+	var loose := _entry_of(pouch)
+	check(pouch != &"" and not loose.is_empty() and player.inventory.slots.get(&"vest", &"") != &"",
+		"it hands you a spare pouch, loose, with a carrier to hang it on (%s)" % pouch)
+	await _stays("the pouch still loose")
+	if not loose.is_empty():
+		player._server_inventory_action.rpc_id(1, "attach", loose[0], loose[1], &"", &"")  # right-click > Attach
+	await _ticks("_pouch_on", "attaching the pouch to the carrier", 3.0)
+	var light := _entry_of(TutorialGuide.LIGHT)
+	check(not light.is_empty() and player.inventory.slots.get(&"primary", &"") != &"", "the next step hands you a weapon light, loose, and you have a rifle")
+	await _stays("the light still loose")
+	if not light.is_empty():
+		player._server_inventory_action.rpc_id(1, "mount_attachment", light[0], light[1], &"primary", &"")  # right-click > Mount on
+	await _ticks("_light_mounted", "mounting the light on the rifle", 3.0)
+	player.select_weapon(&"primary")
+	await _stays("the light mounted but off")
+	player._server_inventory_action.rpc_id(1, "toggle_attachment", &"", -1, player.active_slot, &"")  # L (PlayerInput)
+	await _ticks("_light_on", "switching it on (the weapon-light key)", 3.0)
+	player._server_inventory_action.rpc_id(1, "toggle_attachment", &"", -1, player.active_slot, &"")  # off again
+
+
+# --- Squad orders --------------------------------------------------------------------------------
+
+func _test_orders() -> void:
+	print("Squad orders")
+	check(_skip_to("_squad_sent") and guide._title.text.contains("Squad orders"), "the squad orders section (%s)" % guide._title.text)
+	await _stays("the squad still with you")
+	player.server_squad_command("move", player.global_position + Vector3(0, 0, -12), PackedStringArray())  # ` 1 Move, 2 Move there (at the crosshair)
+	await _ticks("_squad_sent", "sending them off (Move there)", 3.0)
+	await _stays("them still off")
+	await _menu_keys([KEY_QUOTELEFT, KEY_1, KEY_1])  # ` (everyone), 1 Move, 1 Return to formation
+	await _ticks("_squad_back", "Return to formation", 3.0)
+	await _stays("the formation as it was")
+	await _menu_keys([KEY_QUOTELEFT, KEY_8, KEY_3])  # ` (everyone), 8 Formation, 3 Line
+	await _ticks("_formation_set", "Formation > Line", 3.0)
+	var squad := level.squad_for(&"friendly")
+	check(squad != null and (squad.formation == "line" or str(squad.team_orders).contains("line")), "the squad keeps a line now")
+
+
 # --- Medical -------------------------------------------------------------------------------------
 
 func _test_medical() -> void:
@@ -186,6 +274,49 @@ func _test_medical() -> void:
 	await _stays("waiting for the medic", 0.5)
 	await _ticks("_patched_up", "a squadmate bandaging your leg", 90.0)
 	check(not TutorialGuide._bleeding(player), "nothing bleeds now")
+
+
+# --- Casualties ----------------------------------------------------------------------------------
+
+func _test_casualties() -> void:
+	print("Casualties")
+	check(_skip_to("_dragging") and guide._title.text.contains("Casualties"), "the casualties section (%s)" % guide._title.text)
+	await _seconds(0.5)
+	var c := guide.casualty()
+	if c == null:
+		check(false, "a hurt villager lies by the gate")
+		return
+	check(c.vitals.downed and TutorialGuide._artery(c).any(func(w: Dictionary) -> bool: return w.bleeding),
+		"a villager lies by the gate, out, an artery in his thigh bleeding (%s)" % c.vitals.condition_text())
+	await _stays("him lying there", 2.0)
+	check(SquadAI.responder_for(c) == null and not guide._brains().any(func(ai: SquadAI) -> bool: return ai.casualty == c),
+		"the squad's medics leave him to you")
+	var at := c.body_point()
+	player.global_position = level.above_ground(Vector3(at.x + 0.8, 0.1, at.z))
+	await get_tree().physics_frame
+	player._server_drag_body.rpc_id(1, c.get_path())  # Left Ctrl > Drag
+	await _ticks("_dragging", "dragging him (Left Ctrl > Drag)", 5.0)
+	await _stays("still holding him", 1.0)
+	player._server_release_body.rpc_id(1)  # G: let go
+	await _ticks("_let_go", "letting go of him", 5.0)
+	check(player.inventory.medical_count(&"tourniquet") > 0, "you have a tourniquet for him (%d)" % player.inventory.medical_count(&"tourniquet"))
+	await _stays("the artery still open")
+	at = c.body_point()
+	if at.distance_to(player.global_position) > 1.2:
+		player.global_position = level.above_ground(Vector3(at.x + 0.8, 0.1, at.z))
+		await get_tree().physics_frame
+	player._server_treat.rpc_id(1, c.get_path(), &"tourniquet", TutorialGuide.CASUALTY_PART)  # Left Ctrl on his leg > Tourniquet
+	await _ticks("_tourniquet_on", "a tourniquet on his thigh", 20.0)
+	await _read("going down and giving up")
+
+
+## The current step is one to read: it stays, and Page Down goes on, counted done.
+func _read(what: String) -> void:
+	var at := guide.step
+	check(bool((guide.steps[at] as Dictionary).get("read", false)), "%s: a step to read (%s)" % [what, guide._title.text])
+	await _stays(what, 0.5)
+	guide._input(_key(TutorialGuide.SKIP_KEY))
+	check(guide.step == at + 1 and guide.done == _done_at + 1, "%s: Page Down goes on, counted read (%d)" % [what, guide.step])
 
 
 # --- Tagging -------------------------------------------------------------------------------------
@@ -285,11 +416,19 @@ func _test_rebels() -> void:
 ## [container, index] of a stowed pressure bandage in the player's gear, else of an IFAK, or [].
 func _medical_entry() -> Array:
 	for id: StringName in [&"pressure_bandage", &"ifak"]:
-		for c: StringName in player.inventory.search_containers():
-			var list: Array = player.inventory.containers[c]
-			for i in list.size():
-				if StringName(String((list[i] as Dictionary).get("id", ""))) == id:
-					return [c, i]
+		var at := _entry_of(id)
+		if not at.is_empty():
+			return at
+	return []
+
+
+## [container, index] of a stowed `id` in the player's gear, or [].
+func _entry_of(id: StringName) -> Array:
+	for c: StringName in player.inventory.search_containers():
+		var list: Array = player.inventory.containers[c]
+		for i in list.size():
+			if StringName(String((list[i] as Dictionary).get("id", ""))) == id:
+				return [c, i]
 	return []
 
 
@@ -327,3 +466,36 @@ func _test_static_guns() -> void:
 		gun.rpc_id(1, &"request_pack")  # its Left Ctrl point > Pack up the gun
 	await _ticks("_gun_packed", "packing it up again", 40.0)
 	check(player.inventory.hands in TutorialGuide.STATIC_LOADS, "a load is back in your hands (%s)" % player.inventory.hands)
+
+
+# --- The campaign --------------------------------------------------------------------------------
+
+func _test_campaign() -> void:
+	print("The campaign")
+	check(_skip_to_step(guide.first_of("The campaign")) and guide._title.text.contains("campaign"), "the campaign section (%s)" % guide._title.text)
+	while guide.step < guide.steps.size():
+		var s: Dictionary = guide.steps[guide.step]
+		if s.get("read", false):
+			await _read(String(s.text).left(30))
+			continue
+		await _stays(String(s.text).left(30), 0.5)
+		var at := guide.step
+		var map := InputEventAction.new()
+		map.action = &"map"
+		map.pressed = true
+		guide._input(map)  # M
+		check(guide.step == at + 1 and guide.done == _done_at + 1, "opening the map ticks the extraction step off")
+
+
+## A new tutorial in the same run keeps the ticks; Start here goes to a section, ticked or not.
+func _test_ticks_kept() -> void:
+	print("Ticks kept for the session")
+	guide = TutorialGuide.start(level)
+	await get_tree().process_frame
+	var tick := guide.section_ticks.get("Shooting") as CheckBox
+	check(guide.sections_open() and tick != null and tick.button_pressed, "a second tutorial opens with Shooting still ticked")
+	guide.go_to("Shooting")
+	check(not guide.sections_open() and guide.step == guide.first_of("Shooting") and not TutorialGuide.skip_sections.has("Shooting"),
+		"Start here on Shooting goes there, its tick off (%s)" % guide._title.text)
+	guide._input(_key(TutorialGuide.SKIP_KEY, true))
+	check(guide.step == guide.first_of("Gear"), "and Shift + Page Down goes on to Gear (%s)" % guide._title.text)
