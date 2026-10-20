@@ -10,14 +10,16 @@ extends StaticBody3D
 ## same as any other loot.
 ##
 ## Spawned through the zone's CacheSpawner (ZoneLevel._make_cache), so every peer (late joiners
-## included) gets it the same way a vehicle does; the host seeds its contents once right after
-## (server_seed), and Cargo:net_state keeps it in sync from there same as a vehicle's hold.
+## included) gets it the same way a vehicle does; the host fills it once right after
+## (server_fill), and Cargo:net_state keeps it in sync from there same as a vehicle's hold.
 ##
-## Not saved across a zone reload (Proposed, kept simple): its contents are rolled fresh each
-## time the zone hosts, like the rest of the scatter it comes from. A session that reloads the
-## same zone sees the cache restocked, not as it was left.
+## Saved with the zone (compound loot, 2026-10-19): GameState.save_zone keeps what's in every
+## cache (to_save, in GameState.caches by uid) and server_fill puts that back instead of a fresh
+## roll, so a box looted (or used as a stash) stays as it was left after a reload.
 
 const SIZE := Vector3(0.7, 0.45, 0.7)
+## Every live cache (GameState.save_zone reads them).
+const GROUP := &"world_caches"
 const USE_REACH_M := 3.0
 const CAPACITY_L := 150.0
 const CAPACITY_KG := 300.0
@@ -43,6 +45,7 @@ func _init(label := "Cache", key := &"") -> void:
 
 func _ready() -> void:
 	add_to_group(InteractionMenu.INTERACTABLES)
+	add_to_group(GROUP)
 	cargo_hold = VehicleCargo.new(CAPACITY_L, CAPACITY_KG)
 	cargo_hold.name = "Cargo"
 	add_child(cargo_hold)
@@ -130,7 +133,30 @@ func server_open_for(actor: Soldier) -> String:
 ## overflow its small capacity).
 func server_seed(items: Array) -> void:
 	for entry: Dictionary in items:
-		cargo_hold.take(StringName(entry.id), int(entry.get("count", 1)))
+		cargo_hold.take(StringName(entry.id), int(entry.get("count", 1)), entry.get("state", {}))
+
+
+## Host only (WorldValuables, right after the spawner places it): what the zone save kept in this
+## cache (GameState.caches: its contents as they were left, empty if it was emptied, and whether
+## it was unlocked), else `items`, its first roll (server_seed).
+func server_fill(items: Array) -> void:
+	var saved: Variant = GameState.caches.get(uid)
+	if not saved is Dictionary:
+		server_seed(items)
+		return
+	server_seed(GameState.from_json((saved as Dictionary).get("items", [])))
+	unlocked = bool((saved as Dictionary).get("unlocked", false)) and key_id != &""
+
+
+## For the zone save (GameState.save_zone): what's in it and whether it's been unlocked.
+func to_save() -> Dictionary:
+	var items: Array = []
+	for entry: Dictionary in cargo_hold.entries():
+		var e := {"id": String(entry.id), "count": int(entry.count)}
+		if not (entry.get("state", {}) as Dictionary).is_empty():
+			e["state"] = (entry.state as Dictionary).duplicate(true)
+		items.append(e)
+	return {"items": items, "unlocked": unlocked}
 
 
 ## Host: moves one of `actor`'s entries into the hold (as Vehicle.server_load). Returns what to

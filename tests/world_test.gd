@@ -354,9 +354,9 @@ func _test_loot_and_care() -> void:
 	check(item != null and Vector2(item.global_position.x - spot.x, item.global_position.z - spot.z).length() < 0.6 \
 		and absf(item.global_position.y - m.global_position.y) < 0.6,
 		"the village's IFAK lies on the floor of its cinder-block house (%s)" % (m.to_local(item.global_position) if item else "missing"))
-	var cache := level.get_node_or_null(^"Caches/village_e_valbox0") as WorldCache
+	var cache := level.get_node_or_null(^"Caches/village_e_box_house") as WorldCache
 	check(cache != null and absf(cache.global_position.y - m.global_position.y) < 0.3,
-		"village_e's valuables box sits on the floor, not floating at the IFAK's drop height (%s)" \
+		"village_e's cupboard box sits on the floor of its cinder-block house (%s)" \
 		% (m.to_local(cache.global_position) if cache else "missing"))
 	if item:
 		player.global_position = m.to_global(Vector3(1, 0.1, -8.6))
@@ -647,8 +647,13 @@ func _digest() -> Dictionary:
 	for m in level.modules():
 		modules[m.module_id] = [m.type, m.global_position]
 	var crater := level.insertion_points()[0] + CRATER_FROM_INSERTION
+	var caches := {}  # compound loot: every cache and site box (by name, sorted), and what's in it
+	var found := level.find_children("*", "WorldCache", true, false)
+	found.sort_custom(func(a: Node, b: Node) -> bool: return String(a.name) < String(b.name))
+	for c: Node in found:
+		caches[String(c.name)] = (c as WorldCache).cargo_hold.entries().map(func(e: Dictionary) -> String: return "%s x%d" % [e.id, int(e.count)])
 	return {"terrain": level.terrain.checksum(), "modules": modules, "map": level.map_area(),
-		"crater": snappedf(level.terrain.height_at(crater.x, crater.z), 0.001), "berms": Digging.of(level).records.size()}
+		"crater": snappedf(level.terrain.height_at(crater.x, crater.z), 0.001), "berms": Digging.of(level).records.size(), "caches": caches}
 
 
 # --- Client -----------------------------------------------------------------------------------
@@ -678,6 +683,10 @@ func _run_client(address: String) -> void:
 	check(_host_digest.get("terrain") == mine.terrain and _host_digest.get("map") == mine.map,
 		"the same terrain from the seed as the host's (checksum %d)" % mine.terrain)
 	check(str(_host_digest.get("modules")) == str(mine.modules), "the same modules in the same places (%d)" % (mine.modules as Dictionary).size())
+	var host_caches: Dictionary = _host_digest.get("caches", {})
+	await _wait_for(func() -> bool: return str(_digest().caches) == str(host_caches), 10.0)
+	check(not host_caches.is_empty() and str(_digest().caches) == str(host_caches),
+		"the late joiner gets the host's caches and site boxes with what's in them (%d; %s)" % [host_caches.size(), _digest().caches.get("village_e_box_house", "missing")])
 	await _wait_for(func() -> bool: return _digest().crater == _host_digest.get("crater") and _digest().berms == _host_digest.get("berms"), 5.0)
 	mine = _digest()
 	check(mine.crater == _host_digest.get("crater") and int(mine.berms) >= 1,

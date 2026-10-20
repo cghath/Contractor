@@ -27,14 +27,38 @@ Captain, 2026-10-15: "a loot menu that opens, kind of like Tarkov" (inspired by 
   `LootWindow` and `Soldier`'s loot RPCs (`_loot_target`, `_server_loot_move`/`_put`/
   `_take_class`) treat it as a third case alongside a body and a vehicle hold, not a parallel
   system. Spawned through the zone's `CacheSpawner` (`ZoneLevel._make_cache`) so a late joiner
-  gets it too; its contents are rolled fresh each time the zone hosts, not saved across a reload.
-- **Site boxes** (Captain, 2026-10-16, three asks that are one mechanic): `WorldValuables.
-  server_spawn_site_boxes` puts 1-4 `WorldCache`s at every hand-built module (compound, outpost,
-  village, checkpoint, hq, qrf_base, comms) — "common sense" places a player would search
-  (offices, safes, command posts, desks), reusing each module's own proven-safe
-  `ZoneModules.LOOT` spots (a small offset off each, clear of the WorldItem already there)
-  instead of open-terrain scatter; more boxes at a site worth more trouble (`IMPORTANT_TYPES`:
-  hq, qrf_base, compound). Most boxes roll one piece of cash or intel; 18% roll something better
-  instead - half the time a rarer weapon and its mags (svd, pkm, rpk), half the time more intel
-  and an optic ("a couple maps plus a scope").
-- Tests: `tests/interaction_test.gd` ("The loot window"), `tests/ui_test.gd` ("loot window" fit).
+  gets it too. Its contents are rolled the first time the zone hosts; from then on the zone save
+  keeps what's in it (`WorldCache.to_save`/`server_fill`, `GameState.caches`), so a looted box
+  stays looted (and a strongbox opened stays open) after a reload.
+- **Site boxes / compound loot** (Captain, 2026-10-16, three asks that are one mechanic; task 6 of
+  the Captain's tasking, 2026-10-19): `WorldValuables.server_spawn_site_boxes` puts `WorldCache`s
+  in the rooms of every hand-built module (compound, outpost, village, checkpoint, hq, qrf_base,
+  comms) where that kind of thing would be, from `data/loot_tables.json`: each site type lists its
+  box spots (room, position, table, label such as "Desk", "Radio desk", "Weapons crate",
+  "Footlocker", "Seized goods"). The fitting rooms get a box every time (an HQ's office desk and
+  radio room, a compound's command-building desk and armory crate, an outpost's bunker, a comms
+  site's radio desk); a few of the rest are picked per site. Each box rolls a tier by its site's
+  stated weights, then one bundle of that tier from its table:
+
+  | Site | common | uncommon | rare | very rare | boxes |
+  |---|---|---|---|---|---|
+  | village | 72 | 22 | 5 | 1 | 1-3 |
+  | checkpoint | 66 | 25 | 7.5 | 1.5 | 1-2 |
+  | outpost | 64 | 26 | 8 | 2 | 1-3 |
+  | compound | 60 | 28 | 9.5 | 2.5 | 2-4 |
+  | comms | 58 | 29 | 10 | 3 | 1-2 |
+  | qrf_base | 58 | 29 | 10 | 3 | 2-3 |
+  | hq | 52 | 31 | 13 | 4 | 3-5, and the strongbox |
+  | anything else (a generated town) | 70 | 23 | 6 | 1 | 1-3 by its loot spots |
+
+  Very rare only in a hot zone (contract zones roll up to medium): elsewhere it counts as rare.
+  Tables: office (cash, intel, valuables; gold, a laptop or a relic very rarely), radio_room
+  (intel, enemy radios, electronics; a laptop, a jammer or NVGs very rarely), command_post,
+  armory (mags and grenades up to an RPG-7, SVD or PKM), ammo, barracks (footlockers), medical
+  (dressings up to blood and surgery kits), stores (salvage and vehicle parts), home (village
+  houses), stash (contraband) and seized (a checkpoint's confiscated goods). Rolled from the
+  zone's id and the module's id (`site_plan`, `roll_box`): the same zone gives the same loot on
+  every visit.
+- Tests: `tests/interaction_test.gd` ("The loot window"), `tests/ui_test.gd` ("loot window" fit),
+  `tests/loot_test.gd` (tables, spots, fit, rarity over many seeds, same seed, saved and reloaded),
+  `tests/world_test.gd` (a late joiner gets the boxes and their contents).
