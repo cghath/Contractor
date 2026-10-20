@@ -453,6 +453,10 @@ var _shin_right: Node3D
 var _held: Node3D
 var _grip := Vector3.ZERO     # right hand, in _held's local space
 var _support := Vector3.ZERO  # left hand, in _held's local space
+## Reloading, the support hand works the held weapon's magazine here (VoxelArt.reload_points'
+## "mag", in _held's local space: behind the grip on the L85), found once per weapon.
+var _reload_mag := Vector3.ZERO
+var _reload_mag_of := 0
 var _last_position: Vector3
 var _move_dt := 0.0  # time since the body last moved (MOVE_WINDOW_S)
 var _speed := 0.0
@@ -914,6 +918,10 @@ func set_held(node: Node3D, grip: Vector3, support: Vector3, weapon := true) -> 
 	_grip = grip
 	_support = support
 	_held_weapon = weapon
+	if is_instance_valid(node) and node.get_instance_id() != _reload_mag_of:
+		_reload_mag_of = node.get_instance_id()
+		var points := VoxelArt.reload_points(String(node.get_meta(&"voxel_model", ""))) if node.has_meta(&"voxel_model") else {}
+		_reload_mag = points.get("mag", grip.lerp(support, 0.35) + Vector3(0, -0.07, 0))
 
 
 func clear_held() -> void:
@@ -1942,8 +1950,8 @@ func _held_goals() -> Array:
 	if is_seated() and not is_ffv() and _held_weapon:
 		support = _grip + Vector3(0, 0.03, 0.11)  # the rifle stood up: the support hand over the firing hand
 	if reloading:
-		# Hand drops under the receiver and works the magazine.
-		support = _grip.lerp(_support, 0.35) + Vector3(0, -0.11 + sin(_time * 9.0) * 0.025, 0)
+		# The hand goes to the magazine and works it: out, down to the pouch and back up.
+		support = _reload_mag + Vector3(0, -0.06 + sin(_time * 4.0) * 0.06, 0)
 	var firing := [key, torso.to_local(_held.to_global(_grip))]
 	var other := [key, torso.to_local(_held.to_global(support))]
 	return [other, firing] if left_handed and _held_weapon else [firing, other]

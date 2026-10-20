@@ -844,8 +844,9 @@ func _state_of_weapon(weapon: ItemData) -> Dictionary:
 
 ## How long reloading `weapon` takes this body: the weapon's time, slowed by wounds
 ## (a broken arm).
-func reload_seconds(weapon: ItemData) -> float:
-	return float(weapon.stats.get("reload_s", 2.0)) * vitals.reload_mult()
+## Seconds to reload `weapon`: an `empty` one takes longer (the bolt worked: Reloads.seconds).
+func reload_seconds(weapon: ItemData, empty := false) -> float:
+	return Reloads.seconds(weapon, empty) * vitals.reload_mult()
 
 
 ## aim_point's chest shape, found once and kept while it's still this body's (every AI scan asks).
@@ -1158,7 +1159,7 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
-	var seconds := reload_seconds(ItemDB.get_item(id))
+	var seconds := reload_seconds(ItemDB.get_item(id), inventory.rounds_in(slot) <= 0)
 	_server_busy_until = _now() + seconds
 	Sfx.server_play(&"reload", global_position + Vector3.UP)
 	_reload_n += 1

@@ -1735,10 +1735,11 @@ func _do_reload() -> void:
 	if body.inventory.rounds_in(body.active_slot) >= _mag_size(weapon):
 		_think_cd = 0.0
 		return
-	body._busy_until = Soldier._now() + body.reload_seconds(weapon)
+	var empty := body.inventory.rounds_in(body.active_slot) <= 0  # (an empty reload works the bolt: longer)
+	body._busy_until = Soldier._now() + body.reload_seconds(weapon, empty)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
-	_think_cd = body.reload_seconds(weapon)
+	_think_cd = body.reload_seconds(weapon, empty)
 	_callout_reload(weapon)
 
 

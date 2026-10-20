@@ -135,7 +135,7 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 static func instance(model: String, variant: String, layers := 1) -> Node3D:
 	var spec := _spec(model)
 	var pivot := Node3D.new()
-	pivot.name = model.get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
+	pivot.name = model.get_slice("|", model.count("|")).get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
 	pivot.set_meta(&"voxel_variant", variant)
 	var mesh_instance := MeshInstance3D.new()
@@ -202,6 +202,9 @@ static func hand_points(model: String) -> Dictionary:
 		"rifle" when _rifle_style(model) == "walker":
 			grip = Vector3(WALKER_AXIS_X, 2, n * 0.807)  # its pistol grip, under the receiver's back end
 			support = Vector3(WALKER_AXIS_X, 2, n - 27.0)  # its vertical foregrip
+		"rifle" when _rifle_style(model) == "bullpup":
+			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip, the magazine behind it
+			support = Vector3(1.5, 6, n - 26.0)  # on the handguard, as far out as the arm reaches
 		"rifle":
 			grip = Vector3(1.5, 4, n * 0.68)     # pistol grip
 			# Under the handguard, no further than 0.52 m from the butt: as far out as the
@@ -565,6 +568,12 @@ static func _get_material() -> StandardMaterial3D:
 # --- Model specs ------------------------------------------------------------------------
 
 static func _spec(model: String) -> Dictionary:
+	if model.begins_with(MAG) or model.begins_with(WITHOUT_MAG):
+		var keep := model.begins_with(MAG)
+		var whole := _spec(model.get_slice("|", 1))
+		var part := whole.duplicate()
+		part.boxes = whole.boxes.filter(func(b: Array) -> bool: return (b.size() > 4 and b[4] == MAG_TAG) == keep)
+		return part
 	var arg := model.get_slice(":", 1).to_int() if model.contains(":") else 0
 	match model.get_slice(":", 0):
 		"head": return _head()
@@ -1136,6 +1145,72 @@ static func _fb(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float
 	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour]
 
 
+## A magazine's box (_fb, tagged MAG_TAG): a reload takes it out of the weapon (Captain,
+## 2026-10-20: reloads), so first person draws the weapon WITHOUT_MAG and its magazine (MAG) as
+## a part of its own that the hand carries. A belt-fed's ammo box counts.
+static func _fbm(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int) -> Array:
+	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour, false, MAG_TAG]  # (box[3]: _p's paint-only flag)
+
+
+const MAG_TAG := "mag"
+## Model name prefixes: just the magazine of a weapon model, or the weapon without it.
+const MAG := "mag|"
+const WITHOUT_MAG := "nomag|"
+
+
+## Whether weapon model `model` has a magazine part (tagged boxes) to take out.
+static func has_magazine(model: String) -> bool:
+	if not model.begins_with("rifle"):
+		return false
+	return _spec(model).boxes.any(func(b: Array) -> bool: return b.size() > 4 and b[4] == MAG_TAG)
+
+
+## The points a reload's hands go to on weapon model `model`, in metres from the instance pivot
+## (like hand_points): "mag" (the magazine's left side, halfway down: where the support hand
+## takes it), "well" (the top of the magazine, or of an internal one), "catch" (a bolt catch or
+## release button), "bolt" (a cocking or charging handle, a bolt handle, a pistol's slide) and
+## "cover" (a belt-fed's feed cover). Reloads names them.
+static func reload_points(model: String) -> Dictionary:
+	var spec := _spec(model)
+	var centre := Vector3(spec.size) * 0.5
+	var n := float(spec.size.z)
+	var out := {}
+	if model.get_slice(":", 0) == "pistol":
+		out = {"mag": Vector3(0.0, 0.5, 8.0), "well": Vector3(1.0, 0.5, 8.0), "bolt": Vector3(1.0, 6.8, 9.5), "catch": Vector3(0.0, 5.0, 7.0)}
+	elif model.begins_with("rifle"):
+		var lo := Vector3.INF
+		var hi := -Vector3.INF
+		for b: Array in spec.boxes:
+			if b.size() > 4 and b[4] == MAG_TAG:
+				lo = lo.min(Vector3(b[0]).min(Vector3(b[1])))
+				hi = hi.max(Vector3(b[0]).max(Vector3(b[1])))
+		var style := _rifle_style(model)
+		if lo.x < INF:
+			out["mag"] = Vector3(lo.x - 0.3, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
+			out["well"] = Vector3((lo.x + hi.x) * 0.5, hi.y, (lo.z + hi.z) * 0.5)
+		else:  # an internal magazine: its top, through the open action
+			out["mag"] = Vector3(0.6, 7.5, n * 0.62)
+			out["well"] = Vector3(1.5, 9.2, n * 0.62)
+		match style:
+			"ak": out["bolt"] = Vector3(2.7, 8.2, n * 0.56)
+			"bullpup":
+				out["bolt"] = Vector3(2.75, 8.45, n * 0.5)
+				out["catch"] = Vector3(0.5, 7.4, n * 0.755)
+			"pk", "m240":
+				out["bolt"] = Vector3(2.75, 7.4, n * 0.5)
+				out["cover"] = Vector3(1.5, 10.0, n * 0.55)
+			"m249":
+				out["bolt"] = Vector3(0.25, 7.6, n * 0.5)
+				out["cover"] = Vector3(1.5, 10.0, n * 0.55)
+			"mosin", "chassis_bolt": out["bolt"] = Vector3(2.75, 8.4, n * 0.72)
+			_:  # the AR family: the bolt catch on the left above the well, the T-handle at the back
+				out["catch"] = Vector3(0.5, 6.4, out.get("mag", Vector3(0, 0, n * 0.52)).z + n * 0.04)
+				out["bolt"] = Vector3(1.5, 9.9, n * 0.74)
+	for k: String in out:
+		out[k] = (out[k] - centre) * VOXEL_SIZE
+	return out
+
+
 ## Height (voxels) of a rifle's line of sight: the middle of its optic, or its irons'
 ## aperture and front post's top.
 const OPTIC_AXIS_Y := 11.8
@@ -1405,10 +1480,10 @@ static func _rifle(length: int, art := "dot") -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip, raked back
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
@@ -1436,10 +1511,10 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 		_fb(0.55, 6.6, f.call(0.16), 2.45, 7.0, f.call(0.46), C.WOOD_DARK),
 		_fb(0.7, 7.0, f.call(0.46), 2.3, 9.6, f.call(0.76), C.GUN),             # receiver and dust cover
 		_fb(0.75, 5.8, f.call(0.48), 2.25, 7.0, f.call(0.72), C.GUN),
-		_fb(0.9, 4.2, f.call(0.51), 2.1, 5.8, f.call(0.6), C.GUN_LIGHT),        # magazine: a banana curving forward
-		_fb(0.9, 2.8, f.call(0.485), 2.1, 4.2, f.call(0.59), C.GUN_LIGHT),
-		_fb(0.9, 1.4, f.call(0.46), 2.1, 2.8, f.call(0.57), C.GUN_LIGHT),
-		_fb(0.9, 0.6, f.call(0.43), 2.1, 1.4, f.call(0.54), C.GUN),
+		_fbm(0.9, 4.2, f.call(0.51), 2.1, 5.8, f.call(0.6), C.GUN_LIGHT),        # magazine: a banana curving forward
+		_fbm(0.9, 2.8, f.call(0.485), 2.1, 4.2, f.call(0.59), C.GUN_LIGHT),
+		_fbm(0.9, 1.4, f.call(0.46), 2.1, 2.8, f.call(0.57), C.GUN_LIGHT),
+		_fbm(0.9, 0.6, f.call(0.43), 2.1, 1.4, f.call(0.54), C.GUN),
 		_fb(1.25, 4.6, f.call(0.62), 1.75, 5.0, f.call(0.68), C.GUN),           # trigger guard
 		_fb(0.9, 4.4, f.call(0.68), 2.1, 5.8, f.call(0.73), C.WOOD),            # pistol grip, raked back
 		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.74), C.WOOD),
@@ -1476,8 +1551,8 @@ static func _rifle_pkm(length: int, art := IRONS) -> Dictionary:
 		boxes.append(_fb(0.3, 7.7, z, 2.7, 7.95, z + n * 0.015, C.EMPTY))        # bottom row
 		z += n * 0.035
 	boxes.append_array([
-		_fb(-0.5, 4.2, f.call(0.4), 0.9, 7.0, f.call(0.56), C.GUN_LIGHT),       # ammo box, slung off the LEFT side (not underneath), hooked on the receiver
-		_fb(-0.5, 4.2, f.call(0.4), 0.9, 4.6, f.call(0.56), C.GUN),
+		_fbm(-0.5, 4.2, f.call(0.4), 0.9, 7.0, f.call(0.56), C.GUN_LIGHT),       # ammo box, slung off the LEFT side (not underneath), hooked on the receiver
+		_fbm(-0.5, 4.2, f.call(0.4), 0.9, 4.6, f.call(0.56), C.GUN),
 		_fb(1.25, 5.8, f.call(0.6), 1.75, 6.2, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 6.8, f.call(0.71), C.WOOD),            # wood pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.WOOD_DARK),
@@ -1518,8 +1593,8 @@ static func _rifle_m240(length: int, art := IRONS) -> Dictionary:
 		_fb(0.4, 6.0, f.call(0.38), 2.6, 9.6, f.call(0.84), C.GUN),             # long, bulky receiver (the longest of the three)
 		_fb(0.55, 9.6, f.call(0.42), 2.45, 9.95, f.call(0.64), C.GUN_LIGHT),    # feed tray cover, top
 		_fb(0.9, 9.6, f.call(0.38), 2.1, 9.95, f.call(0.8), C.GUN),             # rail on the cover, for an optic
-		_fb(0.2, 3.8, f.call(0.48), 2.2, 6.0, f.call(0.62), C.GUN_LIGHT),       # ammo box, hung under the receiver's left
-		_fb(0.2, 3.8, f.call(0.48), 2.2, 4.2, f.call(0.62), C.GUN),
+		_fbm(0.2, 3.8, f.call(0.48), 2.2, 6.0, f.call(0.62), C.GUN_LIGHT),       # ammo box, hung under the receiver's left
+		_fbm(0.2, 3.8, f.call(0.48), 2.2, 4.2, f.call(0.62), C.GUN),
 		_fb(1.25, 5.2, f.call(0.61), 1.75, 6.0, f.call(0.66), C.GUN),           # trigger guard
 		_fb(0.9, 4.0, f.call(0.66), 2.1, 6.0, f.call(0.72), C.GUN),             # black synthetic pistol grip, raked back
 		_fb(0.9, 2.6, f.call(0.67), 2.1, 4.0, f.call(0.73), C.GUN),
@@ -1560,7 +1635,7 @@ static func _rifle_m249(length: int, art := IRONS) -> Dictionary:
 		_fb(0.5, 6.2, f.call(0.36), 2.5, 9.6, f.call(0.72), C.GUN),             # receiver
 		_fb(0.9, 9.6, f.call(0.36), 2.1, 9.95, f.call(0.74), C.GUN),            # feed cover's top rail, for an optic
 		_fb(0.25, 6.8, f.call(0.6), 0.5, 8.2, f.call(0.68), C.GUN_LIGHT),       # magazine-well door, left side of the receiver
-		_fb(0.4, 2.4, f.call(0.39), 2.6, 6.2, f.call(0.58), C.GUN_LIGHT),        # 200-round box, directly under the receiver
+		_fbm(0.4, 2.4, f.call(0.39), 2.6, 6.2, f.call(0.58), C.GUN_LIGHT),        # 200-round box, directly under the receiver
 		_fb(0.4, 2.4, f.call(0.39), 2.6, 2.8, f.call(0.58), C.GUN),
 		_fb(1.25, 5.4, f.call(0.6), 1.75, 6.2, f.call(0.65), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.65), 2.1, 6.2, f.call(0.71), C.GUN),             # pistol grip, raked back (hand_points: 0.68)
@@ -1599,7 +1674,7 @@ static func _rifle_bullpup(length: int, art := IRONS) -> Dictionary:
 		_fb(1.05, 7.95, 0, 1.95, 9.05, 1.5, C.GUN),                             # muzzle device
 		_fb(0.75, 8.5, 0.5, 1.05, 9.25, 1.25, C.GUN_LIGHT),                     # front sling ring, on the muzzle device
 		_fb(1.2, 8.75, f.call(0.1), 1.8, 9.9, f.call(0.12), C.GUN),             # gas block
-		_fb(0.6, 7.0, f.call(0.12), 2.4, 9.6, f.call(0.33), C.GUN_LIGHT),       # short handguard, angular lines
+		_fb(0.6, 7.0, f.call(0.12), 2.4, 9.6, f.call(0.37), C.GUN_LIGHT),       # short handguard, angular lines, back under the support hand
 		_fb(0.9, 9.6, f.call(0.12), 2.1, 9.95, f.call(0.9), C.GUN),             # flat full-length rail, replacing the old carry handle
 		_fb(0.7, 7.0, f.call(0.33), 2.3, 9.6, n, C.GUN),                        # the long body, past the grip to the shoulder plate
 		_fb(0.75, 5.4, f.call(0.58), 2.25, 7.0, n, C.GUN),                      # its deep lower half: the mag well and the butt
@@ -1608,9 +1683,16 @@ static func _rifle_bullpup(length: int, art := IRONS) -> Dictionary:
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.4, f.call(0.71), C.GUN),             # pistol grip (the AR family's usual spot: hand_points)
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
 		_fb(0.9, 1.6, f.call(0.68), 2.1, 3.0, f.call(0.735), C.GUN),
-		_fb(0.9, 4.2, f.call(0.76), 2.1, 5.4, f.call(0.88), C.GUN_LIGHT),       # magazine, curving forward, hanging BEHIND the grip
-		_fb(0.9, 2.8, f.call(0.75), 2.1, 4.2, f.call(0.87), C.GUN_LIGHT),
-		_fb(0.9, 1.8, f.call(0.74), 2.1, 2.8, f.call(0.86), C.GUN),
+		_fbm(0.9, 4.2, f.call(0.76), 2.1, 5.4, f.call(0.88), C.GUN_LIGHT),      # magazine, curving forward, hanging BEHIND the grip
+		_fbm(0.9, 2.8, f.call(0.75), 2.1, 4.2, f.call(0.87), C.GUN_LIGHT),
+		_fbm(0.9, 1.8, f.call(0.74), 2.1, 2.8, f.call(0.86), C.GUN),
+		_fb(0.7, 5.0, f.call(0.745), 2.3, 5.4, f.call(0.895), C.GUN),           # the magazine housing's lip, round the well
+		_fb(0.55, 5.9, f.call(0.735), 0.75, 6.3, f.call(0.76), C.GUN_LIGHT),    # magazine release button, left, at the well's front
+		_fb(0.5, 7.2, f.call(0.745), 0.7, 7.6, f.call(0.775), C.GUN_LIGHT),     # bolt release plunger, upper left (pressed down)
+		_fb(2.3, 8.2, f.call(0.48), 2.8, 8.7, f.call(0.52), C.GUN),             # the cocking handle, right side ("comma")
+		_fb(2.3, 8.35, f.call(0.52), 2.45, 8.55, f.call(0.64), C.GUN_LIGHT),    # and its slot, running back
+		_fb(2.2, 7.7, f.call(0.62), 2.31, 8.5, f.call(0.72), C.EMPTY),          # ejection port, right side
+		_fb(0.55, 6.6, f.call(0.6), 2.45, 6.85, f.call(0.62), C.GUN_LIGHT),     # cross-bolt safety, through above the trigger
 		_fb(0.95, 9.6, f.call(0.9), 2.05, 9.9, n, C.GUN),                       # cheek piece over the butt, behind the rail
 		_fb(0.6, 5.2, n - 0.5, 2.4, 9.8, n, C.GUN_LIGHT),                       # shoulder plate: the body's own back end, no stock past it
 	]}
@@ -1634,10 +1716,10 @@ static func _rifle_carbine_short(length: int, art := IRONS) -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.11), 2.4, 9.6, f.call(0.3), C.GUN),
 		_fb(0.7, 7.0, f.call(0.3), 2.3, 9.6, f.call(0.74), C.GUN),              # upper receiver, on to the buffer tube
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
@@ -1673,10 +1755,10 @@ static func _rifle_piston_ar(length: int, art := IRONS) -> Dictionary:
 		_fb(2.15, 7.0, f.call(0.15), 2.4, 9.6, f.call(0.45), C.GUN),
 		_fb(0.7, 7.0, f.call(0.45), 2.3, 9.6, f.call(0.74), C.GUN),             # upper receiver
 		_fb(0.75, 5.6, f.call(0.47), 2.25, 7.0, f.call(0.72), C.GUN),           # lower receiver
-		_fb(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
-		_fb(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
-		_fb(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
-		_fb(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
+		_fbm(0.9, 4.2, f.call(0.5), 2.1, 5.6, f.call(0.575), C.GUN_LIGHT),       # magazine, curving forward
+		_fbm(0.9, 2.8, f.call(0.49), 2.1, 4.2, f.call(0.565), C.GUN_LIGHT),
+		_fbm(0.9, 1.4, f.call(0.475), 2.1, 2.8, f.call(0.55), C.GUN_LIGHT),
+		_fbm(0.85, 1.0, f.call(0.47), 2.15, 1.4, f.call(0.55), C.GUN),
 		_fb(1.25, 4.6, f.call(0.6), 1.75, 5.0, f.call(0.66), C.GUN),            # trigger guard
 		_fb(0.9, 4.4, f.call(0.66), 2.1, 5.6, f.call(0.71), C.GUN),             # pistol grip
 		_fb(0.9, 3.0, f.call(0.67), 2.1, 4.4, f.call(0.72), C.GUN),
@@ -1738,8 +1820,8 @@ static func _rifle_chassis_bolt(length: int, art := IRONS) -> Dictionary:
 		_fb(0.9, 8.6, f.call(0.12), 2.1, 8.95, f.call(0.72), C.GUN),            # full-length top rail
 		_fb(0.95, 8.95, f.call(0.4), 2.05, RAIL_Y, f.call(0.74), C.GUN),        # raised scope base on it, up to RAIL_Y (the optic sat in air)
 		_fb(0.7, 7.0, f.call(0.56), 2.3, 8.6, f.call(0.74), C.GUN),             # receiver, in the chassis
-		_fb(0.9, 4.0, f.call(0.6), 2.1, 7.0, f.call(0.68), C.GUN),              # detachable box magazine, protruding below
-		_fb(0.9, 4.0, f.call(0.6), 2.1, 4.4, f.call(0.68), C.GUN_LIGHT),
+		_fbm(0.9, 4.0, f.call(0.6), 2.1, 7.0, f.call(0.68), C.GUN),              # detachable box magazine, protruding below
+		_fbm(0.9, 4.0, f.call(0.6), 2.1, 4.4, f.call(0.68), C.GUN_LIGHT),
 		_fb(1.25, 5.8, f.call(0.68), 1.75, 6.2, f.call(0.73), C.GUN),           # trigger guard
 		_fb(0.9, 4.4, f.call(0.73), 2.1, 7.0, f.call(0.78), C.GUN_LIGHT),       # chassis pistol grip
 		_fb(2.3, 8.3, f.call(0.69), 2.7, 8.7, f.call(0.74), C.GUN),             # bolt shaft
@@ -1777,7 +1859,7 @@ static func _with_suppressor(spec: Dictionary) -> Dictionary:
 	var shift := n * SUPPRESSOR_FRAC
 	var boxes: Array = []
 	for b: Array in spec.boxes:
-		boxes.append([b[0] + Vector3(0, 0, shift), b[1] + Vector3(0, 0, shift), b[2]])
+		boxes.append([b[0] + Vector3(0, 0, shift), b[1] + Vector3(0, 0, shift)] + b.slice(2))  # (a magazine keeps its tag)
 	boxes.append(_fb(1.0, 7.9, 0, 2.0, 9.1, shift, C.GUN_LIGHT))                # suppressor body
 	boxes.append(_fb(1.1, 8.0, 0, 1.9, 9.0, shift * 0.1, C.GUN))                # end cap
 	var size: Vector3i = spec.size

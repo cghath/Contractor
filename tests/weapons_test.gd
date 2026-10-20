@@ -43,6 +43,7 @@ func _ready() -> void:
 	_test_data()
 	_test_rounds_and_rules()
 	_test_models()
+	_test_reloads()
 	_test_muzzle_point()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
@@ -181,6 +182,50 @@ func _test_models() -> void:
 
 ## The separate (face-connected) pieces of model `model`'s voxels: each one's voxel count and
 ## bounding box, in the spec's voxels.
+## Reloads (Captain, 2026-10-20: "reload anims also need work", and the L85's): every family's
+## keys run 0 to 1 in order from rest back to rest, the magazine comes out as a part of its own
+## (the weapon without it plus it: the same boxes), and an empty reload takes longer.
+func _test_reloads() -> void:
+	print("Reloads (2026-10-20)")
+	var ok := true
+	for fam: StringName in [Reloads.AR, Reloads.AK, Reloads.BULLPUP, Reloads.BELT, Reloads.BOLT, Reloads.BOLT_MAG, Reloads.PISTOL]:
+		for empty: bool in [false, true]:
+			var ks := Reloads.keys(fam, empty)
+			var last := -1.0
+			for k: Array in ks:
+				ok = ok and float(k[0]) > last and k.size() == 8
+				last = float(k[0])
+			ok = ok and float(ks[0][0]) == 0.0 and last == 1.0 and ks[0][1] == &"rest" and ks[-1][1] == &"rest" 				and (ks[-1][3] as Vector3) == Vector3.ZERO and (ks[-1][4] as Vector3) == Vector3.ZERO
+			var mid := Reloads.sample(ks, 0.5)
+			ok = ok and (mid.rot as Vector3).length() > 0.1  # tipped in, mid-reload
+	check(ok, "every family's reload keys run from rest to rest, tactical and empty")
+	var fams := {}
+	for id: StringName in [&"m4a1", &"akm", &"l85a2", &"pkm", &"m249", &"mosin9130", &"m17"]:
+		if ItemDB.has_item(id):
+			fams[id] = Reloads.family(ItemDB.get_item(id))
+	check(fams.get(&"m4a1") == Reloads.AR and fams.get(&"akm") == Reloads.AK and fams.get(&"l85a2") == Reloads.BULLPUP
+		and fams.get(&"pkm") == Reloads.BELT and fams.get(&"m249") == Reloads.BELT, "families: AR, AK, the L85 a bullpup, belt-feds (%s)" % fams)
+	for id: StringName in [&"m4a1", &"akm", &"l85a2", &"pkm", &"m249"]:
+		var model := VoxelArt.model_for(ItemDB.get_item(id))
+		var whole := (VoxelArt._spec(model).boxes as Array).size()
+		var mag := (VoxelArt._spec(VoxelArt.MAG + model).boxes as Array).size()
+		var rest := (VoxelArt._spec(VoxelArt.WITHOUT_MAG + model).boxes as Array).size()
+		var pts := VoxelArt.reload_points(model)
+		check(VoxelArt.has_magazine(model) and mag > 0 and rest > 0 and mag + rest == whole and pts.has("mag") and pts.has("bolt"),
+			"%s: its magazine comes out (%d of %d boxes), with places to take it and work the bolt" % [id, mag, whole])
+	var l85 := VoxelArt.model_for(ItemDB.get_item(&"l85a2"))
+	var lp := VoxelArt.reload_points(l85)
+	var lh := VoxelArt.hand_points(l85)
+	check((lp.mag as Vector3).z > (lh.grip as Vector3).z and lp.has("catch") and (lh.support as Vector3).z < (lh.grip as Vector3).z - 0.2,
+		"the L85: its magazine behind the grip, a bolt release to press, the support hand out on the handguard")
+	var plain := VoxelArt.model_for(ItemDB.get_item(&"m4a1"))
+	var suppressed := plain.substr(0, plain.rfind(":") + 1) + "sup"
+	check(VoxelArt._rifle_suppressed(suppressed) and VoxelArt.has_magazine(suppressed), "a suppressed rifle's magazine still comes out (%s)" % suppressed)
+	var m4 := ItemDB.get_item(&"m4a1")
+	check(Reloads.seconds(m4, true) > Reloads.seconds(m4, false) and is_equal_approx(Reloads.seconds(m4, false), float(m4.stats.reload_s)),
+		"an empty reload works the bolt: %.1f s against %.1f" % [Reloads.seconds(m4, true), Reloads.seconds(m4, false)])
+
+
 func _pieces(model: String) -> Array:
 	var spec := VoxelArt._spec(model)
 	var s: int = spec.get("sub", 1)

@@ -58,22 +58,19 @@ const SPRINT_TILT := Vector3(-0.5, 0.35, 0.25)
 ## The Captain's Star Citizen reference (2026-10-18, B:/Contractor-refs/captures/2026-10-18):
 ## not aiming or firing for LOW_READY_AFTER_S, the weapon eases down to a low ready (LOW_READY_VIEW
 ## down and in, LOW_READY_TILT: muzzle down, turned in) and comes straight back up to fire or aim;
-## jogging it takes JOG_CARRY of the sprint carry. Reloading it rolls onto its side (RELOAD_TILT:
-## muzzle down a little, turned, rolled RELOAD_ROLL), comes in RELOAD_VIEW, and the support hand
-## goes to the magazine well, pulls the magazine down out of view, brings the new one up and goes
-## back to the handguard (RELOAD_HAND_*, shares of the reload).
+## jogging it takes JOG_CARRY of the sprint carry. Reloading plays its family's keys (Reloads:
+## the weapon tipped in and pulled close, the support hand taking the magazine out, the new one
+## in with a look, seated and tugged, the bolt worked on an empty reload), the magazine a part of
+## its own that the hand carries (VoxelArt.MAG).
 const LOW_READY_AFTER_S := 1.5
 const LOW_READY_VIEW := Vector3(-0.03, -0.05, 0.02)
 const LOW_READY_TILT := Vector2(-0.28, 0.06)
 const JOG_CARRY := 0.45
-const RELOAD_VIEW := Vector3(-0.05, 0.04, 0.04)
-const RELOAD_TILT := -0.3
-const RELOAD_ROLL := 0.75
-const RELOAD_HAND_TO := 0.2
-const RELOAD_HAND_OUT := 0.4
-const RELOAD_HAND_IN := 0.62
-const RELOAD_HAND_BACK := 0.85
-const RELOAD_HAND_DROP := Vector3(0.02, -0.2, 0.06)
+## A reload's "pouch" anchor (Reloads): low by the belt, out of view, from the hand's rest.
+const RELOAD_POUCH := Vector3(-0.12, -0.38, 0.12)
+## A magazine falling free (an empty reload) drops this fast (m/s²) and tumbles (rad/s).
+const MAG_FALL := 9.8
+const MAG_TUMBLE := 3.0
 ## Each shot (Soldier.recoil_return growing) the view model kicks back VIEW_KICK_BACK (m) and its
 ## muzzle up VIEW_KICK_PITCH (radians) x the weapon's recoil against a rifle's, settling at
 ## VIEW_KICK_DECAY a second (aimed, a third of it: the stock's in the shoulder).
@@ -141,7 +138,13 @@ var _reload_from := 0.0    # Soldier._now() the reload started (its length: _rel
 var _reload_len := 1.0
 var _support_arm: Node3D   # the support hand's view forearm, and where it rests
 var _support_rest := Transform3D.IDENTITY
-var _magwell := Vector3.ZERO  # view-model space: the support palm's offset to the magazine well
+var _support_palm := Vector3.ZERO  # view-model space: the support palm at rest
+var _reload_points := {}  # VoxelArt.reload_points of the weapon in view
+var _reload_keys: Array = []  # Reloads.keys of the reload under way
+var _reload_pos := Vector3.ZERO  # its weapon offset and turn this frame (Reloads)
+var _reload_rot := Vector3.ZERO
+var _mag_old: Node3D  # the magazine in the weapon (VoxelArt.MAG), and the fresh one in hand
+var _mag_new: Node3D
 var _deaf := false
 ## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
 var placing := false
@@ -563,8 +566,9 @@ func _physics_process(delta: float) -> void:
 		_update_focus()
 		_update_aim(delta)
 		_try_fire()
+	_update_reload_hand()
 	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
-	tilt = minf(tilt, minf(LOW_READY_TILT.x * _low_w, RELOAD_TILT * _reload_w))
+	tilt = lerpf(minf(tilt, LOW_READY_TILT.x * _low_w), _reload_rot.x, _reload_w)
 	_vm_pitch = move_toward(_vm_pitch, tilt, delta * 6.0)
 	body.view_model.rotation.x = _vm_pitch
 	if body.recoil_return > _last_recoil + 0.0001:  # a shot: the weapon kicks
@@ -591,9 +595,8 @@ func _physics_process(delta: float) -> void:
 	_look_lag = _look_lag.lerp(Vector2.ZERO, 1.0 - exp(-LOOK_LAG_RETURN * delta))
 	var lag := _look_lag * (LOOK_LAG_AIMED if body.is_aiming else 1.0)  # the weapon trails the mouse
 	body.view_model.rotation.x += lag.y
-	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w + lag.x
-	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + RELOAD_ROLL * side * _reload_w - lag.x * 0.5
-	_update_reload_hand()
+	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w + _reload_rot.y * side * _reload_w + lag.x
+	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + _reload_rot.z * side * _reload_w - lag.x * 0.5
 	hud.update_status(body)
 
 
@@ -883,9 +886,9 @@ func _update_aim(delta: float) -> void:
 		_ready_hold = maxf(_ready_hold - delta, 0.0)
 	var low := _ready_hold <= 0.0 and _sprint_w < 0.2
 	_low_w = move_toward(_low_w, 1.0 if low else 0.0, delta * (2.5 if low else 10.0))  # down slowly, up at once
-	_reload_w = move_toward(_reload_w, 1.0 if body.is_reloading else 0.0, delta * 7.0)
+	_reload_w = move_toward(_reload_w, 1.0 if body.is_reloading else 0.0, delta * 12.0)  # (the keys ease it in and out)
 	var side_v := Vector3(-1.0 if body.left_handed else 1.0, 1, 1)
-	var settle := LOW_READY_VIEW * side_v * _low_w + RELOAD_VIEW * side_v * _reload_w
+	var settle := LOW_READY_VIEW * side_v * _low_w + Vector3(-_reload_pos.x, _reload_pos.y, _reload_pos.z) * side_v * _reload_w
 	_vm_base = _vm_base.lerp((aimed_view if body.is_aiming else hip_view) + lowered + pulled + settle, minf(delta * rate, 1.0))
 	body.view_model.position = _vm_base + weapon_bob() + Vector3(0.0, 0.0, VIEW_KICK_BACK * _view_kick * (0.35 if body.is_aiming else 1.0))
 
@@ -919,9 +922,11 @@ func _try_reload() -> void:
 	if body.inventory.spare_rounds(ammo) <= 0:
 		hud.flash("No spare magazines")
 		return
-	body._busy_until = now + body.reload_seconds(weapon)
+	var empty := body.inventory.rounds_in(body.active_slot) <= 0
+	body._busy_until = now + body.reload_seconds(weapon, empty)
 	_reload_from = now
-	_reload_len = maxf(body.reload_seconds(weapon), 0.1)
+	_reload_len = maxf(body.reload_seconds(weapon, empty), 0.1)
+	_reload_keys = Reloads.keys(Reloads.family(weapon), empty)
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
 
@@ -1020,6 +1025,9 @@ func _update_view_model() -> void:
 	_view_model_id = key
 	for child in body.view_model.get_children():
 		child.queue_free()
+	_mag_old = null
+	_mag_new = null
+	_reload_points = {}
 	if nade_up:
 		_build_nade_view()
 		return
@@ -1029,7 +1037,18 @@ func _update_view_model() -> void:
 		body.view_model.add_child(LauncherSight.view_node(weapon))  # placeholder launcher (wave 5)
 		return
 	var model := art
-	body.view_model.add_child(VoxelArt.instance(model, body.model.variant, VIEW_MODEL_LAYER))
+	if VoxelArt.has_magazine(model):
+		body.view_model.add_child(VoxelArt.instance(VoxelArt.WITHOUT_MAG + model, body.model.variant, VIEW_MODEL_LAYER))
+		_mag_old = VoxelArt.instance(VoxelArt.MAG + model, body.model.variant, VIEW_MODEL_LAYER)
+		_mag_old.name = "ViewMagazine"
+		_mag_new = VoxelArt.instance(VoxelArt.MAG + model, body.model.variant, VIEW_MODEL_LAYER)
+		_mag_new.name = "ViewMagazineNew"
+		_mag_new.visible = false
+		body.view_model.add_child(_mag_old)
+		body.view_model.add_child(_mag_new)
+	else:
+		body.view_model.add_child(VoxelArt.instance(model, body.model.variant, VIEW_MODEL_LAYER))
+	_reload_points = VoxelArt.reload_points(model)
 	var points := VoxelArt.hand_points(model)
 	if points.is_empty():
 		return
@@ -1049,28 +1068,60 @@ func _update_view_model() -> void:
 		if hand[1] == VIEW_SUPPORT_ELBOW:
 			_support_arm = forearm
 			_support_rest = forearm.transform
-			_magwell = (points.grip as Vector3).lerp(points.support, 0.35) + Vector3(0, -0.07, 0) - palm
+			_support_palm = palm
 
 
-## Reloading in first person: the support hand to the magazine well, the magazine down out of
-## view, the new one up, the hand back to the handguard (RELOAD_HAND_*).
+## Reloading in first person (Reloads): the reload's keys at its share so far move the support
+## hand between anchors on the weapon, set the weapon's offset and turn (_reload_pos, _rot) and
+## carry, drop or hide the magazines.
 func _update_reload_hand() -> void:
 	if not is_instance_valid(_support_arm):
 		return
-	var offset := Vector3.ZERO
+	var hand := Vector3.ZERO
+	var old_state := &"in"
+	var new_state := &"out"
+	var tip := 0.0
+	var dropped := 0.0
 	if body.is_reloading:
 		var u := clampf((Soldier._now() - _reload_from) / _reload_len, 0.0, 1.0)
-		if u < RELOAD_HAND_TO:
-			offset = _magwell * smoothstep(0.0, RELOAD_HAND_TO, u)
-		elif u < RELOAD_HAND_OUT:
-			offset = _magwell + RELOAD_HAND_DROP * smoothstep(RELOAD_HAND_TO, RELOAD_HAND_OUT, u)
-		elif u < RELOAD_HAND_IN:
-			offset = _magwell + RELOAD_HAND_DROP * (1.0 - smoothstep(RELOAD_HAND_OUT, RELOAD_HAND_IN, u))
-		elif u < RELOAD_HAND_BACK:
-			offset = _magwell
-		else:
-			offset = _magwell * (1.0 - smoothstep(RELOAD_HAND_BACK, 1.0, u))
-	_support_arm.transform = Transform3D(_support_rest.basis, _support_rest.origin + offset)
+		var ks: Array = _reload_keys if not _reload_keys.is_empty() else Reloads.keys(Reloads.AR, false)
+		var at := Reloads.sample(ks, u)
+		hand = (_reload_anchor(at.anchor_a) + (at.hand_a as Vector3)).lerp(_reload_anchor(at.anchor_b) + (at.hand_b as Vector3), at.w)
+		_reload_pos = at.pos
+		_reload_rot = at.rot
+		old_state = at.old
+		new_state = at.new
+		tip = at.tip
+		dropped = maxf(u - float(at.since), 0.0) * _reload_len
+	_support_arm.transform = Transform3D(_support_rest.basis, _support_rest.origin + hand)
+	# The magazines: in the weapon, carried (where the hand holds it), falling free, or gone.
+	var held := hand - _reload_anchor(&"mag")
+	if is_instance_valid(_mag_old):
+		_mag_old.visible = old_state != &"out"
+		match old_state:
+			&"hand":
+				_mag_old.transform = Transform3D(Basis(Vector3.RIGHT, tip), held)
+			&"drop":
+				_mag_old.transform = Transform3D(Basis(Vector3.RIGHT, -MAG_TUMBLE * dropped), Vector3(0.0, -0.5 * MAG_FALL * dropped * dropped, 0.03 * dropped))
+			_:
+				_mag_old.transform = Transform3D.IDENTITY
+	if is_instance_valid(_mag_new):
+		_mag_new.visible = new_state != &"out"
+		_mag_new.transform = Transform3D(Basis(Vector3.RIGHT, tip), held) if new_state == &"hand" else Transform3D.IDENTITY
+		if new_state == &"in" and is_instance_valid(_mag_old):
+			_mag_old.visible = false  # the fresh one's in its place
+
+
+## Where reload anchor `anchor` (Reloads) puts the support forearm, from its rest: a point on the
+## weapon (VoxelArt.reload_points) less where the palm rests, the pouch, or rest itself.
+func _reload_anchor(anchor: StringName) -> Vector3:
+	match anchor:
+		&"rest":
+			return Vector3.ZERO
+		&"pouch":
+			return RELOAD_POUCH * Vector3(-1.0 if body.left_handed else 1.0, 1, 1)
+	var point: Variant = _reload_points.get(String(anchor), _reload_points.get("mag", null))
+	return (point as Vector3) - _support_palm if point != null else RELOAD_POUCH * 0.3
 
 
 ## Tests: the first-person carry weights now {"low", "reload", "sprint", "kick"} and the support hand's offset from rest.

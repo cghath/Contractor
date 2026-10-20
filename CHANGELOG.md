@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Reloads reworked, and the L85's (Captain, 2026-10-20: "reload anims also need work")
+
+References he named: Sicario's AR reloads, AK and AR reloads, common media (Heat, Modern Warfare
+2019, Tarkov), and "make sure our L85 has a good reload and look too".
+
+#### Changed
+- **The magazine comes out.** It's now its own part in first person: the hand strips it out and
+  stows it (tactical), or it falls free (empty). A fresh one comes up from the pouch.
+- **Shared by every reload:** the weapon tips in so you glance at the well as the new magazine
+  goes in, which is seated with a bump and given a tug. The weapon comes back up with a small
+  overshoot.
+- **Per family, in first person:**
+  - AR: an empty reload ends with a slap on the bolt catch.
+  - AK: the magazine rocks out and rocks in. An empty reload strips the old magazine with the
+    new one, then racks the handle from underneath.
+  - L85: it comes out of the shoulder and the hand reaches back under to the magazine behind
+    the grip. An empty reload presses the bolt release, then taps the cocking handle forward.
+  - Belt-feds: the gun is charged when empty, the cover opened, the box swapped, the belt laid
+    and the cover slammed shut.
+  - Bolt-actions and pistols also have their own reloads.
+- **Empty reloads take longer**, because the bolt is worked: AR +0.3 s, AK and L85 +0.5 s,
+  belt-fed +0.5 s, pistol +0.2 s. A weapon can set its own "reload_empty_s". AI squadmates take
+  the same time.
+- **Third person:** the support hand now works the weapon's real magazine, behind the grip on
+  the L85.
+- **The L85A2 model:** a magazine housing lip, the magazine release, the bolt release plunger,
+  the right-side cocking handle and its slot, an ejection port and the cross-bolt safety. The
+  handguard now runs back under the support hand, which now holds the handguard.
+
 ### Movement feel pass (Captain, 2026-10-20: floaty/slidey, camera, speeds, clunky actions; Star Citizen as the target)
 
 #### Changed
