@@ -513,7 +513,7 @@ func _leave_or_warn(leaving: PackedStringArray, key: int, where: String) -> Stri
 ## not a wreck or burning, driven into the zone this deployment (_driven_in), and ours (the
 ## company's or friendly) or driven by one of the squad.
 func can_drive_out(v: Vehicle) -> bool:
-	if v == null or v.is_queued_for_deletion() or v.kind == Vehicle.HELICOPTER or v.wrecked or v.is_burning() \
+	if v == null or v.is_queued_for_deletion() or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] or v.wrecked or v.is_burning() \
 			or not _driven_in.has(v.get_instance_id()):
 		return false
 	if v.faction == &"player" or v.faction == &"friendly":

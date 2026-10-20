@@ -182,6 +182,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_gun()
 	if _want("vehicle_guns"):
 		await _test_vehicle_guns()
+		await _test_static_gun()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -1139,6 +1140,39 @@ func _test_gun() -> void:
 ## fires his M240H out of his own door from the hold's rounds, an AI on a door gun engages, and
 ## an AI squad getting in puts its autorifleman (never the medic) on the M2, which fires at an
 ## enemy in view; "Take the gun" sends a chosen squadmate to it.
+## G-25 part a (docs/static_weapons.md): an M2 on its tripod is a static vehicle: frozen where it
+## stands, a gunner seat and nothing to drive; a player fires it and an AI gunner mans it.
+func _test_static_gun() -> void:
+	print("Static weapons: the M2 on its tripod")
+	var at := level.ground_point(Vector3(-80, 0, -80))
+	var gun := layer.server_spawn("tripod_m2", Transform3D(Basis(), at), "", &"player", "test_tripod_m2")
+	await _wait_for(func() -> bool: return VehicleHull.is_ready("tripod_m2"), 20.0)
+	await _seconds(0.5)
+	check(gun != null and gun.kind == Vehicle.STATIC and gun.freeze and not gun.can_drive() and gun.gun_seats().size() == 1 and gun.gun_seats()[0] == 0,
+		"a static gun: frozen, won't drive, one gun seat (%s)" % [gun.gun_seats() if gun else []])
+	if gun == null:
+		return
+	gun.server_rearm()
+	check(gun.server_enter(player, 0) and gun.gunner() == player, "the player gets on the gun")
+	await _seconds(0.3)
+	var shot := gun.server_fire_gun(player, gun.barrel_direction())
+	check(not shot.is_empty(), "and fires it")
+	check(not gun.readout_parts(0).any(func(p: Dictionary) -> bool: return String(p.text).begins_with("Fuel")), "no fuel on its readout")
+	gun.server_exit(player)
+	var foe := _soldier("hostile", at + Vector3(0, 0.1, -60), "TripodFoe")
+	var crew := _soldier("friendly", at + Vector3(0, 0.1, 1.5), "TripodGunner")
+	check(gun.server_enter(crew, 0), "an AI gunner sits behind it")
+	var g := gun.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
+	await _wait_for(func() -> bool: return g != null and g.fired > 0, 8.0)
+	check(g != null and g.fired > 0, "and engages the enemy 60 m out (%d rounds)" % (g.fired if g else 0))
+	check(gun.global_position.distance_to(at) < 0.05, "it hasn't moved an inch firing (%.3f m)" % gun.global_position.distance_to(at))
+	gun.server_exit(crew)
+	crew.queue_free()
+	foe.queue_free()
+	gun.queue_free()
+	await _seconds(0.3)
+
+
 func _test_vehicle_guns() -> void:
 	print("Door guns, mounted-gun sound, AI gunners")
 	var v := _vehicle("range_matv")

@@ -761,7 +761,7 @@ func _take_vehicles_across(lvl: CompoundLevel, point: Dictionary) -> Array:
 	if layer == null or not point.get("pos") is Vector2:
 		return out
 	for v: Vehicle in layer.vehicles():
-		if v.wrecked or v.is_burning() or v.kind == Vehicle.HELICOPTER or v.has_meta(&"support") or not Extraction.inside(point, v.global_position):
+		if v.wrecked or v.is_burning() or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] or v.has_meta(&"support") or not Extraction.inside(point, v.global_position):
 			continue
 		var seats := {}
 		for s: Soldier in v.occupants():

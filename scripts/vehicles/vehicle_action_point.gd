@@ -100,13 +100,15 @@ static func report(v: Vehicle) -> String:
 	var lines := PackedStringArray([v.display_name() + (" (wreck)" if v.wrecked else "")])
 	if v.is_burning():
 		lines.append("On fire")
-	for z: StringName in [Vehicle.ZONE_ENGINE, Vehicle.ZONE_WHEELS, Vehicle.ZONE_FUEL, Vehicle.ZONE_HULL]:
+	var parts: Array = [Vehicle.ZONE_HULL] if v.kind == Vehicle.STATIC else [Vehicle.ZONE_ENGINE, Vehicle.ZONE_WHEELS, Vehicle.ZONE_FUEL, Vehicle.ZONE_HULL]
+	for z: StringName in parts:
 		var h := v.zone_health(z)
 		var state := "fine" if h >= 0.999 else ("wrecked" if h <= 0.0 else ("damaged (%d%%)" % roundi(h * 100.0)))
 		lines.append("%s: %s" % [VehicleService.zone_name(z, v.kind).capitalize(), state])
-	if not (v.battery_ok if v.multiplayer.is_server() else bool(v.net_state.get("battery", true))):
-		lines.append("Battery: dead")
-	lines.append("Fuel: %d of %d L" % [roundi(v.fuel_litres()), roundi(float(v.spec.get("fuel_l", 0.0)))])
+	if v.kind != Vehicle.STATIC:
+		if not (v.battery_ok if v.multiplayer.is_server() else bool(v.net_state.get("battery", true))):
+			lines.append("Battery: dead")
+		lines.append("Fuel: %d of %d L" % [roundi(v.fuel_litres()), roundi(float(v.spec.get("fuel_l", 0.0)))])
 	var hold := v.cargo() as VehicleCargo
 	if hold:
 		lines.append("Cargo: %.0f of %.0f L, %.0f of %.0f kg" % [hold.used_litres(), hold.capacity_l, hold.total_mass(), hold.max_kg])

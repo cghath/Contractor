@@ -84,7 +84,7 @@ func server_take_wheel(from: Soldier, point: Vector3, names: PackedStringArray) 
 	var v := layer().vehicle_near(point)
 	if squad == null:
 		return "No squad"
-	if v == null or v.kind == Vehicle.HELICOPTER:
+	if v == null or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC]:
 		return "No vehicle there to drive"
 	var seat := v.driver_seat()
 	if seat < 0:
@@ -207,7 +207,7 @@ func order_of(v: Vehicle) -> int:
 ## the other seats (VehicleLayer.server_board, walking over to it). Returns "" or why not.
 func server_squad_mount(by: Soldier, squad: Squad, point: Vector3) -> String:
 	var v := layer().vehicle_near(point, ELEMENT_PICK_M)
-	if v == null or v.kind == Vehicle.HELICOPTER:
+	if v == null or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC]:
 		return "no vehicle there"
 	var d := v.driver()
 	if d and not d.is_ai():
@@ -271,7 +271,7 @@ func driven_by(squad: Squad) -> Array[Vehicle]:
 	var members := squad.members()
 	for v: Vehicle in layer().vehicles():
 		var d := v.driver()
-		if not v.wrecked and v.kind != Vehicle.HELICOPTER and d and d.is_ai() and d.vitals.is_up() and d in members:
+		if not v.wrecked and not v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] and d and d.is_ai() and d.vitals.is_up() and d in members:
 			out.append(v)
 	return out
 

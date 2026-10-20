@@ -89,6 +89,9 @@ const PILOT := &"pilot"  # helicopters: AI only (Captain: aircraft are AI-flown)
 const WHEELED := "wheeled"
 const TRACKED := "tracked"
 const HELICOPTER := "helicopter"
+## A crew-served weapon on the ground (G-25, docs/static_weapons.md): no wheels or engine, frozen
+## where it was set up, one gunner seat; it packs into loads to move.
+const STATIC := "static"
 
 ## Suspension (Proposed): static sag under the vehicle's weight, travel above the wheel's rest
 ## height, droop below it, and the damping ratio.
@@ -459,9 +462,9 @@ func _ready() -> void:
 			AavGunner.attach(self)
 		if bay:
 			FfvGunner.attach(self)  # AI in its fire-from-vehicle seats fight out of the open bay
-		if wrecked:
+		if wrecked or kind == STATIC:
 			freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
-			freeze = true
+			freeze = true  # (a static weapon stays where it was set up: no drive step, no physics)
 	else:
 		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		freeze = true
@@ -748,7 +751,7 @@ func is_burning() -> bool:
 
 ## Whether it can drive now: an engine, fuel, a battery, wheels or tracks, not a wreck.
 func can_drive() -> bool:
-	return not wrecked and kind != HELICOPTER and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
+	return not wrecked and kind != HELICOPTER and kind != STATIC and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
 		and (battery_ok if multiplayer.is_server() else bool(net_state.get("battery", true))) \
 		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0)
 
@@ -3040,8 +3043,9 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 	var parts: Array[Dictionary] = [{"text": "%s, %s" % [display_name(), seat_name(seat)], "style": &""}]
 	if seat_kind(seat) == DRIVER:
 		parts.append({"text": "%d km/h" % roundi(absf(forward_speed()) * 3.6), "style": &""})
-	parts.append({"text": "Fuel %d L" % roundi(fuel_litres()), "style": &""})
-	for z: StringName in [ZONE_ENGINE, ZONE_WHEELS, ZONE_HULL]:
+	if kind != STATIC:
+		parts.append({"text": "Fuel %d L" % roundi(fuel_litres()), "style": &""})
+	for z: StringName in ([ZONE_HULL] if kind == STATIC else [ZONE_ENGINE, ZONE_WHEELS, ZONE_HULL]):
 		var h := zone_health(z)
 		if h < 0.999:
 			parts.append({"text": "%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)], "style": &"warn" if h < 0.35 else &""})

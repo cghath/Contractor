@@ -30,6 +30,7 @@ const SCHEMES := {
 }
 ## Models and the schemes they come in (the first is the default).
 const MODELS := {
+	"tripod_m2": ["od", "desert"],
 	"uh60": ["army", "od"],
 	"vtol_petrel": ["stealth"],
 	"vtol_razorback": ["desert_camo"],
@@ -184,6 +185,7 @@ static func _shape_for(model: String) -> Canvas:
 		"maxxpro": return _maxxpro()
 		"matv": return _matv()
 		"technical": return _technical("dshk")
+		"tripod_m2": return _tripod_m2()
 		"bradley": return _bradley()
 		"abrams": return _abrams()
 	if model.begins_with("technical_"):
@@ -1875,6 +1877,28 @@ static func _pickup(c: Canvas, base: String) -> float:
 ## A technical: a pickup plus the weapon fitted in its bed. Weapons seen across the Middle
 ## East: DShK 12.7 mm, ZU-23-2 twin 23 mm cannon, SPG-9 73 mm and M40 106 mm recoilless
 ## rifles, a Type 63 twelve-tube 107 mm rocket launcher, and the ZPU-2 twin 14.5 mm.
+## An M2HB .50 on its M3 tripod (G-25, a static weapon): three splayed legs, the gun on the
+## pintle with its ammo can, spade grips at the back for a gunner sitting behind it. 1.2 x 1.2 x
+## 2.0 m canvas; the gun turns on the pintle (VehicleTurret: pivot and gun box in the spec).
+static func _tripod_m2() -> Canvas:
+	var c := Canvas.new(Vector3i(24, 24, 40), 0.05)
+	var head := Vector3(0, 0.45, 1.2)
+	c.mbar(head, Vector3(0, 0.0, 0.35), 0.03, P.METAL)  # front leg
+	c.mbar(head, Vector3(-0.45, 0.0, 1.85), 0.03, P.METAL)  # rear legs
+	c.mbar(head, Vector3(0.45, 0.0, 1.85), 0.03, P.METAL)
+	c.mbar(Vector3(-0.38, 0.12, 1.75), Vector3(0.38, 0.12, 1.75), 0.025, P.METAL)  # traversing bar
+	c.mbar(head, Vector3(0, 0.55, 1.2), 0.04, P.METAL)  # pintle
+	c.mbox(-0.1, 0.55, 1.0, 0.1, 0.72, 1.6, P.GUN)  # receiver
+	c.mbox(-0.03, 0.6, 0.12, 0.03, 0.66, 1.0, P.GUN)  # barrel
+	c.mbox(-0.045, 0.585, 0.08, 0.045, 0.675, 0.16, P.GUN)  # muzzle booster
+	c.mbox(-0.05, 0.58, 0.95, 0.05, 0.68, 1.05, P.GUN)  # barrel support
+	c.mbox(-0.28, 0.48, 1.1, -0.1, 0.64, 1.4, P.SEAT)  # ammo can
+	c.mbar(Vector3(-0.08, 0.62, 1.6), Vector3(-0.08, 0.6, 1.72), 0.025, P.GUN)  # spade grips
+	c.mbar(Vector3(0.08, 0.62, 1.6), Vector3(0.08, 0.6, 1.72), 0.025, P.GUN)
+	c.mbox(-0.04, 0.72, 1.3, 0.04, 0.78, 1.4, P.BLACK)  # rear sight
+	return c
+
+
 static func _technical(weapon: String) -> Canvas:
 	var c := Canvas.new(Vector3i(42, 64, 108), 0.05)
 	var base := "lc79" if weapon in ["zu23", "rockets", "zpu"] else "hilux"
