@@ -1924,7 +1924,45 @@ func _test_squad_drivers() -> void:
 	why = drivers.server_squad_dismount(player, element)
 	await get_tree().physics_frame
 	check(why == "" and men.all(func(m: Soldier) -> bool: return v.seat_of(m) < 0), "and gets out on the word (%s)" % why)
-	for m in men:
+	# Audit A2-10: its men away from the vehicle are sent over by their own squad (the player's
+	# picks only its own men), get in at the door, and one more than it seats stays out.
+	door2 = layer._nearest_door(v, men[0].global_position)
+	for k in men.size():
+		men[k].global_position = door2 + Vector3(0, 0.1, 0.6 * k)
+	var far: Array[Soldier] = []
+	for k in 2:
+		var man := _soldier("friendly", v.global_position + Vector3(-25, 0.1, 3.0 * k), "ElemFar%d" % k)
+		man.role = Roles.MEDIC  # (never the one put at the wheel: the men by the door take it)
+		SquadAI.of(man).squad = element
+		SquadAI.of(man).on_order(Squad.Order.HOLD, man.global_position)
+		far.append(man)
+	await get_tree().physics_frame
+	why = drivers.server_squad_mount(player, element, v.global_position)
+	check(why == "" and men.all(func(m: Soldier) -> bool: return v.seat_of(m) >= 0) and layer.boarding_count() == 2
+		and far.all(func(m: Soldier) -> bool: return SquadAI.of(m).order == Squad.Order.MOVE),
+		"an element told to mount: the men away from it are told to walk over (%s; orders %s, %d on their way)" % [why,
+			far.map(func(m: Soldier) -> int: return SquadAI.of(m).order), layer.boarding_count()])
+	var fillers: Array[Soldier] = []
+	var free_seats := func() -> int:
+		var n := 0
+		for i in v.spec.seats.size():
+			if v.occupant(i) == null and not v.exo_seat(i):
+				n += 1
+		return n
+	while free_seats.call() > 1:
+		var filler := _soldier("friendly", v.global_position + Vector3(0, 0.1, 8), "ElemFill%d" % fillers.size())
+		fillers.append(filler)
+		if not v.server_enter(filler):
+			break
+	far[0].global_position = layer._nearest_door(v, far[0].global_position) + Vector3(0, 0.1, 0)  # (no navmesh here: he's there)
+	await _wait_for(func() -> bool: return v.seat_of(far[0]) >= 0, 3.0)
+	check(free_seats.call() == 0 and v.seat_of(far[0]) >= 0 and layer.boarding_count() == 1, "at the door he gets in, in its last seat")
+	far[1].global_position = layer._nearest_door(v, far[1].global_position) + Vector3(0, 0.1, 0)
+	await _wait_for(func() -> bool: return layer.boarding_count() == 0, 3.0)
+	check(v.seat_of(far[1]) < 0 and layer.boarding_count() == 0, "full: the other finds no seat at the door, and stays out")
+	for s: Soldier in v.occupants():
+		v.server_exit(s)
+	for m in men + far + fillers:
 		m.queue_free()
 	element.queue_free()
 	# By road (RoadRoute): a long drive with a road near both ends goes along it.

@@ -77,6 +77,7 @@ func _ready() -> void:
 	_test_no_revive()
 	await _test_medic_choice()
 	await _test_triage()
+	await _test_carer_boards()
 	_test_medic_keeps_kit()
 	_test_hold_for_medic()
 	_test_medic_fights_only_close()
@@ -242,6 +243,56 @@ func _test_triage() -> void:
 	echo.vitals.server_set_triage(Vitals.TRIAGE_EXPECTANT)
 	check(ai._find_casualty() == echo, "expectant alone is still tended (%s)" % _name(ai._find_casualty()))
 	echo.vitals.server_reset_health()
+	_restore(saved)
+	_unfreeze()
+	await _seconds(0.5)
+
+
+## Audit A2-12: a carer who gets into a vehicle (its brain is off while seated) lets the
+## casualty go, during treatment or on the way to them, so a backup answers; a claim a seated
+## carer still holds counts for nobody.
+func _test_carer_boards() -> void:
+	print("A carer who boards lets the casualty go")
+	_freeze()
+	var delta := _ai("Delta")
+	var golf := _ai("Golf")
+	var saved := _positions()
+	_place(golf, Vector3(6, 0.1, 27))
+	_place(delta, Vector3(10, 0.1, 26))
+	delta.vitals.server_damage(70.0)
+	await _frames(2)
+	var layer := VehicleLayer.of(level)
+	var v := layer.server_spawn("matv", Transform3D(Basis.IDENTITY, Vector3(16, 0.6, 32)), "", &"player")
+	v.freeze = true
+	var golf_ai := SquadAI.of(golf)
+	golf_ai._take_casualty(delta)
+	golf_ai.care = SquadAI.Care.TREAT
+	check(SquadAI._carer_of(delta) == golf, "the medic is treating the casualty (%s)" % _name(SquadAI._carer_of(delta)))
+	check(v.server_enter(golf), "and gets into the M-ATV")
+	var backup := SquadAI.responder_for(delta)
+	check(golf_ai.casualty == null and golf_ai.care == SquadAI.Care.NONE and delta.care_by != golf and SquadAI._carer_of(delta) == null,
+		"seated, he has let the casualty go (care %d, claim %s)" % [golf_ai.care, _name(delta.care_by)])
+	check(backup != null and backup != golf and SquadAI.of(backup)._find_casualty() == delta,
+		"and a backup answers (%s)" % _name(backup))
+	golf_ai.casualty = delta  # a claim left by a seated carer some other way: nobody's
+	golf_ai.care = SquadAI.Care.TREAT
+	delta.care_by = golf
+	check(SquadAI._carer_of(delta) == null, "a seated carer's claim counts for nobody (%s)" % _name(SquadAI._carer_of(delta)))
+	golf_ai.casualty = null
+	golf_ai.care = SquadAI.Care.NONE
+	delta.care_by = null
+	v.server_exit(golf)
+	# On his way to the casualty, boarding by an order (VehicleLayer.server_board, at a door).
+	_place(golf, layer._nearest_door(v, golf.global_position) + Vector3(0, 0.1, 0))
+	golf_ai._take_casualty(delta)
+	check(golf_ai.care == SquadAI.Care.REACH and SquadAI._carer_of(delta) == golf, "on his way to the casualty again")
+	check(layer.server_board(player, golf, v) and v.seat_of(golf) >= 0, "told to mount, he gets in at the door")
+	backup = SquadAI.responder_for(delta)
+	check(golf_ai.casualty == null and SquadAI._carer_of(delta) == null and backup != null and backup != golf
+		and SquadAI.of(backup)._find_casualty() == delta, "and leaves the casualty to a backup (%s)" % _name(backup))
+	v.server_exit(golf)
+	v.queue_free()
+	delta.vitals.server_reset_health()
 	_restore(saved)
 	_unfreeze()
 	await _seconds(0.5)
