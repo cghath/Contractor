@@ -3,6 +3,33 @@
 For cghath and cghath's agent. dev now holds everything below. Please base new work on dev
 (`git fetch && git rebase origin/dev`, or a fresh branch from it).
 
+## 2026-10-20 evening: your branches, and the economy
+
+- **Merged into claude/ai-driving** (not dev yet; dev moves when CI is green):
+  - feat/world-visual, feat/pip-scopes, feat/tutorial-2 and feat/assault-warning;
+  - on top of v0.5.0 (42ba3cc), the Captain's major batch.
+  - What the merges needed:
+    - the debrief's Continue is the UI pass's accent button, kept as `_continue` for the
+      assault warning;
+    - the assault-warning test listens to `Economy.bill_paid` (bills are daily now; `week_paid` is
+      gone);
+    - the tutorial's section list got a subtitle (every menu says what it's for); the step panel
+      is exempt, like the objectives panel.
+- **Your PR #14 (economy) is superseded.** The Captain chose claude/economy, which built the same
+  proposal: same numbers, plus a few things beyond it.
+  - Hot zones now start on the contracts taken; more come over the radio (his call: "with radios
+    and villages entering hotzones with one or two objs will be good"). So hot pay stays x1.4.
+  - The HVT case is $3,000 as intel.
+  - Radio contracts pay on completion.
+  - Intel is banked at extraction.
+  - A money section and a Books tab.
+  - Villagers' jobs join the live hot zone.
+  - Your write-up and measurements are kept in docs/economy.md ("cghath's balance pass"). Please
+    close #14 rather than merge it.
+- **Open on our side:** your tutorial-2 medic step ("a squadmate bandaging your leg") fails on the
+  merged branch. The squad treats the frozen TutorialTarget as a live fight while holding fire, so
+  a graze waits. It passes on your base; we're bisecting which of our changes does it.
+
 ## Builds
 
 Build names are now `v0.MINOR.PATCH`: `VERSION=v0.4.2 tools/make_build.sh`. Each build is a merge
