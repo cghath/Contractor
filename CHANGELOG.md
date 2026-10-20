@@ -18,6 +18,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   frame and a mil scale, and the weapon lowered. Press B again, sprint, or press a weapon key to
   lower them. You walk slowly and can't fire while they're up. Seated, B is still the vehicle
   view. The key can be rebound in Settings.
+- Auto-walk: press = to walk forward hands-free. Sprint still sprints and A/D still steer. W, S
+  or = again stops it, and so does going down or getting in a vehicle. Rebindable, and on the
+  pad wheel.
 
 #### Fixed
 - AI no longer slide with their legs still at high frame rates. The model measured speed over

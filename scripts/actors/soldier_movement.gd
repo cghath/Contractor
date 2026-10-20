@@ -190,6 +190,10 @@ var lean := 0.0
 var mounted := false
 ## Owner-side: 0..1, drained by sprinting and jumping (the legs).
 var stamina := 1.0
+## Owner-side (a human's): auto-walk is on (Captain, 2026-10-20). The body walks forward with no
+## key held; the sprint key still sprints and A/D still steer. W or S, going down or getting in
+## a vehicle turns it off (PlayerInput toggles it on the auto_walk key).
+var auto_walk := false
 var is_sprinting := false
 ## Owner-side: 0..1 of the way from a jog to full sprint speed (MovementRules.SPRINT_RAMP_S).
 var sprint_ramp := 0.0
@@ -290,6 +294,11 @@ func step(delta: float) -> void:
 		_read_keys(adjusting)
 		if not adjusting:  # Caps Lock + WASD changes stance instead of moving
 			input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+			if auto_walk:
+				if Input.is_action_just_pressed(&"move_forward") or Input.is_action_just_pressed(&"move_back") 						or not body.vitals.is_up() or is_instance_valid(body.vehicle):
+					auto_walk = false
+				else:
+					input.y = -1.0
 		if body.carry_mode == Soldier.DRAG:
 			# Dragging, the view faces the casualty behind the body: keys move relative to the
 			# view, and only away from the casualty (back) or to the sides, never onto it.

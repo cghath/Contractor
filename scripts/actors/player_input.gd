@@ -288,6 +288,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_start_placing()
 		else:
 			equip_nade()
+	elif event.is_action_pressed(&"auto_walk") and not is_instance_valid(body.vehicle):
+		body.movement.auto_walk = not body.movement.auto_walk and body.vitals.is_up()
+		hud.flash("Auto-walk on (W or S to stop)" if body.movement.auto_walk else "Auto-walk off")
 	elif event.is_action_pressed(&"binoculars") and not is_instance_valid(body.vehicle):
 		_set_binoculars(not body.binoculars_up)
 	elif event.is_action_pressed(&"nvg_toggle"):
