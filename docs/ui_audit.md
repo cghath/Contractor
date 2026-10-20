@@ -149,11 +149,15 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 
 ### Theme: `themes/contractor_ui.tres`
 
-- **Panels:** dark translucent olive, `0.07,0.08,0.07` at 90%, with a 1 px `0.32,0.35,0.29` border, 4 px corners and 16/14 px content margins. The `SolidPanel` variation is opaque, for a screen opened over another screen.
-- **Text:** `0.90,0.91,0.87` with a soft shadow. Sizes are 16 body (the theme default), 14 small, 20 heading and 26 title. Nothing goes below 14.
-- **One accent:** amber `0.91,0.67,0.25`. It is used for the button hover border, pressed buttons, the 2 px focus ring, headings, the selected tab, progress fill and key chips.
-- **Status colours:** good `0.47,0.76,0.42` and warn `0.93,0.45,0.36`.
-- **Label variations** (set with `theme_type_variation`): `TitleLabel`, `HeadingLabel`, `HintLabel`, `WarnLabel` and `KeyLabel`.
+ui-modern (2026-10-20): the theme is written by `tools/gen_ui_theme.py` (run it with the repo root as its argument) from one palette; edit the script, not the .tres, (the values below, kept in step with the `UiKit` colour constants), so every state matches.
+
+- **Font:** Inter 4.001 (SIL Open Font License, `fonts/Inter-Variable.ttf` and `fonts/OFL.txt`), one variable font in three weights: `themes/inter_body.tres` (500, the theme default), `inter_strong.tres` (600: headings, buttons, tabs, HUD text) and `inter_bold.tres` (700: titles, alert lines, key chips). Drawn UIs use `UiKit.FONT_REGULAR`, `FONT_STRONG` and `FONT_BOLD`, or apply the theme to themselves (the medical and interaction menus). The project's default font is not changed: on a fresh checkout it would load before the font is imported.
+- **Panels:** dark translucent olive, `0.065,0.075,0.065` at 93%, with a 1 px `0.30,0.33,0.27` border, 6 px corners, 18/16 px content margins and a soft 10 px shadow. `SolidPanel` is opaque, for a screen opened over another screen. `CardPanel` is a lighter box inside a panel (the loadout columns). `HelpPanel` is the "?" help box, with an accent edge on its left.
+- **Text:** `0.92,0.93,0.89` with a soft shadow. Sizes are 16 body (the theme default), 14 small, 20 heading and 26 title; `SubtitleLabel` (16, dim) is a screen's "what it's for" line. Nothing goes below 14.
+- **One accent:** amber `0.93,0.69,0.27` (hot `1.0,0.80,0.42`). It is used for the button hover border, pressed buttons, the focus ring, headings, the selected tab's underline, progress fill and key chips.
+- **Buttons:** `Button` (the default), `AccentButton` (the main action: amber with dark text), `DangerButton` (can't be undone: a red edge), `RowButton` (a flat row that lights up on hover) and `HelpButton` (the round "?").
+- **Status colours:** good `0.50,0.80,0.45`, warn `0.95,0.47,0.38` and bad `0.88,0.25,0.20` (`UiKit.BAD`).
+- **Label variations** (set with `theme_type_variation`): `TitleLabel`, `HeadingLabel`, `SubtitleLabel`, `HintLabel`, `WarnLabel`, `GoodLabel`, `MutedLabel`, `StatLabel`, `KeyLabel` and `HelpTitleLabel`. The HUD's are `HudLabel` (20), `HudSmallLabel` (16), `HudAlertLabel` (28), `HudWarnLabel`, `HudSmallWarnLabel` and `HudAccentLabel`, all outlined; `ui_test` checks their sizes match `UiKit.FONT_HUD`, `FONT_HUD_SMALL` and `FONT_HUD_ALERT`.
 - **Spacing scale:** 4, 8, 12 and 20 (`UiKit.SPACE_XS`, `SPACE_S`, `SPACE_M`, `SPACE_L`). Boxes are spaced at 8 and keep `UiKit.EDGE` = 24 from the window edge.
 - **Scale:** every size is a logical pixel, so the Menu and HUD size setting (`content_scale_factor`) scales all of it.
 
@@ -181,6 +185,12 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | `UiKit.stat(caption, value)` | a small dim caption over an 18 px figure (`StatLabel`), for a summary header in a flow |
 | `UiKit.action_row(text, controls)` | a thing's text over a wrapping row of its buttons (meta `controls`), so many buttons never run off a narrow panel |
 | `UiKit.fit_label_text(label, cap)` | a one-line label cut with "..." past `cap` px and whole in its tooltip, as wide as its text up to `cap` (otherwise a trimmed label shrinks to nothing in a flow) |
+| `UiKit.header(title, subtitle, help, keys, centred)` | a screen's title with a "?" button, its one-line subtitle, and the help panel the button shows (how it works, a line each, and its keys). Use it where the title went; every screen has one. |
+| `UiKit.subtitle(t)` / `help_panel(lines, keys)` / `help_button(panel)` / `key_hints(keys)` | the header's parts, for a screen whose title is built by hand |
+| `UiKit.accent_button(...)` / `danger_button(...)` | `UiKit.button` in the main-action or can't-be-undone style |
+| `UiKit.search_field(placeholder, changed)` / `UiKit.matches(name, query)` | a search box (calls `changed` with the lowered text; Esc clears it first) and the match rule (every word somewhere in the name) |
+| `UiKit.picker(options, picked, tip, now)` | a drop-down of `[value, label]` pairs that calls `picked` with the value |
+| `UiKit.confirm(parent, question, ok, on_ok, danger)` | asks before something that can't be undone: a modal box with Cancel and `ok` (Enter confirms, Esc cancels) |
 
 ### Pattern: a menu screen in the kit (see `pause_menu.gd`)
 

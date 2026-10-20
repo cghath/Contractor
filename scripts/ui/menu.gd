@@ -17,6 +17,29 @@ const NEW_CAMPAIGN_CONFIRM := "Click again to archive the campaign and start a n
 ## button and its own save. Never in the campaign: hosted only from the Test zones button.
 const FOREST_ZONE := "forest_experimental"
 const FOREST_BUTTON_TEXT := "Host Experimental forest (dense woods, test)"
+## Every button's tooltip, in plain words (ui-modern, Captain 2026-10-20: "all menus should
+## have better explanations"), by its text.
+const TIPS := {
+	"Settings": "Video, sound, controls, keys and the HUD layout.",
+	"Tutorial (new here? start with this)": "A guided first mission: moving, shooting, the squad, medical and the inventory, a step at a time.",
+	"Play (host a session)": "Start a session on the compound zone. Friends can join you with your address.",
+	"Play the test contract (briefing, extraction)": "A short contract with a briefing, objectives and an extraction, to try the full loop.",
+	"Join someone's session": "Join the session hosted at the address above (127.0.0.1 is this PC).",
+	"Campaign: host at the base (FOB)": "Run the company: hire people, buy kit, take contracts and deploy from the base. It saves as you go.",
+	"Contract board (offline)": "Look at the contract board, the company's money and the hot zones without starting a session.",
+	"Reset plain-session compound save (not the campaign)": "Puts the plain session's compound back as new. The campaign isn't touched.",
+	"Host test zone (2 km, world scale)": "A big empty test zone at world scale, for trying vehicles and long-range shooting.",
+	"Host Old Quarter (city hot zone, test)": "A procedural city hot zone, to look at without waiting for a contract.",
+	"Host Harbour yard (town, test)": "A procedural harbour town, to look at without waiting for a contract.",
+	"Host Experimental forest (dense woods, test)": "The dense woods test zone. Never part of the campaign.",
+	"Host vehicle range (wave 5)": "A range with every vehicle to drive and shoot.",
+}
+const HELP := [
+	"Play hosts a session on this PC; anyone can join it with your address (Join someone's session). Solo is just a session nobody joined.",
+	"Campaign runs the company from its base: hire, kit out, take contracts and deploy. Everything is saved; New campaign archives the old saves (nothing is deleted).",
+	"Test zones are for looking at places and vehicles; they don't count for the campaign.",
+	"Your role and shooting hand are what you play as when you join or host.",
+]
 
 ## Main-menu role picker (sets Roles.local_choice).
 var role_picker: OptionButton
@@ -46,7 +69,8 @@ func _ready() -> void:
 	# Captain, 2026-10-14: "all of the UIs need a pass"): the one long column of 20 controls,
 	# play and debug mixed, is now sections in two columns that fold into one on a narrow window.
 	var box := UiKit.screen(self, 780.0)
-	box.add_child(UiKit.title("CONTRACTOR"))
+	box.add_child(UiKit.header("CONTRACTOR", "Co-op private military contracting. Host, join, or run the company's campaign.",
+		PackedStringArray(HELP), [["Tab / arrows", "Move"], ["Enter", "Press"]]))
 	box.add_child(UiKit.hint("v%s (gray box)" % ProjectSettings.get_setting("application/config/version", "dev"), true))
 	var columns := HFlowContainer.new()
 	columns.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
@@ -323,7 +347,10 @@ func _hand_picker() -> Control:
 
 
 func _button(text: String, action: Callable) -> Button:
-	return UiKit.button(text, action)
+	var b := UiKit.button(text, action, TIPS.get(text, ""))
+	if text == "Campaign: host at the base (FOB)" or text == "Tutorial (new here? start with this)":
+		b.theme_type_variation = &"AccentButton"  # the two ways in
+	return b
 
 
 func _hint(text: String) -> Label:

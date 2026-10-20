@@ -29,7 +29,12 @@ func _ready() -> void:
 	# 620x560 box put its title and filter above a 1280x720 window at a 1.5 Menu and HUD size).
 	add_child(UiKit.dim(0.45))
 	var box := UiKit.screen(self, 620.0, true)
-	box.add_child(UiKit.title("Base shop"))
+	box.add_child(UiKit.header("Base shop", "Buy kit into the company stash with company cash, and sell contraband to the fixer.",
+		PackedStringArray(["Pick a kind under Show, pick an item in the list, set how many, then Buy: it goes into the stash, ready for the loadouts.",
+			"Hover or pick an item for what it is and how it's used. Prices are what the shop charges today.",
+			"Contraband found on deployments can't go on the open market: the fixer buys it, one at a time, at the price shown.",
+			"Support calls aren't bought here: they're paid when called, from the contract's support budget first."]),
+		[["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))
 	_cash = UiKit.text("")
 	box.add_child(_cash)
 	_filter = OptionButton.new()
@@ -38,10 +43,12 @@ func _ready() -> void:
 		_filter.add_item(type.capitalize())
 		_filter.set_item_metadata(_filter.item_count - 1, type)
 	_filter.item_selected.connect(func(_i: int) -> void: refresh())
+	_filter.tooltip_text = "Show one kind of item only"
 	box.add_child(UiKit.row("Show", _filter, 80.0))
 	_list = UiKit.list(120.0)
 	UiKit.fit_height(_list, 320.0, 330.0)  # the list gives way first on a short window
 	_list.item_selected.connect(_show_info)
+	_list.tooltip_text = "What the shop sells, with today's price. Pick one, then Buy"
 	box.add_child(_list)
 	_info = UiKit.hint("Hover an item for what it is and how to use it.")
 	box.add_child(_info)
@@ -49,13 +56,15 @@ func _ready() -> void:
 	_count.min_value = 1
 	_count.max_value = 100
 	_count.tooltip_text = "How many to buy"
-	box.add_child(UiKit.button_row([_count, UiKit.button("Buy", buy_selected), UiKit.button("Close", close)]))
+	box.add_child(UiKit.button_row([_count, UiKit.accent_button("Buy", buy_selected, "Buy that many of the picked item into the stash"),
+		UiKit.button("Close", close, "Back to the contract board (Esc)")]))
 	# Wave 6: contraband in the stash, and what the fixer who buys it pays (Fixers).
 	box.add_child(UiKit.heading("Contraband in the stash"))
 	_contra = UiKit.list(60.0)
 	UiKit.fit_height(_contra, 90.0, 100.0)
 	box.add_child(_contra)
-	box.add_child(UiKit.button_row([UiKit.button("Sell one to the fixer", sell_contraband_selected)]))
+	_contra.tooltip_text = "Contraband in the stash and what the fixer pays for one"
+	box.add_child(UiKit.button_row([UiKit.danger_button("Sell one to the fixer", sell_contraband_selected, "Sell one of the picked contraband to the fixer, for the price shown")]))
 	box.add_child(UiKit.hint("Support calls (paid when called, from the contract's support budget first): " + ", ".join(
 		Prices.support_kinds().map(func(k: Variant) -> String: return "%s $%s" % [String(k), DebriefCalc.money(Prices.support_price(String(k)))]))))
 	_notice = UiKit.text("")

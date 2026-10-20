@@ -1317,6 +1317,8 @@ static func item_of(action: Dictionary) -> StringName:
 static func entry_hint(action: Dictionary) -> String:
 	if action.is_empty():
 		return ""
+	if String(action.get("hint", "")) != "":  # an entry that says what it does (a base terminal)
+		return String(action.hint)
 	var id := item_of(action)
 	if id == &"":
 		return ""

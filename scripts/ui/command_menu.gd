@@ -665,5 +665,5 @@ func _restyle() -> void:
 		if bool(f.get_meta(&"disabled", false)):
 			label.theme_type_variation = &"MutedLabel"
 		else:
-			label.theme_type_variation = &"HeadingLabel" if i == _highlight else &""
+			label.theme_type_variation = &"AccentLabel" if i == _highlight else &""  # body size: the row keeps its height
 		i += 1

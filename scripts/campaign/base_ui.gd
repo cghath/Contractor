@@ -24,6 +24,23 @@ const PAGE_HEIGHT := 620.0
 ## What else is in the panel above and below the pages (header, status, key hint, margins), so
 ## the pages leave room for it on a short window.
 const PAGE_RESERVE := 170.0
+## What each page is for, one line, over its rows and on its tab's tooltip (ui-modern, Captain
+## 2026-10-20: "all menus should have better explanations").
+const ABOUT := {
+	"squad": "The held contracts, who deploys and how they're kitted, raids, local support and the base's defences. Deploy when ready.",
+	"roster": "Everyone the company employs: their role, missions, daily wage and kit.",
+	"hiring": "People looking for work: Hire pays their fee and they join on a daily wage. The board turns over every few days.",
+	"medbay": "The wounded and how long until they're fit; Treat pays to have them back sooner.",
+	"shop": "Buy kit into the company stash (it's delivered to the armory counter), and sell what the shop buys.",
+	"armory": "What's in the company stash. It lies in the armory: pick up what you need there, drop what you bring back.",
+	"motor_pool": "The company's vehicles, their condition and service, and vehicles you can buy.",
+	"stores": "The FOB's stocks from pallets: fuel, parts, ammunition, supplies and medical.",
+}
+const HELP := [
+	"Each tab is one of the base's terminals; walking up to a terminal opens its tab. Changes go to the host, who keeps the company's books.",
+	"The line at the top is the day, the company's cash, what the people cost a day, and when the weekly bill (wages, upkeep, loans) is next due.",
+	"Hover a person, an item or a button for what it is and does.",
+]
 ## The shop's type filter (as ShopScreen's): "" is everything.
 const SHOP_TYPES: Array[String] = ["", "weapon", "ammo", "armor", "plate", "pouch", "backpack", "medical", "utility", "launcher"]
 
@@ -45,11 +62,19 @@ func _ready() -> void:
 	top.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	_header = UiKit.text("")
 	_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_header.tooltip_text = "The day, the company's cash, what the people cost a day, and when the weekly bill (wages, upkeep, loans) is next due"
+	_header.mouse_filter = Control.MOUSE_FILTER_PASS
 	top.add_child(_header)
+	var help := UiKit.help_panel(PackedStringArray(HELP), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]])
+	help.visible = false
+	var q := UiKit.help_button(help)
+	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(q)
 	var close_button := UiKit.button("Close", close, "Close the base screen (Esc)")
 	close_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(close_button)
 	_box.add_child(top)
+	_box.add_child(help)
 	_tabs = TabContainer.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tabs.clip_tabs = true
@@ -64,6 +89,7 @@ func _ready() -> void:
 		rows.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 		scroll.add_child(rows)
 		_tabs.add_child(scroll)
+		_tabs.set_tab_tooltip(_tabs.get_tab_count() - 1, ABOUT.get(p, ""))
 		_pages[p] = rows
 	_tabs.tab_changed.connect(func(i: int) -> void:
 		page = PAGES[i]
@@ -141,6 +167,8 @@ func refresh() -> void:
 	for child in rows.get_children():
 		rows.remove_child(child)
 		child.queue_free()
+	if ABOUT.has(page):
+		rows.add_child(UiKit.subtitle(ABOUT[page], false))
 	match page:
 		"squad":
 			_build_squad(rows, v)
@@ -503,7 +531,9 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 		sellable += 1
 		var n := int(stock[sid])
 		var sell1 := UiKit.button("Sell", func() -> void: Economy.sell_from_stash(StringName(sid), 1), "Sell one %s ($%d)" % [it.name, each])
-		var sell_all := UiKit.button("Sell all", func() -> void: Economy.sell_from_stash(StringName(sid), mini(n, 50)), "Sell all %d %s (about $%d)" % [n, it.name, each * n])
+		var sell_all := UiKit.danger_button("Sell all", func() -> void:
+			UiKit.confirm(self, "Sell all %d %s to the shop for about $%d? They leave the stash for good." % [n, it.name, each * n], "Sell all",
+				func() -> void: Economy.sell_from_stash(StringName(sid), mini(n, 50))), "Sell all %d %s (about $%d; asks first)" % [n, it.name, each * n])
 		var sline := _line("%s x%d  $%d each" % [it.name, n, each], [sell1, sell_all])
 		ItemInfo.apply(sline.get_child(0), StringName(sid))
 		sline.set_meta(&"search", "%s %s %s" % [it.name, it.type, sid])

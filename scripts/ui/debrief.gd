@@ -56,9 +56,23 @@ func _ready() -> void:
 	add_child(_panel)
 	var root := VBoxContainer.new()
 	_panel.add_child(root)
+	var top := HBoxContainer.new()
+	root.add_child(top)
 	_title = UiKit.title("")
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	root.add_child(_title)
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(_title)
+	var help := UiKit.help_panel(PackedStringArray([
+		"What the deployment earned and cost: the contract's pay and bonuses, what was carried out, casualties, and every expense.",
+		"Salvage: pick which lots the company claims (its salvage share sets how much counts as yours). Claims are banked when the host presses Continue.",
+		"Tagged pallets and vehicles go home on a cargo run; intel found opens new leads on the contract board.",
+	]), [["Esc", "Continue"], ["Tab / arrows", "Move"], ["Enter", "Press"]])
+	help.visible = false
+	var q := UiKit.help_button(help)
+	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	top.add_child(q)
+	root.add_child(UiKit.subtitle("How the deployment went: what it paid, what it cost, and the salvage to claim.", false))
+	root.add_child(help)
 	root.add_child(HSeparator.new())
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -79,7 +93,7 @@ func _ready() -> void:
 	keys.add_child(UiKit.key_hint("Esc", "Continue"))
 	keys.add_child(UiKit.hint("Salvage claims are banked when the host continues."))
 	footer.add_child(keys)
-	var cont := UiKit.button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
+	var cont := UiKit.accent_button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
 	cont.name = "Continue"
 	cont.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	footer.add_child(cont)

@@ -28,23 +28,29 @@ func _ready() -> void:
 	add_child(UiKit.dim(0.45))
 	var box := UiKit.screen(self, 380.0)
 	_panel = box.get_parent() as PanelContainer
-	box.add_child(UiKit.title("Paused"))
-	box.add_child(UiKit.hint("The game keeps running behind this menu (co-op: nothing pauses).", true))
-	box.add_child(_button("Resume", close))
-	box.add_child(_button("Settings", _open_settings))
+	box.add_child(UiKit.header("Paused", "The game keeps running behind this menu: it's co-op, nothing pauses.",
+		PackedStringArray(["Resume goes back to the game. Settings has video, sound, controls, keys and the HUD layout.",
+			"Return to Base (revert) is the host's, during a campaign deployment: everything from this deployment is undone and everyone is back at the base (it asks first).",
+			"Return to main menu and Quit game save first when you're the host."]),
+		[["Esc", "Resume"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))
+	var resume := UiKit.accent_button("Resume", close, "Back to the game (Esc)")
+	box.add_child(resume)
+	box.add_child(UiKit.button("Settings", _open_settings, "Video, sound, controls, keys and the HUD layout"))
 	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
 	box.add_child(get_out_toggle)
 	var leave := UiKit.section("Leave", box)
-	_base_button = _button("Return to Base (revert)", _ask_return_to_base)
+	_base_button = UiKit.danger_button("Return to Base (revert)", _ask_return_to_base,
+		"Undo this deployment and take everyone back to the base (the host only; asks first)")
 	leave.add_child(_base_button)
-	leave.add_child(_button("Return to main menu", _to_main_menu))
-	leave.add_child(_button("Quit game", _quit))
+	leave.add_child(UiKit.button("Return to main menu", _to_main_menu, "Leave the session (the host saves first)"))
+	leave.add_child(UiKit.button("Quit game", _quit, "Close the game (the host saves first)"))
 	_status = UiKit.text("")
 	box.add_child(_status)
 	_confirm = VBoxContainer.new()
 	_confirm.visible = false
 	_confirm.add_child(UiKit.warn("Revert to just before you deployed? Everything from this deployment is undone: cash, the squad and their gear, contracts and the stash go back to how they were, and everyone is at the base."))
-	var row := UiKit.button_row([_button("Yes, revert to base", _return_to_base), _button("Cancel", func() -> void: _confirm.visible = false)])
+	var row := UiKit.button_row([UiKit.danger_button("Yes, revert to base", _return_to_base, "Undo this deployment"),
+		UiKit.button("Cancel", func() -> void: _confirm.visible = false, "Keep playing the deployment")])
 	_confirm.add_child(row)
 	box.add_child(_confirm)
 	if SessionLog.session_id != "":  # playtests: which session log to send with a report

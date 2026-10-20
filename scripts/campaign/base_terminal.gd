@@ -85,4 +85,5 @@ func interaction_actions(_actor: Node) -> Array[Dictionary]:
 	## The motor pool opens its page of the base screen like the other terminals (Captain,
 	## 2026-10-14: "all the UIs need a pass"; audit P2-23): its ring of one entry per vehicle
 	## (wave 5b, V4) is now the page's list, with the workshop's Service button on each.
-	return [{"id": &"use", "label": "Use %s" % title(), "disabled": "", "call": BaseHub.open_ui.bind(page)}]
+	return [{"id": &"use", "label": "Use %s" % title(), "disabled": "", "call": BaseHub.open_ui.bind(page),
+		"hint": String(BaseUI.ABOUT.get(page, ""))}]  # what it's for, under the cursor (ui-modern)

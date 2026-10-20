@@ -134,7 +134,7 @@ func _pane(side: StringName, parent: Control) -> Array:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	UiKit.fit_height(scroll, PANE_H, 170.0)
+	UiKit.fit_height(scroll, PANE_H, 250.0)  # the title, subtitle, search row, buttons and keys
 	scroll.set_drag_forwarding(Callable(),
 		func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
 		func(_at: Vector2, d: Variant) -> void: drop(d, side))

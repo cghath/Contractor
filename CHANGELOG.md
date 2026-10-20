@@ -11,6 +11,53 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A modern UI: new font, cleaner look, layout tools and explanations (Captain, 2026-10-20)
+
+#### Added
+- A UI font: Inter (SIL Open Font License, `fonts/OFL.txt`), in place of Godot's default. Body
+  text is medium weight; headings, buttons and the HUD are semibold; titles are bold.
+- Every menu explains itself. Each screen has a one-line subtitle saying what it's for, and a
+  "?" button that opens how it works and its keys: main menu, pause, settings, inventory, loot,
+  loadouts, medical (? or F1), shop, contract board, debrief, bug report and the base screen
+  (each base page also has a line saying what it's for, and so does each terminal's ring entry).
+  Buttons, settings, negotiation fields and lists have tooltips in plain words.
+- Search, kind filter and sort in the inventory, the loot window and the loadout stash. They
+  change only what's shown and in what order, never how anything is packed.
+- Loadouts: each row shows the item's picture and its full description on hover. Drag a stash row
+  onto the Kit column to put it on (as Wear, Mount or +1 would), or a kit row onto the Stash
+  column to put it back.
+- HUD layout: a new Settings tab with a size and an opacity for each part of the HUD (objectives,
+  compass, squad list and command menu, radio and vehicle, weapon and armour, wound silhouette,
+  objective markers) and a "Reset HUD layout" button. A bigger part keeps its corner of the
+  screen.
+- Medical menu: the arrow keys pick the body part (Left/Right) and the treatment (Up/Down), and
+  Enter uses it. Rows are bigger and easier to hit.
+- Command menu: the highlighted row has a background and an accent bar. With the mouse free, rows
+  light up on hover and can be clicked. A footer lists the keys on tall enough windows.
+- Item names in tooltips and the inspect panel are coloured by rarity (common, uncommon, rare,
+  very rare), with the word in the stats line, for items that carry one (the loot work adds it).
+- The ui suite checks that every menu screen has a subtitle, and that its open help still fits at
+  1280x720 and a 2.0 UI scale. It also checks that the HUD layout at its biggest still fits, and
+  that the reset puts it back.
+
+#### Changed
+- The theme is written by `tools/gen_ui_theme.py` from one palette (edit the script, not the
+  .tres). It is cleaner: soft panel shadows, rounded corners, clearer hover, pressed and focus
+  states, an amber main-action button and a red-edged one for actions that can't be undone, and
+  restyled tabs, lists, pop-up menus, sliders, scroll bars, tooltips and key chips.
+- Selling asks first. That covers the loadout stash's Sell, the base shop's Sell all, and Reset
+  everything to defaults in Settings.
+- The HUD's text is the size UiKit always said it was: 20 px, 16 px for its small lines, and
+  28 px for the downed and killed titles. The theme had 18, 14 and 26. On short windows (1280x720
+  at a 1.5 Menu and HUD size and up) the prompt, radio and vehicle lines drop to the small size
+  so they still fit.
+- Easier to read over the 3D view. The compass letters are 16 px, outlined, with brighter ticks.
+  The ammo and armour lines are 16 px at 88% instead of 14 px at 70%. Objective markers are drawn
+  at 95% near and 75% far (they were 70% and 45%), with outlined 16 px labels. The objectives list
+  is outlined. The wound silhouette is about a third bigger.
+- The item tooltips and inspect panel (ItemInfo), the armour readout and the medical menu use the
+  shared palette instead of their own colours.
+
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 
 #### Added

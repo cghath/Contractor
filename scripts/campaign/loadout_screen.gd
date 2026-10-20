@@ -624,9 +624,11 @@ func _draggable(row: Control, data: Dictionary) -> void:
 ## Makes `column` (and what's in it) take dropped rows for `side` ("kit" or "stash").
 func _drop_zone(column: Control, side: String) -> void:
 	column.mouse_filter = Control.MOUSE_FILTER_PASS
-	column.set_drag_forwarding(Callable(),
-		func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
-		func(_at: Vector2, d: Variant) -> void: drop(d, side))
+	# The column and its scroll area (which stops the mouse, so a drop on a row ends there).
+	for c: Control in [column] + column.find_children("*", "ScrollContainer", true, false):
+		c.set_drag_forwarding(Callable(),
+			func(_at: Vector2, d: Variant) -> bool: return can_drop(d, side),
+			func(_at: Vector2, d: Variant) -> void: drop(d, side))
 
 
 ## Whether dropped `d` goes somewhere on `side`: a stash row on the kit, a kit or worn row on

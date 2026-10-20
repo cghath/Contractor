@@ -582,13 +582,13 @@ static func danger_button(label: String, pressed: Callable, tooltip := "") -> Bu
 
 
 ## A search box: calls `changed` with the lowered, trimmed text as it is typed. Esc in it
-## clears it first (a second Esc closes the screen as usual).
+## clears it first where the screen lets the key reach it (most close on Esc before that).
 static func search_field(placeholder := "Search...", changed: Callable = Callable()) -> LineEdit:
 	var field := LineEdit.new()
 	field.name = "Search"
 	field.placeholder_text = placeholder
 	field.clear_button_enabled = true
-	field.tooltip_text = "Type part of a name to show only the matches (Esc clears it)"
+	field.tooltip_text = "Type part of a name to show only the matches (the x at its end clears it)"
 	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	field.custom_minimum_size.x = 140.0
 	if changed.is_valid():

@@ -1278,7 +1278,33 @@ func _wrapped(text: String, variation: StringName = &"") -> Label:
 ## A themed button the keyboard can reach (audit item 6, P1-15: they were FOCUS_NONE, so the
 ## screen was mouse only); long text is cut with "..." and kept whole in the tooltip (UiKit).
 func _button(text: String, action: Callable) -> Button:
-	return UiKit.button(text, action)
+	return UiKit.button(text, action, tip_for(text))
+
+
+## What an action button does, in plain words, by the start of its label (ui-modern: every
+## button gets a tooltip); the label itself when there's nothing more to say.
+const ACTION_TIPS := [
+	["Load magazines", "Fill your empty and part-used magazines from these rounds"],
+	["Loadout menu", "Open the loadout menu: kit yourself and the squad from the company stash"],
+	["Restock last loadout", "Refill your kit to the last loadout you deployed with, from the stash"],
+	["Loadout", "Show your worn slots around the soldier"],
+	["MOLLE", "Show where pouches attach on your carrier and pack, and what fits where"],
+	["Attach", "Put this pouch on a free attach point it fits"],
+	["Detach", "Take this pouch off its attach point"],
+	["Drop", "Put it on the ground at your feet"],
+	["Equip", "Wear it, or carry it in its slot"],
+	["Mount on", "Mount it on that weapon"],
+	["Pick up", "Take it from the ground into your kit, where it fits"],
+	["Stow", "Put it in your containers, where it fits"],
+	["Use", "Use it now"],
+]
+
+
+static func tip_for(label: String) -> String:
+	for pair: Array in ACTION_TIPS:
+		if label.begins_with(String(pair[0])):
+			return String(pair[1])
+	return label
 
 
 ## A tile's box, from the theme's button style: the selected tile's edge in the accent, the
