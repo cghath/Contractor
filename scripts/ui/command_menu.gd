@@ -213,7 +213,7 @@ const MENU := {
 			]},
 			{"key": "8", "label": "Allied troops", "items": [  # wave 6e: AlliedTroops; orders go to every element (the host's high command; one at a time: right click the map)
 				{"key": "1", "label": "Call a rifle squad", "cmd": "support:allied_call:rifle"},
-				{"key": "2", "label": "Call a weapons team (MG + AT)", "cmd": "support:allied_call:weapons"},
+				{"key": "2", "label": "Call a weapons team (M2, MG + AT)", "cmd": "support:allied_call:weapons"},
 				{"key": "3", "label": "All: move there", "cmd": "support:allied_move", "point": true},
 				{"key": "4", "label": "All: hold", "cmd": "support:allied_hold"},
 				{"key": "5", "label": "All: assault there", "cmd": "support:allied_assault", "point": true},

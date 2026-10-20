@@ -143,6 +143,27 @@ func server_command(from: Soldier, cmd: String, point: Vector3, names: PackedStr
 const TEAMS_GROUP := &"weapon_teams"
 
 
+## Host: `a` and `b` (of squad `squad`) take up `kit`'s loads and belts and become a gun team
+## that fights on its own inside their squad (an allied weapons team's M2, the rebels' DShK;
+## G-25 leftovers). Returns the team, or null.
+static func arm_gun_team(level: Node, a: Soldier, b: Soldier, kit: String, squad: Squad) -> GunTeam:
+	if a == null or b == null or not KITS.has(kit):
+		return null
+	var loads: Array = KITS[kit].loads
+	for i in 2:
+		var s: Soldier = [a, b][i]
+		s.inventory.release_hands()
+		s.inventory.take(loads[i])
+	var feed := StringName(VehicleSpecs.gun(String(VehicleSpecs.spec(kit).get("gun", {}).get("weapon", ""))).get("feed", ""))
+	if feed != &"":
+		b.inventory.take(feed, GunTeam.BELTS)
+	var team := GunTeam.form(level, a, b, kit, squad, null, true)
+	if team:
+		team.ordered = false  # on its own: picks its ground, moves on when the fight does
+		team.add_to_group(TEAMS_GROUP)
+	return team
+
+
 ## Host: a team from the squadmates in `men` carrying every load of one kit: a gun team (set up
 ## at `at`, or on high ground when INF) or a mortar team (`mortar`: firing on `at`).
 func _form_from(men: Array[Soldier], at: Vector3, squad: Squad, mortar: bool) -> String:

@@ -278,6 +278,9 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 		var brain := SquadAI.of(s)
 		if brain:
 			brain.squad = sq
+	var members := sq.members()
+	if kind == "weapons" and not rebel and members.size() >= 2:
+		StaticWeapons.arm_gun_team(level, members[0], members[1], "tripod_m2", sq)  # the weapons team brings an M2 (G-25)
 	elements[slot] = {"id": slot + 1, "kind": kind, "squad": sq, "kit": kit, "employer": "rebels" if rebel else ("company" if company else employer), "order": "move",
 		"point": by.global_position, "company": company}
 	caller = by

@@ -144,9 +144,11 @@ A mortar team is a gunner and an assistant (plus a third man for the 82 mm), the
   (`MortarPanel`, `MortarTable`; rounds from the hold or the player's kit). Command menu, Action >
   Weapons team: set up the gun there, set up on high ground, mortar fire on a point, pack up and
   follow. Buying: the M2's and the M224's loads and 60 mm rounds are for sale (priced).
-- **Still to do.** Map orders for weapons teams; the allied weapons team bringing an M2; rebels'
-  DShK with the Fighters call-in; a mortar sound of its own (it uses the far explosion);
-  grenade launchers (Mk19, AGS-17).
+- **Allied and rebel teams, done.** The allied weapons team brings an M2 (its gunner and ammo
+  bearer carry it as a gun team inside the element); the rebels' Fighters call-in, upgraded, brings
+  a DShK the same way (StaticWeapons.arm_gun_team).
+- **Still to do.** Map orders for weapons teams; a mortar sound of its own (it uses the far
+  explosion); grenade launchers (Mk19, AGS-17).
 
 ## The Captain's calls (2026-10-19)
 

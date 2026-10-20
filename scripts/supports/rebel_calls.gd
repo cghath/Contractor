@@ -91,7 +91,7 @@ func server_call(id: String, by: Soldier, point: Vector3) -> String:
 				return "Mark where they should open fire"
 			_diversion = {"at": point, "until": Soldier._now() + DIVERSION_S * [1.0, 1.5, 2.0][lv], "next": 0.0, "reach": DIVERSION_M * weaker}
 		"fighters":
-			why = _send_fighters(by, maxi(roundi((FIGHTERS + 2 * lv) * weaker), 2))
+			why = _send_fighters(by, maxi(roundi((FIGHTERS + 2 * lv) * weaker), 2), lv)
 		"vehicle_drop":
 			var at := point if point.is_finite() else by.global_position + by.global_basis.z * -8.0
 			why = _drop_vehicle(at)
@@ -130,7 +130,7 @@ func _set_cooldown(id: String, seconds: float) -> void:
 		_cooldown[id] = Soldier._now() + seconds
 
 
-func _send_fighters(by: Soldier, men: int) -> String:
+func _send_fighters(by: Soldier, men: int, lv := 0) -> String:
 	var allies := AlliedTroops.current(self)
 	if allies == null:
 		return "No way to bring them in here"
@@ -146,6 +146,8 @@ func _send_fighters(by: Soldier, men: int) -> String:
 		var members := (e.squad as Squad).members()
 		for i in range(men, members.size()):
 			(members[i] as Soldier).queue_free()
+		if lv >= 1 and men >= 4:  # upgraded: two of them bring a DShK (G-25)
+			StaticWeapons.arm_gun_team(CompoundLevel.current(self), members[0], members[1], "tripod_dshk", e.squad)
 	return ""
 
 

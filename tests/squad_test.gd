@@ -632,6 +632,7 @@ func _test_tactics() -> void:
 	check(SquadAI.of(_ai("Charlie")).ordered.is_empty(), "and a movement order replaces it")
 
 	# Drop packs, then go back for them.
+	await _heal_squad()
 	var mate: Soldier = null
 	for s: Soldier in _squad():
 		if s.inventory.slots.get(&"backpack", &"") != &"" and SquadAI.of(s).care == SquadAI.Care.NONE:
@@ -1429,8 +1430,22 @@ func _test_fire_discipline() -> void:
 ## rounds go; behind the perimeter wall none go, and within a few seconds he moves to a spot
 ## with a line (by the gate) and fires from there; in a corner with no such spot near, he holds
 ## fire. Hostiles run the same SquadAI fire code.
+## Everyone fit and nobody on casualty care: for tests that need the whole squad (a squadmate left
+## down by an earlier live-fire test cascaded into every check after it: CI 770119e, R2041).
+func _heal_squad() -> void:
+	for n in level.ai.get_children():
+		var mate := n as Soldier
+		if mate and mate.faction == &"friendly" and not mate.vitals.is_dead():
+			mate.vitals.server_reset_health()
+			var mate_ai := SquadAI.of(mate)
+			if mate_ai:
+				mate_ai._end_care()
+	await _seconds(1.0)
+
+
 func _test_no_fire_into_walls() -> void:
 	print("Line of fire: no rounds into walls, a fire position or hold fire")
+	await _heal_squad()
 	_clear_contact()
 	var squad := level.squad_for(&"friendly")
 	var s := _standing_mate([])
@@ -1880,16 +1895,7 @@ func _seconds(s: float) -> void:
 ## goes to his team only, without handing the squad's lead to him.
 func _test_human_team_lead() -> void:
 	print("A human team leader")
-	# Everyone fit first: a squadmate left down by an earlier test kept the team on casualty care
-	# here instead of gathering (R2041: Echo unconscious, 0 of 3 within 30 m).
-	for n in level.ai.get_children():
-		var mate := n as Soldier
-		if mate and mate.faction == &"friendly" and not mate.vitals.is_dead():
-			mate.vitals.server_reset_health()
-			var mate_ai := SquadAI.of(mate)
-			if mate_ai:
-				mate_ai._end_care()
-	await _seconds(1.0)
+	await _heal_squad()  # (R2041: Echo left unconscious kept the team on casualty care, 0 of 3 within 30 m)
 	var squad := level.squad_for(&"friendly")
 	var lead := squad.leader
 	var other := _squad().filter(func(s: Soldier) -> bool: return s.fire_team != (lead.fire_team if lead.fire_team >= 0 else 0) and s.fire_team >= 0)
