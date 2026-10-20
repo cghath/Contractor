@@ -10,6 +10,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-01 | P2 | The AI building scan only finds one floor; upper floors and roofs are never garrisoned or cleared |
 | F-02 | P2 | Town garrison posts are all on the ground floor |
 | F-03 | P2 | Doctrine `engage_m` numbers sit below the new sight ranges |
+| F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK |
 
 ## F-01: the building scan only sees one floor
 
@@ -51,3 +52,21 @@ Captain raised the engagement ranges (ai/ranges, on dev): hostiles see 200 m (wa
 squad 300 m (was 120), aim error at skill 0 is 1.2 degrees (was 2.0). When the doctrine numbers
 are wired in, `engage_m` should be raised to match, or the doctrines will pull the new ranges
 back down.
+
+## F-20: a medic walks over unasked to a player whose bandages are in his IFAK
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `SquadAI.player_wants_care` (the line
+"nothing of his own for it: a squadmate comes"). Found by cghath's agent on `feat/tutorial`
+(2026-10-20), writing the tutorial's medical steps.
+
+Cause: it asks `s.inventory.count_of(id)` whether the player carries an item for each care task.
+`Inventory.count_of` counts loose items only, not what's inside a kit, so a player whose only
+pressure bandages are the two in his IFAK (the usual kit) counts as carrying nothing for a graze
+or a venous bleed, and out of a firefight a squadmate comes to treat him though he never called.
+The treatments themselves do use kit contents (`Vitals.has_item`, `Inventory.medical_count`), so
+he could have treated himself.
+
+Suggested fix: use `Vitals.has_item(s.inventory, id)` there (it counts loose items, kit contents,
+and items that need none), so "on its own" only covers a wound he really can't treat. The tutorial
+works around it by handing out two loose bandages (`TutorialGuide.KIT`), so its "treat yourself"
+step isn't done for the player by a medic.

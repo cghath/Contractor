@@ -888,6 +888,15 @@ func server_damage(amount: float) -> void:
 	_after_change()
 
 
+## Host only. One wound of `kind` on `part` bleeding `rate` L/min and nothing else: no hit, pain
+## or shock (the tutorial's graze to treat: TutorialGuide). Returns it.
+func server_add_wound(part: StringName, kind: String, rate: float) -> Dictionary:
+	var w := _model._add_wound(part, kind, rate)
+	_model.update_state(0.0)
+	_after_change(true)
+	return w
+
+
 ## Host only. Dead at once, without a wound: the body a player leaves behind when they
 ## respawn, or a body restored from a zone save (Soldier.server_leave_body).
 func server_kill() -> void:

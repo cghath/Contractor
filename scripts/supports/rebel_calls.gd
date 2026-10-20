@@ -13,7 +13,8 @@ extends Node
 ##   rebel_mortar        after MORTAR_WARN_S, MORTAR_ROUNDS on the point marked.
 ## Free; each has its cooldown (COOLDOWN_S) per deployment. In a hot zone they work too but
 ## weaker (Captain: "yes, weaker"): HOT_WEAKER of the reach and rounds and men, cooldowns
-## HOT_COOLDOWN times as long. Only where the call-in is unlocked: the caller's region.
+## HOT_COOLDOWN times as long. Only where the call-in is unlocked: the caller's region (and the
+## Lookouts in the tutorial, which has none: TutorialGuide).
 ## One node, "RebelCalls", in every level (install); the work is the host's. Proposed numbers.
 
 const NODE_NAME := "RebelCalls"
@@ -68,9 +69,13 @@ func server_call(id: String, by: Soldier, point: Vector3) -> String:
 	if not multiplayer.is_server() or by == null:
 		return ""
 	var region := RebelSupport.region_here(self)
-	if region == "":
+	# The tutorial (TutorialGuide) has no region: its locals answer the Lookouts, and only those.
+	var tutorial := region == "" and not BaseHub.campaign_running and TutorialGuide.of(self) != null
+	if tutorial and id != "lookouts":
+		return "In the tutorial, try the Lookouts: the rest open up as a region's locals back you more"
+	if region == "" and not tutorial:
 		return "No locals here to call on"
-	if not id in RebelSupport.unlocked(region):
+	if not tutorial and not id in RebelSupport.unlocked(region):
 		return "The locals of the %s won't do that yet (support %d of %d)" % [region, int(RebelSupport.support(region)), int(RebelSupport.CALLINS[id])]
 	var left := cooldown_left(id)
 	if left > 0.0:
@@ -111,6 +116,11 @@ func server_call(id: String, by: Soldier, point: Vector3) -> String:
 	if id != "mortar":
 		Contracts._notify_all("The rebels: %s%s." % [String(RebelSupport.CALLIN_NAMES[id]), " (thinly, in a hot zone)" if hot else ""])
 	return ""
+
+
+## Host: whether the lookouts are out watching for `s` now.
+func lookouts_for(s: Soldier) -> bool:
+	return s != null and not _lookout.is_empty() and _lookout.get("by") == s and Soldier._now() <= float(_lookout.until)
 
 
 ## Seconds until `id` can be called again (0: now). A deployment keeps its own (crossings too).

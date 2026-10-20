@@ -11,6 +11,28 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The tutorial, finished (cghath, 2026-10-20)
+
+#### Added
+
+- **New tutorial sections**, each step ticked off by what the game sees you do: **Medical** (a
+  graze to bandage yourself, then a second one: call "Medic!" or "Treat me" from the command menu
+  and a squadmate patches you up), **Tagging enemies** (Y, by radio), **Vehicles** (get in as
+  driver, drive, take the gun seat, order the squad in, everyone out), **Rebel support** (ask a
+  villager for work, give him supplies, Support > Rebels > Lookouts) and **Static guns** (pick up
+  one of the M2's two loads, set it up, pack it up; shown once the game has static guns).
+- Steps are grouped in sections, named in the panel's title.
+- `tutorial` test suite: the tutorial as the menu starts it, every new step driven to the end.
+
+#### Changed
+
+- The tutorial's compound: its hostile patrol goes and the squad holds fire, so nobody fights
+  while you learn; the target stands in the open yard (it stood inside the main building); an
+  M-ATV, a villager and the static gun's loads wait south of the gate; the kit has two loose
+  bandages.
+- In the tutorial a villager answers "Ask if they need help" and "Give supplies", and the
+  rebels' Lookouts answer the call, without a campaign.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
