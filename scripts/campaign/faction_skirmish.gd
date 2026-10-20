@@ -22,6 +22,9 @@ const START_BACK_M := 250.0
 const SITE_TYPES: Array[String] = ["compound", "outpost", "checkpoint", "hq", "qrf_base", "comms"]
 
 var team: Array = []  # the skirmishers out now
+## The team as a group the Virtualizer may take ({"squad", "soldiers": team}): far from the squad it
+## walks to the site and fights the garrison there off-screen.
+var group := {}
 var last := {}         # the last one: {"faction", "against", "site", "at"}
 var _next_s := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -50,7 +53,11 @@ func _process(delta: float) -> void:
 
 
 func _alive() -> int:
-	team = team.filter(func(s: Variant) -> bool: return is_instance_valid(s) and not (s as Soldier).is_queued_for_deletion())
+	for i in range(team.size() - 1, -1, -1):  # in place: `group` holds this very array
+		if not is_instance_valid(team[i]) or (team[i] as Soldier).is_queued_for_deletion():
+			team.remove_at(i)
+	if not group.is_empty():
+		return Virtualizer.up(group)  # its men up, live or virtual
 	return team.filter(func(s: Variant) -> bool: return is_instance_valid(s) and (s as Soldier).vitals.is_up()).size()  # (freed bodies: P2017)
 
 
@@ -103,7 +110,7 @@ func server_start(faction := "") -> String:
 	add_child(squad)
 	var kit_id := Kits.kit_of(faction)
 	var across := Vector3(at.x - start.x, 0.0, at.z - start.z).normalized().cross(Vector3.UP)
-	team.clear()
+	team = []
 	for i in TEAM:
 		var pos: Vector3 = start + across * 3.0 * (i - (TEAM - 1) / 2.0)
 		if lvl.has_method(&"ground_point"):
@@ -120,6 +127,10 @@ func server_start(faction := "") -> String:
 		team.append(s)
 	var route: Array[Vector3] = [at]
 	squad.patrol = route
+	group = {"squad": squad, "soldiers": team}
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		virtualizer.track(group, "skirmish")
 	last = {"faction": faction, "against": holder, "site": String(site.get(&"module_id")), "at": [at.x, at.z], "side": String(side)}
 	var who := String(MissionRegistry.faction(faction).get("name", faction))
 	var them := String(MissionRegistry.faction(holder).get("name", holder)) if holder != "" else "the garrison"

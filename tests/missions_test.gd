@@ -26,6 +26,7 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	HotZoneOps.enabled = false  # one contract at a time below; _test_hot_zone_ops turns it on
 	EnemyDrones.enabled = false  # none on their own (wave 6): _test_enemy_drones sends its own
+	Virtualizer.enabled = false  # the response's groups stay real here (they're checked man by man); virtualization_test has its own
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_generation()

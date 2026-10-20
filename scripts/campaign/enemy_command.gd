@@ -411,6 +411,17 @@ func _count_losses() -> void:
 		_ever[String(s.name)] = true
 		if (s.vitals.is_dead() or s.is_in_group(Soldier.DEAD_GROUP)) and not _deaths.has(String(s.name)):
 			_deaths[String(s.name)] = now()
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		for p: Dictionary in virtualizer.profiles():
+			if String(p.side) != "hostile":
+				continue
+			for m: Dictionary in p.members:
+				_ever[String(m.name)] = true  # its men are out there, as a profile
+		for who: String in virtualizer.deaths:
+			_ever[who] = true
+			if not _deaths.has(who):
+				_deaths[who] = now()  # killed off-screen
 
 
 ## The commander's name (the HQ's officer post 0), "" with no HQ: what a decapitation contract
@@ -501,6 +512,9 @@ func _officer_down(post: int) -> bool:
 	var s := ai.get_node_or_null(NodePath(commander_name(post))) as Soldier
 	if s:
 		return s.vitals.is_dead() or s.is_in_group(Soldier.DEAD_GROUP)
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer and not virtualizer.member(commander_name(post)).is_empty():
+		return false  # at his post with the HQ's garrison, as a profile
 	var had := level.get(&"_garrisoned") as Dictionary
 	return had != null and int(had.get(hq.module_id, 0)) > post and int(level.call(&"garrison_pending", hq.module_id)) == 0
 
@@ -657,6 +671,7 @@ func _launch_counterattack(m: ZoneModule, threat: float, ratio: float, what: Str
 	operations.append({"kind": "counterattack", "target": m.global_position, "target_id": m.module_id, "state": "assembling",
 		"why": why, "at": now(), "rally": rally, "base": base.module_id, "squad": team.squad, "soldiers": team.soldiers,
 		"threat": threat})
+	_virtualize(operations.back(), "task_force")
 	operation_started.emit(operations.back())
 	print("[command] counterattack %s: %d men assembling at (%.0f, %.0f)" % [m.module_id, team.soldiers.size(), rally.x, rally.z])
 	_order("%s, assemble %s of %s. We take it back together." % [_callsign(base), RadioChatter.compass(m.global_position, rally),
@@ -689,7 +704,8 @@ func _step_task_force(op: Dictionary) -> void:
 	if op.state in ["done", "failed", "called off"]:
 		return
 	var living: Array = response._living(op.soldiers)
-	if living.is_empty():
+	var at: Array[Vector3] = Virtualizer.points(op)  # where its men are, live or virtual
+	if at.is_empty():
 		op.state = "failed"
 		op.why = "task force lost"
 		_handled.erase(op.target_id)  # still down: decided again
@@ -699,7 +715,7 @@ func _step_task_force(op: Dictionary) -> void:
 		if not can_decide():
 			return  # nobody to give the word: they hold at the rally point
 		var wait := ASSEMBLE_S / maxf(response.coordination(), 0.2) * (COMMS_ASSEMBLE_MULT if _comms_down() else 1.0)
-		var there := living.all(func(s: Soldier) -> bool: return s.global_position.distance_to(op.rally) <= ASSEMBLED_M)
+		var there := at.all(func(p: Vector3) -> bool: return p.distance_to(op.rally) <= ASSEMBLED_M)
 		if there or now() - float(op.at) >= wait:
 			op.state = "attacking"
 			op.attack_at = now()
@@ -708,19 +724,23 @@ func _step_task_force(op: Dictionary) -> void:
 			_order("all units, move on %s. Go, go." % _callsign(level.call(&"get_module", op.target_id)))
 		return
 	var threat := maxf(threat_cp(op.target, SITE_THREAT_M), squad_cp(op.target, ARRIVED_M))
-	if op.kind == "counterattack" and threat > 0.0 and living.size() < threat * CALL_OFF_RATIO:
+	if op.kind == "counterattack" and threat > 0.0 and at.size() < threat * CALL_OFF_RATIO:
 		op.state = "called off"
-		op.why = "%d left against %.1f" % [living.size(), threat]
+		op.why = "%d left against %.1f" % [at.size(), threat]
 		_send_home(op.squad, living, op.get("base", ""), op.rally)
 		_handled.erase(op.target_id)
 		_learn(CAUTION_FAIL)
 		_order("pull back, pull back. Break contact.")
 		return
-	if squad_cp(op.target, SITE_THREAT_M) <= 0.0 and living.any(func(s: Soldier) -> bool: return s.global_position.distance_to(op.target) <= ARRIVED_M):
+	if squad_cp(op.target, SITE_THREAT_M) <= 0.0 and at.any(func(p: Vector3) -> bool: return p.distance_to(op.target) <= ARRIVED_M):
 		op.state = "done"
 		op.why = "retaken" if op.kind == "counterattack" else "reoccupied"
 		for s: Soldier in living:
 			s.set_meta(&"garrison_of", op.target_id)  # the site's garrison again (ZoneLevel.garrison_alive)
+		for m: Dictionary in Virtualizer.virtual_men(op):
+			var meta: Dictionary = m.get("meta", {})
+			meta["garrison_of"] = op.target_id  # (a virtual one's too)
+			m["meta"] = meta
 		_handled.erase(op.target_id)
 		_learn(-CAUTION_WIN)
 		_order("%s is ours. Hold it." % _callsign(level.call(&"get_module", op.target_id)))
@@ -741,6 +761,7 @@ func _send_probe(target: Vector3, site_id := "") -> bool:
 	var team := _send_team("PR%d" % _probes, PROBE_SIZE, gate, response._ground(target))
 	operations.append({"kind": "probe", "target": target, "target_id": site_id, "state": "moving", "at": now(),
 		"base": base.module_id, "squad": team.squad, "soldiers": team.soldiers})
+	_virtualize(operations.back(), "probe")
 	print("[command] probe %d toward (%.0f, %.0f)%s" % [_probes, target.x, target.z, (" (" + site_id + ")") if site_id != "" else ""])
 	_order("%s, send a patrol %s and report." % [_callsign(base), RadioChatter.compass(base.global_position, target)])
 	return true
@@ -764,7 +785,8 @@ func _step_probe(op: Dictionary) -> void:
 		return
 	var site := level.call(&"get_module", op.target_id) as ZoneModule if op.target_id != "" else null
 	var living: Array = response._living(op.soldiers)
-	if living.is_empty():
+	var at: Array[Vector3] = Virtualizer.points(op)  # where its men are, live or virtual
+	if at.is_empty():
 		op.state = "failed"
 		op.why = "probe lost"
 		if site:
@@ -781,7 +803,7 @@ func _step_probe(op: Dictionary) -> void:
 		return
 	match String(op.state):
 		"moving":
-			if living.any(func(s: Soldier) -> bool: return s.global_position.distance_to(op.target) <= ARRIVED_M):
+			if at.any(func(p: Vector3) -> bool: return p.distance_to(op.target) <= ARRIVED_M):
 				op.state = "looking"
 				op.look_until = now() + PROBE_LOOK_S
 			elif now() - float(op.at) > PROBE_GIVE_UP_S:
@@ -826,6 +848,7 @@ func _reoccupy(m: ZoneModule, probe: Array, probe_squad: Squad) -> void:
 			soldiers.append_array(team.soldiers)
 	operations.append({"kind": "reoccupy", "target": m.global_position, "target_id": m.module_id, "state": "moving",
 		"why": "all clear", "at": now(), "squad": squad, "soldiers": soldiers})
+	_virtualize(operations.back(), "task_force")
 	print("[command] reoccupy %s with %d" % [m.module_id, soldiers.size()])
 	_order("%s, reoccupy and hold." % _callsign(m))
 
@@ -836,9 +859,8 @@ func _stop_hunts() -> void:
 		if record.get("recalled", false) or now() - float(record.at) < HUNT_STOP_S:
 			continue
 		record.recalled = true
-		var living: Array = response._living(record.soldiers)
-		if not living.is_empty():
-			_send_home(record.squad, living, "", (living[0] as Soldier).global_position)
+		if Virtualizer.up(record) > 0:
+			_send_home(record.squad, response._living(record.soldiers), "", Virtualizer.lead(record))
 			_order("hunters, break off. Return to base.")
 
 
@@ -849,15 +871,13 @@ func _check_consolidate() -> void:
 	consolidated = true
 	_record("consolidate", Vector3.INF, "done", "%d of %d lost" % [_deaths.size(), _ever.size()])
 	for record: Dictionary in response.hunters:
-		var living: Array = response._living(record.soldiers)
-		if not living.is_empty():
-			_send_home(record.squad, living, "", (living[0] as Soldier).global_position)
+		if Virtualizer.up(record) > 0:
+			_send_home(record.squad, response._living(record.soldiers), "", Virtualizer.lead(record))
 	if response.reinforcements:
 		for w: Dictionary in response.reinforcements.waves:
 			var squad := w.get("squad") as Squad
-			var living: Array = response._living(w.soldiers)
-			if squad and not living.is_empty():
-				_send_home(squad, living, "", (living[0] as Soldier).global_position)
+			if squad and Virtualizer.up(w) > 0:
+				_send_home(squad, response._living(w.soldiers), "", Virtualizer.lead(w))
 	for op: Dictionary in operations:
 		if op.kind in ["counterattack", "probe"] and op.state in ["assembling", "attacking", "moving", "looking"]:
 			var target_site := level.call(&"get_module", op.target_id) as ZoneModule if op.target_id != "" else null
@@ -884,7 +904,9 @@ func _abandon_outposts() -> void:
 			var s := n as Soldier
 			if s and s.faction == &"hostile" and s.vitals.is_up() and not s.is_in_group(Soldier.DEAD_GROUP) 					and (String(s.name).begins_with(prefix) or String(s.get_meta(&"garrison_of", "")) == m.module_id):
 				leaving.append(s)
-		if leaving.is_empty():
+		var virtualizer := Virtualizer.of(self)
+		var virtual_garrison := virtualizer != null and virtualizer.has_garrison(m.module_id)
+		if leaving.is_empty() and not virtual_garrison:
 			continue
 		var base := _nearest_base(m.global_position)
 		if base == null:
@@ -898,16 +920,19 @@ func _abandon_outposts() -> void:
 			if brain:
 				brain.guard = false
 				brain.squad = squad
+		var gone := leaving.size()
+		if virtual_garrison:
+			gone += Virtualizer.virtual_men(virtualizer.server_detach_garrison(m.module_id, squad)).size()  # at its posts as a profile: it walks off as one
 		_send_home(squad, leaving, base.module_id, m.global_position)
-		_record("abandon", m.global_position, "done", "%s: %d fall back on %s" % [m.module_id, leaving.size(), base.module_id],
+		_record("abandon", m.global_position, "done", "%s: %d fall back on %s" % [m.module_id, gone, base.module_id],
 			{"target_id": m.module_id})
 		_handled[m.module_id] = true  # written off: no op when it reads as down
 
 
 ## Sends `living` of `squad` back to base `base_id` (else the nearest base to `from`).
 func _send_home(squad: Squad, living: Array, base_id: String, from: Vector3) -> void:
-	if squad == null or living.is_empty():
-		return
+	if squad == null or not from.is_finite():
+		return  # (`living` may be empty: a virtual group walks its squad's route too)
 	var home: ZoneModule = level.call(&"get_module", base_id) as ZoneModule if base_id != "" else null
 	if home == null or level.call(&"site_down", home.module_id):
 		home = _nearest_base(from)
@@ -915,6 +940,13 @@ func _send_home(squad: Squad, living: Array, base_id: String, from: Vector3) -> 
 		return
 	var route: Array[Vector3] = [response._ground(home.global_position)]
 	response._set_route(squad, living, route)
+
+
+## Host: `record` (a task force, a probe) may go virtual far from the squad (Virtualizer.track).
+func _virtualize(record: Dictionary, kind: String) -> void:
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		virtualizer.track(record, kind)
 
 
 func _nearest_base(pos: Vector3) -> ZoneModule:

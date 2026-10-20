@@ -11,6 +11,39 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### AI virtualization (Captain, 2026-10-18: "instead of dynamic sim lets take a page out of the ALIVE mods book and actually virtualize")
+
+Inspired by ALiVE's profiles; our own build for Contractor's zones (docs/virtualization.md).
+
+#### Added
+- **Far groups become profiles.** An enemy group far from every player and squadmate (700 m),
+  calm and out of sight, leaves the world and becomes a few lines of data: who is in it, each man's
+  kit, rounds, wounds, skill, orders and where it is going. It comes back as the same men, exactly
+  as they were, once someone is within 550 m, and never where a player can see them come out
+  (inside 300 m it comes back regardless). Patrols, hunter teams, the HQ's pairs, QRF waves, the
+  high command's task forces and probes, and faction skirmish teams all do this.
+- **Profiles keep doing their job.** A profile walks its route at its pace: faster on roads, slower
+  up hills. When the enemy's command sends it somewhere new, it goes there.
+- **Off-screen fights.** Two profiles of sides at war that meet fight it out in rounds. Men die or
+  are wounded, a beaten side breaks off, and the dead lie where they fell with their kit on.
+- **Garrisons sleep with their sites.** A garrison goes virtual at its posts once its site streams
+  out, and comes back at the same posts when the site streams in. Its gun and mortar teams wait
+  for it. The site still counts as held, answers its radio check-ins and keeps its officers.
+- **Bigger hot zones.** A hot zone now also fields two roaming teams of four on every patrol route.
+  They are the zone's standing force and are not counted in the budget that paces what is sent at
+  the squad. Far from the squad they are profiles and cost next to nothing.
+- **Saved with the zone.** Every group is saved, virtual or not. A squad that leaves a zone and
+  comes back meets the same men where they had got to. A zone left long enough for its loose gear
+  to fade gets a fresh enemy instead.
+- Tests: a `virtualization` suite (round trips, rules, movement, fights, never in view, counting,
+  garrisons, saves) in CI, a co-op check in `net`, and `tests/virtualization_perf.gd` for timing.
+
+#### Changed
+- Dynamic simulation (far AI asleep) stays only for the AI that isn't virtualized: vehicle crews,
+  bombers, the rival PMC team and scenario waves.
+- In co-op, clients are never sent anything about a profile. Its men replicate like any AI once
+  they are back in the world, late joiners included.
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

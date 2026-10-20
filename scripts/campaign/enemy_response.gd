@@ -139,6 +139,15 @@ const TEAM_SPACING_M := 1.6
 const TEAM_MEDIC_MIN := 4
 const TEAM_MEDIC_INDEX := 2
 
+## A hot zone's standing force on its patrol routes (AI virtualization, docs/virtualization.md;
+## brief 2026-10-20: "raise how many enemies a hot zone can hold, for example 2-3 times today's"):
+## ROAM_TEAMS teams of ROAM_SIZE walk each route, spread along it. Like the garrisons they are the
+## zone's own men: outside SPAWN_BUDGET (which still paces everything sent at the squad), never sent
+## to look, and far from the squad they are profiles (Virtualizer) that cost next to nothing. A
+## team wiped out stays gone. Proposed.
+const ROAM_TEAMS := 2
+const ROAM_SIZE := 4
+
 ## Host: a patrol was sent to look round `pos` (RadioChatter: the order on the net).
 signal look_sent(pos: Vector3)
 ## Host: the checkpoints closed (or opened again).
@@ -171,6 +180,9 @@ var pushes: Array[Dictionary] = []
 var checkpoints_closed := false
 ## Every QRF launched: {"from" (module id), "at", "soldiers"}.
 var qrf_launches: Array[Dictionary] = []
+## A hot zone's roaming teams (ROAM_TEAMS a route): {"k" (the route's patrol), "j", "route", "squad",
+## "soldiers", "pending", "lost"}.
+var roamers: Array[Dictionary] = []
 ## Hunter teams: {"k", "squad", "soldiers", "at", "retarget_at", "smoked"}.
 var hunters: Array[Dictionary] = []
 ## HQ reinforcement pairs: {"k", "to" (module id), "squad", "soldiers", "at"}.
@@ -252,6 +264,7 @@ func server_start() -> void:
 	_started = true
 	_started_at = now()
 	var routes: Array = (level.get(&"def") as Dictionary).get("patrols", []) if level else []
+	var virtualizer := Virtualizer.of(self)
 	for r: Array in routes:
 		var route := _patrol_route(r)
 		if route.size() < 2:
@@ -259,7 +272,99 @@ func server_start() -> void:
 		var record := {"k": patrols.size() + 1, "route": route, "squad": null, "soldiers": [], "pending": true,
 			"second": false, "doubled": false, "lost": false, "last_pos": route[0], "walk": route, "looking_until": -INF}
 		patrols.append(record)
-		_try_patrol(record)
+		if not _take_saved(record, virtualizer):
+			_try_patrol(record)
+	for record: Dictionary in patrols.duplicate():
+		var back: Array[Vector3] = record.route.duplicate()
+		back.reverse()
+		var twin := {"k": record.k, "route": back, "squad": null, "soldiers": [], "pending": true,
+			"second": true, "doubled": true, "lost": false, "last_pos": back[0], "walk": back, "looking_until": -INF}
+		if _take_saved(twin, virtualizer):
+			record.doubled = true
+			patrols.append(twin)
+	if String((level.get(&"def") as Dictionary).get("kind", "")) == "hot":
+		for record: Dictionary in patrols.duplicate():
+			if record.second:
+				continue
+			for j in ROAM_TEAMS:
+				var roam := {"k": record.k, "j": j, "route": record.route, "squad": null, "soldiers": [], "pending": true, "lost": false}
+				roamers.append(roam)
+				var saved: Dictionary = virtualizer.take_saved("roam", {"k": record.k, "j": j}) if virtualizer else {}
+				if not saved.is_empty():
+					_adopt(roam, saved, "RM%d_%d" % [int(record.k), j + 1], "roam", virtualizer)
+				# (the rest set out one a tick: _tick_roamers, no hitch as the zone starts)
+
+
+## A patrol record takes back its saved profile (Virtualizer.take_patrol: the zone was saved with it
+## out): its team walks on from where it had got to, virtual until a player comes near. False if
+## the save had none for it.
+func _take_saved(record: Dictionary, virtualizer: Virtualizer) -> bool:
+	var saved: Dictionary = virtualizer.take_saved("patrol", {"k": int(record.k), "second": bool(record.second)}) if virtualizer else {}
+	if saved.is_empty():
+		return false
+	_adopt(record, saved, ("P%dB" if record.second else "P%d") % int(record.k), "patrol", virtualizer)
+	record.last_pos = saved.pos
+	return true
+
+
+## `record` (a patrol's, a roaming team's) takes saved profile `saved`: a squad `callsign` walking
+## its saved route from where it had got to.
+func _adopt(record: Dictionary, saved: Dictionary, callsign: String, kind: String, virtualizer: Virtualizer) -> void:
+	var squad := _new_squad(callsign)
+	var walk: Array[Vector3] = []
+	walk.assign(saved.route if not (saved.route as Array).is_empty() else record.route)
+	squad.patrol = walk
+	record.squad = squad
+	record.walk = walk
+	record.pending = false
+	virtualizer.adopt(record, saved, kind)
+
+
+## A roaming team sets out (ROAM_TEAMS): from the route point its number puts it at (spread along
+## the route) or the next one no player would see it at; the route turned to start there. False
+## (still pending) if every point is in sight.
+func _try_roam(record: Dictionary) -> bool:
+	var route: Array[Vector3] = record.route
+	var from := int(route.size() * (int(record.j) + 1) / float(ROAM_TEAMS + 1))
+	for step in route.size():
+		var i := (from + step) % route.size()
+		if not _unseen(route[i]):
+			continue
+		var turned: Array[Vector3] = []
+		turned.append_array(route.slice(i))
+		turned.append_array(route.slice(0, i))
+		var callsign := "RM%d_%d" % [int(record.k), int(record.j) + 1]
+		var squad := _new_squad(callsign)
+		squad.patrol = turned
+		var stats: Dictionary = ZoneLevel.GARRISON_STATS
+		record.soldiers = _spawn_team(squad, callsign, ROAM_SIZE, turned[0], turned[1 % turned.size()],
+			CompoundLevel.HOSTILE_LOADOUT, float(stats.combat), float(stats.discipline), alert.mode_at(turned[0]) if alert else "aware")
+		record.squad = squad
+		record.pending = false
+		_virtualize(record, "roam")
+		return true
+	return false
+
+
+## Every tick: one roaming team still to set out tries (a team a tick: spawning is a hitch, and far
+## from the squad it goes virtual at once); one with nobody left is lost.
+func _tick_roamers() -> void:
+	var tried := false
+	for record: Dictionary in roamers:
+		if record.pending:
+			if not tried:
+				tried = true
+				_try_roam(record)
+		elif not record.lost and Virtualizer.up(record) == 0:
+			record.lost = true
+
+
+## Host: `record` may go virtual far from the squad (Virtualizer.track): its owner's decisions don't
+## change, it only counts and moves as a profile meanwhile.
+func _virtualize(record: Dictionary, kind: String) -> void:
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		virtualizer.track(record, kind)
 
 
 ## A ZoneDef route ([[x, z], ...]) as ground points, each site's moved out to its footprint's
@@ -307,6 +412,7 @@ func _try_patrol(record: Dictionary) -> bool:
 		record.pending = false
 		record.last_pos = turned[0]
 		_maybe_ride(record, turned)
+		_virtualize(record, "patrol")
 		return true
 	return false
 
@@ -334,6 +440,7 @@ func server_tick() -> void:
 		_qrf_due = INF
 		_launch_qrf()  # turned out
 	_tick_patrols(alerted or tier >= 1)
+	_tick_roamers()
 	var closed := alerted or tier >= 2
 	if closed != checkpoints_closed:
 		checkpoints_changed.emit(closed)
@@ -355,8 +462,9 @@ func _tick_patrols(doubled: bool) -> void:
 			_try_patrol(record)
 			continue
 		var living := _living(record.soldiers)
-		if not living.is_empty():
-			record.last_pos = (living[0] as Soldier).global_position
+		var up := Virtualizer.up(record)  # a virtual patrol is still out (docs/virtualization.md)
+		if up > 0:
+			record.last_pos = Virtualizer.lead(record)
 			if now() >= float(record.looking_until) and record.looking_until > -INF:
 				record.looking_until = -INF  # had a look: back to the route
 				record.erase("look_rally")
@@ -371,7 +479,7 @@ func _tick_patrols(doubled: bool) -> void:
 			if alert:
 				alert.server_overdue(record.last_pos, randf_range(Alert.CHECK_IN_S.x, Alert.CHECK_IN_S.y))
 			continue
-		if doubled and not record.second and not record.doubled and not living.is_empty():
+		if doubled and not record.second and not record.doubled and up > 0:
 			var route: Array[Vector3] = record.route.duplicate()
 			route.reverse()
 			var twin := {"k": record.k, "route": route, "squad": null, "soldiers": [], "pending": true,
@@ -395,6 +503,11 @@ func _count_officers() -> void:
 		var s := n as Soldier
 		if s and s.faction == &"hostile" and officers.has(String(s.name)) and s.vitals.is_dead():
 			_officers_dead[String(s.name)] = true
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		for who: String in virtualizer.deaths:  # killed off-screen (Virtualizer's fights)
+			if officers.has(who):
+				_officers_dead[who] = true
 
 
 # --- The QRF (host) -----------------------------------------------------------------------------
@@ -522,14 +635,13 @@ func _send_look(pos: Vector3, more := false) -> void:
 	for record: Dictionary in patrols:
 		if record.pending or record.lost or now() < float(record.looking_until):
 			continue
-		var living := _living(record.soldiers)
-		if living.is_empty():
+		if Virtualizer.up(record) == 0:
 			continue
-		var d := (living[0] as Soldier).global_position.distance_to(pos)
+		var d := Virtualizer.lead(record).distance_to(pos)
 		if d < best_d:
 			best_d = d
 			best = record
-			best_living = living
+			best_living = _living(record.soldiers)
 	if best.is_empty():
 		return
 	best.looking_until = now() + LOOK_S
@@ -553,7 +665,7 @@ func _look_max() -> int:
 func _look_near(pos: Vector3) -> Dictionary:
 	for look: Dictionary in looks.duplicate():
 		look.patrols = (look.patrols as Array).filter(func(r: Dictionary) -> bool:
-			return not r.lost and now() < float(r.looking_until) and not _living(r.soldiers).is_empty())
+			return not r.lost and now() < float(r.looking_until) and Virtualizer.up(r) > 0)
 		if (look.patrols as Array).is_empty():
 			looks.erase(look)
 	var near: Dictionary = {}
@@ -585,9 +697,9 @@ func _rally_look(look: Dictionary) -> void:
 	var taken: Array[float] = []
 	for record: Dictionary in look.patrols:
 		var living := _living(record.soldiers)
-		if living.is_empty():
+		if Virtualizer.up(record) == 0:
 			continue
-		var at := (living[0] as Soldier).global_position
+		var at := Virtualizer.lead(record)
 		if Vector2(at.x - pos.x, at.z - pos.z).length() <= LOOK_RALLY_M and not record.has("look_rally"):
 			continue  # already in close: it carries on
 		var a := atan2(at.z - pos.z, at.x - pos.x)
@@ -639,8 +751,8 @@ func _tick_looks() -> void:
 		if rallying.is_empty():
 			continue
 		var there := rallying.all(func(r: Dictionary) -> bool:
-			var living := _living(r.soldiers)
-			return living.is_empty() or (living[0] as Soldier).global_position.distance_to(r.look_rally) <= LOOK_RALLIED_M)
+			var at := Virtualizer.lead(r)
+			return not at.is_finite() or at.distance_to(r.look_rally) <= LOOK_RALLIED_M)
 		if there or now() >= float(look.go_at):
 			for r: Dictionary in rallying:
 				r.looking_until = maxf(float(r.looking_until), now() + LOOK_S * 0.5)  # time to look once in
@@ -748,9 +860,9 @@ func _rally_push(push: Dictionary) -> void:
 	for g: Dictionary in push.groups:
 		var ref: Dictionary = g.ref
 		var living := _living(ref.get("soldiers", []))
-		if living.is_empty():
+		if Virtualizer.up(ref) == 0:
 			continue
-		var at := (living[0] as Soldier).global_position
+		var at := Virtualizer.lead(ref)
 		if Vector2(at.x - pos.x, at.z - pos.z).length() <= PUSH_RALLY_M and not ref.has("rally"):
 			continue  # already in close: it carries on
 		var a := atan2(at.z - pos.z, at.x - pos.x)
@@ -773,7 +885,7 @@ func _rally_push(push: Dictionary) -> void:
 ## together; pushes with nobody left standing are dropped.
 func _tick_pushes() -> void:
 	for push: Dictionary in pushes.duplicate():
-		var alive := (push.groups as Array).filter(func(g: Dictionary) -> bool: return not _living(g.ref.get("soldiers", [])).is_empty())
+		var alive := (push.groups as Array).filter(func(g: Dictionary) -> bool: return Virtualizer.up(g.ref) > 0)
 		if alive.is_empty():
 			pushes.erase(push)
 			continue
@@ -781,7 +893,7 @@ func _tick_pushes() -> void:
 		if rallying.is_empty():
 			continue
 		var there := rallying.all(func(g: Dictionary) -> bool:
-			return _living(g.ref.soldiers).any(func(s: Soldier) -> bool: return s.global_position.distance_to(g.ref.rally) <= PUSH_RALLIED_M))
+			return Virtualizer.points(g.ref).any(func(at: Vector3) -> bool: return at.distance_to(g.ref.rally) <= PUSH_RALLIED_M))
 		if there or now() >= float(push.go_at):
 			for g: Dictionary in rallying:
 				if g.kind == "wave" and reinforcements:
@@ -800,7 +912,7 @@ func _tick_hunters(tier: int) -> void:
 	var teams := 0
 	for team: Dictionary in hunters:
 		var living := _living(team.soldiers)
-		if living.is_empty():
+		if Virtualizer.up(team) == 0:
 			continue
 		teams += 1
 		_check_nemesis(team)
@@ -886,6 +998,7 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 			s.set_meta(&"nemesis", String(nem.id))
 		Economy.server_nemesis_met(String(nem.id))
 		Contracts._notify_all("Word on the net: the %s are hunting you%s." % [nem.name, " again" if int(nem.encounters) > 0 else ""])
+	_virtualize(hunters.back(), "hunters")
 	_join_push("hunters", hunters.back(), lkp)
 	print("[response] hunters %s: %d from (%.0f, %.0f), coordination %.1f" % [callsign, soldiers.size(), origin.x, origin.z, c])
 
@@ -951,7 +1064,7 @@ func _reinforce_sites() -> void:
 			break
 		if not (ZoneModules.base(m.type) in REINFORCE_TYPES) or had == null or int(had.get(m.module_id, 0)) <= 0 or level.call(&"site_down", m.module_id):
 			continue
-		if reinforcement_pairs.any(func(p: Dictionary) -> bool: return p.to == m.module_id and not _living(p.soldiers).is_empty()):
+		if reinforcement_pairs.any(func(p: Dictionary) -> bool: return p.to == m.module_id and Virtualizer.up(p) > 0):
 			continue  # already has one
 		var from := _unseen_gate(hq, m.global_position)
 		if not from.is_finite():
@@ -971,6 +1084,7 @@ func _reinforce_sites() -> void:
 		if command:
 			command.refund_men(2 - soldiers.size())
 		reinforcement_pairs.append({"k": k, "to": m.module_id, "squad": squad, "soldiers": soldiers, "at": now()})
+		_virtualize(reinforcement_pairs.back(), "pair")
 
 
 # --- Helpers ------------------------------------------------------------------------------------
@@ -1053,12 +1167,12 @@ func _room() -> int:
 	return maxi(spawn_budget() - alive_total(), 0)
 
 
-## Living soldiers this node spawned (patrols, hunters, HQ pairs).
+## Living soldiers this node spawned (patrols, hunters, HQ pairs), live or virtual.
 func _alive_spawned() -> int:
 	var count := 0
 	for list: Array in [patrols, hunters, reinforcement_pairs]:
 		for record: Dictionary in list:
-			count += _living(record.soldiers).size()
+			count += Virtualizer.up(record)
 	return count
 
 

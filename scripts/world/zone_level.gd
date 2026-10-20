@@ -94,6 +94,8 @@ var _next_stream := 0.0
 ## Host: this zone's EnemyResponse (patrols, QRF waves, hunters), so _on_contract_live can set
 ## its enemy_faction from a live contract's target (CLAUDE.md squad-roles-pmc bundle).
 var _enemy_response: EnemyResponse
+## Host: far groups as profiles (Virtualizer): virtual garrisons come back with their modules.
+var virtualizer: Virtualizer
 
 
 ## Sets the zone definition (ZoneDef). Call before adding the node to the tree.
@@ -127,7 +129,9 @@ func _ready() -> void:
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
-	add_child(DynamicSim.new())  # far AI stops simulating until a player comes near (Captain, 2026-10-18)
+	add_child(DynamicSim.new())  # far AI the virtualizer doesn't take stops simulating until a player comes near (Captain, 2026-10-18)
+	virtualizer = Virtualizer.new()
+	add_child(virtualizer)  # far groups despawn into profiles and come back as they were (docs/virtualization.md)
 	add_child(SquadTrail.new())  # the trail the squad leaves, for enemy trackers (Captain, 2026-10-18)
 	add_child(Bombers.new())  # insurgent suicide bombers on foot (wave 6f)
 	add_child(RivalTeam.new())  # a rival PMC racing the squad to some contracts' sites (wave 6)
@@ -499,6 +503,7 @@ func _on_hosted() -> void:
 	_add_player(1)
 	nav = ZoneNav.build_zone(self)
 	_restore_bodies()
+	virtualizer.server_restore()  # the groups the save kept, as profiles (before the patrols set out: they take theirs back)
 	if spawn_ai:
 		_spawn_ai()
 	if not is_base():
@@ -667,6 +672,9 @@ func _zone_enemy() -> String:
 func _spawn_garrison(module: ZoneModule) -> void:
 	if not _ai_ready or not spawn_ai:
 		return
+	if virtualizer and virtualizer.has_garrison(module.module_id):
+		virtualizer.server_wake_garrison(module.module_id)  # back at its posts, as it was (Virtualizer)
+		return
 	var from := int(_garrisoned.get(module.module_id, 0))
 	var want := garrison_size(module.module_id)
 	if _garrisoned.has(module.module_id) and from >= want:
@@ -707,6 +715,22 @@ func _post_garrison(module: ZoneModule, s: Soldier) -> void:
 		_posts[module.module_id] = p
 	p.add(s)
 	ai.post = p
+
+
+## Host (Virtualizer): module `module_id`'s garrison back from its profile, `men` in the world again
+## as they were: each holds the post again (its gun and mortar teams have their men back already).
+func server_garrison_back(module_id: String, men: Array) -> void:
+	var module := get_module(module_id)
+	if module == null:
+		return
+	for s: Variant in men:
+		if is_instance_valid(s):
+			var brain := SquadAI.of(s)
+			if brain and not (s as Soldier).has_meta(&"gun_team"):
+				brain.squad = site_squad(module_id)  # (a gun or mortar team's men are back in their team's: Virtualizer)
+			_post_garrison(module, s)
+	_pair_garrison(module)
+	_maybe_gun_team(module)  # (a team it kept isn't formed again)
 
 
 ## Host: module `module_id`'s garrison's own squad (AI bar G-02: one hostile squad per site, as
@@ -846,6 +870,8 @@ func garrison_alive(module_id: String) -> int:
 				and not s.get_meta(&"left_post", false) and not s.is_queued_for_deletion() and s.vitals.is_up() \
 				and not s.is_in_group(Soldier.DEAD_GROUP):
 			count += 1
+	if virtualizer:
+		count += virtualizer.garrison_up(module_id)  # and those at their posts as a profile
 	return count
 
 
@@ -1010,6 +1036,8 @@ func stream_focus() -> Array[Vector3]:
 				var brain := SquadAI.of(s)
 				if brain and brain.fighting():
 					out.append(s.global_position)
+		if virtualizer:
+			out.append_array(virtualizer.focus)  # enemies at a virtual garrison's gate: it comes back to fight them
 	return out
 
 
