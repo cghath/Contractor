@@ -297,7 +297,7 @@ static func on_deployment_started() -> void:
 	_s().near_gain = 0.0
 
 
-## BaseHub.server_advance_days, each week: heat with the company costs support everywhere.
+## BaseHub._on_day_advanced, each week passed: heat with the company costs support everywhere.
 static func on_week() -> void:
 	var hot := BaseZoneLevel.hottest()
 	if float(hot[1]) < HEAT_PER_POINT:

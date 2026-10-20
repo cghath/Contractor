@@ -1,7 +1,7 @@
 class_name BaseAssault
 extends Node
 ## Assaults on the base (docs/linked_zones.md 1b, calls 12 and 17; LZ-5): trouble the company
-## causes comes home. When the campaign's days turn over (BaseHub.server_advance_days) and the
+## causes comes home. When the campaign's days turn over (BaseHub._on_day_advanced) and the
 ## faction hottest against the company (BaseZoneLevel.hottest) is at ASSAULT_HEAT or more, with no
 ## assault in the last WEEK_DAYS, it books one for the next day, and everyone is warned (the
 ## board's notices). On that day:
@@ -38,8 +38,9 @@ var teams: Array = []  # host: [[Soldier]] while the live assault runs
 var _check := 0.0
 
 
-## Host (BaseHub.server_advance_days): books an assault for tomorrow when the heat calls for one,
-## and settles one whose day came while the squad was out. Returns what happened, or "".
+## Host (BaseHub._on_day_advanced, whatever moved the clock): books an assault for tomorrow when
+## the heat calls for one, and settles one whose day came while the squad was out. Returns what
+## happened, or "".
 static func server_day_passed(at_base: bool) -> String:
 	var base := BaseHub.base()
 	var booked: Dictionary = base.get("assault", {})

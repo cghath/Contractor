@@ -1354,6 +1354,9 @@ func _test_support_save_deployment() -> void:
 	var zone := await _test_saved_support_limits(CompoundLevel.current(self) as ZoneLevel)
 	if zone == null:
 		return
+	zone = await _test_travel_clock(zone, "wadi_farm")
+	if zone == null:
+		return
 	BaseHub.server_end_deployment(zone.players.get_children(), true, false)
 	check(await _wait_until(func() -> bool:
 		var current := CompoundLevel.current(self)
@@ -1432,6 +1435,56 @@ func _test_saved_support_limits(zone: ZoneLevel) -> ZoneLevel:
 	# A new loss and cooldown, with the earlier resupply timer elapsed.
 	helis.server_restore_limits({"cooldown": {"resupply": -1.0, "medevac": 180.0}, "lost": ["cargo"]})
 	return await _reload_saved_support_limits(zone, ["transport", "cargo"], "medevac", 180.0, "resupply")
+
+
+## A2-08: walking back into a remembered zone, its clock is the one the squad brought (the hour
+## left `zone` plus the walk), not the hour the zone was saved at; its saved weather stays. A
+## resume of a save made there (BaseHub.resume_info) takes the saved hour back.
+func _test_travel_clock(zone: ZoneLevel, back_to: String) -> ZoneLevel:
+	print("A remembered zone keeps the travel clock (A2-08)")
+	var path := "%s/%s.json" % [GameState.SAVE_DIR, BaseHub.zone_save_id(back_to)]
+	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	check(saved is Dictionary, "A2-08: %s is remembered (its zone save)" % back_to)
+	if not saved is Dictionary:
+		return zone
+	# Left at 09:00 under cloud (the save written straight after a load can predate the sky's
+	# first frame, so the fixture names the hour it was left at).
+	var left_at := 9.0
+	saved["sky"] = {"hour": left_at, "weather": "overcast"}
+	_write(path, JSON.stringify(saved, "", true, true))
+	var leave := 15.0  # (the walk ends at 17:00, short of midnight)
+	DayNight.current().server_set(leave, "fog")
+	var why := BaseHub.server_cross_on(back_to, RegionMap.crossing_id(String(zone.def.id)), null)
+	check(why == "", "A2-08: walking back to %s (%s)" % [back_to, why])
+	if why != "":
+		return zone
+	var arrived := await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self) as ZoneLevel
+		return current != null and String(current.def.id) == back_to and current.players.get_node_or_null(^"1") != null and not BaseHub.switch_pending(), 40.0)
+	check(arrived, "A2-08: %s loads from its memory" % back_to)
+	if not arrived:
+		return CompoundLevel.current(self) as ZoneLevel
+	zone = CompoundLevel.current(self) as ZoneLevel
+	var sky := DayNight.current()
+	var due := leave + BaseHub.TRAVEL_FOOT_H
+	check(sky != null and absf(sky.hour - due) < 0.1 and sky.weather == "overcast",
+		"A2-08: it's %05.2f h there, the walk's clock, not the %05.2f h it was left at; its own weather (%s)" % [sky.hour if sky else -1.0, left_at, sky.weather if sky else "?"])
+	check(BaseHub.server_save(), "A2-08: saving there")
+	var kept := sky.hour if sky else 0.0
+	sky.server_set(fposmod(kept + 8.0, 24.0), "clear")  # (moved on after the save: a resume takes the save's)
+	var info := BaseHub.resume_info()
+	check(not info.is_empty() and not bool(info.def.get(DayNight.TRAVELLED, false)), "A2-08: a resume there is no arrival after travel")
+	if info.is_empty():
+		return zone
+	BaseHub.server_switch_level(info, BaseHub.zone_save_id(String(info.def.id)))
+	var back := await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self) as ZoneLevel
+		return current != null and current != zone and current.players.get_node_or_null(^"1") != null and not BaseHub.switch_pending(), 40.0)
+	check(back, "A2-08: the saved zone resumes")
+	sky = DayNight.current()
+	check(back and sky != null and absf(sky.hour - kept) < 0.1 and sky.weather == "overcast",
+		"A2-08: resumed, the hour it was saved at (%05.2f h, saved %05.2f h)" % [sky.hour if sky else -1.0, kept])
+	return CompoundLevel.current(self) as ZoneLevel
 
 
 ## A2-01: both real raid entry points must leave an unrelated prepared job held and ready.
