@@ -7,7 +7,8 @@ extends Node
 ## - the pad wheel picks a slice by stick direction and presses its action on letting go;
 ## - the assists are off by default, the host sets them, a sync or request from anyone else
 ##   is refused;
-## - aim slowdown slows the stick only with the assist on and an enemy under the crosshair;
+## - aim slowdown slows the stick only with the assist on and an enemy under the crosshair,
+##   in sight: not one behind a wall, a friendly, a civilian or a captive (A2-13);
 ## - wound hints name the worst wound only with the assist on.
 ##   <godot> --headless --path . res://tests/controller_test.tscn
 
@@ -184,10 +185,66 @@ func _test_aim_slowdown() -> void:
 	var turned := absf(angle_difference(yaw, player.rotation.y))
 	check(turned < GameSettings.STICK_TURN_RATE * 0.1 * 0.7, "the stick turns slower over the enemy (%.3f rad in 0.1 s)" % turned)
 	await _stick(JOY_AXIS_RIGHT_X, 0.0)
+	await _test_slowdown_targets(hostile)
 	hostile.global_position = Vector3(0, -500, 0)
 	check(Assists.slowdown_near(player, cam.global_position, -cam.global_basis.z) == 1.0, "no enemy near: no slowdown")
 	Assists.set_assist("aim_slowdown", false)
 	hostile.queue_free()
+
+
+## A2-13: only an enemy who's a fair target and in sight slows the stick: not one behind a
+## solid wall (Squad.sees agrees it hides him), a friendly, a neutral civilian or a captive,
+## each put where the enemy was, under the crosshair.
+func _test_slowdown_targets(hostile: Soldier) -> void:
+	var cam := player.camera
+	var spot := hostile.global_position
+	var away := Vector3(0, -500, 0)
+	var eye := cam.global_position
+	var chest := spot + Vector3.UP * 1.3
+	var slow := func() -> float: return Assists.slowdown_near(player, eye, eye.direction_to(chest))  # (dead on the chest: the stick turned him a little)
+	check(slow.call() < 0.6, "aimed at the enemy's chest, in the open: slowed (x%.2f)" % slow.call())
+	var wall := StaticBody3D.new()  # (collision layer 1: the world, as a building's wall)
+	var box := CollisionShape3D.new()
+	box.shape = BoxShape3D.new()
+	(box.shape as BoxShape3D).size = Vector3(6, 6, 0.4)
+	wall.add_child(box)
+	level.add_child(wall)
+	wall.global_transform = Transform3D(Basis.looking_at(eye.direction_to(chest)), eye.lerp(chest, 0.5))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(not Squad.sees(player, hostile), "an enemy behind a solid wall is out of sight (Squad.sees)")
+	check(slow.call() == 1.0, "and gives the stick no slowdown (x%.2f)" % slow.call())
+	wall.queue_free()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check(slow.call() < 0.6, "the wall gone, the enemy slows it again (x%.2f)" % slow.call())
+	hostile.global_position = away
+	var friend := level.spawn_soldier({"name": "PadFriend", "person_name": "PadFriend", "faction": String(player.faction), "variant": "multicam",
+		"pos": level.ground_point(Vector3(spot.x + 3.0, 0, spot.z)), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	var people := PeopleLayer.find(level)
+	var civilian := people.server_spawn_person({"name": "PadCivilian", "kind": "civilian", "side": "neutral", "label": "Pad civilian",
+		"pos": level.ground_point(Vector3(spot.x - 3.0, 0, spot.z))})
+	await _frames(2)
+	for s: Soldier in [friend, civilian]:
+		for brain: Node in [SquadAI.of(s), s.get_node_or_null(NodePath(PeopleLayer.BRAIN))]:
+			if brain:
+				brain.process_mode = Node.PROCESS_MODE_DISABLED
+		s.set_physics_process(false)
+	friend.global_position = spot
+	check(slow.call() == 1.0, "a friendly under the crosshair: no slowdown (x%.2f)" % slow.call())
+	friend.global_position = away
+	civilian.global_position = spot
+	check(Person.is_civilian(civilian) and slow.call() == 1.0, "a neutral civilian under the crosshair: no slowdown (x%.2f)" % slow.call())
+	civilian.global_position = away
+	hostile.global_position = spot
+	people.server_surrender(hostile, "controller test", false)
+	var gave_up := hostile.get_node_or_null(NodePath(PeopleLayer.BRAIN))
+	if gave_up:
+		gave_up.process_mode = Node.PROCESS_MODE_DISABLED
+	hostile.global_position = spot
+	check(Person.is_captive(hostile) and slow.call() == 1.0, "an enemy who gave up: no slowdown (x%.2f)" % slow.call())
+	friend.queue_free()
+	civilian.queue_free()
 
 
 func _test_wound_hints() -> void:
