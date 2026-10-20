@@ -373,7 +373,7 @@ func server_refresh_board() -> void:
 	# same as the always-on safe job below - it doesn't wait its turn behind board_size.
 	for z: Dictionary in MissionRegistry.zones():
 		var zid := String(z.get("zone_id", ""))
-		if String(z.get("kind", "")) == "hot" and WorldSites.is_flashpoint(zid) \
+		if String(z.get("kind", "")) == "hot" and WorldSites.is_flashpoint(zid) and ZoneControl.offers_in(zid) \
 				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false)):
 			_add_offer(ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid)}))
 			WorldSites.server_clear_flashpoint(zid)

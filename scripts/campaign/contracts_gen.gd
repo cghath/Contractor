@@ -93,6 +93,13 @@ static func generate_board(board_seed: int, day: int, rep: Dictionary, count: in
 	return offers
 
 
+## The zones of `kind` a contract of type `def` can be in, less those the company holds (its FOB's,
+## docs/lhd_home.md: ZoneControl.offers_in).
+static func _zone_options(def: Dictionary, kind: String) -> Array:
+	return MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind).filter(
+		func(z: Dictionary) -> bool: return ZoneControl.offers_in(String(z.get("zone_id", ""))))
+
+
 ## One contract. `ctx`: "day", "source" ("board", "safe", "fixer", "lead"), and optionally
 ## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer"; for a hot zone's
 ## in-zone and radio contracts (HotZoneOps) also "module_id" (play at that site) and
@@ -124,10 +131,10 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		kind = "contract"  # a multi-zone contract walks between contract zones (LZ-7); the locals' jobs are in theirs
 	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
 	if zone.is_empty():
-		var options := MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)
+		var options := _zone_options(def, kind)
 		if options.is_empty():
 			kind = "contract"
-			options = MissionRegistry.zones_for(MissionRegistry.type_modules(def), kind)
+			options = _zone_options(def, kind)
 		zone = options[rng.randi() % options.size()] if not options.is_empty() else {"zone_id": "unknown", "name": "Unknown", "region": "", "kind": kind}
 	kind = String(zone.get("kind", kind))
 	var hot := kind == "hot"

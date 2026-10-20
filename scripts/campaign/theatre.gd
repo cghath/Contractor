@@ -24,7 +24,7 @@ const LINK_HOURS := 2
 static func zone(zone_id: String, from: Node = null, ctx := {}) -> Dictionary:
 	if ctx.is_empty():
 		ctx = _context()
-	var z := ZoneControl._zone(zone_id)
+	var z := ZoneControl.zone_def_raw(zone_id)
 	var region := String(z.get("region", RegionMap.BASE_REGION if zone_id == RegionMap.BASE else ""))
 	var kind := "base" if zone_id == RegionMap.BASE else String(z.get("kind", "contract"))
 	var ctrl := ZoneControl.controller(zone_id)

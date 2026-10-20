@@ -39,13 +39,25 @@ var fob: BaseFob
 
 
 ## The base zone's definition for a campaign seeded `campaign_seed` (normalized, with its crossings
-## into the neighbouring zones: RegionMap, LZ-2): the same every visit.
+## into the neighbouring zones: RegionMap, LZ-2): the same every visit. A FOB the company took
+## ashore in a zone (ZoneControl.fob_zone, docs/lhd_home.md) stands on that zone's ground (its
+## seed, terrain and region), at the middle of it; its cell on the region map is the base's.
 static func def_for(campaign_seed: int) -> Dictionary:
 	var seed := absi(campaign_seed ^ SEED_SALT) % 1000000
-	var def := ZoneDef.normalize({"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": seed,
-		"size_m": SIZE_M, "grow": false, "no_pallets": true,
+	var spec := {"id": ZONE_ID, "name": "FOB", "region": REGION, "kind": "base", "seed": seed}
+	var at := ZoneControl.fob_zone()
+	var zone := MissionRegistry.zone(at) if at != "" else {}
+	if not zone.is_empty():
+		var raw: Variant = zone.get("def", {})
+		seed = int((raw as Dictionary).get("seed", seed)) if raw is Dictionary else seed
+		spec.merge({"name": "FOB %s" % String(zone.get("name", at)), "region": String(zone.get("region", REGION)), "seed": seed}, true)
+		var terrain := String(zone.get("terrain", (raw as Dictionary).get("terrain", "") if raw is Dictionary else ""))
+		if terrain != "":
+			spec["terrain"] = terrain
+	spec.merge({"size_m": SIZE_M, "grow": false, "no_pallets": true,
 		"modules": [{"id": "fob", "type": "fob", "pos": [0, 0]}] + _defences() + _local_sites(seed),
 		"insertion": [[0.0, BaseFob.VEHICLE_PARK.end.y + 20.0]]})
+	var def := ZoneDef.normalize(spec)
 	def["crossings"] = RegionMap.crossings(RegionMap.BASE, def)
 	_add_threats(def, seed)
 	return def

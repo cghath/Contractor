@@ -134,6 +134,35 @@ References he named: Sicario's AR reloads, AK and AR reloads, common media (Heat
   region map are 14 px or more, and the region map shows each zone's controller colour.
 - The UI fit checks cover the zone map, the theatre map, and the briefing and extraction panels
   at all 10 window sizes and 4 UI scales.
+### The LHD is home until you take a zone for the FOB (Captain, 2026-10-20)
+
+Design: docs/lhd_home.md (the Captain's calls, and the Proposed ones for him to confirm).
+
+#### Added
+- A new campaign starts aboard the LHD, a ship you can walk around. The hangar deck holds the
+  armory with the stash on its floor, the shop and supply cage, the muster line, and the vehicle
+  park with the motor pool's vehicles parked in it. The medbay and the hiring office are their own
+  compartments. Two stairways lead up to the flight deck, where helicopters stand on their spots
+  and the ops room is in the island: deploy from there. Squadmates have a navmesh on both decks
+  and the stairs. Clients join aboard like at the FOB.
+- Taking a zone. A zone flips to the company once every HQ and QRF base in it has been taken out,
+  counted across deployments (today, the hot zones). While home is the LHD, the client's liaison
+  calls: the LHD's charter is running out and the client wants the company ashore. A
+  seize-and-hold contract for that zone goes on the board: take the zone's HQ, then hold it
+  through the counterattack. Lose it or let it lapse and it comes back the next day.
+- Winning it makes that zone the FOB: home moves ashore to the base zone, built on that zone's
+  ground. The stash, roster and motor pool move with the company, and the base takes that zone's
+  place on the region map. The LHD stays offshore as the coast's support origin.
+- A new test suite, lhd_home.
+
+#### Changed
+- While home is the LHD, the region map has no base cell, so no zone has a crossing "To FOB".
+  The ops desk sells no defences aboard; they come with a FOB.
+- Campaigns saved before this keep their FOB and play as before.
+
+#### Fixed
+- The contract board no longer offers jobs in a zone the company holds: not in the zone its FOB
+  stands in, and not in a flipped zone while its seize-and-hold contract is out.
 
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 

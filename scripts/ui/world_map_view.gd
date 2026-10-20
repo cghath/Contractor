@@ -202,7 +202,7 @@ static func zone_centre(zone_id: String) -> Vector2:
 static func lhd_point() -> Vector2:
 	var rows_coast := 0
 	for id: String in RegionMap.layout():
-		if String(ZoneControl._zone(id).get("region", "")) == "coast":
+		if String(ZoneControl.zone_def_raw(id).get("region", "")) == "coast":
 			rows_coast = maxi(rows_coast, (RegionMap.layout()[id] as Vector2i).y + 1)
 	return Vector2(-SEA_W * 0.5, maxf(rows_coast, 1) * 0.5)
 
@@ -457,10 +457,10 @@ func _draw_region_borders() -> void:
 	var layout := RegionMap.layout()
 	for id: String in layout:
 		var cell: Vector2i = layout[id]
-		var region := String(ZoneControl._zone(id).get("region", RegionMap.BASE_REGION if id == RegionMap.BASE else ""))
+		var region := String(ZoneControl.zone_def_raw(id).get("region", RegionMap.BASE_REGION if id == RegionMap.BASE else ""))
 		for side in 4:
 			var other := RegionMap.zone_at(cell + RegionMap.SIDE_STEP[side])
-			var other_region := String(ZoneControl._zone(other).get("region", RegionMap.BASE_REGION if other == RegionMap.BASE else ""))
+			var other_region := String(ZoneControl.zone_def_raw(other).get("region", RegionMap.BASE_REGION if other == RegionMap.BASE else ""))
 			if other == "" or other_region != region:
 				draw_polyline(_poly_screen(cell_side(cell, side)), REGION_EDGE, 3.0, true)
 
@@ -590,7 +590,7 @@ func _draw_homes(font: Font) -> void:
 func _draw_region_names(font: Font) -> void:
 	var spans := {}  # region -> Vector2(min x, max x)
 	for id: String in RegionMap.layout():
-		var region := String(ZoneControl._zone(id).get("region", RegionMap.BASE_REGION if id == RegionMap.BASE else ""))
+		var region := String(ZoneControl.zone_def_raw(id).get("region", RegionMap.BASE_REGION if id == RegionMap.BASE else ""))
 		var x := float((RegionMap.layout()[id] as Vector2i).x)
 		var span: Vector2 = spans.get(region, Vector2(x, x + 1.0))
 		spans[region] = Vector2(minf(span.x, x), maxf(span.y, x + 1.0))

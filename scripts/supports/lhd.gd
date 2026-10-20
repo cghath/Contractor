@@ -2,7 +2,9 @@ class_name Lhd
 extends Node3D
 ## Where the company's supports come from in a level (wave 5b, V4): the LHD offshore on a
 ## coastal zone, else the friendly FOB's side of the map (Captain: the LHD on the coast, the FOB
-## inland; the LHD is the company's only base and is never attacked).
+## inland; the LHD is never attacked). The company lives aboard it (LhdLevel, the walkable ship)
+## until it takes a zone for its FOB (ZoneControl, docs/lhd_home.md); offshore it stays the coast's
+## support origin either way.
 ##
 ## install() (AavSupport.install, every peer) adds one node named "SupportOrigin" to the level,
 ## built the same everywhere from the zone definition (so clients and late joiners have it with
