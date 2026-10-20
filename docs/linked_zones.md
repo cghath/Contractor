@@ -368,6 +368,10 @@ and they come with the squad when it crosses.
    (`"leg_scenario_knobs"`). Stopped here, the leg is done too (`MissionScenario._chase_after`).
    Only placed objectives go live at a deployment's start (`Objectives.placed`), so a leg's HVT
    or convoy never appears in the first zone.
+   Fixed 2026-10-20 (the Captain's manhunt): the map shows the deployment's live objectives in the
+   zone it's in (`Objectives.map_objectives`, not the briefing's list, which put a leg at the first
+   zone's centre and showed nothing after the crossing), and a manhunt's intel says where the man
+   went, his zone, site and grid (`Contracts.server_intel_lead`, the type's `"intel_leads"`).
 
 LZ-1 stands alone. LZ-2 needs LZ-1. LZ-3 and LZ-4 both need LZ-2 and can run side by side. LZ-5 needs
 LZ-1 and wave 6d's heat; LZ-6 needs LZ-5's attacks to matter; LZ-7 needs LZ-4. Split squads on a

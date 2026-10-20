@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Story act 1 and the manhunt's markers (Captain, 2026-10-20: "the intel case doesn't tell you where dude is", "both markers show on the first map but not the second map")
+
+#### Fixed
+- **A manhunt's intel says where the man went.** Picking up the intel (the laptop, the papers or the
+  compound's hard case) now gives his zone, his site and its grid reference. The radio says it, and
+  his objective names the site.
+- **Each zone's map shows only its own objectives.** The map used to show the briefing's list for
+  the whole deployment: the man next door sat at the first zone's centre, and after the crossing
+  the second map showed nothing. Now the map shows the deployment's live objectives that play in
+  the zone you're in. The supply line and the convoy chase had the same problem and are fixed too.
+
+#### Added
+- **The story (docs/story.md).** The main arc is in four acts: the Vantage Group's conspiracy,
+  uncovered through intel. Act 1, "The coast", is built: four story contracts for Meridian against
+  Black Ridge, then Vantage.
+  - **Paper trail**, an intel grab.
+  - **The quartermaster**, a two-zone manhunt.
+  - **The crates**, a two-zone supply line.
+  - **Vantage point**, a raid for a Vantage team's ledger.
+  - Each one unlocks after the one before it, once the evidence count is high enough.
+  - The client's liaison calls each one in on the radio.
+- **Clues and evidence.** Each story contract's intel adds a clue and evidence. Ordinary intel
+  turned in counts too: 4 pieces make 1 evidence, and each Vantage ledger is 1, up to 3.
+- **Leads on the contract board.** It shows the act, the evidence, what the next story contract
+  waits for, and every clue so far.
+- **Later acts and three faction arcs are data stubs**, waiting to be written.
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

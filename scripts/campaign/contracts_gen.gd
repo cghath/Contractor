@@ -103,7 +103,8 @@ static func _zone_options(def: Dictionary, kind: String) -> Array:
 ## One contract. `ctx`: "day", "source" ("board", "safe", "fixer", "lead"), and optionally
 ## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer"; for a hot zone's
 ## in-zone and radio contracts (HotZoneOps) also "module_id" (play at that site) and
-## "avoid_modules" (sites other live contracts already hold).
+## "avoid_modules" (sites other live contracts already hold); a story contract's (Story) "def"
+## stands in for parts of its type's definition ("objectives", "modules", their leg_ ones).
 static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var source: String = ctx.get("source", "board")
 	var fixer: Dictionary = ctx.get("fixer", {})
@@ -127,6 +128,9 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
 	var def := MissionRegistry.type_def(type_id)
+	if ctx.get("def") is Dictionary and not (ctx.def as Dictionary).is_empty():
+		def = def.duplicate(true)
+		def.merge(ctx.def, true)
 	if def.has("legs") or def.has("locals"):
 		kind = "contract"  # a multi-zone contract walks between contract zones (LZ-7); the locals' jobs are in theirs
 	var zone := MissionRegistry.zone(ctx.get("zone_id", ""))
@@ -290,7 +294,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 		if site.has("of_hvt"):
 			person = MissionRegistry.site(module_type, String(site.of_hvt)).get("person", {})
 		var friendly := String(person.get("side", "")) == "friendly"
-		var name := String(site.get("name", ""))
+		var name := String(t.get("name", site.get("name", "")))  # (a template may name its own piece: a story contract's, Story)
 		if not person.is_empty():
 			if person_name == "":
 				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target, zone_id if zone_id != "" else "none"))
