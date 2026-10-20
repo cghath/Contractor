@@ -137,16 +137,7 @@ func _send_fighters(by: Soldier, men: int) -> String:
 	var from := _village_near(by.global_position)
 	if not from.is_finite():
 		from = by.global_position + by.global_basis.z * 60.0  # behind the caller
-	var before := allies.out().size()
-	var why := allies.server_call(by, true, "rifle", false, from, true)
-	if why != "":
-		return why
-	if allies.out().size() > before:
-		var e: Dictionary = allies.out().back()
-		var members := (e.squad as Squad).members()
-		for i in range(men, members.size()):
-			(members[i] as Soldier).queue_free()
-	return ""
+	return allies.server_call(by, true, "rifle", false, from, true, men)  # all `men` of them (audit A2-05: ten at the top level, not the rifle squad's eight)
 
 
 ## The nearest village or town within VILLAGE_REACH_M of `at` (INF for none).

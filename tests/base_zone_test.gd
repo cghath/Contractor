@@ -774,7 +774,56 @@ func _test_rebel_calls() -> void:
 		"rebel fighters come under the high command, in their own marks (never the company's: %d, %s)" % [men.size(), why])
 	if allies:
 		allies.server_release(me)
+		await _test_rebel_fighters(base, calls, me, allies)
 	RebelSupport.change("inland", was - RebelSupport.support("inland"), "test reset")
+
+
+## Audit A2-05: every fighters level brings what it's sold as (six, eight, ten: two more a
+## level, UPGRADE_TEXT), fewer in a hot zone, even past the rifle squad's eight. A2-06: rebels
+## following the squad over a crossing (the follower records BaseHub carries) come in as rebels,
+## all of them still up, not as a regular allied rifle squad.
+func _test_rebel_fighters(base: BaseZoneLevel, calls: RebelCalls, me: Soldier, allies: AlliedTroops) -> void:
+	var ups: Dictionary = RebelSupport._s().upgrades
+	var lv_was := RebelSupport.level("fighters")
+	var kind_was := String(base.def.get("kind", ""))
+	var got: Array = []
+	var want: Array = []
+	for hot: bool in [false, true]:
+		base.def["kind"] = "hot" if hot else kind_was
+		for lv in RebelSupport.MAX_LEVEL + 1:
+			ups["fighters"] = lv
+			calls._cooldown.erase("fighters")
+			var dep := RosterDeployment.active(BaseHub.roster()) if BaseHub.campaign_running else {}
+			(dep.get("rebel_cooldown", {}) as Dictionary).erase("fighters")
+			await get_tree().physics_frame
+			var n_before := allies.out().size()
+			var why := calls.server_call("fighters", me, Vector3.INF)
+			got.append((allies.out().back().squad as Squad).members().size() if why == "" and allies.out().size() > n_before else -1)
+			var men := RebelCalls.FIGHTERS + 2 * lv
+			want.append(maxi(roundi(men * RebelCalls.HOT_WEAKER), 2) if hot else men)
+			allies.server_release(me)
+	base.def["kind"] = kind_was
+	check(got == want and want.slice(0, 3) == [6, 8, 10], "rebel fighters by upgrade level: %s men (want %s; a hot zone fewer)" % [got, want])
+	# The top level's ten, out of the hot zone, follow the squad over a crossing.
+	ups["fighters"] = RebelSupport.MAX_LEVEL
+	calls._cooldown.erase("fighters")
+	var dep2 := RosterDeployment.active(BaseHub.roster()) if BaseHub.campaign_running else {}
+	(dep2.get("rebel_cooldown", {}) as Dictionary).erase("fighters")
+	await get_tree().physics_frame
+	var called := calls.server_call("fighters", me, Vector3.INF)
+	var first: Array = (allies.out().back().squad as Squad).members() if called == "" and allies.is_out() else []
+	var was_rebel := first.size() == 10 and first.all(func(m: Soldier) -> bool: return m.iff == &"rebel")
+	var followers := allies.server_take_followers()
+	allies.server_release(me)
+	await get_tree().physics_frame
+	allies.server_follow_in(followers, me, me.global_position + Vector3(6, 0, 6))
+	var e: Dictionary = allies.out().back() if allies.is_out() else {}
+	var came: Array = (e.squad as Squad).members() if not e.is_empty() else []
+	check(was_rebel and came.size() == 10 and String(e.get("employer", "")) == "rebels"
+		and came.all(func(m: Soldier) -> bool: return m.iff == &"rebel" and String(m.variant) == "woodland" and not Harm.is_company(m)),
+		"rebels following over a crossing come in as rebels, all ten (%d of %s, %s)" % [came.size(), String(e.get("employer", "")), ", ".join(came.map(func(m: Soldier) -> String: return String(m.iff)))])
+	allies.server_release(me)
+	ups["fighters"] = lv_was
 
 
 ## Rebel support part 3: the locals' own jobs (on the board, paid in support and favours) and
