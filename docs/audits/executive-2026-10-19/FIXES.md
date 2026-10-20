@@ -4,7 +4,7 @@ These repairs follow the audit of `68a1b8336013a8170b22d2a4b66e15a626feb84b`.
 They remain local working-tree changes; no push, merge or publication was performed.
 The audit reports describe the original checkout. This file tracks subsequent repairs.
 
-**Progress: all 13 findings fixed locally (five P1, eight P2), on branch `cghath/exec-audit-2026-10-19`.**
+**Progress: 10 findings fixed on branch `cghath/exec-audit-2026-10-19`. A2-10, A2-11 and A2-12 sit in Claude's files, so they are logged as F-05, F-06 and F-04 in `docs/audits/followups.md`, with a ready fix on branch `fix/a2-ai-vehicles`.**
 
 ## A2-01 — raids inherit an unrelated prepared contract
 
@@ -128,6 +128,14 @@ Not covered: two-process co-op. Clients never receive the checkpoints, and the h
 restores the scenario state.
 
 ## A2-04 to A2-13 (October 20)
+
+**Captain's tasking (2026-10-19):** findings in Claude's files (`scripts/ai/squad_ai.gd`,
+`scripts/ai/tactics.gd`, `scripts/ai/gun_team.gd`, `scripts/combat/static_weapons.gd`,
+`scripts/vehicles/`, `scripts/world/dynamic_sim.gd`, the garrison and gun-team parts of
+`zone_level.gd`) are written up in `docs/audits/followups.md`, not fixed here. A2-10, A2-11 and
+A2-12 are in those files, so they are F-05, F-06 and F-04 there. Their fix and tests stay on
+`fix/a2-ai-vehicles` (`184f408`), and this branch leaves those files as they are on `dev`. The
+table below still lists them, for the record.
 
 Four agents worked in parallel, each on its own branch from `3e5a1ee`, grouped by file:
 `fix/a2-campaign` (c4edc4a), `fix/a2-rebels` (d0407bd), `fix/a2-exo-assist` (e1a7efc) and

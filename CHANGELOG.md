@@ -11,7 +11,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### Executive audit of 2026-10-19: all 13 findings fixed (cghath's side)
+### Executive audit of 2026-10-19: ten findings fixed, three logged for Claude's side (cghath's side)
 
 The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.
 
@@ -35,11 +35,10 @@ The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). Th
   keeps its own.
 - A2-09: taking over a casualty's HX-1 while wearing an LX-3 is refused ("Take off your exo frame
   first") instead of deleting the HX-1.
-- A2-10: element men told to board from a distance walk over to the vehicle.
-- A2-11: an ammo bearer hands over a belt with the rounds it has, and keeps it if the gunner has
-  no room, instead of it turning into a full belt or vanishing.
-- A2-12: an AI carer who boards a vehicle lets their casualty go, so another medic can take over.
 - A2-13: the aim slowdown assist ignores civilians, captives and enemies behind walls.
+
+A2-10, A2-11 and A2-12 are in Claude's files (the squad AI and vehicles). They are logged as F-04
+to F-06 in `docs/audits/followups.md`, with a ready fix on branch `fix/a2-ai-vehicles`.
 
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 

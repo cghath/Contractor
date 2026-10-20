@@ -219,43 +219,8 @@ func _test_ammo_bearer() -> void:
 	await _wait_for(func() -> bool: return gunner.inventory.count_of(&"belt_762x51") > 0, SquadAI.AMMO_RESUPPLY_COOLDOWN_S + 3.0)
 	check(gunner.inventory.count_of(&"belt_762x51") > 0 and bearer.inventory.count_of(&"belt_762x51") == before - 1,
 		"the bearer hands the gunner a belt box (gunner %d, bearer %d of %d)" % [gunner.inventory.count_of(&"belt_762x51"), bearer.inventory.count_of(&"belt_762x51"), before])
-	# Audit A2-11: the belt handed over is the bearer's own, its rounds (item state) and all, and
-	# one the gunner has no room for stays with the bearer. (Called directly, brains off.)
-	for s: Soldier in [gunner, bearer]:
-		SquadAI.of(s).set_physics_process(false)
-	var bearer_ai := SquadAI.of(bearer)
-	check(bearer_ai._nearest_gunner() == gunner and not bearer_ai.in_contact(), "the bearer has the gunner in reach, out of contact")
-	for rounds: int in [7, 0, -1]:  # part used, empty, full (no state: the item's default 100)
-		while gunner.inventory.remove_one(&"belt_762x51"):
-			pass
-		while bearer.inventory.remove_one(&"belt_762x51"):
-			pass
-		bearer.inventory.take(&"belt_762x51", 1, {} if rounds < 0 else {"rounds": rounds})
-		bearer_ai._ammo_given_at = -1000.0
-		bearer_ai._maybe_resupply_gunner(Soldier._now())
-		var want := 100 if rounds < 0 else rounds
-		check(gunner.inventory.count_of(&"belt_762x51") == 1 and bearer.inventory.count_of(&"belt_762x51") == 0 and _belt_rounds(gunner) == want,
-			"a %d-round belt reaches the gunner as one, not as a fresh one (gunner %d belts, %d rounds)" % [want, gunner.inventory.count_of(&"belt_762x51"), _belt_rounds(gunner)])
-	gunner.inventory.strip()
-	gunner.inventory.put_on(&"primary", &"m240b")  # nothing to stow a belt in: no room on him
-	bearer.inventory.take(&"belt_762x51", 1, {"rounds": 7})
-	bearer_ai._ammo_given_at = -1000.0
-	bearer_ai._maybe_resupply_gunner(Soldier._now())
-	check(gunner.inventory.count_of(&"belt_762x51") == 0 and bearer.inventory.count_of(&"belt_762x51") == 1 and _belt_rounds(bearer) == 7,
-		"no room on the gunner: the bearer keeps his 7-round belt (bearer %d belts, %d rounds)" % [bearer.inventory.count_of(&"belt_762x51"), _belt_rounds(bearer)])
 	gunner.queue_free()
 	bearer.queue_free()
-
-
-## Rounds in the belt boxes `s` has stowed (a belt without state is full).
-func _belt_rounds(s: Soldier) -> int:
-	var full := int(ItemDB.get_item(&"belt_762x51").stats.rounds)
-	var total := 0
-	for c in s.inventory.search_containers():
-		for entry: Dictionary in s.inventory.containers[c]:
-			if entry.id == &"belt_762x51":
-				total += int((entry.get("state", {}) as Dictionary).get("rounds", full)) * int(entry.count)
-	return total
 
 
 func _test_more_players() -> void:

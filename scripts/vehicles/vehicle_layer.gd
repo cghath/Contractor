@@ -243,13 +243,8 @@ func server_board(from: Soldier, s: Soldier, v: Vehicle, seat := -1) -> bool:
 	var door := _nearest_door(v, s.global_position)
 	if s.global_position.distance_to(door) <= BOARD_REACH_M:
 		return (seat >= 0 and v.server_enter(s, seat)) or (seat < 0 and v.server_enter(s))
-	# The walk order goes through his own Squad: an element's man (the high command's
-	# SquadDrivers.server_squad_mount) isn't one of `from`'s squad, which picks only its own (A2-10).
-	var brain := SquadAI.of(s)
-	var squad: Squad = brain.squad if brain and is_instance_valid(brain.squad) else null
-	if squad == null:
-		var lvl := get_parent() as CompoundLevel
-		squad = lvl.squad_for(from.faction) if lvl else null
+	var lvl := get_parent() as CompoundLevel
+	var squad := lvl.squad_for(from.faction) if lvl else null
 	if squad == null:
 		return false
 	squad.give_order(from, Squad.Order.MOVE, door, PackedStringArray([String(s.name)]))
