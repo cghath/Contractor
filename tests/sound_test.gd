@@ -42,7 +42,8 @@ func _test_streams() -> void:
 			if options.is_empty():
 				bad.append(id)  # a recording (audio/sfx/CREDITS.md) that didn't load
 			continue
-		if options.size() != Sfx.SYNTH_VARIANTS or (options[0] as AudioStreamWAV).data.size() < 400:
+		var wanted := int(Sfx.defs[id].get("synth", {}).get("variants", Sfx.SYNTH_VARIANTS))  # (footsteps: more, heard over and over)
+		if options.size() != wanted or (options[0] as AudioStreamWAV).data.size() < 400:
 			bad.append(id)
 	check(bad.is_empty(), "each has a recording or %d generated variants (bad: %s)" % [Sfx.SYNTH_VARIANTS, bad])
 	check(Sfx.is_prebuilt() and Sfx.prebuild_ms > 0.0

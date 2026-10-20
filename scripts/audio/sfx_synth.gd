@@ -14,6 +14,13 @@ const MIX_RATE := 22050
 ##   "tail": {"amp", "decay", "lowpass", "attack"}  low-passed noise (the boom, the rumble),
 ##   "ring": {"amp", "hz", "decay"}         a metallic ping (plates, brass),
 ##   "clicks": [[time, amp], ...]           short high clicks (mechanisms),
+##   "thumps": [[time, amp, hz, decay], ...] short low impacts: a boot's heel, then its toe
+##                                          rolling down (footsteps; times and pitch vary a little),
+##   "grains": {"amp", "count", "from", "to", "decay", "lowpass"}  tiny random clicks scattered
+##                                          between two times, softened: grit, gravel, grass crunch,
+##   "rustle": {"amp", "from", "to", "lowpass"}  a soft swell of noise between two times: cloth
+##                                          and kit moving with a step,
+##   "variants" (Sfx): how many of it to build, for sounds heard over and over (footsteps),
 ##   "highpass" (0-1): thins the whole sound (cracks, footsteps on hard ground).
 static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 	var rng := RandomNumberGenerator.new()
@@ -30,6 +37,25 @@ static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 	var tail: Dictionary = recipe.get("tail", {})
 	var ring: Dictionary = recipe.get("ring", {})
 	var clicks: Array = recipe.get("clicks", [])
+	# Footstep layers (Captain, 2026-10-20: the steps were "terrible", a puff of noise): each
+	# variant's thumps land a little earlier or later and higher or lower, its grains fall at
+	# their own times.
+	var thumps: Array = []
+	for th: Array in recipe.get("thumps", []):
+		thumps.append([float(th[0]) + rng.randf_range(-0.008, 0.008), float(th[1]) * rng.randf_range(0.8, 1.1),
+			float(th[2]) * rng.randf_range(0.88, 1.12), float(th[3])])
+	var grains: Dictionary = recipe.get("grains", {})
+	var grain_at := PackedFloat32Array()
+	var grain_amp := PackedFloat32Array()
+	if not grains.is_empty():
+		for g in int(grains.get("count", 0)):
+			grain_at.append(rng.randf_range(float(grains.get("from", 0.0)), float(grains.get("to", 0.1))))
+			grain_amp.append(rng.randf_range(0.3, 1.0))
+	var grain_k := float(grains.get("lowpass", 0.5))
+	var grain_lp := 0.0
+	var rustle: Dictionary = recipe.get("rustle", {})
+	var rustle_k := float(rustle.get("lowpass", 0.2)) * rng.randf_range(0.8, 1.2)
+	var rustle_lp := 0.0
 	var lp := 0.0
 	var lp_k := float(tail.get("lowpass", 0.08)) * rng.randf_range(0.85, 1.15)
 	var phase := 0.0
@@ -59,6 +85,25 @@ static func make(recipe: Dictionary, seed_value: int) -> AudioStreamWAV:
 			var dt := t - float(c[0])
 			if dt >= 0.0 and dt < 0.02:
 				v += rng.randf_range(-1.0, 1.0) * float(c[1]) * exp(-dt * 400.0)
+		for th: Array in thumps:
+			var dt := t - float(th[0])
+			if dt >= 0.0:
+				var env := minf(dt / 0.002, 1.0) * exp(-dt * float(th[3]))
+				v += (sin(TAU * float(th[2]) * dt) * 0.85 + rng.randf_range(-1.0, 1.0) * 0.15) * float(th[1]) * env
+		if not grain_at.is_empty():
+			var g := 0.0
+			for k in grain_at.size():
+				var dt := t - grain_at[k]
+				if dt >= 0.0 and dt < 0.012:
+					g += rng.randf_range(-1.0, 1.0) * grain_amp[k] * exp(-dt * float(grains.get("decay", 800.0)))
+			grain_lp += grain_k * (g - grain_lp)
+			v += grain_lp * float(grains.amp) * 2.0
+		if not rustle.is_empty():
+			var a := float(rustle.get("from", 0.0))
+			var b := float(rustle.get("to", length))
+			rustle_lp += rustle_k * (rng.randf_range(-1.0, 1.0) - rustle_lp)
+			if t >= a and t < b:
+				v += rustle_lp * 3.0 * float(rustle.amp) * sin(PI * (t - a) / maxf(b - a, 0.001))
 		samples[i] = v
 	var hp := float(recipe.get("highpass", 0.0))
 	if hp > 0.0:

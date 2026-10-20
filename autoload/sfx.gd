@@ -333,8 +333,16 @@ func _airborne(s: Soldier, rise: float, delta: float) -> bool:
 	return delta > 0.0 and rise / delta > STEP_AIR_SPEED
 
 
+## A footstep's loudness by pace (the drawn gait, the same on every peer): a walk softer, a
+## sprint harder (Captain, 2026-10-20: better footsteps).
+const STEP_WALK_DB := -4.0
+const STEP_SPRINT_DB := 3.0
+
+
 func _step(s: Soldier, volume_db: float) -> void:
-	play_at(&"step_hard" if hard_ground(s) else &"step", s.global_position, volume_db + (-8.0 if s.is_crouching() else 0.0))
+	var gait: StringName = s.model.gait() if is_instance_valid(s.model) else &""
+	var pace := STEP_WALK_DB if gait == CharacterModel.WALK else (STEP_SPRINT_DB if gait == CharacterModel.SPRINT else 0.0)
+	play_at(&"step_hard" if hard_ground(s) else &"step", s.global_position, volume_db + pace + (-8.0 if s.is_crouching() else 0.0))
 
 
 ## Whether `pos` is under a roof (world geometry within ROOF_M above): indoors, with reverb.
@@ -471,7 +479,7 @@ func streams(id: StringName) -> Array:
 
 static func _synth_variants(id: String, recipe: Dictionary) -> Array:
 	var out: Array = []
-	for v in SYNTH_VARIANTS:
+	for v in int(recipe.get("variants", SYNTH_VARIANTS)):
 		out.append(synth(recipe, hash(id) + v * 7919))
 	return out
 

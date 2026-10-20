@@ -11,6 +11,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Footsteps (Captain, 2026-10-20: "the current ones are terribleee")
+
+#### Changed
+- Footsteps are now built like a real boot landing: a low heel strike, then the toe rolling
+  down, plus the ground's crunch (grit and grass on soft ground; a sharper tap with a little
+  ring on concrete, wood and metal) and a soft rustle of kit. There are 8 variations of each
+  (was 3), so a run doesn't repeat. Walking is quieter, sprinting louder.
+- The sound generator has new layers for this (thumps, grains, rustle) and a per-sound
+  variation count, which other sounds can use too.
+
 ### Reloads reworked, and the L85's (Captain, 2026-10-20: "reload anims also need work")
 
 References he named: Sicario's AR reloads, AK and AR reloads, common media (Heat, Modern Warfare
