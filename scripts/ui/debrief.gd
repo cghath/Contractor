@@ -28,6 +28,8 @@ const SORTS := ["value", "category", "name"]
 const SORT_NAMES := {"value": "Total value", "category": "Category", "name": "Name"}
 ## The salvage table's item column at its narrowest (it wraps; the numbers and buttons don't).
 const ITEM_MIN := 140.0
+## A casualty line's widest before it cuts with "..." (an injury is a longer line than an item).
+const CASUALTY_CAP := 480.0
 
 var _panel: PanelContainer
 var _scroll: ScrollContainer
@@ -180,7 +182,7 @@ func _header(d: Dictionary) -> void:
 		for c: Dictionary in casualties:
 			var who := "%s (%s%s)" % [c.get("name", "?"), String(c.get("status", "")).to_upper(), ": " + String(c.injury) if String(c.get("injury", "")) != "" else ""]
 			var label := UiKit.cell(who, &"WarnLabel" if String(c.get("status", "")) == "kia" else &"")
-			UiKit.fit_label_text(label)
+			UiKit.fit_label_text(label, CASUALTY_CAP)
 			list.add_child(label)
 	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total)):
 		for l: Dictionary in d.get("expenses", []):

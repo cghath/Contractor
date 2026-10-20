@@ -167,22 +167,9 @@ static func warn(value: String) -> Label:
 	return label
 
 
-## Body text in the good (green) colour: a claimed row, a done thing.
-static func good(value: String) -> Label:
-	var label := text(value)
-	label.theme_type_variation = &"GoodLabel"
-	return label
-
-
-## Body text, dimmed (body size, unlike hint): a row that can't be acted on now.
-static func muted(value: String) -> Label:
-	var label := text(value)
-	label.theme_type_variation = &"MutedLabel"
-	return label
-
-
 ## A table cell: one line of text (no wrapping: numbers and short words) in a label `variation`
-## ("" for body text). Give the table's widest column wrapping text (text()) with
+## ("" for body text; GoodLabel for a done or claimed row, MutedLabel for one that can't be used
+## now, both body size). Give the table's widest column wrapping text (text()) with
 ## SIZE_EXPAND_FILL so it takes the room the others leave.
 static func cell(value: String, variation := &"") -> Label:
 	var label := Label.new()

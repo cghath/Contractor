@@ -176,8 +176,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | `UiKit.key_hint("Esc", "Close")` | a key chip and what the key does |
 | `UiKit.budget_bar(value, max, caption)` | a bar with a caption that turns warn-red past `max` (for salvage budgets, cash against cost, load) |
 | `UiKit.focus_first(root)` | focuses the first enabled button, so Tab, the arrow keys and Enter work as soon as a menu opens. It looks the button up when the deferred call runs, so a screen rebuilt in the same frame still gets focus. |
-| `UiKit.good(t)` / `muted(t)` | wrapping body text in the good colour (a claimed row) or dimmed at body size (a row that can't be used now): `GoodLabel`, `MutedLabel` |
-| `UiKit.cell(t, variation)` | a one-line label for table cells and short figures; it doesn't wrap, so an HBox never squeezes it to nothing |
+| `UiKit.cell(t, variation)` | a one-line label for table cells and short figures; it doesn't wrap, so an HBox never squeezes it to nothing. The theme's `GoodLabel` (a claimed or done row) and `MutedLabel` (a row that can't be used now) are body-size variations for rows like these. |
 | `UiKit.table(headers)` | a GridContainer with a hint-style header row; its first column expands, so give it the wrapping text |
 | `UiKit.stat(caption, value)` | a small dim caption over an 18 px figure (`StatLabel`), for a summary header in a flow |
 | `UiKit.action_row(text, controls)` | a thing's text over a wrapping row of its buttons (meta `controls`), so many buttons never run off a narrow panel |
@@ -283,5 +282,5 @@ Branches 2, 3 and 7 are independent of each other and can run in parallel. Branc
   - Rows are `action_row`s, and the first person has the focus when it opens.
 - **Base screen (`base_ui.gd`), squad page.** The "HX-1: n/8 missions" hint was a wrapping label in the row's HBox, squeezed to 1 px (invisible). It is now a `cell`.
 - **Inventory (`inventory_screen.gd`).** A swatch's short name (shown while no icon is rendered) is cut with "..." instead of wrapping mid-word on a 48 px swatch.
-- **Kit.** New: `good`, `muted`, `cell`, `table`, `stat`, `action_row` and `fit_label_text`. `focus_first` now looks the button up when it runs. **Theme.** New: `GoodLabel`, `MutedLabel` and `StatLabel`.
+- **Kit.** New: `cell`, `table`, `stat`, `action_row` and `fit_label_text`. `focus_first` now looks the button up when it runs. **Theme.** New: `GoodLabel`, `MutedLabel` and `StatLabel`.
 - **Every `_fit` screen passes the strict checks.** That covers the menus, settings, bug report, board, shop, debriefs, base pages, loadout, HUD panels, command menu levels, inventory and loot window. The drawn menus (medical, interaction) and `_test_hud` keep their own checks.
