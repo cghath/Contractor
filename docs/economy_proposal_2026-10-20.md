@@ -358,8 +358,9 @@ contracts; without them, x1.0 left too little:
 So `hot_zone_pay_mult` stays at 1.4. A median squad now grows about $46k a week, a careful one
 (contract zones only, unchanged) about $52k. Before the overhaul they grew $281k and $123k. A
 sloppy squad sinks rather than treading water. The radio follow-ups taken averaged 0.8 per
-median hot deployment. The villagers' jobs aren't in the sim: asking villagers puts a locals'
-job on the base board for a later deployment, not into the live one.
+median hot deployment. The villagers' jobs aren't in the sim. Asking a villager in the hot
+zone the squad is deployed to now hands it the locals' job live (once a zone a day). That job
+is small money (base pay $6,000-8,000) plus rebel support and favours.
 
 Calls for the Captain:
 

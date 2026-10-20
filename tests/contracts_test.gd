@@ -471,10 +471,23 @@ func _test_overhaul_numbers() -> void:
 	var on_spot := Contracts.contract(spot)
 	check(spot != "" and spot in Contracts.deployment().cids and int(on_spot.deal.advance) == 0 and int(on_spot.deal.completion) == int(on_spot.deal.pay_total)
 		and Economy.cash() == cash, "a contract taken there on the spot joins it: nothing up front, $%s on completion" % DebriefCalc.money(on_spot.get("deal", {}).get("completion", 0)))
+	# The villages bring work too: a villager asked there hands the squad the locals' job, live.
+	var told := RebelSupport.server_ask_in("ridge_hot", Economy.day(), "Villager")
+	var village: Array = (Contracts.held() as Array).filter(func(c: Dictionary) -> bool: return String(c.get("in_zone", "")) == "village")
+	check(told.contains("live now") and village.size() == 1 and String(village[0].source) == "locals" and String(village[0].type).begins_with("locals_")
+		and String(village[0].cid) in Contracts.deployment().cids and int(village[0].deal.advance) == 0
+		and not Contracts.board().any(func(c: Dictionary) -> bool: return String(c.get("source", "")) == "locals" and String(c.get("zone_id", "")) == "ridge_hot"),
+		"a villager asked in the hot zone: the locals' job joins the deployment live, nothing up front (%s)" % told)
+	check(RebelSupport.server_ask_in("ridge_hot", Economy.day(), "Villager").contains("you have our job") and village.size() == 1,
+		"asked again that day: they've given theirs already")
 	var d := Contracts.server_end_deployment({"extracted": ["You"]})
 	check(signed > 0 and int(d.totals.advance) == signed and int(d.totals.paid_now) <= 0,
 		"walking in and straight out keeps only the board contract's advance")
 	Contracts.server_finish_debrief()
+	var board_locals := Contracts.board().filter(func(c: Dictionary) -> bool: return String(c.get("source", "")) == "locals").size()
+	check(RebelSupport.server_ask_in("harbour_yard", Economy.day(), "Villager").contains("on the contract board")
+		and Contracts.board().filter(func(c: Dictionary) -> bool: return String(c.get("source", "")) == "locals").size() == board_locals + 1,
+		"not deployed there: the locals' job goes on the board, as before")
 	# The books (base screen) sort the ledger by kind.
 	check(Economy.ledger_kind("Completion: Raid") == "Contract pay" and Economy.ledger_kind("Day 4: wages 900, upkeep 3000") == "Wages and upkeep"
 		and Economy.ledger_kind("Emergency Loan from Meridian") == "Loans in" and Economy.ledger_kind("Lost helicopter (transport support): replacement") == "Lost helicopters"

@@ -477,7 +477,7 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 		return why
 	var deal := ContractGen.deal(c, terms)
 	if String(c.get("in_zone", "")) != "":
-		# A hot zone's radio contracts are taken on the spot: nothing up front, all of it on completion
+		# A hot zone's radio and village contracts are taken on the spot: nothing up front, all on completion
 		# (economy overhaul 2026-10-20: radioing for contract after contract kept 30% of each, and the
 		# arrival contracts a hot zone used to hand out kept about $80,000 for walking in and out).
 		deal.completion = int(deal.completion) + int(deal.advance)
@@ -661,19 +661,23 @@ func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	return server_contract_on_spot(type_id, module_id, why)
 
 
-## Host: a hot zone's faction hands the deployed squad a new contract it takes on the spot (the
-## radio's, once radio_contract_problem() allows it; the economy sim calls it as the follow-ups
-## would). Returns its id, or "" when there's no hot deployment or it couldn't be signed.
-func server_contract_on_spot(type_id := "", module_id := "", why := "") -> String:
+## Host: the deployed squad takes a new contract on the spot in a hot zone: the faction's over the
+## radio (`source` "board": once radio_contract_problem() allows it; the economy sim calls it as
+## the follow-ups would), or one of the locals' own jobs a villager asked for (`source` "locals":
+## RebelSupport.server_ask; Captain, 2026-10-20: "with radios and villages entering hotzones with
+## one or two objs will be good"). Returns its id, or "" when there's no hot deployment or it
+## couldn't be signed.
+func server_contract_on_spot(type_id := "", module_id := "", why := "", source := "board") -> String:
 	var dep: Dictionary = _s().deployment
 	if dep.is_empty() or dep.zone_kind != "hot":
 		return ""
+	var locals := source == "locals"
 	var rng := RandomNumberGenerator.new()
-	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "radio"])
+	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "locals" if locals else "radio"])
 	var employer := String(MissionRegistry.zone(dep.zone_id).get("faction", ""))
-	var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": dep.zone_id,
+	var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": source, "zone_id": dep.zone_id,
 		"type": type_id, "employer": employer, "module_id": module_id, "avoid_modules": live_sites()}))
-	c["in_zone"] = "radio"
+	c["in_zone"] = "village" if locals else "radio"
 	if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
 		(_s().board as Array).erase(c)
 		return ""
@@ -682,7 +686,9 @@ func server_contract_on_spot(type_id := "", module_id := "", why := "") -> Strin
 	var o: Array = dep.get("origin", [0, 0, 0])
 	var added := Objectives.from_contract(c, module_origin(c, Vector3(float(o[0]), float(o[1]), float(o[2]))))
 	objectives.server_add(added)
-	if why != "":
+	if locals:
+		_notify_all("The locals asked for help. New contract: %s" % c.title)
+	elif why != "":
 		_notify_all("Radio, %s: %s New contract: %s" % [MissionRegistry.faction_name(employer), why, c.title])
 	_commit()
 	contract_live.emit(c.cid, Objectives.placed(added))

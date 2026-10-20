@@ -22,8 +22,10 @@ measured before/after: docs/economy.md and the proposal's "Built" section.
   The no-civilian-casualties bonus is 5% (was 10%).
 - **Hot zones start small.** The squad goes in on the one or two contracts it took for the zone
   (Captain: "with radios and villages entering hotzones with one or two objs will be good"). The
-  zone no longer tops them up to 3-6 on arrival; more come in over the radio as the squad works.
-  Contracts taken on the spot pay nothing up front, all on completion.
+  zone no longer tops them up to 3-6 on arrival. More come in over the radio as the squad works,
+  and from the villages: asking a villager in the hot zone you're deployed to hands you the
+  locals' job live (once a zone a day), instead of putting it on the base board. Contracts taken
+  on the spot pay nothing up front, all on completion.
 - **Intel sells for what it's worth:** its own value, $500 to $4,000 (the HVT case $3,000), not
   a flat $6,000 a piece.
 - **Wages and upkeep are paid every day,** a seventh of the week's bill. Each debrief shows its

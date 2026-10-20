@@ -15,7 +15,7 @@ Two passes so far. Every number is Proposed (the Captain tunes them).
 |---|---|---|---|
 | Contract pay by rating (`difficulty_pay`) | 0.5, 0.7, 0.9, 1.15, 1.45 | 0.35, 0.5, 0.6, 0.75, 0.95 | Pay was about twice the running costs of the days a contract takes. |
 | Hot zone pay rate (`hot_zone_pay_mult`) | x1.4 | x1.4 (unchanged) | Proposed x1.0 because a hot zone handed out 3-6 contracts; with the arrival top-up gone (same day), x1.0 left a median squad's hot deployment netting about $10k. |
-| A hot zone's arrival contracts | 3-6 handed out on arrival, 30% advance each, kept if they lapse | none: the squad goes in on the one or two it took (Captain, 2026-10-20); more come over the radio | Walking in and straight out kept about $80,000; the radio and the villages bring the work now. |
+| A hot zone's arrival contracts | 3-6 handed out on arrival, 30% advance each, kept if they lapse | none: the squad goes in on the one or two it took (Captain, 2026-10-20); more come over the radio and from villagers asked there | Walking in and straight out kept about $80,000; the radio and the villages bring the work now. |
 | Contracts taken on the spot (the radio's) | 30% advance up front, kept if they lapse | nothing up front, all on completion | Radioing for contract after contract kept 30% of each. |
 | No-civilian-casualties bonus (`clean_bonus_share`) | 10% | 5% | It pays on almost every contract. |
 | Intel sold to a faction | a flat $6,000 a piece (`intel_sale_price`) | its own `intel_value` x `intel_sale_mult` 1.0 ($500-4,000; the HVT case $3,000) | $6,000 for a $600 USB drive made intel a quarter of a looting squad's income. |
