@@ -11,8 +11,8 @@ The headless fit test is `tests/ui_test.gd` (the `ui` suite).
 These screens are being reworked on other branches, so this one does not redo them. They should adopt the kit when they land.
 
 - **Briefing map and map HUD:** `fix/briefing-map-ui`, already merged into integrate/v0.4.0. It has its own fit test in `tests/map_test.gd`, `_test_fit_sizes`.
-- **Debrief and salvage:** `ui/debrief-salvage`, in progress.
-- **New loadout menu:** `feat/loadout-menu`, in progress.
+- **Debrief and salvage:** `ui/debrief-salvage`, then put in the kit on `feat/ui-pass` (see "The UI pass" below).
+- **New loadout menu:** `feat/loadout-menu`, then put in the kit on `feat/ui-pass`.
 
 ## How the UI scales today
 
@@ -60,7 +60,8 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | Map, briefing panel, extraction panel | `scripts/ui/map_*.gd`, `briefing_screen.gd` | code and drawn | Hud | 12 to 20 px | being reworked on fix/briefing-map-ui | covered by `map_test` |
 | Contract board | `scripts/ui/contract_board.gd` | code | CanvasLayer 10 | default 16; sections 15 at 70% | full window inset 40; left column 460; bottom row of 7 buttons | **@1.5: 1280x720, 1366x768 overflow** |
 | Shop | `scripts/ui/shop.gd` | code | CanvasLayer 11 | default 16; notice `ffd35a` | fixed 620x560, placed by hand | **@1.5: 1280x720, 1366x768 overflow** |
-| Debrief | `scripts/ui/debrief.gd` | code | CanvasLayer 12 | title 22, headings 17, lines 15 | full window inset 80, scrolls | fits when empty (being reworked on ui/debrief-salvage) |
+| Debrief and salvage | `scripts/ui/debrief.gd` (sums in `scripts/campaign/contracts_debrief.gd`) | code | CanvasLayer 12 | theme (UiKit) since feat/ui-pass; was 12 to 22 px set by hand | `panel_rect`: centred, at most 1100 wide, scrolls, Continue pinned | fits, strict, full (salvage open and closed) |
+| Loadout menu | `scripts/campaign/loadout_screen.gd` (from `BaseHub.open_loadout`) | code | CanvasLayer 21 | theme (UiKit) since feat/ui-pass; was the default theme with its own colours | full window, three columns that scroll | fits, strict (you, and a kitted squadmate) |
 | Base hub pages (squad / Ops desk, roster, hiring board, medbay, shop, armory, motor pool) | `scripts/campaign/base_ui.gd` (page from `base_terminal.gd`) | code | CanvasLayer 20 | theme (UiKit) | `UiKit.screen` with SolidPanel, 1100 wide and pages 620 tall or the window; rows cut with "..." and tooltips | fits (fixed on ui/base-hub) |
 | Motor pool | `base_ui.gd` `_build_motor_pool` | the base screen's Motor pool page (from its sign) | CanvasLayer 20 | theme | one row per vehicle with a Service button | fits (ui/base-hub) |
 | Base loading screen | `base_hub.gd` `_show_loading` | code | CanvasLayer 120 | theme title over `UiKit.dim` | full window, wraps | n/t (themed on ui/base-hub) |
@@ -121,7 +122,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
     - Marker labels are 11 to 12 px, and diamonds are 3.5 px at 30% alpha.
 14. **Ammo readout, read. Fixed on ui/hud-pass:** pips 6x14, fill word 16 px, grenades 14 px at 70%, all inside its 280x56 box. The grenade line is 12 px at 40% alpha, the fill word is 14 px at 75%, and the pips are 4 px wide. The grenade line is drawn 3 px below the control's own box.
 15. **Keyboard, read.** No screen took focus until this branch: Tab, the arrow keys and Enter did nothing until the first click. The menu, the pause menu and the inventory are mouse only. There is no gamepad support anywhere.
-16. **Debrief, read.** It is being reworked on ui/debrief-salvage; these are notes for that branch.
+16. **Debrief, read. Fixed on feat/ui-pass:** a tagged lot's or intel's buttons wrap under its line (`UiKit.action_row`), Continue is pinned under the scroll, casualties are one entry each, and ui/debrief-salvage grouped the carried-out list by item type. The notes below are from before.
     - Intel rows (label, Turn in, faction picker, Sell) don't wrap.
     - Continue sits at the end of the scroll and isn't pinned.
     - Casualties and the carried-out list are comma-separated text dumps.
@@ -174,7 +175,13 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 | `UiKit.scroll(min_height)` | a vertical scroll area; returns its VBox |
 | `UiKit.key_hint("Esc", "Close")` | a key chip and what the key does |
 | `UiKit.budget_bar(value, max, caption)` | a bar with a caption that turns warn-red past `max` (for salvage budgets, cash against cost, load) |
-| `UiKit.focus_first(root)` | focuses the first enabled button, so Tab, the arrow keys and Enter work as soon as a menu opens |
+| `UiKit.focus_first(root)` | focuses the first enabled button, so Tab, the arrow keys and Enter work as soon as a menu opens. It looks the button up when the deferred call runs, so a screen rebuilt in the same frame still gets focus. |
+| `UiKit.good(t)` / `muted(t)` | wrapping body text in the good colour (a claimed row) or dimmed at body size (a row that can't be used now): `GoodLabel`, `MutedLabel` |
+| `UiKit.cell(t, variation)` | a one-line label for table cells and short figures; it doesn't wrap, so an HBox never squeezes it to nothing |
+| `UiKit.table(headers)` | a GridContainer with a hint-style header row; its first column expands, so give it the wrapping text |
+| `UiKit.stat(caption, value)` | a small dim caption over an 18 px figure (`StatLabel`), for a summary header in a flow |
+| `UiKit.action_row(text, controls)` | a thing's text over a wrapping row of its buttons (meta `controls`), so many buttons never run off a narrow panel |
+| `UiKit.fit_label_text(label, cap)` | a one-line label cut with "..." past `cap` px and whole in its tooltip, as wide as its text up to `cap` (otherwise a trimmed label shrinks to nothing in a flow) |
 
 ### Pattern: a menu screen in the kit (see `pause_menu.gd`)
 
@@ -200,6 +207,9 @@ func open() -> void:
 - **Wrap or cut with "...", never clip silently.** Long text wraps. Long single-line text cuts with "..." and has a tooltip.
 - **Every screen closes on Esc** (the `pause` action) and consumes the event, so the screen underneath doesn't close instead.
 - **Every screen takes focus when it opens** (`UiKit.focus_first`), unless it is a key-capture screen like the settings Keys tab.
+- **Text beside other controls in an HBox doesn't wrap** unless it expands (`SIZE_EXPAND_FILL`). A wrapping label with nothing making it wide is squeezed to a pixel. Use `UiKit.cell` for a short one-liner there, or `UiKit.action_row` to put the controls under the text.
+- **Many buttons for one thing go under it, not beside it** (`UiKit.action_row`). A table's widest column is wrapping text that expands, so the numbers and buttons keep their width.
+- **A cut line keeps its whole text on hover.** `UiKit.button` and `UiKit.fit_label_text` do this. A hand-made Button or Label with `clip_text` and no tooltip fails `ui_test`.
 - **Every new screen gets a `_fit` line in `tests/ui_test.gd`.** A branch that fixes a KNOWN screen takes its entries off `KNOWN`; the test fails if a KNOWN entry starts fitting, so the list can't go stale.
 
 ## The fit test (`ui` suite)
@@ -207,6 +217,15 @@ func open() -> void:
 `tests/ui_test.gd` builds each screen that needs no level inside a SubViewport. The viewport is sized to each of the 10 window sizes divided by the UI scale each setting gives there (`GameSettings.ui_scale_for` with the setting at 1.0, 1.2, 1.5 and 2.0), which matches what `content_scale_factor` does to the root. The test then checks that every visible button, field, slider, list, tab set, non-empty label and scroll area is inside the viewport.
 
 - **Scroll areas count as one item**, because their content can scroll.
+- **The strict checks** (feat/ui-pass; on by default for every `_fit` screen, in `_layout_problems`):
+  - every visible control that matters is inside what clips it: the window, a scroll area's sides (they only scroll up and down), or a clipping control;
+  - no text is under `UiKit.FONT_SMALL` (14 px);
+  - no line is cut short unless it has "..." and a tooltip (its own, or that of the control it lets the mouse through to);
+  - no wrapping text is squeezed narrower than 80 px (or its own width) or to nothing, and no wrapped lines are cut off at the bottom;
+  - no two children of a box, flow or grid overlap or stick out of it, and no two hand-placed children that show text or controls overlap;
+  - the screen is in the shared theme (unless it draws its own text).
+- **`_test_checks`** builds a small screen that breaks each of these rules, and fails if a check stops finding its problem.
+- **When a size fails,** the first failing size at each scale prints everything found there, for the fix.
 - **Screens waiting for a follow-up branch are in `KNOWN`.** Their overflows are printed as `[known]` instead of failing.
 - **It prints a `FIT` summary line for each screen and scale.**
 - **Screens covered:**
@@ -217,6 +236,8 @@ func open() -> void:
   - contract board
   - shop
   - empty debrief
+  - a full debrief, with the salvage open and then closed (feat/ui-pass): two contracts, nine casualties, 40 kinds carried out, 52 salvage lots, tagged pallets and a vehicle, intel and expenses
+  - the loadout menu (feat/ui-pass): you, and a squadmate in full kit who was short of things on the last change
   - the six base pages
   - objectives panel
   - ammo readout
@@ -242,3 +263,25 @@ Sizes: S is about half a day, M about a day, L two or more days.
 | 8 | (on their own branches) | debrief (ui/debrief-salvage), loadout (feat/loadout-menu), briefing and map (next time they are touched) | Adopt UiKit: `budget_bar` for the salvage budget, `HintLabel` and `HeadingLabel` for the briefing. Notes for the debrief are in P1-16. | n/a |
 
 Branches 2, 3 and 7 are independent of each other and can run in parallel. Branch 4 should land after branch 1. Branches 5 and 6 touch the biggest files (`medical_menu.gd` is 618 lines, `inventory_screen.gd` 1330), so give each one a session of its own.
+
+## The UI pass (feat/ui-pass, the Captain's tasking of 2026-10-19, task 4)
+
+"Every screen fits and reads at all 10 test resolutions, with nothing clipped or overlapping." Branch 8's debrief and loadout are done here, and `ui_test` got the strict checks (see "The fit test").
+
+- **Debrief and salvage (`debrief.gd`).**
+  - It is built from the kit, with no `add_theme_*_override`, `modulate` or StyleBox of its own: the theme's solid panel, `title`, `heading` for the main sections, `stat` figures in a flow, `budget_bar` for the salvage budget, `table` for the salvage, and `button` everywhere.
+  - Before, the figure captions were 12 px and the table headers and footer 13 px.
+  - Claimed rows use `GoodLabel` and rows that won't fit use `MutedLabel`; before, they were tinted with `modulate`.
+  - Tagged lots and intel are `action_row`s.
+  - Carried-out items and casualties are `fit_label_text` cells in flows.
+  - Continue is pinned beside an Esc key hint, and the first button has the focus.
+- **Loadout menu (`loadout_screen.gd`).**
+  - It is in the theme's solid panel, with `title`, `heading`, `text`, `hint` and `warn` instead of its own colours.
+  - The title and the status line wrap; before, they were clipped silently.
+  - A person's button cuts with "..." and has the whole line in its tooltip; before, `clip_text` cut it with no tooltip.
+  - A drop-down is as wide as its prompt; before, it was cut at 120 px with no tooltip.
+  - Rows are `action_row`s, and the first person has the focus when it opens.
+- **Base screen (`base_ui.gd`), squad page.** The "HX-1: n/8 missions" hint was a wrapping label in the row's HBox, squeezed to 1 px (invisible). It is now a `cell`.
+- **Inventory (`inventory_screen.gd`).** A swatch's short name (shown while no icon is rendered) is cut with "..." instead of wrapping mid-word on a 48 px swatch.
+- **Kit.** New: `good`, `muted`, `cell`, `table`, `stat`, `action_row` and `fit_label_text`. `focus_first` now looks the button up when it runs. **Theme.** New: `GoodLabel`, `MutedLabel` and `StatLabel`.
+- **Every `_fit` screen passes the strict checks.** That covers the menus, settings, bug report, board, shop, debriefs, base pages, loadout, HUD panels, command menu levels, inventory and loot window. The drawn menus (medical, interaction) and `_test_hud` keep their own checks.

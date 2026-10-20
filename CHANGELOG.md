@@ -11,6 +11,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### UI pass: debrief, salvage and the loadout menu (Captain's tasking, 2026-10-19, task 4)
+
+- **Debrief and salvage** use the shared look: theme title, headings, figures and buttons, and
+  no text under 14 px (the figure captions, table headers and footer were 12 to 13 px). A
+  tagged pallet's or intel's buttons wrap under its line instead of running off a narrow panel;
+  the salvage table's item column wraps and takes the room the numbers leave; claimed rows are
+  green, rows that won't fit dimmed; casualties are listed one each, the dead in red.
+- **Loadout menu** uses the shared look too. Nothing is clipped silently any more: the title,
+  headings and status wrap; a person's button cuts with "..." and shows the whole line on hover;
+  a drop-down is as wide as its prompt. It opens with the first person focused.
+- **Base screen:** a squadmate's "HX-1: n/8 missions" no longer shrinks to nothing on the squad
+  page. **Inventory:** an item's short name on a swatch is cut with "..." instead of breaking
+  mid-word.
+- **The `ui` suite checks harder**: at all 10 window sizes and 4 UI scales, every screen is
+  checked for text under 14 px, text cut without "..." and a tooltip, squeezed text, controls
+  outside what clips them, and overlapping controls. It now also fits a full debrief (salvage open
+  and closed) and the loadout menu, and self-tests that each check still catches its problem.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
