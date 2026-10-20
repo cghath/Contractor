@@ -184,6 +184,7 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_vehicle_guns()
 		await _test_static_gun()
 		await _test_gun_team()
+		await _test_mortar_team()
 	if _want("chase_camera"):
 		await _test_chase_camera()
 	if _want("turret"):
@@ -1244,6 +1245,44 @@ func _test_gun_team() -> void:
 		var on := team.gun.gunner()
 		if on:
 			team.gun.server_exit(on)
+		team.gun.queue_free()
+	team.queue_free()
+	for s: Soldier in [a, b, foe]:
+		s.queue_free()
+	await _seconds(0.3)
+
+
+## G-25 part c: an AI mortar team carries its M224 to a spot in range and out of sight, sets it
+## up and ranges in: rounds go out and land.
+func _test_mortar_team() -> void:
+	print("Static weapons: an AI mortar team")
+	check(MortarFire.spec_of(null).is_empty() and StaticWeapons.KITS.mortar_m224.mortar.max_m > 3000.0, "the M224's real range: out to %.0f m" % StaticWeapons.KITS.mortar_m224.mortar.max_m)
+	var at := level.ground_point(Vector3(60, 0, 60))
+	var a := _soldier("friendly", at + Vector3(0, 0.1, 0), "MortarA")
+	var b := _soldier("friendly", at + Vector3(1.5, 0.1, 0), "MortarB")
+	var foe := _soldier("hostile", level.ground_point(Vector3(60, 0, -70)) + Vector3(0, 0.1, 0), "MortarFoe")
+	await _seconds(0.3)
+	var fb := SquadAI.of(foe)
+	if fb:
+		fb.process_mode = Node.PROCESS_MODE_DISABLED
+	foe.vitals.can_go_down = false
+	for s: Soldier in [a, b]:
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_INHERIT
+	var crew: Array[Soldier] = [a, b]
+	var team := MortarTeam.form(level, crew, "mortar_m224")
+	check(team != null and a.inventory.hands == &"static_m224_tube" and b.inventory.hands == &"static_m224_mount", "a mortar team: the tube and the mount in two men's hands")
+	if team == null:
+		return
+	team.squad.note_enemy(foe, foe.global_position)
+	await _wait_for(func() -> bool: return team.state == MortarTeam.State.READY, 100.0)
+	check(team.state == MortarTeam.State.READY and is_instance_valid(team.gun), "it sets the mortar up %.0f m from the enemy (%s)" % [
+		team.gun.global_position.distance_to(foe.global_position) if is_instance_valid(team.gun) else -1.0, MortarTeam.STATE_NAMES[team.state]])
+	var mf := MortarFire.of(level)
+	await _wait_for(func() -> bool: return team.rounds < MortarTeam.ROUNDS, 15.0)
+	check(team.rounds < MortarTeam.ROUNDS and mf.in_flight() > 0, "and a ranging round goes out (%d left, %d in the air)" % [team.rounds, mf.in_flight()])
+	await _wait_for(func() -> bool: return mf.in_flight() == 0, 45.0)
+	check(mf.in_flight() == 0, "and lands")
+	if is_instance_valid(team.gun):
 		team.gun.queue_free()
 	team.queue_free()
 	for s: Soldier in [a, b, foe]:

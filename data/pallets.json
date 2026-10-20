@@ -23,7 +23,7 @@
 	"gift_rep_max": 8,
 	"gift_min_rep": -100,
 	"reach_m": 7.0,
-	"vehicle_values": {"default": 14000, "tripod_m2": 6000, "tripod_dshk": 4000, "technical_dshk": 9000, "matv": 38000, "maxxpro": 42000, "aav7": 60000},
+	"vehicle_values": {"default": 14000, "tripod_m2": 6000, "mortar_m224": 5000, "mortar_2b14": 3500, "tripod_dshk": 4000, "technical_dshk": 9000, "matv": 38000, "maxxpro": 42000, "aav7": 60000},
 	"wreck_ratio": 0.25,
 	"_sites": "Pallets at enemy sites, in each module's own space (metres from its origin on the ground): kind, x, z. A site's vehicle is parked abandoned (the faction is hostile; nobody drives it) and can be tagged like a pallet.",
 	"sites": {

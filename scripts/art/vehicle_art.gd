@@ -32,6 +32,8 @@ const SCHEMES := {
 const MODELS := {
 	"tripod_m2": ["od", "desert"],
 	"tripod_dshk": ["od"],
+	"mortar_m224": ["od"],
+	"mortar_2b14": ["od"],
 	"uh60": ["army", "od"],
 	"vtol_petrel": ["stealth"],
 	"vtol_razorback": ["desert_camo"],
@@ -188,6 +190,8 @@ static func _shape_for(model: String) -> Canvas:
 		"technical": return _technical("dshk")
 		"tripod_m2": return _tripod_m2()
 		"tripod_dshk": return _tripod_m2("dshk")
+		"mortar_m224": return _mortar(0.06, 1.0)
+		"mortar_2b14": return _mortar(0.082, 1.2)
 		"bradley": return _bradley()
 		"abrams": return _abrams()
 	if model.begins_with("technical_"):
@@ -1906,6 +1910,21 @@ static func _tripod_m2(gun := "m2") -> Canvas:
 	c.mbar(Vector3(-0.08, 0.62, 1.6), Vector3(-0.08, 0.6, 1.72), 0.025, P.GUN)  # spade grips
 	c.mbar(Vector3(0.08, 0.62, 1.6), Vector3(0.08, 0.6, 1.72), 0.025, P.GUN)
 	c.mbox(-0.04, 0.72, 1.3, 0.04, 0.78, 1.4, P.BLACK)  # rear sight
+	return c
+
+
+## A mortar (G-25 part c): a baseplate on the ground, the tube from it up and forward at about
+## 60 degrees, the bipod under its front with the sight. `bore` the calibre (m), `tube` its length.
+static func _mortar(bore: float, tube: float) -> Canvas:
+	var c := Canvas.new(Vector3i(20, 26, 30), 0.05)
+	var base := Vector3(0, 0.08, 1.15)
+	c.mbox(-0.25, 0.0, 0.85, 0.25, 0.08, 1.4, P.METAL)  # baseplate
+	var top := base + Vector3(0, sin(deg_to_rad(60)), -cos(deg_to_rad(60))) * tube
+	c.mbar(base, top, bore * 0.5 + 0.02, P.GUN)  # the tube
+	var collar := base.lerp(top, 0.7)
+	c.mbar(collar, Vector3(-0.3, 0.0, collar.z - 0.15), 0.025, P.METAL)  # bipod legs
+	c.mbar(collar, Vector3(0.3, 0.0, collar.z - 0.15), 0.025, P.METAL)
+	c.mbox(0.05, collar.y - 0.05, collar.z - 0.05, 0.15, collar.y + 0.05, collar.z + 0.08, P.BLACK)  # sight
 	return c
 
 

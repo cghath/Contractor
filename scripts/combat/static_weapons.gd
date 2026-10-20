@@ -13,6 +13,11 @@ const NODE_NAME := "StaticWeapons"
 const KITS := {
 	"tripod_m2": {"name": "M2", "loads": [&"static_m2_gun", &"static_m3_tripod"], "set_s": 20.0, "pack_s": 15.0},
 	"tripod_dshk": {"name": "DShK", "loads": [&"static_dshk_gun", &"static_dshk_mount"], "set_s": 20.0, "pack_s": 15.0},
+	# Mortars (part c): real ranges (Captain, 2026-10-19). "mortar": what MortarFire needs.
+	"mortar_m224": {"name": "M224", "loads": [&"static_m224_tube", &"static_m224_mount"], "set_s": 25.0, "pack_s": 15.0,
+		"mortar": {"warhead": "mortar_60_he", "min_m": 70.0, "max_m": 3490.0}},
+	"mortar_2b14": {"name": "2B14", "loads": [&"static_2b14_tube", &"static_2b14_bipod", &"static_2b14_plate"], "set_s": 30.0, "pack_s": 20.0,
+		"mortar": {"warhead": "mortar_82_he", "min_m": 85.0, "max_m": 4100.0}},
 }
 const REACH_M := 3.0
 const MOVE_M := 0.6

@@ -783,6 +783,7 @@ func _spawn_queued_garrison() -> void:
 ## the site when the ambush is sprung. Proposed.
 const GUN_TEAM_TYPES := {"hq": 1.0, "qrf_base": 1.0, "compound": 0.5, "outpost": 0.5}
 const GUN_TEAM_MIN_MEN := 5
+const MORTAR_TEAM_TYPES: Array[String] = ["hq", "qrf_base"]
 var _gun_teams := {}  # host: module id -> GunTeam
 
 
@@ -805,6 +806,12 @@ func _maybe_gun_team(module: ZoneModule) -> void:
 	if team:
 		_gun_teams[module.module_id] = team
 		print("[gunteam] %s keeps a %s team (%s, %s)" % [module.module_id, team.kit, men[0].name, men[1].name])
+	# The HQ and QRF bases keep an 82 mm mortar team too (G-25 part c): three more men.
+	if base in MORTAR_TEAM_TYPES and men.size() >= 5:
+		var crew: Array[Soldier] = [men[2], men[3], men[4]]
+		var mt := MortarTeam.form(self, crew, "mortar_2b14", site_squad(module.module_id), _posts.get(module.module_id))
+		if mt:
+			print("[mortar] %s keeps a %s team (%s)" % [module.module_id, mt.kit, ", ".join(crew.map(func(s: Soldier) -> String: return String(s.name)))])
 
 
 ## Buddy pairs in module `module`'s garrison (posts 1 and 2, 3 and 4, ...), for those up.

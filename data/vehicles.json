@@ -104,6 +104,18 @@
 				{"kind": "service", "at": [0.0, 1.7, -3.55]}
 			]
 		},
+		"mortar_m224": {
+			"name": "M224 60 mm mortar", "kind": "static", "class": "soft", "mass_kg": 21, "com": [0.0, 0.2, 0.0],
+			"fuel_l": 0, "cargo_l": 40, "cargo_kg": 40,
+			"boxes": [[-0.3, 0.0, -0.4, 0.3, 0.15, 0.4], [-0.08, 0.15, -0.9, 0.08, 1.0, 0.1]],
+			"default_armour": "soft", "hp": {"hull": 8},
+			"seats": [],
+			"points": [{"kind": "cargo", "at": [0.5, 0.3, 0.3]}]
+		},
+		"mortar_2b14": {
+			"base": "mortar_m224", "name": "2B14 82 mm mortar", "mass_kg": 42,
+			"boxes": [[-0.35, 0.0, -0.45, 0.35, 0.18, 0.45], [-0.1, 0.18, -1.1, 0.1, 1.15, 0.1]]
+		},
 		"tripod_m2": {
 			"name": "M2HB (M3 tripod)", "kind": "static", "class": "soft", "mass_kg": 58, "com": [0.0, 0.3, 0.0],
 			"fuel_l": 0, "cargo_l": 40, "cargo_kg": 60,
