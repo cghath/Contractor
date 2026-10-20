@@ -33,7 +33,7 @@ These screens are being reworked on other branches, so this one does not redo th
     - Yellow, in BaseUI.
     - 15 px at 70% alpha, on the contract board.
     - 13 px at 60% alpha, on the briefing.
-- **Keyboard and gamepad.** Nothing had keyboard focus until this branch, and nothing reads a gamepad (a search of `scripts/` for "joy" finds nothing). Esc is the custom `pause` action everywhere; `ui_cancel` is never used.
+- **Keyboard and gamepad.** Nothing had keyboard focus until this branch, and nothing read a gamepad (a search of `scripts/` for "joy" found nothing). Since wave 7 (S4) there is a full gamepad layout (`Controls.JOY_BUTTONS`, `JOY_AXES` in `autoload/controls.gd`) and the pad wheel (`PadWheel`). Esc is the custom `pause` action everywhere; `ui_cancel` is never used.
 
 ## Inventory
 
@@ -94,7 +94,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
 
 ### P1
 
-7. **No automatic UI scale, read.** On 2560x1440, 3440x1440 and 3840x2160 every screen is laid out for 1600x900 pixels. HUD, inventory and medical text at 11 to 14 px is physically tiny, and the 1.5 maximum isn't enough for 4K (which needs about 2.0).
+7. **No automatic UI scale, read. Fixed on ui/auto-scale** (see "How the UI scales today"): On 2560x1440, 3440x1440 and 3840x2160 every screen is laid out for 1600x900 pixels. HUD, inventory and medical text at 11 to 14 px is physically tiny, and the 1.5 maximum isn't enough for 4K (which needs about 2.0).
 8. **Inventory screen, read. Fixed on ui/inventory.** It now uses the theme and UiKit's palette, has no text under 14 px, side columns that take a share of the width (and slot columns that narrow and scroll), and keyboard focus: the arrow keys walk the tiles and buttons, focusing a tile selects it, Enter uses it, the Menu key (or Shift+F10) lists its actions, and Tab and Esc close the screen even with a tile focused. `ui_test` builds it on a test body and checks the fit, text sizes and focus. The notes below are from before.
    - Text is 9 to 12 px (captions 9, tile names 11, readouts 10).
    - Muted teal on dark is low contrast.
@@ -121,7 +121,7 @@ Headless fit is the result of `tests/ui_test.gd` (run R0969, before the fixes on
     - The hint is 480 px wide under a 364 px objectives panel, so its left edge pokes out 116 px.
     - Marker labels are 11 to 12 px, and diamonds are 3.5 px at 30% alpha.
 14. **Ammo readout, read. Fixed on ui/hud-pass:** pips 6x14, fill word 16 px, grenades 14 px at 70%, all inside its 280x56 box. The grenade line is 12 px at 40% alpha, the fill word is 14 px at 75%, and the pips are 4 px wide. The grenade line is drawn 3 px below the control's own box.
-15. **Keyboard, read.** No screen took focus until this branch: Tab, the arrow keys and Enter did nothing until the first click. The menu, the pause menu and the inventory are mouse only. There is no gamepad support anywhere.
+15. **Keyboard, read.** No screen took focus until this branch: Tab, the arrow keys and Enter did nothing until the first click. The menu, the pause menu and the inventory are mouse only. There was no gamepad support anywhere; wave 7 (S4) added the gamepad layout and the pad wheel.
 16. **Debrief, read. Fixed on feat/ui-pass:** a tagged lot's or intel's buttons wrap under its line (`UiKit.action_row`), Continue is pinned under the scroll, casualties are one entry each, and ui/debrief-salvage grouped the carried-out list by item type. The notes below are from before.
     - Intel rows (label, Turn in, faction picker, Sell) don't wrap.
     - Continue sits at the end of the scroll and isn't pinned.
