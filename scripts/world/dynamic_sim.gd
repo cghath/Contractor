@@ -14,6 +14,9 @@ extends Node
 ##   carried, mid-action (busy), or walking somewhere within SLEEP_M of a player (a patrol sent to
 ##   look, a QRF, hunters: whatever is coming at the squad keeps coming).
 ## Friendly AI (the squad) never sleeps. All numbers Proposed.
+## Going to sleep he first SETTLES for SETTLE_S: his brain stops, he stands still and his model
+## eases out of its stride, so he's frozen standing, not mid-step (Captain, 2026-10-19: "i see ai
+## just still walking places" in MP: frozen walking poses out at range).
 
 const TICK_S := 1.0
 const SLEEP_M := 650.0
@@ -21,6 +24,9 @@ const WAKE_M := 550.0
 ## Further than this above or below the terrain he's off the ground (falling, or on a roof or a
 ## floor up: those keep simulating, so nobody is frozen mid-fall).
 const OFF_GROUND_M := 1.0
+const SETTLE_S := 1.5
+const SETTLE_META := &"sim_settle"
+const BRAIN_META := &"sim_brain_off"
 
 ## Host: how many sleep now (SessionLog's perf line).
 var asleep := 0
@@ -62,12 +68,45 @@ func server_tick() -> void:
 		if s == null or s.is_queued_for_deletion():
 			continue
 		var sleeping := s.process_mode == Node.PROCESS_MODE_DISABLED
-		var want := should_sleep(s, players, sleeping)
-		if want != sleeping:
-			s.process_mode = Node.PROCESS_MODE_DISABLED if want else Node.PROCESS_MODE_INHERIT
-		if want:
+		var want := should_sleep(s, players, sleeping or s.has_meta(SETTLE_META))
+		if want and not sleeping:
+			if not s.has_meta(SETTLE_META):
+				_settle(s)  # first stand still: the model eases out of its stride
+			elif Soldier._now() - float(s.get_meta(SETTLE_META)) >= SETTLE_S:
+				s.remove_meta(SETTLE_META)
+				s.process_mode = Node.PROCESS_MODE_DISABLED
+				sleeping = true
+		elif not want:
+			if sleeping:
+				s.process_mode = Node.PROCESS_MODE_INHERIT
+			if sleeping or s.has_meta(SETTLE_META):
+				_wake_brain(s)
+		if want and sleeping:
 			count += 1
 	asleep = count
+
+
+## Host: `s` stops where he is before he sleeps: no brain, no input, no speed.
+static func _settle(s: Soldier) -> void:
+	s.set_meta(SETTLE_META, Soldier._now())
+	var brain := SquadAI.of(s)
+	if brain and brain.process_mode != Node.PROCESS_MODE_DISABLED:
+		brain.process_mode = Node.PROCESS_MODE_DISABLED
+		s.set_meta(BRAIN_META, true)  # ours to turn back on (tests and vehicles switch brains off too)
+	s.move_input = Vector2.ZERO
+	s.want_sprint = false
+	s.velocity = Vector3.ZERO
+
+
+## Host: awake again (or wanted after all before he slept): his brain back on.
+static func _wake_brain(s: Soldier) -> void:
+	if s.has_meta(SETTLE_META):
+		s.remove_meta(SETTLE_META)
+	var brain := SquadAI.of(s)
+	if brain and s.has_meta(BRAIN_META):
+		brain.process_mode = Node.PROCESS_MODE_INHERIT
+	if s.has_meta(BRAIN_META):
+		s.remove_meta(BRAIN_META)
 
 
 ## Whether `s` should be asleep now, `sleeping` saying whether it is (the wake distance is

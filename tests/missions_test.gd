@@ -863,6 +863,16 @@ func _test_enemy_response() -> void:
 		check(DynamicSim.of(level) != null and DynamicSim.should_sleep(walker, far, false) and not DynamicSim.should_sleep(walker, near, true)
 			and DynamicSim.should_sleep(walker, between, true) and not DynamicSim.should_sleep(walker, between, false),
 			"dynamic sim: a patrol far from every player sleeps, wakes as one comes near (between the two it stays as it was)")
+		# Going to sleep he settles first (Captain, 2026-10-19: frozen walking poses in MP): brain
+		# off, standing still, so the model eases out of its stride before the body freezes.
+		var wb := SquadAI.of(walker)
+		walker.move_input = Vector2(0, -1)
+		DynamicSim._settle(walker)
+		check(walker.has_meta(DynamicSim.SETTLE_META) and wb.process_mode == Node.PROCESS_MODE_DISABLED and walker.move_input == Vector2.ZERO
+			and walker.velocity == Vector3.ZERO, "settling to sleep: brain off, no input, no speed")
+		DynamicSim._wake_brain(walker)
+		check(not walker.has_meta(DynamicSim.SETTLE_META) and wb.process_mode == Node.PROCESS_MODE_INHERIT, "and woken, his brain is back on")
+		check(not walker._smooths(), "the host never smooths its own AI (clients do: Soldier._smooths)")
 	if not looker.is_empty():
 		for r: Dictionary in er.patrols:
 			r.looking_until = -INF

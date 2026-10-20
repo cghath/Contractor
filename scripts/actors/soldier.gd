@@ -411,10 +411,11 @@ func _on_synced() -> void:
 		_smoother.push(global_position, rotation.y, Time.get_ticks_usec() / 1e6)
 
 
-## Whether this body's model is drawn smoothed: another player's, up and on foot, still
-## sending. Riding, carried, down or a ragdoll: the body is placed by something else.
+## Whether this body's model is drawn smoothed: another player's, or (on a client) an AI's
+## (Captain, 2026-10-19: better MP syncing), up and on foot, still sending. Riding, carried, down
+## or a ragdoll: the body is placed by something else.
 func _smooths() -> bool:
-	return not is_ai() and not is_multiplayer_authority() and owner_connected() and vitals.is_up() \
+	return (not is_ai() or not multiplayer.is_server()) and not is_multiplayer_authority() and owner_connected() and vitals.is_up() \
 			and not is_instance_valid(vehicle) and not is_instance_valid(carried_by) and not is_instance_valid(ragdoll)
 
 
