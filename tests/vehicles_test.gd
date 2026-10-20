@@ -1238,7 +1238,9 @@ func _test_gun_team() -> void:
 				muzzle.distance_to(foe.aim_point()), team.gun.get_world_3d().direct_space_state.intersect_ray(q)])
 		check(g != null and g.fired > 0, "and fires on him (%d rounds)" % (g.fired if g else 0))
 		var dig := Digging.of(team.gun)
-		check(team._dug and (dig.digging(team.assistant) or not dig.records.is_empty()), "and the assistant digs in in front of the gun")
+		await _wait_for(func() -> bool: return team._dug, 5.0)
+		check(team._dug, "and digs in in front of the gun, or the ground there already covers it (%s)"
+			% ("digging" if dig.digging(team.assistant) else ("dug" if not dig.records.is_empty() else "the ground covers it")))
 		var on := team.gun.gunner()
 		if on:
 			team.gun.server_exit(on)

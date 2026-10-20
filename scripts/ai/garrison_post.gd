@@ -60,7 +60,7 @@ func keep_in(p: Vector3) -> Vector3:
 
 
 func alive() -> Array[Soldier]:
-	return members.filter(func(s: Soldier) -> bool: return is_instance_valid(s) and s.vitals.is_up())
+	return members.filter(func(s: Variant) -> bool: return is_instance_valid(s) and (s as Soldier).vitals.is_up())  # (a typed lambda errors on a freed man, P2017)
 
 
 ## Every CHECK_S (any member's tick calls it): springs the ambush, breaks the garrison.
@@ -70,7 +70,7 @@ func update(now: float) -> void:
 	_checked_at = now
 	var up := alive()
 	if not sprung:
-		if up.size() < members.filter(func(s: Soldier) -> bool: return is_instance_valid(s)).size():
+		if up.size() < members.filter(func(s: Variant) -> bool: return is_instance_valid(s)).size():
 			_spring("a man down")
 			return
 		var near := rect.grow(SPRING_M)

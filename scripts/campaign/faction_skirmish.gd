@@ -51,7 +51,7 @@ func _process(delta: float) -> void:
 
 func _alive() -> int:
 	team = team.filter(func(s: Variant) -> bool: return is_instance_valid(s) and not (s as Soldier).is_queued_for_deletion())
-	return team.filter(func(s: Soldier) -> bool: return s.vitals.is_up()).size()
+	return team.filter(func(s: Variant) -> bool: return is_instance_valid(s) and (s as Soldier).vitals.is_up()).size()  # (freed bodies: P2017)
 
 
 ## Whose men hold `lvl`: its zone enemy (ZoneLevel._zone_enemy), "" there meaning the usual

@@ -333,6 +333,8 @@ func _spatter(spot: Dictionary) -> void:
 		_drips.append({"pos": from, "vel": (dir + spread).normalized() * speed, "floor": floor_y, "speck": true})
 	if spot.part in [Vitals.HEAD, Vitals.FACE]:
 		for i in BRAIN_DROPS:
+			if _drips.size() >= MAX_DRIPS + BRAIN_DROPS:
+				break  # (two head shots close together: the drip mesh holds this many, P2017)
 			var spread := Vector3(rng.randf_range(-0.5, 0.5), rng.randf_range(-0.25, 0.45), rng.randf_range(-0.5, 0.5))
 			_drips.append({"pos": from, "vel": (dir + spread).normalized() * rng.randf_range(1.0, 3.2), "floor": floor_y, "speck": true,
 				"brain": true, "size": BRAIN_SIZE * rng.randf_range(0.6, 1.4)})
@@ -392,6 +394,8 @@ func _move_drips(delta: float) -> void:
 	if _drip_mesh == null:
 		_drip_mesh = _world_multimesh("Drips", MAX_DRIPS + BRAIN_DROPS)
 	var mm := _drip_mesh.multimesh
+	while _drips.size() > mm.instance_count:
+		_drips.pop_front()  # never past the mesh (P2017: 64 drips, 52 slots)
 	for i in _drips.size():
 		var brain: bool = _drips[i].get("brain", false)
 		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ONE * float(_drips[i].size) if brain else Vector3(1, 1.6, 1) * DRIP_SIZE), _drips[i].pos))
