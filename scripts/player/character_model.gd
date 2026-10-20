@@ -2034,7 +2034,9 @@ func _pose_reload_mags() -> void:
 	var variant := String(_held.get_meta(&"voxel_variant", ""))
 	if _split_held == null:
 		var has_mag := VoxelArt.has_magazine(model)
-		var moving := VoxelArt.moving_parts(model) if not reload_parts.is_empty() and _lod_shown_every <= 1 else []
+		var moving: Array[String] = []
+		if not reload_parts.is_empty() and _lod_shown_every <= 1:
+			moving = VoxelArt.moving_parts(model)  # (typed: a bare [] here threw every reload frame)
 		if (not has_mag and moving.is_empty()) or mesh_node.mesh != VoxelArt.mesh(model, variant):
 			return
 		_split_held = mesh_node

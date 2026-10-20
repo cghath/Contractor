@@ -11,6 +11,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
+
+#### Fixed
+- **Stairs are smooth.** Walking up stairs is one smooth climb instead of a jolt at each step:
+  the view keeps its height for a moment after each step up and eases after the body.
+- **The MG pit no longer places backwards at the base.** Defences with a front (the MG pit, the
+  bunker, the mortar pit) now face out of the base wherever they stand, with their open side or
+  way in toward the wire. The MG pit covering the gate had its wall to the base and its open side
+  to the gate.
+- **A script error in the third-person reload** fired every reload frame (the moving-parts list)
+  and left the weapon's parts half split.
+
 ### Squad AI: stacking outside, clearing on you, longer order range, doctrines that act (Captain, 2026-10-20)
 
 #### Fixed

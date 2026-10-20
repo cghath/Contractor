@@ -151,8 +151,54 @@ static func _compass(d: Vector2) -> String:
 	return names[int(round(a / (TAU / 8.0))) % 8]
 
 
-## A defence's voxel boxes, metres from its own origin.
-static func defence_boxes(id: String) -> Array:
+## Defences with a front (Captain, 2026-10-20: "the mg pit places backwards at the base"): drawn
+## facing north (their front at -z), each placed one is turned to face out of the base, away from
+## its centre (facing_for: the nearest of n, e, s, w), its open side or way in toward the wire.
+## The MG pit "covering the gate" stood with its back wall to the base and its open side to the
+## gate, south.
+const DIRECTIONAL: Array[String] = ["mg_pit", "bunker", "mortar_pit"]
+
+
+## The way a defence at `pos` (FOB space, metres from its centre; +z south) faces: out of the base.
+static func facing_for(pos: Vector2) -> String:
+	if pos.length() < 0.5:
+		return "n"
+	if absf(pos.x) > absf(pos.y):
+		return "e" if pos.x > 0.0 else "w"
+	return "s" if pos.y > 0.0 else "n"
+
+
+## The module type of defence `id` placed at `pos`: "fob_<id>", with "@<facing>" for one with a
+## front (DIRECTIONAL).
+static func defence_type(id: String, pos: Vector2) -> String:
+	return "fob_%s@%s" % [id, facing_for(pos)] if id in DIRECTIONAL else "fob_" + id
+
+
+## A defence's voxel boxes, metres from its own origin, turned to `facing` (n, e, s, w; drawn n).
+static func defence_boxes(id: String, facing := "n") -> Array:
+	var out := _defence_boxes_north(id)
+	if facing == "n":
+		return out
+	var turned: Array = []
+	for b: Array in out:
+		var a := _turn(b[0] as Vector3, facing)
+		var z := _turn(b[1] as Vector3, facing)
+		turned.append([a.min(z), a.max(z)] + b.slice(2))
+	return turned
+
+
+static func _turn(p: Vector3, facing: String) -> Vector3:
+	match facing:
+		"s":
+			return Vector3(-p.x, p.y, -p.z)
+		"e":
+			return Vector3(-p.z, p.y, p.x)  # the front (-z) to +x
+		"w":
+			return Vector3(p.z, p.y, -p.x)  # the front (-z) to -x
+	return p
+
+
+static func _defence_boxes_north(id: String) -> Array:
 	var out: Array = []
 	var M := VoxelWorld.Mat
 	match id:

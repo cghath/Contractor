@@ -116,7 +116,8 @@ static func _defences() -> Array:
 		n += 1
 		# (a slot's module keeps the id it always had: the zone save's damage is by module)
 		var mid := "def_%s_p%d" % [d.id, n] if d.placed else "def_" + String(d.id)
-		out.append({"id": mid, "type": "fob_" + String(d.id), "pos": [float(d.pos[0]), float(d.pos[1])]})
+		var at := Vector2(float(d.pos[0]), float(d.pos[1]))
+		out.append({"id": mid, "type": BaseFob.defence_type(String(d.id), at), "pos": [at.x, at.y]})  # (turned to face out)
 	return out
 
 

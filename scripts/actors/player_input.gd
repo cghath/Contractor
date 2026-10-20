@@ -32,6 +32,15 @@ const LAND_DIP_PER_MPS := 0.016
 const LAND_DIP_MAX := 0.12
 const LAND_SPRING := 140.0
 const LAND_DAMP := 0.75
+## Stairs (Captain, 2026-10-20: "stairs also arent smooth walking up"): a step up lifts the body
+## in one frame (SoldierMovement._climb_bodies, up to WORLD_STEP_M); the view keeps the height it
+## had and eases up after it (STEP_SMOOTH per second), so a flight of stairs is one smooth climb,
+## not a jolt a step. A jump up of more than STEP_SMOOTH_MAX_M (a mantle's end, a teleport) isn't
+## smoothed.
+const STEP_SMOOTH := 14.0
+const STEP_SMOOTH_MAX_M := 0.4
+var _step_y := 0.0  # the view's lag behind the body after a step up (m, down)
+var _step_last_y := INF
 ## Only a fall of at least this long (s) dips the view: not a step down, a stair's lip or the
 ## settle at a spawn (a jump is about 0.7 s in the air).
 const LAND_MIN_AIR_S := 0.25
@@ -482,12 +491,28 @@ func _update_bob(delta: float) -> void:
 	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
 	var phase := TAU * body.model.gait_phase()
 	_update_landing(minf(delta, 0.05))
+	_update_step_smooth(delta)
 	if GameSettings.head_bob():
 		var d := fposmod(body.model.gait_phase() * 2.0, 1.0) * FOOT_DIP_SHARP  # a footfall twice a stride
 		var dip := -FOOT_DIP * pace * d * exp(1.0 - d)
-		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y, 0.0)
+		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y + _step_y, 0.0)
 	else:
-		body.camera.position = Vector3.ZERO
+		body.camera.position = Vector3(0.0, _step_y, 0.0)  # (steps are smoothed with head bob off too)
+
+
+## The step-up smoothing (STEP_SMOOTH): a sudden small rise on the floor is taken back off the view
+## and eased away.
+func _update_step_smooth(delta: float) -> void:
+	var y := body.global_position.y
+	if _step_last_y != INF:
+		var rise := y - _step_last_y
+		var walking := Vector2(body.velocity.x, body.velocity.z).length() > 0.5  # (a step needs a walk: not the settle at a spawn)
+		if walking and rise > 0.03 and rise <= STEP_SMOOTH_MAX_M and body.is_on_floor() and not is_instance_valid(body.vehicle) and not body.movement.mantling:
+			_step_y = maxf(_step_y - rise, -STEP_SMOOTH_MAX_M)
+	_step_last_y = y
+	_step_y = lerpf(_step_y, 0.0, 1.0 - exp(-STEP_SMOOTH * delta))
+	if absf(_step_y) < 0.0005:
+		_step_y = 0.0
 
 
 ## The landing dip (LAND_*): the fall's speed, taken on touching down, kicks a damped spring.

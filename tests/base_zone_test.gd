@@ -738,10 +738,18 @@ func _test_placed_defences() -> void:
 	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending() and CompoundLevel.current(self) is BaseZoneLevel, 40.0)
 	var base := CompoundLevel.current(self) as BaseZoneLevel
 	var placed_mod := (base.def.modules as Array).filter(func(m: Dictionary) -> bool:
-		return String(m.type) == "fob_mg_pit" and Vector2(float(m.pos[0]), float(m.pos[1])) == spot) if base else []
+		return String(m.type).begins_with("fob_mg_pit") and Vector2(float(m.pos[0]), float(m.pos[1])) == spot) if base else []
 	check(why == "" and BaseEconomy.funds() < funds and placed_mod.size() == 1,
 		"placed (snapped to the grid), paid for, and standing there when the base comes back (%s)" % why)
 	check(BaseFob.placement_problem("mg_pit", spot, BaseHub.base().get("defences", [])).contains("another defence"), "and nothing else goes on top of it")
+	# Facing out (Captain, 2026-10-20: "the mg pit places backwards"): the gate's pit, south of the
+	# middle, has its wall to the south (toward the gate) and its open side to the base.
+	var south: Array = BaseFob.defence_boxes("mg_pit", BaseFob.facing_for(Vector2(12, 24)))
+	var front_south := south.any(func(b: Array) -> bool: return (b[0] as Vector3).z >= 1.0 and (b[1] as Vector3).x - (b[0] as Vector3).x > 3.0)
+	var open_north := not south.any(func(b: Array) -> bool: return (b[1] as Vector3).z <= -1.0 and (b[1] as Vector3).x - (b[0] as Vector3).x > 3.0)
+	check(BaseFob.facing_for(Vector2(12, 24)) == "s" and BaseFob.facing_for(Vector2(30, 0)) == "e" and front_south and open_north
+		and String(placed_mod[0].type if not placed_mod.is_empty() else "").begins_with("fob_mg_pit@"),
+		"an MG pit faces out of the base: the gate's to the south, wall toward the gate, open side to the base (%s)" % [placed_mod[0].type if not placed_mod.is_empty() else "none"])
 	# Vehicles from an allied quartermaster into the motor pool (wave 6 call #1: MRAPs at Trusted).
 	var us0 := Economy.reputation("us_forces")
 	check(BaseHub.server_buy_vehicle("matv") != "", "no M-ATV for sale before the company stands Trusted with an allied force")
