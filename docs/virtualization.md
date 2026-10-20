@@ -1,8 +1,8 @@
 # AI virtualization (inspired by ALiVE's profile system)
 
-**Status:** built 2026-10-20 (branch `claude/virtualization`): phases 1 and 2, profile saves and
-off-screen fights from phase 3; vehicles and occlusion culling still to do (see "What's built"
-at the end). Design 2026-10-18 (Captain: "virtualization of anything beyond the players
+**Status:** built 2026-10-20 (branch `claude/virtualization`): phases 1 to 3 (profiles, garrisons,
+vehicles and convoys, off-screen fights, saves); occlusion culling (phase 4) still to do (see
+"What's built" at the end). Design 2026-10-18 (Captain: "virtualization of anything beyond the players
 sightlines", then "instead of dynamic sim lets take a page out of the ALIVE mods book and
 actually virtualize").
 
@@ -134,8 +134,19 @@ zone leg, and the timing script `tests/virtualization_perf.gd`.
   waves to their owners' lists, garrisons to their modules. A save old enough to fade the loose
   gear (`fade_loose`) drops them: the zone's enemy is fresh.
 - **Co-op:** profiles never replicate; men come back as ordinary AI (late joiners get them).
-- **DynamicSim stays** for the AI the virtualizer doesn't take (vehicle crews, bombers, the rival
-  PMC team, scenario waves): it still sleeps them in place past SLEEP_M.
+- **Rides (vehicles and convoys):** a group whose every man is aboard vehicles on their way somewhere
+  goes virtual with them: each vehicle's `Vehicle.to_save` (its id, damage, fuel, cargo) and who sits
+  in which seat. Rides are VehicleQrf technicals driving a QRF or a patrol in (`VehicleQrf.convoy_of`)
+  and a mission's convoy while it rolls (MissionScenario vouches for it: `virtual_ride`). The profile
+  drives the ride's route at the ride's speed (RIDE_OFFROAD_MULT 0.6 of it off a road, slower up
+  hills). Back in the world the same vehicles come out on its way, the men in their seats, and the
+  owner drives on (`VehicleQrf.server_resume`, `MissionScenario.virtual_ride_back`). A QRF ride that
+  reaches where its men get out leaves its technical parked there (real, empty) and the men walk on.
+  A virtual convoy reaching the end of its route gets away (the objective fails) as a live one does.
+  A group half aboard and half walking stays real. Mission convoys aren't in the zone save's profiles:
+  the scenario checkpoint keeps them (it wakes them first).
+- **DynamicSim stays** for the AI the virtualizer doesn't take (crews of vehicles that aren't rides,
+  bombers, the rival PMC team, scenario waves): it still sleeps them in place past SLEEP_M.
 - **Capacity:** a hot zone fields `EnemyResponse.ROAM_TEAMS` (2) roaming teams of `ROAM_SIZE` (4)
   on each patrol route, outside the spawn budget (which still paces what is sent at the squad).
 
@@ -159,6 +170,7 @@ Three times the force with virtualization costs no more than today's does withou
 (DynamicSim) still cost physics (their bodies stay in the world, and the navigation is kept baked
 round them); profiles cost next to nothing.
 
-Still to do: vehicles and convoys as profiles (mounted groups stay real), occlusion culling, an
-alert report for an off-screen fight (gunfire heard), and choosing a covered spot at FORCE_M.
+Still to do: occlusion culling, an alert report for an off-screen fight (gunfire heard), choosing a
+covered spot at FORCE_M, a QRF technical's gunner staying on the gun when it parks off-screen (all its
+men walk on), and the squad's own vehicles (never virtual: the squad is always real).
 

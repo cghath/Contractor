@@ -115,6 +115,47 @@ func _mount(base: Node3D, gate: Vector3, aim: Vector3, soldiers: Array) -> bool:
 	return sent > 0
 
 
+## Host: the convoy record of technical `v` still driving its men in ({} if it isn't one, or they're
+## out): AI virtualization takes a ride only while it's on its way (Virtualizer).
+func convoy_of(v: Vehicle) -> Dictionary:
+	for c: Dictionary in convoys:
+		if c.vehicle == v and not c.out:
+			return c
+	return {}
+
+
+## Host (Virtualizer): technical `v` and its men go into a profile: its convoy record leaves the list
+## (the profile drives it on). Returns the record ({} if it had none).
+func server_release(v: Vehicle) -> Dictionary:
+	var c := convoy_of(v)
+	if not c.is_empty():
+		convoys.erase(c)  # (its hit signal finds no record now: nothing to undo)
+	return c
+
+
+## How fast the technicals drive (km/h).
+func speed_kmh() -> float:
+	return float(_cfg.get("speed_kmh", 55.0))
+
+
+## Host (Virtualizer): technical `v`, back in the world with `riders` seated, drives on to `dismount`
+## as a QRF ride again (its gun manned, hits and getting stuck watched, the men out near the end).
+static func server_resume(level: Node, v: Vehicle, riders: Array, aim: Vector3, dismount: Vector3) -> void:
+	if level == null or v == null or not level.multiplayer.is_server():
+		return
+	var node := level.get_node_or_null(NodePath(NODE_NAME)) as VehicleQrf
+	if node == null:
+		node = VehicleQrf.new()
+		level.add_child(node)
+	v.set_meta(&"qrf", "inbound")
+	v.set_meta(&"no_save", true)
+	AavGunner.attach(v)
+	v.damaged.connect(node._on_hit.bind(v))  # (a vehicle fresh out of a profile: never connected yet)
+	v.server_drive_to(dismount, node.speed_kmh())
+	node.convoys.append({"vehicle": v, "soldiers": riders, "aim": aim, "dismount": dismount, "started": Soldier._now(),
+		"progress_at": Soldier._now(), "progress_pos": v.global_position, "hit": false, "out": false})
+
+
 ## Seats in the order the QRF fills them: the driver, the gun, then the rest.
 static func _seat_order(v: Vehicle) -> Array:
 	var gun := int(v.spec.get("gun", {}).get("seat", -1)) if (v.spec.get("gun", {}) as Dictionary).has("weapon") else -1

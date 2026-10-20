@@ -32,6 +32,12 @@ Inspired by ALiVE's profiles; our own build for Contractor's zones (docs/virtual
 - **Bigger hot zones.** A hot zone now also fields two roaming teams of four on every patrol route.
   They are the zone's standing force and are not counted in the budget that paces what is sent at
   the squad. Far from the squad they are profiles and cost next to nothing.
+- **Vehicles and convoys too.** An enemy QRF or patrol riding a technical, and a mission's convoy,
+  go virtual with their vehicles when everyone is aboard and they're far from the squad. The profile
+  drives on at the vehicle's speed, slower off roads and up hills. It comes back as the same
+  vehicles (damage, fuel, cargo) with every man in his own seat, and drives on. A QRF technical that
+  gets where it was going off-screen is left parked there, and its men walk on. A virtual convoy
+  that reaches the end of its route gets away, as a real one does.
 - **Saved with the zone.** Every group is saved, virtual or not. A squad that leaves a zone and
   comes back meets the same men where they had got to. A zone left long enough for its loose gear
   to fade gets a fresh enemy instead.

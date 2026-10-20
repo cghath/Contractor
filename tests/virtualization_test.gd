@@ -61,6 +61,7 @@ func _ready() -> void:
 	await _test_garrison()
 	await _test_save()
 	await _test_capacity()
+	await _test_rides()
 	_finish()
 
 
@@ -578,3 +579,95 @@ func _test_capacity() -> void:
 			virtual += 1
 	check(virtual == want and out.all(func(r: Dictionary) -> bool: return Virtualizer.up(r) == EnemyResponse.ROAM_SIZE),
 		"far from the squad each is a profile, still %d men" % EnemyResponse.ROAM_SIZE)
+
+
+# --- Rides (phase 3) -------------------------------------------------------------------------------------------------
+
+## What a vehicle is, for comparing before and after (where it stands aside).
+func _vsig(v: Vehicle) -> Dictionary:
+	var out := v.to_save()
+	out.erase("pos")
+	out.erase("rot")
+	out.fuel = snappedf(float(out.fuel), 0.01)
+	return {"save": JSON.stringify(out, "", true)}
+
+
+func _test_rides() -> void:
+	print("A QRF technical goes virtual with its men, drives on, and comes back with them in their seats")
+	_put_player(level.insertion_points()[0])
+	var layer := VehicleLayer.of(level)
+	var at := _away(1200.0, 0.3)
+	var dir := Vector3(level.map_area().get_center().x - at.x, 0.0, level.map_area().get_center().y - at.z).normalized()
+	var tech := layer.server_spawn("technical_dshk", Transform3D(Basis.looking_at(dir, Vector3.UP), at + Vector3.UP * 0.3), "", &"hostile", "")
+	check(tech != null, "a technical out on the map")
+	if tech == null:
+		return
+	await _frames(3)
+	var team := _team(3, at + dir.cross(Vector3.UP) * 4.0, "qrf")
+	await _frames(2)
+	var order := VehicleQrf._seat_order(tech)
+	for i in (team.soldiers as Array).size():
+		tech.server_enter(team.soldiers[i], int(order[i]))
+	var dest := level.ground_point(at + dir * 500.0)
+	VehicleQrf.server_resume(level, tech, team.soldiers, dest, dest)  # a QRF ride on its way in
+	await _frames(3)
+	tech.server_set_fuel(41.5)
+	tech.cargo_hold.take(&"frag_grenade", 2)
+	var seats := {}
+	for s: Soldier in team.soldiers:
+		seats[String(s.name)] = tech.seat_of(s)
+	var id := tech.vehicle_id
+	var before_v := _vsig(tech)
+	var before := _sigs(team)
+	check(self.v.server_virtualize(team, true), "the group goes virtual, ride and all")
+	await _frames(2)
+	var p: Dictionary = team.get("virtual", {})
+	check(layer.find(id) == null and (p.get("rides", []) as Array).size() == 1 and VehicleQrf.of(level).convoys.is_empty(),
+		"the technical has left the world too; the profile holds it (1 ride) and VehicleQrf has let go of it")
+	var start: Vector3 = p.get("pos", Vector3.ZERO)
+	self.v.server_advance(10.0)
+	var drove := Virtualizer._flat(start, p.pos)
+	check(drove > 40.0 and Virtualizer._flat(p.pos, dest) < Virtualizer._flat(start, dest),
+		"in 10 s it drives %.0f m toward where it's going (%.1f m/s here; a man walks %.1f)" % [drove, Virtualizer.ride_pace(level, p), Virtualizer.pace(level, p)])
+	var spots := self.v.spawn_spots(team)
+	check(spots.all(func(x: Vector3) -> bool: return Virtualizer._flat(x, p.pos) < 1.0), "its men would come back where the ride is (aboard)")
+	await _wake(team)
+	var back := layer.find(id)
+	check(back != null and _vsig(back) == before_v, "the same technical comes back: its id, fuel, damage and cargo")
+	if back:
+		var seated := (team.soldiers as Array).all(func(s: Variant) -> bool: return back.seat_of(s) == int(seats.get(String((s as Node).name), -2)))
+		check(seated and (team.soldiers as Array).size() == 3, "each man back in his own seat")
+		check(not VehicleQrf.of(level).convoy_of(back).is_empty() and is_instance_valid(back.ai) and back.ai.active,
+			"and it drives on as a QRF ride (VehicleQrf has it again, its driver at the wheel)")
+	var after := _sigs(team)
+	check(after == before, "the men exactly as they were")
+	# Virtual all the way: it gets there off-screen, parks, and its men go on on foot.
+	check(self.v.server_virtualize(team, true), "virtual again")
+	self.v.server_advance(400.0)
+	p = team.get("virtual", {})
+	var parked := layer.find(id)
+	check((p.get("rides", []) as Array).is_empty() and parked != null and parked.occupants().is_empty() and Virtualizer._flat(parked.global_position, dest) < 40.0,
+		"at the end of its drive the technical is parked there, empty, and the profile goes on on foot")
+	# Saved mid-drive and loaded: the ride and the seats come back.
+	if parked:
+		var crew := _team(2, parked.global_position + Vector3(4, 0, 0), "qrf")
+		await _frames(2)
+		for i in (crew.soldiers as Array).size():
+			parked.server_enter(crew.soldiers[i], int(VehicleQrf._seat_order(parked)[i]))
+		VehicleQrf.server_resume(level, parked, crew.soldiers, at, at)
+		await _frames(2)
+		check(self.v.server_virtualize(crew, true), "another crew drives it back: virtual")
+		var saved: Array = self.v.to_save().filter(func(x: Dictionary) -> bool: return not (x.get("rides", []) as Array).is_empty())
+		var json: Variant = JSON.parse_string(JSON.stringify(saved))
+		check(json is Array and (json as Array).size() >= 1 and Virtualizer.save_ok(json[0]), "a ride is in the zone save")
+		if json is Array and not (json as Array).is_empty():
+			var restored := Virtualizer.from_save(json[0])
+			_drop(crew)
+			var rec := {"squad": er._new_squad("VTR"), "soldiers": [], "virtual": restored}
+			self.v.track(rec, "qrf", false)
+			await _wake(rec)
+			var again := layer.find(id)
+			check(again != null and (rec.soldiers as Array).size() == 2 and (rec.soldiers as Array).all(func(s: Variant) -> bool: return again.seat_of(s) >= 0),
+				"loaded, the same technical comes back with its two men aboard")
+			_drop(rec)
+	_drop(team)
