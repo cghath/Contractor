@@ -229,8 +229,10 @@ func refresh() -> void:
 	var reps := PackedStringArray()
 	for f: String in MissionRegistry.faction_ids():
 		reps.append("%s %+d (tier %d)" % [MissionRegistry.faction_name(f), e.reputation(f), e.tier(f)])
-	_header.text = "Day %d (week %d, bill in %d days)   Cash $%s   Owed $%s%s\nReputation: %s   Locals %+d" % [
-		e.day(), e.week(), e.days_to_bill(), DebriefCalc.money(e.cash()), DebriefCalc.money(e.loans_owed()),
+	var week := e.weekly_bill()
+	_header.text = "Day %d (week %d)   Cash $%s   Costs $%s/day   Owed $%s%s\nReputation: %s   Locals %+d" % [
+		e.day(), e.week(), DebriefCalc.money(e.cash()), DebriefCalc.money(roundi(float(int(week.wages) + int(week.upkeep)) / maxi(MissionRegistry.setting_i("week_days", 7), 1))),
+		DebriefCalc.money(e.loans_owed()),
 		"   DEPLOYED: %s" % Contracts.deployment().zone_name if Contracts.is_deployed() else "", "   ".join(reps), e.locals()]
 	_offer_ids.clear()
 	_offers.clear()

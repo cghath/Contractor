@@ -121,8 +121,57 @@ static func hire(data: Dictionary, roster: Dictionary, cid: String, day: int) ->
 	(data["pool"] as Array).erase(c)
 	var person := c.duplicate(true)
 	person.erase("cid")
-	person["gear"] = Roster.gear_for_kit(Roles.kit(StringName(person.role)))
+	_issue_kit(person)
 	return Roster.add_member(roster, person, day)
+
+
+## Gives `person` their role's kit as their own gear, and notes what it was ("issued": [[id,
+## count]]): it's theirs, and leaves with them if they're let go (release_split).
+static func _issue_kit(person: Dictionary) -> void:
+	var kit := Roles.kit(StringName(person.role))
+	person["gear"] = Roster.gear_for_kit(kit)
+	person["issued"] = kit.map(func(pair: Array) -> Array: return [String(pair[0]), int(pair[1])])
+
+
+## Item types used up in the field (and throwables, disposable launchers): an issued one that's
+## gone isn't owed back on release.
+const USED_UP_TYPES := ["ammo", "mag", "medical", "tq", "aid_bag"]
+
+
+## Someone let go (BaseHub.server_release) takes the kit they were issued on joining (economy
+## overhaul 2026-10-20: a hire brought a $6,100-11,600 kit for a ~$2,100 fee, and releasing them
+## at once put it all in the stash). `issued`: the member's "issued" ([[id, count]], [] for
+## someone hired before it was noted: everything stays, as before); `gear`: what they have on
+## them ([{"id", "count", "state"}]). Returns {"to_stash": the gear entries the company keeps,
+## "owed": {id: count} of durable issued kit not on them (the base takes it from the stash, or
+## charges what the shop would pay for it)}.
+static func release_split(issued: Array, gear: Array) -> Dictionary:
+	var left := {}
+	for pair: Array in issued:
+		left[String(pair[0])] = int(left.get(String(pair[0]), 0)) + int(pair[1])
+	# What's attached to a carrier's MOLLE (pouches, a knife) rides in its state: it's on them.
+	for e: Dictionary in gear:
+		for att: Variant in ((e.get("state", {}) as Dictionary).get("molle", {}) as Dictionary).values():
+			var aid := String((att as Dictionary).get("id", ""))
+			if int(left.get(aid, 0)) > 0:
+				left[aid] = int(left[aid]) - 1
+	var to_stash: Array = []
+	for e: Dictionary in gear:
+		var id := String(e.get("id", ""))
+		var n := int(e.get("count", 1))
+		var theirs := mini(int(left.get(id, 0)), n)
+		if theirs > 0:
+			left[id] = int(left[id]) - theirs
+		if n - theirs > 0:
+			var kept := e.duplicate(true)
+			kept["count"] = n - theirs
+			to_stash.append(kept)
+	var owed := {}
+	for id: String in left:
+		var item: ItemData = ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
+		if int(left[id]) > 0 and item and not item.type in USED_UP_TYPES and not "throwable" in item.tags and not "disposable" in item.tags:
+			owed[id] = int(left[id])
+	return {"to_stash": to_stash, "owed": owed}
 
 
 ## A rookie for a player whose main character is recovering and finds nobody free (design
@@ -135,7 +184,7 @@ static func provide_free(roster: Dictionary, role: StringName, day: int, seed_va
 	while int(person.missions) > 2:
 		person = candidate(rng)
 	person["role"] = String(role) if Roles.has(role) else String(Roles.RIFLEMAN)
-	person["gear"] = Roster.gear_for_kit(Roles.kit(StringName(person.role)))
+	_issue_kit(person)
 	var mid := Roster.add_member(roster, person, day)
 	Roster.add_history(Roster.get_member(roster, mid), day, "Provided free while a player recovers")
 	return mid

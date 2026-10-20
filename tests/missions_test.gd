@@ -1200,8 +1200,12 @@ func _test_field_radio() -> void:
 		"a looted enemy set can't reach the employer: no radio contract without a field radio")
 	player.inventory.take(&"radio")
 	var cids := (Contracts.deployment().cids as Array).size()
+	var cash := Economy.cash()
 	check(Contracts.radio_contract_problem() == "" and Contracts.server_radio_contract() != "" and (Contracts.deployment().cids as Array).size() == cids + 1,
 		"with the field radio along, a radio contract comes in and joins the deployment")
+	var radioed := Contracts.contract(String((Contracts.deployment().cids as Array).back()))
+	check(int(radioed.deal.advance) == 0 and int(radioed.deal.completion) == int(radioed.deal.pay_total) and Economy.cash() == cash,
+		"it pays nothing up front, all on completion (economy overhaul: radioing for contract after contract kept 30%% each)")
 	check(InteractionMenu._check(&"field_radio", player, player) == "", "the player sees 'Radio for a contract' in his own menu")
 	player._server_radio_contract.rpc_id(1)
 	await _frames(2)

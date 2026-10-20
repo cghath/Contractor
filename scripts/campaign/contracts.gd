@@ -476,6 +476,13 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 		_notify(peer_id, why)
 		return why
 	var deal := ContractGen.deal(c, terms)
+	if String(c.get("in_zone", "")) != "":
+		# A hot zone's arrival and radio contracts are taken on the spot: nothing up front, all of it
+		# on completion (economy overhaul 2026-10-20: walking into a hot zone and straight out kept
+		# about $80,000 of arrival advances, and radioing for contract after contract kept 30% each).
+		deal.completion = int(deal.completion) + int(deal.advance)
+		deal.advance = 0
+		deal.advance_share = 0.0
 	c.terms = terms.duplicate()
 	c.deal = deal
 	c.state = ACCEPTED
@@ -486,7 +493,8 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 	(s.held as Array).append(c)
 	Economy.add_cash(int(deal.advance), "Advance: %s" % c.title)
 	Economy.note_job(String(c.get("employer", "")))  # its enemies won't hire the squad for a while
-	_notify_all("Contract signed: %s. Advance $%s paid." % [c.title, DebriefCalc.money(deal.advance)])
+	_notify_all(("Contract signed: %s. Advance $%s paid." % [c.title, DebriefCalc.money(deal.advance)]) if int(deal.advance) > 0
+		else "Contract signed: %s. $%s on completion." % [c.title, DebriefCalc.money(deal.completion)])
 	_commit()
 	_save()
 	contract_accepted.emit(cid)
@@ -582,6 +590,7 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	s.deployment = {"zone_id": zone_id, "zone_name": first.zone_name, "zone_kind": first.zone_kind, "region": first.region,
 		"module": first.module, "cids": ready.map(func(c: Dictionary) -> String: return c.cid), "start_day": Economy.day(),
 		"civilians": 0, "banked": [], "origin": [origin.x, origin.y, origin.z]}
+	Economy.drop_run_bills()  # its debrief lists its own days' wages and upkeep, not the days waited at base
 	objectives.server_begin(list)
 	_notify_all("Deploying to %s" % first.zone_name)
 	_commit()
@@ -593,8 +602,8 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 
 ## A hot zone has several of its faction's contracts live at once (Captain: 3-6, taken in any
 ## order). When the squad took fewer than HotZoneOps' minimum from the board, the faction hands
-## it more on arrival (standard terms, advance paid), each at a site no other contract holds.
-## Returns the new contracts (held, ACCEPTED).
+## it more on arrival (standard terms, all paid on completion: server_accept), each at a site no
+## other contract holds. Returns the new contracts (held, ACCEPTED).
 func _hot_zone_extras(ready: Array, zone_id: String) -> Array:
 	var want := HotZoneOps.live_target(int(_s().seed), Economy.day(), zone_id, ready.size())
 	var out: Array = []
@@ -674,9 +683,10 @@ func radio_contract_problem() -> String:
 
 
 ## Host: in a hot zone, a new contract comes in over the radio and the squad takes it on the
-## spot (standard terms, advance paid); its objectives join the deployment. Returns its id, or
-## "" when radio_contract_problem() says no. HotZoneOps' follow-ups pass the site (`module_id`)
-## and the employer's words (`why`, said to everyone with the contract's title).
+## spot (standard terms, all paid on completion: server_accept); its objectives join the
+## deployment. Returns its id, or "" when radio_contract_problem() says no. HotZoneOps'
+## follow-ups pass the site (`module_id`) and the employer's words (`why`, said to everyone with
+## the contract's title).
 func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	if radio_contract_problem() != "":
 		return ""
@@ -747,8 +757,15 @@ func server_items_banked(items: Array) -> void:
 		return
 	(dep.banked as Array).append_array(items.duplicate(true))
 	objectives.server_items_out(items)
-	Economy.bank_items(items, "banked mid-zone")
+	Economy.bank_items(without_intel(items), "banked mid-zone")
 	_commit()
+
+
+## `items` ([{"id", ...}]) less the intel: intel brought out goes to the debrief (sold or turned
+## in, once), never to the company stash (economy overhaul 2026-10-20: a piece sold in the debrief
+## and kept as well could be sold over the counter, or carried out and sold again).
+static func without_intel(items: Array) -> Array:
+	return items.filter(func(e: Dictionary) -> bool: return not MissionRegistry.is_intel(StringName(e.get("id", ""))))
 
 
 ## Host: takes from a contract's support budget (negative gives back). Returns what it took.
@@ -798,6 +815,7 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	calc_report["items"] = out_items
 	calc_report["hazard_tier"] = int(dep.get("hazard_tier", 0))  # a hot zone's hazard pay (HotZoneOps)
 	var debrief := DebriefCalc.compute(deployed, objectives.list, int(dep.civilians), calc_report)
+	_drop_debriefed_intel(debrief)
 	debrief["zone_name"] = dep.zone_name
 	debrief["extracted"] = report.get("extracted", [])
 	debrief["tagged"] = (report.get("tagged", []) as Array).duplicate(true)  # lots to sell, store, gift or keep (Pallets)
@@ -825,7 +843,7 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")))  # wave 6c
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
-	Economy.bank_items(report.get("bank", report.get("items", [])), "carried out")
+	Economy.bank_items(without_intel(report.get("bank", report.get("items", []))), "carried out")
 	s.deployment = {}
 	s.debrief = debrief
 	objectives.server_clear()
@@ -845,6 +863,34 @@ func server_end_deployment(report: Dictionary) -> Dictionary:
 	_save()
 	debrief_ready.emit(debrief)
 	return debrief
+
+
+## Most debriefed intel ids remembered (the oldest forgotten first).
+const INTEL_SEEN_KEEP := 500
+
+
+## A piece of intel is debriefed once (economy overhaul 2026-10-20): a piece whose intel_id an
+## earlier debrief listed (kept in a hand, a vehicle's hold, and carried out again) is dropped
+## from this one ("intel_repeats" counts them); the rest are remembered.
+func _drop_debriefed_intel(debrief: Dictionary) -> void:
+	var s := _s()
+	var seen: Array = s.get("intel_seen", [])
+	var fresh: Array = []
+	var repeats := 0
+	for e: Dictionary in debrief.get("intel", []):
+		var intel_id := String(e.get("intel_id", ""))
+		if intel_id != "" and intel_id in seen:
+			repeats += int(e.get("count", 1))
+			continue
+		fresh.append(e)
+		if intel_id != "":
+			seen.append(intel_id)
+	while seen.size() > INTEL_SEEN_KEEP:
+		seen.pop_front()
+	s["intel_seen"] = seen
+	debrief["intel"] = fresh
+	if repeats > 0:
+		debrief["intel_repeats"] = repeats
 
 
 ## The session log's line for a debrief: each contract's outcome, pay and clawback, fines, and
@@ -924,7 +970,8 @@ func server_sell_intel(index: int, faction: String) -> String:
 	var entry: Dictionary = d.intel[index]
 	entry.status = "sold"
 	entry.buyer = faction
-	var price := MissionRegistry.setting_i("intel_sale_price", 6000) * int(entry.count)
+	var price := Prices.intel_sale_value(StringName(entry.id), int(entry.count))  # its own worth (was a flat $6,000 a piece)
+	entry.price = price
 	Economy.add_cash(price, "Intel sold to %s" % MissionRegistry.faction_name(faction))
 	Economy.change_reputation(faction, MissionRegistry.setting_i("intel_sale_rep_buyer", 2), "bought intel")
 	entry.caught = randf() < MissionRegistry.setting_f("intel_sale_risk", 0.35)
@@ -955,7 +1002,10 @@ func server_pallet(scope: String, index: int, action: String, faction := "") -> 
 	if String(lot.get("status", "pending")) != "pending":
 		return "Already dealt with"
 	var gift_to := faction if faction != "" else String(lot.get("faction", ""))
+	var price := Pallets.sell_price(lot) if action == "sell" else 0
 	var why2 := Pallets.server_act(lot, action, gift_to)
+	if why2 == "" and action == "sell":
+		lot["sold_for"] = price  # the debrief's money lines (DebriefCalc.money_in)
 	if why2 == "":
 		lot["status"] = {"sell": "sold", "gift": "gifted", "keep": "kept", "store": "stored"}[action]
 		if action == "gift":

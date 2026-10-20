@@ -1620,7 +1620,7 @@ func _on_player_died(player: Soldier) -> void:
 ## the deployed contract's support budget (Captain), and what neither covers goes on credit.
 ## Returns the line the player sees.
 func server_count_respawn() -> String:
-	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var cost := RosterDeployment.respawn_cost(roster(), BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	if cost == 0:
 		var left := RosterDeployment.count_respawn(roster(), false)
 		_changed(&"roster")
@@ -1930,6 +1930,12 @@ func end_deployment(report: Dictionary) -> void:
 				and Vector2(s.global_position.x, s.global_position.z).distance_to(Vector2(float(point[0]), float(point[1]))) <= Extraction.RADIUS_M:
 			hvts.append({"hvt": Contracts.MIA_HVT_PREFIX + String(s.get_meta(&"roster_id")), "alive": true})
 			server_store_member_gear(String(s.get_meta(&"roster_id")), s.inventory.net_state)
+	# Intel still stowed on whoever got out is banked now, as at an extraction point: it goes to
+	# the debrief (sold or turned in, once), not home in their packs to be carried out again
+	# (economy overhaul 2026-10-20).
+	if lvl.people and Contracts.is_deployed():
+		for s: Soldier in extracted:
+			lvl.people.server_bank_intel(s)
 	# The people bring their own gear home; what else came out (bodies carried in, items set
 	# down at the point, a helicopter's hold) goes to the stash, and so leaves the zone: it isn't
 	# salvage too, and the zone save doesn't keep it to be banked again (the loop test caught
@@ -2361,7 +2367,8 @@ func server_hire(cid: String) -> String:
 	return "" if mid != "" else "They've moved on"
 
 
-## Host: lets a member go (available ones only); their gear goes into the stash.
+## Host: lets a member go (available ones only): they take the kit they were issued, the rest of
+## their gear goes into the stash (Hiring.release_split).
 func server_release(mid: String) -> String:
 	var m := member(mid)
 	if m.is_empty() or not Roster.is_available(m):
@@ -2369,7 +2376,19 @@ func server_release(mid: String) -> String:
 	var lvl = base_level()
 	var s: Soldier = lvl.muster_soldier(mid) if lvl else null
 	var gear: Dictionary = s.inventory.net_state if s else m.get("gear", {})
-	_stash_gear(GameState.from_json(gear.duplicate(true)))
+	# They take the kit they were issued on joining (Hiring.release_split); the company keeps what
+	# it added. Issued kit not on them comes out of the stash, or what the shop would pay for it is
+	# charged (economy overhaul 2026-10-20: hire-and-release was free kit).
+	var split := Hiring.release_split(m.get("issued", []), _gear_entries(GameState.from_json(gear.duplicate(true))))
+	for entry: Dictionary in split.to_stash:
+		server_add_to_stash(StringName(entry.id), int(entry.count), entry.get("state", {}))
+	var owed_value := 0
+	for id: String in split.owed:
+		var left := int(split.owed[id]) - server_take_from_stash(StringName(id), int(split.owed[id]))
+		if left > 0:
+			owed_value += Prices.sell_price(StringName(id), left)
+	if owed_value > 0:
+		Economy.add_cash(-owed_value, "%s's issued kit not returned" % String(m.get("name", mid)))
 	if s:
 		s.inventory.strip()
 	Roster.members(roster()).erase(mid)
@@ -2379,13 +2398,13 @@ func server_release(mid: String) -> String:
 	return ""
 
 
-## Puts everything in an Inventory.net_state into the stash.
-func _stash_gear(gear: Dictionary) -> void:
+## Everything in an Inventory.net_state, as entries ({"id", "count", "state"}).
+func _gear_entries(gear: Dictionary) -> Array:
 	var inv := Inventory.new()
 	inv.net_state = gear
-	for entry: Dictionary in inv.strip():
-		server_add_to_stash(StringName(entry.id), int(entry.count), entry.get("state", {}))
+	var out: Array = inv.strip()
 	inv.free()
+	return out
 
 
 ## Host: the medbay treats a member (member id) or a player's main character ("player:<key>")

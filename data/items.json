@@ -592,7 +592,7 @@
 		 "desc": "The DShK's heavy tripod mount.",
 		 "uses": ["Heavy: 30 kg, carried in both hands", "Set up with the DShK's gun within 3 m: Left Ctrl + Left Alt (yourself) > Set up the gun"]},
 		{"id": "hvt_case", "name": "HVT Hard Case", "type": "objective", "volume_l": 30.0, "mass_kg": 12.0, "two_handed": true, "tags": ["objective"],
-		 "stats": {"size_m": [0.55, 0.4, 0.22]},
+		 "stats": {"intel_value": 3000, "size_m": [0.55, 0.4, 0.22]},
 		 "desc": "A locked hard case a contract may want brought out.",
 		 "uses": ["Bulky: carried in both hands (Left Ctrl > Pick up); no room in packs", "Left Ctrl + Left Alt (yourself) > Drop held item sets it down", "Bring it to extraction when a contract asks for it"]},
 		{"id": "supply_crate", "name": "Supply Crate", "type": "objective", "volume_l": 60.0, "mass_kg": 25.0, "two_handed": true, "tags": ["salvage", "bulky"],

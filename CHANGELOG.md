@@ -11,6 +11,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Economy overhaul (Captain, 2026-10-16: "too easy overall but mission expenses swing it negative fast")
+
+Built from docs/economy_proposal_2026-10-20.md. Income is steadier and lower, the costs that
+spiralled are capped, and the debrief and the base say where the money went. Details and the
+measured before/after: docs/economy.md and the proposal's "Built" section.
+
+#### Changed
+- **Contract pay about a third lower** at every rating. Hot zones pay by volume, not at a better
+  rate (x1.0, was x1.4). The no-civilian-casualties bonus is 5% (was 10%).
+- **A hot zone's arrival and radio contracts pay on completion.** Nothing up front, so walking
+  into a hot zone and straight out no longer keeps their advances.
+- **Intel sells for what it's worth:** its own value, $500 to $4,000 (the HVT case $3,000), not
+  a flat $6,000 a piece.
+- **Wages and upkeep are paid every day,** a seventh of the week's bill. Each debrief shows its
+  own days, and no debrief takes a whole week's bill at once. Loan installments stay weekly.
+- **Capped shocks.** A helicopter lost on a support call costs a $15,000 deductible (was
+  $30,000-40,000). Each bought respawn costs a quarter more than the last, never over $8,000 (was
+  half more, no cap). The death benefit is $10,000 (was $15,000).
+
+#### Added
+- **Where the money came from:** a new debrief section lists advances, completion pay, bonuses,
+  fines, clawbacks and what was sold in the debrief. Wages and upkeep show their days. The net is
+  labelled "before loot", and a "Sold here" figure is added.
+- **Books tab** on the base screen: running costs a day, loans and the next installment, the last
+  7 days of money by kind, and the 20 newest payments. The base header and the contract board
+  show costs a day instead of "weekly bill in N days".
+
+#### Fixed
+- **Intel could be sold twice.** Intel brought out goes to the debrief, never to the stash. The
+  shop doesn't buy intel. A piece already debriefed is worth nothing if it is carried out again.
+- **Hire-and-release for free kit.** Someone let go takes the kit they were issued. If it's
+  missing, it comes out of the stash or its sell value is charged.
+- **Radioing for contract after contract** no longer pays 30% of each up front.
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

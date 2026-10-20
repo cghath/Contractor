@@ -14,9 +14,13 @@ extends CanvasLayer
 ## (filter, prices, Buy and Buy 5, support call prices) instead of a second, plainer shop; and
 ## the motor pool has a page of its own (it was only an interaction ring).
 
-const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores"]
+const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores", "books"]
 const TITLES := {"squad": "Squad & deploy", "roster": "Roster", "hiring": "Hiring board", "medbay": "Medbay",
-	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage"}
+	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage", "books": "Books"}
+## The books page's window: the ledger summed over this many days.
+const BOOKS_DAYS := 7
+## Ledger lines listed on the books page, newest first.
+const BOOKS_LINES := 20
 ## The panel's width and the pages' height when the window has room for them (UiKit fits both
 ## to the window when it hasn't).
 const WIDTH := 1100.0
@@ -35,10 +39,11 @@ const ABOUT := {
 	"armory": "What's in the company stash. It lies in the armory: pick up what you need there, drop what you bring back.",
 	"motor_pool": "The company's vehicles, their condition and service, and vehicles you can buy.",
 	"stores": "The FOB's stocks from pallets: fuel, parts, ammunition, supplies and medical.",
+	"books": "Where the company's money came from and went: the running costs a day, loans, the last week by kind, and every recent payment.",
 }
 const HELP := [
 	"Each tab is one of the base's terminals; walking up to a terminal opens its tab. Changes go to the host, who keeps the company's books.",
-	"The line at the top is the day, the company's cash, what the people cost a day, and when the weekly bill (wages, upkeep, loans) is next due.",
+	"The line at the top is the day, the company's cash, what the company costs a day (wages and upkeep, paid every day), and what it owes in loans.",
 	"Hover a person, an item or a button for what it is and does.",
 ]
 ## The shop's type filter (as ShopScreen's): "" is everything.
@@ -62,7 +67,7 @@ func _ready() -> void:
 	top.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 	_header = UiKit.text("")
 	_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_header.tooltip_text = "The day, the company's cash, what the people cost a day, and when the weekly bill (wages, upkeep, loans) is next due"
+	_header.tooltip_text = "The day, the company's cash, what the company costs a day (wages and upkeep, paid daily) and what it owes; the Books tab has the detail"
 	_header.mouse_filter = Control.MOUSE_FILTER_PASS
 	top.add_child(_header)
 	var help := UiKit.help_panel(PackedStringArray(HELP), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]])
@@ -159,9 +164,11 @@ func refresh() -> void:
 	if not visible or not is_node_ready():
 		return
 	var v := BaseHub.view
-	var bill_days := int(v.get("bill_in_days", 7))
-	_header.text = "Day %d    Funds $%d    Wages $%d/day    Weekly bill $%d in %d day%s" % [int(v.get("day", 1)), int(v.get("funds", 0)),
-		int(v.get("daily_wages", 0)), int(v.get("weekly_bill", 0)), bill_days, "" if bill_days == 1 else "s"]
+	var week := Economy.weekly_bill()
+	var week_days := maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	_header.text = "Day %d    Funds $%s    Costs $%s/day (wages $%s, upkeep $%s)%s" % [int(v.get("day", 1)), DebriefCalc.money(v.get("funds", 0)),
+		DebriefCalc.money(roundi(float(int(week.wages) + int(week.upkeep)) / week_days)), DebriefCalc.money(roundi(float(week.wages) / week_days)),
+		DebriefCalc.money(roundi(float(week.upkeep) / week_days)), ("    Owed $%s" % DebriefCalc.money(Economy.loans_owed())) if Economy.loans_owed() > 0 else ""]
 	var rows: VBoxContainer = _pages[page]
 	## Out of the tree at once, not at the frame's end: focus_first and the tests look for the new rows.
 	for child in rows.get_children():
@@ -186,9 +193,49 @@ func refresh() -> void:
 			_build_motor_pool(rows)
 		"stores":
 			_build_stores(rows)
+		"books":
+			_build_books(rows)
 
 
 # --- Pages -----------------------------------------------------------------------------------
+
+## The company's books (economy overhaul 2026-10-20: the Captain couldn't see where the money
+## went): running costs a day, loans, the last BOOKS_DAYS days summed by kind
+## (Economy.ledger_summary) and the newest ledger lines.
+func _build_books(rows: VBoxContainer) -> void:
+	var week := Economy.weekly_bill()
+	var week_days := maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	rows.add_child(UiKit.heading("Running costs"))
+	for l: Dictionary in week.get("lines", []):
+		if not String(l.what).begins_with("Loan from"):
+			rows.add_child(_indent(UiKit.text("%s: $%s a day" % [l.what, DebriefCalc.money(roundi(float(l.amount) / week_days))])))
+	rows.add_child(_indent(UiKit.hint("Paid every day. Deployments add field costs (per person per day), death benefits and treatment at the debrief.")))
+	if Economy.loans_owed() > 0:
+		rows.add_child(UiKit.text("Loans owed: $%s; installments $%s in %d day%s" % [DebriefCalc.money(Economy.loans_owed()), DebriefCalc.money(week.loans),
+			Economy.days_to_bill(), "" if Economy.days_to_bill() == 1 else "s"]))
+	var since := Economy.day() - BOOKS_DAYS + 1
+	var summary := Economy.ledger_summary(since)
+	var net := 0
+	for k: Dictionary in summary:
+		net += int(k["in"]) - int(k.out)
+	rows.add_child(UiKit.heading("The last %d days: %s$%s" % [BOOKS_DAYS, "-" if net < 0 else "+", DebriefCalc.money(absi(net))]))
+	if summary.is_empty():
+		rows.add_child(_indent(UiKit.text("No money moved.")))
+	for k: Dictionary in summary:
+		var parts := PackedStringArray()
+		if int(k["in"]) > 0:
+			parts.append("+$%s" % DebriefCalc.money(k["in"]))
+		if int(k.out) > 0:
+			parts.append("-$%s" % DebriefCalc.money(k.out))
+		rows.add_child(_indent(UiKit.text("%s: %s" % [k.kind, "  ".join(parts)])))
+	rows.add_child(UiKit.heading("Recent payments"))
+	var ledger := Economy.ledger()
+	for i in range(ledger.size() - 1, maxi(ledger.size() - BOOKS_LINES, 0) - 1, -1):
+		var e: Dictionary = ledger[i]
+		var amount := int(e.get("amount", 0))
+		var label := UiKit.text("Day %d  %s$%s  %s" % [int(e.get("day", 0)), "-" if amount < 0 else "+", DebriefCalc.money(absi(amount)), String(e.get("what", ""))])
+		UiKit.fit_label_text(label)
+		rows.add_child(_indent(label))
 
 func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var prep: Dictionary = v.get("prep", {})

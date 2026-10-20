@@ -50,6 +50,7 @@ func _ready() -> void:
 	_test_reveal_renegotiate_abort()
 	_test_wages_and_floor()
 	_test_economy_balance()
+	_test_overhaul_numbers()
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
@@ -344,7 +345,8 @@ func _test_negotiation() -> void:
 	var cash := Economy.cash()
 	var debrief := Contracts.server_end_deployment({})
 	check(debrief.contracts[0].outcome == "failed" and int(debrief.totals.completion) == 0 and int(debrief.totals.advance) == deal.advance
-		and Economy.cash() == cash and not Contracts.is_deployed(), "failed: no completion pay, but the advance is kept ($%d)" % Economy.cash())
+		and Economy.cash() == cash - int(debrief.expenses_total) and not Contracts.is_deployed(),
+		"failed: no completion pay, but the advance is kept ($%d; its days' wages and upkeep paid, $%d)" % [Economy.cash(), int(debrief.expenses_total)])
 	check(Economy.reputation(String(held.employer)) == rep - 6 and Contracts.history().back().outcome == "failed" and Contracts.held().is_empty(),
 		"and the client thinks less of the company (%+d)" % (Economy.reputation(String(held.employer)) - rep))
 	Contracts.server_finish_debrief()
@@ -389,30 +391,45 @@ func _test_wages_and_floor() -> void:
 	Contracts.new_full_campaign(7, 100000)
 	var up := Prices.weekly_upkeep()
 	Economy.wages_provider = func() -> int: return 20000
-	check(Economy.days_to_bill() == 7 and Economy.weekly_bill().total == 20000 + up, "the bill: $20,000 wages from the roster + $%d upkeep, due in 7 days" % up)
-	Economy.advance_days(6, "test")
-	check(Economy.cash() == 100000 and Economy.day() == 7, "nothing due before the week is out")
+	check(Economy.days_to_bill() == 7 and Economy.weekly_bill().total == 20000 + up, "the week's bill: $20,000 wages from the roster + $%d upkeep" % up)
+	# Economy overhaul 2026-10-20: paid every day, a seventh of the week's (each debrief carries its own days).
 	Economy.advance_days(1, "test")
-	var left := 100000 - 20000 - up
-	check(Economy.cash() == left and Economy.day() == 8 and int(Economy.ledger().back().amount) == -(20000 + up), "day 8: the week's bill is paid once")
+	var first := floori(20000 / 7.0) + floori(up / 7.0)
+	check(Economy.cash() == 100000 - first and int(Economy.ledger().back().amount) == -first, "day 2: a day's wages and upkeep paid ($%d)" % first)
 	Economy.advance_days(6, "test")
-	check(Economy.cash() == left, "and not again in the days after it")
+	var left := 100000 - 20000 - up
+	check(Economy.cash() == left and Economy.day() == 8, "day 8: the week's days add up to the week's bill exactly ($%d)" % (20000 + up))
+	var run := Economy.take_run_expenses()
+	check(run.size() == 14 and run.all(func(e: Dictionary) -> bool: return bool(e.get("bill", false))), "each day's wages and upkeep listed for the debrief (14 lines)")
 	Economy.wages_provider = func() -> int: return 100000
+	Economy.add_cash(5000 - Economy.cash(), "test: $5,000 left")
+	var day_bill := {}
+	var on_day := func(_day: int, b: Dictionary) -> void: day_bill.merge(b)
 	var notices: Array = []
 	var on_notice := func(text: String) -> void: notices.append(text)
 	Economy.notice.connect(on_notice)
-	Economy.advance_days(7, "test")
+	Economy.bill_paid.connect(on_day)
+	Economy.advance_days(1, "test")
+	Economy.bill_paid.disconnect(on_day)
 	Economy.notice.disconnect(on_notice)
-	check(Economy.cash() == MissionRegistry.setting_i("safety_floor_cash", 20000) and Economy.loans_owed() == roundi((100000 + up - left + MissionRegistry.setting_i("safety_floor_cash", 20000)) * 1.1)
+	var floor_cash := MissionRegistry.setting_i("safety_floor_cash", 20000)
+	check(Economy.cash() == floor_cash and Economy.loans_owed() == roundi((int(day_bill.total) - 5000 + floor_cash) * 1.1)
 		and notices.any(func(t: String) -> bool: return t.contains("Emergency loan")),
-		"a bill beyond the cash: an emergency loan covers it and leaves the floor ($%d cash, $%d owed)" % [Economy.cash(), Economy.loans_owed()])
+		"a day's bill beyond the cash: an emergency loan covers it and leaves the floor ($%d cash, $%d owed)" % [Economy.cash(), Economy.loans_owed()])
 	Economy.wages_provider = func() -> Array: return [{"what": "Alpha", "amount": 1000}, {"what": "Bravo", "amount": 1500}]
 	var bill := Economy.weekly_bill()
 	var owed := Economy.loans_owed()
 	check(bill.wages == 2500 and bill.loans == ceili(owed / 8.0), "wages as lines from the roster ($%d), and the loan installment ($%d)" % [bill.wages, bill.loans])
 	Economy.add_cash(100000 - Economy.cash(), "test")
-	Economy.advance_days(7, "test")
-	check(Economy.loans_owed() == owed - bill.loans and Economy.cash() == 100000 - bill.total, "the installment comes off the loan")
+	var paid := [0, 0]  # bills' total, installments
+	var on_bill := func(_day: int, b: Dictionary) -> void:
+		paid[0] += int(b.total)
+		paid[1] += int(b.loans)
+	Economy.bill_paid.connect(on_bill)
+	Economy.advance_days(Economy.days_to_bill(), "test")
+	Economy.bill_paid.disconnect(on_bill)
+	check(Economy.loans_owed() == owed - bill.loans and paid[1] == bill.loans and Economy.cash() == 100000 - paid[0],
+		"the week's installment comes off the loan, once, on the week's day")
 	var lent := 0
 	for i in 5:
 		lent += Economy.server_take_loan()
@@ -421,6 +438,45 @@ func _test_wages_and_floor() -> void:
 	check(Contracts.board().any(func(o: Dictionary) -> bool: return o.source == "safe" and int(o.rated) == 1), "the board always keeps a low-risk job")
 	Economy.wages_provider = Callable()
 	check(Economy.weekly_bill().wages == Prices.default_wage_bill(), "without a roster, the stand-in wage bill")
+
+
+## The economy overhaul's numbers (docs/economy_proposal_2026-10-20.md, built 2026-10-20) and its
+## closed loopholes that live in Contracts and Economy.
+func _test_overhaul_numbers() -> void:
+	print("Economy overhaul numbers")
+	var pay: Array = MissionRegistry.data().settings.difficulty_pay
+	var want := [0.0, 0.35, 0.5, 0.6, 0.75, 0.95]
+	check(pay.size() == want.size() and range(want.size()).all(func(i: int) -> bool: return is_equal_approx(float(pay[i]), want[i])) and is_equal_approx(MissionRegistry.setting_f("hot_zone_pay_mult"), 1.0)
+		and is_equal_approx(MissionRegistry.setting_f("clean_bonus_share"), 0.05), "pay a third lower, hot zones by volume (x1.0), the clean bonus 5%")
+	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 10000
+		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_max() == 8000,
+		"a lost helicopter's deductible $15,000, death benefit $10,000, respawns +25% each up to $8,000")
+	# Intel sells for its own worth, and prices.json keeps intel at its intel_value (loot rotation's pieces too).
+	var off := PackedStringArray()
+	for id: StringName in ItemDB.all_ids():
+		var item := ItemDB.get_item(id)
+		if MissionRegistry.is_intel(id) and item.stats.has("intel_value") and Prices.price_of(id) != int(item.stats.intel_value):
+			off.append(String(id))
+	check(Prices.intel_sale_value(&"intel_usb_drive") == 600 and Prices.intel_sale_value(&"intel_laptop", 2) == 6000 and Prices.intel_sale_value(&"vantage_ledger") == 4000
+		and off.is_empty(), "intel sells for its intel_value ($600 USB drive, $3,000 laptop, $4,000 Vantage ledger); prices match it%s" % ("" if off.is_empty() else " except %s" % ", ".join(off)))
+	# A hot zone's arrival contracts pay nothing up front.
+	Contracts.new_full_campaign(64, 200000)
+	var hot := _make_offer("raid", "ridge_hot")
+	Contracts.server_accept(hot, ContractGen.default_terms())
+	var signed := int(Contracts.contract(hot).deal.advance)
+	var cash := Economy.cash()
+	check(Contracts.server_start_deployment([hot]) == "", "(deployed to a hot zone)")
+	var arrivals: Array = (Contracts.held() as Array).filter(func(c: Dictionary) -> bool: return String(c.get("in_zone", "")) == "arrival")
+	check(not arrivals.is_empty() and arrivals.all(func(c: Dictionary) -> bool: return int(c.deal.advance) == 0 and int(c.deal.completion) == int(c.deal.pay_total))
+		and Economy.cash() == cash, "%d arrival contracts: nothing up front, all of it on completion ($%d cash before and after)" % [arrivals.size(), cash])
+	var d := Contracts.server_end_deployment({"extracted": ["You"]})
+	check(signed > 0 and int(d.totals.advance) == signed and int(d.totals.paid_now) <= 0,
+		"walking in and straight out keeps only the contract signed on the board's advance")
+	Contracts.server_finish_debrief()
+	# The books (base screen) sort the ledger by kind.
+	check(Economy.ledger_kind("Completion: Raid") == "Contract pay" and Economy.ledger_kind("Day 4: wages 900, upkeep 3000") == "Wages and upkeep"
+		and Economy.ledger_kind("Emergency Loan from Meridian") == "Loans in" and Economy.ledger_kind("Lost helicopter (transport support): replacement") == "Lost helicopters"
+		and Economy.ledger_kind("Respawn on credit") == "Respawns" and Economy.ledger_kind("Something new") == "Other", "the books sort the ledger by kind")
 
 
 func _test_economy_balance() -> void:
@@ -444,12 +500,22 @@ func _test_economy_balance() -> void:
 	check(bad_net < 0, "a disastrous one (2 KIA, a lost helicopter, supports, failed) loses money: $%d" % bad_net)
 	check(be.lines.any(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit")) and int(be.charge) < int(be.total),
 		"the expense lines list the death benefit and the run's own costs")
-	# Weekly bills are listed once each, and a bought respawn costs money.
+	# Daily bills are listed per day and summed per kind in the debrief, and a bought respawn costs money.
 	Contracts.new_full_campaign(7, 500000)
 	Economy.take_run_expenses()
 	Economy.advance_days(14, "test")
-	var weeks := Economy.take_run_expenses().filter(func(x: Dictionary) -> bool: return String(x.what).begins_with("Week "))
-	check(weeks.size() == 2, "two weeks pass: two weekly bills listed")
+	var listed := Economy.take_run_expenses()
+	var lines: Array = DebriefCalc.expenses({}, 14, listed).lines
+	check(listed.filter(func(x: Dictionary) -> bool: return String(x.what) == "Base upkeep").size() == 14
+		and lines.any(func(l: Dictionary) -> bool: return String(l.what) == "Base upkeep (14 days)" and int(l.amount) == 2 * Prices.weekly_upkeep()),
+		"14 days pass: 14 days of upkeep listed, one debrief line ($%d)" % (2 * Prices.weekly_upkeep()))
+	Contracts.new_full_campaign(7, 500000)
+	Economy.advance_days(3, "test: days at base")
+	var cid := _make_offer("raid", "harbour_yard")
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([cid])
+	check(Economy.take_run_expenses().is_empty(), "a deployment starts: the days waited at base aren't its debrief's")
+	Contracts.server_abandon_deployment()
 	var before := Economy.cash()
 	Economy.charge_run(Prices.respawn_price(), "Respawn")
 	var run := Economy.take_run_expenses()
@@ -704,9 +770,10 @@ func _test_debrief_totals() -> void:
 		"casualties": [{"name": "Bravo", "status": "kia", "injury": ""}]}
 	var d := DebriefCalc.compute([c], objs, 0, report)
 	var line: Dictionary = d.contracts[0]
-	check(line.outcome == "completed" and line.completion == 70000 and line.bonuses.size() == 2 and line.pay == 90000
-		and d.totals.paid_now == 90000 and d.totals.contract_value == 120000 and d.fines == 0,
-		"completed: $70,000 completion + $10,000 bonus objective + $10,000 for no civilian casualties ($120,000 all told)")
+	var clean := roundi(100000 * MissionRegistry.setting_f("clean_bonus_share"))  # 5% since the economy overhaul (was 10%)
+	check(clean == 5000 and line.outcome == "completed" and line.completion == 70000 and line.bonuses.size() == 2 and line.pay == 80000 + clean
+		and d.totals.paid_now == 80000 + clean and d.totals.contract_value == 110000 + clean and d.fines == 0,
+		"completed: $70,000 completion + $10,000 bonus objective + $%s for no civilian casualties ($%s all told)" % [DebriefCalc.money(clean), DebriefCalc.money(110000 + clean)])
 	check(d.rep.get("meridian") == 5 and d.rep.get("black_ridge") == -3 and d.days == 2, "reputation +5 with the client, -3 with the target; 1 day plus 1 of travel")
 	check(d.salvage.pool_value == 2 * 1400 + 450 and d.salvage.budget == floori(3250 * 0.3) and not DebriefCalc.can_pick(d, 0) and DebriefCalc.can_pick(d, 1),
 		"salvage: 30%% of $3,250 left in the field is a $%d budget: the cracked plate fits, two rifles don't" % d.salvage.budget)
@@ -746,7 +813,7 @@ func _test_debrief_totals() -> void:
 	check(honest_abort.rep.get("meridian", 0) == -4 and lied_abort.rep.get("meridian", 0) == 0,
 		"aborting mid-deployment is free only when the briefing lied")
 	var summary := "\n".join(DebriefCalc.summary(d))
-	check(summary.contains("COMPLETED") and summary.contains("$70,000") and summary.contains("Paid now: $90,000"), "the summary reads right")
+	check(summary.contains("COMPLETED") and summary.contains("$70,000") and summary.contains("Paid now: $%s" % DebriefCalc.money(80000 + clean)), "the summary reads right")
 
 
 func _test_civilians_void() -> void:
@@ -769,7 +836,7 @@ func _test_civilians_void() -> void:
 	var rep := Economy.reputation(employer)
 	var cash := Economy.cash()
 	var d := Contracts.server_end_deployment({})
-	check(d.contracts[0].outcome == "voided" and Economy.cash() == cash - 20000 - advance and Economy.reputation(employer) == rep - 6 - 16 and Economy.locals() == -32,
+	check(d.contracts[0].outcome == "voided" and Economy.cash() == cash - 20000 - advance - int(d.expenses_total) and Economy.reputation(employer) == rep - 6 - 16 and Economy.locals() == -32,
 		"debrief: pays nothing (advance $%d clawed back), $20,000 in fines, -22 with the client, -32 with the locals" % advance)
 	Contracts.server_finish_debrief()
 	check(Contracts.server_civilian_casualty() == 0, "no deployment, nothing counted")
@@ -956,7 +1023,7 @@ func _test_intel_and_salvage() -> void:
 	var d := Contracts.server_end_deployment({"items": [{"id": "hvt_case", "count": 1}],
 		"field_items": [{"id": "m4a1", "count": 1}, {"id": "rounds_556", "count": 30}], "extracted": ["You"]})
 	var deal: Dictionary = Contracts.history().back()
-	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(d.totals.paid_now) > 0,
+	check(d.contracts[0].outcome == "completed" and Economy.cash() == cash + int(d.totals.paid_now) - _paid_at_debrief(d) and int(d.totals.paid_now) > 0,
 		"the case carried out completes the contract and pays ($%d)" % int(d.totals.paid_now))
 	check(d.salvage.budget == floori(1430 * 0.5) and Contracts.server_pick_salvage(1) and not Contracts.server_pick_salvage(0) and d.salvage.spent == 30,
 		"a 50%% share of $1,430 in the field: the rounds can be claimed, the rifle can't")
@@ -967,13 +1034,19 @@ func _test_intel_and_salvage() -> void:
 	var buyer_rep := Economy.reputation(buyer)
 	cash = Economy.cash()
 	check(Contracts.server_sell_intel(0, client) != "", "intel can't be sold to the client")
-	check(Contracts.server_sell_intel(0, buyer) == "" and Economy.cash() == cash + 6000 and Economy.reputation(buyer) == buyer_rep + 2
+	var worth := Prices.intel_sale_value(&"hvt_case")
+	check(Contracts.server_sell_intel(0, buyer) == "" and worth == 3000 and Economy.cash() == cash + worth and Economy.reputation(buyer) == buyer_rep + 2
 		and Economy.reputation(client) == client_rep + (-8 if d.intel[0].caught else 0),
-		"sold to %s for $6,000 (the client %s)" % [buyer, "found out: -8" if d.intel[0].caught else "never knew"])
+		"sold to %s for its worth, $%d (was a flat $6,000; the client %s)" % [buyer, worth, "found out: -8" if d.intel[0].caught else "never knew"])
+	check(DebriefCalc.money_in(d).any(func(l: Dictionary) -> bool: return l.what == "Intel sold" and int(l.amount) == worth)
+		and DebriefCalc.money_in(d).any(func(l: Dictionary) -> bool: return l.what == "Completion pay" and int(l.amount) == int(d.totals.completion)),
+		"the debrief says where the money came from: completion pay, intel sold")
 	Contracts.server_finish_debrief()
 	var inbox := Economy.take_unbanked()
-	check(inbox.any(func(e: Dictionary) -> bool: return e.id == "hvt_case") and inbox.any(func(e: Dictionary) -> bool: return e.id == "rounds_556" and e.count == 30)
-		and not inbox.any(func(e: Dictionary) -> bool: return e.id == "m4a1") and d.finished, "closing the debrief banks what was carried out and the salvage picked")
+	check(not inbox.any(func(e: Dictionary) -> bool: return e.id == "hvt_case") and inbox.any(func(e: Dictionary) -> bool: return e.id == "rounds_556" and e.count == 30)
+		and not inbox.any(func(e: Dictionary) -> bool: return e.id == "m4a1") and d.finished,
+		"closing the debrief banks what was carried out and the salvage picked, but not the intel sold (it was handed over)")
+	check(Prices.sell_price(&"intel_laptop") == 0 and Prices.sell_price(&"hvt_case") == 0, "the shop never buys intel")
 	check(deal.outcome == "completed", "the contract closed as completed")
 	# Turning intel in opens leads.
 	var second := _make_offer("intel_grab", "compound_01")
@@ -986,6 +1059,20 @@ func _test_intel_and_salvage() -> void:
 	check(leads.size() == leads_before + 2 and String(leads.back().title).begins_with("Lead:") and float(leads.back().intel_accuracy) >= 0.8,
 		"two pieces open two leads on the board, with good intel (%s)" % [leads.map(func(o: Dictionary) -> String: return o.title)])
 	Contracts.server_finish_debrief()
+	# Economy overhaul 2026-10-20: a piece is debriefed once (kept and carried out again, it's worth nothing), and
+	# intel left in the field isn't salvage.
+	var piece := {"id": "intel_laptop", "count": 1, "state": {"intel_id": "test_laptop_1"}}
+	for round_no in 2:
+		var again := _make_offer("raid", "compound_01")
+		Contracts.server_accept(again, ContractGen.default_terms())
+		Contracts.server_start_deployment([again])
+		var dd := Contracts.server_end_deployment({"items": [piece.duplicate(true)], "field_items": [{"id": "intel_phone", "count": 1}], "extracted": ["You"]})
+		if round_no == 0:
+			check(dd.intel.size() == 1 and int(dd.get("intel_repeats", 0)) == 0 and (dd.salvage.pool as Array).is_empty(),
+				"a laptop carried out is intel to decide on; a phone left in the field isn't in the salvage pool")
+		else:
+			check(dd.intel.is_empty() and int(dd.get("intel_repeats", 0)) == 1, "the same laptop carried out again: already handed over, worth nothing")
+		Contracts.server_finish_debrief()
 
 
 ## B-18: every contract debriefed "failed". What else came out at extraction (BaseHub's
@@ -1355,7 +1442,7 @@ func _test_live_objectives() -> void:
 	check(report.items.any(func(e: Dictionary) -> bool: return e.id == "plate_carrier") and report.field_items.any(func(e: Dictionary) -> bool: return e.id == "m4a1")
 		and report.extracted.size() == 1 and report.casualties.is_empty(), "an extraction report from the level: what the player carries, what's left lying about")
 	var d := Contracts.server_end_deployment(report)
-	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now) - (d.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0)
+	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now) - _paid_at_debrief(d)
 		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.salvage.pool_value)])
 	check(Contracts.objectives.list.is_empty() and (panel == null or panel.text() == ""), "after extraction the objective list clears")
 	Contracts.server_finish_debrief()
@@ -1752,6 +1839,16 @@ func _remote_done() -> void:
 
 ## Host: a contract of `type_id` in `zone_id` on the board, honest unless `overrides` say
 ## otherwise. Returns its id.
+## What a debrief took from the cash at the end of its deployment: the expenses charged then,
+## and its days' wages and upkeep (paid daily since the economy overhaul, as the days passed).
+func _paid_at_debrief(d: Dictionary) -> int:
+	var total := 0
+	for l: Dictionary in d.get("expenses", []):
+		if bool(l.charge) or String(l.what).begins_with("Wages") or String(l.what).begins_with("Base upkeep") or String(l.what).begins_with("Loan installments"):
+			total += int(l.amount)
+	return total
+
+
 func _make_offer(type_id: String, zone_id: String, overrides := {}) -> String:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 500 + _made

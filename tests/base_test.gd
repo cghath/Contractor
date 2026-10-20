@@ -52,6 +52,7 @@ func _ready() -> void:
 	_test_hiring()
 	_test_callsigns()
 	_test_wages()
+	_test_release_kit()
 	_test_heli_upgrades()
 	_test_growth()
 	_test_injuries_and_medbay()
@@ -488,11 +489,45 @@ func _test_wages() -> void:
 	var funds := BaseEconomy.funds()
 	var bill := Economy.weekly_bill()
 	check(daily > 0 and int(bill.wages) == daily * week, "one clock: the roster's wages are the economy's weekly bill ($%d for two)" % int(bill.wages))
-	BaseHub.server_advance_days(Economy.days_to_bill() - 1)
-	check(BaseEconomy.funds() == funds, "nothing is paid during the week")
+	# Economy overhaul 2026-10-20: wages and upkeep are paid every day, a week's days adding up to the week's bill.
 	BaseHub.server_advance_days(1)
-	check(BaseEconomy.funds() == funds - int(bill.total), "the week's bill is paid on its day, base upkeep with it ($%d)" % int(bill.total))
+	check(BaseEconomy.funds() == funds - daily - floori(Prices.weekly_upkeep() / float(week)), "a day's wages ($%d) and upkeep are paid that day" % daily)
+	BaseHub.server_advance_days(Economy.days_to_bill())
+	check(BaseEconomy.funds() == funds - int(bill.total), "the week's days add up to the week's bill, base upkeep with it ($%d)" % int(bill.total))
 	check(BaseHub.day() == Economy.day() and BaseHub.day() == MissionRegistry.setting_i("start_day", 1) + week, "the base's day is the economy's (day %d)" % BaseHub.day())
+
+
+## Economy overhaul 2026-10-20: hiring someone and letting them go at once put their role's kit
+## ($6,100-11,600 at shop prices) in the stash for a ~$2,100 fee. They take it with them now.
+func _test_release_kit() -> void:
+	print("Letting someone go: they keep the kit they were issued")
+	BaseHub.new_campaign(SEED)
+	var c := _cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day()))
+	BaseHub.server_hire(String(c.cid))
+	var mid := String(Roster.ids(BaseHub.roster())[0])
+	var m := BaseHub.member(mid)
+	check((m.get("issued", []) as Array).size() == Roles.kit(StringName(c.role)).size(), "a hire's issued kit is noted (%d lines)" % (m.get("issued", []) as Array).size())
+	var stash_before := BaseArmory.counts(BaseHub.stash())
+	var funds := BaseEconomy.funds()
+	var split := Hiring.release_split(m.issued, BaseHub._gear_entries(GameState.from_json((m.gear as Dictionary).duplicate(true))))
+	check(BaseHub.server_release(mid) == "" and BaseArmory.counts(BaseHub.stash()) == stash_before and BaseEconomy.funds() == funds,
+		"released at once: the kit leaves with them, nothing lands in the stash, nothing is owed (to the stash %s, owed %s, funds %+d)" % [
+			split.to_stash.map(func(e: Dictionary) -> String: return "%s x%d" % [e.id, int(e.count)]), split.owed, BaseEconomy.funds() - funds])
+	# The pure split: what the company added stays; issued kit not on them is owed (durable kit only).
+	var kit := Roles.kit(&"rifleman")
+	var issued: Array = kit.map(func(p: Array) -> Array: return [String(p[0]), int(p[1])])
+	var gun := ""
+	var used_up := ""
+	for p: Array in kit:
+		var item := ItemDB.get_item(StringName(p[0]))
+		if gun == "" and item.type == "weapon":
+			gun = String(p[0])
+		if used_up == "" and item.type in Hiring.USED_UP_TYPES:
+			used_up = String(p[0])
+	split = Hiring.release_split(issued, [{"id": "hk416", "count": 1, "state": {}}])
+	check(split.to_stash.size() == 1 and split.to_stash[0].id == "hk416" and int(split.owed.get(gun, 0)) == 1 and not split.owed.has(used_up),
+		"a company HK416 on them stays; their own %s (gone) is owed, their used-up %s isn't" % [gun, used_up])
+	check(Hiring.release_split([], [{"id": "hk416", "count": 1}]).to_stash.size() == 1, "someone hired before the kit was noted: all of it stays, as before")
 
 
 func _test_growth() -> void:
@@ -574,7 +609,7 @@ func _test_respawn_pool() -> void:
 	BaseHub.server_count_respawn()
 	var dep := RosterDeployment.active(roster)
 	check(int(dep.respawns_bought) == 1 and BaseEconomy.funds() == funds - BaseEconomy.respawn_price(), "the fifth is bought ($%d)" % BaseEconomy.respawn_price())
-	var second := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var second := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	check(second > BaseEconomy.respawn_price(), "each one bought costs more ($%d next)" % second)
 	# Cash first, then the deployed contract's support budget (Captain), then credit.
 	var offer: Dictionary = Contracts.board().filter(func(c: Dictionary) -> bool: return c.source != "recovery")[0]
@@ -588,9 +623,16 @@ func _test_respawn_pool() -> void:
 	check(int(dep.respawns_bought) == 2 and BaseEconomy.funds() == 0 and Contracts.support_left(cid) == budget - (second - 500),
 		"short of cash: the $500 there, the rest from the support budget ($%d of $%d)" % [second - 500, budget])
 	Contracts.server_draw_support(cid, Contracts.support_left(cid))
-	var third := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise())
+	var third := RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max())
 	BaseHub.server_count_respawn()
 	check(int(dep.respawns_bought) == 3 and BaseEconomy.funds() == -third, "with neither, it goes on credit ($%d)" % third)
+	# Economy overhaul 2026-10-20: a quarter more each, never past respawn_max ($4,000, 5,000, 6,000, 7,000, 8,000, 8,000...).
+	check(second == roundi(BaseEconomy.respawn_price() * (1.0 + Prices.respawn_rise())) and third == roundi(BaseEconomy.respawn_price() * (1.0 + 2.0 * Prices.respawn_rise())),
+		"each costs a quarter of the price more ($%d, $%d)" % [second, third])
+	for i in 4:
+		BaseHub.server_count_respawn()
+	check(Prices.respawn_max() > 0 and RosterDeployment.respawn_cost(roster, BaseEconomy.respawn_price(), Prices.respawn_rise(), Prices.respawn_max()) == Prices.respawn_max(),
+		"the eighth bought is capped at $%d (it would be $%d)" % [Prices.respawn_max(), roundi(BaseEconomy.respawn_price() * (1.0 + 7.0 * Prices.respawn_rise()))])
 	Contracts.server_abandon_deployment()
 	RosterDeployment.begin(roster, [], RosterDeployment.HOT, "z", "", 1)
 	check(RosterDeployment.free_respawns_left(roster) == 8, "a hot zone: 8 free")
@@ -1600,16 +1642,16 @@ func _test_contract_loop() -> void:
 	extraction.countdown_s = 0.2
 	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
 	var cash_before := Economy.cash()
-	var bills := [0]  # weekly bills that fall due in the deployment's days
-	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
-	Economy.week_paid.connect(on_week)
+	var bills := [0]  # the bills (daily wages and upkeep, loan installments) that fall due in the deployment's days
+	var on_bill := func(_day: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
+	Economy.bill_paid.connect(on_bill)
 	check(extraction.server_confirm() == "", "the squad (one left behind by choice) confirms at the extraction point")
 	var home := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 20.0)
 	level = CompoundLevel.current(self)
 	var debrief := Contracts.last_debrief()
 	var line: Dictionary = (debrief.get("contracts", [{}]) as Array)[0] if not (debrief.get("contracts", []) as Array).is_empty() else {}
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
-	Economy.week_paid.disconnect(on_week)
+	Economy.bill_paid.disconnect(on_bill)
 	_check_story(cid, String(BaseHub.member(lost).callsign))
 	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
