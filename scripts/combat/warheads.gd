@@ -414,7 +414,7 @@ static func _jet_world(world: VoxelWorld, entry: Vector3, dir: Vector3, pen_mm: 
 		var mat := world.material_at(p)
 		if mat != VoxelWorld.Mat.EMPTY:
 			inside = true
-			left -= float(JET_MATERIAL_MM_PER_M.get(mat, JET_MATERIAL_MM_PER_M[VoxelWorld.Mat.CONCRETE])) * step_m
+			left -= float(JET_MATERIAL_MM_PER_M.get(VoxelWorld.base_mat(mat), JET_MATERIAL_MM_PER_M[VoxelWorld.Mat.CONCRETE])) * step_m
 			_bore(terrain, p, dir, seen)
 			if left <= 0.0:
 				break

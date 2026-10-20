@@ -770,7 +770,7 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	var p := Vector2(v_x(i), v_x(j))
 	for pad: Array in pads:
 		if (pad[0] as Rect2).grow(-1.0).has_point(p):
-			return c_road if _streets.any(func(r: Rect2) -> bool: return r.has_point(p)) else c_earth
+			return c_road if _streets.any(func(r: Rect2) -> bool: return r.has_point(p)) else _pad_colour(pad[0], p, i, j)
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
 	var colour := c_grass.lerp(c_dry, patch * 0.25)  # the shader adds the larger, smoother patches
@@ -790,6 +790,27 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 		var beach := 1.0 - smoothstep(14.0, 50.0, shore_distance(p.x, p.y) + float(absi(hash(Vector2i(i / 2, j / 2))) % 100) * 0.08)
 		colour = colour.lerp(c_sand, beach * (1.0 - steep * 0.5))
 	return colour.lerp(c_road, road_weight(p.x, p.y) * 0.8)
+
+
+## A pad's ground at `p` (vertex i, j) (world visual pass, cghath 2026-10-20: a pad read as one
+## flat square of earth): bare earth, worn back into dry grass toward its edge (PAD_WORN_M, unevenly),
+## with patches of grey gravel and of darker trodden earth (PAD_PATCH_CELLS vertices across), all
+## from the vertex and the zone's seed. The ground shader breaks it up further near the camera.
+const PAD_WORN_M := 9.0
+const PAD_PATCH_CELLS := 2
+
+
+func _pad_colour(r: Rect2, p: Vector2, i: int, j: int) -> Color:
+	var inside := minf(minf(p.x - r.position.x, r.end.x - p.x), minf(p.y - r.position.y, r.end.y - p.y))
+	var roll := float(absi(hash(Vector3i(i, j, seed_value))) % 1000) / 1000.0
+	var patch := absi(hash(Vector3i(i / PAD_PATCH_CELLS, j / PAD_PATCH_CELLS, seed_value + 5))) % 6
+	var colour := c_earth
+	if patch == 0:
+		colour = colour.lerp(c_rock.lightened(0.12), 0.45)  # gravel
+	elif patch == 1:
+		colour = colour.darkened(0.1)  # trodden
+	var worn := clampf(1.0 - (inside - 1.0) / PAD_WORN_M, 0.0, 1.0)
+	return colour.lerp(c_dry.lerp(c_grass, 0.3), worn * (0.3 + 0.6 * roll))
 
 
 ## How much the ground at (x, z) is road: 1 on the line out to ROAD_CORE_M, 0 past

@@ -112,6 +112,7 @@ static var LOOT := {
 }
 
 static var _cache := {}
+static var _skins := {}  # type -> skin(): boxes that dress the structure
 static var _counts := {}  # solid_voxels_in
 
 
@@ -190,6 +191,7 @@ static func _town(type: String) -> bool:
 		return false
 	var t := BuildingGen.town(int(seed_text))
 	_cache[type] = t.boxes
+	_skins[type] = (t.skin as Array) + _dress(type, (t.boxes as Array).filter(func(bx: Array) -> bool: return int(bx[2]) == VoxelWorld.Mat.SANDBAG))  # the street barricades' bags too
 	HALF[type] = t.half
 	POINTS[type] = t.points
 	GARRISON[type] = t.garrison
@@ -235,6 +237,7 @@ static func _grown(type: String) -> bool:
 	var spec: Dictionary = GROW[core]
 	var core_half: Vector2 = HALF[core]
 	var out: Array = (boxes(core) as Array).duplicate()
+	var dress: Array = (skin(core) as Array).duplicate()
 	var garrison: Array = (GARRISON.get(core, []) as Array).duplicate()
 	var face: Array = []
 	for i in garrison.size():
@@ -266,6 +269,10 @@ static func _grown(type: String) -> bool:
 				var c: Vector3 = place.call(bx[1])
 				out.append([a.min(c), a.max(c), bx[2]])
 				top = maxf(top, maxf(a.y, c.y) + 0.5)
+			for bx: Array in b.skin:
+				var a: Vector3 = place.call(bx[0])
+				var c: Vector3 = place.call(bx[1])
+				dress.append([a.min(c), a.max(c), bx[2]])
 			for f: Vector3 in BuildingGen.ramp_faces(b):
 				ramps.append(place.call(f))
 			for dr: Dictionary in b.doors:
@@ -280,6 +287,7 @@ static func _grown(type: String) -> bool:
 					loot.append({"uid": "grown%d" % loot.size(), "id": pick[0], "count": int(pick[1]), "pos": place.call(l.at) + Vector3(0, 0.5, 0)})
 			half = Vector2(maxf(half.x, absf(origin.x) + size.x * 0.5 + 1.0), maxf(half.y, absf(z) + size.y * 0.5 + 1.0))
 	_cache[type] = out
+	_skins[type] = dress
 	HALF[type] = half
 	POINTS[type] = POINTS[core]
 	GARRISON[type] = garrison
@@ -322,6 +330,19 @@ static func boxes(type: String) -> Array:
 				push_error("ZoneModules: unknown type %s" % type)
 				return []
 	return _cache[type]
+
+
+## What dresses the module's structure (world visual pass, cghath 2026-10-20): [from, to, Mat]
+## boxes like boxes(), stamped after them as skin (VoxelWorld.add_box_m): a generated building's
+## frames, plinths, cornices and the rest (BuildingGen._skin), sandbag walls' bags, HESCO's frames,
+## a compound wall's coping and gate. Recolours voxels the structure has, or stands above head
+## height, so navigation, cover and the mission spots are as boxes() alone makes them.
+static func skin(type: String) -> Array:
+	if not _skins.has(type):
+		var structure := boxes(type)  # (a town or grown module enters its own skin as it builds)
+		if not _skins.has(type):
+			_skins[type] = _dress(type, structure)
+	return _skins[type]
 
 
 ## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
@@ -664,6 +685,10 @@ static func _fuel_drums(out: Array, corner: Vector3) -> void:
 			out.append([at, at + Vector3(0.6, 0.9, 0.6), VoxelWorld.Mat.STEEL])
 
 
+## Barrel segments of the AA gun (_aa_site), each 0.2 m along and 0.1 m up.
+const AA_ELEVATION_STEPS := 10
+
+
 ## An AA emplacement centred on `c` (x, z): a 3.6 m sandbag ring 0.8 m high, open to the east,
 ## round a twin-barrel gun on a steel mount (barrels to the north). The gun fills (-0.5, 0, -1.3)
 ## to (0.5, 1.3, 0.4) from the centre.
@@ -671,9 +696,15 @@ static func _fuel_drums(out: Array, corner: Vector3) -> void:
 ## two courses with a way in on +X, and in it a twin-barrelled 23 mm gun on its cruciform
 ## outriggers (a ZU-23-2 pattern), barrels north over the bags, a seat each side, ammo boxes and
 ## a sight, all steel voxels (a sabotage objective counts them: solid_voxels_in).
+## World visual pass (cghath, 2026-10-20: the gun read as a low blob): the gun in olive with its
+## barrels raised (about 27 degrees, in voxel steps) out over the north bags, cooling jackets and
+## muzzle brakes, a magazine on the outside of each receiver, jack pads, handwheels and a ring
+## sight, and two ammo boxes against the back bags. The sandbags get their bag pattern from the
+## module's skin (_dress). Same footprint, ring and objective box.
 static func _aa_site(out: Array, c: Vector2) -> void:
 	var S := VoxelWorld.Mat.SANDBAG
 	var T := VoxelWorld.Mat.STEEL
+	var O := VoxelWorld.Mat.STEEL_OLIVE
 	var W := VoxelWorld.Mat.WOOD
 	var at := Vector3(c.x, 0, c.y)
 	# Sandbags: a lower course 0.6 high and 0.5 thick, an upper course inset 0.4 higher, both
@@ -688,21 +719,185 @@ static func _aa_site(out: Array, c: Vector2) -> void:
 		out.append([at + Vector3(-r, y0, -r + t), at + Vector3(-r + t, y1, r - t), S])
 		out.append([at + Vector3(r - t, y0, -r + t), at + Vector3(r, y1, -0.6), S])
 		out.append([at + Vector3(r - t, y0, 0.6), at + Vector3(r, y1, r - t), S])
-	# The gun: outriggers, pedestal, cradle and seats.
-	out.append([at + Vector3(-1.2, 0, -0.1), at + Vector3(1.2, 0.15, 0.1), T])
-	out.append([at + Vector3(-0.1, 0, -1.2), at + Vector3(0.1, 0.15, 1.2), T])
-	out.append([at + Vector3(-0.3, 0.15, -0.3), at + Vector3(0.3, 0.6, 0.3), T])
-	out.append([at + Vector3(-0.45, 0.6, -0.5), at + Vector3(0.45, 0.9, 0.5), T])
+	# The carriage: outriggers with jack pads, a turntable and pedestal, the cradle and its side plates.
+	out.append([at + Vector3(-1.2, 0, -0.1), at + Vector3(1.2, 0.15, 0.1), O])
+	out.append([at + Vector3(-0.1, 0, -1.2), at + Vector3(0.1, 0.15, 1.2), O])
+	for pad: Vector3 in [Vector3(-1.2, 0, 0), Vector3(1.2, 0, 0), Vector3(0, 0, -1.2), Vector3(0, 0, 1.2)]:
+		out.append([at + pad + Vector3(-0.15, 0, -0.15), at + pad + Vector3(0.15, 0.1, 0.15), T])
+	out.append([at + Vector3(-0.4, 0.15, -0.4), at + Vector3(0.4, 0.3, 0.4), T])
+	out.append([at + Vector3(-0.3, 0.3, -0.3), at + Vector3(0.3, 0.6, 0.3), O])
+	out.append([at + Vector3(-0.45, 0.6, -0.5), at + Vector3(0.45, 0.9, 0.5), O])
 	for side: float in [-1.0, 1.0]:
 		var sx := 0.6 * side
+		out.append([at + Vector3(side * 0.45 - 0.05, 0.6, -0.3), at + Vector3(side * 0.45 + 0.05, 1.15, 0.2), O])  # side plate
 		out.append([at + Vector3(sx - 0.15, 0.55, 0.1), at + Vector3(sx + 0.15, 0.65, 0.4), W])  # seat
 		out.append([at + Vector3(sx - 0.15, 0.65, 0.35), at + Vector3(sx + 0.15, 0.95, 0.45), W])  # its back
+		out.append([at + Vector3(sx - 0.1, 0.15, -0.05), at + Vector3(sx + 0.1, 0.25, 0.25), O])  # footrest
+		out.append([at + Vector3(side * 0.5 - 0.05, 0.75, 0.05), at + Vector3(side * 0.5 + 0.05, 0.95, 0.25), T])  # handwheel
 		var bx := 0.2 * side
-		out.append([at + Vector3(bx - 0.08, 0.9, -0.4), at + Vector3(bx + 0.08, 1.2, 0.45), T])  # receiver
-		out.append([at + Vector3(bx - 0.05, 1.0, -2.4), at + Vector3(bx + 0.05, 1.1, -0.4), T])  # barrel
-		out.append([at + Vector3(bx - 0.08, 0.97, -2.55), at + Vector3(bx + 0.08, 1.13, -2.4), T])  # flash hider
-		out.append([at + Vector3(bx + 0.1 * side - 0.12, 0.9, -0.1), at + Vector3(bx + 0.1 * side + 0.12, 1.15, 0.2), T])  # ammo box
-	out.append([at + Vector3(-0.06, 1.2, 0.0), at + Vector3(0.06, 1.4, 0.15), T])  # sight
+		out.append([at + Vector3(bx - 0.08, 0.9, -0.5), at + Vector3(bx + 0.08, 1.2, 0.45), O])  # receiver
+		out.append([at + Vector3(bx + 0.1 * side - 0.1, 1.0, -0.25), at + Vector3(bx + 0.1 * side + 0.1, 1.35, 0.2), O])  # magazine
+		# The barrel, raised: segments 0.2 m along (-z) and 0.1 m up each, a cooling jacket on the
+		# first four, a muzzle brake at the end.
+		for k in AA_ELEVATION_STEPS:
+			var z0 := -0.4 - k * 0.2
+			var y0 := 1.0 + k * 0.1
+			var r := 0.08 if k < 4 else 0.05
+			out.append([at + Vector3(bx - r, y0, z0 - 0.2), at + Vector3(bx + r, y0 + 0.2, z0), T])
+		var tip_z := -0.4 - AA_ELEVATION_STEPS * 0.2
+		var tip_y := 1.0 + AA_ELEVATION_STEPS * 0.1
+		out.append([at + Vector3(bx - 0.08, tip_y - 0.05, tip_z - 0.15), at + Vector3(bx + 0.08, tip_y + 0.25, tip_z + 0.05), T])  # muzzle brake
+	out.append([at + Vector3(-0.06, 1.2, 0.0), at + Vector3(0.06, 1.45, 0.1), T])  # sight post
+	out.append([at + Vector3(-0.12, 1.45, -0.02), at + Vector3(0.12, 1.6, 0.12), T])  # ring sight
+	# Ammo boxes against the back (south) bags, either side.
+	for ax: float in [-1.0, 0.6]:
+		out.append([at + Vector3(ax, 0, 1.0), at + Vector3(ax + 0.45, 0.3, 1.35), VoxelWorld.Mat.WOOD_GREEN])
+
+
+# --- Dressing (world visual pass, cghath 2026-10-20) ---------------------------------------------
+
+## Sandbag courses and bag length (m) for their bag pattern; HESCO's basket width; a compound
+## wall's pillars (every this far) and how far they and the gate posts stand over it.
+const BAG_H := 0.2
+const BAG_L := 0.6
+const HESCO_CELL := 1.0
+const PILLAR_EVERY := 5.0
+const PILLAR_UP := 0.3
+
+
+## A module's skin (skin()) read off its structure: every sandbag wall's bags (alternate bags a
+## shade darker, a course's offset half a bag), HESCO's basket frames and the soil showing on top,
+## mud-brick perimeter walls' plinth, coping and pillars, a plinth along other walls, crates'
+## corner posts and bands, fuel drums' hoops, a ridge on a tent's roof, and the compound's gate
+## (posts, a beam over it, its steel leaves opened back against the wall). Recolours in the same
+## material family (VoxelWorld.VARIANT_OF), or stands above head height, or (the gate's leaves)
+## lies flat on the wall's face.
+static func _dress(type: String, structure: Array) -> Array:
+	var out: Array = []
+	var M := VoxelWorld.Mat
+	for b: Array in structure:
+		var lo: Vector3 = b[0]
+		var hi: Vector3 = b[1]
+		var mat := int(b[2])
+		var size := hi - lo
+		var thin := minf(size.x, size.z)
+		var long := maxf(size.x, size.z)
+		var wall := size.y >= 1.8 and thin <= 0.65 and long >= 1.0
+		match mat:
+			M.SANDBAG:
+				_bags(out, lo, hi)
+			M.HESCO:
+				_hesco(out, lo, hi)
+			M.MUD_BRICK:
+				if wall and lo.y < 0.05:
+					out.append([lo, Vector3(hi.x, lo.y + 0.3, hi.z), M.MUD_DARK])
+					out.append([Vector3(lo.x, hi.y - 0.15, lo.z), hi, M.MUD_LIGHT])
+					if long >= PILLAR_EVERY * 1.5:
+						var along_x := size.x >= size.z
+						var a := (lo.x if along_x else lo.z) + PILLAR_EVERY * 0.5
+						var end := hi.x if along_x else hi.z
+						while a + 0.6 < end:
+							var p0 := Vector3(a, lo.y + 0.3, lo.z) if along_x else Vector3(lo.x, lo.y + 0.3, a)
+							var p1 := Vector3(a + 0.6, hi.y + PILLAR_UP, hi.z) if along_x else Vector3(hi.x, hi.y + PILLAR_UP, a + 0.6)
+							out.append([p0, p1, M.MUD_LIGHT])
+							a += PILLAR_EVERY
+			M.CONCRETE, M.PAINTED, M.CINDER_BLOCK, M.BRICK, M.STONE:
+				if wall and lo.y < 0.05:
+					out.append([lo, Vector3(hi.x, lo.y + 0.3, hi.z), M.TRIM_DARK])
+				if mat == M.PAINTED and thin <= 0.65 and hi.y >= 2.4 and size.y >= 0.3:
+					out.append([Vector3(lo.x, hi.y - 0.15, lo.z), hi, M.TRIM_WHITE])  # a band under the roof, over the doors too
+			M.WOOD:
+				if size.x >= 0.8 and size.z >= 0.8 and size.y >= 0.8 and long <= 1.5 and size.y <= 1.3:
+					_crate(out, lo, hi)
+			M.STEEL:
+				if thin >= 0.5 and long <= 0.7 and size.y >= 0.8 and size.y <= 1.0:
+					for y: float in [0.25, 0.6]:  # a fuel drum's hoops
+						out.append([Vector3(lo.x, lo.y + y, lo.z), Vector3(hi.x, lo.y + y + 0.1, hi.z), M.STEEL_OLIVE])
+			M.TARP:
+				if size.y <= 0.15 and thin >= 3.0 and lo.y >= 1.8:
+					# A tent roof: a stepped ridge along its length.
+					var along_x := size.x >= size.z
+					for k in range(1, 4):
+						var inset := thin * 0.5 * k / 4.0
+						var r0 := Vector3(lo.x, hi.y + (k - 1) * 0.15, lo.z + inset) if along_x else Vector3(lo.x + inset, hi.y + (k - 1) * 0.15, lo.z)
+						var r1 := Vector3(hi.x, hi.y + k * 0.15, hi.z - inset) if along_x else Vector3(hi.x - inset, hi.y + k * 0.15, hi.z)
+						out.append([r0, r1, M.TARP])
+	if base(type) == "compound":
+		_compound_gate(out)
+	return out
+
+
+## Bag pattern on a sandbag box (`lo`..`hi`): on its long sides (all four when it's no wall),
+## every other bag in a course a shade darker, each course offset half a bag.
+static func _bags(out: Array, lo: Vector3, hi: Vector3) -> void:
+	var size := hi - lo
+	var along_x := size.x >= size.z
+	var faces: Array = [[along_x, lo.z if along_x else lo.x, 1.0], [along_x, hi.z if along_x else hi.x, -1.0]]
+	if minf(size.x, size.z) > 0.7:
+		faces += [[not along_x, lo.x if along_x else lo.z, 1.0], [not along_x, hi.x if along_x else hi.z, -1.0]]
+	for f: Array in faces:
+		var fx: bool = f[0]  # the face runs along x
+		var plane: float = f[1]
+		var inward: float = f[2]
+		var a0 := lo.x if fx else lo.z
+		var a1 := hi.x if fx else hi.z
+		var k := 0
+		var y := lo.y
+		while y < hi.y - 0.05:
+			var y1 := minf(y + BAG_H, hi.y)
+			var a := a0 + (BAG_L * 0.5 if k % 2 == 1 else 0.0)
+			while a < a1 - 0.05:
+				var b := minf(a + BAG_L, a1)
+				var d0 := plane if inward > 0.0 else plane - 0.1
+				if fx:
+					out.append([Vector3(a, y, d0), Vector3(b, y1, d0 + 0.1), VoxelWorld.Mat.SANDBAG_DARK])
+				else:
+					out.append([Vector3(d0, y, a), Vector3(d0 + 0.1, y1, b), VoxelWorld.Mat.SANDBAG_DARK])
+				a += BAG_L * 2.0
+			y = y1
+			k += 1
+
+
+## HESCO baskets on a HESCO box: the soil showing on top, and a frame between every basket
+## (HESCO_CELL apart along it) through its whole depth and height.
+static func _hesco(out: Array, lo: Vector3, hi: Vector3) -> void:
+	out.append([Vector3(lo.x, hi.y - 0.1, lo.z), hi, VoxelWorld.Mat.DIRT_BERM])
+	var along_x := (hi - lo).x >= (hi - lo).z
+	var a := (lo.x if along_x else lo.z) + HESCO_CELL
+	var end := hi.x if along_x else hi.z
+	while a < end - 0.05:
+		if along_x:
+			out.append([Vector3(a - 0.05, lo.y, lo.z), Vector3(a + 0.05, hi.y, hi.z), VoxelWorld.Mat.HESCO_FRAME])
+		else:
+			out.append([Vector3(lo.x, lo.y, a - 0.05), Vector3(hi.x, hi.y, a + 0.05), VoxelWorld.Mat.HESCO_FRAME])
+		a += HESCO_CELL
+	out.append([Vector3(lo.x, lo.y, lo.z), Vector3(hi.x, lo.y + 0.1, hi.z), VoxelWorld.Mat.HESCO_FRAME])
+
+
+## A crate's dark corner posts and a band round its middle.
+static func _crate(out: Array, lo: Vector3, hi: Vector3) -> void:
+	var D := VoxelWorld.Mat.WOOD_DARK
+	for c: Vector2 in [Vector2(lo.x, lo.z), Vector2(hi.x - 0.1, lo.z), Vector2(lo.x, hi.z - 0.1), Vector2(hi.x - 0.1, hi.z - 0.1)]:
+		out.append([Vector3(c.x, lo.y, c.y), Vector3(c.x + 0.1, hi.y, c.y + 0.1), D])
+	var mid := snappedf((lo.y + hi.y) * 0.5, 0.1)
+	out.append([Vector3(lo.x, mid - 0.05, lo.z), Vector3(hi.x, mid + 0.05, lo.z + 0.1), D])
+	out.append([Vector3(lo.x, mid - 0.05, hi.z - 0.1), Vector3(hi.x, mid + 0.05, hi.z), D])
+	out.append([Vector3(lo.x, mid - 0.05, lo.z), Vector3(lo.x + 0.1, mid + 0.05, hi.z), D])
+	out.append([Vector3(hi.x - 0.1, mid - 0.05, lo.z), Vector3(hi.x, mid + 0.05, hi.z), D])
+
+
+## The compound's gate (_compound: the south wall, a 5 m gap at x -2.5 to 2.5, z 29.4 to 30): a
+## post either side standing over the wall, a beam across them at 3.8 m (clear of any vehicle),
+## and the two steel leaves opened back flat against the wall's outside face.
+static func _compound_gate(out: Array) -> void:
+	var M := VoxelWorld.Mat
+	for side: float in [-1.0, 1.0]:
+		var x0 := 2.5 * side
+		var x1 := 3.2 * side
+		out.append([Vector3(minf(x0, x1), 0.0, 29.4), Vector3(maxf(x0, x1), 4.1, 30.0), M.MUD_LIGHT])
+		out.append([Vector3(minf(2.5 * side, 4.9 * side), 0.1, 30.0), Vector3(maxf(2.5 * side, 4.9 * side), 2.3, 30.1), M.SHEET_GREEN])
+		out.append([Vector3(minf(2.5 * side, 4.9 * side), 1.1, 30.0), Vector3(maxf(2.5 * side, 4.9 * side), 1.2, 30.1), M.STEEL])
+	out.append([Vector3(-3.2, 3.8, 29.5), Vector3(3.2, 4.1, 29.9), M.WOOD_DARK])
 
 
 ## Solid voxels of a module type's pristine structure inside `box` (metres from its origin),

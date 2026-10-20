@@ -19,6 +19,11 @@ signal streamed_out(module: ZoneModule)
 
 const PROXY_VIEW_M := 2500.0
 const PROXY_HOLD_S := 0.5
+## The proxy also stays till the voxels' meshes (and so their collision) have caught up with the
+## edits replayed onto them (VoxelWorld.is_meshed: a breach stamped over and carved again in the
+## same frame kept its old wall collision for a second or more after the proxy went, cghath
+## 2026-10-20), but no longer than this past PROXY_HOLD_S.
+const MESH_WAIT_S := 5.0
 ## A carved box's proxy cells: this many voxels a side (0.5 m), solid when at least half
 ## their voxels are (a bullet hole leaves a wall whole; a breach opens it).
 const PROXY_CELL_VOXELS := 5
@@ -120,6 +125,8 @@ func stream_in(log: Array, sink: Callable) -> void:
 	world.edit_sink = sink
 	for box: Array in ZoneModules.boxes(type):
 		world.add_box_m(box[0], box[1], box[2])
+	for box: Array in ZoneModules.skin(type):
+		world.add_box_m(box[0], box[1], box[2], true)
 	voxel_world = world
 	applied = 0
 	_cells.clear()  # the replay of the log fills it again
@@ -162,7 +169,8 @@ func _on_built() -> void:
 
 
 func _process(_delta: float) -> void:
-	if voxel_world and voxel_world.is_built() and Time.get_ticks_msec() / 1000.0 >= _ready_at:
+	var now := Time.get_ticks_msec() / 1000.0
+	if voxel_world and voxel_world.is_built() and now >= _ready_at and (voxel_world.is_meshed() or now >= _ready_at + MESH_WAIT_S):
 		set_process(false)
 		_show_proxy(false)
 		streamed_in.emit(self)

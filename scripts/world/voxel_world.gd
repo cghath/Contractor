@@ -37,6 +37,13 @@ enum Mat {
 	MUD_BRICK, STONE, LIMESTONE, BASALT, TUFF, CORAL_STONE, BRICK, CINDER_BLOCK, PLASTER,
 	ROOF_TILE, FIBRE_CEMENT, CORRUGATED_IRON, THATCH, TARP, GLASS, SANDBAG, HESCO, DIRT_BERM,
 	SHEET_METAL,
+	# Colour variants (world visual pass, 2026-10-20): each takes rounds and blasts exactly as the
+	# material it's a shade of (VARIANT_OF, base_mat), so a building's own wall colour, its window
+	# frames, plinth and signs, sandbags' bag pattern and HESCO's frames change nothing in a fight.
+	MUD_LIGHT, MUD_RED, MUD_WASH, MUD_DARK, BRICK_DARK, BRICK_TAN,
+	RENDER_CREAM, RENDER_OCHRE, RENDER_BLUE, RENDER_GREEN, RENDER_PINK, BLOCK_DIRTY,
+	STONE_WARM, STONE_GREY, TRIM_WHITE, TRIM_DARK, WOOD_GREEN, WOOD_BLUE, WOOD_DARK,
+	SIGN_RED, SIGN_YELLOW, SIGN_BLUE, SANDBAG_DARK, HESCO_FRAME, STEEL_OLIVE, SHEET_RUST, SHEET_GREEN,
 }
 ## One colour per Mat, in the same order. Index 0 must stay transparent: the cubes mesher
 ## treats it as empty.
@@ -47,7 +54,24 @@ const PALETTE: Array[Color] = [
 	Color("a5a49c"), Color("8b8e8c"), Color("b49a5e"), Color("3f6d8c"), Color("9fbcc4"),
 	Color("b8a378"), Color("a99a6c"), Color("8a6f4e"),
 	Color("7b8a8c"),
+	Color("b8956a"), Color("94634a"), Color("d2c6a6"), Color("7a5a3f"), Color("7a4431"), Color("b3895e"),
+	Color("ddd2b2"), Color("c9a468"), Color("9fb3bb"), Color("a9b493"), Color("c99d86"), Color("78756d"),
+	Color("a59478"), Color("74726c"), Color("e4ddcb"), Color("514d47"), Color("4d6a55"), Color("4a6580"), Color("5a4231"),
+	Color("a33f2e"), Color("c9a238"), Color("3d5d88"), Color("8d7a50"), Color("7b7358"), Color("586243"), Color("8a5b3e"), Color("5e6d58"),
 ]
+## The material each colour variant is a shade of: rounds, blasts, chips and holes go by that
+## (base_mat). Anything not listed is its own.
+const VARIANT_OF := {
+	Mat.MUD_LIGHT: Mat.MUD_BRICK, Mat.MUD_RED: Mat.MUD_BRICK, Mat.MUD_WASH: Mat.MUD_BRICK, Mat.MUD_DARK: Mat.MUD_BRICK,
+	Mat.BRICK_DARK: Mat.BRICK, Mat.BRICK_TAN: Mat.BRICK,
+	Mat.RENDER_CREAM: Mat.CINDER_BLOCK, Mat.RENDER_OCHRE: Mat.CINDER_BLOCK, Mat.RENDER_BLUE: Mat.CINDER_BLOCK,
+	Mat.RENDER_GREEN: Mat.CINDER_BLOCK, Mat.RENDER_PINK: Mat.CINDER_BLOCK, Mat.BLOCK_DIRTY: Mat.CINDER_BLOCK,
+	Mat.STONE_WARM: Mat.STONE, Mat.STONE_GREY: Mat.STONE, Mat.TRIM_WHITE: Mat.CONCRETE, Mat.TRIM_DARK: Mat.CONCRETE,
+	Mat.WOOD_GREEN: Mat.WOOD, Mat.WOOD_BLUE: Mat.WOOD, Mat.WOOD_DARK: Mat.WOOD,
+	Mat.SIGN_RED: Mat.PAINTED, Mat.SIGN_YELLOW: Mat.PAINTED, Mat.SIGN_BLUE: Mat.PAINTED,
+	Mat.SANDBAG_DARK: Mat.SANDBAG, Mat.HESCO_FRAME: Mat.HESCO, Mat.STEEL_OLIVE: Mat.STEEL,
+	Mat.SHEET_RUST: Mat.SHEET_METAL, Mat.SHEET_GREEN: Mat.SHEET_METAL,
+}
 ## How each material takes fire (Ballistics walks a round through the voxels, trace_round):
 ## - "loss_j_per_m": energy a round loses per metre of it. INF stops every small-arms round:
 ##   no hole, only a small surface mark (server_mark). A round that runs out of energy inside
@@ -134,6 +158,9 @@ var module_id := ""
 var edit_sink := Callable()
 var _tool: VoxelTool
 var _structures: Array = []  # [begin: Vector3i, end: Vector3i, mat]
+## 1 for each of _structures that is skin (add_box_m's `skin`): stamped like the rest, but not a
+## structure of its own for navigation (structure_boxes_m, solid_boxes_m).
+var _skin := PackedByteArray()
 ## Host: 1 for each of _structures that carving (or a later empty box) may have changed since
 ## it was stamped; 0: still solid as built, so solid_boxes_m needn't read its voxels.
 var _touched := PackedByteArray()
@@ -207,10 +234,17 @@ static func aligned(box: AABB, size: int) -> AABB:
 
 
 ## Adds a solid box, in metres, relative to this node. Call before structures are built.
-func add_box_m(from_m: Vector3, to_m: Vector3, mat: Mat) -> void:
+## `skin`: a box that only dresses the structures (a building's window frames, a cornice, a
+## sandbag wall's bag pattern: ZoneModules.skin), recolouring voxels they already have or standing
+## above head height: stamped after them like any box, carved like any voxel, but left out of the
+## boxes navigation is baked from (structure_boxes_m, solid_boxes_m).
+func add_box_m(from_m: Vector3, to_m: Vector3, mat: Mat, skin := false) -> void:
 	var a := Vector3i((from_m / VOXEL_SIZE).round())
 	var b := Vector3i((to_m / VOXEL_SIZE).round())
+	if skin and (a.x == b.x or a.y == b.y or a.z == b.z):
+		return  # a skin box thinner than half a voxel rounds away to nothing
 	_structures.append([a.min(b), a.max(b) - Vector3i.ONE, mat])
+	_skin.append(1 if skin else 0)
 	var box := AABB(Vector3(a.min(b)), Vector3((a - b).abs()))
 	_structure_area = box if _structures.size() == 1 else _structure_area.merge(box)
 	_touched.append(1 if mat == Mat.EMPTY else 0)
@@ -231,10 +265,24 @@ func is_built() -> bool:
 	return _built
 
 
+## Whether every mesh block of the structures is meshed as its voxels now stand, and the voxel
+## engine has no meshing or main-thread work (applying meshes and their collision) left queued:
+## the collision is as the voxels are. (The engine's queues are every terrain's: a caller should
+## give up waiting after a while, as ZoneModule does.)
+func is_meshed() -> bool:
+	if not _built or not terrain.is_area_meshed(_structure_area):
+		return false
+	var tasks: Dictionary = VoxelEngine.get_stats().get("tasks", {})
+	return int(tasks.get("meshing", 0)) == 0 and int(tasks.get("main_thread", 0)) == 0
+
+
 ## The base structures as boxes in metres, in this node's space (for navigation baking).
 func structure_boxes_m() -> Array[AABB]:
 	var boxes: Array[AABB] = []
-	for s: Array in _structures:
+	for i in _structures.size():
+		if _skin[i] == 1:
+			continue
+		var s: Array = _structures[i]
 		var begin := Vector3(s[0]) * VOXEL_SIZE
 		var end := Vector3(s[1] + Vector3i.ONE) * VOXEL_SIZE
 		boxes.append(AABB(begin, end - begin))
@@ -390,7 +438,7 @@ func server_mark(world_position: Vector3, normal: Vector3, mat: int) -> bool:
 		return false
 	_server_edit({"op": "mark", "p": [snappedf(p.x, 0.001), snappedf(p.y, 0.001), snappedf(p.z, 0.001)],
 		"n": [snappedf(n.x, 0.001), snappedf(n.y, 0.001), snappedf(n.z, 0.001)], "m": mat})
-	if CHIPS_TO_BREAK.has(mat) and (_mark_cells.get(_mark_cell(p, n), []) as Array).size() >= int(CHIPS_TO_BREAK[mat]):
+	if CHIPS_TO_BREAK.has(base_mat(mat)) and (_mark_cells.get(_mark_cell(p, n), []) as Array).size() >= int(CHIPS_TO_BREAK[base_mat(mat)]):
 		server_holes([Vector3i((p - n * 0.5).floor())])  # chipped through: the voxel crumbles out
 	return true
 
@@ -430,7 +478,13 @@ func material_at(world_position: Vector3) -> int:
 ## Energy (J) a round loses per metre of material `mat`: INF for what stops every
 ## small-arms round (concrete, steel, and anything unknown).
 static func loss_per_m(mat: int) -> float:
-	return float((MATERIALS.get(mat, {}) as Dictionary).get("loss_j_per_m", INF))
+	return float((MATERIALS.get(base_mat(mat), {}) as Dictionary).get("loss_j_per_m", INF))
+
+
+## The material `mat` takes fire as: itself, or for a colour variant the material it's a shade of
+## (VARIANT_OF).
+static func base_mat(mat: int) -> int:
+	return int(VARIANT_OF.get(mat, mat))
 
 
 ## Host only. Walks a round into the voxels from `entry` (world space, where its ray met a
@@ -642,14 +696,14 @@ func _apply_shot(edit: Dictionary) -> void:
 	var b: Array = edit["b"]
 	var bn: Array = edit["bn"]
 	_add_hole(Vector3(a[0], a[1], a[2]), Vector3(an[0], an[1], an[2]), mat, size)
-	_add_hole(Vector3(b[0], b[1], b[2]), Vector3(bn[0], bn[1], bn[2]), mat, size * float(HOLE_EXIT_SCALE.get(mat, 1.0)))
+	_add_hole(Vector3(b[0], b[1], b[2]), Vector3(bn[0], bn[1], bn[2]), mat, size * float(HOLE_EXIT_SCALE.get(base_mat(mat), 1.0)))
 	var v: Array = edit["v"]
 	var box := AABB()
 	var broke := false
 	for i in range(0, v.size() - 2, 3):
 		var cell := Vector3i(int(v[i]), int(v[i + 1]), int(v[i + 2]))
 		var hits := int(_hole_hits.get(cell, 0)) + 1
-		var cell_mat := int(_tool.get_voxel(cell))
+		var cell_mat := base_mat(int(_tool.get_voxel(cell)))
 		if hits >= int(HOLES_TO_BREAK.get(cell_mat, HOLES_TO_BREAK[Mat.WOOD])):
 			_hole_hits.erase(cell)
 			_tool.set_voxel(cell, Mat.EMPTY)
@@ -672,7 +726,7 @@ func _blast(centre: Vector3, r: float) -> void:
 				var d := (Vector3(cell) + Vector3.ONE * 0.5).distance_to(centre)
 				if d > r:
 					continue
-				var mat := int(_tool.get_voxel(cell))
+				var mat := base_mat(int(_tool.get_voxel(cell)))
 				if mat != Mat.EMPTY and d <= r * float((MATERIALS.get(mat, {}) as Dictionary).get("blast", 1.0)):
 					_tool.set_voxel(cell, Mat.EMPTY)
 
@@ -762,12 +816,12 @@ func _rebuild_marks() -> void:
 		if hole:
 			basis = basis.scaled(Vector3.ONE * size * (0.9 + float(floori(h / 628.0) % 20) / 100.0))
 			hm.set_instance_transform(j, Transform3D(basis, p + n * 0.02))
-			hm.set_instance_color(j, HOLE_RIM.get(mark[2], Color("c9a877")))
+			hm.set_instance_color(j, HOLE_RIM.get(base_mat(int(mark[2])), Color("c9a877")))
 			j += 1
 			continue
 		basis = basis.scaled(Vector3.ONE * size * (0.7 + float(floori(h / 628.0) % 60) / 100.0))
 		mm.set_instance_transform(i, Transform3D(basis, p + n * 0.03))
-		mm.set_instance_color(i, (MATERIALS.get(mark[2], {}) as Dictionary).get("mark", Color("3b3935")))
+		mm.set_instance_color(i, (MATERIALS.get(base_mat(int(mark[2])), {}) as Dictionary).get("mark", Color("3b3935")))
 		i += 1
 
 
@@ -971,6 +1025,8 @@ func solid_boxes_m(area_m: AABB) -> Array[AABB]:
 	var area_lo := Vector3i((area_m.position / VOXEL_SIZE).floor())
 	var area_hi := Vector3i((area_m.end / VOXEL_SIZE).ceil())
 	for i in _structures.size():
+		if _skin[i] == 1:
+			continue
 		var s: Array = _structures[i]
 		var lo: Vector3i = (s[0] as Vector3i).max(area_lo)
 		var hi: Vector3i = (s[1] as Vector3i + Vector3i.ONE).min(area_hi)
