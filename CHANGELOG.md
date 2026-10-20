@@ -11,6 +11,55 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Weapon detail pass (Captain, 2026-10-20: "we need to do a weapon detail pass soon")
+
+The parts the reloads work are now on the models, they move in first person, and each reload
+beat has its own sound.
+
+#### Added
+- **Model details, per weapon:**
+  - M4, M27, HK416, C8: ejection port with the bolt carrier in it and the dust cover swung open
+    below it. Also the brass deflector, forward assist, T charging handle, bolt catch paddle,
+    magazine release and safety.
+  - AK family (AKM, AK-74, RPK, SVD): ejection port, carrier and charging handle, the long
+    safety lever, magazine release paddle and dust cover latch button.
+  - L85A2: the cocking handle now rides in a cut slot, and the bolt carrier shows in the
+    ejection port. Before, the port was too thin to show.
+  - PKM, M240B, M249: a feed cover hinged at its front, with its latch (and its rail on the
+    M240 and M249). A feed tray under the cover, a brass belt with links from the box onto the
+    tray, and a charging handle on the right.
+  - Mosin: the bolt handle and ball knob now sit above the stock line (the old ones were half
+    inside the wood).
+  - Springfield: the bolt in an ejection port, its shroud, handle and tactical knob.
+  - M17 pistol: slide serrations and a slide stop lever.
+- **Moving parts in first person**, split from the weapon and tagged like the magazine:
+  - AR family: the carrier is locked back on an empty reload and slams home when the catch is
+    slapped.
+  - L85: the handle and carrier run forward when the release is pressed.
+  - AK: the carrier and handle rack back and spring home.
+  - Belt-feds: the handle is charged on an empty reload. The cover flips up while the box is
+    changed and slams down at the end. The belt comes off with the box.
+  - Bolt-actions: the handle turns up, the bolt draws back, then goes forward and down.
+  - Pistol: the slide is locked back on empty and goes home.
+- **A sound for each reload beat**, all generated (data/sounds.json `reload_*`): magazine out,
+  magazine in, bolt back, bolt forward, cover open, cover close, belt laid, clip stripped. They
+  replace the single "reload" sound that played at the start.
+- **Third person follows the same keys.** When a reload begins, the host tells every peer the
+  weapon, whether it's empty and how long it takes. Each peer then times it on its own clock:
+  - the support hand goes from part to part and to the pouch;
+  - the held weapon is drawn without its magazine while the magazines move: out, carried,
+    dropped and in;
+  - the beat sounds play there too. A player's own reload starts at the key press, not after a
+    round trip to the host.
+
+#### Changed
+- **C8 proportions:** it now has its real 15.7 in heavy barrel (longer than the M4's) ahead of
+  a carbine-length handguard and an M4-length upper. Before, the upper ran 37 cm, half as long
+  again as a real one.
+- **reload_points** now gives each hand target on its new part: the AR's T-handle and catch
+  paddle, the AK's knob, the belt-feds' right-side handles (the M249's was on the left) and the
+  covers. They also account for a suppressor's length.
+
 ### Reloads reworked, and the L85's (Captain, 2026-10-20: "reload anims also need work")
 
 References he named: Sicario's AR reloads, AK and AR reloads, common media (Heat, Modern Warfare

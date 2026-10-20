@@ -2,7 +2,7 @@ extends Node
 ## Headless checks for sound (Sfx, autoload/sfx.gd, data/sounds.json): every sound has a
 ## generated placeholder; near and far variants by distance; out of range is silent (a
 ## suppressed shot past what the AI hears); a round passing close cracks, your own doesn't;
-## in a hosted level a shot, its impact, a reload and footsteps are heard.
+## in a hosted level a shot, its impact, a reload's beats and footsteps are heard.
 ##   <voxel godot exe> --headless --path . res://tests/sound_test.tscn
 ## Exits with the number of failures.
 
@@ -122,8 +122,9 @@ func _test_in_level() -> void:
 	check(heard.any(func(id: StringName) -> bool: return String(id).begins_with("impact_")), "and where it lands")
 	t = Sfx.heard_count()
 	player._server_reload.rpc_id(1, &"primary")
-	await _frames(3)
-	check(&"reload" in Sfx.heard_after(t), "a reload is heard")
+	await get_tree().create_timer(player.reload_seconds(ItemDB.get_item(&"m4a1")) + 0.3).timeout
+	var beats := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return String(id).begins_with("reload_"))
+	check(str(beats) == str([&"reload_mag_out", &"reload_mag_in"]), "a reload is heard on its beats: the magazine out, then in (%s)" % [beats])
 	check(not Sfx.under_roof(Vector3(0, 0.1, 30)), "in the open: no reverb")
 	var walker := level.spawn_soldier({"name": "Walker", "faction": "friendly", "variant": "multicam", "pos": Vector3(4, 0.1, 20),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})

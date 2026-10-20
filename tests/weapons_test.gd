@@ -58,6 +58,7 @@ func _ready() -> void:
 	await _frames(30)
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
+	await _test_reload_beats()
 	await _test_hostile_kits()
 	_test_faction_kits()
 	await _test_rival_pmc_kits()
@@ -180,8 +181,6 @@ func _test_models() -> void:
 				check(pieces.size() == 1, "%s is one solid piece (%s: %s)" % [id, model, pieces])
 
 
-## The separate (face-connected) pieces of model `model`'s voxels: each one's voxel count and
-## bounding box, in the spec's voxels.
 ## Reloads (Captain, 2026-10-20: "reload anims also need work", and the L85's): every family's
 ## keys run 0 to 1 in order from rest back to rest, the magazine comes out as a part of its own
 ## (the weapon without it plus it: the same boxes), and an empty reload takes longer.
@@ -224,8 +223,62 @@ func _test_reloads() -> void:
 	var m4 := ItemDB.get_item(&"m4a1")
 	check(Reloads.seconds(m4, true) > Reloads.seconds(m4, false) and is_equal_approx(Reloads.seconds(m4, false), float(m4.stats.reload_s)),
 		"an empty reload works the bolt: %.1f s against %.1f" % [Reloads.seconds(m4, true), Reloads.seconds(m4, false)])
+	_test_weapon_detail()
 
 
+## Weapon detail pass (2026-10-20): each family's moving parts are tagged (the AR's carrier, the
+## AK's carrier and handle, the L85's handle, a belt-fed's handle and feed cover and its belt, a
+## bolt-action's bolt, a pistol's slide) and the weapon still adds up from its parts; their
+## tracks and the sounds' beats run in order inside the reload; the parts come home by the end.
+func _test_weapon_detail() -> void:
+	print("Weapon detail: moving parts, beats (2026-10-20)")
+	var want := {&"m4a1": ["bolt"], &"hk416": ["bolt"], &"c8": ["bolt"], &"l85a2": ["bolt"], &"akm": ["bolt"],
+		&"pkm": ["bolt", "cover"], &"m249": ["bolt", "cover"], &"m240b": ["bolt", "cover"], &"mosin9130": ["bolt"], &"springfield_hs": ["bolt"]}
+	for id: StringName in want:
+		var model := VoxelArt.model_for(ItemDB.get_item(id))
+		var parts := VoxelArt.moving_parts(model)
+		parts.sort()
+		var count := func(prefix: String) -> int: return (VoxelArt._spec(prefix + model).boxes as Array).size()
+		var whole := (VoxelArt._spec(model).boxes as Array).size()
+		var adds: bool = count.call(VoxelArt.FIXED) + count.call(VoxelArt.MAG) + count.call(VoxelArt.BOLT) + count.call(VoxelArt.COVER) == whole
+		var pts := VoxelArt.reload_points(model)
+		check(parts == want[id] and adds and (not parts.has("cover") or pts.has("cover")) and pts.has("bolt"),
+			"%s: moving parts %s, the weapon adds up from them, a place for the hand on each" % [id, parts])
+	check(VoxelArt.moving_parts("pistol") == ["bolt"], "the pistol's slide moves on its own")
+	var belt := VoxelArt.model_for(ItemDB.get_item(&"pkm"))
+	var belted := (VoxelArt._spec(VoxelArt.MAG + belt).boxes as Array).any(func(b: Array) -> bool: return VoxelArt._tag(b) == VoxelArt.BELT_TAG)
+	var motion := VoxelArt.part_motion(belt)
+	check(belted and motion.has("hinge") and float(motion.open) > 1.0, "a belt-fed's belt comes off with its box, its cover hinges at the front")
+	check(float(VoxelArt.part_motion(VoxelArt.model_for(ItemDB.get_item(&"mosin9130"))).lift) > 1.0, "a bolt-action's handle turns up")
+	var ok := true
+	var ids_ok := true
+	for fam: StringName in [Reloads.AR, Reloads.AK, Reloads.BULLPUP, Reloads.BELT, Reloads.BOLT, Reloads.BOLT_MAG, Reloads.PISTOL]:
+		for empty: bool in [false, true]:
+			var tracks := Reloads.parts(fam, empty)
+			for part: String in tracks:
+				var last := -1.0
+				for point: Array in tracks[part]:
+					ok = ok and float(point[0]) > last and float(point[0]) <= 1.0
+					last = float(point[0])
+				ok = ok and is_zero_approx(Reloads.track(tracks[part], 1.0))  # home by the end
+			var last_beat := -1.0
+			for beat: Array in Reloads.beats(fam, empty):
+				ok = ok and float(beat[0]) >= last_beat and float(beat[0]) < 1.0
+				last_beat = float(beat[0])
+				ids_ok = ids_ok and Sfx.defs.has(String(beat[1]))
+			ok = ok and not Reloads.beats(fam, empty).is_empty()
+	check(ok, "every family's part tracks and sound beats run in order inside the reload, the parts home by the end")
+	check(ids_ok, "every beat's sound is defined (data/sounds.json)")
+	var ar := Reloads.parts(Reloads.AR, true)
+	var pk := Reloads.parts(Reloads.BELT, false)
+	check(is_equal_approx(Reloads.track(ar.bolt, 0.3), 1.0) and is_zero_approx(Reloads.track(ar.bolt, 0.8)) and Reloads.parts(Reloads.AR, false).is_empty(),
+		"an AR's empty reload: the carrier locked back until the catch is slapped; a tactical one leaves it home")
+	check(is_equal_approx(Reloads.track(pk.cover, 0.5), 1.0) and is_zero_approx(Reloads.track(pk.cover, 0.1)) and not pk.has("bolt"),
+		"a belt-fed's cover is up while the box is changed and down either side; a tactical one isn't charged")
+
+
+## The separate (face-connected) pieces of model `model`'s voxels: each one's voxel count and
+## bounding box, in the spec's voxels.
 func _pieces(model: String) -> Array:
 	var spec := VoxelArt._spec(model)
 	var s: int = spec.get("sub", 1)
@@ -284,6 +337,44 @@ func _test_fire_and_reload(id: String) -> void:
 	player._server_reload.rpc_id(1, &"primary")
 	await _seconds(player.reload_seconds(gun) + 0.5)
 	check(inv.rounds_in(&"primary") == cap, "reload from its own %s: %d loaded, spare %d -> %d" % [g[0], inv.rounds_in(&"primary"), spare, inv.spare_rounds(StringName(g[0]))])
+
+
+## Weapon detail pass (2026-10-20): a PKM's empty reload in first person, from the reload key:
+## the charging handle goes back and home, the feed cover lifts and comes down on their beats,
+## each beat is heard in turn, and the third-person model follows the same keys.
+func _test_reload_beats() -> void:
+	print("Reload beats: a PKM's empty reload")
+	var inv := player.inventory
+	var pi: PlayerInput = player.player_input
+	inv.slots[&"primary"] = &""
+	inv.take(&"pkm")
+	inv.take(&"belt_762x54r", 2)
+	player.active_slot = &"primary"
+	while inv.consume_round(&"primary"):
+		pass
+	player._busy_until = 0.0
+	player._server_busy_until = 0.0
+	await _frames(5)
+	var t := Sfx.heard_count()
+	pi._try_reload()
+	var length := player.reload_seconds(ItemDB.get_item(&"pkm"), true)
+	check(player.is_reloading and player.reload_item == &"pkm" and player.reload_empty and is_equal_approx(player.reload_len, length),
+		"the reload begins here at once: the PKM, empty, %.1f s" % length)
+	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0}
+	var start := Soldier._now()
+	while Soldier._now() - start < length + 0.4:
+		var parts := pi.view_parts()
+		seen.bolt = maxf(seen.bolt, float(parts.bolt))
+		seen.cover = maxf(seen.cover, float(parts.cover))
+		seen.u = maxf(seen.u, player.model.reload_u)
+		await get_tree().process_frame
+	var heard := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return String(id).begins_with("reload_"))
+	var want: Array = Reloads.beats(Reloads.BELT, true).map(func(b: Array) -> StringName: return b[1])
+	check(seen.bolt > 0.08 and seen.cover > 1.0, "first person: the charging handle went back %.2f m, the cover up %.2f rad" % [seen.bolt, seen.cover])
+	var after := pi.view_parts()
+	check(is_zero_approx(float(after.bolt)) and absf(float(after.cover)) < 0.01, "and both are home after (%s)" % after)
+	check(str(heard) == str(want), "each beat heard in turn (%s)" % [heard])
+	check(seen.u > 0.9 and player.model.reload_u < 0.0 and inv.rounds_in(&"primary") == 100, "third person followed it to the end; 100 loaded")
 
 
 ## Wave 6b (2026-10-18): each enemy faction fields its own kit (factions.json "kits"); Black
