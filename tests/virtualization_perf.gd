@@ -3,11 +3,13 @@ extends Node
 ## a big zone. Headless:
 ##   <voxel godot exe> --headless --path . res://tests/virtualization_perf.tscn
 ## Hosts the 4 km hot zone (ZONE), the player at its insertion point, and puts hostiles in teams of
-## TEAM all over it, each walking a route of its own (as the zone's patrols do), a NEAR_SHARE of
-## them within NEAR_M of the player. Then, after SETTLE_S, times FRAMES frames of each case:
-##   today      BASE_MEN hostiles, virtualization off (DynamicSim sleeps the far ones, as now);
-##   3x plain   3 x BASE_MEN, virtualization off (what the bigger force would cost without it);
-##   3x virtual 3 x BASE_MEN, virtualization on.
+## TEAM, each walking a route of its own (as the zone's patrols do): NEAR_TEAMS of them within NEAR_M
+## of the player (the fight's own, real in every case) and the rest spread over the zone at least
+## FAR_M from him. Then, after SETTLE_S, times FRAMES frames of each case:
+##   today          BASE_MEN hostiles, virtualization off (DynamicSim sleeps the far ones, as now);
+##   today virtual  BASE_MEN, virtualization on;
+##   3x plain       3 x BASE_MEN, virtualization off (what the bigger force would cost without it);
+##   3x virtual     3 x BASE_MEN, virtualization on.
 ## Prints, as "perf:" lines, each case's average and worst frame (wall clock), its process and
 ## physics time (Performance), and how many soldiers were in the world, asleep and virtual.
 ## Never touches a real save.
@@ -16,7 +18,8 @@ const ZONE := "ridge_hot"
 const BASE_MEN := 40
 const TEAM := 4
 const NEAR_M := 450.0
-const NEAR_SHARE := 0.15
+const NEAR_TEAMS := 3
+const FAR_M := 800.0
 const SETTLE_S := 6.0
 const FRAMES := 600
 
@@ -55,10 +58,11 @@ func _ready() -> void:
 	print("perf: zone %s, %.0f m across, %d modules" % [ZONE, level.terrain.size_m, level.modules().size()])
 	var results := []
 	results.append(await _case("today (%d, no virtualization)" % BASE_MEN, BASE_MEN, false))
+	results.append(await _case("today virtual (%d, virtualization on)" % BASE_MEN, BASE_MEN, true))
 	results.append(await _case("3x plain (%d, no virtualization)" % (BASE_MEN * 3), BASE_MEN * 3, false))
 	results.append(await _case("3x virtual (%d, virtualization on)" % (BASE_MEN * 3), BASE_MEN * 3, true))
 	for r: Dictionary in results:
-		print("perf: %-36s frame avg %.2f ms, worst %.1f ms | process %.2f ms, physics %.2f ms | in the world %d (asleep %d), virtual %d"
+		print("perf: %-38s frame avg %.2f ms, worst %.1f ms | process %.2f ms, physics %.2f ms | in the world %d (asleep %d), virtual %d"
 			% [r.name, r.avg, r.worst, r.process, r.physics, r.live, r.asleep, r.virtual])
 	Campaign.reset_campaign()
 	GameState.delete_save()
@@ -79,12 +83,15 @@ func _case(name: String, men: int, virtualize: bool) -> Dictionary:
 	var area := level.map_area().grow(-150.0)
 	var at := player.global_position
 	for t in men / TEAM:
-		var pos: Vector3
-		if _rng.randf() < NEAR_SHARE:
-			var a := _rng.randf() * TAU
-			pos = at + Vector3(cos(a), 0, sin(a)) * _rng.randf_range(150.0, NEAR_M)
-		else:
-			pos = Vector3(_rng.randf_range(area.position.x, area.end.x), 0, _rng.randf_range(area.position.y, area.end.y))
+		var pos := Vector3.INF
+		for k in 200:
+			if t < NEAR_TEAMS:
+				var a := _rng.randf() * TAU
+				pos = at + Vector3(cos(a), 0, sin(a)) * _rng.randf_range(150.0, NEAR_M)
+			else:
+				pos = Vector3(_rng.randf_range(area.position.x, area.end.x), 0, _rng.randf_range(area.position.y, area.end.y))
+			if area.has_point(Vector2(pos.x, pos.z)) and (t < NEAR_TEAMS or Vector2(pos.x - at.x, pos.z - at.z).length() >= FAR_M):
+				break
 		pos.x = clampf(pos.x, area.position.x, area.end.x)
 		pos.z = clampf(pos.z, area.position.y, area.end.y)
 		_team(level.ground_point(pos), virtualize)
