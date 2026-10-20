@@ -7,6 +7,9 @@ extends Node
 ## of its intel_value, at least one). Each goes on the squad's map as an enemy marker
 ## (MapMarkers.server_report_enemy, channel "intel") and everyone is told. Sites already taken
 ## out are skipped. Selling it later (Contracts.server_sell_intel) still pays.
+## A manhunt's intel (LZ-7, Captain 2026-10-20: "the intel case doesn't tell you where dude is"):
+## whatever piece its intel objective wants, intel or a hard case, says where the man went the
+## first time one of the squad has it (Contracts.server_intel_lead).
 ## Host only; ZoneLevel adds one.
 
 const TICK_S := 2.0
@@ -42,14 +45,28 @@ func _process(delta: float) -> void:
 			if not _seen.has(key):
 				_seen[key] = true
 				server_reveal_for(StringName(piece.id), s)
+		if Contracts.is_deployed():
+			for entry: Dictionary in _carried(s):
+				Contracts.server_intel_lead(entry)
 
 
 ## The intel items `s` carries: [{"id", "intel_id"}] (one entry per piece: its intel_id, else its slot).
-static func _intel_on(s: Soldier) -> Array:
+static func _intel_on(s: Variant) -> Array:
 	var out: Array = []
-	if s == null or not is_instance_valid(s):
+	for e: Dictionary in _carried(s):
+		var data := ItemDB.get_item(StringName(e.id))
+		if data == null or data.type != "intel":
+			continue
+		out.append({"id": String(e.id), "intel_id": String((e.state as Dictionary).get("intel_id", "%s#%d" % [e.id, int(e.i)]))})
+	return out
+
+
+## Everything `s` carries, slots, containers and hands: [{"id", "state", "i" (its place in its list)}].
+static func _carried(s: Variant) -> Array:
+	var out: Array = []
+	if not is_instance_valid(s) or not s is Soldier:
 		return out
-	var inv := s.inventory
+	var inv := (s as Soldier).inventory
 	var lists: Array = []
 	for slot in Inventory.SLOTS:
 		if inv.slots.get(slot, &"") != &"":
@@ -63,12 +80,10 @@ static func _intel_on(s: Soldier) -> Array:
 			var e: Variant = list[i]
 			if not e is Dictionary:
 				continue
-			var id := StringName(String((e as Dictionary).get("id", "")))
-			var data := ItemDB.get_item(id) if id != &"" else null
-			if data == null or data.type != "intel":
-				continue
-			var st: Dictionary = (e as Dictionary).get("state", {})
-			out.append({"id": String(id), "intel_id": String(st.get("intel_id", "%s#%d" % [id, i]))})
+			var id := String((e as Dictionary).get("id", ""))
+			var st: Variant = (e as Dictionary).get("state", {})
+			if id != "":
+				out.append({"id": id, "state": st if st is Dictionary else {}, "i": i})
 	return out
 
 

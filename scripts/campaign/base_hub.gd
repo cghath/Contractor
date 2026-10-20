@@ -142,6 +142,8 @@ func _ready() -> void:
 	Contracts.contract_closed.connect(_on_contract_closed)
 	Contracts.contract_closed.connect(ZoneControl.on_contract_closed)  # a seize-and-hold won moves home (docs/lhd_home.md)
 	Economy.day_advanced.connect(ZoneControl.on_day_advanced)  # the liaison's offer comes back
+	Contracts.contract_closed.connect(Story.on_contract_closed)  # a story contract done moves the story on (docs/story.md)
+	Economy.day_advanced.connect(Story.on_day_advanced)  # a failed story contract comes back; an act opens
 	view_changed.connect(ZoneControl.on_view_changed)  # clients: the region map follows home
 
 
@@ -188,6 +190,7 @@ func new_campaign(hiring_seed := -1) -> void:
 	Campaign.reset_campaign()  # its files are aside by now: this only empties it in memory
 	Contracts.new_full_campaign()
 	ZoneControl.server_start(lhd_home_on_new())  # home: aboard the LHD (docs/lhd_home.md)
+	Story.server_start()  # act 1's first story contract on the board (docs/story.md)
 	var b := base()
 	b["started"] = true
 	b["stash"] = []
@@ -234,6 +237,7 @@ func load_or_new() -> void:
 		base()["started"] = true
 	Contracts.ensure_campaign()
 	ZoneControl.server_loaded()  # a save from before zone control keeps its FOB
+	Story.server_loaded()  # a save from before the story starts it now
 	_hook_economy(true)
 	var dep := RosterDeployment.active(roster())
 	if not dep.is_empty() and not resume_info().is_empty():
@@ -1141,7 +1145,7 @@ func _open_briefing(lvl: CompoundLevel) -> void:
 static func briefing_contract(cid: String) -> Dictionary:
 	var c := Contracts.contract(cid)
 	var objectives: Array = []
-	for o: Dictionary in Objectives.from_contract(c, Contracts.module_origin(c)):
+	for o: Dictionary in Objectives.placed(Objectives.from_contract(c, Contracts.module_origin(c))):  # (a leg next door has no place on this map: LZ-7)
 		var p: Array = o.get("pos", [])
 		objectives.append({"id": String(o.oid), "title": String(o.text), "text": String(o.text),
 			"pos": [float(p[0]), float(p[2])] if p.size() == 3 else [0.0, 0.0], "radius": 6.0})

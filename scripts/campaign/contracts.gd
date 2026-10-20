@@ -149,7 +149,7 @@ func briefing(cid: String) -> Dictionary:
 		return {}
 	var out := ContractGen.public_view(c)
 	out["estimate"] = ContractGen.estimate_text(c)
-	out["objective_markers"] = Objectives.from_contract(c, module_origin(c)).map(func(o: Dictionary) -> Dictionary:
+	out["objective_markers"] = Objectives.placed(Objectives.from_contract(c, module_origin(c))).map(func(o: Dictionary) -> Dictionary:
 		return {"text": o.text, "kind": o.kind, "pos": o.pos, "optional": o.optional})
 	return out
 
@@ -209,6 +209,78 @@ func server_arrived(zone_id: String) -> void:
 				# (a chase stopped before it got away: its leg is done, nothing to start)
 				contract_live.emit(cid, placed.filter(func(o: Dictionary) -> bool: return String(objectives.get_objective(String(o.oid)).get("state", "")) == Objectives.ACTIVE))
 				SessionLog.note("contract %s: its leg in %s is live" % [cid, zone_id])
+
+
+## What a manhunt's intel says on the radio (LZ-7): the piece, the man, his site, his zone, the grid there.
+const LINE_LEAD := "Radio, ops: The %s says where %s went: the %s in %s, grid %s. Walk on through the crossing and take him alive."
+
+
+## Host (IntelReveal, LZ-7): `entry` ({"id", "state"}) is on one of the squad. When it's the piece
+## a contract's intel objective wants and the contract's type has "intel_leads" (a manhunt: the
+## intel says where the man went), the first time: his zone, site and grid on the radio, and in his
+## leg's objective (Captain, 2026-10-20: "the intel case doesn't tell you where dude is"). Returns
+## whether it told.
+func server_intel_lead(entry: Dictionary) -> bool:
+	if not _is_host() or (_s().deployment as Dictionary).is_empty():
+		return false
+	var dep: Dictionary = _s().deployment
+	if not dep.has("leads_told"):
+		dep["leads_told"] = []
+	for o: Dictionary in objectives.list:
+		if String(o.kind) != Objectives.EXTRACT_ITEM or o.has("leg") or String(o.cid) in dep.leads_told or not _is_lead_piece(o.params, entry):
+			continue
+		var c := contract(String(o.cid))
+		if not bool(MissionRegistry.type_def(String(c.get("type", ""))).get("intel_leads", false)) or (c.get("legs", []) as Array).is_empty():
+			continue
+		(dep.leads_told as Array).append(String(o.cid))
+		var piece := String(o.params.get("name", "intel"))
+		for k in (c.legs as Array).size():
+			_tell_lead(c, k, piece)
+		_save()
+		return true
+	return false
+
+
+## Whether carried `entry` is the very piece an intel objective's `params` want: the one the
+## mission placed (its "intel_ids"), else one of its "items" (not any intel its "tags" would
+## take at extraction: a phone picked up on the way isn't the case that says where he went).
+static func _is_lead_piece(params: Dictionary, entry: Dictionary) -> bool:
+	if not (params.get("intel_ids", []) as Array).is_empty():
+		return Objectives.entry_matches(params, entry)
+	return String(entry.get("id", "")) in (params.get("items", []) as Array)
+
+
+## Host: leg `k` of `c` told by intel `piece`: on the radio, and its objectives name the site and grid.
+func _tell_lead(c: Dictionary, k: int, piece: String) -> void:
+	var leg: Dictionary = c.legs[k]
+	var lead := leg_lead(leg)
+	var who := "the HVT"
+	for t: Dictionary in leg.get("objectives", []):
+		if t.has("person"):
+			who = String(t.person.get("name", who))
+	var told: Array = []
+	for o: Dictionary in objectives.list:
+		if String(o.cid) == String(c.cid) and int(o.get("leg", -1)) == k and (o.params as Dictionary).get("pending", false):
+			var n: Dictionary = o.duplicate(true)
+			n.text = "%s (in %s, at the %s, grid %s)" % [String(n.text).trim_suffix(" (in %s)" % String(leg.zone_name)), String(leg.zone_name), lead.site, lead.grid]
+			n.params["lead"] = lead
+			told.append(n)
+	objectives.server_replace(told)
+	SessionLog.note("contract %s: the %s says the man went to the %s in %s (%s)" % [String(c.cid), piece, lead.site, leg.zone_name, lead.grid])
+	_notify_all(LINE_LEAD % [piece, who, lead.site, String(leg.zone_name), lead.grid])
+
+
+## Where a multi-zone contract's leg plays, from its zone's layout: {"site" (its module's name),
+## "grid" (its grid reference on that zone's map), "pos": [x, z]}.
+static func leg_lead(leg: Dictionary) -> Dictionary:
+	var zdef := MissionRegistry.zone_def(String(leg.get("zone_id", "")))
+	var size := float(zdef.get("size_m", 2048.0))
+	var at := Vector2.ZERO
+	for m: Dictionary in zdef.get("modules", []):
+		if String(m.get("id", "")) == String(leg.get("module_id", "")) and (m.get("pos", []) as Array).size() >= 2:
+			at = Vector2(float(m.pos[0]), float(m.pos[1]))
+	return {"site": MissionRegistry.module_name(String(leg.get("module", ""))), "grid": MapGrid.grid_ref(at, Rect2(-size * 0.5, -size * 0.5, size, size), 3),
+		"pos": [at.x, at.y]}
 
 
 func module_origin(c: Dictionary, fallback := Vector3.ZERO) -> Vector3:
@@ -907,6 +979,7 @@ func server_turn_in_intel(index: int) -> String:
 		(entry.leads as Array).append(server_open_lead(client if client != "" else Economy.best_lender()))
 	Economy.change_reputation(client, MissionRegistry.setting_i("intel_lead_rep", 2), "intel turned in")
 	_notify_all("Intel turned in: %d new lead%s on the board" % [int(entry.count), "" if int(entry.count) == 1 else "s"])
+	Story.on_intel_turned_in(String(entry.id), int(entry.count))  # it counts towards the story's evidence (docs/story.md)
 	_commit()
 	return ""
 
@@ -1304,6 +1377,7 @@ func _public() -> Dictionary:
 		"held": (s.held as Array).map(func(c: Dictionary) -> Dictionary: return ContractGen.public_view(c)),
 		"deployment": public_deployment, "debrief": (s.debrief as Dictionary).duplicate(true),
 		"history": (s.history as Array).duplicate(true),
+		"story": Story.view(),  # (docs/story.md: the Leads, on every peer)
 	}
 
 

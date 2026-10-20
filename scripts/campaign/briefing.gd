@@ -201,13 +201,13 @@ func all_ready() -> bool:
 
 
 ## Objective interface for the map (MapView.OBJECTIVE_GROUP): the contract's objectives that
-## have a position, while a briefing or deployment is on, unless another part (the economy's
-## objective tracker) provides live ones.
+## have a position, while a briefing or deployment is on, unless the contracts' objective
+## tracker (Objectives.map_objectives) has the deployment's live ones.
 func map_objectives() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if phase == Phase.IDLE:
 		return out
-	if phase == Phase.DEPLOYED and get_tree().get_nodes_in_group(MapView.OBJECTIVE_GROUP).size() > 1:
+	if phase == Phase.DEPLOYED and Contracts.is_deployed() and not Contracts.objectives.list.is_empty():
 		return out
 	for o: Dictionary in contract.get("objectives", []):
 		var p: Variant = o.get("pos")

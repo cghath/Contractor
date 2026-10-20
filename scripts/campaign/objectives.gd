@@ -113,6 +113,11 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 			if site.has("of_hvt"):
 				var of_id := hvt_id(String(MissionRegistry.site(module_type, String(site.of_hvt)).get("hvt", "")), uid)
 				site["intel_ids"] = (site.get("items", []) as Array).map(func(item: Variant) -> String: return "%s:%s" % [of_id, String(item)])
+			if t.has("place"):  # the template's own piece there (a story contract's: Story)
+				site["place"] = String(t.place)
+				site.erase("tags")
+				if t.has("name"):
+					site["name"] = String(t.name)
 			if site.has("place"):
 				site["items"] = [String(site.place)]
 				site["intel_ids"] = ["intel_%s_o%d" % [uid, i + 1]]
@@ -206,6 +211,7 @@ static func site_pos(site: Dictionary) -> Array:
 
 
 func _ready() -> void:
+	add_to_group(MapView.OBJECTIVE_GROUP)  # the deployment's live objectives on the map (map_objectives)
 	Net.peer_joined.connect(_on_peer_joined)
 
 
@@ -242,6 +248,32 @@ func markers() -> Array:
 			continue  # (a leg in another zone, LZ-7: no place on this map)
 		out.append({"oid": o.oid, "pos": Vector3(float(p[0]), float(p[1]), float(p[2])), "text": o.text, "state": o.state,
 			"kind": o.kind, "optional": o.optional})
+	return out
+
+
+## Objective interface for the map (MapView.OBJECTIVE_GROUP): while a deployment is on, its
+## objectives that play in the level the session is in now and have a place there (map_list).
+## Captain, 2026-10-20 (a manhunt): "both markers show on the first map but not the second map";
+## the map showed the briefing's list, the leg next door at the zone's centre and nothing after
+## the crossing. The Briefing shows its own until the deployment starts.
+func map_objectives() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if list.is_empty() or not Contracts.is_deployed() or not is_inside_tree():
+		return out
+	out.assign(map_list(list, get_tree().get_first_node_in_group(&"level")))
+	return out
+
+
+## `objectives` as the map shows them in `level` (Briefing's shape: "id", "title", "pos" as a
+## Vector2, "radius", "state" "open" / "done" / "failed"): those that play there (here) with a place.
+static func map_list(objectives: Array, level: Node) -> Array:
+	var out: Array = []
+	for o: Dictionary in objectives:
+		var p: Array = o.get("pos", [])
+		if p.size() < 3 or not here(o, level):
+			continue
+		out.append({"id": String(o.oid), "title": String(o.text), "pos": Vector2(float(p[0]), float(p[2])), "radius": 6.0,
+			"state": {ACTIVE: "open"}.get(String(o.state), String(o.state)), "optional": bool(o.get("optional", false))})
 	return out
 
 

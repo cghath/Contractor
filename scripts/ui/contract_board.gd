@@ -20,6 +20,7 @@ var _held: ItemList
 var _details: Label
 ## Who holds each hot zone and how firmly (wave 6c).
 var _zones: Label
+var _leads: Label  # the story: act, evidence, clues (docs/story.md)
 ## The details' scroll area (P0-5: a long briefing ran the panel off a small window).
 var _details_scroll: ScrollContainer
 ## Offers / held and details side by side on a wide window, one above the other on a narrow one.
@@ -116,6 +117,9 @@ func _ready() -> void:
 	_left.add_child(UiKit.heading("Hot zones: who holds them"))  # wave 6c: WorldSites, the faction war between deployments
 	_zones = UiKit.text("")
 	_left.add_child(_zones)
+	_left.add_child(UiKit.heading("Leads"))  # the story (docs/story.md): what the intel has said so far
+	_leads = UiKit.text("")
+	_left.add_child(_leads)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -245,6 +249,7 @@ func refresh() -> void:
 		_held.add_item("%s  [%s]" % [offer_line(c), String(c.state).to_upper()])
 		_held.set_item_tooltip(_held.item_count - 1, "[%s] %s" % [String(c.state).to_upper(), _tooltip(c)])
 	_zones.text = zones_text()
+	_leads.text = Story.leads_text()
 	if _selected != "" and Contracts.contract(_selected).is_empty():
 		_selected = ""
 	_show_details()
@@ -361,6 +366,10 @@ func zones_text() -> String:
 		lines.append(WorldSites.row_text(r))
 	return "
 ".join(lines) if not lines.is_empty() else "No hot zones known yet"
+
+
+func leads_text() -> String:
+	return _leads.text
 
 
 func header_text() -> String:
