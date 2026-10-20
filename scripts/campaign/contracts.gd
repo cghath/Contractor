@@ -477,9 +477,9 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 		return why
 	var deal := ContractGen.deal(c, terms)
 	if String(c.get("in_zone", "")) != "":
-		# A hot zone's arrival and radio contracts are taken on the spot: nothing up front, all of it
-		# on completion (economy overhaul 2026-10-20: walking into a hot zone and straight out kept
-		# about $80,000 of arrival advances, and radioing for contract after contract kept 30% each).
+		# A hot zone's radio contracts are taken on the spot: nothing up front, all of it on completion
+		# (economy overhaul 2026-10-20: radioing for contract after contract kept 30% of each, and the
+		# arrival contracts a hot zone used to hand out kept about $80,000 for walking in and out).
 		deal.completion = int(deal.completion) + int(deal.advance)
 		deal.advance = 0
 		deal.advance_share = 0.0
@@ -577,8 +577,9 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	var first: Dictionary = ready[0]
 	if first.zone_kind != "hot":
 		ready = [first]
-	else:
-		ready.append_array(_hot_zone_extras(ready, zone_id))  # several contracts live at once
+	# A hot zone goes in on the contracts taken for it (Captain, 2026-10-20: "entering hotzones with
+	# one or two objs"); more come in there over the radio (HotZoneOps' follow-ups, "Radio for a
+	# contract"). It used to top them up to 3-6 on arrival.
 	var list: Array = []
 	var live := {}
 	for c: Dictionary in ready:
@@ -598,39 +599,6 @@ func server_start_deployment(cids: Array = [], zone_id := "", origin := Vector3.
 	for cid: String in live:
 		contract_live.emit(cid, Objectives.placed(live[cid]))
 	return ""
-
-
-## A hot zone has several of its faction's contracts live at once (Captain: 3-6, taken in any
-## order). When the squad took fewer than HotZoneOps' minimum from the board, the faction hands
-## it more on arrival (standard terms, all paid on completion: server_accept), each at a site no
-## other contract holds. Returns the new contracts (held, ACCEPTED).
-func _hot_zone_extras(ready: Array, zone_id: String) -> Array:
-	var want := HotZoneOps.live_target(int(_s().seed), Economy.day(), zone_id, ready.size())
-	var out: Array = []
-	var employer := String(MissionRegistry.zone(zone_id).get("faction", ""))
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash([int(_s().seed), Economy.day(), zone_id, "in_zone"])
-	var taken: Array = ready.map(func(c: Dictionary) -> String: return String(c.get("module_id", "")))
-	# The zone's first QRF base stays free of arrival contracts (soft: only while another site is
-	# left): its fall is what the radio follow-up "you hit their QRF, now hit the HQ" reacts to.
-	var reserve := ""
-	for m: Dictionary in MissionRegistry.zone_def(zone_id).get("modules", []):
-		if ZoneModules.base(String(m.type)) == "qrf_base" and String(m.id) not in taken:
-			reserve = String(m.id)
-			break
-	var avoid: Array = taken.duplicate()
-	if reserve != "":
-		avoid.append(reserve)
-	while ready.size() + out.size() < want:
-		var c := _add_offer(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_id": zone_id,
-			"employer": employer, "avoid_modules": avoid}))
-		c["in_zone"] = "arrival"
-		if server_accept(c.cid, ContractGen.default_terms(), 1, true) != "":
-			(_s().board as Array).erase(c)
-			break
-		avoid.append(String(c.module_id))
-		out.append(c)
-	return out
 
 
 ## Host: notes `key` on the deployment under way (HotZoneOps: "hazard_tier", the highest
@@ -690,7 +658,16 @@ func radio_contract_problem() -> String:
 func server_radio_contract(type_id := "", module_id := "", why := "") -> String:
 	if radio_contract_problem() != "":
 		return ""
+	return server_contract_on_spot(type_id, module_id, why)
+
+
+## Host: a hot zone's faction hands the deployed squad a new contract it takes on the spot (the
+## radio's, once radio_contract_problem() allows it; the economy sim calls it as the follow-ups
+## would). Returns its id, or "" when there's no hot deployment or it couldn't be signed.
+func server_contract_on_spot(type_id := "", module_id := "", why := "") -> String:
 	var dep: Dictionary = _s().deployment
+	if dep.is_empty() or dep.zone_kind != "hot":
+		return ""
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([int(_s().seed), Economy.day(), int(_s().next_id), "radio"])
 	var employer := String(MissionRegistry.zone(dep.zone_id).get("faction", ""))

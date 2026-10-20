@@ -1258,7 +1258,7 @@ func _test_faction_skirmish() -> void:
 ## the squad did, the alert easing and the checkpoints with it, pressure rising with time, and
 ## extraction lapsing what's left (hazard pay on what's done).
 func _test_hot_zone_ops() -> void:
-	print("Hot zone: several contracts, radio follow-ups, alert, staying")
+	print("Hot zone: in on one contract, radio follow-ups, alert, staying")
 	var ops := HotZoneOps.of(level)
 	var alert := Alert.of(level)
 	var pressure := Pressure.of(level)
@@ -1279,9 +1279,8 @@ func _test_hot_zone_ops() -> void:
 	for c: String in cids:
 		sites[String(Contracts.contract(c).module_id)] = true
 	var faction := String(MissionRegistry.zone(ZONE).faction)
-	check(cids.size() >= HotZoneOps.LIVE_RANGE.x and cids.size() <= HotZoneOps.LIVE_RANGE.y and cid in cids and sites.size() == cids.size()
-		and cids.all(func(c: String) -> bool: return Contracts.contract(c).employer == faction),
-		"the zone's faction has %d contracts live at once, each at a site of its own (%s)" % [cids.size(), sites.keys()])
+	check(cids == [cid] and Contracts.contract(cid).employer == faction,
+		"the squad goes in on the one contract it took, no top-up on arrival (more come in over the radio)")
 	var had := player.inventory.count_of(&"radio")
 	if had == 0:
 		player.inventory.take(&"radio")

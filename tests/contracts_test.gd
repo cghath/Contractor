@@ -446,8 +446,8 @@ func _test_overhaul_numbers() -> void:
 	print("Economy overhaul numbers")
 	var pay: Array = MissionRegistry.data().settings.difficulty_pay
 	var want := [0.0, 0.35, 0.5, 0.6, 0.75, 0.95]
-	check(pay.size() == want.size() and range(want.size()).all(func(i: int) -> bool: return is_equal_approx(float(pay[i]), want[i])) and is_equal_approx(MissionRegistry.setting_f("hot_zone_pay_mult"), 1.0)
-		and is_equal_approx(MissionRegistry.setting_f("clean_bonus_share"), 0.05), "pay a third lower, hot zones by volume (x1.0), the clean bonus 5%")
+	check(pay.size() == want.size() and range(want.size()).all(func(i: int) -> bool: return is_equal_approx(float(pay[i]), want[i])) and is_equal_approx(MissionRegistry.setting_f("hot_zone_pay_mult"), 1.4)
+		and is_equal_approx(MissionRegistry.setting_f("clean_bonus_share"), 0.05), "pay a third lower, hot zones still x1.4 (no arrival contracts now), the clean bonus 5%")
 	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 10000
 		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_max() == 8000,
 		"a lost helicopter's deductible $15,000, death benefit $10,000, respawns +25% each up to $8,000")
@@ -459,19 +459,21 @@ func _test_overhaul_numbers() -> void:
 			off.append(String(id))
 	check(Prices.intel_sale_value(&"intel_usb_drive") == 600 and Prices.intel_sale_value(&"intel_laptop", 2) == 6000 and Prices.intel_sale_value(&"vantage_ledger") == 4000
 		and off.is_empty(), "intel sells for its intel_value ($600 USB drive, $3,000 laptop, $4,000 Vantage ledger); prices match it%s" % ("" if off.is_empty() else " except %s" % ", ".join(off)))
-	# A hot zone's arrival contracts pay nothing up front.
+	# A hot zone goes in on the contracts taken for it (Captain, 2026-10-20: no top-up to 3-6 on arrival);
+	# one that comes in on the spot (the radio's) pays nothing up front.
 	Contracts.new_full_campaign(64, 200000)
 	var hot := _make_offer("raid", "ridge_hot")
 	Contracts.server_accept(hot, ContractGen.default_terms())
 	var signed := int(Contracts.contract(hot).deal.advance)
+	check(Contracts.server_start_deployment([hot]) == "" and Contracts.deployment().cids == [hot], "a hot zone deployed on one contract has that one live, no more")
 	var cash := Economy.cash()
-	check(Contracts.server_start_deployment([hot]) == "", "(deployed to a hot zone)")
-	var arrivals: Array = (Contracts.held() as Array).filter(func(c: Dictionary) -> bool: return String(c.get("in_zone", "")) == "arrival")
-	check(not arrivals.is_empty() and arrivals.all(func(c: Dictionary) -> bool: return int(c.deal.advance) == 0 and int(c.deal.completion) == int(c.deal.pay_total))
-		and Economy.cash() == cash, "%d arrival contracts: nothing up front, all of it on completion ($%d cash before and after)" % [arrivals.size(), cash])
+	var spot := Contracts.server_contract_on_spot()
+	var on_spot := Contracts.contract(spot)
+	check(spot != "" and spot in Contracts.deployment().cids and int(on_spot.deal.advance) == 0 and int(on_spot.deal.completion) == int(on_spot.deal.pay_total)
+		and Economy.cash() == cash, "a contract taken there on the spot joins it: nothing up front, $%s on completion" % DebriefCalc.money(on_spot.get("deal", {}).get("completion", 0)))
 	var d := Contracts.server_end_deployment({"extracted": ["You"]})
 	check(signed > 0 and int(d.totals.advance) == signed and int(d.totals.paid_now) <= 0,
-		"walking in and straight out keeps only the contract signed on the board's advance")
+		"walking in and straight out keeps only the board contract's advance")
 	Contracts.server_finish_debrief()
 	# The books (base screen) sort the ledger by kind.
 	check(Economy.ledger_kind("Completion: Raid") == "Contract pay" and Economy.ledger_kind("Day 4: wages 900, upkeep 3000") == "Wages and upkeep"
@@ -793,10 +795,6 @@ func _test_debrief_totals() -> void:
 		"a hot-zone contract done at pressure tier 2: hazard pay of %d%% on top ($%d)" % [roundi(HotZoneOps.HAZARD_SHARE_PER_TIER * 200), int(hazard[0].amount) if not hazard.is_empty() else 0])
 	var plain := DebriefCalc.compute([c], objs, 0, report.merged({"hazard_tier": 2}, true))
 	check(plain.contracts[0].pay == line.pay, "no hazard pay outside a hot zone")
-	var targets := [1, 2, 3, 4].map(func(held: int) -> int: return HotZoneOps.live_target(7, 3, "ridge_hot", held))
-	check(targets[0] >= HotZoneOps.LIVE_RANGE.x and targets[0] <= HotZoneOps.LIVE_RANGE.y and targets[0] == targets[1] and targets[2] == 3 and targets[3] == 4
-		and HotZoneOps.live_target(7, 3, "ridge_hot", 1) == targets[0],
-		"a hot zone keeps 3-6 contracts live: fewer taken are topped up (to %d, the same every time), 3 or more stay as taken" % targets[0])
 	var voided := DebriefCalc.compute([c.merged({"state": "voided"}, true)], objs, 8, report)
 	check(voided.contracts[0].outcome == "voided" and voided.totals.completion == 0 and voided.totals.bonuses == 0 and voided.fines == 20000
 		and voided.contracts[0].clawback == 30000 and voided.totals.paid_now == -50000 and voided.totals.contract_value == -20000,

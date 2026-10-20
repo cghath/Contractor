@@ -1,7 +1,9 @@
 # Economy balance proposal (2026-10-20)
 
-**Status: Built on claude/economy (2026-10-20), all nine numbers and both loopholes; the
-calls it made are listed in "Built" at the end for the Captain to confirm.** The reasons are in
+**Status: Built on claude/economy (2026-10-20): eight of the nine numbers and both loopholes.
+Item 2 (`hot_zone_pay_mult` 1.0) was undone the same day, when the Captain dropped the hot zone's
+arrival contracts (see "Hot zones start small" at the end). The calls made in building it are
+listed in "Built" for the Captain to confirm.** The reasons are in
 [economy.md](economy.md). The rest of this document is the proposal as written; its "now"
 numbers predate the loot rotation (see "Built" for the rerun).
 
@@ -329,3 +331,38 @@ so ("Net (before loot)", plus where the money came from and "Sold here").
    are on the ledger and the new Books tab, not in the next debrief.
 6. **Not done:** the hot zone's extra campaign day per extra contract (the proposal's option for
    playtests), and the support budget stays at $23,000 a point.
+
+## Hot zones start small (Captain, same day)
+
+> "not all contracts should be active upon entering a hot zone anymore as we have the village
+> systems" / "with radios and villages entering hotzones with one or two objs will be good"
+
+Built: a hot zone goes in on the contracts taken for it. The top-up to 3-6 on arrival
+(`Contracts._hot_zone_extras`, `HotZoneOps.live_target`, `LIVE_RANGE`) is gone. More contracts
+come in over the radio: HotZoneOps' follow-ups as sites fall and contracts are done (at most 4
+a deployment), and "Radio for a contract". Both pay nothing up front. Proposed item 3 (arrival
+contracts paid on completion) has nothing left to apply to.
+
+The sim now models the radio follow-ups (`Contracts.server_contract_on_spot`; a new profile
+assumption "radio": median 0.6, sloppy 0.5 per contract done) in place of the arrival
+contracts. That changed the hot zone a lot. Proposed item 2 assumed a hot deployment brings 3-6
+contracts; without them, x1.0 left too little:
+
+| Median squad (sloppy) | Hot zone x1.0, arrivals (as built first) | x1.0, no arrivals | **x1.4, no arrivals (built)** |
+|---|---|---|---|
+| Hot deployment, net mean | $94.6k ($31.1k) | $10.5k (-$27.5k) | **$39.7k (-$15.7k)** |
+| Cash at day 35 | $609k ($113k) | $230k (-$32k) | **$364k (-$18k)** |
+| Economic net per deployment, mean (share negative) | $37.4k, 19% (-$5.0k, 62%) | $7.2k, 37% (-$21.4k, 76%) | **$18.2k, 32% (-$19.5k, 73%)** |
+| Out of credit by day 35 | 0 (7) of 40 | 0 (18) of 40 | **0 (14) of 40** |
+
+So `hot_zone_pay_mult` stays at 1.4. A median squad now grows about $46k a week, a careful one
+(contract zones only, unchanged) about $52k. Before the overhaul they grew $281k and $123k. A
+sloppy squad sinks rather than treading water. The radio follow-ups taken averaged 0.8 per
+median hot deployment. The villagers' jobs aren't in the sim: asking villagers puts a locals'
+job on the base board for a later deployment, not into the live one.
+
+Calls for the Captain:
+
+7. **Hot zone pay x1.4 kept** (not the proposed x1.0), because the arrival contracts are gone.
+8. **Sloppy squads now go broke** in about a third of the sim's campaigns (14 of 40). If that's
+   too harsh, the lever is the shock costs or the emergency loans, not pay.
