@@ -4,9 +4,9 @@ extends Node
 ## remember multiple missions per and our design"; design doc "Missions: contract zones and hot
 ## zones"). What it adds on top of Alert, Pressure, EnemyResponse and RadioChatter:
 ##
-## - Several contracts live at once: a hot zone keeps LIVE_RANGE (3-6) of its faction's
-##   contracts live. Contracts.server_start_deployment tops the squad's own up on arrival
-##   (live_target), each at a site no other holds; they're taken in any order.
+## - The squad goes in on the contracts it took for the zone (one or two; Captain, 2026-10-20:
+##   it used to be topped up to 3-6 on arrival); more come in over the radio as it works, below,
+##   or when it radios for one (Contracts.server_radio_contract). Taken in any order.
 ## - Radio follow-ups: what the squad does draws new contracts over the radio, reacting to it
 ##   ("you hit their QRF, now hit the HQ"). A site taken out (ZoneLevel.site_down; the comms
 ##   site once its mast is down, Alert.comms_down) or a contract done queues a follow-up
@@ -30,7 +30,6 @@ extends Node
 ## Host: a follow-up contract came in over the radio: {"cid", "trigger", "from", "site", "time"}.
 signal follow_up(entry: Dictionary)
 
-const LIVE_RANGE := Vector2i(3, 6)
 const FOLLOW_UP_DELAY_S := 90.0
 const FOLLOW_UP_GAP_S := 120.0
 const MAX_FOLLOW_UPS := 4
@@ -105,20 +104,6 @@ func now() -> float:
 
 static func _knob(key: String, fallback: Variant) -> Variant:
 	return MissionRegistry.setting(key.to_lower(), fallback)
-
-
-## How many contracts a hot zone keeps live once the squad arrives with `held` of its own: as
-## many as it took when that's LIVE_RANGE.x or more, else a roll in LIVE_RANGE (the same for
-## the same campaign, day and zone).
-static func live_target(campaign_seed: int, day: int, zone_id: String, held: int) -> int:
-	var r: Variant = _knob("hot_zone_live", [LIVE_RANGE.x, LIVE_RANGE.y])
-	var lo := int(r[0]) if r is Array else LIVE_RANGE.x
-	var hi := int(r[1]) if r is Array else LIVE_RANGE.y
-	if held >= lo or not enabled:
-		return held
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash([campaign_seed, day, zone_id, "live"])
-	return rng.randi_range(lo, hi)
 
 
 ## The share of a completed contract's pay added as hazard pay at pressure tier `tier`.

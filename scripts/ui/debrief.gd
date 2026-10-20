@@ -181,7 +181,12 @@ func _header(d: Dictionary) -> void:
 	stats.add_child(UiKit.stat("Days", str(int(d.get("days", 0)))))
 	if d.has("expenses_total"):
 		stats.add_child(UiKit.stat("Expenses", "-$" + DebriefCalc.money(d.expenses_total)))
-		stats.add_child(UiKit.stat("Net after expenses", "$" + DebriefCalc.money(d.get("net", 0))))
+		## Economy overhaul 2026-10-20: the contract's own result; loot and salvage sell later.
+		stats.add_child(UiKit.stat("Net (before loot)", "$" + DebriefCalc.money(d.get("net", 0))))
+	var sold_here: int = DebriefCalc.money_in(d).filter(func(l: Dictionary) -> bool: return String(l.what).ends_with(" sold")) \
+		.reduce(func(acc: int, l: Dictionary) -> int: return acc + int(l.amount), 0)
+	if sold_here > 0:
+		stats.add_child(UiKit.stat("Sold here", "$" + DebriefCalc.money(sold_here)))
 	_line("Got out: %s" % ", ".join(PackedStringArray(d.get("extracted", []))) if not (d.get("extracted", []) as Array).is_empty() else "Got out: (not reported)")
 	## One entry each, the dead in the warning colour (one comma-separated run-on line before,
 	## docs/ui_audit.md P1-16).
@@ -198,11 +203,24 @@ func _header(d: Dictionary) -> void:
 			var label := UiKit.cell(who, &"WarnLabel" if String(c.get("status", "")) == "kia" else &"")
 			UiKit.fit_label_text(label, CASUALTY_CAP)
 			list.add_child(label)
+	var income := DebriefCalc.money_in(d)
+	var income_total: int = income.reduce(func(acc: int, l: Dictionary) -> int: return acc + int(l.amount), 0)
+	if _section("income", "WHERE THE MONEY CAME FROM: $%s" % DebriefCalc.money(income_total)):
+		for l: Dictionary in income:
+			_line("%s: %s$%s" % [l.what, "-" if int(l.amount) < 0 else "", DebriefCalc.money(absi(int(l.amount)))], UiKit.SPACE_L)
+		if income.is_empty():
+			_line("Nothing was paid on this deployment.", UiKit.SPACE_L)
+		_box.add_child(_indent(UiKit.hint("Loot and salvage brought home sell at the base shop (contraband to a fixer)."), UiKit.SPACE_L))
 	if d.has("expenses_total") and _section("expenses", "WHERE THE MONEY WENT: -$%s" % DebriefCalc.money(d.expenses_total)):
 		for l: Dictionary in d.get("expenses", []):
 			_line("%s: -$%s" % [l.what, DebriefCalc.money(l.amount)], UiKit.SPACE_L)
-		var bill := Economy.weekly_bill()
-		_line("Next weekly bill: $%s in %d days (wages $%s, upkeep $%s)" % [DebriefCalc.money(bill.total), Economy.days_to_bill(), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep)], UiKit.SPACE_L)
+		var daily := Economy.weekly_bill()
+		var week_days := maxi(MissionRegistry.setting_i("week_days", 7), 1)
+		var text := "Running costs now: $%s a day (wages $%s, upkeep $%s)" % [DebriefCalc.money(roundi(float(daily.total - daily.loans) / week_days)),
+			DebriefCalc.money(roundi(float(daily.wages) / week_days)), DebriefCalc.money(roundi(float(daily.upkeep) / week_days))]
+		if int(daily.loans) > 0:
+			text += "; loan installments $%s in %d day%s" % [DebriefCalc.money(daily.loans), Economy.days_to_bill(), "" if Economy.days_to_bill() == 1 else "s"]
+		_line(text, UiKit.SPACE_L)
 	if _section("details", "Contract details, pay and reputation"):
 		for l: String in DebriefCalc.summary(d):
 			var depth := 2 if l.begins_with("    ") else (1 if l.begins_with("  ") else 0)
@@ -407,15 +425,18 @@ func _tagged(d: Dictionary) -> void:
 
 func _intel(d: Dictionary) -> void:
 	var intel: Array = d.get("intel", [])
-	if intel.is_empty():
+	if intel.is_empty() and int(d.get("intel_repeats", 0)) == 0:
 		return
 	_heading("INTEL brought out")
+	if int(d.get("intel_repeats", 0)) > 0:
+		_line("%d piece%s already handed over in an earlier debrief: worth nothing now" % [int(d.intel_repeats), "" if int(d.intel_repeats) == 1 else "s"])
 	var client := String((d.contracts as Array)[0].employer) if not (d.get("contracts", []) as Array).is_empty() else ""
 	for i in intel.size():
 		var e: Dictionary = intel[i]
 		var status := String(e.get("status", "pending"))
 		var text := "%d x %s: %s" % [int(e.count), _name(e.id), {"pending": "undecided", "turned_in": "turned in (new leads on the board)",
-			"sold": "sold to %s%s" % [MissionRegistry.faction_name(String(e.get("buyer", ""))), " (the client found out)" if e.get("caught", false) else ""]}.get(status, status)]
+			"sold": "sold to %s for $%s%s" % [MissionRegistry.faction_name(String(e.get("buyer", ""))), DebriefCalc.money(e.get("price", 0)),
+				" (the client found out)" if e.get("caught", false) else ""]}.get(status, status)]
 		if status != "pending" or d.get("finished", false):
 			_line(text)
 			continue
@@ -427,7 +448,7 @@ func _intel(d: Dictionary) -> void:
 			if f != client:
 				buyers.add_item(MissionRegistry.faction_name(f))
 				buyers.set_item_metadata(buyers.item_count - 1, f)
-		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(MissionRegistry.setting_i("intel_sale_price", 6000) * int(e.count)), func() -> void:
+		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(Prices.intel_sale_value(StringName(e.id), int(e.count))), func() -> void:
 			if buyers.item_count > 0:
 				Contracts.sell_intel(i, String(buyers.get_item_metadata(buyers.selected))),
 			"Sell it to the faction picked beside it (risks the client's anger)")

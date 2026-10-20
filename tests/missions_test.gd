@@ -1200,8 +1200,12 @@ func _test_field_radio() -> void:
 		"a looted enemy set can't reach the employer: no radio contract without a field radio")
 	player.inventory.take(&"radio")
 	var cids := (Contracts.deployment().cids as Array).size()
+	var cash := Economy.cash()
 	check(Contracts.radio_contract_problem() == "" and Contracts.server_radio_contract() != "" and (Contracts.deployment().cids as Array).size() == cids + 1,
 		"with the field radio along, a radio contract comes in and joins the deployment")
+	var radioed := Contracts.contract(String((Contracts.deployment().cids as Array).back()))
+	check(int(radioed.deal.advance) == 0 and int(radioed.deal.completion) == int(radioed.deal.pay_total) and Economy.cash() == cash,
+		"it pays nothing up front, all on completion (economy overhaul: radioing for contract after contract kept 30%% each)")
 	check(InteractionMenu._check(&"field_radio", player, player) == "", "the player sees 'Radio for a contract' in his own menu")
 	player._server_radio_contract.rpc_id(1)
 	await _frames(2)
@@ -1254,7 +1258,7 @@ func _test_faction_skirmish() -> void:
 ## the squad did, the alert easing and the checkpoints with it, pressure rising with time, and
 ## extraction lapsing what's left (hazard pay on what's done).
 func _test_hot_zone_ops() -> void:
-	print("Hot zone: several contracts, radio follow-ups, alert, staying")
+	print("Hot zone: in on one contract, radio follow-ups, alert, staying")
 	var ops := HotZoneOps.of(level)
 	var alert := Alert.of(level)
 	var pressure := Pressure.of(level)
@@ -1275,9 +1279,8 @@ func _test_hot_zone_ops() -> void:
 	for c: String in cids:
 		sites[String(Contracts.contract(c).module_id)] = true
 	var faction := String(MissionRegistry.zone(ZONE).faction)
-	check(cids.size() >= HotZoneOps.LIVE_RANGE.x and cids.size() <= HotZoneOps.LIVE_RANGE.y and cid in cids and sites.size() == cids.size()
-		and cids.all(func(c: String) -> bool: return Contracts.contract(c).employer == faction),
-		"the zone's faction has %d contracts live at once, each at a site of its own (%s)" % [cids.size(), sites.keys()])
+	check(cids == [cid] and Contracts.contract(cid).employer == faction,
+		"the squad goes in on the one contract it took, no top-up on arrival (more come in over the radio)")
 	var had := player.inventory.count_of(&"radio")
 	if had == 0:
 		player.inventory.take(&"radio")

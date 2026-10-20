@@ -355,15 +355,15 @@ func _mission(type: String) -> String:
 	var cash_before := Economy.cash()
 	var stash_before := BaseArmory.counts(BaseHub.stash())
 	var bills := [0]
-	var on_week := func(_week: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
-	Economy.week_paid.connect(on_week)
+	var on_bill := func(_day: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
+	Economy.bill_paid.connect(on_bill)
 	var out: Dictionary
 	if heli:
 		out = await _extract_heli(squad, casualty)
 		Soldier.body_cap = Soldier.MAX_BODIES  # _extract_heli lifts it until its bodies are home
 	else:
 		out = await _extract(bring, done.get("cargo", []), left, deposit, stow)
-	Economy.week_paid.disconnect(on_week)
+	Economy.bill_paid.disconnect(on_bill)
 	if not out.get("ok", false):
 		return "extraction: %s" % out.get("why", "")
 	if heli:

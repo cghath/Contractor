@@ -98,6 +98,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Leads on the contract board.** It shows the act, the evidence, what the next story contract
   waits for, and every clue so far.
 - **Later acts and three faction arcs are data stubs**, waiting to be written.
+### Economy overhaul (Captain, 2026-10-16: "too easy overall but mission expenses swing it negative fast")
+
+Built from docs/economy_proposal_2026-10-20.md. Income is steadier and lower, the costs that
+spiralled are capped, and the debrief and the base say where the money went. Details and the
+measured before/after: docs/economy.md and the proposal's "Built" section.
+
+#### Changed
+- **Contract pay about a third lower** at every rating. Hot zones keep their better rate (x1.4).
+  The no-civilian-casualties bonus is 5% (was 10%).
+- **Hot zones start small.** The squad goes in on the one or two contracts it took for the zone
+  (Captain: "with radios and villages entering hotzones with one or two objs will be good"). The
+  zone no longer tops them up to 3-6 on arrival. More come in over the radio as the squad works,
+  and from the villages: asking a villager in the hot zone you're deployed to hands you the
+  locals' job live (once a zone a day), instead of putting it on the base board. Contracts taken
+  on the spot pay nothing up front, all on completion.
+- **Intel sells for what it's worth:** its own value, $500 to $4,000 (the HVT case $3,000), not
+  a flat $6,000 a piece.
+- **Wages and upkeep are paid every day,** a seventh of the week's bill. Each debrief shows its
+  own days, and no debrief takes a whole week's bill at once. Loan installments stay weekly.
+- **Capped shocks.** A helicopter lost on a support call costs a $15,000 deductible (was
+  $30,000-40,000). Each bought respawn costs a quarter more than the last, never over $8,000 (was
+  half more, no cap). The death benefit is $10,000 (was $15,000).
+
+#### Added
+- **Where the money came from:** a new debrief section lists advances, completion pay, bonuses,
+  fines, clawbacks and what was sold in the debrief. Wages and upkeep show their days. The net is
+  labelled "before loot", and a "Sold here" figure is added.
+- **Books tab** on the base screen: running costs a day, loans and the next installment, the last
+  7 days of money by kind, and the 20 newest payments. The base header and the contract board
+  show costs a day instead of "weekly bill in N days".
+
+#### Fixed
+- **Intel could be sold twice.** Intel brought out goes to the debrief, never to the stash. The
+  shop doesn't buy intel. A piece already debriefed is worth nothing if it is carried out again.
+- **Hire-and-release for free kit.** Someone let go takes the kit they were issued. If it's
+  missing, it comes out of the stash or its sell value is charged.
+- **Radioing for contract after contract** no longer pays 30% of each up front.
 
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 

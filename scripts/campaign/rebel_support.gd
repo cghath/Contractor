@@ -177,9 +177,9 @@ static func favours() -> int:
 	return int(_s().favours)
 
 
-## Host (a villager asked, Soldier._server_ask_locals): one of the locals' jobs in this zone goes
-## on the board, once a zone a day. Returns what the player hears. Outside a campaign only the
-## tutorial's villager answers (TutorialGuide).
+## Host (a villager asked, Soldier._server_ask_locals): one of the locals' jobs in this zone, once
+## a zone a day. Returns what the player hears. Outside a campaign only the tutorial's villager
+## answers (TutorialGuide).
 static func server_ask(by: Soldier, villager: Soldier) -> String:
 	if not BaseHub.campaign_running:
 		var tutorial := TutorialGuide.of(villager)
@@ -187,18 +187,36 @@ static func server_ask(by: Soldier, villager: Soldier) -> String:
 	var lvl := CompoundLevel.current(villager)
 	var def: Variant = lvl.get(&"def") if lvl else null
 	var zone_id := String((def as Dictionary).get("id", "")) if def is Dictionary else ""
+	return server_ask_in(zone_id, BaseHub.day(), String(villager.name))
+
+
+## The locals of `zone_id` asked on `day` (by villager `who`, which seeds the job): in a hot zone
+## the squad is deployed to, their job joins the deployment on the spot
+## (Contracts.server_contract_on_spot; Captain, 2026-10-20: the squad goes into a hot zone on one
+## or two contracts and the radio and the villages bring more); anywhere else it goes on the
+## board. Returns what the player hears.
+static func server_ask_in(zone_id: String, day: int, who: String) -> String:
 	if zone_id == "" or zone_id == RegionMap.BASE:
 		return "\"We're fine here, thank you\""
+	var dep := Contracts.deployment()
+	var live := not dep.is_empty() and String(dep.get("zone_id", "")) == zone_id and String(dep.get("zone_kind", "")) == "hot"
 	var s := _s()
-	var key := "%s:%d" % [zone_id, BaseHub.day()]
+	var key := "%s:%d" % [zone_id, day]
 	if not s.has("asked"):
 		s["asked"] = {}
 	if (s.asked as Dictionary).has(key):
-		return "\"We told your people already: it's on your board\""
+		return "\"We told your people already: %s\"" % ("you have our job" if live else "it's on your board")
+	if live:
+		var cid := Contracts.server_contract_on_spot("", "", "", "locals")
+		if cid != "":
+			s.asked[key] = true
+			Campaign.mark_changed(SECTION)
+			var c := Contracts.contract(cid)
+			return "\"%s\" (a new contract, live now: %s)" % [String(c.get("brief", "")), String(c.get("title", ""))]
 	s.asked[key] = true
 	var rng := RandomNumberGenerator.new()
-	rng.seed = hash([key, villager.name])
-	var job := ContractGen.generate(rng, {"day": BaseHub.day(), "source": "locals", "zone_id": zone_id})
+	rng.seed = hash([key, who])
+	var job := ContractGen.generate(rng, {"day": day, "source": "locals", "zone_id": zone_id})
 	Contracts._add_offer(job)
 	Contracts._commit()
 	Campaign.mark_changed(SECTION)

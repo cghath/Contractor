@@ -8,9 +8,10 @@ extends Node
 ##   its tier as a number (tier()); what tiers unlock is wave 6's call. "locals" is the
 ##   standing with the local population (civilian casualties lower it).
 ## - The campaign clock in days: missions advance it (Contracts), and so do travel, recovery
-##   and repairs (whoever does them calls advance_days). Every "week_days" the weekly bill is
-##   paid, MW5-style: wages (wages_provider, the base agent's roster), upkeep and loan
-##   installments.
+##   and repairs (whoever does them calls advance_days). Wages (wages_provider, the base agent's
+##   roster) and upkeep are paid every day, a "week_days"-th of the week's bill (economy overhaul
+##   2026-10-20: each debrief carries its own days, none takes a whole week's bill at once); loan
+##   installments every "week_days".
 ## - The safety floor: when the bill can't be paid the employer that likes the company best
 ##   lends the difference (an emergency loan, up to "loan_max" owed); loans can also be taken
 ##   by hand (take_loan). The contract board always carries a cheap low-risk job too.
@@ -23,8 +24,9 @@ extends Node
 signal changed
 ## Host: the clock moved on `days` days to `day`.
 signal day_advanced(day: int, days: int)
-## Host: a week's bill was paid ({"wages", "upkeep", "loans", "total", "loan_taken"}).
-signal week_paid(week: int, bill: Dictionary)
+## Host: a bill was paid on `day` ({"wages", "upkeep", "loans", "total", "loan_taken"}): the
+## day's wages and upkeep every day, the week's loan installments every "week_days".
+signal bill_paid(day: int, bill: Dictionary)
 ## A message for the local player (purchases, loans).
 signal notice(text: String)
 ## Host: items bought (after purchase_sink, if any, took them).
@@ -84,7 +86,7 @@ func week() -> int:
 	return (day() - MissionRegistry.setting_i("start_day", 1)) / maxi(MissionRegistry.setting_i("week_days", 7), 1) + 1
 
 
-## Days until the next weekly bill.
+## Days until the next loan installments (wages and upkeep are paid daily).
 func days_to_bill() -> int:
 	var w := maxi(MissionRegistry.setting_i("week_days", 7), 1)
 	return w - (day() - MissionRegistry.setting_i("start_day", 1)) % w
@@ -112,6 +114,44 @@ func loans_owed() -> int:
 
 func ledger() -> Array:
 	return state().get("ledger", [])
+
+
+## What a ledger line was, from its text (the base screen's books): "Contract pay", "Sales",
+## "Loans in", "Wages and upkeep", "Loan installments", "Field costs", "Supports", "Respawns",
+## "Lost helicopters", "Hiring", "Medical", "Purchases", "Upgrades", "Repairs and service",
+## "Fines and clawbacks" or "Other".
+static func ledger_kind(what: String) -> String:
+	const KINDS := [["Advance clawed back", "Fines and clawbacks"], ["Civilian fines", "Fines and clawbacks"],
+		["Advance:", "Contract pay"], ["Completion:", "Contract pay"], ["Sold", "Sales"], ["Intel sold", "Sales"],
+		["Emergency", "Loans in"], ["Loan from", "Loans in"], ["Day ", "Wages and upkeep"], ["Week ", "Loan installments"],
+		["Deployment costs", "Field costs"], ["Support ", "Supports"], ["Helicopter out", "Supports"], ["Raid flight", "Supports"],
+		["Lost helicopter", "Lost helicopters"], ["Respawn", "Respawns"], ["Hired", "Hiring"], ["Medbay", "Medical"],
+		["Bought", "Purchases"], ["Air wing upgrade", "Upgrades"], ["FOB upgrade", "Upgrades"], ["Rebel ", "Upgrades"],
+		["HX-1", "Upgrades"], ["Repaired", "Repairs and service"], ["Motor pool", "Repairs and service"]]
+	for pair: Array in KINDS:
+		if what.begins_with(String(pair[0])):
+			return String(pair[1])
+	return "Other"
+
+
+## The ledger's lines from day `since` on, summed by ledger_kind: [{"kind", "in", "out"}] ("out"
+## positive), the biggest movers first.
+func ledger_summary(since: int) -> Array:
+	var by := {}
+	for e: Dictionary in ledger():
+		if int(e.get("day", 0)) < since:
+			continue
+		var k := ledger_kind(String(e.get("what", "")))
+		if not by.has(k):
+			by[k] = {"kind": k, "in": 0, "out": 0}
+		var amount := int(e.get("amount", 0))
+		if amount >= 0:
+			by[k]["in"] = int(by[k]["in"]) + amount
+		else:
+			by[k]["out"] = int(by[k]["out"]) - amount
+	var out: Array = by.values()
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["in"]) + int(a.out) > int(b["in"]) + int(b.out))
+	return out
 
 
 func price_of(item_id: StringName) -> int:
@@ -172,11 +212,23 @@ func charge_run(amount: int, what: String) -> void:
 
 
 ## Host: lists an expense already taken from the cash (negative: a refund) for the debrief.
-func note_run_expense(amount: int, what: String) -> void:
+## `bill`: a day's running costs or a loan installment (a deployment's debrief lists only its own
+## days of them: drop_run_bills).
+func note_run_expense(amount: int, what: String, bill := false) -> void:
 	var s := _section()
 	if not s.has("run_expenses"):
 		s["run_expenses"] = []
-	(s.run_expenses as Array).append({"what": what, "amount": amount})
+	var e := {"what": what, "amount": amount}
+	if bill:
+		e["bill"] = true
+	(s.run_expenses as Array).append(e)
+
+
+## Host: forgets the bills listed since the last debrief (they stay in the ledger): a deployment
+## starting, so its debrief shows only its own days' wages and upkeep, not the days waited at base.
+func drop_run_bills() -> void:
+	var s := _section()
+	s["run_expenses"] = (s.get("run_expenses", []) as Array).filter(func(e: Dictionary) -> bool: return not bool(e.get("bill", false)))
 
 
 ## Host: the expenses listed since the last debrief, emptied.
@@ -360,8 +412,9 @@ func change_locals(delta: int) -> void:
 	_commit()
 
 
-## Host: the clock moves on `days` days. Each day passes in turn: a weekly bill falls due
-## every "week_days", and Contracts expires offers and lapses contracts (day_advanced).
+## Host: the clock moves on `days` days. Each day passes in turn: the day's wages and upkeep
+## are paid (pay_day), loan installments every "week_days" (pay_week), and Contracts expires
+## offers and lapses contracts (day_advanced).
 func advance_days(days: int, reason := "") -> void:
 	if days <= 0:
 		return
@@ -369,6 +422,7 @@ func advance_days(days: int, reason := "") -> void:
 	var week_days := maxi(MissionRegistry.setting_i("week_days", 7), 1)
 	for i in days:
 		s.day = int(s.day) + 1
+		pay_day()
 		if (int(s.day) - MissionRegistry.setting_i("start_day", 1)) % week_days == 0:
 			s.week = int(s.week) + 1
 			pay_week()
@@ -383,6 +437,8 @@ func advance_days(days: int, reason := "") -> void:
 
 ## The week's bill as it stands: {"wages", "upkeep", "loans", "total", "lines": [{"what", "amount"}]}.
 func weekly_bill() -> Dictionary:
+	if not _is_host() and _remote.has("bill"):
+		return _remote.bill  # a client: the host's, as last synced (the wages are the host's roster's)
 	var lines: Array = []
 	var wages := 0
 	if wages_provider.is_valid():
@@ -407,24 +463,61 @@ func weekly_bill() -> Dictionary:
 	return {"wages": wages, "upkeep": upkeep, "loans": loans, "total": wages + upkeep + loans, "lines": lines}
 
 
-## Host: pays the weekly bill (advance_days does, every week). If the cash won't cover it, an
-## emergency loan covers the gap first (the safety floor), as far as "loan_max" allows.
+## Today's share of the week's wages and upkeep: {"wages", "upkeep", "loans" (0), "total"}.
+## Each day pays the next "week_days"-th, rounded so a week's days add up to the week's bill.
+func daily_bill() -> Dictionary:
+	var week := weekly_bill()
+	var w := maxi(MissionRegistry.setting_i("week_days", 7), 1)
+	var k := posmod(day() - MissionRegistry.setting_i("start_day", 1) - 1, w) + 1  # today is the k-th day of its week (1..w)
+	var wages := _share(int(week.wages), k, w)
+	var upkeep := _share(int(week.upkeep), k, w)
+	return {"wages": wages, "upkeep": upkeep, "loans": 0, "total": wages + upkeep}
+
+
+## The k-th of `w` daily parts of `total` (the parts add up to it exactly).
+static func _share(total: int, k: int, w: int) -> int:
+	return floori(float(total) * k / w) - floori(float(total) * (k - 1) / w)
+
+
+## Host: pays today's wages and upkeep (advance_days does, every day; economy overhaul
+## 2026-10-20: was once a week). A bill beyond the cash takes an emergency loan (_pay_bill).
+func pay_day() -> Dictionary:
+	var bill := daily_bill()
+	if int(bill.total) <= 0:
+		return bill
+	return _pay_bill(bill, "Day %d: wages %d, upkeep %d" % [day(), bill.wages, bill.upkeep],
+		[["Wages", int(bill.wages)], ["Base upkeep", int(bill.upkeep)]])
+
+
+## Host: pays the week's loan installments (advance_days does, every week). Returns the bill
+## ({"wages" and "upkeep" 0, "loans", "total", "loan_taken"}).
 func pay_week() -> Dictionary:
-	var bill := weekly_bill()
+	var loans := int(weekly_bill().loans)
 	# This week's installments come off the loans already owed (the bill counts them).
 	for loan: Dictionary in _section().loans:
 		loan.left = int(loan.left) - mini(int(loan.weekly), int(loan.left))
 	_section().loans = (_section().loans as Array).filter(func(l: Dictionary) -> bool: return int(l.left) > 0)
+	var bill := {"wages": 0, "upkeep": 0, "loans": loans, "total": loans, "loan_taken": 0}
+	if loans <= 0:
+		return bill
+	return _pay_bill(bill, "Week %d: loan installments %d" % [int(_section().week), loans], [["Loan installments", loans]])
+
+
+## Pays `bill` ({"total", ...}). If the cash won't cover it, an emergency loan covers the gap
+## first (the safety floor), as far as "loan_max" allows. `lines`: [[what, amount]] for the debrief.
+func _pay_bill(bill: Dictionary, ledger_text: String, lines: Array) -> Dictionary:
 	var loan_taken := 0
 	if int(bill.total) > cash():
 		var short := int(bill.total) - cash() + MissionRegistry.setting_i("safety_floor_cash", 0)
 		loan_taken = _lend(best_lender(), short, "emergency loan")
-	add_cash(-int(bill.total), "Week %d: wages %d, upkeep %d, loans %d" % [int(_section().week), bill.wages, bill.upkeep, bill.loans])
-	note_run_expense(int(bill.total), "Week %d bill (wages %s, upkeep %s, loans %s)" % [int(_section().week), DebriefCalc.money(bill.wages), DebriefCalc.money(bill.upkeep), DebriefCalc.money(bill.loans)])
+	add_cash(-int(bill.total), ledger_text)
+	for pair: Array in lines:
+		if int(pair[1]) != 0:
+			note_run_expense(int(pair[1]), String(pair[0]), true)
 	bill["loan_taken"] = loan_taken
-	week_paid.emit(int(_section().week), bill)
+	bill_paid.emit(day(), bill)
 	if loan_taken > 0:
-		_notify_all("Emergency loan of $%s from %s to cover the week's bill" % [DebriefCalc.money(loan_taken), MissionRegistry.faction_name(best_lender())])
+		_notify_all("Emergency loan of $%s from %s to cover the bills" % [DebriefCalc.money(loan_taken), MissionRegistry.faction_name(best_lender())])
 	return bill
 
 
@@ -727,6 +820,7 @@ func _flush() -> void:
 
 func _public() -> Dictionary:
 	var out := _section().duplicate(true)
+	out["bill"] = weekly_bill()  # the week's wages, upkeep and loans as the host's roster stands (the base screen, the debrief)
 	out["world_sites"] = WorldSites.rows()  # wave 6c: who holds each hot zone, for every peer's board
 	out[String(ZoneControl.SECTION)] = Campaign.section(ZoneControl.SECTION).duplicate(true)  # who controls each zone (the world map)
 	return out

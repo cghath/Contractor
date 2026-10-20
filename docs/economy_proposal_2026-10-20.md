@@ -1,8 +1,11 @@
 # Economy balance proposal (2026-10-20)
 
-**Status: Proposed, awaiting the Captain.** Nothing in the game has changed: no number in
-`data/` and no game code. Once the Captain agrees (all of it, or the items he picks), the
-numbers go in and the reasons go into [economy.md](economy.md), as his tasking asks.
+**Status: Built on claude/economy (2026-10-20): eight of the nine numbers and both loopholes.
+Item 2 (`hot_zone_pay_mult` 1.0) was undone the same day, when the Captain dropped the hot zone's
+arrival contracts (see "Hot zones start small" at the end). The calls made in building it are
+listed in "Built" for the Captain to confirm.** The reasons are in
+[economy.md](economy.md). The rest of this document is the proposal as written; its "now"
+numbers predate the loot rotation (see "Built" for the rerun).
 
 The Captain's read: too easy overall, but mission expenses swing it negative fast. Both are
 true, and they have different causes:
@@ -258,3 +261,109 @@ Tests that read the numbers being changed (they need updating with the change):
 14) and the intel sale check (`cash + 6000`), `tests/base_test.gd` "Wages" (the week's bill paid
 on its day). The "Economy balance" profit checks use a fixed deal and keep passing. The sim's
 `PROPOSED` table in `tools/economy_sim.gd` holds these numbers; rerun it after any change.
+
+## Built (claude/economy, 2026-10-20)
+
+Every number in "Proposed numbers" is in `data/` as proposed, and every rule is in the code:
+daily wages and upkeep (`Economy.pay_day`), intel by its value (`Prices.intel_sale_value`),
+arrival contracts paid on completion (`Contracts.server_accept`), the respawn cap
+(`respawn_max`, `RosterDeployment.respawn_cost`). Both loopholes are closed (see
+[economy.md](economy.md), "Loopholes closed"). The sim no longer models any of it: its
+`PROPOSED` table is empty, ready for the next round.
+
+### Measured again
+
+The loot rotation (about 72 items, rarity-tiered loot tables) landed after this proposal was
+measured, so the "now" side was rerun: the sim's loot mirror was moved to the new
+`WorldValuables.site_plan` / `pool_roll` (it no longer parsed), then run on a72ca02 (the commit
+before the overhaul) and on claude/economy with the same seeds. 40 campaigns, 35 days each.
+
+Cash by day (mean, with the 10th and 90th percentile):
+
+| Day | Careful before | Careful built | Median before | Median built | Sloppy before | Sloppy built |
+|---|---|---|---|---|---|---|
+| 0 | $135k | $135k | $135k | $135k | $135k | $135k |
+| 7 | $265k (208-329) | $184k (147-218) | $462k (174-900) | $238k (127-399) | $289k (29-571) | $115k (9-211) |
+| 14 | $383k (317-468) | $235k (183-277) | $712k (281-1091) | $315k (145-482) | $409k (17-962) | $92k (-12-220) |
+| 21 | $510k (381-631) | $288k (225-359) | $976k (480-1437) | $408k (162-622) | $516k (114-951) | $86k (-19-238) |
+| 28 | $623k (491-763) | $338k (269-417) | $1265k (689-1833) | $499k (229-728) | $610k (52-1313) | $105k (-17-316) |
+| 35 | $752k (598-884) | $395k (314-490) | $1538k (824-2265) | $609k (296-923) | $701k (143-1430) | $113k (-58-343) |
+
+Per deployment:
+
+| | Careful before | Careful built | Median before | Median built | Sloppy before | Sloppy built |
+|---|---|---|---|---|---|---|
+| Economic net, mean | $46.3k | $19.8k | $111.4k | $37.4k | $44.8k | -$5.0k |
+| 10th percentile | $16.0k | $1.6k | -$2.8k | -$12.6k | -$72.4k | -$60.4k |
+| Worst | -$36.3k | -$28.2k | -$78.1k | -$49.6k | -$161.8k | -$116.5k |
+| Share negative | 3% | 8% | 12% | 19% | 48% | 62% |
+| Contract zones, net mean | $46.3k | $19.8k | $38.2k | $13.9k | -$24.5k | -$24.5k |
+| Hot zones, net mean (arrival advances in it) | - | - | $276.6k ($80.3k) | $94.6k ($0) | $166.3k ($77.6k) | $31.1k ($0) |
+| Debrief "net" as shown: mean, worst (share negative) | $25.5k, -$84.1k (20%) | $7.9k, -$39.6k (23%) | $92.3k, -$83.6k (21%) | $22.7k, -$60.3k (29%) | $39.9k, -$182.1k (48%) | -$11.3k, -$131.0k (66%) |
+| Out of credit by day 35 | 0 of 40 | 0 of 40 | 0 of 40 | 0 of 40 | 1 of 40 | 7 of 40 |
+
+Intel was 15% of a careful squad's income before ($156k a campaign) and is 5% built ($31k).
+A careful squad still grows about $52k a week and a median one about $95k (against $123k and $281k before); a sloppy one treads
+water near its start and leans on loans. The worst debrief a careful squad sees falls from
+-$84k to -$40k (no week's bill at once, the deductible and the cap), which is the "swings
+negative fast" half. The built run matches the proposal's modelled run (rerun on the same
+loot) to within 2% at day 35: careful $395k against $394k, median $609k against $595k, sloppy
+$113k against $115k.
+
+The share of debriefs shown negative rises (careful 20% to 23%), as the proposal expected: pay
+is lower, and the shown net is now the contract's own result before loot. The debrief now says
+so ("Net (before loot)", plus where the money came from and "Sold here").
+
+### Calls made in building it (for the Captain to confirm)
+
+1. **Radio contracts pay on completion too**, not only the arrival contracts: "Radio for a
+   contract" could be pressed again and again, each paying a 30% advance kept if it lapsed.
+2. **Intel: both fixes, and two more.** The shop never buys intel, and intel brought out never
+   goes to the stash (it's handed over in the debrief). A piece with an id already debriefed is
+   worth nothing if carried out again. Intel still stowed on the squad at extraction is banked
+   then, so it can't go home in a pack. Intel left in the field isn't salvage.
+3. **Hire and release: they keep the kit they were issued** (not "the fee includes the kit").
+   Issued kit not on them comes out of the stash. If it isn't there, its shop sell value is
+   charged, for durable kit only: ammo, magazines, medical, grenades and AT4s are used up.
+4. **The HVT hard case is worth $3,000 as intel** (a laptop's worth). It had no value of its
+   own and sold at the flat $6,000.
+5. **A deployment's debrief shows only its own days' wages and upkeep.** Days waited at base
+   are on the ledger and the new Books tab, not in the next debrief.
+6. **Not done:** the hot zone's extra campaign day per extra contract (the proposal's option for
+   playtests), and the support budget stays at $23,000 a point.
+
+## Hot zones start small (Captain, same day)
+
+> "not all contracts should be active upon entering a hot zone anymore as we have the village
+> systems" / "with radios and villages entering hotzones with one or two objs will be good"
+
+Built: a hot zone goes in on the contracts taken for it. The top-up to 3-6 on arrival
+(`Contracts._hot_zone_extras`, `HotZoneOps.live_target`, `LIVE_RANGE`) is gone. More contracts
+come in over the radio: HotZoneOps' follow-ups as sites fall and contracts are done (at most 4
+a deployment), and "Radio for a contract". Both pay nothing up front. Proposed item 3 (arrival
+contracts paid on completion) has nothing left to apply to.
+
+The sim now models the radio follow-ups (`Contracts.server_contract_on_spot`; a new profile
+assumption "radio": median 0.6, sloppy 0.5 per contract done) in place of the arrival
+contracts. That changed the hot zone a lot. Proposed item 2 assumed a hot deployment brings 3-6
+contracts; without them, x1.0 left too little:
+
+| Median squad (sloppy) | Hot zone x1.0, arrivals (as built first) | x1.0, no arrivals | **x1.4, no arrivals (built)** |
+|---|---|---|---|
+| Hot deployment, net mean | $94.6k ($31.1k) | $10.5k (-$27.5k) | **$39.7k (-$15.7k)** |
+| Cash at day 35 | $609k ($113k) | $230k (-$32k) | **$364k (-$18k)** |
+| Economic net per deployment, mean (share negative) | $37.4k, 19% (-$5.0k, 62%) | $7.2k, 37% (-$21.4k, 76%) | **$18.2k, 32% (-$19.5k, 73%)** |
+| Out of credit by day 35 | 0 (7) of 40 | 0 (18) of 40 | **0 (14) of 40** |
+
+So `hot_zone_pay_mult` stays at 1.4. A median squad now grows about $46k a week, a careful one
+(contract zones only, unchanged) about $52k. Before the overhaul they grew $281k and $123k. A
+sloppy squad sinks rather than treading water. The radio follow-ups taken averaged 0.8 per
+median hot deployment. The villagers' jobs aren't in the sim. Asking a villager in the hot
+zone the squad is deployed to now hands it the locals' job live (once a zone a day). That job
+is small money (base pay $6,000-8,000) plus rebel support and favours.
+
+Calls for the Captain:
+
+7. **Hot zone pay x1.4 kept** (not the proposed x1.0), because the arrival contracts are gone.
+8. **Sloppy squads now go broke** in about a third of the sim's campaigns (14 of 40). If that's
+   too harsh, the lever is the shock costs or the emergency loans, not pay.

@@ -11,7 +11,7 @@ zone was built in 4B part 3 ([wave4b_handoff.md](wave4b_handoff.md)); this pass 
 | Design point | Where | State |
 |---|---|---|
 | Layout: HQ, comms, 1-2 QRF bases, 3-6 outposts, checkpoints, patrol routes, villages, a town | `ZoneDef.generate_hot` | built (4B) |
-| Several contracts from one faction live at once, any order | `Contracts._hot_zone_extras`, `HotZoneOps.live_target` | **new**: fewer than 3 taken from the board are topped up on arrival to a roll of 3-6, each at its own site, from the zone's faction (standard terms, advance paid) |
+| Several contracts from one faction live at once, any order | `Contracts.server_start_deployment`, radio follow-ups | **changed (Captain, 2026-10-20)**: the squad goes in on the one or two contracts it took for the zone; more come in over the radio as it works (below), when it radios for one, or from a villager asked there (the locals' job joins the deployment live, once a zone a day: `RebelSupport.server_ask_in`, `Contracts.server_contract_on_spot`). The top-up to 3-6 on arrival is gone. Contracts taken on the spot pay nothing up front, all on completion (economy overhaul) |
 | New contracts over the radio, reacting to what the squad did | `HotZoneOps` (`FOLLOW_UPS`) | **new**: a QRF base, outpost, checkpoint or HQ taken out, the comms mast down, or a contract done queues a follow-up at the nearest standing site no other contract holds ("You hit their QRF. Nobody's coming to help the HQ now: hit it."). Needs a field radio; waits without one |
 | Resupply and banking mid-zone | supports, `server_items_banked` | built |
 | Ends at extraction; unfinished contracts lapse with a rep hit | `DebriefCalc` ("lapsed", `rep_lapse` -3) | built; tested end to end now |
@@ -29,7 +29,6 @@ zone was built in 4B part 3 ([wave4b_handoff.md](wave4b_handoff.md)); this pass 
 Each can be set in `data/contracts.json` "settings" under the lower-case name; otherwise the
 constant in `scripts/campaign/hot_zone_ops.gd` holds.
 
-- `hot_zone_live` [3, 6]: contracts live in a hot zone (`LIVE_RANGE`).
 - `follow_up_delay_s` 90, `follow_up_gap_s` 120, `max_follow_ups` 4: radio follow-ups.
 - `hazard_pay_per_tier` 0.05: hazard pay per pressure tier.
 - `FOLLOW_UPS` (code): what sets a follow-up off, the sites it goes to, the contract types it

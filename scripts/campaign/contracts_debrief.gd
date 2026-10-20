@@ -14,7 +14,8 @@ extends RefCounted
 ## - "salvage": {"share", "pool": [{"id", "count", "state", "value"}], "pool_value",
 ##   "budget", "picked": [pool indices], "spent"};
 ## - "items_out": everything carried out (banked to the base);
-## - "intel": [{"id", "count", "status": "pending"}] (intel among the items out);
+## - "intel": [{"id", "count", "status": "pending", "intel_id"}] (intel among the items out;
+##   Contracts drops a piece already debriefed once, by its intel_id);
 ## - "casualties": as the extraction report gave them;
 ## - "days": campaign days the deployment took (mission days plus travel);
 ## - "totals": {"advance", "completion", "bonuses", "fines", "clawback", "paid_now",
@@ -99,7 +100,7 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 	for entry: Dictionary in report.get("field_items", []):
 		var id := StringName(entry.get("id", ""))
 		var value := Prices.value_of(id, int(entry.get("count", 1)), entry.get("state", {}))
-		if value <= 0:
+		if value <= 0 or MissionRegistry.is_intel(id):  # intel counts only carried out (it isn't the client's to hand over as salvage)
 			continue
 		pool.append({"id": String(id), "count": int(entry.get("count", 1)), "state": entry.get("state", {}), "value": value})
 		pool_value += value
@@ -107,7 +108,8 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 	var intel: Array = []
 	for entry: Dictionary in items_out:
 		if MissionRegistry.is_intel(StringName(entry.get("id", ""))):
-			intel.append({"id": String(entry.id), "count": int(entry.get("count", 1)), "status": "pending", "buyer": ""})
+			intel.append({"id": String(entry.id), "count": int(entry.get("count", 1)), "status": "pending", "buyer": "",
+				"intel_id": String((entry.get("state", {}) as Dictionary).get("intel_id", ""))})
 	return {
 		"contracts": lines, "civilians": civilians, "fines": totals.fines,
 		"rep": rep, "locals": civilians * int(S.call("civilian_rep_locals")),
@@ -126,11 +128,17 @@ static func expenses(report: Dictionary, days: int, run: Array, use_stocks := fa
 	var used := {}
 	var lines: Array = []
 	var sums := {}
+	var bill_days := {}  # a daily bill's line: how many days it sums (Economy.pay_day)
 	for e: Dictionary in run:
 		sums[String(e.what)] = int(sums.get(String(e.what), 0)) + int(e.amount)
+		if bool(e.get("bill", false)):
+			bill_days[String(e.what)] = int(bill_days.get(String(e.what), 0)) + 1
 	for what: String in sums:
 		if int(sums[what]) != 0:
-			lines.append({"what": what, "amount": int(sums[what]), "charge": false})
+			var label := what
+			if what != "Loan installments" and int(bill_days.get(what, 0)) > 0:
+				label = "%s (%d day%s)" % [what, int(bill_days[what]), "" if int(bill_days[what]) == 1 else "s"]
+			lines.append({"what": label, "amount": int(sums[what]), "charge": false})
 	var kia := 0
 	var wounded := 0
 	var heads: int = (report.get("extracted", []) as Array).size()
@@ -180,6 +188,34 @@ static func can_pick(debrief: Dictionary, index: int) -> bool:
 	return int(salvage.get("spent", 0)) + int(pool[index].value) <= int(salvage.get("budget", 0))
 
 
+## Where a debrief's money came from (economy overhaul 2026-10-20: the screen showed only where
+## it went): [{"what", "amount"}] (negative: fines and clawbacks), the contract's pay first, then
+## what was sold in the debrief itself (intel to a faction, tagged lots sold now). Loot and
+## salvage sold at the base afterwards aren't in it.
+static func money_in(debrief: Dictionary) -> Array:
+	var totals: Dictionary = debrief.get("totals", {})
+	var out: Array = []
+	var add := func(what: String, amount: int) -> void:
+		if amount != 0:
+			out.append({"what": what, "amount": amount})
+	add.call("Advances (paid at signing)", int(totals.get("advance", 0)))
+	add.call("Completion pay", int(totals.get("completion", 0)))
+	add.call("Bonuses", int(totals.get("bonuses", 0)))
+	add.call("Civilian fines", -int(totals.get("fines", 0)))
+	add.call("Advances clawed back", -int(totals.get("clawback", 0)))
+	var intel := 0
+	for e: Dictionary in debrief.get("intel", []):
+		if String(e.get("status", "")) == "sold":
+			intel += int(e.get("price", 0))
+	add.call("Intel sold", intel)
+	var lots := 0
+	for lot: Dictionary in debrief.get("tagged", []):
+		if String(lot.get("status", "")) == "sold":
+			lots += int(lot.get("sold_for", 0))
+	add.call("Pallets and vehicles sold", lots)
+	return out
+
+
 ## The debrief in plain lines (the screen shows this; tests read it).
 static func summary(debrief: Dictionary) -> PackedStringArray:
 	var out := PackedStringArray()
@@ -197,7 +233,7 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 	for l: Dictionary in debrief.get("expenses", []):
 		out.append("Expense: %s: -$%s" % [l.what, money(l.amount)])
 	if debrief.has("expenses_total"):
-		out.append("Expenses: -$%s; net after expenses: $%s" % [money(debrief.expenses_total), money(debrief.get("net", 0))])
+		out.append("Expenses: -$%s; net after expenses (before loot and salvage): $%s" % [money(debrief.expenses_total), money(debrief.get("net", 0))])
 	if int(debrief.get("civilians", 0)) > 0:
 		out.append("Civilian casualties: %d, fines -$%s" % [debrief.civilians, money(debrief.fines)])
 	out.append("Paid now: $%s (contract value $%s)" % [money(totals.get("paid_now", 0)), money(totals.get("contract_value", 0))])

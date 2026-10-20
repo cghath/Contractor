@@ -3,7 +3,7 @@ extends Node
 ## runs from tools/run_tests.sh or CI. It plays many short campaigns through the real economy
 ## code - the contract board (Contracts, ContractGen: pay, ratings, fixers, clawback terms, hot
 ## zones and their extra contracts), negotiation (ContractGen.deal), the debrief and its expenses
-## (Contracts.server_end_deployment, DebriefCalc), the weekly bill and emergency loans (Economy),
+## (Contracts.server_end_deployment, DebriefCalc), the daily wages and upkeep, loans (Economy),
 ## support calls (Economy.server_pay_support), salvage picks, intel sales, pallets (Pallets),
 ## the hiring board and wage growth (Hiring, Roster), shop sell prices (Prices) and the loot
 ## that really spawns (CompoundLevel.hostile_loadout, WorldValuables' site boxes) - with the
@@ -44,6 +44,8 @@ const CHECKPOINTS := [0, 7, 14, 21, 28, 35]
 ## - intel: "sell" (to another faction), "half" (sell every other piece) or "turn_in".
 ## - pallets: "keep" (FOB stocks), "sell" or "" (not tagged); vehicles: chance it tags a site vehicle.
 ## - civ: chance of a civilian casualty per deployment; hazard: hot-zone pressure tier reached.
+## - radio: chance it takes a radio follow-up after each contract done in a hot zone (HotZoneOps,
+##   at most MAX_FOLLOW_UPS a deployment).
 const PROFILES := {
 	"careful": {"max_rated": 3, "hot": false, "terms": {"salvage_points": 2, "support_points": 1},
 		"win": [0.97, 0.95, 0.92, 0.85, 0.75], "opt": 0.7, "kia": [0.05, 0.04], "bodies": 0.9, "wounded": 0.8, "deaths": 1.0,
@@ -54,12 +56,12 @@ const PROFILES := {
 		"win": [0.93, 0.88, 0.82, 0.72, 0.6], "opt": 0.5, "kia": [0.1, 0.1], "bodies": 0.6, "wounded": 1.5, "deaths": 3.0,
 		"supports": {"transport": 0.7, "extraction": 0.7, "resupply": 0.4, "medevac": 0.3}, "heli_loss": 0.05,
 		"carry": 6, "boxes": 0.7, "extra_modules": 0, "scatter": 1, "officer_intel": 0.4,
-		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1},
+		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1, "radio": 0.6},
 	"sloppy": {"max_rated": 5, "hot": true, "terms": {"support_points": 2},
 		"win": [0.85, 0.78, 0.68, 0.55, 0.42], "opt": 0.3, "kia": [0.3, 0.2], "bodies": 0.3, "wounded": 2.5, "deaths": 6.0,
 		"supports": {"transport": 1.0, "extraction": 1.0, "resupply": 0.8, "medevac": 0.8, "aav": 0.3, "allied_troops": 0.2}, "heli_loss": 0.1,
 		"carry": 2, "boxes": 0.3, "extra_modules": 0, "scatter": 0, "officer_intel": 0.2,
-		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2},
+		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2, "radio": 0.5},
 }
 ## Contract types played quietly: fewer of the enemy die (and less is left to loot).
 const STEALTHY := ["recon", "sabotage", "intel_grab"]
@@ -67,32 +69,20 @@ const STEALTHY := ["recon", "sabotage", "intel_grab"]
 ## stands in one required objective and the scenario's bonus (its *_bonus_share knob).
 const SCENARIO_BONUS_KNOBS := ["cargo_bonus_share", "all_bonus_share", "unseen_bonus_share", "unhurt_bonus_share"]
 
-## The proposed numbers (docs/economy_proposal_2026-10-20.md). "prices" and "settings" override
-## data/prices.json and data/contracts.json "settings" in memory; "sim" are proposed rules that
-## need a code change, modelled here (see the proposal for where each would go).
+## Numbers to try against the data as it stands ("--variant proposed"): "prices" and "settings"
+## override data/prices.json and data/contracts.json "settings" in memory. The 2026-10-20 proposal's
+## numbers and rules are in the game now (daily wages and upkeep, intel by its value, radio
+## contracts paid on completion, the respawn cap; no arrival top-up in hot zones), so "current"
+## plays them; put the next round's candidates here. Its before/after (docs/economy_proposal_2026-10-20.md, "Built") compares
+## "current" here with "current" on the commit before the overhaul.
 const PROPOSED := {
-	"prices": {
-		"lost_supports": {"resupply": 15000, "transport": 15000, "extraction": 15000, "medevac": 15000, "cargo": 15000},
-		"respawn_rise": 0.25,
-		"operations": {"per_head_day": 700, "kia_benefit": 10000, "wounded_care": 1200},
-	},
-	"settings": {
-		"difficulty_pay": [0, 0.35, 0.5, 0.6, 0.75, 0.95],
-		"hot_zone_pay_mult": 1.0,
-		"clean_bonus_share": 0.05,
-	},
-	"sim": {
-		"daily_bill": true,           # wages and upkeep charged each day (a 7th of the week's), so each debrief carries its own
-		"intel_by_value": 1.0,        # an intel piece sells for its intel_value (data/items.json) instead of the flat intel_sale_price
-		"arrival_no_advance": true,   # a hot zone's arrival contracts pay nothing up front: all of it on completion
-		"respawn_cap": 8000,          # a bought respawn never costs more than this (prices.json "respawn_max")
-	},
+	"prices": {},
+	"settings": {},
 }
 
 var _orig_prices: Dictionary
 var _orig_settings: Dictionary
 var _acc: Dictionary = {}
-var _variant: Dictionary = {}
 var _roster: Array = []
 var _hire_refresh := 0
 var _rng := RandomNumberGenerator.new()
@@ -108,7 +98,7 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	_orig_prices = Prices.data().duplicate(true)
 	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
-	Economy.week_paid.connect(_on_week_paid)
+	Economy.bill_paid.connect(_on_bill_paid)
 	var args := _args()
 	var runs := int(args.get("runs", 40))
 	var days := int(args.get("days", 35))
@@ -139,23 +129,12 @@ func _args() -> Dictionary:
 func _apply_variant(v: String) -> void:
 	Prices._data = _orig_prices.duplicate(true)
 	MissionRegistry.data()["settings"] = _orig_settings.duplicate(true)
-	_variant = {}
 	if v != "proposed":
 		return
 	for k: String in PROPOSED.prices:
 		Prices._data[k] = (PROPOSED.prices[k] as Variant).duplicate(true) if PROPOSED.prices[k] is Dictionary else PROPOSED.prices[k]
 	for k: String in PROPOSED.settings:
 		MissionRegistry.data().settings[k] = (PROPOSED.settings[k] as Variant).duplicate(true) if PROPOSED.settings[k] is Array else PROPOSED.settings[k]
-	_variant = (PROPOSED.sim as Dictionary).duplicate(true)
-	if _variant.has("sell_ratio"):
-		Prices._data["sell_ratio"] = float(_variant.sell_ratio)
-	if _variant.get("daily_bill", false):
-		# Emulates billing every day with the real Economy.pay_week: a "week" of one day, upkeep a
-		# 7th, loan installments spread over the same 8 weeks.
-		var s: Dictionary = MissionRegistry.data().settings
-		s["loan_weeks"] = int(s.get("loan_weeks", 8)) * int(_orig_settings.get("week_days", 7))
-		s["week_days"] = 1
-		Prices._data["weekly_upkeep"] = roundi(float(_orig_prices.get("weekly_upkeep", 0)) / float(_orig_settings.get("week_days", 7)))
 
 
 func _week_days() -> int:
@@ -275,7 +254,7 @@ func _pick_contract(prof: Dictionary) -> Dictionary:
 		if Economy.work_problem(String(c.employer)) != "":
 			continue
 		var days := int(c.days) + int(MissionRegistry.region(String(c.get("region", ""))).get("travel_days", 0))
-		var score := float(c.base_pay) / maxf(days, 1.0) * (2.5 if String(c.zone_kind) == "hot" else 1.0)  # a hot zone hands out 3-6 contracts
+		var score := float(c.base_pay) / maxf(days, 1.0) * (1.0 + float(prof.get("radio", 0.0)) if String(c.zone_kind) == "hot" else 1.0)  # the radio brings more work there
 		if score > best_score:
 			best_score = score
 			best = c
@@ -318,27 +297,15 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	var kind := "hot" if hot else "contract"
 	if hot:
 		Contracts.server_note_deployment("hazard_tier", int(prof.hazard))
-	if _variant.get("arrival_no_advance", false):
-		# Proposed (a code change in Contracts._hot_zone_extras): an arrival contract's advance
-		# moves into its completion pay. Modelled by handing the advance back at once.
-		for x: Dictionary in deployed:
-			if String(x.get("in_zone", "")) == "arrival" and int(x.deal.advance) > 0:
-				Economy.add_cash(-int(x.deal.advance), "Advance: %s (moved to completion)" % x.title)
-				x.deal.completion = int(x.deal.completion) + int(x.deal.advance)
-				x.deal.advance = 0
-		_harvest("")
-	var arrival_advance := 0  # what the hot zone's arrival contracts paid up front, kept whatever happens next
-	for x: Dictionary in deployed:
-		if String(x.get("in_zone", "")) == "arrival":
-			arrival_advance += int(x.deal.advance)
-	var rating := 1
-	for x: Dictionary in deployed:
-		rating = maxi(rating, int(x.true_rating))
 	# The fighting's dice: objectives.
 	# (Through Objectives' own calls: they keep the campaign's copy, which the list is restored from.)
 	var objectives: Objectives = Contracts.objectives
 	var hot_done := 0
-	for x: Dictionary in deployed:
+	var follow_ups := 0
+	var at := 0
+	while at < deployed.size():  # (grows: a contract done in a hot zone may bring a radio follow-up)
+		var x: Dictionary = deployed[at]
+		at += 1
 		var mine := objectives.for_contract(String(x.cid))
 		if mine.filter(func(o: Dictionary) -> bool: return not o.optional).is_empty():
 			var share := 0.1
@@ -357,6 +324,16 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		for o: Dictionary in objectives.for_contract(String(x.cid)):
 			var done: bool = won and (not o.optional or _rng.randf() < float(prof.opt))
 			objectives.server_set_state(String(o.oid), Objectives.DONE if done else Objectives.FAILED)
+		# HotZoneOps' radio follow-ups (a site taken out, a contract done), at most MAX_FOLLOW_UPS a
+		# deployment; the squad takes one with the profile's "radio" chance.
+		if won and hot and follow_ups < HotZoneOps.MAX_FOLLOW_UPS and _rng.randf() < float(prof.get("radio", 0.0)):
+			var fcid := Contracts.server_contract_on_spot()
+			if fcid != "":
+				follow_ups += 1
+				deployed.append(Contracts.contract(fcid))
+	var rating := 1
+	for x: Dictionary in deployed:
+		rating = maxi(rating, int(x.true_rating))
 	if _rng.randf() < float(prof.civ):
 		dep.civilians = int(dep.civilians) + 1
 	# Supports, lost helicopters, respawns: charged as they happen (the real calls).
@@ -371,9 +348,9 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	for i in deaths:
 		if i < free:
 			continue
-		var cost := roundi(Prices.respawn_price() * (1.0 + Prices.respawn_rise() * bought))
-		if _variant.has("respawn_cap"):
-			cost = mini(cost, int(_variant.respawn_cap))
+		var cost := roundi(Prices.respawn_price() * (1.0 + Prices.respawn_rise() * bought))  # as RosterDeployment.respawn_cost
+		if Prices.respawn_max() > 0:
+			cost = mini(cost, Prices.respawn_max())
 		bought += 1
 		# As BaseHub.server_count_respawn: cash first, then the support budget, then on credit.
 		var from_cash := clampi(Economy.cash(), 0, cost)
@@ -446,9 +423,9 @@ func _deploy(prof: Dictionary) -> Dictionary:
 			modules.append({"id": String(m.get("id", "")), "type": String(m.get("type", "")), "share": float(prof.boxes)})
 			extra -= 1
 	for m: Dictionary in modules:
-		bank.append_array(_site_boxes(m, prof))
+		bank.append_array(_site_boxes(m, String(dep.zone_id), hot))
 	for i in int(prof.scatter):
-		bank.append_array(_scatter_find())
+		bank.append_array(_scatter_find(hot))
 	if _rng.randf() < float(prof.officer_intel):
 		bank.append({"id": "intel_documents" if _rng.randf() < 0.5 else "intel_phone", "count": 1, "state": {}})
 	for x: Dictionary in deployed:
@@ -483,9 +460,6 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		if sell:
 			var buyer := _intel_buyer(Contracts.debrief_client())
 			if buyer != "":
-				if _variant.has("intel_by_value"):
-					var item := ItemDB.get_item(StringName(intel[i].id))
-					MissionRegistry.data().settings["intel_sale_price"] = roundi(float(item.stats.get("intel_value", 1000)) * float(_variant.intel_by_value))
 				Contracts.server_sell_intel(i, buyer)
 	_harvest("intel")
 	for i in (d.get("tagged", []) as Array).size():
@@ -517,7 +491,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		if not k in ["wages", "upkeep", "loan_repay"]:
 			econ += float(delta.get(k, 0.0))
 	return {"rating": rating, "hot": hot, "days": days, "cash_delta": Economy.cash() - cash0, "net_shown": int(debrief.get("net", 0)),
-		"econ_net": econ, "delta": delta, "arrival_advance": arrival_advance,
+		"econ_net": econ, "delta": delta, "follow_ups": follow_ups,
 		"completed": (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.outcome == "completed").size(),
 		"contracts": (debrief.contracts as Array).size()}
 
@@ -538,47 +512,34 @@ func _intel_buyer(client: String) -> String:
 	return best
 
 
-## A module's loot boxes, as WorldValuables.server_spawn_site_boxes rolls them (same seed, same
-## contents), each opened with the profile's chance; an HQ's strongbox when its share is full.
-func _site_boxes(m: Dictionary, prof: Dictionary) -> Array:
+## A module's loot boxes, as WorldValuables.server_spawn_site_boxes rolls them (its site_plan:
+## same seed, same contents), each opened with the module's "share"; an HQ's strongbox when its
+## share is full.
+func _site_boxes(m: Dictionary, zone_id: String, hot: bool) -> Array:
 	var out: Array = []
-	var spots: Array = ZoneModules.LOOT.get(String(m.type), [])
-	if spots.is_empty():
-		return out
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash("%s|valbox" % String(m.id))
-	var count := mini(WorldValuables._site_box_count(rng, String(m.type)), mini(spots.size(), WorldValuables.SITE_BOX_OFFSETS.size()))
-	for k in count:
-		var contents := WorldValuables._roll_site_box(rng)
-		var box_id := "%s_valbox%d" % [String(m.id), k]
-		var mt := String(m.type)
-		if (mt in WorldValuables.CONTRABAND_TYPES or ZoneModules.base(mt) in WorldValuables.CONTRABAND_TYPES) and contents.size() == 1 \
-				and String(contents[0].id) not in WorldValuables.RARE_GUNS and posmod(hash("contraband:" + box_id), 100) < WorldValuables.CONTRABAND_PCT:
-			contents = [{"id": WorldValuables.CONTRABAND_ITEMS[posmod(hash("contraband_kind:" + box_id), WorldValuables.CONTRABAND_ITEMS.size())], "count": 1}]
+	for box: Dictionary in WorldValuables.site_plan(String(m.type), "%s|%s" % [zone_id, String(m.id)], hot):
 		if _rng.randf() < float(m.share):
-			for e: Dictionary in contents:
+			for e: Dictionary in box.items:
 				out.append({"id": String(e.id), "count": int(e.count), "state": {}})
 	if String(m.type) == "hq" and float(m.share) >= 1.0:
-		for e: Dictionary in WorldValuables.strongbox_contents(String(m.id)):
+		for e: Dictionary in WorldValuables.strongbox_contents(String(m.id), hot):
 			out.append({"id": String(e.id), "count": int(e.count), "state": {}})
 	return out
 
 
-## A find out in the open, as WorldValuables._spawn_site rolls one: a dead drop (intel or a
-## valuable) or a small cache (a gun, its mags, salvage or medical).
-func _scatter_find() -> Array:
+## A find out in the open, as WorldValuables._spawn_site rolls one: a dead drop (one row of the
+## dead_drop pool) or a small cache (the field_cache pool).
+func _scatter_find(hot: bool) -> Array:
+	var key := "sim|%d" % _rng.randi()
+	var out: Array = []
 	if _rng.randf() < WorldValuables.DEAD_DROP_SHARE:
-		var pool := WorldValuables.INTEL_ITEMS if _rng.randf() < 0.5 else WorldValuables.VALUABLE_ITEMS
-		return [{"id": pool[_rng.randi() % pool.size()], "count": 1, "state": {}}]
-	var gun := WorldValuables.CACHE_GUNS[_rng.randi() % WorldValuables.CACHE_GUNS.size()]
-	var kit: Array = CompoundLevel.HOSTILE_GUNS.get(gun, [gun])
-	var items: Array = [{"id": gun, "count": 1, "state": {}}]
-	if kit.size() > 1:
-		items.append({"id": String(kit[1]), "count": kit.size() - 1, "state": {}})
-	var extra := WorldValuables.SALVAGE_ITEMS[_rng.randi() % WorldValuables.SALVAGE_ITEMS.size()] if _rng.randf() < 0.4 \
-		else WorldValuables.CACHE_MEDICAL[_rng.randi() % WorldValuables.CACHE_MEDICAL.size()]
-	items.append({"id": extra, "count": 1, "state": {}})
-	return items
+		var items: Array = WorldValuables.pool_roll("dead_drop", key, hot).items
+		if not items.is_empty():
+			out.append({"id": String(items[0].id), "count": int(items[0].count), "state": {}})
+		return out
+	for e: Dictionary in WorldValuables.pool_roll("field_cache", key, hot).items:
+		out.append({"id": String(e.id), "count": int(e.count), "state": {}})
+	return out
 
 
 ## Sells everything waiting in the base inbox (the loot banked, or the salvage picks): contraband
@@ -601,7 +562,7 @@ func _sell_inbox(tag: String) -> void:
 
 # --- Book-keeping -------------------------------------------------------------------------------
 
-func _on_week_paid(_week: int, bill: Dictionary) -> void:
+func _on_bill_paid(_day: int, bill: Dictionary) -> void:
 	_add("wages", -float(bill.wages))
 	_add("upkeep", -float(bill.upkeep))
 	_add("loan_repay", -float(bill.loans))
@@ -640,8 +601,8 @@ func _harvest(tag: String) -> void:
 			key = "completion"
 		elif what.begins_with("Civilian fines"):
 			key = "fines"
-		elif what.begins_with("Deployment costs") or what.begins_with("Week "):
-			continue  # split by _split_debrief / _on_week_paid
+		elif what.begins_with("Deployment costs") or what.begins_with("Week ") or what.begins_with("Day "):
+			continue  # split by _split_debrief / _on_bill_paid
 		elif what.to_lower().begins_with("emergency loan") or what.to_lower().begins_with("loan from"):
 			key = "loans_in"
 		elif what.begins_with("Support call") or what.begins_with("Support refund"):
@@ -748,9 +709,9 @@ func _report(pname: String, v: String, runs: int, totals: Dictionary, cash_at: D
 		var n: Array = of_k.map(func(d: Dictionary) -> float: return float(d.econ_net))
 		var pay: Array = of_k.map(func(d: Dictionary) -> float: return float(d.delta.get("advance", 0.0)) + float(d.delta.get("completion", 0.0)) + float(d.delta.get("bonuses", 0.0)))
 		var days_n: Array = of_k.map(func(d: Dictionary) -> float: return float(d.days))
-		var arr: Array = of_k.map(func(d: Dictionary) -> float: return float(d.arrival_advance))
-		print("  %s zones: %3d deployments, %.1f days each, contract pay %s, net mean %s, p10 %s, worst %s; arrival advances (kept whatever happens) %s" % [
-			"hot" if hot else "contract", of_k.size(), _mean(days_n), _k(_mean(pay)), _k(_mean(n)), _k(_pct(n, 0.1)), _k(_pct(n, 0.0)), _k(_mean(arr))])
+		var arr: Array = of_k.map(func(d: Dictionary) -> float: return float(d.follow_ups))
+		print("  %s zones: %3d deployments, %.1f days each, contract pay %s, net mean %s, p10 %s, worst %s; radio follow-ups taken %.1f" % [
+			"hot" if hot else "contract", of_k.size(), _mean(days_n), _k(_mean(pay)), _k(_mean(n)), _k(_pct(n, 0.1)), _k(_pct(n, 0.0)), _mean(arr)])
 	print("  lowest cash less loans in a campaign: mean %s, worst %s; out of credit and in debt: %d of %d" % [_k(_mean(min_worth)), _k(_pct(min_worth, 0.0)), bankrupt, runs])
 
 

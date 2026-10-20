@@ -2218,7 +2218,7 @@ func _server_release_body() -> void:
 
 ## Hands one unit of a stowed entry to a standing squadmate, if it fits on them.
 ## A player asks a villager if they need help (rebel support part 3): one of their jobs goes on
-## the board (RebelSupport.server_ask).
+## the board, or joins the deployment live in a hot zone (RebelSupport.server_ask).
 @rpc("any_peer", "call_local", "reliable")
 func _server_ask_locals(path: NodePath) -> void:
 	if not _from_owner() or not vitals.is_up():

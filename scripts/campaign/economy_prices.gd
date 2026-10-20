@@ -70,9 +70,22 @@ static func value_of(item_id: StringName, count := 1, state := {}) -> int:
 	return roundi(each * count * condition_of(state))
 
 
-## What the shop pays for them.
+## What the shop pays for them. Intel it never buys (economy overhaul 2026-10-20): intel is
+## worth something only in the debrief, sold to a faction or turned in, once (a piece kept,
+## carried home and sold over the counter as well paid twice).
 static func sell_price(item_id: StringName, count := 1, state := {}) -> int:
+	if MissionRegistry.is_intel(item_id):
+		return 0
 	return floori(value_of(item_id, count, state) * float(data().get("sell_ratio", 0.4)))
+
+
+## What a faction pays for `count` pieces of intel `item_id` in the debrief: the piece's own
+## intel_value (data/items.json) x the "intel_sale_mult" setting (economy overhaul 2026-10-20;
+## was a flat $6,000 a piece, so a $600 USB drive sold for ten times its worth).
+static func intel_sale_value(item_id: StringName, count := 1) -> int:
+	var item: ItemData = ItemDB.get_item(item_id) if ItemDB.has_item(item_id) else null
+	var each := int(item.stats.get("intel_value", price_of(item_id))) if item else 0
+	return roundi(each * maxi(count, 0) * MissionRegistry.setting_f("intel_sale_mult", 1.0))
 
 
 ## What it costs to bring a damaged item back to new (0 if it isn't damaged): a share of its
@@ -127,3 +140,8 @@ static func respawn_price() -> int:
 ## How much more each further bought respawn costs, as a share of respawn_price.
 static func respawn_rise() -> float:
 	return float(data().get("respawn_rise", 0.0))
+
+
+## The most one bought respawn ever costs (0: no cap; economy overhaul 2026-10-20).
+static func respawn_max() -> int:
+	return int(data().get("respawn_max", 0))
