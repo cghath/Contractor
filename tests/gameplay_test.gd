@@ -720,8 +720,8 @@ func _check_red_dot_size() -> void:
 	var s := roundi(VoxelArt.VOXEL_SIZE / float(rifle.cell))  # built voxels per frame voxel
 	var back := roundi(VoxelArt.sight_back("dot", 42.0) * s)
 	var front := roundi((VoxelArt.sight_back("dot", 42.0) - VoxelArt.optic_length("dot")) * s)
-	var ax := roundi(1.5 * s)  # the line of sight: the rifle's middle, OPTIC_AXIS_Y up
-	var ay := floori(VoxelArt.OPTIC_AXIS_Y * s)
+	var ax := roundi(1.5 * s)  # the line of sight: the rifle's middle, OPTIC_AXIS_Y up (over the frame's RIFLE_BELOW)
+	var ay := floori((VoxelArt.OPTIC_AXIS_Y + VoxelArt.RIFLE_BELOW) * s)
 	var clear := true
 	var walled := true
 	for z in range(front, back):
