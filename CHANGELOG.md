@@ -36,7 +36,9 @@ Inspired by ALiVE's profiles; our own build for Contractor's zones (docs/virtual
   comes back meets the same men where they had got to. A zone left long enough for its loose gear
   to fade gets a fresh enemy instead.
 - Tests: a `virtualization` suite (round trips, rules, movement, fights, never in view, counting,
-  garrisons, saves) in CI, a co-op check in `net`, and `tests/virtualization_perf.gd` for timing.
+  garrisons, saves, capacity) in CI, a co-op check in `net`, and `tests/virtualization_perf.gd` for
+  timing. On the 4 km hot zone, 120 enemies with virtualization ran at 7.0 ms a frame (worst 15 ms).
+  Today's 40 without it ran at 7.3 ms (worst 20 ms). 120 without it ran at 9.0 ms (worst 33 ms).
 
 #### Changed
 - Dynamic simulation (far AI asleep) stays only for the AI that isn't virtualized: vehicle crews,

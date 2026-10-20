@@ -139,6 +139,26 @@ zone leg, and the timing script `tests/virtualization_perf.gd`.
 - **Capacity:** a hot zone fields `EnemyResponse.ROAM_TEAMS` (2) roaming teams of `ROAM_SIZE` (4)
   on each patrol route, outside the spawn budget (which still paces what is sent at the squad).
 
+**Measured** (tests/virtualization_perf.gd, headless, ridge_hot's 4 km hot zone, 2026-10-20; the same
+three teams within 450 m of the player in every case, every other team at least 800 m out, each
+walking its own route; other test runs were sharing the PC, so read the cases against each other):
+
+Two runs each (the second after the first):
+
+| Case | Frame avg | Worst frame | Physics step | In the world | Virtual |
+|---|---|---|---|---|---|
+| Today: 40 men, DynamicSim only | 7.33 / 7.04 ms | 19.9 / 20.2 ms | 12.5 / 10.6 ms | 40 (28 asleep) | 0 |
+| Today with virtualization | 7.03 / 6.96 ms | 17.1 / 14.3 ms | 14.2 / 12.8 ms | 12 | 28 |
+| 3x: 120 men, DynamicSim only | 9.03 / 9.75 ms | 33.4 / 44.5 ms | 23.1 / 29.0 ms | 120 (108 asleep) | 0 |
+| 3x with virtualization | 6.98 / 7.04 ms | 15.4 / 16.3 ms | 7.9 / 8.0 ms | 12 | 108 |
+
+("Physics step" is Godot's physics-process time monitor sampled each frame: the last step's cost,
+noisier than the frame times.)
+
+Three times the force with virtualization costs no more than today's does without it. Sleeping men
+(DynamicSim) still cost physics (their bodies stay in the world, and the navigation is kept baked
+round them); profiles cost next to nothing.
+
 Still to do: vehicles and convoys as profiles (mounted groups stay real), occlusion culling, an
 alert report for an off-screen fight (gunfire heard), and choosing a covered spot at FORCE_M.
 
