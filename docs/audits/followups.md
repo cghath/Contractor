@@ -174,3 +174,23 @@ It passes locally (R0300) and passed on dev's 52037f2. The same kind of "stuck" 
 other branches' CI (`spacing` "walking away from the wall, nobody stays stuck on it" on
 `claude/ai-driving`). Suggested: read Golf's path
 and input in the CI log; a timing difference on the Linux runners in path following looks likely.
+
+## F-80: with a collection point set, no squadmate picks the body up (casualty suite, CI only)
+
+**Same failure as F-08** (squadmates held against the target dummies; logged on `fix/ci-flakes`,
+cghath/Contractor#10, which this branch didn't have). F-08 already lists this collection-point check.
+Kept as extra evidence: five of the six were touching the same StaticBody3D.
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), the "ccp" order (`Squad.order_command(...,
+"ccp", ...)`) and the bearer it should send. Found by cghath's agent on `feat/assault-warning`
+(2026-10-20). That change doesn't reach it (the debrief, BaseHub's deployment end, BaseAssault, the
+supports origin lookup, and the base_zone and ui tests).
+
+What happens: `casualty_test` failed two checks on CI twice in a row on `feat/assault-warning`
+(run 39496388734, first try and its re-run of the failed jobs). "saying so ([])": the "ccp" order
+gave no radio line. "with a collection point set, a squadmate picks his body up": nobody took
+Echo's body in 25 s. All six squadmates stayed "Following (dynamic: wedge, normal)" with no speed,
+and five of them were touching the same StaticBody3D. It passes locally (R0314) and passed on dev's
+52037f2. It may be the same as F-08 and F-90 (squadmates held against the target dummies on the
+Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
+whether "ccp" finds a bearer when every squadmate is blocked on the dummies.

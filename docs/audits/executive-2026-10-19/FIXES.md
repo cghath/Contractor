@@ -159,6 +159,14 @@ Choices made along the way, for review:
 
 - **A2-04:** a debrief's days pass while the deployment is still running. An assault that falls
   due then is handled as "squad out": near the base it holds out, otherwise it resolves off-screen.
+  **cghath's decision (2026-10-20): "warn, then resolve"** (`feat/assault-warning`). When an
+  assault falls due in the debrief's days, the debrief warns before they pass
+  (`BaseAssault.due_within`), and the host chooses. "Head home first" passes the days with the
+  squad counted home for the assault, so it stays booked; the deployment ends straight after and
+  it comes in live at the base zone. "Carry on" works as above. The debrief and the roster's
+  settling run in the same order either way (`Contracts.server_pass_held_days`,
+  `BaseHub.server_assault_choice`), so pay, salvage, expenses and the weekly bills match.
+  Regression: `base_zone_test._test_assault_warning`; the `ui` suite fits the warning.
 - **A2-08:** after travel, the travel hour also beats a contract's own `"hour"`. That hour isn't
   tied to a zone, so it used to rewind the clock in any fresh zone after a crossing. Walking out of
   the base into a contract zone is unaffected. If the contract's hour should win, it's a one-line

@@ -123,6 +123,11 @@ var _loading_serial := 0
 ## Client: the host's summary of the last level it switched to (level_synced), for tests.
 var last_switch_summary := {}
 var _ready_peers := {}     # host: peer id -> true for each player ready to deploy (FOB ready-up)
+## Host: who got out at an extraction whose debrief waits on the host's choice (a base assault
+## due in its days; server_assault_choice), [Soldier]; and while the chosen days pass, whether
+## the squad counts as home for the assault.
+var _held_end: Array = []
+var _squad_home_for_assault := false
 
 
 func _ready() -> void:
@@ -263,6 +268,8 @@ func server_save() -> bool:
 	if not started():
 		push_warning("BaseHub: no campaign loaded; not saving over %s" % Campaign.save_path())
 		return false
+	if Contracts.assault_pending():
+		return false  # (the debrief is paid but its days haven't passed: save_note says why)
 	_read_back_base()
 	_note_resume()
 	return Campaign.save_campaign()
@@ -327,6 +334,8 @@ func resume_info() -> Dictionary:
 
 ## Host: what to tell the player after server_save returned `saved`.
 static func save_note(saved: bool) -> String:
+	if not saved and Contracts.assault_pending():
+		return "Campaign NOT saved: choose on the debrief first (a base assault falls due in its days)"
 	return "Campaign saved" if saved else "Campaign NOT saved: %s" % (Campaign.save_error if Campaign.save_error != "" else "no campaign loaded")
 
 
@@ -1522,6 +1531,7 @@ func _on_session_ended() -> void:
 	_profiles.clear()
 	_gear_applied.clear()
 	_ready_peers.clear()
+	_held_end = []
 
 
 ## Host hook (CompoundLevel._add_player): a player's body was added. In a campaign it gets
@@ -1962,11 +1972,42 @@ func end_deployment(report: Dictionary) -> void:
 		debrief_report["bank"] = bank
 		debrief_report["driven_out"] = report.get("driven_out", [])  # B-18: in a pool vehicle's hold going home (it stays there)
 		_take_out_of_zone(banked)
-		Contracts.server_end_deployment(debrief_report)
+		var debrief := Contracts.server_end_deployment(debrief_report, true)
+		if Contracts.assault_pending() and String(debrief.get("key", "")) == String(Contracts.last_debrief().get("key", "")):
+			_held_end = extracted  # the rest waits for the host's choice (server_assault_choice)
+			return
 	else:
 		_take_out_of_zone(banked)
 		Economy.bank_items(bank, "carried out")
 	server_end_deployment(extracted, true, not contract_ran)
+
+
+## Host (the debrief's warning; cghath's call on audit A2-04, "warn, then resolve"): a base assault
+## falls due in the debrief's days, and the host chose how they pass. The debrief (pay, salvage,
+## expenses, the days and the weekly bills in them) and the roster's settling are the same either
+## way, in the same order; only the assault differs:
+## - BaseAssault.HOME, head home first: the squad is counted home for the assault while the days
+##   pass, so it stays booked (server_day_passed, at_base) and the deployment ends straight after:
+##   back at the base zone, it comes in live against the squad (BaseAssault.server_check_due).
+## - BaseAssault.CARRY_ON: as before the warning, the days pass with the squad out and it's
+##   settled without them (held off-screen, or holding out when they're near).
+## Then the deployment ends as any contract's does (server_end_deployment). Returns "" or why not.
+func server_assault_choice(choice: String) -> String:
+	if not multiplayer.is_server():
+		return "Only the host can do that"
+	if choice not in [BaseAssault.HOME, BaseAssault.CARRY_ON]:
+		return "No such choice"
+	if not Contracts.assault_pending() or not RosterDeployment.is_running(roster()):
+		return "Nothing waiting on that"
+	var extracted := _held_end.filter(func(n: Variant) -> bool: return is_instance_valid(n))
+	_held_end = []
+	SessionLog.note("base assault in the debrief's days: the host chose %s" % choice)
+	_squad_home_for_assault = choice == BaseAssault.HOME
+	if not Contracts.server_pass_held_days(choice):
+		push_warning("BaseHub: the debrief's held days were gone; the deployment ends without them")
+	_squad_home_for_assault = false
+	server_end_deployment(extracted, true, false)
+	return ""
 
 
 ## Host: items (WorldItem.uid) and bodies (Soldier.body_uid) in `uids` came out at extraction
@@ -2076,6 +2117,7 @@ func server_revert_deployment() -> String:
 	SessionLog.note("Return to Base (revert): the deployment is undone, the campaign is back as it was at the base")
 	Campaign.restore(_before_deploy)
 	_before_deploy = {}
+	_held_end = []  # (a debrief waiting on the host's choice is undone with the rest)
 	Contracts.objectives.server_clear()
 	_changed_all()
 	server_switch_level(base_info(), base_zone_id())
@@ -2154,7 +2196,8 @@ func _on_day_advanced(today: int, days: int) -> void:
 		return
 	Roster.advance_days(roster(), days, today)
 	Hiring.refresh_if_due(hiring(), today)
-	BaseAssault.server_day_passed(not RosterDeployment.is_running(roster()))  # (a debrief's days: the squad was out)
+	# (a debrief's days: the squad was out, unless the host headed home first: server_assault_choice)
+	BaseAssault.server_day_passed(_squad_home_for_assault or not RosterDeployment.is_running(roster()))
 	var week := today / maxi(MissionRegistry.setting_i("week_days", 7), 1)
 	var last := int(base().get("rebel_week", week - 1))
 	if week > last:
