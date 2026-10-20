@@ -459,6 +459,8 @@ static func _result(kind: String, hit: Dictionary) -> Dictionary:
 static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
 	var result := _trace(shooter, origin, direction, weapon)
 	report_near_misses(shooter, origin, result.position, weapon)
+	if shooter is Soldier and String(result.get("result", "")) != "none":
+		SquadAI.note_impact(result.position, (shooter as Soldier).faction)  # ground being shot up (G-19)
 	return result
 
 

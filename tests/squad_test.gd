@@ -116,6 +116,16 @@ func _test_fire_fix() -> void:
 	# G-16: no card, the AI reads how badly hurt: an arterial bleed before a graze.
 	check(SquadAI.IMMEDIATE_KINDS.has("arterial") and not SquadAI.MINIMAL_KINDS.has("arterial") and SquadAI.MINIMAL_KINDS.has("graze")
 		and SquadAI.triage_tier(alpha) == SquadAI.auto_tier(alpha) * 2 + 1, "no triage card: the AI's own read of the wounds sets the order (G-16)")
+	# G-21: the side used last time costs more, so an even choice goes the other way.
+	check(SquadTactics.FLANK_SAME_SIDE_COST > 0.0 and SquadTactics.FLANK_WIDE_M > SquadTactics.FLANK_FAR_M,
+		"flanks vary: the other side after one, sometimes wide (%.0f m)" % SquadTactics.FLANK_WIDE_M)
+	# G-19: ground the enemy's rounds have been landing on is remembered, his own side's isn't.
+	var spot_hit := alpha.global_position + Vector3(30, 0, 30)
+	SquadAI.note_impact(spot_hit, &"hostile")
+	check(SquadAI.of(alpha)._shot_up(spot_hit + Vector3(1, 0, 0)) and not SquadAI.of(alpha)._shot_up(spot_hit + Vector3(10, 0, 0)),
+		"rounds landing there: the spot is shot up, ten metres off it isn't (G-19)")
+	SquadAI.note_impact(spot_hit + Vector3(0, 0, 20), &"friendly")
+	check(not SquadAI.of(alpha)._shot_up(spot_hit + Vector3(0, 0, 20)), "his own side's rounds don't count")
 	# G-08: a clearance with rooms left carries on through a quiet moment; done, or a man down, it ends.
 	var op_left := {"op": {"rooms": [1, 2], "called": false}}
 	check(SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, false) and not SquadTactics.keeps_clear(SquadTactics.Option.CLEAR, op_left, true)
@@ -487,6 +497,8 @@ func _test_contact() -> void:
 	## squad on casualty care for him). Shielded, the hostile still sees and fires at him;
 	## his rounds just do nothing, so no wounds leak into what follows.
 	player.vitals.shielded = true
+	for s: Soldier in _squad():
+		s.vitals.shielded = true  # ...and the squad: a squadmate hit here was wounded for every later check (R2037, CI ea8d4ee)
 	await _seconds(3.0)
 	var hostile := level.spawn_soldier({"name": "TestHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(0, 0.1, -1),
 		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
@@ -501,6 +513,10 @@ func _test_contact() -> void:
 	check(fought_from_cover, "the squad fights (from cover, or assaulting the position)")
 	check(not is_instance_valid(hostile) or not hostile.vitals.is_up(), "and puts the hostile down")
 	player.vitals.shielded = false
+	for s: Soldier in _squad():
+		s.vitals.shielded = false
+		if s.vitals.is_up():
+			s.vitals.server_reset_health()
 	check(player.vitals.condition_text() == "OK", "the player, shielded, comes out of it unhurt (%s)" % player.vitals.condition_text())
 
 

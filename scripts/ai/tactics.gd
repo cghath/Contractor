@@ -109,6 +109,16 @@ const OVERWATCH_GAIN := 2.0
 const OVERWATCH_NEAREST := 0.6
 const FLANK_HEIGHT_W := 0.05
 const FLANK_HEIGHT_MAX := 0.5
+## Variety (AI bar G-21; VCOM doesn't repeat an attack on the same group within 120 s): the side
+## a flank took against a group (FLANK_MEMORY_CELL_M cells) is remembered FLANK_MEMORY_S and the
+## next leans the other way (FLANK_SAME_SIDE_COST); a squad not tied to a lead goes wide
+## (FLANK_WIDE_M out) at WIDE_CHANCE when the enemy is WIDE_MIN_RANGE_M or more off. Proposed.
+const FLANK_MEMORY_S := 120.0
+const FLANK_MEMORY_CELL_M := 50.0
+const FLANK_SAME_SIDE_COST := 0.6
+const FLANK_WIDE_M := 150.0
+const WIDE_CHANCE := 0.3
+const WIDE_MIN_RANGE_M := 80.0
 ## Proposed (Captain, 2026-10-14: they bunched up): the maneuver element's men each take their
 ## own lane round the flank, this far apart side by side, instead of all running to one point.
 const LANE_GAP_M := 5.0
@@ -188,6 +198,7 @@ var _no_flank := {}
 ## When the drill's plan was drawn, and its last "[tactics]" line: {"key", "at"}.
 var _plan_at := -1000.0
 var _plan_logged := {"key": "", "at": -1000.0}
+var _flank_sides := {}  # Vector2i cell of the enemy -> {"side", "at"} (G-21)
 
 
 func _init(p_squad: Squad) -> void:
@@ -525,7 +536,13 @@ func _draw_flank(units: Array[SquadAI], enemy: Vector3, now: float) -> Dictionar
 	base.append_array(split[1].filter(func(ai: SquadAI) -> bool: return ai not in moving))
 	var lead: Soldier = situation.lead
 	var others := _other_clusters()
-	var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, others)
+	var cell := Vector2i(floori(enemy.x / FLANK_MEMORY_CELL_M), floori(enemy.z / FLANK_MEMORY_CELL_M))
+	var last: Dictionary = _flank_sides.get(cell, {})
+	var avoid := String(last.side) if not last.is_empty() and now - float(last.at) < FLANK_MEMORY_S else ""
+	var wide := lead == null and not moving.is_empty() and _middle(moving).distance_to(enemy) >= WIDE_MIN_RANGE_M and randf() < WIDE_CHANCE
+	var route := {} if moving.is_empty() else flank_route(moving[0].body, _middle(moving), enemy, lead, others, avoid, wide)
+	if not route.is_empty():
+		_flank_sides[cell] = {"side": route.side, "at": now}
 	if route.is_empty():
 		base.append_array(moving)
 		moving = []
@@ -708,7 +725,7 @@ static func elements_ai(units: Array, enemy: Vector3) -> Array:
 ## side whose points the enemy sees least of wins (then the side away from `others`, other
 ## enemy positions). {"side": "left" or "right" (as the squad faces the enemy), "route":
 ## [Vector3, Vector3]}, or {} if neither side works.
-static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldier, others: Array) -> Dictionary:
+static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldier, others: Array, avoid_side := "", wide := false) -> Dictionary:
 	var world := node.get_world_3d()
 	var map := world.navigation_map
 	var u := Vector3(from.x - enemy.x, 0.0, from.z - enemy.z)
@@ -716,7 +733,7 @@ static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldi
 	if range < 1.0:
 		return {}
 	u /= range
-	var r := clampf(range * FLANK_RANGE, FLANK_NEAR_M, FLANK_FAR_M)
+	var r := FLANK_WIDE_M if wide else clampf(range * FLANK_RANGE, FLANK_NEAR_M, FLANK_FAR_M)
 	var right := (-u).cross(Vector3.UP)
 	var best := {}
 	var best_cost := INF
@@ -744,9 +761,12 @@ static func flank_route(node: Node3D, from: Vector3, enemy: Vector3, lead: Soldi
 		for e: Vector3 in others:
 			if e.distance_to(route[1]) < r:
 				cost += 0.5  # someone else over there
+		var side := "right" if (route[1] - enemy).dot(right) > 0.0 else "left"
+		if side == avoid_side:
+			cost += FLANK_SAME_SIDE_COST  # went that way at him last time: the other side now (G-21)
 		if cost < best_cost:
 			best_cost = cost
-			best = {"side": "right" if (route[1] - enemy).dot(right) > 0.0 else "left", "route": route}
+			best = {"side": side, "route": route, "wide": wide}
 	return best
 
 

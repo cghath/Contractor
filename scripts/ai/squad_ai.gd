@@ -564,6 +564,35 @@ const REACT_CLOSE := 0.2
 ## (crouched; prone by G-05's rules) before the plan takes over. Not while treating, carrying,
 ## riding or on an ordered move. Proposed.
 const DRILL_S := Vector2(1.0, 2.5)
+## Ground being shot up (AI bar G-19; Arma's AI avoids crossing impact zones): where rounds struck
+## is kept IMPACT_KEEP_S (IMPACT_MAX of them, the level's), and a cover spot within IMPACT_NEAR_M
+## of one an enemy's round struck scores IMPACT_PENALTY worse (find_cover: so bounds and cover
+## moves go round it). Proposed.
+const IMPACT_KEEP_S := 15.0
+const IMPACT_MAX := 64
+const IMPACT_NEAR_M := 3.0
+const IMPACT_PENALTY := 6.0
+static var _impacts: Array[Dictionary] = []  # host: {"pos", "at", "by" (the shooter's faction)}
+
+
+## Host (Ballistics.fire): a round from `faction`'s side struck at `pos`.
+static func note_impact(pos: Vector3, faction: StringName) -> void:
+	var now := Soldier._now()
+	while not _impacts.is_empty() and (_impacts.size() >= IMPACT_MAX or now - float(_impacts[0].at) > IMPACT_KEEP_S):
+		_impacts.pop_front()
+	_impacts.append({"pos": pos, "at": now, "by": faction})
+
+
+## Whether the enemy's rounds have been landing within IMPACT_NEAR_M of `q` lately.
+func _shot_up(q: Vector3) -> bool:
+	var now := Soldier._now()
+	for i in range(_impacts.size() - 1, -1, -1):
+		var e: Dictionary = _impacts[i]
+		if now - float(e.at) > IMPACT_KEEP_S:
+			break
+		if StringName(e.by) != body.faction and (e.pos as Vector3).distance_to(q) < IMPACT_NEAR_M:
+			return true
+	return false
 ## Assaults and the flank's maneuver legs go in bounds, buddy pairs taking turns (_bound_toward;
 ## AI bar G-06), in contact; the last ASSAULT_RUSH_M onto the position is one rush. Proposed.
 const ASSAULT_RUSH_M := 12.0
@@ -4039,6 +4068,8 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 				continue  # it can't win even as the best low cover: skip its raycasts and voxel trace
 			if taken.any(func(c: Vector3) -> bool: return c.distance_to(q) < COVER_GAP_M):
 				continue
+			if _shot_up(q):
+				score += IMPACT_PENALTY  # rounds have been landing right there (G-19)
 			if not _cover_protects(q):
 				if q.distance_to(body.threat_pos) < PRONE_MIN_M or not _fold_at(world, q):
 					continue
