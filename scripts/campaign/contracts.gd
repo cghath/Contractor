@@ -1295,10 +1295,13 @@ func _public() -> Dictionary:
 	if Campaign.section(SECTION).is_empty():
 		return {}
 	var s := Campaign.section(SECTION)
+	var public_deployment: Dictionary = (s.deployment as Dictionary).duplicate()
+	public_deployment.erase("scenario_runs")  # host checkpoints include AI/entity state, not the briefing's public view
+	public_deployment = public_deployment.duplicate(true)
 	return {
 		"board": (s.board as Array).map(func(c: Dictionary) -> Dictionary: return ContractGen.public_view(c)),
 		"held": (s.held as Array).map(func(c: Dictionary) -> Dictionary: return ContractGen.public_view(c)),
-		"deployment": (s.deployment as Dictionary).duplicate(true), "debrief": (s.debrief as Dictionary).duplicate(true),
+		"deployment": public_deployment, "debrief": (s.debrief as Dictionary).duplicate(true),
 		"history": (s.history as Array).duplicate(true),
 	}
 

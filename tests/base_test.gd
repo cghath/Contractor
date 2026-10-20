@@ -739,6 +739,7 @@ func _test_session() -> void:
 	await _test_restock_player_leaves_medic()
 	await _test_zone_deployment()
 	await _test_revert()
+	await _test_support_save_deployment()
 	await _test_contract_loop()
 
 
@@ -1335,6 +1336,147 @@ func _all_on_ground(lvl: CompoundLevel) -> bool:
 	return ok
 
 
+## A2-02: save live restrictions, reload the campaign from disk, and recreate the zone's
+## support node through the normal resume information and level-switch path.
+func _test_support_save_deployment() -> void:
+	print("A separate deployment for saved support restrictions (A2-02)")
+	var why := BaseHub.server_deploy({"no_contract": true, "zone_kind": RosterDeployment.RAID,
+		"zone_id": "wadi_farm", "squad": [], "level": {"level": "zone", "def": MissionRegistry.zone_def("wadi_farm")}})
+	check(why == "", "A2-02: the isolated support-save deployment starts (%s)" % why)
+	if why != "":
+		return
+	var arrived := await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self) as ZoneLevel
+		return current != null and current.players.get_node_or_null(^"1") != null and not BaseHub.switch_pending(), 40.0)
+	check(arrived, "A2-02: the support-save fixture reaches its zone")
+	if not arrived:
+		return
+	var zone := await _test_saved_support_limits(CompoundLevel.current(self) as ZoneLevel)
+	if zone == null:
+		return
+	BaseHub.server_end_deployment(zone.players.get_children(), true, false)
+	check(await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self)
+		return current is BaseLevel and current.players.get_node_or_null(^"1") != null and not BaseHub.switch_pending(), 40.0),
+		"A2-02: the support-save fixture returns to base")
+
+
+func _reload_saved_support_limits(zone: ZoneLevel, lost: Array, cooldown: String, seconds: float, expired := "") -> ZoneLevel:
+	check(BaseHub.server_save(), "A2-02: saving the deployment succeeds")
+	var disk: Variant = JSON.parse_string(FileAccess.get_file_as_string(Campaign.save_path()))
+	if not disk is Dictionary:
+		check(false, "A2-02: the campaign save can be read")
+		return zone
+	var saved: Dictionary = disk.get("sections", {}).get("roster", {}).get("deployment", {}).get("support_limits", {})
+	var saved_cooldown := float(saved.get("cooldown", {}).get(cooldown, 0.0))
+	check((saved.get("lost", []) as Array).size() == lost.size() and lost.all(func(kind: String) -> bool:
+		return kind in saved.get("lost", [])), "A2-02: the disk save contains current losses (%s)" % [str(saved.get("lost", []))])
+	# (until - now) can come back a float rounding above `seconds` when nothing has elapsed.
+	check(saved_cooldown > seconds - 5.0 and saved_cooldown <= seconds + 0.001,
+		"A2-02: the disk save contains the remaining %s cooldown (%.2f s)" % [cooldown, saved_cooldown])
+	if expired != "":
+		check(not (saved.get("cooldown", {}) as Dictionary).has(expired), "A2-02: an expired cooldown leaves the disk save")
+	BaseHub.load_or_new()
+	var info := BaseHub.resume_info()
+	check(not info.is_empty() and String(info.def.id) == String(zone.def.id), "A2-02: the saved campaign resumes in the same zone")
+	if info.is_empty():
+		return zone
+	BaseHub.server_switch_level(info, BaseHub.zone_save_id(String(info.def.id)))
+	var ready := await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self) as ZoneLevel
+		return current != null and current != zone and not BaseHub.switch_pending() and current.players.get_node_or_null(^"1") != null, 40.0)
+	check(ready, "A2-02: the saved zone and player reload")
+	var restored := CompoundLevel.current(self) as ZoneLevel
+	if restored == null:
+		return zone
+	var helis := HeliSupports.of(restored)
+	check(helis != null and lost.all(func(kind: String) -> bool: return helis.is_lost(kind)),
+		"A2-02: the recreated support node restores the losses")
+	check(helis != null and helis.cooldown_left(cooldown) > saved_cooldown - 5.0 and helis.cooldown_left(cooldown) <= saved_cooldown,
+		"A2-02: reload preserves remaining cooldown seconds")
+	if expired != "":
+		check(helis != null and helis.cooldown_left(expired) == 0.0, "A2-02: reload does not revive an expired cooldown")
+	return restored
+
+
+func _test_saved_support_limits(zone: ZoneLevel) -> ZoneLevel:
+	print("Helicopter restrictions survive saving and reload (A2-02)")
+	var helis := HeliSupports.of(zone)
+	helis.server_restore_limits({"cooldown": {"resupply": 300.0}, "lost": ["transport"]})
+	check(not RosterDeployment.active(BaseHub.roster()).has("support_limits"), "A2-02: first save is before any crossing snapshot")
+	zone = await _reload_saved_support_limits(zone, ["transport"], "resupply", 300.0)
+	var from_id := String(zone.def.id)
+	var crossings := MapNodes.extraction(zone).points.filter(func(p: Dictionary) -> bool:
+		return String(p.get("source", "")) == "crossing" and String(p.get("to", "")) != RegionMap.BASE)
+	check(not crossings.is_empty(), "A2-02: the zone has a crossing to a later zone")
+	if crossings.is_empty():
+		return zone
+	# Establish a known crossing snapshot independently of the first round trip's verdict.
+	HeliSupports.of(zone).server_restore_limits({"cooldown": {"resupply": 300.0}, "lost": ["transport"]})
+	var to := String(crossings[0].to)
+	var why := BaseHub.server_cross_on(to, RegionMap.crossing_id(from_id), null)
+	check(why == "", "A2-02: crossing into a later zone succeeds (%s)" % why)
+	if why != "":
+		return zone
+	var arrived := await _wait_until(func() -> bool:
+		var current := CompoundLevel.current(self) as ZoneLevel
+		return current != null and String(current.def.id) == to and current.players.get_node_or_null(^"1") != null and not BaseHub.switch_pending(), 40.0)
+	check(arrived, "A2-02: the later zone loads")
+	if not arrived:
+		return CompoundLevel.current(self) as ZoneLevel
+	zone = CompoundLevel.current(self) as ZoneLevel
+	var earlier: Dictionary = RosterDeployment.active(BaseHub.roster()).get("support_limits", {})
+	check("cargo" not in earlier.get("lost", []) and float(earlier.get("cooldown", {}).get("resupply", 0.0)) > 200.0,
+		"A2-02: the crossing snapshot predates the next loss and cooldown change")
+	helis = HeliSupports.of(zone)
+	# A new loss and cooldown, with the earlier resupply timer elapsed.
+	helis.server_restore_limits({"cooldown": {"resupply": -1.0, "medevac": 180.0}, "lost": ["cargo"]})
+	return await _reload_saved_support_limits(zone, ["transport", "cargo"], "medevac", 180.0, "resupply")
+
+
+## A2-01: both real raid entry points must leave an unrelated prepared job held and ready.
+## The ordinary deployment immediately afterwards must still open that job's briefing.
+func _test_raids_keep_prepared_contract(offer: Dictionary) -> void:
+	print("Raids leave a prepared contract for later (A2-01)")
+	var cid := String(offer.cid)
+	var target := "wadi_farm" if String(offer.zone_id) != "wadi_farm" else "harbour_yard"
+	var prepared := BaseHub._prep().duplicate(true)
+	for by_air: bool in [true, false]:
+		var route := "helicopter" if by_air else "crossing"
+		BaseHub.server_set_ready(1, true)
+		var why := BaseHub.server_raid_by_air(target) if by_air else BaseHub.server_cross_from_base(target, RegionMap.crossing_id(RegionMap.BASE))
+		check(why == "", "%s raid accepted while another zone's job is prepared (%s)" % [route, why])
+		if why != "":
+			return
+		var arrived := await _wait_until(func() -> bool:
+			var current := CompoundLevel.current(self) as ZoneLevel
+			return current != null and String(current.def.id) == target and not BaseHub.switch_pending(), 40.0)
+		check(arrived, "%s raid reaches %s" % [route, target])
+		if not arrived:
+			return
+		level = CompoundLevel.current(self)
+		var dep := RosterDeployment.active(BaseHub.roster())
+		check(String(dep.get("zone_kind", "")) == RosterDeployment.RAID and (dep.get("contract", {}) as Dictionary).is_empty(),
+			"%s raid has raid rules and no contract" % route)
+		var briefing := MapNodes.briefing(level)
+		check(briefing != null and not briefing.is_open() and not Contracts.is_deployed()
+			and Contracts.objectives.for_contract(cid).is_empty(), "%s raid opens no contract briefing or objectives" % route)
+		check(BaseHub._prep() == prepared and Contracts.contract(cid).get("state") == Contracts.ACCEPTED,
+			"%s raid leaves the job accepted and its complete preparation intact" % route)
+		# End a real raid without advancing the fixture's campaign day or leaving anyone behind.
+		var extracted: Array = level.players.get_children() + level.ai.get_children().filter(func(n: Node) -> bool:
+			return n is Soldier and (n as Soldier).faction == &"friendly" and not (n as Soldier).vitals.is_dead())
+		BaseHub.server_end_deployment(extracted, true, false)
+		var home := await _wait_until(func() -> bool:
+			var current := CompoundLevel.current(self)
+			return current is BaseLevel and not BaseHub.switch_pending() and current.players.get_node_or_null(^"1") != null, 40.0)
+		check(home and BaseHub._prep() == prepared and Contracts.contract(cid).get("state") == Contracts.ACCEPTED,
+			"back from the %s raid, the same job is still prepared" % route)
+		if not home:
+			return
+		await _frames(2)
+
+
 ## Wave 4B part 1, the loop: accept on the board -> prep -> deploy -> the briefing in the zone
 ## -> objectives live at its start -> extraction -> the debrief and the roster settled once
 ## -> back at the base, on one bank and one clock. One squadmate left behind is MIA with a
@@ -1361,6 +1503,7 @@ func _test_contract_loop() -> void:
 		"one bank: the advance is in the base's funds ($%s)" % DebriefCalc.money(advance))
 	check(String(BaseHub.prep_contract().get("cid", "")) == cid and not BaseHub.prep_contract().has("true_rating"),
 		"accepting it starts the prep at the base (the threat it hides stays hidden)")
+	await _test_raids_keep_prepared_contract(offer)
 	var squad: Array = Roster.available_ids(BaseHub.roster()).slice(0, 2)
 	BaseHub._prep().squad = squad.duplicate()
 	var stay: String = squad[0]

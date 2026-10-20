@@ -11,6 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Executive audit of 2026-10-19: the first three P1 fixes (cghath's side)
+
+The audit is in `docs/audits/executive-2026-10-19/` (README, PART-1, PART-2). The repairs are in `FIXES.md`.
+
+#### Fixed
+- A2-01: a raid (by air or through a crossing) no longer picks up a job prepared for another
+  zone. The job stays accepted and prepared for later.
+- A2-02: saving during a deployment keeps the helicopters lost and their cooldowns, so a lost
+  helicopter no longer comes back after a reload, and an expired cooldown doesn't return.
+- A2-03: recon, hold, convoy, rescue and escort objectives carry on where they were after
+  leaving and coming back to their zone or reloading a save. They no longer sit "active" for good
+  with nothing running them. Their crews, waves, wrecks and convoy vehicles return once each, by
+  their saved ids (`ScenarioCheckpoint`).
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;

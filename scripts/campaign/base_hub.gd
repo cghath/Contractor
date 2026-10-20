@@ -264,7 +264,7 @@ func server_save() -> bool:
 ## stands, and everyone's gear goes onto their records (players' main characters, squadmates'),
 ## so loading puts the squad back there (resume_info), each with their wounds as they were
 ## ("vitals": Vitals.server_snapshot as var_to_str text, by "pk:<player key>" and "m:<member id>",
-## put back as they spawn: _apply_resume).
+## put back as they spawn: _apply_resume). Live support cooldowns and losses are saved too.
 func _note_resume() -> void:
 	if not RosterDeployment.is_running(roster()) or in_base():
 		return
@@ -274,6 +274,8 @@ func _note_resume() -> void:
 	var dep := RosterDeployment.active(roster())
 	var vitals := {}
 	dep["resume"] = {"zone_id": String(lvl.def.get("id", dep.get("zone_id", ""))), "arrive": String(dep.get("last_crossing", "")), "vitals": vitals}
+	var helis := HeliSupports.of(lvl)
+	dep["support_limits"] = helis.limits() if helis else {}
 	GameState.save_zone()
 	for p: Node in lvl.players.get_children():
 		var s := p as Soldier
@@ -1619,8 +1621,9 @@ func server_count_respawn() -> String:
 
 ## Host: takes the picked squad into the zone. `options` may override the prep: "squad"
 ## (member ids), "zone_kind", "zone_id", "scene"; "no_contract": true deploys without a prepped
-## contract (code and tests only: the Deploy request never sends it). Every player must be
-## ready first (FOB ready-up): it returns WAITING_FOR and who isn't, and readiness clears once
+## contract, leaving any prepared job for later (raids; the Deploy request never sends it).
+## Every player must be ready first (FOB ready-up): it returns WAITING_FOR and who isn't,
+## and readiness clears once
 ## the deployment starts. Players whose main character is recovering get a stand-in (an
 ## available member not in the squad, else a free rookie). Returns "" or why it can't.
 func server_deploy(options := {}) -> String:
@@ -1631,8 +1634,9 @@ func server_deploy(options := {}) -> String:
 	RebelSupport.on_deployment_started()
 	_read_back_base()
 	var prep := _prep()
+	var contract: Dictionary = {} if options.get("no_contract", false) else prep.get("contract", {})
 	# Without a contract there's no briefing, so no extraction and no way home (P0331): refuse.
-	if (prep.get("contract", {}) as Dictionary).is_empty() and not options.get("no_contract", false):
+	if contract.is_empty() and not options.get("no_contract", false):
 		return NO_CONTRACT
 	if not all_ready() and not options.get("crossing", false):  # walking out through a crossing together is the ready-up (LZ-2)
 		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
@@ -1652,13 +1656,14 @@ func server_deploy(options := {}) -> String:
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
-	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), prep.get("contract", {}), stand_ins)
+	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), contract, stand_ins)
 	_record_loadouts(dep)  # S2: what everyone deploys in, for "Restock last loadout" back at the base
 	SessionLog.note("deployment started: zone %s (%s), contract %s, day %d; squad %s; %d player%s; %d free respawns" % [zone_id, zone_kind,
-		_contract_text(prep.get("contract", {})), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
+		_contract_text(contract), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
 		int(dep.respawns_free)])
-	prep["contract"] = {}
-	prep["level"] = {}
+	if not contract.is_empty():
+		prep["contract"] = {}
+		prep["level"] = {}
 	_ready_peers.clear()  # back at the FOB everyone readies again for the next one
 	_changed_all()
 	_fade_zone_save(zone_id)  # zone memory (LZ-2): fresh after a week, emptier before that

@@ -68,6 +68,9 @@ func save_path() -> String:
 
 ## Writes the zone's save (write_safely). Returns whether it was written.
 func save_zone() -> bool:
+	var scenario := MissionScenario.of(self)
+	if scenario:
+		scenario.server_checkpoint()
 	# Dropped items may have rolled since they were dropped.
 	for node in get_tree().get_nodes_in_group(&"world_items"):
 		if dropped.has(node.uid):
