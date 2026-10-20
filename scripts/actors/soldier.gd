@@ -259,6 +259,9 @@ func suppress(amount: float, from: Vector3) -> void:
 	threat_pos = from
 	threat_err = 0.0
 	threat_time = _now()
+	var brain := get_node_or_null(^"SquadAI")
+	if brain:
+		brain.call_deferred(&"react_to_fire", amount)  # a blast close by: the same first reaction (G-07)
 
 
 ## Host only. A round cracked past (Ballistics.report_near_misses): it gives the direction well
