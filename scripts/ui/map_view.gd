@@ -420,6 +420,9 @@ func _open_menu(screen_pos: Vector2) -> void:
 		_menu.add_item("Delete marker", 3)
 	if _our_drivers():
 		_menu.add_item("Our drivers: drive here (%s)" % MapGrid.grid_ref(_menu_at, area), 4)  # SquadDrivers' drive_to
+		_menu.add_item("Our drivers: drive here cross-country", 10)  # drive_offroad
+	if _our_drivers() or _our_vehicle_near():
+		_menu.add_item("Squad: mount up and carry us here (dismount short)", 11)  # SquadDrivers' carry
 	var teams := _our_weapon_loads()  # G-25: our squadmates carrying a static weapon's loads
 	if teams.has("gun"):
 		_menu.add_item("Weapons team: set up the gun here (%s)" % MapGrid.grid_ref(_menu_at, area), 5)
@@ -451,6 +454,10 @@ func _on_menu(id: int) -> void:
 			var me := MapNodes.local_player(self)
 			if me:
 				me._server_squad_command.rpc_id(1, "wt_setup" if id == 5 else "wt_fire", Vector3(_menu_at.x, 0.0, _menu_at.y), PackedStringArray())
+		10, 11:  # SquadDrivers: straight across country, or mount up, drive and get out short of it
+			var me := MapNodes.local_player(self)
+			if me:
+				me._server_squad_command.rpc_id(1, "drive_offroad" if id == 10 else "carry", Vector3(_menu_at.x, 0.0, _menu_at.y), PackedStringArray())
 
 
 ## What our squad's AI carry of static weapons (every peer sees what's in their hands): "gun"
@@ -481,6 +488,20 @@ func _our_drivers() -> bool:
 	for v: Vehicle in vl.vehicles():
 		var d := v.driver()
 		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied":  # (an allied element's men take the high command's orders)
+			return true
+	return false
+
+
+## Whether one of our ground vehicles stands within SquadDrivers.MOUNT_UP_M of the local player
+## (a carry mounts the squad up in it).
+func _our_vehicle_near() -> bool:
+	var vl := VehicleLayer.of(level) if level else null
+	var me := MapNodes.local_player(self)
+	if vl == null or me == null:
+		return false
+	for v: Vehicle in vl.vehicles():
+		if not v.wrecked and not v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] and v.faction != &"hostile" \
+				and v.global_position.distance_to(me.global_position) <= SquadDrivers.MOUNT_UP_M:
 			return true
 	return false
 

@@ -11,6 +11,52 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### AI driving part 2 (Captain, 2026-10-19: "the squad's AI drives the squad's vehicles"; 2026-10-20 major batch)
+
+The squad's AI drivers now drive as a column, carry the squad to a point and get it out short of
+it, judge contact by the threat and their armour, and get themselves unstuck. Numbers are
+Proposed.
+
+#### Added
+- **Columns.** "Follow me in vehicles" and any drive order with more than one vehicle form a
+  column (`ConvoyColumn`):
+  - each vehicle follows the lead's own trail, round the same corners and down the same road;
+  - they keep 22 m apart by speed, catching up or holding back, and stop when too close;
+  - an AI lead drives at 40 km/h and crawls while someone behind is straggling;
+  - the lead can be the player at the wheel, an AI-driven vehicle or the player on foot.
+- **Carry us there.** The squad mounts up (`Mount up`: a rifleman at each empty wheel, the
+  autorifleman or grenadier on each free gun, the rest in the seats, a seat kept for each player
+  on foot). Then:
+  - the vehicles drive there as a column;
+  - the passengers get out 100 m short along the way, further back while a known enemy is
+    within 150 m;
+  - they follow the commander if he rode along or is near, else they hold there;
+  - drivers and gunners stay with the vehicles.
+  If the commander is driving himself, the column follows him instead.
+- **Contact while driving** (`DriveContact`), judged by the known enemies near the vehicle, the
+  hits it just took, anti-armour (a launcher seen, a shaped-charge or blast hit) and the vehicle's
+  armour class:
+  - **Drive through**: an ambush within 50 m, or fire its armour shrugs off. It goes faster and
+    the gunner fires on.
+  - **Stop and dismount**: anti-armour, unless it's a tank, or more fire than its armour takes.
+    The passengers get out on the side away from the enemy; the driver and gunner stay, and the
+    gun keeps firing. The whole column halts with it.
+  - **Abandon**: engine or wheels gone, burning, or the hull nearly through. Everyone gets out,
+    crew too, to cover.
+  Mount > "On contact" toggles judging off (always drive through).
+- **Orders.** Command menu Mount: 5 Mount up, 6 Drive (by road, cross-country, carry us there,
+  follow me in vehicles, come pick us up, stop), 7 On contact. Map: "Our drivers: drive here
+  cross-country" and "Squad: mount up and carry us here".
+
+#### Changed
+- **Getting unstuck** (`VehicleAI`, every AI driver):
+  - a wall or wreck dead ahead for 3 s (anything else for 10 s), or stuck twice at one spot: it
+    backs off and goes round by a detour on the clearer side, wider each try;
+  - the squad's drivers give up after 4 tries, plan the way again (by road, then
+    cross-country), and report "stuck" (a carry gets out there).
+- **AI drivers slow for corners ahead** (up to 40 m), not only once they're in them.
+- **Command menu Mount** now has a Drive submenu (the drive orders moved under 6).
+
 ### Footsteps (Captain, 2026-10-20: "the current ones are terribleee", then "too much like minecraft, too heavy, need running, walking, slow walking, crouching sounds")
 
 #### Changed

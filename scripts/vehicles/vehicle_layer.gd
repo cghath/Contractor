@@ -344,6 +344,21 @@ func boarding_count() -> int:
 	return _boarding.size()
 
 
+## Host: the vehicle squadmate `s` is on his way to get into, or null.
+func boarding_of(s: Soldier) -> Vehicle:
+	var b: Dictionary = _boarding.get(s.get_instance_id(), {})
+	return b.vehicle as Vehicle if not b.is_empty() and is_instance_valid(b.vehicle) else null
+
+
+## Host: how many squadmates are on their way to `v`.
+func boarding_to(v: Vehicle) -> int:
+	var n := 0
+	for b: Dictionary in _boarding.values():
+		if b.vehicle == v:
+			n += 1
+	return n
+
+
 ## Host: squadmates still on their way to `v` stop going (it's leaving without them).
 func server_cancel_boarding(v: Vehicle) -> void:
 	for id: int in _boarding.keys():

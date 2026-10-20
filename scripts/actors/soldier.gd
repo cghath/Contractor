@@ -1104,7 +1104,7 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 			var why := "No vehicles here" if layer == null else (layer.server_order_mount(self, point, names, cmd == "take_gun") if cmd != "dismount" else layer.server_order_dismount(self, names))
 			if why != "":
 				_client_message.rpc_id(owner_peer(), why)
-		"take_wheel", "drive_to", "convoy", "pickup", "drive_stop", "contact_dismount":  # the squad's AI drives (SquadDrivers)
+		"take_wheel", "mount_up", "drive_to", "drive_offroad", "carry", "convoy", "pickup", "drive_stop", "contact_dismount":  # the squad's AI drives (SquadDrivers)
 			var drivers := SquadDrivers.of(self)
 			var why := "No vehicles here" if drivers == null else drivers.server_command(self, cmd, point, names)
 			if why != "":
