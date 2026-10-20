@@ -1296,6 +1296,11 @@ func _choose_intent() -> void:
 			scores[Intent.INVESTIGATE] = 0.55 if morale >= MORALE_SHAKEN + 0.2 or suspecting() else 0.2
 	# Casualty care, both sides: a living casualty comes before almost anything; a fallen
 	# friendly's body is carried only out of contact.
+	if care == Care.GUARD and is_instance_valid(casualty) and auto_tier(casualty) >= 1:
+		var worse := _urgent_unanswered()
+		if worse:
+			print("[care] %s leaves %s (stable) for %s: nobody free for that one" % [body.name, casualty.name, worse.name])
+			_end_care()  # handed over: he comes back once the worse one is seen to (G-13)
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
 	if contact and care == Care.NONE and _candidate != null and not _may_leave_fight(_candidate):
 		_candidate = null  # the squad can't spare another out there: he fights and covers them (G-12)
@@ -1892,6 +1897,21 @@ static func triage_tier(s: Soldier) -> int:
 		Vitals.TRIAGE_NONE:
 			return auto_tier(s) * 2 + 1
 	return 2
+
+
+## Watching a stable casualty (Care.GUARD, nothing immediate left), a carer goes to a worse one
+## (AI bar G-13; Lifeline hands casualties over): one within GUARD_LEAVE_M with a life about to
+## go (auto_tier 0), nobody on him, and nobody free to answer. The stable one is picked up again
+## after. Proposed.
+const GUARD_LEAVE_M := 40.0
+func _urgent_unanswered() -> Soldier:
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var c := n as Soldier
+		if c == null or c == casualty or c == body or not _cares_for(c) or not needs_help(c) 				or c.global_position.distance_to(body.global_position) > GUARD_LEAVE_M:
+			continue
+		if _carer_of(c) == null and auto_tier(c) == 0 and responder_for(c) == null:
+			return c
+	return null
 
 
 ## Whether this unit may leave the fight for `c` now (G-12, CARE_CAP_BASE).
