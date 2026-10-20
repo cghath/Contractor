@@ -131,3 +131,17 @@ Suggested fix: use `Vitals.has_item(s.inventory, id)` there (it counts loose ite
 and items that need none), so "on its own" only covers a wound he really can't treat. The tutorial
 works around it by handing out two loose bandages (`TutorialGuide.KIT`), so its "treat yourself"
 step isn't done for the player by a medic.
+
+## F-90: a squadmate stuck on his way back to formation (casualty suite, CI only)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), following the lead (`Following (dynamic: ...)`).
+Found by cghath's agent on `feat/tutorial-2` (2026-10-20), whose change doesn't reach it (the
+tutorial guide, its test and the ui test only).
+
+What happens: `casualty_test` "nobody got stuck on the way" failed on CI twice in a row on
+`feat/tutorial-2` (run 39493797840, first try and its re-run), both times Golf following the lead
+along a path of 14-17 points and making no progress (once at (5.2, 5.1) with input but little
+speed, once at (-3.5, 12.3) with input and zero velocity). It passes locally (R0300) and passed on
+dev's 52037f2. The same kind of "stuck" failure shows on other branches' CI (`spacing` "walking
+away from the wall, nobody stays stuck on it" on `claude/ai-driving`). Suggested: read Golf's path
+and input in the CI log; a timing difference on the Linux runners in path following looks likely.
