@@ -86,6 +86,13 @@ static func is_company(zone_id: String) -> bool:
 	return control(zone_id) != ENEMY
 
 
+## Whether the board's zone picks can send the squad into `zone_id` (ContractGen.generate, the
+## faction war's offers in Contracts.server_refresh_board): not into a zone the company holds,
+## flipped or with its FOB there. The seize-and-hold contract names its zone itself.
+static func offers_in(zone_id: String) -> bool:
+	return not is_company(zone_id)
+
+
 ## The HQ and QRF bases in `zone_id` (module ids): its control flips once all of them are down.
 static func flip_sites(zone_id: String) -> Array[String]:
 	var out: Array[String] = []

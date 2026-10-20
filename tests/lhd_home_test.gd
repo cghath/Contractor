@@ -343,6 +343,21 @@ func _test_take_zone() -> void:
 	var neighbours := RegionMap.links(RegionMap.BASE)
 	check(not neighbours.is_empty() and neighbours.all(func(l: Dictionary) -> bool: return RegionMap.links(String(l.to)).any(func(b: Dictionary) -> bool: return String(b.to) == RegionMap.BASE)),
 		"and the zones beside it lead home (%d)" % neighbours.size())
+	# The board never sends the squad into the zone its FOB stands in.
+	var kind := String(zone.get("kind", ""))
+	var could := MissionRegistry.types().any(func(t: String) -> bool:
+		return MissionRegistry.zones_for(MissionRegistry.type_modules(MissionRegistry.type_def(t)), kind).any(
+			func(z: Dictionary) -> bool: return String(z.zone_id) == TAKE))
+	(Contracts._s().board as Array).clear()
+	Contracts.server_refresh_board()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2026
+	var picks: Array = []
+	for i in 200:
+		picks.append(String(ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "zone_kind": kind}).zone_id))
+	var board_zones: Array = (Contracts._s().board as Array).map(func(o: Dictionary) -> String: return String(o.get("zone_id", "")))
+	check(could and not board_zones.is_empty() and TAKE not in board_zones and TAKE not in picks,
+		"a fresh board has no offer in the FOB's zone (%d offers, 200 %s picks, none in %s)" % [board_zones.size(), kind, TAKE])
 	var stash_was := BaseArmory.counts(BaseHub.stash())
 	BaseHub.server_return_to_base()
 	await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseZoneLevel and not BaseHub.switch_pending(), 60.0)

@@ -37,6 +37,10 @@ Design: docs/lhd_home.md (the Captain's calls, and the Proposed ones for him to 
   The ops desk sells no defences aboard; they come with a FOB.
 - Campaigns saved before this keep their FOB and play as before.
 
+#### Fixed
+- The contract board no longer offers jobs in a zone the company holds: not in the zone its FOB
+  stands in, and not in a flipped zone while its seize-and-hold contract is out.
+
 ### Binoculars and the legs-still fix (Captain, 2026-10-20)
 
 #### Added
