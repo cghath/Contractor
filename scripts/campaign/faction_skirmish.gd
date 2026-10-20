@@ -109,7 +109,7 @@ func server_start(faction := "") -> String:
 		if lvl.has_method(&"ground_point"):
 			pos = lvl.call(&"ground_point", pos)
 		var loadout: Array = Kits.loadout(kit_id, i, 2) if Kits.is_data(kit_id) else CompoundLevel.hostile_loadout(i)
-		var s: Soldier = lvl.call(&"spawn_soldier", {"name": "Sk_%s_%d" % [faction.left(6), i + 1], "faction": String(side), "iff": "militia" if side == RIVAL else "allied",
+		var s: Soldier = lvl.call(&"spawn_soldier", {"name": "Sk_%s_%d" % [faction.left(6), i + 1], "faction": String(side), "iff": ("militia" if kit_id == Kits.INSURGENT else "hostile") if side == RIVAL else "allied",
 			"variant": Kits.variant(kit_id) if Kits.is_data(kit_id) else "woodland", "pos": pos, "loadout": loadout,
 			"combat": 0.6, "discipline": 0.6, "guard": false, "mode": "combat"})
 		if s == null:

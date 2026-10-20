@@ -74,6 +74,7 @@ func _ready() -> void:
 	await _test_looted_weapons()
 	await _test_stand_where_it_lay()
 	await _test_respawn_not_where_it_lay()
+	await _test_iff_marks()
 	await _test_dummy()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -805,6 +806,93 @@ func _test_respawn_not_where_it_lay() -> void:
 	_place_player()
 
 
+## IFF marks (Captain, 2026-10-19; GearRig.side_of, iff_art): armbands on both upper arms and a
+## helmet band and crown square (a head band without a helmet), blue for the company, green for
+## allies (allied troops, friendly rebels), orange for the militia, red for other hostiles; none
+## on civilians or HVTs. The spawn settles the side, so every peer draws the same; a helmet
+## taken off leaves the armbands (and the head band shows); a dead body keeps its marks, and
+## its ragdoll carries them; they're drawn at scope range and the friendly ones flare under NVG.
+func _test_iff_marks() -> void:
+	print("IFF marks")
+	var table := [[&"friendly", &"", "tan", &"contractor"], [&"friendly", &"allied", "multicam", &"allied"],
+		[&"friendly", &"rebel", "woodland", &"allied"], [&"hostile", &"militia", "urban", &"militia"],
+		[&"hostile", &"hostile", "urban", &"hostile"], [&"hostile", &"", "urban", &"militia"], [&"hostile", &"", "black", &"hostile"],
+		[&"rival", &"militia", "urban", &"militia"], [&"rival", &"hostile", "woodland", &"hostile"], [&"civilian", &"", "", &""]]
+	var wrong := table.filter(func(c: Array) -> bool: return GearRig.side_of(c[0], c[1], c[2]) != c[3])
+	check(wrong.is_empty(), "each side its marks: company, allies, rebels with us, militia, hostiles, civilians none (wrong: %s)" % [wrong])
+	check(GearRig.hostile_tag("urban", Kits.INSURGENT) == &"militia" and GearRig.hostile_tag("urban", "concord_cn") == &"hostile"
+		and GearRig.hostile_tag("black", Kits.PMC) == &"hostile" and GearRig.hostile_tag("woodland", "concord_ru") == &"hostile",
+		"a hostile's tag: Black Ridge's camo militia, unless the zone's army wears it too; Vantage and the armies hostile")
+	var at := SPOT + Vector3(-8.0, 0, -8.0)
+	var men := {}
+	for spec: Array in [["IffMilitia", &"hostile", "urban", "", ["helmet"]], ["IffVantage", &"hostile", "black", "", ["helmet"]],
+			["IffAlly", &"friendly", "multicam", "allied", ["helmet"]], ["IffRebel", &"friendly", "woodland", "rebel", []],
+			["IffMate", &"friendly", "tan", "", ["helmet"]]]:
+		var s := level.spawn_soldier({"name": spec[0], "faction": String(spec[1]), "variant": spec[2], "iff": spec[3],
+			"pos": at + Vector3(men.size() * 1.5, 0, 0), "loadout": spec[4], "combat": 0.5, "discipline": 0.5, "guard": true})
+		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+		men[spec[0]] = s
+	var civ := level.people.server_spawn_person({"name": "IffCivilian", "kind": "civilian", "side": "neutral", "pos": at + Vector3(0, 0, 3.0)})
+	var hvt := level.people.server_spawn_person({"name": "IffHvt", "kind": "hvt", "side": "hostile", "pos": at + Vector3(1.5, 0, 3.0)})
+	await _frames(3)
+	check(men.IffMilitia.iff == &"militia" and men.IffVantage.iff == &"hostile", "spawned untagged, a hostile is tagged at the spawn (rides the spawn data): %s, %s" % [men.IffMilitia.iff, men.IffVantage.iff])
+	for pair: Array in [["IffMilitia", &"militia"], ["IffVantage", &"hostile"], ["IffAlly", &"allied"], ["IffRebel", &"allied"], ["IffMate", &"contractor"]]:
+		var s: Soldier = men[pair[0]]
+		var marks := _iff_marks(s)
+		var arm: Color = GearRig.IFF[pair[1]][0]
+		var helmet: Color = GearRig.IFF[pair[1]][1]
+		var helmeted: bool = s.inventory.slots[&"helmet"] != &""
+		check(marks.get("Armband", []) == [arm, arm] and marks.get("HelmetMark", []) == ([helmet, helmet] if helmeted else [])
+			and marks.get("HeadBand", []) == ([] if helmeted else [arm]),
+			"%s (%s): armbands on both arms and %s, in its colours (%s)" % [pair[0], pair[1], "its helmet marked" if helmeted else "a head band", marks])
+	check(_iff_marks(player).get("Armband", []) == [GearRig.IFF.contractor[0], GearRig.IFF.contractor[0]], "a player wears the company's (%s)" % [_iff_marks(player)])
+	check(civ != null and hvt != null and _iff_marks(civ).is_empty() and _iff_marks(hvt).is_empty(), "civilians and HVTs wear none (%s, %s)"
+		% [_iff_marks(civ) if civ else "none", _iff_marks(hvt) if hvt else "none"])
+	var far: bool = (men.IffMilitia as Soldier).find_children("Armband", "Node3D", true, false).all(func(n: Node) -> bool:
+		return n.get_children().all(func(m: Node) -> bool: return (m as GeometryInstance3D).visibility_range_end >= 300.0))
+	check(far, "drawn out past scope range (%.0f m), not faded out with the small gear" % GearRig.IFF_RANGE_M)
+	# Helmet off: the armbands stay and a head band shows; back on, the helmet's marks again.
+	var militia: Soldier = men.IffMilitia
+	militia.inventory.unequip(&"helmet")
+	await _frames(2)
+	var orange: Color = GearRig.IFF.militia[0]
+	check(_iff_marks(militia).get("Armband", []) == [orange, orange] and _iff_marks(militia).get("HeadBand", []) == [orange] and not _iff_marks(militia).has("HelmetMark"),
+		"helmet off: the armbands stay and a head band shows (%s)" % [_iff_marks(militia)])
+	militia.inventory.take(&"helmet")
+	await _frames(2)
+	check(_iff_marks(militia).has("HelmetMark") and not _iff_marks(militia).has("HeadBand") and _iff_marks(militia).get("Armband", []).size() == 2,
+		"helmet back on: its marks, no head band (%s)" % [_iff_marks(militia)])
+	# Under the local player's NVG the friendly marks (IR-reflective) flare and the enemy's go dark.
+	var glow := func(s: Soldier) -> float:
+		var band: Node = s.find_children("Armband", "Node3D", true, false)[0]
+		return ((band.get_child(0) as MeshInstance3D).material_override as StandardMaterial3D).emission_energy_multiplier
+	GearRig.iff_light(true, 1.0)
+	var nvg := [glow.call(men.IffMate), glow.call(men.IffAlly), glow.call(militia), glow.call(men.IffVantage)]
+	GearRig.iff_light(false, 1.0)
+	var night: float = glow.call(men.IffMate)
+	GearRig.iff_light(false, 0.0)
+	check(nvg[0] > 1.0 and nvg[1] > 1.0 and nvg[2] == 0.0 and nvg[3] == 0.0 and night == 0.0 and glow.call(militia) > 0.0,
+		"under NVG friendly marks flare, the enemy's don't (%s); in the dark of night none glows (%.2f), by day all a little" % [nvg, night])
+	# The dead body from Looting: still marked, its ragdoll carrying the armbands where it lies.
+	if is_instance_valid(hostile) and hostile.vitals.is_dead():
+		var red: Color = GearRig.IFF.hostile[0]
+		var bands := hostile.find_children("Armband", "Node3D", true, false)
+		var arm_r := hostile.model.part_node(Vitals.UPPER_ARM_R)
+		var gap := INF
+		if is_instance_valid(hostile.ragdoll) and bands.size() == 2:
+			gap = (bands[0] as Node3D).global_position.distance_to((hostile.ragdoll.parts["arm_r"] as Node3D).global_position)
+		check(_iff_marks(hostile).get("Armband", []) == [red, red] and bands.size() == 2 and bands[0].get_parent() == arm_r and gap < 0.35,
+			"a dead body keeps its marks, carried by its ragdoll (%s, %.2f m from its arm)" % [_iff_marks(hostile), gap])
+	else:
+		check(false, "the looted body is still there, dead")
+	for s: Soldier in men.values():
+		s.queue_free()
+	for s: Soldier in [civ, hvt]:
+		if s:
+			s.queue_free()
+	await _frames(2)
+
+
 func _test_dummy() -> void:
 	print("Dummies")
 	var dummy: TargetDummy = level.get_node(^"Dummies/LightDummy")
@@ -875,6 +963,22 @@ func _weapon_drawn(s: Soldier, id: StringName) -> Array[String]:
 	for n in drawn:
 		if (n as Node3D).is_visible_in_tree() and not _going(n, s):
 			out.append(String(s.get_path_to(n)))
+	return out
+
+
+## The IFF marks shown on `s` now (GearRig.iff_art): mark name ("Armband", "HelmetMark",
+## "HeadBand") -> the colour of each of its pieces.
+func _iff_marks(s: Soldier) -> Dictionary:
+	var out := {}
+	for n: Node in s.find_children("*", "Node3D", true, false):
+		if not (n.name in [&"Armband", &"HelmetMark", &"HeadBand"]) or not (n as Node3D).is_visible_in_tree() or _going(n, s):
+			continue
+		for m: Node in n.get_children():
+			var mat := (m as GeometryInstance3D).material_override as StandardMaterial3D if m is GeometryInstance3D else null
+			if mat:
+				if not out.has(String(n.name)):
+					out[String(n.name)] = []
+				out[String(n.name)].append(mat.emission)
 	return out
 
 

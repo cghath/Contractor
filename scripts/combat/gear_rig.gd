@@ -33,25 +33,48 @@ const HELMET_POSITION := Vector3(0, 0.2, 0)
 ## Friend or foe at a glance (Captain, 2026-10-19: "we also need an easy way to discern friendly
 ## and enemy troops in zones, enemies get orange/red armbands and dull red or roange markings on
 ## helmets, friendlies blue and green"): a cloth band round both upper arms and a mark on the
-## helmet (a square on the crown and a patch on the back). [armband, helmet mark]: contractors
-## (players and their squad) blue, allied troops green; the militia (Black Ridge's "urban"
-## camo) orange, every other hostile side red, the helmet marks a duller shade. Proposed.
+## helmet (a band round it and a square on the crown; a band round the head without one).
+## [armband, helmet mark, IR-reflective]: contractors (players and their squad) blue, allied
+## troops green; the militia (Black Ridge) orange, every other hostile side red, the helmet marks
+## a duller shade. Side by side_of. The friendly marks are IR-reflective (they flare under NVG,
+## iff_light) and the enemy's plain cloth, so through NVG, where every colour is green, a
+## bright mark is a friend and a dark one a foe. Proposed.
 const IFF := {
-	&"contractor": [Color("2f6bd6"), Color("2a4f8f")],
-	&"allied": [Color("3f9a3a"), Color("33692e")],
-	&"militia": [Color("e0661a"), Color("a0532a")],
-	&"hostile": [Color("c8281e"), Color("7e2a22")],
+	&"contractor": [Color("2f6bd6"), Color("2a4f8f"), true],
+	&"allied": [Color("3f9a3a"), Color("33692e"), true],
+	&"militia": [Color("e0661a"), Color("a0532a"), false],
+	&"hostile": [Color("c8281e"), Color("7e2a22"), false],
 }
+## The marks' own glow (emission energy on their colour), so they read in shade and at dusk,
+## fading out between these darknesses (DayNight.darkness_at: a mark glowing in the dark of
+## night would give its wearer away); and an IR-reflective mark's under the local player's NVG
+## (iff_light).
+const IFF_GLOW := 0.35
+const IFF_GLOW_DARK := Vector2(0.8, 1.0)
+const IFF_GLOW_NVG := 3.0
+## How far off the marks are still drawn (m): further than a scope's combat range (they're
+## small gear otherwise, SMALL_GEAR_M, and would vanish past 45 m).
+const IFF_RANGE_M := 400.0
+## The kinds of mark (iff_art).
+const IFF_ARMBAND := &"armband"
+const IFF_HELMET := &"helmet"
+const IFF_HEAD := &"head"
 ## Small gear's cost (2026-10-19 perf probe: a 40-man fight on screen was ~15k draw calls, every
-## soldier ~40 meshes each drawn again per shadow pass): pouches, pack straps, the name tape,
-## armbands and helmet marks cast no shadow and aren't drawn past SMALL_GEAR_M (a few pixels
-## there). The body, carrier, pack, helmet and weapons keep theirs.
+## soldier ~40 meshes each drawn again per shadow pass): pouches, pack straps and the name tape
+## cast no shadow and aren't drawn past SMALL_GEAR_M (a few pixels there). The body, carrier,
+## pack, helmet and weapons keep theirs. The IFF marks cast none either but are drawn out to
+## IFF_RANGE_M: telling friend from foe through a scope is what they're for.
 const SMALL_GEAR_M := 45.0
-## The armband: how far below the shoulder pivot it sits (m), how tall, and how much wider
-## than the upper arm (0.12 m) it is.
-const ARMBAND_Y := -0.1
-const ARMBAND_H := 0.065
-const ARMBAND_W := 0.128
+## The armband: how far below the shoulder pivot its middle sits (m), how tall, and how much
+## wider than the upper arm (0.12 m) it is. Most of the upper arm below the deltoid, so it reads
+## as a block of colour through a 4x scope at 150 m (2-3 pixels).
+const ARMBAND_Y := -0.11
+const ARMBAND_H := 0.13
+const ARMBAND_W := 0.13
+## The band round a helmet (or the head) and the helmet's crown square (m).
+const HELMET_BAND_H := 0.045
+const HEAD_BAND_H := 0.035
+const CROWN_SQUARE := 0.09
 ## A tourniquet's band and the red of medical pull tabs, as drawn on the carrier.
 const TQ_BAND := Color("1b1b1a")
 const MED_RED := Color("b3261e")
@@ -168,7 +191,11 @@ var _straps: Node3D              # the pack's shoulder straps (torso-local)
 var _carrier: ItemData          # the worn carrier (carrier_fit reads its depth and tier)
 var _straps_for := ""  # the pack and carrier they were built for
 var _tape: Node3D                 # the name tape on the carrier's loop panel
-var _armbands: Array[Node3D] = []  # the IFF armbands (_set_armbands), on the upper arms
+var _armbands: Array[Node3D] = []  # the IFF armbands (_set_iff_marks), on the upper arms
+var _head_band: Node3D            # the IFF band round the head, shown without a helmet
+static var _iff_materials := {}   # "colour|IR-reflective" -> its material (iff_material)
+static var _iff_nvg := false      # the local player looks through NVG (iff_light)
+static var _iff_dark := 0.0       # how dark it is here (iff_light)
 var _tape_key := ""              # carrier and text it shows
 var _pack_sway := GearSway.make(PACK_SWAY[0], PACK_SWAY[1], PACK_SWAY[2], PACK_SWAY[3], PACK_SWAY[4], PACK_SWAY[5])
 var _pouch_sway := GearSway.make(POUCH_SWAY[0], POUCH_SWAY[1], POUCH_SWAY[2], POUCH_SWAY[3], POUCH_SWAY[4], POUCH_SWAY[5])
@@ -184,17 +211,47 @@ func _ready() -> void:
 	_rebuild()
 
 
+## The marks (IFF) a soldier wears: [armband, helmet mark, IR-reflective] (IFF), [] for none.
+## Every peer works them out from what the spawn carried (Soldier.faction, iff, variant).
+static func iff_of(faction: StringName, iff: StringName, variant: String) -> Array:
+	var side := side_of(faction, iff, variant)
+	return IFF[side] if side != &"" else []
+
+
+## Whose marks (a key of IFF, &"" for none) a soldier of side `faction` (Soldier.faction) wears,
+## by the `iff` tag his spawner gave him (Soldier.iff) and his camo `variant`:
+## - "friendly": the company's (blue) untagged: players, squadmates, the company's own squads and
+##   crews (Harm.is_company); "allied" (AlliedTroops' allied elements, a friendly faction's
+##   skirmishers) and "rebel" (rebels fighting beside the company, RebelCalls) green: friendlies
+##   are blue and green (Captain, 2026-10-19).
+## - "hostile", or "rival" (FactionSkirmish: a faction at odds with the company): "militia"
+##   orange, "hostile" red; untagged (an older save), by camo: Black Ridge's orange, else red.
+##   CompoundLevel.spawn_soldier tags every hostile (hostile_tag).
+## - anyone else (civilians and HVTs, "civilian"): none.
+static func side_of(faction: StringName, iff: StringName, variant: String) -> StringName:
+	match faction:
+		&"friendly":
+			return &"allied" if iff in [&"allied", &"rebel"] else &"contractor"
+		&"hostile", &"rival":
+			if iff in [&"militia", &"hostile"]:
+				return iff
+			return &"militia" if variant == Kits.variant(Kits.INSURGENT) and faction == &"hostile" else &"hostile"
+	return &""
+
+
+## Host, at the spawn: the tag (Soldier.iff) for a hostile in camo `variant`, in a zone whose
+## holder fields `zone_kit` (Kits.kit_of): "militia" in Black Ridge's camo (Kits.INSURGENT's),
+## unless the zone's army wears that camo too (the Eastern Concord's Chinese kit); else
+## "hostile" (Vantage, the regional armies).
+static func hostile_tag(variant: String, zone_kit: String) -> StringName:
+	var militia_camo := Kits.variant(Kits.INSURGENT)
+	if variant != militia_camo or (Kits.is_data(zone_kit) and Kits.variant(zone_kit) == militia_camo):
+		return &"hostile"
+	return &"militia"
+
+
 ## Where an armor piece sits. Plates sit on the carrier's faces, outside the 0.12 m-deep
 ## hitbox, strike face outward; the carrier sets how far out (heavy carriers are thicker).
-## The marks (IFF) a soldier on `faction` wears ([] for none): `iff` "allied" for allied troops.
-static func iff_of(faction: StringName, iff: StringName, variant: String) -> Array:
-	if faction == &"friendly":
-		return IFF[&"allied" if iff == &"allied" else &"contractor"]
-	if faction == &"hostile":
-		return IFF[&"militia" if variant == "urban" else &"hostile"]
-	return []
-
-
 static func armor_transform(slot: StringName, carrier: ItemData) -> Transform3D:
 	var depth: float = carrier.stats.get("plate_depth", 0.14) if carrier else 0.14
 	var side: float = carrier.stats.get("side_plate_x", 0.245) if carrier else 0.245
@@ -341,14 +398,14 @@ func _rebuild() -> void:
 	_set_pouches()
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
-	_set_armbands()
-	for small: Node in [_pouches, _straps, _tape] + _armbands:
+	_set_iff_marks()
+	for small: Node in [_pouches, _straps, _tape]:
 		_small_detail(small)
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
 	# Inside a heavy exo, the pilot's body and kit don't show (ExoMech.hide_pilot): his head does.
-	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _gear.get(&"backpack", [&"", null])[1], _pouches, _straps, _tape]
+	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _gear.get(&"backpack", [&"", null])[1], _pouches, _straps, _tape] + _armbands
 	for slot: StringName in _armor:
 		if slot != &"helmet":
 			kit.append(_armor[slot])
@@ -668,40 +725,115 @@ static func _small_detail(node: Node) -> void:
 		_small_detail(child)
 
 
-## The IFF armbands (model.iff): a band of cloth round each upper arm, over the sleeve's patch.
-## Built once (the side doesn't change).
-func _set_armbands() -> void:
-	if not _armbands.is_empty() or model.iff.is_empty() or model.part_node(Vitals.UPPER_ARM_L) == null:
+## The IFF marks on the body (model.iff): an armband round each upper arm and a band round the
+## head, on the model's own parts, so animations and the ragdoll carry them. Built once (the
+## side doesn't change); the head band shows only while no helmet is worn (a helmet carries its
+## own marks, _mark_helmet), so taking a helmet off leaves him marked.
+func _set_iff_marks() -> void:
+	if model.iff.is_empty() or model.part_node(Vitals.UPPER_ARM_L) == null:
 		return
-	for part: StringName in [Vitals.UPPER_ARM_R, Vitals.UPPER_ARM_L]:
-		var band := _part_box(Vector3(ARMBAND_W, ARMBAND_H, ARMBAND_W), Vector3(0, ARMBAND_Y, 0), model.iff[0], render_layers)
-		band.name = "Armband"
-		model.part_node(part).add_child(band)
-		_armbands.append(band)
+	if _armbands.is_empty():
+		for part: StringName in [Vitals.UPPER_ARM_R, Vitals.UPPER_ARM_L]:
+			var band := iff_art(IFF_ARMBAND, model.iff, AABB(), render_layers)
+			model.part_node(part).add_child(band)
+			_armbands.append(band)
+	if _head_band == null:
+		var fit := _mesh_box(model.head)
+		if fit.size != Vector3.ZERO:
+			_head_band = iff_art(IFF_HEAD, model.iff, fit, render_layers)
+			model.head.add_child(_head_band)
+	if _head_band:
+		_head_band.visible = not _armor.has(&"helmet")
 
 
-## The IFF marks on a worn helmet (model.iff): a square on the crown and a patch on the back,
-## on the helmet piece itself, so they go with it.
+## The IFF marks on a worn helmet (model.iff), on the helmet piece itself, so they go with it.
 func _mark_helmet(piece: VoxelArmor) -> void:
-	if model.iff.is_empty():
+	var fit := _mesh_box(piece)
+	if model.iff.is_empty() or fit.size == Vector3.ZERO:
 		return
-	var box := AABB()
-	for child: Node in piece.get_children():
+	piece.add_child(iff_art(IFF_HELMET, model.iff, fit, render_layers))
+
+
+## The box of `node`'s first mesh (its voxel art), node-local; empty without one.
+static func _mesh_box(node: Node3D) -> AABB:
+	for child: Node in node.get_children():
 		if child is MeshInstance3D:
-			box = (child as MeshInstance3D).transform * (child as MeshInstance3D).get_aabb()
-			break
-	if box.size == Vector3.ZERO:
+			return (child as MeshInstance3D).transform * (child as MeshInstance3D).get_aabb()
+	return AABB()
+
+
+## The IFF marks' art, all of it (the Captain's art can replace this): mark `kind` (IFF_ARMBAND
+## round an upper arm, IFF_HELMET on a helmet, IFF_HEAD round a bare head) in side `iff`'s
+## colours (an IFF entry), fitted to `fit` (the helmet's or head's box, parent-local; unused for
+## an armband), as one node to add to that part. Bold flat blocks of colour, glowing a little
+## (iff_material), drawn out to IFF_RANGE_M and casting no shadow.
+static func iff_art(kind: StringName, iff: Array, fit: AABB, layers: int) -> Node3D:
+	var root := Node3D.new()
+	var parts: Array[MeshInstance3D] = []
+	match kind:
+		IFF_ARMBAND:
+			root.name = "Armband"
+			parts.append(_part_box(Vector3(ARMBAND_W, ARMBAND_H, ARMBAND_W), Vector3(0, ARMBAND_Y, 0), iff[0], layers))
+		IFF_HELMET:
+			# A band round the helmet just above its rim (seen from every side) and a square on
+			# the crown (seen from above), in the duller helmet shade.
+			root.name = "HelmetMark"
+			var mid := fit.get_center()
+			parts.append(_part_box(Vector3(fit.size.x + 0.012, HELMET_BAND_H, fit.size.z + 0.012),
+				Vector3(mid.x, fit.position.y + fit.size.y * 0.12 + HELMET_BAND_H * 0.5, mid.z), iff[1], layers))
+			parts.append(_part_box(Vector3(CROWN_SQUARE, 0.01, CROWN_SQUARE), Vector3(mid.x, fit.end.y - 0.003, mid.z), iff[1], layers))
+		IFF_HEAD:
+			# A band round the forehead, over the hair, in the armband's colour.
+			root.name = "HeadBand"
+			var mid := fit.get_center()
+			parts.append(_part_box(Vector3(fit.size.x + 0.012, HEAD_BAND_H, fit.size.z + 0.012),
+				Vector3(mid.x, fit.position.y + fit.size.y * 0.8, mid.z), iff[0], layers))
+	for mesh in parts:
+		mesh.material_override = iff_material(iff[1] if kind == IFF_HELMET else iff[0], iff.size() > 2 and bool(iff[2]))
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mesh.visibility_range_end = IFF_RANGE_M
+		mesh.visibility_range_end_margin = 20.0
+		root.add_child(mesh)
+	return root
+
+
+## The material of a mark in `colour` (the voxels' own colour, plus a glow of it: _iff_glow).
+## Shared per colour.
+static func iff_material(colour: Color, ir: bool) -> StandardMaterial3D:
+	var key := "%s|%s" % [colour.to_html(), ir]
+	if not _iff_materials.has(key):
+		var m := StandardMaterial3D.new()
+		m.vertex_color_use_as_albedo = true
+		m.vertex_color_is_srgb = true
+		m.roughness = 0.9
+		m.emission_enabled = true
+		m.emission = colour
+		m.emission_energy_multiplier = _iff_glow(ir)
+		m.set_meta(&"ir", ir)
+		_iff_materials[key] = m
+	return _iff_materials[key]
+
+
+## How much a mark glows now (an `ir` one: IR-reflective): IFF_GLOW by day and at dusk, none in
+## the dark of night; through NVG an IR-reflective mark flares (IFF_GLOW_NVG) and plain cloth
+## shows only the light it reflects.
+static func _iff_glow(ir: bool) -> float:
+	if _iff_nvg:
+		return IFF_GLOW_NVG if ir else 0.0
+	return IFF_GLOW * (1.0 - smoothstep(IFF_GLOW_DARK.x, IFF_GLOW_DARK.y, _iff_dark))
+
+
+## The light the marks are seen in on this machine (NvgView, every frame): through the local
+## player's lowered NVG (`nvg`) or not, and how dark it is (`darkness`, DayNight.darkness_at).
+## Only this machine's picture changes.
+static func iff_light(nvg: bool, darkness: float) -> void:
+	darkness = snappedf(clampf(darkness, 0.0, 1.0), 0.02)
+	if nvg == _iff_nvg and is_equal_approx(darkness, _iff_dark):
 		return
-	var colour: Color = model.iff[1]
-	var mid := box.get_center()
-	var crown := _part_box(Vector3(0.06, 0.008, 0.06), Vector3(mid.x, box.end.y - 0.002, mid.z), colour, render_layers)
-	crown.name = "HelmetMark"
-	piece.add_child(crown)
-	var back := _part_box(Vector3(0.07, 0.035, 0.008), Vector3(mid.x, mid.y + box.size.y * 0.15, box.end.z - 0.002), colour, render_layers)
-	back.name = "HelmetMark"
-	piece.add_child(back)
-	_small_detail(crown)
-	_small_detail(back)
+	_iff_nvg = nvg
+	_iff_dark = darkness
+	for m: StandardMaterial3D in _iff_materials.values():
+		m.emission_energy_multiplier = _iff_glow(bool(m.get_meta(&"ir")))
 
 
 ## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
@@ -1245,9 +1377,14 @@ func _box(item: ItemData) -> MeshInstance3D:
 
 
 func _clear() -> void:
-	for band: Node3D in _armbands:
-		band.queue_free()
+	# The IFF marks leave their parts at once, so the new ones keep their names (Armband, ...).
+	for band: Variant in _armbands + ([_head_band] if _head_band else []):
+		if is_instance_valid(band):
+			if (band as Node).get_parent():
+				(band as Node).get_parent().remove_child(band as Node)
+			(band as Node).queue_free()
 	_armbands.clear()
+	_head_band = null
 	for piece: VoxelArmor in _armor.values():
 		piece.queue_free()
 	_armor.clear()

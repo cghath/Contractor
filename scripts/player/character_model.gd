@@ -368,8 +368,9 @@ var look_pitch := 0.0
 var aiming := false
 ## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
 var left_handed := false
-## Friend-or-foe marks GearRig draws (armbands, helmet marks): [armband, helmet] colours, or
-## [] for none (civilians). Soldier sets it from his side (GearRig.iff_of).
+## Friend-or-foe marks GearRig draws (armbands, a helmet's marks or a head band): [armband
+## colour, helmet colour, IR-reflective] (GearRig.IFF), or [] for none (civilians and HVTs).
+## Soldier sets it from his side before the model's ready (GearRig.iff_of), on every peer.
 var iff: Array = []
 ## Text on the carrier's name tape (an AI's surname, upper case; "" for none). GearRig draws it.
 var name_tape := ""

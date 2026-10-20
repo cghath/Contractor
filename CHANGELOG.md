@@ -83,6 +83,29 @@ to F-06 in `docs/audits/followups.md`, with a ready fix on branch `fix/a2-ai-veh
 - In the tutorial a villager answers "Ask if they need help" and "Give supplies", and the
   rebels' Lookouts answer the call, without a campaign.
 
+### IFF marks you can read through a scope (Captain's tasking 7, 2026-10-19)
+
+#### Changed
+
+- **Armbands and helmet marks now show at combat range**: before, they disappeared past 45 m.
+  They're now bigger blocks of flat colour (an armband over most of each upper arm, a band round
+  the helmet plus a crown square, or a band round the head with no helmet) that glow slightly at
+  dusk and are drawn out to 400 m. Blue is the company, green is allies (allied troops and
+  rebels on our side), orange is the Black Ridge militia, and red is every other hostile.
+  Civilians and HVTs have none. A body keeps its marks, and its ragdoll carries them. All the
+  art is in `GearRig.iff_art`.
+- **Under NVG, friend and foe look different**: friendly marks are IR-reflective and flare in the
+  tube, while enemy marks are plain cloth and stay dark.
+
+#### Fixed
+
+- Eastern Concord troops in their Chinese kit wore militia orange (they share Black Ridge's
+  urban camo). They now wear hostile red: every hostile's side is set when it spawns, from its
+  camo and whose zone it is (`GearRig.hostile_tag`), and that travels with the spawn to every
+  peer and into saved bodies.
+- Faction skirmishers at odds with the company had no marks. Friendly rebels wore the company's
+  blue.
+
 ### Executive audit fixes and their review (cghath's side, 2026-10-17 to 18)
 
 An outside audit of v0.4.36 (`docs/audits/executive-2026-10-17/REPORT.md`) found six defects;
