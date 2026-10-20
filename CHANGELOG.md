@@ -22,11 +22,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   until the player carries him over), base_zone (confirming waits until the crossing counts the
   player in; a fly-on that doesn't board him now says where he and the helicopters are), voice
   (asking waits until the crosshair finds the soldier, and nobody else stands on the line).
-- **A squadmate's slot no longer goes behind a wall for a moment** (casualty soak "stuck"): a
-  wall coming between the team's place and a slot pulls the slot at once; the 2 s hold that
-  stops slots flipping by a doorway now only delays letting it go. Turning a corner by the
-  compound's back wall, Golf's slot sat outside it for about 2 s and he set off round by the
-  gate.
+- **A squadmate's slot no longer sits behind a wall from the lead for a moment** (casualty soak
+  "stuck"): the 2 s hold that stops slots flipping by a doorway no longer keeps a slot (or a
+  team's place) on the far side of a wall from the lead himself. Turning the corner by the
+  compound's back wall, the second team's place and then Golf's slot sat outside it in turn,
+  and he set off round by the gate.
 - **Blood no longer falls through the ground under a body lying on it** (interaction, CI): a drop
   from the lowest skin, pressed a little into the ground, found no floor below it and lay as a
   pool cell 2.5 m under the yard; the floor is looked for again from just above it.
