@@ -15,6 +15,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-06 | P2 | ~~An ammo bearer's belt handoff turns a part-used belt into a full one (audit A2-11)~~ fixed 2026-10-20 (Claude, cghath's fix/a2-ai-vehicles) |
 
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
+| F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
 
 ## F-01: the building scan only sees one floor
 
@@ -131,3 +132,24 @@ Suggested fix: use `Vitals.has_item(s.inventory, id)` there (it counts loose ite
 and items that need none), so "on its own" only covers a wound he really can't treat. The tutorial
 works around it by handing out two loose bandages (`TutorialGuide.KIT`), so its "treat yourself"
 step isn't done for the player by a medic.
+## F-07: the far-AI sleep can freeze a soldier mid-fall
+
+Found by cghath's side (fix/ci-flakes, 2026-10-20) in world_test's ground guard check; the file
+is Claude's (Captain's side), so it isn't changed here.
+
+Location: [dynamic_sim.gd](../../scripts/world/dynamic_sim.gd), `should_sleep`, the
+`OFF_GROUND_M` test.
+
+A hostile far from every player (world_test's FallGuy, ~800 m off) that falls is only kept
+awake while he's more than `OFF_GROUND_M` (1 m) above `ground_point`. In his last metre he can
+be put to sleep mid-fall, `process_mode` disabled with his velocity still set: CI run
+39421584652 left him at y 1.73 over ground at 0.99, falling at 4.9 m/s, not on the floor, until
+the test gave up. A slow runner makes it likelier (a fall spread over more ticks), and a body
+frozen like that floats in the air until a player comes within `WAKE_M`. The doc comment says
+"nobody is frozen mid-fall".
+
+Suggested fix: don't sleep a soldier that isn't on the floor (`not s.is_on_floor()`), or whose
+`velocity` isn't about zero, as well as the height test; or sleep him only after he has been
+on the floor for a tick or two. world_test now turns DynamicSim off during its ground guard
+check (that check isn't about the sleep); a test of the fix could drop a far hostile 2 m onto
+the ground with DynamicSim running and check he lands.

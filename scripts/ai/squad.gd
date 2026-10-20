@@ -1461,30 +1461,24 @@ func _trail_point(metres: float) -> Variant:
 
 ## Whether a wall or building stands between `from` (where a team forms) and `to` (a slot): a
 ## slot is never across a wall from the lead (Captain, 2026-10-14: with wider spacing, slots
-## fell inside compounds the lead walked past, and men went round for them). A wall coming
-## between pulls the slot at once; each slot (`key`) stays pulled until the line has been clear
-## for SIDE_HOLD_S: walking past a doorway, the line through it opens and shuts, and a slot
-## flipping between the room and this side of its wall had a man running in and out (casualty
-## soak, Charlie in the compound's building). The hold used to keep a clear answer too, so a
-## slot that went behind a wall stayed there for up to SIDE_HOLD_S, twice over (the team's
-## place, then the man's): the lead turning the corner by the compound's back wall put Golf's
-## slot outside it for about 2 s, and he turned to go round by the gate (casualty soak "stuck",
-## CI; at the soak's 3x time scale that was 6 s of game time).
+## fell inside compounds the lead walked past, and men went round for them). Each slot (`key`)
+## keeps its answer for SIDE_HOLD_S: walking past a doorway, the line through it opens and
+## shuts, and a slot flipping between the room and this side of its wall had a man running in
+## and out (casualty soak, Charlie in the compound's building). But a clear answer is never
+## held for a slot that has gone behind a wall from the lead himself: the lead turning the
+## corner by the compound's back wall put the second team's place outside it, and then Golf's
+## slot, each held there for SIDE_HOLD_S in turn, and Golf set off round by the gate (casualty
+## soak "stuck" on CI; at the soak's 3x time scale the real-time hold is 6 s of game time).
 func _blocked(from: Vector3, to: Vector3, key: Variant) -> bool:
 	var now := Soldier._now()
 	var blocked := _wall_between(from, to)
 	var was: Dictionary = _sides.get(key, {})
-	if blocked:
-		if was.is_empty() or not bool(was.pulled):
-			_sides[key] = {"pulled": true, "since": now}
-		else:
-			was.since = now  # (while pulled, since is the last time it was seen blocked)
-		return true
-	if was.is_empty() or not bool(was.pulled) or now - float(was.since) >= SIDE_HOLD_S:
-		if was.is_empty() or bool(was.pulled):
-			_sides[key] = {"pulled": false, "since": now}
-		return false
-	return true  # still pulled: the line hasn't been clear for SIDE_HOLD_S yet
+	if was.is_empty() or bool(was.pulled) == blocked or now - float(was.since) >= SIDE_HOLD_S \
+			or (blocked and _wall_between(leader.global_position, to)):
+		if was.is_empty() or bool(was.pulled) != blocked:
+			_sides[key] = {"pulled": blocked, "since": now}
+		return blocked
+	return bool(was.pulled)  # held to the side it was on
 
 
 func _wall_between(from: Vector3, to: Vector3) -> bool:
