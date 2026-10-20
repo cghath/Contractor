@@ -418,6 +418,11 @@ func _open_menu(screen_pos: Vector2) -> void:
 		_menu.add_item("Delete marker", 3)
 	if _our_drivers():
 		_menu.add_item("Our drivers: drive here (%s)" % MapGrid.grid_ref(_menu_at, area), 4)  # SquadDrivers' drive_to
+	var teams := _our_weapon_loads()  # G-25: our squadmates carrying a static weapon's loads
+	if teams.has("gun"):
+		_menu.add_item("Weapons team: set up the gun here (%s)" % MapGrid.grid_ref(_menu_at, area), 5)
+	if teams.has("mortar"):
+		_menu.add_item("Weapons team: mortar fire here (%s)" % MapGrid.grid_ref(_menu_at, area), 6)
 	_add_allied_orders()
 	_menu.position = Vector2i(get_screen_position() + screen_pos)
 	_menu.reset_size()
@@ -440,6 +445,29 @@ func _on_menu(id: int) -> void:
 			var me := MapNodes.local_player(self)
 			if me:
 				me._server_squad_command.rpc_id(1, "drive_to", Vector3(_menu_at.x, 0.0, _menu_at.y), PackedStringArray())
+		5, 6:  # the Weapons team map orders (StaticWeapons.server_command)
+			var me := MapNodes.local_player(self)
+			if me:
+				me._server_squad_command.rpc_id(1, "wt_setup" if id == 5 else "wt_fire", Vector3(_menu_at.x, 0.0, _menu_at.y), PackedStringArray())
+
+
+## What our squad's AI carry of static weapons (every peer sees what's in their hands): "gun"
+## and/or "mortar" when someone has one of their loads, or a mortar team of ours is set up.
+func _our_weapon_loads() -> Array[String]:
+	var out: Array[String] = []
+	for s: Soldier in MapNodes.squad_ai(self):
+		var kit := StaticWeapons.kit_of_load(s.inventory.hands) if s.inventory else ""
+		if kit == "":
+			continue
+		var kind := "mortar" if (StaticWeapons.KITS[kit] as Dictionary).has("mortar") else "gun"
+		if kind not in out:
+			out.append(kind)
+	if "mortar" not in out and multiplayer.is_server():
+		for t in get_tree().get_nodes_in_group(StaticWeapons.TEAMS_GROUP):
+			if t is MortarTeam and (t as MortarTeam).ordered:
+				out.append("mortar")
+				break
+	return out
 
 
 ## Whether one of our squad's AI has the wheel of a ground vehicle here (SquadDrivers; every peer
