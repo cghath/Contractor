@@ -59,6 +59,10 @@ const ITEM_MASK := 1 << 2
 ## the enemy's (CompoundLevel hostiles), and a client's big random peer id landed on it (Captain,
 ## 2026-10-15: "buddy drawn in enemy blue-grey camo").
 const PLAYER_VARIANTS: Array[String] = ["multicam", "woodland", "desert", "tan"]
+## The company's uniform (Captain, 2026-10-20: "make sure our troops wear the same uniform as the
+## player"): every player and every company soldier (squadmates, the FOB's guards, our crews)
+## wears it; allied troops wear their own nation's kit (their green marks tell them apart).
+const COMPANY_VARIANT := "multicam"
 ## Loading magazines from loose rounds (_server_load_mags): seconds per round (proposed:
 ## 1 s per 5 rounds), and how far you can move before it stops.
 const LOAD_ROUND_S := 0.2
@@ -137,10 +141,8 @@ var last_shot_suppressed := false
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
-## Whose IFF marks he wears (GearRig.side_of), as his spawner tagged him: friendly, "" for the
-## company's own, "allied" for allied troops (AlliedTroops, a friendly faction's skirmishers),
-## "rebel" for rebels on our side; hostile, "militia" or "hostile" (CompoundLevel.spawn_soldier
-## tags every hostile). Set before the body enters the tree.
+## Which friendly marks he wears (GearRig.iff_of): "allied" for allied troops (AlliedTroops),
+## "" for everyone else (his faction decides). Set before the body enters the tree.
 @export var iff := &""
 ## Camo for AI bodies (players get theirs from the peer id). Set before entering the tree.
 @export var variant := ""
@@ -239,7 +241,7 @@ func _enter_tree() -> void:
 	if is_ai():
 		$Model.variant = variant if variant != "" else "woodland"
 	else:
-		$Model.variant = PLAYER_VARIANTS[absi(name.to_int() - 1) % PLAYER_VARIANTS.size()]  # host gets the first
+		$Model.variant = COMPANY_VARIANT  # (was by peer id, PLAYER_VARIANTS: players and squad wore different camo)
 	$Model.body = body if body != "" else VoxelArt.MALE
 	$Model.iff = GearRig.iff_of(faction, iff, $Model.variant)
 
@@ -2540,9 +2542,8 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "iff" (its marks, GearRig.side_of), "variant",
-## "person_name", "nation" and "left" (the name tape, nationality and hand, so the body is the
-## same person after a reload), "role",
+## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
+## name tape, nationality and hand, so the body is the same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
 ## CharacterModel.ragdoll_net, or empty) and "gear" (an
@@ -2550,7 +2551,7 @@ func server_leave_body() -> Soldier:
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
-		"iff": String(iff), "variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
+		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}

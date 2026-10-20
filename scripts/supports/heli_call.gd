@@ -1664,7 +1664,7 @@ func _crew_survive(at: Vector3) -> void:
 	for i in CREW_SURVIVORS:
 		var spot := lvl.ground_point(at + Vector3(randf_range(-5.0, 5.0), 0.0, randf_range(-5.0, 5.0)))
 		var crew := lvl.spawn_soldier({"name": ("%s_Crew%d" % [callsign, i + 1]).validate_node_name(), "faction": "friendly",
-			"variant": "tan", "pos": spot, "loadout": ["helmet", "m17", "mag_9mm"], "combat": 0.3, "discipline": 0.6,
+			"variant": Soldier.COMPANY_VARIANT, "pos": spot, "loadout": ["helmet", "m17", "mag_9mm"], "combat": 0.3, "discipline": 0.6,
 			"guard": true, "mode": "aware"})
 		if crew == null:
 			continue

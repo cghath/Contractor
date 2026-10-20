@@ -72,15 +72,11 @@ func _process(_delta: float) -> void:
 	update()
 
 
-func _exit_tree() -> void:
-	GearRig.iff_light(false, 0.0)
-
-
 ## Shows the effect while `body`'s NVG is down and powered, the tube sized to its field of view.
 func update() -> void:
 	var on := body != null and is_instance_valid(body) and Nvg.is_on(body)
 	rect.visible = on
-	GearRig.iff_light(on, DayNight.darkness_at(body.global_position if on else Vector3.ZERO))  # IFF marks: their glow (friendly ones flare in the tube)
+	GearRig.set_iff_nvg(on)  # our side's IFF marks glow under it
 	if not on:
 		return
 	var cam_fov := body.camera.fov if body.camera else 75.0

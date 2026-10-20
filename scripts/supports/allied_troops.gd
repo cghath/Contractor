@@ -272,7 +272,7 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 	for i in size:
 		var pos: Vector3 = level.call(&"ground_point", at + across * SPACING_M * (i - (size - 1) / 2.0))
 		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "rebel" if rebel else ("" if company else "allied"),
-			"variant": "woodland" if rebel else ("tan" if company else Kits.variant(kit)),
+			"variant": "woodland" if rebel else (Soldier.COMPANY_VARIANT if company else Kits.variant(kit)),
 			"pos": pos, "loadout": CompoundLevel.hostile_loadout(i) if rebel else Kits.loadout(kit, i, 1, String(spec.mix)), "role": Kits.role(kit, i, String(spec.mix)),
 			"combat": float(k.get("combat", 0.6)), "discipline": float(k.get("discipline", 0.65)), "guard": false, "mode": "aware"})
 		if s == null:

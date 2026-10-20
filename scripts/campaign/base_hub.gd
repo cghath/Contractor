@@ -739,7 +739,7 @@ func _spawn_away(lvl: CompoundLevel) -> void:
 		if String(a.zone_id) != zone_id or m.is_empty() or lvl.ai.get_node_or_null(NodePath(String(m.callsign))):
 			continue
 		var stats := Roster.ai_stats(m)
-		var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": Vector3(float(a.pos[0]), float(a.pos[1]) + 0.1, float(a.pos[2])),
+		var data := {"name": String(m.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": Vector3(float(a.pos[0]), float(a.pos[1]) + 0.1, float(a.pos[2])),
 			"loadout": [], "role": "", "team": 0, "slot": -1, "combat": stats.combat, "discipline": stats.discipline, "guard": true}
 		data.merge(Roster.identity(m))
 		var s: Soldier = lvl.spawn_soldier(data)
@@ -1797,7 +1797,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	var pos: Vector3 = anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
 		else lvl.next_spawn_point() + Vector3(0, 0, 3)
 	var stats := Roster.ai_stats(m)
-	var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": pos, "loadout": [],
+	var data := {"name": String(m.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": pos, "loadout": [],
 		"role": "", "team": team, "slot": slot, "combat": stats.combat, "discipline": stats.discipline, "guard": false}
 	data.merge(Roster.identity(m))  # the same person every deployment: name tape, nationality, hand, body
 	var s: Soldier = lvl.spawn_soldier(data)
@@ -1823,7 +1823,7 @@ func _spawn_recovery_targets(lvl: CompoundLevel) -> void:
 			continue
 		var p: Array = (c.objectives[0] as Dictionary).get("params", {}).get("pos", [0.0, 0.0, 0.0])
 		var stats := Roster.ai_stats(m)
-		var data := {"name": String(m.callsign), "faction": "friendly", "variant": "tan", "pos": Vector3(float(p[0]), float(p[1]) + 0.1, float(p[2])),
+		var data := {"name": String(m.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": Vector3(float(p[0]), float(p[1]) + 0.1, float(p[2])),
 			"loadout": [], "role": "", "team": 0, "slot": -1, "combat": stats.combat, "discipline": stats.discipline, "guard": true}
 		data.merge(Roster.identity(m))
 		var s: Soldier = lvl.spawn_soldier(data)

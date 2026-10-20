@@ -615,7 +615,6 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.name = data.name
 	corpse.faction = StringName(data.get("faction", "friendly"))
 	corpse.variant = String(data.get("variant", "woodland"))
-	corpse.iff = StringName(data.get("iff", ""))  # its IFF marks (older saves: by faction and camo)
 	corpse.body = String(data.get("body", ""))
 	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
 	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
@@ -979,7 +978,7 @@ func _spawn_squadmate(slot: int, role: StringName, team: int) -> Soldier:
 	var wedge: Array = Squad.FORMATIONS["wedge"]
 	var pos := anchor.global_transform * (wedge[maxi(slot - 1, 0) % wedge.size()] as Vector3) if anchor \
 		else spawn_point(slot) + Vector3(0, 0, 3)
-	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": "tan", "pos": ground_point(pos), "loadout": [],
+	return spawn_soldier({"name": callsign, "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": ground_point(pos), "loadout": [],
 		"role": String(role), "team": team, "slot": slot, "combat": 0.5 + 0.03 * (slot % 5), "discipline": 0.6, "guard": false})
 
 
@@ -1003,10 +1002,6 @@ func spawn_soldier(data: Dictionary) -> Soldier:
 			d["body"] = VoxelArt.FEMALE if female else VoxelArt.MALE
 		if d.body == VoxelArt.FEMALE:
 			d["person_name"] = Names.feminine(String(d.person_name), String(d.get("nation", "")))
-		if faction == &"hostile" and String(d.get("iff", "")) == "":
-			# His IFF marks (GearRig.side_of): militia or not, by his camo and whose zone this is.
-			var holder: String = call(&"_zone_enemy") if has_method(&"_zone_enemy") else ""
-			d["iff"] = String(GearRig.hostile_tag(String(d.get("variant", "")), Kits.kit_of(holder)))
 	return ai_spawner.spawn(d) as Soldier
 
 

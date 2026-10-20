@@ -24,6 +24,9 @@ const WAKE_M := 550.0
 ## Further than this above or below the terrain he's off the ground (falling, or on a roof or a
 ## floor up: those keep simulating, so nobody is frozen mid-fall).
 const OFF_GROUND_M := 1.0
+## Asleep only once he's on the floor, not falling (F-07: a far hostile fell asleep in his last
+## metre of a fall and floated there).
+const STILL_MPS := 0.3
 const SETTLE_S := 1.5
 const SETTLE_META := &"sim_settle"
 const BRAIN_META := &"sim_brain_off"
@@ -124,6 +127,8 @@ static func should_sleep(s: Soldier, players: Array[Vector3], sleeping: bool) ->
 	var lvl := CompoundLevel.current(s)
 	if not sleeping and lvl and absf(s.global_position.y - lvl.ground_point(s.global_position).y) > OFF_GROUND_M:
 		return false  # falling, or waiting for the ground under him to load: let him land first
+	if not sleeping and (not s.is_on_floor() or absf(s.velocity.y) > STILL_MPS):
+		return false  # in his last metre of a fall: not frozen in the air (F-07; a walker on the ground settles first)
 	var brain := SquadAI.of(s)
 	if brain:
 		if brain.fighting():

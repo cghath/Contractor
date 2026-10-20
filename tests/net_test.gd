@@ -353,8 +353,6 @@ func _check_looted_rifle(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", 3.0)
 	check(aimer != null and aimer.is_aiming and aimer.gear._held_key == &"primary", "a hostile aims its rifle: shouldered here too")
 	if aimer:
-		check(aimer.iff == &"hostile" and aimer.model.iff == GearRig.IFF.hostile and aimer.find_children("Armband", "Node3D", true, false).size() == 2,
-			"its IFF marks here too, from the spawn alone: hostile red armbands (%s, %s)" % [aimer.iff, aimer.model.iff])
 		var sent := int(aimer.inventory.net_gear.get("state", {}).get("slot_state", {}).get("primary", {}).get("rounds", -1))
 		check(aimer.inventory.rounds_in(&"primary") == AIMER_ROUNDS and aimer.inventory.net_ammo.size() == Inventory.WEAPON_SLOTS.size() + 1
 			and aimer.inventory.net_ammo[1] == AIMER_ROUNDS,

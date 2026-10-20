@@ -201,7 +201,7 @@ func server_post_guards() -> void:
 		var callsign := "Guard%d" % (i + 1)
 		var s := ai.get_node_or_null(NodePath(callsign)) as Soldier
 		if i < want and s == null:
-			s = spawn_soldier({"name": callsign, "faction": "friendly", "variant": "tan", "pos": ground_point(fob.to_global(GUARD_POSTS[i])),
+			s = spawn_soldier({"name": callsign, "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": ground_point(fob.to_global(GUARD_POSTS[i])),
 				"loadout": GUARD_KIT, "combat": 0.5, "discipline": 0.6, "guard": true, "mode": "aware"})
 			if s:
 				s.rotation.y = atan2(-GUARD_POSTS[i].x, -GUARD_POSTS[i].z) + PI  # looking out
