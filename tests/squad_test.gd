@@ -40,7 +40,7 @@ func _ready() -> void:
 	await _test_buddy_carries_buddy()
 	await _test_contact()
 	_test_flash_stuns()
-	_test_fire_fix()
+	await _test_fire_fix()
 	await _test_spotting()
 	await _test_fire_discipline()
 	await _test_no_fire_into_walls()
@@ -94,6 +94,37 @@ func _test_fire_fix() -> void:
 	var d300 := Ballistics.drop_m(m4, 300.0)
 	var d500 := Ballistics.drop_m(m4, 500.0)
 	check(absf(Ballistics.drop_m(m4, Ballistics.ZERO_M)) < 0.05 and d300 > 0.1 and d500 > d300, "the round drops past its zero (%.2f m at 300, %.2f m at 500)" % [d300, d500])
+	# G-05: getting down on his own: prone to fire at a man far off in the open, not at one close in,
+	# not on the move, not when ordered a stance.
+	var bravo_ai := SquadAI.of(_ai("Bravo"))
+	var bravo := bravo_ai.body
+	var foe_far := level.spawn_soldier({"name": "ProneFoeFar", "faction": "hostile", "variant": "urban",
+		"pos": bravo.global_position + Vector3(0, 0, -140), "loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	SquadAI.of(foe_far).process_mode = Node.PROCESS_MODE_DISABLED
+	var keep_target := bravo_ai.target
+	var keep_dest := bravo_ai._has_destination
+	var keep_order := bravo_ai.stance_order
+	bravo_ai.target = foe_far
+	bravo_ai._has_destination = false
+	bravo_ai.stance_order = -1
+	bravo_ai._stance_at = -1000.0
+	var far_line := Throwables.clear_line(bravo.get_world_3d(), bravo.global_position + Vector3.UP * SquadAI.PRONE_EYE_M, foe_far.aim_point())
+	var far := bravo_ai._auto_stance()
+	check(far == SoldierMovement.Stance.PRONE or not far_line, "an enemy 140 m off in the open, a line lying down: he goes prone (%d, line %s)" % [far, far_line])
+	foe_far.global_position = bravo.global_position + Vector3(0, 0, -12)
+	bravo_ai._stance_at = -1000.0
+	check(bravo_ai._auto_stance() == -1, "12 m off: he stays up, ready to move")
+	foe_far.global_position = bravo.global_position + Vector3(0, 0, -140)
+	bravo_ai._has_destination = true
+	bravo_ai._stance_at = -1000.0
+	check(bravo_ai._auto_stance() == -1, "on the move: on his feet")
+	bravo_ai.target = keep_target
+	bravo_ai._has_destination = keep_dest
+	bravo_ai.stance_order = keep_order
+	bravo_ai._auto_prone = false
+	bravo.want_stance = -1
+	foe_far.queue_free()
 	# G-17: high ground with a line scores better than low; out of another group's sight better still.
 	var world := player.get_world_3d()
 	var up_high := player.global_position + Vector3(0, 40, 0)

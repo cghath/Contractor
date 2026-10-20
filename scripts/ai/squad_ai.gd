@@ -533,6 +533,19 @@ const REACH_PER_POWER := 0.2
 const REACH_MAX_M := 700.0
 const REACH_PISTOL_M := 60.0
 const HOLDOVER_FROM_M := 150.0
+## Getting down (AI bar G-05, with G-17's folds; the Captain, 2026-10-19: soldiers in defilade, a
+## man prone behind a fold in the ground firing over it). In a fight (not ordered a stance, not
+## moving unless pinned, the enemy PRONE_MIN_M or more off) he goes prone when, lying there, his
+## eye (PRONE_EYE_M) sees the enemy and either the ground in front hides him lying down
+## (FOLD_HIDDEN_M: a fold, a crest, a berm) or the enemy is PRONE_OPEN_M or more off; pinned in
+## the open he gets flat at once (a friendly crawls to cover, PRONE_SPEED). Checked every
+## STANCE_CHECK_S. A fold also counts as cover when one is looked for (find_cover). Proposed.
+const PRONE_MIN_M := 25.0
+const PRONE_OPEN_M := 100.0
+const PRONE_EYE_M := 0.4
+const FOLD_HIDDEN_M := 0.2
+const STANCE_CHECK_S := 1.0
+const FOLD_BONUS := 2.0
 ## Fire by range (AI bar G-09): full bursts inside BURST_CLOSE_M, short ones out to BURST_FAR_M,
 ## single aimed shots past it; the pause between bursts grows PAUSE_PER_M a metre past
 ## BURST_CLOSE_M, to PAUSE_MAX_MULT. Machine guns keep their bursts at every range. Doctrine's
@@ -690,6 +703,8 @@ var _fire_line := {}  # the last line-of-fire check (_fire_line): {"at", "from",
 var _no_shot_since := -1.0  # when this unit last found it had a mark but no line of fire (-1: it has one)
 var _fire_spot: Variant = null  # where a base of fire / Suppress unit moves to get its shot (_find_fire_spot)
 var _overwatch_taken: Variant = null  # the plan's high ground last taken up (_take_overwatch)
+var _auto_prone := false  # down on his own (G-05), not by an order
+var _stance_at := -1000.0  # when _auto_stance last cast its rays
 ## Men of a base of fire on high ground stand this far round its spot (G-17). Proposed.
 const OVERWATCH_SPREAD_M := 3.0
 var _fire_spot_aim := Vector3.INF  # the aim that spot was found for
@@ -1330,6 +1345,14 @@ func _act() -> void:
 		body.want_stance = stance_order  # done treating himself: back to his own (or ordered) stance
 	if stance_order >= 0 and not _care_prone:
 		body.want_stance = stance_order if intent != Intent.CASUALTY else -1  # (casualty care kneels as it needs)
+	elif not _care_prone:
+		var low := _auto_stance() if intent == Intent.FIGHT else -1
+		if low >= 0:
+			body.want_stance = low
+			_auto_prone = true
+		elif _auto_prone:
+			body.want_stance = -1
+			_auto_prone = false
 
 
 ## Combat mode stance and weapon carry for the movement and fighting intents (reloading,
@@ -3639,6 +3662,43 @@ func _doctrine_id() -> StringName:
 	return Doctrine.default_for(body.faction)
 
 
+## The stance this unit takes on its own in a fight (G-05): SoldierMovement.Stance.PRONE, or -1
+## to leave it to the crouch logic (see PRONE_MIN_M).
+func _auto_stance() -> int:
+	if not body.vitals.is_up() or body.carrying != null or Vehicle.ride_of(body) != null or body.inventory.hands != &"":
+		return -1
+	var pinned := body.suppression >= PINNED
+	if _has_destination and not pinned:
+		return -1  # on the move: on his feet (a pinned man crawls)
+	var foe: Soldier = target if target != null and is_instance_valid(target) and target.vitals.is_up() else null
+	var threat := foe.global_position if foe else body.threat_pos
+	if threat == Vector3.ZERO or body.global_position.distance_to(threat) < PRONE_MIN_M:
+		return -1  # close in: on his knees or feet, ready to move
+	if pinned and not _at_cover():
+		return SoldierMovement.Stance.PRONE  # pinned in the open: flat, now
+	var now := Soldier._now()
+	if now - _stance_at < STANCE_CHECK_S:
+		return SoldierMovement.Stance.PRONE if _auto_prone else -1
+	_stance_at = now
+	if foe == null:
+		return SoldierMovement.Stance.PRONE if _auto_prone and in_contact() else -1  # keeps it while the fight lasts
+	var world := body.get_world_3d()
+	if not Throwables.clear_line(world, body.global_position + Vector3.UP * PRONE_EYE_M, foe.aim_point()):
+		return -1  # lying there he can't see him: kneel or stand to fire
+	var hidden := not Throwables.clear_line(world, threat + Vector3.UP * 1.5, body.global_position + Vector3.UP * FOLD_HIDDEN_M)
+	if hidden or body.global_position.distance_to(threat) >= PRONE_OPEN_M:
+		return SoldierMovement.Stance.PRONE
+	return -1
+
+
+## Whether `q` is a fold in the ground against the threat (G-17): lying there he's hidden
+## (FOLD_HIDDEN_M) and from his prone eye (PRONE_EYE_M) he sees over it.
+func _fold_at(world: World3D, q: Vector3) -> bool:
+	var from := body.threat_pos + Vector3.UP * 1.5
+	return not Throwables.clear_line(world, from, q + Vector3.UP * FOLD_HIDDEN_M) \
+		and Throwables.clear_line(world, q + Vector3.UP * PRONE_EYE_M, body.threat_pos + Vector3.UP * 1.2)
+
+
 ## How far out `s` picks targets with the weapon in hand (G-27; see REACH_IRONS_M).
 static func reach_m(s: Soldier) -> float:
 	var weapon := s.active_weapon() if s.inventory else null
@@ -3748,12 +3808,17 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 			var score := _flat_distance(q) + q.distance_to(anchor) * 0.5
 			if score - COVER_LOW_BONUS >= best_score:
 				continue  # it can't win even as the best low cover: skip its raycasts and voxel trace
-			if taken.any(func(c: Vector3) -> bool: return c.distance_to(q) < COVER_GAP_M) or not _cover_protects(q):
+			if taken.any(func(c: Vector3) -> bool: return c.distance_to(q) < COVER_GAP_M):
 				continue
-			if not VoxelWorld.stops_round_in(body, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.9, SOFT_COVER_TEST_J):
-				score += SOFT_COVER_PENALTY  # only wood or sheet metal in the way: rounds come through
-			if Throwables.clear_line(world, q + Vector3.UP * 1.6, body.threat_pos + Vector3.UP * 1.2):
-				score -= COVER_LOW_BONUS  # low cover: you can stand up and return fire
+			if not _cover_protects(q):
+				if q.distance_to(body.threat_pos) < PRONE_MIN_M or not _fold_at(world, q):
+					continue
+				score -= FOLD_BONUS  # a fold in the ground: prone behind it, firing over (G-17, G-05)
+			else:
+				if not VoxelWorld.stops_round_in(body, body.threat_pos + Vector3.UP * 1.5, q + Vector3.UP * 0.9, SOFT_COVER_TEST_J):
+					score += SOFT_COVER_PENALTY  # only wood or sheet metal in the way: rounds come through
+				if Throwables.clear_line(world, q + Vector3.UP * 1.6, body.threat_pos + Vector3.UP * 1.2):
+					score -= COVER_LOW_BONUS  # low cover: you can stand up and return fire
 			score += maxf(0.0, 6.0 - q.distance_to(body.threat_pos)) * 2.0
 			if score < best_score:
 				best = q
@@ -3802,7 +3867,9 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 
 
 func _cover_protects(point: Vector3) -> bool:
-	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, point + Vector3.UP * 0.9)
+	if not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, point + Vector3.UP * 0.9):
+		return true
+	return _auto_prone and point.distance_to(_cover_point) < 0.5 and _fold_at(body.get_world_3d(), point)  # lying behind a fold
 
 
 ## The cover spots other soldiers hold now (find_cover checks its candidates against them).
