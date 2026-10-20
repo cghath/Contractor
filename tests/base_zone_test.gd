@@ -436,8 +436,14 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 	var up_ms := Time.get_ticks_msec()
 	await _wait_until(func() -> bool: return there.players.get_node_or_null(^"1") != null, 10.0)
 	me = there.players.get_node_or_null(^"1") as Soldier
-	var aboard := await _wait_until(func() -> bool: return me != null and Vehicle.ride_of(me) is Helicopter, 25.0)  # (CI runs slower)
-	check(aboard, "flown in aboard a helicopter to its insertion LZ (after %.1f s: %s)" % [(Time.get_ticks_msec() - up_ms) / 1000.0, _air_state(there, me)])
+	var arrived := _air_state(there, me)
+	var went_down := [""]  # (the first moment he's seen down while waiting, for a failure's message)
+	var aboard := await _wait_until(func() -> bool:
+		if me != null and not me.vitals.is_up() and went_down[0] == "":
+			went_down[0] = "down after %.1f s: %s" % [(Time.get_ticks_msec() - up_ms) / 1000.0, _air_state(there, me)]
+		return me != null and Vehicle.ride_of(me) is Helicopter, 25.0)  # (CI runs slower)
+	check(aboard, "flown in aboard a helicopter to its insertion LZ (after %.1f s: %s; on arrival: %s; %s)" % [(Time.get_ticks_msec() - up_ms) / 1000.0,
+		_air_state(there, me), arrived, went_down[0] if went_down[0] != "" else "never seen down"])
 	var down_to_earth := func() -> void:
 		HeliSupports.of(there).server_dismiss_all()  # (the test walks on from here: everyone out, on the ground)
 		if me:
@@ -456,8 +462,10 @@ func _test_fly_on(zone: ZoneLevel) -> ZoneLevel:
 
 ## Where `me` is and what the helicopters in `lvl` are doing (a failed check's message).
 func _air_state(lvl: CompoundLevel, me: Soldier) -> String:
-	var out := "player %s" % ("gone" if me == null or not is_instance_valid(me) else "at %s up=%s respawn=%d aboard %s" % [
-		me.global_position, me.vitals.is_up(), me.respawn_state, Vehicle.ride_of(me).name if Vehicle.ride_of(me) else "nothing"])
+	var out := "player %s" % ("gone" if me == null or not is_instance_valid(me) else "at %s up=%s (%s: %s; wounds %s) respawn=%d aboard %s" % [
+		me.global_position, me.vitals.is_up(), me.vitals.condition_text(), ", ".join(PackedStringArray(me.vitals.why_unconscious())),
+		me.vitals.wound_list().map(func(w: Dictionary) -> String: return "%s %s" % [w.get("part", "?"), w.get("kind", "?")]),
+		me.respawn_state, Vehicle.ride_of(me).name if Vehicle.ride_of(me) else "nothing"])
 	var helis := HeliSupports.of(lvl) if lvl and is_instance_valid(lvl) else null
 	if helis == null:
 		return out + "; no helicopter supports"

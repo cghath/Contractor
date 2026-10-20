@@ -1086,8 +1086,10 @@ func _test_dead_bodies() -> void:
 		SquadAI.of(bearer).set_physics_process(false)  # stop picking it up again while we loot
 	await _frames(2)
 	check(_gear_of(echo) == gear_before, "carried, he still has everything on him")
-	# Loot one thing, then everything.
-	_place(player, echo.global_position + Vector3(1.0, 0.1, 0.0))
+	# Loot one thing, then everything. Looting reaches to where the body lies (Soldier.body_point,
+	# the ragdoll's chest), not to its capsule: the bearer lays him down and his ragdoll can rest
+	# metres from it (CI 39427114692: put by the capsule, every loot below moved nothing).
+	await _beside_body(echo)
 	var mags := _entry_index(echo, &"mag_762")
 	var mags_on := echo.inventory.count_of(&"mag_762")
 	var player_mags := player.inventory.count_of(&"mag_762")
@@ -1101,7 +1103,8 @@ func _test_dead_bodies() -> void:
 	player._server_loot_item.rpc_id(1, echo.get_path(), mags[0], mags[1], &"mag_762")
 	await _frames(3)
 	check(mags[1] >= 0 and player.inventory.count_of(&"mag_762") > player_mags and echo.inventory.count_of(&"mag_762") < mags_on,
-		"Loot > one entry: his 7.62 magazines go into the looter's pouches (%d -> %d)" % [player_mags, player.inventory.count_of(&"mag_762")])
+		"Loot > one entry: his 7.62 magazines go into the looter's pouches (%d -> %d; told \"%s\"; %.1f m from where he lies)" % [player_mags,
+		player.inventory.count_of(&"mag_762"), player._hud._message.text, echo.body_point().distance_to(player.global_position)])
 	var looter_gear := player.inventory.net_state.duplicate(true)
 	player.inventory.strip()  # room for everything: nothing worn yet
 	var left_before := _items_of(echo)
@@ -1118,6 +1121,7 @@ func _test_dead_bodies() -> void:
 	SquadAI.of(second).set_physics_process(false)
 	second.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	await _frames(2)
+	await _beside_body(second)
 	player.inventory.take(&"rounds_556", 5000)  # pouches and pack full to the brim
 	var both_before := _items_in([second, player])
 	var ground_2 := _item_ids()
@@ -1541,6 +1545,25 @@ func _remove_hostiles() -> void:
 func _place(s: Soldier, pos: Vector3) -> void:
 	s.global_position = pos
 	s.velocity = Vector3.ZERO
+
+
+## Puts the player a metre from where `body` lies (Soldier.body_point: its ragdoll's chest once it
+## lies as one), once it lies still, and waits until he's within reach of it (what looting and
+## carrying measure to).
+func _beside_body(body: Soldier) -> void:
+	var lay := [body.body_point()]
+	await _wait_until(func() -> bool:
+		var now := body.body_point()
+		var still := now.distance_to(lay[0]) < 0.05
+		lay[0] = now
+		return still, 3.0)
+	var at := body.body_point()
+	_place(player, Vector3(at.x + 1.0, 0.1, at.z))
+	await _wait_until(func() -> bool:
+		return body.body_point().distance_to(player.global_position) <= Soldier.INTERACT_REACH, 2.0)
+	if body.body_point().distance_to(player.global_position) > Soldier.INTERACT_REACH:
+		print("    (the player at %s is %.1f m from %s lying at %s)" % [player.global_position,
+			body.body_point().distance_to(player.global_position), body.name, body.body_point()])
 
 
 func _flat(a: Vector3, b: Vector3) -> float:
