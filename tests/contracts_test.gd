@@ -1093,31 +1093,28 @@ func _test_hot_zone_arrival_pay() -> void:
 	check(Contracts.server_accept(cid, ContractGen.default_terms()) == "" and int(Contracts.contract(cid).deal.advance) > 0
 		and Economy.cash() == cash + int(Contracts.contract(cid).deal.advance), "a hot-zone contract taken from the board pays its advance as before")
 	cash = Economy.cash()
-	check(Contracts.server_start_deployment([cid]) == "", "(deployed to the hot zone)")
-	var arrivals: Array = Contracts.held().filter(func(c: Dictionary) -> bool: return String(c.get("in_zone", "")) == "arrival")
-	check(arrivals.size() >= 2 and Economy.cash() == cash, "%d arrival contracts handed over, nothing paid on arrival" % arrivals.size())
+	# The arrival contracts as server_start_deployment hands them over (_hot_zone_extras), without
+	# going live: a live hot zone here would start its scenarios (a downed crew, reinforcements) in
+	# the menu's level, and they'd still be about when the ENet test hosts.
+	var arrivals: Array = Contracts._hot_zone_extras([Contracts.contract(cid)], "ridge_hot")
+	check(arrivals.size() >= 2 and arrivals.all(func(c: Dictionary) -> bool: return String(c.get("in_zone", "")) == "arrival" and c.state == Contracts.ACCEPTED)
+		and Economy.cash() == cash, "%d arrival contracts handed over, nothing paid on arrival" % arrivals.size())
 	check(arrivals.all(func(c: Dictionary) -> bool: return int(c.deal.advance) == 0 and int(c.deal.pay_total) > 0 and int(c.deal.completion) == int(c.deal.pay_total)),
 		"each pays all of it on completion (%s)" % [arrivals.map(func(c: Dictionary) -> String: return "$%d" % int(c.deal.completion))])
 	if arrivals.is_empty():
 		return
-	var done_cid := String(arrivals[0].cid)
-	var objectives: Objectives = Contracts.objectives
-	var mine := objectives.for_contract(done_cid)
-	if mine.filter(func(o: Dictionary) -> bool: return not o.optional).is_empty():
-		objectives.server_add([{"oid": "%s_t1" % done_cid, "cid": done_cid, "kind": "scenario", "text": "scenario", "state": Objectives.ACTIVE,
-			"optional": false, "bonus_share": 0.0, "progress": "", "params": {}, "pos": Vector3.ZERO}])
-	for o: Dictionary in objectives.for_contract(done_cid):
-		if not o.optional:
-			objectives.server_set_state(String(o.oid), Objectives.DONE)
-	var d := Contracts.server_end_deployment({"extracted": ["You"]})
+	# The debrief (DebriefCalc.compute, as server_end_deployment runs it): the first done, the rest not.
+	var objs: Array = []
+	for i in arrivals.size():
+		objs.append({"oid": "%s_t1" % arrivals[i].cid, "cid": arrivals[i].cid, "kind": "scenario", "text": "x", "optional": false, "bonus_share": 0.0,
+			"state": Objectives.DONE if i == 0 else Objectives.FAILED})
+	var d := DebriefCalc.compute(arrivals, objs, 1, {"extracted": ["You"]})
 	var lines: Array = d.contracts
-	var done: Array = lines.filter(func(l: Dictionary) -> bool: return l.cid == done_cid)
-	var lapsed: Array = lines.filter(func(l: Dictionary) -> bool: return l.cid != done_cid and l.cid != cid)
-	check(done.size() == 1 and done[0].outcome == "completed" and int(done[0].advance) == 0 and int(done[0].completion) == int(arrivals[0].deal.pay_total),
-		"the one done is paid in full on completion ($%d)" % (int(done[0].completion) if not done.is_empty() else 0))
-	check(not lapsed.is_empty() and lapsed.all(func(l: Dictionary) -> bool: return l.outcome == "lapsed" and int(l.advance) == 0 and int(l.pay) == 0),
-		"the ones left undone lapse having paid nothing")
-	Contracts.server_finish_debrief()
+	check(lines[0].outcome == "completed" and int(lines[0].advance) == 0 and int(lines[0].completion) == int(arrivals[0].deal.pay_total),
+		"the one done is paid in full on completion ($%d)" % int(lines[0].completion))
+	check(lines.slice(1).all(func(l: Dictionary) -> bool: return l.outcome == "lapsed" and int(l.advance) == 0 and int(l.pay) == 0)
+		and int(d.totals.contract_value) == int(arrivals[0].deal.pay_total) - int(d.fines),
+		"the ones left undone lapse having paid nothing: all the deployment made is the one done")
 
 
 ## Economy balance 2026-10-20: the approved numbers (docs/economy.md).
