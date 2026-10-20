@@ -18,11 +18,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Test flakes** that turned most CI runs red, each now waiting on what its check needs:
   world (the ground guard's own round no longer races the test's check; the fall spot is clear
   of rocks round the whole capsule; the far-AI sleep stays off while it checks the fall, since
-  it froze the faller in his last metre: F-07 in `docs/audits/followups.md`), map (the staged squad stands still in the LZ before the
-  extraction countdown), loop (the casualty lies out of the helicopter's own loading reach
-  until the player carries him over), base_zone (confirming waits until the crossing counts the
-  player in; a fly-on that doesn't board him now says where he and the helicopters are), voice
-  (asking waits until the crosshair finds the soldier, and nobody else stands on the line).
+  it froze the faller in his last metre: F-07 in `docs/audits/followups.md`), map (the staged
+  squad stands still in the LZ before the extraction countdown), loop (the casualty lies out of
+  the helicopter's own loading reach until the player carries him over), base_zone (the player
+  is whole again before the fly-on, the crossing-on's wound having bled him out cold on a bad
+  roll; confirming waits until the crossing counts him in), voice (asking waits until the
+  crosshair finds the soldier, and nobody else stands on the line), casualty (looting from
+  beside where the body lies, not its capsule).
 - **A squadmate's slot no longer sits behind a wall from the lead for a moment** (casualty soak
   "stuck"): the 2 s hold that stops slots flipping by a doorway no longer keeps a slot (or a
   team's place) on the far side of a wall from the lead himself. Turning the corner by the
