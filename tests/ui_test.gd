@@ -106,6 +106,18 @@ func _ready() -> void:
 	BaseHub.new_campaign(7)
 	for hire: Dictionary in Hiring.pool(BaseHub.hiring(), BaseHub.day()).slice(0, 3):  # a squad on the pages and to kit
 		BaseHub.server_hire(String(hire.cid))
+	# The memorial wall full (feat/fallen): long names and contracts, tags home and missing, and one
+	# man missing after he fell (the warning under the wall).
+	var wall := Fallen.memorial(BaseHub.roster())
+	for n in 14:
+		wall.append({"mid": "m9%03d" % n, "name": "Bartholomew Lindqvist-Okafor %d" % n, "callsign": ["Maverick", "Kingpin", "Knuckles"][n % 3],
+			"role": String([Roles.RIFLEMAN, Roles.MEDIC, Roles.MARKSMAN][n % 3]), "day": 3 + n, "zone": "harbour_yard", "zone_name": "Harbour Yard",
+			"contract": "Recover the field laptop from the farmhouse cellar" if n % 2 == 0 else "", "missions": n,
+			"tags": Fallen.RECOVERED if n % 3 != 0 else Fallen.MISSING, "how": "Killed in action" if n % 3 != 0 else "Missing, declared dead on day %d" % (10 + n)})
+	var hired := Roster.ids(BaseHub.roster())
+	if not hired.is_empty():
+		var missing := BaseHub.member(hired[-1])
+		missing.merge({"status": Roster.MIA, "mia_dead": true, "mia_zone": "harbour_yard", "fell": {"day": 5, "zone": "harbour_yard", "contract": ""}}, true)
 	BaseHub.view = BaseHub.build_view()
 	for page: String in BaseUI.PAGES:
 		await _fit("base: " + page, func() -> Node:

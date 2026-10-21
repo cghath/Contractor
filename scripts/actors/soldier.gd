@@ -228,6 +228,11 @@ var _rounds_fired := 0  # host: rounds this soldier has fired (every TRACER_EVER
 ## replicated by ServerSync. display_name() shows the name; the node keeps its callsign.
 var person_name := ""
 var nation := ""
+## Dog tags (cghath's list, 2026-10-20): every company soldier wears them, set by the host as
+## the body spawns (BaseHub: Fallen.tags_of a roster member, Fallen.player_tags a player's
+## main character) and replicated by ServerSync, late joiners included; {} for everyone else,
+## and on a body once they're taken (server_take_tags). Saved with a body (body_record "tags").
+var dog_tags: Dictionary = {}
 ## Where the host put this body when it spawned (the level's _add_player), sent with the spawn
 ## by ServerSync. A client's own player is placed there as it spawns: its position is the
 ## owner's to replicate, so the host's spawn doesn't carry it and it would start at the
@@ -1843,6 +1848,7 @@ func _server_set_triage(path: NodePath, card: StringName) -> void:
 		_client_message.rpc_id(owner_peer(), "Too far away")
 		return
 	other.server_set_triage(card)
+	other.server_log_care(display_name(), "Triage card: %s" % String(Vitals.TRIAGE_TEXT.get(card, card)))  # the shared triage log
 
 
 ## Takes the tourniquets off `part` of `path` once its arterial bleeding is packed (timed,
@@ -1887,6 +1893,8 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
 	if outcome == "done" and multiplayer.is_server() and faction == &"friendly":
 		RebelSupport.on_treated(self, target)  # a civilian treated: the locals notice (rebel support)
+	if outcome.begins_with("done") and multiplayer.is_server():
+		_log_shared_care(target, item_id, part, outcome.trim_prefix("done").trim_prefix(": "))
 	if SessionLog.session_id == "":
 		return
 	var at := ""
@@ -1894,6 +1902,27 @@ func _log_care(target: Node, item_id: StringName, part: StringName, outcome: Str
 		at = " at %.1f m" % _treat_distance(target)
 	SessionLog.note("%s treats %s: %s%s%s, %s" % [log_name(), "themself" if target == self else SessionLog.who(target),
 		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", at, outcome])
+
+
+## Host: a treatment done goes in the casualty's shared triage log (Vitals.server_log_care):
+## who did what, for everyone who opens the medical menu on them ("Tourniquet, left
+## thigh"; `note` how it went where it isn't plain success).
+func _log_shared_care(target: Node, item_id: StringName, part: StringName, note: String) -> void:
+	var other := Vitals.find_on(target) if is_instance_valid(target) else null
+	if other == null:
+		return
+	var what := ""
+	if item_id == LOG_TOURNIQUET_OFF:
+		what = "Tourniquet off"
+	elif ItemDB.has_item(item_id):
+		what = ItemDB.get_item(item_id).name
+	else:
+		what = String(item_id).capitalize() if item_id != &"" else "Care"
+	if part != &"":
+		what += ", %s" % Vitals.part_name(part)
+	if note != "":
+		what += " (%s)" % note
+	other.server_log_care(display_name() if target != self else "%s (self)" % display_name(), what)
 
 
 ## Whose kit treating `target` with `item_id` uses up: with `their_kit`, the casualty's own
@@ -2616,15 +2645,15 @@ func server_leave_body() -> Soldier:
 ## name tape, nationality and hand, so the body is the same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
-## CharacterModel.ragdoll_net, or empty) and "gear" (an
-## Inventory.net_state: everything on it).
+## CharacterModel.ragdoll_net, or empty), "gear" (an
+## Inventory.net_state: everything on it) and "tags" (its dog_tags, {} if none or taken).
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
 		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
-		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}
+		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net), "tags": dog_tags.duplicate()}
 
 
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the
@@ -2678,13 +2707,53 @@ static func server_enforce_body_cap(tree: SceneTree) -> void:
 		extra -= 1
 
 
-## Host only. Takes a dead body out of the world (the body cap); its gear drops where it lay.
+## Host only. Takes a dead body out of the world (the body cap); its gear drops where it lay,
+## and so do its dog tags, as the item taking them gives (Fallen.TAGS).
 func server_remove_body() -> void:
 	if is_instance_valid(carried_by):
 		carried_by.release_carried()
 	_server_drop_everything()
+	if not dog_tags.is_empty() and CompoundLevel.current(self):
+		CompoundLevel.current(self).server_spawn_dropped(Fallen.TAGS, 1, body_point() + Vector3.UP * 0.3, dog_tags.duplicate())
+		dog_tags = {}
 	remove_from_group(DEAD_GROUP)
 	queue_free()
+
+
+## Interaction menu "Take dog tags" (cghath's list, 2026-10-20): a fallen company soldier's
+## tags (dog_tags) come off his body into your gear, as a Fallen.TAGS item whose state is the
+## tags. Reach is to the body (body_point: the ragdoll's chest), as for looting.
+@rpc("any_peer", "call_local", "reliable")
+func _server_take_tags(path: NodePath) -> void:
+	if not _from_owner() or not vitals.is_up():
+		return
+	var other := get_node_or_null(path) as Soldier
+	if other == null or other == self or other.is_queued_for_deletion() or not other.vitals.is_dead() or other.dog_tags.is_empty():
+		return
+	if other.body_point().distance_to(global_position) > INTERACT_REACH + INTERACT_SLACK:
+		_client_message.rpc_id(owner_peer(), "Too far away")
+		return
+	model.server_loot(other, true)  # kneeling at the body
+	var why := server_take_tags(other)
+	_client_message.rpc_id(owner_peer(), why if why != "" else "You take %s's dog tags" % Fallen.tags_text(other.dog_tags_taken))
+
+
+## What the last server_take_tags took off this body (for the taker's message and the log).
+var dog_tags_taken: Dictionary = {}
+
+
+## Host only. Takes `other`'s dog tags into this soldier's gear (no reach check: the request
+## above checks it; AI and tests call this). Returns "" or why not.
+func server_take_tags(other: Soldier) -> String:
+	if other == null or not other.vitals.is_dead() or other.dog_tags.is_empty():
+		return "No tags on them"
+	var tags := other.dog_tags.duplicate()
+	if inventory.take(Fallen.TAGS, 1, tags) != 1:
+		return "No room for the dog tags"
+	other.dog_tags_taken = tags
+	other.dog_tags = {}
+	SessionLog.note("%s takes the dog tags off %s (%s)" % [log_name(), other.log_name(), Fallen.tags_text(tags)])
+	return ""
 
 
 ## Interaction menu "Loot all": everything on a body you may loot (lootable_by: the dead, a

@@ -128,6 +128,10 @@ var _ready_peers := {}     # host: peer id -> true for each player ready to depl
 ## the squad counts as home for the assault.
 var _held_end: Array = []
 var _squad_home_for_assault := false
+## Host: the member ids whose dog tags (or bodies) came out at the extraction being settled
+## (_collect_tags; Fallen), and whether it has been looked at yet.
+var _tags_out := {}
+var _tags_collected := false
 
 
 func _ready() -> void:
@@ -783,6 +787,7 @@ func _spawn_away(lvl: CompoundLevel) -> void:
 		s.set_meta(&"roster_id", mid)
 		s.set_meta(&"recovery", true)
 		s.set_meta(&"away", true)
+		s.dog_tags = Fallen.tags_of(m)
 		s.inventory.net_state = GameState.from_json((a.gear as Dictionary).duplicate(true))
 		s.vitals.server_restore(a.get("vitals", {}))
 		var brain := SquadAI.of(s)
@@ -1584,6 +1589,7 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 	elif main.get("kit_due", false) and not Restock.is_blank(Restock.template_of(gear)):
 		main.erase("kit_due")  # they already have gear of their own: that wins
 	player.inventory.net_state = GameState.from_json(gear.duplicate(true))
+	player.dog_tags = Fallen.tags_of(member(String(dep.stand_ins[key]))) if stand_in else Fallen.player_tags(key, main)  # every company soldier wears tags
 	_apply_carry("p:%d" % peer, player)  # came on through a crossing: as they were (LZ-2)
 	_apply_resume("pk:" + player_key(peer), player)  # a saved deployment resumed: wounds as saved (LZ-4)
 	if fresh:
@@ -1841,6 +1847,7 @@ func server_spawn_roster_squadmate(lvl: CompoundLevel, slot: int, role: StringNa
 	var s: Soldier = lvl.spawn_soldier(data)
 	s.role = role
 	s.set_meta(&"roster_id", mid)
+	s.dog_tags = Fallen.tags_of(m)  # his tags: taken off his body and carried out, he's killed in action, not missing
 	s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
 	_apply_carry("m:" + mid, s)  # came on through a crossing: as they were (LZ-2)
 	_apply_resume("m:" + mid, s)  # a saved deployment resumed: wounds as saved (LZ-4)
@@ -1868,6 +1875,7 @@ func _spawn_recovery_targets(lvl: CompoundLevel) -> void:
 		s.role = StringName(m.get("role", Roles.RIFLEMAN))
 		s.set_meta(&"roster_id", mid)
 		s.set_meta(&"recovery", true)
+		s.dog_tags = Fallen.tags_of(m)
 		s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
 		var brain := SquadAI.of(s)
 		if brain:
@@ -1932,6 +1940,11 @@ func end_deployment(report: Dictionary) -> void:
 		var s := parent.get_node_or_null(NodePath(String(record.get("node", "")))) as Soldier
 		if s:
 			extracted.append(s)
+	# Dog tags first (Fallen): whose came out, and the death benefits they settle, before the
+	# debrief counts the expenses (each benefit is a line of its own there) and the people's gear
+	# goes home (the tags go to the company's records, not into anyone's kit or the stash).
+	_collect_tags(lvl, extracted, report)
+	_settle_tags(Contracts.is_deployed())
 	var point: Array = report.get("point", {}).get("pos", [])
 	var hvts: Array = []
 	for h: Dictionary in report.get("hvts", []):
@@ -1959,15 +1972,15 @@ func end_deployment(report: Dictionary) -> void:
 	var banked := {}
 	for body: Dictionary in report.get("bodies", []):
 		banked[String(body.get("uid", ""))] = true
-		for entry: Dictionary in body.get("items", []):
-			bank.append_array(Contracts.flatten_entry(entry))
+		bank.append_array(Fallen.without_tags(body.get("items", [])))
 	for entry: Dictionary in report.get("deposited", []):
 		banked[String(entry.get("uid", ""))] = true
-		bank.append_array(Contracts.flatten_entry(entry))
+		bank.append_array(Fallen.without_tags([entry]))
 	banked.erase("")
 	var contract_ran := Contracts.is_deployed()
 	if contract_ran:
 		var debrief_report := Contracts.report_from_level(lvl, extracted, banked)  # (before the bodies go: its casualties)
+		_mark_fallen(lvl, debrief_report)
 		debrief_report["hvts"] = hvts
 		debrief_report["bank"] = bank
 		debrief_report["driven_out"] = report.get("driven_out", [])  # B-18: in a pool vehicle's hold going home (it stays there)
@@ -2041,6 +2054,9 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	if dep.is_empty() or not multiplayer.is_server():
 		return {}
 	var lvl := level()
+	if not _tags_collected:  # (called straight, not through the map's extraction: debug, tests)
+		_collect_tags(lvl, extracted, {})
+		_settle_tags(false)
 	var made_it := {}
 	for n: Variant in extracted:
 		if n is Soldier and is_instance_valid(n):
@@ -2063,6 +2079,7 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 			continue
 		if dep.get("fallen", {}).has(mid) or s == null or s.vitals.is_dead():
 			o["state"] = RosterDeployment.KILLED
+			o["tags"] = _tags_out.has(mid)  # his tags or his body came out: killed in action; else missing (Fallen)
 		else:
 			o = _outcome_of(s)
 			o["state"] = RosterDeployment.EXTRACTED if made_it.has(s.get_instance_id()) else RosterDeployment.LEFT_BEHIND
@@ -2081,10 +2098,19 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	SessionLog.note("deployment ended: zone %s (%s); back %s; MIA %s; KIA %s; respawns %d used (%d bought)" % [report.zone_id,
 		report.zone_kind, _callsigns(report.extracted), _callsigns(report.mia), _callsigns(report.dead), int(report.respawns_used),
 		int(report.respawns_bought)])
+	for mid: String in report.dead:
+		server_pay_death_benefit(mid, "killed in action, tags recovered")  # (paid already when his tags came out: once)
+	for mid: String in report.presumed:
+		Contracts._notify_all("%s is missing: he fell, and neither his tags nor his body came out. Declared dead in %d days unless they come home."
+			% [String(member(mid).callsign), Fallen.DECLARE_DAYS])
 	for mid: String in report.mia:
 		var m := member(mid)
+		if Fallen.presumed(m):
+			continue  # nobody to bring back: only his tags close it (Fallen)
 		BaseEconomy.request_recovery_contract({"mid": mid, "name": m.name, "callsign": m.callsign, "role": m.role,
 			"zone_id": String(m.get("mia_zone", report.zone_id)), "day": day(), "pos": m.get("mia_pos", [])})
+	_tags_out = {}
+	_tags_collected = false
 	GameState.save_zone()  # the zone keeps its bodies, loot and damage
 	if advance_days:
 		server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))
@@ -2118,6 +2144,8 @@ func server_revert_deployment() -> String:
 	Campaign.restore(_before_deploy)
 	_before_deploy = {}
 	_held_end = []  # (a debrief waiting on the host's choice is undone with the rest)
+	_tags_out = {}
+	_tags_collected = false
 	Contracts.objectives.server_clear()
 	_changed_all()
 	server_switch_level(base_info(), base_zone_id())
@@ -2171,8 +2199,129 @@ func server_recover_member(mid: String, sit_out_days := 0) -> bool:
 ## Host (a recovery contract failed or lapsed): the MIA member is lost.
 func server_write_off_member(mid: String) -> bool:
 	var ok := RosterDeployment.written_off(roster(), mid, day())
+	if ok:
+		server_pay_death_benefit(mid, "never recovered, written off")
 	_changed(&"roster")
 	return ok
+
+
+# --- The fallen: dog tags, the memorial wall, death benefits (Fallen) -----------------------
+
+## Host (the extraction, before anything else of it): the dog tags that came out are taken in.
+## Tags in the gear of everyone who got out (taken out of it: they're the company's records),
+## on bodies brought out (still worn, or in their gear), set down in the point or aboard the
+## ride home, and in the holds driven home (`report`: the map's extraction report; {} when the
+## deployment is ended straight). Their member ids go in _tags_out.
+func _collect_tags(lvl: CompoundLevel, extracted: Array, report: Dictionary) -> void:
+	_tags_collected = true
+	var found: Array = []
+	for n: Variant in extracted:
+		if n is Soldier and is_instance_valid(n):
+			found.append_array(Fallen.take_tags_from((n as Soldier).inventory))
+	var uids := {}
+	for body: Dictionary in report.get("bodies", []):
+		uids[String(body.get("uid", ""))] = true
+		found.append_array(Fallen.tags_in(body.get("items", [])))
+	if lvl and not uids.is_empty():
+		for n: Node in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+			var b := n as Soldier
+			if b and uids.has(b.body_uid) and not b.dog_tags.is_empty():
+				found.append(b.dog_tags.duplicate())
+	found.append_array(Fallen.tags_in(report.get("deposited", [])))
+	found.append_array(Fallen.tags_in(report.get("driven_out", [])))
+	var names := PackedStringArray()
+	for tags: Variant in found:
+		var mid := Fallen.mid_of(tags)
+		if mid != "" and not _tags_out.has(mid):
+			_tags_out[mid] = true
+			names.append(Fallen.tags_text(tags))
+	if not names.is_empty():
+		SessionLog.note("dog tags out: %s" % ", ".join(names))
+
+
+## Host: the members killed in the running deployment (as server_end_deployment settles them:
+## marked fallen, or their body is gone or dead), member id -> true.
+func _killed_now(lvl: CompoundLevel) -> Dictionary:
+	var dep := RosterDeployment.active(roster())
+	var alive := {}
+	if lvl:
+		for n: Node in lvl.ai.get_children():
+			var s := n as Soldier
+			if s and s.has_meta(&"roster_id") and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+				alive[String(s.get_meta(&"roster_id"))] = true
+	var out := {}
+	for mid: String in dep.get("spawned", {}):
+		var away: Dictionary = dep.get("away", {}).get(mid, {})
+		if dep.get("fallen", {}).has(mid) or (not alive.has(mid) and away.is_empty()):
+			out[mid] = true
+	return out
+
+
+## Host: the deaths the tags brought home are settled. A man killed this deployment whose tags
+## (or body) came out has his death benefit paid now: in the debrief, as a line of its own, when
+## a contract ran (`in_debrief`: Economy.charge_run), else straight from the cash. One who fell on
+## an earlier deployment and was missing is killed in action now (Fallen.tags_home), paid the
+## same; one already declared dead gets his tags on the wall.
+func _settle_tags(in_debrief: bool) -> void:
+	var killed := _killed_now(level())
+	for mid: String in _tags_out:
+		var m := member(mid)
+		if m.is_empty():
+			continue
+		if killed.has(mid):
+			server_pay_death_benefit(mid, "killed in action, tags recovered", in_debrief)
+			continue
+		match Fallen.tags_home(roster(), mid, day()):
+			"confirmed":
+				Contracts._notify_all("%s's tags came home: killed in action, on the memorial wall" % String(m.callsign))
+				server_pay_death_benefit(mid, "killed in action, tags recovered", in_debrief)
+			"recovered":
+				Contracts._notify_all("%s's tags came home: on the memorial wall with them now" % String(m.callsign))
+				_changed(&"roster")
+
+
+## Host: the debrief's casualties say which of the fallen came home as tags (`report`:
+## Contracts.report_from_level's): a roster member killed now is "kia" with his tags out, "mia"
+## without them (Fallen), and the report says the benefits are paid per man ("benefits_paid":
+## DebriefCalc.expenses lists the run's own lines, not a count of the dead).
+func _mark_fallen(lvl: CompoundLevel, report: Dictionary) -> void:
+	report["benefits_paid"] = true
+	var killed := _killed_now(lvl)
+	var by_name := {}
+	for n: Node in lvl.ai.get_children():
+		var s := n as Soldier
+		if s and s.has_meta(&"roster_id") and killed.has(String(s.get_meta(&"roster_id"))):
+			by_name[s.display_name()] = String(s.get_meta(&"roster_id"))
+	for c: Dictionary in report.get("casualties", []):
+		var mid := String(by_name.get(String(c.get("name", "")), ""))
+		if mid == "" or String(c.get("status", "")) != "kia":
+			continue
+		var out := _tags_out.has(mid)
+		c["tags"] = Fallen.RECOVERED if out else Fallen.MISSING
+		c["status"] = "kia" if out else "mia"
+		c["injury"] = "killed, tags recovered" if out else "fell, tags not brought out"
+
+
+## Host: the family of member `mid` is paid his death benefit (Prices.operations "kia_benefit"),
+## once ("benefit_paid"), as "Death benefit: <callsign> (`why`)" in the books, with a notice for
+## everyone. `in_debrief`: listed in the running deployment's debrief too (Economy.charge_run).
+## Returns what was paid (0: nothing due, or paid before).
+func server_pay_death_benefit(mid: String, why: String, in_debrief := false) -> int:
+	var m := member(mid)
+	if m.is_empty() or m.has("benefit_paid"):
+		return 0
+	var amount := Prices.operations("kia_benefit")
+	m["benefit_paid"] = day()
+	var what := "Death benefit: %s (%s)" % [String(m.get("callsign", mid)), why]
+	if in_debrief:
+		Economy.charge_run(amount, what)
+	else:
+		Economy.add_cash(-amount, what)
+	Roster.add_history(m, day(), "Death benefit paid to the family ($%s)" % DebriefCalc.money(amount))
+	SessionLog.note("%s: $%d" % [what, amount])
+	Contracts._notify_all("Death benefit for %s paid to the family: $%s (%s)" % [Fallen.tags_text(Fallen.tags_of(m)), DebriefCalc.money(amount), why])
+	_changed(&"roster")
+	return amount
 
 
 # --- Days, hiring, medbay, shop -----------------------------------------------------------
@@ -2195,6 +2344,9 @@ func _on_day_advanced(today: int, days: int) -> void:
 	if not started() or (multiplayer.has_multiplayer_peer() and not multiplayer.is_server()):
 		return
 	Roster.advance_days(roster(), days, today)
+	for mid in Fallen.declare_due(roster(), today):  # missing since he fell: declared dead, his benefit paid now
+		if Fallen.declare_dead(roster(), mid, today):
+			server_pay_death_benefit(mid, "missing %d days, declared dead" % Fallen.DECLARE_DAYS)
 	Hiring.refresh_if_due(hiring(), today)
 	# (a debrief's days: the squad was out, unless the host headed home first: server_assault_choice)
 	BaseAssault.server_day_passed(_squad_home_for_assault or not RosterDeployment.is_running(roster()))

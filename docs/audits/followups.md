@@ -16,6 +16,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 | F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
+| F-160 | P3 | Dog tags have no worn model: a chain and tags on the neck while `Soldier.dog_tags` is set (Captain's side: gear rig, character model) |
+| F-161 | P3 | AI squadmates never take a fallen man's dog tags (squad AI: a scavenger or bearer could) |
 
 ## F-01: the building scan only sees one floor
 
@@ -194,3 +196,34 @@ and five of them were touching the same StaticBody3D. It passes locally (R0314) 
 52037f2. It may be the same as F-08 and F-90 (squadmates held against the target dummies on the
 Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
 whether "ccp" finds a bearer when every squadmate is blocked on the dummies.
+
+## F-160: dog tags have no worn model (Captain's side)
+
+Location: [gear_rig.gd](../../scripts/combat/gear_rig.gd), [character_model.gd](../../scripts/player/character_model.gd)
+(and [voxel_art.gd](../../scripts/art/voxel_art.gd) for the piece itself). Found by cghath's agent on
+`feat/fallen` (2026-10-20), which builds the tags but may not touch these files (the Captain's side's
+items 1-5).
+
+What's there: every company soldier wears tags (`Soldier.dog_tags`, a Dictionary set by the host as the
+body spawns, replicated by ServerSync with the other soldier fields, late joiners included; `{}` for
+everyone else and once they've been taken off a body). Taking them makes a `dog_tags` item (data/items.json,
+`size_m` [0.05, 0.005, 0.03]) in the taker's gear. Nothing draws them: no chain on the neck, and the item
+on the ground or in hand uses the generic look.
+
+Suggested: a small chain and two tags at the neck (under the carrier's collar) while `dog_tags` isn't
+empty, gone once taken (the property changes on every peer); a voxel piece for the item.
+
+## F-161: AI squadmates never take a fallen man's dog tags (Claude's side)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (the scavenger and the bearer: `scavenge.gd`'s
+picks, the bearer's walk to a body). Found by cghath's agent on `feat/fallen` (2026-10-20).
+
+What's there: `Soldier.server_take_tags(body)` (host; no reach check of its own, the caller's: measure to
+`Soldier.body_point()`, as CLAUDE.md says) takes a fallen company soldier's tags into the taker's gear;
+carried out at extraction they make him killed in action instead of missing (BaseHub `_collect_tags`,
+`Fallen`). Only players take them now (the interaction menu's Take dog tags). A squadmate who reaches a
+fallen friend (a bearer, a scavenger) walks away without them, so a man killed while the players are
+elsewhere stays missing unless a player goes back.
+
+Suggested (Proposed): a squadmate at a fallen company soldier's body (`not body.dog_tags.is_empty()`)
+takes his tags as he would a pick (`server_take_tags`), and says so on the radio ("Got Reaper's tags").

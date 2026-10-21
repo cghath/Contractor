@@ -11,6 +11,41 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Dog tags, the memorial wall, the death benefit, the shared triage log (Captain's list for cghath, 2026-10-20: "Campaign" and "Medical")
+
+#### Added
+- **Dog tags.** Every company soldier wears tags: your squadmates, hires and players. On a
+  fallen squadmate's body, Left Ctrl > **Take dog tags** puts them in your gear. You have to be
+  at the body as it lies, the same as looting.
+- **Tags decide KIA or MIA.** Carry his tags out at extraction, or bring his body, and he's
+  recorded killed in action. His name goes on the memorial wall and his death benefit is paid.
+  Without his tags or his body he's missing in action. He gets no recovery contract (there's
+  nobody to bring back alive) and stays on the books until either:
+  - his tags come home on a later deployment (then he's KIA), or
+  - 7 days pass after he fell (Proposed). Then he's declared dead, his benefit is paid, and he
+    goes on the wall as "missing".
+  The tags go to the company's records, not into your kit or the stash. A body taken by the body
+  cap leaves its tags where it lay.
+- **The memorial wall**: a new Memorial tab on the base screen, and a wall to use in the LHD's
+  hangar (port side). For each of the fallen it lists their name and callsign, role, the day,
+  the zone, the contract, how many missions they served and "Tags recovered" or "Missing". It
+  also lists anyone missing after they fell who hasn't been declared dead yet. It's saved with
+  the campaign.
+- **The shared triage log.** The medical menu's log now lives on the casualty, so everyone
+  treating him sees the same entries: who did what, and when (by the zone's clock). Players' and
+  AI medics' treatments and triage cards go in it. It's kept by the host and reaches every
+  player, late joiners included. It stays with the casualty when he's carried or dragged, across
+  a crossing and through a save. Before, the log showed only what you yourself did while your
+  menu was open.
+
+#### Changed
+- **The death benefit is paid once per man, when his death is confirmed** (his tags came home,
+  or he was declared dead or written off). It's a line of its own in the debrief and in the
+  books ("Death benefit: Reaper (...)", a "Death benefits" kind on the Books tab), with a notice
+  for everyone. Before, every friendly body in the zone was counted at each debrief, so a body
+  left from an earlier deployment could be paid for again. Raids pay it too now. A squadmate
+  written off after a failed recovery now costs the benefit as well.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

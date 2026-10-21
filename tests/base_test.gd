@@ -58,6 +58,7 @@ func _ready() -> void:
 	_test_injuries_and_medbay()
 	_test_respawn_pool()
 	_test_resolve()
+	_test_fallen()
 	_test_stand_ins()
 	_test_restock()
 	await _test_session()
@@ -677,6 +678,96 @@ func _test_resolve() -> void:
 	check(not Roster.main_recovering(roster, "p2") and int(back.sit_out_days) == Roster.FRACTURE_DAYS, "a stand-in's wounds are the stand-in's")
 
 
+## Dog tags, the memorial wall and the death benefit (cghath's list, 2026-10-20, "Campaign";
+## Fallen): killed with his tags home he's KIA, on the wall; without his tags or body he's
+## missing (no recovery contract) until they come home or he's declared dead; a live MIA written
+## off goes on the wall as missing; each benefit is paid once, a line of its own in the books;
+## the wall saves with the campaign.
+func _test_fallen() -> void:
+	print("The fallen: dog tags, the memorial wall, the death benefit")
+	BaseHub.new_campaign(SEED)
+	for i in 5:
+		BaseHub.server_hire(String(_cheapest(Hiring.pool(BaseHub.hiring(), BaseHub.day())).cid))
+	var ids := Roster.ids(BaseHub.roster())
+	var roster := BaseHub.roster()
+	check(ids.size() == 5, "five on the books (%d)" % ids.size())
+	if ids.size() < 5:
+		return
+	var tags_ok := true
+	for mid in ids:
+		var m := BaseHub.member(mid)
+		var tags := Fallen.tags_of(m)
+		tags_ok = tags_ok and tags.mid == mid and tags.name == String(m.name) and tags.callsign == String(m.callsign) and tags.role == String(m.role)
+	check(tags_ok, "every member's tags carry his id, name, callsign and role")
+	var day0 := BaseHub.day()
+	var missions := int(BaseHub.member(ids[0]).get("missions", 0))
+	RosterDeployment.begin(roster, ids, RosterDeployment.CONTRACT, "harbour_yard", "", day0, {"title": "Hold the Line"})
+	for mid in ids:
+		RosterDeployment.mark_spawned(roster, mid)
+	var report := RosterDeployment.resolve(roster, {"members": {
+		ids[0]: {"state": RosterDeployment.KILLED, "tags": true},
+		ids[1]: {"state": RosterDeployment.KILLED, "tags": false},
+		ids[2]: {"state": RosterDeployment.KILLED, "tags": false},
+		ids[3]: {"state": RosterDeployment.LEFT_BEHIND, "gear": {}, "pos": [1.0, 0.0, 2.0]},
+		ids[4]: {"state": RosterDeployment.EXTRACTED, "gear": {}, "wounds": [], "blood": 1.0}}}, RandomNumberGenerator.new(), day0)
+	var kia := BaseHub.member(ids[0])
+	var entry := Fallen.on_wall(roster, ids[0])
+	check(report.dead == [ids[0]] and String(kia.status) == Roster.DEAD and String(entry.get("tags", "")) == Fallen.RECOVERED
+		and entry.get("callsign") == kia.callsign and entry.get("name") == kia.name and entry.get("role") == kia.role and int(entry.get("day", -1)) == day0
+		and entry.get("zone") == "harbour_yard" and entry.get("zone_name") == RegionMap.zone_name("harbour_yard") and entry.get("contract") == "Hold the Line"
+		and int(entry.get("missions", -1)) == missions,
+		"killed, his tags home: KIA, on the wall (%s)" % Fallen.wall_line(entry))
+	var gone := BaseHub.member(ids[1])
+	check(report.mia.has(ids[1]) and report.presumed == [ids[1], ids[2]] and Fallen.presumed(gone) and Roster.status_text(gone) == "MIA"
+		and Fallen.on_wall(roster, ids[1]).is_empty() and String(BaseHub.member(ids[3]).status) == Roster.MIA and not Fallen.presumed(BaseHub.member(ids[3])),
+		"killed without his tags or body: missing, not on the wall yet (the one left alive is MIA as before)")
+	check(not RosterDeployment.recovered(roster, ids[1], day0), "and no recovery brings him home alive")
+	check(Fallen.tags_home(roster, ids[1], day0 + 2) == "confirmed" and String(gone.status) == Roster.DEAD
+		and String(Fallen.on_wall(roster, ids[1]).get("tags", "")) == Fallen.RECOVERED and int(Fallen.on_wall(roster, ids[1]).get("day", -1)) == day0,
+		"his tags home on a later deployment: KIA, on the wall with them, dated when he fell")
+	var cash := Economy.cash()
+	var benefit := Prices.operations("kia_benefit")
+	check(BaseHub.server_pay_death_benefit(ids[1], "test") == benefit and BaseHub.server_pay_death_benefit(ids[1], "test") == 0
+		and Economy.cash() == cash - benefit and _ledger_lines("Death benefit: %s" % gone.callsign) == 1
+		and Economy.ledger_kind("Death benefit: %s" % gone.callsign) == "Death benefits",
+		"his death benefit is paid once ($%s), a line of its own in the books" % DebriefCalc.money(benefit))
+	check(Fallen.declare_due(roster, day0 + Fallen.DECLARE_DAYS - 1).is_empty() and Fallen.declare_due(roster, day0 + Fallen.DECLARE_DAYS) == [ids[2]],
+		"the other's tags never come home: he's due to be declared dead %d days after he fell" % Fallen.DECLARE_DAYS)
+	BaseHub.server_advance_days(Fallen.DECLARE_DAYS)
+	var lost := BaseHub.member(ids[2])
+	check(String(lost.status) == Roster.DEAD and String(Fallen.on_wall(roster, ids[2]).get("tags", "")) == Fallen.MISSING and lost.has("benefit_paid")
+		and _ledger_lines("Death benefit: %s" % lost.callsign) == 1,
+		"so he is, as the days pass: on the wall as missing, his benefit paid then (%s)" % Fallen.wall_line(Fallen.on_wall(roster, ids[2])))
+	check(Fallen.tags_home(roster, ids[2], BaseHub.day()) == "recovered" and String(Fallen.on_wall(roster, ids[2]).get("tags", "")) == Fallen.RECOVERED
+		and _ledger_lines("Death benefit: %s" % lost.callsign) == 1, "his tags home after that: on the wall with them, no second benefit")
+	var left := BaseHub.member(ids[3])
+	check(BaseHub.server_write_off_member(ids[3]) and String(Fallen.on_wall(roster, ids[3]).get("tags", "")) == Fallen.MISSING
+		and _ledger_lines("Death benefit: %s" % left.callsign) == 1, "one left alive whose recovery fails: written off, on the wall as missing, his benefit paid")
+	var before := JSON.stringify(Fallen.memorial(roster))
+	check(Campaign.save_campaign(), "the campaign saves")
+	Campaign.load_campaign()
+	var after := Fallen.memorial(BaseHub.roster())
+	check(after.size() == 4 and JSON.stringify(after) == before, "the wall (%d names) survives a save and reload" % after.size())
+	# Tags in someone's gear (taken off a body) come out of it at extraction (Fallen.take_tags_from).
+	var inv := Inventory.new()
+	inv.take(&"plate_carrier")
+	inv.take(&"assault_pack")
+	inv.take(Fallen.TAGS, 1, Fallen.tags_of(kia))
+	inv.take(Fallen.TAGS, 1, Fallen.tags_of(gone))
+	inv.take(&"mag_556", 2)
+	var out := Fallen.take_tags_from(inv)
+	var mids_out: Array = out.map(func(t: Dictionary) -> String: return Fallen.mid_of(t))
+	mids_out.sort()
+	check(mids_out == [ids[0], ids[1]], "two sets of tags in someone's gear are taken out of it (%s)" % [out])
+	check(inv.count_of(Fallen.TAGS) == 0 and inv.count_of(&"mag_556") == 2, "and nothing else")
+	inv.free()
+
+
+## Ledger lines whose text starts with `prefix`.
+func _ledger_lines(prefix: String) -> int:
+	return Economy.ledger().filter(func(e: Dictionary) -> bool: return String(e.get("what", "")).begins_with(prefix)).size()
+
+
 func _test_stand_ins() -> void:
 	print("A recovering player plays a squadmate")
 	BaseHub.new_campaign(SEED)
@@ -1218,6 +1309,11 @@ func _test_deployment(client: Dictionary) -> void:
 		as_people = as_people and s != null and s.person_name == String(m.surname) and s.nation == String(m.nation) and s.left_handed == bool(m.left)
 		tapes.append(String(m.surname))
 	check(as_people, "each squadmate deploys as their roster person: the name tape, nationality and hand (%s)" % ", ".join(tapes))
+	# Dog tags (feat/fallen): every company soldier wears his, the players too.
+	var tagged := squad.all(func(mid: String) -> bool: return _roster_soldier(mid) != null and String(_roster_soldier(mid).dog_tags.get("mid", "")) == mid)
+	var host_player: Soldier = level.players.get_node(^"1")
+	check(tagged and String(host_player.dog_tags.get("player", "")) == BaseHub.player_key(1),
+		"every company soldier wears his tags: the three squadmates and the player (%s)" % [host_player.dog_tags])
 	check(is_equal_approx(SquadAI.of(sa).combat, Roster.ai_stats(BaseHub.member(a)).combat), "their aim skill drives the AI (combat %.2f)" % SquadAI.of(sa).combat)
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
@@ -1250,6 +1346,8 @@ func _test_deployment(client: Dictionary) -> void:
 	var surname_c := String(BaseHub.member(c).surname)
 	sc.vitals.server_kill()
 	await _frames(2)
+	check(player.server_take_tags(sc) == "" and sc.dog_tags.is_empty() and player.inventory.count_of(Fallen.TAGS) == 1 and player.server_take_tags(sc) != "",
+		"the player takes %s's tags off his body (once)" % callsign_c)
 	var sb := _roster_soldier(b)
 	SquadAI.of(sb).process_mode = Node.PROCESS_MODE_DISABLED
 	sb.global_position = player.global_position + Vector3(0, 0, -45)
@@ -1268,6 +1366,12 @@ func _test_deployment(client: Dictionary) -> void:
 		"the dead one is lost, gear and all on the body saved in the zone")
 	check(zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("person_name", "")) == surname_c and r.get("nation", "") == BaseHub.member(c).nation),
 		"their body keeps their name tape and nationality (%s)" % surname_c)
+	var fallen_entry := Fallen.on_wall(BaseHub.roster(), c)
+	check(String(fallen_entry.get("tags", "")) == Fallen.RECOVERED and BaseHub.member(c).has("benefit_paid") and _ledger_lines("Death benefit: %s" % callsign_c) == 1
+		and zone_bodies.any(func(r: Dictionary) -> bool: return String(r.get("label", "")) == label_c and (r.get("tags", {}) as Dictionary).is_empty()),
+		"%s's tags came out with the player: KIA, on the memorial wall with them, his benefit paid once, his body saved without them" % callsign_c)
+	check(int(Roster.gear_counts(Roster.main_character(BaseHub.roster(), BaseHub.player_key(1)).get("gear", {})).get("dog_tags", 0)) == 0,
+		"the tags went to the company's records, not home in the player's kit")
 	check(int(BaseHub.member(a).wage) > wage_a and int(BaseHub.member(a).missions) >= 1, "the one who came back earns more ($%d -> $%d)" % [wage_a, int(BaseHub.member(a).wage)])
 	check(BaseHub.day() == day + 1, "a day passed")
 	await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel, 10.0)
@@ -1293,6 +1397,7 @@ func _test_deployment(client: Dictionary) -> void:
 	check(Roster.gear_counts(BaseHub.member(a).gear) == Roster.gear_counts(Roster.json_safe(sa_home.inventory.net_state)) and gear_a.get("smoke_purple", 0) == 1,
 		"their gear survives a save and reload")
 	check(String(BaseHub.member(b).status) == Roster.MIA and String(BaseHub.member(c).status) == Roster.DEAD, "and so do MIA and KIA")
+	check(String(Fallen.on_wall(BaseHub.roster(), c).get("tags", "")) == Fallen.RECOVERED, "and the memorial wall")
 
 
 ## A deployment into a zone (a ZoneLevel generated from the definition the deployment names)

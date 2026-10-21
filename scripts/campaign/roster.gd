@@ -19,7 +19,11 @@ extends RefCounted
 ##   "history" ([{"day", "text"}]), "hired_day", "medbay" (treated this spell already),
 ##   "mia_zone" (where an MIA one was left), "loadout" (optional, {} until their first
 ##   deployment: the kit they last deployed with, Restock.template_of, for "Restock last
-##   loadout" at the base; loadout_of).
+##   loadout" at the base; loadout_of). The fallen (Fallen): "mia_dead" and "fell" ({"day",
+##   "zone", "contract"}) on one MIA because he fell and his tags didn't come out, "tags"
+##   (Fallen.RECOVERED or MISSING) once he's on the memorial wall, "benefit_paid" (the day his
+##   death benefit was paid).
+## - "memorial": the memorial wall, [entry] (Fallen.add_to_wall).
 ## - "players": player key -> main character: "name", "role", "gear", "sit_out_days",
 ##   "injuries", "history", "missions", "medbay", "loadout" (optional, as a member's).
 ## - "next_id": the counter member ids come from.

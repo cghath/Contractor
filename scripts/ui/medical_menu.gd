@@ -5,12 +5,14 @@ extends Control
 ## (bleeding by severity, untreated, treated) with markers for tourniquets, splints,
 ## dressings and seals, and an IV or IO line; the chosen part's injuries in words and every
 ## medical item you carry, usable or greyed out with the reason; the signs (numbers only with
-## a pulse oximeter, as Check condition); and an activity log. A view over Vitals: choosing an
+## a pulse oximeter, as Check condition); and the triage log. A view over Vitals: choosing an
 ## item sends the same host request as the interaction menu's Treat (Soldier._server_treat,
 ## through InteractionMenu.perform), so nothing new decides anything. Everything shown reads
 ## replicated state, so it works the same on clients.
-## The activity log is local to the treater for now: what you chose here, and the changes you
-## saw on the casualty while the menu was open (a shared log comes with the triage card).
+## The triage log is shared (cghath's list, 2026-10-20): it lives on the casualty (Vitals.care_log,
+## host-authoritative, replicated to every peer and late joiners), so everyone treating the same
+## casualty reads the same entries: who did what, and when (the zone's clock). The host writes
+## them as treatments finish and triage cards go on (Soldier._log_care, _server_set_triage).
 ## H or Escape closes it; while open it has the mouse and the keys.
 
 ## Part state, for the diagram's colours.
@@ -80,7 +82,7 @@ const HOVER_BG := UiKit.HOVER_BG
 const ROW_H := 30.0
 const ROW_FONT := UiKit.FONT_BODY
 ## The help box ("?", F1 or a click on the hint at the top right): how the menu works, its keys.
-const HELP_TEXT := "How it works\nPick a body part on the figure (or Left / Right), then a treatment from the list (Up / Down and Enter, or click it). A greyed row says why it can't be used now. Signs are what you can tell without kit; a pulse oximeter gives numbers. The triage cards along the foot tag the casualty for the team.\n\nKeys: Left / Right body part  -  Up / Down treatment  -  Enter use  -  Page Up / Down a page  -  mouse wheel scroll  -  ? or F1 this help  -  H / Esc close"
+const HELP_TEXT := "How it works\nPick a body part on the figure (or Left / Right), then a treatment from the list (Up / Down and Enter, or click it). A greyed row says why it can't be used now. Signs are what you can tell without kit; a pulse oximeter gives numbers. The triage cards along the foot tag the casualty for the team, and the triage log on the right is the team's too: who did what to him, and when.\n\nKeys: Left / Right body part  -  Up / Down treatment  -  Enter use  -  Page Up / Down a page  -  mouse wheel scroll  -  ? or F1 this help  -  H / Esc close"
 ## The item list's scroll bar, right of the rows (click above or below the thumb: a page).
 const SCROLL_BAR_W := 10.0
 const MAX_LOG := 14
@@ -95,7 +97,7 @@ var target: Node3D
 var part: StringName = &"chest"
 ## The chosen part's item rows (item_options) as last refreshed.
 var options: Array[Dictionary] = []
-## Activity log lines, newest last.
+## The triage log's lines as shown (the casualty's Vitals.care_log, the newest MAX_LOG), newest last.
 var log_lines: PackedStringArray = []
 ## The first item row shown. More rows than fit (a medic's full kit) scroll: the mouse
 ## wheel, the scroll bar, or the up and down keys (audit A2-05: rows past the panel's foot
@@ -107,7 +109,6 @@ var help_open := false
 ## The row the keyboard picked (-1: none yet); Up / Down move it and Enter uses it.
 var cursor := -1
 var _refresh_left := 0.0
-var _seen := {}  # part -> its summary last refresh, for the log
 
 
 func _init(p_actor: Soldier = null) -> void:
@@ -126,11 +127,6 @@ func is_open() -> bool:
 func open(who: Node3D) -> void:
 	target = who if who != null and Vitals.find_on(who) != null else actor
 	part = worst_part(Vitals.find_on(target))
-	if target != _last_target():
-		log_lines.clear()
-		_seen.clear()
-		_add_log("Opened on %s" % _who())
-	_log_target = target
 	scroll = 0
 	cursor = -1
 	help_open = false
@@ -144,13 +140,6 @@ func close() -> void:
 		return
 	visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-
-
-var _log_target: Node3D
-
-
-func _last_target() -> Node3D:
-	return _log_target if is_instance_valid(_log_target) else null
 
 
 func select_part(p: StringName) -> void:
@@ -173,23 +162,18 @@ func _clamp_scroll() -> void:
 	scroll = clampi(scroll, 0, maxi(options.size() - visible_rows(), 0))
 
 
-## Chooses option row `index`: sends its host request, logs it. Returns the text to show
-## (the reason, for a greyed-out row).
+## Chooses option row `index`: sends its host request (the host logs it on the casualty once
+## it's done). Returns the text to show (the reason, for a greyed-out row).
 func choose(index: int) -> String:
 	if index < 0 or index >= options.size():
 		return ""
-	var entry := options[index]
-	var text := InteractionMenu.perform(actor, entry)
-	if text == "":
-		_add_log("You: %s" % entry.label.split("  ")[0])
-	return text
+	return InteractionMenu.perform(actor, options[index])
 
 
-## Puts triage card `card` on the casualty (host checks reach); logs it.
+## Puts triage card `card` on the casualty (host checks reach, and logs it on the casualty).
 func set_triage(card: StringName) -> void:
 	if is_instance_valid(target) and actor.vitals.is_up():
 		actor.rpc_id(1, &"_server_set_triage", target.get_path(), card)
-		_add_log("You: triage %s" % String(Vitals.TRIAGE_TEXT.get(card, card)).to_lower())
 
 
 func _process(delta: float) -> void:
@@ -209,7 +193,7 @@ func refresh() -> void:
 		return
 	options = item_options(actor, target, part)
 	_clamp_scroll()
-	_watch(Vitals.find_on(target))
+	log_lines = log_text(Vitals.find_on(target))
 	queue_redraw()
 
 
@@ -509,39 +493,18 @@ static func signs_lines(vitals: Vitals, on_self: bool, oximeter: bool) -> Packed
 	return out
 
 
-# --- Activity log ----------------------------------------------------------------------------
+# --- Triage log ------------------------------------------------------------------------------
 
-func _add_log(text: String) -> void:
-	var t := Time.get_time_dict_from_system()
-	log_lines.append("%02d:%02d:%02d  %s" % [t.hour, t.minute, t.second, text])
-	while log_lines.size() > MAX_LOG:
-		log_lines.remove_at(0)
-	queue_redraw()
-
-
-## Logs what changed on the casualty since the last look: a part starting or stopping
-## bleeding, a marker going on or coming off.
-func _watch(vitals: Vitals) -> void:
+## The shared triage log on `vitals` (Vitals.care_log) as the menu's lines, the newest MAX_LOG:
+## "14:05  Hawk: Tourniquet, left thigh". Empty for nobody, or nothing done yet.
+static func log_text(vitals: Vitals) -> PackedStringArray:
+	var out := PackedStringArray()
 	if vitals == null:
-		return
-	var first := _seen.is_empty()
-	for p: StringName in Vitals.BODY_PARTS:
-		var now := part_state(vitals, p)
-		var before: Dictionary = _seen.get(p, {})
-		_seen[p] = now
-		if first or before.is_empty():
-			continue
-		var where := InteractionMenu.part_name(p)
-		if now.state == BLEEDING and before.state != BLEEDING:
-			_add_log("%s: bleeding" % where)
-		elif before.state == BLEEDING and now.state != BLEEDING:
-			_add_log("%s: bleeding stopped" % where)
-		for m: StringName in now.markers:
-			if not before.markers.has(m):
-				_add_log("%s: %s on" % [where, MARKER_TEXT[m]])
-		for m: StringName in before.markers:
-			if not now.markers.has(m):
-				_add_log("%s: %s off" % [where, MARKER_TEXT[m]])
+		return out
+	var entries := vitals.care_log()
+	for e: Dictionary in entries.slice(maxi(entries.size() - MAX_LOG, 0)):
+		out.append("%s  %s: %s" % [e.t, e.who, e.what])
+	return out
 
 
 func _who() -> String:
@@ -798,7 +761,7 @@ func _draw() -> void:
 	var sign_lines := signs_lines(vitals, target == actor, InteractionMenu.has_oximeter(actor))
 	draw_multiline_string(font, right + Vector2(0, 22), "\n".join(sign_lines), HORIZONTAL_ALIGNMENT_LEFT, right_w, small, SIGN_LINES, UiKit.TEXT)
 	var log_top := top + Vector2(_right_x(), LOG_Y)
-	draw_string(font, log_top, elide(font, "Activity (this menu, your view)", right_w, UiKit.FONT_BODY), HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
+	draw_string(font, log_top, elide(font, "Triage log (shared)" if not log_lines.is_empty() else "Triage log (shared): nothing yet", right_w, UiKit.FONT_BODY), HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
 	var shown := log_lines_shown(font)
 	var line_h := font.get_height(LOG_FONT)
 	for n in shown:  # the newest lines, as many as fit above the log's foot, one line each

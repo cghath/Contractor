@@ -49,6 +49,7 @@ func _ready() -> void:
 	await _test_use_medical()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
+	await _test_shared_triage_log()
 	await _test_medical_menu_scrolls()
 	await _test_menu_prefers_living()
 	await _test_bleed_hud()
@@ -1379,7 +1380,8 @@ func _test_medical_menu_scrolls() -> void:
 	# above the panel's foot: only the newest lines that fit are drawn.
 	await _window(1600, 0)  # the shortest window the layout is made for
 	for n in MedicalMenu.MAX_LOG + 4:
-		menu._add_log("Test line %d" % n)
+		casualty.vitals.server_log_care("Tester", "Test line %d" % n)
+	menu.refresh()
 	var font := menu.get_theme_default_font()
 	panel = menu._panel()
 	var shown := menu.log_lines_shown(font)
@@ -1392,6 +1394,80 @@ func _test_medical_menu_scrolls() -> void:
 	_reset(casualty)
 	_reset(player)
 	_restock()
+
+
+## The shared triage log (cghath's list, 2026-10-20, "Medical"): what everyone treating a casualty
+## did lives on him (Vitals.care_log): the player's and a squadmate's treatments and the player's
+## card, in order, each with who and when, in net_state for every peer; the menu shows the same
+## lines whoever opens it; the log goes with him when he's carried, and through a save
+## (Vitals.server_snapshot as text, the way a resumed deployment keeps it); a respawn starts clean.
+func _test_shared_triage_log() -> void:
+	print("The shared triage log")
+	_restock()
+	_place_player()
+	_reset(casualty)
+	_reset(helper)
+	var casualty_home := casualty.global_position
+	var helper_home := helper.global_position
+	_wound(casualty.vitals, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	_wound(casualty.vitals, Vitals.FOREARM_L, "muscle", 0.25)
+	casualty.vitals.server_damage(70.0)  # down
+	await _seconds(1.0)
+	# Both treaters at his body as it lies (his ragdoll can rest away from his capsule).
+	var at := casualty.body_point()
+	player.global_position = Vector3(at.x, SPOT.y, at.z + 1.2)
+	helper.global_position = Vector3(at.x + 1.2, SPOT.y, at.z)
+	await _frames(2)
+	check(casualty.vitals.care_log().is_empty() and MedicalMenu.log_text(casualty.vitals).is_empty(), "nothing done yet: the log is empty")
+	player.inventory.take(&"tourniquet")
+	helper.inventory.take(&"pressure_bandage")
+	player._server_treat.rpc_id(1, casualty.get_path(), &"tourniquet", Vitals.THIGH_L)
+	helper._server_treat.rpc_id(1, casualty.get_path(), &"pressure_bandage", Vitals.FOREARM_L)
+	await _seconds(5.5)
+	player._server_set_triage.rpc_id(1, casualty.get_path(), Vitals.TRIAGE_DELAYED)
+	await _frames(3)
+	var log := casualty.vitals.care_log()
+	var lines: Array = log.map(func(e: Dictionary) -> String: return "%s: %s" % [e.who, e.what])
+	var want := ["%s: Tourniquet, left thigh" % player.display_name(), "%s: Pressure Bandage, left forearm" % helper.display_name(),
+		"%s: Triage card: Delayed (yellow)" % player.display_name()]
+	check(lines == want and log.all(func(e: Dictionary) -> bool: return String(e.t) != ""),
+		"two treaters and a card, in order, who and when (%s)" % [log])
+	check((casualty.vitals.net_state.get("tl", []) as Array).size() == 3 and Vitals.split_net(casualty.vitals.net_state)[0].has("tl"),
+		"replicated with the casualty's structure (net_state \"tl\")")
+	var mine := MedicalMenu.new(player)
+	var theirs := MedicalMenu.new(helper)
+	add_child(mine)
+	add_child(theirs)
+	mine.open(casualty)
+	theirs.open(casualty)
+	check(mine.log_lines.size() == 3 and mine.log_lines == theirs.log_lines and mine.log_lines[0].ends_with(want[0]),
+		"the menu shows the same lines whoever opens it (%s)" % [mine.log_lines])
+	mine.close()
+	theirs.close()
+	mine.queue_free()
+	theirs.queue_free()
+	check(player.server_pick_up_body(casualty, Soldier.CARRY, INF), "the player picks him up")
+	await _seconds(1.0)
+	check(casualty.vitals.care_log() == log, "carried, his log goes with him")
+	player.release_carried()
+	await _frames(3)
+	var saved: Variant = str_to_var(var_to_str(casualty.vitals.server_snapshot()))
+	_reset(helper)
+	check(helper.vitals.care_log().is_empty(), "a respawn (a body back to full health) starts with an empty log")
+	helper.vitals.server_restore(saved)
+	check(helper.vitals.care_log() == log and (helper.vitals.net_state.get("tl", []) as Array).size() == 3,
+		"saved and put back on a body, the log is as it was (%d entries)" % helper.vitals.care_log().size())
+	_reset(helper)
+	_reset(casualty)
+	_reset(player)
+	for frame in 3:
+		await get_tree().physics_frame
+	casualty.global_position = casualty_home  # (where the later checks expect them)
+	helper.global_position = helper_home
+	_place_player()
+	_restock()
+	for frame in 3:
+		await get_tree().physics_frame
 
 
 ## H: the medical menu (MedicalMenu) on the casualty you look at, else yourself; Shift+H
@@ -1440,14 +1516,17 @@ func _test_medical_menu() -> void:
 	menu.refresh()
 	thigh = MedicalMenu.part_state(casualty.vitals, Vitals.THIGH_L)
 	check(thigh.markers.has(MedicalMenu.TOURNIQUET) and thigh.state != MedicalMenu.BLEEDING, "then the thigh shows a tourniquet, no bleeding (%s)" % [thigh])
-	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.contains("You: Tourniquet (")) \
-		and Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("Left thigh: TQ on")), "the activity log has both (%s)" % [menu.log_lines])
+	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("%s: Tourniquet, left thigh" % player.display_name())),
+		"the triage log shows it, the host's entry on the casualty (%s)" % [menu.log_lines])
 	# Triage card: set from the menu through the host, replicated, shown in Check condition.
 	menu.set_triage(Vitals.TRIAGE_IMMEDIATE)
 	await _frames(3)
 	check(casualty.vitals.triage() == Vitals.TRIAGE_IMMEDIATE and casualty.vitals.net_state.get("tg") == "immediate",
 		"the menu puts a red triage card on him, replicated in net_state (%s)" % casualty.vitals.triage())
 	check(InteractionMenu.condition_report(casualty, player).contains("Immediate (red)"), "Check condition shows the card")
+	menu.refresh()
+	check(Array(menu.log_lines).any(func(l: String) -> bool: return l.ends_with("%s: Triage card: Immediate (red)" % player.display_name())),
+		"and the triage log has the card (%s)" % [menu.log_lines])
 	var old_size := get_tree().root.size
 	await _window(1600, 900)  # laid out in a real window, not headless 64 x 64
 	check(menu.triage_at(menu._triage_rect(2).get_center()) == Vitals.TRIAGE_DELAYED, "the triage buttons are hit-tested")

@@ -119,7 +119,7 @@ func ledger() -> Array:
 ## What a ledger line was, from its text (the base screen's books): "Contract pay", "Sales",
 ## "Loans in", "Wages and upkeep", "Loan installments", "Field costs", "Supports", "Respawns",
 ## "Lost helicopters", "Hiring", "Medical", "Purchases", "Upgrades", "Repairs and service",
-## "Fines and clawbacks" or "Other".
+## "Fines and clawbacks", "Death benefits" or "Other".
 static func ledger_kind(what: String) -> String:
 	const KINDS := [["Advance clawed back", "Fines and clawbacks"], ["Civilian fines", "Fines and clawbacks"],
 		["Advance:", "Contract pay"], ["Completion:", "Contract pay"], ["Sold", "Sales"], ["Intel sold", "Sales"],
@@ -127,7 +127,8 @@ static func ledger_kind(what: String) -> String:
 		["Deployment costs", "Field costs"], ["Support ", "Supports"], ["Helicopter out", "Supports"], ["Raid flight", "Supports"],
 		["Lost helicopter", "Lost helicopters"], ["Respawn", "Respawns"], ["Hired", "Hiring"], ["Medbay", "Medical"],
 		["Bought", "Purchases"], ["Air wing upgrade", "Upgrades"], ["FOB upgrade", "Upgrades"], ["Rebel ", "Upgrades"],
-		["HX-1", "Upgrades"], ["Repaired", "Repairs and service"], ["Motor pool", "Repairs and service"]]
+		["HX-1", "Upgrades"], ["Repaired", "Repairs and service"], ["Motor pool", "Repairs and service"],
+		["Death benefit", "Death benefits"]]
 	for pair: Array in KINDS:
 		if what.begins_with(String(pair[0])):
 			return String(pair[1])
