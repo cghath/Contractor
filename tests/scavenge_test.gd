@@ -326,7 +326,7 @@ const MK18_KIT := ["plate_carrier_light", "plate_pe_l3", "helmet_bump", "assault
 func _dead_hostile(pos: Vector3) -> Soldier:
 	_spawned += 1
 	var s := level.spawn_soldier({"name": "ScavHostile%d" % _spawned, "faction": "hostile", "variant": "urban", "pos": pos,
-		"loadout": MK18_KIT, "combat": 0.5, "discipline": 0.5, "guard": true})
+		"loadout": MK18_KIT, "combat": 0.5, "discipline": 0.5, "guard": true, "no_pockets": true})
 	SquadAI.of(s).set_physics_process(false)
 	s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE})
 	return s
