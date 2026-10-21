@@ -37,3 +37,12 @@
   of "Wave 5").
 - What Captain's side is working on right now, and the files it touches: [docs/captain_side_now.md](docs/captain_side_now.md)
   (kept current; cghath owns the audit findings A1-01 to A3-10).
+- **How to talk about Captain (2026-10-21, standing rule).** "Captain" is his name, not a
+  rank. Write about him plainly and in a friendly tone ("Captain wants…", "decisions already
+  made", "your review is enough"), not as a commanding officer: skip "the Captain's orders",
+  "standing calls", "in the Captain's place" and similar, in code comments, docs, briefs, commits
+  and chat.
+- **Make the call and keep going (2026-10-21).** Captain is usually playtesting rather than
+  watching chat, so waiting on him stalls the work. Decide using [docs/cg_brief.md](docs/cg_brief.md),
+  mark new numbers Proposed, note the call under "Calls made" in docs/audits/followups.md, and
+  carry on. cghath's review is enough sign-off wherever a review is needed.

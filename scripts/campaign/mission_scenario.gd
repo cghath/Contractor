@@ -674,12 +674,18 @@ func _fail_unhurt(run: Dictionary) -> void:
 func _recon_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 	var p: Dictionary = o.params
 	var pos := _p3(p.pos)
-	var eye_to := _ground(pos) + Vector3.UP * 2.0
+	var points := sight_points(o)
 	var seen := false
 	for s: Soldier in _friendlies():
 		var d := s.global_position.distance_to(pos)
-		if d <= float(p.observe_m) and _line_of_sight(s.global_position + Vector3.UP * 1.6, eye_to):
-			seen = true
+		if d > float(p.observe_m):
+			continue
+		var eye := s.global_position + Vector3.UP * 1.6
+		for to: Vector3 in points:
+			if _line_of_sight(eye, to):
+				seen = true
+				break
+		if seen:
 			break
 	if seen:
 		run.dwell += dt
@@ -687,6 +693,26 @@ func _recon_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
 		_mark(run, o, Objectives.DONE, "observed")
 	else:
 		_mark(run, o, Objectives.ACTIVE, _progress(run, o))
+
+
+## Where eyes on a recon site may fall (Captain, 2026-10-21, a forward observer's area: "im in the
+## area observing it but nothing"): its middle, the forward observer's targets about it (a vehicle
+## or a weapon pit: its own contract's FIRE_TARGETs, chest high), and SIGHT_RING points round it
+## SIGHT_RING_M out. Before, only the middle counted, 2 m up, and a compound's walls or a building
+## round it hid it from every post however well the squad saw the area.
+const SIGHT_RING := 6
+const SIGHT_RING_M := 25.0
+func sight_points(o: Dictionary) -> Array[Vector3]:
+	var p: Dictionary = o.params
+	var pos := _p3(p.pos)
+	var out: Array[Vector3] = [_ground(pos) + Vector3.UP * 2.0]
+	for t: Dictionary in Contracts.objectives.for_contract(String(o.get("cid", ""))):
+		if String(t.kind) == Objectives.FIRE_TARGET and (t.params as Dictionary).has("pos"):
+			out.append(_ground(_p3(t.params.pos)) + Vector3.UP * 1.2)
+	for k in SIGHT_RING:
+		var a := TAU * k / SIGHT_RING
+		out.append(_ground(pos + Vector3(cos(a), 0.0, sin(a)) * SIGHT_RING_M) + Vector3.UP * 1.5)
+	return out
 
 
 func _line_of_sight(from: Vector3, to: Vector3) -> bool:

@@ -349,3 +349,6 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+## Calls made for the Captain
+
+One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
