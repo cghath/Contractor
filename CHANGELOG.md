@@ -11,6 +11,49 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### One 12-gauge system (Captain, 2026-10-21: "we have standard and hi brass and breaching rounds for the skeleton key")
+
+#### Added
+- **Three 12 gauge shells for every shotgun:**
+  - **Standard 00 Buck**: nine pellets.
+  - **Hi-Brass Magnum Buck**: twelve faster pellets, a slightly wider pattern and about a third
+    more kick.
+  - **Breaching Rounds.**
+  Standard and hi-brass work in every 12 gauge: the Remington 870, the Mossberg 590A1, the
+  M1014, the Saiga-12 and the Skeleton Key. Breaching rounds work only in the M1014 and the
+  Skeleton Key. Every other shotgun refuses them: they don't load, and the game says why.
+- **The Skeleton Key**: a short-barrelled pump 12 gauge that clamps under a rifle's rail, with a
+  toothed standoff muzzle and a three-shell tube that comes full of breaching rounds. 4 switches
+  the trigger to it, as with the M320. Fire shoots it, R loads it shell by shell. Priced at $1100
+  in the base shop, and found with the rare western rifles as loot.
+- **870 Extended Full Choke**: a choke tube for the Remington 870, its upgrade in place of breaching
+  rounds. It narrows the pattern to under half its width, so it reaches much further. Mounted
+  from the inventory like any attachment. $250 in the shop, and loot where the muzzle cans turn up.
+
+#### Changed
+- **Every 12 gauge fires through one path** (cghath's tube shotguns). Each shell fires as what it
+  is: the gun's tube, a speed loader and a Saiga-12 magazine each keep the shells they hold, in
+  order.
+- **Speed loaders hold any shell.** R tops a tube up from one in a single push when the tube has
+  room for two or more; shells the gun won't take stay in the loader. Loose shells fill speed
+  loaders and Saiga magazines from the inventory (Load magazines). A Saiga magazine takes no
+  breaching rounds.
+- **The loose 12 gauge rounds are Standard buck now, and slugs are gone.** Slugs weren't in the
+  spec, and nothing needed them. cghath's M870 is the Remington 870. Old saves' items turn into
+  those.
+- **The M320 and the Skeleton Key fit every railed assault rifle, carbine and battle rifle**,
+  the AK-12 too while there's no GP-25. They no longer fit SMGs, shotguns or DMRs. The SVD, SVDS
+  and M110 are tagged as DMRs.
+- **The breacher** carries the Skeleton Key under a compact Mk18, with breaching and standard
+  shells, in place of the Mossberg. The AI breacher's "shotgun on the door frame" is a breaching
+  round out of the Key; out of contact he tops the Key up with breaching rounds.
+
+#### Fixed
+- **An AI soldier with a tube shotgun counted no spare ammo** (audit F-131). Loose shells and its
+  speed loaders now count for reloading, the ammo-low checks and scavenging.
+- **cghath's buckshot pellets were scored as full bullets by gunfire gore.** Every pellet from
+  any 12 gauge now scores as a pellet, and a hi-brass pellet hits a little harder.
+
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 
 #### Fixed

@@ -23,9 +23,9 @@
 		"ammo_bearer": {"name": "Ammo Bearer", "short": "AB",
 			"kit": [["pouch_utility", 2], ["m4a1", 1], ["mag_556", 4], ["belt_762x51", 4], ["ifak", 1], ["smoke_grenade", 1]]},
 		"breacher": {"name": "Breacher", "short": "BRC",
-			"kit": [["pouch_shell", 2], ["pouch_grenade", 2], ["pouch_pistol_mag", 1], ["mossberg590", 1], ["loader_12g_6", 5], ["m17", 1], ["mag_9mm", 3], ["breaching_charge", 3], ["flashbang", 3], ["ear_protection", 1], ["ifak", 1], ["smoke_grenade", 1]]}
+			"kit": [["pouch_shell", 2], ["pouch_grenade", 2], ["pouch_pistol_mag", 1], ["mk18", 1], ["mag_556", 5], ["skeleton_key", 1], ["shells_12g_breach", 9], ["shells_12g_buck", 6], ["m17", 1], ["mag_9mm", 3], ["breaching_charge", 3], ["flashbang", 3], ["ear_protection", 1], ["ifak", 1], ["smoke_grenade", 1]]}
 	},
-	"_breacher_note": "Breacher (Captain, 2026-10-20: \"we need breacher roles for the player team\", \"they use breaching charges\"): leads a building entry first at the door (SquadAI breach plan): a breaching charge in Aware/Combat while he has one, the Mossberg on the door frame or a kick when he hasn't, a slow quiet open in Stealth unless ordered otherwise; the stack goes in after his breach and a bang. Like anti_tank, not in fire_teams: a player's pick or a deliberate cast (roster role, command menu Team > Assign role).",
+	"_breacher_note": "Breacher (Captain, 2026-10-20: \"we need breacher roles for the player team\", \"they use breaching charges\"): leads a building entry first at the door (SquadAI breach plan): a breaching charge in Aware/Combat while he has one, the Skeleton Key under his Mk18 (a breaching round on the door frame) or a kick when he hasn't, a slow quiet open in Stealth unless ordered otherwise; the stack goes in after his breach and a bang. Like anti_tank, not in fire_teams: a player's pick or a deliberate cast (roster role, command menu Team > Assign role).",
 	"fire_teams": [
 		["team_leader", "autorifleman", "grenadier", "medic"],
 		["team_leader", "marksman", "rifleman", "medic"]

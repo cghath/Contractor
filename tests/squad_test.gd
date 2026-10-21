@@ -993,6 +993,30 @@ func _test_breacher(found: Dictionary, mates: Array[SquadAI], names: PackedStrin
 	check(plain.is_empty() and kicked.get("door", "") == "kick" and int(kicked.get("breacher", -1)) == 0,
 		"no breacher: today's entry, unless a kick is ordered (the first in the stack kicks: %s)" % [kicked.get("door", "")])
 	check(SquadAI.door_way(brc, "shotgun", false, false, true) == "kick", "ordered to shotgun the door without a shotgun in hand: he kicks it")
+	# One 12-gauge system (2026-10-21): the Skeleton Key under his rifle, and the door shot is a
+	# breaching round out of it.
+	var keyed: SquadAI = null
+	for ai: SquadAI in mates:
+		var rifle := ai.body.active_weapon()
+		if rifle and GunAttachments.fits(rifle, ItemDB.get_item(&"skeleton_key")) and GunAttachments.mounted_id(rifle, ai.body.inventory.state_of(ai.body.active_slot), GunAttachments.UNDERBARREL) == &"":
+			keyed = ai
+			break
+	if keyed:
+		var kslot := keyed.body.active_slot
+		keyed.body.inventory.take(&"skeleton_key")
+		var on := GunAttachments.mount_carried(keyed.body.inventory, &"skeleton_key")
+		var key := Shotguns.key_of(keyed.body)
+		var breaching := func() -> int: return Shotguns.key_list(key, keyed.body.inventory.state_of(kslot)).count(String(Shotguns.BREACHING)) if key else 0
+		var had: int = breaching.call()
+		keyed.body._server_busy_until = 0.0
+		var fired := keyed._hinge_shot({"entrance": found.entrances[0]})
+		check(on and keyed.has_breaching_gun() and SquadAI.door_way(keyed, "shotgun", false, false, true) == "shotgun" and fired and breaching.call() == had - 1,
+			"with the Skeleton Key under his rifle he shotguns the door with a breaching round (%d in it, then %d)" % [had, breaching.call()])
+		GunAttachments.server_remove(keyed.body.inventory, kslot, GunAttachments.UNDERBARREL)
+		while keyed.body.inventory.remove_one(&"skeleton_key"):
+			pass
+	else:
+		check(false, "a squadmate whose rifle takes the Skeleton Key")
 	# Ordered to clear it in Combat: the charge.
 	var space := player.get_world_3d().direct_space_state
 	var charges := Charges.of(player)

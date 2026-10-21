@@ -901,8 +901,8 @@ func view_yaw() -> float:
 
 ## Recoil: the view kicks up and a little sideways; aiming halves it. RECOIL_SETTLE of the
 ## climb settles back (PlayerInput._settle_recoil), and the shot adds recoil heat (P0362).
-func _kick(weapon: ItemData) -> void:
-	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
+func _kick(weapon: ItemData, mult := 1.0) -> void:
+	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0) * mult  # (a hi-brass shell's harder: Shotguns.recoil_of)
 	kick *= movement.recoil_mult()  # stance and mounted weapon
 	kick *= GunAttachments.recoil_mult(weapon, _state_of_weapon(weapon))  # a grip (wave 7 S3)
 	set_pitch(head.rotation.x + kick)
@@ -1027,7 +1027,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var now := _now()
 	if now < _server_next_shot or now < _server_busy_until - 0.1:
 		return
-	var tube := Shotguns.is_tube(weapon)  # a shotgun's next shell out of its tube (Shotguns)
+	var tube := Shotguns.is_shotgun(weapon)  # a 12 gauge's next shell, tube or magazine (Shotguns)
 	var shell := Shotguns.server_take_shell(inventory, slot) if tube else &""
 	if (tube and shell == &"") or (not tube and not inventory.consume_round(slot)):
 		return
@@ -1045,10 +1045,10 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var wall_q := PhysicsRayQueryParameters3D.create(origin, muzzle, 1, [get_rid()])
 	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
 		muzzle = origin
-	# A tube-fed shotgun's shell: its pellets, a slug or a breaching round (Shotguns.server_fire).
-	# Anything else fires its round; buckshot from a magazine (items expansion, 2026-10-20: rounds.json
-	# "pellets") traces each further pellet on its own, spread round the shot inside pellet_spread_deg.
-	var result := Shotguns.server_fire(self, muzzle, direction.normalized(), weapon, shell) if tube else Ballistics.fire(self, muzzle, direction.normalized(), weapon)
+	# A 12 gauge's shell: its pellets (narrowed by a choke) or a breaching round (Shotguns.server_fire;
+	# one 12-gauge system, 2026-10-21). Anything else fires its round; a round with rounds.json
+	# "pellets" from a magazine traces each further pellet on its own inside pellet_spread_deg.
+	var result := Shotguns.server_fire(self, muzzle, direction.normalized(), weapon, shell, Shotguns.spread_mult(weapon, inventory.state_of(slot))) if tube else Ballistics.fire(self, muzzle, direction.normalized(), weapon)
 	for p in (Ballistics.pellets(weapon) - 1 if not tube else 0):
 		var hit := Ballistics.fire(self, muzzle, Ballistics.pellet_direction(direction.normalized(), weapon), weapon)
 		if String(hit.result) != "none":
@@ -1272,15 +1272,35 @@ func _server_reload(slot: StringName) -> void:
 		inventory.reload(slot)
 
 
-## A player loads the shotgun in `slot` shell by shell with `shell` shells (or the first kind
-## carried): Shotguns.server_load.
+## A player loads the shotgun in `slot` (with `key`, the Skeleton Key under the gun there) with a
+## speed loader or shell by shell with `shell` shells (or the first kind carried): Shotguns.server_load.
+## Shells it won't take stay out, and the player hears why (Shotguns.why_not).
 @rpc("any_peer", "call_local", "reliable")
-func _server_load_shells(slot: StringName, shell: StringName) -> void:
+func _server_load_shells(slot: StringName, shell: StringName, key := false) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1:
 		return
-	if Shotguns.server_load(self, slot, shell) < 0.0:
+	if Shotguns.server_load(self, slot, shell, key) < 0.0:
 		var gun := ItemDB.get_item(inventory.slots.get(slot, &"")) if inventory.slots.get(slot, &"") != &"" else null
-		_client_message.rpc_id(owner_peer(), "No shells to load" if Shotguns.load_choice(gun, inventory, shell) == &"" else "The tube's full")
+		var tube := Shotguns.key_on(gun, inventory.state_of(slot)) if key else gun
+		var why := "No shells to load"
+		if tube and shell != &"" and not Shotguns.takes(tube, shell):
+			why = Shotguns.why_not(tube, shell)
+		elif tube and Shotguns.load_choice(tube, inventory, shell) != &"":
+			why = "The tube's full"
+		elif tube and Shotguns.takes(tube, Shotguns.BREACHING) == false and inventory.count_of(Shotguns.BREACHING) > 0:
+			why = Shotguns.why_not(tube, Shotguns.BREACHING)  # only breaching rounds carried, and it won't take them
+		if not is_ai():
+			_client_message.rpc_id(owner_peer(), why)
+
+
+## A player fires the Skeleton Key under the gun in their hands (Shotguns.server_fire_key).
+@rpc("any_peer", "call_local", "reliable")
+func _server_fire_key(origin: Vector3, dir: Vector3) -> void:
+	if not _from_owner():
+		return
+	var why := Shotguns.server_fire_key(self, origin, dir)
+	if why != "" and why != "Busy" and not is_ai():
+		_client_message.rpc_id(owner_peer(), why)
 
 
 ## Every peer: the host says a reload of `item` began (_server_reload), so this peer plays it

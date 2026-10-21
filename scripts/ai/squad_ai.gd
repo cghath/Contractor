@@ -1335,7 +1335,9 @@ func _choose_intent() -> void:
 	var weapon := body.active_weapon()
 	var rounds := body.inventory.rounds_in(body.active_slot) if weapon else 0
 	var full := _mag_size(weapon)
-	var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon)) if weapon else 0
+	var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon) if weapon else 0
+	if not contact:
+		_top_up_key()
 
 	if body.faction == &"friendly":
 		match order:
@@ -3246,7 +3248,7 @@ func ammo_share(full_mags: float) -> float:
 	var mag := _mag_size(weapon)
 	if mag <= 0:
 		return 1.0
-	var rounds := body.inventory.rounds_in(body.active_slot) + body.inventory.spare_rounds(Soldier._ammo_of(weapon))
+	var rounds := body.inventory.rounds_in(body.active_slot) + body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon)
 	return clampf(rounds / (full_mags * mag), 0.0, 1.0)
 
 
@@ -3672,8 +3674,32 @@ static func breacher_slot(units: Array) -> int:
 
 ## Whether this unit holds a 12 gauge with a round in it (the hinge shot).
 func has_breaching_gun() -> bool:
+	return _breach_gun() != ""
+
+
+## What this unit would breach a door frame with (one 12-gauge system, 2026-10-21: the breaching
+## shell): "key", the Skeleton Key under the gun in his hands with a breaching round in it; "hand",
+## the 12 gauge in his hands that takes them (an M1014) with one in its tube; "" for neither.
+func _breach_gun() -> String:
+	var state := body.inventory.state_of(body.active_slot)
+	var key := Shotguns.key_of(body)
+	if key and String(Shotguns.BREACHING) in Shotguns.key_list(key, state):
+		return "key"
 	var w := body.active_weapon()
-	return w != null and "shotgun" in w.tags and body.inventory.rounds_in(body.active_slot) > 0
+	if Shotguns.is_shotgun(w) and Shotguns.takes(w, Shotguns.BREACHING) and String(Shotguns.BREACHING) in Shotguns.tube_of(state):
+		return "hand"
+	return ""
+
+
+## Host: the Skeleton Key topped up with breaching rounds (then whatever else it takes) when there's
+## room, shells for it and nothing else going on (out of contact, not busy).
+func _top_up_key() -> void:
+	var key := Shotguns.key_of(body)
+	if key == null or Shotguns.loading(body) or Soldier._now() < body._busy_until:
+		return
+	if Shotguns.key_list(key, body.inventory.state_of(body.active_slot)).size() >= Shotguns.capacity(key) or Shotguns.spare_shells(body.inventory, key) <= 0:
+		return
+	Shotguns.server_load(body, body.active_slot, Shotguns.BREACHING, true)
 
 
 ## How `ai` makes the way in: `ordered` (a door way, "" for his own call) if he can, else in
@@ -3747,14 +3773,29 @@ func _work_door(op: Dictionary, now: float) -> void:
 ## A buckshot round into the door frame on its hinge side. False if he isn't holding a loaded
 ## shotgun.
 func _hinge_shot(op: Dictionary) -> bool:
-	if not has_breaching_gun():
+	var how := _breach_gun()
+	if how == "":
 		return false
 	var door: Vector3 = op.entrance.door
 	var normal: Vector3 = op.entrance.normal
 	var hinge := door + normal.cross(Vector3.UP) * DOOR_HINGE_M + Vector3.UP * 1.0 - normal * 0.1
 	_aim_at(hinge)
 	var from := body.camera.global_position
-	body._server_fire.rpc_id(1, from, (hinge - from).normalized(), body.active_slot)
+	# The breaching round up next (a breacher thumbs it in last, so it's the one that fires).
+	var slot := body.active_slot
+	var weapon := body.active_weapon()
+	var state := body.inventory.state_of(slot)
+	var list := (Shotguns.key_list(Shotguns.key_of(body), state) if how == "key" else Shotguns.tube_of(state)).duplicate()
+	list.erase(String(Shotguns.BREACHING))
+	list.append(String(Shotguns.BREACHING))
+	if how == "key":
+		body.inventory.set_slot_state(slot, Shotguns.with_key_list(weapon, state, list))
+		body._server_busy_until = 0.0
+		return Shotguns.server_fire_key(body, from, (hinge - from).normalized()) == ""
+	var tube := state.duplicate(true)
+	tube[Shotguns.TUBE_KEY] = list
+	body.inventory.set_slot_state(slot, tube)
+	body._server_fire.rpc_id(1, from, (hinge - from).normalized(), slot)
 	return true
 
 
@@ -3803,7 +3844,8 @@ func _lead_breached(op: Dictionary, lead: Soldier) -> bool:
 			op.entrance.door = Vector3(blast.x, door.y, blast.z)  # in through his hole
 		return true
 	var w := lead.active_weapon()
-	return lead.last_shot_at >= since and w != null and "shotgun" in w.tags and lead.last_shot_to.distance_to(door + Vector3.UP * 1.0) <= LEAD_SHOT_M
+	var shotgun := (w != null and "shotgun" in w.tags) or Shotguns.key_of(lead) != null  # (his Skeleton Key too)
+	return lead.last_shot_at >= since and shotgun and lead.last_shot_to.distance_to(door + Vector3.UP * 1.0) <= LEAD_SHOT_M
 
 
 ## The breach this unit's team would choose itself against a building the enemy holds (Captain:
@@ -5256,7 +5298,7 @@ func _callout(id: StringName, text := "") -> void:
 ## handful of lines, not one per gun.
 func _callout_reload(weapon: ItemData) -> void:
 	var mag := _mag_size(weapon)
-	if mag > 0 and body.inventory.spare_rounds(Soldier._ammo_of(weapon)) <= mag:
+	if mag > 0 and body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon) <= mag:
 		_callout(StringName("reloading_last_%s" % _weapon_class(weapon)))
 	else:
 		_callout(&"reloading")
@@ -5460,6 +5502,8 @@ func _flat_distance(point: Vector3) -> float:
 static func _mag_size(weapon: ItemData) -> int:
 	if weapon == null:
 		return 0
+	if Shotguns.is_tube(weapon):
+		return Shotguns.capacity(weapon)  # a tube's shells (F-131: its loose shells have no magazine size)
 	var ammo := Soldier._ammo_of(weapon)
 	return ItemDB.get_item(ammo).magazine_rounds() if ItemDB.has_item(ammo) else 0
 

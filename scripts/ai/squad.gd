@@ -1060,7 +1060,7 @@ func order_give_ammo(from: Soldier, names: PackedStringArray) -> String:
 		var busy := ai.care != SquadAI.Care.NONE or ai.intent in [SquadAI.Intent.HEAL, SquadAI.Intent.CASUALTY] or not ai._self_task().is_empty()
 		return ai.body.global_position.distance_to(from.global_position) + (1000.0 if busy else 0.0)
 	for ai in _able(names):
-		if ai.body.inventory.spare_rounds(ammo) > 0 and (best == null or cost.call(ai) < cost.call(best)):  # (spares: what _take_out finds)
+		if ai.body.inventory.spare_rounds(ammo, weapon) > 0 and (best == null or cost.call(ai) < cost.call(best)):  # (spares: what _take_out finds)
 			best = ai
 	if best == null:
 		return "Nobody selected carries %s" % ItemDB.get_item(ammo).name if ItemDB.has_item(ammo) else "Nobody selected has any"

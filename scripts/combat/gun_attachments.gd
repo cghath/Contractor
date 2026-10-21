@@ -7,7 +7,10 @@ extends RefCounted
 ##                or the M320 grenade launcher (stats.launcher: Underbarrel fires and loads it);
 ##   side:        a weapon light (tag "light") or a laser (tag "laser", beam "visible" or "ir"),
 ##                switched on and off with the weapon-light key (Controls.KEYS weapon_light)
-##                or the inventory's "Light on / off".
+##                or the inventory's "Light on / off";
+##   choke:       a choke tube in a shotgun's barrel (the Remington 870's, fits tag "870":
+##                Captain, 2026-10-21, its upgrade instead of breaching rounds): its
+##                pellet_spread_mult narrows the pattern (Shotguns.spread_mult).
 ## Each is an item (type "attachment", stats.mount = its mount, stats.fits = weapon tags it
 ## fits; an underbarrel one also needs a rail). What's on a gun is part of the gun's own item
 ## state, like its magazine and optic: state[mount] = the item id, and "side_on" = the light or
@@ -24,7 +27,8 @@ extends RefCounted
 const TYPE := "attachment"
 const UNDERBARREL := &"underbarrel"
 const SIDE := &"side"
-const MOUNTS: Array[StringName] = [UNDERBARREL, SIDE]
+const CHOKE := &"choke"
+const MOUNTS: Array[StringName] = [UNDERBARREL, SIDE, CHOKE]
 const ON_KEY := "side_on"
 ## The gun's state keeps an attachment's own item state under its mount's name plus this.
 const STATE_SUFFIX := "_state"
@@ -83,6 +87,7 @@ static func all_of(weapon: ItemData, state: Dictionary) -> Dictionary:
 		"muzzle": String(Suppressors.mounted_id(weapon, state)),
 		"underbarrel": String(mounted_id(weapon, state, UNDERBARREL)),
 		"side": String(mounted_id(weapon, state, SIDE)),
+		"choke": String(mounted_id(weapon, state, CHOKE)),
 	}
 
 
