@@ -54,6 +54,7 @@ func _ready() -> void:
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
+	_test_faction_followups()
 	_test_debrief_totals()
 	_test_civilians_void()
 	_test_save_reload()
@@ -749,6 +750,144 @@ func _test_world_sites() -> void:
 	check(["ashen_banner", "valley_shura", "saltline", "kestrel"].all(func(g: String) -> bool: return int(by_target.get(g, 0)) > 0),
 		"every new group is a contract target")
 	check(in_war > 0 and float(on_holder) / in_war >= 0.55, "most contracts are against the zone's holder (%d of %d)" % [on_holder, in_war])
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+
+
+## A contract of `type_id` against `target` in `zone_id` from the first seed (of 300) whose offer
+## `fits` (a Callable on the offer), {} if none does. `source` "locals" for the locals' own jobs.
+func _offer_against(type_id: String, target: String, zone_id: String, fits: Callable, source := "board") -> Dictionary:
+	for i in 300:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 7700 + i
+		var c := ContractGen.generate(rng, {"day": 1, "source": source, "type": type_id, "zone_id": zone_id, "target": target})
+		if String(c.type) == type_id and fits.call(c):
+			return c
+	return {}
+
+
+## The first objective of `c` (its legs' too) at site `site_id`, {} if none.
+static func _at_site(c: Dictionary, site_id: String) -> Dictionary:
+	var all: Array = (c.get("objectives", []) as Array).duplicate()
+	for leg: Dictionary in c.get("legs", []):
+		all.append_array(leg.objectives)
+	for o: Dictionary in all:
+		if String(o.get("site", "")) == site_id:
+			return o
+	return {}
+
+
+## Terror groups follow-ups (2026-10-20, docs/terror_groups.md section 9): each group's own name
+## for a raid's cache, the cartels' goods beside a target to destroy, the leaders as the HVTs of
+## capture and manhunt jobs (named, dressed for their part, and taken down by name), and Vantage
+## and the Concord fighting by doctrines of their own.
+func _test_faction_followups() -> void:
+	print("Terror groups follow-ups: site names, contraband, named leaders, doctrines")
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	var zone := "harbour_yard"
+	var on_cache := func(c: Dictionary) -> bool: return not _at_site(c, "cache").is_empty()
+	# Site names follow the target.
+	var lab := _offer_against("raid", "kestrel", zone, on_cache)
+	var lab_o := _at_site(lab, "cache")
+	check(String(lab_o.get("site_name", "")) in ["drug lab", "warehouse"] and String(lab_o.text) == "Destroy the %s" % lab_o.site_name
+		and String(lab.title).contains("(%s)" % lab_o.site_name), "a raid on the Kestrel Cartel's cache is on its %s (%s)" % [lab_o.get("site_name", "nothing"), lab.get("title", "")])
+	var again := _offer_against("raid", "kestrel", zone, func(c: Dictionary) -> bool: return String(c.module_id) == String(lab.module_id) and not _at_site(c, "cache").is_empty())
+	check(String(_at_site(again, "cache").get("site_name", "")) == String(lab_o.get("site_name", "")), "the same site is the same thing every time")
+	var cartels := {}
+	for g: String in ["kestrel", "saltline"]:
+		for i in 12:
+			cartels[ContractGen.faction_site_name(g, "cache", "zone%d|m%d" % [i, i])] = true
+	check(cartels.has("drug lab") and cartels.has("warehouse") and cartels.size() == 2, "the cartels keep both drug labs and warehouses (%s)" % [cartels.keys()])
+	var ied := _offer_against("raid", "ashen_banner", zone, on_cache)
+	var shura := _offer_against("supply_line", "valley_shura", zone, on_cache)
+	check(String(_at_site(ied, "cache").get("text", "")) == "Destroy the IED workshop" and String(_at_site(shura, "cache").get("text", "")) == "Destroy the IED workshop",
+		"the Ashen Banner's and the Valley Shura's caches are IED workshops (%s; %s)" % [_at_site(ied, "cache").get("text", ""), _at_site(shura, "cache").get("text", "")])
+	var plain := _at_site(_offer_against("raid", "black_ridge", zone, on_cache), "cache")
+	check(String(plain.get("text", "")) == "Destroy the weapons cache" and not plain.has("site_name") and not plain.has("loot_of"),
+		"Black Ridge's is still a weapons cache, with nothing extra beside it")
+	var placed := Objectives.from_contract(lab.merged({"cid": "TFF1"}, true))
+	var placed_o: Dictionary = placed.filter(func(o: Dictionary) -> bool: return String(o.kind) == Objectives.DESTROY_CACHE)[0]
+	check(String(placed_o.params.get("name", "")) == String(lab_o.get("site_name", "")) and String(placed_o.params.get("loot_of", "")) == "kestrel",
+		"placed, the objective's site carries its name (the HUD's \"Destroy the %s\") and whose goods sit beside it" % placed_o.params.get("name", ""))
+	# Contraband: a box beside the cartels' targets, and in some of their men's pockets.
+	check(String(lab_o.get("loot_of", "")) == "kestrel" and not _at_site(ied, "cache").has("loot_of"), "only the cartels leave their goods at a raid's target")
+	var sab := _offer_against("sabotage", "saltline", zone, func(c: Dictionary) -> bool: return (c.objectives as Array).any(func(o: Dictionary) -> bool: return bool(o.get("optional", false)) and String(o.get("site", "")) == "aa"))
+	var sab_main: Array = (sab.get("objectives", []) as Array).filter(func(o: Dictionary) -> bool: return not bool(o.get("optional", false)))
+	var sab_aa: Array = (sab.get("objectives", []) as Array).filter(func(o: Dictionary) -> bool: return bool(o.get("optional", false)) and String(o.get("site", "")) == "aa")
+	check(not sab.is_empty() and sab_main.size() == 1 and String(sab_main[0].get("loot_of", "")) == "saltline" and not sab_aa.is_empty() and not (sab_aa[0] as Dictionary).has("loot_of"),
+		"a sabotage job on the Saltline Syndicate: its goods by the target (%s), not by the bonus AA gun" % sab_main[0].get("site", "") if not sab_main.is_empty() else "none")
+	var stores := _at_site(_offer_against("locals_stores", "kestrel", zone, on_cache, "locals"), "cache")
+	check(not stores.is_empty() and not stores.has("site_name") and not stores.has("loot_of"), "the locals' stolen stores stay their stores (%s)" % stores.get("text", "no offer"))
+	var contraband := ["hashish", "captagon", "heroin_bricks", "counterfeit_dollars"]
+	var seen := {}
+	var only_goods := true
+	for i in 200:
+		var box := WorldValuables.contraband_box("kestrel", "test|%d" % i, true)
+		for row: Dictionary in box.get("items", []):
+			seen[String(row.id)] = true
+			only_goods = only_goods and (Fixers.is_contraband(StringName(String(row.id))) or ItemDB.get_item(StringName(String(row.id))).type == "valuable")
+	check(contraband.all(func(id: String) -> bool: return seen.has(id)) and only_goods, "the stash holds hashish, captagon, heroin and fake dollars (%s)" % [seen.keys()])
+	check(WorldValuables.contraband_box("ashen_banner", "test|1", true).is_empty() and String(WorldValuables.contraband_box("saltline", "t", true).label) != "",
+		"no stash for a group that doesn't deal")
+	var carriers: Array = range(9).filter(func(i: int) -> bool: return not WorldValuables.pocket_contraband("kestrel", "zone|m1", i, true).is_empty())
+	var pockets := WorldValuables.pocket_contraband("saltline", "zone|m1", 1, true)
+	check(carriers == [1, 4, 7] and pockets.size() >= 1 and pockets.all(func(id: String) -> bool: return ItemDB.has_item(StringName(id)))
+		and range(9).all(func(i: int) -> bool: return WorldValuables.pocket_contraband("black_ridge", "zone|m1", i, true).is_empty()),
+		"every third cartel man carries some (%s; %s), nobody else's do" % [carriers, pockets])
+	# Named leaders.
+	var hvt := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	var hvt_o := _at_site(hvt, "hvt")
+	var person: Dictionary = hvt_o.get("person", {})
+	check(String(hvt.get("leader", "")) == "the Patron" and String(hvt.title).begins_with("HVT capture (the Patron):")
+		and String(hvt.brief).begins_with("Target: %s, the Patron of the Kestrel Cartel." % person.get("name", "?")),
+		"an HVT job against the Kestrel Cartel is after its first leader, by name (%s | %s)" % [hvt.get("title", ""), String(hvt.get("brief", "")).left(70)])
+	check(String(hvt_o.text) == "Capture the Patron (%s) and bring them to extraction alive" % person.get("name", "?") and String(person.get("leader", "")) == "the Patron"
+		and String(person.get("label", "")) == "HVT (%s, the Patron)" % person.get("name", "?") and String(person.get("role", "")) == "financier",
+		"the objective names him, and he dresses as a financier (%s; %s)" % [hvt_o.get("text", ""), person.get("role", "")])
+	var phone := _at_site(hvt, "hvt_phone")
+	check(phone.is_empty() or String(phone.text) == "Bonus: bring out %s's phone" % person.get("name", "?"), "his phone is just his phone (%s)" % phone.get("text", "none"))
+	WorldSites.server_contract_won(zone, "kestrel", "hvt_capture", String(hvt.leader))
+	var next := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	check(WorldSites.leaders_down("kestrel") == ["the Patron"] and String(next.get("leader", "")) == "the Chemist"
+		and String(_at_site(next, "hvt").get("person", {}).get("role", "")) == "bomb_maker",
+		"taken, the next job is after the Chemist, dressed as a bomb maker (%s)" % next.get("title", ""))
+	WorldSites.server_contract_won(zone, "kestrel", "hvt_capture", "the Enforcer")
+	check(WorldSites.leaders_down("kestrel") == ["the Patron", "the Enforcer"] and WorldSites.next_leader("kestrel") == "the Chemist",
+		"a job that named the Enforcer takes the Enforcer, the Chemist still free")
+	WorldSites.server_contract_won(zone, "kestrel", "manhunt", "the Enforcer")
+	check(WorldSites.leaders_all_down("kestrel") and WorldSites.next_leader("kestrel") == "", "one already taken: the next free goes instead, and then all are down")
+	var spent := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	check(String(spent.get("leader", "x")) == "" and String(spent.title).begins_with("HVT capture:") and not String(spent.brief).begins_with("Target:"),
+		"all its leaders taken: a plain HVT job (%s)" % spent.get("title", ""))
+	var manhunt: Dictionary = {}
+	for z: String in WorldSites.war_zones():
+		if String(MissionRegistry.zone(z).get("kind", "")) != "contract":
+			continue
+		manhunt = _offer_against("manhunt", "highland_front", z, func(c: Dictionary) -> bool: return not (c.get("legs", []) as Array).is_empty())
+		if not manhunt.is_empty():
+			break
+	var hunted := _at_site(manhunt, "hvt")
+	check(not manhunt.is_empty() and String(manhunt.leader) == "the Commandant" and String(hunted.get("text", "")).begins_with("Capture the Commandant (")
+		and String(manhunt.brief).contains("the Commandant of the Highland Free Front") and String(manhunt.title).contains("(the Commandant)"),
+		"a manhunt names him too, in the zone next door (%s | %s)" % [manhunt.get("title", ""), hunted.get("text", "")])
+	check(String(_offer_against("hvt_capture", "vantage_group", zone, func(c: Dictionary) -> bool: return true).get("leader", "x")) == "",
+		"Vantage has no leaders: its HVT jobs are as they were")
+	var roles_ok := true
+	var unfit: Array = []
+	for g: String in ["black_ridge", "ashen_banner", "valley_shura", "saltline", "kestrel", "highland_front"]:
+		var roles: Dictionary = MissionRegistry.faction(g).get("leader_roles", {})
+		for title: Variant in MissionRegistry.faction(g).get("leaders", []):
+			if StringName(String(roles.get(String(title), ""))) not in PersonLook.HOSTILE_ROLES:
+				roles_ok = false
+				unfit.append("%s: %s" % [g, title])
+	check(roles_ok, "every leader dresses as one of PersonLook's HVT roles (commander, financier, bomb maker) %s" % [unfit])
+	var dressed := PersonLook.outfit(Person.HVT, Person.HOSTILE, {"name": "Person_x", "site": "outpost", "role": "financier"}).trim_prefix(VoxelArt.CIV_PREFIX).split(":")
+	check(String(dressed[0]) in PersonLook.ROLES[&"financier"].shirt and String(dressed[1]) in PersonLook.ROLES[&"financier"].trousers,
+		"a financier leader at an outpost wears a financier's dark suit (%s)" % [dressed])
+	# Doctrines of their own.
+	check(Kits.doctrine("eastern_concord") == &"regular" and Kits.doctrine("vantage_group") == &"pmc" and Doctrine.has(&"regular") and Doctrine.has(&"pmc"),
+		"the Concord fights by the regular doctrine and Vantage by the PMC one, wherever they are")
 	Campaign.section(WorldSites.SECTION).clear()
 	Campaign.section(WorldSites.WAR).clear()
 

@@ -1202,6 +1202,7 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 			role = CompoundLevel.hostile_role(mix_i) if role == "" else role
 		var exo := ""
 		var variant := "urban"
+		var fid := String(enemy_faction)  # who he fights for (his doctrine, the war's tally)
 		var kit_id := Kits.kit_of(enemy_faction)
 		if Kits.is_data(kit_id) and loadout.size() >= CompoundLevel.HOSTILE_LOADOUT.size() and loadout.slice(0, CompoundLevel.HOSTILE_LOADOUT.size()) == CompoundLevel.HOSTILE_LOADOUT:
 			# Wave 6b: a faction with a data kit (a regional army) fields its own gear and camo.
@@ -1214,10 +1215,11 @@ func _spawn_team(squad: Squad, callsign: String, size: int, at: Vector3, toward:
 			role = CompoundLevel.rival_pmc_role(mix_i) if role == "" else role
 			exo = CompoundLevel.rival_pmc_exo_at(mix_i, difficulty)
 			variant = "black"  # Captain, 2026-10-17: "black for enemy pmc"
+			fid = String(CompoundLevel.PMC_FACTION)  # Vantage's men are Vantage's (its own doctrine), whoever holds the zone
 		var spawn := {"name": "%s_%d" % [callsign, i + 1], "faction": "hostile",
 			"variant": variant, "pos": pos, "loadout": kit, "combat": combat, "discipline": discipline,
-			"guard": false, "mode": mode, "role": role, "exo": exo, "faction_id": String(enemy_faction),
-			"iff": "militia" if MissionRegistry.faction_side(String(enemy_faction)) == "militia" else ""}  # (terror groups: orange marks for a militia)
+			"guard": false, "mode": mode, "role": role, "exo": exo, "faction_id": fid,
+			"iff": "militia" if MissionRegistry.faction_side(fid) == "militia" else ""}  # (terror groups: orange marks for a militia)
 		var s: Soldier = level.call(&"spawn_soldier", spawn)
 		if s == null:
 			continue

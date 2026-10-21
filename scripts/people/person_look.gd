@@ -73,6 +73,14 @@ static func outfit(kind: StringName, side: StringName, factors: Dictionary = {})
 	return _variant(shirt, trousers, skin, shoes)
 
 
+## The role leader `title` of `faction` dresses as when an HVT job names him (factions.json
+## "leader_roles": the Bookkeeper a financier, the Chemist a bomb maker); a commander when it
+## says nothing or names no HOSTILE_ROLES role.
+static func leader_role(faction: String, title: String) -> StringName:
+	var role := StringName(String((MissionRegistry.faction(faction).get("leader_roles", {}) as Dictionary).get(title, "")))
+	return role if role in HOSTILE_ROLES else &"commander"
+
+
 ## A role from `roles` by weight.
 static func role_for(rng: RandomNumberGenerator, roles: Array[StringName]) -> StringName:
 	var total := 0.0

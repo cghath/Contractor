@@ -226,6 +226,16 @@ static func leaders_all_down(faction: String) -> bool:
 	return leaders_down(faction).size() >= all.size()
 
 
+## The next of `faction`'s leaders still free (the first in its "leaders" list not taken), ""
+## when all are taken or it has none: the man an HVT job against it is after (ContractGen).
+static func next_leader(faction: String) -> String:
+	var down := leaders_down(faction)
+	for title: Variant in MissionRegistry.faction(faction).get("leaders", []):
+		if String(title) not in down:
+			return String(title)
+	return ""
+
+
 ## Whether `zone_id` can't fall to a front now: the FOB's, or a faction's last zone (Captain:
 ## "can be sieged but cannot fall unless the player explicitly wipes them out").
 static func cant_fall(zone_id: String) -> bool:
@@ -316,13 +326,14 @@ static func server_clear_flashpoint(zone_id: String) -> void:
 
 ## Host: a completed contract of `type` against `target` in `zone_id`: the holder's grip and
 ## strength knocked (only the holder's grip is on the line), any front there pushed against
-## whoever the company hit, and a leader taken for an HVT job (LEADER_TYPES).
-static func server_contract_won(zone_id: String, target: String, type := "") -> void:
+## whoever the company hit, and a leader taken for an HVT job (LEADER_TYPES): `leader`, the one
+## the job named (the contract's "leader"), else the next still free.
+static func server_contract_won(zone_id: String, target: String, type := "", leader := "") -> void:
 	if zone_id == "" or target == "":
 		return
 	_add_strength(target, -WIN_STRENGTH_HIT)
 	if type in LEADER_TYPES:
-		server_leader_down(target)
+		server_leader_down(target, leader)
 	var s := site(zone_id)
 	var f: Dictionary = s.get("front", {})
 	if not f.is_empty():
@@ -334,13 +345,16 @@ static func server_contract_won(zone_id: String, target: String, type := "") -> 
 	Campaign.mark_changed(WAR)
 
 
-## Host: one of `faction`'s leaders is taken (the next title in its "leaders" list).
-static func server_leader_down(faction: String) -> void:
+## Host: one of `faction`'s leaders is taken: `leader` if it's one of its "leaders" still free
+## (the one an HVT job named; two jobs on the board can name the same man), else the next free.
+static func server_leader_down(faction: String, leader := "") -> void:
 	var all: Array = MissionRegistry.faction(faction).get("leaders", [])
 	var down: Array = leaders_down(faction).duplicate()
-	if down.size() >= all.size():
+	if leader == "" or leader not in all or leader in down:
+		leader = next_leader(faction)
+	if leader == "":
 		return
-	down.append(String(all[down.size()]))
+	down.append(leader)
 	(_war().leaders_down as Dictionary)[faction] = down
 	_news(int(_war().day), "", "leader", "%s has lost %s." % [MissionRegistry.faction_name(faction), String(down.back())])
 	Campaign.mark_changed(WAR)

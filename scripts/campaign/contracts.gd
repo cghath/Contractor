@@ -945,7 +945,9 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
 		_close(c, String(result.outcome))
 		if String(result.outcome) == "completed" and String(c.get("zone_kind", "")) == "hot":
-			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")))  # wave 6c; the living war
+			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")), String(c.get("leader", "")))  # wave 6c; the living war
+		elif String(result.outcome) == "completed" and String(c.get("leader", "")) != "":
+			WorldSites.server_leader_down(String(c.get("target", "")), String(c.leader))  # the leader it named is taken, in any zone
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
 	Economy.bank_items(without_intel(report.get("bank", report.get("items", []))), "carried out")

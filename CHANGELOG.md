@@ -11,6 +11,29 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terror groups follow-ups: named leaders, drug labs and contraband (2026-10-20)
+
+The follow-ups from docs/terror_groups.md section 9. Every name is made up.
+
+#### Added
+- **HVT jobs go after named leaders.** An HVT capture or manhunt job against a group is after the
+  next of its leaders still free, by title and name: "HVT capture (the Chemist)", "Capture the
+  Chemist (his name) and bring them to extraction alive". The brief opens with who he is.
+  Winning the job takes that leader down, in any zone, and the next job names the next one.
+- **Leaders dress for their part.** Each leader is a commander, a financier or a bomb maker
+  (the Bookkeeper wears a dark suit, the Chemist work clothes).
+- **Each group names its own sites.** A raid or supply-line cache is an IED workshop for the Ashen
+  Banner and the Valley Shura, and a drug lab or a warehouse for the Kestrel Cartel and the
+  Saltline Syndicate. The same site always has the same name.
+- **Cartel contraband.** A raid, sabotage or supply-line job against a cartel has a box of its
+  goods (hashish, captagon, heroin bricks, counterfeit dollars) beside the target. Every third man
+  of a cartel garrison carries some in his pockets.
+
+#### Changed
+- **Vantage and the Eastern Concord Forces fight by their own doctrine** (PMC and regular army)
+  wherever they are, not by the doctrine of the zone's people. Vantage's racing team now counts
+  as Vantage's men, whoever holds the zone.
+
 ### Terror groups, cartels and a living war (Captain, 2026-10-20)
 
 Design and the Captain's calls: docs/terror_groups.md. Every name and flag is made up.

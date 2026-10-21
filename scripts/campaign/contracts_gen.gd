@@ -16,7 +16,9 @@ extends RefCounted
 ##   "enemy_count", "quality", "threats", "understated";
 ## - "base_pay", "days", "objectives" (the type's templates, resolved for the target module:
 ##   mission_target), "offered_day", "expires_day",
-##   "state" ("offered", then Contracts' states), and once accepted "terms" and "deal".
+##   "state" ("offered", then Contracts' states), and once accepted "terms" and "deal";
+## - "leader": for an HVT job (WorldSites.LEADER_TYPES) the title of the target faction's leader
+##   it is after (factions.json "leaders": its next one still free), "" when none.
 
 ## Keys only the host knows until the threat is revealed.
 const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
@@ -224,8 +226,11 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
-	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []))
-	var legs := _legs(rng, def, String(zone.get("zone_id", "")), target)
+	# Terror groups follow-ups (2026-10-20): an HVT job against a faction is after its next leader
+	# still free, by name (WorldSites.server_contract_won takes that one down when it's won).
+	var leader := WorldSites.next_leader(target) if type_id in WorldSites.LEADER_TYPES else ""
+	var mission := mission_target(rng, def, String(zone.get("zone_id", "")), target, at_module, ctx.get("avoid_modules", []), leader)
+	var legs := _legs(rng, def, String(zone.get("zone_id", "")), target, leader)
 	if def.get("chase", false) and not legs.is_empty():
 		# A chase (LZ-7): stopping it here is the bonus; got away, the job goes on next door.
 		for o: Dictionary in mission.objectives:
@@ -239,10 +244,18 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var brief := String(def.get("brief", ""))
 	if war_driven:
 		brief = "The %s just took %s off whoever had it. %s" % [MissionRegistry.faction_name(target), zone.get("name", ""), brief]
+	var title_extra := String(mission.title_extra)
+	if leader != "":
+		title_extra = " (%s)" % leader
+		var everywhere: Array = (mission.objectives as Array).duplicate()
+		for l: Dictionary in legs:
+			everywhere.append_array(l.objectives)
+		var who := _hvt_name(everywhere)
+		brief = "Target: %s%s of the %s. %s" % [who + ", " if who != "" else "", leader, MissionRegistry.faction_name(target), brief]
 	return {
-		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "") + "".join(legs.map(func(l: Dictionary) -> String: return " and " + String(l.zone_name)))],
+		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), title_extra, zone.get("name", "") + "".join(legs.map(func(l: Dictionary) -> String: return " and " + String(l.zone_name)))],
 		"brief": brief + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
-		"employer": employer, "target": target, "war_driven": war_driven,
+		"employer": employer, "target": target, "war_driven": war_driven, "leader": leader,
 		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
 		"region": zone.get("region", ""), "module": mission.module, "module_id": mission.module_id, "module_name": MissionRegistry.module_name(mission.module),
 		"rated": rated, "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),
@@ -262,12 +275,17 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 ## module type with no module id), each template's site (a list picks one the module has; an
 ## optional one whose site the module lacks is left out; a site with its own "kind" plays that
 ## kind: sabotage's vehicle park), {name} and {module} filled in, a
-## person's real name for an HVT (from the `target` faction's nation) or a hostage (Names.mission_person), and the time limit on the required ones. Picked on a
+## person's real name for an HVT (from the `target` faction's nation) or a hostage (Names.mission_person), and the time limit on the required ones.
+## Against a faction with its own goods and names (terror groups follow-ups, 2026-10-20): a site it
+## names its own way is called that ("site_name": faction_site_name, the Banner's IED workshop), a
+## required target to destroy gets its goods in a box beside it ("loot_of": WorldValuables.contraband_box),
+## and the hostile HVT is its `leader` when one is given ("Capture the Chemist (Name)", dressed by
+## his PersonLook role, "leader_roles"). Not on the locals' own jobs. Picked on a
 ## generator of its own (seeded from `rng`, which it leaves alone) so the boards stay as they
 ## were. {"module", "module_id", "objectives", "title_extra"}. Hot zones (HotZoneOps):
 ## `at_module` picks that module when the type plays there; `avoid` leaves out modules other
 ## live contracts hold while any other is left.
-static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "", at_module := "", avoid: Array = []) -> Dictionary:
+static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target := "", at_module := "", avoid: Array = [], leader := "") -> Dictionary:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
 	if def.has("scenario"):  # convoy, defend, rescue, recon: ScenarioGen builds the objectives with their positions
@@ -309,12 +327,24 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 			person = MissionRegistry.site(module_type, String(site.of_hvt)).get("person", {})
 		var friendly := String(person.get("side", "")) == "friendly"
 		var name := String(t.get("name", site.get("name", "")))  # (a template may name its own piece: a story contract's, Story)
+		var renamed := faction_site_name(target, site_id, "%s|%s" % [zone_id, module_id]) if not t.has("name") and not def.has("locals") else ""
+		if renamed != "":
+			name = renamed
+			o["site_name"] = renamed
+		if String(o.get("kind", "")) in [Objectives.DESTROY_CACHE, Objectives.DESTROY_VEHICLES] and not bool(t.get("optional", false)) \
+				and not def.has("locals") and not WorldValuables.faction_loot(target).is_empty():
+			o["loot_of"] = target
+		var as_leader := leader != "" and not friendly and site.has("person")
 		if not person.is_empty():
 			if person_name == "":
 				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target, zone_id if zone_id != "" else "none"))
-			name = person_name
+			name = "%s (%s)" % [leader, person_name] if as_leader else person_name
 		if site.has("person"):
 			o["person"] = {"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}
+			if as_leader:
+				o.person["leader"] = leader
+				o.person["role"] = String(PersonLook.leader_role(target, leader))
+				o.person["label"] = "HVT (%s, %s)" % [person_name, leader]
 		if t.get("site") is Array and title_extra == "":
 			title_extra = " (%s)" % name
 		o.text = String(t.get("text", "")).replace("{name}", name).replace("{module}", MissionRegistry.module_name(module_type))
@@ -330,7 +360,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 ## objectives ({"zone_id", "zone_name", "module", "module_id", "objectives"}). A type's own
 ## "leg_objectives" and "leg_modules" (a manhunt: the intel here, the man next door) stand in for
 ## its "objectives" and "modules" there. [] for any other type.
-static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String) -> Array:
+static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, target: String, leader := "") -> Array:
 	var want := int(def.get("legs", 0))
 	if want <= 0 or zone_id == "":
 		return []
@@ -350,9 +380,26 @@ static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, 
 	var out: Array = []
 	while out.size() < want and not options.is_empty():
 		var z: String = options.pop_at(pick.randi() % options.size())
-		var m := mission_target(pick, leg_def, z, target)
+		var m := mission_target(pick, leg_def, z, target, "", [], leader)
 		out.append({"zone_id": z, "zone_name": String(MissionRegistry.zone(z).get("name", z)), "module": m.module, "module_id": m.module_id, "objectives": m.objectives})
 	return out
+
+
+## What a contract against `faction` calls site `site_id` (factions.json "site_names": the Ashen
+## Banner's and the Shura's IED workshop, the cartels' drug lab or warehouse), "" for its usual
+## name. One of the list by `place_key` (zone and module), so a site is the same thing every time.
+static func faction_site_name(faction: String, site_id: String, place_key: String) -> String:
+	var names: Array = (MissionRegistry.faction(faction).get("site_names", {}) as Dictionary).get(site_id, [])
+	return String(names[posmod(hash(place_key), names.size())]) if not names.is_empty() else ""
+
+
+## The real name of the leader among `objectives` (the hostile HVT mission_target made one), "" for none.
+static func _hvt_name(objectives: Array) -> String:
+	for o: Dictionary in objectives:
+		var person: Dictionary = o.get("person", {})
+		if person.has("leader"):
+			return String(person.get("name", ""))
+	return ""
 
 
 ## The clawback terms (data/contracts.json "clawback_terms"): {term: {"weight", "pay_mult"}}.
