@@ -70,6 +70,9 @@ func _ready() -> void:
 		return b)
 	await _fit("contract board", func() -> Node: return ContractBoard.new())
 	await _fit("shop", func() -> Node: return ShopScreen.new())
+	# Fire support (2026-10-20): the fire mission panel, and the UAV feed's picture-in-picture.
+	await _fit("fire mission panel", func() -> Node: return FireMissionPanel.new())
+	await _fit("uav feed", func() -> Node: return UavFeed.new())
 	# A full board with an offer picked (details and negotiation up), as the Captain sees it
 	# (ui/campaign-screens, docs/ui_audit.md P0-5).
 	Contracts.new_full_campaign(71, 100000)

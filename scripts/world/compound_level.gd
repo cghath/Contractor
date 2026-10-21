@@ -362,6 +362,7 @@ func _ready() -> void:
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	EnemyTags.install(self)  # tagging enemies for the squad by radio (Captain, 2026-10-16)
 	RebelCalls.install(self)  # the locals' call-ins, by their support (rebel support part 2)
+	FireSupport.install(self)  # fire missions, the recon UAV, the forward observer's targets (fire support, 2026-10-20)
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 	add_child(DayNight.new())  # "DayNight": time of day and weather, after _build_environment's lights (wave 7 S1)
 
