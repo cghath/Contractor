@@ -154,6 +154,19 @@ var _pace_wheel_at := -100.0
 ## body moves under it. Applied on top of the camera's eased sway (_cam_turn).
 const GAZE_FOCUS_M := 10.0
 var _cam_turn := Vector2.ZERO
+## First-person medic view (Captain, 2026-10-20: medical animations on par with Arma Reforger and
+## beyond): treating anyone, yourself too, the weapon is gone from view and your own forearms,
+## hands and what they hold are on the camera (CharacterModel.set_view_hands), the eye goes down
+## with the drawn body's kneel and bend (CharacterModel.treat_view_offset, _medic_eye, head space),
+## and for MEDIC_LOOK_S at the start the view turns to the work (Proposed) unless it's already
+## within MEDIC_LOOK_SLACK of it (treating yourself it only looks down: the body doesn't turn);
+## then the mouse is yours again.
+const MEDIC_LOOK_S := 0.5
+const MEDIC_LOOK_RATE := 7.0
+const MEDIC_LOOK_SLACK := 0.25
+var _medic_eye := Vector3.ZERO
+var _medic_n := -1
+var _medic_look := 0.0
 var _view_kick := 0.0      # 0..2: a shot's kick, settling
 var _vm_pitch := 0.0       # the view model's eased pitch, before the kick
 var _last_recoil := 0.0
@@ -164,6 +177,13 @@ var _reload_len := 1.0
 var _support_arm: Node3D   # the support hand's view forearm, and where it rests
 var _support_rest := Transform3D.IDENTITY
 var _support_palm := Vector3.ZERO  # view-model space: the support palm at rest
+## The view forearms' hands (HandPose, fingers pass 2026-10-20): [firing, support] forearms, the
+## pose each is drawn in, and the trigger's squeeze after a shot (CharacterModel.PRESS_S).
+var _view_arms: Array[Node3D] = []
+var _view_poses: Array[StringName] = [&"", &""]
+var _view_press_t := 0.0
+var _view_shot_t := 99.0
+var _view_pistol := false
 var _reload_points := {}  # VoxelArt.reload_points of the weapon in view
 var _reload_keys: Array = []  # Reloads.keys of the reload under way
 var _reload_pos := Vector3.ZERO  # its weapon offset and turn this frame (Reloads)
@@ -517,6 +537,8 @@ func _update_bob(delta: float) -> void:
 		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y + _step_y, 0.0)
 	else:
 		body.camera.position = Vector3(0.0, _step_y, 0.0)  # (steps are smoothed with head bob off too)
+	_medic_eye = body.head.basis.orthonormalized().inverse() * (body.model.treat_view_offset() * body.model.body_scale())
+	body.camera.position += _medic_eye  # down on a knee at the casualty, bent over the work
 
 
 ## The step-up smoothing (STEP_SMOOTH): a sudden small rise on the floor is taken back off the view
@@ -532,6 +554,17 @@ func _update_step_smooth(delta: float) -> void:
 	_step_y = lerpf(_step_y, 0.0, 1.0 - exp(-STEP_SMOOTH * delta))
 	if absf(_step_y) < 0.0005:
 		_step_y = 0.0
+
+
+## Going down dying (Vitals.is_dying): told once, what to do.
+var _was_dying := false
+
+
+func _note_dying() -> void:
+	var dying := body.vitals.is_dying()
+	if dying and not _was_dying:
+		flash("You're going down. Treat yourself (Medical menu) or call a medic (Command > Status > Medic!).")
+	_was_dying = dying
 
 
 ## The landing dip (LAND_*): the fall's speed, taken on touching down, kicks a damped spring.
@@ -630,11 +663,17 @@ func _physics_process(delta: float) -> void:
 		_update_aim(delta)
 		_try_fire()
 	_update_reload_hand()
+	var treating := body.model.action_shown() == CharacterModel.TREAT and not waiting
+	body.model.set_view_hands(treating)
+	_update_view_hands(delta)
+	_update_medic_look(delta, treating)
 	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
 	tilt = lerpf(minf(tilt, LOW_READY_TILT.x * _low_w), _reload_rot.x, _reload_w)
 	_vm_pitch = move_toward(_vm_pitch, tilt, delta * 6.0)
 	body.view_model.rotation.x = _vm_pitch
 	if body.recoil_return > _last_recoil + 0.0001:  # a shot: the weapon kicks
+		_view_press_t = CharacterModel.PRESS_S  # and the trigger finger squeezes
+		_view_shot_t = 0.0
 		var w := body.active_weapon()
 		_view_kick = clampf(_view_kick + (clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0), 0.0, 2.0)
 	_last_recoil = body.recoil_return
@@ -647,7 +686,7 @@ func _physics_process(delta: float) -> void:
 	# Through a scope the gun still shows peripherally (P0362 PIP rework: the magnified glass is
 	# GunSight's own SubViewport, which skips it on VIEW_MODEL_LAYER instead); with PiP off the
 	# whole view is the glass, as before PiP, and the gun goes.
-	body.view_model.visible = body.carry_mode == &"" and not waiting \
+	body.view_model.visible = body.carry_mode == &"" and not waiting and not treating \
 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body)) \
 		and (GunSight.pip_on(body) or not GunSight.scoped(body))
 	_settle_recoil(delta)
@@ -683,6 +722,36 @@ func _update_give_up(delta: float) -> void:
 	if give_up_held >= Soldier.GIVE_UP_HOLD_S and not _give_up_sent:
 		_give_up_sent = true
 		body._server_give_up.rpc_id(1)
+
+
+## The first-person medic view's turn to the work (MEDIC_LOOK_*): a new treatment starts it.
+func _update_medic_look(delta: float, treating: bool) -> void:
+	if not treating:
+		_medic_look = 0.0
+		return
+	var n := int(body.model.action_net.get("n", -1))
+	if n != _medic_n:
+		_medic_n = n
+		_medic_look = MEDIC_LOOK_S
+	if _medic_look <= 0.0:
+		return
+	_medic_look -= delta
+	var site := body.model.treat_site()
+	var aim: Vector3 = site.p if not site.is_empty() else (body.model.hand_position(true) + body.model.hand_position(false)) * 0.5
+	var to := aim - body.camera.global_position
+	var flat := Vector3(to.x, 0.0, to.z)
+	var k := 1.0 - exp(-MEDIC_LOOK_RATE * delta)
+	var mine := not bool(body.model.action_net.get("kneel", false))  # yourself: the work turns with you
+	if flat.length() > 0.2 and not mine:
+		var ahead := -body.camera.global_basis.z
+		ahead.y = 0.0
+		var turn := ahead.signed_angle_to(flat, Vector3.UP) if ahead.length() > 0.01 else 0.0
+		if absf(turn) > MEDIC_LOOK_SLACK:
+			body.rotate_y(turn * k)
+	var pitch := atan2(to.y, maxf(flat.length(), 0.01))
+	var now := body.head.rotation.x
+	if absf(pitch - now) > MEDIC_LOOK_SLACK:
+		body.set_pitch(now + (pitch - now) * k)
 
 
 ## Keeps the casualty this player has up on the shoulder out of their own camera (they still see
@@ -835,8 +904,8 @@ func _update_voice() -> void:
 
 
 func _try_fire() -> void:
-	if body.binoculars_up:
-		return  # glassing: no shooting
+	if body.binoculars_up or body.vitals.is_dying():
+		return  # glassing, or dying on the ground: no shooting
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"" or body.movement.mantling:  # both hands on the casualty, or on the ledge
 		return
@@ -887,7 +956,7 @@ func _update_sway(delta: float) -> void:
 	var sway := body.aim_sway(weapon, Soldier._now()) if weapon and weapon.type == "weapon" and not Launchers.is_launcher(weapon) else Vector2.ZERO
 	var k := minf(delta * 8.0, 1.0)
 	_cam_turn = _cam_turn.lerp(Vector2(sway.x + _feel_pitch, sway.y), k)
-	var gaze := gaze_turn(body.camera.position)
+	var gaze := gaze_turn(body.camera.position - _medic_eye)  # (the steps' moves, not the kneel)
 	body.camera.rotation.x = _cam_turn.x + gaze.x
 	body.camera.rotation.y = _cam_turn.y + gaze.y
 
@@ -920,7 +989,7 @@ func wheel_pace(steps: int) -> bool:
 ## pistol).
 static func ads_view(weapon: ItemData, state := {}) -> Vector3:
 	var model := VoxelArt.model_for(weapon, state)
-	var eye := ADS_EYE_PISTOL if model == "pistol" else ADS_EYE
+	var eye := ADS_EYE_PISTOL if model.begins_with("pistol") else ADS_EYE
 	return eye - VoxelArt.sight_point(model)
 
 
@@ -946,6 +1015,9 @@ func _binos_fov() -> float:
 
 
 func _update_aim(delta: float) -> void:
+	_note_dying()
+	if body.vitals.is_dying():
+		body.is_aiming = false
 	if body.binoculars_up and (not body.vitals.is_up() or is_instance_valid(body.vehicle) or Input.is_action_pressed(&"sprint") \
 			or body.inventory.count_of(BINOS) <= 0 or body.inventory.hands != &""):
 		_set_binoculars(false)  # sprinting, down, aboard, or the pair's gone
@@ -1132,6 +1204,8 @@ func _update_view_model() -> void:
 	_bolt_part = null
 	_cover_part = null
 	_reload_points = {}
+	_view_arms.clear()
+	_view_poses = [&"", &""]
 	if nade_up:
 		_build_nade_view()
 		return
@@ -1171,22 +1245,91 @@ func _update_view_model() -> void:
 	if points.is_empty():
 		return
 	var side := -1.0 if body.left_handed else 1.0  # the firing hand's side
+	_view_pistol = model.begins_with("pistol")
 	for hand: Array in [[points.grip, VIEW_FIRING_ELBOW], [points.support, VIEW_SUPPORT_ELBOW]]:
 		var palm: Vector3 = hand[0]
 		var elbow: Vector3 = palm + (hand[1] as Vector3) * Vector3(side, 1, 1)
-		var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant, VIEW_MODEL_LAYER)
+		var firing: bool = hand[1] == VIEW_FIRING_ELBOW
+		var pose := _view_pose(firing)
+		var forearm := VoxelArt.instance(HandPose.model(pose, firing == body.left_handed, VoxelArt.hands_bare(body.model.variant), body.model.body), body.model.variant, VIEW_MODEL_LAYER)
 		forearm.name = "ViewForearm"
-		# The forearm's pivot is the elbow and its palm FOREARM down its -y: point -y at the palm.
-		var up := (elbow - palm).normalized()
-		var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
-		var basis := Basis(across, up, across.cross(up)).orthonormalized()
-		forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
-		ExoFrame.dress_view_forearm(forearm, frame, (hand[1] == VIEW_FIRING_ELBOW) != body.left_handed, GearRig.armor_color_for(body.model.variant))
+		forearm.set_meta(&"hand_pose", pose)
+		forearm.transform = _view_arm_transform(palm, elbow, firing, pose)
+		ExoFrame.dress_view_forearm(forearm, frame, firing != body.left_handed, GearRig.armor_color_for(body.model.variant))
 		body.view_model.add_child(forearm)
+		_view_arms.append(forearm)
+		_view_poses[_view_arms.size() - 1] = pose
 		if hand[1] == VIEW_SUPPORT_ELBOW:
 			_support_arm = forearm
 			_support_rest = forearm.transform
 			_support_palm = palm
+
+
+## A view forearm's place: its elbow at `elbow` and its -y down the arm to the hand, rolled about
+## its own axis so the palm faces the weapon (in from the firing hand's side, up and in under the
+## handguard: as CharacterModel._palm_want), and moved so pose `pose`'s grasp centre
+## (HandPose.reach_point) is on the hand point `palm`. Scaled to the arm's length.
+func _view_arm_transform(palm: Vector3, elbow: Vector3, firing: bool, pose: StringName) -> Transform3D:
+	var left := firing == body.left_handed  # the mirrored (left) hand's mesh
+	var up := (elbow - palm).normalized()
+	var across := up.cross(Vector3.BACK).normalized() if absf(up.dot(Vector3.BACK)) < 0.95 else Vector3.RIGHT
+	var basis := Basis(across, up, across.cross(up)).orthonormalized()
+	var inward := Vector3(1.0 if left else -1.0, 0, 0)
+	var want := inward if firing or _view_pistol else Vector3.UP + inward * 0.6
+	basis = basis * Basis(Vector3.UP, clampf(HandPose.roll_to(basis.inverse() * want, left), -CharacterModel.ROLL_MAX, CharacterModel.ROLL_MAX))
+	var scaled := basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM)
+	var reach := scaled * HandPose.reach_point(pose, left, body.model.body == VoxelArt.FEMALE)
+	return Transform3D(scaled, palm - reach)
+
+
+## The pose a view hand is in now: the firing hand's grip (TRIGGER aimed or just after a shot, PRESS
+## as one goes, else the index along the frame), the support hand's (a reload's by its anchor:
+## HandPose.RELOAD_POSES; cupping the firing hand on a pistol).
+func _view_pose(firing: bool) -> StringName:
+	if firing:
+		if _view_press_t > 0.0:
+			return HandPose.PRESS
+		return HandPose.TRIGGER if body.is_aiming or _view_shot_t < CharacterModel.TRIGGER_HOLD_S else HandPose.GRIP
+	if body.is_reloading:
+		var ks: Array = _reload_keys if not _reload_keys.is_empty() else Reloads.keys(Reloads.AR, false)
+		var at := Reloads.sample(ks, clampf((Soldier._now() - _reload_from) / _reload_len, 0.0, 1.0))
+		return HandPose.RELOAD_POSES.get(at.anchor_a if float(at.w) < 0.5 else at.anchor_b, HandPose.MAG)
+	return HandPose.HOLD if _view_pistol else HandPose.SUPPORT
+
+
+## Each frame: the view hands' poses, their meshes swapped when one changes (the support forearm's
+## rest moved so the new pose's grasp centre stays on the hand point).
+func _update_view_hands(delta: float) -> void:
+	_view_press_t -= delta
+	_view_shot_t += delta
+	for i in _view_arms.size():
+		var arm := _view_arms[i]
+		if not is_instance_valid(arm):
+			continue
+		var firing := i == 0
+		var pose := _view_pose(firing)
+		if pose == _view_poses[i]:
+			continue
+		_view_poses[i] = pose
+		var left := firing == body.left_handed
+		var mi := arm.get_child(0) as MeshInstance3D
+		var model := HandPose.model(pose, left, VoxelArt.hands_bare(body.model.variant), body.model.body)
+		mi.mesh = VoxelArt.mesh(model, body.model.variant)
+		var was: StringName = arm.get_meta(&"hand_pose")
+		var shift := arm.transform.basis * (HandPose.reach_point(was, left, body.model.body == VoxelArt.FEMALE) - HandPose.reach_point(pose, left, body.model.body == VoxelArt.FEMALE))
+		arm.set_meta(&"hand_pose", pose)
+		if arm == _support_arm:
+			_support_rest.origin += shift
+		else:
+			arm.position += shift
+
+
+## Tests: the first-person hands' poses now, [firing, support] (HandPose.POSES; empty with none).
+func view_hand_poses() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for i in _view_arms.size():
+		out.append(_view_poses[i])
+	return out
 
 
 ## Reloading in first person (Reloads): the reload's keys at its share so far move the support
@@ -1281,12 +1424,10 @@ func _build_nade_view() -> void:
 	nade.position = palm + Vector3(0.0, 0.03, 0.0)
 	body.view_model.add_child(nade)
 	var elbow := palm + Vector3(0.09 * side, -0.12, 0.2)
-	var forearm := VoxelArt.instance(VoxelArt.body_part("forearm", body.model.body), body.model.variant)
+	var forearm := VoxelArt.instance(HandPose.model(HandPose.HOLD, body.left_handed, VoxelArt.hands_bare(body.model.variant), body.model.body), body.model.variant)
 	forearm.name = "ViewForearm"
-	var up := (elbow - palm).normalized()
-	var across := up.cross(Vector3.BACK).normalized()
-	var basis := Basis(across, up, across.cross(up)).orthonormalized()
-	forearm.transform = Transform3D(basis.scaled(Vector3.ONE * palm.distance_to(elbow) / CharacterModel.FOREARM), elbow)
+	_view_pistol = true  # (the palm in round the grenade, as on a grip)
+	forearm.transform = _view_arm_transform(palm + Vector3(0.0, 0.03, 0.0), elbow, true, HandPose.HOLD)
 	ExoFrame.dress_view_forearm(forearm, ExoFrame.worn(body.inventory), not body.left_handed, GearRig.armor_color_for(body.model.variant))
 	body.view_model.add_child(forearm)
 

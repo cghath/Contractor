@@ -26,7 +26,9 @@ extends RefCounted
 ## SIDE_COLOURS (the IFF palette). The first that has an answer:
 ##   1. a "controller" written on the zone's entry (server_set_controller);
 ##   2. the company (PLAYER), for a zone it took or its FOB's (control() not ENEMY; the base zone);
-##   3. a hot zone: its WorldSites holder (the faction war moves it between deployments);
+##   3. a zone in the faction war (every zone with a "controller" in data/contracts.json, and the
+##      hot zones): its WorldSites holder (the living war moves it between deployments; terror
+##      groups, 2026-10-20);
 ##   4. a zone's own "controller" in data/contracts.json, if it has one;
 ##   5. the target of a contract the company holds or is offered there;
 ##   6. DEFAULT: Black Ridge, the insurgents the region's people live under.
@@ -172,7 +174,7 @@ static func controller(zone_id: String) -> String:
 	if zone_id == RegionMap.BASE or is_company(zone_id):
 		return PLAYER
 	var z := zone_def_raw(zone_id)
-	if String(z.get("kind", "")) == "hot":
+	if String(z.get("kind", "")) == "hot" or String(z.get("controller", "")) != "":
 		var holder := String(_site(zone_id).get("holder", ""))
 		if holder != "":
 			return holder
@@ -191,14 +193,17 @@ static func is_contested(zone_id: String) -> bool:
 	if entry.has("contested"):
 		return bool(entry.contested)
 	var site := _site(zone_id)
-	return not site.is_empty() and (float(site.get("grip", 1.0)) <= WorldSites.CONTESTED_GRIP or bool(site.get("flashpoint", false)))
+	return not site.is_empty() and (float(site.get("grip", 1.0)) <= WorldSites.CONTESTED_GRIP or bool(site.get("flashpoint", false))
+		or not (site.get("front", {}) as Dictionary).is_empty())  # (a front: somebody is attacking it now)
 
 
-## How `faction` is drawn: "player", "allied" (an employer), "militia" (a hostile fielding the
-## insurgent kit), "hostile", or "neutral".
+## How `faction` is drawn: "player", "allied" (an employer, or the locals' rebels), "militia" (a
+## hostile drawn orange: MissionRegistry.faction_side), "hostile", or "neutral".
 static func side_of_faction(faction: String) -> String:
 	if faction == PLAYER:
 		return "player"
+	if faction == WorldSites.REBELS:
+		return "allied"
 	var f := MissionRegistry.faction(faction)
 	match String(f.get("role", "")):
 		"employer":
@@ -206,7 +211,7 @@ static func side_of_faction(faction: String) -> String:
 		"neutral":
 			return "neutral"
 		"hostile":
-			return "militia" if String(f.get("kit", Kits.INSURGENT)) == Kits.INSURGENT else "hostile"
+			return MissionRegistry.faction_side(faction)
 	return "neutral"
 
 
@@ -217,7 +222,7 @@ static func side(zone_id: String) -> String:
 
 ## A controller's name for the map ("The company" for PLAYER).
 static func controller_name(faction: String) -> String:
-	return SIDE_NAMES.player if faction == PLAYER else MissionRegistry.faction_name(faction)
+	return SIDE_NAMES.player if faction == PLAYER else WorldSites.holder_name(faction)
 
 
 ## A zone's raw row in data/contracts.json ({} if none): MissionRegistry.zone() would build its layout.
@@ -228,12 +233,17 @@ static func zone_def_raw(zone_id: String) -> Dictionary:
 	return {}
 
 
-## A hot zone's WorldSites row ({} for any other zone): the host's campaign, or the synced rows.
+## A zone's WorldSites row (a hot zone's or any zone in the faction war; {} for any other): the
+## host's campaign, or the synced war (Economy.war_view).
 static func _site(zone_id: String) -> Dictionary:
-	if String(zone_def_raw(zone_id).get("kind", "")) != "hot":
+	var z := zone_def_raw(zone_id)
+	if String(z.get("kind", "")) != "hot" and String(z.get("controller", "")) == "":
 		return {}
 	if _is_host():
 		return WorldSites.site(zone_id)
+	var seen: Dictionary = (Economy.war_view().get("zones", {}) as Dictionary).get(zone_id, {})
+	if not seen.is_empty():
+		return seen
 	for r: Dictionary in Economy.world_sites():
 		if String(r.get("zone_id", "")) == zone_id:
 			return r
@@ -310,6 +320,7 @@ static func server_note_site_down(zone_id: String, module_id: String) -> bool:
 		return false
 	down.append(module_id)
 	z["down"] = down
+	WorldSites.server_site_down(zone_id)  # the living war: its holder's grip and strength take it
 	SessionLog.note("zone control: %s: %s down (%d of %d)" % [zone_id, module_id, progress(zone_id).down, sites.size()])
 	Campaign.mark_changed(SECTION)
 	if String(z.get("state", ENEMY)) == ENEMY and sites.all(func(m: String) -> bool: return m in down):
@@ -319,6 +330,12 @@ static func server_note_site_down(zone_id: String, module_id: String) -> bool:
 
 
 static func _flip(zone_id: String) -> void:
+	if not WorldSites.server_company_takes(zone_id):  # a faction's last zone: its leaders first (Captain, 2026-10-20)
+		var h := WorldSites.holder(zone_id)
+		Contracts._notify_all("%s: its HQ and QRF bases are down, but %s holds on while its leaders are free (%d of %d taken)." % [
+			RegionMap.zone_name(zone_id), MissionRegistry.faction_name(h), WorldSites.leaders_down(h).size(),
+			(MissionRegistry.faction(h).get("leaders", []) as Array).size()])
+		return
 	var z := _zone(zone_id)
 	z["state"] = COMPANY
 	z["flipped_day"] = Economy.day()
@@ -439,4 +456,21 @@ static func server_establish_fob(zone_id: String) -> void:
 	invalidate_maps()
 	SessionLog.note("zone control: the FOB is established in %s (day %d); home moves ashore" % [zone_id, Economy.day()])
 	Contracts._notify_all(LINE_WON % name)
+	Campaign.mark_changed(SECTION)
+
+
+## Host (WorldSites, a front won on the company's ground): `zone_id` goes back to the enemy. Its
+## HQ and QRF bases are theirs again (counted from nothing), and the map follows the war.
+static func server_lose_zone(zone_id: String) -> void:
+	var zones: Dictionary = Campaign.section(SECTION).get("zones", {})
+	if not zones.has(zone_id) or control(zone_id) == FOB:
+		return
+	var z: Dictionary = zones[zone_id]
+	z["state"] = ENEMY
+	z["down"] = []
+	z.erase("controller")
+	z.erase("contested")
+	z["lost_day"] = Economy.day()
+	SessionLog.note("zone control: %s is lost to the enemy (day %d)" % [zone_id, Economy.day()])
+	Contracts._notify_all("%s has fallen: the company has lost the zone." % RegionMap.zone_name(zone_id))
 	Campaign.mark_changed(SECTION)

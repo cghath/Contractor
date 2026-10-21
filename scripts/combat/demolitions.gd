@@ -550,13 +550,21 @@ func _blast_data(stats: Dictionary, frags := true) -> Dictionary:
 		"frag_wounds": stats.get("frag_wounds", [1, 3])}
 
 
+## Host: the blast's gore on the bodies near it (BlastGore: torn, peppered, scorched; the dead
+## too), after its wounds, as a warhead's burst does.
+func _gore(lvl: CompoundLevel, centre: Vector3, data: Dictionary) -> void:
+	BlastGore.server_blast(lvl, centre, float(data.get("blast_kg", 0.0)), float(data.get("frag_m", 0.0)))
+
+
 func _blast_demo(lvl: CompoundLevel, rec: Dictionary, xform: Transform3D, rides: Node, shooter: Node) -> void:
 	var stats := _stats(rec)
 	var pos := xform.origin
 	var kg := float(stats.get("blast_kg", 1.5))
 	lvl.show_explosion.rpc(pos)
 	lvl.server_blast(pos, float(stats.get("carve_m", 1.8)))
-	Warheads.server_people(lvl, pos + xform.basis.y * 0.1, _blast_data(stats), shooter)
+	var data := _blast_data(stats)
+	Warheads.server_people(lvl, pos + xform.basis.y * 0.1, data, shooter)
+	_gore(lvl, pos + xform.basis.y * 0.1, data)
 	var on := Vehicle.find_on(rides) if rides else null
 	_hit_vehicles(pos, kg, float(stats.get("contact_mult", 4.0)), on, shooter)
 	Contracts.objectives.server_charge_blast(pos)  # a sabotage target or cache it's on
@@ -585,6 +593,7 @@ func _fire_claymore(lvl: CompoundLevel, rec: Dictionary, xform: Transform3D, sho
 		Warheads.frag_body(body, vitals, centre, d, reach, Vector2i(int(wounds[0]), int(wounds[1])), shooter, 2)
 		if body.has_method(&"suppress"):
 			body.suppress(1.0, centre)
+	_gore(lvl, centre, _blast_data(stats, false))  # torn and scorched close in; the fan's fragments were frag_body's
 	_heard(lvl, centre, 1.0)
 
 
@@ -602,6 +611,7 @@ func _fire_mine(lvl: CompoundLevel, rec: Dictionary, xform: Transform3D, stepper
 		vitals.server_hit(Vitals.SHIN_L if left else Vitals.SHIN_R, {"round_class": Vitals.FULL_POWER, "position": pos, "direction": Vector3.UP, "distance": 0.0})
 		vitals.server_hit(Vitals.THIGH_L if left else Vitals.THIGH_R, {"round_class": Vitals.FRAGMENT, "position": pos, "direction": Vector3.UP, "distance": 0.3})
 	Warheads.server_people(lvl, pos + Vector3.UP * 0.1, _blast_data(stats), shooter, skip)
+	_gore(lvl, pos + Vector3.UP * 0.1, _blast_data(stats))
 	var car := stepper as Vehicle
 	if car:
 		car.server_take_hit({"kind": Vehicle.HE, "position": pos, "direction": Vector3.UP, "blast_kg": float(stats.get("blast_kg", 0.2)) * 2.0, "shooter": shooter})
@@ -701,6 +711,7 @@ func _thermite_done(id: String) -> void:
 			Harm.note_hit(body, shooter)
 			vitals.server_burn(0.15)
 	Warheads.server_people(lvl, pos, _blast_data(stats, false), shooter)
+	_gore(lvl, pos, _blast_data(stats, false))
 	Contracts.objectives.server_charge_blast(pos)  # a cache or sabotage target it's on
 
 

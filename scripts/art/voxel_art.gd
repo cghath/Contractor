@@ -34,6 +34,13 @@ enum C {
 	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
 	WOUND, WOUND_DARK,  # torn flesh round a hole BodyDeform carved
 	BRASS,  # cartridge cases (a belt-fed's belt)
+	GLOVE_PAD, NAIL,  # a glove's knuckle guard and palm patch; bare fingers' nails (HandPose)
+	# Faces (FaceArt; their colours from a look's "face:" scheme, SoldierLook.palette): shaved or
+	# faded hair and stubble, the eyes' whites, irises, pupils and lashes, and teeth.
+	STUBBLE, EYE_WHITE, IRIS, PUPIL, LASH, TEETH,
+	# Inside a body (BodyDeform: crater walls and stumps go skin, then fat, flesh, bone) and
+	# what a blast leaves on it (charred).
+	FLESH, FAT, BONE, BONE_SHADE, CHAR, CHAR_DARK,
 }
 
 const VARIANTS := {
@@ -56,6 +63,7 @@ const VARIANTS := {
 		# read apart at a glance.
 		"camo": ["5c6066", "3f4247", "7a7e84", "26282b"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "d9730d", "gear": "34373b", "pack": "3a3d42",
+		"hands": "bare",  # militia: no gloves (HandPose; fingers pass, 2026-10-20)
 	},
 	"dummy": {
 		"camo": ["f2c230", "f2c230", "e3b022", "f2c230"], "skin": "f2c230", "hair": "f2c230",
@@ -67,6 +75,18 @@ const VARIANTS := {
 	"black": {
 		"camo": ["1a1a1a", "141414", "202020", "0d0d0d"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "5c1f1f", "gear": "232323", "pack": "1f1f1f",
+	},
+	## The Ashen Banner's foreign fighters (terror groups, docs/terror_groups.md 2.1): charcoal and
+	## black with sand, a red patch; its local men wear plain dark clothes (Kits.variant).
+	"banner": {
+		"camo": ["2e2e2c", "1c1c1b", "4a4438", "8a7a5c"], "skin": "b07a52", "hair": "1f1a17",
+		"patch": "c8281e", "gear": "2b2a27", "pack": "3a3530",
+	},
+	## The Highland Free Front (docs/terror_groups.md 6): moorland smocks, slate and heather over
+	## old woodland surplus, an orange patch.
+	"highland": {
+		"camo": ["4f5a3a", "5c6066", "6b5a4e", "2f3428"], "skin": "c8996f", "hair": "3b2a1d",
+		"patch": "e0661a", "gear": "4a4f3e", "pack": "48523a",
 	},
 	## Captain, 2026-10-17: "tan for us". A flat coyote-tan kit, same shape as "black" above.
 	"tan": {
@@ -80,12 +100,20 @@ const VARIANTS := {
 ## patch, knee pads or belt (Captain). Each part builds from only the colours it shows (_civ_part), so
 ## people sharing a shirt share the torso mesh.
 const CIV_PREFIX := "civ:"
+## A person's head and face (SoldierLook.palette): "face:<skin>:<hair>:<eye>" in hex. Heads hold
+## no camo, so every scheme shares a head shape's raster (_shared_raster) and only meshes anew.
+const FACE_PREFIX := "face:"
 
 
 ## A colour scheme's colours: a VARIANTS entry, or a plain-clothes scheme built from its name.
 static func spec(variant: String) -> Dictionary:
 	if VARIANTS.has(variant):
 		return VARIANTS[variant]
+	if variant.begins_with(FACE_PREFIX):
+		var g := variant.split(":")
+		if g.size() >= 4:
+			return {"camo": [g[2], g[2], g[2], g[2]], "skin": g[1], "hair": g[2], "eye": g[3], "patch": g[2],
+				"gear": "5a5148", "pack": "5a5148"}
 	if variant.begins_with(CIV_PREFIX) or variant.begins_with("civp:"):
 		var f := variant.split(":")
 		if f.size() >= 4:
@@ -109,12 +137,25 @@ static func _civ_part(model: String, variant: String) -> String:
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
 static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
+## Faces (build_async): the cached ones' keys, oldest first; those a worker is building; what
+## the workers have built, not yet taken in (under _warm_mutex); and the workers' tasks.
+const FACE_HEADS_KEPT := 128
+const FACE_PARTS_KEPT := 6000
+static var _face_order: Array[String] = []
+static var _face_part_order: Array[String] = []
+static var _face_pending: Dictionary = {}
+static var _face_built: Dictionary = {}
+static var _face_tasks: Array[int] = []
 ## Plain clothes' rasterised models (the model name's hash -> VoxelBuffer), shared by every plain-clothes
 ## scheme: their cloth is one flat palette entry (no camo), so the voxels' colour indices are the
 ## same whatever the colours, and only the mesher's palette differs. Rasterising a 0.5 cm body
 ## is about 0.5 s and meshing it about 30 ms, so a new person's outfit costs only the meshing
 ## (Captain P0362: 12 civilians at once were a 3.4 s hitch on deploying).
 static var _plain_rasters: Dictionary = {}
+static var _plain_order: Array[int] = []  # their salts, the least recently used first
+## Shared rasters kept (about 0.17 MB a head): plain clothes' few dozen parts and the faces
+## built lately. A face's raster is only wanted again while that face is first meshed.
+const SHARED_RASTERS_KEPT := 96
 ## The body parts a soldier or person is built from (CharacterModel).
 const BODY_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "thigh", "shin"]
 ## Rasters built ahead on a worker thread (warm): "salt|variant" (_raster_key) -> VoxelBuffer.
@@ -133,14 +174,14 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
 ## spec names one (body parts pivot at their joints).
-static func instance(model: String, variant: String, layers := 1) -> Node3D:
+static func instance(model: String, variant: String, layers := 1, with_mesh := true) -> Node3D:
 	var spec := _spec(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice("|", model.count("|")).get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
 	pivot.set_meta(&"voxel_variant", variant)
 	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = mesh(model, variant)
+	mesh_instance.mesh = mesh(model, variant) if with_mesh else null  # (FaceRig hands a face's head its mesh when built)
 	mesh_instance.material_override = _get_material()
 	mesh_instance.layers = layers
 	var voxel: float = spec.get("voxel", VOXEL_SIZE)
@@ -183,7 +224,8 @@ static func model_for(item: ItemData, state := {}) -> String:
 			var sup := Suppressors.mounted_id(item, state) != &""
 			return "rifle:%d:%s:%s:%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, style, "sup" if sup else ""]
 		&"sidearm":
-			return "pistol"
+			var kind := String(item.stats.get("model_style", ""))  # "compact", "steel", "steel_compact": _pistol
+			return "pistol:" + kind if kind != "" else "pistol"
 		&"vest":
 			return "vest:%d" % ["light", "medium", "heavy"].find(item.stats.get("tier", "medium"))
 		&"backpack":
@@ -206,14 +248,24 @@ static func hand_points(model: String) -> Dictionary:
 		"rifle" when _rifle_style(model) == "bullpup":
 			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip, the magazine behind it
 			support = Vector3(1.5, 6 + RIFLE_BELOW, n - 26.0)  # on the handguard, as far out as the arm reaches
+		"rifle" when _rifle_style(model) in SMG_STYLES:
+			var in_grip := _rifle_style(model) in SMG_GRIP_MAG
+			grip = Vector3(1.5, (3.0 if in_grip else 3.5) + RIFLE_BELOW, _z_at(model, 0.57 if in_grip else 0.62))  # its pistol grip
+			# On the forend (an MP7's foregrip, low), or the SD's forend behind its suppressor.
+			var forend := 0.28 if _rifle_style(model) == "smg_sd" else 0.2
+			support = Vector3(1.5, (3.5 if _rifle_style(model) == "smg_pdw" else 6.0) + RIFLE_BELOW, maxf(_z_at(model, forend), n - 26.0))
+		"rifle" when _rifle_style(model) in SHOTGUN_STYLES:
+			# The straight wrist of the stock (an M1014's pistol grip); the pump, as far out as the arm reaches.
+			grip = Vector3(1.5, (4.0 if _rifle_style(model) == "shotgun_auto" else 6.0) + RIFLE_BELOW, _z_at(model, 0.76))
+			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
 		"rifle":
 			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip
 			# Under the handguard, no further than 0.52 m from the butt: as far out as the
 			# arms reach with the support shoulder forward (CharacterModel.SUPPORT_REACH).
 			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
-		"pistol":
-			grip = Vector3(1, 2.5, 7.5)
-			support = Vector3(-0.5, 2, 7.5)      # cupping the grip from the left
+		"pistol":  # (measured from its back: a compact's is shorter at the front)
+			grip = Vector3(1, 2.5, n - 2.5)
+			support = Vector3(-0.5, 2, n - 2.5)  # cupping the grip from the left
 		_:
 			return {}
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
@@ -233,7 +285,7 @@ static func sight_point(model: String) -> Vector3:
 			var back := sight_back(art, spec.size.z) + (IRON_EYE_RELIEF if art == IRONS else 0.0)
 			return (Vector3(_axis_x(model), OPTIC_AXIS_Y + _below(model), back) - centre) * VOXEL_SIZE
 		"pistol":
-			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
+			return (Vector3(1, 7.0, spec.size.z - 0.6) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
 
 
@@ -252,8 +304,71 @@ static func mesh(model: String, variant: String) -> Mesh:
 		variant = _civ_part(model, variant)
 	var key := "%s|%s" % [model, variant]
 	if not _meshes.has(key):
-		_meshes[key] = _build(_spec(model), variant, model.hash())
+		_take_faces()
+	if not _meshes.has(key):
+		_keep(key, _build(_spec(model), variant, model.hash()))
 	return _meshes[key]
+
+
+## Caches a built mesh. A face's (FACE_PREFIX) is one person's, so only the newest stay cached:
+## FACE_HEADS_KEPT heads (big) and FACE_PARTS_KEPT eyes, mouths and brows (tiny). The bodies
+## drawing older ones keep theirs.
+static func _keep(key: String, built: Mesh) -> void:
+	_meshes[key] = built
+	if key.contains("|" + FACE_PREFIX):
+		var order := _face_order if key.begins_with("head") else _face_part_order
+		order.append(key)
+		while order.size() > (FACE_HEADS_KEPT if key.begins_with("head") else FACE_PARTS_KEPT):
+			_meshes.erase(order.pop_front())
+
+
+## Faces are built off the main thread (Captain, 2026-10-20: variety must keep the frame budget;
+## a 0.5 cm head is about 70 ms to rasterise and as long again to mesh): `models`, each in
+## `variant`, rasterised and meshed on a worker. Returns true once all of them are cached (mesh()
+## then hands them over at no cost); until then the caller shows what it has and asks again.
+static func build_async(models: Array, variant: String) -> bool:
+	_take_faces()
+	var todo: Array = []
+	for model: String in models:
+		var key := "%s|%s" % [model, variant]
+		if not _meshes.has(key) and not _face_pending.has(key):
+			_face_pending[key] = true
+			todo.append(model)
+	if not todo.is_empty():
+		var mesher := _get_mesher(variant)  # made here: the worker only uses it
+		_face_tasks.append(WorkerThreadPool.add_task(_build_faces.bind(todo, variant, mesher), false, "VoxelArt faces"))
+	for model: String in models:
+		if not _meshes.has("%s|%s" % [model, variant]):
+			return false
+	return true
+
+
+## Worker: rasterises and meshes `models` in `variant` with `mesher`, handing each over under
+## _warm_mutex. (The rendering server takes meshes from any thread under the default "safe"
+## thread model.)
+static func _build_faces(models: Array, variant: String, mesher: VoxelMesherCubes) -> void:
+	for model: String in models:
+		var built := mesher.build_mesh(_rasterize(_spec(model), variant, model.hash()), [])
+		_warm_mutex.lock()
+		_face_built["%s|%s" % [model, variant]] = built
+		_warm_mutex.unlock()
+
+
+## Main thread: caches what the face workers have finished and lets go of done tasks.
+static func _take_faces() -> void:
+	if _face_pending.is_empty():
+		return
+	_warm_mutex.lock()
+	var done := _face_built
+	_face_built = {}
+	_warm_mutex.unlock()
+	for key: String in done:
+		_face_pending.erase(key)
+		_keep(key, done[key])
+	for task in _face_tasks.duplicate():
+		if WorkerThreadPool.is_task_completed(task):
+			WorkerThreadPool.wait_for_task_completion(task)
+			_face_tasks.erase(task)
 
 
 ## A fresh raster of `model` for `variant`, the soldier's own to carve (BodyDeform). Thread-safe
@@ -279,8 +394,10 @@ static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
 ## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); otherwise one
 ## the warm-up built (warm), or built now.
 static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
-	var plain := variant.begins_with("civp:")
+	var plain := _shared_raster(variant)
 	if plain and _plain_rasters.has(salt):
+		_plain_order.erase(salt)
+		_plain_order.append(salt)
 		return _plain_rasters[salt]
 	var key := _raster_key(salt, variant)
 	_warm_mutex.lock()
@@ -291,12 +408,20 @@ static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer
 		buffer = _rasterize(spec, variant, salt)
 	if plain:
 		_plain_rasters[salt] = buffer
+		_plain_order.append(salt)
+		while _plain_order.size() > SHARED_RASTERS_KEPT:  # faces are nearly all different: keep the newest
+			_plain_rasters.erase(_plain_order.pop_front())
 	return buffer
 
 
-## Plain clothes all share one raster per model ("civp:"); every other scheme has its own.
+## Plain clothes ("civp:") and faces ("face:") share one raster per model, whatever the
+## colours; every other scheme has its own.
+static func _shared_raster(variant: String) -> bool:
+	return variant.begins_with("civp:") or variant.begins_with(FACE_PREFIX)
+
+
 static func _raster_key(salt: int, variant: String) -> String:
-	return "%d|%s" % [salt, "civp:" if variant.begins_with("civp:") else variant]
+	return "%d|%s" % [salt, "shared:" if _shared_raster(variant) else variant]
 
 
 ## Rasterises `pairs` ([model, variant], as mesh() takes them) on a worker thread, so the
@@ -311,8 +436,8 @@ static func warm(pairs: Array) -> void:
 		var variant: String = pair[1]
 		if variant.begins_with(CIV_PREFIX):
 			variant = _civ_part(model, variant)
-		var asked := "%s|%s" % [model, "civp:" if variant.begins_with("civp:") else variant]
-		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (variant.begins_with("civp:") and _plain_rasters.has(model.hash())):
+		var asked := "%s|%s" % [model, "shared:" if _shared_raster(variant) else variant]
+		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (_shared_raster(variant) and _plain_rasters.has(model.hash())):
 			continue
 		_warm_asked[asked] = true
 		todo.append([model, variant])
@@ -325,10 +450,18 @@ static func warm(pairs: Array) -> void:
 
 ## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
 ## and the art of what's worn and carried (model_for), as [model, variant] pairs for warm().
+const WARM_HANDS := [[&"relaxed", false], [&"relaxed", true], [&"grip", false], [&"trigger", false], [&"press", false],
+	[&"support", true], [&"mag", true], [&"hold", false], [&"hold", true]]
 static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	var out: Array = []
 	for part in BODY_PARTS:
-		out.append([body_part(part, body), variant])
+		if part != "forearm" and part != "head":  # (each person's own head builds with his face: FaceRig)
+			out.append([body_part(part, body), variant])
+	# The forearms in the poses a soldier is drawn in most (HandPose): relaxed, the firing grip
+	# and the support grip, a magazine, holding something.
+	var bare := hands_bare(variant)
+	for hand: Array in WARM_HANDS:
+		out.append([HandPose.model(hand[0], hand[1], bare, body), variant])
 	for id: Variant in loadout:
 		var item := ItemDB.get_item(StringName(id))
 		var model := fitted(model_for(item), body) if item else ""
@@ -366,6 +499,10 @@ static func finish_warm() -> void:
 	for task in _warm_tasks:
 		WorkerThreadPool.wait_for_task_completion(task)
 	_warm_tasks.clear()
+	for task in _face_tasks:
+		WorkerThreadPool.wait_for_task_completion(task)
+	_face_tasks.clear()
+	_take_faces()
 
 
 ## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built
@@ -417,7 +554,10 @@ static func _rasterize(spec: Dictionary, variant: String, salt: int) -> VoxelBuf
 			buffer.fill_area(colour, Vector3i(x + 1, y + 1, z0 + 1), Vector3i(x + 2, y + 2, z1 + 1), VoxelBuffer.CHANNEL_COLOR)
 	for box: Variant in spec.boxes:
 		if box is Dictionary:
-			_fill_loft(box, put, s, run)
+			if box.has("obox"):
+				_fill_obox(box, put, s)
+			else:
+				_fill_loft(box, put, s, run)
 			continue
 		var from := Vector3i((Vector3(box[0]) * s).round())  # corners may be fractional (_fb)
 		var to := Vector3i((Vector3(box[1]) * s).round())
@@ -480,6 +620,76 @@ static func _fill_loft(loft: Dictionary, put: Callable, s := 1, run := Callable(
 			for z in range(zb - SHELL, zb):
 				put.call(x, y, z, colour, false)
 			run.call(x, y, za + SHELL, zb - SHELL, C.CAMO_A if colour == C.CAMO else colour)
+
+
+## An oriented box (the fingers' bones, HandPose): centre `o` and half-extents `h` in the spec's
+## voxels, turned by `b` (orthonormal; its columns the box's axes), its cross-section across y a
+## rectangle with its corners cut by `bevel` (as a loft's), and its -y end tapered to half over its
+## last `taper` voxels (a fingertip). `paint` only recolours voxels already there.
+static func obox(o: Vector3, b: Basis, h: Vector3, colour: int, bevel := 0.5, taper := 0.0, paint := false) -> Dictionary:
+	return {"obox": true, "o": o, "b": b, "h": h, "colour": colour, "bevel": bevel, "taper": taper, "paint": paint}
+
+
+static func _fill_obox(box: Dictionary, put: Callable, s := 1) -> void:
+	var b: Basis = box.b
+	var o: Vector3 = box.o * s
+	var h: Vector3 = box.h * s
+	var taper: float = float(box.taper) * s
+	var bevel: float = box.bevel
+	var colour: int = box.colour
+	var paint: bool = box.paint
+	var reach := (b.x * h.x).abs() + (b.y * h.y).abs() + (b.z * h.z).abs()  # half the box's bounds
+	var lo := Vector3i((o - reach).floor())
+	var hi := Vector3i((o + reach).ceil())
+	var bx := b.x
+	var by := b.y
+	var bz := b.z
+	for x in range(lo.x, hi.x):
+		for y in range(lo.y, hi.y):
+			for z in range(lo.z, hi.z):
+				var p := Vector3(x + 0.5, y + 0.5, z + 0.5) - o
+				var ly := by.dot(p)
+				if absf(ly) > h.y:
+					continue
+				var k := 1.0
+				if taper > 0.0 and -ly > h.y - taper:
+					k = 1.0 - 0.5 * (-ly - (h.y - taper)) / taper
+				var dx := absf(bx.dot(p)) / (h.x * k)
+				if dx > 1.0:
+					continue
+				if absf(bz.dot(p)) / (h.z * k) > minf(1.0, 2.0 - bevel - dx):
+					continue
+				put.call(x, y, z, colour, paint)
+
+
+## A spec mirrored left to right (x flipped in its frame): a left hand from a right one.
+static func _mirror_x(spec: Dictionary) -> Dictionary:
+	var w := float(spec.size.x)
+	var out := spec.duplicate()
+	var boxes := []
+	for box: Variant in spec.boxes:
+		if box is Dictionary:
+			var m: Dictionary = box.duplicate()
+			if m.has("obox"):
+				var o: Vector3 = m.o
+				var b: Basis = m.b
+				m.o = Vector3(w - o.x, o.y, o.z)
+				var f := func(v: Vector3) -> Vector3: return Vector3(-v.x, v.y, v.z)
+				m.b = Basis(f.call(b.x), f.call(b.y), f.call(b.z))
+			else:
+				m.centre = Vector2(w - (m.centre as Vector2).x, (m.centre as Vector2).y)
+			boxes.append(m)
+		else:
+			var a: Array = (box as Array).duplicate()
+			var from: Vector3 = Vector3(a[0])
+			var to: Vector3 = Vector3(a[1])
+			a[0] = Vector3(w - to.x, from.y, from.z)
+			a[1] = Vector3(w - from.x, to.y, to.z)
+			boxes.append(a)
+	out.boxes = boxes
+	var pivot: Vector3 = spec.get("pivot", Vector3(spec.size) * 0.5)
+	out.pivot = Vector3(w - pivot.x, pivot.y, pivot.z)
+	return out
 
 
 ## Camouflage by variant, from a point in centimetres: woodland's organic blotches with
@@ -554,6 +764,13 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 			C.WOUND: Color("6e1712"), C.WOUND_DARK: Color("2a0605"),
 			C.BRASS: Color("a8873f"),
+			C.GLOVE_PAD: Color(v.get("glove", "2f2f2a")).lightened(0.14),
+			C.NAIL: skin.lerp(Color("e9c9bd"), 0.55),
+			C.STUBBLE: skin.lerp(Color(v.hair), 0.38), C.EYE_WHITE: Color("e2dcd0").lerp(skin, 0.12),
+			C.IRIS: Color(v.get("eye", "4a3020")), C.PUPIL: Color("0d0b0a"), C.LASH: Color(v.hair).darkened(0.35).lerp(Color("141010"), 0.5),
+			C.TEETH: Color("e0d8c4"),
+			C.FLESH: Color("8f2a22"), C.FAT: Color("c9a86a"), C.BONE: Color("e3dccb"), C.BONE_SHADE: Color("b8ad94"),
+			C.CHAR: Color("2b2420"), C.CHAR_DARK: Color("120f0d"),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
@@ -585,10 +802,13 @@ static func _spec(model: String) -> Dictionary:
 		return part
 	var arg := model.get_slice(":", 1).to_int() if model.contains(":") else 0
 	match model.get_slice(":", 0):
-		"head": return _head()
+		"head": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", false)
+		"eye": return FaceArt.eye(model.get_slice(":", 1), model.get_slice(":", 2) == "f")
+		"mouth": return FaceArt.mouth(arg, model.get_slice(":", 2), model.get_slice(":", 3) == "f")
+		"brow": return FaceArt.brow(arg, model.get_slice(":", 2).to_int(), model.get_slice(":", 3).to_int(), model.get_slice(":", 4), model.get_slice(":", 5) == "f")
 		"torso": return _torso()
 		"upper_arm": return _upper_arm()
-		"forearm": return _forearm()
+		"forearm": return _forearm(model)
 		"leg": return _leg()
 		"thigh": return _thigh()
 		"shin": return _shin()
@@ -610,17 +830,20 @@ static func _spec(model: String) -> Dictionary:
 				"piston_ar": out = _rifle_piston_ar(arg, art)
 				"mosin": out = _rifle_bolt(arg, art, false)
 				"chassis_bolt": out = _rifle_chassis_bolt(arg, art)
+				"smg", "smg_sd", "smg_box": out = _rifle_smg(arg, art, _rifle_style(model))
+				"smg_pdw", "smg_grip": out = _rifle_smg_grip(arg, art, _rifle_style(model) == "smg_pdw")
+				"shotgun", "shotgun_tac", "shotgun_auto": out = _rifle_shotgun(arg, art, _rifle_style(model))
 				_: out = _rifle(arg, art)
 			if _rifle_suppressed(model):
 				out = _with_suppressor(out)
 			return _lowered(out, RIFLE_BELOW) if _rifle_style(model) != "walker" else out
 		"optic": return _optic_model(model.get_slice(":", 1))
-		"pistol": return _pistol()
-		"head_f": return _head_f()
+		"pistol": return _pistol(model.get_slice(":", 1) if model.contains(":") else "")
+		"head_f": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", true)
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
 		"upper_arm_f": return _upper_arm_f()
-		"forearm_f": return _forearm_f()
+		"forearm_f": return _forearm(model, true)
 		"leg_f": return _leg_f()
 		"thigh_f": return _thigh_f()
 		"shin_f": return _shin_f()
@@ -693,24 +916,7 @@ static func _shifted(parts: Array, dy: int) -> Array:
 	return out
 
 
-## 0.22 x 0.30 x 0.24 m including the neck. Pivot at the base of the neck. A boxy,
-## bevelled Stormworks head with a flat face: eyes, brows, a nose, a mouth and ears, hair as
-## a cap. The jaw is a 45-degree chamfer and the face above it is straight up: any other
-## slope steps unevenly at 0.5 cm and shows as bands across the chin.
-static func _head() -> Dictionary:
-	var boxes := [
-		_loft(11, 12, [[0, 4.5, 4.5], [8, 5.0, 5.0]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[5, 8.0, 9.0], [8, 11.0, 12.0], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
-		_p(0, 26, 0, 22, 30, 24, C.HAIR),   # cap
-		_p(0, 11, 17, 22, 30, 24, C.HAIR),  # back
-		_p(0, 20, 10, 22, 30, 24, C.HAIR),  # above the ears
-		_b(0, 14, 10, 1, 19, 15, C.SKIN_SHADE), _b(21, 14, 10, 22, 19, 15, C.SKIN_SHADE),  # ears
-		_p(6, 17, 0, 8, 20, 3, C.EYE), _p(14, 17, 0, 16, 20, 3, C.EYE),
-		_p(5, 21, 0, 9, 22, 3, C.HAIR), _p(13, 21, 0, 17, 22, 3, C.HAIR),  # brows
-		_b(10, 13, 0, 12, 17, 1, C.SKIN_SHADE),  # nose
-		_p(8, 10, 0, 14, 11, 3, C.MOUTH),
-	]
-	return {"size": Vector3i(22, 30, 24), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+## The head ("head", "head:<shape>") is FaceArt's.
 
 
 ## 0.52 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
@@ -741,15 +947,31 @@ static func _upper_arm() -> Dictionary:
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.11 x 0.32 x 0.11 m including the gloved hand. Pivot at the elbow; the palm centre is
-## 0.25 m below it (CharacterModel.FOREARM).
-static func _forearm() -> Dictionary:
+## 0.18 x 0.42 x 0.18 m including the hand. Pivot at the elbow; the wrist 19 cm below it and the
+## palm's centre 0.25 m (CharacterModel.FOREARM). The sleeve to the wrist, the hand with fingers
+## (HandPose: a palm, four fingers and a thumb) in a pose: "forearm:<pose>:<flags>" (HandPose.model;
+## flags "l" a left hand, "b" bare). Plain "forearm" is the relaxed right hand, gloved.
+## `female` ("forearm_f..."): a slimmer sleeve and wrist and her smaller hand.
+static func _forearm(model := "forearm", female := false) -> Dictionary:
+	var flags := model.get_slice(":", 2) if model.get_slice_count(":") > 2 else ""
+	var bare := flags.contains("b")
+	var hand: int = C.SKIN if bare else C.GLOVE
 	var boxes := [
-		_loft(5.5, 5.5, [[14, 4.0, 4.0], [32, 5.0, 5.0]], C.CAMO, 0.6),
-		_loft(5.5, 5.5, [[0, 3.6, 2.8], [6, 5.0, 3.3], [11, 4.2, 3.3], [15, 4.1, 3.9]], C.GLOVE, 0.6),
-		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
+		_loft(9, 9, [[24, 3.8, 3.8], [42, 4.6, 4.6]] if female else [[24, 4.0, 4.0], [42, 5.0, 5.0]], C.CAMO, 0.6),  # the sleeve
+		_loft(9, 9, [[19, 2.0, 2.7], [26, 2.5, 3.1]] if female else [[19, 2.2, 3.0], [26, 2.7, 3.4]], hand, 0.6),  # the wrist, a glove's cuff
+		_p(0, 24, 0, 18, 27, 18, C.CAMO_A),  # the sleeve's cuff
 	]
-	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	boxes.append_array(HandPose.parts(HandPose.pose_of(model), female, bare))
+	var spec := {"size": Vector3i(18, 42, 18), "pivot": Vector3(9, 42, 9), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return _mirror_x(spec) if flags.contains("l") else spec
+
+
+## Whether soldiers in colour scheme `variant` go bare-handed (plain clothes, the militia), else
+## gloved (HandPose).
+static func hands_bare(variant: String) -> bool:
+	if variant.begins_with(CIV_PREFIX) or variant.begins_with("civp:"):
+		return true
+	return String(VARIANTS.get(variant, {}).get("hands", "")) == "bare"
 
 
 ## 0.14 x 0.90 x 0.18 m with the boot toe: a thigh on a shin. Pivot at the hip joint.
@@ -801,31 +1023,6 @@ static func _fp(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float
 	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour, true]
 
 
-## 0.20 x 0.29 x 0.22 m head on the male head's pivot (base of the neck), with a low bun
-## behind (the frame runs 6 cm deeper for it). The jaw is a longer 45-degree chamfer to a
-## narrower chin; the face above it is straight up, as on the male head. The bun sits below
-## the helmet's rim (head y 0.20), so every helmet still fits over the head.
-static func _head_f() -> Dictionary:
-	var boxes := [
-		_loft(11, 12, [[0, 4.0, 4.0], [8, 4.4, 4.4]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[6, 7.0, 8.0], [9, 10.0, 11.0], [27, 10.0, 11.0], [29, 8.0, 9.0]], C.SKIN, 0.55),
-		_loft(11, 25, [[11, 2.5, 2.0], [13, 3.5, 3.0], [17, 3.5, 3.0], [19, 2.5, 2.0]], C.HAIR, 0.6),  # bun
-		_p(0, 25, 0, 22, 30, 30, C.HAIR),   # cap, the hairline a little lower than the male's
-		_p(0, 9, 17, 22, 30, 30, C.HAIR),   # back, down to the nape, pulled back to the bun
-		_p(0, 19, 9, 22, 30, 30, C.HAIR),   # above the ears
-		_fp(7, 14.5, 23.5, 15, 15.5, 30, C.PAD),  # hair tie
-		_fb(0.5, 14, 10.5, 1, 18, 14, C.SKIN_SHADE), _fb(21, 14, 10.5, 21.5, 18, 14, C.SKIN_SHADE),  # ears
-		_fp(6.5, 16.5, 0, 8.5, 19.5, 3, C.EYE), _fp(13.5, 16.5, 0, 15.5, 19.5, 3, C.EYE),
-		_fp(6, 19, 0, 7, 19.5, 3, C.EYE), _fp(15, 19, 0, 16, 19.5, 3, C.EYE),  # lashes, at the outer corners
-		_fp(6, 21, 0, 8.5, 21.5, 3, C.HAIR), _fp(13.5, 21, 0, 16, 21.5, 3, C.HAIR),  # brows, thin
-		_fp(5.5, 20.5, 0, 6, 21, 3, C.HAIR), _fp(16, 20.5, 0, 16.5, 21, 3, C.HAIR),
-		_fb(10.5, 13.5, 0.5, 11.5, 16.5, 1, C.SKIN_SHADE),  # nose
-		_fp(9, 10.5, 0, 13, 11.5, 3, C.LIP), _fp(9.5, 9.5, 0, 12.5, 10.5, 3, C.LIP_SHADE),  # fuller lips
-		_p(0, 17, 0, 2, 27, 6, C.HAIR), _p(20, 17, 0, 22, 27, 6, C.HAIR),  # hair framing the face under the helmet
-	]
-	return {"size": Vector3i(22, 30, 30), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
-
-
 ## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
 ## hips 0.35 m across (the male's: 0.32), easing in to a 0.27 m waist about 20 cm up and a narrower ribcage her arms
 ## hang against. Her shoulders (CharacterModel.FEMALE_SHOULDER, 0.20 m out and 1.5 cm lower
@@ -866,17 +1063,6 @@ static func _upper_arm_f() -> Dictionary:
 		_fp(0, 14, 2.5, 2.5, 26, 9.5, C.PATCH), _fp(9.5, 14, 2.5, 12, 26, 9.5, C.PATCH),
 	]
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
-
-
-## The male forearm's frame and pivot (elbow; palm centre 0.25 m below), slimmer, with a
-## smaller gloved hand.
-static func _forearm_f() -> Dictionary:
-	var boxes := [
-		_loft(5.5, 5.5, [[14, 3.8, 3.8], [32, 4.6, 4.6]], C.CAMO, 0.6),
-		_loft(5.5, 5.5, [[0, 3.2, 2.5], [6, 4.4, 2.9], [11, 3.8, 2.9], [15, 3.7, 3.5]], C.GLOVE, 0.6),
-		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
-	]
-	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 static func _leg_f() -> Dictionary:
@@ -1254,7 +1440,8 @@ static func reload_points(model: String) -> Dictionary:
 		out["well"] = Vector3((lo.x + hi.x) * 0.5, hi.y, (lo.z + hi.z) * 0.5)
 	var b := _below(model)
 	if model.get_slice(":", 0) == "pistol":
-		out.merge({"bolt": Vector3(1.0, 6.8, 9.5), "catch": Vector3(0.0, 4.25, 5.5)}, true)  # the slide's back, the slide stop
+		var n := float(spec.size.z)
+		out.merge({"bolt": Vector3(1.0, 6.8, n - 0.5), "catch": Vector3(0.0, 4.25, n - 4.5)}, true)  # the slide's back, the slide stop
 	elif model.begins_with("rifle"):
 		if mag.is_empty():  # an internal magazine: its top, through the open action
 			out["mag"] = Vector3(0.6, 7.5 + b, z.call(0.62))
@@ -1274,6 +1461,19 @@ static func reload_points(model: String) -> Dictionary:
 			"m249": out["bolt"] = Vector3(2.75, 7.5 + b, z.call(0.435))
 			"mosin": out["bolt"] = Vector3(2.75, 9.0 + b, z.call(0.735))   # the bolt knob
 			"chassis_bolt": out["bolt"] = Vector3(2.75, 8.5 + b, z.call(0.75))
+			# The SMGs' handles slap home like an AR's catch (Reloads.AR): "catch" is the handle locked
+			# back (part_motion's travel behind where it sits, "bolt").
+			"smg", "smg_sd", "smg_box":
+				out["bolt"] = Vector3(0.25, 9.25 + b, z.call(0.11))       # the cocking handle, left, on the tube
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"smg_pdw":
+				out["bolt"] = Vector3(1.5, 9.5 + b, z.call(0.86) + 0.25)  # the T charging handle, out the back
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"smg_grip":
+				out["bolt"] = Vector3(1.5, 10.25 + b, z.call(0.53))       # the cocking knob, on the top cover
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"shotgun", "shotgun_tac": out["bolt"] = Vector3(1.5, 6.25 + b, z.call(0.42))  # under the pump
+			"shotgun_auto": out["bolt"] = Vector3(2.6, 8.0 + b, z.call(0.58))         # the charging handle, right
 			_:  # the AR family: the bolt catch paddle on the left behind the well, the T-handle at the back
 				out["catch"] = Vector3(0.5, 6.5 + b, z.call(0.5875))
 				out["bolt"] = Vector3(1.5, 9.3 + b, z.call(0.765))
@@ -1300,6 +1500,7 @@ static func part_motion(model: String) -> Dictionary:
 		"mosin", "chassis_bolt":
 			out.travel = 0.08
 			out.lift = 1.4
+		"shotgun", "shotgun_tac": out.travel = 0.04  # the pump racked back to the receiver
 	var cover := _part_box(spec, COVER_TAG)
 	if not cover.is_empty():
 		var lo: Vector3 = cover[0]
@@ -2116,6 +2317,218 @@ static func _rifle_chassis_bolt(length: int, art := IRONS) -> Dictionary:
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
+## The items expansion's submachine guns and shotguns have silhouettes of their own (follow-up,
+## 2026-10-20: they borrowed the C8's, the AK's and the Mosin's at their real length).
+const SMG_STYLES: Array[String] = ["smg", "smg_sd", "smg_box", "smg_pdw", "smg_grip"]
+const SMG_GRIP_MAG: Array[String] = ["smg_pdw", "smg_grip"]  # the magazine up the pistol grip
+const SHOTGUN_STYLES: Array[String] = ["shotgun", "shotgun_tac", "shotgun_auto"]
+
+
+## A submachine gun, learned from the real guns: "smg" an MP5 (a stamped receiver with the
+## cocking tube over the barrel and its handle on the left, the three-lug barrel collar, a slim
+## forend, a deep curved magazine, the drum rear sight over the grip and a retractable stock on two
+## struts), "smg_sd" the MP5SD (a fat integral suppressor in place of the barrel and most of the
+## forend) and "smg_box" a UMP (a squared polymer body, a straight magazine and a side-folding
+## skeleton stock). The grip sits further forward than a rifle's (hand_points) and the support
+## hand on the forend. Its cocking handle (BOLT_TAG) locks back on an empty magazine and is
+## slapped home, like an AR's catch (Reloads.AR; reload_points' "catch").
+static func _rifle_smg(length: int, art := IRONS, kind := "smg") -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var ump := kind == "smg_box"
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 9.6)
+	var boxes := sight
+	if kind == "smg_sd":
+		boxes += [
+			_fb(0.5, 7.5, 0, 2.5, 9.5, f.call(0.27), C.GUN_LIGHT),              # integral suppressor, 4 cm across
+			_fb(0.75, 7.75, 0, 2.25, 9.25, 0.25, C.GUN),                        # its end cap
+			_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                       # and bore
+			_fb(1.0, 8.75, f.call(0.04), 2.0, 9.75, f.call(0.3), C.GUN),        # cocking tube, over the can
+			_fb(0.6, 6.5, f.call(0.22), 2.4, 9.0, f.call(0.32), C.GUN_LIGHT),   # short forend, round the can's back
+			_fb(1.25, 8.25, f.call(0.27), 1.75, 8.75, f.call(0.32), C.GUN),     # barrel, into the receiver
+		]
+	elif ump:
+		boxes += [
+			_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                 # barrel
+			_fb(1.0, 8.0, 0, 2.0, 9.0, 1.0, C.GUN),                             # thread protector
+			_fb(0.6, 6.5, f.call(0.08), 2.4, 9.75, f.call(0.3), C.GUN_LIGHT),   # the squared polymer front: forend and upper in one
+			_fbp(0.6, 7.5, f.call(0.1), 2.4, 8.0, f.call(0.26), C.GUN),         # its side rails
+		]
+	else:
+		boxes += [
+			_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                 # barrel, on into the receiver
+			_fb(1.0, 8.0, 0, 2.0, 9.0, 1.25, C.GUN),                            # three-lug barrel collar
+			_fb(0.75, 8.25, 0.25, 2.25, 8.75, 1.0, C.GUN),                      # its lugs
+			_fb(1.0, 8.75, f.call(0.04), 2.0, 9.75, f.call(0.3), C.GUN),        # cocking tube, over the barrel
+			_fb(0.6, 6.5, f.call(0.1), 2.4, 9.0, f.call(0.3), C.GUN_LIGHT),     # slim forend
+			_fbp(0.6, 7.5, f.call(0.12), 2.4, 7.75, f.call(0.28), C.GUN),       # its finger groove
+		]
+	var body := C.GUN_LIGHT if ump else C.GUN
+	boxes += [
+		_fb(0.7, 6.0, f.call(0.3), 2.3, 9.6, f.call(0.74), body),               # receiver
+		_fb(1.0, 9.6, f.call(0.3), 2.0, 9.95, f.call(0.74), C.GUN),             # its top: the claw mount's rail, the rear drum on it
+		_fb(0.75, 5.0, f.call(0.44), 2.25, 6.0, f.call(0.72), C.GUN_LIGHT),     # polymer trigger group under it
+		_fb(0.8, 6.25, f.call(0.72), 2.2, 9.5, f.call(0.76), C.GUN),            # end cap, the stock's mount
+		# The cocking handle (BOLT_TAG): folded out to the left at the tube's front, its slot back
+		# along the tube (it locks up in the slot's notch, back, to change magazines).
+		_fb(1.0, 9.0, f.call(0.12), 1.25, 9.5, f.call(0.27), C.EMPTY),
+		_fbt(0.5, 9.0, f.call(0.1), 1.25, 9.5, f.call(0.12), C.GUN, BOLT_TAG),
+		_fbt(0.0, 8.75, f.call(0.09), 0.5, 9.75, f.call(0.13), C.GUN_LIGHT, BOLT_TAG),
+		_fb(2.0, 8.25, f.call(0.4), 2.3, 9.25, f.call(0.5), C.EMPTY),           # ejection port, right
+		_fb(0.75, 4.5, f.call(0.33), 2.25, 6.0, f.call(0.44), C.GUN),           # magazine well, under the receiver
+		_fb(1.0, 4.5, f.call(0.35), 2.0, 6.5, f.call(0.42), C.EMPTY),           # the well itself
+	]
+	if ump:  # 25 rounds of .45, nearly straight
+		boxes += [
+			_fbm(0.9, 4.5, f.call(0.35), 2.1, 6.5, f.call(0.42), C.GUN_LIGHT),
+			_fbm(0.9, 1.0, f.call(0.345), 2.1, 4.5, f.call(0.415), C.GUN_LIGHT),
+			_fbm(0.9, -2.25, f.call(0.34), 2.1, 1.0, f.call(0.41), C.GUN_LIGHT),
+			_fbm(0.85, -2.75, f.call(0.335), 2.15, -2.25, f.call(0.415), C.GUN),  # floorplate
+		]
+	else:  # 30 rounds of 9 mm, curving well forward
+		boxes += [
+			_fbm(0.9, 4.5, f.call(0.35), 2.1, 6.5, f.call(0.42), C.GUN_LIGHT),
+			_fbm(0.9, 2.75, f.call(0.335), 2.1, 4.5, f.call(0.405), C.GUN_LIGHT),
+			_fbm(0.9, 1.0, f.call(0.315), 2.1, 2.75, f.call(0.385), C.GUN_LIGHT),
+			_fbm(0.9, -0.75, f.call(0.29), 2.1, 1.0, f.call(0.36), C.GUN_LIGHT),
+			_fbm(0.9, -2.25, f.call(0.26), 2.1, -0.75, f.call(0.33), C.GUN_LIGHT),
+			_fbm(0.85, -2.75, f.call(0.25), 2.15, -2.25, f.call(0.325), C.GUN),  # floorplate
+		]
+	boxes += [
+		_fb(1.25, 4.0, f.call(0.44), 1.75, 5.0, f.call(0.46), C.GUN_LIGHT),     # the paddle release, behind the magazine
+		_fb(1.25, 3.25, f.call(0.5), 1.75, 5.0, f.call(0.52), C.GUN_LIGHT),     # trigger guard, moulded with the grip: its front
+		_fb(1.25, 3.25, f.call(0.5), 1.75, 3.75, f.call(0.6), C.GUN_LIGHT),     # its bottom
+		_fb(1.25, 4.0, f.call(0.545), 1.75, 5.0, f.call(0.565), C.GUN),         # trigger
+		_fb(0.9, 3.25, f.call(0.58), 2.1, 5.0, f.call(0.66), C.GUN_LIGHT),      # pistol grip, raked back
+		_fb(0.9, 1.75, f.call(0.6), 2.1, 3.25, f.call(0.68), C.GUN_LIGHT),
+		_fb(0.9, 0.5, f.call(0.62), 2.1, 1.75, f.call(0.7), C.GUN_LIGHT),
+		_fb(0.5, 5.25, f.call(0.6), 0.75, 5.75, f.call(0.65), C.GUN),           # selector, left, over the grip
+	]
+	if ump:  # the side-folding skeleton stock, open
+		boxes += [
+			_fb(0.9, 5.0, f.call(0.74), 2.1, 9.25, f.call(0.78), C.GUN_LIGHT),  # its hinge
+			_fb(0.9, 8.5, f.call(0.74), 2.1, 9.25, n, C.GUN_LIGHT),             # top bar
+			_fb(0.9, 5.0, f.call(0.74), 2.1, 5.75, n, C.GUN_LIGHT),             # bottom bar
+			_fb(0.75, 5.0, n - 1.0, 2.25, 9.5, n, C.GUN),                       # butt plate
+		]
+	else:  # the retractable stock, out: two struts to a curved butt plate
+		boxes += [
+			_fb(0.5, 8.5, f.call(0.74), 0.8, 9.0, n - 0.5, C.GUN),
+			_fb(2.2, 8.5, f.call(0.74), 2.5, 9.0, n - 0.5, C.GUN),
+			_fb(0.5, 5.5, n - 1.0, 2.5, 9.75, n, C.GUN),
+			_fb(0.75, 5.75, n - 0.5, 2.25, 9.5, n, C.GUN_LIGHT),                # its rubber pad
+		]
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A submachine gun with its magazine up the pistol grip: "smg_pdw" an MP7 (a polymer body with
+## a long top rail, a folding foregrip, the AR-style T charging handle out of its back) and
+## "smg_grip" an Uzi (a steel box receiver with a ribbed top cover and its cocking knob on top, a
+## polymer lower handguard and the grip safety). Both stocks collapsed: two rods to a butt plate.
+static func _rifle_smg_grip(length: int, art := IRONS, pdw := false) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 9.6)
+	var boxes := sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.2), C.GUN),                     # barrel
+		_fb(1.0, 8.0, 0, 2.0, 9.0, 1.0, C.GUN),                                 # barrel nut
+		_fb(0.65, 6.0, f.call(0.1), 2.35, 9.6, f.call(0.86), C.GUN),            # receiver: one long box
+		_fb(1.0, 9.6, f.call(0.1), 2.0, 9.95, f.call(0.86), C.GUN),             # its top: a rail, or the top cover's spine
+		_fb(2.0, 8.0, f.call(0.32), 2.35, 9.25, f.call(0.42), C.EMPTY),         # ejection port, right
+		# The magazine up the grip (MAG_TAG: it drops out the bottom), the grip round it.
+		_fb(0.75, 0.0, f.call(0.5), 2.25, 6.0, f.call(0.64), C.GUN),
+		_fb(1.0, 0.0, f.call(0.52), 2.0, 6.0, f.call(0.62), C.EMPTY),
+		_fbm(1.0, 0.0, f.call(0.52), 2.0, 6.0, f.call(0.62), C.GUN_LIGHT),
+		_fbm(1.0, -2.5, f.call(0.52), 2.0, 0.0, f.call(0.62), C.GUN_LIGHT),     # and out under it
+		_fbm(0.9, -3.0, f.call(0.51), 2.1, -2.5, f.call(0.63), C.GUN),          # floorplate
+		_fb(1.25, 3.0, f.call(0.38), 1.75, 6.0, f.call(0.4), C.GUN),            # trigger guard: its front
+		_fb(1.25, 3.0, f.call(0.38), 1.75, 3.5, f.call(0.5), C.GUN),            # its bottom, to the grip
+		_fb(1.25, 4.0, f.call(0.45), 1.75, 6.0, f.call(0.47), C.GUN_LIGHT),     # trigger
+		_fb(0.5, 8.0, f.call(0.84), 0.75, 8.75, n - 0.5, C.GUN),                # stock rods, collapsed
+		_fb(2.25, 8.0, f.call(0.84), 2.5, 8.75, n - 0.5, C.GUN),
+		_fb(0.5, 5.5, n - 0.75, 2.5, 9.5, n, C.GUN),                            # butt plate
+	]
+	if pdw:
+		boxes += [
+			_fb(1.0, 2.0, f.call(0.16), 2.0, 6.0, f.call(0.24), C.GUN),         # folding foregrip, down
+			_fbt(0.5, 9.25, f.call(0.86), 2.5, 9.75, f.call(0.89), C.GUN_LIGHT, BOLT_TAG),  # T charging handle, out the back
+			_fbp(0.65, 7.5, f.call(0.12), 2.35, 8.0, f.call(0.3), C.GUN_LIGHT), # side rails
+		]
+	else:
+		boxes += [
+			_fb(0.6, 5.5, f.call(0.12), 2.4, 7.5, f.call(0.36), C.GUN_LIGHT),   # polymer lower handguard
+			_fb(1.0, 1.0, f.call(0.64), 2.0, 5.0, f.call(0.66), C.GUN_LIGHT),   # grip safety, at the grip's back
+			_fbt(1.0, 9.95, f.call(0.5), 2.0, 10.5, f.call(0.56), C.GUN_LIGHT, BOLT_TAG),  # cocking knob, on the top cover
+		]
+		var z: float = f.call(0.14)
+		while z < f.call(0.46):  # the top cover's ribs
+			boxes.append(_fbp(0.65, 9.25, z, 2.35, 9.95, z + 0.5, C.GUN_LIGHT))
+			z += 1.5
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A 12-gauge shotgun, learned from the real guns: a fat barrel with its magazine tube under it
+## (no magazine well: shells go in through the receiver, Reloads.BOLT), a tall flat-sided receiver
+## with a rail for the ghost ring rear sight, and a cross-bolt safety. "shotgun" a Remington 870
+## (wooden pump and straight stock), "shotgun_tac" a Mossberg 590 (synthetic furniture, a vented
+## heat shield over the barrel), both racked by the pump (BOLT_TAG, with the bolt in the port) and
+## held at the stock's wrist; "shotgun_auto" a Benelli M1014 (a fixed forend, the charging
+## handle on the right, a pistol grip and a collapsible stock on its tube).
+static func _rifle_shotgun(length: int, art := IRONS, kind := "shotgun") -> Dictionary:
+	var n := maxi(length, 30)
+	var f := func(t: float) -> float: return n * t
+	var auto := kind == "shotgun_auto"
+	var furniture := C.WOOD if kind == "shotgun" else C.GUN_LIGHT
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 8.75)
+	var boxes := sight + [
+		_fb(1.0, 8.0, 0, 2.0, 9.0, f.call(0.53), C.GUN),                        # barrel, 2 cm across, on into the receiver
+		_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                           # its bore
+		_fb(1.25, 9.0, f.call(0.13), 1.75, 9.75, f.call(0.13) + 0.5, C.GUN),    # the front sight's base
+		_fb(1.0, 7.0, f.call(0.05), 2.0, 8.0, f.call(0.53), C.GUN),             # magazine tube, under the barrel
+		_fb(0.75, 6.75, f.call(0.035), 2.25, 8.25, f.call(0.06), C.GUN_LIGHT),  # its cap, clamping the barrel's ring
+		_fb(0.75, 5.75, f.call(0.52), 2.25, 9.6, f.call(0.73), C.GUN),          # receiver: tall and flat-sided
+		_fb(1.0, 9.6, f.call(0.52), 2.0, 9.95, f.call(0.73), C.GUN),            # its rail (the ghost ring, or an optic)
+		_fb(1.0, 5.75, f.call(0.55), 2.0, 6.25, f.call(0.63), C.EMPTY),         # loading port, underneath
+		_fb(1.75, 7.75, f.call(0.56), 2.25, 9.0, f.call(0.64), C.EMPTY),        # ejection port, right
+		_fbt(1.75, 7.75, f.call(0.56), 2.0, 9.0, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # the bolt in it, back with the action
+		_fb(0.85, 5.0, f.call(0.6), 2.15, 5.75, f.call(0.72), C.GUN),           # trigger plate
+		_fb(1.25, 4.0, f.call(0.62), 1.75, 5.0, f.call(0.635), C.GUN),          # trigger guard: its front
+		_fb(1.25, 4.0, f.call(0.62), 1.75, 4.4, f.call(0.7), C.GUN),            # its bottom
+		_fb(1.25, 4.4, f.call(0.645), 1.75, 5.0, f.call(0.66), C.GUN_LIGHT),    # trigger
+		_fb(0.5, 5.25, f.call(0.69), 2.5, 5.75, f.call(0.71), C.GUN_LIGHT),     # cross-bolt safety, through the plate
+	]
+	if auto:
+		boxes += [
+			_fb(0.6, 6.25, f.call(0.3), 2.4, 8.5, f.call(0.5), C.GUN_LIGHT),   # fixed forend
+			_fbt(2.0, 7.75, f.call(0.57), 2.75, 8.25, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # charging handle, right, off the bolt in the port
+			_fb(0.9, 4.25, f.call(0.72), 2.1, 5.75, f.call(0.77), C.GUN),       # pistol grip, raked back
+			_fb(0.9, 2.75, f.call(0.735), 2.1, 4.25, f.call(0.785), C.GUN),
+			_fb(0.9, 1.25, f.call(0.75), 2.1, 2.75, f.call(0.8), C.GUN),
+			_fb(1.1, 7.25, f.call(0.72), 1.9, 8.75, f.call(0.9), C.GUN_LIGHT),  # stock tube
+			_fb(0.85, 6.0, f.call(0.82), 2.15, 9.0, n, C.GUN),                  # collapsible stock
+			_fb(0.85, 4.5, n - 0.5, 2.15, 9.25, n, C.GUN),                      # butt pad
+		]
+		return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+	# The pump (BOLT_TAG): round the tube, racked back to the receiver; grooves round it.
+	boxes.append(_fbt(0.6, 6.25, f.call(0.34), 2.4, 8.25, f.call(0.5), furniture, BOLT_TAG))
+	for k in 4:
+		var z: float = f.call(0.36) + k * n * 0.035
+		boxes.append([Vector3(0.6, 6.25, z), Vector3(2.4, 8.25, z + 0.5), C.WOOD_DARK if kind == "shotgun" else C.GUN, true, BOLT_TAG])
+	if kind == "shotgun_tac":
+		boxes.append(_fb(0.75, 8.75, f.call(0.18), 2.25, 9.5, f.call(0.32), C.GUN))  # heat shield over the barrel
+		var z: float = f.call(0.19)
+		while z < f.call(0.31):
+			boxes.append(_fb(1.25, 9.25, z, 1.75, 9.5, z + 1.0, C.EMPTY))           # its vents
+			z += 2.0
+	boxes += [
+		_fb(0.85, 4.5, f.call(0.73), 2.15, 9.0, f.call(0.8), furniture),         # the stock's straight wrist
+		_fb(0.8, 3.75, f.call(0.8), 2.2, 9.0, f.call(0.9), furniture),           # the butt, dropping to the pad
+		_fb(0.8, 3.0, f.call(0.9), 2.2, 9.25, n - 0.75, furniture),
+		_fb(0.75, 2.75, n - 0.75, 2.25, 9.5, n, C.GUN),                          # recoil pad
+	]
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
 ## A suppressor stacked on the muzzle: every other box shifts back by its length (so the model's
 ## muzzle, and everything behind it, keeps its usual place — grip/stock points, iron sights,
 ## optic mount), and a plain can fills the new gap at the front. Generic over every rifle style
@@ -2138,39 +2551,58 @@ static func _with_suppressor(spec: Dictionary) -> Dictionary:
 
 ## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip with its
 ## magazine up it, trigger guard, a front post and a notched rear sight (Captain, P0362:
-## readable irons).
-## hand_points: grip at (1, 2.5, 7.5); sight_point: the rear notch's top (1, 7.0, 9.4).
-static func _pistol() -> Dictionary:
+## readable irons). Its variants (items expansion follow-up, 2026-10-20: every sidearm drew as
+## one pistol), `kind` from the item's model_style: "" a polymer-framed striker pistol (Glock,
+## M17, USP, Five-seveN), "compact" its shorter slide and grip (Glock 19), "steel" an all-metal
+## hammer pistol with wooden grip panels (M1911, Beretta M9, CZ 75, TT-33, P226) and
+## "steel_compact" the short one (Makarov PM). Everything is placed from its back (n), so a
+## compact sits the same in the hand.
+## hand_points: grip at (1, 2.5, n - 2.5); sight_point: the rear notch's top (1, 7.0, n - 0.6).
+static func _pistol(kind := "") -> Dictionary:
+	var compact := kind.ends_with("compact")
+	var steel := kind.begins_with("steel")
+	var n := 9.0 if compact else 10.0
+	var drop := 0.5 if compact else 0.0          # a compact's grip is a finger shorter
+	var frame := C.GUN if steel else C.GUN_LIGHT
+	var slide_end := n - 0.5 if steel else n     # a hammer pistol's hammer behind its slide
 	# The slide and its sights are BOLT_TAG (weapon detail pass, 2026-10-20): an empty magazine
 	# leaves it locked back until the reload racks it home.
-	return {"size": Vector3i(2, 7, 10), "sub": 4, "boxes": [
-		_fbt(0.15, 4.6, 0, 1.85, 6.8, 10, C.GUN, BOLT_TAG),             # slide
+	var boxes := [
+		_fbt(0.15, 4.6, 0, 1.85, 6.8, slide_end, C.GUN, BOLT_TAG),     # slide
 		_fbt(0.85, 6.8, 0.3, 1.15, 7.0, 0.8, C.GUN, BOLT_TAG),         # front post
-		_fbt(0.3, 6.8, 8.8, 0.75, 7.0, 9.4, C.GUN, BOLT_TAG),          # rear sight, either side of the notch
-		_fbt(1.25, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN, BOLT_TAG),
-		[Vector3(0.15, 4.75, 7.25), Vector3(1.85, 6.5, 9.5), C.GUN_LIGHT, true, BOLT_TAG],  # rear cocking serrations (a recolour)
-		[Vector3(0.15, 4.75, 7.25), Vector3(1.85, 6.5, 7.5), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 7.75), Vector3(1.85, 6.5, 8.0), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 8.25), Vector3(1.85, 6.5, 8.5), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 8.75), Vector3(1.85, 6.5, 9.0), C.GUN, true, BOLT_TAG],
-		_fb(0.0, 4.0, 4.5, 0.25, 4.5, 6.5, C.GUN),           # slide stop lever, on the frame's left
-		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
-		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
-		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),
-		_fb(0.2, 0.25, 6.8, 1.8, 1.2, 9.8, C.GUN_LIGHT),
-		_fb(0.75, 2.6, 4.2, 1.25, 3.6, 4.5, C.GUN),          # trigger guard
-		_fb(0.75, 2.6, 4.2, 1.25, 2.9, 6.0, C.GUN),
+		_fbt(0.3, 6.8, n - 1.2, 0.75, 7.0, n - 0.6, C.GUN, BOLT_TAG),  # rear sight, either side of the notch
+		_fbt(1.25, 6.8, n - 1.2, 1.7, 7.0, n - 0.6, C.GUN, BOLT_TAG),
+		[Vector3(0.15, 4.75, n - 2.75), Vector3(1.85, 6.5, n - 0.5), C.GUN_LIGHT, true, BOLT_TAG],  # rear cocking serrations (a recolour)
+		[Vector3(0.15, 4.75, n - 2.75), Vector3(1.85, 6.5, n - 2.5), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 2.25), Vector3(1.85, 6.5, n - 2.0), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 1.75), Vector3(1.85, 6.5, n - 1.5), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 1.25), Vector3(1.85, 6.5, n - 1.0), C.GUN, true, BOLT_TAG],
+		_fb(0.0, 4.0, n - 5.5, 0.25, 4.5, n - 3.5, C.GUN),             # slide stop lever, on the frame's left
+		_fb(0.2, 3.6, 0.6, 1.8, 4.6, n - 0.8, frame),                  # frame
+		_fb(0.2, 2.4, n - 4.0, 1.8, 3.6, n - 0.8, frame),              # grip, raked back
+		_fb(0.2, 1.2, n - 3.6, 1.8, 2.4, n - 0.5, frame),
+		_fb(0.2, 0.25 + drop, n - 3.2, 1.8, 1.2, n - 0.2, frame),
+		_fb(0.75, 2.6, n - 5.8, 1.25, 3.6, n - 5.5, C.GUN),            # trigger guard
+		_fb(0.75, 2.6, n - 5.8, 1.25, 2.9, n - 4.0, C.GUN),
 		# Its magazine (Captain, 2026-10-20: "pistola needs a sep mag too"), up a well in the grip
 		# (MAG_TAG: a reload drops it out the bottom and pushes a new one up): the well, the
 		# magazine raked with the grip, and its floorplate, the grip's bottom.
-		_fb(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.EMPTY),
-		_fb(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.EMPTY),
-		_fb(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.EMPTY),
-		_fbm(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.GUN),
-		_fbm(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.GUN),
-		_fbm(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.GUN),
-		_fbm(0.25, 0.0, 7.0, 1.75, 0.25, 9.75, C.GUN),       # floorplate
-	]}
+		_fb(0.5, 2.4, n - 3.5, 1.5, 3.75, n - 1.25, C.EMPTY),
+		_fb(0.5, 1.2, n - 3.1, 1.5, 2.4, n - 0.9, C.EMPTY),
+		_fb(0.5, 0.25 + drop, n - 2.75, 1.5, 1.2, n - 0.6, C.EMPTY),
+		_fbm(0.5, 2.4, n - 3.5, 1.5, 3.75, n - 1.25, C.GUN),
+		_fbm(0.5, 1.2, n - 3.1, 1.5, 2.4, n - 0.9, C.GUN),
+		_fbm(0.5, 0.25 + drop, n - 2.75, 1.5, 1.2, n - 0.6, C.GUN),
+		_fbm(0.25, drop, n - 3.0, 1.75, 0.25 + drop, n - 0.25, C.GUN),  # floorplate
+	]
+	if steel:
+		boxes += [
+			_fb(0.4, 3.6, n - 0.8, 1.6, 5.0, n, C.GUN),                 # the frame's tang, under the hammer
+			_fb(0.75, 5.0, n - 0.5, 1.25, 6.5, n, C.GUN_LIGHT),         # exposed hammer
+			_fbp(0.2, 0.5 + drop, n - 3.8, 0.45, 3.5, n - 0.6, C.WOOD_DARK),  # wooden grip panels (a recolour), left
+			_fbp(1.55, 0.5 + drop, n - 3.8, 1.8, 3.5, n - 0.6, C.WOOD_DARK),  # and right
+		]
+	return {"size": Vector3i(2, 7, int(n)), "sub": 4, "boxes": boxes}
 
 
 ## A box of `size` metres in 0.5 cm voxels (FINE_VOXEL) with its edges bevelled (1 cm,

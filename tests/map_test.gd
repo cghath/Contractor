@@ -193,11 +193,26 @@ func _test_world_map() -> void:
 		"the base zone is the company's (blue)")
 	check(ZoneControl.controller(hot) == WorldSites.holder(hot) and not ZoneControl.is_contested(hot),
 		"a hot zone is its WorldSites holder's (%s)" % ZoneControl.controller(hot))
-	check(quiet != "" and ZoneControl.controller(quiet) == ZoneControl.DEFAULT and ZoneControl.side(quiet) == "militia",
-		"a contract zone with no contract is Black Ridge's, in militia orange (%s: %s)" % [quiet, ZoneControl.controller(quiet)])
+	check(quiet != "" and ZoneControl.controller(quiet) == WorldSites.holder(quiet) and WorldSites.holder(quiet) != ""
+		and ZoneControl.side(quiet) == ZoneControl.side_of_faction(WorldSites.holder(quiet)),
+		"a contract zone with no contract is its holder's in the faction war, in its colour (%s: %s)" % [quiet, ZoneControl.controller(quiet)])
 	check(ZoneControl.side_of_faction("meridian") == "allied" and ZoneControl.side_of_faction("eastern_concord") == "hostile"
 		and ZoneControl.side_of_faction("salvage_union") == "neutral" and ZoneControl.side_of_faction("black_ridge") == "militia",
 		"the IFF palette: employers allied green, the army hostile red, the Salvage Union neutral, Black Ridge militia orange")
+	# Terror groups (Captain, 2026-10-20): each new group holds its zones and shows in its colour;
+	# Black Ridge no longer holds everything.
+	var held_by := {}
+	for z: Dictionary in MissionRegistry.data().zones:
+		var c := ZoneControl.controller(String(z.zone_id))
+		held_by[c] = int(held_by.get(c, 0)) + 1
+	for g: String in ["ashen_banner", "valley_shura", "saltline", "kestrel", "highland_front"]:
+		check(int(held_by.get(g, 0)) >= 1 and ZoneControl.side_of_faction(g) == ("hostile" if g in ["ashen_banner", "valley_shura"] else "militia"),
+			"%s holds %d zone(s) on the theatre map, drawn %s" % [g, int(held_by.get(g, 0)), ZoneControl.side_of_faction(g)])
+	check(int(held_by.get("black_ridge", 0)) <= 9 and int(held_by.get("black_ridge", 0)) >= 1,
+		"Black Ridge is a regional militia now: %d of %d zones (was every one)" % [int(held_by.get("black_ridge", 0)), MissionRegistry.data().zones.size()])
+	var theatre_row := Theatre.zone("greyfell_moor")
+	check(not (theatre_row.get("symbol", {}) as Dictionary).is_empty() and String(theatre_row.get("holder_wants", "")) != "",
+		"the map shows the holder's flag and what it holds the zone for (%s)" % String(theatre_row.get("holder_wants", "")))
 	site.grip = WorldSites.CONTESTED_GRIP
 	check(ZoneControl.is_contested(hot) and ZoneControl.side(hot) == "contested", "a weak grip makes a hot zone contested")
 	site.grip = WorldSites.START_GRIP

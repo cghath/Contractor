@@ -17,13 +17,27 @@ const KIT: Array[StringName] = [&"plate_carrier", &"plate_ceramic_l4", &"m4a1", 
 const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "friendly", "variant": "desert", "role": "",
 	"pos": [0.0, 0.1, 26.5], "rot_y": 0.0, "age_s": 30.0, "marker": true,
 	"gear": {"slots": {"primary": "m4a1", "vest": "plate_carrier", "helmet": "helmet"}, "slot_state": {"primary": {"rounds": 21}},
-		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""}}
+		"containers": {"vest": [{"id": "mag_556", "count": 3}], "pockets": [], "backpack": []}, "hands": ""},
+	"gore": {"m": [["shin_l", [-0.075, 0.3, -0.08], [], "fragment", 0.6]],
+		"z": [{"i": 1, "k": "s", "p": "shin_l", "a": [-0.075, 0.25, -0.01], "q": [0.7, 0.12, 26.3, 0.0, 0.0, 0.7071, 0.7071]}]}}
+## Blast gore (BlastGore, BodyDeform): two corpses the host blasts, one before the client joins and
+## one after; the client's severed pieces must lie exactly where the host's settled.
+const GORED := ["Gored_1", "Gored_2"]
+const GORED_AT := [Vector3(-6, 0.1, 36), Vector3(-6, 0.1, 44)]
+## A man the host shoots dead standing once the client is in: his corpse must come to rest down,
+## and the same on both machines (the host sends its rest pose: _host_rest_pose).
+const SLUMPED := "Slumped"
+const SLUMPED_AT := Vector3(-14, 0.1, 44)
+var _host_pose := PackedFloat32Array()
 ## Voxel edits in the same save: an impact mark on the main building's concrete and a bullet
 ## hole in the shed's plank wall (voxel coordinates, an old save's whole-voxel hole), plus a
 ## calibre-sized bullet hole through the next voxel, which the late joiner gets in the log.
 const SAVED_EDITS := [{"op": "mark", "p": [-29.5, 13.5, -40.0], "n": [0.0, 0.0, 1.0], "m": 2},
 	{"op": "holes", "v": [175, 13, -71]},
 	{"op": "shot", "a": [177.5, 13.5, -70.0], "an": [0.0, 0.0, 1.0], "b": [177.5, 13.5, -71.0], "bn": [0.0, 0.0, -1.0], "d": 0.0057, "m": 3, "v": [177, 13, -71]}]
+## The look the host gives its own player once it's up (SoldierLook code): the client must draw
+## the host as this person (a face changed on the host replicates; Captain, 2026-10-20).
+const HOST_FACE := "c99a6e:2a1d15:6b5a32:31201110:2:1030"
 ## Where the host marks the perimeter wall's inner face once the client is in (live, by RPC).
 const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
 ## How old the purple smoke the host throws before the client joins already is (spawn_smoke's
@@ -47,6 +61,10 @@ const AIMER_AT := Vector3(4, 0.1, 33)
 ## Rounds the aimer has left after firing some before the client joins: the counts
 ## (Inventory.net_ammo) say so, whatever snapshot (net_gear) came with them (playtest blocker B2).
 const AIMER_ROUNDS := 23
+## A hostile the host treats with a device of each kind before the client joins (_stage_patient):
+## the client checks they're drawn from replicated state alone, then asks for the tourniquet off.
+const PATIENT := "Patient"
+const PATIENT_AT := Vector3(-20, 0.1, 36)  # (14 m from the gore test's frag at GORED_AT[0]: its blast burned him)
 ## Fix B-08 (co-op soak S0706: clients a round above the host while it fired): once the client
 ## is in, the host fires the dragger's rifle dry a round a frame or so, picking up a magazine
 ## halfway (a whole new snapshot, net_gear, among the counts); the client must end on 0 too.
@@ -142,6 +160,7 @@ func _stage_drag() -> void:
 			"loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
 		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
 		return s
+	(level.players.get_node(^"1") as Soldier).face = HOST_FACE
 	var dragger: Soldier = make.call(DRAGGER, Vector3(12, 0.1, 30))
 	var dragged: Soldier = make.call(DRAGGED, Vector3(12, 0.1, 31.1))
 	await get_tree().create_timer(0.3).timeout
@@ -155,6 +174,52 @@ func _stage_drag() -> void:
 	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
 	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
 	level.spawn_smoke.rpc(Vector3(-12, 0.1, 30), "purple", SMOKE_AGE_S)
+	_stage_patient(make.call(PATIENT, PATIENT_AT))
+	_stage_gore(0)
+
+
+## Host: PATIENT gets a bleeding thigh under a tourniquet, a splinted shin, an IV with a bag
+## running, a blanket and burns (BodyDevices, BodyCondition), all before the client joins.
+func _stage_patient(patient: Soldier) -> void:
+	await get_tree().create_timer(0.3).timeout
+	var m: WoundModel = patient.vitals._model
+	m._add_wound(Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")["at"] = Vector3(-0.075, 0.6, -0.085)
+	m._add_wound(Vitals.SHIN_R, "fracture", 0.0, &"tibia_r")
+	m.blood = 0.8
+	m.update_state(0.0)
+	patient.vitals._after_change(true)
+	patient.vitals.care_rng.seed = 3
+	var done := []
+	for t: Array in [[&"tourniquet", Vitals.THIGH_L], [&"splint", Vitals.SHIN_R], [&"iv_18", Vitals.FOREARM_L],
+			[&"saline_500", Vitals.FOREARM_L], [&"hypothermia_blanket", Vitals.TORSO]]:
+		if patient.vitals.server_apply_treatment(t[0], t[1]):
+			done.append(t[0])
+	patient.vitals.server_burn(0.2)
+	print("[host] treated the patient: %s" % [done])
+
+
+## Host: the client has seen the patient's devices; the thigh is packed and its tourniquet comes off.
+@rpc("any_peer", "call_remote", "reliable")
+func _host_patient_tourniquet_off() -> void:
+	var patient: Soldier = _combatant(PATIENT)
+	if multiplayer.is_server() and patient:
+		patient.vitals.server_apply_treatment(&"hemostatic_gauze", Vitals.THIGH_L)
+		print("[host] took %d tourniquet(s) off the patient" % patient.vitals.server_remove_tourniquets(Vitals.THIGH_L))
+
+
+## Host: a hostile killed and blown apart by a frag at his feet (BlastGore), its pieces settling.
+func _stage_gore(i: int) -> void:
+	var s := level.spawn_soldier({"name": GORED[i], "faction": "hostile", "variant": "woodland", "pos": GORED_AT[i],
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(0.3).timeout
+	s.vitals.server_kill()
+	await get_tree().create_timer(1.5).timeout
+	var hb := BlastGore._hitbox(s, Vitals.SHIN_R)
+	var at := Warheads.hitbox_point(hb, Vector3.ZERO) if hb else s.global_position
+	Throwables.server_detonate(level, "frag", at + Vector3.UP * 0.1)
+	await get_tree().create_timer(0.5).timeout
+	print("[host] blew %s apart: %s cut" % [GORED[i], (s.model.get_node(^"BodyDeform") as BodyDeform).severed()])
 
 
 func _give_kit(id: int) -> void:
@@ -167,6 +232,33 @@ func _give_kit(id: int) -> void:
 	level.voxel_world.server_mark(LIVE_MARK, Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
 	print("[host] gave peer %d a kit" % id)
 	_fire_dragger_dry()
+	if id != GHOST and _combatant_or_body(GORED[1]) == null:
+		_stage_gore(1)
+		_stage_slump()
+
+
+## Host: a man shot dead standing; once his ragdoll settles, its rest pose goes to the client.
+func _stage_slump() -> void:
+	var s := level.spawn_soldier({"name": SLUMPED, "faction": "hostile", "variant": "woodland", "pos": SLUMPED_AT,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(1.0).timeout
+	var into := s.global_basis.z
+	s.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.FULL_POWER, "position": s.global_position + Vector3.UP * 1.3 - into * 0.12,
+		"direction": into, "distance": 40.0})
+	s.vitals.server_kill()
+	var deadline := Time.get_ticks_msec() + 15000
+	while Time.get_ticks_msec() < deadline and not (is_instance_valid(s.ragdoll) and s.ragdoll.frozen):
+		await get_tree().process_frame
+	await get_tree().create_timer(0.5).timeout
+	print("[host] %s came to rest: %s" % [SLUMPED, "frozen" if is_instance_valid(s.ragdoll) and s.ragdoll.frozen else "NOT SETTLED"])
+	_host_rest_pose.rpc(s.model.ragdoll_net)
+
+
+## Client: the host's rest pose for SLUMPED's corpse.
+@rpc("authority", "call_remote", "reliable")
+func _host_rest_pose(packed: PackedFloat32Array) -> void:
+	_host_pose = packed
 
 
 ## Host: B-08. The dragger's rifle fired to empty while the client watches (see DRY_SHOT_S).
@@ -298,6 +390,8 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.role == Roles.MARKSMAN, 3.0)
 	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
 	await _check_late_drag()
+	await _check_faces()
+	await _check_devices()
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:
@@ -305,6 +399,9 @@ func _run_client() -> void:
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
+	if me.inventory.rounds_in(&"primary") != 27:
+		print("    (up %s, %s, hands '%s', at %s, %d rounds, why out %s)" % [me.vitals.is_up(), me.vitals.condition_text(), me.inventory.hands,
+			me.global_position, me.inventory.rounds_in(&"primary"), me.vitals.why_unconscious()])
 	# Feel round 2: the reload's phases come from the host (_reload_began: the weapon, the empty
 	# flag, the length), so the third-person model plays the same keys here. Nothing begins it on
 	# this side: the host's word alone must.
@@ -359,6 +456,8 @@ func _run_client() -> void:
 	check(_dropped_helmet() != null, "dropped helmet spawned on the client")
 	await _shoot_dropped_helmet(me)
 	await _check_saved_body(me)
+	await _check_gore()
+	await _check_slump()
 	await _check_looted_rifle(me)
 	await _check_world_edits()
 	me = await _check_rejoin_pickup(me)
@@ -400,6 +499,67 @@ func _check_saved_body(me: Soldier) -> void:
 	await _wait_for(func() -> bool: return body.inventory.count_of(&"mag_556") == 0, 3.0)
 	check(body.inventory.count_of(&"mag_556") == 0 and me.inventory.count_of(&"mag_556") == mags + 3,
 		"looting its magazines over the network moves them onto the looter (%d -> %d)" % [mags, me.inventory.count_of(&"mag_556")])
+
+
+## The bodies the host blew apart (GORED) and the saved body's cut shin: the same parts gone
+## here, each piece lying exactly where the host's settled (its record's "q").
+func _check_gore() -> void:
+	for name_: String in GORED:
+		await _wait_for(func() -> bool: return _gore_off(_combatant_or_body(name_)).is_empty(), 25.0)
+		var off := _gore_off(_combatant_or_body(name_))
+		var b := _combatant_or_body(name_)
+		var deform := b.model.get_node(^"BodyDeform") as BodyDeform if b else null
+		check(off.is_empty() and deform != null and not deform.severed().is_empty(),
+			"%s: the parts the host's blast took are gone here too (%s), each piece where the host's landed (%s)" % [name_, deform.severed() if deform else [], off])
+	var saved: Soldier = level.bodies.get_child(0) if level.bodies.get_child_count() > 0 else null
+	await _wait_for(func() -> bool: return _gore_off(saved).is_empty(), 5.0)
+	var off_saved := _gore_off(saved)
+	var sd := saved.model.get_node(^"BodyDeform") as BodyDeform if saved else null
+	check(sd != null and Vitals.SHIN_L in sd.severed() and off_saved.is_empty(), "the saved body's shin is off, its piece where the save says (%s)" % [off_saved])
+
+
+## The corpse shot dead standing lies down, and exactly as on the host.
+func _check_slump() -> void:
+	await _wait_for(func() -> bool:
+		var s := _combatant_or_body(SLUMPED)
+		return not _host_pose.is_empty() and s != null and s.model.ragdoll_net == _host_pose and is_instance_valid(s.ragdoll), 25.0)
+	var s := _combatant_or_body(SLUMPED)
+	var torso := s.ragdoll.parts.get("torso") as Node3D if s and is_instance_valid(s.ragdoll) else null
+	var same := s != null and not _host_pose.is_empty() and s.model.ragdoll_net == _host_pose
+	var host_torso := Vector3(_host_pose[0], _host_pose[1], _host_pose[2]) if _host_pose.size() >= 3 else Vector3.ZERO  # "torso" leads RAGDOLL_BONES
+	var gap := torso.global_position.distance_to(s.model.global_transform * host_torso) if torso and same else -1.0
+	check(same and gap >= 0.0 and gap < 0.01, "a corpse rests the same here as on the host (pose replicated, torso %.3f m apart)" % gap)
+	var up := torso.global_basis.y.dot(Vector3.UP) if torso else 1.0
+	check(torso != null and absf(up) < 0.75, "shot dead standing, it lies down, not upright (%.0f deg from upright)" % rad_to_deg(acos(clampf(up, -1.0, 1.0))))
+
+
+## What's wrong with `b`'s pieces against its records (empty when each lies at its "q").
+func _gore_off(b: Soldier) -> Array:
+	if b == null:
+		return ["no body"]
+	var deform := b.model.get_node(^"BodyDeform") as BodyDeform
+	var out: Array = []
+	var records := b.vitals.gore_list().filter(func(g: Dictionary) -> bool: return String(g.get("k", "")) == "s" and not g.get("np", false))
+	if records.is_empty():
+		return ["no cuts yet"]
+	for g: Dictionary in records:
+		var q: Array = g.get("q", [])
+		var piece := deform.piece_of(StringName(g.p))
+		if q.size() != 7:
+			out.append("%s unsettled" % g.p)
+		elif piece == null:
+			out.append("%s no piece" % g.p)
+		elif piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin) > 0.01:
+			out.append("%s %.3f m off" % [g.p, piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin)])
+	return out
+
+
+## A soldier by name, alive or a body.
+func _combatant_or_body(callsign: String) -> Soldier:
+	for node in get_tree().get_nodes_in_group(&"combatants") + get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
+		if node is Soldier and String(node.name) == callsign:
+			return node
+	return level.ai.get_node_or_null(callsign) as Soldier if level and level.ai else null
 
 
 ## An AI shot dead with its rifle shouldered and then looted over the network: on this client
@@ -445,6 +605,20 @@ func _check_looted_rifle(me: Soldier) -> void:
 
 
 ## The soldier named `callsign` (players and AI), or null.
+## Faces (SoldierLook): every peer draws each soldier as the same person. An AI's look comes in
+## its spawn data, rolled from who he is; the host's own, set after he joined, replicates.
+func _check_faces() -> void:
+	var ai: Soldier = _combatant(DRAGGER)
+	var host := level.players.get_node_or_null(^"1") as Soldier
+	await _wait_for(func() -> bool: return host != null and host.model.face == HOST_FACE, 5.0)
+	check(host != null and host.face == HOST_FACE and host.model.face == HOST_FACE and is_equal_approx(host.model.body_scale(), 1.03),
+		"the host's face, set on the host, is the same here (and his height with it)")
+	var expected := SoldierLook.make(SoldierLook.seed_of([DRAGGER, ai.person_name, ai.nation]), ai.nation, ai.model.body) if ai else ""
+	check(ai != null and SoldierLook.valid(ai.face) and ai.face == expected and ai.model.face == ai.face
+		and String(ai.model.head.get_meta(&"voxel_model")) == SoldierLook.head_model(ai.face, ai.model.body),
+		"an AI's face here is the one the host rolled for him (%s)" % (ai.face if ai else "none"))
+
+
 func _combatant(callsign: String) -> Soldier:
 	for node in get_tree().get_nodes_in_group(&"combatants"):
 		if node is Soldier and String(node.name) == callsign:
@@ -518,6 +692,37 @@ func _check_late_drag() -> void:
 	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
 		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
+
+
+## The patient the host treated before this client joined (_stage_patient): every device drawn
+## here from the replicated wound state, on the right part; the tourniquet gone once the host
+## takes it off.
+func _check_devices() -> void:
+	var devices := func() -> BodyDevices:
+		var p: Soldier = _combatant(PATIENT)
+		return p.model.get_node(^"WoundMarks").devices if p else null
+	await _wait_for(func() -> bool:
+		var d: BodyDevices = devices.call()
+		return d != null and not d.shown(&"tourniquet").is_empty() and not d.shown(&"bag").is_empty(), 5.0)
+	var d: BodyDevices = devices.call()
+	if d == null:
+		check(false, "devices drawn on a client: no patient here")
+		return
+	var where := func(kind: StringName) -> Array: return d.shown(kind).map(func(e: Dictionary) -> StringName: return e.part)
+	var patient: Soldier = _combatant(PATIENT)
+	var condition: BodyCondition = patient.model.get_node(^"WoundMarks").condition
+	check(where.call(&"tourniquet") == [Vitals.THIGH_L] and where.call(&"splint") == [Vitals.SHIN_R] and where.call(&"iv") == [Vitals.FOREARM_L]
+		and where.call(&"bag") == [Vitals.CHEST] and d.bag_fill() > 0.0 and Vitals.CHEST in where.call(&"blanket")
+		and d.voxels_on(Vitals.THIGH_L) > 0 and d.tourniquet_times(Vitals.THIGH_L).size() == 1,
+		"devices drawn on a client: tourniquet %s, splint %s, IV %s, bag %s (%.2f full), blanket" % [
+			where.call(&"tourniquet"), where.call(&"splint"), where.call(&"iv"), where.call(&"bag"), d.bag_fill()])
+	check(absf(condition.burn() - 0.2) < 0.02 and not condition.overlaid().is_empty() and condition.pallor() > 0.0,
+		"and its burns and pallor (%.2f burned, pallor %.2f)" % [condition.burn(), condition.pallor()])
+	_host_patient_tourniquet_off.rpc_id(1)
+	await _wait_for(func() -> bool: return d.shown(&"tourniquet").is_empty(), 5.0)
+	var dressing: StringName = patient.model.get_node(^"WoundMarks").dressing_on(Vitals.THIGH_L)
+	check(d.shown(&"tourniquet").is_empty() and &"tourniquet" not in d.devices_on(Vitals.THIGH_L) and d.tourniquet_times(Vitals.THIGH_L).is_empty() and dressing == &"gauze",
+		"the host takes the tourniquet off: gone here too, the packed wound under gauze (%s on the thigh, %s)" % [d.devices_on(Vitals.THIGH_L), dressing])
 
 
 ## AI virtualization in co-op (docs/virtualization.md): a group the host holds as a profile isn't

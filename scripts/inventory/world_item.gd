@@ -163,4 +163,7 @@ static func color_for(item: ItemData) -> Color:
 		"objective": return Color("d9a400")
 		"valuable": return Color("c9a443")
 		"intel": return Color("d2b77c")
+		"consumable": return Color("8f9a4a")
+		"barter": return Color("9a8a6e")
+		"salvage": return Color("b0643c")
 		_: return Color("8a8a8a")

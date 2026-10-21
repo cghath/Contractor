@@ -602,11 +602,15 @@ func server_spawn_body(record: Dictionary) -> Soldier:
 		uid = GameState.new_uid()
 	var data := record.duplicate(true)
 	data.erase("gear")  # the gear replicates with the inventory (ServerSync), not in the spawn
+	data.erase("gore")  # and the gore with the vitals (net_state)
 	data["uid"] = uid
 	data["name"] = ("Body_" + uid).validate_node_name()
 	var corpse := body_spawner.spawn(data) as Soldier
 	corpse.inventory.net_state = GameState.from_json(record.get("gear", {}))
 	corpse.vitals.server_kill()  # -> Soldier._on_died: it becomes a body (DEAD_GROUP, body cap)
+	var gore: Dictionary = record.get("gore", {})
+	if not gore.is_empty():  # torn up, cut, its pieces where they lay (BodyDeform.save_record)
+		corpse.vitals.server_restore_gore(gore.get("m", []), gore.get("z", []))
 	corpse.died_at = Soldier._now() - float(record.get("age_s", 0.0))
 	return corpse
 
@@ -617,6 +621,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.faction = StringName(data.get("faction", "friendly"))
 	corpse.variant = String(data.get("variant", "woodland"))
 	corpse.body = String(data.get("body", ""))
+	corpse.face = String(data.get("face", ""))  # (older saves: none, so default_face)
 	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
 	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
 	corpse.rotation.y = float(data.get("rot_y", 0.0))
@@ -1006,6 +1011,9 @@ func spawn_soldier(data: Dictionary) -> Soldier:
 			d["body"] = VoxelArt.FEMALE if female else VoxelArt.MALE
 		if d.body == VoxelArt.FEMALE:
 			d["person_name"] = Names.feminine(String(d.person_name), String(d.get("nation", "")))
+		if not d.has("face"):  # his look: a roster member's from their seed, else from who he is
+			var seed := int(d.look_seed) if d.has("look_seed") else SoldierLook.seed_of([d.name, d.get("person_name", ""), d.get("nation", "")])
+			d["face"] = SoldierLook.make(seed, String(d.get("nation", "")), String(d.body))
 	return ai_spawner.spawn(d) as Soldier
 
 
@@ -1019,6 +1027,10 @@ func _names_on(faction: StringName) -> Dictionary:
 	return taken
 
 
+## A hostile's pocket loot (WorldValuables.roll_pockets), [[id, count], ...] as it went in.
+const POCKETS := &"pockets"
+
+
 func _make_soldier(data: Dictionary) -> Node:
 	var soldier: Soldier = PLAYER_SCENE.instantiate()
 	soldier.name = data.name
@@ -1026,11 +1038,16 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.faction = StringName(data.faction)
 	soldier.variant = data.variant
 	soldier.body = String(data.get("body", ""))
+	soldier.face = String(data.get("face", ""))
 	soldier.position = data.pos
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
 	soldier.iff = StringName(data.get("iff", ""))
+	if String(data.get("faction_id", "")) != "":
+		soldier.set_meta(&"faction_id", String(data.faction_id))  # who he fights for (terror groups: Kits.dress)
+		if multiplayer.is_server():
+			soldier.died_for_good.connect(func(_s: Soldier) -> void: WorldSites.server_note_kill(String(data.faction_id)))  # the living war: his side's strength
 	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
 		soldier.person_name = String(data.get("person_name", ""))  # settled in spawn_soldier
@@ -1050,6 +1067,20 @@ func _make_soldier(data: Dictionary) -> Node:
 			Roles.apply_kit(inventory, soldier.role)
 		if String(data.get("exo", "")) == "hx1":
 			equip_hx1(inventory)
+		if soldier.faction == &"hostile" and not bool(data.get("no_pockets", false)):
+			# What he has on him besides his kit (WorldValuables.roll_pockets): each body a different
+			# find. Leaders carry intel too.
+			var lvl_def: Variant = get(&"def")
+			var hot := lvl_def is Dictionary and String((lvl_def as Dictionary).get("kind", "")) == "hot"
+			var leader := soldier.role == Roles.TEAM_LEADER or "Commander" in String(data.name) or "Officer" in String(data.name) or "Leader" in String(data.name)
+			var zone_key := String((lvl_def as Dictionary).get("id", name)) if lvl_def is Dictionary else String(name)
+			var day := Economy.day() if Campaign.campaign_id != "" else 0  # (a new deployment, new finds; the same body the same)
+			var pockets: Array = []  # [id, count] each (PeopleLayer.server_give_intel makes room in them)
+			for e: Dictionary in WorldValuables.roll_pockets("%s|%s|%s|%d" % [data.name, soldier.spawn_id, zone_key, day], hot, leader):
+				var got := inventory.take(StringName(e.id), int(e.count))
+				if got > 0:
+					pockets.append([StringName(e.id), got])
+			soldier.set_meta(POCKETS, pockets)
 		# What it started with, so what it's handed or picks up later can be told apart
 		# (_drop_extras, when a player takes its slot).
 		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))

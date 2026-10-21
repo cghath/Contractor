@@ -309,6 +309,7 @@ func _test_triggers() -> void:
 	await _seconds(0.4)
 	check(not dem.records.has(mine), "live: he steps on it and it goes")
 	check(hostile2.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.part in [Vitals.SHIN_L, Vitals.SHIN_R]), "his leg takes it")
+	check(not hostile2.vitals.gore_list().is_empty(), "and the blast's gore is on him (BlastGore: %d entries)" % hostile2.vitals.gore_list().size())
 	# A vehicle over one.
 	var matv := _vehicle("range_matv")
 	if matv:
@@ -485,8 +486,17 @@ func _client_report(count: int, lines: PackedStringArray) -> void:
 	_client_failures = count
 
 
+## Both processes: a frame that held the main thread long enough to time a link out is printed
+## (a dropped join is then explained in the log).
+func _process(delta: float) -> void:
+	if delta > 2.0:
+		print("[test] a %.1f s frame at %.1f s" % [delta, Time.get_ticks_msec() / 1000.0])
+
+
 func _run_client() -> void:
 	get_tree().create_timer(200.0).timeout.connect(func() -> void: get_tree().quit(99))
+	Net.peer_left.connect(func(id: int) -> void: print("[test] peer %d left at %.1f s" % [id, Time.get_ticks_msec() / 1000.0]))
+	Net.joined.connect(func() -> void: print("[test] joined at %.1f s" % (Time.get_ticks_msec() / 1000.0)))
 	main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	if Net.session_ended.is_connected(Callable(main, &"_on_session_ended")):

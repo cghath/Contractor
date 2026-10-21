@@ -141,6 +141,26 @@ func _run() -> void:
 	var why := Nvg.server_remove(inv)
 	check(why == "" and Nvg.restores(player) == 0.0 and inv.count_of(&"nvg_gen3") == 1, "taken off again: restores 0, it's in his containers (%s)" % why)
 
+	print("Batteries (items expansion)")
+	var gen3 := ItemDB.get_item(&"nvg_gen3")
+	var at3 := _carried(inv, &"nvg_gen3")
+	check(Nvg.battery_of(gen3, inv.containers[at3[0]][at3[1]].get("state", {})) < Nvg.capacity_h(gen3), "the stowed gen 3 is part used")
+	inv.take(&"battery_aa", 2)
+	var b := _carried(inv, &"battery_aa")
+	player._server_inventory_action.rpc_id(1, "consume", b[0], b[1], &"", &"")
+	at3 = _carried(inv, &"nvg_gen3")
+	check(is_equal_approx(Nvg.battery_of(gen3, inv.containers[at3[0]][at3[1]].get("state", {})), Nvg.capacity_h(gen3)) and inv.count_of(&"battery_aa") == 1,
+		"Use on AA batteries (the inventory's action): the stowed gen 3 back to full, one pack used")
+	b = _carried(inv, &"battery_aa")
+	check(Consumables.server_use(player, b[0], b[1]) == "No NVG needs a battery" and inv.count_of(&"battery_aa") == 1, "with nothing part used, a battery isn't spent")
+	check(Nvg.server_mount(inv, at3[0], at3[1], true) == "" and Nvg.mounted(inv) == gen3, "the gen 3 back on the helmet")
+	Nvg.server_drain(inv, 7200.0)
+	check(Nvg.battery_fraction(inv) < 1.0, "two hours down (%s)" % Nvg.label(inv))
+	inv.take(&"battery_cr123")
+	b = _carried(inv, &"battery_cr123")
+	check(Consumables.server_use(player, b[0], b[1]) == "" and is_equal_approx(Nvg.battery_fraction(inv), 1.0) and inv.count_of(&"battery_cr123") == 0,
+		"a CR123A pack in the mounted gen 3: full again (%s), the pack used" % Nvg.label(inv))
+
 
 func _carried(inv: Inventory, id: StringName) -> Array:
 	for c in inv.search_containers():

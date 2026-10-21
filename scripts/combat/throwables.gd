@@ -49,7 +49,26 @@ static func indoors(world: World3D, pos: Vector3) -> bool:
 ## Carries electronic ear protection (it works from the kit: no slot for it yet).
 static func has_ear_pro(body: Node) -> bool:
 	var inventory: Inventory = body.get(&"inventory") as Inventory
-	return inventory != null and inventory.count_of(EAR_PROTECTION) > 0
+	if inventory == null:
+		return false
+	for id: StringName in hearing_ids():
+		if inventory.count_of(id) > 0:
+			return true
+	return false
+
+
+static var _hearing_ids: Array[StringName] = []
+
+
+## Every item tagged "hearing": ear protection, headsets, earplugs (items expansion).
+static func hearing_ids() -> Array[StringName]:
+	if _hearing_ids.is_empty():
+		for id: StringName in ItemDB.all_ids():
+			if ItemDB.get_item(id).tags.has("hearing"):
+				_hearing_ids.append(id)
+		if _hearing_ids.is_empty():
+			_hearing_ids.append(EAR_PROTECTION)
+	return _hearing_ids
 
 
 ## Host only. `shooter` fired a shot: indoors, everyone close by (indoors too) hears it in a
@@ -92,10 +111,12 @@ static func clear_line(world: World3D, from: Vector3, to: Vector3) -> bool:
 
 ## Host only. `item_id` is the grenade's item: a smoke grenade's cloud takes its
 ## "smoke_colour" (white without one).
-static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"") -> void:
+## `blast_kg` is the filling (kg of TNT) a frag's blast gore scales with (BlastGore): a grenade's
+## Warheads.GRENADE_TNT_KG unless a charge says more.
+static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"", blast_kg := 0.0) -> void:
 	match kind:
 		"frag":
-			_frag(level, pos)
+			_frag(level, pos, blast_kg if blast_kg > 0.0 else Warheads.GRENADE_TNT_KG)
 		"flash":
 			_flash(level, pos)
 		"smoke":
@@ -112,7 +133,7 @@ static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, it
 				demolitions.server_add_chemlight(item_id, at, Charges.rider_of(hit.collider) if not hit.is_empty() and hit.collider is Node else null)
 
 
-static func _frag(level: CompoundLevel, pos: Vector3) -> void:
+static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENADE_TNT_KG) -> void:
 	var centre := pos + Vector3.UP * 0.25
 	var blast_radius := WoundModel.BLAST_RADIUS * (BLAST_INDOOR_MULT if indoors(level.get_world_3d(), centre) else 1.0)
 	for n in combatants(level.get_tree()):
@@ -132,6 +153,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 		frag_body(body, vitals, centre, d)
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
+	BlastGore.server_blast(level, centre, blast_kg, FRAG_RADIUS)  # torn, peppered, scorched bodies (the dead too)
 	level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
 	level.show_explosion.rpc(pos)
 	_shake_players(level, pos)
