@@ -18,6 +18,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   fatal, but the kill used to come with no wound, so the first round into a downed (or standing)
   man's head left nothing on him. Only later rounds, into the corpse, showed. Now the fatal round
   leaves its head wound (and the hole in the model), seen the same by every player.
+### Forward observer: eyes on the area (Captain, 2026-10-21: "im in the area observing it but nothing")
+
+#### Fixed
+- **Observing a target area counts when you can see it.** Before, only one point counted: 2 m
+  above the dead middle of the area. A compound's walls or a building round it hid that point from
+  every position, however well you saw the place, so the "get eyes on" step never moved. Now any
+  clear sight of the area counts, from within range for 10 seconds: its middle, any of the
+  targets (the technicals, the mortar pit), or points round its edge.
 
 ### One 12-gauge system (Captain, 2026-10-21: "we have standard and hi brass and breaching rounds for the skeleton key")
 

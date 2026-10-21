@@ -2603,8 +2603,33 @@ func _test_forward_observer() -> void:
 		parked = parked and v != null and v.faction == &"hostile" and v.occupants().is_empty() and not v.wrecked and _flat_m(v.global_position, _v(t.params.pos)) < 8.0
 	check(d.why == "" and targets.size() >= 3 and parked and String(targets[0].state) == Objectives.ACTIVE,
 		"deployed (%s): %d targets parked in the target area, hostile, empty and whole" % [c.title, targets.size()])
-	# Eyes on, from an observation post out of the guns' danger close.
+	# Eyes on the targets counts though the middle of the area is walled in (Captain, 2026-10-21: "im
+	# in the area observing it but nothing"): a box round the middle, the post seeing a target.
 	var centre := _v(area.params.pos)
+	var wall := StaticBody3D.new()
+	var wall_shape := CollisionShape3D.new()
+	var wall_box := BoxShape3D.new()
+	wall_box.size = Vector3(8, 8, 8)
+	wall_shape.shape = wall_box
+	wall.add_child(wall_shape)
+	level.add_child(wall)
+	wall.global_position = level.ground_point(centre) + Vector3.UP * 2.0
+	await get_tree().physics_frame
+	var points := scen.sight_points(area)
+	var target_at: Vector3 = points[1] if points.size() > 1 else Vector3.INF
+	var hidden_middle := not scen._line_of_sight(target_at + Vector3(0, 30, 0), points[0]) if target_at.is_finite() else false
+	var seen_post := _observation_post(scen, (target_at - Vector3.UP * 1.2) if target_at.is_finite() else centre, target_at)
+	if seen_post.is_finite() and hidden_middle:
+		_place(player, seen_post)
+		await get_tree().physics_frame
+		scen.server_advance(float(area.params.dwell_s) + 1.0)
+		check(Contracts.objectives.get_objective(String(area.oid)).state == Objectives.DONE and not scen._line_of_sight(seen_post + Vector3.UP * 1.6, points[0]),
+			"eyes on a target counts though the middle of the area is walled in (%d sight points)" % points.size())
+	else:
+		check(points.size() >= 1 + targets.size(), "the area's sight points take in its targets (%d points; no post to try from here)" % points.size())
+	wall.queue_free()
+	await get_tree().physics_frame
+	# Eyes on, from an observation post out of the guns' danger close.
 	var post := _observation_post(scen, centre)
 	if post.is_finite():
 		_place(player, post)
@@ -2676,9 +2701,9 @@ func _test_forward_observer() -> void:
 
 
 ## A spot 250-450 m from `centre` with a line of sight to it (MissionScenario's, as recon's), or INF.
-func _observation_post(scen: MissionScenario, centre: Vector3) -> Vector3:
+func _observation_post(scen: MissionScenario, centre: Vector3, look_at := Vector3.INF) -> Vector3:
 	var area: Rect2 = level.ground_area().grow(-150.0)
-	var to := level.ground_point(centre) + Vector3.UP * 2.0
+	var to := look_at if look_at.is_finite() else level.ground_point(centre) + Vector3.UP * 2.0
 	for r: float in [300.0, 400.0, 250.0, 450.0]:
 		for k in 16:
 			var a := TAU * k / 16.0
