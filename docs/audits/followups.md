@@ -17,6 +17,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 | F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
+| F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 
 ## F-01: the building scan only sees one floor
 
@@ -218,4 +219,20 @@ hazard's `radius` (and, for a claymore, don't stand in front of it within 10 m);
 passes within `radius` could add a waypoint round it. Enemy AI should stay unaware (they don't
 know where ours are). A test could place a friendly mine on the line between a squadmate and his
 formation spot and check he goes round it.
+
+## F-121: the vehicle range's obstacles are outside its voxel world
+
+Location: [vehicle_range.gd](../../scripts/vehicles/vehicle_range.gd), `BLOCKS`; the bounds are
+`VoxelWorld.BOUNDS` (`scripts/world/voxel_world.gd`: -220 to 220 voxels, so -22 to 22 m). Found by
+cghath's agent on `feat/demolitions` (2026-10-20) while setting a demo block on them; the file is
+Claude's, so it isn't changed there.
+
+What happens: the range's two concrete blocks at z -30 and the sandbag wall at z -45 ("something
+for the AI driver to steer round") are added with `add_box_m`, and the log says "voxel structures
+built (3 boxes)", but they fall outside the voxel world's edit area: there are no voxels there
+(`Objectives.solid_count` over the block is 0) and no collision (a ray at 0.6 m through it meets
+nothing). The demolitions suite uses a plain box as its wall instead.
+
+Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
+range's VoxelWorld `bounds` that reach them before it builds.
 
