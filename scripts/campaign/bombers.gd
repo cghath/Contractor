@@ -18,7 +18,9 @@ const MIN_TIER := 2
 const GAP_S := 600.0
 const SEND_M := [150.0, 250.0]
 const CHANCE_PER_CHECK := 0.1
-const CHECK_S := 30.0
+## How often the dice are rolled (Captain, 2026-10-20: 10% every 3 minutes or so is more balanced;
+## it was every 30 s): about one bomber per half hour once the conditions hold, GAP_S apart at most.
+const CHECK_S := 180.0
 const KIT: Array[String] = ["plate_carrier_heavy", "assault_pack"]
 ## VBIEDs (wave 6f): a technical (VBIED_MODEL) with one driver drives at the nearest of the squad
 ## and goes off within VBIED_TRIGGER_M, a bigger blast (VBIED_BLAST_M carve and VBIED_FRAGS frag

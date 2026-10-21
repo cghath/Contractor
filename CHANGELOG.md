@@ -364,6 +364,9 @@ The follow-ups from docs/terror_groups.md section 9. Every name is made up.
 - **Vantage and the Eastern Concord Forces fight by their own doctrine** (PMC and regular army)
   wherever they are, not by the doctrine of the zone's people. Vantage's racing team now counts
   as Vantage's men, whoever holds the zone.
+- **Fewer suicide bombers** (Captain). Once the Banner or the Shura is pushed or hunting the
+  squad, the 10% chance of a bomber is rolled every 3 minutes instead of every 30 seconds: about
+  one per half hour instead of one per five minutes, and still at least 10 minutes apart.
 
 ### Terror groups, cartels and a living war (Captain, 2026-10-20)
 
