@@ -33,6 +33,7 @@ var expect: Dictionary = {}
 var _client_lines := PackedStringArray()
 var _client_failures := -1
 var _client_ready := false
+var _asked := false
 
 
 func _ready() -> void:
@@ -436,7 +437,7 @@ func _test_client() -> void:
 		"--", "--demolitions-join"]
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "started the client process")
-	await _wait_until(func() -> bool: return _client_ready, 120.0)
+	await _wait_until(func() -> bool: return _client_ready, 150.0)
 	check(_client_ready, "the client saw what was placed before it joined")
 	if _client_ready:
 		dem.server_fire_remote(player, &"clacker")
@@ -466,6 +467,9 @@ func _expect(data: Dictionary) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func _ask_expect() -> void:
+	if multiplayer.is_server() and not _asked:
+		_asked = true
+		print("[test] the client asked for its checks at %.1f s" % (Time.get_ticks_msec() / 1000.0))
 	if multiplayer.is_server() and not expect.is_empty():
 		_expect.rpc_id(multiplayer.get_remote_sender_id(), expect)
 
@@ -510,12 +514,19 @@ func _run_client() -> void:
 	# The sounds build at boot: join once that's done, so a busy start doesn't time the link out.
 	await _wait_until(func() -> bool: return Sfx.is_prebuilt(), 60.0)
 	var joined := await _join_host("127.0.0.1", 90.0)
-	var asked_until := Time.get_ticks_msec() + 40000
+	var asked_until := Time.get_ticks_msec() + 90000
+	var asks := 0
 	while expect.is_empty() and Time.get_ticks_msec() < asked_until:
-		if not 1 in multiplayer.get_peers():
-			joined = await _join_host("127.0.0.1", 30.0)  # dropped while this process was busy loading: join again
+		var link := multiplayer.multiplayer_peer
+		if not (link is ENetMultiplayerPeer) or link.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED:
+			print("[test] not connected at %.1f s: joining again" % (Time.get_ticks_msec() / 1000.0))
+			joined = await _join_host("127.0.0.1", 30.0)  # dropped: join again
 			continue
-		_ask_expect.rpc_id(1)
+		if link.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+			asks += 1
+			if asks == 1 or asks % 5 == 0:
+				print("[test] asking the host (%d) at %.1f s; peers %s" % [asks, Time.get_ticks_msec() / 1000.0, multiplayer.get_peers()])
+			_ask_expect.rpc_id(1)
 		await _wait_until(func() -> bool: return not expect.is_empty(), 3.0)
 	var lvl := CompoundLevel.current(self)
 	var d := Demolitions.of(lvl) if lvl else null

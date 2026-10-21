@@ -24,6 +24,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
+| F-122 | P2 | A client's first late join to the vehicle range: its RPCs never reach the host, and the link drops about 50 s later; joining again works |
 
 ## F-01: the building scan only sees one floor
 
@@ -330,4 +331,27 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
+
+## F-122: a late joiner's first connection carries no RPCs to the host, then drops
+
+Location: the join path (`autoload/net.gd`, `scripts/world/level_switch.gd`'s auth, the level's
+`_on_peer_joined`); seen on the vehicle range. Found by cghath's agent on `feat/demolitions`
+(2026-10-21) after merging claude/ai-driving 0a649e9 and 4092a26; it didn't happen on a7e9207
+(R0353, R0369). It isn't in this branch's code, so it's an entry, not a fix.
+
+What happens (demolitions suite, its late-joining client, R0392): the client joins at 16.7 s, the
+host logs the peer connected, spawns its player and sends its own state, and the client's
+`multiplayer.get_peers()` is `[1]`. But the client's RPCs to the host (`_ask_expect`, every 3 s
+from 24.9 s) never arrive: the host never prints that it was asked. At 67.6 s the link drops ("peer
+1 left" on the client, the peer left on the host), with no frame over 2 s on either side. The
+client joins again at 69.9 s and from then on everything works. Before the reconnect was added the
+suite failed every time on it (R0377, R0388). The loadout suite's client, which also joins late,
+dropped the same way on CI (run 39526347358), and loadout fails on claude/ai-driving's own CI
+(39529244923, 39562279704).
+
+Suggested: log on the host whether the client's first RPCs reach SceneMultiplayer (the path cache
+confirmation for `/root/<test node>`), and check what the auth (`LevelSwitch._on_auth_data`,
+`complete_auth`) leaves half-done on a first join that a second join doesn't have (the client has
+the level loaded by then). The demolitions suite now prints the client's asks and join/leave times
+(`[test]` lines), which shows it.
 
