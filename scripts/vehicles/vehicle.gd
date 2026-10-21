@@ -329,6 +329,7 @@ var _state_dirty := false
 var _leak := 0.0             # litres a second
 var _fire_tick := 0.0
 var _gun_next := {}          # host: gun seat -> when it may fire next
+var _gun_rounds := 0  # host: rounds the guns have fired (every tracer_every-th a tracer, as Soldier's)
 var _run_over_at := {}          # soldier instance id -> time last run over
 var _pushed_at := {}             # host: player soldier instance id -> time last sent a push
 var _blocked_s := 0.0            # host: driven but held still against a body
@@ -3037,6 +3038,15 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	var lvl := level()
 	if lvl:
 		PeopleLayer.server_noise(shooter, origin)
+		# Every round is seen too (Tracer, as a soldier's: Soldier._server_fire), along the path it
+		# flew (Ballistics.flight_path; Captain, 2026-10-21).
+		_gun_rounds += 1
+		var every := int(item.stats.get("tracer_every", Soldier.TRACER_EVERY))
+		var hostile := shooter != null and shooter.faction == &"hostile"
+		var kind: int = (Tracer.Kind.GREEN if hostile else Tracer.Kind.RED) if every > 0 and _gun_rounds % every == 0 else Tracer.Kind.BALL
+		var launch: Variant = result.get("launch")
+		lvl.show_tracer.rpc(origin, launch if launch is Vector3 and round_end is Vector3 else Vector3.ZERO, Ballistics.round_id(item),
+			round_end if round_end is Vector3 else origin + dir * 400.0, false, kind, false)
 		if result.result != "none":
 			lvl.show_impact.rpc(result.position, result.normal, result.result)
 	return result

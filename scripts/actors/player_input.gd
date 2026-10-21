@@ -103,8 +103,11 @@ const LOCAL_ONLY_LAYER := 1 << 1
 const VIEW_MODEL_LAYER := 1 << 2
 ## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
 ## then each smoke colour you carry, then the breaching charge if you carry one (G with it
-## picked places it: Charges).
-const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple", Charges.ITEM]
+## picked places it: Charges), then the demolitions you carry (Demolitions: G with a block,
+## thermite, a claymore or a mine places it, R picks how it's armed; chem lights are thrown; G
+## with a clacker or remote fires what you armed on a detonator).
+const THROWABLES: Array[StringName] = [&"frag_grenade", &"flashbang", &"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple", Charges.ITEM,
+	&"demo_block", &"thermite", &"claymore", &"ap_mine", &"chemlight_green", &"chemlight_red", &"chemlight_blue", &"chemlight_ir", &"clacker", &"remote_detonator"]
 ## Always in the Shift+G cycle, carried or not (smokes only show up while you have one).
 const ALWAYS_CYCLED: Array[StringName] = [&"frag_grenade", &"flashbang"]
 
@@ -192,8 +195,12 @@ var _cover_part: Node3D
 var _part_motion := {}  # VoxelArt.part_motion of the weapon in view
 var _reload_parts := {}  # Reloads.parts of the reload under way
 var _deaf := false
-## Placing a breaching charge (Charges): the ghost follows the view until Fire commits it.
+## Placing a breaching charge (Charges) or a demolitions item (Demolitions): the ghost follows
+## the view until Fire commits it. `_placing_item` is what's being placed, `_arm_index` which of
+## its Demolitions.arm_modes R has picked.
 var placing := false
+var _placing_item: StringName = &""
+var _arm_index := 0
 ## The Escape menu (PauseMenu), on the local player only.
 var pause_menu: PauseMenu
 ## The bug-report note panel (Insert), on the local player only.
@@ -348,6 +355,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_commit_charge()  # Fire puts the charge where the ghost sits
 	elif placing and (event.is_action_pressed(&"aim") or (event.is_action_pressed(&"grenade") and not (event is InputEventKey and (event.shift_pressed or event.alt_pressed)))):
 		_stop_placing("Charge put away")
+	elif placing and event.is_action_pressed(&"reload"):
+		_cycle_arm()  # R: how it's armed (Demolitions.arm_modes)
 	elif event.is_action_pressed(&"grenade") and body.carry_mode != &"":
 		# Hands full with a casualty: G lets go of them (Release / Put down) instead of throwing.
 		body._server_release_body.rpc_id(1)
@@ -358,18 +367,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			body._server_drop.rpc_id(1, body.active_slot)
 		elif event is InputEventKey and event.shift_pressed:
 			throwable = next_throwable(throwable, body.inventory)
-			if nade_up and throwable == Charges.ITEM:
+			var places := throwable == Charges.ITEM or Demolitions.is_placeable(throwable)
+			if placing:
+				_stop_placing()
+				if places:
+					_start_placing()
+				else:
+					hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
+			elif nade_up and places:
 				put_nade_away()
 				_start_placing()
-			elif nade_up:
+			elif nade_up and not Demolitions.is_detonator(throwable):
 				_show_nade()
 				_update_view_model()
 			else:
+				put_nade_away()
 				hud.flash("%s (%d)" % [ItemDB.get_item(throwable).name, body.inventory.count_of(throwable)])
 		elif nade_up:
 			put_nade_away("Grenade put away")  # G again: nothing thrown
-		elif throwable == Charges.ITEM:
+		elif throwable == Charges.ITEM or Demolitions.is_placeable(throwable):
 			_start_placing()
+		elif Demolitions.is_detonator(throwable):
+			_fire_detonator()
 		else:
 			equip_nade()
 	elif event.is_action_pressed(&"walk") and not is_instance_valid(body.vehicle):
@@ -405,15 +424,26 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## The underbarrel key (4): the trigger onto the M320 under the rifle in hand and back
-## (Underbarrel).
+## (Underbarrel); with a shotgun in hand, the next shell kind R loads (Shotguns.next_pick).
 func toggle_underbarrel() -> void:
 	var weapon := body.active_weapon()
-	if Underbarrel.on_gun(body) == null:
+	if Shotguns.is_tube(weapon):
+		var current := body.shell_pick if body.shell_pick != &"" else Shotguns.load_choice(weapon, body.inventory)
+		body.shell_pick = Shotguns.next_pick(weapon, current, body.inventory)
+		if body.shell_pick != &"":
+			hud.flash("R loads: %s (%d)" % [ItemDB.get_item(body.shell_pick).name, body.inventory.count_of(body.shell_pick)])
+		return
+	var key := Shotguns.key_of(body)
+	if Underbarrel.on_gun(body) == null and key == null:
 		body.underbarrel_up = false
-		hud.flash("No grenade launcher on this gun")
+		hud.flash("No grenade launcher or Skeleton Key on this gun")
 		return
 	put_nade_away()
 	body.underbarrel_up = not body.underbarrel_up
+	if body.underbarrel_up and key:
+		var n := Shotguns.key_list(key, body.inventory.state_of(body.active_slot)).size()
+		hud.flash("%s: %s" % [key.name, "%d in the tube" % n if n > 0 else "empty - R to load"])
+		return
 	var w := Underbarrel.loaded_of(body)
 	if body.underbarrel_up:
 		hud.flash("%s: %s" % [Underbarrel.on_gun(body).stats.get("short", "Launcher"), Launchers.warhead_name(w) if w != &"" else "empty - R to load"])
@@ -922,6 +952,10 @@ func _try_fire() -> void:
 		return
 	if weapon == null or weapon.type != "weapon":
 		return
+	if body.underbarrel_up and Shotguns.key_of(body) != null:
+		if Input.is_action_just_pressed(&"fire"):
+			_fire_key(weapon)  # the Skeleton Key under it (4 switched to it)
+		return
 	if body.underbarrel_up and Underbarrel.on_gun(body) != null:
 		if Input.is_action_just_pressed(&"fire"):
 			_fire_underbarrel(weapon)  # the M320 under it (4 switched to it)
@@ -936,11 +970,30 @@ func _try_fire() -> void:
 		return
 	if body.inventory.rounds_in(body.active_slot) <= 0:
 		if Input.is_action_just_pressed(&"fire"):
-			hud.flash("Empty - R to reload" if body.inventory.spare_rounds(Soldier._ammo_of(weapon)) > 0 else "Out of ammo")
+			var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon) > 0
+			hud.flash("Empty - R to reload" if spare else "Out of ammo")
 		return
 	body._next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
+	var kick := Shotguns.recoil_of(weapon, body.inventory.state_of(body.active_slot))  # (the shell about to go: hi-brass kicks harder)
 	body._server_fire.rpc_id(1, body.camera.global_position, body._spread_direction(weapon), body.active_slot)
-	body._kick(weapon)
+	body._kick(weapon, kick)
+
+
+## Fire with the trigger on the Skeleton Key: the host fires its next shell (Shotguns.server_fire_key).
+func _fire_key(weapon: ItemData) -> void:
+	var now := Soldier._now()
+	var key := Shotguns.key_of(body)
+	if now < body._busy_until or now < body._next_shot:
+		return
+	var state := body.inventory.state_of(body.active_slot)
+	var tube := Shotguns.key_list(key, state)
+	if tube.is_empty():
+		hud.flash("Empty - R to load" if Shotguns.spare_shells(body.inventory, key) > 0 else "No shells for the Skeleton Key")
+		return
+	body._next_shot = now + 60.0 / float(key.stats.get("rpm", 50))
+	var kick := float((ItemDB.get_item(StringName(String(tube.back()))).stats if ItemDB.has_item(StringName(String(tube.back()))) else {}).get("recoil_mult", 1.0))
+	body._server_fire_key.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z)
+	body._kick(key, kick)
 
 
 ## Fire with the trigger on the M320: the host lobs the grenade (Launchers.request_fire_underbarrel).
@@ -1106,8 +1159,14 @@ func _try_reload() -> void:
 		return
 	if nade_up or weapon == null or weapon.type != "weapon" or now < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
 		return
+	if body.underbarrel_up and Shotguns.key_of(body) != null:
+		_load_shells(Shotguns.key_of(body), true)  # the Skeleton Key, shell by shell
+		return
 	if body.underbarrel_up and Underbarrel.on_gun(body) != null:
 		_load_underbarrel()  # the M320, by hand
+		return
+	if Shotguns.is_tube(weapon):
+		_load_shells(weapon)  # a shotgun's tube, shell by shell
 		return
 	var ammo := Soldier._ammo_of(weapon)
 	var full := ItemDB.get_item(ammo).magazine_rounds() if ItemDB.has_item(ammo) else 0
@@ -1137,6 +1196,24 @@ func _load_underbarrel() -> void:
 	body._busy_until = Soldier._now() + float(Underbarrel.on_gun(body).stats.get("reload_s", 3.0)) * body.vitals.reload_mult()
 	hud.flash("Loading %s" % ItemDB.get_item(choice).name)
 	launchers.request_reload_underbarrel.rpc_id(1, choice)
+
+
+## R with a shotgun (with `key`, the Skeleton Key under the gun): a speed loader in one push, or
+## shells into the tube one by one, the picked kind first (Shotguns.server_load). Breaching rounds
+## a gun won't take say so (Shotguns.why_not).
+func _load_shells(weapon: ItemData, key := false) -> void:
+	var state := body.inventory.state_of(body.active_slot)
+	var have := Shotguns.key_list(weapon, state).size() if key else body.inventory.rounds_in(body.active_slot)
+	if have >= Shotguns.capacity(weapon):
+		return
+	var loader := not key and Shotguns.capacity(weapon) - have >= Shotguns.LOADER_MIN_ROOM and not Shotguns._loader_for(body.inventory, weapon).is_empty()
+	var shell := Shotguns.load_choice(weapon, body.inventory, body.shell_pick if not key else &"")
+	if shell == &"" and not loader:
+		var refused := body.inventory.count_of(Shotguns.BREACHING) > 0 and not Shotguns.takes(weapon, Shotguns.BREACHING)
+		hud.flash(Shotguns.why_not(weapon, Shotguns.BREACHING) if refused else "No shells for it")
+		return
+	hud.flash("Speed loader in" if loader else "Loading %s" % ItemDB.get_item(shell).name)
+	body._server_load_shells.rpc_id(1, body.active_slot, shell, key)
 
 
 ## The grenade type after `current` in the Shift+G cycle: THROWABLES order, skipping smoke
@@ -1471,15 +1548,42 @@ func _build_nade_view() -> void:
 func _start_placing() -> void:
 	if Soldier._now() < body._busy_until or body.inventory.hands != &"" or body.carry_mode != &"":
 		return
-	if body.inventory.count_of(Charges.ITEM) <= 0:
-		hud.flash("No %s left" % ItemDB.get_item(Charges.ITEM).name)
+	var item := throwable if Demolitions.is_placeable(throwable) else Charges.ITEM
+	if body.inventory.count_of(item) <= 0:
+		hud.flash("No %s left" % ItemDB.get_item(item).name)
 		return
 	placing = true
-	_ghost = Charges.make_visual(true)
+	_placing_item = item
+	_ghost = Charges.make_visual(true) if item == Charges.ITEM else Demolitions.make_visual(item, true)
 	_ghost.name = "ChargeGhost"
 	body.get_parent().add_child(_ghost)
 	_update_ghost()
-	hud.flash("Place the charge: Fire to set it, G to put it away")
+	if item == Charges.ITEM:
+		hud.flash("Place the charge: Fire to set it, G to put it away")
+		return
+	var modes := Demolitions.arm_modes(item)
+	_arm_index = clampi(_arm_index, 0, modes.size() - 1)
+	hud.flash("Place the %s: Fire to set it%s, G to put it away" % [ItemDB.get_item(item).name,
+		", R to arm (%s)" % Demolitions.arm_label(modes[_arm_index]) if modes.size() > 1 else (" (%s)" % Demolitions.arm_label(modes[0]) if modes[0] != "" else "")])
+
+
+## R while placing: the next way to arm it (Demolitions.arm_modes).
+func _cycle_arm() -> void:
+	if _placing_item == Charges.ITEM:
+		return
+	var modes := Demolitions.arm_modes(_placing_item)
+	_arm_index = (_arm_index + 1) % modes.size()
+	hud.flash("Armed: %s" % Demolitions.arm_label(modes[_arm_index]))
+
+
+## G with a clacker or radio remote picked: fires what you armed on a detonator (Demolitions).
+func _fire_detonator() -> void:
+	if not body.vitals.is_up() or body.inventory.count_of(throwable) <= 0:
+		hud.flash("No %s" % ItemDB.get_item(throwable).name)
+		return
+	var demolitions := Demolitions.of(body)
+	if demolitions:
+		demolitions.request_fire.rpc_id(1, String(throwable))
 
 
 func _stop_placing(note := "") -> void:
@@ -1494,10 +1598,15 @@ func _stop_placing(note := "") -> void:
 ## The ghost sits where the charge would go, lined up with the surface: green where it can
 ## go, red (in front of you) where it can't.
 func _update_ghost() -> void:
-	if not body.vitals.is_up() or body.inventory.count_of(Charges.ITEM) <= 0 or body.inventory.hands != &"" or body.carry_mode != &"":
+	if not body.vitals.is_up() or body.inventory.count_of(_placing_item) <= 0 or body.inventory.hands != &"" or body.carry_mode != &"":
 		_stop_placing()
 		return
 	var dir := -body.camera.global_basis.z
+	if _placing_item != Charges.ITEM:
+		var where := Demolitions.placement(body, body.camera.global_position, dir, _placing_item)
+		_ghost.global_transform = Demolitions.place_transform(_placing_item, where, dir)
+		Demolitions.tint_ghost(_ghost, where.ok)
+		return
 	var spot := Charges.placement(body, body.camera.global_position, dir)
 	_ghost.global_transform = Charges.surface_transform(spot.pos, spot.normal, dir)
 	var block := _ghost.get_node(^"Block") as MeshInstance3D
@@ -1507,6 +1616,18 @@ func _update_ghost() -> void:
 
 func _commit_charge() -> void:
 	var dir := -body.camera.global_basis.z
+	if _placing_item != Charges.ITEM:
+		var where := Demolitions.placement(body, body.camera.global_position, dir, _placing_item)
+		if not where.ok:
+			hud.flash(String(where.why) if String(where.why) != "" else "Nothing to place it on here")
+			return
+		var demolitions := Demolitions.of(body)
+		var modes := Demolitions.arm_modes(_placing_item)
+		if demolitions:
+			demolitions.request_place.rpc_id(1, String(_placing_item), body.camera.global_position, dir, modes[clampi(_arm_index, 0, modes.size() - 1)])
+		body._busy_until = Soldier._now() + Soldier.THROW_BUSY_S
+		_stop_placing()
+		return
 	if not Charges.placement(body, body.camera.global_position, dir).ok:
 		hud.flash("Nothing to place it on here")
 		return

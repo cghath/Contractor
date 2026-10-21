@@ -11,39 +11,211 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### The M320 underbarrel grenade launcher (Captain's list for cghath, 2026-10-20: "Not built yet / Weapons and items")
-
-Closes the M320 half of the list item "an M320 underbarrel grenade launcher and a shotgun". The
-shotguns came with the Captain's items expansion (`rem870`, `m1014`, 12 ga), so this branch's own
-M870 was taken out again. Its breaching round (blows a hole in a wooden or sheet-metal wall
-within 2.5 m, or shoots a locked box's lock off) and its shell-by-shell tube loading are in
-commit 75cc83e (`scripts/combat/shotguns.gd`), if the Captain wants them on his `rem870`.
+### One 12-gauge system (Captain, 2026-10-21: "we have standard and hi brass and breaching rounds for the skeleton key")
 
 #### Added
-- **M320 Grenade Launcher** (`m320`, $1,600 proposed): an underbarrel attachment for railed rifles,
-  mounted from the inventory like a grip (not on machine guns, marksman or sniper rifles, SMGs or
-  shotguns). **4** (new key,
-  rebindable; on the pad wheel as "Underbarrel launcher") switches the trigger to it and back;
-  **R** then loads one grenade by hand (about 3 s), **Fire** lobs it. The grenade flies the
-  launchers' own projectile with gravity, so it arcs: aim high for range. The loaded grenade is
-  the launcher's own state: it stays in when the M320 comes off, goes back on, the gun is stowed,
-  dropped, saved or looted, and every peer sees it. The HUD's ammo readout shows the grenade in
-  it and the ones carried while the trigger is on it.
-- **40 mm grenades:** M406 HE (`round_40mm_he`, $45) bursts through the existing warhead code
-  (blast within about 3 m, fragments to about 10 m, a small crater) but only past 14 m; closer,
-  it hits like a stone and doesn't go off. M714 smoke (`round_40mm_smoke`, $35) puts a white
-  smoke cloud where it lands.
-- The **grenadier** role's kit (data/roles.json) now has the M320 on his M4, with 8 HE and 2
-  smoke grenades. A kit's gun attachment goes on the first gun in the kit that takes it.
-- The M320's thump (new sound). Ground models for the M320 and the 40 mm grenades.
-- Tests: weapons (data, an arcing HE burst that hurts a man near it, a dud inside the arming
-  distance, smoke, its grenade saved and on a peer's copy, the grenadier's kit); attachments (the
-  M320's grenade stays with it on and off the gun, swapped for a grip, the gun stowed and drawn).
+- **Three 12 gauge shells for every shotgun:**
+  - **Standard 00 Buck**: nine pellets.
+  - **Hi-Brass Magnum Buck**: twelve faster pellets, a slightly wider pattern and about a third
+    more kick.
+  - **Breaching Rounds.**
+  Standard and hi-brass work in every 12 gauge: the Remington 870, the Mossberg 590A1, the
+  M1014, the Saiga-12 and the Skeleton Key. Breaching rounds work only in the M1014 and the
+  Skeleton Key. Every other shotgun refuses them: they don't load, and the game says why.
+- **The Skeleton Key**: a short-barrelled pump 12 gauge that clamps under a rifle's rail, with a
+  toothed standoff muzzle and a three-shell tube that comes full of breaching rounds. 4 switches
+  the trigger to it, as with the M320. Fire shoots it, R loads it shell by shell. Priced at $1100
+  in the base shop, and found with the rare western rifles as loot.
+- **870 Extended Full Choke**: a choke tube for the Remington 870, its upgrade in place of breaching
+  rounds. It narrows the pattern to under half its width, so it reaches much further. Mounted
+  from the inventory like any attachment. $250 in the shop, and loot where the muzzle cans turn up.
 
-#### Not yet (for the Captain's side and Claude)
-- **Held model (Captain's files):** the M320 isn't drawn under the rifle in hand (attachments
-  under the barrel aren't drawn on the held gun at all yet). It uses the rifle hold.
-- **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130).
+#### Changed
+- **Every 12 gauge fires through one path** (cghath's tube shotguns). Each shell fires as what it
+  is: the gun's tube, a speed loader and a Saiga-12 magazine each keep the shells they hold, in
+  order.
+- **Speed loaders hold any shell.** R tops a tube up from one in a single push when the tube has
+  room for two or more; shells the gun won't take stay in the loader. Loose shells fill speed
+  loaders and Saiga magazines from the inventory (Load magazines). A Saiga magazine takes no
+  breaching rounds.
+- **The loose 12 gauge rounds are Standard buck now, and slugs are gone.** Slugs weren't in the
+  spec, and nothing needed them. cghath's M870 is the Remington 870. Old saves' items turn into
+  those.
+- **The M320 and the Skeleton Key fit every railed assault rifle, carbine and battle rifle**,
+  the AK-12 too while there's no GP-25. They no longer fit SMGs, shotguns or DMRs. The SVD, SVDS
+  and M110 are tagged as DMRs.
+- **The breacher** carries the Skeleton Key under a compact Mk18, with breaching and standard
+  shells, in place of the Mossberg. The AI breacher's "shotgun on the door frame" is a breaching
+  round out of the Key; out of contact he tops the Key up with breaching rounds.
+
+#### Fixed
+- **An AI soldier with a tube shotgun counted no spare ammo** (audit F-131). Loose shells and its
+  speed loaders now count for reloading, the ammo-low checks and scavenging.
+- **cghath's buckshot pellets were scored as full bullets by gunfire gore.** Every pellet from
+  any 12 gauge now scores as a pellet, and a hi-brass pellet hits a little harder.
+### The medical menu (H) reads like a medic (Captain, 2026-10-21: "injury descriptions in the medical helper (H) need to be improved too")
+
+#### Changed
+- **The casualty at a glance, under the title:**
+  - conscious, conscious but dying, unconscious, or cardiac arrest with the time left;
+  - how much blood is gone, in words, and "bleeding out in about 2 min" while it runs;
+  - breathing and colour, the pulse, and pain, in words.
+
+  With a pulse oximeter, the SpO2 and pulse are shown in numbers too.
+- **Treat in this order:** every injury down the right, worst first, each with its severity in
+  colour (minor, serious, critical, life-threatening). Click one to jump to its body part.
+- **Each injury in plain words.** Where it is, plainly ("Left thigh, inner", "Chest, right
+  side"), and what it is in medic language:
+  - arterial bleed (spurting) and venous bleed (steady);
+  - graze, gunshot or fragment wound, through-and-through;
+  - open or closed fracture, traumatic amputation (blast or gunfire);
+  - open chest wound, tension pneumothorax, blast lung, head injury, internal bleeding;
+  - burns by how much of the body.
+- **Done and next, for each injury:**
+  - What's been done: tourniquet on and how long ago, packed, bandaged, splinted, chest seal on,
+    clamped.
+  - What to do next, in order ("Tourniquet high above the wound, then pack it, and bandage").
+    Items you don't carry are greyed and say so.
+- **Not tied to one wound, listed as well:** cardiac arrest, a blocked airway, blood loss that
+  needs a line and fluids, cold, concussion, a racing or slow pulse, pain.
+
+#### Added
+- **Trace a hit's path through the body** (Captain: "show a traced wound path for a selected hit
+  so users can get an understanding of the anatomy"). Click an injury in "Treat in this order"
+  (or press T on its body part) and the right-hand column shows that part of the body from the
+  front and the side:
+  - the bones, arteries, veins and organs, with what the round crossed drawn bright;
+  - the channel from where it went in to where it came out (a ring) or stopped (an X).
+
+  Below the views, the path in words, in the order the round met things:
+  - "In: Left thigh, front";
+  - "8 cm: left femoral artery, cut";
+  - "9 cm: left femur (thigh bone), cracked by the shock wave";
+  - "Out: Left thigh, back, a 19 cm channel", or "Stopped inside after 11 cm: still in him".
+
+  T moves to the part's next hit; T or Esc goes back to the signs and the log. A round that
+  stayed in can be traced too: where its channel ended is now kept with the wound and sent to
+  every player.
+### Tracers follow the round's real path (Captain, 2026-10-21: "tracers flight paths and ballistic arcs ... theyre still wonky depending on terrain")
+
+#### Fixed
+- **Tracers fly the round's arc.** A tracer used to be a straight line from the muzzle to the
+  impact while the round flew a zeroed, dropping arc. At 800 m the line ran up to 2.8 m off the
+  real path. Now every peer rebuilds the steps the host's round flew from the muzzle, its launch
+  velocity and its round (`Ballistics.flight_path`). The streak runs along them and ends exactly
+  at the impact, on flat ground, slopes, hillsides and voxels, at any range.
+- **Clients draw the host's path.** The tracer message now carries the launch velocity and the
+  round, so the client's streak is the host's path point for point. A shooter that the client
+  draws a moment behind (smoothing) gets the streak started at the gun it sees, and the streak
+  joins the real path within 12 m.
+- **A muzzle in the ground no longer fires from the eye.** A muzzle pushed into a rise (prone
+  on a slope) or a wall now fires from 3 cm short of it. Before, the round and its tracer started
+  at the shooter's face.
+
+#### Added
+- **Mortar and artillery shells can be seen in flight** (Captain, 2026-10-21: "i wanna see the
+  mortar streak down or up depending on weather conditions etc"). Every peer sees a dark shell
+  with a pale streak fly the real arc in its real time of flight. A mortar team's shell goes up
+  off the tube and over. A called mission's 81 mm or 105 mm round comes down out of the sky from
+  the guns off the map. Both end exactly on the burst. The streak stays about a pixel and a half
+  wide at any range, and fog hides it.
+- **Wind by weather.** Each weather has a wind (proposed: fog 1 m/s, clear 3, overcast 5, rain 7,
+  storm 14) from a direction each zone keeps (`DayNight.wind`). The wind pushes shells, so the
+  arc leans and bends in flight: about 5 m at the top of a 25 s flight on a clear day, 22 m in a
+  storm. The crews lay for the wind, so rounds still land where they did before.
+- Mounted vehicle guns show tracers too (every fifth round red or green, the rest as faint ball
+  streaks), along the same real path.
+- A `ballistics` test suite: rounds onto a hilly terrain at 50, 300 and 800 m, up, down and across
+  slopes, up a hillside 700 m out, and into voxels. Each checks that the impact is on the height
+  field, the path goes through no hill, the rebuilt path matches the one flown, and the tracer
+  follows it to the impact. It also covers a player's real shot from the muzzle, a muzzle in the
+  ground, and the smoothed-shooter lead. The net suite checks the client's tracer against the
+  host's path over ENet.
+
+### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
+
+#### Fixed
+- **Arms and hands can be shot.** The arms' hitboxes now follow the arms as they're drawn: on
+  the rifle's grip and handguard, in a reload, carrying, or ragdolled. Before, they hung at the
+  sides in the rest pose whatever the arms did. A round at a raised arm met no arm, and one
+  where the arm would have hung wounded an arm that wasn't there. This was the same for every
+  player, since hits are worked out on the host.
+- The forearm's hitbox now takes in the whole hand, and the hit shape inside it is the hand as
+  drawn (gripping, on the handguard, holding a magazine), not a relaxed one. A hand hit counts
+  on its forearm.
+- The part a round meets first takes the hit. An arm held across the chest is no longer
+  swallowed by the chest's hitbox behind it. A woman's arm hitboxes sit on her own, narrower
+  shoulders.
+### Feet (Captain, 2026-10-21: "better feet")
+
+#### Added
+- **Real footwear at 0.5 cm.** Combat boots have a lugged sole with a heel, a toe box with a toe
+  cap, laces with eyelets up the instep, a laced shaft with speed hooks, a padded ankle cuff and
+  a pull loop. Trousers are bloused over the top. There are also sneakers (a thick light sole,
+  white laces), leather shoes, sandals with straps over bare toes, and bare feet with five toes.
+  Women's feet are smaller.
+- **Footwear by kit.** Contractors and the armies wear boots: coyote for multicam, tan and desert;
+  black for woodland and Vantage. Banner fighters and Saltline wear sneakers, and the Shura wear
+  sandals. Plain clothes get sneakers, shoes or sandals, or boots with the field commander's
+  shoes. A plain-clothes scheme can name its footwear in a sixth field
+  (`civ:<shirt>:<trousers>:<skin>:<shoes>:<style>`).
+- **Feet move like feet.** Each foot is its own part on an ankle joint, pitched to the ground
+  each frame. It's flat when planted. Walking and running, the heel strikes with the toes up,
+  then the heel lifts and the foot rolls off its bent toes. Kneeling, the back foot is up on
+  tucked toes; prone, the toes dig into the ground. Down or dead, the feet go slack.
+
+#### Changed
+- Each leg's shin is drawn for its footwear (a boot's shaft, a trouser hem, a bare ankle), with
+  the foot on its own node. That adds two meshes (about 1,000 to 3,000 triangles each) and two
+  draw calls per body. A severed shin takes its foot with it. The leg's hit shape is unchanged.
+- Posed parts (`forearm:grip:`, `shin:boots`) now widen with a heavier build, as the plain parts did.
+### Helmets fit the new heads (Captain, 2026-10-21)
+
+#### Fixed
+- **Helmets are no longer too big.** They were shaped round the old, broader head and stood 3-4 cm
+  off the new faces' heads. Every helmet now rides snug, with about 1.5-2.5 cm of padding all
+  round, at every height and build, men and women. The LX-3's face guard closes round the face
+  as before. Hits on a helmet land on the shell as drawn.
+- Long hair on top no longer pokes through a helmet's crown.
+- A woman's bun, braid or ponytail goes flat under a heavy helmet's ear covers or the LX-3's nape
+  guard instead of showing through them, and comes back when the helmet is off.
+- **A head that comes off takes its face with it.** The eyes, mouth and brows stayed hanging
+  where the head had been while it rolled away, and a whole head could reappear on the stump
+  (on clients, or once the helmet fell off). Now the flying head is the soldier's own, eyes shut
+  and jaw slack, the helmet falls loose, and the body keeps only the torn neck. The same on
+  every peer, alive or dead.
+### Gunfire takes limbs (Captain, 2026-10-21)
+
+#### Fixed
+- **Shooting a limb enough takes it off, alive or dead.** The Captain shot a man over 40 times with
+  the M1014, more than 20 rounds per leg, and the legs stayed on. Now every hit scores on the
+  limb it hits, by how hard it hits, and past a limit the limb comes off:
+  - Hands and feet go first (hits low on a forearm or shin take it at the wrist or ankle), then
+    forearms and shins, then upper arms and thighs.
+  - Close buckshot takes a shin in 2 or 3 shells and a thigh in about 5.
+  - Heavy rounds take a forearm or shin in one or two hits: .338, and a .50 (which still kills
+    outright).
+  - 7.62x54R takes about 4 hits up close for a forearm or shin, at the Captain's call. So do the
+    rounds close to it: 7.62x51 (.308), .30-06, 6.5 Creedmoor and .303.
+  - Rifle rounds take sustained fire into one limb (about 10 5.56 rounds into a living shin),
+    and pistol rounds hardly ever.
+  - A corpse keeps taking it: about 16 rifle rounds into a dead man's leg takes it off.
+- **Losing a limb alive** is an arterial bleed a tourniquet stops, with the shock of it: he's
+  dying or out.
+- The severed piece lands in the same place for every player, as a blast's does.
+- All the numbers are in one table (BodyDeform.GUNFIRE), Proposed.
+### M1014 model rework (Captain, v0.5.0: "the m1014 is the wrong color and doesnt look right")
+
+#### Fixed
+- **The M1014 is matte black** and reads as the real gun. Its forend, stock tube and handle used
+  the grey gun colour, which looked grey-tan in daylight. It now has a slim barrel with the
+  front blade in its protective wings, and the extended magazine tube runs to 2.5 cm from the
+  muzzle under a barrel clamp with its sling loop. The receiver has a Picatinny rail with the
+  ghost ring between its ears, the bolt and its handle in the ejection port, the bolt release,
+  and the loading port with the carrier and shell latch. It has a cross-bolt safety, a pistol
+  grip and the telescoping stock out on its tube. It is 1 m long.
+- **The Mossberg 590's furniture is black** too (it was the same grey), and both pump guns show
+  a bright bolt in the ejection port.
 
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
@@ -63,6 +235,47 @@ commit 75cc83e (`scripts/combat/shotguns.gd`), if the Captain wants them on his 
 - These guns used to borrow the C8, Mosin or single pistol model at their real length. The
   G36C, Vityaz, Saiga-12, P90, AUG, Lee-Enfield and SKS keep their families (carbine, AK,
   bullpup, bolt-action), which match the real guns closely enough.
+### A squadmate no longer stays behind after clearing a building on his own (2026-10-21)
+
+#### Fixed
+- **Squadmates who clear a building on their own follow you again afterwards.** When you walk
+  into a building, idle squadmates stack up and clear it. A man who finished his corner used to
+  stay put for good, as if you'd ordered him to hold there. He now goes back to following you. A
+  clear you order still ends with them holding where they got to.
+### Breacher role (Captain, 2026-10-20: "we need breacher roles for the player team", "they use breaching charges")
+
+#### Added
+- **Breacher** role (BRC), pickable in the main menu, at join, on the loadout screen and in the
+  roster like the other roles. It takes a free non-medic slot, the way anti-tank and the heavy
+  gunner do. Kit: Mossberg 590A1 breaching shotgun with five speed loaders in shell pouches, an
+  M17, three breaching charges, three flashbangs and ear protection. An LX-3 preset too.
+- **AI breachers lead building entries.** The breacher goes first in the stack and makes the way in:
+  - In Aware or Combat he sets a **breaching charge**. He walks to the wall on the far side of
+    the doorway from the stack, sets it, falls back, and the team goes in through the hole.
+  - Out of charges, he **shotguns the hinge side of the door frame** if an enemy is known
+    inside, and **kicks** it otherwise.
+  - In **Stealth** he eases the door open. He uses a charge only when ordered.
+  - A **flashbang** goes in after the breach (a frag if there's no flashbang and an enemy is
+    known inside). There's never a bang in Stealth, on a quiet order, or with a civilian known
+    inside.
+  - This covers ordered clears, town clears and a squad clearing an enemy-held building itself.
+  - A squad with no breacher clears the way it does today.
+- **Human breachers**: when a breacher player orders Clear, the squad stacks and holds, as on
+  "clear on me", until he breaches. That's his charge going off by the door or his shotgun into
+  the frame. Then the bang goes in and they enter. If he just walks in, they follow.
+- **Command menu > Clear**: "kick it in" (8), "shotgun the door" (9) and "quietly (eased open,
+  no bang)" (0). With no breacher, the first man in the stack kicks. Voice: "kick it in",
+  "shotgun the door", "charge and clear", "clear it quietly".
+- **Command menu > Team > Assign role** (9 6): the selected AI squadmates take on a role.
+  Breacher is key 1. Their kit stays what it is. Voice: "make breacher".
+
+#### Fixed
+- **Breaching charges on a wall cut a doorway.** Before, they left a big crater in the ground
+  and a strip of plinth, fence or wall at the foot that AI couldn't walk past or over. Now the
+  cut is 1.3 m wide and 2.2 m tall, from the floor at the wall's foot, through every material
+  but steel. The ground isn't cratered. A charge set on the ground leaves a small crater.
+- **A wall charge doesn't hurt the stack beside the door.** It throws no fragments out the side
+  it was set from, and only half its overpressure.
 
 ### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
 
@@ -398,6 +611,9 @@ The follow-ups from docs/terror_groups.md section 9. Every name is made up.
 - **Vantage and the Eastern Concord Forces fight by their own doctrine** (PMC and regular army)
   wherever they are, not by the doctrine of the zone's people. Vantage's racing team now counts
   as Vantage's men, whoever holds the zone.
+- **Fewer suicide bombers** (Captain). Once the Banner or the Shura is pushed or hunting the
+  squad, the 10% chance of a bomber is rolled every 3 minutes instead of every 30 seconds: about
+  one per half hour instead of one per five minutes, and still at least 10 minutes apart.
 
 ### Terror groups, cartels and a living war (Captain, 2026-10-20)
 
@@ -447,6 +663,177 @@ Design and the Captain's calls: docs/terror_groups.md. Every name and flag is ma
 #### Changed
 - **Black Ridge is a regional militia.** It holds 4 of the 22 contract zones and Black Ridge hills
   (it held every zone before), and its share of contracts falls from about a third to a fifth.
+### The M320 and a breaching shotgun (Captain's list for cghath, 2026-10-20: "Not built yet / Weapons and items")
+
+Closes the list item "an M320 underbarrel grenade launcher and a shotgun".
+
+#### Added
+- **M320 Grenade Launcher** (`m320`, $1,600 proposed): an underbarrel attachment for railed rifles,
+  mounted from the inventory like a grip (not on machine guns or sniper rifles). **4** (new key,
+  rebindable; on the pad wheel as "Underbarrel / shells") switches the trigger to it and back;
+  **R** then loads one grenade by hand (about 3 s), **Fire** lobs it. The grenade flies the
+  launchers' own projectile with gravity, so it arcs: aim high for range. The loaded grenade is
+  the launcher's own state: it stays in when the M320 comes off, goes back on, the gun is stowed,
+  dropped, saved or looted, and every peer sees it. The HUD's ammo readout shows the grenade in
+  it and the ones carried while the trigger is on it.
+- **40 mm grenades:** M406 HE (`round_40mm_he`, $45) bursts through the existing warhead code
+  (blast within about 3 m, fragments to about 10 m, a small crater) but only past 14 m; closer,
+  it hits like a stone and doesn't go off. M714 smoke (`round_40mm_smoke`, $35) puts a white
+  smoke cloud where it lands.
+- **M870 Pump Shotgun** (`m870`, $900): a six-shell tube, pump action (one shot a pull, about 1 s
+  to work the pump). **R** loads shells one at a time (about half a second each) until the tube
+  is full; firing stops it. **4** picks which shell R loads. Shells (prices proposed):
+  - **00 Buckshot** (`shells_12g_buck`, $2): nine pellets, each its own round through the
+    ballistics, spread inside 1.6 degrees.
+  - **Slugs** (`shells_12g_slug`, $2): one heavy round (IIIA).
+  - **Breaching Rounds** (`shells_12g_breach`, $3): at a wooden or sheet-metal door or wall
+    within 2.5 m they blow a hole through it, on a smaller scale than a breaching charge does
+    (concrete only chips). At a locked box they shoot the lock off. Anything else, they hit as
+    a weak, short-ranged round.
+- The **grenadier** role's kit (data/roles.json) now has the M320 on his M4, with 8 HE and 2
+  smoke grenades. A kit's gun attachment goes on the first gun in the kit that takes it.
+- Weapon lights fit the shotgun. New sounds: the shotgun's boom, the M320's thump, a shell going
+  in, the pump.
+- Tests: weapons (data, buckshot pattern, an arcing HE burst that hurts a man near it, a dud
+  inside the arming distance, smoke, buckshot/slug/breaching shots, shell-by-shell loading and
+  firing stopping it, save/load and a peer's copy of both); attachments (the M320's grenade
+  stays with it on and off the gun); armor (the two new rounds on the ladder).
+
+#### Not yet (for the Captain's side and Claude)
+- **Held models and poses (Captain's files):** carried in hand, the shotgun still shows the
+  generic rifle model (VoxelArt has no `shotgun` style yet), and the M320 isn't drawn under the
+  rifle (attachments under the barrel aren't drawn on the held gun at all yet). The ground models
+  for both are new in ItemArt. Both use the rifle hold pose.
+- **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130),
+  and an AI with a shotgun would see no spare ammo (F-131).
+### Dog tags, the memorial wall, the death benefit, the shared triage log (Captain's list for cghath, 2026-10-20: "Campaign" and "Medical")
+
+#### Added
+- **Dog tags.** Every company soldier wears tags: your squadmates, hires and players. On a
+  fallen squadmate's body, Left Ctrl > **Take dog tags** puts them in your gear. You have to be
+  at the body as it lies, the same as looting.
+- **Tags decide KIA or MIA.** Carry his tags out at extraction, or bring his body, and he's
+  recorded killed in action. His name goes on the memorial wall and his death benefit is paid.
+  Without his tags or his body he's missing in action. He gets no recovery contract (there's
+  nobody to bring back alive) and stays on the books until either:
+  - his tags come home on a later deployment (then he's KIA), or
+  - 7 days pass after he fell (Proposed). Then he's declared dead, his benefit is paid, and he
+    goes on the wall as "missing".
+  The tags go to the company's records, not into your kit or the stash. A body taken by the body
+  cap leaves its tags where it lay.
+- **The memorial wall**: a new Memorial tab on the base screen, and a wall to use in the LHD's
+  hangar (port side). For each of the fallen it lists their name and callsign, role, the day,
+  the zone, the contract, how many missions they served and "Tags recovered" or "Missing". It
+  also lists anyone missing after they fell who hasn't been declared dead yet. It's saved with
+  the campaign.
+- **The shared triage log.** The medical menu's log now lives on the casualty, so everyone
+  treating him sees the same entries: who did what, and when (by the zone's clock). Players' and
+  AI medics' treatments and triage cards go in it. It's kept by the host and reaches every
+  player, late joiners included. It stays with the casualty when he's carried or dragged, across
+  a crossing and through a save. Before, the log showed only what you yourself did while your
+  menu was open.
+
+#### Changed
+- **The death benefit is paid once per man, when his death is confirmed** (his tags came home,
+  or he was declared dead or written off). It's a line of its own in the debrief and in the
+  books ("Death benefit: Reaper (...)", a "Death benefits" kind on the Books tab), with a notice
+  for everyone. Before, every friendly body in the zone was counted at each debrief, so a body
+  left from an earlier deployment could be paid for again. Raids pay it too now. A squadmate
+  written off after a failed recovery now costs the benefit as well.
+### Fire support: artillery and mortar fire missions, a recon UAV, the forward observer (Captain's list, 2026-10-20)
+
+Closes "Vehicles and air: player artillery and UAV calls" and "Campaign / mission types: forward
+observer". Learning from how real call-for-fire works and from Arma's artillery, not copying
+either. Every number is Proposed (data/fire_support.json, data/prices.json).
+
+#### Added
+- **Fire missions** (Support > Fire support, or the fire mission panel for typed corrections and
+  grids). Two firing units fire from off the map:
+  - an 81 mm mortar section, lent by any employer you stand at least Neutral with;
+  - a 105 mm battery, from Trusted, inland only (it sits at the inland FOB).
+
+  How a mission goes:
+  - **Call it** on your map marker, on where you look, or on a typed grid. Through binoculars the
+    point is lased: it reaches 2.5 km and the first round lands closer.
+  - **Adjust.** One adjusting round lands with the guns' starting error. Correct from the burst
+    along your line to the target ("add 50, left 25"), as often as you need.
+  - **Fire for effect:** up to 8 mortar or 6 battery rounds, HE or smoke.
+
+  Rounds fly their real time of flight and land within a stated radius. HE uses the existing blast
+  (people, craters, the enemy hearing it) and hits vehicles near it. Smoke lands as white clouds.
+  The radio calls "shot" and "splash".
+
+  Limits:
+  - **Danger close:** with friendlies within 150 m (mortars) or 250 m (battery) of the aim, the guns
+    wait until you confirm.
+  - **Cost:** $450 a mortar round, $1,500 a battery round, from the support budget first, then cash.
+  - **Cooldown and ammunition:** a cooldown after each fire for effect, and a ration of rounds per
+    deployment. The deployment keeps both, as it does the rebels' call-ins.
+- **Recon UAV** (Support > Fire support > Recon UAV, $8,000):
+  - It flies in from where the supports come from, then circles a point 280 m up for 10 minutes.
+  - Hostiles its camera can see are tagged for the squad through the existing tags (red marks, the
+    map). It judges what it sees the way the AI's spotting does (stance, movement, camo, foliage,
+    weather). It sees in thermal, so night doesn't hide anyone.
+  - "Open the UAV feed" shows its camera in a panel at the right of the screen.
+  - Storms ground it, and send it home if they start while it's up.
+  - Three hits bring it down, and a manned enemy AA technical in range can hit it. It has a
+    15-minute cooldown.
+- **Forward observer contract** (on the board at outposts, checkpoints, QRF bases, HQs and
+  compounds, in contract and hot zones):
+  - Get eyes on the target area from up to 700 m.
+  - Bring the guns onto the 3-4 vehicles and weapon positions there.
+  - Stay unseen.
+
+  Pay goes by the targets the guns destroy: the first is the job, each further one a 25% bonus, and
+  never being spotted another 20%. A target destroyed any other way fails and doesn't pay.
+- A 105 mm HE warhead (data/warheads.json) for the battery.
+- Tests: a new `firesupport` suite, in the default local list and CI. The forward observer is in
+  `missions`, and the panel and the UAV feed are in `ui`.
+### Demolitions: demo blocks, det cord, thermite, claymores, mines, chem lights (cghath, 2026-10-20)
+
+Closes the Captain's 2026-10-20 list item "Not built yet: Weapons and items: mines and claymores,
+demo blocks, det cord, thermite, chem lights". All numbers and prices are Proposed.
+
+#### Added
+- **Demolition block (C4).** Pick it with Shift+G and press G: a ghost shows where it goes on the
+  surface you look at, within 2.5 m. R picks how it's armed: a 10, 30 or 60 s timer, a detonator,
+  or det cord. Fire places it. It's a big blast: a wide hole in walls, people hurt by the blast
+  and fragments, and a vehicle it's set on badly damaged (a charge in contact hurts a hull far more
+  than one going off beside it). A sabotage target or cache it's set on is destroyed.
+- **Det cord.** Arm a block or claymore on det cord and it's tied to your nearest block or claymore
+  within 15 m, using one coil. When any one in the chain goes off, they all go.
+- **Firing devices.** The M57 clacker (50 m of wire) and a radio remote (400 m). Pick one with
+  Shift+G and press G: everything you armed on a detonator within range goes off.
+- **Thermite.** Set it on a vehicle, a static gun, a cache or the ground. It lights after 3 s and
+  burns for 8 s, with a bright flickering light, sparks and a hiss. Then a vehicle's engine is
+  burnt out and the vehicle catches fire, a static gun is wrecked, a cache is destroyed. Anyone
+  within a metre is burnt.
+- **M18 claymore.** Set it on the ground, facing where you look. Fire it with a clacker or remote,
+  on det cord, or on a tripwire 2 m in front (live after 10 s). Its fragments fly in a 60 degree
+  fan out to 50 m; behind and beside it there's only the blast close in. Friendly fire is on.
+- **AP mine (pressure).** Buried in the ground in front of you, live after 15 s. Anyone who steps
+  on it, friend or foe, or a vehicle rolling over it, sets it off. The leg that stepped on it is
+  wrecked. Our own mines and claymores are marked on the map.
+- **Chem lights** in green, red, blue and IR. Throw one, or lob it to drop it close. It lies where
+  it stops (or rides whoever it landed on) and glows for 30 minutes. Through night vision it's
+  four times brighter and reaches further; the IR one shows only through night vision. For
+  marking an LZ, a cleared room or a casualty.
+- **Picking things up again:** Left Ctrl at a placed block, claymore or mine offers "Pick up" from
+  close by (not a lit thermite).
+- Everything placed is seen by every player, late joiners too, and is saved with the zone. A zone
+  left for a week keeps its mines and charges; the chem lights are out.
+- In the base shop (Proposed): demo block 500, det cord 60, clacker 150, radio remote 600, thermite
+  250, claymore 450, AP mine 200, chem lights 40 (IR 60). They sit with the grenades in the
+  loadout menu.
+- New test suite `demolitions`: placing, arming, the timer, the clacker and a det cord chain, a
+  sabotage target destroyed by a block, a block on an MRAP, thermite disabling a technical, the
+  claymore's fan hitting only in front, the tripwire and the mine (live only after their delay),
+  a mine under a vehicle, picking up, chem light life and night-vision brightness, the zone save,
+  and a client joining late that sees it all.
+
+#### Changed
+- Grenades and explosives share a band in the loadout menu: the breaching charge, blocks, mines,
+  thermite and firing devices are listed with the grenades now (they were under Other).
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

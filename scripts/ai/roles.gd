@@ -22,6 +22,10 @@ const ANTI_TANK := &"anti_tank"
 ## casting (a mission's loadout, a roster hire), never AI auto-fill.
 const HEAVY_GUNNER := &"heavy_gunner"
 const AMMO_BEARER := &"ammo_bearer"
+## Leads a building entry, first at the door (Captain, 2026-10-20: "we need breacher roles for
+## the player team", "they use breaching charges"; SquadAI's breach plan): like anti_tank, not in
+## fire_teams, a player's pick or a deliberate cast (roster role, command menu Team > Assign role).
+const BREACHER := &"breacher"
 ## Fire team names, by index (Soldier.fire_team).
 const TEAMS: Array[String] = ["A", "B"]
 ## Which slots a player whose role has no free slot takes first: the least specialised.

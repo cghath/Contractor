@@ -1860,7 +1860,8 @@ func to_net() -> Dictionary:
 		var wound_flags := (1 if w.get("packed", false) else 0) | (2 if w.get("tension", false) else 0) \
 			| (4 if w.get("clamped", false) else 0) | (8 if w.get("closed", false) else 0) | (16 if w.get("pneumo", false) else 0) | (32 if w.get("open", false) else 0)
 		list.append([String(w.part), w.kind, snappedf(float(w.rate), 0.001), 1 if w.treated else 0, String(w.name), wound_flags,
-			_half_cm(w.get("at")), _half_cm(w.get("out")), RC_CODES.find(StringName(w.get("rc", &""))), snappedf(float(w.get("dmg", 0.0)), 0.1)])
+			_half_cm(w.get("at")), _half_cm(w.get("out")), RC_CODES.find(StringName(w.get("rc", &""))), snappedf(float(w.get("dmg", 0.0)), 0.1),
+			_half_cm(w.get("end"))])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
 		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0) | (2048 if dying else 0)
@@ -1952,6 +1953,9 @@ func apply_net(state: Dictionary) -> void:
 			wounds[-1]["rc"] = RC_CODES[int(entry[8])]
 		if entry.size() > 9:
 			wounds[-1]["dmg"] = float(entry[9])
+		if entry.size() > 10 and (entry[10] as Array).size() == 3:  # the channel's end (the medical menu's wound path)
+			var e: Array = entry[10]
+			wounds[-1]["end"] = Vector3(e[0], e[1], e[2]) * 0.005
 	gore = (state.get("z", []) as Array).duplicate(true)
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})

@@ -34,8 +34,8 @@ const KEYS := {
 	&"weapon_primary": [KEY_1],
 	&"weapon_sidearm": [KEY_2],
 	&"weapon_launcher": [KEY_3],  # the anti-armour launcher (wave 5, Launchers)
-	# The trigger onto the M320 under the rifle and back (Underbarrel; Captain's list for cghath,
-	# 2026-10-20). Proposed key.
+	# The trigger onto the M320 under the rifle and back (Underbarrel), or with a shotgun the next
+	# shell kind R loads (Shotguns; Captain's list for cghath, 2026-10-20). Proposed key.
 	&"weapon_underbarrel": [KEY_4],
 	&"pause": [KEY_ESCAPE],
 	&"quick_save": [KEY_HOME],  # F-keys are the squad command menu
@@ -137,7 +137,7 @@ const PAD_WHEEL := [
 	[&"vehicle_view", "Vehicle view"], [&"get_out", "Get out"], [&"quick_save", "Quick save"],
 	[&"nvg_toggle", "NVG up/down"], [&"weapon_light", "Weapon light"], [&"tag_enemy", "Tag enemy"],
 	[&"binoculars", "Binoculars"], [&"auto_walk", "Auto-walk"], [&"walk", "Walk / jog"],
-	[&"weapon_underbarrel", "Underbarrel launcher"],
+	[&"weapon_underbarrel", "Underbarrel / shells"],
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).

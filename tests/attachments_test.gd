@@ -212,6 +212,40 @@ func _run() -> void:
 	loaded.queue_free()
 	copy.queue_free()
 	await _test_m320(m4)
+	await _test_choke()
+
+
+## The 870's choke (one 12-gauge system, 2026-10-21): it goes on the Remington 870 the way any
+## attachment does (the inventory's mount), shows among the gun's attachments, and the host
+## refuses it on any other gun.
+func _test_choke() -> void:
+	var inv := player.inventory
+	var was: StringName = inv.slots[&"primary"]
+	var was_state := inv.state_of(&"primary").duplicate(true)
+	inv.slots[&"primary"] = &""
+	inv.take(&"mossberg590")
+	inv.take(&"choke_870")
+	var c := _find(inv, &"choke_870")
+	player._server_inventory_action.rpc_id(1, "mount_attachment", c[0], c[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(ItemDB.get_item(&"mossberg590"), inv.state_of(&"primary"), GunAttachments.CHOKE) == &"" and inv.count_of(&"choke_870") == 1,
+		"the host refuses the 870's choke on a Mossberg")
+	inv.slots[&"primary"] = &""
+	inv.take(&"rem870")
+	var rem := ItemDB.get_item(&"rem870")
+	c = _find(inv, &"choke_870")
+	player._server_inventory_action.rpc_id(1, "mount_attachment", c[0], c[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(rem, inv.state_of(&"primary"), GunAttachments.CHOKE) == &"choke_870" and inv.count_of(&"choke_870") == 0
+		and GunAttachments.all_of(rem, inv.state_of(&"primary")).choke == "choke_870" and Shotguns.spread_mult(rem, inv.state_of(&"primary")) < 0.6,
+		"the choke goes on the Remington 870 like any attachment: %s" % GunAttachments.all_of(rem, inv.state_of(&"primary")))
+	player._server_inventory_action.rpc_id(1, "remove_attachment", &"", -1, &"primary", GunAttachments.CHOKE)
+	await _frames(2)
+	check(GunAttachments.mounted_id(rem, inv.state_of(&"primary"), GunAttachments.CHOKE) == &"" and inv.count_of(&"choke_870") == 1, "and comes off, back into his kit")
+	while inv.remove_one(&"choke_870"):
+		pass
+	inv.slots[&"primary"] = was
+	inv.set_slot_state(&"primary", was_state)
 
 
 ## The M320 (Captain's list for cghath, 2026-10-20) on the underbarrel mount: it goes on and off

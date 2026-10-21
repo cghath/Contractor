@@ -35,13 +35,18 @@ const MENU := {
 			{"key": "7", "label": "Garrison that building", "cmd": "garrison", "point": true},
 			{"key": "9", "label": "Climb up there (wall, roof)", "cmd": "climb", "point": true},
 			{"key": "8", "label": "Clear", "items": [  # Captain, 2026-10-16: stack, breach, clear; whole towns
-				{"key": "1", "label": "That building (quiet)", "cmd": "clear", "point": true},
+				{"key": "1", "label": "That building (no bang; a breacher makes the way in)", "cmd": "clear", "point": true},
 				{"key": "2", "label": "That building, flashbang first", "cmd": "clear:flash", "point": true},
 				{"key": "3", "label": "That building, frag first", "cmd": "clear:frag", "point": true},
 				{"key": "4", "label": "That building, blow a way in (charge)", "cmd": "clear:charge", "point": true},
 				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
 				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
 				{"key": "7", "label": "That building, on me (they stack, you lead in)", "cmd": "clear:onme", "point": true},
+				## Captain, 2026-10-20: breachers (Squad.breach_plan): the breacher kicks it in or
+				## shotguns the hinge (the first in the stack, with no breacher), or eases it open.
+				{"key": "8", "label": "That building, kick it in", "cmd": "clear:kick", "point": true},
+				{"key": "9", "label": "That building, shotgun the door", "cmd": "clear:shotgun", "point": true},
+				{"key": "0", "label": "That building, quietly (eased open, no bang)", "cmd": "clear:open", "point": true},
 			]},
 			## Captain, 2026-10-17: a squad he leads no longer flanks or assaults on its own.
 			{"key": "0", "label": "Attack", "items": [
@@ -168,6 +173,18 @@ const MENU := {
 				{"key": "3", "label": "Blue", "select": "color:blue"},
 				{"key": "4", "label": "Yellow", "select": "color:yellow"},
 			]},
+			{"key": "6", "label": "Assign role", "items": [  # Captain, 2026-10-20: breacher roles (Squad.assign_role; the kit stays)
+				{"key": "1", "label": "Breacher", "cmd": "role:breacher"},
+				{"key": "2", "label": "Team Leader", "cmd": "role:team_leader"},
+				{"key": "3", "label": "Medic", "cmd": "role:medic"},
+				{"key": "4", "label": "Autorifleman", "cmd": "role:autorifleman"},
+				{"key": "5", "label": "Grenadier", "cmd": "role:grenadier"},
+				{"key": "6", "label": "Marksman", "cmd": "role:marksman"},
+				{"key": "7", "label": "Rifleman", "cmd": "role:rifleman"},
+				{"key": "8", "label": "Anti-Tank", "cmd": "role:anti_tank"},
+				{"key": "9", "label": "Heavy Gunner", "cmd": "role:heavy_gunner"},
+				{"key": "0", "label": "Ammo Bearer", "cmd": "role:ammo_bearer"},
+			]},
 		]},
 		{"key": "0", "label": "Support", "items": [  # wave 5b: handlers registered with Supports
 			{"key": "1", "label": "Helicopter transport", "items": [  # V3: HeliSupports (marker = a grid on the map)
@@ -184,7 +201,41 @@ const MENU := {
 				{"key": "3", "label": "On smoke (green, yellow)", "cmd": "support:resupply:smoke"},
 				{"key": "4", "label": "Send it home", "cmd": "support:resupply:cancel"},
 			]},
-			{"key": "3", "label": "Fire support", "cmd": ""},
+			## Fire support (2026-10-20): FireSupport's fire missions and UavSupport's recon UAV. "lase":
+			## through binoculars the point is lased (FireSupport.lase_point: further, a smaller error).
+			{"key": "3", "label": "Fire support", "items": [
+				{"key": "1", "label": "Mortars: fire mission at my map marker", "cmd": "support:fire:call:mortar:marker"},
+				{"key": "2", "label": "Mortars: fire mission there", "cmd": "support:fire:call:mortar:here", "point": true, "lase": true},
+				{"key": "3", "label": "Artillery: fire mission at my map marker", "cmd": "support:fire:call:artillery:marker"},
+				{"key": "4", "label": "Artillery: fire mission there", "cmd": "support:fire:call:artillery:here", "point": true, "lase": true},
+				{"key": "5", "label": "Adjust fire", "items": [
+					{"key": "1", "label": "Add 100", "cmd": "support:fire:adjust::add 100"},
+					{"key": "2", "label": "Add 50", "cmd": "support:fire:adjust::add 50"},
+					{"key": "3", "label": "Drop 50", "cmd": "support:fire:adjust::drop 50"},
+					{"key": "4", "label": "Drop 100", "cmd": "support:fire:adjust::drop 100"},
+					{"key": "5", "label": "Left 50", "cmd": "support:fire:adjust::left 50"},
+					{"key": "6", "label": "Left 25", "cmd": "support:fire:adjust::left 25"},
+					{"key": "7", "label": "Right 25", "cmd": "support:fire:adjust::right 25"},
+					{"key": "8", "label": "Right 50", "cmd": "support:fire:adjust::right 50"},
+					{"key": "9", "label": "Repeat (another round, same aim)", "cmd": "support:fire:repeat:"},
+				]},
+				{"key": "6", "label": "Fire for effect", "items": [
+					{"key": "1", "label": "HE, 3 rounds", "cmd": "support:fire:ffe::he:3"},
+					{"key": "2", "label": "HE, 6 rounds", "cmd": "support:fire:ffe::he:6"},
+					{"key": "3", "label": "Smoke, 3 rounds", "cmd": "support:fire:ffe::smoke:3"},
+					{"key": "4", "label": "Smoke, 6 rounds", "cmd": "support:fire:ffe::smoke:6"},
+				]},
+				{"key": "7", "label": "Confirm danger close", "cmd": "support:fire:confirm:"},
+				{"key": "8", "label": "End of mission", "cmd": "support:fire:end:"},
+				{"key": "9", "label": "Fire mission panel (type corrections, grids)", "cmd": "local:fire_panel"},
+				{"key": "0", "label": "Recon UAV", "items": [
+					{"key": "1", "label": "Over my map marker", "cmd": "support:uav:marker"},
+					{"key": "2", "label": "Over there", "cmd": "support:uav:here", "point": true, "lase": true},
+					{"key": "3", "label": "Over us", "cmd": "support:uav:me"},
+					{"key": "4", "label": "Open the UAV feed", "cmd": "local:uav_feed"},
+					{"key": "5", "label": "Send it home", "cmd": "support:uav:home"},
+				]},
+			]},
 			{"key": "4", "label": "Helicopter extraction", "items": [
 				{"key": "1", "label": "At my map marker", "cmd": "support:extraction:marker"},
 				{"key": "2", "label": "There", "cmd": "support:extraction:here", "point": true},
@@ -486,13 +537,20 @@ func _pick(i: int) -> void:
 	if cmd == "radio_report":
 		_radio_report()
 		return
+	if cmd.begins_with("local:"):  # fire support's own screens (the fire mission panel, the UAV feed)
+		close()
+		FireSupport.local_command(player, cmd.trim_prefix("local:"))
+		return
 	var point := player.global_position
 	if item.get("point", false):
-		var hit: Variant = player.crosshair_ground()
+		var lased: bool = item.get("lase", false) and player.binoculars_up
+		var hit: Variant = FireSupport.lase_point(player) if lased else player.crosshair_ground()
 		if hit == null:
 			player._hud.flash("Look at a spot on the ground")
 			return
 		point = hit
+		if lased and cmd.begins_with("support:fire:"):
+			cmd += ":lased"
 	if item.get("aim", false):
 		var enemy := enemy_under_crosshair()
 		if enemy == null:

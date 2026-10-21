@@ -170,18 +170,23 @@ static func free_respawns_left(data: Dictionary) -> int:
 ##   down or dead outside the extraction point): a stand-in goes MIA like a squadmate left
 ##   behind; a main character (no recovery contract for them) still comes home, and the debrief
 ##   lists them in "players_left".
-## The dead are lost with their gear (it lies on the body in the zone); those left behind
-## alive go MIA, gear and all; those who extracted come back with what they carry, a mission
-## more experience, and any serious wounds as days to sit out. A player's outcome lands on
-## their stand-in when they had one, else on their main character. Returns the debrief:
-## {"extracted", "mia", "dead": member ids, "injured": {name: days}, "players_left": player
-## keys, "respawns_used", "respawns_bought", "zone_id", "zone_kind"}. The deployment is cleared.
+## The dead are lost with their gear (it lies on the body in the zone). A KILLED outcome's
+## "tags" (default true) says whether his tags or his body came out (Fallen): with them he's
+## killed in action and on the memorial wall, without them he's missing ("mia" and "presumed").
+## Those left behind alive go MIA, gear and all; those who extracted come back with what they
+## carry, a mission more experience, and any serious wounds as days to sit out. A player's
+## outcome lands on their stand-in when they had one, else on their main character. Returns the
+## debrief: {"extracted", "mia", "dead", "presumed" (killed, tags not out: also in "mia"): member
+## ids, "injured": {name: days}, "players_left": player keys, "respawns_used", "respawns_bought",
+## "zone_id", "zone_kind"}. The deployment is cleared.
 static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGenerator, day: int) -> Dictionary:
 	var dep := active(data)
-	var report := {"extracted": [], "mia": [], "dead": [], "injured": {}, "players_left": [], "respawns_used": int(dep.get("respawns_used", 0)),
+	var report := {"extracted": [], "mia": [], "dead": [], "presumed": [], "injured": {}, "players_left": [], "respawns_used": int(dep.get("respawns_used", 0)),
 		"respawns_bought": int(dep.get("respawns_bought", 0)), "zone_id": String(dep.get("zone_id", "")),
 		"zone_kind": String(dep.get("zone_kind", CONTRACT))}
 	var what := "a raid" if report.zone_kind == RAID else "a %s zone" % ("hot" if report.zone_kind == HOT else "contract")
+	var job: Dictionary = dep.get("contract", {})
+	var contract := String(job.get("title", job.get("name", "")))
 	var member_outcomes: Dictionary = outcomes.get("members", {})
 	for mid: String in member_outcomes:
 		var m := Roster.get_member(data, mid)
@@ -190,11 +195,13 @@ static func resolve(data: Dictionary, outcomes: Dictionary, rng: RandomNumberGen
 		var o: Dictionary = member_outcomes[mid]
 		match String(o.get("state", EXTRACTED)):
 			KILLED:
-				m["status"] = Roster.DEAD
-				m["gear"] = {}
-				m["sit_out_days"] = 0
-				Roster.add_history(m, day, "Killed in action in %s" % report.zone_id)
-				report.dead.append(mid)
+				# His tags (or his body) came out: killed in action, on the memorial wall. Without
+				# them he is missing (Fallen.fell): no recovery contract, declared dead later.
+				if Fallen.fell(data, m, bool(o.get("tags", true)), {"day": day, "zone": String(o.get("zone_id", report.zone_id)), "contract": contract}):
+					report.dead.append(mid)
+				else:
+					report.mia.append(mid)
+					report.presumed.append(mid)
 			LEFT_BEHIND:
 				m["status"] = Roster.MIA
 				m["gear"] = Roster.json_safe(o.get("gear", m.gear))
@@ -256,8 +263,8 @@ static func _came_back(m: Dictionary, o: Dictionary, rng: RandomNumberGenerator,
 ## through BaseHub): back on the books with whatever they had, and wounds to recover from.
 static func recovered(data: Dictionary, mid: String, day: int, sit_out_days := 0) -> bool:
 	var m := Roster.get_member(data, mid)
-	if m.is_empty() or String(m.status) != Roster.MIA:
-		return false
+	if m.is_empty() or String(m.status) != Roster.MIA or Fallen.presumed(m):
+		return false  # (one who fell comes home only as his tags: Fallen.tags_home)
 	m["status"] = Roster.READY
 	m.erase("mia_zone")
 	m.erase("mia_pos")
@@ -266,7 +273,8 @@ static func recovered(data: Dictionary, mid: String, day: int, sit_out_days := 0
 	return true
 
 
-## A recovery failed or lapsed: the MIA member is written off (gear and all).
+## A recovery failed or lapsed: the MIA member is written off (gear and all), and goes on the
+## memorial wall as missing (Fallen.written_off).
 static func written_off(data: Dictionary, mid: String, day: int) -> bool:
 	var m := Roster.get_member(data, mid)
 	if m.is_empty() or String(m.status) != Roster.MIA:
@@ -274,4 +282,5 @@ static func written_off(data: Dictionary, mid: String, day: int) -> bool:
 	m["status"] = Roster.DEAD
 	m["gear"] = {}
 	Roster.add_history(m, day, "Written off: never recovered")
+	Fallen.written_off(data, m, day)
 	return true

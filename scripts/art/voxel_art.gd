@@ -41,20 +41,24 @@ enum C {
 	# Inside a body (BodyDeform: crater walls and stumps go skin, then fat, flesh, bone) and
 	# what a blast leaves on it (charred).
 	FLESH, FAT, BONE, BONE_SHADE, CHAR, CHAR_DARK,
+	LACE, SOLE_LIGHT,  # bootlaces; a sneaker's light sole and laces (Feet)
 }
 
 const VARIANTS := {
 	"multicam": {
 		"camo": ["a39a72", "6e7454", "7d6447", "4a4334"], "skin": "c8996f", "hair": "3b2a1d",
 		"patch": "3b4a6b", "gear": "8a7a58", "pack": "7a6c4e",
+		"boot": "7a6447",  # boots (Feet)
 	},
 	"woodland": {
 		"camo": ["5f6b42", "3f4a2e", "6b5236", "262420"], "skin": "8d5b3e", "hair": "1d1612",
 		"patch": "2f3a24", "gear": "4f5a3a", "pack": "48523a",
+		"boot": "26231f",  # boots (Feet)
 	},
 	"desert": {
 		"camo": ["c2ab7f", "a68b5f", "d6c49b", "8a7353"], "skin": "e0b48f", "hair": "6b4a2b",
 		"patch": "7a3b2e", "gear": "b29c74", "pack": "a38e68",
+		"boot": "8a7353",  # boots (Feet)
 	},
 	"urban": {
 		# Black Ridge Militia (Captain, 2026-10-17: "give the militia we typically face early game
@@ -75,12 +79,14 @@ const VARIANTS := {
 	"black": {
 		"camo": ["1a1a1a", "141414", "202020", "0d0d0d"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "5c1f1f", "gear": "232323", "pack": "1f1f1f",
+		"boot": "1c1c1c",  # boots (Feet)
 	},
 	## The Ashen Banner's foreign fighters (terror groups, docs/terror_groups.md 2.1): charcoal and
 	## black with sand, a red patch; its local men wear plain dark clothes (Kits.variant).
 	"banner": {
 		"camo": ["2e2e2c", "1c1c1b", "4a4438", "8a7a5c"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "c8281e", "gear": "2b2a27", "pack": "3a3530",
+		"feet": "sneakers", "boot": "3b3b3d",  # trainers (Feet)
 	},
 	## The Highland Free Front (docs/terror_groups.md 6): moorland smocks, slate and heather over
 	## old woodland surplus, an orange patch.
@@ -92,6 +98,7 @@ const VARIANTS := {
 	"tan": {
 		"camo": ["c9ba9c", "bfae8e", "d9ccae", "a89470"], "skin": "c8996f", "hair": "3b2a1d",
 		"patch": "3b4a6b", "gear": "a8977a", "pack": "9c8a68",
+		"boot": "7a6447",  # boots (Feet)
 	},
 }
 ## Plain clothes (civilians, HVTs and hostages: PersonLook.outfit) instead of a uniform:
@@ -256,7 +263,8 @@ static func hand_points(model: String) -> Dictionary:
 			support = Vector3(1.5, (3.5 if _rifle_style(model) == "smg_pdw" else 6.0) + RIFLE_BELOW, maxf(_z_at(model, forend), n - 26.0))
 		"rifle" when _rifle_style(model) in SHOTGUN_STYLES:
 			# The straight wrist of the stock (an M1014's pistol grip); the pump, as far out as the arm reaches.
-			grip = Vector3(1.5, (4.0 if _rifle_style(model) == "shotgun_auto" else 6.0) + RIFLE_BELOW, _z_at(model, 0.76))
+			var auto := _rifle_style(model) == "shotgun_auto"
+			grip = Vector3(1.5, (4.0 if auto else 6.0) + RIFLE_BELOW, _z_at(model, 0.73 if auto else 0.76))
 			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
 		"rifle":
 			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip
@@ -455,8 +463,14 @@ const WARM_HANDS := [[&"relaxed", false], [&"relaxed", true], [&"grip", false], 
 static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	var out: Array = []
 	for part in BODY_PARTS:
-		if part != "forearm" and part != "head":  # (each person's own head builds with his face: FaceRig)
+		if part != "forearm" and part != "head" and part != "shin":  # (each person's own head builds with his face: FaceRig)
 			out.append([body_part(part, body), variant])
+	# The shin and feet in this scheme's footwear (Feet): flat and with the toes bent, each side.
+	var style := Feet.style_of(variant)
+	out.append([Feet.shin_model(style, body), variant])
+	for left in [true, false]:
+		for toes in [false, true]:
+			out.append([Feet.model(style, left, toes, body), variant])
 	# The forearms in the poses a soldier is drawn in most (HandPose): relaxed, the firing grip
 	# and the support grip, a magazine, holding something.
 	var bare := hands_bare(variant)
@@ -766,6 +780,8 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.BRASS: Color("a8873f"),
 			C.GLOVE_PAD: Color(v.get("glove", "2f2f2a")).lightened(0.14),
 			C.NAIL: skin.lerp(Color("e9c9bd"), 0.55),
+			C.LACE: Color(v.get("boot", "3a3027")).darkened(0.35),
+			C.SOLE_LIGHT: Color("d8d4c8"),
 			C.STUBBLE: skin.lerp(Color(v.hair), 0.38), C.EYE_WHITE: Color("e2dcd0").lerp(skin, 0.12),
 			C.IRIS: Color(v.get("eye", "4a3020")), C.PUPIL: Color("0d0b0a"), C.LASH: Color(v.hair).darkened(0.35).lerp(Color("141010"), 0.5),
 			C.TEETH: Color("e0d8c4"),
@@ -811,7 +827,8 @@ static func _spec(model: String) -> Dictionary:
 		"forearm": return _forearm(model)
 		"leg": return _leg()
 		"thigh": return _thigh()
-		"shin": return _shin()
+		"shin": return Feet.shin_spec(StringName(model.get_slice(":", 1)), false) if model.contains(":") else _shin()
+		"foot": return Feet.foot_spec(model, false)
 		"vest": return _vest(arg)
 		"vest_f": return _vest(arg, _torso_f(true), true)
 		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
@@ -832,7 +849,8 @@ static func _spec(model: String) -> Dictionary:
 				"chassis_bolt": out = _rifle_chassis_bolt(arg, art)
 				"smg", "smg_sd", "smg_box": out = _rifle_smg(arg, art, _rifle_style(model))
 				"smg_pdw", "smg_grip": out = _rifle_smg_grip(arg, art, _rifle_style(model) == "smg_pdw")
-				"shotgun", "shotgun_tac", "shotgun_auto": out = _rifle_shotgun(arg, art, _rifle_style(model))
+				"shotgun", "shotgun_tac": out = _rifle_shotgun(arg, art, _rifle_style(model))
+				"shotgun_auto": out = _rifle_m1014(arg, art)
 				_: out = _rifle(arg, art)
 			if _rifle_suppressed(model):
 				out = _with_suppressor(out)
@@ -846,7 +864,8 @@ static func _spec(model: String) -> Dictionary:
 		"forearm_f": return _forearm(model, true)
 		"leg_f": return _leg_f()
 		"thigh_f": return _thigh_f()
-		"shin_f": return _shin_f()
+		"shin_f": return Feet.shin_spec(StringName(model.get_slice(":", 1)), true) if model.contains(":") else _shin_f()
+		"foot_f": return Feet.foot_spec(model, true)
 	push_error("VoxelArt: unknown model '%s'" % model)
 	return {"size": Vector3i.ONE, "boxes": []}
 
@@ -1473,7 +1492,7 @@ static func reload_points(model: String) -> Dictionary:
 				out["bolt"] = Vector3(1.5, 10.25 + b, z.call(0.53))       # the cocking knob, on the top cover
 				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
 			"shotgun", "shotgun_tac": out["bolt"] = Vector3(1.5, 6.25 + b, z.call(0.42))  # under the pump
-			"shotgun_auto": out["bolt"] = Vector3(2.6, 8.0 + b, z.call(0.58))         # the charging handle, right
+			"shotgun_auto": out["bolt"] = Vector3(2.75, 8.4 + b, z.call(0.565))       # the bolt handle's knob, right
 			_:  # the AR family: the bolt catch paddle on the left behind the well, the T-handle at the back
 				out["catch"] = Vector3(0.5, 6.5 + b, z.call(0.5875))
 				out["bolt"] = Vector3(1.5, 9.3 + b, z.call(0.765))
@@ -2467,54 +2486,42 @@ static func _rifle_smg_grip(length: int, art := IRONS, pdw := false) -> Dictiona
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
-## A 12-gauge shotgun, learned from the real guns: a fat barrel with its magazine tube under it
-## (no magazine well: shells go in through the receiver, Reloads.BOLT), a tall flat-sided receiver
-## with a rail for the ghost ring rear sight, and a cross-bolt safety. "shotgun" a Remington 870
-## (wooden pump and straight stock), "shotgun_tac" a Mossberg 590 (synthetic furniture, a vented
-## heat shield over the barrel), both racked by the pump (BOLT_TAG, with the bolt in the port) and
-## held at the stock's wrist; "shotgun_auto" a Benelli M1014 (a fixed forend, the charging
-## handle on the right, a pistol grip and a collapsible stock on its tube).
+## A 12-gauge pump shotgun, learned from the real guns: a fat barrel with its magazine tube under
+## it (no magazine well: shells go in through the receiver, Reloads.BOLT), a tall flat-sided
+## receiver with a rail for the ghost ring rear sight, the bright bolt in the ejection port, and a
+## cross-bolt safety, racked by the pump (BOLT_TAG, with the bolt) and held at the stock's wrist:
+## "shotgun" a Remington 870 (blued steel, wooden pump and straight stock), "shotgun_tac" a
+## Mossberg 590 (black synthetic furniture, a vented heat shield over the barrel).
 static func _rifle_shotgun(length: int, art := IRONS, kind := "shotgun") -> Dictionary:
 	var n := maxi(length, 30)
 	var f := func(t: float) -> float: return n * t
-	var auto := kind == "shotgun_auto"
-	var furniture := C.WOOD if kind == "shotgun" else C.GUN_LIGHT
+	# The 590's furniture is black (Captain, v0.5.0: the M1014 read grey; GUN_LIGHT has a warm cast).
+	var furniture := C.WOOD if kind == "shotgun" else C.GUN
 	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 8.75)
 	var boxes := sight + [
 		_fb(1.0, 8.0, 0, 2.0, 9.0, f.call(0.53), C.GUN),                        # barrel, 2 cm across, on into the receiver
 		_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                           # its bore
 		_fb(1.25, 9.0, f.call(0.13), 1.75, 9.75, f.call(0.13) + 0.5, C.GUN),    # the front sight's base
 		_fb(1.0, 7.0, f.call(0.05), 2.0, 8.0, f.call(0.53), C.GUN),             # magazine tube, under the barrel
-		_fb(0.75, 6.75, f.call(0.035), 2.25, 8.25, f.call(0.06), C.GUN_LIGHT),  # its cap, clamping the barrel's ring
+		_fb(0.75, 6.75, f.call(0.035), 2.25, 8.25, f.call(0.06), C.GUN),        # its cap, clamping the barrel's ring
 		_fb(0.75, 5.75, f.call(0.52), 2.25, 9.6, f.call(0.73), C.GUN),          # receiver: tall and flat-sided
 		_fb(1.0, 9.6, f.call(0.52), 2.0, 9.95, f.call(0.73), C.GUN),            # its rail (the ghost ring, or an optic)
 		_fb(1.0, 5.75, f.call(0.55), 2.0, 6.25, f.call(0.63), C.EMPTY),         # loading port, underneath
 		_fb(1.75, 7.75, f.call(0.56), 2.25, 9.0, f.call(0.64), C.EMPTY),        # ejection port, right
-		_fbt(1.75, 7.75, f.call(0.56), 2.0, 9.0, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # the bolt in it, back with the action
+		_fbt(1.75, 7.75, f.call(0.56), 2.0, 9.0, f.call(0.6), C.METAL, BOLT_TAG),  # the bolt in it, back with the action
 		_fb(0.85, 5.0, f.call(0.6), 2.15, 5.75, f.call(0.72), C.GUN),           # trigger plate
 		_fb(1.25, 4.0, f.call(0.62), 1.75, 5.0, f.call(0.635), C.GUN),          # trigger guard: its front
 		_fb(1.25, 4.0, f.call(0.62), 1.75, 4.4, f.call(0.7), C.GUN),            # its bottom
-		_fb(1.25, 4.4, f.call(0.645), 1.75, 5.0, f.call(0.66), C.GUN_LIGHT),    # trigger
-		_fb(0.5, 5.25, f.call(0.69), 2.5, 5.75, f.call(0.71), C.GUN_LIGHT),     # cross-bolt safety, through the plate
+		_fb(1.25, 4.4, f.call(0.645), 1.75, 5.0, f.call(0.66), C.GUN),          # trigger
+		_fb(0.5, 5.25, f.call(0.69), 2.5, 5.75, f.call(0.71), C.GUN),           # cross-bolt safety, through the plate
 	]
-	if auto:
-		boxes += [
-			_fb(0.6, 6.25, f.call(0.3), 2.4, 8.5, f.call(0.5), C.GUN_LIGHT),   # fixed forend
-			_fbt(2.0, 7.75, f.call(0.57), 2.75, 8.25, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # charging handle, right, off the bolt in the port
-			_fb(0.9, 4.25, f.call(0.72), 2.1, 5.75, f.call(0.77), C.GUN),       # pistol grip, raked back
-			_fb(0.9, 2.75, f.call(0.735), 2.1, 4.25, f.call(0.785), C.GUN),
-			_fb(0.9, 1.25, f.call(0.75), 2.1, 2.75, f.call(0.8), C.GUN),
-			_fb(1.1, 7.25, f.call(0.72), 1.9, 8.75, f.call(0.9), C.GUN_LIGHT),  # stock tube
-			_fb(0.85, 6.0, f.call(0.82), 2.15, 9.0, n, C.GUN),                  # collapsible stock
-			_fb(0.85, 4.5, n - 0.5, 2.15, 9.25, n, C.GUN),                      # butt pad
-		]
-		return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
-	# The pump (BOLT_TAG): round the tube, racked back to the receiver; grooves round it.
+	# The pump (BOLT_TAG): round the tube, racked back to the receiver; the 870's grooves round it.
 	boxes.append(_fbt(0.6, 6.25, f.call(0.34), 2.4, 8.25, f.call(0.5), furniture, BOLT_TAG))
-	for k in 4:
-		var z: float = f.call(0.36) + k * n * 0.035
-		boxes.append([Vector3(0.6, 6.25, z), Vector3(2.4, 8.25, z + 0.5), C.WOOD_DARK if kind == "shotgun" else C.GUN, true, BOLT_TAG])
-	if kind == "shotgun_tac":
+	if kind == "shotgun":
+		for k in 4:
+			var z: float = f.call(0.36) + k * n * 0.035
+			boxes.append([Vector3(0.6, 6.25, z), Vector3(2.4, 8.25, z + 0.5), C.WOOD_DARK, true, BOLT_TAG])
+	else:
 		boxes.append(_fb(0.75, 8.75, f.call(0.18), 2.25, 9.5, f.call(0.32), C.GUN))  # heat shield over the barrel
 		var z: float = f.call(0.19)
 		while z < f.call(0.31):
@@ -2526,6 +2533,89 @@ static func _rifle_shotgun(length: int, art := IRONS, kind := "shotgun") -> Dict
 		_fb(0.8, 3.0, f.call(0.9), 2.2, 9.25, n - 0.75, furniture),
 		_fb(0.75, 2.75, n - 0.75, 2.25, 9.5, n, C.GUN),                          # recoil pad
 	]
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A Benelli M1014 ("shotgun_auto"; Captain, v0.5.0: "the m1014 is the wrong color and doesnt
+## look right"), learned from the real gun. All matte black (C.GUN: the old cut's forend, stock
+## tube and handle were GUN_LIGHT, which reads grey-tan in daylight), but the bright bolt and the
+## carrier in the ports. 1.01 m with its stock out: a slim 47 cm barrel with the front blade in its
+## protective wings near the muzzle; the extended magazine tube under it to 2.5 cm short of the
+## muzzle, held by the barrel clamp with its sling loop; a slim forend over the gas pistons, a
+## groove along each side; the alloy receiver with its Picatinny rail and the ghost ring rear
+## sight in its protective ears at the back; the ejection port on the right, the bolt and its
+## handle in it (BOLT_TAG: drawn back to load an empty gun); the bolt release button ahead of it;
+## the loading port underneath with the carrier and the shell latch in it; the trigger group with
+## the cross-bolt safety at the guard's back; a pistol grip, and the telescoping stock out on its
+## tube, a cheek riser on it. The grip and support points: hand_points.
+static func _rifle_m1014(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 30)
+	var f := func(t: float) -> float: return n * t
+	var rear := sight_back(IRONS, n)
+	var sight: Array
+	if art == IRONS:
+		sight = [
+			_fb(1.25, 9.5, 2.0, 1.75, OPTIC_AXIS_Y, 2.5, C.GUN),               # front blade, its tip on the sight line
+			_fb(0.75, 9.5, 1.75, 1.0, 11.5, 2.75, C.GUN),                    # its protective wings
+			_fb(2.0, 9.5, 1.75, 2.25, 11.5, 2.75, C.GUN),
+			# The ghost ring: a thin ring round a wide hole centred on the sight line, on a base
+			# clamped to the rail, between tall protective ears.
+			_fb(0.25, RAIL_Y, rear - 0.75, 2.75, 11.0, rear + 0.25, C.GUN),
+			_fb(0.75, 11.0, rear - 0.25, 1.0, 12.75, rear + 0.25, C.GUN),
+			_fb(2.0, 11.0, rear - 0.25, 2.25, 12.75, rear + 0.25, C.GUN),
+			_fb(0.75, 12.5, rear - 0.25, 2.25, 12.75, rear + 0.25, C.GUN),     # (hole 1.0-2.0 x 11.0-12.5)
+			_fb(0.25, 11.0, rear - 0.75, 0.5, 13.0, rear + 0.25, C.GUN),       # the ears
+			_fb(2.5, 11.0, rear - 0.75, 2.75, 13.0, rear + 0.25, C.GUN),
+		]
+	else:
+		sight = optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 8.75)
+	var boxes := sight + [
+		_fb(1.0, 8.0, 0, 2.0, 9.0, f.call(0.48), C.GUN),                        # slim barrel, on into the receiver
+		_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                           # its bore
+		_fb(0.75, 9.0, 1.5, 2.25, 9.5, 3.0, C.GUN),                             # the front sight's base, on the barrel
+		_fb(1.0, 6.75, 1.25, 2.0, 7.75, f.call(0.47), C.GUN),                   # extended magazine tube, nearly to the muzzle,
+		_fb(1.25, 7.0, 0.75, 1.75, 7.5, 1.25, C.GUN),                           # (its cap's nub) a hair under the barrel: two tubes
+		_fb(0.75, 6.75, 3.5, 2.25, 9.25, 4.25, C.GUN),                          # barrel clamp, round barrel and tube
+		_fb(0.75, 5.75, 3.5, 1.0, 6.75, 4.0, C.GUN),                            # its sling loop
+		_fb(2.0, 5.75, 3.5, 2.25, 6.75, 4.0, C.GUN),
+		_fb(0.75, 5.75, 3.5, 2.25, 6.0, 4.0, C.GUN),
+		# The forend, over the tube and the gas pistons, up to the barrel's middle.
+		_fb(0.75, 6.5, f.call(0.24), 2.25, 8.0, f.call(0.25), C.GUN),
+		_fb(0.6, 6.25, f.call(0.25), 2.4, 8.25, f.call(0.47), C.GUN),
+		_fb(0.75, 8.25, f.call(0.26), 2.25, 8.5, f.call(0.47), C.GUN),
+		_fb(0.6, 7.0, f.call(0.28), 0.75, 7.25, f.call(0.44), C.EMPTY),         # its grooves, left
+		_fb(2.25, 7.0, f.call(0.28), 2.4, 7.25, f.call(0.44), C.EMPTY),         # and right
+		_fb(0.75, 5.75, f.call(0.47), 2.25, 9.6, f.call(0.72), C.GUN),          # receiver
+		_fb(1.0, 9.6, f.call(0.48), 2.0, 9.95, f.call(0.72), C.GUN),            # its Picatinny rail
+		_fb(1.75, 7.75, f.call(0.53), 2.25, 9.25, f.call(0.61), C.EMPTY),       # ejection port, right
+		_fbt(1.75, 7.75, f.call(0.53), 2.0, 9.25, f.call(0.58), C.METAL, BOLT_TAG),  # the bolt in it
+		_fbt(2.0, 8.0, f.call(0.555), 2.5, 8.75, f.call(0.575), C.GUN, BOLT_TAG),    # its handle, out to the right
+		_fbt(2.5, 7.75, f.call(0.55), 3.0, 9.0, f.call(0.58), C.GUN, BOLT_TAG),      # and the handle's knob
+		_fb(2.25, 6.75, f.call(0.5), 2.5, 7.5, f.call(0.52), C.GUN),            # bolt release button, ahead of the port
+		_fb(1.0, 5.75, f.call(0.5), 2.0, 6.75, f.call(0.6), C.EMPTY),           # loading port, underneath
+		_fb(1.0, 6.5, f.call(0.51), 2.0, 6.75, f.call(0.6), C.METAL),           # the carrier, up in it
+		_fb(1.0, 6.0, f.call(0.5), 1.25, 6.5, f.call(0.53), C.METAL),           # the shell latch, at its front left
+		_fb(0.85, 5.0, f.call(0.6), 2.15, 5.75, f.call(0.7), C.GUN),            # trigger group
+		_fb(1.25, 4.0, f.call(0.6), 1.75, 5.0, f.call(0.615), C.GUN),           # trigger guard: its front
+		_fb(1.25, 4.0, f.call(0.6), 1.75, 4.4, f.call(0.69), C.GUN),            # its bottom
+		_fb(1.25, 4.4, f.call(0.625), 1.75, 5.0, f.call(0.64), C.GUN),          # trigger
+		_fb(0.5, 5.0, f.call(0.67), 2.5, 5.5, f.call(0.69), C.GUN),             # cross-bolt safety, at the guard's back
+		_fb(0.9, 4.25, f.call(0.69), 2.1, 5.75, f.call(0.75), C.GUN),           # pistol grip, raked back
+		_fb(0.9, 2.75, f.call(0.705), 2.1, 4.25, f.call(0.765), C.GUN),
+		_fb(0.9, 1.25, f.call(0.72), 2.1, 2.75, f.call(0.78), C.GUN),
+		_fb(0.85, 1.0, f.call(0.72), 2.15, 1.25, f.call(0.785), C.GUN),         # its cap
+		_fb(1.1, 7.0, f.call(0.72), 1.9, 8.5, f.call(0.84), C.GUN),             # stock tube, out from the receiver
+		_fb(1.25, 6.5, f.call(0.79), 1.75, 7.0, f.call(0.82), C.GUN),           # the stock's release lever, under it
+		_fb(0.85, 6.0, f.call(0.8), 2.15, 9.25, f.call(0.86), C.GUN),           # telescoping stock: its nose round the tube,
+		_fb(0.85, 5.0, f.call(0.86), 2.15, 9.25, f.call(0.93), C.GUN),          # deepening to the butt
+		_fb(0.85, 4.0, f.call(0.93), 2.15, 9.25, n - 0.75, C.GUN),
+		_fb(0.85, 9.25, f.call(0.84), 2.15, 9.75, f.call(0.95), C.GUN),         # cheek riser
+		_fb(0.75, 3.75, n - 0.75, 2.25, 9.5, n, C.GUN),                         # recoil pad
+	]
+	var z: float = f.call(0.49)
+	while z < f.call(0.69):  # the rail's slots
+		boxes.append(_fb(1.0, 9.75, z, 2.0, 10.0, z + 0.25, C.EMPTY))
+		z += 1.0
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 

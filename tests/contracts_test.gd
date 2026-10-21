@@ -61,6 +61,7 @@ func _ready() -> void:
 	_test_shop()
 	_test_intel_and_salvage()
 	_test_set_down_at_the_point()
+	_test_death_benefit()
 	await _test_board_ui()
 	await _test_debrief_screen()
 	$Main/Menu.host()
@@ -145,9 +146,9 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 13 and seen.has("supply_line") and seen.has("manhunt") and seen.has("convoy_chase") and seen.has("psd_escort") and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+	check(seen.keys().size() == 14 and seen.has("forward_observer") and seen.has("supply_line") and seen.has("manhunt") and seen.has("convoy_chase") and seen.has("psd_escort") and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
 		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
-		"Captain's first four mission types, the five of mission variety, the client escort, the supply line, the manhunt and the convoy chase come up (%s)" % [seen.keys()])
+		"Captain's first four mission types, the five of mission variety, the client escort, the supply line, the manhunt, the convoy chase and the forward observer come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
@@ -175,7 +176,7 @@ func _test_variety_board() -> void:
 	var five: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2026
-	var n := 650
+	var n := 1300  # (a 14th board type, the forward observer: more offers for sabotage's rarer radio mast)
 	var count := {}
 	var zone_kinds := {}
 	var targets := {}
@@ -1351,6 +1352,43 @@ func _test_set_down_at_the_point() -> void:
 	d = Contracts.server_end_deployment({"items": [{"id": "m4a1", "count": 1}], "bank": [{"id": "rounds_556", "count": 30}], "extracted": ["You"]})
 	check(d.contracts[0].outcome == "failed", "extracting without the intel is still a failure (%s)" % d.contracts[0].outcome)
 	Contracts.server_finish_debrief()
+
+
+## The death benefit in a campaign (cghath's list, 2026-10-20; Fallen): each man's is paid when
+## his death is confirmed (BaseHub.server_pay_death_benefit: his tags came out), during the run,
+## so the debrief lists it as a line of its own and doesn't charge it again; the books call it a
+## death benefit. A report without the roster (the board alone) still counts the dead.
+func _test_death_benefit() -> void:
+	print("The death benefit: once per man, a line of its own in the debrief")
+	Contracts.new_full_campaign(63, 100000)
+	Economy.take_unbanked()
+	Economy.take_run_expenses()
+	var benefit := Prices.operations("kia_benefit")
+	var cid := _make_offer("intel_grab", "harbour_yard")
+	Contracts.server_accept(cid, ContractGen.default_terms())
+	Contracts.server_start_deployment([cid])
+	var cash := Economy.cash()
+	Economy.charge_run(benefit, "Death benefit: Reaper (killed in action, tags recovered)")
+	check(Economy.cash() == cash - benefit and Economy.ledger_kind(String(Economy.ledger()[-1].what)) == "Death benefits",
+		"paid when his tags came out: -$%s, in the books as a death benefit" % DebriefCalc.money(benefit))
+	var casualties := [{"name": "Okafor", "status": "kia", "injury": "killed, tags recovered", "tags": Fallen.RECOVERED},
+		{"name": "Brandt", "status": "mia", "injury": "fell, tags not brought out", "tags": Fallen.MISSING}]
+	var d := Contracts.server_end_deployment({"items": [], "extracted": ["You"], "casualties": casualties, "benefits_paid": true})
+	var lines: Array = (d.get("expenses", []) as Array).filter(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit"))
+	check(lines.size() == 1 and int(lines[0].amount) == benefit and not bool(lines[0].charge) and String(lines[0].what).contains("Reaper"),
+		"the debrief lists it once, as its own line, already paid (%s)" % [lines])
+	check(Array(DebriefCalc.summary(d)).has("Expense: Death benefit: Reaper (killed in action, tags recovered): -$%s" % DebriefCalc.money(benefit)),
+		"and the debrief's lines say so")
+	check(_ledger_count("Death benefit") == 1, "one death benefit in the books after the debrief, not two")
+	Contracts.server_finish_debrief()
+	var counted := DebriefCalc.expenses({"casualties": [{"name": "D", "status": "kia"}, {"name": "E", "status": "kia"}]}, 1, [])
+	var counted_lines: Array = (counted.lines as Array).filter(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit"))
+	check(counted_lines.size() == 1 and String(counted_lines[0].what) == "Death benefit (2 KIA)" and int(counted_lines[0].amount) == 2 * benefit and bool(counted_lines[0].charge),
+		"without the roster's word the dead are counted, charged at the debrief (%s)" % [counted_lines])
+
+
+func _ledger_count(prefix: String) -> int:
+	return Economy.ledger().filter(func(e: Dictionary) -> bool: return String(e.get("what", "")).begins_with(prefix)).size()
 
 
 ## One entry per "carry it out" objective of contract `cid`: its item, as the mission placed it.
