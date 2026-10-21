@@ -30,6 +30,15 @@ const PLATE_HEIGHT := 0.33
 const SIDE_PLATE_HEIGHT := 0.28
 ## Where a helmet's pivot (the centre of its dome base) sits, head-local.
 const HELMET_POSITION := Vector3(0, 0.2, 0)
+## Helmets fitted to the heads (FaceArt; Captain, 2026-10-21: "the helmets are too big now"):
+## the shells were shaped round the old, broader, flatter-faced head, so on the new ones they
+## stood 3-4 cm off at the sides. Drawn (and hit) this much narrower and shallower, the dome set
+## this far back over the skull (FaceArt's skull sits behind the old face line), they ride with
+## about 1.5-2.5 cm of pads all round, any height or build (they scale with the head). A face
+## guard's ring (LX-3) keeps its depth, round the face, and narrows less.
+const HELMET_FIT := Vector3(0.84, 1.0, 0.84)
+const HELMET_FIT_BACK := 0.016
+const HELMET_FIT_GUARD := Vector3(0.9, 1.0, 1.0)
 ## Friend or foe at a glance (Captain, 2026-10-19: "we also need an easy way to discern friendly
 ## and enemy troops in zones, enemies get orange/red armbands and dull red or roange markings on
 ## helmets, friendlies blue and green"): a cloth band round both upper arms and a mark on the
@@ -242,6 +251,19 @@ static func iff_of(faction: StringName, iff: StringName, variant: String) -> Arr
 	return []
 
 
+## A worn helmet's place on the head (head-local): HELMET_POSITION, fitted (HELMET_FIT).
+static func helmet_fit(item: ItemData) -> Transform3D:
+	if item and item.stats.get("face_guard", false):
+		return Transform3D(Basis.from_scale(HELMET_FIT_GUARD), HELMET_POSITION)
+	return Transform3D(Basis.from_scale(HELMET_FIT), HELMET_POSITION + Vector3.BACK * HELMET_FIT_BACK)
+
+
+## Whether `item` (a helmet) comes down over long hair: a heavy one's ear covers, a face guard's
+## nape guard (CharacterModel.set_hair_tucked).
+static func helmet_tucks_hair(item: ItemData) -> bool:
+	return item != null and (String(item.stats.get("tier", "")) == "heavy" or item.stats.get("face_guard", false))
+
+
 static func armor_transform(slot: StringName, carrier: ItemData) -> Transform3D:
 	var depth: float = carrier.stats.get("plate_depth", 0.14) if carrier else 0.14
 	var side: float = carrier.stats.get("side_plate_x", 0.245) if carrier else 0.245
@@ -364,13 +386,15 @@ func _rebuild() -> void:
 				_mark_helmet(piece)
 			_chip_counts[slot] = 0
 		if piece:
-			piece.transform = armor_transform(slot, carrier)
+			piece.transform = armor_transform(slot, carrier) if slot != &"helmet" else helmet_fit(piece.item)
 			if slot != &"helmet":
 				piece.transform = carrier_fit(String(slot).trim_prefix("plate_")) * piece.transform
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
 			elif piece.item.stats.get("faction_color", false):
 				piece.set_cover(faction_armor_color())  # a helmet with "faction_color" (Ballistic/Bump/Heavy/LX-3) shows the wearer's side's colour
+	var helmet: VoxelArmor = _armor.get(&"helmet")
+	model.set_hair_tucked(helmet != null and helmet_tucks_hair(helmet.item))
 	for slot: StringName in MOUNTS:
 		_set_gear(slot, inventory.slots[slot], &"torso", rest_transform(slot), inventory.state_of(slot))
 	_fit_front_panel(carrier)

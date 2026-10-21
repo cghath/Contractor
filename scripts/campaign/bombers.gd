@@ -18,7 +18,9 @@ const MIN_TIER := 2
 const GAP_S := 600.0
 const SEND_M := [150.0, 250.0]
 const CHANCE_PER_CHECK := 0.1
-const CHECK_S := 30.0
+## How often the dice are rolled (Captain, 2026-10-20: 10% every 3 minutes or so is more balanced;
+## it was every 30 s): about one bomber per half hour once the conditions hold, GAP_S apart at most.
+const CHECK_S := 180.0
 const KIT: Array[String] = ["plate_carrier_heavy", "assault_pack"]
 ## VBIEDs (wave 6f): a technical (VBIED_MODEL) with one driver drives at the nearest of the squad
 ## and goes off within VBIED_TRIGGER_M, a bigger blast (VBIED_BLAST_M carve and VBIED_FRAGS frag
@@ -31,6 +33,9 @@ const VBIED_FRAGS := 3
 const VBIED_SPEED_KMH := 55.0
 const VBIED_SHARE := 0.3
 
+## Tests and dev tools: false stops the random sends (_maybe_send); server_send and
+## server_send_vbied still work, and those out still walk and go off.
+static var enabled := true
 ## Host: bombers out: {"soldier", "squad"}; and how many went off (tests, the session log).
 var out: Array[Dictionary] = []
 ## VBIEDs out: {"vehicle", "driver"}.
@@ -207,6 +212,8 @@ func _go_off(b: Dictionary) -> void:
 ## Host, every CHECK_S: maybe a bomber, when the zone's enemy is a faction that sends them
 ## (Kits.sends_bombers) and has been pushed (tier) or is hunting the squad.
 func _maybe_send() -> void:
+	if not enabled:
+		return
 	var response := get_parent().get_node_or_null(^"EnemyResponse") as EnemyResponse
 	var pressure := get_parent().get_node_or_null(^"Pressure") as Pressure
 	if response == null or not Kits.sends_bombers(String(response.enemy_faction)):  # (Captain 2026-10-20: the Banner and the Shura)

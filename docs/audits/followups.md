@@ -16,6 +16,12 @@ doctrine numbers), so Captain's side hasn't changed them.
 
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 | F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
+| F-130 | P2 | The AI grenadier carries the M320 and 40 mm grenades but never fires or loads it |
+| F-131 | P3 | An AI soldier with a shotgun counts its loose shells as no spare ammo (reload, ammo-low, scavenging) |
+| F-160 | P3 | Dog tags have no worn model: a chain and tags on the neck while `Soldier.dog_tags` is set (Captain's side: gear rig, character model) |
+| F-161 | P3 | AI squadmates never take a fallen man's dog tags (squad AI: a scavenger or bearer could) |
+| F-150 | P3 | Enemy soldiers and gunners never aim at the player's recon UAV (fire support, 2026-10-20) |
+| F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 
@@ -197,6 +203,95 @@ and five of them were touching the same StaticBody3D. It passes locally (R0314) 
 Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
 whether "ccp" finds a bearer when every squadmate is blocked on the dummies.
 
+## F-130: the AI grenadier never fires the M320
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (engagement and reload), maybe
+[tactics.gd](../../scripts/ai/tactics.gd). Found by cghath's agent on `feat/m320-shotgun`
+(2026-10-20), which built the M320 (Captain's list for cghath, "Not built yet / Weapons and
+items") and left the AI out because it's Claude's file.
+
+What happens: the grenadier's kit (data/roles.json) now puts an M320 on his M4 with eight 40 mm
+HE and two smoke grenades (Roles.give mounts it). He fights with the rifle only: nothing in
+SquadAI loads or fires the launcher. The host-side calls are ready to use: `Underbarrel.on_gun(s)`
+(has one), `Underbarrel.loaded_of(s)` / `carried_rounds(s)` / `next_round(s, id)`,
+`Underbarrel.server_reload(s, round_id)` (timed, returns the seconds or -1) and
+`Underbarrel.server_fire(s, eye, dir)` ("" when it fired). The grenade flies the launchers' flight
+(`LauncherProjectile.drop_at(&"m406", range)` gives the drop and time to aim over, as LauncherAI
+does for the RPG-7). HE arms only past 14 m (`Warheads.data(&"m406").arming_m`), so closer it is a
+dud. Suggested: like LauncherAI's fire at groups behind cover, a grenadier with a loaded M320 lobs
+HE at enemies in cover 30-250 m off with no friendly within 12 m of the aim point, and screens with
+smoke on the squad's "throw smoke" order when he has one loaded; he loads by hand in cover.
+
+## F-131: an AI soldier with a shotgun thinks it has no spare ammo
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (`rounds`/`spare` around the ammo checks and
+`_mag_size`), [scavenge.gd](../../scripts/ai/scavenge.gd). Found by cghath's agent on
+`feat/m320-shotgun` (2026-10-20). No AI kit carries the shotgun yet, so it only matters once one
+does (or an AI picks one up).
+
+What happens: a shotgun (stats.tube, Shotguns) loads loose 12 ga shells shell by shell, and its
+stats.ammo names the buckshot shell. `Inventory.spare_rounds(ammo)` counts a magazine's rounds, so
+for loose shells (no "rounds" in their state, magazine_rounds 0) it gives 0: the AI's ammo-low and
+"reload when" checks see a shotgun with shells in the pack as out of ammo. The host side already
+loads a tube when the AI asks: `Soldier._server_reload` on a tube weapon runs
+`Shotguns.server_load(s, slot)`. Suggested: for `Shotguns.is_tube(weapon)` count
+`Shotguns.shells_of(weapon)` with `inventory.count_of(id)` as the spares, and the tube's
+`Shotguns.capacity(weapon)` as the magazine size.
+## F-160: dog tags have no worn model (Captain's side)
+
+Location: [gear_rig.gd](../../scripts/combat/gear_rig.gd), [character_model.gd](../../scripts/player/character_model.gd)
+(and [voxel_art.gd](../../scripts/art/voxel_art.gd) for the piece itself). Found by cghath's agent on
+`feat/fallen` (2026-10-20), which builds the tags but may not touch these files (the Captain's side's
+items 1-5).
+
+What's there: every company soldier wears tags (`Soldier.dog_tags`, a Dictionary set by the host as the
+body spawns, replicated by ServerSync with the other soldier fields, late joiners included; `{}` for
+everyone else and once they've been taken off a body). Taking them makes a `dog_tags` item (data/items.json,
+`size_m` [0.05, 0.005, 0.03]) in the taker's gear. Nothing draws them: no chain on the neck, and the item
+on the ground or in hand uses the generic look.
+
+Suggested: a small chain and two tags at the neck (under the carrier's collar) while `dog_tags` isn't
+empty, gone once taken (the property changes on every peer); a voxel piece for the item.
+
+## F-161: AI squadmates never take a fallen man's dog tags (Claude's side)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (the scavenger and the bearer: `scavenge.gd`'s
+picks, the bearer's walk to a body). Found by cghath's agent on `feat/fallen` (2026-10-20).
+
+What's there: `Soldier.server_take_tags(body)` (host; no reach check of its own, the caller's: measure to
+`Soldier.body_point()`, as CLAUDE.md says) takes a fallen company soldier's tags into the taker's gear;
+carried out at extraction they make him killed in action instead of missing (BaseHub `_collect_tags`,
+`Fallen`). Only players take them now (the interaction menu's Take dog tags). A squadmate who reaches a
+fallen friend (a bearer, a scavenger) walks away without them, so a man killed while the players are
+elsewhere stays missing unless a player goes back.
+
+Suggested (Proposed): a squadmate at a fallen company soldier's body (`not body.dog_tags.is_empty()`)
+takes his tags as he would a pick (`server_take_tags`), and says so on the radio ("Got Reaper's tags").
+## F-150: enemy soldiers and gunners never aim at the player's recon UAV
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) target picking (it only looks at Soldiers),
+and the AA technicals' gunners (`technical_zu23`, `technical_zpu`) under
+[scripts/vehicles/](../../scripts/vehicles/). Found by cghath's agent on `feat/fire-support`
+(2026-10-20).
+
+What happens: the player's recon UAV (`UavSupport`, scripts/supports/uav_support.gd) can be shot
+down, as the enemy's drones can: its body takes Ballistics' `on_bullet` and three hits bring it
+down. But no enemy AI ever fires at it, because their targets are Soldiers only. For now
+`UavSupport._aa` stands in: a manned hostile AA technical within 1,500 m with a clear line to the
+UAV has a 6% chance every 5 s to hit it (data/fire_support.json "uav", Proposed). Suggested: let the
+AA technicals' gunners (and maybe riflemen who see it low) pick the UAV's body as a target, and
+then drop `_aa`'s dice roll.
+
+## F-151: enemy vehicle crews don't move off when fire missions land round them
+
+Location: [vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) and the crews' SquadAI. Found by
+cghath's agent on `feat/fire-support` (2026-10-20).
+
+What happens: the player's fire missions (`FireSupport`) land on vehicles through
+`Vehicle.server_take_hit`, and every soldier near a burst is suppressed (Warheads, Alert). A crewed
+enemy vehicle under adjusting rounds stays where it is, though, until it's hit. Real crews drive
+off when the first rounds walk in. Suggested: when a burst lands within about 50 m of a crewed
+hostile vehicle, its driver moves it 100-200 m away from the burst, toward cover.
 ## F-120: the squad AI doesn't keep off our own mines and claymores
 
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (moving, formation spots, cover picks) and

@@ -22,6 +22,10 @@ const ANTI_TANK := &"anti_tank"
 ## casting (a mission's loadout, a roster hire), never AI auto-fill.
 const HEAVY_GUNNER := &"heavy_gunner"
 const AMMO_BEARER := &"ammo_bearer"
+## Leads a building entry, first at the door (Captain, 2026-10-20: "we need breacher roles for
+## the player team", "they use breaching charges"; SquadAI's breach plan): like anti_tank, not in
+## fire_teams, a player's pick or a deliberate cast (roster role, command menu Team > Assign role).
+const BREACHER := &"breacher"
 ## Fire team names, by index (Soldier.fire_team).
 const TEAMS: Array[String] = ["A", "B"]
 ## Which slots a player whose role has no free slot takes first: the least specialised.
@@ -103,6 +107,12 @@ static func apply_kit(inventory: Inventory, role: StringName, lx3 := false) -> v
 ## second plate in the vest instead of the carrier's back pocket.
 static func give(inventory: Inventory, id: StringName, count: int) -> int:
 	var item := ItemDB.get_item(id)
+	if GunAttachments.is_attachment(item):
+		# A kit's grip, light or M320 goes on the first gun in it that takes it (else it's stowed).
+		var got := inventory.take(id, count)
+		for i in got:
+			GunAttachments.mount_carried(inventory, id)
+		return got
 	if item == null or item.slot == &"":
 		return inventory.take(id, count)
 	var taken := 0

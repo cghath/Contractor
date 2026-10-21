@@ -74,12 +74,15 @@ static func needs(s: Soldier) -> Dictionary:
 		var ammo := StringName(ItemDB.get_item(weapon_id).stats.get("ammo", ""))
 		if not ItemDB.has_item(ammo):
 			continue
+		var gun := ItemDB.get_item(weapon_id)
 		var per_mag := ItemDB.get_item(ammo).magazine_rounds()
 		var mags := int(kit.get(ammo, 0))
 		if mags <= 0:
 			mags = BASIC_MAGS[slot]
 		var target := (mags + 1) * per_mag  # the loaded magazine too
-		var have := inv.spare_rounds(ammo) + inv.rounds_in(slot)
+		if Shotguns.is_tube(gun):  # loose shells (F-131): a tube and its kit's shells, two tubes' worth at least
+			target = Shotguns.capacity(gun) + maxi(int(kit.get(ammo, 0)), Shotguns.capacity(gun) * 2)
+		var have := inv.spare_rounds(ammo, gun) + inv.rounds_in(slot)
 		if have < target:
 			_add(out, ammo, "ammo", target - have, float(target - have) / target, W_AMMO[slot])
 	for id: StringName in kit:
@@ -244,7 +247,7 @@ static func _weapon_pick(s: Soldier, dead: Soldier) -> Dictionary:
 	var mine: StringName = s.inventory.slots[&"primary"]
 	if mine != &"" and _rounds_for(s.inventory, &"primary") > 0:
 		return {}
-	if mine != &"" and dead.inventory.spare_rounds(StringName(ItemDB.get_item(mine).stats.get("ammo", ""))) > 0:
+	if mine != &"" and dead.inventory.spare_rounds(StringName(ItemDB.get_item(mine).stats.get("ammo", "")), ItemDB.get_item(mine)) > 0:
 		return {}  # his own rifle takes the body's magazines: those come instead (a dry M4 and an MK18)
 	if _rounds_for(dead.inventory, &"primary") <= 0:
 		return {}
@@ -257,7 +260,7 @@ static func _rounds_for(inv: Inventory, slot: StringName) -> int:
 	var weapon_id: StringName = inv.slots[slot]
 	if weapon_id == &"":
 		return 0
-	return inv.rounds_in(slot) + inv.spare_rounds(StringName(ItemDB.get_item(weapon_id).stats.get("ammo", "")))
+	return inv.rounds_in(slot) + inv.spare_rounds(StringName(ItemDB.get_item(weapon_id).stats.get("ammo", "")), ItemDB.get_item(weapon_id))
 
 
 ## A plate on the body (worn or stowed) that fits his carrier and protects clearly more than

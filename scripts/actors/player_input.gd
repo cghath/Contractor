@@ -419,6 +419,36 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"weapon_launcher") and body.inventory.slots.get(Launchers.SLOT, &"") != &"":
 		put_nade_away()
 		body.select_weapon(Launchers.SLOT)
+	elif event.is_action_pressed(&"weapon_underbarrel"):
+		toggle_underbarrel()
+
+
+## The underbarrel key (4): the trigger onto the M320 under the rifle in hand and back
+## (Underbarrel); with a shotgun in hand, the next shell kind R loads (Shotguns.next_pick).
+func toggle_underbarrel() -> void:
+	var weapon := body.active_weapon()
+	if Shotguns.is_tube(weapon):
+		var current := body.shell_pick if body.shell_pick != &"" else Shotguns.load_choice(weapon, body.inventory)
+		body.shell_pick = Shotguns.next_pick(weapon, current, body.inventory)
+		if body.shell_pick != &"":
+			hud.flash("R loads: %s (%d)" % [ItemDB.get_item(body.shell_pick).name, body.inventory.count_of(body.shell_pick)])
+		return
+	var key := Shotguns.key_of(body)
+	if Underbarrel.on_gun(body) == null and key == null:
+		body.underbarrel_up = false
+		hud.flash("No grenade launcher or Skeleton Key on this gun")
+		return
+	put_nade_away()
+	body.underbarrel_up = not body.underbarrel_up
+	if body.underbarrel_up and key:
+		var n := Shotguns.key_list(key, body.inventory.state_of(body.active_slot)).size()
+		hud.flash("%s: %s" % [key.name, "%d in the tube" % n if n > 0 else "empty - R to load"])
+		return
+	var w := Underbarrel.loaded_of(body)
+	if body.underbarrel_up:
+		hud.flash("%s: %s" % [Underbarrel.on_gun(body).stats.get("short", "Launcher"), Launchers.warhead_name(w) if w != &"" else "empty - R to load"])
+	else:
+		hud.flash(weapon.name)
 
 
 ## Turns the body (yaw, radians) as fast as its load lets it (MovementRules.MAX_YAW_RATE): light,
@@ -922,6 +952,14 @@ func _try_fire() -> void:
 		return
 	if weapon == null or weapon.type != "weapon":
 		return
+	if body.underbarrel_up and Shotguns.key_of(body) != null:
+		if Input.is_action_just_pressed(&"fire"):
+			_fire_key(weapon)  # the Skeleton Key under it (4 switched to it)
+		return
+	if body.underbarrel_up and Underbarrel.on_gun(body) != null:
+		if Input.is_action_just_pressed(&"fire"):
+			_fire_underbarrel(weapon)  # the M320 under it (4 switched to it)
+		return
 	# Fire mode (W3): F moves the selector; the trigger follows the mode.
 	if Input.is_action_just_pressed(&"fire_mode") and Soldier.fire_modes_of(weapon).size() > 1:
 		hud.flash(body.cycle_fire_mode().capitalize())
@@ -932,11 +970,45 @@ func _try_fire() -> void:
 		return
 	if body.inventory.rounds_in(body.active_slot) <= 0:
 		if Input.is_action_just_pressed(&"fire"):
-			hud.flash("Empty - R to reload" if body.inventory.spare_rounds(Soldier._ammo_of(weapon)) > 0 else "Out of ammo")
+			var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon) > 0
+			hud.flash("Empty - R to reload" if spare else "Out of ammo")
 		return
 	body._next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
+	var kick := Shotguns.recoil_of(weapon, body.inventory.state_of(body.active_slot))  # (the shell about to go: hi-brass kicks harder)
 	body._server_fire.rpc_id(1, body.camera.global_position, body._spread_direction(weapon), body.active_slot)
+	body._kick(weapon, kick)
+
+
+## Fire with the trigger on the Skeleton Key: the host fires its next shell (Shotguns.server_fire_key).
+func _fire_key(weapon: ItemData) -> void:
+	var now := Soldier._now()
+	var key := Shotguns.key_of(body)
+	if now < body._busy_until or now < body._next_shot:
+		return
+	var state := body.inventory.state_of(body.active_slot)
+	var tube := Shotguns.key_list(key, state)
+	if tube.is_empty():
+		hud.flash("Empty - R to load" if Shotguns.spare_shells(body.inventory, key) > 0 else "No shells for the Skeleton Key")
+		return
+	body._next_shot = now + 60.0 / float(key.stats.get("rpm", 50))
+	var kick := float((ItemDB.get_item(StringName(String(tube.back()))).stats if ItemDB.has_item(StringName(String(tube.back()))) else {}).get("recoil_mult", 1.0))
+	body._server_fire_key.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z)
+	body._kick(key, kick)
+
+
+## Fire with the trigger on the M320: the host lobs the grenade (Launchers.request_fire_underbarrel).
+func _fire_underbarrel(weapon: ItemData) -> void:
+	var now := Soldier._now()
+	var launchers := Launchers.of(body)
+	if launchers == null or now < body._busy_until:
+		return
+	if Underbarrel.loaded_of(body) == &"":
+		hud.flash("Empty - R to load" if not Underbarrel.carried_rounds(body).is_empty() else "No 40 mm grenades")
+		return
+	body._busy_until = now + Underbarrel.FIRE_BUSY_S
+	launchers.request_fire_underbarrel.rpc_id(1, body.camera.global_position, -body.camera.global_basis.z)
 	body._kick(weapon)
+	body._kick(weapon)  # (a 40 mm grenade kicks harder than the rifle's round)
 
 
 ## Recoil settles: Soldier.RECOIL_SETTLE of each kick comes back down (Captain, P0362), so
@@ -1087,6 +1159,15 @@ func _try_reload() -> void:
 		return
 	if nade_up or weapon == null or weapon.type != "weapon" or now < body._busy_until or body.inventory.hands != &"" or not body.vitals.is_up():
 		return
+	if body.underbarrel_up and Shotguns.key_of(body) != null:
+		_load_shells(Shotguns.key_of(body), true)  # the Skeleton Key, shell by shell
+		return
+	if body.underbarrel_up and Underbarrel.on_gun(body) != null:
+		_load_underbarrel()  # the M320, by hand
+		return
+	if Shotguns.is_tube(weapon):
+		_load_shells(weapon)  # a shotgun's tube, shell by shell
+		return
 	var ammo := Soldier._ammo_of(weapon)
 	var full := ItemDB.get_item(ammo).magazine_rounds() if ItemDB.has_item(ammo) else 0
 	if body.inventory.rounds_in(body.active_slot) >= full:
@@ -1103,6 +1184,36 @@ func _try_reload() -> void:
 	body.begin_reload_local(weapon.id, empty, _reload_len)  # its sounds, on the keys' beats, heard now
 	body.is_reloading = true
 	body._server_reload.rpc_id(1, body.active_slot)
+
+
+## R with the trigger on the M320: a grenade in by hand (Underbarrel.server_reload).
+func _load_underbarrel() -> void:
+	var launchers := Launchers.of(body)
+	var choice := Underbarrel.next_round(body)
+	if launchers == null or choice == &"":
+		hud.flash("No 40 mm grenades" if Underbarrel.carried_rounds(body).is_empty() else "Already loaded")
+		return
+	body._busy_until = Soldier._now() + float(Underbarrel.on_gun(body).stats.get("reload_s", 3.0)) * body.vitals.reload_mult()
+	hud.flash("Loading %s" % ItemDB.get_item(choice).name)
+	launchers.request_reload_underbarrel.rpc_id(1, choice)
+
+
+## R with a shotgun (with `key`, the Skeleton Key under the gun): a speed loader in one push, or
+## shells into the tube one by one, the picked kind first (Shotguns.server_load). Breaching rounds
+## a gun won't take say so (Shotguns.why_not).
+func _load_shells(weapon: ItemData, key := false) -> void:
+	var state := body.inventory.state_of(body.active_slot)
+	var have := Shotguns.key_list(weapon, state).size() if key else body.inventory.rounds_in(body.active_slot)
+	if have >= Shotguns.capacity(weapon):
+		return
+	var loader := not key and Shotguns.capacity(weapon) - have >= Shotguns.LOADER_MIN_ROOM and not Shotguns._loader_for(body.inventory, weapon).is_empty()
+	var shell := Shotguns.load_choice(weapon, body.inventory, body.shell_pick if not key else &"")
+	if shell == &"" and not loader:
+		var refused := body.inventory.count_of(Shotguns.BREACHING) > 0 and not Shotguns.takes(weapon, Shotguns.BREACHING)
+		hud.flash(Shotguns.why_not(weapon, Shotguns.BREACHING) if refused else "No shells for it")
+		return
+	hud.flash("Speed loader in" if loader else "Loading %s" % ItemDB.get_item(shell).name)
+	body._server_load_shells.rpc_id(1, body.active_slot, shell, key)
 
 
 ## The grenade type after `current` in the Shift+G cycle: THROWABLES order, skipping smoke

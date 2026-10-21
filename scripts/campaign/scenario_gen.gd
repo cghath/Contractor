@@ -14,6 +14,8 @@ const DEFEND := "defend"
 const RESCUE := "rescue"
 const RECON := "recon"
 const ESCORT := "escort"
+## The forward observer (fire support, 2026-10-20): ObserverMission.build makes its objectives.
+const OBSERVER := "observer"
 ## The convoy's cargo: a supply crate (carried in both hands; it sells as salvage). Any crate of
 ## it carried out counts: a two-handed carry keeps no state (Inventory.hands), so the crate's own
 ## intel id can't be asked for; nothing else in a zone holds one (not for sale, no zone loot).
@@ -49,6 +51,8 @@ static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String,
 			out.objectives = _rescue(pick, def, module, half, knobs, target)
 		ESCORT:
 			out.objectives = _escort(pick, module, half, knobs, layout)
+		OBSERVER:
+			out.objectives = ObserverMission.build(pick, module, half, knobs)
 		RECON:
 			var made := _recon(pick, def, options, half, knobs)
 			out.objectives = made.objectives

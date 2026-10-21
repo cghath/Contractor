@@ -622,10 +622,14 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 		for ai in units:
 			if ai not in base and entry.size() < ENTRY_MAX and (not ai._friendly() or ai.order == Squad.Order.FOLLOW):
 				entry.append(ai)
+		entry = Squad.breacher_first(entry)  # a breacher first at the door, and he makes the way in
 		var op := clear_op(b, entry) if not entry.is_empty() else {}
 		if not op.is_empty():
 			op["breach"] = SquadAI.preferred_breach(entry)
-			if op.breach == "charge":
+			var bp := squad.breach_plan(b, entry, "auto")
+			if not bp.is_empty():
+				Squad.apply_plan(op, bp)
+			elif op.breach == "charge":
 				Squad.stand_off(op)
 		plan = {"base": base, "entry": entry, "op": op}
 		if not op.is_empty():

@@ -270,22 +270,104 @@ func _tick_follow_in(delta: float) -> void:
 ## slow and loud); none with no enemy known inside, or with a civilian or any noncombatant seen in
 ## there.
 func auto_breach(b: Dictionary, units: Array) -> String:
-	var enemy_in := false
+	if not enemy_inside(b) or noncombatant_inside(b):
+		return ""  # nobody known inside, or someone inside who mustn't be hurt
+	for how: String in ["flash", "frag"]:
+		if _carrier(units, how) >= 0:
+			return how
+	return ""
+
+
+## Whether the squad knows of an enemy inside building `b`.
+func enemy_inside(b: Dictionary) -> bool:
 	for e: Dictionary in enemy_picture():
 		if Buildings.contains(b, e.pos as Vector3):
-			enemy_in = true
-			break
-	if not enemy_in:
-		return ""
+			return true
+	return false
+
+
+## Whether a civilian or any noncombatant is up inside building `b`.
+func noncombatant_inside(b: Dictionary) -> bool:
 	for n: Node in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s and s.vitals.is_up() and Person.is_noncombatant(s) and Buildings.contains(b, s.global_position):
-			return ""  # someone inside who mustn't be hurt
-	for how: String in ["flash", "frag"]:
-		for ai: SquadAI in units:
-			if Vitals.has_item(ai.body.inventory, SquadAI.BREACH_ITEMS[how]):
-				return how
-	return ""
+			return true
+	return false
+
+
+## The slot among `units` of one carrying the bang `how` ("flash", "frag"): `prefer` if he does,
+## else the first who does; -1 for nobody.
+static func _carrier(units: Array, how: String, prefer := -1) -> int:
+	var item: StringName = SquadAI.BREACH_ITEMS.get(how, &"")
+	if item == &"":
+		return -1
+	if prefer >= 0 and prefer < units.size() and Vitals.has_item((units[prefer] as SquadAI).body.inventory, item):
+		return prefer
+	for i in units.size():
+		if Vitals.has_item((units[i] as SquadAI).body.inventory, item):
+			return i
+	return -1
+
+
+## A breacher's entry (Captain, 2026-10-20: "we need breacher roles for the player team", "they
+## use breaching charges"; SquadAI._work_door): with a Roles.BREACHER up among `units` (first in
+## the stack: breacher_first), how he makes the way in on clear order `ordered` ("" the plain
+## Clear, "open" quietly, "flash"/"frag" a bang first, "charge", "kick", "shotgun"; "auto" a
+## squad's own clearance) and the bang after it. {"breacher", "breacher_ai", "door", "bang",
+## "bang_by"} for the op, or {} for none: no breacher (today's entry: the op's "breach"), unless
+## a kick or the shotgun was ordered, which the first in the stack does.
+##   door: SquadAI.door_way: Stealth eases it open (a charge only when ordered); else a charge
+##   while he has one ("open" ordered: never), the shotgun on the hinge with an enemy known
+##   inside, or a kick.
+##   bang (_bang_plan): the ordered one; none for "open" or in Stealth; else a flashbang (a frag
+##   with an enemy known inside and no flashbang), never with a noncombatant inside.
+func breach_plan(b: Dictionary, units: Array, ordered: String) -> Dictionary:
+	if ordered == ON_ME or units.is_empty():
+		return {}
+	var slot := SquadAI.breacher_slot(units)
+	if slot < 0:
+		if ordered not in ["kick", "shotgun"]:
+			return {}
+		slot = 0
+	var ai: SquadAI = units[slot]
+	var stealth := ai.combat_mode == CombatMode.STEALTH
+	var enemy_in := enemy_inside(b)
+	var door := SquadAI.door_way(ai, ordered if ordered in SquadAI.DOOR_WAYS else "", stealth, ordered != "open", enemy_in)
+	var plan := {"breacher": slot, "breacher_ai": ai, "door": door}
+	plan.merge(_bang_plan(b, units, ordered, stealth, enemy_in, slot))
+	return plan
+
+
+## The bang after a breach on clear order `ordered` (breach_plan): {"bang", "bang_by"} ("" and -1
+## for none), its thrower `prefer` if he carries it.
+func _bang_plan(b: Dictionary, units: Array, ordered: String, stealth: bool, enemy_in: bool, prefer := -1) -> Dictionary:
+	var bang := ""
+	if ordered in ["flash", "frag"]:
+		bang = ordered
+	elif ordered != "open" and not stealth and not noncombatant_inside(b):
+		bang = "flash" if _carrier(units, "flash") >= 0 else ("frag" if enemy_in else "")
+	var by := _carrier(units, bang, prefer) if bang != "" else -1
+	return {"bang": bang if by >= 0 else "", "bang_by": by}
+
+
+## `units` with the first breacher up moved to the front: first in the stack, at the door.
+static func breacher_first(units: Array) -> Array[SquadAI]:
+	var out: Array[SquadAI] = []
+	out.assign(units)
+	var i := SquadAI.breacher_slot(out)
+	if i > 0:
+		var him: SquadAI = out[i]
+		out.remove_at(i)
+		out.push_front(him)
+	return out
+
+
+## Puts breach plan `plan` on clearance `op` (the plan's door and bang take over from its
+## "breach", which stays for if the breacher goes down); a charge's stack stands off from it.
+static func apply_plan(op: Dictionary, plan: Dictionary) -> void:
+	op.merge(plan, true)
+	if String(op.get("door", "")) == "charge":
+		stand_off(op)
 
 
 ## The AI brains of this squad's living soldiers, in members() order. Only those whose
@@ -588,6 +670,11 @@ func order_garrison(from: Soldier, point: Vector3, names := PackedStringArray())
 ## otherwise they should stack up and clear on their own"): they stack the same, say so, and
 ## hold until `from` goes in through the door (CLEAR_ON_ME_M inside it), then follow him in one
 ## after the other; if he goes down, they go in on their own.
+##
+## With a breacher among them (breach_plan), he's first at the door and makes the way in. A
+## human breacher giving the order makes it himself: they stack and hold, as on "on me", until
+## his breach (his charge gone off by the door, or his shotgun into its frame), then the bang
+## (on the same rules, _bang_plan) and in; or until he goes in.
 func order_clear(from: Soldier, point: Vector3, names := PackedStringArray(), breach := "") -> String:
 	leader = from
 	var b := Buildings.nearest(from, point, ORDER_BUILDING_M)
@@ -597,23 +684,44 @@ func order_clear(from: Soldier, point: Vector3, names := PackedStringArray(), br
 	if units.is_empty():
 		return "Nobody selected can"
 	var on_me := breach == ON_ME
-	var why := _start_clear(b, units, "" if on_me else breach)
-	if why == "" and on_me:
+	var his_breach := not on_me and not from.is_ai() and from.role == Roles.BREACHER
+	var why := _start_clear(b, units, "" if on_me else breach, not his_breach)
+	if why == "" and (on_me or his_breach):
 		_town_op["on"] = from
+	if why == "" and his_breach:
+		_town_op["on_breach"] = true
+		var stealth := (units[0] as SquadAI).combat_mode == CombatMode.STEALTH
+		_town_op.merge(_bang_plan(b, _town_op_units(), breach, stealth, enemy_inside(b)), true)
 	return why
+
+
+## The units on the current clearance, by slot.
+func _town_op_units() -> Array[SquadAI]:
+	var out: Array[SquadAI] = []
+	for ai: SquadAI in brains():
+		if is_same(ai.ordered.get("op"), _town_op):
+			out.append(ai)
+	out.sort_custom(func(a: SquadAI, z: SquadAI) -> bool: return int(a.ordered.get("slot", 0)) < int(z.ordered.get("slot", 0)))
+	return out
 
 
 const ON_ME := "onme"
 
 
 ## The stack on building `b` (SquadTactics.clear_op) with `breach` ("", "flash", "frag",
-## "charge": SquadAI._breach).
-func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String) -> String:
+## "charge": SquadAI._breach; "open", "kick", "shotgun": breach_plan), a breacher first at the
+## door with his plan unless not `plan` (a human breacher makes the way in himself).
+func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := true) -> String:
+	units = breacher_first(units)
 	var op := SquadTactics.clear_op(b, units)
 	if op.is_empty():
 		return "No way in found"
 	op["breach"] = breach
-	if breach == "charge":
+	op["since"] = Soldier._now()
+	var bp := breach_plan(b, units, breach) if plan else {}
+	if not bp.is_empty():
+		apply_plan(op, bp)
+	elif breach == "charge":
 		stand_off(op)
 	for i in units.size():
 		units[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
@@ -952,7 +1060,7 @@ func order_give_ammo(from: Soldier, names: PackedStringArray) -> String:
 		var busy := ai.care != SquadAI.Care.NONE or ai.intent in [SquadAI.Intent.HEAL, SquadAI.Intent.CASUALTY] or not ai._self_task().is_empty()
 		return ai.body.global_position.distance_to(from.global_position) + (1000.0 if busy else 0.0)
 	for ai in _able(names):
-		if ai.body.inventory.spare_rounds(ammo) > 0 and (best == null or cost.call(ai) < cost.call(best)):  # (spares: what _take_out finds)
+		if ai.body.inventory.spare_rounds(ammo, weapon) > 0 and (best == null or cost.call(ai) < cost.call(best)):  # (spares: what _take_out finds)
 			best = ai
 	if best == null:
 		return "Nobody selected carries %s" % ItemDB.get_item(ammo).name if ItemDB.has_item(ammo) else "Nobody selected has any"
@@ -1026,7 +1134,26 @@ func command(from: Soldier, cmd: String, point: Vector3, names := PackedStringAr
 			return COMBAT_MODES.has(arg) and set_combat_mode(from, COMBAT_MODES[arg], names)
 		"team":
 			return assign_color(from, arg, names)
+		"role":
+			return assign_role(from, StringName(arg), names)
 	return false
+
+
+## Command menu Team > Assign role ("role:<id>"; Captain, 2026-10-20: "we need breacher roles
+## for the player team"): the named AI squadmates play `role` from now on (what they do with
+## what they carry: a breacher leads the entries, a medic treats). Their kit stays what it is.
+func assign_role(from: Soldier, role: StringName, names := PackedStringArray()) -> bool:
+	if not Roles.has(role):
+		return false
+	leader = from
+	var given := PackedStringArray()
+	for s in pick(names):
+		if s.is_ai() and s != from:
+			s.role = role
+			given.append(String(s.name))
+	if not given.is_empty():
+		SessionLog.note("roles: %s made %s %s" % [from.name, ", ".join(given), Roles.display_name(role)])
+	return not given.is_empty()
 
 
 ## Command menu "Escort that HVT" (Captain, 2026-10-11): the named units nearest HVT

@@ -441,8 +441,13 @@ func rounds_in(slot: StringName) -> int:
 	return int(state_of(slot).get("rounds", 0))
 
 
-## Rounds carried in spare magazines for `ammo_id`.
-func spare_rounds(ammo_id: StringName) -> int:
+## Rounds carried in spare magazines for `ammo_id`. With `weapon` a 12 gauge (or the Skeleton
+## Key): every shell it takes, loose and in speed loaders and magazines (Shotguns.spare_shells;
+## audit F-131: the AI saw a shotgun with shells in the pack as out of ammo).
+func spare_rounds(ammo_id: StringName, weapon: ItemData = null) -> int:
+	if weapon and (Shotguns.is_shotgun(weapon) or Shotguns.is_key(weapon)):
+		return Shotguns.spare_shells(self, weapon) if not ItemDB.has_item(ammo_id) or not Shotguns.is_holder(ItemDB.get_item(ammo_id)) \
+			else _holder_shells(ammo_id, weapon)
 	var total := 0
 	var full := ItemDB.get_item(ammo_id).magazine_rounds() if ItemDB.has_item(ammo_id) else 0
 	for container in search_containers():
@@ -450,6 +455,17 @@ func spare_rounds(ammo_id: StringName) -> int:
 			if entry.id == ammo_id:
 				total += int(entry.get("state", {}).get("rounds", full)) * entry.count
 	return total
+
+
+## Shells `weapon` takes in the carried holders `holder_id` (a Saiga's magazines).
+func _holder_shells(holder_id: StringName, weapon: ItemData) -> int:
+	var holder := ItemDB.get_item(holder_id)
+	var n := 0
+	for container in search_containers():
+		for entry: Dictionary in containers[container]:
+			if entry.id == holder_id:
+				n += Shotguns.list_of(holder, entry.get("state", {})).filter(func(x: Variant) -> bool: return Shotguns.takes(weapon, StringName(String(x)))).size() * int(entry.count)
+	return n
 
 
 ## Host only. Fires one round from the weapon in `slot`. False if it's empty.
@@ -500,9 +516,17 @@ func reload(slot: StringName) -> int:
 	if best_index < 0:
 		return -1
 	var current := rounds_in(slot)
+	var mag := ItemDB.get_item(ammo_id)
+	var holder := Shotguns.is_holder(mag)  # a Saiga's magazine: its shells go in as they are
+	var incoming: Array = Shotguns.list_of(mag, containers[best_container][best_index].get("state", {})) if holder else []
+	var out := {"rounds": current}
+	if holder:
+		out[Shotguns.LIST_KEY] = Shotguns.list_of(ItemDB.get_item(id), slot_state[slot]).duplicate()
 	remove_entry(best_container, best_index)
-	_append(best_container, ItemDB.get_item(ammo_id), 1, {"rounds": current})
+	_append(best_container, mag, 1, out)
 	slot_state[slot]["rounds"] = best_rounds
+	if holder:
+		slot_state[slot][Shotguns.LIST_KEY] = incoming.duplicate()
 	_commit()
 	return best_rounds
 
@@ -530,7 +554,8 @@ func loadable_rounds(rounds_id: StringName) -> int:
 	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			var item := ItemDB.get_item(entry.id)
-			if item.magazine_rounds() > 0 and not is_loose_rounds(item) and calibre_of(item) == calibre_of(loose):
+			if item.magazine_rounds() > 0 and not is_loose_rounds(item) and calibre_of(item) == calibre_of(loose) \
+					and not (Shotguns.is_holder(item) and not Shotguns.takes(item, rounds_id)):
 				room += (item.magazine_rounds() - int(entry.get("state", {}).get("rounds", item.magazine_rounds()))) * int(entry.count)
 	return mini(room, count_of(rounds_id))
 
@@ -545,7 +570,7 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 	var loaded := 0
 	while loaded < count:
 		var have := count_of(rounds_id)
-		var best := _fullest_unfilled(calibre_of(loose))
+		var best := _fullest_unfilled(calibre_of(loose), rounds_id)
 		if have <= 0 or best.is_empty():
 			break
 		var list: Array = containers[best.container]
@@ -553,11 +578,19 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 		var mag := ItemDB.get_item(entry.id)
 		var full := mag.magazine_rounds()
 		var n := mini(mini(count - loaded, full - int(best.rounds)), have)
+		var shells: Array = Shotguns.list_of(mag, entry.get("state", {})).duplicate() if Shotguns.is_holder(mag) else []
 		entry.count -= 1
 		if entry.count <= 0:
 			list.remove_at(best.index)
 		var rounds := int(best.rounds) + n
-		_append(best.container, mag, 1, {} if rounds >= full else {"rounds": rounds})
+		if Shotguns.is_holder(mag):
+			# A speed loader or Saiga magazine keeps which shells went in, in order (Shotguns).
+			for k in n:
+				shells.append(String(rounds_id))
+			var state := {"rounds": rounds, Shotguns.LIST_KEY: shells}
+			_append(best.container, mag, 1, {} if state == Shotguns.full_holder_state(mag) else state)
+		else:
+			_append(best.container, mag, 1, {} if rounds >= full else {"rounds": rounds})
 		_take_units(rounds_id, n)
 		loaded += n
 	if loaded > 0:
@@ -566,8 +599,9 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 
 
 ## The part-used or empty magazine of `calibre` with the most rounds in it, as
-## {"container", "index", "rounds"}, or {} if every one is full.
-func _fullest_unfilled(calibre: String) -> Dictionary:
+## {"container", "index", "rounds"}, or {} if every one is full. A shell holder only when it takes
+## `loose` (a Saiga magazine refuses breaching rounds: Shotguns.takes).
+func _fullest_unfilled(calibre: String, loose: StringName = &"") -> Dictionary:
 	var best := {}
 	for container in search_containers():
 		var list: Array = containers[container]
@@ -575,6 +609,8 @@ func _fullest_unfilled(calibre: String) -> Dictionary:
 			var item := ItemDB.get_item(list[i].id)
 			var full := item.magazine_rounds()
 			if full <= 0 or is_loose_rounds(item) or calibre_of(item) != calibre:
+				continue
+			if loose != &"" and Shotguns.is_holder(item) and not Shotguns.takes(item, loose):
 				continue
 			var rounds := int(list[i].get("state", {}).get("rounds", full))
 			if rounds < full and (best.is_empty() or rounds > int(best.rounds)):
