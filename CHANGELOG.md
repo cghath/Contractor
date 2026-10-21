@@ -11,6 +11,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
+
+#### Fixed
+- **Arms and hands can be shot.** The arms' hitboxes now follow the arms as they're drawn: on
+  the rifle's grip and handguard, in a reload, carrying, or ragdolled. Before, they hung at the
+  sides in the rest pose whatever the arms did. A round at a raised arm met no arm, and one
+  where the arm would have hung wounded an arm that wasn't there. This was the same for every
+  player, since hits are worked out on the host.
+- The forearm's hitbox now takes in the whole hand, and the hit shape inside it is the hand as
+  drawn (gripping, on the handguard, holding a magazine), not a relaxed one. A hand hit counts
+  on its forearm.
+- The part a round meets first takes the hit. An arm held across the chest is no longer
+  swallowed by the chest's hitbox behind it. A woman's arm hitboxes sit on her own, narrower
+  shoulders.
+
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
 #### Added

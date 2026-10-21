@@ -810,9 +810,47 @@ func pose_hitboxes(body: Node3D) -> void:
 	for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r", "shin_l", "shin_r"]:
 		deltas[key] = transform * (bones.root as Transform3D) * (bones[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
 	for area in _posable_hitboxes(body):
-		var target: Transform3D = deltas[_bone_of(area)] * _rest_of(area)
+		var bone := _bone_of(area)
+		var target: Transform3D
+		if deltas.has(bone):
+			target = deltas[bone] * _rest_of(area)
+		else:
+			target = _arm_delta(area, bone) * _rest_of(area)
 		if not area.transform.is_equal_approx(target):
 			area.transform = target
+
+
+## The arms' hitboxes follow the arms as drawn (Captain, 2026-10-21: "fingers and arms cant be hit"):
+## the IK on a weapon's grip and handguard, a reload, a carry, a ragdoll. Before, they hung at the
+## sides in the rest pose with the chest's turn, wherever the arms were, so a round at the drawn
+## arm met no arm box and one where it hung met an arm that wasn't there. The forearm's box also
+## carries the hand's pose model ("part_model": BodyVolume marches the drawn hand). On a woman the
+## boxes, drawn for the male shoulder, sit on her own (FEMALE_SHOULDER).
+const ARM_BONES := {&"upper_arm_l": "arm_l", &"upper_arm_r": "arm_r", &"forearm_l": "fore_l", &"forearm_r": "fore_r"}
+
+
+func _arm_delta(area: Area3D, bone: String) -> Transform3D:
+	var i := 0 if bone.ends_with("_r") else 1
+	var fore := bone.begins_with("fore")
+	if _upper.size() < 2 or _forearm.size() < 2 or not is_inside_tree():
+		return transform
+	var node: Node3D = _forearm[i] if fore else _upper[i]
+	var side := Vector3(1.0 if i == 0 else -1.0, 1, 1)
+	var down := Vector3(0, UPPER_ARM, 0) if fore else Vector3.ZERO
+	var pivot := TORSO_PIVOT + shoulder() * side - down
+	if not area.has_meta(&"arm_fit"):
+		area.set_meta(&"arm_fit", true)
+		var shift := (shoulder() - SHOULDER) * side  # her shoulder in from his
+		if not shift.is_zero_approx():
+			for child in area.get_children():
+				if child is CollisionShape3D:
+					(child as CollisionShape3D).position += shift
+	if fore:
+		var m := String(node.get_meta(&"voxel_model", ""))
+		if String(area.get_meta(&"part_model", "")) != m:
+			area.set_meta(&"part_model", m)
+	var drawn := global_transform.affine_inverse() * node.global_transform  # model space, unscaled
+	return transform * drawn * Transform3D(Basis(), pivot).affine_inverse()
 
 
 ## `bones` plus "shin_l" and "shin_r": each shin's pivot (the knee), root-local.
@@ -1487,6 +1525,8 @@ static func _bone_of(area: Area3D) -> String:
 		bone = "shin_l"
 	elif part == Vitals.SHIN_R:
 		bone = "shin_r"
+	elif ARM_BONES.has(part):
+		bone = ARM_BONES[part]
 	elif not part in [Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
 			Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]:
 		var centre := Vector3.ZERO

@@ -47,8 +47,8 @@ const PART_BOXES := {
 	&"pelvis": [[Vector3(0, 0.93, 0), Vector3(0.36, 0.14, 0.22)]],
 	&"upper_arm_l": [[Vector3(-0.25, 1.26, 0), Vector3(0.12, 0.32, 0.12)]],
 	&"upper_arm_r": [[Vector3(0.25, 1.26, 0), Vector3(0.12, 0.32, 0.12)]],
-	&"forearm_l": [[Vector3(-0.25, 0.94, 0), Vector3(0.11, 0.32, 0.11)]],
-	&"forearm_r": [[Vector3(0.25, 0.94, 0), Vector3(0.11, 0.32, 0.11)]],
+	&"forearm_l": [[Vector3(-0.25, 0.89, 0), Vector3(0.18, 0.42, 0.18)]],  # the hand too (HandPose: its fingers, in any pose)
+	&"forearm_r": [[Vector3(0.25, 0.89, 0), Vector3(0.18, 0.42, 0.18)]],
 	&"thigh_l": [[Vector3(-0.075, 0.665, -0.01), Vector3(0.152, 0.39, 0.18)]],
 	&"thigh_r": [[Vector3(0.075, 0.665, -0.01), Vector3(0.152, 0.39, 0.18)]],
 	&"shin_l": [[Vector3(-0.075, 0.235, -0.01), Vector3(0.152, 0.47, 0.18)]],

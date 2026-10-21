@@ -35,7 +35,7 @@ size = Vector3(0.36, 0.14, 0.22)
 size = Vector3(0.12, 0.32, 0.12)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_part_8"]
-size = Vector3(0.11, 0.32, 0.11)
+size = Vector3(0.18, 0.42, 0.18)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_part_9"]
 size = Vector3(0.152, 0.39, 0.18)
@@ -160,7 +160,7 @@ monitoring = false
 metadata/body_part = &"forearm_l"
 
 [node name="Shape" type="CollisionShape3D" parent="ForearmLHitbox"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.25, 0.94, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.25, 0.89, 0)
 shape = SubResource("BoxShape3D_part_8")
 
 [node name="ForearmRHitbox" type="Area3D" parent="."]
@@ -170,7 +170,7 @@ monitoring = false
 metadata/body_part = &"forearm_r"
 
 [node name="Shape" type="CollisionShape3D" parent="ForearmRHitbox"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 0.94, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 0.89, 0)
 shape = SubResource("BoxShape3D_part_8")
 
 [node name="ThighLHitbox" type="Area3D" parent="."]
