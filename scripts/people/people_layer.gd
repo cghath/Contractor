@@ -289,6 +289,7 @@ func server_contract_content(objectives: Array) -> void:
 ## the body of stays dead.
 func _spawn_civilians() -> void:
 	var nation := Names.region_nation(String(MissionRegistry.zone(GameState.zone_id).get("region", "")))
+	var at_war := not WorldSites.front_read(GameState.zone_id).is_empty()  # the living war: a front here
 	var used := {}
 	var fallen := {}
 	for record: Dictionary in GameState.bodies:
@@ -303,7 +304,7 @@ func _spawn_civilians() -> void:
 			var who := Names.mission_person(rng, "civilian", nation, Names.MALE, used)
 			used[who] = true
 			var label := "Civilian (%s)" % who
-			if fallen.has(label):
+			if fallen.has(label) or (at_war and i % 2 == 1):  # (a front's villages are half empty: they've fled)
 				continue
 			var routine: Array = []
 			for q: Array in data.get("routine", []):
@@ -311,6 +312,55 @@ func _spawn_civilians() -> void:
 			var at: Array = data.get("pos", [0, 0.1, 0])
 			queue_spawn({"name": ("Civ_%s_%d" % [module.module_id, i]).validate_node_name(), "kind": "civilian", "side": "neutral",
 				"label": label, "pos": module.to_global(Vector3(float(at[0]), float(at[1]), float(at[2]))), "routine": routine})
+	if at_war:
+		_spawn_refugees(nation, used, fallen)
+
+
+## Refugees (the living war, docs/terror_groups.md 7.7): in a zone with a front, families of
+## REFUGEE_FAMILY walk out of up to REFUGEE_VILLAGES of its villages and towns, down to the edge
+## that faces a neighbour not at war (any edge if every one is), and wait there.
+const REFUGEE_FAMILY := Vector2i(3, 5)
+const REFUGEE_VILLAGES := 2
+
+
+func _spawn_refugees(nation: String, used: Dictionary, fallen: Dictionary) -> void:
+	var lvl := level as CompoundLevel
+	if lvl == null or not lvl.has_method(&"map_area"):
+		return
+	var zid := GameState.zone_id
+	var side := -1
+	for l: Dictionary in RegionMap.links(zid):
+		if WorldSites.front_read(String(l.to)).is_empty():
+			side = int(l.side)
+			break
+	var area: Rect2 = lvl.map_area()
+	var c := area.get_center()
+	var edges: Array[Vector2] = [Vector2(c.x, area.position.y + 40.0), Vector2(c.x, area.end.y - 40.0), Vector2(area.position.x + 40.0, c.y),
+		Vector2(area.end.x - 40.0, c.y)]
+	var families := 0
+	for m: Node in level.call(&"modules"):
+		var module := m as ZoneModule
+		if families >= REFUGEE_VILLAGES or ZoneModules.base(module.type) not in ["village", "town"]:
+			continue
+		families += 1
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(["refugees", zid, module.module_id])
+		var from := module.global_position
+		var edge: Vector2 = edges[side] if side >= 0 else edges[0]
+		if side < 0:  # boxed in: the nearest edge
+			for e: Vector2 in edges:
+				if e.distance_to(Vector2(from.x, from.z)) < edge.distance_to(Vector2(from.x, from.z)):
+					edge = e
+		for k in rng.randi_range(REFUGEE_FAMILY.x, REFUGEE_FAMILY.y):
+			var who := Names.mission_person(rng, "civilian", nation, Names.MALE, used)
+			used[who] = true
+			var label := "Refugee (%s)" % who
+			if fallen.has(label):
+				continue
+			var off := Vector3(rng.randf_range(-3.0, 3.0), 0.0, rng.randf_range(-3.0, 3.0))
+			var goal := lvl.ground_point(Vector3(edge.x, 0.0, edge.y) + off * 2.0)
+			queue_spawn({"name": ("Refugee_%s_%d" % [module.module_id, k]).validate_node_name(), "kind": "civilian", "side": "neutral",
+				"label": label, "pos": lvl.ground_point(from + Vector3(12.0, 0.0, 0.0) + off), "routine": [goal]})
 
 
 ## Host only. A person (server_spawn_person's `data`) spawned over the next frames, a few a frame

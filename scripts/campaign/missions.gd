@@ -357,6 +357,22 @@ static func enemies_of(faction_id: String) -> Array:
 	return faction(faction_id).get("enemies", [])
 
 
+## How a hostile faction is drawn and marked (terror groups, 2026-10-20): "militia" (orange: Black
+## Ridge, the cartels, the Highland Free Front) or "hostile" (red: the terror groups and the
+## armies), from its "side"; one without falls back to the old rule (the insurgent kit is militia).
+static func faction_side(faction_id: String) -> String:
+	var f := faction(faction_id)
+	if f.has("side"):
+		return String(f.side)
+	return "militia" if String(f.get("kit", "insurgent")) == "insurgent" else "hostile"
+
+
+## A faction's short name for radio and news lines ("the Shura"), else its name.
+static func faction_short(faction_id: String) -> String:
+	var f := faction(faction_id)
+	return String(f.get("short", f.get("name", faction_id)))
+
+
 ## The tier index of "neutral" (the tier a fresh faction stands in).
 static func neutral_tier() -> int:
 	var tiers := reputation_tiers()

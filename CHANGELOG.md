@@ -11,6 +11,55 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terror groups, cartels and a living war (Captain, 2026-10-20)
+
+Design and the Captain's calls: docs/terror_groups.md. Every name and flag is made up.
+
+#### Added
+- **Five new enemy groups** hold ground on the map, each with its own kit, clothes, guns,
+  doctrine, flag, leaders and radio chatter:
+  - **the Ashen Banner**: a jihadist network with foreign fighters. Its local men wear dark plain
+    clothes; its foreign fighters wear their own camo and helmets. It fights almost to the last
+    man. Red on the map.
+  - **the Valley Shura**: a local Islamist insurgency in the inland villages. Its men wear village
+    clothes and old rifles. It hits from range and slips away. Red.
+  - **the Saltline Syndicate**: a coastal smuggling cartel in the harbours. Orange.
+  - **the Kestrel Cartel**: an inland drug cartel in the river valleys. Orange.
+  - **the Highland Free Front**: a separatist cell on the moors that fights the Eastern Concord
+    first. It starts only Distrusted, so it can be won over. Orange.
+- **Suicide bombers and VBIEDs** now come from the Ashen Banner and the Valley Shura (Captain),
+  no longer from Black Ridge.
+- **A living war.** Zones change hands over the days, about one every three:
+  - each faction fights for what it wants: oil, airfields and HQs for the Banner; villages,
+    mosques and recruits for the Shura; harbours, crossings and routes for the cartels; Black
+    Ridge for its home valleys;
+  - at most three fronts are open at once;
+  - the war is saved in the campaign and plays the same way every time;
+  - a faction's last zone can be sieged but never falls to another faction;
+  - the company wipes a faction out by taking its last zone's HQ and QRF bases and its leaders;
+  - fronts can reach the company's own zones (a defence job goes up), and the FOB's zone can be
+    sieged but never falls.
+- **The player shifts the war:**
+  - contract wins, kills and HQ and QRF bases taken out weaken a faction and push its fronts;
+  - high rebel support starves Black Ridge and the cartels in that region;
+  - at the top tier of rebel support, the locals take up arms themselves.
+- **The player sees the war:**
+  - a local stringer reads the overnight news on the radio, and the world map has a War news
+    panel;
+  - the map draws each holder's flag, front arrows and contested hatching, and its tooltip says
+    who is attacking whom and why;
+  - a contested zone opens with the attacker already assaulting a site, and part of the zone's
+    sites held by its men;
+  - in a contested zone, villages are half empty and refugee families walk out to the safe side;
+  - fictional flags fly at each holder's compounds, outposts and checkpoints;
+  - each group's radio net has its own lines.
+- **Contracts follow the war:** a job goes up on every front, and a war job on every zone that
+  just flipped. Board contracts are against the zone's holder 70% of the time.
+
+#### Changed
+- **Black Ridge is a regional militia.** It holds 4 of the 22 contract zones and Black Ridge hills
+  (it held every zone before), and its share of contracts falls from about a third to a fifth.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

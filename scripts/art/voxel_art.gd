@@ -68,6 +68,18 @@ const VARIANTS := {
 		"camo": ["1a1a1a", "141414", "202020", "0d0d0d"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "5c1f1f", "gear": "232323", "pack": "1f1f1f",
 	},
+	## The Ashen Banner's foreign fighters (terror groups, docs/terror_groups.md 2.1): charcoal and
+	## black with sand, a red patch; its local men wear plain dark clothes (Kits.variant).
+	"banner": {
+		"camo": ["2e2e2c", "1c1c1b", "4a4438", "8a7a5c"], "skin": "b07a52", "hair": "1f1a17",
+		"patch": "c8281e", "gear": "2b2a27", "pack": "3a3530",
+	},
+	## The Highland Free Front (docs/terror_groups.md 6): moorland smocks, slate and heather over
+	## old woodland surplus, an orange patch.
+	"highland": {
+		"camo": ["4f5a3a", "5c6066", "6b5a4e", "2f3428"], "skin": "c8996f", "hair": "3b2a1d",
+		"patch": "e0661a", "gear": "4a4f3e", "pack": "48523a",
+	},
 	## Captain, 2026-10-17: "tan for us". A flat coyote-tan kit, same shape as "black" above.
 	"tan": {
 		"camo": ["c9ba9c", "bfae8e", "d9ccae", "a89470"], "skin": "c8996f", "hair": "3b2a1d",

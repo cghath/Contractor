@@ -100,6 +100,9 @@ static func _zone_options(def: Dictionary, kind: String) -> Array:
 		func(z: Dictionary) -> bool: return ZoneControl.offers_in(String(z.get("zone_id", ""))))
 
 
+## How often a board contract's target is its zone's holder in the faction war (Captain, 2026-10-20).
+const HOLDER_SHARE := 0.7
+
 ## One contract. `ctx`: "day", "source" ("board", "safe", "fixer", "lead"), and optionally
 ## "fixer" (a fixers entry), "type", "zone_kind", "zone_id", "employer"; for a hot zone's
 ## in-zone and radio contracts (HotZoneOps) also "module_id" (play at that site) and
@@ -158,6 +161,17 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var target: String = String(ctx.get("target", ""))
 	if target == "" and not enemies.is_empty():
 		target = enemies[rng.randi() % enemies.size()]
+		# Terror groups (Captain, 2026-10-20): HOLDER_SHARE of the time it's the zone's holder in the
+		# faction war, so the map means something; else the pick above (Vantage, the Concord, anyone).
+		# Rolled on its own generator (from the board's, which it leaves alone) so boards stay as they were.
+		var zone_holder := WorldSites.holder_now(String(zone.get("zone_id", ""))) if WorldSites.is_war_zone(String(zone.get("zone_id", ""))) else ""
+		var own := RandomNumberGenerator.new()
+		own.seed = hash([rng.seed, rng.state, "holder"])
+		if zone_holder in enemies and own.randf() < HOLDER_SHARE:
+			target = zone_holder
+		elif WorldSites.is_wiped(target):
+			var alive := enemies.filter(func(f: String) -> bool: return not WorldSites.is_wiped(f))
+			target = String(alive[own.randi() % alive.size()]) if not alive.is_empty() else target
 	# The real force.
 	var count_range: Array = def.get("enemy_count", [4, 8])
 	var quality_range: Array = def.get("enemy_quality", [0.3, 0.6])

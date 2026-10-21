@@ -1027,6 +1027,10 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
 	soldier.iff = StringName(data.get("iff", ""))
+	if String(data.get("faction_id", "")) != "":
+		soldier.set_meta(&"faction_id", String(data.faction_id))  # who he fights for (terror groups: Kits.dress)
+		if multiplayer.is_server():
+			soldier.died_for_good.connect(func(_s: Soldier) -> void: WorldSites.server_note_kill(String(data.faction_id)))  # the living war: his side's strength
 	soldier.left_handed = bool(data.get("left", Handedness.roll_ai(String(data.name))))  # LEFT_SHARE of AI
 	if multiplayer.is_server():
 		soldier.person_name = String(data.get("person_name", ""))  # settled in spawn_soldier
