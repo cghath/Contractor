@@ -30,7 +30,7 @@ enum K {
 	RED = 40, RED_DARK, WHITE, PAPER, BRASS, COPPER, OD, OD_DARK, KHAKI, BLACK, ORANGE, YELLOW,
 	GREEN, BLUE, PURPLE, GREY, GREY_LIGHT, STEEL, SILVER, GOLD, WOOD, WOOD_DARK, PCB, SCREEN,
 	CLEAR, BLOOD, PINK, TEAL, MANILA, TAN, RUBBER, DARK_GREY, NAVY, BROWN, AMBER, LIME,
-	GUNMETAL, SMOKE_WHITE, SAND, CREAM,
+	GUNMETAL, SMOKE_WHITE, SAND, CREAM, SALINE,
 }
 const COLOURS := {
 	K.RED: "b3261e", K.RED_DARK: "7a1a15", K.WHITE: "e6e4dc", K.PAPER: "d8d2c0", K.BRASS: "c79c45",
@@ -41,6 +41,7 @@ const COLOURS := {
 	K.BLOOD: "6e1015", K.PINK: "d6738c", K.TEAL: "2f8a85", K.MANILA: "d2b77c", K.TAN: "b59f74",
 	K.RUBBER: "262626", K.DARK_GREY: "3b3d3f", K.NAVY: "27324a", K.BROWN: "6b4a2e", K.AMBER: "e0a030",
 	K.LIME: "9fd24a", K.GUNMETAL: "4a4e47", K.SMOKE_WHITE: "c9ccc8", K.SAND: "c2ab7f", K.CREAM: "efe6cc",
+	K.SALINE: "9cc6da",  # saline in a bag (TreatProps), against the bag's milky plastic
 }
 ## Smoke grenade band colours by smoke_colour.
 const SMOKE_BANDS := {"white": K.SMOKE_WHITE, "green": K.GREEN, "yellow": K.YELLOW, "blue": K.BLUE, "purple": K.PURPLE}

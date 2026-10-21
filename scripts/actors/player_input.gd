@@ -151,6 +151,19 @@ var _pace_wheel_at := -100.0
 ## body moves under it. Applied on top of the camera's eased sway (_cam_turn).
 const GAZE_FOCUS_M := 10.0
 var _cam_turn := Vector2.ZERO
+## First-person medic view (Captain, 2026-10-20: medical animations on par with Arma Reforger and
+## beyond): treating anyone, yourself too, the weapon is gone from view and your own forearms,
+## hands and what they hold are on the camera (CharacterModel.set_view_hands), the eye goes down
+## with the drawn body's kneel and bend (CharacterModel.treat_view_offset, _medic_eye, head space),
+## and for MEDIC_LOOK_S at the start the view turns to the work (Proposed) unless it's already
+## within MEDIC_LOOK_SLACK of it (treating yourself it only looks down: the body doesn't turn);
+## then the mouse is yours again.
+const MEDIC_LOOK_S := 0.5
+const MEDIC_LOOK_RATE := 7.0
+const MEDIC_LOOK_SLACK := 0.25
+var _medic_eye := Vector3.ZERO
+var _medic_n := -1
+var _medic_look := 0.0
 var _view_kick := 0.0      # 0..2: a shot's kick, settling
 var _vm_pitch := 0.0       # the view model's eased pitch, before the kick
 var _last_recoil := 0.0
@@ -505,6 +518,8 @@ func _update_bob(delta: float) -> void:
 		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y + _step_y, 0.0)
 	else:
 		body.camera.position = Vector3(0.0, _step_y, 0.0)  # (steps are smoothed with head bob off too)
+	_medic_eye = body.head.basis.orthonormalized().inverse() * (body.model.treat_view_offset() * body.model.body_scale())
+	body.camera.position += _medic_eye  # down on a knee at the casualty, bent over the work
 
 
 ## The step-up smoothing (STEP_SMOOTH): a sudden small rise on the floor is taken back off the view
@@ -629,7 +644,10 @@ func _physics_process(delta: float) -> void:
 		_update_aim(delta)
 		_try_fire()
 	_update_reload_hand()
+	var treating := body.model.action_shown() == CharacterModel.TREAT and not waiting
+	body.model.set_view_hands(treating)
 	_update_view_hands(delta)
+	_update_medic_look(delta, treating)
 	var tilt := minf(minf(-0.7 if body.movement.mantling else 0.0, -CharacterModel.VIEW_LOWER_PITCH * body.model.view_lower()), SPRINT_TILT.x * _sprint_w)  # mantling: weapon down
 	tilt = lerpf(minf(tilt, LOW_READY_TILT.x * _low_w), _reload_rot.x, _reload_w)
 	_vm_pitch = move_toward(_vm_pitch, tilt, delta * 6.0)
@@ -649,7 +667,7 @@ func _physics_process(delta: float) -> void:
 	# Through a scope the gun still shows peripherally (P0362 PIP rework: the magnified glass is
 	# GunSight's own SubViewport, which skips it on VIEW_MODEL_LAYER instead); with PiP off the
 	# whole view is the glass, as before PiP, and the gun goes.
-	body.view_model.visible = body.carry_mode == &"" and not waiting \
+	body.view_model.visible = body.carry_mode == &"" and not waiting and not treating \
 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body)) \
 		and (GunSight.pip_on(body) or not GunSight.scoped(body))
 	_settle_recoil(delta)
@@ -685,6 +703,36 @@ func _update_give_up(delta: float) -> void:
 	if give_up_held >= Soldier.GIVE_UP_HOLD_S and not _give_up_sent:
 		_give_up_sent = true
 		body._server_give_up.rpc_id(1)
+
+
+## The first-person medic view's turn to the work (MEDIC_LOOK_*): a new treatment starts it.
+func _update_medic_look(delta: float, treating: bool) -> void:
+	if not treating:
+		_medic_look = 0.0
+		return
+	var n := int(body.model.action_net.get("n", -1))
+	if n != _medic_n:
+		_medic_n = n
+		_medic_look = MEDIC_LOOK_S
+	if _medic_look <= 0.0:
+		return
+	_medic_look -= delta
+	var site := body.model.treat_site()
+	var aim: Vector3 = site.p if not site.is_empty() else (body.model.hand_position(true) + body.model.hand_position(false)) * 0.5
+	var to := aim - body.camera.global_position
+	var flat := Vector3(to.x, 0.0, to.z)
+	var k := 1.0 - exp(-MEDIC_LOOK_RATE * delta)
+	var mine := not bool(body.model.action_net.get("kneel", false))  # yourself: the work turns with you
+	if flat.length() > 0.2 and not mine:
+		var ahead := -body.camera.global_basis.z
+		ahead.y = 0.0
+		var turn := ahead.signed_angle_to(flat, Vector3.UP) if ahead.length() > 0.01 else 0.0
+		if absf(turn) > MEDIC_LOOK_SLACK:
+			body.rotate_y(turn * k)
+	var pitch := atan2(to.y, maxf(flat.length(), 0.01))
+	var now := body.head.rotation.x
+	if absf(pitch - now) > MEDIC_LOOK_SLACK:
+		body.set_pitch(now + (pitch - now) * k)
 
 
 ## Keeps the casualty this player has up on the shoulder out of their own camera (they still see
@@ -889,7 +937,7 @@ func _update_sway(delta: float) -> void:
 	var sway := body.aim_sway(weapon, Soldier._now()) if weapon and weapon.type == "weapon" and not Launchers.is_launcher(weapon) else Vector2.ZERO
 	var k := minf(delta * 8.0, 1.0)
 	_cam_turn = _cam_turn.lerp(Vector2(sway.x + _feel_pitch, sway.y), k)
-	var gaze := gaze_turn(body.camera.position)
+	var gaze := gaze_turn(body.camera.position - _medic_eye)  # (the steps' moves, not the kneel)
 	body.camera.rotation.x = _cam_turn.x + gaze.x
 	body.camera.rotation.y = _cam_turn.y + gaze.y
 

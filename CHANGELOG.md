@@ -98,6 +98,55 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   nodes or draw calls, and the meshes are shared by every body in the same colour scheme. A posed
   forearm is about 2,300 to 3,200 triangles. The common poses are built ahead on a worker thread
   as a level starts. Far off, the trigger squeeze isn't drawn.
+### Medical care: the kit in your hands, a first-person medic view, the casualty reacts (Captain, 2026-10-20)
+
+#### Added
+- **Treatment kit in the hands.** Every treatment now shows what it's done with, in 0.5 cm voxels,
+  moving through its steps:
+  - A bandage roll shrinks as it unwinds, its tail running onto the turns building up on the limb
+    over the pad.
+  - Gauze runs off its fold into the wound, then both hands hold pressure.
+  - A tourniquet: the strap pulled round, the band tightening as the windlass turns, then the rod
+    clipped. The last turn lands just as the clip phase starts, and the bleeding stops at the end
+    of it.
+  - A chest seal's backing is peeled off, then the seal is pressed on.
+  - The decompression needle goes in at the second intercostal space and the stylet comes back
+    out, leaving the catheter.
+  - The autoinjector's safety cap comes off before the jab, and it's held in. Adenosine uses a
+    syringe whose plunger goes down.
+  - An IV catheter slides in along the vein and is taped. The IO driver goes in at the sternum.
+  - The saline or blood bag is held up with the line running down to the access site. The bag
+    level follows the fluid actually going in, and a pressure bag's bulb is pumped.
+  - A splint is bent into a U, then laid along the limb and wrapped.
+  - The defibrillator sits beside the casualty, with pads and cables onto the chest.
+  - The surgical clamp uses a hemostat and forceps, with the surgery kit open on the ground.
+  - The foil blanket opens out, and the NPA and the pelvic binder's handles show too.
+
+  Everyone sees it, squad AI medics included, and it's gone when the treatment ends.
+- **The hands work on the wound itself.** The hands now go to the wound on the casualty's skin,
+  or to the right spot for the treatment, following the body if it moves:
+  - the sternum for CPR,
+  - the outer thigh for an injector,
+  - the second intercostal space for the needle,
+  - high and tight on the limb for a tourniquet, with the hands going round the limb.
+
+  Before, they worked at the middle of the body part.
+- **First-person medic view.** While you treat someone, or yourself, the weapon leaves the view
+  and your own forearms, hands and kit are in it. The view goes down with your kneel and, for a
+  moment at the start, turns to the work.
+- **The casualty reacts:**
+  - a wince as a tourniquet tightens or a wound is packed (if they're awake),
+  - settling down after morphine (also as their morphine level rises),
+  - a gasp as the needle goes in,
+  - the chest going down under CPR,
+  - a jolt on the defibrillator's shock.
+- **Treating yourself:**
+  - A tourniquet or bandage on your own arm is done one-handed, with the hurt arm held out and the
+    body turned to it.
+  - On your own leg you go down on a knee and lean over it.
+  - An injector goes into your outer thigh standing.
+
+  Treatment times are unchanged.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

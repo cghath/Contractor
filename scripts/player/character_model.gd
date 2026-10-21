@@ -231,6 +231,42 @@ const WINDLASS_HZ := 1.6
 const NEEDLE_HIGH := 0.1
 const COMPRESSION_M := 0.05
 const CPR_HZ := 1.85
+## Technique phases (Proposed; shares of the clip unless in seconds), shared by the hands here and
+## the props in them (TreatProps): a tourniquet's strap goes round until STRAP_END, then the
+## windlass turns, its last turn landing CLIP_S before the end, when the rod goes into its clip and
+## the treatment takes (the bleeding stops: Soldier._treat applies it as the clip ends); gauze is
+## packed until PACK_END, then pressure held; a chest seal's backing comes off until SEAL_PEEL; a
+## needle is all the way in at NEEDLE_IN and its stylet comes out from NEEDLE_OUT; an injector's
+## cap comes off by INJECT_CAP, it goes in at INJECT_JAB and away at INJECT_AWAY; an IV is aimed
+## until IV_AIM and taped from IV_TAPE; defib pads are on by DEFIB_PADS and the shock goes at
+## DEFIB_SHOCK; a splint is shaped until SPLINT_SHAPE.
+const STRAP_END := 0.3
+const CLIP_S := 0.25
+const PACK_END := 0.7
+const SEAL_PEEL := 0.3
+const NEEDLE_IN := 0.6
+const NEEDLE_OUT := 0.85
+const INJECT_CAP := 0.15
+const INJECT_JAB := 0.3
+const INJECT_AWAY := 0.9
+const IV_AIM := 0.2
+const IV_TAPE := 0.7
+const DEFIB_PADS := 0.45
+const DEFIB_SHOCK := 0.75
+const SPLINT_SHAPE := 0.3
+## A palm at work on the skin sits this far off it (half the gloved hand's thickness).
+const HAND_OFF := 0.025
+## Held props (held_anchor): each hand's anchor, forearm-local: the palm centre.
+const HELD_AT := Vector3(0, -FOREARM, 0)
+## First person while treating (set_view_hands): the forearms and props go on the view model's
+## layer (PlayerInput.VIEW_MODEL_LAYER) as well, so your own camera sees them.
+const VIEW_HANDS_LAYER := 1 << 2
+## Treating your own arm (one-handed, Proposed): the hurt arm held out in front, its hand here
+## (torso-local, for the right arm; mirrored), the upper body turned SELF_ARM_TWIST towards it so
+## the other hand reaches across. Your own leg: down on a knee, leaning SELF_LEG_PITCH over it.
+const PRESENT := Vector3(0.2, 0.18, -0.3)
+const SELF_ARM_TWIST := 0.35
+const SELF_LEG_PITCH := -0.45
 ## Pose easing while acting (faster than stance changes, so a 0.6 s pickup reads).
 const ACTION_EASE := 14.0
 ## Kneeling (treating, looting): hips this high. Reaching goes no lower than REACH_MIN_HIP.
@@ -508,6 +544,12 @@ var _action_n := -1           # action_net["n"] last seen
 var _action_t := 0.0          # seconds since that action started (local clock)
 var _reaching: Dictionary = {}   # the reaching pose for the current action ({} for none)
 var _server_n := 0            # host: action serials handed out
+var _props: TreatProps        # what's in the hands while treating (made on the first treatment)
+var _treat_rest: Dictionary = {}  # action_net "site" plus its "bone" and "patient" (CharacterModel)
+var _treat_self := 0          # treating your own arm one-handed: 1 the right is hurt, -1 the left
+var _site_t: Dictionary = {}  # _treat_goals: the live site in torso space while the hands resolve
+var _treat_eye_w := 0.0       # first person: how much of the kneel and bend the eye follows, eased
+var _view_hands := false      # first person: forearms and props on the view's layer
 var _draw_point := Vector3.ZERO  # torso-local: where the weapon being drawn sits
 var _draw_t := -1.0           # seconds into a weapon draw (< 0: none)
 var _held_weapon := false     # what's held is a weapon (set_held)
@@ -957,6 +999,8 @@ static func blend_pose(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 	for key: String in ["hip", "hip_x", "hip_z", "pitch", "roll"]:
 		out[key] = lerpf(float(a.get(key, REST_POSE.get(key, 0.0))), float(b.get(key, a.get(key, 0.0))), w)
 	out["yaw"] = lerp_angle(float(a.get("yaw", 0.0)), float(b.get("yaw", 0.0)), w)
+	if b.has("twist"):  # (treating your own arm turns the upper body to it)
+		out["twist"] = lerpf(float(a.get("twist", 0.0)), float(b.twist), w)
 	return out
 
 
@@ -1223,14 +1267,21 @@ func server_loot(body: Node3D, all := false) -> void:
 ## second intercostal space. Returns the serial to stop it with.
 func server_treat(target: Node3D, part: StringName, seconds: float, item := &"") -> int:
 	var tech: StringName = TECHNIQUES.get(item, WORK)
+	# Where on the casualty (TreatProps.rest_site: the wound's own skin, or the technique's spot),
+	# sent with the clip so every peer works on the same place, followed live on the casualty's bone.
+	var site := TreatProps.rest_site(target, part, tech, get_parent())
 	var at := part_position(target, part)
-	if tech == &"tourniquet":
+	if not site.is_empty():
+		at = TreatProps.site_world(site, _model_of(target))
+	elif tech == &"tourniquet":
 		at += (part_position(target, &"chest") - at).normalized() * TOURNIQUET_HIGH  # towards the trunk
 	elif tech == &"needle":
 		at += (part_position(target, &"head") - at).normalized() * NEEDLE_HIGH
 	if target == get_parent() and _part_bone(target, part) == "torso":
 		at = _unbladed(at)  # the hands leave the rifle, so the upper body squares up first
-	return server_play(TREAT, seconds, to_local(at), &"", &"", target != get_parent(), tech)
+	var serial := server_play(TREAT, seconds, to_local(at), &"", &"", target != get_parent(), tech)
+	action_net = action_net.merged({"target": String(target.get_path()), "part": part, "item": item, "site": site})
+	return serial
 
 
 ## Where body part `part` of `body` is now (world space): its hitbox, else the chest, else
@@ -1474,6 +1525,9 @@ func _process(frame_delta: float) -> void:
 				head.rotation.x = -SEAT_HEAD_DROOP
 	_update_arms(delta, carry, swing)
 	_wounded_extras(delta)
+	_treat_reactions(delta)
+	if is_instance_valid(_props):
+		_props.update(delta)  # what's in the hands, now the arms are where they are this frame
 
 
 ## Locomotion: the gait cycle at ground speed (see GAIT_*), blended over the stance pose by
@@ -1805,15 +1859,193 @@ func _update_action(delta: float) -> void:
 		_action_t = 0.0
 		_reaching = {}
 		var id := StringName(action_net.get("id", &""))
+		if id == TREAT:
+			_begin_treat()
 		if id in [PICK_UP, LOOT, TREAT, MECH_RELEASE]:
 			var kneel := bool(action_net.get("kneel", false))
 			# Treating without a kneel is treating yourself (server_treat): no turning to it.
 			_reaching = reach_pose(pose, action_net.get("at", Vector3.ZERO), kneel, id != TREAT or kneel, body)
+			if id == TREAT and not kneel:
+				_reaching = _self_treat_pose(_reaching)
 		return
 	_action_t += delta
+	_treat_eye_w = move_toward(_treat_eye_w, 1.0 if action_shown() == TREAT else 0.0, delta / 0.25)
+	if action_shown() == TREAT and bool(action_net.get("kneel", false)):
+		# Kneeling to someone else: turned and bent to where the wound is now (they may shift, or
+		# you turn while you work), not where it was when you started.
+		var live := treat_site()
+		if not live.is_empty():
+			_reaching = reach_pose(pose, reach_point(to_local(live.p)), true, true, body)
 	var s := float(action_net.get("s", 0.0))
 	if s > 0.0 and _action_t > s + 0.25 and not action_net.is_empty() and is_inside_tree() and multiplayer.is_server():
 		action_net = {}
+
+
+## A treatment starting (every peer, from action_net): where on whom (the site on the patient's
+## bone), whether it's your own arm (one-handed), and the props' node.
+func _begin_treat() -> void:
+	_treat_rest = {}
+	_treat_self = 0
+	var target := _treat_target()
+	var patient := _model_of(target)
+	var site: Dictionary = action_net.get("site", {})
+	if patient and not site.is_empty():
+		var bone := patient.part_node(StringName(site.get("part", &"")))
+		if bone:
+			_treat_rest = site.merged({"bone": bone, "patient": patient})
+	var part := String(action_net.get("part", ""))
+	if target == get_parent() and (part.begins_with("upper_arm") or part.begins_with("forearm")):
+		_treat_self = -1 if part.ends_with("_l") else 1
+	if not is_instance_valid(_props):
+		_props = TreatProps.new()
+		_props.name = "TreatProps"
+		_props.model = self
+		add_child(_props)
+
+
+## Treating yourself: your own arm, the upper body turned to the hurt arm held out in front (the
+## other hand works one-handed: _action_goals); your own leg (anything but an injector, which goes
+## into the thigh standing), down on a knee bent over it. Otherwise `reaching` as it is.
+func _self_treat_pose(reaching: Dictionary) -> Dictionary:
+	if bool(pose.get("prone", false)):
+		return reaching
+	if _treat_self != 0:
+		var turned := pose.duplicate()
+		turned["twist"] = -_treat_self * SELF_ARM_TWIST
+		turned["pitch"] = float(pose.get("pitch", 0.0)) - 0.1
+		return turned
+	var part := String(action_net.get("part", ""))
+	if (part.begins_with("thigh") or part.begins_with("shin")) and StringName(action_net.get("tech", WORK)) != &"inject":
+		var kneel := reach_pose(pose, action_net.get("at", Vector3.ZERO), true, false, body)
+		if not kneel.is_empty():
+			kneel["pitch"] = minf(float(kneel.pitch), SELF_LEG_PITCH)
+			return kneel
+	return reaching
+
+
+## The body being treated (this one, or another), or null.
+func _treat_target() -> Node3D:
+	var path := String(action_net.get("target", ""))
+	return get_node_or_null(NodePath(path)) as Node3D if path != "" and is_inside_tree() else null
+
+
+## Where the treatment is now (world space), or {} without one: "p" the point on the skin, "n" out
+## of it, "a" along the limb towards the trunk (up the body off the limbs), "r" the limb's radius
+## there (0 off the limbs), "part" the body part, "x" more spots ([point, normal]: defib pads). It
+## follows the patient's bone as drawn (the CPR push taken back out: treat_react).
+func treat_site() -> Dictionary:
+	if _treat_rest.is_empty() or action_shown() != TREAT:
+		return {}
+	var bone: Variant = _treat_rest.get("bone")
+	var patient: Variant = _treat_rest.get("patient")
+	if not is_instance_valid(bone) or not is_instance_valid(patient):
+		return {}
+	var g := (bone as Node3D).global_transform
+	var shift: Vector3 = (patient as CharacterModel)._react_shift
+	var extra: Array = []
+	for spot: Array in _treat_rest.get("x", []):
+		extra.append([g * Vector3(spot[0]) - shift, (g.basis * Vector3(spot[1])).normalized()])
+	return {"p": g * Vector3(_treat_rest.p) - shift, "n": (g.basis * Vector3(_treat_rest.n)).normalized(),
+		"a": (g.basis * Vector3.UP).normalized(), "r": float(_treat_rest.get("r", 0.0)) * g.basis.get_scale().x,
+		"part": StringName(_treat_rest.get("part", &"")), "x": extra}
+
+
+## The treatment playing now, for TreatProps: "tech", "item", "t" (seconds in), "s" (its length),
+## "u" (0..1), "n" (its serial), "site" (treat_site), "patient" (CharacterModel or null), "work"
+## and "help" (the hands: 0 right, 1 left; help -1 one-handed). {} when not treating.
+func treat_state() -> Dictionary:
+	if action_shown() != TREAT:
+		return {}
+	var patient: Variant = _treat_rest.get("patient")
+	return {"tech": StringName(action_net.get("tech", WORK)), "item": StringName(action_net.get("item", &"")),
+		"t": _action_t, "s": float(action_net.get("s", 0.0)), "u": action_progress(), "n": int(action_net.get("n", -1)),
+		"site": treat_site(), "patient": patient if is_instance_valid(patient) else null,
+		"work": 1 if _treat_self == 1 else 0, "help": -1 if _treat_self != 0 else 1}
+
+
+## The tourniquet's windlass over a clip `s` long: the seconds it turns between (after the strap,
+## until CLIP_S before the end), how many whole turns it takes (about WINDLASS_HZ), and how far
+## it has turned `t` seconds in (radians; a last quarter turn lays the rod into its clip).
+static func windlass_span(s: float) -> Vector2:
+	return Vector2(s * STRAP_END, maxf(s - CLIP_S, s * STRAP_END + 0.1))
+
+
+static func windlass_turns(s: float) -> int:
+	var span := windlass_span(s)
+	return maxi(1, roundi((span.y - span.x) * WINDLASS_HZ))
+
+
+static func windlass_angle(t: float, s: float) -> float:
+	var span := windlass_span(s)
+	var turning := clampf((t - span.x) / (span.y - span.x), 0.0, 1.0)
+	return TAU * windlass_turns(s) * turning + PI * 0.5 * smoothstep(span.y, maxf(s, span.y + 0.01), t)
+
+
+## The windlass rod at the site (point `p` on the skin, `n` out of it, `a` up the limb), turned
+## `angle`: {"c": its centre, on the band's base plate, "d": along it}.
+static func windlass_rod(p: Vector3, n: Vector3, a: Vector3, angle: float) -> Dictionary:
+	var across := a.cross(n)
+	across = across.normalized() if across.length() > 0.001 else Vector3.RIGHT
+	return {"c": p + n * 0.02, "d": across.rotated(n.normalized(), angle)}
+
+
+## CPR, `t` seconds in: how far the chest is pushed in now (0..COMPRESSION_M), about 110 a minute.
+static func cpr_compression(t: float) -> float:
+	return COMPRESSION_M * (0.5 - 0.5 * sin(TAU * CPR_HZ * t))
+
+
+## Held props (TreatProps): the fingers' grasp centre (hand_anchor) where the fingers exist, else a
+## node at each palm (HELD_AT, on the forearm), with the forearm's axes: -y along the fingers, +z out of the palm (the working
+## side: facing down when the hand reaches out to work), x across the knuckles (the thumb at -x on
+## the right hand, +x on the left).
+func held_anchor(right: bool) -> Node3D:
+	if has_method(&"hand_anchor"):  # the fingers' grasp centre (+y along what's held), where it exists
+		var grasp: Variant = call(&"hand_anchor", 0 if right else 1)
+		if grasp is Node3D:
+			return grasp
+	var arm := _forearm[0 if right else 1]
+	var anchor := arm.get_node_or_null(^"HeldProp") as Node3D
+	if anchor == null:
+		anchor = Node3D.new()
+		anchor.name = "HeldProp"
+		anchor.position = HELD_AT
+		arm.add_child(anchor)
+	return anchor
+
+
+## What hand `right` (or the left) holds now (a TreatProps prop), or null. Its "grip" meta is how
+## far the fingers close round it (m from the grip's middle).
+func held_prop(right: bool) -> Node3D:
+	for child in held_anchor(right).get_children():
+		if child is Node3D and (child as Node3D).visible and not child.is_queued_for_deletion():
+			return child
+	return null
+
+
+## First person (PlayerInput, the local player only): while `on`, the forearms and what they hold
+## go on the view's layer too (VIEW_HANDS_LAYER), so your own hands show working on the wound.
+func set_view_hands(on: bool) -> void:
+	_view_hands = on
+	for arm in _forearm:
+		var mesh := arm.get_child(0) as MeshInstance3D if arm.get_child_count() > 0 else null
+		var want := render_layers | (VIEW_HANDS_LAYER if on else 0)
+		if mesh and mesh.layers != want:
+			mesh.layers = want
+	if is_instance_valid(_props):
+		_props.view_hands = on
+
+
+func view_hands_shown() -> bool:
+	return _view_hands
+
+
+## First person while treating (PlayerInput): how far the eye moves (body space, before the body's
+## scale) with the drawn body's kneel and bend, so you look down at your hands from where the head is.
+func treat_view_offset() -> Vector3:
+	if _treat_eye_w <= 0.0 or not _shown.has("torso"):
+		return Vector3.ZERO
+	var drawn: Transform3D = (_shown.root as Transform3D) * (_shown.torso as Transform3D)
+	return (drawn * EYE - eye_position(pose)) * smoothstep(0.0, 1.0, _treat_eye_w)
 
 
 func _action_active() -> bool:
@@ -2294,7 +2526,21 @@ func _action_goals(held: Array) -> Array:
 			if to != null:
 				return [["stow", to], ["work", at - spread]]
 		TREAT:
-			return _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
+			var site := treat_site()
+			if not site.is_empty():
+				var inv := torso.global_basis.inverse()
+				var pads: Array = []
+				for spot: Array in site.x:
+					pads.append([torso.to_local(spot[0]), (inv * Vector3(spot[1])).normalized()])
+				_site_t = {"p": torso.to_local(site.p), "n": (inv * Vector3(site.n)).normalized(), "a": (inv * Vector3(site.a)).normalized(),
+					"r": float(site.r) / body_scale(), "x": pads}
+				at = _site_t.p
+			var goals := _treat_goals(StringName(action_net.get("tech", WORK)), at, t, s)
+			_site_t = {}
+			if _treat_self != 0:  # your own arm: held out, the other hand does the work
+				var present := ["present", PRESENT * Vector3(_treat_self, 1, 1)]
+				return [present, goals[0]] if _treat_self == 1 else [goals[0], present]
+			return goals
 		RADIO:
 			if t < s * 0.85:
 				return [held[0], ["radio", RADIO_AT]]
@@ -2325,72 +2571,119 @@ func _action_goals(held: Array) -> Array:
 
 ## The hands for treating with technique `tech` at `at` (torso space), `t` seconds into a
 ## clip `s` long: [[key, point], [key, point]] for the right and left hand. The key changes
-## between phases so the hand blends to the next point.
+## between phases so the hand blends to the next point. While a live site is known (_site_t,
+## from treat_site: the skin, its outward normal, the limb's axis and radius) the hands work on
+## the skin round it (a palm HAND_OFF off it), round the limb for wraps and straps, on the
+## windlass rod TreatProps draws; without one (tests calling this directly) round `at` itself.
 func _treat_goals(tech: StringName, at: Vector3, t: float, s: float) -> Array:
 	var phase := clampf(t / maxf(s, 0.01), 0.0, 1.0)
-	# Axes at the wound: out from the treater's chest (`out`), and two across it (`u`, `v`).
+	# Axes at the wound: in towards it (`out`, from the treater's chest), and two across it (`u`, `v`).
 	var out := (at - HANDS_ANCHOR).normalized()
 	var u := out.cross(Vector3.UP)
 	if u.length_squared() < 0.01:
 		u = out.cross(Vector3.FORWARD)
 	u = u.normalized()
 	var v := out.cross(u).normalized()
+	var sited := not _site_t.is_empty()
+	var skin := at
+	var n := -out
+	var a := v
+	var r := 0.0
+	if sited:  # in is into the skin, across the limb and along it (down it, distal: v)
+		n = _site_t.n
+		a = _site_t.a
+		r = _site_t.r
+		out = -n
+		u = a.cross(n).normalized() if a.cross(n).length() > 0.01 else u
+		v = -a
+		at = skin + n * HAND_OFF
 	var spread := Vector3(HAND_SPREAD, 0, 0)
+	var axis := skin - n * r  # the limb's axis under the site
 	match tech:
 		&"wrap":  # the right hand takes the bandage round and round the limb; the left holds the end
 			var turn := TAU * WRAP_HZ * t
+			if sited and r > 0.0:
+				return [["wrap", axis + (n * cos(turn) + u * sin(turn)) * (r + 0.05)], ["hold", at - v * 0.03]]
 			return [["wrap", at + (u * cos(turn) + v * sin(turn)) * WRAP_RADIUS], ["hold", at - u * 0.04]]
-		&"pack":  # gauze stuffed in, finger by finger, the other hand pressing beside it
-			var push := 0.02 + 0.03 * absf(sin(t * 6.0))
+		&"pack":
+			if sited and phase >= PACK_END:  # then pressure: both hands on it, one over the other
+				return [["press", at], ["press", at + n * 0.035]]
+			var push := 0.02 + 0.03 * absf(sin(t * 6.0))  # gauze stuffed in, finger by finger, the other hand pressing beside it
 			return [["pack", at + out * push], ["press", at - u * 0.05]]
 		&"tourniquet":
-			if phase < 0.35:  # strap round the limb, high and tight, and pulled snug
-				var lap := TAU * phase / 0.35
+			var span := windlass_span(s)
+			if t < span.x:  # strap round the limb, high and tight, and pulled snug
+				var lap := TAU * t / span.x
+				if sited and r > 0.0:
+					return [["strap", axis + (n * cos(lap) + u * sin(lap)) * (r + 0.05)], ["strap", at - u * 0.05]]
 				return [["strap", at + (u * cos(lap) + v * sin(lap)) * 0.07], ["strap", at - u * 0.05]]
-			if phase < 0.8:  # windlass turns, the other hand steadying the strap
+			if sited:  # on the windlass rod's end as it turns (and as it's laid in the clip)
+				var rod := windlass_rod(skin, n, a, windlass_angle(t, s))
+				var key := "windlass" if t < span.y else "clip"
+				return [[key, rod.c + (rod.d as Vector3) * 0.035 + n * 0.02], ["steady", at - a * 0.05]]
+			if t < span.y:  # windlass turns, the other hand steadying the strap
 				var turn := TAU * WINDLASS_HZ * t
 				return [["windlass", at + u * 0.05 + (u * cos(turn) + v * sin(turn)) * 0.035], ["steady", at - u * 0.04]]
 			return [["clip", at + v * 0.05], ["steady", at - u * 0.04]]  # into the clip
-		&"splint":  # the splint along the limb, both hands working down it
-			var slide := sin(t * 2.0) * 0.1
+		&"splint":
+			if sited and phase < SPLINT_SHAPE:  # shaped into a U between the hands, in front of you
+				var mid := (HANDS_ANCHOR + Vector3(0, -0.2, -0.3)).lerp(at, 0.35)
+				return [["shape", mid + Vector3(0.06, 0, 0)], ["shape", mid - Vector3(0.06, 0, 0)]]
+			if sited and r > 0.0:  # on along the limb, the wrap going round it down the splint
+				var k := (phase - SPLINT_SHAPE) / (1.0 - SPLINT_SHAPE)
+				var turn := TAU * WRAP_HZ * t
+				return [["splint", axis + a * lerpf(0.12, -0.12, k) + (n * cos(turn) + u * sin(turn)) * (r + 0.06)], ["hold", at + a * 0.1]]
+			var slide := sin(t * 2.0) * 0.1  # the splint along the limb, both hands working down it
 			return [["splint", at + v * slide + u * 0.03], ["splint", at - v * slide - u * 0.03]]
 		&"seal":
-			if phase < 0.3:  # peel the backing in front of you
+			if phase < SEAL_PEEL:  # peel the backing in front of you, the hands coming apart
 				var mid := HANDS_ANCHOR + Vector3(0, -0.15, -0.3)
-				return [["peel", mid + spread], ["peel", mid - spread]]
-			var smooth := 0.02 + 0.06 * (phase - 0.3) / 0.7  # on, smoothed out from the middle
+				var apart := spread * (1.0 + 1.5 * phase / SEAL_PEEL)
+				return [["peel", mid + apart], ["peel", mid - apart]]
+			var smooth := 0.02 + 0.06 * (phase - SEAL_PEEL) / (1.0 - SEAL_PEEL)  # on, smoothed out from the middle
 			return [["seal", at + u * smooth], ["seal", at - u * smooth]]
 		&"needle":  # straight in at the second intercostal space, slowly, the other hand steadying
-			var depth := clampf(phase / 0.6, 0.0, 1.0)
-			return [["needle", at + out * lerpf(0.15, 0.01, depth)], ["steady", at - v * 0.06]]
-		&"inject":  # wind up, jab into the thigh, hold, away
-			if phase < 0.3:
-				return [["ready", at + out * 0.2], ["rest", at - u * 0.08]]
-			if phase < 0.9:
-				return [["jab", at], ["rest", at - u * 0.08]]
-			return [["away", at + out * 0.15], ["rest", at - u * 0.08]]
+			if sited and phase >= NEEDLE_OUT:  # the stylet back out, the catheter left in
+				return [["stylet", at - out * 0.1], ["steady", at - v * 0.06]]
+			var depth := clampf(phase / NEEDLE_IN, 0.0, 1.0)
+			return [["needle", at - out * lerpf(0.15, 0.01, depth)], ["steady", at - v * 0.06]]  # (from outside the skin in)
+		&"inject":  # wind up (the other hand pulls the safety cap), jab, hold, away
+			if phase < INJECT_JAB:
+				var ready := at + out * -0.2
+				if phase < INJECT_CAP:
+					return [["ready", ready], ["cap", ready - out * 0.1]]
+				return [["ready", ready], ["rest", at - u * 0.08]]
+			if phase < INJECT_AWAY:
+				return [["jab", at - out * 0.05 if sited else at], ["rest", at - u * 0.08]]
+			return [["away", at + out * -0.15], ["rest", at - u * 0.08]]
 		&"iv":  # one hand stretches the skin; the catheter slides in along the vein, then taped
-			if phase < 0.2:
-				return [["iv_aim", at + out * 0.08], ["skin", at - v * 0.08]]
-			if phase < 0.7:
-				var slide := (phase - 0.2) / 0.5
-				return [["iv_in", at + out * lerpf(0.04, 0.0, slide) + v * lerpf(0.04, -0.01, slide)], ["skin", at - v * 0.08]]
+			if phase < IV_AIM:
+				return [["iv_aim", at + out * -0.08 + v * 0.04], ["skin", at + v * 0.08]]
+			if phase < IV_TAPE:
+				var slide := (phase - IV_AIM) / (IV_TAPE - IV_AIM)
+				return [["iv_in", at + out * lerpf(-0.04, 0.0, slide) + v * lerpf(0.04, -0.01, slide)], ["skin", at + v * 0.08]]
 			var dab := sin(t * 9.0) * 0.01
 			return [["tape", at + u * (0.03 + dab)], ["tape", at - u * (0.03 - dab)]]
 		&"io":  # the driver pressed hard onto the sternum, the other hand steadying
-			return [["io", at + out * (0.02 + 0.01 * sin(t * 20.0))], ["steady", at - v * 0.07]]
+			return [["io", at + out * (0.02 + 0.01 * sin(t * 20.0)) - out * (0.06 if sited else 0.0)], ["steady", at - v * 0.07]]
 		&"cpr":  # heel of the hand on the sternum, the other on top, about 110 a minute
+			if sited:  # riding the chest down as it goes in (treat_react moves it the same)
+				var press := at + out * cpr_compression(t)
+				return [["cpr", press], ["cpr", press - out * 0.03]]
 			var depth := COMPRESSION_M * (0.5 + 0.5 * sin(TAU * CPR_HZ * t))
 			var press := at + out * (0.03 + COMPRESSION_M - depth)
 			return [["cpr", press], ["cpr", press + out * 0.03]]
 		&"defib":
-			if phase < 0.45:  # pads on: upper right chest, lower left ribs
+			if phase < DEFIB_PADS:  # pads on: upper right chest, lower left ribs
+				var pads: Array = _site_t.get("x", [])
+				if pads.size() >= 2:
+					return [["pad", pads[0][0] + pads[0][1] * HAND_OFF], ["pad", pads[1][0] + pads[1][1] * HAND_OFF]]
 				return [["pad", at + v * 0.1 + u * 0.08], ["pad", at - v * 0.1 - u * 0.1]]
 			var clear := HANDS_ANCHOR + Vector3(0, 0.05, -0.15)  # hands off and clear for the shock
 			return [["clear", clear + spread], ["clear", clear - spread]]
 		&"clamp":  # fine work close together
 			var fine := Vector3(sin(_time * 11.0), cos(_time * 9.0), sin(_time * 13.0)) * 0.008
-			return [["clamp", at + u * 0.025 + fine], ["clamp", at - u * 0.025 - fine]]
+			return [["clamp", at + u * 0.025 + fine + n * 0.06 * float(sited)], ["clamp", at - u * 0.025 - fine + n * 0.06 * float(sited)]]
 		&"fluids":  # the bag held up high, the other hand at the line
 			return [["bag", HANDS_ANCHOR + Vector3(0.2, 0.45, -0.3)], ["line", at]]
 		&"blanket":  # wide sweeps tucking it round the body
@@ -2398,7 +2691,7 @@ func _treat_goals(tech: StringName, at: Vector3, t: float, s: float) -> Array:
 			return [["blanket", at + u * (0.15 + sweep)], ["blanket", at - u * (0.15 - sweep)]]
 		&"npa":  # into the nostril, the other hand tilting the head
 			var depth := clampf(phase / 0.7, 0.0, 1.0)
-			return [["npa", at + out * lerpf(0.08, 0.01, depth)], ["tilt", at - v * 0.07]]
+			return [["npa", at + out * lerpf(0.08, 0.01, depth) - out * (0.03 if sited else 0.0)], ["tilt", at - v * 0.07]]
 	var busy := Vector3(sin(_time * 7.0) * 0.025, sin(_time * 5.3) * 0.02, cos(_time * 6.1) * 0.02)
 	return [["work", at + spread + busy], ["work", at - spread - busy * 0.7]]
 
@@ -2502,7 +2795,7 @@ func _wounded_extras(delta: float) -> void:
 		return
 	# Dying (Captain: "the wounded and such ... they do when dying"): as the blood goes the writhe
 	# slows and weakens (strength), the head lolls, and now and then the free hand reaches out.
-	var strength := clampf((vitals.blood_fraction() - 0.35) / 0.4, 0.15, 1.0)
+	var strength := clampf((vitals.blood_fraction() - 0.35) / 0.4, 0.15, 1.0) * (1.0 - 0.7 * _calm)  # morphine settles it
 	var t := _time * TAU * WRITHE_HZ * lerpf(0.45, 1.0, strength)
 	var phase := float(absi(hash(String(body.name))) % 100) * 0.1  # not everyone in step
 	_upper[0].rotation.z += PRESS_ARM * strength + sin(t + phase) * WRITHE_ARM * 0.4 * strength  # right hand in over the wound
@@ -2514,6 +2807,128 @@ func _wounded_extras(delta: float) -> void:
 	_leg_right.rotation.x += sin(t * 0.6 + phase + 1.7) * WRITHE_LEG * strength
 	head.rotation.y += sin(t * 0.5 + phase) * WRITHE_HEAD * strength + (1.0 - strength) * 0.5  # lolling to the side
 	head.rotation.x += (1.0 - strength) * 0.3
+
+
+## Being treated (treat_react: the treater's TreatProps asks, on every peer, from its own clip):
+## - "wince": while asked (strength 0..1), the upper body curls and the head turns away, a tremor,
+##   the treated limb jerks; gone WINCE_FADE_S after the last ask. Awake casualties only; on
+##   yourself only the head (the upper body carries your own working hands).
+## - "relax" (morphine): over RELAX_IN_S the head sinks back and the writhe settles (also as the
+##   casualty's own morphine level rises: Vitals.morphine_level), held RELAX_HOLD_S after.
+## - "gasp" (a needle decompression): once, over GASP_S, the chest lifts and the head goes back.
+## - "cpr" (strength: metres): the chest pushed in that far along -dir (the skin's normal) while
+##   asked; treat_site takes it back out (_react_shift) so the hands ride it down.
+## - "spasm" (the defib's shock): once, over SPASM_S, the whole body jolts.
+const WINCE_FADE_S := 0.35
+const RELAX_IN_S := 2.5
+const RELAX_HOLD_S := 8.0
+const GASP_S := 1.1
+const SPASM_S := 0.5
+var _react: Dictionary = {}  # kind -> {"w", "age" (s since it began), "since" (s since last asked), "part", "dir", "k" (shown)}
+var _react_shift := Vector3.ZERO  # world: how far the CPR push moves the chest this frame
+var _calm := 0.0
+
+
+func treat_react(kind: StringName, w := 1.0, part := &"", dir := Vector3.ZERO) -> void:
+	var r: Dictionary = _react.get(kind, {})
+	if r.is_empty() or kind == &"gasp" or kind == &"spasm":
+		if not r.is_empty() and (kind == &"gasp" or kind == &"spasm") and float(r.age) < 0.2:
+			return  # (one shock, one gasp)
+		r = {"age": 0.0}
+	r["w"] = w
+	r["since"] = 0.0
+	r["part"] = part
+	r["dir"] = dir
+	r["k"] = float(r.get("k", 0.0))
+	_react[kind] = r
+
+
+## Tests: the reactions showing now, kind -> how strongly (cpr: metres).
+func reaction_shown() -> Dictionary:
+	var out := {}
+	for kind: StringName in _react:
+		out[kind] = float(_react[kind].get("k", 0.0))
+	return out
+
+
+func _treat_reactions(delta: float) -> void:
+	_react_shift = Vector3.ZERO
+	if _react.is_empty() and not downed:
+		_calm = 0.0
+		return
+	var vitals: Vitals = get_parent().get_node_or_null(^"Vitals") as Vitals if get_parent() else null
+	_calm = clampf(vitals.morphine_level(), 0.0, 1.0) * 0.8 if vitals else 0.0  # (the writhe next frame)
+	if _react.is_empty():
+		return
+	var awake := vitals == null or not (vitals.is_dead() or vitals.is_unconscious())
+	var alive := vitals == null or not vitals.is_dead()
+	var mine := false  # treating yourself: only the head reacts
+	if action_shown() == TREAT:
+		mine = _treat_target() == get_parent()
+	for kind: StringName in _react.keys():
+		var r: Dictionary = _react[kind]
+		r.age = float(r.age) + delta
+		r.since = float(r.since) + delta
+		var k := 0.0
+		var done := false
+		match kind:
+			&"wince":
+				k = float(r.w) * (1.0 - smoothstep(0.0, WINCE_FADE_S, r.since)) if awake else 0.0
+				done = r.since > WINCE_FADE_S
+			&"relax":
+				k = float(r.w) * smoothstep(0.0, RELAX_IN_S, r.age) * (1.0 - smoothstep(RELAX_HOLD_S, RELAX_HOLD_S + 2.0, r.since))
+				done = r.since > RELAX_HOLD_S + 2.0
+			&"gasp":
+				k = sin(PI * clampf(r.age / GASP_S, 0.0, 1.0)) if alive else 0.0
+				done = r.age > GASP_S
+			&"spasm":
+				var left := 1.0 - clampf(r.age / SPASM_S, 0.0, 1.0)
+				k = float(r.w) * left * left
+				done = r.age > SPASM_S
+			&"cpr":
+				k = float(r.w) if r.since < 0.15 else 0.0
+				done = r.since > 0.2
+		r.k = k
+		if done:
+			_react.erase(kind)
+			continue
+		if k <= 0.0:
+			continue
+		var side := 1.0 if hash(String(get_parent().name if get_parent() else name)) % 2 == 0 else -1.0
+		match kind:
+			&"wince":
+				head.rotation.y += 0.4 * k * side
+				head.rotation.x -= 0.12 * k
+				if not mine:
+					torso.rotation.x -= 0.16 * k
+					torso.rotation.z += sin(_time * 31.0) * 0.03 * k
+					var limb := part_node(StringName(r.part))
+					if limb and limb != torso and limb != head:
+						limb.rotation.x += 0.18 * k * sin(_time * 17.0)
+			&"relax":
+				_calm = maxf(_calm, k)
+				head.rotation.x += 0.12 * k
+			&"gasp":
+				torso.rotation.x += 0.22 * k
+				torso.position += torso.basis.y.normalized() * 0.015 * k
+				head.rotation.x += 0.3 * k
+				for i in 2:
+					_upper[i].rotation.z += 0.15 * k * (1.0 if i == 0 else -1.0)
+			&"spasm":
+				torso.rotation.x += 0.35 * k
+				head.rotation.x += 0.4 * k
+				for i in 2:
+					_upper[i].rotation.z += 0.6 * k * (1.0 if i == 0 else -1.0)
+					_upper[i].rotation.x += 0.4 * k
+				_leg_left.rotation.x += 0.3 * k
+				_leg_right.rotation.x += 0.3 * k
+				_root.position.y += 0.03 * k
+			&"cpr":
+				var dir: Vector3 = r.dir
+				if dir.length() > 0.01:
+					_react_shift = -dir.normalized() * k
+					torso.global_position += _react_shift
+					head.rotation.x += 0.1 * k / COMPRESSION_M
 
 
 ## A limp on a wounded leg: on that foot's step the body dips and leans over it (LIMP_*), by how

@@ -32,7 +32,7 @@ func _ready() -> void:
 	Handedness._left = false  # right-handed whatever this machine's settings say (never saved)
 	Handedness._loaded = true
 	GameState.delete_save()
-	get_tree().create_timer(150.0).timeout.connect(func() -> void:
+	get_tree().create_timer(260.0).timeout.connect(func() -> void:
 		print("ANIMATIONS TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -71,6 +71,11 @@ func _ready() -> void:
 	await _test_fingers()
 	await _test_treat()
 	await _test_techniques()
+	await _test_treat_props()
+	await _test_medic_view()
+	await _test_self_treat_poses()
+	await _test_patient_reactions()
+	await _test_treat_timings()
 	await _test_loot()
 	await _test_looted_weapons()
 	await _test_stand_where_it_lay()
@@ -685,7 +690,7 @@ func _test_treat() -> void:
 	await _seconds(0.3)
 	var task := _task_with(alpha, &"pressure_bandage")
 	if not task.is_empty():
-		_beside(CharacterModel.part_position(alpha, task.part))  # kneel within reach of the wound
+		_beside(_drawn(alpha, task.part))  # kneel within reach of the wound (the arm as it lies)
 	await _seconds(0.5)
 	check(not task.is_empty() and not alpha.vitals.is_dead(), "Alpha is down with a wound to bandage (%s)" % [alpha.vitals.care_needed()])
 	if task.is_empty():
@@ -694,13 +699,17 @@ func _test_treat() -> void:
 	player._server_treat.rpc_id(1, alpha.get_path(), &"pressure_bandage", task.part)
 	check(player.model.action_net.get("id") == CharacterModel.TREAT and player.model.action_net.get("kneel") == true, "treating another: kneeling (replicated)")
 	await _seconds(0.8)
-	var wound := CharacterModel.part_position(alpha, task.part)
+	var wound := _drawn(alpha, task.part)  # (an arm's hitbox rides the torso; the hands go to the arm drawn)
 	var at: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
 	var hands := (player.model.hand_position(true) + player.model.hand_position(false)) * 0.5
 	check(player.model.action_shown() == CharacterModel.TREAT and rest_y - player.model.torso.global_position.y > 0.25,
 		"kneeling beside the casualty (hips %.2f m lower)" % (rest_y - player.model.torso.global_position.y))
-	check(hands.distance_to(at) < 0.08 and at.distance_to(wound) < 0.35, "hands working at the wound (%.1f cm from the target, %.1f cm from the wound)"
-		% [hands.distance_to(at) * 100.0, at.distance_to(wound) * 100.0])
+	# (The live site, not action_net's "at": that's body-space at the start, and the first-person
+	# view turns the body to the work.)
+	var site: Dictionary = player.model.treat_site()
+	var on: Vector3 = site.get("p", at)
+	check(hands.distance_to(on) < 0.08 and on.distance_to(wound) < 0.35, "hands working at the wound (%.1f cm from the site, %.1f cm from the wound)"
+		% [hands.distance_to(on) * 100.0, on.distance_to(wound) * 100.0])
 	check(player.model.hand_error() < 0.0, "the rifle slung meanwhile")
 	var done := await _wait(func() -> bool: return player.model.action_net.is_empty(), 8.0)
 	check(done and not player.model.hands_busy(), "the clip ends with the treatment")
@@ -710,10 +719,10 @@ func _test_treat() -> void:
 	player._server_use_medical.rpc_id(1)
 	check(player.model.action_net.get("id") == CharacterModel.TREAT and player.model.action_net.get("kneel") == false, "treating yourself (no kneel)")
 	await _seconds(0.8)
-	var own := CharacterModel.part_position(player, Vitals.FOREARM_L)
-	var own_at: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
-	hands = (player.model.hand_position(true) + player.model.hand_position(false)) * 0.5
-	check(hands.distance_to(own_at) < 0.1 and own_at.distance_to(own) < 0.3, "hands at your own wound (%.1f cm)" % (hands.distance_to(own_at) * 100.0))
+	# Your own arm: held out in front, the right hand wrapping round it (_test_self_treat_poses).
+	var own: Dictionary = player.model.treat_site()
+	var hand := player.model.hand_position(true)
+	check(not own.is_empty() and hand.distance_to(own.p) < float(own.r) + 0.1, "the hand at your own wound (%.1f cm)" % (hand.distance_to(own.get("p", hand)) * 100.0))
 	player.global_position += Vector3(0, 0, 2.0)  # moving interrupts it
 	var stopped := await _wait(func() -> bool: return player.model.action_net.is_empty(), 1.0)
 	check(stopped, "an interrupted treatment stops the clip")
@@ -756,7 +765,7 @@ func _test_techniques() -> void:
 	var strap: Vector3 = m._treat_goals(&"tourniquet", at, 0.5, 6.0)[0][1]
 	var turn_a: Vector3 = m._treat_goals(&"tourniquet", at, 3.0, 6.0)[0][1]
 	var turn_b: Vector3 = m._treat_goals(&"tourniquet", at, 3.0 + 0.25 / CharacterModel.WINDLASS_HZ, 6.0)[0][1]
-	var clip: Vector3 = m._treat_goals(&"tourniquet", at, 5.5, 6.0)[0][1]
+	var clip: Vector3 = m._treat_goals(&"tourniquet", at, 6.0 - CharacterModel.CLIP_S * 0.4, 6.0)[0][1]
 	check(strap.distance_to(at) > 0.05 and turn_a.distance_to(turn_b) > 0.03 and clip.distance_to(turn_a) > 0.01,
 		"a tourniquet: strap round, windlass turns, into the clip")
 	var needle_in: Vector3 = m._treat_goals(&"needle", at, 4.0, 5.0)[0][1]
@@ -788,6 +797,254 @@ func _test_techniques() -> void:
 	check(player.model.action_net.get("tech") == &"inject" and player.model.action_net.get("kneel") == false, "an injector on yourself: standing, own thigh")
 	player.model.action_net = {}
 	alpha.vitals.server_reset_health()
+
+
+## Each technique's kit in the hands (TreatProps, CharacterModel.held_anchor) through its phases,
+## and what goes onto the casualty (a tourniquet's band, a pad, a seal, the AED beside him), all
+## gone once the clip ends; the hands on the casualty's own skin at the wound (treat_site).
+func _test_treat_props() -> void:
+	print("Treatment props")
+	_down(alpha)
+	alpha.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_place_player()
+	await _seconds(0.3)
+	_beside(CharacterModel.part_position(alpha, &"thigh_l"))
+	await _seconds(0.3)
+	var m := player.model
+	# item: [part, [[share of the clip, a prop that shows then], ...]]; "r:"/"l:" in that hand.
+	var expect := {
+		&"tourniquet": [&"thigh_l", [[0.15, "r:strap"], [0.15, "band"], [0.6, "rod"], [0.6, "band"]]],
+		&"pressure_bandage": [&"thigh_l", [[0.3, "r:roll"], [0.3, "pad"], [0.6, "tail"], [0.6, "turns"]]],
+		&"hemostatic_gauze": [&"thigh_l", [[0.3, "r:gauze"], [0.3, "tail"], [0.85, "wad"]]],
+		&"splint": [&"thigh_l", [[0.15, "splint"], [0.7, "r:wrap"], [0.7, "splint"]]],
+		&"chest_seal": [&"chest", [[0.15, "l:seal"], [0.15, "r:backing"], [0.6, "seal"]]],
+		&"decompression_needle": [&"chest", [[0.4, "r:needle"], [0.92, "hub"]]],
+		&"morphine": [&"thigh_l", [[0.04, "r:injector"], [0.2, "l:cap"], [0.6, "r:injector"]]],
+		&"adenosine": [&"thigh_l", [[0.5, "r:syringe"]]],
+		&"iv_18": [&"forearm_l", [[0.4, "r:catheter"], [0.85, "tape"]]],
+		&"io_kit": [&"chest", [[0.5, "r:driver"]]],
+		&"saline_500": [&"forearm_l", [[0.5, "r:bag"], [0.5, "line"]]],
+		&"defibrillator": [&"chest", [[0.2, "r:pad"], [0.2, "l:pad"], [0.2, "aed"], [0.6, "pad_0"], [0.6, "cable_1"]]],
+		&"surgical_clamp": [&"abdomen", [[0.5, "r:hemostat"], [0.5, "l:forceps"], [0.5, "kit"]]],
+		&"hypothermia_blanket": [&"chest", [[0.5, "sheet"]]],
+		&"npa": [&"head", [[0.5, "r:npa"]]],
+		&"pelvic_binder": [&"pelvis", [[0.5, "r:handle"], [0.5, "l:handle"]]],
+	}
+	var missing: Array[String] = []
+	var left_over: Array[String] = []
+	for item: StringName in expect:
+		var part: StringName = expect[item][0]
+		var serial := m.server_treat(alpha, part, 2.0, item)
+		for want: Array in expect[item][1]:
+			await _wait(func() -> bool: return m.action_progress() >= float(want[0]) or m.action_net.is_empty(), 3.0)
+			await _frames(2)
+			var shown: Dictionary = m._props.shown() if is_instance_valid(m._props) else {}
+			var slot: String = want[1]
+			if not shown.has(slot):
+				missing.append("%s %s at %.0f%% (%s)" % [item, slot, float(want[0]) * 100.0, shown.keys()])
+			elif slot.begins_with("r:") and m.held_prop(true) == null or slot.begins_with("l:") and m.held_prop(false) == null:
+				missing.append("%s %s: not in the hand (held_prop)" % [item, slot])
+		m.server_stop(serial)
+		await _frames(3)
+		if is_instance_valid(m._props) and not m._props.shown().is_empty():
+			left_over.append("%s %s" % [item, m._props.shown().keys()])
+	check(missing.is_empty(), "each technique's kit shows through its phases (%d techniques; missing %s)" % [expect.size(), missing])
+	check(left_over.is_empty() and m.held_prop(true) == null and m.held_prop(false) == null, "and it's gone when the clip ends (left over %s)" % [left_over])
+	# On the skin at the wound, not the part's middle, and the hands there.
+	m.server_treat(alpha, &"thigh_l", 3.0, &"pressure_bandage")
+	await _seconds(0.9)
+	var site := m.treat_site()
+	var centre := CharacterModel.part_position(alpha, &"thigh_l")
+	var hand := m.hand_position(false)  # the left holds the pad on it
+	check(not site.is_empty() and Vector3(site.p).distance_to(centre) > 0.03 and Vector3(site.p).distance_to(centre) < 0.2,
+		"the site is on the thigh's skin (%.1f cm from its middle)" % (Vector3(site.get("p", centre)).distance_to(centre) * 100.0))
+	check(not site.is_empty() and hand.distance_to(site.p) < 0.1, "the hand on it (%.1f cm)" % (hand.distance_to(site.get("p", hand)) * 100.0))
+	var anchor := m.held_anchor(true)
+	var own_anchor := not m.has_method(&"hand_anchor")  # (with the fingers: their grasp centre)
+	check(anchor.get_parent() == m._forearm[0] and (not own_anchor or anchor.position.is_equal_approx(CharacterModel.HELD_AT)) and m.held_prop(true) != null \
+		and m.held_prop(true).has_meta(&"grip"), "a held-prop anchor at the right palm, the roll in it (with its grip for the fingers)")
+	m.action_net = {}
+	await _frames(3)
+	alpha.vitals.server_reset_health()
+
+
+## First person while treating: the weapon gone from the view, your own forearms and the kit on
+## the camera's layer, the eye down with the kneel; all back after.
+func _test_medic_view() -> void:
+	print("First-person medic view")
+	_down(alpha)
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_place_player()
+	await _seconds(0.3)
+	_beside(CharacterModel.part_position(alpha, &"thigh_r"))
+	await _seconds(0.5)
+	var m := player.model
+	var input := player.get_node(^"PlayerInput") as PlayerInput
+	var forearm := m._forearm[0].get_child(0) as MeshInstance3D
+	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: the weapon in view, your own arms not")
+	m.server_treat(alpha, &"thigh_r", 3.0, &"tourniquet")
+	await _seconds(0.6)  # (the strap, in the hand)
+	var prop := m.held_prop(true)
+	var prop_mesh: MeshInstance3D = prop.get_child(0) as MeshInstance3D if prop else null
+	check(not player.view_model.visible, "treating: the weapon view model hidden")
+	check(m.view_hands_shown() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER != 0 and player.camera.cull_mask & CharacterModel.VIEW_HANDS_LAYER != 0,
+		"your own forearms on the camera")
+	check(prop_mesh != null and prop_mesh.layers & CharacterModel.VIEW_HANDS_LAYER != 0, "and the kit in your hand")
+	var to_hands := (m.hand_position(true) + m.hand_position(false)) * 0.5 - player.camera.global_position
+	var in_view := (-player.camera.global_basis.z).angle_to(to_hands)
+	check(in_view < deg_to_rad(40.0), "your hands in the view (%.0f degrees off its middle)" % rad_to_deg(in_view))
+	check(m.treat_view_offset().y < -0.2 and input._medic_eye.length() > 0.2, "the eye down with the kneel (%.2f m)" % m.treat_view_offset().y)
+	m.action_net = {}
+	await _seconds(0.6)
+	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
+		"after: the weapon back, your arms off the camera, the eye back up")
+	_place_player()
+
+
+## Treating yourself: a tourniquet one-handed on your own arm (the hurt arm held out, the upper
+## body turned to it), on your own leg down on a knee, an injector into your outer thigh standing.
+func _test_self_treat_poses() -> void:
+	print("Self-treatment poses")
+	_place_player()
+	await _seconds(0.5)
+	var m := player.model
+	var rest_y := m.torso.global_position.y
+	m.server_treat(player, &"upper_arm_l", 3.0, &"tourniquet")
+	await _seconds(0.9)
+	var site := m.treat_site()
+	var present := m.torso.to_local(m.hand_position(false))
+	var want := CharacterModel.PRESENT * Vector3(-1, 1, 1)
+	check(not site.is_empty() and m.hand_position(true).distance_to(site.p) < 0.12, "your own arm: the right hand at the tourniquet on the left arm (%.1f cm)"
+		% (m.hand_position(true).distance_to(site.get("p", Vector3.ZERO)) * 100.0))
+	check(present.distance_to(want) < 0.08 and m.twist_shown() > 0.15, "the left arm held out (%.1f cm off), the upper body turned to it (%.2f)"
+		% [present.distance_to(want) * 100.0, m.twist_shown()])
+	check(m.held_prop(true) != null and m.held_prop(false) == null, "one-handed: the strap in the right hand only")
+	m.action_net = {}
+	await _seconds(0.6)
+	m.server_treat(player, &"thigh_l", 3.0, &"tourniquet")
+	await _seconds(0.9)
+	var drop := rest_y - m.torso.global_position.y
+	site = m.treat_site()
+	check(drop > 0.25 and not site.is_empty() and (m.hand_position(true) + m.hand_position(false)).distance_to(Vector3(site.p) * 2.0) < 0.3,
+		"your own leg: down on a knee over it (hips %.2f m lower), hands at it" % drop)
+	m.action_net = {}
+	await _seconds(0.6)
+	m.server_treat(player, &"thigh_l", 2.0, &"morphine")
+	await _wait(func() -> bool: return m.action_progress() > 0.5, 2.0)
+	await _frames(3)
+	site = m.treat_site()
+	drop = rest_y - m.torso.global_position.y
+	check(drop < 0.12 and StringName(site.get("part", &"")) == Vitals.THIGH_R and m.hand_position(true).distance_to(site.p) < 0.14 and m.held_prop(true) != null,
+		"an injector: standing (%.2f m), into the outer right thigh (%.1f cm)" % [drop, m.hand_position(true).distance_to(site.get("p", Vector3.ZERO)) * 100.0])
+	m.action_net = {}
+	await _seconds(0.5)
+
+
+## The casualty reacts: a wince as a tourniquet tightens (awake), relaxing after morphine, a gasp on
+## decompression, the chest going down under CPR, a spasm on the shock.
+func _test_patient_reactions() -> void:
+	print("Patient reactions")
+	var m := player.model
+	# Bravo, awake, takes a tourniquet and morphine.
+	bravo.vitals.server_reset_health()
+	_place(bravo, SPOT + Vector3(0, 0, -1.2))
+	_place_player()
+	await _seconds(0.4)
+	m.server_treat(bravo, &"thigh_r", 3.0, &"tourniquet")
+	var winced := 0.0
+	var end := Time.get_ticks_msec() + 3200
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		if m.action_progress() > CharacterModel.STRAP_END:
+			winced = maxf(winced, float(bravo.model.reaction_shown().get(&"wince", 0.0)))
+		await get_tree().process_frame
+	check(winced > 0.3, "a wince as the windlass turns (%.2f)" % winced)
+	m.server_treat(bravo, &"thigh_r", 2.0, &"morphine")
+	await _wait(func() -> bool: return m.action_net.is_empty() or m.action_progress() > 0.95, 3.0)
+	await _seconds(0.6)
+	check(float(bravo.model.reaction_shown().get(&"relax", 0.0)) > 0.1, "relaxing after the morphine (%.2f)" % float(bravo.model.reaction_shown().get(&"relax", 0.0)))
+	m.action_net = {}
+	# Alpha, down: a needle, CPR and the defib.
+	_down(alpha)
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_beside(CharacterModel.part_position(alpha, &"chest"))
+	await _seconds(0.3)
+	m.server_treat(alpha, &"chest", 2.0, &"decompression_needle")
+	var gasp := 0.0
+	end = Time.get_ticks_msec() + 2400
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		gasp = maxf(gasp, float(alpha.model.reaction_shown().get(&"gasp", 0.0)))
+		await get_tree().process_frame
+	check(gasp > 0.3, "a gasp as the needle goes in (%.2f)" % gasp)
+	m.server_treat(alpha, &"chest", 2.0, &"cpr")
+	await _seconds(0.4)
+	var lo := INF
+	var hi := -INF
+	var hands := 0.0
+	end = Time.get_ticks_msec() + 1200
+	while Time.get_ticks_msec() < end:
+		var site := m.treat_site()
+		if not site.is_empty():
+			var along: float = alpha.model.torso.global_position.dot(site.n)
+			lo = minf(lo, along)
+			hi = maxf(hi, along)
+			hands = maxf(hands, m.hand_position(true).distance_to(site.p))
+		await get_tree().process_frame
+	check(hi - lo > 0.025 and hi - lo < CharacterModel.COMPRESSION_M + 0.02, "the chest goes down under CPR (%.1f cm)" % ((hi - lo) * 100.0))
+	m.action_net = {}
+	await _frames(3)
+	m.server_treat(alpha, &"chest", 2.0, &"defibrillator")
+	var spasm := 0.0
+	var early := false
+	end = Time.get_ticks_msec() + 2400
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		if m.action_progress() < CharacterModel.DEFIB_SHOCK - 0.05:
+			early = early or alpha.model.reaction_shown().has(&"spasm")
+		spasm = maxf(spasm, float(alpha.model.reaction_shown().get(&"spasm", 0.0)))
+		await get_tree().process_frame
+	check(spasm > 0.3 and not early, "a spasm on the shock, not before (%.2f)" % spasm)
+	m.action_net = {}
+	await _frames(3)
+	alpha.vitals.server_reset_health()
+	bravo.vitals.server_reset_health()
+	_place(bravo, SPOT + Vector3(3.0, 0, 0))
+
+
+## Treatment times as they were (items.json treat_s, the clip as long as the treatment), props
+## or not.
+func _test_treat_timings() -> void:
+	print("Treatment timings")
+	var was := {&"tourniquet": 4.0, &"pressure_bandage": 5.0, &"hemostatic_gauze": 8.0, &"chest_seal": 5.0, &"splint": 8.0,
+		&"pelvic_binder": 10.0, &"morphine": 2.0, &"npa": 3.0, &"iv_18": 10.0, &"io_kit": 5.0, &"saline_500": 3.0,
+		&"decompression_needle": 5.0, &"defibrillator": 5.0, &"cpr": 10.0, &"surgical_clamp": 20.0, &"hypothermia_blanket": 5.0}
+	var changed: Array[String] = []
+	for id: StringName in was:
+		var item := ItemDB.get_item(id)
+		if not is_equal_approx(float(item.stats.get("treat_s", -1.0)), was[id]):
+			changed.append("%s %s" % [id, item.stats.get("treat_s")])
+	check(changed.is_empty(), "treat_s unchanged (%s)" % [changed])
+	_down(alpha)
+	alpha.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	var task := _task_with(alpha, &"pressure_bandage")
+	if task.is_empty():
+		check(false, "a wound to bandage for the timing")
+		return
+	_beside(CharacterModel.part_position(alpha, task.part))
+	await _seconds(0.3)
+	var expected := player.treat_seconds(alpha, ItemDB.get_item(&"pressure_bandage"))
+	var started := Time.get_ticks_msec()
+	player._server_treat.rpc_id(1, alpha.get_path(), &"pressure_bandage", task.part)
+	var clip := float(player.model.action_net.get("s", -1.0))
+	await _wait(func() -> bool: return player.model.action_net.is_empty(), expected + 3.0)
+	var took := (Time.get_ticks_msec() - started) / 1000.0
+	check(is_equal_approx(clip, expected) and absf(took - expected) < 0.5, "a bandage takes %.1f s as before (clip %.1f s, took %.1f s)" % [expected, clip, took])
+	alpha.vitals.server_reset_health()
+	_place_player()
 
 
 func _test_loot() -> void:
@@ -988,6 +1245,16 @@ func _check_mount_path(from: StringName, to: StringName) -> void:
 		seen.to = minf(seen.to, hand.distance_to(player.model.torso.to_global(CharacterModel.MOUNT_POINTS[to]))))
 	check(seen.from < HAND_TOLERANCE and seen.to < HAND_TOLERANCE,
 		"the hand goes to the %s (%.1f cm) and then the %s (%.1f cm)" % [from, seen.from * 100.0, to, seen.to * 100.0])
+
+
+## The middle of body part `part` of `s` as drawn (its bone, ragdoll or pose: an arm's hitbox
+## stays with the torso).
+func _drawn(s: Soldier, part: StringName) -> Vector3:
+	var bone := s.model.part_node(part)
+	if bone == null:
+		return _part(s, part)
+	var down := CharacterModel.UPPER_ARM * 0.5 if String(part).begins_with("upper") else CharacterModel.FOREARM * 0.6
+	return bone.to_global(Vector3(0, -down, 0)) if String(part).contains("arm") else _part(s, part)
 
 
 func _down(s: Soldier) -> void:
