@@ -11,6 +11,41 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Breacher role (Captain, 2026-10-20: "we need breacher roles for the player team", "they use breaching charges")
+
+#### Added
+- **Breacher** role (BRC), pickable in the main menu, at join, on the loadout screen and in the
+  roster like the other roles. It takes a free non-medic slot, the way anti-tank and the heavy
+  gunner do. Kit: Mossberg 590A1 breaching shotgun with five speed loaders in shell pouches, an
+  M17, three breaching charges, three flashbangs and ear protection. An LX-3 preset too.
+- **AI breachers lead building entries.** The breacher goes first in the stack and makes the way in:
+  - In Aware or Combat he sets a **breaching charge**. He walks to the wall on the far side of
+    the doorway from the stack, sets it, falls back, and the team goes in through the hole.
+  - Out of charges, he **shotguns the hinge side of the door frame** if an enemy is known
+    inside, and **kicks** it otherwise.
+  - In **Stealth** he eases the door open. He uses a charge only when ordered.
+  - A **flashbang** goes in after the breach (a frag if there's no flashbang and an enemy is
+    known inside). There's never a bang in Stealth, on a quiet order, or with a civilian known
+    inside.
+  - This covers ordered clears, town clears and a squad clearing an enemy-held building itself.
+  - A squad with no breacher clears the way it does today.
+- **Human breachers**: when a breacher player orders Clear, the squad stacks and holds, as on
+  "clear on me", until he breaches. That's his charge going off by the door or his shotgun into
+  the frame. Then the bang goes in and they enter. If he just walks in, they follow.
+- **Command menu > Clear**: "kick it in" (8), "shotgun the door" (9) and "quietly (eased open,
+  no bang)" (0). With no breacher, the first man in the stack kicks. Voice: "kick it in",
+  "shotgun the door", "charge and clear", "clear it quietly".
+- **Command menu > Team > Assign role** (9 6): the selected AI squadmates take on a role.
+  Breacher is key 1. Their kit stays what it is. Voice: "make breacher".
+
+#### Fixed
+- **Breaching charges on a wall cut a doorway.** Before, they left a big crater in the ground
+  and a strip of plinth, fence or wall at the foot that AI couldn't walk past or over. Now the
+  cut is 1.3 m wide and 2.2 m tall, from the floor at the wall's foot, through every material
+  but steel. The ground isn't cratered. A charge set on the ground leaves a small crater.
+- **A wall charge doesn't hurt the stack beside the door.** It throws no fragments out the side
+  it was set from, and only half its overpressure.
+
 ### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
 
 #### Added

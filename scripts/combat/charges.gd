@@ -29,6 +29,23 @@ const PLACE_MASK := (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4) | Vehicle.LAYER
 const ITEM := &"breaching_charge"
 ## The block's size (m): a 2 kg demolition block.
 const SIZE := Vector3(0.22, 0.06, 0.14)
+## A charge on a wall (its surface facing within WALL_NORMAL_Y of level; Captain, 2026-10-20:
+## "breaching charges need to stop leaving big craters in the ground with a small line of
+## unbroken fence or wall that cannot be walked past or over by AI"): it cuts a doorway through
+## the wall, BREACH_W_M wide, from the ground or floor at the wall's foot up BREACH_H_M, up to
+## BREACH_DEPTH_M deep (VoxelWorld.server_breach); its blast rounds the edges off above that
+## floor only, and the ground isn't cratered. One set higher than BREACH_HIGH_M over the floor
+## cuts the hole round itself instead. On the ground (or anything else) its crater is CRATER_M.
+const WALL_NORMAL_Y := 0.5
+const BREACH_W_M := 1.3
+const BREACH_H_M := 2.2
+const BREACH_DEPTH_M := 1.2
+const BREACH_HIGH_M := 1.9
+const CRATER_M := 0.4
+## Host: the last few charges that went off ({"pos", "at", "by": the placer's instance id, or 0}),
+## newest last: a squad stacked on a human breacher goes in on his (SquadAI, clearing).
+const RECENT_MAX := 8
+var recent: Array[Dictionary] = []
 
 ## Every peer: id -> {"id", "path" (the node it rides, from the level; "" for the level),
 ## "xform" (its transform in that node, as an Array), "world" (its world transform when
@@ -39,6 +56,7 @@ var level: Node3D
 var _next_id := 1
 var _due := {}  # host: id -> Time (s) it goes off
 var _last_pos := {}  # host: id -> where it was last seen (what it rode may be gone)
+var _placer := {}  # host: id -> who placed it (instance id, 0 for nobody)
 
 
 func _init() -> void:
@@ -149,6 +167,7 @@ func server_place_at(by: Soldier, xform: Transform3D, target: Node3D = null) -> 
 	var fuse := MissionRegistry.setting_f("charge_fuse_s", 10.0)
 	var rec := {"id": id, "path": path, "xform": _pack(local), "world": _pack(xform), "fuse_s": fuse, "by": by.display_name() if by else ""}
 	_due[id] = _now() + fuse
+	_placer[id] = by.get_instance_id() if by else 0
 	print("[charges] %s placed by %s on %s (fuse %.0f s)" % [id, rec.by, path if path != "" else "the world", fuse])
 	_client_add.rpc(rec)
 	if by and not by.is_ai():
@@ -185,13 +204,27 @@ func _detonate(id: String) -> void:
 	_last_pos.erase(id)
 	var node := get_charge_node(id)
 	var rides: Node = node.get_parent() if node else null
+	var wall := wall_normal(records.get(id, {}), rides == null or rides == level)
 	_client_remove.rpc(id)
+	var by := int(_placer.get(id, 0))
+	_placer.erase(id)
 	var lvl := level as CompoundLevel
 	if lvl == null:
 		return
-	print("[charges] %s went off at (%.1f, %.1f, %.1f)" % [id, pos.x, pos.y, pos.z])
-	Throwables.server_detonate(lvl, "frag", pos, &"", CHARGE_TNT_KG)
-	lvl.server_blast(pos, MissionRegistry.setting_f("charge_radius_m", 1.6))
+	recent.append({"pos": pos, "at": _now(), "by": by})
+	if recent.size() > RECENT_MAX:
+		recent.pop_front()
+	print("[charges] %s went off at (%.1f, %.1f, %.1f)%s" % [id, pos.x, pos.y, pos.z, " on a wall" if wall != Vector3.ZERO else ""])
+	Throwables.server_detonate(lvl, "frag", pos, &"", CHARGE_TNT_KG, false, wall)
+	var radius := MissionRegistry.setting_f("charge_radius_m", 1.6)
+	if wall != Vector3.ZERO:
+		var floor_y := floor_under(lvl, pos, wall)
+		if pos.y - floor_y > BREACH_HIGH_M:
+			floor_y = pos.y - BREACH_H_M * 0.5
+		lvl.server_breach(pos, wall, floor_y, BREACH_W_M, BREACH_H_M, BREACH_DEPTH_M)
+		lvl.server_blast(pos, minf(radius, maxf(pos.y - floor_y, 0.2)), 0.0)  # ragged edges, nothing below the floor, no crater
+	else:
+		lvl.server_blast(pos, radius, CRATER_M)
 	PeopleLayer.server_noise(lvl, pos, PeopleLayer.BLAST_HEARD_M)
 	Alert.server_noise(lvl, pos, Alert.BLAST)
 	if rides and rides != level and is_instance_valid(rides):
@@ -199,6 +232,40 @@ func _detonate(id: String) -> void:
 		if owner_body.has_method(&"server_explosion"):
 			owner_body.call(&"server_explosion", pos, "breaching_charge")
 	Contracts.objectives.server_charge_blast(pos)
+
+
+## The outward normal of the wall charge record `rec` was set on (level), or Vector3.ZERO if it
+## wasn't set on a wall of the world (`on_world`): on the ground, a crate, a person, a vehicle.
+## A charge's surface faces along its basis' y (surface_transform).
+static func wall_normal(rec: Dictionary, on_world: bool) -> Vector3:
+	var w: Array = rec.get("world", [])
+	if not on_world or w.size() != 12:
+		return Vector3.ZERO
+	var n := _unpack(w).basis.y.normalized()
+	if absf(n.y) >= WALL_NORMAL_Y:
+		return Vector3.ZERO
+	return Vector3(n.x, 0.0, n.z).normalized()
+
+
+## The ground or floor at the foot of the wall a charge at `pos` sits on (`normal` its outer
+## face): straight down from just outside it (the world's layer), never above the charge.
+static func floor_under(lvl: Node3D, pos: Vector3, normal: Vector3) -> float:
+	var from := pos + normal * 0.35 + Vector3.UP * 0.1
+	var hit := lvl.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 4.0, 1))
+	if hit.is_empty():
+		return pos.y - 1.0
+	return minf((hit.position as Vector3).y, pos.y - 0.1)
+
+
+## Host: where a charge went off within `radius_m` of `point` (flat) since `since`, placed by the
+## soldier with instance id `by` (anyone's if 0); Vector3.INF if none did.
+func blast_near(point: Vector3, radius_m: float, since: float, by := 0) -> Vector3:
+	for i in range(recent.size() - 1, -1, -1):
+		var r: Dictionary = recent[i]
+		var at: Vector3 = r.pos
+		if float(r.at) >= since and (by == 0 or int(r.by) == by) and Vector2(at.x - point.x, at.z - point.z).length() <= radius_m:
+			return at
+	return Vector3.INF
 
 
 # --- Every peer ---------------------------------------------------------------------------

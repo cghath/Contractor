@@ -51,6 +51,8 @@
 			"synth": {"length": 0.18, "peak": 0.7, "crack": {"amp": 0.4, "decay": 90}, "tail": {"amp": 0.9, "decay": 30, "lowpass": 0.12}}},
 		"impact_plate": {"range_m": 50, "unit_size": 5, "volume_db": -4, "pitch_spread": 0.08,
 			"synth": {"length": 0.35, "peak": 0.8, "crack": {"amp": 0.6, "decay": 120}, "ring": {"amp": 0.6, "hz": 2100, "decay": 14}}},
+		"door_kick": {"range_m": 60, "unit_size": 5, "volume_db": -2, "pitch_spread": 0.1,
+			"synth": {"length": 0.4, "peak": 0.85, "crack": {"amp": 0.5, "decay": 70}, "body": {"amp": 1.0, "from_hz": 110, "to_hz": 55, "decay": 18}, "tail": {"amp": 0.4, "decay": 12, "lowpass": 0.08}}},
 		"impact_body": {"range_m": 30, "unit_size": 3, "volume_db": -6, "pitch_spread": 0.1,
 			"synth": {"length": 0.16, "peak": 0.7, "body": {"amp": 0.9, "from_hz": 140, "to_hz": 70, "decay": 35}, "tail": {"amp": 0.5, "decay": 30, "lowpass": 0.06}}},
 		"explosion": {"range_m": 500, "near_m": 120, "travels": true, "unit_size": 60, "volume_db": 4, "pitch_spread": 0.05,

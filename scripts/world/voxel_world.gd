@@ -638,6 +638,22 @@ func send_edit_log_to(peer_id: int) -> void:
 	_receive_edit_log.rpc_id(peer_id, GameState.voxel_edits)
 
 
+## Host only. A breaching charge on a wall (Charges, Captain 2026-10-20: "breaching charges need
+## to stop leaving big craters in the ground with a small line of unbroken fence or wall that
+## cannot be walked past or over by AI"): a doorway cut through the wall behind `world_position`,
+## `width_m` wide, from `floor_y` (the ground or floor at the wall's foot, never below it) up
+## `height_m`, `depth_m` into the wall along -`normal` (the wall's outer face), every material but
+## steel, so a plinth or coping the blast's sphere only chips goes too and nothing is left to trip on.
+func server_breach(world_position: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
+	var c := terrain.to_local(world_position)
+	var f := terrain.to_local(Vector3(world_position.x, floor_y, world_position.z))
+	var basis := terrain.global_basis.inverse()
+	var n := basis * Vector3(normal.x, 0.0, normal.z).normalized()
+	var up := (basis * Vector3.UP).normalized()
+	_server_edit({"op": "breach", "c": _snap3(c), "f": _snap3(f), "n": _snap3(n.normalized()), "u": _snap3(up),
+		"bw": width_m / VOXEL_SIZE, "bh": height_m / VOXEL_SIZE, "bd": depth_m / VOXEL_SIZE})  # (not "w": a zone keeps its module id there)
+
+
 @rpc("authority", "call_local", "reliable")
 func apply_edit(edit: Dictionary) -> void:
 	if _built:
@@ -669,6 +685,8 @@ func _apply(edit: Dictionary) -> void:
 			var r := float(edit["r"])
 			_blast(centre, r)
 			_carved(AABB(centre - Vector3.ONE * r, Vector3.ONE * r * 2.0))
+		"breach":
+			_apply_breach(edit)
 		"holes":
 			var v: Array = edit["v"]
 			var box := AABB()
@@ -713,6 +731,39 @@ func _apply_shot(edit: Dictionary) -> void:
 			_hole_hits[cell] = hits
 	if broke:
 		_carved(box)
+
+
+## A breaching charge's doorway (server_breach): every voxel but steel whose centre lies in the
+## box across the wall ("bw" wide, "bd" deep behind "c", "bh" up from the floor point "f"; voxel units).
+func _apply_breach(edit: Dictionary) -> void:
+	var c := Vector3(edit.c[0], edit.c[1], edit.c[2])
+	var f := Vector3(edit.f[0], edit.f[1], edit.f[2])
+	var n := Vector3(edit.n[0], edit.n[1], edit.n[2])
+	var up := Vector3(edit.u[0], edit.u[1], edit.u[2])
+	var along := up.cross(n).normalized()
+	var half_w := float(edit.bw) * 0.5
+	var h := float(edit.bh)
+	var d := float(edit.bd)
+	var box := AABB(f, Vector3.ZERO)
+	for corner: Vector3 in [c + along * half_w + n, c - along * half_w + n, c + along * half_w - n * d, c - along * half_w - n * d]:
+		var flat := corner + up * (f - corner).dot(up)
+		box = box.expand(flat).expand(flat + up * h)
+	var lo := Vector3i(box.position.floor())
+	var hi := Vector3i(box.end.ceil())
+	for z in range(lo.z, hi.z + 1):
+		for y in range(lo.y, hi.y + 1):
+			for x in range(lo.x, hi.x + 1):
+				var cell := Vector3i(x, y, z)
+				var p := Vector3(cell) + Vector3.ONE * 0.5
+				var rel := p - c
+				var high := (p - f).dot(up)
+				var into := -rel.dot(n)
+				if high < 0.0 or high > h or absf(rel.dot(along)) > half_w or into < -5.0 or into > d:
+					continue
+				var mat := base_mat(int(_tool.get_voxel(cell)))
+				if mat != Mat.EMPTY and mat != Mat.STEEL:
+					_tool.set_voxel(cell, Mat.EMPTY)
+	_carved(box)
 
 
 ## Takes out each material within its share of radius `r` around `centre` (voxel units).

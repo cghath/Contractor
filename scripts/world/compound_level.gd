@@ -567,12 +567,19 @@ func voxel_worlds() -> Array[VoxelWorld]:
 
 ## Host only. A blast (a frag) at a world-space point against the voxels around it
 ## (VoxelWorld.server_blast on each loaded world it reaches).
-func server_blast(pos: Vector3, radius_m: float) -> void:
+## `crater_m`: the ground crater's radius (Digging), -1 for the blast's own, 0 for none.
+func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	for world in voxel_worlds():
 		world.server_blast(pos, radius_m)
 	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
 	if digging:
-		digging.server_blast(pos, radius_m)  # dug berms wear down (Digging)
+		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)
+
+
+## Host only. A breaching charge's doorway through the wall at `pos` (VoxelWorld.server_breach).
+func server_breach(pos: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
+	for world in voxel_worlds():
+		world.server_breach(pos, normal, floor_y, width_m, height_m, depth_m)
 
 
 ## Host only.

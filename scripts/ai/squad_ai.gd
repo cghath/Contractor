@@ -3584,18 +3584,222 @@ func _breach(op: Dictionary) -> float:
 	var door: Vector3 = op.entrance.door
 	var normal: Vector3 = op.entrance.normal
 	if how == "charge":
-		var charges := Charges.of(body)
-		if charges == null:
-			return 0.0
-		var along := Vector3((op.stack[0] as Vector3).x - door.x, 0.0, (op.stack[0] as Vector3).z - door.z)
-		along = along.normalized() if along.length() > 0.05 else normal.cross(Vector3.UP)
-		var at := door + along * CHARGE_ALONG_M + Vector3.UP * 1.0 + normal * Charges.SURFACE_OFFSET_M
-		charges.server_place_at(body, Transform3D(Basis.looking_at(-normal, Vector3.UP), at))
-		op.entrance.door = door + along * CHARGE_ALONG_M  # in through the new hole
-		return MissionRegistry.setting_f("charge_fuse_s", 10.0) + 0.8
+		return _set_charge(op, _charge_spot(op))
 	if order_throw(item, door - normal * BREACH_INSIDE_M + Vector3.UP * 0.5):
 		return float(BREACH_WAIT_S.get(how, 2.0))
 	return 0.0
+
+
+## A breaching charge on the wall CHARGE_ALONG_M from the doorway, on its face where it is
+## (Charges cuts a doorway there): on the far side of the doorway from the stack, so they wait
+## out of its blast (Throwables: none of its fragments come out the placer's side), else on the
+## stack's side where the wall ends past the doorway. The stack goes in through the new hole.
+## Returns how long until it's gone off and the dust settles (0: he has none).
+func _set_charge(op: Dictionary, spot: Dictionary) -> float:
+	var charges := Charges.of(body)
+	if charges == null or not Vitals.has_item(body.inventory, BREACH_ITEMS["charge"]):
+		return 0.0
+	var at: Vector3 = spot.at
+	var face: Vector3 = spot.face
+	if charges.server_place_at(body, Charges.surface_transform(at, face, Vector3.UP)) == "":
+		return 0.0
+	var door: Vector3 = op.entrance.door
+	op.entrance = (op.entrance as Dictionary).duplicate()  # (the building's own entrance stays where it is)
+	op.entrance.door = Vector3(at.x, door.y, at.z) + face * 0.3  # in through the new hole
+	op.charge_at = at
+	return MissionRegistry.setting_f("charge_fuse_s", 10.0) + 0.8
+
+
+## Where the op's charge goes (_set_charge): {"at" (on the wall's face), "face" (its outward normal)}.
+func _charge_spot(op: Dictionary) -> Dictionary:
+	if op.has("charge_spot"):
+		return op.charge_spot
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	var to_stack := Vector3((op.stack[0] as Vector3).x - door.x, 0.0, (op.stack[0] as Vector3).z - door.z)
+	to_stack = to_stack.normalized() if to_stack.length() > 0.05 else normal.cross(Vector3.UP)
+	var space := body.get_world_3d().direct_space_state
+	var spot := {"at": door - to_stack * CHARGE_ALONG_M + Vector3.UP * 1.0, "face": normal}
+	for along: Vector3 in [-to_stack, to_stack]:
+		var probe := door + along * CHARGE_ALONG_M + Vector3.UP * 1.0
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(probe + normal * 1.0, probe - normal * 1.5, 1))
+		if not hit.is_empty() and absf((hit.normal as Vector3).y) < Charges.WALL_NORMAL_Y:
+			spot = {"at": hit.position, "face": Vector3((hit.normal as Vector3).x, 0.0, (hit.normal as Vector3).z).normalized()}
+			break
+	op.charge_spot = spot
+	return spot
+
+
+## Breachers (Captain, 2026-10-20: "we need breacher roles for the player team", "they use
+## breaching charges"): with a breach plan on the op (Squad.breach_plan: "breacher" his slot,
+## first in the stack; "door" how he makes the way in; "bang" and "bang_by"), once the stack is
+## up he works the door while the rest hold: "charge" (_set_charge, the stack stood off), "shotgun"
+## (a buckshot round into the door frame's hinge side, from the doorway: the shotgun he holds),
+## "kick" (heard close by) or "open" (Stealth: eased open, nothing heard). Then "bang_by" puts the
+## bang through, and the stack goes in after it, the breacher first. Doorways are open in the
+## voxels (no door leaves yet): the kick and the hinge shot are the beat at the doorway a door
+## leaf will hang on. If he goes down first, the stack goes in its own way (the op's "breach").
+const DOOR_WAYS: Array[String] = ["charge", "shotgun", "kick", "open"]
+const DOOR_TIME_S := {"shotgun": 0.9, "kick": 0.8, "open": 2.5}
+## Where he works a door from: this far out of the doorway; he works it from where he got to
+## after DOOR_WALK_S. The hinge is DOOR_HINGE_M to the side of the doorway's middle.
+const DOOR_SPOT_M := 0.7
+const DOOR_WALK_S := 6.0
+const DOOR_HINGE_M := 0.5
+const KICK_HEARD_M := 25.0
+## The bang goes in this long after the breach (a charge's blast, a kick), and the stack this
+## long after a human breacher's breach when nobody has a bang to put in.
+const BANG_AFTER_S := 0.4
+const LEAD_BREACH_GO_S := 1.0
+## A human breacher's charge counts within this of the doorway, his hinge shot within
+## LEAD_SHOT_M of the door frame.
+const LEAD_CHARGE_M := 4.0
+const LEAD_SHOT_M := 2.0
+
+
+## The slot of the first breacher up among `units` (-1 for none).
+static func breacher_slot(units: Array) -> int:
+	for i in units.size():
+		var ai := units[i] as SquadAI
+		if ai and is_instance_valid(ai.body) and ai.body.role == Roles.BREACHER and ai.body.vitals.is_up():
+			return i
+	return -1
+
+
+## Whether this unit holds a 12 gauge with a round in it (the hinge shot).
+func has_breaching_gun() -> bool:
+	var w := body.active_weapon()
+	return w != null and "shotgun" in w.tags and body.inventory.rounds_in(body.active_slot) > 0
+
+
+## How `ai` makes the way in: `ordered` (a door way, "" for his own call) if he can, else in
+## Stealth an eased open, else a charge while he has one and `charge_ok`, else the shotgun on the
+## hinge with an enemy known inside, else a kick.
+static func door_way(ai: SquadAI, ordered: String, stealth: bool, charge_ok: bool, enemy_in: bool) -> String:
+	var has_charge := Vitals.has_item(ai.body.inventory, BREACH_ITEMS["charge"])
+	match ordered:
+		"charge":
+			if has_charge:
+				return "charge"
+		"shotgun":
+			if ai.has_breaching_gun():
+				return "shotgun"
+		"kick", "open":
+			return ordered
+	if stealth:
+		return "open"
+	if charge_ok and has_charge:
+		return "charge"
+	if enemy_in and ai.has_breaching_gun():
+		return "shotgun"
+	return "kick"
+
+
+## Whether the op's breacher can still work the door.
+static func breacher_up(op: Dictionary) -> bool:
+	var ai: Variant = op.get("breacher_ai")
+	return ai != null and is_instance_valid(ai) and is_instance_valid((ai as SquadAI).body) and (ai as SquadAI).body.vitals.is_up()
+
+
+## The breacher at the door (op "breaching"): to the doorway (a charge from his place in the
+## stack), the breach, then the entry's timing (_breach_done).
+func _work_door(op: Dictionary, now: float) -> void:
+	var how := String(op.door)
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	if how == "charge":
+		# To the wall where it goes, set it, and back to the stack while it burns (the waiting
+		# stack's _tactic_clear walks him back).
+		var cs := _charge_spot(op)
+		var at_wall := NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, (cs.at as Vector3) + (cs.face as Vector3) * DOOR_SPOT_M)
+		if _flat_distance(at_wall) > ARRIVE + 0.2 and now - float(op.get("breach_from", now)) < DOOR_WALK_S:
+			_go(at_wall, true)
+			return
+		var fuse := _set_charge(op, cs)
+		if fuse > 0.0:
+			_callout(&"tactic", "Breaching! Charge set!")
+			_breach_done(op, now, fuse)
+			return
+		how = "kick"  # none left (or no place for it): kick it in
+		op.door = how
+	var spot := NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, door + normal * DOOR_SPOT_M)
+	if _flat_distance(spot) > ARRIVE + 0.2 and now - float(op.get("breach_from", now)) < DOOR_WALK_S:
+		_go(spot, true)
+		return
+	_has_destination = false
+	_face(door - normal)
+	if how == "shotgun" and not _hinge_shot(op):
+		how = "kick"
+		op.door = how
+	match how:
+		"shotgun":
+			_callout(&"tactic", "Breaching!")
+		"kick":
+			_kick_door(door)
+			_callout(&"tactic", "Breaching!")
+	_breach_done(op, now, float(DOOR_TIME_S.get(how, 0.8)))
+
+
+## A buckshot round into the door frame on its hinge side. False if he isn't holding a loaded
+## shotgun.
+func _hinge_shot(op: Dictionary) -> bool:
+	if not has_breaching_gun():
+		return false
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	var hinge := door + normal.cross(Vector3.UP) * DOOR_HINGE_M + Vector3.UP * 1.0 - normal * 0.1
+	_aim_at(hinge)
+	var from := body.camera.global_position
+	body._server_fire.rpc_id(1, from, (hinge - from).normalized(), body.active_slot)
+	return true
+
+
+## A kick at the door: heard by those close by (people, the enemy as a muffled shot would be).
+func _kick_door(door: Vector3) -> void:
+	Sfx.server_play(&"door_kick", door + Vector3.UP * 0.8)
+	PeopleLayer.server_noise(body, door, KICK_HEARD_M)
+	if body.faction != &"hostile":
+		Alert.server_noise(body, door, Alert.SHOT, true)
+
+
+## The door is open (`wait` s from `now` for it to be: a charge's fuse, a kick's beat): the bang
+## at "bang_at" if there is one and someone to put it in, the stack after it ("go_at").
+func _breach_done(op: Dictionary, now: float, wait: float) -> void:
+	op.breaching = false
+	op.breached = true
+	var bang := String(op.get("bang", ""))
+	if bang != "" and int(op.get("bang_by", -1)) >= 0:
+		op.bang_at = now + wait + BANG_AFTER_S
+		op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
+	else:
+		op.go_at = now + wait
+	SessionLog.note("breach: %s %s the way in (bang '%s')" % [body.name, op.door, bang])
+
+
+## The stack's bang (a breach plan's "bang"), put through the doorway by "bang_by" once it's due.
+func _put_bang(op: Dictionary, now: float) -> void:
+	if bool(op.get("banged", false)) or now < float(op.get("bang_at", INF)):
+		return
+	op.banged = true
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	order_throw(BREACH_ITEMS.get(String(op.bang), &""), door - normal * BREACH_INSIDE_M + Vector3.UP * 0.5)
+
+
+## A human breacher's breach (op "on" a breacher, "on_breach"): his charge gone off by the door
+## (they go in through its hole), or his shotgun fired into the door frame, since the stack formed.
+func _lead_breached(op: Dictionary, lead: Soldier) -> bool:
+	var door: Vector3 = op.entrance.door
+	var since := float(op.get("since", 0.0))
+	var charges := Charges.of(body)
+	var blast := charges.blast_near(door, LEAD_CHARGE_M, since, lead.get_instance_id()) if charges else Vector3.INF
+	if blast != Vector3.INF:
+		if Vector2(blast.x - door.x, blast.z - door.z).length() > 1.0:
+			op.entrance = (op.entrance as Dictionary).duplicate()
+			op.entrance.door = Vector3(blast.x, door.y, blast.z)  # in through his hole
+		return true
+	var w := lead.active_weapon()
+	return lead.last_shot_at >= since and w != null and "shotgun" in w.tags and lead.last_shot_to.distance_to(door + Vector3.UP * 1.0) <= LEAD_SHOT_M
 
 
 ## The breach this unit's team would choose itself against a building the enemy holds (Captain:
@@ -3631,6 +3835,9 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 	var slot: int = t.slot
 	var door: Vector3 = op.entrance.door
 	if not is_finite(float(op.go_at)):
+		if bool(op.get("breaching", false)) and slot == int(op.get("breacher", -1)):
+			_work_door(op, now)
+			return
 		var spot: Vector3 = op.stack[slot]
 		if _flat_distance(spot) > SquadTactics.STACK_READY_M:
 			_go(spot, true)
@@ -3642,10 +3849,21 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		body.want_crouch = true  # low in the stack
 		var lead: Variant = op.get("on")
 		if lead != null and is_instance_valid(lead) and (lead as Soldier).vitals.is_up():
-			# Clear on me: hold the stack until he goes in, then in after him.
+			# Clear on me: hold the stack until he goes in, then in after him. On a human
+			# breacher: until his breach (then the bang, then in), or until he goes in.
 			if (op.ready as Dictionary).size() >= int(op.units) and not bool(op.get("told", false)):
 				op.told = true
-				_callout(&"tactic", "Stacked up. On you.")
+				_callout(&"tactic", "Stacked up. Your breach." if bool(op.get("on_breach", false)) else "Stacked up. On you.")
+			if bool(op.get("on_breach", false)) and not bool(op.get("breached", false)) and _lead_breached(op, lead as Soldier):
+				op.breached = true
+				var bang := String(op.get("bang", ""))
+				if bang != "" and int(op.get("bang_by", -1)) >= 0:
+					op.bang_at = now + BANG_AFTER_S
+					op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
+				else:
+					op.go_at = now + LEAD_BREACH_GO_S
+				_callout(&"tactic", "Moving in!")
+				return
 			var at := (lead as Soldier).global_position
 			var past := Vector3(at.x - door.x, 0.0, at.z - door.z).dot(op.entrance.normal as Vector3)
 			if past < -CLEAR_ON_ME_M or Buildings.contains(op.building, at):
@@ -3653,6 +3871,14 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 				_callout(&"tactic", "Moving in!")
 			return
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
+			if String(op.get("door", "")) != "" and not op.get("breached", false):
+				if breacher_up(op):
+					if not bool(op.get("breaching", false)):
+						op.breaching = true  # the breacher works the door (_work_door); the rest hold
+						op.breach_from = now
+					return
+				op.door = ""  # he's down: in their own way
+				op.breach = op.get("bang", "")
 			var wait := 0.0
 			if String(op.get("breach", "")) != "" and not op.get("breached", false):
 				op.breached = true
@@ -3661,8 +3887,13 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			_callout(&"tactic", "Breaching!" if wait > 0.0 else "Going in!")
 		return
 	if now < float(op.go_at) + slot * SquadTactics.ENTRY_GAP_S:
-		_has_destination = false
+		if now < float(op.go_at) and _flat_distance(op.stack[slot]) > SquadTactics.STACK_READY_M:
+			_go(op.stack[slot], true)  # the breacher, back from the doorway (or the charge) to his place
+		else:
+			_has_destination = false
 		_face(door)
+		if slot == int(op.get("bang_by", -1)):
+			_put_bang(op, now)
 		return
 	var floors: Array = op.get("floors", [op.rooms])
 	var level: int = (op.get("floor_of", {}) as Dictionary).get(slot, 0)

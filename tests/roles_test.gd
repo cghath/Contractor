@@ -67,8 +67,8 @@ func _test_assignment() -> void:
 	for team in 2:
 		var roles := layout.filter(func(s: Dictionary) -> bool: return s.team == team).map(func(s: Dictionary) -> StringName: return s.role)
 		check(roles.size() == 4 and roles.count(Roles.MEDIC) == 1, "fire team %s: four slots, one medic %s" % [Roles.TEAMS[team], roles])
-	check(Roles.ids().size() == 9 and Roles.has(&"grenadier") and Roles.has(&"autorifleman") and Roles.has(&"anti_tank")
-		and Roles.has(&"heavy_gunner") and Roles.has(&"ammo_bearer"), "nine roles from data/roles.json")
+	check(Roles.ids().size() == 10 and Roles.has(&"grenadier") and Roles.has(&"autorifleman") and Roles.has(&"anti_tank")
+		and Roles.has(&"heavy_gunner") and Roles.has(&"ammo_bearer") and Roles.has(Roles.BREACHER), "ten roles from data/roles.json")
 	# Captain, 2026-10-12: an AT role for the squad (a Carl Gustaf and three rounds), and the
 	# rifleman's AT4 now that there are launchers.
 	var at_plan := Roles.assign([&"anti_tank"])
@@ -99,6 +99,22 @@ func _test_assignment() -> void:
 	Roles.apply_kit(ab_inv, &"ammo_bearer")
 	check(ab_inv.count_of(&"belt_762x51") >= 3, "the ammo bearer carries spare belts for the gunner (%d)" % ab_inv.count_of(&"belt_762x51"))
 	ab_inv.free()
+	# Captain, 2026-10-20: "we need breacher roles for the player team", "they use breaching
+	# charges": picked the same way (a converted slot, never a medic's), his own kit.
+	var br_plan := Roles.assign([Roles.BREACHER])
+	check(br_plan.slots[0] >= 0 and br_plan.roles[br_plan.slots[0]] == Roles.BREACHER and layout[br_plan.slots[0]].role != Roles.MEDIC,
+		"a breacher pick takes a non-medic slot (%s)" % [br_plan.slots])
+	var br_inv := Inventory.new()
+	Roles.apply_kit(br_inv, Roles.BREACHER)
+	check(br_inv.slots[&"primary"] == &"mossberg590" and br_inv.slots[&"sidearm"] == &"m17" and br_inv.count_of(&"breaching_charge") == 3
+		and br_inv.count_of(&"flashbang") == 3 and br_inv.count_of(&"loader_12g_6") >= 4 and br_inv.count_of(&"ear_protection") == 1,
+		"the breacher kit: a breaching shotgun, an M17, three charges, three flashbangs, shells, ear pro (%s, %d charges, %d bangs, %d loaders)"
+		% [br_inv.slots[&"primary"], br_inv.count_of(&"breaching_charge"), br_inv.count_of(&"flashbang"), br_inv.count_of(&"loader_12g_6")])
+	var br_lx3 := Inventory.new()
+	Roles.apply_kit(br_lx3, Roles.BREACHER, true)
+	check(Roles.has_lx3(Roles.BREACHER) and br_lx3.slots[&"helmet"] == &"helmet_lx3", "the breacher has an LX-3 preset")
+	br_inv.free()
+	br_lx3.free()
 	for picks: Array in [[&"team_leader"], [&"medic"], [&"medic", &"medic"], [&"marksman", &"marksman"],
 			[&"team_leader", &"medic", &"marksman", &"grenadier"], [&"medic", &"medic", &"medic", &"rifleman"],
 			[&"marksman", &"marksman", &"marksman", &"marksman"]]:
@@ -485,6 +501,17 @@ func _test_team() -> void:
 	_press(KEY_3)
 	_press(KEY_1)  # Team > Assign to team > Red
 	check(a.color_team == "red" and b.color_team == "red" and _slot(0).color_team == "", "9 3 1 puts them in the red team")
+	# Team > Assign role (Captain, 2026-10-20: breacher roles): the selected AI play it from now on.
+	var roles_were := [a.role, b.role]
+	_press(KEY_F2)
+	_press(KEY_F4, true)
+	_press(KEY_9)
+	_press(KEY_6)
+	_press(KEY_1)  # Team > Assign role > Breacher
+	check(a.role == Roles.BREACHER and b.role == Roles.BREACHER and _slot(0).role != Roles.BREACHER, "F2, Shift+F4, 9 6 1 makes them breachers (%s, %s)" % [a.role, b.role])
+	a.role = roles_were[0]
+	b.role = roles_were[1]
+	check(not level.squad_for(&"friendly").assign_role(player, &"no_such_role"), "no role that isn't in data/roles.json")
 	_press(KEY_QUOTELEFT)
 	_press(KEY_9)
 	_press(KEY_4)
