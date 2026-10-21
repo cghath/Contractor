@@ -1,6 +1,6 @@
 # Terror groups and a smaller Black Ridge (proposal)
 
-Status: **proposal, waiting on the Captain's OK.** Section 7 (a living war) added 2026-10-20 19:20 CDT. Nothing here is built yet. Branch
+Status: **approved by the Captain 2026-10-20 (section 5), being built.** Section 7 (a living war) added 2026-10-20 19:20 CDT. Nothing here is built yet. Branch
 `claude/factions` (from a7e9207), 2026-10-20 19:00 CDT.
 
 The Captain's ask (2026-10-20): "our terrorist organization faction needs to look more like one,
@@ -186,9 +186,9 @@ terror groups", "a cartel or two"). A separatist cell is parked as a maybe for l
   are hill-clan fighters and deserters who tax the roads and sell their guns to whoever pays.
   Vantage arms it (story act 1 stays as written). It is the Valley Shura's blood rival: the
   feud over the road tax and the villages gives the faction war a steady local fight.
-- **Where (Proposed):** Highland Pass, Greyfell Moor, Pinewood Ridge and Blackwood (inland),
+- **Where (Proposed):** Highland Pass, Pinewood Ridge and Blackwood (inland),
   Gray-box compound (coast, so act 1 still has Black Ridge ground near the LHD), and hot zone **Black Ridge hills**
-  (`ridge_hot`). That is **5 of 22 contract zones (23%) instead of 22 of 22**.
+  (`ridge_hot`). That is **4 of 22 contract zones (18%) instead of 22 of 22** (Greyfell Moor went to the Highland Free Front).
 - **Fights as now:** Insurgent doctrine, its current kit and urban grey camo with the orange
   patch. It **loses the suicide bombers** (5.2): a road-tax militia doesn't blow itself up.
 - **Enemies:** as now, plus the Valley Shura, Kestrel and the Ashen Banner.
@@ -203,7 +203,8 @@ the hash pick.
 
 | Group | Contract zones | Hot zone | Map colour (IFF) |
 |---|---|---|---|
-| Black Ridge Militia | compound_01, highland_pass, greyfell_moor, pinewood_ridge, blackwood | ridge_hot | orange (militia) |
+| Black Ridge Militia | compound_01, highland_pass, pinewood_ridge, blackwood | ridge_hot | orange (militia) |
+| Highland Free Front | greyfell_moor | none | orange (militia) |
 | Ashen Banner | cove_outpost, landing_beach, ashfield, red_mesa, salt_pan | city_hot | red (hostile) |
 | Valley Shura | wadi_farm, dry_wadi, scrub_hollow, thornveld, hollow_downs | none | red (hostile) |
 | Saltline Syndicate | harbour_yard, fishers_reach, marrow_shore, mudflat_crossing | delta_hot | orange (militia) |
@@ -226,33 +227,47 @@ the hash pick.
   else. `""` no longer means Black Ridge. `FactionSkirmish` and `EnemyResponse` read the holder
   too, so the skirmish teams that come in are its real enemies (for example Kestrel vs Saltline).
 
-## 5. Calls for the Captain
+## 5. The Captain's calls (2026-10-20 ~19:40 CDT, via the question tool)
 
-1. **Approve the four groups** (names, roles, zones above), or rename or drop any. *Proposed: all four.*
-2. **Suicide bombers and VBIEDs** (already built, wave 6f, Black Ridge only today): move them to
-   the Ashen Banner only? Or keep them off entirely? *Proposed: Ashen Banner only.*
-3. **Red or orange:** terror groups red and cartels orange like Black Ridge, as in the table?
-   *Proposed: yes.*
-4. **The Valley Shura and the locals:** extra rebel-support cost for civilian casualties in its
-   zones, and no locals contracts against it? *Proposed: yes.*
-5. **Contract target follows the zone holder 70% of the time?** *Proposed: yes.*
-6. **Headwear and chest rigs:** new cloth items (shemagh, headwrap, balaclava, cap: helmet slot,
-   no protection) and a `chest_rig` vest (no plates, mag pouches), in 0.5 cm voxels.
-   *Proposed: build them after the faces session lands, since the head is FaceArt's now.* Until
-   then the groups get their look from clothes colours, chest gear and the patch.
-7. **Separatist cell** (section 6): later, or not at all? *Proposed: later.*
-8. **A living war (section 7):** zones change hands over days, driven by each faction's wants and
-   strength, at most 3 fronts at once and about one zone flip every 2-3 days? *Proposed: yes.*
-9. **A group's last zone can't fall** (so no group is wiped off the map for good)? *Proposed: yes.*
-10. **Fronts reach the company's ground?** Should factions ever attack a zone the company took?
-    *Proposed: not in this round. Later, as FOB-defence contracts.*
+1. **Groups: Captain, all four** (Ashen Banner, Valley Shura, Saltline Syndicate, Kestrel Cartel),
+   names kept as proposed.
+2. **Suicide bombers and VBIEDs: Captain, the Ashen Banner and the Valley Shura.** Black Ridge loses
+   them. A faction sends them when its data says "bombers": true.
+3. **Colours: Captain, as proposed.** Terror groups, the Concord and Vantage red; Black Ridge, both
+   cartels (and the Highland Free Front) orange.
+4. **The Valley Shura and the locals: Captain, no special rules.** It counts like any hostile for
+   rebel support and the locals contracts.
+5. **Contract target: Captain, the zone's holder 70% of the time.**
+6. **Headwear and chest rigs: Captain, after the faces session lands.**
+7. **Separatist cell: Captain, add it now** (section 6).
+8. **The living war: Captain, as proposed** (section 7).
+9. **A faction's last zone: Captain, "can be sieged but cannot fall unless the player explicitly
+   wipes them out".** Wiping out: **Captain, take its HQ and QRF bases in that zone AND kill or
+   capture its leaders** (its named HVTs). Until then a front on it never flips it.
+10. **The company's ground: Captain, yes, now.** Fronts can open on zones the company took.
+    How (Proposed): a front on a company zone posts a defend job (Hold the line) there for the
+    company's employer; if the front wins, a flipped zone goes back to the attacker
+    (ZoneControl state ENEMY again). The FOB's own zone can be sieged (a defend job, and every day
+    the siege lasts costs stores) but never falls, like a faction's last zone.
 
-## 6. Parked: a separatist cell (Proposed, later)
+## 6. The Highland Free Front: separatist cell (Captain: add it now; details Proposed)
 
-The Highland Free Front: a small ethnic separatist cell in the moors. It bombs Concord posts and
-kidnaps officials, and is willing to work with the company against the Concord. It would be the
-first hostile group that can turn friendly (rep above zero). Left out of this round to keep the
-map readable.
+- **What it wants:** a free homeland for the highland people, out from under the Eastern Concord.
+  It fights the Concord first; anyone else only when they're in the way.
+- **Where:** Greyfell Moor (taken out of Black Ridge's five), one small corner of the map. It
+  wants the highlands back (its home tag) and the Concord's posts.
+- **How it fights (doctrine `guerrilla`, like the Shura):** bombs and ambushes on Concord posts,
+  kidnapping officials, sniping from the moors. No suicide attacks.
+- **Kit (`highland`):** woodland-pattern smocks and old Concord surplus (helmets, carriers),
+  AK-74, AKS-74U, SVD, RPK-74, RPG-7. Patch: **orange**.
+- **Flag:** a fictional pennant, slate blue with a white mountain peak over three bars, no writing.
+- **Leaders (HVTs):** the Commandant, the Bomb-maker.
+- **Relations:** enemies the Eastern Concord, Black Ridge and the Ashen Banner. Neutral to the
+  company's employers at the start (start rep -10, so it can be won over): **the first hostile that
+  can turn friendly.** At rep 0 and up it fights alongside the company in skirmishes (it already
+  would: FactionSkirmish sends a faction the company gets on with as friendly).
+- **Contracts against it:** from the Concord-aligned side only (Meridian, the rare job): HVT
+  capture, raid. **Contracts for it (later):** jobs against the Concord, once its rep allows.
 
 ## 7. A living war: zones change hands (Captain, 2026-10-20)
 
