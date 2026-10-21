@@ -48,6 +48,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   the foot on its own node. That adds two meshes (about 1,000 to 3,000 triangles each) and two
   draw calls per body. A severed shin takes its foot with it. The leg's hit shape is unchanged.
 - Posed parts (`forearm:grip:`, `shin:boots`) now widen with a heavier build, as the plain parts did.
+### Helmets fit the new heads (Captain, 2026-10-21)
+
+#### Fixed
+- **Helmets are no longer too big.** They were shaped round the old, broader head and stood 3-4 cm
+  off the new faces' heads. Every helmet now rides snug, with about 1.5-2.5 cm of padding all
+  round, at every height and build, men and women. The LX-3's face guard closes round the face
+  as before. Hits on a helmet land on the shell as drawn.
+- Long hair on top no longer pokes through a helmet's crown.
+- A woman's bun, braid or ponytail goes flat under a heavy helmet's ear covers or the LX-3's nape
+  guard instead of showing through them, and comes back when the helmet is off.
+- **A head that comes off takes its face with it.** The eyes, mouth and brows stayed hanging
+  where the head had been while it rolled away, and a whole head could reappear on the stump
+  (on clients, or once the helmet fell off). Now the flying head is the soldier's own, eyes shut
+  and jaw slack, the helmet falls loose, and the body keeps only the torn neck. The same on
+  every peer, alive or dead.
 
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 

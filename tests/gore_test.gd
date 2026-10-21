@@ -37,6 +37,7 @@ func _ready() -> void:
 	await _test_frag_alive()
 	await _test_dead_he()
 	await _test_point_blank()
+	await _test_beheaded_face()
 	await _test_heavy_and_crush()
 	await _test_hanging()
 	await _test_gore_setting()
@@ -319,6 +320,36 @@ func _test_point_blank() -> void:
 	await _wait_for(func() -> bool: return _settled(s), 10.0)
 	check(_settled(s), "every piece settled and recorded (%s)" % [_pieces_at_records(s)])
 	check(s.vitals.gore_list().size() <= BlastGore.MAX_ENTRIES, "its gore stays under the cap (%d entries)" % s.vitals.gore_list().size())
+
+
+## Captain, 2026-10-21: "the face and neck stayed floating in the air while the head rolled
+## away". A head blown off takes its face with it (FaceRig: eyes, mouth, brows) and its helmet
+## falls loose; nothing of the face stays on the body, and nothing puts a whole head back on
+## the stump later (a late build, the hair coming untucked once the helmet's gone).
+func _test_beheaded_face() -> void:
+	print("Beheaded: the face goes with the head")
+	var s := _man("GoreFace", ["helmet"])
+	await _wait_for(func() -> bool: return s.model.face_rig != null and s.model.face_rig.is_built(), 10.0)
+	var rig := s.model.face_rig
+	var whole := VoxelArt.mesh(rig.head_model, rig.palette)
+	Throwables.server_detonate(level, "frag", Throwables.body_point(s) + s.global_basis.z * -0.15 - Vector3.UP * 0.25)
+	await _wait_for(func() -> bool: return _deform(s).piece_of(Vitals.HEAD) != null, 5.0)
+	var piece := _deform(s).piece_of(Vitals.HEAD)
+	check(Vitals.HEAD in _deform(s).severed() and piece != null, "the head comes off (%s)" % [_deform(s).severed()])
+	rig.setup(s.model, s.model.face)  # (as a late build or the hair untucking would)
+	await _seconds(1.0)
+	var mi := s.model.head.get_child(0) as MeshInstance3D
+	var left: Array = []
+	for part in FaceRig.PARTS:
+		var inst := mi.get_node_or_null(NodePath("Face_" + part)) as MeshInstance3D
+		if inst and inst.is_visible_in_tree():
+			left.append(part)
+	check(rig.head_off and left.is_empty(), "no eyes, mouth or brows left on the body (%s)" % [left])
+	check(mi.mesh != whole and mi.mesh != null, "the stump stays a stump: no whole head put back on it")
+	var helmet := s.model.head.get_node_or_null(^"helmet") as Node3D
+	check(helmet == null or not helmet.is_visible_in_tree(), "and no helmet left hanging where the head was")
+	var faced := piece != null and piece.find_children("Face_eye_l", "MeshInstance3D", true, false).size() == 1 		and piece.find_children("Face_mouth", "MeshInstance3D", true, false).size() == 1
+	check(faced, "the head that flies is his own, face and all (eyes shut, jaw slack)")
 
 
 ## A .50 through a dead man's arm takes it; a heavy vehicle over his head pulps it.

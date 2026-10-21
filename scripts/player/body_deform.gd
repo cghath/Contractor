@@ -741,6 +741,8 @@ func _drop(part: StringName, pivot: Node3D, mi: MeshInstance3D, piece_mesh: Mesh
 	look.layers = mi.layers
 	look.transform = mi.transform
 	rb.add_child(look)
+	if part == Vitals.HEAD and model.face_rig:
+		model.face_rig.head_severed(look)  # the face goes with the head (FaceRig), none left on the stump
 	var cut_y := _pivot_cut_y(mi, hull)
 	for i in range(1, pivot.get_child_count()):
 		var child := pivot.get_child(i) as Node3D

@@ -83,6 +83,7 @@ func _ready() -> void:
 	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
 	await _test_faces()
+	await _test_helmet_fit()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -1423,6 +1424,31 @@ func _test_faces() -> void:
 	player.face = old
 	await _seconds(0.3)
 	check(is_equal_approx(player.model.body_scale(), SoldierLook.height_of(old)), "and back as he was")
+
+
+## Captain, 2026-10-21: "the helmets are too big now". A worn helmet is drawn fitted to the new
+## heads (GearRig.helmet_fit): narrower and set back, so it rides snug; a woman's long hair goes
+## flat under a heavy helmet's ear covers and comes back when it's off.
+func _test_helmet_fit() -> void:
+	print("Helmet fit")
+	var foxtrot := _spawn_ai("Foxtrot", &"friendly", SPOT + Vector3(9.0, 0, 4.0), ["helmet"])
+	await _frames(3)
+	var piece := foxtrot.model.head.get_node_or_null(^"helmet") as VoxelArmor
+	check(piece != null and piece.transform.is_equal_approx(GearRig.helmet_fit(piece.item)) and is_equal_approx(piece.transform.basis.get_scale().x, GearRig.HELMET_FIT.x),
+		"a worn helmet is drawn fitted to the head (%s)" % (piece.transform.basis.get_scale() if piece else Vector3.ZERO))
+	var golf := _spawn_ai("Golf", &"friendly", SPOT + Vector3(10.0, 0, 4.0), [])
+	golf.model.body = VoxelArt.FEMALE
+	var her := SoldierLook.parse(SoldierLook.make(3, "US", VoxelArt.FEMALE))
+	golf.face = "%s:%s:%s:00111000:1:1000" % [her.skin, her.hair, her.eye]  # a bun
+	golf.model.set_face(golf.face)
+	await _frames(2)
+	golf.inventory.take(&"helmet_heavy")
+	await _frames(3)
+	var tucked := String(golf.model.head.get_meta(&"voxel_model"))
+	check(golf.model.hair_tucked and tucked == "head_f:30111000", "a woman's bun goes flat under a heavy helmet's ear covers (%s)" % tucked)
+	golf.inventory.strip()
+	await _frames(3)
+	check(not golf.model.hair_tucked and String(golf.model.head.get_meta(&"voxel_model")) == "head_f:00111000", "and comes back with it off")
 
 
 # --- Helpers --------------------------------------------------------------------------------
