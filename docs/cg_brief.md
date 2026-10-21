@@ -1,18 +1,18 @@
-# cghath: standing brief (the Captain, 2026-10-21)
+# cghath: working brief (2026-10-21)
 
 **Read this first, every session. It replaces "ask the Captain when a call is his" in the
 2026-10-20 task list. That line was wrong, and it's why your agent kept stopping.**
 
 ## Rule zero: never stop to ask. Decide, note it, keep going.
 
-The Captain plays the builds; he doesn't answer agents mid-task. Five or six times now your agent
-has stopped on questions that "need the Captain's answer". From now on:
+Captain is playtesting, not watching agents, so a question to him just stalls the work. Five or
+six times now your agent has stopped on questions that "need the Captain's answer". From now on:
 
-1. **When a call looks like his, make it yourself** with the rules in "His standing calls" below.
+1. **Make the call yourself**, using "Decisions already made" below.
    Pick what's closest to Arma 3 + ACE3/KAT + LAMBS/VCOM realism that's still fun to play.
 2. **Put every number you invent in data** (`data/*.json`) or a named const, marked
    `Proposed`, so it can be tuned without code.
-3. **Write each call down** under "Calls made for the Captain" at the bottom of
+3. **Write each call down** under "Calls made" at the bottom of
    `docs/audits/followups.md`: one line each, saying what you chose, why, and what the alternative
    was. Then carry on.
 4. **Finish the whole task:** code, tests, CHANGELOG, push. If one piece really can't be done
@@ -22,7 +22,7 @@ has stopped on questions that "need the Captain's answer". From now on:
    or a hard rule below that two requirements contradict. Even then, take the safe option, log it
    and continue.
 
-## His standing calls (answers to the usual questions)
+## Decisions already made (answers to the usual questions)
 
 - **Art:** characters and gear are **0.5 cm voxels** (VoxelArt BODY_VOXEL; gear FINE_VOXEL). No
   meshes or textures for bodies. Real camo patterns.
@@ -45,22 +45,22 @@ has stopped on questions that "need the Captain's answer". From now on:
 - **UI:** use the shared UiKit kit. Every menu says what it's for. It must fit the ui_test's 10
   resolutions.
 - **Testing:**
-  - headless Godot only, never pop a window, because the Captain games on this PC;
+  - headless Godot only, never pop a window, because Captain games on this PC;
   - set CONTRACTOR_PORT and CONTRACTOR_TEST_TAG, because other agents test in parallel;
   - run your affected suites plus smoke, not the full suite locally; CI runs the full set;
   - test logs are never deleted.
 - **Branches:**
   - base new work on `origin/claude/ai-driving`, which has everything (v0.5.1 = 1a74488);
   - one branch per task; push it;
-  - **You may update `dev` as needed** with new features and content (the Captain, 2026-10-21).
+  - **You may update `dev` as needed** with new features and content (Captain, 2026-10-21).
     A change only has to be compatible and not a major regression: no suite that passed before
     now fails.
-  - **Your review is sufficient** (the Captain, 2026-10-21). Where something needs a review or
-    approval before it merges or ships (yours, Claude's or another agent's), your review counts as
-    sign-off in the Captain's place. Don't wait for him.
+  - **Your review is enough** (Captain, 2026-10-21). Where something needs a review or approval
+    before it merges or ships (yours, Claude's or another agent's), your review is the sign-off.
+    Nobody else needs to approve it.
   - Claude merges your branches into claude/ai-driving too and cuts builds.
   - Don't wait for a merge to start the next task.
-- **When something lands:** a CHANGELOG entry, then a short note in the Captain's Discord thread.
+- **When something lands:** a CHANGELOG entry, then a short note in Captain's Discord thread.
 
 ## Already done or taken by Claude: don't redo
 
@@ -111,7 +111,7 @@ only partly built: the part to build is spelled out. Already built, so don't red
 Bring `feat/missions-2`, `feat/voxel-smoke` and the `feat/demolitions` F-122 commit up to date
 with origin/claude/ai-driving, get their suites green, and push. Close `feat/economy-balance`.
 
-### 1. World expansion: the top priority (the Captain: "true expansion of terrains and props/buildings")
+### 1. World expansion: the top priority (Captain: "true expansion of terrains and props/buildings")
 
 Today, one zone of 2-5 km² is a heightmap with 11 presets:
 - noise hills, dry wadis and one sea edge;
@@ -315,7 +315,7 @@ for performance, and the voxel world stays the source of truth.
 When the queue is done: the oldest open F-xx item, then anything in docs/build_plan.md marked
 Queued.
 
-## Calls made for the Captain
+## Calls made
 
 Add these to the bottom of docs/audits/followups.md as you go, one line each:
-`date | what was decided | why | the alternative`. The Captain reads them when he reviews.
+`date | what was decided | why | the alternative`. Captain reads them when he gets to them.
