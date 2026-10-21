@@ -64,7 +64,7 @@ const AIMER_ROUNDS := 23
 ## A hostile the host treats with a device of each kind before the client joins (_stage_patient):
 ## the client checks they're drawn from replicated state alone, then asks for the tourniquet off.
 const PATIENT := "Patient"
-const PATIENT_AT := Vector3(-4, 0.1, 36)
+const PATIENT_AT := Vector3(-20, 0.1, 36)  # (14 m from the gore test's frag at GORED_AT[0]: its blast burned him)
 ## Fix B-08 (co-op soak S0706: clients a round above the host while it fired): once the client
 ## is in, the host fires the dragger's rifle dry a round a frame or so, picking up a magazine
 ## halfway (a whole new snapshot, net_gear, among the counts); the client must end on 0 too.
