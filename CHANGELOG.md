@@ -11,6 +11,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Voxel smoke (Captain's list for cghath, 2026-10-20, "World": S5, "Voxel smoke (CS2-style)")
+
+#### Changed
+- **Smoke is a volume now, not a ball of puffs.** A smoke grenade's cloud fills a grid of
+  half-metre cells. It spreads from the grenade cell by cell and stops at walls, floors and
+  ceilings. A closed room fills and holds it; from a room with a door, what doesn't fit pours out
+  of the doorway. In the open it builds a low, rounded cloud with a ragged edge. It drifts with
+  the wind (stronger in rain and storms), thinning on its upwind side first, then thins and is
+  gone after 30 s as before. It looks like the game: see-through boxes for the thin outer layer,
+  opaque boxes in the body, in the grenade's colour.
+- **What the AI can see follows the real cloud.** Sight is blocked by how much smoke is actually
+  on the line: half a metre of the cloud's body blocks it, its thin outer layer doesn't. Smoke in
+  a room blocks a look in through the door only once it fills the doorway.
+- **Blasts push holes in smoke.** A frag, rocket, mortar round, charge or car bomb clears the
+  smoke round it; the hole fills back in from its edge over about two seconds. A wall it blows
+  open lets the smoke through.
+- **Rounds part smoke for a moment.** Shooting through a cloud clears the cells on the round's
+  line, so you can see down it for about a second before it closes.
+- **Every player sees the same cloud**, late joiners too. The host sends a cloud's seed and its
+  blasts and rounds, and every machine grows the same one. Coloured smokes keep their colour, so
+  purple still sets an extraction point and the helicopters still land on theirs.
+
+#### Added
+- A `smokecloud` test suite (also on CI): a room filling and stopping at its walls, smoke out of a
+  door, the compound's shed, sight through thick and thin smoke and through a doorway, thinning,
+  wind, a frag's hole refilling, rounds parting it, purple, the same cloud from the same seed (for a
+  late joiner, and after an event that arrived late), and the cost of eight clouds at once.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed
