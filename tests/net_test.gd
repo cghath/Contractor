@@ -47,6 +47,10 @@ const AIMER_AT := Vector3(4, 0.1, 33)
 ## Rounds the aimer has left after firing some before the client joins: the counts
 ## (Inventory.net_ammo) say so, whatever snapshot (net_gear) came with them (playtest blocker B2).
 const AIMER_ROUNDS := 23
+## A hostile the host treats with a device of each kind before the client joins (_stage_patient):
+## the client checks they're drawn from replicated state alone, then asks for the tourniquet off.
+const PATIENT := "Patient"
+const PATIENT_AT := Vector3(-4, 0.1, 36)
 ## Fix B-08 (co-op soak S0706: clients a round above the host while it fired): once the client
 ## is in, the host fires the dragger's rifle dry a round a frame or so, picking up a magazine
 ## halfway (a whole new snapshot, net_gear, among the counts); the client must end on 0 too.
@@ -155,6 +159,36 @@ func _stage_drag() -> void:
 	# It starts SMOKE_AGE_S old, so the check doesn't hang on how long the client takes to join
 	# (a quick join reached the client at 1.6 s, under the old 2 s mark, and failed).
 	level.spawn_smoke.rpc(Vector3(-12, 0.1, 30), "purple", SMOKE_AGE_S)
+	_stage_patient(make.call(PATIENT, PATIENT_AT))
+
+
+## Host: PATIENT gets a bleeding thigh under a tourniquet, a splinted shin, an IV with a bag
+## running, a blanket and burns (BodyDevices, BodyCondition), all before the client joins.
+func _stage_patient(patient: Soldier) -> void:
+	await get_tree().create_timer(0.3).timeout
+	var m: WoundModel = patient.vitals._model
+	m._add_wound(Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")["at"] = Vector3(-0.075, 0.6, -0.085)
+	m._add_wound(Vitals.SHIN_R, "fracture", 0.0, &"tibia_r")
+	m.blood = 0.8
+	m.update_state(0.0)
+	patient.vitals._after_change(true)
+	patient.vitals.care_rng.seed = 3
+	var done := []
+	for t: Array in [[&"tourniquet", Vitals.THIGH_L], [&"splint", Vitals.SHIN_R], [&"iv_18", Vitals.FOREARM_L],
+			[&"saline_500", Vitals.FOREARM_L], [&"hypothermia_blanket", Vitals.TORSO]]:
+		if patient.vitals.server_apply_treatment(t[0], t[1]):
+			done.append(t[0])
+	patient.vitals.server_burn(0.2)
+	print("[host] treated the patient: %s" % [done])
+
+
+## Host: the client has seen the patient's devices; the thigh is packed and its tourniquet comes off.
+@rpc("any_peer", "call_remote", "reliable")
+func _host_patient_tourniquet_off() -> void:
+	var patient: Soldier = _combatant(PATIENT)
+	if multiplayer.is_server() and patient:
+		patient.vitals.server_apply_treatment(&"hemostatic_gauze", Vitals.THIGH_L)
+		print("[host] took %d tourniquet(s) off the patient" % patient.vitals.server_remove_tourniquets(Vitals.THIGH_L))
 
 
 func _give_kit(id: int) -> void:
@@ -298,6 +332,7 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.role == Roles.MARKSMAN, 3.0)
 	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
 	await _check_late_drag()
+	await _check_devices()
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:
@@ -518,6 +553,37 @@ func _check_late_drag() -> void:
 	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
 		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
+
+
+## The patient the host treated before this client joined (_stage_patient): every device drawn
+## here from the replicated wound state, on the right part; the tourniquet gone once the host
+## takes it off.
+func _check_devices() -> void:
+	var devices := func() -> BodyDevices:
+		var p: Soldier = _combatant(PATIENT)
+		return p.model.get_node(^"WoundMarks").devices if p else null
+	await _wait_for(func() -> bool:
+		var d: BodyDevices = devices.call()
+		return d != null and not d.shown(&"tourniquet").is_empty() and not d.shown(&"bag").is_empty(), 5.0)
+	var d: BodyDevices = devices.call()
+	if d == null:
+		check(false, "devices drawn on a client: no patient here")
+		return
+	var where := func(kind: StringName) -> Array: return d.shown(kind).map(func(e: Dictionary) -> StringName: return e.part)
+	var patient: Soldier = _combatant(PATIENT)
+	var condition: BodyCondition = patient.model.get_node(^"WoundMarks").condition
+	check(where.call(&"tourniquet") == [Vitals.THIGH_L] and where.call(&"splint") == [Vitals.SHIN_R] and where.call(&"iv") == [Vitals.FOREARM_L]
+		and where.call(&"bag") == [Vitals.CHEST] and d.bag_fill() > 0.0 and Vitals.CHEST in where.call(&"blanket")
+		and d.voxels_on(Vitals.THIGH_L) > 0 and d.tourniquet_times(Vitals.THIGH_L).size() == 1,
+		"devices drawn on a client: tourniquet %s, splint %s, IV %s, bag %s (%.2f full), blanket" % [
+			where.call(&"tourniquet"), where.call(&"splint"), where.call(&"iv"), where.call(&"bag"), d.bag_fill()])
+	check(absf(condition.burn() - 0.2) < 0.02 and not condition.overlaid().is_empty() and condition.pallor() > 0.0,
+		"and its burns and pallor (%.2f burned, pallor %.2f)" % [condition.burn(), condition.pallor()])
+	_host_patient_tourniquet_off.rpc_id(1)
+	await _wait_for(func() -> bool: return d.shown(&"tourniquet").is_empty(), 5.0)
+	var dressing: StringName = patient.model.get_node(^"WoundMarks").dressing_on(Vitals.THIGH_L)
+	check(d.shown(&"tourniquet").is_empty() and &"tourniquet" not in d.devices_on(Vitals.THIGH_L) and d.tourniquet_times(Vitals.THIGH_L).is_empty() and dressing == &"gauze",
+		"the host takes the tourniquet off: gone here too, the packed wound under gauze (%s on the thigh, %s)" % [d.devices_on(Vitals.THIGH_L), dressing])
 
 
 ## AI virtualization in co-op (docs/virtualization.md): a group the host holds as a profile isn't
