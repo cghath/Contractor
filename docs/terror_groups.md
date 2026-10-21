@@ -1,6 +1,6 @@
 # Terror groups and a smaller Black Ridge (proposal)
 
-Status: **proposal, waiting on the Captain's OK.** Nothing here is built yet. Branch
+Status: **proposal, waiting on the Captain's OK.** Section 7 (a living war) added 2026-10-20 19:20 CDT. Nothing here is built yet. Branch
 `claude/factions` (from a7e9207), 2026-10-20 19:00 CDT.
 
 The Captain's ask (2026-10-20): "our terrorist organization faction needs to look more like one,
@@ -241,6 +241,11 @@ the hash pick.
    *Proposed: build them after the faces session lands, since the head is FaceArt's now.* Until
    then the groups get their look from clothes colours, chest gear and the patch.
 7. **Separatist cell** (section 6): later, or not at all? *Proposed: later.*
+8. **A living war (section 7):** zones change hands over days, driven by each faction's wants and
+   strength, at most 3 fronts at once and about one zone flip every 2-3 days? *Proposed: yes.*
+9. **A group's last zone can't fall** (so no group is wiped off the map for good)? *Proposed: yes.*
+10. **Fronts reach the company's ground?** Should factions ever attack a zone the company took?
+    *Proposed: not in this round. Later, as FOB-defence contracts.*
 
 ## 6. Parked: a separatist cell (Proposed, later)
 
@@ -249,7 +254,188 @@ kidnaps officials, and is willing to work with the company against the Concord. 
 first hostile group that can turn friendly (rep above zero). Left out of this round to keep the
 map readable.
 
-## 7. Build plan (after the OK)
+## 7. A living war: zones change hands (Captain, 2026-10-20)
+
+The Captain: "the world needs to feel dynamic, zones change hands. different factions fight over
+different areas for different reasons". The how below is **Proposed**.
+
+### 7.1 What exists to build on
+
+- **`WorldSites`** (wave 6c): a hot zone's holder, grip (0..1) and flashpoint flag, saved in the
+  campaign section `world_sites`.
+  - A contract won against the holder takes 0.3 grip.
+  - Each day (`Economy.advance_days`) a grip at or under 0.3 has a 20% chance to flip to one of
+    the holder's enemies; otherwise grip repairs 0.06 a day.
+  - It only covers the 5 hot zones, and its random roll is unseeded (not deterministic).
+- **`ZoneControl`**: the theatre map's controller, side and contested flag
+  (`server_set_controller`), and the company's own zone flips (HQ and QRF bases down).
+- **`FactionSkirmish`**: a team of the holder's enemy hits one of its sites while the squad is
+  in the zone (60% every 12-20 min).
+- **`EnemyCommand`** and **`Pressure`**: within one deployment in a hot zone, the enemy's
+  reserves, counterattacks and reoccupation.
+- **`RebelSupport`**: per region, 0-100, up with help and down with civilian casualties.
+- **`RegionMap.links()`**: which zones border which (the crossings).
+- **`Contracts.server_refresh_board`**: already posts a flashpoint's own war job.
+
+### 7.2 Every zone has a holder, a grip and a front
+
+- `WorldSites` grows from 5 hot zones to **every enemy-held zone** (all 22 contract zones and 5
+  hot zones), seeded from section 4's spread.
+- Each row gets new fields:
+  - `front`: the attacker, and since which day;
+  - `progress` (0..1): how much of the zone the attacker holds;
+  - `since_day`.
+- Zones the company holds are out of the war (call 10).
+- `ZoneControl` reads the row:
+  - its holder is the controller;
+  - a zone with a front is **contested** (the hatching the map already has).
+
+### 7.3 What each faction wants, and why
+
+Each zone gets **asset tags** from what's on it. Most are already in its modules; the rest are a
+few new tags in `data/contracts.json`:
+
+| Asset tag | Where it comes from |
+|---|---|
+| `village` | village and town modules |
+| `mosque` | the town modules (and a new `mosque` tag on village zones that have one) |
+| `crossing` | checkpoints, and zones on a region's edge |
+| `route` | zones on the coast-to-inland road chain |
+| `harbour` | coast zones with water |
+| `oil` | new data tags on salt_pan, red_mesa, thornveld |
+| `airfield` | new data tags on ashfield, landing_beach |
+| `hq` | hq and qrf_base modules |
+| `fields` | new data tags on kestrel_valley, old_orchards, wadi_farm |
+| `home` | each faction's starting zones |
+
+Each faction weights the tags (a new `"wants"` map in `data/factions.json`):
+
+| Faction | Wants most (weight), and why |
+|---|---|
+| Ashen Banner | oil 3, airfield 3, hq 2, mosque 1: money and spectacle; seize what the world notices |
+| Valley Shura | village 3, mosque 3, fields 1: the people, the pulpits and the recruits |
+| Saltline Syndicate | harbour 3, crossing 3, route 2: the routes the goods move on |
+| Kestrel Cartel | fields 3, route 3, crossing 2: field to lab to the coast |
+| Black Ridge | home 4, crossing 2, route 1: its home valleys and the road tax |
+| Eastern Concord | hq 3, airfield 3, crossing 2: strategic sites and the border |
+
+A zone's **worth** to a faction is the sum of its tag weights. That is why the Shura fights over
+villages and the cartels over crossings.
+
+### 7.4 Each faction's strength
+
+- **Strength** (0-100), one number per faction, saved in the campaign section.
+- **It rises** each day:
+  - from its zones' worth to it (income);
+  - more slowly for a predatory group in a region where rebel support is high (7.6).
+- **It falls** with:
+  - its men the company kills (the `heat_kill` hook): 0.2 each;
+  - a contract won against it: 6;
+  - an HQ or QRF base of its taken out: 10;
+  - a lost attack: 8.
+- Strength is what an attack is made of, and what a holder defends with.
+
+### 7.5 The daily war tick (host, deterministic)
+
+- **When:** `Economy.advance_days`, once per day passed.
+- **Deterministic:**
+  - the roll for zone Z on day D is `RNG(hash(war_seed, D, Z))`;
+  - `war_seed` is set once when a campaign starts and saved;
+  - the same campaign plays the same war, and a reload changes nothing.
+- **1. Fronts resolve.** Each zone with a front:
+  - the attacker's progress moves by (attacker strength × worth − holder strength × grip) ×
+    0.1, plus a small roll;
+  - at progress 1 the zone **flips**:
+    - new holder at grip 0.55;
+    - flashpoint (a war job);
+    - a news line;
+  - at progress 0 the attack **fails**: the front closes, the attacker loses 8 strength, and a
+    news line goes out;
+  - a front open more than 6 days stalls and closes.
+- **2. New fronts.**
+  - Only while fewer than **3 fronts** are open (call 8).
+  - Each faction with strength over 40 and no front of its own may attack.
+  - Its target is the best-worth zone **bordering one it holds** (`RegionMap.links`) whose holder
+    is one of its enemies.
+  - It attacks when that target's holder is weak (grip × holder strength low enough).
+  - Weak grips draw attacks first: the 0.3 contested grip stays the trigger.
+- **3. Grip repairs** 0.06 a day where there's no front (as now).
+- **Pace:** with these numbers, about one zone changes hands every 2-3 days of campaign time.
+  Tuned in tests, not playtests.
+- **Never:**
+  - a faction's last zone (call 9);
+  - company or FOB zones (call 10);
+  - a zone where the squad is deployed right now (it resolves after the debrief).
+
+### 7.6 The player's actions shift it
+
+- **Hitting a faction** weakens it:
+  - a contract won against the holder takes its grip (0.3, as now) and strength (6);
+  - in a contested zone, the win also moves the front 0.25 away from whoever the company hit;
+  - kills drain strength (7.4).
+- **Taking out an HQ or QRF base** knocks 0.15 grip on top, saved even without a contract.
+- **Rebel support helps the locals** (Proposed):
+  - at 40 and up in a region, the predatory groups' (Black Ridge, both cartels) grip there
+    repairs at half speed;
+  - at 60 and up, their strength income there is cut by a quarter: villagers stop paying the tax;
+  - at 80, the locals' rebels contest a weak predatory zone themselves. That opens a front with
+    "rebels" as attacker, and a win makes it **neutral** ground, held by the locals.
+  - Low support (under 20) does the opposite for the Valley Shura: the people turn to it.
+- Working for an employer on a front (for example a US job against the Banner in a contested
+  zone) is how the company takes sides.
+
+### 7.7 The player sees it
+
+- **News at the base** each morning:
+  - a short "overnight" list on the base screen and the board, read out as the liaison's or a
+    local stringer's radio line;
+  - example: "Overnight: the Valley Shura took the Dry wadi checkpoint from Black Ridge.
+    Fighting goes on at Red Gulch between the Kestrel Cartel and the Saltline Syndicate.";
+  - lines are built from the zone's best-worth site.
+- **Looted enemy radios** (`RadioChatter`) carry per-group lines about the front: "Hold the pass,
+  the cartel's trucks are coming up from the river".
+- **Theatre map:**
+  - control colours (IFF) and contested hatching update each day;
+  - an arrow from the attacker's neighbouring zone shows each front;
+  - the zone tooltip names who is attacking whom, and why ("the Shura wants the villages").
+- **Deploying into a contested zone, the fight is already on:**
+  - the attacker holds `progress` × the zone's sites: its garrisons in those, the holder's in the
+    rest;
+  - a `FactionSkirmish` team is mid-assault on a site near the line when the squad lands (the
+    first skirmish at 30-60 s, not 5-10 min, and at twice the size);
+  - more skirmishes come for the whole deployment.
+- **Refugees:**
+  - in a contested zone, civilians walk out along the roads in families of 3-6 with bundles,
+    toward the neighbour that isn't at war;
+  - the front's villages are half empty;
+  - a flipped zone's villages refill over 3 days.
+  - Built on the existing PeopleLayer civilians.
+
+### 7.8 Contracts follow the war
+
+- The board weights zone picks toward **fronts** (×3) and **zones flipped in the last 3 days**
+  (×2); quiet zones are ×1.
+- Every new flip posts a flashpoint war job, as hot zones do today, now for every zone.
+- Each front's employer offers fit its side:
+  - the US, UK and Canada against the Banner and the Concord;
+  - Meridian against whoever sits on its routes;
+  - the locals' contracts against the predatory groups.
+- A war job's brief says who is fighting whom ("The Kestrel Cartel is pushing into Red Gulch;
+  the Syndicate is holding. Meridian wants the Syndicate's convoy stopped while it's stretched").
+- The target follows the zone holder (call 5). On a front, it is the holder or the attacker,
+  whichever the employer is at war with.
+
+### 7.9 Saved, host-authoritative, synced
+
+- **Saved:** everything lives in the campaign section `world_sites`: rows, faction strength,
+  `war_seed`, and the last 10 news lines.
+- **Host only:** the host runs the tick.
+- **Synced:** `Economy._public` already carries `world_sites` to every peer; strength and news
+  ride along.
+- **Old saves:** a save from before this seeds the new rows from the spread on load. Hot zones
+  keep their saved holder.
+
+## 8. Build plan (after the OK)
 
 1. `data/factions.json`: the 4 factions (`side`, `nation`, `kit`, allies and enemies, HVT
    titles), their 4 data kits (with a per-man `variants` list for mixed clothes), and Black
@@ -267,6 +453,16 @@ map readable.
 7. Radio chatter: per-group callsigns and lines (`RadioChatter`).
 8. Contract types and site names per group (IED workshop, drug lab, warehouse).
 9. Bombers gated on the Captain's call 2.
+10. The living war (section 7), in its own commits:
+    - `WorldSites` for every zone, with fronts, progress and strength;
+    - the zones' asset tags and the factions' `wants`;
+    - the deterministic daily tick;
+    - the player's effects and the rebel-support effects;
+    - the morning news and radio lines;
+    - map fronts (arrows and hatching);
+    - split garrisons and an early skirmish in contested zones;
+    - refugees;
+    - board weighting toward fronts.
 
 **Tests:**
 
@@ -274,4 +470,11 @@ map readable.
 - contracts: target follows the holder, and Black Ridge's share is at or below 25%;
 - map: each group holds its zones, with the right side and colour;
 - missions: one contract per group plays;
+- world sites:
+  - the war tick is deterministic (same seed, same war);
+  - a zone flips once an attack wins, and the last zone never falls;
+  - a contract win moves a front;
+  - the board leans toward fronts;
+  - news lines appear;
+  - a contested zone spawns both sides;
 - smoke.
