@@ -351,6 +351,11 @@ const HR_DEADLY_SLOW := 35.0
 const HR_DANGER_S := 60.0
 ## Drugs other than morphine, by item id: one dose goes in over absorb_s, the level halves
 ## every half_life_s, and each dose in the blood moves the heart rate by hr (bpm).
+## The last five come from consumables (items expansion, 2026-10-20; Consumables, items.json
+## "consume"), never from the medical menu: each dose in the blood eases "relief" of pain (the
+## two over-the-counter painkillers together at most OTC_RELIEF_MAX, far under morphine) or
+## speeds stamina recovery by "stamina" (all of them together at most STAMINA_BOOST_MAX).
+## Water and rations stand in for food and drink, which aren't tracked yet: a stamina boost only.
 const EPINEPHRINE := &"epinephrine"
 const ATROPINE := &"atropine"
 const ADENOSINE := &"adenosine"
@@ -358,7 +363,16 @@ const DRUGS := {
 	&"epinephrine": {"absorb_s": 10.0, "half_life_s": 120.0, "hr": 30.0},
 	&"atropine": {"absorb_s": 10.0, "half_life_s": 600.0, "hr": 30.0},
 	&"adenosine": {"absorb_s": 2.0, "half_life_s": 120.0, "hr": -40.0},
+	&"caffeine": {"absorb_s": 120.0, "half_life_s": 1800.0, "hr": 6.0, "stamina": 0.3},
+	&"ibuprofen": {"absorb_s": 240.0, "half_life_s": 2700.0, "hr": 0.0, "relief": 0.12},
+	&"paracetamol": {"absorb_s": 240.0, "half_life_s": 2700.0, "hr": 0.0, "relief": 0.1},
+	&"water": {"absorb_s": 60.0, "half_life_s": 2700.0, "hr": 0.0, "stamina": 0.1},
+	&"ration": {"absorb_s": 300.0, "half_life_s": 3600.0, "hr": 0.0, "stamina": 0.15},
 }
+## Pain the over-the-counter painkillers (DRUGS with "relief") take off together, at most.
+const OTC_RELIEF_MAX := 0.25
+## Stamina recovery the consumables (DRUGS with "stamina") add together, at most (a share: 0.5 = half again as fast).
+const STAMINA_BOOST_MAX := 0.5
 ## Epinephrine's wake-up roll (decided; build plan: a chance to come round sooner, never a
 ## revive): given to someone out with no cause left but a concussion knockout (or already
 ## coming round), EPI_WAKE_CHANCE that the knockout clears and they come round in EPI_WAKE_S.
@@ -558,8 +572,8 @@ var _pain_over_s := 0.0         # how long pain has stayed at or over the knocko
 ## Beats per minute (see HR_REST).
 var heart_rate := HR_REST
 ## Other drugs (DRUGS ids): in the blood and still going in, in doses.
-var drug_level := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
-var drug_depot := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
+var drug_level := _no_drugs()
+var drug_depot := _no_drugs()
 var _hr_danger_s := 0.0         # time spent racing or too slow (host only)
 ## Hearing muffled (seconds left), and the indoor gunfire noise level building toward it.
 var deaf_left := 0.0
@@ -633,7 +647,7 @@ func pain() -> float:
 				floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if leg else PAIN_FLOOR_ARM)
 		elif w.kind == "rib" and not w.treated:
 			floor_pain = maxf(floor_pain, PAIN_FLOOR_RIB)
-	var eased := maxf(reducible_pain() - morphine_relief(), 0.0)
+	var eased := maxf(reducible_pain() - minf(morphine_relief() + otc_relief(), MORPHINE_RELIEF_MAX), 0.0)
 	return clampf(maxf(eased, floor_pain) + TOURNIQUET_PAIN * tourniquets.size(), 0.0, 1.0)
 
 
@@ -853,6 +867,39 @@ func drug_total(id: StringName) -> float:
 	return float(drug_level[id]) + float(drug_depot[id])
 
 
+## Host only. `doses` of DRUGS id `drug` taken by mouth (a consumable: Consumables): into the
+## depot, going in over its absorb_s. False for an unknown drug or the dead.
+func take_drug(drug: StringName, doses: float) -> bool:
+	if not DRUGS.has(drug) or dead or doses <= 0.0:
+		return false
+	drug_depot[drug] = float(drug_depot[drug]) + doses
+	return true
+
+
+## Pain the over-the-counter painkillers in the blood take off now (OTC_RELIEF_MAX at most).
+func otc_relief() -> float:
+	return minf(_drug_sum("relief"), OTC_RELIEF_MAX)
+
+
+## The stamina recovery the consumables in the blood add now: 0.3 = 30% faster (STAMINA_BOOST_MAX at most).
+func stamina_boost() -> float:
+	return minf(_drug_sum("stamina"), STAMINA_BOOST_MAX)
+
+
+func _drug_sum(key: String) -> float:
+	var out := 0.0
+	for id: StringName in DRUGS:
+		out += float((DRUGS[id] as Dictionary).get(key, 0.0)) * float(drug_level[id])
+	return out
+
+
+static func _no_drugs() -> Dictionary:
+	var out := {}
+	for id: StringName in DRUGS:
+		out[id] = 0.0
+	return out
+
+
 ## Blood is back far enough for CPR or the defibrillator to restart the heart.
 func can_restart() -> bool:
 	return blood >= RESTART_MIN_BLOOD - 0.0001
@@ -878,7 +925,7 @@ func morphine_total() -> float:
 
 ## Wound and impact pain still left once all the morphine given so far has gone in.
 func pain_to_ease() -> float:
-	return maxf(reducible_pain() - minf(MORPHINE_RELIEF * morphine_total(), MORPHINE_RELIEF_MAX), 0.0)
+	return maxf(reducible_pain() - minf(MORPHINE_RELIEF * morphine_total() + otc_relief(), MORPHINE_RELIEF_MAX), 0.0)
 
 
 ## Another morphine dose is worth giving: the blood holds at most MORPHINE_ASK_MAX_LEVEL.
@@ -958,7 +1005,7 @@ func stamina_mult() -> float:
 		stamina *= RIB_STAMINA
 	if blast_lung:
 		stamina *= BLAST_LUNG_STAMINA
-	return stamina
+	return stamina * (1.0 + stamina_boost())
 
 
 ## A splinted leg still can't sprint until the mission ends (design doc), nor a leg with a
