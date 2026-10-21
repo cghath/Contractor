@@ -32,7 +32,7 @@ func _ready() -> void:
 	Handedness._left = false  # right-handed whatever this machine's settings say (never saved)
 	Handedness._loaded = true
 	GameState.delete_save()
-	get_tree().create_timer(150.0).timeout.connect(func() -> void:
+	get_tree().create_timer(260.0).timeout.connect(func() -> void:
 		print("ANIMATIONS TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -68,13 +68,20 @@ func _ready() -> void:
 	await _test_ai_carry()
 	await _test_pick_up()
 	await _test_equip_and_draw()
+	await _test_fingers()
 	await _test_treat()
 	await _test_techniques()
+	await _test_treat_props()
+	await _test_medic_view()
+	await _test_self_treat_poses()
+	await _test_patient_reactions()
+	await _test_treat_timings()
 	await _test_loot()
 	await _test_looted_weapons()
 	await _test_stand_where_it_lay()
 	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
+	await _test_faces()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -416,7 +423,7 @@ func _test_put_down() -> void:
 	player._server_release_body.rpc_id(1)
 	check(player.model.carry_net.is_empty() and alpha.model.carry_net.is_empty(), "letting go clears both sides")
 	await _seconds(0.6)
-	check(alpha.model.transform.is_equal_approx(Transform3D.IDENTITY) and alpha.model.carry_shown().is_empty() and alpha.model.downed,
+	check(alpha.model.transform.is_equal_approx(alpha.model.base_transform()) and alpha.model.carry_shown().is_empty() and alpha.model.downed,
 		"the casualty lies where its own body is again")
 	check(not player.model.hands_busy() and is_equal_approx(player.model.view_lower(), 0.0), "the carrier's hands are free")
 	await _seconds(0.5)
@@ -447,7 +454,7 @@ func _test_from_replicated_state() -> void:
 	bravo.model.carry_net = {}
 	hostile.vitals.server_reset_health()
 	await _seconds(0.5)
-	check(hostile.model.transform.is_equal_approx(Transform3D.IDENTITY) and not hostile.model.downed, "cleared, both stand again")
+	check(hostile.model.transform.is_equal_approx(hostile.model.base_transform()) and not hostile.model.downed, "cleared, both stand again")
 
 
 func _test_human_casualty() -> void:
@@ -472,7 +479,7 @@ func _test_human_casualty() -> void:
 	player.carried_by_pos = null
 	_place_player()
 	await _seconds(0.5)
-	check(player.model.carry_net.is_empty() and player.model.transform.is_equal_approx(Transform3D.IDENTITY), "put down, and up again")
+	check(player.model.carry_net.is_empty() and player.model.transform.is_equal_approx(player.model.base_transform()), "put down, and up again")
 
 
 func _test_ai_carry() -> void:
@@ -561,6 +568,119 @@ func _test_equip_and_draw() -> void:
 	await _seconds(0.6)
 
 
+## Fingers (HandPose, 2026-10-20): hands are a palm, four fingers and a thumb at 0.5 cm, in poses
+## swapped by what the hand does: the firing grip on a weapon up (the trigger finger on the trigger
+## aimed, squeezing on a shot), the support grip, palms turned to the weapon; first person the same.
+func _test_fingers() -> void:
+	print("Fingers")
+	var spec := VoxelArt._spec(HandPose.model(HandPose.OPEN, false, false))
+	check(is_equal_approx(float(spec.voxel) / int(spec.sub), VoxelArt.FINE_VOXEL), "the hand is built in 0.5 cm voxels (%.4f m)" % (float(spec.voxel) / int(spec.sub)))
+	for body in VoxelArt.BODIES:
+		for bare in [false, true]:
+			var n := _finger_count(HandPose.model(HandPose.OPEN, false, bare, body))
+			check(n == 4, "%s %s hand, open: four fingers across it below the knuckles (%d)" % [body, "bare" if bare else "gloved", n])
+	var male_w := _hand_width(HandPose.model(HandPose.OPEN, false, false))
+	var female_w := _hand_width(HandPose.model(HandPose.OPEN, false, false, VoxelArt.FEMALE))
+	check(female_w < male_w, "a woman's hand is smaller (%.1f cm across the knuckles, his %.1f)" % [female_w * 100.0, male_w * 100.0])
+	var model := player.model
+	player.select_weapon(&"primary")
+	player.is_aiming = false
+	await _seconds(CharacterModel.TRIGGER_HOLD_S + 0.6)
+	check(model.hand_pose(0) == HandPose.GRIP and model.hand_pose(1) == HandPose.SUPPORT,
+		"a rifle up: the firing grip, the index along the frame, and the support grip (%s, %s)" % [model.hand_pose(0), model.hand_pose(1)])
+	var fore: Node3D = model.part_node(Vitals.FOREARM_R)
+	check(String(fore.get_meta(&"voxel_model", "")) == HandPose.model(HandPose.GRIP, false, VoxelArt.hands_bare(model.variant), model.body),
+		"the right forearm is drawn in it (%s)" % fore.get_meta(&"voxel_model", ""))
+	var held: Node3D = model._held
+	if is_instance_valid(held):
+		var palm := fore.global_basis.orthonormalized() * HandPose.palm_normal(false)
+		check(palm.dot(-held.global_basis.x.normalized()) > 0.6, "the firing palm turned in to the grip (%.2f)" % palm.dot(-held.global_basis.x.normalized()))
+		var support := model.part_node(Vitals.FOREARM_L).global_basis.orthonormalized() * HandPose.palm_normal(true)
+		check(support.dot(held.global_basis.y.normalized()) > 0.3, "the support palm up under the handguard (%.2f)" % support.dot(held.global_basis.y.normalized()))
+	var error := model.hand_error()
+	check(error >= 0.0 and error < 0.015, "the grips' grasp centres on the grip and the handguard (%.1f cm)" % (error * 100.0))
+	var resting := (fore.get_child(0) as MeshInstance3D).mesh
+	model.kick(1.0)
+	await _frames(2)
+	check(model.hand_pose(0) == HandPose.PRESS and (fore.get_child(0) as MeshInstance3D).mesh != resting, "a shot: the trigger finger squeezes (%s)" % model.hand_pose(0))
+	await _seconds(CharacterModel.PRESS_S + 0.15)
+	check(model.hand_pose(0) == HandPose.TRIGGER, "and lets off, still on the trigger (%s)" % model.hand_pose(0))
+	await _seconds(CharacterModel.TRIGGER_HOLD_S)
+	check(model.hand_pose(0) == HandPose.GRIP, "and back along the frame a while after (%s)" % model.hand_pose(0))
+	# Aiming (an AI's: the player's own aim follows the mouse, which a headless test hasn't got).
+	bravo.active_slot = &"primary"
+	bravo.want_aim = true
+	await _seconds(0.8)
+	check(bravo.model.hand_pose(0) == HandPose.TRIGGER and bravo.model.hand_pose(1) == HandPose.SUPPORT,
+		"an AI aiming: the finger on the trigger, the support grip (%s, %s)" % [bravo.model.hand_pose(0), bravo.model.hand_pose(1)])
+	bravo.want_aim = false
+	# First person: the view model's forearms have the same hands.
+	var pi := player.player_input
+	if pi:
+		await _frames(3)
+		var arms := player.view_model.get_children().filter(func(a: Node) -> bool: return a.has_meta(&"hand_pose") and not a.is_queued_for_deletion())
+		var posed := arms.filter(func(a: Node) -> bool: return String(a.get_meta(&"voxel_model", "")).contains(":") and HandPose.TABLE.has(HandPose.pose_of(String(a.get_meta(&"voxel_model", "")))))
+		check(arms.size() == 2 and posed.size() == 2, "first person: both forearms have fingers (%d of %d posed)" % [posed.size(), arms.size()])
+		var poses := pi.view_hand_poses()
+		check(poses.size() == 2 and poses[0] == HandPose.GRIP and poses[1] == HandPose.SUPPORT, "the firing grip, the index along the frame, and the support grip (%s)" % [poses])
+		player._kick(player.active_weapon())
+		for i in 3:  # (physics ticks: headless, process frames can run many to a tick)
+			await get_tree().physics_frame
+		check(pi.view_hand_poses()[0] == HandPose.PRESS, "a shot in first person: the trigger finger moves (%s)" % [pi.view_hand_poses()])
+		var mesh := (arms[0].get_child(0) as MeshInstance3D).mesh if arms.size() > 0 else null
+		await _seconds(CharacterModel.PRESS_S + 0.15)
+		check(pi.view_hand_poses()[0] == HandPose.TRIGGER and (arms[0].get_child(0) as MeshInstance3D).mesh != mesh, "and back on it")
+	player.is_aiming = false
+	# The hook for props in the hand (the treatment session): a pose held and an anchor in the hand.
+	model.set_hand_pose(1, HandPose.PINCH)
+	await _frames(2)
+	var anchor := model.hand_anchor(1)
+	check(model.hand_pose(1) == HandPose.PINCH and anchor.get_parent() == model.part_node(Vitals.FOREARM_L)
+		and anchor.global_position.distance_to(model.hand_position(false)) < 0.001, "set_hand_pose holds a pose; hand_anchor is its grasp centre")
+	model.set_hand_pose(1, &"")
+	await _frames(2)
+	check(model.hand_pose(1) == HandPose.SUPPORT, "and let go, the hand is back on the handguard (%s)" % model.hand_pose(1))
+
+
+## How many fingers cross a slice through hand model `m` 3 cm below its knuckles (the voxels'
+## solid runs across the hand, along z, in the hand's plane).
+func _finger_count(m: String) -> int:
+	var occ := VoxelArt.occupancy(m)
+	var dims: Vector3i = occ.dims
+	var cell: float = occ.cell
+	var female := m.begins_with("forearm_f")
+	var hand_y := HandPose.WRIST.y - (13.5 * (HandPose.FEMALE_SIZE if female else 1.0))  # cm, the frame's own
+	var y := int(hand_y * VoxelArt.BODY_VOXEL / cell)
+	var best := 0
+	for x in range(int(dims.x * 0.35), int(dims.x * 0.65)):
+		var runs := 0
+		var inside := false
+		for z in dims.z:
+			var solid: bool = occ.solid[x + dims.x * (y + dims.y * z)] == 1
+			if solid and not inside:
+				runs += 1
+			inside = solid
+		best = maxi(best, runs)
+	return best
+
+
+## The hand's width across the knuckles (metres) in model `m`.
+func _hand_width(m: String) -> float:
+	var occ := VoxelArt.occupancy(m)
+	var dims: Vector3i = occ.dims
+	var cell: float = occ.cell
+	var female := m.begins_with("forearm_f")
+	var y := int((HandPose.WRIST.y - 10.0 * (HandPose.FEMALE_SIZE if female else 1.0)) * VoxelArt.BODY_VOXEL / cell)
+	var lo := dims.z
+	var hi := -1
+	for x in dims.x:
+		for z in dims.z:
+			if occ.solid[x + dims.x * (y + dims.y * z)] == 1:
+				lo = mini(lo, z)
+				hi = maxi(hi, z)
+	return (hi - lo + 1) * cell if hi >= lo else 0.0
+
+
 func _test_treat() -> void:
 	print("Treating")
 	_down(alpha)
@@ -571,7 +691,7 @@ func _test_treat() -> void:
 	await _seconds(0.3)
 	var task := _task_with(alpha, &"pressure_bandage")
 	if not task.is_empty():
-		_beside(CharacterModel.part_position(alpha, task.part))  # kneel within reach of the wound
+		_beside(_drawn(alpha, task.part))  # kneel within reach of the wound (the arm as it lies)
 	await _seconds(0.5)
 	check(not task.is_empty() and not alpha.vitals.is_dead(), "Alpha is down with a wound to bandage (%s)" % [alpha.vitals.care_needed()])
 	if task.is_empty():
@@ -580,13 +700,17 @@ func _test_treat() -> void:
 	player._server_treat.rpc_id(1, alpha.get_path(), &"pressure_bandage", task.part)
 	check(player.model.action_net.get("id") == CharacterModel.TREAT and player.model.action_net.get("kneel") == true, "treating another: kneeling (replicated)")
 	await _seconds(0.8)
-	var wound := CharacterModel.part_position(alpha, task.part)
+	var wound := _drawn(alpha, task.part)  # (an arm's hitbox rides the torso; the hands go to the arm drawn)
 	var at: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
 	var hands := (player.model.hand_position(true) + player.model.hand_position(false)) * 0.5
 	check(player.model.action_shown() == CharacterModel.TREAT and rest_y - player.model.torso.global_position.y > 0.25,
 		"kneeling beside the casualty (hips %.2f m lower)" % (rest_y - player.model.torso.global_position.y))
-	check(hands.distance_to(at) < 0.08 and at.distance_to(wound) < 0.35, "hands working at the wound (%.1f cm from the target, %.1f cm from the wound)"
-		% [hands.distance_to(at) * 100.0, at.distance_to(wound) * 100.0])
+	# (The live site, not action_net's "at": that's body-space at the start, and the first-person
+	# view turns the body to the work.)
+	var site: Dictionary = player.model.treat_site()
+	var on: Vector3 = site.get("p", at)
+	check(hands.distance_to(on) < 0.08 and on.distance_to(wound) < 0.35, "hands working at the wound (%.1f cm from the site, %.1f cm from the wound)"
+		% [hands.distance_to(on) * 100.0, on.distance_to(wound) * 100.0])
 	check(player.model.hand_error() < 0.0, "the rifle slung meanwhile")
 	var done := await _wait(func() -> bool: return player.model.action_net.is_empty(), 8.0)
 	check(done and not player.model.hands_busy(), "the clip ends with the treatment")
@@ -596,10 +720,10 @@ func _test_treat() -> void:
 	player._server_use_medical.rpc_id(1)
 	check(player.model.action_net.get("id") == CharacterModel.TREAT and player.model.action_net.get("kneel") == false, "treating yourself (no kneel)")
 	await _seconds(0.8)
-	var own := CharacterModel.part_position(player, Vitals.FOREARM_L)
-	var own_at: Vector3 = player.to_global(player.model.action_net.get("at", Vector3.ZERO))
-	hands = (player.model.hand_position(true) + player.model.hand_position(false)) * 0.5
-	check(hands.distance_to(own_at) < 0.1 and own_at.distance_to(own) < 0.3, "hands at your own wound (%.1f cm)" % (hands.distance_to(own_at) * 100.0))
+	# Your own arm: held out in front, the right hand wrapping round it (_test_self_treat_poses).
+	var own: Dictionary = player.model.treat_site()
+	var hand := player.model.hand_position(true)
+	check(not own.is_empty() and hand.distance_to(own.p) < float(own.r) + 0.1, "the hand at your own wound (%.1f cm)" % (hand.distance_to(own.get("p", hand)) * 100.0))
 	player.global_position += Vector3(0, 0, 2.0)  # moving interrupts it
 	var stopped := await _wait(func() -> bool: return player.model.action_net.is_empty(), 1.0)
 	check(stopped, "an interrupted treatment stops the clip")
@@ -642,7 +766,7 @@ func _test_techniques() -> void:
 	var strap: Vector3 = m._treat_goals(&"tourniquet", at, 0.5, 6.0)[0][1]
 	var turn_a: Vector3 = m._treat_goals(&"tourniquet", at, 3.0, 6.0)[0][1]
 	var turn_b: Vector3 = m._treat_goals(&"tourniquet", at, 3.0 + 0.25 / CharacterModel.WINDLASS_HZ, 6.0)[0][1]
-	var clip: Vector3 = m._treat_goals(&"tourniquet", at, 5.5, 6.0)[0][1]
+	var clip: Vector3 = m._treat_goals(&"tourniquet", at, 6.0 - CharacterModel.CLIP_S * 0.4, 6.0)[0][1]
 	check(strap.distance_to(at) > 0.05 and turn_a.distance_to(turn_b) > 0.03 and clip.distance_to(turn_a) > 0.01,
 		"a tourniquet: strap round, windlass turns, into the clip")
 	var needle_in: Vector3 = m._treat_goals(&"needle", at, 4.0, 5.0)[0][1]
@@ -674,6 +798,254 @@ func _test_techniques() -> void:
 	check(player.model.action_net.get("tech") == &"inject" and player.model.action_net.get("kneel") == false, "an injector on yourself: standing, own thigh")
 	player.model.action_net = {}
 	alpha.vitals.server_reset_health()
+
+
+## Each technique's kit in the hands (TreatProps, CharacterModel.held_anchor) through its phases,
+## and what goes onto the casualty (a tourniquet's band, a pad, a seal, the AED beside him), all
+## gone once the clip ends; the hands on the casualty's own skin at the wound (treat_site).
+func _test_treat_props() -> void:
+	print("Treatment props")
+	_down(alpha)
+	alpha.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_place_player()
+	await _seconds(0.3)
+	_beside(CharacterModel.part_position(alpha, &"thigh_l"))
+	await _seconds(0.3)
+	var m := player.model
+	# item: [part, [[share of the clip, a prop that shows then], ...]]; "r:"/"l:" in that hand.
+	var expect := {
+		&"tourniquet": [&"thigh_l", [[0.15, "r:strap"], [0.15, "band"], [0.6, "rod"], [0.6, "band"]]],
+		&"pressure_bandage": [&"thigh_l", [[0.3, "r:roll"], [0.3, "pad"], [0.6, "tail"], [0.6, "turns"]]],
+		&"hemostatic_gauze": [&"thigh_l", [[0.3, "r:gauze"], [0.3, "tail"], [0.85, "wad"]]],
+		&"splint": [&"thigh_l", [[0.15, "splint"], [0.7, "r:wrap"], [0.7, "splint"]]],
+		&"chest_seal": [&"chest", [[0.15, "l:seal"], [0.15, "r:backing"], [0.6, "seal"]]],
+		&"decompression_needle": [&"chest", [[0.4, "r:needle"], [0.92, "hub"]]],
+		&"morphine": [&"thigh_l", [[0.04, "r:injector"], [0.2, "l:cap"], [0.6, "r:injector"]]],
+		&"adenosine": [&"thigh_l", [[0.5, "r:syringe"]]],
+		&"iv_18": [&"forearm_l", [[0.4, "r:catheter"], [0.85, "tape"]]],
+		&"io_kit": [&"chest", [[0.5, "r:driver"]]],
+		&"saline_500": [&"forearm_l", [[0.5, "r:bag"], [0.5, "line"]]],
+		&"defibrillator": [&"chest", [[0.2, "r:pad"], [0.2, "l:pad"], [0.2, "aed"], [0.6, "pad_0"], [0.6, "cable_1"]]],
+		&"surgical_clamp": [&"abdomen", [[0.5, "r:hemostat"], [0.5, "l:forceps"], [0.5, "kit"]]],
+		&"hypothermia_blanket": [&"chest", [[0.5, "sheet"]]],
+		&"npa": [&"head", [[0.5, "r:npa"]]],
+		&"pelvic_binder": [&"pelvis", [[0.5, "r:handle"], [0.5, "l:handle"]]],
+	}
+	var missing: Array[String] = []
+	var left_over: Array[String] = []
+	for item: StringName in expect:
+		var part: StringName = expect[item][0]
+		var serial := m.server_treat(alpha, part, 2.0, item)
+		for want: Array in expect[item][1]:
+			await _wait(func() -> bool: return m.action_progress() >= float(want[0]) or m.action_net.is_empty(), 3.0)
+			await _frames(2)
+			var shown: Dictionary = m._props.shown() if is_instance_valid(m._props) else {}
+			var slot: String = want[1]
+			if not shown.has(slot):
+				missing.append("%s %s at %.0f%% (%s)" % [item, slot, float(want[0]) * 100.0, shown.keys()])
+			elif slot.begins_with("r:") and m.held_prop(true) == null or slot.begins_with("l:") and m.held_prop(false) == null:
+				missing.append("%s %s: not in the hand (held_prop)" % [item, slot])
+		m.server_stop(serial)
+		await _frames(3)
+		if is_instance_valid(m._props) and not m._props.shown().is_empty():
+			left_over.append("%s %s" % [item, m._props.shown().keys()])
+	check(missing.is_empty(), "each technique's kit shows through its phases (%d techniques; missing %s)" % [expect.size(), missing])
+	check(left_over.is_empty() and m.held_prop(true) == null and m.held_prop(false) == null, "and it's gone when the clip ends (left over %s)" % [left_over])
+	# On the skin at the wound, not the part's middle, and the hands there.
+	m.server_treat(alpha, &"thigh_l", 3.0, &"pressure_bandage")
+	await _seconds(0.9)
+	var site := m.treat_site()
+	var centre := CharacterModel.part_position(alpha, &"thigh_l")
+	var hand := m.hand_position(false)  # the left holds the pad on it
+	check(not site.is_empty() and Vector3(site.p).distance_to(centre) > 0.03 and Vector3(site.p).distance_to(centre) < 0.2,
+		"the site is on the thigh's skin (%.1f cm from its middle)" % (Vector3(site.get("p", centre)).distance_to(centre) * 100.0))
+	check(not site.is_empty() and hand.distance_to(site.p) < 0.1, "the hand on it (%.1f cm)" % (hand.distance_to(site.get("p", hand)) * 100.0))
+	var anchor := m.held_anchor(true)
+	var own_anchor := not m.has_method(&"hand_anchor")  # (with the fingers: their grasp centre)
+	check(anchor.get_parent() == m._forearm[0] and (not own_anchor or anchor.position.is_equal_approx(CharacterModel.HELD_AT)) and m.held_prop(true) != null \
+		and m.held_prop(true).has_meta(&"grip"), "a held-prop anchor at the right palm, the roll in it (with its grip for the fingers)")
+	m.action_net = {}
+	await _frames(3)
+	alpha.vitals.server_reset_health()
+
+
+## First person while treating: the weapon gone from the view, your own forearms and the kit on
+## the camera's layer, the eye down with the kneel; all back after.
+func _test_medic_view() -> void:
+	print("First-person medic view")
+	_down(alpha)
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_place_player()
+	await _seconds(0.3)
+	_beside(CharacterModel.part_position(alpha, &"thigh_r"))
+	await _seconds(0.5)
+	var m := player.model
+	var input := player.get_node(^"PlayerInput") as PlayerInput
+	var forearm := m._forearm[0].get_child(0) as MeshInstance3D
+	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: the weapon in view, your own arms not")
+	m.server_treat(alpha, &"thigh_r", 3.0, &"tourniquet")
+	await _seconds(0.6)  # (the strap, in the hand)
+	var prop := m.held_prop(true)
+	var prop_mesh: MeshInstance3D = prop.get_child(0) as MeshInstance3D if prop else null
+	check(not player.view_model.visible, "treating: the weapon view model hidden")
+	check(m.view_hands_shown() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER != 0 and player.camera.cull_mask & CharacterModel.VIEW_HANDS_LAYER != 0,
+		"your own forearms on the camera")
+	check(prop_mesh != null and prop_mesh.layers & CharacterModel.VIEW_HANDS_LAYER != 0, "and the kit in your hand")
+	var to_hands := (m.hand_position(true) + m.hand_position(false)) * 0.5 - player.camera.global_position
+	var in_view := (-player.camera.global_basis.z).angle_to(to_hands)
+	check(in_view < deg_to_rad(40.0), "your hands in the view (%.0f degrees off its middle)" % rad_to_deg(in_view))
+	check(m.treat_view_offset().y < -0.2 and input._medic_eye.length() > 0.2, "the eye down with the kneel (%.2f m)" % m.treat_view_offset().y)
+	m.action_net = {}
+	await _seconds(0.6)
+	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
+		"after: the weapon back, your arms off the camera, the eye back up")
+	_place_player()
+
+
+## Treating yourself: a tourniquet one-handed on your own arm (the hurt arm held out, the upper
+## body turned to it), on your own leg down on a knee, an injector into your outer thigh standing.
+func _test_self_treat_poses() -> void:
+	print("Self-treatment poses")
+	_place_player()
+	await _seconds(0.5)
+	var m := player.model
+	var rest_y := m.torso.global_position.y
+	m.server_treat(player, &"upper_arm_l", 3.0, &"tourniquet")
+	await _seconds(0.9)
+	var site := m.treat_site()
+	var present := m.torso.to_local(m.hand_position(false))
+	var want := CharacterModel.PRESENT * Vector3(-1, 1, 1)
+	check(not site.is_empty() and m.hand_position(true).distance_to(site.p) < 0.12, "your own arm: the right hand at the tourniquet on the left arm (%.1f cm)"
+		% (m.hand_position(true).distance_to(site.get("p", Vector3.ZERO)) * 100.0))
+	check(present.distance_to(want) < 0.08 and m.twist_shown() > 0.15, "the left arm held out (%.1f cm off), the upper body turned to it (%.2f)"
+		% [present.distance_to(want) * 100.0, m.twist_shown()])
+	check(m.held_prop(true) != null and m.held_prop(false) == null, "one-handed: the strap in the right hand only")
+	m.action_net = {}
+	await _seconds(0.6)
+	m.server_treat(player, &"thigh_l", 3.0, &"tourniquet")
+	await _seconds(0.9)
+	var drop := rest_y - m.torso.global_position.y
+	site = m.treat_site()
+	check(drop > 0.25 and not site.is_empty() and (m.hand_position(true) + m.hand_position(false)).distance_to(Vector3(site.p) * 2.0) < 0.3,
+		"your own leg: down on a knee over it (hips %.2f m lower), hands at it" % drop)
+	m.action_net = {}
+	await _seconds(0.6)
+	m.server_treat(player, &"thigh_l", 2.0, &"morphine")
+	await _wait(func() -> bool: return m.action_progress() > 0.5, 2.0)
+	await _frames(3)
+	site = m.treat_site()
+	drop = rest_y - m.torso.global_position.y
+	check(drop < 0.12 and StringName(site.get("part", &"")) == Vitals.THIGH_R and m.hand_position(true).distance_to(site.p) < 0.14 and m.held_prop(true) != null,
+		"an injector: standing (%.2f m), into the outer right thigh (%.1f cm)" % [drop, m.hand_position(true).distance_to(site.get("p", Vector3.ZERO)) * 100.0])
+	m.action_net = {}
+	await _seconds(0.5)
+
+
+## The casualty reacts: a wince as a tourniquet tightens (awake), relaxing after morphine, a gasp on
+## decompression, the chest going down under CPR, a spasm on the shock.
+func _test_patient_reactions() -> void:
+	print("Patient reactions")
+	var m := player.model
+	# Bravo, awake, takes a tourniquet and morphine.
+	bravo.vitals.server_reset_health()
+	_place(bravo, SPOT + Vector3(0, 0, -1.2))
+	_place_player()
+	await _seconds(0.4)
+	m.server_treat(bravo, &"thigh_r", 3.0, &"tourniquet")
+	var winced := 0.0
+	var end := Time.get_ticks_msec() + 3200
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		if m.action_progress() > CharacterModel.STRAP_END:
+			winced = maxf(winced, float(bravo.model.reaction_shown().get(&"wince", 0.0)))
+		await get_tree().process_frame
+	check(winced > 0.3, "a wince as the windlass turns (%.2f)" % winced)
+	m.server_treat(bravo, &"thigh_r", 2.0, &"morphine")
+	await _wait(func() -> bool: return m.action_net.is_empty() or m.action_progress() > 0.95, 3.0)
+	await _seconds(0.6)
+	check(float(bravo.model.reaction_shown().get(&"relax", 0.0)) > 0.1, "relaxing after the morphine (%.2f)" % float(bravo.model.reaction_shown().get(&"relax", 0.0)))
+	m.action_net = {}
+	# Alpha, down: a needle, CPR and the defib.
+	_down(alpha)
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	_beside(CharacterModel.part_position(alpha, &"chest"))
+	await _seconds(0.3)
+	m.server_treat(alpha, &"chest", 2.0, &"decompression_needle")
+	var gasp := 0.0
+	end = Time.get_ticks_msec() + 2400
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		gasp = maxf(gasp, float(alpha.model.reaction_shown().get(&"gasp", 0.0)))
+		await get_tree().process_frame
+	check(gasp > 0.3, "a gasp as the needle goes in (%.2f)" % gasp)
+	m.server_treat(alpha, &"chest", 2.0, &"cpr")
+	await _seconds(0.4)
+	var lo := INF
+	var hi := -INF
+	var hands := 0.0
+	end = Time.get_ticks_msec() + 1200
+	while Time.get_ticks_msec() < end:
+		var site := m.treat_site()
+		if not site.is_empty():
+			var along: float = alpha.model.torso.global_position.dot(site.n)
+			lo = minf(lo, along)
+			hi = maxf(hi, along)
+			hands = maxf(hands, m.hand_position(true).distance_to(site.p))
+		await get_tree().process_frame
+	check(hi - lo > 0.025 and hi - lo < CharacterModel.COMPRESSION_M + 0.02, "the chest goes down under CPR (%.1f cm)" % ((hi - lo) * 100.0))
+	m.action_net = {}
+	await _frames(3)
+	m.server_treat(alpha, &"chest", 2.0, &"defibrillator")
+	var spasm := 0.0
+	var early := false
+	end = Time.get_ticks_msec() + 2400
+	while Time.get_ticks_msec() < end and not m.action_net.is_empty():
+		if m.action_progress() < CharacterModel.DEFIB_SHOCK - 0.05:
+			early = early or alpha.model.reaction_shown().has(&"spasm")
+		spasm = maxf(spasm, float(alpha.model.reaction_shown().get(&"spasm", 0.0)))
+		await get_tree().process_frame
+	check(spasm > 0.3 and not early, "a spasm on the shock, not before (%.2f)" % spasm)
+	m.action_net = {}
+	await _frames(3)
+	alpha.vitals.server_reset_health()
+	bravo.vitals.server_reset_health()
+	_place(bravo, SPOT + Vector3(3.0, 0, 0))
+
+
+## Treatment times as they were (items.json treat_s, the clip as long as the treatment), props
+## or not.
+func _test_treat_timings() -> void:
+	print("Treatment timings")
+	var was := {&"tourniquet": 4.0, &"pressure_bandage": 5.0, &"hemostatic_gauze": 8.0, &"chest_seal": 5.0, &"splint": 8.0,
+		&"pelvic_binder": 10.0, &"morphine": 2.0, &"npa": 3.0, &"iv_18": 10.0, &"io_kit": 5.0, &"saline_500": 3.0,
+		&"decompression_needle": 5.0, &"defibrillator": 5.0, &"cpr": 10.0, &"surgical_clamp": 20.0, &"hypothermia_blanket": 5.0}
+	var changed: Array[String] = []
+	for id: StringName in was:
+		var item := ItemDB.get_item(id)
+		if not is_equal_approx(float(item.stats.get("treat_s", -1.0)), was[id]):
+			changed.append("%s %s" % [id, item.stats.get("treat_s")])
+	check(changed.is_empty(), "treat_s unchanged (%s)" % [changed])
+	_down(alpha)
+	alpha.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT, "superficial": true})
+	_place(alpha, SPOT + Vector3(0, 0, -1.5))
+	await _settled(alpha)
+	var task := _task_with(alpha, &"pressure_bandage")
+	if task.is_empty():
+		check(false, "a wound to bandage for the timing")
+		return
+	_beside(CharacterModel.part_position(alpha, task.part))
+	await _seconds(0.3)
+	var expected := player.treat_seconds(alpha, ItemDB.get_item(&"pressure_bandage"))
+	var started := Time.get_ticks_msec()
+	player._server_treat.rpc_id(1, alpha.get_path(), &"pressure_bandage", task.part)
+	var clip := float(player.model.action_net.get("s", -1.0))
+	await _wait(func() -> bool: return player.model.action_net.is_empty(), expected + 3.0)
+	var took := (Time.get_ticks_msec() - started) / 1000.0
+	check(is_equal_approx(clip, expected) and absf(took - expected) < 0.5, "a bandage takes %.1f s as before (clip %.1f s, took %.1f s)" % [expected, clip, took])
+	alpha.vitals.server_reset_health()
+	_place_player()
 
 
 func _test_loot() -> void:
@@ -844,8 +1216,95 @@ func _test_dummy() -> void:
 	check(dummy.model.carry_net.is_empty() and dummy.model.action_shown() == &"" and not dummy.model.hands_busy(), "a dummy has no carry or action")
 	dummy.vitals.server_damage(500.0)
 	await _frames(3)
-	check(dummy.model.downed and dummy.model.transform.is_equal_approx(Transform3D.IDENTITY), "and still lies down where it stands")
+	check(dummy.model.downed and dummy.model.transform.is_equal_approx(dummy.model.base_transform()), "and still lies down where it stands")
 	dummy.vitals.server_reset_health()
+
+
+# --- Faces and builds (SoldierLook, FaceArt, FaceRig) ----------------------------------------
+
+## Captain, 2026-10-20: real faces and per-soldier variety. Two soldiers of a side look like two
+## people, each the same from his spawn data on every peer; his own head and face parts build
+## off the main thread; his eyes shut when he dies, his mouth opens when he calls out; a tall,
+## heavy build scales the rig without the hands leaving the weapon or the hitboxes leaving the
+## body.
+func _test_faces() -> void:
+	print("Faces")
+	var charlie := _spawn_ai("Charlie", &"friendly", SPOT + Vector3(6.0, 0, 4.0), ["m4a1"])
+	var delta := _spawn_ai("Delta", &"friendly", SPOT + Vector3(7.0, 0, 4.0), ["m4a1"])
+	check(SoldierLook.valid(charlie.face) and SoldierLook.valid(delta.face) and charlie.model.face == charlie.face,
+		"each AI spawns with a look (%s, %s)" % [charlie.face, delta.face])
+	check(charlie.face != delta.face and SoldierLook.head_model(charlie.face, charlie.model.body) + SoldierLook.palette(charlie.face)
+		!= SoldierLook.head_model(delta.face, delta.model.body) + SoldierLook.palette(delta.face), "two soldiers of a side get different faces")
+	var expected := SoldierLook.make(SoldierLook.seed_of(["Charlie", charlie.person_name, charlie.nation]), charlie.nation, charlie.model.body)
+	check(charlie.face == expected, "and the face is his identity's: any peer rolls the same from the same spawn")
+	var looks := {}
+	for i in 40:
+		looks[SoldierLook.make(i, "US", VoxelArt.MALE)] = true
+	check(looks.size() == 40, "forty American contractors: forty different looks")
+	var cn := SoldierLook.parse(SoldierLook.make(7, "CN", VoxelArt.MALE))
+	check(String(cn.skin) in SoldierLook.SKINS["eas"], "a soldier of a nation looks like its people (a Chinese soldier's skin: %s)" % cn.skin)
+	var built := await _wait(func() -> bool: return charlie.model.face_rig.is_built() and delta.model.face_rig.is_built(), 10.0)
+	var mi := charlie.model.head.get_child(0) as MeshInstance3D
+	check(built and mi.mesh != null and String(charlie.model.head.get_meta(&"voxel_model")) == SoldierLook.head_model(charlie.face, charlie.model.body),
+		"his own head builds off the main thread and goes on")
+	var parts_on := true
+	for part in FaceRig.PARTS:
+		var inst := mi.get_node_or_null(NodePath("Face_" + part)) as MeshInstance3D
+		parts_on = parts_on and inst != null and inst.mesh != null
+	check(parts_on, "with eyes, a mouth and brows of their own")
+	# Expressions.
+	charlie.model.shout(1.0)
+	await _seconds(0.15)
+	check(charlie.model.face_rig.expression == FaceArt.SHOUT, "calling out, the mouth opens (shout)")
+	await _seconds(1.0)
+	check(charlie.model.face_rig.expression != FaceArt.SHOUT, "and closes after")
+	delta.vitals.server_kill()
+	await _seconds(0.3)
+	var eye := (delta.model.head.get_child(0) as MeshInstance3D).get_node(^"Face_eye_l") as MeshInstance3D
+	check(delta.model.face_rig.eye_state == "c" and String(eye.get_meta(&"model", "")).begins_with("eye:c:"),
+		"dead, his eyes close")
+	check(delta.model.face_rig.expression == FaceArt.SLACK, "and his face goes slack")
+	check(delta.body_record().get("face", "") == delta.face, "his body keeps his face (the body record)")
+	# Builds: a tall, heavy man scales the rig; the hands stay on the weapon, the hitboxes on him.
+	var old := player.model.face  # (a player outside a campaign wears his default face: Soldier.face is "")
+	var tall := ":".join((old if SoldierLook.valid(old) else SoldierLook.DEFAULT).split(":").slice(0, 4)) + ":2:1050"
+	player.select_weapon(&"primary")
+	player.face = tall
+	await _seconds(0.8)
+	check(is_equal_approx(player.model.body_scale(), 1.05), "a tall soldier is drawn taller (%.3f)" % player.model.body_scale())
+	var torso_mi := player.model.torso.get_child(0) as MeshInstance3D
+	var base: Array = torso_mi.get_meta(&"base")
+	check(is_equal_approx(torso_mi.scale.x / (base[1] as Vector3).x, SoldierLook.BUILD_GIRTH[SoldierLook.HEAVY]) and is_equal_approx(torso_mi.scale.y, (base[1] as Vector3).y),
+		"a heavy build is broader through the trunk, not taller")
+	var error := player.model.hand_error()
+	check(error >= 0.0 and error < 0.02, "the hands stay on the rifle (%.1f cm)" % (error * 100.0))
+	# The head's hitbox rides as high as the taller body's head: its shapes' height over the feet
+	# is their rest height times his size.
+	var off := INF
+	for area in CharacterModel._posable_hitboxes(player):
+		if area.get_meta(&"body_part") == Vitals.HEAD:
+			for shape in area.get_children():
+				if shape is CollisionShape3D:
+					var rest_y := (CharacterModel._rest_of(area) * (shape as CollisionShape3D).position).y
+					off = minf(off, absf((shape as CollisionShape3D).global_position.y - player.global_position.y - rest_y * player.model.body_scale()))
+	check(off < 0.03, "the head's hitbox rises with the taller head (%.1f cm off)" % (off * 100.0))
+	var chest: Area3D = null
+	for area in CharacterModel._posable_hitboxes(player):
+		if area.get_meta(&"body_part") == Vitals.CHEST:
+			chest = area
+	var front := player.model.torso.global_position + Vector3(0, 0.4, -0.4)  # (BodyVolume marches LEAD_M back, REACH_M on)
+	var broad := BodyVolume.entry(chest, Vitals.CHEST, front, Vector3(0, 0, 1), BodyVolume.body_of(chest)) if chest else {}
+	var g: Vector3 = chest.get_meta(&"girth", Vector3.ONE) if chest else Vector3.ONE
+	if chest:
+		chest.set_meta(&"girth", Vector3.ONE)
+	var plain := BodyVolume.entry(chest, Vitals.CHEST, front, Vector3(0, 0, 1), BodyVolume.body_of(chest)) if chest else {}
+	if chest:
+		chest.set_meta(&"girth", g)
+	check(g.x > 1.0 and not broad.is_empty() and not plain.is_empty() and (broad.position as Vector3).z < (plain.position as Vector3).z - 0.003,
+		"the broad chest is hit where it's drawn, further forward (BodyVolume widens with the build: %s, %s vs %s)" % [g, broad.get("position"), plain.get("position")])
+	player.face = old
+	await _seconds(0.3)
+	check(is_equal_approx(player.model.body_scale(), SoldierLook.height_of(old)), "and back as he was")
 
 
 # --- Helpers --------------------------------------------------------------------------------
@@ -874,6 +1333,16 @@ func _check_mount_path(from: StringName, to: StringName) -> void:
 		seen.to = minf(seen.to, hand.distance_to(player.model.torso.to_global(CharacterModel.MOUNT_POINTS[to]))))
 	check(seen.from < HAND_TOLERANCE and seen.to < HAND_TOLERANCE,
 		"the hand goes to the %s (%.1f cm) and then the %s (%.1f cm)" % [from, seen.from * 100.0, to, seen.to * 100.0])
+
+
+## The middle of body part `part` of `s` as drawn (its bone, ragdoll or pose: an arm's hitbox
+## stays with the torso).
+func _drawn(s: Soldier, part: StringName) -> Vector3:
+	var bone := s.model.part_node(part)
+	if bone == null:
+		return _part(s, part)
+	var down := CharacterModel.UPPER_ARM * 0.5 if String(part).begins_with("upper") else CharacterModel.FOREARM * 0.6
+	return bone.to_global(Vector3(0, -down, 0)) if String(part).contains("arm") else _part(s, part)
 
 
 func _down(s: Soldier) -> void:

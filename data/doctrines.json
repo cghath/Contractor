@@ -1,5 +1,6 @@
 {
 	"_notes": "Every number acts (AI bar G-15, finished 2026-10-20): each scales the squad AI's own tuned number by its ratio to Doctrine.REFERENCE (the doctrine that plays as the AI did before doctrines), aim_deg and flank added as they are; see doctrine.gd. Faction doctrine profiles (Captain, P0164 queue 17 part 6; every number proposed, for Captain's playtests). Each is meant to bias decisions the squad AI already makes (SquadAI, Doctrine): engage_m how far out it picks targets (m; audit F-03: fitted to the sight ranges, never past what the shooter sees, SquadAI.SIGHT_RANGE 300 m for hostiles and SQUAD_SIGHT_RANGE 300 m for the squad, nor its weapon's reach: Doctrine.engage_m clamps; insurgents hold fire until 240 m and regulars until 280 m, inside their 300 m sight, the PMC at its M4/Mk18's 300 m, which is also all it sees); reaction a factor on the time to the first shot at a new target; aim_deg degrees of aim error added; burst a factor on burst length and burst_pause on the pause between bursts (suppressive fire volume); cover_fire_s how long after the last sight of the enemy it keeps putting covering fire on where they were; frag_cooldown_s seconds between one unit's frags, frag_wait_s how long an enemy must stay hidden or behind cover before a frag goes in; morale_shaken and morale_broken the morale under which aim suffers and under which it falls back (or may give up); advance_after_s how long a hostile waits without sight before pushing a bound toward the enemy, and flank (0..1) how far to the side that bound goes. 'sides' gives each side's doctrine when none is set on the squad or the unit; hostiles follow their zone's people ('nations', by Names nation; 'hostile' when the nation isn't listed).",
+	"_factions": "Terror groups (2026-10-20, docs/terror_groups.md, Proposed numbers): a faction's \"doctrine\" (factions.json or its kit's) wins over the zone's people for its men (SquadAI._doctrine_id via the soldier's faction_id): jihadist presses and fights near the last man, guerrilla hits from range and breaks contact early, cartel guards and sprays but has no zeal.",
 	"_wired": ["burst", "burst_pause", "engage_m", "reaction", "aim_deg", "cover_fire_s", "frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"],
 	"_pending": [],
 	"sides": {"friendly": "pmc", "hostile": "insurgent"},
@@ -10,6 +11,12 @@
 		"regular": {"name": "Regular army", "engage_m": 280, "reaction": 1.0, "aim_deg": 0.3, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 7.0,
 			"frag_cooldown_s": 12.0, "frag_wait_s": 3.0, "morale_shaken": 0.4, "morale_broken": 0.25, "advance_after_s": 5.0, "flank": 0.6},
 		"pmc": {"name": "PMC", "engage_m": 300, "reaction": 0.9, "aim_deg": 0.0, "burst": 0.8, "burst_pause": 1.0, "cover_fire_s": 5.0,
-			"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.35, "morale_broken": 0.2, "advance_after_s": 6.0, "flank": 0.5}
+			"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.35, "morale_broken": 0.2, "advance_after_s": 6.0, "flank": 0.5},
+		"jihadist": {"name": "Jihadist", "engage_m": 250, "reaction": 1.1, "aim_deg": 0.5, "burst": 1.4, "burst_pause": 0.8, "cover_fire_s": 4.0,
+			"frag_cooldown_s": 18.0, "frag_wait_s": 4.0, "morale_shaken": 0.3, "morale_broken": 0.15, "advance_after_s": 4.0, "flank": 0.4},
+		"guerrilla": {"name": "Guerrilla", "engage_m": 260, "reaction": 1.15, "aim_deg": 0.55, "burst": 1.1, "burst_pause": 1.1, "cover_fire_s": 3.0,
+			"frag_cooldown_s": 25.0, "frag_wait_s": 6.0, "morale_shaken": 0.55, "morale_broken": 0.4, "advance_after_s": 10.0, "flank": 0.3},
+		"cartel": {"name": "Cartel", "engage_m": 240, "reaction": 1.0, "aim_deg": 0.45, "burst": 1.6, "burst_pause": 0.7, "cover_fire_s": 4.0,
+			"frag_cooldown_s": 20.0, "frag_wait_s": 5.0, "morale_shaken": 0.5, "morale_broken": 0.35, "advance_after_s": 9.0, "flank": 0.25}
 	}
 }

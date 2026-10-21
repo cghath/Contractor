@@ -29,6 +29,7 @@ var bar: PanelContainer
 var side: PanelContainer
 var _info_title: Label
 var _info: Label
+var _news: Label  # the faction war's latest news (WorldSites)
 var _help: VBoxContainer
 var _help_button: Button
 var _back_button: Button
@@ -141,10 +142,13 @@ func _side() -> PanelContainer:
 	box.add_child(_info_title)
 	_info = UiKit.text("")
 	box.add_child(_info)
+	box.add_child(UiKit.heading("War news"))
+	_news = UiKit.text(news_text())
+	box.add_child(_news)
 	box.add_child(UiKit.heading("Legend"))
 	for s: String in ZoneControl.SIDES:
 		box.add_child(_legend_row(LegendIcon.new("side", ZoneControl.SIDE_COLOURS[s], s == "contested"), "%s%s" % [ZoneControl.SIDE_NAMES[s],
-			{"player": " (contractors)", "allied": " (employers and their allies)", "militia": " (Black Ridge)", "hostile": " (armies, rival PMC)",
+			{"player": " (contractors)", "allied": " (employers and their allies)", "militia": " (Black Ridge, the cartels, the Highland Free Front)", "hostile": " (terror groups, armies, rival PMC)",
 			"neutral": "", "contested": ": being fought over"}[s]]))
 	for kind: String in WorldMapView.BADGES:
 		box.add_child(_legend_row(LegendIcon.new(kind), String(WorldMapView.BADGES[kind].name)))
@@ -203,8 +207,23 @@ func _show_zone(id: String) -> void:
 
 
 func _process(_delta: float) -> void:
-	if is_visible_in_tree() and Engine.get_process_frames() % 120 == 0 and view.selected != "":
-		_show_zone(view.selected)  # (the rows refresh every few seconds)
+	if is_visible_in_tree() and Engine.get_process_frames() % 120 == 0:
+		if view.selected != "":
+			_show_zone(view.selected)  # (the rows refresh every few seconds)
+		if _news:
+			_news.text = news_text()
+
+
+## The faction war's latest news, newest first (the living war, docs/terror_groups.md 7.7).
+static func news_text(count := 6) -> String:
+	var news: Array = Economy.war_view().get("news", [])
+	if news.is_empty():
+		return "Quiet so far: no ground has changed hands."
+	var lines := PackedStringArray()
+	for i in range(news.size() - 1, maxi(news.size() - 1 - count, -1), -1):
+		lines.append("Day %d: %s" % [int(news[i].get("day", 0)), String(news[i].get("text", ""))])
+	return "
+".join(lines)
 
 
 ## The legend's little pictures, drawn as the map draws them.

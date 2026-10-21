@@ -227,11 +227,13 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, 
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
 		var kit_id := Kits.kit_of(enemy_faction)  # Black Ridge's, Vantage's or a regional army's (wave 6b)
 		var kit: Array = Kits.loadout(kit_id, index + i, difficulty) if loadout is Array and loadout == CompoundLevel.HOSTILE_LOADOUT else (loadout if loadout is Array else LOADOUT)
-		var s: Soldier = level.call(&"spawn_soldier", {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
-			"variant": Kits.variant(kit_id), "pos": _on_ground(edge + offset), "loadout": kit,
+		var spawn := {"name": "R%d_%d" % [index + 1, i + 1], "faction": "hostile",
+			"pos": _on_ground(edge + offset), "loadout": kit,
 			"combat": minf(float(params.combat) + float(params.combat_step) * index, float(params.combat_max)), "discipline": 0.5, "guard": false, "mode": "aware",
 			"role": Kits.role(kit_id, index + i),
-			"exo": Kits.exo_at(kit_id, index + i, difficulty)})
+			"exo": Kits.exo_at(kit_id, index + i, difficulty)}
+		spawn.merge(Kits.dress(String(enemy_faction), kit_id, index + i), true)  # clothes, marks, faction (terror groups)
+		var s: Soldier = level.call(&"spawn_soldier", spawn)
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)

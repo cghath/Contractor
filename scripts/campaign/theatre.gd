@@ -55,6 +55,9 @@ static func zone(zone_id: String, from: Node = null, ctx := {}) -> Dictionary:
 		if fs and fs._alive() > 0 and not fs.last.is_empty():
 			skirmish = "%s hitting %s" % [MissionRegistry.faction_name(String(fs.last.get("faction", ""))),
 				MissionRegistry.faction_name(String(fs.last.get("against", "")))]
+	# The living war (terror groups, 2026-10-20): who is attacking it, why, and how far along.
+	var front: Dictionary = site.get("front", {})
+	var by := String(front.get("by", ""))
 	var threat := ""
 	if kind == "base":
 		threat = "None: the company's base"
@@ -70,7 +73,13 @@ static func zone(zone_id: String, from: Node = null, ctx := {}) -> Dictionary:
 		"grip": float(site.get("grip", -1.0)), "held": held, "offered": offered, "skirmish": skirmish, "alert": alert,
 		"pressure": pressure, "recent": recent_fights(zone_id, ctx.history), "support": RebelSupport.support(region) if region != "" else 0.0,
 		"rebel_tier": RebelSupport.tier(region) if region != "" else 0, "threat": threat, "squad": here,
-		"home": zone_id == RegionMap.BASE and ZoneControl.home() == ZoneControl.HOME_FOB}
+		"home": zone_id == RegionMap.BASE and ZoneControl.home() == ZoneControl.HOME_FOB,
+		"front_by": by, "front_by_name": WorldSites.holder_name(by) if by != "" else "", "front_progress": float(front.get("progress", 0.0)),
+		"front_side": ZoneControl.side_of_faction(by) if by != "" else "", "sieged": bool(front.get("sieged", false)),
+		"why": String(MissionRegistry.faction(by).get("wants_text", "")) if by != "" else "",
+		"holder_wants": String(MissionRegistry.faction(ctrl).get("wants_text", "")),
+		"symbol": MissionRegistry.faction(ctrl).get("symbol", {}), "prev": String(site.get("prev", "")),
+		"flipped_day": int(site.get("flipped_day", -1))}
 
 
 ## Every zone on the region map (RegionMap.layout), by id.
@@ -137,6 +146,13 @@ static func describe(row: Dictionary) -> String:
 	if float(row.grip) >= 0.0:
 		held_by += ", grip %d%%" % roundi(float(row.grip) * 100.0)
 	lines.append("Controlled by: " + held_by)
+	if String(row.get("holder_wants", "")) != "":
+		lines.append("It holds it for: " + String(row.holder_wants))
+	if String(row.get("front_by", "")) != "":
+		lines.append("Under attack: %s, %d%% of the way%s%s" % [String(row.front_by_name), roundi(float(row.front_progress) * 100.0),
+			" (sieged: it can't fall to them)" if bool(row.get("sieged", false)) else "", (". It wants " + String(row.why)) if String(row.get("why", "")) != "" else ""])
+	if int(row.get("flipped_day", -1)) >= 0 and String(row.get("prev", "")) != "":
+		lines.append("Taken from %s on day %d" % [WorldSites.holder_name(String(row.prev)), int(row.flipped_day)])
 	lines.append("Threat: " + String(row.threat))
 	if String(row.alert) != "":
 		lines.append("Enemy alert: " + String(row.alert))

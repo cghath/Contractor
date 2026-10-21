@@ -127,6 +127,10 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 				site["intel_ids"] = ["intel_%s_o%d" % [uid, i + 1]]
 			if contract.has("module_id"):
 				site["module_id"] = String(contract.module_id)
+			if t.has("site_name"):
+				site["name"] = String(t.site_name)  # what the target faction calls it (ContractGen.faction_site_name)
+			if t.has("loot_of"):
+				site["loot_of"] = String(t.loot_of)  # its goods in a box beside it (PeopleLayer)
 		if t.has("time_limit_s"):
 			site["time_limit_s"] = float(t.time_limit_s)
 		if contract.has("zone_id"):

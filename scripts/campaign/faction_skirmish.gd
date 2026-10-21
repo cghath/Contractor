@@ -39,6 +39,17 @@ func _ready() -> void:
 	name = NODE_NAME
 	_rng.seed = hash([get_parent().name, Time.get_ticks_msec()])
 	_next_s = _rng.randf_range(FIRST_S.x, FIRST_S.y)
+	var lvl := get_parent()
+	attacker = String(lvl.call(&"_zone_attacker")) if lvl and lvl.has_method(&"_zone_attacker") else ""
+	if attacker != "":
+		_next_s = _rng.randf_range(FRONT_FIRST_S.x, FRONT_FIRST_S.y)  # the fight's already on when the squad lands
+
+
+## The living war (2026-10-20): the faction attacking this zone (WorldSites front), "" for none.
+## Its assaults come first, sooner (FRONT_FIRST_S), every time (no CHANCE roll) and FRONT_TEAM strong.
+var attacker := ""
+const FRONT_FIRST_S := Vector2(30.0, 60.0)
+const FRONT_TEAM := 12
 
 
 func _process(delta: float) -> void:
@@ -48,8 +59,8 @@ func _process(delta: float) -> void:
 	if _next_s > 0.0:
 		return
 	_next_s = _rng.randf_range(GAP_S.x, GAP_S.y)
-	if CompoundLevel.spawn_ai and _alive() == 0 and BaseHub.deployment_running() and _rng.randf() < CHANCE:  # (never in a test level without AI)
-		server_start()
+	if CompoundLevel.spawn_ai and _alive() == 0 and BaseHub.deployment_running() and (attacker != "" or _rng.randf() < CHANCE):  # (never in a test level without AI)
+		server_start(attacker)
 
 
 func _alive() -> int:
@@ -111,14 +122,14 @@ func server_start(faction := "") -> String:
 	var kit_id := Kits.kit_of(faction)
 	var across := Vector3(at.x - start.x, 0.0, at.z - start.z).normalized().cross(Vector3.UP)
 	team = []
-	for i in TEAM:
+	for i in (FRONT_TEAM if faction == attacker and attacker != "" else TEAM):
 		var pos: Vector3 = start + across * 3.0 * (i - (TEAM - 1) / 2.0)
 		if lvl.has_method(&"ground_point"):
 			pos = lvl.call(&"ground_point", pos)
 		var loadout: Array = Kits.loadout(kit_id, i, 2) if Kits.is_data(kit_id) else CompoundLevel.hostile_loadout(i)
 		var s: Soldier = lvl.call(&"spawn_soldier", {"name": "Sk_%s_%d" % [faction.left(6), i + 1], "faction": String(side), "iff": "militia" if side == RIVAL else "allied",
-			"variant": Kits.variant(kit_id) if Kits.is_data(kit_id) else "woodland", "pos": pos, "loadout": loadout,
-			"combat": 0.6, "discipline": 0.6, "guard": false, "mode": "combat"})
+			"variant": Kits.variant(kit_id, i) if Kits.is_data(kit_id) else "woodland", "pos": pos, "loadout": loadout,
+			"combat": 0.6, "discipline": 0.6, "guard": false, "mode": "combat", "faction_id": faction})
 		if s == null:
 			continue
 		var brain := SquadAI.of(s)

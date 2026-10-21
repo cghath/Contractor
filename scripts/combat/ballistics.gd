@@ -377,6 +377,26 @@ static func calibre_m(round_or_weapon: Variant) -> float:
 	return float(round_data(round_or_weapon).get("calibre_mm", 5.7)) / 1000.0
 
 
+## Pellets in one round of `weapon`'s (rounds.json "pellets": buckshot; 1 for a bullet). Each is
+## traced as its own round (Soldier._server_fire), with the round's per-pellet mass.
+static func pellets(weapon: ItemData) -> int:
+	return maxi(int(round_data(weapon).get("pellets", 1)), 1)
+
+
+## A pellet's direction: `direction` turned a random way inside the weapon's
+## "pellet_spread_deg" half-angle cone (uniform over its disc, as the shot's own spread).
+static func pellet_direction(direction: Vector3, weapon: ItemData) -> Vector3:
+	var spread := deg_to_rad(float(weapon.stats.get("pellet_spread_deg", 1.5)))
+	var side := direction.cross(Vector3.UP)
+	if side.length() < 0.01:
+		side = direction.cross(Vector3.RIGHT)
+	side = side.normalized()
+	var up := side.cross(direction).normalized()
+	var r := tan(spread) * sqrt(randf())
+	var a := randf() * TAU
+	return (direction + side * cos(a) * r + up * sin(a) * r).normalized()
+
+
 ## Every round id in data/rounds.json.
 static func round_ids() -> Array:
 	_load_rounds()

@@ -44,10 +44,13 @@ static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction
 	if not PART_MODELS.has(part) or hitbox == null or not hitbox.is_inside_tree():
 		return {"position": position, "depth": BodyMap.CHANNEL_MAX_M}
 	var to_rest := hitbox.global_transform.affine_inverse()
-	var hit := march(part, to_rest * position, (to_rest.basis * direction).normalized(), body)
+	# A broader or slimmer build's trunk (CharacterModel.girth, GIRTH_META): marched in the
+	# model's own proportions, about the body's centre line.
+	var g: Vector3 = hitbox.get_meta(&"girth", Vector3.ONE)
+	var hit := march(part, (to_rest * position) / g, ((to_rest.basis * direction) / g).normalized(), body)
 	if hit.is_empty():
 		return {}
-	return {"position": hitbox.global_transform * Vector3(hit.position), "depth": hit.depth}
+	return {"position": hitbox.global_transform * (Vector3(hit.position) * g), "depth": hit.depth}
 
 
 ## The same in the rest pose: the first voxel of `part` on the ray through `point` along
