@@ -10,6 +10,8 @@
 		{"id": "10mm_fmj", "name": "10mm Auto FMJ", "level": "IIIA", "class": "pistol", "calibre_mm": 10.2, "mass_g": 11.7, "muzzle_mps": 390, "bc": 0.16, "drag": "G1"},
 		{"id": "357sig_fmj", "name": ".357 SIG FMJ", "level": "IIIA", "class": "pistol", "calibre_mm": 9, "mass_g": 8.1, "muzzle_mps": 440, "bc": 0.15, "drag": "G1"},
 		{"id": "12g_slug", "name": "12 ga slug", "level": "IIIA", "class": "pistol", "calibre_mm": 18.5, "mass_g": 28.3, "muzzle_mps": 480, "bc": 0.1, "drag": "G1"},
+		{"id": "12g_00_pellet", "name": "12 ga 00 buckshot pellet", "level": "IIA", "class": "pistol", "calibre_mm": 8.4, "mass_g": 3.5, "muzzle_mps": 400, "bc": 0.03, "drag": "G1"},
+		{"id": "12g_breach", "name": "12 ga frangible breaching round", "level": "IIA", "class": "pistol", "calibre_mm": 18.5, "mass_g": 40.0, "muzzle_mps": 410, "bc": 0.02, "drag": "G1"},
 		{"id": "556_m193", "name": "5.56x45mm M193 ball", "level": "III", "class": "intermediate", "calibre_mm": 5.7, "mass_g": 3.56, "muzzle_mps": 990, "bc": 0.121, "drag": "G7"},
 		{"id": "762x39_msc", "name": "7.62x39mm mild steel core", "level": "III+", "class": "intermediate", "calibre_mm": 7.9, "mass_g": 7.9, "muzzle_mps": 715, "bc": 0.137, "drag": "G7"},
 		{"id": "545x39_7n6", "name": "5.45x39mm 7N6 steel core", "level": "III++", "class": "intermediate", "calibre_mm": 5.6, "mass_g": 3.43, "muzzle_mps": 900, "bc": 0.168, "drag": "G7", "level_drop_mps": 700, "level_drop_to": "III"},

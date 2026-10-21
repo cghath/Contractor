@@ -32,6 +32,8 @@ var uses: PackedStringArray
 func default_state() -> Dictionary:
 	match type:
 		"weapon":
+			if int(stats.get("tube", 0)) > 0:
+				return Shotguns.full_state(self)  # a shotgun's tube, full of its shells
 			var ammo := StringName(stats.get("ammo", ""))
 			return {"rounds": ItemDB.get_item(ammo).magazine_rounds()} if ItemDB.has_item(ammo) else {}
 		"plate":

@@ -103,6 +103,12 @@ static func apply_kit(inventory: Inventory, role: StringName, lx3 := false) -> v
 ## second plate in the vest instead of the carrier's back pocket.
 static func give(inventory: Inventory, id: StringName, count: int) -> int:
 	var item := ItemDB.get_item(id)
+	if GunAttachments.is_attachment(item):
+		# A kit's grip, light or M320 goes on the first gun in it that takes it (else it's stowed).
+		var got := inventory.take(id, count)
+		for i in got:
+			GunAttachments.mount_carried(inventory, id)
+		return got
 	if item == null or item.slot == &"":
 		return inventory.take(id, count)
 	var taken := 0

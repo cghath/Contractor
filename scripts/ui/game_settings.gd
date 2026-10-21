@@ -90,6 +90,7 @@ const BINDABLE := [
 	[&"medical_menu", "Medical menu"], [&"inventory", "Inventory"], [&"map", "Map"],
 	[&"objectives_toggle", "Objectives list (compact / full)"], [&"objectives_next", "Next objective (picks the active one)"],
 	[&"weapon_primary", "Primary weapon"], [&"weapon_sidearm", "Sidearm"], [&"weapon_launcher", "Launcher"],
+	[&"weapon_underbarrel", "Underbarrel launcher / shotgun shells"],
 	[&"get_out", "Get out of vehicle"], [&"vehicle_view", "Vehicle view (1st/3rd person)"], [&"quick_save", "Quick save"],
 	[&"zoom_in", "Optic zoom in / magnifier up"], [&"zoom_out", "Optic zoom out / magnifier down"],
 	[&"give_up", "Give up while down (hold)"], [&"inspect", "Inspect item (ground)"],

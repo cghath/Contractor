@@ -11,7 +11,7 @@ const PROBE := preload("res://tests/armor_probe_vitals.gd")
 
 ## The design doc's ladder: each round's threat level.
 const ROUND_LEVELS := {
-	"9x19_fmj": "IIA", "45acp_fmj": "IIA", "12g_buck": "IIA", "9x19_hot": "II", "357mag": "II",
+	"9x19_fmj": "IIA", "45acp_fmj": "IIA", "12g_buck": "IIA", "12g_00_pellet": "IIA", "12g_breach": "IIA", "9x19_hot": "II", "357mag": "II",
 	"44mag": "IIIA", "10mm_fmj": "IIIA", "357sig_fmj": "IIIA", "12g_slug": "IIIA", "556_m193": "III",
 	"762x39_msc": "III+", "545x39_7n6": "III++", "762x51_m80": "III+", "556_m855": "III++", "762x54r_lps": "III++",
 	"556_m995": "IV", "762x51_m993": "IV", "3006_m2ap": "IV", "65cm_eldm": "III+", "50bmg_m33": "ABOVE_IV",
