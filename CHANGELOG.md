@@ -607,6 +607,55 @@ Closes the list item "an M320 underbarrel grenade launcher and a shotgun".
   for everyone. Before, every friendly body in the zone was counted at each debrief, so a body
   left from an earlier deployment could be paid for again. Raids pay it too now. A squadmate
   written off after a failed recovery now costs the benefit as well.
+### Fire support: artillery and mortar fire missions, a recon UAV, the forward observer (Captain's list, 2026-10-20)
+
+Closes "Vehicles and air: player artillery and UAV calls" and "Campaign / mission types: forward
+observer". Learning from how real call-for-fire works and from Arma's artillery, not copying
+either. Every number is Proposed (data/fire_support.json, data/prices.json).
+
+#### Added
+- **Fire missions** (Support > Fire support, or the fire mission panel for typed corrections and
+  grids). Two firing units fire from off the map:
+  - an 81 mm mortar section, lent by any employer you stand at least Neutral with;
+  - a 105 mm battery, from Trusted, inland only (it sits at the inland FOB).
+
+  How a mission goes:
+  - **Call it** on your map marker, on where you look, or on a typed grid. Through binoculars the
+    point is lased: it reaches 2.5 km and the first round lands closer.
+  - **Adjust.** One adjusting round lands with the guns' starting error. Correct from the burst
+    along your line to the target ("add 50, left 25"), as often as you need.
+  - **Fire for effect:** up to 8 mortar or 6 battery rounds, HE or smoke.
+
+  Rounds fly their real time of flight and land within a stated radius. HE uses the existing blast
+  (people, craters, the enemy hearing it) and hits vehicles near it. Smoke lands as white clouds.
+  The radio calls "shot" and "splash".
+
+  Limits:
+  - **Danger close:** with friendlies within 150 m (mortars) or 250 m (battery) of the aim, the guns
+    wait until you confirm.
+  - **Cost:** $450 a mortar round, $1,500 a battery round, from the support budget first, then cash.
+  - **Cooldown and ammunition:** a cooldown after each fire for effect, and a ration of rounds per
+    deployment. The deployment keeps both, as it does the rebels' call-ins.
+- **Recon UAV** (Support > Fire support > Recon UAV, $8,000):
+  - It flies in from where the supports come from, then circles a point 280 m up for 10 minutes.
+  - Hostiles its camera can see are tagged for the squad through the existing tags (red marks, the
+    map). It judges what it sees the way the AI's spotting does (stance, movement, camo, foliage,
+    weather). It sees in thermal, so night doesn't hide anyone.
+  - "Open the UAV feed" shows its camera in a panel at the right of the screen.
+  - Storms ground it, and send it home if they start while it's up.
+  - Three hits bring it down, and a manned enemy AA technical in range can hit it. It has a
+    15-minute cooldown.
+- **Forward observer contract** (on the board at outposts, checkpoints, QRF bases, HQs and
+  compounds, in contract and hot zones):
+  - Get eyes on the target area from up to 700 m.
+  - Bring the guns onto the 3-4 vehicles and weapon positions there.
+  - Stay unseen.
+
+  Pay goes by the targets the guns destroy: the first is the job, each further one a 25% bonus, and
+  never being spotted another 20%. A target destroyed any other way fails and doesn't pay.
+- A 105 mm HE warhead (data/warheads.json) for the battery.
+- Tests: a new `firesupport` suite, in the default local list and CI. The forward observer is in
+  `missions`, and the panel and the UAV feed are in `ui`.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

@@ -20,6 +20,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-131 | P3 | An AI soldier with a shotgun counts its loose shells as no spare ammo (reload, ammo-low, scavenging) |
 | F-160 | P3 | Dog tags have no worn model: a chain and tags on the neck while `Soldier.dog_tags` is set (Captain's side: gear rig, character model) |
 | F-161 | P3 | AI squadmates never take a fallen man's dog tags (squad AI: a scavenger or bearer could) |
+| F-150 | P3 | Enemy soldiers and gunners never aim at the player's recon UAV (fire support, 2026-10-20) |
+| F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 
 ## F-01: the building scan only sees one floor
 
@@ -263,3 +265,28 @@ elsewhere stays missing unless a player goes back.
 
 Suggested (Proposed): a squadmate at a fallen company soldier's body (`not body.dog_tags.is_empty()`)
 takes his tags as he would a pick (`server_take_tags`), and says so on the radio ("Got Reaper's tags").
+## F-150: enemy soldiers and gunners never aim at the player's recon UAV
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) target picking (it only looks at Soldiers),
+and the AA technicals' gunners (`technical_zu23`, `technical_zpu`) under
+[scripts/vehicles/](../../scripts/vehicles/). Found by cghath's agent on `feat/fire-support`
+(2026-10-20).
+
+What happens: the player's recon UAV (`UavSupport`, scripts/supports/uav_support.gd) can be shot
+down, as the enemy's drones can: its body takes Ballistics' `on_bullet` and three hits bring it
+down. But no enemy AI ever fires at it, because their targets are Soldiers only. For now
+`UavSupport._aa` stands in: a manned hostile AA technical within 1,500 m with a clear line to the
+UAV has a 6% chance every 5 s to hit it (data/fire_support.json "uav", Proposed). Suggested: let the
+AA technicals' gunners (and maybe riflemen who see it low) pick the UAV's body as a target, and
+then drop `_aa`'s dice roll.
+
+## F-151: enemy vehicle crews don't move off when fire missions land round them
+
+Location: [vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) and the crews' SquadAI. Found by
+cghath's agent on `feat/fire-support` (2026-10-20).
+
+What happens: the player's fire missions (`FireSupport`) land on vehicles through
+`Vehicle.server_take_hit`, and every soldier near a burst is suppressed (Warheads, Alert). A crewed
+enemy vehicle under adjusting rounds stays where it is, though, until it's hit. Real crews drive
+off when the first rounds walk in. Suggested: when a burst lands within about 50 m of a crewed
+hostile vehicle, its driver moves it 100-200 m away from the burst, toward cover.
