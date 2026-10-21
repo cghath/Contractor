@@ -2547,6 +2547,7 @@ func _test_forward_observer() -> void:
 	var fired := 0
 	var why_all := ""
 	var destroyed := 0
+	var states := PackedStringArray()
 	for t: Dictionary in targets:
 		var v := obs.target_vehicle(String(t.oid))
 		if v == null:
@@ -2561,10 +2562,14 @@ func _test_forward_observer() -> void:
 		await _frames(3)
 		obs.server_check()
 		why_all += why
-		if Contracts.objectives.get_objective(String(t.oid)).state == Objectives.DONE:
+		var now_o := Contracts.objectives.get_objective(String(t.oid))
+		if now_o.state == Objectives.DONE:
 			destroyed += 1
+		var left := obs.target_vehicle(String(t.oid))
+		states.append("%s: %s (%s)%s" % [String(t.params.model), String(now_o.state), String(now_o.progress),
+			"" if left == null else ", hull %d%%%s" % [roundi(left.zone_health(Vehicle.ZONE_HULL) * 100.0), ", burning" if left.is_burning() else ""]])
 	var spent := funds - Economy.cash() - int(Contracts.contract(d.cid).get("support_left", 0))
-	check(why_all == "" and destroyed == targets.size(), "the mortars called onto each target in turn: %d of %d destroyed by the guns ('%s')" % [destroyed, targets.size(), why_all])
+	check(why_all == "" and destroyed == targets.size(), "the mortars called onto each target in turn: %d of %d destroyed by the guns ('%s'; %s)" % [destroyed, targets.size(), why_all, "; ".join(states)])
 	check(spent == fired * Prices.support_price("mortar_round"), "the %d rounds paid from the support budget and cash ($%d)" % [fired, spent])
 	var debrief := _end_deployment()
 	var target_bonuses := (debrief.contracts[0].bonuses as Array).filter(func(b: Dictionary) -> bool: return String(b.text).contains("Bring fire")).size()

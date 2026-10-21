@@ -554,6 +554,7 @@ func _blast_vehicles(p: Vector3, u: Dictionary, warhead: StringName, by: Node, u
 		return
 	var reach := float(u.get("vehicle_reach_m", 8.0))
 	var kg := float(Warheads.data(warhead).get("blast_kg", 0.5)) * float(u.get("vehicle_blast_x", 2.5))
+	var hit_any := false
 	for v: Vehicle in layer.vehicles():
 		if v.wrecked or v.kind == Vehicle.HELICOPTER:
 			continue
@@ -566,6 +567,13 @@ func _blast_vehicles(p: Vector3, u: Dictionary, warhead: StringName, by: Node, u
 		v.server_take_hit({"kind": Vehicle.HE, "position": centre - toward * minf(d, 0.6), "direction": toward, "blast_kg": kg * share,
 			"shooter": by, "warhead": String(warhead), "warhead_kind": Vehicle.HE})
 		v.set_meta(HIT_META, {"at": now(), "by": String(by.name) if by else "", "unit": unit_id})
+		hit_any = true
+	# A forward observer's target the round just put out of action is the guns' kill now, not at
+	# ObserverMission's next tick (whatever the clock does in between: CI saw a test's clock jump
+	# past its credit window first).
+	var observer := ObserverMission.of(self)
+	if hit_any and observer:
+		observer.server_check()
 
 
 ## Whether `v` was hurt by fire support in the last `within_s` seconds.
