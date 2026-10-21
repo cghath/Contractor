@@ -231,6 +231,20 @@ func _test_gun_styles() -> void:
 		var butt := VoxelArt.butt_point(model)
 		check((hands.support as Vector3).z < (hands.grip as Vector3).z and (hands.grip as Vector3).z < butt.z,
 			"%s: support hand ahead of the grip, the grip ahead of the butt" % id)
+	# Captain, v0.5.0: "the m1014 is the wrong color and doesnt look right". The M1014 and the 590
+	# are matte black (no grey-tan GUN_LIGHT); the M1014's tube runs to within 3 cm of the muzzle,
+	# and it's about a metre long.
+	for id: StringName in [&"m1014", &"mossberg590"]:
+		var spec := VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(id)))
+		check(not (spec.boxes as Array).any(func(b: Array) -> bool: return int(b[2]) == VoxelArt.C.GUN_LIGHT or int(b[2]) == VoxelArt.C.WOOD),
+			"%s is matte black, no grey or wood parts" % id)
+	var m1014 := VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(&"m1014")))
+	var tube_front := INF
+	for b: Array in m1014.boxes:
+		if (b[1] as Vector3).y <= 7.75 + VoxelArt.RIFLE_BELOW and (b[1] as Vector3).z > 20.0:
+			tube_front = minf(tube_front, (b[0] as Vector3).z)
+	check(tube_front <= 1.5 and absf(m1014.size.z * VoxelArt.VOXEL_SIZE - 1.0) < 0.05,
+		"the M1014's magazine tube runs to %.1f cm from the muzzle; it's %.2f m long" % [tube_front * 2.0, m1014.size.z * VoxelArt.VOXEL_SIZE])
 	for p: Array in [[&"m17", "pistol"], [&"glock19", "pistol:compact"], [&"m1911", "pistol:steel"], [&"makarov_pm", "pistol:steel_compact"]]:
 		var model := VoxelArt.model_for(ItemDB.get_item(p[0]))
 		var n := float(VoxelArt._spec(model).size.z)
