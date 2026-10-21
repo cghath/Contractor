@@ -76,7 +76,7 @@ func _ready() -> void:
 	await _test_cartel_site()
 	await _test_variety_played()  # late: it blows the comms site's mast, which stays down (the hot zone ops checks want it standing)
 	await _test_missions_2()
-	await _test_missions_2_resume()  # (before _test_scenario_resume: in the level it leaves behind, the HVT's guards were gone within 3 frames of spawning, R0363; not yet understood)
+	await _test_missions_2_resume()  # (before _test_scenario_resume: the level it leaves behind holds two MissionScenario nodes, its own and one the test added, so a contract there starts twice, two guard details under the same names, and the guards the run holds are gone: R0363, R0394. A test artifact: a level has one, MapNodes.install)
 	await _test_forward_observer()  # fire support (2026-10-20): its own section at the end
 	await _test_respawn_points()
 	await _test_scenario_resume()
