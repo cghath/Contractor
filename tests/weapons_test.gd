@@ -45,6 +45,7 @@ func _ready() -> void:
 	_test_data()
 	_test_rounds_and_rules()
 	_test_models()
+	_test_gun_styles()
 	_test_reloads()
 	_test_muzzle_point()
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -184,6 +185,53 @@ func _test_models() -> void:
 				var model := "%s:%s:%s:%s:%s" % [parts[0], parts[1], art, parts[3], sup]
 				var pieces := _pieces(model)
 				check(pieces.size() == 1, "%s is one solid piece (%s: %s)" % [id, model, pieces])
+
+
+## The items expansion's SMGs, shotguns and pistols have silhouettes of their own (follow-up,
+## 2026-10-20: they borrowed the C8's, the AK's and the Mosin's, and every sidearm was one
+## pistol): each builds as one solid piece under any sight and a suppressor, a magazine that comes
+## out (none on a tube shotgun: shells go in through the top), its action as a moving part with a
+## place for the hand, the grip behind the support hand and ahead of the butt, and its reload
+## family.
+func _test_gun_styles() -> void:
+	print("Gun styles: SMGs, shotguns, pistols (2026-10-20)")
+	var styles := {&"mp5": "smg", &"mp5sd": "smg_sd", &"ump45": "smg_box", &"mp7": "smg_pdw", &"uzi": "smg_grip",
+		&"rem870": "shotgun", &"mossberg590": "shotgun_tac", &"m1014": "shotgun_auto"}
+	for id: StringName in styles:
+		var gun := ItemDB.get_item(id)
+		var model := VoxelArt.model_for(gun)
+		var shotgun := String(styles[id]).begins_with("shotgun")
+		check(model.contains(":%s:" % styles[id]), "%s has its own silhouette (%s)" % [id, model])
+		check(Reloads.family(gun) == (Reloads.BOLT if shotgun else Reloads.AR), "%s reloads as %s" % [id, Reloads.family(gun)])
+		var parts := model.split(":")
+		var solid := true
+		for art: String in ["irons", "dot", "holo", "lpvo", "scope_long"]:
+			for sup: String in ["", "sup"]:
+				var pieces := _pieces("%s:%s:%s:%s:%s" % [parts[0], parts[1], art, parts[3], sup])
+				if pieces.size() != 1:
+					solid = false
+					print("    %s %s %s: %s" % [id, art, sup, pieces])
+		check(solid, "%s is one solid piece under every sight, with or without a suppressor" % id)
+		var count := func(prefix: String) -> int: return (VoxelArt._spec(prefix + model).boxes as Array).size()
+		var whole := (VoxelArt._spec(model).boxes as Array).size()
+		var pts := VoxelArt.reload_points(model)
+		var hands := VoxelArt.hand_points(model)
+		check(VoxelArt.has_magazine(model) != shotgun and VoxelArt.moving_parts(model) == ["bolt"]
+			and count.call(VoxelArt.FIXED) + count.call(VoxelArt.MAG) + count.call(VoxelArt.BOLT) == whole
+			and pts.has("bolt") and pts.has("well") and (shotgun or pts.has("catch")),
+			"%s: %s, its action moves, places for the hands (%s)" % [id, "shells through the top" if shotgun else "its magazine comes out", pts.keys()])
+		var butt := VoxelArt.butt_point(model)
+		check((hands.support as Vector3).z < (hands.grip as Vector3).z and (hands.grip as Vector3).z < butt.z,
+			"%s: support hand ahead of the grip, the grip ahead of the butt" % id)
+	for p: Array in [[&"m17", "pistol"], [&"glock19", "pistol:compact"], [&"m1911", "pistol:steel"], [&"makarov_pm", "pistol:steel_compact"]]:
+		var model := VoxelArt.model_for(ItemDB.get_item(p[0]))
+		var n := float(VoxelArt._spec(model).size.z)
+		check(model == p[1] and n == (9.0 if model.ends_with("compact") else 10.0) and VoxelArt.has_magazine(model)
+			and VoxelArt.moving_parts(model) == ["bolt"] and _pieces(model).size() == 1 and Reloads.family(ItemDB.get_item(p[0])) == Reloads.PISTOL,
+			"%s draws as %s, %.0f cm: one piece, its magazine and slide parts of their own" % [p[0], model, n * 2.0])
+	var under := func(model: String) -> float: return float(VoxelArt.hand_points(model).grip.z) - VoxelArt.sight_point(model).z
+	check(is_equal_approx(under.call("pistol:compact"), under.call("pistol")),
+		"a compact sits in the hand like the full-size: its grip the same way under its rear sight")
 
 
 ## Reloads (Captain, 2026-10-20: "reload anims also need work", and the L85's): every family's
