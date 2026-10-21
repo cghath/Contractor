@@ -269,6 +269,8 @@ func _test_wall_follow() -> void:
 		if s.vitals.is_up() and _flat(s.global_position, squad.follow_point(s)) > SETTLING_M:
 			behind.append("%s %.0f m off: %s%s, blood %.2f" % [s.name, _flat(s.global_position, squad.follow_point(s)), SquadAI.of(s).status_text(),
 				" (dying)" if s.vitals.is_dying() else "", s.vitals.blood_fraction()])
+			var ai := SquadAI.of(s)  # (what holds him: an order, a tactic, care)
+			print("    stuck %s: %s, order %s, tactic %s, care %d" % [s.name, s.ai_status, Squad.Order.keys()[ai.order], ai.ordered.get("kind", "-"), ai.care])
 	check(behind.is_empty(), "walking away from the wall, nobody stays stuck on it (%s)" % (", ".join(behind) if not behind.is_empty() else "all with their slots"))
 	Engine.time_scale = 1.0
 	Engine.physics_ticks_per_second = 60

@@ -321,7 +321,7 @@ func _test_gunfire() -> void:
 	var from := at + Vector3(-10, 1.3, 0.2)
 	var to := at + Vector3(10, 1.3, -0.3)
 	check(SmokeCloud.blocks(from, to), "a line through the smoke is blocked")
-	level.show_tracer(from, to, false)  # a round along it (the host's tracer)
+	level.show_tracer(from, Vector3.ZERO, &"", to, false)  # a round along it (the host's tracer, straight)
 	cloud.run_to(6.0 + 3.0 / SmokeCloud.HZ)
 	check(not SmokeCloud.blocks(from, to), "a round through it parts it along its line for a moment (depth %.2f)" % SmokeCloud.depth_between(from, to))
 	cloud.run_to(8.0)

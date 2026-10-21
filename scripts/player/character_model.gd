@@ -403,6 +403,8 @@ var _height := 1.0
 var _girth := 1.0
 ## The face at work (FaceRig): his own head, eyes, mouth and brows.
 var face_rig: FaceRig
+## Long hair tucked in under a helmet with ear covers or a nape guard (GearRig: set_hair_tucked).
+var hair_tucked := false
 ## Until when (Soldier._now) he's calling out, mouth open (shout; Callouts.play).
 var _shout_until := -1.0
 ## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
@@ -520,6 +522,16 @@ var _leg_left: Node3D
 var _leg_right: Node3D
 var _shin_left: Node3D
 var _shin_right: Node3D
+## Feet (Feet, 2026-10-21): a foot on each ankle, [left, right], pitched each drawn frame to the
+## ground: flat when planted, the heel striking with the toes up and the heel lifting off the
+## bent toes walking; the toes tucked under where the foot can't lie flat (kneeling on that knee,
+## prone); relaxed when down. FOOT_EASE: how fast it follows (per second).
+const FOOT_EASE := 22.0
+var _feet: Array[Node3D] = []
+var _foot_style := Feet.BOOTS
+var _ankle: Array[float] = [0.0, 0.0]
+var _toes: Array[bool] = [false, false]
+var _foot_meshes: Dictionary = {}  # the foot meshes this model put on (a carved or copied one isn't)
 var _held: Node3D
 var _grip := Vector3.ZERO     # right hand, in _held's local space
 var _support := Vector3.ZERO  # left hand, in _held's local space
@@ -631,7 +643,7 @@ func body_scale() -> float:
 ## the same for every build (BodyVolume widens the trunk's hit shape to match, GIRTH_META).
 func girth(part: String) -> float:
 	var g := _girth
-	match part.trim_suffix(VoxelArt.FEMALE_SUFFIX):
+	match part.get_slice(":", 0).trim_suffix(VoxelArt.FEMALE_SUFFIX):  # ("forearm:grip:", "shin:boots": posed and styled parts)
 		"torso", "torso_fc":
 			return g
 		"upper_arm", "thigh":
@@ -661,6 +673,16 @@ func set_face(code: String) -> void:
 		add_child(face_rig)
 	face_rig.setup(self, face if face != "" else SoldierLook.DEFAULT)
 	_apply_girth()
+
+
+## A helmet whose ear covers or nape guard come down over long hair is on (or off): the head's
+## hair goes flat under it (FaceArt.tucked), and back as it was without.
+func set_hair_tucked(on: bool) -> void:
+	if on == hair_tucked:
+		return
+	hair_tucked = on
+	if face_rig and is_node_ready():
+		face_rig.setup(self, face if face != "" else SoldierLook.DEFAULT)
 
 
 ## Widens each body part's mesh for the build (girth), and tells the trunk's hitboxes.
@@ -771,8 +793,9 @@ func _ready() -> void:
 		_hand_anchor.append(anchor)
 	_leg_left = _part("thigh", _root, HIP * Vector3(-1, 1, 1))
 	_leg_right = _part("thigh", _root, HIP)
-	_shin_left = _part("shin", _leg_left, Vector3(0, -THIGH, 0))
-	_shin_right = _part("shin", _leg_right, Vector3(0, -THIGH, 0))
+	_foot_style = Feet.style_of(variant)
+	_shin_left = _shin_part(_leg_left, true)
+	_shin_right = _shin_part(_leg_right, false)
 	_last_position = global_position
 	_shown = pose_bones(REST_POSE, false)
 	set_face(face)
@@ -810,9 +833,47 @@ func pose_hitboxes(body: Node3D) -> void:
 	for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r", "shin_l", "shin_r"]:
 		deltas[key] = transform * (bones.root as Transform3D) * (bones[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
 	for area in _posable_hitboxes(body):
-		var target: Transform3D = deltas[_bone_of(area)] * _rest_of(area)
+		var bone := _bone_of(area)
+		var target: Transform3D
+		if deltas.has(bone):
+			target = deltas[bone] * _rest_of(area)
+		else:
+			target = _arm_delta(area, bone) * _rest_of(area)
 		if not area.transform.is_equal_approx(target):
 			area.transform = target
+
+
+## The arms' hitboxes follow the arms as drawn (Captain, 2026-10-21: "fingers and arms cant be hit"):
+## the IK on a weapon's grip and handguard, a reload, a carry, a ragdoll. Before, they hung at the
+## sides in the rest pose with the chest's turn, wherever the arms were, so a round at the drawn
+## arm met no arm box and one where it hung met an arm that wasn't there. The forearm's box also
+## carries the hand's pose model ("part_model": BodyVolume marches the drawn hand). On a woman the
+## boxes, drawn for the male shoulder, sit on her own (FEMALE_SHOULDER).
+const ARM_BONES := {&"upper_arm_l": "arm_l", &"upper_arm_r": "arm_r", &"forearm_l": "fore_l", &"forearm_r": "fore_r"}
+
+
+func _arm_delta(area: Area3D, bone: String) -> Transform3D:
+	var i := 0 if bone.ends_with("_r") else 1
+	var fore := bone.begins_with("fore")
+	if _upper.size() < 2 or _forearm.size() < 2 or not is_inside_tree():
+		return transform
+	var node: Node3D = _forearm[i] if fore else _upper[i]
+	var side := Vector3(1.0 if i == 0 else -1.0, 1, 1)
+	var down := Vector3(0, UPPER_ARM, 0) if fore else Vector3.ZERO
+	var pivot := TORSO_PIVOT + shoulder() * side - down
+	if not area.has_meta(&"arm_fit"):
+		area.set_meta(&"arm_fit", true)
+		var shift := (shoulder() - SHOULDER) * side  # her shoulder in from his
+		if not shift.is_zero_approx():
+			for child in area.get_children():
+				if child is CollisionShape3D:
+					(child as CollisionShape3D).position += shift
+	if fore:
+		var m := String(node.get_meta(&"voxel_model", ""))
+		if String(area.get_meta(&"part_model", "")) != m:
+			area.set_meta(&"part_model", m)
+	var drawn := global_transform.affine_inverse() * node.global_transform  # model space, unscaled
+	return transform * drawn * Transform3D(Basis(), pivot).affine_inverse()
 
 
 ## `bones` plus "shin_l" and "shin_r": each shin's pivot (the knee), root-local.
@@ -1445,6 +1506,21 @@ static func _model_of(body: Node) -> CharacterModel:
 	return body.get_node_or_null(^"Model") as CharacterModel
 
 
+## A shin drawn for this body's footwear (Feet.shin_model) under the knee, and its foot on the
+## ankle (Feet.ANKLE).
+func _shin_part(thigh: Node3D, left: bool) -> Node3D:
+	var shin := VoxelArt.instance(Feet.shin_model(_foot_style, body), variant, render_layers)
+	shin.position = Vector3(0, -THIGH, 0)
+	thigh.add_child(shin)
+	var foot := VoxelArt.instance(Feet.model(_foot_style, left, false, body), variant, render_layers)
+	foot.name = "Foot"
+	foot.position = Feet.ANKLE
+	shin.add_child(foot)
+	_feet.append(foot)
+	_foot_meshes[(foot.get_child(0) as MeshInstance3D).mesh] = true
+	return shin
+
+
 func _part(model: String, parent: Node3D, pivot: Vector3) -> Node3D:
 	var node := VoxelArt.instance(VoxelArt.body_part(model, body), variant, render_layers)
 	node.position = pivot
@@ -1487,6 +1563,8 @@ static func _bone_of(area: Area3D) -> String:
 		bone = "shin_l"
 	elif part == Vitals.SHIN_R:
 		bone = "shin_r"
+	elif ARM_BONES.has(part):
+		bone = ARM_BONES[part]
 	elif not part in [Vitals.NECK, Vitals.TORSO, Vitals.CHEST, Vitals.ABDOMEN,
 			Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]:
 		var centre := Vector3.ZERO
@@ -1619,6 +1697,7 @@ func _process(frame_delta: float) -> void:
 				head.rotation.x = -SEAT_HEAD_DROOP
 	_update_arms(delta, carry, swing)
 	_wounded_extras(delta)
+	_update_feet(delta, casualty or limp or downed)
 	_treat_reactions(delta)
 	if is_instance_valid(_props):
 		_props.update(delta)  # what's in the hands, now the arms are where they are this frame
@@ -1767,6 +1846,82 @@ func gait_bob() -> float:
 ## The ground speed the legs are walking at (m/s, the model's space).
 func gait_speed() -> float:
 	return _speed
+
+
+## Each foot's pitch on its ankle (_feet): the ground-relative pitch it wants (walking: by the
+## gait's phase; else flat), turned into the ankle's angle under its shin's own pitch; where the
+## ankle can't flatten it (the shin laid back: kneeling on that knee, prone), the toes tucked
+## under and the foot up on them. `limp`: down, dead or carried: relaxed, the toes pointing a little.
+func _update_feet(delta: float, limp: bool) -> void:
+	var up := global_basis.orthonormalized()
+	var duty := _gait_at(GAIT_DUTY, _speed)
+	for i in 2:
+		var shin := _shin_left if i == 0 else _shin_right
+		var want := 0.0
+		var toes := false
+		var ankle := -0.3
+		if not limp:
+			var walking := _gait_w > 0.0 and _gait != CRAWL and _gait != IDLE
+			if walking:
+				want = _gait_foot(fposmod(_gait_phase - 0.5 * i, 1.0), duty) * _gait_w
+			var f := up.inverse() * (shin.global_basis.orthonormalized() * Vector3.FORWARD)
+			var shin_pitch := atan2(f.y, Vector2(f.x, f.z).length())  # its own forward's tilt to the ground
+			if want - shin_pitch > Feet.ANKLE_MAX + 0.25:
+				want = Feet.TUCK_PITCH  # can't lie flat: up on the tucked toes
+				toes = true
+			elif walking and want < -0.2 and fposmod(_gait_phase - 0.5 * i, 1.0) < duty:
+				toes = true  # the heel off the ground, the foot rolling over its toes
+			ankle = Feet.ankle_for(want, shin_pitch)
+		_ankle[i] = lerpf(_ankle[i], ankle, minf(delta * FOOT_EASE, 1.0))
+		_feet[i].transform.basis = Basis(Vector3.RIGHT, _ankle[i])
+		_show_toes(i, toes)
+
+
+## The foot's pitch to the ground (radians, + the toes up) at `q` through its own gait cycle (0:
+## the heel strikes) with it on the ground `duty` of it: the toes up as the heel lands, flat,
+## the heel rising onto the toes to push off, the toes down as it leaves and coming up to land.
+static func _gait_foot(q: float, duty: float) -> float:
+	if q < duty:
+		var s := q / maxf(duty, 0.01)
+		if s < Feet.STRIKE_SHARE:
+			return lerpf(Feet.STRIKE_PITCH, 0.0, s / Feet.STRIKE_SHARE)
+		if s > Feet.ROLL_FROM:
+			return lerpf(0.0, Feet.PUSH_PITCH, (s - Feet.ROLL_FROM) / (1.0 - Feet.ROLL_FROM))
+		return 0.0
+	var w := (q - duty) / maxf(1.0 - duty, 0.01)
+	if w < 0.35:
+		return lerpf(Feet.PUSH_PITCH, Feet.SWING_PITCH, w / 0.35)
+	return lerpf(Feet.SWING_PITCH, Feet.STRIKE_PITCH, (w - 0.35) / 0.65)
+
+
+## Foot `i`'s mesh with its toes bent up or not (Feet.model "t"), unless it's no longer one of
+## this model's own (carved, or gone with a severed leg).
+func _show_toes(i: int, toes: bool) -> void:
+	if toes == _toes[i]:
+		return
+	var mi := _feet[i].get_child(0) as MeshInstance3D if _feet[i].get_child_count() > 0 else null
+	if mi == null or not _foot_meshes.has(mi.mesh):
+		return
+	var m := Feet.model(_foot_style, i == 0, toes, body)
+	mi.mesh = VoxelArt.mesh(m, variant)
+	_foot_meshes[mi.mesh] = true
+	_feet[i].set_meta(&"voxel_model", m)
+	_toes[i] = toes
+
+
+## Tests: foot `left`'s node, its pitch to the ground now (radians, + the toes up, in the body's
+## own upright frame) and whether its toes are bent.
+func foot_node(left: bool) -> Node3D:
+	return _feet[0 if left else 1]
+
+
+func foot_pitch(left: bool) -> float:
+	var f := global_basis.orthonormalized().inverse() * (foot_node(left).global_basis.orthonormalized() * Vector3.FORWARD)
+	return atan2(f.y, Vector2(f.x, f.z).length())
+
+
+func foot_toes(left: bool) -> bool:
+	return _toes[0 if left else 1]
 
 
 ## The sole of a foot (world space): the bottom of its shin.

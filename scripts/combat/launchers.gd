@@ -16,6 +16,8 @@ extends Node
 ## off (Warheads.server_burst: vehicles, structures, people) and every peer sees the burst.
 ## Craters are voxel edits, so late joiners get them with the edit log; a joiner also gets the
 ## rounds still in flight. server_reload is timed (the item's reload_s, slowed by wounds).
+## The M320 under a rifle (Underbarrel) fires its 40 mm grenades through the same flight
+## (server_launch, request_fire_underbarrel); a smoke grenade ends in a cloud, not a burst.
 
 const SLOT := &"launcher"
 ## The host sends each round's position this often (s).
@@ -41,7 +43,7 @@ var level: Node3D
 ## Every peer: id -> LauncherProjectile in flight.
 var projectiles: Dictionary = {}
 ## Every peer: rounds seen launched, backblasts and ends ({"id", "w", "pos", "how": "burst",
-## "dud" or "lost"}), for tests and the HUD.
+## "dud", "lost" or "smoke": an M320 smoke grenade's cloud}), for tests and the HUD.
 var launched := 0
 var backblasts := 0
 var ends: Array[Dictionary] = []
@@ -216,6 +218,31 @@ func request_reload(round_id: StringName) -> void:
 		server_reload(actor, round_id)
 
 
+## A player asks to fire the M320 under the rifle in their hands from `origin` along `dir`
+## (Underbarrel.server_fire). Any peer calls it (rpc_id 1).
+@rpc("any_peer", "call_local", "reliable")
+func request_fire_underbarrel(origin: Vector3, dir: Vector3) -> void:
+	if not multiplayer.is_server():
+		return
+	var actor := _sender()
+	if actor == null:
+		return
+	var why := Underbarrel.server_fire(actor, origin, dir)
+	if why != "" and not actor.is_ai():
+		actor._client_message.rpc_id(actor.owner_peer(), why)
+
+
+## A player asks to load the M320 under the rifle in their hands with `round_id` (or the next
+## grenade: Underbarrel.next_round).
+@rpc("any_peer", "call_local", "reliable")
+func request_reload_underbarrel(round_id: StringName) -> void:
+	if not multiplayer.is_server():
+		return
+	var actor := _sender()
+	if actor and Underbarrel.server_reload(actor, round_id) < 0.0 and not actor.is_ai():
+		actor._client_message.rpc_id(actor.owner_peer(), "No 40 mm grenades to load" if Underbarrel.carried_rounds(actor).is_empty() else "Can't load now")
+
+
 func _sender() -> Soldier:
 	var lvl := level as CompoundLevel
 	if lvl == null:
@@ -272,15 +299,8 @@ func server_fire(s: Soldier, origin: Vector3, dir: Vector3, mode := "", target: 
 	var blast: Dictionary = item.stats.get("backblast", {})
 	last_backblast = Warheads.server_backblast(level as CompoundLevel, s, rear, -dir, blast)
 	_client_backblast.rpc(rear, -dir, float(blast.get("injury_m", 10.0)))
-	var id := _next_id
-	_next_id += 1
-	last_id = id
-	_client_launch.rpc({"id": id, "w": String(w), "pos": muzzle, "vel": dir * float(d.get("speed_mps", 100.0)), "mode": mode, "age": 0.0, "flown": 0.0})
-	var p := projectiles.get(id) as LauncherProjectile
+	var p := server_launch(s, w, muzzle, dir * float(d.get("speed_mps", 100.0)), mode)
 	if p:
-		p.shooter = s
-		p.exclude = _rids_of(s)
-		p.launch_pos = muzzle
 		match guidance:
 			"javelin":
 				p.target = target
@@ -291,6 +311,23 @@ func server_fire(s: Soldier, origin: Vector3, dir: Vector3, mode := "", target: 
 		", " + mode if mode != "" else "", origin.x, origin.y, origin.z])
 	PeopleLayer.server_noise(s, origin, PeopleLayer.BLAST_HEARD_M)  # people nearby hear it
 	return ""
+
+
+## Host only. Launches a round of warhead `w` fired by `s` from `muzzle` at `vel` (attack
+## `mode`, "" for an unguided one) on every peer, never meeting `s` themselves; last_id is
+## its id. Returns the host's LauncherProjectile (null if it didn't start). server_fire and
+## the M320 (Underbarrel.server_fire) launch through it.
+func server_launch(s: Soldier, w: StringName, muzzle: Vector3, vel: Vector3, mode := "") -> LauncherProjectile:
+	var id := _next_id
+	_next_id += 1
+	last_id = id
+	_client_launch.rpc({"id": id, "w": String(w), "pos": muzzle, "vel": vel, "mode": mode, "age": 0.0, "flown": 0.0})
+	var p := projectiles.get(id) as LauncherProjectile
+	if p:
+		p.shooter = s
+		p.exclude = _rids_of(s)
+		p.launch_pos = muzzle
+	return p
 
 
 ## Why `s` can't fire a Javelin at `target` from `origin` along `dir` ("" if the lock holds):
@@ -425,6 +462,12 @@ func _server_end(p: LauncherProjectile, res: Dictionary) -> void:
 			burst = Warheads.server_burst(lvl, p.warhead, pos, dir, null, shooter)
 		else:
 			how = "lost"
+	elif String(p.data.get("kind", "")) == "smoke":
+		# A smoke grenade (the M320's M714): no burst, a cloud where it lands (SmokeCloud), just
+		# off what it met.
+		how = "smoke"
+		if lvl:
+			lvl.server_spawn_smoke(pos - dir * 0.15, String(p.data.get("smoke_colour", "white")))  # (its seed and wind picked here: the same cloud on every peer)
 	else:
 		burst = Warheads.server_burst(lvl, p.warhead, pos, dir, collider, shooter, bool(res.get("top_attack", false)))
 	results[p.id] = {"how": how, "position": pos, "direction": dir, "top_attack": bool(res.get("top_attack", false)),
@@ -486,7 +529,7 @@ func _client_end(id: int, pos: Vector3, w: String, how: String) -> void:
 			var thermo := String(d.get("kind", "")) == "thermobaric"
 			_fireball(pos, 2.4 * pow(kg, 1.0 / 3.0) * (1.8 if thermo else 1.0), Color(1.0, 0.55, 0.2), 0.5 if thermo else 0.35)
 			_dust(pos, Vector3.UP, 2.0 * pow(kg, 1.0 / 3.0), 2.5)
-		"dud":
+		"dud", "smoke":
 			_dust(pos, Vector3.UP, 0.6, 1.2)
 
 

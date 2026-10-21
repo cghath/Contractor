@@ -13,7 +13,7 @@ extends Node
 ## Boxes rolled per site type (and per hot or not) for the rarity check.
 const RARITY_ROLLS := 4000
 ## A piece of each kind the items expansion (2026-10-20) added, all of which must be found somewhere.
-const EXPANSION_SAMPLE: Array[String] = ["glock19", "mp5", "rem870", "ak12", "mk12", "rpd", "lee_enfield", "mag_mp5", "rounds_12g", "helmet_ach",
+const EXPANSION_SAMPLE: Array[String] = ["glock19", "mp5", "rem870", "ak12", "mk12", "rpd", "lee_enfield", "mag_mp5", "shells_12g_hibrass", "helmet_ach",
 	"plate_carrier_iotv", "rig_d3crm", "pack_ruck_60", "pouch_canteen", "plate_sapi", "ear_comtac", "ghillie_suit", "optic_kobra", "bipod_harris",
 	"suppressor_9mm", "energy_drink", "battery_cr123", "mre", "multitool", "graphics_card", "lighter", "antibiotics", "gas_mask_gp5", "gold_ring",
 	"smartphone", "intel_manifest"]
