@@ -484,8 +484,10 @@ func server_refresh_board() -> void:
 	for z: Dictionary in MissionRegistry.zones():
 		var zid := String(z.get("zone_id", ""))
 		if (String(z.get("kind", "")) == "hot" or WorldSites.is_war_zone(zid)) and WorldSites.is_flashpoint(zid) and ZoneControl.offers_in(zid) \
-				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false) and not c.get("war_front", false)):
-			_add_offer(ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid)}))
+				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_flip", false) and c.get("target", "") == WorldSites.holder(zid)):
+			var flip := ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid), "war_flip": true})
+			flip["war_flip"] = true
+			_add_offer(flip)
 			WorldSites.server_clear_flashpoint(zid)
 	# Contracts follow the war: a job on every front (one each), and a defence wherever the
 	# company's own ground is attacked.

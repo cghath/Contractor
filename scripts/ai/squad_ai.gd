@@ -3933,11 +3933,12 @@ static func pause_mult(range_m: float, doctrine: StringName) -> float:
 func _doctrine_id() -> StringName:
 	if squad and squad.doctrine != &"":
 		return squad.doctrine
-	if body.has_meta(&"faction_id"):  # terror groups (2026-10-20): his faction's own doctrine
-		var own := Kits.doctrine(String(body.get_meta(&"faction_id")))
+	var me := body if body else get_parent() as Soldier  # (asked before _setup: the parent)
+	if me and me.has_meta(&"faction_id"):  # terror groups (2026-10-20): his faction's own doctrine
+		var own := Kits.doctrine(String(me.get_meta(&"faction_id")))
 		if own != &"" and Doctrine.has(own):
 			return own
-	return Doctrine.default_for(body.faction)
+	return Doctrine.default_for(me.faction if me else &"hostile")
 
 
 ## The stance this unit takes on its own in a fight (G-05): SoldierMovement.Stance.PRONE, or -1

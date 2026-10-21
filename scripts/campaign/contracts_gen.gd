@@ -235,7 +235,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 				o["text"] = "Bonus: %s (got away, chase it into %s)" % [String(o.get("text", "")), String(legs[0].zone_name)]
 	var limit_min := int(def.get("time_limit_min", 0))
 	# Wave 6c: a flashpoint the faction war just handed to `target` says so up front.
-	var war_driven := hot and WorldSites.is_flashpoint(String(zone.get("zone_id", "")))
+	var war_driven := bool(ctx.get("war_flip", false)) or (hot and WorldSites.is_flashpoint(String(zone.get("zone_id", ""))))  # (the living war: Contracts' flip job, any zone)
 	var brief := String(def.get("brief", ""))
 	if war_driven:
 		brief = "The %s just took %s off whoever had it. %s" % [MissionRegistry.faction_name(target), zone.get("name", ""), brief]

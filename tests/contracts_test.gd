@@ -695,7 +695,7 @@ func _test_world_sites() -> void:
 	var on_front := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == "old_orchards" and c.get("war_front", false))
 	check(on_front.size() == 1 and String(on_front[0].target) in ["valley_shura", "kestrel"] and String(on_front[0].brief).begins_with("Fighting in Old Orchards"),
 		"a job goes up on the front, its brief saying who is fighting whom (%s)" % [on_front.map(func(c: Dictionary) -> String: return String(c.brief).left(80))])
-	var posted := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == "red_gulch" and c.get("war_driven", false) and not c.get("war_front", false))
+	var posted := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == "red_gulch" and c.get("war_flip", false) and c.get("target", "") == "saltline")
 	check(posted.size() == 1 and String(posted[0].target) == "saltline" and not WorldSites.is_flashpoint("red_gulch"),
 		"and the flipped zone's own offer, against the new holder, clearing the flag (%s, flag %s)" % [posted.map(func(c: Dictionary) -> String: return "%s vs %s" % [c.title, c.target]), WorldSites.is_flashpoint("red_gulch")])
 	# The last zone: sieged, never taken by another faction (Captain).
