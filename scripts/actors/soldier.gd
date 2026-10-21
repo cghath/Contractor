@@ -148,6 +148,8 @@ var _load_run := 0
 ## a muzzle flash gives a shooter away).
 var last_shot_at := -1000.0
 var last_shot_suppressed := false
+## Host: where that round ended (a human breacher's hinge shot: SquadAI, clearing on a breacher).
+var last_shot_to := Vector3.INF
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
@@ -180,6 +182,12 @@ var want_stance := -1
 var want_mantle := false
 ## Owner-side: fire-selector position per weapon, keyed "slot:item id" ("semi", "auto").
 var _fire_modes := {}
+## Owner-side: the trigger is on the M320 under the rifle in hand (the underbarrel key, 4;
+## Underbarrel), not the rifle. Off again on a weapon switch.
+var underbarrel_up := false
+## Owner-side: the shell kind R loads into a shotgun's tube next (the underbarrel key cycles it;
+## Shotguns.next_pick), &"" for the first kind carried.
+var shell_pick: StringName = &""
 ## Host only: who is dragging or carrying this body while it is down.
 var carried_by: Soldier
 ## Host only: the downed body this one is dragging or carrying.
@@ -435,6 +443,7 @@ func crosshair_ground() -> Variant:
 ## Switches the active weapon slot (owner-side; active_slot is replicated).
 func select_weapon(slot: StringName) -> void:
 	active_slot = slot
+	underbarrel_up = false  # a gun comes up on its own trigger
 	_on_inventory_changed()
 
 
@@ -892,8 +901,8 @@ func view_yaw() -> float:
 
 ## Recoil: the view kicks up and a little sideways; aiming halves it. RECOIL_SETTLE of the
 ## climb settles back (PlayerInput._settle_recoil), and the shot adds recoil heat (P0362).
-func _kick(weapon: ItemData) -> void:
-	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0)
+func _kick(weapon: ItemData, mult := 1.0) -> void:
+	var kick := deg_to_rad(float(weapon.stats.get("recoil_deg", 0.6))) * (0.5 if is_aiming else 1.0) * mult  # (a hi-brass shell's harder: Shotguns.recoil_of)
 	kick *= movement.recoil_mult()  # stance and mounted weapon
 	kick *= GunAttachments.recoil_mult(weapon, _state_of_weapon(weapon))  # a grip (wave 7 S3)
 	set_pitch(head.rotation.x + kick)
@@ -1003,6 +1012,17 @@ static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool,
 	return eye + right * offset.x * (-1.0 if lefty else 1.0) + up * offset.y + forward * offset.z
 
 
+## Where a round fired from `eye` leaves when the muzzle is `muzzle`: the muzzle, or, when something
+## solid is between them (a wall leaned on, the ground prone on a rise), MUZZLE_WALL_GAP_M short
+## of it on the eye's side.
+const MUZZLE_WALL_GAP_M := 0.03
+static func muzzle_clear_of(space: PhysicsDirectSpaceState3D, eye: Vector3, muzzle: Vector3, exclude: Array[RID]) -> Vector3:
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(eye, muzzle, 1, exclude))
+	if hit.is_empty():
+		return muzzle
+	return eye.move_toward(hit.position, maxf(eye.distance_to(hit.position) - MUZZLE_WALL_GAP_M, 0.0))
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
@@ -1018,7 +1038,9 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var now := _now()
 	if now < _server_next_shot or now < _server_busy_until - 0.1:
 		return
-	if not inventory.consume_round(slot):
+	var tube := Shotguns.is_shotgun(weapon)  # a 12 gauge's next shell, tube or magazine (Shotguns)
+	var shell := Shotguns.server_take_shell(inventory, slot) if tube else &""
+	if (tube and shell == &"") or (not tube and not inventory.consume_round(slot)):
 		return
 	server_end_spawn_protection()  # firing ends spawn protection
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
@@ -1029,15 +1051,16 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		origin = camera.global_position  # don't trust a far-off muzzle
 	# The round leaves the muzzle along the barrel and deviates from there (spread, drop, drag;
 	# Captain, 2026-10-16: "bullets should come from the muzzles ... then deviate"). A muzzle
-	# pushed into a wall fires from the eye instead (no shooting through what you lean on).
+	# pushed into a wall, or into the ground (prone on a rise), fires from just short of it
+	# (no shooting through what you lean on), not from the eye: the round and its tracer still
+	# leave the gun (Captain, 2026-10-21: tracers "wonky depending on terrain").
 	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed, is_aiming)
-	var wall_q := PhysicsRayQueryParameters3D.create(origin, muzzle, 1, [get_rid()])
-	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
-		muzzle = origin
-	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
-	# Buckshot (items expansion, 2026-10-20): a round of several pellets (rounds.json "pellets")
-	# traces each further pellet on its own, spread round the shot inside pellet_spread_deg.
-	for p in Ballistics.pellets(weapon) - 1:
+	muzzle = muzzle_clear_of(get_world_3d().direct_space_state, origin, muzzle, [get_rid()])
+	# A 12 gauge's shell: its pellets (narrowed by a choke) or a breaching round (Shotguns.server_fire;
+	# one 12-gauge system, 2026-10-21). Anything else fires its round; a round with rounds.json
+	# "pellets" from a magazine traces each further pellet on its own inside pellet_spread_deg.
+	var result := Shotguns.server_fire(self, muzzle, direction.normalized(), weapon, shell, Shotguns.spread_mult(weapon, inventory.state_of(slot))) if tube else Ballistics.fire(self, muzzle, direction.normalized(), weapon)
+	for p in (Ballistics.pellets(weapon) - 1 if not tube else 0):
 		var hit := Ballistics.fire(self, muzzle, Ballistics.pellet_direction(direction.normalized(), weapon), weapon)
 		if String(hit.result) != "none":
 			CompoundLevel.current(self).show_impact.rpc(hit.position, hit.normal, hit.result)
@@ -1046,13 +1069,16 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
+	last_shot_to = round_point
 	Sfx.server_shot(muzzle, round_point,
 		"suppressed" if suppressed else String(weapon.stats.get("sound", "pistol" if weapon.slot == &"sidearm" else "rifle")))  # every peer hears it (Sfx): its family's sound (AR, AK, ...)
 	_rounds_fired += 1
 	var every := int(weapon.stats.get("tracer_every", TRACER_EVERY))
 	var tracer := every > 0 and _rounds_fired % every == 0
 	var kind: int = (Tracer.Kind.GREEN if faction == &"hostile" else Tracer.Kind.RED) if tracer else Tracer.Kind.BALL
-	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed, kind)  # and sees it (Tracer)
+	var launch: Variant = result.get("launch")  # the path it flew, on every peer (Ballistics.flight_path)
+	CompoundLevel.current(self).show_tracer.rpc(muzzle, launch if launch is Vector3 and round_end is Vector3 else Vector3.ZERO,
+		Ballistics.round_id(Shotguns.shot_item(weapon, shell) if tube else weapon), round_point, suppressed, kind)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)
@@ -1239,6 +1265,9 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
+	if Shotguns.is_tube(ItemDB.get_item(id)):
+		Shotguns.server_load(self, slot)  # a tube is loaded shell by shell (the AI's reload too)
+		return
 	var empty := inventory.rounds_in(slot) <= 0
 	var seconds := reload_seconds(ItemDB.get_item(id), empty)
 	_server_busy_until = _now() + seconds
@@ -1254,6 +1283,37 @@ func _server_reload(slot: StringName) -> void:
 	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id \
 			and inventory.slot_revision(slot) == rev:
 		inventory.reload(slot)
+
+
+## A player loads the shotgun in `slot` (with `key`, the Skeleton Key under the gun there) with a
+## speed loader or shell by shell with `shell` shells (or the first kind carried): Shotguns.server_load.
+## Shells it won't take stay out, and the player hears why (Shotguns.why_not).
+@rpc("any_peer", "call_local", "reliable")
+func _server_load_shells(slot: StringName, shell: StringName, key := false) -> void:
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1:
+		return
+	if Shotguns.server_load(self, slot, shell, key) < 0.0:
+		var gun := ItemDB.get_item(inventory.slots.get(slot, &"")) if inventory.slots.get(slot, &"") != &"" else null
+		var tube := Shotguns.key_on(gun, inventory.state_of(slot)) if key else gun
+		var why := "No shells to load"
+		if tube and shell != &"" and not Shotguns.takes(tube, shell):
+			why = Shotguns.why_not(tube, shell)
+		elif tube and Shotguns.load_choice(tube, inventory, shell) != &"":
+			why = "The tube's full"
+		elif tube and Shotguns.takes(tube, Shotguns.BREACHING) == false and inventory.count_of(Shotguns.BREACHING) > 0:
+			why = Shotguns.why_not(tube, Shotguns.BREACHING)  # only breaching rounds carried, and it won't take them
+		if not is_ai():
+			_client_message.rpc_id(owner_peer(), why)
+
+
+## A player fires the Skeleton Key under the gun in their hands (Shotguns.server_fire_key).
+@rpc("any_peer", "call_local", "reliable")
+func _server_fire_key(origin: Vector3, dir: Vector3) -> void:
+	if not _from_owner():
+		return
+	var why := Shotguns.server_fire_key(self, origin, dir)
+	if why != "" and why != "Busy" and not is_ai():
+		_client_message.rpc_id(owner_peer(), why)
 
 
 ## Every peer: the host says a reload of `item` began (_server_reload), so this peer plays it
@@ -2721,9 +2781,8 @@ func body_record() -> Dictionary:
 		"variant": model.variant, "body": model.body, "face": model.face, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
-		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net),
-		"gore": BodyDeform.save_record(vitals),  # its holes, cuts and where its pieces lie (CompoundLevel.server_spawn_body)
-		"tags": dog_tags.duplicate()}
+		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net), "tags": dog_tags.duplicate(),
+		"gore": BodyDeform.save_record(vitals)}  # its holes, cuts and where its pieces lie (CompoundLevel.server_spawn_body)
 
 
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the

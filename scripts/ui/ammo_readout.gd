@@ -9,7 +9,9 @@ extends Control
 ## The inventory keeps each magazine's own rounds (an entry's state "rounds", none for a full
 ## one), so every pip is that magazine's own estimate. A belt reads the same with "belt" for
 ## "mag"; a launcher shows the round loaded and how many more are carried (one or two, a count
-## is fine); grenades are a count.
+## is fine); so does the M320 under a rifle with the trigger on it (Underbarrel), and a
+## shotgun's tube reads its fill and the shell up next, with the shells carried; grenades are
+## a count.
 
 ## The fill words, fullest first: a magazine at least this share full gets the word. Above
 ## nothing it's "Nearly empty"; with no rounds at all "Empty". Proposed thresholds.
@@ -81,6 +83,34 @@ static func summary(s: Soldier) -> Dictionary:
 			for i in inv.count_of(id):
 				spares.append(1.0)
 		out = {"kind": "launcher", "loaded": Launchers.warhead_name(w) if w != &"" else EMPTY, "spares": spares, "unit": "round"}
+	elif weapon and s.underbarrel_up and Shotguns.key_of(s) != null:
+		# The trigger on the Skeleton Key under the rifle: its tube, the shell up next, shells carried.
+		var key := Shotguns.key_of(s)
+		var tube := Shotguns.key_list(key, inv.state_of(s.active_slot))
+		var spares: Array = []
+		for i in Shotguns.spare_shells(inv, key):
+			spares.append(1.0)
+		var next := StringName(String(tube.back())) if not tube.is_empty() else &""
+		out = {"kind": "tube", "loaded": fill_word(tube.size(), Shotguns.capacity(key)) + (" (%s)" % ItemDB.get_item(next).name.trim_prefix("12 ga ") if next != &"" else ""),
+			"spares": spares, "unit": "shell"}
+	elif weapon and s.underbarrel_up and Underbarrel.on_gun(s) != null:
+		# The trigger on the M320 under the rifle: the grenade in it and the ones carried.
+		var w := Underbarrel.loaded_of(s)
+		var spares: Array = []
+		for id in Launchers.round_items(Underbarrel.on_gun(s)):
+			for i in inv.count_of(id):
+				spares.append(1.0)
+		out = {"kind": "launcher", "loaded": Launchers.warhead_name(w) if w != &"" else EMPTY, "spares": spares, "unit": "grenade"}
+	elif Shotguns.is_tube(weapon):
+		# A shotgun: how full its tube is, the shell up next, and the shells it takes carried
+		# (loose and in its speed loaders).
+		var spares: Array = []
+		for i in Shotguns.spare_shells(inv, weapon):
+			spares.append(1.0)
+		var next := Shotguns.next_shell(inv.state_of(s.active_slot))
+		var word := fill_word(inv.rounds_in(s.active_slot), Shotguns.capacity(weapon))
+		out = {"kind": "tube", "loaded": word + (" (%s)" % ItemDB.get_item(next).name.trim_prefix("12 ga ") if next != &"" else ""),
+			"spares": spares, "unit": "shell"}
 	elif weapon and weapon.type == "weapon":
 		var ammo_id := StringName(weapon.stats.get("ammo", ""))
 		if ItemDB.has_item(ammo_id):

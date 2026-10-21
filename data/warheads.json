@@ -1,5 +1,5 @@
 {
-	"_units": "Anti-armour rounds (wave 5, V2). Launchers (data/items.json, type launcher) fire these; a round item (type ammo) names its warhead in stats.warhead, a disposable launcher its own in stats.loaded. kind = Vehicle hit kind (heat, tandem_heat, he, hedp, thermobaric); calibre_mm = warhead diameter; penetration_mm = RHA a shaped-charge jet goes through (0 for none); blast_kg = TNT equivalent of the filling (overpressure and craters scale with its cube root); frag_m = how far its fragments wound, frag_wounds = [min, max] fragment wounds on a body close by; arming_m = it doesn't fuse closer than this (a dud); speed_mps = leaving the launcher; motor = a rocket motor that lights delay_s after launch and burns burn_s, taking the round to to_mps; max_s = after this many seconds of flight it self-destructs (self_destruct: the RPG-7's rounds) or is lost; mass_kg = the projectile in flight; guidance = '' (unguided, gravity), 'javelin' (locked target, top attack or direct), 'nlaw' (predicted line of sight, overfly top attack or direct). Javelin: cruise_mps, top_apex_m (highest climb, top attack), direct_apex_m, turn_dps. NLAW: ota_height_m above the line of sight, sensor_m below it. All values are proposed, from the real rounds' published figures.",
+	"_units": "Anti-armour rounds (wave 5, V2). Launchers (data/items.json, type launcher) fire these; a round item (type ammo) names its warhead in stats.warhead, a disposable launcher its own in stats.loaded. kind = Vehicle hit kind (heat, tandem_heat, he, hedp, thermobaric); calibre_mm = warhead diameter; penetration_mm = RHA a shaped-charge jet goes through (0 for none); blast_kg = TNT equivalent of the filling (overpressure and craters scale with its cube root); frag_m = how far its fragments wound, frag_wounds = [min, max] fragment wounds on a body close by; arming_m = it doesn't fuse closer than this (a dud); speed_mps = leaving the launcher; motor = a rocket motor that lights delay_s after launch and burns burn_s, taking the round to to_mps; max_s = after this many seconds of flight it self-destructs (self_destruct: the RPG-7's rounds) or is lost; mass_kg = the projectile in flight; guidance = '' (unguided, gravity), 'javelin' (locked target, top attack or direct), 'nlaw' (predicted line of sight, overfly top attack or direct). Javelin: cruise_mps, top_apex_m (highest climb, top attack), direct_apex_m, turn_dps. NLAW: ota_height_m above the line of sight, sensor_m below it. 40 mm grenades (the M320, Underbarrel): kind smoke (smoke_colour: the cloud it makes where it lands, SmokeCloud.COLOURS) instead of a burst; length_m = the round's length in flight (the drawn model; else by calibre); trail false = no smoke trail (no rocket motor). All values are proposed, from the real rounds' published figures.",
 	"warheads": [
 		{"id": "at4_heat", "name": "AT4 HEAT (84 mm)", "kind": "heat", "calibre_mm": 84, "penetration_mm": 420, "blast_kg": 0.6, "frag_m": 6.0, "frag_wounds": [1, 4],
 			"arming_m": 10.0, "speed_mps": 285.0, "max_s": 8.0, "mass_kg": 1.8},
@@ -9,6 +9,8 @@
 			"arming_m": 25.0, "speed_mps": 200.0, "max_s": 60.0, "mass_kg": 1.7},
 		{"id": "mortar_82_he", "name": "82 mm mortar HE", "kind": "he", "calibre_mm": 82, "penetration_mm": 0, "blast_kg": 0.45, "frag_m": 25.0, "frag_wounds": [4, 10],
 			"arming_m": 25.0, "speed_mps": 210.0, "max_s": 60.0, "mass_kg": 3.1},
+		{"id": "arty_105_he", "name": "105 mm howitzer HE (M1)", "kind": "he", "calibre_mm": 105, "penetration_mm": 0, "blast_kg": 2.1, "frag_m": 35.0, "frag_wounds": [4, 12],
+			"arming_m": 25.0, "speed_mps": 470.0, "max_s": 60.0, "mass_kg": 15.0, "_note": "Player fire support only (FireSupport, data/fire_support.json): lands from off the map."},
 		{"id": "og7v", "name": "OG-7V fragmentation (40 mm)", "kind": "he", "calibre_mm": 40, "penetration_mm": 0, "blast_kg": 0.3, "frag_m": 15.0, "frag_wounds": [3, 8],
 			"arming_m": 5.0, "speed_mps": 152.0, "max_s": 4.5, "self_destruct": true, "mass_kg": 2.0},
 		{"id": "javelin", "name": "Javelin tandem HEAT (127 mm)", "kind": "tandem_heat", "calibre_mm": 127, "penetration_mm": 750, "blast_kg": 2.5, "frag_m": 8.0, "frag_wounds": [1, 4],
@@ -26,6 +28,10 @@
 		{"id": "smaw_hedp", "name": "SMAW HEDP (Mk3, 83 mm)", "kind": "hedp", "calibre_mm": 83, "penetration_mm": 200, "blast_kg": 1.1, "frag_m": 10.0, "frag_wounds": [2, 6],
 			"arming_m": 10.0, "speed_mps": 220.0, "max_s": 6.0, "mass_kg": 3.0},
 		{"id": "smaw_ne", "name": "SMAW-NE thermobaric (Mk80, 83 mm)", "kind": "thermobaric", "calibre_mm": 83, "penetration_mm": 0, "blast_kg": 2.5, "frag_m": 4.0, "frag_wounds": [1, 3],
-			"arming_m": 10.0, "speed_mps": 220.0, "max_s": 6.0, "mass_kg": 3.4}
+			"arming_m": 10.0, "speed_mps": 220.0, "max_s": 6.0, "mass_kg": 3.4},
+		{"id": "m406", "name": "M406 HE (40 mm)", "kind": "he", "calibre_mm": 40, "penetration_mm": 0, "blast_kg": 0.045, "frag_m": 10.0, "frag_wounds": [2, 6],
+			"arming_m": 14.0, "speed_mps": 76.0, "max_s": 16.0, "mass_kg": 0.23, "length_m": 0.1, "trail": false},
+		{"id": "m714", "name": "M714 white smoke (40 mm)", "kind": "smoke", "smoke_colour": "white", "calibre_mm": 40, "penetration_mm": 0, "blast_kg": 0.0, "frag_m": 0.0, "frag_wounds": [0, 0],
+			"arming_m": 14.0, "speed_mps": 76.0, "max_s": 16.0, "mass_kg": 0.22, "length_m": 0.1, "trail": false}
 	]
 }

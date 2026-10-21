@@ -354,6 +354,7 @@ func _ready() -> void:
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
+	add_child(Demolitions.new())  # "Demolitions": demo blocks, thermite, claymores, mines, chem lights (2026-10-20)
 	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
@@ -362,6 +363,7 @@ func _ready() -> void:
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	EnemyTags.install(self)  # tagging enemies for the squad by radio (Captain, 2026-10-16)
 	RebelCalls.install(self)  # the locals' call-ins, by their support (rebel support part 2)
+	FireSupport.install(self)  # fire missions, the recon UAV, the forward observer's targets (fire support, 2026-10-20)
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it
 	add_child(DayNight.new())  # "DayNight": time of day and weather, after _build_environment's lights (wave 7 S1)
 
@@ -567,12 +569,19 @@ func voxel_worlds() -> Array[VoxelWorld]:
 
 ## Host only. A blast (a frag) at a world-space point against the voxels around it
 ## (VoxelWorld.server_blast on each loaded world it reaches).
-func server_blast(pos: Vector3, radius_m: float) -> void:
+## `crater_m`: the ground crater's radius (Digging), -1 for the blast's own, 0 for none.
+func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	for world in voxel_worlds():
 		world.server_blast(pos, radius_m)
 	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
 	if digging:
-		digging.server_blast(pos, radius_m)  # dug berms wear down (Digging)
+		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)
+
+
+## Host only. A breaching charge's doorway through the wall at `pos` (VoxelWorld.server_breach).
+func server_breach(pos: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
+	for world in voxel_worlds():
+		world.server_breach(pos, normal, floor_y, width_m, height_m, depth_m)
 
 
 ## Host only.
@@ -654,16 +663,26 @@ func _restore_bodies() -> void:
 	var vehicles := get_node_or_null(^"Vehicles") as VehicleLayer
 	if vehicles:
 		vehicles.server_restore()
+	var placed := get_node_or_null(^"Demolitions") as Demolitions
+	if placed:
+		placed.server_restore()  # what players placed and left: charges, mines, chem lights (on their vehicles when back)
 
 
-## Host only. A visible tracer streak from `origin` to `end` on every peer (Captain, 2026-10-16:
-## "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic (Sfx.
-## server_shot already carries the sound); suppressed shots get a faint one, not none, since the
-## round still flies even if the bang is quiet.
+## Host only. A visible tracer streak from the muzzle `origin` to `end` on every peer (Captain,
+## 2026-10-16: "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic
+## (Sfx.server_shot already carries the sound); suppressed shots get a faint one, not none, since
+## the round still flies even if the bang is quiet. `launch` and `round_id` (Ballistics.fire's
+## "launch", Ballistics.round_id) let every peer fly the round's real path to `end`
+## (Ballistics.flight_path; Captain, 2026-10-21: tracers' arcs "still wonky depending on
+## terrain"); a zero `launch` draws a straight streak. `kick`: a soldier's shot (his weapon kicks,
+## and the streak starts at his gun as this peer draws him: Tracer.LEAD_BLEND_M); not a vehicle's.
 @rpc("authority", "call_local", "unreliable")
-func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
-	Tracer.spawn(self, origin, end, suppressed, kind)
-	_kick_shooter(origin)
+func show_tracer(origin: Vector3, launch: Vector3, round_id: StringName, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED, kick := true) -> void:
+	if not (origin.is_finite() and launch.is_finite() and end.is_finite()):
+		return
+	var points := Ballistics.flight_path(origin, launch, round_id, end) if launch != Vector3.ZERO else PackedVector3Array([origin, end])
+	var shooter := _kick_shooter(origin) if kick else null
+	Tracer.spawn_path(self, points, suppressed, kind, _seen_muzzle_offset(shooter, origin))
 
 
 ## The soldier whose shot left from `origin` (the nearest within KICK_FIND_M): their weapon kicks
@@ -671,7 +690,7 @@ func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tr
 const KICK_FIND_M := 1.6
 
 
-func _kick_shooter(origin: Vector3) -> void:
+func _kick_shooter(origin: Vector3) -> Soldier:
 	var best: Soldier = null
 	var best_d := KICK_FIND_M
 	for n: Node in get_tree().get_nodes_in_group(&"combatants"):
@@ -686,6 +705,17 @@ func _kick_shooter(origin: Vector3) -> void:
 		var w := best.active_weapon()
 		var strength := clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0
 		best.model.kick(strength)
+	return best
+
+
+## How far from `muzzle` this peer draws `shooter`'s gun: a body another peer moves is drawn a
+## moment behind (Soldier._smooth_remote: the model's net_offset), so the tracer starts at the gun
+## seen, not at a muzzle in the air ahead of it. Zero where the model sits on the body.
+static func _seen_muzzle_offset(shooter: Soldier, muzzle: Vector3) -> Vector3:
+	if shooter == null or shooter.model == null or shooter.model.net_offset == Transform3D.IDENTITY:
+		return Vector3.ZERO
+	var body := shooter.global_transform
+	return body * (shooter.model.net_offset * (body.affine_inverse() * muzzle)) - muzzle
 
 
 @rpc("authority", "call_local", "unreliable")
@@ -726,6 +756,22 @@ func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> 
 	grenade.global_position = origin
 	grenade.linear_velocity = velocity
 	grenade.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+
+
+## Host only. A mortar or artillery shell seen flying (ShellArc) on every peer: from `start` at
+## `launch` under `push` (gravity's partner: the wind, ShellArc.wind_accel), landing `flight`
+## seconds later where the host bursts it.
+@rpc("authority", "call_local", "reliable")
+func show_shell(start: Vector3, launch: Vector3, push: Vector3, flight: float) -> void:
+	if start.is_finite() and launch.is_finite() and push.is_finite() and flight > 0.0 and flight < 600.0:
+		ShellArc.spawn(self, start, launch, push, flight)
+
+
+## Host: a shell from `start` that lands at `end` `flight` seconds from now, in today's wind,
+## seen on every peer (show_shell).
+func server_show_shell(start: Vector3, end: Vector3, flight: float) -> void:
+	var push := ShellArc.wind_accel(DayNight.wind())
+	show_shell.rpc(start, ShellArc.launch_for(start, end, flight, push), push, flight)
 
 
 @rpc("authority", "call_local", "reliable")

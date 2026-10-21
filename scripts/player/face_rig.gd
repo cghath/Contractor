@@ -46,6 +46,9 @@ var thick := 1
 ## expression.
 var eye_state := "11"
 var expression := FaceArt.NEUTRAL
+## The head came off (BodyDeform cut it: head_severed): the face went with the piece; the parts
+## here stay hidden and the head's mesh is BodyDeform's (the stump) until the body is made whole.
+var head_off := false
 var _parts: Dictionary = {}  # PARTS -> MeshInstance3D
 var _models: Array = []      # all_models(), worked out once a face
 var _ready_built := false
@@ -58,11 +61,15 @@ var _tick := 0.0
 
 
 ## Puts `face` (a SoldierLook code) on `m`'s head: its own head mesh and the moving parts, built
-## on a worker; the head draws nothing until they're ready.
+## on a worker. The head keeps what it drew before (nothing, the first time) until they're ready.
+## Under a helmet with ear covers or a nape guard (CharacterModel.hair_tucked) long hair is
+## tucked in (FaceArt.tucked).
 func setup(m: CharacterModel, face: String) -> void:
 	model = m
 	female = m.body == VoxelArt.FEMALE
 	head_model = SoldierLook.head_model(face, m.body)
+	if m.hair_tucked:
+		head_model = FaceArt.tucked(head_model)
 	digits = head_model.get_slice(":", 1)
 	palette = SoldierLook.palette(face)
 	thick = absi(hash(face)) % 3 if not female else 0  # brows: thin, middling, bushy
@@ -74,7 +81,6 @@ func setup(m: CharacterModel, face: String) -> void:
 	var mi := head.get_child(0) as MeshInstance3D
 	_ready_built = false
 	_models = all_models()
-	mi.mesh = null
 	var origins := FaceArt.feature_origins(digits, female)
 	for part in PARTS:
 		var inst: MeshInstance3D = _parts.get(part)
@@ -88,7 +94,6 @@ func setup(m: CharacterModel, face: String) -> void:
 			_parts[part] = inst
 		inst.layers = m.render_layers
 		inst.position = origins[part]
-		inst.mesh = null
 	_try_ready()
 
 
@@ -123,8 +128,50 @@ func _try_ready() -> void:
 	if not VoxelArt.build_async(_models, palette):
 		return
 	_ready_built = true
+	if head_off:
+		return  # (built late, after the cut: the stump stays as BodyDeform drew it)
 	(model.head.get_child(0) as MeshInstance3D).mesh = VoxelArt.mesh(head_model, palette)
 	_apply(true)
+
+
+## BodyDeform: the head was cut off and flies as `look` (its mesh, in the head mesh's own frame).
+## The face goes with it: shut eyes, a slack mouth and brows, this face's own; here they hide,
+## and nothing puts a whole head back on the stump (Captain, 2026-10-21: "the face and neck
+## stayed floating in the air while the head rolled away").
+func head_severed(look: Node3D) -> void:
+	head_off = true
+	var origins := FaceArt.feature_origins(digits, female)
+	var dead := FaceArt.feature_models(digits, female, "c", FaceArt.SLACK, thick)
+	for part in PARTS:
+		var inst: MeshInstance3D = _parts.get(part)
+		if inst and is_instance_valid(inst):
+			inst.visible = false
+		if look and palette != "":
+			var copy := MeshInstance3D.new()
+			copy.name = "Face_" + part
+			copy.mesh = VoxelArt.mesh(dead[part], palette)
+			copy.material_override = VoxelArt._get_material()
+			copy.layers = look.layers if look is VisualInstance3D else 1
+			copy.position = origins[part]
+			look.add_child(copy)
+
+
+## The body made whole again (BodyDeform reset: wounds healed, a respawn): the face comes back.
+func _head_back() -> void:
+	head_off = false
+	for part in PARTS:
+		var inst: MeshInstance3D = _parts.get(part)
+		if inst and is_instance_valid(inst):
+			inst.visible = true
+	if _ready_built:
+		(model.head.get_child(0) as MeshInstance3D).mesh = VoxelArt.mesh(head_model, palette)
+		_apply(true)
+
+
+## Whether the body's head is cut off now (BodyDeform).
+func _cut_off() -> bool:
+	var deform := model.get_node_or_null(^"BodyDeform") as BodyDeform
+	return deform != null and deform.severed().has(Vitals.HEAD)
 
 
 func _process(delta: float) -> void:
@@ -138,6 +185,10 @@ func _process(delta: float) -> void:
 		return
 	var dt := _tick
 	_tick = 0.0
+	if head_off:
+		if not _cut_off():
+			_head_back()
+		return
 	_think(dt)
 	_apply(false)
 

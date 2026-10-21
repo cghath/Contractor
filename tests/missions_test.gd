@@ -26,6 +26,10 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	HotZoneOps.enabled = false  # one contract at a time below; _test_hot_zone_ops turns it on
 	EnemyDrones.enabled = false  # none on their own (wave 6): _test_enemy_drones sends its own
+	# None on their own either (R2255: once the living war hands the zone to the Shura or the Banner,
+	# a random bomber walked in mid-test and broke the alert, pressure and bomber checks); the
+	# enemy response section sends its own.
+	Bombers.enabled = false
 	Virtualizer.enabled = false  # the response's groups stay real here (they're checked man by man); virtualization_test has its own
 	GameState.delete_save()
 	Campaign.reset_campaign()
@@ -71,6 +75,7 @@ func _ready() -> void:
 	_test_strongbox()
 	await _test_cartel_site()
 	await _test_variety_played()  # late: it blows the comms site's mast, which stays down (the hot zone ops checks want it standing)
+	await _test_forward_observer()  # fire support (2026-10-20): its own section at the end
 	await _test_respawn_points()
 	await _test_scenario_resume()
 	_finish()
@@ -93,9 +98,9 @@ func check(condition: bool, what: String) -> void:
 
 func _test_generation() -> void:
 	print("Mission types in the zones")
-	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt", "convoy_chase", "locals_checkpoint", "locals_missing", "locals_stores"]
+	var nine: Array[String] = ["raid", "hvt_capture", "hostage_rescue", "intel_grab", "convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon", "psd_escort", "supply_line", "manhunt", "convoy_chase", "locals_checkpoint", "locals_missing", "locals_stores", "forward_observer"]
 	check(MissionRegistry.types() == nine,
-		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line, the manhunt, the convoy chase and the locals' own three jobs (%s)" % [MissionRegistry.types()])
+		"Captain's first four mission types, then mission variety's convoy ambush, hold the line, crew rescue, sabotage and recon, the client escort, the supply line, the manhunt, the convoy chase, the locals' own three jobs and the forward observer (%s)" % [MissionRegistry.types()])
 	var sound := true
 	var zones_ok := true
 	for z: Dictionary in MissionRegistry.zones():
@@ -2539,3 +2544,157 @@ func _test_variety_played() -> void:
 	settings.charge_fuse_s = fuse
 	r.params = Reinforcements.DEFAULTS.duplicate()
 	_command_on(true)
+
+
+# --- The forward observer (fire support, 2026-10-20) -----------------------------------------------
+
+## The forward observer contract (ObserverMission; FireSupport's fire missions): it comes up on the
+## board in zones holding a module it plays in, its targets the first one required and each other a
+## bonus; taken here, its targets are parked in the target area (hostile, empty, whole), the squad
+## gets eyes on the area from an observation post a few hundred metres out, and calls the mortars
+## (paid per round, the real gates on) onto each target: every one destroyed by the guns is done,
+## and the debrief pays the job plus a bonus per further target and the never-spotted bonus. A
+## target put out of action any other way (set burning here) fails: no pay.
+func _test_forward_observer() -> void:
+	print("The forward observer: from the board, played through")
+	var scen := MissionScenario.of(level)
+	var obs := ObserverMission.of(level)
+	var fs := FireSupport.of(level)
+	if scen == null or obs == null or fs == null:
+		check(false, "the level has its MissionScenario, ObserverMission and FireSupport nodes")
+		return
+	var def := MissionRegistry.type_def("forward_observer")
+	var count := 0
+	var fitting := true
+	var kinds := {}
+	for seed_i in 60:
+		for o: Dictionary in ContractGen.generate_board(900 + seed_i, 1, {}, 6):
+			if String(o.type) != "forward_observer":
+				continue
+			count += 1
+			kinds[String(o.zone_kind)] = true
+			var zone := MissionRegistry.zone(String(o.zone_id))
+			var targets: Array = (o.objectives as Array).filter(func(x: Dictionary) -> bool: return String(x.kind) == Objectives.FIRE_TARGET)
+			fitting = fitting and ZoneModules.base(String(o.module)) in MissionRegistry.type_modules(def) and ZoneModules.base(String(o.module)) in zone.modules \
+				and targets.size() >= 3 and not bool(targets[0].get("optional", false)) \
+				and targets.slice(1).all(func(x: Dictionary) -> bool: return bool(x.get("optional", false)) and float(x.get("bonus_share", 0.0)) > 0.0) \
+				and (o.objectives as Array).any(func(x: Dictionary) -> bool: return String(x.kind) == Objectives.RECON_SITE) \
+				and (o.objectives as Array).any(func(x: Dictionary) -> bool: return String(x.kind) == Objectives.UNDETECTED)
+	check(count > 0 and fitting and kinds.has("contract") and kinds.has("hot"),
+		"the board offers it (%d in 60 boards), in contract and hot zones holding a module it plays in: eyes on the area, the first target the job, each other a bonus, never spotted a bonus" % count)
+	Contracts.new_full_campaign(90, 900000)
+	_command_on(false)
+	_calm()
+	_clear_waves()
+	var before := level.ai.get_children()
+	var c := _board_offer("forward_observer")
+	check(not c.is_empty(), "the board offers one here (%s)" % String(c.get("title", "none")))
+	if c.is_empty():
+		_command_on(true)
+		return
+	c.employer = "us_forces"  # (a neutral standing lends the mortars; the battery wants Trusted)
+	var d := await _deploy_offer(c)
+	var area := _kind(d.objectives, Objectives.RECON_SITE)
+	var targets: Array = d.objectives.filter(func(x: Dictionary) -> bool: return String(x.kind) == Objectives.FIRE_TARGET).map(
+		func(x: Dictionary) -> Dictionary: return Contracts.objectives.get_objective(String(x.oid)))
+	var parked := true
+	for t: Dictionary in targets:
+		var v := obs.target_vehicle(String(t.oid))
+		parked = parked and v != null and v.faction == &"hostile" and v.occupants().is_empty() and not v.wrecked and _flat_m(v.global_position, _v(t.params.pos)) < 8.0
+	check(d.why == "" and targets.size() >= 3 and parked and String(targets[0].state) == Objectives.ACTIVE,
+		"deployed (%s): %d targets parked in the target area, hostile, empty and whole" % [c.title, targets.size()])
+	# Eyes on, from an observation post out of the guns' danger close.
+	var centre := _v(area.params.pos)
+	var post := _observation_post(scen, centre)
+	if post.is_finite():
+		_place(player, post)
+		scen.server_advance(float(area.params.dwell_s) + 1.0)
+	else:
+		_place(player, centre + Vector3(0, 0, 300))
+		scen.server_mark_site(String(area.oid))  # (no line of sight from any post round it on this terrain)
+	area = Contracts.objectives.get_objective(String(area.oid))
+	check(area.state == Objectives.DONE, "eyes on the target area from %s %d m out" % ["a post" if post.is_finite() else "(marked) a spot", roundi(_flat_m(player.global_position, centre))])
+	# The guns onto each target: paid per round, the real gates on.
+	FireSupport.free_calls = 0
+	FireSupport.gated = 1
+	FireSupport.dispersion_mult = 0.1  # (accuracy is the firesupport suite's: here each target is hit)
+	fs.server_reset_limits()
+	var funds := Economy.cash() + int(Contracts.contract(d.cid).get("support_left", 0))
+	var fired := 0
+	var why_all := ""
+	var destroyed := 0
+	var states := PackedStringArray()
+	for t: Dictionary in targets:
+		var v := obs.target_vehicle(String(t.oid))
+		if v == null:
+			continue
+		var why := Supports.server_command(player, "support:fire:call:mortar:here", v.global_position, PackedStringArray())
+		fs.server_set_bias("mortar", Vector3.ZERO)
+		await _fs_land(fs)
+		why += Supports.server_command(player, "support:fire:ffe:mortar:he:4", Vector3.INF, PackedStringArray())
+		await _fs_land(fs)
+		fired += 5
+		fs.server_advance(FireSupport.SPLASH_WARN_S + float(FireMission.unit("mortar").cooldown_s) + 2.0)  # the mission over, the section ready again
+		await _frames(3)
+		obs.server_check()
+		why_all += why
+		var now_o := Contracts.objectives.get_objective(String(t.oid))
+		if now_o.state == Objectives.DONE:
+			destroyed += 1
+		var left := obs.target_vehicle(String(t.oid))
+		states.append("%s: %s (%s)%s" % [String(t.params.model), String(now_o.state), String(now_o.progress),
+			"" if left == null else ", hull %d%%%s" % [roundi(left.zone_health(Vehicle.ZONE_HULL) * 100.0), ", burning" if left.is_burning() else ""]])
+	var spent := funds - Economy.cash() - int(Contracts.contract(d.cid).get("support_left", 0))
+	check(why_all == "" and destroyed == targets.size(), "the mortars called onto each target in turn: %d of %d destroyed by the guns ('%s'; %s)" % [destroyed, targets.size(), why_all, "; ".join(states)])
+	check(spent == fired * Prices.support_price("mortar_round"), "the %d rounds paid from the support budget and cash ($%d)" % [fired, spent])
+	var debrief := _end_deployment()
+	var target_bonuses := (debrief.contracts[0].bonuses as Array).filter(func(b: Dictionary) -> bool: return String(b.text).contains("Bring fire")).size()
+	check(debrief.contracts[0].outcome == "completed" and int(debrief.contracts[0].completion) > 0 and target_bonuses == targets.size() - 1
+		and _bonus_texts(debrief).contains("never spotted"),
+		"extracted: completed and paid, a bonus for each further target (%d) and for never being spotted (%s)" % [target_bonuses, _bonus_texts(debrief)])
+	await _clean_scenario(before)
+	# A target put out of action any other way.
+	c = _board_offer("forward_observer")
+	if not c.is_empty():
+		c.employer = "us_forces"
+		d = await _deploy_offer(c)
+		var first: Dictionary = d.objectives.filter(func(x: Dictionary) -> bool: return String(x.kind) == Objectives.FIRE_TARGET)[0]
+		var v := obs.target_vehicle(String(first.oid))
+		if v:
+			v.server_start_fire()  # (a charge, a rocket: not the guns)
+		obs.server_check()
+		var state := String(Contracts.objectives.get_objective(String(first.oid)).get("state", ""))
+		debrief = _end_deployment()
+		check(v != null and state == Objectives.FAILED and debrief.contracts[0].outcome != "completed" and int(debrief.contracts[0].pay) == 0,
+			"a target burned by anything but the guns doesn't count: failed, no pay (%s)" % debrief.contracts[0].outcome)
+		await _clean_scenario(before)
+	FireSupport.free_calls = -1
+	FireSupport.gated = -1
+	FireSupport.dispersion_mult = 1.0
+	FireSupport.offset_s = 0.0
+	_command_on(true)
+
+
+## A spot 250-450 m from `centre` with a line of sight to it (MissionScenario's, as recon's), or INF.
+func _observation_post(scen: MissionScenario, centre: Vector3) -> Vector3:
+	var area: Rect2 = level.ground_area().grow(-150.0)
+	var to := level.ground_point(centre) + Vector3.UP * 2.0
+	for r: float in [300.0, 400.0, 250.0, 450.0]:
+		for k in 16:
+			var a := TAU * k / 16.0
+			var p := centre + Vector3(cos(a), 0.0, sin(a)) * r
+			if not area.has_point(Vector2(p.x, p.z)):
+				continue
+			var g := level.ground_point(p)
+			if scen._line_of_sight(g + Vector3.UP * 1.6, to):
+				return g
+	return Vector3.INF
+
+
+## Fire support's clock on until no round is in the air (at most two minutes).
+func _fs_land(fs: FireSupport) -> void:
+	var t := 0.0
+	while t < 120.0 and not fs.rounds.is_empty():
+		fs.server_advance(1.0)
+		t += 1.0
+	await _frames(2)

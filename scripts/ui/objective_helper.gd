@@ -243,7 +243,7 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 		target["rect"] = Rect2(float(r[0]), float(r[1]), float(r[2]), float(r[3]))
 	var site := site_name(o, sit)
 	var near := _flat(from, at) <= AT_SITE_M or (target.has("rect") and (target.rect as Rect2).grow(10.0).has_point(Vector2(from.x, from.z)))
-	if not near:
+	if not near and String(o.kind) != Objectives.FIRE_TARGET:  # (a forward observer's target is called from afar)
 		var place := site if site != "" else String(target.label)
 		if String(o.kind) == Objectives.DELIVER_HVT:
 			return {"text": "Find %s at the %s (%s)" % [person_name(o), place, where_text(from, at)] if site != "" else
@@ -285,6 +285,8 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 			text = "Put every vehicle in the %s out of action: a charge on each%s" % [String(p.get("name", "vehicle park")), " (" + progress + ")" if progress != "" else ""]
 		Objectives.RECON_SITE:
 			text = "Observe the %s from within %d m%s" % [String(p.get("name", "site")), roundi(float(p.get("observe_m", 75.0))), " (" + progress + ")" if progress != "" else ""]
+		Objectives.FIRE_TARGET:  # the forward observer (ObserverMission): only the guns' kill counts
+			text = "Call fire on the %s (Support > Fire support)%s" % [String(p.get("name", "target")), " (" + progress + ")" if progress != "" else ""]
 		_:
 			text = String(o.get("text", ""))
 	return {"text": text, "targets": [target]}
@@ -386,6 +388,8 @@ static func short_label(o: Dictionary, sit: Dictionary) -> String:
 			label = "crash site"
 		Objectives.RECON_SITE:
 			label = "observe " + String((o.get("params", {}) as Dictionary).get("name", "site"))
+		Objectives.FIRE_TARGET:
+			label = "target: " + String((o.get("params", {}) as Dictionary).get("name", "target"))
 		_:
 			label = site_name(o, sit)
 	if label == "":
