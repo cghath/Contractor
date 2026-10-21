@@ -336,8 +336,8 @@ func _run_client() -> void:
 	await _wait_for(func() -> bool: return me.role == Roles.MARKSMAN, 3.0)
 	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
 	await _check_late_drag()
-	await _check_devices()
 	await _check_faces()
+	await _check_devices()
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:

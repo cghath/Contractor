@@ -517,8 +517,11 @@ func _npa() -> Array:
 	var tip_z := INF
 	var tip_y := pivot.y + 0.14
 	var bottom := pivot.y + 0.13
-	for i in 20:  # down the nose: its tip, then where the face comes back under it
-		var y := pivot.y + 0.19 - i * VOXEL
+	# Down the nose from its bridge, below the eyes (FaceArt: higher up, the brow ridge stands
+	# out over the bridge's dip and would read as the tip): its tip, then where the face comes
+	# back under it.
+	for i in 20:
+		var y := pivot.y + 0.165 - i * VOXEL
 		var s: Variant = BodyVolume.surface(Vitals.FACE, Vector3(pivot.x, y, pivot.z), Vector3.FORWARD, 0.2, body)
 		if not s is Vector3:
 			continue

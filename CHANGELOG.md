@@ -181,6 +181,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   came out with a random name tape, nationality and body; they now carry their roster identity
   and face, as they do in the field.
 - A dragger's hands stay on the casualty's straps when the two are different heights.
+### Treatment you can see on the body (Captain, 2026-10-20: better wounding, more realistic body wounds)
+
+#### Added
+- **Tourniquets show.** A black strap high and tight, 12 cm above the wound (as high as the limb
+  allows for a wound further down), with its windlass locked on the outside of the limb, the red
+  tip hanging off and a white label with the time it went on written in 0.5 cm digits. A second
+  one sits beside the first. They are gone once they come off.
+- **Splints, the pelvic binder and the sling.** A splint runs along the broken limb (orange out,
+  blue at the edges) under three cravats. A broken pelvis gets a black binder round the hips with
+  its buckle at the front. A broken collarbone gets a sling across the chest.
+- **Dressings look like what was used.** A pressure bandage is a cream elastic wrap with its
+  pressure bar over the hole. Packed gauze is white, bulges out of the wound and has a loose tail.
+  A chest seal is a square patch with a dark border and a valve. Before, all three were the same
+  beige pad.
+- **IV and IO lines and the bag.** An IV is taped in the forearm or shin, the hub coloured by its
+  gauge. An IO has its round patch on the sternum. While fluids run, the bag hangs on the
+  casualty's chest (on the vest front with one on), a line runs from it to the site, and the bag
+  empties as it goes in. A pressure bag adds its blue cuff.
+- **The NPA** shows as a small flange at the nostril. **The blanket** wraps the trunk, arms and
+  legs in creased foil.
+- **Open fractures show bone** at the wound until the wound is dressed.
+- **Burns scorch the body.** Patches of skin and uniform char and darken, raw red at the edges,
+  roughly over the burned share. Burn dressings cover part of them as they go on.
+- **Pallor, blue lips, blood at the mouth, shivering.** Skin greys from 15% of blood lost and is
+  ashen by 45%. Lips go blue-grey under 88% SpO2. A casualty coughing blood
+  has it at the mouth and down the chin. A hypothermic casualty visibly shivers. These were text
+  cues only before.
+- **Bloody hands.** Whoever treats a wound that is bleeding, or has bled, gets blood on both
+  hands. It dries darker after a minute and is gone after 7 minutes.
+- **A drag smear.** A bleeding casualty dragged, or crawling, leaves a continuous smear on the
+  ground under the wound. It is capped at 160 cells per body, oldest first, and lasts as long as a
+  pool.
+- All of it is drawn on every peer from the replicated wound and treatment state, at the model's
+  0.5 cm voxel scale. New `devices` test suite; the net test checks the devices on a client.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
