@@ -36,6 +36,7 @@ func _ready() -> void:
 	_test_bone_care()
 	_test_treatment_wakes()
 	_test_dying()
+	_test_injury_text()
 	_test_kits()
 	_test_iv_fluids()
 	_test_heart()
@@ -95,6 +96,110 @@ func _test_tourniquet() -> void:
 	check(not arm.server_apply_treatment(&"tourniquet", Vitals.FOREARM_R), "nothing left bleeding below it: no second one needed")
 	v.queue_free()
 	arm.queue_free()
+
+
+## The medical menu's injuries in words (InjuryText; Captain, 2026-10-21: "injury descriptions in
+## the medical helper (H) need to be improved too"): where, plainly; what, in medic language; how
+## bad; what's been done (a tourniquet and when); what to do next, items not carried marked; the
+## vitals at a glance; worst first.
+func _test_injury_text() -> void:
+	print("Injury descriptions")
+	var v := _vitals()
+	var none := func(_id: StringName) -> bool: return false
+	var thigh_mid: Vector3 = BodyMap.PART_BOXES[Vitals.THIGH_L][0][0]
+	_wound(v, Vitals.FOREARM_R, "graze", 0.05)
+	var artery := _wound(v, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	artery["at"] = thigh_mid + Vector3(0.06, 0.05, 0.0)  # towards the middle line: the inner thigh
+	artery["out"] = thigh_mid + Vector3(-0.07, 0.05, 0.0)
+	var hole := _wound(v, Vitals.CHEST, "chest", 0.1, &"lung_r")
+	hole["at"] = Vector3(0.1, 1.3, -0.11)
+	hole["rc"] = Vitals.FRAGMENT
+	_wound(v, Vitals.SHIN_R, "fracture", 0.0, &"tibia_r")
+	var list := InjuryText.injuries(v, none)
+	var find := func(part: StringName) -> Dictionary:  # (read fresh: a lambda keeps a copy of `list` as it was)
+		for e: Dictionary in InjuryText.injuries(v, none):
+			if e.part == part:
+				return e
+		return {}
+	var thigh: Dictionary = find.call(Vitals.THIGH_L)
+	check(not list.is_empty() and list[0].part == Vitals.THIGH_L and list[0].severity == InjuryText.LIFE_THREATENING,
+		"worst first: the arterial bleed, life-threatening (%s)" % [list.map(func(e: Dictionary) -> String: return "%s %s" % [e.where, InjuryText.SEVERITY_WORDS[e.severity]])])
+	check(thigh.where == "Left thigh, inner" and String(thigh.what).contains("arterial bleed") and String(thigh.what).contains("through-and-through") and thigh.bleed == "spurting",
+		"where and what: %s" % InjuryText.line(thigh))
+	check((thigh.next as Array)[0].item == WoundModel.TOURNIQUET and not (thigh.next as Array)[0].carried and InjuryText.next_text(thigh).begins_with("Tourniquet high above the wound, then pack"),
+		"next: %s (not carried: marked)" % InjuryText.next_text(thigh))
+	var chest: Dictionary = find.call(Vitals.CHEST)
+	check(chest.where == "Chest, right side" and String(chest.what).contains("open chest wound") and String(chest.what).contains("fragment wound")
+		and chest.severity == InjuryText.CRITICAL and (chest.next as Array)[0].item == &"chest_seal", "the chest: %s, %s" % [InjuryText.line(chest), InjuryText.SEVERITY_WORDS[chest.severity]])
+	var shin: Dictionary = find.call(Vitals.SHIN_R)
+	var graze: Dictionary = find.call(Vitals.FOREARM_R)
+	check(shin.what == "closed fracture" and shin.severity == InjuryText.SERIOUS and graze.severity == InjuryText.MINOR and list[-1].part == Vitals.FOREARM_R,
+		"a closed fracture is serious, a graze minor and last (%s; %s)" % [shin.what, graze.what])
+	var carries := func(id: StringName) -> bool: return id == WoundModel.TOURNIQUET
+	check(InjuryText.injuries(v, carries)[0].next[0].carried, "an item you carry isn't greyed")
+	var glance := InjuryText.summary(v, false, false).map(func(p: Array) -> String: return String(p[0]))
+	check(glance[0] == "CONSCIOUS" and glance.any(func(t: String) -> bool: return t.begins_with("Blood lost:"))
+		and glance.any(func(t: String) -> bool: return t.begins_with("bleeding out in about")) and glance.any(func(t: String) -> bool: return t.begins_with("Pulse:")),
+		"the vitals at a glance: %s" % [glance])
+	# The tourniquet goes on and the log has it: when, and the next step is packing it.
+	v.server_apply_treatment(WoundModel.TOURNIQUET, Vitals.THIGH_L)
+	v.server_log_care("Medic", "%s, %s" % [ItemDB.get_item(WoundModel.TOURNIQUET).name, Vitals.part_name(Vitals.THIGH_L)])
+	list = InjuryText.injuries(v, none)
+	thigh = find.call(Vitals.THIGH_L)
+	check(thigh.severity == InjuryText.SERIOUS and String(thigh.done).begins_with("Tourniquet on at") and String(thigh.done).ends_with("(just now)")
+		and (thigh.next as Array)[0].item == &"hemostatic_gauze", "held by the tourniquet: %s; next %s" % [thigh.done, InjuryText.next_text(thigh)])
+	check(InjuryText.minutes_between("23:50", "00:10") == 20 and InjuryText.minutes_between("14:05:00", "14:17:40") == 13, "a tourniquet's minutes on count across midnight")
+	v.queue_free()
+	# Conscious but dying; a limb gone; tension; burns.
+	var d := _vitals()
+	_wound(d, Vitals.THIGH_R, "arterial", 1.2, &"femoral_r")
+	d._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
+	d._model.update_state(0.1)
+	check(d.is_dying() and String(InjuryText.summary(d, false, false)[0][0]) == "CONSCIOUS, DYING", "conscious but dying says so (%s)" % InjuryText.summary(d, false, false)[0][0])
+	d.queue_free()
+	var a := _vitals()
+	a.server_amputate(Vitals.SHIN_L, BodyMap.PART_BOXES[Vitals.SHIN_L][0][0])
+	var stump: Dictionary = InjuryText.injuries(a, none)[0]
+	check(stump.part == Vitals.SHIN_L and String(stump.what).begins_with("traumatic amputation") and stump.severity == InjuryText.LIFE_THREATENING
+		and InjuryText.next_text(stump).begins_with("Tourniquet high on the stump"), "an amputation: %s, %s" % [InjuryText.line(stump), InjuryText.next_text(stump)])
+	a.queue_free()
+	var t := _vitals()
+	var tense := _wound(t, Vitals.CHEST, "chest", 0.1, &"lung_l")
+	tense["tension"] = true
+	t.server_burn(0.25)
+	var tl := InjuryText.injuries(t, none)
+	check(tl[0].severity == InjuryText.LIFE_THREATENING and String(tl[0].what).contains("tension pneumothorax") and tl[0].next[0].item == &"decompression_needle",
+		"a tension pneumothorax first, the needle next (%s)" % InjuryText.line(tl[0]))
+	var burns := tl.filter(func(e: Dictionary) -> bool: return e.kind == "burn")
+	check(burns.size() == 1 and String(burns[0].what) == "burns over about 25% of the body" and burns[0].severity == InjuryText.CRITICAL,
+		"burns by how much of the body (%s)" % [burns.map(func(e: Dictionary) -> String: return InjuryText.line(e))])
+	t.queue_free()
+	# A hit's path (Captain, 2026-10-21: "show a traced wound path for a selected hit"): front to
+	# back through the left thigh, by the femoral artery and the femur, in the order it met them.
+	var through := {"part": Vitals.THIGH_L, "kind": "arterial", "at": Vector3(-0.06, 0.70, -0.10), "end": Vector3(-0.06, 0.70, 0.09),
+		"out": Vector3(-0.06, 0.70, 0.09), "rc": &"intermediate"}
+	var path := InjuryText.path(through)
+	var ids: Array = path.get("crossed", []).map(func(c: Dictionary) -> StringName: return c.id)
+	var words := InjuryText.path_lines(through, path)
+	check(ids.has(&"femoral_l") and ids.has(&"femur_l") and ids.find(&"femoral_l") < ids.find(&"femur_l") and path.exits and absf(float(path.length) - 0.19) < 0.001,
+		"a path through the thigh: %s" % [ids])
+	check(words.size() >= 4 and words[0].begins_with("In: Left thigh, front") and words.has("%d cm: left femoral artery, cut" % roundi(path.crossed[ids.find(&"femoral_l")].t * 100.0))
+		and words[-1].begins_with("Out: Left thigh, back, a 19 cm channel"), "and in words: %s" % [" / ".join(words)])
+	var lodged := {"part": Vitals.CHEST, "kind": "chest", "at": Vector3(0.09, 1.3, -0.11), "end": Vector3(0.09, 1.3, 0.0), "rc": &"pistol"}
+	var lodged_path := InjuryText.path(lodged)
+	var lodged_words := InjuryText.path_lines(lodged, lodged_path)
+	check(not lodged_path.exits and lodged_path.crossed.any(func(c: Dictionary) -> bool: return c.id == &"lung_r" and c.direct)
+		and lodged_words[-1] == "Stopped inside after 11 cm: still in him", "a round that stayed in: %s" % [" / ".join(lodged_words)])
+	check(InjuryText.path({"part": Vitals.CHEST, "kind": "rib"}).is_empty(), "no entry point known: nothing to trace")
+	# The channel's end travels to every peer with the wound.
+	var sent := _vitals()
+	var hit := _wound(sent, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	hit["at"] = through.at
+	hit["end"] = through.end
+	var copy := WoundModel.new()
+	copy.apply_net(sent._model.to_net())
+	check(copy.wounds[0].get("end") is Vector3 and (copy.wounds[0].end as Vector3).distance_to(through.end) < 0.005, "the channel's end replicates (%s)" % [copy.wounds[0].get("end")])
+	sent.queue_free()
 
 
 ## Conscious but dying (Captain, 2026-10-20): blood running out with a wound still bleeding puts
@@ -1599,6 +1704,18 @@ func _test_medical_menu() -> void:
 	input._unhandled_input(_key(KEY_H, false))
 	check(menu.is_open() and menu.target == casualty and menu.part == Vitals.THIGH_L,
 		"H opens it on the casualty in front, at the left thigh (%s, %s)" % [menu.target, menu.part])
+	# T traces the part's hit: its path drawn in the right-hand column; T again stops.
+	var hit: Dictionary = casualty.vitals._model.wounds.filter(func(w: Dictionary) -> bool: return w.part == Vitals.THIGH_L)[0]
+	hit["at"] = Vector3(-0.06, 0.70, -0.10)
+	hit["end"] = Vector3(-0.06, 0.70, 0.09)
+	hit["out"] = hit.end
+	menu.refresh()
+	menu._unhandled_input(_key(KEY_T, false))
+	await _frames(2)
+	check(not menu.trace.is_empty() and menu.trace.crossed.any(func(c: Dictionary) -> bool: return c.id == &"femoral_l") and menu.layout_rects().has("trace"),
+		"T traces the thigh's hit: the femoral artery on its path (%s; the ui suite fits its box at every size)" % [menu.trace.get("crossed", []).map(func(c: Dictionary) -> StringName: return c.id)])
+	menu._unhandled_input(_key(KEY_T, false))
+	check(menu.trace.is_empty(), "T again: back to the signs")
 	player.inventory.take(&"trauma_kit")
 	player.inventory.take(&"iv_18")
 	menu.refresh()

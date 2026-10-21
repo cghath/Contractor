@@ -53,6 +53,49 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   speed loaders now count for reloading, the ammo-low checks and scavenging.
 - **cghath's buckshot pellets were scored as full bullets by gunfire gore.** Every pellet from
   any 12 gauge now scores as a pellet, and a hi-brass pellet hits a little harder.
+### The medical menu (H) reads like a medic (Captain, 2026-10-21: "injury descriptions in the medical helper (H) need to be improved too")
+
+#### Changed
+- **The casualty at a glance, under the title:**
+  - conscious, conscious but dying, unconscious, or cardiac arrest with the time left;
+  - how much blood is gone, in words, and "bleeding out in about 2 min" while it runs;
+  - breathing and colour, the pulse, and pain, in words.
+
+  With a pulse oximeter, the SpO2 and pulse are shown in numbers too.
+- **Treat in this order:** every injury down the right, worst first, each with its severity in
+  colour (minor, serious, critical, life-threatening). Click one to jump to its body part.
+- **Each injury in plain words.** Where it is, plainly ("Left thigh, inner", "Chest, right
+  side"), and what it is in medic language:
+  - arterial bleed (spurting) and venous bleed (steady);
+  - graze, gunshot or fragment wound, through-and-through;
+  - open or closed fracture, traumatic amputation (blast or gunfire);
+  - open chest wound, tension pneumothorax, blast lung, head injury, internal bleeding;
+  - burns by how much of the body.
+- **Done and next, for each injury:**
+  - What's been done: tourniquet on and how long ago, packed, bandaged, splinted, chest seal on,
+    clamped.
+  - What to do next, in order ("Tourniquet high above the wound, then pack it, and bandage").
+    Items you don't carry are greyed and say so.
+- **Not tied to one wound, listed as well:** cardiac arrest, a blocked airway, blood loss that
+  needs a line and fluids, cold, concussion, a racing or slow pulse, pain.
+
+#### Added
+- **Trace a hit's path through the body** (Captain: "show a traced wound path for a selected hit
+  so users can get an understanding of the anatomy"). Click an injury in "Treat in this order"
+  (or press T on its body part) and the right-hand column shows that part of the body from the
+  front and the side:
+  - the bones, arteries, veins and organs, with what the round crossed drawn bright;
+  - the channel from where it went in to where it came out (a ring) or stopped (an X).
+
+  Below the views, the path in words, in the order the round met things:
+  - "In: Left thigh, front";
+  - "8 cm: left femoral artery, cut";
+  - "9 cm: left femur (thigh bone), cracked by the shock wave";
+  - "Out: Left thigh, back, a 19 cm channel", or "Stopped inside after 11 cm: still in him".
+
+  T moves to the part's next hit; T or Esc goes back to the signs and the log. A round that
+  stayed in can be traced too: where its channel ended is now kept with the wound and sent to
+  every player.
 
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 

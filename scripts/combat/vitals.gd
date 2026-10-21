@@ -529,7 +529,8 @@ func signs(on_self := false) -> PackedStringArray:
 ## limbs), "tourniquet" (a tourniquet above or on it holds some of its bleeding),
 ## "packed" (gauze in it), "tension" (a chest wound's tension pneumothorax has started),
 ## "clamped" (a surgical clamp holds it) and "closed" (a chest wound closed by surgery). "at" and
-## "out": where the round went in and came out (rest pose; null if unknown or it stayed in).
+## "out": where the round went in and came out (rest pose; null if unknown or it stayed in);
+## "end": where its channel ended, out or still inside (rest pose; null if unknown).
 func wound_list() -> Array[Dictionary]:
 	var m := _m()
 	var list: Array[Dictionary] = []
@@ -540,7 +541,7 @@ func wound_list() -> Array[Dictionary]:
 			"tourniquet": m.tourniquet_factor(w.part) < 1.0, "packed": w.get("packed", false), "tension": w.get("tension", false),
 			"clamped": w.get("clamped", false), "closed": w.get("closed", false), "pneumo": w.get("pneumo", false),
 			"open": w.get("open", false), "bandaged": m.open_bandaged(w),
-			"at": w.get("at"), "out": w.get("out"), "round_class": w.get("rc", &""), "dmg": float(w.get("dmg", 0.0))})
+			"at": w.get("at"), "out": w.get("out"), "end": w.get("end"), "round_class": w.get("rc", &""), "dmg": float(w.get("dmg", 0.0))})
 	return list
 
 
@@ -847,6 +848,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			w["rc"] = round_class  # what made it (BodyDeform: a .308 tears more than a 5.56)
 			w["dmg"] = round_damage(round_class, float(hit.get("energy_j", -1.0)), bool(hit.get("pellet", false)), String(hit.get("round", "")))
 			w["at"] = channel.from
+			w["end"] = channel.to  # where the channel ended, in or out (the medical menu traces it: InjuryText.path)
 			if exits:
 				w["out"] = channel.to
 		if float(hit.get("energy_j", -1.0)) >= LETHAL_J and round_class != FRAGMENT:
