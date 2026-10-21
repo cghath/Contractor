@@ -17,6 +17,9 @@ extends Node
 ## builds the same charge under the same node (records, _client_add).
 
 ## Proposed: how far from the eye a charge can be placed.
+## Proposed: a placed charge's filling for the gore it does to bodies (BlastGore), kg of TNT: a
+## breaching charge's half kilo of plastic explosive, more than a grenade's.
+const CHARGE_TNT_KG := 0.5
 const PLACE_REACH_M := 2.5
 ## Placed this far off the surface (half the block's thickness and a little).
 const SURFACE_OFFSET_M := 0.03
@@ -187,7 +190,7 @@ func _detonate(id: String) -> void:
 	if lvl == null:
 		return
 	print("[charges] %s went off at (%.1f, %.1f, %.1f)" % [id, pos.x, pos.y, pos.z])
-	Throwables.server_detonate(lvl, "frag", pos)
+	Throwables.server_detonate(lvl, "frag", pos, &"", CHARGE_TNT_KG)
 	lvl.server_blast(pos, MissionRegistry.setting_f("charge_radius_m", 1.6))
 	PeopleLayer.server_noise(lvl, pos, PeopleLayer.BLAST_HEARD_M)
 	Alert.server_noise(lvl, pos, Alert.BLAST)

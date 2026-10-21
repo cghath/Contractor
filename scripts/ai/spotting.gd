@@ -198,9 +198,9 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 		range_m = OPTIC_FROM_M + (range_m - OPTIC_FROM_M) / optic_x(observer, calm and not suppressed)
 	var s := BASE_S + range_m / METRES_PER_S
 	if target.movement.is_prone():
-		s *= PRONE
+		s *= PRONE * concealment(target)
 	elif target.is_crouching():
-		s *= CROUCHED
+		s *= CROUCHED * concealment(target)
 	var speed := Vector2(target.velocity.x, target.velocity.z).length()
 	if speed >= RUN_MPS:
 		s *= RUNNING
@@ -219,6 +219,25 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	if GunAttachments.lit(target):
 		s *= lit_factor(observer, target)
 	return s
+
+
+static var _conceal_ids: Array[StringName] = []
+static var _conceal_scanned := false
+
+
+## How much longer `target` takes to spot lying or crouched for what it carries: the best
+## "conceal_mult" of its kit (a ghillie suit 1.5; items expansion), 1 with none.
+static func concealment(target: Soldier) -> float:
+	if not _conceal_scanned:
+		_conceal_scanned = true
+		for id: StringName in ItemDB.all_ids():
+			if ItemDB.get_item(id).stats.has("conceal_mult"):
+				_conceal_ids.append(id)
+	var best := 1.0
+	for id: StringName in _conceal_ids:
+		if target.inventory.count_of(id) > 0:
+			best = maxf(best, float(ItemDB.get_item(id).stats.conceal_mult))
+	return best
 
 
 ## Night and weather on spotting someone `range_m` from `eyes` (wave 7 S1): the factor on the

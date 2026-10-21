@@ -205,3 +205,34 @@ static func _stow(inv: Inventory, nvg: Dictionary, first: StringName) -> bool:
 		if inv.insert_entry(c, {"id": item.id, "count": 1, "state": state}):
 			return true
 	return false
+
+
+## Host only. A fresh battery (a consumable: Consumables): the NVG on the helmet back to full,
+## else the flattest NVG carried. "" or why not ("No NVG needs a battery").
+static func server_recharge(inv: Inventory) -> String:
+	var s := mounted_state(inv)
+	var item := mounted(inv)
+	if not s.is_empty() and battery_of(item, s) < capacity_h(item) - 0.0001:
+		s = s.duplicate(true)
+		s["battery_h"] = capacity_h(item)
+		inv.set_slot_state(HELMET, with_nvg(inv.state_of(HELMET), s))
+		return ""
+	var best := []
+	var lowest := INF
+	for c in inv.search_containers():
+		var list: Array = inv.containers.get(c, [])
+		for i in list.size():
+			var it := ItemDB.get_item(StringName(list[i].id))
+			if is_nvg(it):
+				var share := battery_of(it, list[i].get("state", {})) / maxf(capacity_h(it), 0.0001)
+				if share < 1.0 - 0.0001 and share < lowest:
+					lowest = share
+					best = [c, i]
+	if best.is_empty():
+		return "No NVG needs a battery"
+	var entry := inv.remove_entry(best[0], best[1])
+	var state: Dictionary = (entry.get("state", {}) as Dictionary).duplicate(true)
+	state.erase("battery_h")  # missing means full
+	entry["state"] = state
+	inv.insert_entry(best[0], entry)
+	return ""

@@ -196,7 +196,7 @@ static func server_burst(level: CompoundLevel, id: StringName, pos: Vector3, dir
 		if body and body.get_node_or_null(^"Vitals"):
 			out.direct = body
 			skip.append(body)
-			_direct_hit(body, collider, pos, dir, shooter)
+			_direct_hit(body, collider, pos, dir, shooter, float(d.get("blast_kg", 0.0)))
 		var world := VoxelWorld.find_on(collider) if collider else null
 		if world and pen > 0.0:
 			var jet := _jet_world(world, pos, dir, pen)
@@ -212,6 +212,8 @@ static func server_burst(level: CompoundLevel, id: StringName, pos: Vector3, dir
 	if not jet_on_hull:  # a shaped charge on a hull spends itself on the hull (V1 carves it)
 		level.server_blast(centre, crater_radius(id) * (1.5 if kind == Vehicle.THERMOBARIC and Throwables.indoors(level.get_world_3d(), centre) else 1.0))
 	var hurt := server_people(level, centre, d, shooter, skip)
+	if not jet_on_hull:  # torn, peppered, scorched bodies, the dead too (BlastGore)
+		BlastGore.server_blast(level, centre, float(d.get("blast_kg", 0.0)) * (THERMO_OPEN_MULT if kind == Vehicle.THERMOBARIC else 1.0), float(d.get("frag_m", 0.0)), skip)
 	for b in hurt:
 		if not b in out.hurt:
 			out.hurt.append(b)
@@ -237,16 +239,23 @@ static func body_of(collider: Object) -> Node3D:
 
 
 ## Host only. A round going off on (or a jet through) `body`: lethal. Wounds where it struck
-## (so the body shows them), then dead.
-static func _direct_hit(body: Node3D, collider: Object, pos: Vector3, dir: Vector3, shooter: Node) -> void:
+## (so the body shows them), then dead, and torn by it (BlastGore.server_direct: a filling of
+## `blast_kg` gibs him; a jet tears off what it went through).
+static func _direct_hit(body: Node3D, collider: Object, pos: Vector3, dir: Vector3, shooter: Node, blast_kg := 0.0) -> void:
 	var vitals := body.get_node(^"Vitals") as Vitals
 	if vitals.is_dead():
+		BlastGore.server_direct(body, _struck_part(collider), pos, dir, blast_kg)
 		return
 	Harm.note_hit(body, shooter)
-	var part: StringName = (collider as Node).get_meta(&"body_part", Vitals.CHEST) if collider is Node and (collider as Node).has_meta(&"body_part") else Vitals.CHEST
+	var part := _struck_part(collider)
 	vitals.server_hit(part, {"round_class": Vitals.FULL_POWER, "position": pos, "direction": dir, "distance": 0.0})
 	vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.FULL_POWER, "direction": dir, "distance": 0.0})
 	vitals.server_kill()
+	BlastGore.server_direct(body, part, pos, dir, blast_kg)
+
+
+static func _struck_part(collider: Object) -> StringName:
+	return (collider as Node).get_meta(&"body_part", Vitals.CHEST) if collider is Node and (collider as Node).has_meta(&"body_part") else Vitals.CHEST
 
 
 ## Host only. Overpressure, the lethal zone, burns and fragments of warhead data `d` going off

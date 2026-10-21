@@ -375,11 +375,15 @@ func _test_combat_modes() -> void:
 	await _wait_for(func() -> bool: return _squad().all(func(s: Soldier) -> bool: return not SquadAI.of(s).in_contact()), SquadAI.SQUAD_CONTACT_MEMORY_S + 4.0)
 	await _seconds(7.0)
 	check(_squad().all(func(s: Soldier) -> bool: return SquadAI.of(s).combat_mode == Squad.CombatMode.COMBAT), "Combat is the default")
-	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 7, "in Combat, halted squadmates crouch (%d of 7)" % _count(func(s: Soldier) -> bool: return s.want_crouch))
+	# Halted means at their slots: the kitted paces (feel pass, 2026-10-20) bring the last ones in
+	# a little later than a fixed 7 s allowed.
+	await _wait_for(func() -> bool: return _count(func(s: Soldier) -> bool: return s.want_crouch) == 7, 10.0)
+	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 7, "in Combat, halted squadmates crouch (%d of 7; standing: %s)" % [_count(func(s: Soldier) -> bool: return s.want_crouch), _standing()])
 	_menu(KEY_QUOTELEFT, [KEY_7, KEY_2])  # Combat mode > Aware
 	await _seconds(1.0)
 	check(_squad().all(func(s: Soldier) -> bool: return SquadAI.of(s).combat_mode == Squad.CombatMode.AWARE), "~ 7 2 sets everyone to Aware")
-	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 0, "Aware: they stand while halted")
+	await _wait_for(func() -> bool: return _count(func(s: Soldier) -> bool: return s.want_crouch) == 0, 4.0)
+	check(_count(func(s: Soldier) -> bool: return s.want_crouch) == 0, "Aware: they stand while halted (crouched: %s)" % [_squad().filter(func(s: Soldier) -> bool: return s.want_crouch).map(func(s: Soldier) -> String: return "%s %s" % [s.name, SquadAI.of(s).status_text()])])
 	_menu(KEY_QUOTELEFT, [KEY_7, KEY_4])  # Stealth
 	_place(player, Vector3(0, 0.1, 55))
 	# Respect the stance hold introduced to stop repeated ducking between bursts.
@@ -715,6 +719,12 @@ func _squad() -> Array:
 
 func _ai_in_role(role: StringName) -> Array:
 	return _squad().filter(func(s: Soldier) -> bool: return s.role == role)
+
+
+## For failures: who isn't crouched and why (stance, what his AI is doing, dying, digging).
+func _standing() -> Array:
+	return _squad().filter(func(s: Soldier) -> bool: return not s.want_crouch).map(func(s: Soldier) -> String:
+		return "%s stance %d, %s%s" % [s.name, s.movement.stance, SquadAI.of(s).status_text(), " (dying)" if s.vitals.is_dying() else ""])
 
 
 func _count(condition: Callable) -> int:

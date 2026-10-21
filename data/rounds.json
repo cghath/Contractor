@@ -1,9 +1,9 @@
 {
-	"_units": "level = threat on the game's NIJ-named ladder (Ballistics.LEVELS); class = Vitals round class; mass_g = bullet mass in grams; calibre_mm = bullet diameter (bullet hole size); muzzle_mps = muzzle velocity in m/s from a typical barrel (a weapon's muzzle_velocity_mps stat overrides it); bc = ballistic coefficient (lb/in2) against the drag model named in drag (G1 or G7), ACE3-style; level_drop_mps (optional) = below this velocity the round counts as level_drop_to (default one ladder step lower); M855's steel penetrator needs its speed, so far out it acts like M193 ball. All values are proposed starting points, close to ACE3's ammo configs.",
+	"_units": "level = threat on the game's NIJ-named ladder (Ballistics.LEVELS); class = Vitals round class; mass_g = bullet mass in grams; calibre_mm = bullet diameter (bullet hole size); muzzle_mps = muzzle velocity in m/s from a typical barrel (a weapon's muzzle_velocity_mps stat overrides it); bc = ballistic coefficient (lb/in2) against the drag model named in drag (G1 or G7), ACE3-style; level_drop_mps (optional) = below this velocity the round counts as level_drop_to (default one ladder step lower); M855's steel penetrator needs its speed, so far out it acts like M193 ball. All values are proposed starting points, close to ACE3's ammo configs. pellets = shot pellets per round (buckshot): each is traced as its own round with the per-pellet mass_g, spread over the weapon's pellet_spread_deg.",
 	"rounds": [
 		{"id": "9x19_fmj", "name": "9x19mm FMJ", "level": "IIA", "class": "pistol", "calibre_mm": 9, "mass_g": 8.0, "muzzle_mps": 360, "bc": 0.165, "drag": "G1"},
 		{"id": "45acp_fmj", "name": ".45 ACP FMJ", "level": "IIA", "class": "pistol", "calibre_mm": 11.5, "mass_g": 14.9, "muzzle_mps": 255, "bc": 0.195, "drag": "G1"},
-		{"id": "12g_buck", "name": "12 ga 00 buckshot (9 pellets)", "level": "IIA", "class": "pistol", "calibre_mm": 8.4, "mass_g": 31.1, "muzzle_mps": 400, "bc": 0.05, "drag": "G1"},
+		{"id": "12g_buck", "name": "12 ga 00 buckshot (9 pellets)", "level": "IIA", "class": "pistol", "pellets": 9, "calibre_mm": 8.4, "mass_g": 3.5, "muzzle_mps": 400, "bc": 0.05, "drag": "G1"},
 		{"id": "9x19_hot", "name": "9x19mm +P+", "level": "II", "class": "pistol", "calibre_mm": 9, "mass_g": 7.45, "muzzle_mps": 400, "bc": 0.14, "drag": "G1"},
 		{"id": "357mag", "name": ".357 Magnum JSP", "level": "II", "class": "pistol", "calibre_mm": 9.1, "mass_g": 10.2, "muzzle_mps": 435, "bc": 0.2, "drag": "G1"},
 		{"id": "44mag", "name": ".44 Magnum JSP", "level": "IIIA", "class": "pistol", "calibre_mm": 10.9, "mass_g": 15.6, "muzzle_mps": 440, "bc": 0.18, "drag": "G1"},
@@ -20,6 +20,13 @@
 		{"id": "762x51_m993", "name": "7.62x51mm M993 AP", "level": "IV", "class": "full_power", "calibre_mm": 7.8, "mass_g": 8.2, "muzzle_mps": 910, "bc": 0.2, "drag": "G7"},
 		{"id": "3006_m2ap", "name": ".30-06 M2 AP", "level": "IV", "class": "full_power", "calibre_mm": 7.8, "mass_g": 10.8, "muzzle_mps": 850, "bc": 0.19, "drag": "G7"},
 		{"id": "65cm_eldm", "name": "6.5 Creedmoor 143gr ELD-M", "level": "III+", "class": "full_power", "calibre_mm": 6.7, "mass_g": 9.3, "muzzle_mps": 823, "bc": 0.3, "drag": "G7"},
-		{"id": "50bmg_m33", "name": ".50 BMG M33 ball", "level": "ABOVE_IV", "class": "full_power", "calibre_mm": 12.9, "mass_g": 42.9, "muzzle_mps": 890, "bc": 0.33, "drag": "G7"}
+		{"id": "50bmg_m33", "name": ".50 BMG M33 ball", "level": "ABOVE_IV", "class": "full_power", "calibre_mm": 12.9, "mass_g": 42.9, "muzzle_mps": 890, "bc": 0.33, "drag": "G7"},
+		{"id": "9x18_pm", "name": "9x18mm Makarov FMJ", "level": "IIA", "class": "pistol", "calibre_mm": 9.2, "mass_g": 6.1, "muzzle_mps": 315, "bc": 0.12, "drag": "G1"},
+		{"id": "762x25_tt", "name": "7.62x25mm Tokarev FMJ", "level": "II", "class": "pistol", "calibre_mm": 7.8, "mass_g": 5.5, "muzzle_mps": 450, "bc": 0.15, "drag": "G1"},
+		{"id": "57x28_ss190", "name": "5.7x28mm SS190 AP", "level": "III", "class": "pistol", "calibre_mm": 5.7, "mass_g": 2.0, "muzzle_mps": 715, "bc": 0.13, "drag": "G1", "level_drop_mps": 550, "level_drop_to": "IIIA"},
+		{"id": "46x30_dm11", "name": "4.6x30mm DM11 AP", "level": "III", "class": "pistol", "calibre_mm": 4.65, "mass_g": 2.0, "muzzle_mps": 720, "bc": 0.12, "drag": "G1", "level_drop_mps": 550, "level_drop_to": "IIIA"},
+		{"id": "303_mk7", "name": ".303 British Mk VII ball", "level": "III+", "class": "full_power", "calibre_mm": 7.9, "mass_g": 11.3, "muzzle_mps": 744, "bc": 0.235, "drag": "G7"},
+		{"id": "762x51_m118lr", "name": "7.62x51mm M118LR match", "level": "III+", "class": "full_power", "calibre_mm": 7.8, "mass_g": 11.34, "muzzle_mps": 790, "bc": 0.243, "drag": "G7"},
+		{"id": "556_mk262", "name": "5.56x45mm Mk 262 match", "level": "III", "class": "intermediate", "calibre_mm": 5.7, "mass_g": 4.99, "muzzle_mps": 840, "bc": 0.186, "drag": "G7"}
 	]
 }
