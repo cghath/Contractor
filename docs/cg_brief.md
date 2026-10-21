@@ -55,6 +55,9 @@ has stopped on questions that "need the Captain's answer". From now on:
   - **You may update `dev` as needed** with new features and content (the Captain, 2026-10-21).
     A change only has to be compatible and not a major regression: no suite that passed before
     now fails.
+  - **Your review is sufficient** (the Captain, 2026-10-21). Where something needs a review or
+    approval before it merges or ships (yours, Claude's or another agent's), your review counts as
+    sign-off in the Captain's place. Don't wait for him.
   - Claude merges your branches into claude/ai-driving too and cuts builds.
   - Don't wait for a merge to start the next task.
 - **When something lands:** a CHANGELOG entry, then a short note in the Captain's Discord thread.
