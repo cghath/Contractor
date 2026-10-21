@@ -212,6 +212,11 @@ func _test_call_adjust_ffe() -> void:
 		"it fires after the section's response (%d s) and flies %.0f s over %d m from the guns off the map" % [int(u.response_s), flight, roundi(range_m)])
 	await _land_all("mortar")
 	check(fs.heard_line("Shot, over") and fs.heard_line("Splash, over"), "shot and splash on the radio")
+	var arc := ShellArc.last
+	var landed: Vector3 = fs.impacts.back().pos if not fs.impacts.is_empty() else Vector3.INF
+	var arc_end := ShellArc.point_at(arc.get("from", Vector3.ZERO), arc.get("launch", Vector3.ZERO), arc.get("accel", Vector3.ZERO), float(arc.get("flight", 0.0)))
+	check(not arc.is_empty() and arc_end.distance_to(landed) < 0.01 and FireMission.flat(arc.from, landed) > 500.0,
+		"every peer sees the round come down out of the sky from the guns %.0f m off, onto where it bursts (ShellArc, %.3f m)" % [FireMission.flat(arc.get("from", landed), landed), arc_end.distance_to(landed)])
 	var burst: Vector3 = fs.impacts.back().pos if not fs.impacts.is_empty() else Vector3.INF
 	check(burst.is_finite() and FireMission.flat(burst, target + bias) <= spread + 1.0,
 		"the adjusting round lands off by the mission's error, within the dispersion (%.0f m of %.0f)" % [FireMission.flat(burst, target + bias), spread])

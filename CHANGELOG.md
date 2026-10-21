@@ -96,6 +96,41 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   T moves to the part's next hit; T or Esc goes back to the signs and the log. A round that
   stayed in can be traced too: where its channel ended is now kept with the wound and sent to
   every player.
+### Tracers follow the round's real path (Captain, 2026-10-21: "tracers flight paths and ballistic arcs ... theyre still wonky depending on terrain")
+
+#### Fixed
+- **Tracers fly the round's arc.** A tracer used to be a straight line from the muzzle to the
+  impact while the round flew a zeroed, dropping arc. At 800 m the line ran up to 2.8 m off the
+  real path. Now every peer rebuilds the steps the host's round flew from the muzzle, its launch
+  velocity and its round (`Ballistics.flight_path`). The streak runs along them and ends exactly
+  at the impact, on flat ground, slopes, hillsides and voxels, at any range.
+- **Clients draw the host's path.** The tracer message now carries the launch velocity and the
+  round, so the client's streak is the host's path point for point. A shooter that the client
+  draws a moment behind (smoothing) gets the streak started at the gun it sees, and the streak
+  joins the real path within 12 m.
+- **A muzzle in the ground no longer fires from the eye.** A muzzle pushed into a rise (prone
+  on a slope) or a wall now fires from 3 cm short of it. Before, the round and its tracer started
+  at the shooter's face.
+
+#### Added
+- **Mortar and artillery shells can be seen in flight** (Captain, 2026-10-21: "i wanna see the
+  mortar streak down or up depending on weather conditions etc"). Every peer sees a dark shell
+  with a pale streak fly the real arc in its real time of flight. A mortar team's shell goes up
+  off the tube and over. A called mission's 81 mm or 105 mm round comes down out of the sky from
+  the guns off the map. Both end exactly on the burst. The streak stays about a pixel and a half
+  wide at any range, and fog hides it.
+- **Wind by weather.** Each weather has a wind (proposed: fog 1 m/s, clear 3, overcast 5, rain 7,
+  storm 14) from a direction each zone keeps (`DayNight.wind`). The wind pushes shells, so the
+  arc leans and bends in flight: about 5 m at the top of a 25 s flight on a clear day, 22 m in a
+  storm. The crews lay for the wind, so rounds still land where they did before.
+- Mounted vehicle guns show tracers too (every fifth round red or green, the rest as faint ball
+  streaks), along the same real path.
+- A `ballistics` test suite: rounds onto a hilly terrain at 50, 300 and 800 m, up, down and across
+  slopes, up a hillside 700 m out, and into voxels. Each checks that the impact is on the height
+  field, the path goes through no hill, the rebuilt path matches the one flown, and the tracer
+  follows it to the impact. It also covers a player's real shot from the muzzle, a muzzle in the
+  ground, and the smoothed-shooter lead. The net suite checks the client's tracer against the
+  host's path over ENet.
 
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 
