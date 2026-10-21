@@ -11,6 +11,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Tracers follow the round's real path (Captain, 2026-10-21: "tracers flight paths and ballistic arcs ... theyre still wonky depending on terrain")
+
+#### Fixed
+- **Tracers fly the round's arc.** A tracer used to be a straight line from the muzzle to the
+  impact while the round flew a zeroed, dropping arc. At 800 m the line ran up to 2.8 m off the
+  real path. Now every peer rebuilds the steps the host's round flew from the muzzle, its launch
+  velocity and its round (`Ballistics.flight_path`). The streak runs along them and ends exactly
+  at the impact, on flat ground, slopes, hillsides and voxels, at any range.
+- **Clients draw the host's path.** The tracer message now carries the launch velocity and the
+  round, so the client's streak is the host's path point for point. A shooter that the client
+  draws a moment behind (smoothing) gets the streak started at the gun it sees, and the streak
+  joins the real path within 12 m.
+- **A muzzle in the ground no longer fires from the eye.** A muzzle pushed into a rise (prone
+  on a slope) or a wall now fires from 3 cm short of it. Before, the round and its tracer started
+  at the shooter's face.
+
+#### Added
+- Mounted vehicle guns show tracers too (every fifth round red or green, the rest as faint ball
+  streaks), along the same real path.
+- A `ballistics` test suite: rounds onto a hilly terrain at 50, 300 and 800 m, up, down and across
+  slopes, up a hillside 700 m out, and into voxels. Each checks that the impact is on the height
+  field, the path goes through no hill, the rebuilt path matches the one flown, and the tracer
+  follows it to the impact. It also covers a player's real shot from the muzzle, a muzzle in the
+  ground, and the smoothed-shooter lead. The net suite checks the client's tracer against the
+  host's path over ENet.
+
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 
 #### Fixed

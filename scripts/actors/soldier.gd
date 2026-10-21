@@ -1012,6 +1012,17 @@ static func muzzle_point(eye: Vector3, dir: Vector3, sidearm: bool, lefty: bool,
 	return eye + right * offset.x * (-1.0 if lefty else 1.0) + up * offset.y + forward * offset.z
 
 
+## Where a round fired from `eye` leaves when the muzzle is `muzzle`: the muzzle, or, when something
+## solid is between them (a wall leaned on, the ground prone on a rise), MUZZLE_WALL_GAP_M short
+## of it on the eye's side.
+const MUZZLE_WALL_GAP_M := 0.03
+static func muzzle_clear_of(space: PhysicsDirectSpaceState3D, eye: Vector3, muzzle: Vector3, exclude: Array[RID]) -> Vector3:
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(eye, muzzle, 1, exclude))
+	if hit.is_empty():
+		return muzzle
+	return eye.move_toward(hit.position, maxf(eye.distance_to(hit.position) - MUZZLE_WALL_GAP_M, 0.0))
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
@@ -1040,11 +1051,11 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		origin = camera.global_position  # don't trust a far-off muzzle
 	# The round leaves the muzzle along the barrel and deviates from there (spread, drop, drag;
 	# Captain, 2026-10-16: "bullets should come from the muzzles ... then deviate"). A muzzle
-	# pushed into a wall fires from the eye instead (no shooting through what you lean on).
+	# pushed into a wall, or into the ground (prone on a rise), fires from just short of it
+	# (no shooting through what you lean on), not from the eye: the round and its tracer still
+	# leave the gun (Captain, 2026-10-21: tracers "wonky depending on terrain").
 	var muzzle := muzzle_point(origin, direction.normalized(), weapon.slot == &"sidearm", left_handed, is_aiming)
-	var wall_q := PhysicsRayQueryParameters3D.create(origin, muzzle, 1, [get_rid()])
-	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
-		muzzle = origin
+	muzzle = muzzle_clear_of(get_world_3d().direct_space_state, origin, muzzle, [get_rid()])
 	# A tube-fed shotgun's shell: its pellets, a slug or a breaching round (Shotguns.server_fire).
 	# Anything else fires its round; buckshot from a magazine (items expansion, 2026-10-20: rounds.json
 	# "pellets") traces each further pellet on its own, spread round the shot inside pellet_spread_deg.
@@ -1065,7 +1076,9 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var every := int(weapon.stats.get("tracer_every", TRACER_EVERY))
 	var tracer := every > 0 and _rounds_fired % every == 0
 	var kind: int = (Tracer.Kind.GREEN if faction == &"hostile" else Tracer.Kind.RED) if tracer else Tracer.Kind.BALL
-	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed, kind)  # and sees it (Tracer)
+	var launch: Variant = result.get("launch")  # the path it flew, on every peer (Ballistics.flight_path)
+	CompoundLevel.current(self).show_tracer.rpc(muzzle, launch if launch is Vector3 and round_end is Vector3 else Vector3.ZERO,
+		Ballistics.round_id(Shotguns.shot_item(weapon, shell) if tube else weapon), round_point, suppressed, kind)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)

@@ -123,6 +123,7 @@ func _ready() -> void:
 		Net.peer_joined.connect(_give_kit)
 		Net.peer_left.connect(_on_client_left)
 		BaseHub.level_switched.connect(_on_host_switched)
+		Ballistics.record_path = true  # the client checks its tracer against it (_check_tracer_path)
 		get_tree().create_timer(240.0).timeout.connect(func() -> void: get_tree().quit(1))
 		_stage_drag()
 	else:
@@ -426,6 +427,7 @@ func _run_client() -> void:
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
+	await _check_tracer_path()
 	if me.inventory.rounds_in(&"primary") != 27:
 		print("    (up %s, %s, hands '%s', at %s, %d rounds, why out %s)" % [me.vitals.is_up(), me.vitals.condition_text(), me.inventory.hands,
 			me.global_position, me.inventory.rounds_in(&"primary"), me.vitals.why_unconscious()])
@@ -638,6 +640,34 @@ func _check_looted_rifle(me: Soldier) -> void:
 	var left := _rifle_drawn(aimer)
 	check(aimer.inventory.slots[&"primary"] == &"" and left.is_empty(),
 		"looted over the network: nothing of the rifle stays drawn on the body here (%s)" % [left])
+
+
+## Tracers (Captain, 2026-10-21: their arcs "still wonky depending on terrain"): the tracer drawn
+## here for the last shot runs along the path the host's round really flew (Ballistics.flight_path),
+## muzzle to impact, point for point.
+func _check_tracer_path() -> void:
+	_host_path = null
+	_host_last_path.rpc_id(1)
+	await _wait_for(func() -> bool: return _host_path != null, 3.0)
+	var host: PackedVector3Array = _host_path if _host_path != null else PackedVector3Array()
+	var mine := Tracer.last_path
+	var worst := INF if host.size() != mine.size() or host.is_empty() else 0.0
+	for i in mini(host.size(), mine.size()):
+		worst = maxf(worst, host[i].distance_to(mine[i]))
+	check(worst < 0.001, "client vs host: the tracer here follows the host's real path, muzzle to impact (%d points, worst %.4f m)" % [mine.size(), worst])
+
+
+var _host_path: Variant = null
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _host_last_path() -> void:
+	_client_last_path.rpc_id(multiplayer.get_remote_sender_id(), Ballistics.last_path)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_last_path(points: PackedVector3Array) -> void:
+	_host_path = points
 
 
 ## The soldier named `callsign` (players and AI), or null.

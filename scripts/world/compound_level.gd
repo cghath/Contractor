@@ -668,14 +668,21 @@ func _restore_bodies() -> void:
 		placed.server_restore()  # what players placed and left: charges, mines, chem lights (on their vehicles when back)
 
 
-## Host only. A visible tracer streak from `origin` to `end` on every peer (Captain, 2026-10-16:
-## "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic (Sfx.
-## server_shot already carries the sound); suppressed shots get a faint one, not none, since the
-## round still flies even if the bang is quiet.
+## Host only. A visible tracer streak from the muzzle `origin` to `end` on every peer (Captain,
+## 2026-10-16: "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic
+## (Sfx.server_shot already carries the sound); suppressed shots get a faint one, not none, since
+## the round still flies even if the bang is quiet. `launch` and `round_id` (Ballistics.fire's
+## "launch", Ballistics.round_id) let every peer fly the round's real path to `end`
+## (Ballistics.flight_path; Captain, 2026-10-21: tracers' arcs "still wonky depending on
+## terrain"); a zero `launch` draws a straight streak. `kick`: a soldier's shot (his weapon kicks,
+## and the streak starts at his gun as this peer draws him: Tracer.LEAD_BLEND_M); not a vehicle's.
 @rpc("authority", "call_local", "unreliable")
-func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
-	Tracer.spawn(self, origin, end, suppressed, kind)
-	_kick_shooter(origin)
+func show_tracer(origin: Vector3, launch: Vector3, round_id: StringName, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED, kick := true) -> void:
+	if not (origin.is_finite() and launch.is_finite() and end.is_finite()):
+		return
+	var points := Ballistics.flight_path(origin, launch, round_id, end) if launch != Vector3.ZERO else PackedVector3Array([origin, end])
+	var shooter := _kick_shooter(origin) if kick else null
+	Tracer.spawn_path(self, points, suppressed, kind, _seen_muzzle_offset(shooter, origin))
 
 
 ## The soldier whose shot left from `origin` (the nearest within KICK_FIND_M): their weapon kicks
@@ -683,7 +690,7 @@ func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tr
 const KICK_FIND_M := 1.6
 
 
-func _kick_shooter(origin: Vector3) -> void:
+func _kick_shooter(origin: Vector3) -> Soldier:
 	var best: Soldier = null
 	var best_d := KICK_FIND_M
 	for n: Node in get_tree().get_nodes_in_group(&"combatants"):
@@ -698,6 +705,17 @@ func _kick_shooter(origin: Vector3) -> void:
 		var w := best.active_weapon()
 		var strength := clampf(float(w.stats.get("recoil_deg", 0.7)) / 0.7, 0.4, 2.0) if w else 1.0
 		best.model.kick(strength)
+	return best
+
+
+## How far from `muzzle` this peer draws `shooter`'s gun: a body another peer moves is drawn a
+## moment behind (Soldier._smooth_remote: the model's net_offset), so the tracer starts at the gun
+## seen, not at a muzzle in the air ahead of it. Zero where the model sits on the body.
+static func _seen_muzzle_offset(shooter: Soldier, muzzle: Vector3) -> Vector3:
+	if shooter == null or shooter.model == null or shooter.model.net_offset == Transform3D.IDENTITY:
+		return Vector3.ZERO
+	var body := shooter.global_transform
+	return body * (shooter.model.net_offset * (body.affine_inverse() * muzzle)) - muzzle
 
 
 @rpc("authority", "call_local", "unreliable")
