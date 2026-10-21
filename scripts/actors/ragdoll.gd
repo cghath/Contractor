@@ -314,6 +314,12 @@ func _remove_part(key: String) -> void:
 	for child in get_children():
 		var joint := child as Generic6DOFJoint3D
 		if joint and (String(joint.name).begins_with(key + "_") or String(joint.name).ends_with("_" + key)):
+			# Out of the world now, not at the end of the frame: a step with the joint still on
+			# chains the falling body to the part held still below and spins it (Captain,
+			# 2026-10-21: a torso an RPG took everything off landed any way up).
+			joint.node_a = NodePath()
+			joint.node_b = NodePath()
+			remove_child(joint)
 			joint.queue_free()
 	(p as RigidBody3D).freeze = true
 
@@ -542,10 +548,16 @@ func _physics_process(delta: float) -> void:
 		freeze()
 
 
-## Whether the torso still stands more upright than UPRIGHT_DOT.
-func _upright() -> bool:
+## Whether the torso still stands more upright than UPRIGHT_DOT; `either_way`: or upside down
+## (Captain, 2026-10-21, an RPG through a man's chest: a torso with no limbs or head came to rest
+## standing on its neck stump; nothing balances on that either). Only a settled one is tipped off
+## its neck (_topple): one flying past upside down mid-fall is left to fall.
+func _upright(either_way := false) -> bool:
 	var torso := parts.get("torso") as Node3D
-	return torso != null and torso.global_basis.y.dot(Vector3.UP) >= UPRIGHT_DOT
+	if torso == null:
+		return false
+	var up := torso.global_basis.y.dot(Vector3.UP)
+	return (absf(up) if either_way else up) >= UPRIGHT_DOT
 
 
 ## Turns back any knee or elbow bent past straight the wrong way (ONE_WAY).
@@ -572,6 +584,8 @@ func _keep_hinges() -> bool:
 func _collapse(_delta: float) -> void:
 	if _age_s > COLLAPSE_S or not _upright():
 		return
+	if cut_away.has("shin_l") and cut_away.has("shin_r"):
+		return  # no legs left to stand stiff on: it falls as it's thrown (the torque would spin a lone torso like a top)
 	var torso := parts.get("torso") as RigidBody3D
 	var way := _fall_dir if _fall_dir.length() > 0.1 else -torso.global_basis.z
 	way = Vector3(way.x, 0.0, way.z)
@@ -584,7 +598,7 @@ func _collapse(_delta: float) -> void:
 ## Settled upright: pushed over (see TOPPLE_*). True if it was (it falls on, not frozen yet).
 func _topple() -> bool:
 	var torso := parts.get("torso") as RigidBody3D
-	if torso == null or _topples >= TOPPLE_MAX or torso.global_basis.y.dot(Vector3.UP) < UPRIGHT_DOT:
+	if torso == null or _topples >= TOPPLE_MAX or not _upright(true):
 		return false
 	_topples += 1
 	var way := _fall_dir if _fall_dir.length() > 0.1 else _hit_dir
@@ -593,7 +607,7 @@ func _topple() -> bool:
 		way.y = 0.0
 	if way.length() < 0.01:
 		way = Vector3.FORWARD
-	torso.apply_impulse(way.normalized() * TOPPLE_IMPULSE, torso.global_basis.y * 0.5)
+	torso.apply_impulse(way.normalized() * TOPPLE_IMPULSE, torso.global_basis.y * 0.5 * signf(torso.global_basis.y.dot(Vector3.UP)))  # (at the end that's up)
 	_still_s = 0.0
 	return true
 

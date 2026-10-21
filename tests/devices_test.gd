@@ -242,6 +242,15 @@ func _test_pallor_and_signs() -> void:
 		rising = rising and c.pallor() >= last
 		last = c.pallor()
 	check(rising and last > 0.9, "pallor follows the blood lost (%.2f at 50%%)" % last)
+	# Captain, 2026-10-21: "hair blues/gets pallor when it shouldnt": the head's overlay knows the
+	# face's own skin and hair (FaceRig's palette), and hair and eyes are never pale or blue.
+	var head_mi: MeshInstance3D = c.body_meshes()[0]
+	var hmat := head_mi.material_overlay as ShaderMaterial
+	var scheme := c.scheme_of(head_mi)
+	var spec := VoxelArt.spec(scheme)
+	var same := func(param: StringName, hex: String) -> bool: return hmat != null and (hmat.get_shader_parameter(param) as Vector3).distance_to(Vector3(Color(hex).r, Color(hex).g, Color(hex).b)) < 0.002
+	check(same.call(&"skin", String(spec.skin)) and same.call(&"hair", String(spec.hair)) and BodyCondition.SHADER.contains("bool kept"),
+		"the head's overlay is its own face's: skin %s, hair %s (%s), hair and eyes kept" % [spec.skin, spec.hair, scheme])
 	m.blood = 0.95
 	casualty.vitals._after_change(true)
 	check(c.pallor() == 0.0 and c.overlaid().is_empty(), "barely any lost: normal skin")

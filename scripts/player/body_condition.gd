@@ -11,8 +11,11 @@ extends Node3D
 ## - Coughing blood (blast lung, a lung filling with blood): blood at the mouth and down the chin.
 ## - Shivering (hypothermic): the body's meshes tremble.
 ## Burns, pallor and lips are a material overlay on the body part meshes (CharacterModel's
-## VoxelArt meshes, their vertex colours unchanged); it is only set while there's something to
-## show. Everything follows replicated state (Vitals), so every peer shows the same. Created
+## VoxelArt meshes, their vertex colours unchanged, and the face's moving parts); it is only set
+## while there's something to show. Each mesh's overlay knows the skin, lips, hair and eyes of
+## the colour scheme it was built in (a face's own: FaceRig's palette, not the uniform's
+## default), so only skin and lips change and hair, brows and eyes never do (Captain,
+## 2026-10-21: "hair blues/gets pallor when it shouldnt"). Everything follows replicated state (Vitals), so every peer shows the same. Created
 ## by WoundMarks.
 
 const PALLOR_FROM := 0.85  # blood fraction where the skin starts to pale
@@ -25,7 +28,7 @@ const CELL := 0.005
 var model: CharacterModel
 var vitals: Vitals
 var body := ""
-var _material: ShaderMaterial
+var _materials: Dictionary = {}  # colour scheme -> its overlay ShaderMaterial
 var _overlaid: Array[MeshInstance3D] = []
 var _pallor := 0.0
 var _burn := 0.0
@@ -53,6 +56,8 @@ uniform vec3 skin_shade;
 uniform vec3 mouth;
 uniform vec3 lip;
 uniform vec3 lip_shade;
+uniform vec3 hair;
+uniform vec3 eye;
 
 varying vec3 local_pos;
 varying vec3 local_normal;
@@ -89,8 +94,9 @@ void fragment() {
 	vec3 cell = floor(local_pos - local_normal * 0.5);
 	vec3 metres = cell * unit_m;
 	vec3 base = COLOR.rgb;
-	bool is_skin = near(base, skin) || near(base, skin_shade);
-	bool is_lip = near(base, mouth) || near(base, lip) || near(base, lip_shade);
+	bool kept = near(base, hair) || near(base, eye);  // hair, brows and eyes never pale or blue
+	bool is_skin = !kept && (near(base, skin) || near(base, skin_shade));
+	bool is_lip = !kept && (near(base, mouth) || near(base, lip) || near(base, lip_shade));
 	vec3 col = base;
 	bool changed = false;
 	if (burn > 0.0) {
@@ -194,36 +200,71 @@ func _set_overlay() -> void:
 	var needed := _burn > 0.0 or _pallor > 0.0 or _blue
 	if not needed:
 		for mesh: MeshInstance3D in overlaid():
-			if mesh.material_overlay == _material:
+			if mesh.material_overlay in _materials.values():
 				mesh.material_overlay = null
 		_overlaid.clear()
 		return
-	if _material == null:
-		if _shader == null:
-			_shader = Shader.new()
-			_shader.code = SHADER
-		_material = ShaderMaterial.new()
-		_material.shader = _shader
-		var spec := VoxelArt.spec(model.variant)
-		var skin := Color(spec.get("skin", "c8996f"))
-		_material.set_shader_parameter(&"skin", _rgb(skin))
-		_material.set_shader_parameter(&"skin_shade", _rgb(skin.darkened(0.15)))
-		_material.set_shader_parameter(&"mouth", _rgb(skin.darkened(0.35)))
-		_material.set_shader_parameter(&"lip", _rgb(skin.lerp(Color("9a4a44"), 0.3).darkened(0.12)))
-		_material.set_shader_parameter(&"lip_shade", _rgb(skin.lerp(Color("9a4a44"), 0.2)))
-		_material.set_shader_parameter(&"seed", float(hash(model.get_parent().name if model.get_parent() else model.name) % 1000) / 37.0)
-		_material.set_shader_parameter(&"unit_m", VoxelArt.BODY_VOXEL / VoxelArt.BODY_SUB)
 	var m := vitals._m()
 	var needed_dressings := m.burn_dressings + m.burn_dressings_needed()
-	_material.set_shader_parameter(&"burn", _burn)
-	_material.set_shader_parameter(&"dressed", float(m.burn_dressings) / needed_dressings if needed_dressings > 0 else 0.0)
-	_material.set_shader_parameter(&"pallor", _pallor)
-	_material.set_shader_parameter(&"blue", 1.0 if _blue else 0.0)
-	for mesh: MeshInstance3D in body_meshes():
-		if mesh.material_overlay == null:
-			mesh.material_overlay = _material
+	for mesh: MeshInstance3D in overlay_meshes():
+		var material := _material_for(scheme_of(mesh))
+		if mesh.material_overlay == null or (mesh.material_overlay in _materials.values() and mesh.material_overlay != material):
+			mesh.material_overlay = material  # (a face built since keeps its own scheme's)
 		if mesh not in _overlaid:
 			_overlaid.append(mesh)
+	for material: ShaderMaterial in _materials.values():
+		material.set_shader_parameter(&"burn", _burn)
+		material.set_shader_parameter(&"dressed", float(m.burn_dressings) / needed_dressings if needed_dressings > 0 else 0.0)
+		material.set_shader_parameter(&"pallor", _pallor)
+		material.set_shader_parameter(&"blue", 1.0 if _blue else 0.0)
+
+
+## The colour scheme `mesh` was built in: its part pivot's (VoxelArt.instance, FaceRig: a face's
+## palette), else the body's.
+func scheme_of(mesh: Node) -> String:
+	var n := mesh
+	while n != null and n != model:
+		if n.has_meta(&"voxel_variant"):
+			return String(n.get_meta(&"voxel_variant"))
+		n = n.get_parent()
+	return model.variant
+
+
+## The overlay for colour scheme `scheme`: its skin, lips, hair and eyes.
+func _material_for(scheme: String) -> ShaderMaterial:
+	if _materials.has(scheme):
+		return _materials[scheme]
+	if _shader == null:
+		_shader = Shader.new()
+		_shader.code = SHADER
+	var material := ShaderMaterial.new()
+	material.shader = _shader
+	var spec := VoxelArt.spec(scheme)
+	var skin := Color(spec.get("skin", "c8996f"))
+	material.set_shader_parameter(&"skin", _rgb(skin))
+	material.set_shader_parameter(&"skin_shade", _rgb(skin.darkened(0.15)))
+	material.set_shader_parameter(&"mouth", _rgb(skin.darkened(0.35)))
+	material.set_shader_parameter(&"lip", _rgb(skin.lerp(Color("9a4a44"), 0.3).darkened(0.12)))
+	material.set_shader_parameter(&"lip_shade", _rgb(skin.lerp(Color("9a4a44"), 0.2)))
+	material.set_shader_parameter(&"hair", _rgb(Color(spec.get("hair", "3b2a1d"))))
+	material.set_shader_parameter(&"eye", _rgb(Color(spec.get("eye", "1c1c1c"))))
+	material.set_shader_parameter(&"seed", float(hash(model.get_parent().name if model.get_parent() else model.name) % 1000) / 37.0)
+	material.set_shader_parameter(&"unit_m", VoxelArt.BODY_VOXEL / VoxelArt.BODY_SUB)
+	_materials[scheme] = material
+	return material
+
+
+## What the overlay goes on: the body's meshes (body_meshes) and the face's moving parts
+## (FaceRig's Face_* meshes on the head's mesh: the mouth's lips go blue with the rest).
+func overlay_meshes() -> Array[MeshInstance3D]:
+	var out := body_meshes()
+	var head := model.part_node(Vitals.HEAD)
+	if head:
+		for mi: Node in head.get_children():
+			for part: Node in mi.get_children():
+				if part is MeshInstance3D and String(part.name).begins_with("Face_"):
+					out.append(part)
+	return out
 
 
 static func _rgb(c: Color) -> Vector3:

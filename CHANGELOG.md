@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
+
+#### Fixed
+- **The round that kills with a head shot is now on record.** A rifle round through the head is
+  fatal, but the kill used to come with no wound, so the first round into a downed (or standing)
+  man's head left nothing on him. Only later rounds, into the corpse, showed. Now the fatal round
+  leaves its head wound (and the hole in the model), seen the same by every player.
+### Forward observer: eyes on the area (Captain, 2026-10-21: "im in the area observing it but nothing")
+
+#### Fixed
+- **Observing a target area counts when you can see it.** Before, only one point counted: 2 m
+  above the dead middle of the area. A compound's walls or a building round it hid that point from
+  every position, however well you saw the place, so the "get eyes on" step never moved. Now any
+  clear sight of the area counts, from within range for 10 seconds: its middle, any of the
+  targets (the technicals, the mortar pit), or points round its edge.
+
 ### One 12-gauge system (Captain, 2026-10-21: "we have standard and hi brass and breaching rounds for the skeleton key")
 
 #### Added
@@ -216,6 +232,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   grip and the telescoping stock out on its tube. It is 1 m long.
 - **The Mossberg 590's furniture is black** too (it was the same grey), and both pump guns show
   a bright bolt in the ejection port.
+### Gore fixes (Captain, 2026-10-21)
+
+#### Fixed
+- **Hair no longer goes pale or blue.** Pallor and blue lips were keyed to the uniform's default
+  skin colour, not the face's own skin and hair. Some hair shades matched the default mouth and
+  lip colours and took the tint. Each mesh's overlay now uses its own colour scheme, and hair,
+  brows and eyes are never tinted. Blue lips now also show on the face's moving mouth.
+- **The first headshot leaves a wound.** A killing head hit killed without recording a wound, so
+  it drew no hole, blood or brain spatter. Only later shots into the corpse showed.
+- **An RPG to the head leaves a neck, not a crater.** A warhead hit on the head, face or neck now
+  takes the head (pulped by a filling big enough to gib, flung off by a smaller one), chars and
+  peppers the chest, and leaves the body whole. Before, it gibbed him and carved big craters in
+  the torso at the collar. Every head cut now leaves a neck stump about 5 cm tall (it was about
+  2 cm and mostly torn away), opened like a limb: skin, fat, flesh and the spine at its core.
+- **A gibbed torso lands the way it's thrown.** After an RPG in the chest blew everything off,
+  the torso spun and landed any way up (often face down). Now, hit from the front, it goes
+  over onto its back; from behind, onto its front. Four causes:
+  - The death collapse push meant for a body standing on its legs spun a lone torso like a top.
+    A body with no lower legs no longer gets it.
+  - The burst's throw skipped the man it went off on. A direct hit now throws him away from it.
+  - Pieces flying off hit their own torso on the way out. They no longer collide with their
+    own body or with each other.
+  - A cut limb's joint held the falling torso for one more physics step. It now goes at once.
+  A torso left standing on its neck is tipped over too.
+- **Wound marks go with a cut-off limb.** Holes and blood trails past the cut stayed hanging in
+  the air where the limb had been. Now only the marks on what's left of the part are drawn.
 
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 

@@ -625,17 +625,39 @@ func _redraw_pool() -> void:
 
 
 ## Everything on the body: holes, blood and dressings, one MultiMesh per bone.
+## BodyDeform cut a part through: its marks past the cut go (_redraw).
+func on_reshaped() -> void:
+	if is_instance_valid(model):
+		_redraw()
+
+
 func _redraw() -> void:
 	_dirty = false
 	var per_bone := {}  # bone -> Array of [local position, size, colour]
+	var deform := model.get_node_or_null(^"BodyDeform") as BodyDeform
 	for spot: Dictionary in _spots.values():
 		var bone := model.part_node(spot.part)
 		if bone == null:
 			continue
 		var pivot := BodyVolume.pivot_at(spot.part, body)
 		var cells: Array = per_bone.get(bone, [])
+		# A part cut through: only the marks on what's left of it (none hang in the air where
+		# the limb was).
+		var left: Variant = deform.cut_bounds(BodyDeform._bone_part(spot.part)) if deform else null
+		if left is AABB:
+			var kept: Array[Dictionary] = []
+			for hole: Dictionary in spot.holes:
+				if (left as AABB).has_point(Vector3(hole.at) - pivot):
+					kept.append(hole)
+			if kept.is_empty():
+				per_bone[bone] = cells
+				continue
+			spot = spot.duplicate()
+			spot.holes = kept
 		for hole: Dictionary in spot.holes:
 			for b: Array in hole.blood:
+				if left is AABB and not (left as AABB).has_point(b[0] - pivot):
+					continue  # a trail run on past the cut
 				cells.append([b[0] - pivot, b[1], DRIED_COLOUR if spot.flow <= 0.0 and spot.treated else b[2]])
 			if spot.treated and spot.look != &"":
 				if hole.get("dressed_as") != spot.look:  # built once: a redraw comes with each new blood cell

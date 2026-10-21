@@ -355,3 +355,6 @@ confirmation for `/root/<test node>`), and check what the auth (`LevelSwitch._on
 the level loaded by then). The demolitions suite now prints the client's asks and join/leave times
 (`[test]` lines), which shows it.
 
+## Calls made for the Captain
+
+One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
