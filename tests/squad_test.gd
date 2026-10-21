@@ -956,6 +956,110 @@ func _test_buildings_raised_any_order() -> void:
 const STOREY_AT := Vector3(-32, 0, 40)
 
 
+## Breachers (Captain, 2026-10-20: "we need breacher roles for the player team", "they use
+## breaching charges"; "breaching charges need to stop leaving big craters in the ground with a
+## small line of unbroken fence or wall that cannot be walked past or over by AI"). The plans by
+## combat mode and order; then, ordered to clear the house in Combat, the breacher is first in the
+## stack, sets his charge on the wall, the stack holds while it burns, it cuts a doorway from the
+## floor up (nothing left at the foot, the ground under it kept), and in they go, nobody hurt;
+## then a human breacher's own: they hold for his breach.
+func _test_breacher(found: Dictionary, mates: Array[SquadAI], names: PackedStringArray, front_room: Vector3, outside_at: Vector3, house: VoxelWorld) -> void:
+	var squad := level.squad_for(&"friendly")
+	var brc: SquadAI = mates[mates.size() - 1]
+	var brc_role := brc.body.role
+	brc.body.role = Roles.BREACHER
+	Roles.give(brc.body.inventory, &"breaching_charge", 1)
+	Roles.give(brc.body.inventory, &"flashbang", 1)
+	var first := Squad.breacher_first(mates)
+	var others: Array = mates.filter(func(ai: SquadAI) -> bool: return ai != brc)
+	check(first[0] == brc and first.size() == mates.size() and SquadAI.breacher_slot(others) < 0,
+		"the breacher goes first in the stack (%s)" % [first.map(func(ai: SquadAI) -> String: return String(ai.body.name))])
+	var plans := {}
+	for mode: int in [Squad.CombatMode.COMBAT, Squad.CombatMode.STEALTH]:
+		brc.combat_mode = mode
+		plans[mode] = [squad.breach_plan(found, first, ""), squad.breach_plan(found, first, "charge"), squad.breach_plan(found, first, "open"),
+			squad.breach_plan(found, first, "flash")]
+	brc.combat_mode = Squad.CombatMode.COMBAT
+	var combat: Array = plans[Squad.CombatMode.COMBAT]
+	var stealth: Array = plans[Squad.CombatMode.STEALTH]
+	check(combat[0].door == "charge" and combat[0].bang == "flash" and int(combat[0].breacher) == 0,
+		"Combat: he uses a charge, and a flashbang goes in after it (%s, %s)" % [combat[0].door, combat[0].bang])
+	check(stealth[0].door == "open" and stealth[0].bang == "" and stealth[1].door == "charge" and stealth[3].door == "open" and stealth[3].bang == "flash",
+		"Stealth: eased open, no bang, a charge only when ordered, a bang only when ordered (%s/%s, %s, %s/%s)"
+		% [stealth[0].door, stealth[0].bang, stealth[1].door, stealth[3].door, stealth[3].bang])
+	check(combat[2].door == "open" and combat[2].bang == "", "ordered quietly: eased open, no bang (%s/%s)" % [combat[2].door, combat[2].bang])
+	var plain := squad.breach_plan(found, others, "")
+	var kicked := squad.breach_plan(found, others, "kick")
+	check(plain.is_empty() and kicked.get("door", "") == "kick" and int(kicked.get("breacher", -1)) == 0,
+		"no breacher: today's entry, unless a kick is ordered (the first in the stack kicks: %s)" % [kicked.get("door", "")])
+	check(SquadAI.door_way(brc, "shotgun", false, false, true) == "kick", "ordered to shotgun the door without a shotgun in hand: he kicks it")
+	# Ordered to clear it in Combat: the charge.
+	var space := player.get_world_3d().direct_space_state
+	var charges := Charges.of(player)
+	var blasts_before := charges.recent.size()
+	# The house is a world of its own beside the compound's: blasts reach the level's
+	# voxel_worlds(), so it stands in as the level's while the charge goes off.
+	var compound_world := level.voxel_world
+	level.voxel_world = house
+	_place(player, outside_at + Vector3.UP * 0.1)
+	await _seconds(0.5)
+	var why := squad.order_clear(player, front_room, names)
+	var op: Dictionary = brc.ordered.get("op", {}) if why == "" else {}
+	check(why == "" and int(brc.ordered.get("slot", -1)) == 0 and String(op.get("door", "")) == "charge",
+		"ordered to clear: the breacher first in the stack, with a charge (%s; %s)" % [why, op.get("door", "")])
+	if op.is_empty():
+		level.voxel_world = compound_world
+		brc.body.role = brc_role
+		return
+	var placed := await _wait_until(func() -> bool: return op.has("charge_at"), 45.0)
+	var spot: Vector3 = op.get("charge_at", Vector3.ZERO)
+	var n: Vector3 = op.entrance.normal
+	var held := placed and float(op.go_at) > Soldier._now() + 3.0
+	var floor_y := Charges.floor_under(level, spot, n)
+	var blocked := func(h: float) -> bool:
+		var p := Vector3(spot.x, floor_y + h, spot.z)
+		return not space.intersect_ray(PhysicsRayQueryParameters3D.create(p + n * 0.8, p - n * 0.8, 1)).is_empty()
+	var before := [blocked.call(0.15), blocked.call(1.0)]
+	var blown := await _wait_until(func() -> bool: return charges.recent.size() > blasts_before, 20.0)
+	await _physics_frames(2)
+	var deafened := mates.filter(func(ai: SquadAI) -> bool: return ai.body.vitals.deaf_left() > 0.0 or not ai.body.vitals.is_up())
+	var open_now := await _wait_until(func() -> bool: return not blocked.call(0.15) and not blocked.call(1.0) and not blocked.call(1.9), 6.0)
+	level.voxel_world = compound_world
+	var under := Vector3(spot.x, floor_y, spot.z) - n * 0.3
+	var ground_kept := not space.intersect_ray(PhysicsRayQueryParameters3D.create(under + Vector3.UP * 0.5, under + Vector3.DOWN * 0.3, 1)).is_empty()
+	check(placed and held and blown, "he sets the charge on the wall (%s at %s) and the stack holds while it burns" % [placed, spot])
+	check(before[0] and before[1] and open_now and ground_kept,
+		"it cuts a doorway from the floor up: wall there before (%s), open at 0.15, 1.0 and 1.9 m after (%s), the ground under it kept (%s)"
+		% [before, open_now, ground_kept])
+	var went := await _wait_until(func() -> bool:
+		return mates.any(func(ai: SquadAI) -> bool: return Buildings.contains(found, ai.body.global_position)), 25.0)
+	check(went and deafened.is_empty() and bool(op.get("banged", false)),
+		"after the blast and the bang, in they go through the hole (%s, bang %s), the stack out of the blast (%s)"
+		% [went, op.get("banged", false), deafened.map(func(ai: SquadAI) -> String: return String(ai.body.name))])
+	for ai: SquadAI in mates:
+		ai.give_tactic({})
+	brc.body.role = brc_role
+	# A human breacher orders it: they stack and hold for his breach (his charge by the door), then in.
+	var player_role := player.role
+	player.role = Roles.BREACHER
+	_place(player, outside_at + Vector3.UP * 0.1)
+	await _seconds(0.5)
+	why = squad.order_clear(player, front_room, names)
+	var his: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	var stacked := await _wait_until(func() -> bool: return not his.is_empty() and (his.ready as Dictionary).size() >= mates.size() - 1, 40.0)
+	await _seconds(SquadTactics.STACK_WAIT_S + 1.0)
+	var waited := not his.is_empty() and not is_finite(float(his.go_at)) and String(his.get("door", "")) == "" and bool(his.get("on_breach", false))
+	var door: Vector3 = his.entrance.door if not his.is_empty() else Vector3.ZERO
+	charges.recent.append({"pos": door + Vector3.UP, "at": Soldier._now(), "by": player.get_instance_id()})  # his charge, gone off by the door
+	var in_after := await _wait_until(func() -> bool: return not his.is_empty() and is_finite(float(his.go_at)), 3.0)
+	check(why == "" and stacked and waited and in_after,
+		"a human breacher's order: they stack (%s), hold past the usual wait for his breach (%s), and go once his charge goes off (%s; %s)"
+		% [stacked, waited, in_after, why])
+	for ai: SquadAI in mates:
+		ai.give_tactic({})
+	player.role = player_role
+
+
 func _test_multi_storey() -> void:
 	print("Buildings: floors, stairs and roofs (F-01)")
 	var b := {}
@@ -1109,6 +1213,7 @@ func _test_multi_storey() -> void:
 		% [(on_op.get("ready", {}) as Dictionary).size(), mates.size(), held, went, why])
 	for ai: SquadAI in mates:
 		ai.give_tactic({})
+	await _test_breacher(found, mates, names, front_room, outside_at, world)
 	# Following him into a building with no order: they stack on its door and clear it on their own,
 	# and drop it once he's walked away (Squad._tick_follow_in).
 	_place(player, outside_at + Vector3.UP * 0.1)

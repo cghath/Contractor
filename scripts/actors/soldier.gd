@@ -148,6 +148,8 @@ var _load_run := 0
 ## a muzzle flash gives a shooter away).
 var last_shot_at := -1000.0
 var last_shot_suppressed := false
+## Host: where that round ended (a human breacher's hinge shot: SquadAI, clearing on a breacher).
+var last_shot_to := Vector3.INF
 
 ## "friendly" (players and their squad) or "hostile". Set before the body enters the tree.
 @export var faction := &"friendly"
@@ -1041,6 +1043,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
 	var round_point: Vector3 = round_end if round_end is Vector3 else origin + direction.normalized() * 400.0
+	last_shot_to = round_point
 	Sfx.server_shot(muzzle, round_point,
 		"suppressed" if suppressed else String(weapon.stats.get("sound", "pistol" if weapon.slot == &"sidearm" else "rifle")))  # every peer hears it (Sfx): its family's sound (AR, AK, ...)
 	_rounds_fired += 1
