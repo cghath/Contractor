@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Missions 2: HVT kill, crash site, overwatch, night and weather contracts (Captain's list, 2026-10-20, "Not built yet / Campaign")
+
+Closes the list items "mission types: HVT kill with proof, crash site / black box, overwatch" and
+"contracts that roll night and bad weather". All numbers are Proposed (docs/missions.md "Missions 2").
+
+#### Added
+- **HVT kill.** A named commander at a compound, village, town, outpost or HQ, with a guard
+  detail of 2-4 who keep with him as he walks between the site's buildings. Kill him and carry
+  his ID papers (taken off the body) out at extraction. Without the papers the client holds back
+  40% of the pay; taken alive and brought out counts in full. 90 minute clock; bonus for his phone.
+- **Crash site.** A downed Viper, Black Hawk or Petrel lies as a wreck in open ground. Carry its
+  flight recorder out (14 kg, both hands). Bonuses: the crew's ID tags, and denying the wreck with
+  a breaching charge. Enemy waves converge on the site, each sooner than the last.
+- **Overwatch.** A friendly convoy of one or two armoured trucks drives past an enemy site, with
+  ambush teams by the road. The squad takes the high ground over the route (the position moves
+  to the highest ground nearby); the convoy sets out once someone holds the position, or after
+  10 minutes at the latest. Done when it is through, failed if it is lost. Bonuses: every truck
+  through, and staying on the position until it is through. The convoy's crews are the client's:
+  they are not squadmates and don't count as casualties in the debrief.
+- **Night and weather contracts.** A contract sometimes rolls a night start (21:30-03:30) or bad
+  weather. Night is likelier on recon, sabotage, raids and kills, and rarer on escorts, holds and
+  overwatch. Weather depends on the zone's terrain: fog on coasts and moors, little on the salt
+  flats, storms rare everywhere. The board shows it ("NIGHT FOG" on the line) and the brief says
+  "Conditions: Night (insertion about 23:15), fog: +15% pay". It pays more: night +10%, fog or
+  rain +5%, a storm +10%. The deployed zone starts at that hour and weather, even when the zone's
+  save remembers another. The safe job and in-zone radio contracts never roll it.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

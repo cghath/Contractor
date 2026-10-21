@@ -488,10 +488,24 @@ func begin_prep_contract(cid: String) -> String:
 	if RosterDeployment.is_running(roster()):
 		return "A deployment is already running"
 	var zone_id := String(c.get("zone_id", ""))
-	var layout := MissionRegistry.zone_def(zone_id)
-	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), zone_id, "",
-		{"level": "zone", "def": layout} if not layout.is_empty() else {})
+	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), zone_id, "", contract_level_info(c))
 	return ""
+
+
+## The level a deployment on contract `c` loads into ({} for a zone with no layout): its zone's
+## layout, with the contract's own night start or bad weather when it rolled any (missions 2,
+## ContractGen.roll_conditions), which DayNight takes over the zone's save (DayNight.CONTRACT_SKY).
+static func contract_level_info(c: Dictionary) -> Dictionary:
+	var layout := MissionRegistry.zone_def(String(c.get("zone_id", "")))
+	if layout.is_empty():
+		return {}
+	if c.has("hour") or c.has("weather"):
+		layout = layout.duplicate(true)
+		for key: String in ["hour", "weather"]:
+			if c.has(key):
+				layout[key] = c[key]
+		layout[DayNight.CONTRACT_SKY] = true
+	return {"level": "zone", "def": layout}
 
 
 ## The contract in prep ({} if none).

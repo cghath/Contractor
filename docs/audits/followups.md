@@ -194,3 +194,21 @@ and five of them were touching the same StaticBody3D. It passes locally (R0314) 
 52037f2. It may be the same as F-08 and F-90 (squadmates held against the target dummies on the
 Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
 whether "ccp" finds a bearer when every squadmate is blocked on the dummies.
+
+## F-140: ambushers and a friendly convoy driving past (missions 2 overwatch, cghath's side, 2026-10-20)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (target choice and engagement), and how
+hostiles see a crew in a moving vehicle.
+
+The overwatch mission (MissionScenario "overwatch", docs/missions.md "Missions 2") puts 2-3 hostile
+teams by the road (Reinforcements.server_send waves holding their own spot). A friendly convoy of
+1-2 M-ATVs or MaxxPros with friendly crews (`vehicle_crew` and `allied_element` meta, their own
+Squad, no squad slot) drives past them. The mission only works if the ambushers open fire on the
+trucks and their crews as they come by, and go for the trucks rather than standing still. The
+tests resolve the convoy by hand (trucks moved to the end, or set burning), so no test shows
+whether the AI engages a crew sitting in a moving vehicle at 45-150 m. Nothing in Claude's files
+was changed for this.
+
+Suggested: check in a playtest or a probe that a hostile squad in contact picks a friendly
+vehicle's crew (or the vehicle) as a target and fires on it. If it does not, let a holding wave
+engage friendly vehicles that pass within its engage range.

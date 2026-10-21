@@ -43,6 +43,8 @@ func _ready() -> void:
 		return
 	_test_generation()
 	_test_variety_board()
+	_test_missions_2_board()
+	_test_conditions()
 	_register_clear_compound()
 	_test_rating_and_understatement()
 	_test_negotiation()
@@ -144,9 +146,10 @@ func _test_generation() -> void:
 		if o.zone_kind == "hot":
 			hot += 1
 			hot_ok = hot_ok and o.employer == MissionRegistry.zone(o.zone_id).faction
-	check(seen.keys().size() == 13 and seen.has("supply_line") and seen.has("manhunt") and seen.has("convoy_chase") and seen.has("psd_escort") and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
-		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon"),
-		"Captain's first four mission types, the five of mission variety, the client escort, the supply line, the manhunt and the convoy chase come up (%s)" % [seen.keys()])
+	check(seen.keys().size() >= 16 and seen.has("supply_line") and seen.has("manhunt") and seen.has("convoy_chase") and seen.has("psd_escort") and seen.has("raid") and seen.has("hvt_capture") and seen.has("hostage_rescue") and seen.has("intel_grab")
+		and seen.has("convoy_ambush") and seen.has("defend_hold") and seen.has("crew_rescue") and seen.has("sabotage") and seen.has("recon")
+		and seen.has("hvt_kill") and seen.has("crash_site") and seen.has("overwatch"),
+		"Captain's first four mission types, the five of mission variety, the client escort, the supply line, the manhunt, the convoy chase and missions 2's HVT kill, crash site and overwatch come up (%s)" % [seen.keys()])
 	check(hot > 30 and hot < 130 and hot_ok, "hot-zone contracts come up (%d of 300), each from the zone's own faction" % hot)
 	# A mission type added at runtime (Noah's types drop in the same way).
 	MissionRegistry.register_type({"type": "test_rescue", "name": "Hostage rescue", "module": "compound", "base_pay": 60000, "days": 1,
@@ -216,6 +219,182 @@ func _test_variety_board() -> void:
 	var outpost := ContractGen.mission_target(rng, MissionRegistry.type_def("sabotage"), "")
 	check(String(outpost.module) == "outpost" and (outpost.objectives as Array).size() >= 1 and String(outpost.objectives[0].kind) == Objectives.DESTROY_VEHICLES
 		and String(outpost.title_extra) == " (vehicle park)", "an outpost's sabotage target is its vehicle park (%s)" % outpost.title_extra)
+
+
+## Missions 2 (Captain's list, 2026-10-20): the HVT kill, the crash site and the overwatch come up
+## on the board in zones holding a module each plays in, contract and hot zones alike, each with
+## what it plays with: the HVT's proof (his ID papers, the piece he carries), the crash site's
+## flight recorder and wreck, the overwatch's route inside the zone, its trucks and ambushes.
+## missions_test "Missions 2" plays each one to the end.
+func _test_missions_2_board() -> void:
+	print("Missions 2 on the board: HVT kill, crash site, overwatch")
+	var three: Array[String] = ["hvt_kill", "crash_site", "overwatch"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2027
+	var n := 900
+	var count := {}
+	var zone_kinds := {}
+	var misfit := ""
+	var wrecks: Array = (MissionRegistry.type_def("crash_site").get("scenario_knobs", {}) as Dictionary).get("wrecks", [])
+	for i in n:
+		var o := ContractGen.generate(rng, {"day": 1, "source": "board"})
+		if not o.type in three:
+			continue
+		count[o.type] = int(count.get(o.type, 0)) + 1
+		if not zone_kinds.has(o.type):
+			zone_kinds[o.type] = {}
+		zone_kinds[o.type][o.zone_kind] = true
+		var zone := MissionRegistry.zone(String(o.zone_id))
+		var def := MissionRegistry.type_def(String(o.type))
+		var half := float(MissionRegistry.zone_def(String(o.zone_id)).size_m) * 0.5
+		var problem := ""
+		if not (ZoneModules.base(String(o.module)) in MissionRegistry.type_modules(def) and ZoneModules.base(String(o.module)) in zone.modules):
+			problem = "module %s" % o.module
+		var required: Array = (o.objectives as Array).filter(func(x: Dictionary) -> bool: return not bool(x.get("optional", false)))
+		if required.size() != 1 or (o.objectives as Array).any(func(x: Dictionary) -> bool: return String(x.text).contains("{") or not String(x.kind) in Objectives.KINDS):
+			problem = "objectives"
+		var live := Objectives.from_contract(o)
+		match String(o.type):
+			"hvt_kill":
+				var kill: Array = live.filter(func(x: Dictionary) -> bool: return x.kind == Objectives.KILL_HVT)
+				var proof: Array = live.filter(func(x: Dictionary) -> bool: return x.kind == Objectives.EXTRACT_ITEM and bool(x.params.get("proof", false)))
+				var hvt := String(kill[0].params.get("hvt", "")) if kill.size() == 1 else ""
+				var carried: Array = (kill[0].params.get("person", {}) as Dictionary).get("intel", []) if kill.size() == 1 else []
+				if hvt == "" or proof.size() != 1 or proof[0].params.get("intel_ids", []) != ["%s:hvt_id_card" % hvt] or not bool(proof[0].optional) \
+						or float(proof[0].get("withheld_share", 0.0)) <= 0.0 or not carried.any(func(x: Dictionary) -> bool: return String(x.id) == "hvt_id_card") \
+						or not String(kill[0].params.person.get("label", "")).begins_with("HVT (") or not kill[0].params.has("time_limit_s"):
+					problem = "kill and proof (%s; hvt %s, proof %s, carried %s, kill %s)" % [live.map(func(x: Dictionary) -> String: return x.kind), hvt,
+						proof.map(func(x: Dictionary) -> Variant: return [x.params.get("intel_ids", []), x.optional, x.get("withheld_share", 0.0)]), carried,
+						kill.map(func(x: Dictionary) -> Variant: return [x.params.get("person", {}), x.params.has("time_limit_s")])]
+			"crash_site":
+				var main: Dictionary = required[0] if not required.is_empty() else {}
+				var p: Dictionary = main.get("params", {})
+				var pos: Array = p.get("pos", [0, 0, 0])
+				if String(main.get("kind", "")) != Objectives.EXTRACT_ITEM or p.get("items", []) != [ScenarioGen.BLACK_BOX] or not String(p.get("model", "")) in wrecks \
+						or absf(float(pos[0])) > half or absf(float(pos[2])) > half or not live.any(func(x: Dictionary) -> bool: return x.kind == Objectives.DESTROY_WRECK and x.optional) \
+						or not live.any(func(x: Dictionary) -> bool: return x.kind == Objectives.EXTRACT_ITEM and x.optional and x.params.get("items", []) == [ScenarioGen.CREW_TAGS]):
+					problem = "crash site (%s)" % [p]
+			"overwatch":
+				var p: Dictionary = (required[0] if not required.is_empty() else {}).get("params", {})
+				var route: Array = p.get("route", [])
+				var inside := func(q: Array) -> bool: return absf(float(q[0])) <= half and absf(float(q[2])) <= half
+				var trucks: Array = p.get("trucks", [])
+				if route.size() < 3 or not route.all(inside) or not inside.call(p.get("pos", [1e9, 0, 0])) or trucks.is_empty() or int(p.get("need", 0)) < 1 \
+						or int(p.get("need", 0)) > trucks.size() or (p.get("ambushes", []) as Array).size() < 2 \
+						or not live.any(func(x: Dictionary) -> bool: return x.kind == Objectives.OVERWATCH and x.optional and bool(x.params.get("held", false))):
+					problem = "overwatch (%s)" % [p.keys()]
+		if problem != "" and misfit == "":
+			misfit = " (%s in %s: %s)" % [o.type, o.zone_id, problem]
+	var types := MissionRegistry.types().filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).has("locals")).size()
+	check(three.all(func(t: String) -> bool: return int(count.get(t, 0)) >= n / types / 2),
+		"each of the three comes up on the board, about one offer in %d (%s of %d offers)" % [types, count, n])
+	check(misfit == "", "each in a zone holding a module it plays in, with what it plays with" + misfit)
+	check(three.all(func(t: String) -> bool: return (zone_kinds.get(t, {}) as Dictionary).has("contract") and (zone_kinds.get(t, {}) as Dictionary).has("hot")),
+		"in contract zones and hot zones alike (%s)" % [zone_kinds])
+
+
+## Missions 2: contracts roll a night start or bad weather (ContractGen.roll_conditions) at the
+## stated rates (night by mission type, weather by the zone's terrain preset, storms rare), on a
+## generator of their own; the board shows it (the line's tag, the brief's "Conditions:" with the
+## pay) and pays the share more; the safe job never rolls; the deployment's level takes the
+## contract's hour and weather (BaseHub.contract_level_info, DayNight.CONTRACT_SKY; missions_test
+## "Night and weather contracts" loads a zone under one).
+func _test_conditions() -> void:
+	print("Night and weather contracts")
+	var settings: Dictionary = MissionRegistry.data().settings
+	var knobs: Dictionary = settings.get("conditions", {})
+	check(not knobs.is_empty(), "contracts.json has its conditions")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4040
+	var n := 4000
+	var night := {}
+	for type: String in ["recon", "raid", "psd_escort"]:
+		var hits := 0
+		var hours_ok := true
+		for i in n:
+			rng.randi()  # the board's generator moves on between offers
+			var sky := ContractGen.roll_conditions(rng, type, "salt_pan")
+			if sky.has("hour"):
+				hits += 1
+				var h := float(sky.hour)
+				hours_ok = hours_ok and (h >= 21.5 or h <= 3.5) and "night" in sky.conditions
+		night[type] = float(hits) / n
+		check(absf(float(night[type]) - ContractGen.night_chance(type)) < 0.03 and hours_ok,
+			"%s: a night start %.1f%% of the time (stated %.1f%%), between 21:30 and 03:30" % [type, float(night[type]) * 100.0, ContractGen.night_chance(type) * 100.0])
+	check(float(night.recon) > float(night.raid) and float(night.raid) > float(night.psd_escort), "recon and raids go in at night more often than an escort (%s)" % [night])
+	var fog := {}
+	for zone_id: String in ["fishers_reach", "salt_pan"]:
+		var terrain := String(MissionRegistry.zone_def(zone_id).get("terrain", ""))
+		var seen := {}
+		for i in n:
+			rng.randi()
+			var sky := ContractGen.roll_conditions(rng, "raid", zone_id)
+			if sky.has("weather"):
+				seen[sky.weather] = int(seen.get(sky.weather, 0)) + 1
+		var order: Array = (knobs.weather as Dictionary).keys()
+		order.sort_custom(func(a: Variant, b: Variant) -> bool: return float(knobs.weather[a]) < float(knobs.weather[b]))
+		var none_before := 1.0
+		var sound := true
+		var lines := PackedStringArray()
+		for w: Variant in order:
+			var p := ContractGen.weather_chance(String(w), terrain)
+			var expected := p * none_before  # the rarest first, at most one
+			none_before *= 1.0 - p
+			var got := float(seen.get(w, 0)) / n
+			sound = sound and absf(got - expected) < 0.025
+			lines.append("%s %.1f%% (%.1f%%)" % [w, got * 100.0, expected * 100.0])
+		fog[zone_id] = float(seen.get("fog", 0)) / n
+		check(sound and float(seen.get("storm", 0)) / n < 0.05, "%s (%s): %s; storms rare" % [zone_id, terrain, ", ".join(lines)])
+	check(float(fog.fishers_reach) > float(fog.salt_pan) * 3.0, "fog on the coast far more often than on the salt flats (%.1f%% vs %.1f%%)" % [float(fog.fishers_reach) * 100.0, float(fog.salt_pan) * 100.0])
+	# On the board.
+	var with := 0
+	var safe_ok := true
+	var shown := true
+	for seed_i in 40:
+		for o: Dictionary in ContractGen.generate_board(800 + seed_i, 1, {}, 6):
+			if o.source == "safe":
+				safe_ok = safe_ok and not o.has("conditions")
+			if not o.has("conditions"):
+				continue
+			with += 1
+			var tag := ContractGen.conditions_tag(o)
+			shown = shown and tag != "" and ContractBoard.offer_line(o).contains(tag) and String(o.brief).contains("Conditions: ") \
+				and ContractGen.conditions_text(o) != "" and (not o.has("hour") or "night" in o.conditions) and (not o.has("weather") or DayNight.has_weather(String(o.weather)))
+	check(with > 20 and safe_ok, "%d of 240 offers roll a night or bad weather; the safe low-risk job never does" % with)
+	check(shown, "shown on the board (\"NIGHT FOG\" on its line) and in the brief (\"Conditions: ...: +N% pay\")")
+	# The pay: the same offer with no conditions to roll pays the share less (the rest of the offer is the same).
+	var paid := false
+	var pay_line := "no offer with conditions"
+	for seed_i in 200:
+		var a := RandomNumberGenerator.new()
+		a.seed = 5100 + seed_i
+		var c := ContractGen.generate(a, {"day": 1, "source": "board"})
+		if not c.has("conditions"):
+			continue
+		var b := RandomNumberGenerator.new()
+		b.seed = 5100 + seed_i
+		settings.conditions = {}
+		var plain := ContractGen.generate(b, {"day": 1, "source": "board"})
+		settings.conditions = knobs
+		var share := 0.0
+		for w: Variant in c.conditions:
+			share += float((knobs.pay as Dictionary).get(String(w), 0.0))
+		paid = not plain.has("conditions") and plain.type == c.type and plain.zone_id == c.zone_id \
+			and absi(int(c.base_pay) - roundi(int(plain.base_pay) * (1.0 + share))) <= MissionRegistry.setting_i("pay_round", 500)
+		pay_line = "%s: $%d, $%d without (+%d%%)" % [c.conditions, int(c.base_pay), int(plain.base_pay), roundi(share * 100.0)]
+		if share > 0.0:
+			break
+	settings.conditions = knobs
+	check(paid, "a night or bad weather pays its share more (%s)" % pay_line)
+	# Into the deployment's level.
+	var dark := {"zone_id": "fishers_reach", "hour": 23.25, "weather": "fog", "conditions": ["night", "fog"]}
+	var info := BaseHub.contract_level_info(dark)
+	var def: Dictionary = info.get("def", {})
+	check(is_equal_approx(float(def.get("hour", -1.0)), 23.25) and String(def.get("weather", "")) == "fog" and bool(def.get(DayNight.CONTRACT_SKY, false)) and String(def.get("id", "")) == "fishers_reach",
+		"the deployment's level carries the contract's hour and weather, over the zone's save")
+	var day: Dictionary = BaseHub.contract_level_info({"zone_id": "fishers_reach"}).get("def", {})
+	check(not day.is_empty() and not day.has(DayNight.CONTRACT_SKY) and not MissionRegistry.zone_def("fishers_reach").has(DayNight.CONTRACT_SKY),
+		"a day in clear weather loads the zone as it is (its layout untouched)")
 
 
 func _test_rating_and_understatement() -> void:

@@ -1177,6 +1177,8 @@ static func report_from_level(level: CompoundLevel, extracted: Array, banked := 
 			continue
 		if s.has_meta(&"vehicle_crew") and not s.vitals.is_dead():
 			continue  # wave 5b: a support vehicle's crew isn't the squad's, nor missing (it goes home with it)
+		if s.has_meta(&"allied_element"):
+			continue  # missions 2: an overwatch's convoy crews are the client's, not ours, alive or dead
 		out[s] = true
 		if s.vitals.is_dead() and not banked.has(s.body_uid):
 			field.append_array(inventory_items(s.inventory))

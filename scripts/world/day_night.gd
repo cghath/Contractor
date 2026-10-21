@@ -13,7 +13,7 @@ extends Node
 ##   sight_m the furthest anyone is seen at all), hearing (hear_x on footsteps), rain (drops
 ##   near the camera, none headless) and whether it grounds helicopters (grounds).
 ## - Saved with the zone (GameState.sky: the save wins over the definition, except the hour
-##   after travel: TRAVELLED) and replicated: a client asks the host on _ready, and the host
+##   after travel: TRAVELLED, and a contract's own night or weather: CONTRACT_SKY) and replicated: a client asks the host on _ready, and the host
 ##   sends it to everyone every SYNC_S.
 ##
 ## Readers: Spotting (darkness_at, sight_m, spot_x, hearing_x; NVGs, wave 7 S2, restore sight
@@ -27,6 +27,10 @@ const DEFAULT_WEATHER := "clear"
 ## The def's key for an arrival after travel (BaseHub.server_cross_on): its "hour" is the clock
 ## the squad brought with it, over the zone's save and a contract's own hour (audit A2-08).
 const TRAVELLED := "travelled"
+## The def's key for a deployment on a contract that rolled a night start or bad weather
+## (missions 2: ContractGen.roll_conditions, BaseHub.contract_level_info): the def's "hour" and
+## "weather" are the contract's, over the zone's save (a resume of the save has no such key).
+const CONTRACT_SKY := "contract_sky"
 ## Game seconds per real second in a contract zone: an hour passes in 10 minutes.
 const TIME_SCALE := 6.0
 ## The host sends the time and weather to every client this often (s).
@@ -206,6 +210,11 @@ func server_restore() -> void:
 	if bool(def.get(TRAVELLED, false)) and def.has("hour"):
 		saved = saved.duplicate()
 		saved["hour"] = float(def.hour)
+	if bool(def.get(CONTRACT_SKY, false)):
+		saved = saved.duplicate()
+		for key: String in ["hour", "weather"]:
+			if def.has(key):
+				saved[key] = def[key]  # the contract's own night or weather, over the zone's save
 	if saved.has("hour") or saved.has("weather"):
 		_set_state(float(saved.get("hour", hour)), String(saved.get("weather", weather)))
 		_apply_look()

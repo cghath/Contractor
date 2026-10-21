@@ -263,11 +263,12 @@ static func _tooltip(c: Dictionary) -> String:
 	return "%s\n%s" % [offer_line(c), String(c.get("brief", ""))]
 
 
-## One offer in a line: rating, zone kind, title, employer, pay.
+## One offer in a line: rating, zone kind, its night or weather ("NIGHT FOG ", missions 2),
+## title, employer, pay.
 static func offer_line(c: Dictionary) -> String:
 	var stars := "*".repeat(int(c.get("rated", 1))) + ".".repeat(5 - int(c.get("rated", 1)))
 	var tag: String = {"fixer": "FIXER %s: " % c.get("fixer", ""), "safe": "LOW RISK: ", "lead": "", "recovery": "RECOVERY: "}.get(String(c.get("source", "")), "")
-	return "[%s] %s%s%s - %s - $%s" % [stars, "HOT ZONE " if c.get("zone_kind") == "hot" else "", tag, c.get("title", ""),
+	return "[%s] %s%s%s%s - %s - $%s" % [stars, "HOT ZONE " if c.get("zone_kind") == "hot" else "", ContractGen.conditions_tag(c), tag, c.get("title", ""),
 		MissionRegistry.faction_name(String(c.get("employer", ""))), DebriefCalc.money(c.get("base_pay", 0))]
 
 

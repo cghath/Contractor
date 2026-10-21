@@ -1,8 +1,9 @@
 class_name MissionScenario
 extends Node
 ## Plays the scenario mission types in the level (mission variety, 2026-10-15; docs/missions.md):
-## convoy ambush, hold the line, downed crew rescue, recon, the "never spotted" bonus and
-## sabotage's vehicle park (2026-10-20: its own section at the end). Host
+## convoy ambush, hold the line, downed crew rescue, recon, the "never spotted" bonus,
+## sabotage's vehicle park (2026-10-20: its own section) and missions 2's HVT kill, crash site and
+## overwatch (2026-10-20: their own section at the end). Host
 ## only (everything it spawns replicates like any AI, vehicle or person); one node per level,
 ## "MissionScenario", installed by MapNodes.install on every peer and idle off the host.
 ##
@@ -103,6 +104,8 @@ func _step(dt: float) -> void:
 				_unseen_tick(run, o)
 			Objectives.DESTROY_VEHICLES:
 				_park_tick(run, o)
+			HVT_KILL, ScenarioGen.CRASH, ScenarioGen.OVERWATCH:
+				_ops_tick(run, o, dt)  # (missions 2: their own section at the end)
 
 
 ## A run that ended (objective done, failed or gone): a convoy that is still rolling is left to it.
@@ -736,6 +739,9 @@ func _enter_tree() -> void:
 	if not Contracts.contract_live.is_connected(_on_park_live):
 		Contracts.contract_live.connect(_on_park_live)
 		Contracts.contract_returned.connect(_on_park_live)
+	if not Contracts.contract_live.is_connected(_on_ops_live):
+		Contracts.contract_live.connect(_on_ops_live)  # (missions 2: the section at the end)
+		Contracts.contract_returned.connect(_on_ops_live)
 
 
 func _on_park_live(_cid: String, objectives: Array) -> void:
@@ -807,3 +813,454 @@ func park_vehicles(oid: String) -> Array[Vehicle]:
 		if v:
 			out.append(v)
 	return out
+
+
+# --- Missions 2 (2026-10-20): HVT kill, crash site, overwatch ----------------------------------
+## Captain's list, 2026-10-20 (docs/missions.md "Missions 2"). Kept apart from the runs above (its
+## own handler, _on_ops_live, connected in _enter_tree beside the park's) so it merges cleanly;
+## its runs live in `runs` like theirs and are checkpointed by ScenarioCheckpoint (server_checkpoint,
+## the deployment's "scenario_runs"): every node a run holds is under a key ScenarioCheckpoint
+## keeps by identity, never by reference. Run kinds and their keys:
+## - HVT_KILL ("hvt_kill", objective KILL_HVT): "t"; "crew" [the HVT, a person PeopleLayer
+##   spawns, walking between the module's buildings: the type's "hvt_knobs" "routine_sites"];
+##   "ambush" [his guard detail, hostiles of their own squad (_guard_squad_name) who keep close to
+##   him]. The kill and its proof complete through the People ledger (Objectives.server_hvt_lost,
+##   server_hvt_delivered) and extraction (server_items_out: his ID papers).
+## - ScenarioGen.CRASH ("crash", the flight recorder's EXTRACT_ITEM): "t", "wave", "next_s" (when
+##   the next wave comes), "waves" [their soldiers], "wreck" (the aircraft, a wreck). The recorder
+##   and the crew's tags lie by the wreck (WorldItems by their params' "box_uid"/"tags_uid", put
+##   there again on a return only when gone and not picked up). The wreck denied: a charge
+##   (Objectives.server_charge_blast, DESTROY_WRECK).
+## - ScenarioGen.OVERWATCH ("overwatch", the main OVERWATCH objective): "t", "phase" ("waiting",
+##   "rolling"), "on_s" (ours on the position, waiting), "away_s" (nobody of ours on it, rolling),
+##   "through" (trucks out the far end), "route", "vehicles" [the friendly convoy, as the enemy
+##   convoy's entries: "v", "crew", "out", "hit", "down"; a truck through is "out" and "down"],
+##   "ambush" [the teams lying in wait]. Its bonuses (OVERWATCH "bonus_only") have no runs: this
+##   one settles them.
+
+const HVT_KILL := "hvt_kill"
+## An HVT's guards follow him once he has walked this far from where they last made for (m).
+const GUARD_FOLLOW_M := 6.0
+## Overwatch: nobody of ours on the position this long while the convoy rolls loses its bonus (s).
+const OVERWATCH_AWAY_S := 30.0
+## The overwatch position moves onto the highest ground in a grid this many points a side.
+const HIGH_GROUND_GRID := 7
+
+
+## The run kind objective `o` starts (missions 2), "" for none.
+static func _ops_kind(o: Dictionary) -> String:
+	var p: Dictionary = o.get("params", {})
+	match String(o.get("kind", "")):
+		Objectives.KILL_HVT:
+			return HVT_KILL
+		Objectives.EXTRACT_ITEM:
+			return ScenarioGen.CRASH if String(p.get("scenario", "")) == ScenarioGen.CRASH else ""
+		Objectives.OVERWATCH:
+			return "" if bool(p.get("bonus_only", false)) else ScenarioGen.OVERWATCH
+	return ""
+
+
+func _on_ops_live(_cid: String, objectives: Array) -> void:
+	if not multiplayer.is_server() or level == null:
+		return
+	for given: Dictionary in objectives:
+		var kind := _ops_kind(given)
+		if kind == "" or String(runs.get(String(given.oid), {}).get("kind", "")) == kind or not Objectives.here(given, level):
+			continue  # (a run of another kind under its oid is a stale one: an older campaign's, its oid given out again)
+		var o := Contracts.objectives.get_objective(String(given.oid))
+		if o.is_empty() or o.state != Objectives.ACTIVE:
+			continue
+		var saved: Dictionary = Campaign.section(&"contracts").get("deployment", {}).get("scenario_runs", {}).get(String(o.oid), {})
+		if saved.is_empty():
+			match kind:
+				HVT_KILL:
+					_hvt_begin(o)
+				ScenarioGen.CRASH:
+					_crash_begin(o)
+				ScenarioGen.OVERWATCH:
+					_overwatch_begin(o)
+		else:
+			runs[String(o.oid)] = ScenarioCheckpoint.restore(self, saved)
+			_ops_restored(runs[String(o.oid)], o)
+
+
+func _ops_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
+	match String(run.kind):
+		HVT_KILL:
+			_hvt_tick(run, o, dt)
+		ScenarioGen.CRASH:
+			_crash_tick(run, o, dt)
+		ScenarioGen.OVERWATCH:
+			_overwatch_tick(run, o, dt)
+
+
+## A run back from its checkpoint (ScenarioCheckpoint brings its soldiers back in the convoy
+## crews' squad): each soldier in its own squad again, the HVT on his walk, the crash site's
+## items and the convoy's crews as they were.
+func _ops_restored(run: Dictionary, o: Dictionary) -> void:
+	match String(run.kind):
+		HVT_KILL:
+			var guards := _ops_squad(_guard_squad_name(run), &"hostile")
+			for g: Variant in run.get("ambush", []):
+				if is_instance_valid(g) and SquadAI.of(g as Soldier):
+					SquadAI.of(g as Soldier).squad = guards
+			var hvt := _hvt_of(run)
+			var brain := hvt.get_node_or_null(NodePath(PeopleLayer.BRAIN)) if hvt else null
+			if brain:
+				brain.set(&"routine", _hvt_routine(o))
+		ScenarioGen.CRASH:
+			_aim_waves(_p3(o.params.pos))
+			_crash_items(o)
+		ScenarioGen.OVERWATCH:
+			var element := _ops_squad(_element_squad_name(run), &"friendly")
+			for e: Dictionary in run.get("vehicles", []):
+				var v := e.v as Vehicle if is_instance_valid(e.get("v")) else null
+				for s: Variant in e.crew:
+					if is_instance_valid(s):
+						_element_crewman(s as Soldier, v, element)
+
+
+## A squad of this node's (`squad_name`, made the first time) for `faction`.
+func _ops_squad(squad_name: String, faction: StringName) -> Squad:
+	var sq := get_node_or_null(NodePath(squad_name.validate_node_name())) as Squad
+	if sq == null:
+		sq = Squad.new()
+		sq.name = squad_name.validate_node_name()
+		sq.faction = faction
+		add_child(sq)
+	return sq
+
+
+## A soldier of squad `sq`'s side (hostile in the enemy's uniform, friendly in the company's
+## kit), its brain in that squad.
+func _ops_soldier(sq: Squad, soldier_name: String, at: Vector3, combat: float) -> Soldier:
+	var hostile := sq.faction == &"hostile"
+	var loadout: Variant = level.get(&"HOSTILE_LOADOUT" if hostile else &"PMC_LOADOUT")
+	var s: Soldier = level.call(&"spawn_soldier", {"name": soldier_name.validate_node_name(), "faction": String(sq.faction),
+		"variant": "urban" if hostile else Soldier.COMPANY_VARIANT, "pos": at + Vector3.UP * 0.5,
+		"loadout": loadout if loadout is Array else Reinforcements.LOADOUT, "combat": clampf(combat, 0.2, 0.9), "discipline": 0.5, "guard": false, "mode": "aware"})
+	if s and SquadAI.of(s):
+		SquadAI.of(s).squad = sq
+	return s
+
+
+# HVT kill ----------------------------------------------------------------------------------------
+
+func _guard_squad_name(run: Dictionary) -> String:
+	return "HvtGuards_" + String(run.oid)
+
+
+func _hvt_of(run: Dictionary) -> Soldier:
+	var crew: Array = run.get("crew", [])
+	return crew[0] as Soldier if not crew.is_empty() and is_instance_valid(crew[0]) and not (crew[0] as Soldier).is_queued_for_deletion() else null
+
+
+## The type's "hvt_knobs" for objective `o`'s contract.
+static func _hvt_knobs(o: Dictionary) -> Dictionary:
+	return MissionRegistry.type_def(String(Contracts.contract(String(o.cid)).get("type", ""))).get("hvt_knobs", {})
+
+
+## Where the HVT of objective `o` walks: his own spot first, then the module's other indoor
+## sites the type names ("routine_sites": the intel's, the documents', the hostage's rooms), in
+## the level.
+func _hvt_routine(o: Dictionary) -> Array:
+	var c := Contracts.contract(String(o.cid))
+	var module_type := String(c.get("module", ""))
+	var origin := Contracts.module_origin(c)
+	var out: Array = []
+	for site_id: Variant in _hvt_knobs(o).get("routine_sites", ["hvt"]):
+		var site := MissionRegistry.site(module_type, String(site_id))
+		if not site.has("pos"):
+			continue
+		var q: Array = site.pos
+		var at := origin + Vector3(float(q[0]), float(q[1]), float(q[2]))
+		if out.all(func(x: Vector3) -> bool: return x.distance_to(at) > 3.0):
+			out.append(at)
+	return out
+
+
+## Host: the HVT of objective `o` (his ID papers and phone on him, his walk between the
+## buildings) and his guard detail ("guards" of them round him, of the contract's true quality).
+func _hvt_begin(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var run := {"kind": HVT_KILL, "oid": String(o.oid), "cid": String(o.cid), "t": 0.0, "crew": [], "ambush": []}
+	runs[run.oid] = run
+	var people := PeopleLayer.find(self)
+	var hvt_id := String(p.get("hvt", ""))
+	if people == null or hvt_id == "" or People.is_delivered(hvt_id):
+		print("[mission] HVT kill %s: no HVT to put in (%s)" % [run.oid, "no people layer" if people == null else "delivered already" if hvt_id != "" else "no HVT id"])
+		return
+	var s := people.hvt(hvt_id)
+	if s == null:
+		var person: Dictionary = p.get("person", {})
+		s = people.server_spawn_person({"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt", "side": String(person.get("side", Person.HOSTILE)),
+			"label": String(person.get("label", "HVT")), "pos": _p3(p.pos), "hvt_id": hvt_id, "routine": _hvt_routine(o)})
+		if s == null:
+			print("[mission] HVT kill %s: the HVT didn't spawn" % run.oid)
+			return
+		for carried: Dictionary in person.get("intel", []):
+			s.inventory.take(StringName(carried.id), 1, {"intel_id": String(carried.intel_id), "source": "HVT %s" % s.display_name()})
+	run.crew = [s]
+	var knobs := _hvt_knobs(o)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([String(o.oid), "guards"])
+	var range_n: Array = knobs.get("guards", [2, 4])
+	var n := rng.randi_range(int(range_n[0]), int(range_n[1]))
+	var ring := float(knobs.get("guard_ring_m", 2.5))
+	var quality := float(Contracts.enemy_force(String(o.cid)).get("quality", 0.5))
+	var guards := _ops_squad(_guard_squad_name(run), &"hostile")
+	for i in n:
+		var a := TAU * float(i) / float(maxi(n, 1))
+		var g := _ops_soldier(guards, "HvtGuard_%s_%d" % [String(o.oid), i + 1], _ground(s.global_position + Vector3(cos(a), 0.0, sin(a)) * ring), quality + 0.1)
+		if g:
+			(run.ambush as Array).append(g)
+	guards.patrol = [_ground(s.global_position)]
+	print("[mission] HVT %s at (%.0f, %.0f) with %d guards" % [s.display_name(), s.global_position.x, s.global_position.z, (run.ambush as Array).size()])
+
+
+func _hvt_tick(run: Dictionary, _o: Dictionary, dt: float) -> void:
+	run.t += dt
+	var hvt := _hvt_of(run)
+	if hvt == null or not hvt.vitals.is_up():
+		return
+	var guards := get_node_or_null(NodePath(_guard_squad_name(run).validate_node_name())) as Squad
+	if guards and (guards.patrol.is_empty() or Vector2(guards.patrol[0].x - hvt.global_position.x, guards.patrol[0].z - hvt.global_position.z).length() > GUARD_FOLLOW_M):
+		guards.patrol = [_ground(hvt.global_position)]  # his detail keeps with him as he walks between the buildings
+
+
+# Crash site --------------------------------------------------------------------------------------
+
+## Host: the wreck (a wreck of the params' "model"), the flight recorder and the crew's tags by it;
+## the waves aimed at the site.
+func _crash_begin(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var run := {"kind": ScenarioGen.CRASH, "oid": String(o.oid), "cid": String(o.cid), "t": 0.0, "wave": 0, "next_s": float(p.get("first_wave_s", 150.0)), "waves": []}
+	runs[run.oid] = run
+	_aim_waves(_p3(p.pos))
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer
+	if layer:
+		var wreck := layer.server_spawn(String(p.get("model", WRECK_MODEL)), Transform3D(Basis(Vector3.UP, float(p.get("yaw", 0.0))), _ground(_p3(p.pos))),
+			"", &"friendly", "", {"wrecked": true})
+		if wreck:
+			wreck.set_meta(&"no_save", true)  # (a wreck is saved with the zone all the same: VehicleLayer.records)
+			run["wreck"] = wreck
+	_crash_items(o)
+	print("[mission] crash site: a %s down at (%.0f, %.0f)" % [String(p.get("aircraft", "aircraft")), float(p.pos[0]), float(p.pos[2])])
+
+
+## The flight recorder and the crew's tags by the wreck, unless they're there already or were picked up.
+func _crash_items(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var site := _p3(p.pos)
+	var turn := Basis(Vector3.UP, float(p.get("yaw", 0.0)))
+	for piece: Array in [[String(p.get("box_uid", "")), ScenarioGen.BLACK_BOX, Vector3(4.0, 0, 1.5)], [String(p.get("tags_uid", "")), ScenarioGen.CREW_TAGS, Vector3(-3.0, 0, 2.5)]]:
+		var uid: String = piece[0]
+		if uid == "" or GameState.is_looted(uid) or _world_item(uid) != null or not level.has_method(&"spawn_item"):
+			continue
+		level.call(&"spawn_item", StringName(String(piece[1])), 1, _ground(site + turn * (piece[2] as Vector3)) + Vector3.UP * 0.3, uid, {"source": "crash site"})
+
+
+func _world_item(uid: String) -> WorldItem:
+	for n in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		var item := n as WorldItem
+		if item and item.uid == uid and not item.is_queued_for_deletion():
+			return item
+	return null
+
+
+func _crash_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
+	var p: Dictionary = o.params
+	run.t += dt
+	while float(run.t) >= float(run.next_s):
+		if not run.has("waves"):
+			run["waves"] = []
+		run.waves.append_array(_send_wave(_p3(p.pos), int(run.wave), 3, float(p.get("yaw", 0.0)) + 1.1, float(p.get("approach_m", 260.0))))
+		run.next_s = float(run.next_s) + maxf(float(p.get("gap_min_s", 75.0)), float(p.get("gap_s", 150.0)) - float(p.get("gap_step_s", 15.0)) * int(run.wave))
+		run.wave += 1
+	if int(run.wave) > 0:
+		_mark(run, o, Objectives.ACTIVE, "the enemy is converging on the site (%d wave%s)" % [int(run.wave), "" if int(run.wave) == 1 else "s"])
+
+
+# Overwatch ---------------------------------------------------------------------------------------
+
+func _element_squad_name(run: Dictionary) -> String:
+	return "Element_" + String(run.oid)
+
+
+## A friendly convoy's crewman: not a squadmate (no slot, no squad orders: CompoundLevel._squad_ai
+## and Squad.members skip a vehicle's crew), nor one of ours at the debrief (Contracts.report_from_level).
+func _element_crewman(s: Soldier, v: Vehicle, element: Squad) -> void:
+	s.set_meta(&"vehicle_crew", v.vehicle_id if v else "element")
+	s.set_meta(&"allied_element", true)
+	if SquadAI.of(s):
+		SquadAI.of(s).squad = element
+
+
+## Host: the run waits for the squad on the position (moved onto the highest ground about it
+## first) with the ambush teams out by the road.
+func _overwatch_begin(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var route := PackedVector3Array()
+	for point: Variant in p.get("route", []):
+		route.append(_ground(Vector3(float(point[0]), 0.0, float(point[2]))))
+	var run := {"kind": ScenarioGen.OVERWATCH, "oid": String(o.oid), "cid": String(o.cid), "t": 0.0, "phase": "waiting", "on_s": 0.0, "away_s": 0.0,
+		"through": 0, "route": route, "vehicles": [], "ambush": []}
+	runs[run.oid] = run
+	_high_ground(o)
+	var r := _reinforcements()
+	if r:
+		for a: Dictionary in p.get("ambushes", []):
+			var at := _ground(_p3(a.pos))
+			(run.ambush as Array).append_array(r.server_send(at, 0, int(a.get("men", 3)), at))
+	print("[mission] overwatch %s: position at (%.0f, %.0f), %d lying in wait by the road" % [run.oid, float(p.pos[0]), float(p.pos[2]), (run.ambush as Array).size()])
+	_mark(run, o, Objectives.ACTIVE, _overwatch_progress(run, o))
+
+
+## The overwatch position of objective `o` (and its bonuses') onto the highest ground within
+## "search_m" of where ScenarioGen put it, once.
+func _high_ground(o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	if bool(p.get("refined", false)) or not level.has_method(&"ground_height"):
+		return
+	var c := _p3(p.pos)
+	var reach := float(p.get("search_m", 120.0))
+	var area: Rect2 = level.call(&"ground_area") if level.has_method(&"ground_area") else Rect2(c.x - reach, c.z - reach, reach * 2.0, reach * 2.0)
+	var best := Vector3(c.x, float(level.call(&"ground_height", c.x, c.z)), c.z)
+	var half := (HIGH_GROUND_GRID - 1) / 2
+	for ix in range(-half, half + 1):
+		for iz in range(-half, half + 1):
+			var q := Vector2(c.x + ix * reach / half, c.z + iz * reach / half)
+			if not area.grow(-40.0).has_point(q):
+				continue
+			var h := float(level.call(&"ground_height", q.x, q.y))
+			if h > best.y + 0.5:
+				best = Vector3(q.x, h, q.y)
+	var at := [snappedf(best.x, 0.1), snappedf(best.y, 0.1), snappedf(best.z, 0.1)]
+	for other: Dictionary in Contracts.objectives.for_contract(String(o.cid)):
+		if String(other.kind) == Objectives.OVERWATCH:
+			other.params["pos"] = at.duplicate()
+			other.params["refined"] = true
+			other["pos"] = at.duplicate()
+
+
+func _overwatch_progress(run: Dictionary, o: Dictionary) -> String:
+	var p: Dictionary = o.params
+	if String(run.phase) == "waiting":
+		if float(run.on_s) > 0.0:
+			return "in position: the convoy is getting ready"
+		return "get to the overwatch position (the convoy rolls in %d min at the latest)" % ceili(maxf(float(p.get("depart_s", 600.0)) - float(run.t), 0.0) / 60.0)
+	var lost := (run.vehicles as Array).filter(func(e: Dictionary) -> bool: return bool(e.get("down", false))).size() - int(run.through)
+	return "rolling: %d of %d through%s" % [int(run.through), (run.vehicles as Array).size(), (", %d lost" % lost) if lost > 0 else ""]
+
+
+func _overwatch_tick(run: Dictionary, o: Dictionary, dt: float) -> void:
+	var p: Dictionary = o.params
+	run.t += dt
+	var pos := _p3(p.pos)
+	var on := 0
+	for s: Soldier in _friendlies():
+		if not s.has_meta(&"vehicle_crew") and Vector2(s.global_position.x - pos.x, s.global_position.z - pos.z).length() <= float(p.get("radius", 30.0)):
+			on += 1
+	if String(run.phase) == "waiting":
+		if on > 0:
+			run.on_s += dt
+		if float(run.on_s) >= float(p.get("set_s", 20.0)) or float(run.t) >= float(p.get("depart_s", 600.0)):
+			_overwatch_spawn(run, o)
+			run.phase = "rolling"
+			Contracts._notify_all("Radio, convoy: rolling now. Eyes on the road.")
+		_mark(run, o, Objectives.ACTIVE, _overwatch_progress(run, o))
+		return
+	run.away_s = 0.0 if on > 0 else float(run.away_s) + dt
+	if float(run.away_s) >= OVERWATCH_AWAY_S:
+		_overwatch_bonus(run, "held", Objectives.FAILED, "left the position")
+	var route: PackedVector3Array = run.route
+	var end := route[route.size() - 1] if not route.is_empty() else Vector3.ZERO
+	for e: Dictionary in run.vehicles:
+		if bool(e.get("down", false)):
+			continue
+		var v := e.v as Vehicle if is_instance_valid(e.get("v")) else null
+		if v == null or v.is_queued_for_deletion():
+			e["down"] = true
+		elif _neutralized(e, v):
+			e["down"] = true
+			v.server_stop()
+			for s: Soldier in v.occupants():
+				if s.vitals.is_up():
+					v.server_exit(s)  # stranded: they get out and fight where they stopped
+			print("[mission] overwatch: convoy truck %s lost" % v.vehicle_id)
+		elif Vector2(v.global_position.x - end.x, v.global_position.z - end.z).length() <= ESCAPE_M:
+			e["down"] = true
+			e["out"] = true
+			run.through += 1
+			for s: Variant in e.crew:
+				if is_instance_valid(s):
+					(s as Soldier).queue_free()
+			v.queue_free()  # through: out of the zone
+	var total := (run.vehicles as Array).size()
+	var down := (run.vehicles as Array).filter(func(e: Dictionary) -> bool: return bool(e.get("down", false))).size()
+	var lost := down - int(run.through)
+	var need := int(p.get("need", 1))
+	if total - lost < need:
+		_overwatch_bonus(run, "", Objectives.FAILED, "the convoy was lost")
+		_mark(run, o, Objectives.FAILED, "the convoy was lost (%d of %d trucks)" % [lost, total])
+	elif down >= total:
+		_overwatch_bonus(run, "all", Objectives.DONE if int(run.through) >= total else Objectives.FAILED, "%d of %d through" % [int(run.through), total])
+		_overwatch_bonus(run, "held", Objectives.DONE, "held it")
+		_mark(run, o, Objectives.DONE, "%d of %d through" % [int(run.through), total])
+	else:
+		if lost > 0:
+			_overwatch_bonus(run, "all", Objectives.FAILED, "a truck was lost")
+		_mark(run, o, Objectives.ACTIVE, _overwatch_progress(run, o))
+
+
+## Settles run `run`'s still-open bonuses: "all" (every truck through), "held" (on the position
+## till it's through), or "" both.
+func _overwatch_bonus(run: Dictionary, which: String, state: String, progress: String) -> void:
+	for b: Dictionary in Contracts.objectives.for_contract(String(run.cid)):
+		var bp: Dictionary = b.get("params", {})
+		if String(b.kind) != Objectives.OVERWATCH or not bool(bp.get("bonus_only", false)) or String(b.state) != Objectives.ACTIVE:
+			continue
+		var held := bool(bp.get("held", false))
+		if which == "" or (which == "held") == held:
+			Contracts.objectives.server_set_state(String(b.oid), state, progress)
+
+
+## Host: the friendly convoy on the route's first leg and driving it, its crews aboard (the
+## client's, not ours: _element_crewman).
+func _overwatch_spawn(run: Dictionary, o: Dictionary) -> void:
+	var p: Dictionary = o.params
+	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer if level else null
+	var route: PackedVector3Array = run.route
+	if layer == null or route.size() < 2:
+		return
+	var fwd := route[1] - route[0]
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var path := PackedVector3Array()
+	for k in range(1, route.size()):
+		path.append(route[k])
+	var element := _ops_squad(_element_squad_name(run), &"friendly")
+	var trucks: Array = p.get("trucks", ["matv"])
+	var tag := absi(hash(String(run.oid))) % 10000
+	for i in trucks.size():
+		var at := _ground(route[0] - fwd * SPACING_M * i)
+		var v := layer.server_spawn(String(trucks[i]), Transform3D(Basis.looking_at(fwd, Vector3.UP), at), "", &"friendly", "")
+		if v == null:
+			continue
+		v.set_meta(&"no_save", true)
+		var e := {"v": v, "cargo": false, "crate": false, "crew": [], "out": false, "hit": false, "down": false}
+		var seats := VehicleQrf._seat_order(v)
+		for si in mini(seats.size(), maxi(int(p.get("crew", 2)), 1)):
+			var s := _ops_soldier(element, "OW%d_%d_%d" % [tag, i + 1, si + 1], at, 0.55)
+			if s == null:
+				continue
+			_element_crewman(s, v, element)
+			if v.server_enter(s, int(seats[si])):
+				(e.crew as Array).append(s)
+			else:
+				s.queue_free()
+		AavGunner.attach(v)
+		v.damaged.connect(_on_convoy_hit.bind(e))
+		run.vehicles.append(e)
+		v.server_follow_path(path, float(p.get("speed_kmh", 24.0)))
+	print("[mission] overwatch %s: the convoy sets out, %d trucks" % [run.oid, (run.vehicles as Array).size()])

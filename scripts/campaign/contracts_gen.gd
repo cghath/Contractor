@@ -207,6 +207,9 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	# (seeded from the board's, which it leaves alone) so the boards stay as they were.
 	var clawback := clawback_term(rng, source)
 	pay_mult *= float(clawback_terms().get(clawback, {}).get("pay_mult", 1.0))
+	# Missions 2: a night start or bad weather, now and then (roll_conditions: its own generator).
+	var sky := {} if safe or at_module != "" else roll_conditions(rng, type_id, String(zone.get("zone_id", "")))
+	pay_mult *= 1.0 + float(sky.get("pay_share", 0.0))
 	var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
 	var base_pay := maxi(step, roundi(float(def.get("base_pay", 40000)) * pay_mult / step) * step)
 	var day := int(ctx.get("day", 1))
@@ -225,7 +228,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	var brief := String(def.get("brief", ""))
 	if war_driven:
 		brief = "The %s just took %s off whoever had it. %s" % [MissionRegistry.faction_name(target), zone.get("name", ""), brief]
-	return {
+	var out := {
 		"cid": "", "type": type_id, "title": "%s%s: %s" % [def.get("name", type_id), mission.title_extra, zone.get("name", "") + "".join(legs.map(func(l: Dictionary) -> String: return " and " + String(l.zone_name)))],
 		"brief": brief + (" Time limit: %d min." % limit_min if limit_min > 0 else ""), "source": source, "fixer": fixer.get("fixer", ""),
 		"employer": employer, "target": target, "war_driven": war_driven,
@@ -241,6 +244,12 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		"offered_day": day, "expires_day": day + MissionRegistry.setting_i("offer_days", 5),
 		"state": "offered",
 	}
+	for key: String in ["hour", "weather", "conditions"]:  # (only a contract that rolled them has them: DayNight reads "hour" and "weather")
+		if sky.has(key):
+			out[key] = sky[key]
+	if sky.has("conditions"):
+		out.brief = String(out.brief) + " " + conditions_text(out, true)
+	return out
 
 
 ## Where a contract of type `def` plays in zone `zone_id` and its objectives there: the target
@@ -300,7 +309,9 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 				person_name = Names.mission_person(pick, "hostage" if friendly else "hvt", Names.faction_nation(target, zone_id if zone_id != "" else "none"))
 			name = person_name
 		if site.has("person"):
-			o["person"] = {"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}
+			var who: Dictionary = (o.get("person", {}) as Dictionary).duplicate(true)  # (a template's own: an HVT kill's papers he carries, missions 2)
+			who.merge({"name": person_name, "label": "%s (%s)" % ["Hostage" if friendly else "HVT", person_name]}, true)
+			o["person"] = who
 		if t.get("site") is Array and title_extra == "":
 			title_extra = " (%s)" % name
 		o.text = String(t.get("text", "")).replace("{name}", name).replace("{module}", MissionRegistry.module_name(module_type))
@@ -339,6 +350,93 @@ static func _legs(rng: RandomNumberGenerator, def: Dictionary, zone_id: String, 
 		var m := mission_target(pick, leg_def, z, target)
 		out.append({"zone_id": z, "zone_name": String(MissionRegistry.zone(z).get("name", z)), "module": m.module, "module_id": m.module_id, "objectives": m.objectives})
 	return out
+
+
+# --- Night and weather (missions 2, 2026-10-20) ---------------------------------------------
+
+## A contract's conditions (contracts.json settings "conditions", Proposed): {} for a day in clear
+## weather, else {"conditions": ["night", "fog"], "hour" (night only: the insertion hour),
+## "weather" (bad weather only), "pay_share" (the extra pay, summed)}. Night comes at
+## "night_chance" times the type's "night_type" weight (1 without one); each bad weather at its
+## "weather" chance times the zone terrain preset's "weather_terrain" weight, the rarest first
+## (at most one). Rolled on a generator of its own (seeded from `rng`, which it leaves alone) so
+## the boards stay as they were.
+static func roll_conditions(rng: RandomNumberGenerator, type_id: String, zone_id: String) -> Dictionary:
+	var knobs: Dictionary = MissionRegistry.setting("conditions", {})
+	if knobs.is_empty():
+		return {}
+	var roll := RandomNumberGenerator.new()
+	roll.seed = hash([rng.state, "sky"])
+	var out := {}
+	var words: Array = []
+	var share := 0.0
+	var pay: Dictionary = knobs.get("pay", {})
+	if roll.randf() < night_chance(type_id):
+		var hours: Array = knobs.get("night_hours", [21.5, 3.5])
+		var from := float(hours[0])
+		var span := fposmod(float(hours[1]) - from, 24.0)
+		out["hour"] = fposmod(snappedf(from + roll.randf() * span, 0.25), 24.0)
+		words.append("night")
+		share += float(pay.get("night", 0.0))
+	var terrain := String(MissionRegistry.zone_def(zone_id).get("terrain", "")) if zone_id != "" else ""
+	var chances: Dictionary = knobs.get("weather", {})
+	var order := chances.keys()
+	order.sort_custom(func(a: Variant, b: Variant) -> bool: return float(chances[a]) < float(chances[b]))
+	for w: Variant in order:
+		if roll.randf() < weather_chance(String(w), terrain):
+			out["weather"] = String(w)
+			words.append(String(w))
+			share += float(pay.get(String(w), 0.0))
+			break
+	if words.is_empty():
+		return {}
+	out["conditions"] = words
+	out["pay_share"] = snappedf(share, 0.001)
+	return out
+
+
+## The chance a contract of `type_id` starts at night (Proposed).
+static func night_chance(type_id: String) -> float:
+	var knobs: Dictionary = MissionRegistry.setting("conditions", {})
+	return clampf(float(knobs.get("night_chance", 0.0)) * float((knobs.get("night_type", {}) as Dictionary).get(type_id, 1.0)), 0.0, 1.0)
+
+
+## The chance of `weather` on a contract in a zone of terrain preset `terrain`, on its own
+## (Proposed; roll_conditions tries the rarest first and takes at most one).
+static func weather_chance(weather: String, terrain: String) -> float:
+	var knobs: Dictionary = MissionRegistry.setting("conditions", {})
+	var by_terrain: Dictionary = (knobs.get("weather_terrain", {}) as Dictionary).get(terrain, {})
+	return clampf(float((knobs.get("weather", {}) as Dictionary).get(weather, 0.0)) * float(by_terrain.get(weather, 1.0)), 0.0, 1.0)
+
+
+## A contract's conditions in words for the board and the briefing: "Night (insertion about
+## 23:15), fog"; "" for a day in clear weather. `full` adds the pay: "Conditions: ...: +15% pay."
+static func conditions_text(contract: Dictionary, full := false) -> String:
+	var words: Array = contract.get("conditions", [])
+	if words.is_empty():
+		return ""
+	var parts := PackedStringArray()
+	for w: Variant in words:
+		if String(w) == "night" and contract.has("hour"):
+			var h := float(contract.hour)
+			parts.append("night (insertion about %02d:%02d)" % [floori(h), roundi(fposmod(h, 1.0) * 60.0) % 60])
+		else:
+			parts.append(String(w))
+	var text := ", ".join(parts)
+	text = text.left(1).to_upper() + text.substr(1)
+	if not full:
+		return text
+	var share := 0.0
+	var pay: Dictionary = (MissionRegistry.setting("conditions", {}) as Dictionary).get("pay", {})
+	for w: Variant in words:
+		share += float(pay.get(String(w), 0.0))
+	return "Conditions: %s%s." % [text, (": +%d%% pay" % roundi(share * 100.0)) if share > 0.0 else ""]
+
+
+## A contract's tag for the board's line ("NIGHT FOG "), "" for a day in clear weather.
+static func conditions_tag(contract: Dictionary) -> String:
+	var words: Array = contract.get("conditions", [])
+	return "".join(words.map(func(w: Variant) -> String: return String(w).to_upper() + " "))
 
 
 ## The clawback terms (data/contracts.json "clawback_terms"): {term: {"weight", "pay_mult"}}.
