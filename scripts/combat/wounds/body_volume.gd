@@ -47,7 +47,9 @@ static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction
 	# A broader or slimmer build's trunk (CharacterModel.girth, GIRTH_META): marched in the
 	# model's own proportions, about the body's centre line.
 	var g: Vector3 = hitbox.get_meta(&"girth", Vector3.ONE)
-	var hit := march(part, (to_rest * position) / g, ((to_rest.basis * direction) / g).normalized(), body)
+	# The model the part is drawn as now, where the hitbox says (a forearm's hand pose:
+	# CharacterModel._arm_delta), else the part's rest model.
+	var hit := march(part, (to_rest * position) / g, ((to_rest.basis * direction) / g).normalized(), body, String(hitbox.get_meta(&"part_model", "")))
 	if hit.is_empty():
 		return {}
 	return {"position": hitbox.global_transform * (Vector3(hit.position) * g), "depth": hit.depth}
@@ -55,8 +57,8 @@ static func entry(hitbox: Node3D, part: StringName, position: Vector3, direction
 
 ## The same in the rest pose: the first voxel of `part` on the ray through `point` along
 ## `dir`, and how far the body (the part's whole segment) goes on from there.
-static func march(part: StringName, point: Vector3, dir: Vector3, body := "") -> Dictionary:
-	var grid := _grid(part, body)
+static func march(part: StringName, point: Vector3, dir: Vector3, body := "", model := "") -> Dictionary:
+	var grid := _grid(part, body, model)
 	var step: float = grid.cell * STEP_SHARE
 	var t := -LEAD_M
 	var entered := -1.0
@@ -118,27 +120,27 @@ static func _solid(grid: Dictionary, cells: PackedByteArray, p: Vector3) -> bool
 ## A part's grid, built on first use: "body" is every voxel of its model (the channel runs
 ## through the whole torso or head, BodyMap.SEGMENTS), "entry" only those in this part (a
 ## torso or head voxel counts for a part inside that part's BodyMap.PART_BOXES).
-static func _grid(part: StringName, body := "") -> Dictionary:
-	var key := _key(part, body)
+static func _grid(part: StringName, body := "", model := "") -> Dictionary:
+	var key := _key(part, body, model)
 	if _grids.has(key):
 		return _grids[key]
 	if _warm_task >= 0:
 		_take_warmed()  # warm_async still building (or done and not taken in): wait for it
 		if _grids.has(key):
 			return _grids[key]
-	var grid := _build_grid(part, body, _occupancy)
+	var grid := _build_grid(part, body, _occupancy, model)
 	_grids[key] = grid
 	return grid
 
 
-static func _key(part: StringName, body: String) -> String:
-	return "%s/%s" % [part, body if body == FEMALE else ""]
+static func _key(part: StringName, body: String, model := "") -> String:
+	return "%s/%s%s" % [part, body if body == FEMALE else "", "/" + model if model != "" else ""]
 
 
 ## Builds a part's grid, its models' occupancy cached in `occupancy` (no other state: a worker
 ## thread can build them, warm_async).
-static func _build_grid(part: StringName, body: String, occupancy: Dictionary) -> Dictionary:
-	var model: String = model_of(part, body)
+static func _build_grid(part: StringName, body: String, occupancy: Dictionary, drawn := "") -> Dictionary:
+	var model: String = drawn if drawn != "" else model_of(part, body)
 	if not occupancy.has(model):
 		occupancy[model] = VoxelArt.occupancy(model)
 	var occ: Dictionary = occupancy[model]
@@ -178,7 +180,12 @@ static func warm_async(bodies: Array = [""]) -> void:
 	for body: String in bodies:
 		for part: StringName in PART_MODELS:
 			if not _grids.has(_key(part, body)):
-				wanted.append([part, body])
+				wanted.append([part, body, ""])
+		# The hands as most often drawn: the firing grip, the support grip (gloved).
+		for hand: Array in WARM_HANDS:
+			var m := HandPose.model(hand[1], hand[0] == &"forearm_l", false, VoxelArt.FEMALE if body == FEMALE else VoxelArt.MALE)
+			if not _grids.has(_key(hand[0], body, m)):
+				wanted.append([hand[0], body, m])
 	if wanted.is_empty():
 		return
 	_warmed = {}
@@ -186,7 +193,10 @@ static func warm_async(bodies: Array = [""]) -> void:
 	_warm_task = WorkerThreadPool.add_task(func() -> void:
 		var occupancy := {}
 		for w: Array in wanted:
-			into[_key(w[0], w[1])] = _build_grid(w[0], w[1], occupancy), false, "BodyVolume warm")
+			into[_key(w[0], w[1], w[2])] = _build_grid(w[0], w[1], occupancy, w[2]), false, "BodyVolume warm")
+
+
+const WARM_HANDS := [[&"forearm_r", &"grip"], [&"forearm_r", &"trigger"], [&"forearm_l", &"support"]]
 
 
 ## Whether warm_async's grids are taken in (true when none was started).

@@ -145,6 +145,13 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
 			# The box is only the first test: the round must meet the body inside it (BodyVolume).
 			var body_hit := BodyVolume.entry(collider as Node3D, part, hit.position, direction, BodyVolume.body_of(collider))
+			# The first box met isn't always the first part met (an arm held across the chest sits in
+			# front of the chest's box): the part whose voxels the round meets first takes it.
+			var nearer := nearest_part(collider as Node3D, hit.position, direction, body_hit)
+			if not nearer.is_empty():
+				collider = nearer.hitbox
+				part = nearer.part
+				body_hit = nearer.hit
 			if body_hit.is_empty():
 				exclude.append(collider.get_rid())  # through the box, past the body: it flies on
 				from = hit.position
@@ -504,3 +511,65 @@ static func report_near_misses(shooter: Node, from: Vector3, to: Vector3, weapon
 		var d := Geometry3D.get_closest_point_to_segment(chest, from, to).distance_to(chest)
 		if d < sup.x:
 			s.suppress_fire((0.12 + (sup.x - d) * 0.08) * sup.y, from)
+
+
+## Of the body parts `hitbox`'s body has (its Area3D hitboxes with a "body_part"), the one whose
+## voxels a round from `position` along `direction` meets first, if it isn't the one `first`
+## (`hitbox`'s BodyVolume.entry, {} for a miss inside it) already found: {"hitbox", "part", "hit"},
+## or {} when `first` stands. Only boxes the ray crosses are marched.
+static func nearest_part(hitbox: Node3D, position: Vector3, direction: Vector3, first: Dictionary) -> Dictionary:
+	var owner := hitbox.get_parent() if hitbox else null
+	if owner == null:
+		return {}
+	var best := INF
+	if not first.is_empty():
+		best = (Vector3(first.position) - position).dot(direction)
+	var out := {}
+	var body := BodyVolume.body_of(hitbox)
+	for child in owner.get_children():
+		var area := child as Area3D
+		if area == null or area == hitbox or not area.has_meta(&"body_part") or not area.is_inside_tree():
+			continue
+		if not _ray_meets_box(area, position - direction * BodyVolume.LEAD_M, direction, BodyVolume.REACH_M + BodyVolume.LEAD_M):
+			continue
+		var part: StringName = area.get_meta(&"body_part")
+		var hit := BodyVolume.entry(area, part, position, direction, body)
+		if hit.is_empty():
+			continue
+		var along := (Vector3(hit.position) - position).dot(direction)
+		if along < best - 0.002:
+			best = along
+			out = {"hitbox": area, "part": part, "hit": hit}
+	return out
+
+
+## Whether a ray from `from` along `dir` (unit) for `length` m crosses any of `area`'s box shapes.
+static func _ray_meets_box(area: Area3D, from: Vector3, dir: Vector3, length: float) -> bool:
+	for child in area.get_children():
+		var cs := child as CollisionShape3D
+		if cs == null or not cs.shape is BoxShape3D:
+			continue
+		var inv := cs.global_transform.affine_inverse()
+		var o := inv * from
+		var d := inv.basis * dir
+		var half := (cs.shape as BoxShape3D).size * 0.5
+		var t0 := 0.0
+		var t1 := length * d.length()
+		d = d.normalized()
+		var ok := true
+		for a in 3:
+			if absf(d[a]) < 1e-8:
+				if absf(o[a]) > half[a]:
+					ok = false
+					break
+				continue
+			var ta := (-half[a] - o[a]) / d[a]
+			var tb := (half[a] - o[a]) / d[a]
+			t0 = maxf(t0, minf(ta, tb))
+			t1 = minf(t1, maxf(ta, tb))
+			if t0 > t1:
+				ok = false
+				break
+		if ok:
+			return true
+	return false

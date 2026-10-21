@@ -63,6 +63,7 @@ func _ready() -> void:
 		await _test_fire_and_reload(id)
 	await _test_expansion_guns()
 	await _test_reload_beats()
+	await _test_arm_hits()
 	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
@@ -504,6 +505,69 @@ func _test_reload_beats() -> void:
 ## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
 ## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
 ## the new one carried up and in, and the carrier locked back until the catch is slapped.
+## Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems. i tried
+## from both left and right sides"): rounds from the left, the right and the front at an aiming
+## soldier's upper arms, forearms and hands. From the arm's own side the round must wound that
+## part (a hand is its forearm's part); from the front it must wound an arm (the support arm can
+## be in front of the firing hand); from the far side the body may be in the way (the chest in
+## front of the far upper arm), but it must wound him, not pass through. The arms' hitboxes are on
+## the arms as drawn, and the round takes the part it meets first (Ballistics.nearest_part).
+func _test_arm_hits() -> void:
+	print("Arm hits: an aiming soldier, from the left, the right and the front")
+	var s := level.spawn_soldier({"name": "ArmTarget", "faction": "hostile", "variant": "multicam",
+		"pos": player.global_position + Vector3(6, 0, 6), "loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	s.active_slot = &"primary"
+	s.want_aim = true
+	await _seconds(1.0)
+	check(s.is_aiming and s.model._held != null, "the target has his rifle up, aiming")
+	var gun := ItemDB.get_item(&"m4a1")
+	var arms := [Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]
+	var report: Array[String] = []
+	var bad := 0
+	for spot: Array in [["upper_arm_r", Vitals.UPPER_ARM_R], ["upper_arm_l", Vitals.UPPER_ARM_L], ["forearm_r", Vitals.FOREARM_R],
+			["forearm_l", Vitals.FOREARM_L], ["hand_r", Vitals.FOREARM_R], ["hand_l", Vitals.FOREARM_L]]:
+		for from: String in ["left", "right", "front"]:
+			s.vitals.server_reset_health()
+			if s.inventory.slots.get(&"primary", &"") == &"":  # a forearm hit knocked it out (G-23): back in his hands
+				s.inventory.put_on(&"primary", &"m4a1")
+				s.active_slot = &"primary"
+				await _seconds(0.8)
+			await _frames(2)
+			var point: Vector3
+			match spot[0]:
+				"hand_r": point = s.model.hand_position(true)
+				"hand_l": point = s.model.hand_position(false)
+				_:
+					var node := s.model.part_node(spot[1])
+					var down := 0.16 if String(spot[0]).begins_with("upper") else 0.12
+					point = node.to_global(Vector3(0, -down, 0))
+			var across := s.global_basis.x.normalized()
+			var ahead := -s.global_basis.z.normalized()
+			var dir: Vector3 = {"left": across, "right": -across, "front": -ahead}[from]
+			var origin := point - dir * 3.0
+			Ballistics._trace(player, origin, dir, gun)
+			var parts := s.vitals.wound_list().map(func(w: Dictionary) -> StringName: return w.part)
+			var own_side := from != "front" and (from == "right") == String(spot[0]).ends_with("_r")
+			var ok: bool
+			if own_side:
+				ok = parts.has(spot[1])
+			elif from == "front":
+				ok = parts.any(func(p: StringName) -> bool: return p in arms)
+			else:
+				ok = not parts.is_empty()
+			if not ok:
+				bad += 1
+			report.append("%s from the %s: %s" % [spot[0], from, parts])
+	check(bad == 0, "from its own side every arm and hand took the round, from the front an arm, from the far side the body: %s" % ("; ".join(report) if bad > 0 else "18 of 18"))
+	if bad > 0:
+		for line in report:
+			print("    ", line)
+	s.vitals.server_reset_health()
+	s.queue_free()
+	await _frames(2)
+
+
 func _test_third_person_reload() -> void:
 	print("Third person: an AI's empty M4 reload")
 	var s := level.spawn_soldier({"name": "WpnReloader", "faction": "hostile", "variant": "urban",
