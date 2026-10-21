@@ -2,7 +2,8 @@ class_name BaseTerminal
 extends StaticBody3D
 ## A desk, board or kiosk at the base hub that opens one page of the base screen (BaseUI):
 ## the hiring board, the medbay desk, the shop terminal, the ops desk (squad, roster,
-## deploy), the armory ledger, and the motor pool's sign (the company's vehicles). Built
+## deploy), the armory ledger, the motor pool's sign (the company's vehicles) and, on the LHD,
+## the memorial wall (the fallen: BaseUI's "memorial" page). Built
 ## locally on every peer like the voxel structures. Use it from the interaction menu (hold
 ## Left Ctrl and look at it): it's in the "interactables" group and offers its actions.
 ##
@@ -18,6 +19,7 @@ const KINDS := {
 	&"armory": {"title": "Armory ledger", "page": "armory", "colour": Color("7a6a4f")},
 	&"motor_pool": {"title": "Motor pool", "page": "motor_pool", "colour": Color("4f5559")},
 	&"stores": {"title": "Supply cage", "page": "stores", "colour": Color("6b7a4f")},
+	&"memorial": {"title": "Memorial wall", "page": "memorial", "colour": Color("3a3d40")},
 }
 const SIZE := Vector3(1.0, 1.2, 0.5)
 ## The action point sits this far above the top, so the sight check clears the desk itself.

@@ -12,6 +12,7 @@ extends RefCounted
 ## Electronic ear protection (carried) stops flashbang and gunfire deafness and halves a blast's.
 ## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view, in the
 ##   grenade's colour (white, green, yellow, blue, purple) on every peer.
+## - Chem light: a glow stick that lies where it stops and glows (Demolitions).
 
 const FRAG_RADIUS := 8.0
 ## Fragment wounds on a body the blast reaches: from FRAG_MIN_WOUNDS at the edge of the
@@ -33,6 +34,9 @@ const WORLD_MASK := 1
 ## Overpressure reaches WoundModel.BLAST_RADIUS, BLAST_INDOOR_MULT times that indoors (a
 ## ceiling within INDOOR_CEILING_M overhead). A flashbang deafens for FLASH_DEAF_S by closeness.
 const BLAST_INDOOR_MULT := 2.0
+## A wall charge's overpressure on the side it was set from reaches this share of the radius
+## (server_detonate's `facing`).
+const FACING_BLAST_SHARE := 0.5
 const INDOOR_CEILING_M := 4.0
 const FLASH_DEAF_S := Vector2(3.0, 6.0)
 ## Gunfire indoors: everyone within GUNFIRE_NOISE_M of the shooter, indoors too, hears it.
@@ -112,17 +116,31 @@ static func clear_line(world: World3D, from: Vector3, to: Vector3) -> bool:
 ## "smoke_colour" (white without one).
 ## `blast_kg` is the filling (kg of TNT) a frag's blast gore scales with (BlastGore): a grenade's
 ## Warheads.GRENADE_TNT_KG unless a charge says more.
-static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"", blast_kg := 0.0) -> void:
+## `carve` false: the frag's blast and fragments only, no voxels or ground cut (a breaching charge
+## cuts its own doorway, Charges). `facing`: a charge on a wall's face, this its outward normal:
+## no fragments, and overpressure only within FACING_BLAST_SHARE of the radius, on that side (its
+## force goes into the wall, Captain 2026-10-20 breachers: the stack beside the door is safe).
+static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"", blast_kg := 0.0, carve := true, facing := Vector3.ZERO) -> void:
 	match kind:
 		"frag":
-			_frag(level, pos, blast_kg if blast_kg > 0.0 else Warheads.GRENADE_TNT_KG)
+			_frag(level, pos, blast_kg if blast_kg > 0.0 else Warheads.GRENADE_TNT_KG, carve, facing)
 		"flash":
 			_flash(level, pos)
 		"smoke":
 			level.spawn_smoke.rpc(pos, SmokeCloud.colour_of(item_id))
+		"chemlight":
+			# No bang: where it came to rest it becomes a placed chem light (Demolitions), riding
+			# whoever or whatever it landed on.
+			var demolitions := Demolitions.of(level)
+			if demolitions:
+				var query := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.1, pos + Vector3.DOWN * 0.4, Charges.PLACE_MASK)
+				query.collide_with_areas = true
+				var hit := level.get_world_3d().direct_space_state.intersect_ray(query)
+				var at: Vector3 = hit.position if not hit.is_empty() else pos
+				demolitions.server_add_chemlight(item_id, at, Charges.rider_of(hit.collider) if not hit.is_empty() and hit.collider is Node else null)
 
 
-static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENADE_TNT_KG) -> void:
+static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENADE_TNT_KG, carve := true, facing := Vector3.ZERO) -> void:
 	var centre := pos + Vector3.UP * 0.25
 	var blast_radius := WoundModel.BLAST_RADIUS * (BLAST_INDOOR_MULT if indoors(level.get_world_3d(), centre) else 1.0)
 	for n in combatants(level.get_tree()):
@@ -131,6 +149,11 @@ static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENA
 		if vitals == null or vitals.is_dead():
 			continue
 		var d := centre.distance_to(body_point(body))
+		if facing != Vector3.ZERO and (body_point(body) - centre).dot(facing) > 0.0:
+			if d <= blast_radius * FACING_BLAST_SHARE:
+				Harm.note_hit(body, Harm.blast_source)
+				vitals.server_blast(d, blast_radius * FACING_BLAST_SHARE, has_ear_pro(body))
+			continue  # the placer's side of a wall charge: no fragments
 		if d <= blast_radius:
 			# Whose grenade it was, before the blast changes anything (as warheads do): burns or
 			# blast injuries with no fragment still count against the thrower (people: civilian
@@ -143,7 +166,8 @@ static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENA
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
 	BlastGore.server_blast(level, centre, blast_kg, FRAG_RADIUS)  # torn, peppered, scorched bodies (the dead too)
-	level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
+	if carve:
+		level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
 	level.show_explosion.rpc(pos)
 	_shake_players(level, pos)
 

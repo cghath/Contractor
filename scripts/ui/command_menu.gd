@@ -35,13 +35,18 @@ const MENU := {
 			{"key": "7", "label": "Garrison that building", "cmd": "garrison", "point": true},
 			{"key": "9", "label": "Climb up there (wall, roof)", "cmd": "climb", "point": true},
 			{"key": "8", "label": "Clear", "items": [  # Captain, 2026-10-16: stack, breach, clear; whole towns
-				{"key": "1", "label": "That building (quiet)", "cmd": "clear", "point": true},
+				{"key": "1", "label": "That building (no bang; a breacher makes the way in)", "cmd": "clear", "point": true},
 				{"key": "2", "label": "That building, flashbang first", "cmd": "clear:flash", "point": true},
 				{"key": "3", "label": "That building, frag first", "cmd": "clear:frag", "point": true},
 				{"key": "4", "label": "That building, blow a way in (charge)", "cmd": "clear:charge", "point": true},
 				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
 				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
 				{"key": "7", "label": "That building, on me (they stack, you lead in)", "cmd": "clear:onme", "point": true},
+				## Captain, 2026-10-20: breachers (Squad.breach_plan): the breacher kicks it in or
+				## shotguns the hinge (the first in the stack, with no breacher), or eases it open.
+				{"key": "8", "label": "That building, kick it in", "cmd": "clear:kick", "point": true},
+				{"key": "9", "label": "That building, shotgun the door", "cmd": "clear:shotgun", "point": true},
+				{"key": "0", "label": "That building, quietly (eased open, no bang)", "cmd": "clear:open", "point": true},
 			]},
 			## Captain, 2026-10-17: a squad he leads no longer flanks or assaults on its own.
 			{"key": "0", "label": "Attack", "items": [
@@ -167,6 +172,18 @@ const MENU := {
 				{"key": "2", "label": "Green", "select": "color:green"},
 				{"key": "3", "label": "Blue", "select": "color:blue"},
 				{"key": "4", "label": "Yellow", "select": "color:yellow"},
+			]},
+			{"key": "6", "label": "Assign role", "items": [  # Captain, 2026-10-20: breacher roles (Squad.assign_role; the kit stays)
+				{"key": "1", "label": "Breacher", "cmd": "role:breacher"},
+				{"key": "2", "label": "Team Leader", "cmd": "role:team_leader"},
+				{"key": "3", "label": "Medic", "cmd": "role:medic"},
+				{"key": "4", "label": "Autorifleman", "cmd": "role:autorifleman"},
+				{"key": "5", "label": "Grenadier", "cmd": "role:grenadier"},
+				{"key": "6", "label": "Marksman", "cmd": "role:marksman"},
+				{"key": "7", "label": "Rifleman", "cmd": "role:rifleman"},
+				{"key": "8", "label": "Anti-Tank", "cmd": "role:anti_tank"},
+				{"key": "9", "label": "Heavy Gunner", "cmd": "role:heavy_gunner"},
+				{"key": "0", "label": "Ammo Bearer", "cmd": "role:ammo_bearer"},
 			]},
 		]},
 		{"key": "0", "label": "Support", "items": [  # wave 5b: handlers registered with Supports

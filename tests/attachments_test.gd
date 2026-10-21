@@ -13,6 +13,8 @@ extends Node
 ## - a suppressed shot is quiet for the AI (its hearing range is shorter) and marks him so;
 ## - a 4x prism zooms the aimed view in past the red dot's;
 ## - taking the grip off puts it back in his kit, and the kick is back to full;
+## - the M320 goes on the underbarrel mount (not the pistol's) and its loaded grenade goes with
+##   it: off the gun, back on, swapped for the grip, the gun stowed and drawn;
 ## - a magnified optic's picture-in-picture (GunSight PiP): only behind its glass, at its power,
 ##   never headless, off unaimed, on a weapon switch, dead, in a vehicle and with the setting off.
 ##   <godot> --headless --path . res://tests/attachments_test.tscn
@@ -209,6 +211,87 @@ func _run() -> void:
 	check(inv.count_of(&"grip_vertical") == 1, "taking off what isn't there does nothing")
 	loaded.queue_free()
 	copy.queue_free()
+	await _test_m320(m4)
+	await _test_choke()
+
+
+## The 870's choke (one 12-gauge system, 2026-10-21): it goes on the Remington 870 the way any
+## attachment does (the inventory's mount), shows among the gun's attachments, and the host
+## refuses it on any other gun.
+func _test_choke() -> void:
+	var inv := player.inventory
+	var was: StringName = inv.slots[&"primary"]
+	var was_state := inv.state_of(&"primary").duplicate(true)
+	inv.slots[&"primary"] = &""
+	inv.take(&"mossberg590")
+	inv.take(&"choke_870")
+	var c := _find(inv, &"choke_870")
+	player._server_inventory_action.rpc_id(1, "mount_attachment", c[0], c[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(ItemDB.get_item(&"mossberg590"), inv.state_of(&"primary"), GunAttachments.CHOKE) == &"" and inv.count_of(&"choke_870") == 1,
+		"the host refuses the 870's choke on a Mossberg")
+	inv.slots[&"primary"] = &""
+	inv.take(&"rem870")
+	var rem := ItemDB.get_item(&"rem870")
+	c = _find(inv, &"choke_870")
+	player._server_inventory_action.rpc_id(1, "mount_attachment", c[0], c[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(rem, inv.state_of(&"primary"), GunAttachments.CHOKE) == &"choke_870" and inv.count_of(&"choke_870") == 0
+		and GunAttachments.all_of(rem, inv.state_of(&"primary")).choke == "choke_870" and Shotguns.spread_mult(rem, inv.state_of(&"primary")) < 0.6,
+		"the choke goes on the Remington 870 like any attachment: %s" % GunAttachments.all_of(rem, inv.state_of(&"primary")))
+	player._server_inventory_action.rpc_id(1, "remove_attachment", &"", -1, &"primary", GunAttachments.CHOKE)
+	await _frames(2)
+	check(GunAttachments.mounted_id(rem, inv.state_of(&"primary"), GunAttachments.CHOKE) == &"" and inv.count_of(&"choke_870") == 1, "and comes off, back into his kit")
+	while inv.remove_one(&"choke_870"):
+		pass
+	inv.slots[&"primary"] = was
+	inv.set_slot_state(&"primary", was_state)
+
+
+## The M320 (Captain's list for cghath, 2026-10-20) on the underbarrel mount: it goes on and off
+## like a grip, and the grenade loaded in it goes with it, off the gun, back on, swapped for the
+## grip, and with the gun stowed and drawn.
+func _test_m320(m4: ItemData) -> void:
+	var inv := player.inventory
+	inv.take(&"m320")
+	var gl := _find(inv, &"m320")
+	check(GunAttachments.mount_problem(inv, gl[0], gl[1], &"sidearm") != "", "no M320 on the pistol: %s" % GunAttachments.mount_problem(inv, gl[0], gl[1], &"sidearm"))
+	player._server_inventory_action.rpc_id(1, "mount_attachment", gl[0], gl[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(m4, inv.state_of(&"primary"), GunAttachments.UNDERBARREL) == &"m320" and Underbarrel.loaded(inv.state_of(&"primary")) == &"",
+		"the M320 goes on the M4's underbarrel mount, empty")
+	check(InputMap.has_action(&"weapon_underbarrel") and Controls.on_pad(&"weapon_underbarrel"), "there's an underbarrel key, on the pad too (Controls)")
+	var bare := MovementRules.weapon_mass(m4, inv.state_of(&"primary"))
+	inv.set_slot_state(&"primary", Underbarrel.with_round(m4, inv.state_of(&"primary"), &"m406"))
+	check(Underbarrel.loaded(inv.state_of(&"primary")) == &"m406" and GunAttachments.label(m4, inv.state_of(&"primary")).contains("M406")
+		and MovementRules.weapon_mass(m4, inv.state_of(&"primary")) > bare, "an HE grenade in it: named on the gun, and the gun weighs it (%s)" % GunAttachments.label(m4, inv.state_of(&"primary")))
+	player._server_inventory_action.rpc_id(1, "remove_attachment", &"", -1, &"primary", GunAttachments.UNDERBARREL)
+	await _frames(2)
+	var off := _find(inv, &"m320")
+	var off_state: Dictionary = inv.containers[off[0]][off[1]].get("state", {}) if off[1] >= 0 else {}
+	check(String(off_state.get("round", "")) == "m406" and GunAttachments.mounted_state(inv.state_of(&"primary"), GunAttachments.UNDERBARREL).is_empty(),
+		"off the gun, it keeps its grenade (%s), and the gun keeps nothing of it" % [off_state])
+	player._server_inventory_action.rpc_id(1, "mount_attachment", off[0], off[1], &"primary", &"")
+	await _frames(2)
+	check(GunAttachments.mounted_id(m4, inv.state_of(&"primary"), GunAttachments.UNDERBARREL) == &"m320" and Underbarrel.loaded(inv.state_of(&"primary")) == &"m406",
+		"back on, still loaded")
+	player._server_inventory_action.rpc_id(1, "stow_slot", &"", -1, &"primary", &"")
+	await _frames(2)
+	var stowed := _find(inv, &"m4a1")
+	if stowed[1] >= 0:
+		check(Underbarrel.loaded(inv.containers[stowed[0]][stowed[1]].get("state", {})) == &"m406", "the M4 stowed, its M320 still loaded")
+		player._server_inventory_action.rpc_id(1, "equip_entry", stowed[0], stowed[1], &"", &"")
+		await _frames(2)
+	check(inv.slots[&"primary"] == &"m4a1" and Underbarrel.loaded(inv.state_of(&"primary")) == &"m406", "drawn again, loaded")
+	var grip := _find(inv, &"grip_vertical")
+	player._server_inventory_action.rpc_id(1, "mount_attachment", grip[0], grip[1], &"primary", &"")
+	await _frames(2)
+	var swapped := _find(inv, &"m320")
+	check(GunAttachments.mounted_id(m4, inv.state_of(&"primary"), GunAttachments.UNDERBARREL) == &"grip_vertical" and swapped[1] >= 0
+		and String(inv.containers[swapped[0]][swapped[1]].get("state", {}).get("round", "")) == "m406" and Underbarrel.loaded(inv.state_of(&"primary")) == &"",
+		"a grip in its place: the M320 back in the kit with its grenade, none left on the gun")
+	player._server_inventory_action.rpc_id(1, "remove_attachment", &"", -1, &"primary", GunAttachments.UNDERBARREL)
+	await _frames(2)
 
 
 ## Picture-in-picture scopes (art task "PiP scopes"; GunSight.pip_wanted, pip_on): wanted only

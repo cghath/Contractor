@@ -50,6 +50,9 @@ const MOUTH_BACK := 3.5
 const BROW_Y := 19.0
 const BROW_COLS := 10
 const BROW_ROWS := 4
+## How thick a long top's hair stands (cm): under a helmet's crown (GearRig.helmet_fit) with its
+## pads, not through it.
+const LONG_TOP_HAIR := 1.25
 ## The mesh frame: its size (cm) and pivot.
 const SIZE := Vector3i(22, 32, 26)
 const SIZE_F := Vector3i(22, 32, 31)
@@ -250,7 +253,7 @@ static func head(digits: String, female: bool) -> Dictionary:
 		elif not female and style == SoldierLook.RECEDING:
 			boxes.append(VoxelArt._loft(11, 13, _skull_keys(0.5, 0.5), C.HAIR, 0.55))
 		else:
-			var top := 2.0 if style == SoldierLook.LONG_TOP and not female else 1.0
+			var top := LONG_TOP_HAIR if style == SoldierLook.LONG_TOP and not female else 1.0
 			boxes.append(VoxelArt._loft(11, 13, _skull_keys(1.0, top, female), C.HAIR, 0.55))
 		var nape := 9.5 if female else 11.5
 		boxes.append(VoxelArt._fb(0, 0, 0, 22, 25.0, 8.5, C.EMPTY))           # the temples, in front of the sideburns
@@ -301,7 +304,7 @@ static func _face_columns(p: Dictionary) -> Array:
 	var style: int = p.hair
 	var beard: int = p.beard
 	var bald: bool = not p.female and style == SoldierLook.SHAVED
-	var thick := 2.0 if style == SoldierLook.LONG_TOP and not p.female else (0.5 if style in [SoldierLook.BUZZ, SoldierLook.CREW, SoldierLook.RECEDING] and not p.female else 1.0)
+	var thick := LONG_TOP_HAIR if style == SoldierLook.LONG_TOP and not p.female else (0.5 if style in [SoldierLook.BUZZ, SoldierLook.CREW, SoldierLook.RECEDING] and not p.female else 1.0)
 	for xi in range(4, 40):
 		var x := xi * 0.5
 		var xc := x + 0.25
@@ -542,3 +545,15 @@ static func feature_models(digits: String, female: bool, eye_state: String, expr
 		"mouth": "mouth:%d:%s:%s" % [expression, digits, f],
 		"brow_l": "brow:%d:%d:0:%s:%s" % [expression, thick, digits, f],
 		"brow_r": "brow:%d:%d:1:%s:%s" % [expression, thick, digits, f]}
+
+
+## `head_model` ("head_f:<digits>") with long hair tucked in under a helmet whose ear covers or
+## nape guard come down over it (GearRig.helmet_fit, Captain 2026-10-21: helmets snug on the new
+## heads): a woman's bun, braid or ponytail goes flat (a pixie cut's shell). Anything else as it is.
+static func tucked(head_model: String) -> String:
+	if not head_model.begins_with("head_f:") or head_model.length() < 8:
+		return head_model
+	var digits := head_model.get_slice(":", 1)
+	if digits.substr(0, 1).to_int() in [SoldierLook.BUN, SoldierLook.BRAID, SoldierLook.PONYTAIL]:
+		digits = str(SoldierLook.PIXIE) + digits.substr(1)
+	return "head_f:" + digits

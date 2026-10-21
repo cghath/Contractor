@@ -12,6 +12,8 @@ const NODE_NAME := "MortarFire"
 const FLIGHT_S := Vector2(14.0, 38.0)
 ## The tube's own spread, metres off for every km of range (one sigma-ish, a uniform disc).
 const DISPERSION_PER_KM := 18.0
+## The tube's muzzle above the gun's origin (m): where the shell is first seen (ShellArc).
+const TUBE_MUZZLE_M := 1.1
 
 var _rounds: Array[Dictionary] = []  # host: {"at": Vector3, "when": float, "warhead": StringName, "by": Node}
 var _rng := RandomNumberGenerator.new()
@@ -63,6 +65,9 @@ func server_fire(gun: Vehicle, at: Vector3, aim_error_m: float, by: Node = null)
 	var angle := _rng.randf() * TAU
 	var land := at + Vector3(cos(angle), 0.0, sin(angle)) * off * sqrt(_rng.randf())
 	_rounds.append({"at": land, "when": Soldier._now() + flight, "warhead": StringName(m.warhead), "by": by if by else gun})
+	var lvl := CompoundLevel.current(self)
+	if lvl:  # every peer sees it leave the tube, arc over in the wind and come down (ShellArc)
+		lvl.server_show_shell(gun.global_position + Vector3.UP * TUBE_MUZZLE_M, lvl.ground_point(land), flight)
 	Sfx.server_play(&"explosion_far", gun.global_position + Vector3.UP * 0.6)  # the tube's thump, heard far
 	if by is Soldier:
 		SquadAI.server_heard_shot(by as Soldier, gun.global_position, false)

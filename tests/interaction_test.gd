@@ -57,6 +57,7 @@ func _ready() -> void:
 	await _test_body_points()
 	await _test_declutter()
 	await _test_slid_body()
+	await _test_dog_tags()
 	await _test_downed_enemy()  # last: the hostile ends up a prisoner
 	await _test_loot_window()
 	await _test_grenade_equip()
@@ -625,6 +626,53 @@ func _test_slid_body() -> void:
 	runner.server_remove_body()
 	restored.server_remove_body()
 	await _frames(2)
+
+
+## Dog tags (cghath's list, 2026-10-20): a fallen company soldier's tags come off his body from the
+## interaction menu (Take dog tags), reach measured to the body as it lies (Soldier.body_point);
+## the living and a body without tags offer no such entry; the tags stay with a body through the
+## zone save, and drop where it lay when the body cap takes it.
+func _test_dog_tags() -> void:
+	print("Dog tags off a fallen squadmate")
+	_place_player()
+	var mate := _spawn_ai("Fallen", &"friendly", SPOT + Vector3(0, 0, -3.0), ["m4a1", "plate_carrier"])
+	mate.dog_tags = {"mid": "m9001", "name": "Dale Mercer", "callsign": "Fallen", "role": "rifleman"}
+	await _frames(3)
+	check(not _ids(player, mate).has(&"take_tags"), "a living squadmate offers no Take dog tags (%s)" % [_ids(player, mate)])
+	mate.vitals.server_kill()
+	await _seconds(1.0)
+	check(_ids(player, mate).has(&"take_tags") and _action(player, mate, &"take_tags").disabled == "", "his body does (%s)" % [_ids(player, mate)])
+	var record := mate.body_record()
+	check(String((record.get("tags", {}) as Dictionary).get("mid", "")) == "m9001", "his body's save record keeps his tags")
+	player.global_position = mate.body_point() + Vector3(0, 0, 8.0)
+	player._server_take_tags.rpc_id(1, mate.get_path())
+	await _frames(3)
+	check(not mate.dog_tags.is_empty() and player.inventory.count_of(Fallen.TAGS) == 0, "from 8 m off his body: too far, nothing taken")
+	var chest := mate.body_point()
+	player.global_position = Vector3(chest.x, SPOT.y, chest.z + 1.5)
+	await _frames(2)
+	InteractionMenu.perform(player, _action(player, mate, &"take_tags"))
+	await _frames(3)
+	check(mate.dog_tags.is_empty() and player.inventory.count_of(Fallen.TAGS) == 1 and not _ids(player, mate).has(&"take_tags"),
+		"at his body: Take dog tags puts them in your gear, and the entry goes (%s)" % [_ids(player, mate)])
+	var taken := Fallen.take_tags_from(player.inventory)
+	check(taken.size() == 1 and Fallen.mid_of(taken[0]) == "m9001" and Fallen.tags_text(taken[0]) == "Fallen (Dale Mercer)", "they're his (%s)" % [taken])
+	check(not _ids(player, hostile).has(&"take_tags"), "an enemy's body has none to take")
+	record["uid"] = "tags_body"
+	var restored := CompoundLevel.current(self).server_spawn_body(record)
+	await _seconds(1.0)
+	check(String(restored.dog_tags.get("mid", "")) == "m9001" and _ids(player, restored).has(&"take_tags"), "a body back from the zone save still wears them")
+	var at := restored.body_point()
+	restored.inventory.strip()  # (only the tags drop, nothing to get in later checks' way)
+	restored.server_remove_body()
+	await _frames(3)
+	check(_items_near(at, 2.0).has(Fallen.TAGS), "taken away by the body cap, it leaves its tags where it lay")
+	for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+		if (n as WorldItem).item_id == Fallen.TAGS:
+			n.queue_free()
+	mate.queue_free()
+	await _frames(2)
+	_place_player()
 
 
 ## Stands the player over `body`'s ragdoll, looking down at it, and checks it has its point
