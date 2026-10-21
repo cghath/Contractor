@@ -811,6 +811,8 @@ func _spawn_queued_garrison() -> void:
 			var kit: Array = Kits.loadout(kit_id, i) if data_kit else hostile_loadout(i)
 			if module.type == "hq" and i == 0:
 				kit = kit + [String(WorldValuables.STRONGBOX_KEY)]  # wave 6: the HQ's officer carries its strongbox key
+			kit = kit + WorldValuables.pocket_contraband(site_faction, "%s|%s" % [String(def.get("id", GameState.zone_id)), module.module_id], i,
+				String(def.get("kind", "")) == "hot")  # the cartels' men carry their goods (terror groups follow-ups)
 			var spawn := {"name": _garrison_callsign(module, i), "faction": "hostile", "pos": pos,
 				"loadout": kit + ["enemy_radio"] if i % RADIO_EVERY == 0 else kit, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,

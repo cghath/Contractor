@@ -9,7 +9,14 @@
 		"field_cache": {"table": "field_cache", "tier_weights": {"common": 45, "uncommon": 35, "rare": 15, "very_rare": 5}},
 		"strongbox": {"table": "strongbox", "tier_weights": {"common": 25, "uncommon": 40, "rare": 28, "very_rare": 7}},
 		"pockets": {"table": "pockets", "tier_weights": {"common": 62, "uncommon": 27, "rare": 9, "very_rare": 2}},
-		"pockets_leader": {"table": "pockets_leader", "tier_weights": {"common": 30, "uncommon": 40, "rare": 24, "very_rare": 6}}
+		"pockets_leader": {"table": "pockets_leader", "tier_weights": {"common": 30, "uncommon": 40, "rare": 24, "very_rare": 6}},
+		"contraband": {"table": "contraband", "tier_weights": {"common": 40, "uncommon": 35, "rare": 19, "very_rare": 6}},
+		"contraband_pocket": {"table": "contraband_pocket", "tier_weights": {"common": 65, "uncommon": 25, "rare": 9, "very_rare": 1}}
+	},
+	"_factions": "Faction loot (terror groups follow-ups, 2026-10-20; docs/terror_groups.md section 9): a faction listed here leaves its own goods behind. site_box: the pool a box beside the target of a raid, sabotage or supply-line job against it rolls (label: what the box is called; WorldValuables.contraband_box, placed by PeopleLayer when the contract goes live). body: the pool every body_every-th man of its garrisons (ZoneLevel, counting from the second) carries a roll of in his pockets (WorldValuables.pocket_contraband). Both roll like a pool: one tier by its weights (very rare only in a hot zone), then one bundle.",
+	"factions": {
+		"kestrel": {"site_box": "contraband", "label": "Drug stash", "body": "contraband_pocket", "body_every": 3},
+		"saltline": {"site_box": "contraband", "label": "Contraband crates", "body": "contraband_pocket", "body_every": 3}
 	},
 	"sites": {
 		"compound": {
@@ -181,6 +188,18 @@
 			"uncommon": [[["akm", 1], ["mag_762x39", 3], ["ifak", 1]], [["ak74m", 1], ["mag_545", 3], ["ifak", 1]], [["p226", 1], ["mag_9mm", 3], ["ifak", 1]], [["m1911", 1], ["mag_45acp", 3], ["rounds_45acp", 28], ["ifak", 1]], [["akm", 1], ["mag_762x39", 3], ["frag_grenade", 2]], [["rpk74", 1], ["mag_545", 3], ["tourniquet", 2]], [["ak103", 1], ["mag_762x39", 3], ["scrap_copper", 2]], [["rpk", 1], ["mag_rpk40", 3], ["electronics_salvage", 1]], [["saiga12", 1], ["mag_saiga12", 2, 3]], [["akms", 1], ["mag_762x39", 2, 3]], [["vz58", 1], ["mag_vz58", 2, 3]], [["l1a1", 1], ["mag_fal", 2, 3]]],
 			"rare": [[["svd", 1], ["mag_svd", 3]], [["m16a4", 1], ["mag_556", 4], ["ifak", 1]], [["c7", 1], ["mag_556", 4], ["trauma_kit", 1]], [["rpg7", 1], ["pg7v_round", 2], ["frag_grenade", 1]], [["mosin9130", 1], ["clip_762x54r", 4], ["ifak", 1]], [["svds", 1], ["mag_svd", 3], ["ifak", 1]], [["m4a1", 1], ["mag_556", 4], ["optic_t2", 1], ["ifak", 1]], [["l85a2", 1], ["mag_556", 4], ["ifak", 1]], [["g36c", 1], ["mag_g36", 2, 3]], [["aug_a3", 1], ["mag_aug", 2, 3]], [["g3a3", 1], ["mag_g3", 2, 3]], [["fal", 1], ["mag_fal", 2, 3]], [["rpd", 1], ["belt_rpd", 1, 2]], [["plate_carrier_mbav", 1]], [["helmet_mk7", 1]], [["plate_sapi", 1]], [["ghillie_suit", 1]], [["optic_susat", 1]], [["bipod_harris", 1]]],
 			"very_rare": [[["pkm", 1], ["belt_762x54r", 2], ["trauma_kit", 1]], [["hk416", 1], ["mag_556", 5], ["suppressor_556", 1], ["optic_exps3", 1]], [["m110", 1], ["mag_762", 4], ["trauma_kit", 1]], [["scar_h", 1], ["mag_762", 4], ["trauma_kit", 1]], [["pkp", 1], ["belt_762x54r", 2]], [["springfield_hs", 1], ["mag_65cm", 4], ["suppressor_762", 1]], [["m249", 1], ["box_556", 2], ["trauma_kit", 1]], [["m14_ebr", 1], ["mag_m14", 2, 3]]]
+		},
+		"contraband": {
+			"common": [[["hashish", 2, 4]], [["hashish", 1], ["cash_roll", 2]], [["hashish", 3], ["smuggled_cigarettes", 1]], [["hashish", 2], ["cash_roll", 1]]],
+			"uncommon": [[["counterfeit_dollars", 2, 3]], [["hashish", 4], ["counterfeit_dollars", 1]], [["counterfeit_dollars", 1], ["cash_bundle", 1]], [["hashish", 3], ["tramadol", 1]]],
+			"rare": [[["captagon", 2, 3]], [["heroin_bricks", 1], ["hashish", 2]], [["captagon", 1], ["counterfeit_dollars", 2]], [["heroin_bricks", 1], ["cash_bundle", 1]]],
+			"very_rare": [[["heroin_bricks", 2, 3]], [["captagon", 3], ["heroin_bricks", 1]], [["heroin_bricks", 2], ["counterfeit_dollars", 3]]]
+		},
+		"contraband_pocket": {
+			"common": [[["hashish", 1]], [["cash_roll", 1], ["hashish", 1]], [["cash_roll", 1]]],
+			"uncommon": [[["counterfeit_dollars", 1]], [["hashish", 2]], [["counterfeit_dollars", 1], ["cash_roll", 1]]],
+			"rare": [[["captagon", 1]], [["heroin_bricks", 1]]],
+			"very_rare": [[["heroin_bricks", 1], ["cash_bundle", 1]], [["captagon", 2]]]
 		},
 		"strongbox": {
 			"common": [[["cash_bundle", 3]], [["gold_coins", 2], ["cash_roll", 3]], [["silver_bars", 3]], [["luxury_watch", 2]], [["cash_euros", 3]], [["hashish", 2], ["cash_bundle", 1]], [["gold_ring", 2, 4]], [["gold_chain", 2, 4]]],

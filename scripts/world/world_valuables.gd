@@ -255,6 +255,34 @@ static func roll_pockets(seed_key: String, hot: bool, leader := false) -> Array:
 	return out
 
 
+## What `faction` leaves behind (loot_tables.json "factions": the cartels' contraband), {} for most.
+static func faction_loot(faction: String) -> Dictionary:
+	return (loot_data().get("factions", {}) as Dictionary).get(faction, {})
+
+
+## The box beside the target of a raid, sabotage or supply-line job against `faction` (its
+## "site_box" pool, rolled once by `seed_key`): {"label", "items"}, {} for a faction with none.
+static func contraband_box(faction: String, seed_key: String, hot: bool) -> Dictionary:
+	var spec := faction_loot(faction)
+	if not spec.has("site_box"):
+		return {}
+	return {"label": String(spec.get("label", "Contraband")), "items": pool_roll(String(spec.site_box), seed_key, hot).items}
+
+
+## What `faction`'s garrison man `index` carries in his pockets: item ids, one per piece (for his
+## spawn loadout), every "body_every"-th man from the second; [] for the rest and most factions.
+static func pocket_contraband(faction: String, seed_key: String, index: int, hot: bool) -> Array:
+	var spec := faction_loot(faction)
+	var every := int(spec.get("body_every", 0))
+	if not spec.has("body") or every <= 0 or posmod(index, every) != 1 % every:
+		return []
+	var out: Array = []
+	for row: Dictionary in pool_roll(String(spec.body), "%s|%d" % [seed_key, index], hot).items:
+		for k in int(row.count):
+			out.append(String(row.id))
+	return out
+
+
 ## An HQ strongbox's contents (by the module id: the same HQ always holds the same): always one
 ## piece of contraband and one of intel, and a roll of the strongbox pool's valuables (a modest
 ## stack most times, now and then a real prize), half the time a Vantage ledger too. `hot`: a hot

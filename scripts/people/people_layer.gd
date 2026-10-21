@@ -25,6 +25,8 @@ extends Node3D
 const COMMANDER_LOOK := "urban"
 const COMMANDER_KIT: Array[String] = ["plate_carrier", "plate_steel_l3", "plate_steel_l3", "helmet_bump"]
 const PLAYER_SCENE := preload("res://scenes/soldier.tscn")
+## How far beside a cache's box its faction's box of goods stands (m; _server_contraband_box).
+const CONTRABAND_GAP_M := 0.8
 const GROUP := &"people_layers"
 ## The brain's node name on a person's body (CivilianAI or HvtAI).
 const BRAIN := &"PersonAI"
@@ -257,6 +259,8 @@ func server_contract_content(objectives: Array) -> void:
 	var lvl := level as CompoundLevel
 	for o: Dictionary in objectives:
 		var p: Dictionary = o.get("params", {})
+		if p.has("loot_of") and not p.get("pending", false):
+			_server_contraband_box(o)
 		var at: Array = p.get("pos", [])
 		if at.size() != 3:
 			continue
@@ -266,8 +270,11 @@ func server_contract_content(objectives: Array) -> void:
 			if hvt(hvt_id) != null or People.is_delivered(hvt_id):
 				continue
 			var person: Dictionary = p.person
-			var s := server_spawn_person({"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt",
-				"side": String(person.get("side", Person.HOSTILE)), "label": String(person.get("label", "HVT")), "pos": pos, "hvt_id": hvt_id})
+			var spawn := {"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt",
+				"side": String(person.get("side", Person.HOSTILE)), "label": String(person.get("label", "HVT")), "pos": pos, "hvt_id": hvt_id}
+			if person.has("role"):
+				spawn["look_role"] = String(person.role)  # a faction's named leader dresses for his part (PersonLook.leader_role)
+			var s := server_spawn_person(spawn)
 			for carried: Dictionary in person.get("intel", []):
 				s.inventory.take(StringName(carried.id), 1, {"intel_id": String(carried.intel_id), "source": "HVT %s" % s.display_name()})
 		elif o.kind == Objectives.EXTRACT_ITEM and p.has("place") and lvl:
@@ -281,6 +288,44 @@ func server_contract_content(objectives: Array) -> void:
 		for lz: Vector3 in level.call(&"extraction_points"):
 			n += 1
 			server_add_point(lz, Extraction.RADIUS_M, "LZ %d" % n, "LZ%d" % n)
+
+
+## Host only. The box of goods beside a target to destroy that its faction keeps them by ("loot_of":
+## ContractGen.mission_target; the cartels' drug stash at a raid's drug lab or a sabotage's fuel
+## store, WorldValuables.contraband_box): beside a cache's box (on its +x side, on its floor) or at
+## the end of a vehicle park's row. A WorldCache through the zone's CacheSpawner, one per objective
+## (rolled once; the zone save keeps what's taken), so it's there again if the contract resumes.
+func _server_contraband_box(o: Dictionary) -> void:
+	var spawner_node: Variant = level.get(&"cache_spawner") if level else null
+	if not spawner_node is MultiplayerSpawner:
+		return
+	var p: Dictionary = o.params
+	var uid := ("contraband_%s" % String(o.get("oid", ""))).validate_node_name()
+	var holder := (spawner_node as MultiplayerSpawner).get_node_or_null((spawner_node as MultiplayerSpawner).spawn_path)
+	if holder and holder.get_node_or_null(NodePath(uid)) != null:
+		return
+	var at := Vector3.INF
+	var yaw := 0.0
+	if p.has("box"):
+		var a: Array = p.box[0]
+		var b: Array = p.box[1]
+		at = Vector3(maxf(float(a[0]), float(b[0])) + CONTRABAND_GAP_M, minf(float(a[1]), float(b[1])), (float(a[2]) + float(b[2])) * 0.5)
+	elif p.has("pos") and p.has("vehicles"):
+		yaw = deg_to_rad(float(p.get("yaw_deg", 0.0)))
+		var across := Basis(Vector3.UP, yaw) * Vector3.RIGHT
+		var row := float(p.get("spacing_m", 4.5)) * ((p.vehicles as Array).size() * 0.5 + 0.5)
+		var centre := Vector3(float(p.pos[0]), float(p.pos[1]), float(p.pos[2]))
+		at = centre + across * row
+		at = level.call(&"ground_point", at) if level.has_method(&"ground_point") else at
+	if at == Vector3.INF:
+		return
+	var hot := String((level.get(&"def") as Dictionary).get("kind", "")) == "hot" if level.get(&"def") is Dictionary else false
+	var box := WorldValuables.contraband_box(String(p.loot_of), "%s|%s" % [GameState.zone_id, uid], hot)
+	if box.is_empty():
+		return
+	var cache := (spawner_node as MultiplayerSpawner).spawn({"uid": uid, "pos": at, "yaw": yaw, "label": String(box.label)}) as WorldCache
+	if cache:
+		cache.server_fill(box.items)
 
 
 ## Host only. Civilians in every module of a world-scale zone that has them (contracts.json
@@ -433,7 +478,7 @@ func server_spawn_person(data: Dictionary) -> Soldier:
 	if not d.has("look"):  # what they wear, picked once here and sent with the spawn (PersonLook)
 		var site: Variant = level.call(&"module_at", d.pos) if level and level.has_method(&"module_at") else null
 		d["look"] = PersonLook.outfit(StringName(d.get("kind", Person.CIVILIAN)), StringName(d.get("side", Person.NEUTRAL)),
-			{"name": String(d.name), "site": String(site.type) if site else ""})
+			{"name": String(d.name), "site": String(site.type) if site else "", "role": String(d.get("look_role", ""))})
 	var s := spawner.spawn(d) as Soldier
 	var kind := StringName(d.get("kind", Person.CIVILIAN))
 	var st := {"kind": String(kind), "side": String(d.get("side", Person.NEUTRAL)), "uid": "%s_%s" % [GameState.zone_id, d.name],

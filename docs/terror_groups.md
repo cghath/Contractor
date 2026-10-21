@@ -534,16 +534,31 @@ villages and the cartels over crossings.
 - **Radio:** each group's lines, and talk about the front (`RadioChatter`).
 - **Board:** a job on every front, and a war job on every flip (`Contracts.front_offer`).
 
+**Follow-ups built (2026-10-20, branch `claude/faction-followups`):**
+
+- **Site names** (`factions.json` `site_names`, `ContractGen.faction_site_name`): a raid's or
+  supply line's cache is an "IED workshop" for the Banner and the Shura, a "drug lab" or a
+  "warehouse" for the cartels (one per site, the same every time). Not on the locals' jobs.
+- **Contraband** (`loot_tables.json` `factions`, pools `contraband` and `contraband_pocket`):
+  - a box of the cartel's goods beside the target of a raid, sabotage or supply-line job against
+    it (`ContractGen.mission_target` marks it `loot_of`; `PeopleLayer` places the box when the
+    contract goes live; not by an optional bonus target);
+  - every third man of a cartel garrison carries some (`WorldValuables.pocket_contraband`,
+    `ZoneLevel`).
+- **Named leaders** (`WorldSites.next_leader`): an hvt_capture or manhunt job against a faction
+  is after its next leader still free, in the title, the brief and the objective ("Capture the
+  Chemist (name)"). The contract keeps the title (`leader`), and winning it takes that leader
+  down (`server_leader_down` takes the named one, else the next free), in a contract zone too.
+  Each leader has a PersonLook HVT role (`leader_roles`): commander, financier or bomb maker.
+- **Doctrines:** the Concord fights as `regular` and Vantage as `pmc`. Vantage's racing team is
+  tagged as Vantage's men (`EnemyResponse._spawn_team`), not the zone holder's.
+
 **Left (Proposed follow-ups):**
 
 - Cloth headwear (shemagh, headwrap, balaclava, cap) and a chest rig, after the faces session
   lands (Captain's call 6).
-- Per-group site names: an "IED workshop" cache for the Banner, a "drug lab" and a "warehouse"
-  for the cartels. Contraband loot drops at cartel sites.
-- Named leaders as the HVT people of hvt_capture and manhunt jobs. Today a won HVT job against a
-  faction takes its next leader by title.
-- The Concord and Vantage still fight by the zone's people's doctrine, not their own: they have
-  no `doctrine` field yet.
+- Two HVT jobs on the board can name the same leader; the second one won takes the next leader
+  free instead.
 - A Highland Free Front that turns friendly gets contracts of its own against the Concord.
 - Refugees only walk to the zone's edge. Moving them into the neighbouring zone, and back after
   a flip, is still to come.
