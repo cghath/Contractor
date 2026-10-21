@@ -39,6 +39,7 @@ func _ready() -> void:
 	_test_kits()
 	_test_iv_fluids()
 	_test_heart()
+	_test_consumables()
 	_test_surgery_and_damage()
 	await _start_session()
 	await _test_times()
@@ -48,6 +49,7 @@ func _ready() -> void:
 	await _test_casualty_kit_for_players()
 	await _test_care_plan_moves_on()
 	await _test_use_medical()
+	await _test_consume_in_session()
 	await _test_menu_and_removal()
 	await _test_medical_menu()
 	await _test_medical_menu_scrolls()
@@ -1284,6 +1286,89 @@ func _test_use_medical() -> void:
 	player._server_use_medical.rpc_id(1)
 	check(not player.vitals.is_healing(), "unhurt: nothing to treat")
 	player.inventory.remove_one(&"ifak")
+
+
+## Items expansion (2026-10-20): consumables by mouth (WoundModel.take_drug). Ibuprofen and
+## paracetamol ease a little pain (OTC_RELIEF_MAX together, well under morphine), caffeine speeds
+## stamina recovery and lifts the heart rate a little, water and rations speed recovery a little
+## (STAMINA_BOOST_MAX together); none of it sedates, and it all wears off.
+func _test_consumables() -> void:
+	print("Consumables: painkillers, caffeine, water and rations")
+	var m := _model(5)
+	var plain := _model(5)
+	for w: WoundModel in [m, plain]:
+		w.pain_wounds = 0.6
+		w.update_state(0.0)
+	check(m.take_drug(&"ibuprofen", 1.0) and absf(m.drug_total(&"ibuprofen") - 1.0) < 0.001 and not m.take_drug(&"no_such_drug", 1.0),
+		"two ibuprofen tablets go in as a dose; an unknown drug doesn't")
+	_step(m, 300.0)
+	_step(plain, 300.0)
+	var eased := plain.pain() - m.pain()
+	check(eased > 0.08 and eased <= WoundModel.OTC_RELIEF_MAX + 0.001 and absf(eased - m.otc_relief()) < 0.01,
+		"five minutes on, ibuprofen takes %.2f off the pain (%.2f -> %.2f)" % [eased, plain.pain(), m.pain()])
+	m.take_drug(&"paracetamol", 2.0)
+	m.take_drug(&"ibuprofen", 2.0)
+	_step(m, 300.0)
+	_step(plain, 300.0)
+	check(absf(m.otc_relief() - WoundModel.OTC_RELIEF_MAX) < 0.001 and m.otc_relief() < WoundModel.MORPHINE_RELIEF and m.morphine_level == 0.0 and not m.unconscious,
+		"a fistful of both stops at %.2f off (morphine's dose is %.2f), and nothing sedates" % [m.otc_relief(), WoundModel.MORPHINE_RELIEF])
+	var fit := _model(6)
+	var drank := _model(6)
+	check(is_equal_approx(fit.stamina_mult(), 1.0) and drank.take_drug(&"caffeine", 1.0), "unhurt: stamina recovers at 1x; an energy drink goes in")
+	_step(fit, 240.0)
+	_step(drank, 240.0)
+	var boost := drank.stamina_mult() - fit.stamina_mult()
+	check(boost > 0.2 and boost <= 0.3 + 0.001 and drank.heart_rate > fit.heart_rate + 3.0,
+		"four minutes on, stamina recovers %.0f%% faster and the heart beats a little faster (%.0f vs %.0f)" % [boost * 100.0, drank.heart_rate, fit.heart_rate])
+	drank.take_drug(&"caffeine", 4.0)
+	drank.take_drug(&"water", 2.0)
+	drank.take_drug(&"ration", 2.0)
+	_step(drank, 300.0)
+	check(is_equal_approx(drank.stamina_boost(), WoundModel.STAMINA_BOOST_MAX), "cans, water and an MRE together stop at +%.0f%%" % (WoundModel.STAMINA_BOOST_MAX * 100.0))
+	_step(drank, 4.0 * 3600.0)
+	check(drank.stamina_boost() < 0.05 and drank.otc_relief() == 0.0, "hours later it has worn off (+%.0f%%)" % (drank.stamina_boost() * 100.0))
+	var net := _model(7)
+	net.apply_net(drank.to_net())
+	check(absf(net.drug_total(&"caffeine") - drank.drug_total(&"caffeine")) < 0.02, "what's in the blood replicates with the rest")
+
+
+## Items expansion: an energy drink, painkillers and a ration used from the inventory (the Use
+## action: Soldier "consume", Consumables): one used each time, the dose in the blood.
+func _test_consume_in_session() -> void:
+	print("Consumables from the inventory")
+	_restock()
+	_reset(player)
+	var inv := player.inventory
+	inv.take(&"energy_drink", 2)
+	inv.take(&"ibuprofen")
+	inv.take(&"mre")
+	for want: Array in [[&"energy_drink", &"caffeine", 1.0, 1], [&"ibuprofen", &"ibuprofen", 1.0, 0], [&"mre", &"ration", 1.5, 0]]:
+		var at := _carried_at(inv, want[0])
+		var before := player.vitals.drug_total(want[1])
+		player._server_inventory_action("consume", at[0], at[1], &"", &"")
+		check(absf(player.vitals.drug_total(want[1]) - before - float(want[2])) < 0.05 and inv.count_of(want[0]) == want[3],
+			"%s: %.1f dose of %s, %d left" % [want[0], float(want[2]), want[1], inv.count_of(want[0])])
+	check(Consumables.verb(ItemDB.get_item(&"energy_drink")) == "Drink" and Consumables.verb(ItemDB.get_item(&"mre")) == "Eat"
+		and Consumables.verb(ItemDB.get_item(&"ibuprofen")) == "Take" and Consumables.verb(ItemDB.get_item(&"battery_aa")) == "Use",
+		"the Use button says Drink, Eat, Take or Use")
+	var at := _carried_at(inv, &"energy_drink")
+	check(Consumables.server_use(player, at[0], at[1]) == "" and inv.count_of(&"energy_drink") == 0, "the second can too")
+	check(Consumables.server_use(player, &"backpack", 99) != "", "nothing there: nothing used")
+	inv.take(&"battery_aa")
+	at = _carried_at(inv, &"battery_aa")
+	check(Consumables.server_use(player, at[0], at[1]) == "No NVG needs a battery" and inv.count_of(&"battery_aa") == 1, "no NVG: the batteries stay")
+	inv.remove_one(&"battery_aa")
+	_reset(player)
+	await _seconds(0.1)
+
+
+func _carried_at(inv: Inventory, id: StringName) -> Array:
+	for c in inv.search_containers():
+		var list: Array = inv.containers.get(c, [])
+		for i in list.size():
+			if list[i].id == id:
+				return [c, i]
+	return [&"", -1]
 
 
 func _test_menu_and_removal() -> void:

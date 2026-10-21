@@ -333,7 +333,8 @@ func heart_rate() -> float:
 
 
 ## A drug in the blood plus what's still going in, in doses: &"epinephrine", &"atropine",
-## &"adenosine" (morphine: morphine_level).
+## &"adenosine", and the consumables' caffeine, ibuprofen, paracetamol, water and ration
+## (morphine: morphine_level).
 func drug_total(id: StringName) -> float:
 	return _m().drug_total(id)
 
@@ -685,11 +686,6 @@ func server_take_drug(drug: StringName, doses: float) -> bool:
 		return false
 	_after_change(true)
 	return true
-
-
-## The drug (WoundModel.DRUGS id) in the blood plus what's still going in, in doses.
-func drug_total(drug: StringName) -> float:
-	return _m().drug_total(drug) if WoundModel.DRUGS.has(drug) else 0.0
 
 
 ## Why the tourniquets on `part` can't come off yet ("Pack the wound first"), or "".

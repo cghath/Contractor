@@ -11,6 +11,75 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
+
+#### Added
+- **41 guns**, all real-world, each with its own magazine and rounds:
+  - Pistols: Glock 19, Beretta M9, CZ 75 B, Makarov PM, Tokarev TT-33, FN Five-seveN, Glock 18C
+    (full auto), HK USP45.
+  - SMGs: MP5A3, MP5SD6 (built-in suppressor), MP7A1, Uzi, PP-19-01 Vityaz, P90, UMP45.
+  - Shotguns: Remington 870, Mossberg 590A1, Benelli M1014, Saiga-12. Each shell fires nine
+    buckshot pellets, each traced on its own.
+  - Assault rifles: SIG MCX, SCAR-L, G36C, AUG A3, Tavor X95, AK-12, AKMS, AK-105, AMD-65,
+    vz. 58.
+  - Marksman rifles: Mk 12 SPR, SR-25, M14 EBR.
+  - Battle rifles: G3A3, FN FAL, L1A1 SLR.
+  - Machine guns: RPD, Negev, MG3, M60E4.
+  - Older rifles: Lee-Enfield No. 4, SKS.
+- **32 ammo items** and **7 new rounds**: 9x18 Makarov, 7.62x25 Tokarev, 5.7x28, 4.6x30,
+  .303 British, 7.62 M118LR match and 5.56 Mk 262 match.
+  - New magazines: SMG, pistol, 7.62 battle-rifle and match, a 45-round RPK-74 magazine (the
+    RPK-74 now takes it), G36, AUG and vz. 58.
+  - Shotgun ammo: 12 gauge speed loaders, Saiga magazines and loose shells.
+  - Charger clips for the Lee-Enfield and SKS, and an RPD belt drum.
+- **33 gear items:**
+  - 7 helmets: ACH, Mk7, 6B47, SSh-68, M1 steel, ECH (rated III), Altyn with visor.
+  - 6 carriers: SPC, MBAV, 6B23, slick carrier, police IIIA vest, IOTV with side plates.
+  - 3 chest rigs with no armour: Chicom, Smersh, D3CRM.
+  - 4 packs: sling bag, daypack, 30 L assault pack, 60 L ruck.
+  - 5 pouches: SMG mags, shotgun shells, canteen, large GP, 7.62 mags.
+  - 4 plates: SAPI III+, XSAPI IV, light PE III+, ceramic side plate.
+  - 3 ear protectors (ComTac, Sordin, foam earplugs). They work like the existing ear pro.
+  - A ghillie suit: lying or crouched, you take half again as long to spot.
+- **21 attachments** on the existing mounts:
+  - 9 optics: Kobra, Romeo5, T-2 with a 3x magnifier, PSO-1, HAMR, SUSAT, ELCAN C79, Strike
+    Eagle 1-6x, ATACR 5-25x.
+  - 4 suppressors: 9mm, .45, AK (PBS-4), short 5.56.
+  - Handstop, stubby grip, Harris bipod, grip pod.
+  - X300 and TLR-1 lights, a green laser, a PEQ-2 IR laser.
+- **12 consumables** with a real effect. Right-click > Drink, Eat, Take or Use (or double-click)
+  in the inventory.
+  - Energy drink, caffeine tablets: stamina comes back faster for half an hour or so, and the
+    heart rate goes up a little.
+  - Ibuprofen, paracetamol: a little pain relief. Together they take at most 0.25 off, against
+    morphine's 0.5 a dose. They don't sedate.
+  - Bottled water, electrolyte sachets, MRE, IRP ration, energy bar, canned meat: stamina comes
+    back a little faster. Food and water aren't tracked yet, so nothing goes hungry.
+  - AA and CR123A batteries: recharge an NVG fully (the mounted one, else the flattest you carry).
+- **75 barter, materials, valuables and documents**, Tarkov-inspired:
+  - 30 materials: tools, electrical parts, a graphics card, drone parts, vehicle parts, weapon
+    parts. They are salvage, so rebel support upgrades can use them.
+  - Vehicle parts in the stash (spark plugs, bearings, an alternator, oil...) take up to half
+    off a motor pool repair.
+  - 27 barter items: household goods, medical supplies, keys, and clothing (gloves, balaclava,
+    shemagh, ballistic glasses and goggles, knee pads, GP-5 and M50 gas masks). Gas masks are
+    barter because there is no gas mechanic.
+  - 13 valuables: rings, chains, earrings, phones, a laptop, a camera, beads, a statuette.
+  - 5 intel documents: ID cards, a shipping manifest, bank slips, photographs, letters.
+- **Every new item is in the loot tables, by rarity.**
+  - The site boxes, pools and body pockets all take them.
+  - Cheap finds come two or three to a bundle.
+  - Strongboxes hold only valuables and papers.
+- **Army kits.** The Iranian Concord kit fields G3A3s, the Russian kit an AK-12, and US allies a
+  Mk 12 marksman.
+- **Art.** New guns use the existing families at their real length:
+  - the MP5 and UMP on the short carbine;
+  - the Vityaz and Saiga on the AK;
+  - the P90 and AUG on the bullpup;
+  - pump guns on the wooden bolt frame.
+- New magazines, rounds, phones, laptops, papers, electronics and headsets have their own
+  shapes; the rest use the generic box. Shotguns have their own report.
+
 ### Loot on bodies (Captain, 2026-10-20: "we stil havent gotten loot variety in somehow")
 
 #### Added
