@@ -11,6 +11,52 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Demolitions: demo blocks, det cord, thermite, claymores, mines, chem lights (cghath, 2026-10-20)
+
+Closes the Captain's 2026-10-20 list item "Not built yet: Weapons and items: mines and claymores,
+demo blocks, det cord, thermite, chem lights". All numbers and prices are Proposed.
+
+#### Added
+- **Demolition block (C4).** Pick it with Shift+G and press G: a ghost shows where it goes on the
+  surface you look at, within 2.5 m. R picks how it's armed: a 10, 30 or 60 s timer, a detonator,
+  or det cord. Fire places it. It's a big blast: a wide hole in walls, people hurt by the blast
+  and fragments, and a vehicle it's set on badly damaged (a charge in contact hurts a hull far more
+  than one going off beside it). A sabotage target or cache it's set on is destroyed.
+- **Det cord.** Arm a block or claymore on det cord and it's tied to your nearest block or claymore
+  within 15 m, using one coil. When any one in the chain goes off, they all go.
+- **Firing devices.** The M57 clacker (50 m of wire) and a radio remote (400 m). Pick one with
+  Shift+G and press G: everything you armed on a detonator within range goes off.
+- **Thermite.** Set it on a vehicle, a static gun, a cache or the ground. It lights after 3 s and
+  burns for 8 s, with a bright flickering light, sparks and a hiss. Then a vehicle's engine is
+  burnt out and the vehicle catches fire, a static gun is wrecked, a cache is destroyed. Anyone
+  within a metre is burnt.
+- **M18 claymore.** Set it on the ground, facing where you look. Fire it with a clacker or remote,
+  on det cord, or on a tripwire 2 m in front (live after 10 s). Its fragments fly in a 60 degree
+  fan out to 50 m; behind and beside it there's only the blast close in. Friendly fire is on.
+- **AP mine (pressure).** Buried in the ground in front of you, live after 15 s. Anyone who steps
+  on it, friend or foe, or a vehicle rolling over it, sets it off. The leg that stepped on it is
+  wrecked. Our own mines and claymores are marked on the map.
+- **Chem lights** in green, red, blue and IR. Throw one, or lob it to drop it close. It lies where
+  it stops (or rides whoever it landed on) and glows for 30 minutes. Through night vision it's
+  four times brighter and reaches further; the IR one shows only through night vision. For
+  marking an LZ, a cleared room or a casualty.
+- **Picking things up again:** Left Ctrl at a placed block, claymore or mine offers "Pick up" from
+  close by (not a lit thermite).
+- Everything placed is seen by every player, late joiners too, and is saved with the zone. A zone
+  left for a week keeps its mines and charges; the chem lights are out.
+- In the base shop (Proposed): demo block 500, det cord 60, clacker 150, radio remote 600, thermite
+  250, claymore 450, AP mine 200, chem lights 40 (IR 60). They sit with the grenades in the
+  loadout menu.
+- New test suite `demolitions`: placing, arming, the timer, the clacker and a det cord chain, a
+  sabotage target destroyed by a block, a block on an MRAP, thermite disabling a technical, the
+  claymore's fan hitting only in front, the tripwire and the mine (live only after their delay),
+  a mine under a vehicle, picking up, chem light life and night-vision brightness, the zone save,
+  and a client joining late that sees it all.
+
+#### Changed
+- Grenades and explosives share a band in the loadout menu: the breaching charge, blocks, mines,
+  thermite and firing devices are listed with the grenades now (they were under Other).
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

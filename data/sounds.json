@@ -104,6 +104,10 @@
 		"engine_aircraft": {"range_m": 600, "unit_size": 24, "volume_db": -12, "engine": true, "engine_flat": true, "_note": "Captain, 2026-10-16: the Black Hawk was too loud and grating (was 0 dB, unit 40, wobble 0.95 at 5 Hz)",
 			"synth": {"length": 1.0, "loop": true, "peak": 0.7, "hum": {"hz": 46, "harmonics": [1.0, 0.35, 0.12], "amp": 0.5, "wobble": 0.4, "wobble_hz": 11}, "tail": {"amp": 0.55, "decay": 0, "lowpass": 0.035}}},
 		"throw": {"range_m": 15, "unit_size": 2, "volume_db": -10,
-			"synth": {"length": 0.3, "peak": 0.5, "tail": {"amp": 1.0, "decay": 10, "lowpass": 0.3, "attack": 0.08}, "highpass": 0.4}}
+			"synth": {"length": 0.3, "peak": 0.5, "tail": {"amp": 1.0, "decay": 10, "lowpass": 0.3, "attack": 0.08}, "highpass": 0.4}},
+		"thermite": {"range_m": 80, "unit_size": 6, "volume_db": -2, "_note": "Demolitions: a thermite grenade burning (played as it lights and again halfway)",
+			"synth": {"length": 4.0, "peak": 0.7, "crack": {"amp": 0.6, "decay": 30}, "rustle": {"amp": 1.0, "from": 0.0, "to": 4.0, "lowpass": 0.55}, "grains": {"amp": 0.7, "count": 220, "from": 0.0, "to": 4.0, "decay": 900, "lowpass": 0.6}, "highpass": 0.15}},
+		"clacker": {"range_m": 12, "unit_size": 1.5, "volume_db": -6, "_note": "Demolitions: a firing device squeezed",
+			"synth": {"length": 0.2, "peak": 0.6, "clicks": [[0.0, 1.0], [0.06, 0.7]], "ring": {"amp": 0.1, "hz": 2200, "decay": 30}, "highpass": 0.3}}
 	}
 }

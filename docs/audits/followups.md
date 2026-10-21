@@ -16,6 +16,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 | F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
+| F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 
 ## F-01: the building scan only sees one floor
 
@@ -194,3 +195,27 @@ and five of them were touching the same StaticBody3D. It passes locally (R0314) 
 52037f2. It may be the same as F-08 and F-90 (squadmates held against the target dummies on the
 Linux runners), seen from the care side. Suggested: read the order's path in the CI log, then check
 whether "ccp" finds a bearer when every squadmate is blocked on the dummies.
+
+## F-120: the squad AI doesn't keep off our own mines and claymores
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (moving, formation spots, cover picks) and
+perhaps [tactics.gd](../../scripts/ai/tactics.gd). Found by cghath's agent on `feat/demolitions`
+(2026-10-20), which added player mines and claymores (`scripts/combat/demolitions.gd`); the AI
+files are Claude's, so they aren't changed there.
+
+What happens: friendly fire is on for placed mines and claymores, as the Captain asked, and our
+side's are marked on the map ("Our mine", "Our claymore", field channel). Squadmates don't know
+about them: one following the lead, bounding or taking cover can step on a pressure mine (a leg
+wrecked) or walk through a claymore's tripwire.
+
+What's there to use: `Demolitions.of(level).hazards(faction)` (host) lists the armed mines and
+claymores placed by that faction's side, each `{"id", "kind", "pos", "radius", "forward"}`
+(`radius`: keep this far off; `forward`: a claymore's facing, its fan is 60 degrees either side
+of it out to 50 m, its tripwire 2 m out across 4 m). It is cheap (a handful of records).
+
+Suggested: when SquadAI picks a move target, formation slot or cover spot, skip any within a
+hazard's `radius` (and, for a claymore, don't stand in front of it within 10 m); a path that
+passes within `radius` could add a waypoint round it. Enemy AI should stay unaware (they don't
+know where ours are). A test could place a friendly mine on the line between a squadmate and his
+formation spot and check he goes round it.
+

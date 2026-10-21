@@ -32,6 +32,8 @@
 		"knife": 80, "radio": 1800, "enemy_radio": 250, "binoculars": 300,
 		"frag_grenade": 90, "smoke_grenade": 40, "smoke_green": 45, "smoke_yellow": 45, "smoke_blue": 45, "smoke_purple": 45,
 		"flashbang": 70, "breaching_charge": 400,
+		"demo_block": 500, "det_cord": 60, "clacker": 150, "remote_detonator": 600, "thermite": 250, "claymore": 450, "ap_mine": 200,
+		"chemlight_green": 40, "chemlight_red": 40, "chemlight_blue": 40, "chemlight_ir": 60,
 		"electronics_salvage": 450, "hvt_case": 3000, "supply_crate": 2500, "supply_pallet": 0,
 		"zip_cuffs": 5, "intel_laptop": 3000, "intel_phone": 1200, "intel_documents": 800, "intel_usb_drive": 600, "intel_ledger": 1800,
 		"cash_bundle": 1400, "gold_bars": 2800, "jewelry_case": 2200, "smuggled_relic": 4200, "scrap_copper": 220, "machine_parts": 380,
@@ -54,6 +56,7 @@
 		"intel_sat_phone": 2200, "intel_sim_bag": 700, "intel_hard_drive": 2600, "intel_marked_map": 1500, "intel_codebook": 3200, "intel_freq_list": 900, "intel_tablet": 1900, "intel_drone_controller": 3800, "intel_sd_card": 500, "intel_passports": 1300, "intel_orders": 1100,
 		"copper_wire": 260, "filter_set": 330, "solar_panel": 520, "truck_tyre": 450
 	},
+	"_demolitions": "Demolitions (Captain's list 2026-10-20, Weapons and items), Proposed from the catalogue plan's explosives band (40-600; demo block 500, thermite 250): det cord 60, clacker 150, radio remote 600, claymore 450, AP mine 200, chem lights 40 (IR 60). All in the base shop.",
 	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
 	"_heavy_exo": "The HX-1 Assault Frame and its WG-50 (Captain's call, docs/near_future_hardware.md 2.3a, resolved 2026-10-17): priced for repair/salvage valuation (roughly 3x the LX-3 frame's cost, for the bigger chassis and its own weapon mount) but not_for_sale either way — it's issued, not bought, and certified onto a roster soldier (see roles.json / roster.gd hx1_certified) rather than equipped freely.",
 	"_allied_only": "Wave 6 (call #1, Captain 2026-10-18: Allied buys \"their best kit, armour\"): not in the base shop; an allied quartermaster (factions.json \"quartermaster\") sells them at Allied standing.",

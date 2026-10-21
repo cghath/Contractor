@@ -354,6 +354,7 @@ func _ready() -> void:
 	people = PeopleLayer.new()  # "People": civilians, HVTs, intel (wave 4)
 	add_child(people)
 	add_child(Charges.new())  # "Charges": placed explosives (wave 4B)
+	add_child(Demolitions.new())  # "Demolitions": demo blocks, thermite, claymores, mines, chem lights (2026-10-20)
 	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
@@ -648,6 +649,9 @@ func _restore_bodies() -> void:
 	var vehicles := get_node_or_null(^"Vehicles") as VehicleLayer
 	if vehicles:
 		vehicles.server_restore()
+	var placed := get_node_or_null(^"Demolitions") as Demolitions
+	if placed:
+		placed.server_restore()  # what players placed and left: charges, mines, chem lights (on their vehicles when back)
 
 
 ## Host only. A visible tracer streak from `origin` to `end` on every peer (Captain, 2026-10-16:
