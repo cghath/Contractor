@@ -33,6 +33,10 @@ var caches: Dictionary = {}
 ## they stood), put back by the zone's Virtualizer on load, so a squad that leaves and comes back
 ## meets the same men (docs/virtualization.md). Rebuilt from the level's Virtualizer on every save.
 var profiles: Array = []
+## What players placed and left in the zone (Demolitions.to_save: demo blocks, thermite, claymores,
+## mines, chem lights, with their clocks), put back by the level's Demolitions on load. Rebuilt
+## from the level's Demolitions on every save.
+var demolitions: Array = []
 
 
 func post_fell(spawn_id: String) -> void:
@@ -100,6 +104,8 @@ func save_zone() -> bool:
 	ground = digging.to_save() if digging and digging.has_method(&"to_save") else {}
 	var virtualizer := get_tree().get_first_node_in_group(&"virtualizer")
 	profiles = virtualizer.to_save() if virtualizer and virtualizer.has_method(&"to_save") else []
+	var placed := get_tree().get_first_node_in_group(&"demolitions")
+	demolitions = placed.to_save() if placed and placed.has_method(&"to_save") else []
 	# Caches and site boxes as they are now: looted, or used as a stash (compound loot).
 	for node in get_tree().get_nodes_in_group(&"world_caches"):
 		if node.has_method(&"to_save") and not node.is_queued_for_deletion() and String(node.get(&"uid")) != "":
@@ -115,6 +121,7 @@ func save_zone() -> bool:
 		"ground": ground,
 		"caches": caches,
 		"profiles": profiles,
+		"demolitions": demolitions,
 		"sky": sky,
 		"left_day": BaseHub.day() if BaseHub.campaign_running else -1,  # zone memory (LZ-2): it fades from here
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
@@ -138,6 +145,7 @@ func load_zone() -> void:
 	sky = {}
 	caches = {}
 	profiles = []
+	demolitions = []
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -160,10 +168,12 @@ func load_zone() -> void:
 	sky = zone.get("sky", {})
 	caches = zone.get("caches", {})  # boxes stay as they were left even when the loose gear fades
 	profiles = zone.get("profiles", [])
+	demolitions = zone.get("demolitions", [])
 	if fade_loose:
 		bodies.clear()  # gone in the days since (zone memory, LZ-2)
 		dropped.clear()
 		profiles.clear()  # moved on in the days since: the zone's enemy is fresh
+		demolitions = demolitions.filter(func(r: Dictionary) -> bool: return Demolitions.kind_of(StringName(String(r.item))) != Demolitions.CHEMLIGHT)  # the chem lights are out; mines and charges stay
 	fade_loose = false
 
 
@@ -343,6 +353,14 @@ static func read_save(path: String) -> Dictionary:
 				out.profiles.append(p)
 			else:
 				push_warning("GameState: %s: skipping a bad profile" % path)
+	var placed_in: Variant = data.get("demolitions", [])  # nor demolitions before they were built
+	out["demolitions"] = []
+	if typeof(placed_in) == TYPE_ARRAY:
+		for r: Variant in placed_in:
+			if Demolitions.save_ok(r):
+				out.demolitions.append(r)
+			else:
+				push_warning("GameState: %s: skipping a bad placed item" % path)
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)

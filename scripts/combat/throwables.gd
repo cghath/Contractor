@@ -12,6 +12,7 @@ extends RefCounted
 ## Electronic ear protection (carried) stops flashbang and gunfire deafness and halves a blast's.
 ## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view, in the
 ##   grenade's colour (white, green, yellow, blue, purple) on every peer.
+## - Chem light: a glow stick that lies where it stops and glows (Demolitions).
 
 const FRAG_RADIUS := 8.0
 ## Fragment wounds on a body the blast reaches: from FRAG_MIN_WOUNDS at the edge of the
@@ -127,6 +128,16 @@ static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, it
 			_flash(level, pos)
 		"smoke":
 			level.spawn_smoke.rpc(pos, SmokeCloud.colour_of(item_id))
+		"chemlight":
+			# No bang: where it came to rest it becomes a placed chem light (Demolitions), riding
+			# whoever or whatever it landed on.
+			var demolitions := Demolitions.of(level)
+			if demolitions:
+				var query := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 0.1, pos + Vector3.DOWN * 0.4, Charges.PLACE_MASK)
+				query.collide_with_areas = true
+				var hit := level.get_world_3d().direct_space_state.intersect_ray(query)
+				var at: Vector3 = hit.position if not hit.is_empty() else pos
+				demolitions.server_add_chemlight(item_id, at, Charges.rider_of(hit.collider) if not hit.is_empty() and hit.collider is Node else null)
 
 
 static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENADE_TNT_KG, carve := true, facing := Vector3.ZERO) -> void:
