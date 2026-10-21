@@ -496,6 +496,10 @@ func _step() -> void:
 			r.shot = true
 			var bias: Vector3 = (missions.get(String(r.unit), {}) as Dictionary).get("bias", Vector3.ZERO)
 			r.land = FireMission.in_disc(_rng, (r.aim as Vector3) + bias, float(r.spread))  # the aim, the mission's error, the round's own spread
+			var gun: Variant = (missions.get(String(r.unit), {}) as Dictionary).get("gun")
+			var lvl := level()
+			if gun is Vector3 and lvl:  # every peer sees it come down out of the sky, in the wind (ShellArc)
+				lvl.server_show_shell(Vector3(gun.x, maxf(gun.y, 0.0) + 1.5, gun.z), _ground(r.land), float(r.when) - t)
 			if bool(r.first):
 				_radio(String(r.unit), "Shot, over. Time of flight %d seconds." % roundi(float(r.when) - float(r.fire_at)))
 		if not bool(r.warned) and t >= float(r.when) - SPLASH_WARN_S:

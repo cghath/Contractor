@@ -9,7 +9,11 @@ extends Node
 ## path from the muzzle and ends exactly at the impact. Then a player's real shot (the fire RPC):
 ## its tracer leaves the muzzle, not the eye, also with the muzzle in the ground; and a peer that
 ## draws the shooter a moment behind starts the streak at the gun it sees and joins the real path.
-## Client vs host over ENet is the net suite's (_check_tracer_path).
+## Mortar and artillery shells (ShellArc; Captain, 2026-10-21: "i wanna see the mortar streak down
+## or up depending on weather conditions"): a shell flies the real arc from the tube to the burst
+## in its time of flight, and the weather's wind bends it, more in a storm than on a clear day.
+## Client vs host over ENet is the net suite's (_check_tracer_path); the mortar team's and the fire
+## missions' shells are the vehicles and firesupport suites'.
 ##   <voxel godot exe> --headless --path . res://tests/ballistics_test.tscn
 ## Exits with the number of failures.
 
@@ -58,6 +62,7 @@ func _ready() -> void:
 	await _test_player_shot()
 	await _test_muzzle_in_ground()
 	_test_seen_lead()
+	await _test_shells()
 	print("BALLISTICS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -327,3 +332,65 @@ func _test_seen_lead() -> void:
 		"it starts at the gun drawn %.1f m behind, joins the real path by %.0f m and ends at the impact" % [lag.length(), Tracer.LEAD_BLEND_M])
 	if t:
 		t.queue_free()
+
+
+# --- Mortar and artillery shells -----------------------------------------------------------------
+
+## A shell over 1 km in 25 s, in each weather: up off the tube, high over, down exactly onto the
+## burst; the wind leans the arc by its push (ShellArc.WIND_PUSH) times T^2/8 at the top.
+func _test_shells() -> void:
+	print("Mortar shells in the weather")
+	var sky := DayNight.current()
+	check(sky != null, "the level has its day and weather")
+	if sky == null:
+		return
+	var was := [sky.hour, sky.weather]
+	var start := Vector3(0, 1.1, 0)
+	var end := Vector3(600, 0.1, -800)
+	var flight := 25.0
+	var leans := {}
+	for w: String in ["fog", "clear", "storm"]:
+		sky.server_set(sky.hour, w)
+		var wind := DayNight.wind()
+		level.server_show_shell(start, end, flight)
+		await _frames(1)
+		var arc := ShellArc.last
+		var shell := _latest_shell()
+		var calm := ShellArc.launch_for(start, end, flight, Vector3.ZERO)
+		var mid := ShellArc.point_at(start, arc.launch, arc.accel, flight * 0.5)
+		var calm_mid := ShellArc.point_at(start, calm, Vector3.ZERO, flight * 0.5)
+		leans[w] = mid.distance_to(calm_mid)
+		var want := (arc.accel as Vector3).length() * flight * flight / 8.0
+		check(shell != null and shell.at(0.0).distance_to(start) < 0.01 and shell.at(flight).distance_to(end) < 0.01 and (arc.launch as Vector3).y > 0.0
+			and mid.y > start.y + 500.0 and absf(leans[w] - want) < 0.05 and is_equal_approx(wind.length(), float(DayNight.WEATHER[w].wind_mps)),
+			"%s (wind %.0f m/s): up off the tube, %.0f m high at the top, down exactly on the burst, leaning %.1f m" % [w, wind.length(), mid.y, leans[w]])
+		if shell:
+			shell.queue_free()
+	check(float(leans.storm) > float(leans.clear) * 3.0 and float(leans.clear) > float(leans.fog),
+		"a storm bends the arc far more than a clear day, a still fog least (%.1f / %.1f / %.1f m)" % [leans.storm, leans.clear, leans.fog])
+	sky.server_set(float(was[0]), String(was[1]))
+	# Indirect fire (Captain, 2026-10-21: "they arc high into the sky and come down"): a mortar team's
+	# shell leaves its tube steeper than 45 degrees at its shortest and longest range, and goes far
+	# higher than it goes out at the short end; the called 81 mm section fires high angle too.
+	var steep := true
+	var lines: Array[String] = []
+	for kit: String in ["mortar_m224", "mortar_2b14"]:
+		var m: Dictionary = StaticWeapons.KITS[kit].mortar
+		for d: float in [float(m.min_m), float(m.max_m)]:
+			var t := lerpf(MortarFire.FLIGHT_S.x, MortarFire.FLIGHT_S.y, inverse_lerp(float(m.min_m), float(m.max_m), d))
+			var v := ShellArc.launch_for(Vector3.ZERO, Vector3(d, 0, 0), t, Vector3.ZERO)
+			var angle := rad_to_deg(atan2(v.y, v.x))
+			var apex := v.y * v.y / (2.0 * -Ballistics.GRAVITY.y)
+			steep = steep and angle > 45.0 and (d > 1000.0 or apex > d)
+			lines.append("%s %.0f m: %.0f deg, %.0f m up" % [kit.trim_prefix("mortar_"), d, angle, apex])
+	var section := FireMission.unit("mortar")
+	check(steep and float(section.elevation_mils) / 6400.0 * 360.0 > 45.0,
+		"mortars are indirect fire: high into the sky and down (%s; the 81 mm section at %.0f deg)" % [", ".join(lines), float(section.elevation_mils) / 6400.0 * 360.0])
+
+
+func _latest_shell() -> ShellArc:
+	var found: ShellArc = null
+	for n in level.get_children():
+		if n is ShellArc and not n.is_queued_for_deletion():
+			found = n
+	return found

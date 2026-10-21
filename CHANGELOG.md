@@ -28,6 +28,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   at the shooter's face.
 
 #### Added
+- **Mortar and artillery shells can be seen in flight** (Captain, 2026-10-21: "i wanna see the
+  mortar streak down or up depending on weather conditions etc"). Every peer sees a dark shell
+  with a pale streak fly the real arc in its real time of flight. A mortar team's shell goes up
+  off the tube and over. A called mission's 81 mm or 105 mm round comes down out of the sky from
+  the guns off the map. Both end exactly on the burst. The streak stays about a pixel and a half
+  wide at any range, and fog hides it.
+- **Wind by weather.** Each weather has a wind (proposed: fog 1 m/s, clear 3, overcast 5, rain 7,
+  storm 14) from a direction each zone keeps (`DayNight.wind`). The wind pushes shells, so the
+  arc leans and bends in flight: about 5 m at the top of a 25 s flight on a clear day, 22 m in a
+  storm. The crews lay for the wind, so rounds still land where they did before.
 - Mounted vehicle guns show tracers too (every fifth round red or green, the rest as faint ball
   streaks), along the same real path.
 - A `ballistics` test suite: rounds onto a hilly terrain at 50, 300 and 800 m, up, down and across

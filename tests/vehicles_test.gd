@@ -1285,6 +1285,12 @@ func _test_mortar_team() -> void:
 	var mf := MortarFire.of(level)
 	await _wait_for(func() -> bool: return team.rounds < MortarTeam.ROUNDS, 15.0)
 	check(team.rounds < MortarTeam.ROUNDS and mf.in_flight() > 0, "and a ranging round goes out (%d left, %d in the air)" % [team.rounds, mf.in_flight()])
+	if mf.in_flight() > 0 and is_instance_valid(team.gun):
+		var arc := ShellArc.last
+		var lands: Vector3 = level.ground_point(mf._rounds[-1].at)
+		var arc_end := ShellArc.point_at(arc.get("from", Vector3.INF), arc.get("launch", Vector3.ZERO), arc.get("accel", Vector3.ZERO), float(arc.get("flight", 0.0)))
+		check(not arc.is_empty() and (arc.from as Vector3).distance_to(team.gun.global_position) < 2.0 and arc_end.distance_to(lands) < 0.01,
+			"every peer sees the shell leave the tube and come down where it bursts (ShellArc, %.3f m)" % arc_end.distance_to(lands))
 	await _wait_for(func() -> bool: return mf.in_flight() == 0, 45.0)
 	check(mf.in_flight() == 0, "and lands")
 	# Part d: a player lays it by the firing table and fires a round from its hold.

@@ -758,6 +758,22 @@ func show_throw(serial: int, id: String, origin: Vector3, velocity: Vector3) -> 
 	grenade.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
 
 
+## Host only. A mortar or artillery shell seen flying (ShellArc) on every peer: from `start` at
+## `launch` under `push` (gravity's partner: the wind, ShellArc.wind_accel), landing `flight`
+## seconds later where the host bursts it.
+@rpc("authority", "call_local", "reliable")
+func show_shell(start: Vector3, launch: Vector3, push: Vector3, flight: float) -> void:
+	if start.is_finite() and launch.is_finite() and push.is_finite() and flight > 0.0 and flight < 600.0:
+		ShellArc.spawn(self, start, launch, push, flight)
+
+
+## Host: a shell from `start` that lands at `end` `flight` seconds from now, in today's wind,
+## seen on every peer (show_shell).
+func server_show_shell(start: Vector3, end: Vector3, flight: float) -> void:
+	var push := ShellArc.wind_accel(DayNight.wind())
+	show_shell.rpc(start, ShellArc.launch_for(start, end, flight, push), push, flight)
+
+
 @rpc("authority", "call_local", "reliable")
 func show_explosion(pos: Vector3) -> void:
 	_burst(pos, Color(1.0, 0.6, 0.25), 3.2, 0.35)
