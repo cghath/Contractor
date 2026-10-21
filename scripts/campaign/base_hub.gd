@@ -1575,6 +1575,7 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 	var main := Roster.main_character(roster(), key, Roles.local_choice if peer == 1 else Roles.RIFLEMAN)
 	if fresh:
 		main["kit_due"] = true
+	player.face = Roster.player_face(main)  # their own face all campaign (replicated)
 	var gear: Dictionary = main.get("gear", {})
 	var dep := RosterDeployment.active(roster())
 	var stand_in: bool = dep.has("stand_ins") and dep.stand_ins.has(key) and not member(String(dep.stand_ins[key])).is_empty()
@@ -1592,6 +1593,8 @@ func _apply_player_gear(peer: int, player: Soldier) -> void:
 			sm["gear"] = own.duplicate(true)
 			main["gear"] = {}
 		gear = sm.get("gear", {})
+		var who := Roster.identity(sm)
+		player.face = SoldierLook.make(int(who.look_seed), String(who.nation), String(who.body))  # they are the stand-in
 		var msg := "%s is recovering: you play %s%s" % [main.name, sm.callsign, ", in your own kit" if (dep.get("stand_in_gear", {}) as Dictionary).has(key) else ""]
 		SessionLog.note("%s: %s" % [player_key(peer), msg])
 		player._client_message.rpc_id(peer, msg)

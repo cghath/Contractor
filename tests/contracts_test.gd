@@ -56,6 +56,7 @@ func _ready() -> void:
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
+	_test_faction_followups()
 	_test_debrief_totals()
 	_test_civilians_void()
 	_test_save_reload()
@@ -808,48 +809,272 @@ func _test_reputation_core() -> void:
 		"an old save's Federal Army standing, heat, nemesis and held zone move to the Eastern Concord Forces, once")
 
 
-## Wave 6c: persistent world (a hot zone's holder and grip outlive a deployment) and the
-## faction war (a weak holder can lose the zone to one of its own listed enemies between
-## missions), plus the war-driven offer that follows (Contracts.server_refresh_board).
+## Wave 6c: persistent world (a zone's holder and grip outlive a deployment), made a living war
+## (terror groups, 2026-10-20: docs/terror_groups.md 7): every zone in it, fronts that flip zones
+## by the factions' wants and strength, the same war every time for a campaign, the last zone and
+## the FOB sieged but never taken, the player's wins pushing fronts, the board following the war,
+## the company's ground attacked, and a faction wiped out only with its leaders.
 func _test_world_sites() -> void:
-	print("World sites: persistent holder, the faction war, and its offer")
+	print("World sites: the living war")
 	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	Campaign.section(ZoneControl.SECTION).clear()
 	var zid := "pass_hot"
 	var h1 := WorldSites.holder(zid)
-	check(h1 != "" and WorldSites.holder(zid) == h1, "a zone's holder is seeded once and stays stable (%s)" % h1)
+	check(h1 == "kestrel" and WorldSites.holder(zid) == h1, "a zone's holder is seeded from its data and stays stable (%s)" % h1)
+	check(WorldSites.war_zones().size() == 27 and WorldSites.holder("dry_wadi") == "valley_shura" and WorldSites.holder("greyfell_moor") == "highland_front",
+		"every zone is in the war, each held by its group (%d zones)" % WorldSites.war_zones().size())
 	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a fresh site starts at full grip (%.2f)" % WorldSites.grip(zid))
 	WorldSites.server_contract_won(zid, "nobody_holds_this")
-	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a win against someone who doesn't hold it does nothing")
+	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a win against someone who doesn't hold it does nothing to the grip")
+	var st0 := WorldSites.strength(h1)
 	WorldSites.server_contract_won(zid, h1)
-	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT), "a win against the actual holder knocks its grip down (%.2f)" % WorldSites.grip(zid))
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 99
-	WorldSites.server_advance_days(1, rng)
-	check(WorldSites.grip(zid) > WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT, "a quiet day repairs some of it back (%.2f)" % WorldSites.grip(zid))
-	# Push it to contested, with a known holder that has a real hostile rival (black_ridge's
-	# enemies include eastern_concord, the only other one that's also hostile-role), and keep it
-	# there (repair only gets one day's grace before the next contract would knock it down
-	# again) for up to 200 days: at 0.2/day, the faction war flipping it is a near-certainty.
-	# Checks the mechanism, not a coin flip.
-	h1 = "black_ridge"
-	var s := Campaign.section(WorldSites.SECTION)
-	rng.seed = 7
-	for _day in 200:
-		if String(s[zid].holder) != h1:
-			break
-		var site_d: Dictionary = s[zid]
-		site_d.holder = h1
-		site_d.grip = WorldSites.CONTESTED_GRIP
-		s[zid] = site_d
-		WorldSites.server_advance_days(1, rng)
-	var h2 := WorldSites.holder(zid)
-	check(h2 != h1 and h2 in MissionRegistry.enemies_of(h1), "weak and contested long enough, a listed rival takes it over (%s -> %s)" % [h1, h2])
-	check(WorldSites.is_flashpoint(zid), "and it's flagged a flashpoint")
+	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT) and WorldSites.strength(h1) < st0,
+		"a win against the actual holder knocks its grip and its strength down (%.2f, %.0f)" % [WorldSites.grip(zid), WorldSites.strength(h1)])
+	check(WorldSites.worth("valley_shura", "dry_wadi") > WorldSites.worth("saltline", "dry_wadi") and WorldSites.worth("saltline", "harbour_yard") > WorldSites.worth("valley_shura", "harbour_yard"),
+		"each wants its own: the Shura the village zones, the Syndicate the harbours")
+	# The same campaign plays the same war.
+	var snap_sites: Dictionary = Campaign.section(WorldSites.SECTION).duplicate(true)
+	var snap_war: Dictionary = Campaign.section(WorldSites.WAR).duplicate(true)
+	WorldSites.server_advance_days(30)
+	var first := WorldSites.war_view()
+	_restore_section(WorldSites.SECTION, snap_sites)
+	_restore_section(WorldSites.WAR, snap_war)
+	WorldSites.server_advance_days(30)
+	var again := WorldSites.war_view()
+	check(JSON.stringify(first.zones) == JSON.stringify(again.zones) and JSON.stringify(first.news) == JSON.stringify(again.news),
+		"the war is deterministic: the same 30 days twice, the same war")
+	var changed := WorldSites.war_zones().filter(func(z: String) -> bool: return String(first.zones[z].holder) != String(ZoneControl.zone_def_raw(z).controller))
+	check(changed.size() >= 3, "zones change hands over a month (%d of them)" % changed.size())
+	print("  news: %s" % " | ".join(PackedStringArray((first.news as Array).map(func(n: Dictionary) -> String: return String(n.text)))))
+	# A front by hand: the attacker strong, the holder weak, nearly through.
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	var st: Dictionary = WorldSites._war().strength
+	st["saltline"] = 100.0
+	st["kestrel"] = 10.0
+	var gulch := WorldSites.site("red_gulch")
+	gulch.grip = 0.1
+	gulch["front"] = {"by": "saltline", "since": 1, "progress": 0.98}
+	WorldSites._tick_day()
+	check(WorldSites.holder("red_gulch") == "saltline" and WorldSites.is_flashpoint("red_gulch") and WorldSites.front("red_gulch").is_empty(),
+		"a front that gets through flips the zone, flagged a flashpoint (%s)" % WorldSites.holder("red_gulch"))
+	var flip_news := (WorldSites.news() as Array).filter(func(n: Dictionary) -> bool: return String(n.kind) == "flip")
+	check(not flip_news.is_empty() and String(flip_news.back().text).contains("took Red Gulch"),
+		"the news says so: %s" % (String(flip_news.back().text) if not flip_news.is_empty() else "nothing"))
+	# A player's win pushes a front back from whoever the company hit.
+	var orchards := WorldSites.site("old_orchards")
+	orchards["front"] = {"by": "valley_shura", "since": int(WorldSites._war().day), "progress": 0.5}
+	WorldSites.server_contract_won("old_orchards", "valley_shura")
+	check(is_equal_approx(float(WorldSites.front("old_orchards").progress), 0.5 - WorldSites.WIN_FRONT_PUSH), "a win against the attacker pushes its front back")
+	WorldSites.server_contract_won("old_orchards", "kestrel")
+	check(is_equal_approx(float(WorldSites.front("old_orchards").progress), 0.5), "and one against the holder helps it on")
+	# The board follows the war: a job on the front.
 	Contracts.server_refresh_board()
 	var board: Array = Campaign.section(Contracts.SECTION).get("board", [])
-	var posted := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false))
-	check(posted.size() == 1 and String(posted[0].target) == h2, "and posts its own offer on the board, against the new holder (%s)" % [posted.map(func(c: Dictionary) -> String: return c.title)])
-	check(not WorldSites.is_flashpoint(zid), "clearing the flag once it has")
+	var on_front := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == "old_orchards" and c.get("war_front", false))
+	check(on_front.size() == 1 and String(on_front[0].target) in ["valley_shura", "kestrel"] and String(on_front[0].brief).begins_with("Fighting in Old Orchards"),
+		"a job goes up on the front, its brief saying who is fighting whom (%s)" % [on_front.map(func(c: Dictionary) -> String: return String(c.brief).left(80))])
+	var posted := board.filter(func(c: Dictionary) -> bool: return c.get("zone_id", "") == "red_gulch" and c.get("war_flip", false) and c.get("target", "") == "saltline")
+	check(posted.size() == 1 and String(posted[0].target) == "saltline" and not WorldSites.is_flashpoint("red_gulch"),
+		"and the flipped zone's own offer, against the new holder, clearing the flag (%s, flag %s)" % [posted.map(func(c: Dictionary) -> String: return "%s vs %s" % [c.title, c.target]), WorldSites.is_flashpoint("red_gulch")])
+	# The last zone: sieged, never taken by another faction (Captain).
+	st["black_ridge"] = 100.0
+	st["highland_front"] = 5.0
+	var moor := WorldSites.site("greyfell_moor")
+	moor.grip = 0.05
+	moor["front"] = {"by": "black_ridge", "since": int(WorldSites._war().day), "progress": 0.98}
+	WorldSites._tick_day()
+	check(WorldSites.holder("greyfell_moor") == "highland_front" and bool(WorldSites.front("greyfell_moor").get("sieged", false)),
+		"a faction's last zone can be sieged but doesn't fall to another faction")
+	# Wiped out only by the company, with its leaders taken.
+	check(not WorldSites.server_company_takes("greyfell_moor") and not WorldSites.is_wiped("highland_front"),
+		"its HQ and QRF down aren't enough while its leaders are free")
+	WorldSites.server_contract_won("greyfell_moor", "highland_front", "hvt_capture")
+	WorldSites.server_contract_won("greyfell_moor", "highland_front", "manhunt")
+	check(WorldSites.leaders_all_down("highland_front") and WorldSites.server_company_takes("greyfell_moor") and WorldSites.is_wiped("highland_front")
+		and "highland_front" not in WorldSites.warring(), "its leaders taken too, the company takes it and the faction is finished")
+	# The company's ground attacked (Captain: yes, now): a defence job, and lost if the front gets through.
+	var zones_c := Campaign.section(ZoneControl.SECTION)
+	zones_c["zones"] = {"blackwood": {"state": ZoneControl.COMPANY, "down": []}}
+	check(WorldSites.holder_now("blackwood") == ZoneControl.PLAYER, "a zone the company took is the company's in the war")
+	var wood := WorldSites.site("blackwood")
+	wood["front"] = {"by": "kestrel", "since": int(WorldSites._war().day), "progress": 0.5}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	var defend := Contracts.front_offer(rng, "blackwood", Economy.day())
+	check(String(defend.get("type", "")) == "defend_hold" and String(defend.get("target", "")) == "kestrel",
+		"an attack on the company's ground posts a defence against the attacker (%s)" % String(defend.get("title", "")))
+	st["kestrel"] = 100.0
+	wood.grip = 0.0
+	(wood.front as Dictionary)["progress"] = 0.99
+	WorldSites._tick_day()
+	check(ZoneControl.control("blackwood") == ZoneControl.ENEMY and WorldSites.holder("blackwood") == "kestrel",
+		"a front that gets through takes the company's zone back (%s)" % ZoneControl.control("blackwood"))
+	zones_c.clear()
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	# Contract targets follow the holder; Black Ridge no longer takes most of them.
+	var offers := ContractGen.generate_board(4321, 1, {"meridian": 10}, 200)
+	var by_target := {}
+	var on_holder := 0
+	var in_war := 0
+	for o: Dictionary in offers:
+		by_target[o.target] = int(by_target.get(o.target, 0)) + 1
+		if WorldSites.is_war_zone(String(o.zone_id)):
+			in_war += 1
+			if String(o.target) == WorldSites.holder(String(o.zone_id)):
+				on_holder += 1
+	check(float(by_target.get("black_ridge", 0)) / offers.size() <= 0.25, "Black Ridge's share of contracts is down to %d%% (%s)" % [roundi(100.0 * by_target.get("black_ridge", 0) / offers.size()), by_target])
+	check(["ashen_banner", "valley_shura", "saltline", "kestrel"].all(func(g: String) -> bool: return int(by_target.get(g, 0)) > 0),
+		"every new group is a contract target")
+	check(in_war > 0 and float(on_holder) / in_war >= 0.55, "most contracts are against the zone's holder (%d of %d)" % [on_holder, in_war])
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+
+
+## A contract of `type_id` against `target` in `zone_id` from the first seed (of 300) whose offer
+## `fits` (a Callable on the offer), {} if none does. `source` "locals" for the locals' own jobs.
+func _offer_against(type_id: String, target: String, zone_id: String, fits: Callable, source := "board") -> Dictionary:
+	for i in 300:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 7700 + i
+		var c := ContractGen.generate(rng, {"day": 1, "source": source, "type": type_id, "zone_id": zone_id, "target": target})
+		if String(c.type) == type_id and fits.call(c):
+			return c
+	return {}
+
+
+## The first objective of `c` (its legs' too) at site `site_id`, {} if none.
+static func _at_site(c: Dictionary, site_id: String) -> Dictionary:
+	var all: Array = (c.get("objectives", []) as Array).duplicate()
+	for leg: Dictionary in c.get("legs", []):
+		all.append_array(leg.objectives)
+	for o: Dictionary in all:
+		if String(o.get("site", "")) == site_id:
+			return o
+	return {}
+
+
+## Terror groups follow-ups (2026-10-20, docs/terror_groups.md section 9): each group's own name
+## for a raid's cache, the cartels' goods beside a target to destroy, the leaders as the HVTs of
+## capture and manhunt jobs (named, dressed for their part, and taken down by name), and Vantage
+## and the Concord fighting by doctrines of their own.
+func _test_faction_followups() -> void:
+	print("Terror groups follow-ups: site names, contraband, named leaders, doctrines")
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	var zone := "harbour_yard"
+	var on_cache := func(c: Dictionary) -> bool: return not _at_site(c, "cache").is_empty()
+	# Site names follow the target.
+	var lab := _offer_against("raid", "kestrel", zone, on_cache)
+	var lab_o := _at_site(lab, "cache")
+	check(String(lab_o.get("site_name", "")) in ["drug lab", "warehouse"] and String(lab_o.text) == "Destroy the %s" % lab_o.site_name
+		and String(lab.title).contains("(%s)" % lab_o.site_name), "a raid on the Kestrel Cartel's cache is on its %s (%s)" % [lab_o.get("site_name", "nothing"), lab.get("title", "")])
+	var again := _offer_against("raid", "kestrel", zone, func(c: Dictionary) -> bool: return String(c.module_id) == String(lab.module_id) and not _at_site(c, "cache").is_empty())
+	check(String(_at_site(again, "cache").get("site_name", "")) == String(lab_o.get("site_name", "")), "the same site is the same thing every time")
+	var cartels := {}
+	for g: String in ["kestrel", "saltline"]:
+		for i in 12:
+			cartels[ContractGen.faction_site_name(g, "cache", "zone%d|m%d" % [i, i])] = true
+	check(cartels.has("drug lab") and cartels.has("warehouse") and cartels.size() == 2, "the cartels keep both drug labs and warehouses (%s)" % [cartels.keys()])
+	var ied := _offer_against("raid", "ashen_banner", zone, on_cache)
+	var shura := _offer_against("supply_line", "valley_shura", zone, on_cache)
+	check(String(_at_site(ied, "cache").get("text", "")) == "Destroy the IED workshop" and String(_at_site(shura, "cache").get("text", "")) == "Destroy the IED workshop",
+		"the Ashen Banner's and the Valley Shura's caches are IED workshops (%s; %s)" % [_at_site(ied, "cache").get("text", ""), _at_site(shura, "cache").get("text", "")])
+	var plain := _at_site(_offer_against("raid", "black_ridge", zone, on_cache), "cache")
+	check(String(plain.get("text", "")) == "Destroy the weapons cache" and not plain.has("site_name") and not plain.has("loot_of"),
+		"Black Ridge's is still a weapons cache, with nothing extra beside it")
+	var placed := Objectives.from_contract(lab.merged({"cid": "TFF1"}, true))
+	var placed_o: Dictionary = placed.filter(func(o: Dictionary) -> bool: return String(o.kind) == Objectives.DESTROY_CACHE)[0]
+	check(String(placed_o.params.get("name", "")) == String(lab_o.get("site_name", "")) and String(placed_o.params.get("loot_of", "")) == "kestrel",
+		"placed, the objective's site carries its name (the HUD's \"Destroy the %s\") and whose goods sit beside it" % placed_o.params.get("name", ""))
+	# Contraband: a box beside the cartels' targets, and in some of their men's pockets.
+	check(String(lab_o.get("loot_of", "")) == "kestrel" and not _at_site(ied, "cache").has("loot_of"), "only the cartels leave their goods at a raid's target")
+	var sab := _offer_against("sabotage", "saltline", zone, func(c: Dictionary) -> bool: return (c.objectives as Array).any(func(o: Dictionary) -> bool: return bool(o.get("optional", false)) and String(o.get("site", "")) == "aa"))
+	var sab_main: Array = (sab.get("objectives", []) as Array).filter(func(o: Dictionary) -> bool: return not bool(o.get("optional", false)))
+	var sab_aa: Array = (sab.get("objectives", []) as Array).filter(func(o: Dictionary) -> bool: return bool(o.get("optional", false)) and String(o.get("site", "")) == "aa")
+	check(not sab.is_empty() and sab_main.size() == 1 and String(sab_main[0].get("loot_of", "")) == "saltline" and not sab_aa.is_empty() and not (sab_aa[0] as Dictionary).has("loot_of"),
+		"a sabotage job on the Saltline Syndicate: its goods by the target (%s), not by the bonus AA gun" % sab_main[0].get("site", "") if not sab_main.is_empty() else "none")
+	var stores := _at_site(_offer_against("locals_stores", "kestrel", zone, on_cache, "locals"), "cache")
+	check(not stores.is_empty() and not stores.has("site_name") and not stores.has("loot_of"), "the locals' stolen stores stay their stores (%s)" % stores.get("text", "no offer"))
+	var contraband := ["hashish", "captagon", "heroin_bricks", "counterfeit_dollars"]
+	var seen := {}
+	var only_goods := true
+	for i in 200:
+		var box := WorldValuables.contraband_box("kestrel", "test|%d" % i, true)
+		for row: Dictionary in box.get("items", []):
+			seen[String(row.id)] = true
+			only_goods = only_goods and (Fixers.is_contraband(StringName(String(row.id))) or ItemDB.get_item(StringName(String(row.id))).type == "valuable")
+	check(contraband.all(func(id: String) -> bool: return seen.has(id)) and only_goods, "the stash holds hashish, captagon, heroin and fake dollars (%s)" % [seen.keys()])
+	check(WorldValuables.contraband_box("ashen_banner", "test|1", true).is_empty() and String(WorldValuables.contraband_box("saltline", "t", true).label) != "",
+		"no stash for a group that doesn't deal")
+	var carriers: Array = range(9).filter(func(i: int) -> bool: return not WorldValuables.pocket_contraband("kestrel", "zone|m1", i, true).is_empty())
+	var pockets := WorldValuables.pocket_contraband("saltline", "zone|m1", 1, true)
+	check(carriers == [1, 4, 7] and pockets.size() >= 1 and pockets.all(func(id: String) -> bool: return ItemDB.has_item(StringName(id)))
+		and range(9).all(func(i: int) -> bool: return WorldValuables.pocket_contraband("black_ridge", "zone|m1", i, true).is_empty()),
+		"every third cartel man carries some (%s; %s), nobody else's do" % [carriers, pockets])
+	# Named leaders.
+	var hvt := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	var hvt_o := _at_site(hvt, "hvt")
+	var person: Dictionary = hvt_o.get("person", {})
+	check(String(hvt.get("leader", "")) == "the Patron" and String(hvt.title).begins_with("HVT capture (the Patron):")
+		and String(hvt.brief).begins_with("Target: %s, the Patron of the Kestrel Cartel." % person.get("name", "?")),
+		"an HVT job against the Kestrel Cartel is after its first leader, by name (%s | %s)" % [hvt.get("title", ""), String(hvt.get("brief", "")).left(70)])
+	check(String(hvt_o.text) == "Capture the Patron (%s) and bring them to extraction alive" % person.get("name", "?") and String(person.get("leader", "")) == "the Patron"
+		and String(person.get("label", "")) == "HVT (%s, the Patron)" % person.get("name", "?") and String(person.get("role", "")) == "financier",
+		"the objective names him, and he dresses as a financier (%s; %s)" % [hvt_o.get("text", ""), person.get("role", "")])
+	var phone := _at_site(hvt, "hvt_phone")
+	check(phone.is_empty() or String(phone.text) == "Bonus: bring out %s's phone" % person.get("name", "?"), "his phone is just his phone (%s)" % phone.get("text", "none"))
+	WorldSites.server_contract_won(zone, "kestrel", "hvt_capture", String(hvt.leader))
+	var next := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	check(WorldSites.leaders_down("kestrel") == ["the Patron"] and String(next.get("leader", "")) == "the Chemist"
+		and String(_at_site(next, "hvt").get("person", {}).get("role", "")) == "bomb_maker",
+		"taken, the next job is after the Chemist, dressed as a bomb maker (%s)" % next.get("title", ""))
+	WorldSites.server_contract_won(zone, "kestrel", "hvt_capture", "the Enforcer")
+	check(WorldSites.leaders_down("kestrel") == ["the Patron", "the Enforcer"] and WorldSites.next_leader("kestrel") == "the Chemist",
+		"a job that named the Enforcer takes the Enforcer, the Chemist still free")
+	WorldSites.server_contract_won(zone, "kestrel", "manhunt", "the Enforcer")
+	check(WorldSites.leaders_all_down("kestrel") and WorldSites.next_leader("kestrel") == "", "one already taken: the next free goes instead, and then all are down")
+	var spent := _offer_against("hvt_capture", "kestrel", zone, func(c: Dictionary) -> bool: return true)
+	check(String(spent.get("leader", "x")) == "" and String(spent.title).begins_with("HVT capture:") and not String(spent.brief).begins_with("Target:"),
+		"all its leaders taken: a plain HVT job (%s)" % spent.get("title", ""))
+	var manhunt: Dictionary = {}
+	for z: String in WorldSites.war_zones():
+		if String(MissionRegistry.zone(z).get("kind", "")) != "contract":
+			continue
+		manhunt = _offer_against("manhunt", "highland_front", z, func(c: Dictionary) -> bool: return not (c.get("legs", []) as Array).is_empty())
+		if not manhunt.is_empty():
+			break
+	var hunted := _at_site(manhunt, "hvt")
+	check(not manhunt.is_empty() and String(manhunt.leader) == "the Commandant" and String(hunted.get("text", "")).begins_with("Capture the Commandant (")
+		and String(manhunt.brief).contains("the Commandant of the Highland Free Front") and String(manhunt.title).contains("(the Commandant)"),
+		"a manhunt names him too, in the zone next door (%s | %s)" % [manhunt.get("title", ""), hunted.get("text", "")])
+	check(String(_offer_against("hvt_capture", "vantage_group", zone, func(c: Dictionary) -> bool: return true).get("leader", "x")) == "",
+		"Vantage has no leaders: its HVT jobs are as they were")
+	var roles_ok := true
+	var unfit: Array = []
+	for g: String in ["black_ridge", "ashen_banner", "valley_shura", "saltline", "kestrel", "highland_front"]:
+		var roles: Dictionary = MissionRegistry.faction(g).get("leader_roles", {})
+		for title: Variant in MissionRegistry.faction(g).get("leaders", []):
+			if StringName(String(roles.get(String(title), ""))) not in PersonLook.HOSTILE_ROLES:
+				roles_ok = false
+				unfit.append("%s: %s" % [g, title])
+	check(roles_ok, "every leader dresses as one of PersonLook's HVT roles (commander, financier, bomb maker) %s" % [unfit])
+	var dressed := PersonLook.outfit(Person.HVT, Person.HOSTILE, {"name": "Person_x", "site": "outpost", "role": "financier"}).trim_prefix(VoxelArt.CIV_PREFIX).split(":")
+	check(String(dressed[0]) in PersonLook.ROLES[&"financier"].shirt and String(dressed[1]) in PersonLook.ROLES[&"financier"].trousers,
+		"a financier leader at an outpost wears a financier's dark suit (%s)" % [dressed])
+	# Doctrines of their own.
+	check(Kits.doctrine("eastern_concord") == &"regular" and Kits.doctrine("vantage_group") == &"pmc" and Doctrine.has(&"regular") and Doctrine.has(&"pmc"),
+		"the Concord fights by the regular doctrine and Vantage by the PMC one, wherever they are")
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+
+
+func _restore_section(section_name: StringName, snap: Dictionary) -> void:
+	var sec := Campaign.section(section_name)
+	sec.clear()
+	sec.merge(snap.duplicate(true))
 
 
 ## Kill attribution (6d's open item): EnemyResponse tags every man it spawns for a named

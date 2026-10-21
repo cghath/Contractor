@@ -662,7 +662,8 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 			get_tree().create_timer(0.5).timeout.connect(refresh))  # the pool comes back from the host
 		service.name = "Service_" + id.validate_node_name()
 		if why == "" and (int(quote.get("cost", 0)) > 0 or int(quote.get("days", 0)) > 0):
-			service.text = "Service: $%s, %d day%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s"]
+			service.text = "Service: $%s, %d day%s%s" % [DebriefCalc.money(int(quote.cost)), int(quote.days), "" if int(quote.days) == 1 else "s",
+				" (parts from the stash: -$%s)" % DebriefCalc.money(int(quote.parts_credit)) if int(quote.get("parts_credit", 0)) > 0 else ""]
 			service.tooltip_text = "Fix every hit zone, the battery and the hull and fill the tank: %s" % service.text.trim_prefix("Service: ")
 			## Off away from the motor pool's sign (this page is a tab on every terminal's screen,
 			## and the host refuses a booking from anywhere else: review of ui/base-hub).

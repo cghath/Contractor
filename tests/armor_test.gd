@@ -15,6 +15,8 @@ const ROUND_LEVELS := {
 	"44mag": "IIIA", "10mm_fmj": "IIIA", "357sig_fmj": "IIIA", "12g_slug": "IIIA", "556_m193": "III",
 	"762x39_msc": "III+", "545x39_7n6": "III++", "762x51_m80": "III+", "556_m855": "III++", "762x54r_lps": "III++",
 	"556_m995": "IV", "762x51_m993": "IV", "3006_m2ap": "IV", "65cm_eldm": "III+", "50bmg_m33": "ABOVE_IV",
+	# items expansion (2026-10-20)
+	"9x18_pm": "IIA", "762x25_tt": "II", "57x28_ss190": "III", "46x30_dm11": "III", "303_mk7": "III+", "762x51_m118lr": "III+", "556_mk262": "III",
 }
 ## Each armor piece's rating.
 const PIECE_RATINGS := {

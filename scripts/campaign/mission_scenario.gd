@@ -993,8 +993,11 @@ func _hvt_begin(o: Dictionary) -> void:
 	var s := people.hvt(hvt_id)
 	if s == null:
 		var person: Dictionary = p.get("person", {})
-		s = people.server_spawn_person({"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt", "side": String(person.get("side", Person.HOSTILE)),
-			"label": String(person.get("label", "HVT")), "pos": _p3(p.pos), "hvt_id": hvt_id, "routine": _hvt_routine(o)})
+		var spawn := {"name": ("Person_" + hvt_id).validate_node_name(), "kind": "hvt", "side": String(person.get("side", Person.HOSTILE)),
+			"label": String(person.get("label", "HVT")), "pos": _p3(p.pos), "hvt_id": hvt_id, "routine": _hvt_routine(o)}
+		if person.has("role"):
+			spawn["look_role"] = String(person.role)  # a faction's named leader dresses for his part (as PeopleLayer's HVTs)
+		s = people.server_spawn_person(spawn)
 		if s == null:
 			print("[mission] HVT kill %s: the HVT didn't spawn" % run.oid)
 			return

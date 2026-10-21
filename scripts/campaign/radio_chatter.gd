@@ -109,7 +109,51 @@ func server_tick(delta := -1.0) -> void:
 		_count_radios()
 	if _switch_at != INF and now() >= _switch_at:
 		_switch()
+	if tuned and _queue.is_empty() and now() >= _ambient_at:  # (terror groups: each net sounds like its own)
+		_ambient_at = now() + randf_range(AMBIENT_S.x, AMBIENT_S.y)
+		var line := ambient_line()
+		if line != "":
+			_say(line)
 	_flush()
+
+
+## Terror groups (2026-10-20): between reports, now and then (AMBIENT_S), a line that's the
+## faction's own (factions.json "radio"), or, where the faction war has a front in this zone
+## (WorldSites), about the fight with the attacker. Proposed.
+const AMBIENT_S := Vector2(90.0, 150.0)
+const AMBIENT_FIRST_S := 45.0
+var _ambient_at := INF
+var _ambient_n := 0
+
+
+## The zone's enemy (EnemyResponse.enemy_faction), "" for none.
+func faction() -> String:
+	var er := level.get_node_or_null(^"EnemyResponse") if level else null
+	return String(er.get(&"enemy_faction")) if er else ""
+
+
+## The next of the faction's own lines (in turn), or one about the front here.
+func ambient_line() -> String:
+	var f := faction()
+	var own: Array = MissionRegistry.faction(f).get("radio", [])
+	var by := String(WorldSites.front_read(GameState.zone_id).get("by", ""))
+	_ambient_n += 1
+	if by != "" and (_ambient_n % 2 == 0 or own.is_empty()):
+		return "%s: all stations, contact with %s, %s side. Hold your posts." % [NET_CALLSIGN, WorldSites.holder_name(by),
+			compass(Vector3.ZERO, _front_side())]
+	if own.is_empty():
+		return ""
+	return "%s: %s" % [NET_CALLSIGN, String(own[_ambient_n % own.size()])]
+
+
+## Roughly where the front is: towards the neighbour the attacker comes from (or north).
+func _front_side() -> Vector3:
+	var by := String(WorldSites.front_read(GameState.zone_id).get("by", ""))
+	const STEP: Array[Vector3] = [Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(1, 0, 0)]
+	for l: Dictionary in RegionMap.links(GameState.zone_id):
+		if ZoneControl.controller(String(l.to)) == by:
+			return STEP[int(l.side)] * 500.0
+	return STEP[0] * 500.0
 
 
 # --- The squad's radios -------------------------------------------------------------------------
@@ -183,6 +227,7 @@ func _count_radios() -> void:
 	if tuned:
 		_taken_at = now()
 		_switch_at = INF
+		_ambient_at = now() + AMBIENT_FIRST_S
 		_say("%s: all stations, radio check, over." % NET_CALLSIGN)
 	else:
 		_switch_at = INF

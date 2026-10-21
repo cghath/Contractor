@@ -24,6 +24,7 @@ const SPRINT_SPEED := 6.0
 const CROUCH_SPEED := 1.7
 const PRONE_SPEED := 0.7     # crawling
 const CRAWL_SPEED := 0.6     # a body moving while down (nothing moves one now; kept for the speed table)
+const DYING_CRAWL_SPEED := 0.35  # conscious but dying (Vitals.is_dying): a slow drag along the ground
 const JUMP_VELOCITY := 3.4  # about 0.6 m: a man in kit (4.2 was a 0.9 m hop, "floaty")
 const STAND_HEAD_Y := 1.65
 const CROUCH_HEAD_Y := 1.0
@@ -303,8 +304,8 @@ func step(delta: float) -> void:
 		_mantle_step(delta, down)
 		update_pose(delta)
 		return
-	if not down and not body.vitals.can_stand() and stance != Stance.PRONE:
-		set_stance(Stance.PRONE)  # a broken pelvis: no standing, crawl (or be carried)
+	if not down and (not body.vitals.can_stand() or body.vitals.is_dying()) and stance != Stance.PRONE:
+		set_stance(Stance.PRONE)  # a broken pelvis, or dying: no standing, crawl (or be carried)
 	var jumped := false
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
@@ -770,7 +771,7 @@ func _mantle_step(delta: float, down: bool) -> void:
 ## Returns whether the body is now in that stance.
 func set_stance(new_stance: int) -> bool:
 	new_stance = clampi(new_stance, Stance.PRONE, Stance.STAND_HIGH)
-	if body.vitals != null and not body.vitals.can_stand():
+	if body.vitals != null and (not body.vitals.can_stand() or body.vitals.is_dying()):
 		new_stance = Stance.PRONE
 	elif new_stance == Stance.PRONE and ExoMech.piloting(body.inventory):
 		return false  # a heavy exo kneels at most (ExoMech)
@@ -959,6 +960,8 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 		speed = minf(speed, WALK_SPEED) * ADS_SPEED_MULT  # glassing: a slow walk
 	if down:
 		speed = CRAWL_SPEED
+	elif body.vitals.is_dying():
+		speed = minf(speed, DYING_CRAWL_SPEED)  # dragging himself along
 	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory)  # a heavy exo walks at its own pace
 
 

@@ -7,8 +7,8 @@ extends Node
 ## first, nothing goes off. The tells are his: no weapon, the heavy vest, the straight walk.
 ## Counterplay: spot him, shoot early.
 ##
-## Host only; one per zone ("Bombers", ZoneLevel). Only factions whose kit is the insurgents'
-## (Kits.INSURGENT) send them: from Pressure tier MIN_TIER, or any time the faction is hunting
+## Host only; one per zone ("Bombers", ZoneLevel). Only factions that send them (factions.json
+## "bombers": the Ashen Banner and the Valley Shura, Captain 2026-10-20; Black Ridge did before): from Pressure tier MIN_TIER, or any time the faction is hunting
 ## the squad (Economy.hunting), at most one every GAP_S, from an unseen spot SEND_M away
 ## [min, max] (EnemyResponse._unseen). All numbers Proposed.
 
@@ -103,8 +103,10 @@ func server_send(at: Vector3) -> Soldier:
 	squad.name = "Bomber%d" % _n
 	squad.faction = &"hostile"
 	add_child(squad)
-	var s: Soldier = lvl.spawn_soldier({"name": "Bomber%d_1" % _n, "faction": "hostile", "variant": "urban", "pos": at,
-		"loadout": KIT, "combat": 0.2, "discipline": 1.0, "guard": false, "mode": "safe"})
+	var spawn := {"name": "Bomber%d_1" % _n, "faction": "hostile", "pos": at,
+		"loadout": KIT, "combat": 0.2, "discipline": 1.0, "guard": false, "mode": "safe"}
+	spawn.merge(_dress(_n), true)
+	var s: Soldier = lvl.spawn_soldier(spawn)
 	if s == null:
 		squad.queue_free()
 		return null
@@ -128,8 +130,10 @@ func server_send_vbied(at: Vector3) -> Vehicle:
 	if v == null:
 		return null
 	v.set_meta(&"no_save", true)
-	var driver: Soldier = lvl.spawn_soldier({"name": "VBIED%d_1" % _n, "faction": "hostile", "variant": "urban", "pos": at + Vector3(3, 0.1, 0),
-		"loadout": ["assault_pack"], "combat": 0.2, "discipline": 1.0, "guard": false, "mode": "safe"})
+	var spawn := {"name": "VBIED%d_1" % _n, "faction": "hostile", "pos": at + Vector3(3, 0.1, 0),
+		"loadout": ["assault_pack"], "combat": 0.2, "discipline": 1.0, "guard": false, "mode": "safe"}
+	spawn.merge(_dress(_n), true)
+	var driver: Soldier = lvl.spawn_soldier(spawn)
 	var seat := 0
 	var seats: Array = v.spec.get("seats", [])
 	for i in seats.size():
@@ -200,12 +204,12 @@ func _go_off(b: Dictionary) -> void:
 		s.vitals.server_damage(1000.0)  # (whatever the blast left of him)
 
 
-## Host, every CHECK_S: maybe a bomber, when the zone's enemy is an insurgent faction that's
-## been pushed (tier) or is hunting the squad.
+## Host, every CHECK_S: maybe a bomber, when the zone's enemy is a faction that sends them
+## (Kits.sends_bombers) and has been pushed (tier) or is hunting the squad.
 func _maybe_send() -> void:
 	var response := get_parent().get_node_or_null(^"EnemyResponse") as EnemyResponse
 	var pressure := get_parent().get_node_or_null(^"Pressure") as Pressure
-	if response == null or Kits.kit_of(response.enemy_faction) != Kits.INSURGENT:
+	if response == null or not Kits.sends_bombers(String(response.enemy_faction)):  # (Captain 2026-10-20: the Banner and the Shura)
 		return
 	var tier := pressure.tier() if pressure else 0
 	if tier < MIN_TIER and not Economy.hunting(String(response.enemy_faction)):
@@ -231,3 +235,15 @@ func _targets() -> Array[Soldier]:
 	var all: Array[Soldier] = MapNodes.players(self)
 	all.append_array(MapNodes.squad_ai(self))
 	return all.filter(func(t: Soldier) -> bool: return is_instance_valid(t) and t.vitals.is_up())
+
+
+## A bomber's or driver's clothes and marks: the zone's enemy's (plain clothes for the terror
+## groups; Black Ridge's grey when nobody else holds the zone).
+func _dress(n: int) -> Dictionary:
+	var response := get_parent().get_node_or_null(^"EnemyResponse") as EnemyResponse
+	var faction := String(response.enemy_faction) if response else FactionSkirmish.DEFAULT_HOLDER
+	var kit_id := Kits.kit_of(faction)
+	var out := Kits.dress(faction, kit_id, n * 7 + 1)
+	if Kits.is_data(kit_id) and Kits.is_uniform(kit_id, n * 7 + 1):
+		out["variant"] = Kits.variant(kit_id, n * 7 + 2)  # (a bomber never wears the uniform)
+	return out
