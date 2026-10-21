@@ -95,6 +95,14 @@ const TRIAGE_TEXT := {TRIAGE_NONE: "No card", TRIAGE_MINIMAL: "Minimal (green)",
 const TRIAGE_COLORS := {TRIAGE_NONE: Color(0.55, 0.57, 0.6), TRIAGE_MINIMAL: Color(0.3, 0.75, 0.35), TRIAGE_DELAYED: Color(0.95, 0.85, 0.2),
 	TRIAGE_IMMEDIATE: Color(0.9, 0.2, 0.15), TRIAGE_EXPECTANT: Color(0.05, 0.05, 0.05)}
 var _triage: StringName = TRIAGE_NONE
+## The shared triage log (cghath's list, 2026-10-20, "Medical"): who did what to this casualty,
+## and when, the same for everyone treating him (the medical menu shows it). Host-owned, kept
+## here on the casualty so it goes wherever he does (carried, dragged, across a crossing: it's
+## in server_snapshot), replicated in net_state under "tl" (part of the structure: it changes
+## only on events), late joiners included. Each entry is [when (the zone's clock, "14:05"), who,
+## what]. The oldest go past CARE_LOG_KEEP.
+const CARE_LOG_KEEP := 24
+var _care_log: Array = []
 
 ## Unconscious or in cardiac arrest (replicated at once).
 var downed := false:
@@ -102,7 +110,8 @@ var downed := false:
 		downed = value
 		changed.emit()
 
-## Wound-model state (see WoundModel.to_net, plus "tg" the triage card). The host assigns a
+## Wound-model state (see WoundModel.to_net, plus "tg" the triage card and "tl" the shared
+## triage log, care_log). The host assigns a
 ## fresh Dictionary on each publish; a peer rebuilds it from net_vitals and net_pulse. Not
 ## replicated itself.
 var net_state: Dictionary = {}:
@@ -113,7 +122,7 @@ var net_state: Dictionary = {}:
 
 ## Keys of net_state that make up the structure (net_vitals): they change only on real events.
 ## "v" (the bag) goes here as [item, mL]; the mL left goes in the pulse.
-const STRUCT_KEYS: Array[String] = ["w", "q", "a", "v", "tg", "z"]
+const STRUCT_KEYS: Array[String] = ["w", "q", "a", "v", "tg", "z", "tl"]
 ## Replicated (ServerSync): the structure of net_state (STRUCT_KEYS) plus "r", its revision.
 ## The host sets it only when the structure changes.
 var net_vitals: Dictionary = {}:
@@ -1008,6 +1017,7 @@ func server_kill() -> void:
 func server_reset_health() -> void:
 	_model.reset()
 	_triage = TRIAGE_NONE
+	_care_log = []  # a fresh body (a respawn): nobody has treated it yet
 	_died_sent = false
 	_sim_left = 0.0
 	if downed:
@@ -1029,6 +1039,38 @@ func server_set_triage(card: StringName) -> void:
 	_triage = card
 	_publish(true)
 	changed.emit()
+
+
+## The shared triage log on this casualty, oldest first: [{"t" (when, the zone's clock),
+## "who", "what"}], on every peer (the host's own, or what it replicated).
+func care_log() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for e: Variant in (_care_log if _is_host() else net_state.get("tl", [])):
+		if e is Array and (e as Array).size() >= 3:
+			out.append({"t": String(e[0]), "who": String(e[1]), "what": String(e[2])})
+	return out
+
+
+## Host only. Adds "`who`: `what`" to the shared triage log, stamped with the zone's clock (the
+## day-night cycle's hour; the host's clock where a level has none), the same text for every peer.
+func server_log_care(who: String, what: String) -> void:
+	if not _is_host() or what == "":
+		return
+	_care_log.append([care_time(), who, what])
+	while _care_log.size() > CARE_LOG_KEEP:
+		_care_log.pop_front()
+	_publish(true)
+	changed.emit()
+
+
+## When a care log entry is made: the zone's hour ("14:05"), else the host's clock ("14:05:31").
+static func care_time() -> String:
+	var dn := DayNight.current()
+	if dn != null:
+		var h := fposmod(dn.hour, 24.0)
+		return "%02d:%02d" % [floori(h), floori(fposmod(h * 60.0, 60.0))]
+	var t := Time.get_time_dict_from_system()
+	return "%02d:%02d:%02d" % [t.hour, t.minute, t.second]
 
 
 ## Host only. Fast-forwards the simulation by `seconds` (tests).
@@ -1113,10 +1155,11 @@ func _log_open_breaks() -> void:
 ## Publishes net_state when it changed: at once when forced or when consciousness, arrest or
 ## death flags changed, otherwise at most every NET_INTERVAL_S. Countdowns alone don't count
 ## as a change (clients run them down themselves).
-## Host: this body's whole condition (the wound model, downed, the triage card), to carry into the
-## next zone (LZ-2 crossings); server_restore puts it on a fresh body there.
+## Host: this body's whole condition (the wound model, downed, the triage card and the shared
+## triage log), to carry into the next zone (LZ-2 crossings) and into a save (a resumed
+## deployment's, people, checkpoints); server_restore puts it on a fresh body there.
 func server_snapshot() -> Dictionary:
-	return {"model": _model.snapshot(), "downed": downed, "triage": _triage}
+	return {"model": _model.snapshot(), "downed": downed, "triage": _triage, "care_log": _care_log.duplicate(true)}
 
 
 func server_restore(snap: Dictionary) -> void:
@@ -1124,6 +1167,10 @@ func server_restore(snap: Dictionary) -> void:
 		return
 	_model.restore(snap.get("model", {}))
 	_triage = snap.get("triage", _triage)
+	_care_log = []
+	for e: Variant in snap.get("care_log", []):  # (older saves: none)
+		if e is Array and (e as Array).size() >= 3:
+			_care_log.append([String(e[0]), String(e[1]), String(e[2])])
 	downed = bool(snap.get("downed", false))
 	_publish(true)
 
@@ -1131,6 +1178,7 @@ func server_restore(snap: Dictionary) -> void:
 func _publish(force: bool) -> void:
 	var state := _model.to_net()
 	state["tg"] = String(_triage)
+	state["tl"] = _care_log.duplicate(true)
 	var key := state.duplicate()
 	key.erase("t")
 	if key == _published and not force:

@@ -636,6 +636,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.person_name = String(data.get("person_name", ""))  # the name tape (older saves: none)
 	corpse.nation = String(data.get("nation", ""))
 	corpse.left_handed = bool(data.get("left", false))
+	corpse.dog_tags = (data.get("tags", {}) as Dictionary).duplicate()  # a company soldier's, until taken (older saves: none)
 	corpse.body_uid = String(data.uid)
 	corpse.spawn_id = String(data.get("spawn_id", ""))
 	corpse.collision_layer = 0

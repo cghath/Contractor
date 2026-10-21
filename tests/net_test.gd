@@ -58,6 +58,9 @@ var _virtual_group := {}
 ## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
 const DRAGGER := "Dragger"
 const DRAGGED := "Dragged"
+## The shared triage log the host writes on the dragged casualty before the client joins
+## (cghath's list, 2026-10-20): [who, what]; the client must read the same off him.
+const CARE_LOG := [["Dragger", "Tourniquet, left thigh"], ["Medic", "Triage card: Immediate (red)"]]
 ## A hostile the host stages aiming its rifle (_stage_drag), for the client to shoot and loot
 ## (_check_looted_rifle).
 const AIMER := "Aimer"
@@ -169,6 +172,8 @@ func _stage_drag() -> void:
 	var dragged: Soldier = make.call(DRAGGED, Vector3(12, 0.1, 31.1))
 	await get_tree().create_timer(0.3).timeout
 	dragged.vitals.server_damage(500.0)
+	for e: Array in CARE_LOG:
+		dragged.vitals.server_log_care(String(e[0]), String(e[1]))
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
 	var aimer: Soldier = make.call(AIMER, AIMER_AT)
 	aimer.want_aim = true  # its rifle shouldered when the client shoots it
@@ -466,6 +471,10 @@ func _run_client() -> void:
 		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")
 		await _wait_for(func() -> bool: return me.inventory.medical_count(&"pressure_bandage") == 1, 2.0)
 		check(me.inventory.medical_count(&"pressure_bandage") == 1 and me.inventory.count_of(&"ifak") == 1, "drawn from the IFAK, which stays with one bandage left")
+		await _wait_for(func() -> bool: return not me.vitals.care_log().is_empty(), 2.0)
+		var log := me.vitals.care_log()
+		check(log.size() == 1 and String(log[0].who) == "%s (self)" % me.display_name() and String(log[0].what) == "Pressure Bandage, left forearm",
+			"and the host's entry for it in the shared triage log replicates (%s)" % [log])
 	# The medical model's hidden values reach the client too, so its checks and cues match.
 	me._server_treat.rpc_id(1, me.get_path(), &"morphine", Vitals.TORSO)
 	await _wait_for(func() -> bool: return me.vitals.morphine_level() > 0.2, 12.0)
@@ -719,6 +728,10 @@ func _check_late_drag() -> void:
 	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
 		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
+	var log := dragged.vitals.care_log()
+	var seen: Array = log.map(func(e: Dictionary) -> Array: return [e.who, e.what])
+	check(seen == CARE_LOG and log.all(func(e: Dictionary) -> bool: return String(e.t) != ""),
+		"the shared triage log the host wrote on him before this client joined is here, the same, while he's dragged (%s)" % [log])
 
 
 ## The patient the host treated before this client joined (_stage_patient): every device drawn

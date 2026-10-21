@@ -81,7 +81,11 @@ raid are in the proposal ($30,250 pay against $21,100 of wages, upkeep and field
   own days (`Economy.drop_run_bills` when it starts). Loan installments: `pay_week()`, every
   `week_days`. Both through `_pay_bill` (an emergency loan when the cash won't cover it) and the
   `bill_paid` signal. `weekly_bill()` is the week's total (the host's, synced to clients).
-- Field costs, death benefit, treatment: `DebriefCalc.expenses()`, charged in `Contracts.server_end_deployment`.
+- Field costs, treatment: `DebriefCalc.expenses()`, charged in `Contracts.server_end_deployment`.
+- Death benefit (feat/fallen): in a campaign, `BaseHub.server_pay_death_benefit`, once per man when his
+  death is confirmed (his dog tags or body came out at extraction: `Economy.charge_run`, so the debrief
+  lists it as its own line; or he's declared dead `Fallen.DECLARE_DAYS` after he fell, or written off).
+  `DebriefCalc.expenses()` counts the dead itself only for a report without the roster (`benefits_paid`).
 - Respawns (`BaseHub.server_count_respawn`, `RosterDeployment.respawn_cost` with the cap), support
   calls (`Economy.server_pay_support`), lost helicopters (`HeliSupports.server_lost`):
   `Economy.charge_run` / `note_run_expense`; refunds are listed as negatives.
