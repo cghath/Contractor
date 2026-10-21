@@ -69,6 +69,7 @@ func _ready() -> void:
 	await _test_pick_up()
 	await _test_equip_and_draw()
 	await _test_fingers()
+	_test_feet()
 	await _test_treat()
 	await _test_techniques()
 	await _test_treat_props()
@@ -311,11 +312,16 @@ func _walk_model(stance: int, speed: float, dir: Vector3, body: String) -> Dicti
 	var slide := 0.0
 	var planted := 0
 	var down_at: Array = [null, null]
+	var feet := {"pitch_max": -INF, "pitch_min": INF, "toes": false}
 	for i in 240:
 		holder.position += world_dir * speed * dt
 		model._process(dt)
 		if i < 90:
 			continue
+		for left in [true, false]:
+			feet.pitch_max = maxf(feet.pitch_max, model.foot_pitch(left))
+			feet.pitch_min = minf(feet.pitch_min, model.foot_pitch(left))
+			feet.toes = feet.toes or model.foot_toes(left)
 		for f in 2:
 			var sole := model.foot_position(f == 0)
 			if sole.y - holder.position.y < 0.002:
@@ -325,7 +331,8 @@ func _walk_model(stance: int, speed: float, dir: Vector3, body: String) -> Dicti
 				slide = maxf(slide, _flat(sole, down_at[f]))
 			else:
 				down_at[f] = null
-	var out := {"gait": model.gait(), "slide": slide, "planted": planted, "weight": model.gait_weight()}
+	var out := {"gait": model.gait(), "slide": slide, "planted": planted, "weight": model.gait_weight(),
+		"pitch_max": feet.pitch_max, "pitch_min": feet.pitch_min, "toes": feet.toes}
 	holder.queue_free()
 	return out
 
@@ -640,6 +647,117 @@ func _test_fingers() -> void:
 	model.set_hand_pose(1, &"")
 	await _frames(2)
 	check(model.hand_pose(1) == HandPose.SUPPORT, "and let go, the hand is back on the handguard (%s)" % model.hand_pose(1))
+
+
+## Feet (Feet, 2026-10-21): boots, sneakers, shoes, sandals and bare feet at 0.5 cm, each foot on an
+## ankle of its own: flat standing, the heel striking with the toes up and pushing off the bent
+## toes walking, the toes tucked kneeling on that knee and prone.
+func _test_feet() -> void:
+	print("Feet")
+	for style in Feet.STYLES:
+		var spec := VoxelArt._spec(Feet.model(style, false, false))
+		var occ := VoxelArt.occupancy(Feet.model(style, false, false))
+		var length := _solid_extent(occ, 2)
+		check(is_equal_approx(float(spec.voxel) / int(spec.sub), VoxelArt.FINE_VOXEL) and length > 0.24 and length < 0.34,
+			"%s: built in 0.5 cm voxels, %.1f cm long" % [style, length * 100.0])
+	var boot := Feet.model(Feet.BOOTS, false, false)
+	var heel := _sole_depth(boot, 0.04)
+	var ball := _sole_depth(boot, -0.13)
+	check(heel > ball + 0.004, "a boot's sole has a heel (%.1f cm of sole under the heel, %.1f under the ball)" % [heel * 100.0, ball * 100.0])
+	var toes := _toe_count(VoxelArt.occupancy(Feet.model(Feet.BARE, false, false)))
+	check(toes == 5, "a bare foot has five toes (%d)" % toes)
+	check(Feet.style_of("multicam") == Feet.BOOTS and Feet.style_of("banner") == Feet.SNEAKERS
+		and Feet.style_of("civ:a8a49a:a8a49a:b07a52:4a3f35:sandals") == Feet.SANDALS
+		and Feet.style_of("civ:a8a49a:a8a49a:b07a52:3a3027") == Feet.BOOTS
+		and Feet.STYLES.has(Feet.style_of("civ:aaaaaa:bbbbbb:b07a52:6b4a2b")),
+		"footwear by kit: contractors in boots, Banner in sneakers, sandals where named, plain clothes their own")
+	var model := player.model
+	var foot := model.foot_node(true)
+	check(foot != null and foot.get_parent() == model.part_node(Vitals.SHIN_L) and String(foot.get_meta(&"voxel_model", "")).begins_with("foot:boots"),
+		"each foot is its own part on the shin's ankle (%s)" % (foot.get_meta(&"voxel_model", "") if foot else "none"))
+	check(absf(model.foot_pitch(true)) < 0.12 and absf(model.foot_pitch(false)) < 0.12,
+		"standing: both soles flat on the ground (%.2f, %.2f rad)" % [model.foot_pitch(true), model.foot_pitch(false)])
+	var walk := _walk_model(SoldierMovement.Stance.STAND_HIGH, 1.4, Vector3.FORWARD, VoxelArt.MALE)
+	check(walk.pitch_max > 0.15 and walk.pitch_min < -0.3 and walk.toes,
+		"walking: the heel strikes with the toes up (%.2f), the foot pushes off its bent toes (%.2f)" % [walk.pitch_max, walk.pitch_min])
+	var run := _walk_model(SoldierMovement.Stance.STAND_HIGH, 5.0, Vector3.FORWARD, VoxelArt.FEMALE)
+	check(run.pitch_min < -0.3 and run.toes, "running (a woman's): the same roll off the toes (%.2f)" % run.pitch_min)
+	var kneel := _posed_feet(SoldierMovement.Stance.CROUCH_LOW)
+	check(kneel.toes[1] and kneel.pitch[1] < -0.6 and absf(kneel.pitch[0]) < 0.2,
+		"kneeling: the back foot up on its tucked toes (%.2f), the front flat (%.2f)" % [kneel.pitch[1], kneel.pitch[0]])
+	var prone := _posed_feet(SoldierMovement.Stance.PRONE)
+	check(prone.toes[0] and prone.toes[1], "prone: the toes tucked into the ground")
+
+
+## A model posed in `stance` for a second: {"pitch": [left, right] foot pitch, "toes": [left, right]}.
+func _posed_feet(stance: int) -> Dictionary:
+	var holder := Node3D.new()
+	holder.position = Vector3(420, 0, 400)
+	add_child(holder)
+	var model := CharacterModel.new()
+	model.lod = false
+	holder.add_child(model)
+	model.set_process(false)
+	model.pose = SoldierMovement.pose_for(stance, 0, 0.0)
+	for i in 90:
+		model._process(1.0 / 60.0)
+	var out := {"pitch": [model.foot_pitch(true), model.foot_pitch(false)], "toes": [model.foot_toes(true), model.foot_toes(false)]}
+	holder.queue_free()
+	return out
+
+
+## How far (m) a model's voxels reach along `axis` (0 x, 1 y, 2 z).
+func _solid_extent(occ: Dictionary, axis: int) -> float:
+	var dims: Vector3i = occ.dims
+	var lo := 1 << 30
+	var hi := -1
+	for z in dims.z:
+		for y in dims.y:
+			for x in dims.x:
+				if occ.solid[x + dims.x * (y + dims.y * z)] == 1:
+					var c: int = [x, y, z][axis]
+					lo = mini(lo, c)
+					hi = maxi(hi, c)
+	return (hi - lo + 1) * float(occ.cell) if hi >= lo else 0.0
+
+
+## How deep (m) model `m`'s sole (VoxelArt.C.SOLE voxels) is at `z_m` metres forward (-) or back (+)
+## of the ankle, under the middle of the foot.
+func _sole_depth(m: String, z_m: float) -> float:
+	var spec := VoxelArt._spec(m)
+	var cell: float = float(spec.voxel) / int(spec.sub)
+	var buffer := VoxelArt.raster_copy(m, "multicam")
+	var dims: Vector3i = spec.size * int(spec.sub)
+	var z := int((Vector3(spec.pivot).z * float(spec.voxel) + z_m) / cell)
+	var n := 0
+	for y in dims.y:
+		if buffer.get_voxel(dims.x / 2 + 1, y + 1, z + 1, VoxelBuffer.CHANNEL_COLOR) == VoxelArt.C.SOLE:
+			n += 1
+	return n * cell
+
+
+## How many toes cross a foot model just above its sole, 3.8 cm back from the big toe (where all five reach).
+func _toe_count(occ: Dictionary) -> int:
+	var dims: Vector3i = occ.dims
+	var cell: float = occ.cell
+	var front := dims.z
+	for z in dims.z:
+		for y in dims.y:
+			for x in dims.x:
+				if occ.solid[x + dims.x * (y + dims.y * z)] == 1:
+					front = mini(front, z)
+	var z := front + int(0.038 / cell)
+	var best := 0
+	for y in range(1, int(0.02 / cell)):
+		var runs := 0
+		var inside := false
+		for x in dims.x:
+			var solid: bool = occ.solid[x + dims.x * (y + dims.y * z)] == 1
+			if solid and not inside:
+				runs += 1
+			inside = solid
+		best = maxi(best, runs)
+	return best
 
 
 ## How many fingers cross a slice through hand model `m` 3 cm below its knuckles (the voxels'

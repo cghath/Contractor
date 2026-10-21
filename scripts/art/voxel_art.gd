@@ -41,20 +41,24 @@ enum C {
 	# Inside a body (BodyDeform: crater walls and stumps go skin, then fat, flesh, bone) and
 	# what a blast leaves on it (charred).
 	FLESH, FAT, BONE, BONE_SHADE, CHAR, CHAR_DARK,
+	LACE, SOLE_LIGHT,  # bootlaces; a sneaker's light sole and laces (Feet)
 }
 
 const VARIANTS := {
 	"multicam": {
 		"camo": ["a39a72", "6e7454", "7d6447", "4a4334"], "skin": "c8996f", "hair": "3b2a1d",
 		"patch": "3b4a6b", "gear": "8a7a58", "pack": "7a6c4e",
+		"boot": "7a6447",  # boots (Feet)
 	},
 	"woodland": {
 		"camo": ["5f6b42", "3f4a2e", "6b5236", "262420"], "skin": "8d5b3e", "hair": "1d1612",
 		"patch": "2f3a24", "gear": "4f5a3a", "pack": "48523a",
+		"boot": "26231f",  # boots (Feet)
 	},
 	"desert": {
 		"camo": ["c2ab7f", "a68b5f", "d6c49b", "8a7353"], "skin": "e0b48f", "hair": "6b4a2b",
 		"patch": "7a3b2e", "gear": "b29c74", "pack": "a38e68",
+		"boot": "8a7353",  # boots (Feet)
 	},
 	"urban": {
 		# Black Ridge Militia (Captain, 2026-10-17: "give the militia we typically face early game
@@ -75,12 +79,14 @@ const VARIANTS := {
 	"black": {
 		"camo": ["1a1a1a", "141414", "202020", "0d0d0d"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "5c1f1f", "gear": "232323", "pack": "1f1f1f",
+		"boot": "1c1c1c",  # boots (Feet)
 	},
 	## The Ashen Banner's foreign fighters (terror groups, docs/terror_groups.md 2.1): charcoal and
 	## black with sand, a red patch; its local men wear plain dark clothes (Kits.variant).
 	"banner": {
 		"camo": ["2e2e2c", "1c1c1b", "4a4438", "8a7a5c"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "c8281e", "gear": "2b2a27", "pack": "3a3530",
+		"feet": "sneakers", "boot": "3b3b3d",  # trainers (Feet)
 	},
 	## The Highland Free Front (docs/terror_groups.md 6): moorland smocks, slate and heather over
 	## old woodland surplus, an orange patch.
@@ -92,6 +98,7 @@ const VARIANTS := {
 	"tan": {
 		"camo": ["c9ba9c", "bfae8e", "d9ccae", "a89470"], "skin": "c8996f", "hair": "3b2a1d",
 		"patch": "3b4a6b", "gear": "a8977a", "pack": "9c8a68",
+		"boot": "7a6447",  # boots (Feet)
 	},
 }
 ## Plain clothes (civilians, HVTs and hostages: PersonLook.outfit) instead of a uniform:
@@ -455,8 +462,14 @@ const WARM_HANDS := [[&"relaxed", false], [&"relaxed", true], [&"grip", false], 
 static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	var out: Array = []
 	for part in BODY_PARTS:
-		if part != "forearm" and part != "head":  # (each person's own head builds with his face: FaceRig)
+		if part != "forearm" and part != "head" and part != "shin":  # (each person's own head builds with his face: FaceRig)
 			out.append([body_part(part, body), variant])
+	# The shin and feet in this scheme's footwear (Feet): flat and with the toes bent, each side.
+	var style := Feet.style_of(variant)
+	out.append([Feet.shin_model(style, body), variant])
+	for left in [true, false]:
+		for toes in [false, true]:
+			out.append([Feet.model(style, left, toes, body), variant])
 	# The forearms in the poses a soldier is drawn in most (HandPose): relaxed, the firing grip
 	# and the support grip, a magazine, holding something.
 	var bare := hands_bare(variant)
@@ -766,6 +779,8 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.BRASS: Color("a8873f"),
 			C.GLOVE_PAD: Color(v.get("glove", "2f2f2a")).lightened(0.14),
 			C.NAIL: skin.lerp(Color("e9c9bd"), 0.55),
+			C.LACE: Color(v.get("boot", "3a3027")).darkened(0.35),
+			C.SOLE_LIGHT: Color("d8d4c8"),
 			C.STUBBLE: skin.lerp(Color(v.hair), 0.38), C.EYE_WHITE: Color("e2dcd0").lerp(skin, 0.12),
 			C.IRIS: Color(v.get("eye", "4a3020")), C.PUPIL: Color("0d0b0a"), C.LASH: Color(v.hair).darkened(0.35).lerp(Color("141010"), 0.5),
 			C.TEETH: Color("e0d8c4"),
@@ -811,7 +826,8 @@ static func _spec(model: String) -> Dictionary:
 		"forearm": return _forearm(model)
 		"leg": return _leg()
 		"thigh": return _thigh()
-		"shin": return _shin()
+		"shin": return Feet.shin_spec(StringName(model.get_slice(":", 1)), false) if model.contains(":") else _shin()
+		"foot": return Feet.foot_spec(model, false)
 		"vest": return _vest(arg)
 		"vest_f": return _vest(arg, _torso_f(true), true)
 		"vest_f_front": return _vest(arg, _torso_f(true), true, true)
@@ -846,7 +862,8 @@ static func _spec(model: String) -> Dictionary:
 		"forearm_f": return _forearm(model, true)
 		"leg_f": return _leg_f()
 		"thigh_f": return _thigh_f()
-		"shin_f": return _shin_f()
+		"shin_f": return Feet.shin_spec(StringName(model.get_slice(":", 1)), true) if model.contains(":") else _shin_f()
+		"foot_f": return Feet.foot_spec(model, true)
 	push_error("VoxelArt: unknown model '%s'" % model)
 	return {"size": Vector3i.ONE, "boxes": []}
 

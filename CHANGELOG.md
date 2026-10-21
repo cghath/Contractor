@@ -11,6 +11,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Feet (Captain, 2026-10-21: "better feet")
+
+#### Added
+- **Real footwear at 0.5 cm.** Combat boots have a lugged sole with a heel, a toe box with a toe
+  cap, laces with eyelets up the instep, a laced shaft with speed hooks, a padded ankle cuff and
+  a pull loop. Trousers are bloused over the top. There are also sneakers (a thick light sole,
+  white laces), leather shoes, sandals with straps over bare toes, and bare feet with five toes.
+  Women's feet are smaller.
+- **Footwear by kit.** Contractors and the armies wear boots: coyote for multicam, tan and desert;
+  black for woodland and Vantage. Banner fighters and Saltline wear sneakers, and the Shura wear
+  sandals. Plain clothes get sneakers, shoes or sandals, or boots with the field commander's
+  shoes. A plain-clothes scheme can name its footwear in a sixth field
+  (`civ:<shirt>:<trousers>:<skin>:<shoes>:<style>`).
+- **Feet move like feet.** Each foot is its own part on an ankle joint, pitched to the ground
+  each frame. It's flat when planted. Walking and running, the heel strikes with the toes up,
+  then the heel lifts and the foot rolls off its bent toes. Kneeling, the back foot is up on
+  tucked toes; prone, the toes dig into the ground. Down or dead, the feet go slack.
+
+#### Changed
+- Each leg's shin is drawn for its footwear (a boot's shaft, a trouser hem, a bare ankle), with
+  the foot on its own node. That adds two meshes (about 1,000 to 3,000 triangles each) and two
+  draw calls per body. A severed shin takes its foot with it. The leg's hit shape is unchanged.
+- Posed parts (`forearm:grip:`, `shin:boots`) now widen with a heavier build, as the plain parts did.
+
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
 #### Added
