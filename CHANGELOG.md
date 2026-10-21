@@ -21,7 +21,8 @@ commit 75cc83e (`scripts/combat/shotguns.gd`), if the Captain wants them on his 
 
 #### Added
 - **M320 Grenade Launcher** (`m320`, $1,600 proposed): an underbarrel attachment for railed rifles,
-  mounted from the inventory like a grip (not on machine guns or sniper rifles). **4** (new key,
+  mounted from the inventory like a grip (not on machine guns, marksman or sniper rifles, SMGs or
+  shotguns). **4** (new key,
   rebindable; on the pad wheel as "Underbarrel launcher") switches the trigger to it and back;
   **R** then loads one grenade by hand (about 3 s), **Fire** lobs it. The grenade flies the
   launchers' own projectile with gravity, so it arcs: aim high for range. The loaded grenade is
@@ -43,6 +44,409 @@ commit 75cc83e (`scripts/combat/shotguns.gd`), if the Captain wants them on his 
 - **Held model (Captain's files):** the M320 isn't drawn under the rifle in hand (attachments
   under the barrel aren't drawn on the held gun at all yet). It uses the rifle hold.
 - **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130).
+
+### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
+
+#### Added
+- **SMG models**: the MP5 (cocking tube with its handle on the left, curved magazine, two-strut
+  stock), the MP5SD (integral suppressor), the UMP45 (squared polymer body, straight magazine,
+  folding skeleton stock), and the MP7 and Uzi with the magazine up the pistol grip. An empty
+  reload slaps the locked-back cocking handle home.
+- **Shotgun models**: the Remington 870 (wooden pump and stock) and Mossberg 590 (synthetic, heat
+  shield) with a magazine tube under the barrel and no magazine well, racked by the pump; the
+  M1014 with its charging handle, pistol grip and collapsible stock. Shells load through the top,
+  like a bolt-action's clip.
+- **Pistol variants**: compact (Glock 19), all-steel hammer pistols with wooden grips (M1911,
+  Beretta M9, CZ 75, TT-33, P226) and a compact steel one (Makarov PM).
+
+#### Changed
+- These guns used to borrow the C8, Mosin or single pistol model at their real length. The
+  G36C, Vityaz, Saiga-12, P90, AUG, Lee-Enfield and SKS keep their families (carbine, AK,
+  bullpup, bolt-action), which match the real guns closely enough.
+
+### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
+
+#### Added
+- **41 guns**, all real-world, each with its own magazine and rounds:
+  - Pistols: Glock 19, Beretta M9, CZ 75 B, Makarov PM, Tokarev TT-33, FN Five-seveN, Glock 18C
+    (full auto), HK USP45.
+  - SMGs: MP5A3, MP5SD6 (built-in suppressor), MP7A1, Uzi, PP-19-01 Vityaz, P90, UMP45.
+  - Shotguns: Remington 870, Mossberg 590A1, Benelli M1014, Saiga-12. Each shell fires nine
+    buckshot pellets, each traced on its own.
+  - Assault rifles: SIG MCX, SCAR-L, G36C, AUG A3, Tavor X95, AK-12, AKMS, AK-105, AMD-65,
+    vz. 58.
+  - Marksman rifles: Mk 12 SPR, SR-25, M14 EBR.
+  - Battle rifles: G3A3, FN FAL, L1A1 SLR.
+  - Machine guns: RPD, Negev, MG3, M60E4.
+  - Older rifles: Lee-Enfield No. 4, SKS.
+- **32 ammo items** and **7 new rounds**: 9x18 Makarov, 7.62x25 Tokarev, 5.7x28, 4.6x30,
+  .303 British, 7.62 M118LR match and 5.56 Mk 262 match.
+  - New magazines: SMG, pistol, 7.62 battle-rifle and match, a 45-round RPK-74 magazine (the
+    RPK-74 now takes it), G36, AUG and vz. 58.
+  - Shotgun ammo: 12 gauge speed loaders, Saiga magazines and loose shells.
+  - Charger clips for the Lee-Enfield and SKS, and an RPD belt drum.
+- **33 gear items:**
+  - 7 helmets: ACH, Mk7, 6B47, SSh-68, M1 steel, ECH (rated III), Altyn with visor.
+  - 6 carriers: SPC, MBAV, 6B23, slick carrier, police IIIA vest, IOTV with side plates.
+  - 3 chest rigs with no armour: Chicom, Smersh, D3CRM.
+  - 4 packs: sling bag, daypack, 30 L assault pack, 60 L ruck.
+  - 5 pouches: SMG mags, shotgun shells, canteen, large GP, 7.62 mags.
+  - 4 plates: SAPI III+, XSAPI IV, light PE III+, ceramic side plate.
+  - 3 ear protectors (ComTac, Sordin, foam earplugs). They work like the existing ear pro.
+  - A ghillie suit: lying or crouched, you take half again as long to spot.
+- **21 attachments** on the existing mounts:
+  - 9 optics: Kobra, Romeo5, T-2 with a 3x magnifier, PSO-1, HAMR, SUSAT, ELCAN C79, Strike
+    Eagle 1-6x, ATACR 5-25x.
+  - 4 suppressors: 9mm, .45, AK (PBS-4), short 5.56.
+  - Handstop, stubby grip, Harris bipod, grip pod.
+  - X300 and TLR-1 lights, a green laser, a PEQ-2 IR laser.
+- **12 consumables** with a real effect. Right-click > Drink, Eat, Take or Use (or double-click)
+  in the inventory.
+  - Energy drink, caffeine tablets: stamina comes back faster for half an hour or so, and the
+    heart rate goes up a little.
+  - Ibuprofen, paracetamol: a little pain relief. Together they take at most 0.25 off, against
+    morphine's 0.5 a dose. They don't sedate.
+  - Bottled water, electrolyte sachets, MRE, IRP ration, energy bar, canned meat: stamina comes
+    back a little faster. Food and water aren't tracked yet, so nothing goes hungry.
+  - AA and CR123A batteries: recharge an NVG fully (the mounted one, else the flattest you carry).
+- **75 barter, materials, valuables and documents**, Tarkov-inspired:
+  - 30 materials: tools, electrical parts, a graphics card, drone parts, vehicle parts, weapon
+    parts. They are salvage, so rebel support upgrades can use them.
+  - Vehicle parts in the stash (spark plugs, bearings, an alternator, oil...) take up to half
+    off a motor pool repair.
+  - 27 barter items: household goods, medical supplies, keys, and clothing (gloves, balaclava,
+    shemagh, ballistic glasses and goggles, knee pads, GP-5 and M50 gas masks). Gas masks are
+    barter because there is no gas mechanic.
+  - 13 valuables: rings, chains, earrings, phones, a laptop, a camera, beads, a statuette.
+  - 5 intel documents: ID cards, a shipping manifest, bank slips, photographs, letters.
+- **Every new item is in the loot tables, by rarity.**
+  - The site boxes, pools and body pockets all take them.
+  - Cheap finds come two or three to a bundle.
+  - Strongboxes hold only valuables and papers.
+- **Army kits.** The Iranian Concord kit fields G3A3s, the Russian kit an AK-12, and US allies a
+  Mk 12 marksman.
+- **Art.** New guns use the existing families at their real length:
+  - the MP5 and UMP on the short carbine;
+  - the Vityaz and Saiga on the AK;
+  - the P90 and AUG on the bullpup;
+  - pump guns on the wooden bolt frame.
+- New magazines, rounds, phones, laptops, papers, electronics and headsets have their own
+  shapes; the rest use the generic box. Shotguns have their own report.
+
+### Loot on bodies (Captain, 2026-10-20: "we stil havent gotten loot variety in somehow")
+
+#### Added
+- **Every enemy carries 1 to 3 things of his own** besides his kit, rolled by rarity from a new
+  "pockets" pool. Different on every body and every deployment, the same body the same.
+  - Common: cash, cigarettes, bandages, loose rounds, SIM cards, hashish, zip cuffs.
+  - Uncommon: phones, documents, grenades, morphine, watches, gold coins, radios.
+  - Rare: optics, attachments, ledgers, maps, gems, cash bundles.
+  - Very rare: a laptop, NVGs, a sat phone, a cash brick.
+- **Leaders carry their intel too** (orders, maps, phones, laptops).
+- Very rare finds only drop in hot zones, as for site boxes.
+
+### Conscious but dying, and wounded behaviour (Captain, 2026-10-20: "a conscious but dying state ... animations and sounds", "they dont really do wounded things")
+
+#### Added
+- **A conscious-but-dying state.** A soldier is dying while still awake when any of these hold:
+  - about 28% of his blood is gone and a wound is still bleeding;
+  - his oxygen is failing (SpO2 under 88%).
+- **What dying does:**
+  - He collapses to the ground. Lying still, he writhes with a hand pressed to the wound and
+    reaches out as he weakens; he can only drag himself along slowly.
+  - He breathes hard, with a laboured breath you can hear nearby, and cries out now and then.
+    Both sides hear the cries.
+  - He can't stand or fight, but he can still treat himself and call for a medic.
+  - AI who are dying treat themselves if they can, otherwise stay down and call for help.
+  - It ends a few seconds after the cause is treated, so a tourniquet brings him back out of
+    it. Untreated, it runs on into unconsciousness, arrest and death as before.
+  - Players get a one-time prompt telling them what to do. The squad sees "Dying" in his status.
+- **Wounded but up:**
+  - pain hunches the shoulders and drops the head (less while aiming);
+  - breathing quickens and deepens with blood loss, not just tiredness.
+### Treatment you can see on the body (Captain, 2026-10-20: better wounding, more realistic body wounds)
+
+#### Added
+- **Tourniquets show.** A black strap high and tight, 12 cm above the wound (as high as the limb
+  allows for a wound further down), with its windlass locked on the outside of the limb, the red
+  tip hanging off and a white label with the time it went on written in 0.5 cm digits. A second
+  one sits beside the first. They are gone once they come off.
+- **Splints, the pelvic binder and the sling.** A splint runs along the broken limb (orange out,
+  blue at the edges) under three cravats. A broken pelvis gets a black binder round the hips with
+  its buckle at the front. A broken collarbone gets a sling across the chest.
+- **Dressings look like what was used.** A pressure bandage is a cream elastic wrap with its
+  pressure bar over the hole. Packed gauze is white, bulges out of the wound and has a loose tail.
+  A chest seal is a square patch with a dark border and a valve. Before, all three were the same
+  beige pad.
+- **IV and IO lines and the bag.** An IV is taped in the forearm or shin, the hub coloured by its
+  gauge. An IO has its round patch on the sternum. While fluids run, the bag hangs on the
+  casualty's chest (on the vest front with one on), a line runs from it to the site, and the bag
+  empties as it goes in. A pressure bag adds its blue cuff.
+- **The NPA** shows as a small flange at the nostril. **The blanket** wraps the trunk, arms and
+  legs in creased foil.
+- **Open fractures show bone** at the wound until the wound is dressed.
+- **Burns scorch the body.** Patches of skin and uniform char and darken, raw red at the edges,
+  roughly over the burned share. Burn dressings cover part of them as they go on.
+- **Pallor, blue lips, blood at the mouth, shivering.** Skin greys from 15% of blood lost and is
+  ashen by 45%. Lips go blue-grey under 88% SpO2. A casualty coughing blood
+  has it at the mouth and down the chin. A hypothermic casualty visibly shivers. These were text
+  cues only before.
+- **Bloody hands.** Whoever treats a wound that is bleeding, or has bled, gets blood on both
+  hands. It dries darker after a minute and is gone after 7 minutes.
+- **A drag smear.** A bleeding casualty dragged, or crawling, leaves a continuous smear on the
+  ground under the wound. It is capped at 160 cells per body, oldest first, and lasts as long as a
+  pool.
+- All of it is drawn on every peer from the replicated wound and treatment state, at the model's
+  0.5 cm voxel scale. New `devices` test suite; the net test checks the devices on a client.
+### Fingers (Captain, 2026-10-20: more realistic character models)
+
+#### Added
+- **Hands have fingers.** Every soldier's hand is a palm, four fingers and a thumb in 0.5 cm
+  voxels, with knuckles and a slightly cupped palm. Women's hands are smaller and slimmer.
+  Contractors and the other armies wear gloves (a knuckle guard, a palm patch). The militia and
+  civilians are bare-handed, with nails and knuckle creases.
+- **Hands grip what they hold.** On a weapon the firing hand wraps the pistol grip, with the
+  index straight along the frame. It moves onto the trigger while aiming and for a moment after a
+  shot, and squeezes on each shot. The support hand cups the handguard. In a reload it takes the
+  magazine, pinches the charging handle, presses the catch and opens on a feed cover. Holding
+  anything else (straps, handles, the fast-rope, a radio, treatment kit) the hand closes round it.
+  Planting on the floor it opens. The forearm turns so the palm faces the grip.
+- **First person shows the same hands**, and the trigger finger moves when you fire.
+- For whoever puts props in a hand: `CharacterModel.set_hand_pose(hand, pose)` holds a pose, and
+  `hand_anchor(hand)` is a node at the hand's grasp centre to parent a prop to.
+
+#### Changed
+- Each hand pose is a whole forearm mesh, swapped as the hand's work changes. That costs no extra
+  nodes or draw calls, and the meshes are shared by every body in the same colour scheme. A posed
+  forearm is about 2,300 to 3,200 triangles. The common poses are built ahead on a worker thread
+  as a level starts. Far off, the trigger squeeze isn't drawn.
+### Medical care: the kit in your hands, a first-person medic view, the casualty reacts (Captain, 2026-10-20)
+
+#### Added
+- **Treatment kit in the hands.** Every treatment now shows what it's done with, in 0.5 cm voxels,
+  moving through its steps:
+  - A bandage roll shrinks as it unwinds, its tail running onto the turns building up on the limb
+    over the pad.
+  - Gauze runs off its fold into the wound, then both hands hold pressure.
+  - A tourniquet: the strap pulled round, the band tightening as the windlass turns, then the rod
+    clipped. The last turn lands just as the clip phase starts, and the bleeding stops at the end
+    of it.
+  - A chest seal's backing is peeled off, then the seal is pressed on.
+  - The decompression needle goes in at the second intercostal space and the stylet comes back
+    out, leaving the catheter.
+  - The autoinjector's safety cap comes off before the jab, and it's held in. Adenosine uses a
+    syringe whose plunger goes down.
+  - An IV catheter slides in along the vein and is taped. The IO driver goes in at the sternum.
+  - The saline or blood bag is held up with the line running down to the access site. The bag
+    level follows the fluid actually going in, and a pressure bag's bulb is pumped.
+  - A splint is bent into a U, then laid along the limb and wrapped.
+  - The defibrillator sits beside the casualty, with pads and cables onto the chest.
+  - The surgical clamp uses a hemostat and forceps, with the surgery kit open on the ground.
+  - The foil blanket opens out, and the NPA and the pelvic binder's handles show too.
+
+  Everyone sees it, squad AI medics included, and it's gone when the treatment ends.
+- **The hands work on the wound itself.** The hands now go to the wound on the casualty's skin,
+  or to the right spot for the treatment, following the body if it moves:
+  - the sternum for CPR,
+  - the outer thigh for an injector,
+  - the second intercostal space for the needle,
+  - high and tight on the limb for a tourniquet, with the hands going round the limb.
+
+  Before, they worked at the middle of the body part.
+- **First-person medic view.** While you treat someone, or yourself, the weapon leaves the view
+  and your own forearms, hands and kit are in it. The view goes down with your kneel and, for a
+  moment at the start, turns to the work.
+- **The casualty reacts:**
+  - a wince as a tourniquet tightens or a wound is packed (if they're awake),
+  - settling down after morphine (also as their morphine level rises),
+  - a gasp as the needle goes in,
+  - the chest going down under CPR,
+  - a jolt on the defibrillator's shock.
+- **Treating yourself:**
+  - A tourniquet or bandage on your own arm is done one-handed, with the hurt arm held out and the
+    body turned to it.
+  - On your own leg you go down on a knee and lean over it.
+  - An injector goes into your outer thigh standing.
+
+  Treatment times are unchanged.
+### Real faces, and a different person in every uniform (Captain, 2026-10-20)
+
+#### Added
+- **Heads with real proportions**, still 0.5 cm voxels: a skull, a brow ridge over eye sockets,
+  a nose with a bridge and a tip, cheekbones, a jaw and chin, ears, and hair and beards with
+  volume. Helmets, NVGs and IFF marks fit as before.
+- **Eyes** with whites, irises and pupils. They blink, glance about, look up and down with the
+  aim, narrow in bad pain, and close when a soldier is knocked out or dead.
+- **Expressions**: neutral; strain when hurt, down, or carrying or dragging someone; mouth open
+  while calling out or screaming; slack when out cold or dead, and when gasping for breath.
+  The eyes, mouth and brows are small parts swapped whole: nothing is animated voxel by voxel.
+- **Every soldier is his own person**: skin tone, hair style and colour, eye colour, beard or
+  stubble, jaw, chin, nose, brow and ears, a slim, average or heavy build, and a height range,
+  for men and women. Soldiers look like their nation's people: an American squad is mixed, a
+  Chinese one East Asian, and the region's insurgents mostly bearded. Uniforms stay the
+  faction's.
+- **The same face everywhere**: a soldier's look comes from who he is (the spawn's identity),
+  so every peer draws the same person; it rides in the spawn, the replicated state and body
+  records. Company members keep their face all campaign (a look seed on the roster, kept
+  through saves), and each player's main character has their own.
+- Civilians, HVTs and hostages get faces too, matching the skin of their bare hands.
+
+#### Changed
+- A new face's head is built on a worker thread, so a squad or garrison appearing doesn't stall
+  a frame; its head shows once built (a moment after spawning). Face parts aren't drawn past
+  30 m.
+- A broader build widens the body's meshes about each part's own axis, so poses, hands on the
+  weapon and hitboxes stay where they were; the trunk's hit shape widens to match.
+
+#### Fixed
+- **The muster line shows the company's people as themselves.** Members standing at the base
+  came out with a random name tape, nationality and body; they now carry their roster identity
+  and face, as they do in the field.
+- A dragger's hands stay on the casualty's straps when the two are different heights.
+### Treatment you can see on the body (Captain, 2026-10-20: better wounding, more realistic body wounds)
+
+#### Added
+- **Tourniquets show.** A black strap high and tight, 12 cm above the wound (as high as the limb
+  allows for a wound further down), with its windlass locked on the outside of the limb, the red
+  tip hanging off and a white label with the time it went on written in 0.5 cm digits. A second
+  one sits beside the first. They are gone once they come off.
+- **Splints, the pelvic binder and the sling.** A splint runs along the broken limb (orange out,
+  blue at the edges) under three cravats. A broken pelvis gets a black binder round the hips with
+  its buckle at the front. A broken collarbone gets a sling across the chest.
+- **Dressings look like what was used.** A pressure bandage is a cream elastic wrap with its
+  pressure bar over the hole. Packed gauze is white, bulges out of the wound and has a loose tail.
+  A chest seal is a square patch with a dark border and a valve. Before, all three were the same
+  beige pad.
+- **IV and IO lines and the bag.** An IV is taped in the forearm or shin, the hub coloured by its
+  gauge. An IO has its round patch on the sternum. While fluids run, the bag hangs on the
+  casualty's chest (on the vest front with one on), a line runs from it to the site, and the bag
+  empties as it goes in. A pressure bag adds its blue cuff.
+- **The NPA** shows as a small flange at the nostril. **The blanket** wraps the trunk, arms and
+  legs in creased foil.
+- **Open fractures show bone** at the wound until the wound is dressed.
+- **Burns scorch the body.** Patches of skin and uniform char and darken, raw red at the edges,
+  roughly over the burned share. Burn dressings cover part of them as they go on.
+- **Pallor, blue lips, blood at the mouth, shivering.** Skin greys from 15% of blood lost and is
+  ashen by 45%. Lips go blue-grey under 88% SpO2. A casualty coughing blood
+  has it at the mouth and down the chin. A hypothermic casualty visibly shivers. These were text
+  cues only before.
+- **Bloody hands.** Whoever treats a wound that is bleeding, or has bled, gets blood on both
+  hands. It dries darker after a minute and is gone after 7 minutes.
+- **A drag smear.** A bleeding casualty dragged, or crawling, leaves a continuous smear on the
+  ground under the wound. It is capped at 160 cells per body, oldest first, and lasts as long as a
+  pool.
+- All of it is drawn on every peer from the replicated wound and treatment state, at the model's
+  0.5 cm voxel scale. New `devices` test suite; the net test checks the devices on a client.
+### Blast dismemberment and synced severed pieces (Captain, 2026-10-20)
+
+#### Added
+- **Explosions tear bodies.** Grenades, charges, mortar rounds, RPG and AT4 rounds tear the bodies
+  near them, by distance and the size of the charge. A close blast takes one or more limbs. A
+  blast right against someone blows them apart: head, arms and legs off, the torso torn open.
+  Fragments pepper the side facing the blast with small holes, and that side is scorched black.
+  The Captain's rule holds: while someone lives, a blast takes at most a foot or forearm, or
+  leaves a thigh or upper arm hanging. Either way it's an amputation a tourniquet stops. Worse
+  happens only to the dead, or to someone the blast kills outright. Corpses near a blast are torn
+  too.
+- **.50s and vehicles.** A .50 takes the limb or head it hits. A heavy vehicle driving over a body
+  crushes what it rolls over; dead, a heavy one crushes the head. A vehicle that hits someone hard
+  tears the side it hit.
+- **Inside a wound.** Deep craters and stumps show torn skin, then fat, red flesh and white bone
+  at the core of a limb. The skull shows under the scalp and ribs in the torso. Bone sticks out
+  of a stump a little.
+- **Limbs hanging by tissue.** A dead limb torn up nearly enough to come off hangs by a strip of
+  tissue, swung off the stump. More damage cuts it through, and what hung drops.
+- **A gore setting** (Settings, Video): Full (the default), Reduced (wounds and lost limbs, but no
+  bone, fragment pocks or flying bits) or Off (bodies drawn whole). It only changes how your own
+  game draws bodies.
+
+#### Fixed
+- **Severed pieces land in the same place for everyone.** The host settles each piece and sends
+  where it lies; other players' pieces move there, and anyone joining later sees them there too.
+  Pieces have colliders fitted to their shape instead of a box. A helmet on a head that comes off
+  drops beside it as an item you can pick up.
+- **Corpses no longer prop up on a cut-off limb.** A cut limb's ragdoll part goes with it, and
+  the part it was cut from shortens to the stump, so the body lies on what's left.
+- **Torn bodies survive a zone save.** A saved body comes back with the same holes and cuts, its
+  pieces where they lay.
+- Rebuilding torn body parts is capped at a few a frame across all bodies, so a big blast
+  doesn't stall the game.
+- **Bodies no longer die standing up.** A body that drops goes limp: the knees and hips give,
+  the trunk folds, the head lolls. Nothing holds it upright, so a corpse no longer settles kneeling
+  or propped on stiff legs. It falls the way it was pushed: shot from the front it goes back,
+  running it pitches forward, a blast throws it away from the burst. Knees and elbows never bend
+  the wrong way, even when thrown. Every player sees it come to rest the same way.
+### Terror groups follow-ups: named leaders, drug labs and contraband (2026-10-20)
+
+The follow-ups from docs/terror_groups.md section 9. Every name is made up.
+
+#### Added
+- **HVT jobs go after named leaders.** An HVT capture or manhunt job against a group is after the
+  next of its leaders still free, by title and name: "HVT capture (the Chemist)", "Capture the
+  Chemist (his name) and bring them to extraction alive". The brief opens with who he is.
+  Winning the job takes that leader down, in any zone, and the next job names the next one.
+- **Leaders dress for their part.** Each leader is a commander, a financier or a bomb maker
+  (the Bookkeeper wears a dark suit, the Chemist work clothes).
+- **Each group names its own sites.** A raid or supply-line cache is an IED workshop for the Ashen
+  Banner and the Valley Shura, and a drug lab or a warehouse for the Kestrel Cartel and the
+  Saltline Syndicate. The same site always has the same name.
+- **Cartel contraband.** A raid, sabotage or supply-line job against a cartel has a box of its
+  goods (hashish, captagon, heroin bricks, counterfeit dollars) beside the target. Every third man
+  of a cartel garrison carries some in his pockets.
+
+#### Changed
+- **Vantage and the Eastern Concord Forces fight by their own doctrine** (PMC and regular army)
+  wherever they are, not by the doctrine of the zone's people. Vantage's racing team now counts
+  as Vantage's men, whoever holds the zone.
+
+### Terror groups, cartels and a living war (Captain, 2026-10-20)
+
+Design and the Captain's calls: docs/terror_groups.md. Every name and flag is made up.
+
+#### Added
+- **Five new enemy groups** hold ground on the map, each with its own kit, clothes, guns,
+  doctrine, flag, leaders and radio chatter:
+  - **the Ashen Banner**: a jihadist network with foreign fighters. Its local men wear dark plain
+    clothes; its foreign fighters wear their own camo and helmets. It fights almost to the last
+    man. Red on the map.
+  - **the Valley Shura**: a local Islamist insurgency in the inland villages. Its men wear village
+    clothes and old rifles. It hits from range and slips away. Red.
+  - **the Saltline Syndicate**: a coastal smuggling cartel in the harbours. Orange.
+  - **the Kestrel Cartel**: an inland drug cartel in the river valleys. Orange.
+  - **the Highland Free Front**: a separatist cell on the moors that fights the Eastern Concord
+    first. It starts only Distrusted, so it can be won over. Orange.
+- **Suicide bombers and VBIEDs** now come from the Ashen Banner and the Valley Shura (Captain),
+  no longer from Black Ridge.
+- **A living war.** Zones change hands over the days, about one every three:
+  - each faction fights for what it wants: oil, airfields and HQs for the Banner; villages,
+    mosques and recruits for the Shura; harbours, crossings and routes for the cartels; Black
+    Ridge for its home valleys;
+  - at most three fronts are open at once;
+  - the war is saved in the campaign and plays the same way every time;
+  - a faction's last zone can be sieged but never falls to another faction;
+  - the company wipes a faction out by taking its last zone's HQ and QRF bases and its leaders;
+  - fronts can reach the company's own zones (a defence job goes up), and the FOB's zone can be
+    sieged but never falls.
+- **The player shifts the war:**
+  - contract wins, kills and HQ and QRF bases taken out weaken a faction and push its fronts;
+  - high rebel support starves Black Ridge and the cartels in that region;
+  - at the top tier of rebel support, the locals take up arms themselves.
+- **The player sees the war:**
+  - a local stringer reads the overnight news on the radio, and the world map has a War news
+    panel;
+  - the map draws each holder's flag, front arrows and contested hatching, and its tooltip says
+    who is attacking whom and why;
+  - a contested zone opens with the attacker already assaulting a site, and part of the zone's
+    sites held by its men;
+  - in a contested zone, villages are half empty and refugee families walk out to the safe side;
+  - fictional flags fly at each holder's compounds, outposts and checkpoints;
+  - each group's radio net has its own lines.
+- **Contracts follow the war:** a job goes up on every front, and a war job on every zone that
+  just flipped. Board contracts are against the zone's holder 70% of the time.
+
+#### Changed
+- **Black Ridge is a regional militia.** It holds 4 of the 22 contract zones and Black Ridge hills
+  (it held every zone before), and its share of contracts falls from about a third to a fifth.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

@@ -73,6 +73,12 @@ static func family(item: ItemData) -> StringName:
 		"pk", "m240", "m249": return BELT
 		"mosin": return BOLT
 		"chassis_bolt": return BOLT_MAG
+		# A tube magazine: the action opened (the pump, or the M1014's handle), shells in through
+		# the top, the action closed: a bolt-action's drill without the turn (part_motion: no lift).
+		"shotgun", "shotgun_tac", "shotgun_auto": return BOLT
+		# A detachable magazine; on an empty one the cocking handle, locked back, is slapped home
+		# like an AR's bolt catch (VoxelArt.reload_points: the SMGs' "catch" is the handle).
+		"smg", "smg_sd", "smg_box", "smg_pdw", "smg_grip": return AR
 	return AR
 
 

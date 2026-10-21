@@ -25,6 +25,18 @@ const UNCONSCIOUS_LOST := 0.40
 const ARREST_LOST := 0.50
 const EFFECTS_FROM_LOST := 0.15   # blood-loss effects start here and reach full strength at 40%
 const NO_SPRINT_LOST := 0.30
+## Conscious but dying (Captain, 2026-10-20: "we need a conscious but dying state as well where
+## animations and sounds are played"): still awake, but down on the ground, crawling at most,
+## crying out and calling for help, until treated, or until unconsciousness, arrest and death
+## take over. Dying while any of these holds (dying_now), and for DYING_CLEAR_S after the last
+## one went (Proposed):
+##   DYING_LOST of the blood gone and a wound still bleeding,
+##   SpO2 under DYING_SPO2 (the airway or a chest wound failing).
+## (Not pain on its own: the knockout threshold falls with blood loss, so a forearm wound at a
+## quarter of the blood gone read as dying.)
+const DYING_LOST := 0.28
+const DYING_SPO2 := 88.0
+const DYING_CLEAR_S := 4.0
 ## Cardiac arrest: the unit dies when this window runs out with no heart rate.
 const ARREST_WINDOW_S := 600.0
 
@@ -339,6 +351,11 @@ const HR_DEADLY_SLOW := 35.0
 const HR_DANGER_S := 60.0
 ## Drugs other than morphine, by item id: one dose goes in over absorb_s, the level halves
 ## every half_life_s, and each dose in the blood moves the heart rate by hr (bpm).
+## The last five come from consumables (items expansion, 2026-10-20; Consumables, items.json
+## "consume"), never from the medical menu: each dose in the blood eases "relief" of pain (the
+## two over-the-counter painkillers together at most OTC_RELIEF_MAX, far under morphine) or
+## speeds stamina recovery by "stamina" (all of them together at most STAMINA_BOOST_MAX).
+## Water and rations stand in for food and drink, which aren't tracked yet: a stamina boost only.
 const EPINEPHRINE := &"epinephrine"
 const ATROPINE := &"atropine"
 const ADENOSINE := &"adenosine"
@@ -346,7 +363,16 @@ const DRUGS := {
 	&"epinephrine": {"absorb_s": 10.0, "half_life_s": 120.0, "hr": 30.0},
 	&"atropine": {"absorb_s": 10.0, "half_life_s": 600.0, "hr": 30.0},
 	&"adenosine": {"absorb_s": 2.0, "half_life_s": 120.0, "hr": -40.0},
+	&"caffeine": {"absorb_s": 120.0, "half_life_s": 1800.0, "hr": 6.0, "stamina": 0.3},
+	&"ibuprofen": {"absorb_s": 240.0, "half_life_s": 2700.0, "hr": 0.0, "relief": 0.12},
+	&"paracetamol": {"absorb_s": 240.0, "half_life_s": 2700.0, "hr": 0.0, "relief": 0.1},
+	&"water": {"absorb_s": 60.0, "half_life_s": 2700.0, "hr": 0.0, "stamina": 0.1},
+	&"ration": {"absorb_s": 300.0, "half_life_s": 3600.0, "hr": 0.0, "stamina": 0.15},
 }
+## Pain the over-the-counter painkillers (DRUGS with "relief") take off together, at most.
+const OTC_RELIEF_MAX := 0.25
+## Stamina recovery the consumables (DRUGS with "stamina") add together, at most (a share: 0.5 = half again as fast).
+const STAMINA_BOOST_MAX := 0.5
 ## Epinephrine's wake-up roll (decided; build plan: a chance to come round sooner, never a
 ## revive): given to someone out with no cause left but a concussion knockout (or already
 ## coming round), EPI_WAKE_CHANCE that the knockout clears and they come round in EPI_WAKE_S.
@@ -490,9 +516,16 @@ var impact := 0.0
 ## wound's tension pneumothorax has started), and for chest wounds tension_in / arrest_in
 ## (seconds, -1 when not pending; host only).
 var wounds: Array[Dictionary] = []
+## Body gore that isn't a wound (BlastGore, host): blast craters, fragment pepper, charring,
+## severed parts and where their pieces came to rest. Medical never reads it; it rides net_state
+## ("z") so every peer and late joiners carve the same body, and goes with snapshot(). Each entry
+## is plain numbers and strings (BlastGore.entry): {"i" id, "k" kind, "p" part, ...}.
+var gore: Array = []
 var unconscious := false
 var arrest := false
 var dead := false
+var dying := false  # conscious but dying (DYING_*); replicated in the flags (2048)
+var _dying_clear_s := 0.0
 var arrest_left := 0.0
 var concussion_left := 0.0
 var knockout_left := 0.0
@@ -544,8 +577,8 @@ var _pain_over_s := 0.0         # how long pain has stayed at or over the knocko
 ## Beats per minute (see HR_REST).
 var heart_rate := HR_REST
 ## Other drugs (DRUGS ids): in the blood and still going in, in doses.
-var drug_level := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
-var drug_depot := {&"epinephrine": 0.0, &"atropine": 0.0, &"adenosine": 0.0}
+var drug_level := _no_drugs()
+var drug_depot := _no_drugs()
 var _hr_danger_s := 0.0         # time spent racing or too slow (host only)
 ## Hearing muffled (seconds left), and the indoor gunfire noise level building toward it.
 var deaf_left := 0.0
@@ -590,6 +623,13 @@ func lost() -> float:
 	return 1.0 - blood
 
 
+## Whether a cause of dying (DYING_*) holds now.
+func dying_now() -> bool:
+	if dead or arrest:
+		return false
+	return (lost() >= DYING_LOST and wound_bleed_rate() > 0.0) or spo2 < DYING_SPO2
+
+
 ## Blood-loss effect strength: 0 up to 15% lost, 1 at 40%.
 func shock() -> float:
 	return clampf((lost() - EFFECTS_FROM_LOST) / (UNCONSCIOUS_LOST - EFFECTS_FROM_LOST), 0.0, 1.0)
@@ -612,7 +652,7 @@ func pain() -> float:
 				floor_pain = maxf(floor_pain, PAIN_FLOOR_LEG if leg else PAIN_FLOOR_ARM)
 		elif w.kind == "rib" and not w.treated:
 			floor_pain = maxf(floor_pain, PAIN_FLOOR_RIB)
-	var eased := maxf(reducible_pain() - morphine_relief(), 0.0)
+	var eased := maxf(reducible_pain() - minf(morphine_relief() + otc_relief(), MORPHINE_RELIEF_MAX), 0.0)
 	return clampf(maxf(eased, floor_pain) + TOURNIQUET_PAIN * tourniquets.size(), 0.0, 1.0)
 
 
@@ -832,6 +872,39 @@ func drug_total(id: StringName) -> float:
 	return float(drug_level[id]) + float(drug_depot[id])
 
 
+## Host only. `doses` of DRUGS id `drug` taken by mouth (a consumable: Consumables): into the
+## depot, going in over its absorb_s. False for an unknown drug or the dead.
+func take_drug(drug: StringName, doses: float) -> bool:
+	if not DRUGS.has(drug) or dead or doses <= 0.0:
+		return false
+	drug_depot[drug] = float(drug_depot[drug]) + doses
+	return true
+
+
+## Pain the over-the-counter painkillers in the blood take off now (OTC_RELIEF_MAX at most).
+func otc_relief() -> float:
+	return minf(_drug_sum("relief"), OTC_RELIEF_MAX)
+
+
+## The stamina recovery the consumables in the blood add now: 0.3 = 30% faster (STAMINA_BOOST_MAX at most).
+func stamina_boost() -> float:
+	return minf(_drug_sum("stamina"), STAMINA_BOOST_MAX)
+
+
+func _drug_sum(key: String) -> float:
+	var out := 0.0
+	for id: StringName in DRUGS:
+		out += float((DRUGS[id] as Dictionary).get(key, 0.0)) * float(drug_level[id])
+	return out
+
+
+static func _no_drugs() -> Dictionary:
+	var out := {}
+	for id: StringName in DRUGS:
+		out[id] = 0.0
+	return out
+
+
 ## Blood is back far enough for CPR or the defibrillator to restart the heart.
 func can_restart() -> bool:
 	return blood >= RESTART_MIN_BLOOD - 0.0001
@@ -857,7 +930,7 @@ func morphine_total() -> float:
 
 ## Wound and impact pain still left once all the morphine given so far has gone in.
 func pain_to_ease() -> float:
-	return maxf(reducible_pain() - minf(MORPHINE_RELIEF * morphine_total(), MORPHINE_RELIEF_MAX), 0.0)
+	return maxf(reducible_pain() - minf(MORPHINE_RELIEF * morphine_total() + otc_relief(), MORPHINE_RELIEF_MAX), 0.0)
 
 
 ## Another morphine dose is worth giving: the blood holds at most MORPHINE_ASK_MAX_LEVEL.
@@ -937,7 +1010,7 @@ func stamina_mult() -> float:
 		stamina *= RIB_STAMINA
 	if blast_lung:
 		stamina *= BLAST_LUNG_STAMINA
-	return stamina
+	return stamina * (1.0 + stamina_boost())
 
 
 ## A splinted leg still can't sprint until the mission ends (design doc), nor a leg with a
@@ -1624,6 +1697,7 @@ func reset() -> void:
 	pain_wounds = 0.0
 	impact = 0.0
 	wounds.clear()
+	gore.clear()
 	open_events.clear()
 	unconscious = false
 	arrest = false
@@ -1737,9 +1811,17 @@ func advance(dt: float) -> void:
 ## has stayed at or over the knockout threshold (pain_knocks_out).
 func update_state(dt: float) -> void:
 	if dead:
+		dying = false
 		return
 	if not arrest and lost() >= ARREST_LOST:
 		_start_arrest()
+	if dying_now():
+		dying = true
+		_dying_clear_s = 0.0
+	elif dying:
+		_dying_clear_s += dt
+		if _dying_clear_s >= DYING_CLEAR_S:
+			dying = false  # treated (or it eased): he can get up again
 	trauma_level = maxf(trauma_level, trauma_target())  # new injuries count at once
 	_pain_over_s = _pain_over_s + dt if pain() >= knockout_threshold() else 0.0
 	var causes := unconscious_causes()
@@ -1781,7 +1863,7 @@ func to_net() -> Dictionary:
 			_half_cm(w.get("at")), _half_cm(w.get("out")), RC_CODES.find(StringName(w.get("rc", &""))), snappedf(float(w.get("dmg", 0.0)), 0.1)])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
-		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0)
+		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0) | (2048 if dying else 0)
 	var timers := {}
 	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
@@ -1796,7 +1878,8 @@ func to_net() -> Dictionary:
 		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
 		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
 			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)],
-		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings, snappedf(blast_fluid, 0.01)]}
+		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings, snappedf(blast_fluid, 0.01)],
+		"z": gore.duplicate(true)}
 
 
 func _drugs_net() -> Dictionary:
@@ -1847,6 +1930,7 @@ func apply_net(state: Dictionary) -> void:
 	_pain_over_s = PAIN_KNOCKOUT_S if flags & 128 != 0 else 0.0
 	blast_lung = flags & 512 != 0
 	blanket = flags & 1024 != 0
+	dying = flags & 2048 != 0
 	still_s = HYPOTHERMIA_STILL_S if flags & 256 != 0 else 0.0  # clients only need hypothermic()
 	var burns: Array = state.get("u", [0.0, 0])
 	burn = float(burns[0])
@@ -1868,6 +1952,7 @@ func apply_net(state: Dictionary) -> void:
 			wounds[-1]["rc"] = RC_CODES[int(entry[8])]
 		if entry.size() > 9:
 			wounds[-1]["dmg"] = float(entry[9])
+	gore = (state.get("z", []) as Array).duplicate(true)
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
 	for part: String in tq:

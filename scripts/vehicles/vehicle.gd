@@ -1075,6 +1075,7 @@ func _build_crew() -> void:
 		var model := CharacterModel.new()
 		model.name = "Model"
 		model.variant = "multicam"
+		model.face = SoldierLook.make(SoldierLook.seed_of([name, "crew", i]), "US", VoxelArt.MALE)  # its own crewman
 		pivot.add_child(model)
 		var rig := GearRig.new()
 		rig.name = "Gear"
@@ -2006,6 +2007,7 @@ func _run_over(s: Soldier, speed: float) -> void:
 	Harm.note_hit(s, driver())
 	s.vitals.server_damage((speed - RUN_OVER_MIN_MS) * RUN_OVER_TRAUMA)
 	s.vitals.server_fall(speed * speed / (2.0 * g) * RUN_OVER_FALL_MULT)
+	BlastGore.server_vehicle_hit(s, global_position, speed)  # hit hard: the side it hit torn
 	if s.is_ai() and s.vitals.is_up():
 		var side := global_basis.x * signf((s.global_position - global_position).dot(global_basis.x) + 0.001)
 		s.global_position += side * 0.8  # thrown aside
@@ -2036,6 +2038,7 @@ func _ride_over(speed: float, pushing: bool) -> void:
 			if Ragdoll.body_of(b) != null and not _ridden.has(b) and to_local((b as Node3D).global_position).y < BUMPER_M:
 				add_collision_exception_with(b)  # under the bumper at speed: over it, not stopped by it
 				_ridden[b] = now + RIDE_OVER_S
+				BlastGore.server_crush(Ragdoll.body_of(b), String((b as Node).name), mass, speed)  # crushed where it rolls over
 	_blocked_s = _blocked_s + get_physics_process_delta_time() if not wedged.is_empty() else 0.0
 	if _blocked_s < RIDE_OVER_AFTER_S:
 		return

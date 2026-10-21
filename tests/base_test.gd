@@ -401,7 +401,8 @@ func _check_identity(pool: Array, m: Dictionary, hired: Dictionary) -> void:
 		and Names.POOLS.has(String(old.nation)) and old.left == Handedness.roll_ai("Viper") and not Roster.ensure_identity(old),
 		"an older save's member keeps their roster name and is filled in once (%s)" % Roster.person_text(old))
 	var spawn := Roster.identity(old)
-	check(spawn == {"person_name": "Okafor", "nation": old.nation, "left": old.left, "body": Names.MALE}, "and spawns as that person (%s)" % [spawn])
+	check(spawn == {"person_name": "Okafor", "nation": old.nation, "left": old.left, "body": Names.MALE, "look_seed": old.look_seed}, "and spawns as that person (%s)" % [spawn])
+	check(int(old.look_seed) == Roster.look_seed_for(old) and int(m.get("look_seed", -1)) >= 0, "with a look seed of their own, rolled once and kept (faces)")
 
 
 ## A hire's own gear is their role's kit as dev's role kits wear it: the kit's pouches on the
@@ -1216,8 +1217,9 @@ func _test_deployment(client: Dictionary) -> void:
 		var s := _roster_soldier(mid)
 		var m := BaseHub.member(mid)
 		as_people = as_people and s != null and s.person_name == String(m.surname) and s.nation == String(m.nation) and s.left_handed == bool(m.left)
+		as_people = as_people and s.face == SoldierLook.make(int(m.look_seed), String(m.nation), String(m.body))
 		tapes.append(String(m.surname))
-	check(as_people, "each squadmate deploys as their roster person: the name tape, nationality and hand (%s)" % ", ".join(tapes))
+	check(as_people, "each squadmate deploys as their roster person: the name tape, nationality, hand and face (%s)" % ", ".join(tapes))
 	check(is_equal_approx(SquadAI.of(sa).combat, Roster.ai_stats(BaseHub.member(a)).combat), "their aim skill drives the AI (combat %.2f)" % SquadAI.of(sa).combat)
 	player = level.players.get_node(^"1")
 	check(player.inventory.slots[&"vest"] == &"plate_carrier" and player.inventory.slots[&"helmet"] == &"helmet", "the player deploys in the kit from the armory")
@@ -1288,8 +1290,12 @@ func _test_deployment(client: Dictionary) -> void:
 	var home_inside := BaseArmory.contents_counts(base.server_collect_stash())
 	check(int(home_inside.get("mag_556", 0)) >= 2, "the stash's carriers lie in the armory again with their pouches and magazines (%d)" % int(home_inside.get("mag_556", 0)))
 	var gear_a := Roster.gear_counts(BaseHub.member(a).gear)
+	var face_a := sa_home.face if sa_home else ""
 	BaseHub.server_save()
 	Campaign.load_campaign()
+	var ma := BaseHub.member(a)
+	check(face_a != "" and SoldierLook.make(int(ma.get("look_seed", -1)), String(ma.nation), String(ma.body)) == face_a,
+		"%s keeps their face through a save and reload (%s)" % [callsign_a, face_a])
 	check(Roster.gear_counts(BaseHub.member(a).gear) == Roster.gear_counts(Roster.json_safe(sa_home.inventory.net_state)) and gear_a.get("smoke_purple", 0) == 1,
 		"their gear survives a save and reload")
 	check(String(BaseHub.member(b).status) == Roster.MIA and String(BaseHub.member(c).status) == Roster.DEAD, "and so do MIA and KIA")

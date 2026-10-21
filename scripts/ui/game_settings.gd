@@ -43,10 +43,17 @@ const SCOPE_PIP := [
 	["off", "Off (zoom the whole view)"], ["low", "Low resolution (fastest)"], ["medium", "Medium resolution"], ["high", "Full resolution"],
 ]
 const SCOPE_PIP_SCALE := {"low": 0.45, "medium": 0.65, "high": 1.0}
+## Body gore (BodyDeform, BlastGore; blast-gore 2026-10-20): "off" draws bodies whole (no craters,
+## cuts or loose pieces), "reduced" carves craters and takes limbs but shows no bone, pepper or
+## gibbed chunks, "full" everything. Only how this machine draws it: the host's wounds, which
+## parts are gone and the ragdolls are the same for everyone.
+const GORE := [
+	["full", "Full"], ["reduced", "Reduced"], ["off", "Off"],
+]
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
 		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true,
-		"scope_pip": "medium"},
+		"scope_pip": "medium", "gore": "full"},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
@@ -312,6 +319,12 @@ static func head_bob() -> bool:
 ## picture-in-picture scopes off (GunSight zooms the whole view instead).
 static func scope_pip_scale() -> float:
 	return float(SCOPE_PIP_SCALE.get(String(get_value("video", "scope_pip")), 0.0))
+
+
+## The gore setting (GORE): "full", "reduced" or "off".
+static func gore() -> String:
+	var g := String(get_value("video", "gore"))
+	return g if g in ["full", "reduced", "off"] else "full"
 
 
 ## The camera's (vertical) field of view for the setting: what Camera3D.fov takes. Hor+: wider

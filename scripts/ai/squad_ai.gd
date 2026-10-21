@@ -1406,6 +1406,15 @@ func _choose_intent() -> void:
 	var heal := _self_care_score()
 	if heal > 0.0:
 		scores[Intent.HEAL] = heal
+	if body.vitals.is_dying():
+		# Dying (Vitals.is_dying): no fighting, no orders, no loot, no care for others; he treats
+		# himself if he can, otherwise lies where he is and calls for a medic (_maybe_call_medic).
+		for k: Intent in [Intent.FIGHT, Intent.TACTIC, Intent.SCAVENGE, Intent.FALL_BACK, Intent.RELOAD, Intent.CASUALTY, Intent.MOVE_TO]:
+			scores.erase(k)
+		if heal > 0.0:
+			scores[Intent.HEAL] = maxf(heal, 0.99)
+		elif scores.is_empty() or not scores.has(intent):
+			scores[Intent.HOLD] = 0.5
 	var t := _tactic()
 	if StringName(t.get("kind", &"")) in MOVING_TACTICS:
 		scores[Intent.TACTIC] = ORDERED_SCORE if not ordered.is_empty() else TACTIC_SCORE
@@ -1457,7 +1466,9 @@ func _act() -> void:
 				if _halt_spot != null and _flat_distance(spot) <= ARRIVE + 0.3:
 					_face(body.global_position + _outward(spot))  # halted: watch out from the lead
 		Intent.HOLD:
-			if fighting():
+			if body.vitals.is_dying():
+				_has_destination = false  # dying: he stays where he went down (calling for a medic)
+			elif fighting():
 				_stop_digging()
 				_fight(_hold_point, 4.0)
 			else:
@@ -2743,7 +2754,13 @@ func _may_scavenge(dead: Soldier, ordered := false) -> bool:
 		return false
 	var other := dead.scavenged_by
 	if is_instance_valid(other) and other != body and other.vitals.is_up() and SquadAI.of(other) and SquadAI.of(other).loot_body == dead:
-		return false
+		# (one told to search it outranks one searching it on his own: the other gives way, below.
+		# With pocket loot every body was worth a look, and a squadmate already on it cancelled the
+		# order for good.)
+		if not (ordered and SquadAI.of(other).scavenge_order != dead):
+			return false
+	if not ordered and squad and squad.brains().any(func(ai: SquadAI) -> bool: return ai != self and ai.scavenge_order == dead):
+		return false  # someone was told to search this one: leave it to him
 	if not ordered and body.faction == &"friendly" and squad and is_instance_valid(squad.leader) and squad.leader != body \
 			and dead.body_point().distance_to(squad.leader.global_position) > SCAVENGE_LEASH_M:
 		return false
@@ -3933,7 +3950,12 @@ static func pause_mult(range_m: float, doctrine: StringName) -> float:
 func _doctrine_id() -> StringName:
 	if squad and squad.doctrine != &"":
 		return squad.doctrine
-	return Doctrine.default_for(body.faction)
+	var me := body if body else get_parent() as Soldier  # (asked before _setup: the parent)
+	if me and me.has_meta(&"faction_id"):  # terror groups (2026-10-20): his faction's own doctrine
+		var own := Kits.doctrine(String(me.get_meta(&"faction_id")))
+		if own != &"" and Doctrine.has(own):
+			return own
+	return Doctrine.default_for(me.faction if me else &"hostile")
 
 
 ## The stance this unit takes on its own in a fight (G-05): SoldierMovement.Stance.PRONE, or -1
@@ -4564,6 +4586,8 @@ func _sights_on_body(foe: Soldier) -> bool:
 
 
 func _shoot() -> void:
+	if body.vitals.is_dying():
+		return  # on the ground dying: no fighting
 	var tla := Time.get_ticks_usec()
 	var launched := LauncherAI.think(self)
 	_p(&"shoot_launcher", tla)
