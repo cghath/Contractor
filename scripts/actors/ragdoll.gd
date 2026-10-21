@@ -102,7 +102,7 @@ const TOPPLE_MAX := 5
 ##   moving past RUN_MS (running, it pitches forward: the torso carries on, the feet catch:
 ##   RUN_PITCH_RAD_S), else a blast's (note_blast: thrown out from it, BLAST_IMPULSE N s per kg of
 ##   filling's cube root, less with distance), else back the way it faces.
-## - It doesn't freeze while it's still upright (up to SETTLE_MAX_S * UPRIGHT_GRACE).
+## - Pushed by nothing (a man passing out where he stands), it slumps forward, the way it faces.
 const COLLAPSE_S := 2.5
 const COLLAPSE_TORQUE := 1.5
 const HIP_FOLD_RAD_S := 2.0
@@ -114,13 +114,12 @@ const BLAST_FRESH_S := 0.6
 const BLAST_MAX_MS := 9.0
 ## Knees and elbows only bend one way: a joint pushed past straight the wrong way (more than
 ## HYPEREXTEND of its length forward) is turned back (HYPEREXTEND_FIX_RAD_S) while it moves.
-const HYPEREXTEND := 0.1
+const HYPEREXTEND := 0.18
 const HYPEREXTEND_FIX_RAD_S := 6.0
 ## [upper part, lower part, the side a straight-past bend shows on (lower part's down vector in
 ## the upper part's frame): knees fold back (+z), so a foot forward (-z) is wrong; elbows fold
 ## forward (-z), so a hand back (+z) is wrong].
 const ONE_WAY := [["leg_l", "shin_l", -1.0], ["leg_r", "shin_r", -1.0], ["arm_l", "fore_l", 1.0], ["arm_r", "fore_r", 1.0]]
-const UPRIGHT_GRACE := 1.5
 
 ## Cut-off parts (blast-gore, 2026-10-20: a severed limb's physics body stayed and the hidden limb
 ## still propped the corpse up): a part cut off a body (BodyDeform, Vitals) takes its ragdoll part
@@ -172,8 +171,8 @@ static func start(soldier: Soldier) -> Ragdoll:
 		r._take_run(push)
 		r._take_hit(soldier.vitals.last_hit if soldier.vitals else {})
 		if r._fall_dir.length() < 0.1:
-			var back := soldier.global_basis.z  # the way it faces is -z: slumping back
-			r._fall_dir = Vector3(back.x, 0.0, back.z).normalized()
+			var ahead := -soldier.global_basis.z  # slumping forward, the way it faces
+			r._fall_dir = Vector3(ahead.x, 0.0, ahead.z).normalized()
 	return r
 
 
@@ -534,12 +533,12 @@ func _physics_process(delta: float) -> void:
 			break
 	_still_s = _still_s + delta if still else 0.0
 	_collapse(delta)
-	if _keep_hinges():
-		_still_s = 0.0  # not at rest while a knee or elbow is bent the wrong way
+	if _keep_hinges() and _age_s < COLLAPSE_S:
+		_still_s = 0.0  # not at rest while a knee or elbow is bent the wrong way, as it falls
 	_send()
-	if _still_s >= SETTLE_S and _age_s < SETTLE_MAX_S * UPRIGHT_GRACE and _topple():
+	if _still_s >= SETTLE_S and _age_s < SETTLE_MAX_S and _topple():
 		return  # came to rest upright: over it goes (still frozen by SETTLE_MAX_S whatever happens)
-	if _still_s >= SETTLE_S or _age_s >= SETTLE_MAX_S * (UPRIGHT_GRACE if _upright() and _topples < TOPPLE_MAX else 1.0):
+	if _still_s >= SETTLE_S or _age_s >= SETTLE_MAX_S:
 		freeze()
 
 

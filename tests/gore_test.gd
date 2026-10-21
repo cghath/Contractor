@@ -205,7 +205,7 @@ func _test_collapse() -> void:
 	blasted.vitals.server_kill()
 	cases.append([blasted, -blasted.global_basis.x, "a blast throws it away from the burst"])
 	still.vitals.server_kill()
-	cases.append([still, Vector3.ZERO, "dropped where it stood, it still goes down"])
+	cases.append([still, -still.global_basis.z, "dropped where it stood, it slumps forward"])
 	await _wait_for(func() -> bool: return cases.all(func(c: Array) -> bool: return is_instance_valid((c[0] as Soldier).ragdoll) and (c[0] as Soldier).ragdoll.frozen), 20.0)
 	for c: Array in cases:
 		var s: Soldier = c[0]
