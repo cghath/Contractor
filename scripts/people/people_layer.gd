@@ -432,6 +432,10 @@ func _make(data: Dictionary) -> Node:
 	s.name = data.name
 	s.faction = Person.FACTION
 	s.variant = String(data.get("look", "")) if data.has("look") else PersonLook.outfit(kind, side, {"name": String(data.name)})
+	# Their face: the region's people (or a hostage's own nation), with the skin their bare hands show.
+	var civ := s.variant.split(":")
+	s.face = String(data.get("face", SoldierLook.make(SoldierLook.seed_of([data.name, "person"]), String(data.get("nation", "insurgent")),
+		VoxelArt.MALE, civ[3] if civ.size() >= 5 else "")))
 	s.position = data.pos
 	s.rotation.y = float(data.get("rot_y", 0.0))
 	s.body_label = String(data.get("label", ""))

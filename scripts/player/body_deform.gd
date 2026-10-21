@@ -227,7 +227,8 @@ func _queue(part: StringName, at: Vector3, exit: bool, size: float) -> void:
 	var n := WoundMarks._outward(part, at)
 	var skin: Variant = BodyVolume.surface(part, at, n, 0.05, body)
 	var p: Vector3 = (skin if skin is Vector3 else at) - BodyVolume.pivot_at(part, body)
-	var centre := (p - mi.position) / mi.scale.x + Vector3.ONE  # +1: the raster's mesher padding
+	var wide := mi.scale / mi.scale.y  # a build's girth (CharacterModel.girth): the mesh is widened, the rest pose isn't
+	var centre := (p * wide - mi.position) / mi.scale + Vector3.ONE  # +1: the raster's mesher padding
 	var inward := -(mi.basis.inverse() * n).normalized()
 	(state.ys as Array).append(centre.y)
 	state.todo.append({"centre": centre + inward * SINK, "r": (EXIT_R if exit else ENTRY_R) * size, "salt": hash("%s%s%s" % [part, at, exit])})

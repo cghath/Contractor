@@ -616,6 +616,7 @@ func _make_body(data: Dictionary) -> Node:
 	corpse.faction = StringName(data.get("faction", "friendly"))
 	corpse.variant = String(data.get("variant", "woodland"))
 	corpse.body = String(data.get("body", ""))
+	corpse.face = String(data.get("face", ""))  # (older saves: none, so default_face)
 	var p: Array = data.get("pos", [0.0, 0.1, 0.0])
 	corpse.position = Vector3(float(p[0]), float(p[1]), float(p[2]))
 	corpse.rotation.y = float(data.get("rot_y", 0.0))
@@ -1002,6 +1003,9 @@ func spawn_soldier(data: Dictionary) -> Soldier:
 			d["body"] = VoxelArt.FEMALE if female else VoxelArt.MALE
 		if d.body == VoxelArt.FEMALE:
 			d["person_name"] = Names.feminine(String(d.person_name), String(d.get("nation", "")))
+		if not d.has("face"):  # his look: a roster member's from their seed, else from who he is
+			var seed := int(d.look_seed) if d.has("look_seed") else SoldierLook.seed_of([d.name, d.get("person_name", ""), d.get("nation", "")])
+			d["face"] = SoldierLook.make(seed, String(d.get("nation", "")), String(d.body))
 	return ai_spawner.spawn(d) as Soldier
 
 
@@ -1022,6 +1026,7 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.faction = StringName(data.faction)
 	soldier.variant = data.variant
 	soldier.body = String(data.get("body", ""))
+	soldier.face = String(data.get("face", ""))
 	soldier.position = data.pos
 	soldier.role = StringName(data.get("role", ""))
 	soldier.fire_team = int(data.get("team", -1))

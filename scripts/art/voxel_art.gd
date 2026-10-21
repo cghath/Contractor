@@ -34,6 +34,9 @@ enum C {
 	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
 	WOUND, WOUND_DARK,  # torn flesh round a hole BodyDeform carved
 	BRASS,  # cartridge cases (a belt-fed's belt)
+	# Faces (FaceArt; their colours from a look's "face:" scheme, SoldierLook.palette): shaved or
+	# faded hair and stubble, the eyes' whites, irises, pupils and lashes, and teeth.
+	STUBBLE, EYE_WHITE, IRIS, PUPIL, LASH, TEETH,
 }
 
 const VARIANTS := {
@@ -80,12 +83,20 @@ const VARIANTS := {
 ## patch, knee pads or belt (Captain). Each part builds from only the colours it shows (_civ_part), so
 ## people sharing a shirt share the torso mesh.
 const CIV_PREFIX := "civ:"
+## A person's head and face (SoldierLook.palette): "face:<skin>:<hair>:<eye>" in hex. Heads hold
+## no camo, so every scheme shares a head shape's raster (_shared_raster) and only meshes anew.
+const FACE_PREFIX := "face:"
 
 
 ## A colour scheme's colours: a VARIANTS entry, or a plain-clothes scheme built from its name.
 static func spec(variant: String) -> Dictionary:
 	if VARIANTS.has(variant):
 		return VARIANTS[variant]
+	if variant.begins_with(FACE_PREFIX):
+		var g := variant.split(":")
+		if g.size() >= 4:
+			return {"camo": [g[2], g[2], g[2], g[2]], "skin": g[1], "hair": g[2], "eye": g[3], "patch": g[2],
+				"gear": "5a5148", "pack": "5a5148"}
 	if variant.begins_with(CIV_PREFIX) or variant.begins_with("civp:"):
 		var f := variant.split(":")
 		if f.size() >= 4:
@@ -109,12 +120,25 @@ static func _civ_part(model: String, variant: String) -> String:
 
 static var _meshers: Dictionary = {}  # variant -> VoxelMesherCubes
 static var _meshes: Dictionary = {}   # "model|variant" -> Mesh
+## Faces (build_async): the cached ones' keys, oldest first; those a worker is building; what
+## the workers have built, not yet taken in (under _warm_mutex); and the workers' tasks.
+const FACE_HEADS_KEPT := 128
+const FACE_PARTS_KEPT := 6000
+static var _face_order: Array[String] = []
+static var _face_part_order: Array[String] = []
+static var _face_pending: Dictionary = {}
+static var _face_built: Dictionary = {}
+static var _face_tasks: Array[int] = []
 ## Plain clothes' rasterised models (the model name's hash -> VoxelBuffer), shared by every plain-clothes
 ## scheme: their cloth is one flat palette entry (no camo), so the voxels' colour indices are the
 ## same whatever the colours, and only the mesher's palette differs. Rasterising a 0.5 cm body
 ## is about 0.5 s and meshing it about 30 ms, so a new person's outfit costs only the meshing
 ## (Captain P0362: 12 civilians at once were a 3.4 s hitch on deploying).
 static var _plain_rasters: Dictionary = {}
+static var _plain_order: Array[int] = []  # their salts, the least recently used first
+## Shared rasters kept (about 0.17 MB a head): plain clothes' few dozen parts and the faces
+## built lately. A face's raster is only wanted again while that face is first meshed.
+const SHARED_RASTERS_KEPT := 96
 ## The body parts a soldier or person is built from (CharacterModel).
 const BODY_PARTS: Array[String] = ["head", "torso", "upper_arm", "forearm", "thigh", "shin"]
 ## Rasters built ahead on a worker thread (warm): "salt|variant" (_raster_key) -> VoxelBuffer.
@@ -133,14 +157,14 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
 ## spec names one (body parts pivot at their joints).
-static func instance(model: String, variant: String, layers := 1) -> Node3D:
+static func instance(model: String, variant: String, layers := 1, with_mesh := true) -> Node3D:
 	var spec := _spec(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice("|", model.count("|")).get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
 	pivot.set_meta(&"voxel_variant", variant)
 	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = mesh(model, variant)
+	mesh_instance.mesh = mesh(model, variant) if with_mesh else null  # (FaceRig hands a face's head its mesh when built)
 	mesh_instance.material_override = _get_material()
 	mesh_instance.layers = layers
 	var voxel: float = spec.get("voxel", VOXEL_SIZE)
@@ -252,8 +276,71 @@ static func mesh(model: String, variant: String) -> Mesh:
 		variant = _civ_part(model, variant)
 	var key := "%s|%s" % [model, variant]
 	if not _meshes.has(key):
-		_meshes[key] = _build(_spec(model), variant, model.hash())
+		_take_faces()
+	if not _meshes.has(key):
+		_keep(key, _build(_spec(model), variant, model.hash()))
 	return _meshes[key]
+
+
+## Caches a built mesh. A face's (FACE_PREFIX) is one person's, so only the newest stay cached:
+## FACE_HEADS_KEPT heads (big) and FACE_PARTS_KEPT eyes, mouths and brows (tiny). The bodies
+## drawing older ones keep theirs.
+static func _keep(key: String, built: Mesh) -> void:
+	_meshes[key] = built
+	if key.contains("|" + FACE_PREFIX):
+		var order := _face_order if key.begins_with("head") else _face_part_order
+		order.append(key)
+		while order.size() > (FACE_HEADS_KEPT if key.begins_with("head") else FACE_PARTS_KEPT):
+			_meshes.erase(order.pop_front())
+
+
+## Faces are built off the main thread (Captain, 2026-10-20: variety must keep the frame budget;
+## a 0.5 cm head is about 70 ms to rasterise and as long again to mesh): `models`, each in
+## `variant`, rasterised and meshed on a worker. Returns true once all of them are cached (mesh()
+## then hands them over at no cost); until then the caller shows what it has and asks again.
+static func build_async(models: Array, variant: String) -> bool:
+	_take_faces()
+	var todo: Array = []
+	for model: String in models:
+		var key := "%s|%s" % [model, variant]
+		if not _meshes.has(key) and not _face_pending.has(key):
+			_face_pending[key] = true
+			todo.append(model)
+	if not todo.is_empty():
+		var mesher := _get_mesher(variant)  # made here: the worker only uses it
+		_face_tasks.append(WorkerThreadPool.add_task(_build_faces.bind(todo, variant, mesher), false, "VoxelArt faces"))
+	for model: String in models:
+		if not _meshes.has("%s|%s" % [model, variant]):
+			return false
+	return true
+
+
+## Worker: rasterises and meshes `models` in `variant` with `mesher`, handing each over under
+## _warm_mutex. (The rendering server takes meshes from any thread under the default "safe"
+## thread model.)
+static func _build_faces(models: Array, variant: String, mesher: VoxelMesherCubes) -> void:
+	for model: String in models:
+		var built := mesher.build_mesh(_rasterize(_spec(model), variant, model.hash()), [])
+		_warm_mutex.lock()
+		_face_built["%s|%s" % [model, variant]] = built
+		_warm_mutex.unlock()
+
+
+## Main thread: caches what the face workers have finished and lets go of done tasks.
+static func _take_faces() -> void:
+	if _face_pending.is_empty():
+		return
+	_warm_mutex.lock()
+	var done := _face_built
+	_face_built = {}
+	_warm_mutex.unlock()
+	for key: String in done:
+		_face_pending.erase(key)
+		_keep(key, done[key])
+	for task in _face_tasks.duplicate():
+		if WorkerThreadPool.is_task_completed(task):
+			WorkerThreadPool.wait_for_task_completion(task)
+			_face_tasks.erase(task)
 
 
 ## A fresh raster of `model` for `variant`, the soldier's own to carve (BodyDeform). Thread-safe
@@ -279,8 +366,10 @@ static func _build(spec: Dictionary, variant: String, salt: int) -> Mesh:
 ## plain raster (_plain_rasters, by `salt`: mesh() salts with the model's name); otherwise one
 ## the warm-up built (warm), or built now.
 static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer:
-	var plain := variant.begins_with("civp:")
+	var plain := _shared_raster(variant)
 	if plain and _plain_rasters.has(salt):
+		_plain_order.erase(salt)
+		_plain_order.append(salt)
 		return _plain_rasters[salt]
 	var key := _raster_key(salt, variant)
 	_warm_mutex.lock()
@@ -291,12 +380,20 @@ static func _raster(spec: Dictionary, variant: String, salt: int) -> VoxelBuffer
 		buffer = _rasterize(spec, variant, salt)
 	if plain:
 		_plain_rasters[salt] = buffer
+		_plain_order.append(salt)
+		while _plain_order.size() > SHARED_RASTERS_KEPT:  # faces are nearly all different: keep the newest
+			_plain_rasters.erase(_plain_order.pop_front())
 	return buffer
 
 
-## Plain clothes all share one raster per model ("civp:"); every other scheme has its own.
+## Plain clothes ("civp:") and faces ("face:") share one raster per model, whatever the
+## colours; every other scheme has its own.
+static func _shared_raster(variant: String) -> bool:
+	return variant.begins_with("civp:") or variant.begins_with(FACE_PREFIX)
+
+
 static func _raster_key(salt: int, variant: String) -> String:
-	return "%d|%s" % [salt, "civp:" if variant.begins_with("civp:") else variant]
+	return "%d|%s" % [salt, "shared:" if _shared_raster(variant) else variant]
 
 
 ## Rasterises `pairs` ([model, variant], as mesh() takes them) on a worker thread, so the
@@ -311,8 +408,8 @@ static func warm(pairs: Array) -> void:
 		var variant: String = pair[1]
 		if variant.begins_with(CIV_PREFIX):
 			variant = _civ_part(model, variant)
-		var asked := "%s|%s" % [model, "civp:" if variant.begins_with("civp:") else variant]
-		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (variant.begins_with("civp:") and _plain_rasters.has(model.hash())):
+		var asked := "%s|%s" % [model, "shared:" if _shared_raster(variant) else variant]
+		if _warm_asked.has(asked) or _meshes.has("%s|%s" % [model, variant]) or (_shared_raster(variant) and _plain_rasters.has(model.hash())):
 			continue
 		_warm_asked[asked] = true
 		todo.append([model, variant])
@@ -328,7 +425,8 @@ static func warm(pairs: Array) -> void:
 static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	var out: Array = []
 	for part in BODY_PARTS:
-		out.append([body_part(part, body), variant])
+		if part != "head":  # (each person's own head builds with his face: FaceRig)
+			out.append([body_part(part, body), variant])
 	for id: Variant in loadout:
 		var item := ItemDB.get_item(StringName(id))
 		var model := fitted(model_for(item), body) if item else ""
@@ -366,6 +464,10 @@ static func finish_warm() -> void:
 	for task in _warm_tasks:
 		WorkerThreadPool.wait_for_task_completion(task)
 	_warm_tasks.clear()
+	for task in _face_tasks:
+		WorkerThreadPool.wait_for_task_completion(task)
+	_face_tasks.clear()
+	_take_faces()
 
 
 ## Which built voxels of `model` are solid, for hit tests (BodyVolume): {"dims" (built
@@ -554,6 +656,9 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 			C.WOUND: Color("6e1712"), C.WOUND_DARK: Color("2a0605"),
 			C.BRASS: Color("a8873f"),
+			C.STUBBLE: skin.lerp(Color(v.hair), 0.38), C.EYE_WHITE: Color("e2dcd0").lerp(skin, 0.12),
+			C.IRIS: Color(v.get("eye", "4a3020")), C.PUPIL: Color("0d0b0a"), C.LASH: Color(v.hair).darkened(0.35).lerp(Color("141010"), 0.5),
+			C.TEETH: Color("e0d8c4"),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
@@ -585,7 +690,10 @@ static func _spec(model: String) -> Dictionary:
 		return part
 	var arg := model.get_slice(":", 1).to_int() if model.contains(":") else 0
 	match model.get_slice(":", 0):
-		"head": return _head()
+		"head": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", false)
+		"eye": return FaceArt.eye(model.get_slice(":", 1), model.get_slice(":", 2) == "f")
+		"mouth": return FaceArt.mouth(arg, model.get_slice(":", 2), model.get_slice(":", 3) == "f")
+		"brow": return FaceArt.brow(arg, model.get_slice(":", 2).to_int(), model.get_slice(":", 3).to_int(), model.get_slice(":", 4), model.get_slice(":", 5) == "f")
 		"torso": return _torso()
 		"upper_arm": return _upper_arm()
 		"forearm": return _forearm()
@@ -616,7 +724,7 @@ static func _spec(model: String) -> Dictionary:
 			return _lowered(out, RIFLE_BELOW) if _rifle_style(model) != "walker" else out
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol()
-		"head_f": return _head_f()
+		"head_f": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", true)
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
 		"upper_arm_f": return _upper_arm_f()
@@ -693,24 +801,7 @@ static func _shifted(parts: Array, dy: int) -> Array:
 	return out
 
 
-## 0.22 x 0.30 x 0.24 m including the neck. Pivot at the base of the neck. A boxy,
-## bevelled Stormworks head with a flat face: eyes, brows, a nose, a mouth and ears, hair as
-## a cap. The jaw is a 45-degree chamfer and the face above it is straight up: any other
-## slope steps unevenly at 0.5 cm and shows as bands across the chin.
-static func _head() -> Dictionary:
-	var boxes := [
-		_loft(11, 12, [[0, 4.5, 4.5], [8, 5.0, 5.0]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[5, 8.0, 9.0], [8, 11.0, 12.0], [26, 11.0, 12.0], [30, 9.0, 10.0]], C.SKIN, 0.5),
-		_p(0, 26, 0, 22, 30, 24, C.HAIR),   # cap
-		_p(0, 11, 17, 22, 30, 24, C.HAIR),  # back
-		_p(0, 20, 10, 22, 30, 24, C.HAIR),  # above the ears
-		_b(0, 14, 10, 1, 19, 15, C.SKIN_SHADE), _b(21, 14, 10, 22, 19, 15, C.SKIN_SHADE),  # ears
-		_p(6, 17, 0, 8, 20, 3, C.EYE), _p(14, 17, 0, 16, 20, 3, C.EYE),
-		_p(5, 21, 0, 9, 22, 3, C.HAIR), _p(13, 21, 0, 17, 22, 3, C.HAIR),  # brows
-		_b(10, 13, 0, 12, 17, 1, C.SKIN_SHADE),  # nose
-		_p(8, 10, 0, 14, 11, 3, C.MOUTH),
-	]
-	return {"size": Vector3i(22, 30, 24), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+## The head ("head", "head:<shape>") is FaceArt's.
 
 
 ## 0.52 x 0.66 x 0.22 m: the trunk from the crotch (0.10 m below the hip joints, where the
@@ -799,31 +890,6 @@ static func _shin_parts() -> Array:
 ## A paint box (_p) with fractional corners, in the spec's voxels (built at its "sub").
 static func _fp(x0: float, y0: float, z0: float, x1: float, y1: float, z1: float, colour: int) -> Array:
 	return [Vector3(x0, y0, z0), Vector3(x1, y1, z1), colour, true]
-
-
-## 0.20 x 0.29 x 0.22 m head on the male head's pivot (base of the neck), with a low bun
-## behind (the frame runs 6 cm deeper for it). The jaw is a longer 45-degree chamfer to a
-## narrower chin; the face above it is straight up, as on the male head. The bun sits below
-## the helmet's rim (head y 0.20), so every helmet still fits over the head.
-static func _head_f() -> Dictionary:
-	var boxes := [
-		_loft(11, 12, [[0, 4.0, 4.0], [8, 4.4, 4.4]], C.SKIN_SHADE, 0.8),  # neck
-		_loft(11, 12, [[6, 7.0, 8.0], [9, 10.0, 11.0], [27, 10.0, 11.0], [29, 8.0, 9.0]], C.SKIN, 0.55),
-		_loft(11, 25, [[11, 2.5, 2.0], [13, 3.5, 3.0], [17, 3.5, 3.0], [19, 2.5, 2.0]], C.HAIR, 0.6),  # bun
-		_p(0, 25, 0, 22, 30, 30, C.HAIR),   # cap, the hairline a little lower than the male's
-		_p(0, 9, 17, 22, 30, 30, C.HAIR),   # back, down to the nape, pulled back to the bun
-		_p(0, 19, 9, 22, 30, 30, C.HAIR),   # above the ears
-		_fp(7, 14.5, 23.5, 15, 15.5, 30, C.PAD),  # hair tie
-		_fb(0.5, 14, 10.5, 1, 18, 14, C.SKIN_SHADE), _fb(21, 14, 10.5, 21.5, 18, 14, C.SKIN_SHADE),  # ears
-		_fp(6.5, 16.5, 0, 8.5, 19.5, 3, C.EYE), _fp(13.5, 16.5, 0, 15.5, 19.5, 3, C.EYE),
-		_fp(6, 19, 0, 7, 19.5, 3, C.EYE), _fp(15, 19, 0, 16, 19.5, 3, C.EYE),  # lashes, at the outer corners
-		_fp(6, 21, 0, 8.5, 21.5, 3, C.HAIR), _fp(13.5, 21, 0, 16, 21.5, 3, C.HAIR),  # brows, thin
-		_fp(5.5, 20.5, 0, 6, 21, 3, C.HAIR), _fp(16, 20.5, 0, 16.5, 21, 3, C.HAIR),
-		_fb(10.5, 13.5, 0.5, 11.5, 16.5, 1, C.SKIN_SHADE),  # nose
-		_fp(9, 10.5, 0, 13, 11.5, 3, C.LIP), _fp(9.5, 9.5, 0, 12.5, 10.5, 3, C.LIP_SHADE),  # fuller lips
-		_p(0, 17, 0, 2, 27, 6, C.HAIR), _p(20, 17, 0, 22, 27, 6, C.HAIR),  # hair framing the face under the helmet
-	]
-	return {"size": Vector3i(22, 30, 30), "pivot": Vector3(11, 0, 12), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 ## The male torso's frame and pivot (hips), 0.66 m from the crotch to the base of the neck:
