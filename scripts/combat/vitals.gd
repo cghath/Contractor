@@ -113,7 +113,7 @@ var net_state: Dictionary = {}:
 
 ## Keys of net_state that make up the structure (net_vitals): they change only on real events.
 ## "v" (the bag) goes here as [item, mL]; the mL left goes in the pulse.
-const STRUCT_KEYS: Array[String] = ["w", "q", "a", "v", "tg"]
+const STRUCT_KEYS: Array[String] = ["w", "q", "a", "v", "tg", "z"]
 ## Replicated (ServerSync): the structure of net_state (STRUCT_KEYS) plus "r", its revision.
 ## The host sets it only when the structure changes.
 var net_vitals: Dictionary = {}:
@@ -829,6 +829,8 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			w["at"] = channel.from
 			if exits:
 				w["out"] = channel.to
+		if float(hit.get("energy_j", -1.0)) >= LETHAL_J and round_class != FRAGMENT:
+			BlastGore.server_heavy_hit(self, part, channel.from, (to_rest_dir(hit) if hit.has("direction") else Vector3.BACK))  # a .50 tears what it hits
 	if was_dead:
 		_publish(true)  # _after_change goes quiet once he's dead: the corpse's new holes still go out
 		return
@@ -841,6 +843,81 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 	if not was_dead and get_parent() is Soldier:
 		(get_parent() as Soldier).server_hit_reaction(part)  # a weapon knocked out of his hands (G-23)
 
+
+
+## A hit's direction in the rest pose (as _rest_channel turns it), for gore that follows the round.
+func to_rest_dir(hit: Dictionary) -> Vector3:
+	return _rest_channel(TORSO, hit)[1] if hit.has("position") else Vector3.BACK
+
+
+## Body gore (BlastGore): blast craters, fragment pepper, charring, severed parts and where their
+## pieces lie. Not wounds; on every peer, from net_state's "z".
+func gore_list() -> Array:
+	return _m().gore
+
+
+## Host only. Adds gore entry `entry` (BlastGore.entry) under a new id, returned. `publish` false
+## leaves sending it to whatever publishes next (a kill in the same hit).
+func server_gore_add(entry: Dictionary, publish := true) -> int:
+	var id := 1
+	for g: Dictionary in _model.gore:
+		id = maxi(id, int(g.get("i", 0)) + 1)
+	var e := entry.duplicate(true)
+	e["i"] = id
+	_model.gore.append(e)
+	if publish:
+		_publish(true)
+	return id
+
+
+## Host only. Sends gore entries added with `publish` false.
+func server_gore_flush() -> void:
+	_publish(true)
+
+
+## Host only. Sets `key` of gore entry `id` (a piece's rest pose once it settles).
+func server_gore_set(id: int, key: String, value: Variant) -> void:
+	for g: Dictionary in _model.gore:
+		if int(g.get("i", 0)) == id:
+			g[key] = value
+			_publish(true)
+			return
+
+
+## Host only. Gore and postmortem holes put back on a body restored from a zone save
+## (BodyDeform.save_record): `marks` are [part, at, out, round class, points], `gore` the entries.
+func server_restore_gore(marks: Array, gore: Array) -> void:
+	for m: Array in marks:
+		if m.size() < 5:
+			continue
+		var w := {"part": StringName(m[0]), "kind": "postmortem", "rate": 0.0, "treated": false, "name": &"postmortem", "tension_in": -1.0, "arrest_in": -1.0,
+			"rc": StringName(m[3]), "dmg": float(m[4])}
+		if m[1] is Array and (m[1] as Array).size() == 3:
+			w["at"] = Vector3(m[1][0], m[1][1], m[1][2])
+		if m[2] is Array and (m[2] as Array).size() == 3:
+			w["out"] = Vector3(m[2][0], m[2][1], m[2][2])
+		_model.wounds.append(w)
+	for g: Variant in gore:
+		if g is Dictionary:
+			_model.gore.append((g as Dictionary).duplicate(true))
+	_publish(true)
+
+
+## Host only. A limb a blast tears off while he lives (BlastGore): the same arterial
+## "amputation" a tourniquet stops as _check_amputation's, cut where `at` (rest pose) is.
+func server_amputate(part: StringName, at: Vector3) -> void:
+	if shielded or _model.dead or not part in BodyDeform.LIMBS:
+		return
+	for w: Dictionary in _model.wounds:
+		if w.part == part and w.get("name") == AMPUTATION:
+			return
+	var leg := part in [THIGH_L, THIGH_R, SHIN_L, SHIN_R]
+	var w := _model._add_wound(part, "arterial", float(AMPUTATION_RATE["leg" if leg else "arm"]), AMPUTATION)
+	w["at"] = at
+	w["rc"] = FRAGMENT
+	w["dmg"] = 0.0
+	_model.update_state(0.0)
+	_after_change(true)
 
 
 ## Host only. A limb torn off while he lives (Captain, 2026-10-16: "make it so surviving losing arms

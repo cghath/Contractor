@@ -215,6 +215,45 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   pool.
 - All of it is drawn on every peer from the replicated wound and treatment state, at the model's
   0.5 cm voxel scale. New `devices` test suite; the net test checks the devices on a client.
+### Blast dismemberment and synced severed pieces (Captain, 2026-10-20)
+
+#### Added
+- **Explosions tear bodies.** Grenades, charges, mortar rounds, RPG and AT4 rounds tear the bodies
+  near them, by distance and the size of the charge. A close blast takes one or more limbs. A
+  blast right against someone blows them apart: head, arms and legs off, the torso torn open.
+  Fragments pepper the side facing the blast with small holes, and that side is scorched black.
+  The Captain's rule holds: while someone lives, a blast takes at most a foot or forearm, or
+  leaves a thigh or upper arm hanging. Either way it's an amputation a tourniquet stops. Worse
+  happens only to the dead, or to someone the blast kills outright. Corpses near a blast are torn
+  too.
+- **.50s and vehicles.** A .50 takes the limb or head it hits. A heavy vehicle driving over a body
+  crushes what it rolls over; dead, a heavy one crushes the head. A vehicle that hits someone hard
+  tears the side it hit.
+- **Inside a wound.** Deep craters and stumps show torn skin, then fat, red flesh and white bone
+  at the core of a limb. The skull shows under the scalp and ribs in the torso. Bone sticks out
+  of a stump a little.
+- **Limbs hanging by tissue.** A dead limb torn up nearly enough to come off hangs by a strip of
+  tissue, swung off the stump. More damage cuts it through, and what hung drops.
+- **A gore setting** (Settings, Video): Full (the default), Reduced (wounds and lost limbs, but no
+  bone, fragment pocks or flying bits) or Off (bodies drawn whole). It only changes how your own
+  game draws bodies.
+
+#### Fixed
+- **Severed pieces land in the same place for everyone.** The host settles each piece and sends
+  where it lies; other players' pieces move there, and anyone joining later sees them there too.
+  Pieces have colliders fitted to their shape instead of a box. A helmet on a head that comes off
+  drops beside it as an item you can pick up.
+- **Corpses no longer prop up on a cut-off limb.** A cut limb's ragdoll part goes with it, and
+  the part it was cut from shortens to the stump, so the body lies on what's left.
+- **Torn bodies survive a zone save.** A saved body comes back with the same holes and cuts, its
+  pieces where they lay.
+- Rebuilding torn body parts is capped at a few a frame across all bodies, so a big blast
+  doesn't stall the game.
+- **Bodies no longer die standing up.** A body that drops goes limp: the knees and hips give,
+  the trunk folds, the head lolls. Nothing holds it upright, so a corpse no longer settles kneeling
+  or propped on stiff legs. It falls the way it was pushed: shot from the front it goes back,
+  running it pitches forward, a blast throws it away from the burst. Knees and elbows never bend
+  the wrong way, even when thrown. Every player sees it come to rest the same way.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

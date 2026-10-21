@@ -601,11 +601,15 @@ func server_spawn_body(record: Dictionary) -> Soldier:
 		uid = GameState.new_uid()
 	var data := record.duplicate(true)
 	data.erase("gear")  # the gear replicates with the inventory (ServerSync), not in the spawn
+	data.erase("gore")  # and the gore with the vitals (net_state)
 	data["uid"] = uid
 	data["name"] = ("Body_" + uid).validate_node_name()
 	var corpse := body_spawner.spawn(data) as Soldier
 	corpse.inventory.net_state = GameState.from_json(record.get("gear", {}))
 	corpse.vitals.server_kill()  # -> Soldier._on_died: it becomes a body (DEAD_GROUP, body cap)
+	var gore: Dictionary = record.get("gore", {})
+	if not gore.is_empty():  # torn up, cut, its pieces where they lay (BodyDeform.save_record)
+		corpse.vitals.server_restore_gore(gore.get("m", []), gore.get("z", []))
 	corpse.died_at = Soldier._now() - float(record.get("age_s", 0.0))
 	return corpse
 

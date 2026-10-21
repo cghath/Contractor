@@ -502,6 +502,11 @@ var impact := 0.0
 ## wound's tension pneumothorax has started), and for chest wounds tension_in / arrest_in
 ## (seconds, -1 when not pending; host only).
 var wounds: Array[Dictionary] = []
+## Body gore that isn't a wound (BlastGore, host): blast craters, fragment pepper, charring,
+## severed parts and where their pieces came to rest. Medical never reads it; it rides net_state
+## ("z") so every peer and late joiners carve the same body, and goes with snapshot(). Each entry
+## is plain numbers and strings (BlastGore.entry): {"i" id, "k" kind, "p" part, ...}.
+var gore: Array = []
 var unconscious := false
 var arrest := false
 var dead := false
@@ -1645,6 +1650,7 @@ func reset() -> void:
 	pain_wounds = 0.0
 	impact = 0.0
 	wounds.clear()
+	gore.clear()
 	open_events.clear()
 	unconscious = false
 	arrest = false
@@ -1825,7 +1831,8 @@ func to_net() -> Dictionary:
 		"v": [] if infusion.is_empty() else [String(infusion.item), int(infusion.ml), snappedf(float(infusion.left), 1.0)],
 		"l": [snappedf(float(lung_collapse[LUNGS[0]]), 0.01), snappedf(float(lung_fluid[LUNGS[0]]), 0.01),
 			snappedf(float(lung_collapse[LUNGS[1]]), 0.01), snappedf(float(lung_fluid[LUNGS[1]]), 0.01)],
-		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings, snappedf(blast_fluid, 0.01)]}
+		"h": snappedf(heart_rate, 1.0), "g": _drugs_net(), "u": [snappedf(burn, 0.01), burn_dressings, snappedf(blast_fluid, 0.01)],
+		"z": gore.duplicate(true)}
 
 
 func _drugs_net() -> Dictionary:
@@ -1898,6 +1905,7 @@ func apply_net(state: Dictionary) -> void:
 			wounds[-1]["rc"] = RC_CODES[int(entry[8])]
 		if entry.size() > 9:
 			wounds[-1]["dmg"] = float(entry[9])
+	gore = (state.get("z", []) as Array).duplicate(true)
 	tourniquets.clear()
 	var tq: Dictionary = state.get("q", {})
 	for part: String in tq:

@@ -91,17 +91,19 @@ static func clear_line(world: World3D, from: Vector3, to: Vector3) -> bool:
 
 ## Host only. `item_id` is the grenade's item: a smoke grenade's cloud takes its
 ## "smoke_colour" (white without one).
-static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"") -> void:
+## `blast_kg` is the filling (kg of TNT) a frag's blast gore scales with (BlastGore): a grenade's
+## Warheads.GRENADE_TNT_KG unless a charge says more.
+static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, item_id: StringName = &"", blast_kg := 0.0) -> void:
 	match kind:
 		"frag":
-			_frag(level, pos)
+			_frag(level, pos, blast_kg if blast_kg > 0.0 else Warheads.GRENADE_TNT_KG)
 		"flash":
 			_flash(level, pos)
 		"smoke":
 			level.spawn_smoke.rpc(pos, SmokeCloud.colour_of(item_id))
 
 
-static func _frag(level: CompoundLevel, pos: Vector3) -> void:
+static func _frag(level: CompoundLevel, pos: Vector3, blast_kg := Warheads.GRENADE_TNT_KG) -> void:
 	var centre := pos + Vector3.UP * 0.25
 	var blast_radius := WoundModel.BLAST_RADIUS * (BLAST_INDOOR_MULT if indoors(level.get_world_3d(), centre) else 1.0)
 	for n in combatants(level.get_tree()):
@@ -121,6 +123,7 @@ static func _frag(level: CompoundLevel, pos: Vector3) -> void:
 		frag_body(body, vitals, centre, d)
 		if body.has_method(&"suppress"):
 			body.suppress(0.8, pos)
+	BlastGore.server_blast(level, centre, blast_kg, FRAG_RADIUS)  # torn, peppered, scorched bodies (the dead too)
 	level.server_blast(pos, FRAG_CARVE_M)  # by material: concrete only chips (every voxel world it reaches)
 	level.show_explosion.rpc(pos)
 	_shake_players(level, pos)

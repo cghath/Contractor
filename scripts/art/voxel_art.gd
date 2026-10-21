@@ -38,6 +38,9 @@ enum C {
 	# Faces (FaceArt; their colours from a look's "face:" scheme, SoldierLook.palette): shaved or
 	# faded hair and stubble, the eyes' whites, irises, pupils and lashes, and teeth.
 	STUBBLE, EYE_WHITE, IRIS, PUPIL, LASH, TEETH,
+	# Inside a body (BodyDeform: crater walls and stumps go skin, then fat, flesh, bone) and
+	# what a blast leaves on it (charred).
+	FLESH, FAT, BONE, BONE_SHADE, CHAR, CHAR_DARK,
 }
 
 const VARIANTS := {
@@ -743,6 +746,8 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.STUBBLE: skin.lerp(Color(v.hair), 0.38), C.EYE_WHITE: Color("e2dcd0").lerp(skin, 0.12),
 			C.IRIS: Color(v.get("eye", "4a3020")), C.PUPIL: Color("0d0b0a"), C.LASH: Color(v.hair).darkened(0.35).lerp(Color("141010"), 0.5),
 			C.TEETH: Color("e0d8c4"),
+			C.FLESH: Color("8f2a22"), C.FAT: Color("c9a86a"), C.BONE: Color("e3dccb"), C.BONE_SHADE: Color("b8ad94"),
+			C.CHAR: Color("2b2420"), C.CHAR_DARK: Color("120f0d"),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
