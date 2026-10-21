@@ -1030,6 +1030,12 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
 		muzzle = origin
 	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
+	# Buckshot (items expansion, 2026-10-20): a round of several pellets (rounds.json "pellets")
+	# traces each further pellet on its own, spread round the shot inside pellet_spread_deg.
+	for p in Ballistics.pellets(weapon) - 1:
+		var hit := Ballistics.fire(self, muzzle, Ballistics.pellet_direction(direction.normalized(), weapon), weapon)
+		if String(hit.result) != "none":
+			CompoundLevel.current(self).show_impact.rpc(hit.position, hit.normal, hit.result)
 	var suppressed := bool(weapon.stats.get("suppressed", false)) or Suppressors.mounted_id(weapon, inventory.state_of(slot)) != &""
 	last_shot_at = now
 	last_shot_suppressed = suppressed
@@ -1510,6 +1516,13 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var problem := Nvg.server_remove(inventory, target)
 			if problem != "":
 				_client_message.rpc_id(owner_peer(), problem)
+		# A consumable (Consumables, items expansion): one of the entry at `container`/`index`
+		# eaten, drunk, taken or, a battery, put in an NVG.
+		"consume":
+			var list: Array = inventory.containers.get(container, [])
+			var used := ItemDB.get_item(StringName(list[index].id)) if index >= 0 and index < list.size() else null
+			var problem := Consumables.server_use(self, container, index)
+			_client_message.rpc_id(owner_peer(), problem if problem != "" or used == null else Consumables.done_text(used))
 		# Grips, lights and lasers (wave 7 S3, GunAttachments): the entry at `container`/`index`
 		# onto the weapon in `slot` (what was on that mount goes into your containers), what's on
 		# mount `target` (underbarrel or side) of the weapon in `slot` off, or its light or laser

@@ -784,6 +784,8 @@ func _actions_for(src: Dictionary) -> Array:
 			var use := _medical_use(item)
 			if use.is_valid():
 				out.append(["Use", use])
+			if Consumables.is_consumable(item):  # eat, drink, take or a battery in (items expansion); the double-click one
+				out.insert(0, [Consumables.verb(item), _action.bind("consume", c, i, &"", &"")])
 			if Inventory.is_loose_rounds(item) and inv.loadable_rounds(item.id) > 0:
 				out.append(["Load magazines", load_magazines.bind(item.id)])
 			if Inventory.is_pack(item):
@@ -1300,6 +1302,9 @@ const ACTION_TIPS := [
 	["Pick up", "Take it from the ground into your kit, where it fits"],
 	["Stow", "Put it in your containers, where it fits"],
 	["Use", "Use it now"],
+	["Drink", "Drink it now: one used"],
+	["Eat", "Eat it now: one used"],
+	["Take", "Take a dose now: one used"],
 ]
 
 

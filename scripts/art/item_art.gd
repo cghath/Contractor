@@ -188,6 +188,35 @@ static func _spec_for(item: ItemData) -> Dictionary:
 		"rounds_762": s = _rounds(5.1, 1.2, 1.9, Vector3(11, 6, 7), K.RED)
 		"rounds_9mm": s = _rounds(1.9, 1.0, 1.0, Vector3(8, 3, 6.5), K.BLUE)
 		"rounds_45acp": s = _rounds(2.3, 1.1, 1.1, Vector3(8, 3, 6.5), K.ORANGE)
+		# Items expansion (2026-10-20): the new magazines and rounds on the same builders.
+		"mag_mp5": s = _magazine(3.4, 18.0, 2.3, 2.5, VoxelArt.C.GUN, 1.0)
+		"mag_uzi", "mag_glock33": s = _magazine(3.0, 21.0, 2.3, 0.0, VoxelArt.C.GUN, 1.0)
+		"mag_vityaz": s = _magazine(3.4, 18.0, 2.4, 2.0, VoxelArt.C.GUN, 1.0)
+		"mag_9x18", "mag_tt33": s = _magazine(3.0, 10.0, 2.2, 0.0, VoxelArt.C.GUN, 1.0)
+		"mag_57_pistol": s = _magazine(3.2, 13.0, 2.2, 0.0, VoxelArt.C.GUN, 0.9)
+		"mag_usp45": s = _magazine(3.4, 12.0, 2.6, 0.0, VoxelArt.C.GUN, 1.1)
+		"mag_ump45": s = _magazine(3.6, 20.0, 2.8, 0.0, VoxelArt.C.GUN, 1.1)
+		"mag_mp7": s = _magazine(2.8, 20.0, 2.2, 0.0, VoxelArt.C.GUN, 0.8)
+		"mag_saiga12": s = _magazine(8.0, 16.0, 3.4, 1.0, VoxelArt.C.GUN, 2.0)
+		"mag_m14": s = _magazine(7.4, 14.0, 2.8, 0.8, VoxelArt.C.GUN, 1.6)
+		"mag_g3": s = _magazine(7.4, 14.0, 2.8, 1.2, VoxelArt.C.GUN, 1.6)
+		"mag_fal", "mag_762_match": s = _magazine(7.4, 13.5, 2.8, 0.6, VoxelArt.C.GUN, 1.6)
+		"mag_556_match": s = _magazine(6.4, 18.0, 2.4, 1.6, VoxelArt.C.GUN, 1.3)
+		"mag_g36": s = _magazine(6.4, 18.0, 2.6, 2.0, K.DARK_GREY, 1.3)
+		"mag_aug": s = _magazine(6.4, 17.0, 2.6, 1.8, K.CLEAR, 1.3)
+		"mag_rpk74": s = _magazine(6.4, 21.0, 2.6, 4.5, VoxelArt.C.GUN_LIGHT, 1.3)
+		"mag_vz58": s = _magazine(7.0, 14.0, 2.6, 3.0, K.GREY, 1.5)
+		"rounds_9x18": s = _rounds(1.8, 1.0, 1.0, Vector3(8, 3, 6.5), K.GREY)
+		"rounds_762x25": s = _rounds(2.5, 1.0, 1.0, Vector3(8, 3, 6.5), K.RED)
+		"rounds_57x28": s = _rounds(2.9, 0.8, 1.0, Vector3(8, 3, 6.5), K.BLUE)
+		"rounds_46x30": s = _rounds(3.0, 0.7, 0.9, Vector3(8, 3, 6.5), K.TEAL)
+		"rounds_12g": s = _rounds(6.5, 2.0, 0.0, Vector3(12, 7, 9), K.RED)
+		"rounds_303": s = _rounds(5.6, 1.3, 2.0, Vector3(11, 6, 7), K.GREEN)
+		"smartphone", "feature_phone": s = _phone()
+		"laptop_civilian", "tablet_civilian": s = _laptop()
+		"intel_id_cards", "intel_manifest", "intel_bank_slips", "intel_photos", "intel_letters": s = _documents()
+		"circuit_board", "radio_parts", "capacitors", "graphics_card", "drone_parts": s = _electronics()
+		"ear_comtac", "ear_sordin": s = _ear_protection()
 		"belt_50bmg": s = _ammo_can(15, 19, 30, K.OD, true)
 		"belt_127x108": s = _ammo_can(12, 17, 28, K.GUNMETAL, false)
 		"at4": s = _at4()
@@ -278,6 +307,8 @@ static func _fallback(item: ItemData) -> Shape:
 		"intel": colour = K.MANILA
 		"valuable": colour = K.GOLD
 		"salvage": colour = K.COPPER
+		"consumable": colour = K.OD
+		"barter": colour = K.TAN
 	var cut := minf(1.0, minf(size.x, minf(size.y, size.z)) * 0.25)
 	s.prism(Axis.Z, 0, size.y * 0.5, size.x * 0.5, size.y * 0.5, cut, 0, size.z, colour)
 	return s

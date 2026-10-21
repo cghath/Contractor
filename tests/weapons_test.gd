@@ -28,6 +28,8 @@ const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 
 ## Guns fired and reloaded for real on the host player.
 const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs", "scar_h"]
 const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
+## Items expansion (2026-10-20): every gun it added, fired and reloaded for real (_test_expansion_guns).
+const EXPANSION_GUNS: Array[String] = ["glock19", "beretta_m9", "cz75", "makarov_pm", "tt33", "fn57", "glock18c", "usp45", "mp5", "mp5sd", "mp7", "uzi", "vityaz", "p90", "ump45", "rem870", "mossberg590", "m1014", "saiga12", "sig_mcx", "scar_l", "g36c", "aug_a3", "tavor_x95", "ak12", "akms", "ak105", "amd65", "vz58", "mk12", "sr25", "m14_ebr", "g3a3", "fal", "l1a1", "rpd", "negev", "mg3", "m60e4", "lee_enfield", "sks"]
 
 var failures := 0
 var level: CompoundLevel
@@ -58,6 +60,7 @@ func _ready() -> void:
 	await _frames(30)
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
+	await _test_expansion_guns()
 	await _test_reload_beats()
 	await _test_third_person_reload()
 	await _test_hostile_kits()
@@ -354,6 +357,51 @@ func _test_fire_and_reload(id: String) -> void:
 	player._server_reload.rpc_id(1, &"primary")
 	await _seconds(player.reload_seconds(gun) + 0.5)
 	check(inv.rounds_in(&"primary") == cap, "reload from its own %s: %d loaded, spare %d -> %d" % [g[0], inv.rounds_in(&"primary"), spare, inv.spare_rounds(StringName(g[0]))])
+
+
+## Items expansion (2026-10-20): every gun it added has its magazine, loose rounds, prices and a
+## model, fires its own round (a shotgun's nine buckshot pellets for one shell) and reloads from
+## its own magazine, in its own slot.
+func _test_expansion_guns() -> void:
+	print("Items expansion: every new gun fires and reloads from its own magazine")
+	var inv := player.inventory
+	var missing := PackedStringArray()
+	for id: String in EXPANSION_GUNS:
+		var gun := ItemDB.get_item(StringName(id))
+		var mag_id := StringName(String(gun.stats.get("ammo", ""))) if gun else &""
+		var mag := ItemDB.get_item(mag_id) if mag_id != &"" else null
+		if gun == null or mag == null or mag.magazine_rounds() <= 0 or HeliCall.loose_rounds_for(mag_id) == "" or Prices.price_of(StringName(id)) <= 0 				or Prices.price_of(mag_id) <= 0 or VoxelArt.model_for(gun) == "" or Ballistics.round_data(gun).is_empty():
+			missing.append(id)
+	check(missing.is_empty(), "%d new guns, each with its magazine, loose rounds, round data, prices and a model (missing: %s)" % [EXPANSION_GUNS.size(), ", ".join(missing)])
+	var shotguns := EXPANSION_GUNS.filter(func(id: String) -> bool: return ItemDB.get_item(StringName(id)).tags.has("shotgun"))
+	check(shotguns.size() == 4 and shotguns.all(func(id: String) -> bool: return Ballistics.pellets(ItemDB.get_item(StringName(id))) == 9)
+		and Ballistics.pellets(ItemDB.get_item(&"m4a1")) == 1, "the four shotguns fire 9 buckshot pellets a round, a rifle one bullet")
+	var g := ItemDB.get_item(&"rem870")
+	var dir := Vector3(0.3, 0.1, -1.0).normalized()
+	var inside := true
+	for i in 50:
+		inside = inside and rad_to_deg(dir.angle_to(Ballistics.pellet_direction(dir, g))) <= float(g.stats.pellet_spread_deg) + 0.01
+	check(inside, "every pellet leaves inside the gun's %s deg pellet cone" % g.stats.pellet_spread_deg)
+	for id: String in EXPANSION_GUNS:
+		var gun := ItemDB.get_item(StringName(id))
+		var mag_id := StringName(String(gun.stats.ammo))
+		var cap := ItemDB.get_item(mag_id).magazine_rounds()
+		var slot := gun.slot
+		inv.slots[slot] = &""
+		inv.take(StringName(id))
+		inv.take(mag_id, 1)
+		player._server_busy_until = 0.0
+		var aim := -player.global_basis.z
+		var wait := 60.0 / float(gun.stats.rpm) + 0.1
+		for i in 2:
+			player._server_fire.rpc_id(1, player.head.global_position, aim, slot)
+			await _seconds(wait)
+		var fired := inv.rounds_in(slot)
+		player._server_reload.rpc_id(1, slot)
+		await _seconds(player.reload_seconds(gun, false) + 0.4)
+		check(inv.slots[slot] == StringName(id) and fired == cap - 2 and inv.rounds_in(slot) == cap,
+			"%s (%s): 2 shots from %d leave %d; reloads from its own %s to %d" % [id, slot, cap, fired, mag_id, inv.rounds_in(slot)])
+	inv.slots[&"sidearm"] = &""
 
 
 ## Weapon detail pass (2026-10-20): a PKM's empty reload in first person, from the reload key:
