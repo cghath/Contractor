@@ -39,6 +39,7 @@ func _ready() -> void:
 	await _test_point_blank()
 	await _test_heavy_and_crush()
 	await _test_hanging()
+	await _test_heads_and_marks()
 	await _test_gore_setting()
 	await _test_save_round_trip()
 	print("GORE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -339,6 +340,56 @@ func _test_heavy_and_crush() -> void:
 	var helmets := get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool:
 		return n is WorldItem and (n as WorldItem).item_id == &"helmet" and (n as Node3D).global_position.distance_to(s.global_position) < 4.0)
 	check(s.inventory.slots[&"helmet"] == &"" and helmets.size() == 1, "the helmet came off with the head, an item to pick up (%d near)" % helmets.size())
+
+
+## Captain, 2026-10-21: "the first headshot doesnt leave a wound"; "theres no model for a neck
+## which had its head severed by an rpg round. it carves a crater out in the body"; "blood marks
+## on a body stay where a limb was after it dismembers when shooting with weapons".
+func _test_heads_and_marks() -> void:
+	print("Heads, necks and marks past a cut")
+	var s := _man("GoreHeadshot")
+	await _seconds(0.3)
+	var head := _hitbox_point(s, Vitals.HEAD)
+	s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.INTERMEDIATE, "position": head, "direction": s.global_basis.z,
+		"hitbox": BlastGore._hitbox(s, Vitals.HEAD), "distance": 50.0, "channel_depth": 0.08})
+	await _seconds(0.3)
+	var marks := s.model.get_node(^"WoundMarks") as WoundMarks
+	var on_head := s.vitals.wound_list().filter(func(w: Dictionary) -> bool: return w.part == Vitals.HEAD and w.get("at") is Vector3)
+	check(s.vitals.is_dead() and not on_head.is_empty() and marks.holes_on(Vitals.HEAD) >= 1,
+		"the first, killing headshot leaves its wound (%d on the head, %d holes drawn)" % [on_head.size(), marks.holes_on(Vitals.HEAD)])
+	# A warhead on the head: the head goes, a neck stump stays, the torso isn't gibbed or cratered.
+	var r := _man("GoreRpgHead")
+	await _seconds(0.3)
+	var at := _hitbox_point(r, Vitals.HEAD)
+	r.vitals.server_kill()
+	BlastGore.server_direct(r, Vitals.HEAD, at, r.global_basis.z, 0.7)
+	await _wait_for(func() -> bool: return _deform(r).cut_bounds(Vitals.HEAD) is AABB, 5.0)
+	var cut := _deform(r).severed()
+	var torso_craters := _records(r, "c").filter(func(g: Dictionary) -> bool: return StringName(g.p) in BlastGore.TORSO_PARTS)
+	var neck: Variant = _deform(r).cut_bounds(Vitals.HEAD)
+	check(cut == [Vitals.HEAD] and _records(r, "g").is_empty() and torso_craters.is_empty(),
+		"an RPG on the head takes the head and only the head (%s), no gib, no crater in the torso (%d)" % [cut, torso_craters.size()])
+	check(neck is AABB and (neck as AABB).size.y > 0.03 and (neck as AABB).size.y < 0.1,
+		"a neck stump stands where it was (%.1f cm)" % ((neck as AABB).size.y * 100.0 if neck is AABB else -1.0))
+	# Marks low on a thigh, then the thigh cut high: the marks past the cut go with it.
+	var m := _man("GoreMarks")
+	await _seconds(0.3)
+	m.vitals.server_kill()
+	var hb := BlastGore._hitbox(m, Vitals.THIGH_L)
+	var low := Warheads.hitbox_point(hb, Vector3(0, -0.15, 0))
+	m.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.INTERMEDIATE, "position": low, "direction": m.global_basis.z, "hitbox": hb, "distance": 50.0, "channel_depth": 0.05})
+	await _seconds(0.3)
+	var thigh := m.model.part_node(Vitals.THIGH_L)
+	var drawn := func() -> int:
+		var mm := thigh.get_node_or_null(^"WoundMark") as MultiMeshInstance3D
+		return mm.multimesh.visible_instance_count if mm else 0
+	var before: int = drawn.call()
+	var top: Array = BodyMap.PART_BOXES[Vitals.THIGH_L][0]
+	var high := (top[0] as Vector3) + Vector3(0, (top[1] as Vector3).y * 0.35, 0)
+	m.vitals.server_gore_add({"k": "s", "p": String(Vitals.THIGH_L), "a": BlastGore.vec(high), "np": true}, false)
+	m.vitals.server_gore_flush()
+	await _wait_for(func() -> bool: return _deform(m).cut_bounds(Vitals.THIGH_L) is AABB and drawn.call() == 0, 5.0)
+	check(before > 0 and drawn.call() == 0, "cut above its wound, the thigh's marks go with what was cut off (%d drawn, then %d)" % [before, drawn.call()])
 
 
 ## Rounds into a dead man's broken thigh: hanging by tissue first, then off.

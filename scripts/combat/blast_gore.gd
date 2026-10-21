@@ -113,15 +113,39 @@ static func server_direct(body: Node3D, part: StringName, pos: Vector3, dir: Vec
 	if vitals == null:
 		return
 	var world := body.get_world_3d()
+	var bone := BodyDeform._bone_part(part)
+	if bone == Vitals.HEAD:
+		_add(vitals, _direct_head(body, pos, dir, kg))
+		return
 	if kg >= GIB_DIRECT_KG:
 		var entries := _gib(body, vitals, world, pos - dir.normalized() * 0.1, maxf(pow(kg, 1.0 / 3.0), 0.5))
 		_add(vitals, entries)
 		return
 	var hitbox := _hitbox(body, part)
-	var bone := BodyDeform._bone_part(part)
-	if hitbox and (bone in BodyDeform.LIMBS or bone == Vitals.HEAD):
+	if hitbox and bone in BodyDeform.LIMBS:
 		var rest := _to_rest(hitbox) * pos
 		_add(vitals, [_sever(bone, rest, dir.normalized() * HEAVY_LAUNCH + Vector3.UP, hash(body.name) + 31)])
+
+
+## A warhead on the head, face or neck (Captain, 2026-10-21: "theres no model for a neck which had
+## its head severed by an rpg round. it carves a crater out in the body"): the head goes (pulped,
+## no piece, under a filling of GIB_DIRECT_KG or more; flung off under less) and leaves its neck
+## stump (BodyDeform cuts it), the chest charred and peppered from above. The body isn't gibbed
+## and the torso takes no crater at the neck.
+static func _direct_head(body: Node3D, pos: Vector3, dir: Vector3, kg: float) -> Array:
+	var entries: Array = []
+	var head := _hitbox(body, Vitals.HEAD)
+	var rest := _to_rest(head) * pos if head else Vector3(0, 1.6, 0)
+	if kg >= GIB_DIRECT_KG:
+		entries.append({"k": "s", "p": String(Vitals.HEAD), "a": vec(rest), "np": true})
+	else:
+		entries.append(_sever(Vitals.HEAD, rest, dir.normalized() * HEAVY_LAUNCH + Vector3.UP, hash(body.name) + 31))
+	var chest := _hitbox(body, Vitals.CHEST)
+	if chest:
+		var toward := (_to_rest(chest).basis * (pos - _nearest(chest, pos))).normalized()
+		entries.append({"k": "h", "p": String(Vitals.CHEST), "d": vec(toward, 0.01), "m": 0.7})
+		entries.append({"k": "p", "p": String(Vitals.CHEST), "d": vec(toward, 0.01), "n": PEPPER_MAX / 2, "s": hash("%s%s" % [body.name, pos]) % 100000})
+	return entries
 
 
 ## Host only. A .50-class round (Vitals.LETHAL_J) hit `part` of `vitals`' body at rest-pose `at`,

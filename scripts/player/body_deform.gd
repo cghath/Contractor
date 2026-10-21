@@ -65,6 +65,9 @@ const SEVER_ALIVE := 20.0
 const SEVER_DEAD := 10.0
 const HEAD_DEAD := 7.0
 const SEVER_SLAB := 2
+## A head comes off this many voxels up from the bottom of its neck (the neck is ~18 tall): a
+## neck stump stands on the collar (Captain, 2026-10-21: "theres no model for a neck").
+const NECK_STUMP := 11.0
 ## Proposed: hanging by tissue at this share of the sever score (dead; DANGLE_ALIVE alive, its bone
 ## broken too), the hanging part at DANGLE_DEG off the stump; the strip left is DANGLE_BRIDGE of
 ## the part's width.
@@ -138,13 +141,34 @@ var _level := ""      # the gore level drawn with
 var _poll := 0.0
 var _recording := {}  # host: part -> true, its "s" entry on its way (_record_severs)
 
+## A part's mesh was cut through (a piece dropped, pulped or left hanging): what's drawn on it changes
+## (WoundMarks keeps only the marks on what's left).
+signal reshaped
+## How far outside a cut part's mesh a wound mark may sit and still be drawn (cut_bounds).
+const MARK_MARGIN := 0.015
+
 
 func setup(p_model: CharacterModel, p_vitals: Vitals) -> void:
 	model = p_model
 	vitals = p_vitals
 	body = BodyVolume.body_of(p_model)
 	vitals.changed.connect(_rebuild)
+	var marks := model.get_node_or_null(^"WoundMarks")
+	if marks and marks.has_method(&"on_reshaped"):
+		reshaped.connect(marks.on_reshaped)
 	_rebuild()
+
+
+## What's left of cut or hanging `part` (its pivot's space, MARK_MARGIN round its mesh), or null
+## while it's whole (Captain, 2026-10-21: "blood marks on a body stay where a limb was after it
+## dismembers": WoundMarks draws only the marks inside it).
+func cut_bounds(part: StringName) -> Variant:
+	if not (_severed.has(part) or _dangled.has(part)):
+		return null
+	var mi := _mesh_of(model.part_node(part))
+	if mi == null or mi.mesh == null or not _parts.has(model.part_node(part)) or (_parts[model.part_node(part)] as Dictionary).buffer == null:
+		return null
+	return (mi.transform * mi.get_aabb()).grow(MARK_MARGIN)
 
 
 ## The gore level this peer draws: "full", "reduced" or "off".
@@ -653,15 +677,19 @@ static func _work(ref: WeakRef, pivot: Node3D, buffer: VoxelBuffer, prof: Packed
 		if job.get("sever", false):
 			var cut := float(job.cut)
 			if cut < 0.0:
-				cut = _lowest_solid(buffer) + 4.0 if cut > -1.5 else _middle(buffer)
+				cut = _lowest_solid(buffer) + NECK_STUMP if cut > -1.5 else _middle(buffer)
 			cut = _clamp_cut(buffer, cut) if not bool(job.far_up) else cut
-			var piece := split(buffer, roundi(cut), bool(job.far_up), prof, kind, bone)
+			# A head comes off at the neck: the stump is opened as a limb is (skin, fat, flesh, the
+			# spine at its core), not as the skull is.
+			var piece := split(buffer, roundi(cut), bool(job.far_up), prof, K_LIMB if kind == K_HEAD else kind, bone)
+			out["cut"] = true
 			if bool(job.get("drop", true)):
 				(out.pieces as Array).append({"part": job.part, "buffer": piece, "hull": hull_points(piece)})
 		elif job.get("dangle", false):
 			var cut := float(job.cut)
 			cut = _clamp_cut(buffer, _middle(buffer) if cut < 0.0 else cut)
 			var hang := dangle_split(buffer, roundi(cut), int(job.salt), prof, kind, bone)
+			out["cut"] = true
 			if not hang.is_empty():
 				hang["part"] = job.part
 				hang["hull"] = hull_points(hang.buffer)
@@ -726,6 +754,8 @@ func _done_work(pivot: Node3D, buffer: VoxelBuffer, out: Dictionary) -> void:
 		var hang_mesh: Mesh = mesher.build_mesh(h.buffer, [])
 		if hang_mesh and mi:
 			_hang(StringName(h.part), pivot, mi, hang_mesh, h)
+	if out.get("cut", false):
+		reshaped.emit()
 	_kick(pivot)
 
 

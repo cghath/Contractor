@@ -11,6 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Gore fixes (Captain, 2026-10-21)
+
+#### Fixed
+- **Hair no longer goes pale or blue.** Pallor and blue lips were keyed to the uniform's default
+  skin colour, not the face's own skin and hair. Some hair shades matched the default mouth and
+  lip colours and took the tint. Each mesh's overlay now uses its own colour scheme, and hair,
+  brows and eyes are never tinted. Blue lips now also show on the face's moving mouth.
+- **The first headshot leaves a wound.** A killing head hit killed without recording a wound, so
+  it drew no hole, blood or brain spatter. Only later shots into the corpse showed.
+- **An RPG to the head leaves a neck, not a crater.** A warhead hit on the head, face or neck now
+  takes the head (pulped by a filling big enough to gib, flung off by a smaller one), chars and
+  peppers the chest, and leaves the body whole. Before, it gibbed him and carved big craters in
+  the torso at the collar. Every head cut now leaves a neck stump about 5 cm tall (it was about
+  2 cm and mostly torn away), opened like a limb: skin, fat, flesh and the spine at its core.
+- **Wound marks go with a cut-off limb.** Holes and blood trails past the cut stayed hanging in
+  the air where the limb had been. Now only the marks on what's left of the part are drawn.
+
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
 #### Added
