@@ -11,6 +11,25 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
+
+#### Added
+- **SMG models**: the MP5 (cocking tube with its handle on the left, curved magazine, two-strut
+  stock), the MP5SD (integral suppressor), the UMP45 (squared polymer body, straight magazine,
+  folding skeleton stock), and the MP7 and Uzi with the magazine up the pistol grip. An empty
+  reload slaps the locked-back cocking handle home.
+- **Shotgun models**: the Remington 870 (wooden pump and stock) and Mossberg 590 (synthetic, heat
+  shield) with a magazine tube under the barrel and no magazine well, racked by the pump; the
+  M1014 with its charging handle, pistol grip and collapsible stock. Shells load through the top,
+  like a bolt-action's clip.
+- **Pistol variants**: compact (Glock 19), all-steel hammer pistols with wooden grips (M1911,
+  Beretta M9, CZ 75, TT-33, P226) and a compact steel one (Makarov PM).
+
+#### Changed
+- These guns used to borrow the C8, Mosin or single pistol model at their real length. The
+  G36C, Vityaz, Saiga-12, P90, AUG, Lee-Enfield and SKS keep their families (carbine, AK,
+  bullpup, bolt-action), which match the real guns closely enough.
+
 ### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
 
 #### Added

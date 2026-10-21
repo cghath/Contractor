@@ -224,7 +224,8 @@ static func model_for(item: ItemData, state := {}) -> String:
 			var sup := Suppressors.mounted_id(item, state) != &""
 			return "rifle:%d:%s:%s:%s" % [roundi(length / VOXEL_SIZE), art if art != "" else IRONS, style, "sup" if sup else ""]
 		&"sidearm":
-			return "pistol"
+			var kind := String(item.stats.get("model_style", ""))  # "compact", "steel", "steel_compact": _pistol
+			return "pistol:" + kind if kind != "" else "pistol"
 		&"vest":
 			return "vest:%d" % ["light", "medium", "heavy"].find(item.stats.get("tier", "medium"))
 		&"backpack":
@@ -247,14 +248,24 @@ static func hand_points(model: String) -> Dictionary:
 		"rifle" when _rifle_style(model) == "bullpup":
 			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip, the magazine behind it
 			support = Vector3(1.5, 6 + RIFLE_BELOW, n - 26.0)  # on the handguard, as far out as the arm reaches
+		"rifle" when _rifle_style(model) in SMG_STYLES:
+			var in_grip := _rifle_style(model) in SMG_GRIP_MAG
+			grip = Vector3(1.5, (3.0 if in_grip else 3.5) + RIFLE_BELOW, _z_at(model, 0.57 if in_grip else 0.62))  # its pistol grip
+			# On the forend (an MP7's foregrip, low), or the SD's forend behind its suppressor.
+			var forend := 0.28 if _rifle_style(model) == "smg_sd" else 0.2
+			support = Vector3(1.5, (3.5 if _rifle_style(model) == "smg_pdw" else 6.0) + RIFLE_BELOW, maxf(_z_at(model, forend), n - 26.0))
+		"rifle" when _rifle_style(model) in SHOTGUN_STYLES:
+			# The straight wrist of the stock (an M1014's pistol grip); the pump, as far out as the arm reaches.
+			grip = Vector3(1.5, (4.0 if _rifle_style(model) == "shotgun_auto" else 6.0) + RIFLE_BELOW, _z_at(model, 0.76))
+			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
 		"rifle":
 			grip = Vector3(1.5, 4 + RIFLE_BELOW, n * 0.68)     # pistol grip
 			# Under the handguard, no further than 0.52 m from the butt: as far out as the
 			# arms reach with the support shoulder forward (CharacterModel.SUPPORT_REACH).
 			support = Vector3(1.5, 6 + RIFLE_BELOW, maxf(n * 0.42, n - 26.0))
-		"pistol":
-			grip = Vector3(1, 2.5, 7.5)
-			support = Vector3(-0.5, 2, 7.5)      # cupping the grip from the left
+		"pistol":  # (measured from its back: a compact's is shorter at the front)
+			grip = Vector3(1, 2.5, n - 2.5)
+			support = Vector3(-0.5, 2, n - 2.5)  # cupping the grip from the left
 		_:
 			return {}
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
@@ -274,7 +285,7 @@ static func sight_point(model: String) -> Vector3:
 			var back := sight_back(art, spec.size.z) + (IRON_EYE_RELIEF if art == IRONS else 0.0)
 			return (Vector3(_axis_x(model), OPTIC_AXIS_Y + _below(model), back) - centre) * VOXEL_SIZE
 		"pistol":
-			return (Vector3(1, 7.0, 9.4) - centre) * VOXEL_SIZE  # rear sight notch
+			return (Vector3(1, 7.0, spec.size.z - 0.6) - centre) * VOXEL_SIZE  # rear sight notch
 	return Vector3.ZERO
 
 
@@ -819,12 +830,15 @@ static func _spec(model: String) -> Dictionary:
 				"piston_ar": out = _rifle_piston_ar(arg, art)
 				"mosin": out = _rifle_bolt(arg, art, false)
 				"chassis_bolt": out = _rifle_chassis_bolt(arg, art)
+				"smg", "smg_sd", "smg_box": out = _rifle_smg(arg, art, _rifle_style(model))
+				"smg_pdw", "smg_grip": out = _rifle_smg_grip(arg, art, _rifle_style(model) == "smg_pdw")
+				"shotgun", "shotgun_tac", "shotgun_auto": out = _rifle_shotgun(arg, art, _rifle_style(model))
 				_: out = _rifle(arg, art)
 			if _rifle_suppressed(model):
 				out = _with_suppressor(out)
 			return _lowered(out, RIFLE_BELOW) if _rifle_style(model) != "walker" else out
 		"optic": return _optic_model(model.get_slice(":", 1))
-		"pistol": return _pistol()
+		"pistol": return _pistol(model.get_slice(":", 1) if model.contains(":") else "")
 		"head_f": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", true)
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
@@ -1426,7 +1440,8 @@ static func reload_points(model: String) -> Dictionary:
 		out["well"] = Vector3((lo.x + hi.x) * 0.5, hi.y, (lo.z + hi.z) * 0.5)
 	var b := _below(model)
 	if model.get_slice(":", 0) == "pistol":
-		out.merge({"bolt": Vector3(1.0, 6.8, 9.5), "catch": Vector3(0.0, 4.25, 5.5)}, true)  # the slide's back, the slide stop
+		var n := float(spec.size.z)
+		out.merge({"bolt": Vector3(1.0, 6.8, n - 0.5), "catch": Vector3(0.0, 4.25, n - 4.5)}, true)  # the slide's back, the slide stop
 	elif model.begins_with("rifle"):
 		if mag.is_empty():  # an internal magazine: its top, through the open action
 			out["mag"] = Vector3(0.6, 7.5 + b, z.call(0.62))
@@ -1446,6 +1461,19 @@ static func reload_points(model: String) -> Dictionary:
 			"m249": out["bolt"] = Vector3(2.75, 7.5 + b, z.call(0.435))
 			"mosin": out["bolt"] = Vector3(2.75, 9.0 + b, z.call(0.735))   # the bolt knob
 			"chassis_bolt": out["bolt"] = Vector3(2.75, 8.5 + b, z.call(0.75))
+			# The SMGs' handles slap home like an AR's catch (Reloads.AR): "catch" is the handle locked
+			# back (part_motion's travel behind where it sits, "bolt").
+			"smg", "smg_sd", "smg_box":
+				out["bolt"] = Vector3(0.25, 9.25 + b, z.call(0.11))       # the cocking handle, left, on the tube
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"smg_pdw":
+				out["bolt"] = Vector3(1.5, 9.5 + b, z.call(0.86) + 0.25)  # the T charging handle, out the back
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"smg_grip":
+				out["bolt"] = Vector3(1.5, 10.25 + b, z.call(0.53))       # the cocking knob, on the top cover
+				out["catch"] = out["bolt"] + Vector3(0, 0, 3.0)
+			"shotgun", "shotgun_tac": out["bolt"] = Vector3(1.5, 6.25 + b, z.call(0.42))  # under the pump
+			"shotgun_auto": out["bolt"] = Vector3(2.6, 8.0 + b, z.call(0.58))         # the charging handle, right
 			_:  # the AR family: the bolt catch paddle on the left behind the well, the T-handle at the back
 				out["catch"] = Vector3(0.5, 6.5 + b, z.call(0.5875))
 				out["bolt"] = Vector3(1.5, 9.3 + b, z.call(0.765))
@@ -1472,6 +1500,7 @@ static func part_motion(model: String) -> Dictionary:
 		"mosin", "chassis_bolt":
 			out.travel = 0.08
 			out.lift = 1.4
+		"shotgun", "shotgun_tac": out.travel = 0.04  # the pump racked back to the receiver
 	var cover := _part_box(spec, COVER_TAG)
 	if not cover.is_empty():
 		var lo: Vector3 = cover[0]
@@ -2288,6 +2317,218 @@ static func _rifle_chassis_bolt(length: int, art := IRONS) -> Dictionary:
 	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
+## The items expansion's submachine guns and shotguns have silhouettes of their own (follow-up,
+## 2026-10-20: they borrowed the C8's, the AK's and the Mosin's at their real length).
+const SMG_STYLES: Array[String] = ["smg", "smg_sd", "smg_box", "smg_pdw", "smg_grip"]
+const SMG_GRIP_MAG: Array[String] = ["smg_pdw", "smg_grip"]  # the magazine up the pistol grip
+const SHOTGUN_STYLES: Array[String] = ["shotgun", "shotgun_tac", "shotgun_auto"]
+
+
+## A submachine gun, learned from the real guns: "smg" an MP5 (a stamped receiver with the
+## cocking tube over the barrel and its handle on the left, the three-lug barrel collar, a slim
+## forend, a deep curved magazine, the drum rear sight over the grip and a retractable stock on two
+## struts), "smg_sd" the MP5SD (a fat integral suppressor in place of the barrel and most of the
+## forend) and "smg_box" a UMP (a squared polymer body, a straight magazine and a side-folding
+## skeleton stock). The grip sits further forward than a rifle's (hand_points) and the support
+## hand on the forend. Its cocking handle (BOLT_TAG) locks back on an empty magazine and is
+## slapped home, like an AR's catch (Reloads.AR; reload_points' "catch").
+static func _rifle_smg(length: int, art := IRONS, kind := "smg") -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var ump := kind == "smg_box"
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 9.6)
+	var boxes := sight
+	if kind == "smg_sd":
+		boxes += [
+			_fb(0.5, 7.5, 0, 2.5, 9.5, f.call(0.27), C.GUN_LIGHT),              # integral suppressor, 4 cm across
+			_fb(0.75, 7.75, 0, 2.25, 9.25, 0.25, C.GUN),                        # its end cap
+			_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                       # and bore
+			_fb(1.0, 8.75, f.call(0.04), 2.0, 9.75, f.call(0.3), C.GUN),        # cocking tube, over the can
+			_fb(0.6, 6.5, f.call(0.22), 2.4, 9.0, f.call(0.32), C.GUN_LIGHT),   # short forend, round the can's back
+			_fb(1.25, 8.25, f.call(0.27), 1.75, 8.75, f.call(0.32), C.GUN),     # barrel, into the receiver
+		]
+	elif ump:
+		boxes += [
+			_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                 # barrel
+			_fb(1.0, 8.0, 0, 2.0, 9.0, 1.0, C.GUN),                             # thread protector
+			_fb(0.6, 6.5, f.call(0.08), 2.4, 9.75, f.call(0.3), C.GUN_LIGHT),   # the squared polymer front: forend and upper in one
+			_fbp(0.6, 7.5, f.call(0.1), 2.4, 8.0, f.call(0.26), C.GUN),         # its side rails
+		]
+	else:
+		boxes += [
+			_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.3), C.GUN),                 # barrel, on into the receiver
+			_fb(1.0, 8.0, 0, 2.0, 9.0, 1.25, C.GUN),                            # three-lug barrel collar
+			_fb(0.75, 8.25, 0.25, 2.25, 8.75, 1.0, C.GUN),                      # its lugs
+			_fb(1.0, 8.75, f.call(0.04), 2.0, 9.75, f.call(0.3), C.GUN),        # cocking tube, over the barrel
+			_fb(0.6, 6.5, f.call(0.1), 2.4, 9.0, f.call(0.3), C.GUN_LIGHT),     # slim forend
+			_fbp(0.6, 7.5, f.call(0.12), 2.4, 7.75, f.call(0.28), C.GUN),       # its finger groove
+		]
+	var body := C.GUN_LIGHT if ump else C.GUN
+	boxes += [
+		_fb(0.7, 6.0, f.call(0.3), 2.3, 9.6, f.call(0.74), body),               # receiver
+		_fb(1.0, 9.6, f.call(0.3), 2.0, 9.95, f.call(0.74), C.GUN),             # its top: the claw mount's rail, the rear drum on it
+		_fb(0.75, 5.0, f.call(0.44), 2.25, 6.0, f.call(0.72), C.GUN_LIGHT),     # polymer trigger group under it
+		_fb(0.8, 6.25, f.call(0.72), 2.2, 9.5, f.call(0.76), C.GUN),            # end cap, the stock's mount
+		# The cocking handle (BOLT_TAG): folded out to the left at the tube's front, its slot back
+		# along the tube (it locks up in the slot's notch, back, to change magazines).
+		_fb(1.0, 9.0, f.call(0.12), 1.25, 9.5, f.call(0.27), C.EMPTY),
+		_fbt(0.5, 9.0, f.call(0.1), 1.25, 9.5, f.call(0.12), C.GUN, BOLT_TAG),
+		_fbt(0.0, 8.75, f.call(0.09), 0.5, 9.75, f.call(0.13), C.GUN_LIGHT, BOLT_TAG),
+		_fb(2.0, 8.25, f.call(0.4), 2.3, 9.25, f.call(0.5), C.EMPTY),           # ejection port, right
+		_fb(0.75, 4.5, f.call(0.33), 2.25, 6.0, f.call(0.44), C.GUN),           # magazine well, under the receiver
+		_fb(1.0, 4.5, f.call(0.35), 2.0, 6.5, f.call(0.42), C.EMPTY),           # the well itself
+	]
+	if ump:  # 25 rounds of .45, nearly straight
+		boxes += [
+			_fbm(0.9, 4.5, f.call(0.35), 2.1, 6.5, f.call(0.42), C.GUN_LIGHT),
+			_fbm(0.9, 1.0, f.call(0.345), 2.1, 4.5, f.call(0.415), C.GUN_LIGHT),
+			_fbm(0.9, -2.25, f.call(0.34), 2.1, 1.0, f.call(0.41), C.GUN_LIGHT),
+			_fbm(0.85, -2.75, f.call(0.335), 2.15, -2.25, f.call(0.415), C.GUN),  # floorplate
+		]
+	else:  # 30 rounds of 9 mm, curving well forward
+		boxes += [
+			_fbm(0.9, 4.5, f.call(0.35), 2.1, 6.5, f.call(0.42), C.GUN_LIGHT),
+			_fbm(0.9, 2.75, f.call(0.335), 2.1, 4.5, f.call(0.405), C.GUN_LIGHT),
+			_fbm(0.9, 1.0, f.call(0.315), 2.1, 2.75, f.call(0.385), C.GUN_LIGHT),
+			_fbm(0.9, -0.75, f.call(0.29), 2.1, 1.0, f.call(0.36), C.GUN_LIGHT),
+			_fbm(0.9, -2.25, f.call(0.26), 2.1, -0.75, f.call(0.33), C.GUN_LIGHT),
+			_fbm(0.85, -2.75, f.call(0.25), 2.15, -2.25, f.call(0.325), C.GUN),  # floorplate
+		]
+	boxes += [
+		_fb(1.25, 4.0, f.call(0.44), 1.75, 5.0, f.call(0.46), C.GUN_LIGHT),     # the paddle release, behind the magazine
+		_fb(1.25, 3.25, f.call(0.5), 1.75, 5.0, f.call(0.52), C.GUN_LIGHT),     # trigger guard, moulded with the grip: its front
+		_fb(1.25, 3.25, f.call(0.5), 1.75, 3.75, f.call(0.6), C.GUN_LIGHT),     # its bottom
+		_fb(1.25, 4.0, f.call(0.545), 1.75, 5.0, f.call(0.565), C.GUN),         # trigger
+		_fb(0.9, 3.25, f.call(0.58), 2.1, 5.0, f.call(0.66), C.GUN_LIGHT),      # pistol grip, raked back
+		_fb(0.9, 1.75, f.call(0.6), 2.1, 3.25, f.call(0.68), C.GUN_LIGHT),
+		_fb(0.9, 0.5, f.call(0.62), 2.1, 1.75, f.call(0.7), C.GUN_LIGHT),
+		_fb(0.5, 5.25, f.call(0.6), 0.75, 5.75, f.call(0.65), C.GUN),           # selector, left, over the grip
+	]
+	if ump:  # the side-folding skeleton stock, open
+		boxes += [
+			_fb(0.9, 5.0, f.call(0.74), 2.1, 9.25, f.call(0.78), C.GUN_LIGHT),  # its hinge
+			_fb(0.9, 8.5, f.call(0.74), 2.1, 9.25, n, C.GUN_LIGHT),             # top bar
+			_fb(0.9, 5.0, f.call(0.74), 2.1, 5.75, n, C.GUN_LIGHT),             # bottom bar
+			_fb(0.75, 5.0, n - 1.0, 2.25, 9.5, n, C.GUN),                       # butt plate
+		]
+	else:  # the retractable stock, out: two struts to a curved butt plate
+		boxes += [
+			_fb(0.5, 8.5, f.call(0.74), 0.8, 9.0, n - 0.5, C.GUN),
+			_fb(2.2, 8.5, f.call(0.74), 2.5, 9.0, n - 0.5, C.GUN),
+			_fb(0.5, 5.5, n - 1.0, 2.5, 9.75, n, C.GUN),
+			_fb(0.75, 5.75, n - 0.5, 2.25, 9.5, n, C.GUN_LIGHT),                # its rubber pad
+		]
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A submachine gun with its magazine up the pistol grip: "smg_pdw" an MP7 (a polymer body with
+## a long top rail, a folding foregrip, the AR-style T charging handle out of its back) and
+## "smg_grip" an Uzi (a steel box receiver with a ribbed top cover and its cocking knob on top, a
+## polymer lower handguard and the grip safety). Both stocks collapsed: two rods to a butt plate.
+static func _rifle_smg_grip(length: int, art := IRONS, pdw := false) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 9.6)
+	var boxes := sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.2), C.GUN),                     # barrel
+		_fb(1.0, 8.0, 0, 2.0, 9.0, 1.0, C.GUN),                                 # barrel nut
+		_fb(0.65, 6.0, f.call(0.1), 2.35, 9.6, f.call(0.86), C.GUN),            # receiver: one long box
+		_fb(1.0, 9.6, f.call(0.1), 2.0, 9.95, f.call(0.86), C.GUN),             # its top: a rail, or the top cover's spine
+		_fb(2.0, 8.0, f.call(0.32), 2.35, 9.25, f.call(0.42), C.EMPTY),         # ejection port, right
+		# The magazine up the grip (MAG_TAG: it drops out the bottom), the grip round it.
+		_fb(0.75, 0.0, f.call(0.5), 2.25, 6.0, f.call(0.64), C.GUN),
+		_fb(1.0, 0.0, f.call(0.52), 2.0, 6.0, f.call(0.62), C.EMPTY),
+		_fbm(1.0, 0.0, f.call(0.52), 2.0, 6.0, f.call(0.62), C.GUN_LIGHT),
+		_fbm(1.0, -2.5, f.call(0.52), 2.0, 0.0, f.call(0.62), C.GUN_LIGHT),     # and out under it
+		_fbm(0.9, -3.0, f.call(0.51), 2.1, -2.5, f.call(0.63), C.GUN),          # floorplate
+		_fb(1.25, 3.0, f.call(0.38), 1.75, 6.0, f.call(0.4), C.GUN),            # trigger guard: its front
+		_fb(1.25, 3.0, f.call(0.38), 1.75, 3.5, f.call(0.5), C.GUN),            # its bottom, to the grip
+		_fb(1.25, 4.0, f.call(0.45), 1.75, 6.0, f.call(0.47), C.GUN_LIGHT),     # trigger
+		_fb(0.5, 8.0, f.call(0.84), 0.75, 8.75, n - 0.5, C.GUN),                # stock rods, collapsed
+		_fb(2.25, 8.0, f.call(0.84), 2.5, 8.75, n - 0.5, C.GUN),
+		_fb(0.5, 5.5, n - 0.75, 2.5, 9.5, n, C.GUN),                            # butt plate
+	]
+	if pdw:
+		boxes += [
+			_fb(1.0, 2.0, f.call(0.16), 2.0, 6.0, f.call(0.24), C.GUN),         # folding foregrip, down
+			_fbt(0.5, 9.25, f.call(0.86), 2.5, 9.75, f.call(0.89), C.GUN_LIGHT, BOLT_TAG),  # T charging handle, out the back
+			_fbp(0.65, 7.5, f.call(0.12), 2.35, 8.0, f.call(0.3), C.GUN_LIGHT), # side rails
+		]
+	else:
+		boxes += [
+			_fb(0.6, 5.5, f.call(0.12), 2.4, 7.5, f.call(0.36), C.GUN_LIGHT),   # polymer lower handguard
+			_fb(1.0, 1.0, f.call(0.64), 2.0, 5.0, f.call(0.66), C.GUN_LIGHT),   # grip safety, at the grip's back
+			_fbt(1.0, 9.95, f.call(0.5), 2.0, 10.5, f.call(0.56), C.GUN_LIGHT, BOLT_TAG),  # cocking knob, on the top cover
+		]
+		var z: float = f.call(0.14)
+		while z < f.call(0.46):  # the top cover's ribs
+			boxes.append(_fbp(0.65, 9.25, z, 2.35, 9.95, z + 0.5, C.GUN_LIGHT))
+			z += 1.5
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
+## A 12-gauge shotgun, learned from the real guns: a fat barrel with its magazine tube under it
+## (no magazine well: shells go in through the receiver, Reloads.BOLT), a tall flat-sided receiver
+## with a rail for the ghost ring rear sight, and a cross-bolt safety. "shotgun" a Remington 870
+## (wooden pump and straight stock), "shotgun_tac" a Mossberg 590 (synthetic furniture, a vented
+## heat shield over the barrel), both racked by the pump (BOLT_TAG, with the bolt in the port) and
+## held at the stock's wrist; "shotgun_auto" a Benelli M1014 (a fixed forend, the charging
+## handle on the right, a pistol grip and a collapsible stock on its tube).
+static func _rifle_shotgun(length: int, art := IRONS, kind := "shotgun") -> Dictionary:
+	var n := maxi(length, 30)
+	var f := func(t: float) -> float: return n * t
+	var auto := kind == "shotgun_auto"
+	var furniture := C.WOOD if kind == "shotgun" else C.GUN_LIGHT
+	var sight := iron_boxes(n) if art == IRONS else optic_boxes(art, sight_back(art, n)) + optic_mount(art, n, 8.75)
+	var boxes := sight + [
+		_fb(1.0, 8.0, 0, 2.0, 9.0, f.call(0.53), C.GUN),                        # barrel, 2 cm across, on into the receiver
+		_fb(1.25, 8.25, 0, 1.75, 8.75, 0.5, C.EMPTY),                           # its bore
+		_fb(1.25, 9.0, f.call(0.13), 1.75, 9.75, f.call(0.13) + 0.5, C.GUN),    # the front sight's base
+		_fb(1.0, 7.0, f.call(0.05), 2.0, 8.0, f.call(0.53), C.GUN),             # magazine tube, under the barrel
+		_fb(0.75, 6.75, f.call(0.035), 2.25, 8.25, f.call(0.06), C.GUN_LIGHT),  # its cap, clamping the barrel's ring
+		_fb(0.75, 5.75, f.call(0.52), 2.25, 9.6, f.call(0.73), C.GUN),          # receiver: tall and flat-sided
+		_fb(1.0, 9.6, f.call(0.52), 2.0, 9.95, f.call(0.73), C.GUN),            # its rail (the ghost ring, or an optic)
+		_fb(1.0, 5.75, f.call(0.55), 2.0, 6.25, f.call(0.63), C.EMPTY),         # loading port, underneath
+		_fb(1.75, 7.75, f.call(0.56), 2.25, 9.0, f.call(0.64), C.EMPTY),        # ejection port, right
+		_fbt(1.75, 7.75, f.call(0.56), 2.0, 9.0, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # the bolt in it, back with the action
+		_fb(0.85, 5.0, f.call(0.6), 2.15, 5.75, f.call(0.72), C.GUN),           # trigger plate
+		_fb(1.25, 4.0, f.call(0.62), 1.75, 5.0, f.call(0.635), C.GUN),          # trigger guard: its front
+		_fb(1.25, 4.0, f.call(0.62), 1.75, 4.4, f.call(0.7), C.GUN),            # its bottom
+		_fb(1.25, 4.4, f.call(0.645), 1.75, 5.0, f.call(0.66), C.GUN_LIGHT),    # trigger
+		_fb(0.5, 5.25, f.call(0.69), 2.5, 5.75, f.call(0.71), C.GUN_LIGHT),     # cross-bolt safety, through the plate
+	]
+	if auto:
+		boxes += [
+			_fb(0.6, 6.25, f.call(0.3), 2.4, 8.5, f.call(0.5), C.GUN_LIGHT),   # fixed forend
+			_fbt(2.0, 7.75, f.call(0.57), 2.75, 8.25, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),  # charging handle, right, off the bolt in the port
+			_fb(0.9, 4.25, f.call(0.72), 2.1, 5.75, f.call(0.77), C.GUN),       # pistol grip, raked back
+			_fb(0.9, 2.75, f.call(0.735), 2.1, 4.25, f.call(0.785), C.GUN),
+			_fb(0.9, 1.25, f.call(0.75), 2.1, 2.75, f.call(0.8), C.GUN),
+			_fb(1.1, 7.25, f.call(0.72), 1.9, 8.75, f.call(0.9), C.GUN_LIGHT),  # stock tube
+			_fb(0.85, 6.0, f.call(0.82), 2.15, 9.0, n, C.GUN),                  # collapsible stock
+			_fb(0.85, 4.5, n - 0.5, 2.15, 9.25, n, C.GUN),                      # butt pad
+		]
+		return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+	# The pump (BOLT_TAG): round the tube, racked back to the receiver; grooves round it.
+	boxes.append(_fbt(0.6, 6.25, f.call(0.34), 2.4, 8.25, f.call(0.5), furniture, BOLT_TAG))
+	for k in 4:
+		var z: float = f.call(0.36) + k * n * 0.035
+		boxes.append([Vector3(0.6, 6.25, z), Vector3(2.4, 8.25, z + 0.5), C.WOOD_DARK if kind == "shotgun" else C.GUN, true, BOLT_TAG])
+	if kind == "shotgun_tac":
+		boxes.append(_fb(0.75, 8.75, f.call(0.18), 2.25, 9.5, f.call(0.32), C.GUN))  # heat shield over the barrel
+		var z: float = f.call(0.19)
+		while z < f.call(0.31):
+			boxes.append(_fb(1.25, 9.25, z, 1.75, 9.5, z + 1.0, C.EMPTY))           # its vents
+			z += 2.0
+	boxes += [
+		_fb(0.85, 4.5, f.call(0.73), 2.15, 9.0, f.call(0.8), furniture),         # the stock's straight wrist
+		_fb(0.8, 3.75, f.call(0.8), 2.2, 9.0, f.call(0.9), furniture),           # the butt, dropping to the pad
+		_fb(0.8, 3.0, f.call(0.9), 2.2, 9.25, n - 0.75, furniture),
+		_fb(0.75, 2.75, n - 0.75, 2.25, 9.5, n, C.GUN),                          # recoil pad
+	]
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
+
+
 ## A suppressor stacked on the muzzle: every other box shifts back by its length (so the model's
 ## muzzle, and everything behind it, keeps its usual place — grip/stock points, iron sights,
 ## optic mount), and a plain can fills the new gap at the front. Generic over every rifle style
@@ -2310,39 +2551,58 @@ static func _with_suppressor(spec: Dictionary) -> Dictionary:
 
 ## 0.04 x 0.14 x 0.20 m, muzzle at z = 0, built at 0.5 cm: slide, frame, raked grip with its
 ## magazine up it, trigger guard, a front post and a notched rear sight (Captain, P0362:
-## readable irons).
-## hand_points: grip at (1, 2.5, 7.5); sight_point: the rear notch's top (1, 7.0, 9.4).
-static func _pistol() -> Dictionary:
+## readable irons). Its variants (items expansion follow-up, 2026-10-20: every sidearm drew as
+## one pistol), `kind` from the item's model_style: "" a polymer-framed striker pistol (Glock,
+## M17, USP, Five-seveN), "compact" its shorter slide and grip (Glock 19), "steel" an all-metal
+## hammer pistol with wooden grip panels (M1911, Beretta M9, CZ 75, TT-33, P226) and
+## "steel_compact" the short one (Makarov PM). Everything is placed from its back (n), so a
+## compact sits the same in the hand.
+## hand_points: grip at (1, 2.5, n - 2.5); sight_point: the rear notch's top (1, 7.0, n - 0.6).
+static func _pistol(kind := "") -> Dictionary:
+	var compact := kind.ends_with("compact")
+	var steel := kind.begins_with("steel")
+	var n := 9.0 if compact else 10.0
+	var drop := 0.5 if compact else 0.0          # a compact's grip is a finger shorter
+	var frame := C.GUN if steel else C.GUN_LIGHT
+	var slide_end := n - 0.5 if steel else n     # a hammer pistol's hammer behind its slide
 	# The slide and its sights are BOLT_TAG (weapon detail pass, 2026-10-20): an empty magazine
 	# leaves it locked back until the reload racks it home.
-	return {"size": Vector3i(2, 7, 10), "sub": 4, "boxes": [
-		_fbt(0.15, 4.6, 0, 1.85, 6.8, 10, C.GUN, BOLT_TAG),             # slide
+	var boxes := [
+		_fbt(0.15, 4.6, 0, 1.85, 6.8, slide_end, C.GUN, BOLT_TAG),     # slide
 		_fbt(0.85, 6.8, 0.3, 1.15, 7.0, 0.8, C.GUN, BOLT_TAG),         # front post
-		_fbt(0.3, 6.8, 8.8, 0.75, 7.0, 9.4, C.GUN, BOLT_TAG),          # rear sight, either side of the notch
-		_fbt(1.25, 6.8, 8.8, 1.7, 7.0, 9.4, C.GUN, BOLT_TAG),
-		[Vector3(0.15, 4.75, 7.25), Vector3(1.85, 6.5, 9.5), C.GUN_LIGHT, true, BOLT_TAG],  # rear cocking serrations (a recolour)
-		[Vector3(0.15, 4.75, 7.25), Vector3(1.85, 6.5, 7.5), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 7.75), Vector3(1.85, 6.5, 8.0), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 8.25), Vector3(1.85, 6.5, 8.5), C.GUN, true, BOLT_TAG],
-		[Vector3(0.15, 4.75, 8.75), Vector3(1.85, 6.5, 9.0), C.GUN, true, BOLT_TAG],
-		_fb(0.0, 4.0, 4.5, 0.25, 4.5, 6.5, C.GUN),           # slide stop lever, on the frame's left
-		_fb(0.2, 3.6, 0.6, 1.8, 4.6, 9.2, C.GUN_LIGHT),      # frame
-		_fb(0.2, 2.4, 6.0, 1.8, 3.6, 9.2, C.GUN_LIGHT),      # grip, raked back
-		_fb(0.2, 1.2, 6.4, 1.8, 2.4, 9.5, C.GUN_LIGHT),
-		_fb(0.2, 0.25, 6.8, 1.8, 1.2, 9.8, C.GUN_LIGHT),
-		_fb(0.75, 2.6, 4.2, 1.25, 3.6, 4.5, C.GUN),          # trigger guard
-		_fb(0.75, 2.6, 4.2, 1.25, 2.9, 6.0, C.GUN),
+		_fbt(0.3, 6.8, n - 1.2, 0.75, 7.0, n - 0.6, C.GUN, BOLT_TAG),  # rear sight, either side of the notch
+		_fbt(1.25, 6.8, n - 1.2, 1.7, 7.0, n - 0.6, C.GUN, BOLT_TAG),
+		[Vector3(0.15, 4.75, n - 2.75), Vector3(1.85, 6.5, n - 0.5), C.GUN_LIGHT, true, BOLT_TAG],  # rear cocking serrations (a recolour)
+		[Vector3(0.15, 4.75, n - 2.75), Vector3(1.85, 6.5, n - 2.5), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 2.25), Vector3(1.85, 6.5, n - 2.0), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 1.75), Vector3(1.85, 6.5, n - 1.5), C.GUN, true, BOLT_TAG],
+		[Vector3(0.15, 4.75, n - 1.25), Vector3(1.85, 6.5, n - 1.0), C.GUN, true, BOLT_TAG],
+		_fb(0.0, 4.0, n - 5.5, 0.25, 4.5, n - 3.5, C.GUN),             # slide stop lever, on the frame's left
+		_fb(0.2, 3.6, 0.6, 1.8, 4.6, n - 0.8, frame),                  # frame
+		_fb(0.2, 2.4, n - 4.0, 1.8, 3.6, n - 0.8, frame),              # grip, raked back
+		_fb(0.2, 1.2, n - 3.6, 1.8, 2.4, n - 0.5, frame),
+		_fb(0.2, 0.25 + drop, n - 3.2, 1.8, 1.2, n - 0.2, frame),
+		_fb(0.75, 2.6, n - 5.8, 1.25, 3.6, n - 5.5, C.GUN),            # trigger guard
+		_fb(0.75, 2.6, n - 5.8, 1.25, 2.9, n - 4.0, C.GUN),
 		# Its magazine (Captain, 2026-10-20: "pistola needs a sep mag too"), up a well in the grip
 		# (MAG_TAG: a reload drops it out the bottom and pushes a new one up): the well, the
 		# magazine raked with the grip, and its floorplate, the grip's bottom.
-		_fb(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.EMPTY),
-		_fb(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.EMPTY),
-		_fb(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.EMPTY),
-		_fbm(0.5, 2.4, 6.5, 1.5, 3.75, 8.75, C.GUN),
-		_fbm(0.5, 1.2, 6.9, 1.5, 2.4, 9.1, C.GUN),
-		_fbm(0.5, 0.25, 7.25, 1.5, 1.2, 9.4, C.GUN),
-		_fbm(0.25, 0.0, 7.0, 1.75, 0.25, 9.75, C.GUN),       # floorplate
-	]}
+		_fb(0.5, 2.4, n - 3.5, 1.5, 3.75, n - 1.25, C.EMPTY),
+		_fb(0.5, 1.2, n - 3.1, 1.5, 2.4, n - 0.9, C.EMPTY),
+		_fb(0.5, 0.25 + drop, n - 2.75, 1.5, 1.2, n - 0.6, C.EMPTY),
+		_fbm(0.5, 2.4, n - 3.5, 1.5, 3.75, n - 1.25, C.GUN),
+		_fbm(0.5, 1.2, n - 3.1, 1.5, 2.4, n - 0.9, C.GUN),
+		_fbm(0.5, 0.25 + drop, n - 2.75, 1.5, 1.2, n - 0.6, C.GUN),
+		_fbm(0.25, drop, n - 3.0, 1.75, 0.25 + drop, n - 0.25, C.GUN),  # floorplate
+	]
+	if steel:
+		boxes += [
+			_fb(0.4, 3.6, n - 0.8, 1.6, 5.0, n, C.GUN),                 # the frame's tang, under the hammer
+			_fb(0.75, 5.0, n - 0.5, 1.25, 6.5, n, C.GUN_LIGHT),         # exposed hammer
+			_fbp(0.2, 0.5 + drop, n - 3.8, 0.45, 3.5, n - 0.6, C.WOOD_DARK),  # wooden grip panels (a recolour), left
+			_fbp(1.55, 0.5 + drop, n - 3.8, 1.8, 3.5, n - 0.6, C.WOOD_DARK),  # and right
+		]
+	return {"size": Vector3i(2, 7, int(n)), "sub": 4, "boxes": boxes}
 
 
 ## A box of `size` metres in 0.5 cm voxels (FINE_VOXEL) with its edges bevelled (1 cm,

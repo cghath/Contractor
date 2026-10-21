@@ -970,7 +970,7 @@ func wheel_pace(steps: int) -> bool:
 ## pistol).
 static func ads_view(weapon: ItemData, state := {}) -> Vector3:
 	var model := VoxelArt.model_for(weapon, state)
-	var eye := ADS_EYE_PISTOL if model == "pistol" else ADS_EYE
+	var eye := ADS_EYE_PISTOL if model.begins_with("pistol") else ADS_EYE
 	return eye - VoxelArt.sight_point(model)
 
 
