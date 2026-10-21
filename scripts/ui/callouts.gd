@@ -93,6 +93,9 @@ static func display_name(s: Soldier) -> String:
 static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 	if speaker == null or not is_instance_valid(speaker) or not speaker.is_inside_tree():
 		return null
+	var model := speaker.get_node_or_null(^"Model") as CharacterModel
+	if model:
+		model.shout()  # the face: mouth open while he calls out (FaceRig)
 	var path := voiced_path(id, speaker)
 	if path == "":
 		return null

@@ -81,6 +81,7 @@ func _ready() -> void:
 	await _test_stand_where_it_lay()
 	await _test_respawn_not_where_it_lay()
 	await _test_dummy()
+	await _test_faces()
 	GameState.delete_save()
 	print("ANIMATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -422,7 +423,7 @@ func _test_put_down() -> void:
 	player._server_release_body.rpc_id(1)
 	check(player.model.carry_net.is_empty() and alpha.model.carry_net.is_empty(), "letting go clears both sides")
 	await _seconds(0.6)
-	check(alpha.model.transform.is_equal_approx(Transform3D.IDENTITY) and alpha.model.carry_shown().is_empty() and alpha.model.downed,
+	check(alpha.model.transform.is_equal_approx(alpha.model.base_transform()) and alpha.model.carry_shown().is_empty() and alpha.model.downed,
 		"the casualty lies where its own body is again")
 	check(not player.model.hands_busy() and is_equal_approx(player.model.view_lower(), 0.0), "the carrier's hands are free")
 	await _seconds(0.5)
@@ -453,7 +454,7 @@ func _test_from_replicated_state() -> void:
 	bravo.model.carry_net = {}
 	hostile.vitals.server_reset_health()
 	await _seconds(0.5)
-	check(hostile.model.transform.is_equal_approx(Transform3D.IDENTITY) and not hostile.model.downed, "cleared, both stand again")
+	check(hostile.model.transform.is_equal_approx(hostile.model.base_transform()) and not hostile.model.downed, "cleared, both stand again")
 
 
 func _test_human_casualty() -> void:
@@ -478,7 +479,7 @@ func _test_human_casualty() -> void:
 	player.carried_by_pos = null
 	_place_player()
 	await _seconds(0.5)
-	check(player.model.carry_net.is_empty() and player.model.transform.is_equal_approx(Transform3D.IDENTITY), "put down, and up again")
+	check(player.model.carry_net.is_empty() and player.model.transform.is_equal_approx(player.model.base_transform()), "put down, and up again")
 
 
 func _test_ai_carry() -> void:
@@ -1215,8 +1216,95 @@ func _test_dummy() -> void:
 	check(dummy.model.carry_net.is_empty() and dummy.model.action_shown() == &"" and not dummy.model.hands_busy(), "a dummy has no carry or action")
 	dummy.vitals.server_damage(500.0)
 	await _frames(3)
-	check(dummy.model.downed and dummy.model.transform.is_equal_approx(Transform3D.IDENTITY), "and still lies down where it stands")
+	check(dummy.model.downed and dummy.model.transform.is_equal_approx(dummy.model.base_transform()), "and still lies down where it stands")
 	dummy.vitals.server_reset_health()
+
+
+# --- Faces and builds (SoldierLook, FaceArt, FaceRig) ----------------------------------------
+
+## Captain, 2026-10-20: real faces and per-soldier variety. Two soldiers of a side look like two
+## people, each the same from his spawn data on every peer; his own head and face parts build
+## off the main thread; his eyes shut when he dies, his mouth opens when he calls out; a tall,
+## heavy build scales the rig without the hands leaving the weapon or the hitboxes leaving the
+## body.
+func _test_faces() -> void:
+	print("Faces")
+	var charlie := _spawn_ai("Charlie", &"friendly", SPOT + Vector3(6.0, 0, 4.0), ["m4a1"])
+	var delta := _spawn_ai("Delta", &"friendly", SPOT + Vector3(7.0, 0, 4.0), ["m4a1"])
+	check(SoldierLook.valid(charlie.face) and SoldierLook.valid(delta.face) and charlie.model.face == charlie.face,
+		"each AI spawns with a look (%s, %s)" % [charlie.face, delta.face])
+	check(charlie.face != delta.face and SoldierLook.head_model(charlie.face, charlie.model.body) + SoldierLook.palette(charlie.face)
+		!= SoldierLook.head_model(delta.face, delta.model.body) + SoldierLook.palette(delta.face), "two soldiers of a side get different faces")
+	var expected := SoldierLook.make(SoldierLook.seed_of(["Charlie", charlie.person_name, charlie.nation]), charlie.nation, charlie.model.body)
+	check(charlie.face == expected, "and the face is his identity's: any peer rolls the same from the same spawn")
+	var looks := {}
+	for i in 40:
+		looks[SoldierLook.make(i, "US", VoxelArt.MALE)] = true
+	check(looks.size() == 40, "forty American contractors: forty different looks")
+	var cn := SoldierLook.parse(SoldierLook.make(7, "CN", VoxelArt.MALE))
+	check(String(cn.skin) in SoldierLook.SKINS["eas"], "a soldier of a nation looks like its people (a Chinese soldier's skin: %s)" % cn.skin)
+	var built := await _wait(func() -> bool: return charlie.model.face_rig.is_built() and delta.model.face_rig.is_built(), 10.0)
+	var mi := charlie.model.head.get_child(0) as MeshInstance3D
+	check(built and mi.mesh != null and String(charlie.model.head.get_meta(&"voxel_model")) == SoldierLook.head_model(charlie.face, charlie.model.body),
+		"his own head builds off the main thread and goes on")
+	var parts_on := true
+	for part in FaceRig.PARTS:
+		var inst := mi.get_node_or_null(NodePath("Face_" + part)) as MeshInstance3D
+		parts_on = parts_on and inst != null and inst.mesh != null
+	check(parts_on, "with eyes, a mouth and brows of their own")
+	# Expressions.
+	charlie.model.shout(1.0)
+	await _seconds(0.15)
+	check(charlie.model.face_rig.expression == FaceArt.SHOUT, "calling out, the mouth opens (shout)")
+	await _seconds(1.0)
+	check(charlie.model.face_rig.expression != FaceArt.SHOUT, "and closes after")
+	delta.vitals.server_kill()
+	await _seconds(0.3)
+	var eye := (delta.model.head.get_child(0) as MeshInstance3D).get_node(^"Face_eye_l") as MeshInstance3D
+	check(delta.model.face_rig.eye_state == "c" and String(eye.get_meta(&"model", "")).begins_with("eye:c:"),
+		"dead, his eyes close")
+	check(delta.model.face_rig.expression == FaceArt.SLACK, "and his face goes slack")
+	check(delta.body_record().get("face", "") == delta.face, "his body keeps his face (the body record)")
+	# Builds: a tall, heavy man scales the rig; the hands stay on the weapon, the hitboxes on him.
+	var old := player.model.face  # (a player outside a campaign wears his default face: Soldier.face is "")
+	var tall := ":".join((old if SoldierLook.valid(old) else SoldierLook.DEFAULT).split(":").slice(0, 4)) + ":2:1050"
+	player.select_weapon(&"primary")
+	player.face = tall
+	await _seconds(0.8)
+	check(is_equal_approx(player.model.body_scale(), 1.05), "a tall soldier is drawn taller (%.3f)" % player.model.body_scale())
+	var torso_mi := player.model.torso.get_child(0) as MeshInstance3D
+	var base: Array = torso_mi.get_meta(&"base")
+	check(is_equal_approx(torso_mi.scale.x / (base[1] as Vector3).x, SoldierLook.BUILD_GIRTH[SoldierLook.HEAVY]) and is_equal_approx(torso_mi.scale.y, (base[1] as Vector3).y),
+		"a heavy build is broader through the trunk, not taller")
+	var error := player.model.hand_error()
+	check(error >= 0.0 and error < 0.02, "the hands stay on the rifle (%.1f cm)" % (error * 100.0))
+	# The head's hitbox rides as high as the taller body's head: its shapes' height over the feet
+	# is their rest height times his size.
+	var off := INF
+	for area in CharacterModel._posable_hitboxes(player):
+		if area.get_meta(&"body_part") == Vitals.HEAD:
+			for shape in area.get_children():
+				if shape is CollisionShape3D:
+					var rest_y := (CharacterModel._rest_of(area) * (shape as CollisionShape3D).position).y
+					off = minf(off, absf((shape as CollisionShape3D).global_position.y - player.global_position.y - rest_y * player.model.body_scale()))
+	check(off < 0.03, "the head's hitbox rises with the taller head (%.1f cm off)" % (off * 100.0))
+	var chest: Area3D = null
+	for area in CharacterModel._posable_hitboxes(player):
+		if area.get_meta(&"body_part") == Vitals.CHEST:
+			chest = area
+	var front := player.model.torso.global_position + Vector3(0, 0.4, -0.4)  # (BodyVolume marches LEAD_M back, REACH_M on)
+	var broad := BodyVolume.entry(chest, Vitals.CHEST, front, Vector3(0, 0, 1), BodyVolume.body_of(chest)) if chest else {}
+	var g: Vector3 = chest.get_meta(&"girth", Vector3.ONE) if chest else Vector3.ONE
+	if chest:
+		chest.set_meta(&"girth", Vector3.ONE)
+	var plain := BodyVolume.entry(chest, Vitals.CHEST, front, Vector3(0, 0, 1), BodyVolume.body_of(chest)) if chest else {}
+	if chest:
+		chest.set_meta(&"girth", g)
+	check(g.x > 1.0 and not broad.is_empty() and not plain.is_empty() and (broad.position as Vector3).z < (plain.position as Vector3).z - 0.003,
+		"the broad chest is hit where it's drawn, further forward (BodyVolume widens with the build: %s, %s vs %s)" % [g, broad.get("position"), plain.get("position")])
+	player.face = old
+	await _seconds(0.3)
+	check(is_equal_approx(player.model.body_scale(), SoldierLook.height_of(old)), "and back as he was")
 
 
 # --- Helpers --------------------------------------------------------------------------------

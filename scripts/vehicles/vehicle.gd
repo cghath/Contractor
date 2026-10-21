@@ -1075,6 +1075,7 @@ func _build_crew() -> void:
 		var model := CharacterModel.new()
 		model.name = "Model"
 		model.variant = "multicam"
+		model.face = SoldierLook.make(SoldierLook.seed_of([name, "crew", i]), "US", VoxelArt.MALE)  # its own crewman
 		pivot.add_child(model)
 		var rig := GearRig.new()
 		rig.name = "Gear"

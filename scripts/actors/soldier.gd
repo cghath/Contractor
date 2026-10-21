@@ -161,6 +161,12 @@ var binoculars_up := false
 @export var variant := ""
 ## Body type for this soldier's model (VoxelArt.BODIES; "" is male). Set before entering the tree.
 @export var body := ""
+## Who he is to look at (a SoldierLook code: face, hair, eyes, build, height), the same on every
+## peer: an AI's comes in its spawn data (CompoundLevel.spawn_soldier: a roster member's from
+## their look seed), a body's in its record, a campaign player's from his main character
+## (BaseHub); replicated (ServerSync), so a change reaches every peer. "" until set: then one
+## seeded by the node's name (default_face).
+@export var face := ""
 ## AI intent, written by SquadAI on the host each physics frame. move_input is like
 ## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
 var move_input := Vector2.ZERO
@@ -257,6 +263,16 @@ func _enter_tree() -> void:
 		$Model.variant = COMPANY_VARIANT  # (was by peer id, PLAYER_VARIANTS: players and squad wore different camo)
 	$Model.body = body if body != "" else VoxelArt.MALE
 	$Model.iff = GearRig.iff_of(faction, iff, $Model.variant)
+	$Model.face = face if face != "" else default_face()
+
+
+## A look for a body that came without one (a player outside a campaign, an older save's body):
+## seeded by the node's name and side, so every peer rolls the same.
+func default_face() -> String:
+	var from := nation
+	if from == "":
+		from = String(Names.pick(faction, String(name), {}).nation) if faction in [&"friendly", &"hostile"] else "insurgent"
+	return SoldierLook.make(SoldierLook.seed_of([name, faction]), from, body if body != "" else VoxelArt.MALE)
 
 
 ## Human bodies are named after their peer id; AI bodies have any other name.
@@ -502,6 +518,8 @@ func _process(_delta: float) -> void:
 	model.aiming = is_aiming
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
+	if face != "" and model.face != face:
+		model.set_face(face)  # (replicated after the body was built, or changed by the host)
 	_smooth_remote()  # before apply_pose: the hitboxes follow the model's transform
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	if is_local() or (is_ai() and multiplayer.is_server()):
@@ -2649,8 +2667,8 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
-## name tape, nationality and hand, so the body is the same person after a reload), "role",
+## "uid", "label" (whose it was), "faction", "variant", "face", "person_name", "nation" and "left"
+## (his look, name tape, nationality and hand, so the body is the same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
 ## CharacterModel.ragdoll_net, or empty) and "gear" (an
@@ -2658,7 +2676,7 @@ func server_leave_body() -> Soldier:
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
+		"variant": model.variant, "body": model.body, "face": model.face, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
 		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net)}

@@ -24,6 +24,9 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 const SAVED_EDITS := [{"op": "mark", "p": [-29.5, 13.5, -40.0], "n": [0.0, 0.0, 1.0], "m": 2},
 	{"op": "holes", "v": [175, 13, -71]},
 	{"op": "shot", "a": [177.5, 13.5, -70.0], "an": [0.0, 0.0, 1.0], "b": [177.5, 13.5, -71.0], "bn": [0.0, 0.0, -1.0], "d": 0.0057, "m": 3, "v": [177, 13, -71]}]
+## The look the host gives its own player once it's up (SoldierLook code): the client must draw
+## the host as this person (a face changed on the host replicates; Captain, 2026-10-20).
+const HOST_FACE := "c99a6e:2a1d15:6b5a32:31201110:2:1030"
 ## Where the host marks the perimeter wall's inner face once the client is in (live, by RPC).
 const LIVE_MARK := Vector3(6.0, 1.2, 19.7)
 ## How old the purple smoke the host throws before the client joins already is (spawn_smoke's
@@ -146,6 +149,7 @@ func _stage_drag() -> void:
 			"loadout": ["plate_carrier", "m4a1"], "combat": 0.5, "discipline": 0.5, "guard": true})
 		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
 		return s
+	(level.players.get_node(^"1") as Soldier).face = HOST_FACE
 	var dragger: Soldier = make.call(DRAGGER, Vector3(12, 0.1, 30))
 	var dragged: Soldier = make.call(DRAGGED, Vector3(12, 0.1, 31.1))
 	await get_tree().create_timer(0.3).timeout
@@ -333,6 +337,7 @@ func _run_client() -> void:
 	check(me.role == Roles.MARKSMAN and me.fire_team == 1, "the role picked before joining reached the host: marksman, team B (%s, %d)" % [me.role, me.fire_team])
 	await _check_late_drag()
 	await _check_devices()
+	await _check_faces()
 	var gear: GearRig = me.get_node(^"Gear")
 	check(gear.armor_integrity(&"plate_front") == 1.0 and gear.armor_integrity(&"helmet") == 1.0, "client built the worn voxel armor")
 	for i in 3:
@@ -480,6 +485,20 @@ func _check_looted_rifle(me: Soldier) -> void:
 
 
 ## The soldier named `callsign` (players and AI), or null.
+## Faces (SoldierLook): every peer draws each soldier as the same person. An AI's look comes in
+## its spawn data, rolled from who he is; the host's own, set after he joined, replicates.
+func _check_faces() -> void:
+	var ai: Soldier = _combatant(DRAGGER)
+	var host := level.players.get_node_or_null(^"1") as Soldier
+	await _wait_for(func() -> bool: return host != null and host.model.face == HOST_FACE, 5.0)
+	check(host != null and host.face == HOST_FACE and host.model.face == HOST_FACE and is_equal_approx(host.model.body_scale(), 1.03),
+		"the host's face, set on the host, is the same here (and his height with it)")
+	var expected := SoldierLook.make(SoldierLook.seed_of([DRAGGER, ai.person_name, ai.nation]), ai.nation, ai.model.body) if ai else ""
+	check(ai != null and SoldierLook.valid(ai.face) and ai.face == expected and ai.model.face == ai.face
+		and String(ai.model.head.get_meta(&"voxel_model")) == SoldierLook.head_model(ai.face, ai.model.body),
+		"an AI's face here is the one the host rolled for him (%s)" % (ai.face if ai else "none"))
+
+
 func _combatant(callsign: String) -> Soldier:
 	for node in get_tree().get_nodes_in_group(&"combatants"):
 		if node is Soldier and String(node.name) == callsign:

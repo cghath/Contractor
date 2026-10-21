@@ -147,6 +147,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - An injector goes into your outer thigh standing.
 
   Treatment times are unchanged.
+### Real faces, and a different person in every uniform (Captain, 2026-10-20)
+
+#### Added
+- **Heads with real proportions**, still 0.5 cm voxels: a skull, a brow ridge over eye sockets,
+  a nose with a bridge and a tip, cheekbones, a jaw and chin, ears, and hair and beards with
+  volume. Helmets, NVGs and IFF marks fit as before.
+- **Eyes** with whites, irises and pupils. They blink, glance about, look up and down with the
+  aim, narrow in bad pain, and close when a soldier is knocked out or dead.
+- **Expressions**: neutral; strain when hurt, down, or carrying or dragging someone; mouth open
+  while calling out or screaming; slack when out cold or dead, and when gasping for breath.
+  The eyes, mouth and brows are small parts swapped whole: nothing is animated voxel by voxel.
+- **Every soldier is his own person**: skin tone, hair style and colour, eye colour, beard or
+  stubble, jaw, chin, nose, brow and ears, a slim, average or heavy build, and a height range,
+  for men and women. Soldiers look like their nation's people: an American squad is mixed, a
+  Chinese one East Asian, and the region's insurgents mostly bearded. Uniforms stay the
+  faction's.
+- **The same face everywhere**: a soldier's look comes from who he is (the spawn's identity),
+  so every peer draws the same person; it rides in the spawn, the replicated state and body
+  records. Company members keep their face all campaign (a look seed on the roster, kept
+  through saves), and each player's main character has their own.
+- Civilians, HVTs and hostages get faces too, matching the skin of their bare hands.
+
+#### Changed
+- A new face's head is built on a worker thread, so a squad or garrison appearing doesn't stall
+  a frame; its head shows once built (a moment after spawning). Face parts aren't drawn past
+  30 m.
+- A broader build widens the body's meshes about each part's own axis, so poses, hands on the
+  weapon and hitboxes stay where they were; the trunk's hit shape widens to match.
+
+#### Fixed
+- **The muster line shows the company's people as themselves.** Members standing at the base
+  came out with a random name tape, nationality and body; they now carry their roster identity
+  and face, as they do in the field.
+- A dragger's hands stay on the casualty's straps when the two are different heights.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

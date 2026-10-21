@@ -391,6 +391,20 @@ var board_left := false
 
 ## Colour scheme from VoxelArt.VARIANTS. Set before the node enters the tree.
 @export var variant := "multicam"
+## Who this is to look at (a SoldierLook code: face, hair, eyes, build, height; Captain,
+## 2026-10-20: a different person in every uniform). Set before the node enters the tree, or
+## later with set_face. "" draws SoldierLook.DEFAULT. The uniform stays `variant`'s.
+var face := "":
+	set(value):
+		face = value
+		_height = SoldierLook.height_of(value)  # (body_scale is asked many times a frame)
+		_girth = SoldierLook.girth_of(value)
+var _height := 1.0
+var _girth := 1.0
+## The face at work (FaceRig): his own head, eyes, mouth and brows.
+var face_rig: FaceRig
+## Until when (Soldier._now) he's calling out, mouth open (shout; Callouts.play).
+var _shout_until := -1.0
 ## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
 ## the male's size (joints, gear and hitboxes scale with her) with her shoulder joints at
 ## FEMALE_SHOULDER, under her own deltoids. Set before the node enters the tree.
@@ -602,11 +616,88 @@ var _lod_dt := 0.0
 var suit_size := 0.0
 
 
-## How big this body is drawn: a heavy exo's size, FEMALE_SCALE for a female soldier, else 1.
+## How big this body is drawn: a heavy exo's size, else FEMALE_SCALE for a female soldier (1 a
+## male), times his own height (SoldierLook.height_of). Joints, gear and hitboxes scale with it.
 func body_scale() -> float:
 	if suit_size > 0.0:
 		return suit_size
-	return FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0
+	return (FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0) * _height
+
+
+## How broad the part `part` (a VoxelArt body part: "torso", "upper_arm", ...) is drawn for his
+## build (SoldierLook.girth_of): the trunk by the build's girth, the upper limbs half as much
+## and the lower a third (bone doesn't thicken), the head not at all. Only the part's mesh is
+## widened and deepened about its own axis: the joints stay put, so poses, IK and hitboxes are
+## the same for every build (BodyVolume widens the trunk's hit shape to match, GIRTH_META).
+func girth(part: String) -> float:
+	var g := _girth
+	match part.trim_suffix(VoxelArt.FEMALE_SUFFIX):
+		"torso", "torso_fc":
+			return g
+		"upper_arm", "thigh":
+			return 1.0 + (g - 1.0) * 0.5
+		"forearm", "shin":
+			return 1.0 + (g - 1.0) * 0.33
+	return 1.0
+
+
+## The hitbox meta BodyVolume reads for a trunk this much broader (x, z) than the model's.
+const GIRTH_META := &"girth"
+
+
+## Gives this body the look `code` (a SoldierLook code): his own head and face, his height and
+## build. Works before or after the body is built (Soldier hands it on as it replicates).
+func set_face(code: String) -> void:
+	face = code
+	if not is_node_ready():
+		return
+	transform = base_transform()
+	if variant == "dummy":  # a target dummy: a mannequin's plain head, no face at work
+		(head.get_child(0) as MeshInstance3D).mesh = VoxelArt.mesh(VoxelArt.body_part("head", body), variant)
+		return
+	if face_rig == null:
+		face_rig = FaceRig.new()
+		face_rig.name = "FaceRig"
+		add_child(face_rig)
+	face_rig.setup(self, face if face != "" else SoldierLook.DEFAULT)
+	_apply_girth()
+
+
+## Widens each body part's mesh for the build (girth), and tells the trunk's hitboxes.
+func _apply_girth() -> void:
+	var parts: Array[Node3D] = [torso, _leg_left, _leg_right, _shin_left, _shin_right]
+	parts.append_array(_upper)
+	parts.append_array(_forearm)
+	for pivot in parts:
+		if pivot == null:
+			continue
+		var mi := pivot.get_child(0) as MeshInstance3D
+		var model_name := String(pivot.get_meta(&"voxel_model", ""))
+		if mi == null or model_name == "":
+			continue
+		var g := girth(model_name)
+		if not mi.has_meta(&"base"):
+			mi.set_meta(&"base", [mi.position, mi.scale])
+		var base: Array = mi.get_meta(&"base")
+		var wide := Vector3(g, 1.0, g)
+		mi.position = (base[0] as Vector3) * wide
+		mi.scale = (base[1] as Vector3) * wide
+	var body_node := get_parent()
+	if body_node:
+		var g := girth("torso")
+		for area in _posable_hitboxes(body_node):
+			if area.get_meta(&"body_part", &"") in [Vitals.CHEST, Vitals.ABDOMEN, Vitals.PELVIS, Vitals.TORSO]:
+				area.set_meta(GIRTH_META, Vector3(g, 1.0, g))
+
+
+## He calls out (a callout, an order, a scream): mouth open, brows down, for `seconds`.
+func shout(seconds := 1.2) -> void:
+	_shout_until = maxf(_shout_until, Soldier._now() + seconds)
+
+
+## Whether he's calling out now (shout).
+func shouting() -> bool:
+	return Soldier._now() < _shout_until
 
 
 ## Another player's body drawn smoothed between network updates (Soldier._smooth_remote,
@@ -655,7 +746,9 @@ func _ready() -> void:
 	_root = Node3D.new()
 	add_child(_root)
 	torso = _part("torso", _root, TORSO_PIVOT)
-	head = _part("head", torso, HEAD_PIVOT)
+	head = VoxelArt.instance(SoldierLook.head_model(face, body), variant, render_layers, false)  # FaceRig builds its mesh
+	head.position = HEAD_PIVOT
+	torso.add_child(head)
 	hands_anchor = Node3D.new()
 	hands_anchor.position = HANDS_ANCHOR
 	torso.add_child(hands_anchor)
@@ -682,6 +775,7 @@ func _ready() -> void:
 	_shin_right = _part("shin", _leg_right, Vector3(0, -THIGH, 0))
 	_last_position = global_position
 	_shown = pose_bones(REST_POSE, false)
+	set_face(face)
 	var body := get_parent()
 	if body:
 		for area in _posable_hitboxes(body):
@@ -2350,7 +2444,11 @@ func _arm_goals(carry: Dictionary) -> Array:
 		return [["carry", CARRY_HANDS[0]], ["carry", CARRY_HANDS[1]]]
 	if mode == DRAG:
 		var straps := drag_hand_points()
-		return [["drag", _torso_point(straps[0])], ["drag", _torso_point(straps[1])]]
+		# The casualty is drawn at its own size in this body's frame (_update_attachment): a
+		# taller or shorter one's straps are that much further or nearer (each soldier's height).
+		var other: CharacterModel = carry.get("model")
+		var k := other.body_scale() / body_scale() if other and is_instance_valid(other) else 1.0
+		return [["drag", _torso_point(straps[0] * k)], ["drag", _torso_point(straps[1] * k)]]
 	var held := _held_goals()
 	var planted := _stance_hands()
 	if not planted.is_empty():

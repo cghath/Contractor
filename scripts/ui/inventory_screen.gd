@@ -405,6 +405,9 @@ func _ensure_doll() -> void:
 	_doll_model = CharacterModel.new()
 	_doll_model.name = "Model"
 	_doll_model.variant = player.model.variant if player.model else "multicam"
+	if player.model:
+		_doll_model.body = player.model.body
+		_doll_model.face = player.model.face  # the doll is him: his face and build
 	_doll_pivot.add_child(_doll_model)
 	var rig := GearRig.new()
 	rig.name = "Gear"
