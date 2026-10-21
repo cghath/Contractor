@@ -58,7 +58,7 @@ var _dirty := false
 func _ready() -> void:
 	Net.peer_joined.connect(_on_peer_joined)
 	Campaign.changed.connect(func(section_name: StringName) -> void:
-		if (section_name == SECTION or section_name == ZoneControl.SECTION) and _is_host():
+		if (section_name == SECTION or section_name == ZoneControl.SECTION or section_name == WorldSites.WAR) and _is_host():
 			_queue_sync())
 
 
@@ -823,6 +823,7 @@ func _public() -> Dictionary:
 	var out := _section().duplicate(true)
 	out["bill"] = weekly_bill()  # the week's wages, upkeep and loans as the host's roster stands (the base screen, the debrief)
 	out["world_sites"] = WorldSites.rows()  # wave 6c: who holds each hot zone, for every peer's board
+	out["war"] = WorldSites.war_view()  # the living war (2026-10-20): every zone's holder and front, strength, the news
 	out[String(ZoneControl.SECTION)] = Campaign.section(ZoneControl.SECTION).duplicate(true)  # who controls each zone (the world map)
 	return out
 
@@ -831,6 +832,12 @@ func _public() -> Dictionary:
 ## from the last sync.
 func world_sites() -> Array:
 	return WorldSites.rows() if _is_host() else (_remote.get("world_sites", []) as Array)
+
+
+## The living war (WorldSites.war_view: every zone's holder, grip and front, each faction's
+## strength, the news): the host's own, every other peer's from the last sync.
+func war_view() -> Dictionary:
+	return WorldSites.war_view() if _is_host() else (_remote.get("war", {}) as Dictionary)
 
 
 func _on_peer_joined(id: int) -> void:

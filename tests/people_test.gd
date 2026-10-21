@@ -1003,7 +1003,7 @@ func _brain(s: Soldier) -> CivilianAI:
 
 func _soldier(callsign: String, faction: StringName, pos: Vector3, loadout: Array, active: bool) -> Soldier:
 	var s := level.spawn_soldier({"name": callsign, "person_name": callsign, "faction": String(faction), "variant": "woodland", "pos": pos,
-		"loadout": loadout, "combat": 0.9, "discipline": 0.6, "guard": true})
+		"loadout": loadout, "combat": 0.9, "discipline": 0.6, "guard": true, "no_pockets": true})
 	if not active:
 		SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
 	return s

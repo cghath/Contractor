@@ -161,6 +161,12 @@ var binoculars_up := false
 @export var variant := ""
 ## Body type for this soldier's model (VoxelArt.BODIES; "" is male). Set before entering the tree.
 @export var body := ""
+## Who he is to look at (a SoldierLook code: face, hair, eyes, build, height), the same on every
+## peer: an AI's comes in its spawn data (CompoundLevel.spawn_soldier: a roster member's from
+## their look seed), a body's in its record, a campaign player's from his main character
+## (BaseHub); replicated (ServerSync), so a change reaches every peer. "" until set: then one
+## seeded by the node's name (default_face).
+@export var face := ""
 ## AI intent, written by SquadAI on the host each physics frame. move_input is like
 ## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
 var move_input := Vector2.ZERO
@@ -262,6 +268,16 @@ func _enter_tree() -> void:
 		$Model.variant = COMPANY_VARIANT  # (was by peer id, PLAYER_VARIANTS: players and squad wore different camo)
 	$Model.body = body if body != "" else VoxelArt.MALE
 	$Model.iff = GearRig.iff_of(faction, iff, $Model.variant)
+	$Model.face = face if face != "" else default_face()
+
+
+## A look for a body that came without one (a player outside a campaign, an older save's body):
+## seeded by the node's name and side, so every peer rolls the same.
+func default_face() -> String:
+	var from := nation
+	if from == "":
+		from = String(Names.pick(faction, String(name), {}).nation) if faction in [&"friendly", &"hostile"] else "insurgent"
+	return SoldierLook.make(SoldierLook.seed_of([name, faction]), from, body if body != "" else VoxelArt.MALE)
 
 
 ## Human bodies are named after their peer id; AI bodies have any other name.
@@ -472,6 +488,32 @@ func _smooth_remote() -> void:
 		model.transform = model.base_transform()  # now, for this frame's hitbox pose (the model keeps it after)
 
 
+## Conscious but dying: lying still this long shows the downed (writhing) pose; he cries out now
+## and then (host: Callouts.server_vocal, DYING_CRY_S apart, either side hears) and breathes
+## hard (every peer: Sfx "breath_dying", DYING_BREATH_S apart, louder as the blood goes).
+const DYING_STILL_S := 1.0
+const DYING_CRY_S := Vector2(6.0, 14.0)
+const DYING_BREATH_S := Vector2(2.2, 3.4)
+var _dying_moved_at := -1000.0
+var _dying_cry_at := 0.0
+var _dying_breath_at := 0.0
+
+
+func _dying_sounds(dying: bool) -> void:
+	if not dying:
+		return
+	var now := _now()
+	if now >= _dying_breath_at:
+		_dying_breath_at = now + randf_range(DYING_BREATH_S.x, DYING_BREATH_S.y)
+		var weak := clampf(1.0 - vitals.blood_fraction(), 0.0, 1.0)
+		Sfx.play_at(&"breath_dying", global_position + Vector3.UP * 0.3, lerpf(-6.0, 0.0, weak))
+	if multiplayer.is_server() and now >= _dying_cry_at:
+		_dying_cry_at = now + randf_range(DYING_CRY_S.x, DYING_CRY_S.y)
+		var callouts := Callouts.of(self)
+		if callouts:
+			callouts.server_vocal(self, &"scream" if randf() < 0.35 else &"hit")
+
+
 func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
@@ -481,14 +523,21 @@ func _process(_delta: float) -> void:
 	model.aiming = is_aiming
 	model.left_handed = left_handed
 	model.name_tape = person_name.to_upper()
+	if face != "" and model.face != face:
+		model.set_face(face)  # (replicated after the body was built, or changed by the host)
 	_smooth_remote()  # before apply_pose: the hitboxes follow the model's transform
 	movement.apply_pose()  # model pose, hitbox pose and capsule from the replicated stance
 	if is_local() or (is_ai() and multiplayer.is_server()):
 		# Breathing quickens and deepens as the legs tire (stamina is the owner's, so other peers
 		# see the resting breath).
 		var tired := 1.0 - movement.stamina
-		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, tired)
-		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, tired)
+		# Blood loss and a struggling chest breathe hard too (Captain, 2026-10-20: wounded and dying).
+		var hurt := clampf((1.0 - vitals.blood_fraction()) / 0.35, 0.0, 1.0)
+		if vitals.is_dying():
+			hurt = maxf(hurt, 0.85)
+		var strain := maxf(tired, hurt)
+		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, strain)
+		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, strain)
 	if vitals.is_dead():
 		model.breath_depth = 0.0  # the dead don't breathe (Captain, 2026-10-15), on every peer
 	_update_ragdoll()
@@ -498,7 +547,13 @@ func _process(_delta: float) -> void:
 		_down_since = _now()  # the give-up clock (can_give_up)
 	if not is_ai():
 		_apply_respawn_state()
-	CharacterModel.lay_down(self, model, not vitals.is_up())
+	# Dying (Vitals.is_dying): lying in the downed pose, writhing, when he isn't crawling; crawling
+	# shows prone (DYING_STILL_S of stillness first, so it doesn't flicker between the two).
+	var dying := vitals.is_dying()
+	if dying and model.gait_speed() > 0.12:
+		_dying_moved_at = _now()
+	CharacterModel.lay_down(self, model, not vitals.is_up() or (dying and _now() - _dying_moved_at >= DYING_STILL_S))
+	_dying_sounds(dying)
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
 	if collision_layer != 0 and not multiplayer.is_server() \
@@ -980,6 +1035,12 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
 		muzzle = origin
 	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
+	# Buckshot (items expansion, 2026-10-20): a round of several pellets (rounds.json "pellets")
+	# traces each further pellet on its own, spread round the shot inside pellet_spread_deg.
+	for p in Ballistics.pellets(weapon) - 1:
+		var hit := Ballistics.fire(self, muzzle, Ballistics.pellet_direction(direction.normalized(), weapon), weapon)
+		if String(hit.result) != "none":
+			CompoundLevel.current(self).show_impact.rpc(hit.position, hit.normal, hit.result)
 	var suppressed := bool(weapon.stats.get("suppressed", false)) or Suppressors.mounted_id(weapon, inventory.state_of(slot)) != &""
 	last_shot_at = now
 	last_shot_suppressed = suppressed
@@ -1460,6 +1521,13 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var problem := Nvg.server_remove(inventory, target)
 			if problem != "":
 				_client_message.rpc_id(owner_peer(), problem)
+		# A consumable (Consumables, items expansion): one of the entry at `container`/`index`
+		# eaten, drunk, taken or, a battery, put in an NVG.
+		"consume":
+			var list: Array = inventory.containers.get(container, [])
+			var used := ItemDB.get_item(StringName(list[index].id)) if index >= 0 and index < list.size() else null
+			var problem := Consumables.server_use(self, container, index)
+			_client_message.rpc_id(owner_peer(), problem if problem != "" or used == null else Consumables.done_text(used))
 		# Grips, lights and lasers (wave 7 S3, GunAttachments): the entry at `container`/`index`
 		# onto the weapon in `slot` (what was on that mount goes into your containers), what's on
 		# mount `target` (underbarrel or side) of the weapon in `slot` off, or its light or laser
@@ -2641,8 +2709,8 @@ func server_leave_body() -> Soldier:
 
 
 ## Host only. What this body is, for CompoundLevel.server_spawn_body and the zone save:
-## "uid", "label" (whose it was), "faction", "variant", "person_name", "nation" and "left" (the
-## name tape, nationality and hand, so the body is the same person after a reload), "role",
+## "uid", "label" (whose it was), "faction", "variant", "face", "person_name", "nation" and "left"
+## (his look, name tape, nationality and hand, so the body is the same person after a reload), "role",
 ## "pos" ([x, y, z]), "rot_y",
 ## "age_s" (seconds dead), "marker" (a dead player's: shows a GearMarker), "ragdoll" (its ragdoll pose,
 ## CharacterModel.ragdoll_net, or empty), "gear" (an
@@ -2650,10 +2718,12 @@ func server_leave_body() -> Soldier:
 func body_record() -> Dictionary:
 	var p := global_position
 	return {"uid": body_uid if body_uid != "" else GameState.new_uid(), "spawn_id": spawn_id, "label": display_name(), "faction": String(faction),
-		"variant": model.variant, "body": model.body, "person_name": person_name, "nation": nation, "left": left_handed,
+		"variant": model.variant, "body": model.body, "face": model.face, "person_name": person_name, "nation": nation, "left": left_handed,
 		"role": String(role), "pos": [p.x, p.y, p.z], "rot_y": rotation.y,
 		"age_s": maxf(_now() - died_at, 0.0) if died_at >= 0.0 else 0.0, "marker": has_gear_marker,
-		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net), "tags": dog_tags.duplicate()}
+		"gear": inventory.net_state.duplicate(true), "ragdoll": Array(model.ragdoll_net),
+		"gore": BodyDeform.save_record(vitals),  # its holes, cuts and where its pieces lie (CompoundLevel.server_spawn_body)
+		"tags": dog_tags.duplicate()}
 
 
 ## Host only. A dead soldier becomes a body (DEAD_GROUP), gear and all. Past the body cap the

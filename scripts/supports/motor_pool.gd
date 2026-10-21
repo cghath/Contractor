@@ -16,12 +16,17 @@ extends RefCounted
 ##   mid-deployment and loaded again) is home as it left, like the roster's people.
 ## - repair_quote(id) / server_repair(id): the workshop fixes every hit zone, the battery and
 ##   the hull and fills the tank, for money (Economy) and days (it can't deploy until ready_day).
+##   Vehicle parts in the company stash (salvage with a "workshop_credit": spark plugs, bearings,
+##   an alternator, oil...) go into the job and take their credit off the bill, up to
+##   PARTS_SHARE of it (items expansion, 2026-10-20).
 ## A new campaign starts with data/ground_supports.json "motor_pool" "start" (Proposed: one
 ## M-ATV), given the first time the section is used. Numbers there are Proposed.
 
 const SECTION := &"motor_pool"
 ## Record keys that are about one zone, not the vehicle.
 const PLACE_KEYS := ["id", "pos", "rot", "bodies", "faction"]
+## At most this share of a workshop bill is paid in parts from the stash (Proposed).
+const PARTS_SHARE := 0.5
 
 
 static func _cfg() -> Dictionary:
@@ -228,7 +233,30 @@ static func repair_quote(id: String) -> Dictionary:
 		days = maxi(days, 1)
 	var fuel_l := maxf(float(spec.get("fuel_l", 0.0)) - float(rec.get("fuel", spec.get("fuel_l", 0.0))), 0.0)
 	cost += roundi(fuel_l * float(cfg.get("fuel_price", 2)))
-	return {"cost": cost, "days": days, "damage": damage, "fuel_l": fuel_l}
+	var parts := parts_for(cost)
+	return {"cost": cost - int(parts.credit), "days": days, "damage": damage, "fuel_l": fuel_l, "parts_credit": int(parts.credit), "parts": parts.use}
+
+
+## The vehicle parts in the stash a bill of `cost` would use, cheapest credit first, while
+## their credit stays under PARTS_SHARE of it: {"credit" (dollars), "use" ([[item id, count]])}.
+static func parts_for(cost: int) -> Dictionary:
+	var room := floori(cost * PARTS_SHARE)
+	var have := BaseArmory.counts(BaseHub.stash())
+	var ids: Array = []
+	for id: String in have:
+		var item := ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
+		if item and int(item.stats.get("workshop_credit", 0)) > 0:
+			ids.append(id)
+	ids.sort_custom(func(a: String, b: String) -> bool: return int(ItemDB.get_item(StringName(a)).stats.workshop_credit) < int(ItemDB.get_item(StringName(b)).stats.workshop_credit))
+	var credit := 0
+	var use: Array = []
+	for id: String in ids:
+		var each := int(ItemDB.get_item(StringName(id)).stats.workshop_credit)
+		var n := mini(int(have[id]), (room - credit) / each)
+		if n > 0:
+			use.append([id, n])
+			credit += n * each
+	return {"credit": credit, "use": use}
 
 
 ## Host: the workshop fixes vehicle `id` (every zone whole, the battery, the hull's damage, a
@@ -246,6 +274,8 @@ static func server_repair(id: String) -> String:
 		return "Nothing to repair"
 	if not Economy.spend(int(quote.cost), "Motor pool: %s serviced" % String(e.name)):
 		return "Can't afford it ($%s)" % DebriefCalc.money(int(quote.cost))
+	for row: Array in quote.parts:
+		BaseHub.server_take_from_stash(StringName(String(row[0])), int(row[1]))
 	var rec: Dictionary = e.record
 	var zones := {}
 	for z: StringName in Vehicle.ZONES:

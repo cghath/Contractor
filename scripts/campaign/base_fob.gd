@@ -347,8 +347,10 @@ func server_show_roster() -> void:
 		var member := BaseHub.member(mid)
 		var pos: Vector3 = to_global(lay("muster_origin", MUSTER_ORIGIN) + lay("muster_step", MUSTER_STEP) * (i % per_row) + lay("muster_rows", MUSTER_ROWS) * (i / per_row))
 		var stats := Roster.ai_stats(member)
-		var s := level.spawn_soldier({"name": String(member.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": pos,
-			"loadout": [], "combat": stats.combat, "discipline": stats.discipline, "guard": false, "mode": "safe"})
+		var data := {"name": String(member.callsign), "faction": "friendly", "variant": Soldier.COMPANY_VARIANT, "pos": pos,
+			"loadout": [], "combat": stats.combat, "discipline": stats.discipline, "guard": false, "mode": "safe"}
+		data.merge(Roster.identity(member))  # the same person as in the field: name tape, nationality, hand, body and face
+		var s := level.spawn_soldier(data)
 		s.role = StringName(member.role)
 		s.set_meta(&"roster_id", mid)
 		s.inventory.net_state = GameState.from_json(member.get("gear", {}))

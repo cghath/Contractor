@@ -12,6 +12,11 @@ extends Node
 
 ## Boxes rolled per site type (and per hot or not) for the rarity check.
 const RARITY_ROLLS := 4000
+## A piece of each kind the items expansion (2026-10-20) added, all of which must be found somewhere.
+const EXPANSION_SAMPLE: Array[String] = ["glock19", "mp5", "rem870", "ak12", "mk12", "rpd", "lee_enfield", "mag_mp5", "rounds_12g", "helmet_ach",
+	"plate_carrier_iotv", "rig_d3crm", "pack_ruck_60", "pouch_canteen", "plate_sapi", "ear_comtac", "ghillie_suit", "optic_kobra", "bipod_harris",
+	"suppressor_9mm", "energy_drink", "battery_cr123", "mre", "multitool", "graphics_card", "lighter", "antibiotics", "gas_mask_gp5", "gold_ring",
+	"smartphone", "intel_manifest"]
 ## A tier's measured share may be off its stated weight by this many standard errors, plus
 ## RARITY_SLACK (the rolls are seeded, so the result is fixed; the slack is for re-tuning).
 const RARITY_SIGMAS := 4.0
@@ -45,11 +50,31 @@ func _ready() -> void:
 	_test_site_rolls()
 	_test_rarity()
 	_test_same_seed()
+	_test_pockets()
 	await _test_cache_record()
 	await _test_zone()
 	GameState.delete_save()
 	print("LOOT TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## Pocket loot (Captain, 2026-10-20: "we stil havent gotten loot variety in"): every hostile body
+## carries 1 to 3 rolled finds besides its kit, a leader intel too; 40 bodies carry many kinds of
+## thing, and the same seed rolls the same.
+func _test_pockets() -> void:
+	print("Pocket loot on bodies")
+	var kinds := {}
+	var per := []
+	for i in 40:
+		var got := WorldValuables.roll_pockets("body%d" % i, false)
+		per.append(got.size())
+		for e: Dictionary in got:
+			kinds[String(e.id)] = true
+	var leader := WorldValuables.roll_pockets("boss", false, true)
+	var intel := leader.any(func(e: Dictionary) -> bool: return ItemDB.get_item(StringName(e.id)).type == "intel")
+	check(per.min() >= 1 and kinds.size() >= 15, "40 bodies: each carries something, %d kinds of find among them" % kinds.size())
+	check(intel, "a leader carries intel (%s)" % [leader.map(func(e: Dictionary) -> String: return String(e.id))])
+	check(WorldValuables.roll_pockets("body7", false) == WorldValuables.roll_pockets("body7", false), "the same seed rolls the same")
 
 
 func check(condition: bool, what: String) -> void:
@@ -92,6 +117,29 @@ func _test_tables() -> void:
 						unknown.append(row)
 	check(tables.size() >= 8 and full, "%d tables, every one with all four tiers (%s)" % [tables.size(), ", ".join(WorldValuables.TIERS)])
 	check(unknown.is_empty(), "every row is a known item with a count of 1 or more (%s)" % [unknown])
+	# Rarity (items.json _units): the commonest tier of any table that holds the item. Items
+	# expansion (2026-10-20): everything it added turns up somewhere, the pockets pool included.
+	var commonest := {}
+	for name: String in tables:
+		for t in WorldValuables.TIERS.size():
+			for bundle: Array in (tables[name] as Dictionary).get(WorldValuables.TIERS[t], []):
+				for row: Array in bundle:
+					commonest[String(row[0])] = mini(int(commonest.get(String(row[0]), 9)), t)
+	var off: Array = []
+	for id: String in commonest:
+		var r := String(ItemDB.get_item(StringName(id)).stats.get("rarity", ""))
+		if r != "" and r != WorldValuables.TIERS[commonest[id]]:
+			off.append("%s %s (found %s)" % [id, r, WorldValuables.TIERS[commonest[id]]])
+	check(off.is_empty(), "every item's rarity is the commonest tier it's found at (%s)" % [off])
+	var unplaced: Array = EXPANSION_SAMPLE.filter(func(id: String) -> bool: return not commonest.has(id))
+	check(unplaced.is_empty(), "the items expansion's finds are all in the tables (%s)" % [unplaced])
+	var pocket_ids := {}
+	for tier: String in WorldValuables.TIERS:
+		for bundle: Array in (tables.get("pockets", {}) as Dictionary).get(tier, []):
+			for row: Array in bundle:
+				pocket_ids[String(row[0])] = true
+	check(["energy_drink", "lighter", "smartphone", "battery_aa", "ibuprofen", "gold_ring"].all(func(id: String) -> bool: return pocket_ids.has(id)),
+		"a body's pockets hold the new everyday finds: an energy drink, a lighter, a phone, batteries, painkillers, a ring")
 	var sums := {}
 	var missing: Array = []
 	for t: String in _site_types():

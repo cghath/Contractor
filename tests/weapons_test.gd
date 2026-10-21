@@ -28,6 +28,8 @@ const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 
 ## Guns fired and reloaded for real on the host player.
 const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs", "scar_h"]
 const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
+## Items expansion (2026-10-20): every gun it added, fired and reloaded for real (_test_expansion_guns).
+const EXPANSION_GUNS: Array[String] = ["glock19", "beretta_m9", "cz75", "makarov_pm", "tt33", "fn57", "glock18c", "usp45", "mp5", "mp5sd", "mp7", "uzi", "vityaz", "p90", "ump45", "rem870", "mossberg590", "m1014", "saiga12", "sig_mcx", "scar_l", "g36c", "aug_a3", "tavor_x95", "ak12", "akms", "ak105", "amd65", "vz58", "mk12", "sr25", "m14_ebr", "g3a3", "fal", "l1a1", "rpd", "negev", "mg3", "m60e4", "lee_enfield", "sks"]
 
 var failures := 0
 var level: CompoundLevel
@@ -43,6 +45,7 @@ func _ready() -> void:
 	_test_data()
 	_test_rounds_and_rules()
 	_test_models()
+	_test_gun_styles()
 	_test_reloads()
 	_test_muzzle_point()
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -58,10 +61,12 @@ func _ready() -> void:
 	await _frames(30)
 	for id: String in FIRED:
 		await _test_fire_and_reload(id)
+	await _test_expansion_guns()
 	await _test_reload_beats()
 	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
+	_test_terror_group_kits()
 	await _test_rival_pmc_kits()
 	await _test_rival_pmc_exo_gating()
 	_test_roles()
@@ -180,6 +185,53 @@ func _test_models() -> void:
 				var model := "%s:%s:%s:%s:%s" % [parts[0], parts[1], art, parts[3], sup]
 				var pieces := _pieces(model)
 				check(pieces.size() == 1, "%s is one solid piece (%s: %s)" % [id, model, pieces])
+
+
+## The items expansion's SMGs, shotguns and pistols have silhouettes of their own (follow-up,
+## 2026-10-20: they borrowed the C8's, the AK's and the Mosin's, and every sidearm was one
+## pistol): each builds as one solid piece under any sight and a suppressor, a magazine that comes
+## out (none on a tube shotgun: shells go in through the top), its action as a moving part with a
+## place for the hand, the grip behind the support hand and ahead of the butt, and its reload
+## family.
+func _test_gun_styles() -> void:
+	print("Gun styles: SMGs, shotguns, pistols (2026-10-20)")
+	var styles := {&"mp5": "smg", &"mp5sd": "smg_sd", &"ump45": "smg_box", &"mp7": "smg_pdw", &"uzi": "smg_grip",
+		&"rem870": "shotgun", &"mossberg590": "shotgun_tac", &"m1014": "shotgun_auto"}
+	for id: StringName in styles:
+		var gun := ItemDB.get_item(id)
+		var model := VoxelArt.model_for(gun)
+		var shotgun := String(styles[id]).begins_with("shotgun")
+		check(model.contains(":%s:" % styles[id]), "%s has its own silhouette (%s)" % [id, model])
+		check(Reloads.family(gun) == (Reloads.BOLT if shotgun else Reloads.AR), "%s reloads as %s" % [id, Reloads.family(gun)])
+		var parts := model.split(":")
+		var solid := true
+		for art: String in ["irons", "dot", "holo", "lpvo", "scope_long"]:
+			for sup: String in ["", "sup"]:
+				var pieces := _pieces("%s:%s:%s:%s:%s" % [parts[0], parts[1], art, parts[3], sup])
+				if pieces.size() != 1:
+					solid = false
+					print("    %s %s %s: %s" % [id, art, sup, pieces])
+		check(solid, "%s is one solid piece under every sight, with or without a suppressor" % id)
+		var count := func(prefix: String) -> int: return (VoxelArt._spec(prefix + model).boxes as Array).size()
+		var whole := (VoxelArt._spec(model).boxes as Array).size()
+		var pts := VoxelArt.reload_points(model)
+		var hands := VoxelArt.hand_points(model)
+		check(VoxelArt.has_magazine(model) != shotgun and VoxelArt.moving_parts(model) == ["bolt"]
+			and count.call(VoxelArt.FIXED) + count.call(VoxelArt.MAG) + count.call(VoxelArt.BOLT) == whole
+			and pts.has("bolt") and pts.has("well") and (shotgun or pts.has("catch")),
+			"%s: %s, its action moves, places for the hands (%s)" % [id, "shells through the top" if shotgun else "its magazine comes out", pts.keys()])
+		var butt := VoxelArt.butt_point(model)
+		check((hands.support as Vector3).z < (hands.grip as Vector3).z and (hands.grip as Vector3).z < butt.z,
+			"%s: support hand ahead of the grip, the grip ahead of the butt" % id)
+	for p: Array in [[&"m17", "pistol"], [&"glock19", "pistol:compact"], [&"m1911", "pistol:steel"], [&"makarov_pm", "pistol:steel_compact"]]:
+		var model := VoxelArt.model_for(ItemDB.get_item(p[0]))
+		var n := float(VoxelArt._spec(model).size.z)
+		check(model == p[1] and n == (9.0 if model.ends_with("compact") else 10.0) and VoxelArt.has_magazine(model)
+			and VoxelArt.moving_parts(model) == ["bolt"] and _pieces(model).size() == 1 and Reloads.family(ItemDB.get_item(p[0])) == Reloads.PISTOL,
+			"%s draws as %s, %.0f cm: one piece, its magazine and slide parts of their own" % [p[0], model, n * 2.0])
+	var under := func(model: String) -> float: return float(VoxelArt.hand_points(model).grip.z) - VoxelArt.sight_point(model).z
+	check(is_equal_approx(under.call("pistol:compact"), under.call("pistol")),
+		"a compact sits in the hand like the full-size: its grip the same way under its rear sight")
 
 
 ## Reloads (Captain, 2026-10-20: "reload anims also need work", and the L85's): every family's
@@ -340,14 +392,64 @@ func _test_fire_and_reload(id: String) -> void:
 	player._server_busy_until = 0.0
 	var aim := -player.global_basis.z
 	var wait := 60.0 / float(gun.stats.rpm) + 0.1
+	var pressed := false
 	for i in 3:
 		player._server_fire.rpc_id(1, player.head.global_position, aim, &"primary")
-		await _seconds(wait)
+		var shot_end := Time.get_ticks_msec() + int(wait * 1000.0)
+		while Time.get_ticks_msec() < shot_end:
+			pressed = pressed or player.model.hand_pose(0) == HandPose.PRESS
+			await get_tree().process_frame
+	check(pressed, "%s: each shot's tracer squeezes the drawn trigger finger" % id)
 	check(inv.rounds_in(&"primary") == cap - 3, "3 shots: %d left (%d)" % [cap - 3, inv.rounds_in(&"primary")])
 	var spare := inv.spare_rounds(StringName(g[0]))
 	player._server_reload.rpc_id(1, &"primary")
 	await _seconds(player.reload_seconds(gun) + 0.5)
 	check(inv.rounds_in(&"primary") == cap, "reload from its own %s: %d loaded, spare %d -> %d" % [g[0], inv.rounds_in(&"primary"), spare, inv.spare_rounds(StringName(g[0]))])
+
+
+## Items expansion (2026-10-20): every gun it added has its magazine, loose rounds, prices and a
+## model, fires its own round (a shotgun's nine buckshot pellets for one shell) and reloads from
+## its own magazine, in its own slot.
+func _test_expansion_guns() -> void:
+	print("Items expansion: every new gun fires and reloads from its own magazine")
+	var inv := player.inventory
+	var missing := PackedStringArray()
+	for id: String in EXPANSION_GUNS:
+		var gun := ItemDB.get_item(StringName(id))
+		var mag_id := StringName(String(gun.stats.get("ammo", ""))) if gun else &""
+		var mag := ItemDB.get_item(mag_id) if mag_id != &"" else null
+		if gun == null or mag == null or mag.magazine_rounds() <= 0 or HeliCall.loose_rounds_for(mag_id) == "" or Prices.price_of(StringName(id)) <= 0 				or Prices.price_of(mag_id) <= 0 or VoxelArt.model_for(gun) == "" or Ballistics.round_data(gun).is_empty():
+			missing.append(id)
+	check(missing.is_empty(), "%d new guns, each with its magazine, loose rounds, round data, prices and a model (missing: %s)" % [EXPANSION_GUNS.size(), ", ".join(missing)])
+	var shotguns := EXPANSION_GUNS.filter(func(id: String) -> bool: return ItemDB.get_item(StringName(id)).tags.has("shotgun"))
+	check(shotguns.size() == 4 and shotguns.all(func(id: String) -> bool: return Ballistics.pellets(ItemDB.get_item(StringName(id))) == 9)
+		and Ballistics.pellets(ItemDB.get_item(&"m4a1")) == 1, "the four shotguns fire 9 buckshot pellets a round, a rifle one bullet")
+	var g := ItemDB.get_item(&"rem870")
+	var dir := Vector3(0.3, 0.1, -1.0).normalized()
+	var inside := true
+	for i in 50:
+		inside = inside and rad_to_deg(dir.angle_to(Ballistics.pellet_direction(dir, g))) <= float(g.stats.pellet_spread_deg) + 0.01
+	check(inside, "every pellet leaves inside the gun's %s deg pellet cone" % g.stats.pellet_spread_deg)
+	for id: String in EXPANSION_GUNS:
+		var gun := ItemDB.get_item(StringName(id))
+		var mag_id := StringName(String(gun.stats.ammo))
+		var cap := ItemDB.get_item(mag_id).magazine_rounds()
+		var slot := gun.slot
+		inv.slots[slot] = &""
+		inv.take(StringName(id))
+		inv.take(mag_id, 1)
+		player._server_busy_until = 0.0
+		var aim := -player.global_basis.z
+		var wait := 60.0 / float(gun.stats.rpm) + 0.1
+		for i in 2:
+			player._server_fire.rpc_id(1, player.head.global_position, aim, slot)
+			await _seconds(wait)
+		var fired := inv.rounds_in(slot)
+		player._server_reload.rpc_id(1, slot)
+		await _seconds(player.reload_seconds(gun, false) + 0.4)
+		check(inv.slots[slot] == StringName(id) and fired == cap - 2 and inv.rounds_in(slot) == cap,
+			"%s (%s): 2 shots from %d leave %d; reloads from its own %s to %d" % [id, slot, cap, fired, mag_id, inv.rounds_in(slot)])
+	inv.slots[&"sidearm"] = &""
 
 
 ## Weapon detail pass (2026-10-20): a PKM's empty reload in first person, from the reload key:
@@ -371,9 +473,12 @@ func _test_reload_beats() -> void:
 	var length := player.reload_seconds(ItemDB.get_item(&"pkm"), true)
 	check(player.is_reloading and player.reload_item == &"pkm" and player.reload_empty and is_equal_approx(player.reload_len, length),
 		"the reload begins here at once: the PKM, empty, %.1f s" % length)
-	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0, "bolt3": -1.0, "cover3": -1.0}
+	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0, "bolt3": -1.0, "cover3": -1.0, "view_hands": {}}
 	var start := Soldier._now()
 	while Soldier._now() - start < length + 0.4:
+		var vh := pi.view_hand_poses()
+		if vh.size() == 2:
+			seen.view_hands[vh[1]] = true
 		var parts := pi.view_parts()
 		seen.bolt = maxf(seen.bolt, float(parts.bolt))
 		seen.cover = maxf(seen.cover, float(parts.cover))
@@ -385,6 +490,8 @@ func _test_reload_beats() -> void:
 	var heard := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return String(id).begins_with("reload_"))
 	var want: Array = Reloads.beats(Reloads.BELT, true).map(func(b: Array) -> StringName: return b[1])
 	check(seen.bolt > 0.08 and seen.cover > 1.0, "first person: the charging handle went back %.2f m, the cover up %.2f rad" % [seen.bolt, seen.cover])
+	check(seen.view_hands.has(HandPose.MAG) and seen.view_hands.has(HandPose.PINCH) and seen.view_hands.has(HandPose.OPEN),
+		"first person: the support hand takes the box (MAG), pinches the handle, opens on the cover (%s)" % [seen.view_hands.keys()])
 	var after := pi.view_parts()
 	check(is_zero_approx(float(after.bolt)) and absf(float(after.cover)) < 0.01, "and both are home after (%s)" % after)
 	check(str(heard) == str(want), "each beat heard in turn (%s)" % [heard])
@@ -416,10 +523,11 @@ func _test_third_person_reload() -> void:
 	check(s.reload_item == &"m4a1" and s.reload_empty and is_equal_approx(s.reload_len, length) and str(s.model.reload_keys) == str(Reloads.keys(Reloads.AR, true))
 		and s.model.reload_parts.has("bolt"),
 		"the host's word reached the body: the M4, empty, %.1f s, the AR's empty keys and its bolt track" % length)
-	var seen := {"u": -1.0, "pose": 0.0, "mags": 0, "dropped": 0.0, "carried": false, "bolt": -1.0, "seated": false}
+	var seen := {"u": -1.0, "pose": 0.0, "mags": 0, "dropped": 0.0, "carried": false, "bolt": -1.0, "seated": false, "hands": {}}
 	var start := Soldier._now()
 	while Soldier._now() - start < length + 0.4:
 		var m := s.model
+		seen.hands[m.hand_pose(1)] = true
 		seen.u = maxf(seen.u, m.reload_u)
 		var pose := m.reload_pose()
 		if pose.size() == 2:
@@ -440,6 +548,9 @@ func _test_third_person_reload() -> void:
 	check(seen.mags == 2 and seen.dropped < -0.2 and seen.carried and seen.seated,
 		"the magazine came out of the gun: the empty fell free (%.2f m), the new one carried up and seated (%s)" % [seen.dropped, seen])
 	check(seen.bolt > 0.04, "the carrier locked back %.2f m, then home" % seen.bolt)
+	check(seen.hands.has(HandPose.MAG) and seen.hands.has(HandPose.POINT), "the support hand grabs the magazine (MAG) and slaps the catch (%s)" % [seen.hands.keys()])
+	check(String(s.model.part_node(Vitals.FOREARM_R).get_meta(&"voxel_model", "")).ends_with("b") and VoxelArt.hands_bare("urban") and not VoxelArt.hands_bare("multicam"),
+		"militia go bare-handed, contractors gloved (%s)" % s.model.part_node(Vitals.FOREARM_R).get_meta(&"voxel_model", ""))
 	check(whole and s.model.reload_u < 0.0 and s.inventory.rounds_in(&"primary") > 0, "after: the rifle whole again and loaded (%d)" % s.inventory.rounds_in(&"primary"))
 	s.queue_free()
 
@@ -490,6 +601,47 @@ func _test_faction_kits() -> void:
 	check("eastern_concord" in MissionRegistry.enemies(), "the Eastern Concord Forces are a faction the squad can be hired against")
 	check(["us_forces", "uk_forces", "ca_forces"].all(func(f: String) -> bool: return f in MissionRegistry.employers()),
 		"the US, UK and Canada hire the squad")
+
+
+## Terror groups (Captain, 2026-10-20; docs/terror_groups.md): the Ashen Banner, the Valley Shura,
+## the Saltline Syndicate, the Kestrel Cartel and the Highland Free Front each field their own kit:
+## mixed plain clothes (the Banner's foreign fighters and the Front's men in their own camo), their
+## own guns, their marks (militia orange or hostile red), their doctrine; bombers only from the
+## Banner and the Shura.
+func _test_terror_group_kits() -> void:
+	print("Terror group kits")
+	var groups := {"ashen_banner": "hostile", "valley_shura": "hostile", "saltline": "militia", "kestrel": "militia", "highland_front": "militia"}
+	var i := 0
+	for g: String in groups:
+		var kit_id := Kits.kit_of(g, "none")
+		check(Kits.is_data(kit_id) and MissionRegistry.faction_side(g) == groups[g] and g in MissionRegistry.enemies(),
+			"%s fields its own kit (%s), drawn %s" % [g, kit_id, groups[g]])
+		var looks := {}
+		for n in 6:
+			looks[Kits.variant(kit_id, n)] = true
+		check(looks.size() >= 3, "%s's men don't all look alike (%d looks in 6)" % [g, looks.size()])
+		var doctrine := Kits.doctrine(g)
+		check(Doctrine.has(doctrine), "%s fights by its own doctrine (%s)" % [g, doctrine])
+		for n in 2:
+			var spawn := {"name": "WpnTerror%d_%d" % [i, n], "faction": "hostile", "pos": Vector3(60 + i * 4, 0.1, 60 + n * 3),
+				"loadout": Kits.loadout(kit_id, n), "combat": 0.5, "discipline": 0.5, "guard": true, "role": Kits.role(kit_id, n)}
+			spawn.merge(Kits.dress(g, kit_id, n), true)
+			var s := level.spawn_soldier(spawn)
+			SquadAI.of(s).set_physics_process(false)
+			var gun := String(s.inventory.slots[&"primary"])
+			var ammo := StringName(ItemDB.get_item(StringName(gun)).stats.ammo)
+			var marks: Array = s.get_node(^"Model").get(&"iff")
+			check(gun in Kits.loadout(kit_id, n) and s.inventory.rounds_in(&"primary") > 0 and s.inventory.count_of(ammo) >= 1
+				and s.variant == Kits.variant(kit_id, n) and String(s.get_meta(&"faction_id", "")) == g
+				and marks == GearRig.IFF[StringName(groups[g])] and SquadAI.of(s)._doctrine_id() == doctrine,
+				"%s man %d spawns with his %s (loaded, %d spare), his clothes (%s), %s marks and the %s doctrine" % [g, n, gun, s.inventory.count_of(ammo), s.variant, groups[g], doctrine])
+			s.queue_free()
+		i += 1
+	check(Kits.sends_bombers("ashen_banner") and Kits.sends_bombers("valley_shura") and not Kits.sends_bombers("black_ridge")
+		and not Kits.sends_bombers("saltline"), "suicide bombers: the Banner and the Shura only (Captain), not Black Ridge any more")
+	var uniformed := range(6).filter(func(n: int) -> bool: return Kits.is_uniform("banner", n))
+	check(not uniformed.is_empty() and uniformed.size() < 6 and Kits.variant("banner", uniformed[0]) == "banner" and Kits.loadout("banner", uniformed[0]).has("helmet_pasgt"),
+		"the Banner's foreign fighters wear its camo and a helmet; its locals plain clothes")
 
 
 func _test_hostile_kits() -> void:

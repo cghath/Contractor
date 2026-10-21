@@ -138,9 +138,12 @@ properties/15/replication_mode = 2
 properties/16/path = NodePath(".:respawn_state")
 properties/16/spawn = true
 properties/16/replication_mode = 2
-properties/17/path = NodePath(".:dog_tags")
+properties/17/path = NodePath(".:face")
 properties/17/spawn = true
 properties/17/replication_mode = 2
+properties/18/path = NodePath(".:dog_tags")
+properties/18/spawn = true
+properties/18/replication_mode = 2
 
 [node name="Soldier" type="CharacterBody3D"]
 collision_layer = 16
