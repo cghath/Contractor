@@ -1345,7 +1345,7 @@ func _test_consume_in_session() -> void:
 	for want: Array in [[&"energy_drink", &"caffeine", 1.0, 1], [&"ibuprofen", &"ibuprofen", 1.0, 0], [&"mre", &"ration", 1.5, 0]]:
 		var at := _carried_at(inv, want[0])
 		var before := player.vitals.drug_total(want[1])
-		player._server_inventory_action("consume", at[0], at[1], &"", &"")
+		player._server_inventory_action.rpc_id(1, "consume", at[0], at[1], &"", &"")
 		check(absf(player.vitals.drug_total(want[1]) - before - float(want[2])) < 0.05 and inv.count_of(want[0]) == want[3],
 			"%s: %.1f dose of %s, %d left" % [want[0], float(want[2]), want[1], inv.count_of(want[0])])
 	check(Consumables.verb(ItemDB.get_item(&"energy_drink")) == "Drink" and Consumables.verb(ItemDB.get_item(&"mre")) == "Eat"

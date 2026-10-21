@@ -147,7 +147,7 @@ func _run() -> void:
 	check(Nvg.battery_of(gen3, inv.containers[at3[0]][at3[1]].get("state", {})) < Nvg.capacity_h(gen3), "the stowed gen 3 is part used")
 	inv.take(&"battery_aa", 2)
 	var b := _carried(inv, &"battery_aa")
-	player._server_inventory_action("consume", b[0], b[1], &"", &"")
+	player._server_inventory_action.rpc_id(1, "consume", b[0], b[1], &"", &"")
 	at3 = _carried(inv, &"nvg_gen3")
 	check(is_equal_approx(Nvg.battery_of(gen3, inv.containers[at3[0]][at3[1]].get("state", {})), Nvg.capacity_h(gen3)) and inv.count_of(&"battery_aa") == 1,
 		"Use on AA batteries (the inventory's action): the stowed gen 3 back to full, one pack used")
