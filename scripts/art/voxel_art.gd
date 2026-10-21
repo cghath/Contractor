@@ -34,6 +34,7 @@ enum C {
 	GUN, GUN_LIGHT, LENS, LIP, LIP_SHADE, WOOD, WOOD_DARK,
 	WOUND, WOUND_DARK,  # torn flesh round a hole BodyDeform carved
 	BRASS,  # cartridge cases (a belt-fed's belt)
+	GLOVE_PAD, NAIL,  # a glove's knuckle guard and palm patch; bare fingers' nails (HandPose)
 }
 
 const VARIANTS := {
@@ -56,6 +57,7 @@ const VARIANTS := {
 		# read apart at a glance.
 		"camo": ["5c6066", "3f4247", "7a7e84", "26282b"], "skin": "b07a52", "hair": "1f1a17",
 		"patch": "d9730d", "gear": "34373b", "pack": "3a3d42",
+		"hands": "bare",  # militia: no gloves (HandPose; fingers pass, 2026-10-20)
 	},
 	"dummy": {
 		"camo": ["f2c230", "f2c230", "e3b022", "f2c230"], "skin": "f2c230", "hair": "f2c230",
@@ -325,10 +327,18 @@ static func warm(pairs: Array) -> void:
 
 ## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
 ## and the art of what's worn and carried (model_for), as [model, variant] pairs for warm().
+const WARM_HANDS := [[&"relaxed", false], [&"relaxed", true], [&"grip", false], [&"trigger", false], [&"press", false],
+	[&"support", true], [&"mag", true], [&"hold", false], [&"hold", true]]
 static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	var out: Array = []
 	for part in BODY_PARTS:
-		out.append([body_part(part, body), variant])
+		if part != "forearm":
+			out.append([body_part(part, body), variant])
+	# The forearms in the poses a soldier is drawn in most (HandPose): relaxed, the firing grip
+	# and the support grip, a magazine, holding something.
+	var bare := hands_bare(variant)
+	for hand: Array in WARM_HANDS:
+		out.append([HandPose.model(hand[0], hand[1], bare, body), variant])
 	for id: Variant in loadout:
 		var item := ItemDB.get_item(StringName(id))
 		var model := fitted(model_for(item), body) if item else ""
@@ -417,7 +427,10 @@ static func _rasterize(spec: Dictionary, variant: String, salt: int) -> VoxelBuf
 			buffer.fill_area(colour, Vector3i(x + 1, y + 1, z0 + 1), Vector3i(x + 2, y + 2, z1 + 1), VoxelBuffer.CHANNEL_COLOR)
 	for box: Variant in spec.boxes:
 		if box is Dictionary:
-			_fill_loft(box, put, s, run)
+			if box.has("obox"):
+				_fill_obox(box, put, s)
+			else:
+				_fill_loft(box, put, s, run)
 			continue
 		var from := Vector3i((Vector3(box[0]) * s).round())  # corners may be fractional (_fb)
 		var to := Vector3i((Vector3(box[1]) * s).round())
@@ -480,6 +493,76 @@ static func _fill_loft(loft: Dictionary, put: Callable, s := 1, run := Callable(
 			for z in range(zb - SHELL, zb):
 				put.call(x, y, z, colour, false)
 			run.call(x, y, za + SHELL, zb - SHELL, C.CAMO_A if colour == C.CAMO else colour)
+
+
+## An oriented box (the fingers' bones, HandPose): centre `o` and half-extents `h` in the spec's
+## voxels, turned by `b` (orthonormal; its columns the box's axes), its cross-section across y a
+## rectangle with its corners cut by `bevel` (as a loft's), and its -y end tapered to half over its
+## last `taper` voxels (a fingertip). `paint` only recolours voxels already there.
+static func obox(o: Vector3, b: Basis, h: Vector3, colour: int, bevel := 0.5, taper := 0.0, paint := false) -> Dictionary:
+	return {"obox": true, "o": o, "b": b, "h": h, "colour": colour, "bevel": bevel, "taper": taper, "paint": paint}
+
+
+static func _fill_obox(box: Dictionary, put: Callable, s := 1) -> void:
+	var b: Basis = box.b
+	var o: Vector3 = box.o * s
+	var h: Vector3 = box.h * s
+	var taper: float = float(box.taper) * s
+	var bevel: float = box.bevel
+	var colour: int = box.colour
+	var paint: bool = box.paint
+	var reach := (b.x * h.x).abs() + (b.y * h.y).abs() + (b.z * h.z).abs()  # half the box's bounds
+	var lo := Vector3i((o - reach).floor())
+	var hi := Vector3i((o + reach).ceil())
+	var bx := b.x
+	var by := b.y
+	var bz := b.z
+	for x in range(lo.x, hi.x):
+		for y in range(lo.y, hi.y):
+			for z in range(lo.z, hi.z):
+				var p := Vector3(x + 0.5, y + 0.5, z + 0.5) - o
+				var ly := by.dot(p)
+				if absf(ly) > h.y:
+					continue
+				var k := 1.0
+				if taper > 0.0 and -ly > h.y - taper:
+					k = 1.0 - 0.5 * (-ly - (h.y - taper)) / taper
+				var dx := absf(bx.dot(p)) / (h.x * k)
+				if dx > 1.0:
+					continue
+				if absf(bz.dot(p)) / (h.z * k) > minf(1.0, 2.0 - bevel - dx):
+					continue
+				put.call(x, y, z, colour, paint)
+
+
+## A spec mirrored left to right (x flipped in its frame): a left hand from a right one.
+static func _mirror_x(spec: Dictionary) -> Dictionary:
+	var w := float(spec.size.x)
+	var out := spec.duplicate()
+	var boxes := []
+	for box: Variant in spec.boxes:
+		if box is Dictionary:
+			var m: Dictionary = box.duplicate()
+			if m.has("obox"):
+				var o: Vector3 = m.o
+				var b: Basis = m.b
+				m.o = Vector3(w - o.x, o.y, o.z)
+				var f := func(v: Vector3) -> Vector3: return Vector3(-v.x, v.y, v.z)
+				m.b = Basis(f.call(b.x), f.call(b.y), f.call(b.z))
+			else:
+				m.centre = Vector2(w - (m.centre as Vector2).x, (m.centre as Vector2).y)
+			boxes.append(m)
+		else:
+			var a: Array = (box as Array).duplicate()
+			var from: Vector3 = Vector3(a[0])
+			var to: Vector3 = Vector3(a[1])
+			a[0] = Vector3(w - to.x, from.y, from.z)
+			a[1] = Vector3(w - from.x, to.y, to.z)
+			boxes.append(a)
+	out.boxes = boxes
+	var pivot: Vector3 = spec.get("pivot", Vector3(spec.size) * 0.5)
+	out.pivot = Vector3(w - pivot.x, pivot.y, pivot.z)
+	return out
 
 
 ## Camouflage by variant, from a point in centimetres: woodland's organic blotches with
@@ -554,6 +637,8 @@ static func _get_mesher(variant: String) -> VoxelMesherCubes:
 			C.LIP: skin.lerp(Color("9a4a44"), 0.3).darkened(0.12), C.LIP_SHADE: skin.lerp(Color("9a4a44"), 0.2),
 			C.WOUND: Color("6e1712"), C.WOUND_DARK: Color("2a0605"),
 			C.BRASS: Color("a8873f"),
+			C.GLOVE_PAD: Color(v.get("glove", "2f2f2a")).lightened(0.14),
+			C.NAIL: skin.lerp(Color("e9c9bd"), 0.55),
 		}
 		var palette := VoxelColorPalette.new()
 		for index: int in colours:
@@ -588,7 +673,7 @@ static func _spec(model: String) -> Dictionary:
 		"head": return _head()
 		"torso": return _torso()
 		"upper_arm": return _upper_arm()
-		"forearm": return _forearm()
+		"forearm": return _forearm(model)
 		"leg": return _leg()
 		"thigh": return _thigh()
 		"shin": return _shin()
@@ -620,7 +705,7 @@ static func _spec(model: String) -> Dictionary:
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
 		"upper_arm_f": return _upper_arm_f()
-		"forearm_f": return _forearm_f()
+		"forearm_f": return _forearm(model, true)
 		"leg_f": return _leg_f()
 		"thigh_f": return _thigh_f()
 		"shin_f": return _shin_f()
@@ -741,15 +826,31 @@ static func _upper_arm() -> Dictionary:
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
-## 0.11 x 0.32 x 0.11 m including the gloved hand. Pivot at the elbow; the palm centre is
-## 0.25 m below it (CharacterModel.FOREARM).
-static func _forearm() -> Dictionary:
+## 0.18 x 0.42 x 0.18 m including the hand. Pivot at the elbow; the wrist 19 cm below it and the
+## palm's centre 0.25 m (CharacterModel.FOREARM). The sleeve to the wrist, the hand with fingers
+## (HandPose: a palm, four fingers and a thumb) in a pose: "forearm:<pose>:<flags>" (HandPose.model;
+## flags "l" a left hand, "b" bare). Plain "forearm" is the relaxed right hand, gloved.
+## `female` ("forearm_f..."): a slimmer sleeve and wrist and her smaller hand.
+static func _forearm(model := "forearm", female := false) -> Dictionary:
+	var flags := model.get_slice(":", 2) if model.get_slice_count(":") > 2 else ""
+	var bare := flags.contains("b")
+	var hand: int = C.SKIN if bare else C.GLOVE
 	var boxes := [
-		_loft(5.5, 5.5, [[14, 4.0, 4.0], [32, 5.0, 5.0]], C.CAMO, 0.6),
-		_loft(5.5, 5.5, [[0, 3.6, 2.8], [6, 5.0, 3.3], [11, 4.2, 3.3], [15, 4.1, 3.9]], C.GLOVE, 0.6),
-		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
+		_loft(9, 9, [[24, 3.8, 3.8], [42, 4.6, 4.6]] if female else [[24, 4.0, 4.0], [42, 5.0, 5.0]], C.CAMO, 0.6),  # the sleeve
+		_loft(9, 9, [[19, 2.0, 2.7], [26, 2.5, 3.1]] if female else [[19, 2.2, 3.0], [26, 2.7, 3.4]], hand, 0.6),  # the wrist, a glove's cuff
+		_p(0, 24, 0, 18, 27, 18, C.CAMO_A),  # the sleeve's cuff
 	]
-	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	boxes.append_array(HandPose.parts(HandPose.pose_of(model), female, bare))
+	var spec := {"size": Vector3i(18, 42, 18), "pivot": Vector3(9, 42, 9), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
+	return _mirror_x(spec) if flags.contains("l") else spec
+
+
+## Whether soldiers in colour scheme `variant` go bare-handed (plain clothes, the militia), else
+## gloved (HandPose).
+static func hands_bare(variant: String) -> bool:
+	if variant.begins_with(CIV_PREFIX) or variant.begins_with("civp:"):
+		return true
+	return String(VARIANTS.get(variant, {}).get("hands", "")) == "bare"
 
 
 ## 0.14 x 0.90 x 0.18 m with the boot toe: a thigh on a shin. Pivot at the hip joint.
@@ -866,17 +967,6 @@ static func _upper_arm_f() -> Dictionary:
 		_fp(0, 14, 2.5, 2.5, 26, 9.5, C.PATCH), _fp(9.5, 14, 2.5, 12, 26, 9.5, C.PATCH),
 	]
 	return {"size": Vector3i(12, 32, 12), "pivot": Vector3(6, 32, 6), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
-
-
-## The male forearm's frame and pivot (elbow; palm centre 0.25 m below), slimmer, with a
-## smaller gloved hand.
-static func _forearm_f() -> Dictionary:
-	var boxes := [
-		_loft(5.5, 5.5, [[14, 3.8, 3.8], [32, 4.6, 4.6]], C.CAMO, 0.6),
-		_loft(5.5, 5.5, [[0, 3.2, 2.5], [6, 4.4, 2.9], [11, 3.8, 2.9], [15, 3.7, 3.5]], C.GLOVE, 0.6),
-		_p(0, 14, 0, 11, 17, 11, C.CAMO_A),  # cuff
-	]
-	return {"size": Vector3i(11, 32, 11), "pivot": Vector3(5.5, 32, 5.5), "voxel": BODY_VOXEL, "sub": BODY_SUB, "boxes": boxes}
 
 
 static func _leg_f() -> Dictionary:

@@ -68,6 +68,7 @@ func _ready() -> void:
 	await _test_ai_carry()
 	await _test_pick_up()
 	await _test_equip_and_draw()
+	await _test_fingers()
 	await _test_treat()
 	await _test_techniques()
 	await _test_loot()
@@ -559,6 +560,119 @@ func _test_equip_and_draw() -> void:
 	check(error >= 0.0 and error < 0.015 and grip.distance_to(player.model.hand_position(true)) > 0.1, "then holds it up (%.1f cm)" % (error * 100.0))
 	player.select_weapon(&"primary")
 	await _seconds(0.6)
+
+
+## Fingers (HandPose, 2026-10-20): hands are a palm, four fingers and a thumb at 0.5 cm, in poses
+## swapped by what the hand does: the firing grip on a weapon up (the trigger finger on the trigger
+## aimed, squeezing on a shot), the support grip, palms turned to the weapon; first person the same.
+func _test_fingers() -> void:
+	print("Fingers")
+	var spec := VoxelArt._spec(HandPose.model(HandPose.OPEN, false, false))
+	check(is_equal_approx(float(spec.voxel) / int(spec.sub), VoxelArt.FINE_VOXEL), "the hand is built in 0.5 cm voxels (%.4f m)" % (float(spec.voxel) / int(spec.sub)))
+	for body in VoxelArt.BODIES:
+		for bare in [false, true]:
+			var n := _finger_count(HandPose.model(HandPose.OPEN, false, bare, body))
+			check(n == 4, "%s %s hand, open: four fingers across it below the knuckles (%d)" % [body, "bare" if bare else "gloved", n])
+	var male_w := _hand_width(HandPose.model(HandPose.OPEN, false, false))
+	var female_w := _hand_width(HandPose.model(HandPose.OPEN, false, false, VoxelArt.FEMALE))
+	check(female_w < male_w, "a woman's hand is smaller (%.1f cm across the knuckles, his %.1f)" % [female_w * 100.0, male_w * 100.0])
+	var model := player.model
+	player.select_weapon(&"primary")
+	player.is_aiming = false
+	await _seconds(CharacterModel.TRIGGER_HOLD_S + 0.6)
+	check(model.hand_pose(0) == HandPose.GRIP and model.hand_pose(1) == HandPose.SUPPORT,
+		"a rifle up: the firing grip, the index along the frame, and the support grip (%s, %s)" % [model.hand_pose(0), model.hand_pose(1)])
+	var fore: Node3D = model.part_node(Vitals.FOREARM_R)
+	check(String(fore.get_meta(&"voxel_model", "")) == HandPose.model(HandPose.GRIP, false, VoxelArt.hands_bare(model.variant), model.body),
+		"the right forearm is drawn in it (%s)" % fore.get_meta(&"voxel_model", ""))
+	var held: Node3D = model._held
+	if is_instance_valid(held):
+		var palm := fore.global_basis.orthonormalized() * HandPose.palm_normal(false)
+		check(palm.dot(-held.global_basis.x.normalized()) > 0.6, "the firing palm turned in to the grip (%.2f)" % palm.dot(-held.global_basis.x.normalized()))
+		var support := model.part_node(Vitals.FOREARM_L).global_basis.orthonormalized() * HandPose.palm_normal(true)
+		check(support.dot(held.global_basis.y.normalized()) > 0.3, "the support palm up under the handguard (%.2f)" % support.dot(held.global_basis.y.normalized()))
+	var error := model.hand_error()
+	check(error >= 0.0 and error < 0.015, "the grips' grasp centres on the grip and the handguard (%.1f cm)" % (error * 100.0))
+	var resting := (fore.get_child(0) as MeshInstance3D).mesh
+	model.kick(1.0)
+	await _frames(2)
+	check(model.hand_pose(0) == HandPose.PRESS and (fore.get_child(0) as MeshInstance3D).mesh != resting, "a shot: the trigger finger squeezes (%s)" % model.hand_pose(0))
+	await _seconds(CharacterModel.PRESS_S + 0.15)
+	check(model.hand_pose(0) == HandPose.TRIGGER, "and lets off, still on the trigger (%s)" % model.hand_pose(0))
+	await _seconds(CharacterModel.TRIGGER_HOLD_S)
+	check(model.hand_pose(0) == HandPose.GRIP, "and back along the frame a while after (%s)" % model.hand_pose(0))
+	# Aiming (an AI's: the player's own aim follows the mouse, which a headless test hasn't got).
+	bravo.active_slot = &"primary"
+	bravo.want_aim = true
+	await _seconds(0.8)
+	check(bravo.model.hand_pose(0) == HandPose.TRIGGER and bravo.model.hand_pose(1) == HandPose.SUPPORT,
+		"an AI aiming: the finger on the trigger, the support grip (%s, %s)" % [bravo.model.hand_pose(0), bravo.model.hand_pose(1)])
+	bravo.want_aim = false
+	# First person: the view model's forearms have the same hands.
+	var pi := player.player_input
+	if pi:
+		await _frames(3)
+		var arms := player.view_model.get_children().filter(func(a: Node) -> bool: return a.has_meta(&"hand_pose") and not a.is_queued_for_deletion())
+		var posed := arms.filter(func(a: Node) -> bool: return String(a.get_meta(&"voxel_model", "")).contains(":") and HandPose.TABLE.has(HandPose.pose_of(String(a.get_meta(&"voxel_model", "")))))
+		check(arms.size() == 2 and posed.size() == 2, "first person: both forearms have fingers (%d of %d posed)" % [posed.size(), arms.size()])
+		var poses := pi.view_hand_poses()
+		check(poses.size() == 2 and poses[0] == HandPose.GRIP and poses[1] == HandPose.SUPPORT, "the firing grip, the index along the frame, and the support grip (%s)" % [poses])
+		player._kick(player.active_weapon())
+		for i in 3:  # (physics ticks: headless, process frames can run many to a tick)
+			await get_tree().physics_frame
+		check(pi.view_hand_poses()[0] == HandPose.PRESS, "a shot in first person: the trigger finger moves (%s)" % [pi.view_hand_poses()])
+		var mesh := (arms[0].get_child(0) as MeshInstance3D).mesh if arms.size() > 0 else null
+		await _seconds(CharacterModel.PRESS_S + 0.15)
+		check(pi.view_hand_poses()[0] == HandPose.TRIGGER and (arms[0].get_child(0) as MeshInstance3D).mesh != mesh, "and back on it")
+	player.is_aiming = false
+	# The hook for props in the hand (the treatment session): a pose held and an anchor in the hand.
+	model.set_hand_pose(1, HandPose.PINCH)
+	await _frames(2)
+	var anchor := model.hand_anchor(1)
+	check(model.hand_pose(1) == HandPose.PINCH and anchor.get_parent() == model.part_node(Vitals.FOREARM_L)
+		and anchor.global_position.distance_to(model.hand_position(false)) < 0.001, "set_hand_pose holds a pose; hand_anchor is its grasp centre")
+	model.set_hand_pose(1, &"")
+	await _frames(2)
+	check(model.hand_pose(1) == HandPose.SUPPORT, "and let go, the hand is back on the handguard (%s)" % model.hand_pose(1))
+
+
+## How many fingers cross a slice through hand model `m` 3 cm below its knuckles (the voxels'
+## solid runs across the hand, along z, in the hand's plane).
+func _finger_count(m: String) -> int:
+	var occ := VoxelArt.occupancy(m)
+	var dims: Vector3i = occ.dims
+	var cell: float = occ.cell
+	var female := m.begins_with("forearm_f")
+	var hand_y := HandPose.WRIST.y - (13.5 * (HandPose.FEMALE_SIZE if female else 1.0))  # cm, the frame's own
+	var y := int(hand_y * VoxelArt.BODY_VOXEL / cell)
+	var best := 0
+	for x in range(int(dims.x * 0.35), int(dims.x * 0.65)):
+		var runs := 0
+		var inside := false
+		for z in dims.z:
+			var solid: bool = occ.solid[x + dims.x * (y + dims.y * z)] == 1
+			if solid and not inside:
+				runs += 1
+			inside = solid
+		best = maxi(best, runs)
+	return best
+
+
+## The hand's width across the knuckles (metres) in model `m`.
+func _hand_width(m: String) -> float:
+	var occ := VoxelArt.occupancy(m)
+	var dims: Vector3i = occ.dims
+	var cell: float = occ.cell
+	var female := m.begins_with("forearm_f")
+	var y := int((HandPose.WRIST.y - 10.0 * (HandPose.FEMALE_SIZE if female else 1.0)) * VoxelArt.BODY_VOXEL / cell)
+	var lo := dims.z
+	var hi := -1
+	for x in dims.x:
+		for z in dims.z:
+			if occ.solid[x + dims.x * (y + dims.y * z)] == 1:
+				lo = mini(lo, z)
+				hi = maxi(hi, z)
+	return (hi - lo + 1) * cell if hi >= lo else 0.0
 
 
 func _test_treat() -> void:

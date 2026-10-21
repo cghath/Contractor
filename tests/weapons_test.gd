@@ -340,9 +340,14 @@ func _test_fire_and_reload(id: String) -> void:
 	player._server_busy_until = 0.0
 	var aim := -player.global_basis.z
 	var wait := 60.0 / float(gun.stats.rpm) + 0.1
+	var pressed := false
 	for i in 3:
 		player._server_fire.rpc_id(1, player.head.global_position, aim, &"primary")
-		await _seconds(wait)
+		var shot_end := Time.get_ticks_msec() + int(wait * 1000.0)
+		while Time.get_ticks_msec() < shot_end:
+			pressed = pressed or player.model.hand_pose(0) == HandPose.PRESS
+			await get_tree().process_frame
+	check(pressed, "%s: each shot's tracer squeezes the drawn trigger finger" % id)
 	check(inv.rounds_in(&"primary") == cap - 3, "3 shots: %d left (%d)" % [cap - 3, inv.rounds_in(&"primary")])
 	var spare := inv.spare_rounds(StringName(g[0]))
 	player._server_reload.rpc_id(1, &"primary")
@@ -371,9 +376,12 @@ func _test_reload_beats() -> void:
 	var length := player.reload_seconds(ItemDB.get_item(&"pkm"), true)
 	check(player.is_reloading and player.reload_item == &"pkm" and player.reload_empty and is_equal_approx(player.reload_len, length),
 		"the reload begins here at once: the PKM, empty, %.1f s" % length)
-	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0, "bolt3": -1.0, "cover3": -1.0}
+	var seen := {"bolt": 0.0, "cover": 0.0, "u": -1.0, "bolt3": -1.0, "cover3": -1.0, "view_hands": {}}
 	var start := Soldier._now()
 	while Soldier._now() - start < length + 0.4:
+		var vh := pi.view_hand_poses()
+		if vh.size() == 2:
+			seen.view_hands[vh[1]] = true
 		var parts := pi.view_parts()
 		seen.bolt = maxf(seen.bolt, float(parts.bolt))
 		seen.cover = maxf(seen.cover, float(parts.cover))
@@ -385,6 +393,8 @@ func _test_reload_beats() -> void:
 	var heard := Sfx.heard_after(t).filter(func(id: StringName) -> bool: return String(id).begins_with("reload_"))
 	var want: Array = Reloads.beats(Reloads.BELT, true).map(func(b: Array) -> StringName: return b[1])
 	check(seen.bolt > 0.08 and seen.cover > 1.0, "first person: the charging handle went back %.2f m, the cover up %.2f rad" % [seen.bolt, seen.cover])
+	check(seen.view_hands.has(HandPose.MAG) and seen.view_hands.has(HandPose.PINCH) and seen.view_hands.has(HandPose.OPEN),
+		"first person: the support hand takes the box (MAG), pinches the handle, opens on the cover (%s)" % [seen.view_hands.keys()])
 	var after := pi.view_parts()
 	check(is_zero_approx(float(after.bolt)) and absf(float(after.cover)) < 0.01, "and both are home after (%s)" % after)
 	check(str(heard) == str(want), "each beat heard in turn (%s)" % [heard])
@@ -416,10 +426,11 @@ func _test_third_person_reload() -> void:
 	check(s.reload_item == &"m4a1" and s.reload_empty and is_equal_approx(s.reload_len, length) and str(s.model.reload_keys) == str(Reloads.keys(Reloads.AR, true))
 		and s.model.reload_parts.has("bolt"),
 		"the host's word reached the body: the M4, empty, %.1f s, the AR's empty keys and its bolt track" % length)
-	var seen := {"u": -1.0, "pose": 0.0, "mags": 0, "dropped": 0.0, "carried": false, "bolt": -1.0, "seated": false}
+	var seen := {"u": -1.0, "pose": 0.0, "mags": 0, "dropped": 0.0, "carried": false, "bolt": -1.0, "seated": false, "hands": {}}
 	var start := Soldier._now()
 	while Soldier._now() - start < length + 0.4:
 		var m := s.model
+		seen.hands[m.hand_pose(1)] = true
 		seen.u = maxf(seen.u, m.reload_u)
 		var pose := m.reload_pose()
 		if pose.size() == 2:
@@ -440,6 +451,9 @@ func _test_third_person_reload() -> void:
 	check(seen.mags == 2 and seen.dropped < -0.2 and seen.carried and seen.seated,
 		"the magazine came out of the gun: the empty fell free (%.2f m), the new one carried up and seated (%s)" % [seen.dropped, seen])
 	check(seen.bolt > 0.04, "the carrier locked back %.2f m, then home" % seen.bolt)
+	check(seen.hands.has(HandPose.MAG) and seen.hands.has(HandPose.POINT), "the support hand grabs the magazine (MAG) and slaps the catch (%s)" % [seen.hands.keys()])
+	check(String(s.model.part_node(Vitals.FOREARM_R).get_meta(&"voxel_model", "")).ends_with("b") and VoxelArt.hands_bare("urban") and not VoxelArt.hands_bare("multicam"),
+		"militia go bare-handed, contractors gloved (%s)" % s.model.part_node(Vitals.FOREARM_R).get_meta(&"voxel_model", ""))
 	check(whole and s.model.reload_u < 0.0 and s.inventory.rounds_in(&"primary") > 0, "after: the rifle whole again and loaded (%d)" % s.inventory.rounds_in(&"primary"))
 	s.queue_free()
 
