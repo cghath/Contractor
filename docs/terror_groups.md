@@ -1,7 +1,7 @@
-# Terror groups and a smaller Black Ridge (proposal)
+# Terror groups and a smaller Black Ridge
 
-Status: **approved by the Captain 2026-10-20 (section 5), being built.** Section 7 (a living war) added 2026-10-20 19:20 CDT. Nothing here is built yet. Branch
-`claude/factions` (from a7e9207), 2026-10-20 19:00 CDT.
+Status: **approved by the Captain 2026-10-20 (section 5) and built on `claude/factions`** (from
+a7e9207). Section 9 says what was built and what is left.
 
 The Captain's ask (2026-10-20): "our terrorist organization faction needs to look more like one,
 we can keep the black ridge militia but they shouldnt be so big. we should have like islamists and
@@ -493,3 +493,57 @@ villages and the cartels over crossings.
   - news lines appear;
   - a contested zone spawns both sides;
 - smoke.
+
+## 9. What was built (2026-10-20) and what is left
+
+**Built:**
+
+- **Factions** (`data/factions.json`). The five groups have:
+  - `side`, `doctrine`, `bombers`, `war_wants`, `symbol`, `leaders`, `wants_text` and `radio`;
+  - their data kits, with mixed plain clothes through the kit's `clothes`.
+  - Black Ridge, Vantage and the Concord got `side`, `symbol` and their `war_wants`; Black Ridge
+    and both cartels are `predatory`.
+- **Kits** (`Kits`):
+  - `variant(kit, index)` picks a man's clothes;
+  - `is_uniform` covers the Banner's foreign fighters and the Front's smocks;
+  - `dress()` gives a man's clothes, his orange or red marks, and his `faction_id`;
+  - `doctrine()` and `sends_bombers()`.
+- **Spawns:** every hostile spawn path wears its faction's dress, so SquadAI fights by the
+  faction's own doctrine. These are garrisons, QRF waves, EnemyResponse teams, skirmishers and
+  bombers.
+- **Looks:** VoxelArt variants `banner` and `highland`.
+- **Doctrines:** `jihadist`, `guerrilla` and `cartel`.
+- **Zone spread** (`data/contracts.json`): every zone has a `controller`, `assets` and `home`.
+  - `ZoneLevel._zone_enemy` reads the zone's holder, so `""` no longer means Black Ridge.
+  - A board contract's target is the holder 70% of the time (`ContractGen.HOLDER_SHARE`).
+- **The living war** (`WorldSites`, campaign sections `world_sites` and `war`), all of section 7:
+  - strength, the daily tick, fronts, flips, sieges, and wipe-outs with leaders;
+  - fronts on the company's ground (`ZoneControl.server_lose_zone`);
+  - the player's effects and the rebel-support effects;
+  - news, and the stringer's overnight radio line.
+- **The map:**
+  - `Theatre` rows carry the front, its why, the holder's flag and what the holder wants;
+  - `WorldMapView` draws front arrows, a front badge and holder flags;
+  - `WorldMapScreen` has a War news panel.
+- **In a contested zone:**
+  - the attacker holds a share of the outposts, checkpoints and villages (`ZoneLevel.module_faction`);
+  - an assault is under way within a minute, twice as big (`FactionSkirmish`);
+  - villages are half empty, and refugee families walk out (`PeopleLayer`).
+- **Flags:** at the holder's sites (`FactionFlags`). The cartels put up a stencilled board
+  instead.
+- **Radio:** each group's lines, and talk about the front (`RadioChatter`).
+- **Board:** a job on every front, and a war job on every flip (`Contracts.front_offer`).
+
+**Left (Proposed follow-ups):**
+
+- Cloth headwear (shemagh, headwrap, balaclava, cap) and a chest rig, after the faces session
+  lands (Captain's call 6).
+- Per-group site names: an "IED workshop" cache for the Banner, a "drug lab" and a "warehouse"
+  for the cartels. Contraband loot drops at cartel sites.
+- Named leaders as the HVT people of hvt_capture and manhunt jobs. Today a won HVT job against a
+  faction takes its next leader by title.
+- The Concord and Vantage still fight by the zone's people's doctrine, not their own: they have
+  no `doctrine` field yet.
+- A Highland Free Front that turns friendly gets contracts of its own against the Concord.
+- Refugees only walk to the zone's edge. Moving them into the neighbouring zone, and back after
+  a flip, is still to come.
