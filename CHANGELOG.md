@@ -37,6 +37,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Not tied to one wound, listed as well:** cardiac arrest, a blocked airway, blood loss that
   needs a line and fluids, cold, concussion, a racing or slow pulse, pain.
 
+#### Added
+- **Trace a hit's path through the body** (Captain: "show a traced wound path for a selected hit
+  so users can get an understanding of the anatomy"). Click an injury in "Treat in this order"
+  (or press T on its body part) and the right-hand column shows that part of the body from the
+  front and the side:
+  - the bones, arteries, veins and organs, with what the round crossed drawn bright;
+  - the channel from where it went in to where it came out (a ring) or stopped (an X).
+
+  Below the views, the path in words, in the order the round met things:
+  - "In: Left thigh, front";
+  - "8 cm: left femoral artery, cut";
+  - "9 cm: left femur (thigh bone), cracked by the shock wave";
+  - "Out: Left thigh, back, a 19 cm channel", or "Stopped inside after 11 cm: still in him".
+
+  T moves to the part's next hit; T or Esc goes back to the signs and the log. A round that
+  stayed in can be traced too: where its channel ended is now kept with the wound and sent to
+  every player.
+
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 
 #### Fixed

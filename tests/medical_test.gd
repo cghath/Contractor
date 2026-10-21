@@ -174,6 +174,32 @@ func _test_injury_text() -> void:
 	check(burns.size() == 1 and String(burns[0].what) == "burns over about 25% of the body" and burns[0].severity == InjuryText.CRITICAL,
 		"burns by how much of the body (%s)" % [burns.map(func(e: Dictionary) -> String: return InjuryText.line(e))])
 	t.queue_free()
+	# A hit's path (Captain, 2026-10-21: "show a traced wound path for a selected hit"): front to
+	# back through the left thigh, by the femoral artery and the femur, in the order it met them.
+	var through := {"part": Vitals.THIGH_L, "kind": "arterial", "at": Vector3(-0.06, 0.70, -0.10), "end": Vector3(-0.06, 0.70, 0.09),
+		"out": Vector3(-0.06, 0.70, 0.09), "rc": &"intermediate"}
+	var path := InjuryText.path(through)
+	var ids: Array = path.get("crossed", []).map(func(c: Dictionary) -> StringName: return c.id)
+	var words := InjuryText.path_lines(through, path)
+	check(ids.has(&"femoral_l") and ids.has(&"femur_l") and ids.find(&"femoral_l") < ids.find(&"femur_l") and path.exits and absf(float(path.length) - 0.19) < 0.001,
+		"a path through the thigh: %s" % [ids])
+	check(words.size() >= 4 and words[0].begins_with("In: Left thigh, front") and words.has("%d cm: left femoral artery, cut" % roundi(path.crossed[ids.find(&"femoral_l")].t * 100.0))
+		and words[-1].begins_with("Out: Left thigh, back, a 19 cm channel"), "and in words: %s" % [" / ".join(words)])
+	var lodged := {"part": Vitals.CHEST, "kind": "chest", "at": Vector3(0.09, 1.3, -0.11), "end": Vector3(0.09, 1.3, 0.0), "rc": &"pistol"}
+	var lodged_path := InjuryText.path(lodged)
+	var lodged_words := InjuryText.path_lines(lodged, lodged_path)
+	check(not lodged_path.exits and lodged_path.crossed.any(func(c: Dictionary) -> bool: return c.id == &"lung_r" and c.direct)
+		and lodged_words[-1] == "Stopped inside after 11 cm: still in him", "a round that stayed in: %s" % [" / ".join(lodged_words)])
+	check(InjuryText.path({"part": Vitals.CHEST, "kind": "rib"}).is_empty(), "no entry point known: nothing to trace")
+	# The channel's end travels to every peer with the wound.
+	var sent := _vitals()
+	var hit := _wound(sent, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	hit["at"] = through.at
+	hit["end"] = through.end
+	var copy := WoundModel.new()
+	copy.apply_net(sent._model.to_net())
+	check(copy.wounds[0].get("end") is Vector3 and (copy.wounds[0].end as Vector3).distance_to(through.end) < 0.005, "the channel's end replicates (%s)" % [copy.wounds[0].get("end")])
+	sent.queue_free()
 
 
 ## Conscious but dying (Captain, 2026-10-20): blood running out with a wound still bleeding puts
@@ -1678,6 +1704,18 @@ func _test_medical_menu() -> void:
 	input._unhandled_input(_key(KEY_H, false))
 	check(menu.is_open() and menu.target == casualty and menu.part == Vitals.THIGH_L,
 		"H opens it on the casualty in front, at the left thigh (%s, %s)" % [menu.target, menu.part])
+	# T traces the part's hit: its path drawn in the right-hand column; T again stops.
+	var hit: Dictionary = casualty.vitals._model.wounds.filter(func(w: Dictionary) -> bool: return w.part == Vitals.THIGH_L)[0]
+	hit["at"] = Vector3(-0.06, 0.70, -0.10)
+	hit["end"] = Vector3(-0.06, 0.70, 0.09)
+	hit["out"] = hit.end
+	menu.refresh()
+	menu._unhandled_input(_key(KEY_T, false))
+	await _frames(2)
+	check(not menu.trace.is_empty() and menu.trace.crossed.any(func(c: Dictionary) -> bool: return c.id == &"femoral_l") and menu.layout_rects().has("trace"),
+		"T traces the thigh's hit: the femoral artery on its path (%s; the ui suite fits its box at every size)" % [menu.trace.get("crossed", []).map(func(c: Dictionary) -> StringName: return c.id)])
+	menu._unhandled_input(_key(KEY_T, false))
+	check(menu.trace.is_empty(), "T again: back to the signs")
 	player.inventory.take(&"trauma_kit")
 	player.inventory.take(&"iv_18")
 	menu.refresh()

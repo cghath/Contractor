@@ -14,6 +14,9 @@ extends RefCounted
 ##   bandaged, splinted, sealed, needle in, line in);
 ## - what to do next: the items that treat it, in order ("Tourniquet above the wound, then pack
 ##   and bandage"), each marked carried or not.
+## - the path a hit took through the body (path, path_lines): where it went in, the vessels,
+##   organs and bones it crossed in the order it met them (hit, or torn by the shock wave), and
+##   where it came out or stopped, for the menu's anatomy view.
 ## Plus what isn't one wound (cardiac arrest, a blocked airway, blood loss needing a line and
 ## fluids, blast lung, burns, cold, a concussion, pain), and the vitals at a glance (summary).
 ## Static and read-only over Vitals (replicated), so every peer reads the same.
@@ -178,7 +181,8 @@ static func _wound_entry(vitals: Vitals, w: Dictionary, tq: Dictionary, care: Ar
 			severity = MINOR
 	var entry := {"part": part, "kind": kind, "severity": severity, "where": where(w), "what": what,
 		"bleed": _bleed_words(kind, rate, bleeding), "done": _done(w, tq, care, part), "rate": rate if bleeding else 0.0,
-		"order": _order(kind if not (amputation or held) else "arterial"), "next": _steps(steps, carries)}
+		"order": _order(kind if not (amputation or held) else "arterial"), "next": _steps(steps, carries),
+		"at": w.get("at"), "end": w.get("end", w.get("out")), "out": w.get("out"), "rc": StringName(w.get("round_class", &""))}
 	return entry
 
 
@@ -514,3 +518,114 @@ static func pain_word(pain: float) -> String:
 	if pain < 0.5:
 		return "moderate"
 	return "severe"
+
+
+# --- The wound's path --------------------------------------------------------------------------
+
+## Plain names for BodyMap's vessels, organs and bones (the side added from the id's _l / _r).
+const STRUCTURE_NAMES := {
+	&"common_carotid": "carotid artery", &"jugular": "jugular vein", &"subclavian": "subclavian artery",
+	&"subclavian_vein": "subclavian vein", &"brachiocephalic_trunk": "brachiocephalic artery", &"aorta": "aorta",
+	&"vena_cava": "vena cava", &"pulmonary": "pulmonary vessels", &"renal": "renal artery", &"common_iliac": "iliac artery",
+	&"femoral": "femoral artery", &"femoral_vein": "femoral vein", &"popliteal": "popliteal artery", &"brachial": "brachial artery",
+	&"radial": "radial artery", &"ulnar": "ulnar artery", &"brain": "brain", &"heart": "heart", &"lung": "lung",
+	&"femur": "femur (thigh bone)", &"tibia": "tibia (shin bone)", &"humerus": "humerus (upper arm bone)",
+	&"forearm_bones": "radius and ulna", &"hand": "hand bones", &"clavicle": "collarbone", &"pelvis": "pelvis",
+}
+
+
+## A structure's id in words: &"femoral_l" -> "left femoral artery".
+static func structure_name(id: StringName) -> String:
+	var text := String(id)
+	var side := ""
+	if text.ends_with("_l"):
+		side = "left "
+		text = text.left(-2)
+	elif text.ends_with("_r"):
+		side = "right "
+		text = text.left(-2)
+	return side + String(STRUCTURE_NAMES.get(StringName(text), text.replace("_", " ")))
+
+
+## The path one injury's round (or fragment) took, in the rest pose, or {} without one (no entry
+## point known): "from" and "to" (where the channel ended), "exits" (it came out there), "length"
+## (m), "part", "region" (BodyMap's segment: the limb part, &"torso" or &"head") and "crossed":
+## the vessels, organs and bones on it in the order it met them, each {"id", "type" ("vessel",
+## "organ", "bone"), "kind" (a vessel's: arterial, junctional, venous, internal), "direct" (hit
+## head-on; else torn by the cavity's shock wave), "t" (m along the path)}. The same rules as the
+## hit itself (BodyMap.trace: DIRECT_HIT_M, CAVITY_REACH_M by what made it, the organ and bone shares).
+static func path(entry: Dictionary) -> Dictionary:
+	var from: Variant = entry.get("at")
+	if not from is Vector3:
+		return {}
+	var to: Variant = entry.get("end")
+	var a: Vector3 = from
+	var b: Vector3 = to if to is Vector3 else a
+	var part: StringName = entry.part
+	var region := BodyMap.segment_of(part)
+	var reach := float(BodyMap.CAVITY_REACH_M.get(StringName(entry.get("rc", &"")), 0.05))
+	var best := {}  # id -> crossing (a vessel's segments: the closest)
+	if a.distance_to(b) >= BodyMap.GRAZE_DEPTH_M:
+		for v: Array in BodyMap.VESSELS:
+			if not BodyMap._in_segment(v[4], v[5], region, part):
+				continue
+			var pts := Geometry3D.get_closest_points_between_segments(a, b, v[4], v[5])
+			var d := pts[0].distance_to(pts[1]) - float(v[3])
+			var direct := d <= BodyMap.DIRECT_HIT_M
+			if not direct:
+				var t := (d - BodyMap.DIRECT_HIT_M) / reach
+				if t >= 1.0 or BodyMap.CAVITY_MAX_SHARE * pow(1.0 - t, BodyMap.CAVITY_FALLOFF_EXP) < BodyMap.MIN_VESSEL_SHARE:
+					continue
+			var crossing := {"id": v[0], "type": "vessel", "kind": String(v[1]), "direct": direct, "t": a.distance_to(pts[0]), "d": d}
+			if not best.has(v[0]) or (direct and not best[v[0]].direct) or (direct == bool(best[v[0]].direct) and d < float(best[v[0]].d)):
+				best[v[0]] = crossing
+		for organ: StringName in BodyMap.ORGANS:
+			var o: Array = BodyMap.ORGANS[organ]
+			var pts := Geometry3D.get_closest_points_between_segments(a, b, o[0], o[1])
+			if pts[0].distance_to(pts[1]) <= float(o[2]) + reach * BodyMap.ORGAN_CAVITY_SHARE:
+				best[organ] = {"id": organ, "type": "organ", "kind": "", "direct": pts[0].distance_to(pts[1]) <= float(o[2]), "t": a.distance_to(pts[0])}
+		for bone: StringName in BodyMap.BONES:
+			var bn: Array = BodyMap.BONES[bone]
+			if bn[3] != part:
+				continue
+			var pts := Geometry3D.get_closest_points_between_segments(a, b, bn[0], bn[1])
+			if pts[0].distance_to(pts[1]) <= float(bn[2]) + reach * BodyMap.BONE_CAVITY_SHARE:
+				best[bone] = {"id": bone, "type": "bone", "kind": "", "direct": pts[0].distance_to(pts[1]) <= float(bn[2]), "t": a.distance_to(pts[0])}
+	var crossed: Array = best.values()
+	crossed.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return float(x.t) < float(y.t))
+	return {"from": a, "to": b, "exits": entry.get("out") is Vector3, "length": a.distance_to(b), "part": part, "region": region,
+		"crossed": crossed}
+
+
+## The path in words, a line each: in where, each thing it crossed, out where (or where it stopped).
+static func path_lines(entry: Dictionary, trace: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	if trace.is_empty():
+		return out
+	out.append("In: %s (%s)" % [where({"part": trace.part, "at": trace.from}), _how(entry)])
+	if float(trace.length) < BodyMap.GRAZE_DEPTH_M:
+		out.append("Skimmed the surface: nothing deep reached")
+	for c: Dictionary in trace.crossed:
+		var name := structure_name(c.id)
+		var what := ""
+		match String(c.type):
+			"vessel":
+				what = "cut" if c.direct else "torn by the shock wave"
+			"organ":
+				what = "through it" if c.direct else "bruised by the shock wave"
+			"bone":
+				what = "hit, broken" if c.direct else "cracked by the shock wave"
+		out.append("%d cm: %s, %s" % [roundi(float(c.t) * 100.0), name, what])
+	if trace.crossed.is_empty() and float(trace.length) >= BodyMap.GRAZE_DEPTH_M:
+		out.append("Missed the vessels, organs and bones: muscle only")
+	if trace.exits:
+		out.append("Out: %s, a %d cm channel" % [where({"part": trace.part, "at": trace.to}), roundi(float(trace.length) * 100.0)])
+	elif float(trace.length) >= BodyMap.GRAZE_DEPTH_M:
+		out.append("Stopped inside after %d cm: still in him" % roundi(float(trace.length) * 100.0))
+	return out
+
+
+static func _how(entry: Dictionary) -> String:
+	if StringName(entry.get("rc", &"")) == Vitals.FRAGMENT:
+		return "fragment"
+	return "round" if entry.get("out") is Vector3 or entry.get("end") is Vector3 else "wound"
