@@ -33,6 +33,7 @@ func _ready() -> void:
 	player.global_position = Vector3(0, 0.1, 80)
 	player.vitals.shielded = true
 	_test_voxels()
+	await _test_downed_headshot()
 	await _test_gunfire()
 	await _test_collapse()
 	await _test_frag_alive()
@@ -201,6 +202,61 @@ func _rounds_into(s: Soldier, part: StringName, n: int, energy_j: float, round_c
 ## rounds take a forearm in one or two, a pistol doesn't in ten, a corpse's leg goes under 20 rifle
 ## rounds, a hand goes before the forearm. A living man who loses one is dying or out, bleeding
 ## from the stump (a tourniquet's job), and the piece is synced like a blast's.
+## The first round at a downed man's head (Captain, 2026-10-21, v0.5.1: "first time headshots still
+## dont cause a wound", "on a downed state enemy"): knocked out and lying (or dead), with and without
+## a helmet, one rifle round at his head as drawn, from his front and his side, from a standing
+## shooter 3 m off. It must hurt him where it visibly hit: a head (face, neck) wound, or with a
+## helmet a strike the helmet took (its blunt hit on the head).
+func _test_downed_headshot() -> void:
+	print("Downed: the first round at the head")
+	var gun := ItemDB.get_item(&"m4a1")
+	var shooter := StaticBody3D.new()
+	level.add_child(shooter)
+	var heads := [Vitals.HEAD, Vitals.FACE, Vitals.NECK]
+	var lines: Array[String] = []
+	var bad := 0
+	var n := 0
+	for helmet in [false, true]:
+		for dead in [false, true]:
+			for from in ["front", "side"]:
+				n += 1
+				var s := _man("Downed%d" % n, ["helmet"] if helmet else [])
+				s.set_physics_process(true)
+				await _seconds(0.3)
+				s.vitals.server_damage(500.0)
+				if dead:
+					s.vitals.server_kill()
+				await _seconds(2.5)  # down, the ragdoll settled
+				var head := s.model.head.to_global(Vector3(0, 0.12, 0))
+				# From past the crown of his head ("front": the way his face points, as he lies) or from
+				# his side, a standing man's shot down at it, the body not in the way.
+				var crown := head - s.model.torso.global_position
+				crown.y = 0.0
+				var side := s.model.torso.global_basis.x
+				side.y = 0.0
+				var flat: Vector3 = crown if from == "front" else side
+				flat = flat.normalized() if flat.length() > 0.05 else Vector3.FORWARD
+				var origin := head + flat * 3.0 + Vector3.UP * 1.5
+				var before := s.vitals.wound_list().size()
+				shooter.global_position = origin
+				var result := Ballistics.fire(shooter, origin, (head - origin).normalized(), gun)
+				await _seconds(0.1)
+				var parts := s.vitals.wound_list().slice(before).map(func(w: Dictionary) -> StringName: return w.part)
+				var on_head: bool = parts.any(func(p: StringName) -> bool: return p in heads)
+				var cause := String(s.vitals.last_cause.get("cause", ""))
+				var ok: bool = on_head or (helmet and cause.contains("armor") and StringName(s.vitals.last_cause.get("part", &"")) in heads)
+				if not ok:
+					bad += 1
+				lines.append("%s%s from the %s: hit %s, wounds %s, cause %s" % [
+					"helmet, " if helmet else "", "dead" if dead else "down", from, result.get("result", "?"), parts, cause])
+				s.queue_free()
+	shooter.queue_free()
+	check(bad == 0, "every first round at a lying man's head hurt his head (or his helmet took it): %d of %d" % [n - bad, n])
+	for line in lines:
+		print("    ", line)
+	await _seconds(0.2)
+
+
 func _test_gunfire() -> void:
 	print("Gunfire takes limbs")
 	var shot := _man("GunShotgun")

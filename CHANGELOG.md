@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
+
+#### Fixed
+- **The round that kills with a head shot is now on record.** A rifle round through the head is
+  fatal, but the kill used to come with no wound, so the first round into a downed (or standing)
+  man's head left nothing on him. Only later rounds, into the corpse, showed. Now the fatal round
+  leaves its head wound (and the hole in the model), seen the same by every player.
+
 ### One 12-gauge system (Captain, 2026-10-21: "we have standard and hi brass and breaching rounds for the skeleton key")
 
 #### Added

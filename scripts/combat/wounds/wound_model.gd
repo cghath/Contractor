@@ -1564,11 +1564,17 @@ func add_hit(part: StringName, channel: Dictionary, round_class: StringName) -> 
 		added.append(add_spall(part))
 		return added
 	var rifle := round_class == &"intermediate" or round_class == &"full_power"
+	# A round through the head past the helmet is fatal, and the wound that killed him is kept
+	# (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state
+	# enemy": the kill came with no wound, so the first round left nothing on him and only the next,
+	# into a corpse, showed).
 	if part == &"head" and round_class != &"fragment":
-		kill()  # an unprotected head hit past the helmet is fatal
+		added.append(_add_wound(part, "brain", 0.0, &"brain"))
+		kill()
 		return added
 	if &"brain" in channel.organs:
 		if round_class != &"fragment":
+			added.append(_add_wound(part, "brain", 0.0, &"brain"))
 			kill()
 			return added
 		added.append(_add_wound(part, "brain", 0.0, &"brain"))
