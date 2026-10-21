@@ -236,6 +236,25 @@ static func pool_roll(pool: String, seed_key: String, hot: bool) -> Dictionary:
 	return roll_box(String(spec.table), spec.tier_weights, "%s|%s" % [pool, seed_key], hot)
 
 
+## What a man carries on him (Captain, 2026-10-20: "we stil havent gotten loot variety in somehow":
+## bodies, where most looting happens, carried only their fixed kit): POCKET_ROLLS rolls of the
+## "pockets" pool (cash, cigarettes, meds, ammo; rarer phones and documents, grenades, an optic,
+## gold; a laptop or NVGs now and then), a leader one more of "pockets_leader" (his intel). Each
+## [{"id", "count"}]. `seed_key` makes it repeatable; `hot` lets very rare through (cap_outside_hot).
+const POCKET_ROLLS := Vector2i(1, 3)
+
+
+static func roll_pockets(seed_key: String, hot: bool, leader := false) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(seed_key + "|pockets")
+	var out: Array = []
+	for i in rng.randi_range(POCKET_ROLLS.x, POCKET_ROLLS.y):
+		out.append_array(pool_roll("pockets", "%s|%d" % [seed_key, i], hot).items)
+	if leader:
+		out.append_array(pool_roll("pockets_leader", seed_key, hot).items)
+	return out
+
+
 ## An HQ strongbox's contents (by the module id: the same HQ always holds the same): always one
 ## piece of contraband and one of intel, and a roll of the strongbox pool's valuables (a modest
 ## stack most times, now and then a real prize), half the time a Vantage ledger too. `hot`: a hot

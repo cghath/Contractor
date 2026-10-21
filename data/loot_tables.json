@@ -7,7 +7,9 @@
 	"pools": {
 		"dead_drop": {"table": "dead_drop", "tier_weights": {"common": 55, "uncommon": 30, "rare": 12, "very_rare": 3}},
 		"field_cache": {"table": "field_cache", "tier_weights": {"common": 45, "uncommon": 35, "rare": 15, "very_rare": 5}},
-		"strongbox": {"table": "strongbox", "tier_weights": {"common": 25, "uncommon": 40, "rare": 28, "very_rare": 7}}
+		"strongbox": {"table": "strongbox", "tier_weights": {"common": 25, "uncommon": 40, "rare": 28, "very_rare": 7}},
+		"pockets": {"table": "pockets", "tier_weights": {"common": 62, "uncommon": 27, "rare": 9, "very_rare": 2}},
+		"pockets_leader": {"table": "pockets_leader", "tier_weights": {"common": 30, "uncommon": 40, "rare": 24, "very_rare": 6}}
 	},
 	"sites": {
 		"compound": {
@@ -84,6 +86,18 @@
 		}
 	},
 	"tables": {
+		"pockets": {
+			"common": [[["pressure_bandage", 1]], [["smuggled_cigarettes", 1]], [["cash_roll", 1]], [["rounds_762x39", 10, 30]], [["hashish", 1]], [["intel_sim_bag", 1]], [["tourniquet", 1]], [["zip_cuffs", 2]], [["knife", 1]], [["intel_sd_card", 1]], [["cash_euros", 1]], [["rounds_545", 10, 30]], [["hemostatic_gauze", 1]], [["smuggled_cigarettes", 1], ["cash_roll", 1]], [["intel_orders", 1]], [["electronics_salvage", 1]]],
+			"uncommon": [[["morphine", 1]], [["intel_phone", 1]], [["intel_documents", 1]], [["grenade_rgd5", 1]], [["grenade_f1", 1]], [["smoke_rdg2", 1]], [["tramadol", 1]], [["luxury_watch", 1]], [["gold_coins", 1, 3]], [["enemy_radio", 1]], [["intel_freq_list", 1]], [["counterfeit_dollars", 1]], [["ifak", 1]], [["mag_545", 1, 2]], [["mag_762x39", 1, 2]], [["intel_passports", 1]]],
+			"rare": [[["optic_red_dot", 1]], [["optic_pu_scope", 1]], [["intel_ledger", 1]], [["intel_marked_map", 1]], [["rough_gems", 1, 2]], [["captagon", 1]], [["cash_bundle", 1]], [["binoculars", 1]], [["grip_vertical", 1]], [["light_weapon", 1]], [["intel_codebook", 1]], [["intel_tablet", 1]], [["decompression_needle", 1], ["chest_seal", 1]]],
+			"very_rare": [[["nvg_gen1", 1]], [["intel_laptop", 1]], [["intel_sat_phone", 1]], [["intel_hard_drive", 1]], [["cash_brick", 1]], [["intel_drone_controller", 1]], [["heroin_bricks", 1]], [["optic_holo", 1]]]
+		},
+		"pockets_leader": {
+			"common": [[["intel_orders", 1]], [["intel_documents", 1]], [["intel_freq_list", 1]], [["intel_sim_bag", 1], ["cash_roll", 1]]],
+			"uncommon": [[["intel_phone", 1]], [["intel_marked_map", 1]], [["intel_passports", 1]], [["intel_codebook", 1]], [["cash_bundle", 1]]],
+			"rare": [[["intel_ledger", 1]], [["intel_tablet", 1]], [["intel_sat_phone", 1]], [["binoculars", 1], ["intel_marked_map", 1]]],
+			"very_rare": [[["intel_laptop", 1]], [["intel_hard_drive", 1]], [["intel_drone_controller", 1]]]
+		},
 		"office": {
 			"common": [[["cash_roll", 1]], [["cash_roll", 2]], [["intel_sd_card", 1]], [["intel_freq_list", 1]], [["intel_sim_bag", 1]], [["intel_documents", 1]], [["intel_usb_drive", 1]], [["smuggled_cigarettes", 1]], [["intel_orders", 1]], [["zip_cuffs", 2], ["intel_documents", 1]], [["cash_roll", 1], ["intel_sd_card", 1]], [["cash_euros", 1]]],
 			"uncommon": [[["cash_bundle", 1]], [["cash_euros", 2]], [["intel_phone", 1]], [["intel_ledger", 1]], [["intel_passports", 1]], [["intel_tablet", 1]], [["luxury_watch", 1]], [["jewelry_case", 1]], [["counterfeit_dollars", 1]], [["silver_bars", 2]], [["binoculars", 1], ["intel_documents", 1]], [["intel_marked_map", 1]], [["gold_coins", 1]], [["cash_bundle", 1], ["intel_orders", 1]]],

@@ -11,6 +11,38 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Loot on bodies (Captain, 2026-10-20: "we stil havent gotten loot variety in somehow")
+
+#### Added
+- **Every enemy carries 1 to 3 things of his own** besides his kit, rolled by rarity from a new
+  "pockets" pool. Different on every body and every deployment, the same body the same.
+  - Common: cash, cigarettes, bandages, loose rounds, SIM cards, hashish, zip cuffs.
+  - Uncommon: phones, documents, grenades, morphine, watches, gold coins, radios.
+  - Rare: optics, attachments, ledgers, maps, gems, cash bundles.
+  - Very rare: a laptop, NVGs, a sat phone, a cash brick.
+- **Leaders carry their intel too** (orders, maps, phones, laptops).
+- Very rare finds only drop in hot zones, as for site boxes.
+
+### Conscious but dying, and wounded behaviour (Captain, 2026-10-20: "a conscious but dying state ... animations and sounds", "they dont really do wounded things")
+
+#### Added
+- **A conscious-but-dying state.** A soldier is dying while still awake when any of these hold:
+  - about 28% of his blood is gone and a wound is still bleeding;
+  - his oxygen is failing (SpO2 under 88%).
+- **What dying does:**
+  - He collapses to the ground. Lying still, he writhes with a hand pressed to the wound and
+    reaches out as he weakens; he can only drag himself along slowly.
+  - He breathes hard, with a laboured breath you can hear nearby, and cries out now and then.
+    Both sides hear the cries.
+  - He can't stand or fight, but he can still treat himself and call for a medic.
+  - AI who are dying treat themselves if they can, otherwise stay down and call for help.
+  - It ends a few seconds after the cause is treated, so a tourniquet brings him back out of
+    it. Untreated, it runs on into unconsciousness, arrest and death as before.
+  - Players get a one-time prompt telling them what to do. The squad sees "Dying" in his status.
+- **Wounded but up:**
+  - pain hunches the shoulders and drops the head (less while aiming);
+  - breathing quickens and deepens with blood loss, not just tiredness.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

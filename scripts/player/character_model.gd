@@ -2318,6 +2318,12 @@ const WRITHE_ARM := 0.28
 const WRITHE_LEG := 0.16
 const WRITHE_HEAD := 0.25
 const PRESS_ARM := 0.9
+## Wounded but up (Captain, 2026-10-20: "they dont really do wounded things"): pain hunches the
+## shoulders forward and drops the head (HUNCH_PITCH at full pain, eased in and out), less while
+## aiming (he straightens to shoot).
+const HUNCH_PITCH := 0.32
+const HUNCH_EASE := 3.0
+var _hunch := 0.0
 
 
 ## A hit (every peer: Callouts._vocal calls it with the cry). `strength` 0..1.
@@ -2335,10 +2341,18 @@ func _wounded_extras(delta: float) -> void:
 		_flinch = maxf(_flinch - delta / FLINCH_DECAY_S, 0.0)
 	if not downed and _gait_w > 0.1:
 		_limp(delta)
-	if not downed or ragdolled():
-		return
 	var body := get_parent()
 	var vitals: Vitals = body.get_node_or_null(^"Vitals") if body else null
+	if not downed:
+		var want := 0.0
+		if vitals != null and vitals.is_up():
+			want = clampf((vitals.pain() - 0.2) / 0.6, 0.0, 1.0) * (0.35 if aiming else 1.0)
+		_hunch = move_toward(_hunch, want, delta * HUNCH_EASE)
+		if _hunch > 0.001:
+			torso.rotation.x -= HUNCH_PITCH * _hunch
+			head.rotation.x += HUNCH_PITCH * 0.6 * _hunch  # (the head comes back up to look ahead, partly)
+	if not downed or ragdolled():
+		return
 	if vitals == null or vitals.is_dead() or vitals.is_unconscious():
 		return
 	# Dying (Captain: "the wounded and such ... they do when dying"): as the blood goes the writhe

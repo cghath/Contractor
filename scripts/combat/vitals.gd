@@ -205,6 +205,12 @@ func is_unconscious() -> bool:
 	return downed
 
 
+## Conscious but dying (WoundModel.DYING_*): on the ground, crawling at most, no fighting; he can
+## still treat himself and call for help. Every peer (replicated).
+func is_dying() -> bool:
+	return not downed and _m().dying and not _m().dead
+
+
 func in_cardiac_arrest() -> bool:
 	return _m().arrest
 
@@ -728,6 +734,8 @@ func condition_text() -> String:
 		return "Cardiac arrest %d:%02d" % [floori(s / 60.0), s % 60]
 	if downed:
 		return "Unconscious"
+	if m.dying:
+		return "Dying"
 	if m.wound_bleed_rate() > 0.0:
 		return "Bleeding"
 	if not m.wounds.is_empty() or m.pain() >= 0.05 or m.lost() >= 0.05:

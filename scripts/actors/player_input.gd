@@ -515,6 +515,17 @@ func _update_step_smooth(delta: float) -> void:
 		_step_y = 0.0
 
 
+## Going down dying (Vitals.is_dying): told once, what to do.
+var _was_dying := false
+
+
+func _note_dying() -> void:
+	var dying := body.vitals.is_dying()
+	if dying and not _was_dying:
+		flash("You're going down. Treat yourself (Medical menu) or call a medic (Command > Status > Medic!).")
+	_was_dying = dying
+
+
 ## The landing dip (LAND_*): the fall's speed, taken on touching down, kicks a damped spring.
 func _update_landing(delta: float) -> void:
 	var on_floor := body.is_on_floor() and not is_instance_valid(body.vehicle)
@@ -816,8 +827,8 @@ func _update_voice() -> void:
 
 
 func _try_fire() -> void:
-	if body.binoculars_up:
-		return  # glassing: no shooting
+	if body.binoculars_up or body.vitals.is_dying():
+		return  # glassing, or dying on the ground: no shooting
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \
 			or body.carry_mode != &"" or body.movement.mantling:  # both hands on the casualty, or on the ledge
 		return
@@ -927,6 +938,9 @@ func _binos_fov() -> float:
 
 
 func _update_aim(delta: float) -> void:
+	_note_dying()
+	if body.vitals.is_dying():
+		body.is_aiming = false
 	if body.binoculars_up and (not body.vitals.is_up() or is_instance_valid(body.vehicle) or Input.is_action_pressed(&"sprint") \
 			or body.inventory.count_of(BINOS) <= 0 or body.inventory.hands != &""):
 		_set_binoculars(false)  # sprinting, down, aboard, or the pair's gone

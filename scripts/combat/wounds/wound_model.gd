@@ -25,6 +25,18 @@ const UNCONSCIOUS_LOST := 0.40
 const ARREST_LOST := 0.50
 const EFFECTS_FROM_LOST := 0.15   # blood-loss effects start here and reach full strength at 40%
 const NO_SPRINT_LOST := 0.30
+## Conscious but dying (Captain, 2026-10-20: "we need a conscious but dying state as well where
+## animations and sounds are played"): still awake, but down on the ground, crawling at most,
+## crying out and calling for help, until treated, or until unconsciousness, arrest and death
+## take over. Dying while any of these holds (dying_now), and for DYING_CLEAR_S after the last
+## one went (Proposed):
+##   DYING_LOST of the blood gone and a wound still bleeding,
+##   SpO2 under DYING_SPO2 (the airway or a chest wound failing).
+## (Not pain on its own: the knockout threshold falls with blood loss, so a forearm wound at a
+## quarter of the blood gone read as dying.)
+const DYING_LOST := 0.28
+const DYING_SPO2 := 88.0
+const DYING_CLEAR_S := 4.0
 ## Cardiac arrest: the unit dies when this window runs out with no heart rate.
 const ARREST_WINDOW_S := 600.0
 
@@ -493,6 +505,8 @@ var wounds: Array[Dictionary] = []
 var unconscious := false
 var arrest := false
 var dead := false
+var dying := false  # conscious but dying (DYING_*); replicated in the flags (2048)
+var _dying_clear_s := 0.0
 var arrest_left := 0.0
 var concussion_left := 0.0
 var knockout_left := 0.0
@@ -588,6 +602,13 @@ func restore(snap: Dictionary) -> void:
 
 func lost() -> float:
 	return 1.0 - blood
+
+
+## Whether a cause of dying (DYING_*) holds now.
+func dying_now() -> bool:
+	if dead or arrest:
+		return false
+	return (lost() >= DYING_LOST and wound_bleed_rate() > 0.0) or spo2 < DYING_SPO2
 
 
 ## Blood-loss effect strength: 0 up to 15% lost, 1 at 40%.
@@ -1737,9 +1758,17 @@ func advance(dt: float) -> void:
 ## has stayed at or over the knockout threshold (pain_knocks_out).
 func update_state(dt: float) -> void:
 	if dead:
+		dying = false
 		return
 	if not arrest and lost() >= ARREST_LOST:
 		_start_arrest()
+	if dying_now():
+		dying = true
+		_dying_clear_s = 0.0
+	elif dying:
+		_dying_clear_s += dt
+		if _dying_clear_s >= DYING_CLEAR_S:
+			dying = false  # treated (or it eased): he can get up again
 	trauma_level = maxf(trauma_level, trauma_target())  # new injuries count at once
 	_pain_over_s = _pain_over_s + dt if pain() >= knockout_threshold() else 0.0
 	var causes := unconscious_causes()
@@ -1781,7 +1810,7 @@ func to_net() -> Dictionary:
 			_half_cm(w.get("at")), _half_cm(w.get("out")), RC_CODES.find(StringName(w.get("rc", &""))), snappedf(float(w.get("dmg", 0.0)), 0.1)])
 	var flags := (1 if unconscious else 0) | (2 if arrest else 0) | (4 if dead else 0) | (16 if npa else 0) | (32 if airway_blocked else 0) \
 		| (64 if wake_left > 0.0 else 0) | (128 if _pain_over_s >= PAIN_KNOCKOUT_S - 0.001 else 0) \
-		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0)
+		| (256 if hypothermic() else 0) | (512 if blast_lung else 0) | (1024 if blanket else 0) | (2048 if dying else 0)
 	var timers := {}
 	for key: String in TIMERS:
 		if float(get(key)) > 0.0:
@@ -1847,6 +1876,7 @@ func apply_net(state: Dictionary) -> void:
 	_pain_over_s = PAIN_KNOCKOUT_S if flags & 128 != 0 else 0.0
 	blast_lung = flags & 512 != 0
 	blanket = flags & 1024 != 0
+	dying = flags & 2048 != 0
 	still_s = HYPOTHERMIA_STILL_S if flags & 256 != 0 else 0.0  # clients only need hypothermic()
 	var burns: Array = state.get("u", [0.0, 0])
 	burn = float(burns[0])

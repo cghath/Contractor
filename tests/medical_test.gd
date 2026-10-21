@@ -35,6 +35,7 @@ func _ready() -> void:
 	_test_care_order()
 	_test_bone_care()
 	_test_treatment_wakes()
+	_test_dying()
 	_test_kits()
 	_test_iv_fluids()
 	_test_heart()
@@ -91,6 +92,30 @@ func _test_tourniquet() -> void:
 	check(not arm.server_apply_treatment(&"tourniquet", Vitals.FOREARM_R), "nothing left bleeding below it: no second one needed")
 	v.queue_free()
 	arm.queue_free()
+
+
+## Conscious but dying (Captain, 2026-10-20): blood running out with a wound still bleeding puts
+## a conscious soldier on the ground, dying; a tourniquet ends it after DYING_CLEAR_S; it
+## travels in the flags to every peer.
+func _test_dying() -> void:
+	print("Conscious but dying")
+	var v := _vitals()
+	_wound(v, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l")
+	check(not v.is_dying(), "a fresh arterial bleed: not dying yet")
+	v._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
+	v._model.update_state(0.1)
+	check(v.is_dying() and v.is_up() and not v.is_unconscious() and v.condition_text() == "Dying",
+		"%.0f%% of the blood gone and still bleeding: conscious but dying (%s)" % [(WoundModel.DYING_LOST + 0.02) * 100.0, v.condition_text()])
+	var copy := WoundModel.new()
+	copy.apply_net(v._model.to_net())
+	check(copy.dying, "every peer sees it (the flags carry it)")
+	v.server_apply_treatment(&"tourniquet", Vitals.THIGH_L)
+	v._model.update_state(1.0)
+	check(v.is_dying(), "a tourniquet on: still dying a moment (DYING_CLEAR_S)")
+	for i in 5:
+		v._model.update_state(1.0)
+	check(not v.is_dying(), "the bleeding stopped: he comes back out of it")
+	v.queue_free()
 
 
 func _test_rushed_tourniquet() -> void:

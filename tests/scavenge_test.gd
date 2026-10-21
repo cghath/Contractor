@@ -275,7 +275,9 @@ func _test_orders() -> void:
 	var why := squad().order_scavenge(player, dead.body_point() + Vector3(0.5, 0, 0), PackedStringArray([String(rifleman.name)]))
 	check(why == "" and ai.scavenge_order == dead, "\"Scavenge that body\" sends him to the body under the crosshair, where it lies (%s)" % why)
 	var went := await _wait_until(func() -> bool: return ai.loot_body == dead or rifleman.inventory.count_of(&"mag_556") > 1, 20.0)
-	check(went, "and he goes, even with scavenging forbidden (%s)" % rifleman.ai_status)
+	check(went, "and he goes, even with scavenging forbidden (%s; may %s, self-care %.2f, care %d, medic %s, contact %s, carrying %s, dying %s)" % [rifleman.ai_status,
+		ai._may_scavenge(dead, true), ai._self_care_score(), ai.care, ai.asking_for_medic(), ai.in_contact(), rifleman.carrying, rifleman.vitals.is_dying()]
+		+ " order %s, intent %d, loot_body %s, looted %s, body items %d" % [ai.scavenge_order, ai.intent, ai.loot_body, ai._looted.get(dead.get_instance_id(), -1.0), dead.inventory.search_containers().size()])
 	await _wait_until(func() -> bool: return ai.loot_body == null and ai.scavenge_order == null, 30.0)
 	squad().set_scavenge(player, true, PackedStringArray())
 	check(squad().order_scavenge(player, Vector3(60, 0, 60), PackedStringArray()) == "Look at a body", "with no body there the order says so")

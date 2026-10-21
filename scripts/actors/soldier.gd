@@ -467,6 +467,32 @@ func _smooth_remote() -> void:
 		model.transform = model.base_transform()  # now, for this frame's hitbox pose (the model keeps it after)
 
 
+## Conscious but dying: lying still this long shows the downed (writhing) pose; he cries out now
+## and then (host: Callouts.server_vocal, DYING_CRY_S apart, either side hears) and breathes
+## hard (every peer: Sfx "breath_dying", DYING_BREATH_S apart, louder as the blood goes).
+const DYING_STILL_S := 1.0
+const DYING_CRY_S := Vector2(6.0, 14.0)
+const DYING_BREATH_S := Vector2(2.2, 3.4)
+var _dying_moved_at := -1000.0
+var _dying_cry_at := 0.0
+var _dying_breath_at := 0.0
+
+
+func _dying_sounds(dying: bool) -> void:
+	if not dying:
+		return
+	var now := _now()
+	if now >= _dying_breath_at:
+		_dying_breath_at = now + randf_range(DYING_BREATH_S.x, DYING_BREATH_S.y)
+		var weak := clampf(1.0 - vitals.blood_fraction(), 0.0, 1.0)
+		Sfx.play_at(&"breath_dying", global_position + Vector3.UP * 0.3, lerpf(-6.0, 0.0, weak))
+	if multiplayer.is_server() and now >= _dying_cry_at:
+		_dying_cry_at = now + randf_range(DYING_CRY_S.x, DYING_CRY_S.y)
+		var callouts := Callouts.of(self)
+		if callouts:
+			callouts.server_vocal(self, &"scream" if randf() < 0.35 else &"hit")
+
+
 func _process(_delta: float) -> void:
 	# Runs on every peer: active_slot, inventory and head rotation are replicated.
 	model.look_pitch = head.rotation.x
@@ -482,8 +508,13 @@ func _process(_delta: float) -> void:
 		# Breathing quickens and deepens as the legs tire (stamina is the owner's, so other peers
 		# see the resting breath).
 		var tired := 1.0 - movement.stamina
-		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, tired)
-		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, tired)
+		# Blood loss and a struggling chest breathe hard too (Captain, 2026-10-20: wounded and dying).
+		var hurt := clampf((1.0 - vitals.blood_fraction()) / 0.35, 0.0, 1.0)
+		if vitals.is_dying():
+			hurt = maxf(hurt, 0.85)
+		var strain := maxf(tired, hurt)
+		model.breath_rate = lerpf(1.0, MovementRules.ANIM_BREATH_RATE_WINDED, strain)
+		model.breath_depth = lerpf(1.0, MovementRules.ANIM_BREATH_DEPTH_WINDED, strain)
 	if vitals.is_dead():
 		model.breath_depth = 0.0  # the dead don't breathe (Captain, 2026-10-15), on every peer
 	_update_ragdoll()
@@ -493,7 +524,13 @@ func _process(_delta: float) -> void:
 		_down_since = _now()  # the give-up clock (can_give_up)
 	if not is_ai():
 		_apply_respawn_state()
-	CharacterModel.lay_down(self, model, not vitals.is_up())
+	# Dying (Vitals.is_dying): lying in the downed pose, writhing, when he isn't crawling; crawling
+	# shows prone (DYING_STILL_S of stillness first, so it doesn't flicker between the two).
+	var dying := vitals.is_dying()
+	if dying and model.gait_speed() > 0.12:
+		_dying_moved_at = _now()
+	CharacterModel.lay_down(self, model, not vitals.is_up() or (dying and _now() - _dying_moved_at >= DYING_STILL_S))
+	_dying_sounds(dying)
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
 	if collision_layer != 0 and not multiplayer.is_server() \

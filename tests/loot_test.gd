@@ -45,11 +45,31 @@ func _ready() -> void:
 	_test_site_rolls()
 	_test_rarity()
 	_test_same_seed()
+	_test_pockets()
 	await _test_cache_record()
 	await _test_zone()
 	GameState.delete_save()
 	print("LOOT TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## Pocket loot (Captain, 2026-10-20: "we stil havent gotten loot variety in"): every hostile body
+## carries 1 to 3 rolled finds besides its kit, a leader intel too; 40 bodies carry many kinds of
+## thing, and the same seed rolls the same.
+func _test_pockets() -> void:
+	print("Pocket loot on bodies")
+	var kinds := {}
+	var per := []
+	for i in 40:
+		var got := WorldValuables.roll_pockets("body%d" % i, false)
+		per.append(got.size())
+		for e: Dictionary in got:
+			kinds[String(e.id)] = true
+	var leader := WorldValuables.roll_pockets("boss", false, true)
+	var intel := leader.any(func(e: Dictionary) -> bool: return ItemDB.get_item(StringName(e.id)).type == "intel")
+	check(per.min() >= 1 and kinds.size() >= 15, "40 bodies: each carries something, %d kinds of find among them" % kinds.size())
+	check(intel, "a leader carries intel (%s)" % [leader.map(func(e: Dictionary) -> String: return String(e.id))])
+	check(WorldValuables.roll_pockets("body7", false) == WorldValuables.roll_pockets("body7", false), "the same seed rolls the same")
 
 
 func check(condition: bool, what: String) -> void:

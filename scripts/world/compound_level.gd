@@ -1046,6 +1046,16 @@ func _make_soldier(data: Dictionary) -> Node:
 			Roles.apply_kit(inventory, soldier.role)
 		if String(data.get("exo", "")) == "hx1":
 			equip_hx1(inventory)
+		if soldier.faction == &"hostile" and not bool(data.get("no_pockets", false)):
+			# What he has on him besides his kit (WorldValuables.roll_pockets): each body a different
+			# find. Leaders carry intel too.
+			var lvl_def: Variant = get(&"def")
+			var hot := lvl_def is Dictionary and String((lvl_def as Dictionary).get("kind", "")) == "hot"
+			var leader := soldier.role == Roles.TEAM_LEADER or "Commander" in String(data.name) or "Officer" in String(data.name) or "Leader" in String(data.name)
+			var zone_key := String((lvl_def as Dictionary).get("id", name)) if lvl_def is Dictionary else String(name)
+			var day := Economy.day() if Campaign.campaign_id != "" else 0  # (a new deployment, new finds; the same body the same)
+			for e: Dictionary in WorldValuables.roll_pockets("%s|%s|%s|%d" % [data.name, soldier.spawn_id, zone_key, day], hot, leader):
+				inventory.take(StringName(e.id), int(e.count))
 		# What it started with, so what it's handed or picks up later can be told apart
 		# (_drop_extras, when a player takes its slot).
 		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))
