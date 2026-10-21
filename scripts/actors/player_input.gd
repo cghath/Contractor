@@ -156,7 +156,8 @@ var _cam_turn := Vector2.ZERO
 ## hands and what they hold are on the camera (CharacterModel.set_view_hands), the eye goes down
 ## with the drawn body's kneel and bend (CharacterModel.treat_view_offset, _medic_eye, head space),
 ## and for MEDIC_LOOK_S at the start the view turns to the work (Proposed) unless it's already
-## within MEDIC_LOOK_SLACK of it; then the mouse is yours again.
+## within MEDIC_LOOK_SLACK of it (treating yourself it only looks down: the body doesn't turn);
+## then the mouse is yours again.
 const MEDIC_LOOK_S := 0.5
 const MEDIC_LOOK_RATE := 7.0
 const MEDIC_LOOK_SLACK := 0.25
@@ -700,7 +701,8 @@ func _update_medic_look(delta: float, treating: bool) -> void:
 	var to := aim - body.camera.global_position
 	var flat := Vector3(to.x, 0.0, to.z)
 	var k := 1.0 - exp(-MEDIC_LOOK_RATE * delta)
-	if flat.length() > 0.2:  # (straight down at your own leg: no turn to make)
+	var mine := not bool(body.model.action_net.get("kneel", false))  # yourself: the work turns with you
+	if flat.length() > 0.2 and not mine:
 		var ahead := -body.camera.global_basis.z
 		ahead.y = 0.0
 		var turn := ahead.signed_angle_to(flat, Vector3.UP) if ahead.length() > 0.01 else 0.0

@@ -1940,11 +1940,15 @@ static func cpr_compression(t: float) -> float:
 	return COMPRESSION_M * (0.5 - 0.5 * sin(TAU * CPR_HZ * t))
 
 
-## Held props (TreatProps; finger curls can close round them): a node at each palm (HELD_AT, on
-## the forearm), with the forearm's axes: -y along the fingers, +z out of the palm (the working
+## Held props (TreatProps): the fingers' grasp centre (hand_anchor) where the fingers exist, else a
+## node at each palm (HELD_AT, on the forearm), with the forearm's axes: -y along the fingers, +z out of the palm (the working
 ## side: facing down when the hand reaches out to work), x across the knuckles (the thumb at -x on
 ## the right hand, +x on the left).
 func held_anchor(right: bool) -> Node3D:
+	if has_method(&"hand_anchor"):  # the fingers' grasp centre (+y along what's held), where it exists
+		var grasp: Variant = call(&"hand_anchor", 0 if right else 1)
+		if grasp is Node3D:
+			return grasp
 	var arm := _forearm[0 if right else 1]
 	var anchor := arm.get_node_or_null(^"HeldProp") as Node3D
 	if anchor == null:

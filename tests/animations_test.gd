@@ -748,7 +748,8 @@ func _test_treat_props() -> void:
 		"the site is on the thigh's skin (%.1f cm from its middle)" % (Vector3(site.get("p", centre)).distance_to(centre) * 100.0))
 	check(not site.is_empty() and hand.distance_to(site.p) < 0.1, "the hand on it (%.1f cm)" % (hand.distance_to(site.get("p", hand)) * 100.0))
 	var anchor := m.held_anchor(true)
-	check(anchor.get_parent() == m._forearm[0] and anchor.position.is_equal_approx(CharacterModel.HELD_AT) and m.held_prop(true) != null \
+	var own_anchor := not m.has_method(&"hand_anchor")  # (with the fingers: their grasp centre)
+	check(anchor.get_parent() == m._forearm[0] and (not own_anchor or anchor.position.is_equal_approx(CharacterModel.HELD_AT)) and m.held_prop(true) != null \
 		and m.held_prop(true).has_meta(&"grip"), "a held-prop anchor at the right palm, the roll in it (with its grip for the fingers)")
 	m.action_net = {}
 	await _frames(3)

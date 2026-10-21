@@ -82,7 +82,8 @@ var _help := 1
 var _sc := 1.0
 var _patient: CharacterModel
 ## The fingers' pose each hand asks for (CharacterModel.set_hand_pose, from the fingers work: &"hold"
-## round a roll or a bag, &"pinch" for a needle or a syringe, &"press" on a chest), this frame and
+## round a roll or a bag, &"pinch" for a needle, a syringe or tape, &"open" (a flat palm) on a
+## chest or holding pressure), this frame and
 ## as last set (&"": the hand's own pose).
 var _poses: Array[StringName] = [&"", &""]
 var _poses_set: Array[StringName] = [&"", &""]
@@ -220,8 +221,8 @@ func _pack() -> void:
 	if _u > 0.12:
 		_world_prop("wad", "wad", _wad_shape, _on_skin())
 	if not packing:  # pressure held: both hands flat on it
-		_poses[0] = &"press"
-		_poses[1] = &"press"
+		_poses[0] = &"open"
+		_poses[1] = &"open"
 
 
 func _tourniquet() -> void:
@@ -243,10 +244,10 @@ func _tourniquet() -> void:
 
 func _seal() -> void:
 	if _u < CharacterModel.SEAL_PEEL:
-		var flat := Basis(Vector3.RIGHT, Vector3.BACK, Vector3.DOWN)  # flat on the fingers, facing out of the palm
-		_hand_prop(_help if _help >= 0 else _work, "seal", "seal", _seal_shape, flat, PINCH, 0.012, &"pinch")
+		var holder := _help if _help >= 0 else _work
+		_hand_prop(holder, "seal", "seal", _seal_shape, _flat_in(holder), PINCH, 0.012, &"pinch")
 		if _help >= 0:
-			_hand_prop(_work, "backing", "seal_backing", _backing_shape, flat, PINCH, 0.012, &"pinch")
+			_hand_prop(_work, "backing", "seal_backing", _backing_shape, _flat_in(_work), PINCH, 0.012, &"pinch")
 	else:
 		_world_prop("seal", "seal", _seal_shape, _on_skin(0.002))
 
@@ -290,8 +291,8 @@ func _iv() -> void:
 	else:
 		_world_prop("hub", "iv_hub|%d" % gauge, func() -> ItemArt.Shape: return _iv_hub_shape(gauge), Transform3D(_basis_z(-dir, _n), _p + _n * 0.004))
 		_world_prop("tape", "tape", _tape_shape, _on_skin(0.008))
-		_poses[0] = &"press"
-		_poses[1] = &"press"
+		_poses[0] = &"pinch"
+		_poses[1] = &"pinch"
 
 
 func _io() -> void:
@@ -299,8 +300,8 @@ func _io() -> void:
 
 
 func _cpr() -> void:
-	_poses[0] = &"press"
-	_poses[1] = &"press"
+	_poses[0] = &"open"
+	_poses[1] = &"open"
 	_react(&"cpr", CharacterModel.cpr_compression(_t), &"", _n)
 
 
@@ -308,14 +309,13 @@ func _defib() -> void:
 	var aed := _beside("aed", &"defibrillator")
 	var pads: Array = _site.get("x", [])
 	var top := aed + Vector3.UP * 0.04
-	var flat := Basis(Vector3.RIGHT, Vector3.BACK, Vector3.DOWN)
 	for i in 2:
 		var at: Vector3
 		if _u < CharacterModel.DEFIB_PADS or pads.size() < 2:
 			var hand := _work if i == 0 else _help
 			if hand < 0:
 				continue
-			var pad := _hand_prop(hand, "pad", "aed_pad", _aed_pad_shape, flat, PINCH, 0.012, &"pinch")
+			var pad := _hand_prop(hand, "pad", "aed_pad", _aed_pad_shape, _flat_in(hand), PINCH, 0.012, &"pinch")
 			at = _grip_of(pad)
 		else:
 			var site: Array = pads[i]
@@ -388,6 +388,11 @@ func _npa() -> void:
 
 
 # --- Helpers: where things go --------------------------------------------------------------
+
+## Flat in hand `i` (world space): facing out of the palm, across the fingers.
+func _flat_in(i: int) -> Basis:
+	return model.held_anchor(i == 0).global_basis.orthonormalized() * Basis(Vector3.RIGHT, Vector3.BACK, Vector3.DOWN)
+
 
 ## The palm of hand `i` (0 right, 1 left), world space.
 func _palm(i: int) -> Vector3:
@@ -487,10 +492,14 @@ func _hand_prop(i: int, slot: String, key: String, build: Callable, basis: Varia
 	var anchor := model.held_anchor(i == 0)
 	var node := _put(("r:" if i == 0 else "l:") + slot, key, build, anchor)
 	node.set_meta(&"grip", radius)
+	# The fingers' anchor (CharacterModel.hand_anchor, where they exist) is already the grasp's
+	# centre, its +y along what's held: no grip offset, and the props' long axis (x) turned onto y.
+	var fingers := model.has_method(&"hand_anchor")
+	var at := Vector3.ZERO if fingers else grip
 	if basis == null:
-		node.transform = Transform3D(Basis(), grip)
+		node.transform = Transform3D(Basis(Vector3.BACK, PI * 0.5) if fingers else Basis(), at)
 	else:
-		node.global_transform = Transform3D((basis as Basis).scaled(Vector3.ONE * _sc), anchor.global_transform * grip)
+		node.global_transform = Transform3D((basis as Basis).scaled(Vector3.ONE * _sc), anchor.global_transform * at)
 	return node
 
 
