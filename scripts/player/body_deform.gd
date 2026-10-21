@@ -847,10 +847,6 @@ func _done_work(pivot: Node3D, buffer: VoxelBuffer, out: Dictionary) -> void:
 		var piece_mesh: Mesh = mesher.build_mesh(p.buffer, [])
 		if piece_mesh and mi and not (p.hull as PackedVector3Array).is_empty():
 			_drop(StringName(p.part), pivot, mi, piece_mesh, p.hull)
-	for h: Dictionary in out.hangs:
-		var hang_mesh: Mesh = mesher.build_mesh(h.buffer, [])
-		if hang_mesh and mi:
-			_hang(StringName(h.part), pivot, mi, hang_mesh, h)
 	if out.get("cut", false):
 		reshaped.emit()
 	_kick(pivot)
