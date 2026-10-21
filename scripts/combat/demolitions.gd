@@ -83,6 +83,8 @@ const GLOW_COLOURS := {"green": Color(0.35, 1.0, 0.45), "red": Color(1.0, 0.22, 
 ## Thermite's light while it burns (every peer).
 const BURN_ENERGY := 7.0
 const BURN_RANGE_M := 10.0
+## Its hiss (Sfx "thermite", 2 s) plays again this often while it burns.
+const HISS_S := 1.9
 
 ## Every peer: id -> {"id", "item", "kind", "path" (the node it rides, from the level; "" for the
 ## level), "xform" (its transform in that node, packed), "world" (its world transform when placed),
@@ -651,11 +653,16 @@ func _ignite(id: String) -> void:
 	_burn_end[id] = _now() + burn
 	_client_burn.rpc(id, burn)
 	var pos := position_of(id)
-	Sfx.server_play(&"thermite", pos)
-	get_tree().create_timer(burn * 0.5).timeout.connect(func() -> void:
-		if records.has(id):
-			Sfx.server_play(&"thermite", position_of(id)))
+	_hiss(id)
 	print("[demolitions] %s: thermite lit at (%.1f, %.1f, %.1f)" % [id, pos.x, pos.y, pos.z])
+
+
+## Host: burning thermite `id`'s hiss, again every HISS_S while it burns.
+func _hiss(id: String) -> void:
+	if not records.has(id) or not is_inside_tree():
+		return
+	Sfx.server_play(&"thermite", position_of(id))
+	get_tree().create_timer(HISS_S).timeout.connect(_hiss.bind(id))
 
 
 ## Host: thermite `id` has burnt through: what it's on is done for.
