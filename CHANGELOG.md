@@ -11,6 +11,19 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### M1014 model rework (Captain, v0.5.0: "the m1014 is the wrong color and doesnt look right")
+
+#### Fixed
+- **The M1014 is matte black** and reads as the real gun. Its forend, stock tube and handle used
+  the grey gun colour, which looked grey-tan in daylight. It now has a slim barrel with the
+  front blade in its protective wings, and the extended magazine tube runs to 2.5 cm from the
+  muzzle under a barrel clamp with its sling loop. The receiver has a Picatinny rail with the
+  ghost ring between its ears, the bolt and its handle in the ejection port, the bolt release,
+  and the loading port with the carrier and shell latch. It has a cross-bolt safety, a pistol
+  grip and the telescoping stock out on its tube. It is 1 m long.
+- **The Mossberg 590's furniture is black** too (it was the same grey), and both pump guns show
+  a bright bolt in the ejection port.
+
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
 #### Added
