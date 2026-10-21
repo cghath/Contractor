@@ -9,8 +9,9 @@ extends RefCounted
 ## - "members": member id (String) -> member, a JSON-safe Dictionary:
 ##   "mid" (its id), "name" ("first surname"), "callsign" (unique in the company: the AI body's
 ##   node name), the person ("first", "surname" (on the name tape, unique in the company),
-##   "nation" (Names), "left" (shoots left-handed), "body" (Names.MALE or FEMALE): rolled once
-##   at hiring, the same in every deployment, Roster.identity),
+##   "nation" (Names), "left" (shoots left-handed), "body" (Names.MALE or FEMALE), "look_seed"
+##   (their face, hair, build and height, SoldierLook): rolled once at hiring, the same in
+##   every deployment, Roster.identity),
 ##   "role" (a Roles id), "skills" ({aim, nerve, medical, movement}, 0..1), "xp", "missions",
 ##   "wage" (cash per day), "wage_factor" (what they haggled at hiring: wage = wage_for x it),
 ##   "gear" (an Inventory.net_state: their own kit, which deploys with them; the carrier's
@@ -167,7 +168,7 @@ static func surnames(data: Dictionary) -> Dictionary:
 ## ("Dale Okafor": first "Dale", surname "Okafor") and gets a nationality and shooting hand
 ## seeded by their callsign. Returns whether anything changed.
 static func ensure_identity(member: Dictionary) -> bool:
-	if member.has("surname") and member.has("nation") and member.has("left") and member.has("body"):
+	if member.has("surname") and member.has("nation") and member.has("left") and member.has("body") and member.has("look_seed"):
 		return false
 	if not member.has("surname"):
 		var parts := String(member.get("name", "")).strip_edges().split(" ", false)
@@ -179,7 +180,15 @@ static func ensure_identity(member: Dictionary) -> bool:
 		member["left"] = Handedness.roll_ai(String(member.get("callsign", "")))
 	if not member.has("body"):
 		member["body"] = Names.MALE
+	if not member.has("look_seed"):  # (older saves: seeded by who they are, kept from now on)
+		member["look_seed"] = look_seed_for(member)
 	return true
+
+
+## A look seed (SoldierLook) for a person: from their callsign, name and nationality, so a
+## member gets the same one whichever peer or reload first fills it in. Kept on them from then.
+static func look_seed_for(person: Dictionary) -> int:
+	return SoldierLook.seed_of([person.get("callsign", ""), person.get("surname", person.get("name", "")), person.get("nation", ""), person.get("first", "")]) & 0x7fffffff
 
 
 ## A new hire whose surname another member already carries (`taken`, surnames()) gets another
@@ -209,7 +218,7 @@ static func person_text(m: Dictionary) -> String:
 static func identity(member: Dictionary) -> Dictionary:
 	ensure_identity(member)
 	return {"person_name": String(member.surname), "nation": String(member.nation), "left": bool(member.left),
-		"body": String(member.body)}
+		"body": String(member.body), "look_seed": int(member.look_seed)}
 
 
 ## `wanted`, or (Captain, 2026-10-14: numbered names like "Saint 2" are not an option) the next
@@ -473,7 +482,15 @@ static func main_character(data: Dictionary, key: String, role: StringName = Rol
 	if not all.has(key):
 		all[key] = {"name": key, "role": String(role), "gear": {}, "sit_out_days": 0, "injuries": [], "history": [],
 			"missions": 0, "medbay": false, "status": READY}
+	if not all[key].has("look_seed"):  # their face (SoldierLook), kept for the campaign
+		all[key]["look_seed"] = SoldierLook.seed_of(["player", key]) & 0x7fffffff
 	return all[key]
+
+
+## The look (SoldierLook code) a player's main character wears: an American contractor's by
+## default, from their look seed.
+static func player_face(main: Dictionary) -> String:
+	return SoldierLook.make(int(main.get("look_seed", 0)), String(main.get("nation", "US")), String(main.get("body", Names.MALE)))
 
 
 ## Whether a player's main character must sit this deployment out.

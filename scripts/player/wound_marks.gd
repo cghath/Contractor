@@ -5,7 +5,13 @@ extends Node3D
 ## that was hit, so they move with the limb. While a wound bleeds, blood soaks out round the
 ## hole and runs down the skin with gravity (1 cm voxels laid on the 0.5 cm body shape,
 ## BodyVolume.surface), drips off the lowest point and pools on the ground. Treated or
-## held by a tourniquet, it stops; the stain dries darker and a dressing wraps the spot.
+## held by a tourniquet, it stops; the stain dries darker and what treated it covers the spot:
+## a pressure bandage (cream elastic wrap, its pressure bar over the hole), packed gauze (white,
+## bulging, its tail loose), a chest seal (a square patch, dark border and valve) or a plain
+## dressing. A casualty bleeding while dragged or crawling smears a trail on the ground
+## (SMEAR_*), and whoever works on a bleeding wound gets blood on their hands (HAND_*).
+## Devices on the body (tourniquets, splints, lines and bags...) are BodyDevices', and what
+## shows in the skin (burns, pallor, blue lips, shivering) BodyCondition's; both are made here.
 ##
 ## Positions come from the wounds' "at" and "out" (rest pose, Vitals.wound_list,
 ## replicated), and the flow from their replicated rates, so every peer draws the same
@@ -60,6 +66,32 @@ const FLOOR_LOOK_UP_M := 0.3
 const POOL_STEP := 0.15
 const MAX_STUCK_HOLDERS := 24
 const MAX_STUCK_CELLS := 48
+## Dressing looks: a pressure bandage (Israeli style), packed gauze, a vented chest seal.
+const BANDAGE_COLOUR := Color("e3dcc4")
+const BANDAGE_WEAVE := Color("cfc6aa")
+const PRESSURE_BAR := Color("6f736f")
+const GAUZE_COLOUR := Color("f3f1ea")
+const GAUZE_SHADE := Color("dcd8cc")
+const SEAL_COLOUR := Color("b7c0c6")
+const SEAL_BORDER := Color("262626")
+const SEAL_VALVE := Color("e6e6e0")
+## Which dressing a treated spot shows, best first (from the kinds of wound treated there).
+const LOOKS: Array[StringName] = [&"seal", &"gauze", &"bandage", &"dressing"]
+## The smear a bleeding casualty leaves when dragged or crawling: a cell every SMEAR_STEP moved
+## while the bleeding spot is within SMEAR_REACH of the ground, at most MAX_SMEAR (the oldest
+## goes first); it lies as long as a pool.
+const SMEAR_STEP := 0.04
+const SMEAR_REACH := 0.35
+const MAX_SMEAR := 160
+## Blood on the hands of someone treating a wound that bleeds or has bled, while the treat clip
+## plays (_check_hands): up to HAND_CELLS a hand, drying after HAND_DRY_S, gone after
+## HAND_LIFE_S. Checked every HAND_TICK_S.
+const HAND_REACH := 0.45
+const HAND_CELLS := 22
+const HAND_DRY_S := 60.0
+const HAND_LIFE_S := 420.0
+const HAND_TICK_S := 0.5
+const HAND_PATIENT_M := 2.5  # how far from the hands' point the patient's body can be
 
 var model: CharacterModel
 var vitals: Vitals
@@ -80,6 +112,16 @@ var _chunk_mesh: MultiMeshInstance3D
 var _stuck: Dictionary = {}  # holder instance id -> {"inst" (a MultiMeshInstance3D on the holder), "count"}
 var _own_rids_cache: Array[RID] = []
 var _own_rids_children := -1
+var devices: BodyDevices
+var condition: BodyCondition
+var _smear: Array[Dictionary] = []  # {"pos", "dir", "length", "width", "colour", "until"} (world)
+var _smear_mesh: MultiMeshInstance3D
+var _smear_last: Variant = null  # where the trunk was when the last smear cell went down
+var _hand_blood := 0.0  # seconds of work in blood
+var _hand_cells: Array = [[], []]  # right, left: [rest point, size] each
+var _hand_until := 0.0
+var _hand_wet_until := 0.0
+var _hand_meshes: Array = [null, null]
 static var _material: StandardMaterial3D
 
 
@@ -87,12 +129,27 @@ func setup(p_model: CharacterModel, p_vitals: Vitals) -> void:
 	model = p_model
 	vitals = p_vitals
 	body = BodyVolume.body_of(p_model)
+	add_to_group(&"wound_marks")
 	vitals.changed.connect(_rebuild)
 	var expire := Timer.new()
 	expire.wait_time = EXPIRE_TICK_S
 	expire.autostart = true
 	expire.timeout.connect(_expire)
 	add_child(expire)
+	var hands := Timer.new()
+	hands.name = "Hands"
+	hands.wait_time = HAND_TICK_S
+	hands.autostart = true
+	hands.timeout.connect(_check_hands)
+	add_child(hands)
+	devices = BodyDevices.new()
+	devices.name = "BodyDevices"
+	add_child(devices)
+	devices.setup(p_model, p_vitals, body)
+	condition = BodyCondition.new()
+	condition.name = "BodyCondition"
+	add_child(condition)
+	condition.setup(p_model, p_vitals, body)
 	set_process(false)
 	_rebuild()
 
@@ -122,8 +179,12 @@ func _rebuild() -> void:
 			seen[spot_key] = true
 			spot.flow = 0.0
 			spot.treated = false
+			spot.look = &""
 		if w.treated:
 			spot.treated = true
+		var look := _look_of(w)
+		if look != &"" and (spot.look == &"" or LOOKS.find(look) < LOOKS.find(spot.look)):
+			spot.look = look
 		if String(w.kind) in EXTERNAL_KINDS and not w.treated and not w.packed and not w.clamped:
 			spot.flow += float(w.rate) * (0.1 if w.tourniquet else 1.0)
 	for spot_key: String in _spots.keys():
@@ -145,7 +206,30 @@ func _new_spot(part: StringName, at: Vector3, out: Variant) -> Dictionary:
 	var holes: Array[Dictionary] = [_new_hole(part, at, false, rng)]
 	if out is Vector3:
 		holes.append(_new_hole(part, out, true, rng))
-	return {"part": part, "holes": holes, "flow": 0.0, "lost": 0.0, "treated": false, "made": 0, "rng": rng}
+	return {"part": part, "holes": holes, "flow": 0.0, "lost": 0.0, "treated": false, "look": &"", "made": 0, "rng": rng}
+
+
+## The dressing a treated wound shows (LOOKS), or &"" for none (a splinted bone, a rib).
+static func _look_of(w: Dictionary) -> StringName:
+	if not (w.treated or w.get("packed", false) or w.get("clamped", false)):
+		return &""
+	if w.kind == "chest":
+		return &"seal"
+	if w.get("packed", false):
+		return &"gauze"
+	if w.kind in ["venous", "muscle", "graze"]:
+		return &"bandage"
+	if w.kind in ["arterial", "junctional", "internal", "heart"] or w.get("clamped", false):
+		return &"dressing"
+	return &""
+
+
+## What covers the spot on `part` (LOOKS), &"" for none (tests).
+func dressing_on(part: StringName) -> StringName:
+	for spot: Dictionary in _spots.values():
+		if spot.part == part and spot.treated and spot.look != &"":
+			return spot.look
+	return &""
 
 
 func _new_hole(part: StringName, at: Vector3, exit: bool, rng: RandomNumberGenerator) -> Dictionary:
@@ -236,6 +320,9 @@ func _process(delta: float) -> void:
 		if _drip_timer <= 0.0:
 			_drip_timer = randf_range(0.6, 1.4) / (total * DRIPS_PER_L_MIN)
 			_spawn_drip()
+		_smear_step()
+	else:
+		_smear_last = null
 	_move_drips(delta)
 	if _dirty:
 		_redraw()
@@ -550,8 +637,11 @@ func _redraw() -> void:
 		for hole: Dictionary in spot.holes:
 			for b: Array in hole.blood:
 				cells.append([b[0] - pivot, b[1], DRIED_COLOUR if spot.flow <= 0.0 and spot.treated else b[2]])
-			if spot.treated:
-				cells.append_array(_dressing(spot.part, hole, pivot))
+			if spot.treated and spot.look != &"":
+				if hole.get("dressed_as") != spot.look:  # built once: a redraw comes with each new blood cell
+					hole["dressed_as"] = spot.look
+					hole["dressing"] = _dressing(spot.part, hole, pivot, spot.look)
+				cells.append_array(hole.dressing)
 			else:
 				for m: Array in hole.marks:
 					cells.append([m[0] - pivot, m[1], m[2]])
@@ -564,6 +654,7 @@ func _redraw() -> void:
 		var inst: MultiMeshInstance3D = _bone_meshes.get(bone)
 		if inst == null or not is_instance_valid(inst) or inst.multimesh.instance_count < cells.size():
 			if inst and is_instance_valid(inst):
+				inst.name = "WoundMarkOld"  # (the new one takes its name now, not next frame)
 				inst.queue_free()
 			inst = _multimesh_instance(maxi(64, cells.size() * 2))
 			inst.name = "WoundMark"
@@ -572,15 +663,63 @@ func _redraw() -> void:
 			_bone_meshes[bone] = inst
 		var mm := inst.multimesh
 		for i in cells.size():
-			mm.set_instance_transform(i, Transform3D(Basis.from_scale(cells[i][1]), cells[i][0]))
+			var basis: Basis = cells[i][3] if cells[i].size() > 3 else Basis.IDENTITY
+			mm.set_instance_transform(i, Transform3D(basis * Basis.from_scale(cells[i][1]), cells[i][0]))
 			mm.set_instance_color(i, cells[i][2])
 		mm.visible_instance_count = cells.size()
 
 
-## A dressing over a treated hole: on a limb a wrap round it, on the trunk or head a pad.
-func _dressing(part: StringName, hole: Dictionary, pivot: Vector3) -> Array:
+## What covers a treated hole (`look`, LOOKS): on a limb a wrap round it, on the trunk or head
+## a pad. A pressure bandage: a cream elastic wrap, its weave in bands, the pressure bar over the
+## hole. Gauze: white, packed so it bulges out of the hole, a loose tail. A chest seal: a square
+## clear patch with a dark border and its valve. A plain dressing otherwise.
+func _dressing(part: StringName, hole: Dictionary, pivot: Vector3, look: StringName) -> Array:
 	var at: Vector3 = hole.at
-	if BodyMap.segment_of(part) == part:
+	var n: Vector3 = hole.n
+	var basis := BodyDevices._facing(n)
+	var limb := BodyMap.segment_of(part) == part
+	match look:
+		&"seal":
+			var cells: Array = []
+			var p := at + n * 0.004 - pivot
+			for gx in range(-10, 11):  # 10.5 cm square, the border 1 cm wide
+				for gy in range(-10, 11):
+					var edge := absi(gx) > 8 or absi(gy) > 8
+					if not edge and (gx % 2 != 0 or gy % 2 != 0):
+						continue  # (the clear middle is laid in 1 cm cells)
+					var size := Vector3(0.005, 0.005, 0.004) if edge else Vector3(0.0105, 0.0105, 0.003)
+					cells.append([p + basis.x * gx * 0.005 + Vector3.UP * gy * 0.005, size, SEAL_BORDER if edge else SEAL_COLOUR, basis])
+			cells.append([p + n * 0.005 + basis.x * 0.02, Vector3(0.015, 0.015, 0.008), SEAL_VALVE, basis])  # the vent
+			cells.append([p + n * 0.009 + basis.x * 0.02, Vector3(0.005, 0.005, 0.004), SEAL_BORDER, basis])
+			return cells
+		&"bandage", &"gauze":
+			var bandage := look == &"bandage"
+			var cells: Array = []
+			if limb:
+				var rows := 16 if bandage else 12  # 8 or 6 cm wide
+				for row in rows:
+					var y := at.y + (row - rows * 0.5 + 0.5) * 0.005
+					var shade := (BANDAGE_WEAVE if row % 4 == 0 else BANDAGE_COLOUR) if bandage else (GAUZE_SHADE if row % 3 == 0 else GAUZE_COLOUR)
+					for r: Array in devices._ring(part, y, 0.01):
+						var m: Vector3 = r[1]
+						cells.append([Vector3(r[0]) + m * 0.006 - pivot, Vector3(0.0105, 0.005, 0.005), shade, BodyDevices._facing(m)])
+			else:
+				var half := 9 if bandage else 7
+				for gx in range(-half, half + 1, 2):
+					for gy in range(-half, half + 1, 2):
+						var shade := (BANDAGE_WEAVE if gy % 4 == 0 else BANDAGE_COLOUR) if bandage else (GAUZE_SHADE if (gx + gy) % 4 == 0 else GAUZE_COLOUR)
+						cells.append([at + n * 0.006 + basis.x * gx * 0.005 + Vector3.UP * gy * 0.005 - pivot, Vector3(0.0105, 0.0105, 0.005), shade, basis])
+			if bandage:  # the pressure bar over the hole, and the closure bar beside it
+				cells.append([at + n * 0.011 - pivot, Vector3(0.03, 0.012, 0.006), PRESSURE_BAR, basis])
+				cells.append([at + n * 0.011 + basis.x * 0.03 - pivot, Vector3(0.008, 0.02, 0.005), PRESSURE_BAR.darkened(0.2), basis])
+			else:  # packed: it bulges out of the hole, a tail hanging loose
+				for i in 5:
+					cells.append([at + n * (0.011 + (i % 2) * 0.004) + basis.x * ((i - 2) * 0.005) + Vector3.UP * ((i % 3) - 1) * 0.005 - pivot,
+						Vector3(0.006, 0.006, 0.006), GAUZE_COLOUR, basis])
+				for i in 4:
+					cells.append([at + n * 0.01 + basis.x * 0.01 - Vector3.UP * (0.02 + i * 0.006) - pivot, Vector3(0.01, 0.006, 0.004), GAUZE_SHADE, basis])
+			return cells
+	if limb:
 		var centre: Vector3 = BodyMap.PART_BOXES[part][0][0]
 		var mid := Vector3(centre.x, at.y, centre.z)
 		var lo := mid
@@ -592,7 +731,6 @@ func _dressing(part: StringName, hole: Dictionary, pivot: Vector3) -> Array:
 				hi = hi.max(s)
 		var size := Vector3(hi.x - lo.x + 0.012, 0.06, hi.z - lo.z + 0.012)
 		return [[(lo + hi) * 0.5 - pivot, size, DRESSING_COLOUR]]
-	var n: Vector3 = hole.n
 	var size := Vector3(0.08, 0.08, 0.08) - n.abs() * 0.07
 	return [[at + n * 0.005 - pivot, size, DRESSING_COLOUR]]
 
@@ -666,6 +804,16 @@ func _expire() -> void:
 	_chunks = _chunks.filter(func(c: Dictionary) -> bool: return float(c.until) > now)
 	if _chunks.size() != before:
 		_redraw_chunks()
+	var smears_before := _smear.size()
+	_smear = _smear.filter(func(c: Dictionary) -> bool: return float(c.until) > now)
+	if _smear.size() != smears_before:
+		_redraw_smear()
+	if _hand_blood > 0.0 and now >= _hand_until:
+		_hand_blood = 0.0
+		_hand_cells = [[], []]
+		_redraw_hands()
+	elif _hand_blood > 0.0 and now >= _hand_wet_until and now - EXPIRE_TICK_S < _hand_wet_until:
+		_redraw_hands()  # dried
 	var stains_before := _stains.size()
 	_stains = _stains.filter(func(st: Dictionary) -> bool: return float(st.until) > now)
 	if _stains.size() != stains_before:
@@ -700,3 +848,174 @@ func _redraw_stains() -> void:
 		mm.set_instance_transform(i, Transform3D(basis.scaled(Vector3(float(st.size), float(st.size) * 1.4, 0.003)), st.pos))
 		mm.set_instance_color(i, st.colour)
 	mm.visible_instance_count = _stains.size()
+
+
+# --- Drag smear ---------------------------------------------------------------------------
+
+## The smear cells on the ground now (tests).
+func smear_size() -> int:
+	return _smear.size()
+
+
+## Lying (dragged, or crawling) and bleeding: each SMEAR_STEP the body travels, a streak of
+## blood on the ground under the lowest bleeding hole, drawn out along the way it went. Travel is
+## the dragger's (or, crawling, the body's own), never the pose's sway.
+func _smear_step() -> void:
+	var torso := model.part_node(Vitals.CHEST)
+	if torso == null or not is_inside_tree():
+		return
+	var carry := model.carry_shown()
+	var dragged: bool = carry.get("mode", &"") == CharacterModel.DRAGGED
+	var mover: Node3D = carry.get("body") if dragged and carry.get("body") is Node3D else model.get_parent() as Node3D
+	if mover == null:
+		return
+	var pos := mover.global_position
+	if _smear_last == null:
+		_smear_last = pos
+		return
+	var move := pos - Vector3(_smear_last)
+	move.y = 0.0
+	var moved := move.length()
+	if moved < SMEAR_STEP:
+		return
+	_smear_last = pos
+	if moved > 1.0 or not (dragged or torso.global_basis.y.normalized().dot(Vector3.UP) < 0.5):
+		return
+	var low := Vector3.INF
+	for spot: Dictionary in _spots.values():
+		if spot.flow <= 0.0:
+			continue
+		var bone := model.part_node(spot.part)
+		if bone == null:
+			continue
+		for hole: Dictionary in spot.holes:
+			var p: Vector3 = bone.global_transform * (Vector3(hole.head) - BodyVolume.pivot_at(spot.part, body))
+			if p.y < low.y:
+				low = p
+	if low == Vector3.INF:
+		return
+	var floor_y := _floor_below(low)
+	if low.y - floor_y > SMEAR_REACH:
+		return
+	if _smear.size() >= MAX_SMEAR:
+		_smear.pop_front()
+	var total := 0.0
+	for spot: Dictionary in _spots.values():
+		total += spot.flow
+	_smear.append({"pos": Vector3(low.x, floor_y, low.z) - move * 0.5, "dir": move / moved, "length": moved + 0.015,
+		"width": clampf(0.025 + total * 0.03, 0.025, 0.06), "colour": FRESH_COLOUR if randf() < 0.5 else BLOOD_COLOUR,
+		"until": _now() + randf_range(POOL_LIFE_S.x, POOL_LIFE_S.y)})
+	_redraw_smear()
+
+
+func _redraw_smear() -> void:
+	if _smear_mesh == null:
+		_smear_mesh = _world_multimesh("Smear", MAX_SMEAR)
+	var mm := _smear_mesh.multimesh
+	for i in _smear.size():
+		var c: Dictionary = _smear[i]
+		var d: Vector3 = c.dir
+		var basis := Basis(Vector3.UP.cross(d).normalized(), Vector3.UP, d)
+		mm.set_instance_transform(i, Transform3D(basis * Basis.from_scale(Vector3(float(c.width), POOL_HEIGHT * 0.6, float(c.length))),
+			Vector3(c.pos) + Vector3.UP * POOL_HEIGHT * 0.3))
+		mm.set_instance_color(i, c.colour)
+	mm.visible_instance_count = _smear.size()
+
+
+# --- Blood on the hands -------------------------------------------------------------------
+
+## Blood voxels on the right or left hand now (tests).
+func hand_blood(right: bool) -> int:
+	return (_hand_cells[0 if right else 1] as Array).size()
+
+
+## While this body's treat clip plays (replicated action_net, so on every peer) on a wound that
+## is bleeding or has bled, blood builds up on its hands. On yourself ("kneel" off), a wound of
+## your own within HAND_REACH of where the hands work; on someone else, the body nearest that
+## point (the hands' point is held within arm's reach, so it can fall short of the wound).
+func _check_hands() -> void:
+	if not is_instance_valid(model) or model.action_shown() != CharacterModel.TREAT or not is_inside_tree():
+		return
+	var at: Variant = model.action_net.get("at")
+	if not at is Vector3:
+		return
+	var work := model.to_global(at)
+	var bloody := false
+	if not model.action_net.get("kneel", false):
+		bloody = bloody_near(work, HAND_REACH)
+	else:
+		var nearest: WoundMarks = null
+		var best := HAND_PATIENT_M
+		for marks: Node in get_tree().get_nodes_in_group(&"wound_marks"):
+			if marks == self or not marks is WoundMarks or not is_instance_valid((marks as WoundMarks).model):
+				continue
+			var d := (marks as WoundMarks).model.global_position.distance_to(work)
+			if d < best:
+				best = d
+				nearest = marks
+		bloody = nearest != null and nearest.bloody_near(work, INF)
+	if bloody:
+		_hand_blood += HAND_TICK_S
+		_hand_until = _now() + HAND_LIFE_S
+		_hand_wet_until = _now() + HAND_DRY_S
+		_grow_hands()
+
+
+## A wound that bleeds now, or has bled onto the skin, within `reach` of world point `p`.
+func bloody_near(p: Vector3, reach: float) -> bool:
+	for spot: Dictionary in _spots.values():
+		var bloody: bool = spot.flow > 0.0 or spot.holes.any(func(h: Dictionary) -> bool: return not (h.blood as Array).is_empty())
+		if not bloody:
+			continue
+		var bone := model.part_node(spot.part)
+		if bone == null:
+			continue
+		for hole: Dictionary in spot.holes:
+			if (bone.global_transform * (Vector3(hole.at) - BodyVolume.pivot_at(spot.part, body))).distance_to(p) <= reach:
+				return true
+	return false
+
+
+func _grow_hands() -> void:
+	var target := mini(HAND_CELLS, 3 + int(_hand_blood * 3.0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(get_instance_id()) + int(_hand_blood * 10.0)
+	for i in 2:
+		var part := Vitals.FOREARM_R if i == 0 else Vitals.FOREARM_L
+		var box: Array = BodyMap.PART_BOXES[part][0]
+		var bottom: float = box[0].y - box[1].y * 0.5
+		var cells: Array = _hand_cells[i]
+		var tries := 0
+		while cells.size() < target and tries < 30:
+			tries += 1
+			var a := rng.randf() * TAU
+			var dir := Vector3(sin(a), 0.0, -cos(a))
+			var y := bottom + rng.randf_range(0.005, 0.09)
+			var s: Variant = BodyVolume.surface(part, Vector3(box[0].x, y, box[0].z), dir, 0.15, body)
+			if s is Vector3:
+				cells.append([Vector3(s) + dir * 0.002, Vector3.ONE * CELL * rng.randf_range(0.5, 1.0)])
+	_redraw_hands()
+
+
+func _redraw_hands() -> void:
+	var wet := _now() < _hand_wet_until
+	for i in 2:
+		var bone := model.part_node(Vitals.FOREARM_R if i == 0 else Vitals.FOREARM_L)
+		if bone == null:
+			continue
+		var inst: MultiMeshInstance3D = _hand_meshes[i]
+		var cells: Array = _hand_cells[i]
+		if inst == null or not is_instance_valid(inst):
+			if cells.is_empty():
+				continue
+			inst = _multimesh_instance(HAND_CELLS)
+			inst.name = "HandBlood"
+			inst.layers = model.render_layers
+			bone.add_child(inst, true)
+			_hand_meshes[i] = inst
+		var pivot := BodyVolume.pivot_at(Vitals.FOREARM_R if i == 0 else Vitals.FOREARM_L, body)
+		var mm := inst.multimesh
+		for j in cells.size():
+			mm.set_instance_transform(j, Transform3D(Basis.from_scale(cells[j][1]), Vector3(cells[j][0]) - pivot))
+			mm.set_instance_color(j, (FRESH_COLOUR if j % 3 else BLOOD_COLOUR) if wet else DRIED_COLOUR)
+		mm.visible_instance_count = cells.size()

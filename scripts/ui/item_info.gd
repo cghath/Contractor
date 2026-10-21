@@ -41,7 +41,7 @@ static func name_colour(id: StringName) -> Color:
 const TYPE_NAMES := {
 	"weapon": "Weapon", "optic": "Optic", "ammo": "Ammunition", "armor": "Armour", "plate": "Armour plate",
 	"pouch": "Pouch", "backpack": "Backpack", "medical": "Medical", "utility": "Utility", "objective": "Objective",
-	"salvage": "Salvage", "intel": "Intel", "vehicle": "Vehicle part", "launcher": "Launcher",
+	"salvage": "Salvage", "intel": "Intel", "vehicle": "Vehicle part", "launcher": "Launcher", "consumable": "Consumable", "barter": "Barter",
 }
 const SLOT_NAMES := {
 	"primary": "Primary", "sidearm": "Sidearm", "helmet": "Helmet", "vest": "Carrier", "backpack": "Backpack",

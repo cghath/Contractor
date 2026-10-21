@@ -69,6 +69,7 @@ func _ready() -> void:
 	await _test_roadside_ieds()
 	_test_enemy_drones()
 	_test_strongbox()
+	await _test_cartel_site()
 	await _test_variety_played()  # late: it blows the comms site's mast, which stays down (the hot zone ops checks want it standing)
 	await _test_respawn_points()
 	await _test_scenario_resume()
@@ -1409,7 +1410,20 @@ func _test_zone_enemy() -> void:
 	cs.held = []
 	cs.deployment = {"cids": []}
 	ws[zid] = {"holder": "black_ridge", "grip": 0.8, "flashpoint": false}
-	check(zl._zone_enemy() == "", "held by Black Ridge: the usual militia mix")
+	check(zl._zone_enemy() == "black_ridge", "held by Black Ridge: the militia")
+	# Terror groups (2026-10-20): a zone held by one of them is theirs; a front splits its sites.
+	ws[zid] = {"holder": "valley_shura", "grip": 0.8, "flashpoint": false}
+	check(zl._zone_enemy() == "valley_shura" and Kits.sends_bombers("valley_shura"), "held by the Valley Shura: its men, and its bombers")
+	ws[zid] = {"holder": "valley_shura", "grip": 0.5, "flashpoint": false, "front": {"by": "kestrel", "since": 1, "progress": 0.5}}
+	zl._attacker_sites = {}
+	var by_site := {}
+	for mod: ZoneModule in zl.modules():
+		by_site[zl.module_faction(mod)] = int(by_site.get(zl.module_faction(mod), 0)) + 1
+	check(zl._zone_attacker() == "kestrel" and int(by_site.get("kestrel", 0)) >= 1 and int(by_site.get(String(zl._enemy_response.enemy_faction), 0)) >= 1,
+		"a front here: the attacker's men hold some of the sites already (%s)" % by_site)
+	zl._attacker_sites = {}
+	var flags := zl.get_node_or_null(^"FactionFlags")
+	check(flags != null and flags.get_child_count() > 0, "the holder's flags fly over its sites (%d)" % (flags.get_child_count() if flags else 0))
 	ws[zid] = {"holder": "eastern_concord", "grip": 0.8, "flashpoint": false}
 	check(zl._zone_enemy() == "eastern_concord", "held by the Eastern Concord Forces: their kit from the first spawn")
 	cs.held = [{"cid": "TZE1", "zone_id": zid, "target": "vantage_group"}]
@@ -1445,6 +1459,8 @@ func _test_rival_team() -> void:
 	rival.races.append(r)
 	check(rival.server_send(r) and (r.soldiers as Array).size() == RivalTeam.SIZE and (r.soldiers[0] as Soldier).inventory.count_of(RivalTeam.LEDGER) == 1
 		and (r.soldiers as Array).all(func(s: Soldier) -> bool: return s.model.variant == "black"), "the team comes in: %d men in Vantage black" % (r.soldiers as Array).size())
+	check((r.soldiers as Array).all(func(s: Soldier) -> bool: return String(s.get_meta(&"faction_id", "")) == RivalTeam.RIVAL and SquadAI.of(s) != null and SquadAI.of(s)._doctrine_id() == &"pmc"),
+		"Vantage's men are Vantage's, whoever holds the zone, and fight by its PMC doctrine (%s)" % [(r.soldiers as Array).map(func(s: Soldier) -> String: return "%s %s" % [s.get_meta(&"faction_id", ""), SquadAI.of(s)._doctrine_id() if SquadAI.of(s) else &""])])
 	for s: Soldier in r.soldiers:
 		s.global_position = level.ground_point(far.global_position + Vector3(randf_range(-5, 5), 0, randf_range(-5, 5)))
 	rival.server_step(r, RivalTeam.SECURE_S * 0.5)
@@ -1569,6 +1585,62 @@ func _test_strongbox() -> void:
 	check(player.inventory.take(WorldValuables.STRONGBOX_KEY) == 1 and box.server_open_for(player) == "" and not box.is_locked(), "the officer's key opens it")
 	player.inventory.remove_one(WorldValuables.STRONGBOX_KEY)
 	check(box.lock_problem(player) == "", "and it stays open")
+
+
+## Terror groups follow-ups (2026-10-20): a raid on the Kestrel Cartel played here. Its cache is a
+## drug lab or a warehouse, a box of its goods stands beside it once the contract is live, and
+## every third man of the site's garrison carries some (and fights by the cartel doctrine).
+func _test_cartel_site() -> void:
+	print("A cartel's site: its drug lab, its stash, its men's pockets")
+	var c: Dictionary = {}
+	for i in 300:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 4400 + i
+		var o := ContractGen.generate(rng, {"day": Economy.day(), "source": "board", "type": "raid", "zone_id": ZONE, "target": "kestrel"})
+		var mod := level.get_module(String(o.module_id))
+		if mod and not level._garrisoned.has(mod.module_id) and not ZoneModules.GARRISON.get(mod.type, []).is_empty() \
+				and (o.objectives as Array).any(func(x: Dictionary) -> bool: return String(x.get("site", "")) == "cache"):
+			c = o
+			break
+	if c.is_empty():
+		check(false, "a raid on the Kestrel Cartel at a site not garrisoned yet")
+		return
+	c.understated = false
+	c.true_rating = c.rated
+	c.enemy_count = c.enemy_est
+	var module := level.get_module(String(c.module_id))
+	var d := await _deploy_offer(c)
+	var cache_o: Dictionary = (d.objectives as Array).filter(func(o: Dictionary) -> bool: return String(o.kind) == Objectives.DESTROY_CACHE)[0]
+	var name := String(cache_o.params.get("name", ""))
+	check(d.why == "" and name in ["drug lab", "warehouse"] and String(cache_o.text) == "Destroy the %s" % name and String(cache_o.params.get("loot_of", "")) == "kestrel",
+		"live: %s at the %s" % [cache_o.text, module.module_id])
+	var stash := level.find_child(("contraband_%s" % String(cache_o.oid)).validate_node_name(), true, false) as WorldCache
+	var ids: Array = stash.cargo_hold.entries().map(func(e: Dictionary) -> String: return String(e.id)) if stash else []
+	var box: Array = cache_o.params.box
+	var beside := stash != null and stash.global_position.x > maxf(float(box[0][0]), float(box[1][0])) \
+		and absf(stash.global_position.z - (float(box[0][2]) + float(box[1][2])) * 0.5) < 0.1
+	check(stash != null and stash.display_name() == "Drug stash" and not ids.is_empty() and ids.any(func(id: String) -> bool: return Fixers.is_contraband(StringName(id))) and beside,
+		"a drug stash stands beside it (%s)" % [ids])
+	level.people.server_contract_content(d.objectives)
+	check(level.find_children(("contraband_%s" % String(cache_o.oid)).validate_node_name(), "WorldCache", true, false).size() == 1, "and only one, whatever puts the contract's content in again")
+	CompoundLevel.spawn_ai = true
+	level._ai_ready = true
+	level._spawn_garrison(module)
+	await _garrison_out(module)
+	CompoundLevel.spawn_ai = false
+	var men := _garrison(module)
+	var goods := ["hashish", "captagon", "heroin_bricks", "counterfeit_dollars"]
+	var carrying := men.filter(func(s: Soldier) -> bool: return goods.any(func(id: String) -> bool: return s.inventory.count_of(StringName(id)) > 0))
+	check(men.size() >= 3 and not carrying.is_empty() and carrying.size() < men.size()
+		and men.all(func(s: Soldier) -> bool: return String(s.get_meta(&"faction_id", "")) == "kestrel" and SquadAI.of(s)._doctrine_id() == &"cartel"),
+		"the cartel's men hold it, fighting by its doctrine, %d of %d with goods in their pockets" % [carrying.size(), men.size()])
+	_end_deployment()
+	for s in men:
+		s.queue_free()
+	level._garrisoned.erase(module.module_id)
+	if stash:
+		stash.queue_free()
+	await _frames(2)
 
 
 func _test_hq_posts() -> void:
