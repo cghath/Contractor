@@ -787,9 +787,9 @@ const DAMAGE_J := 1650.0
 ## A round's BodyDeform points on the part it hits (BodyDeform.GUNFIRE, hit_points: by its energy,
 ## heavy rounds far more than light; a buckshot `pellet` linearly), or by class when the energy
 ## isn't known.
-static func round_damage(round_class: StringName, energy_j: float, pellet := false) -> float:
+static func round_damage(round_class: StringName, energy_j: float, pellet := false, round_id := "") -> float:
 	if energy_j > 0.0:
-		return snappedf(BodyDeform.hit_points(round_class, energy_j, pellet), 0.1)
+		return snappedf(BodyDeform.hit_points(round_class, energy_j, pellet, round_id), 0.1)
 	return {PISTOL: 0.5, INTERMEDIATE: 1.0, FULL_POWER: 2.0, FRAGMENT: 0.6}.get(round_class, 1.0)
 
 ## Host: the last hit that landed ({"position", "direction" (world), "round_class", "time"}): the
@@ -836,7 +836,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 		var exits: bool = round_class != FRAGMENT and hit.has("channel_depth") and not hit.get("stays_in", false) and depth < BodyMap.CHANNEL_MAX_M - 0.001 and not channel.graze
 		for w: Dictionary in added:
 			w["rc"] = round_class  # what made it (BodyDeform: a .308 tears more than a 5.56)
-			w["dmg"] = round_damage(round_class, float(hit.get("energy_j", -1.0)), bool(hit.get("pellet", false)))
+			w["dmg"] = round_damage(round_class, float(hit.get("energy_j", -1.0)), bool(hit.get("pellet", false)), String(hit.get("round", "")))
 			w["at"] = channel.from
 			if exits:
 				w["out"] = channel.to

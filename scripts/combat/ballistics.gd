@@ -165,6 +165,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				"distance": distance,
 				"energy_j": energy,  # on arrival, after any plate (BodyDeform scores a round by it; .50 kills)
 				"pellet": pellets(weapon) > 1,  # a buckshot pellet (BodyDeform.GUNFIRE scores it its own way)
+				"round": String(round_data(weapon).get("id", "")),  # the cartridge (GUNFIRE's round_mult)
 			}
 			if lost_j > 0.0:
 				_spend(hit_info, world_energy(weapon, distance) - lost_j)

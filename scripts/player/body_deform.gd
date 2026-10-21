@@ -72,14 +72,18 @@ const DAMAGE := {&"pistol": 0.5, &"intermediate": 1.0, &"full_power": 2.5, &"fra
 ## only once he's dead. The living take "alive_mult" times as much, and a limb lost alive is an
 ## arterial amputation and shock (Vitals.server_amputate). Short of the cut, at "dangle_share" of
 ## it a limb hangs by tissue (the living's only with a broken bone). One table, all Proposed:
-## a 5.56 (1 point): about 10 into a living shin, 20 into a thigh; a .308 (4.2): 2 or 3; 7.62x54R
-## close (4.8): 2; .338 (12): 1; a .50 (Vitals.LETHAL_J) kills and takes what it hits; 00 buckshot
+## "round_mult" scales cartridges on their own (rounds.json ids, by prefix): Captain, 2026-10-21:
+## "lower 762x54rs ability to dismember" ... "lower those too if theyre close to that 54r", so
+## 7.62x54R and the full-power rounds near its ~3.3 kJ (7.62x51 M80, M993 and M118LR, .30-06,
+## 6.5 Creedmoor, .303) score half: up close (2.4) about 4 into a living forearm or shin, 7 into a
+## dead thigh. A 5.56 (1 point): about 10 into a living shin, 20 into a thigh; .338 (12): 1; a .50 (Vitals.LETHAL_J) kills and takes what it hits; 00 buckshot
 ## close (0.7 a pellet, ~4 a shell on a leg): 2 or 3 shells for a shin, 5 for a thigh; a 9 mm
 ## (0.13): only sustained fire into one joint.
 const GUNFIRE := {
 	"exponent": 1.5,
 	"class_mult": {&"pistol": 0.8, &"intermediate": 1.0, &"full_power": 1.5, &"fragment": 0.6},
 	"pellet_mult": 4.0,
+	"round_mult": {"762x54r": 0.5, "762x51": 0.5, "3006": 0.5, "65cm": 0.5, "303": 0.5},
 	"points": {"extremity": 5.0, "distal": 8.0, "proximal": 16.0, "head": 7.0},
 	"alive_mult": 1.2,
 	"extremity_share": 0.35,
@@ -443,14 +447,18 @@ static func _threshold(part: StringName, dead: bool) -> float:
 
 
 ## What one hit scores (GUNFIRE): from its energy on arrival (joules; <= 0 unknown: by class), a
-## buckshot `pellet` linearly.
-static func hit_points(round_class: StringName, energy_j: float, pellet := false) -> float:
+## buckshot `pellet` linearly, times its cartridge's own "round_mult" (`round_id`, rounds.json).
+static func hit_points(round_class: StringName, energy_j: float, pellet := false, round_id := "") -> float:
 	if energy_j <= 0.0:
 		return float(DAMAGE.get(round_class, DAMAGE[&"intermediate"]))
 	var base := energy_j / Vitals.DAMAGE_J
+	var own := 1.0
+	for prefix: String in GUNFIRE.round_mult:
+		if round_id.begins_with(prefix):
+			own = float(GUNFIRE.round_mult[prefix])
 	if pellet:
-		return base * float(GUNFIRE.pellet_mult)
-	return pow(base, float(GUNFIRE.exponent)) * float((GUNFIRE.class_mult as Dictionary).get(round_class, 1.0))
+		return base * float(GUNFIRE.pellet_mult) * own
+	return pow(base, float(GUNFIRE.exponent)) * float((GUNFIRE.class_mult as Dictionary).get(round_class, 1.0)) * own
 
 
 ## Host: the cut the hits so far make on `part`'s bone (a limb part, or the head once `dead`), from
@@ -659,7 +667,9 @@ func _queue_sever(part: StringName, at_list: Array) -> void:
 	var cut := -1.0  # worker picks: the head just above its lowest voxels
 	if part != Vitals.HEAD:
 		cut = _cut_y(part, rec, at_list, state)
-	state.todo.append({"sever": true, "cut": cut, "far_up": part == Vitals.HEAD, "part": part, "drop": not rec.get("np", false)})
+	# (Hanging, still on its way to the mesh: what hangs is the piece, not what's left below the cut.)
+	var hanging := _dangle_drawn.has(part)
+	state.todo.append({"sever": true, "cut": cut, "far_up": part == Vitals.HEAD, "part": part, "drop": not rec.get("np", false) and not hanging})
 	_kick(pivot)
 
 
@@ -798,20 +808,22 @@ func _done_work(pivot: Node3D, buffer: VoxelBuffer, out: Dictionary) -> void:
 		var mesh := mesher.build_mesh(buffer, [])
 		if mesh:
 			mi.mesh = mesh
+	for h: Dictionary in out.hangs:  # (first: one cut through as it's hung drops as it hangs)
+		var hang_mesh: Mesh = mesher.build_mesh(h.buffer, [])
+		if hang_mesh and mi:
+			_hang(StringName(h.part), pivot, mi, hang_mesh, h)
 	for p: Dictionary in out.pieces:
 		var piece_mesh: Mesh = mesher.build_mesh(p.buffer, [])
 		if piece_mesh and mi and not (p.hull as PackedVector3Array).is_empty():
 			_drop(StringName(p.part), pivot, mi, piece_mesh, p.hull)
-	for h: Dictionary in out.hangs:
-		var hang_mesh: Mesh = mesher.build_mesh(h.buffer, [])
-		if hang_mesh and mi:
-			_hang(StringName(h.part), pivot, mi, hang_mesh, h)
 	_kick(pivot)
 
 
 ## The cut-off piece as a loose body in the world: the far side of the part's raster plus the
 ## parts and gear it carries (copied, the originals hidden), flung as its record says.
 func _drop(part: StringName, pivot: Node3D, mi: MeshInstance3D, piece_mesh: Mesh, hull: PackedVector3Array) -> void:
+	if piece_of(part) != null:
+		return  # one piece a part (what hung went already): scraps below the cut aren't another
 	var rb := _new_piece(part)
 	if rb == null:
 		return

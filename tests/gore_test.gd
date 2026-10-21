@@ -182,13 +182,14 @@ func _energy_for(points: float, round_class: StringName) -> float:
 
 
 ## `n` rounds of `energy_j` into `part` of `s` from the front, each at its own spot on the part
-## (`low`: in its lowest share, the hand or foot). Returns how many it took to come off (-1: never).
-func _rounds_into(s: Soldier, part: StringName, n: int, energy_j: float, round_class: StringName, low := false) -> int:
+## (`low`: in its lowest share, the hand or foot; `round_id`: the cartridge, rounds.json). Returns
+## how many it took to come off (-1: never).
+func _rounds_into(s: Soldier, part: StringName, n: int, energy_j: float, round_class: StringName, low := false, round_id := "") -> int:
 	var hb := BlastGore._hitbox(s, part)
 	for i in n:
 		var jitter := Vector3(0.1 * (i % 4 - 1.5), (-0.42 + 0.02 * (i % 5)) if low else 0.05 * (i % 7 - 3), -0.5)
 		s.vitals.server_hit(part, {"round_class": round_class, "position": Warheads.hitbox_point(hb, jitter), "direction": s.global_basis.z,
-			"hitbox": hb, "distance": 15.0, "energy_j": energy_j})
+			"hitbox": hb, "distance": 15.0, "energy_j": energy_j, "round": round_id})
 		if BodyDeform._bone_part(part) in BodyDeform.severed_parts(s.vitals):
 			return i + 1
 	return -1
@@ -231,9 +232,14 @@ func _test_gunfire() -> void:
 		"00 buckshot from 3 m takes a leg off in %d shells (%s)" % [shells, off])
 	check(not stump.is_empty() and stump[0].kind == "arterial" and (shot.vitals.is_dying() or not shot.vitals.is_up() or shot.vitals.is_dead()),
 		"alive, it's an arterial amputation and he's dying or down (%s, %s)" % [stump.map(func(w: Dictionary) -> String: return "%s %s" % [w.part, w.kind]), shot.vitals.condition_text()])
-	# 7.62x54R close: a living forearm in one or two.
-	var took := _rounds_into(heavy, Vitals.FOREARM_R, 4, 3600.0, Vitals.FULL_POWER)
-	check(took >= 1 and took <= 2, "7.62x54R up close takes a living forearm in %d hits" % took)
+	# 7.62x54R close (Captain, 2026-10-21: "lower 762x54rs ability to dismember", "lower those too
+	# if theyre close to that 54r"): a living forearm takes 3 to 5 now, a .308 the same.
+	var took := _rounds_into(heavy, Vitals.FOREARM_R, 8, 3600.0, Vitals.FULL_POWER, false, "762x54r_lps")
+	check(took >= 3 and took <= 5, "7.62x54R up close takes a living forearm in %d hits, not 1 or 2" % took)
+	var lowered := ["762x54r_lps", "762x51_m80", "762x51_m993", "762x51_m118lr", "3006_m2ap", "65cm_eldm", "303_mk7"].all(func(id: String) -> bool:
+		return absf(BodyDeform.hit_points(Vitals.FULL_POWER, 3600.0, false, id) - BodyDeform.hit_points(Vitals.FULL_POWER, 3600.0) * 0.5) < 0.01)
+	check(lowered and BodyDeform.hit_points(Vitals.FULL_POWER, 15000.0, false, "50bmg_m33") > 20.0,
+		"7.62x51, .30-06, 6.5 Creedmoor and .303 score half too (as the 54R); a .50 doesn't")
 	# A 9 mm: ten into a living shin and it stays on.
 	check(_rounds_into(pistol, Vitals.SHIN_L, 10, 500.0, Vitals.PISTOL) == -1, "ten 9 mm rounds wound a shin but don't take it off")
 	# A corpse keeps taking it: 5.56 into a dead man's thigh, off within 20.

@@ -20,8 +20,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - Hands and feet go first (hits low on a forearm or shin take it at the wrist or ankle), then
     forearms and shins, then upper arms and thighs.
   - Close buckshot takes a shin in 2 or 3 shells and a thigh in about 5.
-  - Heavy rounds take a forearm or shin in one or two hits: 7.62x54R up close, .338, and a .50
-    (which still kills outright).
+  - Heavy rounds take a forearm or shin in one or two hits: .338, and a .50 (which still kills
+    outright).
+  - 7.62x54R takes about 4 hits up close for a forearm or shin, at the Captain's call. So do the
+    rounds close to it: 7.62x51 (.308), .30-06, 6.5 Creedmoor and .303.
   - Rifle rounds take sustained fire into one limb (about 10 5.56 rounds into a living shin),
     and pistol rounds hardly ever.
   - A corpse keeps taking it: about 16 rifle rounds into a dead man's leg takes it off.
