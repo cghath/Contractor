@@ -11,6 +11,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The medical menu (H) reads like a medic (Captain, 2026-10-21: "injury descriptions in the medical helper (H) need to be improved too")
+
+#### Changed
+- **The casualty at a glance, under the title:**
+  - conscious, conscious but dying, unconscious, or cardiac arrest with the time left;
+  - how much blood is gone, in words, and "bleeding out in about 2 min" while it runs;
+  - breathing and colour, the pulse, and pain, in words.
+
+  With a pulse oximeter, the SpO2 and pulse are shown in numbers too.
+- **Treat in this order:** every injury down the right, worst first, each with its severity in
+  colour (minor, serious, critical, life-threatening). Click one to jump to its body part.
+- **Each injury in plain words.** Where it is, plainly ("Left thigh, inner", "Chest, right
+  side"), and what it is in medic language:
+  - arterial bleed (spurting) and venous bleed (steady);
+  - graze, gunshot or fragment wound, through-and-through;
+  - open or closed fracture, traumatic amputation (blast or gunfire);
+  - open chest wound, tension pneumothorax, blast lung, head injury, internal bleeding;
+  - burns by how much of the body.
+- **Done and next, for each injury:**
+  - What's been done: tourniquet on and how long ago, packed, bandaged, splinted, chest seal on,
+    clamped.
+  - What to do next, in order ("Tourniquet high above the wound, then pack it, and bandage").
+    Items you don't carry are greyed and say so.
+- **Not tied to one wound, listed as well:** cardiac arrest, a blocked airway, blood loss that
+  needs a line and fluids, cold, concussion, a racing or slow pulse, pain.
+
 ### Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems")
 
 #### Fixed

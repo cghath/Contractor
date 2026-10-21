@@ -5,7 +5,11 @@ extends Control
 ## (bleeding by severity, untreated, treated) with markers for tourniquets, splints,
 ## dressings and seals, and an IV or IO line; the chosen part's injuries in words and every
 ## medical item you carry, usable or greyed out with the reason; the signs (numbers only with
-## a pulse oximeter, as Check condition); and the triage log. A view over Vitals: choosing an
+## a pulse oximeter, as Check condition); and the triage log. The injuries are told by
+## InjuryText (Captain, 2026-10-21: "injury descriptions in the medical helper (H) need to be
+## improved too"): the vitals at a glance under the title; the chosen part's injuries, each with
+## where, what, how bad, what's been done and what to do next (items you don't carry greyed); and
+## every injury in the order to treat them (worst first, a click picks its part). A view over Vitals: choosing an
 ## item sends the same host request as the interaction menu's Treat (Soldier._server_treat,
 ## through InteractionMenu.perform), so nothing new decides anything. Everything shown reads
 ## replicated state, so it works the same on clients.
@@ -63,9 +67,9 @@ const PANEL_MIN_H := 456.0
 ## baseline too), the gap right of it, the item list's top and width at full size, the gap
 ## before the right-hand column, the log's heading, and what the legend under the figure takes.
 const FIGURE_X := 30.0
-const FIGURE_TOP := 70.0
+const FIGURE_TOP := 100.0
 const FIGURE_GAP := 40.0
-const ROWS_Y := 230.0
+const ROWS_Y := 270.0
 const ITEMS_W := 414.0
 const COLUMN_GAP := 16.0
 const LEGEND_H := 88.0
@@ -73,6 +77,14 @@ const CLOSE_HINT_W := 200.0
 ## Most lines of the chosen part's injuries, and of the signs.
 const INJURY_LINES := 5
 const SIGN_LINES := 8
+## The vitals summary under the title: its first baseline, and at most this many lines.
+const SUMMARY_Y := 56.0
+const SUMMARY_LINES := 2
+## A line of small text (UiKit.FONT_SMALL and its leading), for the injury blocks and lists.
+const LINE_H := 18.0
+## The treatment order (every injury, worst first) at the top of the right-hand column: at most
+## this many lines, each a click away from its body part.
+const ORDER_LINES := 6
 ## The activity log's text size (UiKit's smallest: nothing under 14 px).
 const LOG_FONT := UiKit.FONT_SMALL
 ## The theme's panel border, and the hovered or keyboard-picked row (the accent, faint).
@@ -82,12 +94,12 @@ const HOVER_BG := UiKit.HOVER_BG
 const ROW_H := 30.0
 const ROW_FONT := UiKit.FONT_BODY
 ## The help box ("?", F1 or a click on the hint at the top right): how the menu works, its keys.
-const HELP_TEXT := "How it works\nPick a body part on the figure (or Left / Right), then a treatment from the list (Up / Down and Enter, or click it). A greyed row says why it can't be used now. Signs are what you can tell without kit; a pulse oximeter gives numbers. The triage cards along the foot tag the casualty for the team, and the triage log on the right is the team's too: who did what to him, and when.\n\nKeys: Left / Right body part  -  Up / Down treatment  -  Enter use  -  Page Up / Down a page  -  mouse wheel scroll  -  ? or F1 this help  -  H / Esc close"
+const HELP_TEXT := "How it works\nUnder the title: how he is at a glance. On the right: every injury in the order to treat them, worst first (click one to pick its part). In the middle: the part's injuries, what's been done and what to do next (greyed: you don't carry it). Pick a body part on the figure (or Left / Right), then a treatment from the list (Up / Down and Enter, or click it). A greyed row says why it can't be used now. Signs are what you can tell without kit; a pulse oximeter gives numbers. The triage cards along the foot tag the casualty for the team, and the triage log on the right is the team's too: who did what to him, and when.\n\nKeys: Left / Right body part  -  Up / Down treatment  -  Enter use  -  Page Up / Down a page  -  mouse wheel scroll  -  ? or F1 this help  -  H / Esc close"
 ## The item list's scroll bar, right of the rows (click above or below the thumb: a page).
 const SCROLL_BAR_W := 10.0
 const MAX_LOG := 14
 ## The activity log's heading, below the panel's top (right-hand column, under the signs).
-const LOG_Y := 310.0
+const LOG_Y := 380.0
 const REFRESH_S := 0.25
 
 ## The treater (the local player).
@@ -99,6 +111,9 @@ var part: StringName = &"chest"
 var options: Array[Dictionary] = []
 ## The triage log's lines as shown (the casualty's Vitals.care_log, the newest MAX_LOG), newest last.
 var log_lines: PackedStringArray = []
+## Every injury on the casualty, worst first (InjuryText.injuries, items marked as the treater
+## carries them), as last refreshed.
+var injury_list: Array[Dictionary] = []
 ## The first item row shown. More rows than fit (a medic's full kit) scroll: the mouse
 ## wheel, the scroll bar, or the up and down keys (audit A2-05: rows past the panel's foot
 ## couldn't be reached, yet were still clickable unseen).
@@ -194,6 +209,10 @@ func refresh() -> void:
 	options = item_options(actor, target, part)
 	_clamp_scroll()
 	log_lines = log_text(Vitals.find_on(target))
+	var who := target
+	var me := actor
+	injury_list = InjuryText.injuries(Vitals.find_on(target), func(id: StringName) -> bool:
+		return is_instance_valid(me) and is_instance_valid(who) and Soldier.kit_has(me, who, id))
 	queue_redraw()
 
 
@@ -240,6 +259,8 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 		elif p != &"":
 			select_part(p)
+		elif order_at(event.position) >= 0:
+			select_part(injury_list[order_at(event.position)].part)
 		elif triage_at(event.position) != &"":
 			set_triage(triage_at(event.position))
 		elif _scroll_bar_rect().has_point(event.position):
@@ -478,8 +499,16 @@ static func injuries_text(vitals: Vitals, p: StringName) -> String:
 
 ## The signs in words (Vitals.signs), the pulse oximeter's reading first when `oximeter`
 ## (the only numbers, as in Check condition), the airway, or "No signs of note".
-static func signs_lines(vitals: Vitals, on_self: bool, oximeter: bool) -> PackedStringArray:
+static func signs_lines(vitals: Vitals, on_self: bool, oximeter: bool, summarised := false) -> PackedStringArray:
 	var out := vitals.signs(on_self)
+	if summarised:  # (breathing, pulse, colour and responsiveness are in the summary: InjuryText.summary)
+		var said := PackedStringArray()
+		for line in out:
+			if not (line.begins_with("Pulse") or line.begins_with("No pulse") or line.begins_with("Breathing") or line == "Blue lips"
+					or line == "Unresponsive" or line == "Heart pounding" or line.begins_with("Burns")):
+				said.append(line)
+		out = said
+		oximeter = false
 	if oximeter:
 		var reading := "no reading" if vitals.in_cardiac_arrest() or vitals.is_dead() \
 			else "SpO2 %d%%, pulse %d" % [roundi(vitals.spo2()), roundi(vitals.heart_rate())]
@@ -659,11 +688,77 @@ func layout_rects() -> Dictionary:
 		"legend": Rect2(_figure_origin() + Vector2(0, FIGURE_SIZE.y * k), Vector2(_legend_w(), LEGEND_H - UiKit.SPACE_S)),
 		"part": Rect2(top + Vector2(_mid_x(), FIGURE_TOP - UiKit.FONT_HEADING), Vector2(_mid_w(), _rows_origin().y - top.y - FIGURE_TOP)),
 		"items": Rect2(_rows_origin(), Vector2(_mid_w(), visible_rows() * ROW_H)),
-		"signs": Rect2(top + Vector2(_right_x(), FIGURE_TOP - UiKit.FONT_BODY), Vector2(_right_w(), LOG_Y - FIGURE_TOP)),
+		"vitals": Rect2(top + Vector2(UiKit.SPACE_L, SUMMARY_Y - UiKit.FONT_SMALL), Vector2(panel.size.x - UiKit.SPACE_L * 2.0, LINE_H * SUMMARY_LINES)),
+		"order": Rect2(top + Vector2(_right_x(), FIGURE_TOP - UiKit.FONT_BODY), Vector2(_right_w(), _signs_y() - FIGURE_TOP - UiKit.SPACE_S)),
+		"signs": Rect2(top + Vector2(_right_x(), _signs_y() - UiKit.FONT_BODY), Vector2(_right_w(), LOG_Y - _signs_y())),
 		"log": Rect2(top + Vector2(_right_x(), LOG_Y - UiKit.FONT_BODY), Vector2(_right_w(), _log_bottom() - top.y - LOG_Y + UiKit.FONT_BODY)),
 		"hover box": _hint_column()}
 	for i in Vitals.TRIAGE_CARDS.size():
 		out["triage %d" % i] = _triage_rect(i)
+	return out
+
+
+## The signs' heading, below the treatment order (right-hand column).
+func _signs_y() -> float:
+	return FIGURE_TOP + 22.0 + ORDER_LINES * LINE_H + UiKit.SPACE_M
+
+
+## Treatment order row `i` (InjuryText's order; only ORDER_LINES of them are drawn).
+func _order_rect(i: int) -> Rect2:
+	var top := _panel().position
+	return Rect2(top + Vector2(_right_x(), FIGURE_TOP + 22.0 - UiKit.FONT_SMALL + i * LINE_H - 2.0), Vector2(_right_w(), LINE_H))
+
+
+## The treatment order row under `pos` (an index into injury_list), or -1.
+func order_at(pos: Vector2) -> int:
+	for i in mini(injury_list.size(), ORDER_LINES):
+		if _order_rect(i).has_point(pos):
+			return i
+	return -1
+
+
+## Draws [text, colour] pieces from `pos` (the first baseline), flowing onto at most `lines`
+## lines of `width` (a piece that doesn't fit starts the next line; the last line cuts with
+## "..."). Returns how many lines it took.
+func _draw_pieces(font: Font, pos: Vector2, pieces: Array, width: float, size: int, lines: int, sep := "   ") -> int:
+	var x := 0.0
+	var line := 0
+	for i in pieces.size():
+		var text: String = pieces[i][0] + (sep if i < pieces.size() - 1 else "")
+		var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		if x > 0.0 and x + w > width and line < lines - 1:
+			line += 1
+			x = 0.0
+		var room := width - x
+		if room <= 8.0:
+			break
+		var shown := elide(font, text.strip_edges(false, true) if x + w > width else text, room, size)
+		draw_string(font, pos + Vector2(x, line * LINE_H), shown, HORIZONTAL_ALIGNMENT_LEFT, room, size, pieces[i][1])
+		x += font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	return line + 1
+
+
+## The chosen part's injuries (InjuryText), as lines of [text, colour] pieces: the severity and
+## what it is, what's been done, what to do next (items not carried greyed).
+func injury_lines(p: StringName) -> Array:
+	var out: Array = []
+	for e: Dictionary in injury_list:
+		if e.part != p:
+			continue
+		var what := String(e.what) + (", " + String(e.bleed) if String(e.bleed) != "" else "")
+		if String(e.where) != InteractionMenu.part_name(p):
+			what = String(e.where) + ": " + what
+		out.append([[InjuryText.SEVERITY_WORDS[e.severity].to_upper(), InjuryText.SEVERITY_COLORS[e.severity]], [what, UiKit.TEXT]])
+		if String(e.done) != "":
+			out.append([["Done: " + String(e.done), UiKit.GOOD]])
+		if not (e.next as Array).is_empty():
+			var next: Array = [["Next:", UiKit.TEXT_DIM]]
+			var steps: Array = e.next
+			for j in steps.size():
+				var step: Dictionary = steps[j]
+				next.append([String(step.text) + ("" if step.carried else " (not carried)") + ("," if j < steps.size() - 1 else ""),
+					UiKit.TEXT if step.carried else UiKit.TEXT_OFF])
+			out.append(next)
 	return out
 
 
@@ -707,8 +802,11 @@ func _draw() -> void:
 	draw_rect(panel, UiKit.PANEL_BG)
 	draw_rect(panel, BORDER, false, 1.0)
 	var top := panel.position
-	draw_string(font, top + Vector2(UiKit.SPACE_L, 32), elide(font, "Medical: %s  (%s)" % [_who(), vitals.condition_text()], _title_w(), UiKit.FONT_HEADING),
+	draw_string(font, top + Vector2(UiKit.SPACE_L, 32), elide(font, "Medical: %s" % _who(), _title_w(), UiKit.FONT_HEADING),
 		HORIZONTAL_ALIGNMENT_LEFT, _title_w(), UiKit.FONT_HEADING, UiKit.TEXT)
+	var oximeter := actor != null and InteractionMenu.has_oximeter(actor)
+	_draw_pieces(font, top + Vector2(UiKit.SPACE_L, SUMMARY_Y), InjuryText.summary(vitals, target == actor, oximeter),
+		panel.size.x - UiKit.SPACE_L * 2.0, small, SUMMARY_LINES)
 	draw_string(font, top + Vector2(panel.size.x - UiKit.SPACE_L - CLOSE_HINT_W, 32), elide(font, "? help   H / Esc close", CLOSE_HINT_W, small), HORIZONTAL_ALIGNMENT_RIGHT, CLOSE_HINT_W, small, UiKit.ACCENT if help_open else UiKit.TEXT_DIM)
 	# Body diagram.
 	var origin := _figure_origin()
@@ -722,7 +820,20 @@ func _draw() -> void:
 	var mid_w := _mid_w()
 	var mid := top + Vector2(_mid_x(), FIGURE_TOP)
 	draw_string(font, mid, elide(font, InteractionMenu.part_name(part), mid_w, UiKit.FONT_HEADING), HORIZONTAL_ALIGNMENT_LEFT, mid_w, UiKit.FONT_HEADING, UiKit.TEXT)
-	draw_multiline_string(font, mid + Vector2(0, 24), injuries_text(vitals, part), HORIZONTAL_ALIGNMENT_LEFT, mid_w, small, INJURY_LINES, UiKit.TEXT)
+	var room := int((ROWS_Y - 26.0 - FIGURE_TOP - 24.0) / LINE_H) + 1  # lines above the item list's heading
+	var blocks := injury_lines(part)
+	if blocks.is_empty():
+		var extra := injuries_text(vitals, part)  # (a line in, a tourniquet on an unhurt limb)
+		draw_string(font, mid + Vector2(0, 24), elide(font, extra.get_slice("\n", 0), mid_w, small), HORIZONTAL_ALIGNMENT_LEFT, mid_w, small, UiKit.TEXT_DIM)
+	var used := 0
+	for i in blocks.size():
+		if used >= room:
+			break
+		if used == room - 1 and i < blocks.size() - 1:
+			draw_string(font, mid + Vector2(0, 24 + used * LINE_H), elide(font, "+ more: see the treatment order", mid_w, small), HORIZONTAL_ALIGNMENT_LEFT, mid_w, small, UiKit.TEXT_DIM)
+			break
+		used += _draw_pieces(font, mid + Vector2(0, 24 + used * LINE_H), blocks[i], mid_w, small, mini(2, room - used),
+			" " if String(blocks[i][0][0]) == "Next:" else "  ")
 	var overflow := options.size() > visible_rows()
 	var heading := "Your medical items"
 	if overflow:
@@ -757,9 +868,23 @@ func _draw() -> void:
 	# Signs (numbers only with a pulse oximeter) and the activity log.
 	var right_w := _right_w()
 	var right := top + Vector2(_right_x(), FIGURE_TOP)
-	draw_string(font, right, "Signs", HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
-	var sign_lines := signs_lines(vitals, target == actor, InteractionMenu.has_oximeter(actor))
-	draw_multiline_string(font, right + Vector2(0, 22), "\n".join(sign_lines), HORIZONTAL_ALIGNMENT_LEFT, right_w, small, SIGN_LINES, UiKit.TEXT)
+	draw_string(font, right, elide(font, "Treat in this order" if not injury_list.is_empty() else "Treat in this order: nothing found", right_w, UiKit.FONT_BODY),
+		HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
+	for i in mini(injury_list.size(), ORDER_LINES):
+		var e := injury_list[i]
+		var row := _order_rect(i)
+		if e.part == part:
+			draw_rect(row, Color(UiKit.ACCENT, 0.12))
+		if i == ORDER_LINES - 1 and injury_list.size() > ORDER_LINES:
+			draw_string(font, Vector2(row.position.x, right.y + 22 + i * LINE_H), elide(font, "+ %d more (pick a part)" % (injury_list.size() - i), right_w, small), HORIZONTAL_ALIGNMENT_LEFT, right_w, small, UiKit.TEXT_DIM)
+			break
+		_draw_pieces(font, Vector2(row.position.x, right.y + 22 + i * LINE_H), [["%d." % (i + 1), UiKit.TEXT_DIM],
+			[InjuryText.SEVERITY_WORDS[e.severity].to_upper(), InjuryText.SEVERITY_COLORS[e.severity]], [InjuryText.line(e), UiKit.TEXT]], right_w, small, 1, " ")
+	var signs_top := top + Vector2(_right_x(), _signs_y())
+	draw_string(font, signs_top, "Signs", HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
+	var sign_lines := signs_lines(vitals, target == actor, oximeter, true)
+	var sign_room := maxi(int((LOG_Y - UiKit.FONT_BODY - _signs_y() - 22.0) / font.get_height(small)) + 1, 1)
+	draw_multiline_string(font, signs_top + Vector2(0, 22), "\n".join(sign_lines), HORIZONTAL_ALIGNMENT_LEFT, right_w, small, mini(SIGN_LINES, sign_room), UiKit.TEXT)
 	var log_top := top + Vector2(_right_x(), LOG_Y)
 	draw_string(font, log_top, elide(font, "Triage log (shared)" if not log_lines.is_empty() else "Triage log (shared): nothing yet", right_w, UiKit.FONT_BODY), HORIZONTAL_ALIGNMENT_LEFT, right_w, UiKit.FONT_BODY, UiKit.ACCENT)
 	var shown := log_lines_shown(font)
