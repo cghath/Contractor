@@ -217,7 +217,12 @@ func _test_gunfire() -> void:
 	level.add_child(shooter)
 	var shells := 0
 	var legs := [Vitals.SHIN_L, Vitals.SHIN_R, Vitals.THIGH_L, Vitals.THIGH_R]
+	var alive_at_cut := true  # whether he was alive when the shell that took the leg was fired
+	var killed_by := {}
 	while shells < 12 and not BodyDeform.severed_parts(shot.vitals).any(func(p: StringName) -> bool: return p in legs):
+		alive_at_cut = not shot.vitals.is_dead()
+		if not alive_at_cut and killed_by.is_empty():
+			killed_by = shot.vitals.last_cause.duplicate()
 		var aim := _hitbox_point(shot, Vitals.SHIN_L)
 		var from := aim - shot.global_basis.z * 3.0 + Vector3.UP * 0.2  # in front of him (he faces -z)
 		shooter.global_position = from
@@ -231,8 +236,14 @@ func _test_gunfire() -> void:
 	var stump := shot.vitals.wound_list().filter(func(w: Dictionary) -> bool: return w.get("name") == Vitals.AMPUTATION)
 	check(off.any(func(p: StringName) -> bool: return p in legs) and shells <= 6,
 		"00 buckshot from 3 m takes a leg off in %d shells (%s)" % [shells, off])
-	check(not stump.is_empty() and stump[0].kind == "arterial" and (shot.vitals.is_dying() or not shot.vitals.is_up() or shot.vitals.is_dead()),
-		"alive, it's an arterial amputation and he's dying or down (%s, %s)" % [stump.map(func(w: Dictionary) -> String: return "%s %s" % [w.part, w.kind]), shot.vitals.condition_text()])
+	# Alive when the leg came off: an arterial amputation, dying or down. (Rarely a shell kills him
+	# first, a pellet's wound and the dice: then it comes off by the corpse's rule, no amputation;
+	# said, with what killed him.)
+	if alive_at_cut:
+		check(not stump.is_empty() and stump[0].kind == "arterial" and (shot.vitals.is_dying() or not shot.vitals.is_up() or shot.vitals.is_dead()),
+			"alive, it's an arterial amputation and he's dying or down (%s, %s)" % [stump.map(func(w: Dictionary) -> String: return "%s %s" % [w.part, w.kind]), shot.vitals.condition_text()])
+	else:
+		check(stump.is_empty() and shot.vitals.is_dead(), "dead before the leg came off (%s): it came off by the corpse's rule, no amputation" % [killed_by])
 	# 7.62x54R close (Captain, 2026-10-21: "lower 762x54rs ability to dismember", "lower those too
 	# if theyre close to that 54r"): a living forearm takes 3 to 5 now, a .308 the same.
 	var took := _rounds_into(heavy, Vitals.FOREARM_R, 8, 3600.0, Vitals.FULL_POWER, false, "762x54r_lps")
@@ -546,15 +557,24 @@ func _test_save_round_trip() -> void:
 		piece.queue_free()
 	await _seconds(0.3)
 	var restored := level.server_spawn_body(back)
-	await _seconds(1.0)
 	var deform := _deform(restored)
+	# Each piece comes back once its part is carved and meshed again (a few a frame, BodyDeform
+	# MESH_PER_FRAME; slower on a loaded machine): wait for them, then they must lie where they lay.
+	var off_of := func() -> Array:
+		var out := []
+		for part: String in poses:
+			var piece := deform.piece_of(StringName(part))
+			var q: Array = poses[part]
+			if q.size() != 7:
+				continue
+			if piece == null:
+				out.append("%s: no piece yet" % part)
+			elif piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin) > 0.01:
+				out.append("%s: %.3f m off" % [part, piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin)])
+		return out
+	await _wait_for(func() -> bool: return (off_of.call() as Array).is_empty(), 10.0)
 	var same := cut_before.all(func(p: StringName) -> bool: return p in deform.severed())
 	check(same and deform.severed().size() == cut_before.size(), "restored: the same parts gone (%s)" % [deform.severed()])
-	var off := []
-	for part: String in poses:
-		var piece := deform.piece_of(StringName(part))
-		var q: Array = poses[part]
-		if q.size() == 7 and (piece == null or piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin) > 0.01):
-			off.append(part)
-	check(off.is_empty() and deform.pieces().size() >= 4, "and its pieces lie where they lay (%s off)" % [off])
+	var off: Array = off_of.call()
+	check(off.is_empty() and deform.pieces().size() >= 4, "and its pieces lie where they lay (%s)" % [off if not off.is_empty() else "all"])
 	check(deform.craters_on(Vitals.CHEST) > 0, "its torso still torn open (%d craters)" % deform.craters_on(Vitals.CHEST))
