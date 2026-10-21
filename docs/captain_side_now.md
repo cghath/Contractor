@@ -1,5 +1,10 @@
 # Captain's side: start here (2026-10-14 night)
 
+> **2026-10-21, read first: [docs/cg_brief.md](cg_brief.md).** Don't stop to ask:
+> decide with the decisions already made there, mark numbers Proposed, log the call in followups.md, and finish
+> the task. It has your queue with the calls already made. It replaces "ask the Captain when a
+> call is his".
+
 For cghath and cghath's agent. dev now holds everything below. Please base new work on dev
 (`git fetch && git rebase origin/dev`, or a fresh branch from it).
 
