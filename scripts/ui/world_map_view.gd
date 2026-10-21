@@ -60,6 +60,7 @@ const BADGES := {
 	"alert": {"colour": Color(0.95, 0.6, 0.2), "glyph": "!", "name": "The enemy's alert while you're there"},
 	"recent": {"colour": Color(0.75, 0.55, 0.5), "glyph": "F", "name": "Fights there this week (count)"},
 	"flashpoint": {"colour": Color(0.85, 0.7, 0.23), "glyph": "!!", "name": "Flashpoint: a faction just took it"},
+	"front": {"colour": Color(0.95, 0.45, 0.25), "glyph": ">>", "name": "A front: a faction is attacking it (arrow: from where)"},
 }
 
 var rows := {}  # zone id -> Theatre.zone row
@@ -432,6 +433,7 @@ func _draw() -> void:
 			draw_polyline(inner, Color(HOT, 0.85), 2.5, true)
 	_draw_region_borders()
 	_draw_links()
+	_draw_fronts()
 	for id: String in _polys:
 		_draw_zone(id, font)
 	_draw_homes(font)
@@ -481,6 +483,41 @@ func _draw_links() -> void:
 			draw_circle(crossing, 3.5, LINK.lightened(0.3))
 
 
+## The faction war's fronts (terror groups, 2026-10-20): an arrow in the attacker's colour from a
+## neighbouring zone it holds into the zone it's attacking (from the zone's own edge when it holds
+## none next door: the locals' rebels, a faction in hiding).
+func _draw_fronts() -> void:
+	for id: String in _polys:
+		var row: Dictionary = rows.get(id, {})
+		var by := String(row.get("front_by", ""))
+		if by == "":
+			continue
+		var to := zone_centre(id)
+		var from := to + Vector2(0.0, -0.42)
+		for l: Dictionary in RegionMap.links(id):
+			if String((rows.get(String(l.to), {}) as Dictionary).get("controller", "")) == by:
+				from = zone_centre(String(l.to))
+				break
+		var colour: Color = ZoneControl.SIDE_COLOURS.get(String(row.get("front_side", "hostile")), ZoneControl.SIDE_COLOURS.hostile)
+		var a := to_screen(from.lerp(to, 0.25))
+		var b := to_screen(from.lerp(to, 0.8))
+		var dir := (b - a).normalized()
+		var w := maxf(scale_px * 0.05, 4.0)
+		draw_line(a, b - dir * w * 1.5, Color(colour, 0.9), w, true)
+		draw_colored_polygon(PackedVector2Array([b, b - dir * w * 2.6 + dir.orthogonal() * w * 1.4, b - dir * w * 2.6 - dir.orthogonal() * w * 1.4]), Color(colour, 0.95))
+
+
+## The holder's flag (factions.json "symbol": a fictional field and mark), small, by its name.
+func _draw_flag(at: Vector2, symbol: Dictionary) -> void:
+	if symbol.is_empty():
+		return
+	var s := maxf(scale_px * 0.08, 8.0)
+	var r := Rect2(at - Vector2(s * 0.75, s * 0.5), Vector2(s * 1.5, s))
+	draw_rect(r, Color(String(symbol.get("field", "808080"))))
+	draw_rect(Rect2(r.position + Vector2(r.size.x * 0.3, r.size.y * 0.3), r.size * Vector2(0.4, 0.4)), Color(String(symbol.get("mark", "ffffff"))))
+	draw_rect(r, ZONE_EDGE, false, 1.0)
+
+
 func _draw_zone(id: String, font: Font) -> void:
 	var row: Dictionary = rows.get(id, {})
 	var poly := _poly_screen(_polys[id])
@@ -500,6 +537,7 @@ func _draw_zone(id: String, font: Font) -> void:
 	var y := c.y - maxf(scale_px * 0.14, 12.0) - (lines.size() - 1) * line_h
 	if bool(row.get("squad", false)):
 		_pill(font, Vector2(c.x, y - line_h - 4.0), "SQUAD", SQUAD)
+	_draw_flag(Vector2(c.x - width * 0.5 + maxf(scale_px * 0.08, 8.0), c.y - maxf(scale_px * 0.3, 22.0)), row.get("symbol", {}))
 	for line in lines:
 		_text_centred(font, Vector2(c.x, y), line, FONT_NAME, UiKit.TEXT, width)
 		y += line_h
@@ -528,6 +566,8 @@ static func badges_of(row: Dictionary) -> Array:
 		out.append(["recent", str((row.recent as Array).size())])
 	if bool(row.get("flashpoint", false)):
 		out.append(["flashpoint", ""])
+	if String(row.get("front_by", "")) != "":
+		out.append(["front", "%d%%" % roundi(float(row.get("front_progress", 0.0)) * 100.0)])
 	return out
 
 

@@ -368,6 +368,8 @@ func _build_environment() -> void:
 		holder.add_child(module)
 		_modules.append(module)
 		_by_id[module.module_id] = module
+	if String(def.get("kind", "")) != "base":
+		FactionFlags.build(self, _modules, ZoneControl.controller(GameState.zone_id), func(p: Vector3) -> Vector3: return Vector3(p.x, terrain.height_at(p.x, p.z), p.z))  # its holder's flags (terror groups)
 	if DisplayServer.get_name() != "headless":
 		terrain.build_visuals()
 		scatter.build_visuals()
@@ -605,7 +607,7 @@ func _on_contract_live(cid: String, objectives: Array) -> void:
 	# the QRF waves (Reinforcements) follow it too (they stayed Black Ridge's before).
 	_apply_difficulty_scale()
 	var target := String(contract.get("target", ""))
-	if _enemy_response and target != "" and Kits.kit_of(target) != Kits.INSURGENT:
+	if _enemy_response and target != "":  # (terror groups: any target, Black Ridge too)
 		# Vantage's exo gear is difficulty-gated (CompoundLevel.PMC_LX3_DIFFICULTY/HX1_DIFFICULTY):
 		# true_rating, the host's real 1-5 rating, not "rated" (the briefing, which can understate it).
 		_set_enemy_faction(target, int(contract.get("true_rating", contract.get("rated", 1))))
@@ -644,22 +646,54 @@ func _apply_difficulty_scale() -> void:
 
 ## Wave 6b's open item ("a garrison already spawned before its contract went live keeps the
 ## militia kit"): who the zone's enemy is as it loads, before any contract goes live. A held
-## contract of this deployment in this zone against a kitted faction (the first one), else a hot
-## zone's holder (WorldSites, the persistent world: only read, never seeded here, so a test zone
-## hosted on its own writes no campaign), else "" (Black Ridge, as before).
+## contract of this deployment in this zone (the first one; terror groups 2026-10-20: any target,
+## Black Ridge included, now that a zone has a holder of its own), else the zone's holder in the
+## faction war (WorldSites, the persistent world: only read, never seeded here, so a test zone
+## hosted on its own writes no campaign; not seeded yet, its data "controller"), else "" (Black
+## Ridge, as before).
 func _zone_enemy() -> String:
 	var zid := GameState.zone_id
 	var cids: Array = Contracts.deployment().get("cids", [])
 	for c: Dictionary in Contracts.held():
 		var target := String(c.get("target", ""))
-		if String(c.get("cid", "")) in cids and String(c.get("zone_id", "")) == zid and target != "" and Kits.kit_of(target, zid) != Kits.INSURGENT:
+		if String(c.get("cid", "")) in cids and String(c.get("zone_id", "")) == zid and target != "":
 			return target
-	if String(def.get("kind", "")) == "hot":
-		var site: Dictionary = Campaign.section(WorldSites.SECTION).get(zid, {})
-		var holder := String(site.get("holder", ""))
-		if holder != "" and Kits.kit_of(holder, zid) != Kits.INSURGENT:
-			return holder
+	var site: Dictionary = Campaign.section(WorldSites.SECTION).get(zid, {})
+	var holder := String(site.get("holder", ZoneControl.zone_def_raw(zid).get("controller", "")))
+	if holder != "" and holder != WorldSites.REBELS and MissionRegistry.faction(holder).get("role", "") == "hostile":
+		return holder
 	return ""
+
+
+## Host: whose men hold `module`: the zone's attacker's for the share of its outposts,
+## checkpoints and villages the front has taken (WorldSites front progress, in module order,
+## never a site a contract here is about), else the zone's enemy.
+func module_faction(module: ZoneModule) -> String:
+	var holder_id := String(_enemy_response.enemy_faction) if _enemy_response else FactionSkirmish.DEFAULT_HOLDER
+	if _attacker_sites.is_empty():
+		_attacker_sites = {"by": _zone_attacker(), "ids": []}
+		if String(_attacker_sites.by) != "":
+			var taken: Array = []
+			for c: Dictionary in Contracts.held() + Contracts.board():
+				if String(c.get("zone_id", "")) == GameState.zone_id:
+					taken.append(String(c.get("module_id", "")))
+			var options: Array = []
+			for m: ZoneModule in _modules:
+				if ZoneModules.base(m.type) in ["outpost", "checkpoint", "village"] and m.module_id not in taken:
+					options.append(m.module_id)
+			var progress := float(WorldSites.front_read(GameState.zone_id).get("progress", 0.0))
+			_attacker_sites.ids = options.slice(0, maxi(1, floori(progress * options.size())))
+	return String(_attacker_sites.by) if module.module_id in (_attacker_sites.ids as Array) else holder_id
+
+
+var _attacker_sites := {}  # host: {"by": the attacker, "ids": [module ids its men hold]} (module_faction)
+
+
+## The faction attacking this zone in the faction war (its WorldSites front), or "".
+func _zone_attacker() -> String:
+	var site: Dictionary = Campaign.section(WorldSites.SECTION).get(GameState.zone_id, {})
+	var by := String((site.get("front", {}) as Dictionary).get("by", ""))
+	return by if by != WorldSites.REBELS and MissionRegistry.faction(by).get("role", "") == "hostile" else ""
 
 
 ## Host only. A module's hostiles (garrison_size of them: the module's posts, then extra posts
@@ -768,20 +802,30 @@ func _spawn_queued_garrison() -> void:
 		var i := int(q.i)
 		var pos: Vector3 = q.pos
 		if module and ai.get_node_or_null(NodePath(_garrison_callsign(module, i))) == null:
-			# Wave 6b: a regional army's (data kit's) garrisons wear and carry its kit.
-			var kit_id := Kits.kit_of(_enemy_response.enemy_faction) if _enemy_response else Kits.INSURGENT
+			# Wave 6b: a regional army's (data kit's) garrisons wear and carry its kit. The living war
+			# (2026-10-20): a site the zone's attacker has already taken is its men's (module_faction).
+			var holder_id := String(_enemy_response.enemy_faction) if _enemy_response else FactionSkirmish.DEFAULT_HOLDER
+			var site_faction := module_faction(module)
+			var kit_id := Kits.kit_of(site_faction)
 			var data_kit := Kits.is_data(kit_id)
 			var kit: Array = Kits.loadout(kit_id, i) if data_kit else hostile_loadout(i)
 			if module.type == "hq" and i == 0:
 				kit = kit + [String(WorldValuables.STRONGBOX_KEY)]  # wave 6: the HQ's officer carries its strongbox key
-			var s := spawn_soldier({"name": _garrison_callsign(module, i), "faction": "hostile", "variant": Kits.variant(kit_id) if data_kit else "urban", "pos": pos,
+			var spawn := {"name": _garrison_callsign(module, i), "faction": "hostile", "pos": pos,
 				"loadout": kit + ["enemy_radio"] if i % RADIO_EVERY == 0 else kit, "combat": GARRISON_STATS.combat, "discipline": GARRISON_STATS.discipline, "guard": true,
 				"mode": alert.mode_at(pos) if alert else GARRISON_STATS.mode,
-				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else (Kits.role(kit_id, i) if data_kit else CompoundLevel.hostile_role(i))})
+				"role": "medic" if i % ENEMY_MEDIC_EVERY == ENEMY_MEDIC_EVERY - 1 else (Kits.role(kit_id, i) if data_kit else CompoundLevel.hostile_role(i))}
+			spawn.merge(Kits.dress(site_faction, kit_id, i), true)  # clothes, marks, faction
+			if site_faction != holder_id:
+				spawn["faction"] = String(FactionSkirmish.side_of(site_faction))  # (the attacker's: it and the holder's men fight)
+				if spawn.faction == "friendly":
+					spawn["iff"] = "allied"
+			var s := spawn_soldier(spawn)
 			if s:
 				var brain := SquadAI.of(s)
 				if brain:
 					brain.squad = site_squad(module.module_id)  # its own squad, not the zone's (G-02)
+					brain.squad.faction = s.faction  # (an attacker's site: its side, not the holder's)
 				_post_garrison(module, s)
 				var look := module.global_basis * (q.get("face", Vector3.ZERO) as Vector3)  # a post's way out (towns)
 				s.rotation.y = post_yaw(module, pos) if look.length() < 0.1 else atan2(-look.x, -look.z)

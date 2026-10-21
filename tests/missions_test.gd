@@ -1409,7 +1409,20 @@ func _test_zone_enemy() -> void:
 	cs.held = []
 	cs.deployment = {"cids": []}
 	ws[zid] = {"holder": "black_ridge", "grip": 0.8, "flashpoint": false}
-	check(zl._zone_enemy() == "", "held by Black Ridge: the usual militia mix")
+	check(zl._zone_enemy() == "black_ridge", "held by Black Ridge: the militia")
+	# Terror groups (2026-10-20): a zone held by one of them is theirs; a front splits its sites.
+	ws[zid] = {"holder": "valley_shura", "grip": 0.8, "flashpoint": false}
+	check(zl._zone_enemy() == "valley_shura" and Kits.sends_bombers("valley_shura"), "held by the Valley Shura: its men, and its bombers")
+	ws[zid] = {"holder": "valley_shura", "grip": 0.5, "flashpoint": false, "front": {"by": "kestrel", "since": 1, "progress": 0.5}}
+	zl._attacker_sites = {}
+	var by_site := {}
+	for mod: ZoneModule in zl.modules():
+		by_site[zl.module_faction(mod)] = int(by_site.get(zl.module_faction(mod), 0)) + 1
+	check(zl._zone_attacker() == "kestrel" and int(by_site.get("kestrel", 0)) >= 1 and int(by_site.get(String(zl._enemy_response.enemy_faction), 0)) >= 1,
+		"a front here: the attacker's men hold some of the sites already (%s)" % by_site)
+	zl._attacker_sites = {}
+	var flags := zl.get_node_or_null(^"FactionFlags")
+	check(flags != null and flags.get_child_count() > 0, "the holder's flags fly over its sites (%d)" % (flags.get_child_count() if flags else 0))
 	ws[zid] = {"holder": "eastern_concord", "grip": 0.8, "flashpoint": false}
 	check(zl._zone_enemy() == "eastern_concord", "held by the Eastern Concord Forces: their kit from the first spawn")
 	cs.held = [{"cid": "TZE1", "zone_id": zid, "target": "vantage_group"}]

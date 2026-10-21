@@ -62,6 +62,7 @@ func _ready() -> void:
 	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
+	_test_terror_group_kits()
 	await _test_rival_pmc_kits()
 	await _test_rival_pmc_exo_gating()
 	_test_roles()
@@ -504,6 +505,47 @@ func _test_faction_kits() -> void:
 	check("eastern_concord" in MissionRegistry.enemies(), "the Eastern Concord Forces are a faction the squad can be hired against")
 	check(["us_forces", "uk_forces", "ca_forces"].all(func(f: String) -> bool: return f in MissionRegistry.employers()),
 		"the US, UK and Canada hire the squad")
+
+
+## Terror groups (Captain, 2026-10-20; docs/terror_groups.md): the Ashen Banner, the Valley Shura,
+## the Saltline Syndicate, the Kestrel Cartel and the Highland Free Front each field their own kit:
+## mixed plain clothes (the Banner's foreign fighters and the Front's men in their own camo), their
+## own guns, their marks (militia orange or hostile red), their doctrine; bombers only from the
+## Banner and the Shura.
+func _test_terror_group_kits() -> void:
+	print("Terror group kits")
+	var groups := {"ashen_banner": "hostile", "valley_shura": "hostile", "saltline": "militia", "kestrel": "militia", "highland_front": "militia"}
+	var i := 0
+	for g: String in groups:
+		var kit_id := Kits.kit_of(g, "none")
+		check(Kits.is_data(kit_id) and MissionRegistry.faction_side(g) == groups[g] and g in MissionRegistry.enemies(),
+			"%s fields its own kit (%s), drawn %s" % [g, kit_id, groups[g]])
+		var looks := {}
+		for n in 6:
+			looks[Kits.variant(kit_id, n)] = true
+		check(looks.size() >= 3, "%s's men don't all look alike (%d looks in 6)" % [g, looks.size()])
+		var doctrine := Kits.doctrine(g)
+		check(Doctrine.has(doctrine), "%s fights by its own doctrine (%s)" % [g, doctrine])
+		for n in 2:
+			var spawn := {"name": "WpnTerror%d_%d" % [i, n], "faction": "hostile", "pos": Vector3(60 + i * 4, 0.1, 60 + n * 3),
+				"loadout": Kits.loadout(kit_id, n), "combat": 0.5, "discipline": 0.5, "guard": true, "role": Kits.role(kit_id, n)}
+			spawn.merge(Kits.dress(g, kit_id, n), true)
+			var s := level.spawn_soldier(spawn)
+			SquadAI.of(s).set_physics_process(false)
+			var gun := String(s.inventory.slots[&"primary"])
+			var ammo := StringName(ItemDB.get_item(StringName(gun)).stats.ammo)
+			var marks: Array = s.get_node(^"Model").get(&"iff")
+			check(gun in Kits.loadout(kit_id, n) and s.inventory.rounds_in(&"primary") > 0 and s.inventory.count_of(ammo) >= 1
+				and s.variant == Kits.variant(kit_id, n) and String(s.get_meta(&"faction_id", "")) == g
+				and marks == GearRig.IFF[StringName(groups[g])] and SquadAI.of(s)._doctrine_id() == doctrine,
+				"%s man %d spawns with his %s (loaded, %d spare), his clothes (%s), %s marks and the %s doctrine" % [g, n, gun, s.inventory.count_of(ammo), s.variant, groups[g], doctrine])
+			s.queue_free()
+		i += 1
+	check(Kits.sends_bombers("ashen_banner") and Kits.sends_bombers("valley_shura") and not Kits.sends_bombers("black_ridge")
+		and not Kits.sends_bombers("saltline"), "suicide bombers: the Banner and the Shura only (Captain), not Black Ridge any more")
+	var uniformed := range(6).filter(func(n: int) -> bool: return Kits.is_uniform("banner", n))
+	check(not uniformed.is_empty() and uniformed.size() < 6 and Kits.variant("banner", uniformed[0]) == "banner" and Kits.loadout("banner", uniformed[0]).has("helmet_pasgt"),
+		"the Banner's foreign fighters wear its camo and a helmet; its locals plain clothes")
 
 
 func _test_hostile_kits() -> void:

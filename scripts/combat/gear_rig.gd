@@ -238,7 +238,7 @@ static func iff_of(faction: StringName, iff: StringName, variant: String) -> Arr
 	if faction == &"friendly":
 		return IFF[&"allied" if iff in [&"allied", &"rebel"] else &"contractor"]  # (rebels on our side: green, not the company's blue)
 	if faction == &"hostile":
-		return IFF[&"militia" if variant == "urban" else &"hostile"]
+		return IFF[&"militia" if iff == &"militia" or variant == "urban" else &"hostile"]  # (militia: a faction whose "side" is, Kits.dress)
 	return []
 
 

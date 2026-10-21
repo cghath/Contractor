@@ -433,6 +433,39 @@ func new_full_campaign(campaign_seed := -1, start_cash := -1) -> void:
 	_save()
 
 
+## A job on the front in `zone_id` (the living war, docs/terror_groups.md 7.8), or {}: the
+## company's own ground attacked, a defence (Hold the line) against the attacker; else a job
+## against the holder or the attacker, its brief saying who is fighting whom.
+static func front_offer(rng: RandomNumberGenerator, zone_id: String, today: int) -> Dictionary:
+	var f := WorldSites.front(zone_id)
+	if f.is_empty():
+		return {}
+	var by := String(f.by)
+	var h := WorldSites.holder_now(zone_id)
+	var name := RegionMap.zone_name(zone_id)
+	var ctx := {"day": today, "source": "board", "zone_id": zone_id}
+	var line := ""
+	if h == ZoneControl.PLAYER:
+		if by == WorldSites.REBELS:
+			return {}
+		ctx["type"] = "defend_hold"
+		ctx["target"] = by
+		line = "Fighting in %s: %s attacking the company's ground." % [name, MissionRegistry.faction_name(by)]
+	else:
+		if not ZoneControl.offers_in(zone_id):
+			return {}
+		var sides: Array = [h, by].filter(func(x: String) -> bool: return x in MissionRegistry.enemies() and not WorldSites.is_wiped(x))
+		if sides.is_empty():
+			return {}
+		ctx["target"] = String(sides[rng.randi() % sides.size()])
+		line = "Fighting in %s: %s attacking, %s holding." % [name, WorldSites.holder_name(by), WorldSites.holder_name(h)]
+	var offer := ContractGen.generate(rng, ctx)
+	offer["war_front"] = true
+	offer["war_driven"] = true
+	offer["brief"] = "%s %s" % [line, String(offer.get("brief", ""))]
+	return offer
+
+
 ## Host: drops expired offers and tops the board up for today: regular offers up to
 ## "board_size", a low-risk one if none is left (the safety floor), and one special job per
 ## fixer the company stands well enough with.
@@ -447,12 +480,23 @@ func server_refresh_board() -> void:
 	var board: Array = s.board
 	# Wave 6c: the faction war's own offer, once a hot zone it just took goes up (war_driven),
 	# same as the always-on safe job below - it doesn't wait its turn behind board_size.
+	# The living war (2026-10-20): any zone the war just flipped, not only the hot zones.
 	for z: Dictionary in MissionRegistry.zones():
 		var zid := String(z.get("zone_id", ""))
-		if String(z.get("kind", "")) == "hot" and WorldSites.is_flashpoint(zid) and ZoneControl.offers_in(zid) \
-				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_driven", false)):
-			_add_offer(ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid)}))
+		if (String(z.get("kind", "")) == "hot" or WorldSites.is_war_zone(zid)) and WorldSites.is_flashpoint(zid) and ZoneControl.offers_in(zid) \
+				and not board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_flip", false) and c.get("target", "") == WorldSites.holder(zid)):
+			var flip := ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": WorldSites.holder(zid), "war_flip": true})
+			flip["war_flip"] = true
+			_add_offer(flip)
 			WorldSites.server_clear_flashpoint(zid)
+	# Contracts follow the war: a job on every front (one each), and a defence wherever the
+	# company's own ground is attacked.
+	for zid in WorldSites.fronts():
+		if board.any(func(c: Dictionary) -> bool: return c.get("zone_id", "") == zid and c.get("war_front", false)):
+			continue
+		var offer := front_offer(rng, zid, today)
+		if not offer.is_empty():
+			_add_offer(offer)
 	if not board.any(func(c: Dictionary) -> bool: return c.source == "safe"):
 		_add_offer(ContractGen.generate(rng, {"day": today, "source": "safe"}))
 	# One of the locals' own jobs at a time (rebel support part 3): paid in support and favours.
@@ -901,7 +945,7 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
 		_close(c, String(result.outcome))
 		if String(result.outcome) == "completed" and String(c.get("zone_kind", "")) == "hot":
-			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")))  # wave 6c
+			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")))  # wave 6c; the living war
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
 	Economy.bank_items(without_intel(report.get("bank", report.get("items", []))), "carried out")
