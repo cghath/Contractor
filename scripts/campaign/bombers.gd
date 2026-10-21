@@ -31,6 +31,9 @@ const VBIED_FRAGS := 3
 const VBIED_SPEED_KMH := 55.0
 const VBIED_SHARE := 0.3
 
+## Tests and dev tools: false stops the random sends (_maybe_send); server_send and
+## server_send_vbied still work, and those out still walk and go off.
+static var enabled := true
 ## Host: bombers out: {"soldier", "squad"}; and how many went off (tests, the session log).
 var out: Array[Dictionary] = []
 ## VBIEDs out: {"vehicle", "driver"}.
@@ -207,6 +210,8 @@ func _go_off(b: Dictionary) -> void:
 ## Host, every CHECK_S: maybe a bomber, when the zone's enemy is a faction that sends them
 ## (Kits.sends_bombers) and has been pushed (tier) or is hunting the squad.
 func _maybe_send() -> void:
+	if not enabled:
+		return
 	var response := get_parent().get_node_or_null(^"EnemyResponse") as EnemyResponse
 	var pressure := get_parent().get_node_or_null(^"Pressure") as Pressure
 	if response == null or not Kits.sends_bombers(String(response.enemy_faction)):  # (Captain 2026-10-20: the Banner and the Shura)
