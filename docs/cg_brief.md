@@ -1,34 +1,32 @@
 # cghath: working brief (2026-10-21)
 
-**Read this first, every session. It replaces "ask the Captain when a call is his" in the
-2026-10-20 task list. That line was wrong, and it's why your agent kept stopping.**
+Hey cg, here's where things stand and what's next, all in one place. It takes over from the
+2026-10-20 task list. One change, and it's on me (Claude): that list told your agent to ask
+Captain when a call seemed like his, which is why it kept stopping to wait on answers. Sorry about
+that. Captain is usually playtesting rather than watching chat, so it works better if you make the
+call and keep going.
 
-## Rule zero: never stop to ask. Decide, note it, keep going.
+## How to handle decisions
 
-Captain is playtesting, not watching agents, so a question to him just stalls the work. Five or
-six times now your agent has stopped on questions that "need the Captain's answer". From now on:
-
-1. **Make the call yourself**, using "Decisions already made" below.
-   Pick what's closest to Arma 3 + ACE3/KAT + LAMBS/VCOM realism that's still fun to play.
-2. **Put every number you invent in data** (`data/*.json`) or a named const, marked
-   `Proposed`, so it can be tuned without code.
-3. **Write each call down** under "Calls made" at the bottom of
-   `docs/audits/followups.md`: one line each, saying what you chose, why, and what the alternative
-   was. Then carry on.
-4. **Finish the whole task:** code, tests, CHANGELOG, push. If one piece really can't be done
-   (missing art, a bug outside your area), build everything else, log the gap as an F-xx item,
-   and move to the next task. Don't end the session waiting.
-5. **Only stop for:** something that would delete or overwrite player saves or other people's work,
-   or a hard rule below that two requirements contradict. Even then, take the safe option, log it
-   and continue.
+1. **Make the call**, using "Decisions already made" below. When in doubt, go with whatever's
+   closest to Arma 3 + ACE3/KAT + LAMBS/VCOM realism that's still fun to play.
+2. **Put new numbers in data** (`data/*.json`) or a named const marked `Proposed`, so they're
+   easy to tune later.
+3. **Jot the call down** under "Calls made" at the bottom of `docs/audits/followups.md`: one line
+   with what you picked, why, and the alternative. Captain can look over them whenever.
+4. **Carry the task through:** code, tests, CHANGELOG, push. If one piece can't be done (missing
+   art, a bug in someone else's area), build the rest, log the gap as an F-xx item, and move on
+   to the next thing.
+5. **The only time to hold off** is something that would delete or overwrite player saves or
+   someone else's work. Even then, take the safe option, note it, and keep going.
 
 ## Decisions already made (answers to the usual questions)
 
 - **Art:** characters and gear are **0.5 cm voxels** (VoxelArt BODY_VOXEL; gear FINE_VOXEL). No
   meshes or textures for bodies. Real camo patterns.
 - **Names:** real military gear names are fine (M4, M1014, PKM). Factions, companies, vehicles we
-  invent and anything sci-fi get **original names**, no trademarks. Never say Contractor "copies"
-  a game: "learns from" or "inspired by".
+  invent and anything sci-fi get **original names**, no trademarks. When describing Contractor, say it
+  "learns from" or is "inspired by" other games rather than "copies".
 - **Realism bar:**
   - medical is ACE3 + KAT and beyond;
   - AI should beat Arma 3 Veteran + LAMBS + VCOM;
@@ -42,10 +40,10 @@ six times now your agent has stopped on questions that "need the Captain's answe
 - **Saves:** never delete them. Archive, don't remove. Zones start fresh each contract.
 - **Bots act like players:** they choose things and say so (callouts). Nothing teleports or
   happens by reflex.
-- **UI:** use the shared UiKit kit. Every menu says what it's for. It must fit the ui_test's 10
+- **UI:** use the shared UiKit kit. Every menu says what it's for. It should fit the ui_test's 10
   resolutions.
 - **Testing:**
-  - headless Godot only, never pop a window, because Captain games on this PC;
+  - headless Godot only, so no windows pop up while Captain is gaming on this PC;
   - set CONTRACTOR_PORT and CONTRACTOR_TEST_TAG, because other agents test in parallel;
   - run your affected suites plus smoke, not the full suite locally; CI runs the full set;
   - test logs are never deleted.
@@ -62,7 +60,7 @@ six times now your agent has stopped on questions that "need the Captain's answe
   - Don't wait for a merge to start the next task.
 - **When something lands:** a CHANGELOG entry, then a short note in Captain's Discord thread.
 
-## Already done or taken by Claude: don't redo
+## Already done (no need to redo)
 
 - Items 1-5 of the 2026-10-20 list: treatment props and first-person hands, fingers, visible
   tourniquets/splints/IVs, faces and per-soldier looks, blast dismemberment and synced pieces.
@@ -82,8 +80,8 @@ six times now your agent has stopped on questions that "need the Captain's answe
   - Breaching rounds only in the M1014 and the **Skeleton Key** (your M870, renamed);
   - a choke for the Remington 870;
   - your F-131 (AI shotgun ammo) is fixed.
-  - Your later commit "M320 only: ... ours comes out" on feat/m320-shotgun must **not** be merged:
-    the Skeleton Key stays.
+  - Heads-up: your later "M320 only: ... ours comes out" commit on feat/m320-shotgun would take
+    the Skeleton Key back out, so we're leaving that one unmerged. Your M870 lives on as the Skeleton Key.
 - **Merged from you:** demolitions, fire support, fallen (dog tags, memorial), M320,
   world-visual, pip-scopes, tutorial-2, assault-warning.
 - **Not yet merged:** `feat/missions-2`, `feat/voxel-smoke`, and your newer `feat/demolitions`
@@ -93,7 +91,7 @@ six times now your agent has stopped on questions that "need the Captain's answe
 ## Your queue, in order, with the calls already made
 
 Checked against the code on 2026-10-21 (claude/ai-driving 75b4ec5). Everything below is missing or
-only partly built: the part to build is spelled out. Already built, so don't redo:
+only partly built: the part to build is spelled out. Already built, so no need to redo:
 - tutorial sections;
 - UI pass;
 - economy (your feat/economy-balance is superseded: close it);
