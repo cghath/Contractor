@@ -24,6 +24,10 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 ## one after; the client's severed pieces must lie exactly where the host's settled.
 const GORED := ["Gored_1", "Gored_2"]
 const GORED_AT := [Vector3(-6, 0.1, 36), Vector3(-6, 0.1, 44)]
+## A corpse the host shoots in the leg until it comes off (BodyDeform.GUNFIRE): the client's piece
+## where the host's landed, as a blast's.
+const SHOT_LEG := "Shot_1"
+const SHOT_LEG_AT := Vector3(-22, 0.1, 36)
 ## A man the host shoots dead standing once the client is in: his corpse must come to rest down,
 ## and the same on both machines (the host sends its rest pose: _host_rest_pose).
 const SLUMPED := "Slumped"
@@ -208,6 +212,23 @@ func _host_patient_tourniquet_off() -> void:
 
 
 ## Host: a hostile killed and blown apart by a frag at his feet (BlastGore), its pieces settling.
+func _stage_shot_leg() -> void:
+	var s := level.spawn_soldier({"name": SHOT_LEG, "faction": "hostile", "variant": "woodland", "pos": SHOT_LEG_AT,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(0.3).timeout
+	s.vitals.server_kill()
+	await get_tree().create_timer(1.5).timeout
+	var hb := BlastGore._hitbox(s, Vitals.THIGH_R)
+	for i in 20:
+		if Vitals.THIGH_R in BodyDeform.severed_parts(s.vitals):
+			break
+		s.vitals.server_hit(Vitals.THIGH_R, {"round_class": Vitals.INTERMEDIATE, "position": Warheads.hitbox_point(hb, Vector3(0.12 * (i % 3 - 1), 0.08 * (i % 5 - 2), 0.0)),
+			"direction": Vector3.DOWN, "hitbox": hb, "distance": 20.0, "energy_j": 1650.0})
+		await get_tree().create_timer(0.05).timeout
+	print("[host] shot %s's leg: %s cut" % [SHOT_LEG, BodyDeform.severed_parts(s.vitals)])
+
+
 func _stage_gore(i: int) -> void:
 	var s := level.spawn_soldier({"name": GORED[i], "faction": "hostile", "variant": "woodland", "pos": GORED_AT[i],
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
@@ -234,6 +255,7 @@ func _give_kit(id: int) -> void:
 	_fire_dragger_dry()
 	if id != GHOST and _combatant_or_body(GORED[1]) == null:
 		_stage_gore(1)
+		_stage_shot_leg()
 		_stage_slump()
 
 
@@ -511,6 +533,11 @@ func _check_gore() -> void:
 		var deform := b.model.get_node(^"BodyDeform") as BodyDeform if b else null
 		check(off.is_empty() and deform != null and not deform.severed().is_empty(),
 			"%s: the parts the host's blast took are gone here too (%s), each piece where the host's landed (%s)" % [name_, deform.severed() if deform else [], off])
+	await _wait_for(func() -> bool: return _gore_off(_combatant_or_body(SHOT_LEG)).is_empty(), 25.0)
+	var shot := _combatant_or_body(SHOT_LEG)
+	var shot_off := _gore_off(shot)
+	check(shot != null and shot_off.is_empty() and Vitals.THIGH_R in (shot.model.get_node(^"BodyDeform") as BodyDeform).severed(),
+		"a dead man's leg shot off by rifle rounds is gone here too, its piece where the host's landed (%s)" % [shot_off])
 	var saved: Soldier = level.bodies.get_child(0) if level.bodies.get_child_count() > 0 else null
 	await _wait_for(func() -> bool: return _gore_off(saved).is_empty(), 5.0)
 	var off_saved := _gore_off(saved)

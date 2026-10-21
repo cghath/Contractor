@@ -12,7 +12,7 @@ extends Node
 ## dead"): each round scores its energy on the part it hit (Vitals.round_damage: 5.56 ~1, .308 and
 ## 7.62x54R ~2, .338 ~4; a .50 just kills, Vitals.LETHAL_J). Craters size to it and widen as the
 ## part's score climbs, so a limb visibly tears up before it goes. Alive, a limb comes off only
-## when the host tears it off (Vitals._check_amputation: a broken bone and SEVER_ALIVE points), as
+## when the host tears it off (gunfire_cut, GUNFIRE: the living take more), as
 ## an arterial "amputation" bleed a tourniquet stops, so a good medic can save him. Dead, the
 ## round that takes a part past SEVER_DEAD cuts it, and the head can go (HEAD_DEAD). The cut is where the
 ## craters are; SEVER_SLAB voxels are torn away and everything past the cut (the rest of the part
@@ -27,7 +27,7 @@ extends Node
 ##   flesh, and white bone at a limb's core (the skull under the scalp, ribs in the torso), from
 ##   each part's own shape (profile). Bone sticks out of a stump a little. Visible-devices shows
 ##   bone at an open fracture on the living; stumps and the dead are here.
-## - Hanging by tissue: at DANGLE_SHARE of a dead limb's sever score with a broken bone (or a blast
+## - Hanging by tissue: at GUNFIRE's dangle share of a limb's sever score (or a blast
 ##   that mangled a thigh or upper arm, BlastGore's "d"), the limb is cut through but for a strip
 ##   of tissue on one side and the rest of it hangs off at DANGLE_DEG. Cut through later, the
 ##   hanging part is what drops.
@@ -59,17 +59,38 @@ const WIDEN := 0.6
 const DEAD_SIZE := 1.25
 ## Points a round scores on the part it hits, by class (unknown: intermediate).
 const DAMAGE := {&"pistol": 0.5, &"intermediate": 1.0, &"full_power": 2.5, &"fragment": 0.6}
-## Captain, 2026-10-16: "dismembering happens way too easily with just shooting" (were 10 \/ 4 \/ 3,
-## and a dead limb needed no break).
-const SEVER_ALIVE := 20.0
-const SEVER_DEAD := 10.0
+## Gunfire takes limbs (Captain, 2026-10-21: "shot this dude over 40 times with the 1014 and his
+## legs didnt come off. more than 20 rounds per leg"; 2026-10-16: "it takes a lot of 556 to lose
+## an arm, or head but not as much 308"). Every hit scores points on the part it hits
+## (Vitals.round_damage -> hit_points): (energy / Vitals.DAMAGE_J) ^ "exponent" x the round class's
+## "class_mult", so heavy rounds count far more than light ones; a buckshot pellet scores linearly
+## x "pellet_mult" (nine of them a shell, chewing). Past a part's "points" it comes off, alive or
+## dead, decided on the host (gunfire_cut, from Vitals.server_hit) and sent like a blast's cut
+## (BlastGore: a synced piece): hands and feet first (hits in the lowest "extremity_share" of a
+## forearm or shin score apart and take it at the wrist or ankle), then forearms and shins
+## ("distal"), then upper arms and thighs ("proximal", the shin or forearm going with it); the head
+## only once he's dead. The living take "alive_mult" times as much, and a limb lost alive is an
+## arterial amputation and shock (Vitals.server_amputate). Short of the cut, at "dangle_share" of
+## it a limb hangs by tissue (the living's only with a broken bone). One table, all Proposed:
+## a 5.56 (1 point): about 10 into a living shin, 20 into a thigh; a .308 (4.2): 2 or 3; 7.62x54R
+## close (4.8): 2; .338 (12): 1; a .50 (Vitals.LETHAL_J) kills and takes what it hits; 00 buckshot
+## close (0.7 a pellet, ~4 a shell on a leg): 2 or 3 shells for a shin, 5 for a thigh; a 9 mm
+## (0.13): only sustained fire into one joint.
+const GUNFIRE := {
+	"exponent": 1.5,
+	"class_mult": {&"pistol": 0.8, &"intermediate": 1.0, &"full_power": 1.5, &"fragment": 0.6},
+	"pellet_mult": 4.0,
+	"points": {"extremity": 5.0, "distal": 8.0, "proximal": 16.0, "head": 7.0},
+	"alive_mult": 1.2,
+	"extremity_share": 0.35,
+	"dangle_share": 0.75,
+}
+## (Older names, for what reads them.)
+const SEVER_DEAD := 16.0
 const HEAD_DEAD := 7.0
 const SEVER_SLAB := 2
-## Proposed: hanging by tissue at this share of the sever score (dead; DANGLE_ALIVE alive, its bone
-## broken too), the hanging part at DANGLE_DEG off the stump; the strip left is DANGLE_BRIDGE of
-## the part's width.
-const DANGLE_SHARE := 0.75
-const DANGLE_ALIVE := 0.85
+## Proposed: the hanging part at DANGLE_DEG off the stump; the strip left is DANGLE_BRIDGE of the
+## part's width.
 const DANGLE_DEG := 40.0
 const DANGLE_BRIDGE := 0.3
 const LIMBS: Array[StringName] = [Vitals.THIGH_L, Vitals.THIGH_R, Vitals.SHIN_L, Vitals.SHIN_R,
@@ -328,8 +349,8 @@ func _rebuild() -> void:
 			continue
 		var limit := _threshold(part, dead)
 		var points := float(score.get(part, 0.0))
-		var cut := _sever_rec.has(part) or (amputated.has(part) and not _dangle_rec.has(part)) \
-			or (dead and fresh and (part == Vitals.HEAD or broken.has(part)) and points >= _threshold(part, true))
+		# (Gunfire's cuts are the host's, from every hit so far: gunfire_cut, recorded like a blast's.)
+		var cut := _sever_rec.has(part) or (amputated.has(part) and not _dangle_rec.has(part))
 		if cut:
 			_severed[part] = true
 			new_cuts.append(part)
@@ -338,7 +359,7 @@ func _rebuild() -> void:
 				_recording[part] = true
 			continue
 		if part != Vitals.HEAD and not _dangled.has(part) and (_dangle_rec.has(part)
-				or (broken.has(part) and points >= limit * (DANGLE_SHARE if dead else DANGLE_ALIVE) and limit < INF)):
+				or ((dead or broken.has(part)) and points >= limit * float(GUNFIRE.dangle_share) and limit < INF)):
 			_dangled[part] = true
 	for part: StringName in new_cuts:
 		_cut_ragdoll(part)
@@ -413,11 +434,70 @@ static func _crater_size(w: Dictionary, rc: StringName) -> float:
 	var dmg := float(w.get("dmg", 0.0))
 	return clampf(0.7 + 0.3 * dmg, 0.7, 2.2) if dmg > 0.0 else float(CLASS_SIZE.get(rc, 1.0))
 
-## Points at which `part` comes off.
+## Points at which `part` comes off (GUNFIRE), whole (its hand or foot sooner: gunfire_cut).
 static func _threshold(part: StringName, dead: bool) -> float:
+	var pts: Dictionary = GUNFIRE.points
 	if part == Vitals.HEAD:
-		return HEAD_DEAD if dead else INF
-	return SEVER_DEAD if dead else SEVER_ALIVE
+		return float(pts.head) if dead else INF
+	return float(pts.distal if part in BlastGore.DISTAL else pts.proximal) * (1.0 if dead else float(GUNFIRE.alive_mult))
+
+
+## What one hit scores (GUNFIRE): from its energy on arrival (joules; <= 0 unknown: by class), a
+## buckshot `pellet` linearly.
+static func hit_points(round_class: StringName, energy_j: float, pellet := false) -> float:
+	if energy_j <= 0.0:
+		return float(DAMAGE.get(round_class, DAMAGE[&"intermediate"]))
+	var base := energy_j / Vitals.DAMAGE_J
+	if pellet:
+		return base * float(GUNFIRE.pellet_mult)
+	return pow(base, float(GUNFIRE.exponent)) * float((GUNFIRE.class_mult as Dictionary).get(round_class, 1.0))
+
+
+## Host: the cut the hits so far make on `part`'s bone (a limb part, or the head once `dead`), from
+## `wounds` (WoundModel's: each round's "at" and points "dmg"): {} for none yet, else {"part", "at":
+## where it's cut (rest pose; a hand or foot at the wrist or ankle; null for the head)}. GUNFIRE.
+static func gunfire_cut(wounds: Array, part: StringName, dead: bool) -> Dictionary:
+	var bone := _bone_part(part)
+	if not (bone in LIMBS or (bone == Vitals.HEAD and dead)):
+		return {}
+	var distal := bone in BlastGore.DISTAL
+	var ext_top := -INF
+	if distal:
+		var box: Array = BodyMap.PART_BOXES[bone][0]
+		var bottom: float = (box[0] as Vector3).y - (box[1] as Vector3).y * 0.5
+		ext_top = bottom + (box[1] as Vector3).y * float(GUNFIRE.extremity_share)
+	var total := 0.0
+	var low := 0.0
+	var sum := Vector3.ZERO
+	var low_sum := Vector3.ZERO
+	var n := 0
+	var nl := 0
+	var seen := {}
+	for w: Dictionary in wounds:
+		var at: Variant = w.get("at")
+		if _bone_part(w.part) != bone or not at is Vector3:
+			continue
+		var key := "%s%s" % [w.part, at]
+		if seen.has(key):
+			continue  # one round, however many wounds it made
+		seen[key] = true
+		var pts := _points(w, StringName(w.get("rc", &"")))
+		total += pts
+		sum += at
+		n += 1
+		if distal and (at as Vector3).y <= ext_top:
+			low += pts
+			low_sum += at
+			nl += 1
+	if n == 0:
+		return {}
+	var mult := 1.0 if dead else float(GUNFIRE.alive_mult)
+	if distal and nl > 0 and low >= float(GUNFIRE.points.extremity) * mult:
+		var a := low_sum / nl
+		return {"part": bone, "at": Vector3(a.x, ext_top, a.z)}  # the hand or foot, at the wrist or ankle
+	if total >= _threshold(bone, dead):
+		return {"part": bone, "at": sum / n if bone != Vitals.HEAD else null}
+	return {}
 
 
 ## The part whose bone carries `part` (face and neck hits count on the head).
