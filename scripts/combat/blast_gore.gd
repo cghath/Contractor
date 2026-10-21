@@ -112,6 +112,11 @@ static func server_direct(body: Node3D, part: StringName, pos: Vector3, dir: Vec
 	var vitals := body.get_node_or_null(^"Vitals") as Vitals
 	if vitals == null:
 		return
+	# Thrown away from where it struck (Captain, 2026-10-21: "i shot homie in the chest with an rpg":
+	# the burst's own throw skips the man it went off on, so what was left of him fell any way;
+	# shot from the front, he goes over on his back).
+	if kg > 0.0:
+		Ragdoll.note_blast(body, pos - dir.normalized() * 0.3, kg)
 	var world := body.get_world_3d()
 	var bone := BodyDeform._bone_part(part)
 	if bone == Vitals.HEAD:

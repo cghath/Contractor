@@ -25,6 +25,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   peppers the chest, and leaves the body whole. Before, it gibbed him and carved big craters in
   the torso at the collar. Every head cut now leaves a neck stump about 5 cm tall (it was about
   2 cm and mostly torn away), opened like a limb: skin, fat, flesh and the spine at its core.
+- **A gibbed torso lands the way it's thrown.** After an RPG in the chest blew everything off,
+  the torso spun and landed any way up (often face down). Now, hit from the front, it goes
+  over onto its back; from behind, onto its front. Four causes:
+  - The death collapse push meant for a body standing on its legs spun a lone torso like a top.
+    A body with no lower legs no longer gets it.
+  - The burst's throw skipped the man it went off on. A direct hit now throws him away from it.
+  - Pieces flying off hit their own torso on the way out. They no longer collide with their
+    own body or with each other.
+  - A cut limb's joint held the falling torso for one more physics step. It now goes at once.
+  A torso left standing on its neck is tipped over too.
 - **Wound marks go with a cut-off limb.** Holes and blood trails past the cut stayed hanging in
   the air where the limb had been. Now only the marks on what's left of the part are drawn.
 

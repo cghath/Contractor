@@ -849,6 +849,17 @@ func _new_piece(part: StringName) -> SeveredPiece:
 ## if it has one (a late joiner, a restored body), else with its record's launch.
 func _launch(rb: SeveredPiece, part: StringName, at: Transform3D) -> void:
 	rb.global_transform = Transform3D(at.basis.orthonormalized(), at.origin)
+	# Never against its own body or the pieces that came off it with it (Captain, 2026-10-21, an
+	# RPG in the chest: the head and thighs, launched from inside the torso's box, shoved it into a
+	# tumble that landed it any way up, not thrown back as the blast threw it). Anyone else's, the
+	# ground and the world it lands on as before.
+	var soldier := model.get_parent() as Soldier
+	if soldier and is_instance_valid(soldier.ragdoll):
+		for p: PhysicsBody3D in soldier.ragdoll.parts.values():
+			rb.add_collision_exception_with(p)
+	for other: Node3D in _pieces:
+		if other != rb and is_instance_valid(other) and other is PhysicsBody3D:
+			rb.add_collision_exception_with(other as PhysicsBody3D)
 	var rec: Dictionary = _sever_rec.get(part, {})
 	var pose: Array = rec.get("q", [])
 	if pose.size() == 7:

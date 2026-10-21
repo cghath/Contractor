@@ -390,6 +390,20 @@ func _test_heads_and_marks() -> void:
 	m.vitals.server_gore_flush()
 	await _wait_for(func() -> bool: return _deform(m).cut_bounds(Vitals.THIGH_L) is AABB and drawn.call() == 0, 5.0)
 	check(before > 0 and drawn.call() == 0, "cut above its wound, the thigh's marks go with what was cut off (%d drawn, then %d)" % [before, drawn.call()])
+	# Captain, 2026-10-21: "torsos cant lay on their back, only on the front when all limbs are
+	# dismembered" ("i shot homie in the chest with an rpg"): what's left is thrown away from the
+	# hit, not spun any way up: from the front onto its back, from behind onto its front.
+	var lie := {}
+	for from_front: bool in [true, false]:
+		var t := _man("GoreRpgChest%s" % from_front)
+		await _seconds(0.3)
+		var chest_hb := BlastGore._hitbox(t, Vitals.CHEST)
+		Warheads._direct_hit(t, chest_hb, Warheads.hitbox_point(chest_hb, Vector3.ZERO), t.global_basis.z if from_front else -t.global_basis.z, null, 0.7)
+		await _wait_for(func() -> bool: return is_instance_valid(t.ragdoll) and t.ragdoll.frozen, 10.0)
+		var torso := t.ragdoll.parts["torso"] as Node3D if is_instance_valid(t.ragdoll) else null
+		lie[from_front] = [(-torso.global_basis.z).normalized().dot(Vector3.UP) if torso else 0.0, _deform(t).severed().size()]
+	check(float(lie[true][0]) > 0.7 and float(lie[false][0]) < -0.7 and int(lie[true][1]) >= 5,
+		"an RPG in the chest, its limbs and head off: from the front he lands on his back (%.2f), from behind on his front (%.2f)" % [lie[true][0], lie[false][0]])
 
 
 ## Rounds into a dead man's broken thigh: hanging by tissue first, then off.
@@ -473,8 +487,8 @@ func _test_save_round_trip() -> void:
 		piece.queue_free()
 	await _seconds(0.3)
 	var restored := level.server_spawn_body(back)
-	await _seconds(1.0)
 	var deform := _deform(restored)
+	await _wait_for(func() -> bool: return deform.pieces().size() >= cut_before.size(), 8.0)  # (meshing shares a budget with every body)
 	var same := cut_before.all(func(p: StringName) -> bool: return p in deform.severed())
 	check(same and deform.severed().size() == cut_before.size(), "restored: the same parts gone (%s)" % [deform.severed()])
 	var off := []
@@ -482,6 +496,6 @@ func _test_save_round_trip() -> void:
 		var piece := deform.piece_of(StringName(part))
 		var q: Array = poses[part]
 		if q.size() == 7 and (piece == null or piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin) > 0.01):
-			off.append(part)
+			off.append("%s %s" % [part, "no piece" if piece == null else "%.3f m, frozen %s" % [piece.global_position.distance_to(SeveredPiece.pose_transform(q).origin), piece.freeze]])
 	check(off.is_empty() and deform.pieces().size() >= 4, "and its pieces lie where they lay (%s off)" % [off])
 	check(deform.craters_on(Vitals.CHEST) > 0, "its torso still torn open (%d craters)" % deform.craters_on(Vitals.CHEST))
