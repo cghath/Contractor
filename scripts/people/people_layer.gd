@@ -456,7 +456,21 @@ func _make(data: Dictionary) -> Node:
 ## Host only. Gives `holder` (anyone's inventory: an officer, an HVT) one intel item with its
 ## own intel_id and `source`. Returns whether it fit.
 func server_give_intel(holder: Soldier, item_id: StringName, source: String) -> bool:
-	return holder.inventory.take(item_id, 1, intel_state(item_id, source, holder.name)) == 1
+	# His pocket loot (CompoundLevel.POCKETS) makes way: the intel he's meant to carry goes in
+	# first, where it usually would, and the pockets refill what room is left.
+	var pockets: Array = holder.get_meta(CompoundLevel.POCKETS, [])
+	for e: Array in pockets:
+		for i in int(e[1]):
+			holder.inventory.remove_one(e[0])
+	var ok := holder.inventory.take(item_id, 1, intel_state(item_id, source, holder.name)) == 1
+	var kept: Array = []
+	for e: Array in pockets:
+		var got := holder.inventory.take(e[0], int(e[1]))
+		if got > 0:
+			kept.append([e[0], got])
+	if not pockets.is_empty():
+		holder.set_meta(CompoundLevel.POCKETS, kept)
+	return ok
 
 
 ## Host only. Places an intel item in the world (an outpost's laptop, a checkpoint's papers).

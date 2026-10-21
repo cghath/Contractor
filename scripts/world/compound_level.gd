@@ -1019,6 +1019,10 @@ func _names_on(faction: StringName) -> Dictionary:
 	return taken
 
 
+## A hostile's pocket loot (WorldValuables.roll_pockets), [[id, count], ...] as it went in.
+const POCKETS := &"pockets"
+
+
 func _make_soldier(data: Dictionary) -> Node:
 	var soldier: Soldier = PLAYER_SCENE.instantiate()
 	soldier.name = data.name
@@ -1059,8 +1063,12 @@ func _make_soldier(data: Dictionary) -> Node:
 			var leader := soldier.role == Roles.TEAM_LEADER or "Commander" in String(data.name) or "Officer" in String(data.name) or "Leader" in String(data.name)
 			var zone_key := String((lvl_def as Dictionary).get("id", name)) if lvl_def is Dictionary else String(name)
 			var day := Economy.day() if Campaign.campaign_id != "" else 0  # (a new deployment, new finds; the same body the same)
+			var pockets: Array = []  # [id, count] each (PeopleLayer.server_give_intel makes room in them)
 			for e: Dictionary in WorldValuables.roll_pockets("%s|%s|%s|%d" % [data.name, soldier.spawn_id, zone_key, day], hot, leader):
-				inventory.take(StringName(e.id), int(e.count))
+				var got := inventory.take(StringName(e.id), int(e.count))
+				if got > 0:
+					pockets.append([StringName(e.id), got])
+			soldier.set_meta(POCKETS, pockets)
 		# What it started with, so what it's handed or picks up later can be told apart
 		# (_drop_extras, when a player takes its slot).
 		soldier.set_meta(&"start_gear", Roster.gear_counts(inventory.net_state))
