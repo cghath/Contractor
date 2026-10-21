@@ -130,7 +130,8 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 ## What a deployment cost on top of the contract: `run` (expenses already taken from the cash
 ## during the run and since: respawns, supports, lost helicopters, weekly bills) summed by
 ## what, plus the field costs per head and day, a death benefit per KIA and treatment per
-## wounded squadmate (Prices.operations). Returns {"lines": [{"what", "amount", "charge"}],
+## wounded squadmate (Prices.operations; with the report's "benefits_paid" the death benefits are
+## `run`'s own lines, one per man). Returns {"lines": [{"what", "amount", "charge"}],
 ## "total", "charge"}: "charge" marks the lines still to take from the cash.
 static func expenses(report: Dictionary, days: int, run: Array, use_stocks := false) -> Dictionary:
 	var used := {}
@@ -168,7 +169,10 @@ static func expenses(report: Dictionary, days: int, run: Array, use_stocks := fa
 			if int(stocked.offset) > 0:
 				used = stocked.used
 				lines.append({"what": "Covered by FOB stocks", "amount": -int(stocked.offset), "charge": true})
-	if kia > 0:
+	# In a campaign each man's benefit is paid when his death is confirmed (his tags home: BaseHub.
+	# server_pay_death_benefit) and is a line of its own in `run` ("benefits_paid"); a report
+	# without the roster (the board alone) still counts the dead.
+	if kia > 0 and not bool(report.get("benefits_paid", false)):
 		lines.append({"what": "Death benefit (%d KIA)" % kia, "amount": kia * Prices.operations("kia_benefit"), "charge": true})
 	if wounded > 0:
 		lines.append({"what": "Treatment (%d wounded)" % wounded, "amount": wounded * Prices.operations("wounded_care"), "charge": true})

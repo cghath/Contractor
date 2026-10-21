@@ -294,7 +294,8 @@ func server_add(pos: Vector3, yaw: float) -> int:
 
 
 ## Host: a blast at `pos` (radius `radius_m`) wears down the berms it reaches; HITS flatten one.
-func server_blast(pos: Vector3, radius_m: float) -> void:
+## Its crater's radius is `crater_m` (the blast's radius if negative; none at 0).
+func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	if not multiplayer.is_server():
 		return
 	for id: int in records.keys():
@@ -304,8 +305,9 @@ func server_blast(pos: Vector3, radius_m: float) -> void:
 			if int(rec.hits) >= HITS:
 				_client_remove.rpc(id)
 	var terrain := _terrain()
-	if terrain and pos.y - terrain.height_at(pos.x, pos.z) <= maxf(CRATER_FROM_M, radius_m):
-		_client_cut.rpc(GroundCuts.crater_op(pos, radius_m))
+	var crater := radius_m if crater_m < 0.0 else crater_m
+	if terrain and crater > 0.0 and pos.y - terrain.height_at(pos.x, pos.z) <= maxf(CRATER_FROM_M, crater):
+		_client_cut.rpc(GroundCuts.crater_op(pos, crater))
 
 
 func _terrain() -> ZoneTerrain:

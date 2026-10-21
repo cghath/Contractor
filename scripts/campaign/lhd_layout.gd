@@ -86,6 +86,7 @@ const TERMINALS := [
 	[&"hiring", Vector3(12.5, 0, -18.5), -90.0],
 	[&"ops", Vector3(12.0, DECK_Y, -25.2), 90.0],
 	[&"motor_pool", Vector3(10.0, 0, 13.0), 0.0],
+	[&"memorial", Vector3(-14.6, 0, -14.0), 90.0],  # the memorial wall (docs/ChrisPlan_handoff.md "Bases"), port side of the hangar
 ]
 ## The vehicle park: the hangar aft, bays two abreast facing the bow, the motor pool's vehicles
 ## parked in them as props (as many as there are bays).

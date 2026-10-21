@@ -21,6 +21,8 @@ const OVERWATCH := "overwatch"
 ## carry keeps no state; nothing else in a zone holds either: not for sale, no zone loot).
 const BLACK_BOX := "black_box"
 const CREW_TAGS := "crew_tags"
+## The forward observer (fire support, 2026-10-20): ObserverMission.build makes its objectives.
+const OBSERVER := "observer"
 ## The convoy's cargo: a supply crate (carried in both hands; it sells as salvage). Any crate of
 ## it carried out counts: a two-handed carry keeps no state (Inventory.hands), so the crate's own
 ## intel id can't be asked for; nothing else in a zone holds one (not for sale, no zone loot).
@@ -60,6 +62,8 @@ static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String,
 			out.objectives = _crash(pick, module, half, knobs)
 		OVERWATCH:
 			out.objectives = _overwatch(pick, module, half, knobs)
+		OBSERVER:
+			out.objectives = ObserverMission.build(pick, module, half, knobs)
 		RECON:
 			var made := _recon(pick, def, options, half, knobs)
 			out.objectives = made.objectives

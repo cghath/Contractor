@@ -24,6 +24,10 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 ## one after; the client's severed pieces must lie exactly where the host's settled.
 const GORED := ["Gored_1", "Gored_2"]
 const GORED_AT := [Vector3(-6, 0.1, 36), Vector3(-6, 0.1, 44)]
+## A corpse the host shoots in the leg until it comes off (BodyDeform.GUNFIRE): the client's piece
+## where the host's landed, as a blast's.
+const SHOT_LEG := "Shot_1"
+const SHOT_LEG_AT := Vector3(-22, 0.1, 36)
 ## A man the host shoots dead standing once the client is in: his corpse must come to rest down,
 ## and the same on both machines (the host sends its rest pose: _host_rest_pose).
 const SLUMPED := "Slumped"
@@ -54,6 +58,9 @@ var _virtual_group := {}
 ## Two AI the host stages before the client joins: one dragging the other (_stage_drag).
 const DRAGGER := "Dragger"
 const DRAGGED := "Dragged"
+## The shared triage log the host writes on the dragged casualty before the client joins
+## (cghath's list, 2026-10-20): [who, what]; the client must read the same off him.
+const CARE_LOG := [["Dragger", "Tourniquet, left thigh"], ["Medic", "Triage card: Immediate (red)"]]
 ## A hostile the host stages aiming its rifle (_stage_drag), for the client to shoot and loot
 ## (_check_looted_rifle).
 const AIMER := "Aimer"
@@ -116,6 +123,7 @@ func _ready() -> void:
 		Net.peer_joined.connect(_give_kit)
 		Net.peer_left.connect(_on_client_left)
 		BaseHub.level_switched.connect(_on_host_switched)
+		Ballistics.record_path = true  # the client checks its tracer against it (_check_tracer_path)
 		get_tree().create_timer(240.0).timeout.connect(func() -> void: get_tree().quit(1))
 		_stage_drag()
 	else:
@@ -165,6 +173,8 @@ func _stage_drag() -> void:
 	var dragged: Soldier = make.call(DRAGGED, Vector3(12, 0.1, 31.1))
 	await get_tree().create_timer(0.3).timeout
 	dragged.vitals.server_damage(500.0)
+	for e: Array in CARE_LOG:
+		dragged.vitals.server_log_care(String(e[0]), String(e[1]))
 	print("[host] staged a drag: %s" % dragger.server_pick_up_body(dragged, Soldier.DRAG, INF))
 	var aimer: Soldier = make.call(AIMER, AIMER_AT)
 	aimer.want_aim = true  # its rifle shouldered when the client shoots it
@@ -208,6 +218,23 @@ func _host_patient_tourniquet_off() -> void:
 
 
 ## Host: a hostile killed and blown apart by a frag at his feet (BlastGore), its pieces settling.
+func _stage_shot_leg() -> void:
+	var s := level.spawn_soldier({"name": SHOT_LEG, "faction": "hostile", "variant": "woodland", "pos": SHOT_LEG_AT,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(0.3).timeout
+	s.vitals.server_kill()
+	await get_tree().create_timer(1.5).timeout
+	var hb := BlastGore._hitbox(s, Vitals.THIGH_R)
+	for i in 20:
+		if Vitals.THIGH_R in BodyDeform.severed_parts(s.vitals):
+			break
+		s.vitals.server_hit(Vitals.THIGH_R, {"round_class": Vitals.INTERMEDIATE, "position": Warheads.hitbox_point(hb, Vector3(0.12 * (i % 3 - 1), 0.08 * (i % 5 - 2), 0.0)),
+			"direction": Vector3.DOWN, "hitbox": hb, "distance": 20.0, "energy_j": 1650.0})
+		await get_tree().create_timer(0.05).timeout
+	print("[host] shot %s's leg: %s cut" % [SHOT_LEG, BodyDeform.severed_parts(s.vitals)])
+
+
 func _stage_gore(i: int) -> void:
 	var s := level.spawn_soldier({"name": GORED[i], "faction": "hostile", "variant": "woodland", "pos": GORED_AT[i],
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
@@ -234,6 +261,7 @@ func _give_kit(id: int) -> void:
 	_fire_dragger_dry()
 	if id != GHOST and _combatant_or_body(GORED[1]) == null:
 		_stage_gore(1)
+		_stage_shot_leg()
 		_stage_slump()
 
 
@@ -399,6 +427,7 @@ func _run_client() -> void:
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
+	await _check_tracer_path()
 	if me.inventory.rounds_in(&"primary") != 27:
 		print("    (up %s, %s, hands '%s', at %s, %d rounds, why out %s)" % [me.vitals.is_up(), me.vitals.condition_text(), me.inventory.hands,
 			me.global_position, me.inventory.rounds_in(&"primary"), me.vitals.why_unconscious()])
@@ -444,6 +473,10 @@ func _run_client() -> void:
 		check(me.vitals.wound_list()[0].treated and not me.vitals.wound_list()[0].bleeding and not me.vitals.is_healing(), "a remote treatment through the host: bandaged after 5 s")
 		await _wait_for(func() -> bool: return me.inventory.medical_count(&"pressure_bandage") == 1, 2.0)
 		check(me.inventory.medical_count(&"pressure_bandage") == 1 and me.inventory.count_of(&"ifak") == 1, "drawn from the IFAK, which stays with one bandage left")
+		await _wait_for(func() -> bool: return not me.vitals.care_log().is_empty(), 2.0)
+		var log := me.vitals.care_log()
+		check(log.size() == 1 and String(log[0].who) == "%s (self)" % me.display_name() and String(log[0].what) == "Pressure Bandage, left forearm",
+			"and the host's entry for it in the shared triage log replicates (%s)" % [log])
 	# The medical model's hidden values reach the client too, so its checks and cues match.
 	me._server_treat.rpc_id(1, me.get_path(), &"morphine", Vitals.TORSO)
 	await _wait_for(func() -> bool: return me.vitals.morphine_level() > 0.2, 12.0)
@@ -511,6 +544,11 @@ func _check_gore() -> void:
 		var deform := b.model.get_node(^"BodyDeform") as BodyDeform if b else null
 		check(off.is_empty() and deform != null and not deform.severed().is_empty(),
 			"%s: the parts the host's blast took are gone here too (%s), each piece where the host's landed (%s)" % [name_, deform.severed() if deform else [], off])
+	await _wait_for(func() -> bool: return _gore_off(_combatant_or_body(SHOT_LEG)).is_empty(), 25.0)
+	var shot := _combatant_or_body(SHOT_LEG)
+	var shot_off := _gore_off(shot)
+	check(shot != null and shot_off.is_empty() and Vitals.THIGH_R in (shot.model.get_node(^"BodyDeform") as BodyDeform).severed(),
+		"a dead man's leg shot off by rifle rounds is gone here too, its piece where the host's landed (%s)" % [shot_off])
 	var saved: Soldier = level.bodies.get_child(0) if level.bodies.get_child_count() > 0 else null
 	await _wait_for(func() -> bool: return _gore_off(saved).is_empty(), 5.0)
 	var off_saved := _gore_off(saved)
@@ -604,6 +642,34 @@ func _check_looted_rifle(me: Soldier) -> void:
 		"looted over the network: nothing of the rifle stays drawn on the body here (%s)" % [left])
 
 
+## Tracers (Captain, 2026-10-21: their arcs "still wonky depending on terrain"): the tracer drawn
+## here for the last shot runs along the path the host's round really flew (Ballistics.flight_path),
+## muzzle to impact, point for point.
+func _check_tracer_path() -> void:
+	_host_path = null
+	_host_last_path.rpc_id(1)
+	await _wait_for(func() -> bool: return _host_path != null, 3.0)
+	var host: PackedVector3Array = _host_path if _host_path != null else PackedVector3Array()
+	var mine := Tracer.last_path
+	var worst := INF if host.size() != mine.size() or host.is_empty() else 0.0
+	for i in mini(host.size(), mine.size()):
+		worst = maxf(worst, host[i].distance_to(mine[i]))
+	check(worst < 0.001, "client vs host: the tracer here follows the host's real path, muzzle to impact (%d points, worst %.4f m)" % [mine.size(), worst])
+
+
+var _host_path: Variant = null
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _host_last_path() -> void:
+	_client_last_path.rpc_id(multiplayer.get_remote_sender_id(), Ballistics.last_path)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_last_path(points: PackedVector3Array) -> void:
+	_host_path = points
+
+
 ## The soldier named `callsign` (players and AI), or null.
 ## Faces (SoldierLook): every peer draws each soldier as the same person. An AI's look comes in
 ## its spawn data, rolled from who he is; the host's own, set after he joined, replicates.
@@ -692,6 +758,10 @@ func _check_late_drag() -> void:
 	check(dragger.model.hand_position(true).distance_to(strap) < 0.08 and dragged.model.torso.global_basis.z.dot(Vector3.UP) < -0.6,
 		"drawn on the client: the casualty on its back, the dragger's hands on its straps")
 	check(dragged.collision_layer == 0, "and the dragged body doesn't block (no collision) for a late joiner either (audit L2-02)")
+	var log := dragged.vitals.care_log()
+	var seen: Array = log.map(func(e: Dictionary) -> Array: return [e.who, e.what])
+	check(seen == CARE_LOG and log.all(func(e: Dictionary) -> bool: return String(e.t) != ""),
+		"the shared triage log the host wrote on him before this client joined is here, the same, while he's dragged (%s)" % [log])
 
 
 ## The patient the host treated before this client joined (_stage_patient): every device drawn

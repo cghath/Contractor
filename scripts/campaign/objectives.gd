@@ -55,6 +55,9 @@ const DESTROY_CACHE := "destroy_cache"
 ## - DESTROY_VEHICLES (sabotage: a vehicle park, 2026-10-20): the "vehicles" parked about "pos"
 ##   (MissionScenario parks them when the contract goes live); done when every one burns, is a
 ##   wreck or can't drive. server_cache_destroyed("cache" id) completes it too.
+## - FIRE_TARGET (the forward observer, 2026-10-20; ObserverMission plays it): the "model" parked
+##   at "pos"; done when it's put out of action by a fire mission's rounds (FireSupport), failed
+##   when anything else does it.
 const CONVOY := "convoy"
 const HOLD_POINT := "hold_point"
 const RESCUE_CREW := "rescue_crew"
@@ -76,8 +79,9 @@ const DESTROY_VEHICLES := "destroy_vehicles"
 const KILL_HVT := "kill_hvt"
 const DESTROY_WRECK := "destroy_wreck"
 const OVERWATCH := "overwatch"
+const FIRE_TARGET := "fire_target"
 const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED, DESTROY_VEHICLES,
-	KILL_HVT, DESTROY_WRECK, OVERWATCH]
+	KILL_HVT, DESTROY_WRECK, OVERWATCH, FIRE_TARGET]
 ## The breaching charge item that destroys a cache when placed on it.
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5

@@ -355,7 +355,7 @@ func _nlaw_sensor(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) 
 
 func _build_visual() -> void:
 	var calibre := float(data.get("calibre_mm", 84.0)) / 1000.0
-	var length := clampf(calibre * 9.0, 0.5, 1.2)
+	var length := float(data.get("length_m", clampf(calibre * 9.0, 0.5, 1.2)))  # (a 40 mm grenade is 10 cm long)
 	_visual = Node3D.new()
 	add_child(_visual)
 	var body := MeshInstance3D.new()
@@ -396,6 +396,7 @@ func _build_visual() -> void:
 	light.light_energy = 2.5
 	light.omni_range = 6.0
 	_flame.add_child(light)
+	_flame.visible = data.has("motor")  # (no motor, no flame: a 40 mm grenade)
 	_visual.add_child(_flame)
 
 
@@ -405,8 +406,8 @@ func _face_and_trail(delta: float) -> void:
 	if _flame:
 		_flame.visible = motor_burning()
 	_trail_cd -= delta
-	if _trail_cd > 0.0 or not is_inside_tree():
-		return
+	if _trail_cd > 0.0 or not is_inside_tree() or not bool(data.get("trail", true)):
+		return  # (a 40 mm grenade has no motor and leaves no trail)
 	_trail_cd = 0.04
 	if _puff_mesh == null:
 		_puff_mesh = SphereMesh.new()  # one mesh for every puff; each fades its own material

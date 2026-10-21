@@ -1,0 +1,19 @@
+{
+	"_note": "Player fire support (FireSupport, UavSupport; the Captain's list of 2026-10-20, 'Vehicles and air'). Everything here is Proposed. Prices per round and per UAV call are in data/prices.json \"supports\" (mortar_round, artillery_round, uav). units: the firing units a fire mission can go to. They fire from off the map: the guns stand off_map_m past the zone's edge on the side its supports come from (Supports.origin_for), so range and time of flight are real ones. elevation_mils: the angle the rounds fly at (the mortar high, the howitzers low), which with the range gives the time of flight (no drag). response_s: from the call to the first round fired; adjust_s: from a correction to the next. bias_m: the error a mission starts with (the guns' survey and the weather), the observer's corrections take it out; lased_bias: what's left of it for a point lased through binoculars. dispersion_m + dispersion_per_km x range (km): every round lands within that radius of where the guns aim (a uniform disc). danger_close_m: friendlies this near the aim and the guns wait for the caller to confirm (real doctrine says 600 m: shortened for our zones). max_rounds: most rounds in one fire for effect; rounds_per_op: what the unit can give one deployment of each shell. cooldown_s: after a fire for effect, before the next mission. vehicle_reach_m: a round's blast hurts a vehicle this near (more the closer), vehicle_blast_x its blast's share on a hull. min_tier: the standing (factions.json reputation_tiers) a deployment employer needs with the company to lend the unit; regions: where it reaches (the 105s sit at the inland FOB: the coast is out of their reach).",
+	"units": {
+		"mortar": {"name": "81 mm mortar section", "callsign": "Hammer 6", "warhead": "mortar_82_he", "price": "mortar_round",
+			"min_m": 80, "max_m": 5600, "off_map_m": 600, "elevation_mils": 1100, "response_s": 20, "adjust_s": 8, "gap_s": 2.5,
+			"bias_m": [15, 45], "lased_bias": 0.35, "dispersion_m": 8, "dispersion_per_km": 4, "danger_close_m": 150,
+			"max_rounds": 8, "rounds_per_op": {"he": 40, "smoke": 12}, "cooldown_s": 180, "vehicle_reach_m": 7, "vehicle_blast_x": 2.5,
+			"min_tier": "neutral", "regions": ["coast", "inland"]},
+		"artillery": {"name": "105 mm battery", "callsign": "Thunder 3", "warhead": "arty_105_he", "price": "artillery_round",
+			"min_m": 600, "max_m": 11500, "off_map_m": 4500, "elevation_mils": 450, "response_s": 40, "adjust_s": 12, "gap_s": 1.0,
+			"bias_m": [30, 80], "lased_bias": 0.35, "dispersion_m": 14, "dispersion_per_km": 3, "danger_close_m": 250,
+			"max_rounds": 6, "rounds_per_op": {"he": 30, "smoke": 8}, "cooldown_s": 420, "vehicle_reach_m": 12, "vehicle_blast_x": 2.5,
+			"min_tier": "trusted", "regions": ["inland"]}
+	},
+	"_uav": "uav: a loitering recon drone (UavSupport). It flies in from the supports' origin at speed_ms, circles orbit_m round the point it was sent to alt_m up for loiter_s, then flies home. Its camera sees the ground within sensor_m of the point under it: a hostile in its sight (no wall or roof, less than Spotting.FOLIAGE_OPAQUE_M of tree crown in the way) is spotted after spot_s (times the Spotting factors for stance, movement, camo, foliage and weather; thermal: night doesn't hide anyone) and tagged for the squad (EnemyTags) every tag_every_s while it's seen. Storms ground it (DayNight.grounds_aircraft). hits rounds bring it down; a manned hostile AA technical within aa_reach_m with a clear line has aa_hit_chance every aa_every_s to hit it.",
+	"uav": {"name": "recon UAV", "callsign": "Eyeball 1-1", "price": "uav", "loiter_s": 600, "alt_m": 280, "orbit_m": 220, "speed_ms": 35,
+		"sensor_m": 450, "spot_s": 5.0, "tag_every_s": 6.0, "cooldown_s": 900, "hits": 3, "aa_models": ["technical_zu23", "technical_zpu"],
+		"aa_reach_m": 1500, "aa_every_s": 5.0, "aa_hit_chance": 0.06, "min_tier": "neutral", "regions": ["coast", "inland"]}
+}
