@@ -403,6 +403,8 @@ var _height := 1.0
 var _girth := 1.0
 ## The face at work (FaceRig): his own head, eyes, mouth and brows.
 var face_rig: FaceRig
+## Long hair tucked in under a helmet with ear covers or a nape guard (GearRig: set_hair_tucked).
+var hair_tucked := false
 ## Until when (Soldier._now) he's calling out, mouth open (shout; Callouts.play).
 var _shout_until := -1.0
 ## Body type (VoxelArt.BODIES): "male" or "female". A female soldier is drawn FEMALE_SCALE of
@@ -661,6 +663,16 @@ func set_face(code: String) -> void:
 		add_child(face_rig)
 	face_rig.setup(self, face if face != "" else SoldierLook.DEFAULT)
 	_apply_girth()
+
+
+## A helmet whose ear covers or nape guard come down over long hair is on (or off): the head's
+## hair goes flat under it (FaceArt.tucked), and back as it was without.
+func set_hair_tucked(on: bool) -> void:
+	if on == hair_tucked:
+		return
+	hair_tucked = on
+	if face_rig and is_node_ready():
+		face_rig.setup(self, face if face != "" else SoldierLook.DEFAULT)
 
 
 ## Widens each body part's mesh for the build (girth), and tells the trunk's hitboxes.

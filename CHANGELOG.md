@@ -11,6 +11,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Helmets fit the new heads (Captain, 2026-10-21)
+
+#### Fixed
+- **Helmets are no longer too big.** They were shaped round the old, broader head and stood 3-4 cm
+  off the new faces' heads. Every helmet now rides snug, with about 1.5-2.5 cm of padding all
+  round, at every height and build, men and women. The LX-3's face guard closes round the face
+  as before. Hits on a helmet land on the shell as drawn.
+- Long hair on top no longer pokes through a helmet's crown.
+- A woman's bun, braid or ponytail goes flat under a heavy helmet's ear covers or the LX-3's nape
+  guard instead of showing through them, and comes back when the helmet is off.
+
 ### Gun styles: the new SMGs, shotguns and pistols get their own models (items expansion follow-up)
 
 #### Added
