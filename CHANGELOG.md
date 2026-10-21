@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A squadmate no longer stays behind after clearing a building on his own (2026-10-21)
+
+#### Fixed
+- **Squadmates who clear a building on their own follow you again afterwards.** When you walk
+  into a building, idle squadmates stack up and clear it. A man who finished his corner used to
+  stay put for good, as if you'd ordered him to hold there. He now goes back to following you. A
+  clear you order still ends with them holding where they got to.
+
 ### Items expansion: 214 new items (Captain, 2026-10-20: "we genuinely need more items like ive been harping about")
 
 #### Added

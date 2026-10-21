@@ -3277,12 +3277,16 @@ func _screened(point: Vector3) -> bool:
 	return squad != null and Soldier._now() - squad.screen_at < SCREEN_S and squad.screen_point.distance_to(point) < SCREEN_M
 
 
-## An ordered tactic is done: the unit holds where it got to.
+## An ordered tactic is done: the unit holds where it got to. Not one the squad gave itself
+## (a follow-in clear behind a human lead, Squad._tick_follow_in: "op" "auto"): that one hands
+## back to following him, as if it had never been ordered (the spacing suite's "Alpha stuck on
+## the wall": done with his corner of a building the lead had walked by, he held there for good).
 func _tactic_done(t: Dictionary) -> void:
 	if t.is_empty() or ordered.is_empty() or t != ordered:
 		return
 	ordered = {}
-	if _friendly():
+	var auto := t.get("op") is Dictionary and bool((t.op as Dictionary).get("auto", false))
+	if _friendly() and not auto:
 		order = Squad.Order.HOLD
 		_hold_point = body.global_position
 		_think_cd = 0.0

@@ -1138,6 +1138,16 @@ func _test_multi_storey() -> void:
 	check(placed_no, "put inside a building (a teleport, not a walk in): no clear")
 	_place(player, outside_at + Vector3.UP * 0.1)
 	check(auto and dropped, "following him in, they stack and clear it on their own (%s), and drop it when he walks off (%s)" % [auto, dropped])
+	# A follow-in clear finished (his corner done) hands him back to following; an ordered one
+	# ends in a hold where he got to (the spacing suite's man left holding by a wall he'd cleared).
+	var mate: SquadAI = mates[0]
+	mate.give_tactic({"kind": &"clear", "op": {"auto": true}, "slot": 0})
+	mate._tactic_done(mate.ordered)
+	var back_to_follow := mate.order == Squad.Order.FOLLOW and mate.ordered.is_empty()
+	mate.give_tactic({"kind": &"clear", "op": {}, "slot": 0})
+	mate._tactic_done(mate.ordered)
+	var ordered_holds := mate.order == Squad.Order.HOLD
+	check(back_to_follow and ordered_holds, "done with a clear of his own he follows again (%s); done with an ordered one he holds (%s)" % [back_to_follow, ordered_holds])
 	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
 	await _seconds(0.5)
 	# A man on the roof behind the parapet sees a hostile in the street and takes him on.
