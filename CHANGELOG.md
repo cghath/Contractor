@@ -11,14 +11,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### The M320 and a breaching shotgun (Captain's list for cghath, 2026-10-20: "Not built yet / Weapons and items")
+### The M320 underbarrel grenade launcher (Captain's list for cghath, 2026-10-20: "Not built yet / Weapons and items")
 
-Closes the list item "an M320 underbarrel grenade launcher and a shotgun".
+Closes the M320 half of the list item "an M320 underbarrel grenade launcher and a shotgun". The
+shotguns came with the Captain's items expansion (`rem870`, `m1014`, 12 ga), so this branch's own
+M870 was taken out again. Its breaching round (blows a hole in a wooden or sheet-metal wall
+within 2.5 m, or shoots a locked box's lock off) and its shell-by-shell tube loading are in
+commit 75cc83e (`scripts/combat/shotguns.gd`), if the Captain wants them on his `rem870`.
 
 #### Added
 - **M320 Grenade Launcher** (`m320`, $1,600 proposed): an underbarrel attachment for railed rifles,
   mounted from the inventory like a grip (not on machine guns or sniper rifles). **4** (new key,
-  rebindable; on the pad wheel as "Underbarrel / shells") switches the trigger to it and back;
+  rebindable; on the pad wheel as "Underbarrel launcher") switches the trigger to it and back;
   **R** then loads one grenade by hand (about 3 s), **Fire** lobs it. The grenade flies the
   launchers' own projectile with gravity, so it arcs: aim high for range. The loaded grenade is
   the launcher's own state: it stays in when the M320 comes off, goes back on, the gun is stowed,
@@ -28,32 +32,17 @@ Closes the list item "an M320 underbarrel grenade launcher and a shotgun".
   (blast within about 3 m, fragments to about 10 m, a small crater) but only past 14 m; closer,
   it hits like a stone and doesn't go off. M714 smoke (`round_40mm_smoke`, $35) puts a white
   smoke cloud where it lands.
-- **M870 Pump Shotgun** (`m870`, $900): a six-shell tube, pump action (one shot a pull, about 1 s
-  to work the pump). **R** loads shells one at a time (about half a second each) until the tube
-  is full; firing stops it. **4** picks which shell R loads. Shells (prices proposed):
-  - **00 Buckshot** (`shells_12g_buck`, $2): nine pellets, each its own round through the
-    ballistics, spread inside 1.6 degrees.
-  - **Slugs** (`shells_12g_slug`, $2): one heavy round (IIIA).
-  - **Breaching Rounds** (`shells_12g_breach`, $3): at a wooden or sheet-metal door or wall
-    within 2.5 m they blow a hole through it, on a smaller scale than a breaching charge does
-    (concrete only chips). At a locked box they shoot the lock off. Anything else, they hit as
-    a weak, short-ranged round.
 - The **grenadier** role's kit (data/roles.json) now has the M320 on his M4, with 8 HE and 2
   smoke grenades. A kit's gun attachment goes on the first gun in the kit that takes it.
-- Weapon lights fit the shotgun. New sounds: the shotgun's boom, the M320's thump, a shell going
-  in, the pump.
-- Tests: weapons (data, buckshot pattern, an arcing HE burst that hurts a man near it, a dud
-  inside the arming distance, smoke, buckshot/slug/breaching shots, shell-by-shell loading and
-  firing stopping it, save/load and a peer's copy of both); attachments (the M320's grenade
-  stays with it on and off the gun); armor (the two new rounds on the ladder).
+- The M320's thump (new sound). Ground models for the M320 and the 40 mm grenades.
+- Tests: weapons (data, an arcing HE burst that hurts a man near it, a dud inside the arming
+  distance, smoke, its grenade saved and on a peer's copy, the grenadier's kit); attachments (the
+  M320's grenade stays with it on and off the gun, swapped for a grip, the gun stowed and drawn).
 
 #### Not yet (for the Captain's side and Claude)
-- **Held models and poses (Captain's files):** carried in hand, the shotgun still shows the
-  generic rifle model (VoxelArt has no `shotgun` style yet), and the M320 isn't drawn under the
-  rifle (attachments under the barrel aren't drawn on the held gun at all yet). The ground models
-  for both are new in ItemArt. Both use the rifle hold pose.
-- **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130),
-  and an AI with a shotgun would see no spare ammo (F-131).
+- **Held model (Captain's files):** the M320 isn't drawn under the rifle in hand (attachments
+  under the barrel aren't drawn on the held gun at all yet). It uses the rifle hold.
+- **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130).
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

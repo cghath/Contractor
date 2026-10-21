@@ -2,10 +2,9 @@ extends Node
 ## Headless checks of weapon pack 1 (stand-in OPFOR guns and more BLUFOR guns): every new weapon
 ## has its ammo, rounds, loose rounds, price and a voxel model; fires its round and reloads from
 ## its own magazine or belt; each round keeps to the armor and vehicle rules; the hostile
-## faction's kits are AK-family guns; the autorifleman role carries the M249. The M320 (loaded by
+## faction's kits are AK-family guns; the autorifleman role carries the M249. The M320: loaded by
 ## hand, an arcing HE grenade that arms past its distance and hurts a man near it, a dud inside
-## it, smoke) and the pump shotgun (buckshot's pellets, a slug, a breaching round through planks
-## and off a lock, shell-by-shell loading), each with its state saved and on a peer's copy.
+## it, smoke, its grenade saved and on a peer's copy, and the grenadier's kit carries it.
 ##   <voxel godot exe> --headless --path . res://tests/weapons_test.tscn
 ## Exits with the number of failures.
 
@@ -49,7 +48,6 @@ func _ready() -> void:
 	_test_reloads()
 	_test_muzzle_point()
 	_test_m320_data()
-	_test_shotgun_data()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -71,7 +69,6 @@ func _ready() -> void:
 	await _test_rival_pmc_exo_gating()
 	_test_roles()
 	await _test_m320()
-	await _test_shotgun()
 	GameState.delete_save()
 	print("WEAPONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -591,7 +588,7 @@ func _test_muzzle_point() -> void:
 	check(Soldier.muzzle_point(eye, Vector3.DOWN, false, false).is_finite(), "straight down still gives a usable point")
 
 
-# --- The M320 and the shotgun (Captain's list for cghath, 2026-10-20) ------------------------
+# --- The M320 (Captain's list for cghath, 2026-10-20) ---------------------------------------
 
 ## The M320, its 40 mm grenades and their warheads in the data: what it fits, the rounds it
 ## takes, the arming distance and the arc.
@@ -616,48 +613,7 @@ func _test_m320_data() -> void:
 	for id: StringName in [&"m320", &"round_40mm_he", &"round_40mm_smoke"]:
 		check(_priced(id), "%s is priced ($%d) and for sale" % [id, Prices.price_of(id)])
 	check(he.type == "ammo" and not he.tags.has("launcher_round"), "40 mm grenades aren't shoulder-launcher rounds")
-
-
-## The shotgun, its shells and their rounds in the data; the buckshot pattern.
-func _test_shotgun_data() -> void:
-	print("Shotgun and 12 ga in the data")
-	var gun := ItemDB.get_item(&"m870")
-	check(gun != null and gun.slot == &"primary" and Shotguns.is_tube(gun) and Shotguns.capacity(gun) == 6 and gun.stats.fire_modes == ["pump"],
-		"the M870 is a pump-action primary with a six-shell tube")
-	var full := gun.default_state()
-	check(int(full.rounds) == 6 and Shotguns.tube_of(full).size() == 6 and Shotguns.next_shell(full) == &"shells_12g_buck", "it comes full of buckshot (%s)" % [full])
-	check(Shotguns.shells_of(gun) == [&"shells_12g_buck", &"shells_12g_slug", &"shells_12g_breach"], "it takes buckshot, slugs and breaching rounds")
-	var pellet := Shotguns.shot_item(gun, &"shells_12g_buck")
-	var slug := Shotguns.shot_item(gun, &"shells_12g_slug")
-	var breach := Shotguns.shot_item(gun, &"shells_12g_breach")
-	check(String(Ballistics.round_data(pellet).get("id", "")) == "12g_00_pellet" and String(Ballistics.round_data(slug).get("id", "")) == "12g_slug"
-		and String(Ballistics.round_data(breach).get("id", "")) == "12g_breach", "each shell fires its own round through the ballistics")
-	check(Ballistics.energy_at(slug, 0.0) > 5.0 * Ballistics.energy_at(pellet, 0.0) and Ballistics.energy_at(pellet, 50.0) < Ballistics.energy_at(pellet, 0.0) * 0.6,
-		"a slug carries far more than one pellet (%.0f J against %.0f J), and a pellet slows fast" % [Ballistics.energy_at(slug, 0.0), Ballistics.energy_at(pellet, 0.0)])
-	check(Ballistics.threat_level(slug) == &"IIIA" and Ballistics.threat_level(pellet) == &"IIA" and Ballistics.round_class(pellet) == Vitals.PISTOL,
-		"soft armour IIIA stops a slug, IIA a pellet")
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 870
-	var aim := Vector3(0.3, -0.1, -1).normalized()
-	var spread := float(ItemDB.get_item(&"shells_12g_buck").stats.pellet_spread_deg)
-	var dirs := Shotguns.pellet_dirs(aim, 9, spread, rng)
-	var widest := 0.0
-	var inside := true
-	var distinct := {}
-	for d in dirs:
-		var a := rad_to_deg(d.angle_to(aim))
-		widest = maxf(widest, a)
-		inside = inside and a <= spread + 0.001
-		distinct[str(d.snapped(Vector3.ONE * 0.0001))] = true
-	check(dirs.size() == 9 and inside and widest > spread * 0.4 and distinct.size() == 9,
-		"buckshot: nine pellets, each its own line inside the %.1f degree cone (widest %.2f)" % [spread, widest])
-	check(Shotguns.pellet_dirs(aim, 1, spread, rng) == [aim], "a slug flies the aim itself")
-	for id: StringName in [&"m870", &"shells_12g_buck", &"shells_12g_slug", &"shells_12g_breach"]:
-		check(_priced(id), "%s is priced ($%d) and for sale" % [id, Prices.price_of(id)])
-	var model := VoxelArt.model_for(gun)
-	check(model.contains(":shotgun:") and VoxelArt.mesh(model, "multicam") != null and not VoxelArt.hand_points(model).is_empty(),
-		"carried, it builds a model with hand points (%s)" % model)
-	check(ItemArt.ground_size(gun).z > 0.8 and ItemArt.ground_size(ItemDB.get_item(&"m320")).z > 0.2, "its ground model and the M320's are their own, full length")
+	check(ItemArt.ground_size(gl).z > 0.2, "the M320 has a ground model of its own, full length")
 
 
 ## The M320 on the host player's M4: loaded by hand, an arcing HE grenade that bursts past its
@@ -743,114 +699,6 @@ func _test_m320() -> void:
 		"saved and loaded, and on a peer's copy, the M320 still has its grenade in")
 	loaded.queue_free()
 	copy.queue_free()
-	player.underbarrel_up = false
-	player.global_position = Vector3(0, 0.1, 24)
-
-
-## The shotgun on the host player: a buckshot pattern on the shed's plank wall, one slug, a
-## breaching round through the planks and off a box's lock, and loading shell by shell.
-func _test_shotgun() -> void:
-	print("Shotgun: buckshot, slug, breaching, shell by shell")
-	var inv := player.inventory
-	var gun := ItemDB.get_item(&"m870")
-	inv.slots[&"primary"] = &""
-	inv.take(&"m870")
-	player.active_slot = &"primary"
-	check(inv.slots[&"primary"] == &"m870" and inv.rounds_in(&"primary") == 6, "the shotgun in hand, six shells in the tube")
-	# Buckshot at the shed's west plank wall (x = 16), 6 m off (through the planks or not, each
-	# pellet ends on a wall of its own line).
-	player.global_position = Vector3(10, 0.1, -8.1)
-	await _frames(2)
-	var eye := player.camera.global_position
-	player._server_busy_until = 0.0
-	player._server_next_shot = 0.0
-	player._server_fire.rpc_id(1, eye, Vector3(1, 0, 0), &"primary")
-	await _frames(2)
-	var on_wall := Shotguns.last_results.filter(func(res: Dictionary) -> bool:
-		return String(res.get("result", "")) == "world" and (res.position as Vector3).x > 15.8)
-	var spots := {}
-	for res: Dictionary in on_wall:
-		spots[str((res.position as Vector3).snapped(Vector3.ONE * 0.005))] = true
-	check(Shotguns.last_results.size() == 9 and Shotguns.last_dirs.size() == 9 and on_wall.size() >= 7 and spots.size() >= 5,
-		"buckshot: 9 pellets, %d of them on the walls 6 m off, in %d separate spots" % [on_wall.size(), spots.size()])
-	check(inv.rounds_in(&"primary") == 5 and Shotguns.tube_of(inv.state_of(&"primary")).size() == 5, "one shell gone from the tube")
-	# A slug: one round.
-	inv.set_slot_state(&"primary", {"rounds": 1, "tube": ["shells_12g_slug"]})
-	await _seconds(60.0 / float(gun.stats.rpm) + 0.1)
-	player._server_busy_until = 0.0
-	player._server_fire.rpc_id(1, eye, Vector3(1, 0, 0), &"primary")
-	await _frames(2)
-	check(Shotguns.last_results.size() == 1 and inv.rounds_in(&"primary") == 0, "a slug is one round (%d), and the tube's empty" % Shotguns.last_results.size())
-	# A breaching round through the planks 1.5 m off (clear of where the buckshot went).
-	player.global_position = Vector3(14.5, 0.1, -7.4)
-	await _frames(2)
-	eye = player.camera.global_position
-	var plank := Vector3(16.05, eye.y, eye.z)
-	var world := level.voxel_world
-	check(world.material_at(plank) == VoxelWorld.Mat.WOOD, "a plank wall in front of him")
-	inv.set_slot_state(&"primary", {"rounds": 1, "tube": ["shells_12g_breach"]})
-	await _seconds(60.0 / float(gun.stats.rpm) + 0.1)
-	player._server_busy_until = 0.0
-	player._server_fire.rpc_id(1, eye, Vector3(1, 0, 0), &"primary")
-	await _frames(5)
-	check(String(Shotguns.last_breach.get("what", "")) == "wall" and world.material_at(plank) == VoxelWorld.Mat.EMPTY
-		and world.material_at(plank + Vector3(0, 0.2, 0)) == VoxelWorld.Mat.EMPTY, "a breaching round blows a hole through the planks")
-	# ...and off a locked box's lock.
-	var cache := WorldCache.new("Strongbox", &"hq_strongbox_key")
-	level.add_child(cache)
-	cache.global_position = Vector3(14.5, 0.0, -5.6)
-	await _frames(2)
-	inv.set_slot_state(&"primary", {"rounds": 1, "tube": ["shells_12g_breach"]})
-	await _seconds(60.0 / float(gun.stats.rpm) + 0.1)
-	player._server_busy_until = 0.0
-	check(cache.is_locked(), "a locked strongbox by his feet")
-	player._server_fire.rpc_id(1, eye, (cache.global_position + Vector3.UP * 0.2 - eye).normalized(), &"primary")
-	await _frames(3)
-	check(not cache.is_locked() and String(Shotguns.last_breach.get("what", "")) == "lock", "a breaching round shoots its lock off")
-	cache.queue_free()
-	# Loading shell by shell: slugs first, then buckshot when they run out, up to what's carried.
-	inv.set_slot_state(&"primary", {"rounds": 0, "tube": []})
-	while inv.remove_one(&"shells_12g_buck"):
-		pass
-	inv.take(&"shells_12g_buck", 3)
-	inv.take(&"shells_12g_slug", 2)
-	player._server_busy_until = 0.0
-	var each := Shotguns.server_load(player, &"primary", &"shells_12g_slug")
-	check(each > 0.3, "a shell goes in every %.2f s" % each)
-	await _seconds(each + 0.15)
-	check(inv.rounds_in(&"primary") == 1 and Shotguns.next_shell(inv.state_of(&"primary")) == &"shells_12g_slug", "one shell in after one shell's time: a slug")
-	await _seconds(each * 4.0 + 0.4)
-	var tube := Shotguns.tube_of(inv.state_of(&"primary"))
-	check(tube == ["shells_12g_slug", "shells_12g_slug", "shells_12g_buck", "shells_12g_buck", "shells_12g_buck"] and not Shotguns.loading(player)
-		and inv.count_of(&"shells_12g_buck") == 0 and inv.count_of(&"shells_12g_slug") == 0,
-		"five shells one by one, slugs then buckshot, and it stops when the shells run out (%s)" % [tube])
-	# Firing stops a load.
-	inv.set_slot_state(&"primary", {"rounds": 0, "tube": []})
-	inv.take(&"shells_12g_buck", 6)
-	await _seconds(60.0 / float(gun.stats.rpm) + 0.1)
-	player._server_busy_until = 0.0
-	Shotguns.server_load(player, &"primary")
-	await _seconds(each * 1.5)
-	player._server_fire.rpc_id(1, eye, Vector3(0, 0, 1), &"primary")
-	await _seconds(each * 2.0)
-	check(inv.rounds_in(&"primary") == 0 and inv.count_of(&"shells_12g_buck") == 5 and not Shotguns.loading(player),
-		"firing between shells stops the load (%d in the tube, %d shells left)" % [inv.rounds_in(&"primary"), inv.count_of(&"shells_12g_buck")])
-	# The tube is the gun's state: saved and loaded (JSON), and a peer's copy.
-	inv.set_slot_state(&"primary", {"rounds": 2, "tube": ["shells_12g_breach", "shells_12g_slug"]})
-	var saved: Variant = JSON.parse_string(JSON.stringify(Roster.json_safe(inv.net_state)))
-	var loaded := Inventory.new()
-	add_child(loaded)
-	loaded.net_state = GameState.from_json(saved)
-	var copy := Inventory.new()
-	add_child(copy)
-	copy.net_state = inv.net_state
-	await _frames(1)
-	check(Shotguns.tube_of(loaded.state_of(&"primary")) == ["shells_12g_breach", "shells_12g_slug"] and loaded.rounds_in(&"primary") == 2
-		and Shotguns.next_shell(copy.state_of(&"primary")) == &"shells_12g_slug", "saved and loaded, and on a peer's copy, the tube keeps its shells in order")
-	loaded.queue_free()
-	copy.queue_free()
-	var readout := AmmoReadout.summary(player)
-	check(String(readout.get("kind", "")) == "tube" and String(readout.get("loaded", "")).contains("Slug"), "the HUD reads the tube and the shell up next: %s" % AmmoReadout.text_of(readout))
 	# The grenadier's kit: the M320 on his M4 with HE and smoke.
 	var kit := Inventory.new()
 	add_child(kit)
@@ -858,6 +706,7 @@ func _test_shotgun() -> void:
 	check(GunAttachments.mounted_id(ItemDB.get_item(kit.slots[&"primary"]), kit.state_of(&"primary"), GunAttachments.UNDERBARREL) == &"m320"
 		and kit.count_of(&"round_40mm_he") >= 6 and kit.count_of(&"round_40mm_smoke") >= 1, "the grenadier's kit: an M320 on his M4, 40 mm HE and smoke")
 	kit.queue_free()
+	player.underbarrel_up = false
 	player.global_position = Vector3(0, 0.1, 24)
 
 

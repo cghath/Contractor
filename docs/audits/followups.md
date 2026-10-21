@@ -17,7 +17,6 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-20 | P2 | A medic walks over unasked to a player whose bandages are in his IFAK (fixed 2026-10-20 by Claude: Vitals.has_item) |
 | F-07 | P2 | ~~The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground~~ fixed 2026-10-20 (Claude: sleeps only on the floor and still) |
 | F-130 | P2 | The AI grenadier carries the M320 and 40 mm grenades but never fires or loads it |
-| F-131 | P3 | An AI soldier with a shotgun counts its loose shells as no spare ammo (reload, ammo-low, scavenging) |
 
 ## F-01: the building scan only sees one floor
 
@@ -215,19 +214,3 @@ does for the RPG-7). HE arms only past 14 m (`Warheads.data(&"m406").arming_m`),
 dud. Suggested: like LauncherAI's fire at groups behind cover, a grenadier with a loaded M320 lobs
 HE at enemies in cover 30-250 m off with no friendly within 12 m of the aim point, and screens with
 smoke on the squad's "throw smoke" order when he has one loaded; he loads by hand in cover.
-
-## F-131: an AI soldier with a shotgun thinks it has no spare ammo
-
-Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (`rounds`/`spare` around the ammo checks and
-`_mag_size`), [scavenge.gd](../../scripts/ai/scavenge.gd). Found by cghath's agent on
-`feat/m320-shotgun` (2026-10-20). No AI kit carries the shotgun yet, so it only matters once one
-does (or an AI picks one up).
-
-What happens: a shotgun (stats.tube, Shotguns) loads loose 12 ga shells shell by shell, and its
-stats.ammo names the buckshot shell. `Inventory.spare_rounds(ammo)` counts a magazine's rounds, so
-for loose shells (no "rounds" in their state, magazine_rounds 0) it gives 0: the AI's ammo-low and
-"reload when" checks see a shotgun with shells in the pack as out of ammo. The host side already
-loads a tube when the AI asks: `Soldier._server_reload` on a tube weapon runs
-`Shotguns.server_load(s, slot)`. Suggested: for `Shotguns.is_tube(weapon)` count
-`Shotguns.shells_of(weapon)` with `inventory.count_of(id)` as the spares, and the tube's
-`Shotguns.capacity(weapon)` as the magazine size.

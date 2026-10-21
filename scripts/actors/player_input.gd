@@ -385,15 +385,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## The underbarrel key (4): the trigger onto the M320 under the rifle in hand and back
-## (Underbarrel); with a shotgun in hand, the next shell kind R loads (Shotguns.next_pick).
+## (Underbarrel).
 func toggle_underbarrel() -> void:
 	var weapon := body.active_weapon()
-	if Shotguns.is_tube(weapon):
-		var current := body.shell_pick if body.shell_pick != &"" else Shotguns.load_choice(weapon, body.inventory)
-		body.shell_pick = Shotguns.next_pick(weapon, current, body.inventory)
-		if body.shell_pick != &"":
-			hud.flash("R loads: %s (%d)" % [ItemDB.get_item(body.shell_pick).name, body.inventory.count_of(body.shell_pick)])
-		return
 	if Underbarrel.on_gun(body) == null:
 		body.underbarrel_up = false
 		hud.flash("No grenade launcher on this gun")
@@ -873,8 +867,7 @@ func _try_fire() -> void:
 		return
 	if body.inventory.rounds_in(body.active_slot) <= 0:
 		if Input.is_action_just_pressed(&"fire"):
-			var spare := Shotguns.load_choice(weapon, body.inventory) != &"" if Shotguns.is_tube(weapon) else body.inventory.spare_rounds(Soldier._ammo_of(weapon)) > 0
-			hud.flash("Empty - R to reload" if spare else "Out of ammo")
+			hud.flash("Empty - R to reload" if body.inventory.spare_rounds(Soldier._ammo_of(weapon)) > 0 else "Out of ammo")
 		return
 	body._next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600))
 	body._server_fire.rpc_id(1, body.camera.global_position, body._spread_direction(weapon), body.active_slot)
@@ -1044,9 +1037,6 @@ func _try_reload() -> void:
 	if body.underbarrel_up and Underbarrel.on_gun(body) != null:
 		_load_underbarrel()  # the M320, by hand
 		return
-	if Shotguns.is_tube(weapon):
-		_load_shells(weapon)  # a shotgun's tube, shell by shell
-		return
 	var ammo := Soldier._ammo_of(weapon)
 	var full := ItemDB.get_item(ammo).magazine_rounds() if ItemDB.has_item(ammo) else 0
 	if body.inventory.rounds_in(body.active_slot) >= full:
@@ -1075,18 +1065,6 @@ func _load_underbarrel() -> void:
 	body._busy_until = Soldier._now() + float(Underbarrel.on_gun(body).stats.get("reload_s", 3.0)) * body.vitals.reload_mult()
 	hud.flash("Loading %s" % ItemDB.get_item(choice).name)
 	launchers.request_reload_underbarrel.rpc_id(1, choice)
-
-
-## R with a shotgun: shells into the tube one by one, the picked kind first (Shotguns.server_load).
-func _load_shells(weapon: ItemData) -> void:
-	if body.inventory.rounds_in(body.active_slot) >= Shotguns.capacity(weapon):
-		return
-	var shell := Shotguns.load_choice(weapon, body.inventory, body.shell_pick)
-	if shell == &"":
-		hud.flash("No shells for it")
-		return
-	hud.flash("Loading %s" % ItemDB.get_item(shell).name)
-	body._server_load_shells.rpc_id(1, body.active_slot, shell)
 
 
 ## The grenade type after `current` in the Shift+G cycle: THROWABLES order, skipping smoke

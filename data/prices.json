@@ -45,7 +45,7 @@
 		"javelin_missile": 12000, "pg7v_round": 300, "og7v_round": 250,
 		"exo_mech_heavy": 150000, "wg50_walker": 24000,
 		"grip_vertical": 250, "light_weapon": 350, "laser_visible": 450, "laser_ir": 1100,
-		"m320": 1600, "round_40mm_he": 45, "round_40mm_smoke": 35, "m870": 900, "shells_12g_buck": 2, "shells_12g_slug": 2, "shells_12g_breach": 3,
+		"m320": 1600, "round_40mm_he": 45, "round_40mm_smoke": 35,
 		"m16a4": 1300, "c7": 1300, "aks74u": 800, "ak74m": 1000, "rpk74": 1500, "type56": 750, "m70": 800, "ak103": 1100, "pkp": 3900, "svds": 4200, "glock17": 550, "p226": 650, "m1911": 600, "mag_45acp": 22, "rounds_45acp": 1,
 		"optic_t2": 750, "optic_compm4": 800, "optic_exps3": 1400, "optic_acog_ta31": 1900, "optic_elcan": 2600, "optic_razor": 3200, "optic_mk5": 4800, "optic_pm2": 5600,
 		"grip_angled": 220, "light_m600": 380, "laser_peq15": 1300, "suppressor_556": 1100, "suppressor_762": 1500,
@@ -55,7 +55,7 @@
 		"intel_sat_phone": 2200, "intel_sim_bag": 700, "intel_hard_drive": 2600, "intel_marked_map": 1500, "intel_codebook": 3200, "intel_freq_list": 900, "intel_tablet": 1900, "intel_drone_controller": 3800, "intel_sd_card": 500, "intel_passports": 1300, "intel_orders": 1100,
 		"copper_wire": 260, "filter_set": 330, "solar_panel": 520, "truck_tyre": 450
 	},
-	"_m320_shotgun": "The M320 and the breaching shotgun (Captain's list for cghath, 2026-10-20), proposed from the catalogue plan (docs/ChrisPlan_handoff.md: weapons 600-4500, explosives 40-600, loose rounds 1-3): M320 1600, 40 mm HE 45 and smoke 35 a grenade, the M870 900, 12 ga shells 2 (buckshot, slugs) and 3 (breaching) each.",
+	"_m320": "The M320 (Captain's list for cghath, 2026-10-20), proposed from the catalogue plan (docs/ChrisPlan_handoff.md: weapons 600-4500, explosives 40-600): M320 1600, 40 mm HE 45 and smoke 35 a grenade.",
 	"_launchers": "Wave 5 (V2) launchers and rounds, proposed: AT4 1800, NLAW 4000, rounds 200-600, Javelin missile 12000 (catalogue plan); the RPG-7 and its rounds are loot, sell-only. The Javelin is buyable until wave 6 gates it behind reputation.",
 	"_heavy_exo": "The HX-1 Assault Frame and its WG-50 (Captain's call, docs/near_future_hardware.md 2.3a, resolved 2026-10-17): priced for repair/salvage valuation (roughly 3x the LX-3 frame's cost, for the bigger chassis and its own weapon mount) but not_for_sale either way — it's issued, not bought, and certified onto a roster soldier (see roles.json / roster.gd hx1_certified) rather than equipped freely.",
 	"_allied_only": "Wave 6 (call #1, Captain 2026-10-18: Allied buys \"their best kit, armour\"): not in the base shop; an allied quartermaster (factions.json \"quartermaster\") sells them at Allied standing.",

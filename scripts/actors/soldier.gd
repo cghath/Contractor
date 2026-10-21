@@ -177,9 +177,6 @@ var _fire_modes := {}
 ## Owner-side: the trigger is on the M320 under the rifle in hand (the underbarrel key, 4;
 ## Underbarrel), not the rifle. Off again on a weapon switch.
 var underbarrel_up := false
-## Owner-side: the shell kind R loads into a shotgun's tube next (the underbarrel key cycles it;
-## Shotguns.next_pick), &"" for the first kind carried.
-var shell_pick: StringName = &""
 ## Host only: who is dragging or carrying this body while it is down.
 var carried_by: Soldier
 ## Host only: the downed body this one is dragging or carrying.
@@ -965,9 +962,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var now := _now()
 	if now < _server_next_shot or now < _server_busy_until - 0.1:
 		return
-	var tube := Shotguns.is_tube(weapon)  # a shotgun's next shell out of its tube (Shotguns)
-	var shell := Shotguns.server_take_shell(inventory, slot) if tube else &""
-	if (tube and shell == &"") or (not tube and not inventory.consume_round(slot)):
+	if not inventory.consume_round(slot):
 		return
 	server_end_spawn_protection()  # firing ends spawn protection
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
@@ -983,8 +978,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var wall_q := PhysicsRayQueryParameters3D.create(origin, muzzle, 1, [get_rid()])
 	if not get_world_3d().direct_space_state.intersect_ray(wall_q).is_empty():
 		muzzle = origin
-	# A shotgun's shell: its pellets, a slug or a breaching round (Shotguns.server_fire).
-	var result := Shotguns.server_fire(self, muzzle, direction.normalized(), weapon, shell) if tube else Ballistics.fire(self, muzzle, direction.normalized(), weapon)
+	var result := Ballistics.fire(self, muzzle, direction.normalized(), weapon)
 	var suppressed := bool(weapon.stats.get("suppressed", false)) or Suppressors.mounted_id(weapon, inventory.state_of(slot)) != &""
 	last_shot_at = now
 	last_shot_suppressed = suppressed
@@ -1183,9 +1177,6 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
-	if Shotguns.is_tube(ItemDB.get_item(id)):
-		Shotguns.server_load(self, slot)  # a tube is loaded shell by shell (the AI's reload too)
-		return
 	var empty := inventory.rounds_in(slot) <= 0
 	var seconds := reload_seconds(ItemDB.get_item(id), empty)
 	_server_busy_until = _now() + seconds
@@ -1201,17 +1192,6 @@ func _server_reload(slot: StringName) -> void:
 	if is_inside_tree() and n == _reload_n and vitals.is_up() and inventory.slots.get(slot, &"") == id \
 			and inventory.slot_revision(slot) == rev:
 		inventory.reload(slot)
-
-
-## A player loads the shotgun in `slot` shell by shell with `shell` shells (or the first kind
-## carried): Shotguns.server_load.
-@rpc("any_peer", "call_local", "reliable")
-func _server_load_shells(slot: StringName, shell: StringName) -> void:
-	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or _now() < _server_busy_until - 0.1:
-		return
-	if Shotguns.server_load(self, slot, shell) < 0.0:
-		var gun := ItemDB.get_item(inventory.slots.get(slot, &"")) if inventory.slots.get(slot, &"") != &"" else null
-		_client_message.rpc_id(owner_peer(), "No shells to load" if Shotguns.load_choice(gun, inventory, shell) == &"" else "The tube's full")
 
 
 ## Every peer: the host says a reload of `item` began (_server_reload), so this peer plays it

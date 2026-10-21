@@ -90,7 +90,7 @@ static func _key(item: ItemData, state: Dictionary) -> String:
 ## The model in its resting pose, not yet centred.
 static func _raw_node(item: ItemData, state := {}) -> Node3D:
 	var art := VoxelArt.model_for(item, state)
-	if art != "" and not _own_weapon(item):
+	if art != "":
 		var turn := Vector3.ZERO  # an optic sits on its mount, upright
 		if item.type == "weapon":
 			turn = ON_SIDE
@@ -119,12 +119,6 @@ static func _raw_node(item: ItemData, state := {}) -> Node3D:
 ## Whether ItemArt builds `item`'s model itself (attachables that aren't plain pouches).
 static func _has_own(item: ItemData) -> bool:
 	return item.id == &"aid_bag"
-
-
-## A gun whose ground model is ItemArt's own, not VoxelArt's carried one (the shotgun: VoxelArt
-## has no shotgun silhouette yet, so carried it shows as a rifle until the Captain's side adds one).
-static func _own_weapon(item: ItemData) -> bool:
-	return item.type == "weapon" and String(item.stats.get("model_style", "")) == "shotgun"
 
 
 static func _mesh_for(item: ItemData) -> Array:
@@ -212,10 +206,6 @@ static func _spec_for(item: ItemData) -> Dictionary:
 		"m320": s = _m320()
 		"round_40mm_he": s = _grenade_40mm(K.OD, K.YELLOW)
 		"round_40mm_smoke": s = _grenade_40mm(K.GREY_LIGHT, K.BLACK)
-		"m870": s = _shotgun()
-		"shells_12g_buck": s = _shells(K.RED)
-		"shells_12g_slug": s = _shells(K.GREEN)
-		"shells_12g_breach": s = _shells(K.ORANGE)
 		"ifak": s = _ifak()
 		"trauma_kit": s = _trauma_kit()
 		"aid_bag": s = _aid_bag()
@@ -434,25 +424,7 @@ static func _grenade_40mm(body: int, band: int) -> Shape:
 	return s
 
 
-## 12 gauge shells: an open carton with the brass heads showing, and two shells in front, the
-## plastic hull in `hull` (red buckshot, green slugs, orange breaching rounds).
-static func _shells(hull: int) -> Shape:
-	var s := Shape.new()
-	s.b(0, 0, 0, 11, 7, 9, K.TAN)
-	s.b(0.5, 6.5, 0.5, 10.5, 7, 8.5, K.BRASS)  # the shells' heads
-	for r in range(1, 4):
-		s.b(0.5, 6.5, 0.5 + r * 2.0, 10.5, 7, 0.5 + r * 2.0 + 0.25, K.BROWN)
-	s.p(0, 2.5, 0, 11, 4.5, 0.5, hull)  # label stripe in the shells' colour
-	for j in 2:
-		var z0 := -1.6 - j * 2.8
-		var x0 := 0.5 + j * 2.5
-		s.b(x0, 0, z0 - 2.0, x0 + 1.4, 2.0, z0, K.BRASS)  # head
-		s.b(x0 + 1.4, 0, z0 - 2.0, x0 + 7.0, 2.0, z0, hull)  # hull
-		s.b(x0 + 6.6, 0.4, z0 - 1.6, x0 + 7.0, 1.6, z0 - 0.4, K.DARK_GREY, true)  # crimp
-	return s
-
-
-# --- Under the barrel and the shotgun ---------------------------------------------------
+# --- Under the barrel -------------------------------------------------------------------
 # Muzzle at z = 0, lying on its side like the launchers: the bottom (grip) out to +x, the top
 # (rail, sights) to -x.
 
@@ -472,38 +444,6 @@ static func _m320() -> Shape:
 	s.b(2.8, -1.4, 25.5, 11, 1.4, 29, K.RUBBER)  # pistol grip
 	s.b(-6.8, -0.3, 13, -5.2, 0.3, 14, K.BLACK)  # folded leaf sight
 	s.b(-6.0, -1.4, 13, -5.2, 1.4, 14, K.BLACK)
-	return s
-
-
-## The pump shotgun: barrel over its tube magazine with a clamp, a crenellated breaching muzzle,
-## the pump, the receiver with its port and a side saddle of red shells, ghost-ring sights, and
-## a stock with a recoil pad.
-static func _shotgun() -> Shape:
-	var s := Shape.new()
-	s.cyl(Axis.Z, -1.2, 0, 1.1, 0, 47, VoxelArt.C.GUN)  # barrel
-	s.ring(Axis.Z, -1.2, 0, 1.5, 0.9, -2.5, 0, VoxelArt.C.GUN)  # breaching muzzle
-	for y: float in [-1.6, 1.1]:
-		s.b(-1.6, y, -2.5, -0.8, y + 0.5, -1.6, K.DARK_GREY, true)  # its teeth
-	s.cyl(Axis.Z, 1.5, 0, 1.2, 4, 47, VoxelArt.C.GUN)  # tube magazine
-	s.b(-2.4, -1.3, 4, 2.8, 1.3, 6, VoxelArt.C.GUN)  # its clamp
-	s.prism(Axis.Z, 1.0, 0, 2.4, 2.1, 0.7, 24, 42, K.BLACK)  # the pump
-	for z: float in [26.0, 29.0, 32.0, 35.0, 38.0]:
-		s.b(3.2, -2.2, z, 3.5, 2.2, z + 1.0, K.DARK_GREY, true)
-	s.b(-2.6, -1.6, 47, 3.0, 1.6, 70, VoxelArt.C.GUN)  # receiver
-	s.p(-1.8, 1.4, 51, 0.2, 1.6, 59, K.DARK_GREY)  # ejection port
-	s.b(-1.6, 1.6, 49, 2.0, 2.2, 58, K.BLACK)  # side saddle
-	for z: float in [49.5, 51.8, 54.1, 56.4]:
-		s.b(-1.2, 2.2, z, 1.6, 2.6, z + 1.8, K.RED)  # its shells
-	s.b(-2.2, -0.3, 0.8, -1.4, 0.3, 1.5, K.SILVER)  # front bead
-	s.ring(Axis.Z, -3.4, 0, 0.9, 0.5, 63, 63.6, K.BLACK)  # ghost ring
-	s.b(-2.6, -0.5, 62.5, -2.5, 0.5, 64, K.BLACK)
-	s.b(-2.9, -0.4, 62.5, -2.5, 0.4, 64, K.BLACK)
-	s.b(3.0, -0.4, 59, 5.2, 0.4, 60, VoxelArt.C.GUN)  # trigger guard
-	s.b(4.8, -0.4, 59, 5.2, 0.4, 66, VoxelArt.C.GUN)
-	s.b(3.0, -0.25, 62, 4.4, 0.25, 62.8, K.BLACK)  # trigger
-	s.b(-2.2, -1.6, 70, 4.5, 1.6, 81, K.BLACK)  # stock
-	s.b(-2.2, -1.6, 81, 7.5, 1.6, 93, K.BLACK)
-	s.b(-2.6, -1.9, 93, 7.9, 1.9, 95, K.RUBBER)  # recoil pad
 	return s
 
 
