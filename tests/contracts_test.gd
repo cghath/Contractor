@@ -179,7 +179,7 @@ func _test_variety_board() -> void:
 	var five: Array[String] = ["convoy_ambush", "defend_hold", "crew_rescue", "sabotage", "recon"]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2026
-	var n := 1300  # (a 14th board type, the forward observer: more offers for sabotage's rarer radio mast)
+	var n := 2000  # (more board types since: the forward observer and missions 2's three; more offers for sabotage's rarer radio mast)
 	var count := {}
 	var zone_kinds := {}
 	var targets := {}
@@ -211,11 +211,23 @@ func _test_variety_board() -> void:
 				problem = "sabotage target %s (%s, %s)" % [site, main.kind, o.module]
 		if problem != "" and misfit == "":
 			misfit = " (%s in %s: %s)" % [o.type, o.zone_id, problem]
-	check(five.all(func(t: String) -> bool: return int(count.get(t, 0)) >= n / 13 / 2),
-		"each of the five comes up on the board, about one offer in 13 (%s of %d offers)" % [count, n])
+	var types := MissionRegistry.types().filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).has("locals")).size()
+	check(five.all(func(t: String) -> bool: return int(count.get(t, 0)) >= n / types / 2),
+		"each of the five comes up on the board, about one offer in %d (%s of %d offers)" % [types, count, n])
 	check(misfit == "", "each in a zone holding a module it plays in, its objectives filled in" + misfit)
 	check(five.all(func(t: String) -> bool: return (zone_kinds.get(t, {}) as Dictionary).has("contract") and (zone_kinds.get(t, {}) as Dictionary).has("hot")),
 		"in contract zones and hot zones alike (%s)" % [zone_kinds])
+	# The radio mast stands only at a hot zone's comms site (one module of about fifteen): with seventeen
+	# board types it can miss the sample above, so sabotage offers in a hot zone are asked for until it comes.
+	var hot_rng := RandomNumberGenerator.new()
+	hot_rng.seed = 2026
+	for i in 400:
+		if targets.has("mast"):
+			break
+		var o := ContractGen.generate(hot_rng, {"day": 1, "source": "board", "type": "sabotage", "zone_id": "ridge_hot"})
+		for x: Dictionary in o.objectives:
+			if not bool(x.get("optional", false)) and String(x.get("site", "")) == "mast":
+				targets["mast"] = int(targets.get("mast", 0)) + 1
 	check(targets.has("fuel") and targets.has("park") and targets.has("mast") and not targets.has("cache"),
 		"sabotage hits a fuel store, a vehicle park or a radio mast, never the raid's weapons cache (%s)" % [targets])
 	var outpost := ContractGen.mission_target(rng, MissionRegistry.type_def("sabotage"), "")
