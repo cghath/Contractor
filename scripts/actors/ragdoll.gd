@@ -89,9 +89,38 @@ const RAGDOLL_FRICTION := 0.95
 ## still upright (its up within acos(UPRIGHT_DOT) of the world's), it's pushed over at the
 ## shoulders (TOPPLE_IMPULSE, N s: along the dropping shot, else the way it faces), at most
 ## TOPPLE_MAX times; then it freezes as it lies.
-const UPRIGHT_DOT := 0.6
+const UPRIGHT_DOT := 0.45
 const TOPPLE_IMPULSE := 30.0
-const TOPPLE_MAX := 2
+const TOPPLE_MAX := 5
+## Captain, 2026-10-20 ("the ragdolls need improvement, dudes still stay upright torsos and such
+## when they die"): a fresh fall collapses, limp, the way it was pushed.
+## - No muscle: for COLLAPSE_S after the fall, while the torso is still more upright than
+##   UPRIGHT_DOT, it's tipped over (COLLAPSE_TORQUE, N m per kg of torso, about the axis that
+##   takes it down along the fall), so nothing balances on stiff knees or hips; the knees and hips
+##   fold as it goes (_buckle, harder with HIP_FOLD_RAD_S), and the head lolls (HEAD_ANGULAR_DAMP).
+## - Its way down: the dropping hit's (shot from the front, back it goes), else the way it was
+##   moving past RUN_MS (running, it pitches forward: the torso carries on, the feet catch:
+##   RUN_PITCH_RAD_S), else a blast's (note_blast: thrown out from it, BLAST_IMPULSE N s per kg of
+##   filling's cube root, less with distance), else back the way it faces.
+## - It doesn't freeze while it's still upright (up to SETTLE_MAX_S * UPRIGHT_GRACE).
+const COLLAPSE_S := 2.5
+const COLLAPSE_TORQUE := 1.5
+const HIP_FOLD_RAD_S := 2.0
+const HEAD_ANGULAR_DAMP := 0.2
+const RUN_MS := 1.5
+const RUN_PITCH_RAD_S := 2.5
+const BLAST_IMPULSE := 160.0
+const BLAST_FRESH_S := 0.6
+const BLAST_MAX_MS := 9.0
+## Knees and elbows only bend one way: a joint pushed past straight the wrong way (more than
+## HYPEREXTEND of its length forward) is turned back (HYPEREXTEND_FIX_RAD_S) while it moves.
+const HYPEREXTEND := 0.1
+const HYPEREXTEND_FIX_RAD_S := 6.0
+## [upper part, lower part, the side a straight-past bend shows on (lower part's down vector in
+## the upper part's frame): knees fold back (+z), so a foot forward (-z) is wrong; elbows fold
+## forward (-z), so a hand back (+z) is wrong].
+const ONE_WAY := [["leg_l", "shin_l", -1.0], ["leg_r", "shin_r", -1.0], ["arm_l", "fore_l", 1.0], ["arm_r", "fore_r", 1.0]]
+const UPRIGHT_GRACE := 1.5
 
 ## Cut-off parts (blast-gore, 2026-10-20: a severed limb's physics body stayed and the hidden limb
 ## still propped the corpse up): a part cut off a body (BodyDeform, Vitals) takes its ragdoll part
@@ -118,6 +147,7 @@ var _support_left := SUPPORT_CHECK_S
 var _woke_at: Variant = null  # where the torso was when it last fell again for want of support
 var _topples := 0
 var _hit_dir := Vector3.ZERO  # the dropping shot's way (flat), for _topple
+var _fall_dir := Vector3.ZERO  # the way it's going down (flat): the hit's, the run's, a blast's
 var cut_away := {}  # ragdoll part key -> true: gone with a cut (no collider, no joint)
 
 
@@ -139,8 +169,63 @@ static func start(soldier: Soldier) -> Ragdoll:
 		p.linear_velocity = push
 	if not soldier.model.ragdolled():  # a fresh fall (not a saved pose put back)
 		r._buckle()
+		r._take_run(push)
 		r._take_hit(soldier.vitals.last_hit if soldier.vitals else {})
+		if r._fall_dir.length() < 0.1:
+			var back := soldier.global_basis.z  # the way it faces is -z: slumping back
+			r._fall_dir = Vector3(back.x, 0.0, back.z).normalized()
 	return r
+
+
+## Running when it went down: the torso carries on over the feet (pitched forward).
+func _take_run(push: Vector3) -> void:
+	var flat := Vector3(push.x, 0.0, push.z)
+	if flat.length() < RUN_MS:
+		return
+	_fall_dir = flat.normalized()
+	var torso := parts.get("torso") as RigidBody3D
+	if torso:
+		torso.angular_velocity += Vector3.UP.cross(_fall_dir).normalized() * RUN_PITCH_RAD_S
+	for key: String in ["shin_l", "shin_r"]:
+		var shin := parts.get(key) as RigidBody3D
+		if shin:
+			shin.linear_velocity = shin.linear_velocity * 0.3  # the feet catch on the ground
+
+
+## Host: a blast at `centre` of `kg` (TNT) reached `soldier`: remembered for a fall it causes
+## (start), and a body already lying is thrown (unfrozen, every part pushed out from it).
+static func note_blast(soldier: Node, centre: Vector3, kg: float) -> void:
+	var s := soldier as Soldier
+	if s == null or not is_instance_valid(s):
+		return
+	s.set_meta(&"last_blast", {"centre": centre, "kg": kg, "time": Time.get_ticks_msec() / 1000.0})
+	if is_instance_valid(s.ragdoll) and s.ragdoll.simulated:
+		s.ragdoll._take_blast(centre, kg)
+
+
+## A blast's throw: every part pushed out from `centre`, more the closer it is.
+func _take_blast(centre: Vector3, kg: float) -> void:
+	var torso := parts.get("torso") as RigidBody3D
+	if torso == null:
+		return
+	var away := torso.global_position - centre
+	var dist := maxf(away.length(), 0.3)
+	var power := BLAST_IMPULSE * pow(maxf(kg, 0.05), 1.0 / 3.0) / (dist * dist + 0.5)
+	if power < 2.0:
+		return
+	if frozen:
+		unfreeze()
+	_fall_dir = Vector3(away.x, 0.0, away.z).normalized() if Vector2(away.x, away.z).length() > 0.05 else _fall_dir
+	# The body thrown as one (every part the same way and speed: pushing each part its own way
+	# twists the joints past their limits), up to BLAST_MAX_MS.
+	var total := 0.0
+	for p: RigidBody3D in parts.values():
+		total += p.mass
+	var dir := (away + Vector3.UP * 0.4).normalized()
+	var speed := minf(power * 4.0 / total, BLAST_MAX_MS)
+	for key: String in parts:
+		if not cut_away.has(key):
+			(parts[key] as RigidBody3D).linear_velocity += dir * speed
 
 
 ## The knees give: shins fold back about the thighs' x, thighs swing forward about the torso's.
@@ -151,12 +236,16 @@ func _buckle() -> void:
 		var shin := parts.get("shin_" + side) as RigidBody3D
 		if leg and torso:
 			leg.angular_velocity += torso.global_basis.x * BUCKLE_RAD_S * 0.5
+			torso.angular_velocity += torso.global_basis.x * -HIP_FOLD_RAD_S * 0.5  # the hips give: the trunk folds over the legs
 		if shin and leg:
 			shin.angular_velocity += leg.global_basis.x * -BUCKLE_RAD_S
 
 
 ## The dropping shot's push on the part nearest where it hit.
 func _take_hit(hit: Dictionary) -> void:
+	var blast: Dictionary = body.get_meta(&"last_blast", {}) if is_instance_valid(body) else {}
+	if not blast.is_empty() and Time.get_ticks_msec() / 1000.0 - float(blast.time) <= BLAST_FRESH_S:
+		_take_blast(blast.centre, float(blast.kg))
 	if hit.is_empty() or Time.get_ticks_msec() / 1000.0 - float(hit.get("time", -INF)) > HIT_FRESH_S:
 		return
 	var at: Vector3 = hit.position
@@ -164,6 +253,8 @@ func _take_hit(hit: Dictionary) -> void:
 	if not at.is_finite() or dir.length() < 0.01:
 		return
 	_hit_dir = Vector3(dir.x, 0.0, dir.z)
+	if _hit_dir.length() > 0.05:
+		_fall_dir = _hit_dir.normalized()
 	var best: RigidBody3D = null
 	for p: RigidBody3D in parts.values():
 		if best == null or (p.global_transform * p.center_of_mass).distance_to(at) < (best.global_transform * best.center_of_mass).distance_to(at):
@@ -367,7 +458,7 @@ func _build(bones: Dictionary) -> void:
 			rb.continuous_cd = true
 			rb.freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
 			rb.linear_damp = 0.1
-			rb.angular_damp = TORSO_ANGULAR_DAMP if key == "torso" else LIMB_ANGULAR_DAMP
+			rb.angular_damp = TORSO_ANGULAR_DAMP if key == "torso" else (HEAD_ANGULAR_DAMP if key == "head" else LIMB_ANGULAR_DAMP)
 			var mat := PhysicsMaterial.new()
 			mat.friction = RAGDOLL_FRICTION
 			mat.rough = true
@@ -442,11 +533,53 @@ func _physics_process(delta: float) -> void:
 			still = false
 			break
 	_still_s = _still_s + delta if still else 0.0
+	_collapse(delta)
+	if _keep_hinges():
+		_still_s = 0.0  # not at rest while a knee or elbow is bent the wrong way
 	_send()
-	if _still_s >= SETTLE_S and _age_s < SETTLE_MAX_S and _topple():
+	if _still_s >= SETTLE_S and _age_s < SETTLE_MAX_S * UPRIGHT_GRACE and _topple():
 		return  # came to rest upright: over it goes (still frozen by SETTLE_MAX_S whatever happens)
-	if _still_s >= SETTLE_S or _age_s >= SETTLE_MAX_S:
+	if _still_s >= SETTLE_S or _age_s >= SETTLE_MAX_S * (UPRIGHT_GRACE if _upright() and _topples < TOPPLE_MAX else 1.0):
 		freeze()
+
+
+## Whether the torso still stands more upright than UPRIGHT_DOT.
+func _upright() -> bool:
+	var torso := parts.get("torso") as Node3D
+	return torso != null and torso.global_basis.y.dot(Vector3.UP) >= UPRIGHT_DOT
+
+
+## Turns back any knee or elbow bent past straight the wrong way (ONE_WAY).
+func _keep_hinges() -> bool:
+	var bent := false
+	for h: Array in ONE_WAY:
+		var upper := parts.get(h[0]) as RigidBody3D
+		var lower := parts.get(h[1]) as RigidBody3D
+		if upper == null or lower == null or cut_away.has(h[1]):
+			continue
+		var down := (upper.global_basis.orthonormalized().inverse() * lower.global_basis.orthonormalized()) * Vector3.DOWN
+		var wrong := down.z * float(h[2])
+		if wrong > HYPEREXTEND:
+			# Back toward straight about the upper part's x, relative to the upper part: the
+			# wrong-way bend undone.
+			bent = true
+			var axis := upper.global_basis.x.normalized() * signf(float(h[2]))
+			lower.angular_velocity = upper.angular_velocity + axis * HYPEREXTEND_FIX_RAD_S * (1.0 + wrong * 4.0)
+			lower.sleeping = false
+	return bent
+
+
+## No muscle holds it up: while it's fresh and the torso still stands, it's tipped along its fall.
+func _collapse(_delta: float) -> void:
+	if _age_s > COLLAPSE_S or not _upright():
+		return
+	var torso := parts.get("torso") as RigidBody3D
+	var way := _fall_dir if _fall_dir.length() > 0.1 else -torso.global_basis.z
+	way = Vector3(way.x, 0.0, way.z)
+	if way.length() < 0.01:
+		return
+	var axis := Vector3.UP.cross(way.normalized()).normalized()
+	torso.apply_torque(axis * COLLAPSE_TORQUE * torso.mass)
 
 
 ## Settled upright: pushed over (see TOPPLE_*). True if it was (it falls on, not frozen yet).
@@ -455,7 +588,7 @@ func _topple() -> bool:
 	if torso == null or _topples >= TOPPLE_MAX or torso.global_basis.y.dot(Vector3.UP) < UPRIGHT_DOT:
 		return false
 	_topples += 1
-	var way := _hit_dir
+	var way := _fall_dir if _fall_dir.length() > 0.1 else _hit_dir
 	if way.length() < 0.1:
 		way = -torso.global_basis.z
 		way.y = 0.0

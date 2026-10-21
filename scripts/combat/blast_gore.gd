@@ -90,11 +90,15 @@ static func server_blast(level: Node, centre: Vector3, kg: float, frag_m: float,
 	var reach := maxf(CHAR_Z * kg3 + 0.6, frag_m * PEPPER_SHARE)
 	var aboard := Warheads.vehicle_occupants(level.get_tree())
 	var world: World3D = (level as Node3D).get_world_3d()
+	var throw_m := Warheads.blast_radius(kg)
 	for body in bodies(level.get_tree()):
 		if body in skip or aboard.has(body):
 			continue
 		var vitals := body.get_node(^"Vitals") as Vitals
-		if Throwables.body_point(body).distance_to(centre) > reach + 1.2:
+		var dist := Throwables.body_point(body).distance_to(centre)
+		if dist <= throw_m and Throwables.clear_line(world, centre, Throwables.body_point(body)):
+			Ragdoll.note_blast(body, centre, kg)  # a fall it causes goes its way; one lying is thrown
+		if dist > reach + 1.2:
 			continue
 		var added := _blast_body(body, vitals, world, centre, kg3, frag_m)
 		if not added.is_empty():
@@ -190,7 +194,7 @@ static func server_vehicle_hit(body: Node3D, from: Vector3, speed: float) -> voi
 # --- One body ------------------------------------------------------------------------------
 
 static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Vector3, kg3: float, frag_m: float) -> Array:
-	var com := Throwables.body_point(body)
+	var com := _centre_of(body)
 	if com.distance_to(centre) / kg3 < GIB_Z and Throwables.clear_line(world, centre, com):
 		var gib := _gib(body, vitals, world, centre, kg3)
 		_add(vitals, gib)
@@ -228,7 +232,14 @@ static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Ve
 			amputate[proximal] = _rest_point(parts, proximal)
 	if dead and not gone.has(Vitals.HEAD) and (_in_reach(parts, Vitals.HEAD, SEVER_Z) or _in_reach(parts, Vitals.NECK, SEVER_Z * 0.8)):
 		entries.append(_blast_sever(body, parts, Vitals.HEAD, centre, kg3))
-	# Torn craters, charring and the pepper, on what's still on the body.
+	# Torn craters, charring and the pepper, on what's still on the body: one charring and one
+	# pepper per drawn part (the torso's three hitboxes share one raster), its nearest hitbox's.
+	var nearest := {}  # drawn part -> [hitbox part, distance]
+	for part: StringName in parts:
+		var e0: Array = parts[part]
+		var group := _drawn_part(part)
+		if e0[3] and (not nearest.has(group) or float(e0[2]) < float(nearest[group][1])):
+			nearest[group] = [part, float(e0[2])]
 	for part: StringName in parts:
 		var e: Array = parts[part]
 		if not e[3] or gone.has(BodyDeform._bone_part(part)):
@@ -239,6 +250,8 @@ static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Ve
 		if z < MANGLE_Z:
 			var closeness := 1.0 - z / MANGLE_Z
 			entries.append({"k": "c", "p": String(part), "a": vec(rest), "r": snappedf(lerpf(1.2, 2.6, closeness) * (1.25 if dead else 1.0), 0.01)})
+		if nearest.get(_drawn_part(part), [&""])[0] != part:
+			continue
 		if z < CHAR_Z:
 			entries.append({"k": "h", "p": String(part), "d": vec(toward, 0.01), "m": snappedf(clampf(1.0 - z / CHAR_Z, 0.1, 1.0), 0.01)})
 		var pepper_m := frag_m * PEPPER_SHARE
@@ -276,8 +289,9 @@ static func _gib(body: Node3D, vitals: Vitals, world: World3D, centre: Vector3, 
 			continue
 		var toward := (_to_rest(parts[part][0]).basis * (centre - (parts[part][1] as Vector3))).normalized()
 		entries.append({"k": "c", "p": String(part), "a": vec(_rest_point(parts, part)), "r": 3.2})
-		entries.append({"k": "h", "p": String(part), "d": vec(toward, 0.01), "m": 1.0})
-		entries.append({"k": "p", "p": String(part), "d": vec(toward, 0.01), "n": PEPPER_MAX, "s": hash("%s%s" % [body.name, part]) % 100000})
+		if part == Vitals.CHEST:  # (the torso is one raster: one charring, one pepper)
+			entries.append({"k": "h", "p": String(part), "d": vec(toward, 0.01), "m": 1.0})
+			entries.append({"k": "p", "p": String(part), "d": vec(toward, 0.01), "n": PEPPER_MAX, "s": hash("%s%s" % [body.name, part]) % 100000})
 	return entries
 
 
@@ -297,6 +311,13 @@ static func _sever(part: StringName, at: Vector3, launch: Vector3, salt: int) ->
 	r.seed = salt
 	var spin := Vector3(r.randf_range(-1, 1), r.randf_range(-1, 1), r.randf_range(-1, 1)) * (2.0 + launch.length() * 0.6)
 	return {"k": "s", "p": String(part), "a": vec(at), "v": vec(launch, 0.01), "w": vec(spin, 0.01)}
+
+
+## The part of the model a hitbox part is drawn on (the torso's three, the head's three share one).
+static func _drawn_part(part: StringName) -> StringName:
+	if part in TORSO_PARTS:
+		return Vitals.CHEST
+	return BodyDeform._bone_part(part)
 
 
 static func _in_reach(parts: Dictionary, part: StringName, z: float) -> bool:
@@ -356,6 +377,13 @@ static func drop_helmet(vitals: Vitals, part: StringName) -> void:
 
 
 # --- Hitboxes ------------------------------------------------------------------------------
+
+## The middle of the body as it is now: its chest hitbox (it follows the pose, a ragdoll's too;
+## Throwables.body_point drops to the ground the moment the blast knocks him out).
+static func _centre_of(body: Node3D) -> Vector3:
+	var chest := _hitbox(body, Vitals.CHEST)
+	return Warheads.hitbox_point(chest, Vector3.ZERO) if chest else Throwables.body_point(body)
+
 
 static func _hitboxes(body: Node) -> Array[Area3D]:
 	var out: Array[Area3D] = []

@@ -646,6 +646,7 @@ static func _work(ref: WeakRef, pivot: Node3D, buffer: VoxelBuffer, prof: Packed
 		prof = profile(buffer)
 	var kind := int(settings.kind)
 	var bone := bool(settings.bone)
+	var facing := {}  # step direction -> _facing list (one scan for char and pepper the same way)
 	var out := {"profile": prof, "gen": settings.gen, "pieces": [], "hangs": []}
 	for job: Dictionary in jobs:
 		if job.get("sever", false):
@@ -664,10 +665,15 @@ static func _work(ref: WeakRef, pivot: Node3D, buffer: VoxelBuffer, prof: Packed
 				hang["part"] = job.part
 				hang["hull"] = hull_points(hang.buffer)
 				(out.hangs as Array).append(hang)
-		elif job.has("pepper"):
-			pepper(buffer, job.dir, int(job.pepper), int(job.salt), prof, kind, bone)
-		elif job.has("char"):
-			scorch(buffer, job.dir, float(job.char), int(job.salt))
+		elif job.has("pepper") or job.has("char"):
+			var key := _step(job.dir)
+			if not facing.has(key):
+				facing[key] = _facing(buffer, job.dir)
+			if job.has("pepper"):
+				pepper(buffer, job.dir, int(job.pepper), int(job.salt), prof, kind, bone, facing[key])
+				facing.erase(key)  # the pocks changed the surface
+			else:
+				scorch(buffer, job.dir, float(job.char), int(job.salt), facing[key])
 		else:
 			carve(buffer, job.centre, float(job.r), int(job.salt), prof, kind, bone)
 	BodyDeform._deliver.call_deferred(ref, pivot, buffer, out)  # meshing goes through the renderer: main thread only
@@ -1030,8 +1036,9 @@ static func carve(buffer: VoxelBuffer, centre: Vector3, r: float, salt: int, pro
 
 ## Fragment pocks: `count` small craters on the side of the part facing `dir` (raster space, toward
 ## the burst), placed by `salt`. Returns how many it made.
-static func pepper(buffer: VoxelBuffer, dir: Vector3, count: int, salt: int, prof := PackedFloat32Array(), kind := K_LIMB, bone := true) -> int:
-	var spots := _facing(buffer, dir)
+static func pepper(buffer: VoxelBuffer, dir: Vector3, count: int, salt: int, prof := PackedFloat32Array(), kind := K_LIMB, bone := true, spots: Array[Vector3i] = []) -> int:
+	if spots.is_empty():
+		spots = _facing(buffer, dir)
 	if spots.is_empty():
 		return 0
 	var r := RandomNumberGenerator.new()
@@ -1046,9 +1053,11 @@ static func pepper(buffer: VoxelBuffer, dir: Vector3, count: int, salt: int, pro
 
 ## Scorches the voxels facing `dir` (toward the burst): blackened in patches, more of them with
 ## `amount` (0..1), the same patches for the same `salt`. Returns how many.
-static func scorch(buffer: VoxelBuffer, dir: Vector3, amount: float, salt: int) -> int:
+static func scorch(buffer: VoxelBuffer, dir: Vector3, amount: float, salt: int, spots: Array[Vector3i] = []) -> int:
 	var n := 0
-	for p: Vector3i in _facing(buffer, dir):
+	if spots.is_empty():
+		spots = _facing(buffer, dir)
+	for p: Vector3i in spots:
 		var roll := float(absi((p.x * 73856093) ^ (p.y * 19349663) ^ (p.z * 83492791) ^ salt) % 1000) / 1000.0
 		var patch := 0.5 + 0.5 * sin(p.x * 0.45 + float(salt % 97)) * cos(p.y * 0.38 + p.z * 0.41)
 		if roll < amount * (0.55 + 0.6 * patch):
@@ -1057,13 +1066,16 @@ static func scorch(buffer: VoxelBuffer, dir: Vector3, amount: float, salt: int) 
 	return n
 
 
+static func _step(dir: Vector3) -> Vector3i:
+	var step := Vector3i(roundi(dir.x * 1.4), roundi(dir.y * 1.4), roundi(dir.z * 1.4)).clamp(-Vector3i.ONE, Vector3i.ONE)
+	return step if step != Vector3i.ZERO else Vector3i(0, 0, -1)
+
+
 ## Solid voxels with open air on their `dir` side: what a burst that way sees.
 static func _facing(buffer: VoxelBuffer, dir: Vector3) -> Array[Vector3i]:
 	var out: Array[Vector3i] = []
 	var size := buffer.get_size()
-	var step := Vector3i(roundi(dir.x * 1.4), roundi(dir.y * 1.4), roundi(dir.z * 1.4)).clamp(-Vector3i.ONE, Vector3i.ONE)
-	if step == Vector3i.ZERO:
-		step = Vector3i(0, 0, -1)
+	var step := _step(dir)
 	for x in range(1, size.x - 1):
 		for y in range(1, size.y - 1):
 			for z in range(1, size.z - 1):

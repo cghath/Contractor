@@ -45,6 +45,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   pieces where they lay.
 - Rebuilding torn body parts is capped at a few a frame across all bodies, so a big blast
   doesn't stall the game.
+- **Bodies no longer die standing up.** A body that drops goes limp: the knees and hips give,
+  the trunk folds, the head lolls. Nothing holds it upright, so a corpse no longer settles kneeling
+  or propped on stiff legs. It falls the way it was pushed: shot from the front it goes back,
+  running it pitches forward, a blast throws it away from the burst. Knees and elbows never bend
+  the wrong way, even when thrown. Every player sees it come to rest the same way.
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

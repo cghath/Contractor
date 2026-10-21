@@ -9,7 +9,8 @@ extends Node
 
 ## Where the test men stand: far enough apart that one's blast doesn't reach another.
 const SPOTS := [Vector3(-30, 0.1, 30), Vector3(-15, 0.1, 30), Vector3(0, 0.1, 30), Vector3(15, 0.1, 30), Vector3(30, 0.1, 30),
-	Vector3(-30, 0.1, 45), Vector3(-15, 0.1, 45), Vector3(0, 0.1, 45), Vector3(15, 0.1, 45), Vector3(30, 0.1, 45)]
+	Vector3(-30, 0.1, 45), Vector3(-15, 0.1, 45), Vector3(0, 0.1, 45), Vector3(15, 0.1, 45), Vector3(30, 0.1, 45),
+	Vector3(-30, 0.1, 60), Vector3(-15, 0.1, 60), Vector3(0, 0.1, 60), Vector3(15, 0.1, 60), Vector3(30, 0.1, 60)]
 
 var failures := 0
 var level: CompoundLevel
@@ -32,6 +33,7 @@ func _ready() -> void:
 	player.global_position = Vector3(0, 0.1, 80)
 	player.vitals.shielded = true
 	_test_voxels()
+	await _test_collapse()
 	await _test_frag_alive()
 	await _test_dead_he()
 	await _test_point_blank()
@@ -168,6 +170,76 @@ func _count(buffer: VoxelBuffer) -> int:
 				if buffer.get_voxel(x, y, z, VoxelBuffer.CHANNEL_COLOR) != VoxelArt.C.EMPTY:
 					n += 1
 	return n
+
+
+# --- Deaths ------------------------------------------------------------------------------
+
+## Men killed standing: each body collapses, torso down near the ground (not left upright on its
+## knees), the way it was pushed: shot from the front it goes back, running it pitches forward,
+## a blast throws it away from the burst, nothing at all and it still goes down.
+func _test_collapse() -> void:
+	print("Deaths collapse")
+	var cases := []
+	var shot := _man("FallShot")
+	var run := _man("FallRun")
+	var blasted := _man("FallBlast")
+	var still := _man("FallStill")
+	await _seconds(0.5)
+	var starts := {}
+	for s: Soldier in [shot, run, blasted, still]:
+		starts[s] = s.global_position
+	# Shot in the chest from the front (from its -z side): it goes back (+z).
+	var chest := _hitbox_point(shot, Vitals.CHEST)
+	var into := shot.global_basis.z
+	shot.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.FULL_POWER, "position": chest - into * 0.1, "direction": into,
+		"hitbox": BlastGore._hitbox(shot, Vitals.CHEST), "distance": 50.0})
+	shot.vitals.server_kill()
+	cases.append([shot, into, "shot from the front, it falls back"])
+	# Running forward (-z) at 5 m/s.
+	run.velocity = -run.global_basis.z * 5.0
+	run.vitals.server_kill()
+	cases.append([run, -run.global_basis.z, "running, it pitches forward"])
+	# A blast 1.2 m to its right (+x): thrown to its left.
+	var centre := blasted.global_position + blasted.global_basis.x * 1.2 + Vector3.UP * 0.4
+	Ragdoll.note_blast(blasted, centre, 0.3)
+	blasted.vitals.server_kill()
+	cases.append([blasted, -blasted.global_basis.x, "a blast throws it away from the burst"])
+	still.vitals.server_kill()
+	cases.append([still, Vector3.ZERO, "dropped where it stood, it still goes down"])
+	await _wait_for(func() -> bool: return cases.all(func(c: Array) -> bool: return is_instance_valid((c[0] as Soldier).ragdoll) and (c[0] as Soldier).ragdoll.frozen), 20.0)
+	for c: Array in cases:
+		var s: Soldier = c[0]
+		var torso := s.ragdoll.parts.get("torso") as Node3D if is_instance_valid(s.ragdoll) else null
+		if torso == null:
+			check(false, "%s: no ragdoll" % c[2])
+			continue
+		var height := torso.global_position.y - _ground_y(torso.global_position)
+		var up := torso.global_basis.y.dot(Vector3.UP)
+		var moved := torso.global_position - (starts[s] as Vector3)
+		moved.y = 0.0
+		var way: Vector3 = c[1]
+		var along := moved.dot(way) if way.length() > 0.1 else 1.0
+		check(s.ragdoll.frozen and height < 0.4 and absf(up) < 0.75 and along > 0.15,
+			"%s: torso down %.2f m off the ground, %.0f deg from upright, %.2f m along its push" % [c[2], height, rad_to_deg(acos(clampf(up, -1.0, 1.0))), along])
+	# A knee bends only backwards: in the thigh's frame the shin runs down and back (+z), never
+	# forward past straight (a little slack for the joints' give).
+	var worst := 0.0
+	var who := ""
+	for c: Array in cases:
+		var s: Soldier = c[0]
+		for side: String in ["l", "r"]:
+			var leg := s.ragdoll.parts.get("leg_" + side) as Node3D
+			var shin := s.ragdoll.parts.get("shin_" + side) as Node3D
+			if leg and shin:
+				var down := (leg.global_basis.orthonormalized().inverse() * shin.global_basis.orthonormalized()) * Vector3.DOWN
+				if -down.z > worst:
+					worst = -down.z
+					who = "%s %s" % [s.name, side]
+	check(worst < 0.25, "no knee bent the wrong way (worst %.2f forward of straight, %s)" % [worst, who])
+	for c: Array in cases:  # out of the way: the blasts below use these spots
+		(c[0] as Soldier).queue_free()
+	_spot = 0
+	await _seconds(0.3)
 
 
 # --- Blasts -------------------------------------------------------------------------------

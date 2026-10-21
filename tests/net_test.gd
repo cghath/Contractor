@@ -24,6 +24,11 @@ const SAVED_BODY := {"uid": "test_net_body_1", "label": "Player 9", "faction": "
 ## one after; the client's severed pieces must lie exactly where the host's settled.
 const GORED := ["Gored_1", "Gored_2"]
 const GORED_AT := [Vector3(-6, 0.1, 36), Vector3(-6, 0.1, 44)]
+## A man the host shoots dead standing once the client is in: his corpse must come to rest down,
+## and the same on both machines (the host sends its rest pose: _host_rest_pose).
+const SLUMPED := "Slumped"
+const SLUMPED_AT := Vector3(-14, 0.1, 44)
+var _host_pose := PackedFloat32Array()
 ## Voxel edits in the same save: an impact mark on the main building's concrete and a bullet
 ## hole in the shed's plank wall (voxel coordinates, an old save's whole-voxel hole), plus a
 ## calibre-sized bullet hole through the next voxel, which the late joiner gets in the log.
@@ -191,6 +196,31 @@ func _give_kit(id: int) -> void:
 	_fire_dragger_dry()
 	if id != GHOST and _combatant_or_body(GORED[1]) == null:
 		_stage_gore(1)
+		_stage_slump()
+
+
+## Host: a man shot dead standing; once his ragdoll settles, its rest pose goes to the client.
+func _stage_slump() -> void:
+	var s := level.spawn_soldier({"name": SLUMPED, "faction": "hostile", "variant": "woodland", "pos": SLUMPED_AT,
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().create_timer(1.0).timeout
+	var into := s.global_basis.z
+	s.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.FULL_POWER, "position": s.global_position + Vector3.UP * 1.3 - into * 0.12,
+		"direction": into, "distance": 40.0})
+	s.vitals.server_kill()
+	var deadline := Time.get_ticks_msec() + 15000
+	while Time.get_ticks_msec() < deadline and not (is_instance_valid(s.ragdoll) and s.ragdoll.frozen):
+		await get_tree().process_frame
+	await get_tree().create_timer(0.5).timeout
+	print("[host] %s came to rest: %s" % [SLUMPED, "frozen" if is_instance_valid(s.ragdoll) and s.ragdoll.frozen else "NOT SETTLED"])
+	_host_rest_pose.rpc(s.model.ragdoll_net)
+
+
+## Client: the host's rest pose for SLUMPED's corpse.
+@rpc("authority", "call_remote", "reliable")
+func _host_rest_pose(packed: PackedFloat32Array) -> void:
+	_host_pose = packed
 
 
 ## Host: B-08. The dragger's rifle fired to empty while the client watches (see DRY_SHOT_S).
@@ -329,6 +359,9 @@ func _run_client() -> void:
 		await get_tree().create_timer(0.15).timeout
 	await _wait_for(func() -> bool: return me.inventory.rounds_in(&"primary") == 27, 3.0)
 	check(me.inventory.rounds_in(&"primary") == 27, "3 shots: host's ammo count replicated back (27)")
+	if me.inventory.rounds_in(&"primary") != 27:
+		print("    (up %s, %s, hands '%s', at %s, %d rounds, why out %s)" % [me.vitals.is_up(), me.vitals.condition_text(), me.inventory.hands,
+			me.global_position, me.inventory.rounds_in(&"primary"), me.vitals.why_unconscious()])
 	# Feel round 2: the reload's phases come from the host (_reload_began: the weapon, the empty
 	# flag, the length), so the third-person model plays the same keys here. Nothing begins it on
 	# this side: the host's word alone must.
@@ -384,6 +417,7 @@ func _run_client() -> void:
 	await _shoot_dropped_helmet(me)
 	await _check_saved_body(me)
 	await _check_gore()
+	await _check_slump()
 	await _check_looted_rifle(me)
 	await _check_world_edits()
 	me = await _check_rejoin_pickup(me)
@@ -431,21 +465,32 @@ func _check_saved_body(me: Soldier) -> void:
 ## here, each piece lying exactly where the host's settled (its record's "q").
 func _check_gore() -> void:
 	for name_: String in GORED:
-		var off := ["no body"]
-		await _wait_for(func() -> bool:
-			off = _gore_off(_combatant_or_body(name_))
-			return off.is_empty(), 25.0)
+		await _wait_for(func() -> bool: return _gore_off(_combatant_or_body(name_)).is_empty(), 25.0)
+		var off := _gore_off(_combatant_or_body(name_))
 		var b := _combatant_or_body(name_)
 		var deform := b.model.get_node(^"BodyDeform") as BodyDeform if b else null
 		check(off.is_empty() and deform != null and not deform.severed().is_empty(),
 			"%s: the parts the host's blast took are gone here too (%s), each piece where the host's landed (%s)" % [name_, deform.severed() if deform else [], off])
 	var saved: Soldier = level.bodies.get_child(0) if level.bodies.get_child_count() > 0 else null
-	var off_saved := ["no body"]
-	await _wait_for(func() -> bool:
-		off_saved = _gore_off(saved)
-		return off_saved.is_empty(), 5.0)
+	await _wait_for(func() -> bool: return _gore_off(saved).is_empty(), 5.0)
+	var off_saved := _gore_off(saved)
 	var sd := saved.model.get_node(^"BodyDeform") as BodyDeform if saved else null
 	check(sd != null and Vitals.SHIN_L in sd.severed() and off_saved.is_empty(), "the saved body's shin is off, its piece where the save says (%s)" % [off_saved])
+
+
+## The corpse shot dead standing lies down, and exactly as on the host.
+func _check_slump() -> void:
+	await _wait_for(func() -> bool:
+		var s := _combatant_or_body(SLUMPED)
+		return not _host_pose.is_empty() and s != null and s.model.ragdoll_net == _host_pose and is_instance_valid(s.ragdoll), 25.0)
+	var s := _combatant_or_body(SLUMPED)
+	var torso := s.ragdoll.parts.get("torso") as Node3D if s and is_instance_valid(s.ragdoll) else null
+	var same := s != null and not _host_pose.is_empty() and s.model.ragdoll_net == _host_pose
+	var host_torso := Vector3(_host_pose[0], _host_pose[1], _host_pose[2]) if _host_pose.size() >= 3 else Vector3.ZERO  # "torso" leads RAGDOLL_BONES
+	var gap := torso.global_position.distance_to(s.model.global_transform * host_torso) if torso and same else -1.0
+	check(same and gap >= 0.0 and gap < 0.01, "a corpse rests the same here as on the host (pose replicated, torso %.3f m apart)" % gap)
+	var up := torso.global_basis.y.dot(Vector3.UP) if torso else 1.0
+	check(torso != null and absf(up) < 0.75, "shot dead standing, it lies down, not upright (%.0f deg from upright)" % rad_to_deg(acos(clampf(up, -1.0, 1.0))))
 
 
 ## What's wrong with `b`'s pieces against its records (empty when each lies at its "q").
