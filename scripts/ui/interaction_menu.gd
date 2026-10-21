@@ -132,6 +132,8 @@ const ACTIONS := {
 		{"id": &"punch_out", "label": "Punch out", "needs": &"mech_pilot", "request": &"_server_punch_out", "with": &"target", "group": MORE},
 		{"id": &"loot", "label": "Loot", "needs": &"has_gear", "window": true},
 		{"id": &"loot_all", "label": "Loot all", "needs": &"has_gear", "request": &"_server_loot_body", "with": &"target"},
+		# A fallen squadmate's tags (cghath's list, 2026-10-20): carried out, he's killed in action, not missing.
+		{"id": &"take_tags", "label": "Take dog tags", "needs": &"has_tags", "request": &"_server_take_tags", "with": &"target"},
 		{"id": &"carry", "label": "Carry", "needs": &"can_carry", "request": &"_server_carry_body", "with": &"target"},
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 	],
@@ -445,6 +447,8 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return _order_check(need, actor, target)
 		&"has_gear":
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
+		&"has_tags":  # a fallen company soldier still wearing his dog tags (Soldier.dog_tags, replicated)
+			return "" if target is Soldier and not (target as Soldier).dog_tags.is_empty() else _HIDE
 		&"lootable":  # the living: an enemy who's down or gave up (Soldier.lootable_by)
 			if not (target is Soldier and (target as Soldier).lootable_by(actor)):
 				return _HIDE

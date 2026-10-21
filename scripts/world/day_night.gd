@@ -11,7 +11,9 @@ extends Node
 ##   each a row of data: haze (fog_x on the Environment's fog), light (on the sun and sky),
 ##   darkness it adds (dark_add: clouds make a darker night), sight (spot_x on the time to spot,
 ##   sight_m the furthest anyone is seen at all), hearing (hear_x on footsteps), rain (drops
-##   near the camera, none headless) and whether it grounds helicopters (grounds).
+##   near the camera, none headless), whether it grounds helicopters (grounds) and the wind
+##   (wind_mps, from a direction of the zone's own: wind; mortar and artillery shells lean on it,
+##   ShellArc).
 ## - Saved with the zone (GameState.sky: the save wins over the definition, except the hour
 ##   after travel: TRAVELLED) and replicated: a client asks the host on _ready, and the host
 ##   sends it to everyone every SYNC_S.
@@ -53,11 +55,11 @@ const OVERCAST_SKY := Color(0.55, 0.57, 0.60)
 const BASE_FOG := 0.00035
 
 const WEATHER := {
-	"clear":    {"fog_x": 1.0,  "light": 1.0,  "dark_add": 0.0,  "spot_x": 1.0, "sight_m": INF,   "hear_x": 1.0,  "rain": 0,    "grounds": false},
-	"overcast": {"fog_x": 2.0,  "light": 0.6,  "dark_add": 0.1,  "spot_x": 1.1, "sight_m": INF,   "hear_x": 1.0,  "rain": 0,    "grounds": false},
-	"fog":      {"fog_x": 40.0, "light": 0.55, "dark_add": 0.05, "spot_x": 1.5, "sight_m": 150.0, "hear_x": 1.0,  "rain": 0,    "grounds": false},
-	"rain":     {"fog_x": 6.0,  "light": 0.5,  "dark_add": 0.15, "spot_x": 1.3, "sight_m": 400.0, "hear_x": 0.75, "rain": 900,  "grounds": false},
-	"storm":    {"fog_x": 10.0, "light": 0.35, "dark_add": 0.25, "spot_x": 1.6, "sight_m": 250.0, "hear_x": 0.55, "rain": 2200, "grounds": true},
+	"clear":    {"fog_x": 1.0,  "light": 1.0,  "dark_add": 0.0,  "spot_x": 1.0, "sight_m": INF,   "hear_x": 1.0,  "rain": 0,    "grounds": false, "wind_mps": 3.0},
+	"overcast": {"fog_x": 2.0,  "light": 0.6,  "dark_add": 0.1,  "spot_x": 1.1, "sight_m": INF,   "hear_x": 1.0,  "rain": 0,    "grounds": false, "wind_mps": 5.0},
+	"fog":      {"fog_x": 40.0, "light": 0.55, "dark_add": 0.05, "spot_x": 1.5, "sight_m": 150.0, "hear_x": 1.0,  "rain": 0,    "grounds": false, "wind_mps": 1.0},
+	"rain":     {"fog_x": 6.0,  "light": 0.5,  "dark_add": 0.15, "spot_x": 1.3, "sight_m": 400.0, "hear_x": 0.75, "rain": 900,  "grounds": false, "wind_mps": 7.0},
+	"storm":    {"fog_x": 10.0, "light": 0.35, "dark_add": 0.25, "spot_x": 1.6, "sight_m": 250.0, "hear_x": 0.55, "rain": 2200, "grounds": true, "wind_mps": 14.0},
 }
 
 static var _current: DayNight
@@ -106,6 +108,16 @@ static func spot_x(_pos: Vector3) -> float:
 static func hearing_x() -> float:
 	var dn := current()
 	return float(dn.row().hear_x) if dn else 1.0
+
+
+## The wind now (m/s, level): the weather's wind_mps from a direction each zone and weather keep
+## (Captain, 2026-10-21: shells "depending on weather conditions"). Calm without a DayNight.
+static func wind() -> Vector3:
+	var dn := current()
+	if dn == null:
+		return Vector3.ZERO
+	var from_deg := float(posmod(hash(GameState.zone_id + "|" + dn.weather), 360))
+	return Vector3.FORWARD.rotated(Vector3.UP, deg_to_rad(from_deg)) * float(dn.row().get("wind_mps", 0.0))
 
 
 ## Whether the weather grounds helicopters now (a storm).

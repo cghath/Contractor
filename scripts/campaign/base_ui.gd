@@ -14,9 +14,9 @@ extends CanvasLayer
 ## (filter, prices, Buy and Buy 5, support call prices) instead of a second, plainer shop; and
 ## the motor pool has a page of its own (it was only an interaction ring).
 
-const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores", "books"]
+const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores", "books", "memorial"]
 const TITLES := {"squad": "Squad & deploy", "roster": "Roster", "hiring": "Hiring board", "medbay": "Medbay",
-	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage", "books": "Books"}
+	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage", "books": "Books", "memorial": "Memorial"}
 ## The books page's window: the ledger summed over this many days.
 const BOOKS_DAYS := 7
 ## Ledger lines listed on the books page, newest first.
@@ -40,6 +40,7 @@ const ABOUT := {
 	"motor_pool": "The company's vehicles, their condition and service, and vehicles you can buy.",
 	"stores": "The FOB's stocks from pallets: fuel, parts, ammunition, supplies and medical.",
 	"books": "Where the company's money came from and went: the running costs a day, loans, the last week by kind, and every recent payment.",
+	"memorial": "The memorial wall: everyone the company has lost, when and where, and whether their dog tags came home.",
 }
 const HELP := [
 	"Each tab is one of the base's terminals; walking up to a terminal opens its tab. Changes go to the host, who keeps the company's books.",
@@ -195,6 +196,8 @@ func refresh() -> void:
 			_build_stores(rows)
 		"books":
 			_build_books(rows)
+		"memorial":
+			_build_memorial(rows, v)
 
 
 # --- Pages -----------------------------------------------------------------------------------
@@ -236,6 +239,38 @@ func _build_books(rows: VBoxContainer) -> void:
 		var label := UiKit.text("Day %d  %s$%s  %s" % [int(e.get("day", 0)), "-" if amount < 0 else "+", DebriefCalc.money(absi(amount)), String(e.get("what", ""))])
 		UiKit.fit_label_text(label)
 		rows.add_child(_indent(label))
+
+## The memorial wall (cghath's list, 2026-10-20; docs/ChrisPlan_handoff.md "Bases": the wall on
+## the LHD): the roster's "memorial" (Fallen), newest first, each name with where and when they
+## fell, the contract, their missions and whether their tags came home; then who's missing
+## after they fell, still to be declared dead.
+func _build_memorial(rows: VBoxContainer, v: Dictionary) -> void:
+	var roster: Dictionary = v.get("roster", {})
+	var wall: Array = (roster.get("memorial", []) as Array).duplicate()
+	wall.reverse()
+	if wall.is_empty():
+		rows.add_child(UiKit.text("No names on the wall."))
+	else:
+		rows.add_child(UiKit.heading("The fallen (%d)" % wall.size()))
+	for e: Dictionary in wall:
+		var recovered := String(e.get("tags", "")) == Fallen.RECOVERED
+		var tags := UiKit.cell("Tags recovered" if recovered else "Missing", &"" if recovered else &"WarnLabel")
+		tags.tooltip_text = "Their dog tags came home" if recovered else "Neither their tags nor their body came home"
+		tags.mouse_filter = Control.MOUSE_FILTER_PASS
+		rows.add_child(_line("%s, %s" % [Fallen.tags_text(e), Roles.display_name(StringName(e.get("role", "")))], [tags]))
+		var missions := int(e.get("missions", 0))
+		var detail := UiKit.hint("%s. %d mission%s." % [Fallen.how_text(e), missions, "" if missions == 1 else "s"])
+		detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		rows.add_child(_indent(detail))
+	var missing: Array = []
+	for m: Dictionary in roster.get("members", {}).values():
+		if Fallen.presumed(m):
+			var fell: Dictionary = m.get("fell", {})
+			missing.append("%s (fell day %d, %s)" % [m.callsign, int(fell.get("day", 0)), RegionMap.zone_name(String(fell.get("zone", m.get("mia_zone", ""))))])
+	if not missing.is_empty():
+		rows.add_child(UiKit.warn("Missing after they fell: %s. Bring their tags home, or they're declared dead %d days after they fell." % [
+			", ".join(PackedStringArray(missing)), Fallen.DECLARE_DAYS]))
+
 
 func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var prep: Dictionary = v.get("prep", {})

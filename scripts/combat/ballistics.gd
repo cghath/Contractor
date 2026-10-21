@@ -15,7 +15,8 @@ extends RefCounted
 ## round flies a curved path, PATH_STEP_M at a time, slowing by the drag model and falling by
 ## gravity, out to RANGE; the sights are zeroed at ZERO_M (a weapon's "zero_m" stat overrides), so
 ## close in it lands where you aim and far out it drops (the optics' BDC holds are for that). No
-## flight time yet: the whole path is traced at once.
+## flight time yet: the whole path is traced at once. Every peer draws the round's tracer along
+## that same path (flight_path: the same steps from the same launch_velocity, to where it stopped).
 
 const RANGE := 1200.0
 const PATH_STEP_M := 20.0
@@ -67,6 +68,11 @@ const DRAG_G7: Array[Vector2] = [Vector2(0.0, 0.120), Vector2(0.7, 0.120), Vecto
 	Vector2(1.2, 0.396), Vector2(1.5, 0.361), Vector2(2.0, 0.298), Vector2(2.5, 0.267), Vector2(3.0, 0.243), Vector2(4.0, 0.209)]
 
 static var _rounds: Dictionary = {}  # round id -> entry of rounds.json
+## Tests: with record_path on, fire() keeps the path the latest round flew in last_path (its
+## muzzle, every step's end it flew past, where it stopped).
+static var record_path := false
+static var last_path := PackedVector3Array()
+static var _recording := PackedVector3Array()
 
 
 ## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
@@ -86,8 +92,11 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 	var from := origin
 	var path := 0.0  # metres flown to the start of this step
 	var seg_start := origin
-	var velocity := direction * _speed_at(weapon, 0.0)
-	var step := _path_step(seg_start, velocity, weapon, path)
+	var velocity := direction * _speed_at(weapon, 0.0)  # (launch_velocity)
+	var rnd := round_data(weapon)
+	if record_path:
+		_recording = PackedVector3Array([origin])
+	var step := _path_step(seg_start, velocity, rnd, path)
 	var to: Vector3 = step[0]
 	var lost_j := 0.0  # energy lost in walls on the way
 	var passed: Dictionary = {}  # the first body it went through (the shooter's result from then on)
@@ -100,11 +109,13 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			path += seg_start.distance_to(to)
 			if path >= RANGE:
 				break
+			if record_path:
+				_recording.append(to)
 			velocity = step[1]
 			seg_start = to
 			from = to
 			direction = velocity.normalized()  # falling a little more each step
-			step = _path_step(seg_start, velocity, weapon, path)
+			step = _path_step(seg_start, velocity, rnd, path)
 			to = step[0]
 			continue
 		hits += 1
@@ -145,6 +156,13 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			var part: StringName = collider.get_meta(&"body_part", Vitals.TORSO) if collider is Node else Vitals.TORSO
 			# The box is only the first test: the round must meet the body inside it (BodyVolume).
 			var body_hit := BodyVolume.entry(collider as Node3D, part, hit.position, direction, BodyVolume.body_of(collider))
+			# The first box met isn't always the first part met (an arm held across the chest sits in
+			# front of the chest's box): the part whose voxels the round meets first takes it.
+			var nearer := nearest_part(collider as Node3D, hit.position, direction, body_hit)
+			if not nearer.is_empty():
+				collider = nearer.hitbox
+				part = nearer.part
+				body_hit = nearer.hit
 			if body_hit.is_empty():
 				exclude.append(collider.get_rid())  # through the box, past the body: it flies on
 				from = hit.position
@@ -164,6 +182,8 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 				"channel_depth": body_hit.depth,  # how much body the round crosses
 				"distance": distance,
 				"energy_j": energy,  # on arrival, after any plate (BodyDeform scores a round by it; .50 kills)
+				"pellet": pellets(weapon) > 1 or bool(round_data(weapon).get("pellet", false)),  # a buckshot pellet (BodyDeform.GUNFIRE scores it its own way): from a magazine's round or one of a shell's (Shotguns)
+				"round": String(round_data(weapon).get("id", "")),  # the cartridge (GUNFIRE's round_mult)
 			}
 			if lost_j > 0.0:
 				_spend(hit_info, world_energy(weapon, distance) - lost_j)
@@ -235,15 +255,57 @@ static func _speed_at(weapon: ItemData, distance: float) -> float:
 
 
 ## One PATH_STEP_M of flight from `from` at `velocity`, `path` metres out: [where it gets to,
-## its velocity there] (gravity bends it; drag slows it to _speed_at).
-static func _path_step(from: Vector3, velocity: Vector3, weapon: ItemData, path: float) -> Array:
+## its velocity there] (gravity bends it; drag by `rnd`, the round's rounds.json entry, slows it).
+static func _path_step(from: Vector3, velocity: Vector3, rnd: Dictionary, path: float) -> Array:
 	var length := PATH_STEP_M if path < PATH_FAR_M else PATH_STEP_FAR_M
 	var speed := maxf(velocity.length(), 50.0)
 	var dt := length / speed
 	var end := from + velocity * dt + 0.5 * GRAVITY * dt * dt
-	var slowed := velocity_after(weapon, speed, length) if weapon else speed
+	var slowed := velocity_after(rnd, speed, length)  # (no data: no drag)
 	var next := (velocity + GRAVITY * dt).normalized() * maxf(slowed, 50.0)
 	return [end, next]
+
+
+## The velocity `weapon`'s round leaves the muzzle with, fired along the line of sight `direction`:
+## zeroed, at its muzzle speed (as _trace launches it).
+static func launch_velocity(direction: Vector3, weapon: ItemData) -> Vector3:
+	return zeroed(direction, weapon) * _speed_at(weapon, 0.0)
+
+
+## The id of `weapon`'s round in rounds.json ("" without data): with launch_velocity, all a peer
+## needs to fly the same path (flight_path).
+static func round_id(weapon: ItemData) -> StringName:
+	return StringName(round_data(weapon).get("id", ""))
+
+
+## The path a round flew (Captain, 2026-10-21: tracers' "flight paths and ballistic arcs ... still
+## wonky depending on terrain"): from `origin` at `velocity` (launch_velocity), `rnd` its round
+## (rounds.json id or entry), to `end` where it stopped. The very steps _trace flew (_path_step,
+## the same numbers on every peer), cut where `end` lies on one, so the last point is `end`
+## exactly: a tracer drawn along it leaves the muzzle along the barrel, rises and drops as the
+## round did and meets the ground, a wall or a man at the impact, on a slope as on the flat.
+static func flight_path(origin: Vector3, velocity: Vector3, rnd: Variant, end: Vector3) -> PackedVector3Array:
+	var data := round_data(rnd)
+	var points := PackedVector3Array([origin])
+	var from := origin
+	var path := 0.0
+	while velocity.length_squared() > 0.0 and path < RANGE:
+		var step := _path_step(from, velocity, data, path)
+		var to: Vector3 = step[0]
+		var seg := to - from
+		if (end - from).dot(seg) <= seg.length_squared() * (1.0 + PATH_CUT_SLACK):
+			break  # it stopped on this step
+		points.append(to)
+		path += from.distance_to(to)
+		velocity = step[1]
+		from = to
+	points.append(end)
+	return points
+
+
+## flight_path: a stop this share of a step past the step's end still counts as on it (a hull's
+## inside, past where the box was met: Vehicle.server_take_hit).
+const PATH_CUT_SLACK := 0.01
 
 
 ## Speed `v` slowed by drag over `distance` metres (velocity_at's integration, from where it is
@@ -476,8 +538,13 @@ static func _result(kind: String, hit: Dictionary) -> Dictionary:
 
 ## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
 ## Rounds that pass close to AI soldiers on the other side suppress them.
+## Also "launch": the velocity it left `origin` with (launch_velocity, for its tracer: flight_path).
 static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
 	var result := _trace(shooter, origin, direction, weapon)
+	result["launch"] = launch_velocity(direction, weapon)
+	if record_path:
+		last_path = _recording.duplicate()
+		last_path.append(result.position)
 	report_near_misses(shooter, origin, result.position, weapon)
 	if shooter is Soldier and String(result.get("result", "")) != "none":
 		SquadAI.note_impact(result.position, (shooter as Soldier).faction)  # ground being shot up (G-19)
@@ -504,3 +571,65 @@ static func report_near_misses(shooter: Node, from: Vector3, to: Vector3, weapon
 		var d := Geometry3D.get_closest_point_to_segment(chest, from, to).distance_to(chest)
 		if d < sup.x:
 			s.suppress_fire((0.12 + (sup.x - d) * 0.08) * sup.y, from)
+
+
+## Of the body parts `hitbox`'s body has (its Area3D hitboxes with a "body_part"), the one whose
+## voxels a round from `position` along `direction` meets first, if it isn't the one `first`
+## (`hitbox`'s BodyVolume.entry, {} for a miss inside it) already found: {"hitbox", "part", "hit"},
+## or {} when `first` stands. Only boxes the ray crosses are marched.
+static func nearest_part(hitbox: Node3D, position: Vector3, direction: Vector3, first: Dictionary) -> Dictionary:
+	var owner := hitbox.get_parent() if hitbox else null
+	if owner == null:
+		return {}
+	var best := INF
+	if not first.is_empty():
+		best = (Vector3(first.position) - position).dot(direction)
+	var out := {}
+	var body := BodyVolume.body_of(hitbox)
+	for child in owner.get_children():
+		var area := child as Area3D
+		if area == null or area == hitbox or not area.has_meta(&"body_part") or not area.is_inside_tree():
+			continue
+		if not _ray_meets_box(area, position - direction * BodyVolume.LEAD_M, direction, BodyVolume.REACH_M + BodyVolume.LEAD_M):
+			continue
+		var part: StringName = area.get_meta(&"body_part")
+		var hit := BodyVolume.entry(area, part, position, direction, body)
+		if hit.is_empty():
+			continue
+		var along := (Vector3(hit.position) - position).dot(direction)
+		if along < best - 0.002:
+			best = along
+			out = {"hitbox": area, "part": part, "hit": hit}
+	return out
+
+
+## Whether a ray from `from` along `dir` (unit) for `length` m crosses any of `area`'s box shapes.
+static func _ray_meets_box(area: Area3D, from: Vector3, dir: Vector3, length: float) -> bool:
+	for child in area.get_children():
+		var cs := child as CollisionShape3D
+		if cs == null or not cs.shape is BoxShape3D:
+			continue
+		var inv := cs.global_transform.affine_inverse()
+		var o := inv * from
+		var d := inv.basis * dir
+		var half := (cs.shape as BoxShape3D).size * 0.5
+		var t0 := 0.0
+		var t1 := length * d.length()
+		d = d.normalized()
+		var ok := true
+		for a in 3:
+			if absf(d[a]) < 1e-8:
+				if absf(o[a]) > half[a]:
+					ok = false
+					break
+				continue
+			var ta := (-half[a] - o[a]) / d[a]
+			var tb := (half[a] - o[a]) / d[a]
+			t0 = maxf(t0, minf(ta, tb))
+			t1 = minf(t1, maxf(ta, tb))
+			if t0 > t1:
+				ok = false
+				break
+		if ok:
+			return true
+	return false
