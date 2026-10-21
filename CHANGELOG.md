@@ -530,6 +530,49 @@ Design and the Captain's calls: docs/terror_groups.md. Every name and flag is ma
 #### Changed
 - **Black Ridge is a regional militia.** It holds 4 of the 22 contract zones and Black Ridge hills
   (it held every zone before), and its share of contracts falls from about a third to a fifth.
+### The M320 and a breaching shotgun (Captain's list for cghath, 2026-10-20: "Not built yet / Weapons and items")
+
+Closes the list item "an M320 underbarrel grenade launcher and a shotgun".
+
+#### Added
+- **M320 Grenade Launcher** (`m320`, $1,600 proposed): an underbarrel attachment for railed rifles,
+  mounted from the inventory like a grip (not on machine guns or sniper rifles). **4** (new key,
+  rebindable; on the pad wheel as "Underbarrel / shells") switches the trigger to it and back;
+  **R** then loads one grenade by hand (about 3 s), **Fire** lobs it. The grenade flies the
+  launchers' own projectile with gravity, so it arcs: aim high for range. The loaded grenade is
+  the launcher's own state: it stays in when the M320 comes off, goes back on, the gun is stowed,
+  dropped, saved or looted, and every peer sees it. The HUD's ammo readout shows the grenade in
+  it and the ones carried while the trigger is on it.
+- **40 mm grenades:** M406 HE (`round_40mm_he`, $45) bursts through the existing warhead code
+  (blast within about 3 m, fragments to about 10 m, a small crater) but only past 14 m; closer,
+  it hits like a stone and doesn't go off. M714 smoke (`round_40mm_smoke`, $35) puts a white
+  smoke cloud where it lands.
+- **M870 Pump Shotgun** (`m870`, $900): a six-shell tube, pump action (one shot a pull, about 1 s
+  to work the pump). **R** loads shells one at a time (about half a second each) until the tube
+  is full; firing stops it. **4** picks which shell R loads. Shells (prices proposed):
+  - **00 Buckshot** (`shells_12g_buck`, $2): nine pellets, each its own round through the
+    ballistics, spread inside 1.6 degrees.
+  - **Slugs** (`shells_12g_slug`, $2): one heavy round (IIIA).
+  - **Breaching Rounds** (`shells_12g_breach`, $3): at a wooden or sheet-metal door or wall
+    within 2.5 m they blow a hole through it, on a smaller scale than a breaching charge does
+    (concrete only chips). At a locked box they shoot the lock off. Anything else, they hit as
+    a weak, short-ranged round.
+- The **grenadier** role's kit (data/roles.json) now has the M320 on his M4, with 8 HE and 2
+  smoke grenades. A kit's gun attachment goes on the first gun in the kit that takes it.
+- Weapon lights fit the shotgun. New sounds: the shotgun's boom, the M320's thump, a shell going
+  in, the pump.
+- Tests: weapons (data, buckshot pattern, an arcing HE burst that hurts a man near it, a dud
+  inside the arming distance, smoke, buckshot/slug/breaching shots, shell-by-shell loading and
+  firing stopping it, save/load and a peer's copy of both); attachments (the M320's grenade
+  stays with it on and off the gun); armor (the two new rounds on the ladder).
+
+#### Not yet (for the Captain's side and Claude)
+- **Held models and poses (Captain's files):** carried in hand, the shotgun still shows the
+  generic rifle model (VoxelArt has no `shotgun` style yet), and the M320 isn't drawn under the
+  rifle (attachments under the barrel aren't drawn on the held gun at all yet). The ground models
+  for both are new in ItemArt. Both use the rifle hold pose.
+- **AI:** the AI grenadier carries the M320 but doesn't fire it (docs/audits/followups.md F-130),
+  and an AI with a shotgun would see no spare ammo (F-131).
 
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 

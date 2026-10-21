@@ -3,7 +3,8 @@ extends RefCounted
 ## Weapon attachments beyond the optic and the suppressor (wave 7, S3; Captain: "Modular
 ## weapon attachments"). The optic (Optics, the rail on top) and the suppressor (Suppressors,
 ## the threaded muzzle) keep their own modules; this one adds the two mounts they leave:
-##   underbarrel: a grip (tag "grip"): less recoil (recoil_mult) and less aimed sway (sway_mult);
+##   underbarrel: a grip (tag "grip"): less recoil (recoil_mult) and less aimed sway (sway_mult),
+##                or the M320 grenade launcher (stats.launcher: Underbarrel fires and loads it);
 ##   side:        a weapon light (tag "light") or a laser (tag "laser", beam "visible" or "ir"),
 ##                switched on and off with the weapon-light key (Controls.KEYS weapon_light)
 ##                or the inventory's "Light on / off".
@@ -13,6 +14,9 @@ extends RefCounted
 ## laser is switched on. So it travels with the gun everywhere its state goes (dropped,
 ## stowed, looted, stashed, saved) and replicates with the inventory (Inventory.net_state).
 ## all_of() gives the whole slot -> item id picture, optic and muzzle included.
+## An attachment with item state of its own (the M320's loaded grenade, Underbarrel) keeps it on
+## the gun in state[mount + STATE_SUFFIX] ("underbarrel_state") and takes it along when it comes
+## off (the stowed entry's "state") and back on, so the grenade stays in it either way.
 ## A visible light or laser that's on gives its carrier away to the AI (Spotting.LIT, lit());
 ## an IR laser shows only through night vision (ir_on(): the hook for the NVG work; no AI
 ## effect yet). Every number is proposed, for Captain's playtests.
@@ -22,6 +26,8 @@ const UNDERBARREL := &"underbarrel"
 const SIDE := &"side"
 const MOUNTS: Array[StringName] = [UNDERBARREL, SIDE]
 const ON_KEY := "side_on"
+## The gun's state keeps an attachment's own item state under its mount's name plus this.
+const STATE_SUFFIX := "_state"
 ## The node the light and laser hang from, under the soldier's camera (rig()).
 const RIG_NAME := "GunLightRig"
 
@@ -38,13 +44,17 @@ static func is_attachment(item: ItemData) -> bool:
 	return mount_of(item) != &""
 
 
-## True if `weapon` takes `item` (its mount, and a tag it fits; an underbarrel needs a rail).
+## True if `weapon` takes `item` (its mount, a tag it fits and none it doesn't: stats.not_fits,
+## the M320 on a machine gun or a sniper rifle; an underbarrel needs a rail).
 static func fits(weapon: ItemData, item: ItemData) -> bool:
 	var m := mount_of(item)
 	if m == &"" or weapon == null or weapon.type != "weapon":
 		return false
 	if m == UNDERBARREL and not bool(weapon.stats.get("rail", false)):
 		return false
+	for tag: Variant in item.stats.get("not_fits", []):
+		if weapon.tags.has(String(tag)):
+			return false
 	for tag: Variant in item.stats.get("fits", []):
 		if weapon.tags.has(String(tag)):
 			return true
@@ -76,15 +86,25 @@ static func all_of(weapon: ItemData, state: Dictionary) -> Dictionary:
 	}
 
 
-## `state` with `id` on `mount` (&"" for none; taking the side one off switches it off).
-static func with_mounted(state: Dictionary, mount: StringName, id: StringName) -> Dictionary:
+## The own item state of what's on `mount` of a gun with item state `state` ({} for none).
+static func mounted_state(state: Dictionary, mount: StringName) -> Dictionary:
+	var own: Variant = state.get(String(mount) + STATE_SUFFIX, {})
+	return own if own is Dictionary else {}
+
+
+## `state` with `id` on `mount` (&"" for none; taking the side one off switches it off), with
+## `own` the attachment's own item state (kept only while it's on).
+static func with_mounted(state: Dictionary, mount: StringName, id: StringName, own := {}) -> Dictionary:
 	var out := state.duplicate(true)
+	out.erase(String(mount) + STATE_SUFFIX)
 	if id == &"":
 		out.erase(String(mount))
 		if mount == SIDE:
 			out.erase(ON_KEY)
 	else:
 		out[String(mount)] = String(id)
+		if not own.is_empty():
+			out[String(mount) + STATE_SUFFIX] = own.duplicate(true)
 	return out
 
 
@@ -116,13 +136,14 @@ static func server_mount(inv: Inventory, container: StringName, index: int, slot
 	var m := mount_of(item)
 	var weapon := ItemDB.get_item(inv.slots[slot])
 	var old := mounted_id(weapon, inv.state_of(slot), m)
+	var old_own := mounted_state(inv.state_of(slot), m)
 	var entry := inv.remove_entry(container, index)
 	if entry.is_empty():
 		return "Can't do that"
-	if old != &"" and not _stow(inv, old, container):
+	if old != &"" and not _stow(inv, old, container, old_own):
 		inv.insert_entry(container, entry)  # no room for the old one: put the new one back
 		return "No room for the %s" % ItemDB.get_item(old).name
-	var state := with_mounted(inv.state_of(slot), m, StringName(entry.id))
+	var state := with_mounted(inv.state_of(slot), m, StringName(entry.id), entry.get("state", {}))
 	if m == SIDE:
 		state.erase(ON_KEY)  # a new light or laser goes on switched off
 	inv.set_slot_state(slot, state)
@@ -137,7 +158,7 @@ static func server_remove(inv: Inventory, slot: StringName, mount: StringName, t
 	var old := mounted_id(weapon, inv.state_of(slot), mount) if weapon else &""
 	if old == &"":
 		return "Nothing on it there"
-	if not _stow(inv, old, target):
+	if not _stow(inv, old, target, mounted_state(inv.state_of(slot), mount)):
 		return "No room for the %s" % ItemDB.get_item(old).name
 	inv.set_slot_state(slot, with_mounted(inv.state_of(slot), mount, &""))
 	return ""
@@ -158,14 +179,35 @@ static func server_toggle(inv: Inventory, slot: StringName) -> String:
 	return ""
 
 
-static func _stow(inv: Inventory, id: StringName, first: StringName) -> bool:
+static func _stow(inv: Inventory, id: StringName, first: StringName, own := {}) -> bool:
 	var order: Array[StringName] = []
 	if first != &"" and inv.containers.has(first):
 		order.append(first)
 	order.append_array(inv.search_containers())
+	var entry := {"id": id, "count": 1}
+	if not own.is_empty():
+		entry["state"] = own.duplicate(true)  # (the M320's grenade goes with it)
 	for c in order:
-		if inv.insert_entry(c, {"id": id, "count": 1}):
+		if inv.insert_entry(c, entry):
 			return true
+	return false
+
+
+## Host only. Puts a stowed `id` attachment on the first gun in `inv`'s weapon slots it fits
+## with nothing on that mount yet (a kit's grip, light or M320: Roles.give). Whether it went on.
+static func mount_carried(inv: Inventory, id: StringName) -> bool:
+	var item := ItemDB.get_item(id) if ItemDB.has_item(id) else null
+	if not is_attachment(item):
+		return false
+	for slot in Inventory.WEAPON_SLOTS:
+		var gun_id: StringName = inv.slots.get(slot, &"")
+		if gun_id == &"" or not fits(ItemDB.get_item(gun_id), item) or mounted_id(ItemDB.get_item(gun_id), inv.state_of(slot), mount_of(item)) != &"":
+			continue
+		for c in inv.search_containers():
+			var list: Array = inv.containers[c]
+			for i in list.size():
+				if list[i].id == id:
+					return server_mount(inv, c, i, slot) == ""
 	return false
 
 
@@ -216,13 +258,18 @@ static func ir_on(s: Soldier) -> bool:
 	return weapon != null and laser_beam(weapon, s.inventory.state_of(s.active_slot)) == "ir"
 
 
-## What these add to a gun's mass_kg (a gun as it comes carries none of them).
+## What these add to a gun's mass_kg (a gun as it comes carries none of them), with the M320's
+## grenade in it.
 static func extra_mass(weapon: ItemData, state: Dictionary) -> float:
 	var kg := 0.0
 	for m in MOUNTS:
 		var on := mounted(weapon, state, m)
 		if on:
 			kg += on.mass_kg
+			var w := StringName(String(mounted_state(state, m).get("round", "")))
+			var round_id := Launchers.round_item_for(w) if w != &"" else &""
+			if round_id != &"":
+				kg += ItemDB.get_item(round_id).mass_kg
 	return kg
 
 
@@ -236,7 +283,7 @@ static func extra_price(weapon: ItemData, state: Dictionary) -> int:
 	return usd
 
 
-## Short names of what's on, for readouts ("" with none): "Grip, Light (on)".
+## Short names of what's on, for readouts ("" with none): "Grip, Light (on)", "M320 (M406 HE)".
 static func label(weapon: ItemData, state: Dictionary) -> String:
 	var parts: PackedStringArray = []
 	for m in MOUNTS:
@@ -245,6 +292,9 @@ static func label(weapon: ItemData, state: Dictionary) -> String:
 			var text := String(on.stats.get("short", on.name))
 			if m == SIDE and bool(state.get(ON_KEY, false)):
 				text += " (on)"
+			elif bool(on.stats.get("launcher", false)):
+				var w := StringName(String(mounted_state(state, m).get("round", "")))
+				text += " (%s)" % (Launchers.warhead_name(w) if w != &"" else "empty")
 			parts.append(text)
 	return ", ".join(parts)
 
