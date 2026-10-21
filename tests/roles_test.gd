@@ -106,10 +106,12 @@ func _test_assignment() -> void:
 		"a breacher pick takes a non-medic slot (%s)" % [br_plan.slots])
 	var br_inv := Inventory.new()
 	Roles.apply_kit(br_inv, Roles.BREACHER)
-	check(br_inv.slots[&"primary"] == &"mossberg590" and br_inv.slots[&"sidearm"] == &"m17" and br_inv.count_of(&"breaching_charge") == 3
-		and br_inv.count_of(&"flashbang") == 3 and br_inv.count_of(&"loader_12g_6") >= 4 and br_inv.count_of(&"ear_protection") == 1,
-		"the breacher kit: a breaching shotgun, an M17, three charges, three flashbangs, shells, ear pro (%s, %d charges, %d bangs, %d loaders)"
-		% [br_inv.slots[&"primary"], br_inv.count_of(&"breaching_charge"), br_inv.count_of(&"flashbang"), br_inv.count_of(&"loader_12g_6")])
+	# (one 12-gauge system, 2026-10-21: the Skeleton Key under a compact Mk18, breaching and standard shells)
+	var br_key := Shotguns.key_on(ItemDB.get_item(br_inv.slots[&"primary"]), br_inv.state_of(&"primary"))
+	check(br_inv.slots[&"primary"] == &"mk18" and br_key != null and br_inv.slots[&"sidearm"] == &"m17" and br_inv.count_of(&"breaching_charge") == 3
+		and br_inv.count_of(&"flashbang") == 3 and br_inv.count_of(Shotguns.BREACHING) >= 6 and br_inv.count_of(Shotguns.STANDARD) >= 4 and br_inv.count_of(&"ear_protection") == 1,
+		"the breacher kit: the Skeleton Key under an Mk18, an M17, three charges, three flashbangs, breaching and standard shells, ear pro (%s, %d charges, %d bangs, %d breaching)"
+		% [br_inv.slots[&"primary"], br_inv.count_of(&"breaching_charge"), br_inv.count_of(&"flashbang"), br_inv.count_of(Shotguns.BREACHING)])
 	var br_lx3 := Inventory.new()
 	Roles.apply_kit(br_lx3, Roles.BREACHER, true)
 	check(Roles.has_lx3(Roles.BREACHER) and br_lx3.slots[&"helmet"] == &"helmet_lx3", "the breacher has an LX-3 preset")

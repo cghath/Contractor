@@ -216,7 +216,6 @@ static func _spec_for(item: ItemData) -> Dictionary:
 		"rounds_762x25": s = _rounds(2.5, 1.0, 1.0, Vector3(8, 3, 6.5), K.RED)
 		"rounds_57x28": s = _rounds(2.9, 0.8, 1.0, Vector3(8, 3, 6.5), K.BLUE)
 		"rounds_46x30": s = _rounds(3.0, 0.7, 0.9, Vector3(8, 3, 6.5), K.TEAL)
-		"rounds_12g": s = _rounds(6.5, 2.0, 0.0, Vector3(12, 7, 9), K.RED)
 		"rounds_303": s = _rounds(5.6, 1.3, 2.0, Vector3(11, 6, 7), K.GREEN)
 		"smartphone", "feature_phone": s = _phone()
 		"laptop_civilian", "tablet_civilian": s = _laptop()
@@ -242,9 +241,10 @@ static func _spec_for(item: ItemData) -> Dictionary:
 		"m320": s = _m320()
 		"round_40mm_he": s = _grenade_40mm(K.OD, K.YELLOW)
 		"round_40mm_smoke": s = _grenade_40mm(K.GREY_LIGHT, K.BLACK)
-		"m870": s = _shotgun()
+		"skeleton_key": s = _skeleton_key()
+		"choke_870": s = _choke()
 		"shells_12g_buck": s = _shells(K.RED)
-		"shells_12g_slug": s = _shells(K.GREEN)
+		"shells_12g_hibrass": s = _shells(K.NAVY)
 		"shells_12g_breach": s = _shells(K.ORANGE)
 		"ifak": s = _ifak()
 		"trauma_kit": s = _trauma_kit()
@@ -504,6 +504,38 @@ static func _m320() -> Shape:
 	s.b(2.8, -1.4, 25.5, 11, 1.4, 29, K.RUBBER)  # pistol grip
 	s.b(-6.8, -0.3, 13, -5.2, 0.3, 14, K.BLACK)  # folded leaf sight
 	s.b(-6.0, -1.4, 13, -5.2, 1.4, 14, K.BLACK)
+	return s
+
+
+## The Skeleton Key: a cut-down pump 12 gauge for under a rifle's rail, its toothed standoff
+## muzzle (pressed to a door), the barrel over a short three-shell tube, the pump, a small
+## receiver and the rail clamp along its top. Lying on its side like the M320 (grip to +x).
+static func _skeleton_key() -> Shape:
+	var s := Shape.new()
+	s.cyl(Axis.Z, 0, 0, 1.1, 0, 30, VoxelArt.C.GUN)  # barrel
+	s.ring(Axis.Z, 0, 0, 1.6, 0.9, -3.0, 0, K.DARK_GREY)  # standoff muzzle
+	for y: float in [-1.7, 1.2]:
+		s.b(-1.7, y, -3.0, -0.9, y + 0.5, -2.0, K.BLACK, true)  # its teeth
+		s.b(0.9, y, -3.0, 1.7, y + 0.5, -2.0, K.BLACK, true)
+	s.cyl(Axis.Z, 2.4, 0, 1.2, 4, 30, VoxelArt.C.GUN)  # tube magazine
+	s.prism(Axis.Z, 2.0, 0, 2.3, 2.0, 0.6, 10, 22, K.BLACK)  # the pump
+	for z: float in [12.0, 15.0, 18.0]:
+		s.b(4.1, -2.0, z, 4.4, 2.0, z + 1.0, K.DARK_GREY, true)
+	s.b(-1.6, -1.5, 30, 3.6, 1.5, 42, VoxelArt.C.GUN)  # receiver
+	s.b(-4.0, -1.6, 4, -1.4, 1.6, 40, VoxelArt.C.GUN)  # the rail clamp along its top
+	s.b(-4.6, -1.2, 6, -4.0, 1.2, 38, K.BLACK)
+	s.b(3.6, -0.4, 33, 6.0, 0.4, 34, VoxelArt.C.GUN)  # trigger guard
+	s.b(3.6, -0.25, 35, 5.0, 0.25, 35.8, K.BLACK)  # trigger
+	return s
+
+
+## A shotgun choke tube: a short ported steel cylinder with its knurled collar.
+static func _choke() -> Shape:
+	var s := Shape.new()
+	s.cyl(Axis.Z, 0, 0, 1.4, 0, 7, K.STEEL)
+	s.ring(Axis.Z, 0, 0, 1.7, 1.0, 0, 1.5, K.GUNMETAL)  # collar
+	for z: float in [3.0, 4.6]:
+		s.b(-1.5, -0.3, z, 1.5, 0.3, z + 0.6, K.BLACK, true)  # ports
 	return s
 
 

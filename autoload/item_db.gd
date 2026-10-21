@@ -4,6 +4,9 @@ extends Node
 const PATH := "res://data/items.json"
 
 var _items: Dictionary = {}  # StringName -> ItemData
+## Ids that went, and what an old save's item is now (one 12-gauge system, 2026-10-21: the loose
+## rounds_12g and the slugs are Standard buck; cghath's M870 is the Remington 870).
+const ALIASES := {&"rounds_12g": &"shells_12g_buck", &"shells_12g_slug": &"shells_12g_buck", &"m870": &"rem870"}
 
 
 func _ready() -> void:
@@ -28,11 +31,11 @@ func load_items() -> void:
 
 
 func get_item(id: StringName) -> ItemData:
-	return _items.get(id)
+	return _items.get(id, _items.get(ALIASES.get(id, &""))) if not _items.has(id) else _items[id]
 
 
 func has_item(id: StringName) -> bool:
-	return _items.has(id)
+	return _items.has(id) or _items.has(ALIASES.get(id, &""))
 
 
 func all_ids() -> Array:
