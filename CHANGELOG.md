@@ -40,6 +40,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - A broader build widens the body's meshes about each part's own axis, so poses, hands on the
   weapon and hitboxes stay where they were; the trunk's hit shape widens to match.
 
+#### Fixed
+- **The muster line shows the company's people as themselves.** Members standing at the base
+  came out with a random name tape, nationality and body; they now carry their roster identity
+  and face, as they do in the field.
+- A dragger's hands stay on the casualty's straps when the two are different heights.
+
 ### Stairs, the MG pit, a third-person reload error (Captain, 2026-10-20)
 
 #### Fixed

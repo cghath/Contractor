@@ -47,6 +47,7 @@ var thick := 1
 var eye_state := "11"
 var expression := FaceArt.NEUTRAL
 var _parts: Dictionary = {}  # PARTS -> MeshInstance3D
+var _models: Array = []      # all_models(), worked out once a face
 var _ready_built := false
 var _rng := RandomNumberGenerator.new()
 var _blink_in := 3.0
@@ -72,6 +73,7 @@ func setup(m: CharacterModel, face: String) -> void:
 	head.set_meta(&"voxel_variant", palette)
 	var mi := head.get_child(0) as MeshInstance3D
 	_ready_built = false
+	_models = all_models()
 	mi.mesh = null
 	var origins := FaceArt.feature_origins(digits, female)
 	for part in PARTS:
@@ -118,7 +120,7 @@ func is_built() -> bool:
 func _try_ready() -> void:
 	if _ready_built or model == null:
 		return
-	if not VoxelArt.build_async(all_models(), palette):
+	if not VoxelArt.build_async(_models, palette):
 		return
 	_ready_built = true
 	(model.head.get_child(0) as MeshInstance3D).mesh = VoxelArt.mesh(head_model, palette)

@@ -61,8 +61,9 @@ static func shape_of(digits: String, female: bool) -> Dictionary:
 	if digits.length() != SoldierLook.SHAPE_KEYS.size() or not digits.is_valid_int():
 		digits = SoldierLook.DEFAULT_FEMALE_SHAPE if female else SoldierLook.DEFAULT_SHAPE
 	var p := {"female": female}
+	var top := [3 if female else 5, 5, 2, 2, 3, 1, 1, 1]  # each digit's highest (a bad code can't reach past the tables)
 	for i in SoldierLook.SHAPE_KEYS.size():
-		p[SoldierLook.SHAPE_KEYS[i]] = digits.substr(i, 1).to_int()
+		p[SoldierLook.SHAPE_KEYS[i]] = clampi(digits.substr(i, 1).to_int(), 0, top[i])
 	if female:
 		p.beard = SoldierLook.CLEAN
 		p.brow = 0
@@ -355,10 +356,10 @@ static func _female_hair(style: int) -> Array:
 				VoxelArt._fb(8, 14.5, 23.5, 14, 15.5, 25.0, C.PAD)]  # the tie
 		SoldierLook.BRAID:
 			var out := []
-			for i in 5:  # plaits down the back of the neck, each a little narrower
-				var y := 16.0 - i * 2.5
-				out.append(VoxelArt._loft(11, 24.0 - i * 0.4, [[y - 2.0, 1.2 - i * 0.08, 1.0], [y - 1.0, 1.7 - i * 0.08, 1.4], [y, 1.3 - i * 0.08, 1.0]], C.HAIR, 0.6))
-			out.append(VoxelArt._fb(9.75, 2.0, 21.8, 12.25, 3.0, 24.0, C.PAD))  # the tie
+			for i in 6:  # plaits down the back of the neck, overlapping, each a little narrower
+				var y := 17.0 - i * 2.0
+				out.append(VoxelArt._loft(11, 24.0 - i * 0.3, [[y - 2.5, 1.2 - i * 0.08, 1.0], [y - 1.25, 1.7 - i * 0.08, 1.4], [y, 1.3 - i * 0.08, 1.0]], C.HAIR, 0.6))
+			out.append(VoxelArt._fb(10.0, 4.0, 21.75, 12.0, 5.0, 23.5, C.PAD))  # the tie, round the last plait
 			return out
 		SoldierLook.PONYTAIL:
 			return [VoxelArt._loft(11, 24.5, [[3.0, 1.0, 1.0], [8.0, 2.2, 2.0], [14.0, 2.2, 2.2], [16.0, 1.6, 1.6]], C.HAIR, 0.6),
