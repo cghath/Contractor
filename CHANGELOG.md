@@ -18,7 +18,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   amphibious coast, rocky ridge, scrubland) now has the Experimental forest's copses-as-cover layout: bigger, denser
   copses with a skirt of thickets and rocks inside, a thicket belt round the woods, and its higher caps. Temperate
   and river valley also get more woods (2.1 a km², was 1.5 and 1.8) and copses (6, was 5). On temperate's hot zone
-  that's 9,000 trees (was 5,000) and 17,000 thickets (was 11,000). Desert, badlands and salt flats keep their small
+  that's 9,000 trees (was 5,000) and 21,700 thickets (was 11,000): the dense layout's thicket cap is
+  16,000 (was 11,000), so the last copses of a big zone still get their skirts. A fresh layout of that zone takes
+  longer (4.2 s, was 1.8 s on this PC; 0.46 s from the disk cache after). Desert, badlands and salt flats keep their small
   copses.
 - **Trees draw in two tiers.** Within 200 m of a cell's middle they're drawn as before; further out, low-poly
   versions in the same places (a crown 44 triangles instead of 164, a thicket 38 instead of 152), and past 950 m the

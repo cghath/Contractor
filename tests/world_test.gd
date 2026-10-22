@@ -1378,7 +1378,7 @@ func _test_presets() -> void:
 	var off_roads := true
 	for item in sh.items:
 		off_roads = off_roads and _off_roads(item, hot)
-	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 30000 and th.max_slope_deg() < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18)
+	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 48000 and th.max_slope_deg() < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18; from 30000 for the dense copses, woods perf pass)
 		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees" % [sh.total(), th.max_slope_deg()])
 	ss.free()
 	sb2.free()

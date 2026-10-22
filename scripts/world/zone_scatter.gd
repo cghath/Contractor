@@ -49,7 +49,7 @@ enum Kind { ROCK, SCRUB, TREE, THICKET, PROP, VALUABLE, ANIMAL }
 const CAP_ROCKS := 2600
 const CAP_SCRUB := 9000
 const CAP_TREES := 9000  # Captain, 2026-10-16: "forests still are too small" (was 6000); 2026-10-17: sprawling woods (was 8000)
-const CAP_THICKETS := 11000  # sprawling woods take more (2026-10-17; was 8000): copses keep their thicket skirts
+const CAP_THICKETS := 16000  # sprawling woods take more (2026-10-17; was 8000): copses keep their thicket skirts. Woods perf pass (queue item 1.8; was 11000): a 16 km2 zone of a normal preset with the dense copses ran out before its last copses had their skirts
 ## The shares of CAP_TREES woods, then woods with copses and groves, may take (Proposed: woods
 ## keep their 3000 trees, round 4's 0.6 of 5000; copses get the most of the rest).
 const WOODS_SHARE := 0.5
@@ -164,7 +164,7 @@ const FAR_GROUP_M := 24.0
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
 ## 11: every tree solid (2026-10-18).
-const LAYOUT_VERSION := 13  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; old caches re-roll
+const LAYOUT_VERSION := 14  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; 14: the woods perf pass's thicket cap (2026-10-22); old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -1750,8 +1750,17 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 ## block's far blobs aren't showing (SEE_TREE_M from the block's middle: its trees are drawn till
 ## then), first past where the near tier hands over.
 func build_near(pos: Vector3, budget: int) -> int:
+	var done := 0
+	for w: Array in _wanted_near(pos, budget):
+		_build_cell(w[0], w[1])
+		done += 1
+	return done
+
+
+## The `budget` most needed [cell, tier] builds near `pos` (build_near), most needed first.
+func _wanted_near(pos: Vector3, budget: int) -> Array:
 	if not _visuals_on:
-		return 0
+		return []
 	var wanted: Array = []
 	var half := _terrain.size_m * 0.5
 	var reach := CELL_M * 0.7072  # half a cell's diagonal
@@ -1769,11 +1778,7 @@ func build_near(pos: Vector3, budget: int) -> int:
 		if d < BUILD_M or blobs_hidden:
 			wanted.append([d if d > LOD_M - reach else BUILD_M, cell, Tier.FAR])
 	wanted.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-	var done := 0
-	for w: Array in wanted.slice(0, budget):
-		_build_cell(w[1], w[2])
-		done += 1
-	return done
+	return wanted.slice(0, budget).map(func(w: Array) -> Array: return [w[1], w[2]])
 
 
 ## How many cells have their far tier built (every cell within BUILD_M once the camera has been
