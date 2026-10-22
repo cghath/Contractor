@@ -282,7 +282,9 @@ func _process(delta: float) -> void:
 		var key := s.get_instance_id()
 		var pos := s.global_position
 		# (A random start in the stride, so a squad setting off together doesn't step in unison.)
-		var e: Dictionary = _steps.get(key, {"pos": pos, "walked": randf() * _stride(s), "anchor": pos, "since": 0.0, "walking": false})
+		var e: Variant = _steps.get(key)  # (perf pass: no default dictionary made per soldier per frame)
+		if e == null:
+			e = {"pos": pos, "walked": randf() * _stride(s), "anchor": pos, "since": 0.0, "walking": false}
 		var moved := Vector2(pos.x - e.pos.x, pos.z - e.pos.z).length()
 		var rise := absf(pos.y - float((e.pos as Vector3).y))
 		e.pos = pos

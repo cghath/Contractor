@@ -394,6 +394,59 @@ walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or le
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
 
+## F-200 to F-206: perf hooks in cghath's world files (perf pass, claude/perf-pass, 2026-10-22)
+
+Captain, 2026-10-22: "we definitely need more performance fixes". docs/performance.md has the
+cases, the numbers before and after and how to measure (tests/perfcases_test.tscn). These are the
+hooks the pass put into world generation's files, for cghath to keep (or redo his way) when he next
+works there. Each keeps the look and the gameplay as they were.
+
+### F-200 (done, for review): GrassCarpet keeps its tufts
+`GrassCarpet.lay` keeps each grid point's tuft (or none) in `_tufts` until the ground is cut again,
+and narrows the scatter's pads and roads to those near the circle once per lay (`_blockers_near`).
+Each tuft used to test every road in the zone: 100-300 ms a lay, every 6 m on foot and many times a
+second in a vehicle.
+
+### F-201 (done, for review): ZoneScatter ground cover and cell builds
+`_ground_blocked` narrows pads and roads per 128 m cell (`_blockers_for`); cells are built one a
+frame from a queue (`_queued`), the same PER_FRAME per CHECK_S as before. The new Detail setting
+(GameSettings.detail) scales the draw ranges (`_range_scale`) and stops the far canopy blobs at
+"far_trees_m" with a fade ("ultra" keeps today's: to the horizon).
+
+### F-202 (done, for review): ZoneTerrain refines a chunk a frame
+`_process` re-plans the chunks to refine only once the camera has moved REPLAN_M (it measured and
+sorted every chunk of the zone every frame) and refines one a frame (`_refine`).
+
+### F-203 (done, for review): GroundCuts redraws over frames
+A cut's collision still goes in at once; its blocks are redrawn one a frame and the coarse chunks
+after them (`_process`, `_fine_dirty`). A barrage of craters used to redraw every block in its own
+frame (50-150 ms a crater).
+
+### F-204 (done, for review): VoxelWorld marks and blasts
+Marks keep a slot in their multimesh (`_show_mark`, `_drop_mark`, a rebuild only to grow); the
+oldest mark at the cap is found without `_marks.keys()[0]`; `drawn_marks()` for tests. `_blast`
+copies its box once, walks only the sphere's rows and pastes the cleared voxels back
+(`paste_masked`). Still open: `_breach` walks voxels one tool call at a time, and a module's edit log
+is replayed in one frame when it streams in (`for edit in _pending`): a fought-over town costs
+hundreds of ms there.
+
+### F-205 (done, for review): ZoneNav and streaming by distinct points
+`ZoneNav._update_wanted` marks once per MARK_CELL_M square of soldiers (radius plus the square's
+half-diagonal: never fewer chunks). `ZoneLevel._update_streaming` takes the focus points once per
+2 m (`_distinct`).
+
+### F-206 (open, for ai-followups / cghath): what's left in the hitches
+- Buildings: a cold scan's grouping, entrances and ports (`_group`, `_building`) still run in one
+  frame once its probes are done (100-250 ms in the Old Quarter); the probes are budgeted now.
+- EnemyResponse._spawn_team spawns a whole team in one frame (about 8 ms a soldier now, was 45):
+  its eight callers use the soldiers at once, so a queue needs their records to wait.
+- Gore: BodyDeform meshes its results on the main thread (`_done_work`); hang and piece meshes
+  aren't counted against its budget.
+- Co-op: three RPCs a shot (sound, tracer, impact); one batched RPC a frame would do.
+- Rendering (not measurable headless): soldiers are 15-25 draws each with shadows and no range
+  (338 draws in the Old Quarter case); module proxies cast shadows; terrain's coarsest level is a
+  draw per 128 m chunk out to the horizon (could merge into 512 m blocks).
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.

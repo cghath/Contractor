@@ -828,9 +828,10 @@ static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> vo
 ## or carried and dragged): each follows the bone it belongs to (upper body, head, pelvis,
 ## left or right leg), from its rest transform.
 func pose_hitboxes(body: Node3D) -> void:
-	# Perf pass (2026-10-22): drawn every few frames (far off or behind the view, _lod_every), the
-	# hitboxes follow on the frames it's drawn, as its arms do; going down or up poses them at once.
-	if lod and _lod_shown_every > 1 and _lod_n != 0 and downed == _boxes_downed:
+	# Perf pass (2026-10-22): a body standing, drawn every few frames (far off or behind the view,
+	# _lod_every), has its hitboxes follow on the frames it's drawn, as its arms do. A downed one's
+	# (lying, slumping) follow every frame; going down or up poses them at once.
+	if lod and not downed and _lod_shown_every > 1 and _lod_n != 0 and downed == _boxes_downed:
 		return
 	_boxes_downed = downed
 	var bones := with_shins(_target_bones(_carry_state()))

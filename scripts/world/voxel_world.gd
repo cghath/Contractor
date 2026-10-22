@@ -913,10 +913,11 @@ func _show_mark(mark: Array) -> void:
 	var mm := (_hole_mesh if hole else _mark_mesh).multimesh
 	var free := _free_holes if hole else _free_marks
 	var slot := -1
+	var shown := _shown(mm)
 	if not free.is_empty():
 		slot = free.pop_back()
-	elif mm.visible_instance_count < mm.instance_count:
-		slot = mm.visible_instance_count
+	elif shown < mm.instance_count:
+		slot = shown
 		mm.visible_instance_count = slot + 1
 	else:
 		_queue_mark_rebuild()  # full: it grows
@@ -972,6 +973,16 @@ func _rebuild_marks() -> void:
 			mark[6] = i
 			_draw_mark(mm, i, mark)
 			i += 1
+
+
+## The slots of `mm` in use (visible_instance_count, -1 meaning all of them).
+static func _shown(mm: MultiMesh) -> int:
+	return mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
+
+
+## How many impact marks (not bullet holes) are drawn (tests).
+func drawn_marks() -> int:
+	return _shown(_mark_mesh.multimesh) - _free_marks.size() if _mark_mesh else 0
 
 
 ## Slots for `n` marks: room to double before the next rebuild.

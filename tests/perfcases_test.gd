@@ -50,6 +50,9 @@ const BUDGETS := {
 	"heli": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
 }
 const WALK_MPS := 3.0
+## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
+## the import and all five zones); averages and per-minute rates compare the same.
+const CI_MEASURE_SHARE := 0.6
 
 var failures := 0
 var main: Node
@@ -456,7 +459,7 @@ func _measure(name: String, walk: Array) -> void:
 	_prev_event_process = true
 	_frame_start = Time.get_ticks_usec()
 	_measuring = true
-	var secs: float = MEASURE_S[name]
+	var secs: float = MEASURE_S[name] * (CI_MEASURE_SHARE if OS.get_environment("GITHUB_ACTIONS") != "" else 1.0)
 	var t0 := Time.get_ticks_msec()
 	var leg := 0
 	var last_draw := -10.0
