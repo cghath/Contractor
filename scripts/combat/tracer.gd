@@ -32,8 +32,13 @@ var _along := PackedFloat32Array()  # metres along the path to each point
 var _length := 0.0
 var _lead := Vector3.ZERO
 var _mesh: MeshInstance3D
-var _material: StandardMaterial3D
-var _box: BoxMesh
+var _width := WIDTH
+## Perf pass (2026-10-22): every streak draws one unit box (scaled to its width and length) in one
+## of a few shared materials (by kind and dimness), fading by its own transparency, where each
+## shot used to make its own BoxMesh and StandardMaterial3D (and resize the box, which rebuilds
+## it, every frame). The streak looks the same.
+static var _unit_box: BoxMesh
+static var _materials := {}  # [kind, dim] -> StandardMaterial3D
 ## Tests: the latest tracer's path, as drawn (lead included), on this peer.
 static var last_path := PackedVector3Array()
 
@@ -72,27 +77,41 @@ func _start(points: PackedVector3Array, dim: bool, kind: int, lead: Vector3) -> 
 		return
 	top_level = true
 	global_transform = Transform3D.IDENTITY  # the streak's placed in world space (_set_drawn)
-	_box = BoxMesh.new()
-	var width := BALL_WIDTH if kind == Kind.BALL else WIDTH
-	_box.size = Vector3(width, width, 0.001)
-	_material = StandardMaterial3D.new()
-	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var colour: Color = COLOURS.get(kind, COLOURS[Kind.RED])
-	if dim:
-		colour.a *= SUPPRESSED_ALPHA
-	_material.albedo_color = colour
-	_box.material = _material
+	_width = BALL_WIDTH if kind == Kind.BALL else WIDTH
 	_mesh = MeshInstance3D.new()
-	_mesh.mesh = _box
+	_mesh.mesh = unit_box()
+	_mesh.material_override = material(kind, dim)
 	add_child(_mesh)
 	_set_drawn(0.0)
 	var draw_s := maxf(_length / DRAW_MPS, MIN_DRAW_S)
 	var tween := create_tween()
 	tween.tween_method(_set_drawn, 0.0, _length, draw_s)
 	tween.tween_interval(HOLD_S)
-	tween.tween_property(_material, "albedo_color:a", 0.0, FADE_S)
+	tween.tween_property(_mesh, "transparency", 1.0, FADE_S)
 	tween.tween_callback(queue_free)
+
+
+## The box every streak draws (a 1 m cube, scaled by its transform).
+static func unit_box() -> BoxMesh:
+	if _unit_box == null:
+		_unit_box = BoxMesh.new()
+		_unit_box.size = Vector3.ONE
+	return _unit_box
+
+
+## The shared material of a streak of `kind` (`dim`: a suppressed shot's).
+static func material(kind: int, dim: bool) -> StandardMaterial3D:
+	var key := [kind, dim]
+	if not _materials.has(key):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		var colour: Color = COLOURS.get(kind, COLOURS[Kind.RED])
+		if dim:
+			colour.a *= SUPPRESSED_ALPHA
+		m.albedo_color = colour
+		_materials[key] = m
+	return _materials[key]
 
 
 ## Where the round was `s` metres along its path (the lead blended out over LEAD_BLEND_M).
@@ -112,15 +131,15 @@ func _set_drawn(drawn: float) -> void:
 	var head := point_at(drawn)
 	var tail := point_at(maxf(drawn - TAIL_M, 0.0))
 	var span := head - tail
-	_box.size.z = maxf(span.length(), 0.001)
 	if span.length_squared() < 0.000001:
 		_mesh.visible = false
 		return
 	_mesh.visible = true
-	_mesh.transform = Transform3D(Basis.looking_at(span, Vector3.UP if absf(span.normalized().y) < 0.99 else Vector3.RIGHT), (head + tail) * 0.5)
+	var basis := Basis.looking_at(span, Vector3.UP if absf(span.normalized().y) < 0.99 else Vector3.RIGHT)
+	_mesh.transform = Transform3D(basis.scaled_local(Vector3(_width, _width, maxf(span.length(), 0.001))), (head + tail) * 0.5)
 
 
 ## The streak's head and tail now (tests).
 func streak() -> Array[Vector3]:
-	var half := _mesh.basis.z * (_box.size.z * 0.5)
+	var half := _mesh.basis.z * 0.5  # (the unit box scaled to the streak's length)
 	return [_mesh.position - half, _mesh.position + half]  # looking_at points -Z at the head

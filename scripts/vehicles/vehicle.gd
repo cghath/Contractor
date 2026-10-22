@@ -1913,6 +1913,9 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 
 ## Host: wakes settled ragdolls just ahead of the hull while it moves or is driven (a body it
 ## has stopped against too), and runs over soldiers in its path.
+var _wake_query: PhysicsShapeQueryParameters3D
+
+
 func _wake_bodies_ahead() -> void:
 	var speed := linear_velocity.length()
 	var pushing := can_drive() and absf(float(_current_input().throttle)) > 0.0
@@ -1921,9 +1924,12 @@ func _wake_bodies_ahead() -> void:
 		return
 	var size := VehicleArt.size_m(model)
 	var ahead := speed * RAGDOLL_LOOKAHEAD_S + RAGDOLL_MARGIN_M
-	var box := BoxShape3D.new()
+	if _wake_query == null:  # (perf pass: one shape and query a vehicle, not a new pair every tick)
+		_wake_query = PhysicsShapeQueryParameters3D.new()
+		_wake_query.shape = BoxShape3D.new()
+	var box := _wake_query.shape as BoxShape3D
 	box.size = Vector3(size.x + RAGDOLL_MARGIN_M * 2.0, maxf(size.y, 1.0), size.z + ahead * 2.0)
-	var q := PhysicsShapeQueryParameters3D.new()
+	var q := _wake_query
 	q.shape = box
 	q.transform = Transform3D(global_basis, global_transform * Vector3(0, size.y * 0.5, 0))
 	q.collision_mask = Ragdoll.LAYER | Soldier.BODY_LAYER

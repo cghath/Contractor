@@ -126,6 +126,8 @@ func _ready() -> void:
 		_set_enemy_faction(_zone_enemy())  # wave 6b: whose kit the garrisons wear from the first spawn
 		_apply_difficulty_scale()
 		Digging.of(self).server_prepare(self)  # the saved cuts and berms back, or the enemy's outposts dug in (dig phase 4)
+	PerfWarm.warm_zone(self)  # the uniforms this zone's soldiers wear, rasterised on a worker now (perf pass)
+	PerfWarm.warm_effects(self)  # the shot and blast effects' shaders compiled before the first shot (perf pass)
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)
@@ -1045,7 +1047,7 @@ func _process(_delta: float) -> void:
 ## Streams modules in near the soldiers this peer streams for (stream_focus) and out far from
 ## all of them; at most one in per call.
 func _update_streaming() -> void:
-	var focus := stream_focus()
+	var focus := _distinct(stream_focus(), 2.0)  # (perf pass: a garrison's men fighting at one post count once)
 	var nearest: ZoneModule = null
 	var nearest_d := INF
 	for m in _modules:
@@ -1075,6 +1077,18 @@ func _stream_in(m: ZoneModule) -> void:
 func _on_streamed_in(m: ZoneModule) -> void:
 	if multiplayer.is_server():
 		_spawn_garrison(m)
+
+
+## `points` with those within `cell_m` of one already kept left out (on a `cell_m` grid).
+static func _distinct(points: Array[Vector3], cell_m: float) -> Array[Vector3]:
+	var seen := {}
+	var out: Array[Vector3] = []
+	for p in points:
+		var key := Vector2i(roundi(p.x / cell_m), roundi(p.z / cell_m))
+		if not seen.has(key):
+			seen[key] = true
+			out.append(p)
+	return out
 
 
 ## Where modules stream in around on this peer: on the host every player and every AI soldier

@@ -420,10 +420,7 @@ func holes_through(world_position: Vector3) -> int:
 
 ## How many bullet hole decals there are (every peer has the same).
 func bullet_hole_count() -> int:
-	var count := 0
-	for serial: int in _marks:
-		count += 1 if _is_hole(_marks[serial]) else 0
-	return count
+	return _hole_count
 
 
 ## Host only. A small impact mark (a crack or chip, nothing carved) where a round stopped on
@@ -767,19 +764,53 @@ func _apply_breach(edit: Dictionary) -> void:
 
 
 ## Takes out each material within its share of radius `r` around `centre` (voxel units).
+## Perf pass (2026-10-22): the blast's box is copied out once, only the sphere's rows are walked in
+## it, and the voxels it takes out go back in one paste (a voxel tool read and write per voxel of
+## the whole box before: a mortar round was ~130k of each in one frame). The same voxels go.
+const _KEEP := 255  # (no material: "leave this voxel be" in the paste)
+
+
 func _blast(centre: Vector3, r: float) -> void:
 	var lo := Vector3i((centre - Vector3.ONE * r).floor())
 	var hi := Vector3i((centre + Vector3.ONE * r).ceil())
-	for z in range(lo.z, hi.z + 1):
-		for y in range(lo.y, hi.y + 1):
-			for x in range(lo.x, hi.x + 1):
-				var cell := Vector3i(x, y, z)
-				var d := (Vector3(cell) + Vector3.ONE * 0.5).distance_to(centre)
-				if d > r:
+	var size := hi - lo + Vector3i.ONE
+	var src := VoxelBuffer.new()
+	src.create(size.x, size.y, size.z)
+	_tool.copy(lo, src, 1 << VoxelBuffer.CHANNEL_COLOR, false)
+	if src.is_uniform(VoxelBuffer.CHANNEL_COLOR) and int(src.get_voxel(0, 0, 0, VoxelBuffer.CHANNEL_COLOR)) == Mat.EMPTY:
+		return  # nothing there
+	var out := VoxelBuffer.new()
+	out.create(size.x, size.y, size.z)
+	out.fill(_KEEP, VoxelBuffer.CHANNEL_COLOR)
+	var reach := {}  # base material -> (its share of r)^2
+	var any := false
+	var c := centre - Vector3(lo) - Vector3.ONE * 0.5  # the centre in the box's cells
+	var r2 := r * r
+	for z in size.z:
+		var dz := float(z) - c.z
+		if dz * dz > r2:
+			continue
+		for y in size.y:
+			var dy := float(y) - c.y
+			var row := r2 - dz * dz - dy * dy
+			if row < 0.0:
+				continue
+			var half := sqrt(row)
+			for x in range(maxi(ceili(c.x - half), 0), mini(floori(c.x + half), size.x - 1) + 1):
+				var raw := int(src.get_voxel(x, y, z, VoxelBuffer.CHANNEL_COLOR))
+				if raw == Mat.EMPTY:
 					continue
-				var mat := base_mat(int(_tool.get_voxel(cell)))
-				if mat != Mat.EMPTY and d <= r * float((MATERIALS.get(mat, {}) as Dictionary).get("blast", 1.0)):
-					_tool.set_voxel(cell, Mat.EMPTY)
+				var mat := base_mat(raw)
+				var lim: float = reach.get(mat, -1.0)
+				if lim < 0.0:
+					lim = pow(r * float((MATERIALS.get(mat, {}) as Dictionary).get("blast", 1.0)), 2.0)
+					reach[mat] = lim
+				var dx := float(x) - c.x
+				if dx * dx + dy * dy + dz * dz <= lim:
+					out.set_voxel(Mat.EMPTY, x, y, z, VoxelBuffer.CHANNEL_COLOR)
+					any = true
+	if any:
+		_tool.paste_masked(lo, out, 1 << VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.CHANNEL_COLOR, _KEEP)
 
 
 ## After voxels in `box` (voxel units) were cleared: marks on voxels that are gone go too,
@@ -793,9 +824,8 @@ func _carved(box: AABB) -> void:
 			gone.append(cell)
 	for cell in gone:
 		for serial: int in _mark_cells[cell]:
-			_marks.erase(serial)
+			_drop_mark(serial)
 		_mark_cells.erase(cell)
-		_queue_mark_rebuild()
 	if multiplayer.is_server():
 		_touch(box)
 		_dirty.append(box)
@@ -813,18 +843,40 @@ func _add_mark(p: Vector3, n: Vector3, mat: int, size_m := MARK_SIZE_M, hole := 
 	n = n.normalized() if not n.is_zero_approx() else Vector3.UP
 	var cell := _mark_cell(p, n)
 	_mark_serial += 1
-	_marks[_mark_serial] = [p, n, mat, cell, size_m, hole]
+	var mark := [p, n, mat, cell, size_m, hole, -1]  # [6]: its slot in its multimesh (_show_mark)
+	_marks[_mark_serial] = mark
+	if hole:
+		_hole_count += 1
 	if not _mark_cells.has(cell):
 		_mark_cells[cell] = []
 	(_mark_cells[cell] as Array).append(_mark_serial)
 	while _marks.size() > MAX_MARKS:
-		var oldest: int = _marks.keys()[0]
+		while not _marks.has(_oldest_mark):
+			_oldest_mark += 1  # (serials only grow: the oldest still here is the lowest)
+		var oldest := _oldest_mark
 		var on: Array = _mark_cells.get(_marks[oldest][3], [])
 		on.erase(oldest)
 		if on.is_empty():
 			_mark_cells.erase(_marks[oldest][3])
-		_marks.erase(oldest)
-	_queue_mark_rebuild()
+		_drop_mark(oldest)
+	_show_mark(mark)
+
+
+## Takes mark `serial` away (its slot hidden and free for the next).
+func _drop_mark(serial: int) -> void:
+	var mark: Array = _marks.get(serial, [])
+	if mark.is_empty():
+		return
+	_marks.erase(serial)
+	var hole := _is_hole(mark)
+	if hole:
+		_hole_count -= 1
+	var slot := int(mark[6]) if mark.size() > 6 else -1
+	if slot < 0 or _marks_dirty:
+		return
+	var mm := (_hole_mesh if hole else _mark_mesh).multimesh
+	mm.set_instance_transform(slot, Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+	(_free_holes if hole else _free_marks).append(slot)
 
 
 ## A bullet hole decal `size_m` across, unless that voxel face already shows
@@ -842,38 +894,103 @@ func _queue_mark_rebuild() -> void:
 		_rebuild_marks.call_deferred()
 
 
-## Every mark as a small quad flat on its surface, turned and sized by its position so every
-## peer draws it the same: impact marks in one multimesh, bullet holes in the other.
+## Perf pass (2026-10-22): every mark keeps a slot in its multimesh. A new mark is drawn into a
+## free slot (or the next one), a mark that goes hides its slot for the next; the multimeshes
+## grow by doubling (a full rebuild then, as every change was before: thousands of marks laid
+## again for each new one in a firefight). Marks look the same.
+const MARK_SLOTS_MIN := 256
+var _hole_count := 0
+var _oldest_mark := 1
+var _free_marks: Array[int] = []
+var _free_holes: Array[int] = []
+
+
+## Draws `mark` in a slot of its multimesh (a rebuild is due instead when none is free).
+func _show_mark(mark: Array) -> void:
+	if _marks_dirty:
+		return  # the rebuild draws it
+	var hole := _is_hole(mark)
+	var mm := (_hole_mesh if hole else _mark_mesh).multimesh
+	var free := _free_holes if hole else _free_marks
+	var slot := -1
+	var shown := _shown(mm)
+	if not free.is_empty():
+		slot = free.pop_back()
+	elif shown < mm.instance_count:
+		slot = shown
+		mm.visible_instance_count = slot + 1
+	else:
+		_queue_mark_rebuild()  # full: it grows
+		return
+	mark[6] = slot
+	_draw_mark(mm, slot, mark)
+
+
+## Mark `mark`'s quad in slot `slot` of `mm`: flat on its surface, turned and sized by its
+## position so every peer draws it the same.
+func _draw_mark(mm: MultiMesh, slot: int, mark: Array) -> void:
+	var size := float(mark[4]) / VOXEL_SIZE if mark.size() > 4 else MARK_SIZE_M / VOXEL_SIZE
+	var p: Vector3 = mark[0]
+	var n: Vector3 = mark[1]
+	var up := Vector3.UP if absf(n.y) < 0.95 else Vector3.RIGHT
+	var x := up.cross(n).normalized()
+	var basis := Basis(x, n.cross(x), n)
+	var h := absi(hash(Vector3i((p * 100.0).round())))
+	basis = basis.rotated(n, float(h % 628) / 100.0)
+	if _is_hole(mark):
+		basis = basis.scaled(Vector3.ONE * size * (0.9 + float(floori(h / 628.0) % 20) / 100.0))
+		mm.set_instance_transform(slot, Transform3D(basis, p + n * 0.02))
+		mm.set_instance_color(slot, HOLE_RIM.get(base_mat(int(mark[2])), Color("c9a877")))
+		return
+	basis = basis.scaled(Vector3.ONE * size * (0.7 + float(floori(h / 628.0) % 60) / 100.0))
+	mm.set_instance_transform(slot, Transform3D(basis, p + n * 0.03))
+	mm.set_instance_color(slot, (MATERIALS.get(base_mat(int(mark[2])), {}) as Dictionary).get("mark", Color("3b3935")))
+
+
+## Every mark laid again: impact marks in one multimesh, bullet holes in the other, each with
+## room to grow (doubling from MARK_SLOTS_MIN).
 func _rebuild_marks() -> void:
 	_marks_dirty = false
-	var holes := bullet_hole_count()
+	var holes := _hole_count
+	var marks := _marks.size() - holes
 	var mm := _mark_mesh.multimesh
 	var hm := _hole_mesh.multimesh
-	mm.instance_count = _marks.size() - holes
-	hm.instance_count = holes
+	mm.instance_count = _room_for(marks)
+	hm.instance_count = _room_for(holes)
+	mm.visible_instance_count = marks
+	hm.visible_instance_count = holes
+	_free_marks.clear()
+	_free_holes.clear()
 	var i := 0
 	var j := 0
 	for serial: int in _marks:
 		var mark: Array = _marks[serial]
-		var hole := _is_hole(mark)
-		var size := float(mark[4]) / VOXEL_SIZE if mark.size() > 4 else MARK_SIZE_M / VOXEL_SIZE
-		var p: Vector3 = mark[0]
-		var n: Vector3 = mark[1]
-		var up := Vector3.UP if absf(n.y) < 0.95 else Vector3.RIGHT
-		var x := up.cross(n).normalized()
-		var basis := Basis(x, n.cross(x), n)
-		var h := absi(hash(Vector3i((p * 100.0).round())))
-		basis = basis.rotated(n, float(h % 628) / 100.0)
-		if hole:
-			basis = basis.scaled(Vector3.ONE * size * (0.9 + float(floori(h / 628.0) % 20) / 100.0))
-			hm.set_instance_transform(j, Transform3D(basis, p + n * 0.02))
-			hm.set_instance_color(j, HOLE_RIM.get(base_mat(int(mark[2])), Color("c9a877")))
+		if _is_hole(mark):
+			mark[6] = j
+			_draw_mark(hm, j, mark)
 			j += 1
-			continue
-		basis = basis.scaled(Vector3.ONE * size * (0.7 + float(floori(h / 628.0) % 60) / 100.0))
-		mm.set_instance_transform(i, Transform3D(basis, p + n * 0.03))
-		mm.set_instance_color(i, (MATERIALS.get(base_mat(int(mark[2])), {}) as Dictionary).get("mark", Color("3b3935")))
-		i += 1
+		else:
+			mark[6] = i
+			_draw_mark(mm, i, mark)
+			i += 1
+
+
+## The slots of `mm` in use (visible_instance_count, -1 meaning all of them).
+static func _shown(mm: MultiMesh) -> int:
+	return mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
+
+
+## How many impact marks (not bullet holes) are drawn (tests).
+func drawn_marks() -> int:
+	return _shown(_mark_mesh.multimesh) - _free_marks.size() if _mark_mesh else 0
+
+
+## Slots for `n` marks: room to double before the next rebuild.
+static func _room_for(n: int) -> int:
+	var room := MARK_SLOTS_MIN
+	while room < n * 2:
+		room *= 2
+	return mini(room, MAX_MARKS * 2)
 
 
 static func _is_hole(mark: Array) -> bool:

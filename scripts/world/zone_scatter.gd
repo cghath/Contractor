@@ -1333,8 +1333,17 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 
 ## Builds up to `budget` cells' visuals near `pos`, nearest first; returns how many it built.
 func build_near(pos: Vector3, budget: int) -> int:
+	var done := 0
+	for cell: Vector2i in _wanted_near(pos, budget):
+		_build_cell(cell)
+		done += 1
+	return done
+
+
+## The nearest `budget` cells within BUILD_M of `pos` not built yet, nearest first.
+func _wanted_near(pos: Vector3, budget: int) -> Array:
 	if not _visuals_on:
-		return 0
+		return []
 	var wanted: Array = []
 	var half := _terrain.size_m * 0.5
 	for cell: Vector2i in _cells:
@@ -1345,28 +1354,34 @@ func build_near(pos: Vector3, budget: int) -> int:
 		if d < BUILD_M:
 			wanted.append([d, cell])
 	wanted.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-	var done := 0
-	for w: Array in wanted.slice(0, budget):
-		_build_cell(w[1])
-		done += 1
-	return done
+	return wanted.slice(0, budget).map(func(w: Array) -> Vector2i: return w[1])
 
 
 func built_cells() -> int:
 	return _built.size()
 
 
+## Perf pass (2026-10-22): the PER_FRAME cells a check wants are built one a frame, not both in
+## the check's frame (a cell is tens of milliseconds of main thread).
 func _process(delta: float) -> void:
+	if not _queued.is_empty():
+		var cell: Vector2i = _queued.pop_front()
+		if not _built.has(cell):
+			_build_cell(cell)
 	_next_check -= delta
 	if _next_check > 0.0:
 		return
 	_next_check = CHECK_S
 	var camera := get_viewport().get_camera_3d()
-	if camera:
-		build_near(camera.global_position, PER_FRAME)
+	if camera and _queued.is_empty():
+		_queued = _wanted_near(camera.global_position, PER_FRAME)
+
+
+var _queued: Array = []  # cells to build, one a frame (_process)
 
 
 func _build_cell(cell: Vector2i) -> void:
+	var t0 := Time.get_ticks_usec()
 	_built[cell] = true
 	var kept: Dictionary = _entry.get("visual", {})
 	var parts: Array = kept.get(cell, [])
@@ -1380,11 +1395,18 @@ func _build_cell(cell: Vector2i) -> void:
 		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
 		node.multimesh = part[1]
 		node.material_override = _material
-		node.visibility_range_end = float(_RANGES[key])
+		node.visibility_range_end = float(_RANGES[key]) * _range_scale(key)
 		node.visibility_range_end_margin = 20.0
 		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket"]))  # keys mix Kind values and names
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
+	FrameCost.spent(&"scatter_cells", t0)
+
+
+## The detail setting's share of a group's draw distance (GameSettings.detail: "scatter"). The
+## trees' range shrinks with their far canopy's start, so no gap opens between them.
+func _range_scale(key: Variant) -> float:
+	return float(GameSettings.detail().scatter)
 
 
 ## Draw distance by group key.
@@ -1486,8 +1508,13 @@ func _build_far() -> void:
 		node.name = "Far_%d_%d" % [cell.x, cell.y]
 		node.multimesh = kept[cell]
 		node.material_override = _material
-		node.visibility_range_begin = SEE_TREE_M - 10.0
+		node.visibility_range_begin = SEE_TREE_M * float(GameSettings.detail().scatter) - 10.0  # (where the trees stop, by the detail setting)
 		node.visibility_range_begin_margin = 20.0
+		var far_m := float(GameSettings.detail().far_trees_m)  # the detail setting (perf pass; "ultra": to the horizon)
+		if far_m > 0.0:
+			node.visibility_range_end = far_m
+			node.visibility_range_end_margin = GameSettings.FAR_FADE_M
+			node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
 
@@ -1629,19 +1656,47 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.
+## Perf pass (2026-10-22): the pads and roads are narrowed to those reaching (x, z)'s cell, once
+## per cell (_blockers_for): every tuft and pebble of a cell tested every road in the zone.
 func _ground_blocked(x: float, z: float) -> bool:
 	if _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true  # a river, lake or bridge (ZoneWater)
 	var p := Vector2(x, z)
-	for r in _keep:
-		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):
+	var cell := _cell_of(x, z)
+	if cell != _gb_cell:
+		_blockers_for(cell)
+	for r in _gb_keep:
+		if r.has_point(p):
 			return true
+	for road: Array in _gb_roads:
+		if Geometry2D.get_closest_point_to_segment(p, road[0], road[1]).distance_to(p) < 4.0:
+			return true
+	return false
+
+
+var _gb_cell := Vector2i(1 << 30, 1 << 30)
+var _gb_keep: Array[Rect2] = []
+var _gb_roads: Array = []
+
+
+## The pads (shrunk as ground cover keeps off them) and road segments [a, b] reaching `cell`.
+func _blockers_for(cell: Vector2i) -> void:
+	_gb_cell = cell
+	_gb_keep.clear()
+	_gb_roads.clear()
+	var half := _terrain.size_m * 0.5
+	var box := Rect2(Vector2(-half + cell.x * CELL_M, -half + cell.y * CELL_M), Vector2(CELL_M, CELL_M)).grow(8.0)
+	for r in _keep:
+		var g := r.grow(-PAD_KEEP_M + 2.0)
+		if g.intersects(box):
+			_gb_keep.append(g)
+	var centre := box.get_center()
+	var reach := box.size.length() * 0.5 + 5.0
 	for road: Array in _roads:
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var b := Vector2(float(road[1][0]), float(road[1][1]))
-		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) < 4.0:
-			return true
-	return false
+		if Geometry2D.get_closest_point_to_segment(centre, a, b).distance_to(centre) < reach:
+			_gb_roads.append([a, b])
 
 
 # --- Shapes: low-poly blocks, flat shaded ----------------------------------------------------

@@ -72,6 +72,10 @@ var earth := {}
 var _tiles := {}  # coarse cell -> [StaticBody3D, its heights (PackedFloat32Array)]
 var _blocks := {}  # Vector2i block -> MeshInstance3D drawing its tiles
 var _dirty := {}  # blocks to redraw
+## Perf pass (2026-10-22): the drawn ground follows a cut over the next frames, a block a frame
+## (_process), and the coarse mesh's chunks after them, where every cut redrew its blocks and
+## chunks in its own frame (a barrage of craters: 50-150 ms each). The collision is cut at once.
+var _fine_dirty := {}  # coarse chunks to rebuild without their cut cells, once the blocks are drawn
 ## Counts up with every cut (GrassCarpet re-lays when it changes).
 var version := 0
 
@@ -263,7 +267,8 @@ func _cut_area(area: Rect2) -> bool:
 					chunks[Vector2i(n.x / ZoneTerrain.CHUNK_CELLS, n.y / ZoneTerrain.CHUNK_CELLS)] = true
 	terrain.blank_samples(holes)
 	for ch: Vector2i in chunks:
-		terrain.rebuild_fine_chunk(ch)
+		_fine_dirty[ch] = true
+	set_process(true)
 	return true
 
 
@@ -275,7 +280,34 @@ func _rebuild_around(area: Rect2) -> void:
 		var t: Array = _tiles[c]
 		if t[0] == null or (c.x >= a.x and c.x <= b.x and c.y >= a.y and c.y <= b.y):
 			_build_tile(c)
+	set_process(true)  # (_process redraws them)
+
+
+func _process(_delta: float) -> void:
+	if not terrain._visuals_built:
+		_dirty.clear()
+		_fine_dirty.clear()
+		set_process(false)
+		return
+	if not _dirty.is_empty():
+		var blk: Vector2i = _dirty.keys()[0]
+		_redraw_only(blk)
+		return
+	if not _fine_dirty.is_empty():
+		var ch: Vector2i = _fine_dirty.keys()[0]
+		_fine_dirty.erase(ch)
+		terrain.rebuild_fine_chunk(ch)
+		return
+	set_process(false)
+
+
+## Redraws block `blk` alone (the rest stay dirty).
+func _redraw_only(blk: Vector2i) -> void:
+	var rest := _dirty
+	rest.erase(blk)
+	_dirty = {blk: true}
 	_redraw()
+	_dirty = rest
 
 
 func _fine_index(x: float, z: float) -> Vector2i:

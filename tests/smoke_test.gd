@@ -274,7 +274,7 @@ func _test_world_materials() -> void:
 	await get_tree().process_frame
 	check(world.mark_count() == 1 and tool.get_voxel(Vector3i(5, 5, 0)) == VoxelWorld.Mat.CONCRETE, "a mark on concrete, nothing carved")
 	check(GameState.voxel_edits.size() == 1 and GameState.voxel_edits[0].op == "mark", "the mark is in the edit log")
-	check(world._mark_mesh.multimesh.instance_count == 1, "and drawn")
+	check(world.drawn_marks() == 1, "and drawn")
 	for i in VoxelWorld.MARKS_PER_VOXEL + 3:
 		world.server_mark(Vector3(0.51 + 0.01 * i, 0.55, 0.0), Vector3.FORWARD, VoxelWorld.Mat.CONCRETE)
 	check(world.mark_count() == VoxelWorld.MARKS_PER_VOXEL, "at most %d marks per voxel (%d)" % [VoxelWorld.MARKS_PER_VOXEL, world.mark_count()])
@@ -303,7 +303,7 @@ func _test_world_materials() -> void:
 	var same := true
 	for v: Vector3i in [Vector3i(25, 5, 0), Vector3i(26, 5, 0), Vector3i(28, 5, 0), Vector3i(5, 2, 0), Vector3i(8, 2, 0), Vector3i(5, 5, 0), Vector3i(5, 5, 2)]:
 		same = same and copy_tool.get_voxel(v) == tool.get_voxel(v)
-	check(same and copy.mark_count() == world.mark_count() and copy._mark_mesh.multimesh.instance_count == world.mark_count(),
+	check(same and copy.mark_count() == world.mark_count() and copy.drawn_marks() == world.mark_count(),
 		"the saved log replays the same holes, blasts and marks (%d marks)" % copy.mark_count())
 	GameState.voxel_edits.clear()
 	viewer.queue_free()

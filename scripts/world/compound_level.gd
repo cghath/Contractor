@@ -723,14 +723,8 @@ static func _seen_muzzle_offset(shooter: Soldier, muzzle: Vector3) -> Vector3:
 func show_impact(pos: Vector3, normal: Vector3, kind: String) -> void:
 	Sfx.play_at({"plate": &"impact_plate", "vehicle": &"impact_plate", "body": &"impact_body"}.get(kind, &"impact_dirt"), pos)
 	var mark := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.025
-	sphere.height = 0.05
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = {"plate": Color.CYAN, "body": Color.RED}.get(kind, Color.YELLOW)
-	sphere.material = material
-	mark.mesh = sphere
+	mark.mesh = _effect_sphere(0.025)
+	mark.material_override = _effect_material({"plate": Color.CYAN, "body": Color.RED}.get(kind, Color.YELLOW), false)
 	add_child(mark)
 	mark.global_position = pos + normal * 0.01
 	get_tree().create_timer(4.0).timeout.connect(mark.queue_free)
@@ -798,17 +792,38 @@ func spawn_smoke(pos: Vector3, colour: String, age := 0.0) -> void:
 	cloud.global_position = pos
 
 
+## Shot and blast effects share their meshes and materials (perf pass 2026-10-22: each impact and
+## burst made its own SphereMesh and StandardMaterial3D); a burst fades by its own transparency.
+## They look the same.
+static var _effect_spheres := {}  # radius -> SphereMesh
+static var _effect_materials := {}  # [colour, alpha] -> StandardMaterial3D
+
+
+static func _effect_sphere(radius: float) -> SphereMesh:
+	if not _effect_spheres.has(radius):
+		var sphere := SphereMesh.new()
+		sphere.radius = radius
+		sphere.height = radius * 2.0
+		_effect_spheres[radius] = sphere
+	return _effect_spheres[radius]
+
+
+static func _effect_material(colour: Color, alpha: bool) -> StandardMaterial3D:
+	var key := [colour, alpha]
+	if not _effect_materials.has(key):
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		if alpha:
+			material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_color = colour
+		_effect_materials[key] = material
+	return _effect_materials[key]
+
+
 func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_color = colour
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.5
-	sphere.height = 1.0
-	sphere.material = material
 	var ball := MeshInstance3D.new()
-	ball.mesh = sphere
+	ball.mesh = _effect_sphere(0.5)
+	ball.material_override = _effect_material(colour, true)
 	var light := OmniLight3D.new()
 	light.light_color = colour
 	light.light_energy = 8.0
@@ -818,7 +833,7 @@ func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
 	ball.global_position = pos + Vector3.UP * 0.3
 	var tween := ball.create_tween().set_parallel()
 	tween.tween_property(ball, "scale", Vector3.ONE * size, life)
-	tween.tween_property(material, "albedo_color:a", 0.0, life)
+	tween.tween_property(ball, "transparency", 1.0, life)
 	tween.tween_property(light, "light_energy", 0.0, life)
 	tween.chain().tween_callback(ball.queue_free)
 

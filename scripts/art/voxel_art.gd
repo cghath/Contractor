@@ -189,7 +189,7 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
 ## spec names one (body parts pivot at their joints).
 static func instance(model: String, variant: String, layers := 1, with_mesh := true) -> Node3D:
-	var spec := _spec(model)
+	var spec := _frame(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice("|", model.count("|")).get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
@@ -212,7 +212,7 @@ static func body_part(part: String, body: String) -> String:
 
 
 static func size_m(model: String) -> Vector3:
-	var spec := _spec(model)
+	var spec := _frame(model)
 	return Vector3(spec.size) * float(spec.get("voxel", VOXEL_SIZE))
 
 
@@ -321,7 +321,9 @@ static func mesh(model: String, variant: String) -> Mesh:
 	if not _meshes.has(key):
 		_take_faces()
 	if not _meshes.has(key):
+		var t := Time.get_ticks_usec()
 		_keep(key, _build(_spec(model), variant, model.hash()))
+		FrameCost.spent(&"models", t)
 	return _meshes[key]
 
 
@@ -460,7 +462,20 @@ static func warm(pairs: Array) -> void:
 		return
 	_camo(Vector3.ZERO, 0, "multicam")  # its noise is made here on the main thread, not on the worker
 	_reap_warm()
-	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo), false, "VoxelArt warm-up"))
+	# Perf pass (2026-10-22): a scheme of its own (not plain clothes or a face, whose colours are
+	# each person's) is meshed on the worker too, handed over as the faces are (_take_faces): the
+	# first soldier in it, and his first reload, build nothing on the main thread (30-70 ms each).
+	# Not on a headless server: its dummy renderer's meshes aren't thread-safe (a mesh made on the
+	# worker while the main thread makes one crashed the perf suite, R2424), and it draws nothing.
+	var meshers := {}  # variant -> its mesher, made here (the worker only uses it)
+	var on_worker := DisplayServer.get_name() != "headless"
+	for pair: Array in todo:
+		var variant: String = pair[1]
+		if on_worker and not _shared_raster(variant):
+			if not meshers.has(variant):
+				meshers[variant] = _get_mesher(variant)
+			_face_pending["%s|%s" % [pair[0], variant]] = true
+	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo, meshers), false, "VoxelArt warm-up"))
 
 
 ## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
@@ -498,12 +513,17 @@ static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	return out
 
 
-static func _warm(todo: Array) -> void:
+static func _warm(todo: Array, meshers := {}) -> void:
 	for pair: Array in todo:
 		var model: String = pair[0]
 		var buffer := _rasterize(_spec(model), pair[1], model.hash())
+		var mesher: VoxelMesherCubes = meshers.get(pair[1])
+		var built: Mesh = mesher.build_mesh(buffer, []) if mesher else null
 		_warm_mutex.lock()
-		_warmed[_raster_key(model.hash(), pair[1])] = buffer
+		if built:
+			_face_built["%s|%s" % [model, pair[1]]] = built
+		else:
+			_warmed[_raster_key(model.hash(), pair[1])] = buffer
 		_warm_mutex.unlock()
 
 
@@ -821,7 +841,54 @@ static func _get_material() -> StandardMaterial3D:
 
 # --- Model specs ------------------------------------------------------------------------
 
+## Model specs, built once (perf pass 2026-10-22): _spec built a model's whole box list on every
+## call, and VoxelArt.instance asked for one per body part at every spawn (about 30 ms a soldier,
+## tests/perf_spawn.tscn). A spec is fixed by its model name, so it's kept, except a face's
+## (one person's: _frame keeps just its size and pivot). Callers only read a spec. Worker threads
+## ask too (warm-ups, faces): _spec_mutex.
+static var _spec_cache := {}
+static var _frame_cache := {}
+static var _spec_mutex := Mutex.new()
+const _FACE_MODELS: Array[String] = ["head", "eye", "mouth", "brow"]
+
+
 static func _spec(model: String) -> Dictionary:
+	_spec_mutex.lock()
+	var kept: Variant = _spec_cache.get(model)
+	_spec_mutex.unlock()
+	if kept != null:
+		return kept
+	var built := _spec_build(model)
+	if not model.get_slice(":", 0) in _FACE_MODELS:
+		_spec_mutex.lock()
+		_spec_cache[model] = built
+		_spec_mutex.unlock()
+	return built
+
+
+## A model's size, voxel, sub and pivot only (what an instance is placed by), kept for every
+## model, faces too.
+static func _frame(model: String) -> Dictionary:
+	_spec_mutex.lock()
+	var kept: Variant = _frame_cache.get(model)
+	_spec_mutex.unlock()
+	if kept != null:
+		return kept
+	var kind := model.get_slice(":", 0)
+	if kind == "head" or kind == body_part("head", FEMALE):  # every head's frame is its body's: no face spec built (25-40 ms)
+		var female := kind != "head"
+		return {"size": FaceArt.SIZE_F if female else FaceArt.SIZE, "pivot": FaceArt.PIVOT, "voxel": BODY_VOXEL, "sub": BODY_SUB}
+	var spec := _spec(model)
+	var out := {"size": spec.size, "voxel": spec.get("voxel", VOXEL_SIZE), "sub": spec.get("sub", 1)}
+	if spec.has("pivot"):
+		out["pivot"] = spec.pivot
+	_spec_mutex.lock()
+	_frame_cache[model] = out
+	_spec_mutex.unlock()
+	return out
+
+
+static func _spec_build(model: String) -> Dictionary:
 	if model.contains("|"):  # a part of a weapon (MAG, WITHOUT_MAG, BOLT, COVER, FIXED)
 		var prefix := model.get_slice("|", 0) + "|"
 		var whole := _spec(model.substr(prefix.length()))

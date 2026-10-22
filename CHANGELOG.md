@@ -130,6 +130,41 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   They were saved but dropped on loading.
 - **Hangars and factory floors count as buildings (F-162).** The AI's building scan missed the
   middle of a big open hall, so it never garrisoned or cleared one room by room.
+### Performance pass (Captain, 2026-10-22: "we definitely need more performance fixes")
+
+#### Changed
+- **Smoother towns, fights, woods and flights.** Measured on five scenes (the Old Quarter, a Black
+  Ridge fight with the QRF coming, Kestrel Valley's woods, an M-ATV and a UH-60 crossing it), the
+  game's own work per frame came down by a quarter to more than half: the Old Quarter from 51 to 21 ms
+  a frame (its worst frames 307 to 67 ms), the helicopter flight from 18 to 10 ms with its 310
+  stutters a minute gone. docs/performance.md has the numbers and how they're measured.
+- **Far-off enemies think less often.** An enemy more than 120 m from every player who isn't in a
+  fight looks round, thinks and re-plans his route less often the further away he is. Anyone near
+  you, shooting, being shot at or tending a casualty runs at the full rate.
+- **Soldiers standing still cost less.** A garrison man at his post, doing nothing, works out his
+  footing a few times a second instead of every tick.
+
+#### Fixed
+- **Stutters when soldiers appear.** A soldier's spawn went from about 45 ms to under 10 (a head's
+  size no longer builds the whole face; armour shares its meshes), and the uniforms a zone will use
+  are built in the background as it starts, so the first soldier in each uniform, and his first
+  reload, no longer hitch.
+- **Stutters in towns.** A squad's look round the buildings near it is spread over frames instead
+  of taking up to half a second in one.
+- **Stutters walking, driving and flying.** The grass round you, the woods' cells and the ground's
+  near detail are laid a little at a time instead of in bursts.
+- **Stutters in firefights.** Bullet marks on walls are added one at a time instead of redrawing
+  all of them for each new one; blasts take out their voxels in one go; craters redraw their ground
+  over a few frames; tracers and impacts reuse their meshes and materials, and their shaders are
+  ready before the first shot.
+
+#### Added
+- **World detail at distance** (Settings, Video). Ultra draws everything as before, the tree
+  canopy to the horizon; High (the default) stops the canopy at about 3 km, fading out, and soldiers
+  further than 150 m cast no shadow; Medium and Low draw woods, rocks and scrub less far out and
+  drop soldiers' shadows nearer. Up close they all look the same. The woods change in the next zone.
+- **Performance cases** (suite perfcases, in CI) with frame-time and stutter budgets, so a change
+  that slows these scenes down shows up.
 
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 

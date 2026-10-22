@@ -686,8 +686,23 @@ func ground_material() -> ShaderMaterial:
 ## The finest level for the chunks nearest `pos`, at most `budget` of them; returns how
 ## many it built.
 func build_near(pos: Vector3, budget: int) -> int:
+	var built := 0
+	for c: Vector2i in _wanted_near(pos, budget):
+		_refine(c)
+		built += 1
+	return built
+
+
+## The finest mesh for chunk `c`.
+func _refine(c: Vector2i) -> void:
+	_lod0[c] = _lod_instance(c.x, c.y, 0)
+	_lod1[c].visibility_range_begin = LOD_END_M[0]
+
+
+## The nearest `budget` chunks within LOD0_BUILD_M of `pos` without their finest mesh, nearest first.
+func _wanted_near(pos: Vector3, budget: int) -> Array:
 	if not _visuals_built:
-		return 0
+		return []
 	var chunk_m := CHUNK_CELLS * CELL_M
 	var wanted: Array = []
 	var count := chunk_count()
@@ -701,13 +716,7 @@ func build_near(pos: Vector3, budget: int) -> int:
 			if d < LOD0_BUILD_M:
 				wanted.append([d, c])
 	wanted.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-	var built := 0
-	for w: Array in wanted.slice(0, budget):
-		var c: Vector2i = w[1]
-		_lod0[c] = _lod_instance(c.x, c.y, 0)
-		_lod1[c].visibility_range_begin = LOD_END_M[0]
-		built += 1
-	return built
+	return wanted.slice(0, budget).map(func(w: Array) -> Vector2i: return w[1])
 
 
 ## How many chunks have their finest mesh built.
@@ -715,10 +724,30 @@ func fine_chunks() -> int:
 	return _lod0.size()
 
 
+## Perf pass (2026-10-22): the chunks to refine are worked out again only once the camera has
+## moved REPLAN_M (every chunk of the zone was measured and sorted every frame), and built one a
+## frame from that list (two in one frame before: a fine chunk is a few ms of GDScript meshing).
+const REPLAN_M := 16.0
+var _planned_at := Vector3.INF
+var _queue: Array = []  # chunks to refine, nearest first
+var _plan_full := false
+
+
 func _process(_delta: float) -> void:
 	var camera := get_viewport().get_camera_3d()
-	if camera:
-		build_near(camera.global_position, LOD0_PER_FRAME)
+	if camera == null or not _visuals_built:
+		return
+	var at := camera.global_position
+	if _queue.is_empty() and (_plan_full or at.distance_to(_planned_at) > REPLAN_M):
+		_planned_at = at
+		_queue = _wanted_near(at, LOD0_PER_FRAME * 8)
+		_plan_full = _queue.size() == LOD0_PER_FRAME * 8  # (more may be waiting: plan again when these are done)
+	if not _queue.is_empty():
+		var c: Vector2i = _queue.pop_front()
+		if not _lod0.has(c):
+			var t := Time.get_ticks_usec()
+			_refine(c)
+			FrameCost.spent(&"terrain_fine", t)
 
 
 func _lod_instance(cx: int, cz: int, lod: int) -> MeshInstance3D:

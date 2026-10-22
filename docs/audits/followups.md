@@ -582,6 +582,64 @@ the annotations.
 Suggested: shield the player for the insertion (Vitals.shielded, as the loop suite does: the
 fight isn't what this suite checks) or say in the check what put him down (his wounds and who
 hit him, Harm).
+## F-200 to F-206: perf hooks in cghath's world files (perf pass, claude/perf-pass, 2026-10-22)
+
+Captain, 2026-10-22: "we definitely need more performance fixes". docs/performance.md has the
+cases, the numbers before and after and how to measure (tests/perfcases_test.tscn). These are the
+hooks the pass put into world generation's files, for cghath to keep (or redo his way) when he next
+works there. Each keeps the look and the gameplay as they were.
+
+### F-200 (done, for review): GrassCarpet keeps its tufts
+`GrassCarpet.lay` keeps each grid point's tuft (or none) in `_tufts` until the ground is cut again,
+and narrows the scatter's pads and roads to those near the circle once per lay (`_blockers_near`).
+Each tuft used to test every road in the zone: 100-300 ms a lay, every 6 m on foot and many times a
+second in a vehicle.
+
+### F-201 (done, for review): ZoneScatter ground cover and cell builds
+`_ground_blocked` narrows pads and roads per 128 m cell (`_blockers_for`); cells are built one a
+frame from a queue (`_queued`), the same PER_FRAME per CHECK_S as before. The new Detail setting
+(GameSettings.detail) scales the draw ranges (`_range_scale`) and stops the far canopy blobs at
+"far_trees_m" with a fade ("ultra" keeps today's: to the horizon).
+
+### F-202 (done, for review): ZoneTerrain refines a chunk a frame
+`_process` re-plans the chunks to refine only once the camera has moved REPLAN_M (it measured and
+sorted every chunk of the zone every frame) and refines one a frame (`_refine`).
+
+### F-203 (done, for review): GroundCuts redraws over frames
+A cut's collision still goes in at once; its blocks are redrawn one a frame and the coarse chunks
+after them (`_process`, `_fine_dirty`). A barrage of craters used to redraw every block in its own
+frame (50-150 ms a crater).
+
+### F-204 (done, for review): VoxelWorld marks and blasts
+Marks keep a slot in their multimesh (`_show_mark`, `_drop_mark`, a rebuild only to grow); the
+oldest mark at the cap is found without `_marks.keys()[0]`; `drawn_marks()` for tests. `_blast`
+copies its box once, walks only the sphere's rows and pastes the cleared voxels back
+(`paste_masked`). Still open: `_breach` walks voxels one tool call at a time, and a module's edit log
+is replayed in one frame when it streams in (`for edit in _pending`): a fought-over town costs
+hundreds of ms there.
+
+### F-205 (done, for review): streaming by distinct points
+`ZoneLevel._update_streaming` takes the focus points once per 2 m (`_distinct`). (Marking the
+navigation's wanted chunks once per 4 m square of soldiers was tried and taken back: the wider
+reach it needed to stay a superset baked and kept more chunks, and the navigation server's time went
+up 1-1.8 ms a frame, R2422.)
+
+### F-206 (open, for ai-followups / cghath): what's left in the hitches
+- Buildings: a cold scan's grouping, entrances and ports (`_group`, `_building`) still run in one
+  frame once its probes are done (100-250 ms in the Old Quarter); the probes are budgeted now.
+- EnemyResponse._spawn_team spawns a whole team in one frame (about 8 ms a soldier now, was 45):
+  its eight callers use the soldiers at once, so a queue needs their records to wait.
+- Gore: BodyDeform meshes its results on the main thread (`_done_work`); hang and piece meshes
+  aren't counted against its budget.
+- Co-op: three RPCs a shot (sound, tracer, impact); one batched RPC a frame would do.
+- Headless: meshes made on a worker (VoxelArt.build_async's faces, BodyDeform) race the main thread's
+  in the dummy renderer, whose mesh RIDs aren't thread-safe: "Initializing already initialized RID"
+  shows in the perfcases logs before the pass too (R2420, R2427), and the pass's own warm-up meshing
+  crashed a run that way (R2424) until it stopped meshing on the worker headless. A player's renderer
+  is thread-safe there; a headless host or test isn't.
+- Rendering (not measurable headless): soldiers are 15-25 draws each with shadows and no range
+  (338 draws in the Old Quarter case); module proxies cast shadows; terrain's coarsest level is a
+  draw per 128 m chunk out to the horizon (could merge into 512 m blocks).
 
 ## Calls made for the Captain
 
@@ -611,3 +669,9 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | G-24: hand flares 150 m up for 35 s, lighting full within 110 m and out to 220 m; mortar illumination 350 m up for 45 s, full within 200 m and out to 360 m; one hostile in 4 on the standard kit carries 2; a squad flares once per 45 s at most, at darkness 0.55 or more; NVGs bloom (Flares, Proposed) | close to the M127A1 and 60/81 mm illumination; enough to light a firefight without lighting the zone | every hostile with flares, or flares by script at set times
 - 2026-10-21 | G-26: a line in contact, a staggered column in a town, a file in the woods, on a road a column (a staggered column on the alert or in the dark), on open ground a wedge (a staggered column in the dark); spacing x doctrine (insurgents 0.7, regulars and PMCs 1.0) | FM 3-21.8's choices by terrain, visibility and threat | random formations as LAMBS does
 - 2026-10-21 | Upper-floor doorways slide along their wall off the stairwell (or another wall takes the doorway): some existing two-storey buildings' doorways move | a doorway over the stairwell cut its room off | leave existing buildings as they were
+- 2026-10-22 | AI level of detail (AiLod): full rate within 120 m of a player, in contact, with a target or busy with a casualty; past that scan, think and re-path 2x less often, 3x past 250 m, 4x past 400 m (Proposed) | most of a hot zone's AI is far from everyone and nobody sees its exact timing; awareness still builds per second | one lower rate for every AI, or none (DynamicSim's 650 m sleep only)
+- 2026-10-22 | An AI standing still steps its movement every 4 ticks with the time summed (SoldierMovement.REST_EVERY, Proposed) | most of a town's garrison stands at its posts; anything ordered ends the rest that tick | every tick as before
+- 2026-10-22 | New Detail setting, default High: the far tree canopy stops at 3.2 km with a 300 m fade; Ultra keeps today's look (canopy to the horizon); Medium/Low draw scatter 0.8/0.65x as far (Proposed) | the canopy past 3 km is mostly fog; visual changes behind a setting with today's look at the top | default Ultra (no gain unless changed)
+- 2026-10-22 | Building scans' probes stop at the frame's 4 ms budget on a player's machine, the first scan's too; headless keeps exact answers | the first scan was 200-600 ms in one frame; an over-budget ask already got stale answers | budget headless too (changes every suite's answers)
+- 2026-10-22 | The physics step cap stays at 8 a frame | a lower cap turns overload into slow motion while the AI's clocks run on real time (Soldier._now) | 3-4 a frame
+- 2026-10-22 | perfcases budgets (Proposed): town 75/140 ms and 90 hitches a minute, fight 60/110/45 (40/60 first: CI measured 42.7/71.7), woods 25/35/20, drive 20/30/15, heli 28/45/20 (60 Hz frame cost average/95th) | about twice the pass's numbers on a busy machine, under the numbers before it | tighter (flaky on CI's runners) or none
