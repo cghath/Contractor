@@ -331,6 +331,58 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+## F-175: roads lie on the riverbed under a bridge (the roads agent's ZoneRoads)
+
+Location: [zone_roads.gd](../../scripts/world/zone_roads.gd) `_strip`; the bridges are
+[zone_bridges.gd](../../scripts/world/zone_bridges.gd). Found by cghath's agent on `world/water`
+(2026-10-21, queue item 1.1); zone_roads.gd is the roads agent's (paved roads, item 1.2), so it isn't
+changed there.
+
+What happens: a road crossing a river or stream gets a bridge (or a culvert's embankment, or a
+ford) from ZoneWater, but ZoneRoads drapes its strip on the terrain as before: under a bridge it
+runs down the bank, along the riverbed under the water and up the far bank, seen through the water.
+Looks only (the strip has no collision; vehicles drive on the deck).
+
+Suggested: break the strip where `terrain.water and terrain.water.bridges.covers(p)` is true for a
+bridge (as `_on_pad` breaks it on a pad), or lay it on the deck (each bridge record in
+`terrain.water.bridges.bridges` has its `xform`, the deck's top middle, and `length`). With
+collision on roads, keep a road's collision off the bridge's span too. A culvert's embankment and a
+ford are ground, so the strip can follow them.
+
+## F-176: the dug ground never comes back from a zone save
+
+Location: [game_state.gd](../../autoload/game_state.gd) `read_save` (and `load_zone`). Found by
+cghath's agent on `world/water` (2026-10-21) while adding the bridges' section to the save; not
+changed there (Digging's side).
+
+What happens: `save_zone` writes `"ground"` (Digging.to_save: the cuts and berms) into the zone's
+save, but `read_save` builds its result from a list of sections and `"ground"` isn't one, so
+`load_zone`'s `ground = zone.get("ground", {})` is always `{}`: foxholes, trenches, berms and blast
+craters are gone when a zone is loaded from its save (Digging.server_prepare then digs the enemy's
+outposts in afresh).
+
+Suggested: copy `"ground"` through in `read_save` (a dictionary with "cuts" and "berms" arrays,
+checked like the other sections), and a digging test that saves, reloads and finds its cuts.
+
+## F-177: a river ends in a notch at the zone's edge
+
+Location: [zone_water.gd](../../scripts/world/zone_water.gd) (rivers run edge to edge) and
+ZoneTerrain's apron. cghath's agent, `world/water` (2026-10-21); a known gap, not a bug.
+
+What happens: the river's channel and valley run to the zone's edge, but the apron past it is flat
+at 0, so from inside the zone (looking out past the invisible wall, in the haze) the river ends
+against a bank a few metres high at the edge.
+
+Suggested: lower the apron along the river's line past the edge (a channel strip in the apron
+mesh at the river's level, and the water strip carried on with it), or fade the river into a
+gorge's end. Looks only.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
+2026-10-21 | Deep water: players swim (1.1 m/s, 0.5 under a full load, head out, hands busy, the current carries them, no drowning); the AI never routes into it (deep water is off its navigation mesh) and crosses on bridges and fords | Arma 3, the realism bar, has men swim, and rivers that block outright read as more map edges | an invisible wall at deep water, or drowning with a breath meter
+2026-10-21 | Wading pace (Wading): 1 - 0.7 x ((depth - 0.1) / 0.9)^0.8 of the pace (knee-deep 0.63, waist-deep 0.3), no sprint past 0.6 m, no prone past 0.45 m, the current pushes at half its speed (Proposed consts) | wading is hard work, more so the deeper | a flat 50% in any water
+2026-10-21 | Bridge damage: each span has health in carve-radius-cubed units (a demo block, 1.8 m, does 5.8 on contact; 105 mm HE 1.5); concrete span 12 (3 blocks, ~8 HE), steel truss 8 (2 blocks, ~6 HE), footbridge 2 (1 block); blasts under 0.5 m carve do nothing (Proposed, ZoneBridges.TYPES) | demolitions and fire support both drop spans, charge counts near real while playable | voxel bridges through the voxel damage path (a VoxelWorld per bridge streamed across the zone), or one health for a whole bridge
+2026-10-21 | Crossings: every road over a river gets a vehicle bridge (concrete 60%, steel truss 40%, by the seed), a road over a stream a culvert (65% where it's 7 m wide or less) or a ford, and the river a ford or footbridge (half each) in every 450 m without a crossing (data: "water" in data/terrain_presets.json) | keeps both banks joined for the AI's paths and the squad | bridges only where roads cross (half a zone cut off from the AI)
+2026-10-21 | Which presets have water: river_valley a river edge to edge (22-30 m wide, 2.1 m deep), 1-2 streams and 1-2 ponds; temperate 0-1 stream and 0-2 ponds; highland_moor 2-3 burns, 0-1 tarn and ponds; coastal_lowland 0-2 ponds; scrubland 0-1 stock pond; desert, badlands, salt flats, rocky ridge and the test grounds none (their wadis stay dry) | the hot zones' presets (rocky_ridge, salt_flats) and the dry country keep their ground; rivers where the land is wet | a river on every preset
+2026-10-21 | river_valley's dry wadi is gone for the river; its "wadi groves" grow in a 45 m band along the river and streams instead (the terrain's bed weight, under the sand tint) | its riverside woods stay | no groves on river_valley

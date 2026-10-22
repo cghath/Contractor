@@ -120,7 +120,22 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 		source.add_faces(ground, Transform3D.IDENTITY)
 	for box in zone.scatter.boxes_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z)):
 		source.add_faces(_box_faces(box), Transform3D.IDENTITY)
+	if zone.terrain.water:
+		var bridges := zone.terrain.water.nav_faces_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z))
+		if not bridges.is_empty():
+			source.add_faces(bridges, Transform3D.IDENTITY)  # the way over deep water (ZoneBridges)
 	return source
+
+
+## Bakes again every chunk baked now that `area` (x, z in metres) touches (a bridge's span
+## dropped: ZoneBridges).
+func rebake_rect(area: Rect2) -> void:
+	var lo := _chunk_of(Vector3(area.position.x - BORDER_M, 0.0, area.position.y - BORDER_M))
+	var hi := _chunk_of(Vector3(area.end.x + BORDER_M, 0.0, area.end.y + BORDER_M))
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			if _regions.has(Vector2i(cx, cz)):
+				_request_rebake(Vector2i(cx, cz))
 
 
 ## Whether every loaded module's voxels inside `bounds` can be read now (_add_structures).

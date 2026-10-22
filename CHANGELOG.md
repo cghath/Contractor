@@ -11,6 +11,39 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
+
+#### Added
+- **Rivers that cut their own valleys.** A river valley zone has a real river running edge to
+  edge. It meanders round the sites and flows downhill all the way, deep enough in the middle
+  that you swim. Its banks stand over the water and its valley blends back into the hills.
+  Kestrel Valley has one.
+- **Streams, lakes and ponds.** Streams spring from the hills and wind downhill into the river,
+  a pond or off the map. There are farm ponds in the temperate hills, burns and a tarn on the
+  moors, and stock ponds in the scrub. Reeds grow in the shallows, trees along the banks, and
+  nothing grows in the water. The banks are dark wet mud and gravel.
+- **Flowing water.** Ripples drift downstream at the current's speed in the same blocky voxel
+  look as the ground. Deep water is darker, and there's a pale fringe at the bank.
+- **Wading and swimming.** The deeper the water, the slower you go. Knee-deep is about two
+  thirds of your pace and waist-deep under a third. Past 0.6 m you can't sprint and past 0.45 m
+  you can't lie down. A current pushes you along. In water deeper than 1.45 m you swim with
+  your head and shoulders out, slowly, and slower still under a heavy load. Your hands are
+  busy, so no shooting, reloading or throwing, and the current carries you. You don't drown.
+- **Bridges, fords and culverts.** Every road over a river has a bridge: concrete (spans on
+  piers, parapets) or steel truss. No stretch of river goes 450 m without a way across: a
+  timber footbridge or a ford, where the river shallows to knee-deep with gentle banks and depth
+  posts. Where a road crosses a stream there's a culvert (an embankment over a pipe) or a ford.
+  Bridges have real collision. Trucks drive over them and through fords, men walk them, rounds
+  stop on them, and the AI's paths use them (deep water isn't on the AI's map).
+- **Bridges can be dropped.** A big enough blast drops a span into the river. One demolition
+  block drops a footbridge. A concrete span takes three, a steel truss span two. A truss span
+  falls to about six 105 mm rounds. Grenades only chip. A dropped span lies in the river: an
+  end span hangs from its abutment, a middle span lies on the riverbed. The AI's paths stop
+  using it. Every player sees it, late joiners too, and it's saved with the zone.
+- **Vehicles feel rivers and lakes.** They already handled the sea. A truck in water deeper
+  than its fording depth floods and stalls.
+- A `water` test suite.
+
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 
 #### Fixed
