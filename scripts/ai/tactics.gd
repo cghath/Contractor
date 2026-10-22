@@ -369,6 +369,10 @@ func doctrine() -> Dictionary:
 		var men := squad.brains()
 		name = men[0]._doctrine_id() if not men.is_empty() else Doctrine.default_for(squad.faction)  # its men's own (T10)
 	var d: Dictionary = DOCTRINES.get(name, DOCTRINES[Doctrine.PMC]).duplicate()
+	var men2 := squad.brains()
+	if squad.faction == &"hostile" and not men2.is_empty() and FactionForce.hit_and_run(String(men2[0].body.get_meta(&"faction_id", ""))):
+		d.break = float(d.break) + 0.25  # a small terror group: a heavy volley, then gone before it's fixed (ai_tactics.md 7.3)
+		d.assault = float(d.assault) - 0.1
 	if squad.faction != &"friendly" and squad.is_inside_tree():
 		var response := EnemyResponse.of(squad)
 		if response:

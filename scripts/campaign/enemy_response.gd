@@ -163,6 +163,17 @@ var reinforcements: Reinforcements
 ## this (zone_level.gd's _on_contract_live reads the live contract's "target") rather than every
 ## spawn site guessing at it.
 var enemy_faction: StringName = &"black_ridge"
+
+
+## Patrols and hunter teams by the enemy's echelon now (FactionForce, docs/ai_tactics.md 7): as
+## tuned at its starting echelon, bigger as it grows, smaller as it shrinks (never under a pair).
+func _patrol_size() -> int:
+	return maxi(PATROL_SIZE, roundi(PATROL_SIZE * FactionForce.size_mult(String(enemy_faction))))
+
+
+func _hunter_size() -> Vector2i:
+	var m := FactionForce.size_mult(String(enemy_faction))
+	return Vector2i(maxi(2, roundi(HUNTER_SIZE.x * m)), maxi(3, roundi(HUNTER_SIZE.y * m)))
 ## The live contract's true_rating (1-5, ZoneLevel._on_contract_live), for Vantage's exo gear
 ## (CompoundLevel.PMC_LX3_DIFFICULTY/PMC_HX1_DIFFICULTY): 1 (no exo) unless a hard contract sets it.
 var difficulty: int = 1
@@ -393,7 +404,7 @@ func _gate(m: ZoneModule, toward: Vector3) -> Vector3:
 ## there). False (still pending) if every point is in sight of a player.
 func _try_patrol(record: Dictionary) -> bool:
 	var route: Array[Vector3] = record.route
-	if PATROL_SIZE > _room():
+	if _patrol_size() > _room():
 		return false
 	for j in route.size():
 		if not _unseen(route[j]):
@@ -405,7 +416,7 @@ func _try_patrol(record: Dictionary) -> bool:
 		var squad := _new_squad(callsign)
 		squad.patrol = turned
 		var stats: Dictionary = ZoneLevel.GARRISON_STATS
-		record.soldiers = _spawn_team(squad, callsign, PATROL_SIZE, turned[0], turned[1 % turned.size()],
+		record.soldiers = _spawn_team(squad, callsign, _patrol_size(), turned[0], turned[1 % turned.size()],
 			CompoundLevel.HOSTILE_LOADOUT, float(stats.combat), float(stats.discipline), alert.mode_at(turned[0]) if alert else "aware")
 		record.squad = squad
 		record.walk = turned
@@ -933,7 +944,7 @@ func _tick_hunters(tier: int) -> void:
 	# Wave 6d: a faction with heat (Economy.hunting) sends its hunters from tier 1, in any zone it holds.
 	var hunted := tier >= 1 and Economy.hunting(String(enemy_faction))
 	if (tier < 3 and not hunted) or lk.is_empty() or teams >= (2 if tier >= 4 else 1) or now() - _last_hunter < HUNTER_GAP_S \
-			or HUNTER_SIZE.y > _room():
+			or _hunter_size().y > _room():
 		return
 	_send_hunters(lk.pos, float(lk.radius))
 
@@ -950,16 +961,17 @@ func _send_hunters(lkp: Vector3, radius: float) -> void:
 	# Wave 6d: past "heat_named" the faction's named hunter squad comes, at full strength. Known
 	# before the team is sized, so the reserves approved and spent (audit E-03) are what it fields.
 	var named := Economy.heat(String(enemy_faction)) >= float(MissionRegistry.reputation_rules().get("heat_named", INF))
-	var count := mini(HUNTER_SIZE.y if named else randi_range(HUNTER_SIZE.x, HUNTER_SIZE.y), _room())
+	var hs := _hunter_size()
+	var count := mini(hs.y if named else randi_range(hs.x, hs.y), _room())
 	count = maxi(roundi(count * scale), mini(count, 2))  # by difficulty (ZoneLevel.difficulty_scale)
 	if command:
 		count = mini(count, floori(command.available_cp()))
 		# Asked even with the reserves short of a team (for the smallest one): the denial is on
 		# record and a stale LKP still gets its probe.
-		if not command.approve("hunters", lkp, maxi(count, HUNTER_SIZE.x)):
+		if not command.approve("hunters", lkp, maxi(count, hs.x)):
 			_last_hunter = now()  # turned down: asked again after HUNTER_GAP_S
 			return
-	if count < HUNTER_SIZE.x:
+	if count < hs.x:
 		return
 	_hunter_teams += 1
 	_last_hunter = now()

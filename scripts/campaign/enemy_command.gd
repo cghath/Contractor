@@ -412,19 +412,25 @@ func _tick_reserves(dt: float) -> void:
 	var tier := _tier()
 	if _reserve_tier < 0:
 		_reserve_tier = tier
-		reserves = RESERVE_POOL[tier]
+		reserves = _pool(tier)
 		_bases_start = maxi(_bases_alive(), 1)
 		_bases_had = _bases_start
 	elif tier > _reserve_tier:
-		reserves += RESERVE_POOL[tier] - RESERVE_POOL[_reserve_tier]
+		reserves += _pool(tier) - _pool(_reserve_tier)
 		_reserve_tier = tier
 	var bases := _bases_alive()
 	if bases < _bases_had:
 		reserves *= float(bases) / _bases_had  # a base lost takes its share of the pool
 		_bases_had = bases
-	var cap := RESERVE_POOL[tier] * float(bases) / _bases_start
+	var cap := _pool(tier) * float(bases) / _bases_start
 	if reserves < cap:
 		reserves = minf(reserves + REFILL_PER_MIN[tier] * dt / 60.0, cap)
+
+
+## The reserve pool at Pressure tier `tier`, by the enemy's echelon now (FactionForce: 1.0 at its
+## starting echelon).
+func _pool(tier: int) -> float:
+	return RESERVE_POOL[tier] * FactionForce.size_mult(String(response.enemy_faction) if response else "")
 
 
 func _count_losses() -> void:

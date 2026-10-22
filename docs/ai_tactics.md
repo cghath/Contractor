@@ -356,6 +356,15 @@ Order: T1-T10 (team and squad) first, then P1-P3, then F1-F3. Each phase pushed 
 - P3 BrigadePlan: company plans over their own groups, a reserve company, and fires then the
   reserve to a stalled company.
 
+**Built 2026-10-22, the factions' echelons** (FactionForce, data/faction_force.json; drills_test):
+- F1 recruits, kits and money per faction, grown each campaign day from territory and spent on
+  men and kits; lost to kills, lost zones and contract defeats; echelon by men under arms; state
+  forces fixed;
+- F2 garrison, patrol and hunter sizes and the enemy commander's reserve pool scaled by the
+  holder's echelon over its starting one (1.0 at the start);
+- F3 small terror groups (cell, team) are veterans (+0.1 combat), lie in wait more (70-80% of
+  patrols) and hit and run (break contact +0.25, assault -0.1).
+
 Left for later, as calls 12-13 below:
 - T8 (dispersion: 6 m cover gaps for every side);
 - T9's smoke before a breach and bunker ports;
@@ -380,3 +389,7 @@ Left for later, as calls 12-13 below:
 | 13 | Smoke before a breach stays for bunkers (one entrance, ports): in a house it blinds the stack as much as the room, and the breach plans (flash, frag, charge) already handle rooms | R06 is about bunkers | Smoke before every door |
 | 14 | A near ambush needs the squad to have been moving when it was hit (its centre moved 2 m in the 3 s before), so a squad springing its own ambush never charges | Ambushers aren't ambushed | Any contact under 35 m |
 | 15 | Break contact's men go one at a time all the way to the rally point (15 s each at most), not in repeated short bounds | The reel's order and calls, with fewer moving parts | A leapfrog of 10-15 m bounds |
+| 16 | The war's `strength` (fronts) stays as it is; the force (men, kits, money) runs beside it and both shrink with losses | The fronts are tuned and world_test pins them | Re-deriving strength from the force now |
+| 17 | Starting men: mid-band for the starting echelon (team 25, squad 80); the Banner and Black Ridge start as squads, the Shura, Highland Front, Saltline and Kestrel as teams; US, UK, Canada, Vessmark and Eastern Concord companies, Vantage and Meridian platoons | The Captain's "cells, teams, a few squads" | Everyone a squad |
+| 18 | Money a day 4 + 3 a zone (a quarter less per zone where villagers stop paying a predatory group), 2 recruits a zone, 80% spent on a man and his kit (2.5); a man killed costs a recruit and half a kit, a zone lost 15% of both, a company win 6 recruits | Growth over weeks, losses felt at once | Instant swings |
+| 19 | Pre-dug positions and IEDs by echelon wait: Digging and RoadsideIeds exist but placing them by a faction's size needs the world lane's site layouts | Out of the AI files | Guessing at layouts |

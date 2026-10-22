@@ -11,6 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terror groups that grow (docs/ai_tactics.md section 7)
+
+#### Added
+- **Factions have men, weapons and money.** Each terror group's money comes from the zones it
+  holds, and it spends that money on recruits and their weapons. It loses men to kills, lost
+  zones and contracts the company wins against it. What it can field follows from its armed
+  men: cells, teams, squads, platoons, then companies. State forces (the US and its allies,
+  Eastern Concord) field full units from the start.
+- **Their size shows in the zones.** Garrisons, patrols, hunter teams and the enemy commander's
+  reserves grow as a group grows and shrink as it loses. They stay as before at each group's
+  starting size.
+- **Small but dangerous.** A group down to cells and teams is its hard core: veterans who lie in
+  wait more and hit and run instead of standing to fight.
+
 ### Platoon, company and brigade tactics from the reels (docs/ai_tactics.md, the AI commander)
 
 #### Added

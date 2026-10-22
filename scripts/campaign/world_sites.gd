@@ -409,6 +409,7 @@ static func server_contract_won(zone_id: String, target: String, type := "", lea
 	if zone_id == "" or target == "":
 		return
 	_add_strength(target, -WIN_STRENGTH_HIT)
+	FactionForce.note_defeat(target)
 	if type in LEADER_TYPES:
 		server_leader_down(target, leader)
 	var s := site(zone_id)
@@ -453,6 +454,7 @@ static func server_note_kill(faction: String) -> void:
 	if faction == "" or not MissionRegistry.faction(faction).has("id"):
 		return
 	_add_strength(faction, -KILL_STRENGTH)
+	FactionForce.note_kill(faction)
 	Campaign.mark_changed(WAR)
 
 
@@ -581,6 +583,7 @@ static func _tick_day() -> void:
 	w.day = int(w.day) + 1
 	var day := int(w.day)
 	_income()
+	FactionForce.tick_day()  # men, kits and money: terror groups grow and shrink (docs/ai_tactics.md 7)
 	for zid in fronts():
 		_resolve(zid, day)
 	_open_front(day)
@@ -684,6 +687,7 @@ static func _flip(zone_id: String, a: String, h: String, day: int) -> void:
 	if h == ZoneControl.PLAYER:
 		ZoneControl.server_lose_zone(zone_id)
 	r.erase("front")
+	FactionForce.note_zone_lost(h)
 	r["prev"] = h if h != ZoneControl.PLAYER else String(r.holder)
 	r["holder"] = a
 	r["grip"] = TAKEOVER_GRIP

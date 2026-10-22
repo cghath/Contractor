@@ -1184,7 +1184,7 @@ func _make_soldier(data: Dictionary) -> Node:
 		var brain := SquadAI.new()
 		brain.name = "SquadAI"
 		brain.squad = squad_for(soldier.faction) if soldier.hc_id == &"" else squad_of_hc(soldier.hc_id, soldier.faction)  # G7
-		brain.combat = data.combat
+		brain.combat = clampf(float(data.combat) + FactionForce.combat_bonus(String(data.get("faction_id", ""))), 0.0, 1.0)  # a small terror group's hard core
 		brain.discipline = data.discipline
 		brain.guard = data.guard
 		brain.combat_mode = Squad.COMBAT_MODES.get(data.get("mode", "combat"), Squad.CombatMode.COMBAT)

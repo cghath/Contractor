@@ -27,6 +27,7 @@ func _ready() -> void:
 		await get_tree().process_frame
 	await _frames(5)
 	await _test_drills()
+	_test_faction_force()
 	GameState.delete_save()
 	print("DRILLS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -188,3 +189,35 @@ func _test_drills() -> void:
 		s.set_meta(&"faction_id", &"valley_shura")
 	var dd := tac.doctrine()
 	check(not dd.is_empty(), "the squad's biases come from its men's faction (%s)" % sq.members()[0].get_meta(&"faction_id"))
+
+
+func _test_faction_force() -> void:
+	print("F1-F3: terror groups that grow; state forces at full strength")
+	check(FactionForce.echelon_for(8) == "cell" and FactionForce.echelon_for(25) == "team" and FactionForce.echelon_for(80) == "squad"
+		and FactionForce.echelon_for(250) == "platoon" and FactionForce.echelon_for(600) == "company", "cell, team, squad, platoon, company by men under arms")
+	check(FactionForce.echelon("eastern_concord") == "company" and FactionForce.echelon("us_forces") == "company", "state forces field full echelons from the start")
+	for f: String in ["ashen_banner", "valley_shura", "kestrel"]:
+		check(is_equal_approx(FactionForce.size_mult(f), 1.0), "%s at its start (%s): today's sizes" % [f, FactionForce.echelon(f)])
+	var r := FactionForce.of("valley_shura")
+	check(FactionForce.echelon("valley_shura") == "team" and FactionForce.hit_and_run("valley_shura") and FactionForce.combat_bonus("valley_shura") > 0.0,
+		"the Shura starts as teams: veterans who hit and run")
+	check(FactionForce.ambush_share("valley_shura", 0.5) >= 0.7, "and lie in wait more")
+	r.recruits = 300.0
+	r.weapons = 300.0
+	check(FactionForce.echelon("valley_shura") == "platoon" and FactionForce.size_mult("valley_shura") > 1.3 and not FactionForce.hit_and_run("valley_shura"),
+		"grown to 300 men with kits: platoons, bigger garrisons (x%.2f)" % FactionForce.size_mult("valley_shura"))
+	r.weapons = 30.0
+	check(FactionForce.echelon("valley_shura") == "team", "300 recruits but 30 kits: 30 under arms, teams again")
+	var before := float(r.recruits)
+	FactionForce.note_kill("valley_shura")
+	check(float(r.recruits) < before, "a man killed is a recruit gone")
+	FactionForce.note_zone_lost("valley_shura")
+	check(float(r.recruits) < before - 1.0, "a zone lost takes its men with it")
+	var warring := WorldSites.warring().filter(func(f: String) -> bool: return not FactionForce.is_state(f))
+	if not warring.is_empty():
+		var f: String = warring[0]
+		var m0 := FactionForce.men(f)
+		FactionForce.tick_day()
+		check(FactionForce.men(f) > m0, "a day of the war: %s buys men and kits with its money (%d to %d)" % [f, m0, FactionForce.men(f)])
+	r.recruits = 25.0
+	r.weapons = 25.0

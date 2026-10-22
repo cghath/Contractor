@@ -4486,7 +4486,7 @@ const BADLY_HURT_BLOOD := 0.7
 func ambusher() -> bool:
 	if body == null or squad == null or post != null or body.faction != &"hostile" or squad.patrol.is_empty() 			or not squad.get_parent() is EnemyResponse:
 		return false  # (the enemy response's patrols: not a level's own squad, nor a garrison)
-	return float(absi(String(squad.name).hash()) % 100) / 100.0 < AMBUSH_SHARE
+	return float(absi(String(squad.name).hash()) % 100) / 100.0 < FactionForce.ambush_share(String(body.get_meta(&"faction_id", "")), AMBUSH_SHARE)  # small groups lie in wait more
 
 
 ## G-26: a hostile patrol walks its route in formation behind its lead (Squad.patrol_lead,
