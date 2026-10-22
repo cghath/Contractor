@@ -434,10 +434,12 @@ func _cheapest(pool: Array) -> Dictionary:
 	return best
 
 
+## (Each stops once this node has left the tree: a wait still pending when the test quits was
+## resumed after the tree went, a SCRIPT ERROR on CI after "LOADOUT TEST PASSED".)
 func _wait_until(cond: Callable, timeout: float) -> bool:
 	var deadline := Time.get_ticks_msec() + int(timeout * 1000)
 	while not cond.call():
-		if Time.get_ticks_msec() > deadline:
+		if Time.get_ticks_msec() > deadline or not is_inside_tree():
 			return false
 		await get_tree().process_frame
 	return true
@@ -445,8 +447,11 @@ func _wait_until(cond: Callable, timeout: float) -> bool:
 
 func _frames(n: int) -> void:
 	for i in n:
+		if not is_inside_tree():
+			return
 		await get_tree().process_frame
 
 
 func _seconds(s: float) -> void:
-	await get_tree().create_timer(s).timeout
+	if is_inside_tree():
+		await get_tree().create_timer(s).timeout

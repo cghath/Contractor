@@ -571,8 +571,11 @@ func _on_ai_added(n: Node) -> void:
 	get_tree().create_timer(0.8).timeout.connect(_kill_hostile.bind(s))  # after an objective poll has seen them
 
 
-func _kill_hostile(s: Soldier) -> void:
-	if not is_instance_valid(s) or s.faction != &"hostile" or s.vitals.is_dead() or s.is_queued_for_deletion() or s.has_meta(&"loop_keep"):
+func _kill_hostile(who: Variant) -> void:  # (untyped: a soldier freed in the 0.8 s fails a typed argument before the check)
+	if not is_instance_valid(who):
+		return
+	var s := who as Soldier
+	if s.faction != &"hostile" or s.vitals.is_dead() or s.is_queued_for_deletion() or s.has_meta(&"loop_keep"):
 		return
 	for i in 6:
 		if s.vitals.is_dead():

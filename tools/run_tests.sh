@@ -88,10 +88,41 @@ note "run $run_id, $(date '+%Y-%m-%d %H:%M:%S'), ${run_tail:-}"
 note "suites: ${SUITES[*]}  (port ${CONTRACTOR_PORT:-default}, timeout ${SUITE_TIMEOUT}s)"
 
 # Runs the engine with "$@" under the timeout, output to log file $1. Returns the exit code
-# (124 or 137: timed out).
+# (124 or 137: timed out). On CI an engine still running QUIT_GRACE_S after its summary line is
+# hung in its shutdown (seen on the Linux runners: nvg and exo printed PASSED, then sat until the
+# timeout): it's sent SIGSEGV so Godot's crash handler prints where it's stuck into its log, and
+# "<log>.hung" notes it for judge. Locally (no gdb-free way to ask a Windows process) it just runs.
+QUIT_GRACE_S="${QUIT_GRACE_S:-60}"
 engine() {
 	local log="$1"; shift
-	timeout -k 10 "$timeout_s" "$GODOT" --headless --path . "$@" >"$log" 2>&1
+	rm -f "$log.hung"
+	if [ -z "${GITHUB_ACTIONS:-}" ]; then
+		timeout -k 10 "$timeout_s" "$GODOT" --headless --path . "$@" >"$log" 2>&1
+		return
+	fi
+	timeout -k 10 "$timeout_s" "$GODOT" --headless --path . "$@" >"$log" 2>&1 &
+	local runner=$!
+	(
+		seen=""
+		while kill -0 "$runner" 2>/dev/null; do
+			sleep 5
+			if [ -z "$seen" ] && grep -qE 'TEST (PASSED|FAILED)' "$log" 2>/dev/null; then
+				seen=$SECONDS
+			elif [ -n "$seen" ] && [ $((SECONDS - seen)) -ge "$QUIT_GRACE_S" ]; then
+				echo "still running ${QUIT_GRACE_S}s after its summary line: sent SIGSEGV for a backtrace" >"$log.hung"
+				pkill -SEGV -P "$runner" 2>/dev/null
+				sleep 20
+				pkill -KILL -P "$runner" 2>/dev/null
+				break
+			fi
+		done
+	) &
+	local watch=$!
+	wait "$runner"
+	local code=$?
+	kill "$watch" 2>/dev/null
+	wait "$watch" 2>/dev/null
+	return "$code"
 }
 
 # Judges a finished process: `name`, its log, its exit code, and the summary line it must
@@ -102,7 +133,9 @@ judge() {
 	local name="$1" log="$2" code="$3" summary="$4" prefix="${5:-}"
 	grep -E '\[FAIL\]|TEST (PASSED|FAILED)|SCRIPT ERROR|Parse Error' "$log" | sed "s/^/$prefix/"
 	local why=""
-	if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
+	if [ -f "$log.hung" ]; then
+		why="hung after its summary line (engine shutdown; its backtrace is at the end of the log)"
+	elif [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
 		why="timed out after ${timeout_s}s (hung?)"
 	elif grep -qE 'SCRIPT ERROR|Parse Error' "$log"; then
 		why="script error (see above)"
@@ -134,7 +167,17 @@ judge() {
 			# failed checks and script errors wherever they are in the log, then the last lines.
 			echo "::error title=$name::FAILED: $why"
 			grep -E '\[FAIL\]' "$log" | head -n 3 | while IFS= read -r line; do echo "::error title=$name failed check::$line"; done
-			grep -A1 -E 'SCRIPT ERROR|Parse Error' "$log" | grep -v '^--$' | head -n 3 | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			# The first script error with its whole backtrace (which caller) as one annotation (%0A:
+			# a new line in it), then the next one's line.
+			local first
+			first="$(grep -n -m1 -E 'SCRIPT ERROR|Parse Error' "$log" | cut -d: -f1)"
+			if [ -n "$first" ]; then
+				echo "::error title=$name first script error::$(sed -n "${first},$((first + 14))p" "$log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+				grep -E 'SCRIPT ERROR|Parse Error' "$log" | sed -n 2p | while IFS= read -r line; do echo "::error title=$name script error::$line"; done
+			fi
+			if [ -f "$log.hung" ]; then
+				echo "::error title=$name hung at exit::$(tail -n 45 "$log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+			fi
 			tail -n 3 "$log" | while IFS= read -r line; do echo "::error title=$name::$line"; done
 		fi
 		status=1

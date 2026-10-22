@@ -555,8 +555,16 @@ func _test_arm_hits() -> void:
 			if s.inventory.slots.get(&"primary", &"") == &"":  # a forearm hit knocked it out (G-23): back in his hands
 				s.inventory.put_on(&"primary", &"m4a1")
 				s.active_slot = &"primary"
-				await _seconds(0.8)
-			await _frames(2)
+			# Rifle up and aiming again, both hands on it and still (a fixed 0.8 s wasn't always
+			# enough on CI: the support hand not back on the handguard, hand_l met nothing).
+			var hands_at := [Vector3.INF, Vector3.INF]
+			var settle_by := Time.get_ticks_msec() + 5000
+			while Time.get_ticks_msec() < settle_by:
+				await _frames(2)
+				var now := [s.model.hand_position(true), s.model.hand_position(false)]
+				if s.is_aiming and s.model._held != null and (now[0] as Vector3).distance_to(hands_at[0]) < 0.002 and (now[1] as Vector3).distance_to(hands_at[1]) < 0.002:
+					break
+				hands_at = now
 			var point: Vector3
 			match spot[0]:
 				"hand_r": point = s.model.hand_position(true)
