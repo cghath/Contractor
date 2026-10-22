@@ -60,6 +60,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - the frame standing in the forest's densest copse, and a 16-man scan round through it.
 - `demolitions` checks the range's blocks and wall are built, stop rays, and carve under a demo block.
 - `world`: temperate now has the dense copses.
+- `vehicles`: its AI driving goals moved clear of the range's blocks (they're there now); an AI vehicle turning
+  round beside one is F-196.
 
 ### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
 

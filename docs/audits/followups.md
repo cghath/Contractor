@@ -27,6 +27,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-162 | P3 | ~~The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21)~~ fixed 2026-10-21 (Claude, claude/ai-followups: a roofed spot probes to 26 m) |
 | F-194 | P3 | The woods' GPU frame time is unmeasured: the forest suite counts draws and triangles headless (no renderer); a windowed frame time in a dense copse wants a build on a real GPU (woods perf pass, 2026-10-22) |
 | F-195 | P2 | claude/perf-pass and world/perf both change ZoneScatter's build_near, _process, _build_cell and _build_far: whoever merges second keeps both (woods perf pass, 2026-10-22) |
+| F-196 | P3 | An AI-driven vehicle turning round beside the range's concrete blocks runs into one and never makes the pickup (vehicle AI; the blocks exist since F-121) |
 | F-140 | P2 | ~~Ambushers by a road and a friendly convoy driving past (missions 2 overwatch)~~ fixed 2026-10-21 (Claude, claude/ai-followups: RoadAmbush, the convoy's drive-through; the mission's two calls are F-178) |
 | F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
 | F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
@@ -537,6 +538,21 @@ Suggested, for whoever merges second: queue [cell, tier] pairs (world/perf's wan
 detail share, so the tiers still hand over at one distance (the forest suite's "every cell's trees drawn exactly once"
 check catches a gap); keep perf-pass's `_ground_blocked`.
 
+## F-196: an AI vehicle turning round next to an obstacle doesn't get clear
+
+Location: [vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) (the obstacle and stuck handling: `_obstacles`,
+`_back_off`, `_go_round`); [squad_drivers.gd](../../scripts/vehicles/squad_drivers.gd) `server_pickup`. Found by
+cghath's agent on world/perf (2026-10-22) once F-121 built the range's blocks; the files are Claude's.
+
+What happens: the vehicles suite's squad drivers drove the M-ATV to (-12, -20), facing south, then ordered a pickup
+at (10, 4). Its turn round to the right swings through about (-6, -29), the concrete block at x -8..-6, z -30..-29:
+it was "blocked", backed off and went round, and 30 s later sat about 38 m from the commander; "Follow me" after it
+failed the same way (R0534; with the blocks left unbuilt it passes, R0537). The suite now drives to (-12, -14), clear
+of the blocks, and its path with a turn goes along z -36 (R0538).
+
+Suggested: when a goal is behind it and something is beside the turn, back up and turn (a three-point turn), or
+plan the turn on the navmesh, which has the blocks.
+
 ## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
 
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `_steer` (the path walk). Found and fixed by
@@ -704,3 +720,4 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-22 | Dense copses (copse_cover and its caps) in every wooded normal preset (temperate, river_valley, highland_moor, coastal_lowland, amphibious_coast, rocky_ridge, scrubland); temperate and river_valley woods 2.1 and copses 6 a km2 (forest 2.4 / 6) (data, Proposed); the dense layout's thicket cap 11000 -> 16000 (CAP_THICKETS), as a 16 km2 hot zone ran out before its last copses had their skirts (world: 130 of 256 lines through woods hidden, R0506) | Captain: "Then denser copses" once the woods were cheap | only the Experimental forest dense; desert_wadi, badlands and salt flats keep their small copses (copse_cover's default copse is 35-110 trees)
 - 2026-10-22 | F-121: the voxel world's edit area grows to hold a level's structures (VoxelWorld.fit_structures, called by CompoundLevel), not the range's blocks moved | vehicle_range.gd is Claude's, and any level's structure past 22 m is built too | move the blocks to z -18 and -21
 - 2026-10-22 | Woods perf budgets in the forest suite (Proposed): from a normal preset's densest copse 600 draws, 700k triangles, 200k in the shadow pass; a capped sight line 400 us; a nav chunk 0.5 ms; standing in the forest's densest copse 25 ms a frame on average, 60 ms at the 95th percentile; a scan round of 16 men 30 ms | room for CI's slower runners over this PC's numbers | frame budgets only (noisy on a shared PC)
+- 2026-10-22 | F-121's blocks in the vehicles suite: its AI driving goals moved off them ((-12, -20) -> (-12, -14); the path with a turn along z -36), the vehicle AI's trouble turning beside one logged as F-196 | the blocks are the range's ("something for the AI driver to steer round") and the AI code is Claude's | leave the range's blocks unbuilt
