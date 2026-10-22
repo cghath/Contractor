@@ -203,7 +203,9 @@ kept 8 ticks and through turns under about 6 degrees; a path kept while its dest
 under 15% of the way left (up to 3 m) until REPATH_S (patrol men re-planned every time the lead's
 slots moved half a metre); the follow-in scan skipped when the squad has nobody to send in (F-211).
 R2519 ran on a busy machine (woods, drive and heli, untouched by batch 2, measured 1.6x R2517):
-city 122 / 288, fight 53 / 82.
+city 122 / 288, fight 53 / 82. Quiet again at c570c558 (R2523, with the budgets, PASS): town 9.2 /
+14.0, city **103.3** / 225.7, fight **35.4 / 49.7**, woods **14.1 / 21.1**, drive **8.5 / 12.8**,
+heli **10.6 / 18.8**.
 
 Budgets tightened (Proposed; about twice a quiet local run, as before; CI's runners measured about
 twice a quiet local run): town 30 / 50 / 40 hitches a minute (a village now), city 260 / 520 / 90,

@@ -13,12 +13,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Perf: towns, cities and the heli (claude/perf-towns)
 
-> **Where I stopped / next step (2026-10-22, 18:25 CDT):** first batch pushed (e0f7b46e):
-> casualty responder and formation slots kept, building scans' grouping resumable (F-206), grass
-> lays budgeted. R2513 -> R2517 (quiet machine, 60 Hz frame cost avg): city 136 -> 107 ms, fight
-> 62 -> 36, woods 25 -> 14, drive 16 -> 9, heli 15 -> 12 (hitches 27 -> 3 a minute).
-> Next: the city's patrols (86 of 107 AI walking: movement and steering), team spawns spread over
-> frames (F-206), the draw proxy's soldiers (1600 draws in the city), then budgets.
+> **Where I stopped / next step (2026-10-22, 18:50 CDT):** three batches pushed (c570c558 + docs).
+> Quiet-machine 60 Hz frame cost avg / p95, R2513 -> R2523: city 136 / 196 -> 103 / 226, fight
+> 62 / 95 -> 35 / 50, woods 25 / 34 -> 14 / 21, drive 16 / 28 -> 8.5 / 13, heli 15 / 31 -> 10.6 / 19
+> (hitches 27 -> about 3 a minute), town (a village now) 8.8 -> 9.2. perfcases budgets tightened
+> and pass locally (R2523); smoke, world, props pass (R2520); townperf passes (R2522; R2520's miss
+> was a busy machine). Not yet: CI on the branch, merge into claude/ai-driving.
+> Next: team spawns made virtual or woken a few a frame (F-206), a scatter cell's and a terrain
+> chunk's single build (F-225, cghath), soldiers' draws (F-226), the city's patrols' movement.
 
 #### Changed
 - **perfcases** has a **city** case: the Old Quarter's city, walked up its middle street from
@@ -30,6 +32,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   his heading (a few rays a man, worked out again for every man that asked).
 - **Building scans** (F-206): a cold scan's grouping stops at the frame's budget between buildings
   and between stair paths and goes on at the next ask (100-250 ms in one frame in a city block).
+- **Casualty care** (2): which medic a carer's call goes to is kept the same way.
+- **AI paths**: a destination that moved under 15% of the way left (up to 3 m) keeps its path until
+  the next re-plan; formation slots of an AI squad are kept 8 ticks and through small turns.
+- **Follow-in** (F-211): no building scan when the squad has nobody to send in.
+- **perfcases budgets** tightened: town 30 / 50, city 260 / 520, fight 100 / 170, woods 35 / 50,
+  drive 40 / 60, heli 40 / 70 (average / 95th, ms).
 - **Grass** near the camera: one buffer write a lay, only the points that can be in the circle,
   new tufts limited by time, and an unfinished lay goes on from the points it left (from a
   helicopter it went through the whole circle again every frame).
