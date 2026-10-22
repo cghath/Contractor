@@ -243,6 +243,9 @@ Every gun, not just the first-pass list.
 
 Each type shows up on the board, plays start to finish, and has its own test.
 
+Combined arms and invasion missions (larger zones, armour columns, beach landings, seizing
+crossings) are Claude's, alongside the armour work, so no need to build those.
+
 ### 5. Follow-ups (F-xx in docs/audits/followups.md)
 
 - **F-130:** the AI grenadier fires the M320.
