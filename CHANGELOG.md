@@ -43,6 +43,44 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Vehicles feel rivers and lakes.** They already handled the sea. A truck in water deeper
   than its fording depth floods and stalls.
 - A `water` test suite.
+### Landmark buildings (cghath's brief, queue item 1.4: world expansion)
+
+#### Added
+- **Landmark buildings**, each its own generated type with furnished rooms you can enter, fight
+  through and blow holes in, and the AI can garrison and clear:
+  - an **office** block: two storeys and a roof;
+  - a **mosque**: a prayer hall under a dome, a minaret, an ablution room;
+  - a **church**: a nave with pews and an altar, a bell tower over its door, a gable roof;
+  - a **school**: classrooms with desks and boards, often two storeys, a playground;
+  - a **garage** workshop: a car on its lift, a wide door;
+  - a **fuel station**: a kiosk, a canopy over its pumps;
+  - a **factory**: a factory floor with machines, offices, a chimney;
+  - a **farm**: farmhouse, barn, silos, livestock pens;
+  - a **harbour**: a quay and two piers out over the water, cranes, sheds, the harbourmaster's
+    office, containers, a moored boat;
+  - an **airfield**: a runway, an apron, two hangars (a light aircraft in one), a control tower,
+    a windsock;
+  - an **oil field**: pumpjacks, flowlines, tanks, a flare stack;
+  - a **fuel depot**: storage tanks in a bund, a pipe rack, a loading gantry and tanker, a fence;
+  - the terror groups' sites: the cartels' **drug lab** (blacked out, lab benches, cookers,
+    chemical drums) and the Banner's and the Shura's **IED workshop** (wire, phones, shells,
+    jugs, a car being rigged).
+- **Ruined and bombed-out variants of every building**, the old types too: walls breached,
+  roofs fallen in, rubble; bombed out, a corner collapsed and an upper storey's roof gone. Stairs
+  and doorways stay usable.
+- **They appear where the zones' asset tags say** (docs/terror_groups.md 7.3): a mosque where a
+  zone has one, a harbour on the coast of harbour zones, oil fields, airfields with a fuel depot,
+  farms in the fields, fuel stations on the routes, garages at crossings, offices where there's a
+  headquarters, the drug lab or IED workshop of the group that holds the zone, and a few churches,
+  schools and factories. Each has a road to it and a garrison; hot zones' are more often in ruins.
+  (data/landmarks.json; all numbers Proposed.)
+
+#### Fixed
+- **Upper-floor doorways no longer open onto the stairwell.** Now and then a doorway upstairs
+  stood over the stair's opening, so the room behind it could only be reached by falling down the
+  stairs; it slides along its wall now (or another wall takes the doorway).
+- **The building docs no longer claim an office** before there was one (docs/building_gen.md,
+  docs/feature_comparison.md 8.2): there is one now.
 
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 

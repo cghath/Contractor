@@ -1,0 +1,31 @@
+{
+	"_note": "Landmarks in zones (queue item 1.4, cghath 2026-10-21; ZoneModules.landmark_kinds, place_landmarks, place_harbour). A zone's landmark sites (BuildingGen.site kinds) come from its asset tags ('tags': data/contracts.json zones' 'assets', docs/terror_groups.md 7.3), its holder's own site ('site_names': what a faction's factions.json 'site_names' call its cache; the Kestrels' and the Syndicate's drug lab, the Banner's and the Shura's IED workshop) and a few by zone id ('zones': the types no tag names). In 'order' first, at most 'max' a zone ('contract' or 'hot' zones). 'ruin': the share of a zone's landmarks [ruined, bombed out]. All Proposed.",
+	"tags": {
+		"mosque": ["mosque"],
+		"harbour": ["harbour"],
+		"oil": ["oil_field"],
+		"airfield": ["airfield", "fuel_depot"],
+		"fields": ["farm"],
+		"route": ["fuel_station"],
+		"crossing": ["garage"],
+		"hq": ["office"]
+	},
+	"site_names": {"drug lab": "drug_lab", "IED workshop": "ied_workshop"},
+	"zones": {
+		"harbour_yard": ["factory", "church"],
+		"fishers_reach": ["church", "school"],
+		"marrow_shore": ["church"],
+		"kestrel_valley": ["school"],
+		"wadi_farm": ["school"],
+		"pinewood_ridge": ["church", "school"],
+		"blackwood": ["factory"],
+		"greyfell_moor": ["church"],
+		"city_hot": ["school", "factory", "church"],
+		"coast_hot": ["factory"],
+		"delta_hot": ["school"]
+	},
+	"order": ["mosque", "harbour", "oil_field", "airfield", "farm", "drug_lab", "ied_workshop", "fuel_depot", "office", "fuel_station", "garage",
+		"school", "church", "factory"],
+	"max": {"contract": 4, "hot": 6},
+	"ruin": {"contract": [0.2, 0.08], "hot": [0.35, 0.3]}
+}

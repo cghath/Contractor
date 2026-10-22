@@ -153,6 +153,8 @@ func generate(def: Dictionary, flat: Array) -> void:
 			var half: Vector2 = ZoneModules.HALF[String(m.type)]
 			_streets.append(Rect2(at.x - BuildingGen.TOWN_HALF_X, at.y - BuildingGen.STREET_W * 0.5, BuildingGen.TOWN_HALF_X * 2.0, BuildingGen.STREET_W))
 			_streets.append(Rect2(at.x - BuildingGen.CROSS_W * 0.5, at.y - half.y, BuildingGen.CROSS_W, half.y * 2.0))
+		for r: Rect2 in ZoneModules.streets(String(m.type)):  # a landmark's hard standing: a runway, a forecourt, a quay
+			_streets.append(Rect2(r.position + Vector2(float(m.pos[0]), float(m.pos[1])), r.size))
 	var sea: Dictionary = preset.get("sea", {})
 	sea_side = int(def.get("sea_side", -1)) if not sea.is_empty() else -1
 	sea_m = float(def.get("sea_m", 0.0)) if sea_side >= 0 else 0.0
@@ -275,8 +277,12 @@ func generate(def: Dictionary, flat: Array) -> void:
 			heights[i + j * points] = h
 			_bed[i + j * points] = int(carve * 255.0)
 	pads.clear()
+	var at_sea := {}  # pads made at a height over the sea (a harbour's quay: ZoneModules.pad_sea)
+	for m: Dictionary in def.get("modules", []):
+		if not is_nan(ZoneModules.pad_sea(String(m.type))):
+			at_sea[ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1])))] = ZoneModules.pad_sea(String(m.type))
 	for rect: Rect2 in flat:
-		_flatten(rect)
+		_flatten(rect, float(at_sea.get(rect, NAN)))
 	if water:
 		water.free()
 	water = ZoneWater.carve(self, def)  # rivers cut their valleys (queue item 1.1)
@@ -414,11 +420,12 @@ func _read_palette() -> void:
 
 ## The height of the noise ground (before pads) is what a pad takes: the grid's height at
 ## its centre. Inside the rect grown by PAD_MARGIN_M it's flat; it blends back over
-## PAD_BLEND_M beyond that.
-func _flatten(rect: Rect2) -> void:
+## PAD_BLEND_M beyond that. `over_sea`: the pad is made that high over the sea instead (a
+## harbour's quay, ZoneModules.pad_sea).
+func _flatten(rect: Rect2, over_sea := NAN) -> void:
 	var flat := rect.grow(PAD_MARGIN_M)
 	var centre := flat.get_center()
-	var h := snappedf(height_at(centre.x, centre.y), 0.05)
+	var h := snappedf(height_at(centre.x, centre.y), 0.05) if is_nan(over_sea) else sea_level + over_sea
 	pads.append([flat, h])
 	var reach := flat.grow(PAD_BLEND_M)
 	var lo := _grid_index(reach.position)
