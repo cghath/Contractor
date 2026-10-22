@@ -29,9 +29,11 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
    the room roles and sizes it fits, the clearance it needs in front of doors and windows, loot
    points (by loot table), cover and spots for the AI. Picked by seed among those that fit; a
    chunk can be mirrored or turned to fit the room's doors.
-4. **Types.** House, shop, warehouse, clinic, police station, office; later a mosque or church,
-   a school, a garage. Each type has its rooms, its loot (the clinic's treatment room has medical
-   loot, the police station an armoury) and its materials.
+4. **Types.** House, shop, warehouse, clinic, police station; the landmarks (below) add an
+   office, a mosque, a church, a school, a garage, a fuel station, a factory, a farmhouse and barn,
+   a harbour shed, a hangar and control tower, a pump house, a drug lab and an IED workshop. Each
+   type has its rooms, its loot (the clinic's treatment room has medical loot, the police station
+   an armoury) and its materials. (Until 2026-10-21 this list named an office that didn't exist.)
 5. **Seeded.** The zone's seed and the lot give the same building every visit: saved damage and
    looting depend on it.
 
@@ -114,6 +116,90 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
   copings, crates, drums, tents, the compound's gate).
 - Screenshots: `tests/world_shots.tscn` (a compound, outpost, village, HQ and town, the ground,
   props and a wood).
+
+## Landmarks (queue item 1.4, cghath 2026-10-21)
+
+Landmark buildings and sites, each its own `BuildingGen` type with interior chunks, enterable,
+navmeshed and garrisoned like the rest, and placed in the zones their asset tags name.
+
+- **Building types** (`BuildingGen.LANDMARK_TYPES`, in `TYPES` with the others), generated as
+  any building (rooms by role, doorways, stairs, chunks, loot, a look and skin), with keys of
+  their own (all Proposed): `styles` (a church in stone or brick), `h` (a hall's wall height),
+  `door_h` (a garage's or hangar's door), `apron` (open lot in front: a forecourt, room for a
+  tower or a canopy), `keep_big` (the bigger part of the first split stays one hall: a prayer
+  hall, a nave, a factory floor, a hangar), `chunk_area` (a big hall gets a chunk per that many
+  m²), `sign`, `extras` (what's built round the shell, `_extras`):
+  - **office**: two storeys always, a roof with a parapet, open-plan offices and a meeting room,
+    a canopy over its door;
+  - **mosque**: a prayer hall with a minbar and mihrab, rugs and shelves, an ablution room, a
+    dome (octagonal courses) over the hall, a minaret (a solid shaft, a railed balcony, a cap and
+    crescent) in its forecourt clear of the door;
+  - **church**: a nave with pews, an altar and a font, a vestry, a hollow gable roof, a bell tower
+    over the front door (a porch: doorways through it front and back, belfry arches, a bell, a
+    spire and a cross);
+  - **school**: classrooms (desks in rows with aisles, a board), offices, often two storeys and a
+    walled playground, a flagpole and railings along its forecourt;
+  - **garage**: a workshop hall with a wide door, a car on a lift, benches and tyres, a car and
+    drums outside;
+  - **fuel station**: a kiosk (a shop) behind a forecourt with a canopy on columns, two pump
+    islands, a price board and the tanks' fill caps;
+  - **factory**: a factory floor (lathes, presses, a conveyor, pallets and racks), offices, a
+    chimney stack and a container on its forecourt, a sawtooth roof unless its roof is used;
+  - **farmhouse** (house rules) and **barn** (stalls, hay, a cart, a gable roof); **harbour
+    shed** (a dock hall with nets, crates, pallets); **hangar** (a light aircraft, tools, a
+    curved roof, its doors slid back); **control tower** (two storeys, a console room above,
+    a mast and windsock on its roof); **pump house** (pumps, pipes out to its forecourt);
+  - **drug lab**: blacked out (no windows), lab benches with glassware, cookers and gas
+    cylinders, chemical drums, a packing table; a generator and drums in its yard;
+  - **IED workshop**: a bench with wire, phones and batteries, artillery shells, yellow jugs and
+    fertiliser sacks; a car being rigged in its yard.
+- **Ruined and bombed out** (`building(type, seed, style, RUINED / BOMBED)`, `_ruin`, every type,
+  the older ones too): the same building with breaches through its outside walls (scorched
+  round), holes in its roof, rubble heaped under them; bombed out, a back corner fallen in
+  (everything over it from 0.4-1.2 m up gone, a heap of rubble in it), a two-storey building's
+  roof gone and its upper walls broken (its stair up there no longer counts). Its stairs, their
+  landings and every doorway's way through are kept: rooms reachable before still are, unless
+  the fallen corner buried a doorway (`"buried"`).
+- **Sites** (`BuildingGen.site(kind, seed, ruin, turn)`, `SITE_KINDS`): a landmark alone on its
+  lot, or several buildings and their props, with garrison posts (inside front doors, up high,
+  back rooms, and the site's own), loot by its rooms' tables (`LANDMARK_LOOT`: a lab's hashish, an
+  IED workshop's wire and detonators), named points, stair ramps, a footprint, its flat pad and
+  the hard standing painted on it (`streets`):
+  - **farm**: farmhouse, barn facing the yard, one or two silos, fenced pens with a shelter and
+    trough, hay bales, a well;
+  - **fuel depot**: three or four storage tanks in a bund (hollow, with decks inside so no room
+    in one bakes into the navmesh), a pump house, an overhead pipe rack to a loading gantry with a
+    tanker under it, a security fence, gate and guard booth;
+  - **harbour** (its sea toward -z, turned to face the zone's): a quay with its concrete face and
+    bollards, two piers on piles out `PIER_L` past it with a portal crane on each, two sheds facing
+    the quay, the harbourmaster's office, container stacks, a fishing boat moored;
+  - **airfield**: a runway (`RUNWAY`, painted on the ground: no voxels), an apron, two hangars, a
+    control tower, a light aircraft parked, a windsock, fuel drums, a sandbagged guard post;
+  - **oil field**: four or five pumpjacks on gravel pads, flowlines along the ground to a
+    separator, two tanks in a bund, a pump house and a site cabin, a flare stack.
+- **Module types** (`ZoneModules`): `"lm#<kind>#<seed>#<ruin>#<turn>"`, `base()` its kind. A
+  landmark's pad can be its own (`PAD`: a harbour's land, not its piers) and made at a height over
+  the sea (`PAD_SEA`, `ZoneTerrain._flatten`), its hard standing is painted on the ground
+  (`STREETS`, `ZoneTerrain`), its voxel bounds are its voxels' own (`EXTENT`, `BELOW`).
+- **Where** (`data/landmarks.json`, `ZoneModules.landmark_kinds`, `place_landmarks`,
+  `place_harbour`, called from `ZoneDef.normalize`; `MissionRegistry.zone_def` gives the def its
+  `assets` and `controller`): by asset tag (mosque, harbour, oil, airfield and a fuel depot,
+  fields: a farm, route: a fuel station, crossing: a garage, hq: an office), by the holder's own
+  site (the Kestrels' and the Syndicate's drug lab, the Banner's and the Shura's IED workshop), a
+  few by zone (churches, schools, factories); at most 4 a contract zone, 6 a hot zone, in the
+  data's order; 20% ruined and 8% bombed out in contract zones, 35% and 30% in hot zones. Each
+  clear of the other modules and the insertion and extraction points, never nearer an edge than
+  the zone's sea could come in (its coast stays as it was), with a road to the nearest site. A
+  harbour goes on the sea once it's chosen, its quay out in the shallows (`HARBOUR_SHORE`), its
+  land built up to 1.6 m over the water, its piers' ends over water. Placed once: a def that has
+  them keeps them (normalizing again changes nothing).
+- **Upper-floor doorways** (all types, a fix): a doorway on the floor above no longer opens onto
+  the stairwell (one did now and then: the room behind it was cut off).
+- **Checks**: `tests/landmarks_test.gd` (suite `landmarks`). **Pictures** (headless, its own
+  flat-shaded drawing of the boxes, no window): `tests/landmark_shots.tscn`.
+- Not yet: mission sites in the landmarks (a raid on the drug lab itself, an HVT in the mosque's
+  office: contracts.json "modules" for them), towns with landmark lots, a real control-tower cab
+  (a third storey), the runway's markings and lights.
 
 ## Open (Captain)
 
