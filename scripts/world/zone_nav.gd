@@ -189,7 +189,7 @@ func is_settled() -> bool:
 	for chunk: Vector2i in _wanted:
 		if region_of(chunk) == null or region_of(chunk).navigation_mesh == null:
 			return false
-	return true
+	return map_caught_up()  # and the map has taken the last mesh in (a path asked for sooner misses it)
 
 
 ## Works out the wanted chunks now (they're also refreshed every UPDATE_S).

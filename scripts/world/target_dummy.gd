@@ -17,6 +17,7 @@ extends StaticBody3D
 
 func _ready() -> void:
 	add_to_group(&"combatants")
+	add_to_group(NavBuilder.OBSTACLES_GROUP)  # paths go round it (NavBuilder._add_obstacles)
 	if multiplayer.is_server():
 		for id in loadout:
 			inventory.take(StringName(id))

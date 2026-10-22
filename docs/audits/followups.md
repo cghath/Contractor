@@ -29,6 +29,11 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
 | F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
 | F-179 | P3 | Players can't fire the hand flare (it's loot only), and the M320's 40 mm star round waits on F-130 (the AI grenadier) |
+| F-190 | P1 | ~~A squadmate following along a path walks head-on into a wall's end and stands there pushing~~ fixed 2026-10-22 (Claude, claude/ci-cleanup: SquadAI._unblock; F-80's collection-point half was the test's point) |
+| F-191 | P3 | A shot-down transport's crash landing with two aboard killed both (supports suite, CI once; "most of them alive") |
+| F-192 | P2 | Following the player through the compound's building, a squadmate on the follow-in stack can run a loop round the building on his way to his stack place (casualty soak, CI only, now and then) |
+| F-193 | P3 | base_zone: the player is down on landing after the helicopter insertion, and the walk home and the rest of the deployment fail after it (CI only, now and then) |
+| F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
 
 ## F-01: the building scan only sees one floor
 
@@ -474,6 +479,124 @@ catch-up teleport stay in the test); give squad orders through `_server_squad_co
 C2, `HighCommand.request_order` (lift 7, so `coop_soak --hc` runs the real validated path); key the
 recorder and coop_soak_report.py by group (`Soldier.hc_id`, "" for the player squad) (lift 8).
 Acceptance: a short replay behaves the same.
+## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `_steer` (the path walk). Found and fixed by
+Claude on `claude/ci-cleanup` (2026-10-22), a CI red directly in the squad AI (the one change there:
+`_unblock`, called from `_steer`; `claude/ai-followups`' hunks don't reach it). Supersedes F-90
+and the stuck half of F-08.
+
+What happens: casualty's soak ("nobody got stuck on the way", then "everyone is back in formation"
+and the collection-point checks) fails on nearly every CI run on `claude/ai-driving` (39710962889's
+predecessors 39689572822, 39687185890, 39682370659, 39655370830 ...). Before 2026-10-22 the man
+was held against the LightDummy at (-4, 0, 12), which the compound's navmesh didn't know. The
+dummies are baked in now (NavBuilder.OBSTACLES_GROUP), and the same thing happens one obstacle
+over, on CI (run 39722065652) and locally (R2364) alike: Foxtrot at (-1.39, 0, 9.70), path next
+(-1.5, 0.5, 10.75), input forward, speed 0. The low wall at x -1.5..1.5, z 10.0..10.4 (1.1 m)
+ends at x -1.5; the bake keeps a path only about 0.1-0.25 m off it at its corner (agent radius
+0.25 m, one 0.25 m cell of erosion, edge_max_error 1 cell), and the soldier's capsule is 0.3 m,
+so with its centre at x -1.39 (inside the wall's x span) it meets the wall's south face head on
+and move_and_slide has nothing to slide along.
+
+Tried on the navigation side and dropped: padding the baked boxes 0.125 m (fixes casualty, but
+closes the compound's 1.2 m doorway in the 0.25 m-cell bake: logistics' "through the doorway"
+path went 15.9 m round, squad's path into the building ended outside); edge_max_error 0.5
+(Foxtrot then stuck elsewhere, the carry checks broke).
+
+Fix: `SquadAI._unblock`: pushing with no way on for 0.5 s against a face met square on
+(get_slide_collision's normal), the man steps along it, the side his next waypoint lies, for
+0.6 s, then takes the path again. casualty passes locally with it (R2382), and failed every
+time without it once the dummies were baked in (R2364). The test is casualty's soak as it stands.
+
+F-80's half ("with a collection point set, a squadmate picks his body up" and its radio line,
+every squadmate idle in formation; CI run 39725520165, R2400) was the test: Echo falls where the
+dynamic wedge has him, about (-4.3, 3.8), within BODY_THERE_M of the test's collection point at
+(-8, 4), so he already lay "there" (`_body_destination` null) and nobody had cause to carry him.
+The test takes the point on the other side (8, 4) when he lies within 10 m of it, and the check
+names, per squadmate, any `_can_bear` condition that holds him back.
+## F-163: a helicopter insertion came 0.1 m inside its 5 m airframe clearance
+
+Location: the loop suite's helicopter insertion check ([loop_test.gd](../../tests/loop_test.gd)
+`_heli_insert`, `HeliFlight.airframe_clearance`, `Helicopter.MIN_CLEAR_M`). Found by cghath's
+agent on `world/landmarks` (2026-10-22); the flight code is Claude's, so it isn't changed there.
+
+What happens: on world/landmarks' CI (run 39717899713) the insertion into kestrel_valley's
+compound job (entry (-1072, 72), LZ (-905, -426)) passed 4.9 m from the ground or what stands on
+it at (-921, 1.9, -378), 51 m before the final. The same flight passed locally (R0474). The
+nearest landmark (the drug lab at (-804, -228)) is about 190 m off that spot, so it's the ground
+or the props along the way in, not a landmark; it shows up now because landmarks lengthen
+kestrel_valley's module list and the board deals that job.
+
+Suggested: a margin on the approach (the clearance the flight keeps a little over MIN_CLEAR_M),
+or the check counting from the final's start rather than FINAL_LOW_M.
+
+The loop suite's other two failures on that branch were the test's: a drop lets go of what's in
+the hands first, so with the intel grab's hard case carried out the rifle stayed slung ("the rifle
+set down in the point goes into the hold"), and the "banked" check expected a dead hostile's
+intel in the stash, where intel never goes (`Contracts.without_intel`, also red on
+claude/ai-driving's CI 39682370659). Both are fixed in tests/loop_test.gd on world/landmarks.
+
+Seen again on `claude/ci-cleanup` (Claude, 2026-10-22), the same few metres every time, in a
+different zone from cghath's: "its airframe at least 5 m clear until the final: 3.5 m at the least
+(at (-32, 14.7, -938), 356 m to go)" on CI run 39732150758 (2ff7a91c), and 3.4 m at (-29, 14.7,
+-944) locally (R2363); the same suite passed in R2365, R2386 and R2402. It follows the zone the
+board deals, so it comes and goes from run to run; a flake for CI's purposes until the flight
+keeps its margin.
+
+## F-191: a crash landing with two aboard can kill both (supports suite)
+
+Location: [supports_test.gd](../../tests/supports_test.gd) (the transport shot down: "a crash
+landing: everyone thrown clear and hurt, %d of %d alive") and the crash's injuries to those thrown
+clear (Helicopter's crash landing). Found by Claude on `claude/ci-cleanup` (2026-10-22).
+
+What happens: the check wants at least half of those aboard alive (Captain, 2026-10-18: the crash
+landing is survivable, "most of them alive"). With two aboard, CI run 39732150758 (2ff7a91c) had
+both dead ("Alpha: dead, riding nothing, 3 m from the helicopter; Bravo: dead, ... 4 m"); the
+runs before on the same branch (39722065652, 39725520165) and locally passed. Nothing on that
+branch touches the crash or its injuries (its changes there: a test's waits, the squad's wall
+sidestep, the stash count), so it reads as the injury rolls: two riders leave no room for one
+bad roll.
+
+Suggested: crash injuries rolled within a survivable band for those thrown clear (the "most of
+them alive" call), or the check with more riders aboard.
+
+## F-192: a follow-in stacker running a loop round the building (casualty soak, CI only)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (the clear tactic: `_tactic_clear`, a man's
+walk to his stack place) and [squad.gd](../../scripts/ai/squad.gd) `_tick_follow_in`. Found by
+Claude on `claude/ci-cleanup` (2026-10-22); left for the squad-AI work (`claude/ai-followups` is
+in `_tactic_clear` now).
+
+What happens: casualty's soak leads the squad through the compound's building ((0, -8) is on its
+route), so a follow-in clear stacks them at its door. On CI run 39740524497 (45da4fa8) Echo,
+"Stacking up" with his place at (5.3, -3.8), ran (5.6, 2.4) -> (7.8, -2.6) -> (12.0, -5.1) ->
+(14.0, -2.7) -> (14.0, 0.4) -> (12.8, 5.8) -> (10.1, 7.4) -> (6.2, 3.8) in 8 s, a loop round the
+building's east side and back, at a run, and the soak's stuck check (no more than 0.6 m from
+where he was 8 s before) took him for stuck. Locally the soak passes (R2382, R2402, R2435,
+R2436). A man standing at his stack place or waiting his turn to go in is no longer counted
+(the soak skips men where their op put them); this one hadn't got there.
+
+Suggested: watch a stacker's distance to his place (as `_reach_progress` does for a casualty):
+no closer for a few seconds means a new path, or his place in the stack handed to the next man.
+The test: casualty's soak.
+
+## F-193: base_zone's player down after the helicopter insertion (CI only)
+
+Location: [base_zone_test.gd](../../tests/base_zone_test.gd) (the walk-through deployment: flown in
+to the insertion LZ, walking home through the base zone). Found by Claude on `claude/ci-cleanup`
+(2026-10-22). The brief listed base_zone as an occasional red already.
+
+What happens: on CI run 39740524497 (45da4fa8) "flown in aboard a helicopter to its insertion LZ"
+failed with the player at (-2006, 0, 891), up=false, 25 s after the insertion drop; everything
+after it failed with him ("walking home through it": only a player standing inside an extraction
+point can confirm it; "back at the base zone, the deployment over"; the MIA recovery contract and
+the raid's standing). The same commit passed it twice locally (R2442, R2443), and the branch's
+three CI runs before passed it (39722065652, 39725520165, 39732150758). Why he was down isn't in
+the annotations.
+
+Suggested: shield the player for the insertion (Vitals.shielded, as the loop suite does: the
+fight isn't what this suite checks) or say in the check what put him down (his wounds and who
+hit him, Harm).
 
 ## Calls made for the Captain
 
