@@ -7,18 +7,21 @@
 		["ridge", "rocky_ridge"], ["hills", "rocky_ridge"], ["mountain", "rocky_ridge"],
 		["wadi", "desert_wadi"], ["desert", "desert_wadi"],
 		["harbour", "coastal_lowland"], ["harbor", "coastal_lowland"], ["coast", "coastal_lowland"], ["beach", "coastal_lowland"],
-		["scrub", "scrubland"]
+		["scrub", "scrubland"],
+		["marsh", "marsh"], ["swamp", "marsh"], ["fen", "marsh"], ["bog", "marsh"],
+		["snow", "snow_mountain"], ["winter", "snow_mountain"], ["glacier", "snow_mountain"],
+		["farmland", "farmland"], ["fields", "farmland"]
 	],
 	"presets": {
-		"highland_moor": {"name": "Highland moor", "land": {"relief_scale": 1.15, "wavelength_m": 820, "octaves": 4, "gain": 0.45, "ridge": 0.25, "detail_m": 2.0, "detail_wavelength_m": 170},
+		"highland_moor": {"name": "Highland moor", "features": {"gullies": {"count": [1, 3]}, "cliffs": {"count": [1, 2], "height_m": [6, 12]}}, "land": {"relief_scale": 1.15, "wavelength_m": 820, "octaves": 4, "gain": 0.45, "ridge": 0.25, "detail_m": 2.0, "detail_wavelength_m": 170},
 			"water": {"_note": "Queue item 1.1: moorland burns and a tarn. Proposed.", "streams": {"count": [2, 3], "width_m": [3.5, 5.5], "depth_m": 0.4, "valley_w_m": 26, "length_m": [350, 800]}, "lakes": {"count": [0, 1], "radius_m": [40, 70], "depth_m": 3.0}, "ponds": {"count": [0, 2], "radius_m": [10, 18]}},
 			"palette": {"grass": "6b6646", "dry": "7a6a55", "earth": "6e5a48", "rock": "706c66"}, "ground": {"rock_above_m": 24.0}, "scatter": {"conifer_share": 0.6, "rocks_per_km2": 90, "large_rock_share": 0.22, "scrub_per_km2": 480, "trees_per_km2": 4, "woods_per_km2": 0.4, "copses_per_km2": 3, "hedgerows_per_km2": 1, "road_trees": 0.1, "props_per_km2": 1.6, "props_near_m": 50, "ruins_per_km2": 1.4, "valuables_per_km2": 1.5, "tufts_per_km2": 60000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 45, "colours": {"rock": ["7a766f", "66625c"], "scrub": ["6a5a50", "5f6040"], "crown": ["3e5530", "4a5a32"], "trunk": "4a3a2c"}}},
-		"river_valley": {"name": "River valley", "land": {"relief_scale": 0.9, "wavelength_m": 720, "octaves": 4, "gain": 0.4, "detail_m": 2.2, "detail_wavelength_m": 180},
+		"river_valley": {"name": "River valley", "features": {"ditches": {"count": [1, 3]}}, "land": {"relief_scale": 0.9, "wavelength_m": 720, "octaves": 4, "gain": 0.4, "detail_m": 2.2, "detail_wavelength_m": 180},
 			"water": {"_note": "Queue item 1.1 (cg_brief): a real river edge to edge in its own valley (deep: swim or take a bridge), streams into it, ponds. Numbers Proposed (ZoneWater).", "rivers": {"count": 1, "width_m": [22, 30], "depth_m": 2.1, "bank_h_m": 1.5, "bank_w_m": 7, "valley_m": 3.0, "valley_w_m": 130, "meander_m": 170, "meander_wavelength_m": 560, "grade": 0.0015, "drop_max_m": 6, "flow_ms": 0.8, "reeds": 0.3},
 				"streams": {"count": [1, 2], "width_m": [4.5, 6.5], "depth_m": 0.45, "bank_h_m": 0.6, "bank_w_m": 4, "valley_m": 1.2, "valley_w_m": 24, "length_m": [350, 900], "flow_ms": 0.5, "reeds": 0.45},
 				"ponds": {"count": [1, 2], "radius_m": [14, 26], "depth_m": 1.4, "reeds": 0.6}, "crossing_gap_m": 450, "bridges": {"concrete": 0.6, "truss": 0.4}, "culvert_share": 0.65, "footbridge_share": 0.5},
 			"palette": {"grass": "56693a", "dry": "6f7448", "earth": "735f45", "rock": "6a665c"}, "scatter": {"conifer_share": 0.25, "rocks_per_km2": 40, "large_rock_share": 0.12, "scrub_per_km2": 300, "trees_per_km2": 14, "woods_per_km2": 1.8, "copses_per_km2": 5, "hedgerows_per_km2": 5, "road_trees": 0.5, "wadi_groves_per_km2": 3, "props_per_km2": 2.2, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.6, "tufts_per_km2": 60000, "pebbles_per_km2": 2500, "rock_clusters_per_km2": 18, "colours": {"rock": ["75716a", "68645c"], "scrub": ["4f6236", "62693c"], "crown": ["3f5c2c", "4d662e"], "trunk": "4c3b2a"}}},
-		"badlands": {"name": "Badlands", "land": {"relief_scale": 1.1, "wavelength_m": 380, "octaves": 5, "gain": 0.46, "ridge": 0.6, "detail_m": 3.6, "detail_wavelength_m": 120, "folds_m": 0.8}, "wadi": {"count": 3, "width_m": 30, "depth_m": 7.0, "meander_m": 90, "berm_m": 1.5}, "palette": {"grass": "8a7a52", "dry": "a08658", "earth": "9a6a44", "rock": "8a6f58"}, "ground": {"rock_above_m": 14.0}, "scatter": {"conifer_share": 0.0, "rocks_per_km2": 110, "large_rock_share": 0.25, "scrub_per_km2": 260, "trees_per_km2": 2, "woods_per_km2": 0, "copses_per_km2": 1.0, "wadi_groves_per_km2": 2, "road_trees": 0.05, "props_per_km2": 1.8, "props_near_m": 55, "ruins_per_km2": 1.6, "valuables_per_km2": 1.6, "tufts_per_km2": 18000, "pebbles_per_km2": 5000, "rock_clusters_per_km2": 55, "colours": {"rock": ["94765c", "7c624c"], "scrub": ["7a7040", "8a7a48"], "crown": ["5a6430", "66702f"], "trunk": "5c4632"}}},
+		"badlands": {"name": "Badlands", "features": {"gullies": {"count": [3, 5], "depth_m": [2.2, 3.0]}, "cliffs": {"count": [1, 3], "height_m": [6, 12]}}, "land": {"relief_scale": 1.1, "wavelength_m": 380, "octaves": 5, "gain": 0.46, "ridge": 0.6, "detail_m": 3.6, "detail_wavelength_m": 120, "folds_m": 0.8}, "wadi": {"count": 3, "width_m": 30, "depth_m": 7.0, "meander_m": 90, "berm_m": 1.5}, "palette": {"grass": "8a7a52", "dry": "a08658", "earth": "9a6a44", "rock": "8a6f58"}, "ground": {"rock_above_m": 14.0}, "scatter": {"conifer_share": 0.0, "rocks_per_km2": 110, "large_rock_share": 0.25, "scrub_per_km2": 260, "trees_per_km2": 2, "woods_per_km2": 0, "copses_per_km2": 1.0, "wadi_groves_per_km2": 2, "road_trees": 0.05, "props_per_km2": 1.8, "props_near_m": 55, "ruins_per_km2": 1.6, "valuables_per_km2": 1.6, "tufts_per_km2": 18000, "pebbles_per_km2": 5000, "rock_clusters_per_km2": 55, "colours": {"rock": ["94765c", "7c624c"], "scrub": ["7a7040", "8a7a48"], "crown": ["5a6430", "66702f"], "trunk": "5c4632"}}},
 		"plain": {
 			"name": "Plain (the test zone)",
 			"land": {"relief_scale": 1.0, "wavelength_m": 650, "octaves": 4, "gain": 0.42},
@@ -27,6 +30,7 @@
 		},
 		"temperate": {
 			"name": "Temperate hills",
+			"features": {"_note": "Queue item 1.3: gullies and ditches for cover (ZoneFeatures). Proposed.", "gullies": {"count": [1, 3]}, "ditches": {"count": [0, 2]}},
 			"land": {"relief_scale": 1.0, "wavelength_m": 650, "octaves": 4, "gain": 0.42},
 			"water": {"_note": "Queue item 1.1: a stream through the hills, farm ponds. Proposed.", "streams": {"count": [0, 1]}, "ponds": {"count": [0, 2]}},
 			"palette": {"grass": "5f6a3c", "dry": "7d7748", "earth": "7f6d4f", "rock": "6f6a60"},
@@ -46,6 +50,7 @@
 		},
 		"coastal_lowland": {
 			"name": "Coastal lowland",
+			"features": {"ditches": {"count": [1, 2]}},
 			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0, "detail_m": 2.4, "detail_wavelength_m": 190},
 			"water": {"_note": "Queue item 1.1: a pond or two behind the coast. Proposed.", "ponds": {"count": [0, 2]}},
 			"sea": {"width_m": 190, "depth_m": 7.0, "level": 0.0, "coast_wobble_m": 70},
@@ -82,6 +87,7 @@
 		},
 		"desert_wadi": {
 			"name": "Desert wadi",
+			"features": {"gullies": {"count": [2, 4]}},
 			"land": {"relief_scale": 0.85, "wavelength_m": 560, "octaves": 4, "gain": 0.44, "ridge": 0.2, "detail_m": 3.2, "detail_wavelength_m": 150},
 			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140, "berm_m": 2.0},
 			"palette": {"grass": "a08f5a", "dry": "b3a068", "earth": "94785a", "rock": "7d6f5c", "sand": "c9b27a", "apron": "a08f5a"},
@@ -91,6 +97,7 @@
 		},
 		"rocky_ridge": {
 			"name": "Rocky ridge",
+			"features": {"_note": "Queue item 1.3: rock faces (escarpments) and gullies. Proposed.", "cliffs": {"count": [2, 3], "height_m": [8, 16]}, "gullies": {"count": [1, 2]}},
 			"land": {"relief_scale": 1.3, "wavelength_m": 480, "octaves": 4, "gain": 0.42, "ridge": 0.5, "folds_m": 0.8},
 			"palette": {"grass": "5d6540", "dry": "7a7650", "earth": "7a6a52", "rock": "6f6a62", "apron": "5d6540"},
 			"ground": {"rock_above_m": 20.0},
@@ -101,6 +108,7 @@
 		},
 		"scrubland": {
 			"name": "Scrubland",
+			"features": {"gullies": {"count": [2, 4]}},
 			"land": {"relief_scale": 0.7, "wavelength_m": 600, "octaves": 4, "gain": 0.42, "ridge": 0.1},
 			"water": {"_note": "Queue item 1.1: a stock pond. Proposed.", "ponds": {"count": [0, 1], "radius_m": [10, 16], "depth_m": 1.1}},
 			"palette": {"grass": "76753f", "dry": "8f8650", "earth": "857049", "rock": "746d5e"},
@@ -108,6 +116,49 @@
 				"props_per_km2": 2.0, "props_near_m": 55, "ruins_per_km2": 1.0, "valuables_per_km2": 1.3,
 				"tufts_per_km2": 32000, "pebbles_per_km2": 3000, "rock_clusters_per_km2": 35,
 				"colours": {"rock": ["80796a", "6e6858"], "scrub": ["6a7040", "7f7a40"], "crown": ["56662f", "62702f"], "trunk": "5a4632"}}
+		},
+		"marsh": {
+			"name": "Marsh",
+			"_note": "Queue item 1.3 (cg_brief): a fen. Soft ground in patches that slows a man on foot (features marsh: share of the ground, slow: the pace lost on the softest), reed beds that hide, dark wet mud; standing water as many shallow ponds and a pool or two (ZoneWater), a sluggish stream, drainage ditches. Numbers Proposed.",
+			"land": {"relief_scale": 0.22, "wavelength_m": 760, "octaves": 3, "gain": 0.4, "flatten": 1.4, "offset_m": -1.0, "detail_m": 0.8, "detail_wavelength_m": 140, "folds_m": 0.9},
+			"water": {"ponds": {"count": [16, 24], "radius_m": [9, 24], "depth_m": 0.55, "bank_h_m": 0.2, "bank_w_m": 3, "valley_w_m": 8, "reeds": 1.2},
+				"lakes": {"count": [1, 2], "radius_m": [40, 70], "depth_m": 1.1, "bank_h_m": 0.3, "bank_w_m": 4, "valley_w_m": 14, "reeds": 0.9},
+				"streams": {"count": [1, 2], "width_m": [4, 6], "depth_m": 0.6, "bank_h_m": 0.3, "bank_w_m": 3, "valley_m": 0.5, "valley_w_m": 14, "length_m": [400, 900], "flow_ms": 0.2, "reeds": 0.8}},
+			"features": {"marsh": {"share": 0.6, "slow": 0.35, "wavelength_m": 130, "reeds": 0.35, "reed_h_m": 1.7, "colour": "4b5132"}, "ditches": {"count": [2, 4]}},
+			"palette": {"grass": "5d6638", "dry": "70703f", "earth": "4f4a34", "rock": "686458", "apron": "5d6638", "road": "6a5a40"},
+			"ground": {"damp": 0.6},
+			"sky": {"fog_density": 0.0006, "fog_colour": "b9c0b6", "sky_horizon": "c3c9bf"},
+			"scatter": {"conifer_share": 0.1, "rocks_per_km2": 8, "large_rock_share": 0.05, "scrub_per_km2": 700, "scrub_size": [0.8, 1.8], "trees_per_km2": 10, "woods_per_km2": 0.6, "copses_per_km2": 5, "copse_trees": [12, 40], "road_trees": 0.2,
+				"props_per_km2": 1.4, "props_near_m": 50, "ruins_per_km2": 0.8, "valuables_per_km2": 1.2, "tufts_per_km2": 70000, "pebbles_per_km2": 400, "rock_clusters_per_km2": 4,
+				"colours": {"rock": ["6e6a5e", "5e5a50"], "scrub": ["556236", "63683a", "4f5a32"], "tuft": ["6a7438", "7a7a40", "5e6a34"], "crown": ["3e5530", "4a5c30"], "trunk": "3e3428"}}
+		},
+		"snow_mountain": {
+			"name": "Snowy mountain pass",
+			"_note": "Queue item 1.3 (cg_brief): high ground under snow (features snow: over a snow line that moves with the season, line_m; off the steep rock; slows a man on foot except on the roads and tracks), frozen streams and tarns (water frozen: ice you walk on), rock faces, gullies, tyre tracks in the snow (ground tracks). No snow physics beyond slowing. Numbers Proposed.",
+			"land": {"relief_scale": 2.1, "wavelength_m": 620, "octaves": 5, "gain": 0.46, "ridge": 0.55, "detail_m": 3.0, "detail_wavelength_m": 140, "folds_m": 1.2},
+			"water": {"streams": {"count": [2, 3], "width_m": [3.5, 5.0], "depth_m": 0.1, "bank_h_m": 0.5, "bank_w_m": 3.5, "valley_m": 1.0, "valley_w_m": 22, "length_m": [350, 800], "flow_ms": 0.0, "reeds": 0.0, "frozen": true},
+				"ponds": {"count": [1, 3], "radius_m": [12, 26], "depth_m": 0.12, "bank_h_m": 0.4, "reeds": 0.0, "frozen": true}},
+			"features": {"snow": {"cover": 1.0, "line_m": {"winter": -1000, "spring": -6, "summer": 6, "autumn": -2}, "slow": 0.25, "colour": "e4e8ec", "drifts": 0.25},
+				"cliffs": {"count": [2, 4], "height_m": [10, 18]}, "gullies": {"count": [2, 3]}},
+			"palette": {"grass": "6d6a52", "dry": "c9ced4", "earth": "8e9298", "rock": "5f5d5a", "apron": "dfe3e8", "road": "7a7266"},
+			"ground": {"tracks": 0.6},
+			"sky": {"sun_energy": 1.0, "exposure": 0.82, "fog_density": 0.00055, "fog_colour": "c7cfd8", "sky_top": "5878a6", "sky_horizon": "cfd7e0", "fill_energy": 0.35},
+			"backdrop": {"colour": "d6dbe1", "near_deg": [0.8, 2.6], "far_deg": [1.8, 5.5]},
+			"scatter": {"conifer_share": 0.95, "rocks_per_km2": 120, "large_rock_share": 0.25, "scrub_per_km2": 90, "scrub_size": [0.5, 1.2], "trees_per_km2": 10, "woods_per_km2": 1.4, "copses_per_km2": 4, "road_trees": 0.2,
+				"props_per_km2": 1.2, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.2, "tufts_per_km2": 6000, "pebbles_per_km2": 1500, "rock_clusters_per_km2": 90,
+				"colours": {"rock": ["6a6864", "58565a"], "scrub": ["6a6650", "7a7258"], "tuft": ["9a9070", "8a8466"], "crown": ["2f4a36", "3a5440", "c8d2d2"], "trunk": "3e3428"}}
+		},
+		"farmland": {
+			"name": "Farmland",
+			"_note": "Queue item 1.3 (cg_brief): a patchwork of fields on a turned grid round the farms (features fields: crops weighted, colour and height by season, ZoneFeatures.CROPS; orchards, hedges along some field edges; never on a pad, so a landmark farm keeps its yard), irrigation channels along some field edges (water channels: shallow water you wade), farm ponds, a drainage ditch or two. Numbers Proposed.",
+			"land": {"relief_scale": 0.5, "wavelength_m": 820, "octaves": 3, "gain": 0.4, "flatten": 1.2, "detail_m": 1.6, "detail_wavelength_m": 200, "folds_m": 1.4},
+			"water": {"streams": {"count": [0, 1]}, "ponds": {"count": [1, 2], "radius_m": [10, 18], "depth_m": 1.2}, "channels": {"width_m": [2.6, 3.2], "depth_m": 0.5}},
+			"features": {"fields": {"share": 0.8, "size_m": [70, 150], "orchard_share": 0.12, "orchards_max": 6, "crops": {"wheat": 3, "maize": 2, "vegetables": 1, "fallow": 1}, "hedges": 0.3, "channels": 0.12},
+				"ditches": {"count": [1, 3]}},
+			"palette": {"grass": "667340", "dry": "8a854c", "earth": "7a6446", "rock": "6f6a60", "road": "7a6a4c"},
+			"scatter": {"conifer_share": 0.1, "rocks_per_km2": 15, "large_rock_share": 0.1, "scrub_per_km2": 160, "trees_per_km2": 6, "woods_per_km2": 0.5, "copses_per_km2": 2, "road_trees": 0.5,
+				"props_per_km2": 2.2, "props_near_m": 55, "ruins_per_km2": 0.8, "valuables_per_km2": 1.4, "tufts_per_km2": 40000, "pebbles_per_km2": 1500, "rock_clusters_per_km2": 8,
+				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["55633a", "6d6f40"], "crown": ["46602f", "52672f"], "trunk": "4f3e2c"}}
 		}
 	}
 }

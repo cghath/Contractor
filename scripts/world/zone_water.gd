@@ -68,6 +68,14 @@ const RIVER_DEFAULTS := {"count": 1, "width_m": [22.0, 30.0], "depth_m": 2.1, "b
 const STREAM_DEFAULTS := {"count": [1, 1], "width_m": [4.5, 6.5], "depth_m": 0.45, "bank_h_m": 0.6, "bank_w_m": 4.0, "valley_m": 1.2,
 	"valley_w_m": 24.0, "length_m": [350.0, 900.0], "grade": 0.006, "drop_max_m": 14.0, "flow_ms": 0.5, "reeds": 0.45}
 const LAKE_DEFAULTS := {"count": [0, 1], "radius_m": [45.0, 80.0], "depth_m": 3.5, "bank_h_m": 0.8, "bank_w_m": 6.0, "valley_w_m": 40.0, "reeds": 0.35}
+## Farmland's irrigation channels (the preset's water "channels"; their lines are ZoneFeatures'
+## field edges, queue item 1.3): shallow, narrow, slow, in a low cut. Proposed.
+const CHANNEL_DEFAULTS := {"width_m": [2.2, 2.8], "depth_m": 0.3, "bank_h_m": 0.35, "bank_w_m": 2.5, "valley_m": 0.55, "valley_w_m": 6.0,
+	"grade": 0.0005, "drop_max_m": 4.0, "flow_ms": 0.25, "reeds": 0.04}
+## Frozen water (a part's "frozen": true, the snow preset; queue item 1.3): ice to walk on, drawn
+## ICE_DROP_M under the surface (the part's depth is a little more: the ice lies on the bed), never
+## waded or swum (it's not in the wet map: surface_at and the navigation see dry ground).
+const ICE_DROP_M := 0.05
 const POND_DEFAULTS := {"count": [1, 2], "radius_m": [12.0, 22.0], "depth_m": 1.4, "bank_h_m": 0.5, "bank_w_m": 4.0, "valley_w_m": 18.0, "reeds": 0.6}
 ## Along a river with no crossing for this far (m), a ford or footbridge is added.
 const CROSSING_GAP_M := 450.0
@@ -105,6 +113,9 @@ var crossings: Array = []
 var bridges: ZoneBridges
 ## Grid vertex index -> Vector3(surface, body, sample) where there is water over it.
 var _wet := {}
+## The same for frozen water (_ice), and the frozen bodies' indices.
+var _ice := {}
+var _frozen := {}
 var _mask := PackedByteArray()  # 1 where a body's water lies (later bodies only cut deeper there)
 var _shore := PackedByteArray()  # 0..255: how much the ground is a wet bank (ZoneTerrain colours)
 var _keep := PackedFloat32Array()  # the pad keep weight on a KEEP_STEP_M grid
@@ -168,6 +179,7 @@ func _generate(def: Dictionary) -> void:
 			started = Time.get_ticks_usec()
 			var lake := _make_lake(s, part == "ponds", roads)
 			if not lake.is_empty():
+				_freeze_next(s, lake)
 				bodies.append(lake)
 				_carve_lake(bodies.size() - 1)
 			_lap("lakes", started)
@@ -179,11 +191,19 @@ func _generate(def: Dictionary) -> void:
 			_lap("stream_line", started)
 			if stream.is_empty():
 				continue
+			_freeze_next(s, stream)
 			bodies.append(stream)
 			_plan_crossings(bodies.size() - 1, roads)
 			started = Time.get_ticks_usec()
 			_carve_line(bodies.size() - 1)
 			_lap("stream_carve", started)
+	if spec.has("channels") and terrain.features:
+		# Farmland's irrigation channels along its field edges (ZoneFeatures, queue item 1.3).
+		var s: Dictionary = CHANNEL_DEFAULTS.merged(spec.channels, true)
+		started = Time.get_ticks_usec()
+		for pts: PackedVector2Array in terrain.features.channel_lines():
+			add_line("channel", pts, s)
+		_lap("channels", started)
 	for c: Dictionary in crossings:
 		if String(c.kind) == ZoneBridges.CULVERT:
 			_embank(c)
@@ -193,6 +213,32 @@ func _generate(def: Dictionary) -> void:
 	add_child(bridges)
 	bridges.setup(self)
 	_lap("bridges", started)
+
+
+## The body about to be appended (`body`, of a part with spec `s`) is frozen if the part says so.
+func _freeze_next(s: Dictionary, body: Dictionary) -> void:
+	if bool(s.get("frozen", false)):
+		body["frozen"] = true
+		_frozen[bodies.size()] = true
+
+
+## A watercourse laid out by another script (ZoneFeatures: farmland's irrigation channels, kind
+## "channel"): `pts` a polyline about STEP_M a step inside the zone, its surface filled (_fill_line)
+## and carved like a stream's with spec `s`, its road crossings culverts or fords. Called while the
+## water is carved (_generate), before the culverts' embankments and the bridges. Its body index,
+## -1 if it's too short or would run perched over lower ground.
+func add_line(kind: String, pts: PackedVector2Array, s: Dictionary) -> int:
+	if pts.size() < 4:
+		return -1
+	var body := {"kind": kind, "pts": pts, "lo": 0, "hi": pts.size() - 1}
+	_fill_line(body, s, _range(s.width_m))
+	if float(body.perched) > PERCHED_MAX:
+		return -1
+	_freeze_next(s, body)
+	bodies.append(body)
+	_plan_crossings(bodies.size() - 1, _roads)
+	_carve_line(bodies.size() - 1)
+	return bodies.size() - 1
 
 
 func _lap(part: String, since: int) -> void:
@@ -523,9 +569,10 @@ func _water_body_at(p: Vector2) -> int:
 	var i := roundi((p.x + _half) / ZoneTerrain.CELL_M)
 	var j := roundi((p.y + _half) / ZoneTerrain.CELL_M)
 	var idx := clampi(i, 0, terrain.points - 1) + clampi(j, 0, terrain.points - 1) * terrain.points
-	if _wet.has(idx):
-		var v: Vector3 = _wet[idx]
-		if v.x - terrain.plane_height(p.x, p.y) > 0.2:
+	var found: Variant = _wet.get(idx, _ice.get(idx))  # (a stream runs into a frozen pond too)
+	if found != null:
+		var v: Vector3 = found
+		if not _wet.has(idx) or v.x - terrain.plane_height(p.x, p.y) > 0.2:  # (ice lies on its bed: any of it)
 			return int(v.y)
 	return -1
 
@@ -541,7 +588,8 @@ func _surface_of(body_i: int, p: Vector2) -> float:
 	var i := roundi((p.x + _half) / ZoneTerrain.CELL_M)
 	var j := roundi((p.y + _half) / ZoneTerrain.CELL_M)
 	var idx := clampi(i, 0, terrain.points - 1) + clampi(j, 0, terrain.points - 1) * terrain.points
-	return float((_wet[idx] as Vector3).x) if _wet.has(idx) else -INF
+	var found: Variant = _wet.get(idx, _ice.get(idx))
+	return float((found as Vector3).x) if found != null else -INF
 
 
 # --- Lakes and ponds ------------------------------------------------------------------------
@@ -778,9 +826,10 @@ func _apply(heights: PackedFloat32Array, bed: PackedByteArray, idx: int, x: floa
 		t = h + (t - h) * keep
 	heights[idx] = minf(h, t) if _mask[idx] != 0 else t
 	if d < half + bank_w * STRIP_BANK_SHARE:
-		var old: Variant = _wet.get(idx)
+		var into := _ice if _frozen.has(body_i) else _wet  # frozen water: ice, not water to wade
+		var old: Variant = into.get(idx)
 		if old == null or (old as Vector3).x < w:
-			_wet[idx] = Vector3(w, body_i, u)
+			into[idx] = Vector3(w, body_i, u)
 		_mask[idx] = 1
 	if d < inner + 3.0:
 		var a := clampf((d - half * 0.8) / (inner + 3.0 - half * 0.8), 0.0, 1.0)
@@ -1051,6 +1100,8 @@ func checksum() -> int:
 	var parts: Array = [LAYOUT_VERSION]
 	for b: Dictionary in bodies:
 		parts.append([b.kind, b.get("pts", b.get("centre")), b.get("w", b.get("level"))])
+		if b.get("frozen", false):
+			parts.append("ice")
 	for c: Dictionary in crossings:
 		parts.append([c.kind, c.pos])
 	return hash(str(parts))
@@ -1071,6 +1122,10 @@ func build_visuals() -> void:
 	_built_visuals = true
 	var material := ShaderMaterial.new()
 	material.shader = SHADER
+	var ice := StandardMaterial3D.new()  # frozen water (queue item 1.3): a pale, glossy sheet
+	ice.albedo_color = Color("c9dbe4")
+	ice.roughness = 0.12
+	ice.metallic_specular = 0.7
 	for bi in bodies.size():
 		var b: Dictionary = bodies[bi]
 		var mesh := _lake_mesh(b) if String(b.kind) == "lake" else _line_mesh(b)
@@ -1079,7 +1134,9 @@ func build_visuals() -> void:
 		var node := MeshInstance3D.new()
 		node.name = "Surface_%d" % bi
 		node.mesh = mesh
-		node.material_override = material
+		node.material_override = ice if b.get("frozen", false) else material
+		if b.get("frozen", false):
+			node.position.y = -ICE_DROP_M
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
 	var reeds := _reeds()

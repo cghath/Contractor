@@ -126,6 +126,8 @@ var _chunk_shapes := {}  # Vector2i chunk -> its HeightMapShape3D (GroundCuts bl
 var cuts: GroundCuts
 ## The rivers, streams, lakes and their bridges (ZoneWater: the preset's "water"), or null.
 var water: ZoneWater
+## Gullies, cliffs, marsh, snow and fields (ZoneFeatures: the preset's "features"), or null.
+var features: ZoneFeatures
 
 
 ## Builds the heights from the zone definition (ZoneDef): seed, size, relief, terrain preset
@@ -283,11 +285,18 @@ func generate(def: Dictionary, flat: Array) -> void:
 			at_sea[ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1])))] = ZoneModules.pad_sea(String(m.type))
 	for rect: Rect2 in flat:
 		_flatten(rect, float(at_sea.get(rect, NAN)))
+	if features:
+		features.free()
+	features = ZoneFeatures.carve(self, def)  # gullies, cliffs, the marsh, snow and farmland planned (queue item 1.3)
+	if features:
+		add_child(features)
 	if water:
 		water.free()
 	water = ZoneWater.carve(self, def)  # rivers cut their valleys (queue item 1.1)
 	if water:
 		add_child(water)
+	if features:
+		features.finish()  # the gullies and cliffs carved, off the water
 	min_height = INF
 	max_height = -INF
 	for h in heights:
@@ -515,7 +524,8 @@ func max_slope_deg() -> float:
 ## A hash of the heights (and the water: ZoneScatter's cache keys on it): two peers that
 ## generated the same zone have the same.
 func checksum() -> int:
-	return hash(heights) if water == null else hash([hash(heights), water.checksum()])
+	var sum := hash(heights) if water == null else hash([hash(heights), water.checksum()])
+	return sum if features == null else hash([sum, features.checksum()])  # (its fields and crops too)
 
 
 ## The ground's triangles inside `area` (x, z in metres), world space, for navigation.
@@ -665,6 +675,8 @@ func build_visuals() -> void:
 		add_child(_water())
 	if water:
 		water.build_visuals()
+	if features:
+		features.build_visuals()
 	set_process(true)
 
 
@@ -677,6 +689,7 @@ func ground_material() -> ShaderMaterial:
 	m.set_shader_parameter(&"rock_colour", c_rock)
 	m.set_shader_parameter(&"earth_colour", c_earth)
 	m.set_shader_parameter(&"seed_offset", float(seed_value % 97) * 3.1)  # small: the noise keeps its float precision
+	m.set_shader_parameter(&"snow_strength", features.snow_strength() if features else 0.0)  # (ZoneFeatures' snow)
 	m.set_shader_parameter(&"damp_strength", damp)
 	m.set_shader_parameter(&"crust_strength", crust)
 	m.set_shader_parameter(&"track_strength", tracks)
@@ -815,6 +828,8 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 		# The beach: a band along the measured shoreline (which the coast wobble shapes).
 		var beach := 1.0 - smoothstep(14.0, 50.0, shore_distance(p.x, p.y) + float(absi(hash(Vector2i(i / 2, j / 2))) % 100) * 0.08)
 		colour = colour.lerp(c_sand, beach * (1.0 - steep * 0.5))
+	if features:
+		colour = features.tint(i, j, p, colour, n)  # fields, marsh, snow, gullies (ZoneFeatures)
 	if water:
 		# A river's or lake's bank: wet mud, gravel in patches (ZoneWater.shore_weight).
 		var wet := water.shore_weight(i, j)

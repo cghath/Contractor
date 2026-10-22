@@ -159,3 +159,49 @@ example): three related fixes, layout version 8.
   taken one from respawning, selling one feeds `Prices`, and carrying intel out already trips `IntelReveal`.
 - Both `ruins_per_km2` and `valuables_per_km2` are capped sparse (`CAP_PROPS`, `CAP_VALUABLES` 40) and set on every
   preset except `plain` (the empty test zone, left alone).
+
+**Terrain features and the marsh, snow and farmland presets** (queue item 1.3, `ZoneFeatures` in
+`scripts/world/zone_features.gd`, `Season`): a preset's `features` are planned once the pads are flat and carved
+into the heights after the water (kept off its water and banks: a stream cuts a notch through a cliff), from the seed
+and the season only (every peer builds the same; the season is in the def,
+`Season.of_day` of the campaign day, 30 days each from spring, put there by the host when it switches to a zone; a def
+without one is summer). Every part is optional, its keys default in `ZoneFeatures`' `*_DEFAULTS` (all Proposed):
+- `gullies`, `ditches`: `count` [min, max], `depth_m`, `half_m` (the sides reach this far from the middle), `floor_m`
+  (the flat floor's half width), `length_m`, `meander`. Seeded lines leaning downhill, kept `LINE_PAD_GAP_M` (30 m) off
+  pads and apart from each other and the cliffs, faded out at roads, the edge and their ends. Gullies 2-2.8 m deep hide
+  a prone man (and mostly a crouched one) from the flat round them; ditches 1.2-1.5 m a prone one. They're the
+  heightmap, so the AI's rays (spotting, `SquadAI.find_cover`'s cover and folds) see them as cover.
+- `cliffs`: `count`, `height_m`, `length_m`, `plateau_m` (the ledge), `back_m` (the ground eases back down over this),
+  `talus_per_m` (fallen rocks at the foot, ZoneScatter rocks). An escarpment whose face crosses one 4 m cell (60-79
+  degrees: no walking, driving or navigation up it; the shader draws it as layered rock), its high side where the ground
+  already rises, tapering out over 45 m at each end, kept 60 m off pads, a ramp where a road crosses it.
+- `marsh`: `share` (of the ground soft), `slow` (the pace lost on the softest: 0.35), `wavelength_m`, `reeds` (reed
+  beds over the soft ground), `reed_h_m`, `colour` (the mud). Slows a man on foot (`Wading.ground_mult`, the water's
+  movement hook), not on roads or pads; reed beds hide (`cover_least`, added in `ZoneScatter.foliage_least`).
+- `snow`: `cover`, `line_m` (the snow line per season: winter covers everything), `slow` (0.25), `colour`, `drifts`
+  (bare patches where the wind takes it). Off steep rock; the ground shader's `snow_strength` turns grass clumps back to
+  snow. The roads, tracks and pads are packed (no slowing). Water parts with `"frozen": true` are ice on their bed:
+  walked on, not waded (`ZoneWater._ice`).
+- `fields`: `share` (of the ground farmed), `size_m`, `lane_m` (the verge between fields), `orchard_share` and
+  `orchards_max`, `crops` (weights of wheat, maize, vegetables, fallow: their colour, height and cover by season in
+  `ZoneFeatures.CROPS`), `hedges` (share of field sides with a hedge: bushes and a tree every sixth), `channels` (share
+  of the grid's column edges with irrigation channels: the water's `"channels"` part carves them, `ZoneWater.add_line`),
+  `channel_m`. A turned grid with each column's rows staggered, never within 6 m of a pad (a landmark farm keeps its
+  yard), off water and slopes over 16 degrees. ZoneScatter keeps its own rocks, trees and ground cover off the fields
+  (`keeps_clear`) and lays the orchards, hedges and talus through `ZoneFeatures.lay_out`. Crops stand near the camera
+  as blocks in rows (maize with lanes); ripe wheat hides a prone man, maize a standing one.
+
+| preset | features | water | campaign zone |
+| --- | --- | --- | --- |
+| marsh | soft ground (60%), reed beds, ditches 2-4 | 16-24 shallow ponds, 1-2 pools, 1-2 sluggish streams | Blackwater Fen (coast) |
+| snow_mountain | snow (line: winter all, spring -6 m, summer 6 m, autumn -2 m), cliffs 2-4 (10-18 m), gullies 2-3 | 2-3 frozen streams, 1-3 frozen ponds | Whitecap Pass (inland) |
+| farmland | fields (80%, 70-150 m), orchards (12%, at most 6), hedges, ditches 1-3 | irrigation channels (12% of the column edges), 1-2 ponds, a stream sometimes | Harrow Fields (inland) |
+| rocky_ridge | cliffs 2-3 (8-16 m), gullies 1-2 | - | Red Mesa, Black Ridge hills |
+| highland_moor, badlands | cliffs 1-2 / 1-3 (6-12 m), gullies 1-3 / 3-5 | as before | |
+| temperate, scrubland, desert_wadi | gullies 1-3 / 2-4 / 2-4 (temperate: ditches 0-2) | as before | |
+| river_valley, coastal_lowland | ditches 1-3 / 1-2 | as before | |
+
+"procedural" mixes take the new presets too, and their `features` part by part (the nearer preset's part where both
+have one); frozen water only where the mix has snow. Name hints: marsh, swamp, fen, bog -> marsh; snow, winter, glacier
+-> snow_mountain; farmland, fields -> farmland. Checked by `tests/terrain_test.gd` (the `terrain` suite); pictures of
+each preset, headless, by `tests/terrain_shots.tscn` (to %TEMP%\contractor_world_shots).

@@ -12,12 +12,15 @@ static var _mixed := {}  # "mix#<seed>" -> its blended preset
 ## Procedural terrains (Captain, 2026-10-17: "maybe extra procedural terrains too"): "mix#<seed>"
 ## blends two presets of MIX_FROM, picked by the seed, at MIX_T [min, max] of the way from the
 ## first to the second: numbers and colours in "land", "palette", "ground" and "scatter" lerp,
-## a key only one has comes from it; "sea", "wadi" and "water" come whole from the nearer of the two. A
-## zone def with "terrain": "procedural" gets "mix#<its seed>" (choose).
+## a key only one has comes from it; "sea", "wadi" and "water" come whole from the nearer of the two;
+## "features" (gullies, cliffs, marsh, snow, fields: ZoneFeatures) part by part, the nearer's part
+## where both have one, else whichever has it (queue item 1.3: so a mix can be a snowy ridge with
+## gullies, or farmland in a marsh). A zone def with "terrain": "procedural" gets "mix#<its seed>"
+## (choose). MIX_FROM takes the marsh, snow and farmland presets too (1.3).
 const MIX := "mix#"
 const PROCEDURAL := "procedural"
 const MIX_FROM: Array[String] = ["temperate", "coastal_lowland", "amphibious_coast", "salt_flats", "desert_wadi", "rocky_ridge",
-	"scrubland", "highland_moor", "river_valley", "badlands"]
+	"scrubland", "highland_moor", "river_valley", "badlands", "marsh", "snow_mountain", "farmland"]
 const MIX_T := Vector2(0.25, 0.75)
 
 
@@ -68,6 +71,13 @@ static func _mix(id: String) -> Dictionary:
 	for key: String in ["sea", "wadi", "water"]:
 		if near.has(key):
 			out[key] = (near[key] as Dictionary).duplicate(true)
+	var far: Dictionary = b if t < 0.5 else a
+	if near.has("features") or far.has("features"):
+		out["features"] = (far.get("features", {}) as Dictionary).merged(near.get("features", {}), true).duplicate(true)
+	if out.has("water") and not (out.get("features", {}) as Dictionary).has("snow"):
+		for part: Variant in (out.water as Dictionary).values():
+			if part is Dictionary:
+				(part as Dictionary).erase("frozen")  # no ice without the snow
 	_mixed[id] = out
 	return out
 

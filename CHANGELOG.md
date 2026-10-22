@@ -11,6 +11,43 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terrain features and presets: gullies, cliffs, marsh, snow and farmland (cghath's brief, queue item 1.3)
+
+#### Added
+- **Gullies and ditches that give cover.** Dry gullies (2-3 m deep, a flat floor and steep
+  sides) and shallower ditches wander across the temperate hills, scrub, desert wadi, moors,
+  badlands, ridges, river valleys and coast. Lie down in one and you're out of sight of the flat
+  around it; crouch in a gully and you mostly are. The AI sees them the same way: it can't spot
+  a man down in one, and its cover search sends a man to one when he's caught in the open
+  (prone at the lip, firing over it, or down in it).
+- **Cliffs and rock faces.** Escarpments 6-18 m high on the ridges, moors, badlands and the new
+  snowy mountains: a sheer rock face with a ledge on top and the ground easing back down behind
+  it, fallen rock at its foot, tapering out at both ends so the way round is short. Nobody walks
+  or drives up the face and the AI's paths go round it. Roads that cross one climb it on a ramp.
+- **Marsh.** A new fen preset: soft ground in patches that slows you to about two thirds of your
+  pace, reed beds that hide a crouched man, dark wet mud, dozens of shallow ponds and pools, a
+  sluggish stream and drainage ditches. Blackwater Fen (coast) is one.
+- **Snowy mountains.** A new preset: big hills under snow, a snow line that climbs in summer and
+  comes down to cover everything in winter, bare rock on the steep faces, cliffs and gullies,
+  tyre tracks in the snow and a cold, hazy sky. Deep snow slows you to about three quarters of
+  your pace, but not on the roads or cleared ground. Its streams and ponds are frozen: ice you
+  walk on. Whitecap Pass (inland) is one.
+- **Farmland.** A new preset: a patchwork of fields round the farms (never over a farm's yard
+  or any site) with wheat, maize, vegetables and fallow ground that change with the season
+  (green in spring, ripe gold and tall maize in summer, stubble in autumn, bare in winter),
+  orchards in rows that blossom in spring, hedges along some field edges, and irrigation
+  channels you wade through. Ripe wheat hides a man lying in it; maize hides a man standing.
+  Harrow Fields (inland) is one.
+- **Seasons.** The campaign now has a season, from the campaign day: 30 days each, starting in
+  spring. Zones you go to are built for the season you go in.
+- **Mixed terrain.** A "procedural" zone can now mix in the marsh, snow and farmland presets, and
+  takes their features (a snowy ridge with gullies, farmland in a marsh).
+- A `terrain` test suite, and `tests/terrain_shots.tscn` for headless pictures of each preset.
+
+#### Changed
+- The rocky ridge, highland moor and badlands presets have cliffs, and most presets have gullies
+  or ditches, so those zones' ground is new.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added

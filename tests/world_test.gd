@@ -1342,8 +1342,9 @@ func _test_presets() -> void:
 	for item in sh.items:
 		for road: Array in hot.roads:
 			off_roads = off_roads and Geometry2D.get_closest_point_to_segment(Vector2(item.pos.x, item.pos.z), Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(Vector2(item.pos.x, item.pos.z)) >= ZoneScatter.ROAD_KEEP_M - 0.01
-	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 30000 and th.max_slope_deg() < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18)
-		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees" % [sh.total(), th.max_slope_deg()])
+	var steepest := _slope_off_cliffs(th)  # (its cliffs are rock faces on purpose: queue item 1.3, terrain_test)
+	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 30000 and steepest < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18)
+		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees away from its %d cliffs" % [sh.total(), steepest, th.features.cliffs.size() if th.features else 0])
 	ss.free()
 	sb2.free()
 	sh.free()
@@ -1351,6 +1352,25 @@ func _test_presets() -> void:
 	tb.free()
 	th.free()
 	_test_woods()
+
+
+## The steepest slope in `t`'s grid (degrees) away from its cliffs (ZoneFeatures: within 12 m of
+## one's footprint), ZoneTerrain.max_slope_deg's measure.
+static func _slope_off_cliffs(t: ZoneTerrain) -> float:
+	var worst := 0.0
+	var limit := tan(deg_to_rad(42.0)) * ZoneTerrain.CELL_M  # only steep cells ask where the cliffs are
+	for j in t.points - 1:
+		for i in t.points - 1:
+			var h := t._h(i, j)
+			var rise := maxf(absf(t._h(i + 1, j) - h), absf(t._h(i, j + 1) - h))
+			if rise <= worst:
+				continue
+			if rise > limit and t.features:
+				var p := Vector2(t.v_x(i), t.v_x(j))
+				if t.features.cliffs.any(func(c: Dictionary) -> bool: return t.features._cliff_reach(c, p) < 12.0):
+					continue
+			worst = rise
+	return rad_to_deg(atan(worst / ZoneTerrain.CELL_M))
 
 
 ## Round 4 (Captain, 2026-10-14: "we need copses and groves and such. the terrain is too empty.

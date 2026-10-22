@@ -379,6 +379,8 @@ func _lay_out() -> void:
 			continue
 		_add({"kind": Kind.VALUABLE, "yaw": rng.randf() * TAU, "solid": false, "size": Vector3.ONE * 0.6,
 			"pos": Vector3(x, h, z), "colour": Color.WHITE})
+	if terrain.features:
+		terrain.features.lay_out(self)  # talus under the cliffs, orchards, hedges (queue item 1.3)
 	# Trees in clusters, with their edge scrub and thickets, then the few lone trees.
 	_lay_out_trees(area_km2)
 	want = mini(int(round(float(_spec.get("trees_per_km2", 0.0)) * area_km2)), _cap_trees - counts[Kind.TREE])
@@ -952,6 +954,8 @@ func _colours(hexes: Array) -> Array[Color]:
 func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
 	if _terrain and _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true  # a river, lake or bridge (ZoneWater)
+	if _terrain and _terrain.features and _terrain.features.keeps_clear(x, z):
+		return true  # a field (ZoneFeatures: its orchards and hedges go in through its lay_out)
 	var p := Vector2(x, z)
 	for r in keep:
 		if r.has_point(p):
@@ -1057,6 +1061,10 @@ func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3) -> float:
 					continue  # as in foliage_between
 				a += _through(item, kind, from, to_a)
 				b += _through(item, kind, from, to_b)
+	if _terrain and _terrain.features:
+		var standing := _terrain.features.cover_least(from, to_a, to_b)  # crops and reed beds (queue item 1.3)
+		a += standing.x
+		b += standing.y
 	return minf(a, b)
 
 
@@ -1632,6 +1640,8 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 func _ground_blocked(x: float, z: float) -> bool:
 	if _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true  # a river, lake or bridge (ZoneWater)
+	if _terrain.features and _terrain.features.keeps_clear(x, z):
+		return true  # a field (ZoneFeatures)
 	var p := Vector2(x, z)
 	for r in _keep:
 		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):

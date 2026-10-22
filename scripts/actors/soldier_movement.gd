@@ -271,6 +271,8 @@ var _capsule: CapsuleShape3D
 ## Owner-side: how deep the water is over the feet (m) and whether he's swimming (Wading).
 var wet := 0.0
 var swimming := false
+## The share of his pace the ground under him leaves (marsh, snow: Wading.ground_mult).
+var ground_mult := 1.0
 var _shape_key := -99.0
 
 
@@ -423,6 +425,7 @@ func _read_water() -> void:
 	var surface := Wading.surface(body)
 	var feet := body.global_position.y
 	wet = maxf(surface - feet, 0.0) if surface > -INF else 0.0
+	ground_mult = Wading.ground_mult(body)  # soft marsh ground, snow (ZoneFeatures, queue item 1.3)
 	swimming = false
 	if wet > 0.0:
 		var t := Wading.terrain_of(body)
@@ -1004,7 +1007,7 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 		speed = CRAWL_SPEED
 	elif body.vitals.is_dying():
 		speed = minf(speed, DYING_CRAWL_SPEED)  # dragging himself along
-	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory) * Wading.speed_mult(wet)  # a heavy exo walks at its own pace; water slows him
+	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory) * Wading.speed_mult(wet) * ground_mult  # a heavy exo walks at its own pace; water, mud and snow slow him
 
 
 ## 0 (light) to 1 (a full load, a bulky item or a body on your shoulder counts too).

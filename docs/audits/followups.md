@@ -394,6 +394,52 @@ walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or le
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
 
+## F-185: vehicles aren't slowed by marsh mud or snow
+
+Location: scripts/vehicles/* (Claude's). Found by cghath's agent on `world/terrain` (2026-10-22,
+queue item 1.3). Men on foot are (Wading.ground_mult, ZoneFeatures.slow_at); a truck drives
+through the fen and the snow at full speed.
+
+Suggested: a vehicle reads `terrain.features.soft_at(x, z)` and `snow_at(x, z)` (both 0..1, 0 on
+roads and pads) under its wheels or tracks and loses grip or top speed by them (wheels more than
+tracks). Public, no changes to ZoneFeatures needed.
+
+## F-186: the map doesn't show the fields, the marsh, the snow or ice
+
+Location: [map_render.gd](../../scripts/ui/map_render.gd) (`zone_inputs`, `compose_zone`). Found
+on `world/terrain` (2026-10-22, 1.3). The map paints height, contours, trees, roads and open water
+(ZoneWater.surface_grid); frozen streams and ponds aren't in that grid, and the fields, soft ground
+and snow are only in the ground's vertex colours.
+
+Suggested: pass a coarse grid of ZoneFeatures' layers (field_at's crop, soft_at, snow_at) and the
+ice (ZoneWater._ice) into zone_inputs and tint the map by them (a field pattern, marsh hatching,
+white over the snow line, pale-blue ice). A test in tests/map_test.gd on Harrow Fields.
+
+## F-187: farmland's fields and the props' farms don't know each other
+
+Location: [zone_features.gd](../../scripts/world/zone_features.gd) and `origin/world/props`'s
+zone_props.gd (PR #22, not merged into world/terrain). Found on `world/terrain` (2026-10-22, 1.3).
+The fields, orchards, hedges and irrigation channels are ZoneFeatures' own; once the props branch
+merges, its farmsteads (_farm: pens, field fences, hay, irrigation props) are laid by its own field
+grid, and the farmland, marsh and snow presets fall back to its default prop style.
+
+Suggested: after both merge, add "farmland" (more farms), "marsh" and "snow_mountain" to
+data/props.json "preset_styles", and let ZoneProps._farm put its field fences and gates along
+ZoneFeatures' field edges (field_cols, field_rows, row_shift, _from_grid) and keep its props off
+the fields (ZoneFeatures.keeps_clear) and the channels.
+
+## F-188: crops and reed beds are plain blocks; their cover counts near the ends of a line only
+
+Location: [zone_features.gd](../../scripts/world/zone_features.gd) (`_crop_cell`, `_reed_cell`,
+`cover_least`). Found on `world/terrain` (2026-10-22, 1.3). Crops are drawn as voxel-style blocks
+in rows within 170 m (reeds 260 m), with no wind sway and no trampling; past that the ground's
+colour carries the field. For spotting, crops and reeds count only within 25 m of either end of a
+line (a man in a field, or a watcher in one), not a field crossed in the middle of a long line.
+
+Suggested: an art pass on the crop blocks (stalks, ears, maize tassels) and a cheap sway in a
+shader; walk the whole line through fields with a field-crossing test on the grid if a playtest
+finds men seen through a field between them.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -414,3 +460,18 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | The control tower is two storeys (the generator's limit) with a console room on top and a mast | storeys over two come with city zones (queue item 1.5) | a third-storey glazed cab now
 - 2026-10-21 | Landmarks are garrisoned like other sites: a post inside each front door, one up high, one in a back room, the site's own (2-9 posts) | the brief says garrisonable like today's types | civilian-only landmarks
 - 2026-10-21 | Upper-floor doorways slide along their wall off the stairwell (or another wall takes the doorway): some existing two-storey buildings' doorways move | a doorway over the stairwell cut its room off | leave existing buildings as they were
+
+- 2026-10-22 | A season from the campaign day: 30 days each, starting in spring (Season); the host puts it in a zone's def when it switches to it (BaseHub.server_switch_level), a def without one (the menu's test zones) is summer | there was none (DayNight keeps the hour, the economy the day); a campaign month a season lets a long campaign see the year turn | a real 91-day calendar, or the season from the weather
+- 2026-10-22 | Gullies 2.0-2.8 m deep (a 2.6 m floor, sides out to 8-10 m), ditches 1.2-1.5 m; 260-520 m and 140-320 m long, kept 30 m off pads, fading out at roads, the zone's edge and their ends | a man prone in a gully is hidden from 91% of the lines from the flat round it (35-140 m), crouched 73%, prone in a ditch 78% (terrain run) | narrower, deeper cuts (the 4 m height grid can't draw them)
+- 2026-10-22 | Cliffs are escarpments in the heightmap: a face across one 4 m cell (60-79 degrees), a 10-24 m ledge, the ground easing back over 110-170 m behind, the ends tapering over 45 m, 6-18 m high by preset, 60 m off pads, a ramp where a road crosses one; talus rocks at the foot | collision, the navigation mesh's slope limit and the ground shader's rock come with it, nothing new to keep in sync | voxel or mesh cliff faces (overhangs: later)
+- 2026-10-22 | Existing presets get features: gullies on temperate, scrubland, desert_wadi, highland_moor, badlands, rocky_ridge; ditches on temperate, river_valley, coastal_lowland; cliffs on rocky_ridge, highland_moor, badlands (none on plain, salt_flats, forest_experimental, amphibious_coast) | the brief's gullies and cliffs are for the world, not only the new presets | new presets only
+- 2026-10-22 | Soft marsh ground keeps 65% of a man's pace at its softest, deep snow 75%; none on roads, tracks and pads (packed); on foot only (vehicles: F-185) | slower than a walk but still a game; the movement hook is the water's | a pace by snow depth, or mud that also tires (stamina)
+- 2026-10-22 | Frozen streams and ponds (the snow preset) are ice lying on their bed (0.1 m of channel): walked on, never waded or swum, on the AI's navigation mesh, pale and glossy; no thin ice | it reads as ice and needs no ice collision of its own | real ice over deep water with breakable slabs
+- 2026-10-22 | Crops and reeds hide by foliage metres a metre: ripe wheat 0.9 m tall 0.08 (about 15 m of it hides a man), maize 2.2 m 0.25, reed beds 1.7 m 0.3; counted within 25 m of either end of a line (F-188) | a man prone in summer wheat is hidden at 80 m, standing he isn't; standing in maize he is | walk every line through every field
+- 2026-10-22 | Crops by season (ZoneFeatures.CROPS): wheat green 0.35 m in spring, gold 0.9 m in summer, stubble in autumn, bare in winter; maize ploughed in spring, 2.2 m green in summer, 2 m dry in autumn, stubble in winter; vegetables low; orchards blossom in spring and stand bare in winter | the brief: crops by season | one fixed look
+- 2026-10-22 | "procedural" mixes take marsh, snow_mountain and farmland too, and their "features" part by part (the nearer preset's part wins); frozen water only where the mix has snow. Adding to MIX_FROM changes which presets the existing procedural zones (Hollow Downs, Ashfield, Marrow Shore) mix | the brief: procedural can mix them | a second list that leaves the old mixes as they were
+- 2026-10-22 | The new campaign zones are in data/contracts.json "zones" (where the campaign's zones live; data/zones.json holds the hand-made test zones): Blackwater Fen (marsh, coast, Saltline), Whitecap Pass (snow_mountain, inland, Highland Front), Harrow Fields (farmland, inland, Kestrel, a farm landmark by its "fields" tag); the region map's grid grows to take them | a contract can go to each | turn existing zones into the new presets
+- 2026-10-22 | Farmland built without merging world/props (PR #22): fields, orchards, hedges and irrigation channels are ZoneFeatures' own; the props' farm fences and hay follow when both merge (F-187) | keeps the two PRs independent | merge world/props into world/terrain first
+- 2026-10-22 | Irrigation channels are ZoneWater line bodies ("channels"): 2.6-3.2 m wide, a 0.5 m cut, along an eighth of the field grid's column edges where both sides are fields and the ground keeps within 3 m of level, cut into 72-340 m lengths | they build on the water (wading, culverts, scatter keep-out, bank tint) | ditches with a separate water mesh
+- 2026-10-22 | The world suite's "steepest ground" check on the ridge hot zone now skips 12 m round its cliffs (they're steep on purpose) | it guards the ridge noise, not the cliffs | drop the check
+- 2026-10-22 | Cliffs and gullies are carved after the water and kept off its water and banks: a stream crossing a cliff's line runs through a notch | carved first, a frozen stream held at its level through a cliff cut a 34 m canyon that took an extraction pad with it (the world suite, snow_mountain) | keep the cliffs off where the streams will run (unknown before the water)
