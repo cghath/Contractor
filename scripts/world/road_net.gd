@@ -981,13 +981,6 @@ func _profiles() -> void:
 				sum += targets[r][k]
 				n += 1
 		junctions[j].y = sum / n if n > 0 else _t.height_at(junctions[j].pos.x, junctions[j].pos.y)
-	# A junction by a pad is level with the pad (the pad's ground can't be graded to it).
-	for jn: Dictionary in junctions:
-		for pad: Array in _t.pads:
-			if ZoneTerrain._distance_to_rect(jn.pos, pad[0]) < _flat_of(jn) + float(jn.r) + 4.0:
-				jn.y = float(pad[1])
-				jn["fixed"] = true
-				break
 	# Junctions near each other on a road: their heights eased toward each other until the stretch
 	# between their flats is a ramp of at most JUNCTION_RAMP (a few rounds: one junction can sit on
 	# several roads).
@@ -1027,7 +1020,7 @@ func _profiles() -> void:
 			for m in range(1, list.size()):
 				var a: Dictionary = list[m - 1][1]
 				var b: Dictionary = list[m][1]
-				var gap := maxf(s[int(list[m][0])] - s[int(list[m - 1][0])] - _flat_of(a) - _flat_of(b), SAMPLE_M)
+				var gap := maxf(s[int(list[m][0])] - s[int(list[m - 1][0])] - _flat_of(a) - _flat_of(b), 0.0)
 				var diff := float(a.y) - float(b.y)
 				var excess := absf(diff) - gap * JUNCTION_RAMP
 				if excess > 0.0:
@@ -1056,12 +1049,13 @@ func _profiles() -> void:
 		var drawn := _beside(i, target, weight, beside)
 		target = drawn[0]
 		weight = drawn[1]
-		var pins: Array = (pad_pins[i] as Array).duplicate()  # [sample, height, flat m]
+		var pins: Array = []  # [sample, height, flat m]: the junctions', then the pads' (which win)
 		for j in junctions.size():
 			if i in (junctions[j].roads as Array):
 				var k := sample_of(i, j)
 				if k >= 0:
 					pins.append([k, float(junctions[j].y), _flat_of(junctions[j])])
+		pins.append_array(pad_pins[i])
 		var pinned := PackedByteArray()
 		pinned.resize(n)
 		var pin_h := PackedFloat32Array()
@@ -1345,8 +1339,11 @@ func _grade() -> void:
 		for k in pts.size():
 			if wet[k] == 1:
 				continue
-			var side := (pts[mini(k + 1, pts.size() - 1)] - pts[maxi(k - 1, 0)]).normalized().orthogonal()
-			var top := ys[k] - SINK_M * 0.5
+			var k0 := maxi(k - 1, 0)
+			var k1 := mini(k + 1, pts.size() - 1)
+			var along := (pts[k1] - pts[k0]).normalized()
+			var side := along.orthogonal()
+			var grade := (ys[k1] - ys[k0]) / maxf(pts[k0].distance_to(pts[k1]), 0.01)
 			for o: float in [-hw, 0.0, hw]:
 				var q := pts[k] + side * o
 				var ci := floori((q.x + _half) / ZoneTerrain.CELL_M)
@@ -1358,8 +1355,10 @@ func _grade() -> void:
 						if i < 0 or j < 0 or i >= n or j >= n:
 							continue
 						var idx := i + j * n
-						if heights[idx] > top and _pad_under(Vector2(i * ZoneTerrain.CELL_M - _half, j * ZoneTerrain.CELL_M - _half)) < 0:
-							heights[idx] = ys[k] - SINK_M
+						var v := Vector2(i * ZoneTerrain.CELL_M - _half, j * ZoneTerrain.CELL_M - _half)
+						var y_v := ys[k] + grade * (v - pts[k]).dot(along)  # (the road's height level with the point)
+						if heights[idx] > y_v - SINK_M * 0.5 and _pad_under(v) < 0:
+							heights[idx] = y_v - SINK_M
 	t.heights = heights
 	graded_vertices = _touched.size()
 	_gd = PackedFloat32Array()

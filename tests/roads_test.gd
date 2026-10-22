@@ -21,9 +21,13 @@ const BUDGET_LAY_MS := 400.0
 ## this (RoadNet.SINK_M and the 4 m grid's chords on curves and crests).
 const GAP_MIN_M := -0.15
 const GAP_MAX_M := 0.45
-## The most a road is cut or filled anywhere (m): RoadNet.CUT_MAX_M on its own, a little more where
-## it's held level with a pad, a junction or a road beside it.
-const CUT_WORST_M := 5.0
+## How far a road is cut or filled (m): CUT_MOST_SHARE of it within CUT_MOST_M of the natural ground
+## (RoadNet.CUT_MAX_M on its own, a little more where it's held level with a pad, a junction or a
+## road beside it), none of it more than CUT_WORST_M (a track climbing to a junction by a site on a
+## hill).
+const CUT_MOST_M := 4.0
+const CUT_MOST_SHARE := 0.98
+const CUT_WORST_M := 10.0
 ## Laying the scatter out round the curved roads takes at most this many times as long as round the
 ## straight links (Proposed).
 const SCATTER_SLOWER := 1.5
@@ -137,6 +141,7 @@ func _test_hot_zone() -> void:
 	var worst_gap := 0.0
 	var worst_under := 0.0
 	var worst_cut := 0.0
+	var cut_ok := 0
 	var samples := 0
 	var where := ""
 	for r: Dictionary in net.roads:
@@ -149,6 +154,8 @@ func _test_hot_zone() -> void:
 				continue
 			samples += 1
 			worst_cut = maxf(worst_cut, absf(ys[k] - raw[k]))
+			if absf(ys[k] - raw[k]) <= CUT_MOST_M:
+				cut_ok += 1
 			var n := ZoneRoads._side(pts, k)
 			for f: float in [0.0, 0.5]:
 				var c := pts[k].lerp(pts[k + 1], f)
@@ -156,7 +163,7 @@ func _test_hot_zone() -> void:
 				for o: float in [-hw * 0.95, 0.0, hw * 0.95]:
 					var q := c + n * o
 					var gap := y - t.height_at(q.x, q.y)
-					if gap < worst_under:
+					if gap < worst_under or (gap > worst_gap and gap > GAP_MAX_M):
 						where = "road %d (%s) sample %d of %d at %s, %.0f m from a junction, %.0f m from another road" % [int(r.id), r.kind, k,
 							pts.size(), q, _junction_near(net, q), _other_road(net, int(r.id), q)]
 					worst_gap = maxf(worst_gap, gap)
@@ -167,7 +174,9 @@ func _test_hot_zone() -> void:
 	print("  timings: %s" % net.timings)
 	if worst_under < GAP_MIN_M or worst_gap > GAP_MAX_M:
 		_debug_gap(net, t, natural, where)
-	check(worst_cut <= CUT_WORST_M, "never cut or filled more than %.1f m off the natural ground (worst %.2f m)" % [CUT_WORST_M, worst_cut])
+	check(float(cut_ok) / samples >= CUT_MOST_SHARE and worst_cut <= CUT_WORST_M,
+		"%.1f%% of the road within %.1f m of the natural ground, none more than %.1f m off it (worst %.2f m: a track climbing to a junction on a site's embankment)" % [
+		100.0 * cut_ok / samples, CUT_MOST_M, CUT_WORST_M, worst_cut])
 	var changed := 0
 	for i in natural.size():
 		if not is_equal_approx(natural[i], t.heights[i]):
@@ -274,6 +283,8 @@ func _test_hot_zone() -> void:
 
 
 func _debug_gap(net: RoadNet, t: ZoneTerrain, natural: PackedFloat32Array, where: String) -> void:
+	if not "at (" in where:
+		return
 	var at := where.substr(where.find("at (") + 4)
 	at = at.substr(0, at.find(")"))
 	var xy := at.split(",")
