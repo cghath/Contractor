@@ -6,7 +6,7 @@ the reset is **Sunday Oct 25, 10:00 CDT**). If you're picking this up, start at 
 "Open work". The decisions are already made: docs/cg_brief.md "Decisions already made",
 docs/combined_arms.md section 10, and Captain's asks below. Make the call and keep going.
 
-Last updated: 2026-10-22 02:20 CDT (claude/ai-driving 494fb4f3 plus this doc).
+Last updated: 2026-10-22 02:40 CDT (claude/ai-driving 494fb4f3 plus this doc).
 
 ## State
 
@@ -75,10 +75,15 @@ operations, vehicle art), then the rest.
 Captain, who's ex-infantry, sent 23 Instagram reels (mostly thee.foxhole: Battle Drill 1 React to
 Contact, Support by Fire, fire teams, and more) as "play by play the same stuff I was taught". He
 wants it applied to **all AI in the game** (friendly, allied, enemy, every faction).
-- **Notes:** docs/tactics/reel_notes.md. A drill-by-drill breakdown per reel (formations, roles,
-  sectors, bounding and overwatch, signals, timing, entries, casualties, diagrams), then a
-  synthesis by echelon. A Claude agent is still filling it in (3 of 23 reels as of 02:16 CDT);
-  this copy gets refreshed as it goes.
+- **Notes:** docs/tactics/reel_notes.md. **10 of the 23 reels watched** (all thee.foxhole): Battle
+  Drill 1 React to Contact, Support by Fire (shift and lift), the squad assault, Battle Drill 3
+  Break Contact, near and far ambush, bunker and trench assault (SOSRA), the Russian dispersed
+  attack on villages, the Soviet security zone, and fire-team and squad structure (US 9-man,
+  USMC 15-man). Each reel has drill steps with frame citations, then a synthesis by echelon.
+  **13 reels are unavailable:** they redirect to a removed or private profile
+  (warfighterforged, "Profile isn't available"): Dekh8L_yzJq, DewwYbqx-P5, DeungvNyISp,
+  DermYSIKGvs, Dehjb6qq046, DedgtmAquBm, Declmu-ySvY, DeaT_tmhFlP, DeVczxvxaZ3, DeTvbnPRZcQ,
+  DeR59s_qkm5, DePKLGpFIhU, DeKGeH0xECz. Watch them if Captain gets them to you another way.
 - **Frames:** contact sheets (8 frames each, 1 s steps, 0.25 s on diagrams) are kept on Captain's
   PC under B:\AI Dev Folder\tactics\frames\. They're not in this repo, because it's public and
   the frames are someone else's video. To regenerate any frame: open the reel
