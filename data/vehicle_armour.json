@@ -1,0 +1,147 @@
+{
+	"_units": "Combined arms A1 (docs/combined_arms.md 2.4): armour per vehicle model, merged into the model's spec by VehicleSpecs.spec (docs/combined_arms.md 9.1: per-topic files keep parallel phases apart). A model with plates resolves rounds that have a data/shells.json or data/warheads.json row through ArmourModel; the rest (rifle rounds, charges, mines, fire support) keep VehicleDamage and the zone's armour class, as does a hit inside no plate. plates: boxes in the vehicle frame (front is -z), [x0, y0, z0, x1, y1, z1]; a hit takes the first plate in the list whose box holds it, whose normal faces the round and agrees with the voxel face it met (ArmourModel.plate_at). normal: the facing its figures apply along (published composite figures are line-of-sight values at their design facing, so they get that facing, not the voxel staircase's slope); \"any\" = head-on from every side (wheels, engine bays, small turrets). ke_mm / ce_mm: RHA-equivalent at the normal against kinetic / chemical-energy rounds; phys_mm: physical thickness (overmatch, HE punch-through, fuze sensitivity); material: rha, hhs, alu, composite, composite_du, glass, skirt, tyre (the x-ray and hit sounds); composite: obliquity capped at 2x instead of 4x; spaced_mm: an air gap behind the plate (a shaped charge loses min(15%, spaced_mm / 3000)). tiles: reactive armour and slat groups (light_era, heavy_era, tandem_era, slat), count tiles along the box's longest side, each used up when it fires; coverage = chance a round meets a tile, not a gap; package = fitted only with that package (any of a list); removed_by = taken off when one of those is fitted. belly: blast share under the hull and the seats (phase A2); spall_liner (phase A2); packages: what each upgrade does to the armour, its weight and who sells it (phase A8 buys and fits them; prices go in data/prices.json). Every number is Proposed, from public estimates (docs/combined_arms.md 2.4.2), rounded and tuned for balance.",
+	"models": {
+		"abrams": {
+			"plates": [
+				{"id": "mantlet", "box": [-0.45, 1.7, -1.9, 0.45, 2.3, -1.2], "normal": [0, 0, -1], "ke_mm": 500, "ce_mm": 700, "phys_mm": 250, "material": "composite", "composite": true},
+				{"id": "turret_front", "box": [-1.9, 1.45, -1.9, 1.9, 2.5, -0.9], "normal": [0, 0.15, -1], "ke_mm": 900, "ce_mm": 1300, "phys_mm": 750, "material": "composite_du", "composite": true},
+				{"id": "hatch_commander", "box": [0.2, 2.2, -1.2, 1.4, 3.1, 1.0], "normal": [0, 1, 0], "ke_mm": 30, "ce_mm": 30, "phys_mm": 30, "material": "rha"},
+				{"id": "hatch_loader", "box": [-1.4, 2.2, -0.6, -0.2, 3.1, 1.0], "normal": [0, 1, 0], "ke_mm": 30, "ce_mm": 30, "phys_mm": 30, "material": "rha"},
+				{"id": "turret_roof", "box": [-1.9, 2.1, -1.9, 1.9, 3.1, 4.05], "normal": [0, 1, 0], "ke_mm": 40, "ce_mm": 60, "phys_mm": 40, "material": "rha"},
+				{"id": "turret_side_fwd_r", "box": [1.2, 1.45, -1.9, 1.95, 2.5, 0.6], "normal": [1, 0, 0], "ke_mm": 300, "ce_mm": 600, "phys_mm": 120, "material": "composite", "composite": true},
+				{"id": "turret_side_fwd_l", "box": [-1.95, 1.45, -1.9, -1.2, 2.5, 0.6], "normal": [-1, 0, 0], "ke_mm": 300, "ce_mm": 600, "phys_mm": 120, "material": "composite", "composite": true},
+				{"id": "turret_bustle_r", "box": [1.2, 1.45, 0.6, 1.95, 2.5, 4.05], "normal": [1, 0, 0], "ke_mm": 60, "ce_mm": 100, "phys_mm": 30, "material": "rha"},
+				{"id": "turret_bustle_l", "box": [-1.95, 1.45, 0.6, -1.2, 2.5, 4.05], "normal": [-1, 0, 0], "ke_mm": 60, "ce_mm": 100, "phys_mm": 30, "material": "rha"},
+				{"id": "turret_rear", "box": [-1.9, 1.45, 3.3, 1.9, 2.5, 4.05], "normal": [0, 0, 1], "ke_mm": 60, "ce_mm": 100, "phys_mm": 30, "material": "rha"},
+				{"id": "hull_front_lower", "box": [-1.95, 0.35, -3.1, 1.95, 0.95, -2.3], "normal": [0, -0.25, -1], "ke_mm": 500, "ce_mm": 700, "phys_mm": 400, "material": "composite", "composite": true},
+				{"id": "hull_front", "box": [-1.95, 0.9, -3.1, 1.95, 1.55, -1.6], "normal": [0, 0.2, -1], "ke_mm": 560, "ce_mm": 800, "phys_mm": 600, "material": "composite", "composite": true},
+				{"id": "engine_deck", "box": [-1.95, 1.2, 3.7, 1.95, 1.7, 4.95], "normal": [0, 1, 0], "ke_mm": 30, "ce_mm": 30, "phys_mm": 30, "material": "rha"},
+				{"id": "hull_rear", "box": [-1.95, 0.3, 4.3, 1.95, 1.6, 5.0], "normal": [0, 0, 1], "ke_mm": 30, "ce_mm": 40, "phys_mm": 30, "material": "rha"},
+				{"id": "hull_roof", "box": [-1.95, 1.0, -2.5, 1.95, 1.7, 3.7], "normal": [0, 1, 0], "ke_mm": 40, "ce_mm": 60, "phys_mm": 40, "material": "rha"},
+				{"id": "side_skirt_fwd_r", "box": [1.5, 0.0, -3.2, 2.05, 1.6, -0.4], "normal": [1, 0, 0], "ke_mm": 160, "ce_mm": 450, "phys_mm": 70, "material": "composite", "spaced_mm": 450},
+				{"id": "side_skirt_fwd_l", "box": [-2.05, 0.0, -3.2, -1.5, 1.6, -0.4], "normal": [-1, 0, 0], "ke_mm": 160, "ce_mm": 450, "phys_mm": 70, "material": "composite", "spaced_mm": 450},
+				{"id": "side_rear_r", "box": [1.5, 0.0, -0.4, 2.05, 1.6, 5.0], "normal": [1, 0, 0], "ke_mm": 85, "ce_mm": 160, "phys_mm": 50, "material": "hhs", "spaced_mm": 450},
+				{"id": "side_rear_l", "box": [-2.05, 0.0, -0.4, -1.5, 1.6, 5.0], "normal": [-1, 0, 0], "ke_mm": 85, "ce_mm": 160, "phys_mm": 50, "material": "hhs", "spaced_mm": 450},
+				{"id": "belly", "box": [-1.95, 0.0, -3.2, 1.95, 0.5, 5.0], "normal": [0, -1, 0], "ke_mm": 30, "ce_mm": 30, "phys_mm": 30, "material": "rha"}
+			],
+			"tiles": [
+				{"group": "arat1_hull_r", "kind": "light_era", "box": [1.6, 0.45, -2.6, 2.2, 1.55, 3.8], "count": 16, "coverage": 0.85, "normal": [1, 0, 0], "package": "tusk1", "removed_by": ["tusk2"]},
+				{"group": "arat1_hull_l", "kind": "light_era", "box": [-2.2, 0.45, -2.6, -1.6, 1.55, 3.8], "count": 16, "coverage": 0.85, "normal": [-1, 0, 0], "package": "tusk1", "removed_by": ["tusk2"]},
+				{"group": "arat2_hull_r", "kind": "tandem_era", "box": [1.6, 0.45, -2.6, 2.2, 1.55, 3.8], "count": 16, "coverage": 0.85, "normal": [1, 0, 0], "package": "tusk2"},
+				{"group": "arat2_hull_l", "kind": "tandem_era", "box": [-2.2, 0.45, -2.6, -1.6, 1.55, 3.8], "count": 16, "coverage": 0.85, "normal": [-1, 0, 0], "package": "tusk2"},
+				{"group": "arat2_turret_r", "kind": "tandem_era", "box": [1.55, 1.5, -1.0, 2.0, 2.4, 1.6], "count": 8, "coverage": 0.85, "normal": [1, 0, 0], "package": "tusk2"},
+				{"group": "arat2_turret_l", "kind": "tandem_era", "box": [-2.0, 1.5, -1.0, -1.55, 2.4, 1.6], "count": 8, "coverage": 0.85, "normal": [-1, 0, 0], "package": "tusk2"},
+				{"group": "slat_rear", "kind": "slat", "box": [-1.95, 0.4, 4.5, 1.95, 1.6, 5.2], "count": 4, "coverage": 0.8, "normal": [0, 0, 1], "package": ["tusk1", "tusk2"]}
+			],
+			"belly": {"blast": 0.45, "seats": "standard"},
+			"spall_liner": true,
+			"packages": {"tusk1": {"name": "Abrams TUSK I", "weight_t": 2.4, "needs": "us_forces:trusted", "belly": {"blast": 0.25}}, "tusk2": {"name": "Abrams TUSK II", "weight_t": 4.0, "needs": "us_forces:allied", "includes": ["tusk1"], "belly": {"blast": 0.25}}, "trophy": {"name": "Trophy APS", "weight_t": 2.5, "needs": "us_forces:allied", "after": ["tusk1"]}}
+		},
+		"bradley": {
+			"plates": [
+				{"id": "turret_front", "box": [-1.2, 1.95, -1.65, 1.2, 2.95, -0.6], "normal": [0, 0.1, -1], "ke_mm": 50, "ce_mm": 90, "phys_mm": 30, "material": "hhs"},
+				{"id": "turret_roof", "box": [-1.2, 2.5, -1.65, 1.2, 3.0, 1.75], "normal": [0, 1, 0], "ke_mm": 20, "ce_mm": 30, "phys_mm": 20, "material": "hhs"},
+				{"id": "turret_side_r", "box": [0.7, 1.95, -1.65, 1.25, 2.95, 1.75], "normal": [1, 0, 0], "ke_mm": 30, "ce_mm": 60, "phys_mm": 25, "material": "hhs"},
+				{"id": "turret_side_l", "box": [-1.25, 1.95, -1.65, -0.7, 2.95, 1.75], "normal": [-1, 0, 0], "ke_mm": 30, "ce_mm": 60, "phys_mm": 25, "material": "hhs"},
+				{"id": "turret_rear", "box": [-1.2, 1.95, 1.1, 1.2, 2.95, 1.75], "normal": [0, 0, 1], "ke_mm": 25, "ce_mm": 40, "phys_mm": 25, "material": "hhs"},
+				{"id": "hull_front", "box": [-1.9, 0.4, -3.3, 1.9, 2.05, -1.4], "normal": [0, 0.3, -1], "ke_mm": 60, "ce_mm": 110, "phys_mm": 45, "material": "alu"},
+				{"id": "hull_roof", "box": [-1.9, 1.6, -3.3, 1.9, 2.1, 3.45], "normal": [0, 1, 0], "ke_mm": 20, "ce_mm": 30, "phys_mm": 20, "material": "alu"},
+				{"id": "hull_rear", "box": [-1.9, 0.4, 3.0, 1.9, 2.05, 3.45], "normal": [0, 0, 1], "ke_mm": 25, "ce_mm": 40, "phys_mm": 25, "material": "alu"},
+				{"id": "hull_side_r", "box": [1.3, 0.0, -3.3, 1.9, 2.05, 3.45], "normal": [1, 0, 0], "ke_mm": 35, "ce_mm": 70, "phys_mm": 30, "material": "alu"},
+				{"id": "hull_side_l", "box": [-1.9, 0.0, -3.3, -1.3, 2.05, 3.45], "normal": [-1, 0, 0], "ke_mm": 35, "ce_mm": 70, "phys_mm": 30, "material": "alu"},
+				{"id": "belly", "box": [-1.9, 0.0, -3.3, 1.9, 0.55, 3.45], "normal": [0, -1, 0], "ke_mm": 20, "ce_mm": 20, "phys_mm": 20, "material": "alu"}
+			],
+			"tiles": [
+				{"group": "brat1_hull_r", "kind": "light_era", "box": [1.55, 0.55, -3.0, 2.0, 1.95, 3.0], "count": 12, "coverage": 0.85, "normal": [1, 0, 0], "removed_by": ["busk3"]},
+				{"group": "brat1_hull_l", "kind": "light_era", "box": [-2.0, 0.55, -3.0, -1.55, 1.95, 3.0], "count": 12, "coverage": 0.85, "normal": [-1, 0, 0], "removed_by": ["busk3"]},
+				{"group": "brat2_hull_r", "kind": "tandem_era", "box": [1.55, 0.55, -3.0, 2.0, 1.95, 3.0], "count": 12, "coverage": 0.85, "normal": [1, 0, 0], "package": "busk3"},
+				{"group": "brat2_hull_l", "kind": "tandem_era", "box": [-2.0, 0.55, -3.0, -1.55, 1.95, 3.0], "count": 12, "coverage": 0.85, "normal": [-1, 0, 0], "package": "busk3"},
+				{"group": "brat1_turret_r", "kind": "light_era", "box": [0.8, 2.0, -1.5, 1.3, 2.9, 1.0], "count": 4, "coverage": 0.85, "normal": [1, 0, 0], "removed_by": ["busk3"]},
+				{"group": "brat1_turret_l", "kind": "light_era", "box": [-1.3, 2.0, -1.5, -0.8, 2.9, 1.0], "count": 4, "coverage": 0.85, "normal": [-1, 0, 0], "removed_by": ["busk3"]},
+				{"group": "brat2_turret_r", "kind": "tandem_era", "box": [0.8, 2.0, -1.5, 1.3, 2.9, 1.0], "count": 4, "coverage": 0.85, "normal": [1, 0, 0], "package": "busk3"},
+				{"group": "brat2_turret_l", "kind": "tandem_era", "box": [-1.3, 2.0, -1.5, -0.8, 2.9, 1.0], "count": 4, "coverage": 0.85, "normal": [-1, 0, 0], "package": "busk3"},
+				{"group": "brat1_front", "kind": "light_era", "box": [-1.7, 0.8, -3.35, 1.7, 2.05, -1.5], "count": 6, "coverage": 0.85, "normal": [0, 0, -1], "removed_by": ["busk3"]},
+				{"group": "brat2_front", "kind": "tandem_era", "box": [-1.7, 0.8, -3.35, 1.7, 2.05, -1.5], "count": 6, "coverage": 0.85, "normal": [0, 0, -1], "package": "busk3"},
+				{"group": "brat1_turret_front", "kind": "light_era", "box": [-1.1, 2.0, -1.65, 1.1, 2.9, -0.9], "count": 4, "coverage": 0.85, "normal": [0, 0, -1], "removed_by": ["busk3"]},
+				{"group": "brat2_turret_front", "kind": "tandem_era", "box": [-1.1, 2.0, -1.65, 1.1, 2.9, -0.9], "count": 4, "coverage": 0.85, "normal": [0, 0, -1], "package": "busk3"}
+			],
+			"belly": {"blast": 0.45, "seats": "standard"},
+			"spall_liner": true,
+			"packages": {"busk3": {"name": "Bradley BUSK III", "weight_t": 1.8, "needs": "us_forces:trusted", "belly": {"blast": 0.2, "seats": "blast"}}, "m919": {"name": "Bradley M919 ammo", "weight_t": 0.0, "needs": "us_forces:trusted"}}
+		},
+		"aav7": {
+			"plates": [
+				{"id": "ugws", "box": [0.3, 2.55, -2.8, 1.7, 3.5, -0.9], "normal": "any", "ke_mm": 30, "ce_mm": 40, "phys_mm": 25, "material": "hhs"},
+				{"id": "front", "box": [-1.8, 0.4, -4.1, 1.8, 2.75, -2.2], "normal": [0, 0.3, -1], "ke_mm": 45, "ce_mm": 70, "phys_mm": 40, "material": "alu"},
+				{"id": "roof", "box": [-1.8, 2.2, -4.1, 1.8, 2.8, 4.05], "normal": [0, 1, 0], "ke_mm": 15, "ce_mm": 20, "phys_mm": 15, "material": "alu"},
+				{"id": "rear", "box": [-1.8, 0.4, 3.5, 1.8, 2.7, 4.05], "normal": [0, 0, 1], "ke_mm": 25, "ce_mm": 35, "phys_mm": 30, "material": "alu"},
+				{"id": "side_r", "box": [1.0, 0.0, -4.1, 1.8, 2.7, 4.05], "normal": [1, 0, 0], "ke_mm": 35, "ce_mm": 55, "phys_mm": 35, "material": "alu"},
+				{"id": "side_l", "box": [-1.8, 0.0, -4.1, -1.0, 2.7, 4.05], "normal": [-1, 0, 0], "ke_mm": 35, "ce_mm": 55, "phys_mm": 35, "material": "alu"},
+				{"id": "belly", "box": [-1.8, 0.0, -4.1, 1.8, 0.55, 4.05], "normal": [0, -1, 0], "ke_mm": 15, "ce_mm": 15, "phys_mm": 15, "material": "alu"}
+			],
+			"tiles": [
+				{"group": "slat_side_r", "kind": "slat", "box": [1.3, 0.6, -3.6, 2.0, 2.6, 3.9], "count": 8, "coverage": 0.8, "normal": [1, 0, 0], "package": "aav_slat"},
+				{"group": "slat_side_l", "kind": "slat", "box": [-2.0, 0.6, -3.6, -1.3, 2.6, 3.9], "count": 8, "coverage": 0.8, "normal": [-1, 0, 0], "package": "aav_slat"},
+				{"group": "slat_rear", "kind": "slat", "box": [-1.7, 0.6, 3.6, 1.7, 2.6, 4.3], "count": 4, "coverage": 0.8, "normal": [0, 0, 1], "package": "aav_slat"}
+			],
+			"belly": {"blast": 0.5, "seats": "standard"},
+			"spall_liner": false,
+			"packages": {"aav_slat": {"name": "AAV slat kit", "weight_t": 1.2, "needs": ""}, "aav_spall_liner": {"name": "AAV spall liner", "weight_t": 0.4, "needs": "", "spall_liner": true}, "ugws_thermal": {"name": "Thermal sight kit", "weight_t": 0.05, "needs": "us_forces:trusted"}}
+		},
+		"matv": {
+			"plates": [
+				{"id": "wheel_fr", "box": [0.85, 0.0, -2.8, 1.35, 1.25, -1.5], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_fl", "box": [-1.35, 0.0, -2.8, -0.85, 1.25, -1.5], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_rr", "box": [0.85, 0.0, 1.05, 1.35, 1.25, 2.35], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_rl", "box": [-1.35, 0.0, 1.05, -0.85, 1.25, 2.35], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "ogpk", "box": [-1.15, 2.68, -1.05, 1.15, 3.5, 1.25], "normal": "any", "ke_mm": 15, "ce_mm": 15, "phys_mm": 10, "material": "hhs"},
+				{"id": "glass_front", "box": [-1.1, 1.75, -1.35, 1.1, 2.55, -0.55], "normal": [0, 0.35, -1], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "engine_bay", "box": [-1.3, 0.45, -3.3, 1.3, 1.85, -1.15], "normal": "any", "ke_mm": 18, "ce_mm": 18, "phys_mm": 10, "material": "hhs"},
+				{"id": "capsule_front", "box": [-1.3, 0.5, -1.35, 1.3, 2.7, -0.5], "normal": [0, 0.2, -1], "ke_mm": 25, "ce_mm": 30, "phys_mm": 25, "material": "hhs"},
+				{"id": "glass_side_r", "box": [0.75, 1.75, -1.1, 1.35, 2.45, 1.1], "normal": [1, 0, 0], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "glass_side_l", "box": [-1.35, 1.75, -1.1, -0.75, 2.45, 1.1], "normal": [-1, 0, 0], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "roof", "box": [-1.3, 2.0, -1.35, 1.3, 2.75, 1.3], "normal": [0, 1, 0], "ke_mm": 12, "ce_mm": 15, "phys_mm": 8, "material": "hhs"},
+				{"id": "side_r", "box": [0.6, 0.4, -1.35, 1.35, 2.7, 3.15], "normal": [1, 0, 0], "ke_mm": 20, "ce_mm": 25, "phys_mm": 25, "material": "hhs"},
+				{"id": "side_l", "box": [-1.35, 0.4, -1.35, -0.6, 2.7, 3.15], "normal": [-1, 0, 0], "ke_mm": 20, "ce_mm": 25, "phys_mm": 25, "material": "hhs"},
+				{"id": "rear", "box": [-1.3, 0.4, 2.6, 1.3, 2.0, 3.15], "normal": [0, 0, 1], "ke_mm": 18, "ce_mm": 22, "phys_mm": 20, "material": "hhs"},
+				{"id": "cargo_top", "box": [-1.3, 1.0, 1.2, 1.3, 1.8, 3.15], "normal": [0, 1, 0], "ke_mm": 12, "ce_mm": 15, "phys_mm": 8, "material": "hhs"},
+				{"id": "belly", "box": [-1.3, 0.0, -3.3, 1.3, 0.75, 3.15], "normal": [0, -1, 0], "ke_mm": 18, "ce_mm": 18, "phys_mm": 12, "material": "hhs"}
+			],
+			"tiles": [
+				{"group": "slat_side_r", "kind": "slat", "box": [0.9, 0.5, -1.3, 1.6, 2.6, 3.1], "count": 6, "coverage": 0.8, "normal": [1, 0, 0], "package": "matv_slat"},
+				{"group": "slat_side_l", "kind": "slat", "box": [-1.6, 0.5, -1.3, -0.9, 2.6, 3.1], "count": 6, "coverage": 0.8, "normal": [-1, 0, 0], "package": "matv_slat"},
+				{"group": "slat_rear", "kind": "slat", "box": [-1.3, 0.5, 2.8, 1.3, 2.0, 3.5], "count": 3, "coverage": 0.8, "normal": [0, 0, 1], "package": "matv_slat"}
+			],
+			"belly": {"blast": 0.12, "seats": "blast"},
+			"spall_liner": true,
+			"packages": {"matv_slat": {"name": "M-ATV slat kit", "weight_t": 0.6, "needs": ""}, "crows": {"name": "CROWS (M153)", "weight_t": 0.2, "needs": "us_forces:trusted"}, "matv_applique": {"name": "M-ATV applique", "weight_t": 0.6, "needs": "", "plates_add": {"capsule_front": [10, 10], "side_r": [10, 10], "side_l": [10, 10], "glass_front": [10, 10], "glass_side_r": [10, 10], "glass_side_l": [10, 10]}}}
+		},
+		"maxxpro": {
+			"plates": [
+				{"id": "wheel_fr", "box": [0.85, 0.0, -2.75, 1.4, 1.2, -1.55], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_fl", "box": [-1.4, 0.0, -2.75, -0.85, 1.2, -1.55], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_rr", "box": [0.85, 0.0, 1.15, 1.4, 1.2, 2.35], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "wheel_rl", "box": [-1.4, 0.0, 1.15, -0.85, 1.2, 2.35], "normal": "any", "ke_mm": 6, "ce_mm": 6, "phys_mm": 6, "material": "tyre"},
+				{"id": "ogpk", "box": [-1.2, 3.02, -1.5, 1.2, 3.8, 0.9], "normal": "any", "ke_mm": 15, "ce_mm": 15, "phys_mm": 10, "material": "hhs"},
+				{"id": "glass_front", "box": [-1.15, 2.0, -2.0, 1.15, 2.85, -1.4], "normal": [0, 0.35, -1], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "engine_bay", "box": [-1.3, 0.5, -3.4, 1.3, 1.9, -1.85], "normal": "any", "ke_mm": 18, "ce_mm": 18, "phys_mm": 10, "material": "hhs"},
+				{"id": "capsule_front", "box": [-1.3, 0.6, -2.0, 1.3, 3.0, -1.3], "normal": [0, 0.25, -1], "ke_mm": 22, "ce_mm": 28, "phys_mm": 25, "material": "hhs"},
+				{"id": "glass_side_r", "box": [0.8, 1.9, -1.6, 1.35, 2.6, 1.0], "normal": [1, 0, 0], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "glass_side_l", "box": [-1.35, 1.9, -1.6, -0.8, 2.6, 1.0], "normal": [-1, 0, 0], "ke_mm": 22, "ce_mm": 22, "phys_mm": 60, "material": "glass"},
+				{"id": "roof", "box": [-1.3, 2.6, -2.0, 1.3, 3.2, 3.2], "normal": [0, 1, 0], "ke_mm": 12, "ce_mm": 15, "phys_mm": 8, "material": "hhs"},
+				{"id": "side_r", "box": [0.6, 0.4, -2.0, 1.35, 3.1, 3.3], "normal": [1, 0, 0], "ke_mm": 20, "ce_mm": 25, "phys_mm": 25, "material": "hhs"},
+				{"id": "side_l", "box": [-1.35, 0.4, -2.0, -0.6, 3.1, 3.3], "normal": [-1, 0, 0], "ke_mm": 20, "ce_mm": 25, "phys_mm": 25, "material": "hhs"},
+				{"id": "rear", "box": [-1.3, 0.4, 2.7, 1.3, 3.1, 3.35], "normal": [0, 0, 1], "ke_mm": 18, "ce_mm": 22, "phys_mm": 20, "material": "hhs"},
+				{"id": "belly", "box": [-1.3, 0.0, -3.4, 1.3, 0.8, 3.3], "normal": [0, -1, 0], "ke_mm": 18, "ce_mm": 18, "phys_mm": 12, "material": "hhs"}
+			],
+			"tiles": [
+				{"group": "slat_side_r", "kind": "slat", "box": [0.9, 0.5, -1.9, 1.6, 3.0, 3.2], "count": 6, "coverage": 0.8, "normal": [1, 0, 0], "package": "maxxpro_slat"},
+				{"group": "slat_side_l", "kind": "slat", "box": [-1.6, 0.5, -1.9, -0.9, 3.0, 3.2], "count": 6, "coverage": 0.8, "normal": [-1, 0, 0], "package": "maxxpro_slat"},
+				{"group": "slat_rear", "kind": "slat", "box": [-1.3, 0.5, 2.9, 1.3, 3.0, 3.6], "count": 3, "coverage": 0.8, "normal": [0, 0, 1], "package": "maxxpro_slat"}
+			],
+			"belly": {"blast": 0.15, "seats": "blast"},
+			"spall_liner": true,
+			"packages": {"maxxpro_slat": {"name": "MaxxPro slat kit", "weight_t": 0.7, "needs": ""}, "crows": {"name": "CROWS (M153)", "weight_t": 0.2, "needs": "us_forces:trusted"}, "mine_roller": {"name": "MaxxPro mine roller", "weight_t": 1.5, "needs": ""}}
+		}
+	}
+}
