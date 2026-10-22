@@ -55,6 +55,7 @@ const NAV_WATER_M := 0.9
 ## The water's look: shallow and deep colours (water_surface.gdshader).
 const SHADER := preload("res://scripts/world/water_surface.gdshader")
 const REED_SEE_M := 260.0
+const REED_CELL_M := 128.0
 ## Bump when what the water keeps the scatter off changes (keeps_clear, ZoneBridges.covers).
 const LAYOUT_VERSION := 1
 ## The riparian band (m past the banks) where ZoneScatter's "wadi_groves" grow: marked in the
@@ -114,6 +115,8 @@ var _rng := RandomNumberGenerator.new()
 var _built_visuals := false
 var _roads: Array = []  # the def's roads as [Vector2, Vector2]
 var _surface_grid := PackedFloat32Array()
+## How many reed clumps _reeds laid (checks).
+var reed_count := 0
 ## How long each part of the carve took (ms), for checks and the zone's log line.
 var timings := {}
 
@@ -1144,7 +1147,7 @@ func _lake_mesh(b: Dictionary) -> ArrayMesh:
 
 ## Reeds along the banks: clumps of blocky stalks in the shallows and at the water's edge
 ## (each body's "reeds": clumps a metre of bank), seeded by where they stand. Looks only.
-func _reeds() -> MultiMeshInstance3D:
+func _reeds() -> Node3D:
 	var list: Array[Transform3D] = []
 	var colours: Array[Color] = []
 	var rng := RandomNumberGenerator.new()
@@ -1182,26 +1185,45 @@ func _reeds() -> MultiMeshInstance3D:
 			colours.append((palette[rng.randi() % palette.size()] as Color).darkened(rng.randf() * 0.15))
 	if list.is_empty():
 		return null
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = true
-	mm.mesh = reed_mesh()
-	mm.instance_count = list.size()
+	# One MultiMesh a REED_CELL_M square, each drawn out to REED_SEE_M from it (a visibility range
+	# counts from the node, so one for the whole zone would show or hide them all at once).
+	var cells := {}
 	for k in list.size():
-		mm.set_instance_transform(k, list[k])
-		mm.set_instance_color(k, colours[k])
-	var node := MultiMeshInstance3D.new()
-	node.name = "Reeds"
-	node.multimesh = mm
+		var at := list[k].origin
+		var key := Vector2i(floori(at.x / REED_CELL_M), floori(at.z / REED_CELL_M))
+		if not cells.has(key):
+			cells[key] = []
+		(cells[key] as Array).append(k)
+	var mesh := reed_mesh()
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.vertex_color_is_srgb = true
 	mat.roughness = 1.0
-	node.material_override = mat
-	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.visibility_range_end = REED_SEE_M
-	node.visibility_range_end_margin = 30.0
-	return node
+	var holder := Node3D.new()
+	holder.name = "Reeds"
+	for key: Vector2i in cells:
+		var picks: Array = cells[key]
+		var centre := Vector3((key.x + 0.5) * REED_CELL_M, 0.0, (key.y + 0.5) * REED_CELL_M)
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = mesh
+		mm.instance_count = picks.size()
+		for n in picks.size():
+			var xf: Transform3D = list[int(picks[n])]
+			mm.set_instance_transform(n, Transform3D(xf.basis, xf.origin - centre))
+			mm.set_instance_color(n, colours[int(picks[n])])
+		var node := MultiMeshInstance3D.new()
+		node.name = "Reeds_%d_%d" % [key.x, key.y]
+		node.multimesh = mm
+		node.position = centre
+		node.material_override = mat
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.visibility_range_end = REED_SEE_M
+		node.visibility_range_end_margin = 30.0
+		holder.add_child(node)
+	reed_count = list.size()
+	return holder
 
 
 ## A reed clump: seven thin square stalks of different heights leaning a little, flat shaded,

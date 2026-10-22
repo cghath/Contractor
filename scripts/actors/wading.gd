@@ -44,8 +44,8 @@ static var _looked_up := -1000
 static func terrain_of(body: Node) -> ZoneTerrain:
 	var frame := Engine.get_physics_frames()
 	var t: ZoneTerrain = _terrain.get_ref() as ZoneTerrain if _terrain else null
-	if t and t.is_inside_tree() and frame - _looked_up < LOOKUP_FRAMES:
-		return t
+	if frame - _looked_up < LOOKUP_FRAMES and (t == null or t.is_inside_tree()):
+		return t  # (null too: no zone here, asked again in a while)
 	_looked_up = frame
 	t = null
 	var lvl := CompoundLevel.current(body) if body.is_inside_tree() else null
