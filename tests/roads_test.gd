@@ -55,6 +55,7 @@ func _ready() -> void:
 	_test_hot_zone()
 	_test_crossings()
 	_test_every_zone()
+	_test_bridges()
 	await _test_level()
 	_finish()
 
@@ -492,6 +493,65 @@ func _exit_to(exits: Array, to: String) -> Dictionary:
 		if String(e.to) == to:
 			return e
 	return {}
+
+
+# --- Over the bridges -----------------------------------------------------------------------------
+
+## The campaign's river valley: the water bridges the links the roads take (RoadNet.water_links),
+## and every road bridge carries a road: straight along its deck at the deck's height, not laid
+## there (the deck is the road, F-175), down its ramps to the road on the ground.
+func _test_bridges() -> void:
+	print("Roads over the bridges")
+	var def := ZoneDef.normalize(MissionRegistry.zone_def("kestrel_valley"))
+	var t := _terrain(def)
+	var roads := ZoneRoads.new()
+	roads.prepare(t, def)
+	var on_road := {}
+	for c: Dictionary in t.water.crossings if t.water else []:
+		if int(c.road) >= 0:
+			on_road[String(c.id)] = true
+	var bridges := 0
+	var ridden := 0
+	var off_line := 0.0
+	var off_deck := 0.0
+	var laid := 0
+	var foot_step := 0.0
+	for b: Dictionary in t.water.bridges.bridges if t.water else []:
+		if String(b.type) == ZoneBridges.FOOT or not on_road.has(String(b.id)):
+			continue
+		bridges += 1
+		var xf: Transform3D = b.xform
+		var along := Vector2(xf.basis.z.x, xf.basis.z.z).normalized()
+		var centre := Vector2(xf.origin.x, xf.origin.z)
+		var half := float(b.length) * 0.5
+		var rode := false
+		for r: Dictionary in roads.net.roads:
+			var pts: PackedVector2Array = r.pts
+			var ys: PackedFloat32Array = r.ys
+			var on := 0
+			for k in pts.size():
+				var v := pts[k] - centre
+				var z := v.dot(along)
+				var x := v.x * -along.y + v.y * along.x
+				if absf(z) > half - 1.0 or absf(x) > 3.0:
+					continue
+				on += 1
+				off_line = maxf(off_line, absf(x))
+				off_deck = maxf(off_deck, absf(ys[k] - xf.origin.y))
+				laid += 1 if roads._drawn(r, k) else 0
+			if on >= 2:
+				rode = true
+				for k in range(1, pts.size()):
+					if roads._drawn(r, k) != roads._drawn(r, k - 1):
+						var z := absf((pts[k] - centre).dot(along))
+						if z < half + ZoneBridges.RAMP_M + 6.0:
+							foot_step = maxf(foot_step, absf(ys[k] - ys[k - 1]))
+		ridden += 1 if rode else 0
+	check(bridges > 0 and ridden == bridges and off_line < 1.0 and off_deck < 0.05 and laid == 0 and foot_step < 0.6,
+		"every road bridge carries its road (%d of %d): along its deck (%.2f m off its line at most), at its height (%.2f m off), not laid on it (%d samples), down its ramps (steps %.2f m)" % [
+			ridden, bridges, off_line, off_deck, laid, foot_step])
+	roads.free()
+	t.free()
 
 
 # --- Every campaign zone ------------------------------------------------------------------------

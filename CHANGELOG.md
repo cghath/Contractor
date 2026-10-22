@@ -105,7 +105,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 #### Changed
 - The trails' patrols walk their curved trails.
-- Where a road meets water it stops at the bank, ready for a bridge.
+- **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
+  new roads run (every site's road, the roads in from the zone's edges), and each road runs
+  straight across its bridge's deck and down its ramps instead of dipping under it onto the
+  riverbed (F-175). Where two roads would cross a river side by side, the second joins the first
+  either side of its bridge.
+
+#### Fixed
+- A stream's bank running past a site no longer lifts the site's flat ground (a checkpoint's pad
+  had a 2 m hump in it).
 
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 

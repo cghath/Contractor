@@ -27,12 +27,18 @@ extends RefCounted
 ##   leaves one zone is the same kind and width as the one that enters the next, at its crossing.
 ## - Every site is on the network (_complete_links), a trail's loose end near a road joins it, and
 ##   routes keep off the roads already laid (NEAR_COST): roads cross, they don't run alongside.
+## - Water: the zone's water plans its bridges, fords and culverts over the links the roads take
+##   (water_links, from ZoneTerrain.generate), and each way runs straight through the ones on its
+##   links (_anchors: fixed control points, ALIGN_M lined up before them). A later way that would
+##   take a crossing an earlier road already has joins that road either side of it (two Ts).
 ## - Profile: each road's height is the ground along it smoothed over SMOOTH_M (at most CUT_MAX_M
 ##   off it), solved as a stretched string (_solve, PROFILE_LAMBDA_M) through its pins: flat at its
 ##   junctions (whose heights are eased so the ramps between them and the pads stay under
 ##   JUNCTION_RAMP; close ones share one), level with the pads it leaves or passes, drawn toward the
-##   roads beside it. Water (where ZoneTerrain.water_height stands over the ground) is left out:
-##   the bridge goes there (the water side owns bridges; water_crossings() lists the spans).
+##   roads beside it. Over a bridge it rides the deck and its ramps (pinned to them, not laid or
+##   graded there: the deck is the road, F-175); other water (where ZoneTerrain.water_height
+##   stands over the ground: a ford, a stream no link crosses) is left out of the targets and not
+##   laid (water_crossings() lists the spans).
 ## - Grade: the terrain is cut and filled to the road: under the road SINK_M below it, a shoulder,
 ##   then banks back to the natural ground (CUT_BANK, FILL_BANK); last, no height point of a cell a
 ##   road's surface crosses is left above it.
@@ -110,6 +116,13 @@ const DEF_MAX_SEG_M := 80.0
 ## The query grid (m) and a roundabout ring's sides in the def (RoadRoute drives round them).
 const GRID_M := 32.0
 const RING_SIDES := 12
+## A road keeps straight this far (m) past a bridge's ramps, or either side of a ford or culvert.
+const BRIDGE_LEAD_M := 4.0
+const FORD_LEAD_M := 10.0
+## And lines up this far before that (m): the curve settles straight before the bridge.
+const ALIGN_M := 12.0
+## A link passing this close (m) to another link's way across, the same way, takes it too.
+const SHARE_CROSSING_M := 30.0
 ## Bumped when the planning changes: part of every road's def entry, so a stale cache is seen.
 const VERSION := 1
 
@@ -124,6 +137,14 @@ var grade_ms := 0.0
 ## Each step's time (ms), for the costs.
 var timings := {}
 var _lap := 0
+## The water's ways across (terrain.water: ZoneWater.crossings) on the links, for the routes to take:
+## [{"link", "pos", "dir", "half" (m either side the road keeps straight)}]; and the bridges' boxes
+## (the deck and its ramps: the road isn't laid there, it rides the deck): [{"centre", "along",
+## "half_len", "half_w", "top", "ramps"}].
+var _water_ways: Array = []
+var _bridge_boxes: Array = []
+## Where the crossing roads' links start in the water's links (water_links).
+var _crossing_link_base := 0
 var _gd := PackedFloat32Array()  # grading: per height point, how far past the nearest road's edge (m)
 var _gy := PackedFloat32Array()  # and that road's height there
 var _touched := PackedInt32Array()
@@ -142,6 +163,9 @@ var _block_n := 0
 var _rng := RandomNumberGenerator.new()
 var _grid := {}  # Vector2i -> Array of [road index, sample index] (segment from that sample)
 var _way_of_trail := {}  # road index -> the trail's original points (patrol matching)
+var _trail_parts := {}  # a split trail's first road index -> its roads in order
+## The water's ways across a road already takes: _water_ways index -> that road's index.
+var _taken := {}
 
 
 # --- Data ------------------------------------------------------------------------------------
@@ -173,6 +197,35 @@ static func crossing_kind(a: String, b: String) -> String:
 
 # --- Planning --------------------------------------------------------------------------------
 
+## The links the zone's water plans its bridges, fords and culverts over (ZoneTerrain.generate
+## hands them to ZoneWater.carve as the def's "roads"): the def's links
+## completed (_complete_links: every site joined), then for each crossing two: the zone's edge to the
+## crossing point, the crossing point to the nearest site. The planned roads take those ways across
+## (the routes pass through them), so the bridges stand on the roads. The same on every peer.
+static func water_links(def: Dictionary) -> Array:
+	var net := RoadNet.new()
+	net._def = def
+	net._half = float(def.get("size_m", 2048.0)) * 0.5
+	net._read_sites()
+	var links: Array = net._complete_links(def.get("road_links", def.get("roads", [])))
+	for c: Dictionary in def.get("crossings", []):
+		links.append_array(net._crossing_links(c))
+	return links
+
+
+## Crossing `c`'s two water links: [edge, crossing point], [crossing point, the nearest site].
+func _crossing_links(c: Dictionary) -> Array:
+	var side := int(c.get("side", 0))
+	var p := Vector2(float(c.pos[0]), float(c.pos[1]))
+	var gap := _half - EDGE_GAP_M
+	var edge: Vector2 = [Vector2(p.x, -gap), Vector2(p.x, gap), Vector2(-gap, p.y), Vector2(gap, p.y)][side]
+	var to := p
+	for site: Dictionary in _sites:
+		if to == p or (site.pos as Vector2).distance_to(p) < to.distance_to(p):
+			to = site.pos
+	return [[[edge.x, edge.y], [p.x, p.y]], [[p.x, p.y], [to.x, to.y]]]
+
+
 ## The network for `def` on `terrain` (generated, before its collision): plans it, cuts and fills
 ## the terrain to it, and writes the def's "roads" (and the trails' "patrols").
 static func plan(def: Dictionary, terrain: ZoneTerrain) -> RoadNet:
@@ -196,7 +249,10 @@ func _plan(def: Dictionary, terrain: ZoneTerrain) -> void:
 	_read_sites()
 	_build_blocked()
 	_lap = Time.get_ticks_usec()
-	var ways := _ways(_complete_links(def.get("road_links", [])))
+	var completed := _complete_links(def.get("road_links", []))
+	_crossing_link_base = completed.size()
+	_read_water()
+	var ways := _ways(completed)
 	# Main roads first (their ends are where later ones join), longer before shorter.
 	ways.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		if (String(a.kind) == "asphalt") != (String(b.kind) == "asphalt"):
@@ -205,8 +261,9 @@ func _plan(def: Dictionary, terrain: ZoneTerrain) -> void:
 	_tick("ways")
 	for w in ways:
 		_route_way(w)
-	for c: Dictionary in def.get("crossings", []):
-		_route_crossing(c)
+	var crossings: Array = def.get("crossings", [])
+	for i in crossings.size():
+		_route_crossing(crossings[i], i)
 	_tick("route")
 	_hs = PackedFloat32Array()
 	_snap_loose_ends()
@@ -240,10 +297,82 @@ func _read_sites() -> void:
 		var half: Vector2 = ZoneModules.HALF.get(type, Vector2(20, 20))
 		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
 		var pad := Rect2(p - half, half * 2.0).grow(ZoneTerrain.PAD_MARGIN_M)
-		var site := {"id": String(m.id), "type": type, "base": ZoneModules.base(type), "pos": p, "half": half, "pad": pad, "y": _t.height_at(p.x, p.y)}
+		var site := {"id": String(m.id), "type": type, "base": ZoneModules.base(type), "pos": p, "half": half, "pad": pad, "y": _t.height_at(p.x, p.y) if _t else 0.0}
 		_sites.append(site)
 		if String(site.base) == "town":
 			towns.append({"id": site.id, "pos": p, "half": half, "y": site.y, "pad": pad})
+
+
+## The water's ways across the links (bridges, fords, culverts) and the bridges' boxes.
+func _read_water() -> void:
+	var water: Variant = _t.get(&"water")
+	if water == null:
+		return
+	var by_id := {}
+	var bridges: Variant = water.get(&"bridges")
+	if bridges != null:
+		for b: Dictionary in bridges.get(&"bridges"):
+			by_id[String(b.id)] = b
+			var xf: Transform3D = b.xform
+			var along := Vector2(xf.basis.z.x, xf.basis.z.z).normalized()
+			var spec: Dictionary = ZoneBridges.TYPES.get(String(b.type), {})
+			_bridge_boxes.append({"centre": Vector2(xf.origin.x, xf.origin.z), "along": along, "half_len": float(b.length) * 0.5,
+				"half_w": float(spec.get("deck_w", 7.0)) * 0.5 + 0.5, "top": xf.origin.y, "ramps": b.get("ramps", [])})
+	for c: Dictionary in water.get(&"crossings"):
+		if int(c.get("road", -1)) < 0:
+			continue
+		var half := FORD_LEAD_M
+		var dir: Vector2 = c.dir
+		if by_id.has(String(c.id)):
+			var b: Dictionary = by_id[String(c.id)]
+			var xf: Transform3D = b.xform
+			dir = Vector2(xf.basis.z.x, xf.basis.z.z).normalized()
+			half = float(b.length) * 0.5 + ZoneBridges.RAMP_M + BRIDGE_LEAD_M
+		_water_ways.append({"link": int(c.road), "pos": c.pos, "dir": dir, "half": half})
+
+
+## The fixed points a way along `chain` (its links `links`, one a segment) passes to take the
+## water's ways across: per segment k, [[t along it, point, _water_ways index], ...] in order
+## (four per way across: lined up, onto it, off it, lined up). A way across on the
+## segment's own link, or on another link's near it and the same way (the water keeps one crossing
+## where two links cross close together: both roads take it).
+func _anchors(chain: Array[Vector2], links: Array) -> Dictionary:
+	var out := {}
+	var arc: Array[float] = [0.0]  # the chain's length up to each node
+	for k in range(1, chain.size()):
+		arc.append(arc[k - 1] + chain[k - 1].distance_to(chain[k]))
+	for wi in _water_ways.size():
+		var ww: Dictionary = _water_ways[wi]
+		var pos: Vector2 = ww.pos
+		var best_k := -1
+		var best_d := INF
+		for k in chain.size() - 1:
+			var seg := chain[k + 1] - chain[k]
+			var d := Geometry2D.get_closest_point_to_segment(pos, chain[k], chain[k + 1]).distance_to(pos)
+			var own := k < links.size() and int(links[k]) == int(ww.link)
+			if d < best_d and ((own and d <= 5.0) or (d <= SHARE_CROSSING_M and absf((ww.dir as Vector2).dot(seg.normalized())) >= 0.7)):
+				best_d = d
+				best_k = k
+		if best_k < 0:
+			continue
+		var a := chain[best_k]
+		var seg := chain[best_k + 1] - a
+		var length := seg.length()
+		var t := clampf((pos - a).dot(seg) / maxf(length * length, 0.01), 0.0, 1.0)
+		var reach := float(ww.half) + ALIGN_M
+		var at := arc[best_k] + t * length
+		if at < reach + LEAD_M or arc.back() - at < reach + LEAD_M:
+			continue  # (too near the way's ends to keep straight: its nodes between are free, passed by)
+		var dir: Vector2 = ww.dir
+		if dir.dot(seg) < 0.0:
+			dir = -dir
+		if not out.has(best_k):
+			out[best_k] = []
+		for d: float in [-reach, -float(ww.half), float(ww.half), reach]:
+			out[best_k].append([t + d / length, pos + dir * d, wi])
+	for k: int in out:
+		(out[k] as Array).sort_custom(func(u: Array, v: Array) -> bool: return float(u[0]) < float(v[0]))
+	return out
 
 
 ## The route's blocked cells: pads (grown a little) now; water and the band along the edge as
@@ -290,8 +419,9 @@ func _site_at(p: Vector2) -> int:
 
 
 ## The def's links, completed: a link that passes a checkpoint goes through it (its road runs
-## through the checkpoint), and every site no link reaches gets one to the nearest site that has
-## one (a hot zone's links only joined the HQ and its outposts), so every site is on the roads.
+## through the checkpoint), and the links' separate networks are joined, nearest sites first, until
+## every site is on one (a hot zone's links only joined the HQ and its outposts; a landmark's link
+## to its town can leave the two on their own), so every site is on the roads.
 func _complete_links(links: Array) -> Array:
 	var out: Array = links.duplicate(true)
 	var at := func(p: Array) -> Vector2: return Vector2(float(p[0]), float(p[1]))
@@ -309,30 +439,54 @@ func _complete_links(links: Array) -> Array:
 				out.append([[c.x, c.y], out[li][1]])
 				out[li] = [out[li][0], [c.x, c.y]]
 				break
-	var linked := {}
+	# The networks: sites first in `parent`, then the links' other ends.
+	var parent: Array[int] = []
+	for i in _sites.size():
+		parent.append(i)
+	var others: Array[Vector2] = []
 	for r: Array in out:
+		var ends: Array[int] = []
 		for p: Array in [r[0], r[1]]:
-			var s := _site_at(at.call(p))
-			if s >= 0:
-				linked[s] = true
-	if linked.is_empty() and not _sites.is_empty():
-		linked[0] = true
-	while linked.size() < _sites.size():
+			var q: Vector2 = at.call(p)
+			var s := _site_at(q)
+			if s < 0:
+				for i in others.size():
+					if others[i].distance_to(q) < 2.0:
+						s = _sites.size() + i
+						break
+			if s < 0:
+				others.append(q)
+				parent.append(parent.size())
+				s = parent.size() - 1
+			ends.append(s)
+		parent[_root(parent, ends[0])] = _root(parent, ends[1])
+	while not _sites.is_empty():
+		var main := _root(parent, 0)
 		var best := Vector2i(-1, -1)
 		var best_d := INF
 		for i in _sites.size():
-			if linked.has(i):
+			if _root(parent, i) == main:
 				continue
-			for j: int in linked:
+			for j in _sites.size():
+				if _root(parent, j) != main:
+					continue
 				var d := (_sites[i].pos as Vector2).distance_to(_sites[j].pos)
 				if d < best_d:
 					best_d = d
 					best = Vector2i(i, j)
+		if best.x < 0:
+			break
 		var pi: Vector2 = _sites[best.x].pos
 		var pj: Vector2 = _sites[best.y].pos
 		out.append([[pi.x, pi.y], [pj.x, pj.y]])
-		linked[best.x] = true
+		parent[_root(parent, best.x)] = main
 	return out
+
+
+static func _root(parent: Array[int], i: int) -> int:
+	while parent[i] != i:
+		i = parent[i]
+	return i
 
 
 ## The links as ways: chains between fixed nodes (sites, ends, junctions of the links).
@@ -340,11 +494,14 @@ func _complete_links(links: Array) -> Array:
 func _ways(links: Array) -> Array[Dictionary]:
 	var nodes: Array[Vector2] = []
 	var adj := {}
-	for r: Array in links:
+	var link_of := {}  # Vector2i(node, node) -> the link's index
+	for li in links.size():
+		var r: Array = links[li]
 		var a := _node(nodes, Vector2(float(r[0][0]), float(r[0][1])))
 		var b := _node(nodes, Vector2(float(r[1][0]), float(r[1][1])))
 		if a == b:
 			continue
+		link_of[Vector2i(mini(a, b), maxi(a, b))] = li
 		if not adj.has(a):
 			adj[a] = []
 		if not adj.has(b):
@@ -389,13 +546,15 @@ func _ways(links: Array) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for chain: Array in chains:
 		var pts: Array[Vector2] = []
+		var chain_links: Array = []
 		var length := 0.0
 		for k in chain.size():
 			pts.append(nodes[chain[k]])
 			if k > 0:
 				length += pts[k - 1].distance_to(pts[k])
+				chain_links.append(int(link_of.get(Vector2i(mini(chain[k - 1], chain[k]), maxi(chain[k - 1], chain[k])), -1)))
 		var w := {"nodes": pts, "a": int(site[chain.front()]), "b": int(site[chain.back()]), "length": length,
-			"trail": int(site[chain.front()]) < 0 and int(site[chain.back()]) < 0}
+			"trail": int(site[chain.front()]) < 0 and int(site[chain.back()]) < 0, "links": chain_links}
 		w["kind"] = _way_kind(w)
 		out.append(w)
 	return out
@@ -430,32 +589,105 @@ func _route_way(w: Dictionary) -> void:
 	var nodes: Array[Vector2] = w.nodes
 	var ea := _end(int(w.a), nodes[0], nodes[1])
 	var eb := _end(int(w.b), nodes[nodes.size() - 1], nodes[nodes.size() - 2])
-	var ctrl: Array[Vector2] = [ea.exit]
-	if ea.has("lead"):
-		ctrl.append(ea.lead)
-	var first_free := ctrl.size()
-	var inner: Array[Vector2] = []
-	inner.append(ctrl.back())
-	for k in range(1, nodes.size() - 1):
-		inner.append(nodes[k])
-	inner.append(eb.lead if eb.has("lead") else eb.exit)
-	_subdivide(inner, ctrl)
-	var last_free := ctrl.size()  # (exclusive)
-	if eb.has("lead"):
-		ctrl.append(eb.lead)
-	ctrl.append(eb.exit)
-	var road := _add_road(ctrl, first_free, last_free, String(w.kind), ea, eb)
+	# Through the nodes (free), and straight through the water's ways across on its links (fixed).
+	# Where an earlier road already takes a way across, this one joins that road either side of
+	# it (two Ts) instead of running along it: the way is laid in parts.
+	var anchors := _anchors(nodes, w.get("links", []))
+	var parts: Array = []  # [[start end or null (ea), [[point, fixed, way across or -1]], end or null (eb)]]
+	var part_a: Variant = null
+	var items: Array = []
+	var shared: Array = []  # per split: [road, near point, far point]
+	for k in nodes.size() - 1:
+		var list: Array = anchors.get(k, [])
+		var g := 0
+		while g < list.size():
+			var wi := int(list[g][2])
+			if _taken.has(wi) and g + 3 < list.size() and int(list[g + 3][2]) == wi:
+				shared.append([int(_taken[wi]), list[g][1], list[g + 3][1]])
+				parts.append([part_a, items, shared.size() - 1])
+				part_a = shared.size() - 1
+				items = []
+				g += 4
+				continue
+			items.append([list[g][1], true, wi])
+			g += 1
+		if k + 1 < nodes.size() - 1 and not _by_crossing(nodes[k + 1], anchors):
+			items.append([nodes[k + 1], false, -1])
+	parts.append([part_a, items, null])
+	var laid: Array[int] = []
+	for pi in parts.size():
+		var part: Array = parts[pi]
+		var its: Array = part[1]
+		var a_end := ea
+		var b_end := eb
+		if part[0] != null:
+			var sh: Array = shared[int(part[0])]
+			var toward: Vector2 = its[0][0] if not its.is_empty() else (nodes[nodes.size() - 1] if part[2] == null else shared[int(part[2])][1])
+			a_end = _join_end(int(sh[0]), _nearest_sample(int(sh[0]), sh[2]), toward)
+		if part[2] != null:
+			var sh: Array = shared[int(part[2])]
+			var toward: Vector2 = its.back()[0] if not its.is_empty() else (a_end.exit as Vector2)
+			b_end = _join_end(int(sh[0]), _nearest_sample(int(sh[0]), sh[1]), toward)
+		var ctrl: Array[Vector2] = [a_end.exit]
+		var fixed: Array[bool] = [true]
+		if a_end.has("lead"):
+			ctrl.append(a_end.lead)
+			fixed.append(true)
+		var inner: Array[Vector2] = [ctrl.back()]
+		var inner_fixed: Array[bool] = [true]
+		for it: Array in its:
+			inner.append(it[0])
+			inner_fixed.append(bool(it[1]))
+		inner.append(b_end.lead if b_end.has("lead") else b_end.exit)
+		inner_fixed.append(true)
+		_subdivide(inner, ctrl, fixed, inner_fixed)
+		if b_end.has("lead"):
+			ctrl.append(b_end.lead)
+			fixed.append(true)
+		ctrl.append(b_end.exit)
+		fixed.append(true)
+		var road := _add_road(ctrl, fixed, String(w.kind), a_end, b_end)
+		laid.append(road)
+		for it: Array in its:
+			if int(it[2]) >= 0 and not _taken.has(int(it[2])):
+				_taken[int(it[2])] = road
 	if bool(w.trail):
-		_way_of_trail[road] = nodes
+		_way_of_trail[laid[0]] = nodes
+		if laid.size() > 1:
+			_trail_parts[laid[0]] = laid
 
 
-## Appends the free control points along `inner` (its first point already in `ctrl`, its last
-## not): every leg cut into pieces of at most CTRL_M, each nudged sideways by up to JITTER_M.
-func _subdivide(inner: Array[Vector2], ctrl: Array[Vector2]) -> void:
+## Whether `p` (a free node of a way) lies by one of the way's ways across (`anchors`): left out,
+## the road keeps straight there.
+func _by_crossing(p: Vector2, anchors: Dictionary) -> bool:
+	for list: Array in anchors.values():
+		for an: Array in list:
+			var ww: Dictionary = _water_ways[int(an[2])]
+			if p.distance_to(ww.pos) < float(ww.half) + ALIGN_M + LEAD_M:
+				return true
+	return false
+
+
+## Road `i`'s sample nearest `p`, kept off its ends.
+func _nearest_sample(i: int, p: Vector2) -> int:
+	var pts: PackedVector2Array = roads[i].pts
+	var best := 1
+	for k in range(1, pts.size() - 1):
+		if pts[k].distance_squared_to(p) < pts[best].distance_squared_to(p):
+			best = k
+	return best
+
+
+## Appends the control points along `inner` (its first point already in `ctrl`, its last not) to
+## `ctrl`, and whether each is fixed to `fixed`: every leg cut into pieces of at most CTRL_M, each
+## nudged sideways by up to JITTER_M (free); `inner`'s own points as `inner_fixed` says. A leg
+## between two fixed points (over a bridge) stays one straight piece.
+func _subdivide(inner: Array[Vector2], ctrl: Array[Vector2], fixed: Array[bool], inner_fixed: Array[bool]) -> void:
 	for k in range(1, inner.size()):
 		var a := inner[k - 1]
 		var b := inner[k]
-		var n := maxi(ceili(a.distance_to(b) / CTRL_M), 1)
+		var straight := inner_fixed[k - 1] and inner_fixed[k] and k > 1 and k < inner.size() - 1 and a.distance_to(b) <= CTRL_M * 2.0
+		var n := 1 if straight else maxi(ceili(a.distance_to(b) / CTRL_M), 1)
 		var side := (b - a).orthogonal().normalized()
 		for i in range(1, n + 1):
 			if k == inner.size() - 1 and i == n:
@@ -464,6 +696,7 @@ func _subdivide(inner: Array[Vector2], ctrl: Array[Vector2]) -> void:
 			if i < n:
 				p += side * _rng.randf_range(-1.0, 1.0) * JITTER_M
 			ctrl.append(p)
+			fixed.append(inner_fixed[k] if i == n else false)
 
 
 ## A way's end at site `s` (-1: a plain node at `at`), heading toward `toward`: {"exit" (where the
@@ -551,7 +784,7 @@ func _sample_at_distance(r: Dictionary, d: float, from_a: bool) -> int:
 
 
 ## A road from the zone's edge in through crossing `c` (RegionMap) to the nearest road (or site).
-func _route_crossing(c: Dictionary) -> void:
+func _route_crossing(c: Dictionary, index: int) -> void:
 	var side := int(c.get("side", 0))
 	var p := Vector2(float(c.pos[0]), float(c.pos[1]))
 	var gap := _half - EDGE_GAP_M
@@ -586,21 +819,41 @@ func _route_crossing(c: Dictionary) -> void:
 		eb = _join_end(int(join[0]), int(join[1]), lead)
 	var ea := {"exit": edge, "stub": PackedVector2Array(), "site": "", "edge": String(c.get("id", ""))}
 	var ctrl: Array[Vector2] = [edge, p, lead]
-	var first_free := ctrl.size()
-	var inner: Array[Vector2] = [lead, eb.lead if eb.has("lead") else eb.exit]
-	_subdivide(inner, ctrl)
-	var last_free := ctrl.size()
+	var fixed: Array[bool] = [true, true, true]
+	# The water's ways across its water link toward the nearest site (water_links), on the way in.
+	var water_line := _crossing_links(c)
+	var chain: Array[Vector2] = [edge, p, Vector2(float(water_line[1][1][0]), float(water_line[1][1][1]))]
+	var anchors := _anchors(chain, [_crossing_link_base + index * 2, _crossing_link_base + index * 2 + 1])
+	var inner: Array[Vector2] = [lead]
+	var inner_fixed: Array[bool] = [true]
+	var end: Vector2 = eb.lead if eb.has("lead") else eb.exit
+	var toward := (end - p).normalized()
+	var on_way: Array = (anchors.get(1, []) as Array).filter(func(an: Array) -> bool:
+		var v: Vector2 = (an[1] as Vector2) - p
+		return v.length() > LEAD_M and v.length() < end.distance_to(p) and v.normalized().dot(toward) > 0.8 and not _taken.has(int(an[2])))
+	if on_way.size() % 4 == 0:  # (whole crossings only)
+		for an: Array in on_way:
+			inner.append(an[1])
+			inner_fixed.append(true)
+	inner.append(end)
+	inner_fixed.append(true)
+	_subdivide(inner, ctrl, fixed, inner_fixed)
 	if eb.has("lead"):
 		ctrl.append(eb.lead)
+		fixed.append(true)
 	ctrl.append(eb.exit)
-	var road := _add_road(ctrl, first_free, last_free, kind_id, ea, eb)
+	fixed.append(true)
+	var road := _add_road(ctrl, fixed, kind_id, ea, eb)
+	if on_way.size() % 4 == 0:
+		for an: Array in on_way:
+			_taken[int(an[2])] = road
 	exits.append({"crossing": String(c.get("id", "")), "to": String(c.get("to", "")), "side": side, "edge": edge, "pos": p,
 		"kind": kind_id, "width": half_width(kind_id) * 2.0, "road": road})
 
 
 ## Optimises the free control points, samples the curve and adds the road; its index.
-func _add_road(ctrl: Array[Vector2], first_free: int, last_free: int, kind_id: String, ea: Dictionary, eb: Dictionary) -> int:
-	_snake(ctrl, first_free, last_free)
+func _add_road(ctrl: Array[Vector2], fixed: Array[bool], kind_id: String, ea: Dictionary, eb: Dictionary) -> int:
+	_snake(ctrl, fixed)
 	var curve := _catmull(ctrl, SAMPLE_M)
 	var pts := PackedVector2Array([curve[0]])
 	for k in range(1, curve.size()):
@@ -646,12 +899,12 @@ func _link_junction(j: int, road: int) -> void:
 
 # --- The route: the snake ---------------------------------------------------------------------
 
-func _snake(ctrl: Array[Vector2], first: int, last: int) -> void:
-	if last <= first:
-		return
+func _snake(ctrl: Array[Vector2], fixed: Array[bool]) -> void:
 	for step in SNAKE_STEPS:
 		for sweep in (2 if step == SNAKE_STEPS[0] else 1):
-			for i in range(first, last):
+			for i in range(1, ctrl.size() - 1):
+				if fixed[i]:
+					continue
 				var n := (ctrl[i + 1] - ctrl[i - 1]).orthogonal().normalized()
 				var here := ctrl[i]
 				var best := here
@@ -1061,6 +1314,15 @@ func _profiles() -> void:
 				if k >= 0:
 					pins.append([k, float(junctions[j].y), _flat_of(junctions[j])])
 		pins.append_array(pad_pins[i])
+		# On a bridge's deck: its top; on its ramps: down them (the road isn't laid there).
+		var on_bridge := PackedByteArray()
+		on_bridge.resize(n)
+		for k in n:
+			var h := _bridge_height(pts[k], pts[mini(k + 1, n - 1)] - pts[maxi(k - 1, 0)])
+			if not is_nan(h):
+				on_bridge[k] = 1
+				pins.append([k, h, 0.0])
+		r["bridge"] = on_bridge
 		var pinned := PackedByteArray()
 		pinned.resize(n)
 		var pin_h := PackedFloat32Array()
@@ -1237,6 +1499,28 @@ func _pad_near(p: Vector2, reach: float) -> int:
 	return best
 
 
+## The height of the bridge (deck or ramp) at `p` for a road heading `heading` along it, NAN off
+## every bridge (or across one: a road along the bank under its end isn't on it).
+func _bridge_height(p: Vector2, heading: Vector2) -> float:
+	for bb: Dictionary in _bridge_boxes:
+		var v: Vector2 = p - (bb.centre as Vector2)
+		var along: Vector2 = bb.along
+		if absf(heading.normalized().dot(along)) < 0.8:
+			continue
+		var z := v.dot(along)
+		var x := v.x * -along.y + v.y * along.x
+		var half := float(bb.half_len)
+		if absf(x) > float(bb.half_w) or absf(z) > half + ZoneBridges.RAMP_M:
+			continue
+		if absf(z) <= half:
+			return float(bb.top)
+		for ramp: Array in bb.ramps:
+			if signf(float(ramp[0])) == signf(z):
+				return float(bb.top) - float(ramp[2]) * (absf(z) - half) / ZoneBridges.RAMP_M
+		return float(bb.top)
+	return NAN
+
+
 ## The pad (ZoneTerrain.pads index) under `p`, -1 if none.
 func _pad_under(p: Vector2) -> int:
 	for i in _pads.size():
@@ -1301,13 +1585,14 @@ func _grade() -> void:
 		while k < pts.size() - 1:
 			var k2 := mini(k + 3, pts.size() - 1)
 			var dry := true
+			var bridge: PackedByteArray = r.get("bridge", PackedByteArray())
 			for m in range(k, k2 + 1):
-				dry = dry and wet[m] == 0
+				dry = dry and wet[m] == 0 and (bridge.is_empty() or bridge[m] == 0)
 			if dry:
 				_consider(pts[k], pts[k2], ys, k, k2, hw)
 			else:
 				for m in range(k, k2):
-					if wet[m] == 0 and wet[m + 1] == 0:
+					if wet[m] == 0 and wet[m + 1] == 0 and (bridge.is_empty() or (bridge[m] == 0 and bridge[m + 1] == 0)):
 						_consider(pts[m], pts[m + 1], ys, m, m + 1, hw)
 			k = k2
 	for jn: Dictionary in junctions:
@@ -1341,8 +1626,9 @@ func _grade() -> void:
 		var ys: PackedFloat32Array = r.ys
 		var wet: PackedByteArray = r.wet
 		var hw := float(r.hw)
+		var on_bridge: PackedByteArray = r.get("bridge", PackedByteArray())
 		for k in pts.size():
-			if wet[k] == 1:
+			if wet[k] == 1 or (not on_bridge.is_empty() and on_bridge[k] == 1):
 				continue
 			var k0 := maxi(k - 1, 0)
 			var k1 := mini(k + 1, pts.size() - 1)
@@ -1567,10 +1853,11 @@ func _write_def(def: Dictionary) -> void:
 			for k in nodes.size():
 				same = same and nodes[k].distance_to(Vector2(float(route[k][0]), float(route[k][1]))) < 2.5
 			if same:
-				var line: PackedVector2Array = simplified[ri]
 				var walk: Array = []
-				for p in line:
-					walk.append(snap.call(p))
+				for part: int in _trail_parts.get(ri, [ri]):  # (a trail laid in parts: across the bridge between them)
+					var line: PackedVector2Array = simplified[part]
+					for p in line:
+						walk.append(snap.call(p))
 				patrols[pi] = walk
 	if def.has("patrols") or not patrols.is_empty():
 		def["patrols"] = patrols

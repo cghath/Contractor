@@ -18,7 +18,7 @@ extends Node3D
 ##   segments()                every road: {"id", "kind", "width", "points" (PackedVector3Array: the
 ##                             centreline on the surface), "water" ([[from, to]] sample spans over
 ##                             water: left out for a bridge), "drawn" (PackedByteArray: 0 where not
-##                             laid: on a pad, over water, inside a roundabout), "a"/"b" (its ends:
+##                             laid: on a pad, over water or a bridge, inside a roundabout), "a"/"b" (its ends:
 ##                             {"site", "junction", "crossing"})}
 ##   junctions()               {"pos", "kind" ("x", "t", "node", "roundabout"), "radius", "roads"}
 ##   water_crossings()         where a road meets water: {"road", "kind", "width", "from", "to" (the
@@ -302,13 +302,14 @@ func _drawn(r: Dictionary, k: int) -> bool:
 		var pts: PackedVector2Array = r.pts
 		var skip: PackedByteArray = r.skip
 		var wet: PackedByteArray = r.wet
+		var bridge: PackedByteArray = r.get("bridge", PackedByteArray())
 		var laid := PackedByteArray()
 		laid.resize(pts.size())
 		var pads: Array[Rect2] = []
 		for pad: Array in terrain.pads:
 			pads.append((pad[0] as Rect2).grow(-0.5))
 		for i in pts.size():
-			var on := skip[i] == 0 and wet[i] == 0
+			var on := skip[i] == 0 and wet[i] == 0 and (bridge.is_empty() or bridge[i] == 0)  # (a bridge's deck carries it: F-175)
 			if on:
 				for pad in pads:
 					if pad.has_point(pts[i]):

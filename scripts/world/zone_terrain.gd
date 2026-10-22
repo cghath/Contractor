@@ -285,7 +285,8 @@ func generate(def: Dictionary, flat: Array) -> void:
 		_flatten(rect, float(at_sea.get(rect, NAN)))
 	if water:
 		water.free()
-	water = ZoneWater.carve(self, def)  # rivers cut their valleys (queue item 1.1)
+	# Rivers cut their valleys (queue item 1.1), bridged where the roads will run (RoadNet.water_links).
+	water = ZoneWater.carve(self, def.merged({"roads": RoadNet.water_links(def)}, true))
 	if water:
 		add_child(water)
 	min_height = INF
