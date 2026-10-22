@@ -17,6 +17,8 @@ const ROUND_LEVELS := {
 	"556_m995": "IV", "762x51_m993": "IV", "3006_m2ap": "IV", "65cm_eldm": "III+", "50bmg_m33": "ABOVE_IV",
 	# items expansion (2026-10-20)
 	"9x18_pm": "IIA", "762x25_tt": "II", "57x28_ss190": "III", "46x30_dm11": "III", "303_mk7": "III+", "762x51_m118lr": "III+", "556_mk262": "III",
+	# shotgun shells (2026-10-21): hi-brass 00 buck, the shell and each of its pellets
+	"12g_00_mag": "IIA", "12g_00_mag_pellet": "IIA",
 }
 ## Each armor piece's rating.
 const PIECE_RATINGS := {
@@ -530,6 +532,17 @@ func _fresh_plates(dummy: TargetDummy, plate: StringName) -> void:
 	await get_tree().physics_frame
 
 
+## Waits until `dummy`'s drawn body is back at rest after a trial: the last hit's flinch and the
+## pain hunch ease out over a few tenths of a second (CharacterModel._wounded_extras), and the arm
+## hitboxes follow the drawn arms, so a shot fired sooner meets a limb that is still moving.
+func _settled(dummy: TargetDummy) -> void:
+	var deadline := Time.get_ticks_msec() + 3000
+	while (dummy.model._flinch > 0.0 or dummy.model._hunch > 0.0) and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+
+
 ## A few words on what a body went through, for the log.
 func _vitals_text(v: Vitals) -> String:
 	var m: WoundModel = v._model
@@ -595,7 +608,9 @@ func _test_playtest_knockouts() -> void:
 
 	var bare := await _dummy([])
 	bare.respawn_seconds = 999.0
-	var targets := {Vitals.THIGH_L: Vector3(-0.09, 0.68, 0), Vitals.THIGH_R: Vector3(0.06, 0.6, 0), Vitals.UPPER_ARM_R: Vector3(0.26, 1.25, 0), Vitals.FOREARM_L: Vector3(-0.24, 0.95, 0)}
+	# Aims on each limb's voxels at rest (hits find the drawn arm since claude/arm-hits: the left
+	# forearm spans about x -0.30..-0.23), with room for the three trials' 1 cm steps.
+	var targets := {Vitals.THIGH_L: Vector3(-0.09, 0.68, 0), Vitals.THIGH_R: Vector3(0.06, 0.6, 0), Vitals.UPPER_ARM_R: Vector3(0.26, 1.25, 0), Vitals.FOREARM_L: Vector3(-0.26, 0.95, 0)}
 	for weapon_id: StringName in [&"m4a1", &"mk18"]:
 		var weapon := ItemDB.get_item(weapon_id)
 		for distance: float in [10.0, 50.0, 100.0]:
@@ -608,8 +623,7 @@ func _test_playtest_knockouts() -> void:
 				for t in 3:
 					bare.vitals.server_reset_health()
 					bare.vitals.rng.seed = 8000 + t
-					await get_tree().physics_frame
-					await get_tree().physics_frame
+					await _settled(bare)
 					var aim: Vector3 = targets[part] + Vector3(0.01 * t, 0.02 * t, 0)
 					_shooter.position = Vector3(aim.x, aim.y, -distance)
 					var shot := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, weapon)

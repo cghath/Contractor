@@ -159,6 +159,10 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 			# The first box met isn't always the first part met (an arm held across the chest sits in
 			# front of the chest's box): the part whose voxels the round meets first takes it.
 			var nearer := nearest_part(collider as Node3D, hit.position, direction, body_hit)
+			# Not a part behind a plate the round hasn't met yet (an exo pilot's arms in front of his
+			# belly plate, ExoMech): the plate has its say first, so the round flies on to it.
+			if not nearer.is_empty() and _armor_between(space, hit.position, Vector3(nearer.hit.position), direction, exclude):
+				nearer = {}
 			if not nearer.is_empty():
 				collider = nearer.hitbox
 				part = nearer.part
@@ -609,6 +613,18 @@ static func nearest_part(hitbox: Node3D, position: Vector3, direction: Vector3, 
 			best = along
 			out = {"hitbox": area, "part": part, "hit": hit}
 	return out
+
+
+## Whether an armour piece (VoxelArmor, not in `exclude`: one the round already met) lies between
+## `from` and `to` further along `direction`.
+static func _armor_between(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, direction: Vector3, exclude: Array[RID]) -> bool:
+	if (to - from).dot(direction) <= 0.0:
+		return false
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1 << 3, exclude)
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	var hit := space.intersect_ray(query)
+	return not hit.is_empty() and hit.collider is VoxelArmor
 
 
 ## Whether a ray from `from` along `dir` (unit) for `length` m crosses any of `area`'s box shapes.
