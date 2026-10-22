@@ -118,6 +118,8 @@ const CONTOUR := Color("a8865c")
 const PAD := Color("ccc6b4")
 const ROAD := Color("f2efe6")
 const ROAD_CASING := Color("6d6355")
+## Dirt tracks (a road piece's kind "dirt", RoadNet): thinner, tan, no casing.
+const TRACK := Color("c2ad86")
 const STREET := Color("e8e3d6")
 const BUILDING := Color("5a5852")
 ## Trees from above: a crown about this wide (m).
@@ -166,7 +168,7 @@ static func zone_inputs(level: Node, max_px := MAX_PX) -> Dictionary:
 	var def: Variant = level.get(&"def")
 	if def is Dictionary:
 		for road: Array in (def as Dictionary).get("roads", []):
-			roads.append([Vector2(float(road[0][0]), float(road[0][1])), Vector2(float(road[1][0]), float(road[1][1]))])
+			roads.append([Vector2(float(road[0][0]), float(road[0][1])), Vector2(float(road[1][0]), float(road[1][1])), String(road[2]) if road.size() > 2 else ""])
 	var streets: Array[Rect2] = []
 	var raw_streets: Variant = t.get(&"_streets")
 	if raw_streets is Array:
@@ -283,9 +285,14 @@ static func compose_zone(inp: Dictionary) -> Image:
 		_fill(image, area, scale, pad, PAD)
 	var road_px := maxf(ZoneTerrain.ROAD_CORE_M * 2.0 * scale, 2.0)
 	for seg: Array in inp.roads:
-		_stroke(image, area, scale, seg[0], seg[1], road_px + 2.0, ROAD_CASING)
+		if seg.size() < 3 or seg[2] != "dirt":
+			_stroke(image, area, scale, seg[0], seg[1], road_px + 2.0, ROAD_CASING)
 	for seg: Array in inp.roads:
-		_stroke(image, area, scale, seg[0], seg[1], road_px, ROAD)
+		if seg.size() > 2 and seg[2] == "dirt":
+			_stroke(image, area, scale, seg[0], seg[1], maxf(road_px * 0.6, 1.5), TRACK)
+	for seg: Array in inp.roads:
+		if seg.size() < 3 or seg[2] != "dirt":
+			_stroke(image, area, scale, seg[0], seg[1], road_px, ROAD)
 	for street: Rect2 in inp.streets:
 		_fill(image, area, scale, street, STREET)
 	# 5. Buildings and walls as footprints: one dark tone, low cover a little lighter.

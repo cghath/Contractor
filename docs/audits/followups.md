@@ -24,6 +24,10 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
+| F-190 | P2 | A convoy ambush's convoy drives its own straight-ish line across the zone, not the roads (scenario_gen `_convoy`) |
+| F-191 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
+| F-192 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
+| F-193 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
 
 ## F-01: the building scan only sees one floor
 
@@ -331,6 +335,72 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+## F-190: a convoy ambush's convoy doesn't drive the roads
+
+Found by cghath's agent on `world/roads` (2026-10-21, cg_brief 1.2). Location:
+[scenario_gen.gd](../../scripts/campaign/scenario_gen.gd) `_convoy`, which the convoy ambush's
+objective keeps as "route" and [mission_scenario.gd](../../scripts/campaign/mission_scenario.gd)
+drives.
+
+What happens: the route is made when the contract is generated, before the zone's level exists:
+a line through the ambush point across the zone with a little sine bend ("the road bends a
+little"). The zone's real roads (ZoneRoads, planned when the level builds) go elsewhere, so the
+convoy drives cross-country past them.
+
+Suggested: when the scenario starts the convoy (the level is built by then), replace the route's
+middle with `RoadRoute.route(level.def, start, finish)` (the def's "roads" are the curved roads
+now) when it isn't empty, and put the ambush point on the road nearest it (`ZoneRoads.of(level)
+.segments()`). Keep the old line as the fallback.
+
+## F-191: vehicle grip ignores the surface
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[vehicle.gd](../../scripts/vehicles/vehicle.gd) `_wheel_forces` (Claude's file, so roads didn't
+change it): `grip := GRIP * ...` is the same on every surface.
+
+The roads now give the wheels' rays something to read: every road body (ZoneRoads) has a
+`PhysicsMaterial` (friction 1.0 on asphalt and concrete, 0.75 on dirt, data/roads.json) and the
+meta `road` ("asphalt"/"dirt"). Suggested: multiply the grip by the hit collider's
+`physics_material_override.friction` when it has one, and by a Proposed 0.7 on the terrain
+(ZoneTerrain), so tyres hold best on asphalt and slide sooner off-road. A wet-weather factor
+(DayNight) could come later.
+
+## F-192: roundabouts are two-way to the AI drivers
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[road_route.gd](../../scripts/vehicles/road_route.gd) `_graph` and
+[vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) (Claude's files).
+
+A roundabout is in the def's "roads" as a ring of RoadNet.RING_SIDES pieces (in order, corner k
+to corner k + 1), with the arms ending on its corners. RoadRoute's graph is undirected, so a
+route round the ring takes the shorter way, which is the wrong way half the time. Suggested: give
+ring pieces (both ends within the ring's radius of one centre) one direction only in `_graph`
+(the def order is the driving direction), and have VehicleAI slow to a Proposed 20 km/h through a
+turn of more than 30 degrees.
+
+## F-193: a crater on a road leaves the road hanging
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[ground_cuts.gd](../../scripts/world/ground_cuts.gd) `_cut_area` / `_rebuild_around` and
+[zone_roads.gd](../../scripts/world/zone_roads.gd).
+
+A blast or a dig cuts the terrain under a road, but the road's mesh and trimesh collision stay
+whole, so the road surface spans the crater (an IED on a road leaves no hole in it). Suggested: a
+small hook in GroundCuts after a cut, `ZoneRoads.of(self).cut(area)`, that rebuilds the road
+tiles touching `area` without the triangles over cut cells (ZoneRoads keeps its geometry per
+TILE_M tile, so it's one tile's mesh and body each time).
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
+
+2026-10-21 | Roads come in three kinds (asphalt 7 m, dirt tracks 4.2 m, town streets 6 m between kerbs), every number in data/roads.json as Proposed | one place to tune widths, grip and which sites get what | hard-coded consts in ZoneRoads
+2026-10-21 | Asphalt to towns, the HQ, QRF bases, comms, checkpoints and the FOB; dirt to outposts, compounds and villages, and on the trails; a link takes the better of its two ends | main roads read as main roads, farms and compounds get tracks (Arma's mix) | everything asphalt in hot zones
+2026-10-21 | Every site is joined to the roads: a site no link reaches gets one to its nearest linked site, and a link passing within 90 m of a checkpoint runs through it | hot zones only linked the HQ to its outposts, so comms, QRF bases, checkpoints, villages and the town had no road; the brief wants every site on the network | leave the links as ZoneDef makes them
+2026-10-21 | A road out through a linked-zone crossing runs straight out from the crossing to the zone's edge, its kind from the link's two zone ids (60% asphalt), so both sides of a link get the same road at their own crossing | crossings slide along their edge per zone (RegionMap SLIDES), so "the matching point" is each zone's crossing, not one shared coordinate | change RegionMap so both crossings share one along-edge position
+2026-10-21 | Towns get a mini roundabout (a 2 m mountable dome) at the crossroads; full roundabouts (6 m island, 7 m ring) go at junctions of 3+ arms within 320 m of a town, or where 4 asphalt arms meet, clear of pads | the crossroads is about 5 x 6 m between corner buildings, too tight for a full ring without moving BuildingGen's lots | widen the crossroads in BuildingGen.town (changes every town's layout)
+2026-10-21 | Kerbs and pavements sit inside the town's existing street rects (carriageway = street less 1 m each side, 2 m pavements out to the building fronts, 12 cm high with a chamfered kerb you can walk and drive over); BuildingGen.town is unchanged | no layout change, no step for soldiers or the navmesh to trip on | move the building fronts back for wider pavements
+2026-10-21 | The terrain is cut and filled to the roads: ground 0.10 m under the surface, a level shoulder (3 m low side, 6 m high side), banks 1:2 up and 1:1.6 down to 10 m out; the profile is the ground smoothed over 20 m, solved as a stretched string (36 m) through flat junctions (14 m, ramps between them at most 8%) and the pads, never more than about 3 m off the ground | roads that follow the ground but drive smoothly and never have terrain poking through | drape the road on the raw 4 m grid (bumpy, terrain through it)
+2026-10-21 | Where a road meets water (ZoneTerrain.water_height over the ground) it isn't laid or graded: the span is listed in ZoneRoads.water_crossings() for the water side's bridges and the road runs straight over it in the profile | the water side owns bridges, fords and culverts | fill a causeway across
+2026-10-21 | Road collision is a trimesh per 256 m tile (a hard body and a soft one, friction 1.0 / 0.75, meta hard_ground for footsteps) on top of the graded heightfield | the 4 m heightfield can't follow a 7 m road's curves and edges; vehicles drive on exactly what's drawn | the graded heightfield only
+2026-10-21 | The def's "roads" become the curved roads as straight pieces (within 1 m of the curve, at most 80 m, a third entry naming the kind), the links kept in "road_links"; the trails' patrols follow their curved trails | RoadRoute, ZoneScatter, the map, IEDs and the tracker all read "roads" and now follow the real roads with no change to them | a separate key (they'd all keep the old straight lines)

@@ -11,6 +11,32 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Roads (cg_brief queue item 1.2)
+
+#### Added
+- **Real roads.** Every zone's roads are planned on its ground when it loads, the same on every
+  machine: they curve round hills and follow the valleys, and the ground is cut and filled to
+  them, so they run smooth with banks either side.
+  - **Asphalt** (7 m, a dashed centre line and edge lines) between the main sites: towns, the
+    HQ, QRF bases, comms, checkpoints, the FOB.
+  - **Dirt tracks** (4 m, two ruts and a grassy crown) to outposts, compounds and villages, and
+    on the cross-country trails.
+  - **Junctions** where roads cross or join, and **roundabouts** near towns and where four main
+    roads meet.
+  - **Towns:** kerbed pavements along both streets and a mini roundabout at the crossroads.
+  - Every site is on the network now (in hot zones the comms site, QRF bases, checkpoints,
+    villages and the town had no road).
+- **Roads you can drive on.** Roads have collision that matches what's drawn; AI drivers take
+  them (the squad's drivers already route by road, and now follow the curves). Asphalt and
+  pavements sound hard underfoot, dirt tracks soft.
+- **Roads across the zone's edges.** A road leaves by each crossing into a linked zone, and the
+  zone on the other side has the same kind of road coming in at its crossing.
+- The map draws the curved roads, dirt tracks thinner than asphalt.
+
+#### Changed
+- The trails' patrols walk their curved trails.
+- Where a road meets water it stops at the bank, ready for a bridge.
+
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 
 #### Fixed
