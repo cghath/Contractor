@@ -1000,15 +1000,19 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 	for c: Dictionary in deployed:
 		Economy.note_job(String(c.get("employer", "")))  # the lockout counts again from the debrief
 	Economy.change_locals(int(debrief.locals))
+	var war: Array = []  # claude/mission-ui: what the job did to the living war, in words (the debrief's "war")
 	for c: Dictionary in deployed:
 		var result: Dictionary = (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.cid == c.cid)[0]
 		_close(c, String(result.outcome))
+		var war_before := _war_snapshot(c)
 		if String(result.outcome) == "completed" and String(c.get("zone_kind", "")) == "hot":
 			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")), String(c.get("leader", "")))  # wave 6c; the living war
 		elif String(result.outcome) == "completed" and String(c.get("leader", "")) != "":
 			WorldSites.server_leader_down(String(c.get("target", "")), String(c.leader))  # the leader it named is taken, in any zone
 		if String(c.get("op_front", "")) != "":  # D7: a US operation's result moves its front (6.6)
 			WorldSites.server_operation_ended(c, int(c.get("op_phases", 1)) if String(result.outcome) == "completed" else 0)
+		war.append_array(war_lines(c, war_before, _war_snapshot(c)))
+	debrief["war"] = war
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
 	Economy.bank_items(without_intel(report.get("bank", report.get("items", []))), "carried out")
@@ -1030,6 +1034,40 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 	_pass_days(debrief, calc_report, report)
 	debrief_ready.emit(debrief)
 	return debrief
+
+
+## What a contract can move in the living war, read before and after its result (_war_snapshot):
+## its hot zone's holder, grip and front, and its target's leaders taken. Read only: a zone that
+## isn't hot isn't looked up (WorldSites.site would add it).
+static func _war_snapshot(c: Dictionary) -> Dictionary:
+	var out := {"leaders": WorldSites.leaders_down(String(c.get("target", ""))).size()}
+	var zid := String(c.get("zone_id", ""))
+	if String(c.get("zone_kind", "")) == "hot" and zid != "":
+		var site := WorldSites.site(zid)
+		out["holder"] = String(site.get("holder", ""))
+		out["grip"] = float(site.get("grip", 0.0))
+		out["front"] = float((site.get("front", {}) as Dictionary).get("progress", -1.0))
+	return out
+
+
+## The war's changes between two snapshots of contract `c`, in words for the debrief.
+static func war_lines(c: Dictionary, before: Dictionary, after: Dictionary) -> Array:
+	var out: Array = []
+	var target := MissionRegistry.faction_name(String(c.get("target", "")))
+	var zone := String(c.get("zone_name", c.get("zone_id", "")))
+	if int(after.get("leaders", 0)) > int(before.get("leaders", 0)):
+		var down: Array = WorldSites.leaders_down(String(c.get("target", "")))
+		out.append("%s has lost %s." % [target, String(down.back()) if not down.is_empty() else "a leader"])
+	if after.has("holder"):
+		if String(after.holder) != String(before.get("holder", "")):
+			out.append("%s changed hands: now held by %s." % [zone, WorldSites.holder_name(String(after.holder))])
+		elif float(after.grip) < float(before.get("grip", 0.0)) - 0.001:
+			out.append("%s's grip on %s weakened: %d%% to %d%%." % [target, zone, roundi(float(before.grip) * 100.0), roundi(float(after.grip) * 100.0)])
+		if float(after.get("front", -1.0)) >= 0.0 and not is_equal_approx(float(after.front), float(before.get("front", -1.0))):
+			out.append("The front at %s moved: %d%% to %d%%." % [zone, roundi(float(before.get("front", 0.0)) * 100.0), roundi(float(after.front) * 100.0)])
+	if String(c.get("op_front", "")) != "":
+		out.append("The operation's result moved its front (%s)." % String(c.op_front))
+	return out
 
 
 ## Whether the latest debrief waits on the host's choice for a base assault due in its days
