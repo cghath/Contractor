@@ -144,6 +144,19 @@ const SCREEN_RANGE_M := 120.0
 const SMOKE_OUT_M := 7.0
 const SCREEN_S := 20.0
 const SCREEN_M := 15.0
+## G-14: in contact, a move over open ground the threat sees (its middle and two thirds in its
+## view) of CROSS_OPEN_M or more (a bound, a fall back, a move order) gets smoke between it and
+## the threat first (SMOKE_OUT_M off the way, toward the threat); a casualty dragged or carried
+## off in the open, from DRAG_OPEN_M. Once a squad near there (_screened). Proposed.
+const CROSS_OPEN_M := 15.0
+const DRAG_OPEN_M := 3.0
+## G-14: a stair push in a clear (F-01's floor by floor) bangs up the stair first when the
+## building is hot (Squad.bang_wanted): the carrier goes to the stair's foot and throws it to
+## STAIR_BANG_PAST_M past the top; the push goes BREACH_WAIT_S after. Not past STAIR_BANG_MAX_S
+## (he's slow getting there: they go anyway). Proposed.
+const STAIR_BANG_PAST_M := 1.2
+const STAIR_BANG_FOOT_M := 1.6
+const STAIR_BANG_MAX_S := 8.0
 ## "Give me ammo": this many magazines of the asker's ammunition, handed over within GIVE_M.
 const GIVE_MAGS := 2
 const GIVE_M := 2.0
@@ -775,6 +788,7 @@ var _hold_point := Vector3.ZERO
 var _held_since := -1.0  # when he got to _hold_point (Soldier._now()), -1 while away from it
 var _dig_way := Vector3.ZERO  # the way his cover at _hold_point faces (_dig_in)
 var _move_point := Vector3.ZERO
+var _crossing_checked := Vector3.INF  # the move order whose way was looked at for smoke (G-14)
 ## Where a casualty carried under a move order is laid down (null until worked out).
 var _lay_spot: Variant = null
 var _lay_for := Vector3.INF  # the point _lay_spot was found for (a moving CCP: found again)
@@ -1053,6 +1067,7 @@ static func server_heard_shot(shooter: Soldier, origin: Vector3, suppressed: boo
 func hear_sound(where: Vector3) -> void:
 	_suspect_pos = where
 	_suspect_at = Soldier._now()
+	_maybe_flare(where)  # (G-24: at night, light it up)
 
 
 ## Heard `who` at about `where`: awareness of them rises by `amount` (never to a full spot:
@@ -1477,6 +1492,9 @@ func _act() -> void:
 				_go(_hold_point, false)
 				_dig_in()
 		Intent.MOVE_TO:
+			if _crossing_checked != _move_point:
+				_crossing_checked = _move_point
+				_smoke_crossing(_move_point)  # (G-14: ordered across open ground under fire)
 			_go(_move_point, true)
 			if body.global_position.distance_to(_move_point) <= ARRIVE + 0.5:
 				_hold_point = _move_point
@@ -1509,6 +1527,8 @@ func _act() -> void:
 	_recover_weapon()  # (G-23: his weapon knocked out of his hands: he picks it back up)
 	_contact_drill()  # (G-18: the first moments of a contact, before the plan)
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
+	if _holding_ambush():
+		_hold_ambush()  # (F-140: a road ambush keeps its spots until it's sprung)
 	_apply_combat_mode()
 	if _care_prone and intent != Intent.HEAL:
 		_care_prone = false
@@ -1572,6 +1592,8 @@ func _notice_fire(now: float) -> void:
 		_fired_on_at = now
 		if squad:
 			squad.note_fired_on()
+		_maybe_flare(body.threat_pos if now - body.threat_time < CONTACT_MEMORY_S and body.threat_pos != Vector3.ZERO \
+			else body.global_position - body.global_basis.z * FLARE_AHEAD_M)  # (G-24)
 	_last_suppression = body.suppression
 	_last_injury = injury
 
@@ -1737,6 +1759,11 @@ func _halt_spot_taken(point: Vector3) -> bool:
 func _patrol() -> void:
 	if guard or squad == null or squad.patrol.is_empty():
 		_go(_hold_point, false)
+		return
+	var lead := squad.patrol_lead()
+	if lead != null and lead != body and _flat_distance(lead.global_position) <= PATROL_FORM_M:
+		_go(squad.follow_point(body), false)  # (G-26: his place in the patrol's formation behind the lead)
+		_patrol_index = SquadAI.of(lead)._patrol_index  # (where the lead is on the route, should he take over)
 		return
 	var point := squad.patrol[_patrol_index % squad.patrol.size()]
 	_go(point, false)
@@ -2331,6 +2358,7 @@ func _care_reach(contact: bool, handoff := false) -> void:
 			_has_cover = true
 			care = Care.DRAG
 			_start_drag_watch()
+			_smoke_crossing(spot, DRAG_OPEN_M)  # (G-14: smoke over the pick-up's way to cover)
 			return
 	care = Care.TREAT
 
@@ -2467,6 +2495,7 @@ func _care_carry(contact: bool) -> void:
 			_has_cover = spot != null
 			if spot != null:
 				_cover_point = spot
+				_smoke_crossing(spot, DRAG_OPEN_M)  # (G-14)
 			care = Care.DRAG
 			_start_drag_watch()
 		else:
@@ -3049,6 +3078,8 @@ func _do_fall_back() -> void:
 			else body.global_position + (away.normalized() if away.length() > 0.1 else -body.global_basis.z) * FALL_BACK_M
 		var spot: Variant = find_cover(p, FALL_BACK_COVER_M)
 		_fall_back_point = spot if spot != null else NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, p)
+		if not _smoke_crossing(_fall_back_point as Vector3):  # (G-14: over the open ground he runs across)
+			_screen_toward_threat(_fall_back_point as Vector3)
 	var point: Vector3 = _fall_back_point
 	if _flat_distance(point) > ARRIVE + 0.5:
 		_go(point, true)
@@ -3236,6 +3267,8 @@ func _tactic() -> Dictionary:
 		return task
 	if _friendly() and order != Squad.Order.FOLLOW and StringName(task.kind) in MOVING_TACTICS:
 		return {}
+	if post is RoadAmbush and not post.fleeing and StringName(task.kind) in MOVING_TACTICS:
+		return {}  # a road ambush fights from its own ground; its flight is the post's (F-140)
 	return task
 
 
@@ -3929,6 +3962,9 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			if String(op.get("breach", "")) != "" and not op.get("breached", false):
 				op.breached = true
 				wait = _breach(op)
+			elif String(op.get("bang", "")) != "" and int(op.get("bang_by", -1)) >= 0 and not op.has("bang_at"):
+				op.bang_at = now + BANG_AFTER_S  # an open doorway, the building hot: the bang in first (G-14)
+				wait = BANG_AFTER_S + float(BREACH_WAIT_S.get(String(op.bang), 2.0))
 			op.go_at = now + wait
 			_callout(&"tactic", "Breaching!" if wait > 0.0 else "Going in!")
 		return
@@ -3944,6 +3980,9 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 	var floors: Array = op.get("floors", [op.rooms])
 	var level: int = (op.get("floor_of", {}) as Dictionary).get(slot, 0)
 	var corner: Vector3 = floors[level][slot]
+	if op.has("stair_bang") and int(op.stair_bang.floor) == level + 1 and int(op.stair_bang.by) == slot:
+		_stair_bang(op, slot, now)  # (G-14: his bang up the stair first, from its foot)
+		return
 	# Through the doorway first (Captain, 2026-10-16: CQB): on the ground floor each man goes in
 	# by the threshold, a step inside, then hooks or crosses to his corner, instead of cutting
 	# the wall line to it.
@@ -3977,9 +4016,13 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 		var marks: Dictionary = op.floor_done[level]
 		marks[slot] = true
 		op.floor_first[level] = minf(float(op.floor_first[level]), now)
-		if not is_finite(float(op.floor_go[level + 1])) and (marks.size() >= int(op.units) or now - float(op.floor_first[level]) >= SquadTactics.FLOOR_WAIT_S):
-			op.floor_go[level + 1] = now
-			_callout(&"tactic", "Clear! Moving up!")
+		if not is_finite(float(op.floor_go[level + 1])) and not op.has("stair_bang") and not (op.get("stair_banged", {}) as Dictionary).has(level + 1) 				and (marks.size() >= int(op.units) or now - float(op.floor_first[level]) >= SquadTactics.FLOOR_WAIT_S):
+			if not _plan_stair_bang(op, level, now):
+				op.floor_go[level + 1] = now
+				_callout(&"tactic", "Clear! Moving up!")
+		if op.has("stair_bang") and int(op.stair_bang.floor) == level + 1:
+			_stair_bang(op, slot, now)
+			return
 		if is_finite(float(op.floor_go[level + 1])) and now >= float(op.floor_go[level + 1]) + slot * SquadTactics.ENTRY_GAP_S:
 			op.floor_of[slot] = level + 1
 		return
@@ -3989,6 +4032,72 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			op.called = true
 			_callout(&"tactic", "Clear!")
 		_tactic_done(t)
+
+
+## A stair push from floor `level` (G-14): when the building is hot (Squad.bang_wanted) and one
+## of the stack carries a bang, he takes it to the stair's foot first (op "stair_bang": "floor",
+## "by" his slot, "item", "foot", "top", "since"). Returns whether one was planned.
+func _plan_stair_bang(op: Dictionary, level: int, now: float) -> bool:
+	var banged: Dictionary = op.get("stair_banged", {})
+	op["stair_banged"] = banged
+	banged[level + 1] = true
+	if squad == null or not squad.bang_wanted(op.building):
+		return false
+	var stair := {}
+	for st: Dictionary in op.building.get("stairs", []):
+		if int(st.get("from", -1)) == level and int(st.get("to", -1)) == level + 1:
+			stair = st
+			break
+	if stair.is_empty():
+		return false
+	var units := _op_units(op)
+	var pick := Squad.bang_carrier(units)
+	if int(pick[0]) < 0:
+		return false
+	var ai: SquadAI = units[int(pick[0])]
+	var how := String(pick[1])
+	op["stair_bang"] = {"floor": level + 1, "by": int(ai._tactic().get("slot", -1)), "item": Squad.BANG_ITEMS[how], "how": how,
+		"foot": stair.foot, "top": stair.top, "since": now}
+	ai._callout(&"tactic", "Bang up the stairs!")
+	return true
+
+
+## The stair bang under way: its thrower to the stair's foot and the bang up past the top; the
+## push goes once it's gone off (or STAIR_BANG_MAX_S on); the rest wait at their corners.
+func _stair_bang(op: Dictionary, slot: int, now: float) -> void:
+	var sb: Dictionary = op.stair_bang
+	var level := int(sb.floor) - 1
+	var done := func(wait: float) -> void:
+		op.erase("stair_bang")
+		op.floor_go[level + 1] = now + wait
+		_callout(&"tactic", "Clear! Moving up!")
+	if now - float(sb.since) > STAIR_BANG_MAX_S or not _op_units(op).any(func(ai: SquadAI) -> bool: return int(ai._tactic().get("slot", -1)) == int(sb.by)):
+		done.call(0.0)  # he's slow or down: up without it
+		return
+	if slot != int(sb.by):
+		return
+	var foot: Vector3 = sb.foot
+	var top: Vector3 = sb.top
+	if _flat_distance(foot) > STAIR_BANG_FOOT_M:
+		_go(foot, true)
+		return
+	_has_destination = false
+	var up := Vector3(top.x - foot.x, 0.0, top.z - foot.z)
+	var at := top + (up.normalized() if up.length() > 0.1 else Vector3.ZERO) * STAIR_BANG_PAST_M + Vector3.UP * 0.5
+	if order_throw(StringName(sb.item), at):
+		done.call(float(BREACH_WAIT_S.get(String(sb.how), 2.0)))
+
+
+## The living units on clearance `op`, by slot.
+func _op_units(op: Dictionary) -> Array[SquadAI]:
+	var out: Array[SquadAI] = []
+	if squad == null:
+		return out
+	for ai: SquadAI in squad.brains():
+		if ai.body.vitals.is_up() and is_same(ai._tactic().get("op"), op):
+			out.append(ai)
+	out.sort_custom(func(a: SquadAI, z: SquadAI) -> bool: return int(a._tactic().get("slot", 0)) < int(z._tactic().get("slot", 0)))
+	return out
 
 
 ## Bounding overwatch toward `point` (t keeps the leg): in contact, legs of up to BOUND_LEG_M
@@ -4002,6 +4111,9 @@ func _bound_toward(point: Vector3, t: Dictionary) -> bool:
 		t.erase("leg_point")
 		_go(point, true)
 		return false
+	if not t.has("crossing"):
+		t["crossing"] = true
+		_smoke_crossing(point)  # (G-14: the open ground of the whole bound, once)
 	var now := Soldier._now()
 	var leg: Variant = t.get("leg_point")
 	if leg != null and _flat_distance(leg) <= ARRIVE + 0.4:
@@ -4038,6 +4150,33 @@ func _screen_toward_threat(point: Vector3) -> void:
 	if _throw(&"smoke_grenade", at) and squad:
 		squad.screen_at = Soldier._now()
 		squad.screen_point = at
+
+
+## Crossing to `to` in contact (G-14): smoke between the way and the threat first when it's open
+## ground the threat sees, `min_m` or more of it, unless the squad screened there lately.
+## Returns whether it threw.
+func _smoke_crossing(to: Vector3, min_m := CROSS_OPEN_M) -> bool:
+	if not in_contact() or body.threat_pos == Vector3.ZERO or _flat_distance(to) < min_m:
+		return false
+	var from := body.global_position
+	var mid := from.lerp(to, 0.5)
+	var threat := body.threat_pos
+	var off := Vector3(threat.x - mid.x, 0.0, threat.z - mid.z)
+	if off.length() > SCREEN_RANGE_M or off.length() < SMOKE_OUT_M + 2.0 or _screened(mid) or body.inventory.count_of(SCREEN_SMOKE) <= 0:
+		return false
+	var world := body.get_world_3d()
+	var eye := threat + Vector3.UP * 1.5
+	for k: float in [0.5, 0.67]:
+		var p := from.lerp(to, k) + Vector3.UP * 1.1
+		if SmokeCloud.blocks(eye, p) or not Throwables.clear_line(world, eye, p):
+			return false  # (a wall or smoke already hides that stretch)
+	var at := mid + off.normalized() * SMOKE_OUT_M
+	if not _throw(SCREEN_SMOKE, at):
+		return false
+	if squad:
+		squad.screen_at = Soldier._now()
+		squad.screen_point = mid
+	return true
 
 
 ## "Give me ammo": to the asker, then magazines of their ammunition (GIVE_MAGS) if this unit
@@ -4310,6 +4449,77 @@ func ambusher() -> bool:
 	return float(absi(String(squad.name).hash()) % 100) / 100.0 < AMBUSH_SHARE
 
 
+## G-26: a hostile patrol walks its route in formation behind its lead (Squad.patrol_lead,
+## follow_point: the formation and spacing Squad picks for the ground and the threat, by its
+## doctrine); a man further than this from the lead (left behind, or the lead's down) walks the
+## route on his own. Proposed.
+const PATROL_FORM_M := 60.0
+
+
+## Enemy flares at night (AI bar G-24; LAMBS fires flares): a hostile who hears contact or
+## takes fire in the dark (darkness FLARE_DARK or more where he is) has his squad put up
+## illumination over it, once a squad every FLARE_SQUAD_GAP_S, not where a flare already lights
+## it (FLARE_LIT_ENOUGH): a hand flare from whoever of the squad up and on foot carries one
+## nearest it (Flares.server_hand: he says so), else his side's mortar team's illumination round
+## where it has one in range (MortarTeam.illum_for). Nobody with either: the squad asks again in
+## FLARE_RETRY_S. Fired on with no known threat: over FLARE_AHEAD_M in front. Proposed.
+const FLARE_DARK := 0.55
+const FLARE_SQUAD_GAP_S := 45.0
+const FLARE_RETRY_S := 10.0
+const FLARE_LIT_ENOUGH := 0.4
+const FLARE_AHEAD_M := 60.0
+
+
+func _maybe_flare(point: Vector3) -> void:
+	if squad == null or body == null or _friendly() or body.faction == &"civilian" or not point.is_finite():
+		return
+	var now := Soldier._now()
+	if now - squad.flare_at < FLARE_SQUAD_GAP_S or DayNight.darkness_at(body.global_position) < FLARE_DARK \
+			or Flares.light_at(point) >= FLARE_LIT_ENOUGH:
+		return
+	squad.flare_at = now
+	var by: Soldier = null
+	var best := INF
+	for m: Soldier in squad.members():
+		if not m.vitals.is_up() or Vehicle.ride_of(m) != null or m.inventory.count_of(Flares.HAND_ITEM) <= 0 or now < m._busy_until:
+			continue
+		var d := m.global_position.distance_to(point)
+		if d < best:
+			by = m
+			best = d
+	var flares := Flares.of(body)
+	if by and flares and flares.server_hand(by, point):
+		var his := SquadAI.of(by)
+		if his:
+			his._callout(&"tactic", "Flare!")
+		return
+	if MortarTeam.illum_for(body, point):
+		_callout(&"tactic", "Illumination, over there!")
+		return
+	squad.flare_at = now - FLARE_SQUAD_GAP_S + FLARE_RETRY_S  # nothing to light it with: ask again soon
+
+
+## Whether this unit is one of a road ambush that hasn't been sprung (RoadAmbush): it keeps to
+## its own spot whatever it hears or sees (reloading, its own wounds and a casualty aside).
+func _holding_ambush() -> bool:
+	return post is RoadAmbush and not post.sprung and not post.fleeing and not intent in [Intent.RELOAD, Intent.HEAL, Intent.CASUALTY]
+
+
+## Holding a road ambush: to his spot, then down there facing the kill zone, holding fire.
+func _hold_ambush() -> void:
+	var amb := post as RoadAmbush
+	amb.settle(self)
+	var spot: Variant = amb.position_of(body)
+	if not spot is Vector3:
+		return
+	if _flat_distance(spot) > ARRIVE + 0.3:
+		_go(spot, false)
+	else:
+		_has_destination = false
+		_face(amb.facing_point())
+	body.want_crouch = true
+
+
 func _lying_in_wait() -> bool:
 	return intent == Intent.INVESTIGATE and ambusher() and suspecting() and not in_contact()
 
@@ -4449,6 +4659,8 @@ func target_score(s: Soldier, d: float, taken: Dictionary = {}) -> float:
 	if s.movement and (s.movement.is_prone() or s.is_crouching()):
 		sc += TARGET_LOW
 	sc += TARGET_TAKEN * int(taken.get(s.get_instance_id(), 0))
+	if post is RoadAmbush:
+		sc -= (post as RoadAmbush).target_bonus(s)  # a sprung road ambush goes for the vehicles' guns and crews first (F-140)
 	return sc
 
 

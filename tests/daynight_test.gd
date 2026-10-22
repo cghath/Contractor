@@ -9,6 +9,10 @@ extends Node
 ## - the time passes in a contract zone (advance), not past 24;
 ## - saved with the zone and restored over the definition's;
 ## - the host's sync (DayNight._sync, what a client gets) sets the time and weather.
+## - flares (AI bar G-24, Flares): a flare lights the ground under it at night, so spotting sees
+##   there as by day and not past its edge, fading as it burns out; a hostile who hears contact in
+##   the dark puts up his hand flare over it, once for his squad, never by day; one in
+##   Flares.FLARE_EVERY hostiles carries them; NVGs bloom in the light and looking at a flare.
 ##   <godot> --headless --path . res://tests/daynight_test.tscn
 
 var failures := 0
@@ -41,6 +45,7 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	await get_tree().process_frame
 	_run()
+	await _test_flares()
 	_finish()
 
 
@@ -115,6 +120,76 @@ func _run() -> void:
 	check(is_equal_approx(dn.hour, 4.0) and dn.weather == "fog", "the host's sync sets it (%.1f h, %s)" % [dn.hour, dn.weather])
 	dn._sync(5.0, "hail")
 	check(dn.weather == DayNight.DEFAULT_WEATHER, "an unknown weather falls back to clear")
+	dn.server_set(DayNight.DEFAULT_HOUR, "clear")
+
+
+func _test_flares() -> void:
+	print("Flares (G-24)")
+	var dn := DayNight.current()
+	if dn == null:
+		return
+	dn.server_set(0.0, "clear")
+	var flares := Flares.of(level)
+	Flares.burning.clear()
+	var field := player.global_position + Vector3(0, 0, 100)
+	var eye := player.global_position + Vector3.UP * 1.6
+	check(Spotting.sight_x(null, eye, 100.0, false, field) == INF, "midnight, no flare: nobody seen at 100 m")
+	flares.server_pop("hand", field)
+	check(Flares.burning.size() == 1 and absf(Flares.light_at(field) - 1.0) < 0.01 and Flares.light_at(field + Vector3(300, 0, 0)) == 0.0,
+		"a hand flare over the field lights it (%.2f under it, 0 300 m off)" % Flares.light_at(field))
+	var lit := Spotting.sight_x(null, eye, 100.0, false, field)
+	check(lit < 1.2, "under its light he's seen at 100 m almost as by day (x%.2f)" % lit)
+	check(Spotting.sight_x(null, eye, 100.0, false, field + Vector3(300, 0, 0)) == INF, "past its edge it's still night")
+	var pos := Flares.position_of(Flares.burning[0])
+	check(pos.y - field.y > float(Flares.KINDS.hand.height_m) * 0.9, "it burns high over the ground (%.0f m up)" % (pos.y - field.y))
+	Flares.burning[0].born = Soldier._now() - float(Flares.KINDS.hand.burn_s) + Flares.FADE_S * 0.5
+	var fading := Flares.light_at(field)
+	Flares.burning[0].born = Soldier._now() - float(Flares.KINDS.hand.burn_s) - 0.1
+	check(fading > 0.3 and fading < 0.7 and Flares.light_at(field) == 0.0 and Flares.burning.is_empty(),
+		"it fades in its last seconds (%.2f) and is gone once burnt out" % fading)
+	# NVGs bloom: standing in its light, and looking at one.
+	flares.server_pop("hand", player.global_position)
+	var bloom := NvgView.bloom(player)
+	Flares.burning.clear()
+	check(bloom >= NvgView.BLOOM_LIT * 0.99 and NvgView.bloom(player) == 0.0, "NVGs bloom in a flare's light (%.2f), not without one" % bloom)
+	# Kits: one in FLARE_EVERY carries them.
+	level.set_meta(Flares.KIT_META, 0)
+	var kits: Array = []
+	for i in Flares.FLARE_EVERY:
+		kits.append(Flares.insurgent_flares(level).size())
+	check(kits[0] == Flares.FLARES_CARRIED and kits.slice(1).all(func(n: int) -> bool: return n == 0),
+		"one hostile in %d on the standard kit carries %d hand flares (%s)" % [Flares.FLARE_EVERY, Flares.FLARES_CARRIED, kits])
+	# A hostile hears contact at night: he puts his flare up over it, once for the squad.
+	var sq := Squad.new()
+	sq.name = "FlareTest"
+	sq.faction = &"hostile"
+	level.add_child(sq)
+	var h := level.spawn_soldier({"name": "FlareMan", "faction": "hostile", "variant": "urban", "pos": player.global_position + Vector3(0, 0.1, -60),
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.5, "discipline": 0.5, "guard": true})
+	var ai := SquadAI.of(h)
+	ai.squad = sq
+	await _wait_for(func() -> bool: return ai.body != null, 3.0)
+	while h.inventory.count_of(Flares.HAND_ITEM) > 0:
+		h.inventory.remove_one(Flares.HAND_ITEM)
+	h.inventory.take(Flares.HAND_ITEM)
+	h._busy_until = 0.0
+	ai.hear_sound(player.global_position + Vector3(0, 0, 20))
+	var up := Flares.burning.size() == 1 and h.inventory.count_of(Flares.HAND_ITEM) == 0
+	var over: Vector3 = Flares.burning[0].at if not Flares.burning.is_empty() else Vector3.INF
+	check(up and over.distance_to(player.global_position + Vector3(0, 0, 20)) < float(Flares.KINDS.hand.throw_m) + 1.0,
+		"at night a hostile who hears contact puts his hand flare up over it (%s)" % [over])
+	h.inventory.take(Flares.HAND_ITEM)
+	h._busy_until = 0.0
+	Flares.burning.clear()
+	ai.hear_sound(player.global_position)
+	check(Flares.burning.is_empty(), "and not again for his squad for a while")
+	dn.server_set(12.0, "clear")
+	sq.flare_at = -1000.0
+	ai.hear_sound(player.global_position)
+	check(Flares.burning.is_empty() and h.inventory.count_of(Flares.HAND_ITEM) == 1, "by day he keeps it")
+	check(not MortarTeam.illum_for(h, player.global_position), "no mortar team of his side here: no illumination round")
+	h.queue_free()
+	sq.queue_free()
 	dn.server_set(DayNight.DEFAULT_HOUR, "clear")
 
 

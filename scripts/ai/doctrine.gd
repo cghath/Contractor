@@ -25,6 +25,9 @@ extends RefCounted
 ##   morale_shaken, morale_broken   where aim suffers and where it breaks (SquadAI morale),
 ##   advance_after_s   how long a hostile waits without sight before pushing a bound,
 ##   flank          how far to the side of the enemy that bound goes (0 straight at him, 1 wide).
+##   spacing        (G-26) the gaps between its men and fire teams on the move, as a multiple of
+##                  Squad.SPACINGS (Squad.resolved; read as it is, not over the side's usual: an
+##                  insurgent band bunches up, a regular army keeps the drill's gaps).
 ## A per-unit doctrine (SquadAI.doctrine) is still to come: a squad's, or its side's.
 
 const PATH := "res://data/doctrines.json"
@@ -36,12 +39,12 @@ const PENDING: Array[String] = []
 ## The weights the AI reads now (AI bar G-15, one at a time): burst and burst_pause (SquadAI
 ## burst_rounds and pause_mult, G-09). The file's "_wired" lists the same.
 const WIRED: Array[String] = ["burst", "burst_pause", "engage_m", "reaction", "aim_deg", "cover_fire_s",
-	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank"]
+	"frag_cooldown_s", "frag_wait_s", "morale_shaken", "morale_broken", "advance_after_s", "flank", "spacing"]
 
 ## What a weight is when the file lacks it: the squad AI's numbers before doctrines (engage_m:
 ## a hostile's sight, SquadAI.SIGHT_RANGE).
 const FALLBACK := {"engage_m": 200.0, "reaction": 1.0, "aim_deg": 0.0, "burst": 1.0, "burst_pause": 1.0, "cover_fire_s": 5.0,
-	"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.4, "morale_broken": 0.25, "advance_after_s": 6.0, "flank": 0.0}
+	"frag_cooldown_s": 15.0, "frag_wait_s": 4.0, "morale_shaken": 0.4, "morale_broken": 0.25, "advance_after_s": 6.0, "flank": 0.0, "spacing": 1.0}
 
 static var _data := {}
 ## The hostile side's doctrine, worked out once per zone (zone id -> doctrine id).

@@ -26,6 +26,8 @@ var fired := 0
 var _cfg := {}
 ## Per gun seat: {"target", "check", "burst", "pause"}.
 var _seats := {}
+## Who the gunners have made out: soldier instance id -> [awareness 0..1, when last looked at].
+var _aware := {}
 
 
 ## Host: gives `v` an AI gunner (once). Returns it.
@@ -145,8 +147,27 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 			continue
 		if _friend_in_line(gunner, everyone, muzzle, aim):
 			continue
+		if _spotted(gunner, s) < 1.0:
+			continue  # not made out yet (Spotting: a man down in cover at range takes a while)
 		return s
 	return null
+
+
+## The gunner's awareness of `s` after this look (one check_s of it in sight): it builds over
+## Spotting.spot_seconds as SquadAI's does, and goes once he's out of sight a look or two.
+func _spotted(gunner: Soldier, s: Soldier) -> float:
+	var now := Soldier._now()
+	var id := s.get_instance_id()
+	var e: Array = _aware.get(id, [0.0, now])
+	var gap := now - float(e[1])
+	var a := float(e[0]) if gap <= float(_cfg.get("check_s", 0.5)) * 3.0 else 0.0
+	if a < 1.0:
+		var brain := SquadAI.of(gunner)
+		var t := Spotting.spot_seconds(gunner, s, Spotting.preset_of(vehicle), brain._react_combat() if brain and brain.body else 0.5, false, now,
+			Spotting.foliage_m(Spotting.scatter_of(vehicle), gunner, s))
+		a = 1.0 if t <= 0.0 else minf(a + float(_cfg.get("check_s", 0.5)) / t, 1.0)
+	_aware[id] = [a, now]
+	return a
 
 
 func _friend_in_line(gunner: Soldier, everyone: Array[Soldier], from: Vector3, to: Vector3) -> bool:
