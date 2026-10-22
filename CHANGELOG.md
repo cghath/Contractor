@@ -268,6 +268,10 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   stairs; it slides along its wall now (or another wall takes the doorway).
 - **The building docs no longer claim an office** before there was one (docs/building_gen.md,
   docs/feature_comparison.md 8.2): there is one now.
+- **Loop suite, helicopter extraction:** the player sets down what's in his hands before his
+  rifle (a drop lets go of the hands first, so a carried-out hard case kept the rifle slung), and
+  a dead hostile's intel isn't expected in the stash (intel goes to the debrief, never the stash).
+
 ### Roads (cg_brief queue item 1.2)
 
 #### Added
@@ -293,7 +297,7 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 #### Changed
 - The trails' patrols walk their curved trails.
 - Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
-  billboards) follow the curved roads and keep off them, each road its own width (F-178).
+  billboards) follow the curved roads and keep off them, each road its own width (F-199).
 - **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
   new roads run (every site's road, the roads in from the zone's edges), and each road runs
   straight across its bridge's deck and down its ramps instead of dipping under it onto the

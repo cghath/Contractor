@@ -449,7 +449,9 @@ static func server_fire_key(s: Soldier, origin: Vector3, dir: Vector3) -> String
 	Sfx.server_shot(muzzle, point, String(key.stats.get("sound", "shotgun")))
 	var lvl := CompoundLevel.current(s)
 	if lvl:
-		lvl.show_tracer.rpc(muzzle, point, false, Tracer.Kind.BALL)
+		var launch: Variant = result.get("launch")  # the path it flew, as Soldier's shots pass it (CompoundLevel.show_tracer)
+		lvl.show_tracer.rpc(muzzle, launch if launch is Vector3 and end is Vector3 else Vector3.ZERO, Ballistics.round_id(shot_item(key, shell)),
+			point, false, Tracer.Kind.BALL)
 		if String(result.get("result", "none")) != "none":
 			lvl.show_impact.rpc(result.position, result.normal, result.result)
 	PeopleLayer.server_noise(s, origin)

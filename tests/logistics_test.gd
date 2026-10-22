@@ -869,7 +869,8 @@ func _test_breach_navigation() -> void:
 	var through := Array(path).any(func(p: Vector3) -> bool: return Vector2(p.x + 4.85, p.z + 8.0).length() < 1.0)
 	check(after < 5.5, "now the path goes straight out through the breach (%.1f m, was %.1f)" % [after, before])
 	check(through, "right past the gap")
-	var path_back := _path_length(map, Vector3(0, 0, 0), Vector3(0, 0, -8))
+	# (Beside the MediumDummy at (0, 0, -8), not on it: the dummies are in the navmesh, NavBuilder.OBSTACLES_GROUP.)
+	var path_back := _path_length(map, Vector3(0, 0, 0), Vector3(0, 0, -7.2))
 	check(path_back < 12.0, "paths elsewhere still work (through the doorway: %.1f m)" % path_back)
 
 	# What the host spends on the main thread: the breach check and reading a chunk's voxels.
