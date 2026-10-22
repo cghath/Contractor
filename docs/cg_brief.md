@@ -318,7 +318,7 @@ Every gun, not just the first-pass list.
 Each type shows up on the board, plays start to finish, and has its own test.
 
 Combined arms and invasion missions (larger zones, armour columns, beach landings, seizing
-crossings) are Claude's, alongside the armour work, so no need to build those.
+crossings) are item 3, so they're not repeated here.
 
 ### 8. Follow-ups (F-xx in docs/audits/followups.md)
 
@@ -363,9 +363,7 @@ buckle, shoulder hits spin). Players get a view kick to match.
 
 ### 13. Vehicles and air, in this order
 
-Armoured gameplay is Claude's now (Captain, 2026-10-21): crewable Bradley/Abrams/AAV main guns,
-first- and third-person vehicle HUDs, light armour across the factions, and US forces fighting in
-the living war. No need to build those. Still yours, in this order:
+Armoured ground vehicles are items 2-4. Still to do here, in this order:
 1. Enemy armed helicopters at high alert.
 2. Close air support and attack-helicopter runs as a support purchase (the AH-1Z model exists,
    parked on the LHD).
