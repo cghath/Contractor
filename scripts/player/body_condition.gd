@@ -171,7 +171,7 @@ func mouth_blood() -> bool:
 
 ## The body meshes the overlay is on now (tests).
 func overlaid() -> Array[MeshInstance3D]:
-	return _overlaid.filter(func(m: MeshInstance3D) -> bool: return is_instance_valid(m))
+	return _overlaid.filter(func(m: Variant) -> bool: return is_instance_valid(m))  # (untyped: a freed mesh fails a typed argument before the check)
 
 
 func _refresh() -> void:
