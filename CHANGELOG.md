@@ -13,6 +13,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Combined arms A1: the armour model (docs/combined_arms.md 2.3-2.4)
 
+**For phase A2 (handover):** `ArmourModel.damage()` (scripts/combat/armour_model.gd) is A1's
+bridge onto the old zones: replace it with the module path, and keep `vehicle_hit()` and the
+pure `resolve()` (its HitResult has the outcome, `pen`, `t_eff`, `residual`, `burst` and
+`tiles_fired`). Fired tiles and fitted packages live in vehicle metadata (`armour_tiles`,
+`armour_packages`) until A2/A7 put them in `net_state`. Charges, mines and fire support (HE with
+no warhead id) and rifle rounds still use `VehicleDamage` on plated models (calls 79 and 80).
+New per-model data goes in data/vehicle_modules.json; `VehicleSpecs.spec` already merges it.
+docs/combined_arms.md calls 74-92 list A1's decisions.
+
 #### Added
 - **Armour that cares about angle and where you hit.** The Abrams, Bradley, AAV, M-ATV and
   MaxxPro now have armour plates: turret cheeks, mantlet, glacis, skirts, sides, roofs,
