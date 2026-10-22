@@ -159,6 +159,17 @@
 			"scatter": {"conifer_share": 0.1, "rocks_per_km2": 15, "large_rock_share": 0.1, "scrub_per_km2": 160, "trees_per_km2": 6, "woods_per_km2": 0.5, "copses_per_km2": 2, "road_trees": 0.5,
 				"props_per_km2": 2.2, "props_near_m": 55, "ruins_per_km2": 0.8, "valuables_per_km2": 1.4, "tufts_per_km2": 40000, "pebbles_per_km2": 1500, "rock_clusters_per_km2": 8,
 				"colours": {"rock": ["77736a", "6a665e"], "scrub": ["55633a", "6d6f40"], "crown": ["46602f", "52672f"], "trunk": "4f3e2c"}}
+		},
+		"city": {
+			"_note": "Queue item 1.5 (cghath, 2026-10-22): a city's country (the Old Quarter): low, gently rolling ground (a city's grid stands on one flat pad, ZoneModules \"city#\"), dusty verges and waste ground, grey-brown tarmac-coloured streets, few trees but more litter and ruins than open country. Proposed.",
+			"name": "City",
+			"land": {"relief_scale": 0.35, "wavelength_m": 900, "octaves": 3, "gain": 0.4, "ridge": 0.0, "detail_m": 1.2, "detail_wavelength_m": 200, "folds_m": 1.2},
+			"palette": {"grass": "7a7550", "dry": "8d8462", "earth": "807360", "rock": "7a746a", "road": "5f5c57", "apron": "7a7550"},
+			"sky": {"fog_density": 0.00045, "fog_colour": "b8b4a8"},
+			"scatter": {"conifer_share": 0.0, "rocks_per_km2": 30, "large_rock_share": 0.05, "scrub_per_km2": 300, "trees_per_km2": 5, "woods_per_km2": 0, "copses_per_km2": 1.0, "road_trees": 0.4,
+				"props_per_km2": 4.0, "props_near_m": 60, "ruins_per_km2": 2.5, "valuables_per_km2": 1.6,
+				"tufts_per_km2": 14000, "pebbles_per_km2": 5000, "rock_clusters_per_km2": 15,
+				"colours": {"rock": ["7e786c", "6c675e"], "scrub": ["6c6c44", "7a7444"], "crown": ["56622f", "5e6a30"], "trunk": "5a4632"}}
 		}
 	}
 }

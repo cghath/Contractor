@@ -150,7 +150,7 @@ func generate(def: Dictionary, flat: Array) -> void:
 		_roads.append([a, b, Rect2(a, Vector2.ZERO).expand(b).grow(ROAD_VERGE_M)])
 	_streets.clear()
 	for m: Dictionary in def.get("modules", []):
-		if ZoneModules.base(String(m.type)) == "town" and ZoneModules.has_type(String(m.type)):
+		if String(m.type).begins_with(ZoneModules.TOWN) and ZoneModules.has_type(String(m.type)):  # (a city's block paints its own: ZoneModules.streets)
 			var at := Vector2(float(m.pos[0]), float(m.pos[1]))
 			var half: Vector2 = ZoneModules.HALF[String(m.type)]
 			_streets.append(Rect2(at.x - BuildingGen.TOWN_HALF_X, at.y - BuildingGen.STREET_W * 0.5, BuildingGen.TOWN_HALF_X * 2.0, BuildingGen.STREET_W))

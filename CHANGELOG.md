@@ -48,6 +48,50 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - The rocky ridge, highland moor and badlands presets have cliffs, and most presets have gullies
   or ditches, so those zones' ground is new.
 
+### City zones and village houses (cghath's brief, queue items 1.5 and 1.6)
+
+#### Added
+- **Cities.** A city is a street grid of blocks: 5 x 4 blocks, 10 m streets between and round
+  them. Each block is a ring of terraced buildings along its four streets, fronts on the street,
+  narrow alleys between them and a courtyard behind. The inner blocks are 3-5 storeys, the outer
+  ring 2-3, and two or three 6-8 storey towers stand out over the core. New building types: an
+  apartment block (flats on every floor), a tenement (a shop under flats) and a tower (offices).
+  Some buildings are ruined, and there are barricades and rubble in the streets.
+- **Stairs to every floor and the roof.** Every building over one storey has a flight up from
+  each floor to the next and onto its roof, and the AI's navigation covers every floor and roof.
+- **Garrisons hold the upper floors.** A city's defenders stand at upstairs windows onto the
+  street, in back rooms upstairs and on the roofs, and the towers are held from the top floor
+  and the roof.
+- **The Old Quarter is a real city.** Its towns are replaced by a city near the enemy HQ, with a
+  road in from the HQ and a patrol round its inner streets, on a new "city" terrain preset (low
+  ground, dusty verges, grey streets, few trees). Each block streams in on its own, so the city
+  loads round you as you walk in, and each block is a town to missions (raids, HVTs, hostages,
+  intel), the townsfolk and the enemy's defence.
+- **The street grid is data the roads can use** (the zone's "cities"): paving it is F-210.
+- **A `city` test suite**: the city by seed, its storeys, stairs, rooms and garrison posts, the
+  Old Quarter, the village, and in the world the navmesh up a tall building, the AI's building
+  scan from upstairs, the garrison upstairs and a city block's frame time as it streams in.
+  Pictures: `tests/city_shots.tscn`.
+
+#### Changed
+- **Village houses are generated.** The village's four houses (mud brick, cinder block, a
+  two-room brick house and a plank shack) are now generated buildings with rooms, furniture,
+  windows and their own look, each where the old one stood with its door in the same place. The
+  village's layout, garrison posts, loot and mission spots are as they were.
+- The AI's navigation in zones now reaches the top of tall buildings (it stopped 8 m up).
+- More physics bodies are allowed (Jolt's limit is 32 768), so a whole city can be loaded.
+
+#### Fixed
+- Stairs in city buildings always join the floor on the AI's navigation (a short space in front
+  of the first step could cut a stair off, depending on the ground's height). Every stair's
+  navigation ramp now has a wedge on and off. Towns and landmarks keep their stairs as they are
+  for now (F-212).
+
+#### Known
+- An AI order from the street to a tall tower's top floors first paths a floor or two short and
+  re-paths on the way up (Godot's path search stops at 4096 navmesh polygons: F-213). A city
+  block's AI building scans can take 150-450 ms near tall buildings (F-211).
+
 ### US forces in the living war (combined arms, phase D7)
 
 #### Added
