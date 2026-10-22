@@ -29,7 +29,8 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | Tactics reels → AI spec | docs/tactics/, docs/ai_tactics.md | yes | Done from 10 reels (13 gone, skipped on Captain's call); see the B lane row for what was deferred |
 | 3D loadout editor + 3D armory | claude/loadout-3d | yes | Done: 3D soldier with clickable slots, buy-in-place and "Buy missing", saved kits applied to anyone incl. Hawk 2/Viper 3, armory room by shelf. Not yet seen in game: check marker placement on the female build, gun rail markers, shelf spacing (docs/loadout_3d.md) |
 | Mission UI pass | claude/mission-ui | yes | Done (9aa87f16): contract board, briefing, objectives tracker, debrief; contracts, missions, ui, smoke pass (R2510, R2511). Not yet seen in game |
-| Town perf follow-up | claude/perf-towns | no | Done to 0721c384, pushed, not merged: city 136→103 ms, fight 62→35, woods 25→14, drive 16→8.5, heli 15→10.6 (hitches 27→3/min), budgets tightened (R2523 PASS). Next: CI, merge into claude/ai-driving; open: team spawns (F-206), F-225, F-226 |
+| Town perf follow-up | claude/perf-towns | yes | Done (a38fab7e): city 136→103 ms, fight 62→35, woods 25→14, drive 16→8.5, heli 15→10.6 ms with hitches 27→3/min; perfcases budgets tightened. Cities are still the heaviest case |
+| Voice + economy tuning | (next) | no | Queued: last of Captain's one-at-a-time list |
 
 ## Open work, in order, and who has it
 
