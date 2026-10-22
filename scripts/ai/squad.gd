@@ -88,6 +88,14 @@ const SPACING_ORDER: Array[String] = ["tight", "normal", "wide"]
 ## the lead make it a town (looked up on a TOWN_GRID_M grid, so a walk doesn't rescan every
 ## step); road under the lead from ROAD_WEIGHT (ZoneTerrain.road_weight).
 const CONTEXT_S := 1.0
+## G-26 (patrol formation variety; FM 3-21.8's choices, LAMBS's random patrol formations): woods
+## round the lead (WOODS_FOLIAGE_M or more of leaves on four lines WOODS_M out at chest height)
+## make it a file; the squad on the alert (a man suspecting someone, or contact in the last
+## ALERT_S) or in the dark takes a staggered column on a road rather than the column, and a
+## staggered column on open ground at night (pick_formation). Proposed.
+const WOODS_M := 15.0
+const WOODS_FOLIAGE_M := 3.0
+const ALERT_S := 60.0
 const TOWN_M := 18.0
 const TOWN_GRID_M := 8.0
 const ROAD_WEIGHT := 0.5
@@ -163,6 +171,8 @@ var ccp: Variant = null
 var hold_casualties := false
 ## The squad's last screening smoke (SquadAI._screened): when and where it went up.
 var screen_at := -1000.0
+## When the squad last put up illumination (G-24: SquadAI._maybe_flare).
+var flare_at := -1000.0
 var screen_point := Vector3.ZERO
 ## A rescuer went down going to / treating a casualty here, then (SquadAI._rescue_hot).
 var rescuer_down_at := -1000.0
@@ -276,6 +286,85 @@ func auto_breach(b: Dictionary, units: Array) -> String:
 		if _carrier(units, how) >= 0:
 			return how
 	return ""
+
+
+## G-14: a building is hot (worth a bang before going in, or up its stair) when the squad knows of
+## an enemy inside it, or is in a fight with one known within HOT_BANG_M of it; never with a
+## noncombatant inside (a civilian, an HVT). Proposed.
+const HOT_BANG_M := 35.0
+const BANG_ITEMS := {"flash": &"flashbang", "frag": &"frag_grenade"}
+
+
+func bang_wanted(b: Dictionary) -> bool:
+	if b.is_empty() or noncombatant_inside(b):
+		return false
+	if enemy_inside(b):
+		return true
+	if not is_engaged():
+		return false
+	var c: Vector3 = b.get("centre", Vector3.INF)
+	for e: Dictionary in enemy_picture():
+		if float(e.age) <= STALE_S and c.is_finite() and Vector2((e.pos as Vector3).x - c.x, (e.pos as Vector3).z - c.z).length() <= HOT_BANG_M:
+			return true
+	return false
+
+
+## What `ai` would bang a room with (G-14, by side): our side a flashbang first (rooms may hold
+## anyone), the enemy a frag first; "" when he carries neither.
+static func bang_of(ai: SquadAI) -> String:
+	for how: String in bang_order(ai.body.faction):
+		if Vitals.has_item(ai.body.inventory, BANG_ITEMS[how]):
+			return how
+	return ""
+
+
+## The bangs side `faction` reaches for, first choice first (bang_of).
+static func bang_order(faction: StringName) -> Array[String]:
+	var order: Array[String] = ["flash", "frag"]
+	if faction == &"hostile":
+		order.reverse()
+	return order
+
+
+## Who of `units` bangs and with what (G-14): the first choice (bang_order) carried by any of
+## them before the next, the first in the stack who carries it: [slot, how], [-1, ""] for nobody.
+static func bang_carrier(units: Array) -> Array:
+	if units.is_empty():
+		return [-1, ""]
+	for how: String in bang_order((units[0] as SquadAI).body.faction):
+		for i in units.size():
+			if Vitals.has_item((units[i] as SquadAI).body.inventory, BANG_ITEMS[how]):
+				return [i, how]
+	return [-1, ""]
+
+
+## The stack's entry bang with no breacher (G-14): {"bang", "bang_by"} (bang_carrier), {} for
+## nobody; never in Stealth.
+func entry_bang(units: Array) -> Dictionary:
+	if units.is_empty() or units.any(func(ai: SquadAI) -> bool: return ai.combat_mode == CombatMode.STEALTH):
+		return {}
+	var pick := bang_carrier(units)
+	return {"bang": pick[1], "bang_by": pick[0]} if int(pick[0]) >= 0 else {}
+
+
+## The patrol's lead (G-26: a hostile patrol walks its route in formation behind him): the
+## squad's leader while he's up, on foot and patrolling, else the first of its members who is
+## (taken as its leader). Null for a squad with no route.
+func patrol_lead() -> Soldier:
+	if patrol.is_empty() or faction == &"friendly":
+		return null
+	var ok := func(s: Soldier) -> bool:
+		var ai := SquadAI.of(s)
+		return is_instance_valid(s) and s.is_ai() and s.vitals.is_up() and Vehicle.ride_of(s) == null and ai != null and ai.squad == self \
+			and ai.intent == SquadAI.Intent.PATROL and not ai.guard
+	if leader != null and is_instance_valid(leader) and ok.call(leader):
+		return leader
+	for m: Soldier in members():
+		if ok.call(m):
+			leader = m
+			_slots_frame = -1
+			return m
+	return null
 
 
 ## Whether the squad knows of an enemy inside building `b`.
@@ -723,6 +812,8 @@ func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := 
 		apply_plan(op, bp)
 	elif breach == "charge":
 		stand_off(op)
+	elif breach == "" and plan and bang_wanted(b):
+		op.merge(entry_bang(units), true)  # an open doorway into a hot building: a bang in first (G-14)
 	for i in units.size():
 		units[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
 	_town_op = op
@@ -1312,7 +1403,8 @@ func resolved(team: int) -> Dictionary:
 	if sp == DYNAMIC:
 		sp = String(context.spacing)
 	var gaps: Dictionary = SPACINGS.get(sp, SPACINGS["normal"])
-	return {"formation": f, "spacing": sp, "man": float(gaps.man), "team": float(gaps.team), "dynamic": dynamic}
+	var k := Doctrine.value(doctrine_id(), "spacing")  # (G-26: per doctrine; insurgents bunch up)
+	return {"formation": f, "spacing": sp, "man": float(gaps.man) * k, "team": float(gaps.team) * k, "dynamic": dynamic}
 
 
 ## "Copy, wedge, wide"; a dynamic choice says so: "Copy, dynamic (wedge), wide".
@@ -1376,24 +1468,60 @@ func _update_context() -> void:
 		if not found.is_empty():
 			threat = found[0].centre
 	var dark := _low_visibility()
+	var woods := not town and _in_woods(at)
+	var alert := not contact and (Soldier._now() - engaged_at < ALERT_S or brains().any(func(ai: SquadAI) -> bool: return ai.suspecting()))
 	var step := 0 if town else (2 if contact else 1)
-	if dark:
+	if dark or woods:
 		step = maxi(step - 1, 0)
-	var why := PackedStringArray(["town" if town else "open ground"])
+	var why := PackedStringArray(["town" if town else ("woods" if woods else "open ground")])
 	if road and not town:
 		why.append("road")
 	if contact:
 		why.append("contact")
+	elif alert:
+		why.append("alert")
 	if dark:
 		why.append("low visibility")
 	_slots_frame = -1  # the slots change with it
-	context = {"formation": "staggered column" if town else ("line" if contact else ("column" if road else "wedge")),
+	context = {"formation": pick_formation(town, woods, road, contact, alert, dark),
 		"spacing": SPACING_ORDER[step], "why": ", ".join(why)}
 	if contact and threat.is_finite():
 		var to := Vector3(threat.x - at.x, 0.0, threat.z - at.z)
 		if to.length() > 1.0:
 			heading = to.normalized()
 			_heading_from = at
+
+
+## The formation for where the squad is and what it fears (G-26): a line in contact, a staggered
+## column in a town, a file in the woods, on a road the column (a staggered column on the alert
+## or in the dark), on open ground a wedge (a staggered column in the dark).
+static func pick_formation(town: bool, woods: bool, road: bool, contact: bool, alert: bool, dark: bool) -> String:
+	if contact:
+		return "line"
+	if town:
+		return "staggered column"
+	if woods:
+		return "file"
+	if road:
+		return "staggered column" if alert or dark else "column"
+	return "staggered column" if dark else "wedge"
+
+
+## Whether there are woods round `at` (WOODS_M, WOODS_FOLIAGE_M): the zone's trees and scrub.
+func _in_woods(at: Vector3) -> bool:
+	var scatter := Spotting.scatter_of(leader)
+	if scatter == null:
+		return false
+	var eye := at + Vector3.UP * 1.2
+	var leaves := 0.0
+	for d: Vector3 in [Vector3.FORWARD, Vector3.BACK, Vector3.LEFT, Vector3.RIGHT]:
+		leaves += scatter.foliage_between(eye, eye + d * WOODS_M)
+	return leaves >= WOODS_FOLIAGE_M
+
+
+## The doctrine this squad fights by: its own, else its side's (Doctrine.default_for).
+func doctrine_id() -> StringName:
+	return doctrine if doctrine != &"" else Doctrine.default_for(faction)
 
 
 ## Low visibility (night, thick weather) closes the spacing up a step. The zones have no night

@@ -31,7 +31,7 @@ const WALK_SPEED_MS := 6.0
 const WALK_INTO_M := 30.0
 ## A frame longer than this is reported with where its time went.
 const SPIKE_MS := 100.0
-## How many navmesh polygons a path search in the checks may cover (Godot's default is 4096: F-193).
+## How many navmesh polygons a path search in the checks may cover (Godot's default is 4096: F-213).
 const NAV_SEARCH_POLYGONS := 65536
 ## Seeds for the generation checks.
 const SEEDS: Array[int] = [204917, 77, 3001]
@@ -478,7 +478,7 @@ func _test_in_world() -> void:
 		walk, city_blocks.size(), streamed_before, _frame_ms.size(), raw.worst, raw.p95, raw.avg, Buildings.FRAME_BUDGET_USEC / 1000.0, net.worst, net.p95, net.avg])
 	check(city_blocks.size() >= 6 and nearest.is_ready(), "walking in, the city streams in block by block (%d blocks in; the nearest ready)" % city_blocks.size())
 	check(float(net.worst) <= BLOCK_WORST_FRAME_MS and float(net.avg) <= BLOCK_AVERAGE_FRAME_MS,
-		"a city block's frame cost streaming in (the AI's building scans as a game caps them, F-191): worst frame %.0f ms (Proposed budget %.0f), average %.1f ms (Proposed budget %.0f)" % [
+		"a city block's frame cost streaming in (the AI's building scans as a game caps them, F-211): worst frame %.0f ms (Proposed budget %.0f), average %.1f ms (Proposed budget %.0f)" % [
 			net.worst, BLOCK_WORST_FRAME_MS, net.avg, BLOCK_AVERAGE_FRAME_MS])
 	# The tall building checks in the tower block nearest the player.
 	var tower: ZoneModule = null
@@ -546,7 +546,7 @@ func _check_tall_building(m: ZoneModule) -> void:
 	var on_roof := absf(roof_goal.y - m.global_position.y - float(b.roof_y)) < Buildings.SURFACE_SNAP_M and roof_path.size() > 2 and roof_path[-1].distance_to(roof_goal) < 0.5
 	check(bad.is_empty() and on_roof, "the navmesh covers every room of a %d-storey %s (rooms reached by floor %s) and its roof (%.1f m), from the street %s" % [
 		b.storeys, best.type, by_floor, b.roof_y, bad.slice(0, 4)])
-	print("  (map_get_path's 4096-polygon search falls short of %d of its %d rooms from the street: F-193)" % [short_of, (b.rooms as Array).size()])
+	print("  (map_get_path's 4096-polygon search falls short of %d of its %d rooms from the street: F-213)" % [short_of, (b.rooms as Array).size()])
 	# The AI's scan from its top floor and from a middle floor.
 	var top := int(b.storeys) - 1
 	var scans: Array = []
@@ -626,7 +626,7 @@ func _room_goal(map: RID, rect: Rect2, y: float, street: Vector3, to_world: Call
 
 ## A navmesh path from `from` to `to` searched over up to NAV_SEARCH_POLYGONS polygons. Godot's
 ## map_get_path (what the AI calls) gives up after 4096 and returns the path to the nearest spot it
-## got to: from the street to a tower's top floors that's a floor or two short (F-193). This
+## got to: from the street to a tower's top floors that's a floor or two short (F-213). This
 ## checks that the navmesh joins them up; the AI gets there by re-pathing on the way.
 func _path(map: RID, from: Vector3, to: Vector3) -> PackedVector3Array:
 	var q := NavigationPathQueryParameters3D.new()

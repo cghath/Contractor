@@ -20,7 +20,8 @@ extends RefCounted
 ## time to spot by 1 + NIGHT_SLOW x darkness and hides anyone further than the night's sight
 ## (NIGHT_SIGHT_M at full dark, DUSK_SIGHT_M as it starts), unless they fired in the last
 ## FLASH_S; the weather multiplies it by its spot_x and hides anyone past its sight_m (fog,
-## rain), flash or not. NVGs (wave 7 S2) take darkness away where the hook says.
+## rain), flash or not. NVGs (wave 7 S2) take darkness away where the hook says. A flare's light
+## on the one looked at (G-24, Flares.light_at) takes it away too, as far as it lights.
 
 const BASE_S := 0.4
 const METRES_PER_S := 50.0
@@ -191,7 +192,7 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 	# review, 2026-10-19: the light only sped spotting up within night sight, so it never gave
 	# anyone away at night, when it should most).
 	var shows := now - target.last_shot_at <= FLASH_S or GunAttachments.lit(target)
-	var light := sight_x(observer, eyes, range_m, shows)
+	var light := sight_x(observer, eyes, range_m, shows, target.aim_point())
 	if light == INF:
 		return INF
 	if range_m > OPTIC_FROM_M:
@@ -243,9 +244,13 @@ static func concealment(target: Soldier) -> float:
 ## Night and weather on spotting someone `range_m` from `eyes` (wave 7 S1): the factor on the
 ## time to spot, or INF when they can't be seen at all there. `flashed`: they fired in the last
 ## FLASH_S, or show a light or a visible laser (it shows at night, not through fog). `observer` may be null (tests).
-static func sight_x(observer: Soldier, eyes: Vector3, range_m: float, flashed := false) -> float:
+## `at`: where the one looked at is; a flare's light there (Flares.light_at, G-24) takes the
+## darkness away as it lights the ground.
+static func sight_x(observer: Soldier, eyes: Vector3, range_m: float, flashed := false, at := Vector3.INF) -> float:
 	# Lowered, powered NVGs give back part of what the dark takes (wave 7 S2).
 	var dark := DayNight.darkness_at(eyes) * (1.0 - Nvg.restores(observer))
+	if dark > 0.0 and at.is_finite():
+		dark *= 1.0 - Flares.light_at(at)
 	if range_m > DayNight.sight_m(eyes):
 		return INF
 	if dark > 0.0 and not flashed and range_m > night_sight_m(dark):

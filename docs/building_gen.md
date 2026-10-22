@@ -223,7 +223,7 @@ navmeshed and garrisoned like the rest, and placed in the zones their asset tags
   grid) apart, `CITY_STREET_W` (10 m) streets between and round them; the inner blocks are the
   core, the ring the outskirts; `CITY_TOWERS` (2-3) core blocks hold a tower. Its `"streets"`
   (centre lines with widths) and `"junctions"` are the grid's own data, for the roads to pave
-  (`ZoneModules.city_streets(def)` in zone metres; F-190).
+  (`ZoneModules.city_streets(def)` in zone metres; F-210).
 - **A block** (`city_block(seed, ix, iz)`): a perimeter block, rows of terraced buildings along
   its four streets (`CITY_LOT_GAP` alleys between them, `CITY_OPEN_LOT` of lots left open), fronts
   on the street, backs on a courtyard; storeys by `CITY_CORE_STOREYS` (3-5),
@@ -253,8 +253,8 @@ navmeshed and garrisoned like the rest, and placed in the zones their asset tags
   `physics/jolt_physics_3d/limits/max_bodies` is 32 768. A block is generated in 30-230 ms (zone
   load: about 2 s for the city). The `city` suite walks into the Old Quarter at a run and times
   every frame while its blocks stream in (budgets in tests/city_test.gd, Proposed); the AI's
-  building scans near tall buildings are the long frames (F-191). Godot's path search stops at
-  4096 navmesh polygons, short of a tower's top floors from the street (F-193): the navmesh joins
+  building scans near tall buildings are the long frames (F-211). Godot's path search stops at
+  4096 navmesh polygons, short of a tower's top floors from the street (F-213): the navmesh joins
   them, the suite checks it with a wider search.
 - **Checks**: tests/city_test.gd (suite `city`). **Pictures**: tests/city_shots.tscn (headless,
   its own drawing of the boxes: the whole city, a tower block, an outskirts block, the village).
@@ -273,5 +273,5 @@ suite's firing lines (`_village_keep`). The stone yard wall and the shack's weap
 ## Open (Captain)
 
 - Which building types matter most for missions.
-- Towns' and landmarks' stairs keep a 0.5 m approach (F-192): moving them changes those
+- Towns' and landmarks' stairs keep a 0.5 m approach (F-212): moving them changes those
   buildings (saved damage), so it's left for a call.

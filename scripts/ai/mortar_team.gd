@@ -19,6 +19,11 @@ extends Node
 ## garrison's team (`post`) sets up inside its site once the site is alerted. Numbers Proposed.
 
 enum State { PACKED, MOVING, SETTING, READY, PACKING }
+const GROUP := &"mortar_teams"
+## Illumination on call (G-24, illum_for): one round at most every ILLUM_GAP_S a team, never its
+## last ILLUM_KEEP rounds (kept for fire missions). Proposed.
+const ILLUM_GAP_S := 40.0
+const ILLUM_KEEP := 6
 const STATE_NAMES: Array[String] = ["packed", "moving", "setting up", "ready", "packing"]
 const THINK_S := 1.0
 const TARGET_MAX_UNCERTAIN_M := 150.0
@@ -38,6 +43,7 @@ const DANGER_CLOSE_M := 50.0
 const ROUNDS := 24
 const BASE_ERROR_M := 40.0  # a known position's error before any correction: one ranging round at least
 
+var _illum_at := -1000.0  # when this team last fired illumination (illum_for)
 var kit := "mortar_2b14"
 var squad: Squad
 var works_with: Squad
@@ -76,6 +82,7 @@ static func form(level: Node, men: Array[Soldier], p_kit := "mortar_2b14", with:
 	team.kit = p_kit
 	team.works_with = with
 	team.post = p_post
+	team.add_to_group(GROUP)
 	level.add_child(team)
 	var sq: Squad = with if keep_squad and with else Squad.new()
 	if sq != with:
@@ -197,6 +204,26 @@ func _fire_step() -> void:
 		_next_round = now + RANGING_GAP_S
 		if _observed(target):
 			_error *= 0.5  # someone saw it land: the correction comes over the radio
+
+
+## Host (G-24): a team of `asker`'s side, set up and in range, puts an illumination round over
+## `at`. Returns whether one fired.
+static func illum_for(asker: Soldier, at: Vector3) -> bool:
+	var now := Soldier._now()
+	for n in asker.get_tree().get_nodes_in_group(GROUP):
+		var team := n as MortarTeam
+		if team == null or team.state != State.READY or not is_instance_valid(team.gun) or team.rounds <= ILLUM_KEEP \
+				or now - team._illum_at < ILLUM_GAP_S or team._up_crew().is_empty() or team._up_crew()[0].faction != asker.faction:
+			continue
+		var mf := MortarFire.of(team)
+		if mf == null or not MortarFire.in_range(team.gun, at):
+			continue
+		if mf.server_fire_illum(team.gun, at, team._up_crew()[0]) >= 0.0:
+			team.rounds -= 1
+			team._illum_at = now
+			print("[mortar] %s: illumination over (%.0f, %.0f) for %s" % [team.name, at.x, at.z, asker.name])
+			return true
+	return false
 
 
 func _to(s: State) -> void:

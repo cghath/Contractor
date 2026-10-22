@@ -271,7 +271,7 @@ static func city_of(type: String) -> String:
 
 ## Zone def `def`'s city streets (zone metres): [[[x, z], [x, z], width]] for every street of every
 ## city in it (its "cities": ZoneDef.place_city), the centre lines of the grid and its ring: the
-## street grid's own data, for the roads to pave (F-190: zone_roads.gd doesn't yet).
+## street grid's own data, for the roads to pave (F-210: zone_roads.gd doesn't yet).
 static func city_streets(def: Dictionary) -> Array:
 	var out: Array = []
 	for c: Dictionary in def.get("cities", []):

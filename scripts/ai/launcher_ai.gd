@@ -333,6 +333,14 @@ static func choose(ai: SquadAI, item: ItemData, st: State) -> Dictionary:
 			return {"kind": "vehicle", "target": st.order_target, "point": Launchers.hull_box(st.order_target).get_center()}
 		return {"kind": "order", "point": st.order_point}
 	var reach := float(item.stats.get("lock_range_m", VEHICLE_RANGE_M)) if item.stats.has("lock_range_m") else VEHICLE_RANGE_M
+	if ai.post is RoadAmbush:
+		# A sprung road ambush: the lead vehicle first (it blocks the road), then the last (F-140).
+		var first := (ai.post as RoadAmbush).priority_vehicle(body.faction, body.get_tree())
+		if first:
+			var fc := Launchers.hull_box(first).get_center()
+			var fd := eye.distance_to(fc)
+			if fd >= MIN_RANGE_M and fd < reach and _in_sight(body, fc, first) and not _friend_near(body, fc):
+				return {"kind": "vehicle", "target": first, "point": fc}
 	var best: Vehicle = null
 	var best_d := reach
 	for n in body.get_tree().get_nodes_in_group(Vehicle.GROUP):

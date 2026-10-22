@@ -85,6 +85,9 @@ static func _glyph(glyph: String) -> Array:
 				[Vector2(0.0, -0.27), Vector2(0.8, 0.06)], [Vector2(0.0, -0.39), Vector2(0.8, 0.06)]]
 		"star_ring":
 			return [[Vector2(0.0, 0.0), Vector2(0.2, 0.2)], [Vector2(0.0, 0.28), Vector2(0.4, 0.06)], [Vector2(0.0, -0.28), Vector2(0.4, 0.06)]]
+		"stripes":  # the US flag in blocks (D7): a blue canton on the field's blue, red and white bars
+			return [[Vector2(0.1, 0.33), Vector2(0.8, 0.08)], [Vector2(0.1, 0.11), Vector2(0.8, 0.08)], [Vector2(0.0, -0.11), Vector2(1.0, 0.08)],
+				[Vector2(0.0, -0.33), Vector2(1.0, 0.08)]]
 		"chevron":
 			return [[Vector2(-0.12, 0.0), Vector2(0.24, 0.1)], [Vector2(0.12, -0.08), Vector2(0.24, 0.1)]]
 	return [[Vector2.ZERO, Vector2(0.4, 0.4)]]
