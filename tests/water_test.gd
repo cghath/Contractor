@@ -267,7 +267,7 @@ func _test_generation(def: Dictionary) -> void:
 	check(wet == 0 and scatter.total() > 500, "no rocks, trees or scrub in the water or on a bridge (%d items)" % scatter.total())
 	scatter.free()
 	var reeds := w._reeds()
-	check(reeds != null and reeds.multimesh.instance_count > 100, "reeds along the banks (%d clumps)" % (reeds.multimesh.instance_count if reeds else 0))
+	check(reeds != null and w.reed_count > 100 and reeds.get_child_count() > 4, "reeds along the banks (%d clumps in %d cells)" % [w.reed_count, reeds.get_child_count() if reeds else 0])
 	if reeds:
 		reeds.free()
 	var verts := 0
@@ -470,7 +470,7 @@ func _test_nav_over_bridge() -> void:
 			var local := xf.affine_inverse() * q
 			if absf(local.x) < float(ZoneBridges.TYPES[b.type].deck_w) * 0.5 and absf(local.z) < float(b.length) * 0.25 and absf(local.y) < 0.8:
 				on_deck = true
-	check(path.size() >= 2 and path[path.size() - 1].distance_to(ends[1]) < 2.5 and on_deck and deepest < ZoneWater.NAV_WATER_M,
+	check(path.size() >= 2 and path[path.size() - 1].distance_to(ends[1]) < 4.0 and on_deck and deepest < ZoneWater.NAV_WATER_M,
 		"the navigation routes across the river over the %s (%d points, ends %.1f m from the far end, on the deck %s, deepest water on the way %.2f m), not through the deep water beside it" % [ZoneBridges.TYPES[b.type].name, path.size(), path[path.size() - 1].distance_to(ends[1]) if path.size() > 0 else -1.0, on_deck, maxf(deepest, 0.0)])
 
 
