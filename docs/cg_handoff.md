@@ -22,7 +22,7 @@ below is what lets it catch up.
 | CI reds, dev catch-up, AAV fix | claude/ci-cleanup | 4be2d0d1 (15 ahead) | no | Running. Fixing the CI reds; then merge into claude/ai-driving and fast-forward dev |
 | Performance pass | claude/perf-pass | 7a0a6d5c (9 ahead) | no | Running. Measuring and fixing FPS and stutters (towns, firefights, woods, vehicles); notes in docs/performance.md on the branch |
 | B lane: AI commander | claude/ca-b1-side-picture | a242b86c (5 ahead) | no | B1 and B4 part 1 done; B2 waits for C2 (high command). Then B3, B5 |
-| C lane: high command and UI | claude/ca-c-high-command | (starting) | no | Started 02:16: C1 → C6 |
+| C lane: high command and UI | claude/ca-c-high-command | 665a3a3a | no | C1-C6 done (groundwork; Phase 1 + Hawk 2/Viper 3 from the start + allied on HcOrder; Phase 2 orders, go codes, requests; map-order HUD + gun cone; 3D HC camera + 3D mission map; contextual menus; B1/B4 part 1 merged in; R2441-R2454 pass locally). Next: branch CI, then merge into claude/ai-driving. B2 can build on SquadOrders now. Follow-ups: section 10 C2.11, C4.9, C6.7 |
 | D1/D2: 8 km operation zones | claude/ca-d1-operation-zones | d9936362 (2 ahead) | no | **Yours** (cg_brief 3.1). D1 done and tested; D2 is untested WIP, see the note at the top of its CHANGELOG entry |
 | Tactics reels → AI spec | (not a branch yet) | | docs/tactics/ | In progress; see "Tactics reels" below |
 
