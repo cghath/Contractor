@@ -319,7 +319,7 @@ func _test_modules() -> void:
 			stairs += (bt.data.stairs as Array).size()
 	var school := "lm#school#%d#0#0" % seed
 	ZoneModules.has_type(school)
-	check(ZoneModules.ramps(school).size() == stairs * 6, "its stairs have ramps for the navmesh (%d stairs)" % stairs)
+	check(ZoneModules.ramps(school).size() == stairs * BuildingGen.RAMP_FACES, "its stairs have ramps for the navmesh (%d stairs)" % stairs)
 	var air := "lm#airfield#5#0#1"
 	ZoneModules.has_type(air)
 	var bounds := ZoneModules.bounds_voxels(air)

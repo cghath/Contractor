@@ -25,6 +25,10 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
+| F-190 | P2 | A city's street grid isn't paved: ZoneRoads doesn't draw the def's `"cities"` streets (ZoneModules.city_streets), junctions or kerbs, and its own roads aren't joined to them (city zones, 2026-10-22) |
+| F-191 | P2 | One AI building scan near a city's tall buildings takes 150-450 ms, and a frame's first scan isn't capped (Buildings.FRAME_BUDGET_USEC): a fight in a city hitches (city zones, 2026-10-22) |
+| F-192 | P3 | A town's or landmark's stair (0.5 m approach) can be cut off from a zone's navmesh, depending on how its pad's height falls on the bake's 0.25 m grid (city zones, 2026-10-22) |
+| F-193 | P3 | The AI's navmesh paths (map_get_path, 4096 polygons at most) from the street to a tall tower's top floors stop a floor or two short until it re-paths (city zones, 2026-10-22) |
 
 ## F-01: the building scan only sees one floor
 
@@ -394,6 +398,59 @@ walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or le
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
 
+## F-190: a city's street grid isn't paved (the roads agent's ZoneRoads)
+
+Queue item 1.5 (city zones) gives a city's street grid as data of its own: the def's `"cities"`
+(`[{"id", "seed", "pos"}]`, ZoneDef._place_city) and `ZoneModules.city_streets(def)`, every
+street's centre line in zone metres with its width (`BuildingGen.CITY_STREET_W`, 10 m: a 6 m road
+and 2 m pavements; `BuildingGen.city_layout(seed).junctions` where they cross). Today the streets
+are only painted road-coloured on the city's pad (`ZoneModules.STREETS`, ZoneTerrain), and the
+zone's own roads (the HQ's to the city's ring street, `"roads"`, the trails) stop at its pad.
+`scripts/world/zone_roads.gd` (the roads agent's, not touched here) should pave the grid with
+its kerbs and junctions, join the road from the HQ where it meets the ring street, and keep its
+other roads (HQ to outposts, trails) off the city's lots.
+
+## F-191: an AI building scan near a city's tall buildings takes 150-450 ms
+
+Measured in the `city` suite (headless, the Old Quarter, the player walking into the city): the
+long frames are all `Buildings.near` scans (FrameCost "buildings": groups 30-255 ms, probes
+100-190 ms, entrances 10-125 ms), asked by `Squad._tick_follow_in` (Buildings.at at the leader,
+every 2 m he moves, before it checks there's anyone to follow him in) and `Squad._update_context`
+(has_near). Near 3-8 storey buildings a scan has many more floors, stairs and stacked groups to
+link than in a town. `Buildings.FRAME_BUDGET_USEC` stops a frame's later scans in a game, but
+the first always runs: a 300 ms scan is a 300 ms hitch. Suggested (buildings.gd and squad.gd are
+Claude's: helper-and-hook territory): skip the follow-in scan when the squad has nobody to send
+in, cap a scan's floors to those within reach of the asker, or slice a scan over frames. The
+suite's frame budget counts the scans as a game caps them (tests/city_test.gd).
+
+## F-192: a town's or landmark's stair can be cut off from a zone's navmesh
+
+Found building city zones: in a zone a module stands on its pad's height (any 0.05 m), so the
+navmesh bake's 0.25 m height grid falls anywhere on its floors. A stair's foot with only
+`BuildingGen.STAIR_APPROACH` (0.5 m) between it and the end wall leaves, after the agent's radius
+is eroded off, a strip one cell deep in front of the first step: at some heights it bakes and
+the stair joins the floor, at others it doesn't (a scratch probe: three of twelve city stairs cut
+off with the grid 0.2 m off the floor, none with it on). City buildings keep 1.0 m
+(`CITY_STAIR_APPROACH`; 215 flights checked at five grid offsets, all joined) and every stair's
+ramp now has wedges at both ends (`ramp_faces`), but towns and landmarks keep 0.5 m: giving them
+1.0 m moves their stairs (and so their furniture), which changes those buildings for saved
+damage. Captain's call: move them (and accept the change), or keep them and bake a little floor
+ramp in front of each foot instead.
+
+## F-193: a path from the street to a tower's top floors stops a floor or two short
+
+Found building city zones: `NavigationServer3D.map_get_path`, which the AI calls (squad_ai.gd,
+tactics.gd, buildings.gd, civilian_ai.gd), searches at most 4096 navmesh polygons (Godot's
+`path_search_max_polygons`; there's no project setting for it) and then returns the path to the
+nearest spot it reached. In a city, from the street to an 8-storey tower's top floors that's more
+than 4096 (every flight, landing and furnished room on the way), so the path ends on floor 6 (in
+the `city` suite, 6 of the tower's 48 rooms; a path with the limit at 65 536 reaches every one).
+The navmesh itself joins them up, and a man re-pathing as he climbs gets there, but an order to
+"go to the top floor" from outside takes him only part of the way first. Suggested (the callers are
+Claude's files): one helper that paths with `NavigationServer3D.query_path` and a higher
+`path_search_max_polygons` (or in hops: to the building's door, then up), used where the AI paths
+into a building.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -414,3 +471,13 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | The control tower is two storeys (the generator's limit) with a console room on top and a mast | storeys over two come with city zones (queue item 1.5) | a third-storey glazed cab now
 - 2026-10-21 | Landmarks are garrisoned like other sites: a post inside each front door, one up high, one in a back room, the site's own (2-9 posts) | the brief says garrisonable like today's types | civilian-only landmarks
 - 2026-10-21 | Upper-floor doorways slide along their wall off the stairwell (or another wall takes the doorway): some existing two-storey buildings' doorways move | a doorway over the stairwell cut its room off | leave existing buildings as they were
+- 2026-10-22 | A city is a 5 x 4 grid of perimeter blocks 48 m apart with 10 m streets (240 x 192 m), each block a zone module of its own ("city#<seed>#<ix>#<iz>": streamed, garrisoned and given missions block by block, a town to the rest of the game) on one flat pad for the whole city (Proposed: BuildingGen.CITY_*) | streaming per block keeps a city's cost to the blocks near the squad; one pad keeps the streets level | one big city module, or towns packed together
+- 2026-10-22 | City heights (the brief's call): 3-5 storeys in the inner blocks, 2-3 on the outer ring, 2-3 towers of 6-8 in the core; new types apartment (flats), tenement (a shop under flats) and tower (offices); clinics, police stations, houses and shops too; a house or shop too small for its stairs gives way to flats, a lot too narrow for stairs is left open (no one-storey buildings in a city) | the bands as called, every building with stairs to every floor and its roof | let small buildings top out lower than their band
+- 2026-10-22 | City garrisons: 4 posts a core block, 2 an outskirts block, 2 more in a tower (its top floor and roof), 70% up high (in practice all upstairs: windows onto the street, the floors spread by building, a back room upstairs); about 58 for the Old Quarter | "garrisons use the upper floors", and about what its 3-4 towns held | a post per building (200+)
+- 2026-10-22 | The Old Quarter's 3-4 towns become one city (its HQ outside it, a road from the HQ to its ring street, a patrol round its inner streets, its villages outside), on a new "city" terrain preset (low rolling ground, dusty verges, grey streets, few trees, more ruins) | "the Old Quarter becomes a real city" | a city alongside the towns
+- 2026-10-22 | 12% of a city's buildings ruined (never a tower; never bombed out: the bombed-out roof-and-walls collapse is two-storey only) | it's a hot zone in a living war, as its landmarks are | none ruined, or bombed out too
+- 2026-10-22 | A city's street grid is its own data (the def's "cities", ZoneModules.city_streets), painted on its pad, not paved: joining it to the roads is F-190 | the roads agent owns zone_roads.gd | pave it here
+- 2026-10-22 | The zone navmesh bakes up to the tallest module on each chunk (was 8 m over the ground), and Jolt's body limit goes 10 240 -> 32 768 (project.godot) | a city's upper floors weren't in the navmesh, and a whole city streamed in passed 10 240 bodies (each voxel mesh block's collision is one) | stream fewer blocks at once (a city is meant to be fought through)
+- 2026-10-22 | City stairs keep 1.0 m clear in front of their foot (towns and landmarks keep 0.5 m: F-192), and every stair's navmesh ramp gets a wedge on and off | at 0.5 m a zone's pad height decided whether a stair joined the floor (3 of 12 cut off at one offset; 215 of 215 joined at five offsets with 1.0 m) | move every building's stairs now (changes towns and landmarks for saves)
+- 2026-10-22 | City block frame-time check: walking in at a run while its blocks stream in, worst frame 200 ms and average 25 ms (Proposed; 76 ms and 9 ms measured here), with the AI's building scans counted as a game caps them (4 ms a frame past the first; F-191) | headless runs every scan in full, and those (not the blocks) are the long frames | count the scans in full (fails on F-191, not on the city)
+- 2026-10-22 | Village houses (queue item 1.6): the four hand-built houses are generated on their own ground (mud brick, cinder block, a two-room brick house, a plank shack: a "plank" style kept out of STYLES so no other building changes), front doors where they were, one storey, no roof stairs; their furniture keeps off the posts, loot, named points, mission sites, site boxes and the world suite's firing lines; every village the same | the brief: "keeping each module's layout and garrison posts" | a village seed per zone with varied houses (moves posts and sites)

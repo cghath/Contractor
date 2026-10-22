@@ -7,7 +7,9 @@ palette and the scatter (rocks, scrub, trees per km2 of zone, so bigger zones ge
 **Which preset a zone gets** (`ZoneDef.normalize`, so it is in the def the host sends): the def's `terrain`,
 else the first `name_hints` word in the zone's name, else `region_defaults[region]`, else `default`.
 Coast -> coastal_lowland, inland -> desert_wadi; Salt flats -> salt_flats; Black Ridge hills -> rocky_ridge; Kestrel Valley -> river_valley;
-Wadi farm -> desert_wadi. The test zone is `plain` (no scatter).
+Wadi farm -> desert_wadi. The test zone is `plain` (no scatter). The Old Quarter is `city` (queue item 1.5: low,
+gently rolling ground for a city's one flat pad, dusty verges, grey streets, few trees, more litter and ruins; its
+city's blocks paint their streets on the pad: docs/building_gen.md "City zones").
 
 **Sea**: a preset with `sea` gets a shoreline on one side picked by the seed, never a side holding a pad
 (`def.sea_side`, `def.sea_m`). Ground deeper than 0.9 m under the water is left out of navigation.

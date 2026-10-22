@@ -833,37 +833,32 @@ func _test_hot_layout() -> void:
 		var crates := int(MissionRegistry.site(htype, "cache").get("voxels", 0))
 		check(sites_ok and picked.size() == 4 and hvt_at != hostage_at and crates >= 1000,
 			"its contract sites come from its buildings (HVT at %s, hostage at %s, a cache of %d voxels), and %s can play there" % [hvt_at, hostage_at, crates, picked])
-	# Urban hot zones: towns packed round the HQ, a road to each, patrols in their streets.
+	# Urban hot zones: a city (queue item 1.5: it took the place of 3-4 towns packed round the HQ),
+	# its blocks within reach of the HQ and clear of the other sites, a road in from the HQ, patrols
+	# in its streets (tests/city_test.gd checks the city itself).
 	for seed in [6607, 4409, 77]:
 		var city := ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true)
 		var mods: Array = city.modules
 		var hq_m: Dictionary = mods.filter(func(m: Dictionary) -> bool: return m.type == "hq")[0]
 		var hq_at := Vector2(hq_m.pos[0], hq_m.pos[1])
-		var towns: Array = mods.filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")
-		var near := towns.all(func(m: Dictionary) -> bool:
-			return Vector2(m.pos[0], m.pos[1]).distance_to(hq_at) <= ZoneDef.URBAN_REACH_M.y + ZoneDef.GRID_M)
-		var roads_in := towns.all(func(m: Dictionary) -> bool:
-			return (city.roads as Array).any(func(r: Array) -> bool: return is_equal_approx(float(r[1][0]), float(m.pos[0])) and is_equal_approx(float(r[1][1]), float(m.pos[1]))))
-		var town_spots := towns.map(func(m: Dictionary) -> Vector2: return Vector2(m.pos[0], m.pos[1]))
+		var blocks: Array = mods.filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.CITY))
+		var cities: Array = city.get("cities", [])
+		var at := Vector2(float(cities[0].pos[0]), float(cities[0].pos[1])) if not cities.is_empty() else Vector2.INF
+		var c_half: Vector2 = BuildingGen.city_layout(int(cities[0].seed)).half if not cities.is_empty() else Vector2.ZERO
+		var area := Rect2(at - c_half, c_half * 2.0)
+		var near := at.distance_to(hq_at) <= ZoneDef.URBAN_REACH_M.y + ZoneDef.GRID_M
+		var road_in := (city.roads as Array).any(func(r: Array) -> bool: return area.grow(0.5).has_point(Vector2(float(r[1][0]), float(r[1][1]))))
 		var patrolled := (city.patrols as Array).any(func(route: Array) -> bool:
-			return route.any(func(q: Array) -> bool: return Vector2(q[0], q[1]) in town_spots))
-		var apart := true
-		for i in towns.size():
-			for j in range(i + 1, towns.size()):
-				var a: Dictionary = towns[i]
-				var b: Dictionary = towns[j]
-				var ha: Vector2 = ZoneModules.HALF[a.type]
-				var hb: Vector2 = ZoneModules.HALF[b.type]
-				var ra := Rect2(Vector2(a.pos[0], a.pos[1]) - ha, ha * 2.0)
-				apart = apart and not ra.intersects(Rect2(Vector2(b.pos[0], b.pos[1]) - hb, hb * 2.0))
-		check(bool(city.get("urban", false)) and towns.size() >= ZoneDef.URBAN_TOWNS.x and towns.size() <= ZoneDef.URBAN_TOWNS.y and near and roads_in and apart
+			return route.all(func(q: Array) -> bool: return area.has_point(Vector2(q[0], q[1]))))
+		var clear := mods.all(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.CITY) or not area.grow(ZoneDef.URBAN_CITY_KEEP_M - 1.0).has_point(Vector2(m.pos[0], m.pos[1])))
+		check(bool(city.get("urban", false)) and cities.size() == 1 and blocks.size() == BuildingGen.CITY_BLOCKS.x * BuildingGen.CITY_BLOCKS.y and near and road_in and clear
 			and patrolled and mods.any(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "village") and ZoneDef.generate_hot(seed, ZoneDef.HOT_SIZE_M, true).hash() == city.hash(),
-			"urban seed %d: %d towns within %d m of the HQ, apart, a road into each, patrols in their streets, a village outside, the same every time" % [seed,
-			towns.size(), int(ZoneDef.URBAN_REACH_M.y)])
+			"urban seed %d: a city of %d blocks within %d m of the HQ, clear of the other sites, a road in, patrols in its streets, a village outside, the same every time" % [seed,
+			blocks.size(), int(ZoneDef.URBAN_REACH_M.y)])
 	var old_quarter := MissionRegistry.zone_def("city_hot")
 	check(bool(old_quarter.get("urban", false)) and old_quarter.get("kind", "") == "hot" and MissionRegistry.zone("city_hot").get("modules", []).has("town"),
-		"the campaign has an urban hot zone (%s: %d towns)" % [old_quarter.get("name", ""),
-		(old_quarter.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town").size()])
+		"the campaign has an urban hot zone (%s: %d city blocks)" % [old_quarter.get("name", ""),
+		(old_quarter.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.CITY)).size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
 	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the
@@ -1094,7 +1089,7 @@ func _test_towns() -> void:
 	var stairs := 0
 	for bt: Dictionary in BuildingGen.town(4409).buildings:
 		stairs += (bt.data.stairs as Array).size()
-	check(stairs > 0 and ZoneModules.ramps(type).size() == stairs * 6 and ZoneModules.ramps("village").is_empty(),
+	check(stairs > 0 and ZoneModules.ramps(type).size() == stairs * BuildingGen.RAMP_FACES and ZoneModules.ramps("village").is_empty(),
 		"its %d stairs have ramps for the navmesh (%d corners); a village has none" % [stairs, ZoneModules.ramps(type).size()])
 	# Navigation reaches the roofs (F-01): a zone chunk's bake keeps HEADROOM_M over its highest
 	# ground, room for the tallest building's roof and a soldier standing on it.
@@ -1264,7 +1259,7 @@ func _test_presets() -> void:
 		and pick.call({"name": "Somewhere", "region": "coast", "terrain": "scrubland"}) == "scrubland"
 		and pick.call({"name": "Somewhere"}) == "temperate",
 		"terrain preset by zone: explicit, then name hints, then the region's default, then temperate")
-	var expect := {"compound_01": "coastal_lowland", "wadi_farm": "desert_wadi", "harbour_yard": "coastal_lowland", "ridge_hot": "rocky_ridge", "coast_hot": "salt_flats", "city_hot": "scrubland"}
+	var expect := {"compound_01": "coastal_lowland", "wadi_farm": "desert_wadi", "harbour_yard": "coastal_lowland", "ridge_hot": "rocky_ridge", "coast_hot": "salt_flats", "city_hot": "city"}
 	var mapped := true
 	for id: String in expect:
 		mapped = mapped and String(MissionRegistry.zone_def(id).get("terrain", "")) == expect[id]

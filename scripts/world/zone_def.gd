@@ -36,13 +36,15 @@ const HOT_CHECKPOINTS := Vector2i(2, 4)
 const HOT_VILLAGES := Vector2i(2, 3)
 ## One of a hot zone's villages is a town instead (BuildingGen.town, "town#<seed>"): HOT_TOWNS.
 const HOT_TOWNS := 1
-## Urban hot zones (Captain, 2026-10-13: "add urban hotzones too"): URBAN_TOWNS towns packed
-## round the HQ (URBAN_REACH_M), URBAN_SPACING_M apart (closer than other sites: districts of
-## one city), a road from the HQ to each; the enemy patrols their streets. Villages on the
-## outskirts: URBAN_VILLAGES.
-const URBAN_TOWNS := Vector2i(3, 4)
+## Urban hot zones (Captain, 2026-10-13: "add urban hotzones too"): a city (queue item 1.5, cghath
+## 2026-10-22: it took the place of three or four towns packed round the HQ), its middle within
+## URBAN_REACH_M of the HQ and every site already placed URBAN_CITY_KEEP_M clear of it, a road
+## from the HQ to its nearest edge; the enemy patrols its streets. Its blocks are modules of their
+## own (ZoneModules "city#<seed>#<ix>#<iz>", BuildingGen.city_block), its street grid the def's
+## "cities" ([{"id", "seed", "pos"}]: ZoneModules.city_streets). Villages on the outskirts:
+## URBAN_VILLAGES. Proposed.
 const URBAN_REACH_M := Vector2(200.0, 900.0)
-const URBAN_SPACING_M := 190.0
+const URBAN_CITY_KEEP_M := 80.0
 const URBAN_VILLAGES := Vector2i(1, 2)
 const HOT_INSERTION_CLEAR_M := 700.0
 const HOT_PATROLS := Vector2i(2, 4)
@@ -399,14 +401,14 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M, urban := false) -> Dic
 	var roads: Array = []
 	for p in outposts:
 		roads.append([[hq.x, hq.y], [p.x, p.y]])
+	var cities: Array = []
 	if urban:
-		for i in rng.randi_range(URBAN_TOWNS.x, URBAN_TOWNS.y):
-			var type := "%s%d" % [ZoneModules.TOWN, seed * 31 + 100 + i]
-			for attempt in 300:
-				var at := hq + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(URBAN_REACH_M.x, URBAN_REACH_M.y)
-				if place.call(type, at, URBAN_SPACING_M):
-					roads.append([[hq.x, hq.y], [float(modules.back().pos[0]), float(modules.back().pos[1])]])
-					break
+		var city := _place_city(seed * 31 + 100, hq, reach, rng, modules, placed)
+		if not city.is_empty():
+			var entry: Vector2 = city.entry
+			roads.append([[hq.x, hq.y], [entry.x, entry.y]])
+			city.erase("entry")
+			cities.append(city)
 	# Checkpoints part way along the roads (the first ones), off to the side a little.
 	var checkpoints := rng.randi_range(HOT_CHECKPOINTS.x, HOT_CHECKPOINTS.y)
 	var order := range(outposts.size())
@@ -441,6 +443,13 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M, urban := false) -> Dic
 		for m: Dictionary in near.slice(0, 2):
 			route.append([float(m.pos[0]), float(m.pos[1])])
 		patrols.append(route)
+	for c: Dictionary in cities:  # and one round the city's inner streets, junction to junction
+		var city_at := Vector2(float(c.pos[0]), float(c.pos[1]))
+		var inner: Vector2 = (BuildingGen.city_layout(int(c.seed)).half as Vector2) - Vector2.ONE * BuildingGen.CITY_PITCH
+		var loop: Array = []
+		for corner: Vector2 in [Vector2(-inner.x, -inner.y), Vector2(inner.x, -inner.y), inner, Vector2(-inner.x, inner.y)]:
+			loop.append([city_at.x + corner.x, city_at.y + corner.y])
+		patrols.append(loop)
 	var edge_points := func(n: int, clear: float) -> Array:
 		var out: Array = []
 		for attempt in 400:
@@ -463,10 +472,39 @@ static func generate_hot(seed: int, size_m := HOT_SIZE_M, urban := false) -> Dic
 	def["kind"] = "hot"
 	if urban:
 		def["urban"] = true
+		def["cities"] = cities
 	_add_trails(def, roads, patrols, rng)
 	def["roads"] = roads
 	def["patrols"] = patrols
 	return def
+
+
+## A city (BuildingGen.city_layout `city_seed`) for an urban hot zone: its middle on the grid,
+## URBAN_REACH_M from the HQ at `hq`, inside `reach` of the zone's middle, its footprint
+## URBAN_CITY_KEEP_M clear of every site in `placed`; its blocks added to `modules` (ids
+## "city_<ix>_<iz>") and their middles to `placed` (later sites keep MIN_SPACING_M from them).
+## {"id", "seed", "pos" ([x, z]), "entry" (Vector2: where its ring street faces the HQ, for the
+## road from it)}, or {} if it fits nowhere.
+static func _place_city(city_seed: int, hq: Vector2, reach: float, rng: RandomNumberGenerator, modules: Array, placed: Array[Vector2]) -> Dictionary:
+	var layout := BuildingGen.city_layout(city_seed)
+	var half: Vector2 = layout.half
+	for attempt in 300:
+		var at := hq + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(URBAN_REACH_M.x, URBAN_REACH_M.y)
+		var p := Vector2(snappedf(at.x, GRID_M), snappedf(at.y, GRID_M))
+		var r := Rect2(p - half, half * 2.0)
+		if r.position.x < -reach or r.position.y < -reach or r.end.x > reach or r.end.y > reach:
+			continue
+		if placed.any(func(q: Vector2) -> bool: return r.grow(URBAN_CITY_KEEP_M).has_point(q)):
+			continue
+		for iz in int(layout.rows):
+			for ix in int(layout.cols):
+				var c := p + BuildingGen.city_block_centre(ix, iz)
+				placed.append(c)
+				modules.append({"id": "city_%d_%d" % [ix, iz], "type": "%s%d#%d#%d" % [ZoneModules.CITY, city_seed, ix, iz], "pos": [c.x, c.y]})
+		var toward := hq - p
+		var entry := p + (Vector2(signf(toward.x) * half.x, 0.0) if absf(toward.x) / half.x >= absf(toward.y) / half.y else Vector2(0.0, signf(toward.y) * half.y))
+		return {"id": "city", "seed": city_seed, "pos": [p.x, p.y], "entry": entry}
+	return {}
 
 
 ## How far `p` is from the nearest of `sites`.
