@@ -42,6 +42,7 @@ var _again := {}     # Vector2i -> true: breached again during its rebake
 var _waiting := {}   # Vector2i -> true: voxels not loaded yet, rebake when they are
 var _holds := 0      # hold() calls not yet released
 var _held := {}      # Vector2i -> true: rebakes asked for while held, done once on release
+var _mesh_iteration := -1  # the navigation map's iteration id when a chunk's mesh last changed
 
 
 ## Host only. Bakes the compound's navigation from the structures' boxes and keeps it up to
@@ -76,6 +77,13 @@ static func chunk_aabb(chunk: Vector2i) -> AABB:
 ## True while any chunk is waiting for, held back from or running a background rebake.
 func is_rebaking() -> bool:
 	return not _baking.is_empty() or not _waiting.is_empty() or not _held.is_empty()
+
+
+## Whether the navigation map has synced since a chunk's mesh last changed: until it does, a path
+## asked for still runs over the old meshes (the server takes region changes in at its next map
+## iteration, a physics frame or more later).
+func map_caught_up() -> bool:
+	return not is_inside_tree() or NavigationServer3D.map_get_iteration_id(get_world_3d().navigation_map) > _mesh_iteration
 
 
 ## Holds rebakes back during a burst of changes (PeopleLayer bringing a zone's people out over
@@ -161,6 +169,7 @@ func _on_rebaked(chunk: Vector2i, mesh: NavigationMesh) -> void:
 	if not is_inside_tree() or not _regions.has(chunk):
 		return
 	_regions[chunk].navigation_mesh = mesh
+	_mesh_iteration = NavigationServer3D.map_get_iteration_id(get_world_3d().navigation_map)
 	rebaked.emit(chunk)
 	if _again.has(chunk):
 		_again.erase(chunk)
@@ -182,6 +191,7 @@ func _bake_from_boxes() -> void:
 			for box in boxes:
 				if box.intersects(bounds):
 					source.add_faces(_box_faces(box), Transform3D.IDENTITY)
+			_add_obstacles(source, bounds)
 			var mesh := _new_mesh(chunk)
 			NavigationServer3D.bake_from_source_geometry_data(mesh, source)
 			var region := NavigationRegion3D.new()
@@ -197,7 +207,10 @@ func _voxel_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 	if not _structures_readable(bounds):
 		return null  # checked first: a chunk waiting on a module still stamping retries every frame
 	var source := _ground_source(chunk)
-	return source if _add_structures(source, bounds) else null
+	if not _add_structures(source, bounds):
+		return null
+	_add_obstacles(source, bounds)
+	return source
 
 
 ## Whether the structures inside `bounds` (world space) can be read now (_add_structures).
@@ -218,6 +231,28 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 	for box in world.solid_boxes_m(local):
 		source.add_faces(_box_faces(box), world.global_transform)
 	return true
+
+
+## Bodies that stand still on the level and aren't voxels (target dummies: TargetDummy joins this
+## group): baked in as their collision boxes, so a path goes round them. Before, the casualty
+## suite's squadmates following the player were walked into the LightDummy at (-4, 0, 12) and
+## held there with input and no speed (F-08, F-80, F-90; CI's slower runners).
+const OBSTACLES_GROUP := &"nav_obstacles"
+
+
+## Adds the boxes of the level's OBSTACLES_GROUP bodies inside `bounds` (world space) to `source`.
+func _add_obstacles(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> void:
+	for n: Node in level.get_tree().get_nodes_in_group(OBSTACLES_GROUP):
+		var body := n as CollisionObject3D
+		if body == null or not level.is_ancestor_of(body):
+			continue
+		for child in body.get_children():
+			var cs := child as CollisionShape3D
+			if cs == null or cs.shape == null or cs.disabled:
+				continue
+			var box := cs.global_transform * cs.shape.get_debug_mesh().get_aabb()
+			if box.intersects(bounds):
+				source.add_faces(_box_faces(box), Transform3D.IDENTITY)
 
 
 # The chunk grid this builder bakes: the compound's (AREA, CHUNK_M). ZoneNav has its own.

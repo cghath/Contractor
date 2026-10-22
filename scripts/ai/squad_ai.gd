@@ -5612,6 +5612,7 @@ func _steer(delta: float) -> void:
 		dir = next - body.global_position
 		dir.y = 0.0
 		dir = dir.normalized() if dir.length() > 0.05 else Vector3.ZERO
+		dir = _unblock(dir, next, delta)
 	if _keeps_apart():
 		dir = _apart(dir)
 	var local := body.global_basis.inverse() * dir
@@ -5633,6 +5634,47 @@ func _steer(delta: float) -> void:
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
 	elif foe == null and dir == Vector3.ZERO and suspecting() and intent != Intent.CASUALTY:
 		_aim_at(_suspect_pos + Vector3.UP * 1.0)  # something there: look (Spotting)
+
+
+## A wall's end met head on (F-190: the navmesh keeps a path only ~0.1-0.25 m off a corner and
+## the body is 0.3 m round, so it can walk square into the face beside the path and push there
+## with nothing to slide along; casualty's soak, Foxtrot at the low wall at (-1.5, 10)): pushing
+## with no way on for BLOCKED_S, it steps along the face, the side its next waypoint lies, for
+## SLIP_S, then takes the path again.
+const BLOCKED_S := 0.5
+const SLIP_S := 0.6
+var _blocked_s := 0.0
+var _slip := Vector3.ZERO
+var _slip_until := -1.0
+
+
+func _unblock(dir: Vector3, next: Vector3, delta: float) -> Vector3:
+	var now := Soldier._now()
+	if now < _slip_until:
+		return _slip
+	if dir == Vector3.ZERO or Vector2(body.velocity.x, body.velocity.z).length() > 0.2:
+		_blocked_s = 0.0
+		return dir
+	_blocked_s += delta
+	if _blocked_s < BLOCKED_S:
+		return dir
+	for i in body.get_slide_collision_count():
+		var n := body.get_slide_collision(i).get_normal()
+		n.y = 0.0
+		if n.length() < 0.7:
+			continue  # the floor, a slope
+		n = n.normalized()
+		if dir.dot(-n) < 0.7:
+			continue  # not square on: move_and_slide slides it
+		var along := Vector3(-n.z, 0.0, n.x)
+		var to_next := next - body.global_position
+		if along.dot(to_next) < 0.0 or (absf(along.dot(to_next)) < 0.05 and body.get_instance_id() % 2 == 0):
+			along = -along
+		_slip = (along + n * 0.3).normalized()
+		_slip_until = now + SLIP_S
+		_blocked_s = 0.0
+		return _slip
+	return dir
 
 
 ## Whether this unit keeps its distance from squadmates now (SEPARATION_M): following, or
