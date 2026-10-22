@@ -135,6 +135,9 @@ func _test_generation(mem_before: float) -> void:
 	check(flat, "every module sits on a flat pad at its origin's height")
 	var again := ZoneTerrain.new()
 	again.generate(level.def, level._flat_areas())
+	var again_roads := ZoneRoads.new()
+	again_roads.prepare(again, level.def.duplicate(true))  # (cut and filled to the same roads, cg_brief 1.2)
+	again_roads.free()
 	var other := ZoneTerrain.new()
 	other.generate(level.def.merged({"seed": 99}, true), level._flat_areas())
 	check(again.checksum() == t.checksum() and other.checksum() != t.checksum(), "the same seed gives the same ground, another seed different ground")
@@ -877,24 +880,35 @@ func _test_hot_layout() -> void:
 		(old_quarter.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.CITY)).size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
-	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the
-	# ground along them takes the road colour (seen past ZoneRoads.SEE_M).
+	# Terrain visual pass: the roads are laid, on the ground and off the module pads, and the
+	# ground along them takes the road colour (seen past ZoneRoads.SEE_M). (Roads, cg_brief 1.2:
+	# the curved roads go into the def; tests/roads_test.gd checks them in full.)
 	var def := ZoneDef.normalize(ZoneDef.generate_hot(4409))
 	var t := _preset_terrain(def)
 	var roads := ZoneRoads.new()
-	roads.build(t, def)
+	roads.prepare(t, def)
 	var on_ground := true
 	var off_pads := true
-	for v in roads.vertices:
-		on_ground = on_ground and absf(v.y - t.height_at(v.x, v.z) - ZoneRoads.LIFT_M) < 0.01
-		var inside := t.pads.any(func(pad: Array) -> bool:
-			return (pad[0] as Rect2).grow(-(ZoneRoads.WIDTH_M * 0.5 + ZoneRoads.STEP_M)).has_point(Vector2(v.x, v.z)))
-		off_pads = off_pads and not inside
+	var laid := 0
+	var gaps := Vector2(INF, -INF)
+	for seg: Dictionary in roads.segments():
+		var line: PackedVector3Array = seg.points
+		var drawn: PackedByteArray = seg.drawn
+		for k in line.size():
+			if drawn[k] == 0:
+				continue
+			laid += 1
+			var v := line[k]
+			var gap := v.y - t.height_at(v.x, v.z)
+			gaps = Vector2(minf(gaps.x, gap), maxf(gaps.y, gap))
+			on_ground = on_ground and gap > -0.15 and gap < 0.45
+			off_pads = off_pads and not t.pads.any(func(pad: Array) -> bool: return (pad[0] as Rect2).grow(-1.0).has_point(Vector2(v.x, v.z)))
 	var r0: Array = def.roads[0]
 	var mid := (Vector2(r0[0][0], r0[0][1]) + Vector2(r0[1][0], r0[1][1])) * 0.5
 	var across := (Vector2(r0[1][0], r0[1][1]) - Vector2(r0[0][0], r0[0][1])).normalized().orthogonal()
-	check(roads.segments == (def.roads as Array).size() and on_ground and off_pads,
-		"hot zone roads drawn: %d of %d, on the ground (%.2f m up), not over the module pads" % [roads.segments, (def.roads as Array).size(), ZoneRoads.LIFT_M])
+	check(laid > 200 and on_ground and off_pads,
+		"hot zone roads laid: %d samples on %d roads, on the graded ground (the surface %.2f to %.2f m over it), not over the module pads (%s)" % [laid,
+		roads.net.roads.size(), gaps.x, gaps.y, off_pads])
 	# A town's streets are road-coloured on its pad.
 	var town_m: Dictionary = (def.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")[0]
 	var tp := Vector2(town_m.pos[0], town_m.pos[1])

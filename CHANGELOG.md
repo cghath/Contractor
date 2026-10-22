@@ -405,6 +405,44 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   rifle (a drop lets go of the hands first, so a carried-out hard case kept the rifle slung), and
   a dead hostile's intel isn't expected in the stash (intel goes to the debrief, never the stash).
 
+### Roads (cg_brief queue item 1.2)
+
+#### Added
+- **Real roads.** Every zone's roads are planned on its ground when it loads, the same on every
+  machine: they curve round hills and follow the valleys, and the ground is cut and filled to
+  them, so they run smooth with banks either side.
+  - **Asphalt** (7 m, a dashed centre line and edge lines) between the main sites: towns, the
+    HQ, QRF bases, comms, checkpoints, the FOB.
+  - **Dirt tracks** (4 m, two ruts and a grassy crown) to outposts, compounds and villages, and
+    on the cross-country trails.
+  - **Junctions** where roads cross or join, and **roundabouts** near towns and where four main
+    roads meet.
+  - **Towns:** kerbed pavements along both streets and a mini roundabout at the crossroads.
+  - Every site is on the network now (in hot zones the comms site, QRF bases, checkpoints,
+    villages and the town had no road).
+- **Roads you can drive on.** Roads have collision that matches what's drawn; AI drivers take
+  them (the squad's drivers already route by road, and now follow the curves). Asphalt and
+  pavements sound hard underfoot, dirt tracks soft.
+- **Roads across the zone's edges.** A road leaves by each crossing into a linked zone, and the
+  zone on the other side has the same kind of road coming in at its crossing.
+- The map draws the curved roads, dirt tracks thinner than asphalt.
+
+#### Changed
+- The trails' patrols walk their curved trails.
+- A helicopter coming round its J-hook over rising ground climbs back up to its height instead
+  of holding level under it (it came over a rise 4 m clear of the ground, F-218).
+- Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
+  billboards) follow the curved roads and keep off them, each road its own width (F-219).
+- **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
+  new roads run (every site's road, the roads in from the zone's edges), and each road runs
+  straight across its bridge's deck and down its ramps instead of dipping under it onto the
+  riverbed (F-175). Where two roads would cross a river side by side, the second joins the first
+  either side of its bridge.
+
+#### Fixed
+- A stream's bank running past a site no longer lifts the site's flat ground (a checkpoint's pad
+  had a 2 m hump in it).
+
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 
 #### Fixed

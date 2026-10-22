@@ -110,9 +110,13 @@ var margin_m := 0.0
 var _bed := PackedByteArray()  # riverbed weight (0..255) per height
 var _coast: FastNoiseLite
 var _wobble_m := 0.0
-## The def's "roads" as [a, b, bounds] (Vector2, Vector2, Rect2 grown by ROAD_VERGE_M): the
-## ground under and beside them takes the road colour, so they show past ZoneRoads.SEE_M.
+## The def's "roads" as [a, b, bounds, core, verge, colour] (Vector2, Vector2, Rect2 grown by the
+## verge, the half-width taking the full colour, where it has faded out, the road's far colour):
+## the ground under and beside them takes the road colour, so they show past ZoneRoads.SEE_M.
+## _road_grid: ROAD_GRID_M cell -> the indices of the roads crossing it (road_weight's lookups).
 var _roads: Array = []
+var _road_grid := {}
+const ROAD_GRID_M := 64.0
 ## A generated town's streets (Rect2s, x/z in metres): its pad is road-coloured along them.
 var _streets: Array[Rect2] = []
 
@@ -143,11 +147,7 @@ func generate(def: Dictionary, flat: Array) -> void:
 	_half = size_m * 0.5
 	points = int(round(size_m / CELL_M)) + 1
 	_read_palette()
-	_roads.clear()
-	for road: Array in def.get("roads", []):
-		var a := Vector2(float(road[0][0]), float(road[0][1]))
-		var b := Vector2(float(road[1][0]), float(road[1][1]))
-		_roads.append([a, b, Rect2(a, Vector2.ZERO).expand(b).grow(ROAD_VERGE_M)])
+	set_roads(def.get("roads", []))
 	_streets.clear()
 	for m: Dictionary in def.get("modules", []):
 		if String(m.type).begins_with(ZoneModules.TOWN) and ZoneModules.has_type(String(m.type)):  # (a city's block paints its own: ZoneModules.streets)
@@ -292,7 +292,8 @@ func generate(def: Dictionary, flat: Array) -> void:
 		add_child(features)
 	if water:
 		water.free()
-	water = ZoneWater.carve(self, def)  # rivers cut their valleys (queue item 1.1)
+	# Rivers cut their valleys (queue item 1.1), bridged where the roads will run (RoadNet.water_links).
+	water = ZoneWater.carve(self, def.merged({"roads": RoadNet.water_links(def)}, true))
 	if water:
 		add_child(water)
 	if features:
@@ -303,6 +304,45 @@ func generate(def: Dictionary, flat: Array) -> void:
 		min_height = minf(min_height, h)
 		max_height = maxf(max_height, h)
 	_measure_shore()  # wave 5b (V4): the coast the LHD and AAVs use, from the sea above
+
+
+## The roads the ground is tinted along (a def's "roads": [[x, z], [x, z]] pieces, a third entry
+## naming the kind, data/roads.json; none: ROAD_CORE_M wide, c_road). RoadNet sets them again once
+## it has laid the curved roads.
+func set_roads(pieces: Array) -> void:
+	_roads.clear()
+	_road_grid.clear()
+	for road: Array in pieces:
+		var a := Vector2(float(road[0][0]), float(road[0][1]))
+		var b := Vector2(float(road[1][0]), float(road[1][1]))
+		var core := ROAD_CORE_M
+		var colour := c_road
+		if road.size() > 2:
+			var k: Dictionary = RoadNet.kind(String(road[2]))
+			core = float(k.get("width_m", ROAD_CORE_M * 2.0)) * 0.5
+			if String(k.get("far_colour", "")) != "":
+				colour = Color(String(k.far_colour))
+		var verge := core + ROAD_VERGE_M - ROAD_CORE_M
+		var bounds := Rect2(a, Vector2.ZERO).expand(b).grow(verge)
+		var i := _roads.size()
+		_roads.append([a, b, bounds, core, verge, colour])
+		for cy in range(floori(bounds.position.y / ROAD_GRID_M), floori(bounds.end.y / ROAD_GRID_M) + 1):
+			for cx in range(floori(bounds.position.x / ROAD_GRID_M), floori(bounds.end.x / ROAD_GRID_M) + 1):
+				var key := Vector2i(cx, cy)
+				if not _road_grid.has(key):
+					_road_grid[key] = []
+				_road_grid[key].append(i)
+
+
+## After something changed `heights` in place (RoadNet's cut and fill): the height range and the
+## shoreline again.
+func heights_changed() -> void:
+	min_height = INF
+	max_height = -INF
+	for h in heights:
+		min_height = minf(min_height, h)
+		max_height = maxf(max_height, h)
+	_measure_shore()
 
 
 ## The margin's clearance round the pads (`flat`) and roads: per MARGIN_KEEP_STEP_M grid node in
@@ -693,6 +733,9 @@ func ground_material() -> ShaderMaterial:
 	m.set_shader_parameter(&"damp_strength", damp)
 	m.set_shader_parameter(&"crust_strength", crust)
 	m.set_shader_parameter(&"track_strength", tracks)
+	var asphalt := String(RoadNet.kind("asphalt").get("far_colour", ""))
+	m.set_shader_parameter(&"road_colour", Color(asphalt) if asphalt != "" else c_road)  # (roads, cg_brief 1.2: kept off the patches)
+	m.set_shader_parameter(&"track_colour", c_road)
 	return m
 
 
@@ -835,7 +878,8 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 		var wet := water.shore_weight(i, j)
 		if wet > 0.0:
 			colour = colour.lerp(c_earth.darkened(0.28).lerp(c_rock, 0.35 if absi(hash(Vector2i(i, j) + Vector2i(seed_value, 3))) % 3 == 0 else 0.0), wet * 0.85)
-	return colour.lerp(c_road, road_weight(p.x, p.y) * 0.8)
+	var tint := _road_tint(p.x, p.y)
+	return colour.lerp(Color(tint.r, tint.g, tint.b), tint.a)  # (all of it on the road: the shader knows it by its colour)
 
 
 ## A pad's ground at `p` (vertex i, j) (world visual pass, cghath 2026-10-20: a pad read as one
@@ -862,13 +906,21 @@ func _pad_colour(r: Rect2, p: Vector2, i: int, j: int) -> Color:
 ## How much the ground at (x, z) is road: 1 on the line out to ROAD_CORE_M, 0 past
 ## ROAD_VERGE_M.
 func road_weight(x: float, z: float) -> float:
+	return _road_tint(x, z).a
+
+
+## The road colour at (x, z), its alpha how much road it is (road_weight).
+func _road_tint(x: float, z: float) -> Color:
 	var p := Vector2(x, z)
-	var best := 0.0
-	for r: Array in _roads:
+	var best := Color(c_road, 0.0)
+	for i: int in _road_grid.get(Vector2i(floori(x / ROAD_GRID_M), floori(z / ROAD_GRID_M)), []):
+		var r: Array = _roads[i]
 		if not (r[2] as Rect2).has_point(p):
 			continue
 		var d := Geometry2D.get_closest_point_to_segment(p, r[0], r[1]).distance_to(p)
-		best = maxf(best, 1.0 - smoothstep(ROAD_CORE_M, ROAD_VERGE_M, d))
+		var w := 1.0 - smoothstep(float(r[3]), float(r[4]), d)
+		if w > best.a:
+			best = Color(r[5], w)
 	return best
 
 

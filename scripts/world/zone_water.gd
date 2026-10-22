@@ -813,7 +813,9 @@ func _apply(heights: PackedFloat32Array, bed: PackedByteArray, idx: int, x: floa
 		var a := minf((d - inner) / valley_w, 1.0)
 		var floor_h := w + bank_h
 		t = floor_h + (h - floor_h) * a * a * (3.0 - 2.0 * a)
-		# Pads keep their ground (the keep grid, bilinear).
+	if d > inner or t > h:
+		# Pads keep their ground (the keep grid, bilinear): the valley fades out near them, and
+		# a bank is never raised on one (a stream past a pad cut into a slope: roads, cg_brief 1.2).
 		var gx := clampf((x + _half) / KEEP_STEP_M, 0.0, _keep_n - 1.001)
 		var gz := clampf((z + _half) / KEEP_STEP_M, 0.0, _keep_n - 1.001)
 		var ki := int(gx)

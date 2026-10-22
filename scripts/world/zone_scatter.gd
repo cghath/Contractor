@@ -240,6 +240,10 @@ var _next_check := 0.0
 var _visuals_on := false
 var _keep: Array[Rect2] = []
 var _roads: Array = []
+## The road pieces by ROAD_CELL_M cell (_roads_near). Roads (cg_brief 1.2): the curved roads come as
+## hundreds of short pieces, too many to test every one for every item tried.
+const ROAD_CELL_M := 48.0
+var _road_cells := {}
 var _cluster: FastNoiseLite
 var _key := ""
 var _def := {}
@@ -297,6 +301,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 		keep.append((pad[0] as Rect2).grow(PAD_KEEP_M))
 	_keep = keep
 	_roads = def.get("roads", [])
+	_index_roads()
 	_def = def
 	var cluster := FastNoiseLite.new()
 	cluster.seed = terrain.seed_value + 77
@@ -513,7 +518,7 @@ func _open_weight(x: float, z: float) -> float:
 			w = maxf(w, 1.0 - smoothstep(near_pad, near_pad * 1.5, Vector2(dx, dz).length()))
 	var near_road := float(_spec.get("near_road_m", 0.0))
 	if near_road > 0.0:
-		for road: Array in _roads:
+		for road: Array in _roads_near(p, near_road * 1.5):
 			var a := Vector2(float(road[0][0]), float(road[0][1]))
 			var b := Vector2(float(road[1][0]), float(road[1][1]))
 			var d := Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p)
@@ -1059,12 +1064,34 @@ func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
 	for r in keep:
 		if r.has_point(p):
 			return true
-	for road: Array in roads:
+	for road: Array in (_roads_near(p, ROAD_KEEP_M) if is_same(roads, _roads) else roads):
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var b := Vector2(float(road[1][0]), float(road[1][1]))
 		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) < ROAD_KEEP_M:
 			return true
 	return false
+
+
+## Indexes _roads by ROAD_CELL_M cell: each piece under every cell its bounds touch.
+func _index_roads() -> void:
+	_road_cells = {}
+	for road: Array in _roads:
+		var box := Rect2(Vector2(float(road[0][0]), float(road[0][1])), Vector2.ZERO).expand(Vector2(float(road[1][0]), float(road[1][1])))
+		for cy in range(floori(box.position.y / ROAD_CELL_M), floori(box.end.y / ROAD_CELL_M) + 1):
+			for cx in range(floori(box.position.x / ROAD_CELL_M), floori(box.end.x / ROAD_CELL_M) + 1):
+				var key := Vector2i(cx, cy)
+				if not _road_cells.has(key):
+					_road_cells[key] = []
+				_road_cells[key].append(road)
+
+
+## The road pieces that could come within `reach` of `p` (every one that does; some twice).
+func _roads_near(p: Vector2, reach: float) -> Array:
+	var out: Array = []
+	for cy in range(floori((p.y - reach) / ROAD_CELL_M), floori((p.y + reach) / ROAD_CELL_M) + 1):
+		for cx in range(floori((p.x - reach) / ROAD_CELL_M), floori((p.x + reach) / ROAD_CELL_M) + 1):
+			out.append_array(_road_cells.get(Vector2i(cx, cy), []))
+	return out
 
 
 ## True within `near_m` of a road or a pad (props: man-made clutter belongs near where people
@@ -1076,7 +1103,7 @@ func _near_road_or_pad(x: float, z: float, near_m: float) -> bool:
 		var dz := maxf(maxf(r.position.y - p.y, p.y - r.end.y), 0.0)
 		if Vector2(dx, dz).length() <= near_m:
 			return true
-	for road: Array in _roads:
+	for road: Array in _roads_near(p, near_m):
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var b := Vector2(float(road[1][0]), float(road[1][1]))
 		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) <= near_m:
@@ -2207,7 +2234,7 @@ func _ground_blocked(x: float, z: float) -> bool:
 	for r in _keep:
 		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):
 			return true
-	for road: Array in _roads:
+	for road: Array in _roads_near(p, 4.0):
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var b := Vector2(float(road[1][0]), float(road[1][1]))
 		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) < 4.0:

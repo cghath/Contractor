@@ -11,6 +11,9 @@
 // - damp_strength: large darker damp patches (~350 m and ~70 m),
 // - crust_strength: the crust's polygons (~1.8 m, raised lighter rims) near the camera,
 // - track_strength: a few long tyre tracks (two ruts each) across the pan, seen to ~320 m.
+// Roads (ZoneRoads, cg_brief 1.2): where the vertex colour is a road's (road_colour: asphalt,
+// track_colour: the dirt tracks; ZoneTerrain tints the ground under and past the drawn roads)
+// the patches and grass clumps stay off, so a road reads as one line out past its mesh.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
@@ -25,6 +28,8 @@ uniform float snow_strength = 0.0;
 uniform float damp_strength = 0.0;
 uniform float crust_strength = 0.0;
 uniform float track_strength = 0.0;
+uniform vec3 road_colour : source_color = vec3(0.064, 0.063, 0.058);
+uniform vec3 track_colour : source_color = vec3(0.17, 0.13, 0.08);
 
 varying vec3 w_pos;
 varying vec3 w_nrm;
@@ -118,6 +123,8 @@ void fragment() {
 	float grain = vnoise(p * 4.3) * 0.5 + vnoise(q * 9.7) * 0.5;
 
 	vec3 col = base;
+	// How much this is a road's ground: its colour within a little of a road's.
+	float roadness = max(1.0 - smoothstep(0.004, 0.02, distance(base, road_colour)), 1.0 - smoothstep(0.004, 0.02, distance(base, track_colour)));
 	// Dry patches, darker gravel/earth patches across the macro and mid noise.
 	col = mix(col, dry_colour, smoothstep(0.45, 0.85, macro) * 0.45 * macro_strength);
 	col = mix(col, earth_colour * 0.85, smoothstep(0.30, 0.05, macro) * 0.55 * macro_strength);
@@ -125,6 +132,7 @@ void fragment() {
 	col *= mix(0.84, 1.08, macro) * mix(0.90, 1.06, mid);  // (softer: the big smooth blotches read as smears, Captain 2026-10-18)
 	col *= mix(1.0, mix(0.80, 1.12, fine), near);
 	col *= mix(1.0, mix(0.84, 1.10, grain), close);
+	col = mix(col, base * mix(0.92, 1.05, mid), roadness);  // a road's ground keeps its colour
 
 	if (damp_strength > 0.0) {
 		// Damp patches: the crust darker and a touch greyer where the brine sits under it.
@@ -161,7 +169,7 @@ void fragment() {
 	// wall's are), the grass clumps and bare soil patches snapped to that grid (blocky edges),
 	// square stones on a 10 cm grid within ~25 m, and within ~12 m the 10 cm voxel grid itself.
 	const float BLOCK_M = 0.25;
-	float grassy = smoothstep(0.0, 0.05, base.g - base.r * 0.92);
+	float grassy = smoothstep(0.0, 0.05, base.g - base.r * 0.92) * (1.0 - roadness);
 	float mid_near = 1.0 - smoothstep(60.0, 110.0, dist);
 	if (mid_near > 0.0) {
 		vec2 bid = floor(p / BLOCK_M);
