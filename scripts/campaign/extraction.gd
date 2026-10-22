@@ -389,11 +389,51 @@ static func _named(base: String, foot: bool) -> String:
 	return base if foot else base + HELI_SUFFIX
 
 
+## Host: hero squads' men alive in the zone (roster members on a high command squad). They
+## never confirm and never block; the leave-behind warning names their squads (hc_outside).
+func hc_men() -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	for s in MapNodes.hc_ai(self):
+		if s.has_meta(&"roster_id"):
+			out.append(s)
+	return out
+
+
+## "Hawk 2, 2 men, 380 m out" for each hero squad with men outside `point`.
+func hc_outside(point: Dictionary) -> PackedStringArray:
+	var by := {}
+	for s in hc_men():
+		if not inside(point, s.body_point()):
+			var id := String(s.hc_id)
+			if not by.has(id):
+				by[id] = []
+			(by[id] as Array).append(s)
+	var out := PackedStringArray()
+	var at: Vector2 = point.get("pos", Vector2.ZERO)
+	for id: String in by:
+		var men: Array = by[id]
+		var sq := (MapNodes.level_of(self) as CompoundLevel).squad_of(men[0] as Soldier) if MapNodes.level_of(self) is CompoundLevel else null
+		var d := 0.0
+		for s: Soldier in men:
+			d = maxf(d, Vector2(s.global_position.x, s.global_position.z).distance_to(at))
+		out.append("%s, %d %s, %d m out" % [sq.callsign if sq and sq.callsign != "" else id, men.size(), "man" if men.size() == 1 else "men", int(round(d / 10.0) * 10.0)])
+	return out
+
+
 ## Names of those required who aren't inside `point`.
 func missing_at(point: Dictionary) -> PackedStringArray:
-	var missing := PackedStringArray()
 	var need := required()
-	for s: Soldier in need.players + need.ai:
+	return missing_of(point, need.players + need.ai)
+
+
+## Names of `soldiers` (any group: a hero squad, an element, the soak's bots) who aren't inside
+## `point` (high_command.md section 9 lift 5: one rule for every group). The caller picks who
+## counts (required() drops the dead AI; a player waiting to respawn still counts).
+func missing_of(point: Dictionary, soldiers: Array) -> PackedStringArray:
+	var missing := PackedStringArray()
+	for s: Soldier in soldiers:
+		if s == null or not is_instance_valid(s):
+			continue
 		if not inside(point, s.body_point()):  # a downed one lying as a ragdoll: where it lies
 			missing.append(_soldier_name(s))
 	return missing
@@ -457,6 +497,11 @@ func server_confirm(by_peer := 0) -> String:
 		return HELI_ONLY_TEXT
 	if not missing_at(point).is_empty():
 		return _confirm_without(point)
+	var groups := hc_outside(point)
+	if not groups.is_empty():
+		var why := _leave_or_warn(groups, int(point.id), String(point.name))  # hero squads never block, but they're named first
+		if why != "":
+			return why
 	return _start_countdown(point)
 
 
@@ -483,6 +528,7 @@ func _confirm_without(point: Dictionary) -> String:
 	if why != "":
 		_client_message.rpc(why)
 		return why
+	leaving.append_array(hc_outside(point))
 	why = _leave_or_warn(leaving, int(point.id), String(point.name))
 	return why if why != "" else _start_countdown(point)
 
@@ -823,6 +869,9 @@ func build_report(point: Dictionary) -> Dictionary:
 	for s: Soldier in MapNodes.squad_ai(self):
 		if left_at_call.has(_soldier_name(s)) and not leave.has(String(s.name)) and _out_at(point, s):
 			out_ai.append(s)
+	for s: Soldier in hc_men():  # hero squads come out with the squad when they're in the point (high_command.md 3.1 step 6)
+		if _out_at(point, s):
+			out_ai.append(s)
 	var out_soldiers: Array[Soldier] = []
 	var players: Array = []
 	var squad: Array = []
@@ -833,7 +882,7 @@ func build_report(point: Dictionary) -> Dictionary:
 		squad.append(_soldier_record(s))
 		out_soldiers.append(s)
 	var left: Array = []
-	for s: Soldier in MapNodes.squad_ai(self):
+	for s: Soldier in MapNodes.squad_ai(self) + hc_men():
 		if s not in out_ai:
 			var p := s.global_position
 			left.append({"name": String(s.name), "role": String(s.role), "slot": s.squad_slot, "alive": true,

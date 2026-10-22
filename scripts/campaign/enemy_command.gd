@@ -59,6 +59,11 @@ extends Node
 ##   campaign day so a beaten zone recovers.
 ## - Its orders go out on the net (RadioChatter.order): a looted radio hears them.
 ## - At most MAX_OPS operations moving or attacking at once (MAX_OPS_HIGH from tier 3).
+## - The picture (docs/combined_arms.md 3.2, B1): what reached its net lives in `picture`, the
+##   hostile SidePicture (Alert's reports, already delayed by Alert: 60-15 s by discipline, x1.5
+##   under fire, x3 with the mast down), merged into entries like the friendly side's; shots and
+##   blasts are in its log as noise, never entries. threat_cp reads that log, so the fog above is
+##   unchanged. Its groups are on `board` (GroupBoard, refreshed each tick) for B2's SideCommand.
 ## Every decision is a record in `operations` ({"kind", "target", "state", "why", "at", ...}).
 ## Host only; one node per hot zone ("EnemyCommand", ZoneLevel), on the Alert's clock. All
 ## numbers Proposed.
@@ -137,6 +142,10 @@ var level: Node3D
 var response: EnemyResponse
 var alert: Alert
 var operations: Array[Dictionary] = []
+## What the hostile side knows (B1): every report that reached the net, merged and aged.
+var picture := SidePicture.new(&"hostile", "insurgent")
+## The hostile side's groups, live and virtual (B1; B2 tasks from it).
+var board := GroupBoard.new(&"hostile")
 ## The squad's strength as reported (CP), before fading.
 var seen_cp := 0.0
 var reserves := 0.0
@@ -152,7 +161,10 @@ var _noise: Array[Dictionary] = []  # recent shots and blasts reported: {"pos", 
 var _tick := 0.0
 var _last_tick := INF
 var _seen_at := -INF
-var _contacts: Array[Dictionary] = []  # recent contact reports: {"pos", "time", "cp"}
+## Recent contact reports (the picture's log: {"pos", "reported_at", "cp", ...}); tests clear it.
+var _contacts: Array[Dictionary]:
+	get:
+		return picture.received
 var _handled := {}  # module id -> true: its loss already has an operation
 var _deaths := {}   # hostile name -> when its death was noticed
 var _ever := {}     # hostile name -> true: every man it has had
@@ -170,6 +182,7 @@ var _teams := 0
 
 func _init() -> void:
 	name = "EnemyCommand"
+	picture.max_received = 4096
 
 
 func _ready() -> void:
@@ -219,8 +232,8 @@ func _on_reported(r: Dictionary) -> void:
 	var cp := float(r.get("seen", 1)) * SQUAD_MAN_CP + float(r.get("exo", 0)) * EXO_CP
 	seen_cp = maxf(seen_now(), cp)
 	_seen_at = now()
-	_contacts = _contacts.filter(func(c: Dictionary) -> bool: return now() - float(c.time) <= LKP_FRESH_S)
-	_contacts.append({"pos": r.pos, "time": now(), "cp": cp})
+	picture.submit({"kind": "inf", "count": int(r.get("seen", 1)), "pos": r.pos, "by": String(r.get("by", "")), "source": "alert",
+		"cp": cp, "unc0": SidePicture.base_uncertainty("seen")}, now())  # Alert already held it for the radio delay
 
 
 ## Loud fire reads as more men: the shots and blasts reported near this one lately.
@@ -235,7 +248,8 @@ func _on_noise(r: Dictionary) -> void:
 	if cp > seen_now():
 		seen_cp = cp
 		_seen_at = now()
-	_contacts.append({"pos": r.pos, "time": now(), "cp": cp})
+	picture.submit({"kind": "inf", "count": 1, "pos": r.pos, "by": String(r.get("by", "")), "source": "alert", "cp": cp, "noise": true,
+		"unc0": SidePicture.base_uncertainty("noise")}, now())
 
 
 ## Whether `target` is only noise: no sighting reported within NOISE_FAR_M of it lately.
@@ -303,8 +317,8 @@ func threat_cp(at := Vector3.INF, radius := INF) -> float:
 	if not at.is_finite():
 		return maxf(seen_now(), recent_losses() * LOSS_SHARE)
 	var best := 0.0
-	for c: Dictionary in _contacts:
-		if now() - float(c.time) <= LKP_FRESH_S and (c.pos as Vector3).distance_to(at) <= radius:
+	for c: Dictionary in picture.received:
+		if c.has("cp") and now() - float(c.reported_at) <= LKP_FRESH_S and (c.pos as Vector3).distance_to(at) <= radius:
 			best = maxf(best, float(c.cp))
 	return best
 
@@ -373,6 +387,19 @@ func _tier() -> int:
 ## Whether anyone is in command to start something new.
 func can_decide() -> bool:
 	return commander_state in ["commanding", "deputy"]
+
+
+## The picture's tick (B1): its comms follow the mast, aged entries go; the board's sitreps.
+func _step_picture() -> void:
+	picture.comms_down = _comms_down()
+	picture.step(now())
+	var groups: Array = GroupBoard.squads_of(get_tree(), &"hostile")
+	var virtualizer := Virtualizer.of(self)
+	if virtualizer:
+		for r: Dictionary in virtualizer.virtual_records():
+			if r.get("squad") is Squad and (r.squad as Squad).faction == &"hostile" and not groups.has(r.squad):
+				groups.append(r)
+	board.refresh(groups, now())
 
 
 # --- Reserves, losses, the commander -------------------------------------------------------------
@@ -588,6 +615,7 @@ func server_tick() -> void:
 	var dt := now() - _last_tick if _last_tick != INF else 0.0
 	_last_tick = now()
 	_load_memory()
+	_step_picture()
 	_tick_reserves(maxf(dt, 0.0))
 	_count_losses()
 	_watch_command()

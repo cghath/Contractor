@@ -141,6 +141,11 @@ const ACTIONS := {
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
+		# The squadmate orders it lacked (combined_arms.md 5.5): the command menu's own, for him.
+		{"id": &"sq_follow", "label": "Follow me", "needs": &"my_squadmate", "squad": "follow"},
+		{"id": &"sq_hold", "label": "Hold here", "needs": &"my_squadmate", "squad": "hold"},
+		{"id": &"sq_heal", "label": "Heal up", "needs": &"my_squadmate", "squad": "heal"},
+		{"id": &"sq_ammo", "label": "Give ammo", "needs": &"my_squadmate", "squad": "give_ammo", "group": MORE},
 	],
 	PERSON: [
 		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
@@ -447,6 +452,8 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return _order_check(need, actor, target)
 		&"has_gear":
 			return "" if target is Soldier and (target as Soldier).has_gear() else "Nothing left on them"
+		&"my_squadmate":  # one of the player squad's AI (Squad.is_squadmate), up
+			return "" if target is Soldier and Squad.is_squadmate(target as Soldier) else _HIDE
 		&"has_tags":  # a fallen company soldier still wearing his dog tags (Soldier.dog_tags, replicated)
 			return "" if target is Soldier and not (target as Soldier).dog_tags.is_empty() else _HIDE
 		&"lootable":  # the living: an enemy who's down or gave up (Soldier.lootable_by)
@@ -709,6 +716,9 @@ static func perform(actor: Soldier, action: Dictionary) -> String:
 	if action.get("window", false):
 		if actor._hud:
 			actor._hud.open_loot(target)
+		return ""
+	if action.has("squad"):  # a squadmate order (the command menu's command, for him alone)
+		actor._server_squad_command.rpc_id(1, String(action.squad), (target as Node3D).global_position, PackedStringArray([String(target.name)]))
 		return ""
 	if action.has("people"):
 		var layer := PeopleLayer.find(actor)

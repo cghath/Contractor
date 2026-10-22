@@ -695,7 +695,7 @@ func _board_step() -> void:
 			b["going"] = next
 			b["next_at"] = Soldier._now() + 4.0
 			var lvl := level() as CompoundLevel
-			var squad := lvl.squad_for(s.faction) if lvl else null
+			var squad := lvl.squad_of(s) if lvl else null  # G12: the boarder's own squad
 			var by: Soldier = b.get("by") if is_instance_valid(b.get("by")) else s
 			if squad:
 				squad.give_order(by, Squad.Order.MOVE, next, PackedStringArray([String(s.name)]))

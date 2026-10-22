@@ -1099,6 +1099,9 @@ func server_report(reporter: Soldier, point: Vector3) -> Dictionary:
 		"how": "reported", "item": "", "name": "Enemy position (%d)" % group.size(), "value": REPORT_VALUE * group.size(),
 		"source": "radio", "by": reporter.display_name(), "pos": [centre.x, centre.z], "count": group.size(), "enemies": Array(names)}
 	People.server_bank_intel(entry)
+	var intel := SideIntel.of(self)
+	if intel:
+		intel.server_report_position(reporter, centre, group)  # into the side's picture (combined_arms 4.4)
 	return entry
 
 

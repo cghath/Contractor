@@ -67,8 +67,9 @@ static func begin(data: Dictionary, squad: Array, zone_kind: String, zone_id: St
 ## available, up to `size`, leaving out `exclude`.
 static func auto_squad(data: Dictionary, size: int, exclude: Array = []) -> Array[String]:
 	var free: Array[String] = []
+	var hc := Heroes.detachment_members(data)  # a detachment's men never fill the player squad's slots
 	for mid in Roster.available_ids(data):
-		if mid not in exclude:
+		if mid not in exclude and mid not in hc:
 			free.append(mid)
 	var out: Array[String] = []
 	for slot: Dictionary in Roles.layout():

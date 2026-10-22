@@ -137,6 +137,8 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 		var d := muzzle.distance_to(s.global_position)
 		if door and not vehicle.door_arc_ok(seat, s.aim_point() - muzzle):
 			continue
+		if vehicle.has_meta(&"sector") and not GunTeam.in_sector(vehicle.get_meta(&"sector"), muzzle, s.global_position):
+			continue  # a placed gun's arc (GunTeam.sector)
 		if d <= reach:
 			foes.append([d, s])
 	foes.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])

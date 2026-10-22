@@ -104,7 +104,7 @@ func _test_actions_for() -> void:
 	print("What each target offers (actions_for)")
 	var item := await _spawn_item(&"ifak", SPOT + Vector3(0, 0.3, -1.0))
 	check(_ids(player, item) == [&"pick_up"], "world item: Pick up (%s)" % [_ids(player, item)])
-	check(_ids(player, alpha) == [&"give_item"], "standing squadmate: Give item (%s)" % [_ids(player, alpha)])
+	check(_ids(player, alpha) == [&"give_item", &"sq_follow", &"sq_hold", &"sq_heal", &"sq_ammo"], "standing squadmate: Give item, then his orders: Follow me, Hold here, Heal up, Give ammo (combined_arms.md 5.5) (%s)" % [_ids(player, alpha)])
 	var give := InteractionMenu.actions_for(player, alpha)[0]
 	check(give.items.size() == 1 and give.items[0].label.begins_with("5.56"), "Give item lists your stowed items (%s)" % [give.items.map(func(e: Dictionary) -> String: return e.label)])
 	check(_ids(player, hostile).is_empty(), "a standing enemy offers nothing")

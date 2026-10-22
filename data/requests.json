@@ -1,0 +1,42 @@
+{
+	"_about": "B4 of docs/combined_arms.md (4.1-4.3, 4.6): requests to friendly units and their asks back. Read by RequestBroker and RequestCards. Every number Proposed (2026-10-22); the calls the doc left open are its section 10, B4.n.",
+	"open_per_player": 3,
+	"merge_m": 30.0,
+	"decline_cooldown_s": 30.0,
+	"answer_s": [2.0, 6.0],
+	"answer_in_contact_mult": 1.5,
+	"shout_m": 80.0,
+	"counter_eta_s": 120.0,
+	"foot_mps": 1.8,
+	"mounted_mps": 8.0,
+	"in_place_s": 8.0,
+	"until_s": 600.0,
+	"kinds": {
+		"_about": "who: the board capabilities a group needs (any of them); reach_m: how far it will come or reach; duty_s: how long the job runs once on station (0: until done); in_place_m: within this it's already in position.",
+		"suppress": {"label": "suppression", "who": ["mgs", "ifv", "mbt", "light_armour", "gun_team"], "reach_m": 1500.0, "duty_s": 60.0, "in_place_m": 600.0, "ammo": true},
+		"medic": {"label": "a medic", "who": ["medics"], "reach_m": 300.0, "duty_s": 0.0, "in_place_m": 5.0},
+		"casevac": {"label": "CASEVAC", "who": ["ifv", "light_armour", "transport"], "reach_m": 4000.0, "duty_s": 0.0, "in_place_m": 30.0},
+		"smoke": {"label": "smoke", "who": ["smoke", "mortar_section"], "reach_m": 300.0, "duty_s": 120.0, "in_place_m": 40.0},
+		"armour": {"label": "armour support", "who": ["ifv", "mbt"], "reach_m": 4000.0, "duty_s": 0.0, "in_place_m": 100.0, "ammo": true},
+		"hold": {"label": "a hold", "who": ["any"], "reach_m": 1000.0, "duty_s": 0.0, "in_place_m": 99999.0, "named_only": true},
+		"cover": {"label": "covering fire", "who": ["any"], "reach_m": 800.0, "duty_s": 60.0, "in_place_m": 800.0, "named_only": true, "ammo": true},
+		"pickup": {"label": "a pick-up", "who": ["transport", "light_armour", "ifv"], "reach_m": 4000.0, "duty_s": 90.0, "in_place_m": 150.0},
+		"ammo": {"label": "ammo", "who": ["any"], "reach_m": 300.0, "duty_s": 0.0, "in_place_m": 10.0, "ammo": true},
+		"sitrep": {"label": "a sitrep", "who": ["any"], "reach_m": 99999.0, "duty_s": 0.0, "in_place_m": 99999.0}
+	},
+	"asks": {
+		"_about": "Allied groups asking players (4.3): when they're raised, how close a player must be, how long the card waits.",
+		"answer_s": 30.0,
+		"contact_support_m": 600.0,
+		"ammo_m": 300.0,
+		"again_s": 300.0,
+		"rep_per_answer": 1,
+		"rep_max_per_operation": 5
+	},
+	"callsigns": {
+		"_about": "4.6: original callsigns by group kind; a group's number follows ('Saber 2').",
+		"rifle_squad": "Saber", "weapons_team": "Saber", "at_team": "Saber", "recon_team": "Shadow", "mech_infantry": "Iron",
+		"armour_section": "Anvil", "armour_platoon": "Anvil", "light_armour": "Iron", "mortar_section": "Hammer", "gun_team": "Hammer",
+		"transport": "Packhorse", "qrf": "Saber", "engineers": "Saber"
+	}
+}

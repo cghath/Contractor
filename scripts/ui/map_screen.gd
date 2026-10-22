@@ -18,6 +18,8 @@ var view: MapView
 var briefing_panel: BriefingScreen
 var toolbar: PanelContainer
 var extraction_panel: MapExtractionPanel
+## High command (MapHcPanel): on the left while a squad is out.
+var hc_panel: MapHcPanel
 var _reference: Label
 var _kind: OptionButton
 var _swatches := {}  # colour name -> its Button
@@ -73,6 +75,12 @@ func _ready() -> void:
 	extraction_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	extraction_panel.offset_left = -MapExtractionPanel.WIDTH - 8
 	extraction_panel.offset_right = -8
+	hc_panel = MapHcPanel.new()
+	hc_panel.visible = false
+	add_child(hc_panel)
+	hc_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	hc_panel.offset_left = 8
+	hc_panel.offset_right = 8 + MapHcPanel.WIDTH
 	resized.connect(_layout_panels)
 	_layout_panels()
 	_connect_level.call_deferred()
@@ -87,6 +95,7 @@ func _layout_panels() -> void:
 	view.offset_top = top
 	briefing_panel.offset_top = top + 8
 	extraction_panel.offset_top = top + 8
+	hc_panel.offset_top = top + 8
 	_help.offset_top = top + 8
 	var room := (size.y if size.y > 1.0 else get_viewport_rect().size.y) - top - 32.0
 	_help_scroll.custom_minimum_size.y = clampf(_help_box.get_combined_minimum_size().y, 60.0, maxf(room, 60.0))
@@ -105,6 +114,9 @@ func _connect_level() -> void:
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.changed.connect(_refresh_panels)
+	var hc := MapNodes.high_command(self)
+	if hc:
+		hc.changed.connect(_refresh_hc)
 
 
 func is_open() -> bool:
@@ -144,6 +156,8 @@ func close() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(HcCamera.ACTION):
+		return  # Shift+M is the 3D camera's (PlayerInput), not the map's M
 	if event.is_action_pressed(&"map"):
 		toggle()
 		get_viewport().set_input_as_handled()
@@ -207,7 +221,55 @@ func _refresh_panels() -> void:
 	if extraction_panel.visible:
 		extraction_panel.show_extraction(extraction)
 	_close_button.disabled = _forced  # the briefing keeps the map open
+	_refresh_hc()
 	_refresh_inset()
+
+
+## The 3D mission map (HcCamera map mode, combined_arms.md 5.3): over the map view, or gone.
+var map_3d: SubViewportContainer
+
+
+func toggle_3d_map() -> void:
+	if map_3d:
+		map_3d.queue_free()
+		map_3d = null
+		return
+	var lvl := MapNodes.level_of(self)
+	if lvl == null:
+		return
+	var marks: Array = []
+	for o: Dictionary in MapView.objectives_in(self):
+		var p: Variant = o.get("pos")
+		if p is Array and (p as Array).size() >= 2:
+			marks.append({"pos": Vector3(float(p[0]), 0.0, float(p[1])), "label": String(o.get("title", "Objective")), "colour": Color(1.0, 0.85, 0.3)})
+	var b := MapNodes.briefing(self)
+	if b:
+		for point: Dictionary in b.insertion_points():
+			var q: Array = point.get("pos", [])
+			if q.size() >= 2:
+				marks.append({"pos": Vector3(float(q[0]), 0.0, float(q[1])), "label": String(point.get("name", "Insertion")), "colour": Color(0.4, 0.95, 0.5)})
+	for m: Dictionary in marks:
+		m.pos = Vector3(m.pos.x, HcCamera._height_fn(lvl).call(m.pos.x, m.pos.z), m.pos.z)
+	map_3d = HcCamera.open_map_mode(lvl, marks)
+	add_child(map_3d)
+	map_3d.set_anchors_preset(Control.PRESET_FULL_RECT)
+	map_3d.offset_top = view.offset_top
+	map_3d.offset_left = view.offset_left
+	map_3d.offset_right = view.offset_right
+	map_3d.offset_bottom = view.offset_bottom
+
+
+## The high command panel: shown while any group is out (MapHcPanel).
+func _refresh_hc() -> void:
+	var hc := MapNodes.high_command(self)
+	var want := visible and hc != null and (not hc.view.is_empty() or (DevTools.on() and multiplayer.is_server())) and not briefing_panel.visible
+	if hc_panel.visible != want:
+		hc_panel.visible = want
+		_refresh_inset()
+	if want:
+		hc_panel.show_command(hc)
+		view.queue_redraw()
+	view.command.refresh()
 
 
 ## The map fills what the toolbar and the side panel leave.
@@ -219,6 +281,9 @@ func _refresh_inset() -> void:
 		inset = MapExtractionPanel.WIDTH + 16.0
 	if view.offset_right != -inset:
 		view.offset_right = -inset
+	var left := MapHcPanel.WIDTH + 16.0 if hc_panel and hc_panel.visible else 0.0
+	if view.offset_left != left:
+		view.offset_left = left
 	if _help:
 		_help.offset_right = -inset - 8.0
 

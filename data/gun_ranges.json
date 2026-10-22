@@ -1,0 +1,9 @@
+{
+	"_notes": "Ranges the map's gun placement draws (docs/combined_arms.md 5.4.2): the cone runs to effective_m, a ring at max_m; mortars draw min and max rings. Proposed, from public figures.",
+	"tripod_m2": {"name": "M2", "effective_m": 1800, "max_m": 6800},
+	"tripod_dshk": {"name": "DShK", "effective_m": 1500, "max_m": 3500},
+	"m240": {"name": "M240", "effective_m": 800, "max_m": 3725},
+	"mk19": {"name": "Mk19", "effective_m": 1500, "area_m": 2200, "max_m": 2200},
+	"mortar_m224": {"name": "M224", "effective_m": 3490, "min_m": 70, "max_m": 3490},
+	"mortar_2b14": {"name": "2B14", "effective_m": 4100, "min_m": 85, "max_m": 4100}
+}

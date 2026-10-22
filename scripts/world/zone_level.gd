@@ -1107,6 +1107,10 @@ func stream_focus() -> Array[Vector3]:
 				var brain := SquadAI.of(s)
 				if brain and brain.fighting():
 					out.append(s.global_position)
+		for n in get_tree().get_nodes_in_group(Squad.HC_GROUP):  # G8: a hero squad's ground stays streamed in under it
+			var lead := (n as Squad).hero
+			if lead and is_instance_valid(lead) and not lead.vitals.is_dead():
+				out.append(lead.global_position)
 		if virtualizer:
 			out.append_array(virtualizer.focus)  # enemies at a virtual garrison's gate: it comes back to fight them
 	return out

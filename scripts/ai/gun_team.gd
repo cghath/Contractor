@@ -66,6 +66,10 @@ var _flanked_since := -1.0  # when an enemy off the parapet's arc first saw the 
 ## stay in the squad it was ordered from, no moving on by itself; packing up on an order ends it.
 var ordered := false
 var forced_spot := Vector3.INF
+## The arc it covers (combined_arms.md 5.4.2, the map's Place gun): left and right map bearings
+## in degrees (0 north, clockwise), INF for none. Set, the gun faces its middle, fires only inside it
+## (its gunner too: the gun's meta "sector", AavGunner) and never moves for fire from outside it.
+var sector := Vector2.INF
 var dissolve_on_pack := false
 static var _count := 0
 
@@ -148,7 +152,10 @@ func _physics_process(delta: float) -> void:
 			if not _up(gunner):
 				_to(State.PACKED)  # (the assistant takes over in the swap above, next think)
 			elif gunner.global_position.distance_to(spot) <= AT_SPOT_M:
-				if target.is_finite():
+				if sector.is_finite():
+					var mid := Viewshed.dir_of(sector.x + fposmod(sector.y - sector.x, 360.0) * 0.5)
+					gunner.rotation.y = atan2(-mid.x, -mid.y)  # the gun faces its arc's middle
+				elif target.is_finite():
 					var way := Vector3(target.x - gunner.global_position.x, 0.0, target.z - gunner.global_position.z)
 					if way.length() > 0.5:
 						gunner.rotation.y = atan2(-way.x, -way.z)  # the gun (and the parapet) face him
@@ -164,6 +171,8 @@ func _physics_process(delta: float) -> void:
 			var g := _gun_at(spot)
 			if g:
 				gun = g
+				if sector.is_finite():
+					gun.set_meta(&"sector", sector)  # its gunner fires only inside the arc
 				if int(gun.gun_info().get("rounds", 0)) <= 0:
 					gun.server_rearm()  # no room on them for belts: a team never sets up a gun with nothing to feed it
 				_man()
@@ -234,6 +243,8 @@ func _enemy() -> Vector3:
 			continue
 		for e: Dictionary in sq.enemy_picture():
 			var p: Vector3 = e.pos
+			if not in_sector(sector, from, p):
+				continue
 			if p.distance_to(from) <= ENGAGE_M and (not best.is_finite() or p.distance_to(from) < best.distance_to(from)):
 				best = p
 	if not best.is_finite() and is_instance_valid(gun) and gun.gunner():
@@ -252,6 +263,8 @@ func _enemies() -> Array[Vector3]:
 			continue
 		for e: Dictionary in sq.enemy_picture():
 			var p: Vector3 = e.pos
+			if not in_sector(sector, from, p):
+				continue
 			if p.distance_to(from) <= ENGAGE_M and not found.any(func(q: Vector3) -> bool: return q.distance_to(p) < 3.0):
 				found.append(p)
 	found.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.distance_to(from) < b.distance_to(from))
@@ -355,10 +368,17 @@ func _dig_in() -> void:
 		print("[gunteam] %s: %s digs in in front of the gun" % [name, (digger as Soldier).name])
 
 
+## Whether `to` lies inside `arc` (left, right bearings; INF: no arc, everywhere) seen from `from`.
+static func in_sector(arc: Vector2, from: Vector3, to: Vector3) -> bool:
+	if not arc.is_finite():
+		return true
+	return Viewshed.in_arc(Viewshed.bearing_of(Vector2(to.x - from.x, to.z - from.z)), arc.x, arc.y)
+
+
 ## Whether an enemy outside the parapet's arc (FLANK_ARC_DEG off the gun's facing) sees the crew.
 func _flanked() -> bool:
-	if not is_instance_valid(gun):
-		return false
+	if not is_instance_valid(gun) or sector.is_finite():
+		return false  # (an ordered arc holds: it doesn't move for fire from outside it)
 	var fwd := -gun.global_basis.z
 	var face := Vector2(fwd.x, fwd.z).normalized()
 	var at := gun.global_position

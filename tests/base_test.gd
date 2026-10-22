@@ -31,6 +31,7 @@ var _log: FileAccess  # client: where its checks go
 
 func _ready() -> void:
 	GameState.zone_id = "test_base" + tag
+	BaseHub.standing_squads = false  # these checks count the roster's own hires; _test_hiring checks the standing squads
 	Soldier.respawn_delay_s = 0.0  # these checks want the old instant respawn (the wait and spawn
 	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	Campaign.campaign_id = "test_base" + tag  # never touch a real save
@@ -334,13 +335,24 @@ func _write(path: String, text: String) -> void:
 
 func _test_hiring() -> void:
 	print("Hiring")
+	BaseHub.standing_squads = true
 	BaseHub.new_campaign(SEED)
+	BaseHub.standing_squads = false
 	var pool: Array = Hiring.pool(BaseHub.hiring(), 1)
 	check(pool.size() == Hiring.POOL_SIZE and pool == Hiring.draw_pool(SEED, 0), "a new campaign's board: %d contractors drawn from the seed" % pool.size())
 	check(Hiring.draw_pool(SEED, 0) == Hiring.draw_pool(SEED, 0) and Hiring.draw_pool(SEED, 1) != pool, "the same seed draws the same board; the next refresh another")
-	check(Roster.members(BaseHub.roster()).is_empty(), "no fixed starting squad")
-	check(BaseEconomy.funds() == Economy.cash() and Economy.cash() == MissionRegistry.setting_i("start_cash", 150000),
-		"one bank: the base's funds are the economy's starting cash ($%d)" % BaseEconomy.funds())
+	var dets := Heroes.detachments(BaseHub.roster())
+	check(dets.size() == 2 and Roster.members(BaseHub.roster()).size() == 8 and dets.values().all(func(d: Dictionary) -> bool: return (d.members as Array).size() == 4 and bool(d.standing)),
+		"two standing high command squads of 4 from the start, and no player-squad members (combined_arms.md 5.2)")
+	check(dets.values().map(func(d: Dictionary) -> String: return String(d.callsign)) == ["Hawk 2", "Viper 3"], "callsigns Hawk 2 and Viper 3")
+	var hero: Dictionary = Roster.get_member(BaseHub.roster(), String(dets.d02.leader))
+	check(hero.has("hero") and String(hero.role) == "team_leader" and int(hero.missions) >= 4, "each led by a hero: a team leader with 4+ missions behind him")
+	check(RosterDeployment.auto_squad(BaseHub.roster(), 7).is_empty(), "their men never fill the player squad")
+	var standing := Heroes.standing_wages(BaseHub.roster())
+	check(BaseEconomy.funds() == Economy.cash() and Economy.cash() == MissionRegistry.setting_i("start_cash", 150000) + standing * Heroes.START_WAGE_DAYS,
+		"one bank: the base's funds are the economy's starting cash plus 14 days of the standing squads' wages ($%d)" % BaseEconomy.funds())
+	BaseHub.new_campaign(SEED)  # (the hires below start from an empty roster)
+	pool = Hiring.pool(BaseHub.hiring(), 1)
 	var ok := pool.all(func(c: Dictionary) -> bool:
 		return Roles.has(StringName(c.role)) and int(c.demand) > 0 and int(c.fee) == int(c.demand) * Hiring.FEE_DAYS \
 			and Roster.SKILLS.all(func(s: String) -> bool: return float(c.skills[s]) > 0.0 and float(c.skills[s]) <= 1.0))

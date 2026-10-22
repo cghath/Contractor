@@ -72,6 +72,12 @@ const KEYS := {
 ## PlayerInput checks these first.
 const SHIFT_KEYS := {
 	&"quick_treat": KEY_H,  # treat yourself with the next item you carry (Soldier._server_use_medical)
+	# High command (combined_arms.md 5.1 question 13): answer the latest request from a squad
+	# (HighCommand.request_answer). Y and N alone are tag_enemy and objectives_next, so Shift.
+	&"hc_approve": KEY_Y,
+	&"hc_deny": KEY_N,
+	# The 3D high command camera (HcCamera, combined_arms.md 5.3): Shift+M (M alone is the map, Tab the inventory).
+	&"high_command": KEY_M,
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
@@ -83,6 +89,9 @@ const MOUSE := {
 const BUTTONS := {
 	&"zoom_in": MOUSE_BUTTON_XBUTTON2,
 	&"zoom_out": MOUSE_BUTTON_XBUTTON1,
+	# The contextual order (ContextMenu, combined_arms.md 5.5): tap for what you look at's top option,
+	# hold for the radial. The middle button is free with the command menu shut (it picks in it).
+	&"context": MOUSE_BUTTON_MIDDLE,
 }
 ## Keys that only count on the left of the keyboard: [action, key, needs Ctrl held].
 ## Hold Left Ctrl for the interaction menu (InteractionMenu); add Left Alt while holding it
@@ -141,7 +150,7 @@ const PAD_WHEEL := [
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
-const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order"]
+const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny", &"high_command", &"context"]  # (requests: the map panel's buttons on a pad; the 3D camera: its button there)
 
 
 func _enter_tree() -> void:

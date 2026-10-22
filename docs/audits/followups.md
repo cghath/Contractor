@@ -464,6 +464,21 @@ walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or le
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
 
+## F-180: the co-op soak onto the game's high command pieces (high_command.md section 9, lifts 1-3, 7, 8)
+
+C1 (claude/ca-c-high-command) lifted the soak bot's decisions into game code: `FollowBrain`
+(scripts/ai/follow_brain.gd: _follow_tick, _follow_spot, _wedge_spot), `ProgressWatch`
+(scripts/ai/progress_watch.gd: _stuck_note, _track_wedge), `CareRules` (scripts/ai/care_rules.gd:
+_treat_loop's pick, _casevac_tick's carrier, _give_up_tick), `Extraction.missing_of(point,
+soldiers)` and `DeadGround.known_watchers(level, squads)` (the knowledge-fair seam; the soak keeps
+true posts through `DeadGround.watchers`). tests/coop_soak.gd isn't on claude/ai-driving (it lives
+on test/coop-soak and claude/coop-join), so it wasn't edited.
+
+Suggested, on the soak's branch: call those in place of its own copies (its RPC actuator and the
+catch-up teleport stay in the test); give squad orders through `_server_squad_command` and, from
+C2, `HighCommand.request_order` (lift 7, so `coop_soak --hc` runs the real validated path); key the
+recorder and coop_soak_report.py by group (`Soldier.hc_id`, "" for the player squad) (lift 8).
+Acceptance: a short replay behaves the same.
 ## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
 
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `_steer` (the path walk). Found and fixed by

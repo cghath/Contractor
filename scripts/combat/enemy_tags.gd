@@ -85,6 +85,9 @@ func server_tag(by: Soldier, target: Soldier) -> String:
 		model.server_play(CharacterModel.RADIO, CharacterModel.RADIO_S)  # keying the radio
 	_tell_squad(by, target)
 	_send()
+	var intel := SideIntel.of(self)
+	if intel:
+		intel.server_report_tag(by, target)  # a tag is a report to the side's picture (combined_arms 4.4)
 	SessionLog.note("tag: %s tagged %s" % [by.name, key])
 	return "Tagged" if fresh else "Tag refreshed"
 
@@ -96,6 +99,9 @@ func server_tag_reported(target: Soldier) -> void:
 		return
 	_until[String(target.name)] = Soldier._now() + TAG_S
 	_send()
+	var intel := SideIntel.of(self)
+	if intel:
+		intel.server_report_tag(null, target)  # a lookout's or the UAV's report
 
 
 ## The AI squadmates of `by`'s squad learn where `target` is.

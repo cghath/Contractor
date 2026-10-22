@@ -92,6 +92,10 @@ var _menu: PopupMenu
 var _menu_at := Vector2.ZERO
 ## The right-click menu's allied-order submenus, rebuilt each time it opens.
 var _allied_menus: Array[PopupMenu] = []
+## The right-click menu's high command submenus (MapCommandLayer.add_orders).
+var _hc_menus: Array[PopupMenu] = []
+## High command's order flow and drawing (MapCommandLayer: select, order, place, face, confirm).
+var command := MapCommandLayer.new()
 var _fitted := false  # showing the whole area (fit), until zoomed or panned
 ## The zone picture being made on a worker thread (-1: none).
 var _render_task := -1
@@ -106,6 +110,7 @@ var drawn_labels: Array[Dictionary] = []
 
 
 func _ready() -> void:
+	command.attach(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	focus_mode = Control.FOCUS_ALL
 	clip_contents = true
@@ -309,6 +314,10 @@ func marker_at(screen_pos: Vector2) -> int:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if command.handle(event):
+		accept_event()
+		queue_redraw()
+		return
 	if event is InputEventMouseMotion:
 		_on_motion(event)
 	elif event is InputEventMouseButton:
@@ -429,6 +438,9 @@ func _open_menu(screen_pos: Vector2) -> void:
 	if teams.has("mortar"):
 		_menu.add_item("Weapons team: mortar fire here (%s)" % MapGrid.grid_ref(_menu_at, area), 6)
 	_add_allied_orders()
+	for sub in _hc_menus:
+		sub.queue_free()
+	_hc_menus = MapCommandLayer.add_orders(self, _menu, _menu_at)
 	_menu.position = Vector2i(get_screen_position() + screen_pos)
 	_menu.reset_size()
 	_menu.popup()
@@ -487,7 +499,7 @@ func _our_drivers() -> bool:
 		return false
 	for v: Vehicle in vl.vehicles():
 		var d := v.driver()
-		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied":  # (an allied element's men take the high command's orders)
+		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied" and d.hc_id == &"":  # (an allied element's or hero squad's men take the high command's orders)
 			return true
 	return false
 
@@ -621,6 +633,7 @@ func _draw() -> void:
 	_draw_gear_markers()
 	_draw_squad()
 	_draw_allied()
+	command.draw()  # high command: squad frames, their orders, the order flow's ghost and gun cone
 	if _line.size() >= 2:
 		_polyline(_line, MapMarkers.colour_value(marker_colour), 2.0)
 	_layout_labels(map_rect)
@@ -787,6 +800,9 @@ func _draw_markers() -> void:
 			points = moved
 		var colour := MapMarkers.colour_value(String(marker.colour))
 		var hover := int(marker.id) == _hover_id
+		if marker.kind == "spot":  # the side's spot reports (combined_arms 4.4): never dragged
+			MapMarkers.draw_spot(self, marker, map_to_screen(marker.points[0]), hover)
+			continue
 		if marker.kind == "line":
 			_polyline(points, colour, 3.0 if hover else 2.0)
 			continue

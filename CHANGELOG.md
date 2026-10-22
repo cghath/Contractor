@@ -11,6 +11,105 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### High command (combined arms, phases C1 to C6)
+
+> **Where this lane is:** C1-C6 done on claude/ca-c-high-command (B1 and B4 part 1 merged in).
+> The C lane is complete; follow-ups are in docs/combined_arms.md section 10 (C2.11, C4.9, C6.7).
+
+#### Added (C6: contextual menus)
+- **One key does the obvious thing.** Look at something and tap the middle mouse button: the top
+  option for it happens (a squadmate follows you, a casualty gets treated, an enemy gets tagged,
+  an allied squad gets asked for suppression when you're in contact). Hold the button for a radial
+  with the rest and "More..." (the full command menu). A prompt under the crosshair says what the
+  tap will do. The options you use most come first next time.
+- The interaction menu (Left Ctrl) on a squadmate now has Follow me, Hold here, Heal up and Give
+  ammo.
+- The map's order bar puts the orders that fit what's under the cursor first (an enemy marker:
+  Attack and Support by fire), and the ones you used there last.
+
+#### Added (C5: the 3D high command camera)
+- **Shift+M lifts you into a 3D view over the zone** (or "3D view" on the map's high command panel).
+  WASD or the screen's edges pan, the wheel zooms from 40 m to 1,500 m over the ground, middle-drag
+  orbits, Q / E rotate, F frames your squads, a click selects a squad and a double-click follows it.
+  Your squads stand on poles with their callsign, strength and state, their orders drawn on the
+  ground; enemies show only where your side has reported them, with how sure that is. Soldiers and
+  vehicles themselves aren't drawn, so the camera can't scout. Give orders with the map's keys.
+  A hit drops you back into your body; a near miss reddens the edge.
+- **The 3D mission map.** "3D map" on the briefing shows the zone in relief with the objectives,
+  insertion points and known enemies standing on it: tilt, zoom and orbit the plan.
+- Command mode on the map now toggles with C (Tab is the theatre map).
+
+#### Added (C4: the map-order HUD)
+- **One way to give every order on the map.** Select a squad (click its frame, Shift to add,
+  drag a box, or 1-4), pick the order on the bar along the bottom (each button shows its key and
+  explains itself; the ones that fit what's under the cursor come first), click the point, drag
+  to face, release. The ghost says what's wrong ("Off the map") before you commit; the line goes
+  dotted until the squad says "copy". Shift queues, right-click cancels, Backspace cancels the
+  squad's order, Ctrl+Z undoes the last one within 10 s, Space repeats the last order, Tab turns
+  command mode off.
+- **Place the gun with its cone of fire.** G, then drag its facing and roll the wheel to widen or
+  narrow the arc. The cone shows what the gun can see in green and the dead ground behind crests
+  and buildings in dark, a red edge where a bank close in blocks it, range rings, how high it sits
+  over the ground it covers and how many known enemy positions can see the spot. The team sets up
+  facing the middle of the arc and fires only inside it.
+
+#### Added (C3: Phase 2)
+- **Real high command orders.** Attack (to an attack position, then in; "objective secure" once
+  it's quiet; it falls back if it's spent), Support by fire (never with a friendly in the line of
+  fire; fire shifts deeper or lifts when friendlies close on the target: "check fire, friendlies
+  on target"), Bound, Fall back, and Defend a frontage (a sector per buddy pair).
+- **Go codes.** Give an order "on Alpha" (the map panel's "Next order" picker) and it waits; Attack
+  and Support by fire move to their position first ("Hawk 2, set. Ready on Alpha"). The panel's
+  Go buttons show how many are waiting; H-hour orders go with the deployment.
+- **Requests.** A squad past its casualty limit asks to break contact. Approve or deny on the map
+  panel or with Shift+Y / Shift+N; unanswered after 20 s, the hero decides.
+- A squad that loses its leader goes quiet for a moment until the new one has the radio.
+- A HUD line while hero squads are out: "HAWK 2 ● green Set | VIPER 3 ● amber Contact", with the
+  latest request and its keys under it.
+
+#### Added (C2: Phase 1)
+- **Two high command squads from the start.** Every new campaign has Hawk 2 and Viper 3 on the
+  roster: four men each (a team leader with a record, an autorifleman, a medic and a rifleman) in
+  their own kit, on wages, with 14 days of their wages added to the start cash. They deploy on
+  every contract beside the player squad (100 m to either side of the insertion) and never take
+  a player-squad slot. "Squad & deploy" lists them with a "Deploys" box to leave one at home and
+  their callsigns to rename.
+- **Ordering them.** Right-click the map: Move, Defend (a building near the point is garrisoned,
+  else a line facing the threat), Regroup, Extract, Hold, Follow me, Support me, Report, Cancel.
+  Shift queues. Every order is acknowledged, then ends done, failed with a reason ("unable: no
+  route to 041 053. Holding"), or cancelled; a squad that stops making headway says "held up" at
+  30 s and gives up at 90 s.
+- **The company net.** Squads report on it in their own subtitle lines: copy, set, done, contact
+  (with an intel marker; the other squads hear of it 3 s later), man down, a new leader taking
+  over when the hero falls, and sitreps. The map shows each squad as a frame with its callsign,
+  strength and a green/amber/red pip, its order as a line, and a panel with each squad's card and
+  the net.
+- **Allied elements report too.** Their orders now have the same lifecycle and net lines.
+- One commander at a time (the host by default; "Take command" on the panel). Contracts carry
+  how many squads they allow (2, more on rated-5, hot zones and operations).
+- Hero squads inside the extraction point come out with you; the leave-behind warning names any
+  that aren't.
+
+#### Added
+- **A second friendly squad no longer breaks the first.** The groundwork for hero-led squads
+  (docs/high_command.md G1-G12): a squad beside the player's keeps its own men, orders, picture and
+  voice. Each of its men carries his group (`Soldier.hc_id`), and `HighCommand.server_spawn_squad`
+  spawns one (the tests' and, from C2, the dev tools' and the campaign's).
+- Lifted from the co-op soak bot into game code, with tests: `FollowBrain` (keeping station off a
+  leader, boarding and leaving his vehicle, getting inside his extraction point), `ProgressWatch`
+  (headway, detours a different side each time, "held up" at 30 s, "unable" at 90 s), `CareRules`
+  (who's treated next, who carries, when to give up), `Extraction.missing_of` (any group), and
+  `DeadGround.known_watchers` (plan from what our side knows, never the true positions).
+- New suite: high_command.
+
+#### Fixed
+- Allied elements, US troops and allied garrisons were removed from the game when a player joined
+  or left (the player squad's rebalance took every friendly AI without a slot for its own).
+- Allied elements' men showed in the command menu's F-key roster.
+- Another friendly squad counted the human players as its own men, and formed them into its slots.
+- A hero squad's or element's shouts reached every player on the map (now within 50 m).
+- An AAV's boarders and the contact callout used the player squad, not the speaker's own.
+
 ### US forces in the living war (combined arms, phase D7)
 
 #### Added
@@ -165,6 +264,57 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   drop soldiers' shadows nearer. Up close they all look the same. The woods change in the next zone.
 - **Performance cases** (suite perfcases, in CI) with frame-time and stutter budgets, so a change
   that slows these scenes down shows up.
+### Requests to friendly units: the plumbing (combined arms phase B4, part 1, docs/combined_arms.md 4.1-4.3, 4.6)
+
+#### Added
+- **Requests and their answers.** A request to a friendly unit (suppression, a medic, CASEVAC,
+  smoke, armour, hold, cover, a pick-up, ammo, a sitrep) goes to the nearest group that can do it
+  and hears you. After a radio delay it answers yes with an ETA, no with a reason ("We're pinned",
+  "Ammo black", "No medic free", "Out of range"), or offers a later time you can take or cancel.
+  Three can be open at once, and asking the same thing twice merges. A sitrep is answered at once
+  from what the side knows. The units don't carry out the jobs yet (phase B2), and the menus that
+  send requests come with the contextual menus (C6).
+- **Request cards** under the objectives show each request: who answers, what, its state and
+  the ETA counting down, with accept and cancel.
+- **Allies ask you.** An allied group in contact and in trouble, or out of ammo, calls the nearest
+  player on the net ("Any station, Saber 2, contact, need support at 041 053"). A card shows
+  where it is and asks yes or no. Helping counts toward your cooperation.
+- **Radio voice.** Net lines are put together from recorded words, digit by digit. The clips are
+  still to be rendered (tools/voices/gen_radio.py needs Piper); until then the lines show as
+  subtitles.
+- New test suite requests, in tools/run_tests.sh and CI.
+
+### The side picture: what each side knows (combined arms phase B1, docs/combined_arms.md 3.2, 3.3, 4.4)
+
+> **Status (2026-10-22 ~01:10 CDT):** side_command, requests and smoke pass locally; missions
+> (R2402) fails only its zone-generation check, which runs before any B1 code (the landmarks
+> red claude/ci-cleanup fixes). Remove this note when B1 lands.
+
+#### Added
+- **Spot reports on the map.** What your side has reported shows on the map as it was reported:
+  a symbol by what was seen (men, an MG, an AT team, a sniper, a vehicle, armour, a mortar), how
+  many and how long ago, inside a circle for how sure anyone is of where they are now. Fresh
+  reports are solid, older ones dashed, and past three minutes only a "last seen" circle is left.
+  Hover one to see who sent it and when. Nobody sees anything that wasn't reported.
+- **Spot reports in the world.** A small diamond hangs over each reported enemy within 800 m that
+  you can't see yourself. Your side's tags are red, everyone else's reports amber, and they fade
+  as they age. Settings > HUD turns them off or changes the range.
+- **Reports take radio time.** A squad's sighting reaches the side over the radio after a delay:
+  3-8 s for the company and allied regulars by their leader's skill, 8-20 s for Eastern Concord,
+  15-45 s for the cartels and Black Ridge, and the insurgents as before. With the net down it's
+  three times as long. A group whose radio man is down holds what it saw until it meets someone
+  with a radio.
+- **Your own forces are tracked.** Friendly vehicles with a working radio are tracked where they
+  are, and go grey if the radio is knocked out. Groups are tracked by their sitreps every 30 s.
+- **The group board.** Every group on each side is listed with its strength, anti-armour power,
+  combat effectiveness (green, amber, red) and ammunition. The AI commander (phase B2) will task
+  groups from it.
+- New test suite side_command (merging, ageing, latency by side, comms down, tracking, fairness,
+  the budget), in tools/run_tests.sh and CI.
+
+#### Changed
+- The hot-zone enemy commander now keeps its picture in the same form the friendly side uses.
+  Its decisions read the same reports as before, so hot zones play the same.
 
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 

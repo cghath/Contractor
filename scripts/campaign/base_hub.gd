@@ -217,6 +217,13 @@ func new_campaign(hiring_seed := -1) -> void:
 	Hiring.redraw(h, day())
 	Roster.members(roster())
 	Roster.players(roster())
+	# Two standing high command squads from the start (combined_arms.md 5.2), and 14 days of
+	# their wages on top of the start cash so the first fortnight isn't a trap.
+	var standing_rng := RandomNumberGenerator.new()
+	standing_rng.seed = hash([int(h.seed), "standing"])
+	if standing_squads:
+		Heroes.seed_standing(roster(), day(), standing_rng)
+		Economy.add_cash(Heroes.standing_wages(roster()) * Heroes.START_WAGE_DAYS, "Standing squads: their first fortnight")
 	_hook_economy(true)
 	_changed_all()
 
@@ -541,6 +548,9 @@ func base_level():
 ## suites keep BaseLevel until the base zone is proven, BaseLevel the fallback), 0 BaseLevel, 1 the
 ## base zone.
 static var base_zone_mode := -1
+## A new campaign starts with the two standing high command squads (combined_arms.md 5.2).
+## Suites about the roster's own mechanics (base_test's hiring and counts) turn it off.
+static var standing_squads := true
 ## Whether a new campaign starts aboard the LHD (docs/lhd_home.md; ZoneControl.home): -1 yes except
 ## under a test scene (the suites keep their base, as base_zone_mode), 0 no (the FOB, as before), 1 yes.
 static var lhd_home_mode := -1
@@ -1705,6 +1715,8 @@ func server_deploy(options := {}) -> String:
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
 	var dep := RosterDeployment.begin(roster(), squad, zone_kind, zone_id, scene, day(), contract, stand_ins)
+	dep["detachments"] = Heroes.deploying(roster(), Heroes.squads_max(int(contract.get("rated", 3)), zone_kind == RosterDeployment.HOT,
+		bool(contract.get("operation", false))))  # high command squads (5.2): the standing two unless left at home
 	_record_loadouts(dep)  # S2: what everyone deploys in, for "Restock last loadout" back at the base
 	SessionLog.note("deployment started: zone %s (%s), contract %s, day %d; squad %s; %d player%s; %d free respawns" % [zone_id, zone_kind,
 		_contract_text(contract), day(), _callsigns(dep.squad), _player_count(), "" if _player_count() == 1 else "s",
@@ -1917,6 +1929,48 @@ func server_squadmate_leaving(s: Soldier) -> void:
 	Roster.injure(member(mid), Roster.assess_outcome(_outcome_of(s)), day())
 	RosterDeployment.unmark_spawned(roster(), mid)
 	_changed(&"roster")
+
+
+## Host (HighCommand, the deployment's start): detachment `did`'s ready men spawn round `at` as
+## a hero squad, each in their own identity, gear and skills, on the deployment's books
+## (dep.spawned: resolve() settles them as it does the player squad's). Returns the Squad.
+func server_spawn_detachment(lvl: Node, did: String, at: Vector3) -> Squad:
+	var d := Heroes.get_detachment(roster(), did)
+	var mids := Heroes.deploy_members(roster(), did)
+	if d.is_empty() or mids.is_empty() or lvl == null:
+		return null
+	var members: Array = []
+	for mid in mids:
+		var m := member(mid)
+		var stats := Roster.ai_stats(m)
+		var data := {"name": String(m.callsign), "role": String(m.get("role", "rifleman")), "combat": stats.combat, "discipline": stats.discipline}
+		data.merge(Roster.identity(m))
+		members.append(data)
+	var hc_id := "hc_" + did
+	var sq := HighCommand.server_spawn_squad(lvl, {"id": hc_id, "callsign": String(d.callsign), "members": members, "size": members.size(), "did": did}, at)
+	if sq == null:
+		return null
+	for s: Soldier in sq.members():
+		var i := mids.find(_mid_by_callsign(String(s.name)))
+		if i < 0:
+			continue
+		var mid := mids[i]
+		var m := member(mid)
+		s.role = StringName(m.get("role", "rifleman"))
+		s.set_meta(&"roster_id", mid)
+		s.dog_tags = Fallen.tags_of(m)
+		s.inventory.net_state = GameState.from_json(m.get("gear", {}).duplicate(true))
+		RosterDeployment.mark_spawned(roster(), mid)
+	_changed(&"roster")
+	SessionLog.note("[hc] %s deployed: %d men at (%.0f, %.0f)" % [d.callsign, sq.members().size(), at.x, at.z])
+	return sq
+
+
+func _mid_by_callsign(callsign: String) -> String:
+	for mid: String in Roster.members(roster()):
+		if String(Roster.members(roster())[mid].get("callsign", "")) == callsign:
+			return mid
+	return ""
 
 
 ## Host hook (CompoundLevel._on_died_for_good): a roster squadmate was killed.
@@ -2687,6 +2741,8 @@ func server_pick(mid: String, in_squad: bool) -> String:
 	elif mid not in squad:
 		if not Roster.is_available(member(mid)):
 			return "They can't deploy now"
+		if Heroes.in_detachment(roster(), mid):
+			return "They deploy with their high command squad"
 		if squad.size() >= SQUAD_SIZE - 1:
 			return "The squad is full"
 		squad.append(mid)
@@ -2700,7 +2756,7 @@ func server_pick(mid: String, in_squad: bool) -> String:
 ## Returns whether anyone was taken out.
 func _prune_prep_squad() -> bool:
 	var squad: Array = _prep().squad
-	var gone := squad.filter(func(mid: Variant) -> bool: return not Roster.is_available(member(String(mid))))
+	var gone := squad.filter(func(mid: Variant) -> bool: return not Roster.is_available(member(String(mid))) or Heroes.in_detachment(roster(), String(mid)))
 	for mid: Variant in gone:
 		squad.erase(mid)
 	return not gone.is_empty()
@@ -3264,6 +3320,12 @@ func _server_request(action: String, args: Array) -> void:
 				why = server_set_company_squads(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"fob_tier":
 				why = server_upgrade_fob() if sender == 1 else "Only the host can do that"
+			"hc_home":
+				why = ("" if Heroes.set_home(roster(), String(args[0]), bool(args[1])) else "No such squad") if sender == 1 and args.size() >= 2 else "Only the host can do that"
+				_changed(&"roster")
+			"hc_rename":
+				why = "" if sender == 1 and args.size() >= 2 and Heroes.rename(roster(), String(args[0]), String(args[1])) != "" else "Only the host can do that"
+				_changed(&"roster")
 			"guards":
 				why = server_set_guards(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
 			"deploy":

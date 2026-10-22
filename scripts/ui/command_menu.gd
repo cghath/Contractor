@@ -389,7 +389,8 @@ func roster() -> Array[Soldier]:
 		if h is Soldier and not h.is_queued_for_deletion():
 			out.append(h as Soldier)
 	for s in level.ai.get_children():
-		if s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion() and not (s as Soldier).vitals.is_dead():
+		if s is Soldier and s.faction == player.faction and not s.is_queued_for_deletion() and not (s as Soldier).vitals.is_dead() \
+				and (s as Soldier).hc_id == &"" and (s as Soldier).iff not in [&"allied", &"rebel"]:  # G3: the player squad's men only (not hero squads, elements, US troops)
 			out.append(s as Soldier)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool: return _roster_key(a) < _roster_key(b))
 	return out

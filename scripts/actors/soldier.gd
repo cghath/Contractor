@@ -156,6 +156,10 @@ var last_shot_to := Vector3.INF
 ## Which friendly marks he wears (GearRig.iff_of): "allied" for allied troops (AlliedTroops),
 ## "" for everyone else (his faction decides). Set before the body enters the tree.
 @export var iff := &""
+## The high command group he belongs to (docs/high_command.md G12, combined_arms.md 5.1): a
+## hero squad's id ("hawk2") or an allied element's ("allied1"); &"" for the player squad and
+## everyone else. From the spawn data (CompoundLevel._make_soldier), so every peer has it.
+var hc_id := &""
 ## Local (the owning player's): his binoculars are up (PlayerInput). He walks slowly and can't
 ## sprint or fire (SoldierMovement, PlayerInput).
 var binoculars_up := false
@@ -1175,7 +1179,7 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 		if ordered_why != "":
 			_client_message.rpc_id(owner_peer(), ordered_why)
 		return
-	match cmd:
+	match cmd.get_slice(":", 0) if cmd.begins_with("wt_") else cmd:  # ("wt_setup:<left>:<right>": the map's Place gun arc)
 		"follow":
 			squad.give_order(self, Squad.Order.FOLLOW, point, names)
 		"hold":
