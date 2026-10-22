@@ -13,8 +13,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Mission UI pass (claude/mission-ui)
 
-> **Where I stopped / next step (2026-10-22, @@TIME@@ CDT):** all four screens done and pushed
-> (board, briefing, objectives tracker, debrief) with the flow between them. Local run: @@RUN@@.
+> **Where I stopped / next step (2026-10-22, 22:39 CDT):** all four screens done and pushed
+> (board, briefing, objectives tracker, debrief) with the flow between them. Local runs: R2510 (smoke, contracts, missions PASS; ui's one red was the board's open help at 1280x720 @2.0, fixed in f869ce82), R2511 (smoke + ui PASS at f869ce82).
 > Next: CI on the branch, then a look in game (no windowed screenshots while Captain plays):
 > the glance strip's wrap on the briefing panel at 1.5-2.0 UI scale, and the hotkeys against
 > the map's own keys (V, L, R, G only fire while the briefing panel shows). Numbers Proposed:
