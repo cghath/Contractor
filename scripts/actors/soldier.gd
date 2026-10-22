@@ -1179,7 +1179,7 @@ func _squad_command_as(squad: Squad, cmd: String, point: Vector3, names: PackedS
 		if ordered_why != "":
 			_client_message.rpc_id(owner_peer(), ordered_why)
 		return
-	match cmd:
+	match cmd.get_slice(":", 0) if cmd.begins_with("wt_") else cmd:  # ("wt_setup:<left>:<right>": the map's Place gun arc)
 		"follow":
 			squad.give_order(self, Squad.Order.FOLLOW, point, names)
 		"hold":

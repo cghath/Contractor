@@ -30,6 +30,7 @@ var player: Soldier
 var inventory_screen: InventoryScreen
 var loot_window: LootWindow
 var command_menu: CommandMenu
+var context_menu: ContextMenu
 var voice_order: VoiceOrder
 ## The map (M) and briefing (MapScreen).
 var map_screen: MapScreen
@@ -137,6 +138,8 @@ func _ready() -> void:
 	zone_left.add_child(_spacer())
 	voice_order = VoiceOrder.new(command_menu)
 	add_child(voice_order)
+	context_menu = ContextMenu.new(player)  # the one-key contextual order (combined_arms.md 5.5)
+	add_child(context_menu)
 	_status = UiKit.hud_label()
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long line cuts with "...", never runs under the radio
 	zone_left.add_child(_status)

@@ -107,6 +107,7 @@ const BINDABLE := [
 	[&"binoculars", "Binoculars (raise / lower, on foot)"],
 	[&"auto_walk", "Auto-walk (on / off)"],
 	[&"walk", "Walk / jog (toggle)"],
+	[&"context", "Contextual order (tap: the top one, hold: all)"],
 ]
 ## Pairs of bindable actions that may share a key, because they never apply at the same time:
 ## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them

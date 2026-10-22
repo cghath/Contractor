@@ -2784,6 +2784,15 @@ Made while building the C lane (claude/ca-c-high-command); each is Proposed and 
 | C5.5 | The body: a hit (its injury rises or it goes down) drops you back at once (`HcCamera.back_when_hit`, on); suppression of 0.35 or more shows the red edge | 5.3 | Only the red edge |
 | C5.6 | Map mode builds a 96 x 96 relief of the zone's heights with the map's picture on it, in its own world inside a SubViewport over the map view; the briefing's "3D map" button toggles it. It shows the objectives, the insertion points and the known enemies (the map's markers) | 5.3's "one camera, two places" from what the loaded zone already has | A separate scene built from the zone def at the FOB |
 | C5.7 | Camera cost: no extra rendering (it's the same world from another camera, actors hidden); markers rebuild 4 times a second (measured under 3 ms) | 9.3 budget | Every frame |
+| C6.1 | `context` is the middle mouse button (a mouse binding in `Controls.BUTTONS`, rebindable): tap for the top option, hold 0.25 s for the radial; the command menu keeps the middle button while it's open | 5.5's proposal; no key in `Controls.KEYS` is free | A keyboard key |
+| C6.2 | One table (`ContextResolver`, pure) for the world (`ContextMenu`), and its `hc_first` for the map's and the HC camera's order bar (enemy marker: Attack, Support by fire; building: Defend, Attack; extraction point: Extract; ground: Move, Defend) | 5.5: the same resolver everywhere | Per-screen lists |
+| C6.3 | Recently used: the last 3 picks per kind of target, kept per peer for the session (not saved) | 5.5 | Saved in the settings |
+| C6.4 | A prompt under the crosshair names the one key's default when you look at something other than open ground ("[Middle mouse] Follow me: Okafor") | The one-key default has to be seen to be used | No prompt |
+| C6.5 | Looking at a hero squad's man in the world, its orders come to you (Move, Defend, Attack, SBF, Regroup at your position); the map and camera give them anywhere | In the world the only point to hand is where you stand | A second aim for the point |
+| C6.6 | Requests from the menu go to RequestBroker (B4) with the unit's group id; fire support opens the command menu's Support page; "Swap kit" opens his loot window | B4's broker is the request path; fire missions keep their own flow | New request kinds |
+| C6.7 | The crew wheel's driver and gunner orders say "Not yet" until A3's crews exist; Pop smoke and Bail out are there now (bail works, smoke waits for A3's launchers) | A3 owns the crew intercom (2.5.2) | Leaving the crew wheel out |
+| C6.8 | The interaction menu (Left Ctrl) gains Follow me, Hold here, Heal up and (under More) Give ammo for a squadmate, through the command menu's own commands | 5.5's "the squadmate orders it lacks" | A second order path |
+| C6.9 | voice_order.gd is unchanged: spoken orders already go through the command menu's commands | Nothing in 5.5 needs it | A voice context |
 
 ### Operations, the war and staging
 

@@ -552,7 +552,7 @@ func _test_map_flow() -> void:
 	cmd.begin("hold")
 	await _frames(5)
 	check(String(so.order.verb) == "hold", "Hold: sent at once, no point needed")
-	check(cmd.context_first(at) == ["move", "defend"], "open ground: Move and Defend first on the bar")
+	check(cmd.context_first(at).has("move") and cmd.context_first(at).has("defend"), "open ground: Move and Defend on the bar's first buttons (recent first)")
 	await _frames(30)
 	cmd._check_pending()
 	check(not cmd.pending.has("hawk2"), "the host's copy came back (the ghost is gone)")

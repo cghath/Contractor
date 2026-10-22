@@ -354,6 +354,8 @@ func _send_points(id: String, verb: String, pts: Array, queue: bool, facing := V
 
 func _note_sent(id: String, verb: String, at: Vector2) -> void:
 	pending[id] = {"verb": verb, "point": at, "at": Time.get_ticks_msec(), "seen_ack": false}
+	if at.is_finite():
+		ContextResolver.used("map:" + context_kind(at), verb)  # recently used first on the bar
 	_last_order_squad = id
 
 
@@ -480,20 +482,30 @@ func _screen_of(f: Dictionary) -> Vector2:
 
 # --- The order bar -------------------------------------------------------------------------------
 
-## The verbs to show first for what's under the cursor (C6's ContextResolver takes this over).
+## The verbs to show first for what's under the cursor (ContextResolver.hc_first: the same table
+## as the world's, recently used first).
 func context_first(at: Vector2) -> Array[String]:
+	return ContextResolver.hc_first(context_kind(at))
+
+
+## What's under map point `at` for the order bar: "enemy" (an intel or spot marker), "extraction",
+## "building" or "ground".
+func context_kind(at: Vector2) -> String:
 	var marks := MapNodes.markers(view)
 	if marks:
 		for m: Dictionary in marks.markers.values():
 			var pts: PackedVector2Array = m.get("points", PackedVector2Array())
-			if String(m.get("kind", "")) == "enemy" and not pts.is_empty() and pts[0].distance_to(at) < 40.0:
-				return ["attack", "sbf"]
+			if String(m.get("kind", "")) in ["enemy", "spot"] and not pts.is_empty() and pts[0].distance_to(at) < 40.0:
+				return "enemy"
 	var ex := MapNodes.extraction(view)
 	if ex:
 		for p: Dictionary in ex.points:
 			if Extraction.inside(p, Vector3(at.x, 0.0, at.y)):
-				return ["extract"]
-	return ["move", "defend"]
+				return "extraction"
+	var lvl := view.level as Node3D if view else null
+	if lvl and not Buildings.nearest(lvl, Vector3(at.x, 0.0, at.y), 15.0).is_empty():
+		return "building"
+	return "ground"
 
 
 func refresh() -> void:

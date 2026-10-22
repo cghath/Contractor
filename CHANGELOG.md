@@ -11,11 +11,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### High command (combined arms, phases C1 to C5)
+### High command (combined arms, phases C1 to C6)
 
-> **Where this lane is:** C1-C5 done on claude/ca-c-high-command (B1 and B4 part 1 merged in for
-> the side picture's spot markers). Next: C6 (contextual menus everywhere: ContextResolver, the one
-> key, recent first, the interaction menu's squadmate orders, the crew wheel, request options).
+> **Where this lane is:** C1-C6 done on claude/ca-c-high-command (B1 and B4 part 1 merged in).
+> The C lane is complete; follow-ups are in docs/combined_arms.md section 10 (C2.11, C4.9, C6.7).
+
+#### Added (C6: contextual menus)
+- **One key does the obvious thing.** Look at something and tap the middle mouse button: the top
+  option for it happens (a squadmate follows you, a casualty gets treated, an enemy gets tagged,
+  an allied squad gets asked for suppression when you're in contact). Hold the button for a radial
+  with the rest and "More..." (the full command menu). A prompt under the crosshair says what the
+  tap will do. The options you use most come first next time.
+- The interaction menu (Left Ctrl) on a squadmate now has Follow me, Hold here, Heal up and Give
+  ammo.
+- The map's order bar puts the orders that fit what's under the cursor first (an enemy marker:
+  Attack and Support by fire), and the ones you used there last.
 
 #### Added (C5: the 3D high command camera)
 - **Shift+M lifts you into a 3D view over the zone** (or "3D view" on the map's high command panel).
