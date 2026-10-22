@@ -1924,6 +1924,27 @@ func _responder_kept(c: Soldier, wanted: Array[StringName]) -> Soldier:
 	return who
 
 
+## medic_for for _find_casualty, kept as _responder_kept keeps its answer (a carer calling for a
+## medic had every AI's think go through every combatant for him).
+func _medic_kept(c: Soldier, wanted: Array[StringName]) -> Soldier:
+	var now := Soldier._now()
+	var key := "m%d|%s" % [c.get_instance_id(), wanted]
+	var kept: Array = _responders.get(key, [])
+	if not kept.is_empty() and now - float(kept[0]) >= 0.0 and now - float(kept[0]) < RESPONDER_KEEP_S:
+		var r: Variant = kept[1]
+		if r == null:
+			return null
+		if is_instance_valid(r):
+			var ai := SquadAI.of(r)
+			if ai and ai.body.role == Roles.MEDIC and c.care_by != r and ai._free_for(c) and ai._cares_for(c) and ai._carries_any(wanted):
+				return r
+	if _responders.size() > 256:
+		_responders.clear()
+	var who := medic_for(c, wanted)
+	_responders[key] = [now, who]
+	return who
+
+
 ## Who answers casualty `c` (design doc "Medics"): the medic of c's fire team when free and
 ## not far (MEDIC_FAR_M), otherwise c's battle buddy, otherwise another free medic,
 ## otherwise the nearest free squadmate. Only AI on c's side that is up and not already
@@ -2060,7 +2081,7 @@ func _find_casualty() -> Soldier:
 				continue  # another medic is already walking in to take him over
 			if hvt and _takes_over_hvt(s, carer):
 				pass  # a medic takes a wounded HVT over from whoever has him
-			elif carer_ai == null or not carer_ai.wants_medic or medic_for(s, carer_ai.wanted) != body:
+			elif carer_ai == null or not carer_ai.wants_medic or _medic_kept(s, carer_ai.wanted) != body:
 				continue  # someone is on it
 		else:
 			var ai := SquadAI.of(s)
@@ -5677,11 +5698,19 @@ func _go(point: Vector3, run := false) -> void:
 
 ## Follows a navmesh path to the destination, judging waypoints by flat distance (the
 ## baked mesh sits a little above the ground, so 3D distances never quite close).
+const REPATH_SHARE := 0.15
+const REPATH_DRIFT_MAX_M := 3.0
+
+
 func _steer(delta: float) -> void:
 	var dir := Vector3.ZERO
 	_repath_cd -= delta
 	if _has_destination and _flat_distance(_destination) > ARRIVE and body.stunned_s <= 0.0:
-		if _repath_cd <= 0.0 or _path_target.distance_to(_destination) > 0.5:
+		# A destination that moved a little goes on with the path it has until REPATH_S (perf,
+		# 2026-10-22: a patrol's men re-planned each time the lead's slots moved 0.5 m): within
+		# 0.5 m, or REPATH_SHARE of the way still to go (up to REPATH_DRIFT_MAX_M).
+		var drift_ok := clampf(_flat_distance(_destination) * REPATH_SHARE, 0.5, REPATH_DRIFT_MAX_M)
+		if _repath_cd <= 0.0 or _path_target.distance_to(_destination) > drift_ok:
 			_repath_cd = REPATH_S * _lod_now()
 			_path_target = _destination
 			_path = NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, _destination, true)

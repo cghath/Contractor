@@ -1621,15 +1621,19 @@ func follow_point(member: Soldier) -> Vector3:
 ## SLOTS_KEEP_M of where they were worked out and heads the same way (each working out is a few
 ## rays per man: in the Old Quarter city the patrols' follow_point was 1.8 ms a call, worked out
 ## again for every man that wasn't in the last answer). A man's slot lags the lead by at most a
-## couple of ticks' walk.
+## couple of ticks' walk (an AI squad's, with no player in it to watch it form, a few more), and
+## turns with the lead once he has turned SLOTS_KEEP_DOT's worth (about 6 degrees).
 const SLOTS_KEEP_TICKS := 4
+const SLOTS_KEEP_TICKS_AI := 8
 const SLOTS_KEEP_M := 0.6
+const SLOTS_KEEP_DOT := 0.995
 var _slots_lead_at := Vector3.INF
 var _slots_heading := Vector3.ZERO
 
 
 func _slots_fresh(frame: int) -> bool:
-	return _slots_frame >= 0 and frame - _slots_frame < SLOTS_KEEP_TICKS and frame >= _slots_frame 		and leader.global_position.distance_to(_slots_lead_at) <= SLOTS_KEEP_M and heading == _slots_heading
+	var keep := SLOTS_KEEP_TICKS if leader == null or not leader.is_ai() or is_player_squad() else SLOTS_KEEP_TICKS_AI
+	return _slots_frame >= 0 and frame - _slots_frame < keep and frame >= _slots_frame 		and leader.global_position.distance_to(_slots_lead_at) <= SLOTS_KEEP_M 		and (heading == _slots_heading or heading.dot(_slots_heading) >= SLOTS_KEEP_DOT)
 
 
 ## The squad as it stands this frame, the lead and players too (who squadmates keep apart from,
