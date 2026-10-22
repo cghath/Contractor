@@ -12,7 +12,7 @@ extends RefCounted
 ## - round settlements and sites: washing lines, dishes and generators by the villages; shipping
 ##   containers, generators, fuel tanks, latrines and barriers outside the HQ, QRF bases, outposts
 ##   and compounds; barriers and signs at checkpoints (_site, data "sites");
-## - along the roads (street_lines: one function, for the roads work to repoint at its road edges):
+## - along the roads (street_lines: the planned roads' pieces, each its own kind's width, F-178):
 ##   utility poles with wires, direction signs, a bus shelter and a billboard by a town, parked and
 ##   burnt-out vehicles (_roadside);
 ## - the countryside: pylon lines across the zone (_power_lines), farmsteads with a pen of goats or
@@ -89,6 +89,10 @@ var _near_cells := {}  # Vector2i -> true: cells with a footprint in them or nex
 var _modules: Array = []  # {"type", "base", "centre" (Vector2), "y", "half" (Vector2), "pad" (Rect2)}
 var _pads: Array = []  # [Rect2, margin] every pad, with how far props keep from it
 var _lines: Array = []  # street_lines()
+## The street lines by LINE_CELL_M cell (_lines_near): the planned roads come as hundreds of short
+## pieces, and every prop tried looks for the ones near it (roads, cg_brief 1.2).
+const LINE_CELL_M := 64.0
+var _line_cells := {}
 var _allow: Variant = null  # the town pad a street prop may stand on (Rect2), or null
 var _farms: Array[Vector2] = []
 var _open := false  # the preset has an open middle (ZoneScatter._open_weight: a salt pan)
@@ -143,6 +147,7 @@ func lay_out(s: ZoneScatter, t: ZoneTerrain, d: Dictionary) -> void:
 		if String(m.type).begins_with(ZoneModules.LANDMARK) and m.base == "farm":
 			_farms.append(m.centre)  # a landmark farm (BuildingGen.site): the countryside's keep FARM_GAP_M from it
 	_lines = street_lines()
+	_index_lines()
 	_open = float(s._spec.get("margin_m", 0.0)) > 0.0
 	for m: Dictionary in _modules:
 		if m.base == "town":
@@ -161,13 +166,44 @@ func lay_out(s: ZoneScatter, t: ZoneTerrain, d: Dictionary) -> void:
 
 
 ## The zone's roads as street lines: {"a", "b" (Vector2, ends of the middle line), "half_w" (its
-## half width, m)}. Today's roads are the def's straight "roads" segments, ZoneRoads.WIDTH_M wide;
-## the roads work (zone_roads.gd) will expose their edges and pavements: point this at them and
-## every roadside prop follows.
+## half width, m: to the road's edge), "kind"}. The roads (cg_brief 1.2, F-178) are the def's
+## "roads" pieces once ZoneRoads has planned them: the curved roads as straight pieces within 1 m
+## of the curve, each naming its kind, so a line's edge is the road's edge (as ZoneRoads.edges():
+## an asphalt road 3.5 m, a dirt track 2.1 m, a town street's carriageway 3 m; RoadNet.half_width),
+## and every roadside prop follows the curves. The scatter's cache keys on the same pieces. A def
+## not planned yet (its links, no kind) keeps the old ROAD_HALF_M.
 func street_lines() -> Array:
 	var out: Array = []
 	for road: Array in def.get("roads", []):
-		out.append({"a": Vector2(float(road[0][0]), float(road[0][1])), "b": Vector2(float(road[1][0]), float(road[1][1])), "half_w": ROAD_HALF_M})
+		var kind := String(road[2]) if road.size() > 2 else ""
+		var hw := RoadNet.half_width(kind) if kind != "" else ROAD_HALF_M
+		out.append({"a": Vector2(float(road[0][0]), float(road[0][1])), "b": Vector2(float(road[1][0]), float(road[1][1])), "half_w": hw, "kind": kind})
+	return out
+
+
+func _index_lines() -> void:
+	_line_cells.clear()
+	for l: Dictionary in _lines:
+		var box := Rect2(l.a, Vector2.ZERO).expand(l.b)
+		for cy in range(floori(box.position.y / LINE_CELL_M), floori(box.end.y / LINE_CELL_M) + 1):
+			for cx in range(floori(box.position.x / LINE_CELL_M), floori(box.end.x / LINE_CELL_M) + 1):
+				var cell := Vector2i(cx, cy)
+				if not _line_cells.has(cell):
+					_line_cells[cell] = []
+				(_line_cells[cell] as Array).append(l)
+
+
+## The street lines that may pass within `reach` of `p` (each once).
+func _lines_near(p: Vector2, reach: float) -> Array:
+	var out: Array = []
+	var seen := {}
+	for cy in range(floori((p.y - reach) / LINE_CELL_M), floori((p.y + reach) / LINE_CELL_M) + 1):
+		for cx in range(floori((p.x - reach) / LINE_CELL_M), floori((p.x + reach) / LINE_CELL_M) + 1):
+			for l: Dictionary in _line_cells.get(Vector2i(cx, cy), []):
+				var id := hash([l.a, l.b])
+				if not seen.has(id):
+					seen[id] = true
+					out.append(l)
 	return out
 
 
@@ -282,7 +318,7 @@ func _fits(shape: String, foot: Array, opts: Dictionary) -> bool:
 	var c: Vector2 = foot[0]
 	var reach := h.length()
 	var road_m := float(opts.get("road_m", -1.0))
-	for line: Dictionary in _lines:
+	for line: Dictionary in _lines_near(c, reach + maxf(road_m, ROAD_HALF_M + ROAD_CLEAR_M + 2.0)):
 		var keep := road_m if road_m >= 0.0 else float(line.half_w) + ROAD_CLEAR_M
 		if Geometry2D.get_closest_point_to_segment(c, line.a, line.b).distance_to(c) > keep + reach:
 			continue

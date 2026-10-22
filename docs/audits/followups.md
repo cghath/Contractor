@@ -33,7 +33,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-191 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
 | F-192 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
 | F-193 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
-| F-194 | P3 | A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1 on world/roads: the 5 m check fails) |
+| F-194 | P3 | A helicopter's J-hook can come over a natural hump 4 m clear: it plans 17 m and flies 14 m up a 23% rise (heliflight ridge_hot insertion 1 on world/roads: the 5 m check fails) |
 
 ## F-01: the building scan only sees one floor
 
@@ -540,6 +540,17 @@ and landmark to the network, so trees and rocks land elsewhere), and the hook fl
 no longer has whatever stood there keeping it higher. Suggested: let the hook's descent look ahead
 at the terrain under the rest of its path (obstacle_top along the next points), not only what stands
 on it, so it holds 5 m over a hump on the way down.
+
+Rechecked 2026-10-22 with the prop library merged (ZoneScatter.tall_top in obstacle_top): the
+same 4.0 m at the same spot (local R0520). No tall prop stands there, so tall_top doesn't bind. A
+closer look: the hook already looks ahead along its own points (_contour, _ahead, _need_y with
+footprint_ground), and at the hump its own need is about 17 m (ground 7.3 m + MIN_CLEAR_M 5 +
+CLEAR_MARGIN_M 2 + about 2.8 m of airframe drop); it flies 14.1 m. So it plans the height and
+doesn't make it in time: the ground climbs 15 m in 64 m (23%) while it's coming down the glide
+slope at 61 km/h. That's the climb and steering response (CONTOUR_CLIMB, _climb_to, _steer),
+not a missing look-ahead, so it's left for the helicopter side rather than tuned here.
+Suggested: plan the hook's climb at a lower share of CLIMB_MS when it's sinking (or slow the
+hook where the ground ahead rises faster than the glide slope).
 
 ## F-178: point the roadside props at the new roads (cghath's side, queue item 1.7) (done 2026-10-22)
 

@@ -292,6 +292,8 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 
 #### Changed
 - The trails' patrols walk their curved trails.
+- Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
+  billboards) follow the curved roads and keep off them, each road its own width (F-178).
 - **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
   new roads run (every site's road, the roads in from the zone's edges), and each road runs
   straight across its bridge's deck and down its ramps instead of dipping under it onto the
