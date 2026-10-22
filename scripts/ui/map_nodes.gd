@@ -86,10 +86,25 @@ static func squad_ai(from: Node) -> Array[Soldier]:
 		return out
 	for child in node.get_children():
 		var s := child as Soldier
-		if s and s.faction == &"friendly" and s.squad_slot >= 0 and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+		if s and s.faction == &"friendly" and s.squad_slot >= 0 and s.hc_id == &"" and not s.is_queued_for_deletion() and not s.vitals.is_dead():
 			out.append(s)
 	out.sort_custom(func(a: Soldier, b: Soldier) -> bool:
 		return (a.squad_slot if a.squad_slot >= 0 else 99) < (b.squad_slot if b.squad_slot >= 0 else 99))
+	return out
+
+
+## Living friendly AI of the high command groups (any peer): hero squads' and allied elements'
+## men (Soldier.hc_id), optionally only group `hc_id`. Not the player squad's (squad_ai).
+static func hc_ai(from: Node, hc_id := &"") -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	var level := level_of(from)
+	var node := level.get_node_or_null(^"AI") if level else null
+	if node == null:
+		return out
+	for child in node.get_children():
+		var s := child as Soldier
+		if s and s.faction == &"friendly" and s.hc_id != &"" and (hc_id == &"" or s.hc_id == hc_id) and not s.is_queued_for_deletion() and not s.vitals.is_dead():
+			out.append(s)
 	return out
 
 

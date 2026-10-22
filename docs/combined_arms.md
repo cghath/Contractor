@@ -2730,6 +2730,21 @@ Made while building A1; each is Proposed and can be changed.
 | 54 | A terrain-masked cone (64-ray viewshed) for gun placement | The Captain: "a cone of fire visible" | An unmasked arc |
 | 55 | One `ContextResolver` for world, map and camera; a one-key default; recent first; everything else still reachable | The Captain's contextual ask | Per-screen logic |
 
+### High command, phase C builds (2026-10-22, Proposed)
+
+Made while building the C lane (claude/ca-c-high-command); each is Proposed and can be changed.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| C1.1 | `Soldier.hc_id` comes in the spawn data (like `iff`), not a replicated property | It never changes after spawn (succession keeps the group), and spawn data reaches every peer and late joiners for free | A SceneReplicationConfig entry |
+| C1.2 | Allied elements get an hc_id (`allied1`, `allied2`) and a callsign now, ahead of C2's HcOrder move | They are high command groups; the groundwork fixes protect them too (rebalance used to remove them on a join) | Hero squads only |
+| C1.3 | `Squad.is_squadmate(s)` = friendly AI, no hc_id, not allied or rebel marks, not recovery, not crew; `rebalance_squad` also needs the brain on the player squad | One predicate in place of G2/G3/G11's meta checks; the US troops (iff allied, no hc_id) are covered too | A meta per group |
+| C1.4 | G4 by `Squad.is_player_squad()` (the level's `squad_for`), not by hc_id | Gun teams and US field squads have their own Squads without an hc_id; none of them should count the humans | `hc_id == ""` |
+| C1.5 | `Callouts.HC_VOICE_M` 50 m | Middle of the doc's 40-60 m | 40 or 60 |
+| C1.6 | `DeadGround` already existed (supports/, lifted for helicopter LZs); lift 4 is `DeadGround.known_watchers(level, squads)` (intel markers + squads' `known`) for game AI's `posts`, the soak and LZ picks keep `watchers()` | No second dead-ground search; the seam is the posts argument `find()` already takes | A new pure copy |
+| C1.7 | FollowBrain's bands: Follow 30-60 m, Support me 60-120 m; ProgressWatch: wedged 4 s (the soak's), held up 30 s, unable 90 s | high_command.md 3.2 and 4.3 | Other numbers |
+| C1.8 | Soak edits (lifts 7, 8 and the soak calling the lifted pieces) go as F-180 | coop_soak.gd isn't on claude/ai-driving | Bringing the soak branch in |
+
 ### Operations, the war and staging
 
 | # | Call | Why | The alternative |

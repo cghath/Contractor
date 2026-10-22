@@ -268,10 +268,12 @@ func server_call(by: Soldier, dev := false, kind := "rifle", company := false, a
 	var sq := Squad.new()
 	sq.name = "AlliedSquad%d" % (slot + 1)
 	sq.faction = &"friendly"
+	sq.hc_id = StringName("allied%d" % (slot + 1))  # a high command group (G12): not the player squad
+	sq.callsign = "%s %d" % ["Rebels" if rebel else ("Company" if company else "Allied"), slot + 1]
 	level.add_child(sq)
 	for i in size:
 		var pos: Vector3 = level.call(&"ground_point", at + across * SPACING_M * (i - (size - 1) / 2.0))
-		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "rebel" if rebel else ("" if company else "allied"),
+		var s: Soldier = level.call(&"spawn_soldier", {"name": "A%d_%d" % [slot + 1, i + 1], "faction": "friendly", "iff": "rebel" if rebel else ("" if company else "allied"), "hc_id": String(sq.hc_id),
 			"variant": "woodland" if rebel else (Soldier.COMPANY_VARIANT if company else Kits.variant(kit)),
 			"pos": pos, "loadout": CompoundLevel.hostile_loadout(i) if rebel else Kits.loadout(kit, i, 1, String(spec.mix)), "role": Kits.role(kit, i, String(spec.mix)),
 			"combat": float(k.get("combat", 0.6)), "discipline": float(k.get("discipline", 0.65)), "guard": false, "mode": "aware"})

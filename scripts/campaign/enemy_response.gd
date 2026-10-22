@@ -1119,6 +1119,7 @@ func _unseen(pos: Vector3) -> bool:
 func _watchers() -> Array[Soldier]:
 	var out := MapNodes.players(self)
 	out.append_array(MapNodes.squad_ai(self))
+	out.append_array(MapNodes.hc_ai(self))  # G6: hero squads and elements see a QRF spawn too
 	return out
 
 

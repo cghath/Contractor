@@ -64,6 +64,28 @@ static func watchers(level: Node) -> Array[Vector3]:
 	return out
 
 
+## Where our side KNOWS the enemy watches from (docs/high_command.md section 9 lift 4, 5.5):
+## enemy intel markers on the map and the entries of `squads`' pictures (Squad.known), never
+## true positions. Pass it as find()'s `posts` from game AI (high command's planners); the
+## helicopter's LZ pick and the soak keep watchers(). Empty when nothing is known.
+static func known_watchers(level: Node, squads: Array = []) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var marks := MapNodes.markers(level) if level else null
+	if marks:
+		for m: Dictionary in marks.markers.values():
+			var pts: PackedVector2Array = m.get("points", PackedVector2Array())
+			if String(m.get("kind", "")) == "enemy" and not pts.is_empty():
+				var at := Vector3(pts[0].x, 0.0, pts[0].y)
+				if level.has_method(&"ground_point"):
+					at = level.call(&"ground_point", at)
+				out.append(at)
+	for sq: Variant in squads:
+		if sq is Squad and is_instance_valid(sq):
+			for e: Dictionary in (sq as Squad).enemy_picture():
+				out.append(e.pos)
+	return out
+
+
 ## Hostile soldiers up in `level` (not captive).
 static func hostiles(level: Node) -> Array[Soldier]:
 	var out: Array[Soldier] = []

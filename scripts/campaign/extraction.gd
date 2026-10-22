@@ -391,9 +391,18 @@ static func _named(base: String, foot: bool) -> String:
 
 ## Names of those required who aren't inside `point`.
 func missing_at(point: Dictionary) -> PackedStringArray:
-	var missing := PackedStringArray()
 	var need := required()
-	for s: Soldier in need.players + need.ai:
+	return missing_of(point, need.players + need.ai)
+
+
+## Names of `soldiers` (any group: a hero squad, an element, the soak's bots) who aren't inside
+## `point` (high_command.md section 9 lift 5: one rule for every group). The caller picks who
+## counts (required() drops the dead AI; a player waiting to respawn still counts).
+func missing_of(point: Dictionary, soldiers: Array) -> PackedStringArray:
+	var missing := PackedStringArray()
+	for s: Soldier in soldiers:
+		if s == null or not is_instance_valid(s):
+			continue
 		if not inside(point, s.body_point()):  # a downed one lying as a ragdoll: where it lies
 			missing.append(_soldier_name(s))
 	return missing

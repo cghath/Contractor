@@ -341,7 +341,7 @@ func assess() -> Dictionary:
 		if ai.weapons_free():
 			free += 1
 	if squad.faction == &"friendly" and squad.is_inside_tree():
-		for n in squad.get_tree().get_nodes_in_group(&"combatants"):
+		for n in (squad.get_tree().get_nodes_in_group(&"combatants") if squad.is_player_squad() else []):  # G4: the humans are the player squad's men only
 			var p := n as Soldier
 			if p and not p.is_ai() and p.faction == squad.faction and p.squad_slot >= 0 and not p.is_queued_for_deletion() and not p.vitals.is_dead():
 				if p.vitals.is_up():

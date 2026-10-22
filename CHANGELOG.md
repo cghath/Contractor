@@ -11,6 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### High command (combined arms, phase C1: groundwork)
+
+> **Where this lane is:** C1 done on claude/ca-c-high-command. Next: C2 (Phase 1, HighCommand
+> registry and orders, the two standing squads, AlliedTroops onto HcOrder).
+
+#### Added
+- **A second friendly squad no longer breaks the first.** The groundwork for hero-led squads
+  (docs/high_command.md G1-G12): a squad beside the player's keeps its own men, orders, picture and
+  voice. Each of its men carries his group (`Soldier.hc_id`), and `HighCommand.server_spawn_squad`
+  spawns one (the tests' and, from C2, the dev tools' and the campaign's).
+- Lifted from the co-op soak bot into game code, with tests: `FollowBrain` (keeping station off a
+  leader, boarding and leaving his vehicle, getting inside his extraction point), `ProgressWatch`
+  (headway, detours a different side each time, "held up" at 30 s, "unable" at 90 s), `CareRules`
+  (who's treated next, who carries, when to give up), `Extraction.missing_of` (any group), and
+  `DeadGround.known_watchers` (plan from what our side knows, never the true positions).
+- New suite: high_command.
+
+#### Fixed
+- Allied elements, US troops and allied garrisons were removed from the game when a player joined
+  or left (the player squad's rebalance took every friendly AI without a slot for its own).
+- Allied elements' men showed in the command menu's F-key roster.
+- Another friendly squad counted the human players as its own men, and formed them into its slots.
+- A hero squad's or element's shouts reached every player on the map (now within 50 m).
+- An AAV's boarders and the contact callout used the player squad, not the speaker's own.
+
 ### US forces in the living war (combined arms, phase D7)
 
 #### Added

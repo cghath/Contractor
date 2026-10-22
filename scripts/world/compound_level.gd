@@ -329,6 +329,24 @@ func squad_for(faction: StringName) -> Squad:
 	return _squads.get(faction)
 
 
+## Host: the Squad `s` fights in (his brain's), else his side's (squad_for). squad_for keeps
+## meaning the player squad; callers that mean "this soldier's squad" use this (G12).
+func squad_of(s: Soldier) -> Squad:
+	var brain := SquadAI.of(s) if s else null
+	if brain and is_instance_valid(brain.squad):
+		return brain.squad
+	return squad_for(s.faction) if s else null
+
+
+## Host: the high command group `hc_id`'s Squad (Squad.hc_id), else the side's squad.
+func squad_of_hc(hc_id: StringName, faction: StringName) -> Squad:
+	for n in get_tree().get_nodes_in_group(Squad.HC_GROUP):
+		var sq := n as Squad
+		if sq and sq.hc_id == hc_id and sq.faction == faction:
+			return sq
+	return squad_for(faction)
+
+
 func _ready() -> void:
 	add_to_group(&"level")
 	item_spawner.spawn_function = _make_item
@@ -933,9 +951,16 @@ func rebalance_squad() -> void:
 ## squadmate a recovery contract is about (BaseHub, meta "recovery"): found in the zone, they
 ## come along outside the slots.
 func _squad_ai() -> Array:
-	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == &"friendly" \
-		and not s.is_queued_for_deletion() and not s.vitals.is_dead() and not s.has_meta(&"recovery") and not s.has_meta(&"vehicle_crew"))  # wave 5b: an AAV's crew
+	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and Squad.is_squadmate(s) \
+		and not s.vitals.is_dead() and _on_player_squad(s))  # G2: never a hero squad's or an allied element's man
 
+
+## Host: `s`'s brain is on the player squad (or he has none yet). An element's or a hero
+## squad's man (his own Squad) is not: the old faction test let rebalance_squad remove allied
+## and US troops (squad_slot -1) on the next join (high_command.md G2).
+func _on_player_squad(s: Soldier) -> bool:
+	var brain := SquadAI.of(s)
+	return brain == null or brain.squad == null or brain.squad == squad_for(&"friendly")
 
 ## A squadmate whose slot a player took (or whose role changed) leaves the session. A dead one
 ## never does: its body and gear stay where it fell.
@@ -1088,6 +1113,7 @@ func _make_soldier(data: Dictionary) -> Node:
 	soldier.fire_team = int(data.get("team", -1))
 	soldier.squad_slot = int(data.get("slot", -1))
 	soldier.iff = StringName(data.get("iff", ""))
+	soldier.hc_id = StringName(data.get("hc_id", ""))
 	if String(data.get("faction_id", "")) != "":
 		soldier.set_meta(&"faction_id", String(data.faction_id))  # who he fights for (terror groups: Kits.dress)
 		if multiplayer.is_server():
@@ -1139,7 +1165,7 @@ func _make_soldier(data: Dictionary) -> Node:
 		soldier.set_meta(&"start_states", states)
 		var brain := SquadAI.new()
 		brain.name = "SquadAI"
-		brain.squad = squad_for(soldier.faction)
+		brain.squad = squad_for(soldier.faction) if soldier.hc_id == &"" else squad_of_hc(soldier.hc_id, soldier.faction)  # G7
 		brain.combat = data.combat
 		brain.discipline = data.discipline
 		brain.guard = data.guard

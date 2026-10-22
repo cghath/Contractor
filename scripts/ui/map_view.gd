@@ -487,7 +487,7 @@ func _our_drivers() -> bool:
 		return false
 	for v: Vehicle in vl.vehicles():
 		var d := v.driver()
-		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied":  # (an allied element's men take the high command's orders)
+		if d and d.is_ai() and d.faction == &"friendly" and d.iff != &"allied" and d.hc_id == &"":  # (an allied element's or hero squad's men take the high command's orders)
 			return true
 	return false
 

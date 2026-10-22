@@ -127,6 +127,24 @@ const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
 
+## High command (docs/high_command.md 2, combined_arms.md 5): every Squad with an hc_id is in
+## this group, a hero squad ("hawk2") or an allied element ("allied1"); the player squad has none.
+const HC_GROUP := &"hc_squads"
+var hc_id := &"":
+	set(v):
+		hc_id = v
+		if v != &"" and not is_in_group(HC_GROUP):
+			add_to_group(HC_GROUP)
+## Its callsign on the net and the map ("Hawk 2"); "" for the player squad.
+var callsign := ""
+## The AI soldier who leads it (a hero squad's hero), or null: the player squad and allied
+## elements follow whoever ordered them (leader).
+var hero: Soldier
+## Where the squad works (high_command.md 5.2, set by its SquadOrders): {"anchor": Vector3,
+## "leash_m": float, "sector": [left_dir, right_dir], "rally": Vector3, "axis": Vector3}. Empty
+## (the default) is exactly the old behaviour: follow the lead within FOLLOW_LEASH_M.
+var tasking := {}
+
 var leader: Soldier
 ## The squad's formation and spacing orders (DYNAMIC: chosen by context, the default), and
 ## per fire team orders over them: {team: {"formation": String, "spacing": String}}.
@@ -178,6 +196,24 @@ var screen_point := Vector3.ZERO
 var rescuer_down_at := -1000.0
 var rescuer_down_point := Vector3.ZERO
 var _tactics_cd := 0.0
+
+
+## The player squad: the friendly squad with no high command id (the level's squad_for). Only it
+## counts the human players as its own men (G4) and forms them into its slots.
+func is_player_squad() -> bool:
+	if faction != &"friendly" or hc_id != &"":
+		return false
+	var lvl := CompoundLevel.current(self) if is_inside_tree() else null
+	return lvl == null or lvl.squad_for(faction) == self
+
+
+## One predicate for "a man of the player squad's AI" (high_command.md G12, section 9 lift 6):
+## friendly AI, no high command group, not wearing allied or rebel marks (allied elements, US
+## troops), not a recovery contract's man and not a vehicle's crew. Works on every peer (hc_id
+## and iff come with the spawn data).
+static func is_squadmate(s: Soldier) -> bool:
+	return s != null and is_instance_valid(s) and s.is_ai() and s.faction == &"friendly" and not s.is_queued_for_deletion() \
+		and s.hc_id == &"" and s.iff not in [&"allied", &"rebel"] and not s.has_meta(&"recovery") and not s.has_meta(&"vehicle_crew")
 
 
 ## Host: the tactical evaluator thinks every SquadTactics.THINK_S.
@@ -1570,8 +1606,8 @@ static func team_offset(kind: String, gap: float, team_gap: float, lead_count: i
 ## first man up, while he follows), who keeps his place off the lead (team_offset). Slots go by
 ## squad slot, so a man keeps his place when another goes down, and lie on the navmesh.
 func follow_point(member: Soldier) -> Vector3:
-	if leader == null or not is_instance_valid(leader):
-		return member.global_position
+	if leader == null or not is_instance_valid(leader) or member == hero:
+		return member.global_position  # G9: a hero leads; he never chases his own slot
 	var frame := Engine.get_physics_frames()
 	if frame != _slots_frame or not _slots.has(member):
 		_slots = _work_out_slots()
@@ -1599,9 +1635,11 @@ func _work_out_slots() -> Dictionary:
 	var right := fwd.cross(Vector3.UP).normalized()
 	var lead_team := leader.fire_team if leader.fire_team >= 0 else 0
 	var everyone: Array[Soldier] = members()
+	var mine := is_player_squad()
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var p := n as Soldier
-		if p and not p.is_ai() and p.faction == faction and p.squad_slot >= 0 and not p.is_queued_for_deletion() and not p.vitals.is_dead():
+		if p and not p.is_ai() and p.faction == faction and p.squad_slot >= 0 and not p.is_queued_for_deletion() and not p.vitals.is_dead() \
+				and (mine or p == leader):  # G4: another friendly squad forms only its own men (and a human it follows)
 			everyone.append(p)
 	if leader not in everyone:
 		everyone.append(leader)

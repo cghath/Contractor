@@ -183,16 +183,25 @@ func _send(speaker: Soldier, id: StringName, line: String, repeat_key: String, s
 		_show.rpc_id(peer, speaker.get_path(), display_name(speaker), String(id), line)
 
 
-## Host only. The peers who hear `speaker`: every connected player on the speaker's side.
+## A hero squad's or allied element's man (Soldier.hc_id) is heard only this close (G5); the
+## rest of what his squad says goes over the company net (HighCommand). Proposed.
+const HC_VOICE_M := 50.0
+
+
+## Host only. The peers who hear `speaker`: every connected player on the speaker's side (only
+## those within HC_VOICE_M for a high command group's man, G5).
 func recipients(speaker: Soldier) -> PackedInt32Array:
 	var out := PackedInt32Array()
 	var level := CompoundLevel.current(self)
 	if level == null or speaker == null:
 		return out
 	var peers := multiplayer.get_peers()
+	var near_only := speaker.hc_id != &""
 	for node in level.players.get_children():
 		var player := node as Soldier
 		if player == null or player.is_queued_for_deletion() or player.faction != speaker.faction:
+			continue
+		if near_only and player.global_position.distance_to(speaker.global_position) > HC_VOICE_M:
 			continue
 		var peer := player.owner_peer()
 		if (peer == multiplayer.get_unique_id() or peer in peers) and peer not in out:
@@ -210,7 +219,7 @@ func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	if enemy == null:
 		return false
 	var level := CompoundLevel.current(self)
-	var squad := level.squad_for(speaker.faction) if level else null
+	var squad := level.squad_of(speaker) if level else null  # G12: the speaker's own squad
 	var from: Node3D = squad.leader if squad and is_instance_valid(squad.leader) else speaker
 	var distance := from.global_position.distance_to(enemy.global_position)
 	var clock := clock_word(from, enemy.global_position)
