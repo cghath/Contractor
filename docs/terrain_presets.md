@@ -193,7 +193,7 @@ without one is summer). Every part is optional, its keys default in `ZoneFeature
 
 | preset | features | water | campaign zone |
 | --- | --- | --- | --- |
-| marsh | soft ground (60%), reed beds, ditches 2-4 | 16-24 shallow ponds, 1-2 pools, 1-2 sluggish streams | Blackwater Fen (coast) |
+| marsh | soft ground (60%), reed beds, ditches 2-4 | 16-24 shallow ponds, 1-2 pools, 1-2 sluggish streams | Blackwater Fen (inland) |
 | snow_mountain | snow (line: winter all, spring -6 m, summer 6 m, autumn -2 m), cliffs 2-4 (10-18 m), gullies 2-3 | 2-3 frozen streams, 1-3 frozen ponds | Whitecap Pass (inland) |
 | farmland | fields (80%, 70-150 m), orchards (12%, at most 6), hedges, ditches 1-3 | irrigation channels (12% of the column edges), 1-2 ponds, a stream sometimes | Harrow Fields (inland) |
 | rocky_ridge | cliffs 2-3 (8-16 m), gullies 1-2 | - | Red Mesa, Black Ridge hills |

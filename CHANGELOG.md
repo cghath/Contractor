@@ -26,7 +26,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   or drives up the face and the AI's paths go round it. Roads that cross one climb it on a ramp.
 - **Marsh.** A new fen preset: soft ground in patches that slows you to about two thirds of your
   pace, reed beds that hide a crouched man, dark wet mud, dozens of shallow ponds and pools, a
-  sluggish stream and drainage ditches. Blackwater Fen (coast) is one.
+  sluggish stream and drainage ditches. Blackwater Fen (inland) is one.
 - **Snowy mountains.** A new preset: big hills under snow, a snow line that climbs in summer and
   comes down to cover everything in winter, bare rock on the steep faces, cliffs and gullies,
   tyre tracks in the snow and a cold, hazy sky. Deep snow slows you to about three quarters of
