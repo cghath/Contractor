@@ -53,8 +53,10 @@ func _ready() -> void:
 				var m := level.get_module(cid)
 				if m == null:
 					bad.append("%s/%s: module %s not in level" % [type, c.zone_id, cid])
-				elif Contracts.module_origin(c) != m.position or m.position == Vector3.ZERO:
-					bad.append("%s: origin %s vs %s" % [type, Contracts.module_origin(c), m.position])
+				# (Vector3.INF as the fallback, not ZERO: a zone's HQ stands at its middle, and on
+				# flat ground, as the Old Quarter's "city" preset is, that's (0, 0, 0) itself.)
+				elif Contracts.module_origin(c, Vector3.INF) != m.position:
+					bad.append("%s: origin %s vs %s" % [type, Contracts.module_origin(c, Vector3.INF), m.position])
 				elif BaseHub.known_enemies(c)[0].pos != [m.position.x, m.position.z]:
 					bad.append("%s: known_enemies off" % type)
 		check(bad.is_empty(), "%s: %d contracts, module_origin is each target module's real place %s" % [zid, n, bad.slice(0, 3)])
