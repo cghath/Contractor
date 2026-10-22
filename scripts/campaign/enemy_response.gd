@@ -165,15 +165,15 @@ var reinforcements: Reinforcements
 var enemy_faction: StringName = &"black_ridge"
 
 
-## Patrols and hunter teams by the enemy's echelon now (FactionForce, docs/ai_tactics.md 7): as
-## tuned at its starting echelon, bigger as it grows, smaller as it shrinks (never under a pair).
+## Patrols and hunter teams keep their tactical sizes (a pair, a team of 4-6) whatever the enemy's
+## echelon (docs/ai_tactics.md 7.2, call 20): a bigger force fields more of them, through its
+## garrisons and the commander's reserve pool (FactionForce.size_mult).
 func _patrol_size() -> int:
-	return maxi(PATROL_SIZE, roundi(PATROL_SIZE * FactionForce.size_mult(String(enemy_faction))))
+	return PATROL_SIZE
 
 
 func _hunter_size() -> Vector2i:
-	var m := FactionForce.size_mult(String(enemy_faction))
-	return Vector2i(maxi(2, roundi(HUNTER_SIZE.x * m)), maxi(3, roundi(HUNTER_SIZE.y * m)))
+	return HUNTER_SIZE
 ## The live contract's true_rating (1-5, ZoneLevel._on_contract_live), for Vantage's exo gear
 ## (CompoundLevel.PMC_LX3_DIFFICULTY/PMC_HX1_DIFFICULTY): 1 (no exo) unless a hard contract sets it.
 var difficulty: int = 1

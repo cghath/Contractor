@@ -360,8 +360,8 @@ Order: T1-T10 (team and squad) first, then P1-P3, then F1-F3. Each phase pushed 
 - F1 recruits, kits and money per faction, grown each campaign day from territory and spent on
   men and kits; lost to kills, lost zones and contract defeats; echelon by men under arms; state
   forces fixed;
-- F2 garrison, patrol and hunter sizes and the enemy commander's reserve pool scaled by the
-  holder's echelon over its starting one (1.0 at the start);
+- F2 garrison sizes and the enemy commander's reserve pool scaled by the holder's echelon over
+  its starting one (1.0 at the start); patrols and hunter teams keep their sizes (call 20);
 - F3 small terror groups (cell, team) are veterans (+0.1 combat), lie in wait more (70-80% of
   patrols) and hit and run (break contact +0.25, assault -0.1).
 
@@ -392,4 +392,5 @@ Left for later, as calls 12-13 below:
 | 16 | The war's `strength` (fronts) stays as it is; the force (men, kits, money) runs beside it and both shrink with losses | The fronts are tuned and world_test pins them | Re-deriving strength from the force now |
 | 17 | Starting men: mid-band for the starting echelon (team 25, squad 80); the Banner and Black Ridge start as squads, the Shura, Highland Front, Saltline and Kestrel as teams; US, UK, Canada, Vessmark and Eastern Concord companies, Vantage and Meridian platoons | The Captain's "cells, teams, a few squads" | Everyone a squad |
 | 18 | Money a day 4 + 3 a zone (a quarter less per zone where villagers stop paying a predatory group), 2 recruits a zone, 80% spent on a man and his kit (2.5); a man killed costs a recruit and half a kit, a zone lost 15% of both, a company win 6 recruits | Growth over weeks, losses felt at once | Instant swings |
+| 20 | Patrols stay pairs and hunter teams 4-6 whatever the echelon: a bigger force fields more of them (bigger garrisons, a bigger reserve pool that sends more teams), not bigger teams | A team is a team; missions_test pins the pairs and the hunter teams | Scaling every team |
 | 19 | Pre-dug positions and IEDs by echelon wait: Digging and RoadsideIeds exist but placing them by a faction's size needs the world lane's site layouts | Out of the AI files | Guessing at layouts |

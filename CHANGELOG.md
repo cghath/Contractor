@@ -19,9 +19,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   zones and contracts the company wins against it. What it can field follows from its armed
   men: cells, teams, squads, platoons, then companies. State forces (the US and its allies,
   Eastern Concord) field full units from the start.
-- **Their size shows in the zones.** Garrisons, patrols, hunter teams and the enemy commander's
-  reserves grow as a group grows and shrink as it loses. They stay as before at each group's
-  starting size.
+- **Their size shows in the zones.** Garrisons and the enemy commander's reserves grow as a group
+  grows and shrink as it loses, so a bigger group sends more patrols and hunter teams. Those
+  stay pairs and teams of 4-6. Everything stays as before at each group's starting size.
 - **Small but dangerous.** A group down to cells and teams is its hard core: veterans who lie in
   wait more and hit and run instead of standing to fight.
 
