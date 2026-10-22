@@ -126,6 +126,7 @@ func _ready() -> void:
 		_set_enemy_faction(_zone_enemy())  # wave 6b: whose kit the garrisons wear from the first spawn
 		_apply_difficulty_scale()
 		Digging.of(self).server_prepare(self)  # the saved cuts and berms back, or the enemy's outposts dug in (dig phase 4)
+	PerfWarm.warm_zone(self)  # the uniforms this zone's soldiers wear, rasterised on a worker now (perf pass)
 	add_child(RadioChatter.new())  # what a looted enemy radio lets the squad hear
 	add_child(UrbanDefence.new())  # towns fought from inside: reserves, falling back, relief (Captain, 2026-10-17)
 	add_child(ZoneCleanup.new())  # bodies and dropped loot go after ~6-7 min (blood on its own clock)

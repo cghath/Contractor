@@ -182,7 +182,7 @@ static var _colour_meshers: Dictionary = {}  # colour -> VoxelMesherCubes
 ## A pivot node holding the model's mesh. The pivot is the model's centre unless the
 ## spec names one (body parts pivot at their joints).
 static func instance(model: String, variant: String, layers := 1, with_mesh := true) -> Node3D:
-	var spec := _spec(model)
+	var spec := _frame(model)
 	var pivot := Node3D.new()
 	pivot.name = model.get_slice("|", model.count("|")).get_slice(":", 0).trim_suffix(FEMALE_SUFFIX)  # "torso_f" is still the torso
 	pivot.set_meta(&"voxel_model", model)  # BodyDeform re-rasterises it to carve into
@@ -205,7 +205,7 @@ static func body_part(part: String, body: String) -> String:
 
 
 static func size_m(model: String) -> Vector3:
-	var spec := _spec(model)
+	var spec := _frame(model)
 	return Vector3(spec.size) * float(spec.get("voxel", VOXEL_SIZE))
 
 
@@ -314,7 +314,9 @@ static func mesh(model: String, variant: String) -> Mesh:
 	if not _meshes.has(key):
 		_take_faces()
 	if not _meshes.has(key):
+		var t := Time.get_ticks_usec()
 		_keep(key, _build(_spec(model), variant, model.hash()))
+		FrameCost.spent(&"models", t)
 	return _meshes[key]
 
 
@@ -809,7 +811,54 @@ static func _get_material() -> StandardMaterial3D:
 
 # --- Model specs ------------------------------------------------------------------------
 
+## Model specs, built once (perf pass 2026-10-22): _spec built a model's whole box list on every
+## call, and VoxelArt.instance asked for one per body part at every spawn (about 30 ms a soldier,
+## tests/perf_spawn.tscn). A spec is fixed by its model name, so it's kept, except a face's
+## (one person's: _frame keeps just its size and pivot). Callers only read a spec. Worker threads
+## ask too (warm-ups, faces): _spec_mutex.
+static var _spec_cache := {}
+static var _frame_cache := {}
+static var _spec_mutex := Mutex.new()
+const _FACE_MODELS: Array[String] = ["head", "eye", "mouth", "brow"]
+
+
 static func _spec(model: String) -> Dictionary:
+	_spec_mutex.lock()
+	var kept: Variant = _spec_cache.get(model)
+	_spec_mutex.unlock()
+	if kept != null:
+		return kept
+	var built := _spec_build(model)
+	if not model.get_slice(":", 0) in _FACE_MODELS:
+		_spec_mutex.lock()
+		_spec_cache[model] = built
+		_spec_mutex.unlock()
+	return built
+
+
+## A model's size, voxel, sub and pivot only (what an instance is placed by), kept for every
+## model, faces too.
+static func _frame(model: String) -> Dictionary:
+	_spec_mutex.lock()
+	var kept: Variant = _frame_cache.get(model)
+	_spec_mutex.unlock()
+	if kept != null:
+		return kept
+	var kind := model.get_slice(":", 0)
+	if kind == "head" or kind == body_part("head", FEMALE):  # every head's frame is its body's: no face spec built (25-40 ms)
+		var female := kind != "head"
+		return {"size": FaceArt.SIZE_F if female else FaceArt.SIZE, "pivot": FaceArt.PIVOT, "voxel": BODY_VOXEL, "sub": BODY_SUB}
+	var spec := _spec(model)
+	var out := {"size": spec.size, "voxel": spec.get("voxel", VOXEL_SIZE), "sub": spec.get("sub", 1)}
+	if spec.has("pivot"):
+		out["pivot"] = spec.pivot
+	_spec_mutex.lock()
+	_frame_cache[model] = out
+	_spec_mutex.unlock()
+	return out
+
+
+static func _spec_build(model: String) -> Dictionary:
 	if model.contains("|"):  # a part of a weapon (MAG, WITHOUT_MAG, BOLT, COVER, FIXED)
 		var prefix := model.get_slice("|", 0) + "|"
 		var whole := _spec(model.substr(prefix.length()))

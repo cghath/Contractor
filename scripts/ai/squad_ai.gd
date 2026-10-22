@@ -871,6 +871,12 @@ var _looted := {}  # body instance id -> Soldier._now() until which this unit le
 var _lead_last := Vector3.INF  # where the lead stood when last seen moving (_lead_halted)
 var _lead_still_s := 0.0
 var _halt_spot: Variant = null  # where this unit waits while the lead is halted (null: its slot)
+## Level of detail (AiLod, perf pass 2026-10-22): far from every player and out of the fight, the
+## scan, think and re-path rates are divided by _lod (1: full rate). _scan_dt is the last scan's
+## interval, the time step awareness and hearing build by.
+var _lod := 1
+var _lod_cd := 0.0
+var _scan_dt := SCAN_S
 
 
 static func of(s: Node) -> SquadAI:
@@ -923,6 +929,10 @@ func _tick(delta: float) -> void:
 		return
 	_grenade_cd -= delta
 	_cover_cd -= delta
+	_lod_cd -= delta
+	if _lod_cd <= 0.0:
+		_lod_cd = AiLod.REFRESH_S
+		_lod = AiLod.mult(body)
 	var t := Time.get_ticks_usec()
 	_notice_fire(now)
 	t = _p(&"notice_fire", t)
@@ -932,8 +942,10 @@ func _tick(delta: float) -> void:
 		_take_reports(now)
 	t = _p(&"reports", t)
 	_scan_cd -= delta
-	if _scan_cd <= 0.0:
-		_scan_cd = SCAN_S
+	var scanned := _scan_cd <= 0.0
+	if scanned:
+		_scan_dt = SCAN_S * _lod_now()
+		_scan_cd = _scan_dt
 		var previous := target
 		target = _find_target()
 		t = _p(&"find_target", t)
@@ -952,7 +964,7 @@ func _tick(delta: float) -> void:
 		body.threat_err = 0.0
 		body.threat_time = now
 		_no_los_s = 0.0
-		if _scan_cd == SCAN_S:
+		if scanned:
 			_share_contact(target.global_position, now)  # once a scan, not every frame
 			if squad:
 				squad.note_enemy(target, target.global_position)
@@ -961,8 +973,8 @@ func _tick(delta: float) -> void:
 	t = _p(&"contact", t)
 	_think_cd -= delta
 	if _think_cd <= 0.0:
-		_think_cd = THINK_S
-		_update_morale(THINK_S)
+		_think_cd = THINK_S * _lod_now()
+		_update_morale(_think_cd)
 		t = _p(&"morale", t)
 		_choose_intent()
 		t = _p(&"choose_intent", t)
@@ -990,6 +1002,14 @@ func _briefing_open() -> bool:
 
 func in_contact() -> bool:
 	return Soldier._now() - _last_contact < _contact_memory()
+
+
+## The rate divider now (AiLod): 1 in contact, with a target, or busy with a casualty or a body,
+## whatever the distance.
+func _lod_now() -> int:
+	if _lod <= 1 or target != null or care != Care.NONE or loot_body != null or in_contact():
+		return 1
+	return _lod
 
 
 func _friendly() -> bool:
@@ -4166,7 +4186,7 @@ func _find_target() -> Soldier:
 		if d <= steps and not in_sight and (leaves < INF or d <= steps * WALL_STEPS_MULT):  # (a wall muffles them, G-29)
 			seen[s.get_instance_id()] = true  # heard, not seen: keeps awareness from fading
 			var ang := randf() * TAU
-			hear(s, s.global_position + Vector3(cos(ang), 0.0, sin(ang)) * STEPS_ERROR_M * sqrt(randf()), Spotting.HEARD_STEPS_PER_S * SCAN_S)
+			hear(s, s.global_position + Vector3(cos(ang), 0.0, sin(ang)) * STEPS_ERROR_M * sqrt(randf()), Spotting.HEARD_STEPS_PER_S * _scan_dt)
 			continue
 		if d < limit and in_sight:
 			seen[s.get_instance_id()] = true
@@ -4488,7 +4508,7 @@ func _build_awareness(s: Soldier, leaves := 0.0) -> float:
 		var suppressed := body.suppression >= SUPPRESSED
 		var t := Spotting.spot_seconds(body, s, _preset, _react_combat(), suppressed, Soldier._now(), leaves, not in_contact() and not suppressed) \
 			* Doctrine.factor(_doctrine_id(), "reaction", body.faction)  # (G-15: some armies are quicker on the trigger)
-		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + SCAN_S / t, 1.0)
+		a = 1.0 if t <= SCAN_S * 0.5 else minf(a + _scan_dt / t, 1.0)
 		_aware[id] = a
 	return a
 
@@ -4506,7 +4526,7 @@ func _fade_awareness(seen: Dictionary) -> void:
 	for id: int in _aware.keys():
 		if seen.has(id):
 			continue
-		var a: float = _aware[id] - SCAN_S / Spotting.FADE_S
+		var a: float = _aware[id] - _scan_dt / Spotting.FADE_S
 		if a <= 0.0:
 			_aware.erase(id)
 		else:
@@ -5337,7 +5357,7 @@ func _steer(delta: float) -> void:
 	_repath_cd -= delta
 	if _has_destination and _flat_distance(_destination) > ARRIVE and body.stunned_s <= 0.0:
 		if _repath_cd <= 0.0 or _path_target.distance_to(_destination) > 0.5:
-			_repath_cd = REPATH_S
+			_repath_cd = REPATH_S * _lod_now()
 			_path_target = _destination
 			_path = NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, _destination, true)
 			_path_index = 0

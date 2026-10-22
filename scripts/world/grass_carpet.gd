@@ -22,6 +22,7 @@ var _terrain: ZoneTerrain
 var _centre := Vector2(INF, INF)
 var _colours: Array[Color] = []
 var _cut_seen := 0  # GroundCuts.version the carpet was laid for
+var _tufts := {}  # grid point (Vector2i) -> [Transform3D, Color], or null for none (lay)
 
 
 func setup(scatter: ZoneScatter, terrain: ZoneTerrain, mesh: Mesh, material: Material, colours: Array[Color]) -> void:
@@ -45,18 +46,31 @@ func _process(_delta: float) -> void:
 	var cut_now := _terrain.cuts.version if _terrain.cuts else 0
 	if at.distance_to(_centre) < SNAP_M and cut_now == _cut_seen:
 		return
+	if cut_now != _cut_seen:
+		_tufts.clear()  # the ground changed: work them out again
 	_cut_seen = cut_now
 	_centre = (at / SNAP_M).round() * SNAP_M
+	var t0 := Time.get_ticks_usec()
 	lay(_centre)
+	FrameCost.spent(&"grass", t0)
 
 
 ## Lays the carpet round `centre` (x, z). Returns how many tufts.
+## Perf pass (2026-10-22): each grid point's tuft (or none) is worked out once and kept (_tufts)
+## until the ground is cut again, so a re-lay only works out the points that came into the
+## circle; the scatter's pads and roads are narrowed to those near the circle once per lay (a
+## tuft tested all the zone's roads before: 100-300 ms a lay, every 6 m on foot and many times a
+## second in a vehicle). The carpet looks the same.
 func lay(centre: Vector2) -> int:
-	var list: Array = []
 	var n := int(ceil(RADIUS_M / SPACING_M))
 	var gx0 := int(floor(centre.x / SPACING_M))
 	var gz0 := int(floor(centre.y / SPACING_M))
 	var half := _terrain.size_m * 0.5
+	var near := _blockers_near(centre)
+	var keep: Array[Rect2] = near[0]
+	var roads: Array = near[1]
+	var xs: Array[Transform3D] = []
+	var cs: Array[Color] = []
 	for gz in range(gz0 - n, gz0 + n + 1):
 		for gx in range(gx0 - n, gx0 + n + 1):
 			var h1 := _hash(gx, gz)
@@ -68,25 +82,79 @@ func lay(centre: Vector2) -> int:
 			var edge := clampf((RADIUS_M - d) / (RADIUS_M * EDGE_SHARE), 0.0, 1.0)
 			if fposmod(h1 * 13.7, 1.0) > edge:
 				continue  # thinner toward the edge: no ring
-			if _scatter and _scatter._ground_blocked(x, z):
+			var key := Vector2i(gx, gz)
+			var tuft: Variant = _tufts.get(key, false)
+			if tuft is bool:
+				tuft = _tuft(x, z, h1, keep, roads)
+				_tufts[key] = tuft
+			if tuft == null:
 				continue
-			var h := _terrain.height_at(x, z)
-			if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.4:
-				continue
-			if _terrain.normal_at(x, z).y < MIN_UP:
-				continue
-			if _terrain.cuts and _terrain.cuts.bare(x, z):
-				continue
-			var s := lerpf(SIZE.x, SIZE.y, fposmod(h1 * 3.97, 1.0))
-			var basis := Basis(Vector3.UP, h1 * TAU).scaled(Vector3(s, s * lerpf(0.8, 1.4, fposmod(h1 * 5.3, 1.0)), s))
-			var c: Color = _colours[int(fposmod(h1 * 17.0, 1.0) * _colours.size()) % _colours.size()]
-			c = c.darkened(fposmod(h1 * 23.0, 1.0) * 0.18)
-			list.append([Transform3D(basis, Vector3(x, h - 0.03, z)), c])
-	multimesh.instance_count = list.size()
-	for k in list.size():
-		multimesh.set_instance_transform(k, list[k][0])
-		multimesh.set_instance_color(k, list[k][1])
-	return list.size()
+			xs.append(tuft[0])
+			cs.append(tuft[1])
+	multimesh.instance_count = xs.size()
+	for k in xs.size():
+		multimesh.set_instance_transform(k, xs[k])
+		multimesh.set_instance_color(k, cs[k])
+	# Points well out of the circle are forgotten (a long walk doesn't grow the cache).
+	if _tufts.size() > 4 * (2 * n + 1) * (2 * n + 1):
+		var far := RADIUS_M + SNAP_M * 2.0
+		for key: Vector2i in _tufts.keys():
+			if Vector2(key.x * SPACING_M, key.y * SPACING_M).distance_to(centre) > far:
+				_tufts.erase(key)
+	return xs.size()
+
+
+## The tuft at grid point (x, z) with hash `h1`: [Transform3D, Color], or null where none grows
+## (a pad, a road, water, the sea's edge, steep or bare ground).
+func _tuft(x: float, z: float, h1: float, keep: Array[Rect2], roads: Array) -> Variant:
+	if _blocked(x, z, keep, roads):
+		return null
+	var h := _terrain.height_at(x, z)
+	if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.4:
+		return null
+	if _terrain.normal_at(x, z).y < MIN_UP:
+		return null
+	if _terrain.cuts and _terrain.cuts.bare(x, z):
+		return null
+	var s := lerpf(SIZE.x, SIZE.y, fposmod(h1 * 3.97, 1.0))
+	var basis := Basis(Vector3.UP, h1 * TAU).scaled(Vector3(s, s * lerpf(0.8, 1.4, fposmod(h1 * 5.3, 1.0)), s))
+	var c: Color = _colours[int(fposmod(h1 * 17.0, 1.0) * _colours.size()) % _colours.size()]
+	c = c.darkened(fposmod(h1 * 23.0, 1.0) * 0.18)
+	return [Transform3D(basis, Vector3(x, h - 0.03, z)), c]
+
+
+## ZoneScatter._ground_blocked with the pads and roads narrowed to `keep` and `roads`.
+func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
+	if _terrain.water and _terrain.water.keeps_clear(x, z):
+		return true
+	var p := Vector2(x, z)
+	for r in keep:
+		if r.has_point(p):
+			return true
+	for road: Array in roads:
+		if Geometry2D.get_closest_point_to_segment(p, road[0], road[1]).distance_to(p) < 4.0:
+			return true
+	return false
+
+
+## The scatter's pads (already shrunk as ZoneScatter._ground_blocked does) and road segments
+## that reach the circle round `centre`: [Array[Rect2], [[a, b], ...]].
+func _blockers_near(centre: Vector2) -> Array:
+	var keep: Array[Rect2] = []
+	var roads: Array = []
+	if _scatter == null:
+		return [keep, roads]
+	var box := Rect2(centre - Vector2.ONE * (RADIUS_M + 1.0), Vector2.ONE * (RADIUS_M + 1.0) * 2.0)
+	for r in _scatter._keep:
+		var g := r.grow(-ZoneScatter.PAD_KEEP_M + 2.0)
+		if g.intersects(box):
+			keep.append(g)
+	for road: Array in _scatter._roads:
+		var a := Vector2(float(road[0][0]), float(road[0][1]))
+		var b := Vector2(float(road[1][0]), float(road[1][1]))
+		if Geometry2D.get_closest_point_to_segment(centre, a, b).distance_to(centre) < RADIUS_M + 5.0:
+			roads.append([a, b])
+	return [keep, roads]
 
 
 static func _hash(x: int, z: int) -> float:

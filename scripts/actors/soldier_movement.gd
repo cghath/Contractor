@@ -288,8 +288,26 @@ func no_ground_below() -> bool:
 	return not GroundGuard.floor_below(body.get_world_3d(), body.global_position, [body.get_rid()])
 
 
+## An AI standing still (perf pass 2026-10-22): its step runs every REST_EVERY ticks with the
+## time summed (stamina, breath and the head's easing come out the same), not every tick: most of
+## a town's garrison stands at its posts. Any order to move, aim, sprint, change stance, lean or
+## climb ends the rest that tick. A floor gone from under him is found at the next step (at most
+## REST_EVERY ticks). Proposed.
+const REST_EVERY := 4
+var _rest_n := 0
+var _rest_dt := 0.0
+
+
 ## One physics step for the body's owner (the human's peer, or the host for AI).
 func step(delta: float) -> void:
+	if body.is_ai() and _resting():
+		_rest_dt += delta
+		_rest_n += 1
+		if _rest_n < REST_EVERY:
+			return
+		delta = _rest_dt
+	_rest_n = 0
+	_rest_dt = 0.0
 	_read_water()
 	if swimming:
 		# Deep water (Wading): he floats head and shoulders out, no falling and no fall to count.
@@ -415,6 +433,19 @@ func step(delta: float) -> void:
 	if mounted and (input != Vector2.ZERO or after.length() > MOUNT_MAX_SPEED or not body.is_on_floor() or not _has_weapon_up()):
 		mounted = false
 	update_pose(delta)
+
+
+## An AI at rest: on the floor, up, dry, nothing ordered (move, aim, sprint, stance, lean, climb)
+## and not moving.
+func _resting() -> bool:
+	if not body.is_on_floor() or mantling or swimming or wet > 0.0 or lean != 0.0 or body.move_input != Vector2.ZERO:
+		return false
+	if body.want_aim or body.want_sprint or body.want_mantle or not body.vitals.is_up() or body.vitals.is_dying():
+		return false
+	if Vector2(body.velocity.x, body.velocity.z).length_squared() > 0.0025 or stance_shifting() or lean_target() != 0:
+		return false
+	var want: int = body.want_stance if body.want_stance >= 0 else (Stance.CROUCH_MID if body.want_crouch else Stance.STAND_HIGH)
+	return want == stance and not ExoMech.transitioning(body)
 
 
 ## Owner-side: how deep the water is over his feet, and whether it's deep enough to swim

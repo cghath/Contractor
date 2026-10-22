@@ -68,6 +68,7 @@ var _base: Dictionary
 var _buffer: VoxelBuffer
 var _mesh_instance: MeshInstance3D
 var _removed := 0
+var _pristine := false  # no chips, not shattered: shows the shared intact mesh (intact_mesh)
 var _own_state: Dictionary = {}  # state of a piece that is neither worn nor in a WorldItem
 
 
@@ -104,8 +105,26 @@ static func make_mesh_instance(p_item: ItemData, render_layers := 1, cover := Co
 	mesh_instance.layers = render_layers
 	mesh_instance.scale = Vector3.ONE * VOXEL_SIZE
 	mesh_instance.position = -base.pivot * VOXEL_SIZE
-	mesh_instance.mesh = _get_mesher(p_item, cover, p_camo).build_mesh(paint_camo(base.buffer, p_item, p_camo), [])
+	mesh_instance.mesh = intact_mesh(p_item, cover, p_camo)
 	return mesh_instance
+
+
+## Undamaged pieces' meshes, by item, cover and camo (perf pass 2026-10-22): built once and
+## shared by every piece showing no damage, not meshed three times per piece at every spawn
+## (setup, apply_damage and the cover) as before. A chipped piece meshes its own (_remesh).
+static var _intact := {}
+
+
+## The undamaged mesh of `p_item` under `p_cover` in `p_camo` (built once, then shared).
+static func intact_mesh(p_item: ItemData, p_cover := Color(0, 0, 0, 0), p_camo := "") -> Mesh:
+	if not bool(p_item.stats.get("camo", false)):
+		p_camo = ""
+	var key := "%s|%s|%s" % [p_item.id, p_cover.to_html() if p_cover.a > 0.0 else "", p_camo]
+	if not _intact.has(key):
+		var t := Time.get_ticks_usec()
+		_intact[key] = _get_mesher(p_item, p_cover, p_camo).build_mesh(paint_camo(_get_base(p_item).buffer, p_item, p_camo), [])
+		FrameCost.spent(&"armour", t)
+	return _intact[key]
 
 
 ## Covers the plate with carrier fabric of `colour` (alpha 0 to show the bare plate).
@@ -126,7 +145,10 @@ func set_camo(variant: String) -> void:
 
 func _remesh() -> void:
 	if _mesh_instance:
-		_mesh_instance.mesh = _get_mesher(item, cover, camo).build_mesh(paint_camo(_buffer, item, camo), [])
+		if _pristine:
+			_mesh_instance.mesh = intact_mesh(item, cover, camo)
+		else:
+			_mesh_instance.mesh = _get_mesher(item, cover, camo).build_mesh(paint_camo(_buffer, item, camo), [])
 
 
 ## `buffer` as it is meshed: for a piece whose item says "camo", a copy with its intact voxels
@@ -167,6 +189,7 @@ static func center_offset(p_item: ItemData) -> Vector3:
 func apply_damage(chips: Array, shattered := false) -> void:
 	_buffer.copy_channel_from(_base.buffer, VoxelBuffer.CHANNEL_COLOR)
 	_removed = 0
+	_pristine = chips.is_empty() and not shattered
 	for chip: Array in chips:
 		var cell := Vector3i(int(chip[0]), int(chip[1]), int(chip[2]))
 		if chip.size() >= 8:

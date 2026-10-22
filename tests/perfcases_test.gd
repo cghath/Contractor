@@ -18,13 +18,17 @@ extends Node
 ## roads) and a camera rides with the player, so their CPU side counts (the renderer itself is
 ## the headless dummy: GPU time isn't measurable here).
 ##
-## Measured per case (every process frame that ran a physics tick: what the player's frame
-## would cost at 60 Hz, minus the GPU): the frame time's average, 95th and 99th percentile and
-## worst; the physics tick split into its scripts (every _physics_process) and the engine's own
-## step; the _process scripts; the navigation server; what FrameCost counted, by system; and the
-## HITCHES: every frame over HITCH_MS, with what it went on (FrameCost systems, nodes added,
-## soldiers spawned, the slowest script with PERF_PROFILE=1). Also the draw proxy: geometry
-## instances and MultiMesh instances in view range, and the shadow casters among them.
+## Measured per case, for every frame that ran a physics tick: its 60 Hz FRAME COST, the average
+## tick of that frame (its scripts, every _physics_process, and the engine's own step) plus the
+## frame's _process: what one frame costs at 60 ticks a second, minus the GPU, however far behind
+## the engine fell (a machine that can't keep up runs up to 8 ticks a frame and the wall-clock
+## frame balloons; on a shared machine that swings run to run, the frame cost much less). Its
+## average, 95th and 99th percentile and worst; the wall-clock frame too; the tick's scripts and
+## engine step; the _process scripts; the navigation server; what FrameCost counted, by system;
+## and the HITCHES: every single tick or _process pass over HITCH_MS and over HITCH_MEDIANS times
+## the case's median one, with what it went on (FrameCost systems, nodes added, soldiers spawned,
+## the slowest script with PERF_PROFILE=1). Also the draw proxy: geometry instances and MultiMesh
+## instances in view range, and the shadow casters among them.
 ## PERF_PROFILE=1 also times every script's _physics_process and _process by script (slower).
 ##
 ## Budgets (Proposed, 2026-10-22; docs/performance.md has the numbers before and after): each
@@ -35,6 +39,8 @@ const MEASURE_S := {"town": 30.0, "fight": 40.0, "woods": 30.0, "drive": 45.0, "
 const ALL_CASES := ["town", "fight", "woods", "drive", "heli"]
 ## A frame this long is a hitch (under 30 fps for that frame).
 const HITCH_MS := 33.3
+## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
+const HITCH_MEDIANS := 3.0
 ## Proposed budgets (ms; hitches a minute). Set from the after-numbers with room for CI.
 const BUDGETS := {
 	"town": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
@@ -68,6 +74,12 @@ var _scripts_end := 0
 var _pending := false
 var _process_start := 0
 var _frames: Array[float] = []  # wall ms of each frame that ran a tick
+var _f60: Array[float] = []  # each such frame's 60 Hz cost: its average tick + its _process
+var _ticks_ms: Array[float] = []  # each tick: scripts + engine step
+var _frame_tick_sum := 0.0
+var _frame_tick_n := 0
+var _frame_proc := 0.0
+var _spikes: Array = []  # candidates: {"ms", "kind", "why"}
 var _scripts_ms: Array[float] = []
 var _engine_ms: Array[float] = []
 var _proc_ms: Array[float] = []
@@ -142,10 +154,10 @@ func _ready() -> void:
 			continue
 		print("perf: --- case %s ---" % c)
 		await call("_case_" + c)
-	print("perf: === summary (ms per frame that ran a physics tick; hitches over %.0f ms) ===" % HITCH_MS)
+	print("perf: === summary (60 Hz frame cost: a frame's average tick + its _process, ms; hitches: a tick or _process over %.0f ms and %.0fx the median) ===" % [HITCH_MS, HITCH_MEDIANS])
 	for r: Dictionary in results:
-		print("perf: %-6s avg %6.2f  p95 %6.2f  p99 %6.2f  worst %7.1f | tick scripts %5.2f engine %5.2f | process %5.2f | nav %5.2f | hitches %d (%.1f/min) | AI %d (asleep %d) | draws %s"
-			% [r.name, r.avg, r.p95, r.p99, r.worst, r.scripts, r.engine, r.process, r.nav, r.hitches, r.hitches_min, r.ai, r.asleep, r.draws])
+		print("perf: %-6s avg %6.2f  p95 %6.2f  p99 %6.2f  worst %7.1f | wall %6.1f | tick scripts %5.2f engine %5.2f | process %5.2f | nav %5.2f | hitches %d (%.1f/min) | AI %d (asleep %d) | draws %s"
+			% [r.name, r.avg, r.p95, r.p99, r.worst, r.wall, r.scripts, r.engine, r.process, r.nav, r.hitches, r.hitches_min, r.ai, r.asleep, r.draws])
 		if not _no_budgets:
 			var b: Dictionary = BUDGETS[r.name]
 			check(r.avg <= b.avg, "%s: average frame %.2f ms (Proposed budget %.1f)" % [r.name, r.avg, b.avg])
@@ -264,13 +276,14 @@ func _case_heli() -> void:
 	while not VehicleHull.is_ready("uh60") and Time.get_ticks_msec() - t0 < 30000:
 		await get_tree().process_frame
 	var layer := VehicleLayer.of(level)
-	var heli := layer.server_spawn("uh60", Transform3D(Basis.looking_at((b - a).normalized()), a + Vector3.UP * Helicopter.CRUISE_AGL_M), "", &"player", "perf_heli") as Helicopter
+	var heli := layer.server_spawn("uh60", Transform3D(Basis.looking_at((b - a).normalized()), a + Vector3.UP * 0.3), "", &"player", "perf_heli") as Helicopter
 	check(heli != null, "a UH-60 at the zone's edge")
 	if heli == null:
 		return
 	await _settle_at(a, [], false)
 	player.set_physics_process(true)
-	check(heli.server_enter(player, 2), "the player rides in the UH-60")
+	check(heli.server_enter(player), "the player rides in the UH-60")
+	heli.global_position.y += Helicopter.CRUISE_AGL_M
 	heli.server_start_airborne()
 	heli.server_fly_to(b, Helicopter.CRUISE_AGL_M, Helicopter.CRUISE_KMH, false)
 	await _measure("heli", [])
@@ -417,6 +430,12 @@ func _clear_spawned() -> void:
 ## if any; adds a result.
 func _measure(name: String, walk: Array) -> void:
 	_frames.clear()
+	_f60.clear()
+	_ticks_ms.clear()
+	_spikes.clear()
+	_frame_tick_sum = 0.0
+	_frame_tick_n = 0
+	_frame_proc = 0.0
 	_scripts_ms.clear()
 	_engine_ms.clear()
 	_proc_ms.clear()
@@ -429,6 +448,8 @@ func _measure(name: String, walk: Array) -> void:
 	FrameCost.take()
 	if _profile:
 		_gather_profiled()
+		SquadAI.profiling = true
+		SquadAI.prof = {}
 	_nodes_at_frame = get_tree().get_node_count()
 	_ai_at_frame = level.ai.get_child_count()
 	_prev_event_process = true
@@ -465,13 +486,16 @@ func _measure(name: String, walk: Array) -> void:
 			if s.process_mode == Node.PROCESS_MODE_DISABLED:
 				asleep += 1
 	var n_frames := maxi(_frames.size(), 1)
-	var r := {"name": name, "avg": _avg(_frames), "p95": _pct(_frames, 0.95), "p99": _pct(_frames, 0.99),
-		"worst": _frames.max() if not _frames.is_empty() else 0.0, "scripts": _avg(_scripts_ms), "engine": _avg(_engine_ms),
+	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
+	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
+	_hitches = _spikes.filter(func(h: Dictionary) -> bool: return h.ms > HITCH_MEDIANS * float(med[h.kind]))
+	var r := {"name": name, "avg": _avg(_f60), "p95": _pct(_f60, 0.95), "p99": _pct(_f60, 0.99),
+		"worst": _f60.max() if not _f60.is_empty() else 0.0, "wall": _avg(_frames), "scripts": _avg(_scripts_ms), "engine": _avg(_engine_ms),
 		"process": _avg(_proc_ms), "nav": _nav_ms / n_frames, "hitches": _hitches.size(), "hitches_min": _hitches.size() * 60.0 / secs,
 		"ai": live, "asleep": asleep, "draws": _draw_text(_draw)}
 	results.append(r)
-	print("perf: %s: %d tick frames, avg %.2f ms, p95 %.2f, p99 %.2f, worst %.1f; tick scripts %.2f, engine step %.2f; process scripts %.2f; nav %.2f; AI %d (asleep %d)"
-		% [name, _frames.size(), r.avg, r.p95, r.p99, r.worst, r.scripts, r.engine, r.process, r.nav, live, asleep])
+	print("perf: %s: %d tick frames; 60 Hz frame cost avg %.2f ms, p95 %.2f, p99 %.2f, worst %.1f; wall frame avg %.1f; tick scripts %.2f, engine step %.2f; process scripts %.2f; nav %.2f; AI %d (asleep %d)"
+		% [name, _frames.size(), r.avg, r.p95, r.p99, r.worst, r.wall, r.scripts, r.engine, r.process, r.nav, live, asleep])
 	var systems := _costs.keys()
 	systems.sort_custom(func(a: StringName, b: StringName) -> bool: return int(_costs[a]) > int(_costs[b]))
 	var parts: Array[String] = []
@@ -487,6 +511,13 @@ func _measure(name: String, walk: Array) -> void:
 		keys.sort_custom(func(a: String, b: String) -> bool: return int(_by_script[a]) > int(_by_script[b]))
 		for k: String in keys.slice(0, 20):
 			print("perf: %s: profile %s %.3f ms a frame" % [name, k, int(_by_script[k]) / 1000.0 / n_frames])
+		SquadAI.profiling = false
+		var ticks := maxi(_scripts_ms.size(), 1)
+		var ai_parts := SquadAI.prof.keys()
+		ai_parts.sort_custom(func(a: StringName, b: StringName) -> bool: return int(SquadAI.prof[a][0]) > int(SquadAI.prof[b][0]))
+		for part: StringName in ai_parts.slice(0, 14):
+			var e: Array = SquadAI.prof[part]
+			print("perf: %s: AI part %s %.3f ms a tick, %d calls, worst %.2f ms" % [name, part, int(e[0]) / 1000.0 / ticks, int(e[1]), int(e[2]) / 1000.0])
 
 
 ## A frame boundary: the previous event was a frame's last _process, so this event starts a frame.
@@ -494,10 +525,12 @@ func _boundary() -> void:
 	var now := Time.get_ticks_usec()
 	if _prev_event_process:
 		if _measuring and _frame_ticks > 0:
-			var ms := (now - _frame_start) / 1000.0
-			_frames.append(ms)
-			if ms > HITCH_MS:
-				_hitches.append({"ms": ms, "why": _why()})
+			_frames.append((now - _frame_start) / 1000.0)
+			if _frame_tick_n > 0:
+				_f60.append(_frame_tick_sum / _frame_tick_n + _frame_proc)
+		_frame_tick_sum = 0.0
+		_frame_tick_n = 0
+		_frame_proc = 0.0
 		_frame_start = now
 		_frame_ticks = 0
 		_frame_costs = {}
@@ -516,18 +549,30 @@ func _why() -> String:
 		parts.append("%s %.1f" % [k, int(_frame_costs[k]) / 1000.0])
 	var nodes := get_tree().get_node_count() - _nodes_at_frame
 	var ai := (level.ai.get_child_count() if level and is_instance_valid(level) else 0) - _ai_at_frame
-	return "%d ticks; scripts %.1f, engine %.1f, process %.1f; FrameCost [%s]; nodes %+d, AI %+d%s" % [_frame_ticks,
-		_scripts_ms[-1] if not _scripts_ms.is_empty() else 0.0, _engine_ms[-1] if not _engine_ms.is_empty() else 0.0,
-		_proc_ms[-1] if not _proc_ms.is_empty() else 0.0, ", ".join(parts), nodes, ai,
+	return "the frame's FrameCost so far [%s]; nodes %+d, AI %+d%s" % [", ".join(parts), nodes, ai,
 		("; slowest script %s %.1f ms" % [_frame_top, _frame_top_us / 1000.0]) if _frame_top != "" else ""]
+
+
+func _take_costs() -> void:
+	var c := FrameCost.take()
+	for k in c:
+		_costs[k] = int(_costs.get(k, 0)) + int(c[k])
+		_frame_costs[k] = int(_frame_costs.get(k, 0)) + int(c[k])
 
 
 func _engine_part() -> void:
 	if not _pending:
 		return
 	_pending = false
-	if _measuring:
+	if _measuring and not _scripts_ms.is_empty():
 		_engine_ms.append((Time.get_ticks_usec() - _scripts_end) / 1000.0)
+		var tick: float = _scripts_ms[-1] + _engine_ms[-1]
+		_ticks_ms.append(tick)
+		_frame_tick_sum += tick
+		_frame_tick_n += 1
+		if tick > HITCH_MS:
+			_take_costs()
+			_spikes.append({"ms": tick, "kind": "tick", "why": "a tick: " + _why()})
 
 
 func _on_tick_first() -> void:
@@ -558,12 +603,13 @@ func _on_frame_first() -> void:
 
 func _on_frame_last() -> void:
 	if _measuring:
-		var c := FrameCost.take()
-		for k in c:
-			_costs[k] = int(_costs.get(k, 0)) + int(c[k])
-			_frame_costs[k] = int(_frame_costs.get(k, 0)) + int(c[k])
+		_take_costs()
 		if _frame_ticks > 0:
-			_proc_ms.append((Time.get_ticks_usec() - _process_start) / 1000.0)
+			var ms := (Time.get_ticks_usec() - _process_start) / 1000.0
+			_proc_ms.append(ms)
+			_frame_proc = ms
+			if ms > HITCH_MS:
+				_spikes.append({"ms": ms, "kind": "process", "why": "a _process pass: " + _why()})
 	_prev_event_process = true
 
 
