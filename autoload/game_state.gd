@@ -479,3 +479,16 @@ func delete_save() -> void:
 	for path: String in save_candidates(save_path()):
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)
+
+
+## At quit, while the scripts are still loaded: waits for the worker tasks that run GDScript
+## (VoxelArt's warm-up and faces, BodyVolume's warm-up, VehicleHull's canvases; Sfx waits for its
+## own). Tests that quit seconds after a level loads (nvg, exo on the range) hang in the engine's
+## shutdown on CI's Linux runners, and tasks like these still running then are the likely cause:
+## the line printed says when there were any.
+func _exit_tree() -> void:
+	var pending := VoxelArt.pending_tasks() + (1 if not BodyVolume.is_warm() else 0) + VehicleHull.finish_tasks()
+	VoxelArt.finish_warm()
+	BodyVolume.finish_warm()
+	if pending > 0:
+		print("[exit] waited for %d worker task(s) still running" % pending)

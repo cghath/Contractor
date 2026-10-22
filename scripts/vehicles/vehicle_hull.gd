@@ -110,6 +110,15 @@ static func prewarm(p_model: String) -> void:
 	_tasks[p_model] = WorkerThreadPool.add_task(VehicleHull._build_canvas.bind(p_model), false, "VehicleHull canvas")
 
 
+## Waits for every canvas still building (at quit: GameState._exit_tree). Returns how many were.
+static func finish_tasks() -> int:
+	var n := _tasks.size()
+	for p_model: String in _tasks:
+		WorkerThreadPool.wait_for_task_completion(_tasks[p_model])
+	_tasks.clear()
+	return n
+
+
 static func _build_canvas(p_model: String) -> void:
 	var c: Variant = VehicleArt._canvas_for(p_model)
 	_mutex.lock()

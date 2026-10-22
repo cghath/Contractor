@@ -478,6 +478,9 @@ func _test_point_blank() -> void:
 	var cut := _deform(s).severed()
 	check(s.vitals.is_dead() and not _records(s, "g").is_empty() and cut.size() >= 5 and Vitals.HEAD in cut,
 		"gibbed: dead, head, arms and legs off (%s)" % [cut])
+	# (The cuts are carved on BodyDeform's workers and each piece comes off as its job lands: a
+	# slow runner had 3 of them after the 0.6 s above.)
+	await _wait_for(func() -> bool: return _deform(s).pieces().size() >= 4, 5.0)
 	check(_deform(s).pieces().size() >= 4, "flung as pieces (%d)" % _deform(s).pieces().size())
 	await _wait_for(func() -> bool: return _settled(s), 10.0)
 	check(_settled(s), "every piece settled and recorded (%s)" % [_pieces_at_records(s)])

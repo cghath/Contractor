@@ -213,12 +213,22 @@ func _test_physics(ship: LhdLevel) -> void:
 	# (Past anyone or anything that moves: a soldier at muster or a vehicle crossing the ray isn't
 	# the ship's structure.)
 	var across := PhysicsRayQueryParameters3D.create(Vector3(0, 2, -40), Vector3(30, 2, -40), 1)
-	var side := space.intersect_ray(across)
+	var met := [{}]  # (a lambda can't assign the locals it captures)
 	var passed: Array[String] = []
-	while not side.is_empty() and not side.collider is StaticBody3D and passed.size() < 16:
-		passed.append(str(side.collider.name) if side.collider is Node else "?")
-		across.exclude = across.exclude + [side.rid]
-		side = space.intersect_ray(across)
+	var wall := func() -> bool:
+		across.exclude = []
+		passed.clear()
+		var hit := space.intersect_ray(across)
+		while not hit.is_empty() and not hit.collider is StaticBody3D and not hit.collider is VoxelTerrain and passed.size() < 16:
+			passed.append(str(hit.collider.name) if hit.collider is Node else "?")
+			across.exclude = across.exclude + [hit.rid]
+			hit = space.intersect_ray(across)
+		met[0] = hit
+		return not hit.is_empty()
+	# (The voxels are built (fob_ready), but their collision comes block by block after: CI met
+	# no wall at all two frames in.)
+	await _wait_until(wall, 20.0)
+	var side: Dictionary = met[0]
 	check(not side.is_empty() and absf((side.position as Vector3).x - (LhdLayout.HALF_BEAM - LhdLayout.WALL_T)) < 0.15,
 		"the hangar's starboard side is a wall (met at x %.2f%s)" % [(side.position as Vector3).x if not side.is_empty() else -1.0, ", past %s" % [passed] if not passed.is_empty() else ""])
 	check(ship.ground_area() == LhdLayout.ship_rect() and ship.map_area().encloses(LhdLayout.ship_rect()), "the ground and the map are the ship")

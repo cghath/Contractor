@@ -420,8 +420,9 @@ func _run_client() -> void:
 	await _seconds(1.0)
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	_log.close()
+	var tree := get_tree()  # (Net.leave() takes this scene out of the tree on a client: back to the menu)
 	Net.leave()
-	get_tree().quit(failures)
+	tree.quit(failures)
 
 
 # --- Bits --------------------------------------------------------------------------------------

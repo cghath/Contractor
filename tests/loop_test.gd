@@ -354,6 +354,7 @@ func _mission(type: String) -> String:
 	var stow: Array = [&"intel_phone"] if type == "hvt_capture" else []
 	var cash_before := Economy.cash()
 	var stash_before := BaseArmory.counts(BaseHub.stash())
+	var stash_before_all := _with_contents(BaseHub.stash())
 	var bills := [0]
 	var on_bill := func(_day: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
 	Economy.bill_paid.connect(on_bill)
@@ -435,16 +436,20 @@ func _mission(type: String) -> String:
 	if deposit:
 		var deposited: Array = out.get("deposited", [])
 		var bodies: Array = out.get("bodies", [])
-		var back := BaseArmory.counts(BaseHub.stash())
-		var expected := stash_before.duplicate()
+		# Counted with what's in and on the stash's entries: a body's carrier keeps its pouches and
+		# their contents in its state (the body's items list them flat, Contracts.flatten_entry).
+		var back := _with_contents(BaseHub.stash())
+		var expected := stash_before_all.duplicate()
 		expected["m4a1"] = int(expected.get("m4a1", 0)) + 1
 		var body_items: Dictionary = out.get("body_items", {})
 		for id: String in body_items:
 			expected[id] = int(expected.get(id, 0)) + int(body_items[id])
 		var banked := expected.keys().all(func(id: String) -> bool: return int(back.get(id, 0)) >= int(expected[id]))
 		check(not deposited.is_empty() and not bodies.is_empty() and banked,
-			"the rifle set down inside the point and the dead hostile brought there are banked in the stash (M4A1 %d -> %d; the body's %s)" % [
-				int(stash_before.get("m4a1", 0)), int(back.get("m4a1", 0)), body_items])
+			"the rifle set down inside the point and the dead hostile brought there are banked in the stash (M4A1 %d -> %d; short: %s; the body's %s)" % [
+				int(stash_before_all.get("m4a1", 0)), int(back.get("m4a1", 0)),
+				expected.keys().filter(func(id: String) -> bool: return int(back.get(id, 0)) < int(expected[id])).map(func(id: String) -> String: return "%s %d of %d" % [id, int(back.get(id, 0)), int(expected[id])]),
+				body_items])
 	# Salvage is what was left in the field, never what came out.
 	var pool_counts := {}
 	for e: Dictionary in debrief.salvage.pool:
@@ -813,6 +818,15 @@ func _do_recovery(cid: String) -> Dictionary:
 	check(found, "a player reaching them finds them")
 	_hold(target)
 	return {"ok": true, "cargo": [target]} if found else {"why": "never found"}
+
+
+## {item id: count} of a stash: its entries and what's on and in them (pouches, their contents).
+func _with_contents(stash: Array) -> Dictionary:
+	var out := BaseArmory.counts(stash)
+	var inside := BaseArmory.contents_counts(stash)
+	for id: String in inside:
+		out[id] = int(out.get(id, 0)) + int(inside[id])
+	return out
 
 
 # --- Extraction ---------------------------------------------------------------------------------
@@ -1230,7 +1244,12 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 	check(Vehicle.ride_of(hurt) == c.heli, "the carried casualty is loaded aboard (%s)" % _kit_text(hurt))
 	check(is_instance_valid(loot) and Vehicle.ride_of(loot) == c.heli and (left == null or not is_instance_valid(left) or Vehicle.ride_of(left) == null),
 		"the dead hostile by the door is loaded; the one lying off in the point isn't")
-	check("m4a1" in c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id)), "the rifle set down in the point goes into the hold")
+	var rifles := get_tree().get_nodes_in_group(WorldItem.GROUP).filter(func(n: Node) -> bool: return n is WorldItem and (n as WorldItem).item_id == &"m4a1") 		.map(func(n: Node) -> String: return "(%.1f, %.1f, %.1f)" % [(n as Node3D).global_position.x, (n as Node3D).global_position.y, (n as Node3D).global_position.z])
+	var ex := MapNodes.extraction(level)
+	var pt: Dictionary = ex.point_by_id(c.point_id) if ex else {}
+	check("m4a1" in c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return String(x.id)), "the rifle set down in the point goes into the hold (M4A1s lying at %s; the point %s r %s; the hold %s, %.0f of %.0f kg)" % [
+		rifles, pt.get("pos", "?"), pt.get("radius", Extraction.RADIUS_M), c.heli.cargo_hold.entries().map(func(x: Dictionary) -> String: return "%s x%d" % [x.id, int(x.get("count", 1))]),
+		c.heli.cargo_hold.total_mass(), c.heli.cargo_hold.max_kg])
 	if not loaded:
 		return {"why": "the casualty, the body or the rifle wasn't loaded"}
 	var mates_in := await _wait_until(func() -> bool: return squad.all(func(mid: String) -> bool: return Vehicle.ride_of(_roster_soldier(mid)) == c.heli), 20.0)

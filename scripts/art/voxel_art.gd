@@ -508,6 +508,11 @@ static func _reap_warm() -> void:
 			_warm_tasks.erase(task)
 
 
+## How many warm-up and face tasks haven't been waited for yet.
+static func pending_tasks() -> int:
+	return _warm_tasks.size() + _face_tasks.size()
+
+
 ## Waits for every warm-up task still running. As a level goes, so none is left at quit.
 static func finish_warm() -> void:
 	for task in _warm_tasks:
