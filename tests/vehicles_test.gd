@@ -1353,8 +1353,9 @@ func _test_weapons_team_orders() -> void:
 	check(team != null and team.state == GunTeam.State.MANNED and team.gun.global_position.distance_to(spot) < 3.0,
 		"they carry it there, set it up and man it (%s)" % (GunTeam.STATE_NAMES[team.state] if team else "no team"))
 	why = sw.server_command(player, "wt_pack", Vector3.ZERO, PackedStringArray([String(a.name), String(b.name)]))
-	await _wait_for(func() -> bool: return not is_instance_valid(team), 30.0)
-	check(not is_instance_valid(team) and StaticWeapons.kit_of_load(a.inventory.hands) == "tripod_m2" and StaticWeapons.kit_of_load(b.inventory.hands) == "tripod_m2",
+	var team_id := team.get_instance_id() if team else 0  # (by id: a lambda holding the freed team errors)
+	await _wait_for(func() -> bool: return not is_instance_id_valid(team_id), 30.0)
+	check(not is_instance_id_valid(team_id) and StaticWeapons.kit_of_load(a.inventory.hands) == "tripod_m2" and StaticWeapons.kit_of_load(b.inventory.hands) == "tripod_m2",
 		"Pack up and follow: packed, the loads back in their hands, the team done (%s, %s)" % [a.inventory.hands, b.inventory.hands])
 	for s: Soldier in [a, b]:
 		s.queue_free()

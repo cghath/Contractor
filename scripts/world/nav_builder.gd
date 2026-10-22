@@ -42,6 +42,7 @@ var _again := {}     # Vector2i -> true: breached again during its rebake
 var _waiting := {}   # Vector2i -> true: voxels not loaded yet, rebake when they are
 var _holds := 0      # hold() calls not yet released
 var _held := {}      # Vector2i -> true: rebakes asked for while held, done once on release
+var _mesh_iteration := -1  # the navigation map's iteration id when a chunk's mesh last changed
 
 
 ## Host only. Bakes the compound's navigation from the structures' boxes and keeps it up to
@@ -76,6 +77,13 @@ static func chunk_aabb(chunk: Vector2i) -> AABB:
 ## True while any chunk is waiting for, held back from or running a background rebake.
 func is_rebaking() -> bool:
 	return not _baking.is_empty() or not _waiting.is_empty() or not _held.is_empty()
+
+
+## Whether the navigation map has synced since a chunk's mesh last changed: until it does, a path
+## asked for still runs over the old meshes (the server takes region changes in at its next map
+## iteration, a physics frame or more later).
+func map_caught_up() -> bool:
+	return not is_inside_tree() or NavigationServer3D.map_get_iteration_id(get_world_3d().navigation_map) > _mesh_iteration
 
 
 ## Holds rebakes back during a burst of changes (PeopleLayer bringing a zone's people out over
@@ -161,6 +169,7 @@ func _on_rebaked(chunk: Vector2i, mesh: NavigationMesh) -> void:
 	if not is_inside_tree() or not _regions.has(chunk):
 		return
 	_regions[chunk].navigation_mesh = mesh
+	_mesh_iteration = NavigationServer3D.map_get_iteration_id(get_world_3d().navigation_map)
 	rebaked.emit(chunk)
 	if _again.has(chunk):
 		_again.erase(chunk)

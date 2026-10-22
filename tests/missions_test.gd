@@ -106,7 +106,12 @@ func _test_generation() -> void:
 	for z: Dictionary in MissionRegistry.zones():
 		var layout := MissionRegistry.zone_def(String(z.zone_id))
 		var hot := String(z.get("kind", "")) == "hot"
-		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 			and ["compound", "outpost", "village", "checkpoint"].all(func(t: String) -> bool: return t in z.modules or (hot and t == "compound")) 			and (z.modules as Array).size() == (7 if hot else (5 if "town" in z.modules else 4))
+		# Landmarks (world/landmarks, 2026-10-21) come on top of the sites, by the zone's tags: at most
+		# data/landmarks.json's "max" of them (4 a contract zone, 6 a hot zone).
+		var landmarks: Array = (layout.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.LANDMARK)) 			.map(func(m: Dictionary) -> String: return ZoneModules.base(String(m.type)))
+		var sites: Array = (z.modules as Array).filter(func(t: String) -> bool: return not t in landmarks)
+		var most := int((ZoneModules.landmark_data().get("max", {}) as Dictionary).get("hot" if hot else "contract", 0))
+		zones_ok = zones_ok and not layout.is_empty() and (layout.modules as Array).size() >= 4 			and ["compound", "outpost", "village", "checkpoint"].all(func(t: String) -> bool: return t in sites or (hot and t == "compound")) 			and sites.size() == (7 if hot else (5 if "town" in sites else 4)) and landmarks.size() <= most
 		zones_ok = zones_ok and layout == MissionRegistry.zone_def(String(z.zone_id))
 		var size := float(layout.get("size_m", 0))
 		# Up to 6.0e6 m² (~2.45 km a side): "Five more contract zones" (2026-10-16) added

@@ -38,6 +38,9 @@ SUITE_TIMEOUT="${SUITE_TIMEOUT:-480}"
 suite_timeout() {
 	case "$1" in
 		supports) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		# vehicles: its host runs ~30 sections, and squad driving (convoys, carries, unstuck, 2026-10-20)
+		# took it past 480 s: killed in "Squad drivers part 2" with two sections to go (R2353, CI too).
+		vehicles) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
 	esac
 }
