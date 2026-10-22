@@ -11,10 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### High command (combined arms, phases C1 to C4)
+### High command (combined arms, phases C1 to C5)
 
-> **Where this lane is:** C1-C4 done on claude/ca-c-high-command. Next: C5 (the 3D high command
-> camera with known-only markers, and its map mode for the 3D mission map).
+> **Where this lane is:** C1-C5 done on claude/ca-c-high-command (B1 and B4 part 1 merged in for
+> the side picture's spot markers). Next: C6 (contextual menus everywhere: ContextResolver, the one
+> key, recent first, the interaction menu's squadmate orders, the crew wheel, request options).
+
+#### Added (C5: the 3D high command camera)
+- **Shift+M lifts you into a 3D view over the zone** (or "3D view" on the map's high command panel).
+  WASD or the screen's edges pan, the wheel zooms from 40 m to 1,500 m over the ground, middle-drag
+  orbits, Q / E rotate, F frames your squads, a click selects a squad and a double-click follows it.
+  Your squads stand on poles with their callsign, strength and state, their orders drawn on the
+  ground; enemies show only where your side has reported them, with how sure that is. Soldiers and
+  vehicles themselves aren't drawn, so the camera can't scout. Give orders with the map's keys.
+  A hit drops you back into your body; a near miss reddens the edge.
+- **The 3D mission map.** "3D map" on the briefing shows the zone in relief with the objectives,
+  insertion points and known enemies standing on it: tilt, zoom and orbit the plan.
+- Command mode on the map now toggles with C (Tab is the theatre map).
 
 #### Added (C4: the map-order HUD)
 - **One way to give every order on the map.** Select a squad (click its frame, Shift to add,

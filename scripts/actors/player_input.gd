@@ -285,6 +285,8 @@ var wall_pull := 0.0
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if HcCamera.of(body) != null:
+		return  # the 3D high command camera has the mouse and the keys
 	var captured := _captured()
 	if pause_menu.is_open() or bug_report.is_open():
 		return  # the Escape menu has the mouse (it closes itself on Escape)
@@ -307,6 +309,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		hud.voice_order.cancel()  # Esc cancels the voice order box instead of opening the pause menu
 	elif hud.voice_order.listening:
 		return  # the voice order box has the keys (not the mouse: you can still aim a pointed order)
+	elif event.is_action_pressed(HcCamera.ACTION):  # before M: M alone also matches with Shift held
+		if body.vitals.is_up() and HighCommand.of(body) and not HighCommand.of(body).view.is_empty():
+			HcCamera.toggle(body)
+		else:
+			hud.flash("No high command squads out")
 	elif event.is_action_pressed(&"inventory") or (event.is_action_pressed(&"pause") and hud.is_inventory_open()):
 		hud.toggle_detail()
 	elif hud.is_inventory_open():

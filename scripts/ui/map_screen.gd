@@ -156,6 +156,8 @@ func close() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(HcCamera.ACTION):
+		return  # Shift+M is the 3D camera's (PlayerInput), not the map's M
 	if event.is_action_pressed(&"map"):
 		toggle()
 		get_viewport().set_input_as_handled()
@@ -221,6 +223,40 @@ func _refresh_panels() -> void:
 	_close_button.disabled = _forced  # the briefing keeps the map open
 	_refresh_hc()
 	_refresh_inset()
+
+
+## The 3D mission map (HcCamera map mode, combined_arms.md 5.3): over the map view, or gone.
+var map_3d: SubViewportContainer
+
+
+func toggle_3d_map() -> void:
+	if map_3d:
+		map_3d.queue_free()
+		map_3d = null
+		return
+	var lvl := MapNodes.level_of(self)
+	if lvl == null:
+		return
+	var marks: Array = []
+	for o: Dictionary in MapView.objectives_in(self):
+		var p: Variant = o.get("pos")
+		if p is Array and (p as Array).size() >= 2:
+			marks.append({"pos": Vector3(float(p[0]), 0.0, float(p[1])), "label": String(o.get("title", "Objective")), "colour": Color(1.0, 0.85, 0.3)})
+	var b := MapNodes.briefing(self)
+	if b:
+		for point: Dictionary in b.insertion_points():
+			var q: Array = point.get("pos", [])
+			if q.size() >= 2:
+				marks.append({"pos": Vector3(float(q[0]), 0.0, float(q[1])), "label": String(point.get("name", "Insertion")), "colour": Color(0.4, 0.95, 0.5)})
+	for m: Dictionary in marks:
+		m.pos = Vector3(m.pos.x, HcCamera._height_fn(lvl).call(m.pos.x, m.pos.z), m.pos.z)
+	map_3d = HcCamera.open_map_mode(lvl, marks)
+	add_child(map_3d)
+	map_3d.set_anchors_preset(Control.PRESET_FULL_RECT)
+	map_3d.offset_top = view.offset_top
+	map_3d.offset_left = view.offset_left
+	map_3d.offset_right = view.offset_right
+	map_3d.offset_bottom = view.offset_bottom
 
 
 ## The high command panel: shown while any group is out (MapHcPanel).

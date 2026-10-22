@@ -43,6 +43,7 @@ func _ready() -> void:
 	await _test_dead_ground()
 	await _test_groundwork()
 	await _test_map_flow()
+	await _test_camera()
 	await _test_phase2()
 	await _test_orders()
 	GameState.delete_save()
@@ -343,7 +344,8 @@ func _test_orders() -> void:
 	check(String(so.order.state) == "done", "Regroup: done once everyone is in (%s)" % so.order.state)
 	await get_tree().create_timer(1.1).timeout
 	# cancel
-	why = hc.server_order(HcOrder.make("hawk2", "move", [[a.x, a.z + 30]]))
+	var c := _inside(a + Vector3(0, 0, 30))
+	why = hc.server_order(HcOrder.make("hawk2", "move", [[c.x, c.z]]))
 	check(hc.server_cancel("hawk2") and String(so.order.state) == "cancelled", "Cancel: cancelled, holding (%s; %s %s)" % [why, so.order.verb, so.order.state])
 	# follow
 	hc.server_order(HcOrder.make("hawk2", "follow", []))
@@ -555,3 +557,67 @@ func _test_map_flow() -> void:
 	cmd._check_pending()
 	check(not cmd.pending.has("hawk2"), "the host's copy came back (the ghost is gone)")
 	mv.queue_free()
+
+
+# --- C5: the 3D high command camera -----------------------------------------------------------------
+
+func _test_camera() -> void:
+	print("3D high command camera (C5)")
+	var hc := MapNodes.high_command(level)
+	if hc == null or not hc.groups.has("hawk2"):
+		check(false, "the squad is still on the books")
+		return
+	var enemy := level.spawn_soldier({"name": "HC_CamEnemy", "faction": "hostile", "variant": "desert", "pos": level.ground_point(player.global_position + Vector3(40, 0, 40)),
+		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
+	await _frames(3)
+	var cam := HcCamera.toggle(player)
+	await _frames(3)
+	check(cam != null and HcCamera.of(level) == cam, "Shift+M's toggle opens the camera")
+	check(not cam.shows(enemy) and not cam.shows(_hawk.hero) and not cam.shows(player), "it hides every actor: an unreported enemy, our squads, the body")
+	var unreported := cam.known_enemies().filter(func(m: Dictionary) -> bool: return (m.pos as Vector3).distance_to(enemy.global_position) < 5.0)
+	check(unreported.is_empty(), "an enemy nobody reported has no marker")
+	var marks := MapNodes.markers(level)
+	var id := marks.server_report_enemy(enemy.global_position, "Hawk 2: 1x")
+	await _frames(2)
+	check(cam.known_enemies().any(func(m: Dictionary) -> bool: return (m.pos as Vector3).distance_to(Vector3(enemy.global_position.x, (m.pos as Vector3).y, enemy.global_position.z)) < 2.0),
+		"a reported one stands on the map's marker, with its ring")
+	marks.server_remove(id)
+	var t0 := Time.get_ticks_usec()
+	cam._rebuild_markers()
+	var ms := (Time.get_ticks_usec() - t0) / 1000.0
+	check(cam._markers.get_child_count() > 0, "our squads' markers are up")
+	check(ms < 3.0, "the markers rebuild cheaply (%.2f ms, 4 times a second)" % ms)
+	cam.agl = 1.0
+	cam._place()
+	check(cam.height_above_ground() >= HcCamera.MIN_AGL_M - 0.5, "never under 40 m over the ground (%.1f m)" % cam.height_above_ground())
+	cam.focus = Vector3(1e5, 0, 1e5)
+	cam._place()
+	var area := MapNodes.area_of(level)
+	check(area.has_point(Vector2(cam.cam.global_position.x, cam.cam.global_position.z)) or area.grow(1.0).has_point(Vector2(cam.cam.global_position.x, cam.cam.global_position.z)),
+		"never off the zone")
+	cam.focus = _hawk.hero.global_position
+	cam._place()
+	await get_tree().create_timer(1.1).timeout
+	cam.selected = PackedStringArray(["hawk2"])
+	var at := _inside(_hawk.hero.global_position + Vector3(0, 0, 15))
+	at.y = cam.ground(at.x, at.z)
+	cam.order_at("move", at)
+	await _frames(5)
+	var so: SquadOrders = hc.groups.hawk2.orders
+	check(String(so.order.verb) == "move", "an order from the camera goes the same validated way")
+	cam.close()
+	await _frames(3)
+	check(enemy.is_visible_in_tree() and _hawk.hero.is_visible_in_tree(), "closing brings the actors back")
+	check(HcCamera.of(level) == null, "and the camera is gone")
+	enemy.queue_free()
+	# map mode: the 3D mission map
+	var box := HcCamera.open_map_mode(level, [{"pos": Vector3(0, 0, 0), "label": "Objective", "colour": Color.YELLOW}])
+	add_child(box)
+	box.size = Vector2(800, 600)
+	await _frames(5)
+	var mc := box.get_child(0).get_node_or_null(NodePath(HcCamera.NODE_NAME)) as HcCamera
+	check(mc != null and mc.map_mode and mc.cam != null, "map mode: the same camera, in its own world")
+	check(box.get_child(0).get_children().any(func(n: Node) -> bool: return n is MeshInstance3D), "over the zone's relief")
+	check(mc != null and mc._markers.get_child_count() > 0, "the plan's marks stand on it")
+	box.queue_free()
+	await _frames(2)

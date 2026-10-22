@@ -42,6 +42,12 @@ func _ready() -> void:
 			me._server_squad_command.rpc_id(1, "support:hc_dev_spawn", me.global_position, PackedStringArray()), "Dev tools: a hero squad of 4 beside you (not on the roster)")
 	dev.visible = DevTools.on() and multiplayer.is_server()
 	_box.add_child(dev)
+	_box.add_child(UiKit.button("3D view [Shift+M]", func() -> void:
+		var me := MapNodes.local_player(self)
+		var screen := get_parent() as MapScreen
+		if me and screen:
+			screen.close()
+			HcCamera.toggle(me), "The 3D high command camera over the zone: known enemies and our squads only"))
 	_asks = VBoxContainer.new()
 	_box.add_child(_asks)
 	_go_pick = OptionButton.new()

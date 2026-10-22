@@ -76,6 +76,8 @@ const SHIFT_KEYS := {
 	# (HighCommand.request_answer). Y and N alone are tag_enemy and objectives_next, so Shift.
 	&"hc_approve": KEY_Y,
 	&"hc_deny": KEY_N,
+	# The 3D high command camera (HcCamera, combined_arms.md 5.3): Shift+M (M alone is the map, Tab the inventory).
+	&"high_command": KEY_M,
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
@@ -145,7 +147,7 @@ const PAD_WHEEL := [
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
-const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny"]  # (requests: the map panel's buttons on a pad)
+const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny", &"high_command"]  # (requests: the map panel's buttons on a pad; the 3D camera: its button there)
 
 
 func _enter_tree() -> void:

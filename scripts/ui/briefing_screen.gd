@@ -109,6 +109,15 @@ func _ready() -> void:
 		if _briefing:
 			_briefing.request_start())
 	_box.add_child(_start)
+	var relief := Button.new()
+	_fit_button(relief)
+	relief.text = "3D map (on / off)"
+	relief.tooltip_text = "The plan in relief: objectives, insertion points and known enemies on the zone's ground. Wheel: zoom, middle-drag: orbit, WASD: pan"
+	relief.pressed.connect(func() -> void:
+		var screen := get_parent() as MapScreen
+		if screen:
+			screen.toggle_3d_map())
+	_box.add_child(relief)
 	_add_label("Plan on the map: double-click for a marker, Ctrl + drag for a line, drag to move, Delete to remove. Click a green triangle to pick the insertion point. \"?\" lists every control.", &"HintLabel")
 
 

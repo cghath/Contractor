@@ -127,7 +127,7 @@ func heroes() -> Array:
 
 ## MapView._gui_input hands every event here first; true when it was ours.
 func handle(event: InputEvent) -> bool:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB and hc() and not heroes().is_empty():
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_C and not event.ctrl_pressed and hc() and not heroes().is_empty():
 		on = not on
 		cancel_placing()
 		_say("Command mode %s" % ("on" if on else "off"))
@@ -528,7 +528,7 @@ func refresh() -> void:
 		_bar_buttons.add_child(btn)
 	var go := " (on %s)" % next_go.capitalize() if next_go != "" else ""
 	_bar_help.text = ("Placing %s%s: click the point, drag to face, release to confirm. " % [_spec(placing)[1], go] if placing != "" else "") \
-		+ "Right-click: cancel   Shift: queue   Ctrl+Z: undo (%d s)   Backspace: cancel orders   Space: repeat last%s   Tab: command mode" % [int(UNDO_S),
+		+ "Right-click: cancel   Shift: queue   Ctrl+Z: undo (%d s)   Backspace: cancel orders   Space: repeat last%s   C: command mode" % [int(UNDO_S),
 			" (%s)" % _spec(last_verb)[1] if last_verb != "" else ""]
 
 
