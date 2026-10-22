@@ -38,6 +38,12 @@ const EDGE_KEEP_M := 80.0
 const POST_KEEP_M := 150.0
 ## Sight lines are worked out for at most this many candidates (the search's time cap).
 const MAX_SIGHT_CHECKS := 260
+## A hidden LZ steeper than LZ_LEVEL_DEG (LandingZone allows 15) isn't taken at once: up to
+## LZ_LEVEL_LOOK more candidates are looked at for a hidden one at most that steep, else the
+## flattest hidden one found. A helicopter settles on 6-7 degrees but not on 10-13 (F-189, the
+## loop suite on Whitecap Pass's mountain ground). Proposed.
+const LZ_LEVEL_DEG := 8.0
+const LZ_LEVEL_LOOK := 40
 ## Hot LZ: an enemy soldier this close (m) who sees it. Captain, 2026-10-14 ("not landing": one
 ## sentry 200-320 m off kept every LZ hot): real danger only, close by (was 450 m). Proposed.
 const HOT_CLOSE_M := 150.0
@@ -146,25 +152,38 @@ static func find(level: Node3D, centre: Vector3, ring := OBJECTIVE_RING_M, prefe
 		r += RING_STEP_M
 	cands.sort_custom(func(x: Array, y: Array) -> bool: return float(x[0]) < float(y[0]))
 	var fallback := {}
+	var steep := {}  # the flattest hidden LZ steeper than LZ_LEVEL_DEG so far
+	var looked := 0
 	var checked := 0
 	for c: Array in cands:
 		if checked >= MAX_SIGHT_CHECKS:
 			break
+		if not steep.is_empty():
+			looked += 1
+			if looked > LZ_LEVEL_LOOK:
+				break
 		var at: Vector3 = c[1]
 		if seen_by(level, at, never_seen_by, 1) > 0:
 			continue  # (one sight line each: not counted against the cap)
 		checked += 1
-		var seen := seen_by(level, at, watch, int(fallback.get("seen_by", 1 << 30)) if not fallback.is_empty() else 1 << 30)
-		if seen > 0 and not fallback.is_empty() and seen >= int(fallback.seen_by):
+		var seen := seen_by(level, at, watch, 1 if not steep.is_empty() else (int(fallback.get("seen_by", 1 << 30)) if not fallback.is_empty() else 1 << 30))
+		if seen > 0 and (not steep.is_empty() or (not fallback.is_empty() and seen >= int(fallback.seen_by))):
 			continue
 		var lz := LandingZone.check(level, at, ignore)
 		if not lz.ok:
 			continue
 		var out := {"ok": true, "spot": lz.spot, "hidden": seen == 0, "seen_by": seen, "dist": float(c[2]), "checked": checked,
-			"watchers": watch.size()}
+			"watchers": watch.size(), "slope_deg": float(lz.slope_deg)}
 		if seen == 0:
-			return out
+			if float(lz.slope_deg) <= LZ_LEVEL_DEG:
+				return out
+			if steep.is_empty() or float(lz.slope_deg) < float(steep.slope_deg):
+				steep = out
+			continue
 		fallback = out
+	if not steep.is_empty():
+		steep.checked = checked
+		return steep
 	if not fallback.is_empty():
 		fallback.checked = checked
 		return fallback

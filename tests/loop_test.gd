@@ -448,10 +448,10 @@ func _mission(type: String) -> String:
 			expected[id] = int(expected.get(id, 0)) + int(body_items[id])
 		var banked := expected.keys().all(func(id: String) -> bool: return int(back.get(id, 0)) >= int(expected[id]))
 		check(not deposited.is_empty() and not bodies.is_empty() and banked,
-			"the rifle set down inside the point and the dead hostile brought there are banked in the stash (M4A1 %d -> %d; short: %s; the body's %s)" % [
+			"the rifle set down inside the point and the dead hostile brought there are banked in the stash (M4A1 %d -> %d; short: %s; the body's %s; deposited %d, bodies %d; %s)" % [
 				int(stash_before_all.get("m4a1", 0)), int(back.get("m4a1", 0)),
 				expected.keys().filter(func(id: String) -> bool: return int(back.get(id, 0)) < int(expected[id])).map(func(id: String) -> String: return "%s %d of %d" % [id, int(back.get(id, 0)), int(expected[id])]),
-				body_items])
+				body_items, deposited.size(), bodies.size(), out.get("where_deposit", "")])
 	# Salvage is what was left in the field, never what came out.
 	var pool_counts := {}
 	for e: Dictionary in debrief.salvage.pool:
@@ -869,11 +869,13 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 		extraction.server_set_bring(String(s.name), false)
 	var deposited_ok := true
 	var body_items := {}
+	var put_body: Soldier = null
 	if deposit:
 		player._server_drop.rpc_id(1, &"primary")
 		await _frames(3)
 		deposited_ok = player.inventory.slots[&"primary"] == &""
 		var body := _hostile_body()  # and a dead hostile brought to the point
+		put_body = body
 		if body:
 			for e: Dictionary in Contracts.inventory_items(body.inventory):
 				body_items[String(e.id)] = int(body_items.get(String(e.id), 0)) + int(e.get("count", 1))
@@ -884,6 +886,21 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 	# before the field is counted: one falling after it is salvage the count missed (R1878).
 	await _wait_until(func() -> bool: return _hostiles_up_near(at, INF) == 0, 5.0)
 	var field := _field_counts(lz)
+	# Diagnostics for the deposit check: where the body (its ragdoll's chest) and the dropped rifle
+	# lie against the point at the call.
+	var where_deposit := ""
+	if deposit:
+		if is_instance_valid(put_body):
+			var bp := put_body.body_point()
+			where_deposit += "body %s: chest %.1f m from the point's middle (capsule %.1f m, ragdoll %s, y %.1f vs ground %.1f)" % [put_body.name,
+				Vector2(bp.x, bp.z).distance_to(lz), Vector2(put_body.global_position.x, put_body.global_position.z).distance_to(lz),
+				is_instance_valid(put_body.ragdoll), bp.y, (level as ZoneLevel).ground_point(bp).y if level is ZoneLevel else 0.0]
+		else:
+			where_deposit += "the body brought there is gone"
+		for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
+			var item := n as WorldItem
+			if item and item.item_id == &"m4a1":
+				where_deposit += "; m4a1 %.1f m from it (y %.1f)" % [Vector2(item.global_position.x, item.global_position.z).distance_to(lz), item.global_position.y]
 	for o: Dictionary in Contracts.objectives.list:
 		print("    objective before extraction: %s" % Objectives.line(o))
 	var report := {}
@@ -902,7 +919,7 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 	player = level.players.get_node_or_null(^"1")
 	await _seconds(BaseHub.STASH_POLL_S + 0.3)
 	return {"ok": true, "deposited": report.get("deposited", []), "bodies": report.get("bodies", []), "body_items": body_items,
-		"field": field, "lz": lz, "pool_id": truck.get("pool_id", ""), "stowed": truck.get("stowed", false)}
+		"field": field, "lz": lz, "where_deposit": where_deposit, "pool_id": truck.get("pool_id", ""), "stowed": truck.get("stowed", false)}
 
 
 ## B-18: the pool's M-ATV brought beside the landing zone at `at`, and `ids` moved from the
@@ -933,13 +950,19 @@ func _load_truck(ids: Array, at: Vector3) -> Dictionary:
 	return {"pool_id": MotorPool.pool_id(v), "stowed": stowed}
 
 
-## A dead hostile's body in the zone with something on it, or null.
+## A dead hostile's body in the zone with something on it, or null: the one that died last, so the
+## body cap (Soldier.server_enforce_body_cap: the oldest go first, their gear dropped where they
+## lay) doesn't take it while more fall before the call. (Taking the first in the group, the
+## oldest, a raid with a dozen more falling after it lost the body: "bodies 0", its gear banked
+## as deposited.)
 func _hostile_body() -> Soldier:
+	var last: Soldier = null
 	for n: Node in get_tree().get_nodes_in_group(Soldier.DEAD_GROUP):
 		var s := n as Soldier
 		if s and s.faction == &"hostile" and not s.is_queued_for_deletion() and not Contracts.inventory_items(s.inventory).is_empty():
-			return s
-	return null
+			if last == null or s.died_at > last.died_at:
+				last = s
+	return last
 
 
 # --- By helicopter ---------------------------------------------------------------------------------
