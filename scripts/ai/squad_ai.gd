@@ -4466,6 +4466,9 @@ const PATROL_FORM_M := 60.0
 ## nearest it (Flares.server_hand: he says so), else his side's mortar team's illumination round
 ## where it has one in range (MortarTeam.illum_for). Nobody with either: the squad asks again in
 ## FLARE_RETRY_S. Fired on with no known threat: over FLARE_AHEAD_M in front. Proposed.
+## F-140: at a man inside a vehicle the sights need only be on the vehicle, this share of its
+## hull's diagonal either side of his chest (_gate_open). Proposed.
+const VEHICLE_GATE_SHARE := 0.3
 const FLARE_DARK := 0.55
 const FLARE_SQUAD_GAP_S := 45.0
 const FLARE_RETRY_S := 10.0
@@ -4980,6 +4983,13 @@ func _aim_for_shot(point: Vector3, foe: Soldier) -> float:
 ## left of DEAD_CHECK_ROUNDS, and the sights on his body rather than his head (_sights_on_body).
 ## Covering fire at a spot (no foe): within 6 degrees, as ever.
 func _gate_open(foe: Soldier, error: float, point: Variant = null) -> bool:
+	var ride := Vehicle.ride_of(foe) if foe != null else null
+	if ride != null and foe.vitals.is_up():
+		# A man in a vehicle (F-140): a round that misses him still hits the vehicle, so the
+		# sights only need to be on it (VEHICLE_GATE_SHARE of its hull's size either way).
+		var box := Launchers.hull_box(ride)
+		var d := maxf(body.camera.global_position.distance_to(box.get_center()), 1.0)
+		return error <= atan(box.size.length() * VEHICLE_GATE_SHARE / d)
 	if foe != null and not foe.vitals.is_up():
 		return error <= deg_to_rad(DEAD_CHECK_GATE_DEG) and _dead_check_rounds < DEAD_CHECK_ROUNDS and _sights_on_body(foe)
 	if foe == null or point == null:
@@ -5095,6 +5105,11 @@ func _shoot() -> void:
 	var tactic_fire := false  # a base of fire's or a Suppress order's point
 	if foe != null:
 		aim_at = _cqb_aim_point(foe, get_physics_process_delta_time())
+		var ride := Vehicle.ride_of(foe)
+		if ride != null and foe.vitals.is_up():
+			# Leading a moving vehicle (F-140): where it will be when the round gets there.
+			var mv := maxf(float(weapon.stats.get("muzzle_velocity_mps", 800.0)), 100.0)
+			aim_at = (aim_at as Vector3) + ride.linear_velocity * body.camera.global_position.distance_to(aim_at) / mv
 	elif _suppressing:
 		aim_at = body.threat_pos + Vector3.UP * 1.0  # keep their heads down before going out to the casualty
 	elif _suppress_point() != null:
@@ -5321,6 +5336,41 @@ func _take_overwatch() -> void:
 
 
 ## Status words for a unit with a mark and no line of fire (_shoot), or "" for none.
+## What stops this unit's next shot at its target now ("" for nothing), read only: _shoot's
+## gates in order (tests, the debug overlay).
+func shoot_blocker() -> String:
+	var weapon := body.active_weapon()
+	if weapon == null or weapon.type != "weapon":
+		return "no weapon"
+	if body.carrying != null or body.is_reloading or body.stunned_s > 0.0:
+		return "busy (carrying, reloading or stunned)"
+	if body.suppression >= PINNED and not _suppressing:
+		return "pinned"
+	if not weapons_free():
+		return "weapons not free"
+	var foe := _foe()
+	if foe == null:
+		return "no foe (intent %d)" % intent
+	var now := Soldier._now()
+	if now < _next_shot or now < _pause_until or now < body._busy_until:
+		return "between rounds or bursts"
+	var p := foe.aim_point()
+	var fwd := -body.camera.global_basis.z
+	var err := fwd.angle_to((p - body.camera.global_position).normalized())
+	if not _gate_open(foe, err, p):
+		return "sights not on (%.1f deg off)" % rad_to_deg(err)
+	match _fire_line_state(p, foe):
+		FireLine.BLOCKED:
+			return "no line of fire"
+		FireLine.STAND:
+			return "has to stand for the line"
+	if body.inventory.rounds_in(body.active_slot) <= 0:
+		return "empty"
+	if _friendly_in_line(p):
+		return "a friend in the line"
+	return ""
+
+
 func _no_shot_text() -> String:
 	if body == null or intent not in [Intent.FOLLOW, Intent.HOLD, Intent.FIGHT] or body.stunned_s > 0.0 or body.suppression >= PINNED:
 		return ""

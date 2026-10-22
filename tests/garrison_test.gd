@@ -190,7 +190,7 @@ func _test_road_ambush() -> void:
 			return "gone"
 		var ai := SquadAI.of(s)
 		return "%s %s: %s, target %s, supp %.2f, %d rounds, %s" % [s.name, "up" if s.vitals.is_up() else "down", s.ai_status,
-			ai.target.name if ai.target else "none", s.suppression, s.inventory.rounds_in(s.active_slot), ai._no_shot_text()]))])
+			ai.target.name if ai.target else "none", s.suppression, s.inventory.rounds_in(s.active_slot), ai.shoot_blocker()]))])
 	await _wait_for(func() -> bool: return String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH, 4.0)
 	check(String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH and v.ai.cruise_ms > 30.0 / 3.6 + 1.0,
 		"the truck drives on through, faster (%s, %.1f m/s)" % [drivers.last_contact.get(v.get_instance_id(), "none"), v.ai.cruise_ms])
@@ -207,10 +207,11 @@ func _test_road_ambush() -> void:
 	v._zones[Vehicle.ZONE_ENGINE] = 0.0
 	await _wait_for(func() -> bool: return v.occupants().is_empty(), 5.0)
 	var out_of_it := v.occupants().is_empty()
-	await _wait_for(func() -> bool: return crew.all(func(c: Soldier) -> bool: return not c.vitals.is_up() or c.global_position.z < v.global_position.z - 1.0), 8.0)
-	var lee := crew.filter(func(c: Soldier) -> bool: return c.vitals.is_up() and c.global_position.z < v.global_position.z - 1.0)
+	var away := func(c: Soldier) -> bool: return _flat_d(c.global_position, at) > _flat_d(v.global_position, at) + 1.0  # (the lee: the truck between him and the ambush)
+	await _wait_for(func() -> bool: return crew.all(func(c: Soldier) -> bool: return not c.vitals.is_up() or away.call(c)), 8.0)
+	var lee := crew.filter(func(c: Soldier) -> bool: return c.vitals.is_up() and away.call(c))
 	check(out_of_it and lee.size() == crew.filter(func(c: Soldier) -> bool: return c.vitals.is_up()).size(),
-		"disabled, its crew bail out on the side away from the ambush (%d of %d out south of it)" % [lee.size(), crew.size()])
+		"disabled, its crew bail out on the side away from the ambush (%d of %d out on its far side)" % [lee.size(), crew.size()])
 	# The fight goes on from their ground: nobody chases the truck or makes for the hill.
 	var out := 0.0
 	var until := Time.get_ticks_msec() + 12000
@@ -297,6 +298,10 @@ func _test_patrol_formation() -> void:
 	for f in unseen:
 		if is_instance_valid(f):
 			f.add_to_group(&"combatants")
+
+
+func _flat_d(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 func _finish() -> void:
