@@ -20,7 +20,25 @@ extends RefCounted
 ##   objective that fell in under half its time sends it on to the next).
 ## - Stalls: at the limit the main effort shifts to `alt`, or fire support is called and the phase
 ##   pauses phase_pause_s; at phase_fail_share x the limit the operation stalls.
+## The reels (docs/ai_tactics.md, P1-P2):
+## - A `fortified` objective is taken by SOSRA: Suppress (its SBF), Obscure (fire_support_wanted for
+##   smoke on it as the breach goes in), Secure (a group on its far flank facing out, cutting its
+##   reinforcement), Reduce (a breach group to the breach spot short of it), Assault (through the
+##   breach once it's made).
+## - A phase marked `isolate` (R07): fix it with fires, send small groups to its routes in (the
+##   phase's `routes`, else three points round it away from the attacker), starve it until the
+##   picture shows it at half the CP it had (or starve_s), then concentrate: every axis set, then
+##   all at once.
+## - An objective marked `lure` (R04's feigned retreat): one group goes at it and then falls back;
+##   if the garrison follows it out, a second group waiting out of sight on another side goes in.
 ## Numbers in data/side_command.json, Proposed.
+
+const STARVE_S := 600.0
+const ISOLATE_M := 450.0
+const LURE_S := 90.0
+const LURE_BACK_M := 250.0
+const PUSH_SIDE_M := 350.0
+const FOLLOW_M := 60.0
 
 var spec: Dictionary
 var phase := 0
@@ -36,6 +54,11 @@ var _paused_until := -INF
 var _shifted := false
 var _stall_committed := false
 var _exploit := ""      # the next phase's objective an exploiting reserve goes for
+## P2: the isolation of the phase's main objective: {"stage", "groups", "at", "cp0", "fired_at"}.
+var isolation := {}
+## P2: a lure: objective id -> {"lure", "push", "at", "state", "rally", "hide"}.
+var lures := {}
+var _obscured := {}     # objective id -> true: its smoke asked for
 
 
 func _init(p_spec := {}) -> void:
@@ -90,7 +113,7 @@ func update(cmd: SideCommand, t: float) -> void:
 	if stalled or current().is_empty():
 		return
 	if not started:
-		if t < phase_at or cmd.groups.is_empty():
+		if t < phase_at or cmd.my_groups().is_empty():
 			return  # (nothing to plan with yet)
 		started = true
 		_begin_phase(cmd, t)
@@ -121,11 +144,15 @@ func update(cmd: SideCommand, t: float) -> void:
 			_commit_reserve(cmd, main, "the main objective stalls")
 	_watch_assaults(cmd)
 	_watch_counterattacks(cmd)
+	_isolate(cmd, t)
+	_lure(cmd, t)
 
 
 func _begin_phase(cmd: SideCommand, t: float) -> void:
 	phase_at = t
 	_paused_until = -INF
+	isolation = {}
+	lures = {}
 	_shifted = false
 	_stall_committed = false
 	_pick_reserve(cmd)
@@ -186,7 +213,7 @@ func _top_up_reserve(cmd: SideCommand) -> void:
 		var gid := String(r.id)
 		if not reserve.has(gid) and String(r.role) in ["", "reserve"] and not cmd.pairs.has(gid):
 			reserve[gid] = true
-			cmd._log("%s joins the reserve" % cmd.groups[gid].callsign)
+			cmd._log("%s joins the reserve" % cmd.my_groups()[gid].callsign)
 			return
 
 
@@ -215,7 +242,7 @@ func _check_objectives(cmd: SideCommand, t: float) -> void:
 		elif not _quiet.has(id):
 			_quiet[id] = t
 		var ours := ""
-		for gid: String in cmd.groups:
+		for gid: String in cmd.my_groups():
 			var row: Dictionary = b.rows.get(gid, {})
 			if not row.is_empty() and SideCommand._flat(row.pos, o.pos) <= r:
 				ours = gid
@@ -223,7 +250,7 @@ func _check_objectives(cmd: SideCommand, t: float) -> void:
 		if not enemy and ours != "" and t - float(_quiet.get(id, t)) >= SideCommand.num("consolidate_s", 90.0):
 			taken[id] = t
 			taken_by[id] = ours
-			cmd._log("%s taken by %s" % [String(o.get("label", id)), cmd.groups[ours].callsign])
+			cmd._log("%s taken by %s" % [String(o.get("label", id)), cmd.my_groups()[ours].callsign])
 			cmd.trigger("%s taken" % id)
 			if t - phase_at < float(current().get("limit_s", 1200.0)) * 0.5 and phase + 1 < phases().size():
 				_exploit = String((phases()[phase + 1] as Dictionary).get("main", ""))
@@ -239,7 +266,7 @@ func _check_objectives(cmd: SideCommand, t: float) -> void:
 
 ## An assault gone AMBER brings the reserve in.
 func _watch_assaults(cmd: SideCommand) -> void:
-	for g: Dictionary in cmd.groups.values():
+	for g: Dictionary in cmd.my_groups().values():
 		if String(g.role) == "assault" and bool(g.amber):
 			_commit_reserve(cmd, String(g.need).get_slice(":", 0), "%s is amber" % g.callsign)
 			return
@@ -263,7 +290,7 @@ func _watch_counterattacks(cmd: SideCommand) -> void:
 
 ## Is a counterattack seen (RequestBroker: the last reserve isn't lent then)?
 func counterattack_seen(cmd: SideCommand) -> bool:
-	return committed.values().any(func(o: String) -> bool: return taken.has(o)) and not cmd.groups.is_empty()
+	return committed.values().any(func(o: String) -> bool: return taken.has(o)) and not cmd.my_groups().is_empty()
 
 
 # --- Needs ---------------------------------------------------------------------------------------
@@ -295,8 +322,22 @@ func needs(cmd: SideCommand, t: float) -> Array:
 				armour = armour or String(e.kind) in ["mbt", "ifv", "light_armour"]
 		var prio := 10.0 if id == main else 8.0
 		var sbf_at := p - dir * SideCommand.num("sbf_offset_m", 250.0) + side * 80.0
-		out.append({"id": id, "role": "assault", "pos": p, "target": p, "pair": id + ":sbf", "priority": prio, "armour": armour,
-			"town": bool(o.get("town", false)), "label": String(o.get("label", id))})
+		if id == main and not isolation.is_empty() and String(isolation.stage) != "concentrate":
+			out.append_array(_isolation_needs(o, dir, side))
+			continue  # fixed by fires and cut off; the assault waits for the concentration
+		if lures.has(id):
+			out.append_array(_lure_needs(o))
+			continue
+		var assault := {"id": id, "role": "assault", "pos": p, "target": p, "pair": id + ":sbf", "priority": prio, "armour": armour,
+			"town": bool(o.get("town", false)), "label": String(o.get("label", id))}
+		if bool(o.get("fortified", false)):  # P1: SOSRA
+			assault["breach"] = id + ":breach"
+			out.append({"id": id + ":breach", "role": "breach", "pos": p - dir * 30.0, "priority": prio + 0.5, "label": "the breach of %s" % o.get("label", id)})
+			out.append({"id": id + ":secure", "role": "secure", "pos": p + side * 90.0 + dir * 60.0, "facing": side, "priority": prio - 1.0,
+				"label": "securing %s's far flank" % o.get("label", id)})
+		if not isolation.is_empty() and String(isolation.stage) == "concentrate" and id == main:
+			assault["together"] = id
+		out.append(assault)
 		out.append({"id": id + ":sbf", "role": "sbf", "pos": sbf_at, "target": p, "priority": prio, "armour": armour,
 			"label": String(o.get("label", id))})
 		if bool(spec.get("flanks", true)) and id == main:
@@ -329,6 +370,132 @@ func axis_dir() -> Vector3:
 	return d.normalized() if d.length() > 0.1 else Vector3.FORWARD
 
 
+# --- P1, P2: SOSRA's obscure, isolation, the lure -----------------------------------------------
+
+## P1's obscure: smoke on a fortified objective once its breach group is on the way.
+func _obscure(cmd: SideCommand) -> void:
+	for o: Dictionary in objectives():
+		var id := String(o.id)
+		if not bool(o.get("fortified", false)) or _obscured.has(id) or taken.has(id):
+			continue
+		for g: Dictionary in cmd.my_groups().values():
+			if String(g.need) == id + ":breach":
+				_obscured[id] = true
+				cmd.fire_support_wanted.emit(o.pos, "smoke on %s's ports for the breach" % o.get("label", id))
+				cmd._log("obscure: smoke on %s for the breach" % o.get("label", id))
+
+
+## P2: fix, isolate, starve, concentrate on a main objective whose phase says `isolate`.
+func _isolate(cmd: SideCommand, t: float) -> void:
+	_obscure(cmd)
+	if not bool(current().get("isolate", false)) or taken.has(main_id()):
+		return
+	var o := objective(main_id())
+	var pic := cmd.picture()
+	var cp := float(DefencePlan.threat(pic, o.pos, float(o.get("radius", 60.0)) + 100.0).cp)
+	if isolation.is_empty():
+		isolation = {"stage": "isolate", "groups": [], "at": t, "cp0": cp, "fired_at": t}
+		cmd.fire_support_wanted.emit(o.pos, "fix %s" % o.get("label", o.id))
+		cmd._log("isolate %s: fires to fix it, teams to its routes in (%.0f CP there)" % [o.get("label", o.id), cp])
+		return
+	if t - float(isolation.fired_at) >= 120.0 and String(isolation.stage) != "concentrate":
+		isolation.fired_at = t
+		cmd.fire_support_wanted.emit(o.pos, "keep %s fixed" % o.get("label", o.id))
+	match String(isolation.stage):
+		"isolate":
+			var there := 0
+			for g: Dictionary in cmd.my_groups().values():
+				if String(g.need).begins_with("isolate:"):
+					var so := g.orders as SquadOrders
+					if so and not so.order.is_empty() and String(so.order.state) in ["done", "set"]:
+						there += 1
+			if there >= 1 and there >= mini(3, cmd.my_groups().size() - 2):
+				isolation.stage = "starve"
+				isolation.at = t
+				cmd._log("%s cut off: starving it" % o.get("label", o.id))
+		"starve":
+			var weak := float(isolation.cp0) > 0.0 and cp <= float(isolation.cp0) * 0.5
+			if weak or t - float(isolation.at) >= float(current().get("starve_s", STARVE_S)):
+				isolation.stage = "concentrate"
+				cmd._log("concentrate on %s: %s" % [o.get("label", o.id), "half its strength gone" if weak else "starved %d min" % roundi((t - float(isolation.at)) / 60.0)])
+				cmd.trigger()
+
+
+func _isolation_needs(o: Dictionary, dir: Vector3, side: Vector3) -> Array:
+	var out: Array = []
+	var routes: Array = current().get("routes", [])
+	if routes.is_empty():  # the three ways in that aren't the attacker's: its flanks and rear
+		routes = [o.pos + side * ISOLATE_M, o.pos - side * ISOLATE_M, o.pos + dir * ISOLATE_M]
+	for i in routes.size():
+		out.append({"id": "isolate:%s:%d" % [o.id, i], "role": "recon", "pos": routes[i], "priority": 9.0,
+			"label": "the way into %s (%d)" % [o.get("label", o.id), i + 1]})
+	return out
+
+
+## P2's lure: set up at the phase's start for objectives marked `lure`, then run.
+func _lure(cmd: SideCommand, t: float) -> void:
+	for o: Dictionary in objectives():
+		var id := String(o.id)
+		if not bool(o.get("lure", false)) or taken.has(id):
+			continue
+		if not lures.has(id):
+			var rows := cmd.rows().filter(func(r: Dictionary) -> bool: return not reserve.has(String(r.id)))
+			if rows.size() < 2:
+				continue
+			rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.strength_cp) < float(b.strength_cp))
+			var lure: Dictionary = rows[0]
+			var push: Dictionary = rows[rows.size() - 1]
+			var back: Vector3 = (lure.pos as Vector3) - (o.pos as Vector3)
+			back.y = 0.0
+			back = back.normalized() if back.length() > 0.5 else Vector3.BACK
+			var across := back.cross(Vector3.UP)
+			lures[id] = {"lure": String(lure.id), "push": String(push.id), "at": t, "state": "luring",
+				"rally": (o.pos as Vector3) + back * LURE_BACK_M, "hide": (o.pos as Vector3) + across * PUSH_SIDE_M}
+			cmd._log("feigned retreat on %s: %s draws them out, %s waits to push in" % [o.get("label", id), lure.id, push.id])
+			continue
+		var l: Dictionary = lures[id]
+		match String(l.state):
+			"luring":
+				if t - float(l.at) >= LURE_S:
+					l.state = "falling back"
+					l.at = t
+					cmd._log("%s pulls back from %s" % [l.lure, o.get("label", id)])
+					cmd.trigger()
+			"falling back":
+				var pic := cmd.picture()
+				var followed := false
+				if pic:
+					for e: Dictionary in pic.entries_near(l.rally, LURE_BACK_M):
+						if SideCommand._flat(e.pos, o.pos) > float(o.get("radius", 60.0)) + FOLLOW_M:
+							followed = true
+				if followed:
+					l.state = "pushing"
+					cmd._log("the garrison of %s followed %s out: %s pushes in" % [o.get("label", id), l.lure, l.push])
+					cmd.trigger()
+
+
+func _lure_needs(o: Dictionary) -> Array:
+	var l: Dictionary = lures[String(o.id)]
+	var out: Array = []
+	match String(l.state):
+		"luring":
+			out.append({"id": "lure:" + String(o.id), "role": "assault", "pos": o.pos, "target": o.pos, "priority": 9.5, "only": l.lure, "label": "the feint on %s" % o.get("label", o.id)})
+			out.append({"id": "hide:" + String(o.id), "role": "reserve", "pos": l.hide, "priority": 9.4, "only": l.push, "label": "waiting to push into %s" % o.get("label", o.id)})
+		"falling back":
+			out.append({"id": "lure_back:" + String(o.id), "role": "reserve", "pos": l.rally, "priority": 9.5, "only": l.lure, "label": "falling back from %s" % o.get("label", o.id)})
+			out.append({"id": "hide:" + String(o.id), "role": "reserve", "pos": l.hide, "priority": 9.4, "only": l.push, "label": "waiting to push into %s" % o.get("label", o.id)})
+		"pushing":
+			out.append({"id": "push:" + String(o.id), "role": "assault", "pos": o.pos, "target": o.pos, "priority": 10.5, "only": l.push, "label": o.get("label", o.id)})
+			out.append({"id": "turn:" + String(o.id), "role": "defend", "pos": l.rally, "facing": (o.pos as Vector3) - (l.rally as Vector3), "priority": 9.5, "only": l.lure,
+				"label": "turning on the pursuers"})
+	return out
+
+
+## Whether the plan's current phase is stalled or paused (the brigade's reserve goes to it).
+func stalled_now(t: float) -> bool:
+	return stalled or t < _paused_until or (started and not current().is_empty() and t - phase_at >= float(current().get("limit_s", 1200.0)))
+
+
 ## Where group `g` falls back to: the rally.
 func rally_for(_cmd: SideCommand, _g: Dictionary) -> Vector3:
 	return spec.get("rally", spec.get("ld", Vector3.INF))
@@ -342,7 +509,7 @@ func withdraw(cmd: SideCommand, _t: float) -> void:
 		if float(taken[id]) > latest:
 			latest = float(taken[id])
 			line = objective(id).pos
-	for g: Dictionary in cmd.groups.values():
+	for g: Dictionary in cmd.my_groups().values():
 		g.role = "withdrawn"
 		g.need = ""
 		cmd._give(g, HcOrder.make(String(g.id), "defend", [[line.x, line.z]]))

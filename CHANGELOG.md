@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Platoon, company and brigade tactics from the reels (docs/ai_tactics.md, the AI commander)
+
+#### Added
+- **Bunkers and trench lines by SOSRA.** The AI commander takes a fortified objective in the
+  reels' order. It suppresses the position, smokes its ports, sends a group to secure the far
+  flank, makes a breach with its engineers, and only then assaults through the breach.
+- **Isolate before the assault.** Against a village held in strength, the commander fixes it with
+  fires and sends small teams to cut the ways in. It starves the garrison until it's half
+  what it was, then attacks from every axis at once.
+- **Feigned retreat.** One group attacks, then pulls back. If the garrison follows it out, a
+  second group waiting out of sight on another side goes in.
+- **Defence in depth.** A defending side puts a security zone a kilometre forward. Recon groups
+  there call fires on what they see and pull back before they're caught.
+- **Brigades.** Several company plans run under one command element. The element keeps a
+  reserve company, and a company that stalls gets the brigade's fires first, then the reserve.
+
 ### Team and squad drills from the tactics reels (docs/ai_tactics.md, every side)
 
 #### Added

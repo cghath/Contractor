@@ -55,6 +55,9 @@ var jobs := {}
 var pairs := {}
 ## B3: hand-offs and AT asks already said ("armour|entry").
 var handed := {}
+## P3 (docs/ai_tactics.md 6): the company a plan is working for now ("" for all): BrigadePlan
+## sets it while each company's plan runs, and rows() / my_groups() keep to that company.
+var company := ""
 var _offset := 0.0
 var _task_left := 0.0
 var _think_left := 0.0
@@ -167,7 +170,7 @@ func trigger(why := "") -> void:
 
 ## Host: `squad` is this commander's to task from now on (`kind` a GroupBoard kind, "" guessed;
 ## `record` its Virtualizer record if it may go virtual). Returns its id.
-func server_register(squad: Squad, kind := "", callsign := "", record := {}) -> String:
+func server_register(squad: Squad, kind := "", callsign := "", record := {}, p_company := "") -> String:
 	var id := GroupBoard.group_id(squad)
 	if kind != "":
 		squad.set_meta(&"group_kind", kind)
@@ -179,7 +182,7 @@ func server_register(squad: Squad, kind := "", callsign := "", record := {}) -> 
 	var so := SquadOrders.new(squad, self)
 	groups[id] = {"id": id, "squad": squad, "orders": so, "record": record, "callsign": callsign if callsign != "" else String(squad.name),
 		"kind": kind, "role": "", "need": "", "set_at": -INF, "start_men": maxi(squad.members().size(), Virtualizer.up(record) if not record.is_empty() else 0),
-		"amber": false}
+		"amber": false, "company": p_company, "need_data": {}}
 	if not record.is_empty():
 		var v := Virtualizer.of(self)
 		if v:
@@ -213,11 +216,23 @@ func _ensure_hero(squad: Squad) -> void:
 	squad.hero = lead
 
 
-## The board rows of this commander's groups, with their availability now.
+## This commander's groups, only the current company's while a brigade's company plan runs.
+func my_groups() -> Dictionary:
+	if company == "":
+		return groups
+	var out := {}
+	for id: String in groups:
+		if String(groups[id].get("company", "")) == company:
+			out[id] = groups[id]
+	return out
+
+
+## The board rows of this commander's groups (the current company's), with their availability now.
 func rows() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var b := board()
-	for id: String in groups:
+	var mine := my_groups()
+	for id: String in mine:
 		var row: Dictionary = b.rows.get(id, {})
 		if row.is_empty():
 			continue
@@ -457,6 +472,10 @@ static func suitability(kind: String, role: String, town := false) -> float:
 		return 1.0 if kind in ["transport", "light_armour", "mech_infantry"] else 0.0
 	if r == "assault" and town and k.has("town_assault"):
 		return float(k.town_assault)
+	if r == "breach" and not k.has("breach"):
+		return float(k.get("assault", 0.0)) * 0.6
+	if r == "secure" and not k.has("secure"):
+		return float(k.get("screen", 0.0))
 	return float(k.get(r, 0.0))
 
 
@@ -513,6 +532,7 @@ func _issue(n: Dictionary, row: Dictionary, s: float) -> void:
 			return  # already on it
 	g.need = String(n.id)
 	g.role = String(n.role)
+	g.need_data = n
 	g.set_at = -INF
 	g.amber = false
 	_log("%s to %s on %s: score %.2f, %s %s at %d m" % [g.callsign, String(n.role).to_upper(), String(n.get("label", n.id)), s,
@@ -569,7 +589,12 @@ func orders_for(n: Dictionary, g: Dictionary) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	match String(n.role):
 		"assault", "counterattack":
-			out.append(HcOrder.make(id, "attack", [at], {"target": {"kind": "point", "pos": [target.x, target.z]}, "go": GO if n.get("pair", "") != "" else ""}))
+			var held := String(n.get("pair", "")) != "" or n.has("breach") or n.has("together")  # waits for its support, breach or partners (3.5.1, P1, P2)
+			out.append(HcOrder.make(id, "attack", [at], {"target": {"kind": "point", "pos": [target.x, target.z]}, "go": GO if held else ""}))
+		"breach":
+			out.append(HcOrder.make(id, "move", route, {"posture": {"mode": "combat"}}))
+		"secure":
+			out.append(HcOrder.make(id, "defend", [at], {"facing": facing}))
 		"sbf":
 			out.append(HcOrder.make(id, "sbf", [at], {"target": {"kind": "point", "pos": [target.x, target.z]}}))
 		"flank":
@@ -643,13 +668,40 @@ func _sync(t: float) -> void:
 		if float(g.set_at) == -INF:
 			g.set_at = t
 		var sbf := _pair_of(g)
-		var ready := not sbf.is_empty() and sbf_ready(sbf)
+		var nd: Dictionary = g.get("need_data", {})
+		var ready := (sbf.is_empty() and String(nd.get("pair", "")) == "") or (not sbf.is_empty() and sbf_ready(sbf))
+		if nd.has("breach"):  # P1: SOSRA, the assault goes once the breach is made
+			ready = ready and breach_made(String(nd.breach))
+		if nd.has("together"):  # P2: every axis set before any goes
+			ready = ready and _all_set(String(nd.together))
 		if ready or t - float(g.set_at) >= num("sync_timeout_s", 120.0):
 			if ready:
 				_say(sbf, "set", "%s is set." % sbf.callsign)
 			_say(g, "go", "%s, go." % g.callsign)
 			_log("%s goes in: %s" % [g.callsign, "support set" if ready else "support not set after %d s" % roundi(t - float(g.set_at))])
 			so.go(GO)
+
+
+## P1: whether the breach of need `breach_id` is made: its group reached the breach spot (its move
+## done), or there is no breach group.
+func breach_made(breach_id: String) -> bool:
+	for g: Dictionary in groups.values():
+		if String(g.need) == breach_id:
+			var so := g.orders as SquadOrders
+			return so != null and not so.order.is_empty() and String(so.order.get("state", "")) == "done"
+	return true
+
+
+## P2: whether every assault tagged `tag` (need "together") is set at its attack position.
+func _all_set(tag: String) -> bool:
+	for g: Dictionary in groups.values():
+		var nd: Dictionary = g.get("need_data", {})
+		if String(nd.get("together", "")) != tag or not (String(g.role) in ["assault", "counterattack"]):
+			continue
+		var so := g.orders as SquadOrders
+		if so == null or so.order.is_empty() or String(so.order.state) != "set":
+			return false
+	return true
 
 
 ## Whether SBF group `g` is set: at its position and firing (or set waiting).

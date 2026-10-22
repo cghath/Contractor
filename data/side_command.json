@@ -41,7 +41,9 @@
 			"reserve": 0.8,
 			"screen": 0.8,
 			"defend": 1.0,
-			"overwatch": 0.3
+			"overwatch": 0.3,
+			"breach": 0.6,
+			"secure": 0.8
 		},
 		"weapons_team": {
 			"assault": 0.2,
@@ -51,7 +53,9 @@
 			"reserve": 0.4,
 			"screen": 0.7,
 			"defend": 0.8,
-			"overwatch": 0.9
+			"overwatch": 0.9,
+			"breach": 0.2,
+			"secure": 0.7
 		},
 		"gun_team": {
 			"assault": 0.2,
@@ -61,7 +65,9 @@
 			"reserve": 0.4,
 			"screen": 0.7,
 			"defend": 0.8,
-			"overwatch": 0.9
+			"overwatch": 0.9,
+			"breach": 0.2,
+			"secure": 0.7
 		},
 		"at_team": {
 			"assault": 0.3,
@@ -71,7 +77,9 @@
 			"reserve": 0.6,
 			"screen": 1.0,
 			"defend": 0.8,
-			"overwatch": 0.7
+			"overwatch": 0.7,
+			"breach": 0.3,
+			"secure": 0.9
 		},
 		"recon_team": {
 			"assault": 0.2,
@@ -81,7 +89,9 @@
 			"reserve": 0.3,
 			"screen": 0.5,
 			"defend": 0.4,
-			"overwatch": 0.6
+			"overwatch": 0.6,
+			"breach": 0.2,
+			"secure": 0.6
 		},
 		"mech_infantry": {
 			"assault": 1.0,
@@ -91,7 +101,9 @@
 			"reserve": 1.0,
 			"screen": 0.8,
 			"defend": 0.9,
-			"overwatch": 0.7
+			"overwatch": 0.7,
+			"breach": 0.5,
+			"secure": 0.9
 		},
 		"armour_section": {
 			"assault": 0.7,
@@ -102,7 +114,9 @@
 			"reserve": 1.0,
 			"screen": 0.5,
 			"defend": 0.6,
-			"overwatch": 1.0
+			"overwatch": 1.0,
+			"breach": 0.3,
+			"secure": 0.6
 		},
 		"armour_platoon": {
 			"assault": 0.7,
@@ -113,7 +127,9 @@
 			"reserve": 1.0,
 			"screen": 0.5,
 			"defend": 0.6,
-			"overwatch": 1.0
+			"overwatch": 1.0,
+			"breach": 0.3,
+			"secure": 0.6
 		},
 		"light_armour": {
 			"assault": 0.5,
@@ -123,7 +139,9 @@
 			"reserve": 0.9,
 			"screen": 0.8,
 			"defend": 0.5,
-			"overwatch": 0.6
+			"overwatch": 0.6,
+			"breach": 0.3,
+			"secure": 0.8
 		},
 		"qrf": {
 			"assault": 1.0,
@@ -133,7 +151,9 @@
 			"reserve": 0.9,
 			"screen": 0.8,
 			"defend": 1.0,
-			"overwatch": 0.3
+			"overwatch": 0.3,
+			"breach": 0.6,
+			"secure": 0.8
 		},
 		"engineers": {
 			"assault": 0.4,
@@ -143,7 +163,9 @@
 			"reserve": 0.5,
 			"screen": 0.4,
 			"defend": 0.6,
-			"overwatch": 0.2
+			"overwatch": 0.2,
+			"breach": 1.0,
+			"secure": 0.4
 		},
 		"transport": {
 			"assault": 0.0,
@@ -153,7 +175,9 @@
 			"reserve": 0.2,
 			"screen": 0.0,
 			"defend": 0.1,
-			"overwatch": 0.0
+			"overwatch": 0.0,
+			"breach": 0.0,
+			"secure": 0.0
 		},
 		"mortar_section": {
 			"assault": 0.0,
@@ -164,7 +188,9 @@
 			"screen": 0.0,
 			"defend": 0.3,
 			"overwatch": 0.1,
-			"fire_support": 1.0
+			"fire_support": 1.0,
+			"breach": 0.0,
+			"secure": 0.1
 		}
 	},
 	"counterattack": {

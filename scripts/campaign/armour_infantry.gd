@@ -184,7 +184,9 @@ static func apply(cmd: SideCommand, needs: Array, axis_dir: Vector3) -> Array:
 		paired[aid] = true
 	for x: Dictionary in out:  # paired armour takes only its own tasks (escort, hand-offs)
 		if String(x.get("only", "")) == "":
-			x["exclude"] = paired
+			var ex: Dictionary = (x.get("exclude", {}) as Dictionary).duplicate()
+			ex.merge(paired)
+			x["exclude"] = ex
 	out.append_array(_hand_offs(cmd, pairs, by_id))
 	out.append_array(_at_threats(cmd, pairs, by_id))
 	return out

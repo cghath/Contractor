@@ -348,6 +348,14 @@ Order: T1-T10 (team and squad) first, then P1-P3, then F1-F3. Each phase pushed 
 - T9 a chem light at each cleared building's door (`mark_cleared`);
 - T10 doctrine by faction (`doctrine()` from the men's own; jihadist, guerrilla and cartel biases).
 
+**Built 2026-10-22, platoon to brigade** (SideCommand's plans; side_command_test):
+- P1 SOSRA for objectives marked `fortified` (secure and breach roles, smoke on the ports as the
+  breach goes in, the assault held for the breach);
+- P2 isolate-starve-concentrate for phases marked `isolate`, the feigned retreat for objectives
+  marked `lure`, and DefencePlan's security zone (`security_zone`, `threat_dir`);
+- P3 BrigadePlan: company plans over their own groups, a reserve company, and fires then the
+  reserve to a stalled company.
+
 Left for later, as calls 12-13 below:
 - T8 (dispersion: 6 m cover gaps for every side);
 - T9's smoke before a breach and bunker ports;

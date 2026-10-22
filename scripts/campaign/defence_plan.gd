@@ -17,7 +17,14 @@ extends RefCounted
 ## - Players hear it coming when their side has reported the enemy massing (the friendly picture
 ##   has an entry near the rally): "Enemy massing at 038 061, expect a counterattack on <site>".
 ## - Withdrawing (3.5.3, the hostile side): consolidate on the last line.
+## - The security zone (R08, docs/ai_tactics.md E2; spec "security_zone": true, "threat_dir"):
+##   two or three small groups (recon first) watch the approaches screen_m forward of the first
+##   line, call fires on what they see and pull back to the first line before they're fixed.
 ## Numbers in data/side_command.json "counterattack", Proposed.
+
+const SCREEN_M := 1000.0
+const SCREEN_SPREAD_M := 250.0
+const SCREEN_SEEN_M := 500.0
 
 var spec: Dictionary
 var holders := {}   # site id -> group id
@@ -26,6 +33,8 @@ var ops: Array[Dictionary] = []  # {"site", "state", "groups", "rally", "lost_at
 var mobile := {}    # group id -> true
 var mobile_sent := ""
 var consolidating := false
+## The security zone's groups: id -> {"spot", "state" ("watching", "back"), "fired"}.
+var screens := {}
 var _rng := RandomNumberGenerator.new()
 
 
@@ -70,7 +79,7 @@ func update(cmd: SideCommand, t: float) -> void:
 			continue
 		var r := float(s.get("radius", 60.0))
 		var ours := false
-		for gid: String in cmd.groups:
+		for gid: String in cmd.my_groups():
 			var row: Dictionary = b.rows.get(gid, {})
 			if not row.is_empty() and SideCommand._flat(row.pos, s.pos) <= r:
 				ours = true
@@ -83,18 +92,19 @@ func update(cmd: SideCommand, t: float) -> void:
 	for op in ops:
 		_step(cmd, op, t)
 	_commit_mobile(cmd)
+	_security_zone(cmd)
 
 
 func _assign_holders(cmd: SideCommand) -> void:
 	var b := cmd.board()
 	for s: Dictionary in sites():
 		var id := String(s.id)
-		if holders.has(id) and cmd.groups.has(String(holders[id])):
+		if holders.has(id) and cmd.my_groups().has(String(holders[id])):
 			continue
 		var best := ""
 		var best_d := INF
-		for gid: String in cmd.groups:
-			if gid in holders.values() or mobile.has(gid) or _in_op(gid):
+		for gid: String in cmd.my_groups():
+			if gid in holders.values() or mobile.has(gid) or _in_op(gid) or screens.has(gid):
 				continue
 			var row: Dictionary = b.rows.get(gid, {})
 			if row.is_empty():
@@ -285,6 +295,59 @@ func _step(cmd: SideCommand, op: Dictionary, t: float) -> void:
 				cmd.trigger()
 
 
+## E2: pick the screen groups once, then each one calls fires on what comes near and pulls back.
+func _security_zone(cmd: SideCommand) -> void:
+	if not bool(spec.get("security_zone", false)):
+		return
+	var line0: Array = sites().filter(func(s: Dictionary) -> bool: return int(s.get("line", 0)) == 0)
+	if line0.is_empty():
+		return
+	var front := Vector3.ZERO
+	for s: Dictionary in line0:
+		front += s.pos
+	front /= line0.size()
+	var dir: Vector3 = spec.get("threat_dir", Vector3.FORWARD)
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.1 else Vector3.FORWARD
+	if screens.is_empty():
+		var rows := cmd.rows().filter(func(r: Dictionary) -> bool: return not (String(r.id) in holders.values()) and not mobile.has(String(r.id)))
+		rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			var ra := 0 if String(a.kind) == "recon_team" else 1
+			var rb := 0 if String(b.kind) == "recon_team" else 1
+			return ra < rb if ra != rb else float(a.strength_cp) < float(b.strength_cp))
+		var n := mini(3, rows.size())
+		var across := dir.cross(Vector3.UP)
+		for i in n:
+			var k := 0.0 if n == 1 else float(i) / (n - 1) - 0.5
+			screens[String(rows[i].id)] = {"spot": front + dir * SCREEN_M + across * k * SCREEN_SPREAD_M * 2.0, "state": "watching", "fired": false}
+		if not screens.is_empty():
+			cmd._log("security zone: %s watch %.0f m forward" % [", ".join(PackedStringArray(screens.keys())), SCREEN_M])
+		return
+	var pic := cmd.picture()
+	for gid: String in screens:
+		var sc: Dictionary = screens[gid]
+		if String(sc.state) != "watching" or pic == null:
+			continue
+		var near := pic.entries_near(sc.spot, SCREEN_SEEN_M)
+		if near.is_empty():
+			continue
+		cmd.fire_support_wanted.emit(near[0].pos, "the security zone's call on what's coming")
+		sc.state = "back"
+		sc.spot = _nearest_site(sc.spot)
+		cmd._log("%s calls fires on %s and pulls back to the first line" % [gid, cmd._grid(near[0].pos)])
+		cmd.trigger()
+
+
+func _nearest_site(from: Vector3) -> Vector3:
+	var best := from
+	var d := INF
+	for s: Dictionary in sites():
+		if int(s.get("line", 0)) == 0 and SideCommand._flat(s.pos, from) < d:
+			d = SideCommand._flat(s.pos, from)
+			best = s.pos
+	return best
+
+
 ## Once a forward (line 0) site is lost, the mobile reserve goes to the most threatened site of the
 ## next line.
 func _commit_mobile(cmd: SideCommand) -> void:
@@ -334,6 +397,10 @@ func needs(cmd: SideCommand, _t: float) -> Array:
 				"attacking":
 					out.append({"id": "ca:%s:%s" % [op.site, gid], "role": "counterattack", "pos": s.pos, "target": s.pos, "priority": 10.0, "only": gid,
 						"label": String(s.get("label", op.site))})
+	for gid: String in screens:
+		var sc: Dictionary = screens[gid]
+		out.append({"id": "screen:%s:%s" % [gid, sc.state], "role": "recon" if String(sc.state) == "watching" else "defend", "pos": sc.spot,
+			"priority": 8.5, "only": gid, "label": "the security zone" if String(sc.state) == "watching" else "back to the first line"})
 	for gid: String in mobile:
 		if _in_op(gid):
 			continue
