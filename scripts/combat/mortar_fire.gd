@@ -7,6 +7,8 @@ extends Node
 ## (data/warheads.json: Warheads.server_burst, the explosion and the shake grenades use). The tube's
 ## thump is heard by both sides. One node a level (made on first use); the host's. Proposed numbers.
 
+## An illumination round's warhead (server_fire_illum).
+const ILLUM := &"illum"
 const NODE_NAME := "MortarFire"
 ## Time of flight: FLIGHT_S.x at the minimum range to FLIGHT_S.y at the maximum (high-angle fire).
 const FLIGHT_S := Vector2(14.0, 38.0)
@@ -75,6 +77,23 @@ func server_fire(gun: Vehicle, at: Vector3, aim_error_m: float, by: Node = null)
 	return flight
 
 
+## Host (G-24): an illumination round from `gun` over `at` (in range): it leaves the tube and
+## arcs over like any other, then bursts high and burns under its chute (Flares "mortar") in
+## place of landing. Returns its flight time, -1 when it can't.
+func server_fire_illum(gun: Vehicle, at: Vector3, by: Node = null) -> float:
+	if not multiplayer.is_server() or not in_range(gun, at):
+		return -1.0
+	var m := spec_of(gun)
+	var d := Vector2(at.x - gun.global_position.x, at.z - gun.global_position.z).length()
+	var flight := lerpf(FLIGHT_S.x, FLIGHT_S.y, clampf(inverse_lerp(float(m.min_m), float(m.max_m), d), 0.0, 1.0))
+	_rounds.append({"at": at, "when": Soldier._now() + flight, "warhead": ILLUM, "by": by if by else gun})
+	var lvl := CompoundLevel.current(self)
+	if lvl:
+		lvl.server_show_shell(gun.global_position + Vector3.UP * TUBE_MUZZLE_M, lvl.ground_point(at) + Vector3.UP * float(Flares.KINDS.mortar.height_m), flight)
+	Sfx.server_play(&"explosion_far", gun.global_position + Vector3.UP * 0.6)
+	return flight
+
+
 func _physics_process(_delta: float) -> void:
 	if _rounds.is_empty() or not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
 		return
@@ -83,6 +102,11 @@ func _physics_process(_delta: float) -> void:
 		if now < float(r.when):
 			continue
 		_rounds.erase(r)
+		if StringName(r.warhead) == ILLUM:
+			var flares := Flares.of(self)
+			if flares:
+				flares.server_pop("mortar", r.at)  # bursts high and burns (G-24)
+			continue
 		_impact(r)
 
 

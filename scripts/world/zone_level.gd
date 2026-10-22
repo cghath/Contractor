@@ -525,6 +525,7 @@ func _on_hosted() -> void:
 	nav = ZoneNav.build_zone(self)
 	_restore_bodies()
 	virtualizer.server_restore()  # the groups the save kept, as profiles (before the patrols set out: they take theirs back)
+	UsField.install(self)  # D7: US garrisons, patrols, convoys and armour where the US holds or fights (before the garrisons come out)
 	if spawn_ai:
 		_spawn_ai()
 	if not is_base():
@@ -681,7 +682,7 @@ func _zone_enemy() -> String:
 	var holder := String(site.get("holder", ZoneControl.zone_def_raw(zid).get("controller", "")))
 	if holder != "" and holder != WorldSites.REBELS and MissionRegistry.faction(holder).get("role", "") == "hostile":
 		return holder
-	return ""
+	return UsField.remnants(zid)  # D7: a US-held zone's other sites hold what's left of the enemy it took it from
 
 
 ## Host: whose men hold `module`: the zone's attacker's for the share of its outposts,
@@ -725,6 +726,8 @@ func _zone_attacker() -> String:
 func _spawn_garrison(module: ZoneModule) -> void:
 	if not _ai_ready or not spawn_ai:
 		return
+	if UsField.server_garrison(self, module):
+		return  # D7: a US site's garrison is American (UsField)
 	if virtualizer and virtualizer.has_garrison(module.module_id):
 		virtualizer.server_wake_garrison(module.module_id)  # back at its posts, as it was (Virtualizer)
 		return

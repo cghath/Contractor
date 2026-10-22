@@ -609,6 +609,20 @@ func _test_reload() -> void:
 	print("Saving and reloading the zone")
 	GameState.save_zone()
 	var saved := GameState.voxel_edits.size()
+	# F-176: the dug ground comes back from the file, not only from memory: read_save keeps every
+	# cut and berm, and drops a bad record without losing the rest.
+	var dug := Digging.of(level).cut_ops.size()
+	var dug_kinds := {}
+	for op: Dictionary in Digging.of(level).cut_ops:
+		dug_kinds[String(op.kind)] = true
+	var berms_saved := Digging.of(level).records.size()
+	var read := GameState.read_save(GameState.save_path())
+	check(dug > 0 and (read.get("ground", {}).get("cuts", []) as Array).size() == dug and (read.get("ground", {}).get("berms", []) as Array).size() == berms_saved,
+		"the save reads back with its dug ground (%d of %d cuts: %s; %d of %d berms)" % [(read.get("ground", {}).get("cuts", []) as Array).size(), dug,
+			", ".join(dug_kinds.keys()), (read.get("ground", {}).get("berms", []) as Array).size(), berms_saved])
+	check(not Digging.cut_ok({"kind": "pit", "x": 1.0, "z": NAN, "yaw": 0.0, "depth": 0.5}) and not Digging.cut_ok({"kind": "tunnel", "x": 1.0, "z": 1.0})
+		and Digging.cut_ok(GroundCuts.pit_op(Vector3(1, 0, 2), 0.3, 0.5)) and not Digging.berm_ok({"id": 1, "pos": [0, 0], "yaw": 0, "colour": "806040", "hits": 0}),
+		"and a cut or berm that makes no sense is dropped (a NaN, an unknown kind, a short position)")
 	var def := level.def
 	Net.leave()
 	var old := level
@@ -632,6 +646,8 @@ func _test_reload() -> void:
 	await get_tree().physics_frame
 	check(t.height_at(crater.x, crater.z) < t.plane_height(crater.x, crater.z) - 0.4 and Digging.of(level).records.size() >= 1,
 		"the crater and the berms are back after the reload (%d berms, %d cuts)" % [Digging.of(level).records.size(), Digging.of(level).cut_ops.size()])
+	check(Digging.of(level).cut_ops.size() == dug and Digging.of(level).records.size() == berms_saved,
+		"every cut is back from the save, none dug afresh on top (%d of %d cuts, %d of %d berms)" % [Digging.of(level).cut_ops.size(), dug, Digging.of(level).records.size(), berms_saved])
 	var m := await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,
 		"after the reload the compound module has its bullet holes and mark")

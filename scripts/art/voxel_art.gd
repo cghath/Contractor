@@ -94,6 +94,13 @@ const VARIANTS := {
 		"camo": ["4f5a3a", "5c6066", "6b5a4e", "2f3428"], "skin": "c8996f", "hair": "3b2a1d",
 		"patch": "e0661a", "gear": "4a4f3e", "pack": "48523a",
 	},
+	## The Vessmark Defence Ministry (D7, docs/combined_arms.md 6.1): the coalition's small northern
+	## battlegroup, a grey-green pattern of its own, a slate-blue patch.
+	"vessmark": {
+		"camo": ["7a8270", "5b6352", "8f9484", "3d4238"], "skin": "e0b48f", "hair": "6b4a2b",
+		"patch": "2f4a5e", "gear": "5b6352", "pack": "565e4c",
+		"boot": "3a3a32",  # boots (Feet)
+	},
 	## Captain, 2026-10-17: "tan for us". A flat coyote-tan kit, same shape as "black" above.
 	"tan": {
 		"camo": ["c9ba9c", "bfae8e", "d9ccae", "a89470"], "skin": "c8996f", "hair": "3b2a1d",
