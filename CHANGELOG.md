@@ -11,6 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Mission UI pass (claude/mission-ui) - WIP, paused
+
+> **Where I stopped / next step (2026-10-22, 21:14 CDT; paused on Captain's word):** WIP commit,
+> not tested beyond a compile check (tools/parse_check.gd: every changed script loads). Done:
+> scripts/ui/contract_glance.gd (the job at a glance: pay and split, risk, enemy, intel,
+> conditions, employer and standing, time and limit, supports, HC squads; a generic "glance"
+> hook for operation contracts; the board > prep > brief > deploy > track > debrief flow strip),
+> UiKit.hotkey (hotkeys printed on buttons, Godot shortcuts), GameSettings "mission_ui" (last
+> choices), the contract board pass (glance strip, flow strip, opens on a contract, the picked
+> contract's next step lit and focused on Enter, A/P/R/X/S/L/W hotkeys, confirms on Abort and
+> loan, notices lit, last terms and pick remembered, moves on to the signed contract), the
+> briefing panel pass (glance figures, tagged objectives, "Look at the plan in 3D" [V] as the
+> step after reading the job, "Use my last plan" [L], Ready [R], Start [G] with who it waits
+> for), and the objectives panel (N/M done heading, bonus/optional tags, direction and distance
+> on live objectives, live ones first). **Next:** 1) debrief pass (verdict banner, pay and
+> deductions explained as a ledger, reputation and war effects: record WorldSites changes into
+> the debrief in Contracts at the server_contract_won/leader_down/operation_ended calls,
+> C/Enter continue and B best-value hotkeys, flow strip, salvage sort remembered); 2) tests:
+> contracts_test _test_board_ui must use its own settings file (GameSettings.use_file) since the
+> board now saves its picks; extend ui_test (glance on the board and briefing, flow strip) and
+> contracts_test/missions_test (board opens on a contract, accept moves to held, objectives
+> panel tags and distance); 3) run smoke ui contracts missions through run_tests_locked.sh
+> (CONTRACTOR_PORT=24801, CONTRACTOR_TEST_TAG=mui), then CI. Numbers marked Proposed:
+> ContractGlance INTEL_GOOD 0.8, INTEL_FAIR 0.6, RISK_HIGH 4.
+
 ### 3D loadout editor and armory (claude/loadout-3d)
 
 > **Where I stopped / next step (2026-10-22, 16:05 CDT):** done and pushed: saved kits and
