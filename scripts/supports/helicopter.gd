@@ -59,6 +59,10 @@ const HOVER_AGL_M := 3.0
 const OBSTACLE_CLEAR_M := 6.0
 const ROTOR_REACH_M := 9.0
 const CONTOUR_CLIMB := 0.6
+## On the J-hook, coming down (sinking), the rise ahead is planned at this share of that climb:
+## it has to stop sinking and get its climb back, and on ridge_hot's insertion 1 it came over a
+## 23% rise 4 m clear (F-218; cghath's roads branch, 2026-10-22). Proposed.
+const HOOK_SINK_CLIMB := 0.5
 ## Captain, 2026-10-14 (the bump on infil): the airframe (its footprint: the main rotor's disc,
 ## the nose, the tail and the tail rotor) never comes within MIN_CLEAR_M of the ground or what
 ## stands on it, cruising, round the J-hook or on the approach; only the last FINAL_LOW_M of the
@@ -389,6 +393,9 @@ func obstacle_top(at: Vector3, side := Vector3.ZERO) -> float:
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(p.x, ground + OBSTACLE_SCAN_M, p.z), Vector3(p.x, ground - 2.0, p.z), 1, exclude))
 		if not hit.is_empty():
 			top = maxf(top, (hit.position as Vector3).y)
+	var scatter := Spotting.scatter_of(self)  # (a pylon's lattice is too thin for the rays)
+	if scatter:
+		top = maxf(top, scatter.tall_top(at, maxf(side.length(), ROTOR_RADIUS_M)))
 	return top
 
 
@@ -901,6 +908,7 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 	var climb := CLIMB_MS * CONTOUR_CLIMB * pace
 	var accel := VERTICAL_ACCEL_MS2 * pace * pace
 	var vy := linear_velocity.y
+	var plan_climb := climb * (HOOK_SINK_CLIMB if vy < 0.0 and has_meta(&"landing") and _path.size() >= 2 else 1.0)
 	var want := -INF
 	var binding := 0.0
 	var now := 0.0
@@ -913,14 +921,17 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 			now = need
 		elif t == 1.0:
 			next = need
-		var y := need - Helicopter._rise(t, vy, climb, accel)
+		var y := need - Helicopter._rise(t, vy, plan_climb, accel)
 		if y > want:
 			want = y
 			binding = t
 	# Held to a point ahead, the height to hold rises as it comes on: at the planned climb (only
 	# once it's down to that height: higher, it comes down to it first).
 	if binding == 0.0:
-		return Vector2(want, next - now)
+		# Held to where it is: the height to hold changes as the ground under it does; but below
+		# it, a falling need (the glide slope ahead) doesn't hold it from climbing back up to it
+		# (F-218: it sat level 2.5 m under its need over a rise, the fall cancelling the climb).
+		return Vector2(want, maxf(next - now, 0.0) if pos.y < want else next - now)
 	return Vector2(want, climb if pos.y < want + 1.0 else 0.0)
 
 

@@ -135,6 +135,9 @@ func _test_generation(mem_before: float) -> void:
 	check(flat, "every module sits on a flat pad at its origin's height")
 	var again := ZoneTerrain.new()
 	again.generate(level.def, level._flat_areas())
+	var again_roads := ZoneRoads.new()
+	again_roads.prepare(again, level.def.duplicate(true))  # (cut and filled to the same roads, cg_brief 1.2)
+	again_roads.free()
 	var other := ZoneTerrain.new()
 	other.generate(level.def.merged({"seed": 99}, true), level._flat_areas())
 	check(again.checksum() == t.checksum() and other.checksum() != t.checksum(), "the same seed gives the same ground, another seed different ground")
@@ -877,24 +880,35 @@ func _test_hot_layout() -> void:
 		(old_quarter.get("modules", []) as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.CITY)).size()])
 	var spec := MissionRegistry.zone_def("ridge_hot")
 	check(spec.get("kind", "") == "hot" and is_equal_approx(float(spec.size_m), 4096.0), "the campaign's hot zones are 16 km² hot layouts")
-	# Terrain visual pass: the roads are drawn, on the ground and off the module pads, and the
-	# ground along them takes the road colour (seen past ZoneRoads.SEE_M).
+	# Terrain visual pass: the roads are laid, on the ground and off the module pads, and the
+	# ground along them takes the road colour (seen past ZoneRoads.SEE_M). (Roads, cg_brief 1.2:
+	# the curved roads go into the def; tests/roads_test.gd checks them in full.)
 	var def := ZoneDef.normalize(ZoneDef.generate_hot(4409))
 	var t := _preset_terrain(def)
 	var roads := ZoneRoads.new()
-	roads.build(t, def)
+	roads.prepare(t, def)
 	var on_ground := true
 	var off_pads := true
-	for v in roads.vertices:
-		on_ground = on_ground and absf(v.y - t.height_at(v.x, v.z) - ZoneRoads.LIFT_M) < 0.01
-		var inside := t.pads.any(func(pad: Array) -> bool:
-			return (pad[0] as Rect2).grow(-(ZoneRoads.WIDTH_M * 0.5 + ZoneRoads.STEP_M)).has_point(Vector2(v.x, v.z)))
-		off_pads = off_pads and not inside
+	var laid := 0
+	var gaps := Vector2(INF, -INF)
+	for seg: Dictionary in roads.segments():
+		var line: PackedVector3Array = seg.points
+		var drawn: PackedByteArray = seg.drawn
+		for k in line.size():
+			if drawn[k] == 0:
+				continue
+			laid += 1
+			var v := line[k]
+			var gap := v.y - t.height_at(v.x, v.z)
+			gaps = Vector2(minf(gaps.x, gap), maxf(gaps.y, gap))
+			on_ground = on_ground and gap > -0.15 and gap < 0.45
+			off_pads = off_pads and not t.pads.any(func(pad: Array) -> bool: return (pad[0] as Rect2).grow(-1.0).has_point(Vector2(v.x, v.z)))
 	var r0: Array = def.roads[0]
 	var mid := (Vector2(r0[0][0], r0[0][1]) + Vector2(r0[1][0], r0[1][1])) * 0.5
 	var across := (Vector2(r0[1][0], r0[1][1]) - Vector2(r0[0][0], r0[0][1])).normalized().orthogonal()
-	check(roads.segments == (def.roads as Array).size() and on_ground and off_pads,
-		"hot zone roads drawn: %d of %d, on the ground (%.2f m up), not over the module pads" % [roads.segments, (def.roads as Array).size(), ZoneRoads.LIFT_M])
+	check(laid > 200 and on_ground and off_pads,
+		"hot zone roads laid: %d samples on %d roads, on the graded ground (the surface %.2f to %.2f m over it), not over the module pads (%s)" % [laid,
+		roads.net.roads.size(), gaps.x, gaps.y, off_pads])
 	# A town's streets are road-coloured on its pad.
 	var town_m: Dictionary = (def.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(m.type) == "town")[0]
 	var tp := Vector2(town_m.pos[0], town_m.pos[1])
@@ -1193,6 +1207,34 @@ func _test_town_posts() -> void:
 
 # --- Terrain presets ----------------------------------------------------------------------------
 
+## Whether scatter item `item` keeps off zone `def`'s roads: ROAD_KEEP_M for rocks, trees, scrub and
+## the old props; a library prop (ZoneProps: roadside poles, signs, parked cars) off the road's own
+## width, but a checkpoint's barriers across it and a town's street furniture (its streets aren't
+## the def's roads); an animal's home anywhere.
+func _off_roads(item: Dictionary, def: Dictionary) -> bool:
+	if int(item.kind) == ZoneScatter.Kind.ANIMAL or _in_town(item, def) or String(item.get("shape", "")) == "jersey_barrier":
+		return true
+	var keep := ZoneProps.ROAD_HALF_M if item.has("shape") else ZoneScatter.ROAD_KEEP_M
+	var q := Vector2(item.pos.x, item.pos.z)
+	for road: Array in def.get("roads", []):
+		if Geometry2D.get_closest_point_to_segment(q, Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(q) < keep - 0.01:
+			return false
+	return true
+
+
+## Whether library prop `item` stands in one of `def`'s generated towns.
+func _in_town(item: Dictionary, def: Dictionary) -> bool:
+	if not item.has("shape"):
+		return false
+	var q := Vector2(item.pos.x, item.pos.z)
+	for m: Dictionary in def.get("modules", []):
+		if ZoneModules.base(String(m.type)) == "town":
+			var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
+			if Rect2(Vector2(float(m.pos[0]), float(m.pos[1])) - half, half * 2.0).has_point(q):
+				return true
+	return false
+
+
 func _preset_terrain(def: Dictionary) -> ZoneTerrain:
 	var flat: Array = []
 	for m: Dictionary in def.modules:
@@ -1304,12 +1346,21 @@ func _test_presets() -> void:
 		check(flat_ok, "preset %s: every pad stays flat" % id)
 		var clear := true
 		var dry := true
+		var towns: Array[Rect2] = []  # (a town's street furniture stands on its streets: ZoneProps._town)
+		for m: Dictionary in def.modules:
+			if ZoneModules.base(String(m.type)) == "town":
+				var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
+				towns.append(Rect2(Vector2(float(m.pos[0]), float(m.pos[1])) - half, half * 2.0))
 		for item in sa.items:
+			if int(item.kind) == ZoneScatter.Kind.ANIMAL:
+				continue  # where animals live (a village's dogs about it), not a thing on the ground
 			var p := Vector2(item.pos.x, item.pos.z)
+			if item.has("shape") and towns.any(func(r: Rect2) -> bool: return r.has_point(p)):
+				continue
 			for pad: Array in a.pads:
 				clear = clear and not (pad[0] as Rect2).has_point(p)
 			dry = dry and (a.sea_side < 0 or a.height_at(p.x, p.y) > a.sea_level)
-		check(clear and dry, "preset %s: no scatter on a pad or in the water" % id)
+		check(clear and dry, "preset %s: no scatter on a pad or in the water (but a town's street furniture on its streets)" % id)
 		var want: Dictionary = a.preset.get("scatter", {})
 		check(want.is_empty() or sa.counts[ZoneScatter.Kind.SCRUB] + sa.counts[ZoneScatter.Kind.ROCK] > 0, "preset %s: has its scatter (%s)" % [id, sa.counts])
 		by_relief[id] = a.max_height - a.min_height
@@ -1351,8 +1402,7 @@ func _test_presets() -> void:
 	sh.generate(th, hot)
 	var off_roads := true
 	for item in sh.items:
-		for road: Array in hot.roads:
-			off_roads = off_roads and Geometry2D.get_closest_point_to_segment(Vector2(item.pos.x, item.pos.z), Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(Vector2(item.pos.x, item.pos.z)) >= ZoneScatter.ROAD_KEEP_M - 0.01
+		off_roads = off_roads and _off_roads(item, hot)
 	var steepest := _slope_off_cliffs(th)  # (its cliffs are rock faces on purpose: queue item 1.3, terrain_test)
 	check(hot.terrain == "rocky_ridge" and off_roads and sh.total() > 1500 and sh.total() < 30000 and steepest < 42.0,  # (budget raised from 22000 for the scrub belts, Captain 2026-10-18)
 		"hot zone on the ridge preset: %d scatter items off the roads, steepest %.0f degrees away from its %d cliffs" % [sh.total(), steepest, th.features.cliffs.size() if th.features else 0])
@@ -1490,13 +1540,14 @@ func _test_woods() -> void:
 	# Nothing on the pads (modules, insertion and extraction points) or the roads.
 	var clear := true
 	for item in a.items:
+		if int(item.kind) == ZoneScatter.Kind.ANIMAL or _in_town(item, hot):
+			continue  # (animals' homes; a town's street furniture on its streets)
 		var q := Vector2(item.pos.x, item.pos.z)
 		for pad: Array in t.pads:
 			clear = clear and not (pad[0] as Rect2).has_point(q)
 		for p: Array in hot.insertion + hot.extraction:
 			clear = clear and q.distance_to(Vector2(float(p[0]), float(p[1]))) > 8.0
-		for road: Array in hot.roads:
-			clear = clear and Geometry2D.get_closest_point_to_segment(q, Vector2(road[0][0], road[0][1]), Vector2(road[1][0], road[1][1])).distance_to(q) >= ZoneScatter.ROAD_KEEP_M - 0.01
+		clear = clear and _off_roads(item, hot)
 	check(clear, "woods: nothing on a pad, an insertion or extraction point, or a road")
 	# A standing man's eye line (1.6 m above the ground all along, in 5 m pieces) 40 m across a
 	# wood or copse (a tree with 20+ others within 25 m) is hidden, in four directions, at most

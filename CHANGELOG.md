@@ -212,6 +212,73 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 - **Hangars and factory floors count as buildings (F-162).** The AI's building scan missed the
   middle of a big open hall, so it never garrisoned or cleared one room by room.
 
+### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
+
+#### Added
+- **72 new outdoor props**, on top of the 25 shapes the open terrain and the sites had (rocks,
+  scrub, trees, crates, drums, debris, ruins, box wrecks, sandbags, HESCO, towers, tents and the
+  rest): 97 in all.
+  - Street furniture: street lamps (single and double), wooden utility poles (some with a
+    transformer), stop, warning and direction signs, a billboard, a bus shelter, benches, bollards,
+    skips, a kiosk, concrete road barriers.
+  - Market: stalls with striped awnings and produce, big canopies, shop awnings, produce crates,
+    hand carts.
+  - Fences and gates: post-and-rail, board, chain-link, barbed wire, corrugated iron, dry stone,
+    block and mud-brick walls; farm, steel and wooden gates (open).
+  - Power lines: steel lattice pylons and H-frame wooden poles, with sagging wires from each to
+    the next.
+  - Farm and water: wells, raised water tanks, cisterns, troughs, round and square hay bales,
+    irrigation channels with sluices and pipes, windpumps, animal shelters.
+  - Animals: goats, sheep and dogs. They wander about their pens, farms and streets (nothing more),
+    the same on every peer; a round kills one.
+  - Scenery vehicles built from blocks the shape of the real thing: saloon and hatchback cars, a
+    panel van, a pickup, a dropside lorry with a canvas tilt, a tanker, a tractor, and burnt-out
+    hulks of a car, a van and a lorry. They're scenery, not drivable.
+  - Shipping containers: 20 ft, 40 ft and a stack of two.
+  - Graves: mounds, headstones, crosses, box tombs and the arid style's stone-bordered graves.
+  - Site clutter: generators, satellite dishes, washing lines, fuel tanks, gas cylinders, pallet
+    stacks, tyre piles, portable latrines.
+- **Where they go**, by the zone's terrain style (`data/props.json`: temperate, woodland,
+  highland, coastal, arid) and what's there:
+  - Towns: lamps, and poles with wires, along the streets; market stalls by the crossroads;
+    parked cars, benches, skips, a kiosk, bollards, stop and direction signs and a bus shelter.
+    All of it stands on the street, clear of the buildings, barricades, guard posts, loot and the
+    civilians' walks.
+  - Villages and towns get washing lines, dishes, a well or a water tank, a small pen and dogs
+    round them.
+  - Sites: containers, generators, fuel tanks, latrines, barriers and a chain-link yard outside
+    the HQ, QRF bases, outposts and compounds. Checkpoints get barriers in a chicane and stop and
+    warning signs on the way in.
+  - Roads: utility poles along most of them, direction signs where they reach a site, a bus
+    shelter and a billboard on the way into a town, and parked or abandoned vehicles (some burnt
+    out, now and then a cluster where an ambush was).
+  - Countryside: pylon lines across the zone; farms with a pen of goats or sheep, water, hay, a
+    tractor, field fences with gates and sometimes an irrigation channel; a walled cemetery by the
+    biggest settlement.
+  - The campaign's zones had 390 props between them; they now have about 11,900.
+- **New suite `props`** (two processes, like world): the library and every campaign zone's layout,
+  collision against what's drawn, rounds through props by material, AI cover behind a container,
+  animals wandering and the same on a late joiner.
+
+#### Changed
+- **Every prop's collision is what's drawn**, part by part, and each part takes rounds by its
+  material. An M855 goes through a car's cabin, a shipping container's width, wooden fences and
+  chain-link; a 9 mm stops in the car or the container. A car's engine bay, concrete, stone, a
+  generator, a hay bale, a full tank and a mud wall stop rifle rounds. The AI's soft-cover test
+  agrees, so it hides behind an engine block or down a container's length, not behind a door.
+- Chain-link and barbed wire stop men walking, but not sight or rounds.
+- The old box car wrecks out in the open are burnt-out hulks now.
+- Rocks, trees and bushes keep off the props.
+- Scatter props no longer count as foliage that hides people. They were treated like bushes on
+  top of being solid.
+- Props keep out of rivers, lakes, their wet banks and bridges (as the rest of the scatter does);
+  a power line spans a river, one footing skipped. Landmark sites (a mosque, a farm, a harbour
+  and the rest) keep the props they build themselves: the library adds none on their pads, and
+  its farms keep their distance from a landmark farm.
+- Zone layouts cache under a new version (13), so old caches re-roll.
+- Helicopters climb over pylons and other tall props near their track. A pylon's lattice was too
+  thin for them to sense, and an insertion flew into one.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added
@@ -285,6 +352,44 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 - **Loop suite, helicopter extraction:** the player sets down what's in his hands before his
   rifle (a drop lets go of the hands first, so a carried-out hard case kept the rifle slung), and
   a dead hostile's intel isn't expected in the stash (intel goes to the debrief, never the stash).
+
+### Roads (cg_brief queue item 1.2)
+
+#### Added
+- **Real roads.** Every zone's roads are planned on its ground when it loads, the same on every
+  machine: they curve round hills and follow the valleys, and the ground is cut and filled to
+  them, so they run smooth with banks either side.
+  - **Asphalt** (7 m, a dashed centre line and edge lines) between the main sites: towns, the
+    HQ, QRF bases, comms, checkpoints, the FOB.
+  - **Dirt tracks** (4 m, two ruts and a grassy crown) to outposts, compounds and villages, and
+    on the cross-country trails.
+  - **Junctions** where roads cross or join, and **roundabouts** near towns and where four main
+    roads meet.
+  - **Towns:** kerbed pavements along both streets and a mini roundabout at the crossroads.
+  - Every site is on the network now (in hot zones the comms site, QRF bases, checkpoints,
+    villages and the town had no road).
+- **Roads you can drive on.** Roads have collision that matches what's drawn; AI drivers take
+  them (the squad's drivers already route by road, and now follow the curves). Asphalt and
+  pavements sound hard underfoot, dirt tracks soft.
+- **Roads across the zone's edges.** A road leaves by each crossing into a linked zone, and the
+  zone on the other side has the same kind of road coming in at its crossing.
+- The map draws the curved roads, dirt tracks thinner than asphalt.
+
+#### Changed
+- The trails' patrols walk their curved trails.
+- A helicopter coming round its J-hook over rising ground climbs back up to its height instead
+  of holding level under it (it came over a rise 4 m clear of the ground, F-218).
+- Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
+  billboards) follow the curved roads and keep off them, each road its own width (F-219).
+- **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
+  new roads run (every site's road, the roads in from the zone's edges), and each road runs
+  straight across its bridge's deck and down its ramps instead of dipping under it onto the
+  riverbed (F-175). Where two roads would cross a river side by side, the second joins the first
+  either side of its bridge.
+
+#### Fixed
+- A stream's bank running past a site no longer lifts the site's flat ground (a checkpoint's pad
+  had a 2 m hump in it).
 
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 

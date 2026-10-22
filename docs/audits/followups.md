@@ -38,6 +38,11 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-192 | P2 | Following the player through the compound's building, a squadmate on the follow-in stack can run a loop round the building on his way to his stack place (casualty soak, CI only, now and then) |
 | F-193 | P3 | base_zone: the player is down on landing after the helicopter insertion, and the walk home and the rest of the deployment fail after it (CI only, now and then) |
 | F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
+| F-214 | P2 | A convoy ambush's convoy drives its own straight-ish line across the zone, not the roads (scenario_gen `_convoy`) |
+| F-215 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
+| F-216 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
+| F-217 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
+| F-218 | P3 | ~~A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1)~~ fixed 2026-10-22 (cghath's agent, world/roads: Helicopter._contour) |
 
 ## F-01: the building scan only sees one floor
 
@@ -363,6 +368,13 @@ bridge (as `_on_pad` breaks it on a pad), or lay it on the deck (each bridge rec
 collision on roads, keep a road's collision off the bridge's span too. A culvert's embankment and a
 ford are ground, so the strip can follow them.
 
+Status (2026-10-22, world/roads, queue item 1.2): done. The roads are now planned (RoadNet) after the
+water, which plans its crossings over the links the roads take (`RoadNet.water_links`, handed to
+ZoneWater.carve by ZoneTerrain.generate). Each road runs straight through the bridge on its link
+(fixed control points from the bridge's `xform`/`length`), its profile pinned to the deck's top and
+down the ramps; those samples are neither laid (no strip, no collision: the bridge's own deck and
+collision carry it) nor graded. Fords and culverts stay ground the road follows. roads suite
+"every road bridge carries its road" checks it on Kestrel Valley.
 ## F-140: ambushers and a friendly convoy driving past (fixed 2026-10-21)
 
 The write-up is on cghath's feat/missions-2 (its followups.md, F-140): the overwatch mission's
@@ -467,6 +479,158 @@ Suggested: count a spot as inside when a ray straight up meets a roof within a f
 walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or let a building's
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
+## F-214: a convoy ambush's convoy doesn't drive the roads
+
+(Logged on world/roads as F-190, an id claude/ai-driving also used; renumbered 2026-10-22.)
+
+Found by cghath's agent on `world/roads` (2026-10-21, cg_brief 1.2). Location:
+[scenario_gen.gd](../../scripts/campaign/scenario_gen.gd) `_convoy`, which the convoy ambush's
+objective keeps as "route" and [mission_scenario.gd](../../scripts/campaign/mission_scenario.gd)
+drives.
+
+What happens: the route is made when the contract is generated, before the zone's level exists:
+a line through the ambush point across the zone with a little sine bend ("the road bends a
+little"). The zone's real roads (ZoneRoads, planned when the level builds) go elsewhere, so the
+convoy drives cross-country past them.
+
+Suggested: when the scenario starts the convoy (the level is built by then), replace the route's
+middle with `RoadRoute.route(level.def, start, finish)` (the def's "roads" are the curved roads
+now) when it isn't empty, and put the ambush point on the road nearest it (`ZoneRoads.of(level)
+.segments()`). Keep the old line as the fallback.
+
+## F-215: vehicle grip ignores the surface
+
+(Logged on world/roads as F-191, an id claude/ai-driving also used; renumbered 2026-10-22.)
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[vehicle.gd](../../scripts/vehicles/vehicle.gd) `_wheel_forces` (Claude's file, so roads didn't
+change it): `grip := GRIP * ...` is the same on every surface.
+
+The roads now give the wheels' rays something to read: every road body (ZoneRoads) has a
+`PhysicsMaterial` (friction 1.0 on asphalt and concrete, 0.75 on dirt, data/roads.json) and the
+meta `road` ("asphalt"/"dirt"). Suggested: multiply the grip by the hit collider's
+`physics_material_override.friction` when it has one, and by a Proposed 0.7 on the terrain
+(ZoneTerrain), so tyres hold best on asphalt and slide sooner off-road. A wet-weather factor
+(DayNight) could come later.
+
+## F-216: roundabouts are two-way to the AI drivers
+
+(Logged on world/roads as F-192, an id claude/ai-driving also used; renumbered 2026-10-22.)
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[road_route.gd](../../scripts/vehicles/road_route.gd) `_graph` and
+[vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) (Claude's files).
+
+A roundabout is in the def's "roads" as a ring of RoadNet.RING_SIDES pieces (in order, corner k
+to corner k + 1), with the arms ending on its corners. RoadRoute's graph is undirected, so a
+route round the ring takes the shorter way, which is the wrong way half the time. Suggested: give
+ring pieces (both ends within the ring's radius of one centre) one direction only in `_graph`
+(the def order is the driving direction), and have VehicleAI slow to a Proposed 20 km/h through a
+turn of more than 30 degrees.
+
+## F-217: a crater on a road leaves the road hanging
+
+(Logged on world/roads as F-193, an id claude/ai-driving also used; renumbered 2026-10-22.)
+
+Found by cghath's agent on `world/roads` (2026-10-21). Location:
+[ground_cuts.gd](../../scripts/world/ground_cuts.gd) `_cut_area` / `_rebuild_around` and
+[zone_roads.gd](../../scripts/world/zone_roads.gd).
+
+A blast or a dig cuts the terrain under a road, but the road's mesh and trimesh collision stay
+whole, so the road surface spans the crater (an IED on a road leaves no hole in it). Suggested: a
+small hook in GroundCuts after a cut, `ZoneRoads.of(self).cut(area)`, that rebuilds the road
+tiles touching `area` without the triangles over cut cells (ZoneRoads keeps its geometry per
+TILE_M tile, so it's one tile's mesh and body each time).
+
+## F-218: a J-hook over a natural hump comes in 4 m clear
+
+(Logged on world/roads as F-194, an id claude/ai-driving also used; renumbered 2026-10-22.)
+
+Found by cghath's agent on `world/roads` (2026-10-22, queue item 1.2): CI run 39729719130 (commit
+0ca5246) and local run R0507, heliflight "ridge_hot insertion 1: the airframe at least 5 m clear
+until the final, 4.0 m at the least (at (-1737, 14.1, 1938) 78 m to go, 61 km/h)". Location:
+[helicopter.gd](../../scripts/supports/helicopter.gd) (the J-hook's descent, `hook_plan`) and
+[heli_flight_check.gd](../../tests/heli_flight_check.gd).
+
+The ground there is natural (a 7.3 m hump 77 m short of the LZ at -0.8 m; no road within 30 m,
+none graded: checked against the terrain before and after the roads). The roads branch changes
+nothing on that line; what changes is the zone's scatter (ridge_hot gains a road joining its town
+and landmark to the network, so trees and rocks land elsewhere), and the hook flown over the hump
+no longer has whatever stood there keeping it higher. Suggested: let the hook's descent look ahead
+at the terrain under the rest of its path (obstacle_top along the next points), not only what stands
+on it, so it holds 5 m over a hump on the way down.
+
+Rechecked 2026-10-22 with the prop library merged (ZoneScatter.tall_top in obstacle_top): the
+same 4.0 m at the same spot (local R0520). No tall prop stands there, so tall_top doesn't bind. A
+closer look: the hook already looks ahead along its own points (_contour, _ahead, _need_y with
+footprint_ground), and at the hump its own need is about 17 m (ground 7.3 m + MIN_CLEAR_M 5 +
+CLEAR_MARGIN_M 2 + about 2.8 m of airframe drop); it flies 14.1 m. So it plans the height and
+doesn't make it in time: the ground climbs 15 m in 64 m (23%) while it's coming down the glide
+slope at 61 km/h. That's the climb and steering response (CONTOUR_CLIMB, _climb_to, _steer),
+not a missing look-ahead, so it's left for the helicopter side rather than tuned here.
+Suggested: plan the hook's climb at a lower share of CLIMB_MS when it's sinking (or slow the
+hook where the ground ahead rises faster than the glide slope).
+
+Fixed 2026-10-22 (world/roads), in Helicopter._contour, two small changes. The cause: held to
+where it was (the binding point "now"), its rate was the change of need one second ahead, and over
+the rise the glide slope's need fell ahead faster than the ground rose, so the rate came out
+negative (-7 m/s) and cancelled the climb term: `_climb_to` gave 0 and it sat level 2.5 m under
+its own need from 100 m to go to 78 m. Now (1) below its need that rate is never negative, and (2)
+on the J-hook while sinking it plans the rise ahead at HOOK_SINK_CLIMB (0.5) of its climb, so it
+starts up sooner. ridge_hot insertion 1: 5.5 m at the least (4.0 before; 5.3 with (1) alone).
+The 5 m minimum is unchanged.
+
+## F-219: point the roadside props at the new roads (cghath's side, queue item 1.7) (done 2026-10-22)
+
+(Logged on world/props as F-178, an id claude/ai-driving also used; renumbered when the two met on world/roads.)
+
+Location: [zone_props.gd](../../scripts/world/zone_props.gd), `street_lines()`.
+
+What happens: roadside poles, signs, parked cars and checkpoint barriers go along today's straight
+`def.roads` segments, 5 m wide (`ROAD_HALF_M`), and a town's furniture along BuildingGen's main
+and cross streets. The roads work (zone_roads.gd) will give roads curves, kerbs and pavements.
+
+Suggested: return the new road edges (and pavements, with their half width) from
+`street_lines()`; everything roadside follows. Town lamps and stalls could then stand on the
+pavements instead of the street's edge.
+
+Status (2026-10-22, world/roads, queue item 1.2): done. `street_lines()` returns the planned
+roads: the def's "roads" pieces once ZoneRoads has planned them (the curves as straight pieces
+within 1 m, each naming its kind), each line's `half_w` its kind's half width (RoadNet.half_width:
+asphalt 3.5 m, dirt 2.1 m, a town street's carriageway 3 m), so a line's edge is the road's edge as
+`ZoneRoads.edges()` has it and every roadside prop (poles, parked cars and hulks, checkpoint
+barriers and signs, direction signs, bus shelters, billboards) follows the curves and keeps off the
+road's surface. The pieces rather than ZoneRoads itself because the scatter's layout cache keys on
+them and the props are laid where no ZoneRoads node is reachable (the cache, a test terrain). The
+lines are indexed by 64 m cell (`_lines_near`): hundreds of short pieces against the old few
+links. The town's furniture already stands on the new pavements (lamps 0.35 m and poles 0.25 m
+in from the street rect's edge; the pavement runs from 1 m in to 1 m out); stalls and benches set
+against the street's edge still overhang the carriageway by up to a metre (not moved).
+
+## F-220: a round into an animal makes a "vehicle" hit (Ballistics)
+
+(Logged on world/props as F-179, an id claude/ai-driving also used; renumbered on world/roads.)
+
+Location: [ballistics.gd](../../scripts/combat/ballistics.gd), the `on_bullet` branch;
+[zone_animals.gd](../../scripts/world/zone_animals.gd) uses it.
+
+What happens: an animal is hit through Ballistics' `on_bullet` meta (as a drone is), which
+returns `{"result": "vehicle"}`, so the shooter's impact effect is the one for metal, not flesh.
+The animal dies (and lies down) on every peer either way.
+
+Suggested: let an `on_bullet` callable return the result kind ("animal": a blood puff), or add a
+meta for it.
+
+## F-180: props can't be knocked down or destroyed
+
+Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) (static bodies per cell).
+
+What happens: like the rocks, trees and old box props before them, library props are static and
+deterministic from the zone's seed: a blast doesn't flatten a fence or a stall, a vehicle doesn't
+push through a chain-link fence (it senses it as an obstacle), and nothing about them is saved.
+
+Suggested (later, with structural collapse, queue item 13): destructible light props (fences,
+stalls, awnings, washing lines) as a host-saved "gone" set per zone, like the voxel edit log.
 
 ## F-185: vehicles aren't slowed by marsh mud or snow
 
@@ -755,3 +919,32 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-22 | City stairs keep 1.0 m clear in front of their foot (towns and landmarks keep 0.5 m: F-212), and every stair's navmesh ramp gets a wedge on and off | at 0.5 m a zone's pad height decided whether a stair joined the floor (3 of 12 cut off at one offset; 215 of 215 joined at five offsets with 1.0 m) | move every building's stairs now (changes towns and landmarks for saves)
 - 2026-10-22 | City block frame-time check: walking in at a run while its blocks stream in, worst frame 200 ms and average 25 ms (Proposed; 76 ms and 9 ms measured here), with the AI's building scans counted as a game caps them (4 ms a frame past the first; F-211) | headless runs every scan in full, and those (not the blocks) are the long frames | count the scans in full (fails on F-211, not on the city)
 - 2026-10-22 | Village houses (queue item 1.6): the four hand-built houses are generated on their own ground (mud brick, cinder block, a two-room brick house, a plank shack: a "plank" style kept out of STYLES so no other building changes), front doors where they were, one storey, no roof stairs; their furniture keeps off the posts, loot, named points, mission sites, site boxes and the world suite's firing lines; every village the same | the brief: "keeping each module's layout and garrison posts" | a village seed per zone with varied houses (moves posts and sites)
+
+2026-10-21 | Roads come in three kinds (asphalt 7 m, dirt tracks 4.2 m, town streets 6 m between kerbs), every number in data/roads.json as Proposed | one place to tune widths, grip and which sites get what | hard-coded consts in ZoneRoads
+2026-10-21 | Asphalt to towns, the HQ, QRF bases, comms, checkpoints and the FOB; dirt to outposts, compounds and villages, and on the trails; a link takes the better of its two ends | main roads read as main roads, farms and compounds get tracks (Arma's mix) | everything asphalt in hot zones
+2026-10-21 | A trail that ends within 14 m of another road joins it (a T); junctions within 30 m of each other share one height; a later road passing close by an earlier one is drawn toward its height; routes cost 1.5x a metre alongside a road already laid | the ground between two roads can only be graded to one height, so roads that touch must agree | let them overlap at different heights (terrain through one of them)
+2026-10-21 | Every site is joined to the roads: the links' separate networks are joined nearest sites first until every site is on one, and a link passing within 90 m of a checkpoint runs through it | hot zones only linked the HQ to its outposts, so comms, QRF bases, checkpoints, villages and the town had no road, and a landmark's link to its town can leave the two on their own; the brief wants every site on the network | leave the links as ZoneDef makes them
+2026-10-21 | A road out through a linked-zone crossing runs straight out from the crossing to the zone's edge, its kind from the link's two zone ids (60% asphalt), so both sides of a link get the same road at their own crossing | crossings slide along their edge per zone (RegionMap SLIDES), so "the matching point" is each zone's crossing, not one shared coordinate | change RegionMap so both crossings share one along-edge position
+2026-10-21 | Towns get a mini roundabout (a 2 m mountable dome) at the crossroads; full roundabouts (6 m island, 7 m ring) go at junctions of 3+ arms within 320 m of a town, or where 4 asphalt arms meet, clear of pads | the crossroads is about 5 x 6 m between corner buildings, too tight for a full ring without moving BuildingGen's lots | widen the crossroads in BuildingGen.town (changes every town's layout)
+2026-10-21 | Kerbs and pavements sit inside the town's existing street rects (carriageway = street less 1 m each side, 2 m pavements out to the building fronts, 12 cm high with a chamfered kerb you can walk and drive over); BuildingGen.town is unchanged | no layout change, no step for soldiers or the navmesh to trip on | move the building fronts back for wider pavements
+2026-10-21 | The terrain is cut and filled to the roads: ground 0.10 m under the surface, a level shoulder (3 m low side, 6 m high side), banks 1:2 up and 1:1.6 down to 10 m out; the profile is the ground smoothed over 20 m, solved as a stretched string (36 m) through flat junctions (14 m, ramps between them and the pads at most 12%), level with any pad it leaves or passes within 4 m of; then no height point under a road is left above it | roads that follow the ground but drive smoothly and never have terrain poking through (99% of road within 4 m of the natural ground; the worst, a track climbing to a junction on a site's embankment, about 8 m) | drape the road on the raw 4 m grid (bumpy, terrain through it)
+2026-10-21 | Where a road meets water (ZoneTerrain.water_height over the ground) it isn't laid or graded: the span is listed in ZoneRoads.water_crossings() for the water side's bridges and the road runs straight over it in the profile | the water side owns bridges, fords and culverts | fill a causeway across
+2026-10-22 | The water plans its crossings over the links the roads take (RoadNet.water_links: the def's links completed, plus a line in from each linked-zone crossing), handed over inside ZoneTerrain.generate; water_test's "every road over the river has a bridge" reads the same links | the bridges must stand where the roads run, on every peer and in every test that builds a terrain | ZoneLevel swapping the def's "roads" before generate (other callers of generate would get other bridges)
+2026-10-22 | A road runs straight through the crossing on its link: fixed points at the bridge's ramps' ends plus 4 m (a ford or culvert: 10 m either side) and 12 m before that to line up; its profile is pinned to the deck and down the ramps there, not laid or graded (F-175) | the deck is the road; the curve can't wander off a 7 m deck | lay a road strip on the deck (doubles the deck's surface and collision)
+2026-10-22 | A link passing within 30 m of another link's crossing (heading the same way) takes it too; if an earlier road already has it, the later way joins that road either side of the bridge (two Ts) instead of running along it | the water keeps one crossing where links cross the river close together; without this the second road went into the river a few metres beside the bridge | run both roads over the deck side by side (overlapping strips and junction clutter)
+2026-10-22 | ZoneWater._apply never raises a pad's ground with a stream's bank (the pad keep weight now also scales a raise inside the bank); the water agent's file, a 3-line change | a stream past highland_pass's checkpoint lifted its pad 2 m (terrain through the road and the site); found by the roads suite | log it for the water side and leave the road check failing
+2026-10-22 | Helicopter._contour: below its need the rate it holds is never negative, and on the J-hook while sinking it plans the rise ahead at half its climb (HOOK_SINK_CLIMB 0.5, Proposed); helicopter.gd isn't Claude's | heliflight's ridge_hot insertion 1 came over a 23% rise 4.0 m clear (the 5 m check) once the roads moved the scatter: it sat level under its own need (F-218) | slow the hook where the ground rises ahead (changes every approach's timing)
+2026-10-21 | Road collision is a trimesh per 256 m tile (a hard body and a soft one, friction 1.0 / 0.75, meta hard_ground for footsteps) on top of the graded heightfield | the 4 m heightfield can't follow a 7 m road's curves and edges; vehicles drive on exactly what's drawn | the graded heightfield only
+2026-10-21 | The def's "roads" become the curved roads as straight pieces (within 1 m of the curve, at most 80 m, a third entry naming the kind), the links kept in "road_links"; the trails' patrols follow their curved trails | RoadRoute, ZoneScatter, the map, IEDs and the tracker all read "roads" and now follow the real roads with no change to them | a separate key (they'd all keep the old straight lines)
+- 2026-10-21 | Prop library (1.7): today's outdoor set counted as 25 shapes (the scatter's 8 natural and 6 box props, the modules' 11 outdoor dressings), so "triple" means 75+; the library adds 72 (69 static props, 3 animals): 97 | the brief's own "about 25" | count only the scatter's 6 man-made props (18 would have done)
+- 2026-10-21 | Prop library: each part takes rounds by its own material (PropArt.MATERIALS, Proposed): a car's cabin and boot 600 J/m (an M855 goes through, a 9 mm stops), its engine bay stops everything, a container 450 J/m (through its width, not its 6 m length), hay 3500, a full tank 4000, wood, sheet and mud as VoxelWorld's | Arma/ACE: car bodies don't stop rifle rounds, engine blocks do | every prop hard cover, as the old box props were
+- 2026-10-21 | Prop library: chain-link and barbed wire collide on Soldier.BODY_LAYER only: they stop men (and vehicles sense them) but not sight lines or rounds | you see and shoot through wire mesh | solid on the world layer (the AI would hide behind a mesh fence)
+- 2026-10-21 | Prop library: animals are walked by the host and sent 4 times a second in one unreliable packet (Proposed); a hit kills one; no fleeing, not saved | the brief: wandering only, synced, cheap | a deterministic walk from a shared clock (no packets, but no shared clock to drive it yet)
+- 2026-10-21 | Prop library: scenery vehicles are built from flat-shaded blocks (boxes, wedges, drums) that collide exactly as drawn, not from VehicleArt's 5 cm voxel canvases | collision has to match what's drawn, and one mesh per shape batches | VehicleArt-style canvases (finer, but collision would only approximate them)
+- 2026-10-21 | Prop library: placement by terrain style in data/props.json (temperate, woodland, highland, coastal, arid; a procedural mix takes its first preset's style), Proposed densities: 0.2-0.55 farms a km2, 0-2 pylon lines, poles on 45-70% of roads, 0.9-1.4 vehicles per km of road (35-50% burnt out) | towns lived-in, the country with power and farms | per-preset numbers in terrain_presets.json (shared with the terrain work)
+- 2026-10-21 | Prop library: a town's street furniture stands on its streets inside the town's pad, clear of every box, guard post, loot spot and civilian walk (the world suite's "nothing on a pad" allows it) | that's where a town's streets are | keep every prop off the pads (towns stay bare)
+- 2026-10-21 | Prop library: pylons every 95 m, roadside poles every 38 m, wires sag 3% of their span (Proposed consts in ZoneProps and ZoneScatter) | a 2-4 km zone shows several spans | real 300 m pylon spacing (6-10 pylons a zone)
+- 2026-10-21 | Prop library: the old box car wreck becomes a burnt-out hulk where it fits (same spot and heading), and scatter props no longer count as foliage (they hid people like bushes on top of being solid) | the brief: real shapes in place of box wrecks; props are solid | keep both
+- 2026-10-21 | Prop library: the screenshots are drawn by a small software rasteriser in tests/props_shots.gd (headless has no renderer and no window may open) | the brief's "headless screenshots" | tests/world_shots.gd in a real window
+- 2026-10-22 | Prop library: a helicopter climbs over a tall library prop (6 m and up: pylons, masts, poles' tops) it would pass within its rotor reach of, from ZoneScatter.tall_top (one call in Helicopter.obstacle_top); the lattice is too thin for its rays (heliflight harbour_yard flew into a pylon on CI) | pilots know where the pylons are | keep pylon lines away from every LZ and approach (unknowable: the LZ is picked in dead ground near the objective)
+- 2026-10-22 | Prop library, merged with the water and landmarks work: props keep off ZoneWater.keeps_clear (water, wet banks, bridges) like the rest of the scatter; a power line whose footing falls in water skips it and its wires span the gap (two steps); landmark sites get no site kit (they build their own props) and countryside farms keep FARM_GAP_M from a landmark farm | the coordinator's merge brief | move a wet footing to the bank (the line would kink)
