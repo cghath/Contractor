@@ -188,41 +188,69 @@ Build it out, in this order:
 snowy pass, farmland or a city. Every landmark above shows up where its tag says. Towns read as
 lived-in. The world, townperf, map and smoke suites pass.
 
-### 1b. The combined arms plan's heavy lanes (docs/combined_arms.md), added 2026-10-22
+### 2. Armour lane (docs/combined_arms.md), Captain's next priority after item 1
 
-Captain wants playable tanks soon and asked to hand the heavy work to you (you've a budget of your
-own; ours is tight this week). Read docs/combined_arms.md; section 9 is the build plan (phases,
-dependencies, tests, budgets) and section 10 has every call already made, so there's nothing to
-ask. One phase per commit, pushed as each lands; one branch per lane is fine.
+Captain wants playable tanks soon and asked to hand the heavy combined-arms work to you (ours is
+tight on usage this week). docs/combined_arms.md is the full design. Section 9 is the build plan
+(phases, dependencies, tests, budgets) and section 10 has every call already made, so there's
+nothing to ask. Work it like your world items: a branch per item (e.g. `armour/modules`,
+`armour/guns`), commits saying "cg_brief queue item 2.x", the follow-ups in followups.md, and a
+Discord note when each lands. Claude merges your branches into claude/ai-driving as they come.
 
-**Order:** finish the world item you're on, then the armour lane (Captain's priority), then the
-operations lane. Interleave the art (D6a) whenever it suits you.
+**Standards (Captain, 2026-10-22: "make sure it follows the current standards for armor"):**
+- **Vehicles: NATO STANAG 4569 (AEP-55).** Every vehicle and armour package gets a rated
+  protection level per arc:
+  - KE levels 1-6, from 7.62x51 ball up to 25 mm APDS-T;
+  - artillery levels by 155 mm HE burst distance;
+  - mine/blast levels 1 to 4a/4b under the wheel and belly (6 to 10 kg TNT).
+  Each level is stored with the vehicle (`stanag_ke`, `stanag_mine`), and armour_test proves the
+  plates meet it: the level's threats are stopped at its range, and the next level's aren't
+  always. Above STANAG's range (MBT frontal armour), keep the doc's RHAe line-of-sight figures from
+  public estimates.
+  - Proposed ratings: the M-ATV and MaxxPro at KE 2 / mine 3b (with add-on armour KE 3), the
+    Bradley base at KE 4 front, with BUSK/ERA against RPGs.
+- **Personal armour: NIJ 0101.07** (2023), the current standard, in place of 0101.06's
+  IIA/II/IIIA/III/IV.
+  - Re-rate data and armor_rules.gd to HG1, HG2, RF1, RF2 and RF3 with their threat lists
+    (RF2 adds M855 and M80; RF3 is .30-06 M2 AP).
+  - Map old levels: IIA/II → HG1; IIIA → HG2; III → RF1; III+/III++ → RF2 where they stop M855,
+    otherwise RF1; IV → RF3.
+  - Keep the hit behaviour the same except where the new threat lists change it. Say so in the
+    CHANGELOG.
 
-- **Armour lane: A2, A3, A4, A5, A7, A8, then A6.**
-  - A2: modules, spall, crew hits, kill states.
-  - A3: main guns: Abrams 120 mm and loader, Bradley 25 mm dual feed, TOW; commander/loader seats.
-  - A4: gunnery: sights, thermal, LRF and fire control, stabiliser, hatches.
-  - A5: the 1P/3P vehicle HUDs and the x-ray.
-  - A7: fire and destruction effects.
-  - A8: logistics and armour packages.
-  - A6: driving physics, fording the rivers, bridge load limits.
-  - A1 (the armour model) is being finished by a Claude session on `claude/ca-a1-armour-model`.
-    Start A2 once it's merged into claude/ai-driving (a few hours).
-  - The **first build cut** is after A5: tanks firing with sights and HUDs. Tell Captain in
-    Discord when A5 lands.
-- **Operations lane: D1, D2, D3, D4, D5, D8.**
-  - D1/D2: 8 km operation zones and their performance. Pick up the paused WIP on
-    `claude/ca-d1-operation-zones`; its CHANGELOG entry says where it stopped.
-  - D3-D5: operation contracts, phases, the front grid, pay by phase, and the mission types
-    (phased invasion, armoured thrust, beach landing, seizing a crossing, holding a town).
-    D3 needs Claude's B2 (the AI commander); build D3's contract and front-grid parts first and
-    hook the commander in when B2 lands.
-  - D8: staging from a friendly FOB (D7, the US in the living war, is Claude's, and D8 builds on
-    it).
-- **Art and light armour: D6a, then D6b.**
-  - D6a: T-72B3, BMP-2, BTR-82A, MT-LB, the three HEMTTs, the rhino truck, the armoured SUV, a
-    captured-MaxxPro scheme.
-  - D6b: their armour/modules/weapons data and the factions' vehicle tables, after A2/A3.
+**The armour items:**
+- **2.0** Standards pass: STANAG levels on the A1 data and armour_test; the NIJ 0101.07 re-rate
+  of personal armour. Do this first.
+- **2.1** A2: modules, spall, crew hits, kill states.
+- **2.2** A3: main guns: the Abrams 120 mm and its loader, the Bradley 25 mm dual feed, TOW,
+  commander and loader seats.
+- **2.3** A4: gunnery: sights, thermal, LRF and fire control, the stabiliser, hatches.
+- **2.4** A5: the 1P/3P vehicle HUDs and the x-ray. **The first build cut is here**: tanks firing
+  with sights and HUDs, so tell Captain in Discord when it lands.
+- **2.5** A7: fire and destruction effects.
+- **2.6** A8: logistics and armour packages (each package keeps its STANAG rating).
+- **2.7** A6: driving physics, fording the rivers, bridge load limits (your ZoneWater/ZoneBridges).
+
+A1 (the armour model) is being finished by a Claude session on `claude/ca-a1-armour-model`. Start
+2.0 once it's merged into claude/ai-driving (a few hours).
+
+### 3. Operations lane (docs/combined_arms.md)
+
+- **3.1** D1 + D2: operation zones of about 8 km and their performance. Pick up the paused WIP on
+  `claude/ca-d1-operation-zones`; its CHANGELOG entry says where it stopped.
+- **3.2** D3: operation contracts, phases, the front grid, pay by phase, feeding the war. It
+  needs Claude's B2 (the AI commander), so build the contract and front-grid parts first and hook
+  the commander in when B2 lands.
+- **3.3** D4 and D5, the mission types: phased invasion, armoured thrust, beach landing, seizing
+  a crossing, holding a town.
+- **3.4** D8: staging from a friendly FOB. It builds on Claude's D7, the US in the living war.
+
+### 4. Vehicle art and light armour (docs/combined_arms.md)
+
+- **4.1** D6a: T-72B3, BMP-2, BTR-82A, MT-LB, the three HEMTTs, the rhino truck, the armoured
+  SUV, and a captured-MaxxPro scheme. Interleave this whenever it suits you.
+- **4.2** D6b: their armour, modules and weapons data (with STANAG levels) and the factions'
+  vehicle tables, after 2.1 and 2.2.
 
 Claude keeps the parts tied to its squad AI files:
 - B, the AI commander;
@@ -231,10 +259,10 @@ Claude keeps the parts tied to its squad AI files:
 - D7, the US in the living war;
 - the performance pass.
 
-Where your phase needs a hook in squad_ai.gd, tactics.gd or squad.gd, keep it to one line and note
-it in followups.md.
+Where an item needs a hook in squad_ai.gd, tactics.gd or squad.gd, keep it to one line and note it
+in followups.md.
 
-### 2. Real picture-in-picture scopes
+### 5. Real picture-in-picture scopes
 
 The first pass (gun_sight.gd SubViewport) isn't reading as a real scope. It needs:
 - a true second render at the scope's real magnification;
@@ -246,7 +274,7 @@ The first pass (gun_sight.gd SubViewport) isn't reading as a real scope. It need
 - variable-power scopes zooming on the scroll wheel;
 - holding the frame rate (the render scale is a setting).
 
-### 3. Weapon models across the board: detail first, iron sights first of all
+### 6. Weapon models across the board: detail first, iron sights first of all
 
 Every gun, not just the first-pass list.
 - **Iron sights:**
@@ -260,7 +288,7 @@ Every gun, not just the first-pass list.
   - the right colours and finishes per gun (matte black, FDE, wood, parkerised).
 - **Moving parts:** where the rig allows, the bolt or charging handle moves on reloads.
 
-### 4. Mission variety: improve what's there, and add new types
+### 7. Mission variety: improve what's there, and add new types
 
 **Already in (don't re-add):**
 - raid, HVT capture, hostage rescue, intel grab;
@@ -292,7 +320,7 @@ Each type shows up on the board, plays start to finish, and has its own test.
 Combined arms and invasion missions (larger zones, armour columns, beach landings, seizing
 crossings) are Claude's, alongside the armour work, so no need to build those.
 
-### 5. Follow-ups (F-xx in docs/audits/followups.md)
+### 8. Follow-ups (F-xx in docs/audits/followups.md)
 
 - **F-130:** the AI grenadier fires the M320.
   - HE at enemies in cover 30-250 m away, never with a friendly within 12 m of the aim point.
@@ -307,7 +335,7 @@ crossings) are Claude's, alongside the armour work, so no need to build those.
   - enemy vehicle crews drive out of a fire-mission area after the first round lands.
 - You may edit squad_ai.gd and tactics.gd for these; keep each to a helper plus a hook.
 
-### 6. Medical: what's still missing
+### 9. Medical: what's still missing
 
 - IV lines pull out on a sprint or carry.
 - CPR slows the arrest window (Proposed ×0.5 while it's done properly; wound_model.gd:1800).
@@ -317,23 +345,23 @@ crossings) are Claude's, alongside the armour work, so no need to build those.
 - A heartbeat when SpO2 is low or blood loss is high.
 - Fix the stale header at vitals.gd:28-30.
 
-### 7. Hit reactions that follow the hit
+### 10. Hit reactions that follow the hit
 
 `CharacterModel.flinch()` picks a random side, and stagger only follows plate stops. Make the
 flinch and stagger follow the hit's direction, scaled by round energy and body part (leg hits
 buckle, shoulder hits spin). Players get a view kick to match.
 
-### 8. Night and optics
+### 11. Night and optics
 
 - NVG IR illuminators (visible only under NVG).
 - Thermal optics as a scope variant: white-hot/black-hot, sees through smoke, not through walls.
 
-### 9. Player drones
+### 12. Player drones
 
 - A recon quadcopter: data-link range, battery, marks targets.
 - An FPV drone: one-way, warhead from Warheads, jammable by the existing jammer.
 
-### 10. Vehicles and air, in this order
+### 13. Vehicles and air, in this order
 
 Armoured gameplay is Claude's now (Captain, 2026-10-21): crewable Bradley/Abrams/AAV main guns,
 first- and third-person vehicle HUDs, light armour across the factions, and US forces fighting in
@@ -344,18 +372,18 @@ the living war. No need to build those. Still yours, in this order:
 3. The Razorback nose pod.
 4. Player-flown aircraft, last.
 
-### 11. Multiplayer
+### 14. Multiplayer
 
 - Gear changes send deltas, not the whole snapshot (inventory.gd:1393-1401 `_publish`; ammo
   already sends deltas).
 - A `--server` launch flag that hosts a campaign headless with no local player.
 
-### 12. Campaign
+### 15. Campaign
 
 LRRP missions with time acceleration and fatigue (day_night.gd has a fixed TIME_SCALE; there's
 no fatigue system yet). Food and water stay deferred: don't build them.
 
-### 13. Structural collapse
+### 16. Structural collapse
 
 Buildings lose support and drop chunks as physics debris when blasted enough. Synced, capped
 for performance, and the voxel world stays the source of truth.
