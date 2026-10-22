@@ -28,12 +28,19 @@ var _log: FileAccess
 var _notes: Array = []
 
 
+## The tree this test started in: a client's scene can be taken out of it near the end (the
+## client's level handling), and the waits and the quit still need it (CI: SCRIPT ERRORs, and a
+## null tree at the client's quit, after "LOADOUT TEST PASSED").
+var _tree: SceneTree
+
+
 func _ready() -> void:
+	_tree = get_tree()
 	GameState.zone_id = "test_loadout" + tag
 	Campaign.campaign_id = "test_loadout" + tag  # never touch a real save
-	get_tree().create_timer(420.0).timeout.connect(func() -> void:
+	_tree.create_timer(420.0).timeout.connect(func() -> void:
 		_say("LOADOUT TEST FAILED (timed out)")
-		get_tree().quit(99))
+		_tree.quit(99))
 	if "--join" in OS.get_cmdline_user_args():
 		await _run_client()
 		return
@@ -388,7 +395,7 @@ func _run_client() -> void:
 	Campaign.campaign_id = "test_loadout_client" + tag
 	BaseHub.local_profile = CLIENT_KEY
 	add_child(load("res://scenes/main.tscn").instantiate())
-	await get_tree().process_frame
+	await _tree.process_frame
 	var followed := await _wait_until(func() -> bool: return CompoundLevel.current(self) is BaseLevel and BaseHub.campaign_running, 60.0)
 	check(followed, "the client follows the host to the base")
 	level = CompoundLevel.current(self)
@@ -421,7 +428,7 @@ func _run_client() -> void:
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	_log.close()
 	Net.leave()
-	get_tree().quit(failures)
+	_tree.quit(failures)
 
 
 # --- Bits --------------------------------------------------------------------------------------
@@ -439,14 +446,14 @@ func _wait_until(cond: Callable, timeout: float) -> bool:
 	while not cond.call():
 		if Time.get_ticks_msec() > deadline:
 			return false
-		await get_tree().process_frame
+		await _tree.process_frame
 	return true
 
 
 func _frames(n: int) -> void:
 	for i in n:
-		await get_tree().process_frame
+		await _tree.process_frame
 
 
 func _seconds(s: float) -> void:
-	await get_tree().create_timer(s).timeout
+	await _tree.create_timer(s).timeout

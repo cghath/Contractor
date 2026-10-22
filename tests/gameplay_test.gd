@@ -749,8 +749,26 @@ func _test_downed() -> void:
 	await _frames(2)
 	check(dummy.vitals.downed and dummy.model.downed, "dummy is down and lying down")
 	var hitboxes := dummy.get_children().filter(func(n: Node) -> bool: return n is Area3D)
-	check(hitboxes.size() == Vitals.BODY_PARTS.size() and hitboxes.all(func(h: Area3D) -> bool: return absf(h.rotation.x + PI / 2) < 0.01),
+	var arm := func(h: Area3D) -> bool: return CharacterModel.ARM_BONES.has(h.get_meta(&"body_part", &""))
+	var body_boxes := hitboxes.filter(func(h: Area3D) -> bool: return not arm.call(h))
+	var arm_boxes := hitboxes.filter(arm)
+	check(hitboxes.size() == Vitals.BODY_PARTS.size() and arm_boxes.size() == 4 and body_boxes.all(func(h: Area3D) -> bool: return absf(h.rotation.x + PI / 2) < 0.01),
 		"all %d of its hitboxes lie down with it" % hitboxes.size())
+	# The arms' boxes follow the arms as drawn (CharacterModel._arm_delta), which sink at the slump's
+	# pace: once they've settled, each lies along the ground (the forearms at the drawn elbow's bend).
+	var was: Array = arm_boxes.map(func(h: Area3D) -> Transform3D: return h.transform)
+	var settle_by := Time.get_ticks_msec() + 8000
+	while Time.get_ticks_msec() < settle_by:
+		await _frames(10)
+		var now: Array = arm_boxes.map(func(h: Area3D) -> Transform3D: return h.transform)
+		var still := true
+		for i in now.size():
+			still = still and (now[i] as Transform3D).is_equal_approx(was[i])
+		if still:
+			break
+		was = now
+	check(arm_boxes.all(func(h: Area3D) -> bool: return absf(h.global_basis.y.normalized().dot(Vector3.UP)) < 0.25),
+		"and its arms' boxes with its arms as they settle (%s)" % [arm_boxes.map(func(h: Area3D) -> String: return "%s %.2f" % [h.get_meta(&"body_part"), h.rotation.x])])
 	player.global_position = dummy.global_position + Vector3(0, 0, -1.2)
 	player.inventory.take(&"trauma_kit")
 	await _frames(2)
