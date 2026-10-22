@@ -25,6 +25,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
+| F-190 | P1 | ~~A squadmate following along a path walks head-on into a wall's end and stands there pushing~~ fixed 2026-10-22 (Claude, claude/ci-cleanup: SquadAI._unblock; F-80's collection-point half was the test's point) |
 
 ## F-01: the building scan only sees one floor
 
@@ -393,6 +394,42 @@ Suggested: count a spot as inside when a ray straight up meets a roof within a f
 walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or let a building's
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
+
+## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `_steer` (the path walk). Found and fixed by
+Claude on `claude/ci-cleanup` (2026-10-22), a CI red directly in the squad AI (the one change there:
+`_unblock`, called from `_steer`; `claude/ai-followups`' hunks don't reach it). Supersedes F-90
+and the stuck half of F-08.
+
+What happens: casualty's soak ("nobody got stuck on the way", then "everyone is back in formation"
+and the collection-point checks) fails on nearly every CI run on `claude/ai-driving` (39710962889's
+predecessors 39689572822, 39687185890, 39682370659, 39655370830 ...). Before 2026-10-22 the man
+was held against the LightDummy at (-4, 0, 12), which the compound's navmesh didn't know. The
+dummies are baked in now (NavBuilder.OBSTACLES_GROUP), and the same thing happens one obstacle
+over, on CI (run 39722065652) and locally (R2364) alike: Foxtrot at (-1.39, 0, 9.70), path next
+(-1.5, 0.5, 10.75), input forward, speed 0. The low wall at x -1.5..1.5, z 10.0..10.4 (1.1 m)
+ends at x -1.5; the bake keeps a path only about 0.1-0.25 m off it at its corner (agent radius
+0.25 m, one 0.25 m cell of erosion, edge_max_error 1 cell), and the soldier's capsule is 0.3 m,
+so with its centre at x -1.39 (inside the wall's x span) it meets the wall's south face head on
+and move_and_slide has nothing to slide along.
+
+Tried on the navigation side and dropped: padding the baked boxes 0.125 m (fixes casualty, but
+closes the compound's 1.2 m doorway in the 0.25 m-cell bake: logistics' "through the doorway"
+path went 15.9 m round, squad's path into the building ended outside); edge_max_error 0.5
+(Foxtrot then stuck elsewhere, the carry checks broke).
+
+Fix: `SquadAI._unblock`: pushing with no way on for 0.5 s against a face met square on
+(get_slide_collision's normal), the man steps along it, the side his next waypoint lies, for
+0.6 s, then takes the path again. casualty passes locally with it (R2382), and failed every
+time without it once the dummies were baked in (R2364). The test is casualty's soak as it stands.
+
+F-80's half ("with a collection point set, a squadmate picks his body up" and its radio line,
+every squadmate idle in formation; CI run 39725520165, R2400) was the test: Echo falls where the
+dynamic wedge has him, about (-4.3, 3.8), within BODY_THERE_M of the test's collection point at
+(-8, 4), so he already lay "there" (`_body_destination` null) and nobody had cause to carry him.
+The test takes the point on the other side (8, 4) when he lies within 10 m of it, and the check
+names, per squadmate, any `_can_bear` condition that holds him back.
 
 ## Calls made for the Captain
 

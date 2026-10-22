@@ -1113,18 +1113,31 @@ func _test_dead_bodies() -> void:
 	# "Bring casualties there": a squadmate chooses to take the body there, and says so.
 	var said_from: int = level.callouts.sent.size()
 	var ccp_at := Vector3(-8, 0.1, 4)
+	# (Where he fell is where the dynamic wedge had him: at about (-4.3, 3.8) he already lay within
+	# BODY_THERE_M of this point, "there", and nobody would carry him (CI runs and R2400). The point
+	# on the other side then.)
+	if _flat(echo.body_point(), ccp_at) < 10.0:
+		ccp_at = Vector3(8, 0.1, 4)
 	var friendly := level.squad_for(&"friendly")
 	check(friendly.order_command(player, "ccp", ccp_at) == "", "Bring casualties there")
 	var carried := await _wait_until(func() -> bool: return is_instance_valid(echo.carried_by) and echo.carried_by.is_ai(), 25.0)
 	var bearer := echo.carried_by
-	check(carried, "with a collection point set, a squadmate picks his body up (%s; squad: %s)" % [bearer.ai_status if bearer else "nobody", _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m at %s v%.1f in%s hits %s busy %.1f" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), s.global_position, s.velocity.length(), s.move_input, range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider())), s._busy_until - Soldier._now()])])
+	# Why nobody would (the annotations on CI carry only the check lines): each one's _can_bear,
+	# care/free/carrying/hands/quiet/ordered/scavenge/self care/asking.
+	var why_not := _squad().map(func(s: Soldier) -> String:
+		var a := SquadAI.of(s)
+		return "%s:%s%s%s%s%s%s%s%s%s" % [s.name.left(2), "c" if a.care != SquadAI.Care.NONE else "", "f" if not a._free_for(echo) else "", "k" if s.carrying != null else "",
+			"h" if s.inventory.hands != &"" else "", "q%.0f" % (Soldier._now() - a._last_contact) if Soldier._now() - a._last_contact < SquadAI.BODY_QUIET_S else "",
+			"o" if not a.ordered.is_empty() else "", "s" if a.scavenge_order != null else "", "w" if a._self_care_score() > 0.0 else "", "m" if a.asking_for_medic() else ""])
+	check(carried, "with a collection point set, a squadmate picks his body up (%s; dest %s; blocked: %s; squad: %s)" % [bearer.ai_status if bearer else "nobody",
+		SquadAI.of(_squad()[0])._body_destination(echo.body_point()), why_not, _squad().map(func(s: Soldier) -> String: return "%s %s %.1f m at %s v%.1f in%s hits %s busy %.1f" % [s.name, s.ai_status, _flat(s.global_position, echo.global_position), s.global_position, s.velocity.length(), s.move_input, range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider())), s._busy_until - Soldier._now()])])
 	if not carried:
 		print("    squad: %s" % [_squad().map(func(s: Soldier) -> String: return "%s %s %s/%s contact %s" % [s.name, s.ai_status,
 			SquadAI.Intent.keys()[SquadAI.of(s).intent], SquadAI.Care.keys()[SquadAI.of(s).care], SquadAI.of(s).in_contact()])])
 		var a0 := SquadAI.of(_squad()[0])
 		print("    body at %s; dest %s; carer %s; bearer %s; can bear %s; quiet %s" % [echo.body_point(), a0._body_destination(echo.body_point()), SquadAI._carer_of(echo), a0._bearer_for(echo),
 			_squad().map(func(s: Soldier) -> bool: return SquadAI.of(s)._can_bear(echo)), _squad().map(func(s: Soldier) -> float: return Soldier._now() - SquadAI.of(s)._last_contact)])
-	_place(player, Vector3(-12, 0.1, 4))
+	_place(player, ccp_at + Vector3(4.0 * signf(ccp_at.x), 0, 0))
 	var laid_there := func() -> bool: return _flat(echo.global_position, ccp_at) < SquadAI.BODY_THERE_M + 1.0 and not is_instance_valid(echo.carried_by)
 	var along := await _wait_until(laid_there, 40.0)
 	check(along, "and carries it to the collection point and lays it down there (%.1f m off)" % _flat(echo.global_position, ccp_at))
