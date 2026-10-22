@@ -131,6 +131,73 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 - **Hangars and factory floors count as buildings (F-162).** The AI's building scan missed the
   middle of a big open hall, so it never garrisoned or cleared one room by room.
 
+### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
+
+#### Added
+- **72 new outdoor props**, on top of the 25 shapes the open terrain and the sites had (rocks,
+  scrub, trees, crates, drums, debris, ruins, box wrecks, sandbags, HESCO, towers, tents and the
+  rest): 97 in all.
+  - Street furniture: street lamps (single and double), wooden utility poles (some with a
+    transformer), stop, warning and direction signs, a billboard, a bus shelter, benches, bollards,
+    skips, a kiosk, concrete road barriers.
+  - Market: stalls with striped awnings and produce, big canopies, shop awnings, produce crates,
+    hand carts.
+  - Fences and gates: post-and-rail, board, chain-link, barbed wire, corrugated iron, dry stone,
+    block and mud-brick walls; farm, steel and wooden gates (open).
+  - Power lines: steel lattice pylons and H-frame wooden poles, with sagging wires from each to
+    the next.
+  - Farm and water: wells, raised water tanks, cisterns, troughs, round and square hay bales,
+    irrigation channels with sluices and pipes, windpumps, animal shelters.
+  - Animals: goats, sheep and dogs. They wander about their pens, farms and streets (nothing more),
+    the same on every peer; a round kills one.
+  - Scenery vehicles built from blocks the shape of the real thing: saloon and hatchback cars, a
+    panel van, a pickup, a dropside lorry with a canvas tilt, a tanker, a tractor, and burnt-out
+    hulks of a car, a van and a lorry. They're scenery, not drivable.
+  - Shipping containers: 20 ft, 40 ft and a stack of two.
+  - Graves: mounds, headstones, crosses, box tombs and the arid style's stone-bordered graves.
+  - Site clutter: generators, satellite dishes, washing lines, fuel tanks, gas cylinders, pallet
+    stacks, tyre piles, portable latrines.
+- **Where they go**, by the zone's terrain style (`data/props.json`: temperate, woodland,
+  highland, coastal, arid) and what's there:
+  - Towns: lamps, and poles with wires, along the streets; market stalls by the crossroads;
+    parked cars, benches, skips, a kiosk, bollards, stop and direction signs and a bus shelter.
+    All of it stands on the street, clear of the buildings, barricades, guard posts, loot and the
+    civilians' walks.
+  - Villages and towns get washing lines, dishes, a well or a water tank, a small pen and dogs
+    round them.
+  - Sites: containers, generators, fuel tanks, latrines, barriers and a chain-link yard outside
+    the HQ, QRF bases, outposts and compounds. Checkpoints get barriers in a chicane and stop and
+    warning signs on the way in.
+  - Roads: utility poles along most of them, direction signs where they reach a site, a bus
+    shelter and a billboard on the way into a town, and parked or abandoned vehicles (some burnt
+    out, now and then a cluster where an ambush was).
+  - Countryside: pylon lines across the zone; farms with a pen of goats or sheep, water, hay, a
+    tractor, field fences with gates and sometimes an irrigation channel; a walled cemetery by the
+    biggest settlement.
+  - The campaign's zones had 390 props between them; they now have about 11,900.
+- **New suite `props`** (two processes, like world): the library and every campaign zone's layout,
+  collision against what's drawn, rounds through props by material, AI cover behind a container,
+  animals wandering and the same on a late joiner.
+
+#### Changed
+- **Every prop's collision is what's drawn**, part by part, and each part takes rounds by its
+  material. An M855 goes through a car's cabin, a shipping container's width, wooden fences and
+  chain-link; a 9 mm stops in the car or the container. A car's engine bay, concrete, stone, a
+  generator, a hay bale, a full tank and a mud wall stop rifle rounds. The AI's soft-cover test
+  agrees, so it hides behind an engine block or down a container's length, not behind a door.
+- Chain-link and barbed wire stop men walking, but not sight or rounds.
+- The old box car wrecks out in the open are burnt-out hulks now.
+- Rocks, trees and bushes keep off the props.
+- Scatter props no longer count as foliage that hides people. They were treated like bushes on
+  top of being solid.
+- Props keep out of rivers, lakes, their wet banks and bridges (as the rest of the scatter does);
+  a power line spans a river, one footing skipped. Landmark sites (a mosque, a farm, a harbour
+  and the rest) keep the props they build themselves: the library adds none on their pads, and
+  its farms keep their distance from a landmark farm.
+- Zone layouts cache under a new version (13), so old caches re-roll.
+- Helicopters climb over pylons and other tall props near their track. A pylon's lattice was too
+  thin for them to sense, and an insertion flew into one.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added

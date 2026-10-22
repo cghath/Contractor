@@ -541,6 +541,56 @@ no longer has whatever stood there keeping it higher. Suggested: let the hook's 
 at the terrain under the rest of its path (obstacle_top along the next points), not only what stands
 on it, so it holds 5 m over a hump on the way down.
 
+## F-178: point the roadside props at the new roads (cghath's side, queue item 1.7) (done 2026-10-22)
+
+(The id is also used by "the overwatch mission's two calls" above: the two were logged on separate branches.)
+
+Location: [zone_props.gd](../../scripts/world/zone_props.gd), `street_lines()`.
+
+What happens: roadside poles, signs, parked cars and checkpoint barriers go along today's straight
+`def.roads` segments, 5 m wide (`ROAD_HALF_M`), and a town's furniture along BuildingGen's main
+and cross streets. The roads work (zone_roads.gd) will give roads curves, kerbs and pavements.
+
+Suggested: return the new road edges (and pavements, with their half width) from
+`street_lines()`; everything roadside follows. Town lamps and stalls could then stand on the
+pavements instead of the street's edge.
+
+Status (2026-10-22, world/roads, queue item 1.2): done. `street_lines()` returns the planned
+roads: the def's "roads" pieces once ZoneRoads has planned them (the curves as straight pieces
+within 1 m, each naming its kind), each line's `half_w` its kind's half width (RoadNet.half_width:
+asphalt 3.5 m, dirt 2.1 m, a town street's carriageway 3 m), so a line's edge is the road's edge as
+`ZoneRoads.edges()` has it and every roadside prop (poles, parked cars and hulks, checkpoint
+barriers and signs, direction signs, bus shelters, billboards) follows the curves and keeps off the
+road's surface. The pieces rather than ZoneRoads itself because the scatter's layout cache keys on
+them and the props are laid where no ZoneRoads node is reachable (the cache, a test terrain). The
+lines are indexed by 64 m cell (`_lines_near`): hundreds of short pieces against the old few
+links. The town's furniture already stands on the new pavements (lamps 0.35 m and poles 0.25 m
+in from the street rect's edge; the pavement runs from 1 m in to 1 m out); stalls and benches set
+against the street's edge still overhang the carriageway by up to a metre (not moved).
+
+## F-179: a round into an animal makes a "vehicle" hit (Ballistics)
+
+Location: [ballistics.gd](../../scripts/combat/ballistics.gd), the `on_bullet` branch;
+[zone_animals.gd](../../scripts/world/zone_animals.gd) uses it.
+
+What happens: an animal is hit through Ballistics' `on_bullet` meta (as a drone is), which
+returns `{"result": "vehicle"}`, so the shooter's impact effect is the one for metal, not flesh.
+The animal dies (and lies down) on every peer either way.
+
+Suggested: let an `on_bullet` callable return the result kind ("animal": a blood puff), or add a
+meta for it.
+
+## F-180: props can't be knocked down or destroyed
+
+Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) (static bodies per cell).
+
+What happens: like the rocks, trees and old box props before them, library props are static and
+deterministic from the zone's seed: a blast doesn't flatten a fence or a stall, a vehicle doesn't
+push through a chain-link fence (it senses it as an obstacle), and nothing about them is saved.
+
+Suggested (later, with structural collapse, queue item 13): destructible light props (fences,
+stalls, awnings, washing lines) as a host-saved "gone" set per zone, like the voxel edit log.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -585,3 +635,15 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-22 | ZoneWater._apply never raises a pad's ground with a stream's bank (the pad keep weight now also scales a raise inside the bank); the water agent's file, a 3-line change | a stream past highland_pass's checkpoint lifted its pad 2 m (terrain through the road and the site); found by the roads suite | log it for the water side and leave the road check failing
 2026-10-21 | Road collision is a trimesh per 256 m tile (a hard body and a soft one, friction 1.0 / 0.75, meta hard_ground for footsteps) on top of the graded heightfield | the 4 m heightfield can't follow a 7 m road's curves and edges; vehicles drive on exactly what's drawn | the graded heightfield only
 2026-10-21 | The def's "roads" become the curved roads as straight pieces (within 1 m of the curve, at most 80 m, a third entry naming the kind), the links kept in "road_links"; the trails' patrols follow their curved trails | RoadRoute, ZoneScatter, the map, IEDs and the tracker all read "roads" and now follow the real roads with no change to them | a separate key (they'd all keep the old straight lines)
+- 2026-10-21 | Prop library (1.7): today's outdoor set counted as 25 shapes (the scatter's 8 natural and 6 box props, the modules' 11 outdoor dressings), so "triple" means 75+; the library adds 72 (69 static props, 3 animals): 97 | the brief's own "about 25" | count only the scatter's 6 man-made props (18 would have done)
+- 2026-10-21 | Prop library: each part takes rounds by its own material (PropArt.MATERIALS, Proposed): a car's cabin and boot 600 J/m (an M855 goes through, a 9 mm stops), its engine bay stops everything, a container 450 J/m (through its width, not its 6 m length), hay 3500, a full tank 4000, wood, sheet and mud as VoxelWorld's | Arma/ACE: car bodies don't stop rifle rounds, engine blocks do | every prop hard cover, as the old box props were
+- 2026-10-21 | Prop library: chain-link and barbed wire collide on Soldier.BODY_LAYER only: they stop men (and vehicles sense them) but not sight lines or rounds | you see and shoot through wire mesh | solid on the world layer (the AI would hide behind a mesh fence)
+- 2026-10-21 | Prop library: animals are walked by the host and sent 4 times a second in one unreliable packet (Proposed); a hit kills one; no fleeing, not saved | the brief: wandering only, synced, cheap | a deterministic walk from a shared clock (no packets, but no shared clock to drive it yet)
+- 2026-10-21 | Prop library: scenery vehicles are built from flat-shaded blocks (boxes, wedges, drums) that collide exactly as drawn, not from VehicleArt's 5 cm voxel canvases | collision has to match what's drawn, and one mesh per shape batches | VehicleArt-style canvases (finer, but collision would only approximate them)
+- 2026-10-21 | Prop library: placement by terrain style in data/props.json (temperate, woodland, highland, coastal, arid; a procedural mix takes its first preset's style), Proposed densities: 0.2-0.55 farms a km2, 0-2 pylon lines, poles on 45-70% of roads, 0.9-1.4 vehicles per km of road (35-50% burnt out) | towns lived-in, the country with power and farms | per-preset numbers in terrain_presets.json (shared with the terrain work)
+- 2026-10-21 | Prop library: a town's street furniture stands on its streets inside the town's pad, clear of every box, guard post, loot spot and civilian walk (the world suite's "nothing on a pad" allows it) | that's where a town's streets are | keep every prop off the pads (towns stay bare)
+- 2026-10-21 | Prop library: pylons every 95 m, roadside poles every 38 m, wires sag 3% of their span (Proposed consts in ZoneProps and ZoneScatter) | a 2-4 km zone shows several spans | real 300 m pylon spacing (6-10 pylons a zone)
+- 2026-10-21 | Prop library: the old box car wreck becomes a burnt-out hulk where it fits (same spot and heading), and scatter props no longer count as foliage (they hid people like bushes on top of being solid) | the brief: real shapes in place of box wrecks; props are solid | keep both
+- 2026-10-21 | Prop library: the screenshots are drawn by a small software rasteriser in tests/props_shots.gd (headless has no renderer and no window may open) | the brief's "headless screenshots" | tests/world_shots.gd in a real window
+- 2026-10-22 | Prop library: a helicopter climbs over a tall library prop (6 m and up: pylons, masts, poles' tops) it would pass within its rotor reach of, from ZoneScatter.tall_top (one call in Helicopter.obstacle_top); the lattice is too thin for its rays (heliflight harbour_yard flew into a pylon on CI) | pilots know where the pylons are | keep pylon lines away from every LZ and approach (unknowable: the LZ is picked in dead ground near the objective)
+- 2026-10-22 | Prop library, merged with the water and landmarks work: props keep off ZoneWater.keeps_clear (water, wet banks, bridges) like the rest of the scatter; a power line whose footing falls in water skips it and its wires span the gap (two steps); landmark sites get no site kit (they build their own props) and countryside farms keep FARM_GAP_M from a landmark farm | the coordinator's merge brief | move a wet footing to the bank (the line would kink)
