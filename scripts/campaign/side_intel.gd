@@ -227,6 +227,14 @@ func _radio_near(squad: Squad, squads: Array[Squad], shout: float) -> Soldier:
 	return null
 
 
+## The live friendly Squad with board id `id`, or null.
+func squad_of(id: String) -> Squad:
+	for squad: Squad in GroupBoard.squads_of(get_tree(), &"friendly"):
+		if GroupBoard.group_id(squad) == id:
+			return squad
+	return null
+
+
 ## The man up who carries `squad`'s radio: one with a radio in his kit, else (a side with issued
 ## sets, and not meta "no_radio") its leader or first man up; null for none.
 func radio_man(squad: Squad) -> Soldier:

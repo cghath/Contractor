@@ -11,15 +11,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Requests to friendly units: the plumbing (combined arms phase B4, part 1, docs/combined_arms.md 4.1-4.3, 4.6)
+
+#### Added
+- **Requests and their answers.** A request to a friendly unit (suppression, a medic, CASEVAC,
+  smoke, armour, hold, cover, a pick-up, ammo, a sitrep) goes to the nearest group that can do it
+  and hears you. After a radio delay it answers yes with an ETA, no with a reason ("We're pinned",
+  "Ammo black", "No medic free", "Out of range"), or offers a later time you can take or cancel.
+  Three can be open at once, and asking the same thing twice merges. A sitrep is answered at once
+  from what the side knows. The units don't carry out the jobs yet (phase B2), and the menus that
+  send requests come with the contextual menus (C6).
+- **Request cards** under the objectives show each request: who answers, what, its state and
+  the ETA counting down, with accept and cancel.
+- **Allies ask you.** An allied group in contact and in trouble, or out of ammo, calls the nearest
+  player on the net ("Any station, Saber 2, contact, need support at 041 053"). A card shows
+  where it is and asks yes or no. Helping counts toward your cooperation.
+- **Radio voice.** Net lines are put together from recorded words, digit by digit. The clips are
+  still to be rendered (tools/voices/gen_radio.py needs Piper); until then the lines show as
+  subtitles.
+- New test suite requests, in tools/run_tests.sh and CI.
+
 ### The side picture: what each side knows (combined arms phase B1, docs/combined_arms.md 3.2, 3.3, 4.4)
 
-> **Where I stopped (2026-10-22 ~01:00 CDT, paused for usage):** B1 is built; side_command
-> passes locally (R2395). missions R2398 FAILED: (1) a script error from B1, GroupBoard.row_for
-> calling ammo_share on a brain with no body yet, fixed after the run (not re-run: paused);
-> (2) the zone-generation check at its start, which runs before any B1 code: the known
-> landmarks red that claude/ci-cleanup fixes, so expected on this base. Next: rerun missions and
-> smoke, check the branch CI, then the AI commander lane (B4 plumbing that doesn't need B2, then
-> B2 once C2 lands on claude/ai-driving, B3, B5). Remove this note when B1 lands.
+> **Status (2026-10-22 ~01:10 CDT):** side_command, requests and smoke pass locally; missions
+> (R2402) fails only its zone-generation check, which runs before any B1 code (the landmarks
+> red claude/ci-cleanup fixes). Remove this note when B1 lands.
 
 #### Added
 - **Spot reports on the map.** What your side has reported shows on the map as it was reported:

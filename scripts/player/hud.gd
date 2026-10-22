@@ -157,6 +157,7 @@ func _ready() -> void:
 	zone_top_right = _zone("TopRightZone")
 	zone_top_right.add_to_group(TOP_RIGHT_GROUP)
 	zone_top_right.add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
+	zone_top_right.add_child(RequestCards.new(player))  # requests to friendly units and their asks (combined_arms 4.1, 4.3)
 	objective_helper = ObjectiveHelper.new(player)  # what to do now, and small markers on its target
 	add_child(objective_helper)
 	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count

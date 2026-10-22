@@ -5,7 +5,8 @@ extends RefCounted
 ##   {"id", "side", "kind" (KINDS), "callsign", "strength_cp", "at_cp", "ce", "ce_band" ("green",
 ##    "amber", "red"), "ammo" (0..1), "ammo_band", "pos", "up", "size", "mounted_in": [vehicle
 ##    ids], "task" (an HcOrder id, "" untasked), "role", "availability", "sector", "rally",
-##    "virtual", "taskable" (false for the company and what it paid for: 3.4.4), "sitrep_at"}
+##    "virtual", "taskable" (false for the company and what it paid for: 3.4.4), "sitrep_at",
+##    and for requests (4.2): "vehicle_kinds", "mgs", "launchers", "medics", "smoke", "in_contact"}
 ## - Rows change only at a group's sitrep (every sitrep_s), as the side would hear of them: its
 ##   position, strength and state are what the group last reported, never read between.
 ## - CP keeps EnemyCommand's scale (1 per man x skill x 1.5 with body armour; a technical or MRAP
@@ -18,6 +19,9 @@ extends RefCounted
 
 const KINDS: Array[String] = ["rifle_squad", "weapons_team", "at_team", "gun_team", "mortar_section", "recon_team", "mech_infantry",
 	"armour_section", "armour_platoon", "light_armour", "transport", "qrf", "engineers", "company"]
+
+## Hand smoke a row counts (requests: 4.2.3).
+const SMOKE_ITEMS: Array[StringName] = [&"smoke_grenade", &"smoke_green", &"smoke_yellow", &"smoke_blue", &"smoke_purple", &"smoke_rdg2"]
 
 var side: StringName
 ## id -> row.
@@ -180,6 +184,9 @@ func row_for(g: Variant, now: float, meta := {}) -> Dictionary:
 	var vehicles := {}
 	var launchers := 0
 	var mgs := 0
+	var medics := 0
+	var smoke := 0
+	var in_contact := false
 	var pos := Vector3.INF
 	var soldiers: Array = squad.members() if g is Squad else record.get("soldiers", [])
 	for n: Variant in soldiers:
@@ -200,6 +207,11 @@ func row_for(g: Variant, now: float, meta := {}) -> Dictionary:
 		at_cp += man_at_cp(lkind)
 		launchers += 1 if lkind != "" else 0
 		mgs += 1 if soldier_kind(s) == "mg" else 0
+		medics += 1 if s.role == &"medic" else 0
+		if s.inventory:
+			for id: StringName in SMOKE_ITEMS:
+				smoke += s.inventory.count_of(id)
+		in_contact = in_contact or (brain != null and brain.body != null and brain.in_contact())
 		ammo += brain.ammo_share(_cfg_num("ammo_full_mags", 6.0)) if brain and brain.body else 1.0  # (a brain not ready yet has no body)
 		morale += brain.morale if brain else 1.0
 		if s.vehicle and is_instance_valid(s.vehicle) and not s.vehicle.wrecked:
@@ -232,7 +244,8 @@ func row_for(g: Variant, now: float, meta := {}) -> Dictionary:
 	return {"id": id, "side": String(side), "kind": String(meta.get("kind", squad.get_meta(&"group_kind", _guess_kind(up, mgs, launchers, v_kinds)))),
 		"callsign": String(meta.get("callsign", squad.get_meta(&"callsign", id))), "strength_cp": cp, "at_cp": at_cp, "ce": ce,
 		"ce_band": ce_band(ce), "ammo": ammo_share, "ammo_band": ammo_band(ammo_share), "pos": pos, "up": up, "size": size,
-		"mounted_in": mounted, "task": "", "role": "", "availability": 1.0, "sector": null, "rally": Vector3.INF,
+		"mounted_in": mounted, "vehicle_kinds": v_kinds, "mgs": mgs, "launchers": launchers, "medics": medics, "smoke": smoke,
+		"in_contact": in_contact, "task": "", "role": "", "availability": 1.0, "sector": null, "rally": Vector3.INF,
 		"virtual": Virtualizer.is_virtual(record) if not record.is_empty() else false, "taskable": bool(meta.get("taskable", true)), "sitrep_at": now}
 
 

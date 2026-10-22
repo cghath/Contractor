@@ -2744,3 +2744,21 @@ where it's a number. They're numbered B1.n so the phases landing beside it don't
 | B1.16 | World diamonds: none for a spot the player can see himself (in his view within 150 m with a clear line, checked 4 times a second); a tag's red diamond shows once `EnemyTags`' own mark over the man has gone; 0.95, 0.6 and 0.3 alpha by band. Settings: on/off, range 100-1,500 m (800) | No double marks, no clutter over what you're looking at | Diamonds over everything |
 | B1.17 | The 0.3 ms budget is measured on a full picture (64 entries) taking 5 reports a step: 106 µs in the debug build. 40 groups each reporting a fresh cluster every 30 s make 1.3 a second; at 20 a step it's about 550 µs | A heavy fight's burst, not a steady state no fight reaches | 20 reports a second as the steady load |
 | B1.18 | Friendly comms down is a hook (`SideIntel.server_set_comms`) until something calls it: no enemy jammer exists yet, and the operation HQ's relay comes with D3; the hostile picture's comms follow the mast | B1 builds the effect; its causes land with their phases | Inventing an enemy jammer now |
+
+### B4, part 1: request plumbing before B2 (built 2026-10-22, branch claude/ca-b1-side-picture)
+
+B4's pieces that don't need the commander: the broker, the cards and the radio voice. The jobs
+themselves (moving, suppressing, treating) come with B2's SideCommand as the broker's executor.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| B4.1 | `RequestBroker` runs the whole lifecycle now and hands each accepted request to an `executor` (B2's SideCommand), which moves it on with `server_progress`; with none, an accepted request waits and fails at `until_s` (10 min) "Timed out". No player entry point yet: C6's contextual menus and the map add them | The plumbing is testable and stable before anything can do the jobs; no half-working option in the game | Faking the jobs until B2 |
+| B4.2 | `can_spare` is a hook B2 fills; until then every group can be spared | 4.2.10 is the commander's call | A stand-in rule |
+| B4.3 | Refusals in a fixed order: committed to an assault, pinned (in contact and RED), ammo (black for jobs that shoot, amber or worse for an ammo ask), no medic, no smoke, out of range, the commander's answer; an ETA over 2 minutes is a counter-offer | The order a unit would answer in; data per kind (data/requests.json) | Random refusals |
+| B4.4 | ETAs: within the kind's `in_place_m` 8 s, else the distance at 1.8 m/s on foot or 8 m/s mounted. Line of sight and SBF spots come with B2's executor | Close enough until routes are in | Path-finding on the host for every request |
+| B4.5 | The answer comes 2-6 s after the ask by the group's CE (x1.5 in contact); a group with no radio hears only within 80 m | The doc's 2-6 s and shouting distance | One fixed delay |
+| B4.6 | Groups answer under callsigns by kind and number (Saber, Iron, Anvil, Hammer, Shadow, Packhorse), kept for the deployment; the net itself is Citadel | 4.6's names | The squads' node names |
+| B4.7 | Allied asks (4.3) built for contact support and ammo from the board; medic, clearing an AT threat, covering a crossing and recovery come with B2/B3 when groups know those states. One card per player at a time, 30 s; asks again from the same group after 5 min; cooperation counted per player (the employer's reputation and the operation bonus read it in D3) | The two asks the board already knows; the rest need the commander | All six now, half of them never raised |
+| B4.8 | The cards answer to C2's high command keys (`hc_approve`, `hc_deny`) once they exist; until then the card's buttons | C2 owns the keys | Binding new keys here |
+| B4.9 | RadioVoice says a line only when every word has a clip, digit by digit ("zero four one"); 2 voices; the words are data/radio_voice.json and requests_test checks every line the broker says is covered. The clips are rendered with tools/voices/gen_radio.py, which needs Piper: not on this PC, so they're still to render (subtitles meanwhile) | No half-spoken lines; the word list can't drift from the lines | Runtime speech synthesis (4.6 rules it out) |
+| B4.10 | Requests travel as whole records to every peer on each change (a few at a time, closed ones kept 2 minutes) | Few records, simple late joins | Deltas |
