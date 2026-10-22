@@ -459,11 +459,64 @@ static func front_offer(rng: RandomNumberGenerator, zone_id: String, today: int)
 			return {}
 		ctx["target"] = String(sides[rng.randi() % sides.size()])
 		line = "Fighting in %s: %s attacking, %s holding." % [name, WorldSites.holder_name(by), WorldSites.holder_name(h)]
+		for side: String in [by, h]:  # D7: on a front of the US's, the US pays for the job
+			if WorldSites.is_belligerent(side):
+				ctx["employer"] = side
 	var offer := ContractGen.generate(rng, ctx)
 	offer["war_front"] = true
 	offer["war_driven"] = true
 	offer["brief"] = "%s %s" % [line, String(offer.get("brief", ""))]
 	return offer
+
+
+## D7 (docs/combined_arms.md 6.1, 7.3): how long a front's operation offer stays up (days), and
+## the title each employer's carries. Proposed.
+const OP_OFFER_DAYS := 4
+const OP_TITLES := {"vessmark": "Vessmark operation"}
+
+
+## The operations a belligerent's front posts (D7, until D3's operation contracts): one on each of
+## its fronts, once, from the belligerent itself and from each "ops_only" ally of its (Vessmark),
+## each only for an employer the company stands at trusted or better with. A stand-in operation
+## is a contract of one of the employer's "op_types" against the front's holder, one phase
+## ("op_phases"), "op_front" the zone (WorldSites waits on it and its result moves the front), up
+## OP_OFFER_DAYS. `posted` (zone ids) are fronts that had theirs already.
+static func operation_offers(rng: RandomNumberGenerator, today: int, posted: Array) -> Array:
+	var out: Array = []
+	var trusted := 30
+	for t: Dictionary in MissionRegistry.reputation_tiers():
+		if String(t.id) == "trusted":
+			trusted = int(t.min)
+	for zid in WorldSites.fronts():
+		var side := String(WorldSites.front(zid).by)
+		var target := WorldSites.holder_now(zid)
+		if not WorldSites.is_belligerent(side) or zid in posted or not ZoneControl.offers_in(zid) \
+				or target == ZoneControl.PLAYER or target == WorldSites.REBELS or not MissionRegistry.faction(target).has("id"):
+			continue
+		var hirers: Array[String] = [side]
+		for f: String in MissionRegistry.employers():
+			if bool(MissionRegistry.faction(f).get("ops_only", false)) and side in MissionRegistry.allies_of(f):
+				hirers.append(f)
+		for employer in hirers:
+			if Economy.reputation(employer) < trusted:
+				continue
+			var e := MissionRegistry.faction(employer)
+			var types: Array = e.get("op_types", ["raid"])
+			var offer := ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": target, "employer": employer,
+				"type": String(types[rng.randi() % types.size()])})
+			var step := maxi(MissionRegistry.setting_i("pay_round", 500), 1)
+			offer.base_pay = maxi(step, roundi(int(offer.base_pay) * float(e.get("op_pay_mult", 1.0)) / step) * step)
+			offer["operation"] = true
+			offer["op_front"] = zid
+			offer["op_side"] = side
+			offer["op_phases"] = 1
+			offer["war_driven"] = true
+			offer["expires_day"] = today + OP_OFFER_DAYS
+			offer["title"] = "%s: %s" % [String(OP_TITLES.get(employer, "Joint operation")), String(offer.title)]
+			offer["brief"] = "%s are attacking %s, held by %s, and want the company in the push: the operation's result decides the fight there. %s" % [
+				WorldSites.holder_name(side), RegionMap.zone_name(zid), WorldSites.holder_name(target), String(offer.get("brief", ""))]
+			out.append(offer)
+	return out
 
 
 ## Host: drops expired offers and tops the board up for today: regular offers up to
@@ -489,6 +542,12 @@ func server_refresh_board() -> void:
 			flip["war_flip"] = true
 			_add_offer(flip)
 			WorldSites.server_clear_flashpoint(zid)
+	# D7: a US front posts its operation, once (and Vessmark's beside it); the front waits on it.
+	var posted: Array = WorldSites.fronts().filter(func(z: String) -> bool: return WorldSites.front(z).has("op_day"))
+	for op: Dictionary in operation_offers(rng, today, posted):
+		_add_offer(op)
+		WorldSites.front(String(op.op_front))["op_day"] = today
+		Campaign.mark_changed(WorldSites.SECTION)
 	# Contracts follow the war: a job on every front (one each), and a defence wherever the
 	# company's own ground is attacked.
 	for zid in WorldSites.fronts():
@@ -948,6 +1007,8 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")), String(c.get("leader", "")))  # wave 6c; the living war
 		elif String(result.outcome) == "completed" and String(c.get("leader", "")) != "":
 			WorldSites.server_leader_down(String(c.get("target", "")), String(c.leader))  # the leader it named is taken, in any zone
+		if String(c.get("op_front", "")) != "":  # D7: a US operation's result moves its front (6.6)
+			WorldSites.server_operation_ended(c, int(c.get("op_phases", 1)) if String(result.outcome) == "completed" else 0)
 	# What came home goes to the base. In a campaign the people bring their own gear home
 	# (BaseHub), so the report says what else to bank ("bank": bodies and items set down).
 	Economy.bank_items(without_intel(report.get("bank", report.get("items", []))), "carried out")

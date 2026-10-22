@@ -7,7 +7,8 @@ extends RefCounted
 ##   floats a little over it) with walls round it. Of PROBE_DIRS level rays at PROBE_HEIGHT
 ##   (below a window's sill, so only doorways and breaches let them out), at most
 ##   MAX_OPEN reach PROBE_M without meeting a wall, and never two opposite ones (a gap between
-##   two buildings is no room). Ground rising under a ray isn't a wall (hilly zones). Inside
+##   two buildings is no room). Under a roof (a hangar's or a factory's hall, F-162) the rays
+##   reach HALL_PROBE_M and HALL_MAX_OPEN may be open. Ground rising under a ray isn't a wall (hilly zones). Inside
 ##   spots next to each other make one building.
 ## - Floors (audit follow-up F-01): every walkable surface over each grid cell counts, from
 ##   SCAN_DOWN_M below the query to SCAN_UP_M above it (found by casting down through the
@@ -44,6 +45,15 @@ const PROBE_HEIGHT := 0.6
 const PROBE_M := 12.0
 const PROBE_DIRS := 8
 const MAX_OPEN := 2
+## Big open halls (F-162: a hangar about 19 x 17 m with a 14 m door, a factory floor up to 26 m
+## wide): a spot with a roof straight over it within ROOF_UP_M (the underside of something, a
+## surface facing down) probes for walls out to HALL_PROBE_M instead, and may have up to
+## HALL_MAX_OPEN ways out (a wide door seen from close by), still never two opposite ones. A
+## canopy with no walls stays outside. Proposed.
+const ROOF_UP_M := 12.0
+const HALL_PROBE_M := 26.0
+const HALL_MAX_OPEN := 3
+const ROOF_NORMAL_Y := -0.5
 ## A hit counts as a wall when its surface is this close to upright (normal.y below it).
 const WALL_NORMAL_Y := 0.5
 ## Fewer inside spots than this is a nook, not a building.
@@ -664,7 +674,8 @@ static func _spot(spots: Dictionary, id: Vector3i) -> Vector3:
 	return (spots[Vector2i(id.x, id.z)] as Array)[id.y]
 
 
-## Whether walkable spot `q` has walls round it (see the class notes).
+## Whether walkable spot `q` has walls round it (see the class notes). Under a roof (a hall,
+## F-162) the walls may stand further off and one more way may be open (ROOF_UP_M).
 static func inside(world: World3D, q: Vector3) -> bool:
 	var eye := q + Vector3.UP * PROBE_HEIGHT
 	var open: Array[int] = []
@@ -672,11 +683,37 @@ static func inside(world: World3D, q: Vector3) -> bool:
 		if not _wall_within(world, eye, _dir(k), PROBE_M):
 			open.append(k)
 			if open.size() > MAX_OPEN:
+				return _hall_inside(world, q, eye)
+	return not _opposite(open)
+
+
+## A spot too open for inside(): inside a hall when it's roofed and the walls further off close
+## it in (HALL_PROBE_M, HALL_MAX_OPEN).
+static func _hall_inside(world: World3D, q: Vector3, eye: Vector3) -> bool:
+	if not roofed(world, q):
+		return false
+	var open: Array[int] = []
+	for k in PROBE_DIRS:
+		if not _wall_within(world, eye, _dir(k), HALL_PROBE_M):
+			open.append(k)
+			if open.size() > HALL_MAX_OPEN:
 				return false
+	return not _opposite(open)
+
+
+## Whether two of the open ways `open` are opposite (a gap between buildings).
+static func _opposite(open: Array[int]) -> bool:
 	for i in open:
 		if (i + (PROBE_DIRS >> 1)) % PROBE_DIRS in open:
-			return false  # open both ways: a gap between buildings
-	return true
+			return true
+	return false
+
+
+## Whether spot `q` has a roof straight over it within ROOF_UP_M: the underside of something.
+static func roofed(world: World3D, q: Vector3) -> bool:
+	var from := q + Vector3.UP * PROBE_HEIGHT
+	var hit := world.direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + Vector3.UP * ROOF_UP_M, Throwables.WORLD_MASK))
+	return not hit.is_empty() and (hit.normal as Vector3).y <= ROOF_NORMAL_Y
 
 
 ## A wall (an upright surface, not the ground rising) within `reach` from `from` along `dir`.

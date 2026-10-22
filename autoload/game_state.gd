@@ -380,6 +380,25 @@ static func read_save(path: String) -> Dictionary:
 			else:
 				push_warning("GameState: %s: skipping a bad bridge record (%s)" % [path, id])
 		out.bridges = {"hp": hp}
+	var ground_in: Variant = data.get("ground", {})  # nor dug ground before the e-tool (F-176: it was dropped here)
+	out["ground"] = {}
+	if typeof(ground_in) == TYPE_DICTIONARY and typeof(ground_in.get("cuts", [])) == TYPE_ARRAY and typeof(ground_in.get("berms", [])) == TYPE_ARRAY:
+		var cuts: Array = []
+		var berms: Array = []
+		for op: Variant in ground_in.get("cuts", []):
+			if Digging.cut_ok(op):
+				cuts.append(op)
+			else:
+				push_warning("GameState: %s: skipping a bad ground cut (%s)" % [path, str(op).left(80)])
+		for b: Variant in ground_in.get("berms", []):
+			if Digging.berm_ok(b):
+				berms.append(b)
+			else:
+				push_warning("GameState: %s: skipping a bad berm" % path)
+		if ground_in.has("cuts"):
+			out.ground = {"cuts": cuts, "berms": berms}
+	elif typeof(ground_in) != TYPE_DICTIONARY or not (ground_in as Dictionary).is_empty():
+		push_warning("GameState: %s: the ground section has the wrong type; the zone is dug afresh" % path)
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)

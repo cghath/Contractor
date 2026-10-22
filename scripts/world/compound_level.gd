@@ -362,6 +362,7 @@ func _ready() -> void:
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
 	Digging.of(self)  # every peer: dug berms come to it (Digging)
+	Flares.of(self)  # every peer: flares at night come to it (G-24)
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	EnemyTags.install(self)  # tagging enemies for the squad by radio (Captain, 2026-10-16)
 	RebelCalls.install(self)  # the locals' call-ins, by their support (rebel support part 2)
@@ -1102,6 +1103,8 @@ func _make_soldier(data: Dictionary) -> Node:
 			inventory.take(StringName(id))
 		if soldier.faction == &"hostile" and is_hostile_kit(data.loadout):
 			for id: StringName in LauncherAI.insurgent_kit(self):  # wave 5: some carry an RPG-7
+				inventory.take(id)
+			for id: StringName in Flares.insurgent_flares(self):  # G-24: some carry hand flares for the night
 				inventory.take(id)
 		# A hostile's heavy_gunner/ammo_bearer role is cast purely for SquadAI (its weapon and
 		# ammo already come from its own loadout, hostile_loadout/rival_pmc_loadout); giving it
