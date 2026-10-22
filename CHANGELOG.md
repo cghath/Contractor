@@ -11,10 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### High command (combined arms, phase C1: groundwork)
+### High command (combined arms, phases C1 and C2)
 
-> **Where this lane is:** C1 done on claude/ca-c-high-command. Next: C2 (Phase 1, HighCommand
-> registry and orders, the two standing squads, AlliedTroops onto HcOrder).
+> **Where this lane is:** C1 and C2 done on claude/ca-c-high-command. Next: C3 (Phase 2 orders:
+> Attack, Support by fire, Bound, Fall back, Defend frontage, go codes, requests, CE aborts).
+
+#### Added (C2: Phase 1)
+- **Two high command squads from the start.** Every new campaign has Hawk 2 and Viper 3 on the
+  roster: four men each (a team leader with a record, an autorifleman, a medic and a rifleman) in
+  their own kit, on wages, with 14 days of their wages added to the start cash. They deploy on
+  every contract beside the player squad (100 m to either side of the insertion) and never take
+  a player-squad slot. "Squad & deploy" lists them with a "Deploys" box to leave one at home and
+  their callsigns to rename.
+- **Ordering them.** Right-click the map: Move, Defend (a building near the point is garrisoned,
+  else a line facing the threat), Regroup, Extract, Hold, Follow me, Support me, Report, Cancel.
+  Shift queues. Every order is acknowledged, then ends done, failed with a reason ("unable: no
+  route to 041 053. Holding"), or cancelled; a squad that stops making headway says "held up" at
+  30 s and gives up at 90 s.
+- **The company net.** Squads report on it in their own subtitle lines: copy, set, done, contact
+  (with an intel marker; the other squads hear of it 3 s later), man down, a new leader taking
+  over when the hero falls, and sitreps. The map shows each squad as a frame with its callsign,
+  strength and a green/amber/red pip, its order as a line, and a panel with each squad's card and
+  the net.
+- **Allied elements report too.** Their orders now have the same lifecycle and net lines.
+- One commander at a time (the host by default; "Take command" on the panel). Contracts carry
+  how many squads they allow (2, more on rated-5, hot zones and operations).
+- Hero squads inside the extraction point come out with you; the leave-behind warning names any
+  that aren't.
 
 #### Added
 - **A second friendly squad no longer breaks the first.** The groundwork for hero-led squads

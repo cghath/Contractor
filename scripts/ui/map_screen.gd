@@ -18,6 +18,8 @@ var view: MapView
 var briefing_panel: BriefingScreen
 var toolbar: PanelContainer
 var extraction_panel: MapExtractionPanel
+## High command (MapHcPanel): on the left while a squad is out.
+var hc_panel: MapHcPanel
 var _reference: Label
 var _kind: OptionButton
 var _swatches := {}  # colour name -> its Button
@@ -73,6 +75,12 @@ func _ready() -> void:
 	extraction_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	extraction_panel.offset_left = -MapExtractionPanel.WIDTH - 8
 	extraction_panel.offset_right = -8
+	hc_panel = MapHcPanel.new()
+	hc_panel.visible = false
+	add_child(hc_panel)
+	hc_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	hc_panel.offset_left = 8
+	hc_panel.offset_right = 8 + MapHcPanel.WIDTH
 	resized.connect(_layout_panels)
 	_layout_panels()
 	_connect_level.call_deferred()
@@ -87,6 +95,7 @@ func _layout_panels() -> void:
 	view.offset_top = top
 	briefing_panel.offset_top = top + 8
 	extraction_panel.offset_top = top + 8
+	hc_panel.offset_top = top + 8
 	_help.offset_top = top + 8
 	var room := (size.y if size.y > 1.0 else get_viewport_rect().size.y) - top - 32.0
 	_help_scroll.custom_minimum_size.y = clampf(_help_box.get_combined_minimum_size().y, 60.0, maxf(room, 60.0))
@@ -105,6 +114,9 @@ func _connect_level() -> void:
 	var extraction := MapNodes.extraction(self)
 	if extraction:
 		extraction.changed.connect(_refresh_panels)
+	var hc := MapNodes.high_command(self)
+	if hc:
+		hc.changed.connect(_refresh_hc)
 
 
 func is_open() -> bool:
@@ -207,7 +219,20 @@ func _refresh_panels() -> void:
 	if extraction_panel.visible:
 		extraction_panel.show_extraction(extraction)
 	_close_button.disabled = _forced  # the briefing keeps the map open
+	_refresh_hc()
 	_refresh_inset()
+
+
+## The high command panel: shown while any group is out (MapHcPanel).
+func _refresh_hc() -> void:
+	var hc := MapNodes.high_command(self)
+	var want := visible and hc != null and (not hc.view.is_empty() or (DevTools.on() and multiplayer.is_server())) and not briefing_panel.visible
+	if hc_panel.visible != want:
+		hc_panel.visible = want
+		_refresh_inset()
+	if want:
+		hc_panel.show_command(hc)
+		view.queue_redraw()
 
 
 ## The map fills what the toolbar and the side panel leave.
@@ -219,6 +244,9 @@ func _refresh_inset() -> void:
 		inset = MapExtractionPanel.WIDTH + 16.0
 	if view.offset_right != -inset:
 		view.offset_right = -inset
+	var left := MapHcPanel.WIDTH + 16.0 if hc_panel and hc_panel.visible else 0.0
+	if view.offset_left != left:
+		view.offset_left = left
 	if _help:
 		_help.offset_right = -inset - 8.0
 

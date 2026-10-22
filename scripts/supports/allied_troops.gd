@@ -356,6 +356,9 @@ func server_order(by: Soldier, order: String, point: Vector3, target := "") -> S
 		else:
 			e.order = order
 			e.point = at
+			var hc := HighCommand.of(self)
+			if hc:
+				hc.note_allied_order(e, order, at, by)  # onto HcOrder: a lifecycle and reports (combined_arms.md 5.1)
 	_show_left = 0.0
 	return "; ".join(problems)
 

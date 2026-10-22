@@ -92,6 +92,8 @@ var _menu: PopupMenu
 var _menu_at := Vector2.ZERO
 ## The right-click menu's allied-order submenus, rebuilt each time it opens.
 var _allied_menus: Array[PopupMenu] = []
+## The right-click menu's high command submenus (MapCommandLayer.add_orders).
+var _hc_menus: Array[PopupMenu] = []
 var _fitted := false  # showing the whole area (fit), until zoomed or panned
 ## The zone picture being made on a worker thread (-1: none).
 var _render_task := -1
@@ -429,6 +431,9 @@ func _open_menu(screen_pos: Vector2) -> void:
 	if teams.has("mortar"):
 		_menu.add_item("Weapons team: mortar fire here (%s)" % MapGrid.grid_ref(_menu_at, area), 6)
 	_add_allied_orders()
+	for sub in _hc_menus:
+		sub.queue_free()
+	_hc_menus = MapCommandLayer.add_orders(self, _menu, _menu_at)
 	_menu.position = Vector2i(get_screen_position() + screen_pos)
 	_menu.reset_size()
 	_menu.popup()
@@ -621,6 +626,7 @@ func _draw() -> void:
 	_draw_gear_markers()
 	_draw_squad()
 	_draw_allied()
+	MapCommandLayer.draw(self)  # high command: squad frames and their orders
 	if _line.size() >= 2:
 		_polyline(_line, MapMarkers.colour_value(marker_colour), 2.0)
 	_layout_labels(map_rect)

@@ -2744,6 +2744,17 @@ Made while building the C lane (claude/ca-c-high-command); each is Proposed and 
 | C1.6 | `DeadGround` already existed (supports/, lifted for helicopter LZs); lift 4 is `DeadGround.known_watchers(level, squads)` (intel markers + squads' `known`) for game AI's `posts`, the soak and LZ picks keep `watchers()` | No second dead-ground search; the seam is the posts argument `find()` already takes | A new pure copy |
 | C1.7 | FollowBrain's bands: Follow 30-60 m, Support me 60-120 m; ProgressWatch: wedged 4 s (the soak's), held up 30 s, unable 90 s | high_command.md 3.2 and 4.3 | Other numbers |
 | C1.8 | Soak edits (lifts 7, 8 and the soak calling the lifted pieces) go as F-180 | coop_soak.gd isn't on claude/ai-driving | Bringing the soak branch in |
+| C2.1 | The hero leads with the existing MOVE order given to himself; his men keep FOLLOW on him (he's the squad's leader). No new `Intent.LEAD` in squad_ai.gd | The followers already read only `leader`; it works today and keeps squad_ai.gd untouched | A new intent |
+| C2.2 | `SquadOrders` is ticked by `HighCommand._physics_process` every 0.5 s, not from `Squad._physics_process` | No hook in squad.gd; one place ticks every group | The doc's Squad tick |
+| C2.3 | The standing detachments are d02 (Hawk 2) and d03 (Viper 3), hired from `Hiring.candidate` with their role kits; the hero gets +0.12 nerve and aim and 5-8 missions, his men 2-5 | Believable veterans (5.2), the hiring board's own people | Fixed hand-made men |
+| C2.4 | Hero squads spawn at the deployment's start, 100 m to either side of the insertion and 20 m back, on foot even after a helicopter insertion | high_command.md 3.1 (80-150 m); the helicopter carries the player squad only | Riding in with the player squad |
+| C2.5 | Every contract carries `squads_max` = `Heroes.squads_max(rated, hot)`: 2, +1 rated 5, +1 hot, +1 operation, cap 3 (4 in operations); only the standing two exist until Phase 3 forms more | 5.1 question 4 | Rating-gated squads |
+| C2.6 | The net: one line a squad every 3 s, a queue of 4 by priority; "copy", man-down and succession lines skip the gap; 4 orders a second per peer | high_command.md 6, 7 | No limits |
+| C2.7 | Allied elements keep AlliedTroops' own dispatch; every order they get (support menu, map menu or HighCommand) is recorded as an HcOrder with a lifecycle: done within 12 m of the point, unable after 90 s without headway, reports on the net | One order path with reports (call 50), without rewriting AlliedTroops | Moving their dispatch into SquadOrders |
+| C2.8 | A reported contact: an intel marker "Hawk 2: 6x" at once, and the other squads (and the player squad) note those enemies as heard 3 s later | 5.1's company picture with net delay | Instant sharing |
+| C2.9 | Hero squads inside the extraction point at the end come out with the squad; outside, the leave-behind warning names them ("Hawk 2, 2 men, 380 m out") and a second confirm leaves them MIA | high_command.md 3.1 step 6; they never block | Waiting for them |
+| C2.10 | C2's map: squad frames and order lines (MapCommandLayer), a right-click submenu per squad, and the HC panel on the left; C4 replaces the submenus with the full select > order > place > face > confirm flow | Enough to order and see the squads now | Waiting for C4 |
+| C2.11 | Not in C2 (later): a debrief section per hero squad and the hero's "Led Hawk 2 at ..." history line; briefing insertion markers for hero squads | Kept the phase to the order path and the squads | |
 
 ### Operations, the war and staging
 

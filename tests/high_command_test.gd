@@ -10,6 +10,7 @@ extends Node
 var failures := 0
 var level: CompoundLevel
 var player: Soldier
+var _hawk: Squad
 
 
 func _ready() -> void:
@@ -22,6 +23,9 @@ func _ready() -> void:
 	_test_follow_brain()
 	_test_progress_watch()
 	_test_care_rules()
+	_test_hc_order()
+	_test_heroes()
+	_test_ce()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -36,6 +40,7 @@ func _ready() -> void:
 	await _frames(5)
 	await _test_dead_ground()
 	await _test_groundwork()
+	await _test_orders()
 	GameState.delete_save()
 	print("HIGH_COMMAND TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -208,7 +213,143 @@ func _test_groundwork() -> void:
 	check(mine.members().all(func(s: Soldier) -> bool: return SquadAI.of(s).order == Squad.Order.HOLD), "and the other way round")
 	check(hawk.tasking.is_empty(), "an empty tasking (nothing changes)")
 	mine.give_order(player, Squad.Order.FOLLOW, player.global_position)
-	for s in hawk.members():
-		s.queue_free()
-	hawk.queue_free()
-	await _frames(2)
+	_hawk = hawk
+
+
+# --- C2: HcOrder, Heroes, CE (pure) --------------------------------------------------------------
+
+func _test_hc_order() -> void:
+	print("HcOrder.clean")
+	var ctx := {"area": Rect2(-500, -500, 1000, 1000), "squads": {"hawk2": true}, "commander": true}
+	var ok := HcOrder.clean(HcOrder.make("hawk2", "move", [[10, 20]]), ctx)
+	check(bool(ok.ok) and ok.order.points == [[10.0, 20.0]], "a good Move passes")
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "dance", [[0, 0]]), ctx).ok), "an unknown verb is refused")
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "move", [[NAN, 0]]), ctx).ok), "NaN is refused")
+	check(String(HcOrder.clean(HcOrder.make("hawk2", "move", [[900, 0]]), ctx).why) == "off the map", "off the map is refused")
+	var route: Array = []
+	for i in 17:
+		route.append([i, i])
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "move", route), ctx).ok), "a 17-point route is refused")
+	var full := ctx.duplicate()
+	full.queued = 8
+	full.append = true
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "move", [[0, 0]]), full).ok), "a ninth queued order is refused")
+	var nc := ctx.duplicate()
+	nc.commander = false
+	check(String(HcOrder.clean(HcOrder.make("hawk2", "move", [[0, 0]]), nc).why) == "you don't have command", "a non-commander is refused")
+	check(not bool(HcOrder.clean(HcOrder.make("viper3", "move", [[0, 0]]), ctx).ok), "an unknown squad is refused")
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "move", []), ctx).ok), "Move needs a point")
+	var edge := HcOrder.clean(HcOrder.make("hawk2", "move", [[495, 0]]), ctx)
+	check(bool(edge.ok) and float(edge.order.points[0][0]) <= 420.0, "a point near the edge is clamped 80 m inside")
+
+
+func _test_heroes() -> void:
+	print("Heroes")
+	var data := {}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var added := Heroes.seed_standing(data, 1, rng)
+	check(added.size() == 8 and Heroes.detachments(data).size() == 2, "two standing detachments of four")
+	var d: Dictionary = Heroes.get_detachment(data, "d02")
+	check(d.callsign == "Hawk 2" and Heroes.get_detachment(data, "d03").callsign == "Viper 3", "Hawk 2 and Viper 3")
+	var roles := (d.members as Array).map(func(mid: Variant) -> String: return String(Roster.get_member(data, String(mid)).role))
+	check(roles == ["team_leader", "autorifleman", "medic", "rifleman"], "leader, autorifleman, medic, rifleman")
+	var hero := Roster.get_member(data, String(d.leader))
+	check(hero.has("hero") and int(hero.missions) >= Heroes.HERO_MISSIONS and not (hero.history as Array).is_empty(), "the hero has a record")
+	check(Heroes.seed_standing(data, 2, rng).is_empty(), "seeding twice adds nobody")
+	check(RosterDeployment.auto_squad(data, 7).is_empty(), "auto_squad never returns detachment members")
+	check(Heroes.standing_wages(data) == Roster.daily_wages(data), "their wages are the daily bill")
+	check(Heroes.squads_max(3) == 2 and Heroes.squads_max(5) == 3 and Heroes.squads_max(5, true) == 3 and Heroes.squads_max(5, true, true) == 4,
+		"squads: 2 always; rated 5 +1, hot +1, operation +1; cap 3 (4 in operations)")
+	check(Heroes.deploying(data) == ["d02", "d03"], "both deploy by default")
+	Heroes.set_home(data, "d03", true)
+	check(Heroes.deploying(data) == ["d02"], "one left at home stays")
+	check(Heroes.rename(data, "d02", "  Hammer 2 ") == "Hammer 2", "a callsign is editable")
+	check(Heroes.deploy_members(data, "d02")[0] == String(d.leader), "the leader deploys first")
+
+
+func _test_ce() -> void:
+	print("Combat effectiveness")
+	check(SquadOrders.ce_band(SquadOrders.combat_effectiveness({"up": 4, "ammo": 1.0, "morale": 1.0}, 4)) == "green", "4/4, full ammo: green")
+	check(SquadOrders.ce_band(SquadOrders.combat_effectiveness({"up": 2, "ammo": 0.6, "morale": 0.6}, 4)) == "amber", "2/4, ammo and morale down: amber")
+	check(SquadOrders.ce_band(SquadOrders.combat_effectiveness({"up": 1, "ammo": 0.3, "morale": 0.3, "urgent": 1}, 4)) == "red", "1/4 with an urgent casualty: red")
+
+
+# --- C2: orders in a level -----------------------------------------------------------------------
+
+func _wait_state(so: SquadOrders, state: String, limit_s: float) -> void:
+	var t0 := Soldier._now()
+	while String(so.order.get("state", "")) == state and Soldier._now() - t0 < limit_s:
+		await _frames(10)
+
+
+func _test_orders() -> void:
+	print("Orders (Phase 1)")
+	var hc := MapNodes.high_command(level)
+	check(hc != null and hc.groups.has("hawk2"), "the spawned squad is on HighCommand's books")
+	if hc == null or not hc.groups.has("hawk2"):
+		return
+	var so: SquadOrders = hc.groups.hawk2.orders
+	var hero := _hawk.hero
+	hero.global_position = level.ground_point(player.global_position + Vector3(30, 0, 0))
+	for s in _hawk.members():
+		s.global_position = level.ground_point(hero.global_position + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3)))
+	await _frames(3)
+	check(hc.server_order(HcOrder.make("hawk2", "move", [[0, 0]]), false, 7) != "", "an order from nobody's player is refused")
+	var to := hero.global_position + Vector3(0, 0, 25)
+	var why := hc.server_order(HcOrder.make("hawk2", "move", [[to.x, to.z]]))
+	check(why == "" and String(so.order.state) == "active", "Move accepted and active (%s)" % why)
+	var t0 := Soldier._now()
+	await _wait_state(so, "active", 40.0)
+	check(String(so.order.state) == "done", "Move: the hero gets there and it's done (%s, %.0f s)" % [so.order.state, Soldier._now() - t0])
+	check(_hawk.members().all(func(s: Soldier) -> bool: return s.global_position.distance_to(hero.global_position) < 25.0), "his men came with him")
+	await _frames(5)
+	var texts := hc.net_log.map(func(l: Dictionary) -> String: return String(l.text))
+	check(texts.any(func(t: String) -> bool: return "copy, moving to" in t), "the net: copy, moving to ...")
+	check(texts.any(func(t: String) -> bool: return "set at" in t), "the net: set at ...")
+	# queue
+	var a := hero.global_position + Vector3(8, 0, 0)
+	hc.server_order(HcOrder.make("hawk2", "hold", []))
+	check(String(so.order.state) == "set", "Hold: set at once")
+	hc.server_order(HcOrder.make("hawk2", "move", [[a.x, a.z]]), true)
+	check(so.queue.size() == 1 and String(so.queue[0].state) == "queued", "Shift: queued behind the hold")
+	hc.server_order(HcOrder.make("hawk2", "report", []))
+	check(so.queue.is_empty() and String(so.order.verb) == "report", "a new order without Shift replaces the queue")
+	await get_tree().create_timer(1.1).timeout  # (at most 4 orders a second from one peer)
+	# stuck: the hero can't move, so the watch reports held up, then unable
+	so.watch.held_up_s = 1.0
+	so.watch.unable_s = 2.5
+	hero.set_physics_process(false)
+	var far := hero.global_position + Vector3(0, 0, -60)
+	hc.server_order(HcOrder.make("hawk2", "move", [[far.x, far.z]]))
+	hc.server_order(HcOrder.make("hawk2", "hold", []), true)
+	t0 = Soldier._now()
+	while String(so.order.verb) == "move" and Soldier._now() - t0 < 15.0:
+		await _frames(10)
+	hero.set_physics_process(true)
+	var failed: Array = hc.orders.values().filter(func(o: Dictionary) -> bool: return String(o.state) == "failed")
+	check(not failed.is_empty() and "no route" in String(failed[-1].why), "a stuck move fails with a reason")
+	check(String(so.order.verb) == "hold", "and the next queued order starts (%s %s, queue %d)" % [so.order.verb, so.order.state, so.queue.size()])
+	so.watch.held_up_s = ProgressWatch.HELD_UP_S
+	so.watch.unable_s = ProgressWatch.UNABLE_S
+	# regroup
+	why = hc.server_order(HcOrder.make("hawk2", "regroup", [[hero.global_position.x, hero.global_position.z]]))
+	await _wait_state(so, "active", 30.0)
+	check(String(so.order.state) == "done", "Regroup: done once everyone is in (%s)" % so.order.state)
+	await get_tree().create_timer(1.1).timeout
+	# cancel
+	why = hc.server_order(HcOrder.make("hawk2", "move", [[a.x, a.z + 30]]))
+	check(hc.server_cancel("hawk2") and String(so.order.state) == "cancelled", "Cancel: cancelled, holding (%s; %s %s)" % [why, so.order.verb, so.order.state])
+	# follow
+	hc.server_order(HcOrder.make("hawk2", "follow", []))
+	check(String(so.order.verb) == "follow" and String(so.order.target.ref) == "1", "Follow: the ordering player")
+	# succession
+	var old := _hawk.hero
+	old.vitals.server_damage(1000.0)
+	await _frames(10)
+	so.tick(Soldier._now())
+	check(_hawk.hero != old and _hawk.hero != null and _hawk.hero.vitals.is_up(), "Succession: the next man leads")
+	await _frames(5)
+	check(hc.net_log.any(func(l: Dictionary) -> bool: return "has command" in String(l.text)), "and says so on the net")
+	var v := hc.build_view()
+	check(v.size() >= 1 and String(v[0].callsign) == "Hawk 2", "the view has the squad")

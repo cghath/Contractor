@@ -272,6 +272,46 @@ func _build_memorial(rows: VBoxContainer, v: Dictionary) -> void:
 			", ".join(PackedStringArray(missing)), Fallen.DECLARE_DAYS]))
 
 
+## The high command squads on "Squad & deploy" (combined_arms.md 5.2): each standing squad
+## pre-picked, a checkbox to leave it at home, its callsign editable by the host.
+func _build_hc_squads(rows: VBoxContainer, roster: Dictionary, contract: Dictionary) -> void:
+	var dets: Dictionary = roster.get("detachments", {})
+	if dets.is_empty():
+		return
+	var allowed := int(contract.get("squads_max", Heroes.FLOOR))
+	var going := Heroes.deploying(roster.duplicate(true), allowed)
+	var box := UiKit.section("High command squads (%d of %d allowed on this contract)" % [going.size(), allowed], rows)
+	var ids := dets.keys()
+	ids.sort()
+	for did: String in ids:
+		var d: Dictionary = dets[did]
+		var st := Heroes.strength(roster.duplicate(true), did)
+		var lead: Dictionary = roster.get("members", {}).get(String(d.get("leader", "")), {})
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override(&"separation", UiKit.SPACE_M)
+		var check := CheckBox.new()
+		check.button_pressed = did in going
+		check.text = "Deploys"
+		check.disabled = not multiplayer.is_server() or int(st.ready) == 0
+		check.tooltip_text = "Untick to leave %s at home for the next deployment" % d.callsign if int(st.ready) > 0 else "Nobody in %s is fit to deploy" % d.callsign
+		check.toggled.connect(func(on: bool) -> void: BaseHub.request("hc_home", [did, not on]))
+		row.add_child(check)
+		var callsign := LineEdit.new()
+		callsign.text = String(d.callsign)
+		callsign.custom_minimum_size.x = 120
+		callsign.editable = multiplayer.is_server()
+		callsign.tooltip_text = "Its callsign on the net and the map (Enter to rename)"
+		callsign.text_submitted.connect(func(t: String) -> void: BaseHub.request("hc_rename", [did, t]))
+		row.add_child(callsign)
+		var men := PackedStringArray()
+		for mid: Variant in d.get("members", []):
+			var m: Dictionary = roster.get("members", {}).get(String(mid), {})
+			if not m.is_empty():
+				men.append("%s%s" % [m.callsign, "" if Roster.is_available(m) else " (%s)" % Roster.status_text(m)])
+		row.add_child(_cut("Led by %s. %d of %d fit: %s" % [lead.get("name", "?"), int(st.ready), int(st.total), ", ".join(men)]))
+		box.add_child(row)
+
+
 func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	var prep: Dictionary = v.get("prep", {})
 	var roster: Dictionary = v.get("roster", {})
@@ -301,8 +341,8 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	ids.sort()
 	for mid: String in ids:
 		var m: Dictionary = members[mid]
-		if not Roster.is_available(m):
-			continue
+		if not Roster.is_available(m) or Heroes.in_detachment(roster, mid):
+			continue  # (a detachment's men deploy with their high command squad, below)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override(&"separation", UiKit.SPACE_M)
 		var check := CheckBox.new()
@@ -318,6 +358,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		row.add_child(_cut(_skills_text(m)))
 		squad.add_child(row)
 		_add_short_line(squad, String(m.callsign), m)
+	_build_hc_squads(rows, roster, contract)
 	var people := UiKit.section("Players", rows)
 	var players: Dictionary = roster.get("players", {})
 	var me := multiplayer.get_unique_id()

@@ -1030,6 +1030,8 @@ func _drop_extras(s: Soldier) -> void:
 ## Host only: a squadmate died (permadeath). Its body stays where it fell; it leaves the squad
 ## (no slot, no orders) and nobody new takes its slot.
 func _on_died_for_good(s: Soldier) -> void:
+	if s.faction == &"friendly" and s.squad_slot < 0 and s.hc_id != &"":
+		BaseHub.server_squadmate_died(s)  # a hero squad's man: lost on the roster too (no slot to free)
 	if s.faction == &"friendly" and s.squad_slot >= 0:
 		BaseHub.server_squadmate_died(s)  # campaign: a roster member is lost (wave 4)
 		_fallen_slots[s.squad_slot] = true

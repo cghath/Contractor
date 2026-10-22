@@ -260,7 +260,7 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 		"employer": employer, "target": target, "war_driven": war_driven, "leader": leader,
 		"zone_id": zone.get("zone_id", ""), "zone_name": zone.get("name", ""), "zone_kind": kind,
 		"region": zone.get("region", ""), "module": mission.module, "module_id": mission.module_id, "module_name": MissionRegistry.module_name(mission.module),
-		"rated": rated, "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),
+		"rated": rated, "squads_max": Heroes.squads_max(rated, hot), "enemy_est": est_count, "quality_est": snappedf(est_quality, 0.01),  # squads_max: high command squads allowed, from the briefed rating (5.1)
 		"threats_known": known, "intel_accuracy": snappedf(intel, 0.01),
 		"true_rating": true_rating, "enemy_count": enemy_count, "quality": snappedf(quality, 0.01),
 		"threats": threats, "understated": understated, "revealed": false, "renegotiated": false,

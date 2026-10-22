@@ -12,7 +12,7 @@ const LEVEL_GROUP := &"level"
 
 ## Adds the nodes to `level` (once). Call from the level's _ready, on every peer.
 static func install(level: Node) -> void:
-	for node: Node in [MapMarkers.new(), Briefing.new(), Extraction.new(), Reinforcements.new(), MissionScenario.new()]:
+	for node: Node in [MapMarkers.new(), Briefing.new(), Extraction.new(), Reinforcements.new(), MissionScenario.new(), HighCommand.new()]:
 		if level.get_node_or_null(NodePath(node.name)) == null:
 			level.add_child(node)
 		else:
@@ -35,6 +35,11 @@ static func markers(from: Node) -> MapMarkers:
 static func briefing(from: Node) -> Briefing:
 	var level := level_of(from)
 	return level.get_node_or_null(^"Briefing") as Briefing if level else null
+
+
+static func high_command(from: Node) -> HighCommand:
+	var level := level_of(from)
+	return level.get_node_or_null(^"HighCommand") as HighCommand if level else null
 
 
 static func extraction(from: Node) -> Extraction:
