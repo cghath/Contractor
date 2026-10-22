@@ -56,7 +56,10 @@ const CRUISE_KMH := 250.0
 const LOITER_KMH := 120.0
 const CRUISE_AGL_M := 12.5
 const HOVER_AGL_M := 3.0
-const OBSTACLE_CLEAR_M := 6.0
+## 7 m (was 6): the same CLEAR_MARGIN_M over MIN_CLEAR_M as over the ground; at 6, harbour_yard's
+## insertion 1 at pace 2 came over a billboard by the road 4.99 m clear, banked (woods perf pass,
+## 2026-10-22: the dense copses moved its line in). Proposed.
+const OBSTACLE_CLEAR_M := 7.0
 const ROTOR_REACH_M := 9.0
 const CONTOUR_CLIMB := 0.6
 ## On the J-hook, coming down (sinking), the rise ahead is planned at this share of that climb:

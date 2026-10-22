@@ -50,6 +50,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **The vehicle range's concrete blocks and sandbag wall are there (F-121).** They lay outside the range's 22 m voxel
   area, so they were never built: no voxels, no collision. A level's voxel area now grows to hold its structures.
   The AI driver has something to steer round, and a demo block on a concrete block carves it.
+- **The insertion helicopter keeps 7 m over what stands in its way (was 6),** the same margin it keeps over the
+  ground. With the dense copses moving its line, harbour yard's flight in came over a roadside billboard 4.99 m clear
+  while banking (the check asks for 5).
 
 #### Tests
 - `forest` checks, with Proposed budgets:
