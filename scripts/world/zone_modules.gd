@@ -121,6 +121,8 @@ static var _counts := {}  # solid_voxels_in
 static func base(type: String) -> String:
 	if type.begins_with(TOWN):
 		return "town"
+	if type.begins_with(LANDMARK):
+		return type.get_slice("#", 1)
 	return type.get_slice(GROWN, 0) if GROWN in type else type
 
 
@@ -173,6 +175,8 @@ static func has_type(type: String) -> bool:
 		return true
 	if type.begins_with(TOWN):
 		return _town(type)
+	if type.begins_with(LANDMARK):
+		return _landmark(type)
 	if GROWN in type:
 		return _grown(type)
 	return type in TYPES
@@ -298,6 +302,238 @@ static func _grown(type: String) -> bool:
 	return true
 
 
+## Landmarks (queue item 1.4, cghath 2026-10-21; docs/building_gen.md "Landmarks"):
+## "lm#<kind>#<seed>#<ruin>#<turn>", a landmark site (BuildingGen.site: a mosque, a church, a
+## school, a garage, a fuel station or depot, a factory, a farm, a harbour, an airfield, an oil
+## field, a drug lab, an IED workshop, an office), `ruin` BuildingGen.INTACT, RUINED or BOMBED,
+## turned `turn` quarter turns. base() is its kind. Zones get theirs by their asset tags
+## (place_landmarks, place_harbour; data/landmarks.json).
+const LANDMARK := "lm#"
+## A landmark's flat pad when it isn't its footprint (module metres: a harbour's land, not its
+## piers), the pad's height over the sea (a harbour's quay), the hard standing painted on it (a
+## runway, a forecourt, a quay), its voxels' own half size and depth (bounds_voxels).
+static var PAD := {}
+static var PAD_SEA := {}
+static var STREETS := {}
+static var EXTENT := {}
+static var BELOW := {}
+
+
+static func _landmark(type: String) -> bool:
+	if _cache.has(type):
+		return true
+	var parts := type.split("#")
+	if parts.size() != 5 or not parts[1] in BuildingGen.SITE_KINDS or not (parts[2].is_valid_int() and parts[3].is_valid_int() and parts[4].is_valid_int()):
+		return false
+	var ruin := int(parts[3])
+	if ruin < BuildingGen.INTACT or ruin > BuildingGen.BOMBED:
+		return false
+	var s := BuildingGen.site(parts[1], int(parts[2]), ruin, posmod(int(parts[4]), 4))
+	_cache[type] = s.boxes
+	_skins[type] = (s.skin as Array) + _dress(type, (s.boxes as Array).filter(func(bx: Array) -> bool: return int(bx[2]) == VoxelWorld.Mat.SANDBAG))
+	HALF[type] = s.half
+	POINTS[type] = s.points
+	GARRISON[type] = s.garrison
+	GARRISON_FACE[type] = s.garrison_face
+	RAMPS[type] = s.ramps
+	LOOT[type] = s.loot
+	TOP[type] = maxf(TOP_M, float(s.top) + 0.5)
+	PAD[type] = s.pad
+	if not is_nan(float(s.pad_sea)):
+		PAD_SEA[type] = float(s.pad_sea)
+	STREETS[type] = s.streets
+	EXTENT[type] = s.extent
+	BELOW[type] = float(s.below) + 0.2
+	return true
+
+
+## The flat pad under module `type` at `pos` (x, z, m), in zone metres: its footprint, or a
+## landmark's own pad (PAD).
+static func pad_rect(type: String, pos: Vector2) -> Rect2:
+	if has_type(type) and PAD.has(type):
+		var r: Rect2 = PAD[type]
+		return Rect2(r.position + pos, r.size)
+	var half: Vector2 = HALF.get(type, Vector2(20, 20))
+	return Rect2(pos - half, half * 2.0)
+
+
+## The height over the sea module `type`'s pad is made (a harbour's quay), NAN: the ground's own.
+static func pad_sea(type: String) -> float:
+	return float(PAD_SEA.get(type, NAN)) if has_type(type) else NAN
+
+
+## Hard standing painted on module `type`'s pad (Rect2s, module metres): a runway, a forecourt.
+static func streets(type: String) -> Array:
+	return STREETS.get(type, []) if has_type(type) else []
+
+
+## Landmarks in zones: which kinds a zone gets is data (LANDMARKS_PATH): by its "assets" tags
+## (data/contracts.json, docs/terror_groups.md 7.3), its holder's own site (a faction whose
+## factions.json "site_names" call its cache a drug lab or an IED workshop), and a few by zone id.
+## Proposed: each LANDMARK_KEEP_M clear of every other module, LANDMARK_POINT_KEEP_M of any
+## insertion or extraction point, LANDMARK_EDGE_M inside the edge; a harbour's quay edge
+## HARBOUR_SHORE of the sea's width in from the zone's edge (out in the shallows: the quay is
+## built up to QUAY_OVER_SEA over the water, its piers reach out past it).
+const LANDMARKS_PATH := "res://data/landmarks.json"
+const LANDMARK_KEEP_M := 40.0
+const LANDMARK_POINT_KEEP_M := 150.0
+const LANDMARK_EDGE_M := 120.0
+const HARBOUR_SHORE := 0.55
+static var _landmark_data := {}
+
+
+static func landmark_data() -> Dictionary:
+	if _landmark_data.is_empty():
+		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(LANDMARKS_PATH))
+		_landmark_data = data if data is Dictionary else {"tags": {}}
+	return _landmark_data
+
+
+## The landmark kinds zone def `def` gets ("assets", "controller", "id", "kind"), most wanted first,
+## at most the data's "max" for its kind of zone.
+static func landmark_kinds(def: Dictionary) -> Array:
+	var data := landmark_data()
+	var want: Array = []
+	for tag: Variant in def.get("assets", []):
+		for k: Variant in (data.get("tags", {}) as Dictionary).get(String(tag), []):
+			want.append(String(k))
+	var controller := String(def.get("controller", ""))
+	if controller != "":
+		for n: Variant in ((MissionRegistry.faction(controller).get("site_names", {}) as Dictionary).get("cache", []) as Array):
+			var k := String((data.get("site_names", {}) as Dictionary).get(String(n), ""))
+			if k != "":
+				want.append(k)
+	for k: Variant in (data.get("zones", {}) as Dictionary).get(String(def.get("id", "")), []):
+		want.append(String(k))
+	var out: Array = []
+	for k: Variant in data.get("order", []):
+		if String(k) in want and not String(k) in out:
+			out.append(String(k))
+	var most := int((data.get("max", {}) as Dictionary).get("hot" if String(def.get("kind", "")) == "hot" else "contract", 4))
+	return out.slice(0, most)
+
+
+## A landmark's type in zone `def`: its seed from the zone's, ruined or bombed out by the data's
+## shares ("ruin"), turned `turn`.
+static func _landmark_type(def: Dictionary, kind: String, turn: int) -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(def.get("seed", 0)), kind, "landmark"])
+	var shares: Array = (landmark_data().get("ruin", {}) as Dictionary).get("hot" if String(def.get("kind", "")) == "hot" else "contract", [0.0, 0.0])
+	var roll := rng.randf()
+	var ruin := BuildingGen.BOMBED if roll < float(shares[1]) else (BuildingGen.RUINED if roll < float(shares[0]) + float(shares[1]) else BuildingGen.INTACT)
+	return "%s%s#%d#%d#%d" % [LANDMARK, kind, rng.randi() % 1000000, ruin, turn]
+
+
+## Zone def `def` (ZoneDef.normalize, before its sea is chosen) given its landmarks (landmark_kinds,
+## a harbour aside: place_harbour) where they fit, each a module "lm_<kind>" with a road to the
+## nearest site. Never nearer an edge than the pads already are where the zone's sea could come
+## in (ZoneDef._choose_sea), so its coast is the same. Once: a def that has them keeps them.
+static func place_landmarks(def: Dictionary) -> void:
+	var kinds := landmark_kinds(def)
+	if kinds.is_empty():
+		return
+	var mods: Array = def.modules
+	var half := float(def.get("size_m", 1920.0)) * 0.5
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(def.get("seed", 0)), "landmarks"])
+	var taken: Array[Rect2] = []
+	for m: Dictionary in mods:
+		taken.append(pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))
+	var points: Array[Vector2] = []
+	for key in ["insertion", "extraction"]:
+		for p: Array in def.get(key, []):
+			points.append(Vector2(float(p[0]), float(p[1])))
+	var sea: Dictionary = TerrainPresets.get_preset(TerrainPresets.choose(def)).get("sea", {})
+	var reach := float(sea.get("width_m", 0.0)) + ZoneDef.SEA_PAD_KEEP_M + 20.0 if not sea.is_empty() else 0.0
+	var clear := [INF, INF, INF, INF]  # each side's nearest pad (0 north -z, 1 south, 2 west, 3 east)
+	for r: Rect2 in taken:
+		var d := [r.position.y + half, half - r.end.y, r.position.x + half, half - r.end.x]
+		for k in 4:
+			clear[k] = minf(clear[k], d[k])
+	for kind: String in kinds:
+		var id := "lm_%s" % kind
+		if kind == "harbour" or mods.any(func(m: Dictionary) -> bool: return String(m.id) == id):
+			continue
+		var type := _landmark_type(def, kind, rng.randi() % 4)
+		if not has_type(type):
+			continue
+		var h: Vector2 = HALF[type]
+		var keep := half - LANDMARK_EDGE_M
+		if h.x > keep or h.y > keep:
+			continue
+		for attempt in 400:
+			var p := Vector2(snappedf(rng.randf_range(-keep + h.x, keep - h.x), ZoneDef.GRID_M), snappedf(rng.randf_range(-keep + h.y, keep - h.y), ZoneDef.GRID_M))
+			var r := pad_rect(type, p)
+			if taken.any(func(t: Rect2) -> bool: return t.grow(LANDMARK_KEEP_M).intersects(r)):
+				continue
+			if points.any(func(q: Vector2) -> bool: return r.grow(LANDMARK_POINT_KEEP_M).has_point(q)):
+				continue
+			if reach > 0.0:
+				var d := [r.position.y + half, half - r.end.y, r.position.x + half, half - r.end.x]
+				var shifts := false
+				for k in 4:
+					if d[k] < clear[k] and d[k] < reach:
+						shifts = true
+				if shifts:
+					continue
+			mods.append({"id": id, "type": type, "pos": [p.x, p.y]})
+			taken.append(r)
+			_road_to_nearest(def, p, id)
+			break
+
+
+## A harbour for zone `def` if its tags want one and it has a sea (after ZoneDef._choose_sea):
+## on its coast, turned to face the sea, its quay edge HARBOUR_SHORE of the sea's width in from
+## the zone's edge, slid along the coast clear of every other module and point. ZoneDef leaves it
+## out of choosing the sea (it stands in it).
+static func place_harbour(def: Dictionary) -> void:
+	var side := int(def.get("sea_side", -1))
+	if side < 0 or not "harbour" in landmark_kinds(def):
+		return
+	var mods: Array = def.modules
+	if mods.any(func(m: Dictionary) -> bool: return String(m.id) == "lm_harbour"):
+		return
+	var type := _landmark_type(def, "harbour", [0, 2, 1, 3][side])  # (its sea is toward -z before it's turned)
+	if not has_type(type):
+		return
+	var half := float(def.get("size_m", 1920.0)) * 0.5
+	var inland := float(def.get("sea_m", 0.0)) * HARBOUR_SHORE - BuildingGen.QUAY_Z
+	var h: Vector2 = HALF[type]
+	var taken: Array[Rect2] = []
+	for m: Dictionary in mods:
+		taken.append(pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))
+	var points: Array[Vector2] = []
+	for key in ["insertion", "extraction"]:
+		for p: Array in def.get(key, []):
+			points.append(Vector2(float(p[0]), float(p[1])))
+	var span := half - LANDMARK_EDGE_M - maxf(h.x, h.y)
+	for k in 13:
+		var along := clampf(float((k + 1) / 2) * 90.0 * (1.0 if k % 2 == 1 else -1.0), -span, span)
+		var at: Vector2 = [Vector2(along, -half + inland), Vector2(along, half - inland), Vector2(-half + inland, along), Vector2(half - inland, along)][side]
+		var p := Vector2(snappedf(at.x, ZoneDef.GRID_M), snappedf(at.y, ZoneDef.GRID_M))
+		var r := Rect2(p - h, h * 2.0)
+		if taken.any(func(t: Rect2) -> bool: return t.grow(LANDMARK_KEEP_M).intersects(r)):
+			continue
+		if points.any(func(q: Vector2) -> bool: return r.grow(LANDMARK_POINT_KEEP_M * 0.5).has_point(q)):
+			continue
+		mods.append({"id": "lm_harbour", "type": type, "pos": [p.x, p.y]})
+		_road_to_nearest(def, p, "lm_harbour")
+		return
+
+
+## A road from `p` (a new landmark's place) to the nearest other module, if the def has roads.
+static func _road_to_nearest(def: Dictionary, p: Vector2, id: String) -> void:
+	if not def.has("roads"):
+		return
+	var best := Vector2.INF
+	for m: Dictionary in def.modules:
+		var q := Vector2(float(m.pos[0]), float(m.pos[1]))
+		if String(m.id) != id and (not best.is_finite() or q.distance_to(p) < best.distance_to(p)):
+			best = q
+	if best.is_finite():
+		(def.roads as Array).append([[p.x, p.y], [best.x, best.y]])
+
+
 ## The module's base structure: [from (Vector3, m), to (Vector3, m), VoxelWorld.Mat] boxes,
 ## in the order they are built.
 static func boxes(type: String) -> Array:
@@ -324,6 +560,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = BaseFob.defence_boxes(spec.get_slice("@", 0), spec.get_slice("@", 1) if "@" in spec else "n")
 			_ when type.begins_with(TOWN) and _town(type):
 				pass
+			_ when type.begins_with(LANDMARK) and _landmark(type):
+				pass
 			_ when GROWN in type and _grown(type):
 				pass
 			_:
@@ -348,8 +586,8 @@ static func skin(type: String) -> Array:
 ## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
 ## m from the origin; a generated town's), empty for a type without stairs.
 static func ramps(type: String) -> PackedVector3Array:
-	if type.begins_with(TOWN) or GROWN in type:
-		boxes(type)  # builds the town (or grown module) once
+	if type.begins_with(TOWN) or GROWN in type or type.begins_with(LANDMARK):
+		boxes(type)  # builds the town (or grown module, or landmark) once
 	return RAMPS.get(type, PackedVector3Array())
 
 
@@ -365,10 +603,12 @@ static func boxes_m(type: String) -> Array[AABB]:
 
 
 ## The voxel world's bounds for a type (voxels, from the origin).
+## A landmark's are its voxels' own (EXTENT, BELOW): an airfield's footprint takes in its runway,
+## painted on the ground, and a harbour's piles reach down into the sea.
 static func bounds_voxels(type: String) -> AABB:
-	var half: Vector2 = HALF.get(type, Vector2(20, 20))
+	var half: Vector2 = EXTENT.get(type, HALF.get(type, Vector2(20, 20)))
 	var s := VoxelWorld.VOXEL_SIZE
-	var lo := Vector3(-half.x - 1.0, -BELOW_M, -half.y - 1.0) / s
+	var lo := Vector3(-half.x - 1.0, -float(BELOW.get(type, BELOW_M)), -half.y - 1.0) / s
 	var hi := Vector3(half.x + 1.0, float(TOP.get(type, TOP_M)), half.y + 1.0) / s
 	return AABB(lo.round(), (hi - lo).round())
 

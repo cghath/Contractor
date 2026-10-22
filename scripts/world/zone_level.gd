@@ -450,9 +450,7 @@ func _backdrop_sky(look: Dictionary) -> ShaderMaterial:
 func _flat_areas() -> Array:
 	var out: Array = []
 	for m: Dictionary in def.get("modules", []):
-		var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
-		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
-		out.append(Rect2(p - half, half * 2.0))
+		out.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))  # (a landmark's own: a harbour's land)
 	for p: Array in def.get("extraction", []):
 		out.append(Rect2(float(p[0]) - 12.0, float(p[1]) - 12.0, 24.0, 24.0))
 	for p: Array in def.get("insertion", []):
