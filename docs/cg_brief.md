@@ -6,6 +6,9 @@ Captain when a call seemed like his, which is why it kept stopping to wait on an
 that. Captain is usually playtesting rather than watching chat, so it works better if you make the
 call and keep going.
 
+**Picking up Claude's work?** docs/cg_handoff.md says where every branch and lane stands, kept
+current at each landing. If Claude's usage runs out, that's your starting point for its lanes.
+
 ## How to handle decisions
 
 1. **Make the call**, using "Decisions already made" below. When in doubt, go with whatever's
