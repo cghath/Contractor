@@ -646,6 +646,29 @@ static func matches(item_name: String, query: String) -> bool:
 	return true
 
 
+## Gives button `b` the hotkey `key` (claude/mission-ui: "hotkeys printed on buttons"): its text
+## ends with the key ("Accept  [A]"), its tooltip says it, and pressing the key presses it while
+## the focus is inside `context` (the screen; null: anywhere). A Godot shortcut, so a focused text
+## or number field takes its own keys first and typing never fires one. Returns `b`.
+static func hotkey(b: Button, key: Key, context: Node = null, shift := false) -> Button:
+	var ev := InputEventKey.new()
+	ev.keycode = key
+	ev.shift_pressed = shift
+	var sc := Shortcut.new()
+	sc.events = [ev]
+	b.shortcut = sc
+	b.shortcut_in_tooltip = false
+	b.shortcut_feedback = true
+	if context != null:
+		b.shortcut_context = context
+	var key_name := ("Shift+" if shift else "") + OS.get_keycode_string(key)
+	b.set_meta(&"hotkey", key_name)
+	b.text = "%s  [%s]" % [b.text, key_name]
+	if not b.tooltip_text.contains("(%s)" % key_name):
+		b.tooltip_text = "%s (%s)" % [b.tooltip_text, key_name]
+	return b
+
+
 ## Asks before something that can't be undone: a modal box over `parent` (a Control filling
 ## its window, or a CanvasLayer) with `question`, Cancel and `ok_label` (red when `danger`).
 ## Enter confirms, Esc cancels. Returns the box (it frees itself when answered).

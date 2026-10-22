@@ -78,7 +78,10 @@ func _ready() -> void:
 	Contracts.new_full_campaign(71, 100000)
 	await _fit("contract board (offer picked)", func() -> Node:
 		var b := ContractBoard.new()
-		b.ready.connect(func() -> void: b.select_offer(0))
+		b.ready.connect(func() -> void:
+			b.select_offer(0)
+			check(b.find_child("Glance", true, false) != null and b.find_child("MissionFlow", true, false) != null,
+				"the board shows the picked job at a glance and the mission flow (claude/mission-ui)"))
 		return b)
 	await _fit("debrief (empty)", func() -> Node: return DebriefScreen.new())
 	# The debrief at its longest, with the salvage still open and then closed (feat/ui-pass).
@@ -270,6 +273,9 @@ func _fit_map_screens() -> void:
 		panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 		panel.ready.connect(func() -> void:
 			panel.show_briefing(briefing)
+			check(panel.find_child("LookAtPlan", true, false) != null and panel.find_child("MissionFlow", true, false) != null
+				and (panel.find_child("Ready", true, false) as Button).text.ends_with("[R]"),
+				"the briefing has the 3D look at the plan, the mission flow and Ready's hotkey (claude/mission-ui)")
 			var fit := func() -> void:
 				var w := BriefingScreen.width_for(frame.size.x)
 				panel.set_panel_width(w)

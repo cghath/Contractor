@@ -4,6 +4,10 @@ extends PanelContainer
 ## [ ] active, [x] done, [-] failed, from the replicated Contracts.objectives. Hidden when
 ## there's no deployment. Contract messages (signed, voided, civilian casualties) flash on
 ## the HUD while it's up.
+## claude/mission-ui: the heading counts the required ones done ("3/5 done"); a live objective
+## says which way and how far it is from you ("NW, 340 m"); a bonus or optional one says so; and
+## within a contract the live ones come first, then the done, then the failed. What to do next
+## is the helper's line under the panel (ObjectiveHelper).
 
 ## Its width (logical px); the Hud's top-right zone is this wide, or less on a narrow window.
 const WIDTH := 364.0
@@ -48,7 +52,10 @@ func refresh() -> void:
 	var dep := Contracts.deployment()
 	var civilians := int(dep.get("civilians", 0))
 	var active := active_oid()
-	var head := "OBJECTIVES%s" % (" - " + String(dep.zone_name) if dep.has("zone_name") else "")
+	var required := list.filter(func(o: Dictionary) -> bool: return not bool(o.get("optional", false)))
+	var done := required.filter(func(o: Dictionary) -> bool: return String(o.get("state", "")) == Objectives.DONE).size()
+	var head := "OBJECTIVES %d/%d done%s" % [done, required.size(), (" - " + String(dep.zone_name) if dep.has("zone_name") else "")]
+	var from: Variant = _player_pos()
 	var keys := "[%s] %s" % [_key("objectives_toggle"), "list" if compact() else "compact"]
 	var pickable := ObjectiveHelper.pickable(list)
 	if pickable.size() > 1:
@@ -62,7 +69,7 @@ func refresh() -> void:
 		if shown.is_empty() and not list.is_empty():
 			shown = pickable[0] if not pickable.is_empty() else list[0]
 		if not shown.is_empty():
-			body.append("> " + Objectives.line(shown))
+			body.append("> " + entry(shown, from))
 		var more := list.size() - (1 if not shown.is_empty() else 0)
 		if more > 0:
 			body.append("+%d more" % more)
@@ -75,9 +82,8 @@ func refresh() -> void:
 			if cids.size() > 1:
 				var c := Contracts.contract(cid)
 				body.append("-- %s --" % String(c.get("title", c.get("zone_name", cid))))
-			for o: Dictionary in list:
-				if String(o.get("cid", "")) == cid:
-					body.append(("> " if String(o.get("oid", "")) == active else "") + Objectives.line(o))
+			for o: Dictionary in ordered(list.filter(func(x: Dictionary) -> bool: return String(x.get("cid", "")) == cid)):
+				body.append(("> " if String(o.get("oid", "")) == active else "") + entry(o, from))
 	if civilians > 0 and not compact():
 		body.append("Civilian casualties: %d of %d" % [civilians, MissionRegistry.setting_i("civilian_void_at", 8)])
 	_label.text = "%s  (%s)
@@ -109,6 +115,44 @@ func _fit_height() -> void:
 		_label.text = "
 ".join(lines.slice(0, keep)) + "
 +%d more (%s: next)" % [lines.size() - keep, _key("objectives_next")]
+
+
+## One objective's line: its state and text (Objectives.line), "(bonus)" or "(optional)" when it
+## isn't required and doesn't say so, and, still live and placed, which way and how far from
+## `from` (null: not known).
+static func entry(o: Dictionary, from: Variant) -> String:
+	var out := Objectives.line(o)
+	if bool(o.get("optional", false)) and not String(o.get("text", "")).to_lower().begins_with("bonus"):
+		out += " (bonus)" if float(o.get("bonus_share", 0.0)) > 0.0 else " (optional)"
+	if from is Vector3 and String(o.get("state", "")) == Objectives.ACTIVE:
+		var at := ObjectiveHelper.target_pos(o, {})
+		if at != Vector3.ZERO:
+			out += "  " + ObjectiveHelper.where_text(from, at)
+	return out
+
+
+## A contract's objectives in the order the panel lists them: live required ones, live optional
+## ones, then done, then failed (each group in its own order).
+static func ordered(objectives: Array) -> Array:
+	var rank := func(o: Dictionary) -> int:
+		match String(o.get("state", "")):
+			Objectives.DONE:
+				return 2
+			Objectives.FAILED:
+				return 3
+		return 1 if bool(o.get("optional", false)) else 0
+	var out: Array = []
+	for r in 4:
+		out.append_array(objectives.filter(func(o: Dictionary) -> bool: return rank.call(o) == r))
+	return out
+
+
+## Where this peer's player stands (null without one).
+func _player_pos() -> Variant:
+	var helper := get_tree().get_first_node_in_group(ObjectiveHelper.GROUP) as ObjectiveHelper if is_inside_tree() else null
+	if helper and is_instance_valid(helper.player) and helper.player.is_inside_tree():
+		return helper.player.global_position
+	return null
 
 
 ## Compact mode: only the active objective, and how many more there are.

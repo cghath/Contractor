@@ -36,6 +36,11 @@ var _accept: Button
 var _renegotiate: Button
 var _abort: Button
 var _deploy: Button
+## The facts at a glance over the details (ContractGlance), rebuilt with them.
+var _glance: VBoxContainer
+## The cid to pick once it shows up held (an offer just accepted: Prepare deployment is next).
+var _pick_when_held := ""
+var _panel: PanelContainer
 ## The host's buttons in the bottom row (wait, and offline the debug ones).
 var _host_buttons: Array[Button] = []
 ## The shop opened from here: Esc closes it first, and it goes when the board does (P0-4).
@@ -79,6 +84,7 @@ func _ready() -> void:
 		margin.add_theme_constant_override("margin_" + side, UiKit.EDGE)
 	frame.add_child(margin)
 	var panel := UiKit.panel()
+	_panel = panel
 	margin.add_child(panel)
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override(&"separation", UiKit.SPACE_S)
@@ -89,7 +95,7 @@ func _ready() -> void:
 			"Negotiation: spend the points between pay, salvage share (how much of what you bring back is yours) and support budget (paid support calls). Advance % is paid when you accept, the rest on completion.",
 			"Held contracts are the ones the company has taken. Renegotiate (once, when the briefing understated the threat) or Abort one; Prepare deployment sends it to the base's prep.",
 			"Hot zones shows who holds each zone and how firmly; it shifts while days pass. Shop buys kit into the stash; a loan gives cash now, paid back with interest.",
-		]), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))
+		]), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))  # (each button prints its own hotkey)
 	_header = UiKit.text("")
 	root.add_child(_header)
 	var scroll := ScrollContainer.new()
@@ -109,11 +115,17 @@ func _ready() -> void:
 	_offers.tooltip_text = "Contracts on offer. Pick one to see its briefing and negotiate it"
 	_left.add_child(_offers)
 	_offers.item_selected.connect(func(i: int) -> void: _select(_offer_ids[i], false))
+	_offers.item_activated.connect(func(i: int) -> void:  # Enter / double-click: on to its next step (the button, not the deed)
+		_select(_offer_ids[i], false)
+		_focus_primary())
 	_left.add_child(UiKit.heading("Held contracts"))
 	_held = UiKit.list(140.0)
 	_held.tooltip_text = "Contracts the company holds. Pick one to see it, renegotiate, abort or deploy"
 	_left.add_child(_held)
 	_held.item_selected.connect(func(i: int) -> void: _select(_held_ids[i], true))
+	_held.item_activated.connect(func(i: int) -> void:
+		_select(_held_ids[i], true)
+		_focus_primary())
 	_left.add_child(UiKit.heading("Hot zones: who holds them"))  # wave 6c: WorldSites, the faction war between deployments
 	_zones = UiKit.text("")
 	_left.add_child(_zones)
@@ -124,6 +136,10 @@ func _ready() -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.add_child(right)
+	right.add_child(ContractGlance.flow("Board"))  # in the scrolling part: the open help still fits a small window
+	_glance = VBoxContainer.new()
+	_glance.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
+	right.add_child(_glance)
 	var details := UiKit.scroll(160.0)
 	_details_scroll = details.get_parent() as ScrollContainer
 	_details = UiKit.text("")
@@ -140,20 +156,21 @@ func _ready() -> void:
 	_advance = _spin(fields, "Advance %", 10, 50, 10)
 	_deal = UiKit.text("")
 	right.add_child(_deal)
-	_accept = UiKit.accent_button("Accept contract", accept_selected, "Take the picked offer on the terms set above (the advance is paid now)")
-	_renegotiate = UiKit.button("Renegotiate", func() -> void: Contracts.renegotiate(_selected),
-		"Once per contract, when the briefing understated the threat: the pay on completion goes up")
-	_abort = UiKit.danger_button("Abort", func() -> void: Contracts.abort(_selected), "Give the held contract up. The advance is kept; your standing with the employer drops, unless the briefing was shown to have lied")
-	_deploy = UiKit.button("Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected,
-		"Send the held contract to the base's deployment prep: pick the squad and kit there")
-	right.add_child(UiKit.button_row([_accept, _renegotiate, _abort, _deploy]))
+	# The picked contract's next step first and lit (an offer: Accept; a held one: Prepare), the rest after.
+	_accept = UiKit.hotkey(UiKit.accent_button("Accept contract", accept_selected, "Take the picked offer on the terms set above (the advance is paid now)"), KEY_A, panel)
+	_renegotiate = UiKit.hotkey(UiKit.button("Renegotiate", func() -> void: Contracts.renegotiate(_selected),
+		"Once per contract, when the briefing understated the threat: the pay on completion goes up"), KEY_R, panel)
+	_abort = UiKit.hotkey(UiKit.danger_button("Abort", _confirm_abort, "Give the held contract up. The advance is kept; your standing with the employer drops, unless the briefing was shown to have lied"), KEY_X, panel)
+	_deploy = UiKit.hotkey(UiKit.accent_button("Prepare deployment" if BaseHub.campaign_running else "Deploy (debug)", _deploy_selected,
+		"Send the held contract to the base's deployment prep: pick the squad and kit there, then the briefing"), KEY_P, panel)
+	right.add_child(UiKit.button_row([_accept, _deploy, _renegotiate, _abort]))
 	# The bottom row's seven buttons wrap onto a second line rather than off the window (P0-5).
-	var bottom: Array = [UiKit.button("Shop", open_shop, "Buy kit into the company stash"),
-		UiKit.button("Take a loan", func() -> void: Economy.take_loan(), "Cash now from a lender, paid back with interest a share each week")]
-	_host_buttons.append(UiKit.button("Wait a day", func() -> void: Economy.advance_days(1, "waiting at base"),
-		"Let a day pass: offers expire and new ones come, the hot zones shift, and each week the bill (wages, upkeep, loans) falls due"))
-	_host_buttons.append(UiKit.button("Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base"),
-		"Let a week pass (as Wait a day, seven times)"))
+	var bottom: Array = [UiKit.hotkey(UiKit.button("Shop", open_shop, "Buy kit into the company stash"), KEY_S, panel),
+		UiKit.hotkey(UiKit.button("Take a loan", _confirm_loan, "Cash now from a lender, paid back with interest a share each week"), KEY_L, panel)]
+	_host_buttons.append(UiKit.hotkey(UiKit.button("Wait a day", func() -> void: Economy.advance_days(1, "waiting at base"),
+		"Let a day pass: offers expire and new ones come, the hot zones shift, and each week the bill (wages, upkeep, loans) falls due"), KEY_W, panel))
+	_host_buttons.append(UiKit.hotkey(UiKit.button("Wait a week", func() -> void: Economy.advance_days(MissionRegistry.setting_i("week_days", 7), "waiting at base"),
+		"Let a week pass (as Wait a day, seven times)"), KEY_W, panel, true))
 	if not BaseHub.campaign_running:  # a campaign deploys from the base and ends at extraction
 		_host_buttons.append(UiKit.button("End deployment (debug)", _debug_extract))
 		_host_buttons.append(UiKit.button("Reset campaign", func() -> void: Contracts.new_full_campaign()))
@@ -164,6 +181,7 @@ func _ready() -> void:
 	bottom.append(esc)
 	root.add_child(UiKit.button_row(bottom))
 	_notice = UiKit.text("")
+	_notice.name = "Notice"
 	root.add_child(_notice)
 	_layout()
 	get_viewport().size_changed.connect(_layout)
@@ -171,6 +189,7 @@ func _ready() -> void:
 	Economy.changed.connect(refresh)
 	Contracts.notice.connect(_on_notice)
 	Economy.notice.connect(_on_notice)
+	_restore_choices()
 	refresh()
 	UiKit.focus_first(panel)  # keyboard: Tab/arrows and Enter work at once
 
@@ -252,8 +271,20 @@ func refresh() -> void:
 		_held.set_item_tooltip(_held.item_count - 1, "[%s] %s" % [String(c.state).to_upper(), _tooltip(c)])
 	_zones.text = zones_text()
 	_leads.text = Story.leads_text()
+	if _pick_when_held != "" and _pick_when_held in _held_ids:
+		_selected = _pick_when_held
+		_selected_held = true
+		_pick_when_held = ""
 	if _selected != "" and Contracts.contract(_selected).is_empty():
 		_selected = ""
+	if _selected == "":  # fewer clicks: the board opens on a contract, not on nothing
+		if not _held_ids.is_empty() and Contracts.contract(_held_ids[0]).get("state") == Contracts.ACCEPTED:
+			_selected = _held_ids[0]
+			_selected_held = true
+		elif not _offer_ids.is_empty():
+			_selected = _offer_ids[0]
+			_selected_held = false
+	_mark_selected()
 	_show_details()
 	_refreshing = false
 
@@ -275,7 +306,29 @@ static func offer_line(c: Dictionary) -> String:
 func _select(cid: String, from_held: bool) -> void:
 	_selected = cid
 	_selected_held = from_held
+	_remember("board_pick", cid)
+	_mark_selected()
 	_show_details()
+
+
+## The lists' selection follows _selected (a pick made in code, or after a refresh).
+func _mark_selected() -> void:
+	_offers.deselect_all()
+	_held.deselect_all()
+	var i := _offer_ids.find(_selected)
+	if i >= 0:
+		_offers.select(i)
+	var j := _held_ids.find(_selected)
+	if j >= 0:
+		_held.select(j)
+
+
+## Focuses the picked contract's next step (Accept for an offer, Prepare for a held one).
+func _focus_primary() -> void:
+	for b: Button in [_accept, _deploy]:
+		if b.is_visible_in_tree() and not b.disabled:
+			b.grab_focus()
+			return
 
 
 func _show_details() -> void:
@@ -286,11 +339,18 @@ func _show_details() -> void:
 	_renegotiate.visible = not offer and c.get("revealed", false) and not c.get("renegotiated", false)
 	_abort.visible = not c.is_empty() and c.get("state") in [Contracts.ACCEPTED, Contracts.DEPLOYED]
 	_deploy.visible = Contracts.is_host() and c.get("state") == Contracts.ACCEPTED and not Contracts.is_deployed()
+	for child in _glance.get_children():
+		_glance.remove_child(child)
+		child.queue_free()
 	if c.is_empty():
 		_details.text = "Pick an offer to see its briefing and negotiate."
 		_deal.text = ""
 		return
-	var lines := PackedStringArray([String(c.title), String(c.brief), ""])
+	var title := UiKit.heading(String(c.title))
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_glance.add_child(title)
+	_glance.add_child(ContractGlance.strip(c))
+	var lines := PackedStringArray([String(c.brief), ""])
 	lines.append("Client: %s   Target: %s" % [MissionRegistry.faction_name(String(c.employer)), MissionRegistry.faction_name(String(c.target))])
 	lines.append("Zone: %s (%s zone, %s)   %d day%s plus travel" % [c.zone_name, c.zone_kind, MissionRegistry.region(String(c.region)).get("name", c.region),
 		int(c.days), "" if int(c.days) == 1 else "s"])
@@ -300,7 +360,7 @@ func _show_details() -> void:
 		lines.append("ACTUAL THREAT: difficulty %d/5, %d fighters" % [int(c.true_rating), int(c.enemy_count)])
 	lines.append("Objectives:")
 	for o: Dictionary in c.get("objectives", []):
-		lines.append("  - " + String(o.get("text", "")))
+		lines.append("  - " + objective_tag(o) + String(o.get("text", "")))
 	if not offer:
 		var deal: Dictionary = c.get("deal", {})
 		lines.append("Terms: pay $%s (advance $%s paid, $%s on completion%s), salvage %d%%, support budget $%s left" % [
@@ -350,8 +410,18 @@ func select_offer(index: int) -> void:
 
 
 func accept_selected() -> void:
-	if _selected != "":
+	if _selected != "" and not _accept.disabled:
+		_pick_when_held = _selected  # once signed, the board moves on to it: Prepare deployment is next
+		_remember("board_terms", terms())
+		_on_notice("Accepting %s..." % String(Contracts.contract(_selected).get("title", "the contract")))
 		Contracts.accept(_selected, terms())
+
+
+## "BONUS: " or "OPTIONAL: " before an objective that isn't required (and doesn't say so itself).
+static func objective_tag(o: Dictionary) -> String:
+	if not bool(o.get("optional", false)) or String(o.get("text", "")).begins_with("Bonus"):
+		return ""
+	return "BONUS: " if float(o.get("bonus_share", 0.0)) > 0.0 else "OPTIONAL: "
 
 
 func offer_count() -> int:
@@ -414,9 +484,48 @@ func _debug_extract() -> void:
 	Contracts.server_end_deployment(report)
 
 
+## A message from the host (signed, refused, paid...): shown under the buttons, lit for a moment.
 func _on_notice(text: String) -> void:
 	if is_instance_valid(_notice):
 		_notice.text = text
+		_notice.modulate = Color(UiKit.ACCENT_HOT, 1.0)
+		if _notice.is_inside_tree():
+			_notice.create_tween().tween_property(_notice, "modulate", Color.WHITE, 1.2)
+
+
+## Abort asks first: it can't be undone and costs standing.
+func _confirm_abort() -> void:
+	var c := Contracts.contract(_selected)
+	if c.is_empty():
+		return
+	var cid := _selected
+	UiKit.confirm(_panel, "Abort %s? The advance is kept, but %s thinks less of the company (unless the briefing lied)." % [String(c.title),
+		MissionRegistry.faction_name(String(c.get("employer", "")))], "Abort", func() -> void: Contracts.abort(cid))
+
+
+## A loan asks first: it's paid back with interest every week.
+func _confirm_loan() -> void:
+	UiKit.confirm(_panel, "Take a loan? The cash comes now; it is paid back with interest a share each week.", "Take the loan",
+		func() -> void: Economy.take_loan(), false)
+
+
+## The terms and pick the player last used (GameSettings "mission_ui").
+func _restore_choices() -> void:
+	var t: Variant = GameSettings.get_value("mission_ui", "board_terms")
+	if t is Dictionary and not (t as Dictionary).is_empty():
+		_pay.set_value_no_signal(int(t.get("pay_points", 0)))
+		_salvage.set_value_no_signal(int(t.get("salvage_points", 0)))
+		_support.set_value_no_signal(int(t.get("support_points", 0)))
+		_advance.set_value_no_signal(roundi(float(t.get("advance_share", 0.3)) * 100.0))
+	var pick := String(GameSettings.get_value("mission_ui", "board_pick"))
+	if pick != "" and not Contracts.contract(pick).is_empty():
+		_selected = pick
+		_selected_held = Contracts.contract(pick).get("state") != "offered"
+
+
+static func _remember(key: String, value: Variant) -> void:
+	if GameSettings.get_value("mission_ui", key) != value:
+		GameSettings.set_value("mission_ui", key, value)
 
 
 ## A negotiation field: its label and SpinBox together, so the pair wraps as one.

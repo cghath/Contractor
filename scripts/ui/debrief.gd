@@ -42,8 +42,9 @@ var _scroll: ScrollContainer
 var _title: Label
 var _box: VBoxContainer
 var _mouse_before := Input.MOUSE_MODE_VISIBLE
-## Collapsed sections ("details", "carried", "carried:<category>"), kept across refreshes.
-var _collapsed := {}
+## Collapsed sections ("details", "carried", "carried:<category>"), kept across refreshes. The
+## old line-by-line details start folded: the ledger (claude/mission-ui) says it plainer.
+var _collapsed := {"details": true}
 var _sort := "value"
 var _scroll_to := -1
 ## The size fit() was last given (ZERO: this screen's own viewport, as in the game).
@@ -79,7 +80,11 @@ func _ready() -> void:
 	q.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	top.add_child(q)
 	root.add_child(UiKit.subtitle("How the deployment went: what it paid, what it cost, and the salvage to claim.", false))
+	root.add_child(ContractGlance.flow("Debrief"))
 	root.add_child(help)
+	var remembered := String(GameSettings.get_value("mission_ui", "debrief_sort"))
+	if remembered in SORTS:
+		_sort = remembered
 	root.add_child(HSeparator.new())
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -97,10 +102,10 @@ func _ready() -> void:
 	var keys := VBoxContainer.new()
 	keys.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	keys.add_theme_constant_override(&"separation", 0)
-	keys.add_child(UiKit.key_hint("Esc", "Continue"))
+	keys.add_child(UiKit.key_hint("Esc / C", "Continue"))
 	keys.add_child(UiKit.hint("Salvage claims are banked when the host continues."))
 	footer.add_child(keys)
-	_continue = UiKit.accent_button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)")
+	_continue = UiKit.hotkey(UiKit.accent_button("Continue", close, "Close the debrief (the host's closing banks the salvage claims)"), KEY_C, _panel)
 	_continue.name = "Continue"
 	_continue.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	footer.add_child(_continue)
@@ -166,7 +171,10 @@ func refresh() -> void:
 		return
 	_title.text = "DEBRIEF - %s (day %d)" % [d.get("zone_name", ""), int(d.get("day", 0))]
 	_assault(d)
+	_verdict(d)
 	_header(d)
+	_ledger(d)
+	_standing(d)
 	_carried(d)
 	_salvage(d)
 	_tagged(d)
@@ -189,6 +197,7 @@ func _header(d: Dictionary) -> void:
 	stats.add_child(UiKit.stat("Outcome", ", ".join(outcomes) if not outcomes.is_empty() else "-"))
 	stats.add_child(UiKit.stat("Paid now", "$" + DebriefCalc.money(totals.get("paid_now", 0))))
 	stats.add_child(UiKit.stat("Fines", ("-$" + DebriefCalc.money(d.get("fines", 0))) if int(d.get("fines", 0)) > 0 else "none"))
+	stats.add_child(UiKit.stat("Deductions", "-$" + DebriefCalc.money(deductions(d))))
 	stats.add_child(UiKit.stat("Days", str(int(d.get("days", 0)))))
 	if d.has("expenses_total"):
 		stats.add_child(UiKit.stat("Expenses", "-$" + DebriefCalc.money(d.expenses_total)))
@@ -236,6 +245,97 @@ func _header(d: Dictionary) -> void:
 		for l: String in DebriefCalc.summary(d):
 			var depth := 2 if l.begins_with("    ") else (1 if l.begins_with("  ") else 0)
 			_line(l.strip_edges(), UiKit.SPACE_L + UiKit.SPACE_M * depth)
+
+
+## Each contract's result in a line, lit by how it went (completed green, failed or voided in the
+## warning colour).
+func _verdict(d: Dictionary) -> void:
+	for c: Dictionary in d.get("contracts", []):
+		var outcome := String(c.get("outcome", ""))
+		var label := UiKit.heading("%s - %s" % [outcome.to_upper(), String(c.get("title", ""))])
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.add_theme_color_override(&"font_color", UiKit.GOOD if outcome == "completed" else UiKit.WARN)
+		_box.add_child(label)
+
+
+## What came off the pay: fines, advances clawed back and the expenses.
+static func deductions(d: Dictionary) -> int:
+	var total := int(d.get("fines", 0)) + int(d.get("expenses_total", 0))
+	for c: Dictionary in d.get("contracts", []):
+		total += int(c.get("clawback", 0))
+	return total
+
+
+## The pay and what came off it, line by line with the reason, down to the net.
+func _ledger(d: Dictionary) -> void:
+	if not _section("ledger", "PAY AND DEDUCTIONS, EXPLAINED"):
+		return
+	for line: Dictionary in ledger_lines(d):
+		var label := UiKit.text("%s: %s" % [line.what, line.amount])
+		if String(line.get("why", "")) != "":
+			label.tooltip_text = String(line.why)
+			label.mouse_filter = Control.MOUSE_FILTER_PASS
+			label.text += "  (%s)" % String(line.why)
+		match String(line.get("tone", "")):
+			"bad":
+				label.theme_type_variation = &"WarnLabel"
+			"good":
+				label.theme_type_variation = &"GoodLabel"
+		_box.add_child(_indent(label, UiKit.SPACE_L * (2 if line.get("sub", false) else 1)))
+
+
+## The ledger's lines: [{"what", "amount" (text), "why", "tone", "sub"}].
+static func ledger_lines(d: Dictionary) -> Array:
+	var out: Array = []
+	for c: Dictionary in d.get("contracts", []):
+		out.append({"what": String(c.get("title", "Contract")), "amount": String(c.get("outcome", "")).to_upper(), "why": ""})
+		out.append({"what": "Advance", "amount": "$" + DebriefCalc.money(c.get("advance", 0)), "why": "paid at signing, already in the bank", "sub": true})
+		out.append({"what": "Completion", "amount": "$" + DebriefCalc.money(c.get("completion", 0)), "sub": true, "tone": "good" if int(c.get("completion", 0)) > 0 else "",
+			"why": "paid now" if int(c.get("completion", 0)) > 0 else "nothing: the job wasn't done"})
+		for b: Dictionary in c.get("bonuses", []):
+			out.append({"what": String(b.text), "amount": "$" + DebriefCalc.money(b.amount), "why": "bonus", "sub": true, "tone": "good"})
+		if int(c.get("withheld", 0)) > 0:
+			out.append({"what": "Held back", "amount": "-$" + DebriefCalc.money(c.withheld), "sub": true, "tone": "bad",
+				"why": "not paid: %s wasn't done" % String(c.get("withheld_for", "")).get_slice(" (", 0)})
+		if int(c.get("clawback", 0)) > 0:
+			out.append({"what": "Advance clawed back", "amount": "-$" + DebriefCalc.money(c.clawback), "sub": true, "tone": "bad",
+				"why": "the contract was voided; its terms: %s" % String(c.get("clawback_term", "full"))})
+	if int(d.get("fines", 0)) > 0:
+		out.append({"what": "Civilian fines", "amount": "-$" + DebriefCalc.money(d.fines), "tone": "bad",
+			"why": "%d civilian casualt%s" % [int(d.get("civilians", 0)), "y" if int(d.get("civilians", 0)) == 1 else "ies"]})
+	if d.has("expenses_total"):
+		out.append({"what": "Expenses", "amount": "-$" + DebriefCalc.money(d.expenses_total), "tone": "bad",
+			"why": "supports, respawns, field costs, treatment and the days' bills: see where the money went"})
+		out.append({"what": "Net (before loot and salvage)", "amount": "$" + DebriefCalc.money(d.get("net", 0)), "tone": "good" if int(d.get("net", 0)) >= 0 else "bad",
+			"why": "the contract's value less the expenses"})
+	return out
+
+
+## Reputation changes (and where each faction stands now), the locals, and what the job did to
+## the living war (Contracts.war_lines).
+func _standing(d: Dictionary) -> void:
+	if not _section("standing", "STANDING AND THE WAR"):
+		return
+	for line: String in standing_lines(d):
+		_line(line, UiKit.SPACE_L)
+
+
+static func standing_lines(d: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	for f: String in d.get("rep", {}):
+		var now := Economy.reputation(f)
+		var tier := MissionRegistry.tier_of(now)
+		out.append("Reputation %s: %+d (now %+d, %s)" % [MissionRegistry.faction_name(f), int(d.rep[f]), now, String(tier.get("name", tier.get("id", "")))])
+	if int(d.get("locals", 0)) != 0:
+		out.append("Reputation with the locals: %+d" % int(d.locals))
+	if out.is_empty():
+		out.append("No change in standing.")
+	var war: Array = d.get("war", [])
+	for w: Variant in war:
+		out.append(String(w))
+	if war.is_empty():
+		out.append("The war: no change from this job.")
+	return out
 
 
 ## A base assault due in the debrief's days (BaseAssault.due_within): the warning, and the host's
@@ -353,11 +453,14 @@ func _salvage(d: Dictionary) -> void:
 	sort.tooltip_text = "Sort the salvage table"
 	sort.item_selected.connect(func(i: int) -> void:
 		_sort = SORTS[i]
+		if GameSettings.get_value("mission_ui", "debrief_sort") != _sort:
+			GameSettings.set_value("mission_ui", "debrief_sort", _sort)
 		refresh())
 	var tools: Array = [UiKit.cell("Sort by"), sort]
 	if not finished:
 		var best_picks := DebriefCalc.best_value_picks(d)
-		var best := UiKit.button("Claim best value", func() -> void: _pick(best_picks), "Fill what's left of the budget with the most valuable lots")
+		var best := UiKit.hotkey(UiKit.button("Claim best value", func() -> void: _pick(best_picks), "Fill what's left of the budget with the most valuable lots"), KEY_B, _panel)
+		best.name = "ClaimBest"
 		best.disabled = best_picks.is_empty()
 		tools.append(best)
 		var picked: Array = (salvage.get("picked", []) as Array).duplicate()

@@ -94,6 +94,11 @@ const DEFAULTS := {
 	# Co-op assists (wave 7, S4; Assists): this machine's picks when it hosts. Off by default; a
 	# client follows its host's.
 	"assists": {"aim_slowdown": false, "wound_hints": false},
+	# The mission screens' last choices (claude/mission-ui, "the last choices remembered"): the
+	# board's negotiation terms and the contract picked, the briefing's drop and supports, the
+	# debrief's salvage sort.
+	"mission_ui": {"board_terms": {}, "board_pick": "", "briefing_drop": "", "briefing_approach": -2, "briefing_supports": [],
+		"debrief_sort": "value"},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {

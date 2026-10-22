@@ -11,6 +11,52 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Mission UI pass (claude/mission-ui)
+
+> **Where I stopped / next step (2026-10-22, 22:39 CDT):** all four screens done and pushed
+> (board, briefing, objectives tracker, debrief) with the flow between them. Local runs: R2510 (smoke, contracts, missions PASS; ui's one red was the board's open help at 1280x720 @2.0, fixed in f869ce82), R2511 (smoke + ui PASS at f869ce82).
+> Next: CI on the branch, then a look in game (no windowed screenshots while Captain plays):
+> the glance strip's wrap on the briefing panel at 1.5-2.0 UI scale, and the hotkeys against
+> the map's own keys (V, L, R, G only fire while the briefing panel shows). Numbers Proposed:
+> ContractGlance INTEL_GOOD 0.8, INTEL_FAIR 0.6, RISK_HIGH 4.
+
+#### Added
+- **The job at a glance** (scripts/ui/contract_glance.gd), the same on the board, the briefing
+  and in the tests: pay and its split, risk (and the real threat once it's out), the enemy
+  estimate, intel quality, night and weather, the employer and the company's standing with it,
+  days and any time limit, the supports allowed with the budget, and how many high command
+  squads the job allows. Hover any figure for what it means. A contract kind of its own (the
+  operation contracts) adds figures by carrying "glance": no UI change needed.
+- **The mission flow** as a row of steps over each screen: Board > Prep > Brief > Deploy >
+  Track > Debrief, the current one lit.
+- **Hotkeys printed on buttons** (UiKit.hotkey: Godot shortcuts, so typing in a field never
+  fires one). Board: A accept, P prepare deployment, R renegotiate, X abort, S shop, L loan,
+  W wait a day, Shift+W a week. Briefing: V the 3D look at the plan, L last plan, R ready,
+  G start. Debrief: C continue, B claim best value.
+- **Last choices remembered** (settings "mission_ui"): the board's terms and the contract last
+  picked, the briefing's helicopter drop, approach and supports ("Use my last plan"), the
+  debrief's salvage sort.
+- **Debrief: pay and deductions, explained.** Each contract's verdict lit green or red; the
+  advance, completion, bonuses, pay held back and advance clawed back, fines, expenses and the
+  net, each with its reason; a Deductions figure. **Standing and the war:** each faction's
+  change and where the company stands with it now, the locals, and what the job did to the
+  living war (a zone's grip weakened or changed hands, a front moved, a leader taken), recorded
+  into the debrief as it happens (Contracts.war_lines).
+
+#### Changed
+- **Contract board:** opens on a contract (the held one waiting to deploy, else the first
+  offer), the picked contract's next step first and lit (Accept, or Prepare deployment once
+  it's held), Enter on a row goes to that step, and after accepting it moves on to the signed
+  contract. Abort and loans ask first. Host messages light up for a moment. Bonus and optional
+  objectives are tagged in the briefing text.
+- **Briefing panel:** the glance figures under the title, bonus and optional objectives tagged,
+  "Look at the plan in 3D" right after the objectives as the next step (it says "Back to the 2D
+  map" while open), "None allowed on this job" when no supports are, and "N of M ready" with
+  Start saying who it waits for.
+- **Objectives tracker:** the heading counts the required objectives done ("2/3 done"); a live
+  objective says which way and how far it is from you ("NW, 340 m"); bonus and optional ones say
+  so; within a contract live ones come first, then done, then failed.
+
 ### 3D loadout editor and armory (claude/loadout-3d)
 
 > **Where I stopped / next step (2026-10-22, 16:05 CDT):** done and pushed: saved kits and

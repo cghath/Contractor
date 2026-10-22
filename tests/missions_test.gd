@@ -34,6 +34,7 @@ func _ready() -> void:
 	GameState.delete_save()
 	Campaign.reset_campaign()
 	_test_generation()
+	_test_mission_ui()
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
@@ -96,6 +97,40 @@ func check(condition: bool, what: String) -> void:
 	print("  [%s] %s" % ["ok" if condition else "FAIL", what])
 	if not condition:
 		failures += 1
+
+
+# --- Mission UI (no level) --------------------------------------------------------------------
+
+## claude/mission-ui: the job at a glance (board and briefing), the objectives tracker's lines,
+## and the war's changes in words (the debrief).
+func _test_mission_ui() -> void:
+	print("Mission UI: the glance, the tracker's lines, the war in words")
+	var offers := ContractGen.generate_board(17, 1, {}, 6)
+	check(not offers.is_empty(), "a board to look at (%d offers)" % offers.size())
+	if offers.is_empty():
+		return
+	var c: Dictionary = offers[0]
+	var keys: Array = ContractGlance.facts(c).map(func(f: Dictionary) -> String: return String(f.key))
+	check(["pay", "risk", "threat", "intel", "conditions", "employer", "standing", "time", "supports", "squads"].all(func(k: String) -> bool: return k in keys),
+		"an offer at a glance: pay, risk, enemy, intel, conditions, employer, standing, time, supports, HC squads (%s)" % ", ".join(PackedStringArray(keys)))
+	var op := c.duplicate(true)
+	op["glance"] = [{"caption": "Operation", "value": "Phase 2 of 3", "tip": "a contract kind's own figure"}]
+	check(ContractGlance.text(op).contains("Operation: Phase 2 of 3"), "a contract kind adds its own figures through \"glance\" (operation contracts)")
+	check(ContractGlance.time_limit_min({"objectives": [{"time_limit_s": 1500.0}, {"time_limit_s": 600.0}, {}]}) == 10, "the time limit is the shortest timed objective's")
+	var objs := [{"oid": "a", "state": "done", "text": "Clear the yard"},
+		{"oid": "b", "state": "active", "text": "Destroy the cache", "optional": true, "bonus_share": 0.1, "pos": [30.0, 0.0, -40.0]},
+		{"oid": "c", "state": "failed", "text": "Capture the courier"}, {"oid": "d", "state": "active", "text": "Recover the laptop", "pos": [0.0, 0.0, -100.0]}]
+	var order: Array = ObjectivesPanel.ordered(objs).map(func(o: Dictionary) -> String: return String(o.oid))
+	check(order == ["d", "b", "a", "c"], "the tracker lists live required, live bonus, done, failed (%s)" % ", ".join(PackedStringArray(order)))
+	var line := ObjectivesPanel.entry(objs[3], Vector3.ZERO)
+	check(line.begins_with("[ ] Recover the laptop") and line.ends_with("N, 100 m"), "a live objective says which way and how far ('%s')" % line)
+	var bonus := ObjectivesPanel.entry(objs[1], null)
+	check(bonus.contains("(bonus)") and not bonus.contains(" m"), "a bonus says so; without a player, no distance ('%s')" % bonus)
+	check(ObjectivesPanel.entry(objs[0], Vector3.ZERO) == Objectives.line(objs[0]), "a done one has no distance")
+	var weak := Contracts.war_lines(c, {"leaders": 0, "holder": "x", "grip": 0.8, "front": -1.0}, {"leaders": 0, "holder": "x", "grip": 0.6, "front": -1.0})
+	var flip := Contracts.war_lines(c, {"leaders": 0, "holder": "x", "grip": 0.1}, {"leaders": 0, "holder": "rebels", "grip": 0.5})
+	check(weak.size() == 1 and String(weak[0]).contains("weakened: 80% to 60%") and flip.size() == 1 and String(flip[0]).contains("changed hands")
+		and Contracts.war_lines(c, {"leaders": 0}, {"leaders": 0}).is_empty(), "the debrief says what a job did to the war (%s / %s)" % [weak, flip])
 
 
 # --- Generation (no level) --------------------------------------------------------------------

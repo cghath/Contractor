@@ -1842,18 +1842,29 @@ func _test_driven_out() -> void:
 
 func _test_board_ui() -> void:
 	print("Board, shop and debrief screens (host)")
+	# The board remembers its terms and pick (claude/mission-ui): in a file of the test's own.
+	GameSettings.use_file(OS.get_user_data_dir().path_join("test_board_settings%s.cfg" % OS.get_environment("CONTRACTOR_TEST_TAG")))
+	GameSettings.reset_all()
 	Contracts.new_full_campaign(71, 100000)
 	var board := Contracts.open_board()
 	await _frames(2)
 	check(board.offer_count() == Contracts.board().size() and board.header_text().contains("Cash $100,000") and board.header_text().contains("Day 1"),
 		"the board lists every offer, with cash and the day")
+	check(board._selected == String(Contracts.board()[0].cid) and board.find_child("Glance", true, false) != null and board.find_child("MissionFlow", true, false) != null,
+		"the board opens on the first offer, the job at a glance over its briefing and the mission flow on top")
+	var labels := board.find_children("*", "Button", true, false).map(func(b: Button) -> String: return b.text)
+	check(labels.any(func(t: String) -> bool: return t.begins_with("Accept contract") and t.ends_with("[A]")) and labels.any(func(t: String) -> bool: return t.ends_with("[S]")),
+		"its buttons print their hotkeys (%s)" % ", ".join(PackedStringArray(labels.slice(0, 6))))
 	board.select_offer(1)
 	var cid: String = Contracts.board()[1].cid
-	board.set_terms({"pay_points": 1, "salvage_points": 1, "support_points": 0, "advance_share": 0.3})
+	var signed := {"pay_points": 1, "salvage_points": 1, "support_points": 0, "advance_share": 0.3}
+	board.set_terms(signed)
 	board.accept_selected()
 	await _frames(2)
 	check(board.held_count() == 1 and Contracts.contract(cid).state == "accepted" and board.offer_count() == Contracts.board().size(),
 		"accepting from the board signs the contract")
+	check(board._selected == cid and board._selected_held and board.details_text().contains("Deploy by day"),
+		"and the board moves on to the signed contract, its next step (Prepare deployment) up")
 	# Esc closes the top-most screen only: the shop over the board first, then the board
 	# (docs/ui_audit.md P0-4: Esc fell through the shop and closed the board under it).
 	var over := board.open_shop()
@@ -1868,6 +1879,11 @@ func _test_board_ui() -> void:
 	get_viewport().push_input(esc)
 	await _frames(2)
 	check(not is_instance_valid(board), "a second Esc closes the board")
+	var again := Contracts.open_board()
+	await _frames(2)
+	check(again.terms() == signed and again._selected == cid, "opened again, the board has the last terms and the contract last picked (%s)" % again.terms())
+	again.close()
+	await _frames(1)
 	var shop := ShopScreen.new()
 	add_child(shop)
 	await _frames(1)
@@ -1885,9 +1901,13 @@ func _test_board_ui() -> void:
 	var text := screen.text()
 	check(text.contains("DEBRIEF") and text.contains("Paid now") and text.contains("SALVAGE") and text.contains("Charlie (WOUNDED: Broken leg)") and text.contains("INTEL"),
 		"the debrief screen shows pay, salvage, casualties and intel")
+	check(text.contains("PAY AND DEDUCTIONS, EXPLAINED") and text.contains("Advance: $") and text.contains("Deductions") and text.contains("STANDING AND THE WAR")
+		and Contracts.last_debrief().has("war"), "and explains the pay and deductions line by line, the standing and the war")
+	check((screen.find_child("Continue", true, false) as Button).text.ends_with("[C]"), "Continue prints its hotkey")
 	screen.close()
 	await _frames(1)
 	check(Contracts.last_debrief().finished, "Continue on the host closes the debrief")
+	GameSettings.use_file("")
 
 
 ## Captain, 2026-10-14 (v0.3.1): "its hard to select the items you want". The debrief screen
