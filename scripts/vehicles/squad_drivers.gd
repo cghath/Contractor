@@ -664,9 +664,11 @@ func _hits(v: Vehicle) -> Array:
 func _meet_contact(v: Vehicle, o: Dictionary) -> bool:
 	var a := DriveContact.assess(v, o.get("squad"), _hits(v), not dismount_on_contact or bool(o.get("through_only", false)))
 	last_contact[v.get_instance_id()] = a.act
+	if (a.enemy as Vector3) != Vector3.INF:
+		o["threat"] = a.enemy  # the last threat it met: where the crew keep away from once it's quiet (F-140)
 	match String(a.act):
 		DriveContact.ABANDON:
-			_abandon(v, o, a.enemy)
+			_abandon(v, o, a.enemy if (a.enemy as Vector3) != Vector3.INF else o.get("threat", Vector3.INF))
 			return true
 		DriveContact.DISMOUNT:
 			if int(o.order) != Order.HOLD:

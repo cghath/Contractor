@@ -375,7 +375,8 @@ Fixed on claude/ai-followups (Claude, 2026-10-21):
   `server_drive_route(v, path, speed_kmh, squad)` drives a truck as an order, so DriveContact
   meets the ambush: it always drives through, faster, the gunner firing on (AavGunner). Disabled,
   its crew bail out to the side away from the fire and hold there (a convoy's crew aren't squad
-  members, so they get the move themselves).
+  members, so they get the move themselves). An order keeps the last threat it met, so a truck
+  disabled once the firing has died down still bails its crew out away from it.
 - Firing at a man in a vehicle (SquadAI `_gate_open`, `_shoot`): the sights need only be on the
   vehicle (VEHICLE_GATE_SHARE of its hull's size), since a round that misses him still hits it, and
   the shot leads it by its speed. Before, a truck passing at 18 m/s never let the man-sized aim gate

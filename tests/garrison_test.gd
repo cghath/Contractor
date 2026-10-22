@@ -195,14 +195,6 @@ func _test_road_ambush() -> void:
 	check(String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH and v.ai.cruise_ms > 30.0 / 3.6 + 1.0,
 		"the truck drives on through, faster (%s, %.1f m/s)" % [drivers.last_contact.get(v.get_instance_id(), "none"), v.ai.cruise_ms])
 	check(amb.priority_vehicle(&"hostile", get_tree()) == v, "the ambush's launchers would go for the lead truck first")
-	# The squad on the high ground in sight again: the ambush takes it on too, as a fight.
-	for f in hill:
-		if is_instance_valid(f):
-			f.add_to_group(&"combatants")
-	var on_hill := await _wait_for(func() -> bool:
-		return amb.alive().any(func(s: Soldier) -> bool: return SquadAI.of(s).target != null and SquadAI.of(s).target in hill), 25.0)
-	check(on_hill or amb.alive().is_empty(), "the squad on the high ground in sight, the ambush takes it on too (%s)" % ", ".join(amb.alive().map(func(s: Soldier) -> String:
-		return "%s on %s" % [s.name, SquadAI.of(s).target.name if SquadAI.of(s).target else "nobody"])))
 	# Disabled in the kill zone: the crew bail out on the far side and fight from there.
 	v._zones[Vehicle.ZONE_ENGINE] = 0.0
 	await _wait_for(func() -> bool: return v.occupants().is_empty(), 5.0)
@@ -211,7 +203,16 @@ func _test_road_ambush() -> void:
 	await _wait_for(func() -> bool: return crew.all(func(c: Soldier) -> bool: return not c.vitals.is_up() or away.call(c)), 8.0)
 	var lee := crew.filter(func(c: Soldier) -> bool: return c.vitals.is_up() and away.call(c))
 	check(out_of_it and lee.size() == crew.filter(func(c: Soldier) -> bool: return c.vitals.is_up()).size(),
-		"disabled, its crew bail out on the side away from the ambush (%d of %d out on its far side)" % [lee.size(), crew.size()])
+		"disabled, its crew bail out on the side away from the ambush (%d of %d out on its far side; %s)" % [lee.size(), crew.size(),
+		", ".join(crew.map(func(c: Soldier) -> String: return "%s %s %.0f m from the ambush (truck %.0f)" % [c.name, c.ai_status, _flat_d(c.global_position, at), _flat_d(v.global_position, at)]))])
+	# The squad on the high ground in sight again: the ambush takes it on too, as a fight.
+	for f in hill:
+		if is_instance_valid(f):
+			f.add_to_group(&"combatants")
+	var on_hill := await _wait_for(func() -> bool:
+		return amb.alive().any(func(s: Soldier) -> bool: return SquadAI.of(s).target != null and SquadAI.of(s).target in hill), 25.0)
+	check(on_hill or amb.alive().is_empty(), "the squad on the high ground in sight, the ambush takes it on too (%s)" % ", ".join(amb.alive().map(func(s: Soldier) -> String:
+		return "%s on %s" % [s.name, SquadAI.of(s).target.name if SquadAI.of(s).target else "nobody"])))
 	# The fight goes on from their ground: nobody chases the truck or makes for the hill.
 	var out := 0.0
 	var until := Time.get_ticks_msec() + 12000
