@@ -2143,9 +2143,11 @@ func _test_squad_drivers() -> void:
 	await _wait_for(func() -> bool: return drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0, 6.0)
 	check(drivers.order_of(v) == SquadDrivers.Order.HOLD and v.seat_of(walker) < 0 and v.driver() == rifle,
 		"hit by an RPG on the move: it stops, the squadmate in the back gets out, the driver stays")
-	# A column behind the commander (on foot).
+	# A column behind the commander (on foot), once the RPG hit is past (SquadDrivers remembers a hit
+	# CONTACT_S: an order given sooner meets it as contact and halts; how soon the squadmate got
+	# out decided whether it did, R0550).
 	player.global_position = Vector3(-30, 0.1, -10)
-	await _seconds(0.5)
+	await _seconds(SquadDrivers.CONTACT_S + 0.5)
 	why = drivers.server_command(player, "convoy", Vector3.ZERO, PackedStringArray())
 	var near_enough := SquadDrivers.CONVOY_GAP_M + SquadDrivers.CONVOY_HOLD_M + 8.0  # (and the M-ATV's own length)
 	await _wait_for(func() -> bool: return v.global_position.distance_to(player.global_position) < near_enough and v.linear_velocity.length() < 0.8, 30.0)

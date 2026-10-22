@@ -681,7 +681,9 @@ What happens: the vehicles suite's squad drivers drove the M-ATV to (-12, -20), 
 at (10, 4). Its turn round to the right swings through about (-6, -29), the concrete block at x -8..-6, z -30..-29:
 it was "blocked", backed off and went round, and 30 s later sat about 38 m from the commander; "Follow me" after it
 failed the same way (R0534; with the blocks left unbuilt it passes, R0537). The suite now drives to (-12, -14), clear
-of the blocks, and its path with a turn goes along z -36 (R0538).
+of the blocks, and its path with a turn goes along z -36. Its "Follow me" then waits out the RPG hit
+(SquadDrivers.CONTACT_S) before the order: given sooner it met the hit as contact and halted, depending on how fast
+the squadmate got out (R0550). The suite passes (R0553).
 
 Suggested: when a goal is behind it and something is beside the turn, back up and turn (a three-point turn), or
 plan the turn on the navmesh, which has the blocks.
