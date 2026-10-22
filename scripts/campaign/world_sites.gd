@@ -668,7 +668,7 @@ static func _resolve(zone_id: String, day: int) -> void:
 	elif float(f.progress) >= 1.0:
 		if cant_fall(zone_id):
 			if not bool(f.get("sieged", false)):
-				_news(day, zone_id, "siege", "Siege at %s: the last ground of %s, under attack by %s." % [name, _short(h), _short(a)])
+				_news(day, zone_id, "siege", ("Siege at %s: the base of %s, under attack by %s." if _held_by_data(zone_id, h) else "Siege at %s: the last ground of %s, under attack by %s.") % [name, _short(h), _short(a)])
 			f["progress"] = SIEGE_CAP
 			f["sieged"] = true
 		else:
