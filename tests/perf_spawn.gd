@@ -49,9 +49,21 @@ func _ready() -> void:
 		var t_make := Time.get_ticks_usec()
 		var s := level._make_soldier(d) as Soldier
 		FrameCost.spent(&"PT_make", t_make)
+		var marks: Array = []  # [usec, node path] as each node's _ready finishes (children first)
+		for n: Node in [s] + s.find_children("*", "", true, false):
+			var label := String(s.get_path_to(n)) if n != s else "Soldier"
+			n.ready.connect(func() -> void: marks.append([Time.get_ticks_usec(), label]), CONNECT_ONE_SHOT)
 		var t_add := Time.get_ticks_usec()
 		level.ai.add_child(s, true)
 		FrameCost.spent(&"PT_add_child", t_add)
+		if i >= 6:
+			var gaps: Array = []
+			var prev := t_add
+			for m: Array in marks:
+				gaps.append([int(m[0]) - prev, m[1]])
+				prev = int(m[0])
+			gaps.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+			print("spawn: %d slowest readies: %s" % [i, ", ".join(gaps.slice(0, 8).map(func(g: Array) -> String: return "%s %.1f" % [g[1], g[0] / 1000.0]))])
 		var ms := (Time.get_ticks_usec() - t) / 1000.0
 		var c := FrameCost.take()
 		await get_tree().process_frame

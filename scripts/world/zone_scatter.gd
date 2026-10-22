@@ -1395,12 +1395,18 @@ func _build_cell(cell: Vector2i) -> void:
 		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
 		node.multimesh = part[1]
 		node.material_override = _material
-		node.visibility_range_end = float(_RANGES[key])
+		node.visibility_range_end = float(_RANGES[key]) * _range_scale(key)
 		node.visibility_range_end_margin = 20.0
 		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket"]))  # keys mix Kind values and names
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
 	FrameCost.spent(&"scatter_cells", t0)
+
+
+## The detail setting's share of a group's draw distance (GameSettings.detail: "scatter"). The
+## trees' range shrinks with their far canopy's start, so no gap opens between them.
+func _range_scale(key: Variant) -> float:
+	return float(GameSettings.detail().scatter)
 
 
 ## Draw distance by group key.
@@ -1502,8 +1508,13 @@ func _build_far() -> void:
 		node.name = "Far_%d_%d" % [cell.x, cell.y]
 		node.multimesh = kept[cell]
 		node.material_override = _material
-		node.visibility_range_begin = SEE_TREE_M - 10.0
+		node.visibility_range_begin = SEE_TREE_M * float(GameSettings.detail().scatter) - 10.0  # (where the trees stop, by the detail setting)
 		node.visibility_range_begin_margin = 20.0
+		var far_m := float(GameSettings.detail().far_trees_m)  # the detail setting (perf pass; "ultra": to the horizon)
+		if far_m > 0.0:
+			node.visibility_range_end = far_m
+			node.visibility_range_end_margin = GameSettings.FAR_FADE_M
+			node.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
 

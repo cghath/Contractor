@@ -149,6 +149,12 @@ static var _cache_scope := ""
 const FRAME_BUDGET_USEC := 4000
 static var _budget_frame := -1
 static var _budget_used := 0
+## Perf pass (2026-10-22): a scan's cell probes stop at the frame's budget too, the first scan's
+## as well (a town's first scan was 200-600 ms in one frame, and again each time its CACHE_S ran
+## out); the cells probed so far are kept (_cells), so the next ask goes on from there, and until
+## then the ask gets what it knew before, as an ask over budget does. The perf suites turn this on
+## headless (budget_always) to measure the game as a player's machine runs it.
+static var budget_always := false
 
 
 ## The buildings with an inside spot within `radius` of `centre` (see the class notes).
@@ -182,7 +188,8 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := tru
 	if frame != _budget_frame:
 		_budget_frame = frame
 		_budget_used = 0
-	if _budget_used >= FRAME_BUDGET_USEC and DisplayServer.get_name() != "headless":
+	var budgeted := budget_always or DisplayServer.get_name() != "headless"
+	if _budget_used >= FRAME_BUDGET_USEC and budgeted:
 		return hit.list if not hit.is_empty() else []  # over this frame's budget: what it knew
 	_cache.erase(key)  # an expired answer: the fresh one goes in last (most recently used), not in its old slot
 	if _cache.size() >= CACHE_MAX:
@@ -193,11 +200,15 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := tru
 	# answers: casualty's "out in the open" soldier found cover the plain scan doesn't). The
 	# speed-up is in the parts below that don't change the answer: each cell's probes, each
 	# building made of the same spots, and each stair link, all kept for CACHE_S.
-	var area := _scan(from.get_world_3d(), centre, radius, now, details)
-	var list: Array = area.list
+	var area := _scan(from.get_world_3d(), centre, radius, now, details, t + FRAME_BUDGET_USEC - _budget_used if budgeted else 0)
 	FrameCost.spent(&"buildings", t)  # (inside "ai" too when an AI's tick asked)
 	spent_usec += Time.get_ticks_usec() - t
 	_budget_used += Time.get_ticks_usec() - t
+	if area.get("partial", false):
+		if not hit.is_empty():
+			_cache[key] = hit  # (kept for the next ask, which goes on probing)
+		return hit.list if not hit.is_empty() else []
+	var list: Array = area.list
 	_cache[key] = {"at": area.at, "list": list}
 	return list
 
@@ -297,7 +308,9 @@ static func entrance_near(b: Dictionary, point: Vector3) -> Dictionary:
 ## SCAN_DOWN_M under it. Each cell's probes are kept for CACHE_S under the cell and the height
 ## band `centre` is in (_cells), for the scans that overlap it. A cell's surfaces are probed
 ## GROUND_DOWN_M deeper than its spots, so any building found has its ground in them (RAISED_M).
-static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier._now(), details := true) -> Dictionary:
+## `deadline` (Time.get_ticks_usec, 0: none): past it no more cells are probed (at least one
+## is) and the scan comes back {"partial": true}.
+static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier._now(), details := true, deadline := 0) -> Dictionary:
 	var started := Time.get_ticks_usec()
 	var map := world.navigation_map
 	_index_regions(map)
@@ -313,6 +326,7 @@ static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier
 	var bottom := centre.y - SCAN_DOWN_M
 	if _cells.size() >= CELL_MAX:
 		_cells.clear()
+	var probed_now := 0
 	for ix in range(-n, n + 1):
 		for iz in range(-n, n + 1):
 			if Vector2(ix, iz).length() * GRID_M > radius:
@@ -326,6 +340,10 @@ static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier
 					break
 				kept = []
 			if kept.is_empty():
+				if deadline > 0 and probed_now > 0 and Time.get_ticks_usec() >= deadline:
+					FrameCost.spent(&"building_probes", started)
+					return {"partial": true}
+				probed_now += 1
 				# Spots down to the band below's reach, surfaces GROUND_DOWN_M (and a little) deeper:
 				# a spot this scan finds is at most SCAN_DOWN_M + 0.15 under `centre`, and the band
 				# above's probe (which a scan from here may use) starts that much higher.

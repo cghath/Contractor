@@ -621,6 +621,7 @@ var _shot_t := 99.0
 var lod := true
 var _lod_n := 0
 var _lod_dt := 0.0
+var _boxes_downed := false  # the downed state the hitboxes were last posed in (pose_hitboxes)
 
 
 ## A heavy exo's size (ExoMech.size; GearRig sets it): the whole body, its gear, plates and
@@ -827,6 +828,11 @@ static func lay_down(body: Node3D, model: CharacterModel, is_downed: bool) -> vo
 ## or carried and dragged): each follows the bone it belongs to (upper body, head, pelvis,
 ## left or right leg), from its rest transform.
 func pose_hitboxes(body: Node3D) -> void:
+	# Perf pass (2026-10-22): drawn every few frames (far off or behind the view, _lod_every), the
+	# hitboxes follow on the frames it's drawn, as its arms do; going down or up poses them at once.
+	if lod and _lod_shown_every > 1 and _lod_n != 0 and downed == _boxes_downed:
+		return
+	_boxes_downed = downed
 	var bones := with_shins(_target_bones(_carry_state()))
 	var rest := with_shins(rest_bones())
 	var deltas := {}

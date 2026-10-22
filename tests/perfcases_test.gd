@@ -118,6 +118,7 @@ func _ready() -> void:
 	CompoundLevel.spawn_ai = true
 	Contracts.auto_show_debrief = false
 	EnemyDrones.enabled = false  # (their own suite; a drone overhead is luck of the draw)
+	Buildings.budget_always = true  # building scans budgeted as on a player's machine (not headless's exact answers)
 	_rng.seed = 20261022
 	var cases: Array = ALL_CASES.duplicate()
 	if OS.get_environment("PERF_CASES") != "":
@@ -479,12 +480,20 @@ func _measure(name: String, walk: Array) -> void:
 	_restore_profiled()
 	var live := 0
 	var asleep := 0
+	var resting := 0
+	var why_not := {}  # what keeps the awake ones stepping every tick
 	for n in level.ai.get_children():
 		var s := n as Soldier
 		if s and not s.is_queued_for_deletion():
 			live += 1
 			if s.process_mode == Node.PROCESS_MODE_DISABLED:
 				asleep += 1
+			elif s.movement._resting():
+				resting += 1
+			else:
+				var k := "moving" if s.move_input != Vector2.ZERO else ("aiming" if s.want_aim else ("down" if not s.vitals.is_up() else ("air" if not s.is_on_floor() else "other")))
+				why_not[k] = int(why_not.get(k, 0)) + 1
+	print("perf: %s: at the end %d AI resting, the rest: %s" % [name, resting, why_not])
 	var n_frames := maxi(_frames.size(), 1)
 	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
 	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
@@ -703,6 +712,7 @@ func _sample_draws() -> void:
 		if light and light.shadow_enabled:
 			sun_m = maxf(sun_m, light.directional_shadow_max_distance)
 	var draws := 0
+	var by := {}  # what draws, by kind (_draw_kind)
 	var instances := 0
 	var shadow_draws := 0
 	var lights := 0
@@ -727,6 +737,8 @@ func _sample_draws() -> void:
 		var d := world_box.get_center().distance_to(cam) - world_box.size.length() * 0.5
 		if g.visibility_range_end > 0.0 and d > g.visibility_range_end:
 			continue
+		if g.visibility_range_begin > 0.0 and world_box.get_center().distance_to(cam) < g.visibility_range_begin:
+			continue  # (a nearer level of detail draws there)
 		if d > camera.far:
 			continue
 		var in_view := true
@@ -742,19 +754,47 @@ func _sample_draws() -> void:
 		if not in_view:
 			continue
 		draws += 1
+		var kind := _draw_kind(g)
+		by[kind] = int(by.get(kind, 0)) + 1
 		if g is MultiMeshInstance3D and (g as MultiMeshInstance3D).multimesh:
 			var mm := (g as MultiMeshInstance3D).multimesh
 			instances += mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
 		else:
 			instances += 1
 	if draws > int(_draw.get("draws", 0)):
-		_draw = {"draws": draws, "instances": instances, "shadow_draws": shadow_draws, "lights": lights, "shadow_lights": shadow_lights, "sun_m": sun_m}
+		_draw = {"draws": draws, "instances": instances, "shadow_draws": shadow_draws, "lights": lights, "shadow_lights": shadow_lights, "sun_m": sun_m, "by": by}
 
 
 func _draw_text(d: Dictionary) -> String:
 	if d.is_empty():
 		return "-"
-	return "%d draws (%d instances), %d shadow casters (sun %.0f m), %d lights (%d with shadows)" % [d.draws, d.instances, d.shadow_draws, d.sun_m, d.lights, d.shadow_lights]
+	var by: Dictionary = d.get("by", {})
+	var kinds := by.keys()
+	kinds.sort_custom(func(a: String, b: String) -> bool: return int(by[a]) > int(by[b]))
+	var parts: Array[String] = []
+	for k: String in kinds.slice(0, 6):
+		parts.append("%s %d" % [k, by[k]])
+	return "%d draws (%d instances; %s), %d shadow casters (sun %.0f m), %d lights (%d with shadows)" % [d.draws, d.instances, ", ".join(parts), d.shadow_draws, d.sun_m, d.lights, d.shadow_lights]
+
+
+## What a geometry instance belongs to, for the draw proxy's breakdown.
+func _draw_kind(g: GeometryInstance3D) -> String:
+	var n: Node = g
+	while n and n != level:
+		if n is ZoneScatter:
+			return "scatter_far" if String(g.name).begins_with("Far") or g.visibility_range_begin > 0.0 else "scatter"
+		if n is ZoneTerrain:
+			return "terrain"
+		if n is Soldier:
+			return "soldiers"
+		if n is Vehicle:
+			return "vehicles"
+		if n is ZoneModule:
+			return "modules"
+		if n.name == &"Roads":
+			return "roads"
+		n = n.get_parent()
+	return "other"
 
 
 func _avg(ms: Array[float]) -> float:

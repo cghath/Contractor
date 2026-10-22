@@ -455,7 +455,17 @@ static func warm(pairs: Array) -> void:
 		return
 	_camo(Vector3.ZERO, 0, "multicam")  # its noise is made here on the main thread, not on the worker
 	_reap_warm()
-	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo), false, "VoxelArt warm-up"))
+	# Perf pass (2026-10-22): a scheme of its own (not plain clothes or a face, whose colours are
+	# each person's) is meshed on the worker too, handed over as the faces are (_take_faces): the
+	# first soldier in it, and his first reload, build nothing on the main thread (30-70 ms each).
+	var meshers := {}  # variant -> its mesher, made here (the worker only uses it)
+	for pair: Array in todo:
+		var variant: String = pair[1]
+		if not _shared_raster(variant):
+			if not meshers.has(variant):
+				meshers[variant] = _get_mesher(variant)
+			_face_pending["%s|%s" % [pair[0], variant]] = true
+	_warm_tasks.append(WorkerThreadPool.add_task(_warm.bind(todo, meshers), false, "VoxelArt warm-up"))
 
 
 ## The models a soldier in `variant` with `loadout` (item ids) is built from: the body's parts
@@ -493,12 +503,17 @@ static func uniform(variant: String, loadout: Array, body := MALE) -> Array:
 	return out
 
 
-static func _warm(todo: Array) -> void:
+static func _warm(todo: Array, meshers := {}) -> void:
 	for pair: Array in todo:
 		var model: String = pair[0]
 		var buffer := _rasterize(_spec(model), pair[1], model.hash())
+		var mesher: VoxelMesherCubes = meshers.get(pair[1])
+		var built: Mesh = mesher.build_mesh(buffer, []) if mesher else null
 		_warm_mutex.lock()
-		_warmed[_raster_key(model.hash(), pair[1])] = buffer
+		if built:
+			_face_built["%s|%s" % [model, pair[1]]] = built
+		else:
+			_warmed[_raster_key(model.hash(), pair[1])] = buffer
 		_warm_mutex.unlock()
 
 

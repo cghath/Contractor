@@ -227,13 +227,27 @@ func _physics_process(_delta: float) -> void:
 		_request_rebake(chunk)
 
 
+## Perf pass (2026-10-22): soldiers standing in the same MARK_CELL_M square are marked once, from
+## its middle, over their radius plus the square's half-diagonal (a garrison or a squad marked the
+## same chunks once per man, every UPDATE_S): never fewer chunks than before, at most a few more.
+const MARK_CELL_M := 4.0
+
+
 func _update_wanted() -> void:
 	var near := {}  # Vector2i -> distance
 	var keep := {}
+	var done := {}  # [MARK_CELL_M square, player?] marked already
+	var slack := MARK_CELL_M * 0.7072
 	for s in zone.soldiers_for_navigation():
-		var radius := PLAYER_RADIUS_M if not s.is_ai() else AI_RADIUS_M
-		_mark(near, s.global_position, radius)
-		_mark(keep, s.global_position, radius + DROP_MARGIN_M)
+		var p := s.global_position
+		var cell := Vector3i(floori(p.x / MARK_CELL_M), 0 if s.is_ai() else 1, floori(p.z / MARK_CELL_M))
+		if done.has(cell):
+			continue
+		done[cell] = true
+		var at := Vector3((cell.x + 0.5) * MARK_CELL_M, p.y, (cell.z + 0.5) * MARK_CELL_M)
+		var radius := (PLAYER_RADIUS_M if not s.is_ai() else AI_RADIUS_M) + slack
+		_mark(near, at, radius)
+		_mark(keep, at, radius + DROP_MARGIN_M)
 	_wanted = near
 	# Drop chunks nobody is near any more.
 	for chunk: Vector2i in _regions.keys():
