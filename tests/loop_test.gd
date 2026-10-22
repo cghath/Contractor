@@ -443,8 +443,9 @@ func _mission(type: String) -> String:
 		expected["m4a1"] = int(expected.get("m4a1", 0)) + 1
 		var body_items: Dictionary = out.get("body_items", {})
 		for id: String in body_items:
-			if not MissionRegistry.is_intel(StringName(id)):  # (intel goes to the debrief, never the stash: Contracts.without_intel)
-				expected[id] = int(expected.get(id, 0)) + int(body_items[id])
+			if MissionRegistry.is_intel(StringName(id)):
+				continue  # intel goes to the debrief, never the stash (Contracts.without_intel)
+			expected[id] = int(expected.get(id, 0)) + int(body_items[id])
 		var banked := expected.keys().all(func(id: String) -> bool: return int(back.get(id, 0)) >= int(expected[id]))
 		check(not deposited.is_empty() and not bodies.is_empty() and banked,
 			"the rifle set down inside the point and the dead hostile brought there are banked in the stash (M4A1 %d -> %d; short: %s; the body's %s)" % [
@@ -1208,6 +1209,11 @@ func _extract_heli(squad: Array, casualty: String) -> Dictionary:
 			if at >= 0 and player.inventory.equip_entry(container, at):
 				break
 	check(player.inventory.slots[&"primary"] == &"m4a1", "the player has a rifle to set down (%s)" % _kit_text(player))
+	# A drop lets go of what's in his hands first (Soldier._server_drop): the intel he carried out
+	# (a compound's hard case) is set down in the point too, then the rifle.
+	if player.inventory.hands != &"":
+		player._server_drop.rpc_id(1, &"primary")
+		await _frames(3)
 	player._server_drop.rpc_id(1, &"primary")
 	await _frames(3)
 	var bodies: Array = get_tree().get_nodes_in_group(Soldier.DEAD_GROUP).filter(func(n: Node) -> bool:

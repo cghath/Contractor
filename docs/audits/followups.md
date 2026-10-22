@@ -26,6 +26,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
 | F-190 | P1 | ~~A squadmate following along a path walks head-on into a wall's end and stands there pushing~~ fixed 2026-10-22 (Claude, claude/ci-cleanup: SquadAI._unblock; F-80's collection-point half was the test's point) |
+| F-191 | P3 | A shot-down transport's crash landing with two aboard killed both (supports suite, CI once; "most of them alive") |
+| F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
 
 ## F-01: the building scan only sees one floor
 
@@ -430,6 +432,51 @@ dynamic wedge has him, about (-4.3, 3.8), within BODY_THERE_M of the test's coll
 (-8, 4), so he already lay "there" (`_body_destination` null) and nobody had cause to carry him.
 The test takes the point on the other side (8, 4) when he lies within 10 m of it, and the check
 names, per squadmate, any `_can_bear` condition that holds him back.
+## F-163: a helicopter insertion came 0.1 m inside its 5 m airframe clearance
+
+Location: the loop suite's helicopter insertion check ([loop_test.gd](../../tests/loop_test.gd)
+`_heli_insert`, `HeliFlight.airframe_clearance`, `Helicopter.MIN_CLEAR_M`). Found by cghath's
+agent on `world/landmarks` (2026-10-22); the flight code is Claude's, so it isn't changed there.
+
+What happens: on world/landmarks' CI (run 39717899713) the insertion into kestrel_valley's
+compound job (entry (-1072, 72), LZ (-905, -426)) passed 4.9 m from the ground or what stands on
+it at (-921, 1.9, -378), 51 m before the final. The same flight passed locally (R0474). The
+nearest landmark (the drug lab at (-804, -228)) is about 190 m off that spot, so it's the ground
+or the props along the way in, not a landmark; it shows up now because landmarks lengthen
+kestrel_valley's module list and the board deals that job.
+
+Suggested: a margin on the approach (the clearance the flight keeps a little over MIN_CLEAR_M),
+or the check counting from the final's start rather than FINAL_LOW_M.
+
+The loop suite's other two failures on that branch were the test's: a drop lets go of what's in
+the hands first, so with the intel grab's hard case carried out the rifle stayed slung ("the rifle
+set down in the point goes into the hold"), and the "banked" check expected a dead hostile's
+intel in the stash, where intel never goes (`Contracts.without_intel`, also red on
+claude/ai-driving's CI 39682370659). Both are fixed in tests/loop_test.gd on world/landmarks.
+
+Seen again on `claude/ci-cleanup` (Claude, 2026-10-22), the same few metres every time, in a
+different zone from cghath's: "its airframe at least 5 m clear until the final: 3.5 m at the least
+(at (-32, 14.7, -938), 356 m to go)" on CI run 39732150758 (2ff7a91c), and 3.4 m at (-29, 14.7,
+-944) locally (R2363); the same suite passed in R2365, R2386 and R2402. It follows the zone the
+board deals, so it comes and goes from run to run; a flake for CI's purposes until the flight
+keeps its margin.
+
+## F-191: a crash landing with two aboard can kill both (supports suite)
+
+Location: [supports_test.gd](../../tests/supports_test.gd) (the transport shot down: "a crash
+landing: everyone thrown clear and hurt, %d of %d alive") and the crash's injuries to those thrown
+clear (Helicopter's crash landing). Found by Claude on `claude/ci-cleanup` (2026-10-22).
+
+What happens: the check wants at least half of those aboard alive (Captain, 2026-10-18: the crash
+landing is survivable, "most of them alive"). With two aboard, CI run 39732150758 (2ff7a91c) had
+both dead ("Alpha: dead, riding nothing, 3 m from the helicopter; Bravo: dead, ... 4 m"); the
+runs before on the same branch (39722065652, 39725520165) and locally passed. Nothing on that
+branch touches the crash or its injuries (its changes there: a test's waits, the squad's wall
+sidestep, the stash count), so it reads as the injury rolls: two riders leave no room for one
+bad roll.
+
+Suggested: crash injuries rolled within a survivable band for those thrown clear (the "most of
+them alive" call), or the check with more riders aboard.
 
 ## Calls made for the Captain
 
