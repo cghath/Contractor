@@ -185,6 +185,9 @@ func _hud_tab() -> Control:
 	page.add_child(UiKit.hint("What shows over the game view, and how big and how see-through each part is. Changes show at once, behind this menu."))
 	page.add_child(_toggle("Objective markers on screen (the hint line always shows)", "hud", "objective_markers",
 		"Diamonds over where the current objective is, with how far it is. Off: only the hint line under the objectives."))
+	page.add_child(_toggle("Spot reports in the world", "hud", "spot_diamonds",
+		"A diamond over each enemy your side has reported that you can't see yourself: red your tags, amber the rest, fading with age."))
+	page.add_child(_slider("Spot reports out to", "hud", "spot_diamond_range_m", func(v: float) -> String: return "%d m" % roundi(v)))
 	page.add_child(_toggle("Objectives list starts in full (else one line)", "hud", "objectives_expanded",
 		"Show every objective in the top-right list, or only the one you're on (the objectives list key switches it in play)."))
 	var pct := func(v: float) -> String: return "%d%%" % roundi(v * 100.0)

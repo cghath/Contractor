@@ -381,6 +381,7 @@ func _ready() -> void:
 	Flares.of(self)  # every peer: flares at night come to it (G-24)
 	AlliedTroops.install(self)  # wave 6e: an allied rifle element through the support menu
 	EnemyTags.install(self)  # tagging enemies for the squad by radio (Captain, 2026-10-16)
+	SideIntel.install(self)  # the friendly side's picture, group board and spot reports (combined_arms B1)
 	RebelCalls.install(self)  # the locals' call-ins, by their support (rebel support part 2)
 	FireSupport.install(self)  # fire missions, the recon UAV, the forward observer's targets (fire support, 2026-10-20)
 	add_child(GroundGuard.new())  # "GroundGuard": puts back on the ground anything lost below or past it

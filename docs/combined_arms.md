@@ -1426,6 +1426,8 @@ SquadAI                every soldier (built)
 ### 3.2 The picture: what a side knows
 
 New `SidePicture` (`scripts/campaign/side_picture.gd`, RefCounted, pure where it can be).
+**Built in B1** (2026-10-22) with `GroupBoard` and `SideIntel`; the details it settled are in
+section 10, calls B1.1-B1.18.
 
 **A contact report** is a record:
 
@@ -2824,3 +2826,47 @@ Numbered D7-n so they don't collide with other phases' calls. All Proposed.
 | 71 | New per-model data in per-topic files merged by `VehicleSpecs.spec` | Parallel phases would collide in data/vehicles.json | One file |
 | 72 | 29 session-sized phases in four lanes and six waves, new logic in new files | Parallel without overlap | Fewer, bigger phases |
 | 73 | Builds cut after A5, C3 and D4 | The Captain's "builds only for major updates" | A build per phase |
+
+### B1: the side picture (built 2026-10-22, branch claude/ca-b1-side-picture)
+
+The details B1 had to settle that the doc left open. Each is Proposed and in data/side_picture.json
+where it's a number. They're numbered B1.n so the phases landing beside it don't collide on numbers.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| B1.1 | A `SideIntel` node per level (scripts/campaign/side_intel.gd) owns the friendly `SidePicture` and `GroupBoard` and feeds them until B2's `SideCommand` takes them over; the hostile ones live on `EnemyCommand` | B1 needed a host for the picture before the commander exists; one node, easy to hand over | Waiting for B2 to build the picture |
+| B1.2 | A report gets its id when it reaches the picture; an entry keeps the ids it was built from, its freshest kept as long as the entry lives. Fairness = every entry, every spot marker and every world diamond traces to reports in the log, at its freshest report's position | Ids that rise through the log make the trace a binary search; the test checks it on 400 random reports and in play | Ids at send time (out of order after latency) |
+| B1.3 | Latency profiles: the company, Meridian, US, UK and Canada regular (3-8 s); Eastern Concord and Vantage Group (a hostile PMC) 8-20 s; Black Ridge, Saltline, Kestrel and the Salvage Union irregular (15-45 s); Banner, Shura and Highland Front as `Alert` (60-15 s). Only insurgents slow under fire (x1.5, `Alert`'s rule). The delay is set by the leader's skill, no dice | The doc's table, filled in for every faction; tests can pin it | A random delay in the band |
+| B1.4 | A player's tag, report or lase reaches the picture in 3 s (x3 with comms down); a lookout's or the UAV's at a mid-skill regular's 5.5 s | Players key their own radios; the fastest sender on the net | The company's 3-8 s |
+| B1.5 | Radios: regular and Concord groups carry an issued set (the leader's, else the first man up); irregulars and insurgents need a radio in their kit; a squad meta `no_radio` takes it away. A report dies with its radio man if he's down before it's due (as `Alert`). A group with no radio holds its reports until one of its men is within 80 m of a man or player with a radio, who passes them on at his own delay | The doc's "radio man down" and shouting distance, without a radio item in every regular kit | Radio items in every allied kit |
+| B1.6 | A report's kind comes from what the seen men carry (a launcher AT, an LMG or HMG MG, a sniper rifle or DMR sniper, else infantry); a cluster's men on foot are one report named for the most dangerous kind; each vehicle seen is its own report by its class | What a sighting tells a real observer; one icon per group on the map | One report per man |
+| B1.7 | Base uncertainty by how it was seen: seen 5 m, heard 40, a tag 2, a radio report 10, a lase 1, noise 80 | A lase or a tag is a precise fix; a bearing heard isn't | One uncertainty for all |
+| B1.8 | The merge window runs from the entry's last sighting; a late report of an older sighting merges (count, uncertainty) but never moves the entry back | "Position the fresher" with latency in the way | Merging by arrival time |
+| B1.9 | At most 64 entries a side (full: the least lately reported of the 8 longest-standing goes); the log keeps 15 min or 512 reports, pruned in batches of 32; `EnemyCommand`'s keeps 4,096 so its fog reads every report of the last 10 min as it did | Bounded cost; hot zones unchanged | Unbounded lists |
+| B1.10 | The hostile picture takes `Alert`'s contact reports with no extra delay (Alert already holds them 60-15 s, x1.5 under fire, x3 with the mast down); shots and blasts go in its log as noise, never as entries; `threat_cp` reads the log, and `_contacts` stays as the log for the tests that clear it | The doc's "moved, not rewritten": missions_test's hot-zone checks pass unchanged | A second delay on top of Alert's |
+| B1.11 | A board row changes only at its group's sitrep (every 30 s): position, strength, ammo and CE as last reported. CP's skill floor is 0.3; a virtual man counts 0.6 skill without armour; a group's mounted vehicles add their CP and AT power; a vehicle group's CE stays whole until A2's modules (mobility only from fuel) | The commander knows its own groups by their reports too | Live rows |
+| B1.12 | The player squad is a "company" row and `AlliedTroops` elements are rows, both with `taskable` false; garrison profiles without a squad aren't on the board until B2 needs them | 3.4.4: the commander plans around the company, never tasks it | Leaving the company off the board |
+| B1.13 | BFT: a friendly vehicle (faction player, friendly or allied) is tracked at its true position while its radio works: not wrecked, battery up and no meta `radio_down` (A2's radio module sets it); grey and frozen after. Groups by their sitrep | A hook A2 fills without touching B1 | Waiting for A2's modules |
+| B1.14 | Each entry is one MapMarkers `spot` marker on the intel channel, re-sent only when it changes; every peer ages it on its own clock from when it arrived; a late joiner gets ages brought up to now; players can't move or delete them | Little traffic, no shared clock needed; "joins the intel channel" (4.4) | Streaming the picture every second |
+| B1.15 | The map symbol: men a diamond frame (the infantry cross, an MG mark, an AT chevron, a sniper ring), vehicles a box with the armour oval or wheels, mortars a tube; labelled "MG x1, 40 s", "last seen: ..." once stale; hovering adds who sent it and how long ago it came in ("Saber 2, 40 s ago") | APP-6-inspired and readable at a glance | Full APP-6 frames |
+| B1.16 | World diamonds: none for a spot the player can see himself (in his view within 150 m with a clear line, checked 4 times a second); a tag's red diamond shows once `EnemyTags`' own mark over the man has gone; 0.95, 0.6 and 0.3 alpha by band. Settings: on/off, range 100-1,500 m (800) | No double marks, no clutter over what you're looking at | Diamonds over everything |
+| B1.17 | The 0.3 ms budget is measured on a full picture (64 entries) taking 5 reports a step: 106 µs in the debug build. 40 groups each reporting a fresh cluster every 30 s make 1.3 a second; at 20 a step it's about 550 µs | A heavy fight's burst, not a steady state no fight reaches | 20 reports a second as the steady load |
+| B1.18 | Friendly comms down is a hook (`SideIntel.server_set_comms`) until something calls it: no enemy jammer exists yet, and the operation HQ's relay comes with D3; the hostile picture's comms follow the mast | B1 builds the effect; its causes land with their phases | Inventing an enemy jammer now |
+
+### B4, part 1: request plumbing before B2 (built 2026-10-22, branch claude/ca-b1-side-picture)
+
+B4's pieces that don't need the commander: the broker, the cards and the radio voice. The jobs
+themselves (moving, suppressing, treating) come with B2's SideCommand as the broker's executor.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| B4.1 | `RequestBroker` runs the whole lifecycle now and hands each accepted request to an `executor` (B2's SideCommand), which moves it on with `server_progress`; with none, an accepted request waits and fails at `until_s` (10 min) "Timed out". No player entry point yet: C6's contextual menus and the map add them | The plumbing is testable and stable before anything can do the jobs; no half-working option in the game | Faking the jobs until B2 |
+| B4.2 | `can_spare` is a hook B2 fills; until then every group can be spared | 4.2.10 is the commander's call | A stand-in rule |
+| B4.3 | Refusals in a fixed order: committed to an assault, pinned (in contact and RED), ammo (black for jobs that shoot, amber or worse for an ammo ask), no medic, no smoke, out of range, the commander's answer; an ETA over 2 minutes is a counter-offer | The order a unit would answer in; data per kind (data/requests.json) | Random refusals |
+| B4.4 | ETAs: within the kind's `in_place_m` 8 s, else the distance at 1.8 m/s on foot or 8 m/s mounted. Line of sight and SBF spots come with B2's executor | Close enough until routes are in | Path-finding on the host for every request |
+| B4.5 | The answer comes 2-6 s after the ask by the group's CE (x1.5 in contact); a group with no radio hears only within 80 m | The doc's 2-6 s and shouting distance | One fixed delay |
+| B4.6 | Groups answer under callsigns by kind and number (Saber, Iron, Anvil, Hammer, Shadow, Packhorse), kept for the deployment; the net itself is Citadel | 4.6's names | The squads' node names |
+| B4.7 | Allied asks (4.3) built for contact support and ammo from the board; medic, clearing an AT threat, covering a crossing and recovery come with B2/B3 when groups know those states. One card per player at a time, 30 s; asks again from the same group after 5 min; cooperation counted per player (the employer's reputation and the operation bonus read it in D3) | The two asks the board already knows; the rest need the commander | All six now, half of them never raised |
+| B4.8 | The cards answer to C2's high command keys (`hc_approve`, `hc_deny`) once they exist; until then the card's buttons | C2 owns the keys | Binding new keys here |
+| B4.9 | RadioVoice says a line only when every word has a clip, digit by digit ("zero four one"); 2 voices; the words are data/radio_voice.json and requests_test checks every line the broker says is covered. The clips are rendered with tools/voices/gen_radio.py, which needs Piper: not on this PC, so they're still to render (subtitles meanwhile) | No half-spoken lines; the word list can't drift from the lines | Runtime speech synthesis (4.6 rules it out) |
+| B4.10 | Requests travel as whole records to every peer on each change (a few at a time, closed ones kept 2 minutes) | Few records, simple late joins | Deltas |

@@ -158,6 +158,7 @@ func _ready() -> void:
 	zone_top_right.add_to_group(TOP_RIGHT_GROUP)
 	zone_top_right.add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	zone_top_right.add_child(HcStrip.new())  # high command: the squads' line and the latest request (high_command.md 10)
+	zone_top_right.add_child(RequestCards.new(player))  # requests to friendly units and their asks (combined_arms 4.1, 4.3)
 	objective_helper = ObjectiveHelper.new(player)  # what to do now, and small markers on its target
 	add_child(objective_helper)
 	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count
@@ -166,6 +167,7 @@ func _ready() -> void:
 	add_child(armor_readout)
 	compass = Compass.new(player)  # the bearing strip, top-centre
 	add_child(compass)
+	add_child(SpotDiamonds.new(player))  # the side's spot reports over the world (combined_arms 4.4)
 	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
 	_bleed = BleedSilhouette.new(player)

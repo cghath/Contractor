@@ -1,0 +1,13 @@
+{
+	"_about": "RadioVoice (docs/combined_arms.md 4.6, B4): every word the coordination net says, one clip each per voice, rendered with tools/voices/gen_radio.py into audio/radio/v<k>/<word>.wav. Digits zero-nine are always in. requests_test checks every RequestBroker line is covered. Proposed.",
+	"voices": 2,
+	"words": [
+		"saber", "anvil", "iron", "hammer", "thunder", "shadow", "packhorse", "dustoff", "citadel", "company", "element",
+		"copy", "out", "over", "unable", "cancelling", "complete", "now", "on", "in", "it", "at", "say", "if", "you", "want",
+		"we", "were", "can", "be", "there", "seconds", "minutes", "no", "unit", "give", "committed", "to", "an", "assault",
+		"pinned", "ourselves", "ammo", "black", "medic", "free", "smoke", "left", "of", "range", "our", "orders", "come", "first",
+		"a", "suppression", "casevac", "armour", "support", "hold", "covering", "fire", "pick", "up", "sitrep",
+		"green", "amber", "red", "good", "low", "holding", "contact", "enemy", "metres",
+		"north", "east", "south", "west", "any", "station", "need", "anyone", "close", "waiting", "grid"
+	]
+}

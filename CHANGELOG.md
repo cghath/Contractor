@@ -206,6 +206,57 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   They were saved but dropped on loading.
 - **Hangars and factory floors count as buildings (F-162).** The AI's building scan missed the
   middle of a big open hall, so it never garrisoned or cleared one room by room.
+### Requests to friendly units: the plumbing (combined arms phase B4, part 1, docs/combined_arms.md 4.1-4.3, 4.6)
+
+#### Added
+- **Requests and their answers.** A request to a friendly unit (suppression, a medic, CASEVAC,
+  smoke, armour, hold, cover, a pick-up, ammo, a sitrep) goes to the nearest group that can do it
+  and hears you. After a radio delay it answers yes with an ETA, no with a reason ("We're pinned",
+  "Ammo black", "No medic free", "Out of range"), or offers a later time you can take or cancel.
+  Three can be open at once, and asking the same thing twice merges. A sitrep is answered at once
+  from what the side knows. The units don't carry out the jobs yet (phase B2), and the menus that
+  send requests come with the contextual menus (C6).
+- **Request cards** under the objectives show each request: who answers, what, its state and
+  the ETA counting down, with accept and cancel.
+- **Allies ask you.** An allied group in contact and in trouble, or out of ammo, calls the nearest
+  player on the net ("Any station, Saber 2, contact, need support at 041 053"). A card shows
+  where it is and asks yes or no. Helping counts toward your cooperation.
+- **Radio voice.** Net lines are put together from recorded words, digit by digit. The clips are
+  still to be rendered (tools/voices/gen_radio.py needs Piper); until then the lines show as
+  subtitles.
+- New test suite requests, in tools/run_tests.sh and CI.
+
+### The side picture: what each side knows (combined arms phase B1, docs/combined_arms.md 3.2, 3.3, 4.4)
+
+> **Status (2026-10-22 ~01:10 CDT):** side_command, requests and smoke pass locally; missions
+> (R2402) fails only its zone-generation check, which runs before any B1 code (the landmarks
+> red claude/ci-cleanup fixes). Remove this note when B1 lands.
+
+#### Added
+- **Spot reports on the map.** What your side has reported shows on the map as it was reported:
+  a symbol by what was seen (men, an MG, an AT team, a sniper, a vehicle, armour, a mortar), how
+  many and how long ago, inside a circle for how sure anyone is of where they are now. Fresh
+  reports are solid, older ones dashed, and past three minutes only a "last seen" circle is left.
+  Hover one to see who sent it and when. Nobody sees anything that wasn't reported.
+- **Spot reports in the world.** A small diamond hangs over each reported enemy within 800 m that
+  you can't see yourself. Your side's tags are red, everyone else's reports amber, and they fade
+  as they age. Settings > HUD turns them off or changes the range.
+- **Reports take radio time.** A squad's sighting reaches the side over the radio after a delay:
+  3-8 s for the company and allied regulars by their leader's skill, 8-20 s for Eastern Concord,
+  15-45 s for the cartels and Black Ridge, and the insurgents as before. With the net down it's
+  three times as long. A group whose radio man is down holds what it saw until it meets someone
+  with a radio.
+- **Your own forces are tracked.** Friendly vehicles with a working radio are tracked where they
+  are, and go grey if the radio is knocked out. Groups are tracked by their sitreps every 30 s.
+- **The group board.** Every group on each side is listed with its strength, anti-armour power,
+  combat effectiveness (green, amber, red) and ammunition. The AI commander (phase B2) will task
+  groups from it.
+- New test suite side_command (merging, ageing, latency by side, comms down, tracking, fairness,
+  the budget), in tools/run_tests.sh and CI.
+
+#### Changed
+- The hot-zone enemy commander now keeps its picture in the same form the friendly side uses.
+  Its decisions read the same reports as before, so hot zones play the same.
 
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 

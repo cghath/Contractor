@@ -800,6 +800,9 @@ func _draw_markers() -> void:
 			points = moved
 		var colour := MapMarkers.colour_value(String(marker.colour))
 		var hover := int(marker.id) == _hover_id
+		if marker.kind == "spot":  # the side's spot reports (combined_arms 4.4): never dragged
+			MapMarkers.draw_spot(self, marker, map_to_screen(marker.points[0]), hover)
+			continue
 		if marker.kind == "line":
 			_polyline(points, colour, 3.0 if hover else 2.0)
 			continue
