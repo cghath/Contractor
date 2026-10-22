@@ -1,0 +1,281 @@
+{
+	"_about": "B2 of docs/combined_arms.md (3.1, 3.4-3.8): the AI commander's numbers. Read by SideCommand, OperationPlan, DefencePlan and the Virtualizer's armour table. Every number Proposed (2026-10-22); the calls the doc left open are its section 10, B2.n.",
+	"task_s": {
+		"operation": 20.0,
+		"hot": 30.0,
+		"defence": 20.0
+	},
+	"think_s": 0.5,
+	"reach_m": {
+		"foot": 1500.0,
+		"mounted": 4000.0
+	},
+	"commitment": 0.2,
+	"availability": {
+		"assault": 0.0,
+		"defend_quiet": 0.5,
+		"idle": 1.0,
+		"reserve": 1.0
+	},
+	"sync_timeout_s": 120.0,
+	"consolidate_s": 90.0,
+	"objective_radius_m": 60.0,
+	"reserve_share": 0.25,
+	"withdraw_share": 0.5,
+	"withdraw_ce": 0.4,
+	"phase_stall_share": 0.6,
+	"phase_pause_s": 300.0,
+	"phase_fail_share": 1.5,
+	"merge_m": 60.0,
+	"rally_back_m": 250.0,
+	"sbf_offset_m": 250.0,
+	"flank_offset_m": 200.0,
+	"screen_offset_m": 300.0,
+	"suitability": {
+		"_about": "3.4.2: group kind -> role -> 0..1; armour_section assault is 0.7 in the open, town_assault in a town.",
+		"rifle_squad": {
+			"assault": 1.0,
+			"sbf": 0.6,
+			"flank": 0.9,
+			"recon": 0.5,
+			"reserve": 0.8,
+			"screen": 0.8,
+			"defend": 1.0,
+			"overwatch": 0.3,
+			"breach": 0.6,
+			"secure": 0.8
+		},
+		"weapons_team": {
+			"assault": 0.2,
+			"sbf": 1.0,
+			"flank": 0.3,
+			"recon": 0.2,
+			"reserve": 0.4,
+			"screen": 0.7,
+			"defend": 0.8,
+			"overwatch": 0.9,
+			"breach": 0.2,
+			"secure": 0.7
+		},
+		"gun_team": {
+			"assault": 0.2,
+			"sbf": 1.0,
+			"flank": 0.3,
+			"recon": 0.2,
+			"reserve": 0.4,
+			"screen": 0.7,
+			"defend": 0.8,
+			"overwatch": 0.9,
+			"breach": 0.2,
+			"secure": 0.7
+		},
+		"at_team": {
+			"assault": 0.3,
+			"sbf": 0.5,
+			"flank": 0.6,
+			"recon": 0.2,
+			"reserve": 0.6,
+			"screen": 1.0,
+			"defend": 0.8,
+			"overwatch": 0.7,
+			"breach": 0.3,
+			"secure": 0.9
+		},
+		"recon_team": {
+			"assault": 0.2,
+			"sbf": 0.4,
+			"flank": 0.4,
+			"recon": 1.0,
+			"reserve": 0.3,
+			"screen": 0.5,
+			"defend": 0.4,
+			"overwatch": 0.6,
+			"breach": 0.2,
+			"secure": 0.6
+		},
+		"mech_infantry": {
+			"assault": 1.0,
+			"sbf": 0.9,
+			"flank": 0.8,
+			"recon": 0.6,
+			"reserve": 1.0,
+			"screen": 0.8,
+			"defend": 0.9,
+			"overwatch": 0.7,
+			"breach": 0.5,
+			"secure": 0.9
+		},
+		"armour_section": {
+			"assault": 0.7,
+			"town_assault": 0.2,
+			"sbf": 1.0,
+			"flank": 0.6,
+			"recon": 0.4,
+			"reserve": 1.0,
+			"screen": 0.5,
+			"defend": 0.6,
+			"overwatch": 1.0,
+			"breach": 0.3,
+			"secure": 0.6
+		},
+		"armour_platoon": {
+			"assault": 0.7,
+			"town_assault": 0.2,
+			"sbf": 1.0,
+			"flank": 0.6,
+			"recon": 0.4,
+			"reserve": 1.0,
+			"screen": 0.5,
+			"defend": 0.6,
+			"overwatch": 1.0,
+			"breach": 0.3,
+			"secure": 0.6
+		},
+		"light_armour": {
+			"assault": 0.5,
+			"sbf": 0.8,
+			"flank": 0.7,
+			"recon": 0.8,
+			"reserve": 0.9,
+			"screen": 0.8,
+			"defend": 0.5,
+			"overwatch": 0.6,
+			"breach": 0.3,
+			"secure": 0.8
+		},
+		"qrf": {
+			"assault": 1.0,
+			"sbf": 0.6,
+			"flank": 0.9,
+			"recon": 0.5,
+			"reserve": 0.9,
+			"screen": 0.8,
+			"defend": 1.0,
+			"overwatch": 0.3,
+			"breach": 0.6,
+			"secure": 0.8
+		},
+		"engineers": {
+			"assault": 0.4,
+			"sbf": 0.3,
+			"flank": 0.4,
+			"recon": 0.2,
+			"reserve": 0.5,
+			"screen": 0.4,
+			"defend": 0.6,
+			"overwatch": 0.2,
+			"breach": 1.0,
+			"secure": 0.4
+		},
+		"transport": {
+			"assault": 0.0,
+			"sbf": 0.0,
+			"flank": 0.0,
+			"recon": 0.1,
+			"reserve": 0.2,
+			"screen": 0.0,
+			"defend": 0.1,
+			"overwatch": 0.0,
+			"breach": 0.0,
+			"secure": 0.0
+		},
+		"mortar_section": {
+			"assault": 0.0,
+			"sbf": 0.2,
+			"flank": 0.0,
+			"recon": 0.0,
+			"reserve": 0.2,
+			"screen": 0.0,
+			"defend": 0.3,
+			"overwatch": 0.1,
+			"fire_support": 1.0,
+			"breach": 0.0,
+			"secure": 0.1
+		}
+	},
+	"counterattack": {
+		"_about": "3.7: retaken only at ratio x CP (called off under call_off); AT power at least the armour's CP x at_share; assemble rally_m out, go at wait_s after the loss (or once assembled), the prep prep_s before.",
+		"ratio": 3.0,
+		"call_off": 1.5,
+		"at_share": 0.25,
+		"rally_m": [
+			600.0,
+			1200.0
+		],
+		"rally_hot_m": 150.0,
+		"wait_s": [
+			300.0,
+			720.0
+		],
+		"prep_s": 60.0,
+		"stale_s": 180.0,
+		"assembled_m": 50.0,
+		"dusk_window_s": 1200.0
+	},
+	"virtual_fight": {
+		"_about": "3.8: off-screen fights. soft/hard attack per group kind, and whether it's armoured (no, light, yes). Hits on an armoured group use the attacker's hard attack, else its soft; the factor scales the Virtualizer's hit count by attack over a rifle squad's soft 6.",
+		"rifle_squad": {
+			"soft": 6.0,
+			"hard": 1.0,
+			"hard_with_at": 3.0,
+			"armoured": "no"
+		},
+		"weapons_team": {
+			"soft": 8.0,
+			"hard": 2.0,
+			"hard_with_at": 4.0,
+			"armoured": "no"
+		},
+		"at_team": {
+			"soft": 2.0,
+			"hard": 6.0,
+			"hard_with_at": 6.0,
+			"armoured": "no"
+		},
+		"technical": {
+			"soft": 5.0,
+			"hard": 1.0,
+			"hard_with_at": 1.0,
+			"armoured": "no"
+		},
+		"mrap": {
+			"soft": 5.0,
+			"hard": 1.0,
+			"hard_with_at": 1.0,
+			"armoured": "light"
+		},
+		"ifv": {
+			"soft": 6.0,
+			"hard": 4.0,
+			"hard_with_at": 8.0,
+			"armoured": "yes"
+		},
+		"mbt": {
+			"soft": 6.0,
+			"hard": 10.0,
+			"hard_with_at": 10.0,
+			"armoured": "yes"
+		},
+		"base_soft": 6.0,
+		"light_armour_share": 0.5
+	},
+	"armour_infantry": {
+		"_about": "3.6 (B3): pairing distances, who leads by ground, hand-offs and AT asks.",
+		"pair_m": [
+			50.0,
+			150.0
+		],
+		"open_overwatch_m": 1000.0,
+		"follow_woods_m": 150.0,
+		"follow_town_m": 75.0,
+		"town_edge_m": 5.0,
+		"dismount_min_m": 300.0,
+		"dismount_max_m": 500.0,
+		"handoff_s": 60.0,
+		"handoff_m": 60.0,
+		"at_threat_m": 400.0,
+		"woods_probe_m": 30.0,
+		"woods_foliage_m": 30.0,
+		"still_in_sight_s": 60.0
+	}
+}

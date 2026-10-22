@@ -833,6 +833,12 @@ func _tick_sbf(now: float, h: Soldier) -> void:
 				squad.set_hold_fire(h, true, _names(men()))
 				radio("set", "check fire, friendlies on target")
 			return
+	if Deconfliction.checked(_target, squad.faction) or (squad.has_meta(&"sector") and Deconfliction.in_bubble(squad, _target)):
+		if not _lifted:  # a check fire there, or a player's bubble for an allied group (combined_arms 4.5)
+			_lifted = true
+			squad.set_hold_fire(h, true, _names(men()))
+			radio("set", "check fire, friendlies on target")
+		return
 	if not safe_to_fire(h.global_position, _target, friends):
 		if not _lifted:
 			_lifted = true

@@ -22,11 +22,11 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | D7: US forces in the living war | claude/ca-d7-us-war | yes | Done |
 | A1: the armour model | claude/ca-a1-armour-model | yes | Done. Next is your cg_brief 2.0 (standards pass), then A2 |
 | C lane: high command C1-C6 | claude/ca-c-high-command | yes (df3133f0) | Done: two HC squads from the start, Phase 2 orders, map-order HUD with gun cone of fire, 3D HC camera, contextual menus |
-| B lane: AI commander | claude/ca-b1-side-picture | B1 only (via C) | Running: B2 (unblocked by C2), B3, B5, the rest of B4, then docs/ai_tactics.md from the reels, for all AI |
+| B lane: AI commander + tactics | claude/ca-b1-side-picture | yes (2026-10-22 ~13:30) | Done: B2 commander, B3 armour with infantry, B5 deconfliction, B4 requests carried out; docs/ai_tactics.md and the drills by echelon for every side; terror groups that grow. Deferred (doc calls 12, 13, 19): wider spacing in cover (waits for a playtest), smoke before a breach beyond bunkers, dug-in positions and IEDs scaling with group size. Radio voice clips need Piper rendering (subtitles meanwhile) |
 | D1/D2: 8 km operation zones | claude/ca-d1-operation-zones | no | **Yours** (cg_brief 3.1). D1 done; D2 untested WIP |
 | Your world/water, missions-2, voxel smoke, demolitions | (yours) | yes (00f3e731) | Merged 2026-10-22 for v0.5.3 |
 | Your world/perf stack (roads, terrain, cities, village houses, props, perf) | world/perf, via claude/merge-world-perf | yes (9729d106) | Merged with our perf pass (both kept in zone_scatter.gd). Your content roughly doubles town and heli frame cost, so the perfcases budgets were re-based; worth a perf look. **In v0.5.3 (B2493)** |
-| Tactics reels → AI spec | docs/tactics/ | yes | 10 of 23 reels done (13 gone, skipped on Captain's call); the B lane writes and builds the spec |
+| Tactics reels → AI spec | docs/tactics/, docs/ai_tactics.md | yes | Done from 10 reels (13 gone, skipped on Captain's call); see the B lane row for what was deferred |
 
 ## Open work, in order, and who has it
 

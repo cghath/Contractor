@@ -16,7 +16,7 @@ func _ready() -> void:
 	GameState.zone_id = "test_side_command" + OS.get_environment("CONTRACTOR_TEST_TAG")  # never touch a real save
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = false
-	get_tree().create_timer(300.0).timeout.connect(func() -> void:
+	get_tree().create_timer(420.0).timeout.connect(func() -> void:
 		print("SIDE_COMMAND TEST FAILED (timed out)")
 		get_tree().quit(99))
 	_test_latency()
@@ -26,6 +26,7 @@ func _ready() -> void:
 	_test_fairness_pure()
 	_test_budget()
 	_test_board_scales()
+	_test_allocation()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -40,6 +41,14 @@ func _ready() -> void:
 	await _test_board_level()
 	_test_hostile_picture()
 	await _test_diamonds()
+	await _test_commander()
+	await _test_defence()
+	await _test_armour_infantry()
+	await _test_platoon_sosra()
+	await _test_company_isolate()
+	await _test_company_lure()
+	await _test_security_zone()
+	await _test_brigade()
 	GameState.delete_save()
 	print("SIDE_COMMAND TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -454,3 +463,475 @@ func _test_diamonds() -> void:
 	else:
 		GameSettings._values["hud"]["spot_diamonds"] = had
 	await _frames(2)
+
+
+# --- B2: the commander ----------------------------------------------------------------------------
+
+func _b2_row(id: String, kind: String, pos: Vector3, extra := {}) -> Dictionary:
+	var r := {"id": id, "kind": kind, "pos": pos, "ce": 1.0, "ce_band": "green", "ammo_band": "green", "strength_cp": 6.0, "at_cp": 0.0,
+		"mounted_in": [], "vehicle_kinds": [], "need": "", "availability": 1.0, "up": 8}
+	r.merge(extra, true)
+	return r
+
+
+func _test_allocation() -> void:
+	print("B2: allocation on staged boards (3.4.3)")
+	var obj := Vector3(0, 0, 0)
+	var needs := [{"id": "brass", "role": "assault", "pos": obj, "target": obj, "pair": "brass:sbf", "priority": 10.0},
+		{"id": "brass:sbf", "role": "sbf", "pos": obj + Vector3(0, 0, 250), "target": obj, "priority": 10.0}]
+	var rows := [_b2_row("saber1", "rifle_squad", Vector3(0, 0, 400)), _b2_row("hammer1", "weapons_team", Vector3(50, 0, 400))]
+	var got := SideCommand.allocate(needs, rows)
+	var by := {}
+	for a: Dictionary in got:
+		by[String(a.need.id)] = String(a.row.id)
+	check(by.get("brass") == "saber1" and by.get("brass:sbf") == "hammer1", "the rifle squad assaults, the weapons team supports by fire")
+	check(SideCommand.allocate(needs, [_b2_row("saber1", "rifle_squad", Vector3(0, 0, 400))]).is_empty(), "an Assault is never sent without its SBF")
+	var armour := needs.duplicate(true)
+	for n: Dictionary in armour:
+		n["armour"] = true
+	var at_rows := [_b2_row("saber1", "rifle_squad", Vector3(0, 0, 400)), _b2_row("hammer1", "weapons_team", Vector3(50, 0, 400), {"at_cp": 2.0})]
+	check(SideCommand.allocate(armour, at_rows).is_empty(), "no group without AT power goes at known armour (the rifle squad has none)")
+	var s := SideCommand.score(_b2_row("saber1", "rifle_squad", Vector3(0, 0, 750), {"ce": 0.8, "availability": 0.5}), needs[0])
+	check(is_equal_approx(s, 1.0 * 0.8 * 0.5 * 0.5), "score = suitability x CE x (1 - distance / reach) x availability (%.3f)" % s)
+	var busy := SideCommand.score(_b2_row("saber1", "rifle_squad", Vector3(0, 0, 0), {"need": "other"}), needs[0])
+	check(is_equal_approx(busy, 1.0 - 0.2), "a group tasked elsewhere pays the 0.2 commitment (hysteresis)")
+	var mech := _b2_row("iron1", "mech_infantry", Vector3(0, 0, 3000), {"mounted_in": ["v1"]})
+	check(SideCommand.score(mech, needs[0]) > 0.0 and SideCommand.score(_b2_row("saber9", "rifle_squad", Vector3(0, 0, 3000)), needs[0]) == 0.0,
+		"mounted groups reach 4 km, on foot 1.5 km")
+	check(SideCommand.suitability("armour_section", "assault", true) == 0.2 and SideCommand.suitability("armour_section", "assault") == 0.7,
+		"tanks assault in the open (0.7), not into a town (0.2)")
+	check(SideCommand.score(_b2_row("x", "rifle_squad", obj), {"id": "r", "role": "reserve", "pos": obj, "only": "y"}) == 0.0, "a need for one group takes no other")
+	print("B2: off-screen fights by the armour table (3.8)")
+	check(is_equal_approx(SideCommand.fight_factor("rifle_squad", "mbt"), 1.0 / 6.0), "rifles against a tank: 1/6 the hits")
+	check(is_equal_approx(SideCommand.fight_factor("at_team", "mbt"), 1.0), "an AT team against a tank: full")
+	check(is_equal_approx(SideCommand.fight_factor("mbt", "rifle_squad"), 1.0), "a tank against infantry: its soft attack")
+	check(is_equal_approx(SideCommand.fight_factor("rifle_squad", "mrap"), 0.5), "rifles against an MRAP: half")
+	print("B2: tasking budget")
+	var many_rows: Array = []
+	var many_needs: Array = []
+	for i in 40:
+		many_rows.append(_b2_row("g%d" % i, ["rifle_squad", "weapons_team", "mech_infantry", "at_team"][i % 4], Vector3(i * 30.0, 0, 500)))
+	for i in 5:  # a company's plan: 5 objectives with their SBF and screens, 5 more tasks (20 needs)
+		many_needs.append({"id": "o%d" % i, "role": "assault", "pos": Vector3(i * 100.0, 0, 0), "pair": "o%d:sbf" % i, "priority": 10.0 - i})
+		many_needs.append({"id": "o%d:sbf" % i, "role": "sbf", "pos": Vector3(i * 100.0, 0, 250), "priority": 10.0 - i})
+		many_needs.append({"id": "s%d" % i, "role": "screen", "pos": Vector3(i * 100.0, 0, -300), "priority": 5.0})
+		many_needs.append({"id": "r%d" % i, "role": ["reserve", "recon", "defend", "overwatch", "resupply"][i], "pos": Vector3(i * 80.0, 0, 600), "priority": 4.0})
+	var us := INF
+	for batch in 10:  # the best of ten batches: other runs (perf suites) share this machine
+		var t0 := Time.get_ticks_usec()
+		for k in 4:
+			SideCommand.allocate(many_needs, many_rows)
+		us = minf(us, (Time.get_ticks_usec() - t0) / 4.0)
+	print("    allocate: %.0f us for 40 groups and 20 needs" % us)
+	# The budget is 1 ms (combined_arms 9.3): about 0.5 ms on a quiet machine. Other sessions' perf
+	# suites share this one and double it, so the check guards against a real regression at 2 ms.
+	check(us < 2000.0, "a tasking cycle's allocation for 40 groups stays near its 1 ms budget (%.0f us; 0.5 ms quiet)" % us)
+
+
+## A commanded group of `n` men at `at` (frozen: the test drives what happens).
+func _b2_group(cmd: SideCommand, nm: String, faction: String, at: Vector3, kind: String, loadout: Array = ["m4a1"], n := 4) -> String:
+	var sq := Squad.new()
+	sq.name = nm
+	sq.faction = StringName(faction)
+	level.add_child(sq)
+	var men: Array[Soldier] = []
+	for i in n:
+		men.append(_spawn("%s_%d" % [nm, i], faction, at + Vector3(i * 1.5, 0, 0), loadout))
+	await _frames(3)
+	for s in men:
+		_freeze(s)
+		SquadAI.of(s).squad = sq
+		var w := s.active_weapon()
+		if w:
+			s.inventory.take(Soldier._ammo_of(w), 8)
+	sq.leader = men[0]
+	return cmd.server_register(sq, kind, nm.capitalize())
+
+
+func _test_commander() -> void:
+	print("B2: the friendly commander in play")
+	var obj := Vector3(-30, 0, -40)
+	var spec := {"phases": [{"name": "the farm", "limit_s": 100.0, "axis": [Vector3(0, 0, 40), obj], "main": "farm",
+		"objectives": [{"id": "farm", "label": "OBJ BRASS", "pos": obj, "radius": 15.0, "required": true}]}],
+		"ld": Vector3(0, 0, 40), "rally": Vector3(20, 0, 45), "hhour_s": 0.0, "flanks": false}
+	var plan := OperationPlan.new(spec)
+	var cmd := SideCommand.install(level, &"friendly", plan)
+	check(SideCommand.of(level, &"friendly") == cmd and RequestBroker.of(level).executor.is_valid(), "the friendly commander is in, and the broker's executor")
+	var saber := await _b2_group(cmd, "saber1", "friendly", Vector3(-10, 0.1, 30), "rifle_squad", ["m4a1"], 6)
+	var hammer := await _b2_group(cmd, "hammer1", "friendly", Vector3(10, 0.1, 30), "weapons_team", ["m249"], 4)
+	var res := await _b2_group(cmd, "saber2", "friendly", Vector3(25, 0.1, 40), "rifle_squad", ["m4a1"], 4)
+	SideIntel.of(level).picture.submit({"kind": "inf", "count": 3, "pos": obj}, SideIntel.of(level).now())  # the farm is held
+	cmd.advance(0.1)
+	check(plan.started and not plan.reserve.is_empty(), "phase 1 begins and a reserve is held (%s)" % ", ".join(PackedStringArray(plan.reserve.keys())))
+	var ga: Dictionary = cmd.groups[saber]
+	var gs: Dictionary = cmd.groups[hammer]
+	if plan.reserve.has(saber) or plan.reserve.has(hammer):
+		print("    (the reserve took an assault group: %s)" % ", ".join(PackedStringArray(plan.reserve.keys())))
+	check(ga.role == "assault" and (ga.orders as SquadOrders).order.get("verb") == "attack" and (ga.orders as SquadOrders).order.get("go") == "alpha",
+		"Saber 1 assaults, held for its support (go alpha)")
+	check(gs.role == "sbf" and (gs.orders as SquadOrders).order.get("verb") == "sbf", "Hammer 1 supports by fire")
+	check(cmd.lines.any(func(l: Dictionary) -> bool: return String(l.text).contains("ASSAULT on OBJ BRASS: score")), "the decision is a [cmd] line with its score")
+	print("B2: the assault waits for its SBF (3.5.1)")
+	var so_a := ga.orders as SquadOrders
+	var so_s := gs.orders as SquadOrders
+	so_a.order.state = "set"
+	so_a.order.phase = "set"
+	so_s.order.phase = "route"
+	cmd.advance(10.0)
+	check(String(so_a.order.state) == "set", "set at its attack position, it waits while the SBF isn't firing")
+	so_s.order.phase = "execute"
+	cmd.advance(1.0)
+	check(String(so_a.order.state) != "set" and String(so_a.order.get("go", "")) == "", "the SBF is set: the assault goes")
+	check(cmd.net.any(func(l: Dictionary) -> bool: return String(l.text) == "Hammer 1 is set.") and cmd.net.any(func(l: Dictionary) -> bool: return String(l.text) == "Saber 1, go."),
+		"\"Hammer 1 is set.\" \"Saber 1, go.\"")
+	print("B2: the reserve commits on a stall (3.5.2)")
+	cmd.advance(61.0)
+	check(not plan.committed.is_empty() and cmd.lines.any(func(l: Dictionary) -> bool: return String(l.text).contains("reserve committed to farm")),
+		"past 60% of the phase's limit with the farm still held: the reserve goes in")
+	cmd.advance(45.0)
+	check(cmd.lines.any(func(l: Dictionary) -> bool: return String(l.text).contains("paused 5 min for fire support")), "at the limit: fire support and a pause")
+	print("B2: RED falls back and reconstitutes (3.5.3)")
+	var b := SideIntel.of(level).board
+	for gid: String in [saber, res]:
+		b.rows[gid].ce_band = "red"
+		b.rows[gid].pos = Vector3(15, 0, 40)
+	var before := cmd.groups.size()
+	cmd.server_cycle()
+	check(cmd.net.any(func(l: Dictionary) -> bool: return String(l.text).begins_with("Saber 1 is red")), "\"Saber 1 is red, falling back\"")
+	check(cmd.groups.size() == before - 1, "two RED rifle squads at the rally merge into one")
+	print("B2: the commander and requests (4.2.10)")
+	var row_s: Dictionary = b.rows[hammer]
+	gs.role = "sbf"
+	(gs.orders as SquadOrders).order.state = "active"
+	check(cmd.can_spare(row_s, {"kind": "suppress"}).get("delay_s", 0.0) > 0.0, "a group mid-SBF offers to come later")
+	check(cmd.can_spare({"id": "nobody"}, {}).is_empty(), "a group it doesn't command: no say")
+	cmd.withdrawn = false
+	level.remove_child(cmd)
+	cmd.free()
+	for gid: String in [saber, hammer, res]:
+		var sq := level.get_node_or_null(NodePath(gid)) as Squad
+		if sq:
+			for s: Soldier in sq.members():
+				s.queue_free()
+			sq.queue_free()
+	await _frames(2)
+
+
+func _test_defence() -> void:
+	print("B2: counterattack ratios (3.7)")
+	var site_pos := Vector3(-20, 0, -30)
+	var plan := DefencePlan.new({"sites": [{"id": "ridge", "label": "the ridge", "pos": site_pos, "radius": 20.0, "line": 0}],
+		"rally": Vector3(30, 0, 40)}, 7)
+	var cmd := SideCommand.install(level, &"hostile", plan)
+	var h1 := await _b2_group(cmd, "banner1", "hostile", Vector3(30, 0.1, 30), "rifle_squad")
+	var h2 := await _b2_group(cmd, "banner2", "hostile", Vector3(35, 0.1, 30), "rifle_squad")
+	var b := cmd.board()
+	for gid: String in [h1, h2]:
+		b.rows[gid].strength_cp = 5.0
+		b.rows[gid].at_cp = 0.0
+	var pic := cmd.picture()
+	var t := cmd.now()
+	pic.submit({"kind": "inf", "count": 2, "pos": site_pos}, t)
+	plan._decide(cmd, plan.site("ridge"), t)
+	var op: Dictionary = plan.ops.back()
+	check(op.state == "assembling" and (op.groups as Array).size() == 2, "2 seen there (3 CP): 10 CP is enough at 3:1, it assembles")
+	var rally: Vector3 = op.rally
+	var d := SideCommand._flat(rally, site_pos)
+	check(d >= 600.0 - 1.0 and d <= 1200.0 + 1.0, "the rally is 600-1,200 m short (%.0f m)" % d)
+	var wait := float(op.go_at) - t
+	check(wait >= 300.0 and wait <= 720.0, "it goes 5-12 minutes after the loss (%.0f s)" % wait)
+	b.rows[h2].strength_cp = 1.0
+	plan.ops.clear()
+	plan._decide(cmd, plan.site("ridge"), t)
+	check(plan.ops.back().state == "contained", "6 CP against 3 seen: under 3:1, contained (%s)" % plan.ops.back().why)
+	b.rows[h2].strength_cp = 100.0
+	pic.submit({"kind": "mbt", "count": 1, "pos": site_pos + Vector3(5, 0, 0)}, t)
+	plan.ops.clear()
+	plan._decide(cmd, plan.site("ridge"), t)
+	check(plan.ops.back().state == "contained", "a tank seen there and no AT power: contained however many men (%s)" % plan.ops.back().why)
+	b.rows[h1].at_cp = 6.0
+	plan.ops.clear()
+	plan._decide(cmd, plan.site("ridge"), t)
+	check(plan.ops.back().state == "assembling", "with AT power at a quarter of the armour's CP it goes")
+	var attack: Dictionary = plan.ops.back()
+	attack.state = "attacking"
+	b.rows[h1].strength_cp = 1.0
+	b.rows[h2].strength_cp = 1.0
+	plan._step(cmd, attack, t)
+	check(attack.state == "called off", "cut under 1.5:1 while attacking: called off")
+	print("B2: a stale picture gets a probe first")
+	var stale := SidePicture.new(&"hostile")
+	cmd._own_picture = stale
+	stale.submit({"kind": "inf", "count": 1, "pos": site_pos, "seen_at": t - 400.0}, t)
+	plan.ops.clear()
+	plan._decide(cmd, plan.site("ridge"), t)
+	check(plan.ops.back().state == "probing", "nothing fresh there: a probe")
+	print("B2: virtual groups are tasked through their route")
+	var sq := Squad.new()
+	sq.name = "banner_v"
+	sq.faction = &"hostile"
+	level.add_child(sq)
+	var rec := {"squad": sq, "soldiers": [], "virtual": {"members": [{"name": "v1"}], "pos": Vector3(40, 0, 40), "side": "hostile"}}
+	var vid := cmd.server_register(sq, "rifle_squad", "Banner V")
+	cmd.groups[vid].record = rec  # (a staged profile: not handed to the Virtualizer)
+	cmd._issue({"id": "hold:x", "role": "defend", "pos": site_pos}, {"id": vid, "pos": Vector3(40, 0, 40), "kind": "rifle_squad"}, 1.0)
+	check(sq.patrol.size() == 1 and sq.patrol[0].is_equal_approx(site_pos), "a virtual group walks its profile's route to its task")
+	check(rec.get("vf_kind") == "rifle_squad", "and fights off-screen by the armour table as what it is")
+	print("B2: a hot zone keeps EnemyCommand's rules")
+	var hz := HotZonePolicy.new()
+	check(hz.needs(cmd, t).is_empty() and is_equal_approx(hz.task_s(), 30.0), "HotZonePolicy tasks nothing itself; hot zones keep 30 s")
+	level.remove_child(cmd)
+	cmd.free()
+
+
+# --- B3: armour with infantry ---------------------------------------------------------------------
+
+func _test_armour_infantry() -> void:
+	print("B3: pairing and who leads by ground (3.6)")
+	var rows := [_b2_row("anvil1", "armour_section", Vector3(0, 0, 0)), _b2_row("saber1", "rifle_squad", Vector3(30, 0, 0)),
+		_b2_row("saber2", "rifle_squad", Vector3(400, 0, 0)), _b2_row("anvil2", "armour_section", Vector3(390, 0, 0))]
+	var pairs := ArmourInfantry.pair(rows)
+	check(pairs.get("anvil1") == "saber1" and pairs.get("anvil2") == "saber2", "each tank section is paired with the nearest infantry group")
+	var dir := Vector3(0, 0, -1)
+	var inf := Vector3(0, 0, 0)
+	var obj := Vector3(0, 0, -1500)
+	var woods := ArmourInfantry.escort_spot("woods", inf, obj, dir)
+	check(is_equal_approx(SideCommand._flat(woods, inf), 150.0) and woods.z > inf.z, "woods: the armour follows 150 m behind its infantry")
+	var town := ArmourInfantry.escort_spot("town", inf, obj, dir)
+	check(is_equal_approx(SideCommand._flat(town, inf), 75.0) and town.z > inf.z, "a town: 75 m behind")
+	var open := ArmourInfantry.escort_spot("open", inf, obj, dir)
+	check(is_equal_approx(SideCommand._flat(open, obj), 1000.0), "open ground: overwatch 1 km off the objective (it leads)")
+	print("B3: armour stops at a town's edge")
+	var stub := Node3D.new()
+	var gs := GDScript.new()
+	gs.source_code = "extends Node3D\nvar mods := []\nfunc modules() -> Array:\n\treturn mods\n"
+	gs.reload()
+	stub.set_script(gs)
+	add_child(stub)
+	var village := ZoneModule.new()
+	village.type = "village"
+	village.position = Vector3(0, 0, -300)
+	stub.add_child(village)
+	stub.set(&"mods", [village])
+	var half: Vector2 = ZoneModules.HALF.get("village", Vector2(20, 20))
+	var inside := Vector3(0, 0, -300)
+	var from := Vector3(0, 0, -100)
+	var held := ArmourInfantry.town_edge(stub, inside, from, Vector3(0, 0, -120))
+	check(held.z > -300.0 + half.y and held.z <= -300.0 + half.y + 20.0, "its screen still outside: held at the edge (%.0f m from the centre)" % absf(held.z + 300.0))
+	var going := ArmourInfantry.town_edge(stub, inside, from, Vector3(0, 0, -290))
+	check(going.is_equal_approx(inside), "its screen in the town: it follows in")
+	check(ArmourInfantry.ground(stub, Vector3(0, 0, -300)) == "town" and ArmourInfantry.ground(stub, Vector3(0, 0, 500)) == "open", "the ground: town inside the village, open away from it")
+	stub.queue_free()
+	print("B3: a paired tank stays with its screen; a hand-off; armour asks for infantry")
+	var spec := {"phases": [{"name": "the ridge", "limit_s": 900.0, "axis": [Vector3(0, 0, 40), Vector3(0, 0, -40)], "main": "ridge",
+		"objectives": [{"id": "ridge", "label": "OBJ IRON", "pos": Vector3(0, 0, -40), "radius": 10.0}]}], "ld": Vector3(0, 0, 40),
+		"rally": Vector3(30, 0, 45), "hhour_s": 0.0, "flanks": false}
+	var cmd := SideCommand.install(level, &"friendly", OperationPlan.new(spec))
+	var saber := await _b2_group(cmd, "saber3", "friendly", Vector3(-5, 0.1, 20), "rifle_squad", ["m4a1"], 4)
+	var hammer := await _b2_group(cmd, "hammer3", "friendly", Vector3(10, 0.1, 25), "weapons_team", ["m249"], 3)
+	var anvil := await _b2_group(cmd, "anvil3", "friendly", Vector3(-20, 0.1, 35), "armour_section", ["m4a1"], 2)
+	var b := SideIntel.of(level).board
+	b.rows[anvil].at_cp = 12.0
+	cmd.advance(1.0)
+	check(cmd.pairs.has(anvil), "the armour section is paired (%s)" % cmd.pairs.get(anvil, "none"))
+	var screen := String(cmd.pairs.get(anvil, ""))
+	var ga: Dictionary = cmd.groups[anvil]
+	check(String(ga.role) == "overwatch" and String(ga.need) == "escort:" + anvil, "its task is escorting its screen")
+	var spot: Array = ((ga.orders as SquadOrders).order.get("points", [[0, 0]]) as Array)[0]
+	var sp: Vector3 = b.rows[screen].pos
+	var d := Vector2(float(spot[0]) - sp.x, float(spot[1]) - sp.z).length()
+	check(d <= 160.0, "and it's sent to within 150 m of the screen (%.0f m; open ground clamps to the map)" % d)
+	b.rows[screen].pos = sp + Vector3(0, 0, -20)
+	b.rows[screen].ce_band = "amber"
+	var sg: Dictionary = cmd.groups[screen]
+	(sg.orders as SquadOrders)._target = Vector3(0, 0, -40)
+	sg.role = "assault"
+	SideIntel.of(level).picture.submit({"kind": "mg", "count": 1, "pos": Vector3(2, 0, -42)}, SideIntel.of(level).now())
+	cmd.server_cycle()
+	check(String(ga.need).begins_with("handoff:") and (ga.orders as SquadOrders).order.get("verb") == "sbf", "the infantry, held by an MG on its objective, hands it to its armour: an SBF on it")
+	check(cmd.net.any(func(l: Dictionary) -> bool: return String(l.text).contains("MG at ") and String(l.text).ends_with("my tracer.")), "\"... MG at <grid>, <n> metres, my tracer.\"")
+	b.rows[screen].ce_band = "green"
+	SideIntel.of(level).picture.submit({"kind": "at", "count": 2, "pos": b.rows[anvil].pos + Vector3(60, 0, 0)}, SideIntel.of(level).now())
+	cmd.server_cycle()
+	check(String(sg.need).begins_with("clear_at:"), "an AT team near the armour: its screen goes after it")
+	check(cmd.net.any(func(l: Dictionary) -> bool: return String(l.text).contains("AT team at ") and String(l.text).contains("need it cleared")), "\"AT team at <grid>, need it cleared before we move.\"")
+	level.remove_child(cmd)
+	cmd.free()
+	for gid: String in [saber, hammer, anvil]:
+		var sq := level.get_node_or_null(NodePath(gid)) as Squad
+		if sq:
+			for s: Soldier in sq.members():
+				s.queue_free()
+			sq.queue_free()
+	await _frames(2)
+
+
+# --- The reels at platoon, company and brigade (docs/ai_tactics.md P1-P3) ------------------------
+
+func _cleanup_cmd(cmd: SideCommand) -> void:
+	var ids := cmd.groups.keys()
+	level.remove_child(cmd)
+	cmd.free()
+	for gid: String in ids:
+		var sq := level.get_node_or_null(NodePath(gid)) as Squad
+		if sq:
+			for s: Soldier in sq.members():
+				s.queue_free()
+			sq.queue_free()
+	await _frames(2)
+
+
+func _op(id: String, pos: Vector3, extra := {}, phase_extra := {}) -> Dictionary:
+	var o := {"id": id, "label": id.to_upper(), "pos": pos, "radius": 10.0}
+	o.merge(extra, true)
+	var ph := {"name": id, "limit_s": 900.0, "axis": [Vector3(0, 0, 40), pos], "main": id, "objectives": [o]}
+	ph.merge(phase_extra, true)
+	return {"phases": [ph], "ld": Vector3(0, 0, 40), "rally": Vector3(30, 0, 45), "hhour_s": 0.0, "flanks": false}
+
+
+func _test_platoon_sosra() -> void:
+	print("P1: a fortified objective by SOSRA")
+	var plan := OperationPlan.new(_op("bnk", Vector3(-40, 0, -40), {"fortified": true}))
+	var cmd := SideCommand.install(level, &"friendly", plan)
+	var fires: Array = []
+	cmd.fire_support_wanted.connect(func(_p: Vector3, why: String) -> void: fires.append(why))
+	var a := await _b2_group(cmd, "sosra_a", "friendly", Vector3(-10, 0.1, 20), "rifle_squad", ["m4a1"], 2)
+	var s := await _b2_group(cmd, "sosra_s", "friendly", Vector3(10, 0.1, 25), "weapons_team", ["m249"], 2)
+	var e := await _b2_group(cmd, "sosra_e", "friendly", Vector3(0, 0.1, 30), "engineers", ["m4a1"], 2)
+	var k := await _b2_group(cmd, "sosra_k", "friendly", Vector3(20, 0.1, 35), "rifle_squad", ["m4a1"], 2)
+	var needs: Array = plan.needs(cmd, cmd.now())
+	var roles := needs.map(func(n: Dictionary) -> String: return String(n.role))
+	check("breach" in roles and "secure" in roles and needs.any(func(n: Dictionary) -> bool: return n.role == "assault" and n.has("breach")),
+		"Suppress, Obscure, Secure, Reduce, Assault: an SBF, a breach, a secure and an assault held for the breach")
+	cmd.advance(0.5)
+	cmd.advance(0.5)
+	var by_role := {}
+	for g: Dictionary in cmd.groups.values():
+		by_role[String(g.role)] = String(g.id)
+	check(by_role.get("breach") == e, "the engineers make the breach")
+	check(fires.any(func(w: String) -> bool: return w.contains("smoke")), "smoke on its ports as the breach goes in (obscure)")
+	var ga: Dictionary = cmd.groups.get(String(by_role.get("assault", "")), {})
+	var gs: Dictionary = cmd.groups.get(String(by_role.get("sbf", "")), {})
+	var gb: Dictionary = cmd.groups.get(e, {})
+	if ga.is_empty() or gs.is_empty() or gb.is_empty():
+		check(false, "an assault, an SBF and a breach were all assigned (%s)" % by_role)
+		await _cleanup_cmd(cmd)
+		return
+	(ga.orders as SquadOrders).order.state = "set"
+	(ga.orders as SquadOrders).order.phase = "set"
+	(gs.orders as SquadOrders).order.phase = "execute"
+	cmd.think()
+	check(String((ga.orders as SquadOrders).order.state) == "set", "the support is firing but the breach isn't made: the assault waits")
+	(gb.orders as SquadOrders).order.state = "done"
+	cmd.think()
+	check(String((ga.orders as SquadOrders).order.state) != "set", "the breach made: through it")
+	await _cleanup_cmd(cmd)
+
+
+func _test_company_isolate() -> void:
+	print("P2: fix, isolate, starve, concentrate")
+	var vil := Vector3(-30, 0, -45)
+	var plan := OperationPlan.new(_op("vil", vil, {}, {"isolate": true, "starve_s": 5.0}))
+	var cmd := SideCommand.install(level, &"friendly", plan)
+	var fires: Array = []
+	cmd.fire_support_wanted.connect(func(_p: Vector3, why: String) -> void: fires.append(why))
+	for i in 4:
+		await _b2_group(cmd, "iso_%d" % i, "friendly", Vector3(-20 + i * 12, 0.1, 25), "rifle_squad" if i != 1 else "recon_team", ["m4a1"], 2)
+	SideIntel.of(level).picture.submit({"kind": "inf", "count": 6, "pos": vil}, SideIntel.of(level).now())
+	cmd.advance(0.5)
+	check(fires.any(func(w: String) -> bool: return w.begins_with("fix")), "fires fix the village first")
+	var needs: Array = plan.needs(cmd, cmd.now())
+	check(needs.filter(func(n: Dictionary) -> bool: return String(n.id).begins_with("isolate:")).size() == 3 and not needs.any(func(n: Dictionary) -> bool: return n.id == "vil"),
+		"teams to its three ways in; no assault yet")
+	cmd.advance(0.5)
+	for g: Dictionary in cmd.groups.values():
+		if String(g.need).begins_with("isolate:"):
+			(g.orders as SquadOrders).order.state = "done"
+	cmd.advance(0.5)
+	check(String(plan.isolation.stage) == "starve", "the ways in held: starve it")
+	cmd.advance(6.0)
+	check(String(plan.isolation.stage) == "concentrate", "starved long enough: concentrate")
+	needs = plan.needs(cmd, cmd.now())
+	check(needs.any(func(n: Dictionary) -> bool: return n.id == "vil" and n.get("together", "") == "vil"), "now the assault, every axis set before any goes")
+	await _cleanup_cmd(cmd)
+
+
+func _test_company_lure() -> void:
+	print("P2: the feigned retreat")
+	var town := Vector3(20, 0, -45)
+	var plan := OperationPlan.new(_op("twn", town, {"lure": true}))
+	var cmd := SideCommand.install(level, &"friendly", plan)
+	for i in 3:
+		await _b2_group(cmd, "lure_%d" % i, "friendly", Vector3(-10 + i * 12, 0.1, 25), "rifle_squad", ["m4a1"], 2 + i)
+	cmd.advance(0.5)
+	check(plan.lures.has("twn"), "one group to draw them out, one waiting out of sight on another side")
+	var l: Dictionary = plan.lures.get("twn", {})
+	if l.is_empty():
+		await _cleanup_cmd(cmd)
+		return
+	var needs: Array = plan.needs(cmd, cmd.now())
+	check(needs.any(func(n: Dictionary) -> bool: return n.id == "lure:twn" and n.only == l.lure) and needs.any(func(n: Dictionary) -> bool: return n.id == "hide:twn" and n.only == l.push),
+		"the feint goes in; the push waits")
+	cmd.advance(OperationPlan.LURE_S + 1.0)
+	check(String(l.state) == "falling back", "then the feint pulls back")
+	var out: Vector3 = (l.rally as Vector3).lerp(town, 0.4)
+	SideIntel.of(level).picture.submit({"kind": "inf", "count": 3, "pos": out}, SideIntel.of(level).now())
+	cmd.advance(0.5)
+	check(String(l.state) == "pushing", "the garrison followed it out: the push goes in")
+	needs = plan.needs(cmd, cmd.now())
+	check(needs.any(func(n: Dictionary) -> bool: return n.id == "push:twn" and n.only == l.push) and needs.any(func(n: Dictionary) -> bool: return n.id == "turn:twn"),
+		"the push assaults; the feint turns on its pursuers")
+	await _cleanup_cmd(cmd)
+
+
+func _test_security_zone() -> void:
+	print("P2: a defence with a security zone")
+	var plan := DefencePlan.new({"sites": [{"id": "ridge", "label": "the ridge", "pos": Vector3(-20, 0, -30), "radius": 20.0, "line": 0}],
+		"rally": Vector3(0, 0, -45), "security_zone": true, "threat_dir": Vector3(0, 0, 1)}, 3)
+	var cmd := SideCommand.install(level, &"hostile", plan)
+	var fires: Array = []
+	cmd.fire_support_wanted.connect(func(p: Vector3, why: String) -> void: fires.append(why))
+	await _b2_group(cmd, "sz_hold", "hostile", Vector3(-20, 0.1, -30), "rifle_squad", ["akm"], 2)
+	await _b2_group(cmd, "sz_r1", "hostile", Vector3(-10, 0.1, -40), "recon_team", ["akm"], 2)
+	await _b2_group(cmd, "sz_r2", "hostile", Vector3(0, 0.1, -40), "rifle_squad", ["akm"], 2)
+	cmd.advance(0.5)
+	check(plan.screens.size() >= 1 and plan.screens.has(GroupBoard.group_id(level.get_node(^"sz_r1") as Squad)), "the recon team and a small group watch forward (%s)" % ", ".join(PackedStringArray(plan.screens.keys())))
+	var first: String = plan.screens.keys()[0]
+	var sc: Dictionary = plan.screens[first]
+	check(SideCommand._flat(sc.spot, Vector3(-20, 0, -30)) >= DefencePlan.SCREEN_M - 300.0, "a kilometre out")
+	cmd.picture().submit({"kind": "inf", "count": 4, "pos": (sc.spot as Vector3) + Vector3(0, 0, 200)}, cmd.now())
+	cmd.advance(0.5)
+	check(String(sc.state) == "back" and fires.any(func(w: String) -> bool: return w.contains("security zone")), "the enemy seen: it calls fires on it and pulls back to the first line")
+	await _cleanup_cmd(cmd)
+
+
+func _test_brigade() -> void:
+	print("P3: a brigade of companies and a command element")
+	var pa := OperationPlan.new(_op("xa", Vector3(-35, 0, -45)))
+	var pb := OperationPlan.new(_op("xb", Vector3(35, 0, -45), {}, {"limit_s": 8.0}))
+	var cmd := SideCommand.install(level, &"friendly", BrigadePlan.new({"a": pa, "b": pb}, "r", Vector3(0, 0, 45)))
+	var fires: Array = []
+	cmd.fire_support_wanted.connect(func(_p: Vector3, why: String) -> void: fires.append(why))
+	var comp := {}
+	for c: String in ["a", "b"]:
+		for i in 2:
+			var gid := await _b2_group(cmd, "bde_%s%d" % [c, i], "friendly", Vector3((-30 if c == "a" else 30) + i * 8, 0.1, 25), "rifle_squad" if i == 0 else "weapons_team",
+				["m4a1" if i == 0 else "m249"], 2)
+			cmd.groups[gid].company = c
+			comp[gid] = c
+	var rid := await _b2_group(cmd, "bde_r0", "friendly", Vector3(0, 0.1, 40), "rifle_squad", ["m4a1"], 2)
+	cmd.groups[rid].company = "r"
+	cmd.advance(0.5)
+	cmd.advance(0.5)
+	var crossed := false
+	for g: Dictionary in cmd.groups.values():
+		var nd: Dictionary = g.get("need_data", {})
+		if nd.has("company") and String(nd.company) != String(g.company):
+			crossed = true
+	check(not crossed, "each company's tasks go to its own groups")
+	check(String(cmd.groups[rid].need) == "brigade_reserve:" + rid, "the reserve company held by the command element")
+	cmd.advance(9.0)
+	cmd.advance(0.5)
+	check((cmd.plan as BrigadePlan).committed_to == "b" and fires.any(func(w: String) -> bool: return w.contains("brigade's fires for b")), "company b stalls: the brigade's fires to it first")
+	check(String(cmd.groups[rid].need).begins_with("brigade_reserve:b:"), "then the reserve company, at b's objective")
+	await _cleanup_cmd(cmd)

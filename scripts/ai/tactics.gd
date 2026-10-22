@@ -44,20 +44,59 @@ extends RefCounted
 ## (SquadAI.ordered) keeps to that. Hostile squads use it too, with their own doctrine
 ## (DOCTRINES), and a hot zone's enemy coordination (EnemyResponse.coordination) makes them
 ## flank less. Every number is proposed, for Captain's playtests.
+##
+## The tactics reels (docs/ai_tactics.md, 2026-10-22), team and squad level, for every side:
+## - Near ambush (T1): fired on from within NEAR_AMBUSH_M while moving, a squad doesn't look for
+##   cover in the kill zone: the gun and his buddy fire, the rest throw frags and CHARGE_DELAY_S
+##   later charge through the enemy line THROUGH_M past it, then consolidate facing back.
+## - Break contact as Battle Drill 3 (T2): the grenadier's smoke, then the man furthest back goes
+##   first, "Moving!", to the rally point, "Set!", then the next, each covered by those still firing;
+##   all set at the rally point, a perimeter facing the enemy.
+## - Rally points (T3): moving with no contact, a rally point every RALLY_EVERY_M, RALLY_BACK_M back
+##   along the way, in cover (Squad meta "rally"): where break contact goes.
+## - Fire superiority first (T4): the flank's movers wait until the base of fire is firing (or
+##   BASE_SET_TIMEOUT_S), then "Base is set, move!".
+## - Sectors of fire (T5): the base's men spread their fire across the enemy and past both flanks
+##   (SECTOR_EXTRA_M), never all on one point; it shifts beyond the objective with the movers within
+##   SHIFT_M and lifts within LIFT_M.
+## - Lanes and the limit of advance (T6): the assault goes through in lanes LANE_W apart, to
+##   THROUGH_M past the enemy at most; then consolidation, all-round, CONSOLIDATE_S.
+## - Doctrine by faction (T10): a squad's men's own doctrine (jihadist, guerrilla, cartel), not only
+##   its side's, sets its option biases.
 
-enum Option { NONE, HOLD, SUPPRESS_FLANK, ASSAULT, CLEAR, DEFEND, BREAK_CONTACT, CASUALTY, SEARCH }
+enum Option { NONE, HOLD, SUPPRESS_FLANK, ASSAULT, CLEAR, DEFEND, BREAK_CONTACT, CASUALTY, SEARCH, NEAR_AMBUSH }
 
 const OPTION_NAMES := {
 	Option.NONE: "carry on", Option.HOLD: "hold and improve cover", Option.SUPPRESS_FLANK: "suppress and flank",
 	Option.ASSAULT: "assault", Option.CLEAR: "clear the building", Option.DEFEND: "defend the building",
 	Option.BREAK_CONTACT: "break contact", Option.CASUALTY: "casualty care", Option.SEARCH: "search last known",
+	Option.NEAR_AMBUSH: "near ambush: assault through",
 }
 ## What the squad leader calls out when the squad takes up an option (the friendly side hears it).
 const CALLS := {
 	Option.HOLD: "Get in cover, hold here!", Option.SUPPRESS_FLANK: "Base of fire, suppress! %s, flank %s!",
 	Option.ASSAULT: "Assault through!", Option.CLEAR: "Stack up on that building!", Option.DEFEND: "Into the building, take the windows!",
 	Option.BREAK_CONTACT: "Break contact! Fall back!", Option.CASUALTY: "Cover the casualty!",
+	Option.NEAR_AMBUSH: "Ambush! Frags, then through them!",
 }
+## The reels (docs/ai_tactics.md), Proposed.
+const NEAR_AMBUSH_M := 35.0
+const NEAR_WINDOW_S := 12.0
+const NEAR_MOVING_M := 2.0
+const CHARGE_DELAY_S := 2.5
+const THROUGH_M := 15.0
+const LANE_W := 6.0
+const CONSOLIDATE_S := 20.0
+const CONSOLIDATE_R := 8.0
+const RALLY_EVERY_M := 150.0
+const RALLY_BACK_M := 45.0
+const BD3_BACK_M := 60.0
+const BD3_MOVER_S := 15.0
+const BD3_SPREAD_M := 6.0
+const BASE_SET_TIMEOUT_S := 30.0
+const SECTOR_EXTRA_M := 10.0
+const SHIFT_M := 50.0
+const LIFT_M := 25.0
 
 const THINK_S := 1.0
 const HYSTERESIS := 0.1
@@ -185,6 +224,11 @@ const DOCTRINES := {
 	Doctrine.PMC: {"flank": 0.05, "assault": 0.0, "clear": 0.0, "defend": 0.0, "break": 0.0, "casualty": 0.05, "search": 0.0},
 	Doctrine.REGULAR: {"flank": 0.08, "assault": 0.03, "clear": 0.03, "defend": 0.03, "break": -0.03, "casualty": 0.0, "search": 0.05},
 	Doctrine.INSURGENT: {"flank": -0.1, "assault": 0.08, "clear": -0.05, "defend": 0.1, "break": 0.05, "casualty": -0.15, "search": 0.1},
+	# Terror groups (docs/terror_groups.md, ai_tactics.md 7.3): jihadists press and stay; guerrillas
+	# hit and run; cartels hold what they guard. Proposed.
+	&"jihadist": {"flank": 0.0, "assault": 0.15, "clear": 0.0, "defend": 0.05, "break": -0.15, "casualty": -0.2, "search": 0.1},
+	&"guerrilla": {"flank": 0.05, "assault": -0.05, "clear": -0.1, "defend": -0.05, "break": 0.2, "casualty": -0.1, "search": 0.0},
+	&"cartel": {"flank": -0.1, "assault": 0.0, "clear": -0.1, "defend": 0.15, "break": 0.05, "casualty": -0.1, "search": 0.05},
 }
 ## Hostile squads in a hot zone flank this much less at no coordination (EnemyResponse).
 const UNCOORDINATED_FLANK := 0.3
@@ -207,6 +251,14 @@ var _no_flank := {}
 var _plan_at := -1000.0
 var _plan_logged := {"key": "", "at": -1000.0}
 var _flank_sides := {}  # Vector2i cell of the enemy -> {"side", "at"} (G-21)
+var _contact_was := false
+var _contact_began := -1000.0
+var _contact_range := INF
+var _moving_at_contact := false
+var _centres: Array = []  # [{"at", "pos"}]: the squad's centre the last few seconds (moving?)
+var _rally_from := Vector3.INF
+var _consolidate_until := -1000.0
+var _consolidate_at := Vector3.INF
 
 
 func _init(p_squad: Squad) -> void:
@@ -217,6 +269,8 @@ func _init(p_squad: Squad) -> void:
 func think(now: float) -> void:
 	situation = assess()
 	situation["no_flank"] = _no_flank_now(now)
+	_track_contact(now)
+	_rally_points(now)
 	var result := score(situation, doctrine())
 	var best := _best(result.scores)
 	var urgent := int(situation.down) > _down_at_pick
@@ -237,6 +291,11 @@ func think(now: float) -> void:
 	scores = result.scores
 	if best != option and switches(scores.get(option, -1.0), scores[best], now - since, urgent):
 		var was := option
+		if was in [Option.ASSAULT, Option.NEAR_AMBUSH] and not bool(situation.fresh):
+			_consolidate_until = now + CONSOLIDATE_S  # the position taken: all-round security (T6)
+			_consolidate_at = situation.centre
+			if not squad.brains().is_empty():
+				squad.brains()[0]._callout(&"tactic", "Consolidate! All-round security, ammo check!")
 		option = best
 		since = now
 		plan = drill if best == Option.SUPPRESS_FLANK else {}
@@ -307,8 +366,13 @@ func _drill_plan(now: float) -> Dictionary:
 func doctrine() -> Dictionary:
 	var name := squad.doctrine
 	if name == &"":
-		name = Doctrine.default_for(squad.faction)
+		var men := squad.brains()
+		name = men[0]._doctrine_id() if not men.is_empty() else Doctrine.default_for(squad.faction)  # its men's own (T10)
 	var d: Dictionary = DOCTRINES.get(name, DOCTRINES[Doctrine.PMC]).duplicate()
+	var men2 := squad.brains()
+	if squad.faction == &"hostile" and not men2.is_empty() and FactionForce.hit_and_run(String(men2[0].body.get_meta(&"faction_id", ""))):
+		d.break = float(d.break) + 0.25  # a small terror group: a heavy volley, then gone before it's fixed (ai_tactics.md 7.3)
+		d.assault = float(d.assault) - 0.1
 	if squad.faction != &"friendly" and squad.is_inside_tree():
 		var response := EnemyResponse.of(squad)
 		if response:
@@ -458,6 +522,9 @@ static func score(sit: Dictionary, d: Dictionary) -> Dictionary:
 		if no_flank and outshot > 0.0:
 			s[Option.BREAK_CONTACT] += NO_FLANK_BREAK * outshot
 			why[Option.BREAK_CONTACT] = "%s, no flank to take and out-shot (suppression %.2f, %d down): bound back to cover" % [odds, supp, down]
+	if bool(sit.get("near_ambush", false)) and free and weapons and sit.fresh and range <= NEAR_AMBUSH_M and float(sit.cover) < 0.5:
+		s[Option.NEAR_AMBUSH] = 0.9 + float(d.assault) - 0.3 * shaken - 0.2 * short
+		why[Option.NEAR_AMBUSH] = "%s, ambushed at %.0f m in the open: no cover in a kill zone, fire, frags and through them" % [odds, range]
 	if down > 0:
 		s[Option.CASUALTY] = 0.6 + 0.1 * mini(down, 3) + float(d.casualty)
 		why[Option.CASUALTY] = "%d down: cover them while they're seen to" % down
@@ -502,17 +569,18 @@ func _carry_out(now: float) -> void:
 				var t: Dictionary = plan.tasks.get(ai, {})
 				ai.set_task(t.merged({"id": id}) if not t.is_empty() else {"kind": &"base", "aim": aim, "id": id})
 		Option.BREAK_CONTACT:
-			var lead: Soldier = sit.lead
-			for i in units.size():
-				var from: Soldier = lead if lead != null and units[i].order == Squad.Order.FOLLOW else null
-				var p := fall_back_point(from, enemy if enemy.is_finite() else units[i].body.threat_pos, i, units.size(), units[i].body)
-				units[i].set_task({"kind": &"break", "point": p, "id": id})
+			_break_contact(units, enemy, aim, id, now)
+		Option.NEAR_AMBUSH:
+			_near_ambush(units, enemy, aim, id, now)
 		Option.CASUALTY:
 			for ai in units:
 				ai.set_task({"kind": &"base", "aim": aim, "id": id} if aim.is_finite() else {})
 		Option.SEARCH:
 			_search(units, enemy, id, now)
 		_:
+			if now < _consolidate_until and _consolidate_at.is_finite():
+				_consolidate(units, now)
+				return
 			for ai in units:
 				ai.set_task({})
 
@@ -527,11 +595,22 @@ func _flank(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now
 	if plan.is_empty() or plan.names != names or ((plan.enemy as Vector3).distance_to(enemy) > REPLAN_M and now - _plan_at >= REPLAN_MIN_S):
 		plan = _draw_flank(units, enemy, now)
 		_log_plan(now)
+	if not plan.has("set_at") and (_base_firing(plan.base, float(plan.get("drawn_at", now))) or now - float(plan.get("drawn_at", now)) >= BASE_SET_TIMEOUT_S):
+		plan["set_at"] = now  # fire superiority first (T4): the movers go once the base is firing
+		if not (plan.moving as Array).is_empty() and not (plan.base as Array).is_empty():
+			(plan.base[0] as SquadAI)._callout(&"tactic", "Base is set, move!")
+	var going := plan.has("set_at")
+	var aims := sector_aims(plan.base, enemy, _base_shift(plan.moving, enemy, plan.base))
+	var lifted := _lifted(plan.moving, enemy)
 	for ai in units:
-		if ai in plan.moving:
+		if ai in plan.moving and going:
 			ai.set_task({"kind": &"maneuver", "route": (plan.get("lanes", {}) as Dictionary).get(ai, plan.route), "aim": aim, "id": id})
+		elif ai in plan.moving:
+			ai.set_task({"kind": &"base", "aim": aim, "id": id + ":wait"})  # in cover, firing, until the base is set
+		elif lifted:
+			ai.set_task({})  # lifted: the movers are on them; eyes on the flanks
 		else:
-			ai.set_task({"kind": &"base", "aim": aim, "id": id, "spot": plan.get("base_spot")})
+			ai.set_task({"kind": &"base", "aim": aims.get(ai, aim), "id": id, "spot": plan.get("base_spot")})
 
 
 ## The drill's plan for `units` against `enemy`: {"enemy", "names", "base", "moving", "route",
@@ -556,10 +635,11 @@ func _draw_flank(units: Array[SquadAI], enemy: Vector3, now: float) -> Dictionar
 		moving = []
 		_no_flank = {"enemy": enemy, "at": now}
 	_plan_at = now
+	var drawn_at := now
 	var path: Array = route.get("route", [])
 	var base_spot: Variant = overwatch_spot(base[0].body, _middle(base), enemy, others, lead) if not base.is_empty() else null
 	return {"enemy": enemy, "names": names, "base": base, "moving": moving, "route": path, "side": route.get("side", ""),
-		"lanes": lanes(moving, path), "base_spot": base_spot}
+		"lanes": lanes(moving, path), "base_spot": base_spot, "drawn_at": drawn_at}
 
 
 ## Each of `units` its own lane along `route`: the route moved sideways (across its start to end)
@@ -602,12 +682,13 @@ func _assault(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String) -
 		var base := _gunners_and_buddies(units, enemy)
 		plan = {"enemy": enemy, "base": base}
 	var map := units[0].body.get_world_3d().navigation_map
-	var point := NavigationServer3D.map_get_closest_point(map, enemy)
+	var going: Array = units.filter(func(ai: SquadAI) -> bool: return not (ai in plan.base or (ai._friendly() and ai.order != Squad.Order.FOLLOW)))
+	var points := assault_lanes(going, enemy, situation.get("centre", enemy))  # lanes, through to the limit of advance (T6)
 	for ai in units:
-		if ai in plan.base or (ai._friendly() and ai.order != Squad.Order.FOLLOW):
+		if not (ai in going):
 			ai.set_task({"kind": &"base", "aim": aim, "id": id})
 		else:
-			ai.set_task({"kind": &"assault", "point": point, "id": id})
+			ai.set_task({"kind": &"assault", "point": NavigationServer3D.map_get_closest_point(map, points.get(ai, enemy)), "id": id})
 
 
 ## Clearing the building the enemy holds: the base (the autorifleman and his buddy) suppresses
@@ -650,7 +731,223 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 		var first: SquadAI = plan.entry[0]
 		if is_instance_valid(first.body):
 			first._callout(&"tactic", "Clear!")
+			mark_cleared(first, op.entrance.door)
 		print("[tactics] %s: building clear" % squad.name)
+
+
+# --- The reels' drills (docs/ai_tactics.md) ------------------------------------------------------
+
+## Contact's start: how close, and whether the squad was moving (a near ambush hits a moving squad
+## from close; a squad lying in wait that springs its own ambush isn't ambushed).
+func _track_contact(now: float) -> void:
+	var c: Vector3 = situation.centre
+	_centres.append({"at": now, "pos": c})
+	while _centres.size() > 0 and now - float(_centres[0].at) > 3.0:
+		_centres.pop_front()
+	var engaged := bool(situation.contact)
+	if engaged and not _contact_was:
+		_contact_began = now
+		_contact_range = float(situation.range)
+		_moving_at_contact = not _centres.is_empty() and (c as Vector3).distance_to(_centres[0].pos) >= NEAR_MOVING_M
+	_contact_was = engaged
+	situation["near_ambush"] = engaged and _moving_at_contact and now - _contact_began <= NEAR_WINDOW_S and _contact_range <= NEAR_AMBUSH_M
+
+
+## T3: moving with no contact, a rally point every RALLY_EVERY_M, RALLY_BACK_M back along the way,
+## in cover where there is some (Squad meta "rally").
+func _rally_points(now: float) -> void:
+	if bool(situation.contact) or int(situation.up) <= 0:
+		return
+	var c: Vector3 = situation.centre
+	if not _rally_from.is_finite():
+		_rally_from = c
+		return
+	if c.distance_to(_rally_from) < RALLY_EVERY_M:
+		return
+	var back := c + (_rally_from - c).normalized() * RALLY_BACK_M
+	var men := squad.brains()
+	var spot: Variant = men[0].find_cover(back, 15.0) if not men.is_empty() else null
+	squad.set_meta(&"rally", spot if spot != null else back)
+	squad.set_meta(&"rally_at", now)
+	_rally_from = c
+	if squad.faction == &"friendly" and not men.is_empty() and situation.get("lead") != null and (situation.lead as Soldier).is_ai():
+		men[0]._callout(&"tactic", "Rally point, %d metres back." % roundi(RALLY_BACK_M))
+
+
+## Whether any of `base` fired since `since` (its next shot is timed from its last).
+static func _base_firing(base: Array, since: float) -> bool:
+	for ai: SquadAI in base:
+		if is_instance_valid(ai) and ai._next_shot > since + 0.05:
+			return true
+	return false
+
+
+## T5: each of the base's men an aim across the enemy and out past both its flanks (SECTOR_EXTRA_M),
+## moved `shift` (the far side, when the movers are close). {SquadAI: Vector3}.
+static func sector_aims(base: Array, enemy: Vector3, shift := Vector3.ZERO) -> Dictionary:
+	var out := {}
+	if base.is_empty() or not enemy.is_finite():
+		return out
+	var c := _middle(base)
+	var at := enemy - c
+	at.y = 0.0
+	var across := at.normalized().cross(Vector3.UP) if at.length() > 0.5 else Vector3.RIGHT
+	var width := SECTOR_EXTRA_M * 2.0 + 4.0 * maxi(base.size() - 1, 0)
+	for i in base.size():
+		var k := 0.0 if base.size() == 1 else float(i) / (base.size() - 1) - 0.5
+		out[base[i]] = enemy + shift + across * k * width + Vector3.UP
+	return out
+
+
+## T5's shift: with a mover within SHIFT_M of the enemy, the base fires beyond it (the far side).
+func _base_shift(moving: Array, enemy: Vector3, base: Array) -> Vector3:
+	if moving.is_empty() or base.is_empty() or not enemy.is_finite():
+		return Vector3.ZERO
+	var near := moving.any(func(ai: SquadAI) -> bool: return is_instance_valid(ai) and ai.body.global_position.distance_to(enemy) <= SHIFT_M)
+	if not near:
+		return Vector3.ZERO
+	var d := enemy - _middle(base)
+	d.y = 0.0
+	return d.normalized() * 15.0
+
+
+## T5's lift: a mover within LIFT_M of the enemy, the base stops suppressing.
+static func _lifted(moving: Array, enemy: Vector3) -> bool:
+	return enemy.is_finite() and moving.any(func(ai: SquadAI) -> bool: return is_instance_valid(ai) and ai.body.global_position.distance_to(enemy) <= LIFT_M)
+
+
+## T6: each assaulter a lane LANE_W wide across the enemy, through to THROUGH_M past it (the limit
+## of advance), from the squad's side `from`. {SquadAI: Vector3}.
+static func assault_lanes(units: Array, enemy: Vector3, from: Vector3) -> Dictionary:
+	var out := {}
+	if units.is_empty() or not enemy.is_finite():
+		return out
+	var dir := enemy - from
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length() > 0.5 else Vector3.FORWARD
+	var across := dir.cross(Vector3.UP)
+	var order := units.duplicate()
+	order.sort_custom(func(a: SquadAI, b: SquadAI) -> bool: return a.body.global_position.dot(across) < b.body.global_position.dot(across))
+	for i in order.size():
+		out[order[i]] = enemy + dir * THROUGH_M * 0.6 + across * (i - (order.size() - 1) / 2.0) * LANE_W
+	return out
+
+
+## T1: the gun and his buddy fire; the rest throw frags and CHARGE_DELAY_S later go through the
+## enemy line THROUGH_M past it; once they're all through, consolidation facing back.
+func _near_ambush(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now: float) -> void:
+	if plan.is_empty() or not plan.has("through"):
+		var base := _gunners_and_buddies(units, enemy).slice(0, 2)
+		if base.size() == 1 and units.size() > 2:  # the gun and the man nearest him
+			var gun: SquadAI = base[0]
+			var near: SquadAI = null
+			for ai in units:
+				if ai != gun and (near == null or ai.body.global_position.distance_to(gun.body.global_position) < near.body.global_position.distance_to(gun.body.global_position)):
+					near = ai
+			base.append(near)
+		var c: Vector3 = situation.centre
+		var dir := enemy - c
+		dir.y = 0.0
+		dir = dir.normalized() if dir.length() > 0.5 else Vector3.FORWARD
+		var through := enemy + dir * THROUGH_M
+		var going: Array = units.filter(func(ai: SquadAI) -> bool: return not (ai in base))
+		plan = {"enemy": enemy, "base": base, "through": through, "lanes": assault_lanes(going, enemy + dir * (THROUGH_M * 0.4), c),
+			"go_at": now + CHARGE_DELAY_S}
+		print("[tactics] %s: near ambush at %.0f m: %s fire, %s frags and through" % [squad.name, float(situation.range), _names(base), _names(going)])
+	for ai in units:
+		if ai in plan.base:
+			ai.set_task({"kind": &"base", "aim": aim, "id": id})
+		else:
+			ai.set_task({"kind": &"near_ambush", "enemy": plan.enemy, "point": (plan.lanes as Dictionary).get(ai, plan.through), "go_at": plan.go_at, "id": id})
+
+
+## T2: Battle Drill 3. The grenadier's smoke, then the man furthest back first, one at a time,
+## "Moving!" to his spot at the rally point, "Set!", then the next; those not yet gone keep firing;
+## those set hold the perimeter facing the enemy.
+func _break_contact(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: String, now: float) -> void:
+	var threat := enemy if enemy.is_finite() else units[0].body.threat_pos
+	if plan.is_empty() or not plan.has("order"):
+		var order := units.duplicate()
+		order.sort_custom(func(a: SquadAI, b: SquadAI) -> bool: return a.body.global_position.distance_to(threat) > b.body.global_position.distance_to(threat))
+		var rally := _break_rally(threat)
+		var away := rally - threat
+		away.y = 0.0
+		var across := away.normalized().cross(Vector3.UP) if away.length() > 0.5 else Vector3.RIGHT
+		var spots := {}
+		for i in order.size():
+			spots[order[i]] = rally + across * (i - (order.size() - 1) / 2.0) * BD3_SPREAD_M
+		var smoker: SquadAI = null
+		for ai in order:
+			if ai.body.role == Roles.GRENADIER:
+				smoker = ai
+		if smoker == null:
+			for ai in order:
+				if ai.body.inventory.count_of(&"smoke_grenade") > 0:
+					smoker = ai
+					break
+		if smoker:
+			smoker._screen_toward_threat(threat)
+		plan = {"order": order, "idx": 0, "spots": spots, "rally": rally, "mover_at": now}
+		print("[tactics] %s: break contact to (%.0f, %.0f), %s first" % [squad.name, rally.x, rally.z, _names([order[0]])])
+		if not order.is_empty():
+			(order[0] as SquadAI)._callout(&"tactic", "Moving!")
+	var order: Array = plan.order
+	var idx: int = plan.idx
+	while idx < order.size() and (not is_instance_valid(order[idx]) or not (order[idx] in units)):
+		idx += 1
+	if idx < order.size():
+		var mover: SquadAI = order[idx]
+		var spot: Vector3 = plan.spots[mover]
+		if mover.body.global_position.distance_to(spot) <= 3.0 or now - float(plan.mover_at) >= BD3_MOVER_S:
+			mover._callout(&"tactic", "Set!")
+			idx += 1
+			plan.mover_at = now
+			if idx < order.size() and is_instance_valid(order[idx]):
+				(order[idx] as SquadAI)._callout(&"tactic", "Moving!")
+	plan.idx = idx
+	for i in order.size():
+		var ai = order[i]
+		if not is_instance_valid(ai) or not (ai in units):
+			continue
+		var spot: Vector3 = plan.spots[ai]
+		if i < idx:
+			ai.set_task({"kind": &"garrison", "spot": spot, "face": (threat - spot).normalized(), "id": id + ":set"})
+		elif i == idx:
+			ai.set_task({"kind": &"break", "point": spot, "id": id + ":move", "smoked": true})
+		else:
+			ai.set_task({"kind": &"base", "aim": aim if aim.is_finite() else threat + Vector3.UP, "id": id})
+
+
+## Where break contact goes: the squad's last rally point if it's further from the threat than the
+## squad and within 200 m, else BD3_BACK_M straight back.
+func _break_rally(threat: Vector3) -> Vector3:
+	var c: Vector3 = situation.centre
+	var rally: Variant = squad.get_meta(&"rally", null)
+	if rally is Vector3 and (rally as Vector3).distance_to(threat) > c.distance_to(threat) + 10.0 and (rally as Vector3).distance_to(c) <= 200.0:
+		return rally
+	var away := c - threat
+	away.y = 0.0
+	away = away.normalized() if away.length() > 0.5 else Vector3.BACK
+	return c + away * BD3_BACK_M
+
+
+## T6's end state: all-round security round where the position was taken, each man facing out on
+## his own bearing.
+func _consolidate(units: Array[SquadAI], now: float) -> void:
+	var id := "consolidate@%.0f" % _consolidate_until
+	for i in units.size():
+		var a := TAU * i / units.size()
+		var face := Vector3(sin(a), 0.0, cos(a))
+		units[i].set_task({"kind": &"garrison", "spot": _consolidate_at + face * CONSOLIDATE_R, "face": face, "id": id})
+
+
+## T9 (R06): a cleared building is marked: a chem light at its door, from whoever carries one.
+const MARK_LIGHTS: Array[StringName] = [&"chemlight_green", &"chemlight_blue", &"chemlight_red"]
+static func mark_cleared(ai: SquadAI, door: Vector3) -> bool:
+	for id in MARK_LIGHTS:
+		if ai.body.inventory.count_of(id) > 0:
+			return ai.order_throw(id, door)
+	return false
 
 
 ## Searching where the enemy was last seen: hostile pairs to points round it, friendlies watch

@@ -1,0 +1,26 @@
+{
+	"_about": "docs/ai_tactics.md section 7 (F1-F3): what each faction can field. Terror groups start small and grow with money, recruits, weapons and territory in the living war; state forces field full echelons from the start. Read by FactionForce. Every number Proposed (2026-10-22).",
+	"echelons": ["cell", "team", "squad", "platoon", "company"],
+	"men_from": {"cell": 0, "team": 12, "squad": 40, "platoon": 120, "company": 400},
+	"start_men": {"cell": 8, "team": 25, "squad": 80, "platoon": 250, "company": 600},
+	"size_scale": {"cell": 0.5, "team": 0.65, "squad": 0.8, "platoon": 1.0, "company": 1.25},
+	"start_echelon": {
+		"ashen_banner": "squad", "black_ridge": "squad", "valley_shura": "team", "highland_front": "team", "saltline": "team", "kestrel": "team"
+	},
+	"state": {"_about": "State forces: full echelons from the start, never below platoon.", "us_forces": "company", "uk_forces": "company",
+		"ca_forces": "company", "vessmark": "company", "eastern_concord": "company", "vantage_group": "platoon", "meridian": "platoon"},
+	"money_base": 4.0,
+	"money_per_zone": 3.0,
+	"predatory_cut": 0.25,
+	"recruits_per_zone": 2.0,
+	"recruit_cost": 1.0,
+	"weapon_cost": 1.5,
+	"spend_share": 0.8,
+	"kill_recruits": 1.0,
+	"kill_weapons": 0.5,
+	"zone_lost_share": 0.15,
+	"defeat_recruits": 6.0,
+	"veteran_combat": 0.1,
+	"ambush_share": {"cell": 0.8, "team": 0.7},
+	"hit_and_run": ["cell", "team"]
+}

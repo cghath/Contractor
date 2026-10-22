@@ -146,6 +146,7 @@ func _ready() -> void:
 	if String(def.get("kind", "")) == "hot":
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
 		add_child(EnemyCommand.new())  # the enemy's high command: what it sends, and whether (docs/enemy_high_command.md)
+		SideCommand.install(self, &"hostile", HotZonePolicy.new())  # its side's commander (combined_arms B2): EnemyCommand's rules
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)
@@ -606,7 +607,8 @@ func difficulty_scale() -> float:
 func garrison_size(module_id: String) -> int:
 	var module := get_module(module_id)
 	var n: int = (ZoneModules.GARRISON.get(module.type, []) as Array).size() if module else 0
-	n = maxi(mini(n, 2), ceili(n * difficulty_scale()))  # the other sites by difficulty (the target keeps its briefed count, below)
+	var force := FactionForce.size_mult(module_faction(module)) if module else 1.0  # its holder's echelon now (docs/ai_tactics.md 7)
+	n = maxi(mini(n, 2), ceili(n * difficulty_scale() * force))  # the other sites by difficulty (the target keeps its briefed count, below)
 	var target := -1
 	for cid: String in Contracts.deployment().get("cids", []):
 		if String(Contracts.contract(cid).get("module_id", "")) == module_id:

@@ -3367,6 +3367,23 @@ func _do_tactic(t: Dictionary) -> void:
 				bounding = true
 		&"clear":
 			_tactic_clear(t, now)
+		&"near_ambush":
+			# SquadTactics' near ambush (docs/ai_tactics.md T1): a frag at the enemy line, then
+			# CHARGE_DELAY_S later straight through it, firing, to his lane's point past it.
+			if not t.has("thrown"):
+				t.thrown = true
+				var at: Vector3 = t.enemy
+				if body.inventory.count_of(&"frag_grenade") > 0 and body.global_position.distance_to(at) >= 12.0:  # (clear of his own frag)
+					_throw(&"frag_grenade", at)
+			if now < float(t.go_at):
+				body.want_crouch = false
+				return
+			var point: Vector3 = t.point
+			if _flat_distance(point) <= ARRIVE + 1.0:
+				_fight(point, 4.0)
+			else:
+				_go(point, true)
+				bounding = true
 		&"garrison":
 			var spot: Vector3 = t.spot
 			if _flat_distance(spot) > ARRIVE + 0.2:
@@ -4469,7 +4486,7 @@ const BADLY_HURT_BLOOD := 0.7
 func ambusher() -> bool:
 	if body == null or squad == null or post != null or body.faction != &"hostile" or squad.patrol.is_empty() 			or not squad.get_parent() is EnemyResponse:
 		return false  # (the enemy response's patrols: not a level's own squad, nor a garrison)
-	return float(absi(String(squad.name).hash()) % 100) / 100.0 < AMBUSH_SHARE
+	return float(absi(String(squad.name).hash()) % 100) / 100.0 < FactionForce.ambush_share(String(body.get_meta(&"faction_id", "")), AMBUSH_SHARE)  # small groups lie in wait more
 
 
 ## G-26: a hostile patrol walks its route in formation behind its lead (Squad.patrol_lead,
@@ -5164,8 +5181,8 @@ func _shoot() -> void:
 			_seek_fire_spot()
 		return
 	_no_shot_since = -1.0
-	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
-		return
+	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at) or Deconfliction.holds_fire(body, aim_at, foe == null):
+		return  # (Deconfliction: check fire, a player's bubble, another group's sector: combined_arms 4.5)
 	var auto: bool = weapon.stats.get("auto", false)
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
 	var range_m := body.camera.global_position.distance_to(aim_at)

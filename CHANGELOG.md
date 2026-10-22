@@ -11,6 +11,123 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Terror groups that grow (docs/ai_tactics.md section 7)
+
+#### Added
+- **Factions have men, weapons and money.** Each terror group's money comes from the zones it
+  holds, and it spends that money on recruits and their weapons. It loses men to kills, lost
+  zones and contracts the company wins against it. What it can field follows from its armed
+  men: cells, teams, squads, platoons, then companies. State forces (the US and its allies,
+  Eastern Concord) field full units from the start.
+- **Their size shows in the zones.** Garrisons and the enemy commander's reserves grow as a group
+  grows and shrink as it loses, so a bigger group sends more patrols and hunter teams. Those
+  stay pairs and teams of 4-6. Everything stays as before at each group's starting size.
+- **Small but dangerous.** A group down to cells and teams is its hard core: veterans who lie in
+  wait more and hit and run instead of standing to fight.
+
+### Platoon, company and brigade tactics from the reels (docs/ai_tactics.md, the AI commander)
+
+#### Added
+- **Bunkers and trench lines by SOSRA.** The AI commander takes a fortified objective in the
+  reels' order. It suppresses the position, smokes its ports, sends a group to secure the far
+  flank, makes a breach with its engineers, and only then assaults through the breach.
+- **Isolate before the assault.** Against a village held in strength, the commander fixes it with
+  fires and sends small teams to cut the ways in. It starves the garrison until it's half
+  what it was, then attacks from every axis at once.
+- **Feigned retreat.** One group attacks, then pulls back. If the garrison follows it out, a
+  second group waiting out of sight on another side goes in.
+- **Defence in depth.** A defending side puts a security zone a kilometre forward. Recon groups
+  there call fires on what they see and pull back before they're caught.
+- **Brigades.** Several company plans run under one command element. The element keeps a
+  reserve company, and a company that stalls gets the brigade's fires first, then the reserve.
+
+### Team and squad drills from the tactics reels (docs/ai_tactics.md, every side)
+
+#### Added
+- **Near ambush.** A squad hit from under 35 m while moving doesn't look for cover in the kill
+  zone. Its gun and one man fire flat out, the rest throw frags, and 2-3 seconds later they
+  charge through the ambush line. Then they consolidate facing back.
+- **Break contact as a drill.** Smoke from the grenadier first. Then the man furthest back goes:
+  "Moving!", to the rally point, "Set!". Then the next, each covered by those still firing, until
+  all are set at the rally point facing the enemy.
+- **Rally points.** On the move a squad names a rally point every 150 m, about 45 m back the way
+  it came. That's where it breaks contact to.
+- **Fire superiority first.** Flankers wait in cover until their base of fire is shooting:
+  "Base is set, move!"
+- **Sectors of fire.** A base of fire spreads its guns across the enemy and past both flanks,
+  never all on one man. It shifts its fire beyond the objective as its flankers close in, and
+  stops when they're on it.
+- **Assault lanes and consolidation.** Assaulters go through the position in their own lanes, to
+  a limit just past it. Then they take all-round security and check their ammo.
+- **Contact reports** say how many and what: "Contact, two o'clock, 80 m, three men, MG".
+- **Cleared buildings** get a chem light at the door when someone carries one.
+- **Terror groups fight their own way.** Jihadists press and stay, guerrillas hit and run, and
+  cartels hold what they guard.
+- New test suite drills, in tools/run_tests.sh and CI.
+
+### Requests that get done (combined arms phase B4, part 2)
+
+#### Added
+- **Allied units carry out what they accept.** Ask an allied unit through the contextual menu
+  (look at it) for suppression, covering fire, smoke, a hold, ammo or a medic. It moves into
+  range if it has to, does the job, and the request card follows it: on the way, on station,
+  done. Units under the AI commander do it through their orders. A unit without what you asked
+  for says so.
+- **Check fire** is on the contextual menu over open ground.
+
+### Deconfliction: no blue on blue (combined arms phase B5, docs/combined_arms.md 4.5)
+
+#### Added
+- **Check fire.** Any player can call a check fire on a point. Every friendly gun firing within
+  100 m of it stops for 30 seconds.
+- **Lanes.** Each allied group's task gets its own lane, kept clear of the other groups' lanes.
+  Allied groups don't shoot across another group's lane, and their moves bend round players.
+- **Player bubbles.** No allied suppression lands within 100 m of a player.
+- **Fire missions near friendlies.** The fire direction centre warns before rounds land near
+  friendlies ("Splash in 45, friendlies stay south of the target"). It checks fire if one walks
+  into the target area.
+- **Vehicle gunners** don't fire near friendly vehicles.
+- **Friendly-fire incidents** are logged for the debrief.
+
+### Armour and infantry together (combined arms phase B3, docs/combined_arms.md 3.6)
+
+#### Added
+- **Tanks keep their infantry.** Each allied armour section is paired with an infantry group and
+  moves with it by the ground. In the open it overwatches the objective from a kilometre off. In
+  woods it follows 150 m behind, and in a town 75 m behind. It waits at a town's edge until its
+  infantry is in.
+- **Target hand-off.** Infantry held up by a machine gun or a gun position marks it to its tank
+  ("Anvil 1, Saber 2, MG at 041 053, 120 metres, my tracer."), and the tank puts fire on it.
+- **Armour asks for infantry.** An AT team reported near the armour sends its infantry after it,
+  and the tank calls for help on the net, asking a nearby player when its infantry is busy.
+
+### The AI commander (combined arms phase B2, docs/combined_arms.md 3)
+
+#### Added
+- **A commander for each side.** It sees only what its side has reported. It knows its groups
+  by their sitreps and tasks them through the same orders high command uses: assault, support by
+  fire, flank, recon, reserve, screen and defend. Every 20 s, or at once when something changes,
+  it scores each group for each job by how suited it is, how fit, how far away and how free. An
+  assault is never sent without its support by fire, and no group without anti-armour weapons is
+  sent at known armour. Each decision is logged with its reason.
+- **Timing.** An assault waits at its attack position until its support by fire is set, or
+  2 minutes, then goes ("Hammer 1 is set." "Saber 1, go."). An objective counts as taken after
+  90 s with no reported enemy in it. A phase moves on when every objective in it is taken.
+- **Reserves and stalls.** A quarter of the side's strength is kept back. It goes in when the
+  main objective stalls, an assault goes amber, a counterattack is seen, or to exploit a quick
+  win. At the phase's limit the commander shifts the main effort or calls fire support and
+  pauses.
+- **Falling back.** An amber group holds and asks for help. A red group breaks contact to its
+  rally, and two red groups of a kind merge there. A side that loses half its men pulls back.
+- **Defence and counterattacks.** A defending side holds its sites and keeps a mobile reserve.
+  A lost site is retaken only by a force three times what's seen there, with anti-armour weapons
+  if armour is there; otherwise it's contained. The force assembles out of sight and goes in 5-12
+  minutes later, after a preparation. Players hear it coming if their side has reported the
+  enemy massing.
+- **Off-screen fights by armour.** A tank shrugs off rifles and an AT team hurts it, also when
+  both are virtual.
+- Hot zones keep their enemy commander's rules unchanged; the new commander sits beside it.
+
 ### High command (combined arms, phases C1 to C6)
 
 > **Where this lane is:** C1-C6 done on claude/ca-c-high-command (B1 and B4 part 1 merged in).

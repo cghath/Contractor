@@ -224,7 +224,7 @@ func contact(speaker: Soldier, enemy: Soldier) -> bool:
 	var distance := from.global_position.distance_to(enemy.global_position)
 	var clock := clock_word(from, enemy.global_position)
 	var voice_id := StringName("contact_%s%s" % [clock, "_close" if distance <= CLOSE_RANGE_M else ""])
-	return say(speaker, voice_id, "Contact, %s o'clock, %d m" % [clock, round_distance(distance)],
+	return say(speaker, voice_id, "Contact, %s o'clock, %d m%s" % [clock, round_distance(distance), _what_seen(squad, enemy)],
 		"contact", "contact/%s" % enemy.name, SQUAD_CONTACT_GAP_S)
 
 
@@ -327,6 +327,26 @@ static func _octant(from: Node3D, point: Vector3) -> int:
 ## "front", "front right", ... "left", "front left": where `point` is seen from `from`.
 static func direction_word(from: Node3D, point: Vector3) -> String:
 	return DIRECTIONS[_octant(from, point)]
+
+
+## A contact report's third D (docs/ai_tactics.md T-B2): how many the squad knows of round
+## `enemy`, and the worst of what they carry: ", three men, MG".
+static func _what_seen(squad: Squad, enemy: Soldier) -> String:
+	if squad == null or enemy == null:
+		return ""
+	var n := 0
+	var worst := "inf"
+	for e: Dictionary in squad.enemy_picture():
+		if (e.pos as Vector3).distance_to(enemy.global_position) <= 25.0:
+			n += 1
+			var who := e.who as Soldier
+			var k := GroupBoard.soldier_kind(who) if who and is_instance_valid(who) else "inf"
+			if k in ["at", "mg", "sniper"] and (worst == "inf" or k == "at"):
+				worst = k
+	n = maxi(n, 1)
+	var words := ["", "one man", "two men", "three men", "four men", "five men"]
+	var count: String = words[n] if n < words.size() else "%d men" % n
+	return ", %s%s" % [count, {"at": ", RPG", "mg": ", MG", "sniper": ", sniper"}.get(worst, "")]
 
 
 ## "twelve", "two", ... "nine", "eleven" o'clock: where `point` is seen from `from`.
