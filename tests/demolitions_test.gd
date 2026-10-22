@@ -77,6 +77,7 @@ func _ready() -> void:
 	await _wait_for(func() -> bool: return _vehicle("range_technical") != null and _vehicle("range_maxxpro") != null, 10.0)
 	await _frames(10)
 	_test_data()
+	await _test_range_blocks()
 	await _test_place_and_sabotage()
 	await _test_chain()
 	await _test_vehicle_block()
@@ -117,12 +118,54 @@ func _test_data() -> void:
 		"a claymore's fan: ahead yes; behind, beside and steeply up no")
 
 
+# --- The range's blocks (F-121) -------------------------------------------------------------
+
+## F-121 (cghath's queue item 1.8): the range's two concrete blocks (z -30) and its sandbag wall
+## (z -45) lay outside the voxel world's 22 m edit area and were never built. Now the edit area
+## grows to hold them (VoxelWorld.fit_structures): their voxels are there, a ray at 0.6 m stops on
+## each, and a demo block set on a concrete block's face and fired carves it.
+func _test_range_blocks() -> void:
+	print("The range's concrete blocks and sandbag wall (F-121)")
+	var world := level.voxel_world
+	await _wait_for(func() -> bool: return world.is_meshed(), 10.0)
+	var solid: Array[int] = []
+	var stopped := 0
+	var space := level.get_world_3d().direct_space_state
+	for b: Array in VehicleRange.BLOCKS:
+		var box := AABB(b[0], (b[1] as Vector3) - (b[0] as Vector3))
+		solid.append(Objectives.solid_count(world, box))
+		var mid := Vector3(box.get_center().x, 0.6, box.get_center().z)
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(mid + Vector3(0, 0, 3), mid - Vector3(0, 0, 3), 1))
+		if not hit.is_empty() and (hit.position as Vector3).z >= box.position.z - 0.15 and (hit.position as Vector3).z <= box.end.z + 0.15:
+			stopped += 1
+	check(world.bounds.encloses(AABB(Vector3(-80, 0, -450), Vector3(160, 12, 160))) and solid.all(func(n: int) -> bool: return n > 0) and stopped == VehicleRange.BLOCKS.size(),
+		"the range's blocks and sandbag wall are built: voxels %s, %d of %d stop a ray at 0.6 m (edit area %s voxels)" % [solid, stopped, VehicleRange.BLOCKS.size(), world.bounds])
+	var first: Array = VehicleRange.BLOCKS[0]
+	var block := AABB(first[0], (first[1] as Vector3) - (first[0] as Vector3))
+	player.inventory.take(&"demo_block", 1)
+	_put(player, Vector3(block.get_center().x, 0.1, block.end.z + 2.0))
+	await get_tree().physics_frame
+	await _frames(2)
+	var eye := player.camera.global_position
+	var dir := (Vector3(block.get_center().x, 0.6, block.end.z) - eye).normalized()
+	var spot := Demolitions.placement(player, eye, dir, &"demo_block")
+	var id := dem.server_place(player, &"demo_block", Demolitions.place_transform(&"demo_block", spot, dir), spot.target, Demolitions.REMOTE) if spot.ok else ""
+	_put(player, Vector3(-7, 0.1, 15))
+	await _frames(2)
+	var before := Objectives.solid_count(world, block)
+	var went := dem.server_detonate(id) if id != "" else 0
+	await _wait_for(func() -> bool: return Objectives.solid_count(world, block) < before, 5.0)
+	var after := Objectives.solid_count(world, block)
+	check(spot.ok and spot.target == null and absf((spot.pos as Vector3).z - block.end.z) < 0.2 and went == 1 and after >= 0 and after < before * 0.9,
+		"a demo block on the concrete block's face (%s) goes off and carves it: %d voxels -> %d" % [spot.get("pos", "no spot: " + String(spot.get("why", ""))), before, after])
+
+
 # --- Placing, a timer, a sabotage target ---------------------------------------------------
 
 func _test_place_and_sabotage() -> void:
 	print("Placing, a timer, a sabotage target")
-	# A sabotage target: a box standing in for a fuel store (the range's concrete blocks lie outside
-	# its voxel world's edit area, so they aren't there to set a charge on).
+	# A sabotage target: a box standing in for a fuel store (the range's concrete blocks are voxels:
+	# _test_range_blocks sets a charge on one).
 	var depot := StaticBody3D.new()
 	depot.name = "TestFuelStore"
 	depot.collision_layer = 1

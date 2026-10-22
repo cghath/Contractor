@@ -12,10 +12,13 @@ extends Node3D
 ##
 ## Visuals are MultiMeshes per CELL_M square (low-poly blocky shapes, in the voxel look),
 ## built nearest cells first as the camera comes near (like the terrain's finest level) and
-## skipped on a headless server; past SEE_TREE_M the trees give way to low canopy blobs (one
-## per FAR_GROUP_M square of trees) out to the horizon. Large rocks and tree trunks also have
+## skipped on a headless server, in two tiers (woods perf pass, cghath's queue item 1.8): the
+## full shapes out to LOD_M, low-poly stand-ins past it; past SEE_TREE_M the trees give way to low
+## canopy blobs (one per FAR_GROUP_M square of trees, a MultiMesh per FAR_BLOCK cells a side) out
+## to the horizon. Large rocks and tree trunks also have
 ## collision (one static body per cell, built up front: cover for the AI) and are baked into the
-## navigation mesh as boxes; scrub and thickets are visual only (and hide people: foliage_between).
+## navigation mesh as boxes; scrub and thickets are visual only (and hide people: foliage_between,
+## walked on a FINE_M index).
 ##
 ## The layout is cached (Captain, 2026-10-14: "we'll use caching for performance if needed"):
 ## in memory per zone (seed, preset, ground, pads, roads) with the cells' built meshes, and on
@@ -129,6 +132,26 @@ const CELL_M := 128.0
 const BUILD_M := 1000.0
 const PER_FRAME := 2
 const CHECK_S := 0.5
+## Woods perf pass (cghath's queue item 1.8; Captain, 2026-10-14: "frame goes 4 -> 10 ms in woods,
+## up to 1.5k draws, 1.4M prims. Then denser copses"). Each cell is drawn in two tiers that hand
+## over at LOD_M from its middle (the same margin both ways, so never both and never neither):
+## near, the full trees, thickets and scrub as before plus the ground cover, built only for cells
+## within NEAR_BUILD_M (the farthest near thing, the rock clusters at SEE_OUTCROP_M, plus half a
+## cell's diagonal and the margin); and far (out to BUILD_M), low-poly stand-ins of the same items
+## (_lod_meshes: a crown is 44 triangles, not 164; a thicket 38, not 152) with the rocks and props.
+## Proposed.
+const LOD_M := 200.0
+const LOD_MARGIN_M := 20.0
+const NEAR_BUILD_M := 420.0
+## A cell's tiers (the cache keeps each tier's built parts: Vector3i(cell.x, cell.y, tier)).
+enum Tier { FAR, NEAR }
+## The keys drawn as the near tier's full shapes and their low-poly stand-ins in the far tier.
+const LOD_KEYS := {Kind.SCRUB: "scrub_lod", "thicket": "thicket_lod", "trunk": "trunk_lod", "crown": "crown_lod", "conifer": "conifer_lod"}
+## Far canopy blobs are grouped FAR_BLOCK x FAR_BLOCK cells to a MultiMesh (a fourth of the draws),
+## and each block is its cells' far-tier trees' visibility parent: past SEE_TREE_M from the block's
+## middle the blobs show and its cells' trees and thickets don't (hierarchical LOD, so a tree is
+## never drawn twice and never missing). Proposed.
+const FAR_BLOCK := 2
 ## Draw distances (m): scrub, rocks, trunks and crowns (thickets with the trees).
 const SEE_SCRUB_M := 470.0  # bushes read at mid range (round 3: was 400)
 const SEE_ROCK_M := 650.0
@@ -200,7 +223,17 @@ var _spec := {}
 var _cells := {}  # Vector2i -> Array of item indices
 var _tall := {}  # Vector2i (TALL_CELL_M) -> PackedFloat32Array of x, z, reach, top: tall_top's index
 var _tall_built := false
-var _built := {}  # Vector2i -> true
+var _built := {}  # Vector2i -> true: the cell's far tier is built
+var _built_near := {}  # Vector2i -> true: its near tier
+## The woods perf pass's fine index (FINE_M squares, from where each item stands): the foliage as
+## packed numbers for spotting (_foliage: Vector2i -> PackedFloat64Array of FOLIAGE_FIELDS each:
+## x, z, its cylinder's radius, bottom, top, and 1 for scrub, seen only to SEE_SCRUB_M), the
+## widest radius in it, and the solid items and library props by index for navigation (_solids).
+## Built with the layout (_index_fine) and kept in its cache entry.
+var _foliage := {}
+var _foliage_reach := 0.0
+var _solids := {}
+var _indexed := -1  # items.size() when the fine index was built (a test may hand-fill items: built again on use)
 var _meshes := {}
 var _material: StandardMaterial3D
 var _next_check := 0.0
@@ -241,6 +274,11 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	items = fresh  # new arrays, never clear(): a cached layout may share the old ones
 	_cells = {}
 	_built = {}
+	_built_near = {}
+	_foliage = {}
+	_foliage_reach = 0.0
+	_solids = {}
+	_indexed = -1
 	_tall = {}
 	_tall_built = false
 	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0, Kind.ANIMAL: 0}
@@ -269,6 +307,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	if _from_memory() or _from_disk():
 		return
 	_lay_out()
+	_index_fine()
 	cache_source = "generated"
 	_remember()
 	_to_disk()
@@ -887,13 +926,18 @@ func _from_memory() -> bool:
 	counts = (_entry.counts as Dictionary).duplicate()
 	solid_count = int(_entry.solid)
 	library_count = int(_entry.get("library", 0))
+	_foliage = _entry.foliage
+	_foliage_reach = float(_entry.foliage_reach)
+	_solids = _entry.solids
+	_indexed = items.size()
 	cache_source = "memory"
 	_touch()
 	return true
 
 
 func _remember() -> void:
-	_entry = {"items": items, "cells": _cells, "counts": counts.duplicate(), "solid": solid_count, "library": library_count, "visual": {}, "far": {}}
+	_entry = {"items": items, "cells": _cells, "counts": counts.duplicate(), "solid": solid_count, "library": library_count, "visual": {}, "far": {},
+		"foliage": _foliage, "foliage_reach": _foliage_reach, "solids": _solids}
 	_cache[_key] = _entry
 	_touch()
 
@@ -977,6 +1021,7 @@ func _from_disk() -> bool:
 			item["paint"] = int(flat[k + 13])
 			item["link"] = int(flat[k + 14])
 		_add(item)
+	_index_fine()
 	cache_source = "disk"
 	_remember()
 	return true
@@ -1064,128 +1109,268 @@ func valuable_sites() -> Array[Dictionary]:
 
 
 ## The footprints (world AABBs) of the solid items overlapping `area` (x, z in metres), for
-## the navigation mesh.
+## the navigation mesh (by the fine index: a nav chunk is 12 m, a cell 128 m).
 func boxes_in(area: Rect2) -> Array[AABB]:
 	var out: Array[AABB] = []
 	if _cells.is_empty():
 		return out
-	var lo := _cell_of(area.position.x, area.position.y)
-	var hi := _cell_of(area.end.x, area.end.y)
-	for cz in range(lo.y, hi.y + 1):
-		for cx in range(lo.x, hi.x + 1):
-			for index: int in _cells.get(Vector2i(cx, cz), []):
-				var item: Dictionary = items[index]
-				if not item.solid or item.has("shape") or not area.has_point(Vector2(item.pos.x, item.pos.z)):
-					continue
-				var half := _solid_half(item)
-				var p: Vector3 = item.pos
-				var centre := p + Vector3(0, half.y, 0) if item.kind == Kind.TREE else p
-				out.append(AABB(centre - half, half * 2.0))
+	if _indexed != items.size():
+		_index_fine()
+	for row: PackedInt32Array in _fine_rows(_solids, area):
+		for index in row:
+			var item: Dictionary = items[index]
+			if not item.solid or item.has("shape") or not area.has_point(Vector2(item.pos.x, item.pos.z)):
+				continue
+			var half := _solid_half(item)
+			var p: Vector3 = item.pos
+			var centre := p + Vector3(0, half.y, 0) if item.kind == Kind.TREE else p
+			out.append(AABB(centre - half, half * 2.0))
 	return out
+
+
+# --- The fine index (woods perf pass) --------------------------------------------------------
+
+## The fine index's squares (m) and the numbers a foliage item has in it (_foliage). Proposed: a
+## 128 m cell holds up to ~2000 items in a dense wood, and every sight line and nav chunk near it
+## walked them all (cghath's queue item 1.8).
+const FINE_M := 16.0
+const FOLIAGE_FIELDS := 6
+
+
+## Indexes the layout by FINE_M square: the foliage's cylinders, as foliage_between measures them
+## (_foliage, _foliage_reach), and the solid items and library props (_solids).
+func _index_fine() -> void:
+	var rows := {}  # Vector2i -> Array of numbers
+	var solids := {}  # Vector2i -> Array of item indices
+	var reach := 0.0
+	for index in items.size():
+		var item: Dictionary = items[index]
+		var kind := int(item.kind)
+		var p: Vector3 = item.pos
+		var g := Vector2i(floori(p.x / FINE_M), floori(p.z / FINE_M))
+		if item.get("solid", false) or (item.has("shape") and kind == Kind.PROP):
+			if not solids.has(g):
+				solids[g] = []
+			(solids[g] as Array).append(index)
+		if kind == Kind.ROCK or kind >= Kind.PROP:
+			continue  # solid (rays see to it) or not foliage
+		var size: Vector3 = item.size
+		var bush := kind != Kind.TREE
+		var conifer := not bush and bool(item.get("conifer", false))
+		var r := size.x * (SCRUB_R if bush else (CONIFER_R if conifer else CROWN_R))
+		reach = maxf(reach, r)
+		if not rows.has(g):
+			rows[g] = []
+		(rows[g] as Array).append_array([p.x, p.z, r, p.y + (0.0 if bush else size.y * CROWN_LOW),
+			p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH)), 1.0 if kind == Kind.SCRUB else 0.0])
+	_foliage = {}
+	for g: Vector2i in rows:
+		_foliage[g] = PackedFloat64Array(rows[g])
+	_solids = {}
+	for g: Vector2i in solids:
+		_solids[g] = PackedInt32Array(solids[g])
+	_foliage_reach = reach
+	_indexed = items.size()
+
+
+## The rows of `index` (_solids) for the FINE_M squares over `area`.
+func _fine_rows(index: Dictionary, area: Rect2) -> Array:
+	var out: Array = []
+	for gz in range(floori(area.position.y / FINE_M), floori(area.end.y / FINE_M) + 1):
+		for gx in range(floori(area.position.x / FINE_M), floori(area.end.x / FINE_M) + 1):
+			var row: Variant = index.get(Vector2i(gx, gz))
+			if row != null:
+				out.append(row)
+	return out
+
+
+## The foliage rows (_foliage) of the FINE_M squares whose items, `pad` round at most, can reach
+## the flat line from (ax, az) to (bx, bz), the squares nearest (ax, az) first: square by square
+## along x, each column only the squares the line crosses in it (and `pad` either side).
+func _foliage_rows(ax: float, az: float, bx: float, bz: float, pad: float) -> Array:
+	var out: Array = []
+	var dx := bx - ax
+	var dz := bz - az
+	var lo := floori((minf(ax, bx) - pad) / FINE_M)
+	var hi := floori((maxf(ax, bx) + pad) / FINE_M)
+	var step := 1 if dx >= 0.0 else -1
+	var gx := lo if step > 0 else hi
+	var last := hi if step > 0 else lo
+	while true:
+		var t0 := 0.0
+		var t1 := 1.0
+		if absf(dx) > 0.000001:
+			var ta := (gx * FINE_M - pad - ax) / dx
+			var tb := ((gx + 1) * FINE_M + pad - ax) / dx
+			t0 = maxf(t0, minf(ta, tb))
+			t1 = minf(t1, maxf(ta, tb))
+		if t0 <= t1:
+			var za := az + dz * t0
+			var zb := az + dz * t1
+			var z0 := floori((minf(za, zb) - pad) / FINE_M)
+			var z1 := floori((maxf(za, zb) + pad) / FINE_M)
+			var zs := range(z0, z1 + 1) if dz >= 0.0 else range(z1, z0 - 1, -1)
+			for gz: int in zs:
+				var row: Variant = _foliage.get(Vector2i(gx, gz))
+				if row != null:
+					out.append(row)
+		if gx == last:
+			break
+		gx += step
+	return out
+
+
+## Metres of a foliage cylinder (its middle (cx, cz) from the line's start, radius r, from y0 up
+## to y1) that the line from height `fy` along (fx, dy, fz) passes through (`flen2` the square of
+## its flat length, `length` its length): foliage_between's test, on the fine index's numbers.
+static func _span(cx: float, cz: float, r: float, y0: float, y1: float, fx: float, fz: float, flen2: float, fy: float, dy: float, length: float) -> float:
+	var along := (cx * fx + cz * fz) / flen2
+	var mx := cx - fx * along
+	var mz := cz - fz * along
+	var miss2 := mx * mx + mz * mz
+	if miss2 >= r * r:
+		return 0.0
+	var half_t := sqrt(r * r - miss2) / sqrt(flen2)
+	var t0 := maxf(along - half_t, 0.0)
+	var t1 := minf(along + half_t, 1.0)
+	if absf(dy) < 0.0001:
+		if fy < y0 or fy > y1:
+			return 0.0
+	else:
+		var ta := (y0 - fy) / dy
+		var tb := (y1 - fy) / dy
+		t0 = maxf(t0, minf(ta, tb))
+		t1 = minf(t1, maxf(ta, tb))
+	return (t1 - t0) * length if t1 > t0 else 0.0
 
 
 ## The least foliage_between `from` and either of `to_a` and `to_b` (a head and a chest), with
 ## the foliage walked once for both lines (Spotting.foliage_m: two walks per pair in sight were
-## a large share of an AI scan, research 2026-10-13 B2.6).
-func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3) -> float:
-	if _cells.is_empty():
+## a large share of an AI scan, research 2026-10-13 B2.6). Walks the fine index from `from` out
+## and stops once both lines have `enough` (Spotting: FOLIAGE_OPAQUE_M hides them, however much
+## more there is), so the answer is exact below `enough` and at least `enough` past it.
+func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3, enough := INF) -> float:
+	if _indexed != items.size():
+		_index_fine()
+	if _foliage.is_empty():
 		return 0.0
-	var lo := _cell_of(minf(from.x, minf(to_a.x, to_b.x)) - FOLIAGE_PAD_M, minf(from.z, minf(to_a.z, to_b.z)) - FOLIAGE_PAD_M)
-	var hi := _cell_of(maxf(from.x, maxf(to_a.x, to_b.x)) + FOLIAGE_PAD_M, maxf(from.z, maxf(to_a.z, to_b.z)) + FOLIAGE_PAD_M)
+	var started := Time.get_ticks_usec()
+	var ax := to_a.x - from.x
+	var az := to_a.z - from.z
+	var bx := to_b.x - from.x
+	var bz := to_b.z - from.z
+	var a2 := ax * ax + az * az
+	var b2 := bx * bx + bz * bz
+	var a_on := a2 >= 0.0001  # (a line under a centimetre across meets nothing, as foliage_between)
+	var b_on := b2 >= 0.0001
+	var a_len := from.distance_to(to_a)
+	var b_len := from.distance_to(to_b)
+	var a_dy := to_a.y - from.y
+	var b_dy := to_b.y - from.y
+	var far2 := SEE_SCRUB_M * SEE_SCRUB_M
+	var spread := Vector2(to_a.x - to_b.x, to_a.z - to_b.z).length() * 0.5
+	# The middle line (from `from` to between the ends): an item further from it than its radius
+	# and `spread` meets neither line.
+	var mx := (ax + bx) * 0.5
+	var mz := (az + bz) * 0.5
+	var m2 := maxf(mx * mx + mz * mz, 0.0001)
 	var a := 0.0
 	var b := 0.0
-	var eye := Vector2(from.x, from.z)
-	var end_a := Vector2(to_a.x, to_a.z)
-	var end_b := Vector2(to_b.x, to_b.z)
-	for cz in range(lo.y, hi.y + 1):
-		for cx in range(lo.x, hi.x + 1):
-			if _cell_off_line(cx, cz, eye, end_a) and _cell_off_line(cx, cz, eye, end_b):
+	# The squares from both ends in turn (from `from`, then from the far end, ...): a line from in
+	# a wood or into one meets most of its leaves near one end, and stops as soon as it has enough.
+	var rows := _foliage_rows(from.x, from.z, from.x + mx, from.z + mz, _foliage_reach + spread)
+	var n := rows.size()
+	for k in n:
+		var row: PackedFloat64Array = rows[k / 2 if k % 2 == 0 else n - 1 - k / 2]
+		for i in range(0, row.size(), FOLIAGE_FIELDS):
+			var cx := row[i] - from.x
+			var cz := row[i + 1] - from.z
+			if row[i + 5] > 0.5 and cx * cx + cz * cz > far2:
+				continue  # as in foliage_between
+			var t := clampf((cx * mx + cz * mz) / m2, 0.0, 1.0)
+			var ex := cx - mx * t
+			var ez := cz - mz * t
+			var reach := row[i + 2] + spread
+			if ex * ex + ez * ez >= reach * reach:
 				continue
-			for index: int in _cells.get(Vector2i(cx, cz), []):
-				var item: Dictionary = items[index]
-				var kind := int(item.kind)
-				if kind == Kind.ROCK or kind >= Kind.PROP:
-					continue  # solid (rays see to it) or not foliage
-				var p: Vector3 = item.pos
-				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
-					continue  # as in foliage_between
-				a += _through(item, kind, from, to_a)
-				b += _through(item, kind, from, to_b)
+			if a_on:
+				a += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], ax, az, a2, from.y, a_dy, a_len)
+			if b_on:
+				b += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], bx, bz, b2, from.y, b_dy, b_len)
+		if a >= enough and b >= enough:
+			break
+	FrameCost.spent(&"foliage", started)
 	return minf(a, b)
-
-
-## Metres of `item` (foliage of `kind`) the line `from` -> `to` passes through (foliage_between's
-## test, for foliage_least).
-static func _through(item: Dictionary, kind: int, from: Vector3, to: Vector3) -> float:
-	var flat := Vector2(to.x - from.x, to.z - from.z)
-	var flat_len := flat.length()
-	if flat_len < 0.01:
-		return 0.0
-	var p: Vector3 = item.pos
-	var size: Vector3 = item.size
-	var bush := kind != Kind.TREE
-	var conifer := not bush and bool(item.get("conifer", false))
-	var r := size.x * (SCRUB_R if bush else (CONIFER_R if conifer else CROWN_R))
-	var c := Vector2(p.x - from.x, p.z - from.z)
-	var along := c.dot(flat) / (flat_len * flat_len)
-	var miss := (c - flat * along).length()
-	if miss >= r:
-		return 0.0
-	var y0 := p.y + (0.0 if bush else size.y * CROWN_LOW)
-	var y1 := p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH))
-	var half_t := sqrt(r * r - miss * miss) / flat_len
-	var t0 := maxf(along - half_t, 0.0)
-	var t1 := minf(along + half_t, 1.0)
-	var dy := to.y - from.y
-	if absf(dy) < 0.0001:
-		if from.y < y0 or from.y > y1:
-			return 0.0
-	else:
-		var ta := (y0 - from.y) / dy
-		var tb := (y1 - from.y) / dy
-		t0 = maxf(t0, minf(ta, tb))
-		t1 = minf(t1, maxf(ta, tb))
-	return (t1 - t0) * from.distance_to(to) if t1 > t0 else 0.0
 
 
 ## Metres of foliage (scrub, thickets, and tree crowns) the straight line `from` -> `to` passes
 ## through, for spotting (Spotting.foliage_m). Each is a vertical cylinder about its mesh: scrub
 ## and thickets SCRUB_R x their width, up to SCRUB_TOP x their height; a crown CROWN_R x its
 ## size, from CROWN_LOW to CROWN_HIGH x its size up (a conifer's CONIFER_R, to CONIFER_HIGH). Trunks and rocks are solid: rays see to
-## those. A wood's thickets and low crowns add up: a few trees deep hides a standing man.
+## those. A wood's thickets and low crowns add up: a few trees deep hides a standing man. Scrub
+## past SEE_SCRUB_M of `from` (where it's no longer drawn) hides nobody; crowns and thickets any
+## distance (past SEE_TREE_M the far canopy blobs stand for them). Walks the fine index's
+## squares along the line (woods perf pass): the same answer as walking every item near it.
 func foliage_between(from: Vector3, to: Vector3) -> float:
+	if _indexed != items.size():
+		_index_fine()
+	if _foliage.is_empty():
+		return 0.0
+	var fx := to.x - from.x
+	var fz := to.z - from.z
+	var flen2 := fx * fx + fz * fz
+	if flen2 < 0.0001:
+		return 0.0
+	var length := from.distance_to(to)
+	var dy := to.y - from.y
+	var far2 := SEE_SCRUB_M * SEE_SCRUB_M
+	var total := 0.0
+	for row: PackedFloat64Array in _foliage_rows(from.x, from.z, to.x, to.z, _foliage_reach):
+		for i in range(0, row.size(), FOLIAGE_FIELDS):
+			var cx := row[i] - from.x
+			var cz := row[i + 1] - from.z
+			if row[i + 5] > 0.5 and cx * cx + cz * cz > far2:
+				continue
+			var t := clampf((cx * fx + cz * fz) / flen2, 0.0, 1.0)
+			var ex := cx - fx * t
+			var ez := cz - fz * t
+			if ex * ex + ez * ez >= row[i + 2] * row[i + 2]:
+				continue  # (clear of the line: _span would say 0)
+			total += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], fx, fz, flen2, from.y, dy, length)
+	return total
+
+
+## The same as foliage_between, the slow way it was measured before the fine index (every item in
+## every 128 m cell near the line, from the items themselves), for tests to check the two agree.
+func foliage_between_slow(from: Vector3, to: Vector3) -> float:
 	if _cells.is_empty():
 		return 0.0
 	var flat := Vector2(to.x - from.x, to.z - from.z)
 	var flat_len := flat.length()
 	if flat_len < 0.01:
 		return 0.0
-	var lo := _cell_of(minf(from.x, to.x) - FOLIAGE_PAD_M, minf(from.z, to.z) - FOLIAGE_PAD_M)
-	var hi := _cell_of(maxf(from.x, to.x) + FOLIAGE_PAD_M, maxf(from.z, to.z) + FOLIAGE_PAD_M)
+	var pad := FOLIAGE_PAD_M
+	var lo := _cell_of(minf(from.x, to.x) - pad, minf(from.z, to.z) - pad)
+	var hi := _cell_of(maxf(from.x, to.x) + pad, maxf(from.z, to.z) + pad)
 	var length := from.distance_to(to)
 	var dy := to.y - from.y
 	var total := 0.0
-	var eye := Vector2(from.x, from.z)
-	var end := Vector2(to.x, to.z)
 	for cz in range(lo.y, hi.y + 1):
 		for cx in range(lo.x, hi.x + 1):
-			if _cell_off_line(cx, cz, eye, end):
-				continue
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
 				var kind := int(item.kind)
 				if kind == Kind.ROCK or kind >= Kind.PROP:
-					continue  # props and rocks are solid: rays see to them
+					continue
 				var p: Vector3 = item.pos
 				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
-					continue  # past where it's drawn it hides nobody (what players see is what counts)
+					continue
 				var size: Vector3 = item.size
 				var bush := kind != Kind.TREE
 				var conifer := not bush and bool(item.get("conifer", false))
 				var r := size.x * (SCRUB_R if bush else (CONIFER_R if conifer else CROWN_R))
 				var y0 := p.y + (0.0 if bush else size.y * CROWN_LOW)
 				var y1 := p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH))
-				# The flat line against the circle: t runs 0..1 along it.
 				var c := Vector2(p.x - from.x, p.z - from.z)
 				var along := c.dot(flat) / (flat_len * flat_len)
 				var miss := (c - flat * along).length()
@@ -1194,7 +1379,6 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 				var half_t := sqrt(r * r - miss * miss) / flat_len
 				var t0 := maxf(along - half_t, 0.0)
 				var t1 := minf(along + half_t, 1.0)
-				# ...then its height (the line's y is linear in t).
 				if absf(dy) < 0.0001:
 					if from.y < y0 or from.y > y1:
 						continue
@@ -1212,15 +1396,6 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 ## crowns and thickets any distance (past SEE_TREE_M the far canopy blobs stand for them).
 static func _see_m(kind: int) -> float:
 	return SEE_SCRUB_M if kind == Kind.SCRUB else INF
-
-
-## Whether no foliage in cell (cx, cz) can reach the flat line `a` -> `b`: the cell's centre is
-## further from it than half the cell's diagonal and FOLIAGE_PAD_M (round 4: the woods put far
-## more items in a cell, and a long sight line's box held many cells it never crosses).
-func _cell_off_line(cx: int, cz: int, a: Vector2, b: Vector2) -> bool:
-	var half := _terrain.size_m * 0.5
-	var centre := Vector2(-half + (cx + 0.5) * CELL_M, -half + (cz + 0.5) * CELL_M)
-	return Geometry2D.get_closest_point_to_segment(centre, a, b).distance_to(centre) > CELL_M * 0.7072 + FOLIAGE_PAD_M
 
 
 func _solid_half(item: Dictionary) -> Vector3:
@@ -1470,38 +1645,37 @@ func faces_in(area: Rect2) -> PackedVector3Array:
 	var out := PackedVector3Array()
 	if _cells.is_empty():
 		return out
+	if _indexed != items.size():
+		_index_fine()
 	var reach := area.grow(14.0)  # (a prop standing just outside still reaches in: a 40 ft container)
-	var lo := _cell_of(reach.position.x, reach.position.y)
-	var hi := _cell_of(reach.end.x, reach.end.y)
-	for cz in range(lo.y, hi.y + 1):
-		for cx in range(lo.x, hi.x + 1):
-			for index: int in _cells.get(Vector2i(cx, cz), []):
-				var item: Dictionary = items[index]
-				if not item.has("shape") or int(item.kind) != Kind.PROP:
+	for row: PackedInt32Array in _fine_rows(_solids, reach):  # (by the fine index: its solids and library props)
+		for index in row:
+			var item: Dictionary = items[index]
+			if not item.has("shape") or int(item.kind) != Kind.PROP:
+				continue
+			var p: Vector3 = item.pos
+			var half := PropArt.half_extents(String(item.shape)).length()
+			if not area.grow(half).has_point(Vector2(p.x, p.z)):
+				continue
+			var xf := library_transform(item)
+			for part: Dictionary in PropArt.parts(String(item.shape)):
+				if not part.solid:
 					continue
-				var p: Vector3 = item.pos
-				var half := PropArt.half_extents(String(item.shape)).length()
-				if not area.grow(half).has_point(Vector2(p.x, p.z)):
+				var low := INF
+				for c: Vector3 in part.pts:
+					low = minf(low, c.y)
+				if low >= NAV_TOP_M:
 					continue
-				var xf := library_transform(item)
-				for part: Dictionary in PropArt.parts(String(item.shape)):
-					if not part.solid:
-						continue
-					var low := INF
-					for c: Vector3 in part.pts:
-						low = minf(low, c.y)
-					if low >= NAV_TOP_M:
-						continue
-					var centre := Vector3.ZERO
-					for c: Vector3 in part.pts:
-						centre += c / float((part.pts as PackedVector3Array).size())
-					for poly: PackedVector3Array in PropArt.faces(part):
-						var n := (poly[1] - poly[0]).cross(poly[2] - poly[0])
-						var flip := n.dot((poly[0] + poly[2]) * 0.5 - centre) < 0.0
-						for i in range(1, poly.size() - 1):
-							var tri := [poly[0], poly[i + 1], poly[i]] if not flip else [poly[0], poly[i], poly[i + 1]]
-							for v: Vector3 in tri:
-								out.append(xf * v)
+				var centre := Vector3.ZERO
+				for c: Vector3 in part.pts:
+					centre += c / float((part.pts as PackedVector3Array).size())
+				for poly: PackedVector3Array in PropArt.faces(part):
+					var n := (poly[1] - poly[0]).cross(poly[2] - poly[0])
+					var flip := n.dot((poly[0] + poly[2]) * 0.5 - centre) < 0.0
+					for i in range(1, poly.size() - 1):
+						var tri := [poly[0], poly[i + 1], poly[i]] if not flip else [poly[0], poly[i], poly[i + 1]]
+						for v: Vector3 in tri:
+							out.append(xf * v)
 	return out
 
 
@@ -1559,37 +1733,57 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 		_shapes["thicket"] = _shapes[Kind.SCRUB]
 		for kind: String in PROP_SHAPES:
 			_shapes["prop_" + kind] = _prop_mesh(kind)
+		_shapes.merge(_lod_meshes())
 	var trunk_key := "trunk:" + trunk_hex
 	if not _shapes.has(trunk_key):
 		_shapes[trunk_key] = _trunk_mesh(Color(trunk_hex))
+		_shapes["trunk_lod:" + trunk_hex] = _trunk_lod_mesh(Color(trunk_hex))
 	var out := _shapes.duplicate()
 	out["trunk"] = _shapes[trunk_key]
+	out["trunk_lod"] = _shapes["trunk_lod:" + trunk_hex]
 	return out
 
 
-## Builds up to `budget` cells' visuals near `pos`, nearest first; returns how many it built.
+## Builds up to `budget` cells' visuals near `pos`, most needed first; returns how many it built.
+## A cell's near tier is wanted within NEAR_BUILD_M (first where its full trees show, inside LOD_M
+## and half a cell, then its ground cover's ring), its far tier within BUILD_M, and as long as its
+## block's far blobs aren't showing (SEE_TREE_M from the block's middle: its trees are drawn till
+## then), first past where the near tier hands over.
 func build_near(pos: Vector3, budget: int) -> int:
 	if not _visuals_on:
 		return 0
 	var wanted: Array = []
 	var half := _terrain.size_m * 0.5
+	var reach := CELL_M * 0.7072  # half a cell's diagonal
+	var block_m := CELL_M * FAR_BLOCK
+	var at := Vector2(pos.x, pos.z)
 	for cell: Vector2i in _cells:
+		var centre := Vector2(-half + (cell.x + 0.5) * CELL_M, -half + (cell.y + 0.5) * CELL_M)
+		var d := centre.distance_to(at)
+		if d < NEAR_BUILD_M and not _built_near.has(cell):
+			wanted.append([d if d < LOD_M + reach else d + LOD_M, cell, Tier.NEAR])
 		if _built.has(cell):
 			continue
-		var centre := Vector2(-half + (cell.x + 0.5) * CELL_M, -half + (cell.y + 0.5) * CELL_M)
-		var d := centre.distance_to(Vector2(pos.x, pos.z))
-		if d < BUILD_M:
-			wanted.append([d, cell])
+		var block := Vector2i(floori(cell.x / float(FAR_BLOCK)), floori(cell.y / float(FAR_BLOCK)))
+		var blobs_hidden := _far.has(block) and Vector2(-half + (block.x + 0.5) * block_m, -half + (block.y + 0.5) * block_m).distance_to(at) < SEE_TREE_M + LOD_MARGIN_M
+		if d < BUILD_M or blobs_hidden:
+			wanted.append([d if d > LOD_M - reach else BUILD_M, cell, Tier.FAR])
 	wanted.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 	var done := 0
 	for w: Array in wanted.slice(0, budget):
-		_build_cell(w[1])
+		_build_cell(w[1], w[2])
 		done += 1
 	return done
 
 
+## How many cells have their far tier built (every cell within BUILD_M once the camera has been
+## there); built_near_cells: their near tier.
 func built_cells() -> int:
 	return _built.size()
+
+
+func built_near_cells() -> int:
+	return _built_near.size()
 
 
 func _process(delta: float) -> void:
@@ -1602,27 +1796,61 @@ func _process(delta: float) -> void:
 		build_near(camera.global_position, PER_FRAME)
 
 
-func _build_cell(cell: Vector2i) -> void:
-	_built[cell] = true
+## Builds cell `cell`'s `tier` (Tier): its MultiMeshes (from the cache entry when this zone built
+## them before), each drawn over its tier's range: the near tier's full shapes out to LOD_M and its
+## ground cover to their own ranges; the far tier's stand-ins from LOD_M out to their full shapes'
+## ranges (the trees and thickets till their block's far blobs take over, _far_parent), and the
+## rocks and props over theirs. Each node has its "centre" (the cell's middle) as a meta, for tests.
+func _build_cell(cell: Vector2i, tier := Tier.FAR) -> void:
+	if tier == Tier.NEAR:
+		_built_near[cell] = true
+	else:
+		_built[cell] = true
 	var kept: Dictionary = _entry.get("visual", {})
-	var parts: Array = kept.get(cell, [])
-	if not kept.has(cell):
-		parts = _cell_parts(cell)
+	var at := Vector3i(cell.x, cell.y, tier)
+	var parts: Array = kept.get(at, [])
+	if not kept.has(at):
+		parts = _cell_parts(cell, tier)
 		if _entry.has("visual"):
-			kept[cell] = parts  # built once, kept while this zone is among the newest (CACHE_VISUAL_ZONES)
+			kept[at] = parts  # built once, kept while this zone is among the newest (CACHE_VISUAL_ZONES)
+	var half := _terrain.size_m * 0.5
+	var centre := Vector3(-half + (cell.x + 0.5) * CELL_M, 0.0, -half + (cell.y + 0.5) * CELL_M)
+	centre.y = _terrain.height_at(clampf(centre.x, -half, half), clampf(centre.z, -half, half))
+	var lod_keys := LOD_KEYS.values()
 	for part: Array in parts:
 		var key: Variant = part[0]
 		var node := MultiMeshInstance3D.new()
 		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
+		node.set_meta(&"centre", centre)
 		node.multimesh = part[1]
 		node.material_override = _material
-		node.visibility_range_end = _range_of(key)
-		node.visibility_range_end_margin = 20.0
-		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket", "wire"]))  # keys mix Kind values and names
+		if tier == Tier.NEAR and LOD_KEYS.has(key):
+			node.visibility_range_end = LOD_M
+			node.visibility_range_end_margin = LOD_MARGIN_M
+		elif key is String and key in lod_keys:
+			node.visibility_range_begin = LOD_M
+			node.visibility_range_begin_margin = LOD_MARGIN_M
+			var full: Variant = LOD_KEYS.find_key(key)
+			var parent := _far_parent(cell) if full is String else ""  # (scrub ends at SEE_SCRUB_M, well inside the blobs)
+			if parent.is_empty():
+				node.visibility_range_end = _range_of(full)
+				node.visibility_range_end_margin = 20.0
+			else:
+				node.visibility_parent = NodePath("../" + parent)
+		else:
+			node.visibility_range_end = _range_of(key)
+			node.visibility_range_end_margin = 20.0
+		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket", "wire", "thicket_lod", "scrub_lod"]))  # keys mix Kind values and names
 		if key is String and String(key).begins_with(LIBRARY):
 			shade = bool(PropArt.shape(String(key).trim_prefix(LIBRARY).get_slice("#", 0)).shadow)
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
+
+
+## The name of the far blobs' node for cell `cell`'s block ("" when its block has no trees).
+func _far_parent(cell: Vector2i) -> String:
+	var block := Vector2i(floori(cell.x / float(FAR_BLOCK)), floori(cell.y / float(FAR_BLOCK)))
+	return "Far_%d_%d" % [block.x, block.y] if _far.has(block) else ""
 
 
 ## Draw distance by group key: _RANGES, a library prop's shape's own (PropArt), its wires SEE_WIRE_M.
@@ -1647,21 +1875,28 @@ const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE
 	"prop_crates": SEE_ROCK_M, "prop_drums": SEE_ROCK_M, "prop_debris": SEE_ROCK_M, "prop_wall": SEE_ROCK_M, "prop_wreck": SEE_ROCK_M, "prop_mound": SEE_ROCK_M}
 
 
-## Cell `cell`'s MultiMeshes: [[group key, MultiMesh], ...].
-func _cell_parts(cell: Vector2i) -> Array:
-	var groups := {Kind.ROCK: [], Kind.SCRUB: [], "thicket": [], "trunk": [], "crown": [], "conifer": []}
-	for kind: String in PROP_SHAPES:
-		groups["prop_" + kind] = []
+## Cell `cell`'s MultiMeshes for `tier` (Tier): [[group key, MultiMesh], ...]. The near tier: the
+## trees, thickets and scrub as visual_parts draws them, and the ground cover; the far tier: their
+## low-poly stand-ins (LOD_KEYS, at the same transforms), the rocks, props and wires.
+func _cell_parts(cell: Vector2i, tier := Tier.FAR) -> Array:
+	var groups := {}
 	for index: int in _cells[cell]:
 		for part: Array in visual_parts(items[index]):
-			if not groups.has(part[0]):
-				groups[part[0]] = []
-			groups[part[0]].append([part[1], part[2]])
-		if int(items[index].get("link", 0)) == 1 and index > 0:
+			var key: Variant = part[0]
+			if LOD_KEYS.has(key):
+				if tier == Tier.FAR:
+					key = LOD_KEYS[key]
+			elif tier == Tier.NEAR:
+				continue
+			if not groups.has(key):
+				groups[key] = []
+			groups[key].append([part[1], part[2]])
+		if tier == Tier.FAR and int(items[index].get("link", 0)) == 1 and index > 0:
 			if not groups.has("wire"):
 				groups["wire"] = []
 			_wires(items[index - 1], items[index], groups["wire"])
-	_ground_cover(cell, groups)
+	if tier == Tier.NEAR:
+		_ground_cover(cell, groups)
 	var parts: Array = []
 	for key in groups:
 		var list: Array = groups[key]
@@ -1780,8 +2015,10 @@ static func _multimesh(mesh: Mesh, list: Array) -> MultiMesh:
 # --- Far stand-ins -----------------------------------------------------------------------------
 
 ## Builds the far canopy blobs: per cell, one blob per FAR_GROUP_M square holding trees (at
-## their middle, as wide as they spread, as tall as their crowns), one MultiMesh per cell, seen
-## from just inside SEE_TREE_M out to the horizon, no shadows. Kept in the zone's cache entry.
+## their middle, as wide as they spread, as tall as their crowns), one MultiMesh per block of
+## FAR_BLOCK x FAR_BLOCK cells, seen from just inside SEE_TREE_M of the block's middle out to the
+## horizon, no shadows; each block is the visibility parent of its cells' far-tier trees and
+## thickets (_build_cell). Kept in the zone's cache entry.
 func _build_far() -> void:
 	var kept: Dictionary = _entry.get("far", {})
 	if kept.is_empty():
@@ -1789,10 +2026,14 @@ func _build_far() -> void:
 		if _entry.has("far"):
 			_entry.far = kept
 	_far = kept
-	for cell: Vector2i in kept:
+	var half := _terrain.size_m * 0.5
+	var block_m := CELL_M * FAR_BLOCK
+	for block: Vector2i in kept:
 		var node := MultiMeshInstance3D.new()
-		node.name = "Far_%d_%d" % [cell.x, cell.y]
-		node.multimesh = kept[cell]
+		node.name = "Far_%d_%d" % [block.x, block.y]
+		var centre := Vector3(-half + (block.x + 0.5) * block_m, 0.0, -half + (block.y + 0.5) * block_m)
+		node.set_meta(&"centre", centre)
+		node.multimesh = kept[block]
 		node.material_override = _material
 		node.visibility_range_begin = SEE_TREE_M - 10.0
 		node.visibility_range_begin_margin = 20.0
@@ -1800,9 +2041,11 @@ func _build_far() -> void:
 		add_child(node)
 
 
-## cell -> MultiMesh of its far blobs.
+## block (FAR_BLOCK cells a side) -> MultiMesh of its far blobs (one per FAR_GROUP_M square of a
+## cell holding trees).
 func _far_parts() -> Dictionary:
 	var out := {}
+	var lists := {}  # block -> [transform, colour] of its blobs
 	var half := _terrain.size_m * 0.5
 	for cell: Vector2i in _cells:
 		var squares := {}  # Vector2i -> [position sum, count, size sum, colour sum, low corner, high corner]
@@ -1823,7 +2066,10 @@ func _far_parts() -> Dictionary:
 			sq[5] = (sq[5] as Vector2).max(Vector2(p.x, p.z))
 		if squares.is_empty():
 			continue
-		var list: Array = []
+		var block := Vector2i(floori(cell.x / float(FAR_BLOCK)), floori(cell.y / float(FAR_BLOCK)))
+		if not lists.has(block):
+			lists[block] = []
+		var list: Array = lists[block]
 		for g: Vector2i in squares:
 			var sq: Array = squares[g]
 			var n := int(sq[1])
@@ -1835,15 +2081,17 @@ func _far_parts() -> Dictionary:
 			c.a = 1.0
 			var basis := Basis(Vector3.UP, float(g.x * 7 + g.y * 13) * 0.37).scaled(Vector3(r, tall, r))
 			list.append([Transform3D(basis, mid), c.darkened(0.06)])
-		out[cell] = _multimesh(_meshes.get("far", _far_mesh()), list)
+	for block: Vector2i in lists:
+		out[block] = _multimesh(_meshes.get("far", _far_mesh()), lists[block])
 	return out
 
 
-## How many far stand-ins are built: {"cells": MultiMeshes, "blobs": instances}, for tests.
+## How many far stand-ins are built: {"cells": MultiMeshes (one a block of cells), "blobs":
+## instances}, for tests.
 func far_counts() -> Dictionary:
 	var blobs := 0
-	for cell: Vector2i in _far:
-		blobs += (_far[cell] as MultiMesh).instance_count
+	for block: Vector2i in _far:
+		blobs += (_far[block] as MultiMesh).instance_count
 	return {"cells": _far.size(), "blobs": blobs}
 
 
@@ -1852,8 +2100,8 @@ func far_counts() -> Dictionary:
 func _far_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for t: Array in [[1.2, 2.4, 0.75, 1.0], [2.4, 3.9, 1.0, 0.85], [3.9, 4.9, 0.85, 0.35]]:
-		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+	for t: Array in [[1.2, 2.4, 0.75, 1.0, BOTTOM], [2.4, 3.9, 1.0, 0.85, 0], [3.9, 4.9, 0.85, 0.35, TOP]]:
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3], Color.WHITE, t[4])  # (the caps between tiers are inside: none)
 	return st.commit()
 
 
@@ -2130,24 +2378,36 @@ func _is_conifer(item: Dictionary) -> bool:
 	return roll < float(_spec.get("conifer_share", CONIFER_SHARE))
 
 
+## _tier's `caps`: its flat bottom, its flat top (both by default). The woods perf pass leaves out
+## the caps nobody can see: those inside the tier above or below, on or under the ground, inside
+## the crown (a crown 224 -> 164 triangles, scrub 224 -> 152, a trunk 28 -> 16; the look unchanged).
+const BOTTOM := 1
+const TOP := 2
+
+
 ## One tier: an octagonal frustum from y0 (half-width r0) to y1 (r1), centred on (cx, cz),
-## with flat top and bottom.
-func _tier(st: SurfaceTool, cx: float, cz: float, y0: float, y1: float, r0: float, r1: float, tint := Color.WHITE) -> void:
+## with flat top and bottom (`caps`); with `sides` 4, a square one (the far tier's trunks).
+func _tier(st: SurfaceTool, cx: float, cz: float, y0: float, y1: float, r0: float, r1: float, tint := Color.WHITE, caps := BOTTOM | TOP, sides := 8) -> void:
 	var ring := func(y: float, r: float) -> Array[Vector3]:
 		var out: Array[Vector3] = []
 		var c := r * 0.7  # the 45-degree cut leaves 0.7 of each side (VoxelArt bevel 0.3)
-		for v: Vector2 in [Vector2(c, -r), Vector2(r, -c), Vector2(r, c), Vector2(c, r), Vector2(-c, r), Vector2(-r, c), Vector2(-r, -c), Vector2(-c, -r)]:
+		var corners: Array[Vector2] = [Vector2(c, -r), Vector2(r, -c), Vector2(r, c), Vector2(c, r), Vector2(-c, r), Vector2(-r, c), Vector2(-r, -c), Vector2(-c, -r)]
+		if sides == 4:
+			corners = [Vector2(r, -r), Vector2(r, r), Vector2(-r, r), Vector2(-r, -r)]
+		for v: Vector2 in corners:
 			out.append(Vector3(cx + v.x, y, cz + v.y))
 		return out
 	var lo: Array[Vector3] = ring.call(y0, r0)
 	var hi: Array[Vector3] = ring.call(y1, r1)
 	var mid := Vector3(cx, (y0 + y1) * 0.5, cz)
-	for i in 8:
-		var j := (i + 1) % 8
+	for i in sides:
+		var j := (i + 1) % sides
 		_face(st, [lo[i], lo[j], hi[j], hi[i]], mid, tint * SIDE_SHADE)
-	for i in range(1, 7):
-		_face(st, [hi[0], hi[i], hi[i + 1]], mid, tint * TOP_SHADE)
-		_face(st, [lo[0], lo[i + 1], lo[i]], mid, tint * UNDER_SHADE)
+	for i in range(1, sides - 1):
+		if caps & TOP:
+			_face(st, [hi[0], hi[i], hi[i + 1]], mid, tint * TOP_SHADE)
+		if caps & BOTTOM:
+			_face(st, [lo[0], lo[i + 1], lo[i]], mid, tint * UNDER_SHADE)
 
 
 ## A flat face through `points` (3 or 4, in order), turned to face away from `inside`.
@@ -2185,8 +2445,8 @@ func _scrub_mesh() -> ArrayMesh:
 	for c: Array in [[0.0, 0.0, 0.27, 0.58], [0.22, 0.1, 0.2, 0.5], [-0.19, 0.14, 0.19, 0.48], [0.03, -0.23, 0.19, 0.46]]:
 		var r: float = c[2]
 		var h: float = c[3]
-		_tier(st, c[0], c[1], 0.0, h * 0.7, r * 0.75, r)
-		_tier(st, c[0], c[1], h * 0.7, h, r, r * 0.55)
+		_tier(st, c[0], c[1], 0.0, h * 0.7, r * 0.75, r, Color.WHITE, 0)  # (its foot on the ground, its top inside the tier above)
+		_tier(st, c[0], c[1], h * 0.7, h, r, r * 0.55, Color.WHITE, TOP)
 	return st.commit()
 
 
@@ -2213,28 +2473,66 @@ func _tuft_mesh() -> ArrayMesh:
 func _crown_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for t: Array in [[2.0, 2.55, 0.65, 1.05], [2.55, 3.45, 1.05, 1.1], [3.45, 4.3, 1.1, 0.85], [4.3, 4.9, 0.85, 0.35]]:
-		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+	for t: Array in [[2.0, 2.55, 0.65, 1.05, BOTTOM], [2.55, 3.45, 1.05, 1.1, 0], [3.45, 4.3, 1.1, 0.85, 0], [4.3, 4.9, 0.85, 0.35, TOP]]:
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3], Color.WHITE, t[4])
 	# Two lobes out to the sides break the outline (within CROWN_R of the middle, about).
-	_tier(st, 0.72, 0.18, 2.55, 3.15, 0.45, 0.6)
-	_tier(st, 0.72, 0.18, 3.15, 3.75, 0.6, 0.3)
-	_tier(st, -0.45, -0.62, 3.25, 3.85, 0.42, 0.55)
-	_tier(st, -0.45, -0.62, 3.85, 4.4, 0.55, 0.25)
+	_tier(st, 0.72, 0.18, 2.55, 3.15, 0.45, 0.6, Color.WHITE, BOTTOM)
+	_tier(st, 0.72, 0.18, 3.15, 3.75, 0.6, 0.3, Color.WHITE, TOP)
+	_tier(st, -0.45, -0.62, 3.25, 3.85, 0.42, 0.55, Color.WHITE, BOTTOM)
+	_tier(st, -0.45, -0.62, 3.85, 4.4, 0.55, 0.25, Color.WHITE, TOP)
 	return st.commit()
 
 
-## A conifer: three stacked tiers, each narrower, from 2 m up to 4.9 m.
+## A conifer: three stacked tiers, each narrower, from 2 m up to 4.9 m. (Each top is inside the
+## tier above, and the last comes to a point: bottoms only.)
 func _conifer_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for t: Array in [[2.0, 3.0, 1.15, 0.7], [2.8, 3.9, 0.9, 0.45], [3.7, 4.9, 0.6, 0.06]]:
-		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3])
+		_tier(st, 0.0, 0.0, t[0], t[1], t[2], t[3], Color.WHITE, BOTTOM)
 	return st.commit()
 
 
-## The trunk: an octagonal post, a little narrower at the top, 2.6 m tall (into the crown).
+## The trunk: an octagonal post, a little narrower at the top, 2.6 m tall (into the crown; its
+## foot sunk TRUNK_SINK into the ground: no caps).
 func _trunk_mesh(colour: Color) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_tier(st, 0.0, 0.0, 0.0, TRUNK_TALL, TRUNK_FOOT_R, TRUNK_TOP_R, colour / SIDE_SHADE)
+	_tier(st, 0.0, 0.0, 0.0, TRUNK_TALL, TRUNK_FOOT_R, TRUNK_TOP_R, colour / SIDE_SHADE, 0)
+	return st.commit()
+
+
+## The far tier's low-poly stand-ins (LOD_KEYS), each in its full shape's space (the same
+## transforms) and shades: a broadleaf crown two tiers (44 triangles), a conifer two (44), a
+## thicket or bush one clump (38); indexed.
+func _lod_meshes() -> Dictionary:
+	var out := {}
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_tier(st, 0.0, 0.0, 2.0, 3.3, 0.75, 1.12, Color.WHITE, BOTTOM)
+	_tier(st, 0.0, 0.0, 3.3, 4.9, 1.12, 0.42, Color.WHITE, TOP)
+	st.index()
+	out["crown_lod"] = st.commit()
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_tier(st, 0.0, 0.0, 2.0, 3.35, 1.15, 0.6, Color.WHITE, BOTTOM)
+	_tier(st, 0.0, 0.0, 3.1, 4.9, 0.8, 0.06, Color.WHITE, BOTTOM)
+	st.index()
+	out["conifer_lod"] = st.commit()
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_tier(st, 0.0, 0.0, 0.0, 0.41, 0.38, 0.49, Color.WHITE, 0)
+	_tier(st, 0.0, 0.0, 0.41, 0.58, 0.49, 0.27, Color.WHITE, TOP)
+	st.index()
+	out["thicket_lod"] = st.commit()
+	out["scrub_lod"] = out["thicket_lod"]
+	return out
+
+
+## The far tier's trunk: a square post (8 triangles), as wide as the octagon's middle.
+func _trunk_lod_mesh(colour: Color) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_tier(st, 0.0, 0.0, 0.0, TRUNK_TALL, TRUNK_FOOT_R * 0.85, TRUNK_TOP_R * 0.85, colour / SIDE_SHADE, 0, 4)
+	st.index()
 	return st.commit()

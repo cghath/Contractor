@@ -77,7 +77,7 @@ thickets 8000, solid 6800. Set as:
 
 | preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
 | --- | --- | --- | --- | --- | --- | --- |
-| temperate | 1.5 | 5 | 4 | 0.4 | - | 12 |
+| temperate (woods perf pass: copse_cover; river_valley 2.1 and 6 too) | 2.1 (was 1.5) | 6 (was 5) | 4 | 0.4 | - | 12 |
 | forest_experimental (copse_cover) | 2.4 (70-170 m, thicket_share 0.35) | 6 (24-60 trees) | 2 | 0.6 | - | 16 |
 | coastal_lowland (harbour_yard) | 0.8 | 6 | 5 | 0.5 | - | 10 |
 | amphibious_coast | 0.4 | 4 | 3 | 0.3 | - | 8 |
@@ -90,8 +90,9 @@ thickets 8000, solid 6800. Set as:
 cover", "but they look fantastic": the trees' look is unchanged). EXPERIMENTAL, only in a preset whose scatter says
 `"copse_cover": true` (forest_experimental, the main menu's "Host Experimental forest (dense woods, test)"; Captain,
 2026-10-14: "include experimental forest mission like we dev'd", "make it a button on the menu, not a regular
-mission"). Every other preset keeps round 4's copses and caps (the normal zones' woods have a perf problem; a perf pass
-is queued). Fewer but bigger, denser copses (Proposed numbers, `ZoneScatter._copse`, layout version 7): 20-60 trees in a compact blob of radius `COPSE_SPREAD` (1.9) x sqrt(trees) + 2 m
+mission"). Since the woods perf pass (below) the normal wooded presets have it too: temperate, river_valley,
+highland_moor, coastal_lowland, amphibious_coast, rocky_ridge and scrubland; desert_wadi, badlands and salt_flats keep round
+4's small copses. Fewer but bigger, denser copses (Proposed numbers, `ZoneScatter._copse`, layout version 7): 20-60 trees in a compact blob of radius `COPSE_SPREAD` (1.9) x sqrt(trees) + 2 m
 (20 trees ~10.5 m, 60 ~16.7 m; round 4: 2.3 sqrt(n) + 3), trees ~3.2 m from the nearest (round 4: ~3.7);
 `copse_thicket_share` (default 0.9) thickets a tree inside (round 4: one per two trees); a skirt of thickets every
 `COPSE_SKIRT_M` (2.2 m) round the edge, the edge scrub outside it; 1-3 big solid rocks inside (`COPSE_ROCKS`) as low
@@ -114,6 +115,28 @@ seed, preset, ground checksum, pads, roads), so coming back to a zone skips the 
 MultiMeshes are kept for the 2 newest zones. Thickets draw with the scrub mesh to 950 m, no shadows. **Far
 stand-ins**: past 940 m each 24 m square of trees is one low canopy blob (one MultiMesh per 128 m cell, no shadows),
 out to the horizon, built with the visuals (never on a headless server; `far_counts()`).
+
+**Woods perf pass** (cghath's queue item 1.8, 2026-10-22; Captain, 2026-10-14: "frame goes 4 -> 10 ms in woods, up to
+1.5k draws, 1.4M prims. Then denser copses"). Measured headless on a PC loaded by other agents' runs, back to back (R0498
+before, R0499 after; "dense" is temperate's hot zone 4409 laid out with the dense copses, from its densest copse):
+- **Draw tiers** (`LOD_M` 200 m, `NEAR_BUILD_M` 420 m, Proposed): each 128 m cell is drawn as a near tier (the full trees,
+  thickets and scrub out to LOD_M from the cell's middle, plus the ground cover; built only within NEAR_BUILD_M) and a far
+  tier (low-poly stand-ins at the same transforms: a crown 44 triangles, a conifer 44, a thicket or bush 38, a square
+  trunk 8; with the rocks, props and wires) from LOD_M out. The two hand over at the same distance with the same margin.
+  The tier meshes leave out the caps nobody can see (a crown 224 -> 164 triangles, scrub 224 -> 152, a trunk 28 -> 16).
+- **Far blobs** in blocks of `FAR_BLOCK` (2) x 2 cells, each block the visibility parent of its cells' far-tier trees and
+  thickets (hierarchical LOD: a tree is drawn by exactly one of the near tier, the far tier or its block's blobs; the
+  forest suite checks it from 6 spots out to 1400 m). A cell's far tier is built while its block's blobs aren't showing.
+- Dense, from the densest copse: 590 -> 435 draws, 1.70M -> 0.64M triangles in view range, shadow pass ~231k -> ~159k
+  triangles; building a cell's visuals 27 -> 6 ms on average (headless, no GPU upload).
+- **Spotting**: foliage is indexed in 16 m squares (`FINE_M`, packed numbers, built with the layout and cached with it); a
+  sight line walks only the squares it crosses, from both ends, and `foliage_least` stops once both lines have
+  `enough` (Spotting.foliage_m passes FOLIAGE_OPAQUE_M: the answer is exact below it). The same metres as before (the
+  forest suite compares 300 lines with the old walk). A line 20-250 m through the dense copse: 4266 -> 392 us uncapped;
+  with 16 AI fighting round the forest's densest copse the AI's foliage walks went 9.0 -> 0.38 ms a frame.
+- **Navigation**: a nav chunk's trunk and rock boxes and prop faces come from the same 16 m index: 0.75 -> 0.06 ms a chunk.
+- Unchanged: collision (one static body per cell, every trunk, large rock and prop as drawn; a 30 m ray through the dense
+  wood 5-7 us, built at load in 0.6-1.2 s), layout time, and what hides whom.
 
 **Salt flats** (Captain, 2026-10-14, v0.3.1, first person on an HVT capture: "this terrain is an actual eye sore": a
 near-white pan, brighter than the sky, meeting it at a hard line with nothing on it). Numbers Proposed; judged in the

@@ -11,6 +11,50 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Performance: the woods perf pass and F-121 (cghath's brief, queue item 1.8)
+
+#### Changed
+- **Dense copses in the normal zones.** Every wooded preset (temperate, river valley, highland moor, coastal lowland,
+  amphibious coast, rocky ridge, scrubland) now has the Experimental forest's copses-as-cover layout: bigger, denser
+  copses with a skirt of thickets and rocks inside, a thicket belt round the woods, and its higher caps. Temperate
+  and river valley also get more woods (2.1 a km², was 1.5 and 1.8) and copses (6, was 5). On temperate's hot zone
+  that's 9,000 trees (was 5,000) and 17,000 thickets (was 11,000). Desert, badlands and salt flats keep their small
+  copses.
+- **Trees draw in two tiers.** Within 200 m of a cell's middle they're drawn as before; further out, low-poly
+  versions in the same places (a crown 44 triangles instead of 164, a thicket 38 instead of 152), and past 950 m the
+  canopy blobs. Each tree shows in exactly one of the three. The blobs come in blocks of 2 x 2 cells (a quarter of
+  the draws). The full shapes lose the faces nobody sees (hidden caps between tiers, under the ground, inside the
+  crown), so they look the same with fewer triangles.
+- **Cheaper sight lines through the woods.** Foliage is indexed in 16 m squares, and a sight line only walks the
+  squares it crosses, from both ends. The AI's lines stop once the target is hidden: the answer is the same as
+  before (checked against the old walk), just cheaper.
+- Measured headless, back to back on a PC shared with other agents' runs (R0498 before, R0499 after), from the densest
+  copse of temperate's hot zone with the dense copses:
+  - draws 590 -> 435;
+  - triangles in view 1.70M -> 0.64M;
+  - shadow-pass triangles ~231k -> ~159k;
+  - a sight line 4.3 ms -> 0.39 ms;
+  - a nav chunk's scatter 0.75 -> 0.06 ms;
+  - building a cell's visuals 27 -> 6 ms.
+  - With 16 AI fighting round the Experimental forest's densest copse, their sight lines through the leaves cost 9.0 ->
+    0.38 ms a frame. Frames averaged 41 -> 31 ms (p95 199 -> 94) on that shared PC.
+  - Standing in the copse alone: 6.9 ms a frame both before and after (the headless frame has no drawing).
+
+#### Fixed
+- **The vehicle range's concrete blocks and sandbag wall are there (F-121).** They lay outside the range's 22 m voxel
+  area, so they were never built: no voxels, no collision. A level's voxel area now grows to hold its structures.
+  The AI driver has something to steer round, and a demo block on a concrete block carves it.
+
+#### Tests
+- `forest` checks, with Proposed budgets:
+  - a normal preset's dense copses: laid out the same twice, and drawn within a budget of draws and triangles;
+  - each cell's trees drawn exactly once, near and far;
+  - sight lines the same as the old walk, and within a time budget;
+  - nav geometry the same and cheap;
+  - the frame standing in the forest's densest copse, and a 16-man scan round through it.
+- `demolitions` checks the range's blocks and wall are built, stop rays, and carve under a demo block.
+- `world`: temperate now has the dense copses.
+
 ### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
 
 #### Added

@@ -1528,12 +1528,14 @@ func _test_woods() -> void:
 			if through >= Spotting.FOLIAGE_OPAQUE_M:
 				hidden += 1
 	check(lines >= 40 and hidden >= lines * 0.65, "woods: %d of %d eye-height lines 40 m through woods and copses are hidden (%.1f m of foliage or more)" % [hidden, lines, Spotting.FOLIAGE_OPAQUE_M])
-	# Captain, 2026-10-14: the copses-as-cover layout is the experimental forest's only; the
-	# normal presets keep round 4's copses and caps (their woods' perf pass is queued).
-	check(not a._cover and a._cap_trees == ZoneScatter.ROUND4_CAP_TREES and a._cap_thickets == ZoneScatter.ROUND4_CAP_THICKETS and a._cap_solid == ZoneScatter.ROUND4_CAP_SOLID
-		and a.counts[ZoneScatter.Kind.TREE] <= ZoneScatter.ROUND4_CAP_TREES,
-		"woods: temperate keeps round 4's copses and caps (%d trees, %d copses)" % [a.counts[ZoneScatter.Kind.TREE], a.copse_sites.size()])
-	# Far stand-ins: one blob per 24 m square of trees, one MultiMesh per cell (built with the visuals).
+	# Captain, 2026-10-14: the copses-as-cover layout was the experimental forest's only until the
+	# normal presets' woods perf pass (cghath's queue item 1.8): now temperate has it too, with its
+	# caps (forest_test checks its cost).
+	check(a._cover and a._cap_trees == ZoneScatter.CAP_TREES and a._cap_thickets == ZoneScatter.CAP_THICKETS and a._cap_solid == ZoneScatter.CAP_SOLID
+		and a.counts[ZoneScatter.Kind.TREE] > ZoneScatter.ROUND4_CAP_TREES and a.counts[ZoneScatter.Kind.TREE] <= ZoneScatter.CAP_TREES,
+		"woods: temperate has the dense copses and their caps (%d trees, %d copses)" % [a.counts[ZoneScatter.Kind.TREE], a.copse_sites.size()])
+	# Far stand-ins: one blob per 24 m square of trees (a square split by a cell's edge is a blob each
+	# side), one MultiMesh per block of cells (built with the visuals).
 	a.build_visuals()
 	var far := a.far_counts()
 	var squares := {}  # a square split by a cell's edge is a blob each side

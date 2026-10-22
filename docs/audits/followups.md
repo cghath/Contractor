@@ -23,8 +23,10 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-150 | P3 | Enemy soldiers and gunners never aim at the player's recon UAV (fire support, 2026-10-20) |
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
-| F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
+| F-121 | P3 | ~~The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built~~ fixed 2026-10-22 (cghath's world/perf: VoxelWorld.fit_structures) |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
+| F-190 | P3 | The woods' GPU frame time is unmeasured: the forest suite counts draws and triangles headless (no renderer); a windowed frame time in a dense copse wants a build on a real GPU (woods perf pass, 2026-10-22) |
+| F-191 | P2 | claude/perf-pass and world/perf both change ZoneScatter's build_near, _process, _build_cell and _build_far: whoever merges second keeps both (woods perf pass, 2026-10-22) |
 
 ## F-01: the building scan only sees one floor
 
@@ -332,6 +334,13 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+Fixed 2026-10-22 (cghath's queue item 1.8, world/perf), without touching vehicle_range.gd (Claude's):
+`VoxelWorld.fit_structures()` grows a world's edit area (and its view distance, to reach across it) to hold every
+structure added before it builds, and CompoundLevel calls it after `_build_structures`. A world whose structures fit
+(the compound, the base, the LHD, every zone module) is unchanged. The range's blocks have voxels and collision now
+(2400, 2400 and 1760 voxels), its structures still finish building with the player at the spawn, and the demolitions
+suite sets a demo block on a concrete block and checks it carves it.
+
 ## F-175: roads lie on the riverbed under a bridge (the roads agent's ZoneRoads)
 
 Location: [zone_roads.gd](../../scripts/world/zone_roads.gd) `_strip`; the bridges are
@@ -429,6 +438,35 @@ push through a chain-link fence (it senses it as an obstacle), and nothing about
 Suggested (later, with structural collapse, queue item 13): destructible light props (fences,
 stalls, awnings, washing lines) as a host-saved "gone" set per zone, like the voxel edit log.
 
+## F-190: the woods' GPU frame time is unmeasured
+
+Location: [forest_test.gd](../../tests/forest_test.gd) `_test_dense_normal`, `_drawn`. Found by cghath's agent on
+world/perf (2026-10-22, queue item 1.8).
+
+The suites run headless (no renderer, no window, so nothing pops up while the Captain plays), so the woods perf pass
+measured what the GPU is given, not how long it takes: draws, triangles in view range and the shadow pass's triangles
+from a dense copse (590 -> 435 draws, 1.70M -> 0.64M triangles), the main thread's frame standing in the copse, and the
+AI's and navigation's woods costs. The Captain's 4 -> 10 ms in woods was a windowed number.
+
+Suggested: in the next test build, stand in a dense copse on a normal zone (temperate, river_valley) and in the
+Experimental forest and read the frame time and the monitor's draw calls and primitives; tune `ZoneScatter.LOD_M`
+(200 m), `NEAR_BUILD_M` and the shadows setting from there.
+
+## F-191: claude/perf-pass and world/perf change the same ZoneScatter functions
+
+Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) `build_near`, `_process`, `_build_cell`, `_build_far`.
+Found by cghath's agent on world/perf (2026-10-22).
+
+claude/perf-pass (not merged yet) builds one queued cell a frame (`_wanted_near`, `_queued`), scales the draw ranges by
+the detail setting (`_range_scale`, far blobs' `far_trees_m`) and narrows `_ground_blocked`; world/perf builds each cell
+in two tiers (`Tier.NEAR` / `Tier.FAR`, `build_near` returns [distance, cell, tier] wants) and groups the far blobs in
+blocks that are the far tier's visibility parents.
+
+Suggested, for whoever merges second: queue [cell, tier] pairs (world/perf's wants) one a frame (perf-pass's
+`_queued`); scale LOD_M, the near tier's end, the far tier's begin, SEE_TREE_M and the blobs' begin by the same
+detail share, so the tiers still hand over at one distance (the forest suite's "every cell's trees drawn exactly once"
+check catches a gap); keep perf-pass's `_ground_blocked`.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -461,3 +499,11 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | Prop library: the screenshots are drawn by a small software rasteriser in tests/props_shots.gd (headless has no renderer and no window may open) | the brief's "headless screenshots" | tests/world_shots.gd in a real window
 - 2026-10-22 | Prop library: a helicopter climbs over a tall library prop (6 m and up: pylons, masts, poles' tops) it would pass within its rotor reach of, from ZoneScatter.tall_top (one call in Helicopter.obstacle_top); the lattice is too thin for its rays (heliflight harbour_yard flew into a pylon on CI) | pilots know where the pylons are | keep pylon lines away from every LZ and approach (unknowable: the LZ is picked in dead ground near the objective)
 - 2026-10-22 | Prop library, merged with the water and landmarks work: props keep off ZoneWater.keeps_clear (water, wet banks, bridges) like the rest of the scatter; a power line whose footing falls in water skips it and its wires span the gap (two steps); landmark sites get no site kit (they build their own props) and countryside farms keep FARM_GAP_M from a landmark farm | the coordinator's merge brief | move a wet footing to the bank (the line would kink)
+- 2026-10-22 | Woods perf pass: each cell drawn in two tiers, the full trees, thickets and scrub to 200 m (LOD_M) and low-poly stand-ins (crown 44 triangles, thicket 38, square trunk 8) out to 950 m, blobs past that (Proposed) | the woods' cost was triangles (1.7M from a dense copse); a four-tier crown 300 m off is a few pixels | Godot's automatic mesh LOD (per MultiMesh, not per tree) or flat impostor cards (wrong in the blocky look)
+- 2026-10-22 | Woods perf pass: far blobs one MultiMesh a block of 2 x 2 cells, each block the visibility parent of its cells' far-tier trees (hierarchical LOD) | a quarter of the blob draws, and a tree is never drawn twice or missing | a blob MultiMesh a cell, or bigger blocks (blobs from 770 m)
+- 2026-10-22 | Woods perf pass: the caps nobody sees (inside the tier above, under the ground, inside the crown) left out of the crown, conifer, scrub, trunk and blob meshes | free triangles, the look unchanged | keep them
+- 2026-10-22 | Woods perf pass: foliage and solids indexed in 16 m squares (FINE_M, Proposed) and the sight-line walk stops once both lines are hidden (Spotting.foliage_m passes FOLIAGE_OPAQUE_M; the value is exact below it) | a sight line through a dense wood 10x cheaper, the AI's foliage cost in a fight 9.0 -> 0.4 ms a frame, every decision the same | a cache of sight results per pair (stale as men move)
+- 2026-10-22 | Woods perf pass: collision left as it was (a body a cell, every trunk, big rock and prop as drawn) | rays through dense woods cost 5-7 us and the build is once at load; building shapes without nodes would change the props suite's round_through owners | shape owners without CollisionShape3D nodes
+- 2026-10-22 | Dense copses (copse_cover and its caps) in every wooded normal preset (temperate, river_valley, highland_moor, coastal_lowland, amphibious_coast, rocky_ridge, scrubland); temperate and river_valley woods 2.1 and copses 6 a km2 (forest 2.4 / 6) (data, Proposed) | Captain: "Then denser copses" once the woods were cheap | only the Experimental forest dense; desert_wadi, badlands and salt flats keep their small copses (copse_cover's default copse is 35-110 trees)
+- 2026-10-22 | F-121: the voxel world's edit area grows to hold a level's structures (VoxelWorld.fit_structures, called by CompoundLevel), not the range's blocks moved | vehicle_range.gd is Claude's, and any level's structure past 22 m is built too | move the blocks to z -18 and -21
+- 2026-10-22 | Woods perf budgets in the forest suite (Proposed): from a normal preset's densest copse 600 draws, 700k triangles, 200k in the shadow pass; a capped sight line 400 us; a nav chunk 0.5 ms; standing in the forest's densest copse 25 ms a frame on average, 60 ms at the 95th percentile; a scan round of 16 men 30 ms | room for CI's slower runners over this PC's numbers | frame budgets only (noisy on a shared PC)

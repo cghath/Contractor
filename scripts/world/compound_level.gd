@@ -347,6 +347,8 @@ func _ready() -> void:
 	MapNodes.install(self)  # W13: map markers, briefing, extraction, reinforcement timer
 	_build_environment()
 	_build_structures()
+	if voxel_world:
+		voxel_world.fit_structures()  # (F-121: a level's structures past the 22 m edit area are built too)
 	Net.hosted.connect(_on_hosted)
 	Net.joined.connect(_on_joined)
 	Net.peer_joined.connect(_on_peer_joined)

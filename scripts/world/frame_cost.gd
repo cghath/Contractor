@@ -13,7 +13,8 @@ extends RefCounted
 ## Some keys are parts of others, not more time on top: "buildings" is inside "ai" when an AI's
 ## tick asked (most asks), and "building_probes" (the cells' probes), "building_groups" (spots
 ## into groups, floors linked), "building_entrances", "building_ports" and "building_rooms" are
-## inside "buildings" (so inside "ai" too). Add up only the top-level ones ("ai", "nav", "sfx",
+## inside "buildings" (so inside "ai" too); "foliage" (ZoneScatter.foliage_least: sight lines
+## through the woods) is inside "ai" when an AI's spotting asked. Add up only the top-level ones ("ai", "nav", "sfx",
 ## "voxels", "models", and "buildings" asked outside an AI tick) for a frame's counted total.
 
 static var on := false

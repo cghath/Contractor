@@ -281,11 +281,12 @@ static func optic_x(observer: Soldier, calm: bool) -> float:
 
 
 ## Metres of scrub and tree crown between `observer`'s eyes and `target`: the clearer of the
-## lines to its head and its chest. 0 off a zone (no scatter).
+## lines to its head and its chest (exact under FOLIAGE_OPAQUE_M; once both lines have that much
+## the walk stops, so past it only "hidden" is meant). 0 off a zone (no scatter).
 static func foliage_m(scatter: ZoneScatter, observer: Soldier, target: Soldier) -> float:
 	if scatter == null:
 		return 0.0
-	return scatter.foliage_least(observer.camera.global_position, target.camera.global_position, target.aim_point())  # one walk for both lines
+	return scatter.foliage_least(observer.camera.global_position, target.camera.global_position, target.aim_point(), FOLIAGE_OPAQUE_M)  # one walk for both lines, stopping once both are hidden (woods perf pass)
 
 
 ## How far `s`'s footsteps carry now (0 when still or prone).
