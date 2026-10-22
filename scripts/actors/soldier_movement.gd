@@ -268,6 +268,9 @@ var _floor_at := -1000.0  # when it was last on the ground (a mantle just after 
 var _jump_buffer_until := -1000.0  # the jump key, pressed this long ago, still asks for a mantle
 var _collision: CollisionShape3D
 var _capsule: CapsuleShape3D
+## Owner-side: how deep the water is over the feet (m) and whether he's swimming (Wading).
+var wet := 0.0
+var swimming := false
 var _shape_key := -99.0
 
 
@@ -287,7 +290,13 @@ func no_ground_below() -> bool:
 
 ## One physics step for the body's owner (the human's peer, or the host for AI).
 func step(delta: float) -> void:
-	if not body.is_on_floor():
+	_read_water()
+	if swimming:
+		# Deep water (Wading): he floats head and shoulders out, no falling and no fall to count.
+		var float_y := Wading.surface(body) - Wading.SWIM_FLOAT_M
+		body.velocity.y = clampf((float_y - body.global_position.y) * Wading.SWIM_RISE, -Wading.SWIM_RISE_MAX, Wading.SWIM_RISE_MAX)
+		_air_top = -INF
+	elif not body.is_on_floor():
 		if no_ground_below():
 			# Captain, 2026-10-14 (falling out of the world): nothing under the body yet (a spawn,
 			# respawn or level switch ahead of the ground under it, or past its edge): it waits
@@ -307,6 +316,8 @@ func step(delta: float) -> void:
 	if not down and (not body.vitals.can_stand() or body.vitals.is_dying()) and stance != Stance.PRONE:
 		set_stance(Stance.PRONE)  # a broken pelvis, or dying: no standing, crawl (or be carried)
 	var jumped := false
+	if swimming:
+		_swim_hands()
 	var burdened := body.inventory.hands != &"" or body.carry_speed_mult() < 1.0  # carry_mode reaches the owner; carrying is host-only
 	var input := Vector2.ZERO
 	var sprint := false
@@ -361,6 +372,12 @@ func step(delta: float) -> void:
 	if ExoMech.transitioning(body):
 		input = Vector2.ZERO  # climbing into or out of a heavy exo: it stands still for it
 		sprint = false
+	if swimming or wet > Wading.NO_SPRINT_M:
+		sprint = false  # no running in deep water (Wading)
+	if swimming and not down and stance != Stance.STAND_HIGH:
+		set_stance(Stance.STAND_HIGH)
+	elif wet > Wading.NO_PRONE_M and stance == Stance.PRONE and not down and body.vitals.can_stand() and not body.vitals.is_dying():
+		set_stance(Stance.CROUCH_LOW)  # no lying down in water this deep
 	# Sprint: forward only (MovementRules.SPRINT_ARC_DEG), never aimed (the sprint key aimed is
 	# holding the breath by default), within the load tier (can_sprint).
 	is_sprinting = sprint and MovementRules.sprint_direction_ok(input) and not body.is_aiming and not body.binoculars_up and not down and not burdened \
@@ -382,8 +399,10 @@ func step(delta: float) -> void:
 	else:
 		sprint_unsteady = maxf(sprint_unsteady - delta / MovementRules.SPRINT_UNSTEADY_S, 0.0)
 	var target := (body.global_basis * Vector3(input.x, 0.0, input.y)).normalized() * top_speed(is_sprinting, down, input)
+	if wet > 0.0:
+		target += Wading.flow(body) * (Wading.SWIM_DRIFT if swimming else Wading.FLOW_PUSH * clampf(wet / Wading.WADE_FULL_M, 0.0, 1.0))  # the current
 	var before := Vector3(body.velocity.x, 0.0, body.velocity.z)
-	var after := next_velocity(before, target, delta, body.is_on_floor(), not body.is_ai())
+	var after := next_velocity(before, target, delta, body.is_on_floor() or swimming, not body.is_ai())
 	body.velocity.x = after.x
 	body.velocity.z = after.z
 	_slide()
@@ -396,6 +415,27 @@ func step(delta: float) -> void:
 	if mounted and (input != Vector2.ZERO or after.length() > MOUNT_MAX_SPEED or not body.is_on_floor() or not _has_weapon_up()):
 		mounted = false
 	update_pose(delta)
+
+
+## Owner-side: how deep the water is over his feet, and whether it's deep enough to swim
+## (Wading: the bottom more than SWIM_DEPTH_M under the surface, his feet in it).
+func _read_water() -> void:
+	var surface := Wading.surface(body)
+	var feet := body.global_position.y
+	wet = maxf(surface - feet, 0.0) if surface > -INF else 0.0
+	swimming = false
+	if wet > 0.0:
+		var t := Wading.terrain_of(body)
+		swimming = t != null and Wading.swims(surface, t.height_at(body.global_position.x, body.global_position.z)) and not is_instance_valid(body.vehicle)
+
+
+## Swimming: his hands are on the water, not his weapon (no firing, reloading or throwing).
+func _swim_hands() -> void:
+	var until := Soldier._now() + Wading.SWIM_BUSY_S
+	body._busy_until = maxf(body._busy_until, until)
+	if body.is_ai():
+		body._server_busy_until = maxf(body._server_busy_until, until)
+	mounted = false
 
 
 ## move_and_slide, without the floor it stood on when the game has moved the body since its
@@ -942,6 +982,8 @@ func _has_weapon_up() -> bool:
 ## default): slower sideways and backwards (MovementRules.direction_mult); a sprint builds from a
 ## jog over the sprint ramp and loses some of its edge under load (MovementRules.sprint_left).
 func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
+	if swimming:
+		return Wading.swim_speed(load_fraction()) * body.vitals.speed_mult()
 	var speed := STANCE_SPEED[stance]
 	if side != 0:
 		speed *= SIDE_SPEED_MULT
@@ -962,7 +1004,7 @@ func top_speed(sprinting: bool, down: bool, input := Vector2(0, -1)) -> float:
 		speed = CRAWL_SPEED
 	elif body.vitals.is_dying():
 		speed = minf(speed, DYING_CRAWL_SPEED)  # dragging himself along
-	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory)  # a heavy exo walks at its own pace
+	return speed * body.load_mult * body.vitals.speed_mult() * body.carry_speed_mult() * ExoMech.speed_mult(body.inventory) * Wading.speed_mult(wet)  # a heavy exo walks at its own pace; water slows him
 
 
 ## 0 (light) to 1 (a full load, a bulky item or a body on your shoulder counts too).

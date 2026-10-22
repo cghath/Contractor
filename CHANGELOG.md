@@ -41,6 +41,77 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   wind, a frag's hole refilling, rounds parting it, purple, the same cloud from the same seed (for a
   late joiner, and after an event that arrived late), and the cost of eight clouds at once.
 
+### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
+
+#### Added
+- **Rivers that cut their own valleys.** A river valley zone has a real river running edge to
+  edge. It meanders round the sites and flows downhill all the way, deep enough in the middle
+  that you swim. Its banks stand over the water and its valley blends back into the hills.
+  Kestrel Valley has one.
+- **Streams, lakes and ponds.** Streams spring from the hills and wind downhill into the river,
+  a pond or off the map. There are farm ponds in the temperate hills, burns and a tarn on the
+  moors, and stock ponds in the scrub. Reeds grow in the shallows, trees along the banks, and
+  nothing grows in the water. The banks are dark wet mud and gravel.
+- **Flowing water.** Ripples drift downstream at the current's speed in the same blocky voxel
+  look as the ground. Deep water is darker, and there's a pale fringe at the bank.
+- **Wading and swimming.** The deeper the water, the slower you go. Knee-deep is about two
+  thirds of your pace and waist-deep under a third. Past 0.6 m you can't sprint and past 0.45 m
+  you can't lie down. A current pushes you along. In water deeper than 1.45 m you swim with
+  your head and shoulders out, slowly, and slower still under a heavy load. Your hands are
+  busy, so no shooting, reloading or throwing, and the current carries you. You don't drown.
+- **Bridges, fords and culverts.** Every road over a river has a bridge: concrete (spans on
+  piers, parapets) or steel truss. No stretch of river goes 450 m without a way across: a
+  timber footbridge or a ford, where the river shallows to knee-deep with gentle banks and depth
+  posts. Where a road crosses a stream there's a culvert (an embankment over a pipe) or a ford.
+  Bridges have real collision. Trucks drive over them and through fords, men walk them, rounds
+  stop on them, and the AI's paths use them (deep water isn't on the AI's map).
+- **Bridges can be dropped.** A big enough blast drops a span into the river. One demolition
+  block drops a footbridge. A concrete span takes three, a steel truss span two. A truss span
+  falls to about six 105 mm rounds. Grenades only chip. A dropped span lies in the river: an
+  end span hangs from its abutment, a middle span lies on the riverbed. The AI's paths stop
+  using it. Every player sees it, late joiners too, and it's saved with the zone.
+- **Vehicles feel rivers and lakes.** They already handled the sea. A truck in water deeper
+  than its fording depth floods and stalls.
+- A `water` test suite.
+### Landmark buildings (cghath's brief, queue item 1.4: world expansion)
+
+#### Added
+- **Landmark buildings**, each its own generated type with furnished rooms you can enter, fight
+  through and blow holes in, and the AI can garrison and clear:
+  - an **office** block: two storeys and a roof;
+  - a **mosque**: a prayer hall under a dome, a minaret, an ablution room;
+  - a **church**: a nave with pews and an altar, a bell tower over its door, a gable roof;
+  - a **school**: classrooms with desks and boards, often two storeys, a playground;
+  - a **garage** workshop: a car on its lift, a wide door;
+  - a **fuel station**: a kiosk, a canopy over its pumps;
+  - a **factory**: a factory floor with machines, offices, a chimney;
+  - a **farm**: farmhouse, barn, silos, livestock pens;
+  - a **harbour**: a quay and two piers out over the water, cranes, sheds, the harbourmaster's
+    office, containers, a moored boat;
+  - an **airfield**: a runway, an apron, two hangars (a light aircraft in one), a control tower,
+    a windsock;
+  - an **oil field**: pumpjacks, flowlines, tanks, a flare stack;
+  - a **fuel depot**: storage tanks in a bund, a pipe rack, a loading gantry and tanker, a fence;
+  - the terror groups' sites: the cartels' **drug lab** (blacked out, lab benches, cookers,
+    chemical drums) and the Banner's and the Shura's **IED workshop** (wire, phones, shells,
+    jugs, a car being rigged).
+- **Ruined and bombed-out variants of every building**, the old types too: walls breached,
+  roofs fallen in, rubble; bombed out, a corner collapsed and an upper storey's roof gone. Stairs
+  and doorways stay usable.
+- **They appear where the zones' asset tags say** (docs/terror_groups.md 7.3): a mosque where a
+  zone has one, a harbour on the coast of harbour zones, oil fields, airfields with a fuel depot,
+  farms in the fields, fuel stations on the routes, garages at crossings, offices where there's a
+  headquarters, the drug lab or IED workshop of the group that holds the zone, and a few churches,
+  schools and factories. Each has a road to it and a garrison; hot zones' are more often in ruins.
+  (data/landmarks.json; all numbers Proposed.)
+
+#### Fixed
+- **Upper-floor doorways no longer open onto the stairwell.** Now and then a doorway upstairs
+  stood over the stair's opening, so the room behind it could only be reached by falling down the
+  stairs; it slides along its wall now (or another wall takes the doorway).
+- **The building docs no longer claim an office** before there was one (docs/building_gen.md,
+  docs/feature_comparison.md 8.2): there is one now.
+
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 
 #### Fixed

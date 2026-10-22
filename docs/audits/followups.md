@@ -24,6 +24,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
+| F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
 
 ## F-01: the building scan only sees one floor
 
@@ -331,6 +332,85 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+## F-175: roads lie on the riverbed under a bridge (the roads agent's ZoneRoads)
+
+Location: [zone_roads.gd](../../scripts/world/zone_roads.gd) `_strip`; the bridges are
+[zone_bridges.gd](../../scripts/world/zone_bridges.gd). Found by cghath's agent on `world/water`
+(2026-10-21, queue item 1.1); zone_roads.gd is the roads agent's (paved roads, item 1.2), so it isn't
+changed there.
+
+What happens: a road crossing a river or stream gets a bridge (or a culvert's embankment, or a
+ford) from ZoneWater, but ZoneRoads drapes its strip on the terrain as before: under a bridge it
+runs down the bank, along the riverbed under the water and up the far bank, seen through the water.
+Looks only (the strip has no collision; vehicles drive on the deck).
+
+Suggested: break the strip where `terrain.water and terrain.water.bridges.covers(p)` is true for a
+bridge (as `_on_pad` breaks it on a pad), or lay it on the deck (each bridge record in
+`terrain.water.bridges.bridges` has its `xform`, the deck's top middle, and `length`). With
+collision on roads, keep a road's collision off the bridge's span too. A culvert's embankment and a
+ford are ground, so the strip can follow them.
+
+## F-176: the dug ground never comes back from a zone save
+
+Location: [game_state.gd](../../autoload/game_state.gd) `read_save` (and `load_zone`). Found by
+cghath's agent on `world/water` (2026-10-21) while adding the bridges' section to the save; not
+changed there (Digging's side).
+
+What happens: `save_zone` writes `"ground"` (Digging.to_save: the cuts and berms) into the zone's
+save, but `read_save` builds its result from a list of sections and `"ground"` isn't one, so
+`load_zone`'s `ground = zone.get("ground", {})` is always `{}`: foxholes, trenches, berms and blast
+craters are gone when a zone is loaded from its save (Digging.server_prepare then digs the enemy's
+outposts in afresh).
+
+Suggested: copy `"ground"` through in `read_save` (a dictionary with "cuts" and "berms" arrays,
+checked like the other sections), and a digging test that saves, reloads and finds its cuts.
+
+## F-177: a river ends in a notch at the zone's edge
+
+Location: [zone_water.gd](../../scripts/world/zone_water.gd) (rivers run edge to edge) and
+ZoneTerrain's apron. cghath's agent, `world/water` (2026-10-21); a known gap, not a bug.
+
+What happens: the river's channel and valley run to the zone's edge, but the apron past it is flat
+at 0, so from inside the zone (looking out past the invisible wall, in the haze) the river ends
+against a bank a few metres high at the edge.
+
+Suggested: lower the apron along the river's line past the edge (a channel strip in the apron
+mesh at the river's level, and the water strip carried on with it), or fade the river into a
+gorge's end. Looks only.
+## F-162: the building scan misses the middle of a big open hall (a hangar)
+
+Location: [buildings.gd](../../scripts/ai/buildings.gd) (`inside`: PROBE_M, MAX_OPEN). Found by
+cghath's agent on `world/landmarks` (2026-10-21, queue item 1.4); the file is Claude's, so it
+isn't changed there.
+
+What happens: a spot counts as inside when at most MAX_OPEN (2) of its 8 level rays reach PROBE_M
+(12 m) without a wall. A hangar's hall is about 19 x 17 m with a 14 m door, so from its middle
+most rays run 12 m without meeting a wall: only its back corners and office read as a building
+(the landmarks suite scans one from its office: 1 room, 3 entrances). A factory floor (up to 18 x
+16 m) is on the edge of it. The AI won't garrison or clear a hangar's hall room by room.
+
+Suggested: count a spot as inside when a ray straight up meets a roof within a few metres and the
+walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or let a building's
+rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
+tests/landmarks_test.gd, scanned from the hall's middle.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
+2026-10-21 | Deep water: players swim (1.1 m/s, 0.5 under a full load, head out, hands busy, the current carries them, no drowning); the AI never routes into it (deep water is off its navigation mesh) and crosses on bridges and fords | Arma 3, the realism bar, has men swim, and rivers that block outright read as more map edges | an invisible wall at deep water, or drowning with a breath meter
+2026-10-21 | Wading pace (Wading): 1 - 0.7 x ((depth - 0.1) / 0.9)^0.8 of the pace (knee-deep 0.63, waist-deep 0.3), no sprint past 0.6 m, no prone past 0.45 m, the current pushes at half its speed (Proposed consts) | wading is hard work, more so the deeper | a flat 50% in any water
+2026-10-21 | Bridge damage: each span has health in carve-radius-cubed units (a demo block, 1.8 m, does 5.8 on contact; 105 mm HE 1.5); concrete span 12 (3 blocks, ~8 HE), steel truss 8 (2 blocks, ~6 HE), footbridge 2 (1 block); blasts under 0.5 m carve do nothing (Proposed, ZoneBridges.TYPES) | demolitions and fire support both drop spans, charge counts near real while playable | voxel bridges through the voxel damage path (a VoxelWorld per bridge streamed across the zone), or one health for a whole bridge
+2026-10-21 | Crossings: every road over a river gets a vehicle bridge (concrete 60%, steel truss 40%, by the seed), a road over a stream a culvert (65% where it's 7 m wide or less) or a ford, and the river a ford or footbridge (half each) in every 450 m without a crossing (data: "water" in data/terrain_presets.json) | keeps both banks joined for the AI's paths and the squad | bridges only where roads cross (half a zone cut off from the AI)
+2026-10-21 | Which presets have water: river_valley a river edge to edge (22-30 m wide, 2.1 m deep), 1-2 streams and 1-2 ponds; temperate 0-1 stream and 0-2 ponds; highland_moor 2-3 burns, 0-1 tarn and ponds; coastal_lowland 0-2 ponds; scrubland 0-1 stock pond; desert, badlands, salt flats, rocky ridge and the test grounds none (their wadis stay dry) | the hot zones' presets (rocky_ridge, salt_flats) and the dry country keep their ground; rivers where the land is wet | a river on every preset
+2026-10-21 | river_valley's dry wadi is gone for the river; its "wadi groves" grow in a 45 m band along the river and streams instead (the terrain's bed weight, under the sand tint) | its riverside woods stay | no groves on river_valley
+
+- 2026-10-21 | Landmarks go by data/landmarks.json: the tags that exist (mosque, harbour, oil, airfield, fields) plus route: a fuel station, crossing: a garage, hq: an office, airfield: a fuel depot too; church, school and factory (no tag names them) by zone id | the brief says where its tag already says, and only five tags name landmarks | new asset tags in contracts.json, or towns with landmark lots
+- 2026-10-21 | The drug lab and IED workshop stand in the zones of the groups whose factions.json site_names call their cache that (by the zone's starting holder), as landmarks with a garrison, not yet a contract's target | gives the names their geometry without changing any contract board | make them the raid's cache site (changes boards and their tests)
+- 2026-10-21 | At most 4 landmarks a contract zone and 6 a hot zone, in a fixed order (mosque, harbour, oil field, airfield, farm, drug lab, IED workshop, fuel depot, office, fuel station, garage, school, church, factory) | room in 2-4 km zones and the extra garrisons | every tag's landmark in every zone
+- 2026-10-21 | Ruined landmarks: 20% ruined and 8% bombed out in contract zones, 35% and 30% in hot zones (by the zone's seed) | hot zones are the war's front | ruin by the faction war's damage over time
+- 2026-10-21 | A harbour's quay edge at 0.55 of the sea's width in from the zone's edge, its land built up 1.6 m over the water, piers 30 m out | water under the piers on every coast preset (checked on six zones) | measure the shoreline per zone and fit the quay to it
+- 2026-10-21 | The airfield's runway is 240 x 22 m painted on the ground, not voxels | a module's voxels must stay within its streaming range, and it's a strip for light aircraft and helicopters | a 600 m+ runway, or voxel slabs
+- 2026-10-21 | A minaret is solid; tanks and silos are hollow with a floor every 1.5 m inside | no closed room the navmesh bakes and the AI thinks is a building | a hollow minaret with a stair up (later)
+- 2026-10-21 | The control tower is two storeys (the generator's limit) with a console room on top and a mast | storeys over two come with city zones (queue item 1.5) | a third-storey glazed cab now
+- 2026-10-21 | Landmarks are garrisoned like other sites: a post inside each front door, one up high, one in a back room, the site's own (2-9 posts) | the brief says garrisonable like today's types | civilian-only landmarks
+- 2026-10-21 | Upper-floor doorways slide along their wall off the stairwell (or another wall takes the doorway): some existing two-storey buildings' doorways move | a doorway over the stairwell cut its room off | leave existing buildings as they were

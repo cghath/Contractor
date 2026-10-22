@@ -10,8 +10,14 @@
 		["scrub", "scrubland"]
 	],
 	"presets": {
-		"highland_moor": {"name": "Highland moor", "land": {"relief_scale": 1.15, "wavelength_m": 820, "octaves": 4, "gain": 0.45, "ridge": 0.25, "detail_m": 2.0, "detail_wavelength_m": 170}, "palette": {"grass": "6b6646", "dry": "7a6a55", "earth": "6e5a48", "rock": "706c66"}, "ground": {"rock_above_m": 24.0}, "scatter": {"conifer_share": 0.6, "rocks_per_km2": 90, "large_rock_share": 0.22, "scrub_per_km2": 480, "trees_per_km2": 4, "woods_per_km2": 0.4, "copses_per_km2": 3, "hedgerows_per_km2": 1, "road_trees": 0.1, "props_per_km2": 1.6, "props_near_m": 50, "ruins_per_km2": 1.4, "valuables_per_km2": 1.5, "tufts_per_km2": 60000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 45, "colours": {"rock": ["7a766f", "66625c"], "scrub": ["6a5a50", "5f6040"], "crown": ["3e5530", "4a5a32"], "trunk": "4a3a2c"}}},
-		"river_valley": {"name": "River valley", "land": {"relief_scale": 0.9, "wavelength_m": 720, "octaves": 4, "gain": 0.4, "detail_m": 2.2, "detail_wavelength_m": 180}, "wadi": {"count": 1, "width_m": 75, "depth_m": 6.0, "meander_m": 210, "berm_m": 2.5}, "palette": {"grass": "56693a", "dry": "6f7448", "earth": "735f45", "rock": "6a665c"}, "scatter": {"conifer_share": 0.25, "rocks_per_km2": 40, "large_rock_share": 0.12, "scrub_per_km2": 300, "trees_per_km2": 14, "woods_per_km2": 1.8, "copses_per_km2": 5, "hedgerows_per_km2": 5, "road_trees": 0.5, "wadi_groves_per_km2": 3, "props_per_km2": 2.2, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.6, "tufts_per_km2": 60000, "pebbles_per_km2": 2500, "rock_clusters_per_km2": 18, "colours": {"rock": ["75716a", "68645c"], "scrub": ["4f6236", "62693c"], "crown": ["3f5c2c", "4d662e"], "trunk": "4c3b2a"}}},
+		"highland_moor": {"name": "Highland moor", "land": {"relief_scale": 1.15, "wavelength_m": 820, "octaves": 4, "gain": 0.45, "ridge": 0.25, "detail_m": 2.0, "detail_wavelength_m": 170},
+			"water": {"_note": "Queue item 1.1: moorland burns and a tarn. Proposed.", "streams": {"count": [2, 3], "width_m": [3.5, 5.5], "depth_m": 0.4, "valley_w_m": 26, "length_m": [350, 800]}, "lakes": {"count": [0, 1], "radius_m": [40, 70], "depth_m": 3.0}, "ponds": {"count": [0, 2], "radius_m": [10, 18]}},
+			"palette": {"grass": "6b6646", "dry": "7a6a55", "earth": "6e5a48", "rock": "706c66"}, "ground": {"rock_above_m": 24.0}, "scatter": {"conifer_share": 0.6, "rocks_per_km2": 90, "large_rock_share": 0.22, "scrub_per_km2": 480, "trees_per_km2": 4, "woods_per_km2": 0.4, "copses_per_km2": 3, "hedgerows_per_km2": 1, "road_trees": 0.1, "props_per_km2": 1.6, "props_near_m": 50, "ruins_per_km2": 1.4, "valuables_per_km2": 1.5, "tufts_per_km2": 60000, "pebbles_per_km2": 4000, "rock_clusters_per_km2": 45, "colours": {"rock": ["7a766f", "66625c"], "scrub": ["6a5a50", "5f6040"], "crown": ["3e5530", "4a5a32"], "trunk": "4a3a2c"}}},
+		"river_valley": {"name": "River valley", "land": {"relief_scale": 0.9, "wavelength_m": 720, "octaves": 4, "gain": 0.4, "detail_m": 2.2, "detail_wavelength_m": 180},
+			"water": {"_note": "Queue item 1.1 (cg_brief): a real river edge to edge in its own valley (deep: swim or take a bridge), streams into it, ponds. Numbers Proposed (ZoneWater).", "rivers": {"count": 1, "width_m": [22, 30], "depth_m": 2.1, "bank_h_m": 1.5, "bank_w_m": 7, "valley_m": 3.0, "valley_w_m": 130, "meander_m": 170, "meander_wavelength_m": 560, "grade": 0.0015, "drop_max_m": 6, "flow_ms": 0.8, "reeds": 0.3},
+				"streams": {"count": [1, 2], "width_m": [4.5, 6.5], "depth_m": 0.45, "bank_h_m": 0.6, "bank_w_m": 4, "valley_m": 1.2, "valley_w_m": 24, "length_m": [350, 900], "flow_ms": 0.5, "reeds": 0.45},
+				"ponds": {"count": [1, 2], "radius_m": [14, 26], "depth_m": 1.4, "reeds": 0.6}, "crossing_gap_m": 450, "bridges": {"concrete": 0.6, "truss": 0.4}, "culvert_share": 0.65, "footbridge_share": 0.5},
+			"palette": {"grass": "56693a", "dry": "6f7448", "earth": "735f45", "rock": "6a665c"}, "scatter": {"conifer_share": 0.25, "rocks_per_km2": 40, "large_rock_share": 0.12, "scrub_per_km2": 300, "trees_per_km2": 14, "woods_per_km2": 1.8, "copses_per_km2": 5, "hedgerows_per_km2": 5, "road_trees": 0.5, "wadi_groves_per_km2": 3, "props_per_km2": 2.2, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.6, "tufts_per_km2": 60000, "pebbles_per_km2": 2500, "rock_clusters_per_km2": 18, "colours": {"rock": ["75716a", "68645c"], "scrub": ["4f6236", "62693c"], "crown": ["3f5c2c", "4d662e"], "trunk": "4c3b2a"}}},
 		"badlands": {"name": "Badlands", "land": {"relief_scale": 1.1, "wavelength_m": 380, "octaves": 5, "gain": 0.46, "ridge": 0.6, "detail_m": 3.6, "detail_wavelength_m": 120, "folds_m": 0.8}, "wadi": {"count": 3, "width_m": 30, "depth_m": 7.0, "meander_m": 90, "berm_m": 1.5}, "palette": {"grass": "8a7a52", "dry": "a08658", "earth": "9a6a44", "rock": "8a6f58"}, "ground": {"rock_above_m": 14.0}, "scatter": {"conifer_share": 0.0, "rocks_per_km2": 110, "large_rock_share": 0.25, "scrub_per_km2": 260, "trees_per_km2": 2, "woods_per_km2": 0, "copses_per_km2": 1.0, "wadi_groves_per_km2": 2, "road_trees": 0.05, "props_per_km2": 1.8, "props_near_m": 55, "ruins_per_km2": 1.6, "valuables_per_km2": 1.6, "tufts_per_km2": 18000, "pebbles_per_km2": 5000, "rock_clusters_per_km2": 55, "colours": {"rock": ["94765c", "7c624c"], "scrub": ["7a7040", "8a7a48"], "crown": ["5a6430", "66702f"], "trunk": "5c4632"}}},
 		"plain": {
 			"name": "Plain (the test zone)",
@@ -22,6 +28,7 @@
 		"temperate": {
 			"name": "Temperate hills",
 			"land": {"relief_scale": 1.0, "wavelength_m": 650, "octaves": 4, "gain": 0.42},
+			"water": {"_note": "Queue item 1.1: a stream through the hills, farm ponds. Proposed.", "streams": {"count": [0, 1]}, "ponds": {"count": [0, 2]}},
 			"palette": {"grass": "5f6a3c", "dry": "7d7748", "earth": "7f6d4f", "rock": "6f6a60"},
 			"scatter": {"conifer_share": 0.35, "rocks_per_km2": 50, "large_rock_share": 0.15, "scrub_per_km2": 250, "trees_per_km2": 12, "woods_per_km2": 1.5, "copses_per_km2": 5, "hedgerows_per_km2": 4, "road_trees": 0.4,
 				"props_per_km2": 2.0, "props_near_m": 50, "ruins_per_km2": 1.0, "valuables_per_km2": 1.5,
@@ -40,6 +47,7 @@
 		"coastal_lowland": {
 			"name": "Coastal lowland",
 			"land": {"relief_scale": 0.55, "wavelength_m": 700, "octaves": 4, "gain": 0.4, "offset_m": 3.0, "detail_m": 2.4, "detail_wavelength_m": 190},
+			"water": {"_note": "Queue item 1.1: a pond or two behind the coast. Proposed.", "ponds": {"count": [0, 2]}},
 			"sea": {"width_m": 190, "depth_m": 7.0, "level": 0.0, "coast_wobble_m": 70},
 			"palette": {"grass": "6a7440", "dry": "8a8650", "earth": "86744f", "rock": "7a7468", "sand": "c2b583"},
 			"ground": {"sand_below_m": 1.6},
@@ -94,6 +102,7 @@
 		"scrubland": {
 			"name": "Scrubland",
 			"land": {"relief_scale": 0.7, "wavelength_m": 600, "octaves": 4, "gain": 0.42, "ridge": 0.1},
+			"water": {"_note": "Queue item 1.1: a stock pond. Proposed.", "ponds": {"count": [0, 1], "radius_m": [10, 16], "depth_m": 1.1}},
 			"palette": {"grass": "76753f", "dry": "8f8650", "earth": "857049", "rock": "746d5e"},
 			"scatter": {"conifer_share": 0.05, "rocks_per_km2": 60, "large_rock_share": 0.12, "scrub_per_km2": 520, "trees_per_km2": 6, "woods_per_km2": 0.3, "copses_per_km2": 3, "road_trees": 0.3,
 				"props_per_km2": 2.0, "props_near_m": 55, "ruins_per_km2": 1.0, "valuables_per_km2": 1.3,

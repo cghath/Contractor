@@ -214,6 +214,8 @@ func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
 	if digging:
 		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)
+	if terrain and terrain.water:
+		terrain.water.server_blast(pos, radius_m)  # a big enough one drops a bridge's span (ZoneBridges)
 
 
 func server_breach(pos: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
@@ -451,9 +453,7 @@ func _backdrop_sky(look: Dictionary) -> ShaderMaterial:
 func _flat_areas() -> Array:
 	var out: Array = []
 	for m: Dictionary in def.get("modules", []):
-		var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
-		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
-		out.append(Rect2(p - half, half * 2.0))
+		out.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))  # (a landmark's own: a harbour's land)
 	for p: Array in def.get("extraction", []):
 		out.append(Rect2(float(p[0]) - 12.0, float(p[1]) - 12.0, 24.0, 24.0))
 	for p: Array in def.get("insertion", []):
@@ -488,6 +488,8 @@ func _on_hosted() -> void:
 	GameState.load_zone()
 	if DayNight.current():
 		DayNight.current().server_restore()  # the saved time and weather (wave 7 S1)
+	if terrain.water:
+		terrain.water.bridges.server_restore(GameState.bridges)  # the spans dropped before, down again
 	_zone_loaded()
 	_logs = {}
 	for edit: Dictionary in GameState.voxel_edits:
@@ -1115,6 +1117,8 @@ func reinforcement_edge(players: Array[Vector2]) -> Vector3:
 	var far_d := -1.0
 	for i in REINFORCE_TRIES:
 		var spot := Reinforcements._perimeter_point(area, (float(i) + randf()) / REINFORCE_TRIES)
+		if terrain.water and terrain.water.depth_at(spot.x, spot.y) > 0.3:
+			continue  # not out of a river or a lake (ZoneWater)
 		var d := INF
 		for p in players:
 			d = minf(d, spot.distance_to(p))
