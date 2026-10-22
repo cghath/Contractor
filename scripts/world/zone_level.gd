@@ -212,6 +212,7 @@ func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	for module in _modules:
 		if module.voxel_world and module.distance_to(pos) <= radius_m + 1.0:
 			module.voxel_world.server_blast(pos, radius_m)
+	SmokeCloud.server_blast(pos, radius_m)  # it pushes a hole in any smoke round it
 	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
 	if digging:
 		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)

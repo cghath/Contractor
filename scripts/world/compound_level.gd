@@ -593,6 +593,7 @@ func voxel_worlds() -> Array[VoxelWorld]:
 func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 	for world in voxel_worlds():
 		world.server_blast(pos, radius_m)
+	SmokeCloud.server_blast(pos, radius_m)  # it pushes a hole in any smoke round it
 	var digging := get_node_or_null(Digging.NODE_NAME) as Digging
 	if digging:
 		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)
@@ -703,6 +704,8 @@ func show_tracer(origin: Vector3, launch: Vector3, round_id: StringName, end: Ve
 	var points := Ballistics.flight_path(origin, launch, round_id, end) if launch != Vector3.ZERO else PackedVector3Array([origin, end])
 	var shooter := _kick_shooter(origin) if kick else null
 	Tracer.spawn_path(self, points, suppressed, kind, _seen_muzzle_offset(shooter, origin))
+	if multiplayer.is_server():
+		SmokeCloud.server_shot(origin, end)  # the round parts any smoke it goes through (its line: arcs are near straight over a cloud)
 
 
 ## The soldier whose shot left from `origin` (the nearest within KICK_FIND_M): their weapon kicks
@@ -800,13 +803,25 @@ func show_flash(pos: Vector3) -> void:
 	Sfx.play_at(&"flashbang", pos)
 
 
+## Host: a smoke cloud on every peer (Throwables' smoke grenades), its seed and wind picked here
+## so every peer grows the same cloud (SmokeCloud).
+func server_spawn_smoke(pos: Vector3, colour: String) -> void:
+	spawn_smoke.rpc(pos, colour, 0.0, SmokeCloud.new_seed(self), SmokeCloud.wind_here(self))
+
+
 ## A smoke cloud on every peer, in its colour (a name in SmokeCloud.COLOURS), `age` seconds
-## old (a late joiner gets the clouds already out: _send_smoke_to).
+## old, grown from `cloud_seed` (0: one from where and what it is, SmokeCloud.seed_at) drifting
+## with `wind` (not finite: the weather's here), with the `events` it has had (blasts and rounds
+## through it). A late joiner gets the clouds already out, events and all: _send_smoke_to.
 @rpc("authority", "call_local", "reliable")
-func spawn_smoke(pos: Vector3, colour: String, age := 0.0) -> void:
+func spawn_smoke(pos: Vector3, colour: String, age := 0.0, cloud_seed := 0, wind := Vector3.INF, events: Array = []) -> void:
 	var cloud := SmokeCloud.new()
 	cloud.colour = colour
 	cloud.age = age
+	cloud.cloud_seed = cloud_seed if cloud_seed != 0 else SmokeCloud.seed_at(pos, colour)
+	cloud.wind = wind if wind.is_finite() else SmokeCloud.wind_here(self)
+	cloud.events = events.duplicate(true)
+	cloud.name = SmokeCloud.node_name(cloud.cloud_seed)
 	add_child(cloud)
 	cloud.global_position = pos
 
@@ -837,6 +852,15 @@ static func _effect_material(colour: Color, alpha: bool) -> StandardMaterial3D:
 		material.albedo_color = colour
 		_effect_materials[key] = material
 	return _effect_materials[key]
+
+
+## An event in a smoke cloud (SmokeCloud._server_event: a blast or a round through it), to every
+## client, for the step it happens at.
+@rpc("authority", "call_remote", "reliable")
+func smoke_event(cloud_name: String, event: Array) -> void:
+	var cloud := get_node_or_null(NodePath(cloud_name)) as SmokeCloud
+	if cloud:
+		cloud.add_event(event)
 
 
 func _burst(pos: Vector3, colour: Color, size: float, life: float) -> void:
@@ -1241,7 +1265,7 @@ func _on_peer_joined(id: int) -> void:
 func _send_smoke_to(id: int) -> void:
 	for cloud in SmokeCloud.active:
 		if is_instance_valid(cloud) and is_ancestor_of(cloud) and not cloud.is_queued_for_deletion():
-			spawn_smoke.rpc_id(id, cloud.global_position, cloud.colour, cloud.age)
+			spawn_smoke.rpc_id(id, cloud.global_position, cloud.colour, cloud.age, cloud.cloud_seed, cloud.wind, cloud.events)
 
 
 ## Host: a joined player's pick never came; they play DEFAULT_JOIN_ROLE.

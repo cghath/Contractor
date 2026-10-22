@@ -531,7 +531,7 @@ func _impact(r: Dictionary) -> void:
 	var u := FireMission.unit(unit_id)
 	var by: Node = r.by if is_instance_valid(r.by) else null
 	if String(r.shell) == "smoke":
-		lvl.spawn_smoke.rpc(p + Vector3.UP * 0.3, SMOKE_COLOUR)
+		lvl.server_spawn_smoke(p + Vector3.UP * 0.3, SMOKE_COLOUR)  # (its seed and wind picked here: the same cloud on every peer)
 	else:
 		var warhead := StringName(String(u.warhead))
 		Warheads.server_burst(lvl, warhead, p + Vector3.UP * 0.15, Vector3.DOWN, null, by)  # people, the crater, the shake

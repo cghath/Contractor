@@ -467,7 +467,7 @@ func _server_end(p: LauncherProjectile, res: Dictionary) -> void:
 		# off what it met.
 		how = "smoke"
 		if lvl:
-			lvl.spawn_smoke.rpc(pos - dir * 0.15, String(p.data.get("smoke_colour", "white")))
+			lvl.server_spawn_smoke(pos - dir * 0.15, String(p.data.get("smoke_colour", "white")))  # (its seed and wind picked here: the same cloud on every peer)
 	else:
 		burst = Warheads.server_burst(lvl, p.warhead, pos, dir, collider, shooter, bool(res.get("top_attack", false)))
 	results[p.id] = {"how": how, "position": pos, "direction": dir, "top_attack": bool(res.get("top_attack", false)),

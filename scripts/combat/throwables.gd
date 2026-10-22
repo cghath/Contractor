@@ -11,7 +11,8 @@ extends RefCounted
 ##   stuns AI soldiers, and deafens everyone close for 3 to 6 s.
 ## Electronic ear protection (carried) stops flashbang and gunfire deafness and halves a blast's.
 ## - Smoke: a cloud that blocks AI line of sight (SmokeCloud.blocks) and the view, in the
-##   grenade's colour (white, green, yellow, blue, purple) on every peer.
+##   grenade's colour (white, green, yellow, blue, purple) on every peer: a volume on a grid that
+##   fills rooms, goes out through doors and drifts (SmokeCloud).
 ## - Chem light: a glow stick that lies where it stops and glows (Demolitions).
 
 const FRAG_RADIUS := 8.0
@@ -127,7 +128,7 @@ static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, it
 		"flash":
 			_flash(level, pos)
 		"smoke":
-			level.spawn_smoke.rpc(pos, SmokeCloud.colour_of(item_id))
+			level.server_spawn_smoke(pos, SmokeCloud.colour_of(item_id))
 		"chemlight":
 			# No bang: where it came to rest it becomes a placed chem light (Demolitions), riding
 			# whoever or whatever it landed on.
