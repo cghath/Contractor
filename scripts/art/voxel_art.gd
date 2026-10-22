@@ -458,10 +458,13 @@ static func warm(pairs: Array) -> void:
 	# Perf pass (2026-10-22): a scheme of its own (not plain clothes or a face, whose colours are
 	# each person's) is meshed on the worker too, handed over as the faces are (_take_faces): the
 	# first soldier in it, and his first reload, build nothing on the main thread (30-70 ms each).
+	# Not on a headless server: its dummy renderer's meshes aren't thread-safe (a mesh made on the
+	# worker while the main thread makes one crashed the perf suite, R2424), and it draws nothing.
 	var meshers := {}  # variant -> its mesher, made here (the worker only uses it)
+	var on_worker := DisplayServer.get_name() != "headless"
 	for pair: Array in todo:
 		var variant: String = pair[1]
-		if not _shared_raster(variant):
+		if on_worker and not _shared_raster(variant):
 			if not meshers.has(variant):
 				meshers[variant] = _get_mesher(variant)
 			_face_pending["%s|%s" % [pair[0], variant]] = true
