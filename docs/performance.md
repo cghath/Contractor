@@ -131,8 +131,10 @@ before the first shot.
 body's every frame); footsteps and a moving vehicle's body check no longer allocate per frame.
 
 **Detail setting** (Settings, Video, "World detail at distance"): Ultra draws everything as before;
-High (the default) stops the far tree canopy at 3.2 km with a 300 m fade; Medium and Low draw the
-scatter 0.8x and 0.65x as far and the canopy to 2.4 and 1.8 km. Up close they all look the same.
+High (the default) stops the far tree canopy at 3.2 km with a 300 m fade, and soldiers further than
+150 m from the view cast no sun shadow (each is 15-25 shadow draws); Medium and Low draw the scatter
+0.8x and 0.65x as far, the canopy to 2.4 and 1.8 km and soldiers' shadows to 100 and 60 m. Up close
+they all look the same.
 
 ## Budgets (Proposed)
 

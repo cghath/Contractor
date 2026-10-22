@@ -41,9 +41,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 #### Added
 - **World detail at distance** (Settings, Video). Ultra draws everything as before, the tree
-  canopy to the horizon; High (the default) stops the canopy at about 3 km, fading out; Medium and
-  Low draw woods, rocks and scrub less far out. Up close they all look the same. It takes effect in
-  the next zone.
+  canopy to the horizon; High (the default) stops the canopy at about 3 km, fading out, and soldiers
+  further than 150 m cast no shadow; Medium and Low draw woods, rocks and scrub less far out and
+  drop soldiers' shadows nearer. Up close they all look the same. The woods change in the next zone.
 - **Performance cases** (suite perfcases, in CI) with frame-time and stutter budgets, so a change
   that slows these scenes down shows up.
 
