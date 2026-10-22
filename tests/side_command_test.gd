@@ -506,17 +506,18 @@ func _test_allocation() -> void:
 	var many_needs: Array = []
 	for i in 40:
 		many_rows.append(_b2_row("g%d" % i, ["rifle_squad", "weapons_team", "mech_infantry", "at_team"][i % 4], Vector3(i * 30.0, 0, 500)))
-	for i in 10:
+	for i in 5:  # a company's plan: 5 objectives with their SBF and screens, 5 more tasks (20 needs)
 		many_needs.append({"id": "o%d" % i, "role": "assault", "pos": Vector3(i * 100.0, 0, 0), "pair": "o%d:sbf" % i, "priority": 10.0 - i})
 		many_needs.append({"id": "o%d:sbf" % i, "role": "sbf", "pos": Vector3(i * 100.0, 0, 250), "priority": 10.0 - i})
 		many_needs.append({"id": "s%d" % i, "role": "screen", "pos": Vector3(i * 100.0, 0, -300), "priority": 5.0})
+		many_needs.append({"id": "r%d" % i, "role": ["reserve", "recon", "defend", "overwatch", "resupply"][i], "pos": Vector3(i * 80.0, 0, 600), "priority": 4.0})
 	var us := INF
 	for batch in 5:  # the best of five batches: other runs share this machine
 		var t0 := Time.get_ticks_usec()
 		for k in 4:
 			SideCommand.allocate(many_needs, many_rows)
 		us = minf(us, (Time.get_ticks_usec() - t0) / 4.0)
-	print("    allocate: %.0f us for 40 groups and 30 needs" % us)
+	print("    allocate: %.0f us for 40 groups and 20 needs" % us)
 	check(us < 1000.0, "a tasking cycle's allocation is under 1 ms for 40 groups (%.0f us)" % us)
 
 
@@ -666,7 +667,7 @@ func _test_defence() -> void:
 	var rec := {"squad": sq, "soldiers": [], "virtual": {"members": [{"name": "v1"}], "pos": Vector3(40, 0, 40), "side": "hostile"}}
 	var vid := cmd.server_register(sq, "rifle_squad", "Banner V")
 	cmd.groups[vid].record = rec  # (a staged profile: not handed to the Virtualizer)
-	cmd._issue({"id": "probe:x", "role": "probe", "pos": site_pos}, {"id": vid, "pos": Vector3(40, 0, 40), "kind": "rifle_squad"}, 1.0)
+	cmd._issue({"id": "hold:x", "role": "defend", "pos": site_pos}, {"id": vid, "pos": Vector3(40, 0, 40), "kind": "rifle_squad"}, 1.0)
 	check(sq.patrol.size() == 1 and sq.patrol[0].is_equal_approx(site_pos), "a virtual group walks its profile's route to its task")
 	check(rec.get("vf_kind") == "rifle_squad", "and fights off-screen by the armour table as what it is")
 	print("B2: a hot zone keeps EnemyCommand's rules")

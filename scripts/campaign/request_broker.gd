@@ -123,6 +123,16 @@ func server_request(by: int, kind: String, target_pos: Vector3, from_pos: Vector
 		return {"why": "No such request"}
 	if bool(sp.get("named_only", false)) and to == "":
 		return {"why": "Look at a unit to ask it for %s" % sp.get("label", kind)}
+	if kind == "check_fire":  # every friendly gun into 100 m of it stops for 30 s (4.5): no answerer
+		Deconfliction.server_check_fire(target_pos, &"friendly", _peer_name(by))
+		_say("Citadel", "All stations, check fire, check fire at %s." % _grid(target_pos))
+		var cf := {"id": _next_id, "kind": kind, "by": by, "by_name": _peer_name(by), "from_pos": from_pos, "target": {"pos": target_pos, "ref": ref, "radius": 100.0},
+			"to": "", "group": "", "callsign": "Citadel", "state": "done", "eta_s": 0.0, "why": "", "counter": {}, "at": now(), "answer_at": now(),
+			"until": now() + Deconfliction.CHECK_FIRE_S, "merged": 0, "text": ""}
+		_next_id += 1
+		requests[cf.id] = cf
+		_send()
+		return cf
 	var open := 0
 	for r: Dictionary in requests.values():
 		if r.get("ask", false) or int(r.by) != by or not (String(r.state) in OPEN):

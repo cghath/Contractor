@@ -139,8 +139,9 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 			continue
 		if vehicle.has_meta(&"sector") and not GunTeam.in_sector(vehicle.get_meta(&"sector"), muzzle, s.global_position):
 			continue  # a placed gun's arc (GunTeam.sector)
-		if d <= reach:
-			foes.append([d, s])
+		if d <= reach and not Deconfliction.near_bft(lvl, s.global_position, Deconfliction.BFT_M, "v:" + vehicle.vehicle_id) \
+				and not Deconfliction.checked(s.global_position, gunner.faction):
+			foes.append([d, s])  # (never within 50 m of our tracked vehicles, never into a check fire: combined_arms 4.5)
 	foes.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 	var exclude: Array[RID] = [vehicle.get_rid()]
 	for f: Array in foes.slice(0, 6):

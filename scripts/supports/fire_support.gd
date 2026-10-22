@@ -369,6 +369,10 @@ func _request(m: Dictionary, kind: String, shell: String, n: int) -> String:
 		_radio(unit_id, "Danger close: %d friendl%s within %d m of the aim. Request confirmation, over." % [close, "y" if close == 1 else "ies", int(u.danger_close_m)])
 		_show()
 		return "Danger close: %d friendl%s within %d m. Confirm danger close (Support > Fire support) to fire" % [close, "y" if close == 1 else "ies", int(u.danger_close_m)]
+	var near := Deconfliction.friendlies_near(self, m.aim, float(u.danger_close_m) * 2.0)
+	if int(near.count) > 0 and int(m.fired) == 0:  # the FDC warns before a mission near friendlies (combined_arms 4.5)
+		_radio(unit_id, "Splash in %d, friendlies stay %s of the target." % [roundi(float(u.response_s) + FireMission.flight_s(FireMission.flat(m.gun, m.aim), float(u.elevation_mils))),
+			near.away if String(near.away) != "" else "clear"])
 	var price := Prices.support_price(String(u.price)) * n
 	if not server_pay(price, "%s, %d %s" % [String(u.name), n, "adjusting round" if kind == "adjust" else ("rounds" if n > 1 else "round")]):
 		return "Can't pay for %d round%s ($%s)" % [n, "" if n == 1 else "s", DebriefCalc.money(price)]
@@ -492,6 +496,8 @@ func server_advance(seconds: float) -> void:
 func _step() -> void:
 	var t := now()
 	for r: Dictionary in rounds.duplicate():
+		if not bool(r.shot) and t >= float(r.fire_at) and _check_fire(r):
+			continue
 		if not bool(r.shot) and t >= float(r.fire_at):
 			r.shot = true
 			var bias: Vector3 = (missions.get(String(r.unit), {}) as Dictionary).get("bias", Vector3.ZERO)
@@ -515,6 +521,23 @@ func _step() -> void:
 			m.by = null
 		if t >= float(m.ends_at) or (t - float(m.last_at) > IDLE_END_S and not _in_flight(id)):
 			_end(id, bool(m.ffe))
+
+
+## A round about to be fired whose target area has a check fire, or a friendly walked into it
+## (inside danger close, a mission not confirmed danger close): the mission's rounds not yet fired
+## are stopped (combined_arms 4.5). True if `r` was.
+func _check_fire(r: Dictionary) -> bool:
+	var m: Dictionary = missions.get(String(r.unit), {})
+	var u := FireMission.unit(String(r.unit))
+	var walked_in := not bool(m.get("confirmed", false)) and int(Deconfliction.friendlies_near(self, r.aim, float(u.get("danger_close_m", 150.0))).count) > 0
+	if not Deconfliction.checked(r.aim) and not walked_in:
+		return false
+	for other: Dictionary in rounds.duplicate():
+		if String(other.unit) == String(r.unit) and not bool(other.shot):
+			rounds.erase(other)
+	_radio(String(r.unit), "Check fire, check fire. %s." % ("Friendlies in the target area" if walked_in else "Check fire called"))
+	SessionLog.note("fire support: %s check fire" % String(r.unit))
+	return true
 
 
 func _in_flight(unit_id: String) -> bool:

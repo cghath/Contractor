@@ -11,6 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Deconfliction: no blue on blue (combined arms phase B5, docs/combined_arms.md 4.5)
+
+#### Added
+- **Check fire.** Any player can call a check fire on a point. Every friendly gun firing within
+  100 m of it stops for 30 seconds.
+- **Lanes.** Each allied group's task gets its own lane, kept clear of the other groups' lanes.
+  Allied groups don't shoot across another group's lane, and their moves bend round players.
+- **Player bubbles.** No allied suppression lands within 100 m of a player.
+- **Fire missions near friendlies.** The fire direction centre warns before rounds land near
+  friendlies ("Splash in 45, friendlies stay south of the target"). It checks fire if one walks
+  into the target area.
+- **Vehicle gunners** don't fire near friendly vehicles.
+- **Friendly-fire incidents** are logged for the debrief.
+
 ### Armour and infantry together (combined arms phase B3, docs/combined_arms.md 3.6)
 
 #### Added

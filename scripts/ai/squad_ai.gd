@@ -5164,8 +5164,8 @@ func _shoot() -> void:
 			_seek_fire_spot()
 		return
 	_no_shot_since = -1.0
-	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at):
-		return
+	if body.inventory.rounds_in(body.active_slot) <= 0 or _friendly_in_line(aim_at) or Deconfliction.holds_fire(body, aim_at, foe == null):
+		return  # (Deconfliction: check fire, a player's bubble, another group's sector: combined_arms 4.5)
 	var auto: bool = weapon.stats.get("auto", false)
 	_next_shot = now + 60.0 / float(weapon.stats.get("rpm", 600)) * (1.0 if auto else 1.6)
 	var range_m := body.camera.global_position.distance_to(aim_at)

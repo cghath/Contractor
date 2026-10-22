@@ -14,7 +14,7 @@ SPEAKERS = [int(s) for s in sys.argv[4].split(",") if s != ""]
 DIGITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
 # How a word is spoken where its spelling would read wrong.
 SAY = {"casevac": "cas evac", "sitrep": "sit rep", "were": "we're", "metres": "meters", "dustoff": "dust off",
-       "nine": "niner", "a": "uh"}
+       "nine": "niner", "a": "uh", "m": "meters", "d": "'d", "s": "'s", "t": "'t", "lz": "L Z", "hhour": "H hour"}
 
 words = json.loads((ROOT / "data" / "radio_voice.json").read_text(encoding="utf-8"))["words"] + DIGITS
 for k, speaker in enumerate(SPEAKERS):

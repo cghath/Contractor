@@ -341,33 +341,35 @@ static func allocate(needs: Array, rows: Array) -> Array[Dictionary]:
 		reaches.append(mounted if not (row.get("mounted_in", []) as Array).is_empty() else foot)
 		ats.append(float(row.get("at_cp", 0.0)))
 	# (packed arrays are values: built here, then shared read-only; `taken` is the one that changes)
-	var t := {"ids": ids, "kinds": kinds, "kind_of": kind_of, "needs": tasked, "x": xs, "z": zs, "w": ws, "ce": ces, "reach": reaches, "at": ats, "taken": {}}
+	var t := {"ids": ids, "kinds": kinds, "kind_of": kind_of, "needs": tasked, "x": xs, "z": zs, "w": ws, "ce": ces, "reach": reaches, "at": ats}
+	var taken := PackedByteArray()
+	taken.resize(ids.size())
 	var out: Array[Dictionary] = []
 	for n: Dictionary in order:
 		if paired.has(String(n.id)):
 			continue  # an assault's SBF: assigned with it
 		if String(n.role) == "assault" and String(n.get("pair", "")) != "" and by_id.has(String(n.pair)):
 			var sbf: Dictionary = by_id[String(n.pair)]
-			var si := _best(sbf, t, -1)
+			var si := _best(sbf, t, taken, -1)
 			if si.x < 0:
 				continue
-			var ai := _best(n, t, int(si.x))
+			var ai := _best(n, t, taken, int(si.x))
 			if ai.x < 0:
 				continue
-			t.taken[int(si.x)] = true
-			t.taken[int(ai.x)] = true
+			taken[int(si.x)] = 1
+			taken[int(ai.x)] = 1
 			out.append({"need": sbf, "row": rows[int(si.x)], "score": si.y})
 			out.append({"need": n, "row": rows[int(ai.x)], "score": ai.y})
 			continue
-		var bi := _best(n, t, -1)
+		var bi := _best(n, t, taken, -1)
 		if bi.x >= 0:
-			t.taken[int(bi.x)] = true
+			taken[int(bi.x)] = 1
 			out.append({"need": n, "row": rows[int(bi.x)], "score": bi.y})
 	return out
 
 
 ## The best row for need `n` in packed rows `t`: (index, score), index -1 for none.
-static func _best(n: Dictionary, t: Dictionary, also_not: int) -> Vector2:
+static func _best(n: Dictionary, t: Dictionary, taken: PackedByteArray, also_not: int) -> Vector2:
 	var only := String(n.get("only", ""))
 	var role := String(n.role)
 	var town := bool(n.get("town", false))
@@ -386,9 +388,9 @@ static func _best(n: Dictionary, t: Dictionary, also_not: int) -> Vector2:
 	var zs: PackedFloat32Array = t.z
 	var ws: PackedFloat32Array = t.ce if bool(n.get("override", false)) else t.w  # an override ignores how busy the group is
 	var exclude: Dictionary = n.get("exclude", {})
+	var has_exclude := not exclude.is_empty()
 	var reaches: PackedFloat32Array = t.reach
 	var ats: PackedFloat32Array = t.at
-	var taken: Dictionary = t.taken
 	var suits := PackedFloat32Array()
 	for k in kinds:
 		suits.append(suitability(k, role, town))
@@ -399,7 +401,7 @@ static func _best(n: Dictionary, t: Dictionary, also_not: int) -> Vector2:
 	var top := 0.0
 	for i in ids.size():
 		var suit := suits[kind_of[i]]
-		if suit <= 0.0 or i == also_not or taken.has(i) or (armour and ats[i] <= 0.0) or (has_only and ids[i] != only) or exclude.has(ids[i]):
+		if suit <= 0.0 or taken[i] == 1 or i == also_not or (armour and ats[i] <= 0.0) or (has_only and ids[i] != only) or (has_exclude and exclude.has(ids[i])):
 			continue
 		var d := 0.0
 		if has_to and not is_nan(xs[i]):
@@ -515,6 +517,7 @@ func _issue(n: Dictionary, row: Dictionary, s: float) -> void:
 	g.amber = false
 	_log("%s to %s on %s: score %.2f, %s %s at %d m" % [g.callsign, String(n.role).to_upper(), String(n.get("label", n.id)), s,
 		String(row.get("kind", "")).replace("_", " "), String(row.get("ce_band", "")), roundi(_flat(row.pos, n.pos))])
+	n = _sector(g, row, n)
 	if not (g.record as Dictionary).is_empty():
 		g.record["vf_kind"] = fight_kind(row)
 	if not (g.record as Dictionary).is_empty() and Virtualizer.is_virtual(g.record):
@@ -526,11 +529,40 @@ func _issue(n: Dictionary, row: Dictionary, s: float) -> void:
 		_give(g, list[i], i > 0)
 
 
+## B5 (4.5): the task's sector, its corridor from the group to the task kept clear of the other
+## groups' (a spot that can move moves sideways; an objective can't); the squad carries it
+## (meta "sector") for Deconfliction.holds_fire. Returns the need, its spot maybe moved.
+func _sector(g: Dictionary, row: Dictionary, n: Dictionary) -> Dictionary:
+	var from: Vector3 = row.get("pos", n.pos)
+	if not from.is_finite():
+		return n
+	var sec := Deconfliction.sector_of(from, n.pos, float(n.get("frontage", 0.0)))
+	var others: Array = []
+	for o: Dictionary in groups.values():
+		if not is_same(o, g) and o.has("sector") and not (o.sector as Dictionary).is_empty():
+			others.append(o.sector)
+	if String(n.role) in ["sbf", "screen", "overwatch", "reserve", "recon", "probe", "flank", "qrf"]:
+		var moved := Deconfliction.shift_clear(sec, others)
+		if not (moved.to as Vector2).is_equal_approx(sec.to):
+			n = n.duplicate()
+			n.pos = Vector3(moved.to.x, (n.pos as Vector3).y, moved.to.y)
+			_log("%s's lane shifted %.0f m to keep clear of another group's" % [g.callsign, (moved.to as Vector2).distance_to(sec.to)])
+			sec = moved
+	g.sector = sec
+	(g.squad as Squad).set_meta(&"sector", sec)
+	return n
+
+
 ## The HcOrders that carry out need `n` for group `g` (3.4.1's "compiles to").
 func orders_for(n: Dictionary, g: Dictionary) -> Array[Dictionary]:
 	var id := String(g.id)
 	var p: Vector3 = n.pos
 	var at := [p.x, p.z]
+	var route: Array = []  # a move's way round the players' bubbles (B5), then the spot
+	if side == &"friendly":
+		for w: Vector3 in Deconfliction.detour(_group_pos(g), p, Deconfliction.players(self)):
+			route.append([w.x, w.z])
+	route.append(at)
 	var target: Vector3 = n.get("target", p)
 	var face: Variant = n.get("facing", null)
 	var facing: Array = [] if face == null else [(face as Vector3).x, (face as Vector3).z]
@@ -544,14 +576,14 @@ func orders_for(n: Dictionary, g: Dictionary) -> Array[Dictionary]:
 			out.append(HcOrder.make(id, "move", [at], {"posture": {"contact": "avoid"}}))
 			out.append(HcOrder.make(id, "attack", [[target.x, target.z]], {"target": {"kind": "point", "pos": [target.x, target.z]}}))
 		"recon", "probe":
-			out.append(HcOrder.make(id, "move", [at], {"posture": {"contact": "avoid", "mode": "stealth"}}))
+			out.append(HcOrder.make(id, "move", route, {"posture": {"contact": "avoid", "mode": "stealth"}}))
 		"reserve", "qrf", "reconstituting":
-			out.append(HcOrder.make(id, "move", [at], {"posture": {"mode": "aware"}}))
+			out.append(HcOrder.make(id, "move", route, {"posture": {"mode": "aware"}}))
 			out.append(HcOrder.make(id, "hold", []))
 		"screen", "defend", "overwatch":
 			out.append(HcOrder.make(id, "defend", [at], {"facing": facing}))
 		"resupply", "casevac", "transport":
-			out.append(HcOrder.make(id, "move", [at]))
+			out.append(HcOrder.make(id, "move", route))
 		"fire_support":
 			fire_support_wanted.emit(target, String(n.get("label", "")))
 			out.append(HcOrder.make(id, "hold", []))
