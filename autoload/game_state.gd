@@ -37,6 +37,9 @@ var profiles: Array = []
 ## mines, chem lights, with their clocks), put back by the level's Demolitions on load. Rebuilt
 ## from the level's Demolitions on every save.
 var demolitions: Array = []
+## The zone's bridges (ZoneBridges.to_save: {"hp": bridge id -> every span's health}), put back by
+## the level on load: a dropped span stays down. Rebuilt from the level's bridges on every save.
+var bridges: Dictionary = {}
 
 
 func post_fell(spawn_id: String) -> void:
@@ -106,6 +109,8 @@ func save_zone() -> bool:
 	profiles = virtualizer.to_save() if virtualizer and virtualizer.has_method(&"to_save") else []
 	var placed := get_tree().get_first_node_in_group(&"demolitions")
 	demolitions = placed.to_save() if placed and placed.has_method(&"to_save") else []
+	var spans := get_tree().get_first_node_in_group(&"zone_bridges")
+	bridges = spans.to_save() if spans and spans.has_method(&"to_save") else {}
 	# Caches and site boxes as they are now: looted, or used as a stash (compound loot).
 	for node in get_tree().get_nodes_in_group(&"world_caches"):
 		if node.has_method(&"to_save") and not node.is_queued_for_deletion() and String(node.get(&"uid")) != "":
@@ -122,6 +127,7 @@ func save_zone() -> bool:
 		"caches": caches,
 		"profiles": profiles,
 		"demolitions": demolitions,
+		"bridges": bridges,
 		"sky": sky,
 		"left_day": BaseHub.day() if BaseHub.campaign_running else -1,  # zone memory (LZ-2): it fades from here
 	}, "", true, true)  # full precision: item state (plate and helmet integrity) comes back exactly
@@ -146,6 +152,7 @@ func load_zone() -> void:
 	caches = {}
 	profiles = []
 	demolitions = []
+	bridges = {}
 	var zone := {}
 	for path: String in save_candidates(save_path()):
 		if not FileAccess.file_exists(path):
@@ -169,6 +176,7 @@ func load_zone() -> void:
 	caches = zone.get("caches", {})  # boxes stay as they were left even when the loose gear fades
 	profiles = zone.get("profiles", [])
 	demolitions = zone.get("demolitions", [])
+	bridges = zone.get("bridges", {})
 	if fade_loose:
 		bodies.clear()  # gone in the days since (zone memory, LZ-2)
 		dropped.clear()
@@ -361,6 +369,17 @@ static func read_save(path: String) -> Dictionary:
 				out.demolitions.append(r)
 			else:
 				push_warning("GameState: %s: skipping a bad placed item" % path)
+	var bridges_in: Variant = data.get("bridges", {})  # nor bridges before the water (queue item 1.1)
+	out["bridges"] = {}
+	if typeof(bridges_in) == TYPE_DICTIONARY and typeof(bridges_in.get("hp", {})) == TYPE_DICTIONARY:
+		var hp := {}
+		for id: Variant in bridges_in.get("hp", {}):
+			var spans: Variant = bridges_in.hp[id]
+			if typeof(id) == TYPE_STRING and typeof(spans) == TYPE_ARRAY and (spans as Array).all(func(v: Variant) -> bool: return is_number(v) and is_finite(float(v))):
+				hp[id] = spans
+			else:
+				push_warning("GameState: %s: skipping a bad bridge record (%s)" % [path, id])
+		out.bridges = {"hp": hp}
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)

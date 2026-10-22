@@ -6,11 +6,32 @@ palette and the scatter (rocks, scrub, trees per km2 of zone, so bigger zones ge
 
 **Which preset a zone gets** (`ZoneDef.normalize`, so it is in the def the host sends): the def's `terrain`,
 else the first `name_hints` word in the zone's name, else `region_defaults[region]`, else `default`.
-Coast -> coastal_lowland, inland -> desert_wadi; Salt flats -> salt_flats; Black Ridge hills -> rocky_ridge;
+Coast -> coastal_lowland, inland -> desert_wadi; Salt flats -> salt_flats; Black Ridge hills -> rocky_ridge; Kestrel Valley -> river_valley;
 Wadi farm -> desert_wadi. The test zone is `plain` (no scatter).
 
 **Sea**: a preset with `sea` gets a shoreline on one side picked by the seed, never a side holding a pad
 (`def.sea_side`, `def.sea_m`). Ground deeper than 0.9 m under the water is left out of navigation.
+
+**Water** (queue item 1.1, `ZoneWater` in `scripts/world/zone_water.gd`, `ZoneBridges`, `Wading`): a preset's
+`water` carves rivers, streams, lakes and ponds into the heightmap once the pads are flat, from the seed only (every
+peer builds the same). Every key is optional (defaults in `ZoneWater`'s `*_DEFAULTS`, all Proposed):
+- `rivers`: `count`, `width_m` [min, max], `depth_m`, `bank_h_m`, `bank_w_m`, `valley_m` (its surface under the
+  ground along it), `valley_w_m` (the valley blends back into the land over this), `meander_m`,
+  `meander_wavelength_m`, `grade` (the least fall a metre), `drop_max_m`, `flow_ms`, `reeds` (clumps a metre of
+  bank). Edge to edge, kept `PAD_CLEAR_M` past its banks off every pad, flowing downhill from its higher end.
+- `streams`: the same keys plus `length_m` [min, max]: from a seeded spring downhill into the river (or a lake, or
+  off the edge), joining at its level.
+- `lakes`, `ponds`: `count`, `radius_m`, `depth_m`, `bank_h_m`, `bank_w_m`, `valley_w_m`, `reeds`. A wobbly bowl
+  whose level is its lowest rim, clear of pads, roads, rivers and each other.
+- `crossing_gap_m` (450), `bridges` {"concrete", "truss"} weights, `culvert_share` (0.65), `footbridge_share`
+  (0.5): every road over a river gets a vehicle bridge, a road over a stream a culvert or ford, and the river a ford
+  or footbridge in every `crossing_gap_m` without a crossing (`ZoneBridges`: collision, the AI's navigation over
+  them, spans a big blast drops, saved with the zone).
+Ground deeper than `ZoneWater.NAV_WATER_M` (0.9 m) under the water is out of the navigation mesh; wading slows a man
+and deeper than 1.45 m he swims (`Wading`). On river_valley (the river, 1-2 streams, 1-2 ponds), temperate (a stream
+and ponds, sometimes), highland_moor (burns, a tarn), coastal_lowland and scrubland (ponds). "procedural" takes
+`water` whole from the nearer of its two presets, like `sea` and `wadi`. A zone def's `"no_water": true` leaves it
+out (checks).
 
 **Scatter**: deterministic from the seed; never on pads, roads, in water or on steep ground. Large rocks and
 trunks have collision and are baked into navigation; scrub is visual only. Visuals build nearest cells first.
