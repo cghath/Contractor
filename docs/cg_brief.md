@@ -286,13 +286,14 @@ buckle, shoulder hits spin). Players get a view kick to match.
 
 ### 10. Vehicles and air, in this order
 
-1. The Bradley's 25 mm and the Abrams' 120 mm main guns, crewable (today only their coax M240
-   works).
-2. Enemy armed helicopters at high alert.
-3. Close air support and attack-helicopter runs as a support purchase (the AH-1Z model exists,
+Armoured gameplay is Claude's now (Captain, 2026-10-21): crewable Bradley/Abrams/AAV main guns,
+first- and third-person vehicle HUDs, light armour across the factions, and US forces fighting in
+the living war. No need to build those. Still yours, in this order:
+1. Enemy armed helicopters at high alert.
+2. Close air support and attack-helicopter runs as a support purchase (the AH-1Z model exists,
    parked on the LHD).
-4. The Razorback nose pod.
-5. Player-flown aircraft, last.
+3. The Razorback nose pod.
+4. Player-flown aircraft, last.
 
 ### 11. Multiplayer
 
