@@ -6,35 +6,27 @@ the reset is **Sunday Oct 25, 10:00 CDT**). If you're picking this up, start at 
 "Open work". The decisions are already made: docs/cg_brief.md "Decisions already made",
 docs/combined_arms.md section 10, and Captain's asks below. Make the call and keep going.
 
-Last updated: 2026-10-22 02:40 CDT (claude/ai-driving 494fb4f3 plus this doc).
+Last updated: 2026-10-22 11:55 CDT (claude/ai-driving 494fb4f3 plus this doc).
 
 ## State
 
-claude/ai-driving is the integration branch. dev is still at 52037f2 (Oct 20); the CI cleanup
-below is what lets it catch up.
+claude/ai-driving is the integration branch. dev caught up on 2026-10-22 (3c2ba039, via the CI
+cleanup); it moves again once claude/ai-driving's CI is no worse.
 
-| Work | Branch | Head | In claude/ai-driving? | Status / next step |
-|---|---|---|---|---|
-| Design doc (combined arms) | claude/combined-arms-doc | e13d2f7 | yes | Done: docs/combined_arms.md, 29 phases, 73 calls |
-| AI follow-ups F-140/162/176 + AI bar G-14/24/26 | claude/ai-followups | ff9d4419 | yes (494fb4f3) | Done |
-| D7: US forces in the living war | claude/ca-d7-us-war | fcecf360 | yes (f152f8b0) | Done. FOB Halberd and US outposts exist for D8 |
-| A1: the armour model | claude/ca-a1-armour-model | 4365bdb4 | yes (06637048) | Done. Next is your cg_brief 2.0 (standards pass), then A2 |
-| CI reds, dev catch-up, AAV fix | claude/ci-cleanup | 4be2d0d1 (15 ahead) | no | Running. Fixing the CI reds; then merge into claude/ai-driving and fast-forward dev |
-| Performance pass | claude/perf-pass | 7a0a6d5c (9 ahead) | no | Running. Measuring and fixing FPS and stutters (towns, firefights, woods, vehicles); notes in docs/performance.md on the branch |
-| B lane: AI commander | claude/ca-b1-side-picture | a242b86c (5 ahead) | no | B1 and B4 part 1 done; B2 waits for C2 (high command). Then B3, B5 |
-| C lane: high command and UI | claude/ca-c-high-command | 665a3a3a | no | C1-C6 done (groundwork; Phase 1 + Hawk 2/Viper 3 from the start + allied on HcOrder; Phase 2 orders, go codes, requests; map-order HUD + gun cone; 3D HC camera + 3D mission map; contextual menus; B1/B4 part 1 merged in; R2441-R2454 pass locally). Next: branch CI, then merge into claude/ai-driving. B2 can build on SquadOrders now. Follow-ups: section 10 C2.11, C4.9, C6.7 |
-| D1/D2: 8 km operation zones | claude/ca-d1-operation-zones | d9936362 (2 ahead) | no | **Yours** (cg_brief 3.1). D1 done and tested; D2 is untested WIP, see the note at the top of its CHANGELOG entry |
-| Tactics reels → AI spec | (not a branch yet) | | docs/tactics/ | In progress; see "Tactics reels" below |
-
-Your branches not yet merged into claude/ai-driving (Captain asked to wait for more world
-expansion before the next merge and build):
-- world/water (1 ahead);
-- world/landmarks (3);
-- world/props (4);
-- feat/missions-2 (7);
-- feat/voxel-smoke (5);
-- feat/demolitions (5);
-- docs/stale-status (5, docs only; left out on Captain's call).
+| Work | Branch | In claude/ai-driving? | Status / next step |
+|---|---|---|---|
+| Design doc (combined arms) | claude/combined-arms-doc | yes | Done: docs/combined_arms.md |
+| AI follow-ups F-140/162/176, G-14/24/26 | claude/ai-followups | yes | Done |
+| CI cleanup, dev catch-up, AAV fix | claude/ci-cleanup | yes | Done. Known reds left: exo, mech, nvg, loadout, vehicles (480 s timeout on the base), gameplay, armour (fail on the base too) |
+| Performance pass | claude/perf-pass | yes (df3133f0) | Done. Town 50.7→21.4 ms, heli stutters gone; perfcases suite; "World detail at distance" setting; F-206 lists what's left |
+| D7: US forces in the living war | claude/ca-d7-us-war | yes | Done |
+| A1: the armour model | claude/ca-a1-armour-model | yes | Done. Next is your cg_brief 2.0 (standards pass), then A2 |
+| C lane: high command C1-C6 | claude/ca-c-high-command | yes (df3133f0) | Done: two HC squads from the start, Phase 2 orders, map-order HUD with gun cone of fire, 3D HC camera, contextual menus |
+| B lane: AI commander | claude/ca-b1-side-picture | B1 only (via C) | Running: B2 (unblocked by C2), B3, B5, the rest of B4, then docs/ai_tactics.md from the reels, for all AI |
+| D1/D2: 8 km operation zones | claude/ca-d1-operation-zones | no | **Yours** (cg_brief 3.1). D1 done; D2 untested WIP |
+| Your world/water, missions-2, voxel smoke, demolitions | (yours) | yes (00f3e731) | Merged 2026-10-22 for v0.5.3 |
+| Your world/perf stack (roads, terrain, cities, village houses, props, perf) | world/perf | **merging** | It conflicts with our perf pass in zone_scatter.gd; the perf session is merging both (claude/merge-world-perf), then v0.5.3 |
+| Tactics reels → AI spec | docs/tactics/ | yes | 10 of 23 reels done (13 gone, skipped on Captain's call); the B lane writes and builds the spec |
 
 ## Open work, in order, and who has it
 
