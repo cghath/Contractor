@@ -160,6 +160,8 @@ func _pick_reserve(cmd: SideCommand) -> void:
 	for r: Dictionary in rows:
 		if held >= total * share or rows.size() - reserve.size() <= 2:
 			break  # an Assault and its SBF still need someone
+		if cmd.pairs.has(String(r.id)):
+			continue  # paired armour escorts its infantry
 		reserve[String(r.id)] = true
 		held += float(r.strength_cp)
 	if not reserve.is_empty():
@@ -182,7 +184,7 @@ func _top_up_reserve(cmd: SideCommand) -> void:
 		return
 	for r: Dictionary in rows:
 		var gid := String(r.id)
-		if not reserve.has(gid) and String(r.role) in ["", "reserve"]:
+		if not reserve.has(gid) and String(r.role) in ["", "reserve"] and not cmd.pairs.has(gid):
 			reserve[gid] = true
 			cmd._log("%s joins the reserve" % cmd.groups[gid].callsign)
 			return
@@ -315,6 +317,16 @@ func needs(cmd: SideCommand, t: float) -> Array:
 		if String(row.ammo_band) == "amber" and not reserve.has(String(row.id)):
 			out.append({"id": "resupply:" + String(row.id), "role": "resupply", "pos": row.pos, "priority": 4.0, "label": "%s's ammo" % row.id})
 	return out
+
+
+## The current phase's axis (B3: armour follows its infantry along it).
+func axis_dir() -> Vector3:
+	var axis: Array = current().get("axis", [])
+	if axis.size() < 2:
+		return Vector3.FORWARD
+	var d: Vector3 = (axis[1] as Vector3) - (axis[0] as Vector3)
+	d.y = 0.0
+	return d.normalized() if d.length() > 0.1 else Vector3.FORWARD
 
 
 ## Where group `g` falls back to: the rally.

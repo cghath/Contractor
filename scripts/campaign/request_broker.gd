@@ -394,6 +394,16 @@ func _raise(row: Dictionary, kind: String, players: Array[Soldier], reach: float
 	_queue_cards()
 
 
+## Host (SideCommand, B3): group `group` asks the nearest player within contact_support_m of
+## `at` for `kind` ("ask_clear_at": an AT team its armour can't hit), saying `text`.
+func server_ask_players(group: String, kind: String, at: Vector3, text: String) -> void:
+	var board := _board()
+	var row: Dictionary = board.rows.get(group, {}) if board else {}
+	if row.is_empty():
+		row = {"id": group, "pos": at, "kind": "armour_section"}
+	_raise(row, kind, MapNodes.players(self), float((data().get("asks", {}) as Dictionary).get("contact_support_m", 600.0)), text)
+
+
 ## One card a player at a time: the oldest ask waiting gets its 30 s once nothing else is up.
 func _queue_cards() -> void:
 	var showing := {}
@@ -424,6 +434,14 @@ func server_answer_ask(by: int, id: int, yes: bool) -> bool:
 	return true
 
 
+## An AT-team ask is done once the side has no AT team reported within 400 m of the armour.
+func _at_cleared(r: Dictionary) -> bool:
+	var pic := SideIntel.picture_of(self, &"friendly")
+	if pic == null:
+		return true
+	return not pic.entries_near(r.pos, 400.0).any(func(e: Dictionary) -> bool: return String(e.kind) == "at")
+
+
 func _check_asks() -> void:
 	var board := _board()
 	for r: Dictionary in requests.values():
@@ -435,7 +453,7 @@ func _check_asks() -> void:
 		elif r.state == "accepted":
 			var row: Dictionary = board.rows.get(r.group, {}) if board else {}
 			var out_of_it: bool = row.is_empty() or (r.kind == "ask_support" and (not bool(row.get("in_contact", false)) or row.ce_band == "green")) \
-				or (r.kind == "ask_ammo" and row.ammo_band != "red")
+				or (r.kind == "ask_ammo" and row.ammo_band != "red") or (r.kind == "ask_clear_at" and _at_cleared(r))
 			if out_of_it:
 				r.state = "done"
 				_send()

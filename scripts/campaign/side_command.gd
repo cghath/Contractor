@@ -51,6 +51,10 @@ var net: Array[Dictionary] = []
 var withdrawn := false
 ## Request jobs: request id -> group id (B4's executor).
 var jobs := {}
+## B3: armour id -> its infantry screen's id (ArmourInfantry.pair, each cycle).
+var pairs := {}
+## B3: hand-offs and AT asks already said ("armour|entry").
+var handed := {}
 var _offset := 0.0
 var _task_left := 0.0
 var _think_left := 0.0
@@ -286,6 +290,7 @@ func server_cycle() -> void:
 	if withdrawn:
 		return
 	var needs: Array = plan.call(&"needs", self, t)
+	needs = ArmourInfantry.apply(self, needs, plan.call(&"axis_dir") if plan.has_method(&"axis_dir") else Vector3.FORWARD)
 	if needs.is_empty():
 		return
 	for a: Dictionary in allocate(needs, rows()):
@@ -316,6 +321,7 @@ static func allocate(needs: Array, rows: Array) -> Array[Dictionary]:
 	var xs := PackedFloat32Array()
 	var zs := PackedFloat32Array()
 	var ws := PackedFloat32Array()
+	var ces := PackedFloat32Array()
 	var reaches := PackedFloat32Array()
 	var ats := PackedFloat32Array()
 	for row: Dictionary in rows:
@@ -331,10 +337,11 @@ static func allocate(needs: Array, rows: Array) -> Array[Dictionary]:
 		xs.append(at.x if at.is_finite() else NAN)
 		zs.append(at.z if at.is_finite() else NAN)
 		ws.append(float(row.get("ce", 1.0)) * float(row.get("availability", 1.0)))
+		ces.append(float(row.get("ce", 1.0)))
 		reaches.append(mounted if not (row.get("mounted_in", []) as Array).is_empty() else foot)
 		ats.append(float(row.get("at_cp", 0.0)))
 	# (packed arrays are values: built here, then shared read-only; `taken` is the one that changes)
-	var t := {"ids": ids, "kinds": kinds, "kind_of": kind_of, "needs": tasked, "x": xs, "z": zs, "w": ws, "reach": reaches, "at": ats, "taken": {}}
+	var t := {"ids": ids, "kinds": kinds, "kind_of": kind_of, "needs": tasked, "x": xs, "z": zs, "w": ws, "ce": ces, "reach": reaches, "at": ats, "taken": {}}
 	var out: Array[Dictionary] = []
 	for n: Dictionary in order:
 		if paired.has(String(n.id)):
@@ -377,7 +384,8 @@ static func _best(n: Dictionary, t: Dictionary, also_not: int) -> Vector2:
 	var tasked: PackedStringArray = t.needs
 	var xs: PackedFloat32Array = t.x
 	var zs: PackedFloat32Array = t.z
-	var ws: PackedFloat32Array = t.w
+	var ws: PackedFloat32Array = t.ce if bool(n.get("override", false)) else t.w  # an override ignores how busy the group is
+	var exclude: Dictionary = n.get("exclude", {})
 	var reaches: PackedFloat32Array = t.reach
 	var ats: PackedFloat32Array = t.at
 	var taken: Dictionary = t.taken
@@ -391,7 +399,7 @@ static func _best(n: Dictionary, t: Dictionary, also_not: int) -> Vector2:
 	var top := 0.0
 	for i in ids.size():
 		var suit := suits[kind_of[i]]
-		if suit <= 0.0 or i == also_not or taken.has(i) or (armour and ats[i] <= 0.0) or (has_only and ids[i] != only):
+		if suit <= 0.0 or i == also_not or taken.has(i) or (armour and ats[i] <= 0.0) or (has_only and ids[i] != only) or exclude.has(ids[i]):
 			continue
 		var d := 0.0
 		if has_to and not is_nan(xs[i]):

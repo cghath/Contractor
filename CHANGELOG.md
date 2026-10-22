@@ -11,6 +11,18 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Armour and infantry together (combined arms phase B3, docs/combined_arms.md 3.6)
+
+#### Added
+- **Tanks keep their infantry.** Each allied armour section is paired with an infantry group and
+  moves with it by the ground. In the open it overwatches the objective from a kilometre off. In
+  woods it follows 150 m behind, and in a town 75 m behind. It waits at a town's edge until its
+  infantry is in.
+- **Target hand-off.** Infantry held up by a machine gun or a gun position marks it to its tank
+  ("Anvil 1, Saber 2, MG at 041 053, 120 metres, my tracer."), and the tank puts fire on it.
+- **Armour asks for infantry.** An AT team reported near the armour sends its infantry after it,
+  and the tank calls for help on the net, asking a nearby player when its infantry is busy.
+
 ### The AI commander (combined arms phase B2, docs/combined_arms.md 3)
 
 #### Added
