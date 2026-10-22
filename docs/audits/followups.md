@@ -430,10 +430,11 @@ copies its box once, walks only the sphere's rows and pastes the cleared voxels 
 is replayed in one frame when it streams in (`for edit in _pending`): a fought-over town costs
 hundreds of ms there.
 
-### F-205 (done, for review): ZoneNav and streaming by distinct points
-`ZoneNav._update_wanted` marks once per MARK_CELL_M square of soldiers (radius plus the square's
-half-diagonal: never fewer chunks). `ZoneLevel._update_streaming` takes the focus points once per
-2 m (`_distinct`).
+### F-205 (done, for review): streaming by distinct points
+`ZoneLevel._update_streaming` takes the focus points once per 2 m (`_distinct`). (Marking the
+navigation's wanted chunks once per 4 m square of soldiers was tried and taken back: the wider
+reach it needed to stay a superset baked and kept more chunks, and the navigation server's time went
+up 1-1.8 ms a frame, R2422.)
 
 ### F-206 (open, for ai-followups / cghath): what's left in the hitches
 - Buildings: a cold scan's grouping, entrances and ports (`_group`, `_building`) still run in one

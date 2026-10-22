@@ -41,13 +41,17 @@ const ALL_CASES := ["town", "fight", "woods", "drive", "heli"]
 const HITCH_MS := 33.3
 ## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
 const HITCH_MEDIANS := 3.0
-## Proposed budgets (ms; hitches a minute). Set from the after-numbers with room for CI.
+## Proposed budgets (ms of 60 Hz frame cost; hitches a minute), 2026-10-22: about twice the perf
+## pass's numbers on a shared machine (docs/performance.md: town 37/68 ms and 24 hitches a minute,
+## fight 19/27 and 21, woods 10/15 and 0, drive 9/14 and 3, heli 13/22 and 2), room for CI's runners,
+## and under the numbers before the pass (town p95 168-267 ms, heli 309 hitches a minute), so going
+## back to them fails.
 const BUDGETS := {
-	"town": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
-	"fight": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
-	"woods": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
-	"drive": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
-	"heli": {"avg": 40.0, "p95": 80.0, "hitches_min": 90.0},
+	"town": {"avg": 75.0, "p95": 140.0, "hitches_min": 60.0},
+	"fight": {"avg": 40.0, "p95": 60.0, "hitches_min": 45.0},
+	"woods": {"avg": 25.0, "p95": 35.0, "hitches_min": 20.0},
+	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0},
+	"heli": {"avg": 28.0, "p95": 45.0, "hitches_min": 20.0},
 }
 const WALK_MPS := 3.0
 ## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
