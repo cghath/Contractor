@@ -1609,10 +1609,27 @@ func follow_point(member: Soldier) -> Vector3:
 	if leader == null or not is_instance_valid(leader) or member == hero:
 		return member.global_position  # G9: a hero leads; he never chases his own slot
 	var frame := Engine.get_physics_frames()
-	if frame != _slots_frame or not _slots.has(member):
+	if not _slots_fresh(frame) or (not _slots.has(member) and frame != _slots_frame):
 		_slots = _work_out_slots()
 		_slots_frame = frame
+		_slots_lead_at = leader.global_position
+		_slots_heading = heading
 	return _slots.get(member, member.global_position)
+
+
+## Perf (2026-10-22): the slots are kept SLOTS_KEEP_TICKS physics ticks while the lead is within
+## SLOTS_KEEP_M of where they were worked out and heads the same way (each working out is a few
+## rays per man: in the Old Quarter city the patrols' follow_point was 1.8 ms a call, worked out
+## again for every man that wasn't in the last answer). A man's slot lags the lead by at most a
+## couple of ticks' walk.
+const SLOTS_KEEP_TICKS := 4
+const SLOTS_KEEP_M := 0.6
+var _slots_lead_at := Vector3.INF
+var _slots_heading := Vector3.ZERO
+
+
+func _slots_fresh(frame: int) -> bool:
+	return _slots_frame >= 0 and frame - _slots_frame < SLOTS_KEEP_TICKS and frame >= _slots_frame 		and leader.global_position.distance_to(_slots_lead_at) <= SLOTS_KEEP_M and heading == _slots_heading
 
 
 ## The squad as it stands this frame, the lead and players too (who squadmates keep apart from,
@@ -1620,9 +1637,12 @@ func follow_point(member: Soldier) -> Vector3:
 func neighbours() -> Array:
 	if leader == null or not is_instance_valid(leader):
 		return members()
-	if Engine.get_physics_frames() != _slots_frame:
+	var frame := Engine.get_physics_frames()
+	if not _slots_fresh(frame):
 		_slots = _work_out_slots()
-		_slots_frame = Engine.get_physics_frames()
+		_slots_frame = frame
+		_slots_lead_at = leader.global_position
+		_slots_heading = heading
 	return _slots.keys() + [leader]
 
 

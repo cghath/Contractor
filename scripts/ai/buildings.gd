@@ -140,6 +140,7 @@ static var _cache := {}
 static var _cells := {}  # Vector3i (cell x, z, height band) -> [at, surfaces, spots] (_probe_cell)
 static var _built := {}  # a group's actual spots -> [built at, oldest probe, building]
 static var _links := {}  # [a, b] -> [at, linked]: _linked's answers
+static var _climbs := {}  # [from, to] -> [at, stair]: _climb's answers (F-206: a cut-short scan's next ask goes on)
 ## The index (_index_regions): Vector2i (a REGION_GRID_M square) -> the RIDs of the enabled
 ## regions whose bounds reach it. RIDs, not nodes: it's made again whenever the map's
 ## iteration or its count of regions changes, so a region freed since is never asked.
@@ -181,6 +182,7 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := tru
 		_cells.clear()
 		_built.clear()
 		_links.clear()
+		_climbs.clear()
 		_region_grid.clear()
 		_region_iteration = 0
 		_region_count = -1
@@ -240,6 +242,7 @@ static func forget() -> void:
 	_cells.clear()
 	_built.clear()
 	_links.clear()
+	_climbs.clear()
 	_region_grid.clear()
 	_region_iteration = 0
 	_region_count = -1
@@ -367,7 +370,10 @@ static func _scan(world: World3D, centre: Vector3, radius: float, now := Soldier
 			if not here.is_empty():
 				spots[cell] = here
 	FrameCost.spent(&"building_probes", started)
-	return {"list": _group(world, map, spots, surfaces, probed, now, details), "at": oldest}
+	var list := _group(world, map, spots, surfaces, probed, now, details, deadline)
+	if _cut_short:
+		return {"partial": true}
+	return {"list": list, "at": oldest}
 
 
 ## One cell's probes (see the class notes), from height `top` down to `bottom`: [its upward
@@ -443,7 +449,15 @@ static func _closest_nav_point(p: Vector3) -> Vector3:
 
 
 ## The scanned cells' spots (`spots`, `surfaces`, `probed`: see _scan) made into buildings.
-static func _group(world: World3D, map: RID, spots: Dictionary, surfaces: Dictionary, probed := {}, now := 0.0, details := true) -> Array:
+## Perf (F-206, 2026-10-22): past `deadline` (Time.get_ticks_usec, 0: none) no more buildings are
+## made (at least one is): _cut_short is set and the scan comes back partial. The ones made are
+## kept (_built), so the next ask goes on from there, a building or more a frame, where a cold
+## scan of a city block made them all in one frame (100-250 ms).
+static var _cut_short := false
+
+
+static func _group(world: World3D, map: RID, spots: Dictionary, surfaces: Dictionary, probed := {}, now := 0.0, details := true, deadline := 0) -> Array:
+	_cut_short = false
 	var started := Time.get_ticks_usec()
 	# Spots next to each other (8 ways) and level, or linked up a stair, make one building.
 	var out: Array = []
@@ -484,8 +498,11 @@ static func _group(world: World3D, map: RID, spots: Dictionary, surfaces: Dictio
 	# Floors stacked over each other and linked by a navmesh path that never leaves their
 	# footprint (a stair inside: the grid's spots on a narrow stair can miss its navmesh) are
 	# one building; the path gives the stair between them.
-	var climbs := _link_floors(map, spots, groups)
+	var climbs := _link_floors(map, spots, groups, now, deadline)
 	FrameCost.spent(&"building_groups", started)
+	if _cut_short:
+		return out
+	var made := 0
 	for gi in groups.size():
 		if (groups[gi] as Array).is_empty():
 			continue
@@ -511,6 +528,10 @@ static func _group(world: World3D, map: RID, spots: Dictionary, surfaces: Dictio
 		if not kept.is_empty() and float(kept[0]) >= newest and now - float(kept[1]) < CACHE_S:
 			b = kept[2]
 		else:
+			if deadline > 0 and made > 0 and Time.get_ticks_usec() >= deadline:
+				_cut_short = true
+				return out
+			made += 1
 			b = _building(world, spots, groups[gi], joins, surfaces, climbs.get(gi, []), details)
 			if _built.size() >= BUILT_MAX:
 				_built.clear()
@@ -527,7 +548,8 @@ static func _group(world: World3D, map: RID, spots: Dictionary, surfaces: Dictio
 ## that stays within their footprint: the higher one's spots go into the lower one's group
 ## (the group merged away is left empty). Returns {group index: [{"foot", "top", "spots"}]}:
 ## each link's stair, from its path (the last point on the lower floor, the first on the upper).
-static func _link_floors(map: RID, spots: Dictionary, groups: Array) -> Dictionary:
+static func _link_floors(map: RID, spots: Dictionary, groups: Array, now := 0.0, deadline := 0) -> Dictionary:
+	var asked := 0  # navmesh paths asked this call (not kept in _climbs)
 	var info: Array = []  # per group: {"cells": {Vector2i: true}, "y": mean height, "centre"}
 	for g: Array in groups:
 		var cells := {}
@@ -552,7 +574,22 @@ static func _link_floors(map: RID, spots: Dictionary, groups: Array) -> Dictiona
 					shared += 1
 			if shared < LINK_OVERLAP:
 				continue
-			var stair := _climb(map, spots, groups[lo], groups[hi], info[lo], info[hi])
+			if deadline > 0 and asked > 0 and Time.get_ticks_usec() >= deadline:
+				_cut_short = true  # (the paths asked so far are kept: the next ask goes on)
+				return {}
+			var from := _spot_nearest(spots, groups[lo], info[hi].centre)
+			var to := _spot_nearest(spots, groups[hi], info[lo].centre)
+			var ckey := [from, to]
+			var known: Array = _climbs.get(ckey, [])
+			var stair: Dictionary
+			if not known.is_empty() and now - float(known[0]) < CACHE_S:
+				stair = known[1]
+			else:
+				asked += 1
+				stair = _climb(map, spots, groups[lo], groups[hi], info[lo], info[hi])
+				if _climbs.size() >= BUILT_MAX:
+					_climbs.clear()
+				_climbs[ckey] = [now, stair]
 			if stair.is_empty():
 				continue
 			var root: int = owner[lo]

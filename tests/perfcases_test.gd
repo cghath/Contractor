@@ -7,7 +7,10 @@ extends Node
 ## PERF_NO_BUDGETS=1 to only print the numbers.
 ## Each case hosts a real zone with its AI (CompoundLevel.spawn_ai: garrisons, the squad, the
 ## hot zones' patrols) and plays a scene from it for MEASURE_S seconds:
-##   town   Old Quarter (city_hot): the player walks into the city's biggest town with the squad;
+##   town   Old Quarter (city_hot): the player walks into the zone's biggest town or village (not
+##          a city block) with the squad;
+##   city   Old Quarter: the player walks from outside the city (BuildingGen.city_layout) up its
+##          street to the middle, through the city blocks' garrisons;
 ##   fight  Black Ridge (ridge_hot): the squad and an allied section 90-140 m from the biggest
 ##          garrison, the zone ENGAGED (the QRF launches, gun teams man their guns);
 ##   woods  Kestrel Valley (river_valley: woods, a river, reeds): the squad walks through the
@@ -35,8 +38,8 @@ extends Node
 ## case's average frame, 95th percentile and hitches a minute, with room for CI's slower runners.
 ## Never touches a real save.
 
-const MEASURE_S := {"town": 30.0, "fight": 40.0, "woods": 30.0, "drive": 45.0, "heli": 35.0}
-const ALL_CASES := ["town", "fight", "woods", "drive", "heli"]
+const MEASURE_S := {"town": 30.0, "city": 40.0, "fight": 40.0, "woods": 30.0, "drive": 45.0, "heli": 35.0}
+const ALL_CASES := ["town", "city", "fight", "woods", "drive", "heli"]
 ## A frame this long is a hitch (under 30 fps for that frame).
 const HITCH_MS := 33.3
 ## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
@@ -49,6 +52,7 @@ const HITCH_MEDIANS := 3.0
 ## doubling; the first budgets (town 75/140, heli 28/45...) are in docs/performance.md.
 const BUDGETS := {
 	"town": {"avg": 270.0, "p95": 360.0, "hitches_min": 90.0},
+	"city": {"avg": 270.0, "p95": 360.0, "hitches_min": 90.0},
 	"fight": {"avg": 140.0, "p95": 260.0, "hitches_min": 90.0},
 	"woods": {"avg": 45.0, "p95": 60.0, "hitches_min": 30.0},
 	"drive": {"avg": 52.0, "p95": 86.0, "hitches_min": 45.0},
@@ -196,7 +200,9 @@ func _case_town() -> void:
 		return
 	var town: ZoneModule = null
 	for m in level.modules():
-		if ZoneModules.base(m.type) in ["town", "city"] and (town == null or ZoneModules.boxes(m.type).size() > ZoneModules.boxes(town.type).size()):
+		if ZoneModules.city_of(m.type) != "":
+			continue  # (the city case's)
+		if ZoneModules.base(m.type) in ["town", "village"] and (town == null or ZoneModules.boxes(m.type).size() > ZoneModules.boxes(town.type).size()):
 			town = m
 	check(town != null, "city_hot has a town")
 	if town == null:
@@ -206,6 +212,26 @@ func _case_town() -> void:
 	var through := level.ground_point(Vector3(r.get_center().x, 0, r.position.y + r.size.y * 0.3))
 	await _settle_at(start, [town])
 	await _measure("town", [start, through])
+
+
+func _case_city() -> void:
+	if not await _host("city_hot"):
+		return
+	var cities: Array = level.def.get("cities", [])
+	check(not cities.is_empty(), "city_hot has a city")
+	if cities.is_empty():
+		return
+	var c: Dictionary = cities[0]
+	var mid := Vector3(float(c.pos[0]), 0, float(c.pos[1]))
+	var half: Vector2 = BuildingGen.city_layout(int(c.seed)).half
+	# Up the middle street from 40 m outside the city's south edge to its middle.
+	var x := mid.x + BuildingGen.CITY_PITCH * (0.0 if BuildingGen.CITY_BLOCKS.x % 2 == 0 else 0.5)
+	var start := level.ground_point(Vector3(x, 0, mid.z + half.y + 40.0))
+	var through := level.ground_point(Vector3(x, 0, mid.z))
+	var near: Array = level.modules().filter(func(m: ZoneModule) -> bool:
+		return ZoneModules.city_of(m.type) != "" and m.distance_to(start) < 140.0)
+	await _settle_at(start, near)
+	await _measure("city", [start, through])
 
 
 func _case_fight() -> void:
@@ -506,6 +532,13 @@ func _measure(name: String, walk: Array) -> void:
 				var k := "moving" if s.move_input != Vector2.ZERO else ("aiming" if s.want_aim else ("down" if not s.vitals.is_up() else ("air" if not s.is_on_floor() else "other")))
 				why_not[k] = int(why_not.get(k, 0)) + 1
 	print("perf: %s: at the end %d AI resting, the rest: %s" % [name, resting, why_not])
+	var intents := {}
+	for n in level.ai.get_children():
+		var brain := SquadAI.of(n)
+		if brain and not n.is_queued_for_deletion() and n.process_mode != Node.PROCESS_MODE_DISABLED:
+			var k: String = SquadAI.Intent.keys()[brain.intent]
+			intents[k] = int(intents.get(k, 0)) + 1
+	print("perf: %s: awake AI's intents at the end: %s" % [name, intents])
 	var n_frames := maxi(_frames.size(), 1)
 	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
 	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
@@ -536,7 +569,7 @@ func _measure(name: String, walk: Array) -> void:
 		var ticks := maxi(_scripts_ms.size(), 1)
 		var ai_parts := SquadAI.prof.keys()
 		ai_parts.sort_custom(func(a: StringName, b: StringName) -> bool: return int(SquadAI.prof[a][0]) > int(SquadAI.prof[b][0]))
-		for part: StringName in ai_parts.slice(0, 14):
+		for part: StringName in ai_parts.slice(0, 24):
 			var e: Array = SquadAI.prof[part]
 			print("perf: %s: AI part %s %.3f ms a tick, %d calls, worst %.2f ms" % [name, part, int(e[0]) / 1000.0 / ticks, int(e[1]), int(e[2]) / 1000.0])
 

@@ -992,8 +992,11 @@ func _tick(delta: float) -> void:
 		t = _p(&"morale", t)
 		_choose_intent()
 		t = _p(&"choose_intent", t)
+	var t_act := t
 	_act()
 	t = _p(&"act", t)
+	if profiling:
+		_p(StringName("act:%s" % Intent.keys()[intent]), t_act)  # (perfcases' profile: act by intent)
 	_steer(delta)
 	t = _p(&"steer", t)
 	_shoot()
@@ -1365,6 +1368,7 @@ func _pass_through_squadmates() -> void:
 # --- Intent selection -----------------------------------------------------
 
 func _choose_intent() -> void:
+	var tp := Time.get_ticks_usec()  # (perfcases' profile: choose_intent's parts, "ci:")
 	var scores := {}
 	var contact := in_contact()
 	var weapon := body.active_weapon()
@@ -1417,7 +1421,9 @@ func _choose_intent() -> void:
 		if worse:
 			print("[care] %s leaves %s (stable) for %s: nobody free for that one" % [body.name, casualty.name, worse.name])
 			_end_care()  # handed over: he comes back once the worse one is seen to (G-13)
+	tp = _p(&"ci:orders", tp)
 	_candidate = _find_casualty() if care == Care.NONE or care == Care.BODY else null
+	tp = _p(&"ci:find_casualty", tp)
 	if contact and care == Care.NONE and _candidate != null and not _may_leave_fight(_candidate):
 		_candidate = null  # the squad can't spare another out there: he fights and covers them (G-12)
 	if (care != Care.NONE and care != Care.BODY) or _candidate != null:
@@ -1429,9 +1435,11 @@ func _choose_intent() -> void:
 		scores[Intent.CASUALTY] = PLAYER_ORDER_SCORE + 0.01 if near_hold else (in_fire if contact else 0.9)
 	elif not contact and (care == Care.BODY or _find_body() != null):
 		scores[Intent.CASUALTY] = BODY_RECOVER_SCORE
+	tp = _p(&"ci:find_body", tp)
 	_maybe_call_medic()
 	_maybe_resupply_gunner(Soldier._now())
 	_cover_medic = _medic_needs_cover()
+	tp = _p(&"ci:medic", tp)
 	if fighting():
 		scores[Intent.FIGHT] = 0.7
 	if broken() and in_contact() and (not _friendly() or order == Squad.Order.FOLLOW):
@@ -1452,12 +1460,15 @@ func _choose_intent() -> void:
 			scores[Intent.HEAL] = maxf(heal, 0.99)
 		elif scores.is_empty() or not scores.has(intent):
 			scores[Intent.HOLD] = 0.5
+	tp = _p(&"ci:self", tp)
 	var t := _tactic()
 	if StringName(t.get("kind", &"")) in MOVING_TACTICS:
 		scores[Intent.TACTIC] = ORDERED_SCORE if not ordered.is_empty() else TACTIC_SCORE
+	tp = _p(&"ci:tactic", tp)
 	var loot := _scavenge_score(contact)
 	if loot > 0.0:
 		scores[Intent.SCAVENGE] = loot
+	tp = _p(&"ci:scavenge", tp)
 
 	var best: Intent = intent
 	var best_score := -1.0
@@ -1782,7 +1793,11 @@ func _patrol() -> void:
 		return
 	var lead := squad.patrol_lead()
 	if lead != null and lead != body and _flat_distance(lead.global_position) <= PATROL_FORM_M:
-		_go(squad.follow_point(body), false)  # (G-26: his place in the patrol's formation behind the lead)
+		var tp := Time.get_ticks_usec()
+		var spot := squad.follow_point(body)
+		tp = _p(&"pat:follow_point", tp)
+		_go(spot, false)  # (G-26: his place in the patrol's formation behind the lead)
+		_p(&"pat:go", tp)
 		_patrol_index = SquadAI.of(lead)._patrol_index  # (where the lead is on the route, should he take over)
 		return
 	var point := squad.patrol[_patrol_index % squad.patrol.size()]
@@ -1879,6 +1894,34 @@ static func plan_care(tasks: Array[Dictionary], under_fire: bool, conscious: boo
 	for r: Array in ranked:
 		out.append(tasks[r[1]])
 	return out
+
+
+## responder_for for _find_casualty, kept RESPONDER_KEEP_S per casualty and items asked for while
+## the one it named is still free for him (perf, 2026-10-22: every AI's think asked it for every
+## casualty, each ask going through every combatant: in the Old Quarter city with a few down,
+## _find_casualty was 9 ms a think). Within that the nearest free one can change; the next ask
+## after it sees that.
+const RESPONDER_KEEP_S := 0.25
+static var _responders := {}  # "casualty id|items" -> [at, Soldier or null]
+
+
+func _responder_kept(c: Soldier, wanted: Array[StringName]) -> Soldier:
+	var now := Soldier._now()
+	var key := "%d|%s" % [c.get_instance_id(), wanted]
+	var kept: Array = _responders.get(key, [])
+	if not kept.is_empty() and now - float(kept[0]) >= 0.0 and now - float(kept[0]) < RESPONDER_KEEP_S:
+		var r: Variant = kept[1]
+		if r == null:
+			return null
+		if is_instance_valid(r):
+			var ai := SquadAI.of(r)
+			if ai and ai._free_for(c) and ai._cares_for(c) and ai._carries_any(wanted):
+				return r
+	if _responders.size() > 256:
+		_responders.clear()
+	var who := responder_for(c, wanted)
+	_responders[key] = [now, who]
+	return who
 
 
 ## Who answers casualty `c` (design doc "Medics"): the medic of c's fire team when free and
@@ -2022,7 +2065,7 @@ func _find_casualty() -> Soldier:
 		else:
 			var ai := SquadAI.of(s)
 			var asked: Array[StringName] = ai.wanted if ai and not s.vitals.downed else ([] as Array[StringName])
-			if responder_for(s, asked) != body:
+			if _responder_kept(s, asked) != body:
 				continue
 			if _rescue_hot(s):
 				_hold_for_cover_at = Soldier._now()
