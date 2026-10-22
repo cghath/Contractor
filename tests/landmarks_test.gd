@@ -417,7 +417,8 @@ func _test_in_world() -> void:
 		runs.append([type, 5, BuildingGen.INTACT])
 	for type: String in ["mosque", "school", "office", "ied_workshop"]:
 		runs.append([type, 5, BuildingGen.BOMBED])
-	runs.append(["church", 5, BuildingGen.RUINED])
+	for type: String in ["church", "garage", "factory", "fuel_station", "drug_lab"]:
+		runs.append([type, 5, BuildingGen.RUINED])
 	var bad_nav: Array = []
 	var bad_up: Array = []
 	var bad_scan: Array = []
@@ -455,7 +456,7 @@ func _test_in_world() -> void:
 		for r: Dictionary in b.rooms:
 			var rect: Rect2 = r.rect
 			var y := float(r.y)
-			var goal := _room_goal(map, rect, y)
+			var goal := _room_goal(map, rect, y, street)
 			var local := goal - AT
 			if int(run[2]) == BuildingGen.BOMBED and int(r.floor) > 0:
 				continue  # (a bombed-out building's upper floor: open to the sky now, may be cut off)
@@ -464,11 +465,11 @@ func _test_in_world() -> void:
 			var path := NavigationServer3D.map_get_path(map, street, goal, true) if on_floor else PackedVector3Array()
 			if on_floor and path.size() > 1 and path[-1].distance_to(goal) < 0.5:
 				reached += 1
-			elif int(run[2]) == BuildingGen.INTACT:
+			elif int(run[2]) != BuildingGen.BOMBED:
 				var down := player.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(AT + Vector3(rect.get_center().x, y + 2.0, rect.get_center().y), AT + Vector3(rect.get_center().x, y - 1.0, rect.get_center().y), 1))
 				bad_nav.append("%s %s (floor %d, %s: %s, %s, under it %s)" % [name, r.role, r.floor, "no navmesh there" if not on_floor else "no path", rect, local,
 					(down.position as Vector3) - AT if not down.is_empty() else "nothing"])
-		if int(run[2]) != BuildingGen.INTACT and reached < ceili(rooms * 0.5):
+		if int(run[2]) == BuildingGen.BOMBED and reached < ceili(rooms * 0.5):
 			bad_nav.append("%s: %d of %d rooms reached" % [name, reached, rooms])
 		# Up the stairs: the roof (or the floor above) from the street.
 		if int(run[2]) == BuildingGen.INTACT and (int(b.storeys) == 2 or b.roof_access):
@@ -510,10 +511,11 @@ func _test_in_world() -> void:
 	check(bad_scan.is_empty() and found_rooms > runs.size(), "the AI's building scan finds each one's floors, rooms (%d), entrances and firing ports %s" % [found_rooms, bad_scan.slice(0, 4)])
 
 
-## The walkable spot on room `rect`'s floor (at `y`) nearest its middle, by the navmesh (zone
-## space), Vector3.INF if none: furniture can stand on the middle itself.
-func _room_goal(map: RID, rect: Rect2, y: float) -> Vector3:
-	var best := Vector3.INF
+## A walkable spot on room `rect`'s floor (at `y`) by the navmesh (zone space): the one nearest
+## its middle that a path from `street` reaches (furniture tops are walkable too, islands of their
+## own), else the nearest; Vector3.INF if the room has none.
+func _room_goal(map: RID, rect: Rect2, y: float, street: Vector3) -> Vector3:
+	var found: Array = []
 	var c := rect.get_center()
 	var x := rect.position.x + 0.25
 	while x < rect.end.x:
@@ -521,11 +523,19 @@ func _room_goal(map: RID, rect: Rect2, y: float) -> Vector3:
 		while z < rect.end.y:
 			var q := NavigationServer3D.map_get_closest_point(map, AT + Vector3(x, y + 0.1, z))
 			var local := q - AT
-			if rect.has_point(Vector2(local.x, local.z)) and absf(local.y - y) < Buildings.SURFACE_SNAP_M 					and (not best.is_finite() or Vector2(local.x, local.z).distance_to(c) < Vector2(best.x - AT.x, best.z - AT.z).distance_to(c)):
-				best = q
+			if rect.has_point(Vector2(local.x, local.z)) and absf(local.y - y) < Buildings.SURFACE_SNAP_M:
+				found.append([Vector2(local.x, local.z).distance_to(c), q])
 			z += 0.5
 		x += 0.5
-	return best
+	if found.is_empty():
+		return Vector3.INF
+	found.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+	for k in mini(found.size(), 16):
+		var q: Vector3 = found[k][1]
+		var path := NavigationServer3D.map_get_path(map, street, q, true)
+		if path.size() > 1 and path[-1].distance_to(q) < 0.5:
+			return q
+	return found[0][1]
 
 
 ## The navigation over building `b` (in `world`, at AT) as NavBuilder bakes a chunk: the ground,

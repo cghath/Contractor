@@ -35,7 +35,7 @@ func _ready() -> void:
 			var started := Time.get_ticks_msec()
 			var s := BuildingGen.site(kind, seed_value, state)
 			var path := out.path_join("%s_%s.png" % [kind, ["intact", "ruined", "bombed"][state]])
-			_draw(s.boxes, s.skin, s.streets, path)
+			_draw(s, path)
 			print("[shots] %s: %d boxes, %d skin, %d ms" % [path, (s.boxes as Array).size(), (s.skin as Array).size(), Time.get_ticks_msec() - started])
 	print("[shots] done: %s" % out)
 	get_tree().quit()
@@ -49,7 +49,11 @@ func _basis() -> Array[Vector3]:
 	return [r, u, f]
 
 
-func _draw(boxes: Array, skin: Array, streets: Array, path: String) -> void:
+## Site `s` drawn to `path`: its boxes and skin on its ground (its pad; a harbour's sea round it).
+func _draw(s: Dictionary, path: String) -> void:
+	var boxes: Array = s.boxes
+	var skin: Array = s.skin
+	var streets: Array = s.streets
 	var b := _basis()
 	var r: Vector3 = b[0]
 	var u: Vector3 = b[1]
@@ -78,7 +82,13 @@ func _draw(boxes: Array, skin: Array, streets: Array, path: String) -> void:
 		_rgb[i * 3 + 1] = int(SKY.g8)
 		_rgb[i * 3 + 2] = int(SKY.b8)
 		_depth[i] = INF
-	_box(plate[0], plate[1], GROUND, r, u, f, scale, off, 0.0)
+	if is_nan(float(s.pad_sea)):
+		_box(plate[0], plate[1], GROUND, r, u, f, scale, off, 0.0)
+	else:  # the sea, and the harbour's land built up out of it
+		var sea := -float(s.pad_sea)
+		_box(Vector3(plate[0].x, sea - 0.05, plate[0].z), Vector3(plate[1].x, sea, plate[1].z), Color("3f6d8c"), r, u, f, scale, off, 0.0)
+		var pad: Rect2 = (s.pad as Rect2).grow(ZoneTerrain.PAD_MARGIN_M)
+		_box(Vector3(pad.position.x, sea - 0.05, pad.position.y), Vector3(pad.end.x, -0.01, pad.end.y), GROUND, r, u, f, scale, off, 0.0)
 	for st: Rect2 in streets:  # hard standing: a runway, a forecourt, a quay
 		_box(Vector3(st.position.x, -0.04, st.position.y), Vector3(st.end.x, 0.005, st.end.y), Color("6f6e66"), r, u, f, scale, off, 0.0)
 	for bx: Array in boxes:

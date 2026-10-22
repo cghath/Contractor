@@ -3124,7 +3124,7 @@ static func _crane(out: Array, at: Vector3, span: float, rng: RandomNumberGenera
 	var z := -2.0
 	var segs := rng.randi_range(6, 8)
 	for k in segs:
-		out.append([at + Vector3(-0.3, y, z - 2.0), at + Vector3(0.3, y + 0.6, z), M.STEEL if k % 2 == 0 else Y])
+		out.append([at + Vector3(-0.3, y, z - 2.0), at + Vector3(0.3, y + 1.0, z), Y])  # (each 0.2 m over the next: one boom)
 		y += 0.8
 		z -= 2.0
 	out.append([at + Vector3(-0.05, y - 6.5, z), at + Vector3(0.05, y, z + 0.1), M.STEEL])
