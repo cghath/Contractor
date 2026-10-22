@@ -389,6 +389,9 @@ func obstacle_top(at: Vector3, side := Vector3.ZERO) -> float:
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(p.x, ground + OBSTACLE_SCAN_M, p.z), Vector3(p.x, ground - 2.0, p.z), 1, exclude))
 		if not hit.is_empty():
 			top = maxf(top, (hit.position as Vector3).y)
+	var scatter := Spotting.scatter_of(self)  # (a pylon's lattice is too thin for the rays)
+	if scatter:
+		top = maxf(top, scatter.tall_top(at, maxf(side.length(), ROTOR_RADIUS_M)))
 	return top
 
 

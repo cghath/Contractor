@@ -71,6 +71,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - Scatter props no longer count as foliage that hides people. They were treated like bushes on
   top of being solid.
 - Zone layouts cache under a new version (12), so old caches re-roll.
+- Helicopters climb over pylons and other tall props near their track. A pylon's lattice was too
+  thin for them to sense, and an insertion flew into one.
+
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 
 #### Fixed

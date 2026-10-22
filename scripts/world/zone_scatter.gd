@@ -198,6 +198,8 @@ var copse_sites: Array[Dictionary] = []
 var _terrain: ZoneTerrain
 var _spec := {}
 var _cells := {}  # Vector2i -> Array of item indices
+var _tall := {}  # Vector2i (TALL_CELL_M) -> PackedFloat32Array of x, z, reach, top: tall_top's index
+var _tall_built := false
 var _built := {}  # Vector2i -> true
 var _meshes := {}
 var _material: StandardMaterial3D
@@ -239,6 +241,8 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	items = fresh  # new arrays, never clear(): a cached layout may share the old ones
 	_cells = {}
 	_built = {}
+	_tall = {}
+	_tall_built = false
 	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0, Kind.ANIMAL: 0}
 	solid_count = 0
 	library_count = 0
@@ -849,6 +853,7 @@ func _add(item: Dictionary) -> void:
 		item["conifer"] = _is_conifer(item)  # (from where it stands: the same from a cache too)
 	if item.has("shape") and int(item.kind) == Kind.PROP:
 		library_count += 1
+		_tall_built = false
 	elif item.solid:
 		solid_count += 1
 	counts[int(item.kind)] += 1
@@ -1406,6 +1411,51 @@ static func round_through(hit: Dictionary, direction: Vector3, energy_j: float) 
 	if loss >= energy_j:
 		return out
 	return {"stopped": false, "material": material, "lost_j": loss, "exit": exit}
+
+
+## What a helicopter must clear (Helicopter.obstacle_top): a pylon's or a mast's lattice is too
+## thin for its rays to find, so it asks for the top (y) of every library prop at least TALL_M tall
+## whose reach (the farthest corner of its drawn bounds from where it stands) comes within
+## `radius` of `at` (x, z); -INF when none does.
+const TALL_M := 6.0
+const TALL_CELL_M := 32.0
+
+
+func tall_top(at: Vector3, radius: float) -> float:
+	if not _tall_built:
+		_index_tall()
+	var top := -INF
+	if _tall.is_empty():
+		return top
+	var reach := radius + 16.0  # (the widest tall prop's reach: a pylon's cross arm)
+	var lo := Vector2i(floori((at.x - reach) / TALL_CELL_M), floori((at.z - reach) / TALL_CELL_M))
+	var hi := Vector2i(floori((at.x + reach) / TALL_CELL_M), floori((at.z + reach) / TALL_CELL_M))
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			var row: PackedFloat32Array = _tall.get(Vector2i(cx, cz), PackedFloat32Array())
+			for i in range(0, row.size(), 4):
+				var r := radius + row[i + 2]
+				if Vector2(at.x - row[i], at.z - row[i + 1]).length_squared() <= r * r:
+					top = maxf(top, row[i + 3])
+	return top
+
+
+func _index_tall() -> void:
+	_tall = {}
+	_tall_built = true
+	for item: Dictionary in items:
+		if not item.has("shape") or int(item.kind) != Kind.PROP:
+			continue
+		var b: AABB = PropArt.shape(String(item.shape)).bounds
+		var size: Vector3 = item.size
+		if b.end.y * size.y < TALL_M:
+			continue
+		var p: Vector3 = item.pos
+		var reach := PropArt.half_extents(String(item.shape)).length() * maxf(size.x, size.z)
+		var cell := Vector2i(floori(p.x / TALL_CELL_M), floori(p.z / TALL_CELL_M))
+		var row: PackedFloat32Array = _tall.get(cell, PackedFloat32Array())
+		row.append_array(PackedFloat32Array([p.x, p.z, reach, p.y + b.end.y * size.y]))
+		_tall[cell] = row
 
 
 ## The library props' solid parts near `area` (x, z in metres) as triangles, for the navigation
