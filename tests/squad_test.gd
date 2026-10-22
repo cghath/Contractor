@@ -1416,8 +1416,8 @@ func _test_smoke_and_bangs(found: Dictionary, mates: Array[SquadAI], names: Pack
 				watch.at_foot = true
 		return not op.is_empty() and is_finite(float((op.floor_go as Array)[1])), 90.0)
 	var by: SquadAI = watch.by
-	var from: Vector3 = op.get("stair_bang_from", Vector3.INF)
-	var off := Vector2(from.x - (stair.foot as Vector3).x, from.z - (stair.foot as Vector3).z).length() if from.is_finite() else INF
+	var thrown_from: Vector3 = op.get("stair_bang_from", Vector3.INF)
+	var off := Vector2(thrown_from.x - (stair.foot as Vector3).x, thrown_from.z - (stair.foot as Vector3).z).length() if thrown_from.is_finite() else INF
 	check(why == "" and pushed and watch.seen and off <= SquadAI.STAIR_BANG_FOOT_M + 0.1 and by != null and by.body.inventory.count_of(watch.item) < int(watch.before),
 		"clearing it, the push up the stair waits on a bang thrown up it from its foot (%s; %s, %.1f m from the foot, %s by %s)" % [why, watch.seen, off, watch.item, by.body.name if by else "nobody"])
 	for ai: SquadAI in mates:

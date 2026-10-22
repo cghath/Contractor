@@ -31,8 +31,8 @@ const LINE_SPACING_M := 5.0
 const POSITION_COVER_M := 6.0
 ## Sprung, a crewed enemy vehicle's gunner is worth this many metres of range as a target, its
 ## other crew TARGET_CREW_M (SquadAI.target_score subtracts it).
-const TARGET_GUNNER_M := 60.0
-const TARGET_CREW_M := 30.0
+const TARGET_GUNNER_M := 90.0
+const TARGET_CREW_M := 60.0
 
 ## Where the ambush is (its middle) and the way the road runs past it (flat, unit; ZERO when
 ## not known: the line then runs across the way to the road's nearest point).

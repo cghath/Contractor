@@ -114,10 +114,15 @@ func _test_road_ambush() -> void:
 	player.global_position = level.ground_point(Vector3(-150, 0, 215))  # the overwatch: 85 m south of the road
 	var map := player.get_world_3d().navigation_map
 	await _wait_for(func() -> bool: return NavigationServer3D.map_get_closest_point(map, at).distance_to(at) < 1.5, 20.0)
+	var hill: Array[Soldier] = []  # the squad on the high ground: out of the ambush's sight while the convoy comes on
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var f := n as Soldier
-		if f and f.faction == &"friendly" and SquadAI.of(f):
-			SquadAI.of(f).hold_fire = true  # (the squad on the hill watches: the ambush is the convoy's)
+		if f and f.faction == &"friendly":
+			if SquadAI.of(f):
+				SquadAI.of(f).hold_fire = true  # (the squad on the hill watches: the ambush is the convoy's)
+			hill.append(f)
+	for f in hill:
+		f.remove_from_group(&"combatants")
 	var sq := Squad.new()
 	sq.name = "AmbushTest"
 	sq.faction = &"hostile"
@@ -190,6 +195,14 @@ func _test_road_ambush() -> void:
 	check(String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH and v.ai.cruise_ms > 30.0 / 3.6 + 1.0,
 		"the truck drives on through, faster (%s, %.1f m/s)" % [drivers.last_contact.get(v.get_instance_id(), "none"), v.ai.cruise_ms])
 	check(amb.priority_vehicle(&"hostile", get_tree()) == v, "the ambush's launchers would go for the lead truck first")
+	# The squad on the high ground in sight again: the ambush takes it on too, as a fight.
+	for f in hill:
+		if is_instance_valid(f):
+			f.add_to_group(&"combatants")
+	var on_hill := await _wait_for(func() -> bool:
+		return amb.alive().any(func(s: Soldier) -> bool: return SquadAI.of(s).target != null and SquadAI.of(s).target in hill), 25.0)
+	check(on_hill or amb.alive().is_empty(), "the squad on the high ground in sight, the ambush takes it on too (%s)" % ", ".join(amb.alive().map(func(s: Soldier) -> String:
+		return "%s on %s" % [s.name, SquadAI.of(s).target.name if SquadAI.of(s).target else "nobody"])))
 	# Disabled in the kill zone: the crew bail out on the far side and fight from there.
 	v._zones[Vehicle.ZONE_ENGINE] = 0.0
 	await _wait_for(func() -> bool: return v.occupants().is_empty(), 5.0)
@@ -267,12 +280,15 @@ func _test_patrol_formation() -> void:
 					apart[0] = minf(float(apart[0]), s.global_position.distance_to(o.global_position))
 		worst[1] = int(worst[1]) + 1
 		worst[2] = float(worst[2]) + (sum / n if n > 0 else 0.0)
+		if int(worst[1]) % 6 == 1:
+			print("    lead %s at %s; %s" % [lead.name, lead.global_position.snappedf(0.1), ", ".join(men.filter(func(m: Soldier) -> bool: return m != lead).map(func(m: Soldier) -> String:
+				return "%s at %s slot %s going %s (%s)" % [m.name, m.global_position.snappedf(0.1), sq.follow_point(m).snappedf(0.1), SquadAI.of(m).destination().snappedf(0.1), m.ai_status]))])
 	var lead := sq.patrol_lead()
 	check(lead != null and sq.leader == lead and lead.global_position.distance_to(start) > 15.0,
 		"the patrol's lead walks its route (%s, %.0f m along)" % [lead.name if lead else "none", lead.global_position.distance_to(start) if lead else 0.0])
 	var mean := float(worst[2]) / maxf(float(worst[1]), 1.0)
-	check(int(worst[1]) > 10 and mean < 4.0 and float(apart[0]) > 1.5,
-		"the rest keep their places in its %s behind him (%.1f m off their slots on average, worst %.1f m: %s; never closer than %.1f m to another)" % [sq.context.formation, mean, worst[0], worst[3], apart[0]])
+	check(int(worst[1]) > 10 and mean < float(sq.resolved(0).man) and float(apart[0]) > 1.5,
+		"the rest keep their places in its %s behind him, within a man's gap (%.1f m off their slots on average, worst %.1f m: %s; never closer than %.1f m to another)" % [sq.context.formation, mean, worst[0], worst[3], apart[0]])
 	check(absf(float(sq.resolved(0).man) - float(Squad.SPACINGS[String(sq.context.spacing)].man) * Doctrine.value(Doctrine.REGULAR, "spacing")) < 0.01,
 		"at its doctrine's gaps (%s, %.1f m)" % [sq.context.spacing, float(sq.resolved(0).man)])
 	for s: Soldier in men:

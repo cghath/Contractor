@@ -1767,6 +1767,8 @@ func _patrol() -> void:
 		return
 	var point := squad.patrol[_patrol_index % squad.patrol.size()]
 	_go(point, false)
+	if lead == body and squad.members().size() > 1:
+		_run = false  # (G-26: a lead with his patrol behind him walks, however far the next point)
 	if _flat_distance(point) <= ARRIVE + 0.3:
 		_patrol_index += 1
 
