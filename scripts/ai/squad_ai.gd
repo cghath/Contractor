@@ -4085,6 +4085,7 @@ func _stair_bang(op: Dictionary, slot: int, now: float) -> void:
 	var up := Vector3(top.x - foot.x, 0.0, top.z - foot.z)
 	var at := top + (up.normalized() if up.length() > 0.1 else Vector3.ZERO) * STAIR_BANG_PAST_M + Vector3.UP * 0.5
 	if order_throw(StringName(sb.item), at):
+		op["stair_bang_from"] = body.global_position  # (where it went up from: the log, the tests)
 		done.call(float(BREACH_WAIT_S.get(String(sb.how), 2.0)))
 
 

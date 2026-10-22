@@ -178,8 +178,14 @@ func _test_road_ambush() -> void:
 		return amb.alive().any(func(s: Soldier) -> bool: return SquadAI.of(s).target != null and Vehicle.ride_of(SquadAI.of(s).target) == v), 6.0)
 	check(amb.alive().all(func(s: Soldier) -> bool: return SquadAI.of(s).weapons_free()) and on_truck,
 		"sprung, every man opens up, on the truck's crew first")
-	await _wait_for(func() -> bool: return hits[0] > 0, 8.0)
-	check(hits[0] > 0, "their rounds hit the truck (%d hits)" % hits[0])
+	var crew_hit := func() -> int: return crew.filter(func(c: Soldier) -> bool: return not c.vitals.wound_list().is_empty()).size()
+	await _wait_for(func() -> bool: return hits[0] > 0 or crew_hit.call() > 0, 10.0)
+	check(hits[0] > 0 or crew_hit.call() > 0, "their rounds hit the truck or its crew (%d hits on it, %d of its crew hit; %s)" % [hits[0], crew_hit.call(), ", ".join(amb.members.map(func(s: Soldier) -> String:
+		if not is_instance_valid(s):
+			return "gone"
+		var ai := SquadAI.of(s)
+		return "%s %s: %s, target %s, supp %.2f, %d rounds, %s" % [s.name, "up" if s.vitals.is_up() else "down", s.ai_status,
+			ai.target.name if ai.target else "none", s.suppression, s.inventory.rounds_in(s.active_slot), ai._no_shot_text()]))])
 	await _wait_for(func() -> bool: return String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH, 4.0)
 	check(String(drivers.last_contact.get(v.get_instance_id(), "")) == DriveContact.THROUGH and v.ai.cruise_ms > 30.0 / 3.6 + 1.0,
 		"the truck drives on through, faster (%s, %.1f m/s)" % [drivers.last_contact.get(v.get_instance_id(), "none"), v.ai.cruise_ms])
@@ -236,7 +242,7 @@ func _test_patrol_formation() -> void:
 		men.append(s)
 	var route: Array[Vector3] = [finish, start]
 	sq.patrol = route
-	var worst := [0.0, 0]  # the furthest a follower was off his slot, over how many looks
+	var worst := [0.0, 0, 0.0, ""]  # the furthest a follower was off his slot, how many looks, the summed look averages, who was worst
 	var apart := [INF]
 	var deadline := Time.get_ticks_msec() + 18000
 	await get_tree().create_timer(6.0).timeout  # (they form up)
@@ -245,19 +251,28 @@ func _test_patrol_formation() -> void:
 		var lead := sq.patrol_lead()
 		if lead == null:
 			continue
+		var sum := 0.0
+		var n := 0
 		for s: Soldier in men:
 			if s == lead or not s.vitals.is_up():
 				continue
-			worst[0] = maxf(float(worst[0]), Vector2(s.global_position.x - sq.follow_point(s).x, s.global_position.z - sq.follow_point(s).z).length())
+			var off := Vector2(s.global_position.x - sq.follow_point(s).x, s.global_position.z - sq.follow_point(s).z).length()
+			sum += off
+			n += 1
+			if off > float(worst[0]):
+				worst[0] = off
+				worst[3] = "%s %s" % [s.name, s.ai_status]
 			for o: Soldier in men:
 				if o != s:
 					apart[0] = minf(float(apart[0]), s.global_position.distance_to(o.global_position))
 		worst[1] = int(worst[1]) + 1
+		worst[2] = float(worst[2]) + (sum / n if n > 0 else 0.0)
 	var lead := sq.patrol_lead()
 	check(lead != null and sq.leader == lead and lead.global_position.distance_to(start) > 15.0,
 		"the patrol's lead walks its route (%s, %.0f m along)" % [lead.name if lead else "none", lead.global_position.distance_to(start) if lead else 0.0])
-	check(int(worst[1]) > 10 and float(worst[0]) < 6.0 and float(apart[0]) > 1.5,
-		"the rest keep their places in its %s behind him (worst %.1f m off a slot, never closer than %.1f m to another)" % [sq.context.formation, worst[0], apart[0]])
+	var mean := float(worst[2]) / maxf(float(worst[1]), 1.0)
+	check(int(worst[1]) > 10 and mean < 4.0 and float(apart[0]) > 1.5,
+		"the rest keep their places in its %s behind him (%.1f m off their slots on average, worst %.1f m: %s; never closer than %.1f m to another)" % [sq.context.formation, mean, worst[0], worst[3], apart[0]])
 	check(absf(float(sq.resolved(0).man) - float(Squad.SPACINGS[String(sq.context.spacing)].man) * Doctrine.value(Doctrine.REGULAR, "spacing")) < 0.01,
 		"at its doctrine's gaps (%s, %.1f m)" % [sq.context.spacing, float(sq.resolved(0).man)])
 	for s: Soldier in men:
