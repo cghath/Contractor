@@ -49,6 +49,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   stairs; it slides along its wall now (or another wall takes the doorway).
 - **The building docs no longer claim an office** before there was one (docs/building_gen.md,
   docs/feature_comparison.md 8.2): there is one now.
+- **Loop suite, helicopter extraction:** the player sets down what's in his hands before his
+  rifle (a drop lets go of the hands first, so a carried-out hard case kept the rifle slung), and
+  a dead hostile's intel isn't expected in the stash (intel goes to the debrief, never the stash).
 
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 

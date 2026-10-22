@@ -25,7 +25,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
-| F-163 | P3 | The loop suite's extraction checks ("rifle set down in the point goes into the hold", "banked") pass or fail with the zones the board hands it (fails on claude/ai-driving's CI too) |
+| F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
 
 ## F-01: the building scan only sees one floor
 
@@ -350,25 +350,27 @@ walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or le
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
 
-## F-163: the loop suite's extraction checks depend on which zones it plays
+## F-163: a helicopter insertion came 0.1 m inside its 5 m airframe clearance
 
-Location: [loop_test.gd](../../tests/loop_test.gd) (the extraction steps) and the heli's
-`_load_items` (`Extraction.inside(point, item.global_position)`). Found by cghath's agent on
-`world/landmarks` (2026-10-21); not changed there.
+Location: the loop suite's helicopter insertion check ([loop_test.gd](../../tests/loop_test.gd)
+`_heli_insert`, `HeliFlight.airframe_clearance`, `Helicopter.MIN_CLEAR_M`). Found by cghath's
+agent on `world/landmarks` (2026-10-22); the flight code is Claude's, so it isn't changed there.
 
-What happens: the loop suite plays whichever zones the campaign board hands it, and its
-extraction checks fail in some. "banked" failed on claude/ai-driving's own CI (run 39682370659)
-and locally on world/landmarks in greyfell_moor (R0446). "the rifle set down in the point goes
-into the hold" failed in kestrel_valley (R0454) and on world/landmarks' CI (39703927542,
-39705480633, 39715541725), then passed in the same zone (R0459), as it did on the base (R0457).
-Landmarks change a zone's module list, so the board deals different zones, but none sits near an
-LZ (350-500 m off). With prints in R0459, an `m4a1` WorldItem lay at (-515, -6, -277) while the
-heli and player stood at (-342, -9, -943) and the hold held "m4a1 x1": there can be more than one
-m4a1 in the world, so the check may read the wrong one, or the rifle may be set down before the
-heli has landed in the point.
+What happens: on world/landmarks' CI (run 39717899713) the insertion into kestrel_valley's
+compound job (entry (-1072, 72), LZ (-905, -426)) passed 4.9 m from the ground or what stands on
+it at (-921, 1.9, -378), 51 m before the final. The same flight passed locally (R0474). The
+nearest landmark (the drug lab at (-804, -228)) is about 190 m off that spot, so it's the ground
+or the props along the way in, not a landmark; it shows up now because landmarks lengthen
+kestrel_valley's module list and the board deals that job.
 
-Suggested: set the rifle down by node, not by id, once the heli has touched down, and check that
-node's item; pin the zone the suite extracts from.
+Suggested: a margin on the approach (the clearance the flight keeps a little over MIN_CLEAR_M),
+or the check counting from the final's start rather than FINAL_LOW_M.
+
+The loop suite's other two failures on that branch were the test's: a drop lets go of what's in
+the hands first, so with the intel grab's hard case carried out the rifle stayed slung ("the rifle
+set down in the point goes into the hold"), and the "banked" check expected a dead hostile's
+intel in the stash, where intel never goes (`Contracts.without_intel`, also red on
+claude/ai-driving's CI 39682370659). Both are fixed in tests/loop_test.gd on world/landmarks.
 
 ## Calls made for the Captain
 
