@@ -47,7 +47,7 @@ static func group_of(item: ItemData) -> String:
 		return "ammo"
 	if item.type == "medical":
 		return "medical"
-	if "throwable" in item.tags or "explosive" in item.tags or "incendiary" in item.tags or "detonator" in item.tags:
+	if "throwable" in item.tags or ("explosive" in item.tags and not "mortar_round" in item.tags) or "incendiary" in item.tags or "detonator" in item.tags:
 		return "grenades"  # and explosives: charges, demo blocks, mines, thermite, firing devices (Demolitions)
 	return "other"
 

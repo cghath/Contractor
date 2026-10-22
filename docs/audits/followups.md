@@ -34,6 +34,9 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-192 | P2 | Following the player through the compound's building, a squadmate on the follow-in stack can run a loop round the building on his way to his stack place (casualty soak, CI only, now and then) |
 | F-193 | P3 | base_zone: the player is down on landing after the helicopter insertion, and the walk home and the rest of the deployment fail after it (CI only, now and then) |
 | F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
+| F-122 | P2 | A client's first late join to the vehicle range: its RPCs never reach the host, and the link drops about 50 s later; joining again works |
+
+| F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
 
 ## F-01: the building scan only sees one floor
 
@@ -358,6 +361,29 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
+
+## F-122: a late joiner's first connection carries no RPCs to the host, then drops
+
+Location: the join path (`autoload/net.gd`, `scripts/world/level_switch.gd`'s auth, the level's
+`_on_peer_joined`); seen on the vehicle range. Found by cghath's agent on `feat/demolitions`
+(2026-10-21) after merging claude/ai-driving 0a649e9 and 4092a26; it didn't happen on a7e9207
+(R0353, R0369). It isn't in this branch's code, so it's an entry, not a fix.
+
+What happens (demolitions suite, its late-joining client, R0392): the client joins at 16.7 s, the
+host logs the peer connected, spawns its player and sends its own state, and the client's
+`multiplayer.get_peers()` is `[1]`. But the client's RPCs to the host (`_ask_expect`, every 3 s
+from 24.9 s) never arrive: the host never prints that it was asked. At 67.6 s the link drops ("peer
+1 left" on the client, the peer left on the host), with no frame over 2 s on either side. The
+client joins again at 69.9 s and from then on everything works. Before the reconnect was added the
+suite failed every time on it (R0377, R0388). The loadout suite's client, which also joins late,
+dropped the same way on CI (run 39526347358), and loadout fails on claude/ai-driving's own CI
+(39529244923, 39562279704).
+
+Suggested: log on the host whether the client's first RPCs reach SceneMultiplayer (the path cache
+confirmation for `/root/<test node>`), and check what the auth (`LevelSwitch._on_auth_data`,
+`complete_auth`) leaves half-done on a first join that a second join doesn't have (the client has
+the level loaded by then). The demolitions suite now prints the client's asks and join/leave times
+(`[test]` lines), which shows it.
 
 ## F-175: roads lie on the riverbed under a bridge (the roads agent's ZoneRoads)
 

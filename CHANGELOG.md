@@ -1294,6 +1294,8 @@ demo blocks, det cord, thermite, chem lights". All numbers and prices are Propos
   it stops (or rides whoever it landed on) and glows for 30 minutes. Through night vision it's
   four times brighter and reaches further; the IR one shows only through night vision. For
   marking an LZ, a cleared room or a casualty.
+- Blocks, claymores, mines and thermite leave blast gore on the bodies close by, as grenades and
+  rockets do.
 - **Picking things up again:** Left Ctrl at a placed block, claymore or mine offers "Pick up" from
   close by (not a lit thermite).
 - Everything placed is seen by every player, late joiners too, and is saved with the zone. A zone
