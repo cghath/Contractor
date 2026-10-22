@@ -955,6 +955,8 @@ func _colours(hexes: Array) -> Array[Color]:
 
 
 func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
+	if _terrain and _terrain.water and _terrain.water.keeps_clear(x, z):
+		return true  # a river, lake or bridge (ZoneWater)
 	var p := Vector2(x, z)
 	for r in keep:
 		if r.has_point(p):
@@ -1655,6 +1657,8 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.
 func _ground_blocked(x: float, z: float) -> bool:
+	if _terrain.water and _terrain.water.keeps_clear(x, z):
+		return true  # a river, lake or bridge (ZoneWater)
 	var p := Vector2(x, z)
 	for r in _keep:
 		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):

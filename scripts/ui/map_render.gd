@@ -174,12 +174,13 @@ static func zone_inputs(level: Node, max_px := MAX_PX) -> Dictionary:
 	if raw_streets is Array:
 		streets.assign(raw_streets)
 	var bed: Variant = t.get(&"_bed")
+	var water: PackedFloat32Array = t.water.surface_grid() if t.water else PackedFloat32Array()
 	return {
 		"area": area, "side": side, "heights": t.heights, "points": t.points, "cell": ZoneTerrain.CELL_M, "half": t.size_m * 0.5,
 		"min_h": t.min_height, "max_h": t.max_height, "bed": bed if bed is PackedByteArray else PackedByteArray(),
 		"sand_below": t.sand_below_m,
 		"sea_side": t.sea_side, "sea_rect": t.sea_rect(), "sea_level": t.sea_level, "sea_depth": maxf(t.sea_depth, 1.0),
-		"trees": trees, "pads": pads, "boxes": boxes, "roads": roads, "streets": streets,
+		"trees": trees, "pads": pads, "boxes": boxes, "roads": roads, "streets": streets, "water": water,
 	}
 
 
@@ -232,6 +233,8 @@ static func compose_zone(inp: Dictionary) -> Image:
 	var beach_rect := sea_rect.grow(60.0)
 	var sea_level: float = inp.sea_level
 	var sea_depth: float = inp.sea_depth
+	var water: PackedFloat32Array = inp.get("water", PackedFloat32Array())  # rivers and lakes (ZoneWater.surface_grid)
+	var has_water := water.size() == heights.size() and n >= 2
 	var data := PackedByteArray()
 	data.resize(side * side * 4)
 	for pz in side:
@@ -244,8 +247,13 @@ static func compose_zone(inp: Dictionary) -> Image:
 			var k := px + row
 			var h := hs[k]
 			var colour: Color
+			var surface := -INF
+			if has_water:
+				surface = water[clampi(roundi((x + half) / cell), 0, n - 1) + clampi(roundi((z + half) / cell), 0, n - 1) * n]
 			if sea_side >= 0 and h < sea_level and sea_rect.has_point(Vector2(x, z)):
 				colour = WATER_SHALLOW.lerp(WATER_DEEP, clampf((sea_level - h) / sea_depth, 0.0, 1.0))
+			elif h < surface:
+				colour = WATER_SHALLOW.lerp(WATER_DEEP, clampf((surface - h) / 3.0, 0.0, 1.0))
 			else:
 				var east_h := hs[mini(px + 1, side - 1) + row]
 				var south_h := hs[px + down]

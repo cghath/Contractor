@@ -116,8 +116,10 @@ static func normalize(def: Dictionary) -> Dictionary:
 		out.insertion = [[0.0, half - 80.0]]
 	out["grow"] = bool(def.get("grow", true))
 	_grow(out, half)
+	ZoneModules.place_landmarks(out)  # its landmarks by its asset tags (queue item 1.4; once: kept after)
 	out["terrain"] = TerrainPresets.choose(out)
 	_choose_sea(out)
+	ZoneModules.place_harbour(out)  # a harbour on that sea (it stands in it: _choose_sea leaves it out)
 	_ensure_edge(out, "insertion")
 	_ensure_edge(out, "extraction")
 	return out
@@ -215,6 +217,8 @@ static func _choose_sea(def: Dictionary) -> void:
 	var half := float(def.size_m) * 0.5
 	var pads: Array[Rect2] = []
 	for m: Dictionary in def.modules:
+		if ZoneModules.base(String(m.type)) == "harbour":
+			continue  # (placed on the sea once it's chosen: ZoneModules.place_harbour)
 		var h: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
 		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
 		pads.append(Rect2(p - h, h * 2.0))

@@ -128,6 +128,8 @@ var _lod1 := {}  # Vector2i chunk -> its middle MeshInstance3D
 var _chunk_shapes := {}  # Vector2i chunk -> its HeightMapShape3D (GroundCuts blanks samples in it)
 ## The cuts in the ground (craters, dug holes: GroundCuts), or null while there are none.
 var cuts: GroundCuts
+## The rivers, streams, lakes and their bridges (ZoneWater: the preset's "water"), or null.
+var water: ZoneWater
 
 
 ## Builds the heights from the zone definition (ZoneDef): seed, size, relief, terrain preset
@@ -151,6 +153,8 @@ func generate(def: Dictionary, flat: Array) -> void:
 			var half: Vector2 = ZoneModules.HALF[String(m.type)]
 			_streets.append(Rect2(at.x - BuildingGen.TOWN_HALF_X, at.y - BuildingGen.STREET_W * 0.5, BuildingGen.TOWN_HALF_X * 2.0, BuildingGen.STREET_W))
 			_streets.append(Rect2(at.x - BuildingGen.CROSS_W * 0.5, at.y - half.y, BuildingGen.CROSS_W, half.y * 2.0))
+		for r: Rect2 in ZoneModules.streets(String(m.type)):  # a landmark's hard standing: a runway, a forecourt, a quay
+			_streets.append(Rect2(r.position + Vector2(float(m.pos[0]), float(m.pos[1])), r.size))
 	var sea: Dictionary = preset.get("sea", {})
 	sea_side = int(def.get("sea_side", -1)) if not sea.is_empty() else -1
 	sea_m = float(def.get("sea_m", 0.0)) if sea_side >= 0 else 0.0
@@ -273,8 +277,17 @@ func generate(def: Dictionary, flat: Array) -> void:
 			heights[i + j * points] = h
 			_bed[i + j * points] = int(carve * 255.0)
 	pads.clear()
+	var at_sea := {}  # pads made at a height over the sea (a harbour's quay: ZoneModules.pad_sea)
+	for m: Dictionary in def.get("modules", []):
+		if not is_nan(ZoneModules.pad_sea(String(m.type))):
+			at_sea[ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1])))] = ZoneModules.pad_sea(String(m.type))
 	for rect: Rect2 in flat:
-		_flatten(rect)
+		_flatten(rect, float(at_sea.get(rect, NAN)))
+	if water:
+		water.free()
+	water = ZoneWater.carve(self, def)  # rivers cut their valleys (queue item 1.1)
+	if water:
+		add_child(water)
 	min_height = INF
 	max_height = -INF
 	for h in heights:
@@ -446,11 +459,12 @@ func _read_palette() -> void:
 
 ## The height of the noise ground (before pads) is what a pad takes: the grid's height at
 ## its centre. Inside the rect grown by PAD_MARGIN_M it's flat; it blends back over
-## PAD_BLEND_M beyond that.
-func _flatten(rect: Rect2) -> void:
+## PAD_BLEND_M beyond that. `over_sea`: the pad is made that high over the sea instead (a
+## harbour's quay, ZoneModules.pad_sea).
+func _flatten(rect: Rect2, over_sea := NAN) -> void:
 	var flat := rect.grow(PAD_MARGIN_M)
 	var centre := flat.get_center()
-	var h := snappedf(height_at(centre.x, centre.y), 0.05)
+	var h := snappedf(height_at(centre.x, centre.y), 0.05) if is_nan(over_sea) else sea_level + over_sea
 	pads.append([flat, h])
 	var reach := flat.grow(PAD_BLEND_M)
 	var lo := _grid_index(reach.position)
@@ -537,9 +551,10 @@ func max_slope_deg() -> float:
 	return rad_to_deg(atan(worst / CELL_M))
 
 
-## A hash of the heights: two peers that generated the same zone have the same.
+## A hash of the heights (and the water: ZoneScatter's cache keys on it): two peers that
+## generated the same zone have the same.
 func checksum() -> int:
-	return hash(heights)
+	return hash(heights) if water == null else hash([hash(heights), water.checksum()])
 
 
 ## The ground's triangles inside `area` (x, z in metres), world space, for navigation.
@@ -555,6 +570,13 @@ func triangles_in(area: Rect2) -> PackedVector3Array:
 			var d := _vertex(i, j + 1)
 			if sea_side >= 0 and maxf(maxf(a.y, b.y), maxf(c.y, d.y)) < sea_level - NAV_WATER_M:
 				continue  # too deep to walk: not part of the navigation mesh
+			if water:
+				# A river or lake too deep to wade, triangle by triangle: the bridges carry the way (ZoneWater).
+				if not water.too_deep(a, b, d):
+					faces.append_array([a, b, d])
+				if not water.too_deep(b, c, d):
+					faces.append_array([b, c, d])
+				continue
 			faces.append_array([a, b, d, b, c, d])  # clockwise seen from above: facing up
 	return faces
 
@@ -620,6 +642,8 @@ func build_collision() -> void:
 		node.position = [Vector3(0, 0, -out), Vector3(0, 0, out), Vector3(-out, 0, 0), Vector3(out, 0, 0)][side]
 		walls.add_child(node)
 	add_child(walls)
+	if water:
+		water.build_collision()  # the bridges and culverts
 
 
 # --- Visuals ---------------------------------------------------------------------------------
@@ -678,6 +702,8 @@ func build_visuals() -> void:
 	add_child(_apron(_material))
 	if sea_side >= 0:
 		add_child(_water())
+	if water:
+		water.build_visuals()
 	set_process(true)
 
 
@@ -831,6 +857,11 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 		# The beach: a band along the measured shoreline (which the coast wobble shapes).
 		var beach := 1.0 - smoothstep(14.0, 50.0, shore_distance(p.x, p.y) + float(absi(hash(Vector2i(i / 2, j / 2))) % 100) * 0.08)
 		colour = colour.lerp(c_sand, beach * (1.0 - steep * 0.5))
+	if water:
+		# A river's or lake's bank: wet mud, gravel in patches (ZoneWater.shore_weight).
+		var wet := water.shore_weight(i, j)
+		if wet > 0.0:
+			colour = colour.lerp(c_earth.darkened(0.28).lerp(c_rock, 0.35 if absi(hash(Vector2i(i, j) + Vector2i(seed_value, 3))) % 3 == 0 else 0.0), wet * 0.85)
 	var tint := _road_tint(p.x, p.y)
 	return colour.lerp(Color(tint.r, tint.g, tint.b), tint.a)  # (all of it on the road: the shader knows it by its colour)
 
@@ -1037,9 +1068,11 @@ func shore_distance(x: float, z: float) -> float:
 
 
 ## The water's surface at (x, z): sea_level over the sea strip (where the Sea mesh is, and on
-## out past the zone's edge), -INF where there is no water. Below the ground it's dry land.
+## out past the zone's edge), a river's, stream's or lake's over its water (ZoneWater), -INF
+## where there is no water. Below the ground it's dry land.
 func water_height(x: float, z: float) -> float:
-	return sea_level if sea_side >= 0 and sea_edge_distance(x, z) <= sea_m + SEA_MARGIN_M else -INF
+	var sea := sea_level if sea_side >= 0 and sea_edge_distance(x, z) <= sea_m + SEA_MARGIN_M else -INF
+	return maxf(sea, water.surface_at(x, z)) if water else sea  # and the rivers and lakes (ZoneWater)
 
 
 ## Out to sea (a unit vector on the ground plane), ZERO with no sea.
