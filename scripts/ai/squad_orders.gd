@@ -79,6 +79,7 @@ var _sitrep_at := 0.0
 var _held_said := false
 var _down := {}  # instance id -> true: men we've reported down
 var dark_until := -INF
+var _undo := {}  # the last order given: {"id", "at", "from", "append", "prev", "queue"}
 var _target := Vector3.INF  # attack's objective / SBF's target
 var _attack_pos := Vector3.INF
 var _quiet_since := -INF
@@ -115,16 +116,56 @@ func hero() -> Soldier:
 	return squad.hero if squad.hero and is_instance_valid(squad.hero) else null
 
 
+## Undo (5.4.1): the last order is undone within UNDO_S if it hasn't started (queued, waiting,
+## or the hero still within UNDO_MOVED_M of where he was given it).
+const UNDO_S := 10.0
+const UNDO_MOVED_M := 5.0
+
+
 ## Host: takes `o` (cleaned by HcOrder.clean). `append` queues it behind the current one.
 func give(o: Dictionary, append := false) -> void:
+	_undo = {"id": int(o.id), "at": Soldier._now(), "from": hero().global_position if hero() else Vector3.INF, "append": append,
+		"prev": order.duplicate(true) if not order.is_empty() and not HcOrder.ended(order) else {}, "queue": queue.duplicate(true)}
 	if append and not order.is_empty() and not HcOrder.ended(order):
 		o.state = "queued"
 		queue.append(o)
+		hc.call(&"order_changed", o)
 		return
 	if not order.is_empty() and not HcOrder.ended(order):
 		_end("cancelled", "replaced")
 	queue.clear()
 	_start(o)
+
+
+## Host: undoes the last order given (5.4.1). Returns "" or why not.
+func undo() -> String:
+	if _undo.is_empty() or Soldier._now() - float(_undo.at) > UNDO_S:
+		return "Nothing to undo (only within %d s)" % int(UNDO_S)
+	var id := int(_undo.id)
+	var h := hero()
+	if bool(_undo.append):
+		for q: Dictionary in queue:
+			if int(q.id) == id:
+				queue.erase(q)
+				q.state = "cancelled"
+				q.why = "undone"
+				hc.call(&"order_changed", q)
+				_undo = {}
+				return ""
+	if int(order.get("id", -1)) != id:
+		return "It's already under way"
+	var started := String(order.state) not in ["queued", "waiting"] and h and (_undo.from as Vector3).is_finite() and _flat(h.global_position, _undo.from) > UNDO_MOVED_M
+	if started:
+		return "It's already under way"
+	_end("cancelled", "undone")
+	var prev: Dictionary = _undo.prev
+	queue = (_undo.queue as Array).duplicate(true)
+	_undo = {}
+	if not prev.is_empty():
+		_start(prev)  # back to what it was doing
+	else:
+		_hold_here()
+	return ""
 
 
 ## Host: cancels order `id` (0: the current one), or a queued one.

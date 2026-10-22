@@ -11,10 +11,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### High command (combined arms, phases C1 to C3)
+### High command (combined arms, phases C1 to C4)
 
-> **Where this lane is:** C1, C2 and C3 done on claude/ca-c-high-command. Next: C4 (the map-order
-> HUD: select, order, place, face, confirm, undo; gun placement with the cone of fire).
+> **Where this lane is:** C1-C4 done on claude/ca-c-high-command. Next: C5 (the 3D high command
+> camera with known-only markers, and its map mode for the 3D mission map).
+
+#### Added (C4: the map-order HUD)
+- **One way to give every order on the map.** Select a squad (click its frame, Shift to add,
+  drag a box, or 1-4), pick the order on the bar along the bottom (each button shows its key and
+  explains itself; the ones that fit what's under the cursor come first), click the point, drag
+  to face, release. The ghost says what's wrong ("Off the map") before you commit; the line goes
+  dotted until the squad says "copy". Shift queues, right-click cancels, Backspace cancels the
+  squad's order, Ctrl+Z undoes the last one within 10 s, Space repeats the last order, Tab turns
+  command mode off.
+- **Place the gun with its cone of fire.** G, then drag its facing and roll the wheel to widen or
+  narrow the arc. The cone shows what the gun can see in green and the dead ground behind crests
+  and buildings in dark, a red edge where a bank close in blocks it, range rings, how high it sits
+  over the ground it covers and how many known enemy positions can see the spot. The team sets up
+  facing the middle of the arc and fires only inside it.
 
 #### Added (C3: Phase 2)
 - **Real high command orders.** Attack (to an attack position, then in; "objective secure" once

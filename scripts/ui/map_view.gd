@@ -94,6 +94,8 @@ var _menu_at := Vector2.ZERO
 var _allied_menus: Array[PopupMenu] = []
 ## The right-click menu's high command submenus (MapCommandLayer.add_orders).
 var _hc_menus: Array[PopupMenu] = []
+## High command's order flow and drawing (MapCommandLayer: select, order, place, face, confirm).
+var command := MapCommandLayer.new()
 var _fitted := false  # showing the whole area (fit), until zoomed or panned
 ## The zone picture being made on a worker thread (-1: none).
 var _render_task := -1
@@ -108,6 +110,7 @@ var drawn_labels: Array[Dictionary] = []
 
 
 func _ready() -> void:
+	command.attach(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	focus_mode = Control.FOCUS_ALL
 	clip_contents = true
@@ -311,6 +314,10 @@ func marker_at(screen_pos: Vector2) -> int:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if command.handle(event):
+		accept_event()
+		queue_redraw()
+		return
 	if event is InputEventMouseMotion:
 		_on_motion(event)
 	elif event is InputEventMouseButton:
@@ -626,7 +633,7 @@ func _draw() -> void:
 	_draw_gear_markers()
 	_draw_squad()
 	_draw_allied()
-	MapCommandLayer.draw(self)  # high command: squad frames and their orders
+	command.draw()  # high command: squad frames, their orders, the order flow's ghost and gun cone
 	if _line.size() >= 2:
 		_polyline(_line, MapMarkers.colour_value(marker_colour), 2.0)
 	_layout_labels(map_rect)

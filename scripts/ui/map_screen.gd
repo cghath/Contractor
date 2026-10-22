@@ -233,6 +233,7 @@ func _refresh_hc() -> void:
 	if want:
 		hc_panel.show_command(hc)
 		view.queue_redraw()
+	view.command.refresh()
 
 
 ## The map fills what the toolbar and the side panel leave.

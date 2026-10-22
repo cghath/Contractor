@@ -27,6 +27,7 @@ func _ready() -> void:
 	_test_heroes()
 	_test_ce()
 	_test_phase2_pure()
+	_test_viewshed()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -41,6 +42,7 @@ func _ready() -> void:
 	await _frames(5)
 	await _test_dead_ground()
 	await _test_groundwork()
+	await _test_map_flow()
 	await _test_phase2()
 	await _test_orders()
 	GameState.delete_save()
@@ -462,3 +464,94 @@ func _said(hc: HighCommand, text: String) -> bool:
 		if text in String(l.text):
 			return true
 	return false
+
+
+# --- C4: the viewshed and the map's order flow ------------------------------------------------------
+
+func _test_viewshed() -> void:
+	print("Viewshed (a staged ridge)")
+	# a ridge 20 m high along x = 100: from the origin facing east (bearing 90), the ground past it is dead
+	var ridge := func(x: float, _z: float) -> float: return 20.0 * maxf(0.0, 1.0 - absf(x - 100.0) / 15.0)
+	var v := Viewshed.cast(Vector3.ZERO, 90.0, 60.0, 400.0, ridge)
+	var mid: Dictionary = v.rays[v.rays.size() / 2]
+	var seen: PackedByteArray = mid.seen
+	var step := float(v.step)
+	check(seen[int(50.0 / step) - 1] == 1, "the ground before the ridge is seen")
+	check(seen[int(200.0 / step) - 1] == 0, "the ground behind it is dead")
+	check(seen[int(100.0 / step) - 1] == 1, "the ridge top itself is seen")
+	check(int(v.samples) <= Viewshed.RAYS * Viewshed.MAX_SAMPLES, "at most %d samples (%d)" % [Viewshed.RAYS * Viewshed.MAX_SAMPLES, int(v.samples)])
+	var flat := Viewshed.cast(Vector3.ZERO, 0.0, 60.0, 400.0, func(_x: float, _z: float) -> float: return 0.0)
+	check(is_equal_approx(float(flat.seen_share), 1.0), "flat ground: all of it seen")
+	var wall := func(x: float, _z: float) -> float: return 6.0 if x > 12.0 and x < 28.0 else 0.0  # (a berm: samples are 10 m apart; thin walls come as building boxes)
+	var w := Viewshed.cast(Vector3.ZERO, 90.0, 30.0, 300.0, wall)
+	check(int(w.blocked_close) == w.rays.size(), "a berm 12-28 m out: every ray blocked close in")
+	var box := Viewshed.cast(Vector3.ZERO, 90.0, 30.0, 300.0, func(_x: float, _z: float) -> float: return 0.0, [AABB(Vector3(40, 0, -50), Vector3(10, 8, 100))])
+	check(float(box.seen_share) < 0.5, "a building box hides what's behind it")
+	var best := INF
+	for i in 5:
+		best = minf(best, float(Viewshed.cast(Vector3.ZERO, 45.0, 60.0, 1800.0, ridge).ms))
+	print("    viewshed: %.2f ms for %d samples" % [best, int(v.samples)])
+	check(best < 6.0, "the cast is cheap (%.2f ms; budget 2 ms in a release build)" % best)
+	check(is_equal_approx(Viewshed.bearing_of(Viewshed.dir_of(135.0)), 135.0), "bearings round-trip")
+	check(Viewshed.in_arc(350.0, 330.0, 30.0) and not Viewshed.in_arc(90.0, 330.0, 30.0), "an arc across north")
+	check(GunTeam.in_sector(Vector2(60, 120), Vector3.ZERO, Vector3(100, 0, 0)) and not GunTeam.in_sector(Vector2(60, 120), Vector3.ZERO, Vector3(0, 0, -100)),
+		"GunTeam.sector: east is inside 060-120, north isn't")
+	check(GunTeam.in_sector(Vector2.INF, Vector3.ZERO, Vector3(0, 0, -100)), "no sector: everywhere")
+	check(not Viewshed.ranges("tripod_m2").is_empty() and int(Viewshed.ranges("tripod_m2").effective_m) == 1800, "the M2's ranges come from data")
+
+
+func _test_map_flow() -> void:
+	print("The map's order flow (C4)")
+	var hc := MapNodes.high_command(level)
+	if hc == null or not hc.groups.has("hawk2"):
+		check(false, "the squad is still on the books")
+		return
+	var so: SquadOrders = hc.groups.hawk2.orders
+	var mv := MapView.new()
+	add_child(mv)
+	mv.setup(level)
+	mv.size = Vector2(1280, 720)
+	await _frames(40)  # (the view replicates at 2 Hz)
+	var cmd := mv.command
+	check(cmd.active(), "command mode is on for the commander with squads out")
+	cmd.select(["hawk2"])
+	check(cmd.selected == PackedStringArray(["hawk2"]), "select a squad")
+	var at := Vector2(_hawk.hero.global_position.x, _hawk.hero.global_position.z) + Vector2(0, 12)
+	await get_tree().create_timer(1.1).timeout
+	cmd.begin("move")
+	check(cmd.placing == "move", "Move: placing")
+	cmd.press(at)
+	cmd.release(at + Vector2(20, 0))
+	await _frames(5)
+	check(String(so.order.verb) == "move" and (so.order.facing as Array).size() == 2 and float(so.order.facing[0]) > 0.9, "release: sent, facing east from the drag")
+	check(cmd.pending.has("hawk2") or String(so.order.state) != "", "the ghost waits for the host's copy")
+	cmd.begin("defend")
+	cmd.press(at + Vector2(5, 5))
+	cmd.release(at + Vector2(5, 5), true)
+	await _frames(5)
+	check(so.queue.size() == 1 and String(so.queue[0].verb) == "defend", "Shift: queued")
+	check(cmd.last_verb == "defend", "the last order is remembered (Space repeats it)")
+	cmd.undo()
+	await _frames(5)
+	check(so.queue.is_empty(), "Ctrl+Z: the queued order is undone")
+	cmd.begin("move")
+	var right := InputEventMouseButton.new()
+	right.button_index = MOUSE_BUTTON_RIGHT
+	right.pressed = true
+	check(cmd.handle(right) and cmd.placing == "", "right-click while placing: cancelled")
+	await get_tree().create_timer(1.1).timeout
+	var before := int(so.order.get("id", 0))
+	cmd.begin("move")
+	cmd.press(Vector2(1e5, 1e5))
+	cmd.release(Vector2(1e5, 1e5))
+	await _frames(3)
+	check(int(so.order.get("id", 0)) == before and cmd.problem_at(Vector2(1e5, 1e5)) == "Off the map", "off the map: nothing sent, the ghost says why")
+	cmd.cancel_placing()
+	cmd.begin("hold")
+	await _frames(5)
+	check(String(so.order.verb) == "hold", "Hold: sent at once, no point needed")
+	check(cmd.context_first(at) == ["move", "defend"], "open ground: Move and Defend first on the bar")
+	await _frames(30)
+	cmd._check_pending()
+	check(not cmd.pending.has("hawk2"), "the host's copy came back (the ghost is gone)")
+	mv.queue_free()

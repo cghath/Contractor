@@ -197,6 +197,34 @@ func request_go(code: String) -> void:
 	_server_go.rpc_id(1, code)
 
 
+## Any peer (Ctrl+Z on the map): undo the last order given to `squad_id` (SquadOrders.undo).
+func request_undo(squad_id: String) -> void:
+	_server_undo.rpc_id(1, squad_id)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_undo(squad_id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer := multiplayer.get_remote_sender_id()
+	var why := server_undo(squad_id, peer if peer != 0 else 1)
+	if why != "" and peer != 0:
+		_client_refused.rpc_id(peer, 0, why)
+
+
+## Host: undoes `squad_id`'s last order for `peer` (the commander). Returns "" or why not.
+func server_undo(squad_id: String, peer := 1) -> String:
+	if peer != commander:
+		return _refuse("you don't have command")
+	var g: Dictionary = groups.get(squad_id, {})
+	if g.is_empty() or g.orders == null:
+		return _refuse("Nothing to undo")
+	var why: String = (g.orders as SquadOrders).undo()
+	if why == "":
+		radio_group(squad_id, "copy", "copy, belay that")
+	return _refuse(why) if why != "" else ""
+
+
 func request_answer(id: int, yes: bool) -> void:
 	_server_answer.rpc_id(1, id, yes)
 

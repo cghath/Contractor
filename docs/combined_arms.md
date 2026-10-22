@@ -2765,6 +2765,16 @@ Made while building the C lane (claude/ca-c-high-command); each is Proposed and 
 | C3.8 | A squad goes dark for 15 s after a succession (no reports, no shared contacts, "No comms" on the HUD strip) | 5.3: dark until the new leader has the radio | A pick-up-the-radio action |
 | C3.9 | The HUD strip shows only while hero squads are out, in the top-right zone under the objectives | high_command.md 10 | A new HUD zone |
 | C3.10 | The command menu's Squads mode is left to C6's contextual menus (its number tree stays as it is) | C6 owns the menus | A second menu tree now |
+| C4.1 | The order flow lives in `MapCommandLayer` (scripts/ui/map_command.gd), which MapView hands its input first and asks to draw; command mode is on whenever squads are out and you hold the command token, Tab turns it off and on | One hook each in MapView; no mode to find first | A separate Command toolbar mode |
+| C4.2 | Order keys on the map: Move M, Defend D, Attack A, Support by fire S, Bound B, Fall back F, Frontage W, Hold H, Regroup R, Extract X, Follow me Y, Place gun G; 1-4 select, ] cycles, Space repeats, Backspace cancels, Ctrl+Z undoes, Esc or right-click cancels the placing | The map has the keyboard while it's open (MapView takes the keys), so they don't clash with the on-foot keys; the letters match the order names | Function keys |
+| C4.3 | A plain click (under 8 px of drag) keeps the default facing (toward the nearest enemy intel marker, else north for the gun) | 5.4.1 | Always asking for a facing |
+| C4.4 | Support by fire is two clicks (where it fires from, then the target); a frontage is one drag from end to end | 5.4.1 with the two orders that need two points | A modal second step |
+| C4.5 | Undo: the host undoes the squad's last order within 10 s when it's queued, waiting, or the hero is still within 5 m of where he was given it; the order it replaced comes back | 5.4.1 "if it hasn't started" | Client-side undo |
+| C4.6 | The viewshed's step grows past 10 m for long ranges so a cast is at most 64 x 64 samples (the M2's 1,800 m cone samples every 28 m); thin walls come in as building boxes. Measured 2.8 ms in the debug editor (R build on the test PC), under the 2 ms budget expected in a release build; recast at most 10 times a second | 5.4.2's 4,000-sample budget at every range | 10 m always (11,500 samples for the M2) |
+| C4.7 | Gun ranges in data/gun_ranges.json (M2 1,800 / 6,800 m, DShK 1,500 / 3,500, M240 800 / 3,725, Mk19 1,500 point and 2,200 area, M224 70-3,490, 2B14 85-4,100) | 5.4.2 and the mortars' KITS | Hard-coded |
+| C4.8 | Place gun drives the player squad's gun loads (StaticWeapons "wt_setup:<left>:<right>"); `GunTeam.sector` faces the arc's middle, fires only inside it (its gunner too, through the gun's meta `sector` read by AavGunner) and never moves for fire from outside it. The wheel sets the arc (20-120, 60 default) | 5.4.2; one hook in AavGunner | A new gun-team order path |
+| C4.9 | The mortar's firing point and dispersion read-out wait for a mortar on the bar (Place gun is the MG in C4; the mortar keeps its "wt_fire" map menu entry) | Kept C4 to the cone the Captain asked for | Both at once |
+| C4.10 | The viewshed checks live in high_command_test (pure, a staged ridge), not a new suite | One fewer CI job; they're pure and fast | A viewshed suite |
 
 ### Operations, the war and staging
 

@@ -113,6 +113,12 @@ func server_command(from: Soldier, cmd: String, point: Vector3, names: PackedStr
 	var squad := lvl.squad_for(from.faction) if lvl else null
 	if squad == null:
 		return "No squad"
+	var arc := Vector2.INF  # "wt_setup:<left>:<right>": the arc the map's Place gun drew (GunTeam.sector)
+	var parts := cmd.split(":")
+	if parts.size() == 3 and parts[1].is_valid_float() and parts[2].is_valid_float():
+		arc = Vector2(fposmod(parts[1].to_float(), 360.0), fposmod(parts[2].to_float(), 360.0))
+		cmd = parts[0]
+	_arc = arc
 	var men: Array[Soldier] = []
 	for s: Soldier in squad.pick(names):
 		if s.is_ai() and s.vitals.is_up():
@@ -141,6 +147,8 @@ func server_command(from: Soldier, cmd: String, point: Vector3, names: PackedStr
 
 
 const TEAMS_GROUP := &"weapon_teams"
+## The arc of the order being formed (server_command: "wt_setup:<left>:<right>").
+var _arc := Vector2.INF
 
 
 ## Host: `a` and `b` (of squad `squad`) take up `kit`'s loads and belts and become a gun team
@@ -189,6 +197,7 @@ func _form_from(men: Array[Soldier], at: Vector3, squad: Squad, mortar: bool) ->
 			var gt := GunTeam.form(CompoundLevel.current(carriers[0]), carriers[0], carriers[1], kit, squad, null, true)
 			if gt:
 				gt.forced_spot = at
+				gt.sector = _arc
 				gt.add_to_group(TEAMS_GROUP)
 				return ""
 	return "Nobody there carries all of a %s's loads" % ("mortar" if mortar else "gun")
