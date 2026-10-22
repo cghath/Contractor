@@ -11,6 +11,41 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### US forces in the living war (combined arms, phase D7)
+
+#### Added
+- **The US is at war.** US forces now hold ground in the living war, as the factions do. They
+  fight the Ashen Banner first. Once the company wipes the Banner out, they turn on the Kestrel
+  Cartel. If Kestrel goes too, their war ends and they keep what they hold. They start at
+  strength 70 and gain a flat 3 a day. From day 3 they open one front of their own at a time on
+  Banner ground beside theirs. Where none is beside them, they push through the zone in the way.
+  The Banner, and anyone else at war with the US, can attack US ground.
+- **FOB Halberd.** It's a new US base on the coast, north of Cove outpost, held from day 1. It
+  can be besieged but never falls. No contracts are offered inside it, and every site there has
+  an American garrison. It's green on the theatre map, under the US flag.
+- **Joint operations.** A US front posts an operation on the US board once, if the company is
+  Trusted with the US. Vessmark posts one beside it. While the operation is on the board or under
+  way, that front waits. Complete it and the zone goes to the US. Fail it and the US loses
+  strength. If nobody takes it, it expires after 4 days and the front fights on without the
+  company. Until the full operation contracts (D3) arrive, an operation is a one-phase raid,
+  sabotage or HVT job against the zone's holder.
+- **The Vessmark Defence Ministry.** This new fictional government employer belongs to the
+  coalition, allied with the US, the UK and Canada. It wears its own grey-green camo, carries
+  Canadian weapons and flies a slate-blue flag. Its work only comes beside US operations, and it
+  pays 10% more.
+- **US forces in the field.** In zones the US holds or borders, a US patrol drives the roads
+  from site to site in an M-ATV and a MaxxPro with a rifle squad aboard, and gets out to fight
+  when hit. A US-held zone has a US garrison at its HQ site, while the Banner's last men hold its
+  other sites. US convoys come in along the MSR from neighbouring US ground. A section of two
+  Bradleys moves up to overwatch a US front, with an Abrams leading once the US is strong. Every
+  US group is green, uses callsigns (Saber, Anvil, Iron, Citadel) and talks on the US net.
+- **War news and radio.** The morning news covers US offensives, gains, sieges and operations,
+  and the US turning on Kestrel. Where US troops are about, enemy nets talk about them.
+
+#### Changed
+- Fronts opened by the US don't count toward the factions' limit of 3 open fronts.
+- A zone the US takes isn't a flashpoint, so no job against the US goes up there.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added

@@ -2709,6 +2709,27 @@ can be changed; the alternative is what was weighed against it.
 | 69 | Contract helicopter insertion and extraction cost $3,000 + $1,200 a link each way | Today it's free, so staging had nothing to save; the economy is "too easy overall" | Leaving flights free |
 | 70 | Staging services are limited (no armory, stash, hiring or workshop; +25% resupply prices) | The Captain: "improvised", "limited services" | A full second base |
 
+### Made while building D7 (US forces in the living war)
+
+Numbered D7-n so they don't collide with other phases' calls. All Proposed.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| D7-1 | FOB Halberd is placed by hand (`map_cell` in data/contracts.json, read by `RegionMap.layout`) north of Cove outpost, linked to it alone; no other zone moves | The grid has no free cell beside both Landing beach and Cove outpost, and filling Halberd into the grid would have moved every coast zone and its crossings | Re-flowing the coast grid; a hand-made link (two crossings on one edge) |
+| D7-2 | With no war-target zone beside its ground, the US's front goes on the next zone on the shortest way to the nearest one, if an enemy of the US holds it ("clearing the way to the Banner") | The Banner's zones are scattered (coast and inland), so the US would stall after Cove outpost | Stalling until the company takes ground for it |
+| D7-3 | The US's own front is outside the factions' cap of 3 (one US front at a time, its own seeded roll); the factions' fronts are counted without it | With 3 faction fronts open the US would often be locked out of its own war | Sharing the cap |
+| D7-4 | Until D3's operation contracts, a US front's operation is a one-phase contract of the employer's `op_types` (US: raid, sabotage, HVT capture; Vessmark: raid, intel grab) against the front's holder, `op_front` naming the zone, up 4 days, titled "Joint operation" ("Vessmark operation") | D7 needed operations for 7.3's pause and 6.6's result before D3 builds the real ones; D3 swaps the stand-in for its phases | Waiting for D3 to make the US front pause at all |
+| D7-5 | "Refreshed every 3 days" read as one operation per front: once it expires unaccepted, the front fights on by the tick to its end | Re-posting would keep a trusted company's board full and freeze every US front it ignores, against call 66's "unaccepted, the tick resolves them" | A fresh offer every 3 days |
+| D7-6 | Vessmark posts beside every US operation (an `ops_only` employer, never a random board pick), x1.1 pay, needing trusted with Vessmark | 6.1: "Vessmark offers appear when the US has a front" | A board share of its own |
+| D7-7 | A completed operation counts as all its phases, any other result as none; a held operation that lapses undeployed changes nothing | The stand-in has one phase; a lapse is the same as nobody taking it | A lapse as a failure |
+| D7-8 | A zone the US takes is no flashpoint; an operation's success on the target's last zone sieges it instead of flipping it | A flashpoint posts a job against the new holder (the US); the Captain's wipe rule holds for the US too | 6.6's "with a flashpoint" literally |
+| D7-9 | FOB Halberd defends at least as hard as the company's FOB (`FOB_DEFENCE`) | A base that can't fall shouldn't spend half the war sieged | The US's strength alone |
+| D7-10 | US garrison at a held zone's HQ site (its HQ, else first outpost, compound, checkpoint); at Halberd every site (the main one 8 men, the rest 4); a site a held contract is about stays the enemy's; the other sites of a US-held zone hold the faction it took it from (else its war target) | 7.3's "garrison at each held zone's HQ site"; contract zones have no HQ module; a held zone still has work in it | Clearing every site of a US zone |
+| D7-11 | US field groups: a patrol (M-ATV + MaxxPro, 8 men) in held and bordering zones; a convoy (M-ATV, MaxxPro, MaxxPro, M-ATV, 2 crew each, MaxxPros standing in for the HEMTT until D6a) every 10-15 min in held zones next to more US ground, from that crossing to the next or to the garrison and back; an armour section (2 Bradleys, an Abrams leading at US strength 85+) on a US front, halting 350 m short to overwatch, or at the garrison when US ground is attacked | 7.3's field list with the existing vehicles; a weak US doesn't field tanks | Abrams always |
+| D7-12 | Until B2's friendly SideCommand they're squad-AI groups (faction friendly, green IFF, a Squad each), like AlliedTroops' elements; B2 takes them over | B2 isn't built; they still fight and the squad can see who they are | Waiting for B2 |
+| D7-13 | Callsigns from call 47: Saber (patrols), Anvil (convoys), Iron (armour), Citadel (garrisons, Halberd); the US net's lines go to every player as notices, and enemy nets talk about the US every third ambient line where it's about (`radio_about`) | Original names, already chosen | Generic callsigns |
+| D7-14 | US war wants: airfield 3, HQ 2, harbour 2, crossing 1; the US flag drawn in blocks (glyph `stripes`); Vessmark's flag slate blue with a gold block; its camo a grey-green variant of its own; start rep 0 | Gives the US's fronts a preference and the map a flag | |
+
 ### The plan
 
 | # | Call | Why | The alternative |

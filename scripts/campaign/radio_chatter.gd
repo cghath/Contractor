@@ -119,7 +119,8 @@ func server_tick(delta := -1.0) -> void:
 
 ## Terror groups (2026-10-20): between reports, now and then (AMBIENT_S), a line that's the
 ## faction's own (factions.json "radio"), or, where the faction war has a front in this zone
-## (WorldSites), about the fight with the attacker. Proposed.
+## (WorldSites), about the fight with the attacker; where US forces are about (D7), every third
+## line is about them (their "radio_about"). Proposed.
 const AMBIENT_S := Vector2(90.0, 150.0)
 const AMBIENT_FIRST_S := 45.0
 var _ambient_at := INF
@@ -138,6 +139,11 @@ func ambient_line() -> String:
 	var own: Array = MissionRegistry.faction(f).get("radio", [])
 	var by := String(WorldSites.front_read(GameState.zone_id).get("by", ""))
 	_ambient_n += 1
+	# D7: where US forces hold, border or fight here (UsField.plan), every third line is about them.
+	var us := UsField.plan(GameState.zone_id)
+	var about: Array = MissionRegistry.faction(String(us.get("side", ""))).get("radio_about", []) if not us.is_empty() else []
+	if not about.is_empty() and _ambient_n % 3 == 0:
+		return "%s: %s" % [NET_CALLSIGN, String(about[(_ambient_n / 3) % about.size()])]
 	if by != "" and (_ambient_n % 2 == 0 or own.is_empty()):
 		return "%s: all stations, contact with %s, %s side. Hold your posts." % [NET_CALLSIGN, WorldSites.holder_name(by),
 			compass(Vector3.ZERO, _front_side())]
