@@ -11,6 +11,34 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The side picture: what each side knows (combined arms phase B1, docs/combined_arms.md 3.2, 3.3, 4.4)
+
+#### Added
+- **Spot reports on the map.** What your side has reported shows on the map as it was reported:
+  a symbol by what was seen (men, an MG, an AT team, a sniper, a vehicle, armour, a mortar), how
+  many and how long ago, inside a circle for how sure anyone is of where they are now. Fresh
+  reports are solid, older ones dashed, and past three minutes only a "last seen" circle is left.
+  Hover one to see who sent it and when. Nobody sees anything that wasn't reported.
+- **Spot reports in the world.** A small diamond hangs over each reported enemy within 800 m that
+  you can't see yourself. Your side's tags are red, everyone else's reports amber, and they fade
+  as they age. Settings > HUD turns them off or changes the range.
+- **Reports take radio time.** A squad's sighting reaches the side over the radio after a delay:
+  3-8 s for the company and allied regulars by their leader's skill, 8-20 s for Eastern Concord,
+  15-45 s for the cartels and Black Ridge, and the insurgents as before. With the net down it's
+  three times as long. A group whose radio man is down holds what it saw until it meets someone
+  with a radio.
+- **Your own forces are tracked.** Friendly vehicles with a working radio are tracked where they
+  are, and go grey if the radio is knocked out. Groups are tracked by their sitreps every 30 s.
+- **The group board.** Every group on each side is listed with its strength, anti-armour power,
+  combat effectiveness (green, amber, red) and ammunition. The AI commander (phase B2) will task
+  groups from it.
+- New test suite side_command (merging, ageing, latency by side, comms down, tracking, fairness,
+  the budget), in tools/run_tests.sh and CI.
+
+#### Changed
+- The hot-zone enemy commander now keeps its picture in the same form the friendly side uses.
+  Its decisions read the same reports as before, so hot zones play the same.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added

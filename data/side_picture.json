@@ -1,5 +1,5 @@
 {
-	"_about": "B1 of docs/combined_arms.md (3.2 the picture, 3.3 the group board, 4.4 shared spot reports). Read by SidePicture, GroupBoard and SideIntel. Every number Proposed (2026-10-22); the ones the doc left open are in its section 10, calls 74-85.",
+	"_about": "B1 of docs/combined_arms.md (3.2 the picture, 3.3 the group board, 4.4 shared spot reports). Read by SidePicture, GroupBoard and SideIntel. Every number Proposed (2026-10-22); the ones the doc left open are in its section 10, calls B1.1-B1.18.",
 	"latency_s": {
 		"_about": "Radio delay from a sighting to the side's picture: slow (skill 0) to fast (skill 1) by the reporting leader's skill (insurgents: by discipline, as Alert). issued: the side's groups carry a radio set without one in their kit.",
 		"regular": {"slow": 8.0, "fast": 3.0, "issued": true},
