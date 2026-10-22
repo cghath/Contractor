@@ -53,6 +53,10 @@ const BUDGETS := {
 	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0},
 	"heli": {"avg": 28.0, "p95": 45.0, "hitches_min": 20.0},
 }
+## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
+## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners
+## are the guard.
+const LOCAL_SLACK := 1.6
 const WALK_MPS := 3.0
 ## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
 ## the import and all five zones); averages and per-minute rates compare the same.
@@ -168,9 +172,10 @@ func _ready() -> void:
 			% [r.name, r.avg, r.p95, r.p99, r.worst, r.wall, r.scripts, r.engine, r.process, r.nav, r.hitches, r.hitches_min, r.ai, r.asleep, r.draws])
 		if not _no_budgets:
 			var b: Dictionary = BUDGETS[r.name]
-			check(r.avg <= b.avg, "%s: average frame %.2f ms (Proposed budget %.1f)" % [r.name, r.avg, b.avg])
-			check(r.p95 <= b.p95, "%s: 95th percentile frame %.2f ms (Proposed budget %.1f)" % [r.name, r.p95, b.p95])
-			check(r.hitches_min <= b.hitches_min, "%s: %.1f hitches a minute over %.0f ms (Proposed budget %.0f)" % [r.name, r.hitches_min, HITCH_MS, b.hitches_min])
+			var k := 1.0 if OS.get_environment("GITHUB_ACTIONS") != "" else LOCAL_SLACK
+			check(r.avg <= b.avg * k, "%s: average frame %.2f ms (Proposed budget %.1f)" % [r.name, r.avg, b.avg * k])
+			check(r.p95 <= b.p95 * k, "%s: 95th percentile frame %.2f ms (Proposed budget %.1f)" % [r.name, r.p95, b.p95 * k])
+			check(r.hitches_min <= b.hitches_min * k, "%s: %.1f hitches a minute over %.0f ms (Proposed budget %.0f)" % [r.name, r.hitches_min, HITCH_MS, b.hitches_min * k])
 	Campaign.reset_campaign()
 	GameState.delete_save()
 	print("PERFCASES TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])

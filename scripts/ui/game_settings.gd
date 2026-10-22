@@ -52,17 +52,19 @@ const GORE := [
 ]
 ## World detail at distance (perf pass, Captain 2026-10-22: "we definitely need more performance
 ## fixes"): "ultra" draws everything as before, to the horizon; the others stop the far tree canopy
-## at "far_trees_m" (fading out over its last FAR_FADE_M; 0: to the horizon) and draw rocks, scrub,
-## trees and props out to "scatter" times their usual distance. Up close every level looks the
-## same. Read as a zone's visuals are built (the next zone after a change). All numbers Proposed.
+## at "far_trees_m" (fading out over its last FAR_FADE_M; 0: to the horizon), draw rocks, scrub,
+## trees and props out to "scatter" times their usual distance, and soldiers further than
+## "soldier_shadow_m" cast no sun shadow (0: always; CharacterModel). Up close every level looks the
+## same. The scatter is read as a zone's visuals are built (the next zone after a change), the
+## soldiers' shadows at once. All numbers Proposed.
 const DETAIL := [
 	["low", "Low"], ["medium", "Medium"], ["high", "High"], ["ultra", "Ultra (full draw distance)"],
 ]
 const DETAIL_LEVELS := {
-	"low": {"far_trees_m": 1800.0, "scatter": 0.65},
-	"medium": {"far_trees_m": 2400.0, "scatter": 0.8},
-	"high": {"far_trees_m": 3200.0, "scatter": 1.0},
-	"ultra": {"far_trees_m": 0.0, "scatter": 1.0},
+	"low": {"far_trees_m": 1800.0, "scatter": 0.65, "soldier_shadow_m": 60.0},
+	"medium": {"far_trees_m": 2400.0, "scatter": 0.8, "soldier_shadow_m": 100.0},
+	"high": {"far_trees_m": 3200.0, "scatter": 1.0, "soldier_shadow_m": 150.0},
+	"ultra": {"far_trees_m": 0.0, "scatter": 1.0, "soldier_shadow_m": 0.0},
 }
 const FAR_FADE_M := 300.0
 

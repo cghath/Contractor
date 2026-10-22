@@ -148,7 +148,10 @@ the numbers before the pass, so going back to them fails.
 | drive | 20 | 30 | 15 |
 | heli | 28 | 45 | 20 |
 
-townperf keeps its own (tick 20 ms average, 40 ms 95th percentile).
+These are CI's: its runners have nothing else on them. Run locally the budgets get 1.6x room
+(LOCAL_SLACK): on this shared machine a busy run measured 2.5-3x a quiet one (R2431: town 62 ms,
+fight 49 against 21 and 17 in R2425), so a local failure is first a question of what else was
+running. townperf keeps its own (tick 20 ms average, 40 ms 95th percentile).
 
 ## What's left
 

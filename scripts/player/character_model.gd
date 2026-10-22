@@ -1590,6 +1590,7 @@ static func _bone_of(area: Area3D) -> String:
 
 
 func _process(frame_delta: float) -> void:
+	_shadow_lod(frame_delta)
 	# Level of detail: far off or behind the view, drawn every few frames.
 	_lod_dt += frame_delta
 	_lod_n += 1
@@ -1935,6 +1936,41 @@ func foot_toes(left: bool) -> bool:
 func foot_position(left: bool) -> Vector3:
 	var shin := _shin_left if left else _shin_right
 	return shin.global_transform * Vector3(0, -(LEG_LENGTH - THIGH), 0)
+
+
+## Perf pass (2026-10-22): a body further from the view than the Detail setting's
+## "soldier_shadow_m" (GameSettings.detail; 0, Ultra: always) casts no sun shadow (15-25 shadow
+## draws a soldier, for a shadow a few pixels long out there). Each part's own setting comes back
+## as it was when he's near again. Looked at every SHADOW_CHECK_S, with SHADOW_BAND of slack.
+const SHADOW_CHECK_S := 0.5
+const SHADOW_BAND := 1.1
+var _shadows_cut := false
+var _shadow_cd := 0.0
+
+
+func _shadow_lod(delta: float) -> void:
+	_shadow_cd -= delta
+	if _shadow_cd > 0.0:
+		return
+	_shadow_cd = SHADOW_CHECK_S
+	var far_m := float(GameSettings.detail().get("soldier_shadow_m", 0.0))
+	var viewport := get_viewport()
+	var camera := viewport.get_camera_3d() if viewport else null
+	var cut := false
+	if far_m > 0.0 and camera:
+		var d := global_position.distance_to(camera.global_position)
+		cut = d > far_m * (SHADOW_BAND if not _shadows_cut else 1.0 / SHADOW_BAND)
+	if cut == _shadows_cut:
+		return
+	_shadows_cut = cut
+	for g: Node in find_children("*", "GeometryInstance3D", true, false):
+		var geo := g as GeometryInstance3D
+		if cut:
+			geo.set_meta(&"shadow_lod", geo.cast_shadow)
+			geo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		elif geo.has_meta(&"shadow_lod"):
+			geo.cast_shadow = geo.get_meta(&"shadow_lod")
+			geo.remove_meta(&"shadow_lod")
 
 
 ## Frames between draws for this body (level of detail): every frame near the view, fewer far
