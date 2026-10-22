@@ -125,6 +125,8 @@ const MUST := {
 	"barn": {"barn": 1}, "harbour_shed": {"dock_hall": 1}, "hangar": {"hangar": 1, "office": 1}, "control_tower": {"tower_cab": 1},
 	"pumphouse": {"plant": 1}, "drug_lab": {"lab": 1}, "ied_workshop": {"bomb_workshop": 1},
 }
+## The halls the AI's scan must find from their middle (F-162), by type.
+const HALL_SCANNED := {"hangar": "hangar", "factory": "factory_floor"}
 ## Halls furnished with more than one chunk.
 const HALLS: Array[String] = ["prayer_hall", "nave", "factory_floor", "hangar", "dock_hall"]
 
@@ -424,6 +426,8 @@ func _test_in_world() -> void:
 	var bad_scan: Array = []
 	var found_rooms := 0
 	var summary: Array = []
+	var halls: Array = []
+	var bad_halls: Array = []
 	for run: Array in runs:
 		var b := BuildingGen.building(String(run[0]), int(run[1]), "", int(run[2]))
 		var name := "%s%s" % [run[0], "" if int(run[2]) == 0 else ["", " (ruined)", " (bombed)"][int(run[2])]]
@@ -482,8 +486,7 @@ func _test_in_world() -> void:
 				bad_up.append("%s (to %.1f m: got %.1f)" % [name, top_y, goal.y - AT.y])
 		# The AI's scan from inside the front door.
 		var front_door: Variant = BuildingGen.front_door(b)
-		# (From inside its front door; a hangar's hall is too open by its door for the scan's probes,
-		# so from its rooms in turn after that.)
+		# (From inside its front door, then from its rooms in turn.)
 		var tries: Array = [AT + (front_door as Vector3) + Vector3(0, 0.1, -1.5)] if front_door != null else []
 		for r: Dictionary in b.rooms:
 			tries.append(AT + Vector3((r.rect as Rect2).get_center().x, float(r.y) + 0.1, (r.rect as Rect2).get_center().y))
@@ -500,6 +503,25 @@ func _test_in_world() -> void:
 		var want_floors := 1 if int(run[2]) != BuildingGen.INTACT else int(b.storeys) + (1 if b.roof_access else 0)
 		if found.is_empty() or floors.size() < want_floors or entrances.is_empty() or scan_rooms.is_empty() or ports.is_empty():
 			bad_scan.append("%s: %d floors (want %d), %d entrances, %d rooms, %d ports" % [name, floors.size(), want_floors, entrances.size(), scan_rooms.size(), ports.size()])
+		# F-162: a big open hall (a hangar's, a factory floor) reads as inside from its middle, most
+		# of its floor with it, so the AI garrisons and clears it like any other building.
+		if int(run[2]) == BuildingGen.INTACT and String(run[0]) in HALL_SCANNED:
+			for r: Dictionary in b.rooms:
+				if String(r.role) != String(HALL_SCANNED[String(run[0])]):
+					continue
+				var rect: Rect2 = r.rect
+				var middle := _room_goal(map, rect, float(r.y), street)
+				Buildings.forget()
+				var hall := Buildings.nearest(player, middle, 2.0) if middle.is_finite() else {}
+				var covered := 0
+				for sp: Vector3 in hall.get("spots", []):
+					if rect.grow(-0.5).has_point(Vector2(sp.x - AT.x, sp.z - AT.z)) and absf(sp.y - AT.y - float(r.y)) < 1.0:
+						covered += 1
+				var cells := int(rect.grow(-0.5).get_area() / (Buildings.GRID_M * Buildings.GRID_M))
+				halls.append("%s %s from its middle: %s, %d of ~%d floor cells, %d entrances, %d rooms" % [name, r.role,
+					"inside" if Buildings.contains(hall, middle) else "OUTSIDE", covered, cells, hall.get("entrances", []).size(), hall.get("rooms", []).size()])
+				if not Buildings.contains(hall, middle) or covered * 2 < cells or hall.get("entrances", []).is_empty() or hall.get("rooms", []).is_empty():
+					bad_halls.append(halls[-1])
 		summary.append("%s %d/%d rooms, scan %df %de %dr %dp" % [name, reached, rooms, floors.size(), entrances.size(), scan_rooms.size(), ports.size()])
 		if not built or not readable:
 			bad_scan.append("%s: voxels built %s, readable %s" % [name, built, readable])
@@ -509,6 +531,9 @@ func _test_in_world() -> void:
 	check(bad_nav.is_empty(), "the navmesh covers every room of every type, a path to each from the street (ruins: most) %s" % [bad_nav.slice(0, 5)])
 	check(bad_up.is_empty(), "their stairs reach their upper floors and roofs %s" % [bad_up.slice(0, 4)])
 	check(bad_scan.is_empty() and found_rooms > runs.size(), "the AI's building scan finds each one's floors, rooms (%d), entrances and firing ports %s" % [found_rooms, bad_scan.slice(0, 4)])
+	print("    " + "
+    ".join(halls))
+	check(not halls.is_empty() and bad_halls.is_empty(), "a hangar's hall and a factory floor scan as inside from their middle, most of the floor with them (F-162) %s" % [bad_halls])
 
 
 ## A walkable spot on room `rect`'s floor (at `y`) by the navmesh (zone space): the one nearest
