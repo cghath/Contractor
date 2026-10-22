@@ -609,8 +609,12 @@ placeholder-level in places.
 bases, outposts, checkpoints, villages, roads), with urban hot zones. 22 contract zones and 5 hot
 zones on a region map. Terrain presets (temperate, coastal, salt flats, desert wadi, rocky ridge,
 scrubland, forest). Buildings are generated: a shell, rooms by type (house, shop, warehouse,
-clinic, police station, office), interior chunks, storeys and stairs, the same on every visit.
-Modules stream in at 260 m, with stand-ins out to 2.5 km.
+clinic, police station), interior chunks, storeys and stairs, the same on every visit. Landmarks
+(queue item 1.4): an office, a mosque, a church, a school, a garage, a fuel station, a factory, a
+farm, a harbour with piers and cranes, an airfield with hangars and a tower, an oil field, a fuel
+depot, and the terror groups' drug labs and IED workshops, each with ruined and bombed-out
+variants, placed in the zones their asset tags name. Modules stream in at 260 m, with stand-ins
+out to 2.5 km.
 
 **Compared with.**
 - *Arma 3 / Reforger*: hand-made maps of 50 to 270 km².
@@ -618,8 +622,8 @@ Modules stream in at 260 m, with stand-ins out to 2.5 km.
 - *Teardown*: hand-made voxel levels.
 
 **Standing.** Ahead on variety: every zone is generated and every building can be breached and
-furnished. Behind on scale and authored detail: zones are a few km², and a generated zone lacks
-the landmarks of a hand-made map. City zones (phase 4) aren't built.
+furnished. Behind on scale and authored detail: zones are a few km², and generated landmarks are
+simpler than a hand-made map's set pieces. City zones (phase 4) aren't built.
 
 ### 8.3 Linked zones, crossings, zone memory and raids (in the spirit of STALKER)
 **Now.** Zones join on a region map through marked crossings at their edges. Everyone and

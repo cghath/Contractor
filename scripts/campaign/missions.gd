@@ -180,6 +180,8 @@ static func zone_def(zone_id: String) -> Dictionary:
 		for key: String in ["hour", "weather"]:  # the zone's time of day and weather (DayNight, wave 7 S1)
 			if raw.has(key):
 				def[key] = raw[key]
+		def["assets"] = raw.get("assets", [])  # its landmarks go by these (ZoneModules.place_landmarks, queue item 1.4)
+		def["controller"] = String(raw.get("controller", ""))
 		if not spec is String:
 			def.erase("terrain")  # generate() already chose one before it knew the name and region
 			var named: Variant = raw.get("terrain", spec.get("terrain", "") if spec is Dictionary else "")
