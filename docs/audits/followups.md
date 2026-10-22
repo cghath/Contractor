@@ -331,6 +331,65 @@ nothing). The demolitions suite uses a plain box as its wall instead.
 Suggested: move the blocks inside 22 m of the range's origin (e.g. z -18 and -21), or give the
 range's VoxelWorld `bounds` that reach them before it builds.
 
+## F-175: library props don't know about rivers and lakes yet (cghath's side, queue item 1.7)
+
+Location: [zone_props.gd](../../scripts/world/zone_props.gd), `_ground_under` and `_farm_site`.
+Found while building the prop library (`world/props`, 2026-10-21) alongside the water work.
+
+What happens: props keep out of the sea (the terrain's `sea_level`), but rivers, lakes and fords
+don't exist yet on this branch, so nothing keeps a pylon, a farm or a parked car out of one once
+the water work lands.
+
+Suggested: when the water work exposes a "wet at (x, z)" query, check it in
+`ZoneProps._ground_under` (one line, beside the sea check) and keep pylon lines off a bridge's
+approach (they can span a river: skip the footing, keep the link).
+
+## F-176: point the roadside props at the new roads (cghath's side, queue item 1.7)
+
+Location: [zone_props.gd](../../scripts/world/zone_props.gd), `street_lines()`.
+
+What happens: roadside poles, signs, parked cars and checkpoint barriers go along today's straight
+`def.roads` segments, 5 m wide (`ROAD_HALF_M`), and a town's furniture along BuildingGen's main
+and cross streets. The roads work (zone_roads.gd) will give roads curves, kerbs and pavements.
+
+Suggested: return the new road edges (and pavements, with their half width) from
+`street_lines()`; everything roadside follows. Town lamps and stalls could then stand on the
+pavements instead of the street's edge.
+
+## F-177: a round into an animal makes a "vehicle" hit (Ballistics)
+
+Location: [ballistics.gd](../../scripts/combat/ballistics.gd), the `on_bullet` branch;
+[zone_animals.gd](../../scripts/world/zone_animals.gd) uses it.
+
+What happens: an animal is hit through Ballistics' `on_bullet` meta (as a drone is), which
+returns `{"result": "vehicle"}`, so the shooter's impact effect is the one for metal, not flesh.
+The animal dies (and lies down) on every peer either way.
+
+Suggested: let an `on_bullet` callable return the result kind ("animal": a blood puff), or add a
+meta for it.
+
+## F-178: props can't be knocked down or destroyed
+
+Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) (static bodies per cell).
+
+What happens: like the rocks, trees and old box props before them, library props are static and
+deterministic from the zone's seed: a blast doesn't flatten a fence or a stall, a vehicle doesn't
+push through a chain-link fence (it senses it as an obstacle), and nothing about them is saved.
+
+Suggested (later, with structural collapse, queue item 13): destructible light props (fences,
+stalls, awnings, washing lines) as a host-saved "gone" set per zone, like the voxel edit log.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
+
+- 2026-10-21 | Prop library (1.7): today's outdoor set counted as 25 shapes (the scatter's 8 natural and 6 box props, the modules' 11 outdoor dressings), so "triple" means 75+; the library adds 72 (69 static props, 3 animals): 97 | the brief's own "about 25" | count only the scatter's 6 man-made props (18 would have done)
+- 2026-10-21 | Prop library: each part takes rounds by its own material (PropArt.MATERIALS, Proposed): a car's cabin and boot 600 J/m (an M855 goes through, a 9 mm stops), its engine bay stops everything, a container 450 J/m (through its width, not its 6 m length), hay 3500, a full tank 4000, wood, sheet and mud as VoxelWorld's | Arma/ACE: car bodies don't stop rifle rounds, engine blocks do | every prop hard cover, as the old box props were
+- 2026-10-21 | Prop library: chain-link and barbed wire collide on Soldier.BODY_LAYER only: they stop men (and vehicles sense them) but not sight lines or rounds | you see and shoot through wire mesh | solid on the world layer (the AI would hide behind a mesh fence)
+- 2026-10-21 | Prop library: animals are walked by the host and sent 4 times a second in one unreliable packet (Proposed); a hit kills one; no fleeing, not saved | the brief: wandering only, synced, cheap | a deterministic walk from a shared clock (no packets, but no shared clock to drive it yet)
+- 2026-10-21 | Prop library: scenery vehicles are built from flat-shaded blocks (boxes, wedges, drums) that collide exactly as drawn, not from VehicleArt's 5 cm voxel canvases | collision has to match what's drawn, and one mesh per shape batches | VehicleArt-style canvases (finer, but collision would only approximate them)
+- 2026-10-21 | Prop library: placement by terrain style in data/props.json (temperate, woodland, highland, coastal, arid; a procedural mix takes its first preset's style), Proposed densities: 0.2-0.55 farms a km2, 0-2 pylon lines, poles on 45-70% of roads, 0.9-1.4 vehicles per km of road (35-50% burnt out) | towns lived-in, the country with power and farms | per-preset numbers in terrain_presets.json (shared with the terrain work)
+- 2026-10-21 | Prop library: a town's street furniture stands on its streets inside the town's pad, clear of every box, guard post, loot spot and civilian walk (the world suite's "nothing on a pad" allows it) | that's where a town's streets are | keep every prop off the pads (towns stay bare)
+- 2026-10-21 | Prop library: pylons every 95 m, roadside poles every 38 m, wires sag 3% of their span (Proposed consts in ZoneProps and ZoneScatter) | a 2-4 km zone shows several spans | real 300 m pylon spacing (6-10 pylons a zone)
+- 2026-10-21 | Prop library: the old box car wreck becomes a burnt-out hulk where it fits (same spot and heading), and scatter props no longer count as foliage (they hid people like bushes on top of being solid) | the brief: real shapes in place of box wrecks; props are solid | keep both
+- 2026-10-21 | Prop library: the screenshots are drawn by a small software rasteriser in tests/props_shots.gd (headless has no renderer and no window may open) | the brief's "headless screenshots" | tests/world_shots.gd in a real window

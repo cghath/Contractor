@@ -25,8 +25,18 @@ extends Node3D
 ## empty"): bigger, rougher PROP clutter out in the open terrain, not just roadside. VALUABLE
 ## marks where WorldValuables spawns real lootable pickups (caches, crates, wrecks with kit, dead
 ## drops) — a placement kind with no mesh of its own; see valuable_sites().
+##
+## The prop library (cghath's queue item 1.7, PropArt and ZoneProps): street furniture, market
+## stalls, fences and gates, pylons and poles with their wires, farm and water props, scenery
+## vehicles and burnt-out hulks (in place of the old box wrecks), shipping containers, graves, site
+## clutter, laid out first (ZoneProps.lay_out) so the rocks and trees keep off them. A library prop
+## is a PROP item with a "shape" (PropArt.NAMES), a "paint" and a "link" (its wires run to the item
+## before it); its size is a scale (ONE). Each part collides as drawn and takes rounds by its own
+## material (round_through, from Ballistics and VoxelWorld.stops_round_in); see-through parts
+## (chain-link, barbed wire) stop men but not sight or rounds. ANIMAL marks where ZoneAnimals keeps
+## goats, sheep and dogs (no mesh of its own).
 
-enum Kind { ROCK, SCRUB, TREE, THICKET, PROP, VALUABLE }
+enum Kind { ROCK, SCRUB, TREE, THICKET, PROP, VALUABLE, ANIMAL }
 
 ## Most items of each kind in a zone (a 16 km2 hot zone hits them). Round 4 raised the trees
 ## for the woods; a nav chunk is 12 m (ZoneNav), so more trunk boxes cost little per bake.
@@ -130,7 +140,8 @@ const FAR_GROUP_M := 24.0
 ## 8: ruins and wrecks off the roads, and the VALUABLE placement kind (Captain, 2026-10-16).
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
-const LAYOUT_VERSION := 11  # 11: every tree solid (2026-10-18), old caches re-roll
+## 11: every tree solid (2026-10-18).
+const LAYOUT_VERSION := 12  # 12: the prop library (ZoneProps, 2026-10-21), old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -172,8 +183,12 @@ static var _shared_material: StandardMaterial3D
 
 ## Every item: {"kind", "pos" (Vector3), "yaw", "size" (Vector3), "colour" (Color), "solid"}.
 var items: Array[Dictionary] = []
-var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0}
+var counts := {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0, Kind.ANIMAL: 0}
 var solid_count := 0
+## Library props (PropArt shapes) in the layout (they're PROP items too, but not in solid_count).
+var library_count := 0
+## What the last fresh layout's ZoneProps laid ({} from a cache), for tests.
+var props_report := {}
 ## Where the last generate's layout came from: "generated", "memory" or "disk" ("" none).
 var cache_source := ""
 ## The copses and groves the last fresh layout made (not kept in the cache: empty when the
@@ -192,6 +207,8 @@ var _keep: Array[Rect2] = []
 var _roads: Array = []
 var _cluster: FastNoiseLite
 var _key := ""
+var _def := {}
+var _props: ZoneProps  # while laying out: the library's placement (rocks and trees keep off its props)
 var _entry := {}  # this zone's cache entry
 var _far := {}  # cell -> MultiMesh of far blobs (built in build_visuals)
 # While laying out: the zone's half width, colours, scrub sizes, the trees placed so far by
@@ -222,8 +239,10 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 	items = fresh  # new arrays, never clear(): a cached layout may share the old ones
 	_cells = {}
 	_built = {}
-	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0}
+	counts = {Kind.ROCK: 0, Kind.SCRUB: 0, Kind.TREE: 0, Kind.THICKET: 0, Kind.PROP: 0, Kind.VALUABLE: 0, Kind.ANIMAL: 0}
 	solid_count = 0
+	library_count = 0
+	props_report = {}
 	cache_source = ""
 	var sites: Array[Dictionary] = []
 	copse_sites = sites
@@ -236,6 +255,7 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 		keep.append((pad[0] as Rect2).grow(PAD_KEEP_M))
 	_keep = keep
 	_roads = def.get("roads", [])
+	_def = def
 	var cluster := FastNoiseLite.new()
 	cluster.seed = terrain.seed_value + 77
 	cluster.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -287,6 +307,10 @@ func _lay_out() -> void:
 	_scrub_lo = float(scrub_size[0])
 	_scrub_hi = float(scrub_size[1])
 	_tree_grid = {}
+	# The prop library first: everything after keeps off it (_props.blocks).
+	_props = ZoneProps.new()
+	_props.lay_out(self, terrain, _def)
+	props_report = _props.report
 	# Rocks.
 	var want := mini(int(round(float(_spec.get("rocks_per_km2", 0.0)) * area_km2)), CAP_ROCKS)
 	var attempts := int(want * tries_per)
@@ -301,7 +325,7 @@ func _lay_out() -> void:
 		var squash_roll := rng.randf()
 		if open and rng.randf() > _open_weight(x, z):
 			continue
-		if _blocked(x, z, _keep, _roads):
+		if _blocked(x, z, _keep, _roads) or _props.blocks(x, z, 0.8 + scale_roll * 1.0):
 			continue
 		var h := terrain.height_at(x, z)
 		if terrain.sea_side >= 0 and h < terrain.sea_level + 0.35:
@@ -325,7 +349,7 @@ func _lay_out() -> void:
 		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
 		if not _near_road_or_pad(x, z, props_near):
 			continue
-		if _blocked(x, z, _keep, _roads):
+		if _blocked(x, z, _keep, _roads) or _props.blocks(x, z, 0.8):
 			continue
 		var h := terrain.height_at(x, z)
 		if terrain.sea_side >= 0 and h < terrain.sea_level + 0.35:
@@ -345,7 +369,7 @@ func _lay_out() -> void:
 		attempts -= 1
 		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
 		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
-		if _blocked(x, z, _keep, _roads):
+		if _blocked(x, z, _keep, _roads) or _props.blocks(x, z, 2.0):
 			continue
 		if open and rng.randf() > _open_weight(x, z):
 			continue
@@ -355,8 +379,15 @@ func _lay_out() -> void:
 		if terrain.normal_at(x, z).y < 0.6:
 			continue
 		var size := Vector3(rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI), rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI) * 0.6, rng.randf_range(RUIN_SIZE_LO, RUIN_SIZE_HI))
-		_add({"kind": Kind.PROP, "yaw": rng.randf() * TAU, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.5, z),
-			"colour": ruin_colours[rng.randi() % ruin_colours.size()]})
+		var ruin := {"kind": Kind.PROP, "yaw": rng.randf() * TAU, "solid": true, "size": size, "pos": Vector3(x, h + size.y * 0.5, z),
+			"colour": ruin_colours[rng.randi() % ruin_colours.size()]}
+		# A car wreck is a burnt-out vehicle hulk from the library now (queue item 1.7: "real voxel
+		# shapes in place of box wrecks"), lying the way the wreck would have; the old box only where
+		# a hulk doesn't fit.
+		if _prop_kind(ruin) == "wreck" and _props.hulk(x, z, float(_prop_transform(ruin)[0])):
+			want -= 1
+			continue
+		_add(ruin)
 		want -= 1
 	# Valuable sites: where WorldValuables (host) will spawn real lootable pickups (caches,
 	# crates, wrecks with kit, dead drops) — well away from a site or a road (VALUABLE_AVOID_M,
@@ -368,7 +399,7 @@ func _lay_out() -> void:
 		attempts -= 1
 		var x := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
 		var z := rng.randf_range(-_half + EDGE_KEEP_M, _half - EDGE_KEEP_M)
-		if _near_road_or_pad(x, z, VALUABLE_AVOID_M) or _blocked(x, z, _keep, _roads):
+		if _near_road_or_pad(x, z, VALUABLE_AVOID_M) or _blocked(x, z, _keep, _roads) or _props.blocks(x, z, 1.0):
 			continue
 		if open and rng.randf() > _open_weight(x, z):
 			continue
@@ -410,6 +441,7 @@ func _lay_out() -> void:
 		if _try_bush(rng, x, z, Kind.SCRUB, _scrub_lo, _scrub_hi):
 			bushes += 1
 	_tree_grid = {}
+	_props = null
 
 
 ## How much scatter a preset with an open middle (scatter "margin_m"; Captain, 2026-10-14: the
@@ -671,7 +703,7 @@ func _copse_rock(rng: RandomNumberGenerator, x: float, z: float) -> bool:
 	var tint := rng.randf()
 	if counts[Kind.ROCK] >= CAP_ROCKS or solid_count >= _cap_solid or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
-	if _crowded(x, z) or _blocked(x, z, _keep, _roads):
+	if _crowded(x, z) or _blocked(x, z, _keep, _roads) or (_props and _props.blocks(x, z, s * 0.6)):
 		return false
 	var h := _terrain.height_at(x, z)
 	if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.35:
@@ -757,7 +789,7 @@ func _try_tree(rng: RandomNumberGenerator, x: float, z: float, lo: float, hi: fl
 	var tint := rng.randf()
 	if counts[Kind.TREE] >= _tree_limit or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
-	if _crowded(x, z) or _blocked(x, z, _keep, _roads):
+	if _crowded(x, z) or _blocked(x, z, _keep, _roads) or (_props and _props.blocks(x, z, 1.3 * s)):
 		return false
 	var h := _terrain.height_at(x, z)
 	if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.35:
@@ -797,7 +829,7 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 	var cap := _cap_thickets if kind == Kind.THICKET else CAP_SCRUB
 	if counts[kind] >= cap or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
-	if _blocked(x, z, _keep, _roads):
+	if _blocked(x, z, _keep, _roads) or (_props and _props.blocks(x, z, s * SCRUB_R)):
 		return false
 	var h := _terrain.height_at(x, z)
 	if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.35:
@@ -815,7 +847,9 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 func _add(item: Dictionary) -> void:
 	if int(item.kind) == Kind.TREE:
 		item["conifer"] = _is_conifer(item)  # (from where it stands: the same from a cache too)
-	if item.solid:
+	if item.has("shape") and int(item.kind) == Kind.PROP:
+		library_count += 1
+	elif item.solid:
 		solid_count += 1
 	counts[int(item.kind)] += 1
 	var p: Vector3 = item.pos
@@ -832,7 +866,10 @@ func _add(item: Dictionary) -> void:
 ## heights, the preset's scatter, the pads and roads).
 func _cache_key() -> String:
 	var t := _terrain
-	var parts := [LAYOUT_VERSION, t.seed_value, t.size_m, t.preset_id, t.checksum(), t.sea_side, t.sea_level, JSON.stringify(_spec, "", true), str(_keep), str(_roads)]
+	var modules: Array = []  # (the library's town streets and site clutter go by the modules' types)
+	for m: Dictionary in _def.get("modules", []):
+		modules.append([String(m.get("type", "")), m.get("pos", [])])
+	var parts := [LAYOUT_VERSION, t.seed_value, t.size_m, t.preset_id, t.checksum(), t.sea_side, t.sea_level, JSON.stringify(_spec, "", true), str(_keep), str(_roads), str(modules)]
 	return str(parts).sha256_text()
 
 
@@ -844,13 +881,14 @@ func _from_memory() -> bool:
 	_cells = _entry.cells
 	counts = (_entry.counts as Dictionary).duplicate()
 	solid_count = int(_entry.solid)
+	library_count = int(_entry.get("library", 0))
 	cache_source = "memory"
 	_touch()
 	return true
 
 
 func _remember() -> void:
-	_entry = {"items": items, "cells": _cells, "counts": counts.duplicate(), "solid": solid_count, "visual": {}, "far": {}}
+	_entry = {"items": items, "cells": _cells, "counts": counts.duplicate(), "solid": solid_count, "library": library_count, "visual": {}, "far": {}}
 	_cache[_key] = _entry
 	_touch()
 
@@ -882,17 +920,23 @@ func _disk_path() -> String:
 	return CACHE_DIR.path_join("scatter_%s.bin" % _key.substr(0, 24))
 
 
-## Items on disk: 12 numbers each (kind, position, yaw, size, colour, solid), compressed.
+## Items on disk: DISK_FIELDS numbers each (kind, position, yaw, size, colour, solid, and a library
+## prop's shape (PropArt.NAMES index, -1 none), paint and link), compressed.
+const DISK_FIELDS := 15
+
+
 func _to_disk() -> void:
 	DirAccess.make_dir_recursive_absolute(CACHE_DIR)
 	var flat := PackedFloat64Array()
-	flat.resize(items.size() * 12)
+	flat.resize(items.size() * DISK_FIELDS)
 	var k := 0
 	for item in items:
 		var p: Vector3 = item.pos
 		var s: Vector3 = item.size
 		var c: Color = item.colour
-		for v: float in [float(item.kind), p.x, p.y, p.z, float(item.yaw), s.x, s.y, s.z, c.r, c.g, c.b, 1.0 if item.solid else 0.0]:
+		var shape := float(PropArt.index_of(String(item.shape))) if item.has("shape") else -1.0
+		for v: float in [float(item.kind), p.x, p.y, p.z, float(item.yaw), s.x, s.y, s.z, c.r, c.g, c.b, 1.0 if item.solid else 0.0,
+				shape, float(item.get("paint", 0)), float(item.get("link", 0))]:
 			flat[k] = v
 			k += 1
 	var file := FileAccess.open_compressed(_disk_path(), FileAccess.WRITE, FileAccess.COMPRESSION_ZSTD)
@@ -920,9 +964,14 @@ func _from_disk() -> bool:
 		for cz in cells:
 			for cx in cells:
 				_cells[Vector2i(cx, cz)] = []
-	for k in range(0, flat.size(), 12):
-		_add({"kind": int(flat[k]), "pos": Vector3(flat[k + 1], flat[k + 2], flat[k + 3]), "yaw": flat[k + 4],
-			"size": Vector3(flat[k + 5], flat[k + 6], flat[k + 7]), "colour": Color(flat[k + 8], flat[k + 9], flat[k + 10]), "solid": flat[k + 11] > 0.5})
+	for k in range(0, flat.size(), DISK_FIELDS):
+		var item := {"kind": int(flat[k]), "pos": Vector3(flat[k + 1], flat[k + 2], flat[k + 3]), "yaw": flat[k + 4],
+			"size": Vector3(flat[k + 5], flat[k + 6], flat[k + 7]), "colour": Color(flat[k + 8], flat[k + 9], flat[k + 10]), "solid": flat[k + 11] > 0.5}
+		if flat[k + 12] >= 0.0:
+			item["shape"] = PropArt.NAMES[int(flat[k + 12])]
+			item["paint"] = int(flat[k + 13])
+			item["link"] = int(flat[k + 14])
+		_add(item)
 	cache_source = "disk"
 	_remember()
 	return true
@@ -988,7 +1037,7 @@ func checksum() -> int:
 	var flat := PackedFloat32Array()
 	for item in items:
 		var p: Vector3 = item.pos
-		flat.append_array([float(item.kind), p.x, p.y, p.z, item.yaw, (item.size as Vector3).x])
+		flat.append_array([float(item.kind), p.x, p.y, p.z, item.yaw, (item.size as Vector3).x, float(PropArt.index_of(String(item.get("shape", "")))), float(item.get("paint", 0))])
 	return hash(flat)
 
 
@@ -1019,7 +1068,7 @@ func boxes_in(area: Rect2) -> Array[AABB]:
 		for cx in range(lo.x, hi.x + 1):
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
-				if not item.solid or not area.has_point(Vector2(item.pos.x, item.pos.z)):
+				if not item.solid or item.has("shape") or not area.has_point(Vector2(item.pos.x, item.pos.z)):
 					continue
 				var half := _solid_half(item)
 				var p: Vector3 = item.pos
@@ -1048,8 +1097,8 @@ func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3) -> float:
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
 				var kind := int(item.kind)
-				if kind == Kind.ROCK or kind == Kind.VALUABLE:
-					continue
+				if kind == Kind.ROCK or kind >= Kind.PROP:
+					continue  # solid (rays see to it) or not foliage
 				var p: Vector3 = item.pos
 				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
 					continue  # as in foliage_between
@@ -1118,8 +1167,8 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 			for index: int in _cells.get(Vector2i(cx, cz), []):
 				var item: Dictionary = items[index]
 				var kind := int(item.kind)
-				if kind == Kind.ROCK or kind == Kind.VALUABLE:
-					continue
+				if kind == Kind.ROCK or kind >= Kind.PROP:
+					continue  # props and rocks are solid: rays see to them
 				var p: Vector3 = item.pos
 				if Vector2(p.x - from.x, p.z - from.z).length() > _see_m(kind):
 					continue  # past where it's drawn it hides nobody (what players see is what counts)
@@ -1197,9 +1246,15 @@ static var _trunk_shapes := {}
 ## each the shape it's drawn as (world visual pass, 2026-10-20: rocks and props were a box 0.9 of
 ## their size, the rocks' drawn corners pulled in and out of it, and both drawn sheared when turned):
 ## a trunk its octagonal frustum, a rock the hull of its rock mesh, a prop each of its parts.
+## A library prop's parts each name their item and part (the "prop" meta: Vector2i(item index, part
+## index), for round_through); see-through parts (chain-link, barbed wire) go in a body of their own
+## on Soldier.BODY_LAYER ("SeeThrough_x_z"): it stops men walking (and vehicles' sensing) but not
+## sight lines or rounds, which look on layer 1. Also adds the zone's animals (ZoneAnimals, from the
+## ANIMAL markers), at the same path on every peer.
 func build_collision() -> void:
 	for cell: Vector2i in _cells:
 		var body: StaticBody3D = null
+		var through: StaticBody3D = null
 		for index: int in _cells[cell]:
 			var item: Dictionary = items[index]
 			if not item.solid:
@@ -1214,14 +1269,41 @@ func build_collision() -> void:
 				var shape := CollisionShape3D.new()
 				shape.shape = part[0]
 				shape.transform = part[1]
-				body.add_child(shape)
+				var holder := body
+				if part.size() > 2:
+					shape.set_meta(&"prop", Vector2i(index, int(part[2])))
+					if bool(part[3]):
+						if through == null:
+							through = StaticBody3D.new()
+							through.name = "SeeThrough_%d_%d" % [cell.x, cell.y]
+							through.collision_layer = Soldier.BODY_LAYER
+							through.collision_mask = 0
+							add_child(through)
+						holder = through
+				holder.add_child(shape)
+	if get_node_or_null(^"Animals") == null:
+		var zoo := ZoneAnimals.new()
+		zoo.setup(self, _terrain)
+		add_child(zoo)
 
 
 ## The shapes item `item` collides as, each [Shape3D, Transform3D (world)], exactly as it's drawn
-## (_cell_parts): [] for one that doesn't collide (scrub, thickets, small rocks, valuables).
+## (_cell_parts): [] for one that doesn't collide (scrub, thickets, small rocks, valuables). A
+## library prop's are [Shape3D, Transform3D, its part's index, see-through], one per solid part.
 func collision_parts(item: Dictionary) -> Array:
 	var s: Vector3 = item.size
 	var p: Vector3 = item.pos
+	if item.has("shape") and int(item.kind) == Kind.PROP:
+		var out: Array = []
+		var shape := String(item.shape)
+		var place := Transform3D(Basis(Vector3.UP, float(item.yaw)), p)  # (the scale is in the shape's points)
+		var list := PropArt.parts(shape)
+		for i in list.size():
+			var part: Dictionary = list[i]
+			if not part.solid:
+				continue
+			out.append([_library_shape(shape, i, s), place, i, PropArt.material_of(shape, part) == PropArt.SEE_THROUGH])
+		return out
 	match int(item.kind):
 		Kind.TREE:
 			var key := snappedf(s.x, TRUNK_SHAPE_STEP)
@@ -1264,6 +1346,110 @@ static func _trunk_points(s: float) -> PackedVector3Array:
 	for ring: Vector2 in [Vector2(0.0, TRUNK_FOOT_R), Vector2(TRUNK_TALL, TRUNK_TOP_R)]:
 		for v: Vector2 in _octagon(ring.y * s):
 			out.append(Vector3(v.x, ring.x * s, v.y))
+	return out
+
+
+## Library shapes' hulls by shape, part and scale, shared (a shape's parts never change).
+static var _library_shapes := {}
+
+
+static func _library_shape(shape: String, part: int, scale: Vector3) -> ConvexPolygonShape3D:
+	var key := "%s|%d|%s" % [shape, part, scale.snapped(Vector3.ONE * 0.01)]
+	if not _library_shapes.has(key):
+		var hull := ConvexPolygonShape3D.new()
+		var points := PackedVector3Array()
+		for c: Vector3 in (PropArt.parts(shape)[part] as Dictionary).pts:
+			points.append(c * scale)
+		hull.points = points
+		_library_shapes[key] = hull
+	return _library_shapes[key]
+
+
+## A library prop's transform from its own metres to the world: turned, scaled, on its spot.
+static func library_transform(item: Dictionary) -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, float(item.yaw)) * Basis.from_scale(item.size as Vector3), item.pos as Vector3)
+
+
+## How a round meets a library prop's part (Ballistics, and the AI's soft-cover test through
+## VoxelWorld.stops_round_in): `hit` is the ray's hit on a scatter body, the round going `direction`
+## with `energy_j`. {} when it isn't a library prop (the caller goes on as before: a rock, a trunk,
+## an old box prop stops it). Else {"stopped", "material", "lost_j", "exit"}: the part's material
+## (PropArt.MATERIALS) takes its loss per metre over the round's path through the part; one that
+## stops every round, or the round's energy runs out inside, stops it there.
+static func round_through(hit: Dictionary, direction: Vector3, energy_j: float) -> Dictionary:
+	var body := hit.get("collider") as StaticBody3D
+	if body == null or not body.get_parent() is ZoneScatter:
+		return {}
+	var owner_id := body.shape_find_owner(int(hit.get("shape", 0)))
+	var node := body.shape_owner_get_owner(owner_id) as Node
+	if node == null or not node.has_meta(&"prop"):
+		return {}
+	var scatter := body.get_parent() as ZoneScatter
+	var ids: Vector2i = node.get_meta(&"prop")
+	var item: Dictionary = scatter.items[ids.x]
+	var shape := String(item.shape)
+	var part: Dictionary = PropArt.parts(shape)[ids.y]
+	var material := PropArt.material_of(shape, part)
+	var at: Vector3 = hit.position
+	var out := {"stopped": true, "material": material, "lost_j": maxf(energy_j, 0.0), "exit": at}
+	var per_m := PropArt.loss_per_m(material)
+	if per_m == INF or energy_j <= 0.0:
+		return out
+	var xf := library_transform(item)
+	var inv := xf.affine_inverse()
+	var dir := direction.normalized()
+	var span := PropArt.ray_span(part, inv * (at - dir * 0.05), inv.basis * dir)
+	var exit := at
+	if span.y > span.x:
+		exit = xf * ((inv * (at - dir * 0.05)) + (inv.basis * dir) * span.y)
+	var loss := per_m * maxf((exit - at).dot(dir), 0.0)
+	if loss >= energy_j:
+		return out
+	return {"stopped": false, "material": material, "lost_j": loss, "exit": exit}
+
+
+## The library props' solid parts near `area` (x, z in metres) as triangles, for the navigation
+## mesh (ZoneNav): what stands on the ground (parts starting under NAV_TOP_M; a lamp's arm or a
+## pylon's cross arms overhead don't block anyone), see-through fences too (they stop men).
+const NAV_TOP_M := 2.0
+
+
+func faces_in(area: Rect2) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	if _cells.is_empty():
+		return out
+	var reach := area.grow(14.0)  # (a prop standing just outside still reaches in: a 40 ft container)
+	var lo := _cell_of(reach.position.x, reach.position.y)
+	var hi := _cell_of(reach.end.x, reach.end.y)
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			for index: int in _cells.get(Vector2i(cx, cz), []):
+				var item: Dictionary = items[index]
+				if not item.has("shape") or int(item.kind) != Kind.PROP:
+					continue
+				var p: Vector3 = item.pos
+				var half := PropArt.half_extents(String(item.shape)).length()
+				if not area.grow(half).has_point(Vector2(p.x, p.z)):
+					continue
+				var xf := library_transform(item)
+				for part: Dictionary in PropArt.parts(String(item.shape)):
+					if not part.solid:
+						continue
+					var low := INF
+					for c: Vector3 in part.pts:
+						low = minf(low, c.y)
+					if low >= NAV_TOP_M:
+						continue
+					var centre := Vector3.ZERO
+					for c: Vector3 in part.pts:
+						centre += c / float((part.pts as PackedVector3Array).size())
+					for poly: PackedVector3Array in PropArt.faces(part):
+						var n := (poly[1] - poly[0]).cross(poly[2] - poly[0])
+						var flip := n.dot((poly[0] + poly[2]) * 0.5 - centre) < 0.0
+						for i in range(1, poly.size() - 1):
+							var tri := [poly[0], poly[i + 1], poly[i]] if not flip else [poly[0], poly[i], poly[i + 1]]
+							for v: Vector3 in tri:
+								out.append(xf * v)
 	return out
 
 
@@ -1378,14 +1564,32 @@ func _build_cell(cell: Vector2i) -> void:
 		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
 		node.multimesh = part[1]
 		node.material_override = _material
-		node.visibility_range_end = float(_RANGES[key])
+		node.visibility_range_end = _range_of(key)
 		node.visibility_range_end_margin = 20.0
-		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket"]))  # keys mix Kind values and names
+		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket", "wire"]))  # keys mix Kind values and names
+		if key is String and String(key).begins_with(LIBRARY):
+			shade = bool(PropArt.shape(String(key).trim_prefix(LIBRARY).get_slice("#", 0)).shadow)
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
 
 
-## Draw distance by group key.
+## Draw distance by group key: _RANGES, a library prop's shape's own (PropArt), its wires SEE_WIRE_M.
+static func _range_of(key: Variant) -> float:
+	if key is String and String(key).begins_with(LIBRARY):
+		return PropArt.see_m(String(key).trim_prefix(LIBRARY).get_slice("#", 0))
+	if key is String and key == "wire":
+		return SEE_WIRE_M
+	return float(_RANGES[key])
+
+
+## A library prop's group key: LIBRARY + "<shape>#<paint>" (one mesh each, PropArt.mesh).
+const LIBRARY := "lib:"
+## Power and phone lines are drawn out to this far (m), WIRE_W thick, sagging WIRE_SAG of their
+## span in the middle, in WIRE_SEGMENTS straight pieces. Proposed.
+const SEE_WIRE_M := 700.0
+const WIRE_W := 0.03
+const WIRE_SAG := 0.03
+const WIRE_SEGMENTS := 6
 const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M,
 	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M,
 	"prop_crates": SEE_ROCK_M, "prop_drums": SEE_ROCK_M, "prop_debris": SEE_ROCK_M, "prop_wall": SEE_ROCK_M, "prop_wreck": SEE_ROCK_M, "prop_mound": SEE_ROCK_M}
@@ -1398,15 +1602,65 @@ func _cell_parts(cell: Vector2i) -> Array:
 		groups["prop_" + kind] = []
 	for index: int in _cells[cell]:
 		for part: Array in visual_parts(items[index]):
+			if not groups.has(part[0]):
+				groups[part[0]] = []
 			groups[part[0]].append([part[1], part[2]])
+		if int(items[index].get("link", 0)) == 1 and index > 0:
+			if not groups.has("wire"):
+				groups["wire"] = []
+			_wires(items[index - 1], items[index], groups["wire"])
 	_ground_cover(cell, groups)
 	var parts: Array = []
 	for key in groups:
 		var list: Array = groups[key]
 		if list.is_empty():
 			continue
-		parts.append([key, _multimesh(_meshes[key], list)])
+		var mesh: Mesh = _meshes.get(key)
+		if mesh == null and key is String and String(key).begins_with(LIBRARY):
+			var name_paint := String(key).trim_prefix(LIBRARY)
+			mesh = PropArt.mesh(name_paint.get_slice("#", 0), int(name_paint.get_slice("#", 1)))
+		elif mesh == null and key is String and key == "wire":
+			mesh = _wire_mesh()
+		parts.append([key, _multimesh(mesh, list)])
 	return parts
+
+
+## The wires from library prop `a` to `b` (the next pole or pylon along its line): one from each of
+## a's hanging points (PropArt wire_points) to b's same, sagging in the middle, as WIRE_SEGMENTS
+## thin bars, into `list` ([transform, colour]).
+func _wires(a: Dictionary, b: Dictionary, list: Array) -> void:
+	if not a.has("shape") or not b.has("shape"):
+		return
+	var from := PropArt.wire_points(String(a.shape))
+	var to := PropArt.wire_points(String(b.shape))
+	var xa := library_transform(a)
+	var xb := library_transform(b)
+	for i in mini(from.size(), to.size()):
+		var p0 := xa * from[i]
+		var p1 := xb * to[i]
+		var sag := p0.distance_to(p1) * WIRE_SAG
+		var prev := p0
+		for k in range(1, WIRE_SEGMENTS + 1):
+			var t := float(k) / WIRE_SEGMENTS
+			var q := p0.lerp(p1, t) - Vector3(0, sag * 4.0 * t * (1.0 - t), 0)
+			var along := q - prev
+			var x := along.cross(Vector3.UP).normalized()
+			if x == Vector3.ZERO:
+				x = Vector3.RIGHT
+			var y := x.cross(along).normalized()
+			list.append([Transform3D(Basis(x * WIRE_W, y * WIRE_W, along), prev), Color("26272a")])
+			prev = q
+
+
+## A wire piece: a unit bar from z 0 to 1, 1 across (scaled to WIRE_W and its length).
+func _wire_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var corners: Array[Vector3] = []
+	for c: Vector3 in _blocky_corners(Vector3.ONE, 0.0, 0, true):
+		corners.append(c + Vector3(0, 0, 0.5))
+	_add_box(st, corners, Color.WHITE)
+	return st.commit()
 
 
 ## How item `item` is drawn: [group key (its mesh in _shared_meshes), Transform3D (world), colour]
@@ -1418,6 +1672,10 @@ func visual_parts(item: Dictionary) -> Array:
 	var size: Vector3 = item.size
 	var p: Vector3 = item.pos
 	var xf := Transform3D(basis.scaled(size), p)  # (x and z the same for these: turned, not sheared)
+	if item.has("shape"):
+		if int(item.kind) != Kind.PROP:
+			return []  # an ANIMAL marker (ZoneAnimals draws them)
+		return [[LIBRARY + "%s#%d" % [item.shape, int(item.get("paint", 0))], library_transform(item), item.colour]]
 	match int(item.kind):
 		Kind.ROCK:
 			return [[Kind.ROCK, Transform3D(basis * Basis.from_scale(size), p - Vector3(0, _sink(item, ROCK_BURIED), 0)), item.colour]]
@@ -1723,6 +1981,8 @@ const PROP_PAINT := {"drums": [Color("5b6340"), Color("3f5a78"), Color("8a4e2e")
 
 ## Which PROP_SHAPES shape prop `item` is, from where it stands and its size.
 static func _prop_kind(item: Dictionary) -> String:
+	if item.has("shape"):
+		return String(item.shape)
 	var p: Vector3 = item.pos
 	var s: Vector3 = item.size
 	var roll := absi(hash(Vector2i(roundi(p.x * 10.0), roundi(p.z * 10.0)))) % 1000

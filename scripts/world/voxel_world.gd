@@ -617,7 +617,14 @@ static func stops_round_in(node: Node, from: Vector3, to: Vector3, energy_j: flo
 			return false
 		var world := VoxelWorld.find_on(hit.collider)
 		if world == null:
-			return true  # the ground or other solid world geometry
+			var prop := ZoneScatter.round_through(hit, direction, energy)  # a library prop by its material
+			if prop.is_empty() or prop.stopped:
+				return true  # the ground or other solid world geometry
+			energy -= float(prop.lost_j)
+			at = (prop.exit as Vector3) + direction * 0.01
+			if (at - from).dot(direction) >= (to - from).length():
+				return false
+			continue
 		var through := world.trace_round(hit.position, direction, energy)
 		if through.stopped:
 			return true

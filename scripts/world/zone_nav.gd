@@ -120,6 +120,9 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 		source.add_faces(ground, Transform3D.IDENTITY)
 	for box in zone.scatter.boxes_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z)):
 		source.add_faces(_box_faces(box), Transform3D.IDENTITY)
+	var props := zone.scatter.faces_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z))  # the prop library's, as drawn
+	if not props.is_empty():
+		source.add_faces(props, Transform3D.IDENTITY)
 	return source
 
 

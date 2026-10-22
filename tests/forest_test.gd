@@ -81,7 +81,11 @@ func _test_hitboxes(level: ZoneLevel, scatter: ZoneScatter) -> void:
 			if part[0] is String and part[0] in ["crown", "conifer"]:
 				continue  # leaves: no collision
 			if not verts.has(part[0]):
-				verts[part[0]] = (meshes[part[0]] as Mesh).surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+				var mesh: Mesh = meshes.get(part[0])
+				if mesh == null:  # a library prop's (the props suite checks those shape by shape)
+					var np := String(part[0]).trim_prefix(ZoneScatter.LIBRARY)
+					mesh = PropArt.mesh(np.get_slice("#", 0), int(np.get_slice("#", 1)))
+				verts[part[0]] = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 			var xf: Transform3D = part[1]
 			for v: Vector3 in verts[part[0]]:
 				out.append(xf * v)
