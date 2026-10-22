@@ -168,6 +168,36 @@ budgets were re-based on the merge (about twice its local numbers; CI's runners 
 a quiet local run): town 270 / 360 and 90 hitches a minute, fight 140 / 260 / 90, woods 45 / 60 / 30,
 drive 52 / 86 / 45, heli 58 / 100 / 45. The city's cost is the next perf task.
 
+## Towns, cities and the heli (claude/perf-towns, 2026-10-22)
+
+The follow-up for the world expansion's cost. perfcases gained a **city** case (the Old Quarter's
+city, walked up its middle street from 40 m outside: about 107 AI, its blocks' garrisons and
+patrols); **town** is now the zone's biggest town or village outside the city (after the
+expansion the old pick landed on a city block).
+
+60 Hz frame cost, average / 95th percentile ms, and hitches a minute, quiet machine, each run all
+six cases (before R2513 at 8edc184b with the new city case, after R2517 at e0f7b46e):
+
+| Case | Before | After | Hitches a minute |
+|---|---|---|---|
+| town (village) | 8.8 / 13.3 | 8.5 / 14.1 | 8 -> 12 (team spawns, 40-60 ms) |
+| city | 136.3 / 196.3 | **107.4** / 213.4 | 1.5 -> 15 (the median fell) |
+| fight | 61.9 / 94.6 | **35.6 / 50.0** | 19.5 -> 31.5 |
+| woods | 24.8 / 34.4 | **14.0 / 21.1** | 16 -> 10 |
+| drive | 16.0 / 27.7 | **9.2 / 14.1** | 13.3 -> 4 |
+| heli | 15.1 / 30.5 | **12.2 / 21.6** | 27.4 -> **3.4** |
+
+What the city's profile found (R2514-R2516): it's the AI, not the buildings or props. SquadAI
+about 50 ms a tick for ~100 AI: `_find_casualty` 9 ms a think (every AI asked responder_for, a pass
+over every combatant, for every casualty), patrols' formation slots 1.8 ms a call (a few rays a
+man, worked out again for each man), act 0.3 ms a patrol member a tick; soldiers' movement 10-20 ms
+a tick. The heli's hitches were the grass carpet (a lay from a helicopter is mostly new ground).
+
+Fixed: casualty responders kept 0.25 s while still free; formation slots kept 4 ticks while the
+lead holds his place and heading; a cold building scan's grouping and stair paths stop at the
+frame budget and go on (F-206); grass lays write one buffer, clip rows to the circle, budget new
+tufts by time and go on from where they stopped.
+
 ## What's left
 
 See F-206 in docs/audits/followups.md: a cold building scan's grouping (100-250 ms once its probes

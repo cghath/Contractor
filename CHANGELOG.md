@@ -11,6 +11,29 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Perf: towns, cities and the heli (claude/perf-towns)
+
+> **Where I stopped / next step (2026-10-22, 18:25 CDT):** first batch pushed (e0f7b46e):
+> casualty responder and formation slots kept, building scans' grouping resumable (F-206), grass
+> lays budgeted. R2513 -> R2517 (quiet machine, 60 Hz frame cost avg): city 136 -> 107 ms, fight
+> 62 -> 36, woods 25 -> 14, drive 16 -> 9, heli 15 -> 12 (hitches 27 -> 3 a minute).
+> Next: the city's patrols (86 of 107 AI walking: movement and steering), team spawns spread over
+> frames (F-206), the draw proxy's soldiers (1600 draws in the city), then budgets.
+
+#### Changed
+- **perfcases** has a **city** case: the Old Quarter's city, walked up its middle street from
+  outside. **town** is now the zone's biggest town or village outside the city (it used to pick
+  a city block once the city came in). The profile splits the AI's act and think by part.
+- **Casualty care**: who answers a casualty is kept for a quarter second while that one is still
+  free for him (every AI's think worked it out for every casualty; 9 ms a think in the city).
+- **Formations**: a squad's slots are kept four ticks while its lead stays within 0.6 m and keeps
+  his heading (a few rays a man, worked out again for every man that asked).
+- **Building scans** (F-206): a cold scan's grouping stops at the frame's budget between buildings
+  and between stair paths and goes on at the next ask (100-250 ms in one frame in a city block).
+- **Grass** near the camera: one buffer write a lay, only the points that can be in the circle,
+  new tufts limited by time, and an unfinished lay goes on from the points it left (from a
+  helicopter it went through the whole circle again every frame).
+
 ### Mission UI pass (claude/mission-ui)
 
 > **Where I stopped / next step (2026-10-22, 22:39 CDT):** all four screens done and pushed
