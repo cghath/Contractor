@@ -285,17 +285,19 @@ func _tick_follow_in(delta: float) -> void:
 	var lvl: Variant = CompoundLevel.current(lead)
 	if lvl != null and (lvl as Node).has_method(&"is_base") and bool((lvl as Node).call(&"is_base")):
 		return
+	var units: Array[SquadAI] = []
+	for ai: SquadAI in brains():
+		if ai.order == Order.FOLLOW and ai.ordered.is_empty() and ai.body.vitals.is_up() and ai.combat_mode != CombatMode.SAFE \
+				and not ai.intent in [SquadAI.Intent.CASUALTY, SquadAI.Intent.HEAL, SquadAI.Intent.RELOAD]:
+			units.append(ai)
+	if units.size() < FOLLOW_IN_MIN and not _follow_in_placed:
+		return  # nobody to send in, and nothing to reset: no building scan (F-211)
 	var b := Buildings.at(lead, at)
 	if b.is_empty():
 		_follow_in_placed = false  # out in the open: the next building he walks into counts
 		return
 	if _follow_in_placed or (b.get("rooms", []) as Array).is_empty():
 		return
-	var units: Array[SquadAI] = []
-	for ai: SquadAI in brains():
-		if ai.order == Order.FOLLOW and ai.ordered.is_empty() and ai.body.vitals.is_up() and ai.combat_mode != CombatMode.SAFE \
-				and not ai.intent in [SquadAI.Intent.CASUALTY, SquadAI.Intent.HEAL, SquadAI.Intent.RELOAD]:
-			units.append(ai)
 	if units.size() < FOLLOW_IN_MIN:
 		return
 	var op := SquadTactics.clear_op(b, units)

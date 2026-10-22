@@ -198,6 +198,25 @@ lead holds his place and heading; a cold building scan's grouping and stair path
 frame budget and go on (F-206); grass lays write one buffer, clip rows to the circle, budget new
 tufts by time and go on from where they stopped.
 
+Batch 2 (3d11c456 and after): medic_for kept the same way for `_find_casualty`; an AI squad's slots
+kept 8 ticks and through turns under about 6 degrees; a path kept while its destination drifts
+under 15% of the way left (up to 3 m) until REPATH_S (patrol men re-planned every time the lead's
+slots moved half a metre); the follow-in scan skipped when the squad has nobody to send in (F-211).
+R2519 ran on a busy machine (woods, drive and heli, untouched by batch 2, measured 1.6x R2517):
+city 122 / 288, fight 53 / 82.
+
+Budgets tightened (Proposed; about twice a quiet local run, as before; CI's runners measured about
+twice a quiet local run): town 30 / 50 / 40 hitches a minute (a village now), city 260 / 520 / 90,
+fight 100 / 170 / 70, woods 35 / 50 / 30, drive 40 / 60 / 30, heli 40 / 70 / 45. Against the first
+pass's (town 75 / 140, heli 28 / 45) the heli is close; the city carries about 100 AI where the
+first pass's town had 50-60, and its AI is what's left there (below).
+
+What's left in the city: SquadAI still 30-45 ms a tick for ~100 AI (act, steering, think), soldiers'
+movement 10-20 ms a tick (most of the city's AI are patrols, walking), the navigation server 10 ms a
+frame. No building, prop or scatter cost shows in the city's profile. The rendering side, which
+headless can't time: 2100 draws in the city, 1630 of them soldiers (F-226). Team spawns in one
+frame (F-206) and a scatter cell's or terrain chunk's single build (F-225) are the hitches left.
+
 ## What's left
 
 See F-206 in docs/audits/followups.md: a cold building scan's grouping (100-250 ms once its probes

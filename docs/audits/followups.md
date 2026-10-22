@@ -1051,6 +1051,37 @@ up 1-1.8 ms a frame, R2422.)
   (338 draws in the Old Quarter case); module proxies cast shadows; terrain's coarsest level is a
   draw per 128 m chunk out to the horizon (could merge into 512 m blocks).
 
+### F-206 update (claude/perf-towns, 2026-10-22)
+- Buildings: done. The grouping (`_group`) and the stair paths (`_link_floors`, answers kept in
+  `_climbs`) stop at the frame budget too and go on at the next ask, a building or stair path at
+  a time; headless keeps exact answers. F-211's "slice a scan over frames" is this; its follow-in
+  scan is skipped when the squad has nobody to send in (Squad._tick_follow_in).
+- Team spawns: still open. `_spawn_team`'s callers use the whole team at once (sizes for refunds,
+  nemesis tags, `_virtualize`, `_maybe_ride`), so spreading it means the Virtualizer owning the
+  spawn: a team that would go virtual at once (far from every player) should be made virtual
+  without spawning (today it's spawned, 10-20 ms a man on a busy machine, then taken out), and a
+  near one woken a few a frame (`Virtualizer.server_wake` already does that for woken groups).
+
+### F-224 (done, for review): GrassCarpet lays budgeted (claude/perf-towns)
+`lay` hands the multimesh one buffer (each kept tuft is its 16 floats), walks only the rows' points
+that can be in the circle, and stops working out new tufts after NEW_USEC (2.5 ms) as well as
+NEW_PER_LAY; an unfinished lay goes on from the points it left (`_lay_pending`) instead of the
+whole circle again. From the UH-60 the grass was 40-60 ms frames on a busy machine. Same look.
+
+### F-225 (open, cghath): a scatter cell's build and a fine terrain chunk are 15-25 ms each
+From the UH-60 on a busy machine (perfcases heli, R2519) the hitches left are one ZoneScatter cell
+(`scatter_cells` 17-26 ms in one frame) or one ZoneTerrain fine chunk (`terrain_fine` ~18 ms):
+already one a frame (F-201, F-202), but each is one piece of work. Splitting a cell's build (its
+kinds or near/far tiers a frame each) or making the instance transforms on a worker would take
+them under the 33 ms line.
+
+### F-226 (open): soldiers are most of a city's draws
+The draw proxy in the city case: about 2100 draws, 1630 of them soldiers (107 AI, 15-25 draws
+each with their gear), 930 shadow casters. Buildings are 36 (merged per block), terrain 300.
+Not measurable headless; worth a GPU capture in game. Options: soldiers' gear merged into the
+body's mesh past ~40 m, visibility ranges on small gear (pouches, tape, optics), no sun shadow from
+gear.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.

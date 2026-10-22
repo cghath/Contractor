@@ -50,13 +50,15 @@ const HITCH_MEDIANS := 3.0
 ## and none asleep; heli 14.9 -> 28.7, R2484 -> R2485): about twice the merge's local numbers (R2478,
 ## R2485), CI's runners having measured about twice a quiet local run. They still fail a further
 ## doubling; the first budgets (town 75/140, heli 28/45...) are in docs/performance.md.
+## Tightened 2026-10-22 (claude/perf-towns, R2517/R2519): about twice a quiet local run again, the
+## town case now a village (the city has its own case).
 const BUDGETS := {
-	"town": {"avg": 270.0, "p95": 360.0, "hitches_min": 90.0},
-	"city": {"avg": 270.0, "p95": 360.0, "hitches_min": 90.0},
-	"fight": {"avg": 140.0, "p95": 260.0, "hitches_min": 90.0},
-	"woods": {"avg": 45.0, "p95": 60.0, "hitches_min": 30.0},
-	"drive": {"avg": 52.0, "p95": 86.0, "hitches_min": 45.0},
-	"heli": {"avg": 58.0, "p95": 100.0, "hitches_min": 45.0},
+	"town": {"avg": 30.0, "p95": 50.0, "hitches_min": 40.0},
+	"city": {"avg": 260.0, "p95": 520.0, "hitches_min": 90.0},
+	"fight": {"avg": 100.0, "p95": 170.0, "hitches_min": 70.0},
+	"woods": {"avg": 35.0, "p95": 50.0, "hitches_min": 30.0},
+	"drive": {"avg": 40.0, "p95": 60.0, "hitches_min": 30.0},
+	"heli": {"avg": 40.0, "p95": 70.0, "hitches_min": 45.0},
 }
 ## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
 ## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners
