@@ -157,6 +157,17 @@ running. townperf keeps its own (tick 20 ms average, 40 ms 95th percentile). The
 40/60 after CI's first run measured 42.7/71.7 there (run 39737889264); the other four cases passed
 on CI at the first budgets.
 
+## With cghath's world expansion (2026-10-22)
+
+Merging world/perf (the Old Quarter a real city, roads, fields, the prop library, near/far scatter
+tiers) about doubled the cases' cost: back to back, claude/ai-driving df3133f without it against the
+merge (R2484 -> R2485), town 66.7 / 102 -> 132.6 / 178 ms (75 AI against 62, none of them far enough
+to sleep, the navigation server 3.5 -> 10.9 ms a frame, SquadAI's act about 9x), heli 14.9 / 28.5 ->
+28.7 / 48.7 (_process 6.8 -> 19.7 ms: the grass 1.3 -> 3.8, the terrain and scatter cells). The
+budgets were re-based on the merge (about twice its local numbers; CI's runners measured about twice
+a quiet local run): town 270 / 360 and 90 hitches a minute, fight 140 / 260 / 90, woods 45 / 60 / 30,
+drive 52 / 86 / 45, heli 58 / 100 / 45. The city's cost is the next perf task.
+
 ## What's left
 
 See F-206 in docs/audits/followups.md: a cold building scan's grouping (100-250 ms once its probes

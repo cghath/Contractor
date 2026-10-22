@@ -445,7 +445,12 @@ func _trees_shown(scatter: ZoneScatter, t: ZoneTerrain, eye: Vector3) -> Diction
 		var name := String(node.name)
 		if name.begins_with("Far_"):
 			blobs[Vector2i(int(name.get_slice("_", 1)), int(name.get_slice("_", 2)))] = node
+	var half := t.size_m * 0.5
+	var far_m := float(GameSettings.detail().far_trees_m)  # (the Detail setting ends the far blobs there; Ultra: never)
 	for cell: Vector2i in scatter._cells:
+		var middle := Vector2(-half + (cell.x + 0.5) * ZoneScatter.CELL_M, -half + (cell.y + 0.5) * ZoneScatter.CELL_M)
+		if far_m > 0.0 and middle.distance_to(Vector2(eye.x, eye.z)) > far_m - ZoneScatter.CELL_M * ZoneScatter.FAR_BLOCK:
+			continue  # past the far canopy's end: nothing drawn there on purpose
 		var has_trees := false
 		for index: int in scatter._cells[cell]:
 			if int(scatter.items[index].kind) == ZoneScatter.Kind.TREE:
