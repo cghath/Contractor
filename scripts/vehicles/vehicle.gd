@@ -2245,7 +2245,11 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 		on_part = String(found.get("part", "")) != ""
 		out.position = to_global(local)
 	var zone := VehicleDamage.zone_at(spec, local)
-	var res := VehicleDamage.resolve(hit, zone, ldir)
+	# Combined arms A1: a model with armour plates resolves rounds that have vehicle numbers
+	# through ArmourModel (angle, plate, tiles, fuze); the rest as before (VehicleDamage).
+	var res := ArmourModel.vehicle_hit(self, hit, zone, local, ldir) if spec.has("plates") else VehicleDamage.resolve(hit, zone, ldir)
+	if res.has("armour"):
+		out.armour = res.armour  # the HitResult (the x-ray's, phase A5)
 	out.zone = zone.zone
 	out.penetrated = res.penetrated
 	out.stopped = res.stopped
