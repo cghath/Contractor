@@ -148,11 +148,13 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 	kind = String(zone.get("kind", kind))
 	var hot := kind == "hot"
 	# Who pays: the fixer's faction, the hot zone's faction, or any employer.
-	var employers := MissionRegistry.employers()
+	var all_employers := MissionRegistry.employers()
+	# (D7: an "ops_only" employer, Vessmark, is never a random pick: it posts only beside a US operation.)
+	var employers := all_employers.filter(func(f: String) -> bool: return not bool(MissionRegistry.faction(f).get("ops_only", false)))
 	var employer: String = ctx.get("employer", "")
 	if employer == "":
 		employer = fixer.get("faction", zone.get("faction", employers[rng.randi() % employers.size()] if not employers.is_empty() else ""))
-	if not employers.has(employer):
+	if not all_employers.has(employer):
 		employer = employers[rng.randi() % employers.size()] if not employers.is_empty() else ""
 	var enemies := MissionRegistry.enemies()
 	# Wave 6c: `ctx.target` (the faction war's own flashpoint offers, Contracts.server_refresh_board)

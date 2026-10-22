@@ -24,7 +24,11 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
-| F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
+| F-162 | P3 | ~~The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21)~~ fixed 2026-10-21 (Claude, claude/ai-followups: a roofed spot probes to 26 m) |
+| F-140 | P2 | ~~Ambushers by a road and a friendly convoy driving past (missions 2 overwatch)~~ fixed 2026-10-21 (Claude, claude/ai-followups: RoadAmbush, the convoy's drive-through; the mission's two calls are F-178) |
+| F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
+| F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
+| F-179 | P3 | Players can't fire the hand flare (it's loot only), and the M320's 40 mm star round waits on F-130 (the AI grenadier) |
 
 ## F-01: the building scan only sees one floor
 
@@ -350,7 +354,62 @@ bridge (as `_on_pad` breaks it on a pad), or lay it on the deck (each bridge rec
 collision on roads, keep a road's collision off the bridge's span too. A culvert's embankment and a
 ford are ground, so the strip can follow them.
 
+## F-140: ambushers and a friendly convoy driving past (fixed 2026-10-21)
+
+The write-up is on cghath's feat/missions-2 (its followups.md, F-140): the overwatch mission's
+ambush teams were plain Reinforcements waves wandering a 12 m loop round their spot, in Aware,
+and nothing in the AI knew to wait for the convoy.
+
+Fixed on claude/ai-followups (Claude, 2026-10-21):
+- [road_ambush.gd](../../scripts/ai/road_ambush.gd) `RoadAmbush` (a GarrisonPost): laid with
+  `RoadAmbush.server_lay(men, point, route)`. Each man gets his own spot on a line along the road
+  (5 m apart), in cover against the kill zone (the road's nearest stretch), down and facing it,
+  holding fire. No patrolling and no going to look at a sound. It springs when the first crewed
+  enemy vehicle comes level with it (its closest pass, within 160 m) or anything comes within
+  35 m. It springs sooner when it's given away: one of them fired on or down, or found by an
+  enemy on foot within 30 m. Sprung, every man opens up, the guns' gunners and crews first
+  (`target_bonus`), the launchers at the lead truck and then the last (`priority_vehicle`,
+  LauncherAI). They fight from their own ground (the leash) and break and run when outgunned
+  (GarrisonPost's flight).
+- The convoy: [squad_drivers.gd](../../scripts/vehicles/squad_drivers.gd)
+  `server_drive_route(v, path, speed_kmh, squad)` drives a truck as an order, so DriveContact
+  meets the ambush: it always drives through, faster, the gunner firing on (AavGunner). Disabled,
+  its crew bail out to the side away from the fire and hold there (a convoy's crew aren't squad
+  members, so they get the move themselves). An order keeps the last threat it met, so a truck
+  disabled once the firing has died down still bails its crew out away from it.
+- Firing at a man in a vehicle (SquadAI `_gate_open`, `_shoot`): the sights need only be on the
+  vehicle (VEHICLE_GATE_SHARE of its hull's size), since a round that misses him still hits it, and
+  the shot leads it by its speed. Before, a truck passing at 18 m/s never let the man-sized aim gate
+  open, so nobody fired at all. `SquadAI.shoot_blocker()` now names whatever stops a shot.
+- AavGunner now needs to make a man out before it fires (Spotting.spot_seconds, as SquadAI): an
+  M2 gunner saw anyone in a clear line at once, which gave every ambush away at 600 m.
+- The mission's side is F-178. tests/garrison_test.gd checks it with an M-ATV on a road past
+  three ambushers.
+
+## F-178: the overwatch mission's two calls
+
+Location: cghath's feat/missions-2, `MissionScenario._overwatch_begin` and `_overwatch_spawn`.
+Claude's side is built (F-140); the mission isn't merged, so it isn't changed there.
+
+To do: in `_overwatch_begin`, after `r.server_send(at, 0, men, at)` for each ambush, lay them with
+`RoadAmbush.server_lay(those_soldiers, at, route)` (route: the run's PackedVector3Array). In
+`_overwatch_spawn`, in place of `v.server_follow_path(path, speed)`, use
+`SquadDrivers.of(level).server_drive_route(v, path, speed, element)` (falling back to
+`server_follow_path` if it returns false). Nothing else changes: the mission's own `_neutralized`
+dismount and its through/lost counts still work.
+
+## F-179: hand flares for players, 40 mm star rounds
+
+The hand-held parachute flare (`hand_flare`, G-24) is fired by the AI only. A player who takes one
+off a body can't fire it (it isn't a throwable; it wants its own use input). The M320's 40 mm star
+parachute round would light the same way (Flares "hand"), but the AI never fires the M320 (F-130).
+
 ## F-176: the dug ground never comes back from a zone save
+
+**Fixed 2026-10-21** (Claude, claude/ai-followups): `read_save` copies "ground", every cut checked
+(`Digging.cut_ok`: a known kind, every field a finite number) and every berm (`Digging.berm_ok`); a
+bad record is dropped with a warning and the rest loads. tests/world_test.gd reads the save back
+and finds every cut and berm after the reload, none dug afresh on top.
 
 Location: [game_state.gd](../../autoload/game_state.gd) `read_save` (and `load_zone`). Found by
 cghath's agent on `world/water` (2026-10-21) while adding the bridges' section to the save; not
@@ -378,6 +437,12 @@ Suggested: lower the apron along the river's line past the edge (a channel strip
 mesh at the river's level, and the water strip carried on with it), or fade the river into a
 gorge's end. Looks only.
 ## F-162: the building scan misses the middle of a big open hall (a hangar)
+
+**Fixed 2026-10-21** (Claude, claude/ai-followups): a spot too open for the usual probes counts as
+inside when a ray straight up meets the underside of a roof within 12 m and, probing out to 26 m,
+at most 3 of the 8 ways are open and no two opposite (`Buildings.inside`, `_hall_inside`,
+`roofed`). A canopy with no walls stays outside. The landmarks suite scans a hangar's hall and a
+factory floor from their middle (R2350: 153 of about 284 and 171 of about 196 floor cells).
 
 Location: [buildings.gd](../../scripts/ai/buildings.gd) (`inside`: PROBE_M, MAX_OPEN). Found by
 cghath's agent on `world/landmarks` (2026-10-21, queue item 1.4); the file is Claude's, so it
@@ -459,6 +524,14 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | A minaret is solid; tanks and silos are hollow with a floor every 1.5 m inside | no closed room the navmesh bakes and the AI thinks is a building | a hollow minaret with a stair up (later)
 - 2026-10-21 | The control tower is two storeys (the generator's limit) with a console room on top and a mast | storeys over two come with city zones (queue item 1.5) | a third-storey glazed cab now
 - 2026-10-21 | Landmarks are garrisoned like other sites: a post inside each front door, one up high, one in a back room, the site's own (2-9 posts) | the brief says garrisonable like today's types | civilian-only landmarks
+- 2026-10-21 | Road ambushes spring on the first crewed enemy vehicle's closest pass within 160 m, or anything within 35 m, or when given away (fired on, a man down, found within 30 m); guns' gunners first, then crews; launchers at the lead truck, then the last (RoadAmbush, Proposed) | Lead and trail vehicles hit first is the drill; waiting for the pass gets the most of the column in the kill zone | spring at a fixed distance, or on the first sighting
+- 2026-10-21 | A convoy truck driven as an order always drives through an ambush; only a disabled one stops, its crew out to the lee (SquadDrivers.server_drive_route) | MRAPs drive through small-arms fire and the mission counts trucks through | DriveContact's judging (stop and dismount under heavy fire)
+- 2026-10-21 | At a man in a vehicle the AI's sights need only be on the vehicle (0.3 of its hull's diagonal) and the shot leads its speed (SquadAI, Proposed) | a passing truck never let the man-sized gate open, and a miss on him still hits the truck | aim at the hull's middle
+- 2026-10-21 | AI vehicle gunners need Spotting's time to make a man out before firing | the M2 saw anyone in a clear line at once, out to 600 m, which made ambushes impossible | an ambush-only exception
+- 2026-10-21 | A roofed spot in a big hall is inside with walls out to 26 m and up to 3 open ways (Buildings, Proposed) | hangars and factory floors are 17-26 m across with 14 m doors | grow rooms inward from the walls
+- 2026-10-21 | G-14: smoke over open ground of 15 m or more the threat sees, once a squad near there (bounds, fall backs, move orders), and over a casualty dragged off in the open; bangs into a hot building with no breacher and up each stair (flash first for our side, frag first for the enemy), never with a noncombatant inside | Arma/LAMBS smoke crossings; CQB bangs rooms and stairs | bangs into every room on every clear
+- 2026-10-21 | G-24: hand flares 150 m up for 35 s, lighting full within 110 m and out to 220 m; mortar illumination 350 m up for 45 s, full within 200 m and out to 360 m; one hostile in 4 on the standard kit carries 2; a squad flares once per 45 s at most, at darkness 0.55 or more; NVGs bloom (Flares, Proposed) | close to the M127A1 and 60/81 mm illumination; enough to light a firefight without lighting the zone | every hostile with flares, or flares by script at set times
+- 2026-10-21 | G-26: a line in contact, a staggered column in a town, a file in the woods, on a road a column (a staggered column on the alert or in the dark), on open ground a wedge (a staggered column in the dark); spacing x doctrine (insurgents 0.7, regulars and PMCs 1.0) | FM 3-21.8's choices by terrain, visibility and threat | random formations as LAMBS does
 - 2026-10-21 | Upper-floor doorways slide along their wall off the stairwell (or another wall takes the doorway): some existing two-storey buildings' doorways move | a doorway over the stairwell cut its room off | leave existing buildings as they were
 
 - 2026-10-22 | A season from the campaign day: 30 days each, starting in spring (Season); the host puts it in a zone's def when it switches to it (BaseHub.server_switch_level), a def without one (the menu's test zones) is summer | there was none (DayNight keeps the hour, the economy the day); a campaign month a season lets a long campaign see the year turn | a real 91-day calendar, or the season from the weather

@@ -8,6 +8,11 @@ extends RefCounted
 ## defeat vehicle armour and that 7.62x54R and up can). Read-only after the first load.
 
 const PATH := "res://data/vehicles.json"
+## Combined arms (docs/combined_arms.md 9.1): per-topic files keyed by model id, merged into
+## the model's spec so parallel phases never edit one JSON file: plates, tiles, belly, spall
+## liner and packages (A1); modules (A2); weapons, optics, crew and vision (A3). A file that
+## isn't there yet is skipped.
+const TOPIC_PATHS: Array[String] = ["res://data/vehicle_armour.json", "res://data/vehicle_modules.json", "res://data/vehicle_weapons.json"]
 const KMH := 1.0 / 3.6
 
 ## Vehicle threat tiers (round_tier): small arms, full-power rifle (7.62x54R up), heavy
@@ -20,6 +25,7 @@ const TIER_AUTOCANNON := 3
 const HMG_CALIBRE_MM := 12.0
 
 static var _data: Dictionary = {}
+static var _topics: Array = []       # each TOPIC_PATHS file's "models" ({model: {key: value}})
 static var _models: Dictionary = {}  # model -> merged spec
 static var _guns: Dictionary = {}    # gun id -> ItemData built for Ballistics
 
@@ -38,6 +44,14 @@ static func _load() -> void:
 		_data = {"models": {}, "armour": {}, "round_tiers": {}, "guns": {}}
 		return
 	_data = parsed
+	for path in TOPIC_PATHS:
+		if not FileAccess.file_exists(path):
+			continue
+		var topic: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if typeof(topic) != TYPE_DICTIONARY or typeof(topic.get("models")) != TYPE_DICTIONARY:
+			push_error("VehicleSpecs: %s is not valid JSON with \"models\"" % path)
+			continue
+		_topics.append(topic.models)
 
 
 ## Every model with numbers (the VehicleArt models).
@@ -65,6 +79,10 @@ static func spec(model: String) -> Dictionary:
 	for key: String in raw:
 		if key != "base":
 			out[key] = raw[key]
+	for topic: Dictionary in _topics:  # a derived model keeps its base's unless it names its own
+		var extra: Dictionary = topic.get(model, {})
+		for key: String in extra:
+			out[key] = extra[key]
 	_models[model] = out
 	return out
 
