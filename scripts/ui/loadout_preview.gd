@@ -56,7 +56,7 @@ var _anchors_dirty := true
 func _ready() -> void:
 	stretch = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(240, 240)
+	custom_minimum_size = Vector2(200, 110)
 	viewport = SubViewport.new()
 	viewport.name = "Viewport"
 	viewport.own_world_3d = true

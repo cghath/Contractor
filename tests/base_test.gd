@@ -1198,10 +1198,26 @@ func _test_armory(base: BaseLevel) -> void:
 	check(BaseEconomy.item_price(&"cpr") == 0 and BaseHub.server_buy(&"cpr") != "" and BaseEconomy.item_price(&"surgery_kit_3") > 0,
 		"the shop sells surgery kits but not CPR")
 	await _test_armory_molle(base, player)
+	# The 3D armory (claude/loadout-3d) buys through the base shop: its price, into the armory.
+	var room := BaseHub.open_armory()
+	check(room != null and room.items.size() > 0, "the 3D armory opens with its shelves (%d items)" % (room.items.size() if room else 0))
+	if room:
+		funds = BaseEconomy.funds()
+		var had := int(BaseArmory.counts(base.server_collect_stash()).get("ifak", 0))
+		room.point_at("ifak")
+		room.buy("ifak", 2)
+		await _frames(3)
+		check(BaseEconomy.funds() == funds - 2 * BaseEconomy.item_price(&"ifak") and int(BaseArmory.counts(base.server_collect_stash()).get("ifak", 0)) == had + 2,
+			"buying in the 3D armory is the shop's buy: 2 IFAKs into the armory for $%d" % (2 * BaseEconomy.item_price(&"ifak")))
+		room.close()
+	check(KitLibrary.save(BaseHub.roster(), "Saved with the campaign", Loadouts.role_template(Roles.MEDIC), "test") == "", "a saved kit")
 	BaseHub.server_save()
 	var saved := BaseArmory.counts(BaseHub.stash())
 	var saved_inside := BaseArmory.contents_counts(BaseHub.stash())
 	Campaign.load_campaign()
+	check("Saved with the campaign" in KitLibrary.names(BaseHub.roster())
+		and Restock.counts(KitLibrary.template_of_kit(BaseHub.roster(), "Saved with the campaign")) == Restock.counts(Loadouts.role_template(Roles.MEDIC)),
+		"saved kits go with the campaign: there after a save and reload")
 	check(BaseArmory.counts(BaseHub.stash()) == saved and saved.get("m17", 0) == 1, "the stash survives a save and reload")
 	check(BaseArmory.contents_counts(BaseHub.stash()) == saved_inside and int(saved_inside.get("mag_556", 0)) >= 2,
 		"and so do the carriers' pouches and the magazines in them (%d)" % int(saved_inside.get("mag_556", 0)))

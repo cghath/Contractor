@@ -148,6 +148,25 @@ func _ready() -> void:
 			if who != "":
 				screen.ready.connect(func() -> void: screen.select(who))
 			return layer)
+	# The 3D loadout editor and the 3D armory (claude/loadout-3d): the editor on a squadmate in full
+	# kit with a slot picked (the picker's list showing), the armory pointing at a rifle.
+	await _fit("loadout editor (3D)", func() -> Node:
+		var layer := CanvasLayer.new()
+		layer.layer = 22
+		var editor := LoadoutEditor.new()
+		layer.add_child(editor)
+		editor.ready.connect(func() -> void:
+			if mate != "":
+				editor.select(mate)
+			editor.pick_slot("slot:helmet"))
+		return layer)
+	await _fit("armory (3D)", func() -> Node:
+		var layer := CanvasLayer.new()
+		layer.layer = 21
+		var room := ArmoryRoom.new()
+		layer.add_child(room)
+		room.ready.connect(func() -> void: room.point_at("m4a1"))
+		return layer)
 	# Full and compact, with several contracts' worth of lines (feat/objective-list).
 	for expanded: bool in [true, false]:
 		GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_objlist_settings.cfg"))

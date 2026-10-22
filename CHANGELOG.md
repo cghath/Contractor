@@ -13,12 +13,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### 3D loadout editor and armory (claude/loadout-3d)
 
-> **Where I stopped / next step (2026-10-22, 16:00 CDT):** pieces 1-2 pushed: saved kits and
-> mounts (host ops), the 3D editor (scripts/ui/loadout_editor.gd + loadout_preview.gd) and the
-> 3D armory (scripts/ui/armory_room.gd), opened from the base screen ("3D loadout editor",
-> "Armory" buttons; BaseHub.open_loadout_3d / open_armory). loadout_test covers all of it
-> (R2506 PASS). Next: ui_test fit checks for both screens, base_test buy flow, docs/loadout_3d.md.
-> Not checked yet: how it looks (no windowed screenshots on this PC while Captain plays).
+> **Where I stopped / next step (2026-10-22, 16:05 CDT):** done and pushed: saved kits and
+> mounts (host ops), the 3D editor (scripts/ui/loadout_editor.gd + loadout_preview.gd), the 3D
+> armory (scripts/ui/armory_room.gd), opened from the base screen; design in docs/loadout_3d.md.
+> Local runs: loadout R2506, base R2507, ui + smoke R2508, all PASS. Next: CI on the branch, then
+> a look in game (no windowed screenshots were taken while Captain plays): marker placement on
+> the female build, gun rail markers, shelf spacing.
 
 #### Added
 - **3D loadout editor.** Your soldier full size in 3D: his own model, camo, face and the voxel

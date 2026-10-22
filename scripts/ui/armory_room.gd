@@ -99,7 +99,7 @@ func _ready() -> void:
 	view_box.stretch = true
 	view_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	view_box.size_flags_stretch_ratio = 2.0
-	view_box.custom_minimum_size = Vector2(240, 200)
+	view_box.custom_minimum_size = Vector2(200, 110)
 	view_box.mouse_filter = Control.MOUSE_FILTER_STOP
 	view_box.gui_input.connect(_room_input)
 	body.add_child(view_box)
