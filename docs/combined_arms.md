@@ -1,6 +1,6 @@
 # Combined arms: armour, the AI commander, high command and invasions
 
-**Status: design, 2026-10-21; phase A1 built 2026-10-22 (calls 74-91).** Written for the build sessions to work from. Every call is made
+**Status: design, 2026-10-21; phase A1 built 2026-10-22 (calls 74-92).** Written for the build sessions to work from. Every call is made
 here (listed in "Calls made" at the end); every number is **Proposed** and lives in a data file or
 a named constant so it can be tuned without code. Checked against `claude/ai-driving` `e6ebcf4`.
 
@@ -2695,6 +2695,7 @@ Made while building A1; each is Proposed and can be changed.
 | 89 | ATGM rows (TOW-2A, Konkurs-M, Kornet, 9M119M) arm at 25 m (real TOW about 65 m) and carry `range_m`; their guidance comes with A3 | The antiarmor suite's 5-25 m arming rule for every warhead | A longer arming distance (fails that rule) |
 | 90 | `Shells.shell(id)` (not `Shells.get`, which is Object's); a warhead's `penetration_mm` and `blast_kg` are read as its `pen_ce` and `he_kg` | One reader for both files without repeating numbers | Copying the numbers into new keys |
 | 91 | For phase D6b: the T-72B3's Kontakt-5 figures in 2.4.2 include the tiles; author the base plates plus `heavy_era` tiles, with the base turret CE a little under 900 so "TOW-2A: ~" holds; the BMP-2 front's "M2 M33: ~" needs a thinner front or reads "no" (the M33 is 24 mm at most) | The table test rates those columns as soon as their data lands | |
+| 92 | Physical thickness (`phys_mm`, for overmatch and HE punch-through) of the M-ATV and MaxxPro capsule walls 25 mm (rear 20), roofs 8, engine bays 10 | An 84 mm HE round (22 mm of punch) only scorches an MRAP's side, as the antiarmor suite has it, while a 60 mm mortar (17 mm) still blows in its roof (2.3.6: "soft-skins and the roofs of light armour fail to it") | 12 mm walls (any HE rocket blew in the side) |
 
 ### The AI commander and cooperation
 
