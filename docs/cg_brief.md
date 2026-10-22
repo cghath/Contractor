@@ -188,26 +188,51 @@ Build it out, in this order:
 snowy pass, farmland or a city. Every landmark above shows up where its tag says. Towns read as
 lived-in. The world, townperf, map and smoke suites pass.
 
-### 1b. Two pieces of the combined arms plan (docs/combined_arms.md), added 2026-10-22
+### 1b. The combined arms plan's heavy lanes (docs/combined_arms.md), added 2026-10-22
 
-These fit your world and art work, and Captain asked to share the load with you. Read
-docs/combined_arms.md sections 6.2, 7.2 and 9 for the detail; its section 10 has the calls
-already made.
+Captain wants playable tanks soon and asked to hand the heavy work to you (you've a budget of your
+own; ours is tight this week). Read docs/combined_arms.md; section 9 is the build plan (phases,
+dependencies, tests, budgets) and section 10 has every call already made, so there's nothing to
+ask. One phase per commit, pushed as each lands; one branch per lane is fine.
 
-- **D1 + D2, operation zones of about 8 km.**
-  - D1: `ZoneDef.generate_operation`, operation_gen.gd, the bands, sites from covered zones, the
-    river and bridge hints, the MSR.
-  - D2: 8 km performance: collision on demand, the scatter density grid, far proxies, live caps,
-    the `invasion` perf case.
-  - A Claude session started D1 on `claude/ca-d1-operation-zones` and paused it for usage. Pick it
-    up from there: its CHANGELOG entry says where it stopped.
-  - These are your terrain/world files anyway, so they sit well next to your roads and cities.
-- **D6a, new vehicle art at 0.5 cm-style detail:** T-72B3, BMP-2, BTR-82A, MT-LB, the three
-  HEMTTs, the rhino truck, the armoured SUV, and a captured-MaxxPro scheme (vehicle_art.gd,
-  vehicle_interiors.gd). Claude's armour lane will give them armour, modules and weapons data
-  later (D6b).
+**Order:** finish the world item you're on, then the armour lane (Captain's priority), then the
+operations lane. Interleave the art (D6a) whenever it suits you.
 
-Do these after the world expansion items you're on, or interleave them if it suits you.
+- **Armour lane: A2, A3, A4, A5, A7, A8, then A6.**
+  - A2: modules, spall, crew hits, kill states.
+  - A3: main guns: Abrams 120 mm and loader, Bradley 25 mm dual feed, TOW; commander/loader seats.
+  - A4: gunnery: sights, thermal, LRF and fire control, stabiliser, hatches.
+  - A5: the 1P/3P vehicle HUDs and the x-ray.
+  - A7: fire and destruction effects.
+  - A8: logistics and armour packages.
+  - A6: driving physics, fording the rivers, bridge load limits.
+  - A1 (the armour model) is being finished by a Claude session on `claude/ca-a1-armour-model`.
+    Start A2 once it's merged into claude/ai-driving (a few hours).
+  - The **first build cut** is after A5: tanks firing with sights and HUDs. Tell Captain in
+    Discord when A5 lands.
+- **Operations lane: D1, D2, D3, D4, D5, D8.**
+  - D1/D2: 8 km operation zones and their performance. Pick up the paused WIP on
+    `claude/ca-d1-operation-zones`; its CHANGELOG entry says where it stopped.
+  - D3-D5: operation contracts, phases, the front grid, pay by phase, and the mission types
+    (phased invasion, armoured thrust, beach landing, seizing a crossing, holding a town).
+    D3 needs Claude's B2 (the AI commander); build D3's contract and front-grid parts first and
+    hook the commander in when B2 lands.
+  - D8: staging from a friendly FOB (D7, the US in the living war, is Claude's, and D8 builds on
+    it).
+- **Art and light armour: D6a, then D6b.**
+  - D6a: T-72B3, BMP-2, BTR-82A, MT-LB, the three HEMTTs, the rhino truck, the armoured SUV, a
+    captured-MaxxPro scheme.
+  - D6b: their armour/modules/weapons data and the factions' vehicle tables, after A2/A3.
+
+Claude keeps the parts tied to its squad AI files:
+- B, the AI commander;
+- C, high command and the UI;
+- A9, AI crews and armour tactics;
+- D7, the US in the living war;
+- the performance pass.
+
+Where your phase needs a hook in squad_ai.gd, tactics.gd or squad.gd, keep it to one line and note
+it in followups.md.
 
 ### 2. Real picture-in-picture scopes
 
