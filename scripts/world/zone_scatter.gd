@@ -164,7 +164,7 @@ const FAR_GROUP_M := 24.0
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
 ## 11: every tree solid (2026-10-18).
-const LAYOUT_VERSION := 14  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; 14: the woods perf pass's thicket cap (2026-10-22); old caches re-roll
+const LAYOUT_VERSION := 15  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; 14: the woods perf pass's thicket cap (2026-10-22); 15: the terrain features' orchards and hedges and the paved roads in the same layout; old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
