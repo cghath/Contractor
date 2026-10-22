@@ -796,14 +796,17 @@ func _test_soak() -> void:
 			history[who] = list
 			var far := _flat(s.global_position, squad.follow_point(s))
 			worst[who] = maxf(float(worst.get(who, 0.0)), far)
-			# A man at his place in a follow-in stack (Squad._tick_follow_in: the lead walked into a
-			# building) waits there by design, up to STACK_WAIT_S after the first is ready: that much
-			# more before he counts as stuck (a stack that never goes still does).
+			# A man standing at the place a follow-in clear gives him (Squad._tick_follow_in: the lead
+			# walked into a building; stacked at the door, or waiting his turn to go in) isn't stuck:
+			# he's where he was sent, and the op ends once the lead is FOLLOW_IN_LEAVE_M off, after
+			# which he's watched again (Foxtrot "Stacking up" / "Clearing" at his spot: CI
+			# 39732150758, R2400, R2434).
 			var brain := SquadAI.of(s)
-			var window := STUCK_WINDOW_S
-			if s.ai_status == "Stacking up" and _flat(s.global_position, brain._destination) < 1.0:
-				window += ceili(SquadTactics.STACK_WAIT_S) + 2
-			if list.size() > window and far > STUCK_FAR_M and _flat(list[-1], list[-1 - window]) < STUCK_MOVE_M:
+			var placed := brain.ordered.has("op") and _flat(s.global_position, brain._destination) < 1.0
+			if placed:
+				history[who] = [s.global_position]  # (his window starts again once he's sent on)
+				list = history[who]
+			if not placed and list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
 				var ai := brain
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
