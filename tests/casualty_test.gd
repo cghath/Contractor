@@ -796,8 +796,15 @@ func _test_soak() -> void:
 			history[who] = list
 			var far := _flat(s.global_position, squad.follow_point(s))
 			worst[who] = maxf(float(worst.get(who, 0.0)), far)
-			if list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
-				var ai := SquadAI.of(s)
+			# A man at his place in a follow-in stack (Squad._tick_follow_in: the lead walked into a
+			# building) waits there by design, up to STACK_WAIT_S after the first is ready: that much
+			# more before he counts as stuck (a stack that never goes still does).
+			var brain := SquadAI.of(s)
+			var window := STUCK_WINDOW_S
+			if s.ai_status == "Stacking up" and _flat(s.global_position, brain._destination) < 1.0:
+				window += ceili(SquadTactics.STACK_WAIT_S) + 2
+			if list.size() > window and far > STUCK_FAR_M and _flat(list[-1], list[-1 - window]) < STUCK_MOVE_M:
+				var ai := brain
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
 					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])]
