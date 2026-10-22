@@ -216,6 +216,14 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 					exclude.append(box.get_rid())  # out of this body: it doesn't hit him twice
 			from = body_hit.position + direction * (body_hit.depth + 0.01)
 			continue
+		# A prop from the library (ZoneScatter.round_through): through it or stopped by its material.
+		var prop := ZoneScatter.round_through(hit, direction, world_energy(weapon, distance) - lost_j)
+		if not prop.is_empty():
+			if prop.stopped:
+				return passed if not passed.is_empty() else _result("world", hit)
+			lost_j += float(prop.lost_j)
+			from = (prop.exit as Vector3) + direction * 0.01
+			continue
 		var world := VoxelWorld.find_on(collider)
 		if world == null:
 			return passed if not passed.is_empty() else _result("world", hit)  # the ground

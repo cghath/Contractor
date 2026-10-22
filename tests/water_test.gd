@@ -62,6 +62,9 @@ func _ready() -> void:
 	(multiplayer.multiplayer_peer as ENetMultiplayerPeer).refuse_new_connections = true
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(^"1") != null, 20.0)
 	var fresh := _terrain(def)
+	var fresh_roads := ZoneRoads.new()
+	fresh_roads.prepare(fresh, level.def.duplicate(true))  # (cut and filled to the same roads, cg_brief 1.2)
+	fresh_roads.free()
 	check(fresh.water.checksum() == water.checksum() and fresh.checksum() == level.terrain.checksum(),
 		"the hosted zone's water is the same as a fresh build from its seed (every peer and late joiner builds it)")
 	fresh.free()
@@ -224,7 +227,7 @@ func _test_generation(def: Dictionary) -> void:
 	check(flat_ok and dry, "every pad stays flat and dry (%d pads)" % t.pads.size())
 	# Roads over the river have bridges; no long stretch without a crossing.
 	var bridged := true
-	for road: Array in def.roads:
+	for road: Array in RoadNet.water_links(def):  # (the links the roads take: every site joined, cg_brief 1.2)
 		var a := Vector2(float(road[0][0]), float(road[0][1]))
 		var e := Vector2(float(road[1][0]), float(road[1][1]))
 		for i in range(lo, hi):

@@ -1,0 +1,18 @@
+{
+	"_note": "Roads (RoadNet plans them, ZoneRoads lays them; cg_brief queue item 1.2). Every number here is Proposed. kinds: width_m (carriageway), colour (hex: the surface), far_colour (the terrain's tint under and past the drawn road), friction (the road body's PhysicsMaterial: Vehicle reads no surface grip yet, F-191), hard (footsteps: true = the hard-ground steps), max_grade (steepest the profile is let run before it cuts or fills, rise over run), lines (asphalt markings: centre dashes and edge lines). sites: which kind of road a site link gets by the module's base type (both ends' kinds: the better one wins, a town always asphalt; types not listed take default / default_hot). trails: the cross-country trails' kind. crossings: a road out of a linked-zone crossing is asphalt when the link's hash falls under asphalt_share, else dirt (the same on both sides of the link).",
+	"kinds": {
+		"asphalt": {"width_m": 7.0, "colour": "3d3d3b", "far_colour": "4a4946", "friction": 1.0, "hard": true, "max_grade": 0.10, "lines": true},
+		"dirt": {"width_m": 4.2, "colour": "", "far_colour": "", "friction": 0.75, "hard": false, "max_grade": 0.16, "lines": false},
+		"street": {"width_m": 6.0, "colour": "45443f", "far_colour": "4a4946", "friction": 1.0, "hard": true, "max_grade": 0.10, "lines": false}
+	},
+	"sites": {
+		"town": "asphalt", "hq": "asphalt", "qrf_base": "asphalt", "comms": "asphalt", "checkpoint": "asphalt", "fob": "asphalt",
+		"outpost": "dirt", "compound": "dirt", "village": "dirt"
+	},
+	"default": "dirt",
+	"default_hot": "asphalt",
+	"trails": "dirt",
+	"crossings": {"asphalt_share": 0.6},
+	"town": {"kerb_in_m": 1.0, "pavement_h_m": 0.12, "kerb_chamfer_m": 0.18, "mini_island_r_m": 2.0, "mini_island_h_m": 0.08},
+	"roundabout": {"island_r_m": 6.0, "ring_w_m": 7.0, "island_h_m": 0.15, "near_town_m": 320.0, "min_arms": 3}
+}

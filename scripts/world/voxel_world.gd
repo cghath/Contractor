@@ -233,6 +233,26 @@ static func aligned(box: AABB, size: int) -> AABB:
 	return AABB(lo, hi - lo)
 
 
+## Grows the edit area (`bounds`) to hold every structure added so far, FIT_MARGIN voxels round
+## them, and the view distance to reach across all of it, before the structures are built; a
+## world whose structures are inside its bounds is left as it is. F-121 (cghath's queue item 1.8):
+## the vehicle range's concrete blocks and sandbag wall (z -30 and -45 m) lay outside the
+## compound's 22 m bounds, so they were never built (no voxels, no collision); CompoundLevel calls
+## this once its structures are added. Returns whether it grew.
+const FIT_MARGIN := 20
+func fit_structures() -> bool:
+	if _structures.is_empty() or _built or bounds.encloses(_structure_area):
+		return false
+	bounds = bounds.merge(_structure_area.grow(FIT_MARGIN))
+	var across := Vector2(bounds.size.x, bounds.size.z).length()
+	view_distance = maxi(view_distance, ceili(across))
+	if terrain:
+		terrain.bounds = aligned(bounds, MESH_BLOCK)
+		terrain.max_view_distance = view_distance
+	print("[world] edit area grown to hold its structures: %s voxels, view %d" % [bounds, view_distance])
+	return true
+
+
 ## Adds a solid box, in metres, relative to this node. Call before structures are built.
 ## `skin`: a box that only dresses the structures (a building's window frames, a cornice, a
 ## sandbag wall's bag pattern: ZoneModules.skin), recolouring voxels they already have or standing
@@ -614,7 +634,14 @@ static func stops_round_in(node: Node, from: Vector3, to: Vector3, energy_j: flo
 			return false
 		var world := VoxelWorld.find_on(hit.collider)
 		if world == null:
-			return true  # the ground or other solid world geometry
+			var prop := ZoneScatter.round_through(hit, direction, energy)  # a library prop by its material
+			if prop.is_empty() or prop.stopped:
+				return true  # the ground or other solid world geometry
+			energy -= float(prop.lost_j)
+			at = (prop.exit as Vector3) + direction * 0.01
+			if (at - from).dot(direction) >= (to - from).length():
+				return false
+			continue
 		var through := world.trace_round(hit.position, direction, energy)
 		if through.stopped:
 			return true

@@ -374,7 +374,7 @@ func under_roof(pos: Vector3) -> bool:
 	return not space.intersect_ray(q).is_empty()
 
 
-## Whether `s` stands on something built (a voxel structure, a module, a vehicle): a hard step.
+## Whether `s` stands on something built (a voxel structure, a module, a vehicle, a paved road): a hard step.
 func hard_ground(s: Soldier) -> bool:
 	var space := _space()
 	if space == null:
@@ -384,6 +384,8 @@ func hard_ground(s: Soldier) -> bool:
 	var hit := space.intersect_ray(q)
 	var node: Node = hit.get("collider") as Node
 	while node:
+		if node.has_meta(&"hard_ground"):  # a road's body (ZoneRoads): asphalt and concrete hard, dirt not
+			return bool(node.get_meta(&"hard_ground"))
 		if node is VoxelWorld or node is ZoneModule or node is Vehicle:
 			return true
 		if node is ZoneTerrain:

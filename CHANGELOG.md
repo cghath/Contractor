@@ -109,6 +109,218 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - Another friendly squad counted the human players as its own men, and formed them into its slots.
 - A hero squad's or element's shouts reached every player on the map (now within 50 m).
 - An AAV's boarders and the contact callout used the player squad, not the speaker's own.
+### Performance: the woods perf pass and F-121 (cghath's brief, queue item 1.8)
+
+#### Changed
+- **Dense copses in the normal zones.** Every wooded preset (temperate, river valley, highland moor, coastal lowland,
+  amphibious coast, rocky ridge, scrubland, and the new snowy mountain and farmland) now has the Experimental forest's copses-as-cover layout: bigger, denser
+  copses with a skirt of thickets and rocks inside, a thicket belt round the woods, and its higher caps. Temperate
+  and river valley also get more woods (2.1 a km², was 1.5 and 1.8) and copses (6, was 5). On temperate's hot zone
+  that's 9,000 trees (was 5,000) and 21,700 thickets (was 11,000): the dense layout's thicket cap is
+  16,000 (was 11,000), so the last copses of a big zone still get their skirts. A fresh layout of that zone takes
+  longer (4.2 s, was 1.8 s on this PC; 0.46 s from the disk cache after). Desert, badlands and salt flats keep their small
+  copses.
+- **Trees draw in two tiers.** Within 200 m of a cell's middle they're drawn as before; further out, low-poly
+  versions in the same places (a crown 44 triangles instead of 164, a thicket 38 instead of 152), and past 950 m the
+  canopy blobs. Each tree shows in exactly one of the three. The blobs come in blocks of 2 x 2 cells (a quarter of
+  the draws). The full shapes lose the faces nobody sees (hidden caps between tiers, under the ground, inside the
+  crown), so they look the same with fewer triangles.
+- **Cheaper sight lines through the woods.** Foliage is indexed in 16 m squares, and a sight line only walks the
+  squares it crosses, from both ends. The AI's lines stop once the target is hidden: the answer is the same as
+  before (checked against the old walk), just cheaper.
+- Measured headless, back to back on a PC shared with other agents' runs (R0498 before, R0499 after), from the densest
+  copse of temperate's hot zone with the dense copses:
+  - draws 590 -> 435;
+  - triangles in view 1.70M -> 0.64M;
+  - shadow-pass triangles ~231k -> ~159k;
+  - a sight line 4.3 ms -> 0.39 ms;
+  - a nav chunk's scatter 0.75 -> 0.06 ms;
+  - building a cell's visuals 27 -> 6 ms.
+  - With 16 AI fighting round the Experimental forest's densest copse, their sight lines through the leaves cost 9.0 ->
+    0.38 ms a frame. Frames averaged 41 -> 31 ms (p95 199 -> 94) on that shared PC.
+  - Standing in the copse alone: 6.9 ms a frame both before and after (the headless frame has no drawing).
+  - A scan round of 16 men's sight lines through that copse (128 lines): 649 -> 11 ms (R0519 / R0517).
+  - Temperate's hot zone as its preset now says (dense) against as it was (R0517 / R0519), from its densest
+    spot: 627k triangles in view (was 566k with half the woods), 610 draws (was 273; this spot is by a
+    settlement, its props and wires a third of them), ~152k shadow triangles (was ~39k).
+
+#### Fixed
+- **The vehicle range's concrete blocks and sandbag wall are there (F-121).** They lay outside the range's 22 m voxel
+  area, so they were never built: no voxels, no collision. A level's voxel area now grows to hold its structures.
+  The AI driver has something to steer round, and a demo block on a concrete block carves it.
+- **The insertion helicopter keeps 7 m over what stands in its way (was 6),** the same margin it keeps over the
+  ground. With the dense copses moving its line, harbour yard's flight in came over a roadside billboard 4.99 m clear
+  while banking (the check asks for 5).
+
+#### Tests
+- `forest` checks, with Proposed budgets:
+  - a normal preset's dense copses: laid out the same twice, and drawn within a budget of draws and triangles;
+  - each cell's trees drawn exactly once, near and far;
+  - sight lines the same as the old walk, and within a time budget;
+  - nav geometry the same and cheap;
+  - the frame standing in the forest's densest copse, and a 16-man scan round through it.
+- `demolitions` checks the range's blocks and wall are built, stop rays, and carve under a demo block.
+- `world`: temperate now has the dense copses.
+- `vehicles`: its AI driving goals moved clear of the range's blocks (they're there now); an AI vehicle turning
+  round beside one is F-223.
+
+### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
+
+#### Added
+- **72 new outdoor props**, on top of the 25 shapes the open terrain and the sites had (rocks,
+  scrub, trees, crates, drums, debris, ruins, box wrecks, sandbags, HESCO, towers, tents and the
+  rest): 97 in all.
+  - Street furniture: street lamps (single and double), wooden utility poles (some with a
+    transformer), stop, warning and direction signs, a billboard, a bus shelter, benches, bollards,
+    skips, a kiosk, concrete road barriers.
+  - Market: stalls with striped awnings and produce, big canopies, shop awnings, produce crates,
+    hand carts.
+  - Fences and gates: post-and-rail, board, chain-link, barbed wire, corrugated iron, dry stone,
+    block and mud-brick walls; farm, steel and wooden gates (open).
+  - Power lines: steel lattice pylons and H-frame wooden poles, with sagging wires from each to
+    the next.
+  - Farm and water: wells, raised water tanks, cisterns, troughs, round and square hay bales,
+    irrigation channels with sluices and pipes, windpumps, animal shelters.
+  - Animals: goats, sheep and dogs. They wander about their pens, farms and streets (nothing more),
+    the same on every peer; a round kills one.
+  - Scenery vehicles built from blocks the shape of the real thing: saloon and hatchback cars, a
+    panel van, a pickup, a dropside lorry with a canvas tilt, a tanker, a tractor, and burnt-out
+    hulks of a car, a van and a lorry. They're scenery, not drivable.
+  - Shipping containers: 20 ft, 40 ft and a stack of two.
+  - Graves: mounds, headstones, crosses, box tombs and the arid style's stone-bordered graves.
+  - Site clutter: generators, satellite dishes, washing lines, fuel tanks, gas cylinders, pallet
+    stacks, tyre piles, portable latrines.
+- **Where they go**, by the zone's terrain style (`data/props.json`: temperate, woodland,
+  highland, coastal, arid) and what's there:
+  - Towns: lamps, and poles with wires, along the streets; market stalls by the crossroads;
+    parked cars, benches, skips, a kiosk, bollards, stop and direction signs and a bus shelter.
+    All of it stands on the street, clear of the buildings, barricades, guard posts, loot and the
+    civilians' walks.
+  - Villages and towns get washing lines, dishes, a well or a water tank, a small pen and dogs
+    round them.
+  - Sites: containers, generators, fuel tanks, latrines, barriers and a chain-link yard outside
+    the HQ, QRF bases, outposts and compounds. Checkpoints get barriers in a chicane and stop and
+    warning signs on the way in.
+  - Roads: utility poles along most of them, direction signs where they reach a site, a bus
+    shelter and a billboard on the way into a town, and parked or abandoned vehicles (some burnt
+    out, now and then a cluster where an ambush was).
+  - Countryside: pylon lines across the zone; farms with a pen of goats or sheep, water, hay, a
+    tractor, field fences with gates and sometimes an irrigation channel; a walled cemetery by the
+    biggest settlement.
+  - The campaign's zones had 390 props between them; they now have about 11,900.
+- **New suite `props`** (two processes, like world): the library and every campaign zone's layout,
+  collision against what's drawn, rounds through props by material, AI cover behind a container,
+  animals wandering and the same on a late joiner.
+
+#### Changed
+- **Every prop's collision is what's drawn**, part by part, and each part takes rounds by its
+  material. An M855 goes through a car's cabin, a shipping container's width, wooden fences and
+  chain-link; a 9 mm stops in the car or the container. A car's engine bay, concrete, stone, a
+  generator, a hay bale, a full tank and a mud wall stop rifle rounds. The AI's soft-cover test
+  agrees, so it hides behind an engine block or down a container's length, not behind a door.
+- Chain-link and barbed wire stop men walking, but not sight or rounds.
+- The old box car wrecks out in the open are burnt-out hulks now.
+- Rocks, trees and bushes keep off the props.
+- Scatter props no longer count as foliage that hides people. They were treated like bushes on
+  top of being solid.
+- Props keep out of rivers, lakes, their wet banks and bridges (as the rest of the scatter does);
+  a power line spans a river, one footing skipped. Landmark sites (a mosque, a farm, a harbour
+  and the rest) keep the props they build themselves: the library adds none on their pads, and
+  its farms keep their distance from a landmark farm.
+- Zone layouts cache under a new version (13), so old caches re-roll.
+- Helicopters climb over pylons and other tall props near their track. A pylon's lattice was too
+  thin for them to sense, and an insertion flew into one.
+
+### Terrain features and presets: gullies, cliffs, marsh, snow and farmland (cghath's brief, queue item 1.3)
+
+#### Added
+- **Gullies and ditches that give cover.** Dry gullies (2-3 m deep, a flat floor and steep
+  sides) and shallower ditches wander across the temperate hills, scrub, desert wadi, moors,
+  badlands, ridges, river valleys and coast. Lie down in one and you're out of sight of the flat
+  around it; crouch in a gully and you mostly are. The AI sees them the same way: it can't spot
+  a man down in one, and its cover search sends a man to one when he's caught in the open
+  (prone at the lip, firing over it, or down in it).
+- **Cliffs and rock faces.** Escarpments 6-18 m high on the ridges, moors, badlands and the new
+  snowy mountains: a sheer rock face with a ledge on top and the ground easing back down behind
+  it, fallen rock at its foot, tapering out at both ends so the way round is short. Nobody walks
+  or drives up the face and the AI's paths go round it. Roads that cross one climb it on a ramp.
+- **Marsh.** A new fen preset: soft ground in patches that slows you to about two thirds of your
+  pace, reed beds that hide a crouched man, dark wet mud, dozens of shallow ponds and pools, a
+  sluggish stream and drainage ditches. Blackwater Fen (inland) is one.
+- **Snowy mountains.** A new preset: big hills under snow, a snow line that climbs in summer and
+  comes down to cover everything in winter, bare rock on the steep faces, cliffs and gullies,
+  tyre tracks in the snow and a cold, hazy sky. Deep snow slows you to about three quarters of
+  your pace, but not on the roads or cleared ground. Its streams and ponds are frozen: ice you
+  walk on. Whitecap Pass (inland) is one.
+- **Farmland.** A new preset: a patchwork of fields round the farms (never over a farm's yard
+  or any site) with wheat, maize, vegetables and fallow ground that change with the season
+  (green in spring, ripe gold and tall maize in summer, stubble in autumn, bare in winter),
+  orchards in rows that blossom in spring, hedges along some field edges, and irrigation
+  channels you wade through. Ripe wheat hides a man lying in it; maize hides a man standing.
+  Harrow Fields (inland) is one.
+- **Seasons.** The campaign now has a season, from the campaign day: 30 days each, starting in
+  spring. Zones you go to are built for the season you go in.
+- **Mixed terrain.** A "procedural" zone can now mix in the marsh, snow and farmland presets, and
+  takes their features (a snowy ridge with gullies, farmland in a marsh).
+- A `terrain` test suite, and `tests/terrain_shots.tscn` for headless pictures of each preset.
+
+#### Changed
+- The rocky ridge, highland moor and badlands presets have cliffs, and most presets have gullies
+  or ditches, so those zones' ground is new.
+- **Farms and fields agree.** On farmland the farmsteads stand on the rough ground by the fields,
+  their fences and gates run down the lanes between the fields, and nothing stands in a crop
+  field but the power lines' pylons and poles. Fields keep clear of the roads' verges. Marsh
+  zones take the woodland props, snowy mountains the highland ones.
+- **Cities get their street furniture once.** A city's lamps, benches and bins line the pavements
+  of its whole street grid, laid in one pass instead of a town's street kit inside every block;
+  building a city zone's props takes about a tenth of the time it did.
+- **Flatter helicopter LZs.** A helicopter insertion or wave-off now looks a little further for
+  a hidden LZ of 8 degrees or less before settling for a steeper one, so on the mountains it
+  lands instead of hovering on a slope it can't sit on.
+
+### City zones and village houses (cghath's brief, queue items 1.5 and 1.6)
+
+#### Added
+- **Cities.** A city is a street grid of blocks: 5 x 4 blocks, 10 m streets between and round
+  them. Each block is a ring of terraced buildings along its four streets, fronts on the street,
+  narrow alleys between them and a courtyard behind. The inner blocks are 3-5 storeys, the outer
+  ring 2-3, and two or three 6-8 storey towers stand out over the core. New building types: an
+  apartment block (flats on every floor), a tenement (a shop under flats) and a tower (offices).
+  Some buildings are ruined, and there are barricades and rubble in the streets.
+- **Stairs to every floor and the roof.** Every building over one storey has a flight up from
+  each floor to the next and onto its roof, and the AI's navigation covers every floor and roof.
+- **Garrisons hold the upper floors.** A city's defenders stand at upstairs windows onto the
+  street, in back rooms upstairs and on the roofs, and the towers are held from the top floor
+  and the roof.
+- **The Old Quarter is a real city.** Its towns are replaced by a city near the enemy HQ, with a
+  road in from the HQ and a patrol round its inner streets, on a new "city" terrain preset (low
+  ground, dusty verges, grey streets, few trees). Each block streams in on its own, so the city
+  loads round you as you walk in, and each block is a town to missions (raids, HVTs, hostages,
+  intel), the townsfolk and the enemy's defence.
+- **The street grid is data the roads can use** (the zone's "cities"): paving it is F-210.
+- **A `city` test suite**: the city by seed, its storeys, stairs, rooms and garrison posts, the
+  Old Quarter, the village, and in the world the navmesh up a tall building, the AI's building
+  scan from upstairs, the garrison upstairs and a city block's frame time as it streams in.
+  Pictures: `tests/city_shots.tscn`.
+
+#### Changed
+- **Village houses are generated.** The village's four houses (mud brick, cinder block, a
+  two-room brick house and a plank shack) are now generated buildings with rooms, furniture,
+  windows and their own look, each where the old one stood with its door in the same place. The
+  village's layout, garrison posts, loot and mission spots are as they were.
+- The AI's navigation in zones now reaches the top of tall buildings (it stopped 8 m up).
+- More physics bodies are allowed (Jolt's limit is 32 768), so a whole city can be loaded.
+
+#### Fixed
+- Stairs in city buildings always join the floor on the AI's navigation (a short space in front
+  of the first step could cut a stair off, depending on the ground's height). Every stair's
+  navigation ramp now has a wedge on and off. Towns and landmarks keep their stairs as they are
+  for now (F-212).
+
+#### Known
+- An AI order from the street to a tall tower's top floors first paths a floor or two short and
+  re-paths on the way up (Godot's path search stops at 4096 navmesh polygons: F-213). A city
+  block's AI building scans can take 150-450 ms near tall buildings (F-211).
 
 ### US forces in the living war (combined arms, phase D7)
 
@@ -389,6 +601,44 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 - **Loop suite, helicopter extraction:** the player sets down what's in his hands before his
   rifle (a drop lets go of the hands first, so a carried-out hard case kept the rifle slung), and
   a dead hostile's intel isn't expected in the stash (intel goes to the debrief, never the stash).
+
+### Roads (cg_brief queue item 1.2)
+
+#### Added
+- **Real roads.** Every zone's roads are planned on its ground when it loads, the same on every
+  machine: they curve round hills and follow the valleys, and the ground is cut and filled to
+  them, so they run smooth with banks either side.
+  - **Asphalt** (7 m, a dashed centre line and edge lines) between the main sites: towns, the
+    HQ, QRF bases, comms, checkpoints, the FOB.
+  - **Dirt tracks** (4 m, two ruts and a grassy crown) to outposts, compounds and villages, and
+    on the cross-country trails.
+  - **Junctions** where roads cross or join, and **roundabouts** near towns and where four main
+    roads meet.
+  - **Towns:** kerbed pavements along both streets and a mini roundabout at the crossroads.
+  - Every site is on the network now (in hot zones the comms site, QRF bases, checkpoints,
+    villages and the town had no road).
+- **Roads you can drive on.** Roads have collision that matches what's drawn; AI drivers take
+  them (the squad's drivers already route by road, and now follow the curves). Asphalt and
+  pavements sound hard underfoot, dirt tracks soft.
+- **Roads across the zone's edges.** A road leaves by each crossing into a linked zone, and the
+  zone on the other side has the same kind of road coming in at its crossing.
+- The map draws the curved roads, dirt tracks thinner than asphalt.
+
+#### Changed
+- The trails' patrols walk their curved trails.
+- A helicopter coming round its J-hook over rising ground climbs back up to its height instead
+  of holding level under it (it came over a rise 4 m clear of the ground, F-218).
+- Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
+  billboards) follow the curved roads and keep off them, each road its own width (F-219).
+- **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
+  new roads run (every site's road, the roads in from the zone's edges), and each road runs
+  straight across its bridge's deck and down its ramps instead of dipping under it onto the
+  riverbed (F-175). Where two roads would cross a river side by side, the second joins the first
+  either side of its bridge.
+
+#### Fixed
+- A stream's bank running past a site no longer lifts the site's flat ground (a checkpoint's pad
+  had a 2 m hump in it).
 
 ### A head shot leaves its wound (Captain, 2026-10-21: "first time headshots still dont cause a wound", "on a downed state enemy")
 

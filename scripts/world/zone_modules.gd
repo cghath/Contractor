@@ -119,8 +119,8 @@ static var _counts := {}  # solid_voxels_in
 ## A module type's base type: "town" for a generated town ("town#<seed>"), else the type. The
 ## mission data (contracts.json "modules"), callsigns and the like are by base type.
 static func base(type: String) -> String:
-	if type.begins_with(TOWN):
-		return "town"
+	if type.begins_with(TOWN) or type.begins_with(CITY):
+		return "town"  # (a city's block is a town to the missions, the people, the callsigns and UrbanDefence)
 	if type.begins_with(LANDMARK):
 		return type.get_slice("#", 1)
 	return type.get_slice(GROWN, 0) if GROWN in type else type
@@ -129,7 +129,7 @@ static func base(type: String) -> String:
 ## A generated town's civilians (BuildingGen.town "civilians"); none for other types (theirs
 ## are in contracts.json).
 static func civilians(type: String) -> Array:
-	return (_towns.get(type, {}) as Dictionary).get("civilians", []) if has_type(type) else []
+	return (_towns.get(type, {}) as Dictionary).get("civilians", []) if _town_like(type) else []
 
 
 ## A generated town's contract sites (contracts.json "modules" sites, made from its buildings):
@@ -137,7 +137,7 @@ static func civilians(type: String) -> Array:
 ## "hostage" and "cache" (the weapons cache, its voxels counted) (BuildingGen.town). {} for other
 ## types.
 static func town_sites(type: String) -> Dictionary:
-	if not type.begins_with(TOWN) or not has_type(type):
+	if not _town_like(type):
 		return {}
 	var t: Dictionary = _towns[type]
 	var half: Vector2 = t.half
@@ -160,12 +160,19 @@ static var _towns := {}
 
 ## A generated town's reserve: its garrison post indices (UrbanDefence); [] for other types.
 static func town_reserve(type: String) -> Array:
-	return (_towns.get(type, {}) as Dictionary).get("reserve", []) if type.begins_with(TOWN) and has_type(type) else []
+	return (_towns.get(type, {}) as Dictionary).get("reserve", []) if _town_like(type) else []
 
 
 ## A generated town's fallback points (every building's back room, m from the origin; UrbanDefence).
 static func town_fallback(type: String) -> Array:
-	return (_towns.get(type, {}) as Dictionary).get("fallback", []) if type.begins_with(TOWN) and has_type(type) else []
+	return (_towns.get(type, {}) as Dictionary).get("fallback", []) if _town_like(type) else []
+
+
+## Whether `type` is a generated town or a city's block, built (its buildings made) and entered.
+static func _town_like(type: String) -> bool:
+	if type.begins_with(TOWN):
+		return has_type(type)
+	return type.begins_with(CITY) and _city(type, true)
 
 
 static func has_type(type: String) -> bool:
@@ -175,6 +182,8 @@ static func has_type(type: String) -> bool:
 		return true
 	if type.begins_with(TOWN):
 		return _town(type)
+	if type.begins_with(CITY):
+		return _city(type)
 	if type.begins_with(LANDMARK):
 		return _landmark(type)
 	if GROWN in type:
@@ -209,6 +218,69 @@ static func _town(type: String) -> bool:
 	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache,
 		"reserve": t.garrison_reserve, "fallback": t.fallback}
 	return true
+
+
+## Cities (queue item 1.5, cghath 2026-10-22; docs/building_gen.md "City zones"):
+## "city#<seed>#<ix>#<iz>", block (ix, iz) of city <seed>'s street grid (BuildingGen.city_layout,
+## city_block). Each block is a module of its own, CITY_PITCH square with its half of the streets
+## round it, so a city streams in block by block; base() "town", so missions, people, callsigns
+## and UrbanDefence take it as a town. Every block's pad (PAD) is the whole city's (they flatten to
+## one height), its half streets are painted on it (STREETS). Asked about (has_type), a block
+## enters its footprint, pad and streets only; its buildings are made the first time its boxes
+## are (boxes(), a zone module's proxy), with its garrison, loot, points and the rest.
+const CITY := "city#"
+
+
+static func _city(type: String, full := false) -> bool:
+	if full and _cache.has(type):
+		return true
+	var parts := type.split("#")
+	if parts.size() != 4 or not (parts[1].is_valid_int() and parts[2].is_valid_int() and parts[3].is_valid_int()):
+		return false
+	var ix := int(parts[2])
+	var iz := int(parts[3])
+	if ix < 0 or iz < 0 or ix >= BuildingGen.CITY_BLOCKS.x or iz >= BuildingGen.CITY_BLOCKS.y:
+		return false
+	if not PAD.has(type):
+		var layout := BuildingGen.city_layout(int(parts[1]))
+		var city: Vector2 = layout.half
+		var centre := BuildingGen.city_block_centre(ix, iz)
+		HALF[type] = Vector2(BuildingGen.CITY_PITCH, BuildingGen.CITY_PITCH) * 0.5
+		PAD[type] = Rect2(-city - centre, city * 2.0)
+		STREETS[type] = BuildingGen.city_block_streets()
+	if not full:
+		return true
+	var t := BuildingGen.city_block(int(parts[1]), ix, iz)
+	_cache[type] = t.boxes
+	_skins[type] = (t.skin as Array) + _dress(type, (t.boxes as Array).filter(func(bx: Array) -> bool: return int(bx[2]) == VoxelWorld.Mat.SANDBAG))
+	POINTS[type] = t.points
+	GARRISON[type] = t.garrison
+	GARRISON_FACE[type] = t.garrison_face
+	RAMPS[type] = t.ramps
+	LOOT[type] = t.loot
+	TOP[type] = maxf(TOP_M, float(t.top) + 0.5)
+	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache,
+		"reserve": t.garrison_reserve, "fallback": t.fallback}
+	return true
+
+
+## The city a module type is a block of ("city#<seed>"), "" for any other type.
+static func city_of(type: String) -> String:
+	return "%s%s" % [CITY, type.get_slice("#", 1)] if type.begins_with(CITY) else ""
+
+
+## Zone def `def`'s city streets (zone metres): [[[x, z], [x, z], width]] for every street of every
+## city in it (its "cities": ZoneDef.place_city), the centre lines of the grid and its ring: the
+## street grid's own data, for the roads to pave (F-210: zone_roads.gd doesn't yet).
+static func city_streets(def: Dictionary) -> Array:
+	var out: Array = []
+	for c: Dictionary in def.get("cities", []):
+		var at := Vector2(float(c.pos[0]), float(c.pos[1]))
+		for st: Array in BuildingGen.city_layout(int(c.seed)).streets:
+			var a: Vector2 = (st[0] as Vector2) + at
+			var b: Vector2 = (st[1] as Vector2) + at
+			out.append([[a.x, a.y], [b.x, b.y], float(st[2])])
+	return out
 
 
 ## Grown modules (Captain, 2026-10-17: "2 or 3 new buildings for the outposts, then enlargify
@@ -560,6 +632,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = BaseFob.defence_boxes(spec.get_slice("@", 0), spec.get_slice("@", 1) if "@" in spec else "n")
 			_ when type.begins_with(TOWN) and _town(type):
 				pass
+			_ when type.begins_with(CITY) and _city(type, true):
+				pass
 			_ when type.begins_with(LANDMARK) and _landmark(type):
 				pass
 			_ when GROWN in type and _grown(type):
@@ -586,8 +660,8 @@ static func skin(type: String) -> Array:
 ## The ramps over the module's stairs for the navmesh bake (BuildingGen.ramp_faces: triangles,
 ## m from the origin; a generated town's), empty for a type without stairs.
 static func ramps(type: String) -> PackedVector3Array:
-	if type.begins_with(TOWN) or GROWN in type or type.begins_with(LANDMARK):
-		boxes(type)  # builds the town (or grown module, or landmark) once
+	if type.begins_with(TOWN) or GROWN in type or type.begins_with(LANDMARK) or type.begins_with(CITY):
+		boxes(type)  # builds the town (or grown module, landmark or city block) once
 	return RAMPS.get(type, PackedVector3Array())
 
 
@@ -691,27 +765,68 @@ static func _outpost() -> Array:
 	return out
 
 
-## A village block: four houses in mixed materials (mud brick, cinder block with a sheet-metal
-## roof, a two-room brick house, a plank shack), with doors and windows, and a low stone yard
-## wall.
+## A village block: four houses in mixed materials where they always stood (mud brick, cinder
+## block, a two-room brick house, a plank shack: VILLAGE_HOUSES), a low stone yard wall, and a
+## weapons cache of crates in the shack. Queue item 1.6 (cghath, 2026-10-22: "replace the
+## hand-built village houses with generated ones in village style"): the houses are generated
+## (BuildingGen.village_house: rooms, furniture, windows, a look and skin of their own), each on
+## the hand-built one's ground with its front door where that one's was, so the village's layout,
+## garrison posts, loot, named points and mission sites are as they were; its furniture keeps off
+## them all (_village_keep).
+const VILLAGE_HOUSES := [
+	{"rect": Rect2(-18, -12, 6, 5), "style": "mud", "rooms": 1, "front": "s", "door": -15.0, "seed": 7101},
+	{"rect": Rect2(-2, -12, 6, 5), "style": "block", "rooms": 1, "front": "s", "door": 1.0, "seed": 7102},
+	{"rect": Rect2(9, -13, 8, 6), "style": "brick", "rooms": 2, "front": "s", "door": 11.0, "seed": 7103},
+	{"rect": Rect2(-16, 7, 5, 4), "style": "plank", "rooms": 1, "front": "e", "door": 9.0, "seed": 7104},
+]
+## Furniture keeps this far (m) off each spot that matters in a village (_village_keep), and off
+## these strips (module metres): the line through the shack's plank wall and the brick house's
+## front doorway that the world suite fires along, a man standing at its end.
+const VILLAGE_KEEP_M := 0.6
+const VILLAGE_KEEP_RECTS: Array[Rect2] = [Rect2(-13.1, 7.0, 1.2, 2.7), Rect2(10.3, -9.7, 1.4, 2.7), Rect2(14.3, -9.7, 1.4, 1.4)]
+
+
 static func _village() -> Array:
 	var out: Array = []
-	var M := VoxelWorld.Mat
-	_room(out, Vector2(-18, -12), Vector2(-12, -7), 2.6, 0.4, M.MUD_BRICK, [["s", -15.6, -14.4]], M.WOOD, 0.2,
-		[["w", -10.5, -9.5], ["e", -10.5, -9.5]])
-	_room(out, Vector2(-2, -12), Vector2(4, -7), 2.6, 0.2, M.CINDER_BLOCK, [["s", 0.4, 1.6]], M.SHEET_METAL, 0.1,
-		[["n", -0.5, 0.5], ["e", -10.5, -9.5]])
-	# The brick house: two rooms, a doorway between them.
-	_room(out, Vector2(9, -13), Vector2(17, -7), 2.8, 0.25, M.BRICK, [["s", 10.4, 11.6]], M.CONCRETE, 0.2,
-		[["n", 14.5, 15.5], ["e", -10.5, -9.5]])
-	out.append([Vector3(12.9, 0, -12.75), Vector3(13.1, 2.8, -10.6), M.BRICK])
-	out.append([Vector3(12.9, 0, -9.4), Vector3(13.1, 2.8, -7.25), M.BRICK])
-	out.append([Vector3(12.9, 2.1, -10.6), Vector3(13.1, 2.8, -9.4), M.BRICK])
-	_room(out, Vector2(-16, 7), Vector2(-11, 11), 2.3, 0.1, M.WOOD, [["e", 8.4, 9.6]], M.SHEET_METAL, 0.1,
-		[["n", -14.5, -13.5]])
-	out.append([Vector3(-9, 0, 1.8), Vector3(-3, 1.2, 2.2), M.STONE])
+	var dress: Array = []
+	var keep := _village_keep()
+	for spec: Dictionary in VILLAGE_HOUSES:
+		var h := BuildingGen.village_house(spec, keep)
+		out.append_array(h.boxes)
+		dress.append_array(h.skin)
+	var rest := out.size()
+	out.append([Vector3(-9, 0, 1.8), Vector3(-3, 1.2, 2.2), VoxelWorld.Mat.STONE])
 	# A weapons cache in the plank shack (a raid target): three crates against its back wall.
 	_crates(out, Vector3(-15.8, 0, 9.6))
+	_skins["village"] = dress + _dress("village", out.slice(rest))
+	return out
+
+
+## Where a village's furniture mustn't stand (Rect2s, module metres): VILLAGE_KEEP_M round its
+## garrison posts, loot, named points, its mission sites (data/contracts.json "village"), its site
+## boxes (data/loot_tables.json), and VILLAGE_KEEP_RECTS.
+static func _village_keep() -> Array:
+	var spots: Array[Vector2] = []
+	for p: Vector3 in GARRISON.village:
+		spots.append(Vector2(p.x, p.z))
+	for l: Dictionary in LOOT.village:
+		spots.append(Vector2((l.pos as Vector3).x, (l.pos as Vector3).z))
+	for kind: String in POINTS.village:
+		for p: Vector3 in POINTS.village[kind]:
+			spots.append(Vector2(p.x, p.z))
+	var out: Array = VILLAGE_KEEP_RECTS.duplicate()
+	for site: Variant in (MissionRegistry.data().get("modules", {}).get("village", {}).get("sites", {}) as Dictionary).values():
+		var s: Dictionary = site
+		if s.has("pos"):
+			spots.append(Vector2(float(s.pos[0]), float(s.pos[2])))
+		if s.has("box"):
+			var a := Vector2(float(s.box[0][0]), float(s.box[0][2]))
+			var c := Vector2(float(s.box[1][0]), float(s.box[1][2]))
+			out.append(Rect2(a, c - a).abs().grow(0.2))
+	for spot: Dictionary in WorldValuables.site_spec("village").get("spots", []):
+		spots.append(Vector2(float(spot.pos[0]), float(spot.pos[1])))
+	for p: Vector2 in spots:
+		out.append(Rect2(p - Vector2.ONE * VILLAGE_KEEP_M, Vector2.ONE * VILLAGE_KEEP_M * 2.0))
 	return out
 
 

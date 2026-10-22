@@ -93,8 +93,8 @@ suit it. Captain's side; see `docs/build_plan.md` ("Procedural buildings") for w
      floor, so upper floors and roofs are walkable but not garrisoned or cleared room by room;
      F-02, town garrison posts are all on the ground floor (Captain's side adds upper and
      rooftop posts to `BuildingGen.town` once F-01 lands).
-4. **City zones.** A dense-streets terrain preset made of towns, with what it takes to stream
-   that many buildings (budgets measured with the session log's performance lines).
+4. **City zones (built, cghath 2026-10-22, queue item 1.5: "City zones" below).** A city of
+   street-grid blocks, 2-8 storeys, streamed block by block; the Old Quarter is one.
 
 ## Looks and skin (world visual pass, cghath, 2026-10-20)
 
@@ -201,8 +201,77 @@ navmeshed and garrisoned like the rest, and placed in the zones their asset tags
   office: contracts.json "modules" for them), towns with landmark lots, a real control-tower cab
   (a third storey), the runway's markings and lights.
 
+## City zones (phase 4: queue item 1.5, cghath 2026-10-22)
+
+- **Any number of storeys.** `building(type, seed, style, ruin, {"storeys": n})` builds a type
+  with an `"upper"` spec n storeys high: a flight up from every floor to the next, each kept off
+  the stairwell coming up into its floor and its landing (`_stair`'s `keep`), the walls above on
+  the ones below, every floor's rooms its own roles and doorways, and a stair onto the roof. A
+  flight that fits nowhere tops the building out there (`"storeys"` says how many it got).
+  Buildings made without opts are as they were (checked against the old generator: 880
+  buildings, towns and sites the same). City stairs keep `CITY_STAIR_APPROACH` (1.0 m) clear in
+  front of their foot (0.5 m, eroded by the agent's radius, left the bake a strip one cell deep:
+  whether a stair joined the floor hung on where the bake's 0.25 m grid fell, and a zone's pads
+  stand at any height). Every stair's ramp for the navmesh (`ramp_faces`) now has a wedge up onto
+  it from the floor and one down off it (`RAMP_FACES` corners a stair).
+- **City types** (`CITY_TYPES`): an apartment block (flats on every floor), a tenement (a shop
+  under flats) and a tower (offices, the city's landmarks). Clinics, police stations, houses and
+  shops stand in cities too; one too small for its stairs gives way to flats, a lot too narrow
+  for stairs is left open.
+- **The street grid** (`city_layout(seed)`, cheap, no buildings): `CITY_BLOCKS` (5 x 4) blocks
+  `CITY_PITCH` (48 m: a multiple of 24, so every block's middle is on the zone's 12 m navigation
+  grid) apart, `CITY_STREET_W` (10 m) streets between and round them; the inner blocks are the
+  core, the ring the outskirts; `CITY_TOWERS` (2-3) core blocks hold a tower. Its `"streets"`
+  (centre lines with widths) and `"junctions"` are the grid's own data, for the roads to pave
+  (`ZoneModules.city_streets(def)` in zone metres; F-210).
+- **A block** (`city_block(seed, ix, iz)`): a perimeter block, rows of terraced buildings along
+  its four streets (`CITY_LOT_GAP` alleys between them, `CITY_OPEN_LOT` of lots left open), fronts
+  on the street, backs on a courtyard; storeys by `CITY_CORE_STOREYS` (3-5),
+  `CITY_OUTSKIRT_STOREYS` (2-3), `CITY_TOWER_STOREYS` (6-8); types by `CITY_MIX`; a district style
+  (`CITY_STYLES`); `CITY_RUINED` (12%) of its buildings ruined (never a tower); street barricades
+  and rubble in its half of the streets. What `town()` gives a town (garrison, loot, points,
+  civilians, fallback points, a weapons cache, an HVT's and a hostage's rooms), and its pad and
+  half streets.
+- **Garrisons hold the upper floors** (`_city_finish`, `CITY_POSTS`: 4 a core block, 2 an
+  outskirts block, a tower 2 more on its top floor and roof; `CITY_HIGH_SHARE` 70% up high): at
+  windows onto the street, the floor spread by building, then a back room upstairs, then inside
+  front doors. Every post stands clear with a little to spare (`_clear_margin`).
+- **Module types** (`ZoneModules`): `"city#<seed>#<ix>#<iz>"`, one block each, so a city streams
+  in block by block; `base()` is `"town"` (missions, people, callsigns and UrbanDefence take a
+  block as a town; one relief counterattack for the whole city, `city_of`). Every block's pad is
+  the whole city's rect (`PAD`: they flatten to one height), its half streets are painted on it
+  (`STREETS`). `has_type` enters its footprint, pad and streets only; its buildings are made the
+  first time its boxes are (a zone module's proxy).
+- **Urban hot zones** (`ZoneDef.generate_hot(..., urban = true)`): a city (`_place_city`) in
+  place of the 3-4 towns, its middle `URBAN_REACH_M` from the HQ and `URBAN_CITY_KEEP_M` clear of
+  the other sites, a road from the HQ to its ring street, a patrol round its inner streets, the
+  def's `"cities"`. The Old Quarter (`city_hot`) is one, on the `"city"` terrain preset (low
+  rolling ground, dusty verges, grey streets, few trees, more litter and ruins).
+- **Streaming and performance.** The zone's navmesh bakes up to the tallest module on a chunk
+  (`ZoneNav._bounds_of`: a city's upper floors and roofs; it stopped 8 m over the ground). A
+  whole city streamed in passed Jolt's 10 240 bodies (each voxel mesh block's collision is one):
+  `physics/jolt_physics_3d/limits/max_bodies` is 32 768. A block is generated in 30-230 ms (zone
+  load: about 2 s for the city). The `city` suite walks into the Old Quarter at a run and times
+  every frame while its blocks stream in (budgets in tests/city_test.gd, Proposed); the AI's
+  building scans near tall buildings are the long frames (F-211). Godot's path search stops at
+  4096 navmesh polygons, short of a tower's top floors from the street (F-213): the navmesh joins
+  them, the suite checks it with a wider search.
+- **Checks**: tests/city_test.gd (suite `city`). **Pictures**: tests/city_shots.tscn (headless,
+  its own drawing of the boxes: the whole city, a tower block, an outskirts block, the village).
+
+## Village houses (queue item 1.6, cghath 2026-10-22)
+
+The village's four hand-built houses are generated (`BuildingGen.village_house`,
+`ZoneModules.VILLAGE_HOUSES`) in village style where they stood: a mud-brick house, a cinder-block
+house, a two-room brick house and a plank shack (`VILLAGE_STYLES` "plank": kept out of `STYLES` so
+every other building's style pick is as it was), each on its old ground, its front door on the
+same side at the same place, single storey, no yard, no roof stair. Rooms, furniture, windows,
+a look and a skin of their own; the furniture keeps off the village's garrison posts, loot, named
+points, mission sites (contracts.json "village"), site boxes (loot_tables.json) and the world
+suite's firing lines (`_village_keep`). The stone yard wall and the shack's weapons cache stay.
+
 ## Open (Captain)
 
-- Replace the village's hand-built houses with generated ones after phase 1, or keep both.
 - Which building types matter most for missions.
-- How tall buildings get in cities.
+- Towns' and landmarks' stairs keep a 0.5 m approach (F-212): moving them changes those
+  buildings (saved damage), so it's left for a call.

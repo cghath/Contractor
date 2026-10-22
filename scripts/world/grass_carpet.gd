@@ -127,6 +127,8 @@ func _tuft(x: float, z: float, h1: float, keep: Array[Rect2], roads: Array) -> V
 func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
 	if _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true
+	if _terrain.features and _terrain.features.keeps_clear(x, z):
+		return true  # a field (ZoneFeatures)
 	var p := Vector2(x, z)
 	for r in keep:
 		if r.has_point(p):

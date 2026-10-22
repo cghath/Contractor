@@ -48,3 +48,4 @@ window/size/viewport_height=900
 
 3d/physics_engine="Jolt Physics"
 common/physics_ticks_per_second=60
+jolt_physics_3d/limits/max_bodies=32768
