@@ -786,8 +786,10 @@ blocks, and there's an in-fight phase profiler.
 - *Arma 3*: dynamic simulation, and ALiVE's profile virtualization.
 - *DayZ*: persistent server-side world.
 
-**Standing.** On par with Arma's dynamic sim. ALiVE-style virtualization is designed
-(`docs/virtualization.md`) but not built.
+**Standing.** On par with Arma's dynamic sim, and ALiVE-style virtualization is built
+(`docs/virtualization.md`, 2026-10-18): far enemies become profiles that move, fight and garrison
+off-screen, and come back as men out of sight. Dynamic sim stays for what isn't virtualized
+(vehicle crews, bombers, the rival PMC team and scenario waves).
 
 ---
 
