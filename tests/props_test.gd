@@ -158,6 +158,11 @@ func _test_zones() -> void:
 	var pylons := 0
 	var farms := 0
 	var animals := 0
+	var watered := 0
+	var wet := 0
+	var wet_at := ""
+	var landmarks := 0
+	var on_landmark := 0
 	ZoneScatter.clear_cache(true)  # (this code's layouts, not ones cached on disk by an older build)
 	for z: Dictionary in MissionRegistry.zones():
 		var def := MissionRegistry.zone_def(String(z.zone_id))
@@ -179,9 +184,23 @@ func _test_zones() -> void:
 		pylons += int(r.get("pylons", 0))
 		farms += int(r.get("farms", 0))
 		animals += int(r.get("animals", 0))
+		var landmark_pads: Array[Rect2] = []
+		for i in mini((def.modules as Array).size(), t.pads.size()):
+			if String(def.modules[i].type).begins_with(ZoneModules.LANDMARK):
+				landmark_pads.append(t.pads[i][0])
+		landmarks += landmark_pads.size()
+		if t.water:
+			watered += 1
 		for item: Dictionary in s.items:
 			if item.has("shape"):
 				used[String(item.shape)] = true
+				var p := Vector2((item.pos as Vector3).x, (item.pos as Vector3).z)
+				if t.water and t.water.keeps_clear(p.x, p.y):
+					wet += 1
+					wet_at = "%s %s at %s" % [z.zone_id, item.shape, p]
+				for pad: Rect2 in landmark_pads:
+					if pad.has_point(p):
+						on_landmark += 1
 		s.free()
 		t.free()
 	check(total >= PROPS_BEFORE * 3, "the props tripled: %d over the campaign's zones (%d before), %d of them the library's" % [total, PROPS_BEFORE, library])
@@ -189,6 +208,8 @@ func _test_zones() -> void:
 	check(unused.is_empty(), "every prop type is laid somewhere in the campaign (%d of %d)%s" % [used.size(), PropArt.NAMES.size(), "" if unused.is_empty() else ": never %s" % [unused]])
 	check(towns > 0 and town_props >= towns * 20 and pylons >= 100 and farms >= 10 and animals >= 50,
 		"towns get their streets furnished (%d towns, %d props), the countryside pylons (%d) and farms (%d), %d animals; styles %s" % [towns, town_props, pylons, farms, animals, styles.keys()])
+	check(watered > 0 and wet == 0, "no prop in a river, a lake, on a wet bank or a bridge (%d zones with water, %d in it%s)" % [watered, wet, "" if wet == 0 else ": %s" % wet_at])
+	check(landmarks > 0 and on_landmark == 0, "no library prop on a landmark's pad: it builds its own (%d landmarks, %d on one)" % [landmarks, on_landmark])
 	check(worst_ms <= BUDGET_LAYOUT_MS, "the library's layout takes at most %.0f ms a zone (%s; Proposed budget %.0f)" % [worst_ms, worst_zone, BUDGET_LAYOUT_MS])
 	# Same seed, same props; from the disk cache too; another seed others.
 	var def := MissionRegistry.zone_def(ZONE)
@@ -221,10 +242,7 @@ func _test_zones() -> void:
 func _terrain_of(def: Dictionary) -> ZoneTerrain:
 	var flat: Array = []
 	for m: Dictionary in def.modules:
-		ZoneModules.has_type(String(m.type))
-		var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
-		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
-		flat.append(Rect2(p - half, half * 2.0))
+		flat.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))  # (as ZoneLevel._flat_areas)
 	for p: Array in def.get("extraction", []):
 		flat.append(Rect2(float(p[0]) - 12.0, float(p[1]) - 12.0, 24.0, 24.0))
 	for p: Array in def.get("insertion", []):
@@ -289,7 +307,17 @@ func _test_placement() -> void:
 					on_road += 1
 		if int(item.get("link", 0)) == 1:
 			links += 1
-			if (item.pos as Vector3).distance_to(s.items[i - 1].pos) > ZoneProps.PYLON_STEP_M * ZoneProps.LINK_STEPS + 2.0 or not s.items[i - 1].has("shape"):
+			var span := (item.pos as Vector3).distance_to(s.items[i - 1].pos)
+			var most := ZoneProps.PYLON_STEP_M * ZoneProps.LINK_STEPS + 2.0
+			if span > most and span <= most * 2.0 and level.terrain.water:  # over a river: one footing skipped
+				var q: Vector3 = s.items[i - 1].pos
+				var over := false
+				for k in range(1, 40):
+					var w := q.lerp(item.pos, k / 40.0)
+					over = over or level.terrain.water.keeps_clear(w.x, w.z)
+				if over:
+					most *= 2.0
+			if span > most or not s.items[i - 1].has("shape"):
 				long_links += 1
 		if String(item.shape) in ["container_20", "container_40", "container_stack", "generator"]:
 			for m in level.modules():

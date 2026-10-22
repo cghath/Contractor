@@ -12,7 +12,7 @@ static var _mixed := {}  # "mix#<seed>" -> its blended preset
 ## Procedural terrains (Captain, 2026-10-17: "maybe extra procedural terrains too"): "mix#<seed>"
 ## blends two presets of MIX_FROM, picked by the seed, at MIX_T [min, max] of the way from the
 ## first to the second: numbers and colours in "land", "palette", "ground" and "scatter" lerp,
-## a key only one has comes from it; "sea" and "wadi" come whole from the nearer of the two. A
+## a key only one has comes from it; "sea", "wadi" and "water" come whole from the nearer of the two. A
 ## zone def with "terrain": "procedural" gets "mix#<its seed>" (choose).
 const MIX := "mix#"
 const PROCEDURAL := "procedural"
@@ -65,7 +65,7 @@ static func _mix(id: String) -> Dictionary:
 		if a.has(key) or b.has(key):
 			out[key] = _blend(a.get(key, {}), b.get(key, {}), t)
 	var near: Dictionary = a if t < 0.5 else b
-	for key: String in ["sea", "wadi"]:
+	for key: String in ["sea", "wadi", "water"]:
 		if near.has(key):
 			out[key] = (near[key] as Dictionary).duplicate(true)
 	_mixed[id] = out

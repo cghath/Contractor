@@ -71,9 +71,7 @@ func _zone(preset: String, seed_value: int) -> void:
 	def["roads"] = roads
 	var flat: Array = []
 	for m: Dictionary in def.modules:
-		ZoneModules.has_type(String(m.type))
-		var half: Vector2 = ZoneModules.HALF.get(String(m.type), Vector2(20, 20))
-		flat.append(Rect2(Vector2(float(m.pos[0]), float(m.pos[1])) - half, half * 2.0))
+		flat.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))  # (as ZoneLevel._flat_areas)
 	for p: Array in def.extraction:
 		flat.append(Rect2(float(p[0]) - 12.0, float(p[1]) - 12.0, 24.0, 24.0))
 	for p: Array in def.insertion:

@@ -141,7 +141,7 @@ const FAR_GROUP_M := 24.0
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
 ## 11: every tree solid (2026-10-18).
-const LAYOUT_VERSION := 12  # 12: the prop library (ZoneProps, 2026-10-21), old caches re-roll
+const LAYOUT_VERSION := 13  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4
@@ -1004,6 +1004,8 @@ func _colours(hexes: Array) -> Array[Color]:
 
 
 func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
+	if _terrain and _terrain.water and _terrain.water.keeps_clear(x, z):
+		return true  # a river, lake or bridge (ZoneWater)
 	var p := Vector2(x, z)
 	for r in keep:
 		if r.has_point(p):
@@ -1936,6 +1938,8 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.
 func _ground_blocked(x: float, z: float) -> bool:
+	if _terrain.water and _terrain.water.keeps_clear(x, z):
+		return true  # a river, lake or bridge (ZoneWater)
 	var p := Vector2(x, z)
 	for r in _keep:
 		if r.grow(-PAD_KEEP_M + 2.0).has_point(p):

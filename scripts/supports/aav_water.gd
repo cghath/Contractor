@@ -44,8 +44,8 @@ const AFLOAT_M := 0.7
 static func water_height(v: Node3D, x: float, z: float) -> float:
 	var lvl: Node = v.call(&"level") if v.has_method(&"level") else null
 	var terrain: Variant = lvl.get(&"terrain") if lvl else null
-	if terrain is ZoneTerrain and (terrain as ZoneTerrain).has_coast():
-		return (terrain as ZoneTerrain).water_height(x, z)
+	if terrain is ZoneTerrain and ((terrain as ZoneTerrain).has_coast() or (terrain as ZoneTerrain).water != null):
+		return (terrain as ZoneTerrain).water_height(x, z)  # the sea, and rivers and lakes (ZoneWater: a deep one floods a truck)
 	return -INF
 
 

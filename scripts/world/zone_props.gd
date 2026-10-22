@@ -92,6 +92,7 @@ var _lines: Array = []  # street_lines()
 var _allow: Variant = null  # the town pad a street prop may stand on (Rect2), or null
 var _farms: Array[Vector2] = []
 var _open := false  # the preset has an open middle (ZoneScatter._open_weight: a salt pan)
+var _why := ""  # why the last prop didn't fit (_reject)
 
 
 static func _load() -> void:
@@ -138,6 +139,9 @@ func lay_out(s: ZoneScatter, t: ZoneTerrain, d: Dictionary) -> void:
 		_modules.append({"type": type, "base": ZoneModules.base(type), "centre": c, "half": half,
 			"pad": t.pads[i][0] if i < t.pads.size() else Rect2(c - half, half * 2.0).grow(ZoneTerrain.PAD_MARGIN_M),
 			"y": t.height_at(c.x, c.y)})
+	for m: Dictionary in _modules:
+		if String(m.type).begins_with(ZoneModules.LANDMARK) and m.base == "farm":
+			_farms.append(m.centre)  # a landmark farm (BuildingGen.site): the countryside's keep FARM_GAP_M from it
 	_lines = street_lines()
 	_open = float(s._spec.get("margin_m", 0.0)) > 0.0
 	for m: Dictionary in _modules:
@@ -271,6 +275,8 @@ func _fits(shape: String, foot: Array, opts: Dictionary) -> bool:
 			return _reject(shape, "edge")
 		if _open and scatter._open_weight(p.x, p.y) <= 0.0:
 			return _reject(shape, "open")  # (a salt pan's open middle stays bare, as for the rest of the scatter)
+		if terrain.water and terrain.water.keeps_clear(p.x, p.y):
+			return _reject(shape, "water")  # a river, lake, wet bank or bridge (ZoneWater), as for the rest of the scatter
 	if not bool(opts.get("free", false)) and _occupied(foot):
 		return _reject(shape, "taken")
 	var c: Vector2 = foot[0]
@@ -298,6 +304,7 @@ func _fits(shape: String, foot: Array, opts: Dictionary) -> bool:
 
 ## Counts why `shape` didn't fit (rejected: {shape: {reason: count}}, for tests and tuning); false.
 func _reject(shape: String, why: String) -> bool:
+	_why = why
 	if not rejected.has(shape):
 		rejected[shape] = {}
 	rejected[shape][why] = int(rejected[shape].get(why, 0)) + 1
@@ -432,18 +439,23 @@ func line(shape: String, a: Vector2, b: Vector2, step: float, poles := false, ga
 	var yaw := atan2(d.x, d.y) if poles else atan2(-d.y, d.x)
 	var n := maxi(int(length / step), 1)
 	var last := -1
+	var wet := -1  # the last step that fell in water (the wires span a river: one step over)
 	var done := 0
 	for k in n:
 		var t := (k + 0.5) * length / n if not poles else k * length / maxf(n - 1, 1)
 		var what := gate if gate != "" and gate_every > 0 and k % gate_every == gate_every / 2 else shape
+		var placed := false
 		for off: float in shift:
 			var p := a + d * t + side * off
 			var o := opts.duplicate()
-			o["link"] = poles and last >= 0 and k - last <= 1 and absf(off) < step * 0.5
+			o["link"] = poles and last >= 0 and (k - last <= 1 or (k - last == 2 and wet == k - 1)) and absf(off) < step * 0.5
 			if place(what, p.x, p.y, yaw, o):
 				last = k
 				done += 1
+				placed = true
 				break
+		if not placed and _why == "water":
+			wet = k
 	return done
 
 
@@ -603,6 +615,8 @@ func _town(m: Dictionary) -> void:
 ## site, the rest turned any way; a checkpoint's barriers and signs along its road; a village's or
 ## town's dogs, pen, well and parked cars round it.
 func _site(m: Dictionary) -> void:
+	if String(m.type).begins_with(ZoneModules.LANDMARK):
+		return  # a landmark site builds its own props (BuildingGen.site); its pad keeps ours off
 	var base: String = m.base
 	var kit: Array = (_data.get("sites", {}) as Dictionary).get(base, [])
 	var pad: Rect2 = m.pad
@@ -880,6 +894,8 @@ func _farm_site(p: Vector2) -> bool:
 			var h := terrain.height_at(p.x + dx, p.y + dz)
 			if terrain.sea_side >= 0 and h < terrain.sea_level + 0.5:
 				return false
+			if terrain.water and terrain.water.keeps_clear(p.x + dx, p.y + dz):
+				return false  # (a river, a lake or its wet bank: ZoneWater)
 			lo = minf(lo, h)
 			hi = maxf(hi, h)
 	return hi - lo < 2.2 and terrain.normal_at(p.x, p.y).y > 0.95
