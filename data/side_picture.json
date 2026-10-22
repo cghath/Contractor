@@ -1,0 +1,46 @@
+{
+	"_about": "B1 of docs/combined_arms.md (3.2 the picture, 3.3 the group board, 4.4 shared spot reports). Read by SidePicture, GroupBoard and SideIntel. Every number Proposed (2026-10-22); the ones the doc left open are in its section 10, calls 74-85.",
+	"latency_s": {
+		"_about": "Radio delay from a sighting to the side's picture: slow (skill 0) to fast (skill 1) by the reporting leader's skill (insurgents: by discipline, as Alert). issued: the side's groups carry a radio set without one in their kit.",
+		"regular": {"slow": 8.0, "fast": 3.0, "issued": true},
+		"concord": {"slow": 20.0, "fast": 8.0, "issued": true},
+		"irregular": {"slow": 45.0, "fast": 15.0, "issued": false},
+		"insurgent": {"slow": 60.0, "fast": 15.0, "issued": false, "under_fire_mult": 1.5},
+		"player": {"slow": 3.0, "fast": 3.0, "issued": true}
+	},
+	"comms_down_mult": 3.0,
+	"faction_profile": {
+		"_about": "Faction (factions.json id, or a Soldier/Squad faction) to its latency profile. Anything not listed: insurgent.",
+		"friendly": "regular", "player": "regular", "meridian": "regular", "us_forces": "regular", "uk_forces": "regular", "ca_forces": "regular",
+		"eastern_concord": "concord", "vantage_group": "concord",
+		"black_ridge": "irregular", "saltline": "irregular", "kestrel": "irregular", "salvage_union": "irregular",
+		"ashen_banner": "insurgent", "valley_shura": "insurgent", "highland_front": "insurgent", "hostile": "insurgent"
+	},
+	"shout_m": 80.0,
+	"merge_m": {"infantry": 25.0, "vehicle": 60.0},
+	"merge_window_s": 60.0,
+	"uncertainty_mps": {"infantry": 1.5, "vehicle": 5.0},
+	"uncertainty_max_m": 600.0,
+	"base_uncertainty_m": {"seen": 5.0, "heard": 40.0, "tag": 2.0, "report": 10.0, "lase": 1.0, "noise": 80.0},
+	"drop_s": {"infantry": 600.0, "vehicle": 900.0},
+	"bands_s": {"fresh": 30.0, "aged": 180.0},
+	"report_every_s": 30.0,
+	"sitrep_s": 30.0,
+	"feed_s": 1.0,
+	"hash_m": 64.0,
+	"max_entries": 64,
+	"max_log": 512,
+	"log_keep_s": 900.0,
+	"world": {"diamond_range_m": 800.0, "see_self_m": 150.0, "check_hz": 4.0},
+	"board": {
+		"_about": "GroupBoard (3.3): CP keeps EnemyCommand's scale (1 per man x skill x armour), vehicles and AT power as the doc's table; CE bands GREEN/AMBER/RED.",
+		"man_cp": 1.0, "armour_mult": 1.5, "skill_floor": 0.3,
+		"vehicle_cp": {"soft_vehicle": 4.0, "light_armour": 4.0, "ifv": 8.0, "mbt": 16.0, "static_gun": 2.0, "mortar": 1.0, "air": 8.0},
+		"vehicle_at_cp": {"ifv_atgm": 4.0, "mbt": 6.0},
+		"launcher_at_cp": {"guided": 3.0, "default": 1.0},
+		"ce": {"up": 0.5, "ammo": 0.25, "morale": 0.25, "urgent": 0.1, "green": 0.7, "amber": 0.45},
+		"vehicle_ce": {"crew": 0.4, "mobility": 0.2, "firepower": 0.2, "ammo": 0.2},
+		"ammo_full_mags": 6.0,
+		"ammo_bands": {"amber": 0.5, "red": 0.25}
+	}
+}

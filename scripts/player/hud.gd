@@ -165,6 +165,7 @@ func _ready() -> void:
 	add_child(armor_readout)
 	compass = Compass.new(player)  # the bearing strip, top-centre
 	add_child(compass)
+	add_child(SpotDiamonds.new(player))  # the side's spot reports over the world (combined_arms 4.4)
 	_message = _add(_wrapping(UiKit.hud_label())) as Label
 	# The map (M) and the briefing, over everything else (W13).
 	_bleed = BleedSilhouette.new(player)

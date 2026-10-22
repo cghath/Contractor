@@ -58,7 +58,8 @@ const DEFAULTS := {
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
 	"controls": {"mouse_sensitivity": 1.0, "aim_sensitivity": 0.75, "invert_y": false},
 	# The HUD layout (HudLayout, ui-modern): each part's size and opacity.
-	"hud": {"objective_markers": true, "objectives_expanded": true,
+	# spot_diamonds: the side's spot reports as diamonds in the world (combined_arms 4.4, B1).
+	"hud": {"objective_markers": true, "objectives_expanded": true, "spot_diamonds": true, "spot_diamond_range_m": 800.0,
 		"objectives_scale": 1.0, "objectives_opacity": 1.0, "compass_scale": 1.0, "compass_opacity": 1.0,
 		"squad_scale": 1.0, "squad_opacity": 1.0, "radio_scale": 1.0, "radio_opacity": 1.0,
 		"weapon_scale": 1.0, "weapon_opacity": 1.0, "wounds_scale": 1.0, "wounds_opacity": 1.0,
@@ -76,6 +77,7 @@ const RANGES := {
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 	"stick_sensitivity": [0.2, 3.0, 0.05], "stick_deadzone": [0.0, 0.5, 0.01], "stick_curve": [1.0, 3.0, 0.1],
+	"spot_diamond_range_m": [100.0, 1500.0, 50.0],
 }
 ## The UI scale (docs/ui_audit.md P1-7, "no automatic UI scale": on 1440p and 4K every screen
 ## was laid out for 1600x900 and its text was physically tiny). The window height over
