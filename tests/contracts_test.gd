@@ -54,6 +54,7 @@ func _ready() -> void:
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
+	_test_us_war()
 	_test_faction_followups()
 	_test_debrief_totals()
 	_test_civilians_void()
@@ -644,7 +645,7 @@ func _test_world_sites() -> void:
 	var zid := "pass_hot"
 	var h1 := WorldSites.holder(zid)
 	check(h1 == "kestrel" and WorldSites.holder(zid) == h1, "a zone's holder is seeded from its data and stays stable (%s)" % h1)
-	check(WorldSites.war_zones().size() == 27 and WorldSites.holder("dry_wadi") == "valley_shura" and WorldSites.holder("greyfell_moor") == "highland_front",
+	check(WorldSites.war_zones().size() == 28 and WorldSites.holder("dry_wadi") == "valley_shura" and WorldSites.holder("greyfell_moor") == "highland_front",
 		"every zone is in the war, each held by its group (%d zones)" % WorldSites.war_zones().size())
 	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a fresh site starts at full grip (%.2f)" % WorldSites.grip(zid))
 	WorldSites.server_contract_won(zid, "nobody_holds_this")
@@ -753,6 +754,178 @@ func _test_world_sites() -> void:
 	check(in_war > 0 and float(on_holder) / in_war >= 0.55, "most contracts are against the zone's holder (%d of %d)" % [on_holder, in_war])
 	Campaign.section(WorldSites.SECTION).clear()
 	Campaign.section(WorldSites.WAR).clear()
+
+
+## D7 (docs/combined_arms.md 7.3): US forces in the living war. FOB Halberd is the US's from day 1
+## and never falls; the US fights the Ashen Banner first (its fronts from day 3, outside the
+## factions' cap), the same war every time; a US front posts its operation (and Vessmark's beside
+## it) to a trusted company, once, waits on it, and the result moves the front; UsField plans
+## garrisons, patrols and convoys from the war; once the company wipes the Banner out the US turns
+## on the Kestrel Cartel, and its war ends with Kestrel's; Vessmark is never a random employer.
+func _test_us_war() -> void:
+	print("US forces in the living war (D7)")
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	Campaign.section(ZoneControl.SECTION).clear()
+	var board_s := Campaign.section(Contracts.SECTION)
+	board_s["board"] = (board_s.get("board", []) as Array).filter(func(c: Dictionary) -> bool: return not c.has("op_front"))
+	_set_rep("us_forces", 0)
+	_set_rep("vessmark", 0)
+	# Who's in it, and FOB Halberd on the map.
+	var bell := WorldSites.belligerents()
+	check(bell.size() == 1 and bell[0] == "us_forces" and "us_forces" in WorldSites.warring() and WorldSites.war_target("us_forces") == "ashen_banner"
+		and is_equal_approx(WorldSites.strength("us_forces"), 70.0), "the US is a belligerent at war with the Ashen Banner, strength 70 (%s, %.0f)" % [WorldSites.warring(), WorldSites.strength("us_forces")])
+	var links := RegionMap.links("fob_halberd")
+	check(WorldSites.holder("fob_halberd") == "us_forces" and WorldSites.cant_fall("fob_halberd") and links.size() == 1 and String(links[0].to) == "cove_outpost"
+		and ZoneControl.side("fob_halberd") == "allied" and RegionMap.layout()["landing_beach"] == Vector2i(0, 1),
+		"FOB Halberd: held by the US, can't fall, beside Cove outpost, green on the map, nothing else moved (%s)" % [links])
+	var halberd_row: Dictionary = Theatre.zones()["fob_halberd"]
+	check(String(halberd_row.controller) == "us_forces" and String((halberd_row.symbol as Dictionary).get("glyph", "")) == "stripes",
+		"the theatre map shows Halberd as the US's, with its flag")
+	var offers := ContractGen.generate_board(4321, 1, {"meridian": 10}, 200)
+	check(not offers.any(func(o: Dictionary) -> bool: return String(o.employer) == "vessmark") and not offers.any(func(o: Dictionary) -> bool: return String(o.zone_id) == "fob_halberd"),
+		"Vessmark never posts ordinary work, and nothing is offered inside FOB Halberd")
+	# A deterministic war with the US in it.
+	var snap_sites: Dictionary = Campaign.section(WorldSites.SECTION).duplicate(true)
+	var snap_war: Dictionary = Campaign.section(WorldSites.WAR).duplicate(true)
+	WorldSites.server_advance_days(30)
+	var first := WorldSites.war_view()
+	_restore_section(WorldSites.SECTION, snap_sites)
+	_restore_section(WorldSites.WAR, snap_war)
+	WorldSites.server_advance_days(30)
+	var again := WorldSites.war_view()
+	var us_news: Array = (first.news as Array).filter(func(n: Dictionary) -> bool: return String(n.text).begins_with("US forces"))
+	check(JSON.stringify(first.zones) == JSON.stringify(again.zones) and JSON.stringify(first.news) == JSON.stringify(again.news) and JSON.stringify(first.strength) == JSON.stringify(again.strength),
+		"the war with the US in it is deterministic: the same 30 days twice, the same war")
+	check(String(first.zones.fob_halberd.holder) == "us_forces" and String((first.targets as Dictionary).get("us_forces", "")) == "ashen_banner",
+		"a month on, Halberd is still the US's and the US still fights the Banner")
+	var us_zones := (first.zones as Dictionary).keys().filter(func(z: String) -> bool: return String(first.zones[z].holder) == "us_forces")
+	check(not us_news.is_empty() or us_zones.size() > 1, "the US makes the news or gains ground in a month (%d lines, %s)" % [us_news.size(), us_zones])
+	print("  US news: %s" % " | ".join(PackedStringArray(us_news.map(func(n: Dictionary) -> String: return "day %d: %s" % [int(n.day), String(n.text)]))))
+	# No US front before day 3; one on Cove outpost (the Banner's, next to Halberd) once it may.
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	var st: Dictionary = WorldSites._war().strength
+	for f: String in MissionRegistry.enemies():
+		st[f] = 10.0  # nobody else opens a front
+	WorldSites._tick_day()
+	WorldSites._tick_day()
+	check(not WorldSites.fronts().any(func(z: String) -> bool: return String(WorldSites.front(z).by) == "us_forces"), "no US front before day 3")
+	for i in 12:
+		WorldSites._tick_day()
+		if String(WorldSites.front("cove_outpost").get("by", "")) == "us_forces":
+			break
+	check(String(WorldSites.front("cove_outpost").get("by", "")) == "us_forces", "from day 3 the US attacks the Banner's zone next to Halberd (day %d)" % int(WorldSites._war().day))
+	var opened := (WorldSites.news() as Array).filter(func(n: Dictionary) -> bool: return String(n.kind) == "front" and String(n.text).begins_with("US forces open an offensive on Cove outpost"))
+	check(not opened.is_empty(), "the news says so: %s" % (String(opened[0].text) if not opened.is_empty() else "nothing"))
+	# The US front's operation: posted to a trusted company once, the front waits on it, its result flips the zone.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	check(Contracts.operation_offers(rng, Economy.day(), []).is_empty(), "no operation for a company the US doesn't trust yet")
+	_set_rep("us_forces", 35)
+	_set_rep("vessmark", 35)
+	Contracts.server_refresh_board()
+	var ops: Array = (Campaign.section(Contracts.SECTION).board as Array).filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == "cove_outpost")
+	var us_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "us_forces")
+	var vm_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "vessmark")
+	check(us_op.size() == 1 and vm_op.size() == 1 and String(us_op[0].target) == "ashen_banner" and String(us_op[0].title).begins_with("Joint operation: ")
+		and String(vm_op[0].title).begins_with("Vessmark operation: ") and String(vm_op[0].op_side) == "us_forces" and bool(us_op[0].operation)
+		and int(us_op[0].expires_day) == Economy.day() + Contracts.OP_OFFER_DAYS and String(us_op[0].type) in ["raid", "sabotage", "hvt_capture"],
+		"a trusted company gets the US front's operation, and Vessmark's beside it (%s)" % [ops.map(func(c: Dictionary) -> String: return "%s [%s]" % [c.title, c.employer])])
+	Contracts.server_refresh_board()
+	check((Campaign.section(Contracts.SECTION).board as Array).filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == "cove_outpost").size() == 2,
+		"once per front: the next refresh doesn't post it again")
+	var f0 := float(WorldSites.front("cove_outpost").progress)
+	var since0 := int(WorldSites.front("cove_outpost").since)
+	WorldSites._tick_day()
+	check(is_equal_approx(float(WorldSites.front("cove_outpost").progress), f0) and int(WorldSites.front("cove_outpost").since) == since0 + 1,
+		"while its operation is on the board the front waits (%.2f)" % float(WorldSites.front("cove_outpost").progress))
+	var us_before := WorldSites.strength("us_forces")
+	var banner_before := WorldSites.strength("ashen_banner")
+	WorldSites.server_operation_ended(us_op[0], 1)
+	check(WorldSites.holder("cove_outpost") == "us_forces" and is_equal_approx(WorldSites.grip("cove_outpost"), WorldSites.OP_WIN_GRIP)
+		and not WorldSites.is_flashpoint("cove_outpost") and WorldSites.strength("us_forces") > us_before and WorldSites.strength("ashen_banner") < banner_before,
+		"the operation carried: Cove outpost is the US's at grip %.2f, the US up and the Banner down" % WorldSites.grip("cove_outpost"))
+	_set_rep("us_forces", 0)
+	_set_rep("vessmark", 0)
+	board_s["board"] = (board_s.board as Array).filter(func(c: Dictionary) -> bool: return not c.has("op_front"))
+	# UsField's plan follows the war.
+	var cove := UsField.plan("cove_outpost")
+	var base := UsField.plan("fob_halberd")
+	check(bool(cove.held) and bool(cove.patrol) and cove.convoy == ["fob_halberd", ""] and UsField.remnants("cove_outpost") == "ashen_banner"
+		and bool(base.base) and (base.convoy as Array).is_empty() and UsField.plan("ridge_hot").is_empty(),
+		"the field: a garrison, a patrol and convoys from Halberd in Cove outpost, the Banner's last men at its other sites; nothing far from US ground (%s)" % [cove])
+	var harbour := UsField.plan("harbour_yard")
+	check(not harbour.is_empty() and not bool(harbour.held) and bool(harbour.patrol) and String(harbour.from) == "cove_outpost" and String(harbour.armour) == "",
+		"next door to US ground, a US patrol comes over from it (%s)" % [harbour])
+	check(UsField.models("us_forces", "patrol") == ["matv", "maxxpro"] and UsField.models("us_forces", "convoy").size() >= 2,
+		"US patrols ride an M-ATV and a MaxxPro; convoys roll several vehicles")
+	# A failed operation costs the US; half the phases move its front.
+	var beach := WorldSites.site("landing_beach")
+	var g0 := WorldSites.grip("landing_beach")
+	var s0 := WorldSites.strength("us_forces")
+	WorldSites.server_operation_ended({"employer": "us_forces", "target": "ashen_banner", "op_front": "landing_beach", "op_phases": 4}, 1)
+	check(WorldSites.holder("landing_beach") == "ashen_banner" and is_equal_approx(WorldSites.strength("us_forces"), s0 - WorldSites.OP_FAIL_STRENGTH)
+		and WorldSites.grip("landing_beach") > g0 - 0.001, "a failed operation: the Banner holds, the US pays for it")
+	WorldSites.server_operation_ended({"employer": "vessmark", "op_side": "us_forces", "target": "ashen_banner", "op_front": "landing_beach", "op_phases": 4}, 2)
+	check(String(WorldSites.front("landing_beach").get("by", "")) == "us_forces" and float(WorldSites.front("landing_beach").progress) >= 0.5 and WorldSites.holder("landing_beach") == "ashen_banner",
+		"a Vessmark operation half done moves the US's front there half way (%.2f)" % float(WorldSites.front("landing_beach").get("progress", 0.0)))
+	beach.erase("front")
+	# FOB Halberd never falls, whatever else the US holds.
+	st["ashen_banner"] = 100.0
+	st["us_forces"] = 2.0
+	var held_before := WorldSites.zones_of("us_forces").size()
+	var halberd := WorldSites.site("fob_halberd")
+	halberd.grip = 0.02
+	halberd["front"] = {"by": "ashen_banner", "since": int(WorldSites._war().day), "progress": 0.99}
+	for i in 3:
+		WorldSites._tick_day()
+		if WorldSites.front("fob_halberd").is_empty():
+			halberd["front"] = {"by": "ashen_banner", "since": int(WorldSites._war().day), "progress": 0.99}
+	check(held_before >= 2 and WorldSites.holder("fob_halberd") == "us_forces" and bool(WorldSites.front("fob_halberd").get("sieged", false)),
+		"FOB Halberd is sieged but never falls, with the US holding more than it (%d zones)" % held_before)
+	halberd.erase("front")
+	# The Banner wiped out by the company: the US turns on Kestrel; Kestrel wiped too, its war is over.
+	WorldSites.site("city_hot").holder = "ashen_banner"
+	for z in WorldSites.zones_of("ashen_banner"):
+		if z != "city_hot":
+			WorldSites.site(z).holder = "black_ridge"
+	for leader: String in MissionRegistry.faction("ashen_banner").leaders:
+		WorldSites.server_leader_down("ashen_banner", leader)
+	check(WorldSites.server_company_takes("city_hot") and WorldSites.is_wiped("ashen_banner") and WorldSites.war_target("us_forces") == "kestrel",
+		"the company wipes the Banner out: the US's war target is now the Kestrel Cartel")
+	var turned := (WorldSites.news() as Array).filter(func(n: Dictionary) -> bool: return String(n.kind) == "war_target")
+	check(not turned.is_empty() and String(turned.back().text) == "With the Banner broken, US forces turn on the Kestrel Cartel's routes.",
+		"the news: %s" % (String(turned.back().text) if not turned.is_empty() else "nothing"))
+	WorldSites.site("thornveld").holder = "us_forces"  # next to Kestrel Valley
+	WorldSites.site("kestrel_valley").holder = "kestrel"
+	st["us_forces"] = 90.0
+	for z in WorldSites.fronts():
+		WorldSites.site(z).erase("front")
+	var us_fronts: Array = []
+	for i in 12:
+		WorldSites._tick_day()
+		us_fronts = WorldSites.fronts().filter(func(z: String) -> bool: return String(WorldSites.front(z).by) == "us_forces")
+		if not us_fronts.is_empty():
+			break
+	check(us_fronts.size() == 1 and WorldSites.holder_now(String(us_fronts[0])) == "kestrel",
+		"the US's next front is on Kestrel ground (%s)" % [us_fronts.map(func(z: String) -> String: return "%s (%s)" % [z, WorldSites.holder_now(z)])])
+	for leader: String in MissionRegistry.faction("kestrel").leaders:
+		WorldSites.server_leader_down("kestrel", leader)
+	for z in WorldSites.zones_of("kestrel"):
+		if z != "kestrel_valley":
+			WorldSites.site(z).holder = "black_ridge"
+	check(WorldSites.server_company_takes("kestrel_valley") and WorldSites.war_target("us_forces") == "" and String((WorldSites.news() as Array).back().kind) == "war_over",
+		"Kestrel wiped out too: the US's war is over and it holds what it has (%s)" % String((WorldSites.news() as Array).back().text))
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	Campaign.section(ZoneControl.SECTION).clear()
+
+
+func _set_rep(faction: String, value: int) -> void:
+	var rep: Dictionary = Economy.state().get("rep", {})
+	rep[faction] = value
+	Economy.state()["rep"] = rep
 
 
 ## A contract of `type_id` against `target` in `zone_id` from the first seed (of 300) whose offer

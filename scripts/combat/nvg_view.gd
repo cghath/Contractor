@@ -12,6 +12,13 @@ const TINT := Color(0.32, 1.0, 0.42)
 const GRAIN := 0.12
 ## Outside the tube: how much of the plain (unaided) view is still seen.
 const OUTSIDE := 0.18
+## Flares bloom the tube (AI bar G-24; bloom()): standing in a flare's light washes the picture
+## out by BLOOM_LIT x the light, a burning flare in the tube's view by up to BLOOM_SEEN more
+## (straight at it, fading to the tube's edge and out to GLARE_M off). The shader lifts the
+## gain and whites the picture out by it. Proposed.
+const BLOOM_LIT := 0.6
+const BLOOM_SEEN := 0.7
+const GLARE_M := 700.0
 
 ## The intensifier, over the screen behind it (SHADER_HEAD's sampler, SEEN_SCREEN) or over a
 ## texture drawn on top (SEEN_TEXTURE: scope_material, a magnified optic's picture-in-picture in
@@ -29,6 +36,7 @@ uniform float grain = 0.12;
 uniform float tube = 0.6;     // the tube's radius, as a share of half the screen's height
 uniform float outside = 0.18;
 uniform float aspect = 1.777;
+uniform float bloom = 0.0;    // flares (NvgView.bloom): the tube washed out, 0..1
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
@@ -37,7 +45,8 @@ float hash(vec2 p) {
 void fragment() {
 	vec3 seen = SEEN;
 	float lum = dot(seen, vec3(0.299, 0.587, 0.114));
-	float lit = 1.0 - exp(-lum * gain);
+	float lit = 1.0 - exp(-lum * gain * (1.0 + bloom * 3.0));
+	lit = mix(lit, 1.0, bloom * 0.55);
 	float noise = hash(floor(FRAGCOORD.xy * 0.75) + fract(TIME * 7.0) * 113.0) - 0.5;
 	lit = clamp(lit + noise * grain, 0.0, 1.0);
 	vec2 c = (SCREEN_UV - vec2(0.5)) * vec2(aspect, 1.0) * 2.0;
@@ -109,6 +118,27 @@ func update() -> void:
 	if not on:
 		return
 	set_view(_material, body, rect.get_viewport_rect().size)
+	_material.set_shader_parameter(&"bloom", bloom(body))
+
+
+## How much flares bloom `body`'s NVG now (0..1; see BLOOM_LIT): the light he stands in, and
+## any burning flare within his tube's view.
+static func bloom(body: Soldier) -> float:
+	if Flares.burning.is_empty() or body == null or not is_instance_valid(body):
+		return 0.0
+	var eye := body.camera.global_position if body.camera else body.global_position + Vector3.UP * 1.6
+	var fwd := -body.camera.global_basis.z if body.camera else -body.global_basis.z
+	var half := deg_to_rad(maxf(Nvg.fov_of(body), 1.0) * 0.5)
+	var out := Flares.light_at(body.global_position) * BLOOM_LIT
+	for f: Dictionary in Flares.burning:
+		var to := Flares.position_of(f) - eye
+		var d := to.length()
+		if d < 0.1 or d > GLARE_M:
+			continue
+		var off := fwd.angle_to(to / d)
+		if off < half:
+			out += BLOOM_SEEN * (1.0 - off / half) * (1.0 - d / GLARE_M)
+	return clampf(out, 0.0, 1.0)
 
 
 ## The tube's radius as a share of half the screen's height: a tube of `tube_deg` seen by a

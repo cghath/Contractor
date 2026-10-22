@@ -70,6 +70,7 @@ func _ready() -> void:
 	_test_zone_enemy()
 	await _test_rival_team()
 	await _test_faction_skirmish()
+	await _test_us_field()
 	await _test_roadside_ieds()
 	_test_enemy_drones()
 	_test_strongbox()
@@ -1263,6 +1264,56 @@ func _test_faction_skirmish() -> void:
 		s.queue_free()
 	sk.team.clear()
 	await _frames(2)
+
+
+## D7 (docs/combined_arms.md 7.3): US forces in the field, put in by hand as if the US held this
+## zone with a front of its own here: a US garrison at the HQ site in the US kit, green; a mounted
+## patrol (an M-ATV and a MaxxPro, the rifle squad aboard) that dismounts when hit; a Bradley
+## section; and the US net saying so.
+func _test_us_field() -> void:
+	print("US forces in the field (D7)")
+	var node := UsField.new()
+	node.name = UsField.NODE_NAME
+	node.p = {"side": "us_forces", "held": true, "base": false, "patrol": true, "from": "", "convoy": [], "armour": "front"}
+	level.add_child(node)
+	await _frames(2)
+	var hq := level.get_module(UsField.hq_site(level.modules()))
+	var site_ok := hq != null and node.is_site(hq)
+	check(hq != null and UsField.server_garrison(level, hq) == site_ok, "the HQ site (%s) is a US site unless a contract here is about it (%s)" % [hq.module_id if hq else "none", site_ok])
+	if site_ok:
+		var men: Array = node.garrisons.get(hq.module_id, [])
+		check(men.size() == 8 and men.all(func(s: Soldier) -> bool: return is_instance_valid(s) and s.faction == &"friendly"),
+			"a US garrison of %d holds it, friendly" % men.size())
+	var patrol := node.server_patrol()
+	await _frames(3)
+	var vs: Array = patrol.get("vehicles", [])
+	var riders: Array = (patrol.get("men", []) as Array).filter(func(s: Variant) -> bool: return is_instance_valid(s) and Vehicle.ride_of(s) != null)
+	check(vs.size() == 2 and (vs[0] as Vehicle).model == "matv" and (vs[1] as Vehicle).model == "maxxpro" and riders.size() >= 6
+		and riders.all(func(s: Soldier) -> bool: return s.faction == &"friendly"),
+		"a mounted patrol: an M-ATV and a MaxxPro with %d of its rifle squad aboard, friendly" % riders.size())
+	node._on_hit(&"", {}, patrol)
+	await _frames(5)
+	var out: Array = (patrol.get("men", []) as Array).filter(func(s: Variant) -> bool: return is_instance_valid(s) and Vehicle.ride_of(s) == null)
+	check(String(patrol.get("state", "")) == "halted" and out.size() >= 3, "hit, it halts and the squad gets out to fight (%d out)" % out.size())
+	var armour := node.server_armour()
+	await _frames(3)
+	var tanks: Array = armour.get("vehicles", [])
+	check(tanks.size() == 2 and tanks.all(func(v: Vehicle) -> bool: return v.model in ["bradley", "abrams"]) and (armour.get("men", []) as Array).size() >= 4,
+		"an armour section moves up: %s, %d crew" % [tanks.map(func(v: Vehicle) -> String: return v.model), (armour.get("men", []) as Array).size()])
+	check(node.said.size() >= 3 and node.said[0].begins_with("US net: Saber"), "the US net says what's out (%s)" % [node.said])
+	for g: Dictionary in node.groups:
+		for s: Variant in g.men:
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+		for v: Variant in g.vehicles:
+			if is_instance_valid(v):
+				(v as Node).queue_free()
+	for list: Variant in node.garrisons.values():
+		for s: Variant in list:
+			if is_instance_valid(s):
+				(s as Node).queue_free()
+	node.queue_free()
+	await _frames(3)
 
 
 ## Captain (2026-10-15: "flesh out HZs too, remember multiple missions per and our design"):

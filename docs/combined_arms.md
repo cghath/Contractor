@@ -1,6 +1,6 @@
 # Combined arms: armour, the AI commander, high command and invasions
 
-**Status: design, 2026-10-21.** Written for the build sessions to work from. Every call is made
+**Status: design, 2026-10-21; phase A1 built 2026-10-22 (calls 74-92).** Written for the build sessions to work from. Every call is made
 here (listed in "Calls made" at the end); every number is **Proposed** and lives in a data file or
 a named constant so it can be tuned without code. Checked against `claude/ai-driving` `e6ebcf4`.
 
@@ -326,6 +326,11 @@ Small arms keep their present path: tier 0 rounds (pistol, 5.56, 7.62x39, 7.62x5
 reach the model on a vehicle plate (Captain's call: vehicle armour is immune to small calibre),
 so the common case costs nothing new.
 
+**Built in A1:** `ArmourModel` (scripts/combat/armour_model.gd: `resolve`, `plate_at`,
+`tiles_at`, `vehicle_hit`, `damage`), `Shells` (scripts/combat/shells.gd: `shell(id)`,
+`for_round`, `pen_ke`), data/shells.json, data/vehicle_armour.json, the warheads.json keys, and
+the hook in `Vehicle.server_take_hit`. Until A2 the result lands on the old zones (call 81).
+
 #### 2.3.1 Shell data
 
 New `data/shells.json`. One row per projectile. It replaces `round_tiers` for anything listed
@@ -532,7 +537,7 @@ All values in mm RHA-equivalent at the plate's normal: KE / CE.
 | Turret sides, front half | 300 | 600 | |
 | Turret sides, bustle | 60 | 100 | Ammo behind it: blow-out panels vent up |
 | Hull side behind the heavy front skirts (front third) | 160 | 450 | `spaced_mm` 450 |
-| Hull side behind the light skirts (rear two-thirds) | 70 | 160 | `spaced_mm` 450 |
+| Hull side behind the light skirts (rear two-thirds) | 85 | 160 | `spaced_mm` 450 (KE 70 raised to 85 in A1: call 76) |
 | Hull rear and engine grille | 30 | 40 | |
 | Turret roof | 40 | 60 | Hatches 30 / 30 |
 | Engine deck | 30 | 30 | |
@@ -547,7 +552,7 @@ Spall liner: yes.
 |---|---|---|---|
 | Hull front | 60 | 110 | Proof against 30 mm APDS past about 700 m |
 | Turret front | 50 | 90 | |
-| Hull sides (spaced laminate) | 35 | 70 | Proof against 14.5 mm at 300 m and beyond; BRAT I tiles over most of it |
+| Hull sides (spaced laminate) | 35 | 70 | Proof against 14.5 mm at 300 m and beyond; BRAT I tiles over most of it (and over the hull and turret front: call 77) |
 | Turret sides | 30 | 60 | BRAT I tiles |
 | Rear and ramp | 25 | 40 | |
 | Roof | 20 | 30 | |
@@ -700,20 +705,30 @@ on the angle or the range; "tile" is stopped by a tile and penetrates through a 
 | Threat | Abrams turret front | Abrams hull front | Abrams side (rear 2/3) | Abrams roof | Bradley front | Bradley side | AAV side | M-ATV side | T-72B3 (K-5) turret | T-72B3 side | BMP-2 front |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | M829A3 | no | pen | pen | pen | pen | pen | pen | pen | ~ (pen at 0-20 deg) | pen | pen |
-| M830A1 HEAT | no | no | pen | pen | pen | tile | pen | pen | no | tile | pen |
-| M791 25 mm | no | no | no | no (rear: pen) | ~ | pen | pen | pen | no | no | pen |
+| M830A1 HEAT | no | no | pen | pen | pen | pen | pen | pen | no | pen | pen |
+| M791 25 mm | no | no | no | ~ | ~ | pen | pen | pen | no | no | pen |
 | M919 25 mm | no | no | ~ | pen | pen | pen | pen | pen | no | pen | pen |
 | TOW-2A | no | pen | pen | pen | pen | pen | pen | pen | ~ | pen | pen |
 | 3BM42 | no | ~ | pen | pen | pen | pen | pen | pen | | | |
 | 3UBR8 30 mm | no | no | no | ~ | ~ | pen | pen | pen | | | |
 | Konkurs-M | no | ~ | pen | pen | pen | pen | pen | pen | | | |
 | Kornet | no | pen | pen | pen | pen | pen | pen | pen | | | |
-| PG-7V | no | no | pen (TUSK: tile) | pen | no | tile | pen | pen | no | tile | pen |
-| PG-7VR | no | no | pen (TUSK II: no) | pen | no | pen (BUSK III: ~) | pen | pen | no | pen | pen |
-| AT4 | no | no | pen (TUSK: tile) | pen | no | tile | pen | pen | no | tile | pen |
+| PG-7V | no | no | pen (TUSK: tile) | pen | tile | tile | pen | pen | no | tile | pen |
+| PG-7VR | no | no | pen (TUSK II: no) | pen | pen | pen (BUSK III: ~) | pen | pen | no | pen | pen |
+| AT4 | no | no | pen (TUSK: tile) | pen | tile | tile | pen | pen | no | tile | pen |
 | Javelin (top) | pen | pen | pen | pen | pen | pen | pen | pen | pen | pen | pen |
 | M2 M33 | no | no | no | no | no | no | no | no (100 m: ~) | no | no | ~ |
 | Mk19 HEDP | no | no | no | ~ | no | no | no | pen | no | no | ~ |
+
+**Built in A1** (`tests/armour_test.gd`, `_test_table`): every cell above is asserted from
+data/shells.json, data/warheads.json and data/vehicle_armour.json. "pen" means through head-on
+at 500 m, past a gap in the tiles and through a tile met; "no" means never through with the
+tiles met, at 0-60 degrees, 100-2,000 m and on every plate of that face (the Abrams hull front
+includes its lower plate; its roof includes the hatches); "~" means through somewhere in that
+sweep and not somewhere else; "tile" means stopped by a tile met and through a gap. The Javelin
+row is resolved on each vehicle's roof. The T-72B3 and BMP-2 columns are asserted as soon as
+phase D6b adds their data. Five cells were corrected against the 2.4.2-2.4.4 numbers in A1
+(calls 77 and 78).
 
 Read across a row: the AT4 is a side and rear weapon against tanks and a killer of everything
 light, which is its job. Read down a column: the Abrams' front is beaten only by a tandem ATGM's
@@ -2656,6 +2671,32 @@ can be changed; the alternative is what was weighed against it.
 | 31 | The x-ray shown after hits by default ("my shots and hits on me"), full view on a key, protection analysis at the ranges | The Captain asked for it as a dev, training and player setting | Dev-only |
 | 32 | Vehicles drawn to 3 km, soldiers to 1.5 km in operation zones | Tank gunnery happens at 0.5-2.5 km; budget | Infinite draw |
 
+### Armour, phase A1 build (2026-10-22, Proposed)
+
+Made while building A1; each is Proposed and can be changed.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| 74 | `ArmourModel.plate_at`: the first plate in the list whose box holds the hit, whose normal faces the round and agrees (cos 0.3 or more) with the voxel face it crossed (`face_of`: the axis it stepped into the voxel on); else the first that faces it; else the first that holds it; none: the zone's old armour class | Boxes overlap at every corner and edge; the voxel face says which side was really hit, and the list order breaks the rest (the glacis before the deck) | The nearest box face (wrong on sloped plates); the first box only (a side shot at a turret corner read the cheek) |
+| 75 | A plate's `normal` is the facing its figure applies along (the published composite figures are line-of-sight values at that facing), not the staircase's slope; `"normal": "any"` is head-on from every side, used for tyres, engine bays and small turrets (the O-GPK, the UGWS) | Keeps 2.4.2's numbers meaning what they say; voxel art can't give a slope | Real slopes with physical thicknesses (no public data to tune, and the 2.4.6 table would no longer hold) |
+| 76 | Abrams hull side behind the light skirts: KE 85 (doc had 70) | M791 at 100 m (80 mm) went through it, against the table's "no"; M919 then reads "~" and 3UBR8 "no" as the table says | Changing the table (a 25 mm APDS through an Abrams side is wrong) |
+| 77 | The Bradley's BRAT I (and BUSK III's BRAT II) also covers the hull and turret front; PG-7V and AT4 against the Bradley front read "tile", PG-7VR "pen" | The table had "no" for all three, which the front's 110 CE can't give; real M2A3 BRAT kits cover the front, and a tandem RPG must beat an IFV's front | A thicker front (an IFV that shrugs off RPGs) |
+| 78 | Table cells corrected to the 2.4.2-2.4.4 numbers: M830A1 against the Bradley side and the T-72B3 side "pen" (600 against 70 + 400 and 120 + 400), M791 against the Abrams roof "~" (through head-on, not at 60 degrees from 2 km) | Light ERA's +400 can't stop a 600 mm jet; a roof head-on is 40 mm | Raising light ERA (it would stop PG-7VL and AT4s everywhere) |
+| 79 | Rounds with no shells.json row (pistol, 5.56, 7.62x39, 7.62x51, 7.62x54R, .30-06 AP) keep `VehicleDamage`'s tiers even on plated models; the .50 M33 (`round_id` 50bmg_m33) is the first bullet with a row | The Captain's small-calibre immunity costs nothing new, and the vehicles suite's 7.62x54R-through-an-engine-bay checks keep their meaning | Every bullet through the model |
+| 80 | HE with no warhead id (charges, mines, fire support, `server_explosion`) keeps `VehicleDamage` in A1 | Charges and fire support are tuned against zones (demolitions and fire support suites); they move with A2's overpressure and belly blast | Routing them now and retuning every charge |
+| 81 | A1's bridge to the zones (`ArmourModel.damage`): a penetration does the shell's `module_dmg` to the zone at the hit; KE flies on with `energy x residual / pen`; a partial does 15%; a stopped shaped charge or HE does the old blast-on-the-hull share; spall (today's 2.5 m) on CE and on KE of 20 mm and up; API doubles the fire chance | Keeps zones, fire, wrecks and every caller working until A2's modules | Building modules in A1 |
+| 82 | `range_m` for the pen tables: the hit's `range_m`, else the shooter's distance; arming is checked only when a hit gives `range_m` (A3's `ShellFlight` will); launcher rounds are already duds before arming in `LauncherProjectile` | No double arming check from a distance that isn't the flight | Passing flight distance through Ballistics now (outside A1's files) |
+| 83 | A proximity fuze against a vehicle bursts short: blast only (`fuzed_outside`); an airburst round that meets a hull before its set range acts point-detonating | 2.3.7 leaves the jet's fate open; a HEAT burst metres off a hull is spent | Half penetration at standoff |
+| 84 | Shatter: a KE round stopped below half the plate's `t_eff` on composite or high-hardness steel | 2.3.3 names the outcome but not when | No shatter outcome |
+| 85 | Rolls are `hash(seed x 1000003 + salt)`, one salt per roll kind and tile; the seed is `hash(shot_id, vehicle name, plate id)`, `shot_id` falling back to the hit point and physics frame until A3 numbers shots | Deterministic, independent rolls, no RandomNumberGenerator per hit | One RNG stream (one roll shifts the next) |
+| 86 | Tiles counted along their box's longest side; fired tiles and fitted packages kept as vehicle metadata (`armour_tiles`, `armour_packages`) until A2/A7 move them into `net_state` (A7 removes the voxels) | A1 touches only `server_take_hit` in vehicle.gd | New vehicle fields now |
+| 87 | The M33 penetrates 24 mm at the muzzle (20 at 100 m as 2.4.3) | The "M-ATV side: no (100 m: ~)" cell and the vehicles suite's close .50 through a MaxxPro side | 20 flat to the muzzle (a .50 never through an MRAP) |
+| 88 | Wheels are plates of 6/6 (`tyre`) and engine bays 18/18 from every side (`mrap_weak`), so a .50 still wrecks wheels and engines | Matches today's zones | Tyres behind the side armour |
+| 89 | ATGM rows (TOW-2A, Konkurs-M, Kornet, 9M119M) arm at 25 m (real TOW about 65 m) and carry `range_m`; their guidance comes with A3 | The antiarmor suite's 5-25 m arming rule for every warhead | A longer arming distance (fails that rule) |
+| 90 | `Shells.shell(id)` (not `Shells.get`, which is Object's); a warhead's `penetration_mm` and `blast_kg` are read as its `pen_ce` and `he_kg` | One reader for both files without repeating numbers | Copying the numbers into new keys |
+| 91 | For phase D6b: the T-72B3's Kontakt-5 figures in 2.4.2 include the tiles; author the base plates plus `heavy_era` tiles, with the base turret CE a little under 900 so "TOW-2A: ~" holds; the BMP-2 front's "M2 M33: ~" needs a thinner front or reads "no" (the M33 is 24 mm at most) | The table test rates those columns as soon as their data lands | |
+| 92 | Physical thickness (`phys_mm`, for overmatch and HE punch-through) of the M-ATV and MaxxPro capsule walls 25 mm (rear 20), roofs 8, engine bays 10 | An 84 mm HE round (22 mm of punch) only scorches an MRAP's side, as the antiarmor suite has it, while a 60 mm mortar (17 mm) still blows in its roof (2.3.6: "soft-skins and the roofs of light armour fail to it") | 12 mm walls (any HE rocket blew in the side) |
+
 ### The AI commander and cooperation
 
 | # | Call | Why | The alternative |
@@ -2708,6 +2749,27 @@ can be changed; the alternative is what was weighed against it.
 | 68 | Staging rent $6,000 + $1,500 a day, x0.7 at allied, x0.5 for the host's own contract; trusted needed | The Captain: "for a fee and a standing requirement" | Free staging |
 | 69 | Contract helicopter insertion and extraction cost $3,000 + $1,200 a link each way | Today it's free, so staging had nothing to save; the economy is "too easy overall" | Leaving flights free |
 | 70 | Staging services are limited (no armory, stash, hiring or workshop; +25% resupply prices) | The Captain: "improvised", "limited services" | A full second base |
+
+### Made while building D7 (US forces in the living war)
+
+Numbered D7-n so they don't collide with other phases' calls. All Proposed.
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| D7-1 | FOB Halberd is placed by hand (`map_cell` in data/contracts.json, read by `RegionMap.layout`) north of Cove outpost, linked to it alone; no other zone moves | The grid has no free cell beside both Landing beach and Cove outpost, and filling Halberd into the grid would have moved every coast zone and its crossings | Re-flowing the coast grid; a hand-made link (two crossings on one edge) |
+| D7-2 | With no war-target zone beside its ground, the US's front goes on the next zone on the shortest way to the nearest one, if an enemy of the US holds it ("clearing the way to the Banner") | The Banner's zones are scattered (coast and inland), so the US would stall after Cove outpost | Stalling until the company takes ground for it |
+| D7-3 | The US's own front is outside the factions' cap of 3 (one US front at a time, its own seeded roll); the factions' fronts are counted without it | With 3 faction fronts open the US would often be locked out of its own war | Sharing the cap |
+| D7-4 | Until D3's operation contracts, a US front's operation is a one-phase contract of the employer's `op_types` (US: raid, sabotage, HVT capture; Vessmark: raid, intel grab) against the front's holder, `op_front` naming the zone, up 4 days, titled "Joint operation" ("Vessmark operation") | D7 needed operations for 7.3's pause and 6.6's result before D3 builds the real ones; D3 swaps the stand-in for its phases | Waiting for D3 to make the US front pause at all |
+| D7-5 | "Refreshed every 3 days" read as one operation per front: once it expires unaccepted, the front fights on by the tick to its end | Re-posting would keep a trusted company's board full and freeze every US front it ignores, against call 66's "unaccepted, the tick resolves them" | A fresh offer every 3 days |
+| D7-6 | Vessmark posts beside every US operation (an `ops_only` employer, never a random board pick), x1.1 pay, needing trusted with Vessmark | 6.1: "Vessmark offers appear when the US has a front" | A board share of its own |
+| D7-7 | A completed operation counts as all its phases, any other result as none; a held operation that lapses undeployed changes nothing | The stand-in has one phase; a lapse is the same as nobody taking it | A lapse as a failure |
+| D7-8 | A zone the US takes is no flashpoint; an operation's success on the target's last zone sieges it instead of flipping it | A flashpoint posts a job against the new holder (the US); the Captain's wipe rule holds for the US too | 6.6's "with a flashpoint" literally |
+| D7-9 | FOB Halberd defends at least as hard as the company's FOB (`FOB_DEFENCE`) | A base that can't fall shouldn't spend half the war sieged | The US's strength alone |
+| D7-10 | US garrison at a held zone's HQ site (its HQ, else first outpost, compound, checkpoint); at Halberd every site (the main one 8 men, the rest 4); a site a held contract is about stays the enemy's; the other sites of a US-held zone hold the faction it took it from (else its war target) | 7.3's "garrison at each held zone's HQ site"; contract zones have no HQ module; a held zone still has work in it | Clearing every site of a US zone |
+| D7-11 | US field groups: a patrol (M-ATV + MaxxPro, 8 men) in held and bordering zones; a convoy (M-ATV, MaxxPro, MaxxPro, M-ATV, 2 crew each, MaxxPros standing in for the HEMTT until D6a) every 10-15 min in held zones next to more US ground, from that crossing to the next or to the garrison and back; an armour section (2 Bradleys, an Abrams leading at US strength 85+) on a US front, halting 350 m short to overwatch, or at the garrison when US ground is attacked | 7.3's field list with the existing vehicles; a weak US doesn't field tanks | Abrams always |
+| D7-12 | Until B2's friendly SideCommand they're squad-AI groups (faction friendly, green IFF, a Squad each), like AlliedTroops' elements; B2 takes them over | B2 isn't built; they still fight and the squad can see who they are | Waiting for B2 |
+| D7-13 | Callsigns from call 47: Saber (patrols), Anvil (convoys), Iron (armour), Citadel (garrisons, Halberd); the US net's lines go to every player as notices, and enemy nets talk about the US every third ambient line where it's about (`radio_about`) | Original names, already chosen | Generic callsigns |
+| D7-14 | US war wants: airfield 3, HQ 2, harbour 2, crossing 1; the US flag drawn in blocks (glyph `stripes`); Vessmark's flag slate blue with a gold block; its camo a grey-green variant of its own; start rep 0 | Gives the US's fronts a preference and the map a flag | |
 
 ### The plan
 
