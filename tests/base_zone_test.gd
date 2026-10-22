@@ -70,7 +70,7 @@ func _run() -> void:
 		"2304 m, its id \"fob\", in the FOB's region (%s, %.0f m)" % [base.def.id, float(base.def.size_m)])
 	check(base.generate_ms < LOAD_BUDGET_MS, "it loads within %.0f s (%.0f ms)" % [LOAD_BUDGET_MS / 1000.0, base.generate_ms])
 	var again := BaseZoneLevel.def_for(Contracts.campaign_seed())
-	check(again.hash() == base.def.hash(), "the same base zone from the same campaign seed")
+	check(again.hash() == RoadNet.unplanned(base.def).hash(), "the same base zone from the same campaign seed")  # (its roads planned in: cg_brief 1.2)
 	var m := base.get_module("fob")
 	check(m != null and base.fob != null and base.fob.global_position.distance_to(m.global_position) < 0.01, "the FOB is its \"fob\" module")
 	var terminals := base.fob.get_children().filter(func(n: Node) -> bool: return n is BaseTerminal)

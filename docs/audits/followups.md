@@ -29,6 +29,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-191 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
 | F-192 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
 | F-193 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
+| F-194 | P3 | A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1 on world/roads: the 5 m check fails) |
 
 ## F-01: the building scan only sees one floor
 
@@ -459,6 +460,22 @@ whole, so the road surface spans the crater (an IED on a road leaves no hole in 
 small hook in GroundCuts after a cut, `ZoneRoads.of(self).cut(area)`, that rebuilds the road
 tiles touching `area` without the triangles over cut cells (ZoneRoads keeps its geometry per
 TILE_M tile, so it's one tile's mesh and body each time).
+
+## F-194: a J-hook over a natural hump comes in 4 m clear
+
+Found by cghath's agent on `world/roads` (2026-10-22, queue item 1.2): CI run 39729719130 (commit
+0ca5246) and local run R0507, heliflight "ridge_hot insertion 1: the airframe at least 5 m clear
+until the final, 4.0 m at the least (at (-1737, 14.1, 1938) 78 m to go, 61 km/h)". Location:
+[helicopter.gd](../../scripts/supports/helicopter.gd) (the J-hook's descent, `hook_plan`) and
+[heli_flight_check.gd](../../tests/heli_flight_check.gd).
+
+The ground there is natural (a 7.3 m hump 77 m short of the LZ at -0.8 m; no road within 30 m,
+none graded: checked against the terrain before and after the roads). The roads branch changes
+nothing on that line; what changes is the zone's scatter (ridge_hot gains a road joining its town
+and landmark to the network, so trees and rocks land elsewhere), and the hook flown over the hump
+no longer has whatever stood there keeping it higher. Suggested: let the hook's descent look ahead
+at the terrain under the rest of its path (obstacle_top along the next points), not only what stands
+on it, so it holds 5 m over a hump on the way down.
 
 ## Calls made for the Captain
 

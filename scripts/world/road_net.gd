@@ -197,6 +197,21 @@ static func crossing_kind(a: String, b: String) -> String:
 
 # --- Planning --------------------------------------------------------------------------------
 
+## `def` as ZoneDef made it, before planning wrote its roads in (a copy): "roads" and "patrols"
+## back to the links, the planner's own keys gone. For comparing a hosted zone's def with a fresh one.
+static func unplanned(def: Dictionary) -> Dictionary:
+	var out := def.duplicate(true)
+	if out.has("road_links"):
+		out["roads"] = out.road_links
+		if (out.road_links as Array).is_empty():
+			out.erase("roads")  # (a def with no links has no "roads" until planned)
+		if out.has("patrols"):
+			out["patrols"] = out.get("patrol_links", [])
+	out.erase("road_links")
+	out.erase("patrol_links")
+	out.erase("roads_version")
+	return out
+
 ## The links the zone's water plans its bridges, fords and culverts over (ZoneTerrain.generate
 ## hands them to ZoneWater.carve as the def's "roads"): the def's links
 ## completed (_complete_links: every site joined), then for each crossing two: the zone's edge to the
