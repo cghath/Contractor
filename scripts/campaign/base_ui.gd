@@ -811,11 +811,31 @@ func _build_stores(rows: VBoxContainer) -> void:
 
 ## The loadout menu (Captain, 2026-10-14: "a menu for equipping yourself better and your
 ## squadmates how you want to"): this screen steps aside while it's up and comes back after.
-func _loadouts_button() -> Button:
+func _loadouts_button() -> Control:
 	var b := UiKit.button("Loadouts: kit yourself and the squad from the stash", _open_loadouts,
 		"Paper doll for you and each squadmate: weapons, optics, armour, pack, ammo, meds, grenades; standing loadouts for Restock")
 	b.name = "Loadouts"
-	return b
+	var editor := UiKit.accent_button("3D loadout editor", _open_3d.bind("editor"),
+		"Your soldier in 3D: click a slot on him, pick what goes there, buy what the company lacks, save kits and apply them to the squad")
+	editor.name = "Loadout3D"
+	var armory := UiKit.button("Armory", _open_3d.bind("armory"), "Walk the racks: every item with its price and stats, buy it or fit it on your soldier")
+	armory.name = "Armory3D"
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
+	row.add_theme_constant_override(&"v_separation", UiKit.SPACE_S)
+	for c: Control in [editor, armory, b]:
+		row.add_child(c)
+	return row
+
+
+func _open_3d(which: String) -> void:
+	var screen: Control = BaseHub.open_loadout_3d() if which == "editor" else BaseHub.open_armory()
+	if screen == null:
+		return
+	visible = false
+	screen.tree_exited.connect(func() -> void:
+		if is_inside_tree() and not visible:
+			open(page))
 
 
 func _open_loadouts() -> void:

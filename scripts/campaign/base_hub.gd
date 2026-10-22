@@ -3572,6 +3572,42 @@ func open_loadout() -> LoadoutScreen:
 	return screen
 
 
+## This machine: opens the 3D loadout editor (LoadoutEditor) on its own layer, `fit` (an item
+## id, "" none) put on the model as a draft (the armory's "Fit on me"). Only at the base between
+## deployments, like the loadout menu.
+func open_loadout_3d(fit := "") -> LoadoutEditor:
+	if not campaign_running or not in_base() or RosterDeployment.is_running(view.get("roster", {})):
+		note.emit("Loadouts are at the base, between deployments")
+		return null
+	var layer := CanvasLayer.new()
+	layer.name = "LoadoutEditorLayer"
+	layer.layer = 22  # over the base screen (20) and the loadout menu (21)
+	get_tree().root.add_child(layer)
+	var editor := LoadoutEditor.new()
+	editor.name = "LoadoutEditor"
+	editor.closed.connect(layer.queue_free)
+	layer.add_child(editor)
+	if fit != "":
+		editor.fit_item(fit)
+	return editor
+
+
+## This machine: opens the 3D armory (ArmoryRoom) on its own layer. Only at the base.
+func open_armory() -> ArmoryRoom:
+	if not campaign_running or not in_base() or RosterDeployment.is_running(view.get("roster", {})):
+		note.emit("The armory is at the base, between deployments")
+		return null
+	var layer := CanvasLayer.new()
+	layer.name = "ArmoryLayer"
+	layer.layer = 21
+	get_tree().root.add_child(layer)
+	var room := ArmoryRoom.new()
+	room.name = "ArmoryRoom"
+	room.closed.connect(layer.queue_free)
+	layer.add_child(room)
+	return room
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not campaign_running or not Net.is_hosting():
 		return

@@ -334,6 +334,7 @@ func _test_session() -> void:
 	check(bought >= 3 and Economy.cash() < cost and not BaseHub.member(who).has("edit_missing"),
 		"buying fills the shortfall (%d IVs on him) and takes the money (%d left of %d)" % [bought, Economy.cash(), cost])
 	await _test_kits_at_hub(ids, me)
+	await _test_3d(me)
 	# The host can't change another player's kit (a client is peer 2 here).
 	check(BaseHub.server_loadout(2, me, "add", {"id": "smoke_grenade"}).contains("their own kit"), "a client's request on the host's kit is refused")
 	await _test_fit(ids)
@@ -393,6 +394,99 @@ func _test_kits_at_hub(ids: Array, me: String) -> void:
 	BaseHub.request("loadout", [me, "kit_delete", {"name": "Quiet rifleman"}])
 	await _frames(2)
 	check(KitLibrary.names(BaseHub.roster()).is_empty(), "a kit deletes")
+
+
+## The 3D loadout editor and the 3D armory at the hub (claude/loadout-3d): the model wears the
+## draft, slots are markers on it, picking fits, undo, an unowned item's Buy now, Apply through
+## the host, a kit saved from the editor; the armory's shelves, its panel, buy, Fit on me.
+func _test_3d(me: String) -> void:
+	print("The 3D loadout editor")
+	Economy.add_cash(50000, "test: the 3D editor")
+	var editor := BaseHub.open_loadout_3d()
+	check(editor != null, "the 3D editor opens at the base")
+	if editor == null:
+		return
+	await _frames(3)
+	check(editor.who == me and editor.preview.model != null and editor.preview.gear != null, "on your own soldier, his model and kit in 3D (%s)" % editor.who)
+	var host := level.players.get_node(^"1") as Soldier
+	check(Restock.counts(editor.draft) == Restock.counts(Loadouts.template_of(Roster.json_safe(host.inventory.net_state))) and not editor.dirty(),
+		"the draft starts as what he wears")
+	var main := editor.preview.anchors().filter(func(a: Dictionary) -> bool: return editor.preview.shown(a))
+	editor.focus_region("torso")
+	await _frames(2)
+	var torso := editor.preview.anchors().filter(func(a: Dictionary) -> bool: return editor.preview.shown(a))
+	var points := torso.filter(func(a: Dictionary) -> bool: return String(a.key).begins_with("point:"))
+	check(main.size() >= 5 and points.size() >= 3 and editor.preview.screen_of(points[0].at) != null if not points.is_empty() else false,
+		"markers: %d slots on the whole body, %d MOLLE points on the torso, on screen" % [main.size(), points.size()])
+	var p0: Variant = editor.preview.screen_of(torso[0].at)
+	check(p0 != null and editor.preview.key_at(p0) != "", "a click on a marker picks a slot (%s)" % [editor.preview.key_at(p0) if p0 != null else ""])
+	editor.pick_slot("slot:helmet")
+	check(editor.choices("slot:helmet").has("helmet_heavy") and editor.choices("slot:helmet").all(func(id: String) -> bool: return ItemDB.get_item(StringName(id)).slot == &"helmet"),
+		"the helmet's picker lists helmets only (%d)" % editor.choices("slot:helmet").size())
+	editor.choose("helmet_heavy")
+	await _frames(1)
+	check(String(editor.draft.slots.get("helmet", "")) == "helmet_heavy" and String(editor.preview.inventory.slots.get(&"helmet", &"")) == "helmet_heavy" and editor.dirty(),
+		"picking puts it on the model at once, as a draft")
+	editor.undo()
+	check(String(editor.draft.slots.get("helmet", "")) != "helmet_heavy" and not editor.dirty(), "Ctrl+Z takes it back")
+	var unowned := "nvg_gen3" if editor.owned("nvg_gen3") <= 0 else "nvg_gen1"
+	editor.choose("helmet")
+	editor.pick_slot("mount:helmet:nvg")
+	editor.choose(unowned)
+	await _frames(1)
+	var buy_now := editor.find_child("BuyNow", true, false) as Button
+	check(buy_now != null and not buy_now.disabled and buy_now.text.contains("$%d" % BaseEconomy.item_price(StringName(unowned))),
+		"an unowned NVG on the helmet offers Buy now at its price (%s)" % [buy_now.text if buy_now else "none"])
+	check(int(editor.short.get("units", 0)) > 0 and editor.buy_button.text.contains("$%d" % int(editor.short.cost)), "Buy missing shows what the draft lacks ($%d)" % int(editor.short.get("cost", 0)))
+	var cash := Economy.cash()
+	buy_now.pressed.emit()
+	await _wait_until(func() -> bool: return editor.owned(unowned) == 1, 6.0)
+	check(Economy.cash() == cash - BaseEconomy.item_price(StringName(unowned)) and editor.owned(unowned) == 1, "Buy now bought it into the stash (cash $%d to $%d)" % [cash, Economy.cash()])
+	editor.apply_draft()
+	await _frames(4)
+	var g: Dictionary = Roster.json_safe(host.inventory.net_state)
+	check(GearMounts.on(ItemDB.get_item(StringName(String(g.slots.get("helmet", "")))), g.slot_state.get("helmet", {}), "nvg") == unowned and not editor.dirty(),
+		"Apply fits the draft through the host: the NVG is on his helmet, and the draft is what he wears")
+	editor.save_kit("Editor kit")
+	await _frames(2)
+	check("Editor kit" in KitLibrary.names(BaseHub.roster()), "a kit saved from the editor is on the roster")
+	editor.close()
+	await _frames(2)
+	print("The 3D armory")
+	var room := BaseHub.open_armory()
+	check(room != null, "the armory opens at the base")
+	if room == null:
+		return
+	await _frames(3)
+	var groups := {}
+	for it: Dictionary in room.items:
+		groups[Loadouts.group_of(ItemDB.get_item(StringName(String(it.id))))] = true
+	check(room.items.size() > 40 and groups.size() >= 7, "the shelves hold %d items in %d kinds" % [room.items.size(), groups.size()])
+	room.walk_to("weapons")
+	for i in 40:
+		await get_tree().process_frame
+	var target: Dictionary = room.items.filter(func(it: Dictionary) -> bool: return Loadouts.group_of(ItemDB.get_item(StringName(String(it.id)))) == "weapons")[0]
+	var scale_by: Vector2 = room.view_box.size / Vector2(room.viewport.size)
+	var at := room.camera.unproject_position((target.node as Node3D).global_position) * scale_by
+	check(room.item_at(at) != "", "pointing at a rifle on the weapons shelf finds it (%s)" % room.item_at(at))
+	room.point_at("m4a1")
+	await _frames(1)
+	var buy := room.find_child("Buy", true, false) as Button
+	check(buy != null and buy.text.contains("$%d" % BaseEconomy.item_price(&"m4a1")), "its panel shows the price and a Buy button")
+	var had := int(_hub_units().get("m4a1", 0))
+	cash = Economy.cash()
+	buy.pressed.emit()
+	await _frames(3)
+	check(int(_hub_units().get("m4a1", 0)) == had + 1 and Economy.cash() == cash - BaseEconomy.item_price(&"m4a1"), "Buy puts one in the stash and takes the money")
+	room.fit_on_me("helmet_heavy")
+	await _frames(3)
+	var ed := get_tree().root.find_child("LoadoutEditor", true, false) as LoadoutEditor
+	check(ed != null and not is_instance_valid(room) or room.is_queued_for_deletion(), "Fit on me opens the editor and the armory steps aside")
+	if ed:
+		check(String(ed.draft.slots.get("helmet", "")) == "helmet_heavy" and ed.slot_key == "slot:helmet" and ed.dirty(),
+			"with the heavy helmet on him as a draft, its slot picked (%s, %s)" % [ed.slot_key, ed.draft.slots])
+		ed.close()
+	await _frames(2)
 
 
 ## Units of every item in the hub's stash (world items, with what's on and in them) and on

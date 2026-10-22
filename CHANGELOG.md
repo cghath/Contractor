@@ -13,14 +13,31 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### 3D loadout editor and armory (claude/loadout-3d)
 
-> **Where I stopped / next step (2026-10-22, 15:50 CDT):** piece 1 pushed: mounts in loadout
-> templates, saved kits (KitLibrary) and the "kit_save/kit_delete/kit_apply/template/mount"
-> host ops, with loadout_test checks (R2502 PASS). Written but not yet wired or tested:
-> scripts/ui/loadout_preview.gd and scripts/ui/loadout_editor.gd (the 3D editor). Next: open
-> the editor from BaseHub (open_loadout_3d) and the base screen, ui_test fit check, then the 3D
-> armory room (scripts/ui/armory_room.gd), base_test buy flow, docs/loadout_3d.md.
+> **Where I stopped / next step (2026-10-22, 16:00 CDT):** pieces 1-2 pushed: saved kits and
+> mounts (host ops), the 3D editor (scripts/ui/loadout_editor.gd + loadout_preview.gd) and the
+> 3D armory (scripts/ui/armory_room.gd), opened from the base screen ("3D loadout editor",
+> "Armory" buttons; BaseHub.open_loadout_3d / open_armory). loadout_test covers all of it
+> (R2506 PASS). Next: ui_test fit checks for both screens, base_test buy flow, docs/loadout_3d.md.
+> Not checked yet: how it looks (no windowed screenshots on this PC while Captain plays).
 
 #### Added
+- **3D loadout editor.** Your soldier full size in 3D: his own model, camo, face and the voxel
+  kit, drawn by the same code as in the field. Drag to turn him, the wheel zooms, 1-5 focus the
+  head, torso, legs, weapons or the whole body. Markers on the model are the slots: the helmet
+  and its NVG mount, carrier, plate pockets, every MOLLE point, the pack, the guns with their
+  optic rail, muzzle, underbarrel and side rail, and the pockets. Click one and the picker lists
+  everything that fits, owned or not; unowned items show their price. Picking puts it on the
+  model at once as a draft, and an unowned pick offers "Buy now" with its price and your cash.
+  "Buy missing: $X" (B) buys everything the draft lacks and fits it; Apply (Enter) fits the
+  draft from the stash under the usual rules (litres, kg, bulky items, plates in pockets).
+  Undo (Ctrl+Z), Revert (R), Last applied (L); closing with changes not applied asks first. The
+  stats panel shows weight and load tier, litres, protection by NIJ rating, ammo carried and
+  speed. The last person, kit and target you picked are remembered.
+- **3D armory.** A room with the company's gear on shelves by kind (weapons, optics, armour,
+  packs, pouches, ammo, medical, grenades, the rest), every item as its voxel model. Point at
+  one for a panel with its price, stats and how many the company owns; buy it there (B), or Fit
+  on me (F) or drag it onto your soldier to open the loadout editor with it fitted. It reads the
+  existing stash, shop and quartermaster prices; nothing is forked.
 - **Saved kits.** Name and save a loadout; it goes with the campaign and every player in co-op
   sees the same list. Apply a kit to yourself, a squadmate, a fire team, everyone in a role, the
   whole squad or a high command squad (Hawk 2, Viper 3). It becomes their standing loadout too,
