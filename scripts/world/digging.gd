@@ -185,6 +185,23 @@ func to_save() -> Dictionary:
 	return {"cuts": cut_ops.duplicate(true), "berms": berms}
 
 
+## The fields of each kind of saved cut (GroundCuts.crater_op, pit_op, mound_op), checked by
+## GameState.read_save (F-176).
+const CUT_FIELDS := {"crater": ["x", "z", "r", "depth"], "pit": ["x", "z", "yaw", "depth"], "mound": ["x", "z", "yaw", "h"]}
+
+
+## Whether `op` is a saved cut GroundCuts.apply can replay: a known kind, every field a finite number.
+static func cut_ok(op: Variant) -> bool:
+	if typeof(op) != TYPE_DICTIONARY or not CUT_FIELDS.has(String(op.get("kind", ""))):
+		return false
+	return (CUT_FIELDS[String(op.kind)] as Array).all(func(k: String) -> bool: return GameState.is_number(op.get(k)))
+
+
+## Whether `b` is a saved berm (to_save): an id, a position, a yaw, a colour and its hits.
+static func berm_ok(b: Variant) -> bool:
+	return typeof(b) == TYPE_DICTIONARY and GameState.is_number(b.get("id")) and GameState._finite_pos(b.get("pos")) 		and GameState.is_number(b.get("yaw")) and typeof(b.get("colour")) == TYPE_STRING and Color.html_is_valid(String(b.colour)) 		and GameState.is_number(b.get("hits"))
+
+
 ## Host: the ground as saved (to_save) back, to every peer.
 func _server_restore(saved: Dictionary) -> void:
 	for b: Dictionary in saved.get("berms", []):

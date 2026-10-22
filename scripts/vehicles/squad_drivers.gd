@@ -410,6 +410,25 @@ func server_squad_dismount(by: Soldier, squad: Squad) -> String:
 # --- Who drives what ---------------------------------------------------------------------------
 
 ## The squad's ground vehicles with one of its AI at the wheel.
+## Host: an escort or a convoy truck of `squad` (its own crew at the wheel, AI) drives `path` at
+## `speed_kmh` as an order, so contact on the way is met as the squad's own vehicles meet it
+## (F-140, the overwatch mission's convoy): it always drives through the kill zone, faster, the
+## gunner firing on (AavGunner), and when it's disabled the crew bail out on the side away from
+## the fire and fight from there (DriveContact ABANDON). Returns whether it was given.
+func server_drive_route(v: Vehicle, path: PackedVector3Array, speed_kmh: float, squad: Squad) -> bool:
+	var d := v.driver() if v else null
+	if d == null or not d.is_ai() or path.is_empty():
+		return false
+	var by: Soldier = squad.leader if squad and is_instance_valid(squad.leader) and squad.leader.vitals.is_up() else d
+	_give(v, Order.DRIVE, by, path[path.size() - 1], squad)
+	var o: Dictionary = orders[v.get_instance_id()]
+	o["through_only"] = true  # a convoy pushes through: it stops only when it can't go on
+	o["roads"] = true
+	o["cruise"] = speed_kmh / 3.6 if speed_kmh > 0.0 else -1.0
+	v.server_follow_path(path, speed_kmh)
+	return true
+
+
 func driven(from: Soldier) -> Array[Vehicle]:
 	return driven_by(_squad(from))
 
@@ -643,11 +662,13 @@ func _hits(v: Vehicle) -> Array:
 
 ## Contact on the move: what DriveContact says. Returns whether the order stopped for it.
 func _meet_contact(v: Vehicle, o: Dictionary) -> bool:
-	var a := DriveContact.assess(v, o.get("squad"), _hits(v), not dismount_on_contact)
+	var a := DriveContact.assess(v, o.get("squad"), _hits(v), not dismount_on_contact or bool(o.get("through_only", false)))
 	last_contact[v.get_instance_id()] = a.act
+	if (a.enemy as Vector3) != Vector3.INF:
+		o["threat"] = a.enemy  # the last threat it met: where the crew keep away from once it's quiet (F-140)
 	match String(a.act):
 		DriveContact.ABANDON:
-			_abandon(v, o, a.enemy)
+			_abandon(v, o, a.enemy if (a.enemy as Vector3) != Vector3.INF else o.get("threat", Vector3.INF))
 			return true
 		DriveContact.DISMOUNT:
 			if int(o.order) != Order.HOLD:
@@ -720,6 +741,11 @@ func _dismount_here(v: Vehicle, o: Dictionary, enemy: Vector3, everyone: bool) -
 	var squad: Squad = o.get("squad") if is_instance_valid(o.get("squad")) else null
 	if not out.is_empty() and squad and is_instance_valid(o.by):
 		squad.give_order(o.by, Squad.Order.HOLD, lee_of(v, enemy), out)
+	var crew := 0
+	for s: Soldier in v.get_tree().get_nodes_in_group(&"combatants") if not out.is_empty() else []:
+		if String(s.name) in out and s.has_meta(&"vehicle_crew") and SquadAI.of(s):
+			SquadAI.of(s).on_order(Squad.Order.MOVE, lee_of(v, enemy), crew, out.size())  # (a convoy's crew aren't squad members: to the lee, then hold there; F-140)
+			crew += 1
 	return out
 
 

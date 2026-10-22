@@ -47,7 +47,7 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-11 | ~~One small suppression radius for every round~~ (done 2026-10-19) | P1 | S |
 | G-12 | ~~No cap on how many leave the fight for casualties~~ (done 2026-10-19: 1 plus the medics, in contact) | P1 | S |
 | G-13 | ~~A carer stays with a casualty who is already stable~~ (done 2026-10-20: leaves for a worse one nobody can answer, comes back) | P1 | M |
-| G-14 | Smoke and bangs only on break contact, casualty reach or an order (part done 2026-10-19: smoke when pinned, smoke over the flank's open ground; entry bangs were already in the clear op's breach) | P1 | M |
+| G-14 | ~~Smoke and bangs only on break contact, casualty reach or an order~~ (done 2026-10-21: smoke over open ground crossed under fire and over a casualty dragged off; bangs into a hot building with no breacher and up each stair push) | P1 | M |
 | G-15 | ~~Doctrine numbers still don't act~~ (done 2026-10-20: every number scales the AI's own, Doctrine.factor) | P1 | M |
 | G-16 | ~~The AI never judges which casualty is worst~~ (done 2026-10-19: its own read when no card) | P2 | S |
 | G-30 | ~~Only an AI medic can give CPR or shock a heart~~ (dropped, Captain 2026-10-19) | - | - |
@@ -58,9 +58,9 @@ We learn from these mods and are inspired by how they behave. We take no code fr
 | G-21 | ~~Every flank is the same close hook~~ (done 2026-10-20: the other side next time, sometimes wide) | P2 | S |
 | G-22 | ~~A lost enemy is searched for where he was, not where he was going~~ (done 2026-10-20) | P2 | S |
 | G-23 | ~~Few visible reactions to being hit~~ (done 2026-10-20: flinch and limp were in; a forearm hit can knock the weapon out (picked back up), a badly hurt man crawls to cover) | P2 | M |
-| G-24 | ~~No night, light, NVG, fog or weather in spotting~~ (done in wave 7: darkness, weather sight and fog, NVGs, flash and lights at night; enemy flares still to do) | P2 | M |
+| G-24 | ~~No night, light, NVG, fog or weather in spotting~~ (done in wave 7: darkness, weather sight and fog, NVGs, flash and lights at night; enemy flares done 2026-10-21: hand flares and mortar illumination light the ground, spotting reads it, NVGs bloom) | P2 | M |
 | G-25 | No enemy fire support: mortars, static guns; static weapon teams that move where they're needed (done 2026-10-20 for both sides and players, first pass: see docs/static_weapons.md) | P1 | L |
-| G-26 | ~~Patrols don't ambush; no mines~~ (done 2026-10-20: half the enemy's patrols lie in wait when they suspect someone; roadside IEDs are the mines; formation variety still to do) | P3 | M |
+| G-26 | ~~Patrols don't ambush; no mines~~ (done 2026-10-20: half the enemy's patrols lie in wait when they suspect someone; roadside IEDs are the mines; formation variety done 2026-10-21: patrols walk in formation by ground and threat, spacing by doctrine) | P3 | M |
 
 G-27 to G-30 were added from the critic's pass (the gaps are numbered in the order they were
 found, not by priority).
@@ -373,6 +373,16 @@ gap here.
   already does); the entry team bangs (or frags, by doctrine) a room before entry, never with
   civilians or an HVT inside as far as the squad knows. Pinned in the open: smoke (G-07).
 - **Size** M. **Priority** P1.
+- **Done 2026-10-21** (claude/ai-followups). Smoke: `SquadAI._smoke_crossing` puts smoke between
+  the way and the threat when a move in contact crosses CROSS_OPEN_M (15 m) or more of open ground
+  the threat sees (its middle and two thirds in view, nothing in the way), once a squad near there
+  (`_screened`): a bound (`_bound_toward`, once for the whole bound), a fall back, a move order, and
+  a casualty dragged or carried off in the open (from 3 m). Bangs: `Squad.bang_wanted` (an enemy
+  known inside, or a fight with one within 35 m of it; never a noncombatant inside) gives a stack
+  with no breacher an entry bang (`Squad.entry_bang`), and before each stair push the carrier goes
+  to the stair's foot and bangs up past the top (`_plan_stair_bang`, `_stair_bang`); the push goes
+  once it's gone off. Our side bangs with a flashbang first, the enemy a frag first
+  (`Squad.bang_of`). squad_test checks the crossing smoke and the stair bang.
 
 ### G-15: doctrine numbers still don't act (audit A3-07)
 
@@ -521,6 +531,17 @@ gap here.
 - **Proposed work.** With wave 7: a light factor and an NVG factor in `Spotting.spot_seconds`,
   muzzle flash worth more at night, flares. Fog as a range factor can go in now.
 - **Size** M. **Priority** P2 (P1 once wave 7 starts).
+- **Enemy flares done 2026-10-21** (claude/ai-followups). `Flares` (scripts/combat/flares.gd): a
+  parachute flare bursts high and lights the ground round it, full within its "full_m" and fading
+  to "edge_m", fading out in its last 4 s; host authoritative, synced to every peer and a late
+  joiner. Spotting's `sight_x` takes the darkness away at the one looked at by `light_at`, so a lit
+  field is seen almost as by day, by both sides. A hostile who hears contact or takes fire at
+  darkness 0.55 or more has his squad put one up over it (`SquadAI._maybe_flare`, once a squad every
+  45 s, not where one already lights it): a hand flare (`hand_flare`; one hostile in 4 on the
+  standard kit carries 2), else his side's mortar team's illumination round
+  (`MortarTeam.illum_for`, `MortarFire.server_fire_illum`). NVGs bloom in the light and looking at a
+  flare (`NvgView.bloom`). The daynight suite checks it. 40 mm star rounds and player hand flares
+  are F-179.
 
 ---
 
@@ -560,6 +581,14 @@ gap here.
 - **Proposed work.** An ambush posture for a suspicious patrol (down, hold fire until close),
   formation variety; mines with the IED work.
 - **Size** M. **Priority** P3.
+- **Formation variety done 2026-10-21** (claude/ai-followups). A hostile patrol walks its route in
+  formation behind its lead (`Squad.patrol_lead`, `SquadAI._patrol` to `follow_point`). The
+  dynamic formation (both sides, `Squad.pick_formation`): a line in contact, a staggered column in a
+  town, a file in the woods (`_in_woods`: leaves round the lead), on a road a column or a staggered
+  column on the alert or in the dark, on open ground a wedge or a staggered column in the dark;
+  woods and the dark close the spacing a step. Spacing is scaled by doctrine (doctrines.json
+  "spacing": insurgents 0.7, regulars and PMCs 1.0). squad_test checks the table and the doctrine
+  gaps; garrison_test a patrol in formation.
 
 ---
 

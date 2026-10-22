@@ -86,6 +86,50 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
   about 100 m), not at any range. It still wrecks wheels and engine bays.
 - Rifle rounds, demolition charges, mines and fire support hit vehicles exactly as before, and
   so does everything that hits a technical, a helicopter or a static gun.
+### AI follow-ups: road ambushes, halls, dug ground, smoke and bangs, flares, patrol formations
+
+#### Added
+- **Road ambushes that wait for the convoy (F-140).** Enemy teams laid by a road hold their own
+  spots in cover, down and facing the road, holding their fire. They spring it as the first truck
+  comes level with them, every man opening up at once: the gunner on the mounted gun first, then
+  the crews, the rocket men at the lead truck and then the last one. They spring early if they're
+  given away (fired on, a man down, or found up close). They fight from their ground rather than
+  chase the convoy or charge the hill, and run if they're beaten.
+- **Convoy trucks drive through an ambush.** A truck driven as a convoy's pushes through the kill
+  zone faster, its gunner firing as it goes. If it's knocked out, its crew bail out on the side
+  away from the fire and hold there.
+- **Smoke and bangs (AI bar G-14).** Under fire, the AI throws smoke before crossing open ground
+  the enemy can see (a bound, falling back, a move order) and before dragging a casualty off in the
+  open, once a squad on the same ground. Clearing a building known to hold the enemy (or close to
+  a fight), a stack with no breacher bangs the room before going in, and the stack bangs up the
+  stairs before each push upstairs, the thrower at the foot of the stairs. Our side uses a
+  flashbang first, the enemy a frag. Never with a civilian or an HVT inside.
+- **Enemy flares at night (AI bar G-24).** When an enemy hears contact or takes fire in the dark,
+  his squad puts up illumination over it: a hand-fired parachute flare (one enemy in four carries
+  two), or a mortar illumination round where his side has a mortar team set up in range. A hand
+  flare bursts about 150 m up and lights the ground for about 35 s; a mortar's burns higher and
+  longer over a wider area. The lit ground is seen almost as by day by both sides, and NVGs bloom
+  in the light and when looking at a flare. Hand flares are loot.
+- **Patrol formations (AI bar G-26).** Enemy patrols walk their routes in formation behind their
+  lead instead of in a bunch. The formation follows the ground and the threat for both sides: a
+  file in the woods, a staggered column on a road when on the alert or at night (a column when
+  it's calm), a wedge on open ground (a staggered column at night), a staggered column in town, a
+  line in contact. Each doctrine has its own spacing: insurgent bands bunch up, regular armies keep
+  the drill's gaps.
+
+#### Changed
+- **The AI shoots at moving vehicles.** Against someone riding in a vehicle it aims at the vehicle
+  and leads it by its speed. Before, a truck driving past at speed never let it settle its aim,
+  so it never fired.
+- **Vehicle gunners take time to spot you.** The AI on a mounted gun has to make someone out
+  before it fires, like any soldier (range, stance, cover, camo, the dark). Before, it saw anyone
+  in a clear line at once, out to 600 m.
+
+#### Fixed
+- **Foxholes, trenches, berms and craters come back when a zone loads from its save (F-176).**
+  They were saved but dropped on loading.
+- **Hangars and factory floors count as buildings (F-162).** The AI's building scan missed the
+  middle of a big open hall, so it never garrisoned or cleared one room by room.
 
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 

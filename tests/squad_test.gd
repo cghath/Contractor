@@ -336,6 +336,25 @@ func _test_formation_orders() -> void:
 	check(echo.ai_status.contains("file") and alpha.ai_status.contains("dynamic"), "the squad HUD shows it (%s; %s)" % [echo.ai_status, alpha.ai_status])
 	check(squad.command(player, "formation:dynamic", player.global_position) and squad.command(player, "spacing:dynamic", player.global_position)
 		and squad.ordered_formation(1) == Squad.DYNAMIC and squad.ordered_spacing(0) == Squad.DYNAMIC, "the whole squad back to Dynamic clears team B's order")
+	# G-26: the formation by ground and threat, the gaps by doctrine.
+	var table := [Squad.pick_formation(false, false, false, true, false, false), Squad.pick_formation(true, false, true, false, true, false),
+		Squad.pick_formation(false, true, false, false, false, false), Squad.pick_formation(false, false, true, false, false, false),
+		Squad.pick_formation(false, false, true, false, true, false), Squad.pick_formation(false, false, false, false, false, false),
+		Squad.pick_formation(false, false, false, false, false, true)]
+	check(table == ["line", "staggered column", "file", "column", "staggered column", "wedge", "staggered column"],
+		"formations by ground and threat (G-26): contact a line, a town a staggered column, woods a file, a road a column or on the alert a staggered column, open ground a wedge or at night a staggered column (%s)" % [table])
+	var band := Squad.new()
+	band.faction = &"hostile"
+	band.doctrine = Doctrine.INSURGENT
+	var army := Squad.new()
+	army.faction = &"hostile"
+	army.doctrine = Doctrine.REGULAR
+	var bunched := float(band.resolved(0).man)
+	var drilled := float(army.resolved(0).man)
+	band.free()
+	army.free()
+	check(absf(drilled - float(Squad.SPACINGS.normal.man)) < 0.01 and bunched < drilled and absf(bunched - drilled * Doctrine.value(Doctrine.INSURGENT, "spacing")) < 0.01,
+		"spacing by doctrine: an insurgent band %.1f m apart, a regular army %.1f m" % [bunched, drilled])
 	_place(player, Vector3(0, 0.1, 12))
 	await _seconds(12.0)
 
@@ -1237,6 +1256,7 @@ func _test_multi_storey() -> void:
 		% [(on_op.get("ready", {}) as Dictionary).size(), mates.size(), held, went, why])
 	for ai: SquadAI in mates:
 		ai.give_tactic({})
+	await _test_smoke_and_bangs(found, mates, names, front_room, outside_at, upper)
 	await _test_breacher(found, mates, names, front_room, outside_at, world)
 	# Following him into a building with no order: they stack on its door and clear it on their own,
 	# and drop it once he's walked away (Squad._tick_follow_in).
@@ -1317,6 +1337,97 @@ func _test_multi_storey() -> void:
 		SquadAI.of(s).hold_fire = false
 	_clear_contact()
 	_place(gunner.body, STOREY_AT + Vector3(0, 0.1, b.size.y * 0.5 + 4.0))
+
+
+## AI bar G-14: smoke over open ground crossed under fire (not a short hop, not twice where the
+## squad has just screened), and bangs: a clear of a building known to hold an enemy upstairs
+## bangs up the stair before the push, the thrower at its foot; never with a noncombatant inside.
+func _test_smoke_and_bangs(found: Dictionary, mates: Array[SquadAI], names: PackedStringArray, front_room: Vector3, outside_at: Vector3, upper: float) -> void:
+	print("Smoke and bangs (G-14)")
+	var squad := level.squad_for(&"friendly")
+	var mate := mates[0]
+	var from := outside_at + Vector3.UP * 0.1
+	_place(mate.body, from)
+	await _seconds(0.3)
+	var world := mate.body.get_world_3d()
+	# A threat 60 m off across open ground, and a crossing 25 m across its view.
+	var threat := Vector3.INF
+	var cross := Vector3.INF
+	for dir: Vector3 in [Vector3.BACK, Vector3.RIGHT, Vector3.LEFT, Vector3.FORWARD]:
+		var t := from + dir * 60.0
+		var c := from + dir.cross(Vector3.UP) * 25.0
+		if Throwables.clear_line(world, t + Vector3.UP * 1.5, from.lerp(c, 0.5) + Vector3.UP * 1.1) and Throwables.clear_line(world, t + Vector3.UP * 1.5, from.lerp(c, 0.67) + Vector3.UP * 1.1):
+			threat = t
+			cross = c
+			break
+	if not threat.is_finite():
+		check(false, "open ground round the house to cross")
+		return
+	mate.body.inventory.take(SquadAI.SCREEN_SMOKE)
+	squad.screen_at = -1000.0
+	mate.body._busy_until = 0.0
+	mate.body.threat_pos = threat
+	mate._last_contact = Soldier._now()
+	var smokes := mate.body.inventory.count_of(SquadAI.SCREEN_SMOKE)
+	var short := mate._smoke_crossing(from + (cross - from).normalized() * 8.0)
+	var thrown := mate._smoke_crossing(cross)
+	mate.body._busy_until = 0.0
+	mate.body.inventory.take(SquadAI.SCREEN_SMOKE)
+	var again := mate._smoke_crossing(cross + Vector3.UP * 0.0)
+	check(not short and thrown and mate.body.inventory.count_of(SquadAI.SCREEN_SMOKE) == smokes and not again and squad.screen_point.distance_to(from.lerp(cross, 0.5)) < 1.0,
+		"in contact, a 25 m crossing in the enemy's view gets smoke first (an 8 m hop doesn't; nor the same ground again: %s, %s, %s)" % [short, thrown, again])
+	mate._last_contact = -1000.0
+	_clear_contact()
+	# Bangs: who carries what, our side flashbangs first.
+	for id: StringName in [&"flashbang", &"frag_grenade"]:
+		mates[1].body.inventory.take(id)
+	check(Squad.bang_of(mates[1]) == "flash", "our side bangs a room with a flashbang before a frag")
+	# A hostile known upstairs (held out of the fight far off): the building's hot.
+	var stair: Dictionary = {}
+	for st: Dictionary in found.get("stairs", []):
+		if int(st.from) == 0 and int(st.to) == 1:
+			stair = st
+	var spots_up: Array = (found.get("floors", []) as Array)[1].spots if (found.get("floors", []) as Array).size() > 1 else [Vector3(found.centre.x, upper, found.centre.z)]
+	var upstairs: Vector3 = (spots_up[spots_up.size() / 2] as Vector3) + Vector3.UP * 0.1
+	var held := level.spawn_soldier({"name": "UpstairsHostile", "faction": "hostile", "variant": "urban", "pos": Vector3(400, 0.1, -400),
+		"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.3, "discipline": 0.5, "guard": true})
+	await _frames(2)
+	SquadAI.of(held).process_mode = Node.PROCESS_MODE_DISABLED
+	held.set_physics_process(false)
+	squad.note_enemy(held, upstairs)
+	check(squad.bang_wanted(found) and not stair.is_empty(), "an enemy known upstairs: the building's hot (a bang before the push)")
+	for ai: SquadAI in mates:
+		ai.hold_fire = true
+	_place(player, outside_at + Vector3.UP * 0.1)
+	var why := squad.order_clear(player, front_room, names, "open")  # (eased open: the breacher's charge stays for his own test)
+	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	var watch := {"seen": false, "at_foot": false, "before": -1, "by": null, "item": &""}
+	var pushed := await _wait_until(func() -> bool:
+		squad.note_enemy(held, upstairs)  # (kept fresh: the squad still reckons him up there)
+		if op.has("stair_bang"):
+			if not watch.seen:
+				watch.seen = true
+				for ai: SquadAI in mates:
+					if int(ai._tactic().get("slot", -1)) == int(op.stair_bang.by):
+						watch.by = ai
+						watch.item = StringName(op.stair_bang.item)
+						watch.before = ai.body.inventory.count_of(watch.item)
+			if watch.by and (watch.by as SquadAI).body.global_position.distance_to(stair.foot) < SquadAI.STAIR_BANG_FOOT_M + 0.6:
+				watch.at_foot = true
+		return not op.is_empty() and is_finite(float((op.floor_go as Array)[1])), 90.0)
+	var by: SquadAI = watch.by
+	var thrown_from: Vector3 = op.get("stair_bang_from", Vector3.INF)
+	var off := Vector2(thrown_from.x - (stair.foot as Vector3).x, thrown_from.z - (stair.foot as Vector3).z).length() if thrown_from.is_finite() else INF
+	check(why == "" and pushed and watch.seen and off <= SquadAI.STAIR_BANG_FOOT_M + 0.1 and by != null and by.body.inventory.count_of(watch.item) < int(watch.before),
+		"clearing it, the push up the stair waits on a bang thrown up it from its foot (%s; %s, %.1f m from the foot, %s by %s)" % [why, watch.seen, off, watch.item, by.body.name if by else "nobody"])
+	for ai: SquadAI in mates:
+		ai.give_tactic({})
+		ai.hold_fire = false
+	squad.give_order(player, Squad.Order.FOLLOW, player.global_position)
+	squad.known.erase(held.get_instance_id())
+	held.queue_free()
+	_clear_contact()
+	await _seconds(0.5)
 
 
 ## ZoneScatter.foliage_between on made-up lines: through a bush, over it, past it, through a

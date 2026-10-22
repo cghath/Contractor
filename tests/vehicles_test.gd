@@ -1166,12 +1166,15 @@ func _test_static_gun() -> void:
 	check(not shot.is_empty(), "and fires it")
 	check(not gun.readout_parts(0).any(func(p: Dictionary) -> bool: return String(p.text).begins_with("Fuel")), "no fuel on its readout")
 	gun.server_exit(player)
+	player.global_position = at + Vector3(6.0, 0.1, 3.0)  # (off the gun's line: the AI gunner takes a moment to make the foe out now, F-140)
 	var foe := _soldier("hostile", at + Vector3(0, 0.1, -60), "TripodFoe")
 	var crew := _soldier("friendly", at + Vector3(0, 0.1, 1.5), "TripodGunner")
 	check(gun.server_enter(crew, 0), "an AI gunner sits behind it")
 	var g := gun.get_node_or_null(NodePath(AavGunner.NODE_NAME)) as AavGunner
 	await _wait_for(func() -> bool: return g != null and g.fired > 0, 8.0)
-	check(g != null and g.fired > 0, "and engages the enemy 60 m out (%d rounds)" % (g.fired if g else 0))
+	check(g != null and g.fired > 0, "and engages the enemy 60 m out (%d rounds; made out %s, awareness %s, %.1f s to spot him)" % [g.fired if g else 0,
+		g.made_out(foe) if g else false, g._aware.get(foe.get_instance_id(), "none") if g else "none",
+		Spotting.spot_seconds(crew, foe, Spotting.preset_of(gun), 0.7, false, Soldier._now())])
 	check(gun.global_position.distance_to(at) < 0.05, "it hasn't moved an inch firing (%.3f m)" % gun.global_position.distance_to(at))
 	gun.server_exit(crew)
 	foe.queue_free()
