@@ -25,12 +25,17 @@ extends RefCounted
 ## - Crossings: each crossing gets a road from the zone's edge, straight in through the crossing
 ##   point, on to the nearest road. Its kind comes from the link's two zone ids, so the road that
 ##   leaves one zone is the same kind and width as the one that enters the next, at its crossing.
-## - Profile: each road's height is the ground along it, smoothed over SMOOTH_M, never more than
-##   CUT_MAX_M off the ground, flat at junctions and level with the pads it meets. Water (where
-##   ZoneTerrain.water_height stands over the ground) is left out: the bridge goes there (the
-##   water side owns bridges; water_crossings() lists the spans).
+## - Every site is on the network (_complete_links), a trail's loose end near a road joins it, and
+##   routes keep off the roads already laid (NEAR_COST): roads cross, they don't run alongside.
+## - Profile: each road's height is the ground along it smoothed over SMOOTH_M (at most CUT_MAX_M
+##   off it), solved as a stretched string (_solve, PROFILE_LAMBDA_M) through its pins: flat at its
+##   junctions (whose heights are eased so the ramps between them and the pads stay under
+##   JUNCTION_RAMP; close ones share one), level with the pads it leaves or passes, drawn toward the
+##   roads beside it. Water (where ZoneTerrain.water_height stands over the ground) is left out:
+##   the bridge goes there (the water side owns bridges; water_crossings() lists the spans).
 ## - Grade: the terrain is cut and filled to the road: under the road SINK_M below it, a shoulder,
-##   then banks back to the natural ground (CUT_BANK, FILL_BANK).
+##   then banks back to the natural ground (CUT_BANK, FILL_BANK); last, no height point of a cell a
+##   road's surface crosses is left above it.
 ## - The def: "roads" becomes the curved roads as straight pieces (within DEF_TOL_M of the curve:
 ##   RoadRoute drives them, ZoneScatter keeps trees off them, the map draws them; each piece's
 ##   third entry is its kind), and the trails' "patrols" follow their curved roads.
