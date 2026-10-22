@@ -376,6 +376,10 @@ Fixed on claude/ai-followups (Claude, 2026-10-21):
   meets the ambush: it always drives through, faster, the gunner firing on (AavGunner). Disabled,
   its crew bail out to the side away from the fire and hold there (a convoy's crew aren't squad
   members, so they get the move themselves).
+- Firing at a man in a vehicle (SquadAI `_gate_open`, `_shoot`): the sights need only be on the
+  vehicle (VEHICLE_GATE_SHARE of its hull's size), since a round that misses him still hits it, and
+  the shot leads it by its speed. Before, a truck passing at 18 m/s never let the man-sized aim gate
+  open, so nobody fired at all. `SquadAI.shoot_blocker()` now names whatever stops a shot.
 - AavGunner now needs to make a man out before it fires (Spotting.spot_seconds, as SquadAI): an
   M2 gunner saw anyone in a clear line at once, which gave every ambush away at 600 m.
 - The mission's side is F-178. tests/garrison_test.gd checks it with an M-ATV on a road past
@@ -475,6 +479,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | Landmarks are garrisoned like other sites: a post inside each front door, one up high, one in a back room, the site's own (2-9 posts) | the brief says garrisonable like today's types | civilian-only landmarks
 - 2026-10-21 | Road ambushes spring on the first crewed enemy vehicle's closest pass within 160 m, or anything within 35 m, or when given away (fired on, a man down, found within 30 m); guns' gunners first, then crews; launchers at the lead truck, then the last (RoadAmbush, Proposed) | Lead and trail vehicles hit first is the drill; waiting for the pass gets the most of the column in the kill zone | spring at a fixed distance, or on the first sighting
 - 2026-10-21 | A convoy truck driven as an order always drives through an ambush; only a disabled one stops, its crew out to the lee (SquadDrivers.server_drive_route) | MRAPs drive through small-arms fire and the mission counts trucks through | DriveContact's judging (stop and dismount under heavy fire)
+- 2026-10-21 | At a man in a vehicle the AI's sights need only be on the vehicle (0.3 of its hull's diagonal) and the shot leads its speed (SquadAI, Proposed) | a passing truck never let the man-sized gate open, and a miss on him still hits the truck | aim at the hull's middle
 - 2026-10-21 | AI vehicle gunners need Spotting's time to make a man out before firing | the M2 saw anyone in a clear line at once, out to 600 m, which made ambushes impossible | an ambush-only exception
 - 2026-10-21 | A roofed spot in a big hall is inside with walls out to 26 m and up to 3 open ways (Buildings, Proposed) | hangars and factory floors are 17-26 m across with 14 m doors | grow rooms inward from the walls
 - 2026-10-21 | G-14: smoke over open ground of 15 m or more the threat sees, once a squad near there (bounds, fall backs, move orders), and over a casualty dragged off in the open; bangs into a hot building with no breacher and up each stair (flash first for our side, frag first for the enemy), never with a noncombatant inside | Arma/LAMBS smoke crossings; CQB bangs rooms and stairs | bangs into every room on every clear

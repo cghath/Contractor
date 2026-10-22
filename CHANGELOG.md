@@ -43,6 +43,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   the drill's gaps.
 
 #### Changed
+- **The AI shoots at moving vehicles.** Against someone riding in a vehicle it aims at the vehicle
+  and leads it by its speed. Before, a truck driving past at speed never let it settle its aim,
+  so it never fired.
 - **Vehicle gunners take time to spot you.** The AI on a mounted gun has to make someone out
   before it fires, like any soldier (range, stance, cover, camo, the dark). Before, it saw anyone
   in a clear line at once, out to 600 m.

@@ -95,6 +95,8 @@ func _seat_step(seat: int, delta: float) -> void:
 		gunner.model.look_pitch = asin(clampf(exact.y, -1.0, 1.0))
 	if not vehicle.gun_on(exact, VehicleTurret.ON_TARGET_DEG, -1 if main else seat):
 		return  # still turning onto it (a door gun: it went out of the arc)
+	if not made_out(foe):
+		return  # on him, not sure of him yet (F-140)
 	if not main and not vehicle.door_arc_ok(seat, dir):
 		dir = exact  # the spread took it past the door's edge
 	var shot := vehicle.server_fire_gun(gunner, dir)
@@ -147,10 +149,16 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 			continue
 		if _friend_in_line(gunner, everyone, muzzle, aim):
 			continue
-		if _spotted(gunner, s) < 1.0:
-			continue  # not made out yet (Spotting: a man down in cover at range takes a while)
+		if _spotted(gunner, s) < Spotting.SUSPECT:
+			continue  # nothing there yet he'd swing onto (Spotting: a man down in cover at range takes a while)
 		return s
 	return null
+
+
+## Whether the gunner has made `s` out (full awareness): he swings onto a man he only suspects,
+## and fires once he's sure.
+func made_out(s: Soldier) -> bool:
+	return float((_aware.get(s.get_instance_id(), [0.0]) as Array)[0]) >= 1.0
 
 
 ## The gunner's awareness of `s` after this look (one check_s of it in sight): it builds over
@@ -165,6 +173,13 @@ func _spotted(gunner: Soldier, s: Soldier) -> float:
 		var brain := SquadAI.of(gunner)
 		var t := Spotting.spot_seconds(gunner, s, Spotting.preset_of(vehicle), brain._react_combat() if brain and brain.body else 0.5, false, now,
 			Spotting.foliage_m(Spotting.scatter_of(vehicle), gunner, s))
+		# He scans with the gun, not along the way his seat faces: no off-view penalty.
+		var to := s.global_position - gunner.global_position
+		var facing := -gunner.global_basis.z
+		to.y = 0.0
+		facing.y = 0.0
+		if to.length() > 0.01 and facing.length() > 0.01 and rad_to_deg(facing.normalized().angle_to(to.normalized())) > Spotting.VIEW_HALF_DEG:
+			t /= Spotting.OFF_VIEW
 		a = 1.0 if t <= 0.0 else minf(a + float(_cfg.get("check_s", 0.5)) / t, 1.0)
 	_aware[id] = [a, now]
 	return a
