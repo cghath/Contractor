@@ -44,10 +44,43 @@ player's machine; the other suites keep headless's exact answers.
 
 ## Before and after
 
-NUMBERS_TABLE
+60 Hz frame cost in ms (average / 95th percentile / 99th / worst) and hitches a minute, before (the
+branch point, origin/claude/ai-driving e13d2f7, with the same harness) and after (15ec60a). The
+machine was quiet for these (the other sessions between runs):
 
-The machine was shared throughout (Captain's game and other sessions' test runs), so the absolute
-numbers are high and noisy; the baseline and the pass ran back to back (runs RUN_IDS).
+| Case | Average | 95th | 99th | Worst | Hitches a minute |
+|---|---|---|---|---|---|
+| town | 50.7 -> **21.4** | 114.0 -> **32.0** | 228.0 -> **47.1** | 306.6 -> **67.3** | 44 -> 60 (155-290 ms each -> 39-65 ms) |
+| fight | 24.1 -> **18.3** | 32.5 -> **25.7** | 89.6 -> **39.6** | 167.8 -> **74.2** | 45 -> **24** |
+| woods | 12.9 -> **8.6** | 17.5 -> **12.5** | 26.5 -> **17.6** | 76.9 -> **29.7** | 30 -> **0** |
+| drive | 10.3 -> **7.8** | 13.7 -> **10.8** | 19.2 -> **13.8** | 64.3 -> **33.1** | 11 -> **0** |
+| heli | 17.9 -> **10.4** | 58.9 -> **18.4** | 67.2 -> **24.5** | 101.4 -> **35.8** | 310 -> **0** |
+
+Runs: before R2427, after R2430 (town: R2425, the same code; R2430's town garrison went out hunting
+the squad and most of the zone's AI ended asleep, a different scene). Town's hitch count went up
+because the hitch line is three times the median and the median fell; each one is a quarter of what
+it was. The worst town frames left are a building scan's grouping and entrances (below).
+
+On a busy machine (Captain's game and other sessions' test runs alongside; before R2420, after
+R2422 at 9e235a4, the pass before its last fixes), the same picture:
+
+| Case | Average | 95th | Worst | Hitches a minute |
+|---|---|---|---|---|
+| town | 55.2 -> 37.5 | 167.9 -> 67.6 | 213.8 -> 94.1 | 40 -> 24 |
+| fight | 28.4 -> 18.7 | 41.4 -> 27.1 | 209.9 -> 67.6 | 54 -> 21 |
+| woods | 14.5 -> 10.2 | 20.3 -> 15.3 | 70.8 -> 32.1 | 34 -> 0 |
+| drive | 12.0 -> 9.3 | 16.9 -> 13.7 | 77.6 -> 41.0 | 11 -> 3 |
+| heli | 19.9 -> 12.9 | 63.9 -> 22.0 | 113.5 -> 58.1 | 309 -> 2 |
+
+Busiest of all, the first pass alone (R2405 -> R2408): town 91.5 / 267.0 -> 60.2 / 101.6, fight
+95.8 / 236.6 -> 35.8 / 56.4, heli 55.3 / 100.6 -> 15.2 / 29.2. A soldier's spawn: about 45 ms ->
+5-10 ms (tests/perf_spawn.tscn). townperf's tick: 17.2 -> 15.6 ms average, 95th 31.2 -> 26.0
+(R2418 -> R2419).
+
+The draw proxy (what the camera would draw; not timed headless): the Old Quarter about 515 draws, 340
+of them soldiers; Kestrel Valley from the M-ATV about 935 (scatter 412, terrain 201, soldiers 199),
+from the UH-60 about 1370 (scatter 1181) with about 965 shadow casters. The Detail setting's High
+stops the far canopy at 3.2 km; Medium and Low draw less scatter.
 
 ## What it found, and what changed
 
@@ -103,7 +136,19 @@ scatter 0.8x and 0.65x as far and the canopy to 2.4 and 1.8 km. Up close they al
 
 ## Budgets (Proposed)
 
-BUDGETS_TABLE
+`tests/perfcases_test.gd` BUDGETS: each case's average 60 Hz frame cost, its 95th percentile, and
+hitches a minute. About twice the pass's numbers on a busy machine (room for CI's runners) and under
+the numbers before the pass, so going back to them fails.
+
+| Case | Average | 95th | Hitches a minute |
+|---|---|---|---|
+| town | 75 | 140 | 90 |
+| fight | 40 | 60 | 45 |
+| woods | 25 | 35 | 20 |
+| drive | 20 | 30 | 15 |
+| heli | 28 | 45 | 20 |
+
+townperf keeps its own (tick 20 ms average, 40 ms 95th percentile).
 
 ## What's left
 

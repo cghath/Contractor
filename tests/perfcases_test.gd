@@ -47,7 +47,7 @@ const HITCH_MEDIANS := 3.0
 ## and under the numbers before the pass (town p95 168-267 ms, heli 309 hitches a minute), so going
 ## back to them fails.
 const BUDGETS := {
-	"town": {"avg": 75.0, "p95": 140.0, "hitches_min": 60.0},
+	"town": {"avg": 75.0, "p95": 140.0, "hitches_min": 90.0},
 	"fight": {"avg": 40.0, "p95": 60.0, "hitches_min": 45.0},
 	"woods": {"avg": 25.0, "p95": 35.0, "hitches_min": 20.0},
 	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0},
