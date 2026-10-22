@@ -25,6 +25,9 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built |
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
+| F-195 | P3 | Note: ZoneWater takes an operation zone's `river_hint` (combined arms D1, 2026-10-22): keep it when reworking the river line and road crossings |
+| F-196 | P3 | Note: ZoneBridges' bridge records carry the crossing's `role` ("msr" on an operation's main bridge; combined arms D1, 2026-10-22) |
+| F-197 | P3 | Note: ZoneModules.place_landmarks and landmark_kinds take an operation zone's band hint, covered zones, own list and max (combined arms D1, 2026-10-22) |
 
 ## F-01: the building scan only sees one floor
 
@@ -393,6 +396,42 @@ Suggested: count a spot as inside when a ray straight up meets a roof within a f
 walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or let a building's
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
+
+## F-195 to F-197: combined arms D1's hints in the world files (notes, nothing to fix)
+
+Branch `claude/ca-d1-operation-zones` (docs/combined_arms.md 6.2, phase D1: operation zones of
+8,192 m, `OperationGen`, `ZoneDef.generate_operation`). The doc (9.1) allows one hint each in
+ZoneWater and ZoneBridges; these are them, plus the landmark band hint, so the world work rebases
+cleanly. Every hint is inert for a def without the key: hot and contract zones generate exactly as
+before (the same seeds give the same water, crossings and landmarks).
+
+### F-195: ZoneWater's `river_hint`
+
+[zone_water.gd](../../scripts/world/zone_water.gd): `carve` merges the def's `river_hint.water`
+into the preset's water spec (an operation brings its own river to a dry preset: `rivers` count 1,
+`crossing_gap_m` 900, `footbridge_share` 1.0); `_generate` keeps the hint in `_hint`; `_make_river`
+lays its first river across the hint's `axis` at `at_m` from the friendly edge (the tries still
+pick the meander furthest from the pads); `_plan_crossings` gives a road crossing the river the
+kind the hint planned for it within `match_m` (`_planned`: the MSR's concrete bridge, the second
+route's truss, the ford tracks' fords), its `default` (a ford) for any other road, and puts the
+plan's `role` on the crossing. The rng is drawn as before, so zones without a hint don't change.
+If the river line or crossing planning is reworked, keep the hint: operation zones rely on the
+river crossing band 2 and the MSR's bridge being concrete (seizing a crossing, 6.4.4).
+
+### F-196: ZoneBridges' `role`
+
+[zone_bridges.gd](../../scripts/world/zone_bridges.gd) `setup`: each bridge record gets
+`"role"` from its crossing ("msr", "route", "ford" or ""), so later phases find the operation's
+main bridge (A6's `mlc`, D5's demolition and firing point) without matching positions.
+
+### F-197: ZoneModules' landmark band hint
+
+[zone_modules.gd](../../scripts/world/zone_modules.gd): `place_landmarks` asks
+`OperationGen.landmark_area(def, kind, half)` for the rect a landmark's centre may go in (its band
+in an operation zone, from data/operation_zones.json `landmark_bands`; an empty rect elsewhere: the
+old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers` (data/landmarks.json
+"zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
+`landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
 ## Calls made for the Captain
 

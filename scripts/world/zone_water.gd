@@ -114,6 +114,9 @@ var _rng := RandomNumberGenerator.new()
 var _built_visuals := false
 var _roads: Array = []  # the def's roads as [Vector2, Vector2]
 var _surface_grid := PackedFloat32Array()
+## An operation zone's hint (the def's "river_hint", OperationGen): its first river crosses
+## "axis" at "at_m" from the friendly edge, and its road crossings get the planned kinds.
+var _hint := {}
 ## How long each part of the carve took (ms), for checks and the zone's log line.
 var timings := {}
 
@@ -124,6 +127,8 @@ const LAKE_BINS := 48
 ## the crossings over `def`'s roads. Null when the preset has no water.
 static func carve(t: ZoneTerrain, def: Dictionary) -> ZoneWater:
 	var water_spec: Dictionary = t.preset.get("water", {})
+	if def.has("river_hint"):  # an operation zone's river across its axis (OperationGen, docs/combined_arms.md 6.2.1; F-item)
+		water_spec = water_spec.merged(def.river_hint.get("water", {}), true)
 	if water_spec.is_empty() or def.get("no_water", false):
 		return null
 	var w := ZoneWater.new()
@@ -137,6 +142,7 @@ static func carve(t: ZoneTerrain, def: Dictionary) -> ZoneWater:
 func _generate(def: Dictionary) -> void:
 	_half = terrain.size_m * 0.5
 	_rng.seed = terrain.seed_value ^ 0x5A7E12
+	_hint = def.get("river_hint", {})
 	var n := terrain.points
 	_mask.resize(n * n)
 	_shore.resize(n * n)
@@ -272,6 +278,10 @@ func _make_river(s: Dictionary, k: int) -> Dictionary:
 	for attempt in RIVER_TRIES:
 		var dir := Vector2.from_angle(_rng.randf() * PI)
 		var offset := _rng.randf_range(-0.28, 0.28) * terrain.size_m
+		if k == 0 and _hint.has("axis"):  # across the operation's axis at at_m (each try a different meander)
+			var axis := Vector2(float(_hint.axis[0]), float(_hint.axis[1]))
+			dir = Vector2(-axis.y, axis.x)
+			offset = (float(_hint.at_m) - _half) * Vector2(-dir.y, dir.x).dot(axis)
 		var perp := Vector2(-dir.y, dir.x)
 		var reach := _half * (absf(dir.x) + absf(dir.y)) + STEP_M * 2.0
 		var n := ceili(2.0 * reach / STEP_M) + 1
@@ -619,13 +629,29 @@ func _plan_crossings(bi: int, roads: Array) -> void:
 			if river:
 				var weights: Dictionary = spec.get("bridges", {"concrete": 0.6, "truss": 0.4})
 				kind = ZoneBridges.CONCRETE if _rng.randf() < float(weights.get("concrete", 0.6)) / maxf(float(weights.get("concrete", 0.6)) + float(weights.get("truss", 0.4)), 0.01) else ZoneBridges.TRUSS
+				var plan := _planned(hit)
+				if not plan.is_empty():
+					kind = String(plan.kind)
 			else:
 				var narrow := float((b.half as PackedFloat32Array)[i]) * 2.0 <= CULVERT_MAX_W_M
 				kind = ZoneBridges.CULVERT if narrow and _rng.randf() < float(spec.get("culvert_share", 0.65)) else ZoneBridges.FORD
 			at.append(u)
 			_add_crossing(bi, u, kind, (e - a).normalized(), ri)
+			if river and not _hint.is_empty():
+				crossings.back()["role"] = String(_planned(hit).get("role", ""))
 	if river:
 		_fill_gaps(bi, at)
+
+
+## The operation's plan for a road crossing a river at `p` (_hint "crossings" within "match_m":
+## {"kind", "role"}), its "default" kind for any other road, {} with no hint.
+func _planned(p: Vector2) -> Dictionary:
+	if _hint.is_empty():
+		return {}
+	for c: Dictionary in _hint.get("crossings", []):
+		if p.distance_to(Vector2(float(c.pos[0]), float(c.pos[1]))) <= float(_hint.get("match_m", 300.0)):
+			return c
+	return {"kind": String(_hint.get("default", ZoneBridges.FORD)), "role": ""}
 
 
 ## River `bi`'s added crossings (fords and footbridges): no stretch longer than the gap goes

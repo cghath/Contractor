@@ -403,13 +403,15 @@ static func landmark_kinds(def: Dictionary) -> Array:
 			var k := String((data.get("site_names", {}) as Dictionary).get(String(n), ""))
 			if k != "":
 				want.append(k)
-	for k: Variant in (data.get("zones", {}) as Dictionary).get(String(def.get("id", "")), []):
-		want.append(String(k))
+	for zone_id: Variant in [def.get("id", "")] + Array(def.get("covers", [])):  # an operation's covered zones' too (OperationGen)
+		for k: Variant in (data.get("zones", {}) as Dictionary).get(String(zone_id), []):
+			want.append(String(k))
+	want.append_array(def.get("landmarks", []))  # a def's own (an operation's depth target)
 	var out: Array = []
 	for k: Variant in data.get("order", []):
 		if String(k) in want and not String(k) in out:
 			out.append(String(k))
-	var most := int((data.get("max", {}) as Dictionary).get("hot" if String(def.get("kind", "")) == "hot" else "contract", 4))
+	var most := int(def.get("landmark_max", (data.get("max", {}) as Dictionary).get("hot" if String(def.get("kind", "")) == "hot" else "contract", 4)))
 	return out.slice(0, most)
 
 
@@ -461,8 +463,11 @@ static func place_landmarks(def: Dictionary) -> void:
 		var keep := half - LANDMARK_EDGE_M
 		if h.x > keep or h.y > keep:
 			continue
+		var band := OperationGen.landmark_area(def, kind, h)  # an operation zone's band for the kind (docs/combined_arms.md 6.2.1); empty: anywhere
 		for attempt in 400:
 			var p := Vector2(snappedf(rng.randf_range(-keep + h.x, keep - h.x), ZoneDef.GRID_M), snappedf(rng.randf_range(-keep + h.y, keep - h.y), ZoneDef.GRID_M))
+			if band.has_area():
+				p = Vector2(snappedf(lerpf(band.position.x, band.end.x, rng.randf()), ZoneDef.GRID_M), snappedf(lerpf(band.position.y, band.end.y, rng.randf()), ZoneDef.GRID_M))
 			var r := pad_rect(type, p)
 			if taken.any(func(t: Rect2) -> bool: return t.grow(LANDMARK_KEEP_M).intersects(r)):
 				continue

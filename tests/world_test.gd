@@ -18,6 +18,8 @@ const BUDGET_GENERATE_MS := 1500.0
 const BUDGET_WORST_FRAME_MS := 150.0
 const BUDGET_AVERAGE_FRAME_MS := 25.0
 const BUDGET_MEMORY_MB := 250.0
+## docs/combined_arms.md 9.3, D1: an operation zone's def, terrain and water made in under this.
+const BUDGET_OPERATION_MS := 8000.0
 ## The shed's plank wall in the compound module, and the live mark the host makes once the
 ## client is in (module space, metres).
 const SHED_SHOT_FROM := Vector3(17.05, 1.35, -3)
@@ -147,6 +149,7 @@ func _test_generation(mem_before: float) -> void:
 	_test_building_gen()
 	_test_towns()
 	_test_presets()
+	_test_operation_zones()
 	_test_ship_placement()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
@@ -1616,3 +1619,104 @@ func _eye_foliage(sc: ZoneScatter, t: ZoneTerrain, p0: Vector2, p1: Vector2) -> 
 		var v := p0.lerp(p1, float(k + 1) / pieces)
 		sum += sc.foliage_between(Vector3(u.x, t.height_at(u.x, u.y) + 1.6, u.y), Vector3(v.x, t.height_at(v.x, v.y) + 1.6, v.y))
 	return sum
+
+
+## docs/combined_arms.md 6.2 (phase D1): operation zones of 8,192 m in bands along an axis of
+## advance, made from the zones they cover: the same every time, every site in its band, the MSR
+## the length with a concrete bridge over the band-2 river, the other crossings in band 2, and
+## landmarks from the covered zones in their bands. Budget: BUDGET_OPERATION_MS for the def, the
+## terrain and the water.
+func _test_operation_zones() -> void:
+	print("Operation zones")
+	var d := OperationGen.data()
+	var started := Time.get_ticks_msec()
+	var op := ZoneDef.generate_operation(11, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"])
+	var def_ms := Time.get_ticks_msec() - started
+	check(ZoneDef.generate_operation(11, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"]).hash() == op.hash()
+		and ZoneDef.generate_operation(12, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"]).hash() != op.hash(),
+		"the same seed, type and covers give the same operation zone; another seed another")
+	check(is_equal_approx(float(op.size_m), 8192.0) and OperationGen.is_operation(op) and op.covers == ["ashfield", "red_mesa", "salt_pan"]
+		and op.region == "inland" and op.terrain == "river_valley" and op.controller == "ashen_banner",
+		"an 8,192 m operation zone over its covered zones: inland, %s terrain, held by %s" % [op.terrain, op.controller])
+	var bands: Array = op.op.bands
+	var contiguous := bands.size() == 6 and is_zero_approx(float(bands[0].from_m)) and is_equal_approx(float(bands.back().to_m), 8192.0)
+	for k in range(1, bands.size()):
+		contiguous = contiguous and is_equal_approx(float(bands[k].from_m), float(bands[k - 1].to_m))
+	check(contiguous and bands.map(func(b: Dictionary) -> String: return b.id) == ["start", "outposts", "crossing", "town", "depth", "keep"],
+		"six bands along the axis, end to end: %s" % [bands.map(func(b: Dictionary) -> String: return "%s %d-%d" % [b.id, b.from_m, b.to_m])])
+	var band_of := func(def: Dictionary, id: String) -> String:
+		for m: Dictionary in def.modules:
+			if m.id == id:
+				return OperationGen.band_at(def, Vector2(m.pos[0], m.pos[1]))
+		return "(none)"
+	var count := func(def: Dictionary, type: String) -> int:
+		return (def.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) == type).size()
+	var in_band := func(def: Dictionary, type: String, band: String) -> bool:
+		return (def.modules as Array).all(func(m: Dictionary) -> bool:
+			return ZoneModules.base(String(m.type)) != type or OperationGen.band_at(def, Vector2(m.pos[0], m.pos[1])) == band)
+	var sites: Dictionary = d.sites
+	var posts: int = count.call(op, "outpost") + count.call(op, "checkpoint")
+	check(band_of.call(op, "fob") == "start" and band_of.call(op, "cp_msr") == "outposts" and band_of.call(op, "cp_bridge") == "crossing"
+		and band_of.call(op, "town") == "town" and band_of.call(op, "hq") == "depth" and in_band.call(op, "qrf_base", "depth") and in_band.call(op, "comms", "depth")
+		and not (op.modules as Array).any(func(m: Dictionary) -> bool: return OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1])) in ["keep", ""]),
+		"every site in its band: the FOB at the start, the MSR checkpoint in the outposts, the bridge's in the crossing, the town, the HQ, comms and QRF bases in the depth, none in the keep")
+	check(posts >= int(sites.outposts_checkpoints[0]) and posts <= int(sites.outposts_checkpoints[1]) and count.call(op, "hq") == 1
+		and count.call(op, "qrf_base") >= int(sites.qrf_bases[0]) and count.call(op, "qrf_base") <= int(sites.qrf_bases[1]) and count.call(op, "town") == 1
+		and count.call(op, "village") >= int(sites.villages[0]) and count.call(op, "village") <= int(sites.villages[1]),
+		"hot-zone sites, scaled: %d outposts and checkpoints, %d QRF bases, an HQ, %d villages, a town" % [posts, count.call(op, "qrf_base"), count.call(op, "village")])
+	# The MSR: start to depth target, crossed by both laterals.
+	var msr: Array = op.op.msr
+	var first := Vector2(msr[0][0], msr[0][1])
+	var last := Vector2(msr.back()[0], msr.back()[1])
+	var crossed := 0
+	for line: Array in op.op.laterals:
+		var hit := false
+		for i in range(1, line.size()):
+			for j in range(1, msr.size()):
+				hit = hit or Geometry2D.segment_intersects_segment(Vector2(line[i - 1][0], line[i - 1][1]), Vector2(line[i][0], line[i][1]),
+					Vector2(msr[j - 1][0], msr[j - 1][1]), Vector2(msr[j][0], msr[j][1])) != null
+		crossed += 1 if hit else 0
+	check(OperationGen.band_at(op, first) == "start" and OperationGen.band_at(op, last) == "depth" and String(op.op.depth).begins_with("lm_")
+		and (op.op.msr_roads as Array).size() == msr.size() - 1 and crossed == 2,
+		"the MSR runs from the start (%.0f m) to the depth target %s (%.0f m) in %d legs; both laterals cross it" % [OperationGen.along(op, first), op.op.depth, OperationGen.along(op, last), msr.size() - 1])
+	# Landmarks from the covered zones (Ashfield's airfield and mosque, Red Mesa's and Salt Pan's
+	# oil), each in its band.
+	var lm_bands: Dictionary = d.landmark_bands
+	var lms := (op.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.id).begins_with("lm_"))
+	var kinds := lms.map(func(m: Dictionary) -> String: return String(m.id).trim_prefix("lm_"))
+	var placed_right := lms.all(func(m: Dictionary) -> bool:
+		var kind := String(m.id).trim_prefix("lm_")
+		return not lm_bands.has(kind) or OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1])) == String(lm_bands[kind]))
+	check("airfield" in kinds and "oil_field" in kinds and "mosque" in kinds and placed_right
+		and kinds.all(func(k: String) -> bool: return k in ZoneModules.landmark_kinds(op)),
+		"landmarks from the covered zones, each in its band: %s" % [lms.map(func(m: Dictionary) -> String: return "%s (%s)" % [m.id, OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1]))])])
+	var dry := ZoneDef.generate_operation(13, "seize_crossing", ["kestrel_valley", "old_orchards"])
+	check(dry.op.depth == "lm_fuel_depot" and band_of.call(dry, "lm_fuel_depot") == "depth",
+		"covered zones with no airfield or oil site get a fuel depot as the depth target (%s, %s)" % [dry.op.depth, band_of.call(dry, String(dry.op.depth))])
+	var coast := ZoneDef.generate_operation(12, "beach_landing", ["landing_beach", "cove_outpost", "ashfield"])
+	check(coast.region == "coast" and coast.terrain == "amphibious_coast" and int(coast.sea_side) == int(coast.op.side) and String(coast.op.fob) == ""
+		and band_of.call(coast, "lm_harbour") == "start" and OperationGen.band_at(coast, Vector2(coast.op.msr[0][0], coast.op.msr[0][1])) == "start",
+		"a beach landing: the sea on the friendly edge (side %d, sea %d), no FOB (the LHD stands off), the harbour on the coast, the MSR from the beach" % [coast.op.side, coast.sea_side])
+	# The river and its crossings (ZoneWater and ZoneBridges from the def's river_hint).
+	var flat: Array = []
+	for m: Dictionary in op.modules:
+		flat.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))
+	var t := ZoneTerrain.new()
+	var terrain_started := Time.get_ticks_msec()
+	t.generate(op, flat)
+	var gen_ms := def_ms + Time.get_ticks_msec() - terrain_started
+	var w := t.water
+	var rivers := (w.bodies as Array).filter(func(b: Dictionary) -> bool: return b.kind == "river") if w else []
+	var on_river := (w.crossings as Array).filter(func(c: Dictionary) -> bool: return w.bodies[int(c.body)].kind == "river") if w else []
+	var vehicle := on_river.filter(func(c: Dictionary) -> bool: return int(c.road) >= 0)
+	var msr_bridge := (w.bridges.bridges as Array).filter(func(b: Dictionary) -> bool: return b.type == ZoneBridges.CONCRETE and b.get("role", "") == "msr") if w else []
+	var msr_x := vehicle.filter(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.CONCRETE and int(c.road) in (op.op.msr_roads as Array))
+	check(rivers.size() == 1 and msr_bridge.size() == 1 and msr_x.size() == 1 and OperationGen.band_at(op, msr_x[0].pos) == "crossing",
+		"a river across the axis at %.0f m with one concrete bridge on the MSR, in band 2" % float(op.op.river_at_m))
+	check(on_river.all(func(c: Dictionary) -> bool: return OperationGen.band_at(op, c.pos) == "crossing")
+		and vehicle.size() >= 2 and vehicle.size() <= 4 and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.TRUSS)
+		and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.FORD),
+		"every crossing in band 2: %d for vehicles (%s), %d footbridges between" % [vehicle.size(),
+		vehicle.map(func(c: Dictionary) -> String: return "%s %s" % [c.kind, c.get("role", "")]), on_river.size() - vehicle.size()])
+	t.free()
+	check(gen_ms < BUDGET_OPERATION_MS, "an operation zone generates in %d ms: the def %d, its terrain and water %d (budget %.0f)" % [gen_ms, def_ms, gen_ms - def_ms, BUDGET_OPERATION_MS])

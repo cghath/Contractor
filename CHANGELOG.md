@@ -11,6 +11,37 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Combined arms D1: operation zones of about 8 km (docs/combined_arms.md 6.2)
+
+#### Added
+- **Operation zones.** `ZoneDef.generate_operation(seed, op_type, covers)` makes an 8,192 m zone
+  for the big government operations from the contract zones it covers. It takes their region,
+  terrain, assets and landmarks. Nothing offers or hosts one yet: that comes with operation
+  contracts (D3) and the 8 km performance work (D2).
+- **Bands along an axis of advance.** The zone runs from the friendly edge, or the sea, into the
+  enemy's depth. First comes the start: an allied FOB inland, or the beach on the coast. Then
+  outposts, checkpoints and villages. Then a river crossing, then the town, then the HQ with its
+  comms site, QRF bases and the depth target (an airfield, an oil site or a fuel depot). The
+  enemy's rear comes last.
+- **The main supply route.** The MSR runs the length of the zone: start, its checkpoint, the
+  river, the town, the HQ, the depth target. Two laterals cross it, and every other site has a
+  track to the nearest road.
+- **A river with real crossings.** The river crosses the axis in band 2. The MSR crosses it on a
+  concrete road bridge. A second route has a steel truss bridge, and one or two tracks ford it.
+  Footbridges sit between them for the infantry. A checkpoint holds the far end of the bridge,
+  with an outpost overlooking it.
+- **Landmarks from the covered zones**, each in its own band. A beach landing's harbour stands on
+  the coast. The mosque and the office are in the town, and the airfield and oil field are in the
+  depth.
+
+#### Changed
+- cghath's world files get one small hint each: ZoneWater lays an operation's river and plans its
+  crossings, ZoneBridges tags the MSR's bridge, and ZoneModules places landmarks in their bands.
+  Other zones generate exactly as before. These are noted as F-195 to F-197 in
+  docs/audits/followups.md.
+- Every number is in data/operation_zones.json (Proposed). The calls made are listed in
+  docs/combined_arms.md section 10, numbers 74 to 84.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added
