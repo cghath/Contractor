@@ -701,6 +701,12 @@ helicopter settle on it (gear on the uphill side first), or have LandingZone als
 ground within the rotor disc to stay within a metre or so of the spot. The snow preset was made
 gentler (relief 2.1 -> 1.7) meanwhile.
 
+Eased (world/terrain, 2026-10-22): it came back on CI (ad6a064e, the loop suite's intel grab on
+Whitecap Pass: LZs of 13 and 15 degrees, touched down at 0 m to go, never landed). DeadGround.find
+now looks on (up to LZ_LEVEL_LOOK = 40 more candidates) for a hidden LZ of 8 degrees or less
+before taking a steeper one, and then takes the flattest; Whitecap Pass's LZs round every site
+come out at 2-8 degrees. Still open: the helicopter settling on a slope LandingZone allows.
+
 ## F-210: a city's street grid isn't paved (the roads agent's ZoneRoads)
 
 Queue item 1.5 (city zones) gives a city's street grid as data of its own: the def's `"cities"`
@@ -960,3 +966,6 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-22 | Farmland and the props library (F-187): nothing of the props stands in a crop field but the power lines' pylons and poles; a farm's field fences and gates run down the lanes between the fields (2-5 sides within 170 m of it, Proposed); farmland has no prop irrigation (its channels are ZoneWater's); fields keep off the planned roads' verges | props and fields agree, the lanes stay walkable, power lines stay straight | power lines bending round every field, or the props' own field grid over the features' fields
 - 2026-10-22 | A city's props (cities #23 under the props library): its street furniture is laid once for the whole city from its street grid's numbers (BuildingGen.city_layout: lamps every 16 m on alternating pavements, 1-2 benches and 0-1 bins a block, 2-4 dogs; data/props.json "city", Proposed), without building its blocks, and a city's clutter round its pad once, not once a block; city_hot's layout 4028 ms -> ~380 ms locally | each of a city's 20 blocks was laid as a town (building the block, ~100 ms each) and round the same city pad 20 times | the town street template inside each 48 m block, or a bigger budget
 - 2026-10-22 | terrain_test's "the hosted zone's ground ... are a fresh build's" compares like with like: the fresh build starts from the def as sent before the roads were planned (RoadNet.unplanned), plans its roads too (ZoneRoads.prepare), and must match the ground, the features and the planned road pieces | the host plans the roads into the def it sends, as base_zone_test found | comparing against the planned def (two different builds)
+- 2026-10-22 | Helicopter LZs (DeadGround.find, Noah's file, a small change): a hidden LZ steeper than 8 degrees is taken only if none of up to 40 more candidates is a hidden one of 8 or less, and then the flattest (Proposed) | helicopters land on 6-7 degrees but not on 10-15 (F-189), and Whitecap Pass's first hidden LZs were 13-15 | the first hidden LZ that LandingZone passes (15), or a gentler snow preset again
+- 2026-10-22 | loop_test's deposit check brings the hostile body that fell last, not the first in the group | the body cap (12) takes the oldest body, gear dropped where it lay, and a raid with a dozen more falling after it lost the body brought to the point ("bodies 0", its gear banked as deposited) | raise the cap in the test
+- 2026-10-22 | A group coming back from virtual (Virtualizer._woke, Noah's file, a small change) puts every man on the group's leg of its route (the profile's route_i, from its lead), as a moving profile already did | whichever man thinks first becomes the patrol's lead and the rest copy his leg, so a man left on leg 0 took the group back a leg (virtualization's "same leg of the route" failed 1 run in 2 here and on CI, R0563) | restore the old lead (patrol_lead drops a lead not yet patrolling)

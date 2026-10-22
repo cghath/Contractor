@@ -54,6 +54,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Cities get their street furniture once.** A city's lamps, benches and bins line the pavements
   of its whole street grid, laid in one pass instead of a town's street kit inside every block;
   building a city zone's props takes about a tenth of the time it did.
+- **Flatter helicopter LZs.** A helicopter insertion or wave-off now looks a little further for
+  a hidden LZ of 8 degrees or less before settling for a steeper one, so on the mountains it
+  lands instead of hovering on a slope it can't sit on.
 
 ### City zones and village houses (cghath's brief, queue items 1.5 and 1.6)
 
