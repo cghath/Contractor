@@ -102,13 +102,18 @@ func _rect_of(chunk: Vector2i) -> Rect2:
 	return Rect2(_origin.x + chunk.x * ZONE_CHUNK_M, _origin.y + chunk.y * ZONE_CHUNK_M, ZONE_CHUNK_M, ZONE_CHUNK_M)
 
 
-## The chunk plus its border, from below the lowest ground to HEADROOM_M above the highest,
-## on a 0.25 m height grid shared by every chunk (so their edges line up).
+## The chunk plus its border, from below the lowest ground to HEADROOM_M above the highest (or
+## over the tallest module standing on it, its top and a man's height: a city's floors and roofs,
+## queue item 1.5), on a 0.25 m height grid shared by every chunk (so their edges line up).
 func _bounds_of(chunk: Vector2i) -> AABB:
 	var r := _rect_of(chunk).grow(BORDER_M)
 	var heights := zone.terrain.height_range(r.grow(ZoneTerrain.CELL_M))
 	var lo := floorf((heights.x - 1.0) / 0.25) * 0.25
-	var hi := ceilf((heights.y + HEADROOM_M) / 0.25) * 0.25
+	var top := heights.y + HEADROOM_M
+	for module in zone.modules():
+		if module.footprint().intersects(r):
+			top = maxf(top, module.global_position.y + float(ZoneModules.TOP.get(module.type, 0.0)) + AGENT_HEIGHT)
+	var hi := ceilf(top / 0.25) * 0.25
 	return AABB(Vector3(r.position.x, lo, r.position.y), Vector3(r.size.x, hi - lo, r.size.y))
 
 
@@ -124,6 +129,9 @@ func _ground_source(chunk: Vector2i) -> NavigationMeshSourceGeometryData3D:
 		var bridges := zone.terrain.water.nav_faces_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z))
 		if not bridges.is_empty():
 			source.add_faces(bridges, Transform3D.IDENTITY)  # the way over deep water (ZoneBridges)
+	var props := zone.scatter.faces_in(Rect2(b.position.x, b.position.z, b.size.x, b.size.z))  # the prop library's, as drawn
+	if not props.is_empty():
+		source.add_faces(props, Transform3D.IDENTITY)
 	return source
 
 

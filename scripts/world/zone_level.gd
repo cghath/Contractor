@@ -69,14 +69,17 @@ var terrain: ZoneTerrain
 var _posts := {}  # Host: module id -> GarrisonPost (its garrison holding inside its walls)
 var _site_squads := {}  # Host: module id -> Squad, its garrison's own (AI bar G-02)
 var scatter: ZoneScatter  # rocks, scrub and trees on it
+## The roads (ZoneRoads, cg_brief 1.2): planned on the terrain before its collision, every peer.
+var roads: ZoneRoads
 ## Spawns WorldCache nodes at the scatter's VALUABLE sites (WorldValuables): one per peer, the
 ## host's spawn (with its seeded loot) replicates to everyone, late joiners included.
 var cache_spawner: MultiplayerSpawner
 ## Host only: the navigation (null on clients).
 var nav: ZoneNav
 ## How long generating the zone took on this peer (ms): terrain heights, collision and,
-## with a display, the coarse meshes.
+## with a display, the coarse meshes; and the scatter's part of it.
 var generate_ms := 0.0
+var scatter_ms := 0.0
 
 var _modules: Array[ZoneModule] = []
 var _by_id := {}  # module id -> ZoneModule
@@ -186,7 +189,10 @@ func player_spawn(id: int) -> Vector3:
 
 ## `pos` on the terrain (0.1 m above it).
 func ground_point(pos: Vector3) -> Vector3:
-	return Vector3(pos.x, terrain.height_at(pos.x, pos.z) + 0.1, pos.z)
+	var h := terrain.height_at(pos.x, pos.z)
+	if roads and roads.net:
+		h = maxf(h, roads.surface_at(pos.x, pos.z))  # on a road: its surface (it stands a little over the graded ground)
+	return Vector3(pos.x, h + 0.1, pos.z)
 
 
 ## The ground's height at (x, z).
@@ -354,11 +360,18 @@ func _build_environment() -> void:
 	terrain.name = "Terrain"
 	add_child(terrain)
 	terrain.generate(def, _flat_areas())
+	roads = ZoneRoads.new()
+	roads.name = "Roads"
+	add_child(roads)
+	roads.prepare(terrain, def)  # the curved roads into the def, the ground cut and filled to them
 	terrain.build_collision()
+	roads.build_collision()
 	scatter = ZoneScatter.new()
 	scatter.name = "Scatter"
 	add_child(scatter)
+	var scatter_started := Time.get_ticks_usec()
 	scatter.generate(terrain, def)
+	scatter_ms = (Time.get_ticks_usec() - scatter_started) / 1000.0
 	scatter.build_collision()
 	var cache_holder := Node3D.new()
 	cache_holder.name = "Caches"
@@ -384,15 +397,13 @@ func _build_environment() -> void:
 	if DisplayServer.get_name() != "headless":
 		terrain.build_visuals()
 		scatter.build_visuals()
-		var roads := ZoneRoads.new()
-		roads.name = "Roads"
-		add_child(roads)
-		roads.build(terrain, def)
+		roads.build_visuals()
 		var at := insertion_points()[0]
 		terrain.build_near(at, 16)
 		scatter.build_near(at, 4)
 	generate_ms = (Time.get_ticks_usec() - started) / 1000.0
-	print("[zone] '%s' (%d m, seed %d, %d modules) generated in %.0f ms" % [def.get("id", ""), int(terrain.size_m), terrain.seed_value, _modules.size(), generate_ms])
+	print("[zone] '%s' (%d m, seed %d, %d modules) generated in %.0f ms (scatter %.0f ms; roads: %d, planned %.0f ms, graded %.0f ms, laid %.0f ms, %d collision faces)" % [def.get("id", ""),
+		int(terrain.size_m), terrain.seed_value, _modules.size(), generate_ms, scatter_ms, roads.net.roads.size(), roads.net.plan_ms, roads.net.grade_ms, roads.build_ms, roads.collision_faces])
 
 
 ## The zone's light for terrain preset `preset_id`: the preset's "sky" (sun_energy, fill_energy,

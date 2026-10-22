@@ -1098,6 +1098,8 @@ func _restore_zone_id() -> void:
 ## or after SWITCH_WAIT_S: watch `level_switched`. Alone, it swaps at once.
 func server_switch_level(level_info: Variant, zone_id := "") -> void:
 	_switch_to = (level_info as Dictionary).duplicate(true) if level_info is Dictionary else LevelSwitch.info_for_scene(String(level_info))
+	if _switch_to.get("def") is Dictionary and not (_switch_to.def as Dictionary).has("season"):
+		_switch_to.def["season"] = Season.of_day(day())  # the campaign's season: crops, the snow line (queue item 1.3)
 	_switch_zone = zone_id
 	_switch_waiting = {}
 	for id in multiplayer.get_peers():

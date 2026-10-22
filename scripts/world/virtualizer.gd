@@ -829,6 +829,14 @@ func _woke(lvl: CompoundLevel, r: Dictionary) -> void:
 	for s: Variant in r.soldiers:
 		if is_instance_valid(s):
 			by_name[String((s as Node).name)] = s
+	# Every man back on the group's leg of its route (the profile's, from its lead), as a moving
+	# profile already gives them (_move): whichever man thinks first becomes the patrol's lead
+	# (Squad.patrol_lead: the first one patrolling) and the rest take his leg (SquadAI._patrol), so
+	# a man left on another leg could take the group back along its route.
+	for s: Variant in r.soldiers:
+		var brain := SquadAI.of(s) if is_instance_valid(s) else null
+		if brain and p.has("route_i"):
+			brain._patrol_index = int(p.route_i)
 	for s: Variant in r.soldiers:
 		if not is_instance_valid(s):
 			continue

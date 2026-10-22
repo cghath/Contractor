@@ -93,3 +93,16 @@ static func flow(body: Node3D) -> Vector3:
 ## His swimming speed with `load_fraction` (0 light to 1 a full load) on him.
 static func swim_speed(load_fraction: float) -> float:
 	return SWIM_SPEED * lerpf(1.0, SWIM_LOADED, clampf(load_fraction, 0.0, 1.0))
+
+
+## The share of his pace the ground under `body` leaves him (queue item 1.3: soft marsh ground and
+## snow, ZoneFeatures.slow_at; 1 elsewhere, in a vehicle, or off a zone). The same hook as the
+## water's: SoldierMovement reads it each step with the depth.
+static func ground_mult(body: Node3D) -> float:
+	var t := terrain_of(body)
+	if t == null or t.features == null:
+		return 1.0
+	var p := body.global_position
+	if p.y > t.height_at(p.x, p.z) + 0.8:
+		return 1.0  # up on something (a bridge, a rock, a roof): not in the mud or the snow
+	return t.features.slow_at(p.x, p.z)

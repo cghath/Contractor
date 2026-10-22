@@ -7,7 +7,9 @@ palette and the scatter (rocks, scrub, trees per km2 of zone, so bigger zones ge
 **Which preset a zone gets** (`ZoneDef.normalize`, so it is in the def the host sends): the def's `terrain`,
 else the first `name_hints` word in the zone's name, else `region_defaults[region]`, else `default`.
 Coast -> coastal_lowland, inland -> desert_wadi; Salt flats -> salt_flats; Black Ridge hills -> rocky_ridge; Kestrel Valley -> river_valley;
-Wadi farm -> desert_wadi. The test zone is `plain` (no scatter).
+Wadi farm -> desert_wadi. The test zone is `plain` (no scatter). The Old Quarter is `city` (queue item 1.5: low,
+gently rolling ground for a city's one flat pad, dusty verges, grey streets, few trees, more litter and ruins; its
+city's blocks paint their streets on the pad: docs/building_gen.md "City zones").
 
 **Sea**: a preset with `sea` gets a shoreline on one side picked by the seed, never a side holding a pad
 (`def.sea_side`, `def.sea_m`). Ground deeper than 0.9 m under the water is left out of navigation.
@@ -77,7 +79,7 @@ thickets 8000, solid 6800. Set as:
 
 | preset | woods | copses | hedgerows | road_trees | wadi groves | lone trees |
 | --- | --- | --- | --- | --- | --- | --- |
-| temperate | 1.5 | 5 | 4 | 0.4 | - | 12 |
+| temperate (woods perf pass: copse_cover; river_valley 2.1 and 6 too) | 2.1 (was 1.5) | 6 (was 5) | 4 | 0.4 | - | 12 |
 | forest_experimental (copse_cover) | 2.4 (70-170 m, thicket_share 0.35) | 6 (24-60 trees) | 2 | 0.6 | - | 16 |
 | coastal_lowland (harbour_yard) | 0.8 | 6 | 5 | 0.5 | - | 10 |
 | amphibious_coast | 0.4 | 4 | 3 | 0.3 | - | 8 |
@@ -90,8 +92,9 @@ thickets 8000, solid 6800. Set as:
 cover", "but they look fantastic": the trees' look is unchanged). EXPERIMENTAL, only in a preset whose scatter says
 `"copse_cover": true` (forest_experimental, the main menu's "Host Experimental forest (dense woods, test)"; Captain,
 2026-10-14: "include experimental forest mission like we dev'd", "make it a button on the menu, not a regular
-mission"). Every other preset keeps round 4's copses and caps (the normal zones' woods have a perf problem; a perf pass
-is queued). Fewer but bigger, denser copses (Proposed numbers, `ZoneScatter._copse`, layout version 7): 20-60 trees in a compact blob of radius `COPSE_SPREAD` (1.9) x sqrt(trees) + 2 m
+mission"). Since the woods perf pass (below) the normal wooded presets have it too: temperate, river_valley,
+highland_moor, coastal_lowland, amphibious_coast, rocky_ridge, scrubland, snow_mountain and farmland; desert_wadi,
+badlands, salt_flats, marsh (its own 12-40 tree copses among the reeds) and city keep round 4's copses. Fewer but bigger, denser copses (Proposed numbers, `ZoneScatter._copse`, layout version 7): 20-60 trees in a compact blob of radius `COPSE_SPREAD` (1.9) x sqrt(trees) + 2 m
 (20 trees ~10.5 m, 60 ~16.7 m; round 4: 2.3 sqrt(n) + 3), trees ~3.2 m from the nearest (round 4: ~3.7);
 `copse_thicket_share` (default 0.9) thickets a tree inside (round 4: one per two trees); a skirt of thickets every
 `COPSE_SKIRT_M` (2.2 m) round the edge, the edge scrub outside it; 1-3 big solid rocks inside (`COPSE_ROCKS`) as low
@@ -114,6 +117,29 @@ seed, preset, ground checksum, pads, roads), so coming back to a zone skips the 
 MultiMeshes are kept for the 2 newest zones. Thickets draw with the scrub mesh to 950 m, no shadows. **Far
 stand-ins**: past 940 m each 24 m square of trees is one low canopy blob (one MultiMesh per 128 m cell, no shadows),
 out to the horizon, built with the visuals (never on a headless server; `far_counts()`).
+
+**Woods perf pass** (cghath's queue item 1.8, 2026-10-22; Captain, 2026-10-14: "frame goes 4 -> 10 ms in woods, up to
+1.5k draws, 1.4M prims. Then denser copses"). Measured headless on a PC loaded by other agents' runs, back to back (R0498
+before, R0499 after; "dense" is temperate's hot zone 4409 laid out with the dense copses, from its densest copse):
+- **Draw tiers** (`LOD_M` 200 m, `NEAR_BUILD_M` 420 m, Proposed): each 128 m cell is drawn as a near tier (the full trees,
+  thickets and scrub out to LOD_M from the cell's middle, plus the ground cover; built only within NEAR_BUILD_M) and a far
+  tier (low-poly stand-ins at the same transforms: a crown 44 triangles, a conifer 44, a thicket or bush 38, a square
+  trunk 8; with the rocks, props and wires) from LOD_M out. The two hand over at the same distance with the same margin.
+  The tier meshes leave out the caps nobody can see (a crown 224 -> 164 triangles, scrub 224 -> 152, a trunk 28 -> 16).
+- **Far blobs** in blocks of `FAR_BLOCK` (2) x 2 cells, each block the visibility parent of its cells' far-tier trees and
+  thickets (hierarchical LOD: a tree is drawn by exactly one of the near tier, the far tier or its block's blobs; the
+  forest suite checks it from 6 spots out to 1400 m). A cell's far tier is built while its block's blobs aren't showing.
+- Dense, from the densest copse: 590 -> 435 draws, 1.70M -> 0.64M triangles in view range, shadow pass ~231k -> ~159k
+  triangles; building a cell's visuals 27 -> 6 ms on average (headless, no GPU upload).
+- **Spotting**: foliage is indexed in 16 m squares (`FINE_M`, packed numbers, built with the layout and cached with it); a
+  sight line walks only the squares it crosses, from both ends, and `foliage_least` stops once both lines have
+  `enough` (Spotting.foliage_m passes FOLIAGE_OPAQUE_M: the answer is exact below it). The same metres as before (the
+  forest suite compares 300 lines with the old walk). A line 20-250 m through the dense copse: 4266 -> 392 us uncapped;
+  with 16 AI fighting round the forest's densest copse the AI's foliage walks went 9.0 -> 0.38 ms a frame; a
+  16-man scan round through it 649 -> 11 ms (R0519 / R0517).
+- **Navigation**: a nav chunk's trunk and rock boxes and prop faces come from the same 16 m index: 0.75 -> 0.06 ms a chunk.
+- Unchanged: collision (one static body per cell, every trunk, large rock and prop as drawn; a 30 m ray through the dense
+  wood 5-7 us, built at load in 0.6-1.2 s), layout time, and what hides whom.
 
 **Salt flats** (Captain, 2026-10-14, v0.3.1, first person on an HVT capture: "this terrain is an actual eye sore": a
 near-white pan, brighter than the sky, meeting it at a hard line with nothing on it). Numbers Proposed; judged in the
@@ -159,3 +185,49 @@ example): three related fixes, layout version 8.
   taken one from respawning, selling one feeds `Prices`, and carrying intel out already trips `IntelReveal`.
 - Both `ruins_per_km2` and `valuables_per_km2` are capped sparse (`CAP_PROPS`, `CAP_VALUABLES` 40) and set on every
   preset except `plain` (the empty test zone, left alone).
+
+**Terrain features and the marsh, snow and farmland presets** (queue item 1.3, `ZoneFeatures` in
+`scripts/world/zone_features.gd`, `Season`): a preset's `features` are planned once the pads are flat and carved
+into the heights after the water (kept off its water and banks: a stream cuts a notch through a cliff), from the seed
+and the season only (every peer builds the same; the season is in the def,
+`Season.of_day` of the campaign day, 30 days each from spring, put there by the host when it switches to a zone; a def
+without one is summer). Every part is optional, its keys default in `ZoneFeatures`' `*_DEFAULTS` (all Proposed):
+- `gullies`, `ditches`: `count` [min, max], `depth_m`, `half_m` (the sides reach this far from the middle), `floor_m`
+  (the flat floor's half width), `length_m`, `meander`. Seeded lines leaning downhill, kept `LINE_PAD_GAP_M` (30 m) off
+  pads and apart from each other and the cliffs, faded out at roads, the edge and their ends. Gullies 2-2.8 m deep hide
+  a prone man (and mostly a crouched one) from the flat round them; ditches 1.2-1.5 m a prone one. They're the
+  heightmap, so the AI's rays (spotting, `SquadAI.find_cover`'s cover and folds) see them as cover.
+- `cliffs`: `count`, `height_m`, `length_m`, `plateau_m` (the ledge), `back_m` (the ground eases back down over this),
+  `talus_per_m` (fallen rocks at the foot, ZoneScatter rocks). An escarpment whose face crosses one 4 m cell (60-79
+  degrees: no walking, driving or navigation up it; the shader draws it as layered rock), its high side where the ground
+  already rises, tapering out over 45 m at each end, kept 60 m off pads, a ramp where a road crosses it.
+- `marsh`: `share` (of the ground soft), `slow` (the pace lost on the softest: 0.35), `wavelength_m`, `reeds` (reed
+  beds over the soft ground), `reed_h_m`, `colour` (the mud). Slows a man on foot (`Wading.ground_mult`, the water's
+  movement hook), not on roads or pads; reed beds hide (`cover_least`, added in `ZoneScatter.foliage_least`).
+- `snow`: `cover`, `line_m` (the snow line per season: winter covers everything), `slow` (0.25), `colour`, `drifts`
+  (bare patches where the wind takes it). Off steep rock; the ground shader's `snow_strength` turns grass clumps back to
+  snow. The roads, tracks and pads are packed (no slowing). Water parts with `"frozen": true` are ice on their bed:
+  walked on, not waded (`ZoneWater._ice`).
+- `fields`: `share` (of the ground farmed), `size_m`, `lane_m` (the verge between fields), `orchard_share` and
+  `orchards_max`, `crops` (weights of wheat, maize, vegetables, fallow: their colour, height and cover by season in
+  `ZoneFeatures.CROPS`), `hedges` (share of field sides with a hedge: bushes and a tree every sixth), `channels` (share
+  of the grid's column edges with irrigation channels: the water's `"channels"` part carves them, `ZoneWater.add_line`),
+  `channel_m`. A turned grid with each column's rows staggered, never within 6 m of a pad (a landmark farm keeps its
+  yard), off water and slopes over 16 degrees. ZoneScatter keeps its own rocks, trees and ground cover off the fields
+  (`keeps_clear`) and lays the orchards, hedges and talus through `ZoneFeatures.lay_out`. Crops stand near the camera
+  as blocks in rows (maize with lanes); ripe wheat hides a prone man, maize a standing one.
+
+| preset | features | water | campaign zone |
+| --- | --- | --- | --- |
+| marsh | soft ground (60%), reed beds, ditches 2-4 | 16-24 shallow ponds, 1-2 pools, 1-2 sluggish streams | Blackwater Fen (inland) |
+| snow_mountain | snow (line: winter all, spring -6 m, summer 6 m, autumn -2 m), cliffs 2-4 (10-18 m), gullies 2-3 | 2-3 frozen streams, 1-3 frozen ponds | Whitecap Pass (inland) |
+| farmland | fields (80%, 70-150 m), orchards (12%, at most 6), hedges, ditches 1-3 | irrigation channels (12% of the column edges), 1-2 ponds, a stream sometimes | Harrow Fields (inland) |
+| rocky_ridge | cliffs 2-3 (8-16 m), gullies 1-2 | - | Red Mesa, Black Ridge hills |
+| highland_moor, badlands | cliffs 1-2 / 1-3 (6-12 m), gullies 1-3 / 3-5 | as before | |
+| temperate, scrubland, desert_wadi | gullies 1-3 / 2-4 / 2-4 (temperate: ditches 0-2) | as before | |
+| river_valley, coastal_lowland | ditches 1-3 / 1-2 | as before | |
+
+"procedural" mixes take the new presets too, and their `features` part by part (the nearer preset's part where both
+have one); frozen water only where the mix has snow. Name hints: marsh, swamp, fen, bog -> marsh; snow, winter, glacier
+-> snow_mountain; farmland, fields -> farmland. Checked by `tests/terrain_test.gd` (the `terrain` suite); pictures of
+each preset, headless, by `tests/terrain_shots.tscn` (to %TEMP%\contractor_world_shots).

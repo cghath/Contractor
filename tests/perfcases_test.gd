@@ -41,17 +41,18 @@ const ALL_CASES := ["town", "fight", "woods", "drive", "heli"]
 const HITCH_MS := 33.3
 ## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
 const HITCH_MEDIANS := 3.0
-## Proposed budgets (ms of 60 Hz frame cost; hitches a minute), 2026-10-22: about twice the perf
-## pass's numbers on a shared machine (docs/performance.md: town 37/68 ms and 24 hitches a minute,
-## fight 19/27 and 21, woods 10/15 and 0, drive 9/14 and 3, heli 13/22 and 2), room for CI's runners,
-## and under the numbers before the pass (town p95 168-267 ms, heli 309 hitches a minute), so going
-## back to them fails.
+## Proposed budgets (ms of 60 Hz frame cost; hitches a minute). Re-based 2026-10-22 on cghath's world
+## expansion (world/perf: the Old Quarter a real city, roads, fields, props), which about doubled the
+## cases' cost against claude/ai-driving df3133f without it (town 66.7 -> 132.6 ms average, 75 AI
+## and none asleep; heli 14.9 -> 28.7, R2484 -> R2485): about twice the merge's local numbers (R2478,
+## R2485), CI's runners having measured about twice a quiet local run. They still fail a further
+## doubling; the first budgets (town 75/140, heli 28/45...) are in docs/performance.md.
 const BUDGETS := {
-	"town": {"avg": 75.0, "p95": 140.0, "hitches_min": 90.0},
-	"fight": {"avg": 60.0, "p95": 110.0, "hitches_min": 45.0},
-	"woods": {"avg": 25.0, "p95": 35.0, "hitches_min": 20.0},
-	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0},
-	"heli": {"avg": 28.0, "p95": 45.0, "hitches_min": 20.0},
+	"town": {"avg": 270.0, "p95": 360.0, "hitches_min": 90.0},
+	"fight": {"avg": 140.0, "p95": 260.0, "hitches_min": 90.0},
+	"woods": {"avg": 45.0, "p95": 60.0, "hitches_min": 30.0},
+	"drive": {"avg": 52.0, "p95": 86.0, "hitches_min": 45.0},
+	"heli": {"avg": 58.0, "p95": 100.0, "hitches_min": 45.0},
 }
 ## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
 ## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners
@@ -338,10 +339,9 @@ func _host(zone_id: String) -> bool:
 	var t_vis := Time.get_ticks_usec()
 	level.terrain.build_visuals()
 	level.scatter.build_visuals()
-	var roads := ZoneRoads.new()
-	roads.name = "Roads"
-	level.add_child(roads)
-	roads.build(level.terrain, level.def)
+	var roads := level.get_node_or_null(^"Roads") as ZoneRoads  # (ZoneLevel lays them; their visuals wait for a screen)
+	if roads:
+		roads.build_visuals()
 	print("perf: %s's visuals built in %.0f ms" % [zone_id, (Time.get_ticks_usec() - t_vis) / 1000.0])
 	camera = Camera3D.new()
 	camera.name = "PerfCamera"

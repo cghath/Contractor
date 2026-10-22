@@ -4,11 +4,16 @@
 // - fine grain (~1 m, ~0.2 m) near the camera (faded out by detail_end_m), part-faceted normals,
 // - rock on steep faces picked per pixel (with layered bands), not only per vertex.
 // All procedural (value noise): no textures to load, a handful of ALU ops per pixel.
+// Snow (snow_strength, ZoneFeatures' snow preset, queue item 1.3; 0 elsewhere): where the vertex
+// colour is snow-white, the grass clumps and soil patches give way to soft drifts and a faint glint.
 // Salt pans (ZoneTerrain sets these from the preset's "ground"; 0 elsewhere, so other
 // presets look as before. Captain, 2026-10-14: the salt flats were "an actual eye sore"):
 // - damp_strength: large darker damp patches (~350 m and ~70 m),
 // - crust_strength: the crust's polygons (~1.8 m, raised lighter rims) near the camera,
 // - track_strength: a few long tyre tracks (two ruts each) across the pan, seen to ~320 m.
+// Roads (ZoneRoads, cg_brief 1.2): where the vertex colour is a road's (road_colour: asphalt,
+// track_colour: the dirt tracks; ZoneTerrain tints the ground under and past the drawn roads)
+// the patches and grass clumps stay off, so a road reads as one line out past its mesh.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
@@ -19,9 +24,12 @@ uniform float seed_offset = 0.0;
 uniform float macro_strength = 1.0;
 uniform float detail_end_m = 140.0;
 uniform float facet_share = 0.4;
+uniform float snow_strength = 0.0;
 uniform float damp_strength = 0.0;
 uniform float crust_strength = 0.0;
 uniform float track_strength = 0.0;
+uniform vec3 road_colour : source_color = vec3(0.064, 0.063, 0.058);
+uniform vec3 track_colour : source_color = vec3(0.17, 0.13, 0.08);
 
 varying vec3 w_pos;
 varying vec3 w_nrm;
@@ -115,6 +123,8 @@ void fragment() {
 	float grain = vnoise(p * 4.3) * 0.5 + vnoise(q * 9.7) * 0.5;
 
 	vec3 col = base;
+	// How much this is a road's ground: its colour within a little of a road's.
+	float roadness = max(1.0 - smoothstep(0.004, 0.02, distance(base, road_colour)), 1.0 - smoothstep(0.004, 0.02, distance(base, track_colour)));
 	// Dry patches, darker gravel/earth patches across the macro and mid noise.
 	col = mix(col, dry_colour, smoothstep(0.45, 0.85, macro) * 0.45 * macro_strength);
 	col = mix(col, earth_colour * 0.85, smoothstep(0.30, 0.05, macro) * 0.55 * macro_strength);
@@ -122,6 +132,7 @@ void fragment() {
 	col *= mix(0.84, 1.08, macro) * mix(0.90, 1.06, mid);  // (softer: the big smooth blotches read as smears, Captain 2026-10-18)
 	col *= mix(1.0, mix(0.80, 1.12, fine), near);
 	col *= mix(1.0, mix(0.84, 1.10, grain), close);
+	col = mix(col, base * mix(0.92, 1.05, mid), roadness);  // a road's ground keeps its colour
 
 	if (damp_strength > 0.0) {
 		// Damp patches: the crust darker and a touch greyer where the brine sits under it.
@@ -158,7 +169,7 @@ void fragment() {
 	// wall's are), the grass clumps and bare soil patches snapped to that grid (blocky edges),
 	// square stones on a 10 cm grid within ~25 m, and within ~12 m the 10 cm voxel grid itself.
 	const float BLOCK_M = 0.25;
-	float grassy = smoothstep(0.0, 0.05, base.g - base.r * 0.92);
+	float grassy = smoothstep(0.0, 0.05, base.g - base.r * 0.92) * (1.0 - roadness);
 	float mid_near = 1.0 - smoothstep(60.0, 110.0, dist);
 	if (mid_near > 0.0) {
 		vec2 bid = floor(p / BLOCK_M);
@@ -184,6 +195,16 @@ void fragment() {
 	float voxel_near = 1.0 - smoothstep(6.0, 12.0, dist);
 	if (voxel_near > 0.0) {
 		col *= mix(1.0, 1.0 + (hash12(floor(p / 0.1) + 17.0) - 0.5) * 0.08, voxel_near);  // the 10 cm voxel grid up close
+	}
+
+	if (snow_strength > 0.0) {
+		// Snow: on snow-white ground (bright in every channel: no other preset's palette is) the
+		// grass clumps and soil patches above are taken back to the snow, with drifts and a glint.
+		float snowy = smoothstep(0.45, 0.62, min(base.r, min(base.g, base.b))) * snow_strength;
+		float drift = vnoise(q / 9.0 + 2.0) * 0.6 + vnoise(p / 2.3) * 0.4;
+		vec3 snow_col = base * mix(0.90, 1.03, drift) * mix(1.0, mix(0.96, 1.03, grain), close);
+		snow_col *= 1.0 + step(0.985, hash12(floor(p / 0.1) + 3.0)) * speck_near * 0.25;
+		col = mix(col, snow_col, snowy);
 	}
 
 	// Rock on steep faces, per pixel, with horizontal strata. Not on dug earth: GroundCuts gives a

@@ -836,7 +836,7 @@ func _test_world_sites() -> void:
 	var zid := "pass_hot"
 	var h1 := WorldSites.holder(zid)
 	check(h1 == "kestrel" and WorldSites.holder(zid) == h1, "a zone's holder is seeded from its data and stays stable (%s)" % h1)
-	check(WorldSites.war_zones().size() == 28 and WorldSites.holder("dry_wadi") == "valley_shura" and WorldSites.holder("greyfell_moor") == "highland_front",
+	check(WorldSites.war_zones().size() == 31 and WorldSites.holder("dry_wadi") == "valley_shura" and WorldSites.holder("greyfell_moor") == "highland_front",  # (28, and queue item 1.3's fen, pass and farmland)
 		"every zone is in the war, each held by its group (%d zones)" % WorldSites.war_zones().size())
 	check(is_equal_approx(WorldSites.grip(zid), WorldSites.START_GRIP), "a fresh site starts at full grip (%.2f)" % WorldSites.grip(zid))
 	WorldSites.server_contract_won(zid, "nobody_holds_this")
@@ -1350,7 +1350,8 @@ func _test_allied_troops() -> void:
 	var rows := WorldSites.rows()
 	check(rows.size() == 5 and rows.all(func(r: Dictionary) -> bool: return String(r.holder) in MissionRegistry.enemies() and float(r.grip) > 0.0)
 		and Economy.world_sites().size() == 5 and WorldSites.row_text(rows[0]).contains("grip"),
-		"the board's hot zones: who holds each and how firmly (%s)" % WorldSites.row_text(rows[0]))
+		"the board's hot zones: who holds each and how firmly (%s; %s; on the board %d)" % [WorldSites.row_text(rows[0]),
+			rows.map(func(r: Dictionary) -> String: return "%s %s %.2f" % [r.zone_id, r.holder, float(r.grip)]), Economy.world_sites().size()])
 	cs.held = held_before
 	cs.deployment = deployment_before
 	Economy.change_reputation("uk_forces", uk_before - Economy.reputation("uk_forces"), "test cleanup", false)

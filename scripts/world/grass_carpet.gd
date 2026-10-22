@@ -23,6 +23,11 @@ var _centre := Vector2(INF, INF)
 var _colours: Array[Color] = []
 var _cut_seen := 0  # GroundCuts.version the carpet was laid for
 var _tufts := {}  # grid point (Vector2i) -> [Transform3D, Color], or null for none (lay)
+## Perf pass: at most this many grid points not seen before are worked out per lay; the rest come
+## in over the next frames (_incomplete re-lays). From a helicopter almost every lay is new ground
+## (15-50 ms a lay with the world expansion's fields). Standing, the carpet is whole in a frame or two.
+const NEW_PER_LAY := 700
+var _incomplete := false
 
 
 func setup(scatter: ZoneScatter, terrain: ZoneTerrain, mesh: Mesh, material: Material, colours: Array[Color]) -> void:
@@ -44,7 +49,7 @@ func _process(_delta: float) -> void:
 		return
 	var at := Vector2(camera.global_position.x, camera.global_position.z)
 	var cut_now := _terrain.cuts.version if _terrain.cuts else 0
-	if at.distance_to(_centre) < SNAP_M and cut_now == _cut_seen:
+	if at.distance_to(_centre) < SNAP_M and cut_now == _cut_seen and not _incomplete:
 		return
 	if cut_now != _cut_seen:
 		_tufts.clear()  # the ground changed: work them out again
@@ -71,6 +76,8 @@ func lay(centre: Vector2) -> int:
 	var roads: Array = near[1]
 	var xs: Array[Transform3D] = []
 	var cs: Array[Color] = []
+	var fresh := 0
+	_incomplete = false
 	for gz in range(gz0 - n, gz0 + n + 1):
 		for gx in range(gx0 - n, gx0 + n + 1):
 			var h1 := _hash(gx, gz)
@@ -85,6 +92,10 @@ func lay(centre: Vector2) -> int:
 			var key := Vector2i(gx, gz)
 			var tuft: Variant = _tufts.get(key, false)
 			if tuft is bool:
+				if fresh >= NEW_PER_LAY:
+					_incomplete = true  # (the next frame's lay goes on)
+					continue
+				fresh += 1
 				tuft = _tuft(x, z, h1, keep, roads)
 				_tufts[key] = tuft
 			if tuft == null:
@@ -127,6 +138,8 @@ func _tuft(x: float, z: float, h1: float, keep: Array[Rect2], roads: Array) -> V
 func _blocked(x: float, z: float, keep: Array[Rect2], roads: Array) -> bool:
 	if _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true
+	if _terrain.features and _terrain.features.keeps_clear(x, z):
+		return true  # a field (ZoneFeatures)
 	var p := Vector2(x, z)
 	for r in keep:
 		if r.has_point(p):

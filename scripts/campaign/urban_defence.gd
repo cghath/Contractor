@@ -101,10 +101,11 @@ func server_tick() -> void:
 				continue
 			s.set_meta(&"fell_back", int(s.get_meta(&"fell_back", 0)) + 1)
 			_move([s], to, "FB_%s" % m.module_id)
-		if not _relief_sent.has(m.module_id):
+		var relief_key := ZoneModules.city_of(m.type) if ZoneModules.city_of(m.type) != "" else m.module_id  # (a city: one relief for all its blocks)
+		if not _relief_sent.has(relief_key):
 			var command := EnemyCommand.of(self)
 			if command and command.can_decide():
-				_relief_sent[m.module_id] = true
+				_relief_sent[relief_key] = true
 				var threat := maxf(command.threat_cp(m.global_position, half.length() + NEAR_TOWN_M), EnemyCommand.SQUAD_MAN_CP)
 				command._launch_counterattack(m, threat, command.applied_ratio(RELIEF_RATIO), "relief of %s" % m.module_id, false)
 
