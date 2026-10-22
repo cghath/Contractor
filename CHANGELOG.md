@@ -11,6 +11,39 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Combined arms A1: the armour model (docs/combined_arms.md 2.3-2.4)
+
+#### Added
+- **Armour that cares about angle and where you hit.** The Abrams, Bradley, AAV, M-ATV and
+  MaxxPro now have armour plates: turret cheeks, mantlet, glacis, skirts, sides, roofs,
+  hatches, bellies, windows and tyres, each with its own thickness against sabots and against
+  shaped charges. A round's angle to the plate matters. Sabots and APDS turn slightly into the
+  plate, and steep hits can bounce off. A big enough round overmatches a thin plate and goes
+  through at any angle. RPGs and other shaped charges can glance off as duds at very steep
+  angles. The Abrams front shrugs off what kills it from the side, rear or roof, and an RPG
+  still kills an AAV from the side.
+- **Reactive armour and slat.** Tiles are used up when they fire, so the next round through the
+  same spot meets bare armour. The Bradley wears BRAT I tiles. Light tiles stop single RPGs but
+  not tandem ones, tandem-capable tiles stop both, and heavy tiles also blunt sabots. Slat cages
+  short out about half the RPGs that hit them and weaken the rest. Upgrade packages are in the
+  data, ready for the motor pool: TUSK I and II, BUSK III, and slat kits for the AAV and MRAPs.
+- **Fuzes.** Rounds now have point-detonating, delay, shaped-charge, tandem, proximity and
+  airburst fuzes, plus arming distances and self-destruct. HE can blow in thin plates such as
+  MRAP roofs and technical skins, but not a tank's.
+- **The tank and IFV rounds and the missiles.** These are in data now: M829A3, M830A1, AMP,
+  25 mm, 30 mm and 125 mm rounds, the .50, 12.7 mm, 14.5 mm and 23 mm API, plus PG-7VL,
+  PG-7VR, TBG-7V, PG-9, M344, Type 63, TOW-2A, Konkurs-M, Kornet and 9M119M. Guns and
+  launchers that fire the new ones come in later phases.
+- **The armour suite (armour_test).** It checks angles, normalisation, overmatch, ricochet,
+  graze, tiles, slat odds, HE, fuzes and plate lookup. It also checks the design doc's "who
+  beats what" table cell by cell against the data, and that a hit resolves in under 0.05 ms.
+
+#### Changed
+- **The .50 against MRAPs.** A .50 now goes through an M-ATV or MaxxPro side only up close (inside
+  about 100 m), not at any range. It still wrecks wheels and engine bays.
+- Rifle rounds, demolition charges, mines and fire support hit vehicles exactly as before, and
+  so does everything that hits a technical, a helicopter or a static gun.
+
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
 #### Added
