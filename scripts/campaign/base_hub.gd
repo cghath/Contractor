@@ -3079,6 +3079,9 @@ func _apply_stash(lvl, before: Array, after: Array) -> void:
 
 ## Ops that change only the standing loadout (what Restock refills to), not the kit worn now.
 const STANDING_OPS: Array[String] = ["save", "standing_role", "copy_standing", "restock"]
+## Saved kits (KitLibrary; claude/loadout-3d): "kit_save" [name, template?], "kit_delete" [name],
+## "kit_apply" [name, to: KitLibrary targets, buy: bool].
+const KIT_OPS: Array[String] = ["kit_save", "kit_delete", "kit_apply"]
 
 
 ## Host: `who` at the hub (a member id at the muster line, or "player:<key>" for a player here):
@@ -3133,6 +3136,8 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 		return _server_buy_missing(lvl, sender, a, String(p.get("id", "")))
 	if op in STANDING_OPS:
 		return _server_standing(sender, a, op, p)
+	if op in KIT_OPS:
+		return _server_kit(lvl, sender, a, op, p)
 	var t := Loadouts.template_of(Roster.json_safe(s.inventory.net_state))
 	var people: Array = [a]
 	var what := ""
@@ -3151,6 +3156,24 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 				return "That isn't an optic"
 			t = Loadouts.set_optic(t, slot, id)
 			what = "%s on the %s" % [ItemDB.get_item(StringName(id)).name if id != "" else "Irons", String(Loadouts.SLOT_NAMES[slot]).to_lower()]
+		"mount":
+			var slot := StringName(String(p.get("slot", "")))
+			var mount := String(p.get("mount", ""))
+			var id := String(p.get("id", ""))
+			var holder := ItemDB.get_item(StringName(String(t.slots.get(String(slot), ""))))
+			if holder == null or (id != "" and not GearMounts.fits(holder, mount, ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null)):
+				return "That doesn't go there"
+			t = Loadouts.set_mount(t, slot, mount, id)
+			what = "%s: %s" % [GearMounts.NAMES.get(mount, mount), ItemDB.get_item(StringName(id)).name if id != "" else "off"]
+		"template":
+			# The 3D editor's whole draft at once (LoadoutEditor), buying what the stash lacks first when asked.
+			t = KitLibrary.clean_template(p.get("template", {}))
+			if bool(p.get("buy", false)):
+				var bought := _server_buy_shortfall(lvl, sender, [{"gear": _person_gear(a), "template": t}])
+				if bought.begins_with("!"):
+					return bought.substr(1)
+				what = bought
+			what = "kit fitted" if what == "" else what + ", kit fitted"
 		"add", "remove", "give":
 			var id := String(p.get("id", ""))
 			var n := clampi(int(p.get("count", 1)), 1, 50)
@@ -3207,23 +3230,106 @@ func _loadout_apply(lvl, people: Array) -> PackedStringArray:
 	var before: Array = lvl.server_collect_stash()
 	var pool: Array = before.duplicate(true)
 	var jobs: Array = people.map(func(a: Dictionary) -> Dictionary:
-		return {"gear": Roster.json_safe((a.soldier as Soldier).inventory.net_state), "template": a.template})
+		return {"gear": _person_gear(a), "template": a.template})
 	var results := Loadouts.rebuild(jobs, pool)
 	var lines := PackedStringArray()
 	for i in people.size():
 		var a: Dictionary = people[i]
-		var s: Soldier = a.soldier
-		s.inventory.net_state = GameState.from_json(results[i].gear)
+		var s: Soldier = a.get("soldier")
+		if s:
+			s.inventory.net_state = GameState.from_json(results[i].gear)
 		if int(a.peer) == 0:
-			server_store_member_gear(String(a.who), s.inventory.net_state)
+			server_store_member_gear(String(a.who), GameState.from_json(results[i].gear))
 		else:
-			a.person["gear"] = Roster.json_safe(s.inventory.net_state.duplicate(true))
+			a.person["gear"] = Roster.json_safe(results[i].gear.duplicate(true))
 		lines.append(Loadouts.short_text(results[i]))
 		_note_edit_missing(a, results[i])
-		SessionLog.note("loadout: %s: %s" % [SessionLog.who(s), lines[i] if lines[i] != "" else "changed"])
+		SessionLog.note("loadout: %s: %s" % [SessionLog.who(s) if s else String(a.name), lines[i] if lines[i] != "" else "changed"])
 	_apply_stash(lvl, before, pool)
 	_changed(&"roster")
 	return lines
+
+
+## What `a` (a loadout_person entry) wears now, JSON-safe: the body's, or the roster's for a
+## squadmate not standing at the muster line (a high command squad's man).
+static func _person_gear(a: Dictionary) -> Dictionary:
+	var s: Soldier = a.get("soldier")
+	return Roster.json_safe(s.inventory.net_state if s else a.person.get("gear", {}))
+
+
+## Host: buys what the stash lacks to put `jobs` ([{"gear", "template"}]) on everyone at once
+## (KitLibrary.shortfall). "" when nothing was missing, "bought N items for $X", or "!" + why
+## not (not enough cash: nothing is bought then).
+func _server_buy_shortfall(lvl, sender: int, jobs: Array) -> String:
+	var short := KitLibrary.shortfall(jobs, lvl.server_collect_stash())
+	if int(short.units) <= 0:
+		return ""
+	if BaseEconomy.funds() < int(short.cost):
+		return "!Not enough cash: $%d needed, $%d in the account" % [int(short.cost), BaseEconomy.funds()]
+	for id: String in short.missing:
+		if not id in short.unbuyable:
+			Economy.server_buy(StringName(id), int(short.missing[id]), sender)
+	return "bought %d items for $%d" % [int(short.units), int(short.cost)]
+
+
+## Host: the saved-kit ops (KitLibrary, KIT_OPS). `a` is the one asking's own person here.
+func _server_kit(lvl, sender: int, a: Dictionary, op: String, p: Dictionary) -> String:
+	var data := roster()
+	var kit_name := KitLibrary.clean_name(String(p.get("name", "")))
+	match op:
+		"kit_save":
+			var t: Variant = p.get("template", null)
+			if not t is Dictionary:
+				t = Loadouts.template_of(_person_gear(a))
+			var why := KitLibrary.save(data, kit_name, t, String(a.name), String(a.role))
+			if why != "":
+				return why
+			_changed(&"roster")
+			return "Saved kit \"%s\"" % kit_name
+		"kit_delete":
+			if not KitLibrary.delete(data, kit_name):
+				return "No kit called \"%s\"" % kit_name
+			_changed(&"roster")
+			return "Deleted kit \"%s\"" % kit_name
+		"kit_apply":
+			var t := KitLibrary.template_of_kit(data, kit_name)
+			if Restock.is_blank(t):
+				return "No kit called \"%s\"" % kit_name
+			var people: Array = []
+			var skipped := PackedStringArray()
+			for who: String in KitLibrary.resolve(data, _prep().get("squad", []), p.get("to", [])):
+				var b := loadout_person(who)
+				if b.is_empty() and not who.begins_with("player:") and not member(who).is_empty():
+					var m := member(who)  # away from the muster line (a high command squad): their roster kit
+					b = {"who": who, "name": String(m.callsign), "role": StringName(m.get("role", Roles.RIFLEMAN)), "person": m, "soldier": null, "peer": 0}
+				if b.is_empty() or not may_change_loadout(sender, b) or (b.soldier != null and not (b.soldier as Soldier).vitals.is_up()):
+					if not b.is_empty():
+						skipped.append(String(b.name))
+					continue
+				b["template"] = t.duplicate(true)
+				people.append(b)
+			if people.is_empty():
+				return "Nobody to put \"%s\" on" % kit_name
+			var bought := ""
+			if bool(p.get("buy", false)):
+				bought = _server_buy_shortfall(lvl, sender, people.map(func(b: Dictionary) -> Dictionary: return {"gear": _person_gear(b), "template": b.template}))
+				if bought.begins_with("!"):
+					return bought.substr(1)
+			var lines := _loadout_apply(lvl, people)
+			var short := PackedStringArray()
+			for i in people.size():
+				people[i].person["loadout"] = t.duplicate(true)  # their standing loadout too: Restock refills to it
+				Roster.record_restock_short(people[i].person, {})
+				if lines[i] != "":
+					short.append("%s: %s" % [people[i].name, lines[i]])
+			_changed(&"roster")
+			var text := "Kit \"%s\" on %s%s" % [kit_name, ", ".join(people.map(func(b: Dictionary) -> String: return String(b.name))), (" (" + bought + ")") if bought != "" else ""]
+			if not skipped.is_empty():
+				text += ". Not changed: " + ", ".join(skipped)
+			if not short.is_empty():
+				text += "\n" + "\n".join(short)
+			return text
+	return "Unknown request"
 
 
 ## Host: the standing-loadout ops (what Restock refills to): "save" (the kit worn now),

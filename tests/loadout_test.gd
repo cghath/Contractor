@@ -14,7 +14,8 @@ extends Node
 
 const SEED := 5151
 ## Items the test stash holds besides the starting stash.
-const EXTRA_STASH := [["smoke_grenade", 4], ["m110", 1], ["mag_762", 6], ["optic_holo", 2], ["helmet_heavy", 1], ["mag_9mm", 4], ["m17", 1]]
+const EXTRA_STASH := [["smoke_grenade", 4], ["m110", 1], ["mag_762", 6], ["optic_holo", 2], ["helmet_heavy", 1], ["mag_9mm", 4], ["m17", 1],
+	["suppressor_rifle", 1], ["grip_vertical", 1], ["nvg_gen2", 1], ["pouch_mag_double", 2]]
 const CLIENT_DONE := "CLIENT LOADOUT CHECKS DONE"
 const CLIENT_KEY := "loadout_client"
 const FIT_SIZES: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(1366, 768), Vector2i(1600, 900), Vector2i(1920, 1080), Vector2i(2560, 1440),
@@ -145,8 +146,73 @@ func _test_rules() -> void:
 	check(Loadouts.group_of(ItemDB.get_item(&"frag_grenade")) == "grenades" and Loadouts.group_of(ItemDB.get_item(&"mag_556")) == "ammo"
 		and Loadouts.group_of(ItemDB.get_item(&"aid_bag")) == "pouches" and Loadouts.fits_slot(ItemDB.get_item(&"plate_side"), &"plate_left")
 		and not Loadouts.fits_slot(ItemDB.get_item(&"plate_side"), &"plate_front"), "items are grouped and slotted for the paper doll")
+	_test_kit_rules(rifleman)
 	check(not BaseHub.may_change_loadout(2, {"peer": 1}) and BaseHub.may_change_loadout(2, {"peer": 2}) and BaseHub.may_change_loadout(2, {"peer": 0}),
 		"a player may change their own kit and any squadmate's, never another player's")
+
+
+## claude/loadout-3d: the 3D editor's mounts (muzzle, rails, the helmet's NVG) and MOLLE points
+## in templates, saved kits (KitLibrary) and what a set of them is short of.
+func _test_kit_rules(rifleman: Dictionary) -> void:
+	print("Mounts and points in templates (the 3D editor)")
+	var t := Loadouts.template_of(rifleman)
+	var gun := ItemDB.get_item(StringName(String(t.slots.get("primary", "m4a1"))))
+	var muzzled := Loadouts.set_mount(t, &"primary", "muzzle", "suppressor_rifle")
+	muzzled = Loadouts.set_mount(muzzled, &"primary", "underbarrel", "grip_vertical")
+	muzzled = Loadouts.set_mount(Loadouts.set_slot(muzzled, &"helmet", "helmet"), &"helmet", "nvg", "nvg_gen2")
+	var pool := _stash()
+	var before := Loadouts.units(pool, [rifleman])
+	var res: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": muzzled}], pool)[0]
+	var state: Dictionary = res.gear.slot_state.get("primary", {})
+	check(Loadouts.units(pool, [res.gear]) == before, "a suppressor, a grip and an NVG fitted: nothing made or lost")
+	check(String(Suppressors.mounted_id(gun, state)) == "suppressor_rifle" and GearMounts.on(gun, state, "underbarrel") == "grip_vertical"
+		and GearMounts.on(ItemDB.get_item(&"helmet"), res.gear.slot_state.get("helmet", {}), "nvg") == "nvg_gen2",
+		"the gun has its suppressor and grip, the helmet its NVG (%s)" % [GearMounts.of(gun, state)])
+	check(Restock.template_of(res.gear).get("mounts", {}).get("primary", {}) == {"muzzle": "suppressor_rifle", "underbarrel": "grip_vertical"},
+		"and the template of what he wears records them (Restock refills them)")
+	var bare := Loadouts.set_mount(Restock.template_of(res.gear), &"primary", "muzzle", "")
+	var pool2 := pool.duplicate(true)
+	var res2: Dictionary = Loadouts.rebuild([{"gear": res.gear, "template": bare}], pool2)[0]
+	check(String(Suppressors.mounted_id(gun, res2.gear.slot_state.get("primary", {}))) == "" and int(Loadouts.units(pool2, []).get("suppressor_rifle", 0)) == 1
+		and Loadouts.units(pool2, [res2.gear]) == before, "taking the suppressor off leaves it in the stash")
+	var points: Array = ItemDB.get_item(StringName(String(t.slots.vest))).stats.get("molle", [])
+	var free := ""
+	for p: Dictionary in points:
+		if not t.molle.has(String(p.id)) and "mag" in Inventory.point_types(p):
+			free = String(p.id)
+	if free != "":
+		pool = _stash()
+		res = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_point(t, free, "pouch_mag_double")}], pool)[0]
+		check(Loadouts.units(pool, [res.gear]) == before and res.missing.is_empty(), "a mag pouch on free point %s: drawn from the stash, nothing short" % free)
+	print("Saved kits")
+	var data := {"members": {"a": {"callsign": "A", "role": "medic"}, "b": {"callsign": "B", "role": "rifleman"}, "c": {"callsign": "C", "role": "rifleman"},
+		"d": {"callsign": "D", "role": "autorifleman"}, "e": {"callsign": "E", "role": "rifleman"}, "h1": {"callsign": "H1", "role": "rifleman"}},
+		"detachments": {"d02": {"id": "d02", "callsign": "Hawk 2", "members": ["h1"]}}}
+	check(KitLibrary.save(data, "  Assault kit  ", muzzled, "test") == "" and KitLibrary.names(data) == ["Assault kit"],
+		"a kit saves under its cleaned name (%s)" % [KitLibrary.names(data)])
+	check(KitLibrary.save(data, "", muzzled, "test") != "" and KitLibrary.save(data, "Empty", {}, "test") != "", "no name or an empty kit: refused")
+	var sent := muzzled.duplicate(true)
+	sent.slots["helmet"] = "m4a1"  # a gun on the head
+	sent.slots["primary"] = "no_such_item"
+	sent["junk"] = 1
+	var clean := KitLibrary.clean_template(sent)
+	check(not clean.slots.has("helmet") and not clean.slots.has("primary") and not clean.has("junk") and clean.slots.get("vest", "") == t.slots.vest,
+		"a client's template is cleaned: unknown items and wrong slots dropped, the rest kept")
+	var picked := ["a", "b", "c", "d", "e"]
+	check(KitLibrary.resolve(data, picked, ["team:1"]) == ["a", "b", "c", "d"] and KitLibrary.resolve(data, picked, ["team:2"]) == ["e"],
+		"fire teams are the picked squad in fours")
+	check(KitLibrary.resolve(data, picked, ["role:rifleman"]) == ["b", "c", "e"] and KitLibrary.resolve(data, picked, ["hc:d02"]) == ["h1"]
+		and KitLibrary.resolve(data, picked, ["squad", "a", "player:x"]) == ["a", "b", "c", "d", "e", "player:x"],
+		"by role, a high command squad, the squad (no one twice)")
+	pool = _stash()
+	var one := KitLibrary.shortfall([{"gear": {}, "template": muzzled}], pool)
+	var three := KitLibrary.shortfall([{"gear": {}, "template": muzzled}, {"gear": {}, "template": muzzled}, {"gear": {}, "template": muzzled}], pool)
+	check(int(three.units) > int(one.units) and int(three.missing.get("suppressor_rifle", 0)) == 3 - 1 and three.each.size() == 3
+		and int(three.cost) == int(BaseHub.missing_cost(three.missing).cost) and Loadouts.units(pool, []) == Loadouts.units(_stash(), []),
+		"buy missing totals over everyone: 3 kits lack 2 suppressors with 1 in the stash ($%d for %d items), the stash untouched" % [int(three.cost), int(three.units)])
+	var st := KitLibrary.stats_of(rifleman)
+	check(float(st.kg) > 5.0 and float(st.litres) > 0.0 and not st.protection.is_empty() and String(st.protection[0][2]) != "" and not st.ammo.is_empty(),
+		"the stats panel's numbers: %.1f kg, %.1f L, %s, %s" % [float(st.kg), float(st.litres), st.protection, st.ammo])
 
 
 # --- At the hub --------------------------------------------------------------------------------
@@ -267,10 +333,66 @@ func _test_session() -> void:
 	var bought := int(Roster.gear_counts(Roster.json_safe(s2.inventory.net_state)).get("iv_18", 0))
 	check(bought >= 3 and Economy.cash() < cost and not BaseHub.member(who).has("edit_missing"),
 		"buying fills the shortfall (%d IVs on him) and takes the money (%d left of %d)" % [bought, Economy.cash(), cost])
+	await _test_kits_at_hub(ids, me)
 	# The host can't change another player's kit (a client is peer 2 here).
 	check(BaseHub.server_loadout(2, me, "add", {"id": "smoke_grenade"}).contains("their own kit"), "a client's request on the host's kit is refused")
 	await _test_fit(ids)
 	await _test_client(ids)
+
+
+## Saved kits at the hub (claude/loadout-3d): save, apply to the squad with buy missing, the
+## 3D editor's whole-draft "template" op with buy; units conserved apart from what was bought.
+func _test_kits_at_hub(ids: Array, me: String) -> void:
+	print("Saved kits at the hub")
+	var tmpl := Loadouts.set_mount(Loadouts.role_template(Roles.RIFLEMAN), &"primary", "muzzle", "suppressor_rifle")
+	_notes.clear()
+	BaseHub.request("loadout", [me, "kit_save", {"name": "Quiet rifleman", "template": tmpl}])
+	await _frames(2)
+	check("Quiet rifleman" in KitLibrary.names(BaseHub.roster()) and "Quiet rifleman" in KitLibrary.names(BaseHub.view.get("roster", {})),
+		"a saved kit is on the roster and in the view every player gets (%s)" % [_notes])
+	var whos := KitLibrary.resolve(BaseHub.roster(), BaseHub._prep().get("squad", []), ["squad"])
+	var jobs: Array = whos.map(func(w: String) -> Dictionary:
+		return {"gear": Roster.json_safe((level as BaseLevel).muster_soldier(w).inventory.net_state), "template": tmpl})
+	var short := KitLibrary.shortfall(jobs, (level as BaseLevel).server_collect_stash())
+	check(int(short.units) > 0 and int(short.missing.get("suppressor_rifle", 0)) >= whos.size() - 1, "the squad (%d) lacks suppressors: %d items, $%d" % [whos.size(), int(short.units), int(short.cost)])
+	Economy.add_cash(-Economy.cash(), "test: broke")
+	Economy.add_cash(int(short.cost) - 1, "test: a dollar short")
+	_notes.clear()
+	BaseHub.request("loadout", [me, "kit_apply", {"name": "Quiet rifleman", "to": ["squad"], "buy": true}])
+	await _frames(3)
+	check(Economy.cash() == int(short.cost) - 1 and not _notes.is_empty() and String(_notes.back()).contains("Not enough cash"), "a dollar short: nothing bought (%s)" % [_notes])
+	Economy.add_cash(1, "test: enough")
+	var before := _hub_units()
+	_notes.clear()
+	BaseHub.request("loadout", [me, "kit_apply", {"name": "Quiet rifleman", "to": ["squad"], "buy": true}])
+	await _frames(4)
+	var after := _hub_units()
+	var bought := {}
+	for id: String in after:
+		if int(after[id]) != int(before.get(id, 0)):
+			bought[id] = int(after[id]) - int(before.get(id, 0))
+	check(Economy.cash() == 0 and bought == short.missing.duplicate(), "buy missing bought exactly the shortfall ($%d) and nothing else changed (%s vs %s)" % [int(short.cost), bought, short.missing])
+	var all_quiet := whos.all(func(w: String) -> bool:
+		var g: Dictionary = Roster.json_safe((level as BaseLevel).muster_soldier(w).inventory.net_state)
+		return String(Suppressors.mounted_id(ItemDB.get_item(StringName(String(g.slots.get("primary", "")))), g.slot_state.get("primary", {}))) == "suppressor_rifle")
+	check(all_quiet and whos.all(func(w: String) -> bool: return Restock.counts(Roster.loadout_of(BaseHub.member(w))) == Restock.counts(KitLibrary.template_of_kit(BaseHub.roster(), "Quiet rifleman"))),
+		"every squadmate wears the kit with its suppressor, and it's their standing loadout (%s)" % [_notes])
+	# The editor's draft with buy: one helmet NVG the stash lacks.
+	var mid := String(ids[0])
+	var t := Loadouts.template_of(Roster.json_safe((level as BaseLevel).muster_soldier(mid).inventory.net_state))
+	t = Loadouts.set_mount(Loadouts.set_slot(t, &"helmet", "helmet"), &"helmet", "nvg", "nvg_gen3")
+	var price := BaseEconomy.item_price(&"nvg_gen3")
+	Economy.add_cash(price + 100, "test: an NVG")
+	before = _hub_units()
+	BaseHub.request("loadout", [mid, "template", {"template": t, "buy": true}])
+	await _frames(3)
+	var g: Dictionary = Roster.json_safe((level as BaseLevel).muster_soldier(mid).inventory.net_state)
+	check(GearMounts.on(ItemDB.get_item(&"helmet"), g.slot_state.get("helmet", {}), "nvg") == "nvg_gen3" and Economy.cash() == 100
+		and int(_hub_units().get("nvg_gen3", 0)) == int(before.get("nvg_gen3", 0)) + 1, "the editor's draft: the NVG bought ($%d) and on his helmet" % price)
+	_notes.clear()
+	BaseHub.request("loadout", [me, "kit_delete", {"name": "Quiet rifleman"}])
+	await _frames(2)
+	check(KitLibrary.names(BaseHub.roster()).is_empty(), "a kit deletes")
 
 
 ## Units of every item in the hub's stash (world items, with what's on and in them) and on

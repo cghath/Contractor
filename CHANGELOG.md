@@ -11,6 +11,25 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### 3D loadout editor and armory (claude/loadout-3d)
+
+> **Where I stopped / next step (2026-10-22, 15:50 CDT):** piece 1 pushed: mounts in loadout
+> templates, saved kits (KitLibrary) and the "kit_save/kit_delete/kit_apply/template/mount"
+> host ops, with loadout_test checks (R2502 PASS). Written but not yet wired or tested:
+> scripts/ui/loadout_preview.gd and scripts/ui/loadout_editor.gd (the 3D editor). Next: open
+> the editor from BaseHub (open_loadout_3d) and the base screen, ui_test fit check, then the 3D
+> armory room (scripts/ui/armory_room.gd), base_test buy flow, docs/loadout_3d.md.
+
+#### Added
+- **Saved kits.** Name and save a loadout; it goes with the campaign and every player in co-op
+  sees the same list. Apply a kit to yourself, a squadmate, a fire team, everyone in a role, the
+  whole squad or a high command squad (Hawk 2, Viper 3). It becomes their standing loadout too,
+  so Restock refills to it. "Buy missing" buys what all of them lack in one go, priced as one
+  total. Fire teams are the picked squad in fours (Proposed); at most 40 kits (Proposed).
+- **Weapon mounts and the helmet's NVG are part of a loadout.** A gun's suppressor, grip, light
+  or laser and choke, and the NVG on a helmet, are recorded with the kit, refilled by Restock
+  and taken from or put back in the stash like an optic.
+
 ### Terror groups that grow (docs/ai_tactics.md section 7)
 
 #### Added

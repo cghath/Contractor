@@ -143,9 +143,12 @@ func _on_note(text: String) -> void:
 ## first, then the other players, then the squad picked for the next deployment (everyone at
 ## the muster line if nobody is picked).
 func people() -> Array:
-	var v := BaseHub.view
+	return people_of(BaseHub.view, multiplayer.get_unique_id())
+
+
+## The people in base view `v`, as people() lists them for player `me` (the 3D editor too).
+static func people_of(v: Dictionary, me: int) -> Array:
 	var out: Array = []
-	var me := multiplayer.get_unique_id()
 	var keys: Dictionary = v.get("players", {})
 	var players: Dictionary = v.get("roster", {}).get("players", {})
 	var peers := keys.keys()

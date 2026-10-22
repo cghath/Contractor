@@ -80,6 +80,8 @@ static func set_slot(t: Dictionary, slot: StringName, id: String) -> Dictionary:
 	if id == "":
 		out.slots.erase(String(slot))
 		out.optics.erase(String(slot))
+		if out.has("mounts"):
+			out.mounts.erase(String(slot))
 		if slot == &"vest" or slot == &"backpack":
 			_drop_points(out, old)
 			out.containers[String(slot)] = []
@@ -91,6 +93,34 @@ static func set_slot(t: Dictionary, slot: StringName, id: String) -> Dictionary:
 	var item := ItemDB.get_item(StringName(id))
 	if item == null or not Optics.has_rail(item):
 		out.optics.erase(String(slot))
+	if old != id and out.has("mounts"):
+		var kept := {}
+		for m: String in out.mounts.get(String(slot), {}):
+			if GearMounts.fits(item, m, ItemDB.get_item(StringName(String(out.mounts[String(slot)][m])))):
+				kept[m] = out.mounts[String(slot)][m]
+		out.mounts[String(slot)] = kept
+	return out
+
+
+## The holder in `slot` (a gun, the helmet) carries `id` on `mount` ("" takes it off; GearMounts).
+## From here on the template names every mount of that holder (what it doesn't name comes off).
+static func set_mount(t: Dictionary, slot: StringName, mount: String, id: String) -> Dictionary:
+	var out := _copy(t)
+	var holder := ItemDB.get_item(StringName(String(out.slots.get(String(slot), ""))))
+	if holder == null or (mount != "optic" and not (mount in GearMounts.mounts_for(holder))):
+		return out
+	if mount == "optic":
+		return set_optic(out, slot, id)
+	if id != "" and not GearMounts.fits(holder, mount, ItemDB.get_item(StringName(id))):
+		return out
+	if not out.has("mounts"):
+		out["mounts"] = {}
+	var now: Dictionary = out.mounts.get(String(slot), {})
+	if id == "":
+		now.erase(mount)
+	else:
+		now[mount] = id
+	out.mounts[String(slot)] = now
 	return out
 
 
@@ -100,6 +130,26 @@ static func set_optic(t: Dictionary, slot: StringName, optic: String) -> Diction
 	var gun := ItemDB.get_item(StringName(String(out.slots.get(String(slot), ""))))
 	if gun != null and Optics.has_rail(gun):
 		out.optics[String(slot)] = optic
+	return out
+
+
+## Attach point `point` holds pouch `id` ("" takes it off): what the old one held stays in the
+## new one if it takes it, else goes in the carrier (or the pockets).
+static func set_point(t: Dictionary, point: String, id: String) -> Dictionary:
+	var out := _copy(t)
+	var held: Array = (out.molle.get(point, {}) as Dictionary).get("held", [])
+	out.molle.erase(point)
+	var into := "vest" if out.slots.has("vest") else "pockets"
+	var pouch := ItemDB.get_item(StringName(id)) if id != "" else null
+	var keep: Array = []
+	for it: Dictionary in held:
+		var item := ItemDB.get_item(StringName(String(it.id)))
+		if pouch != null and Inventory.is_pouch(pouch) and item != null and Inventory.pouch_accepts(pouch, item):
+			keep.append(it)
+		else:
+			_merge(out.containers[into], String(it.id), int(it.count))
+	if pouch != null:
+		out.molle[point] = {"id": id, "held": keep}
 	return out
 
 
@@ -276,6 +326,9 @@ static func _count_entry(e: Dictionary, out: Dictionary) -> void:
 	var item := ItemDB.get_item(StringName(id))
 	if item and Optics.has_rail(item):
 		_add(out, String(Optics.mounted_id(item, state)), n)
+	var on := GearMounts.of(item, state)
+	for m: String in on:
+		_add(out, String(on[m]), n)
 	var inside := {}
 	var molle: Dictionary = state.get("molle", {})
 	for point: Variant in molle:

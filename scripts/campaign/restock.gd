@@ -14,6 +14,9 @@ extends RefCounted
 ## - "molle": attach point id -> {"id": the pouch (or knife, packed launcher), "held": [items]}:
 ##   the worn carrier's and pack's points.
 ## - "containers": "vest", "pockets", "backpack" -> [items].
+## - "mounts" (optional; claude/loadout-3d): slot -> {mount: item id}, a gun's muzzle, underbarrel,
+##   side and choke and a helmet's NVG (GearMounts). A slot listed is the whole truth for it; a
+##   slot not listed keeps what the drawn item carries (every template recorded before).
 ## Items are {"id", "count"} (and "optic" for a stowed rail gun), merged by id. Conditions
 ## (rounds, chips, what's left in a kit) aren't kept: the best the stash has is drawn (full
 ## magazines first, undamaged plates first, full kits first).
@@ -36,6 +39,7 @@ static func template_of(gear: Dictionary) -> Dictionary:
 	var slots := {}
 	var optics := {}
 	var molle := {}
+	var mounts := {}
 	var slot_state: Dictionary = gear.get("slot_state", {})
 	for slot: Variant in gear.get("slots", {}):
 		var id := String(gear.slots[slot])
@@ -46,6 +50,9 @@ static func template_of(gear: Dictionary) -> Dictionary:
 		var state: Dictionary = slot_state.get(slot, {})
 		if Optics.has_rail(item):
 			optics[String(slot)] = String(Optics.mounted_id(item, state))
+		var on := GearMounts.of(item, state)
+		if not on.is_empty():
+			mounts[String(slot)] = on
 		var points: Dictionary = state.get("molle", {})
 		for point: Variant in points:
 			var att: Dictionary = points[point]
@@ -54,7 +61,10 @@ static func template_of(gear: Dictionary) -> Dictionary:
 	var containers := {}
 	for c in CONTAINER_ORDER:
 		containers[String(c)] = _items_of(gear.get("containers", {}).get(c, gear.get("containers", {}).get(String(c), [])))
-	return {"slots": slots, "optics": optics, "molle": molle, "containers": containers}
+	var out := {"slots": slots, "optics": optics, "molle": molle, "containers": containers}
+	if not mounts.is_empty():
+		out["mounts"] = mounts
+	return out
 
 
 ## Whether a loadout holds nothing worth restocking (none recorded yet).
@@ -71,6 +81,9 @@ static func counts(loadout: Dictionary) -> Dictionary:
 	for slot: String in loadout.get("optics", {}):
 		if String(loadout.optics[slot]) != "":
 			_add_count(out, String(loadout.optics[slot]), 1)
+	for slot: String in loadout.get("mounts", {}):
+		for m: String in loadout.mounts[slot]:
+			_add_count(out, String(loadout.mounts[slot][m]), 1)
 	for point: String in loadout.get("molle", {}):
 		var att: Dictionary = loadout.molle[point]
 		_add_count(out, String(att.id), 1)
@@ -140,6 +153,9 @@ static func build(loadout: Dictionary, pool: Array, caps := {}) -> Dictionary:
 			if want_optic != null and String(want_optic) != "":
 				res.wanted += 1
 				_add_count(res.missing, String(want_optic), 1)
+			for m: Variant in loadout.get("mounts", {}).get(String(slot), {}):  # and what was to go on it
+				res.wanted += 1
+				_add_count(res.missing, String(loadout.mounts[String(slot)][m]), 1)
 			continue
 		var state: Dictionary = entry.get("state", {}).duplicate(true)
 		if slot == &"vest" or slot == &"backpack":
@@ -148,6 +164,9 @@ static func build(loadout: Dictionary, pool: Array, caps := {}) -> Dictionary:
 				BaseArmory.add(pool, StringName(loose.id), int(loose.count), loose.get("state", {}))
 		if want_optic != null:
 			state = _fit_optic(item, state, String(want_optic), pool, res)
+		var mounts: Dictionary = loadout.get("mounts", {})
+		if mounts.has(String(slot)):
+			state = _fit_mounts(item, state, mounts[String(slot)], pool, res)
 		if inv.take(item.id, 1, state) == 0:
 			BaseArmory.add(pool, item.id, 1, state)
 			_add_count(res.no_room, id, 1)
@@ -484,6 +503,35 @@ static func _fit_optic(item: ItemData, state: Dictionary, want: String, pool: Ar
 	if on != "":
 		BaseArmory.add(pool, StringName(on), 1)
 	return Optics.with_optic(item, state, StringName(want))
+
+
+## `state` of `item` with the mounts `want` ({mount: id}; any other comes off into `pool`),
+## each drawn from `pool` (named in res.missing when it isn't there; what was on stays then).
+static func _fit_mounts(item: ItemData, state: Dictionary, want: Dictionary, pool: Array, res: Dictionary) -> Dictionary:
+	var out := state
+	for m: String in GearMounts.mounts_for(item):
+		var id := String(want.get(m, ""))
+		if id != "" and not GearMounts.fits(item, m, ItemDB.get_item(StringName(id))):
+			id = ""
+		var now := GearMounts.on(item, out, m)
+		if id != "":
+			res.wanted += 1
+		if now == id:
+			if id != "":
+				res.placed += 1
+			continue
+		var entry := {}
+		if id != "":
+			entry = _draw_capped(res, pool, id, 1)
+			if entry.is_empty():
+				_add_count(res.missing, id, 1)
+				continue
+			res.placed += 1
+		var old := GearMounts.entry_on(item, out, m)
+		if not old.is_empty():
+			BaseArmory.add(pool, StringName(String(old.id)), 1, old.get("state", {}))
+		out = GearMounts.with(item, out, m, entry)
+	return out
 
 
 ## What sits on and in a carrier's or pack's (or a pouch's) state, as entries, taken out of it:
