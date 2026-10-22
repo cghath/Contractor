@@ -24,10 +24,14 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-151 | P3 | Enemy vehicle crews don't move off when fire missions land round them (fire support, 2026-10-20) |
 | F-120 | P2 | Squad AI walks onto our own marked mines and into our claymores' fans and tripwires (Demolitions.hazards) |
 | F-121 | P3 | ~~The vehicle range's concrete blocks and sandbag wall (z -30 and -45) lie outside its voxel world's edit area, so they're never built~~ fixed 2026-10-22 (cghath's world/perf: VoxelWorld.fit_structures) |
+| F-210 | P2 | A city's street grid isn't paved: ZoneRoads doesn't draw the def's `"cities"` streets (ZoneModules.city_streets), junctions or kerbs, and its own roads aren't joined to them (city zones, 2026-10-22) |
+| F-211 | P2 | One AI building scan near a city's tall buildings takes 150-450 ms, and a frame's first scan isn't capped (Buildings.FRAME_BUDGET_USEC): a fight in a city hitches (city zones, 2026-10-22) |
+| F-212 | P3 | A town's or landmark's stair (0.5 m approach) can be cut off from a zone's navmesh, depending on how its pad's height falls on the bake's 0.25 m grid (city zones, 2026-10-22) |
+| F-213 | P3 | The AI's navmesh paths (map_get_path, 4096 polygons at most) from the street to a tall tower's top floors stop a floor or two short until it re-paths (city zones, 2026-10-22) |
 | F-162 | P3 | ~~The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21)~~ fixed 2026-10-21 (Claude, claude/ai-followups: a roofed spot probes to 26 m) |
-| F-194 | P3 | The woods' GPU frame time is unmeasured: the forest suite counts draws and triangles headless (no renderer); a windowed frame time in a dense copse wants a build on a real GPU (woods perf pass, 2026-10-22) |
-| F-195 | P2 | claude/perf-pass and world/perf both change ZoneScatter's build_near, _process, _build_cell and _build_far: whoever merges second keeps both (woods perf pass, 2026-10-22) |
-| F-196 | P3 | An AI-driven vehicle turning round beside the range's concrete blocks runs into one and never makes the pickup (vehicle AI; the blocks exist since F-121) |
+| F-221 | P3 | The woods' GPU frame time is unmeasured: the forest suite counts draws and triangles headless (no renderer); a windowed frame time in a dense copse wants a build on a real GPU (woods perf pass, 2026-10-22) |
+| F-222 | P2 | claude/perf-pass and world/perf both change ZoneScatter's build_near, _process, _build_cell and _build_far: whoever merges second keeps both (woods perf pass, 2026-10-22) |
+| F-223 | P3 | An AI-driven vehicle turning round beside the range's concrete blocks runs into one and never makes the pickup (vehicle AI; the blocks exist since F-121) |
 | F-140 | P2 | ~~Ambushers by a road and a friendly convoy driving past (missions 2 overwatch)~~ fixed 2026-10-21 (Claude, claude/ai-followups: RoadAmbush, the convoy's drive-through; the mission's two calls are F-178) |
 | F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
 | F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
@@ -509,7 +513,7 @@ push through a chain-link fence (it senses it as an obstacle), and nothing about
 Suggested (later, with structural collapse, queue item 13): destructible light props (fences,
 stalls, awnings, washing lines) as a host-saved "gone" set per zone, like the voxel edit log.
 
-## F-194: the woods' GPU frame time is unmeasured
+## F-221: the woods' GPU frame time is unmeasured
 
 Location: [forest_test.gd](../../tests/forest_test.gd) `_test_dense_normal`, `_drawn`. Found by cghath's agent on
 world/perf (2026-10-22, queue item 1.8).
@@ -523,7 +527,7 @@ Suggested: in the next test build, stand in a dense copse on a normal zone (temp
 Experimental forest and read the frame time and the monitor's draw calls and primitives; tune `ZoneScatter.LOD_M`
 (200 m), `NEAR_BUILD_M` and the shadows setting from there.
 
-## F-195: claude/perf-pass and world/perf change the same ZoneScatter functions
+## F-222: claude/perf-pass and world/perf change the same ZoneScatter functions
 
 Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) `build_near`, `_process`, `_build_cell`, `_build_far`.
 Found by cghath's agent on world/perf (2026-10-22).
@@ -538,7 +542,7 @@ Suggested, for whoever merges second: queue [cell, tier] pairs (world/perf's wan
 detail share, so the tiers still hand over at one distance (the forest suite's "every cell's trees drawn exactly once"
 check catches a gap); keep perf-pass's `_ground_blocked`.
 
-## F-196: an AI vehicle turning round next to an obstacle doesn't get clear
+## F-223: an AI vehicle turning round next to an obstacle doesn't get clear
 
 Location: [vehicle_ai.gd](../../scripts/vehicles/vehicle_ai.gd) (the obstacle and stuck handling: `_obstacles`,
 `_back_off`, `_go_round`); [squad_drivers.gd](../../scripts/vehicles/squad_drivers.gd) `server_pickup`. Found by
@@ -552,6 +556,119 @@ of the blocks, and its path with a turn goes along z -36 (R0538).
 
 Suggested: when a goal is behind it and something is beside the turn, back up and turn (a three-point turn), or
 plan the turn on the navmesh, which has the blocks.
+
+## F-185: vehicles aren't slowed by marsh mud or snow
+
+Location: scripts/vehicles/* (Claude's). Found by cghath's agent on `world/terrain` (2026-10-22,
+queue item 1.3). Men on foot are (Wading.ground_mult, ZoneFeatures.slow_at); a truck drives
+through the fen and the snow at full speed.
+
+Suggested: a vehicle reads `terrain.features.soft_at(x, z)` and `snow_at(x, z)` (both 0..1, 0 on
+roads and pads) under its wheels or tracks and loses grip or top speed by them (wheels more than
+tracks). Public, no changes to ZoneFeatures needed.
+
+## F-186: the map doesn't show the fields, the marsh, the snow or ice
+
+Location: [map_render.gd](../../scripts/ui/map_render.gd) (`zone_inputs`, `compose_zone`). Found
+on `world/terrain` (2026-10-22, 1.3). The map paints height, contours, trees, roads and open water
+(ZoneWater.surface_grid); frozen streams and ponds aren't in that grid, and the fields, soft ground
+and snow are only in the ground's vertex colours.
+
+Suggested: pass a coarse grid of ZoneFeatures' layers (field_at's crop, soft_at, snow_at) and the
+ice (ZoneWater._ice) into zone_inputs and tint the map by them (a field pattern, marsh hatching,
+white over the snow line, pale-blue ice). A test in tests/map_test.gd on Harrow Fields.
+
+## F-187: farmland's fields and the props' farms don't know each other
+
+Location: [zone_features.gd](../../scripts/world/zone_features.gd) and `origin/world/props`'s
+zone_props.gd (PR #22, not merged into world/terrain). Found on `world/terrain` (2026-10-22, 1.3).
+The fields, orchards, hedges and irrigation channels are ZoneFeatures' own; once the props branch
+merges, its farmsteads (_farm: pens, field fences, hay, irrigation props) are laid by its own field
+grid, and the farmland, marsh and snow presets fall back to its default prop style.
+
+Suggested: after both merge, add "farmland" (more farms), "marsh" and "snow_mountain" to
+data/props.json "preset_styles", and let ZoneProps._farm put its field fences and gates along
+ZoneFeatures' field edges (field_cols, field_rows, row_shift, _from_grid) and keep its props off
+the fields (ZoneFeatures.keeps_clear) and the channels.
+
+## F-188: crops and reed beds are plain blocks; their cover counts near the ends of a line only
+
+Location: [zone_features.gd](../../scripts/world/zone_features.gd) (`_crop_cell`, `_reed_cell`,
+`cover_least`). Found on `world/terrain` (2026-10-22, 1.3). Crops are drawn as voxel-style blocks
+in rows within 170 m (reeds 260 m), with no wind sway and no trampling; past that the ground's
+colour carries the field. For spotting, crops and reeds count only within 25 m of either end of a
+line (a man in a field, or a watcher in one), not a field crossed in the middle of a long line.
+
+Suggested: an art pass on the crop blocks (stalks, ears, maize tassels) and a cheap sway in a
+shader; walk the whole line through fields with a field-crossing test on the grid if a playtest
+finds men seen through a field between them.
+## F-189: a helicopter doesn't settle on an LZ of 10-12 degrees on rugged ground
+
+Location: scripts/vehicles/helicopter.gd / scripts/supports/heli_flight.gd (Claude's), and
+[landing_zone.gd](../../scripts/supports/landing_zone.gd). Found on `world/terrain` (2026-10-22,
+1.3), CI run 39755429759 (0defd900), the loop suite on Whitecap Pass (snow_mountain): the
+briefing's helicopter LZ at (-1035, 179) passed LandingZone.check (slope 10 degrees, the ground
+round the rotor disc -2.6 to +1.5 m), the helicopter touched the ground there at 0 m to go and
+never reached LANDED in 120 s. LandingZone allows 15 degrees (Captain's limit; the supports suite
+checks a 12-degree slope takes a landing) but only flat landings are flown in the suites.
+
+Suggested: fly a landing onto a 12-degree slope in tests/heliflight_test.gd and let the
+helicopter settle on it (gear on the uphill side first), or have LandingZone also require the
+ground within the rotor disc to stay within a metre or so of the spot. The snow preset was made
+gentler (relief 2.1 -> 1.7) meanwhile.
+
+## F-210: a city's street grid isn't paved (the roads agent's ZoneRoads)
+
+Queue item 1.5 (city zones) gives a city's street grid as data of its own: the def's `"cities"`
+(`[{"id", "seed", "pos"}]`, ZoneDef._place_city) and `ZoneModules.city_streets(def)`, every
+street's centre line in zone metres with its width (`BuildingGen.CITY_STREET_W`, 10 m: a 6 m road
+and 2 m pavements; `BuildingGen.city_layout(seed).junctions` where they cross). Today the streets
+are only painted road-coloured on the city's pad (`ZoneModules.STREETS`, ZoneTerrain), and the
+zone's own roads (the HQ's to the city's ring street, `"roads"`, the trails) stop at its pad.
+`scripts/world/zone_roads.gd` (the roads agent's, not touched here) should pave the grid with
+its kerbs and junctions, join the road from the HQ where it meets the ring street, and keep its
+other roads (HQ to outposts, trails) off the city's lots.
+
+## F-211: an AI building scan near a city's tall buildings takes 150-450 ms
+
+Measured in the `city` suite (headless, the Old Quarter, the player walking into the city): the
+long frames are all `Buildings.near` scans (FrameCost "buildings": groups 30-255 ms, probes
+100-190 ms, entrances 10-125 ms), asked by `Squad._tick_follow_in` (Buildings.at at the leader,
+every 2 m he moves, before it checks there's anyone to follow him in) and `Squad._update_context`
+(has_near). Near 3-8 storey buildings a scan has many more floors, stairs and stacked groups to
+link than in a town. `Buildings.FRAME_BUDGET_USEC` stops a frame's later scans in a game, but
+the first always runs: a 300 ms scan is a 300 ms hitch. Suggested (buildings.gd and squad.gd are
+Claude's: helper-and-hook territory): skip the follow-in scan when the squad has nobody to send
+in, cap a scan's floors to those within reach of the asker, or slice a scan over frames. The
+suite's frame budget counts the scans as a game caps them (tests/city_test.gd).
+
+## F-212: a town's or landmark's stair can be cut off from a zone's navmesh
+
+Found building city zones: in a zone a module stands on its pad's height (any 0.05 m), so the
+navmesh bake's 0.25 m height grid falls anywhere on its floors. A stair's foot with only
+`BuildingGen.STAIR_APPROACH` (0.5 m) between it and the end wall leaves, after the agent's radius
+is eroded off, a strip one cell deep in front of the first step: at some heights it bakes and
+the stair joins the floor, at others it doesn't (a scratch probe: three of twelve city stairs cut
+off with the grid 0.2 m off the floor, none with it on). City buildings keep 1.0 m
+(`CITY_STAIR_APPROACH`; 215 flights checked at five grid offsets, all joined) and every stair's
+ramp now has wedges at both ends (`ramp_faces`), but towns and landmarks keep 0.5 m: giving them
+1.0 m moves their stairs (and so their furniture), which changes those buildings for saved
+damage. Captain's call: move them (and accept the change), or keep them and bake a little floor
+ramp in front of each foot instead.
+
+## F-213: a path from the street to a tower's top floors stops a floor or two short
+
+Found building city zones: `NavigationServer3D.map_get_path`, which the AI calls (squad_ai.gd,
+tactics.gd, buildings.gd, civilian_ai.gd), searches at most 4096 navmesh polygons (Godot's
+`path_search_max_polygons`; there's no project setting for it) and then returns the path to the
+nearest spot it reached. In a city, from the street to an 8-storey tower's top floors that's more
+than 4096 (every flight, landing and furnished room on the way), so the path ends on floor 6 (in
+the `city` suite, 6 of the tower's 48 rooms; a path with the limit at 65 536 reaches every one).
+The navmesh itself joins them up, and a man re-pathing as he climbs gets there, but an order to
+"go to the top floor" from outside takes him only part of the way first. Suggested (the callers are
+Claude's files): one helper that paths with `NavigationServer3D.query_path` and a higher
+`path_search_max_polygons` (or in hops: to the building's door, then up), used where the AI paths
+into a building.
 
 ## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
 
@@ -717,7 +834,35 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-22 | Woods perf pass: the caps nobody sees (inside the tier above, under the ground, inside the crown) left out of the crown, conifer, scrub, trunk and blob meshes | free triangles, the look unchanged | keep them
 - 2026-10-22 | Woods perf pass: foliage and solids indexed in 16 m squares (FINE_M, Proposed) and the sight-line walk stops once both lines are hidden (Spotting.foliage_m passes FOLIAGE_OPAQUE_M; the value is exact below it) | a sight line through a dense wood 10x cheaper, the AI's foliage cost in a fight 9.0 -> 0.4 ms a frame, every decision the same | a cache of sight results per pair (stale as men move)
 - 2026-10-22 | Woods perf pass: collision left as it was (a body a cell, every trunk, big rock and prop as drawn) | rays through dense woods cost 5-7 us and the build is once at load; building shapes without nodes would change the props suite's round_through owners | shape owners without CollisionShape3D nodes
-- 2026-10-22 | Dense copses (copse_cover and its caps) in every wooded normal preset (temperate, river_valley, highland_moor, coastal_lowland, amphibious_coast, rocky_ridge, scrubland); temperate and river_valley woods 2.1 and copses 6 a km2 (forest 2.4 / 6) (data, Proposed); the dense layout's thicket cap 11000 -> 16000 (CAP_THICKETS), as a 16 km2 hot zone ran out before its last copses had their skirts (world: 130 of 256 lines through woods hidden, R0506) | Captain: "Then denser copses" once the woods were cheap | only the Experimental forest dense; desert_wadi, badlands and salt flats keep their small copses (copse_cover's default copse is 35-110 trees)
+- 2026-10-22 | Dense copses (copse_cover and its caps) in every wooded normal preset (temperate, river_valley, highland_moor, coastal_lowland, amphibious_coast, rocky_ridge, scrubland, and since the merge with world/terrain snow_mountain and farmland; marsh keeps its own 12-40 tree copses, city has no woods); temperate and river_valley woods 2.1 and copses 6 a km2 (forest 2.4 / 6) (data, Proposed); the dense layout's thicket cap 11000 -> 16000 (CAP_THICKETS), as a 16 km2 hot zone ran out before its last copses had their skirts (world: 130 of 256 lines through woods hidden, R0506) | Captain: "Then denser copses" once the woods were cheap | only the Experimental forest dense; desert_wadi, badlands and salt flats keep their small copses (copse_cover's default copse is 35-110 trees)
 - 2026-10-22 | F-121: the voxel world's edit area grows to hold a level's structures (VoxelWorld.fit_structures, called by CompoundLevel), not the range's blocks moved | vehicle_range.gd is Claude's, and any level's structure past 22 m is built too | move the blocks to z -18 and -21
 - 2026-10-22 | Woods perf budgets in the forest suite (Proposed): from a normal preset's densest copse 600 draws, 700k triangles, 200k in the shadow pass; a capped sight line 400 us; a nav chunk 0.5 ms; standing in the forest's densest copse 25 ms a frame on average, 60 ms at the 95th percentile; a scan round of 16 men 30 ms | room for CI's slower runners over this PC's numbers | frame budgets only (noisy on a shared PC)
-- 2026-10-22 | F-121's blocks in the vehicles suite: its AI driving goals moved off them ((-12, -20) -> (-12, -14); the path with a turn along z -36), the vehicle AI's trouble turning beside one logged as F-196 | the blocks are the range's ("something for the AI driver to steer round") and the AI code is Claude's | leave the range's blocks unbuilt
+- 2026-10-22 | F-121's blocks in the vehicles suite: its AI driving goals moved off them ((-12, -20) -> (-12, -14); the path with a turn along z -36), the vehicle AI's trouble turning beside one logged as F-223 | the blocks are the range's ("something for the AI driver to steer round") and the AI code is Claude's | leave the range's blocks unbuilt
+
+
+- 2026-10-22 | A season from the campaign day: 30 days each, starting in spring (Season); the host puts it in a zone's def when it switches to it (BaseHub.server_switch_level), a def without one (the menu's test zones) is summer | there was none (DayNight keeps the hour, the economy the day); a campaign month a season lets a long campaign see the year turn | a real 91-day calendar, or the season from the weather
+- 2026-10-22 | Gullies 2.0-2.8 m deep (a 2.6 m floor, sides out to 8-10 m), ditches 1.2-1.5 m; 260-520 m and 140-320 m long, kept 30 m off pads, fading out at roads, the zone's edge and their ends | a man prone in a gully is hidden from 91% of the lines from the flat round it (35-140 m), crouched 73%, prone in a ditch 78% (terrain run) | narrower, deeper cuts (the 4 m height grid can't draw them)
+- 2026-10-22 | Cliffs are escarpments in the heightmap: a face across one 4 m cell (60-79 degrees), a 10-24 m ledge, the ground easing back over 110-170 m behind, the ends tapering over 45 m, 6-18 m high by preset, 60 m off pads, a ramp where a road crosses one; talus rocks at the foot | collision, the navigation mesh's slope limit and the ground shader's rock come with it, nothing new to keep in sync | voxel or mesh cliff faces (overhangs: later)
+- 2026-10-22 | Existing presets get features: gullies on temperate, scrubland, desert_wadi, highland_moor, badlands, rocky_ridge; ditches on temperate, river_valley, coastal_lowland; cliffs on rocky_ridge, highland_moor, badlands (none on plain, salt_flats, forest_experimental, amphibious_coast) | the brief's gullies and cliffs are for the world, not only the new presets | new presets only
+- 2026-10-22 | Soft marsh ground keeps 65% of a man's pace at its softest, deep snow 75%; none on roads, tracks and pads (packed); on foot only (vehicles: F-185) | slower than a walk but still a game; the movement hook is the water's | a pace by snow depth, or mud that also tires (stamina)
+- 2026-10-22 | Frozen streams and ponds (the snow preset) are ice lying on their bed (0.1 m of channel): walked on, never waded or swum, on the AI's navigation mesh, pale and glossy; no thin ice | it reads as ice and needs no ice collision of its own | real ice over deep water with breakable slabs
+- 2026-10-22 | Crops and reeds hide by foliage metres a metre: ripe wheat 0.9 m tall 0.08 (about 15 m of it hides a man), maize 2.2 m 0.25, reed beds 1.7 m 0.3; counted within 25 m of either end of a line (F-188) | a man prone in summer wheat is hidden at 80 m, standing he isn't; standing in maize he is | walk every line through every field
+- 2026-10-22 | Crops by season (ZoneFeatures.CROPS): wheat green 0.35 m in spring, gold 0.9 m in summer, stubble in autumn, bare in winter; maize ploughed in spring, 2.2 m green in summer, 2 m dry in autumn, stubble in winter; vegetables low; orchards blossom in spring and stand bare in winter | the brief: crops by season | one fixed look
+- 2026-10-22 | "procedural" mixes take marsh, snow_mountain and farmland too, and their "features" part by part (the nearer preset's part wins); frozen water only where the mix has snow. Adding to MIX_FROM changes which presets the existing procedural zones (Hollow Downs, Ashfield, Marrow Shore) mix | the brief: procedural can mix them | a second list that leaves the old mixes as they were
+- 2026-10-22 | The new campaign zones are in data/contracts.json "zones" (where the campaign's zones live; data/zones.json holds the hand-made test zones): Blackwater Fen (marsh, inland, Valley Shura), Whitecap Pass (snow_mountain, inland, Black Ridge), Harrow Fields (farmland, inland, Kestrel, a farm landmark by its "fields" tag), all inland so the coast's block (FOB Halberd's hand-placed cell beside Cove outpost) keeps its shape; Whitecap isn't the Highland Front's, so Greyfell Moor stays its last zone (the war's siege rule) | a contract can go to each | turn existing zones into the new presets
+- 2026-10-22 | Farmland built without merging world/props (PR #22): fields, orchards, hedges and irrigation channels are ZoneFeatures' own; the props' farm fences and hay follow when both merge (F-187) | keeps the two PRs independent | merge world/props into world/terrain first
+- 2026-10-22 | Irrigation channels are ZoneWater line bodies ("channels"): 2.6-3.2 m wide, a 0.5 m cut, along an eighth of the field grid's column edges where both sides are fields and the ground keeps within 3 m of level, cut into 72-340 m lengths | they build on the water (wading, culverts, scatter keep-out, bank tint) | ditches with a separate water mesh
+- 2026-10-22 | The world suite's "steepest ground" check on the ridge hot zone now skips 12 m round its cliffs (they're steep on purpose) | it guards the ridge noise, not the cliffs | drop the check
+- 2026-10-22 | Cliffs and gullies are carved after the water and kept off its water and banks: a stream crossing a cliff's line runs through a notch | carved first, a frozen stream held at its level through a cliff cut a 34 m canyon that took an extraction pad with it (the world suite, snow_mountain) | keep the cliffs off where the streams will run (unknown before the water)
+- 2026-10-22 | snow_mountain's relief down from 2.1 to 1.7 times the zone's, its ridges and detail a little softer | on CI the loop suite's helicopter didn't settle on a 10-12 degree LZ on Whitecap Pass (F-189) | keep it rugged and fix the landing first
+
+- 2026-10-22 | A city is a 5 x 4 grid of perimeter blocks 48 m apart with 10 m streets (240 x 192 m), each block a zone module of its own ("city#<seed>#<ix>#<iz>": streamed, garrisoned and given missions block by block, a town to the rest of the game) on one flat pad for the whole city (Proposed: BuildingGen.CITY_*) | streaming per block keeps a city's cost to the blocks near the squad; one pad keeps the streets level | one big city module, or towns packed together
+- 2026-10-22 | City heights (the brief's call): 3-5 storeys in the inner blocks, 2-3 on the outer ring, 2-3 towers of 6-8 in the core; new types apartment (flats), tenement (a shop under flats) and tower (offices); clinics, police stations, houses and shops too; a house or shop too small for its stairs gives way to flats, a lot too narrow for stairs is left open (no one-storey buildings in a city) | the bands as called, every building with stairs to every floor and its roof | let small buildings top out lower than their band
+- 2026-10-22 | City garrisons: 4 posts a core block, 2 an outskirts block, 2 more in a tower (its top floor and roof), 70% up high (in practice all upstairs: windows onto the street, the floors spread by building, a back room upstairs); about 58 for the Old Quarter | "garrisons use the upper floors", and about what its 3-4 towns held | a post per building (200+)
+- 2026-10-22 | The Old Quarter's 3-4 towns become one city (its HQ outside it, a road from the HQ to its ring street, a patrol round its inner streets, its villages outside), on a new "city" terrain preset (low rolling ground, dusty verges, grey streets, few trees, more ruins) | "the Old Quarter becomes a real city" | a city alongside the towns
+- 2026-10-22 | 12% of a city's buildings ruined (never a tower; never bombed out: the bombed-out roof-and-walls collapse is two-storey only) | it's a hot zone in a living war, as its landmarks are | none ruined, or bombed out too
+- 2026-10-22 | A city's street grid is its own data (the def's "cities", ZoneModules.city_streets), painted on its pad, not paved: joining it to the roads is F-210 | the roads agent owns zone_roads.gd | pave it here
+- 2026-10-22 | The zone navmesh bakes up to the tallest module on each chunk (was 8 m over the ground), and Jolt's body limit goes 10 240 -> 32 768 (project.godot) | a city's upper floors weren't in the navmesh, and a whole city streamed in passed 10 240 bodies (each voxel mesh block's collision is one) | stream fewer blocks at once (a city is meant to be fought through)
+- 2026-10-22 | City stairs keep 1.0 m clear in front of their foot (towns and landmarks keep 0.5 m: F-212), and every stair's navmesh ramp gets a wedge on and off | at 0.5 m a zone's pad height decided whether a stair joined the floor (3 of 12 cut off at one offset; 215 of 215 joined at five offsets with 1.0 m) | move every building's stairs now (changes towns and landmarks for saves)
+- 2026-10-22 | City block frame-time check: walking in at a run while its blocks stream in, worst frame 200 ms and average 25 ms (Proposed; 76 ms and 9 ms measured here), with the AI's building scans counted as a game caps them (4 ms a frame past the first; F-211) | headless runs every scan in full, and those (not the blocks) are the long frames | count the scans in full (fails on F-211, not on the city)
+- 2026-10-22 | Village houses (queue item 1.6): the four hand-built houses are generated on their own ground (mud brick, cinder block, a two-room brick house, a plank shack: a "plank" style kept out of STYLES so no other building changes), front doors where they were, one storey, no roof stairs; their furniture keeps off the posts, loot, named points, mission sites, site boxes and the world suite's firing lines; every village the same | the brief: "keeping each module's layout and garrison posts" | a village seed per zone with varied houses (moves posts and sites)

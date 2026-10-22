@@ -51,6 +51,11 @@ const STAIR_LANDING := 0.8
 ## against the end wall could only be stepped onto from the side, where the navmesh, eroded
 ## along the wall and the stair's open side, left no way on (F-01).
 const STAIR_APPROACH := 0.5
+## A city building's stairs (building() with "storeys", queue item 1.5): more floor in front of the
+## foot. A 0.5 m approach between the end wall and the first step, eroded by the agent's radius,
+## left a strip a single 0.25 m cell deep: whether the bake kept a way on hung on where its cells
+## fell, which on a zone's pads (any height) cut many a stair off. Proposed.
+const CITY_STAIR_APPROACH := 1.0
 const RAIL_H := 1.0
 const RAIL_T := 0.1
 ## A flat roof with a stair up to it has a parapet round its edge.
@@ -69,6 +74,11 @@ const STYLES := {
 	"brick": {"wall": VoxelWorld.Mat.BRICK, "t": 0.25, "inner": VoxelWorld.Mat.PLASTER, "roof": VoxelWorld.Mat.CONCRETE, "roof_t": 0.2, "h": 2.8},
 	"block": {"wall": VoxelWorld.Mat.CINDER_BLOCK, "t": 0.2, "inner": VoxelWorld.Mat.CINDER_BLOCK, "roof": VoxelWorld.Mat.SHEET_METAL, "roof_t": 0.1, "h": 2.6},
 	"stone": {"wall": VoxelWorld.Mat.STONE, "t": 0.4, "inner": VoxelWorld.Mat.PLASTER, "roof": VoxelWorld.Mat.ROOF_TILE, "roof_t": 0.2, "h": 2.8},
+}
+## Styles only a village's houses are built in (village_house, queue item 1.6), kept out of STYLES
+## so a town's or a building's own pick among STYLES is as it was: a plank shack.
+const VILLAGE_STYLES := {
+	"plank": {"wall": VoxelWorld.Mat.WOOD, "t": 0.1, "inner": VoxelWorld.Mat.WOOD, "roof": VoxelWorld.Mat.SHEET_METAL, "roof_t": 0.1, "h": 2.3},
 }
 ## Building types: footprint (width x along the street, depth z: [min, max] m each), how many
 ## rooms, and their roles: "front" the room the front door opens into (the one with most street
@@ -160,7 +170,25 @@ const TYPES := {
 		"rest": "storeroom", "back": "bomb_workshop", "dark": ["storeroom"], "door_w": 1.1, "win_w": 0.8,
 		"storeys": 0.2, "l_shape": 0.3, "yard": 0.7, "roof": 0.3, "styles": ["mud", "block", "stone"], "extras": "ied_workshop",
 		"upper": {"front": "bedroom", "fill": ["storeroom"], "rest": "bedroom"}},
+	# City buildings (queue item 1.5, cghath 2026-10-22; docs/building_gen.md "City zones"): built
+	# with building(..., {"storeys": n}) by city_block (CITY_*_STOREYS), never by chance ("storeys"
+	# 0). Flats on every floor (an apartment block), a shop under flats (a tenement), offices (a
+	# tower: the city's landmarks). Proposed sizes: wide enough for a flight up on every floor.
+	"apartment": {"w": [12.0, 16.0], "d": [10.0, 12.5], "rooms": [3, 5], "front": "living", "fill": ["kitchen", "bedroom", "bedroom"],
+		"smallest": "bathroom", "rest": "bedroom", "back": "kitchen", "dark": ["bathroom", "storeroom"], "door_w": 1.4, "win_w": 1.2,
+		"storeys": 0.0, "l_shape": 0.0, "yard": 0.0, "roof": 1.0, "styles": ["block", "brick", "stone"],
+		"upper": {"front": "living", "fill": ["kitchen", "bedroom", "bedroom"], "smallest": "bathroom", "rest": "bedroom"}},
+	"tenement": {"w": [11.0, 15.0], "d": [10.0, 12.5], "rooms": [3, 4], "front": "shopfront", "fill": ["storeroom", "office"],
+		"smallest": "bathroom", "rest": "storeroom", "back": "storeroom", "dark": ["bathroom", "storeroom"], "door_w": 1.8, "win_w": 2.0,
+		"storeys": 0.0, "l_shape": 0.0, "yard": 0.0, "roof": 1.0, "styles": ["block", "brick", "stone", "mud"], "sign": true,
+		"upper": {"front": "living", "fill": ["kitchen", "bedroom"], "smallest": "bathroom", "rest": "bedroom"}},
+	"tower": {"w": [14.0, 17.0], "d": [13.0, 15.5], "rooms": [4, 6], "front": "reception", "fill": ["office", "open_office", "meeting"],
+		"smallest": "bathroom", "inner": "storeroom", "rest": "office", "back": "office", "dark": ["bathroom", "storeroom"], "door_w": 2.0, "win_w": 1.6,
+		"storeys": 0.0, "l_shape": 0.0, "yard": 0.0, "roof": 1.0, "styles": ["block", "brick"], "sign": true,
+		"upper": {"front": "open_office", "fill": ["office", "meeting", "open_office"], "smallest": "bathroom", "rest": "office"}},
 }
+## The city building types (city_block) besides the town's.
+const CITY_TYPES: Array[String] = ["apartment", "tenement", "tower"]
 ## The landmark building types (queue item 1.4): each has a ruined and a bombed-out variant
 ## (building(type, seed, style, RUINED / BOMBED)).
 const LANDMARK_TYPES: Array[String] = ["office", "mosque", "church", "school", "garage", "fuel_station", "factory", "farmhouse", "barn",
@@ -191,37 +219,54 @@ static func house(seed: int, style := "") -> Dictionary:
 ## front (+z) of the lot, a yard behind it (and a landmark's "apron" in front of it).
 ## `ruin`: RUINED or BOMBED makes its ruined or bombed-out variant (_ruin): the same building
 ## (rooms, doors, loot) with walls breached, roofs fallen in, rubble.
-static func building(type: String, seed: int, style := "", ruin := INTACT) -> Dictionary:
+## `opts` (city blocks and village houses, queue items 1.5 and 1.6; {} builds it as it always
+## was): "storeys" (int: this many storeys, as far as its stairs fit: "storeys" in the result says
+## how many it got; a type with an "upper" spec), "size" (Vector2: its shell's width and depth, m,
+## not the type's range), "rooms" (how many rooms at most, not the type's range), "no_yard" (true:
+## no yard behind), "no_l" (never an L), "no_roof" (no stair
+## up onto a single storey's roof), "door_at" (its front door's middle along its front, x, its own
+## metres), "keep" (Rect2s, its own metres: the ground floor's furniture stays off them: a
+## village's garrison posts and mission spots). Every one leaves the random stream as it was.
+static func building(type: String, seed: int, style := "", ruin := INTACT, opts := {}) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	var spec: Dictionary = TYPES[type]
 	if style == "":
 		var allowed: Array = spec.get("styles", STYLES.keys())
 		style = allowed[rng.randi() % allowed.size()]
-	var st: Dictionary = STYLES[style]
+	var st: Dictionary = STYLES[style] if STYLES.has(style) else VILLAGE_STYLES[style]
 	var look := _look(style, type, seed)  # its own colours (a random stream of its own: the layout below is as it was)
 	var w := snappedf(rng.randf_range(spec.w[0], spec.w[1]), 0.1)
 	var d := snappedf(rng.randf_range(spec.d[0], spec.d[1]), 0.1)
+	if opts.has("size"):
+		w = snappedf((opts.size as Vector2).x, 0.1)
+		d = snappedf((opts.size as Vector2).y, 0.1)
 	var t: float = st.t
 	var h: float = float(spec.get("h", st.h))
 	var roof_t: float = st.roof_t
 	var fh := h + SLAB_T  # floor to floor
-	var slab_mat: int = VoxelWorld.Mat.WOOD if style == "mud" else VoxelWorld.Mat.CONCRETE
+	var slab_mat: int = VoxelWorld.Mat.WOOD if style in ["mud", "plank"] else VoxelWorld.Mat.CONCRETE
 	var storeys := 2 if rng.randf() < float(spec.get("storeys", 0.0)) else 1
+	if int(opts.get("storeys", 0)) > 0:
+		storeys = int(opts.storeys) if spec.has("upper") else 1
 	var yard_d := snappedf(rng.randf_range(YARD_D.x, YARD_D.y), 0.1) if rng.randf() < float(spec.get("yard", 0.0)) else 0.0
+	if opts.get("no_yard", false):
+		yard_d = 0.0
 	var apron := snappedf(rng.randf_range(spec.apron[0], spec.apron[1]), 0.1) if spec.has("apron") else 0.0
 	var depth := d + yard_d + apron
 	var outer := Rect2(-w * 0.5, -depth * 0.5 + yard_d, w, d)
 	var inner := outer.grow(-t)
 	# An L: a back corner left out (single storey, no yard behind).
 	var cut := Rect2()
-	if storeys == 1 and yard_d == 0.0 and rng.randf() < float(spec.get("l_shape", 0.0)):
+	if storeys == 1 and yard_d == 0.0 and rng.randf() < float(spec.get("l_shape", 0.0)) and not opts.get("no_l", false):
 		var nw := snappedf(inner.size.x * rng.randf_range(0.35, 0.5), 0.1)
 		var nd := snappedf(inner.size.y * rng.randf_range(0.35, 0.5), 0.1)
 		if nw >= MIN_ROOM and nd >= MIN_ROOM and inner.size.x - nw >= MIN_ROOM * 2.0 and inner.size.y - nd >= MIN_ROOM:
 			cut = Rect2(inner.position.x if rng.randf() < 0.5 else inner.end.x - nw, inner.position.y, nw, nd)
 	# The ground floor: its rooms, roles and doorways, the front door and a back door.
 	var want := rng.randi_range(spec.rooms[0], spec.rooms[1])
+	if opts.has("rooms"):
+		want = int(opts.rooms)
 	var keep_big := bool(spec.get("keep_big", false))
 	var plan := _plan(inner, cut, want, rng, float(spec.get("first_cut", -1.0)), keep_big)
 	if (plan.rects as Array).size() < int(spec.rooms[0]):  # too small an L for its rooms: whole
@@ -236,45 +281,60 @@ static func building(type: String, seed: int, style := "", ruin := INTACT) -> Di
 	var floors: Array = [{"rects": rects, "splits": plan.splits, "roles": roles, "gaps": {}, "y": 0.0, "first": 0}]
 	var gaps: Dictionary = floors[0].gaps
 	var doors: Array = []
-	_doorways(rects, links, hub, bath, rng, gaps, doors, 0, 0.0)
+	var city := int(opts.get("storeys", 0)) > 0
+	_doorways(rects, links, hub, bath, rng, gaps, doors, 0, 0.0, [], city)
 	var door_w: float = spec.door_w
 	var front := hub if _side_len(hub, rects, "s") >= door_w + 2.0 * DOOR_EDGE else _nearest_side(rects, "s", bath)
-	_outer_door(gaps, doors, rects, front, "s", rng, door_w, float(spec.get("door_h", -1.0)))
+	var door_at := float(opts.get("door_at", NAN))
+	if not is_nan(door_at):  # the room whose street wall it's in
+		for i in rects.size():
+			var span := _side_span(i, rects, "s")
+			if door_at > span.x and door_at < span.y:
+				front = i
+	_outer_door(gaps, doors, rects, front, "s", rng, door_w, float(spec.get("door_h", -1.0)), door_at)
 	var back := roles.find(spec.back)
 	for side: String in ["n", "e", "w"]:
 		if back >= 0 and (back != front or side == "n") and _side_len(back, rects, side) >= DOOR_W + 2.0 * DOOR_EDGE:
 			_outer_door(gaps, doors, rects, back, side, rng, maxf(DOOR_W, door_w if type == "warehouse" else DOOR_W))
 			break
-	# A second storey: a stair up from a ground-floor room; the walls above stand on the ones
-	# below (so the stairwell and its landing are in one room up there too), the rooms given the
-	# type's "upper" roles and doorways of their own.
+	# Storeys above the ground: a stair up from each floor to the next; the walls above stand on
+	# the ones below (so a stairwell and its landing are in one room up there too), each floor's
+	# rooms given the type's "upper" roles and doorways of their own. Each flight keeps off the
+	# stairwell coming up into its floor and its landing (city buildings, queue item 1.5: up to
+	# CITY_TOWER_STOREYS; a flight that fits nowhere tops the building out there).
 	var stairs: Array = []
 	var avoid := {}  # "floor:room" -> Rect2s furniture keeps off (stairs, stairwells, landings)
-	var up := {}
-	if storeys == 2:
-		up = _stair(rects, roles, doors, 0, fh, [], rng)
+	if opts.has("keep"):
+		for i in rects.size():
+			avoid["0:%d" % i] = (opts.keep as Array).duplicate()
+	var ups: Array = []  # each floor's stair up to the next (as _stair), lowest first
+	var keep_up: Array = []  # what the next flight keeps off: the stairwell and landing of the last
+	for k in range(1, storeys):
+		var below: Dictionary = floors[k - 1]
+		var up := _stair(rects, below.roles, doors, int(below.first), fh, keep_up, rng, CITY_STAIR_APPROACH if city else STAIR_APPROACH)
 		if up.is_empty():
-			storeys = 1
-	if storeys == 2:
+			storeys = k
+			break
 		var hole: Rect2 = up.foot
 		var hub2: int = up.room
 		var roles2 := _upper_roles(spec.upper, rects, hub2)
-		floors.append({"rects": rects, "splits": plan.splits, "roles": roles2, "gaps": {}, "y": fh, "first": n})
-		_doorways(rects, links, hub2, roles2.find("bathroom"), rng, floors[1].gaps, doors, n, fh, [hole.grow(0.3)])
+		floors.append({"rects": rects, "splits": plan.splits, "roles": roles2, "gaps": {}, "y": fh * k, "first": n * k})
+		_doorways(rects, links, hub2, roles2.find("bathroom"), rng, floors[k].gaps, doors, n * k, fh * k, [hole.grow(0.3)], city)
 		var land: Vector2 = (up.land as Rect2).get_center()
-		doors.append({"at": Vector3(land.x, fh, land.y), "rooms": [int(up.room), n + hub2], "stair": true})
-		stairs.append({"foot": hole, "from_y": 0.0, "to_y": fh, "steps": int(up.steps), "low": up.low, "up": up.up, "along_x": up.along_x, "land": up.land, "side": up.side})
-		avoid["0:%d" % up.room] = [hole.grow(0.7)]
-		avoid["1:%d" % hub2] = [hole.grow(0.5), (up.land as Rect2).grow(0.3)]
-	# Up onto the roof: two storeys always, one now and then.
+		doors.append({"at": Vector3(land.x, fh * k, land.y), "rooms": [int(below.first) + int(up.room), n * k + hub2], "stair": true})
+		stairs.append({"foot": hole, "from_y": fh * (k - 1), "to_y": fh * k, "steps": int(up.steps), "low": up.low, "up": up.up, "along_x": up.along_x, "land": up.land, "side": up.side})
+		var below_key := "%d:%d" % [k - 1, up.room]
+		avoid[below_key] = (avoid.get(below_key, []) as Array) + [hole.grow(0.7)]
+		var key_up := "%d:%d" % [k, hub2]
+		avoid[key_up] = (avoid.get(key_up, []) as Array) + [hole.grow(0.5), (up.land as Rect2).grow(0.3)]
+		ups.append(up)
+		keep_up = [hole.grow(0.9), (up.land as Rect2).grow(0.3)]
+	# Up onto the roof: two storeys or more always, one now and then.
 	var top: Dictionary = floors.back()
 	var roof_y: float = float(top.y) + h
 	var roof := {}
-	if storeys == 2 or rng.randf() < float(spec.get("roof", 0.0)):
-		var keep_off: Array = []
-		if storeys == 2:
-			keep_off = [(up.foot as Rect2).grow(0.9), (up.land as Rect2).grow(0.3)]
-		roof = _stair(top.rects, top.roles, doors, int(top.first), h + roof_t, keep_off, rng)
+	if (storeys >= 2 or rng.randf() < float(spec.get("roof", 0.0))) and not opts.get("no_roof", false):
+		roof = _stair(top.rects, top.roles, doors, int(top.first), h + roof_t, keep_up, rng, CITY_STAIR_APPROACH if city else STAIR_APPROACH)
 		if not roof.is_empty():
 			var land: Vector2 = (roof.land as Rect2).get_center()
 			doors.append({"at": Vector3(land.x, roof_y + roof_t, land.y), "rooms": [int(top.first) + int(roof.room), -2], "stair": true})
@@ -310,10 +370,11 @@ static func building(type: String, seed: int, style := "", ruin := INTACT) -> Di
 		for sp: Array in f.splits:
 			var key := "in:%d:%s" % [sp[0], snappedf(sp[1], 0.01)]
 			_wall(boxes, 1 if sp[0] == 0 else 0, float(sp[1]) - INNER_T * 0.5, float(sp[1]) + INNER_T * 0.5, sp[2], sp[3], h, st.inner, f.gaps.get(key, []), f.y)
-	if storeys == 2:
-		_slab(boxes, rects, t, [up.foot], h, fh, slab_mat)
-		_stair_boxes(boxes, up, 0.0, fh, slab_mat)
-		_rails(boxes, up, fh)
+	for k in ups.size():  # the slab over each floor with its stairwell up, the stair, its railing
+		var up: Dictionary = ups[k]
+		_slab(boxes, rects, t, [up.foot], fh * k + h, fh * (k + 1), slab_mat)
+		_stair_boxes(boxes, up, fh * k, fh, slab_mat)
+		_rails(boxes, up, fh * (k + 1))
 	_slab(boxes, top.rects, t, [roof.foot] if not roof.is_empty() else [], roof_y, roof_y + roof_t, look.roof)
 	if not roof.is_empty():
 		_stair_boxes(boxes, roof, top.y, h + roof_t, slab_mat)
@@ -379,7 +440,7 @@ static func style_for(preset: String, seed: int) -> String:
 	var pick := {
 		"desert_wadi": ["mud", "mud", "block"], "scrubland": ["mud", "block"], "salt_flats": ["block", "mud"],
 		"rocky_ridge": ["stone", "block"], "temperate": ["brick", "stone", "block"],
-		"coastal_lowland": ["block", "brick"], "amphibious_coast": ["block", "brick"],
+		"coastal_lowland": ["block", "brick"], "amphibious_coast": ["block", "brick"], "city": ["block", "brick", "stone"],
 	}
 	var list: Array = pick.get(preset, ["block", "brick"])
 	return list[absi(seed) % list.size()]
@@ -411,6 +472,10 @@ const LOOKS := {
 	"stone": {"walls": [VoxelWorld.Mat.STONE, VoxelWorld.Mat.STONE_WARM, VoxelWorld.Mat.STONE_GREY],
 		"trim": VoxelWorld.Mat.LIMESTONE, "trim_alt": VoxelWorld.Mat.TRIM_WHITE, "plinth": VoxelWorld.Mat.STONE_GREY, "dirty": VoxelWorld.Mat.STONE_GREY,
 		"lintel": VoxelWorld.Mat.LIMESTONE, "shutters": 0.5, "beams": false, "quoins": true},
+	"plank": {"walls": [VoxelWorld.Mat.WOOD, VoxelWorld.Mat.WOOD, VoxelWorld.Mat.WOOD_GREEN, VoxelWorld.Mat.WOOD_BLUE],
+		"trim": VoxelWorld.Mat.WOOD_DARK, "trim_alt": VoxelWorld.Mat.WOOD, "plinth": VoxelWorld.Mat.WOOD_DARK, "dirty": VoxelWorld.Mat.WOOD_DARK,
+		"lintel": VoxelWorld.Mat.WOOD_DARK, "shutters": 0.0, "beams": false, "quoins": false,
+		"roofs": [VoxelWorld.Mat.SHEET_METAL, VoxelWorld.Mat.SHEET_RUST]},
 }
 const SHUTTERS: Array[int] = [VoxelWorld.Mat.WOOD_GREEN, VoxelWorld.Mat.WOOD_BLUE, VoxelWorld.Mat.WOOD_DARK]
 const SIGNS: Array[int] = [VoxelWorld.Mat.SIGN_RED, VoxelWorld.Mat.SIGN_YELLOW, VoxelWorld.Mat.SIGN_BLUE]
@@ -441,14 +506,14 @@ static func _look(style: String, type: String, seed: int) -> Dictionary:
 	var trim: int = l.trim if l.trim != wall else l.trim_alt
 	var plinth: int = l.plinth if l.plinth != wall else VoxelWorld.Mat.TRIM_DARK
 	var dirty: int = l.dirty if l.dirty != wall else plinth
-	var roofs: Array = l.get("roofs", [STYLES[style].roof])
+	var roofs: Array = l.roofs if l.has("roofs") else [STYLES[style].roof]
 	var roof: int = roofs[rng.randi() % roofs.size()]
 	var shutter: int = SHUTTERS[rng.randi() % SHUTTERS.size()] if rng.randf() < float(l.shutters) else -1
 	var sign: int = SIGNS[rng.randi() % SIGNS.size()]
 	if type == "police":
 		sign = VoxelWorld.Mat.SIGN_BLUE
 	return {"wall": wall, "roof": roof, "trim": trim, "plinth": plinth, "dirty": dirty, "lintel": l.lintel, "shutter": shutter,
-		"sign": sign, "beams": l.beams, "quoins": l.quoins, "seed": rng.randi(), "roof_kind": STYLES[style].roof}
+		"sign": sign, "beams": l.beams, "quoins": l.quoins, "seed": rng.randi(), "roof_kind": (STYLES[style] if STYLES.has(style) else VILLAGE_STYLES[style]).roof}
 
 
 ## The building's skin (see LOOKS) over its outside `walls` (_shell's records) and `yards`' walls,
@@ -705,6 +770,8 @@ static func _house_roles(rects: Array[Rect2], links: Array) -> Array:
 	var roles: Array = []
 	roles.resize(n)
 	roles.fill("bedroom")
+	if n == 1:
+		return ["living"]  # (a one-room village house: never a house that's all bathroom)
 	roles[order[0]] = "living"
 	roles[order[n - 1]] = "bathroom"
 	if n >= 6:
@@ -795,7 +862,9 @@ static func _links(rects: Array[Rect2]) -> Array:
 ## it), and now and then one loop. Rooms in `doors` are numbered from `first`; at height `y`.
 ## `wells` (Rect2s: the stairwell up through this floor): a doorway is slid along its wall till
 ## the floor either side of it is clear of them (one over a stairwell was no way through).
-static func _doorways(rects: Array[Rect2], links: Array, hub: int, bath: int, rng: RandomNumberGenerator, gaps: Dictionary, doors: Array, first: int, y: float, wells: Array = []) -> void:
+## `through_bath` (city buildings): a room the tree can't reach but through the bathroom gets a
+## doorway that way (a row of three rooms with the bathroom in the middle was cut off at its end).
+static func _doorways(rects: Array[Rect2], links: Array, hub: int, bath: int, rng: RandomNumberGenerator, gaps: Dictionary, doors: Array, first: int, y: float, wells: Array = [], through_bath := false) -> void:
 	var n := rects.size()
 	var tree: Array = []
 	var reached := {hub: true}
@@ -810,6 +879,9 @@ static func _doorways(rects: Array[Rect2], links: Array, hub: int, bath: int, rn
 			clear_links.append(l)
 	for pool: Array in ([clear_links, links] if not wells.is_empty() else [links]):
 		_tree(pool, bath, n, reached, tree)
+	if through_bath and reached.size() < n:
+		for pool: Array in ([clear_links, links] if not wells.is_empty() else [links]):
+			_tree(pool, -1, n, reached, tree)
 	if rng.randf() < 0.3:
 		for l: Array in clear_links:
 			if not tree.has(l) and l[0] != bath and l[1] != bath:
@@ -981,13 +1053,16 @@ static func _nearest_side(rects: Array[Rect2], side: String, skip := -1) -> int:
 	return best
 
 
-## `height`: a landmark's "door_h" (-1: DOOR_H, a little more for a wide one).
-static func _outer_door(gaps: Dictionary, doors: Array, rects: Array[Rect2], room: int, side: String, rng: RandomNumberGenerator, width := DOOR_W, height := -1.0) -> void:
+## `height`: a landmark's "door_h" (-1: DOOR_H, a little more for a wide one); `at`: its middle
+## along the wall (NAN: picked by `rng`).
+static func _outer_door(gaps: Dictionary, doors: Array, rects: Array[Rect2], room: int, side: String, rng: RandomNumberGenerator, width := DOOR_W, height := -1.0, at := NAN) -> void:
 	var span := _side_span(room, rects, side)
 	width = minf(width, span.y - span.x - DOOR_EDGE * 2.0)
 	if width < DOOR_W:
 		return
 	var lo := snappedf(rng.randf_range(span.x + DOOR_EDGE, span.y - DOOR_EDGE - width), 0.1)
+	if not is_nan(at):  # (a village house's door where the hand-built one was)
+		lo = snappedf(clampf(at - width * 0.5, span.x + DOOR_EDGE, span.y - DOOR_EDGE - width), 0.05)
 	_gap(gaps, _out_key(rects[room], side), lo, lo + width, 0.0, height if height > 0.0 else DOOR_H + (0.4 if width >= 2.5 else 0.0))
 	var c := lo + width * 0.5
 	var line := _line(rects[room], side)
@@ -1012,7 +1087,7 @@ static func _door_clear(at: Vector3, room: Rect2) -> Rect2:
 ## top in the same room. {"room",
 ## "foot" (Rect2), "side" (its wall), "along_x", "low" (where its foot is, along), "up" (1 or
 ## -1: which way it climbs), "steps", "land" (Rect2: the landing)}, or {} if none fits.
-static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, rise: float, keep: Array, rng: RandomNumberGenerator) -> Dictionary:
+static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, rise: float, keep: Array, rng: RandomNumberGenerator, approach := STAIR_APPROACH) -> Dictionary:
 	var steps := ceili(rise / STAIR_RISE)
 	var run := steps * STAIR_TREAD
 	var order: Array = range(rects.size())
@@ -1030,7 +1105,7 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var along_x := side in ["n", "s"]
 			var length := room.size.x if along_x else room.size.y
 			var across := room.size.y if along_x else room.size.x
-			if length >= run + STAIR_LANDING + STAIR_APPROACH + FURNITURE_GAP and across >= STAIR_W + 0.9:
+			if length >= run + STAIR_LANDING + approach + FURNITURE_GAP and across >= STAIR_W + 0.9:
 				options.append([side, 1])
 				options.append([side, -1])
 		for k in range(options.size() - 1, 0, -1):
@@ -1042,8 +1117,8 @@ static func _stair(rects: Array[Rect2], roles: Array, doors: Array, first: int, 
 			var side: String = o[0]
 			var up: int = o[1]
 			var along_x := side in ["n", "s"]
-			var low := ((room.position.x if along_x else room.position.y) + STAIR_APPROACH) if up == 1 \
-				else ((room.end.x if along_x else room.end.y) - STAIR_APPROACH)
+			var low := ((room.position.x if along_x else room.position.y) + approach) if up == 1 \
+				else ((room.end.x if along_x else room.end.y) - approach)
 			var high := low + up * run
 			var c0: float
 			match side:
@@ -1095,11 +1170,17 @@ static func _rails(out: Array, s: Dictionary, y: float) -> void:
 		out.append([Vector3(f.position.x, y, l0), Vector3(f.end.x, yt, l0 + RAIL_T), mat])
 
 
+## A stair's ramp's wedges (ramp_faces): how long (m), and the corners a stair's ramp is in all.
+const RAMP_WEDGE := 0.25
+const RAMP_FACES := 18
+
+
 ## For the navmesh bake only (NavBuilder, ZoneNav): a ramp over each of building `b`'s stairs,
-## in its own metres, as triangles facing up (two a stair). It lies a step's rise over the step
-## nosings, so it's over every tread, from that high at the foot to that high over its top
-## landing: one 0.2 m climb on and off, and a smooth slope between that a 0.25 m cell bakes
-## whole (the steps themselves, voxels, came out cut in two: see STAIR_RISE).
+## in its own metres, as triangles facing up (RAMP_FACES corners a stair: the ramp and a wedge at
+## each end). It lies a step's rise over the step nosings, so it's over every tread, from that
+## high at the foot to that high over its top landing, a RAMP_WEDGE long wedge up onto it from
+## the floor and one down off it onto the landing, and a smooth slope between that a 0.25 m cell
+## bakes whole (the steps themselves, voxels, came out cut in two: see STAIR_RISE).
 static func ramp_faces(b: Dictionary) -> PackedVector3Array:
 	var faces := PackedVector3Array()
 	for st: Dictionary in b.get("stairs", []):
@@ -1121,6 +1202,21 @@ static func ramp_faces(b: Dictionary) -> PackedVector3Array:
 		else:
 			corners = [Vector3(a.x, y0, a.z), Vector3(c.x, y0, a.z), Vector3(c.x, y1, c.z), Vector3(a.x, y1, c.z)]
 		faces.append_array([corners[0], corners[1], corners[2], corners[0], corners[2], corners[3]])
+		# Wedges onto it from the floor at its foot and down off it onto its landing (city zones,
+		# 2026-10-22): the 0.2 m climb on and off, baked where a 0.25 m cell happened to hold it and
+		# the slope's first 0.2 m together, came out a ledge the agent couldn't climb whenever the
+		# building stood at a height off the bake's 0.25 m grid (a zone's pads: stairs cut off).
+		var s0 := a.x if st.along_x else a.z
+		var s1 := c.x if st.along_x else c.z
+		var foot := [s0 - RAMP_WEDGE, float(st.from_y), s0, y_low] if up == 1 else [s1, y_low, s1 + RAMP_WEDGE, float(st.from_y)]
+		var top := [s1, y_high, s1 + RAMP_WEDGE, float(st.to_y)] if up == 1 else [s0 - RAMP_WEDGE, float(st.to_y), s0, y_high]
+		for wedge: Array in [foot, top]:
+			var q: Array[Vector3]
+			if st.along_x:
+				q = [Vector3(wedge[0], wedge[1], a.z), Vector3(wedge[2], wedge[3], a.z), Vector3(wedge[2], wedge[3], c.z), Vector3(wedge[0], wedge[1], c.z)]
+			else:
+				q = [Vector3(a.x, wedge[1], wedge[0]), Vector3(c.x, wedge[1], wedge[0]), Vector3(c.x, wedge[3], wedge[2]), Vector3(a.x, wedge[3], wedge[2])]
+			faces.append_array([q[0], q[1], q[2], q[0], q[2], q[3]])
 	return faces
 
 
@@ -1690,12 +1786,12 @@ static func _high_post(b: Dictionary, i: int) -> Array:
 		for w: Dictionary in (b.windows as Array).filter(func(w: Dictionary) -> bool: return int(w.floor) >= 1 and (w.out as Vector3).z > 0.5):
 			for back: float in [POST_IN_M, POST_IN_M + 0.4]:
 				tries.append([(w.at as Vector3) - (w.out as Vector3) * back + Vector3(0, 0.1, 0), w.out])
-	if int(b.storeys) == 2 and i % 2 == 0:
+	if int(b.storeys) >= 2 and i % 2 == 0:
 		window.call()
 		roof.call()
 	else:
 		roof.call()
-		if int(b.storeys) == 2:
+		if int(b.storeys) >= 2:
 			window.call()
 	for t: Array in tries:
 		if _clear_post(b.boxes, t[0]):
@@ -1764,6 +1860,433 @@ static func _town_type(rng: RandomNumberGenerator, along: float, once: Dictionar
 		if roll <= 0.0:
 			return t
 	return "house"
+
+
+# --- Village houses (queue item 1.6, cghath 2026-10-22) -----------------------------------------
+
+## A village's house (ZoneModules._village, VILLAGE_HOUSES): a single-storey house generated on the
+## hand-built one's ground: `spec` {"rect" (Rect2: its shell, module metres), "style" (STYLES or
+## VILLAGE_STYLES), "rooms", "front" ("s": its front door to +z, "e": to +x), "door" (that door's
+## middle along its wall, module metres), "seed"}; its furniture off `keep` (Rect2s, module
+## metres). No yard, no L, no stair onto its roof. {"boxes", "skin" (module metres), "data"
+## (building()), "turn", "origin"}.
+static func village_house(spec: Dictionary, keep: Array) -> Dictionary:
+	var rect: Rect2 = spec.rect
+	var centre := rect.get_center()
+	var origin := Vector3(centre.x, 0, centre.y)
+	var turn := 1 if String(spec.front) == "e" else 0
+	var size := rect.size if turn == 0 else Vector2(rect.size.y, rect.size.x)
+	var door := float(spec.door) - (centre.x if turn == 0 else 0.0)
+	if turn == 1:
+		door = -(float(spec.door) - centre.y)  # (turned: its own x runs along the zone's -z)
+	var local: Array = []
+	for r: Rect2 in keep:
+		if r.intersects(rect.grow(0.5)):
+			local.append(_turn_rect(Rect2(r.position - centre, r.size), 4 - turn))
+	var b := building("house", int(spec.seed), String(spec.style), INTACT,
+		{"size": size, "rooms": int(spec.rooms), "storeys": 1, "no_yard": true, "no_l": true, "no_roof": true, "door_at": door, "keep": local})
+	var boxes: Array = []
+	var skin: Array = []
+	for bx: Array in b.boxes:
+		boxes.append(_turn_box(bx, turn, origin))
+	for bx: Array in b.skin:
+		skin.append(_turn_box(bx, turn, origin))
+	return {"boxes": boxes, "skin": skin, "data": b, "turn": turn, "origin": origin}
+
+
+# --- Cities (phase 4: queue item 1.5, cghath 2026-10-22) ---------------------------------------
+# A city is a street grid of blocks (city_layout, from its seed alone): CITY_BLOCKS of them,
+# CITY_PITCH apart, CITY_STREET_W streets between and round them. Each block is a zone module of
+# its own (ZoneModules "city#<seed>#<ix>#<iz>", city_block), so the city streams in and out block
+# by block and its blocks are garrisoned, cleared and given missions like towns. A block is a
+# perimeter block: rows of terraced buildings along its four streets, fronts on the street,
+# alleys between them (CITY_LOT_GAP) and a courtyard behind; 3-5 storeys in the core, 2-3 on the
+# outskirts, a 6-8 storey tower in a few core blocks (the city's landmarks). Every building over
+# one storey has a stair up to every floor and its roof; the garrison holds the upper floors.
+# The street grid is data of its own (city_layout "streets", ZoneModules.city_streets) for the
+# roads to pave.
+
+## Proposed (cghath's call, 2026-10-22): the grid (blocks across and down, the pitch from one
+## block's middle to the next: a multiple of 24 m, so every block's middle sits on the zone's 12 m
+## navigation grid whatever the count), the streets' width (a 6 m road and 2 m pavements), the
+## storeys in the core, on the outskirts and in the towers, how many towers, the gap left between
+## buildings in a row (an alley), the share of lots left open, of buildings ruined (the living
+## war), and the deepest a row's building may be (the courtyard stays open behind).
+const CITY_BLOCKS := Vector2i(5, 4)
+const CITY_PITCH := 48.0
+const CITY_STREET_W := 10.0
+const CITY_CORE_STOREYS := Vector2i(3, 5)
+const CITY_OUTSKIRT_STOREYS := Vector2i(2, 3)
+const CITY_TOWER_STOREYS := Vector2i(6, 8)
+const CITY_TOWERS := Vector2i(2, 3)
+const CITY_LOT_GAP := 1.2
+const CITY_OPEN_LOT := 0.1
+const CITY_RUINED := 0.12
+const CITY_ROW_DEPTH := 14.0
+## The narrowest building a row's leftover is filled with (m); less is left open (a yard).
+const CITY_MIN_W := 8.5
+## Building types by where the block is (weights; Proposed): flats and shops under flats in the
+## core with the odd clinic or police station, more houses and shops out on the outskirts (every
+## one of them two storeys or more: no warehouses).
+const CITY_MIX := {
+	"core": {"apartment": 5.0, "tenement": 4.0, "clinic": 0.4, "police": 0.4},
+	"outskirts": {"apartment": 3.0, "tenement": 2.5, "house": 1.5, "shop": 1.0},
+}
+## Garrison posts a block (Proposed): a core block's, an outskirts block's, and a tower's own on top;
+## CITY_HIGH_SHARE of a block's posts up high (upper floors' windows onto the street and roofs, the
+## floors spread by building), the rest inside front doors and in back rooms upstairs.
+const CITY_POSTS := {"core": 4, "outskirts": 2, "tower": 2}
+const CITY_HIGH_SHARE := 0.7
+## Loot spots a block at most, street barricades a block [min, max], and someone living in every
+## CITY_CIVILIAN_EVERY'th building.
+const CITY_LOOT_MAX := 4
+const CITY_BARRICADES := Vector2i(0, 2)
+const CITY_CIVILIAN_EVERY := 3
+## A city's districts' styles (weights): mostly rendered block, brick and stone; mud brick in the
+## old lanes now and then.
+const CITY_STYLES := {"block": 4.0, "brick": 3.0, "stone": 2.0, "mud": 0.6}
+
+
+## City `seed`'s street grid (cheap: no buildings). {"cols", "rows", "pitch", "street_w", "half"
+## (Vector2: the city's half size, m: its blocks, their half streets and all), "blocks"
+## ({Vector2i(ix, iz): {"core" (not on the outer ring), "tower", "centre" (Vector2, city metres),
+## "style"}}), "streets" ([[Vector2 a, Vector2 b, width]]: the centre line of every street, the
+## ring round it too, city metres), "junctions" (Vector2s: where they cross)}.
+static func city_layout(seed: int) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed, "city"])
+	var cols := CITY_BLOCKS.x
+	var rows := CITY_BLOCKS.y
+	var half := Vector2(cols, rows) * CITY_PITCH * 0.5
+	var blocks := {}
+	var core: Array[Vector2i] = []
+	for iz in rows:
+		for ix in cols:
+			var at := Vector2i(ix, iz)
+			var inner := ix > 0 and ix < cols - 1 and iz > 0 and iz < rows - 1
+			blocks[at] = {"core": inner, "tower": false, "centre": city_block_centre(ix, iz), "style": _pick(rng, CITY_STYLES)}
+			if inner:
+				core.append(at)
+	for k in range(core.size() - 1, 0, -1):
+		var j := rng.randi() % (k + 1)
+		var c := core[k]
+		core[k] = core[j]
+		core[j] = c
+	for k in mini(rng.randi_range(CITY_TOWERS.x, CITY_TOWERS.y), core.size()):
+		blocks[core[k]].tower = true
+	var streets: Array = []
+	var junctions: Array[Vector2] = []
+	for k in cols + 1:
+		var x := -half.x + k * CITY_PITCH
+		streets.append([Vector2(x, -half.y), Vector2(x, half.y), CITY_STREET_W])
+		for j in rows + 1:
+			junctions.append(Vector2(x, -half.y + j * CITY_PITCH))
+	for j in rows + 1:
+		var z := -half.y + j * CITY_PITCH
+		streets.append([Vector2(-half.x, z), Vector2(half.x, z), CITY_STREET_W])
+	return {"cols": cols, "rows": rows, "pitch": CITY_PITCH, "street_w": CITY_STREET_W, "half": half, "blocks": blocks,
+		"streets": streets, "junctions": junctions}
+
+
+## Block (`ix`, `iz`)'s middle in its city's metres.
+static func city_block_centre(ix: int, iz: int) -> Vector2:
+	return Vector2((ix - (CITY_BLOCKS.x - 1) * 0.5) * CITY_PITCH, (iz - (CITY_BLOCKS.y - 1) * 0.5) * CITY_PITCH)
+
+
+## A block's half of the streets round it (Rect2s, its own metres: north, south, west, east).
+static func city_block_streets() -> Array:
+	var e := CITY_PITCH * 0.5
+	var band := CITY_STREET_W * 0.5
+	return [Rect2(-e, -e, CITY_PITCH, band), Rect2(-e, e - band, CITY_PITCH, band), Rect2(-e, -e, band, CITY_PITCH), Rect2(e - band, -e, band, CITY_PITCH)]
+
+
+## A key of `weights` picked by them.
+static func _pick(rng: RandomNumberGenerator, weights: Dictionary) -> String:
+	var total := 0.0
+	for k: String in weights:
+		total += float(weights[k])
+	var roll := rng.randf() * total
+	for k: String in weights:
+		roll -= float(weights[k])
+		if roll <= 0.0:
+			return k
+	return String(weights.keys()[0])
+
+
+## Block (`ix`, `iz`) of city `seed` (ZoneModules "city#<seed>#<ix>#<iz>"), in its own metres
+## (its middle on the ground, the street grid's x and z): what town() gives a town ({"boxes",
+## "skin", "buildings" ([{"type", "origin", "turn" (quarter turns, _rot: 0 its front to +z), "data"
+## (building())}]), "half", "points", "garrison", "garrison_face", "garrison_high", "garrison_deep",
+## "garrison_reserve", "fallback", "ramps", "loot", "civilians", "style", "cache", "hvt",
+## "hostage"}), and "pad" (Rect2: the whole city's flat ground, its own metres, so every block
+## stands at one height), "streets" (Rect2s: its half of the streets round it, painted on the
+## ground), "core", "tower", "top" (its highest box, m).
+static func city_block(seed: int, ix: int, iz: int) -> Dictionary:
+	var layout := city_layout(seed)
+	var info: Dictionary = layout.blocks[Vector2i(ix, iz)]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed, ix, iz, "block"])
+	var kind := "core" if info.core else "outskirts"
+	var band: Vector2i = CITY_CORE_STOREYS if info.core else CITY_OUTSKIRT_STOREYS
+	var lot := (CITY_PITCH - CITY_STREET_W) * 0.5  # the lots run this far out from the middle; the street beyond
+	var boxes: Array = []
+	var skin: Array = []
+	var ramps := PackedVector3Array()
+	var buildings: Array = []
+	var deepest := {0: 0.0, 2: 0.0}  # the south (+z) and north rows' deepest buildings
+	var k := 0
+	for turn: int in [0, 2, 1, 3]:  # the rows along the south, north, east and west streets
+		var from := -lot
+		var to := lot
+		if turn % 2 == 1:  # the east and west rows fit between the ends of those
+			from = -lot + float(deepest[2]) + CITY_LOT_GAP
+			to = lot - float(deepest[0]) - CITY_LOT_GAP
+		var cursor := from
+		var first := true
+		while to - cursor >= CITY_MIN_W:
+			var tower: bool = info.tower and turn == 0 and first
+			first = false
+			if not tower and rng.randf() < CITY_OPEN_LOT:
+				cursor += rng.randf_range(4.0, 8.0)  # an open lot: a yard, a way through to the courtyard
+				continue
+			var type := "tower" if tower else _pick(rng, CITY_MIX[kind])
+			var spec: Dictionary = TYPES[type]
+			var storeys := rng.randi_range(CITY_TOWER_STOREYS.x, CITY_TOWER_STOREYS.y) if tower else rng.randi_range(band.x, band.y)
+			if not spec.has("upper"):
+				storeys = 1
+			var w := minf(snappedf(rng.randf_range(spec.w[0], spec.w[1]), 0.1), to - cursor)
+			if to - cursor - w < CITY_MIN_W:
+				w = to - cursor  # the row's end: this one takes the rest
+			w = floorf(w * 10.0 + 0.001) / 10.0  # (a building's sizes are whole 0.1 m: never past the row's end)
+			var d := minf(snappedf(rng.randf_range(spec.d[0], spec.d[1]), 0.1), CITY_ROW_DEPTH)
+			var style := String(info.style) if rng.randf() < 0.7 else ""
+			if style != "" and spec.has("styles") and not style in (spec.styles as Array):
+				style = ""
+			var ruin := RUINED if not tower and rng.randf() < CITY_RUINED else INTACT
+			var b := {}
+			# (A flight fits nowhere on some floor now and then: the next seed; a house or shop too
+			# small for its stairs gives way to flats.)
+			for attempt in 6:
+				if attempt == 3 and type in ["house", "shop", "clinic", "police"]:
+					type = "apartment" if type != "shop" else "tenement"
+					if style != "" and not style in (TYPES[type].styles as Array):
+						style = ""
+				b = building(type, absi(hash([seed, ix, iz, k, attempt])), style, ruin, {"storeys": storeys, "size": Vector2(w, d), "no_yard": true})
+				if int(b.storeys) == storeys and b.roof_access:
+					break
+			k += 1
+			if int(b.storeys) != storeys or not b.roof_access:
+				cursor += w + CITY_LOT_GAP  # too narrow a lot for stairs: left open
+				continue
+			var size: Vector2 = b.size
+			var origin: Vector3
+			var along := cursor + size.x * 0.5
+			match turn:  # (a building's extent along its row is the same either way it's turned)
+				0: origin = Vector3(along, 0, lot - size.y * 0.5)
+				2: origin = Vector3(along, 0, -lot + size.y * 0.5)
+				1: origin = Vector3(lot - size.y * 0.5, 0, along)
+				_: origin = Vector3(-lot + size.y * 0.5, 0, along)
+			for bx: Array in b.boxes:
+				boxes.append(_turn_box(bx, turn, origin))
+			for bx: Array in b.skin:
+				skin.append(_turn_box(bx, turn, origin))
+			for p: Vector3 in ramp_faces(b):
+				ramps.append(_rot(p, turn) + origin)
+			buildings.append({"type": type, "origin": origin, "turn": turn, "data": b, "tower": tower})
+			if turn % 2 == 0:
+				deepest[turn] = maxf(float(deepest[turn]), size.y)
+			cursor += size.x + CITY_LOT_GAP
+	# Street barricades and rubble in its half of the streets.
+	for n in rng.randi_range(CITY_BARRICADES.x, CITY_BARRICADES.y):
+		var side := rng.randi() % 4
+		var a := rng.randf_range(-lot + 3.0, lot - 3.0)
+		var mid := lot + (CITY_PITCH * 0.5 - lot) * 0.5
+		var rubble := rng.randf() < 0.4
+		var size := Vector3(rng.randf_range(1.4, 2.2), rng.randf_range(0.7, 1.2), rng.randf_range(1.2, 2.0)) if rubble else Vector3(rng.randf_range(2.4, 3.6), 1.1, 0.8)
+		var c := _rot(Vector3(a, 0, mid), side)
+		var s := _rot(size, side).abs()
+		boxes.append([c - Vector3(s.x * 0.5, 0, s.z * 0.5), c + Vector3(s.x * 0.5, s.y, s.z * 0.5), VoxelWorld.Mat.CONCRETE if rubble else VoxelWorld.Mat.SANDBAG])
+	var out := _city_finish(buildings, kind, info, rng)
+	var half := Vector2(CITY_PITCH, CITY_PITCH) * 0.5
+	var centre: Vector2 = info.centre
+	var city: Vector2 = layout.half
+	var top := 0.0
+	for bx: Array in boxes:
+		top = maxf(top, (bx[1] as Vector3).y)
+	out.merge({"boxes": boxes, "skin": skin, "ramps": ramps, "buildings": buildings, "half": half, "style": String(info.style),
+		"pad": Rect2(-city - centre, city * 2.0), "core": info.core, "tower": info.tower, "top": top, "streets": city_block_streets()}, true)
+	# The weapons cache: crates in the middle of a store room (or the courtyard).
+	var at: Vector3 = _city_room(buildings, ["armoury", "storeroom"], Vector3(0, 0.1, 0)) - Vector3(0, 0.1, 0)
+	var cache: Array = [at - Vector3(TOWN_CACHE.x * 0.5, 0, TOWN_CACHE.z * 0.5), at + Vector3(TOWN_CACHE.x * 0.5, TOWN_CACHE.y, TOWN_CACHE.z * 0.5)]
+	boxes.append([cache[0], cache[1], VoxelWorld.Mat.WOOD])
+	out["cache"] = cache
+	return out
+
+
+## A block's garrison posts, loot, named points, civilians and fallback points (city_block), from
+## its `buildings` (placed: "origin", "turn"). Posts: CITY_POSTS[`kind`] (and a tower's own),
+## CITY_HIGH_SHARE of them up high, the floors they're on spread over the buildings; then a back
+## room upstairs; then inside front doors. In building order (posts pair off as buddies in turn).
+static func _city_finish(buildings: Array, kind: String, info: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
+	var place := func(bt: Dictionary, p: Vector3) -> Vector3: return _rot(p, int(bt.turn)) + (bt.origin as Vector3)
+	var garrison: Array = []
+	var face: Array = []
+	var want := int(CITY_POSTS[kind])
+	var want_high := roundi(want * CITY_HIGH_SHARE)
+	var high: Array = []  # [post, face] up high, one a building, in building order
+	var deep: Array = []
+	var doors: Array = []
+	for i in buildings.size():
+		var bt: Dictionary = buildings[i]
+		var b: Dictionary = bt.data
+		if bt.tower:
+			continue  # (its own, below)
+		var hp := _city_high(b, i)
+		if not hp.is_empty():
+			high.append([place.call(bt, hp[0]), _rot(hp[1], int(bt.turn))])
+		var dp := _city_deep(b, i)
+		if dp.is_finite():
+			deep.append(place.call(bt, dp))
+		var fd: Variant = front_door(b)
+		if fd != null and _clear_standing(b.boxes, (fd as Vector3) + Vector3(0, 0.1, -1.0)) and _clear_margin(b.boxes, (fd as Vector3) + Vector3(0, 0.1, -1.0)):
+			doors.append([place.call(bt, (fd as Vector3) + Vector3(0, 0.1, -1.0)), _rot(Vector3(0, 0, 1), int(bt.turn))])
+	var take := func(list: Array, n: int) -> Array:  # n of `list`, spread over it
+		var out: Array = []
+		for j in mini(n, list.size()):
+			out.append(list[j * list.size() / mini(n, list.size())])
+		return out
+	var count_high := 0
+	for p: Array in take.call(high, want_high):
+		garrison.append(p[0])
+		face.append(p[1])
+		count_high += 1
+	var deep_at: Array = []
+	for p: Vector3 in take.call(deep, 1 if want > garrison.size() else 0):  # one in a back room upstairs
+		deep_at.append(garrison.size())
+		garrison.append(p)
+		face.append(Vector3.ZERO)
+	for p: Array in take.call(doors, want - garrison.size()):
+		garrison.append(p[0])
+		face.append(p[1])
+	# A tower is held from its top floor and its roof.
+	for bt: Dictionary in buildings:
+		if not bt.tower:
+			continue
+		var b: Dictionary = bt.data
+		var top_floor := int(b.storeys) - 1
+		var hp := _city_high(b, top_floor - 1)  # (its top floor's window: _city_high picks floor 1 + i % (storeys - 1))
+		if not hp.is_empty():
+			garrison.append(place.call(bt, hp[0]))
+			face.append(_rot(hp[1], int(bt.turn)))
+			count_high += 1
+		var roof := _high_post(b, 1)  # (an odd index: its roof first)
+		if not roof.is_empty() and _clear_margin(b.boxes, roof[0]) and (hp.is_empty() or (roof[0] as Vector3).distance_to(hp[0]) > 1.0):
+			garrison.append(place.call(bt, roof[0]))
+			face.append(_rot(roof[1], int(bt.turn)))
+			count_high += 1
+	# Loot, named points, civilians, fallback points.
+	var points := {"objective": [], "cache": [], "intel": []}
+	var loot: Array = []
+	var civilians: Array = []
+	var fallback: Array = []
+	var arr := func(p: Vector3) -> Array: return [snappedf(p.x, 0.1), snappedf(p.y, 0.1), snappedf(p.z, 0.1)]
+	for i in buildings.size():
+		var bt: Dictionary = buildings[i]
+		var b: Dictionary = bt.data
+		for l: Dictionary in b.loot:
+			var t: String = l.table
+			var where: Vector3 = place.call(bt, l.at)
+			if t in ["armoury", "objective"]:
+				points.objective.append(where)
+			elif t == "cache":
+				points.cache.append(where)
+			elif t == "intel":
+				points.intel.append(where)
+			if TOWN_LOOT.has(t) and loot.size() < CITY_LOOT_MAX:
+				var choices: Array = TOWN_LOOT[t]
+				var pick: Array = choices[rng.randi() % choices.size()]
+				loot.append({"uid": "loot%d" % loot.size(), "id": pick[0], "count": int(pick[1]), "pos": where + Vector3(0, 0.5, 0)})
+		var back := _back_room(b)
+		if back.is_finite():
+			fallback.append(place.call(bt, back))
+		var fd: Variant = front_door(b)
+		if i % CITY_CIVILIAN_EVERY == 1 and fd != null:
+			var step: Vector3 = place.call(bt, (fd as Vector3) + Vector3(0, 0, 1.2))
+			var out_dir := _rot(Vector3(0, 0, 1), int(bt.turn))
+			var across := step + out_dir * rng.randf_range(1.5, 3.5) + out_dir.cross(Vector3.UP) * rng.randf_range(-6.0, 6.0)
+			var corner := Vector3(signf(step.x) * CITY_PITCH * 0.5, 0, signf(step.z) * CITY_PITCH * 0.5) * 0.92
+			civilians.append({"pos": arr.call(step + Vector3(0, 0.1, 0)), "routine": [arr.call(step), arr.call(across), arr.call(corner)]})
+	for key: String in points:
+		if (points[key] as Array).is_empty():
+			points[key].append(Vector3(0, 0, 0))
+	return {"garrison": garrison, "garrison_face": face, "garrison_high": count_high, "garrison_deep": deep_at, "garrison_reserve": [],
+		"fallback": fallback, "points": points, "loot": loot, "civilians": civilians,
+		"hvt": _city_room(buildings, ["office", "living"], Vector3(0, 0.1, 0)),
+		"hostage": _city_room(buildings, ["cells", "bedroom"], Vector3(0, 0.1, 0))}
+
+
+## Building `b`'s post at a window onto its street (+z) on an upper floor, the floor by `i` (1 +
+## i % (storeys - 1), then the others from the top down), else on its roof: [post, face] in its
+## own metres, [] for none.
+static func _city_high(b: Dictionary, i: int) -> Array:
+	var storeys := int(b.storeys)
+	if storeys < 2:
+		var low := _high_post(b, i)
+		return low if not low.is_empty() and _clear_margin(b.boxes, low[0]) else []
+	var order: Array = [1 + posmod(i, storeys - 1)]
+	for f in range(storeys - 1, 0, -1):
+		if not f in order:
+			order.append(f)
+	for f: int in order:
+		for w: Dictionary in b.windows:
+			if int(w.floor) != f or (w.out as Vector3).z < 0.5:
+				continue
+			for back: float in [POST_IN_M, POST_IN_M + 0.4]:
+				var p: Vector3 = (w.at as Vector3) - (w.out as Vector3) * back + Vector3(0, 0.1, 0)
+				if _clear_post(b.boxes, p) and _clear_margin(b.boxes, p):
+					return [p, w.out]
+	var roof := _high_post(b, i)
+	return roof if not roof.is_empty() and _clear_margin(b.boxes, roof[0]) else []
+
+
+## Whether nothing stands within POST_CLEAR_M and a little more of a man at `p` (a post that only
+## just clears a railing is no post once the building is turned and placed: rounding).
+static func _clear_margin(boxes: Array, p: Vector3) -> bool:
+	var r := POST_CLEAR_M + 0.05
+	var body := AABB(p + Vector3(-r, 0.05, -r), Vector3(r * 2.0, 1.65, r * 2.0))
+	for bx: Array in boxes:
+		var lo: Vector3 = bx[0]
+		if AABB(lo, (bx[1] as Vector3) - lo).intersects(body):
+			return false
+	return true
+
+
+## Building `b`'s back room on an upper floor (1 + i % (storeys - 1)): a clear spot in it (its own
+## metres), Vector3.INF with none (a single storey: its ground floor's).
+static func _city_deep(b: Dictionary, i: int) -> Vector3:
+	var storeys := int(b.storeys)
+	var want := 1 + posmod(i, storeys - 1) if storeys >= 2 else 0
+	var best := Vector3.INF
+	for r: Dictionary in b.rooms:
+		if String(r.role) == "bathroom" or int(r.floor) != want:
+			continue
+		var c: Vector2 = (r.rect as Rect2).get_center()
+		if not best.is_finite() or c.y < best.z:
+			best = Vector3(c.x, float(r.y) + 0.1, c.y)
+	var p := _room_post(b, best)
+	return p if p.is_finite() and _clear_margin(b.boxes, p) else Vector3.INF
+
+
+## As _town_room for a block's buildings (placed with quarter turns): the middle of the first room
+## of the earliest of `roles`, block metres; `fallback` if none.
+static func _city_room(buildings: Array, roles: Array, fallback: Vector3) -> Vector3:
+	for role: String in roles:
+		for bt: Dictionary in buildings:
+			for r: Dictionary in bt.data.rooms:
+				if r.role == role:
+					var c: Vector2 = (r.rect as Rect2).get_center()
+					return _rot(Vector3(c.x, float(r.get("y", 0.0)) + 0.1, c.y), int(bt.turn)) + (bt.origin as Vector3)
+	return fallback
 
 
 # --- Landmarks (queue item 1.4, cghath 2026-10-21) ---------------------------------------------

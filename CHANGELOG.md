@@ -15,7 +15,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 #### Changed
 - **Dense copses in the normal zones.** Every wooded preset (temperate, river valley, highland moor, coastal lowland,
-  amphibious coast, rocky ridge, scrubland) now has the Experimental forest's copses-as-cover layout: bigger, denser
+  amphibious coast, rocky ridge, scrubland, and the new snowy mountain and farmland) now has the Experimental forest's copses-as-cover layout: bigger, denser
   copses with a skirt of thickets and rocks inside, a thicket belt round the woods, and its higher caps. Temperate
   and river valley also get more woods (2.1 a km², was 1.5 and 1.8) and copses (6, was 5). On temperate's hot zone
   that's 9,000 trees (was 5,000) and 21,700 thickets (was 11,000): the dense layout's thicket cap is
@@ -61,7 +61,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - `demolitions` checks the range's blocks and wall are built, stop rays, and carve under a demo block.
 - `world`: temperate now has the dense copses.
 - `vehicles`: its AI driving goals moved clear of the range's blocks (they're there now); an AI vehicle turning
-  round beside one is F-196.
+  round beside one is F-223.
 
 ### Prop library (cghath's brief, queue item 1.7: "at least triple today's outdoor set")
 
@@ -129,6 +129,88 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - Zone layouts cache under a new version (13), so old caches re-roll.
 - Helicopters climb over pylons and other tall props near their track. A pylon's lattice was too
   thin for them to sense, and an insertion flew into one.
+
+### Terrain features and presets: gullies, cliffs, marsh, snow and farmland (cghath's brief, queue item 1.3)
+
+#### Added
+- **Gullies and ditches that give cover.** Dry gullies (2-3 m deep, a flat floor and steep
+  sides) and shallower ditches wander across the temperate hills, scrub, desert wadi, moors,
+  badlands, ridges, river valleys and coast. Lie down in one and you're out of sight of the flat
+  around it; crouch in a gully and you mostly are. The AI sees them the same way: it can't spot
+  a man down in one, and its cover search sends a man to one when he's caught in the open
+  (prone at the lip, firing over it, or down in it).
+- **Cliffs and rock faces.** Escarpments 6-18 m high on the ridges, moors, badlands and the new
+  snowy mountains: a sheer rock face with a ledge on top and the ground easing back down behind
+  it, fallen rock at its foot, tapering out at both ends so the way round is short. Nobody walks
+  or drives up the face and the AI's paths go round it. Roads that cross one climb it on a ramp.
+- **Marsh.** A new fen preset: soft ground in patches that slows you to about two thirds of your
+  pace, reed beds that hide a crouched man, dark wet mud, dozens of shallow ponds and pools, a
+  sluggish stream and drainage ditches. Blackwater Fen (inland) is one.
+- **Snowy mountains.** A new preset: big hills under snow, a snow line that climbs in summer and
+  comes down to cover everything in winter, bare rock on the steep faces, cliffs and gullies,
+  tyre tracks in the snow and a cold, hazy sky. Deep snow slows you to about three quarters of
+  your pace, but not on the roads or cleared ground. Its streams and ponds are frozen: ice you
+  walk on. Whitecap Pass (inland) is one.
+- **Farmland.** A new preset: a patchwork of fields round the farms (never over a farm's yard
+  or any site) with wheat, maize, vegetables and fallow ground that change with the season
+  (green in spring, ripe gold and tall maize in summer, stubble in autumn, bare in winter),
+  orchards in rows that blossom in spring, hedges along some field edges, and irrigation
+  channels you wade through. Ripe wheat hides a man lying in it; maize hides a man standing.
+  Harrow Fields (inland) is one.
+- **Seasons.** The campaign now has a season, from the campaign day: 30 days each, starting in
+  spring. Zones you go to are built for the season you go in.
+- **Mixed terrain.** A "procedural" zone can now mix in the marsh, snow and farmland presets, and
+  takes their features (a snowy ridge with gullies, farmland in a marsh).
+- A `terrain` test suite, and `tests/terrain_shots.tscn` for headless pictures of each preset.
+
+#### Changed
+- The rocky ridge, highland moor and badlands presets have cliffs, and most presets have gullies
+  or ditches, so those zones' ground is new.
+
+### City zones and village houses (cghath's brief, queue items 1.5 and 1.6)
+
+#### Added
+- **Cities.** A city is a street grid of blocks: 5 x 4 blocks, 10 m streets between and round
+  them. Each block is a ring of terraced buildings along its four streets, fronts on the street,
+  narrow alleys between them and a courtyard behind. The inner blocks are 3-5 storeys, the outer
+  ring 2-3, and two or three 6-8 storey towers stand out over the core. New building types: an
+  apartment block (flats on every floor), a tenement (a shop under flats) and a tower (offices).
+  Some buildings are ruined, and there are barricades and rubble in the streets.
+- **Stairs to every floor and the roof.** Every building over one storey has a flight up from
+  each floor to the next and onto its roof, and the AI's navigation covers every floor and roof.
+- **Garrisons hold the upper floors.** A city's defenders stand at upstairs windows onto the
+  street, in back rooms upstairs and on the roofs, and the towers are held from the top floor
+  and the roof.
+- **The Old Quarter is a real city.** Its towns are replaced by a city near the enemy HQ, with a
+  road in from the HQ and a patrol round its inner streets, on a new "city" terrain preset (low
+  ground, dusty verges, grey streets, few trees). Each block streams in on its own, so the city
+  loads round you as you walk in, and each block is a town to missions (raids, HVTs, hostages,
+  intel), the townsfolk and the enemy's defence.
+- **The street grid is data the roads can use** (the zone's "cities"): paving it is F-210.
+- **A `city` test suite**: the city by seed, its storeys, stairs, rooms and garrison posts, the
+  Old Quarter, the village, and in the world the navmesh up a tall building, the AI's building
+  scan from upstairs, the garrison upstairs and a city block's frame time as it streams in.
+  Pictures: `tests/city_shots.tscn`.
+
+#### Changed
+- **Village houses are generated.** The village's four houses (mud brick, cinder block, a
+  two-room brick house and a plank shack) are now generated buildings with rooms, furniture,
+  windows and their own look, each where the old one stood with its door in the same place. The
+  village's layout, garrison posts, loot and mission spots are as they were.
+- The AI's navigation in zones now reaches the top of tall buildings (it stopped 8 m up).
+- More physics bodies are allowed (Jolt's limit is 32 768), so a whole city can be loaded.
+
+#### Fixed
+- Stairs in city buildings always join the floor on the AI's navigation (a short space in front
+  of the first step could cut a stair off, depending on the ground's height). Every stair's
+  navigation ramp now has a wedge on and off. Towns and landmarks keep their stairs as they are
+  for now (F-212).
+
+#### Known
+- An AI order from the street to a tall tower's top floors first paths a floor or two short and
+  re-paths on the way up (Godot's path search stops at 4096 navmesh polygons: F-213). A city
+  block's AI building scans can take 150-450 ms near tall buildings (F-211).
+
 ### US forces in the living war (combined arms, phase D7)
 
 #### Added

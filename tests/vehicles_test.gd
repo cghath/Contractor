@@ -2115,7 +2115,7 @@ func _test_squad_drivers() -> void:
 	check(drivers.server_command(player, "take_wheel", v.global_position, PackedStringArray()).contains("already has the wheel"), "and once he has it, nobody else is sent")
 	# Drive there: the commander on foot sends every vehicle the squad drives.
 	# (-12, -14), not -20: since F-121 the range's concrete blocks stand at z -30, and turning round
-	# from -20 for the pickup below ran it into one (F-196).
+	# from -20 for the pickup below ran it into one (F-223).
 	var goal := Vector3(-12, 0, -14)
 	why = drivers.server_command(player, "drive_to", goal, PackedStringArray())
 	await _wait_for(func() -> bool: return v.ai.status == "arrived", 30.0)

@@ -4,6 +4,8 @@
 // - fine grain (~1 m, ~0.2 m) near the camera (faded out by detail_end_m), part-faceted normals,
 // - rock on steep faces picked per pixel (with layered bands), not only per vertex.
 // All procedural (value noise): no textures to load, a handful of ALU ops per pixel.
+// Snow (snow_strength, ZoneFeatures' snow preset, queue item 1.3; 0 elsewhere): where the vertex
+// colour is snow-white, the grass clumps and soil patches give way to soft drifts and a faint glint.
 // Salt pans (ZoneTerrain sets these from the preset's "ground"; 0 elsewhere, so other
 // presets look as before. Captain, 2026-10-14: the salt flats were "an actual eye sore"):
 // - damp_strength: large darker damp patches (~350 m and ~70 m),
@@ -19,6 +21,7 @@ uniform float seed_offset = 0.0;
 uniform float macro_strength = 1.0;
 uniform float detail_end_m = 140.0;
 uniform float facet_share = 0.4;
+uniform float snow_strength = 0.0;
 uniform float damp_strength = 0.0;
 uniform float crust_strength = 0.0;
 uniform float track_strength = 0.0;
@@ -184,6 +187,16 @@ void fragment() {
 	float voxel_near = 1.0 - smoothstep(6.0, 12.0, dist);
 	if (voxel_near > 0.0) {
 		col *= mix(1.0, 1.0 + (hash12(floor(p / 0.1) + 17.0) - 0.5) * 0.08, voxel_near);  // the 10 cm voxel grid up close
+	}
+
+	if (snow_strength > 0.0) {
+		// Snow: on snow-white ground (bright in every channel: no other preset's palette is) the
+		// grass clumps and soil patches above are taken back to the snow, with drifts and a glint.
+		float snowy = smoothstep(0.45, 0.62, min(base.r, min(base.g, base.b))) * snow_strength;
+		float drift = vnoise(q / 9.0 + 2.0) * 0.6 + vnoise(p / 2.3) * 0.4;
+		vec3 snow_col = base * mix(0.90, 1.03, drift) * mix(1.0, mix(0.96, 1.03, grain), close);
+		snow_col *= 1.0 + step(0.985, hash12(floor(p / 0.1) + 3.0)) * speck_near * 0.25;
+		col = mix(col, snow_col, snowy);
 	}
 
 	// Rock on steep faces, per pixel, with horizontal strata. Not on dug earth: GroundCuts gives a

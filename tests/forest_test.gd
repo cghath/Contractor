@@ -350,7 +350,8 @@ func _test_dense_normal() -> void:
 		var l: Array = lines[k]
 		var slow_a := a.foliage_between_slow(l[0], l[1])
 		var slow_b := a.foliage_between_slow(l[0], l[2])
-		var least := minf(slow_a, slow_b)
+		var standing: Vector2 = t.features.cover_least(l[0], l[1], l[2]) if t.features else Vector2.ZERO  # (crops and reeds: ZoneFeatures)
+		var least := minf(slow_a + standing.x, slow_b + standing.y)
 		worst = maxf(worst, maxf(absf(a.foliage_between(l[0], l[1]) - slow_a), absf(a.foliage_least(l[0], l[1], l[2]) - least)))
 		var capped := a.foliage_least(l[0], l[1], l[2], Spotting.FOLIAGE_OPAQUE_M)
 		if least >= Spotting.FOLIAGE_OPAQUE_M:
