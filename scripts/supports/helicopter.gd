@@ -61,7 +61,7 @@ const ROTOR_REACH_M := 9.0
 const CONTOUR_CLIMB := 0.6
 ## On the J-hook, coming down (sinking), the rise ahead is planned at this share of that climb:
 ## it has to stop sinking and get its climb back, and on ridge_hot's insertion 1 it came over a
-## 23% rise 4 m clear (F-198; cghath's roads branch, 2026-10-22). Proposed.
+## 23% rise 4 m clear (F-218; cghath's roads branch, 2026-10-22). Proposed.
 const HOOK_SINK_CLIMB := 0.5
 ## Captain, 2026-10-14 (the bump on infil): the airframe (its footprint: the main rotor's disc,
 ## the nose, the tail and the tail rotor) never comes within MIN_CLEAR_M of the ground or what
@@ -930,7 +930,7 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 	if binding == 0.0:
 		# Held to where it is: the height to hold changes as the ground under it does; but below
 		# it, a falling need (the glide slope ahead) doesn't hold it from climbing back up to it
-		# (F-198: it sat level 2.5 m under its need over a rise, the fall cancelling the climb).
+		# (F-218: it sat level 2.5 m under its need over a rise, the fall cancelling the climb).
 		return Vector2(want, maxf(next - now, 0.0) if pos.y < want else next - now)
 	return Vector2(want, climb if pos.y < want + 1.0 else 0.0)
 

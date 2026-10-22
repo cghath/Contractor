@@ -12,7 +12,7 @@ extends RefCounted
 ## - round settlements and sites: washing lines, dishes and generators by the villages; shipping
 ##   containers, generators, fuel tanks, latrines and barriers outside the HQ, QRF bases, outposts
 ##   and compounds; barriers and signs at checkpoints (_site, data "sites");
-## - along the roads (street_lines: the planned roads' pieces, each its own kind's width, F-199):
+## - along the roads (street_lines: the planned roads' pieces, each its own kind's width, F-219):
 ##   utility poles with wires, direction signs, a bus shelter and a billboard by a town, parked and
 ##   burnt-out vehicles (_roadside);
 ## - the countryside: pylon lines across the zone (_power_lines), farmsteads with a pen of goats or
@@ -166,7 +166,7 @@ func lay_out(s: ZoneScatter, t: ZoneTerrain, d: Dictionary) -> void:
 
 
 ## The zone's roads as street lines: {"a", "b" (Vector2, ends of the middle line), "half_w" (its
-## half width, m: to the road's edge), "kind"}. The roads (cg_brief 1.2, F-199) are the def's
+## half width, m: to the road's edge), "kind"}. The roads (cg_brief 1.2, F-219) are the def's
 ## "roads" pieces once ZoneRoads has planned them: the curved roads as straight pieces within 1 m
 ## of the curve, each naming its kind, so a line's edge is the road's edge (as ZoneRoads.edges():
 ## an asphalt road 3.5 m, a dirt track 2.1 m, a town street's carriageway 3 m; RoadNet.half_width),

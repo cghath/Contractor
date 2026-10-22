@@ -8,7 +8,7 @@ extends Node3D
 ##
 ## Collision: every surface is a trimesh (ConcavePolygonShape3D), per TILE_M tile, one body for the
 ## hard surfaces (asphalt, concrete: hard footsteps, meta "hard_ground") and one for the soft (dirt),
-## each with its kind's friction (PhysicsMaterial; Vehicle doesn't read surface grip yet, F-195).
+## each with its kind's friction (PhysicsMaterial; Vehicle doesn't read surface grip yet, F-215).
 ## Edges slope down to the graded ground (SKIRT_M) and kerbs are chamfered (no step to trip on).
 ## Meshes: one per tile (the road shader, zone_road.gdshader), drawn out to SEE_M; past that the
 ## terrain's own colour carries them (ZoneTerrain.set_roads, road_weight).

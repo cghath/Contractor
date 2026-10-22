@@ -297,9 +297,9 @@ docs/combined_arms.md calls 74-92 list A1's decisions.
 #### Changed
 - The trails' patrols walk their curved trails.
 - A helicopter coming round its J-hook over rising ground climbs back up to its height instead
-  of holding level under it (it came over a rise 4 m clear of the ground, F-198).
+  of holding level under it (it came over a rise 4 m clear of the ground, F-218).
 - Roadside props (poles, parked cars and wrecks, checkpoint barriers, signs, bus shelters,
-  billboards) follow the curved roads and keep off them, each road its own width (F-199).
+  billboards) follow the curved roads and keep off them, each road its own width (F-219).
 - **Roads run over the bridges.** The rivers' bridges, fords and culverts are placed where the
   new roads run (every site's road, the roads in from the zone's edges), and each road runs
   straight across its bridge's deck and down its ramps instead of dipping under it onto the

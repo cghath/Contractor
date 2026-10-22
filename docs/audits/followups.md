@@ -34,11 +34,11 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-192 | P2 | Following the player through the compound's building, a squadmate on the follow-in stack can run a loop round the building on his way to his stack place (casualty soak, CI only, now and then) |
 | F-193 | P3 | base_zone: the player is down on landing after the helicopter insertion, and the walk home and the rest of the deployment fail after it (CI only, now and then) |
 | F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
-| F-194 | P2 | A convoy ambush's convoy drives its own straight-ish line across the zone, not the roads (scenario_gen `_convoy`) |
-| F-195 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
-| F-196 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
-| F-197 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
-| F-198 | P3 | ~~A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1)~~ fixed 2026-10-22 (cghath's agent, world/roads: Helicopter._contour) |
+| F-214 | P2 | A convoy ambush's convoy drives its own straight-ish line across the zone, not the roads (scenario_gen `_convoy`) |
+| F-215 | P3 | Vehicle grip ignores the surface: asphalt, a dirt track and open ground all grip alike (Vehicle `_wheel_forces`, Claude's file) |
+| F-216 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
+| F-217 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
+| F-218 | P3 | ~~A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1)~~ fixed 2026-10-22 (cghath's agent, world/roads: Helicopter._contour) |
 
 ## F-01: the building scan only sees one floor
 
@@ -475,7 +475,9 @@ Suggested: count a spot as inside when a ray straight up meets a roof within a f
 walls it does meet enclose it (e.g. rays to 24 m for a spot under a roof), or let a building's
 rooms grow from its walls inward. A test: `BuildingGen.building("hangar", 5)` stood up as in
 tests/landmarks_test.gd, scanned from the hall's middle.
-## F-194: a convoy ambush's convoy doesn't drive the roads
+## F-214: a convoy ambush's convoy doesn't drive the roads
+
+(Logged on world/roads as F-190, an id claude/ai-driving also used; renumbered 2026-10-22.)
 
 Found by cghath's agent on `world/roads` (2026-10-21, cg_brief 1.2). Location:
 [scenario_gen.gd](../../scripts/campaign/scenario_gen.gd) `_convoy`, which the convoy ambush's
@@ -492,7 +494,9 @@ middle with `RoadRoute.route(level.def, start, finish)` (the def's "roads" are t
 now) when it isn't empty, and put the ambush point on the road nearest it (`ZoneRoads.of(level)
 .segments()`). Keep the old line as the fallback.
 
-## F-195: vehicle grip ignores the surface
+## F-215: vehicle grip ignores the surface
+
+(Logged on world/roads as F-191, an id claude/ai-driving also used; renumbered 2026-10-22.)
 
 Found by cghath's agent on `world/roads` (2026-10-21). Location:
 [vehicle.gd](../../scripts/vehicles/vehicle.gd) `_wheel_forces` (Claude's file, so roads didn't
@@ -505,7 +509,9 @@ meta `road` ("asphalt"/"dirt"). Suggested: multiply the grip by the hit collider
 (ZoneTerrain), so tyres hold best on asphalt and slide sooner off-road. A wet-weather factor
 (DayNight) could come later.
 
-## F-196: roundabouts are two-way to the AI drivers
+## F-216: roundabouts are two-way to the AI drivers
+
+(Logged on world/roads as F-192, an id claude/ai-driving also used; renumbered 2026-10-22.)
 
 Found by cghath's agent on `world/roads` (2026-10-21). Location:
 [road_route.gd](../../scripts/vehicles/road_route.gd) `_graph` and
@@ -518,7 +524,9 @@ ring pieces (both ends within the ring's radius of one centre) one direction onl
 (the def order is the driving direction), and have VehicleAI slow to a Proposed 20 km/h through a
 turn of more than 30 degrees.
 
-## F-197: a crater on a road leaves the road hanging
+## F-217: a crater on a road leaves the road hanging
+
+(Logged on world/roads as F-193, an id claude/ai-driving also used; renumbered 2026-10-22.)
 
 Found by cghath's agent on `world/roads` (2026-10-21). Location:
 [ground_cuts.gd](../../scripts/world/ground_cuts.gd) `_cut_area` / `_rebuild_around` and
@@ -530,7 +538,9 @@ small hook in GroundCuts after a cut, `ZoneRoads.of(self).cut(area)`, that rebui
 tiles touching `area` without the triangles over cut cells (ZoneRoads keeps its geometry per
 TILE_M tile, so it's one tile's mesh and body each time).
 
-## F-198: a J-hook over a natural hump comes in 4 m clear
+## F-218: a J-hook over a natural hump comes in 4 m clear
+
+(Logged on world/roads as F-194, an id claude/ai-driving also used; renumbered 2026-10-22.)
 
 Found by cghath's agent on `world/roads` (2026-10-22, queue item 1.2): CI run 39729719130 (commit
 0ca5246) and local run R0507, heliflight "ridge_hot insertion 1: the airframe at least 5 m clear
@@ -566,7 +576,7 @@ on the J-hook while sinking it plans the rise ahead at HOOK_SINK_CLIMB (0.5) of 
 starts up sooner. ridge_hot insertion 1: 5.5 m at the least (4.0 before; 5.3 with (1) alone).
 The 5 m minimum is unchanged.
 
-## F-199: point the roadside props at the new roads (cghath's side, queue item 1.7) (done 2026-10-22)
+## F-219: point the roadside props at the new roads (cghath's side, queue item 1.7) (done 2026-10-22)
 
 (Logged on world/props as F-178, an id claude/ai-driving also used; renumbered when the two met on world/roads.)
 
@@ -593,7 +603,7 @@ links. The town's furniture already stands on the new pavements (lamps 0.35 m an
 in from the street rect's edge; the pavement runs from 1 m in to 1 m out); stalls and benches set
 against the street's edge still overhang the carriageway by up to a metre (not moved).
 
-## F-200: a round into an animal makes a "vehicle" hit (Ballistics)
+## F-220: a round into an animal makes a "vehicle" hit (Ballistics)
 
 (Logged on world/props as F-179, an id claude/ai-driving also used; renumbered on world/roads.)
 
@@ -779,7 +789,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-22 | A road runs straight through the crossing on its link: fixed points at the bridge's ramps' ends plus 4 m (a ford or culvert: 10 m either side) and 12 m before that to line up; its profile is pinned to the deck and down the ramps there, not laid or graded (F-175) | the deck is the road; the curve can't wander off a 7 m deck | lay a road strip on the deck (doubles the deck's surface and collision)
 2026-10-22 | A link passing within 30 m of another link's crossing (heading the same way) takes it too; if an earlier road already has it, the later way joins that road either side of the bridge (two Ts) instead of running along it | the water keeps one crossing where links cross the river close together; without this the second road went into the river a few metres beside the bridge | run both roads over the deck side by side (overlapping strips and junction clutter)
 2026-10-22 | ZoneWater._apply never raises a pad's ground with a stream's bank (the pad keep weight now also scales a raise inside the bank); the water agent's file, a 3-line change | a stream past highland_pass's checkpoint lifted its pad 2 m (terrain through the road and the site); found by the roads suite | log it for the water side and leave the road check failing
-2026-10-22 | Helicopter._contour: below its need the rate it holds is never negative, and on the J-hook while sinking it plans the rise ahead at half its climb (HOOK_SINK_CLIMB 0.5, Proposed); helicopter.gd isn't Claude's | heliflight's ridge_hot insertion 1 came over a 23% rise 4.0 m clear (the 5 m check) once the roads moved the scatter: it sat level under its own need (F-198) | slow the hook where the ground rises ahead (changes every approach's timing)
+2026-10-22 | Helicopter._contour: below its need the rate it holds is never negative, and on the J-hook while sinking it plans the rise ahead at half its climb (HOOK_SINK_CLIMB 0.5, Proposed); helicopter.gd isn't Claude's | heliflight's ridge_hot insertion 1 came over a 23% rise 4.0 m clear (the 5 m check) once the roads moved the scatter: it sat level under its own need (F-218) | slow the hook where the ground rises ahead (changes every approach's timing)
 2026-10-21 | Road collision is a trimesh per 256 m tile (a hard body and a soft one, friction 1.0 / 0.75, meta hard_ground for footsteps) on top of the graded heightfield | the 4 m heightfield can't follow a 7 m road's curves and edges; vehicles drive on exactly what's drawn | the graded heightfield only
 2026-10-21 | The def's "roads" become the curved roads as straight pieces (within 1 m of the curve, at most 80 m, a third entry naming the kind), the links kept in "road_links"; the trails' patrols follow their curved trails | RoadRoute, ZoneScatter, the map, IEDs and the tracker all read "roads" and now follow the real roads with no change to them | a separate key (they'd all keep the old straight lines)
 - 2026-10-21 | Prop library (1.7): today's outdoor set counted as 25 shapes (the scatter's 8 natural and 6 box props, the modules' 11 outdoor dressings), so "triple" means 75+; the library adds 72 (69 static props, 3 animals): 97 | the brief's own "about 25" | count only the scatter's 6 man-made props (18 would have done)
