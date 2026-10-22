@@ -36,6 +36,16 @@ extends RefCounted
 ## - Wiping a faction out (Captain, 2026-10-20): its last zone falls only to the company, and only
 ##   once its HQ and QRF bases there are down AND its leaders (factions.json "leaders": the HVTs
 ##   of hvt_capture and manhunt contracts won against it) are all taken. Then it is gone.
+## - US forces in the war (D7, docs/combined_arms.md 7.3; Captain: "the Ashen Banner first, then
+##   the Kestrel Cartel if the US wins"): an employer with "belligerent" in factions.json holds
+##   ground like a faction (warring() has it) from FOB Halberd, a zone of its own that can't fall
+##   (data "cant_fall"). It earns a flat income (a deployment budget, not land), opens one front of
+##   its own at a time from its "fronts_from_day" (_belligerent_front, outside MAX_FRONTS) on its
+##   war_target's zones next to its ground (or, with none next to it, the zone on the way to the
+##   nearest), and turns on the next of its "war_next" when that one is wiped out (_wipe). While
+##   its operation on a front is on the board or under way (Contracts, "op_front"), that front
+##   waits; the operation's result moves it (server_operation_ended, 6.6). Unaccepted, the
+##   operation expires and the front goes on by the tick. Any enemy of the US may attack its ground.
 ## All numbers Proposed (tuned in a model: about one zone changes hands every 3 days).
 
 const SECTION := &"world_sites"
@@ -92,6 +102,16 @@ const REBELS := "rebels"
 const NEWS_KEEP := 12
 ## Contracts that take a faction's leader (an HVT) when won against it.
 const LEADER_TYPES: Array[String] = ["hvt_capture", "manhunt"]
+## D7 (docs/combined_arms.md 6.6): what a belligerent's operation does to the war. Success flips the
+## zone to it at OP_WIN_GRIP (+OP_WIN_STRENGTH for it, -OP_TARGET_HIT for the target); half the
+## phases or more move its front that share of the way and knock the target's grip OP_PARTIAL_GRIP;
+## less is a failure: -OP_FAIL_STRENGTH for it, +OP_FAIL_GRIP for the target. Proposed.
+const OP_WIN_GRIP := 0.6
+const OP_WIN_STRENGTH := 6.0
+const OP_TARGET_HIT := 10.0
+const OP_PARTIAL_GRIP := 0.2
+const OP_FAIL_STRENGTH := 10.0
+const OP_FAIL_GRIP := 0.1
 
 
 static func _section() -> Dictionary:
@@ -179,7 +199,12 @@ static func fronts() -> Array[String]:
 
 ## A faction's strength (0-100).
 static func strength(faction: String) -> float:
-	return float((_war().strength as Dictionary).get(faction, START_STRENGTH))
+	return float((_war().strength as Dictionary).get(faction, float(_war_cfg(faction).get("start_strength", START_STRENGTH))))
+
+
+## A faction's war numbers (factions.json "war": "start_strength", "income", "fronts_from_day"), or {}.
+static func _war_cfg(faction: String) -> Dictionary:
+	return MissionRegistry.faction(faction).get("war", {})
 
 
 static func _add_strength(faction: String, amount: float) -> void:
@@ -206,10 +231,51 @@ static func zones_of(faction: String) -> Array[String]:
 	return war_zones().filter(func(z: String) -> bool: return holder_now(z) == faction)
 
 
-## The hostile factions still in the war (not wiped out).
+## The factions in the war: the hostile ones still standing (not wiped out), then the belligerent
+## employers (D7: the US).
 static func warring() -> Array[String]:
 	var wiped: Array = _war().wiped
-	return MissionRegistry.enemies().filter(func(f: String) -> bool: return f not in wiped)
+	var out: Array[String] = []
+	for f in MissionRegistry.enemies():
+		if f not in wiped:
+			out.append(f)
+	out.append_array(belligerents())
+	return out
+
+
+## The employers that hold ground in the war (factions.json "belligerent": the US), in data order.
+static func belligerents() -> Array[String]:
+	var out: Array[String] = []
+	for f: Dictionary in MissionRegistry.factions():
+		if bool(f.get("belligerent", false)) and String(f.get("role", "")) != "hostile":
+			out.append(String(f.id))
+	return out
+
+
+static func is_belligerent(faction: String) -> bool:
+	return faction != "" and bool(MissionRegistry.faction(faction).get("belligerent", false))
+
+
+## Who belligerent `faction` fights now: its "war_target", else the first of its "war_next" not
+## wiped out (the Banner, then Kestrel: the Captain's order); "" once all are (its war is over and
+## it holds what it has).
+static func war_target(faction: String) -> String:
+	var f := MissionRegistry.faction(faction)
+	var order: Array = [String(f.get("war_target", ""))]
+	order.append_array(f.get("war_next", []))
+	for t: Variant in order:
+		if String(t) != "" and not is_wiped(String(t)):
+			return String(t)
+	return ""
+
+
+## Whether an operation for the front in `zone_id` is on the board or held (D7: that front waits for it).
+static func operation_pending(zone_id: String) -> bool:
+	var cs := Campaign.section(Contracts.SECTION)
+	for c: Dictionary in (cs.get("board", []) as Array) + (cs.get("held", []) as Array):
+		if String(c.get("op_front", "")) == zone_id:
+			return true
+	return false
 
 
 static func is_wiped(faction: String) -> bool:
@@ -242,7 +308,15 @@ static func cant_fall(zone_id: String) -> bool:
 	var h := holder_now(zone_id)
 	if h == ZoneControl.PLAYER:
 		return ZoneControl.control(zone_id) == ZoneControl.FOB
+	if _held_by_data(zone_id, h):
+		return true  # FOB Halberd (D7): its holder's base
 	return h != REBELS and zones_of(h).size() <= 1
+
+
+## Whether `zone_id` is a base that can't fall ("cant_fall" in data) and `h` is the one it belongs to.
+static func _held_by_data(zone_id: String, h: String) -> bool:
+	var z := ZoneControl.zone_def_raw(zone_id)
+	return bool(z.get("cant_fall", false)) and h == String(z.get("controller", ""))
 
 
 ## Every zone in the war for the theatre map and the news ({"zone_id", "holder", "grip", "front",
@@ -254,8 +328,11 @@ static func war_view() -> Dictionary:
 		zones[zid] = {"holder": String(r.holder), "grip": snappedf(float(r.grip), 0.01), "front": (r.get("front", {}) as Dictionary).duplicate(),
 			"flashpoint": bool(r.get("flashpoint", false)), "flipped_day": int(r.get("flipped_day", -1)), "prev": String(r.get("prev", ""))}
 	var w := _war()
+	var targets := {}
+	for b in belligerents():
+		targets[b] = war_target(b)
 	return {"zones": zones, "strength": (w.strength as Dictionary).duplicate(), "news": (w.news as Array).duplicate(true),
-		"day": int(w.day), "wiped": (w.wiped as Array).duplicate()}
+		"day": int(w.day), "wiped": (w.wiped as Array).duplicate(), "targets": targets}
 
 
 ## Every hot zone's holder and grip, for the contract board (wave 6c, the zone UI): [{"zone_id",
@@ -395,6 +472,9 @@ static func server_company_takes(zone_id: String) -> bool:
 
 static func _wipe(faction: String, zone_id: String) -> void:
 	var w := _war()
+	var was := {}
+	for b in belligerents():
+		was[b] = war_target(b)
 	if faction not in (w.wiped as Array):
 		(w.wiped as Array).append(faction)
 	for z in war_zones():  # its fronts go with it
@@ -402,8 +482,71 @@ static func _wipe(faction: String, zone_id: String) -> void:
 		if not f.is_empty() and String(f.by) == faction:
 			site(z).erase("front")
 	_news(int(w.day), zone_id, "wiped", "%s is finished: its last ground at %s is gone and its leaders with it." % [MissionRegistry.faction_name(faction), RegionMap.zone_name(zone_id)])
+	for b: String in was:  # D7: a belligerent whose enemy that was turns on the next (the Banner, then Kestrel)
+		if String(was[b]) != faction:
+			continue
+		var next := war_target(b)
+		var turns: Dictionary = MissionRegistry.faction(b).get("war_turns", {})
+		if next != "":
+			_news(int(w.day), "", "war_target", String(turns.get(next, "With %s broken, %s turn on %s." % [_short(faction), _short(b), _short(next)])))
+		else:
+			_news(int(w.day), "", "war_over", "With %s broken, the war of %s is over: they hold what they have." % [_short(faction), _short(b)])
 	Campaign.mark_changed(WAR)
 	Campaign.mark_changed(SECTION)
+
+
+## Host (Contracts' debrief): a belligerent's operation (D7 stands one in as a contract with
+## "op_front"; D3's operations report the same way) ended with `phases_done` of its phases (6.6).
+## Its side is the employer if that's a belligerent, else "op_side" (Vessmark fights inside US
+## operations); it and the target move by the OP_ numbers, on "covers" (else the front's zone). A
+## zone that can't fall (the target's last) is sieged, not flipped; the company's is left alone.
+static func server_operation_ended(contract: Dictionary, phases_done: int) -> void:
+	var employer := String(contract.get("employer", ""))
+	var side := employer if is_belligerent(employer) else String(contract.get("op_side", ""))
+	var target := String(contract.get("target", ""))
+	if not is_belligerent(side) or target == "":
+		return
+	var phases := maxi(1, int(contract.get("op_phases", (contract.get("phases", [1]) as Array).size())))
+	var done := clampi(phases_done, 0, phases)
+	var covers: Array = contract.get("covers", [])
+	if covers.is_empty():
+		covers = [String(contract.get("op_front", contract.get("zone_id", "")))]
+	var day := int(_war().day)
+	for zv: Variant in covers:
+		var zid := String(zv)
+		if not is_war_zone(zid):
+			continue
+		var r := site(zid)
+		var h := holder_now(zid)
+		var name := RegionMap.zone_name(zid)
+		if done >= phases:
+			if h != side and h != ZoneControl.PLAYER:
+				if cant_fall(zid):
+					r["front"] = {"by": side, "since": day, "progress": SIEGE_CAP, "sieged": true}
+					_news(day, zid, "siege", "Siege at %s: %s hold all but the last ground of %s." % [name, _short(side), _short(h)])
+				else:
+					_flip(zid, side, h, day)
+					r["grip"] = OP_WIN_GRIP
+			_news(day, zid, "operation", "%s and the company carried the operation at %s." % [_cap(_short(side)), name])
+			_add_strength(side, OP_WIN_STRENGTH)
+			_add_strength(target, -OP_TARGET_HIT)
+		elif done * 2 >= phases:
+			var f: Dictionary = r.get("front", {})
+			if f.is_empty() or String(f.by) != side:
+				f = {"by": side, "since": day, "progress": FRONT_START}
+				r["front"] = f
+			f["progress"] = minf(float(f.progress) + float(done) / phases, SIEGE_CAP if cant_fall(zid) else 0.99)
+			if h == target:
+				r.grip = maxf(0.0, float(r.grip) - OP_PARTIAL_GRIP)
+			_news(day, zid, "operation", "%s gained ground at %s: %d of %d phases." % [_cap(_short(side)), name, done, phases])
+		else:
+			_add_strength(side, -OP_FAIL_STRENGTH)
+			if h == target:
+				r.grip = minf(1.0, float(r.grip) + OP_FAIL_GRIP)
+			_news(day, zid, "operation", "The operation at %s failed: %s held." % [name, _short(h)])
+		_section()[zid] = r
+	Campaign.mark_changed(SECTION)
+	Campaign.mark_changed(WAR)
 
 
 ## Host, from Economy.advance_days: the faction war, `days` days of it (see the header). `_rng`
@@ -441,6 +584,7 @@ static func _tick_day() -> void:
 	for zid in fronts():
 		_resolve(zid, day)
 	_open_front(day)
+	_belligerent_front(day)
 	_rebel_front(day)
 	for zid: String in _section().keys():
 		var r := site(zid)
@@ -467,6 +611,9 @@ static func _support(zone_id: String) -> float:
 
 static func _income() -> void:
 	for f in warring():
+		if is_belligerent(f):
+			_add_strength(f, float(_war_cfg(f).get("income", INCOME_BASE)))  # a deployment budget, not land (D7)
+			continue
 		var gain := INCOME_BASE
 		for z in zones_of(f):
 			var share := INCOME_PER_WORTH * worth(f, z) - UPKEEP
@@ -487,7 +634,8 @@ static func _defence(h: String, zone_id: String) -> float:
 		return _support(zone_id) / 100.0 * (0.3 + 0.7 * g)
 	var spread := sqrt(SPREAD_ZONES / maxf(SPREAD_ZONES, float(zones_of(h).size())))
 	var home := 1.0 + (HOME_BONUS if h in (ZoneControl.zone_def_raw(zone_id).get("home", []) as Array) else 0.0)
-	return strength(h) / 100.0 * (0.3 + 0.7 * g) * spread * home
+	var d := strength(h) / 100.0 * (0.3 + 0.7 * g) * spread * home
+	return maxf(d, FOB_DEFENCE * (0.3 + 0.7 * g)) if _held_by_data(zone_id, h) else d  # FOB Halberd holds like the company's FOB
 
 
 ## How hard `a` pushes into `zone_id`.
@@ -504,6 +652,9 @@ static func _resolve(zone_id: String, day: int) -> void:
 	var h := holder_now(zone_id)
 	if a == h or (a != REBELS and is_wiped(a)):
 		r.erase("front")
+		return
+	if is_belligerent(a) and operation_pending(zone_id):
+		f["since"] = int(f.since) + 1  # it waits on the operation (D7); the wait doesn't count toward a stall
 		return
 	var rng := _rng(day, zone_id)
 	f["progress"] = float(f.progress) + (_push(a, zone_id) - _defence(h, zone_id)) * FRONT_RATE + rng.randf_range(-FRONT_NOISE, FRONT_NOISE)
@@ -536,7 +687,7 @@ static func _flip(zone_id: String, a: String, h: String, day: int) -> void:
 	r["prev"] = h if h != ZoneControl.PLAYER else String(r.holder)
 	r["holder"] = a
 	r["grip"] = TAKEOVER_GRIP
-	r["flashpoint"] = a != REBELS
+	r["flashpoint"] = a != REBELS and not is_belligerent(a)  # (a flashpoint posts a job against the new holder)
 	r["flipped_day"] = day
 	var why := String(MissionRegistry.faction(a).get("wants_text", ""))
 	_news(day, zone_id, "flip", "%s took %s from %s%s." % [_cap(_short(a)), RegionMap.zone_name(zone_id), _short(h),
@@ -547,11 +698,11 @@ static func _flip(zone_id: String, a: String, h: String, day: int) -> void:
 
 ## Host: at most one new front a day while fewer than MAX_FRONTS are open (see the header).
 static func _open_front(day: int) -> void:
-	if fronts().size() >= MAX_FRONTS:
+	if _faction_fronts() >= MAX_FRONTS:
 		return
 	var best := {}
 	for a in warring():
-		if strength(a) < ATTACK_STRENGTH or fronts().any(func(z: String) -> bool: return String(front(z).by) == a):
+		if is_belligerent(a) or strength(a) < ATTACK_STRENGTH or fronts().any(func(z: String) -> bool: return String(front(z).by) == a):
 			continue
 		var from := zones_of(a)
 		if from.is_empty() and (_war().last_zone as Dictionary).has(a):
@@ -576,7 +727,7 @@ static func _open_front(day: int) -> void:
 
 ## Host: where rebel support is at SUPPORT_REBELS, the locals' rebels take on a weak predatory zone.
 static func _rebel_front(day: int) -> void:
-	if fronts().size() >= MAX_FRONTS or fronts().any(func(z: String) -> bool: return String(front(z).by) == REBELS):
+	if _faction_fronts() >= MAX_FRONTS or fronts().any(func(z: String) -> bool: return String(front(z).by) == REBELS):
 		return
 	for zid in war_zones():
 		var h := holder_now(zid)
@@ -584,6 +735,69 @@ static func _rebel_front(day: int) -> void:
 			site(zid)["front"] = {"by": REBELS, "since": day, "progress": FRONT_START}
 			_news(day, zid, "front", "Fighting in %s: the villagers have taken up arms against %s." % [RegionMap.zone_name(zid), _short(h)])
 			return
+
+
+## The open fronts not opened by a belligerent (D7: the US's own front is outside MAX_FRONTS).
+static func _faction_fronts() -> int:
+	return fronts().filter(func(z: String) -> bool: return not is_belligerent(String(front(z).by))).size()
+
+
+## Host (D7): each belligerent, from its "fronts_from_day", strong enough and with no front of its
+## own open, may open one on its war_target's zones next to its ground (the best by the same score
+## as _open_front); with none next to it, on the zone next to its ground on the way to the nearest
+## (_step_toward). Its own OPEN_CHANCE roll.
+static func _belligerent_front(day: int) -> void:
+	for b in belligerents():
+		var t := war_target(b)
+		if t == "" or day < int(_war_cfg(b).get("fronts_from_day", 1)) or strength(b) < ATTACK_STRENGTH \
+				or fronts().any(func(z: String) -> bool: return String(front(z).by) == b):
+			continue
+		var options: Array[String] = []
+		for z in zones_of(b):
+			for l: Dictionary in RegionMap.links(z):
+				var n := String(l.to)
+				if is_war_zone(n) and front(n).is_empty() and holder_now(n) == t and n not in options:
+					options.append(n)
+		if options.is_empty():
+			var step := _step_toward(b, t)
+			if step != "":
+				options.append(step)
+		var best := {}
+		for n in options:
+			var h := holder_now(n)
+			var score := worth(b, n) * (1.3 - grip(n)) * strength(b) / maxf(_defence(h, n) * 100.0, 1.0)
+			if best.is_empty() or score > float(best.score):
+				best = {"score": score, "zone": n, "against": h}
+		if best.is_empty() or _rng(day, "front_" + b).randf() >= OPEN_CHANCE:
+			continue
+		var zid := String(best.zone)
+		site(zid)["front"] = {"by": b, "since": day, "progress": FRONT_START}
+		var why := "" if String(best.against) == t else ", clearing the way to %s" % _short(t)
+		_news(day, zid, "front", "%s open an offensive on %s against %s%s." % [_cap(_short(b)), RegionMap.zone_name(zid), _short(String(best.against)), why])
+
+
+## The zone next to `b`'s ground on the shortest way (RegionMap links, through war zones) to the
+## nearest zone `t` holds, when an enemy of `b`'s holds it (never the company or the rebels) and it
+## has no front; "" if there's none.
+static func _step_toward(b: String, t: String) -> String:
+	var first := {}  # zone -> the zone next to b's ground the way to it starts with ("" for b's own)
+	var frontier: Array[String] = []
+	for z in zones_of(b):
+		first[z] = ""
+		frontier.append(z)
+	while not frontier.is_empty():
+		var at: String = frontier.pop_front()
+		for l: Dictionary in RegionMap.links(at):
+			var n := String(l.to)
+			if first.has(n) or not is_war_zone(n):
+				continue
+			first[n] = n if String(first[at]) == "" else String(first[at])
+			if holder_now(n) == t:
+				var step := String(first[n])
+				var h := holder_now(step)
+				return step if front(step).is_empty() and (h == t or h in MissionRegistry.enemies_of(b)) else ""
+			frontier.append(n)
+	return ""
 
 
 static func _cap(text: String) -> String:

@@ -7,7 +7,9 @@ extends RefCounted
 ## the grid (north, south, west, east: 2-4 each), and each link puts a crossing on both zones' edges,
 ## on the side facing the other (ZoneDef "crossings"), so walking out of one zone's east edge comes
 ## in at the next one's west edge. Made from the data, the same every time: links aren't written
-## by hand.
+## by hand. A zone with a "map_cell" ([column, row] in its region's block, D7: FOB Halberd) sits
+## there instead, off the grid's fill, so adding it moves no other zone; it links to whatever is
+## beside it like any other.
 
 const BASE := "fob"
 const BASE_REGION := "inland"
@@ -28,11 +30,15 @@ static func layout() -> Dictionary:
 	if not _layout.is_empty():
 		return _layout
 	var x0 := 0
+	var by_hand: Array[Array] = []  # [zone id, cell]: zones with a "map_cell" (D7: FOB Halberd)
 	for region: String in REGIONS:
 		var ids: Array[String] = []
 		for z: Dictionary in MissionRegistry.data().get("zones", []):
 			if String(z.get("region", "")) == region:
-				ids.append(String(z.zone_id))
+				if z.get("map_cell") is Array:
+					by_hand.append([String(z.zone_id), Vector2i(x0 + int(z.map_cell[0]), int(z.map_cell[1]))])
+				else:
+					ids.append(String(z.zone_id))
 		var with_base := region == BASE_REGION
 		var n := ids.size() + (1 if with_base else 0)
 		var cols := maxi(ceili(sqrt(float(n))), 1)
@@ -48,6 +54,9 @@ static func layout() -> Dictionary:
 					_layout[ids[k]] = cell
 					k += 1
 		x0 += cols
+	for h: Array in by_hand:
+		if not _layout.values().has(h[1]):
+			_layout[h[0]] = h[1]
 	ZoneControl.apply_to_layout(_layout)  # the base's cell follows home (none aboard the LHD; docs/lhd_home.md)
 	return _layout
 
