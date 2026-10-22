@@ -6,7 +6,7 @@ the reset is **Sunday Oct 25, 10:00 CDT**). If you're picking this up, start at 
 "Open work". The decisions are already made: docs/cg_brief.md "Decisions already made",
 docs/combined_arms.md section 10, and Captain's asks below. Make the call and keep going.
 
-Last updated: 2026-10-22 11:55 CDT (claude/ai-driving 494fb4f3 plus this doc).
+Last updated: 2026-10-22 13:05 CDT (claude/ai-driving 494fb4f3 plus this doc).
 
 ## State
 
@@ -25,7 +25,7 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | B lane: AI commander | claude/ca-b1-side-picture | B1 only (via C) | Running: B2 (unblocked by C2), B3, B5, the rest of B4, then docs/ai_tactics.md from the reels, for all AI |
 | D1/D2: 8 km operation zones | claude/ca-d1-operation-zones | no | **Yours** (cg_brief 3.1). D1 done; D2 untested WIP |
 | Your world/water, missions-2, voxel smoke, demolitions | (yours) | yes (00f3e731) | Merged 2026-10-22 for v0.5.3 |
-| Your world/perf stack (roads, terrain, cities, village houses, props, perf) | world/perf | **merging** | It conflicts with our perf pass in zone_scatter.gd; the perf session is merging both (claude/merge-world-perf), then v0.5.3 |
+| Your world/perf stack (roads, terrain, cities, village houses, props, perf) | world/perf, via claude/merge-world-perf | yes (9729d106) | Merged with our perf pass (both kept in zone_scatter.gd). Your content roughly doubles town and heli frame cost, so the perfcases budgets were re-based; worth a perf look. **In v0.5.3 (B2493)** |
 | Tactics reels → AI spec | docs/tactics/ | yes | 10 of 23 reels done (13 gone, skipped on Captain's call); the B lane writes and builds the spec |
 
 ## Open work, in order, and who has it
