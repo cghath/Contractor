@@ -28,6 +28,7 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | Your world/perf stack (roads, terrain, cities, village houses, props, perf) | world/perf, via claude/merge-world-perf | yes (9729d106) | Merged with our perf pass (both kept in zone_scatter.gd). Your content roughly doubles town and heli frame cost, so the perfcases budgets were re-based; worth a perf look. **In v0.5.3 (B2493)** |
 | Tactics reels → AI spec | docs/tactics/, docs/ai_tactics.md | yes | Done from 10 reels (13 gone, skipped on Captain's call); see the B lane row for what was deferred |
 | 3D loadout editor + 3D armory | claude/loadout-3d | yes | Done: 3D soldier with clickable slots, buy-in-place and "Buy missing", saved kits applied to anyone incl. Hawk 2/Viper 3, armory room by shelf. Not yet seen in game: check marker placement on the female build, gun rail markers, shelf spacing (docs/loadout_3d.md) |
+| Mission UI pass (board, briefing, objectives tracker, debrief) | claude/mission-ui | no | Done, CI next; see its CHANGELOG entry. Operation contracts show their own figures on the board/briefing by carrying "glance": [{caption, value, tip, tone}] |
 | Mission UI pass | (next) | no | Queued: item 2 of Captain's one-at-a-time list (then town perf, then voice + economy) |
 
 ## Open work, in order, and who has it

@@ -95,9 +95,7 @@ func _ready() -> void:
 			"Negotiation: spend the points between pay, salvage share (how much of what you bring back is yours) and support budget (paid support calls). Advance % is paid when you accept, the rest on completion.",
 			"Held contracts are the ones the company has taken. Renegotiate (once, when the briefing understated the threat) or Abort one; Prepare deployment sends it to the base's prep.",
 			"Hot zones shows who holds each zone and how firmly; it shifts while days pass. Shop buys kit into the stash; a loan gives cash now, paid back with interest.",
-			"The figures over the briefing are the job at a glance: hover one for what it means. Your last terms and pick are remembered.",
-		]), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"], ["A", "Accept"], ["P", "Prepare"], ["S", "Shop"], ["W", "Wait a day"]]))
-	root.add_child(ContractGlance.flow("Board"))
+		]), [["Esc", "Close"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))  # (each button prints its own hotkey)
 	_header = UiKit.text("")
 	root.add_child(_header)
 	var scroll := ScrollContainer.new()
@@ -138,6 +136,7 @@ func _ready() -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.add_child(right)
+	right.add_child(ContractGlance.flow("Board"))  # in the scrolling part: the open help still fits a small window
 	_glance = VBoxContainer.new()
 	_glance.add_theme_constant_override(&"separation", UiKit.SPACE_XS)
 	right.add_child(_glance)
