@@ -1718,5 +1718,58 @@ func _test_operation_zones() -> void:
 		and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.FORD),
 		"every crossing in band 2: %d for vehicles (%s), %d footbridges between" % [vehicle.size(),
 		vehicle.map(func(c: Dictionary) -> String: return "%s %s" % [c.kind, c.get("role", "")]), on_river.size() - vehicle.size()])
+	_test_big_zone_streaming(op, t)
 	t.free()
 	check(gen_ms < BUDGET_OPERATION_MS, "an operation zone generates in %d ms: the def %d, its terrain and water %d (budget %.0f)" % [gen_ms, def_ms, gen_ms - def_ms, BUDGET_OPERATION_MS])
+
+
+## docs/combined_arms.md 6.2.2 (phase D2): an 8 km zone's ground collides only near the action
+## (BigZoneStreaming): terrain chunks within collision_in_m of a point built, nearest first and by
+## the budget, freed past collision_out_m; GroundCuts' holes kept through a rebuild; the scatter at a
+## hot zone's density (its caps times the area) with its cover streamed the same way. Hot and contract
+## zones build everything up front as before.
+func _test_big_zone_streaming(op: Dictionary, t: ZoneTerrain) -> void:
+	print("8 km zone streaming")
+	var spec := BigZoneStreaming.spec()
+	var in_m := float(spec.collision_in_m)
+	var out_m := float(spec.collision_out_m)
+	check(not BigZoneStreaming.streams(ZoneDef.HOT_SIZE_M) and BigZoneStreaming.streams(float(op.size_m)) and t.on_demand
+		and is_equal_approx(BigZoneStreaming.scatter_scale(ZoneDef.HOT_SIZE_M), 1.0) and BigZoneStreaming.scatter_scale(float(op.size_m)) > 3.9,
+		"only zones over a hot zone's size stream their ground; their scatter caps scale x%.1f" % BigZoneStreaming.scatter_scale(float(op.size_m)))
+	t.build_collision()
+	var none := t.collision_chunks()
+	var a: Array[Vector3] = [Vector3(-1500, 0, 600)]
+	var first := t.stream_collision(a, in_m, out_m, 12)
+	var all_a := first + t.stream_collision(a, in_m, out_m, -1)
+	var chunk_m := ZoneTerrain.CHUNK_CELLS * ZoneTerrain.CELL_M
+	var expect := PI * in_m * in_m / (chunk_m * chunk_m)
+	check(none == 0 and first == 12 and absf(all_a - expect) < expect * 0.15 and t.collision_chunks() == all_a,
+		"no ground collision up front; round a point, 12 chunks a tick, %d in all within %.0f m (about %.0f of %d)" % [all_a, in_m, expect, t.chunk_count() * t.chunk_count()])
+	var hole := Vector2i(t.points / 2 - 1500 / int(ZoneTerrain.CELL_M) + 3, t.points / 2 + 600 / int(ZoneTerrain.CELL_M) + 3)
+	var holes: Array[Vector2i] = [hole]
+	t.blank_samples(holes)
+	var near_b: Array[Vector3] = [Vector3(-1500 + out_m - 300.0, 0, 600)]
+	t.stream_collision(near_b, in_m, out_m, -1)
+	var kept := t.collision_chunks() > all_a
+	var b: Array[Vector3] = [Vector3(2500, 0, -2000)]
+	t.stream_collision(b, in_m, out_m, -1)
+	var moved := t.collision_chunks()
+	t.stream_collision(a, in_m, out_m, -1)
+	var c := Vector2i(hole.x / ZoneTerrain.CHUNK_CELLS, hole.y / ZoneTerrain.CHUNK_CELLS)
+	var shape: HeightMapShape3D = t._chunk_shapes.get(c)
+	var li := hole.x - c.x * ZoneTerrain.CHUNK_CELLS + (hole.y - c.y * ZoneTerrain.CHUNK_CELLS) * (ZoneTerrain.CHUNK_CELLS + 1)
+	check(kept and absf(moved - expect) < expect * 0.15 and shape != null and is_nan(shape.map_data[li]),
+		"chunks kept within %.0f m of the action, freed past it (%d after a 5 km move); a dug hole survives its chunk being freed and built again" % [out_m, moved])
+	var s := ZoneScatter.new()
+	t.add_child(s)
+	var started := Time.get_ticks_msec()
+	s.generate(t, op)
+	var scatter_ms := Time.get_ticks_msec() - started
+	s.build_collision()
+	var cover_none := s.cover_cells()
+	s.stream_collision(a, float(spec.scatter_in_m), float(spec.scatter_out_m), -1)
+	var cells := s.cover_cells()
+	s.stream_collision(b, float(spec.scatter_in_m), float(spec.scatter_out_m), -1)
+	var area_km2 := float(op.size_m) * float(op.size_m) / 1.0e6
+	check(s.on_demand and cover_none == 0 and cells > 100 and absf(s.cover_cells() - cells) < cells * 0.3 and s.total() > ZoneScatter.CAP_TREES * 3,
+		"the scatter at a hot zone's density: %d items (%.0f a km2) in %d ms; its cover built in %d cells round a point, none up front" % [s.total(), s.total() / area_km2, scatter_ms, cells])

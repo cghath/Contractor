@@ -357,6 +357,8 @@ func _build_environment() -> void:
 	add_child(scatter)
 	scatter.generate(terrain, def)
 	scatter.build_collision()
+	if terrain.on_demand:
+		add_child(BigZoneStreaming.new())  # an 8 km zone streams its ground and draws far (docs/combined_arms.md 6.2.2)
 	var cache_holder := Node3D.new()
 	cache_holder.name = "Caches"
 	add_child(cache_holder)

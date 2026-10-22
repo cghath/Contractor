@@ -122,6 +122,11 @@ var _material: ShaderMaterial
 var _lod0 := {}  # Vector2i chunk -> its finest MeshInstance3D
 var _lod1 := {}  # Vector2i chunk -> its middle MeshInstance3D
 var _chunk_shapes := {}  # Vector2i chunk -> its HeightMapShape3D (GroundCuts blanks samples in it)
+## An 8 km zone's ground collides only near players, vehicles and live soldiers (BigZoneStreaming,
+## docs/combined_arms.md 6.2.2): build_collision builds no chunks, stream_collision does.
+var on_demand := false
+var _chunk_bodies := {}  # Vector2i chunk -> its StaticBody3D
+var _blanks := {}  # Vector2i sample -> true: GroundCuts' holes, put back into a chunk built later
 ## The cuts in the ground (craters, dug holes: GroundCuts), or null while there are none.
 var cuts: GroundCuts
 ## The rivers, streams, lakes and their bridges (ZoneWater: the preset's "water"), or null.
@@ -134,6 +139,7 @@ var water: ZoneWater
 func generate(def: Dictionary, flat: Array) -> void:
 	seed_value = int(def.get("seed", 0))
 	size_m = float(def.get("size_m", 2048.0))
+	on_demand = BigZoneStreaming.streams(size_m)
 	preset_id = String(def.get("terrain", "plain"))
 	preset = TerrainPresets.get_preset(preset_id)
 	var land: Dictionary = preset.get("land", {})
@@ -564,32 +570,14 @@ func chunk_count() -> int:
 
 # --- Collision -------------------------------------------------------------------------------
 
-## One static body per chunk with a height field, plus the walls at the zone's edge.
+## One static body per chunk with a height field (none yet in an on_demand zone: stream_collision
+## builds them), plus the walls at the zone's edge.
 func build_collision() -> void:
 	var count := chunk_count()
 	for cz in count:
 		for cx in count:
-			var body := StaticBody3D.new()
-			body.name = "Ground_%d_%d" % [cx, cz]
-			body.collision_layer = 1
-			body.collision_mask = 0
-			var shape := HeightMapShape3D.new()
-			shape.map_width = CHUNK_CELLS + 1
-			shape.map_depth = CHUNK_CELLS + 1
-			var data := PackedFloat32Array()
-			data.resize((CHUNK_CELLS + 1) * (CHUNK_CELLS + 1))
-			for j in CHUNK_CELLS + 1:
-				for i in CHUNK_CELLS + 1:
-					data[i + j * (CHUNK_CELLS + 1)] = _h(cx * CHUNK_CELLS + i, cz * CHUNK_CELLS + j)
-			shape.map_data = data
-			_chunk_shapes[Vector2i(cx, cz)] = shape
-			var node := CollisionShape3D.new()
-			node.shape = shape
-			node.scale = Vector3(CELL_M, 1.0, CELL_M)
-			body.add_child(node)
-			var chunk_m := CHUNK_CELLS * CELL_M
-			body.position = Vector3(-_half + (cx + 0.5) * chunk_m, 0.0, -_half + (cz + 0.5) * chunk_m)
-			add_child(body)
+			if not on_demand:
+				_build_chunk(Vector2i(cx, cz))
 	var walls := StaticBody3D.new()
 	walls.name = "EdgeWalls"
 	walls.collision_layer = 1
@@ -607,6 +595,63 @@ func build_collision() -> void:
 		water.build_collision()  # the bridges and culverts
 
 
+func _build_chunk(c: Vector2i) -> void:
+	var body := StaticBody3D.new()
+	body.name = "Ground_%d_%d" % [c.x, c.y]
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var shape := HeightMapShape3D.new()
+	shape.map_width = CHUNK_CELLS + 1
+	shape.map_depth = CHUNK_CELLS + 1
+	var data := PackedFloat32Array()
+	data.resize((CHUNK_CELLS + 1) * (CHUNK_CELLS + 1))
+	for j in CHUNK_CELLS + 1:
+		for i in CHUNK_CELLS + 1:
+			var s := Vector2i(c.x * CHUNK_CELLS + i, c.y * CHUNK_CELLS + j)
+			data[i + j * (CHUNK_CELLS + 1)] = NAN if not _blanks.is_empty() and _blanks.has(s) else _h(s.x, s.y)
+	shape.map_data = data
+	_chunk_shapes[c] = shape
+	var node := CollisionShape3D.new()
+	node.shape = shape
+	node.scale = Vector3(CELL_M, 1.0, CELL_M)
+	body.add_child(node)
+	var chunk_m := CHUNK_CELLS * CELL_M
+	body.position = Vector3(-_half + (c.x + 0.5) * chunk_m, 0.0, -_half + (c.y + 0.5) * chunk_m)
+	add_child(body)
+	_chunk_bodies[c] = body
+
+
+## An on_demand zone (BigZoneStreaming): builds the chunks within `in_m` of any of `focus` (or
+## `reach[k]` of focus k, where given), nearest first, at most `budget` of them (-1: all), and frees
+## those further than `out_m` (scaled the same) from all of them. Returns how many it built.
+func stream_collision(focus: Array[Vector3], in_m: float, out_m: float, budget := -1, reach := PackedFloat32Array()) -> int:
+	if not on_demand:
+		return 0
+	var plan := BigZoneStreaming.plan(focus, reach, in_m, out_m, CHUNK_CELLS * CELL_M, chunk_count(), _half)
+	var wanted: Dictionary = plan[0]
+	var keep: Dictionary = plan[1]
+	for c: Vector2i in _chunk_bodies.keys():
+		if not keep.has(c):
+			(_chunk_bodies[c] as Node).queue_free()
+			_chunk_bodies.erase(c)
+			_chunk_shapes.erase(c)
+	var todo: Array = []
+	for c: Vector2i in wanted:
+		if not _chunk_bodies.has(c):
+			todo.append(c)
+	todo.sort_custom(func(x: Vector2i, y: Vector2i) -> bool: return float(wanted[x]) < float(wanted[y]))
+	if budget >= 0:
+		todo = todo.slice(0, budget)
+	for c: Vector2i in todo:
+		_build_chunk(c)
+	return todo.size()
+
+
+## How many chunks have collision now.
+func collision_chunks() -> int:
+	return _chunk_bodies.size()
+
+
 # --- Visuals ---------------------------------------------------------------------------------
 
 ## GroundCuts: blanks grid samples `samples` (Vector2i) in the coarse collision (a NaN sample
@@ -614,6 +659,8 @@ func build_collision() -> void:
 func blank_samples(samples: Array[Vector2i]) -> void:
 	var edits := {}  # chunk -> PackedFloat32Array
 	for s in samples:
+		if on_demand:
+			_blanks[s] = true  # a chunk freed and built again keeps its holes
 		for dz in [0, -1]:
 			for dx in [0, -1]:
 				var c := Vector2i(s.x / CHUNK_CELLS + dx, s.y / CHUNK_CELLS + dz)

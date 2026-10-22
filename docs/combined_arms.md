@@ -2719,6 +2719,12 @@ can be changed; the alternative is what was weighed against it.
 | 82 | (D1) Three insertion and three extraction points at the friendly edge (inland) or the beach exit (coast) | Everyone starts at the start; no exfil from the enemy's depth | Points spread over the bands |
 | 83 | (D1) The 8 s budget counts the def, the 8 km heightmap and the water; collision, scatter and navigation at 8 km are D2's | What D1 makes | The whole level load |
 | 84 | (D1) The town is one generated town module with villages round it; a city of districts waits for cghath's city work | The town generator is one block today | Several town modules packed as districts now |
+| 85 | (D2) Only zones bigger than a hot zone (from 4,224 m) stream their ground; hot and contract zones build it all up front as before | Today's zones are tuned and tested as they are | Streaming every zone |
+| 86 | (D2) Ground collision reaches 1 km round a player, 300 m round a vehicle and 150 m round any other live soldier (who is held by SoldierMovement until it's under him); freed at 1.3x that; 12 chunks a tick, every 0.25 s | Players' shots and sight need the far ground; an AI soldier needs the ground under him and the cover round him; hundreds of soldiers mustn't each hold a square kilometre | 1 km round every soldier and vehicle (a 130 ms tick with 260 soldiers) |
+| 87 | (D2) The scatter keeps a hot zone's density at 8 km (every cap times the area, about 4x: ~100,000 items), laid out up front as today, its cover collision streamed by its 128 m cells (1.2 km of a player) | The look and the layout code stay the same; only the collision streams | A per-cell lazy layout on a 256 m grid (a rewrite of the woods, copses and belts; cghath's props branch reworks the same file) |
+| 88 | (D2) Far drawing in streamed zones: soldiers to 1.5 km, vehicles to 1.2 km with a box of their size and colour out to 3 km | The doc's ranges; tanks are seen at gunnery range | Full meshes to 3 km |
+| 89 | (D2) Live caps: past the Virtualizer's FORCE_M a profile waits while 80 soldiers are live (a ride while 16 vehicles are) | 6.2.3's budget; nobody near a player is ever held back | A hard cap that also holds groups within 300 m |
+| 90 | (D2) The invasion perf case is its own script (tests/invasion_perf.gd, `-- --zone hot` for the case to hold against), not a branch of perf_timing | perf_timing is one 240 s flow; the invasion case hosts its own zone | A mode switch inside perf_timing |
 
 ### The plan
 
