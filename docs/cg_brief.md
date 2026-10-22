@@ -188,6 +188,27 @@ Build it out, in this order:
 snowy pass, farmland or a city. Every landmark above shows up where its tag says. Towns read as
 lived-in. The world, townperf, map and smoke suites pass.
 
+### 1b. Two pieces of the combined arms plan (docs/combined_arms.md), added 2026-10-22
+
+These fit your world and art work, and Captain asked to share the load with you. Read
+docs/combined_arms.md sections 6.2, 7.2 and 9 for the detail; its section 10 has the calls
+already made.
+
+- **D1 + D2, operation zones of about 8 km.**
+  - D1: `ZoneDef.generate_operation`, operation_gen.gd, the bands, sites from covered zones, the
+    river and bridge hints, the MSR.
+  - D2: 8 km performance: collision on demand, the scatter density grid, far proxies, live caps,
+    the `invasion` perf case.
+  - A Claude session started D1 on `claude/ca-d1-operation-zones` and paused it for usage. Pick it
+    up from there: its CHANGELOG entry says where it stopped.
+  - These are your terrain/world files anyway, so they sit well next to your roads and cities.
+- **D6a, new vehicle art at 0.5 cm-style detail:** T-72B3, BMP-2, BTR-82A, MT-LB, the three
+  HEMTTs, the rhino truck, the armoured SUV, and a captured-MaxxPro scheme (vehicle_art.gd,
+  vehicle_interiors.gd). Claude's armour lane will give them armour, modules and weapons data
+  later (D6b).
+
+Do these after the world expansion items you're on, or interleave them if it suits you.
+
 ### 2. Real picture-in-picture scopes
 
 The first pass (gun_sight.gd SubViewport) isn't reading as a real scope. It needs:
