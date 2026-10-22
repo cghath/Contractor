@@ -103,7 +103,7 @@ const REED_COVER := 0.3
 ## cover_least marches this far from each end of a line, a metre a step.
 const COVER_MARCH_M := 25.0
 ## Bump when what the features make changes (the scatter's cache keys on checksum()).
-const LAYOUT_VERSION := 1
+const LAYOUT_VERSION := 2  # 2: fields keep off the planned roads (F-187)
 
 var terrain: ZoneTerrain
 var spec := {}
@@ -671,11 +671,50 @@ func field_at(x: float, z: float) -> int:
 		return -1
 	if pad_distance(p) < FIELD_PAD_M:
 		return -1
+	if terrain.road_weight(x, z) > 0.05:
+		return -1  # a road and its verge (the planned roads once they're laid: ZoneTerrain.set_roads)
 	if _wet_known and terrain.water and terrain.water.keeps_clear(x, z):
 		return -1
 	if terrain.normal_at(x, z).y < FIELD_UP:
 		return -1
 	return c * (field_rows.size() - 1) + r
+
+
+## The field sides near `p` (F-187: ZoneProps lays a farm's fences and gates along them): every
+## side of a field (a column edge between two rows, or a row edge within one column) whose middle
+## is within `reach` of `p` and runs between fields (a field on at least one side), nearest first,
+## as [a, b] (Vector2, world). The lane down a side is field-free (lane_m either way).
+func field_sides_near(p: Vector2, reach: float) -> Array:
+	var out: Array = []
+	if field_cols.is_empty():
+		return out
+	var g := _to_grid(p)
+	for e in range(1, field_cols.size() - 1):
+		for piece in field_rows.size() - 1:
+			for axis in 2:
+				var a := Vector2.ZERO
+				var b := Vector2.ZERO
+				if axis == 0:  # the column edge e, along the rows of the column after it
+					if absf(field_cols[e] - g.x) > reach:
+						continue
+					a = Vector2(field_cols[e], field_rows[piece] + row_shift[e])
+					b = Vector2(field_cols[e], field_rows[piece + 1] + row_shift[e])
+				else:  # the row edge `piece` within column e
+					if e >= field_cols.size() - 1 or absf(field_rows[piece] + row_shift[e] - g.y) > reach:
+						continue
+					a = Vector2(field_cols[e], field_rows[piece] + row_shift[e])
+					b = Vector2(field_cols[e + 1], field_rows[piece] + row_shift[e])
+				var mid := (a + b) * 0.5
+				if mid.distance_to(g) > reach:
+					continue
+				var side := Vector2(-(b - a).normalized().y, (b - a).normalized().x) * (float(_fields.lane_m) + 2.0)
+				var wm := _from_grid(mid)
+				var ws := _from_grid(side)
+				if field_at(wm.x + ws.x, wm.y + ws.y) < 0 and field_at(wm.x - ws.x, wm.y - ws.y) < 0:
+					continue
+				out.append([_from_grid(a), _from_grid(b), mid.distance_to(g)])
+	out.sort_custom(func(x: Array, y: Array) -> bool: return float(x[2]) < float(y[2]))
+	return out.map(func(x: Array) -> Array: return [x[0], x[1]])
 
 
 ## What grows in field `id` this season: {"crop", "colour", "height", "cover"} ({} for none).
@@ -792,7 +831,8 @@ func _talus(s: ZoneScatter, rng: RandomNumberGenerator, c: Dictionary) -> void:
 		var t := rng.randf()
 		var size := rng.randf_range(0.5, 2.4)
 		var p := cliff_point(c, t, -rng.randf_range(2.0, 10.0))
-		if _keep_at(Vector2(p.x, p.z), CLIFF_ROAD_M) < 0.5 or s._blocked(p.x, p.z, s._keep, s._roads) or terrain.normal_at(p.x, p.z).y < 0.6:
+		if _keep_at(Vector2(p.x, p.z), CLIFF_ROAD_M) < 0.5 or s._blocked(p.x, p.z, s._keep, s._roads) or terrain.normal_at(p.x, p.z).y < 0.6 \
+				or (s._props and s._props.blocks(p.x, p.z, size)):
 			continue
 		var large := size > 1.5 and s.solid_count < s._cap_solid
 		var dims := Vector3(size, size * rng.randf_range(0.55, 0.85), size * rng.randf_range(0.8, 1.2))
@@ -810,7 +850,8 @@ func _orchard(s: ZoneScatter, rng: RandomNumberGenerator, id: int) -> void:
 		var v := field_rows[r] + row_shift[c] + ORCHARD_INSET_M
 		while v < field_rows[r + 1] + row_shift[c] - ORCHARD_INSET_M:
 			var p := _from_grid(Vector2(u, v))
-			if field_at(p.x, p.y) == id and not s._blocked(p.x, p.y, s._keep, s._roads) and s.counts[ZoneScatter.Kind.TREE] < s._cap_trees:
+			if field_at(p.x, p.y) == id and not s._blocked(p.x, p.y, s._keep, s._roads) and s.counts[ZoneScatter.Kind.TREE] < s._cap_trees \
+					and not (s._props and s._props.blocks(p.x, p.y, 1.5)):
 				var size := rng.randf_range(float(ORCHARD_SIZE[0]), float(ORCHARD_SIZE[1]))
 				s._add({"kind": ZoneScatter.Kind.TREE, "pos": Vector3(p.x, terrain.height_at(p.x, p.y), p.y), "yaw": rng.randf() * TAU,
 					"size": Vector3(size, size, size), "colour": Color(String(crowns[rng.randi() % crowns.size()])), "solid": true, "orchard": true})

@@ -12,7 +12,10 @@
 		"desert_wadi": "arid",
 		"badlands": "arid",
 		"rocky_ridge": "arid",
-		"scrubland": "arid"
+		"scrubland": "arid",
+		"farmland": "farmland",
+		"marsh": "woodland",
+		"snow_mountain": "highland"
 	},
 	"styles": {
 		"temperate": {
@@ -34,6 +37,27 @@
 			"graves": {"headstone": 4, "grave_cross": 3, "tomb": 2, "grave_mound": 1},
 			"vehicles": {"car_sedan": 3, "car_hatch": 3, "van": 2, "pickup_civ": 2, "truck_cargo": 1, "truck_tanker": 1},
 			"hulks": {"hulk_car": 3, "hulk_van": 1, "hulk_truck": 1}
+		},
+		"farmland": {
+			"_note": "Queue item 1.3 / F-187: farmland (ZoneFeatures' fields): more farmsteads, on the rough ground by the fields, their fences and gates down the lanes between the fields, more hay; the zone's own irrigation channels (no prop irrigation). Proposed.",
+			"farms_per_km2": 1.1,
+			"pylon_lines": [1, 2],
+			"pole_roads": 0.7,
+			"pole_kinds": {"utility_pole": 3, "power_pole_h": 1},
+			"roadside_per_km": 1.2,
+			"hulk_share": 0.25,
+			"pen_fence": ["fence_rail", "fence_board"],
+			"field_fence": ["fence_rail", "fence_barbed", "fence_rail"],
+			"gate": ["gate_farm", "gate_wood"],
+			"animals": {"sheep": 3, "goat": 1},
+			"water": {"well": 1, "cistern": 2, "water_tower": 1, "windpump": 1},
+			"hay": ["hay_round", "hay_round", "hay_square", "hay_square"],
+			"irrigation": 0.0,
+			"cemetery_wall": "wall_block",
+			"cemetery_gate": "gate_steel",
+			"graves": {"headstone": 4, "grave_cross": 3, "tomb": 2, "grave_mound": 1},
+			"vehicles": {"pickup_civ": 3, "car_hatch": 2, "van": 1, "truck_cargo": 2},
+			"hulks": {"hulk_car": 2, "hulk_van": 1, "hulk_truck": 1}
 		},
 		"woodland": {
 			"farms_per_km2": 0.2,
@@ -136,5 +160,12 @@
 		"benches": [2, 4],
 		"dumpsters": [1, 3],
 		"dogs": [1, 2]
+	},
+	"city": {
+		"_note": "A city's street furniture (ZoneProps._city), laid once for the whole city along its street grid: lamps every lamp_step_m, alternating sides; benches and bins on the pavements [min, max] a block; dogs [min, max] the city. Proposed.",
+		"lamp_step_m": 16.0,
+		"benches_a_block": [1, 2],
+		"dumpsters_a_block": [0, 1],
+		"dogs": [2, 4]
 	}
 }

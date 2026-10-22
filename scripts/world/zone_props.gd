@@ -62,6 +62,14 @@ const PEN_D := [9.0, 15.0]
 const FIELD_FENCE_M := [40.0, 120.0]
 const FIELD_GATE_EVERY := 15
 const IRRIGATION_M := [30.0, 90.0]
+## Farmland (ZoneFeatures' fields, F-187): no prop stands in a crop field but the power lines'
+## pylons and poles (they stand in fields; their lines would break up on every field), and a farm's
+## field fences and gates run down the lanes between the fields, at most FIELD_SIDES of them, the
+## field sides within FIELD_SIDE_REACH_M of the farm. Its irrigation is the zone's own channels
+## (ZoneWater "channels"), not the props'. Proposed.
+const FIELD_OK: Array[String] = ["pylon", "power_pole_h", "utility_pole", "pole_transformer"]
+const FIELD_SIDES := [2, 5]
+const FIELD_SIDE_REACH_M := 170.0
 ## Cemeteries: inside a wall (W, D) [min, max], graves on a grid, this share of the plots used.
 const CEMETERY_W := [18.0, 27.0]
 const CEMETERY_D := [12.0, 18.0]
@@ -69,6 +77,16 @@ const GRAVE_STEP := Vector2(2.7, 1.5)
 const GRAVE_FILL := 0.75
 ## Town street layout (BuildingGen's: the main street along x, the cross street along z).
 const KERB_IN_M := 0.35
+## A city (ZoneModules "city#..." blocks, BuildingGen.city_layout): its street furniture is laid
+## once for the whole city, along its grid's streets (data "city"), not as a town's per block. On
+## the pavements (a street's middle out to street_w / 2, where the buildings' fronts stand): lamps
+## CITY_LAMP_M out from a street's middle; benches and bins with their backs CITY_FRONT_IN_M off the
+## fronts, all past CITY_CLEAR_M (a block's barricades and rubble stand within it,
+## BuildingGen.city_block); nothing within CITY_JUNCTION_M of a crossing. Proposed.
+const CITY_LAMP_M := 4.0
+const CITY_FRONT_IN_M := 0.1
+const CITY_CLEAR_M := 3.55
+const CITY_JUNCTION_M := 6.5
 
 static var _data := {}
 
@@ -78,6 +96,8 @@ var def: Dictionary
 var style_id := "temperate"
 var style := {}
 var rng := RandomNumberGenerator.new()
+## The zone has ZoneFeatures' fields (farmland: F-187).
+var _fields := false
 ## What it laid, for tests: {group: count} and the farms, cemeteries, pylon lines and towns.
 var report := {"farms": 0, "cemeteries": 0, "pylons": 0, "poles": 0, "towns": 0, "town_props": 0, "sites": 0, "roadside": 0, "animals": 0}
 var placed := 0
@@ -146,23 +166,51 @@ func lay_out(s: ZoneScatter, t: ZoneTerrain, d: Dictionary) -> void:
 	for m: Dictionary in _modules:
 		if String(m.type).begins_with(ZoneModules.LANDMARK) and m.base == "farm":
 			_farms.append(m.centre)  # a landmark farm (BuildingGen.site): the countryside's keep FARM_GAP_M from it
+	_fields = t.features != null and not t.features.field_cols.is_empty()
 	_lines = street_lines()
 	_index_lines()
 	_open = float(s._spec.get("margin_m", 0.0)) > 0.0
+	var parts := {}  # what each part took (ms): report "parts"
+	var lap := Time.get_ticks_usec()
+	var cities := {}  # "city#<seed>" -> its first block (every block's pad is the whole city's)
 	for m: Dictionary in _modules:
-		if m.base == "town":
+		var city := ZoneModules.city_of(String(m.type))
+		if city != "":
+			if not cities.has(city):
+				cities[city] = m
+		elif m.base == "town":
 			_town(m)
+	for c: Dictionary in def.get("cities", []):
+		var city := "%s%d" % [ZoneModules.CITY, int(c.seed)]
+		if cities.has(city):
+			_city(c, cities[city])
+	lap = _lap(parts, "towns", lap)
 	for m: Dictionary in _modules:
-		_site(m)
+		var city := ZoneModules.city_of(String(m.type))
+		if city == "" or is_same(cities.get(city), m):
+			_site(m)  # (a city's clutter round it once, not once a block round the same pad)
+	lap = _lap(parts, "sites", lap)
 	_roadside()
+	lap = _lap(parts, "roadside", lap)
 	_power_lines()
+	lap = _lap(parts, "power", lap)
 	_cemetery()
+	lap = _lap(parts, "cemetery", lap)
 	var area_km2 := t.size_m * t.size_m / 1.0e6
 	for n in _how_many(float(style.get("farms_per_km2", 0.0)) * area_km2):
 		_farm()
+	_lap(parts, "farms", lap)
+	report["parts"] = parts
 	report["placed"] = placed
 	report["rejected"] = rejected
 	report["ms"] = snappedf((Time.get_ticks_usec() - started) / 1000.0, 0.1)
+
+
+## Adds the time since `since` (usec) to `parts[part]` (ms); now (usec).
+static func _lap(parts: Dictionary, part: String, since: int) -> int:
+	var now := Time.get_ticks_usec()
+	parts[part] = snappedf(float(parts.get(part, 0.0)) + (now - since) / 1000.0, 0.1)
+	return now
 
 
 ## The zone's roads as street lines: {"a", "b" (Vector2, ends of the middle line), "half_w" (its
@@ -313,6 +361,8 @@ func _fits(shape: String, foot: Array, opts: Dictionary) -> bool:
 			return _reject(shape, "open")  # (a salt pan's open middle stays bare, as for the rest of the scatter)
 		if terrain.water and terrain.water.keeps_clear(p.x, p.y):
 			return _reject(shape, "water")  # a river, lake, wet bank or bridge (ZoneWater), as for the rest of the scatter
+		if _fields and not shape in FIELD_OK and terrain.features.field_at(p.x, p.y) >= 0:
+			return _reject(shape, "field")  # a crop field (ZoneFeatures, F-187): props keep to its lanes and the rough ground
 	if not bool(opts.get("free", false)) and _occupied(foot):
 		return _reject(shape, "taken")
 	var c: Vector2 = foot[0]
@@ -645,6 +695,80 @@ func _town(m: Dictionary) -> void:
 	animals("dog", o.x, o.y, Vector2(span - 6.0, street - 1.0), 0.0, dogs)
 
 
+## City `c`'s street furniture (a def "cities" entry: {"seed", "pos"}; `m` one of its blocks, whose
+## pad is the city's): from its street grid's own numbers (BuildingGen.city_layout), without
+## building its blocks (CITY_* above), once for the whole city. Lamps down every street, alternating
+## sides (the ring's on its city side), "lamp_step_m" apart; benches and bins on the pavements, so
+## many a block; dogs about a few streets.
+func _city(c: Dictionary, m: Dictionary) -> void:
+	var layout := BuildingGen.city_layout(int(c.seed))
+	var at := Vector2(float(c.pos[0]), float(c.pos[1]))
+	var spec: Dictionary = _data.get("city", {})
+	var area := Rect2(at - (layout.half as Vector2), (layout.half as Vector2) * 2.0).grow(0.5)
+	var pitch := float(layout.pitch)
+	var front := float(layout.street_w) * 0.5 - CITY_FRONT_IN_M
+	var streets: Array = []  # [a, d (along), n (across), length]
+	for st: Array in layout.streets:
+		var a: Vector2 = (st[0] as Vector2) + at
+		var b: Vector2 = (st[1] as Vector2) + at
+		var d := (b - a).normalized()
+		streets.append([a, d, Vector2(-d.y, d.x), a.distance_to(b)])
+	# A point `off` out from street `st`'s middle `t` along, on side `s` (the other side if that one's
+	# outside the city: the ring's outer pavement), and the yaw facing the street; [] at a crossing.
+	var spot := func(st: Array, t: float, s: float, off: float) -> Array:
+		var j := fposmod(t, pitch)
+		if minf(j, pitch - j) < CITY_JUNCTION_M:
+			return []
+		var p: Vector2 = (st[0] as Vector2) + (st[1] as Vector2) * t + (st[2] as Vector2) * s * off
+		if not area.has_point(p):
+			s = -s
+			p = (st[0] as Vector2) + (st[1] as Vector2) * t + (st[2] as Vector2) * s * off
+		var face: Vector2 = -(st[2] as Vector2) * s
+		return [p, atan2(face.x, face.y)]
+	_allow = m.pad
+	var before := placed
+	var opts := {"road_m": 0.0}
+	var step := float(spec.get("lamp_step_m", 16.0))
+	var k := 0
+	for st: Array in streets:
+		var t := step * 0.5
+		while t < float(st[3]):
+			var put_at: Array = spot.call(st, t, -1.0 if k % 2 == 0 else 1.0, CITY_LAMP_M)
+			if not put_at.is_empty():
+				var p: Vector2 = put_at[0]
+				place("lamp_double" if k % 5 == 4 else "street_lamp", p.x, p.y, float(put_at[1]), opts)
+				k += 1
+			t += step
+	var blocks := int(layout.cols) * int(layout.rows)
+	for want: Array in [["bench", spec.get("benches_a_block", [1, 2])], ["dumpster", spec.get("dumpsters_a_block", [0, 1])]]:
+		var shape: String = want[0]
+		var off := front - _back(shape)
+		if off - (PropArt.foot(shape).size.z - _back(shape)) < CITY_CLEAR_M:
+			continue  # (too deep for the pavement)
+		var count := 0
+		for b in blocks:
+			count += rng.randi_range(int(want[1][0]), int(want[1][1]))
+		for n in count * 4:
+			if count <= 0:
+				break
+			var st: Array = streets[rng.randi() % streets.size()]
+			var put_at: Array = spot.call(st, rng.randf() * float(st[3]), -1.0 if rng.randf() < 0.5 else 1.0, off)
+			if put_at.is_empty():
+				continue
+			var p: Vector2 = put_at[0]
+			if place(shape, p.x, p.y, float(put_at[1]), opts):
+				count -= 1
+	_allow = null
+	report.towns += 1
+	report.town_props += placed - before
+	var dogs := rng.randi_range(int(spec.get("dogs", [2, 4])[0]), int(spec.get("dogs", [2, 4])[1]))
+	for n in dogs:
+		var st: Array = streets[rng.randi() % streets.size()]
+		var d: Vector2 = st[1]
+		var p: Vector2 = (st[0] as Vector2) + d * (pitch * (0.5 + rng.randi() % maxi(int(float(st[3]) / pitch), 1)))
+		animals("dog", p.x, p.y, Vector2(2.0, pitch * 0.5 - CITY_JUNCTION_M), atan2(d.x, d.y), 1)
+
+
 # --- Settlements and sites ---------------------------------------------------------------------
 
 ## A site's clutter outside its pad (data "sites" by its base type): containers squared to the
@@ -877,9 +1001,15 @@ func _farm() -> void:
 		if rng.randf() < 0.5:
 			var home := p - u * (size.x * 0.5 + 9.0)
 			animals("dog", home.x, home.y, Vector2(6.0, 6.0), yaw, 1)
-		# Field fences out from the pen's corners, gates along them.
+		# Field fences out from the pen's corners, gates along them; in farmland, down the lanes
+		# between the fields round the farm instead (F-187).
 		var fence := _pick(style.get("field_fence", ["fence_rail"]))
 		var gate := _pick(style.get("gate", ["gate_farm"]))
+		if _fields:
+			var sides := terrain.features.field_sides_near(p, FIELD_SIDE_REACH_M)
+			for k in mini(rng.randi_range(int(FIELD_SIDES[0]), int(FIELD_SIDES[1])), sides.size()):
+				line(fence, sides[k][0], sides[k][1], PropArt.SECTION_M + 0.02, false, gate, FIELD_GATE_EVERY)
+			return  # (its irrigation: the zone's own channels)
 		for k in rng.randi_range(1, 3):
 			var cs := Vector2(1.0 if k % 2 == 0 else -1.0, 1.0 if k < 2 else -1.0)
 			var corner := p + u * cs.x * (size.x * 0.5 + 1.0) + v * cs.y * (size.y * 0.5 + 1.0)
@@ -914,6 +1044,8 @@ func _farm_site(p: Vector2) -> bool:
 		var r: Rect2 = pad[0]
 		if r.grow(FARM_PAD_M).has_point(p):
 			return false
+	if _fields and terrain.features.field_at(p.x, p.y) >= 0:
+		return false  # the farmstead on the rough ground by its fields, not in one (F-187)
 	for f in _farms:
 		if f.distance_to(p) < FARM_GAP_M:
 			return false

@@ -653,7 +653,7 @@ Suggested: pass a coarse grid of ZoneFeatures' layers (field_at's crop, soft_at,
 ice (ZoneWater._ice) into zone_inputs and tint the map by them (a field pattern, marsh hatching,
 white over the snow line, pale-blue ice). A test in tests/map_test.gd on Harrow Fields.
 
-## F-187: farmland's fields and the props' farms don't know each other
+## F-187: farmland's fields and the props' farms don't know each other (done 2026-10-22)
 
 Location: [zone_features.gd](../../scripts/world/zone_features.gd) and `origin/world/props`'s
 zone_props.gd (PR #22, not merged into world/terrain). Found on `world/terrain` (2026-10-22, 1.3).
@@ -665,6 +665,15 @@ Suggested: after both merge, add "farmland" (more farms), "marsh" and "snow_moun
 data/props.json "preset_styles", and let ZoneProps._farm put its field fences and gates along
 ZoneFeatures' field edges (field_cols, field_rows, row_shift, _from_grid) and keep its props off
 the fields (ZoneFeatures.keeps_clear) and the channels.
+
+Done (world/terrain, 2026-10-22, after the roads/props merge 863ac43): data/props.json maps
+farmland to a new "farmland" style (more farms, more hay, no prop irrigation: the zone's channels
+are the irrigation), marsh to "woodland" and snow_mountain to "highland". ZoneProps keeps every prop
+but the power lines' pylons and poles out of a crop field (ZoneFeatures.field_at, reject "field"),
+lays its farmsteads on the rough ground off the fields, and runs a farm's field fences and gates
+down the lanes along the 2-5 nearest field sides (ZoneFeatures.field_sides_near, within 170 m).
+Fields keep off the planned roads and their verges (ZoneTerrain.road_weight). The talus and the
+orchards' trees keep off the props. terrain_test's farmland check counts what stands in a field.
 
 ## F-188: crops and reed beds are plain blocks; their cover counts near the ends of a line only
 
@@ -948,3 +957,6 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-21 | Prop library: the screenshots are drawn by a small software rasteriser in tests/props_shots.gd (headless has no renderer and no window may open) | the brief's "headless screenshots" | tests/world_shots.gd in a real window
 - 2026-10-22 | Prop library: a helicopter climbs over a tall library prop (6 m and up: pylons, masts, poles' tops) it would pass within its rotor reach of, from ZoneScatter.tall_top (one call in Helicopter.obstacle_top); the lattice is too thin for its rays (heliflight harbour_yard flew into a pylon on CI) | pilots know where the pylons are | keep pylon lines away from every LZ and approach (unknowable: the LZ is picked in dead ground near the objective)
 - 2026-10-22 | Prop library, merged with the water and landmarks work: props keep off ZoneWater.keeps_clear (water, wet banks, bridges) like the rest of the scatter; a power line whose footing falls in water skips it and its wires span the gap (two steps); landmark sites get no site kit (they build their own props) and countryside farms keep FARM_GAP_M from a landmark farm | the coordinator's merge brief | move a wet footing to the bank (the line would kink)
+- 2026-10-22 | Farmland and the props library (F-187): nothing of the props stands in a crop field but the power lines' pylons and poles; a farm's field fences and gates run down the lanes between the fields (2-5 sides within 170 m of it, Proposed); farmland has no prop irrigation (its channels are ZoneWater's); fields keep off the planned roads' verges | props and fields agree, the lanes stay walkable, power lines stay straight | power lines bending round every field, or the props' own field grid over the features' fields
+- 2026-10-22 | A city's props (cities #23 under the props library): its street furniture is laid once for the whole city from its street grid's numbers (BuildingGen.city_layout: lamps every 16 m on alternating pavements, 1-2 benches and 0-1 bins a block, 2-4 dogs; data/props.json "city", Proposed), without building its blocks, and a city's clutter round its pad once, not once a block; city_hot's layout 4028 ms -> ~380 ms locally | each of a city's 20 blocks was laid as a town (building the block, ~100 ms each) and round the same city pad 20 times | the town street template inside each 48 m block, or a bigger budget
+- 2026-10-22 | terrain_test's "the hosted zone's ground ... are a fresh build's" compares like with like: the fresh build starts from the def as sent before the roads were planned (RoadNet.unplanned), plans its roads too (ZoneRoads.prepare), and must match the ground, the features and the planned road pieces | the host plans the roads into the def it sends, as base_zone_test found | comparing against the planned def (two different builds)

@@ -141,7 +141,7 @@ const FAR_GROUP_M := 24.0
 ## 9: sprawling woods (WOOD_SPRAWL, thinning edges, outlier copses) (Captain, 2026-10-17).
 ## 10: scrub belts out in the open (_scrub_belts) (Captain, 2026-10-18).
 ## 11: every tree solid (2026-10-18).
-const LAYOUT_VERSION := 13  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; old caches re-roll
+const LAYOUT_VERSION := 14  # 12: the prop library (ZoneProps, 2026-10-21); 13: its props keep out of the water; 14: out of farmland's fields, a city's laid once (F-187); old caches re-roll
 ## Zones kept in memory (layouts), the newest of them also keep their built cell meshes, and
 ## files kept in the disk cache.
 const CACHE_ZONES := 4

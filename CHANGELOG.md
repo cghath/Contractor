@@ -47,6 +47,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 #### Changed
 - The rocky ridge, highland moor and badlands presets have cliffs, and most presets have gullies
   or ditches, so those zones' ground is new.
+- **Farms and fields agree.** On farmland the farmsteads stand on the rough ground by the fields,
+  their fences and gates run down the lanes between the fields, and nothing stands in a crop
+  field but the power lines' pylons and poles. Fields keep clear of the roads' verges. Marsh
+  zones take the woodland props, snowy mountains the highland ones.
+- **Cities get their street furniture once.** A city's lamps, benches and bins line the pavements
+  of its whole street grid, laid in one pass instead of a town's street kit inside every block;
+  building a city zone's props takes about a tenth of the time it did.
 
 ### City zones and village houses (cghath's brief, queue items 1.5 and 1.6)
 
