@@ -70,8 +70,17 @@ func _ready() -> void:
 		return
 	(multiplayer.multiplayer_peer as ENetMultiplayerPeer).refuse_new_connections = true
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(^"1") != null, 20.0)
-	var fresh := _terrain(def)
-	check(fresh.checksum() == level.terrain.checksum(), "the hosted zone's ground, water and features are a fresh build's from its seed (every peer and late joiner builds them)")
+	# A fresh build the way the level builds (ZoneLevel._build_environment): the heights, water and
+	# features from the def as it came, then the roads planned and the ground graded to them (the
+	# level's def now carries the planned roads: RoadNet.unplanned takes it back to what was sent).
+	var sent := RoadNet.unplanned(level.def)
+	var fresh := _terrain(sent)
+	var fresh_roads := ZoneRoads.new()
+	fresh_roads.prepare(fresh, sent)
+	check(fresh.checksum() == level.terrain.checksum() and fresh.features.checksum() == level.terrain.features.checksum()
+		and JSON.stringify(sent.get("roads", [])) == JSON.stringify(level.def.get("roads", [])),
+		"the hosted zone's ground (graded to its roads), water, features and planned roads are a fresh build's from its seed (every peer and late joiner builds them)")
+	fresh_roads.free()
 	fresh.free()
 	await _test_gully_cover()
 	await _test_cliff_hosted()
@@ -426,16 +435,32 @@ func _test_farmland() -> void:
 	var s := ZoneScatter.new()
 	s.generate(t, def)
 	var orchard := 0
-	var in_field := 0
+	var in_field: Array[String] = []
+	var lane_fences := 0
+	var pylons_in_fields := 0
 	for item: Dictionary in s.items:
 		if item.get("orchard", false):
 			orchard += 1
 			continue
+		var kind := int(item.kind)
+		if kind == ZoneScatter.Kind.VALUABLE or kind == ZoneScatter.Kind.ANIMAL:
+			continue  # (a placement mark; animals wander)
+		var shape := String(item.get("shape", ""))
 		var id := f.field_at(item.pos.x, item.pos.z)
-		if id >= 0 and int(item.kind) != ZoneScatter.Kind.VALUABLE:
-			in_field += 1
-	check(f.orchards.size() >= 1 and orchard >= 40 and in_field == 0,
-		"farmland: %d orchards (%d fruit trees in rows); no rock, bush or tree of the scatter's own in a field" % [f.orchards.size(), orchard])
+		if shape in ZoneProps.FIELD_OK:
+			pylons_in_fields += 1 if id >= 0 else 0
+			continue  # the power lines cross the fields (a call)
+		if shape.begins_with("fence_") or shape.begins_with("gate_"):
+			var on_lane := false
+			for d: Vector2 in [Vector2(5, 0), Vector2(-5, 0), Vector2(0, 5), Vector2(0, -5)]:
+				on_lane = on_lane or f.field_at(item.pos.x + d.x, item.pos.z + d.y) >= 0
+			lane_fences += 1 if on_lane and id < 0 else 0
+		if id >= 0:
+			in_field.append("%s %s" % [ZoneScatter.Kind.keys()[kind], shape])
+	var farms := int(s.props_report.get("farms", 0))
+	check(f.orchards.size() >= 1 and orchard >= 40 and in_field.is_empty() and farms >= 2 and lane_fences >= 40,
+		"farmland: %d orchards (%d fruit trees in rows); nothing of the scatter's or the prop library's in a crop field (%s); %d farmsteads off the fields, %d fence and gate sections down the lanes between them (F-187); %d pylons and poles stand in fields" % [
+			f.orchards.size(), orchard, in_field.slice(0, 6), farms, lane_fences, pylons_in_fields])
 	var channels := 0
 	var wadeable := 0
 	var depths := Vector2(INF, 0.0)
