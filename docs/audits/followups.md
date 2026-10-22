@@ -27,6 +27,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-162 | P3 | The AI building scan misses the middle of a big open hall (a hangar: rays reach 12 m with no wall), so it isn't garrisoned or cleared room by room (landmarks, 2026-10-21) |
 | F-190 | P1 | ~~A squadmate following along a path walks head-on into a wall's end and stands there pushing~~ fixed 2026-10-22 (Claude, claude/ci-cleanup: SquadAI._unblock; F-80's collection-point half was the test's point) |
 | F-191 | P3 | A shot-down transport's crash landing with two aboard killed both (supports suite, CI once; "most of them alive") |
+| F-192 | P2 | Following the player through the compound's building, a squadmate on the follow-in stack can run a loop round the building on his way to his stack place (casualty soak, CI only, now and then) |
+| F-193 | P3 | base_zone: the player is down on landing after the helicopter insertion, and the walk home and the rest of the deployment fail after it (CI only, now and then) |
 | F-163 | P3 | A helicopter insertion came 4.9 m from the ground, inside its 5 m airframe clearance, before the final (loop suite, kestrel_valley, world/landmarks' CI once) |
 
 ## F-01: the building scan only sees one floor
@@ -477,6 +479,44 @@ bad roll.
 
 Suggested: crash injuries rolled within a survivable band for those thrown clear (the "most of
 them alive" call), or the check with more riders aboard.
+
+## F-192: a follow-in stacker running a loop round the building (casualty soak, CI only)
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd) (the clear tactic: `_tactic_clear`, a man's
+walk to his stack place) and [squad.gd](../../scripts/ai/squad.gd) `_tick_follow_in`. Found by
+Claude on `claude/ci-cleanup` (2026-10-22); left for the squad-AI work (`claude/ai-followups` is
+in `_tactic_clear` now).
+
+What happens: casualty's soak leads the squad through the compound's building ((0, -8) is on its
+route), so a follow-in clear stacks them at its door. On CI run 39740524497 (45da4fa8) Echo,
+"Stacking up" with his place at (5.3, -3.8), ran (5.6, 2.4) -> (7.8, -2.6) -> (12.0, -5.1) ->
+(14.0, -2.7) -> (14.0, 0.4) -> (12.8, 5.8) -> (10.1, 7.4) -> (6.2, 3.8) in 8 s, a loop round the
+building's east side and back, at a run, and the soak's stuck check (no more than 0.6 m from
+where he was 8 s before) took him for stuck. Locally the soak passes (R2382, R2402, R2435,
+R2436). A man standing at his stack place or waiting his turn to go in is no longer counted
+(the soak skips men where their op put them); this one hadn't got there.
+
+Suggested: watch a stacker's distance to his place (as `_reach_progress` does for a casualty):
+no closer for a few seconds means a new path, or his place in the stack handed to the next man.
+The test: casualty's soak.
+
+## F-193: base_zone's player down after the helicopter insertion (CI only)
+
+Location: [base_zone_test.gd](../../tests/base_zone_test.gd) (the walk-through deployment: flown in
+to the insertion LZ, walking home through the base zone). Found by Claude on `claude/ci-cleanup`
+(2026-10-22). The brief listed base_zone as an occasional red already.
+
+What happens: on CI run 39740524497 (45da4fa8) "flown in aboard a helicopter to its insertion LZ"
+failed with the player at (-2006, 0, 891), up=false, 25 s after the insertion drop; everything
+after it failed with him ("walking home through it": only a player standing inside an extraction
+point can confirm it; "back at the base zone, the deployment over"; the MIA recovery contract and
+the raid's standing). The same commit passed it twice locally (R2442, R2443), and the branch's
+three CI runs before passed it (39722065652, 39725520165, 39732150758). Why he was down isn't in
+the annotations.
+
+Suggested: shield the player for the insertion (Vitals.shielded, as the loop suite does: the
+fight isn't what this suite checks) or say in the check what put him down (his wounds and who
+hit him, Harm).
 
 ## Calls made for the Captain
 
