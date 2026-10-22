@@ -9,7 +9,9 @@ extends RefCounted
 ##   "failed", "voided", "lapsed", "aborted"), "advance" (paid at signing), "completion",
 ##   "bonuses": [{"text", "amount"}], "pay" (completion + bonuses), "clawback" (what a voided
 ##   contract gives back of its advance under its own term, ContractGen.clawback_amount:
-##   all, none, or the share of required objectives not done), "salvage_share", "objectives": [lines]};
+##   all, none, or the share of required objectives not done), "salvage_share", "objectives": [lines],
+##   and when an optional objective with a "withheld_share" wasn't done (an HVT kill's proof,
+##   missions 2) "withheld" (taken off the completion) and "withheld_for" (its text);
 ## - "civilians", "fines"; "rep": {faction: change}, "locals": change;
 ## - "salvage": {"share", "pool": [{"id", "count", "state", "value"}], "pool_value",
 ##   "budget", "picked": [pool indices], "spent"};
@@ -56,6 +58,12 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 		match outcome:
 			"completed":
 				line.completion = int(deal.get("completion", 0)) + int(c.get("raise", 0))
+				for o: Dictionary in mine:  # (missions 2: an HVT kill without its proof pays less)
+					if o.optional and o.state != Objectives.DONE and float(o.get("withheld_share", 0.0)) > 0.0:
+						var held := mini(roundi(pay_total * float(o.withheld_share)), int(line.completion))
+						line.completion -= held
+						line["withheld"] = int(line.get("withheld", 0)) + held
+						line["withheld_for"] = String(o.text)
 				for o: Dictionary in mine:
 					if o.optional and o.state == Objectives.DONE and float(o.get("bonus_share", 0.0)) > 0.0:
 						line.bonuses.append({"text": "Bonus: %s" % String(o.text).trim_prefix("Bonus: "), "amount": roundi(pay_total * float(o.bonus_share))})
@@ -227,6 +235,8 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 		out.append("%s - %s" % [c.title, String(c.outcome).to_upper()])
 		out.append("  Advance (paid at signing): $%s" % money(c.advance))
 		out.append("  Completion: $%s" % money(c.completion))
+		if int(c.get("withheld", 0)) > 0:
+			out.append("  Held back by the client (not done: %s): -$%s" % [String(c.get("withheld_for", "")).get_slice(" (", 0), money(c.withheld)])
 		for b: Dictionary in c.bonuses:
 			out.append("  %s: $%s" % [b.text, money(b.amount)])
 		if int(c.get("clawback", 0)) > 0:

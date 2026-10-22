@@ -29,8 +29,9 @@ extends Node
 ##   With no "voxels" in the site, or a box already under the threshold when it is first
 ##   read, the voxel check stays off and only the hook or a charge completes it (a world or
 ##   4B pass that restores a zone rebuilds the cache).
-## - Any kind with "time_limit_s" (hostage rescue, HVT capture): fails when the clock, started
-##   when the objective goes live, runs out; DELIVER_HVT and EXTRACT_ITEM show the minutes left.
+## - Any kind with "time_limit_s" (hostage rescue, HVT capture, HVT kill): fails when the clock,
+##   started when the objective goes live, runs out; DELIVER_HVT, KILL_HVT and EXTRACT_ITEM show
+##   the minutes left.
 ## In a world-scale zone a cache's voxels are its module's ("module_id": world_of).
 
 signal changed
@@ -63,8 +64,24 @@ const RESCUE_CREW := "rescue_crew"
 const RECON_SITE := "recon_site"
 const UNDETECTED := "undetected"
 const DESTROY_VEHICLES := "destroy_vehicles"
+## Missions 2 (2026-10-20; docs/missions.md):
+## - KILL_HVT: the HVT ("hvt", a person MissionScenario puts there with his guard detail) is
+##   dead (server_hvt_lost), or brought out (server_hvt_delivered, alive or not). His proof is
+##   an EXTRACT_ITEM with "proof" (his ID papers, "of_hvt"): optional, and its objective's
+##   "withheld_share" of the pay is held back when it isn't done (DebriefCalc); bringing him out
+##   is proof enough.
+## - DESTROY_WRECK (a crash site's bonus): a breaching charge goes off within "radius" of the
+##   wreck at "pos" (server_charge_blast).
+## - OVERWATCH: a friendly convoy drives "route" past the overwatch position "pos"; done when
+##   "need" of its trucks are through, failed when too many are lost (MissionScenario). Its
+##   bonuses are OVERWATCH objectives too: "bonus_only" (every truck through) and "held" (ours on
+##   the position until it's through).
+const KILL_HVT := "kill_hvt"
+const DESTROY_WRECK := "destroy_wreck"
+const OVERWATCH := "overwatch"
 const FIRE_TARGET := "fire_target"
-const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED, DESTROY_VEHICLES, FIRE_TARGET]
+const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED, DESTROY_VEHICLES,
+	KILL_HVT, DESTROY_WRECK, OVERWATCH, FIRE_TARGET]
 ## The breaching charge item that destroys a cache when placed on it.
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5
@@ -114,6 +131,11 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 					carried.append({"id": String(item), "intel_id": "%s:%s" % [site.hvt, String(item)]})
 				person["intel"] = carried
 				site["person"] = person
+			if t.has("items"):  # the template's own piece the HVT carries (an HVT kill's proof: his ID papers)
+				site["items"] = (t.items as Array).duplicate()
+				site.erase("tags")
+			if bool(t.get("proof", false)):
+				site["proof"] = true
 			if site.has("of_hvt"):
 				var of_id := hvt_id(String(MissionRegistry.site(module_type, String(site.of_hvt)).get("hvt", "")), uid)
 				site["intel_ids"] = (site.get("items", []) as Array).map(func(item: Variant) -> String: return "%s:%s" % [of_id, String(item)])
@@ -140,6 +162,8 @@ static func from_contract(contract: Dictionary, origin := Vector3.ZERO) -> Array
 			"text": t.get("text", ""), "state": ACTIVE, "optional": bool(t.get("optional", false)),
 			"bonus_share": float(t.get("bonus_share", 0.0)), "progress": "", "params": site, "pos": site_pos(site),
 		}
+		if t.has("withheld_share"):
+			obj["withheld_share"] = float(t.withheld_share)  # (missions 2: the pay held back without it, DebriefCalc)
 		out.append(obj)
 	for k in (contract.get("legs", []) as Array).size():
 		out.append_array(leg_objectives(contract, k, Vector3.ZERO, true))
@@ -398,6 +422,9 @@ func server_hvt_delivered(hvt_id: String, alive := true) -> void:
 	for o: Dictionary in active():
 		if o.kind == DELIVER_HVT and String(o.params.get("hvt", hvt_id)) == hvt_id:
 			server_set_state(o.oid, DONE if alive else FAILED)
+		elif o.kind == KILL_HVT and String(o.params.get("hvt", "")) == hvt_id:
+			server_set_state(o.oid, DONE, "brought out")  # the man himself, alive or dead: the kill and its proof
+			_proof_in_person(hvt_id)
 
 
 ## Host: an HVT died or got away for good.
@@ -406,6 +433,17 @@ func server_hvt_lost(hvt_id: String) -> void:
 	for o: Dictionary in active():
 		if o.kind == DELIVER_HVT and String(o.params.get("hvt", hvt_id)) == hvt_id:
 			server_set_state(o.oid, FAILED)
+		elif o.kind == KILL_HVT and String(o.params.get("hvt", "")) == hvt_id:
+			server_set_state(o.oid, DONE, "confirmed dead")
+
+
+## An HVT kill's proof (EXTRACT_ITEM "proof", a piece HVT `hvt_id` carries) is done when the man
+## himself is brought out.
+func _proof_in_person(hvt_id: String) -> void:
+	for o: Dictionary in active():
+		if o.kind == EXTRACT_ITEM and bool(o.params.get("proof", false)) \
+				and (o.params.get("intel_ids", []) as Array).any(func(id: Variant) -> bool: return String(id).begins_with(hvt_id + ":")):
+			server_set_state(o.oid, DONE, "brought him out")
 
 
 ## Host: a downed crew member was delivered (alive: out; dead: lost) or lost (died): RESCUE_CREW
@@ -480,6 +518,11 @@ func server_charge_blast(pos: Vector3) -> void:
 	var kill := MissionRegistry.setting_f("charge_kill_m", 1.0)
 	var level := CompoundLevel.current(self)
 	for o: Dictionary in active():
+		if o.kind == DESTROY_WRECK and here(o, level):
+			var at: Array = o.params.get("pos", [0, 0, 0])
+			if Vector2(pos.x - float(at[0]), pos.z - float(at[2])).length() <= float(o.params.get("radius", 6.0)):
+				server_set_state(o.oid, DONE, "wreck destroyed")
+			continue
 		if o.kind != DESTROY_CACHE or not here(o, level):
 			continue  # (a leg's cache in another zone, LZ-7)
 		var box := _box_of(o)
@@ -546,7 +589,7 @@ func _check_clock(o: Dictionary) -> void:
 	var left := time_left(o.oid)
 	if left <= 0.0:
 		server_set_state(o.oid, FAILED, "time ran out")
-	elif o.kind in [DELIVER_HVT, EXTRACT_ITEM]:
+	elif o.kind in [DELIVER_HVT, EXTRACT_ITEM, KILL_HVT]:
 		server_set_state(o.oid, ACTIVE, "%d min left" % ceili(left / 60.0))
 
 

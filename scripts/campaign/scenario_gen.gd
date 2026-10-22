@@ -14,6 +14,13 @@ const DEFEND := "defend"
 const RESCUE := "rescue"
 const RECON := "recon"
 const ESCORT := "escort"
+## Missions 2 (2026-10-20): a crash site and an overwatch (their own section at the end).
+const CRASH := "crash"
+const OVERWATCH := "overwatch"
+## A crash site's flight recorder and the crew's tags: any carried out counts (a two-handed
+## carry keeps no state; nothing else in a zone holds either: not for sale, no zone loot).
+const BLACK_BOX := "black_box"
+const CREW_TAGS := "crew_tags"
 ## The forward observer (fire support, 2026-10-20): ObserverMission.build makes its objectives.
 const OBSERVER := "observer"
 ## The convoy's cargo: a supply crate (carried in both hands; it sells as salvage). Any crate of
@@ -51,6 +58,10 @@ static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String,
 			out.objectives = _rescue(pick, def, module, half, knobs, target)
 		ESCORT:
 			out.objectives = _escort(pick, module, half, knobs, layout)
+		CRASH:
+			out.objectives = _crash(pick, module, half, knobs)
+		OVERWATCH:
+			out.objectives = _overwatch(pick, module, half, knobs)
 		OBSERVER:
 			out.objectives = ObserverMission.build(pick, module, half, knobs)
 		RECON:
@@ -251,3 +262,92 @@ static func _recon(pick: RandomNumberGenerator, def: Dictionary, options: Array,
 ## A rough grid reference ("E 120 N -40") for a position, for objective text.
 static func _grid(pos: Array) -> String:
 	return "%d, %d" % [roundi(float(pos[0]) / 10.0) * 10, roundi(float(pos[2]) / 10.0) * 10]
+
+
+# --- Missions 2 (2026-10-20): crash site, overwatch -----------------------------------------------
+
+## A downed aircraft (one of "wrecks", a wreck: VehicleLayer) in open ground "site_offset_m" from
+## the module, its crew lost. Required: carry its flight recorder (BLACK_BOX, heavy, two-handed)
+## out. Bonuses: the crew's ID tags (CREW_TAGS) out; the wreck denied (DESTROY_WRECK: a charge
+## within "deny_radius_m"). Waves converge on the site from "first_wave_s", the gaps shrinking
+## by "gap_step_s" a wave from "gap_s" to "gap_min_s" (the longer the squad stays, the faster
+## they come). The main objective's params hold the run's (MissionScenario "crash").
+static func _crash(pick: RandomNumberGenerator, module: Dictionary, half: float, knobs: Dictionary) -> Array:
+	var centre := Vector2(float((module.pos as Array)[0]), float((module.pos as Array)[1]))
+	var heading := pick.randf() * TAU
+	var site := _inside(centre, Vector2(cos(heading), sin(heading)), float(knobs.get("site_offset_m", 240.0)), half)
+	var wrecks: Array = knobs.get("wrecks", ["uh60"])
+	var model := String(wrecks[pick.randi() % wrecks.size()]) if not wrecks.is_empty() else "uh60"
+	var aircraft := String(VehicleSpecs.spec(model).get("name", "aircraft")) if VehicleSpecs.has_model(model) else "aircraft"
+	var tag := pick.randi() % 100000
+	var wave: Array = knobs.get("first_wave_s", [120, 210])
+	var params := {"scenario": CRASH, "pos": _v3(site), "items": [BLACK_BOX], "name": "flight recorder", "model": model, "aircraft": aircraft,
+		"yaw": snappedf(pick.randf() * TAU, 0.01), "box_uid": "crash_box_%d" % tag, "tags_uid": "crash_tags_%d" % tag,
+		"first_wave_s": snappedf(pick.randf_range(float(wave[0]), float(wave[1])), 15.0), "gap_s": float(knobs.get("gap_s", 150.0)),
+		"gap_min_s": float(knobs.get("gap_min_s", 75.0)), "gap_step_s": float(knobs.get("gap_step_s", 15.0)), "approach_m": float(knobs.get("approach_m", 260.0))}
+	return [
+		{"kind": Objectives.EXTRACT_ITEM, "site": "", "params": params,
+			"text": "Reach the downed %s at grid %s, recover its flight recorder and carry it out" % [aircraft, _grid(params.pos)]},
+		{"kind": Objectives.EXTRACT_ITEM, "site": "", "optional": true, "bonus_share": float(knobs.get("tags_bonus_share", 0.1)),
+			"params": {"items": [CREW_TAGS], "pos": _v3(site), "name": "crew's ID tags"}, "text": "Bonus: bring the crew's ID tags home"},
+		{"kind": Objectives.DESTROY_WRECK, "site": "", "optional": true, "bonus_share": float(knobs.get("deny_bonus_share", 0.15)),
+			"params": {"scenario": CRASH, "pos": _v3(site), "radius": float(knobs.get("deny_radius_m", 7.0)), "name": "%s wreck" % aircraft},
+			"text": "Bonus: deny the wreck: set a breaching charge on it"},
+	]
+
+
+## A friendly convoy ("vehicles" armoured trucks of "models", "crew" aboard each) drives a road
+## across the zone past the module (an enemy site, "road_offset_m" off it); "ambushes" teams of
+## "ambush_men" lie in wait "ambush_off_m" off the road on the enemy's side, between a third and
+## two thirds along. The overwatch position is "standoff_m" off the road's middle on the far side
+## (MissionScenario moves it onto the highest ground within "search_m" when the contract goes
+## live). The convoy sets out once someone of ours has been on the position ("radius_m") for
+## "set_s", at the latest "depart_s" after the deployment starts. Required: "need" trucks
+## through (all but one); bonuses: every truck through ("bonus_only"), ours on the position until
+## it's through ("held").
+static func _overwatch(pick: RandomNumberGenerator, module: Dictionary, half: float, knobs: Dictionary) -> Array:
+	var centre := Vector2(float((module.pos as Array)[0]), float((module.pos as Array)[1]))
+	var heading := pick.randf() * TAU
+	var dir := Vector2(cos(heading), sin(heading))
+	var side := dir.orthogonal() * (1.0 if pick.randf() < 0.5 else -1.0)
+	var keep := half - EDGE_KEEP_M
+	var clamp_in := func(p: Vector2) -> Vector2: return Vector2(clampf(p.x, -keep, keep), clampf(p.y, -keep, keep))
+	var mid: Vector2 = clamp_in.call(centre + side * float(knobs.get("road_offset_m", 110.0)))
+	var start := _inside(mid, -dir, 1400.0, half)
+	var finish := _inside(mid, dir, 1400.0, half)
+	var points: Array = [_v3(start)]
+	var n := maxi(floori(start.distance_to(finish) / 160.0), 2)
+	for i in range(1, n):
+		points.append(_v3(start.lerp(finish, float(i) / n) + side * sin(float(i) * 0.9) * 12.0))
+	points.append(_v3(finish))
+	var watch: Vector2 = clamp_in.call(mid + side * float(knobs.get("standoff_m", 300.0)))
+	var count := pick.randi_range(int(knobs.get("vehicles", [1, 2])[0]), int(knobs.get("vehicles", [1, 2])[1]))
+	var models: Array = knobs.get("models", ["matv"])
+	var trucks: Array = []
+	for i in count:
+		trucks.append(String(models[pick.randi() % models.size()]))
+	var teams := pick.randi_range(int(knobs.get("ambushes", [2, 3])[0]), int(knobs.get("ambushes", [2, 3])[1]))
+	var men: Array = knobs.get("ambush_men", [3, 4])
+	var ambushes: Array = []
+	for i in teams:
+		var along := lerpf(0.35, 0.65, float(i) / maxf(teams - 1, 1))
+		var at: Vector2 = clamp_in.call(start.lerp(finish, along) - side * float(knobs.get("ambush_off_m", 45.0)))
+		ambushes.append({"pos": _v3(at), "men": pick.randi_range(int(men[0]), int(men[1]))})
+	var need := maxi(count - 1, 1)
+	var params := {"scenario": OVERWATCH, "route": points, "pos": _v3(watch), "radius": float(knobs.get("radius_m", 30.0)), "search_m": float(knobs.get("search_m", 120.0)),
+		"set_s": float(knobs.get("set_s", 20.0)), "depart_s": float(knobs.get("depart_s", 600.0)), "trucks": trucks, "crew": int(knobs.get("crew", 2)),
+		"speed_kmh": float(knobs.get("speed_kmh", 24.0)), "ambushes": ambushes, "need": need, "name": "overwatch position"}
+	var out: Array = [{"kind": Objectives.OVERWATCH, "site": "", "params": params,
+		"text": "Overwatch: from the high ground at grid %s, cover the friendly convoy (%d truck%s) through the zone; at least %d must get through" % [_grid(params.pos), count, "" if count == 1 else "s", need]}]
+	if count > need:
+		var all := params.duplicate(true)
+		all["bonus_only"] = true
+		all["need"] = count
+		out.append({"kind": Objectives.OVERWATCH, "site": "", "optional": true, "bonus_share": float(knobs.get("all_bonus_share", 0.15)), "params": all,
+			"text": "Bonus: every truck through"})
+	var held := params.duplicate(true)
+	held["bonus_only"] = true
+	held["held"] = true
+	out.append({"kind": Objectives.OVERWATCH, "site": "", "optional": true, "bonus_share": float(knobs.get("held_bonus_share", 0.1)), "params": held,
+		"text": "Bonus: stay on the overwatch position until the convoy is through"})
+	return out

@@ -16,6 +16,8 @@ extends Control
 ##   <site> (<dir>, <distance>)". At the site, by kind: CLEAR_AREA "Clear the <site>" with
 ##   the hostiles left; DESTROY_CACHE "Destroy the <name>" (a charge set: "get clear");
 ##   DESTROY_VEHICLES (sabotage's vehicle park) "Put every vehicle ... out of action";
+##   missions 2's KILL_HVT "Kill <name>: ... take his ID papers off the body", DESTROY_WRECK "Set a
+##   breaching charge on the <wreck>", OVERWATCH "Hold the overwatch position and cover the convoy";
 ##   EXTRACT_ITEM "Find the <item> in the building", or for a piece an HVT carries "Search
 ##   <name> for the <item>"; DELIVER_HVT "Capture <name>: cuff them, take them to the LZ"
 ##   ("you need zip cuffs" without any), or for a hostage "Free <name>: have them follow you
@@ -245,7 +247,7 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 	var near := _flat(from, at) <= AT_SITE_M or (target.has("rect") and (target.rect as Rect2).grow(10.0).has_point(Vector2(from.x, from.z)))
 	if not near and String(o.kind) != Objectives.FIRE_TARGET:  # (a forward observer's target is called from afar)
 		var place := site if site != "" else String(target.label)
-		if String(o.kind) == Objectives.DELIVER_HVT:
+		if String(o.kind) in [Objectives.DELIVER_HVT, Objectives.KILL_HVT]:
 			return {"text": "Find %s at the %s (%s)" % [person_name(o), place, where_text(from, at)] if site != "" else
 				"Find %s (%s)" % [person_name(o), where_text(from, at)], "targets": [target]}
 		return {"text": "Head to the %s (%s)" % [place, where_text(from, at)], "targets": [target]}
@@ -285,6 +287,12 @@ static func _objective_step(o: Dictionary, all: Array, sit: Dictionary) -> Dicti
 			text = "Put every vehicle in the %s out of action: a charge on each%s" % [String(p.get("name", "vehicle park")), " (" + progress + ")" if progress != "" else ""]
 		Objectives.RECON_SITE:
 			text = "Observe the %s from within %d m%s" % [String(p.get("name", "site")), roundi(float(p.get("observe_m", 75.0))), " (" + progress + ")" if progress != "" else ""]
+		Objectives.KILL_HVT:
+			text = "Kill %s: he walks between the buildings with his guards; take his ID papers off the body" % person_name(o)
+		Objectives.DESTROY_WRECK:
+			text = "Set a breaching charge on the %s, then get clear" % String(p.get("name", "wreck"))
+		Objectives.OVERWATCH:
+			text = "Hold the %s and cover the convoy on the road%s" % [String(p.get("name", "overwatch position")), ": " + progress if progress != "" else ""]
 		Objectives.FIRE_TARGET:  # the forward observer (ObserverMission): only the guns' kill counts
 			text = "Call fire on the %s (Support > Fire support)%s" % [String(p.get("name", "target")), " (" + progress + ")" if progress != "" else ""]
 		_:
@@ -374,8 +382,12 @@ static func item_name(o: Dictionary) -> String:
 static func short_label(o: Dictionary, sit: Dictionary) -> String:
 	var label := ""
 	match String(o.get("kind", "")):
-		Objectives.DELIVER_HVT:
+		Objectives.DELIVER_HVT, Objectives.KILL_HVT:
 			label = person_name(o)
+		Objectives.DESTROY_WRECK:
+			label = String((o.get("params", {}) as Dictionary).get("name", "wreck"))
+		Objectives.OVERWATCH:
+			label = "overwatch position"
 		Objectives.EXTRACT_ITEM:
 			label = item_name(o)
 		Objectives.DESTROY_CACHE, Objectives.DESTROY_VEHICLES:
@@ -400,7 +412,7 @@ static func short_label(o: Dictionary, sit: Dictionary) -> String:
 ## The HVT whose person carries objective `o`'s item (an "of_hvt" piece), by name.
 static func _holder_of(o: Dictionary, all: Array) -> String:
 	for other: Dictionary in all:
-		if other.get("cid") == o.get("cid") and String(other.get("kind", "")) == Objectives.DELIVER_HVT:
+		if other.get("cid") == o.get("cid") and String(other.get("kind", "")) in [Objectives.DELIVER_HVT, Objectives.KILL_HVT]:
 			return person_name(other)
 	return ""
 
