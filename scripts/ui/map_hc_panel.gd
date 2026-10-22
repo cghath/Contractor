@@ -14,6 +14,9 @@ var _cards: VBoxContainer
 var _commander: Label
 var _take: Button
 var _net: Label
+var _go_row: HFlowContainer
+var _go_pick: OptionButton
+var _asks: VBoxContainer
 
 
 func _ready() -> void:
@@ -39,6 +42,16 @@ func _ready() -> void:
 			me._server_squad_command.rpc_id(1, "support:hc_dev_spawn", me.global_position, PackedStringArray()), "Dev tools: a hero squad of 4 beside you (not on the roster)")
 	dev.visible = DevTools.on() and multiplayer.is_server()
 	_box.add_child(dev)
+	_asks = VBoxContainer.new()
+	_box.add_child(_asks)
+	_go_pick = OptionButton.new()
+	for label: String in ["Next order: now", "Next order: on Alpha", "Next order: on Bravo", "Next order: on Charlie"]:
+		_go_pick.add_item(label)
+	_go_pick.tooltip_text = "Hold the next order until its go code (Attack and Support by fire move to their position and wait)"
+	_go_pick.item_selected.connect(func(i: int) -> void: MapCommandLayer.next_go = ["", "alpha", "bravo", "charlie"][i])
+	_box.add_child(_go_pick)
+	_go_row = HFlowContainer.new()
+	_box.add_child(_go_row)
 	_cards = VBoxContainer.new()
 	_cards.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	_box.add_child(_cards)
@@ -60,10 +73,30 @@ func show_command(hc: HighCommand) -> void:
 		c.queue_free()
 	for e: Dictionary in hc.view:
 		_cards.add_child(_card(e))
+	for c in _asks.get_children() + _go_row.get_children():
+		c.get_parent().remove_child(c)
+		c.queue_free()
+	if hc.is_commander():
+		for r: Dictionary in hc.requests:
+			var rid := int(r.id)
+			_asks.add_child(UiKit.text("%s: %s" % [r.callsign, r.text]))
+			_asks.add_child(UiKit.button_row([UiKit.button("Approve (Shift+Y)", func() -> void: _hc.request_answer(rid, true), "Let them do it"),
+				UiKit.button("Deny (Shift+N)", func() -> void: _hc.request_answer(rid, false), "They carry on with the order")]))
+		for code: String in ["alpha", "bravo", "charlie"]:
+			var n := _waiting(hc, code)
+			var b := UiKit.button("Go %s (%d)" % [code.capitalize(), n], func() -> void: _hc.request_go(code), "Every squad waiting on %s goes now" % code.capitalize())
+			b.disabled = n == 0
+			_go_row.add_child(b)
+	_go_pick.visible = hc.is_commander()
 	var lines := PackedStringArray()
 	for line: Dictionary in hc.net_log.slice(maxi(hc.net_log.size() - NET_LINES, 0)):
 		lines.append(String(line.text))
 	_net.text = "\n".join(lines) if not lines.is_empty() else "(quiet)"
+
+
+## Orders waiting on go code `code`, from the view (every peer).
+static func _waiting(hc: HighCommand, code: String) -> int:
+	return hc.view.filter(func(e: Dictionary) -> bool: return String(e.get("order", {}).get("go", "")) == code and String(e.get("order", {}).get("state", "")) in ["waiting", "set"]).size()
 
 
 func _card(e: Dictionary) -> Control:

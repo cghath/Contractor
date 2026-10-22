@@ -11,10 +11,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
-### High command (combined arms, phases C1 and C2)
+### High command (combined arms, phases C1 to C3)
 
-> **Where this lane is:** C1 and C2 done on claude/ca-c-high-command. Next: C3 (Phase 2 orders:
-> Attack, Support by fire, Bound, Fall back, Defend frontage, go codes, requests, CE aborts).
+> **Where this lane is:** C1, C2 and C3 done on claude/ca-c-high-command. Next: C4 (the map-order
+> HUD: select, order, place, face, confirm, undo; gun placement with the cone of fire).
+
+#### Added (C3: Phase 2)
+- **Real high command orders.** Attack (to an attack position, then in; "objective secure" once
+  it's quiet; it falls back if it's spent), Support by fire (never with a friendly in the line of
+  fire; fire shifts deeper or lifts when friendlies close on the target: "check fire, friendlies
+  on target"), Bound, Fall back, and Defend a frontage (a sector per buddy pair).
+- **Go codes.** Give an order "on Alpha" (the map panel's "Next order" picker) and it waits; Attack
+  and Support by fire move to their position first ("Hawk 2, set. Ready on Alpha"). The panel's
+  Go buttons show how many are waiting; H-hour orders go with the deployment.
+- **Requests.** A squad past its casualty limit asks to break contact. Approve or deny on the map
+  panel or with Shift+Y / Shift+N; unanswered after 20 s, the hero decides.
+- A squad that loses its leader goes quiet for a moment until the new one has the radio.
+- A HUD line while hero squads are out: "HAWK 2 ● green Set | VIPER 3 ● amber Contact", with the
+  latest request and its keys under it.
 
 #### Added (C2: Phase 1)
 - **Two high command squads from the start.** Every new campaign has Hawk 2 and Viper 3 on the

@@ -15,9 +15,12 @@ const ALLIED := Color(0.45, 0.85, 0.5)
 const CE_COLOURS := {"green": Color(0.3, 0.85, 0.35), "amber": Color(1.0, 0.75, 0.2), "red": Color(0.95, 0.25, 0.2)}
 const FAILED := Color(0.95, 0.3, 0.25)
 ## The right-click orders on a hero squad (menu text, verb, needs the point).
-const ORDERS := [["Move here", "move", true], ["Defend here", "defend", true], ["Regroup here", "regroup", true],
-	["Extract here", "extract", true], ["Hold where it is", "hold", false], ["Follow me", "follow", false],
-	["Support me", "support", false], ["Report", "report", false], ["Cancel its order", "cancel", false]]
+const ORDERS := [["Move here", "move", true], ["Defend here", "defend", true], ["Attack here", "attack", true],
+	["Support by fire on here (from where it is)", "sbf", true], ["Bound here", "bound", true], ["Fall back here", "fall_back", true],
+	["Regroup here", "regroup", true], ["Extract here", "extract", true], ["Hold where it is", "hold", false],
+	["Follow me", "follow", false], ["Support me", "support", false], ["Report", "report", false], ["Cancel its order", "cancel", false]]
+## The go code the next order waits on ("" none; the HC panel sets it, C4's order bar too).
+static var next_go := ""
 
 
 ## Draws every high command group on `view` (MapView._draw).
@@ -83,7 +86,13 @@ static func send(hc: HighCommand, id: String, verb: String, at: Vector2, append 
 		hc.request_cancel(id, 0)
 		return
 	var pts: Array = [[at.x, at.y]] if at.is_finite() else []
+	if verb == "sbf" and at.is_finite():
+		var e := hc.status(id)
+		var p: Array = e.get("pos", [at.x, at.y])
+		pts = [[float(p[0]), float(p[1])], [at.x, at.y]]  # from where it is, onto the spot
 	var o := HcOrder.make(id, verb, pts)
+	if next_go != "" and verb not in ["cancel", "report", "posture"]:
+		o.go = next_go
 	if facing.length() > 0.01:
 		o.facing = [facing.x, facing.y]
 	o.id = -1  # the host numbers it

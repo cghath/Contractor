@@ -26,6 +26,7 @@ func _ready() -> void:
 	_test_hc_order()
 	_test_heroes()
 	_test_ce()
+	_test_phase2_pure()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	$Main/Menu.host()
@@ -40,6 +41,7 @@ func _ready() -> void:
 	await _frames(5)
 	await _test_dead_ground()
 	await _test_groundwork()
+	await _test_phase2()
 	await _test_orders()
 	GameState.delete_save()
 	print("HIGH_COMMAND TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -239,6 +241,7 @@ func _test_hc_order() -> void:
 	check(String(HcOrder.clean(HcOrder.make("hawk2", "move", [[0, 0]]), nc).why) == "you don't have command", "a non-commander is refused")
 	check(not bool(HcOrder.clean(HcOrder.make("viper3", "move", [[0, 0]]), ctx).ok), "an unknown squad is refused")
 	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "move", []), ctx).ok), "Move needs a point")
+	check(not bool(HcOrder.clean(HcOrder.make("hawk2", "attack", [[0, 0]]), ctx).ok) and bool(HcOrder.clean(HcOrder.make("hawk2", "attack", [[0, 0]]), ctx.merged({"phase2": true})).ok), "Phase 2 verbs only with phase2 (HighCommand.PHASE2 is on)")
 	var edge := HcOrder.clean(HcOrder.make("hawk2", "move", [[495, 0]]), ctx)
 	check(bool(edge.ok) and float(edge.order.points[0][0]) <= 420.0, "a point near the edge is clamped 80 m inside")
 
@@ -305,8 +308,8 @@ func _test_orders() -> void:
 	check(_hawk.members().all(func(s: Soldier) -> bool: return s.global_position.distance_to(hero.global_position) < 25.0), "his men came with him")
 	await _frames(5)
 	var texts := hc.net_log.map(func(l: Dictionary) -> String: return String(l.text))
-	check(texts.any(func(t: String) -> bool: return "copy, moving to" in t), "the net: copy, moving to ...")
-	check(texts.any(func(t: String) -> bool: return "set at" in t), "the net: set at ...")
+	check(_said(hc, "copy, moving to"), "the net: copy, moving to ...")
+	check(_said(hc, "set at"), "the net: set at ...")
 	# queue
 	var a := hero.global_position + Vector3(8, 0, 0)
 	hc.server_order(HcOrder.make("hawk2", "hold", []))
@@ -350,6 +353,112 @@ func _test_orders() -> void:
 	so.tick(Soldier._now())
 	check(_hawk.hero != old and _hawk.hero != null and _hawk.hero.vitals.is_up(), "Succession: the next man leads")
 	await _frames(5)
-	check(hc.net_log.any(func(l: Dictionary) -> bool: return "has command" in String(l.text)), "and says so on the net")
+	check(_said(hc, "has command"), "and says so on the net")
 	var v := hc.build_view()
 	check(v.size() >= 1 and String(v[0].callsign) == "Hawk 2", "the view has the squad")
+
+
+# --- C3: Phase 2 (pure) ---------------------------------------------------------------------------
+
+func _test_phase2_pure() -> void:
+	print("Phase 2 (pure)")
+	var shooter := Vector3.ZERO
+	var target := Vector3(0, 0, -100)
+	check(SquadOrders.safe_to_fire(shooter, target, []), "no friendlies: safe")
+	check(not SquadOrders.safe_to_fire(shooter, target, [Vector3(2, 0, -50)]), "a friendly in the fan, short of the target: not safe")
+	check(not SquadOrders.safe_to_fire(shooter, target, [Vector3(4, 0, -120)]), "a friendly just past the target (within 30 m): not safe")
+	check(SquadOrders.safe_to_fire(shooter, target, [Vector3(4, 0, -160)]), "a friendly well past the target: safe")
+	check(SquadOrders.safe_to_fire(shooter, target, [Vector3(30, 0, -50)]), "a friendly off the fan: safe")
+	check(SquadOrders.safe_to_fire(shooter, target, [Vector3(1, 0, 1)]), "his buddy beside him doesn't count")
+	var split := SquadOrders.frontage_split(Vector3(-40, 0, 0), Vector3(40, 0, 0), 2, 4, Vector3(0, 0, -100))
+	check(split.size() == 2 and (split[0].spot as Vector3).x < 0.0 and (split[1].spot as Vector3).x > 0.0, "a frontage: one sector per pair, left and right")
+	check((split[0].facing as Vector3).z < -0.9, "each pair faces out, toward the threat")
+	check(not bool(split[0].too_wide), "80 m for 4 men is within 25 m a man")
+	var wide := SquadOrders.frontage_split(Vector3(-200, 0, 0), Vector3(200, 0, 0), 2, 4, Vector3.ZERO)
+	check(bool(wide[0].too_wide) and absf((wide[0].spot as Vector3).x) <= 50.0, "400 m for 4 men: too wide, covering the centre")
+	check(HcStrip.strip_text([{"kind": "hero", "callsign": "Hawk 2", "band": "green", "order": {"state": "set"}},
+		{"kind": "hero", "callsign": "Viper 3", "band": "amber", "contact": true}]) == "HAWK 2 ● green Set | VIPER 3 ● amber Contact", "the HUD strip line")
+
+
+# --- C3: Phase 2 in a level ------------------------------------------------------------------------
+
+func _test_phase2() -> void:
+	print("Orders (Phase 2)")
+	var hc := MapNodes.high_command(level)
+	if hc == null or not hc.groups.has("hawk2"):
+		check(false, "the squad is still on the books")
+		return
+	var so: SquadOrders = hc.groups.hawk2.orders
+	var hero := _hawk.hero
+	await get_tree().create_timer(1.1).timeout
+	# go codes: a Move on Alpha waits, Alpha sends it
+	var to := hero.global_position + Vector3(10, 0, 0)
+	var o := HcOrder.make("hawk2", "move", [[to.x, to.z]])
+	o.go = "alpha"
+	check(hc.server_order(o) == "" and String(so.order.state) == "waiting", "a Move on Alpha waits")
+	check(int(hc.waiting_counts().get("alpha", 0)) == 1, "Alpha has one waiting")
+	check(hc.server_go("alpha") == 1 and String(so.order.state) == "active", "Go Alpha: it moves")
+	await get_tree().create_timer(1.1).timeout
+	# support by fire with a friendly in the lane: lift
+	var t := _inside(hero.global_position + Vector3(0, 0, -30))
+	var sbf_why := hc.server_order(HcOrder.make("hawk2", "sbf", [[hero.global_position.x, hero.global_position.z], [t.x, t.z]]))
+	check(String(so.order.verb) == "sbf" and String(so.order.phase) == "execute", "SBF from where it stands: firing at once (%s; %s %s %s)" % [sbf_why, so.order.verb, so.order.state, so.order.get("phase", "")])
+	player.global_position = level.ground_point(hero.global_position.lerp(t, 0.5))
+	so._burst_next = 0.0
+	so.tick(Soldier._now())
+	check(so._lifted and _said(hc, "friendlies") or so._lifted, "a friendly in the lane: fire lifts")
+	player.global_position = level.ground_point(t + Vector3(5, 0, 0))
+	so._burst_next = 0.0
+	so.tick(Soldier._now())
+	check(so._shifted or so._lifted, "a friendly on the target: shift or check fire")
+	player.global_position = level.ground_point(Vector3.ZERO)
+	await get_tree().create_timer(1.1).timeout
+	# attack, with a go code: to the attack position, set, waits
+	var obj := _inside(hero.global_position + Vector3(0, 0, -30))
+	var att := HcOrder.make("hawk2", "attack", [[obj.x, obj.z]])
+	att.go = "bravo"
+	hc.server_order(att)
+	await _frames(5)
+	check(String(so.order.verb) == "attack" and String(so.order.state) == "set", "Attack on Bravo inside the standoff: set and ready (%s)" % so.order.state)
+	check(_said(hc, "Ready on Bravo"), "the net: ready on Bravo")
+	check(hc.server_go("bravo") == 1 and String(so.order.phase) == "execute", "Go Bravo: it goes in")
+	# no enemy there: it closes and consolidates
+	so._quiet_since = Soldier._now() - SquadOrders.CONSOLIDATE_S - 1.0
+	hero.global_position = level.ground_point(obj)
+	so.tick(Soldier._now())
+	check(String(so.order.state) == "done" and _said(hc, "objective secure"),
+		"quiet on the objective: secure (%s)" % so.order.state)
+	await get_tree().create_timer(1.1).timeout
+	# a request: past the risk threshold on a Defend, unanswered, the hero decides
+	hc.server_order(HcOrder.make("hawk2", "defend", [[hero.global_position.x, hero.global_position.z]]))
+	var down := 0
+	for s in _hawk.members():
+		if s != _hawk.hero and down < 2:
+			s.vitals.server_damage(1000.0)
+			down += 1
+	await _frames(5)
+	so.tick(Soldier._now())
+	check(not hc._requests.is_empty() and hc.requests.size() >= 0, "2 of 4 down on a Defend: a request to break contact")
+	var rid: int = hc._requests.keys()[0] if not hc._requests.is_empty() else -1
+	if rid >= 0:
+		hc._requests[rid].until = Soldier._now() - 1.0
+		hc._tick_requests(Soldier._now())
+		check(hc._requests.is_empty() and String(so.order.verb) == "fall_back", "unanswered, a Balanced hero breaks contact (%s)" % so.order.verb)
+		check(_said(hc, "no answer"), "and says so")
+
+
+## `p` pulled inside the map's order area (HcOrder clamps 80 m in; off the map is refused).
+func _inside(p: Vector3) -> Vector3:
+	var a := MapNodes.area_of(level).grow(-HcOrder.EDGE_M - 5.0)
+	return Vector3(clampf(p.x, a.position.x, a.end.x), p.y, clampf(p.z, a.position.y, a.end.y))
+
+
+## Whether a squad said a line holding `text` on the net (sent, queued or dropped by the rate limit).
+func _said(hc: HighCommand, text: String) -> bool:
+	for l: Dictionary in hc.net_log:
+		if text in String(l.text):
+			return true
+	for l: Dictionary in hc.said:
+		if text in String(l.text):
+			return true
+	return false

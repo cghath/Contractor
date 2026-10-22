@@ -72,6 +72,10 @@ const KEYS := {
 ## PlayerInput checks these first.
 const SHIFT_KEYS := {
 	&"quick_treat": KEY_H,  # treat yourself with the next item you carry (Soldier._server_use_medical)
+	# High command (combined_arms.md 5.1 question 13): answer the latest request from a squad
+	# (HighCommand.request_answer). Y and N alone are tag_enemy and objectives_next, so Shift.
+	&"hc_approve": KEY_Y,
+	&"hc_deny": KEY_N,
 }
 const MOUSE := {
 	&"fire": MOUSE_BUTTON_LEFT,
@@ -141,7 +145,7 @@ const PAD_WHEEL := [
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
-const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order"]
+const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny"]  # (requests: the map panel's buttons on a pad)
 
 
 func _enter_tree() -> void:

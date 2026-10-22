@@ -11,14 +11,17 @@ extends Node
 ##  (after NET_DELAY_S, as intel markers too), the commander token, and at the deployment's
 ##  start the company's detachments (BaseHub.server_spawn_detachment).
 ##  Clients: the replicated view (2 Hz), the orders and the net log; they never run SquadOrders.
-## Phase 1 is C2; Phase 2 (C3) adds verbs through start_verb / tick_verb and go codes.
+## Phase 1 is C2; Phase 2 (C3): the Phase 2 verbs (SquadOrders), go codes (server_go), requests
+## to the commander with a timeout (server_request, hc_approve / hc_deny), going dark.
 
 signal changed
 signal net_line(line: Dictionary)
 
 const NODE_NAME := "HighCommand"
 ## Phase 2 verbs (C3) accepted.
-const PHASE2 := false
+const PHASE2 := true
+## A request to the commander (break contact) waits this long, then the hero decides (4.2).
+const REQUEST_S := 20.0
 const THINK_S := 0.5
 const VIEW_S := 0.5
 ## The net (high_command.md 6): one line a squad every NET_GAP_S, a queue of NET_QUEUE, the last
@@ -50,6 +53,8 @@ var commander := 1
 var view: Array = []
 var orders := {}
 var net_log: Array = []
+## Host: every line the squads said, before rate limiting (the session log, tests).
+var said: Array = []
 ## Last refusal or message for this peer (tests, the panel).
 var last_message := ""
 
@@ -60,6 +65,11 @@ var _net_queue: Array = []  # [{"prio", "line"}]
 var _shares: Array = []  # [{"at", "from": id, "cluster"}]
 var _rate := {}  # peer -> [times]
 var _dispatching := false
+## Host: pending requests: id -> {"id", "squad", "kind", "text", "until", "answer": Callable, "default": bool}.
+var _requests := {}
+var _request_id := 1
+## Every peer: the pending requests [{"id", "squad", "callsign", "text", "left"}] (the HUD and the panel).
+var requests: Array = []
 
 
 static func of(from: Node) -> HighCommand:
@@ -137,6 +147,7 @@ func server_register(sq: Squad, did := "") -> void:
 
 ## Host, the briefing's start: the deployment's detachments come in beside the insertion.
 func _on_deployment_started(plan: Dictionary) -> void:
+	server_go.call_deferred("hhour")  # H-hour orders start with the deployment
 	if not BaseHub.campaign_running or not BaseHub.deployment_running():
 		return
 	var dep := RosterDeployment.active(BaseHub.roster())
@@ -180,6 +191,100 @@ func request_cancel(squad_id: String, id := 0) -> void:
 
 func request_command() -> void:
 	_server_take_command.rpc_id(1)
+
+
+func request_go(code: String) -> void:
+	_server_go.rpc_id(1, code)
+
+
+func request_answer(id: int, yes: bool) -> void:
+	_server_answer.rpc_id(1, id, yes)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_go(code: String) -> void:
+	if multiplayer.is_server():
+		var peer := multiplayer.get_remote_sender_id()
+		if (peer if peer != 0 else 1) == commander:
+			server_go(code)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_answer(id: int, yes: bool) -> void:
+	if multiplayer.is_server():
+		var peer := multiplayer.get_remote_sender_id()
+		if (peer if peer != 0 else 1) == commander:
+			server_answer(id, yes)
+
+
+## Host: go code `code` (alpha, bravo, charlie, hhour): every squad waiting on it goes. Returns how many.
+func server_go(code: String) -> int:
+	var n := 0
+	for id: String in groups:
+		var so: SquadOrders = groups[id].orders
+		if so and so.go(code):
+			n += 1
+	radio_group("", "set", "%s, go: %d squad%s" % [code.capitalize(), n, "" if n == 1 else "s"])
+	return n
+
+
+## Host: how many orders wait on each go code {code: n} (the panel's go buttons).
+func waiting_counts() -> Dictionary:
+	var out := {}
+	for id: String in groups:
+		var so: SquadOrders = groups[id].orders
+		if so and not so.order.is_empty() and String(so.order.get("go", "")) != "" and String(so.order.state) in ["waiting", "set"]:
+			out[String(so.order.go)] = int(out.get(String(so.order.go), 0)) + 1
+	return out
+
+
+## Host (SquadOrders): `so`'s hero asks the commander `text` (kind "break_contact"); `answer`
+## gets yes or no, from the commander or, after REQUEST_S, `default_yes` (the hero decides).
+func server_request(so: SquadOrders, kind: String, text: String, answer: Callable, default_yes: bool) -> int:
+	var id := _request_id
+	_request_id += 1
+	var sid := String(so.squad.hc_id)
+	_requests[id] = {"id": id, "squad": sid, "kind": kind, "text": text, "until": Soldier._now() + REQUEST_S, "answer": answer, "default": default_yes}
+	so.radio("request", text)
+	_send_requests()
+	return id
+
+
+## Host: answers request `id`. Returns whether it was still pending.
+func server_answer(id: int, yes: bool, by_timeout := false) -> bool:
+	var r: Dictionary = _requests.get(id, {})
+	if r.is_empty():
+		return false
+	_requests.erase(id)
+	if by_timeout:
+		radio_group(String(r.squad), "request", "no answer, %s" % ("breaking contact" if bool(r.default) else "holding on"))
+	else:
+		radio_group(String(r.squad), "copy", "copy, %s" % ("approved" if yes else "denied"))
+	(r.answer as Callable).call(yes)
+	_send_requests()
+	return true
+
+
+func _tick_requests(now: float) -> void:
+	for id: int in _requests.keys():
+		if now >= float(_requests[id].until):
+			server_answer(id, bool(_requests[id].default), true)
+
+
+func _send_requests() -> void:
+	var out: Array = []
+	for r: Dictionary in _requests.values():
+		out.append({"id": r.id, "squad": r.squad, "callsign": String(groups.get(String(r.squad), {}).get("callsign", r.squad)), "text": r.text, "until_in": float(r.until) - Soldier._now()})
+	if multiplayer.has_multiplayer_peer():
+		_client_requests.rpc(out)
+
+
+@rpc("authority", "call_local", "reliable")
+func _client_requests(list: Array) -> void:
+	requests = list
+	for r: Dictionary in requests:
+		r["until"] = Soldier._now() + float(r.until_in)
+	changed.emit()
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -277,17 +382,6 @@ func order_changed(o: Dictionary) -> void:
 	orders[int(o.id)] = o.duplicate(true)
 	_client_order.rpc(o)
 	_view_left = 0.0
-
-
-## Phase 2 hooks (C3 overrides through these): an unknown verb fails cleanly.
-func start_verb(so: SquadOrders, o: Dictionary) -> void:
-	so.order.state = "failed"
-	so.order.why = "can't do %s yet" % String(o.verb)
-	order_changed(so.order)
-
-
-func tick_verb(_so: SquadOrders, _now: float) -> void:
-	pass
 
 
 # --- Allied elements onto HcOrder (combined_arms.md 5.1) -----------------------------------------
@@ -400,6 +494,9 @@ func radio_group(id: String, kind: String, text: String, pos: Variant = null) ->
 	if pos is Vector3:
 		line["pos"] = [(pos as Vector3).x, (pos as Vector3).z]
 	SessionLog.note("[hc] %s" % line.text)
+	said.append(line)  # (host: every line, before the rate limit drops any)
+	if said.size() > NET_LOG:
+		said.pop_front()
 	var now := Soldier._now()
 	if now < float(_net_next.get(id, -INF)) and kind not in ["copy", "casualty", "succession"]:
 		_net_queue.append({"prio": int(PRIORITY.get(kind, 1)), "line": line})
@@ -472,6 +569,7 @@ func _physics_process(delta: float) -> void:
 				(g.orders as SquadOrders).tick(now)
 		_tick_allied(now)
 		_tick_shares(now)
+		_tick_requests(now)
 		_flush_net(now)
 	_view_left -= delta
 	if _view_left <= 0.0:
@@ -496,11 +594,12 @@ func build_view() -> Array:
 		var so: SquadOrders = g.orders
 		var o: Dictionary = so.order if so else g.get("order", {})
 		var lead: Soldier = sq.hero if sq.hero and is_instance_valid(sq.hero) else (men[0] if not men.is_empty() else null)
+		var dark := so != null and so.is_dark()
 		var at := lead.global_position if lead else _centre(sq)
 		var ce := so.ce() if so else 1.0
 		out.append({"id": id, "kind": g.kind, "callsign": g.callsign, "hero": lead.person_name if lead and lead.person_name != "" else "",
 			"up": up, "total": men.size(), "ce": snappedf(ce, 0.01), "band": SquadOrders.ce_band(ce), "pos": [snappedf(at.x, 0.1), snappedf(at.z, 0.1)],
-			"heading": snappedf(lead.rotation.y, 0.01) if lead else 0.0, "contact": sq.is_engaged(),
+			"heading": snappedf(lead.rotation.y, 0.01) if lead else 0.0, "contact": sq.is_engaged(), "dark": dark,
 			"order": {"id": int(o.get("id", 0)), "verb": String(o.get("verb", "")), "points": o.get("points", []), "state": String(o.get("state", "")),
 				"go": String(o.get("go", "")), "why": String(o.get("why", ""))} if not o.is_empty() else {},
 			"queue": so.queue.size() if so else 0, "last": so.last_verb if so else "", "men": men.map(func(s: Soldier) -> Array: return [snappedf(s.global_position.x, 0.1), snappedf(s.global_position.z, 0.1)])})

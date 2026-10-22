@@ -4,9 +4,12 @@ extends RefCounted
 ## queue, compiled onto the Squad orders that already work, always with `from` = the hero. Host
 ## only, ticked by HighCommand every THINK_S. SquadTactics still fights every contact.
 ##
-## Phase 1 (C2): move, hold, defend, follow / support (FollowBrain), regroup, extract, posture,
-## report; ProgressWatch for "held up" / "unable"; succession; contact, man-down and sitrep
-## reports. Phase 2 (C3) adds its own handlers here.
+## Phase 1 (C2): move (a route of legs), hold, defend, follow / support (FollowBrain), regroup,
+## extract, posture, report; ProgressWatch for "held up" / "unable"; succession; contact,
+## man-down and sitrep reports.
+## Phase 2 (C3): attack (approach, set, assault, consolidate, commander's intent, CE abort),
+## support by fire (safe_to_fire, danger close: shift or lift), bound, fall back, defend a
+## frontage (a sector per buddy pair), go codes, risk and the break-contact request, going dark.
 ##
 ## The hero leads through the existing MOVE order to himself: his men keep FOLLOW on him (the
 ## squad's leader), so they walk in formation behind him and fight as they do for a player.
@@ -32,6 +35,31 @@ const CONTACT_GAP_M := 40.0
 ## CE bands (5.2): GREEN >= 0.7, AMBER >= 0.45, else RED.
 const CE_GREEN := 0.7
 const CE_AMBER := 0.45
+## Attack (Phase 2): the attack position this far short of the objective along the approach;
+## the objective is secure when no known enemy is within OBJ_RADIUS_M of it for CONSOLIDATE_S;
+## a cluster within OBJ_DRIFT_M re-aims it (commander's intent); ATTACK_MAX_S to take it.
+const ATTACK_STANDOFF_M := 120.0
+const OBJ_RADIUS_M := 40.0
+const CONSOLIDATE_S := 20.0
+const OBJ_DRIFT_M := 60.0
+const ATTACK_MAX_S := 300.0
+## Support by fire: a burst order every SBF_BURST_S while it's safe; the target's quiet for
+## SBF_IDLE_S and it's done. safe_to_fire's fan: SAFE_FAN_DEG either side, out to the target +
+## SAFE_PAST_M; a friendly within DANGER_CLOSE_M of the target shifts fire SHIFT_M deeper or lifts.
+const SBF_BURST_S := 6.0
+const SBF_IDLE_S := 60.0
+const SAFE_FAN_DEG := 5.0
+const SAFE_PAST_M := 30.0
+const DANGER_CLOSE_M := 35.0
+const SHIFT_M := 40.0
+## Defend frontage: 15-25 m a man; wider covers the centre.
+const FRONTAGE_PER_MAN_M := 25.0
+## Risk (4.1): past this share down, the hero asks to break contact (Careful also at the first
+## urgent casualty).
+const RISK_DOWN := {"careful": 0.25, "balanced": 0.35, "press": 0.5}
+## After a succession the squad is dark (no reports, no shared contacts) until the new leader
+## has the radio.
+const DARK_S := 15.0
 
 var squad: Squad
 var hc: Node  # HighCommand
@@ -50,6 +78,18 @@ var _follow_next := 0.0
 var _sitrep_at := 0.0
 var _held_said := false
 var _down := {}  # instance id -> true: men we've reported down
+var dark_until := -INF
+var _target := Vector3.INF  # attack's objective / SBF's target
+var _attack_pos := Vector3.INF
+var _quiet_since := -INF
+var _exec_at := -INF
+var _burst_next := 0.0
+var _lifted := false
+var _shifted := false
+var _asked := false  # the break-contact request went out for this order
+var _rally := Vector3.INF
+var _leg := 0
+var _spots: Array = []  # frontage: [{"names", "spot", "facing"}]
 var _contacts: Array = []  # [{"pos", "at"}]: reported contacts
 
 
@@ -120,17 +160,24 @@ func tick(now: float) -> void:
 			radio("sitrep", sitrep())
 		return
 	if String(order.state) == "waiting":
-		return  # held for a go code (C3)
+		return  # held for a go code
 	var engaged := squad.is_engaged() or bool(_assess().get("contact", false))
 	if engaged:
 		_engaged_until = now + RESUME_S
+	_check_risk()
+	if HcOrder.ended(order):
+		return
 	match String(order.verb):
-		"move", "defend", "regroup", "extract":
+		"move", "defend", "regroup", "extract", "bound", "fall_back":
 			_tick_route(now, h, engaged)
 		"follow", "support":
 			_tick_follow(now, h, engaged)
-		_:
-			hc.call(&"tick_verb", self, now)  # Phase 2 verbs (C3)
+		"attack":
+			_tick_attack(now, h, engaged)
+		"sbf":
+			_tick_sbf(now, h)
+		"defend_frontage":
+			_tick_frontage(now)
 
 
 # --- Starting orders ----------------------------------------------------------------------------
@@ -144,10 +191,20 @@ func _start(o: Dictionary) -> void:
 		last_posture = (o.posture as Dictionary).duplicate()
 	_held_said = false
 	_paused = false
+	_asked = false
+	_lifted = false
+	_shifted = false
+	_leg = 0
 	watch.reset(Soldier._now())
 	var h := hero()
-	var p := _point3()
+	_rally = h.global_position if h else Vector3.INF
+	var p := _point3(0)
 	_goal = p
+	if String(o.get("go", "")) != "" and String(o.verb) not in ["attack", "sbf", "hold", "posture", "report"]:
+		order.state = "waiting"  # held until the go code (Phase 2): nothing moves yet
+		radio("copy", "copy, %s on %s" % [HcOrder.verb_text(String(o.verb)), String(o.go).capitalize()])
+		hc.call(&"order_changed", order)
+		return
 	match String(o.verb):
 		"move":
 			_apply_posture(o.get("posture", {}))
@@ -182,9 +239,39 @@ func _start(o: Dictionary) -> void:
 			_end("done", "")
 			radio("sitrep", sitrep())
 			_next()
+		"bound":
+			if h:
+				squad.order_bound(h, _ground(p), _names(men()))
+			radio("copy", "copy, bounding to %s" % grid(p))
+		"fall_back":
+			if h:
+				squad.order_fall_back(h, _ground(p), _names(men()))
+			radio("copy", "copy, falling back to %s" % grid(p))
+		"attack":
+			_start_attack(h, p)
+		"sbf":
+			_start_sbf(h, p)
+		"defend_frontage":
+			_start_frontage(h)
 		_:
-			hc.call(&"start_verb", self, o)
+			_end("failed", "can't do %s" % String(o.verb))
 	hc.call(&"order_changed", order)
+
+
+## Host (HighCommand.server_go): go code `code` was given. A waiting order starts; an attack or
+## support by fire set at its position goes in. Returns whether this squad went.
+func go(code: String) -> bool:
+	if order.is_empty() or HcOrder.ended(order) or String(order.get("go", "")) != code:
+		return false
+	if String(order.state) == "waiting":
+		order.go = ""
+		_start(order)
+		return true
+	if String(order.state) == "set" and String(order.verb) in ["attack", "sbf"]:
+		order.go = ""
+		_execute()
+		return true
+	return false
 
 
 func _next() -> void:
@@ -215,7 +302,7 @@ func _tick_route(now: float, h: Soldier, engaged: bool) -> void:
 		_lead_to(_goal)
 	if _paused:
 		return
-	if String(order.state) == "set":
+	if String(order.state) == "set" or String(order.get("phase", "")) in ["execute", "consolidate"]:
 		return
 	var who: Array[Soldier] = up_men()
 	match String(order.verb):
@@ -241,30 +328,50 @@ func _tick_route(now: float, h: Soldier, engaged: bool) -> void:
 	var state := watch.feed(h.global_position, _goal, now)
 	if straggling and state == ProgressWatch.OK:
 		return
+	var steers := String(order.verb) not in ["bound", "fall_back"]  # (their own drills move the pairs)
 	match state:
 		ProgressWatch.WEDGED:
-			_lead_to(watch.steer(h.global_position, _goal))
+			if steers:
+				_lead_to(watch.steer(h.global_position, _goal))
 		ProgressWatch.HELD_UP:
 			if not _held_said:
 				_held_said = true
 				radio("held_up", "held up at %s, finding a way round" % grid(h.global_position))
-			_lead_to(watch.steer(h.global_position, _goal, 10.0))
+			if steers:
+				_lead_to(watch.steer(h.global_position, _goal, 10.0))
 		ProgressWatch.UNABLE:
 			_end("failed", "no route to %s" % grid(_goal))
 			radio("unable", "unable: no route to %s. Holding" % grid(_goal))
 			_hold_here()
 			_next()
 		_:
-			if watch.detour == Vector3.ZERO and _held_said:
+			if watch.detour == Vector3.ZERO and _held_said and steers:
 				_lead_to(_goal)
 
 
 func _arrived(h: Soldier) -> void:
 	match String(order.verb):
 		"move":
+			if _leg < (order.points as Array).size() - 1:
+				_leg += 1
+				_goal = _point3(_leg)
+				watch.reset(Soldier._now())
+				_lead_to(_goal)
+				return
 			_end("done", "")
 			radio("done", "set at %s" % grid(h.global_position))
 			_next()
+		"bound":
+			_end("done", "")
+			radio("done", "set at %s" % grid(h.global_position))
+			_next()
+		"fall_back":
+			_hold_here()
+			order.state = "set"
+			hc.call(&"order_changed", order)
+			radio("set", "fell back to %s, holding" % grid(h.global_position))
+		"attack", "sbf":
+			_in_position(h)
 		"defend":
 			var lvl := _level()
 			var b := Buildings.nearest(lvl, _goal, GARRISON_M) if lvl else {}
@@ -323,7 +430,13 @@ func _follow_target() -> Soldier:
 # --- Reports ------------------------------------------------------------------------------------
 
 func radio(kind: String, text: String, pos: Variant = null) -> void:
+	if is_dark() and kind not in ["succession"]:
+		return  # dark: nobody on the radio yet (5.3)
 	hc.call(&"radio", self, kind, text, pos)
+
+
+func is_dark() -> bool:
+	return Soldier._now() < dark_until
 
 
 ## "green, 4 up, ammo amber, holding at 041 053"
@@ -384,7 +497,8 @@ func _watch_contacts(now: float) -> void:
 	var dist := _flat(h.global_position, c.centre) if h else 0.0
 	var dir := Callouts.direction_word(h, c.centre) if h else ""
 	radio("contact", "contact: %d enemy, %s, %d m, engaging" % [int(c.count), _compass(h.global_position if h else c.centre, c.centre), int(round(dist / 10.0) * 10.0)], c.centre)
-	hc.call(&"share_contact", self, c)
+	if not is_dark():
+		hc.call(&"share_contact", self, c)
 	if dir == "":
 		pass
 
@@ -418,6 +532,7 @@ func _succession() -> void:
 	squad.hero = best
 	squad.leader = best
 	radio("succession", "%s is down. %s has command" % [was, best.person_name if best.person_name != "" else String(best.name)])
+	dark_until = Soldier._now() + DARK_S  # until he has the radio
 	if not order.is_empty() and not HcOrder.ended(order):
 		var o := order
 		order = {}
@@ -500,9 +615,14 @@ func _extraction_point() -> Dictionary:
 	return best if best_d <= 60.0 else {}
 
 
-func _point3() -> Vector3:
-	var p := HcOrder.point(order)
+func _point3(i := -1) -> Vector3:
+	var p := HcOrder.point(order, i)
 	return Vector3(p.x, 0.0, p.y) if p.is_finite() else (hero().global_position if hero() else Vector3.ZERO)
+
+
+func _ground(p: Vector3) -> Vector3:
+	var lvl := _level()
+	return lvl.call(&"ground_point", p) if lvl and lvl.has_method(&"ground_point") else p
 
 
 func _assess() -> Dictionary:
@@ -528,3 +648,313 @@ static func _names(list: Array) -> PackedStringArray:
 
 static func _flat(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+# --- Phase 2: attack (high_command.md 3.2, 4.1) ------------------------------------------------
+
+## The objective: the order's target, else its last point.
+func _target_of() -> Vector3:
+	var t: Dictionary = order.get("target", {})
+	var tp: Variant = t.get("pos")
+	if tp is Array and (tp as Array).size() >= 2:
+		return Vector3(float(tp[0]), 0.0, float(tp[1]))
+	return _point3()
+
+
+func _start_attack(h: Soldier, _p: Vector3) -> void:
+	_target = _target_of()
+	if h == null:
+		return
+	var axis := _target - h.global_position
+	axis.y = 0.0
+	var dist := axis.length()
+	axis = axis.normalized() if dist > 0.1 else Vector3.FORWARD
+	_attack_pos = h.global_position if dist <= ATTACK_STANDOFF_M else _target - axis * ATTACK_STANDOFF_M
+	_goal = _attack_pos
+	_quiet_since = -INF
+	if dist <= ATTACK_STANDOFF_M:
+		radio("copy", "copy, attacking %s" % grid(_target))
+		_in_position(h)
+		return
+	_lead_to(_attack_pos)
+	radio("copy", "copy, attacking %s, moving to the attack position" % grid(_target))
+
+
+## At the attack or SBF position: set and wait for the go code, else go in.
+func _in_position(h: Soldier) -> void:
+	order.phase = "set"
+	if String(order.get("go", "")) != "":
+		_hold_here()
+		order.state = "set"
+		hc.call(&"order_changed", order)
+		radio("set", "set at %s. Ready on %s" % [grid(h.global_position), String(order.go).capitalize()])
+		return
+	_execute()
+
+
+func _execute() -> void:
+	var h := hero()
+	if h == null:
+		return
+	order.state = "active"
+	order.phase = "execute"
+	_exec_at = Soldier._now()
+	_burst_next = 0.0
+	match String(order.verb):
+		"attack":
+			var why := squad.order_assault(h, _ground(_target), _names(men()))
+			if why != "":
+				squad.give_order(h, Squad.Order.MOVE, _ground(_target), _names(men()))  # no enemy known there: walk on it
+			radio("copy", "going in on %s" % grid(_target))
+		"sbf":
+			radio("copy", "opening fire on %s" % grid(_target))
+	hc.call(&"order_changed", order)
+
+
+func _tick_attack(now: float, h: Soldier, engaged: bool) -> void:
+	if String(order.phase) == "route":
+		_tick_route(now, h, engaged)
+		return
+	if String(order.state) == "set":
+		return  # waiting on its go code
+	if ce_band(ce()) == "red":
+		_end("failed", "combat ineffective")
+		radio("unable", "is red, request orders. Falling back")
+		if _attack_pos.is_finite():
+			squad.order_fall_back(h, _ground(_attack_pos), _names(men()))
+		_next()
+		return
+	# commander's intent: a cluster drifted within OBJ_DRIFT_M is still the objective
+	var cl := squad.clusters()
+	if not cl.is_empty() and _flat(cl[0].centre, _target) <= OBJ_DRIFT_M and _flat(cl[0].centre, _target) > 5.0:
+		_target = cl[0].centre
+	var near := squad.enemy_picture().filter(func(e: Dictionary) -> bool: return _flat(e.pos, _target) <= OBJ_RADIUS_M)
+	if near.is_empty() and _flat(h.global_position, _target) <= OBJ_RADIUS_M:
+		if _quiet_since == -INF:  # (uptime starts at 0: never a negative test)
+			_quiet_since = now
+			order.phase = "consolidate"
+			hc.call(&"order_changed", order)
+		elif now - _quiet_since >= CONSOLIDATE_S:
+			_hold_here()
+			_end("done", "")
+			radio("done", "objective secure at %s" % grid(_target))
+			_next()
+			return
+	else:
+		_quiet_since = -INF
+		if near.is_empty() and now - _exec_at > 10.0 and _flat(h.global_position, _target) > OBJ_RADIUS_M and not engaged:
+			_lead_to(_target)  # nobody there that we know of: close on it
+	if now - _exec_at > ATTACK_MAX_S:
+		_end("failed", "objective not taken")
+		radio("unable", "unable to take %s. Holding" % grid(_target))
+		_hold_here()
+		_next()
+
+
+# --- Phase 2: support by fire (5.4) --------------------------------------------------------------
+
+func _start_sbf(h: Soldier, p: Vector3) -> void:
+	var t: Dictionary = order.get("target", {})
+	if not t.has("pos") and (order.points as Array).size() < 2:
+		_end("failed", "support by fire needs a target")
+		radio("unable", "unable: no target to fire on")
+		return
+	_target = _target_of() if t.has("pos") else _point3(1)
+	_goal = p
+	_quiet_since = -INF
+	if h and _flat(h.global_position, p) <= ARRIVE_M:
+		_in_position(h)
+		return
+	_lead_to(p)
+	radio("copy", "copy, support by fire from %s on %s" % [grid(p), grid(_target)])
+
+
+func _tick_sbf(now: float, h: Soldier) -> void:
+	if String(order.phase) == "route":
+		_tick_route(now, h, false)  # (an SBF position is taken under fire too)
+		return
+	if String(order.state) == "set" or now < _burst_next:
+		return
+	_burst_next = now + SBF_BURST_S
+	var friends := _friendlies()
+	var close := friends.filter(func(f: Vector3) -> bool: return _flat(f, _target) <= DANGER_CLOSE_M)
+	if not close.is_empty():
+		var axis := _target - h.global_position
+		axis.y = 0.0
+		var deeper := _target + axis.normalized() * SHIFT_M
+		if not _shifted and friends.all(func(f: Vector3) -> bool: return _flat(f, deeper) > DANGER_CLOSE_M) and safe_to_fire(h.global_position, deeper, friends):
+			_shifted = true
+			_target = deeper
+			radio("set", "shifting fire")
+		else:
+			if not _lifted:
+				_lifted = true
+				squad.set_hold_fire(h, true, _names(men()))
+				radio("set", "check fire, friendlies on target")
+			return
+	if not safe_to_fire(h.global_position, _target, friends):
+		if not _lifted:
+			_lifted = true
+			squad.set_hold_fire(h, true, _names(men()))
+			radio("set", "can't fire, friendlies in the lane")
+		return
+	if _lifted:
+		_lifted = false
+		squad.set_hold_fire(h, false, _names(men()))
+		radio("set", "resuming fire")
+	squad.order_suppress(h, _ground(_target), _names(up_men()))
+	var near := squad.enemy_picture().filter(func(e: Dictionary) -> bool: return _flat(e.pos, _target) <= OBJ_RADIUS_M)
+	if near.is_empty():
+		if _quiet_since == -INF:  # (uptime starts at 0: never a negative test)
+			_quiet_since = now
+		elif now - _quiet_since >= SBF_IDLE_S:
+			_end("done", "")
+			radio("done", "target quiet, holding")
+			_hold_here()
+			_next()
+	else:
+		_quiet_since = -INF
+
+
+## No fire with any friendly inside a SAFE_FAN_DEG fan either side of the shot line from
+## `shooter` to `target`, out to the target + SAFE_PAST_M (5.4: the most important safety rule
+## once several squads fight in one place). Friendlies within 3 m of the shooter (his own
+## buddy beside him) don't count. Pure.
+static func safe_to_fire(shooter: Vector3, target: Vector3, friendlies: Array) -> bool:
+	var line := Vector2(target.x - shooter.x, target.z - shooter.z)
+	var reach := line.length() + SAFE_PAST_M
+	if line.length() < 0.5:
+		return false
+	for f: Vector3 in friendlies:
+		var d := Vector2(f.x - shooter.x, f.z - shooter.z)
+		if d.length() < 3.0 or d.length() > reach:
+			continue
+		if absf(rad_to_deg(line.angle_to(d))) <= SAFE_FAN_DEG:
+			return false
+	return true
+
+
+## Where every friendly not in this squad stands: players, the player squad, other groups.
+func _friendlies() -> Array:
+	var out: Array = []
+	var mine := {}
+	for s in men():
+		mine[s] = true
+	for n in hc.get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s and s.faction == squad.faction and not mine.has(s) and not s.vitals.is_dead() and not s.is_queued_for_deletion():
+			out.append(s.global_position)
+	return out
+
+
+# --- Phase 2: defend a frontage (5.2) ------------------------------------------------------------
+
+## A frontage from `a` to `b` split for `pairs` buddy pairs: [{"spot", "facing"}], each pair at
+## its sector's middle facing out (to `out`'s side). Wider than `men` x FRONTAGE_PER_MAN_M it
+## covers the centre only ("too_wide" true on the first). Pure.
+static func frontage_split(a: Vector3, b: Vector3, pairs: int, men_count: int, out: Vector3) -> Array:
+	var res: Array = []
+	var along := Vector3(b.x - a.x, 0.0, b.z - a.z)
+	var width := along.length()
+	var too_wide := width > men_count * FRONTAGE_PER_MAN_M
+	var centre := (a + b) * 0.5
+	if too_wide:
+		var half := along.normalized() * men_count * FRONTAGE_PER_MAN_M * 0.5
+		a = centre - half
+		b = centre + half
+		along = b - a
+	var facing := along.cross(Vector3.UP).normalized()
+	if out != Vector3.ZERO and facing.dot(out - centre) < 0.0:
+		facing = -facing
+	pairs = maxi(pairs, 1)
+	for i in pairs:
+		var t := (i + 0.5) / pairs
+		res.append({"spot": a + along * t, "facing": facing, "too_wide": too_wide and i == 0})
+	return res
+
+
+func _start_frontage(h: Soldier) -> void:
+	if (order.points as Array).size() < 2:
+		_end("failed", "a frontage needs two points")
+		return
+	var list := up_men()
+	var pairs := ceili(list.size() / 2.0)
+	var out := _point3(0) + _facing() * 50.0
+	var split := frontage_split(_point3(0), _point3(1), pairs, list.size(), out)
+	_spots.clear()
+	for i in split.size():
+		var names := PackedStringArray()
+		for j in [i * 2, i * 2 + 1]:
+			if j < list.size():
+				names.append(String(list[j].name))
+		_spots.append({"names": names, "spot": split[i].spot, "facing": split[i].facing})
+		if h:
+			squad.give_order(h, Squad.Order.MOVE, _ground(split[i].spot), names)
+	_goal = (_point3(0) + _point3(1)) * 0.5
+	order.phase = "route"
+	radio("copy", "copy, defending the frontage %s to %s%s" % [grid(_point3(0)), grid(_point3(1)),
+		". Frontage too wide, covering the centre" if not split.is_empty() and bool(split[0].too_wide) else ""])
+
+
+func _tick_frontage(now: float) -> void:
+	if String(order.state) == "set":
+		return
+	var h := hero()
+	var all_in := true
+	for sp: Dictionary in _spots:
+		for n: String in sp.names:
+			var s := squad.find_soldier(n)
+			if s and s.vitals.is_up() and _flat(s.global_position, sp.spot) > 5.0:
+				all_in = false
+	if all_in or now - float(order.get("at", now)) > 90.0:
+		for sp: Dictionary in _spots:
+			squad.give_order(h, Squad.Order.HOLD, sp.spot, sp.names)
+			squad.order_command(h, "watch", (sp.spot as Vector3) + (sp.facing as Vector3) * 60.0, sp.names)
+		order.state = "set"
+		order.phase = "set"
+		hc.call(&"order_changed", order)
+		radio("set", "set on the frontage, %d sectors" % _spots.size())
+
+
+# --- Phase 2: risk and requests (4.1, 4.2) -------------------------------------------------------
+
+## Past the risk threshold on a Defend, an Attack or SBF, the hero asks to break contact once
+## (HighCommand.server_request); unanswered, he decides by the risk.
+func _check_risk() -> void:
+	if _asked or String(order.verb) not in ["defend", "defend_frontage", "attack", "sbf", "hold"]:
+		return
+	var sit := _assess()
+	var down := 1.0 - clampf(float(sit.get("up", 0)) / maxf(size, 1), 0.0, 1.0)
+	var risk := String(order.get("risk", "balanced"))
+	var past := down >= float(RISK_DOWN.get(risk, 0.35)) or (risk == "careful" and int(sit.get("urgent", 0)) > 0)
+	if not past:
+		return
+	_asked = true
+	if risk == "careful":
+		radio("request", "%s, breaking contact" % ce_band(ce()))
+		_break_contact()
+		return
+	hc.call(&"server_request", self, "break_contact", "%s: %d down, request to break contact" % [ce_band(ce()), roundi(down * size)],
+		func(yes: bool) -> void:
+			if yes:
+				_break_contact()
+			else:
+				radio("copy", "copy, holding on"), risk != "press")
+
+
+func _break_contact() -> void:
+	var h := hero()
+	if h == null:
+		return
+	var back := _rally if _rally.is_finite() else h.global_position - h.global_basis.z * -40.0
+	_end("cancelled", "broke contact")
+	squad.order_fall_back(h, _ground(back), _names(men()))
+	var o := HcOrder.make(String(squad.hc_id), "fall_back", [[back.x, back.z]])
+	o.id = HcOrder.next_id()
+	o.at = Soldier._now()
+	order = o
+	order.state = "active"
+	_goal = back
+	watch.reset(Soldier._now())
+	hc.call(&"order_changed", order)
+	radio("copy", "breaking contact to %s" % grid(back))
