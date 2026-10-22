@@ -13,12 +13,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### The side picture: what each side knows (combined arms phase B1, docs/combined_arms.md 3.2, 3.3, 4.4)
 
-> **Where I stopped (2026-10-22 ~01:00 CDT, paused for usage):** B1 is built and side_command
-> passes locally (R2395). missions was running when the pause came (R2398 in
-> B:\Contractor-test-logs; read its verdict, no rerun needed if PASS). Not yet run locally: smoke.
-> Next: check R2398 and the branch's CI, fix any reds, then the AI commander lane (B4 plumbing
-> that doesn't need B2, then B2 once C2 lands on claude/ai-driving, B3, B5). Remove this note
-> when B1 lands.
+> **Where I stopped (2026-10-22 ~01:00 CDT, paused for usage):** B1 is built; side_command
+> passes locally (R2395). missions R2398 FAILED: (1) a script error from B1, GroupBoard.row_for
+> calling ammo_share on a brain with no body yet, fixed after the run (not re-run: paused);
+> (2) the zone-generation check at its start, which runs before any B1 code: the known
+> landmarks red that claude/ci-cleanup fixes, so expected on this base. Next: rerun missions and
+> smoke, check the branch CI, then the AI commander lane (B4 plumbing that doesn't need B2, then
+> B2 once C2 lands on claude/ai-driving, B3, B5). Remove this note when B1 lands.
 
 #### Added
 - **Spot reports on the map.** What your side has reported shows on the map as it was reported:

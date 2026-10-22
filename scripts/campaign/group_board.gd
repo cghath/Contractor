@@ -200,7 +200,7 @@ func row_for(g: Variant, now: float, meta := {}) -> Dictionary:
 		at_cp += man_at_cp(lkind)
 		launchers += 1 if lkind != "" else 0
 		mgs += 1 if soldier_kind(s) == "mg" else 0
-		ammo += brain.ammo_share(_cfg_num("ammo_full_mags", 6.0)) if brain else 1.0
+		ammo += brain.ammo_share(_cfg_num("ammo_full_mags", 6.0)) if brain and brain.body else 1.0  # (a brain not ready yet has no body)
 		morale += brain.morale if brain else 1.0
 		if s.vehicle and is_instance_valid(s.vehicle) and not s.vehicle.wrecked:
 			vehicles[s.vehicle] = true
