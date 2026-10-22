@@ -337,6 +337,22 @@ biases, which today only know pmc, regular and insurgent):
 
 Order: T1-T10 (team and squad) first, then P1-P3, then F1-F3. Each phase pushed on its own.
 
+**Built 2026-10-22** (SquadTactics, tests/drills_test.gd; squad_test unchanged and passing):
+- T1 the near ambush (option NEAR_AMBUSH, SquadAI task "near_ambush");
+- T2 break contact as Battle Drill 3 (`_break_contact`);
+- T3 rally points (Squad meta "rally");
+- T4 fire superiority first (`_flank`'s "Base is set, move!");
+- T5 sectors of fire, shift and lift (`sector_aims`, `_base_shift`, `_lifted`);
+- T6 lanes, the limit of advance and consolidation (`assault_lanes`, `_consolidate`);
+- T7 the contact report's count and what's seen (Callouts `_what_seen`);
+- T9 a chem light at each cleared building's door (`mark_cleared`);
+- T10 doctrine by faction (`doctrine()` from the men's own; jihadist, guerrilla and cartel biases).
+
+Left for later, as calls 12-13 below:
+- T8 (dispersion: 6 m cover gaps for every side);
+- T9's smoke before a breach and bunker ports;
+- T-B5's covering man firing while his buddy bounds.
+
 ## 9. Calls made
 
 | # | Call | Why | The alternative |
@@ -352,3 +368,7 @@ Order: T1-T10 (team and squad) first, then P1-P3, then F1-F3. Each phase pushed 
 | 9 | Echelon by men under arms (recruits with a kit), five steps cell to company | The Captain's "cells, teams, a few squads ... platoons or companies" | By strength alone |
 | 10 | State forces never below platoon; terror groups start at a cell or team (the Banner a squad) | The Captain's rule | Everyone grows |
 | 11 | Hot zones keep today's sizes at their factions' starting echelons, so missions_test holds until the war has moved | No surprise retune | Rescaling every zone now |
+| 12 | T8 (6 m between men in cover, for every side) waits for a playtest: the Captain tuned spacing by hand (2026-10-14, "they bunched up") and the spacing suite pins today's numbers | Not undoing a tuned feel blind | Changing it now |
+| 13 | Smoke before a breach stays for bunkers (one entrance, ports): in a house it blinds the stack as much as the room, and the breach plans (flash, frag, charge) already handle rooms | R06 is about bunkers | Smoke before every door |
+| 14 | A near ambush needs the squad to have been moving when it was hit (its centre moved 2 m in the 3 s before), so a squad springing its own ambush never charges | Ambushers aren't ambushed | Any contact under 35 m |
+| 15 | Break contact's men go one at a time all the way to the rally point (15 s each at most), not in repeated short bounds | The reel's order and calls, with fewer moving parts | A leapfrog of 10-15 m bounds |

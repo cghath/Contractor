@@ -3367,6 +3367,23 @@ func _do_tactic(t: Dictionary) -> void:
 				bounding = true
 		&"clear":
 			_tactic_clear(t, now)
+		&"near_ambush":
+			# SquadTactics' near ambush (docs/ai_tactics.md T1): a frag at the enemy line, then
+			# CHARGE_DELAY_S later straight through it, firing, to his lane's point past it.
+			if not t.has("thrown"):
+				t.thrown = true
+				var at: Vector3 = t.enemy
+				if body.inventory.count_of(&"frag_grenade") > 0 and body.global_position.distance_to(at) >= 12.0:  # (clear of his own frag)
+					_throw(&"frag_grenade", at)
+			if now < float(t.go_at):
+				body.want_crouch = false
+				return
+			var point: Vector3 = t.point
+			if _flat_distance(point) <= ARRIVE + 1.0:
+				_fight(point, 4.0)
+			else:
+				_go(point, true)
+				bounding = true
 		&"garrison":
 			var spot: Vector3 = t.spot
 			if _flat_distance(spot) > ARRIVE + 0.2:

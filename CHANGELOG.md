@@ -11,6 +11,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Team and squad drills from the tactics reels (docs/ai_tactics.md, every side)
+
+#### Added
+- **Near ambush.** A squad hit from under 35 m while moving doesn't look for cover in the kill
+  zone. Its gun and one man fire flat out, the rest throw frags, and 2-3 seconds later they
+  charge through the ambush line. Then they consolidate facing back.
+- **Break contact as a drill.** Smoke from the grenadier first. Then the man furthest back goes:
+  "Moving!", to the rally point, "Set!". Then the next, each covered by those still firing, until
+  all are set at the rally point facing the enemy.
+- **Rally points.** On the move a squad names a rally point every 150 m, about 45 m back the way
+  it came. That's where it breaks contact to.
+- **Fire superiority first.** Flankers wait in cover until their base of fire is shooting:
+  "Base is set, move!"
+- **Sectors of fire.** A base of fire spreads its guns across the enemy and past both flanks,
+  never all on one man. It shifts its fire beyond the objective as its flankers close in, and
+  stops when they're on it.
+- **Assault lanes and consolidation.** Assaulters go through the position in their own lanes, to
+  a limit just past it. Then they take all-round security and check their ammo.
+- **Contact reports** say how many and what: "Contact, two o'clock, 80 m, three men, MG".
+- **Cleared buildings** get a chem light at the door when someone carries one.
+- **Terror groups fight their own way.** Jihadists press and stay, guerrillas hit and run, and
+  cartels hold what they guard.
+- New test suite drills, in tools/run_tests.sh and CI.
+
 ### Requests that get done (combined arms phase B4, part 2)
 
 #### Added
