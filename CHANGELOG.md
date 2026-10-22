@@ -41,6 +41,10 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   - With 16 AI fighting round the Experimental forest's densest copse, their sight lines through the leaves cost 9.0 ->
     0.38 ms a frame. Frames averaged 41 -> 31 ms (p95 199 -> 94) on that shared PC.
   - Standing in the copse alone: 6.9 ms a frame both before and after (the headless frame has no drawing).
+  - A scan round of 16 men's sight lines through that copse (128 lines): 649 -> 11 ms (R0519 / R0517).
+  - Temperate's hot zone as its preset now says (dense) against as it was (R0517 / R0519), from its densest
+    spot: 627k triangles in view (was 566k with half the woods), 610 draws (was 273; this spot is by a
+    settlement, its props and wires a third of them), ~152k shadow triangles (was ~39k).
 
 #### Fixed
 - **The vehicle range's concrete blocks and sandbag wall are there (F-121).** They lay outside the range's 22 m voxel

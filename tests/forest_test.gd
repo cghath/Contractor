@@ -29,8 +29,8 @@ const SPOT_US_MAX := 400.0
 const NAV_CHUNK_MS_MAX := 0.5
 ## Standing in the forest's densest copse with its visuals built (headless: no drawing): the frame
 ## (average, 95th percentile); and a scan round of 16 men's sight lines through it (128 capped
-## foliage walks; before, uncapped on the old walk, about 4.5 ms each: R0498's 16 AI fighting there
-## spent 9.0 ms a frame on them).
+## foliage walks; before, uncapped on the old walk, 649 ms a round, R0519; R0498's 16 AI fighting
+## there spent 9.0 ms a frame on them).
 const COPSE_FRAME_AVG_MS := 25.0
 const COPSE_FRAME_P95_MS := 60.0
 const SCAN_ROUND_MS := 30.0

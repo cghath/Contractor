@@ -133,7 +133,8 @@ before, R0499 after; "dense" is temperate's hot zone 4409 laid out with the dens
   sight line walks only the squares it crosses, from both ends, and `foliage_least` stops once both lines have
   `enough` (Spotting.foliage_m passes FOLIAGE_OPAQUE_M: the answer is exact below it). The same metres as before (the
   forest suite compares 300 lines with the old walk). A line 20-250 m through the dense copse: 4266 -> 392 us uncapped;
-  with 16 AI fighting round the forest's densest copse the AI's foliage walks went 9.0 -> 0.38 ms a frame.
+  with 16 AI fighting round the forest's densest copse the AI's foliage walks went 9.0 -> 0.38 ms a frame; a
+  16-man scan round through it 649 -> 11 ms (R0519 / R0517).
 - **Navigation**: a nav chunk's trunk and rock boxes and prop faces come from the same 16 m index: 0.75 -> 0.06 ms a chunk.
 - Unchanged: collision (one static body per cell, every trunk, large rock and prop as drawn; a 30 m ray through the dense
   wood 5-7 us, built at load in 0.6-1.2 s), layout time, and what hides whom.
