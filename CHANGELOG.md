@@ -11,6 +11,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Requests that get done (combined arms phase B4, part 2)
+
+#### Added
+- **Allied units carry out what they accept.** Ask an allied unit through the contextual menu
+  (look at it) for suppression, covering fire, smoke, a hold, ammo or a medic. It moves into
+  range if it has to, does the job, and the request card follows it: on the way, on station,
+  done. Units under the AI commander do it through their orders. A unit without what you asked
+  for says so.
+- **Check fire** is on the contextual menu over open ground.
+
 ### Deconfliction: no blue on blue (combined arms phase B5, docs/combined_arms.md 4.5)
 
 #### Added

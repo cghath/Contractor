@@ -803,10 +803,11 @@ func _reserves() -> int:
 
 
 ## RequestBroker.executor: an accepted request to one of its groups becomes that group's job.
-func execute_request(r: Dictionary) -> void:
+## False for a group it doesn't command (the broker runs that one itself).
+func execute_request(r: Dictionary) -> bool:
 	var g: Dictionary = groups.get(String(r.group), {})
 	if g.is_empty():
-		return
+		return false
 	var tp: Vector3 = r.target.pos
 	var here := _group_pos(g)
 	var o: Dictionary
@@ -821,6 +822,7 @@ func execute_request(r: Dictionary) -> void:
 	g.need = "request:%d" % int(r.id)
 	jobs[int(r.id)] = String(g.id)
 	_give(g, o)
+	return true
 
 
 ## Request jobs move on with their group's order: route = en route, firing or there = on station,

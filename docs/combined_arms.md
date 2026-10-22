@@ -2934,3 +2934,13 @@ themselves (moving, suppressing, treating) come with B2's SideCommand as the bro
 | B5.8 | A friendly-fire incident is caught in `Harm.note_hit` (friendly hit by friendly), logged as "[ff]" with the distance and kept in `Deconfliction.incidents`; the employer's reputation cost and the debrief line are D3's, reading that list | One place every hit already passes | Per-weapon checks |
 | B5.9 | Road reservations for vehicle columns (`RoadRoute`, `SquadDrivers`) are left for the driving lane: they need the columns' own timing | Out of the commander's files | Half a reservation system |
 | B5.10 | The test's combined fight: two allied groups (an SBF and an assault) and a squadmate against three hostiles for 25 s live, zero incidents; then a check fire on the hostiles, and from 1 s on not a round fired at them. The mortar's check fire and the gunner's IFF are checked on their own; a live tank joins the fight when A3/A4 give it a gunner | B5's 9.3 row, cheaply and without flakes | A long full combined-arms run |
+
+### B4, part 2: the jobs and the entry points (built 2026-10-22, branch claude/ca-b1-side-picture)
+
+| # | Call | Why | The alternative |
+|---|---|---|---|
+| B4.11 | Players ask through C6's contextual menus (an allied unit looked at: the request list, suppression first in contact, a medic first with a casualty near; a casualty: CASEVAC; allied armour: armour support, a ride; open ground: Check fire here), which already send to the broker; the map's and the HC camera's menus share the same table | One table for every way in (5.5) | A request panel |
+| B4.12 | A group's board id is its high command id where it has one (hawk2, allied1), what the menus name; else its node name | Named requests reach the group the player looked at | Two ids |
+| B4.13 | An accepted request goes to its commander's executor (B2) for groups a SideCommand commands; for groups no commander has (the company's AlliedTroops elements), the broker runs suppress, cover, smoke, hold, ammo and a medic on the squad's own orders from its own leader, moving into range first; CASEVAC, armour and pick-ups take a commander's vehicles and are refused otherwise ("we can't do that without our orders") | Every request either happens or says why | Faking the vehicle jobs |
+| B4.14 | A group that has nothing for a named request says so ("We've nothing for that") after the specific refusals (no medic, no smoke) | 4.1: nothing happens silently | Accepting and failing |
+| B4.15 | The medic's green cross on the HUD is left to the cards' ETA for now (the medic's name and the countdown) | Cheap and clear | A world marker per medic |

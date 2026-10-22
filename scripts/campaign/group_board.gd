@@ -158,7 +158,8 @@ func refresh(groups: Array, now: float, meta := {}) -> void:
 			rows.erase(id)
 
 
-## A group's id: its Squad's (callsign meta or name), "" for none.
+## A group's id: its Squad's group_id meta, else its high command id (hawk2, allied1: what the
+## contextual menus name), else its node name; "" for none.
 static func group_id(g: Variant) -> String:
 	var squad: Squad = null
 	if g is Squad:
@@ -167,7 +168,7 @@ static func group_id(g: Variant) -> String:
 		squad = (g as Dictionary).get("squad") as Squad
 	if squad == null or not is_instance_valid(squad):
 		return ""
-	return String(squad.get_meta(&"group_id", squad.name))
+	return String(squad.get_meta(&"group_id", squad.hc_id if squad.hc_id != &"" else StringName(squad.name)))
 
 
 ## A fresh row for `g` (a Squad, or a record {"squad", "soldiers", "virtual"?}).
