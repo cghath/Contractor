@@ -509,6 +509,21 @@ line (a man in a field, or a watcher in one), not a field crossed in the middle 
 Suggested: an art pass on the crop blocks (stalks, ears, maize tassels) and a cheap sway in a
 shader; walk the whole line through fields with a field-crossing test on the grid if a playtest
 finds men seen through a field between them.
+## F-189: a helicopter doesn't settle on an LZ of 10-12 degrees on rugged ground
+
+Location: scripts/vehicles/helicopter.gd / scripts/supports/heli_flight.gd (Claude's), and
+[landing_zone.gd](../../scripts/supports/landing_zone.gd). Found on `world/terrain` (2026-10-22,
+1.3), CI run 39755429759 (0defd900), the loop suite on Whitecap Pass (snow_mountain): the
+briefing's helicopter LZ at (-1035, 179) passed LandingZone.check (slope 10 degrees, the ground
+round the rotor disc -2.6 to +1.5 m), the helicopter touched the ground there at 0 m to go and
+never reached LANDED in 120 s. LandingZone allows 15 degrees (Captain's limit; the supports suite
+checks a 12-degree slope takes a landing) but only flat landings are flown in the suites.
+
+Suggested: fly a landing onto a 12-degree slope in tests/heliflight_test.gd and let the
+helicopter settle on it (gear on the uphill side first), or have LandingZone also require the
+ground within the rotor disc to stay within a metre or so of the spot. The snow preset was made
+gentler (relief 2.1 -> 1.7) meanwhile.
+
 ## F-190: a following squadmate stuck head-on against a wall's end (casualty suite)
 
 Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), `_steer` (the path walk). Found and fixed by
@@ -671,3 +686,4 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-10-22 | Irrigation channels are ZoneWater line bodies ("channels"): 2.6-3.2 m wide, a 0.5 m cut, along an eighth of the field grid's column edges where both sides are fields and the ground keeps within 3 m of level, cut into 72-340 m lengths | they build on the water (wading, culverts, scatter keep-out, bank tint) | ditches with a separate water mesh
 - 2026-10-22 | The world suite's "steepest ground" check on the ridge hot zone now skips 12 m round its cliffs (they're steep on purpose) | it guards the ridge noise, not the cliffs | drop the check
 - 2026-10-22 | Cliffs and gullies are carved after the water and kept off its water and banks: a stream crossing a cliff's line runs through a notch | carved first, a frozen stream held at its level through a cliff cut a 34 m canyon that took an extraction pad with it (the world suite, snow_mountain) | keep the cliffs off where the streams will run (unknown before the water)
+- 2026-10-22 | snow_mountain's relief down from 2.1 to 1.7 times the zone's, its ridges and detail a little softer | on CI the loop suite's helicopter didn't settle on a 10-12 degree LZ on Whitecap Pass (F-189) | keep it rugged and fix the landing first

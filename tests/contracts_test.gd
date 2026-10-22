@@ -1159,7 +1159,8 @@ func _test_allied_troops() -> void:
 	var rows := WorldSites.rows()
 	check(rows.size() == 5 and rows.all(func(r: Dictionary) -> bool: return String(r.holder) in MissionRegistry.enemies() and float(r.grip) > 0.0)
 		and Economy.world_sites().size() == 5 and WorldSites.row_text(rows[0]).contains("grip"),
-		"the board's hot zones: who holds each and how firmly (%s)" % WorldSites.row_text(rows[0]))
+		"the board's hot zones: who holds each and how firmly (%s; %s; on the board %d)" % [WorldSites.row_text(rows[0]),
+			rows.map(func(r: Dictionary) -> String: return "%s %s %.2f" % [r.zone_id, r.holder, float(r.grip)]), Economy.world_sites().size()])
 	cs.held = held_before
 	cs.deployment = deployment_before
 	Economy.change_reputation("uk_forces", uk_before - Economy.reputation("uk_forces"), "test cleanup", false)

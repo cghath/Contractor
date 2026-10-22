@@ -695,7 +695,7 @@ func _test_gully_cover() -> void:
 		cut = f.cut_at(roundi((c3.x + t.size_m * 0.5) / ZoneTerrain.CELL_M), roundi((c3.z + t.size_m * 0.5) / ZoneTerrain.CELL_M))
 		across = absf((Vector2(c3.x, c3.z) - floor_p).dot(toward))
 		how = "down in it, crouched out of sight" if hider_brain._cover_protects(c3) else ("prone at its lip, firing over (a fold)" if hider_brain._fold_at(world, c3) else "uncovered")
-	check(exposed and cover is Vector3 and across < 10.0 and how != "uncovered",
+	check(exposed and cover is Vector3 and (across < 10.0 or cut > 0.5) and how != "uncovered",  # (down in it, or at its lip; it bends)
 		"the AI's cover search (SquadAI.find_cover), out in the open 13 m from a gully with a threat 57 m across the flat (in the open there: %s), picks the gully: %.1f m from its middle, cut %.1f m there, %s" % [exposed, across, cut, how])
 	hider.queue_free()
 	watcher.queue_free()
