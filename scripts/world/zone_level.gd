@@ -143,6 +143,7 @@ func _ready() -> void:
 	if String(def.get("kind", "")) == "hot":
 		add_child(HotZoneOps.new())  # several contracts live, radio follow-ups, hazard pay
 		add_child(EnemyCommand.new())  # the enemy's high command: what it sends, and whether (docs/enemy_high_command.md)
+		SideCommand.install(self, &"hostile", HotZonePolicy.new())  # its side's commander (combined_arms B2): EnemyCommand's rules
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Contracts.contract_live.connect(_on_contract_live)

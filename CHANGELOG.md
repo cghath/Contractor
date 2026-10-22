@@ -11,6 +11,33 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The AI commander (combined arms phase B2, docs/combined_arms.md 3)
+
+#### Added
+- **A commander for each side.** It sees only what its side has reported. It knows its groups
+  by their sitreps and tasks them through the same orders high command uses: assault, support by
+  fire, flank, recon, reserve, screen and defend. Every 20 s, or at once when something changes,
+  it scores each group for each job by how suited it is, how fit, how far away and how free. An
+  assault is never sent without its support by fire, and no group without anti-armour weapons is
+  sent at known armour. Each decision is logged with its reason.
+- **Timing.** An assault waits at its attack position until its support by fire is set, or
+  2 minutes, then goes ("Hammer 1 is set." "Saber 1, go."). An objective counts as taken after
+  90 s with no reported enemy in it. A phase moves on when every objective in it is taken.
+- **Reserves and stalls.** A quarter of the side's strength is kept back. It goes in when the
+  main objective stalls, an assault goes amber, a counterattack is seen, or to exploit a quick
+  win. At the phase's limit the commander shifts the main effort or calls fire support and
+  pauses.
+- **Falling back.** An amber group holds and asks for help. A red group breaks contact to its
+  rally, and two red groups of a kind merge there. A side that loses half its men pulls back.
+- **Defence and counterattacks.** A defending side holds its sites and keeps a mobile reserve.
+  A lost site is retaken only by a force three times what's seen there, with anti-armour weapons
+  if armour is there; otherwise it's contained. The force assembles out of sight and goes in 5-12
+  minutes later, after a preparation. Players hear it coming if their side has reported the
+  enemy massing.
+- **Off-screen fights by armour.** A tank shrugs off rifles and an AT team hurts it, also when
+  both are virtual.
+- Hot zones keep their enemy commander's rules unchanged; the new commander sits beside it.
+
 ### High command (combined arms, phases C1 to C6)
 
 > **Where this lane is:** C1-C6 done on claude/ca-c-high-command (B1 and B4 part 1 merged in).

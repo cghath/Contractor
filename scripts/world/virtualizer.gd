@@ -96,7 +96,7 @@ const RIDE_ARRIVE_M := 15.0
 const SPAWN_BUDGET_MS := 4.0
 ## Metas that aren't the man's own (the brain's, the sleep's).
 const DROP_META: Array[StringName] = [&"start_gear", &"start_states", &"sim_settle", &"sim_brain_off"]
-const SIDE_KINDS: Array[String] = ["patrol", "roam", "hunters", "pair", "qrf", "task_force", "probe", "skirmish", "garrison", "withdraw"]
+const SIDE_KINDS: Array[String] = ["patrol", "roam", "hunters", "pair", "qrf", "task_force", "probe", "skirmish", "garrison", "withdraw", "allied"]
 
 ## Tests: false and nothing goes virtual or comes back by itself (server_virtualize, server_wake
 ## and the rest still work when called).
@@ -1113,12 +1113,24 @@ func _fight_all(lvl: CompoundLevel, _dt: float) -> void:
 ## garrison is behind walls: COVER_MULT); each hit kills (KILL_SHARE) or wounds a random man of the
 ## other. Simultaneous: the shots are worked out before anyone falls.
 func fight_round(lvl: CompoundLevel, a: Dictionary, b: Dictionary) -> void:
-	var hits_on_b := _hits(a.virtual, b)
-	var hits_on_a := _hits(b.virtual, a)
+	var hits_on_b := _armour_hits(_hits(a.virtual, b), a, b)
+	var hits_on_a := _armour_hits(_hits(b.virtual, a), b, a)
 	for k in hits_on_b:
 		_hit(lvl, b)
 	for k in hits_on_a:
 		_hit(lvl, a)
+
+
+## combined_arms 3.8's armour table: a group a SideCommand tasks carries its kind ("vf_kind");
+## hits scale by SideCommand.fight_factor (a tank shrugs off rifles, an AT team hurts it). Groups
+## without a kind fight as before.
+func _armour_hits(hits: int, attacker: Dictionary, target: Dictionary) -> int:
+	if not attacker.has("vf_kind") and not target.has("vf_kind"):
+		return hits
+	var f := SideCommand.fight_factor(String(attacker.get("vf_kind", "rifle_squad")), String(target.get("vf_kind", "rifle_squad")),
+		bool(attacker.get("vf_at", false)))
+	var scaled := hits * f
+	return floori(scaled) + (1 if _rng.randf() < scaled - floorf(scaled) else 0)
 
 
 func _hits(p: Dictionary, target: Dictionary) -> int:
