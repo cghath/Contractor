@@ -1,0 +1,308 @@
+# Economy sim, 2026-10-22 (claude/voice-economy): tools/economy_sim.tscn -- --runs 40 --variant current
+# BEFORE (fa7eed17^ data: the 2026-10-20 numbers, with the standing high command squads modelled)
+Godot Engine v4.7.2.stable.custom_build.ed1daf0bf (2026-08-17 01:18:38 UTC) - https://godotengine.org
+ECONOMY SIM: 40 runs x 35 days per profile; variants ["current"]; hot_win 0.92, hot_cap 0
+Role kits (Roles.kit, what a new hire brings): shop value / sells for / typical sign-on fee
+  rifleman      $9.6k / $3.8k
+  medic         $11.6k / $4.6k
+  autorifleman  $9.1k / $3.6k
+  grenadier     $8.2k / $3.3k
+  marksman      $9.7k / $3.9k
+  team_leader   $8.0k / $3.2k
+  sign-on fee: median $2.1k, p10 $1.8k, p90 $2.5k
+=== careful / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $169.9k / $147.6k / $188.5k   [$169.9k]
+  day 10: $159.6k / $116.1k / $198.1k   [$159.6k]
+  day 15: $145.9k / $106.4k / $191.5k   [$145.9k]
+  day 20: $131.8k / $78.4k / $192.9k   [$131.8k]
+  day 25: $124.0k / $60.7k / $185.3k   [$123.4k]
+  day 30: $116.1k / $49.5k / $201.8k   [$115.6k]
+  day 35: $109.5k / $22.1k / $206.4k   [$109.0k]
+income per campaign: $679.0k
+  advance      $140.6k  20.7%
+  completion   $305.4k  45.0%
+  bonuses      $66.4k   9.8%
+  loot         $83.7k  12.3%
+  salvage      $21.3k   3.1%
+  intel        $26.7k   3.9%
+  contraband   $25.3k   3.7%
+  pallets      $9.6k   1.4%
+expenses per campaign: $768.5k
+  wages        $257.6k  33.5%
+  upkeep       $107.4k  14.0%
+  field_costs  $319.8k  41.6%
+  kia_benefit  $34.8k   4.5%
+  treatment    $23.5k   3.1%
+  supports     $0.0k  -0.0%
+  lost_heli    $3.0k   0.4%
+  respawns     $0.3k   0.0%
+  hiring       $21.5k   2.8%
+  fines        $0.5k   0.1%
+  clawback     $0.0k  -0.0%
+  loan_repay   $0.1k   0.0%
+  (loans taken $0.5k per campaign; other $48.4k)
+deployments: 13.6 per campaign, 94% of contracts completed, 0% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean -$5.7k, p10 -$25.1k, worst -$65.9k, 64% negative
+  debrief 'net after expenses' as shown: mean -$17.2k, p10 -$36.9k, worst -$76.9k, 89% negative
+  mean per deployment: advance $10.3k, completion $22.5k, bonuses $4.9k, loot $6.2k, salvage $1.6k, intel $2.0k, contraband $1.9k, pallets $0.7k, wages -$18.9k, upkeep -$7.9k, field_costs -$23.5k, kia_benefit -$2.6k, treatment -$1.7k, lost_heli -$0.2k, respawns -$0.0k, hiring -$0.5k, fines -$0.0k, loan_repay -$0.0k
+  worst deployment (contract, rating 3, 4 days, 0 of 1 contracts done): advance $12.0k, intel $1.7k, contraband $9.9k, wages -$25.9k, upkeep -$12.0k, field_costs -$34.9k, treatment -$1.2k, lost_heli -$15.0k
+  rating 1:  36 deployments, net mean -$9.8k, p10 -$19.8k, worst -$48.3k
+  rating 2: 235 deployments, net mean -$7.0k, p10 -$25.9k, worst -$61.9k
+  rating 3: 261 deployments, net mean -$3.7k, p10 -$24.2k, worst -$65.9k
+  rating 4:   7 deployments, net mean -$9.6k, p10 -$24.6k, worst -$27.4k
+  rating 5:   5 deployments, net mean -$14.8k, p10 -$38.0k, worst -$38.0k
+  contract zones: 544 deployments, 2.6 days each, contract pay $37.7k, net mean -$5.7k, p10 -$25.1k, worst -$65.9k; radio follow-ups taken 0.0
+  lowest cash less loans in a campaign: mean $89.9k, worst -$19.0k; out of credit and in debt: 0 of 40
+=== median / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $141.8k / $84.8k / $175.0k   [$141.8k]
+  day 10: $98.0k / $21.5k / $216.9k   [$98.0k]
+  day 15: $57.4k / -$20.3k / $149.6k   [$53.9k]
+  day 20: $45.2k / -$22.9k / $144.2k   [$21.7k]
+  day 25: $22.6k / -$31.6k / $96.1k   [-$18.5k]
+  day 30: $5.0k / -$47.6k / $49.6k   [-$55.0k]
+  day 35: -$2.9k / -$71.2k / $53.8k   [-$82.6k]
+income per campaign: $688.8k
+  advance      $163.8k  23.8%
+  completion   $332.9k  48.3%
+  bonuses      $63.1k   9.2%
+  loot         $69.4k  10.1%
+  salvage      $20.3k   2.9%
+  intel        $11.9k   1.7%
+  contraband   $9.6k   1.4%
+  pallets      $17.8k   2.6%
+expenses per campaign: $980.8k
+  wages        $253.1k  25.8%
+  upkeep       $108.0k  11.0%
+  field_costs  $352.8k  36.0%
+  kia_benefit  $83.5k   8.5%
+  treatment    $44.9k   4.6%
+  supports     $44.4k   4.5%
+  lost_heli    $22.9k   2.3%
+  respawns     $18.3k   1.9%
+  hiring       $30.6k   3.1%
+  fines        $2.3k   0.2%
+  clawback     $0.0k  -0.0%
+  loan_repay   $20.1k   2.0%
+  (loans taken $90.6k per campaign; other $48.4k)
+deployments: 13.0 per campaign, 80% of contracts completed, 15% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean -$20.0k, p10 -$55.8k, worst -$92.1k, 82% negative
+  debrief 'net after expenses' as shown: mean -$30.1k, p10 -$65.6k, worst -$111.6k, 91% negative
+  mean per deployment: advance $12.6k, completion $25.7k, bonuses $4.9k, loot $5.4k, salvage $1.6k, intel $0.9k, contraband $0.7k, pallets $1.4k, wages -$19.5k, upkeep -$8.3k, field_costs -$27.2k, kia_benefit -$6.4k, treatment -$3.5k, supports -$3.4k, lost_heli -$1.8k, respawns -$1.4k, hiring -$1.2k, fines -$0.2k, loan_repay -$1.5k
+  worst deployment (hot, rating 4, 4 days, 0 of 1 contracts done): advance $21.2k, loot $10.3k, pallets $2.1k, wages -$25.6k, upkeep -$12.0k, field_costs -$39.2k, kia_benefit -$20.0k, treatment -$4.8k, supports -$20.0k, hiring -$3.9k
+  rating 1:  17 deployments, net mean -$22.0k, p10 -$34.9k, worst -$40.5k
+  rating 2: 152 deployments, net mean -$22.7k, p10 -$41.3k, worst -$83.8k
+  rating 3: 200 deployments, net mean -$22.8k, p10 -$54.5k, worst -$80.7k
+  rating 4: 129 deployments, net mean -$21.8k, p10 -$68.8k, worst -$92.1k
+  rating 5:  21 deployments, net mean $38.5k, p10 -$52.2k, worst -$76.6k
+  contract zones: 441 deployments, 2.6 days each, contract pay $39.3k, net mean -$20.2k, p10 -$47.0k, worst -$83.8k; radio follow-ups taken 0.0
+  hot zones:  78 deployments, 3.7 days each, contract pay $64.6k, net mean -$18.9k, p10 -$77.5k, worst -$92.1k; radio follow-ups taken 0.5
+  lowest cash less loans in a campaign: mean -$101.6k, worst -$337.9k; out of credit and in debt: 9 of 40
+=== sloppy / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $38.8k / -$17.9k / $84.4k   [$35.3k]
+  day 10: -$27.3k / -$70.2k / $15.7k   [-$67.5k]
+  day 15: -$61.1k / -$119.0k / -$19.3k   [-$173.4k]
+  day 20: -$135.1k / -$230.1k / -$24.5k   [-$272.0k]
+  day 25: -$221.6k / -$349.2k / -$64.4k   [-$367.3k]
+  day 30: -$318.4k / -$441.7k / -$178.5k   [-$465.7k]
+  day 35: -$412.7k / -$562.5k / -$249.9k   [-$562.7k]
+income per campaign: $550.1k
+  advance      $176.2k  32.0%
+  completion   $266.9k  48.5%
+  bonuses      $43.8k   8.0%
+  loot         $50.2k   9.1%
+  salvage      $12.2k   2.2%
+  intel        $0.0k   0.0%
+  contraband   $0.8k   0.1%
+  pallets      $0.0k   0.0%
+expenses per campaign: $1371.0k
+  wages        $243.2k  17.7%
+  upkeep       $108.4k   7.9%
+  field_costs  $354.0k  25.8%
+  kia_benefit  $229.5k  16.7%
+  treatment    $72.0k   5.3%
+  supports     $29.2k   2.1%
+  lost_heli    $68.2k   5.0%
+  respawns     $121.6k   8.9%
+  hiring       $58.0k   4.2%
+  fines        $6.2k   0.5%
+  clawback     $0.0k  -0.0%
+  loan_repay   $80.7k   5.9%
+  (loans taken $209.7k per campaign; other $48.4k)
+deployments: 13.2 per campaign, 65% of contracts completed, 17% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean -$55.0k, p10 -$100.2k, worst -$150.6k, 97% negative
+  debrief 'net after expenses' as shown: mean -$62.6k, p10 -$107.7k, worst -$148.8k, 97% negative
+  mean per deployment: advance $13.3k, completion $20.2k, bonuses $3.3k, loot $3.8k, salvage $0.9k, contraband $0.1k, wages -$18.4k, upkeep -$8.2k, field_costs -$26.8k, kia_benefit -$17.4k, treatment -$5.5k, supports -$2.2k, lost_heli -$5.2k, respawns -$9.2k, hiring -$3.3k, fines -$0.5k, loan_repay -$6.1k
+  worst deployment (hot, rating 3, 4 days, 1 of 1 contracts done): advance $11.9k, completion $27.7k, bonuses $4.0k, loot $3.0k, salvage $1.8k, wages -$25.8k, upkeep -$12.0k, field_costs -$39.2k, kia_benefit -$40.0k, treatment -$4.8k, supports -$15.0k, lost_heli -$15.0k, respawns -$38.0k, hiring -$7.3k, fines -$2.5k
+  rating 1:   9 deployments, net mean -$53.2k, p10 -$94.4k, worst -$104.2k
+  rating 2: 139 deployments, net mean -$51.1k, p10 -$80.7k, worst -$122.5k
+  rating 3: 204 deployments, net mean -$54.6k, p10 -$96.6k, worst -$150.6k
+  rating 4: 125 deployments, net mean -$57.8k, p10 -$104.2k, worst -$141.6k
+  rating 5:  51 deployments, net mean -$60.6k, p10 -$115.0k, worst -$142.0k
+  contract zones: 438 deployments, 2.6 days each, contract pay $32.9k, net mean -$54.1k, p10 -$96.6k, worst -$138.3k; radio follow-ups taken 0.0
+  hot zones:  90 deployments, 3.6 days each, contract pay $56.1k, net mean -$59.5k, p10 -$113.4k, worst -$150.6k; radio follow-ups taken 0.4
+  lowest cash less loans in a campaign: mean -$564.3k, worst -$763.5k; out of credit and in debt: 39 of 40
+=== expensive op / current (40 campaigns): rated 4, heli insertion, resupply + medevac + extraction, 2 KIA + 1 high command KIA, 3 wounded, 4 respawns bought ===
+  won: net mean -$56.3k, worst -$76.1k; cash after it $79.3k (start $183.5k)
+    advance $16.2k, completion $36.5k, bonuses $7.7k, loot $7.6k, salvage $1.4k, intel $0.5k, contraband $1.0k, pallets $1.3k, wages -$18.8k, upkeep -$8.7k, field_costs -$28.5k, kia_benefit -$30.0k, treatment -$3.6k, supports -$11.0k, respawns -$22.0k, hiring -$5.6k
+  failed: net mean -$100.8k, worst -$122.9k; cash after it $31.9k (start $183.4k)
+    advance $15.9k, loot $8.0k, intel $0.5k, contraband $0.6k, pallets $1.0k, wages -$18.2k, upkeep -$8.5k, field_costs -$27.7k, kia_benefit -$30.0k, treatment -$3.6k, supports -$11.0k, respawns -$22.0k, hiring -$5.7k, loan_repay -$0.1k
+
+# AFTER (the economy pass's numbers in data/)
+Godot Engine v4.7.2.stable.custom_build.ed1daf0bf (2026-08-17 01:18:38 UTC) - https://godotengine.org
+ECONOMY SIM: 40 runs x 35 days per profile; variants ["current"]; hot_win 0.92, hot_cap 0
+Role kits (Roles.kit, what a new hire brings): shop value / sells for / typical sign-on fee
+  rifleman      $9.6k / $3.8k
+  medic         $11.6k / $4.6k
+  autorifleman  $9.1k / $3.6k
+  grenadier     $8.2k / $3.3k
+  marksman      $9.7k / $3.9k
+  team_leader   $8.0k / $3.2k
+  sign-on fee: median $2.1k, p10 $1.8k, p90 $2.5k
+=== careful / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $224.7k / $199.2k / $249.3k   [$224.7k]
+  day 10: $254.8k / $210.9k / $305.9k   [$254.8k]
+  day 15: $284.1k / $218.9k / $341.8k   [$284.1k]
+  day 20: $321.9k / $254.0k / $373.1k   [$321.9k]
+  day 25: $357.2k / $287.2k / $440.0k   [$357.2k]
+  day 30: $387.5k / $315.3k / $466.7k   [$387.5k]
+  day 35: $430.3k / $338.3k / $539.7k   [$430.3k]
+income per campaign: $830.9k
+  advance      $183.6k  22.1%
+  completion   $395.5k  47.6%
+  bonuses      $88.9k  10.7%
+  loot         $81.6k   9.8%
+  salvage      $20.8k   2.5%
+  intel        $27.5k   3.3%
+  contraband   $25.8k   3.1%
+  pallets      $7.2k   0.9%
+expenses per campaign: $599.0k
+  wages        $258.3k  43.1%
+  upkeep       $107.6k  18.0%
+  field_costs  $161.4k  26.9%
+  kia_benefit  $26.4k   4.4%
+  treatment    $16.6k   2.8%
+  supports     $1.1k   0.2%
+  lost_heli    $5.6k   0.9%
+  respawns     $0.1k   0.0%
+  hiring       $21.2k   3.5%
+  fines        $0.6k   0.1%
+  clawback     $0.0k  -0.0%
+  loan_repay   $0.0k  -0.0%
+  (loans taken $0.0k per campaign; other $48.4k)
+deployments: 13.4 per campaign, 93% of contracts completed, 0% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean $18.1k, p10 -$1.6k, worst -$38.5k, 12% negative
+  debrief 'net after expenses' as shown: mean $6.7k, p10 -$12.9k, worst -$50.7k, 32% negative
+  mean per deployment: advance $13.7k, completion $29.5k, bonuses $6.6k, loot $6.1k, salvage $1.5k, intel $2.1k, contraband $1.9k, pallets $0.5k, wages -$19.3k, upkeep -$8.0k, field_costs -$12.0k, kia_benefit -$2.0k, treatment -$1.2k, supports -$0.1k, lost_heli -$0.4k, respawns -$0.0k, hiring -$0.5k, fines -$0.0k
+  worst deployment (contract, rating 3, 3 days, 0 of 1 contracts done): advance $13.4k, loot $10.8k, intel $3.5k, wages -$22.4k, upkeep -$9.0k, field_costs -$12.7k, kia_benefit -$16.0k, hiring -$3.8k, fines -$2.5k
+  rating 1:  30 deployments, net mean $6.1k, p10 -$2.8k, worst -$15.7k
+  rating 2: 199 deployments, net mean $13.6k, p10 -$0.1k, worst -$37.5k
+  rating 3: 298 deployments, net mean $22.6k, p10 -$1.1k, worst -$38.5k
+  rating 4:   8 deployments, net mean $11.5k, p10 -$9.8k, worst -$22.8k
+  rating 5:   1 deployments, net mean $16.5k, p10 $16.5k, worst $16.5k
+  contract zones: 536 deployments, 2.7 days each, contract pay $49.9k, net mean $18.1k, p10 -$1.6k, worst -$38.5k; radio follow-ups taken 0.0
+  lowest cash less loans in a campaign: mean $181.7k, worst $151.8k; out of credit and in debt: 0 of 40
+=== median / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $197.7k / $132.6k / $255.4k   [$197.7k]
+  day 10: $214.1k / $128.4k / $284.1k   [$214.1k]
+  day 15: $233.5k / $132.8k / $307.7k   [$233.5k]
+  day 20: $243.9k / $120.7k / $353.5k   [$243.9k]
+  day 25: $273.9k / $145.6k / $375.7k   [$273.9k]
+  day 30: $313.8k / $149.5k / $536.7k   [$313.8k]
+  day 35: $329.1k / $166.7k / $552.4k   [$329.1k]
+income per campaign: $904.1k
+  advance      $218.9k  24.2%
+  completion   $461.2k  51.0%
+  bonuses      $87.7k   9.7%
+  loot         $71.5k   7.9%
+  salvage      $23.4k   2.6%
+  intel        $9.6k   1.1%
+  contraband   $10.6k   1.2%
+  pallets      $21.0k   2.3%
+expenses per campaign: $773.3k
+  wages        $253.8k  32.8%
+  upkeep       $108.3k  14.0%
+  field_costs  $191.3k  24.7%
+  kia_benefit  $68.2k   8.8%
+  treatment    $33.3k   4.3%
+  supports     $52.3k   6.8%
+  lost_heli    $21.4k   2.8%
+  respawns     $11.6k   1.5%
+  hiring       $31.0k   4.0%
+  fines        $2.1k   0.3%
+  clawback     $0.0k  -0.0%
+  loan_repay   $0.0k  -0.0%
+  (loans taken $0.0k per campaign; other $48.4k)
+deployments: 12.7 per campaign, 77% of contracts completed, 21% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean $11.3k, p10 -$34.2k, worst -$80.5k, 36% negative
+  debrief 'net after expenses' as shown: mean $2.0k, p10 -$41.3k, worst -$85.0k, 48% negative
+  mean per deployment: advance $17.3k, completion $36.5k, bonuses $6.9k, loot $5.7k, salvage $1.9k, intel $0.8k, contraband $0.8k, pallets $1.7k, wages -$20.1k, upkeep -$8.6k, field_costs -$15.1k, kia_benefit -$5.4k, treatment -$2.6k, supports -$4.1k, lost_heli -$1.7k, respawns -$0.9k, hiring -$1.3k, fines -$0.2k
+  worst deployment (hot, rating 4, 4 days, 0 of 1 contracts done): advance $16.9k, contraband $7.1k, pallets $1.4k, wages -$29.2k, upkeep -$12.0k, field_costs -$21.2k, kia_benefit -$16.0k, treatment -$4.5k, supports -$19.0k, hiring -$3.7k
+  rating 1:  18 deployments, net mean -$0.6k, p10 -$20.1k, worst -$32.6k
+  rating 2: 132 deployments, net mean $1.6k, p10 -$22.8k, worst -$62.3k
+  rating 3: 174 deployments, net mean $6.5k, p10 -$31.5k, worst -$64.8k
+  rating 4: 151 deployments, net mean $13.7k, p10 -$48.7k, worst -$80.5k
+  rating 5:  31 deployments, net mean $74.6k, p10 -$22.8k, worst -$62.9k
+  contract zones: 399 deployments, 2.7 days each, contract pay $52.4k, net mean $6.8k, p10 -$26.1k, worst -$62.3k; radio follow-ups taken 0.0
+  hot zones: 107 deployments, 3.6 days each, contract pay $91.8k, net mean $27.9k, p10 -$56.4k, worst -$80.5k; radio follow-ups taken 0.7
+  lowest cash less loans in a campaign: mean $148.3k, worst $35.3k; out of credit and in debt: 0 of 40
+=== sloppy / current (40 campaigns) ===
+cash by day (mean / p10 / p90), cash less loans owed in []:
+  day  0: $183.4k / $181.6k / $185.0k   [$183.4k]
+  day  5: $104.1k / $53.9k / $156.4k   [$104.1k]
+  day 10: $55.6k / -$18.7k / $129.5k   [$52.2k]
+  day 15: $21.0k / -$33.0k / $110.9k   [$1.6k]
+  day 20: $3.9k / -$33.7k / $60.9k   [-$39.0k]
+  day 25: -$3.8k / -$58.6k / $71.1k   [-$68.3k]
+  day 30: -$31.0k / -$97.4k / $16.6k   [-$131.9k]
+  day 35: -$52.7k / -$181.9k / $19.1k   [-$175.9k]
+income per campaign: $662.1k
+  advance      $225.6k  34.1%
+  completion   $327.8k  49.5%
+  bonuses      $51.8k   7.8%
+  loot         $43.9k   6.6%
+  salvage      $11.7k   1.8%
+  intel        $0.0k   0.0%
+  contraband   $1.4k   0.2%
+  pallets      $0.0k   0.0%
+expenses per campaign: $1058.7k
+  wages        $243.1k  23.0%
+  upkeep       $108.0k  10.2%
+  field_costs  $190.8k  18.0%
+  kia_benefit  $163.6k  15.5%
+  treatment    $51.1k   4.8%
+  supports     $46.3k   4.4%
+  lost_heli    $71.2k   6.7%
+  respawns     $87.6k   8.3%
+  hiring       $53.4k   5.0%
+  fines        $6.7k   0.6%
+  clawback     $0.0k  -0.0%
+  loan_repay   $36.8k   3.5%
+  (loans taken $145.5k per campaign; other $48.4k)
+deployments: 12.2 per campaign, 61% of contracts completed, 25% hot
+  economic net per deployment (all cash in and out, its days' wages and upkeep): mean -$28.3k, p10 -$73.6k, worst -$120.9k, 81% negative
+  debrief 'net after expenses' as shown: mean -$32.7k, p10 -$76.7k, worst -$117.6k, 85% negative
+  mean per deployment: advance $18.5k, completion $26.8k, bonuses $4.2k, loot $3.6k, salvage $1.0k, contraband $0.1k, wages -$19.9k, upkeep -$8.8k, field_costs -$15.6k, kia_benefit -$13.4k, treatment -$4.2k, supports -$3.8k, lost_heli -$5.8k, respawns -$7.2k, hiring -$3.1k, fines -$0.5k, loan_repay -$3.0k
+  worst deployment (hot, rating 3, 3 days, 0 of 1 contracts done): advance $20.0k, loot $3.0k, wages -$19.8k, upkeep -$9.0k, field_costs -$15.9k, kia_benefit -$32.0k, treatment -$5.4k, respawns -$54.5k, hiring -$7.5k
+  rating 1:   8 deployments, net mean -$24.4k, p10 -$49.4k, worst -$52.3k
+  rating 2: 109 deployments, net mean -$31.8k, p10 -$67.4k, worst -$91.2k
+  rating 3: 184 deployments, net mean -$31.6k, p10 -$75.7k, worst -$120.9k
+  rating 4: 121 deployments, net mean -$32.2k, p10 -$76.3k, worst -$106.0k
+  rating 5:  67 deployments, net mean -$6.9k, p10 -$67.4k, worst -$98.7k
+  contract zones: 367 deployments, 2.7 days each, contract pay $43.8k, net mean -$29.7k, p10 -$68.5k, worst -$111.8k; radio follow-ups taken 0.0
+  hot zones: 122 deployments, 3.6 days each, contract pay $66.6k, net mean -$24.2k, p10 -$82.8k, worst -$120.9k; radio follow-ups taken 0.3
+  lowest cash less loans in a campaign: mean -$188.1k, worst -$501.2k; out of credit and in debt: 16 of 40
+=== expensive op / current (40 campaigns): rated 4, heli insertion, resupply + medevac + extraction, 2 KIA + 1 high command KIA, 3 wounded, 4 respawns bought ===
+  won: net mean -$12.9k, worst -$42.8k; cash after it $107.1k (start $183.4k)
+    advance $20.2k, completion $47.1k, bonuses $11.3k, loot $6.5k, salvage $1.4k, intel $0.7k, contraband $2.0k, pallets $0.9k, wages -$18.6k, upkeep -$8.6k, field_costs -$15.2k, kia_benefit -$24.0k, treatment -$2.7k, supports -$11.5k, respawns -$16.5k, hiring -$5.6k
+  failed: net mean -$69.7k, worst -$86.8k; cash after it $69.0k (start $183.4k)
+    advance $20.8k, loot $8.1k, intel $0.7k, contraband $1.5k, pallets $1.2k, wages -$18.2k, upkeep -$8.4k, field_costs -$14.9k, kia_benefit -$24.0k, treatment -$2.7k, supports -$11.5k, respawns -$16.5k, hiring -$5.7k, loan_repay -$0.2k

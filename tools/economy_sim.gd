@@ -753,6 +753,7 @@ func curve(profile: String, runs: int, days: int, first_seed := 1) -> Dictionary
 	Contracts.autosave = false
 	Contracts.auto_show_debrief = false
 	Economy.bill_paid.connect(_on_bill_paid)
+	var wages := Economy.wages_provider  # (the game's: _run_campaign clears it when it's done)
 	var starts: Array = []
 	var ends: Array = []
 	var broke := 0
@@ -762,6 +763,7 @@ func curve(profile: String, runs: int, days: int, first_seed := 1) -> Dictionary
 		ends.append(float(res.worth_at[CHECKPOINTS[-1]]))
 		broke += 1 if res.broke else 0
 	Economy.bill_paid.disconnect(_on_bill_paid)
+	Economy.wages_provider = wages
 	Contracts.autosave = autosave
 	Contracts.auto_show_debrief = show
 	return {"start": _mean(starts), "end": _mean(ends), "broke": broke}
@@ -777,6 +779,7 @@ func op_result(won: bool, runs: int, first_seed := 1) -> Dictionary:
 	Contracts.autosave = false
 	Contracts.auto_show_debrief = false
 	Economy.bill_paid.connect(_on_bill_paid)
+	var wages := Economy.wages_provider
 	var prof: Dictionary = EXPENSIVE_OP.duplicate(true)
 	prof.win = [1.0, 1.0, 1.0, 1.0, 1.0] if won else [0.0, 0.0, 0.0, 0.0, 0.0]
 	var nets: Array = []
@@ -787,6 +790,7 @@ func op_result(won: bool, runs: int, first_seed := 1) -> Dictionary:
 			nets.append(float(res.deploys[0].econ_net))
 			after.append(float(res.cash_after_op))
 	Economy.bill_paid.disconnect(_on_bill_paid)
+	Economy.wages_provider = wages
 	Contracts.autosave = autosave
 	Contracts.auto_show_debrief = show
 	return {"net": _mean(nets), "cash_after": _mean(after), "n": nets.size()}

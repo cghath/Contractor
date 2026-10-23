@@ -583,6 +583,7 @@ func _test_callout_rules() -> void:
 	callouts._last_by_key.clear()
 	callouts._last_by_side_key.clear()
 	callouts._pending.clear()
+	callouts._group_air.clear()
 	callouts.sent.clear()
 	callouts.shown.clear()
 	# And their own brains stay quiet meanwhile (the newest held-back line wins: anything they
@@ -633,6 +634,7 @@ func _test_callout_rules() -> void:
 		callouts._last_by_speaker.erase(String(s.name))
 		callouts._last_by_key.erase("%s/contact" % s.name)
 	callouts._last_by_side_key.clear()
+	callouts._group_air.clear()
 	check(callouts.contact(spotters[0], hostile), "%s spots an enemy and calls the contact" % spotters[0].name)
 	check(not callouts.contact(spotters[1], hostile) and said.call(spotters[1], &"contact").is_empty(),
 		"a squadmate who spots the same enemy right after stays quiet")

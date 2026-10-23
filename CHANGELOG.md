@@ -11,6 +11,44 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Voice and economy (claude/voice-economy)
+
+> **Where I stopped / next step (2026-10-22, 20:05 CDT):** both parts built and pushed. Local:
+> smoke passes (R2525); voice and contracts pass (R2526); roles rerun after its fixes. Not yet: CI on the
+> branch, merge into claude/ai-driving, a look in game (no windows while the Captain plays).
+> Next: render the 81 new lines with Piper when it's on a PC (tools/voices/lines_to_render.txt,
+> docs/voice.md), wire a speech recognizer to `VoiceOrder.run`, and price armour packages into
+> the sim once phase A8 has them. Every number is Proposed.
+
+#### Added
+- **Context-aware barks** (docs/voice.md): Grenade! (the side it threatens, before it goes off),
+  Check fire! (friendly on friendly), enemy down by what he was ("Gunner down!", "RPG's
+  down!"), pinned with where the fire comes from, out of ammo, and confirmations for voice
+  orders. Enemies say them in their own tongue, unsubtitled.
+- **One voice at a time per group**: a squad's lines wait their turn unless they outrank
+  what's being said (0.6 s; `Callouts.PRIORITY`: man down, grenade, check fire and the medical calls
+  cut in; contact, enemy down, pinned and out of ammo next; the leader's calls, reloading,
+  moving, set after).
+- **Voice orders**: more of the command menu (follow me, bound, garrison, clear the town, flank,
+  assault, suppress, watch, stance, mount up, get out); a squadmate's callsign or "everyone"
+  before the order; the one ordered confirms ("Holding."); the high command squads by callsign
+  ("Hawk two, move there on alpha": move, hold, defend, follow, regroup, extract, attack, base
+  of fire, bound, fall back, report); go codes ("alpha go", "execute H hour").
+- **Clips to render later**: `tools/voices/gen_callouts.py` has the new lines (English, and the
+  enemy barks in Russian and Farsi), renders only clips that are missing, and `--list` writes
+  what's left (tools/voices/lines_to_render.txt: 81 lines, 720 clips). Subtitles meanwhile.
+- **Economy sim** (tools/economy_sim.gd): the standing high command squads, heli insertions, a
+  scripted expensive op, 5-day checkpoints; `curve()` and `op_result()` for the tests.
+
+#### Changed
+- **Economy pass** (docs/economy.md, all Proposed): the standing squads' men get their own
+  field rate ($250 a day, `operations.hc_per_head_day`); field costs $700 -> $550 a head a day;
+  contract pay by rating 0.35-0.95 -> 0.46-1.22; support calls about 15% cheaper; a heli
+  insertion costs $6,000 (it was free); death benefit $10,000 -> $8,000; treatment $1,200 ->
+  $900; respawns $3,000 rising to at most $6,000. Sim, 35 days: careful $110k -> $430k, median
+  -$3k (9 of 40 broke) -> $329k (none), sloppy -$413k -> -$53k (16 of 40 broke); an expensive
+  op won -$56k -> -$13k, failed -$101k -> -$70k.
+
 ### Perf: towns, cities and the heli (claude/perf-towns)
 
 > **Where I stopped / next step (2026-10-22, 18:50 CDT):** three batches pushed (c570c558 + docs).

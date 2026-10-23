@@ -27,7 +27,7 @@ const SQUAD_CONTACT_GAP_S := 6.0
 const PENDING_S := 3.0
 ## Callouts that cut in on the speaker gap: man down, thrown grenades and the medical calls
 ## (they still don't repeat within REPEAT_GAP_S).
-const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out", &"medic", &"moving_to", &"treating", &"need_medic"]
+const URGENT: Array[StringName] = [&"man_down", &"frag_out", &"smoke_out", &"medic", &"moving_to", &"treating", &"need_medic", &"grenade", &"check_fire"]
 ## How far from a casualty a squadmate notices them go down and calls it.
 const MAN_DOWN_RANGE := 40.0
 ## Subtitles: how long a line stays up, and how many show at once.
@@ -58,14 +58,15 @@ const LINES := {
 ## "nothing insane"): one voice at a time per group (a squad; a side's men in no squad share
 ## one), by priority. A line while someone else in its group is talking (GROUP_GAP_S) waits its
 ## turn like a speaker-gap line (PENDING_S) unless it outranks what's being said; 3 cuts in on
-## anyone. Ids not listed are 0; a templated id takes its prefix's ("contact_two_close" is a
-## contact). Proposed.
-const GROUP_GAP_S := 1.0
+## anyone. A line already waiting goes before a newer one of no more weight (no starving). Ids
+## not listed are 0; a templated id takes its prefix's ("contact_two_close" is a contact).
+## Proposed.
+const GROUP_GAP_S := 0.6
 const PRIORITY := {
 	&"man_down": 3, &"grenade": 3, &"check_fire": 3, &"frag_out": 3, &"smoke_out": 3, &"flash_out": 3,
 	&"medic": 3, &"moving_to": 3, &"treating": 3, &"need_medic": 3,
-	&"contact": 2, &"enemy_down": 2, &"suppressed": 2, &"out_of_ammo": 2, &"tactic": 2, &"ack": 2, &"intel": 2,
-	&"reloading": 1, &"moving": 1, &"covering": 1, &"set": 1, &"no_shot": 1, &"clear": 1,
+	&"contact": 2, &"enemy_down": 2, &"suppressed": 2, &"out_of_ammo": 2, &"ack": 2, &"intel": 2,
+	&"tactic": 1, &"reloading": 1, &"moving": 1, &"covering": 1, &"set": 1, &"no_shot": 1, &"clear": 1,
 }
 ## Enemy down, by what the man was (GroupBoard.soldier_kind): its own line.
 const ENEMY_DOWN_LINES := {"mg": "Gunner down!", "at": "RPG's down!", "sniper": "Sniper down!"}
@@ -169,7 +170,7 @@ func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := ""
 	if shared != "" and now - float(_last_by_side_key.get(shared, -1000.0)) < side_gap:
 		return false
 	var line := text if text != "" else String(LINES.get(id, String(id)))
-	if (id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S) or not group_free(speaker, id):
+	if (id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S) or not group_free(speaker, id, true):
 		_pending[who] = {"speaker": speaker, "id": id, "line": line, "repeat_key": repeat_key,
 			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S}
 		return false
@@ -232,15 +233,22 @@ func group_of(speaker: Soldier) -> String:
 
 
 ## Host only. Whether `speaker` may say `id` now as far as his group goes: nobody else in it is
-## talking, or `id` outranks what is being said (3 always cuts in).
-func group_free(speaker: Soldier, id: StringName) -> bool:
+## talking, or `id` outranks what is being said (3 always cuts in). `new`: a fresh line, which
+## also waits behind anyone else in the group already waiting with as much weight.
+func group_free(speaker: Soldier, id: StringName, new := false) -> bool:
 	var prio := priority(id)
 	if prio >= 3:
 		return true
-	var air: Dictionary = _group_air.get(group_of(speaker), {})
-	if air.is_empty() or Soldier._now() >= float(air.until) or String(air.who) == String(speaker.name):
-		return true
-	return prio > int(air.prio)
+	var group := group_of(speaker)
+	var air: Dictionary = _group_air.get(group, {})
+	if not (air.is_empty() or Soldier._now() >= float(air.until) or String(air.who) == String(speaker.name)) and prio <= int(air.prio):
+		return false
+	if new:
+		for who: String in _pending:
+			var p: Dictionary = _pending[who]
+			if who != String(speaker.name) and is_instance_valid(p.speaker) and priority(p.id) >= prio and group_of(p.speaker) == group:
+				return false
+	return true
 
 
 ## A hero squad's or allied element's man (Soldier.hc_id) is heard only this close (G5); the

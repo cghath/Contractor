@@ -153,7 +153,7 @@ static func ack_for(keys: Array) -> Array:
 ## A callsign as spoken: normalized, every digit its word ("Hawk 2" -> "hawk two").
 static func spoken(callsign: String) -> String:
 	var words := PackedStringArray()
-	for w in normalize(callsign).split(" ", false):
+	for w in normalize(callsign.replace("-", " ")).split(" ", false):
 		if w.is_valid_int():
 			for d in w:
 				words.append(DIGIT_WORDS[int(d)])

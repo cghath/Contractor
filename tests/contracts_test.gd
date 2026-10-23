@@ -53,7 +53,6 @@ func _ready() -> void:
 	_test_wages_and_floor()
 	_test_economy_balance()
 	_test_overhaul_numbers()
-	_test_money_curve()
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
@@ -82,6 +81,7 @@ func _ready() -> void:
 	_test_ammo_readout()
 	await _test_driven_out()
 	await _test_over_network()
+	_test_money_curve()  # last: its campaigns deploy and debrief hundreds of times over the live level
 	Campaign.reset_campaign()
 	GameState.delete_save()
 	print("CONTRACTS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -653,7 +653,6 @@ func _test_money_curve() -> void:
 	check(float(sloppy.end) < float(sloppy.start) - 50000.0, "careless play goes negative ($%.0fk -> $%.0fk in 14 days, less loans)" % [float(sloppy.start) / 1000.0, float(sloppy.end) / 1000.0])
 	check(int(won.n) > 0 and float(won.net) < 0.0 and float(won.net) > -45000.0, "an expensive op that's won hurts (net $%.1fk)" % (float(won.net) / 1000.0))
 	check(int(lost.n) > 0 and float(lost.cash_after) > 0.0 and float(lost.net) > -100000.0, "one that fails hurts more but isn't ruinous (net $%.1fk, $%.0fk left)" % [float(lost.net) / 1000.0, float(lost.cash_after) / 1000.0])
-	Contracts.new_full_campaign(1)  # (the sim's campaigns leave theirs behind)
 
 
 ## The economy overhaul's numbers (docs/economy_proposal_2026-10-20.md, built 2026-10-20) and its
@@ -1640,9 +1639,9 @@ func _test_shop() -> void:
 	Contracts.server_accept(cid, {"pay_points": 0, "salvage_points": 0, "support_points": 1, "advance_share": 0.3})
 	cash = Economy.cash()
 	var budget := Contracts.support_left(cid)
-	check(Economy.server_pay_support("resupply", cid) and Economy.server_pay_support("extraction", cid) and Contracts.support_left(cid) == 0
-		and Economy.cash() == cash - (Prices.support_price("resupply") + Prices.support_price("extraction") - budget),
-		"a resupply and an extraction: the $%d support budget first, the rest from cash" % budget)
+	check(Economy.server_pay_support("resupply", cid) and Economy.server_pay_support("extraction", cid) and Economy.server_pay_support("medevac", cid) and Contracts.support_left(cid) == 0
+		and Economy.cash() == cash - (Prices.support_price("resupply") + Prices.support_price("extraction") + Prices.support_price("medevac") - budget),
+		"a resupply, an extraction and a medevac: the $%d support budget first, the rest from cash" % budget)
 
 
 func _test_intel_and_salvage() -> void:

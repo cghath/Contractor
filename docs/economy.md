@@ -1,6 +1,6 @@
 # Economy balance
 
-Two passes so far. Every number is Proposed (the Captain tunes them).
+Three passes so far. Every number is Proposed (the Captain tunes them).
 
 1. **feat/economy-balance** (Captain: "not enough expenses to balance, so it's easy to stack
    cash"): running costs, field costs, death benefits, lost helicopters, dearer respawns.
@@ -8,6 +8,105 @@ Two passes so far. Every number is Proposed (the Captain tunes them).
    but mission expenses swing it negative fast"): the reasons, the sim and the before/after are in
    [economy_proposal_2026-10-20.md](economy_proposal_2026-10-20.md). Income comes down, the
    shock costs are capped, and the debrief and the base say where the money went.
+3. **The economy pass, 2026-10-22** (claude/voice-economy): the two standing high command squads
+   (Hawk 2, Viper 3) came after the overhaul and doubled the men on wages and in the field. The
+   sim now keeps them, and on the overhaul's numbers a median company went broke. This pass puts
+   the curve back where the Captain wants it. Next section.
+
+## The economy pass, 2026-10-22 (all Proposed)
+
+**Targets** (the Captain's read, 2026-10-16: "too easy overall, but mission expenses swing it
+negative fast"): normal play steadily builds the company; an expensive op (heli insertion,
+supports, casualties) hurts but isn't ruinous; careless play does go negative.
+
+**What the sim plays now** (tools/economy_sim.gd): the overhaul's sim plus the standing squads
+(eight more men on wages, the start cash's fortnight of their wages, their own casualties,
+replacements and field costs: they come out at the extraction point, so the debrief counted
+them), a heli insertion with each profile's chance, and a scripted **expensive op**: a rated-4
+job flown in, resupply, medevac and extraction called, two squadmates and one high command man
+killed, three wounded, four respawns bought. Profiles as in the overhaul (careful, median,
+sloppy), plus `hc_kia` 0.1 / 0.3 / 0.8 and `hc_wounded` 0.6 / 1.2 / 2.0 a deployment and
+`insert` 0.2 / 0.4 / 0.6 (assumptions). 40 campaigns of 35 days a profile, seeds 1-40.
+
+### Before and after: mean cash by day (40 campaigns each)
+
+Before = the 2026-10-20 numbers with the standing squads in the sim. After = this pass's numbers
+in data/. Cash, not less loans; the full output (p10/p90, loans, every line) is in
+[economy_sim_2026-10-22.txt](economy_sim_2026-10-22.txt).
+
+```mermaid
+xychart-beta
+    title "Before: mean cash ($k) by day"
+    x-axis [0, 5, 10, 15, 20, 25, 30, 35]
+    y-axis "cash $k" -450 --> 450
+    line [183, 170, 160, 146, 132, 124, 116, 110]
+    line [183, 142, 98, 57, 45, 23, 5, -3]
+    line [183, 39, -27, -61, -135, -222, -318, -413]
+```
+
+```mermaid
+xychart-beta
+    title "After: mean cash ($k) by day"
+    x-axis [0, 5, 10, 15, 20, 25, 30, 35]
+    y-axis "cash $k" -450 --> 450
+    line [183, 225, 255, 284, 322, 357, 388, 430]
+    line [183, 198, 214, 234, 244, 274, 314, 329]
+    line [183, 104, 56, 21, 4, -4, -31, -53]
+```
+
+(Lines top to bottom: careful, median, sloppy.)
+
+| Day | Careful before | Careful after | Median before | Median after | Sloppy before | Sloppy after |
+|---|---|---|---|---|---|---|
+| 0 | $183k | $183k | $183k | $183k | $183k | $183k |
+| 5 | $170k | $225k | $142k | $198k | $39k | $104k |
+| 10 | $160k | $255k | $98k | $214k | -$27k | $56k |
+| 15 | $146k | $284k | $57k | $234k | -$61k | $21k |
+| 20 | $132k | $322k | $45k | $244k | -$135k | $4k |
+| 25 | $124k | $357k | $23k | $274k | -$222k | -$4k |
+| 30 | $116k | $388k | $5k | $314k | -$318k | -$31k |
+| 35 | $110k | $430k | -$3k | $329k | -$413k | -$53k |
+| Day 35, p10 to p90 | $22k to $206k | $338k to $540k | -$71k to $54k | $167k to $552k | -$563k to -$250k | -$182k to $19k |
+| Out of credit by day 35 | 0 of 40 | 0 of 40 | 9 of 40 | 0 of 40 | 39 of 40 | 16 of 40 |
+| Net per deployment (mean / p10) | -$5.7k / -$25.1k | $18.1k / -$1.6k | -$20.0k / -$55.8k | $11.3k / -$34.2k | -$55.0k / -$100.2k | -$28.3k / -$73.6k |
+
+| The expensive op (40 campaigns) | Before | After |
+|---|---|---|
+| Won: economic net, mean (worst) | -$56.3k (-$76.1k) | -$12.9k (-$42.8k) |
+| Failed: economic net, mean (worst) | -$100.8k (-$122.9k) | -$69.7k (-$86.8k) |
+| Failed: cash left after it (start $183k) | $32k | $69k |
+
+So: normal play builds steadily (+$146k in five weeks, nobody broke, the 10th percentile still
+ends near the start); careful play builds faster with less spread; a won expensive op costs about
+two days of profit, a failed one a third of the start cash; careless play goes into debt (16 of 40
+out of credit). Median trails careful because its extra risk mostly buys casualties; its hot
+zones pay ($27.9k a deployment against $6.8k in contract zones).
+
+### What changed, and why
+
+| What | Where | Was | Now (Proposed) | Why |
+|---|---|---|---|---|
+| The standing squads' field costs | `operations.hc_per_head_day` (new), `DebriefCalc.expenses` (`report.hc_names`) | 700 a head a day, like the squad | 250 | Heroes says they're "never charged per deployment", but their 8 heads at 700 added ~$5,600 a deployment day. They still cost their wages, and something in the field. |
+| Field costs | `operations.per_head_day` | 700 | 550 | With 14 heads out, field costs were the biggest line of a deployment. |
+| Contract pay by rating | `difficulty_pay` | 0.35, 0.5, 0.6, 0.75, 0.95 | 0.46, 0.63, 0.8, 0.98, 1.22 | About a third back: the overhaul cut pay for a company of 8 on wages; it has 16 now. Still about two thirds of the pre-overhaul rates. |
+| Support calls | `supports` | resupply 12,000, transport 9,000, AAV 18,000, extraction 14,000, medevac 8,000, allied troops 26,000 | 10,000, 7,500, 16,000, 12,000, 6,500, 22,000 | The swing the Captain felt: one op's calls ran $30-50k. One support point ($23,000) still covers an insertion and an extraction. |
+| Helicopter insertion | `supports.insertion`, `Economy.server_pay_insertion` (from `HeliSupports.server_insert`) | free | 6,000 | It flies a helicopter; the briefing's choice now costs something. From the support budget first, then cash, on credit if neither covers it (the squad is already aboard). |
+| Death benefit | `operations.kia_benefit` | 10,000 | 8,000 | Casualties among 16 men come more often. A loss still costs the benefit, a sign-on fee and the man's missions. |
+| Treatment | `operations.wounded_care` | 1,200 | 900 | Same reason, for the wounded. |
+| Bought respawns | `respawn`, `respawn_max` | 4,000 (+25% each, at most 8,000) | 3,000 (+25% each, at most 6,000) | The last of the shock costs. |
+
+Unchanged: wages (`Roster.WAGE_*`), upkeep, the standing squads themselves and their start-cash
+fortnight, hot-zone rate x1.4, the clean bonus, lost-helicopter deductibles, shop prices, loans.
+
+**Not modelled yet**: armour packages (combined_arms phase A8 has no prices yet; when it does,
+put them in `PROPOSED.prices` and a profile that buys them), and the air wing upgrades and
+vehicles as purchases (they're capital the company chooses, not running costs).
+
+**Tests**: `tests/contracts_test.gd` "Economy overhaul numbers" (this pass's numbers, the high
+command field rate in the debrief) and "The money curve" (short sim runs: careful and median
+build, sloppy goes negative, the expensive op won hurts but under $45k, failed leaves cash). To
+try new numbers: put them in `PROPOSED` in tools/economy_sim.gd and run
+`--variant both --runs 20` (about 3.5 minutes for all three profiles on this PC).
 
 ## The overhaul, 2026-10-20
 
