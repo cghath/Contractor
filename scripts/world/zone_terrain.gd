@@ -551,6 +551,15 @@ func normal_at(x: float, z: float) -> Vector3:
 	return Vector3(-dx, 2.0 * e, -dz).normalized()
 
 
+## normal_at on the ground as generated, before any cuts (plane_height): reads only the heights,
+## so a worker thread may ask (ZoneScatter's ground cover).
+func plane_normal(x: float, z: float) -> Vector3:
+	var e := CELL_M
+	var dx := plane_height(x + e, z) - plane_height(x - e, z)
+	var dz := plane_height(x, z + e) - plane_height(x, z - e)
+	return Vector3(-dx, 2.0 * e, -dz).normalized()
+
+
 ## The steepest slope in the grid (degrees), for checks.
 func max_slope_deg() -> float:
 	var worst := 0.0
@@ -701,6 +710,7 @@ func build_visuals() -> void:
 	if _visuals_built:
 		return
 	_visuals_built = true
+	_shrink_pads()
 	_material = ground_material()
 	var count := chunk_count()
 	for cz in count:
@@ -790,6 +800,9 @@ var _plan_full := false
 
 
 func _process(_delta: float) -> void:
+	if _task >= 0:
+		_take_refined()
+		return
 	var camera := get_viewport().get_camera_3d()
 	if camera == null or not _visuals_built:
 		return
@@ -801,15 +814,52 @@ func _process(_delta: float) -> void:
 	if not _queue.is_empty():
 		var c: Vector2i = _queue.pop_front()
 		if not _lod0.has(c):
+			# Perf (world content pass, 2026-10-23): a fine chunk's vertices, normals and colours are
+			# worked out on a worker thread (15-30 ms of GDScript a chunk with the world expansion's
+			# ground tints: fields, banks, roads, pads), its mesh made here when they're done.
 			var t := Time.get_ticks_usec()
-			_refine(c)
+			_task_chunk = c
+			_task_out = []
+			_task = WorkerThreadPool.add_task(_refine_arrays.bind(c, _covered_mask(c.x, c.y, LOD_STEPS[0])), false, "terrain fine chunk")
 			FrameCost.spent(&"terrain_fine", t)
 
 
-func _lod_instance(cx: int, cz: int, lod: int) -> MeshInstance3D:
+## The worker's fine chunk (_process): one at a time.
+var _task := -1
+var _task_chunk := Vector2i.ZERO
+var _task_out: Array = []
+
+
+func _refine_arrays(c: Vector2i, covered: PackedByteArray) -> void:
+	_task_out = _chunk_arrays(c.x, c.y, LOD_STEPS[0], SKIRT_M[0], covered)
+
+
+## The worker's chunk is done: its finest mesh goes in (unless it was built meanwhile).
+func _take_refined() -> void:
+	if not WorkerThreadPool.is_task_completed(_task):
+		return
+	WorkerThreadPool.wait_for_task_completion(_task)
+	_task = -1
+	var c := _task_chunk
+	if _lod0.has(c) or _task_out.is_empty() or not _lod1.has(c):
+		return
+	var t := Time.get_ticks_usec()
+	_lod0[c] = _lod_instance(c.x, c.y, 0, _mesh_of(_task_out))
+	_lod1[c].visibility_range_begin = LOD_END_M[0]
+	_task_out = []
+	FrameCost.spent(&"terrain_fine", t)
+
+
+func _exit_tree() -> void:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+
+
+func _lod_instance(cx: int, cz: int, lod: int, mesh: ArrayMesh = null) -> MeshInstance3D:
 	var node := MeshInstance3D.new()
 	node.name = "Mesh_%d_%d_%d" % [cx, cz, lod]
-	node.mesh = _chunk_mesh(cx, cz, LOD_STEPS[lod], SKIRT_M[lod])
+	node.mesh = mesh if mesh else _chunk_mesh(cx, cz, LOD_STEPS[lod], SKIRT_M[lod])
 	node.material_override = _material
 	node.visibility_range_begin = LOD_END_M[lod - 1] if lod > 0 else 0.0
 	node.visibility_range_end = LOD_END_M[lod]
@@ -822,6 +872,40 @@ func _lod_instance(cx: int, cz: int, lod: int) -> MeshInstance3D:
 
 ## One chunk's mesh with a quad every `step` cells, and a skirt `skirt` metres deep.
 func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
+	return _mesh_of(_chunk_arrays(cx, cz, step, skirt, _covered_mask(cx, cz, step)))
+
+
+## Which of a chunk's cells (row by row) GroundCuts draws finely, at the finest level (empty at
+## the others, or with no cuts): read here on the main thread, for _chunk_arrays.
+func _covered_mask(cx: int, cz: int, step: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	if step != 1 or cuts == null:
+		return out
+	out.resize(CHUNK_CELLS * CHUNK_CELLS)
+	for b in CHUNK_CELLS:
+		for a in CHUNK_CELLS:
+			if cuts.covers(Vector2i(cx * CHUNK_CELLS + a, cz * CHUNK_CELLS + b)):
+				out[a + b * CHUNK_CELLS] = 1
+	return out
+
+
+func _mesh_of(data: Array) -> ArrayMesh:
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = data[0]
+	arrays[Mesh.ARRAY_NORMAL] = data[1]
+	arrays[Mesh.ARRAY_COLOR] = data[2]
+	arrays[Mesh.ARRAY_INDEX] = data[3]
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+## A chunk's mesh arrays [vertices, normals, colours, indices] with a quad every `step` cells and
+## a skirt `skirt` metres deep, leaving out the cells `covered` marks (_covered_mask). Reads only
+## the zone's generated ground (heights, pads, roads, water, features), never the scene: safe on a
+## worker thread. A skirt's vertices take their edge vertex's normal and colour (worked out once).
+func _chunk_arrays(cx: int, cz: int, step: int, skirt: float, covered: PackedByteArray) -> Array:
 	var n := CHUNK_CELLS / step
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
@@ -831,10 +915,15 @@ func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
 	var j0 := cz * CHUNK_CELLS
 	for b in n + 1:
 		for a in n + 1:
-			_add_vertex(verts, normals, colours, i0 + a * step, j0 + b * step, 0.0)
+			var i := i0 + a * step
+			var j := j0 + b * step
+			verts.append(_vertex(i, j))
+			var nrm := vertex_normal(i, j)
+			normals.append(nrm)
+			colours.append(_ground_colour(i, j, nrm))
 	for b in n:
 		for a in n:
-			if step == 1 and cuts and cuts.covers(Vector2i(i0 + a, j0 + b)):
+			if not covered.is_empty() and covered[a + b * CHUNK_CELLS] != 0:
 				continue  # drawn fine (GroundCuts)
 			var p := a + b * (n + 1)
 			indices.append_array([p, p + 1, p + n + 1, p + 1, p + n + 2, p + n + 1])  # clockwise from above
@@ -843,13 +932,17 @@ func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
 		[Vector2i(0, 0), Vector2i(1, 0)], [Vector2i(n, 0), Vector2i(0, 1)],
 		[Vector2i(n, n), Vector2i(-1, 0)], [Vector2i(0, n), Vector2i(0, -1)],
 	]
+	var down := Vector3(0, skirt, 0)
 	for e: Array in edges:
 		var start: Vector2i = e[0]
 		var dir: Vector2i = e[1]
 		var base := verts.size()
 		for k in n + 1:
 			var g: Vector2i = start + dir * k
-			_add_vertex(verts, normals, colours, i0 + g.x * step, j0 + g.y * step, skirt)
+			var top := g.x + g.y * (n + 1)
+			verts.append(verts[top] - down)
+			normals.append(normals[top])
+			colours.append(colours[top])
 		for k in n:
 			var g0: Vector2i = start + dir * k
 			var top0 := g0.x + g0.y * (n + 1)
@@ -858,30 +951,19 @@ func _chunk_mesh(cx: int, cz: int, step: int, skirt: float) -> ArrayMesh:
 			# Both sides: a skirt is seen from whichever neighbour shows the crack.
 			indices.append_array([top0, top1, base + k + 1, top0, base + k + 1, base + k,
 				top0, base + k + 1, top1, top0, base + k, base + k + 1])
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_COLOR] = colours
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return mesh
-
-
-func _add_vertex(verts: PackedVector3Array, normals: PackedVector3Array, colours: PackedColorArray, i: int, j: int, drop: float) -> void:
-	var v := _vertex(i, j)
-	verts.append(v - Vector3(0, drop, 0))
-	var n := vertex_normal(i, j)
-	normals.append(n)
-	colours.append(_ground_colour(i, j, n))
+	return [verts, normals, colours, indices]
 
 
 func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 	var p := Vector2(v_x(i), v_x(j))
-	for pad: Array in pads:
-		if (pad[0] as Rect2).grow(-1.0).has_point(p):
-			return c_road if _streets.any(func(r: Rect2) -> bool: return r.has_point(p)) else _pad_colour(pad[0], p, i, j)
+	if _pads_in.size() != pads.size():
+		_shrink_pads()
+	for k in _pads_in.size():
+		if _pads_in[k].has_point(p):
+			for r in _streets:
+				if r.has_point(p):
+					return c_road
+			return _pad_colour(pads[k][0], p, i, j)
 	var steep := clampf((1.0 - n.y) * 12.0, 0.0, 1.0)
 	var patch := float(absi(hash(Vector2i(i / 3, j / 3) + Vector2i(seed_value, 0))) % 1000) / 1000.0
 	var colour := c_grass.lerp(c_dry, patch * 0.25)  # the shader adds the larger, smoother patches
@@ -909,6 +991,18 @@ func _ground_colour(i: int, j: int, n: Vector3) -> Color:
 			colour = colour.lerp(c_earth.darkened(0.28).lerp(c_rock, 0.35 if absi(hash(Vector2i(i, j) + Vector2i(seed_value, 3))) % 3 == 0 else 0.0), wet * 0.85)
 	var tint := _road_tint(p.x, p.y)
 	return colour.lerp(Color(tint.r, tint.g, tint.b), tint.a)  # (all of it on the road: the shader knows it by its colour)
+
+
+## The pads a metre in from their edges (_ground_colour), made once (they were made again for
+## every pad at every vertex). Pads are set while the zone generates, before any mesh is built.
+var _pads_in: Array[Rect2] = []
+
+
+func _shrink_pads() -> void:
+	var out: Array[Rect2] = []
+	for pad: Array in pads:
+		out.append((pad[0] as Rect2).grow(-1.0))
+	_pads_in = out
 
 
 ## A pad's ground at `p` (vertex i, j) (world visual pass, cghath 2026-10-20: a pad read as one

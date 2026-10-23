@@ -16,6 +16,8 @@ const EDGE_SHARE := 0.35
 const SNAP_M := 6.0
 const SIZE := Vector2(0.35, 0.75)
 const MIN_UP := 0.8
+## Proposed: no carpet with the eye this far over the ground (m; _process).
+const EYE_MAX_M := 20.0
 
 var _scatter: ZoneScatter
 var _terrain: ZoneTerrain
@@ -51,6 +53,17 @@ func _process(_delta: float) -> void:
 	if camera == null or _terrain == null:
 		return
 	var at := Vector2(camera.global_position.x, camera.global_position.z)
+	# Perf (world content pass, 2026-10-23): with the eye more than EYE_MAX_M over the ground (a
+	# helicopter, a tower's roof) every tuft is that far off at least, a few pixels at most: the
+	# carpet isn't drawn or laid (from a UH-60 a lay was most of the new ground every frame).
+	var up := camera.global_position.y - _terrain.height_at(at.x, at.y) > EYE_MAX_M
+	if up:
+		if visible:
+			visible = false
+			_centre = Vector2(INF, INF)
+		return
+	if not visible:
+		visible = true
 	var cut_now := _terrain.cuts.version if _terrain.cuts else 0
 	if at.distance_to(_centre) < SNAP_M and cut_now == _cut_seen and not _incomplete:
 		return

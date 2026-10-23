@@ -37,6 +37,8 @@ var _rng := RandomNumberGenerator.new()
 var _send_in := 0.0
 var _groups := {}  # "species#coat" -> [MultiMeshInstance3D, [animal indices]]
 var _areas: Array[Area3D] = []
+var _moved := PackedByteArray()  # per animal: walked this tick (its hit box follows)
+var _still := PackedByteArray()  # per animal: drawn where it stands, nothing to glide (_place_all)
 var _time := 0.0
 
 
@@ -63,6 +65,9 @@ func setup(scatter: ZoneScatter, terrain: ZoneTerrain) -> void:
 
 
 func _ready() -> void:
+	_moved.resize(animals.size())
+	_moved.fill(1)
+	_still.resize(animals.size())
 	if multiplayer.is_server():
 		for i in animals.size():
 			var a := animals[i]
@@ -133,12 +138,18 @@ func _physics_process(delta: float) -> void:
 		else:
 			a.pos = (a.pos as Vector2) + to.normalized() * step
 			a.face = lerp_angle(float(a.face), atan2(-to.y, to.x), minf(delta * 4.0, 1.0))
+		_moved[i] = true
 	_send_in -= delta
 	if _send_in <= 0.0:
 		_send_in = SEND_S
 		_state.rpc(_packed())
 		sent += 1
+	# Perf (world content pass, 2026-10-23): only the hit boxes of animals that moved this tick
+	# (most stand grazing; every area moved every tick was ~1 ms a tick in a city).
 	for i in _areas.size():
+		if not _moved[i]:
+			continue
+		_moved[i] = false
 		var a := animals[i]
 		var p: Vector2 = a.pos
 		_areas[i].global_transform = Transform3D(Basis(Vector3.UP, float(a.face)), Vector3(p.x, _terrain.height_at(p.x, p.y), p.y))
@@ -225,7 +236,15 @@ func _place_all(delta := 1.0) -> void:
 		var node: MultiMeshInstance3D = _groups[key][0]
 		var list: Array = _groups[key][1]
 		for k in list.size():
-			var a := animals[int(list[k])]
+			var index := int(list[k])
+			var a := animals[index]
+			# Perf (world content pass, 2026-10-23): one standing still, drawn there already, is left be.
+			var settled := float(a.wait) > 0.0 and (a.show as Vector2).distance_squared_to(a.pos) < 1e-6 \
+				and absf(angle_difference(float(a.show_face), float(a.face))) < 1e-3
+			var state := (1 if a.alive else 2) if settled else 0
+			if state != 0 and _still[index] == state:
+				continue
+			_still[index] = state
 			var p: Vector2 = a.show
 			var y := _terrain.height_at(p.x, p.y)
 			var basis := Basis(Vector3.UP, float(a.show_face))

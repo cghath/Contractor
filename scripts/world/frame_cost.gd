@@ -16,6 +16,10 @@ extends RefCounted
 ## inside "buildings" (so inside "ai" too); "foliage" (ZoneScatter.foliage_least: sight lines
 ## through the woods) is inside "ai" when an AI's spotting asked. Add up only the top-level ones ("ai", "nav", "sfx",
 ## "voxels", "models", and "buildings" asked outside an AI tick) for a frame's counted total.
+## ZoneNav's own tick (world content pass, 2026-10-23): "nav_wanted" (which chunks the soldiers
+## want, every UPDATE_S) and "nav_start" (starting the new chunks' bakes, their "nav" gathering
+## inside it); "terrain_fine" and "scatter_cells" are the main thread's part of a fine terrain chunk
+## or a scatter cell (their arrays and ground cover are worked out on a worker thread).
 
 static var on := false
 ## System -> microseconds spent since take() last ran.

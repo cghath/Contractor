@@ -493,6 +493,8 @@ func _measure(name: String, walk: Array) -> void:
 		SquadAI.prof = {}
 	_nodes_at_frame = get_tree().get_node_count()
 	_ai_at_frame = level.ai.get_child_count()
+	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
+	var bakes_before := nav.bakes if nav else 0
 	_prev_event_process = true
 	_frame_start = Time.get_ticks_usec()
 	_measuring = true
@@ -541,6 +543,8 @@ func _measure(name: String, walk: Array) -> void:
 			var k: String = SquadAI.Intent.keys()[brain.intent]
 			intents[k] = int(intents.get(k, 0)) + 1
 	print("perf: %s: awake AI's intents at the end: %s" % [name, intents])
+	if nav and is_instance_valid(nav):
+		print("perf: %s: navigation: %d chunk bakes (%.1f a second), %d chunks held at the end" % [name, nav.bakes - bakes_before, (nav.bakes - bakes_before) / secs, nav.chunk_total()])
 	var n_frames := maxi(_frames.size(), 1)
 	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
 	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
@@ -829,7 +833,10 @@ func _draw_kind(g: GeometryInstance3D) -> String:
 	var n: Node = g
 	while n and n != level:
 		if n is ZoneScatter:
-			return "scatter_far" if String(g.name).begins_with("Far") or g.visibility_range_begin > 0.0 else "scatter"
+			var nm := String(g.name)
+			if nm.contains("lib:"):
+				return "props_far" if g.visibility_range_begin > 0.0 else "props"
+			return "scatter_far" if nm.begins_with("Far") or g.visibility_range_begin > 0.0 else "scatter"
 		if n is ZoneTerrain:
 			return "terrain"
 		if n is Soldier:
