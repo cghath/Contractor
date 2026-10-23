@@ -256,17 +256,33 @@ static func belly(spec: Dictionary, packages: Array = []) -> Dictionary:
 ## it, "floor_kg": the TNT that reaches it}. No belly: never held.
 static func mine_result(spec: Dictionary, level: String, packages: Array = []) -> Dictionary:
 	var def: Dictionary = (_stanag().get("mine", {}) as Dictionary).get(level, {})
-	var b := belly(spec, packages)
-	if def.is_empty() or b.is_empty():
+	if def.is_empty() or belly(spec, packages).is_empty():
 		return {"held": false, "floor_kg": INF}
-	var proof: Dictionary = _stanag().get("mine_proof", {})
 	var station := String(def.station)
 	if station == "wheel" and String(spec.get("kind", "")) == "tracked":
 		station = "track"
-	var kg := float(def.kg) * float((proof.get("station_share", {}) as Dictionary).get(station, 1.0)) * float(b.get("blast", 1.0))
+	var kg := floor_kg(spec, float(def.kg), station, packages)
+	return {"held": kg <= floor_limit_kg() + 0.000001, "floor_kg": kg}
+
+
+## The TNT (kg) of a `kg` charge under station `station` ("wheel", "track", "belly") of `spec`
+## with `packages` that reaches the crew floor: kg x the station's share x belly.blast (x0.5 with
+## blast seats). The one sum the mine ratings are proven with and phase A2's belly blast turns
+## into crew injuries (VehicleModules.belly_injury). INF with no belly.
+static func floor_kg(spec: Dictionary, kg: float, station: String, packages: Array = []) -> float:
+	var b := belly(spec, packages)
+	if b.is_empty():
+		return INF
+	var proof: Dictionary = _stanag().get("mine_proof", {})
+	var out := kg * float((proof.get("station_share", {}) as Dictionary).get(station, 1.0)) * float(b.get("blast", 1.0))
 	if String(b.get("seats", "")) == "blast":
-		kg *= float(proof.get("blast_seat_mult", 1.0))
-	return {"held": kg <= float(proof.get("floor_kg", 0.0)) + 0.000001, "floor_kg": kg}
+		out *= float(proof.get("blast_seat_mult", 1.0))
+	return out
+
+
+## The most TNT (kg) the crew floor takes and the crew fight on (mine_proof floor_kg).
+static func floor_limit_kg() -> float:
+	return float((_stanag().get("mine_proof", {}) as Dictionary).get("floor_kg", 0.55))
 
 
 ## The mine levels the belly really holds: {"wheel", "belly"} (MINE_WHEEL, MINE_BELLY).

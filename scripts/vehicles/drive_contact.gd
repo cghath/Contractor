@@ -98,10 +98,12 @@ static func decide(cls: String, disabled: bool, through_only: bool, near: float,
 
 
 ## Whether `v` is out of the fight as a vehicle: engine or wheels (tracks) gone, burning, its hull
-## nearly through, a wreck. (Out of fuel or a flat battery isn't: the crew stays for a fix.)
+## nearly through, a wreck, or its modules immobile (combined arms A2: a thrown track, the
+## transmission). (Out of fuel or a flat battery isn't: the crew stays for a fix.)
 static func is_disabled(v: Vehicle) -> bool:
 	return v.wrecked or v.is_burning() or v.zone_health(Vehicle.ZONE_ENGINE) <= 0.0 \
-		or v.zone_health(Vehicle.ZONE_WHEELS) <= 0.0 or v.zone_health(Vehicle.ZONE_HULL) < ABANDON_HULL
+		or v.zone_health(Vehicle.ZONE_WHEELS) <= 0.0 or v.zone_health(Vehicle.ZONE_HULL) < ABANDON_HULL \
+		or (v.modules != null and v.modules.mobility_killed())
 
 
 static func _why(act: String, near: float, at: bool) -> String:

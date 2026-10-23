@@ -309,6 +309,8 @@ var cargo_hold: VehicleCargo
 var bay: VehicleBay
 ## Host: the AI driver, made by server_drive_to / server_follow_path.
 var ai: VehicleAI
+## Combined arms A2: its modules and kill states (VehicleModules; replicated, saved).
+var modules: VehicleModules
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -398,6 +400,8 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	add_child(hull)
 	cargo_hold = VehicleCargo.new(float(spec.get("cargo_l", 0.0)), float(spec.get("cargo_kg", 0.0)))
 	add_child(cargo_hold)
+	modules = VehicleModules.new(self)
+	add_child(modules)
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -435,7 +439,7 @@ func _add_sync() -> void:
 	pose_sync.replication_interval = 1.0 / POSE_HZ
 	add_child(pose_sync)
 	var state := SceneReplicationConfig.new()
-	for path: NodePath in [^".:net_state", ^".:net_carves", ^"Cargo:net_state"]:
+	for path: NodePath in [^".:net_state", ^".:net_carves", ^"Cargo:net_state", ^"Modules:net_state"]:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 		state.property_set_spawn(path, true)
@@ -754,12 +758,14 @@ func is_burning() -> bool:
 func can_drive() -> bool:
 	return not wrecked and kind != HELICOPTER and kind != STATIC and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
 		and (battery_ok if multiplayer.is_server() else bool(net_state.get("battery", true))) \
-		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0)
+		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed())
 
 
 ## Top speed now (m/s): the model's, cut by engine and wheel damage.
 func top_speed(reverse := false) -> float:
 	var top := float(spec.get("reverse_kmh" if reverse else "top_speed_kmh", 0.0)) * VehicleSpecs.KMH
+	if modules and modules.authored:
+		return top * modules.speed_share()  # A2: engine, transmission, tracks, wheels and run-flats
 	var engine := zone_health(ZONE_ENGINE)
 	var wheels := zone_health(ZONE_WHEELS)
 	var mult := lerpf(0.35, 1.0, engine) * (lerpf(0.5, 1.0, wheels) if wheels > 0.0 else 0.15)
@@ -2261,6 +2267,7 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 	out.stopped = res.stopped
 	out.energy_left = res.energy_left
 	out.lost_j = maxf(float(hit.get("energy_j", 0.0)) - float(res.energy_left), 0.0)
+	out.traced = bool(res.get("traced", false))  # A2: the modules took the jet's path (Warheads skips its own)
 	if not on_part:
 		_carve_for(hit_kind, res, local, hit)
 	if not wrecked:
@@ -2315,6 +2322,9 @@ func _add_carves(ops: Array) -> void:
 
 
 func _apply_damage(zone: Dictionary, res: Dictionary, at: Vector3, hit: Dictionary) -> void:
+	if modules and modules.authored:
+		modules.server_apply(zone, res, at, hit)  # A2: modules, spall cone, crew, kill states
+		return
 	var dmg := float(res.damage_kj) * damage_mult
 	if dmg > 0.0:
 		var z: StringName = zone.zone
@@ -2413,6 +2423,7 @@ func _become_wreck() -> void:
 		cargo_hold.clear_all()
 	for z: StringName in _zones:
 		_zones[z] = 0.0
+	modules.server_wrecked()
 	if is_instance_valid(ai):
 		ai.stop()
 	freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
@@ -2768,6 +2779,7 @@ func job_left(actor: Node) -> float:
 ## Host (V2, tests): sets a zone's health directly (0 to 1).
 func server_set_zone(zone: StringName, health: float) -> void:
 	_zones[zone] = clampf(health, 0.0, 1.0)
+	modules.server_set_zone(zone, health)  # A2: the modules under it (the zone then answers from them)
 	if zone == ZONE_HULL and health <= 0.0:
 		_destroy()
 	_publish_state(true)
@@ -2792,6 +2804,7 @@ func server_set_fuel(litres: float) -> void:
 func server_repair(zone: StringName, to_health: float, add := 0.0) -> void:
 	var h := float(_zones.get(zone, 1.0))
 	_zones[zone] = clampf(maxf(h + add, to_health), 0.0, 1.0)
+	modules.server_repair(zone, to_health, add)
 	if zone == ZONE_FUEL:
 		_leak = 0.0
 	_publish_state(true)
@@ -3017,7 +3030,7 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if not seat in gun_seats():
 		seat = _main_gun_seat()
 	var info := gun_info(seat)
-	if info.is_empty() or wrecked:
+	if info.is_empty() or wrecked or not modules.gun_ok(seat):  # A2: its breech, barrel or sights out
 		return {}
 	var main := seat == _main_gun_seat()
 	if not main and not door_arc_ok(seat, direction):
@@ -3027,12 +3040,12 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if now < next:
 		return {}
 	var item := VehicleSpecs.gun_item(info.id)
-	_gun_next[seat] = maxf(next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm)
+	_gun_next[seat] = maxf(next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm) + modules.gun_jam_s(seat)
 	if not cargo_hold.take_feed(info.feed):
 		_tell(shooter, "%s: no ammunition in the %s" % [info.name, display_name()])
 		return {}
 	var origin := gun_origin(seat)
-	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3)))
+	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3))) * modules.gun_spread_mult(seat)
 	# A turret's rounds go where its barrel points (the gunner turns it: request_aim, server_aim).
 	var dir := barrel_direction() if turret and main else direction.normalized()
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
@@ -3145,7 +3158,7 @@ func condition() -> Dictionary:
 	var zones_out := {}
 	for z: StringName in _zones:
 		zones_out[String(z)] = float(_zones[z])
-	return {"zones": zones_out, "fuel": fuel, "leak": _leak, "carves": net_carves.duplicate(true)}
+	return {"zones": zones_out, "fuel": fuel, "leak": _leak, "carves": net_carves.duplicate(true), "modules": modules.to_save()}
 
 
 ## Host: puts a saved condition() back on this vehicle.
@@ -3159,6 +3172,7 @@ func apply_condition(c: Dictionary) -> void:
 	_leak = maxf(float(c.get("leak", 0.0)), 0.0)
 	if c.has("carves"):
 		net_carves = (c.carves as Array).duplicate(true)
+	modules.from_save(c.get("modules", {}), zones_in)
 
 
 func to_save() -> Dictionary:
@@ -3170,7 +3184,7 @@ func to_save() -> Dictionary:
 	return {"id": vehicle_id, "model": model, "scheme": scheme, "faction": String(faction), "wrecked": wrecked,
 		"pos": [p.x, p.y, p.z], "rot": [q.x, q.y, q.z, q.w], "zones": zones_out, "fuel": fuel, "burning": burning_s,
 		"battery": battery_ok, "salvaged": salvaged, "leak": _leak, "carves": net_carves.duplicate(true),
-		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids()}
+		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids(), "modules": modules.to_save()}
 
 
 ## Host: the dead riding in seats, by seat (as text), by their body uid (Soldier.body_record:
@@ -3230,6 +3244,7 @@ func from_save(data: Dictionary) -> void:
 	_leak = maxf(float(data.get("leak", 0.0)), 0.0)
 	_lost = wrecked or burning_s > 0.0
 	net_carves = (GameState.from_json(data.get("carves", [])) as Array) if data.has("carves") else []
+	modules.from_save(data.get("modules", {}) if data.get("modules") is Dictionary else {}, zones_in)  # A2 (an older save: from its zones)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

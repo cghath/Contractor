@@ -13,8 +13,9 @@ extends RefCounted
 ## vehicle_hit() is the host glue Vehicle.server_take_hit calls for a model with "plates": it
 ## finds the shell, the plate (plate_at) and the tiles over the point (tiles_at), resolves, uses
 ## up the tiles that fired, and turns the result into the damage dictionary Vehicle._apply_damage
-## already takes (damage(), with the HitResult under "armour"), so zones, fire, spall and wrecks
-## work as before until phase A2's modules take over. Rounds with no vehicle numbers (pistol and
+## already takes (damage(), with the HitResult under "armour"); on a model with modules (phase
+## A2, VehicleModules.plan) it adds the path through them, the spall cone and any burst inside,
+## which VehicleModules applies. Rounds with no vehicle numbers (pistol and
 ## rifle rounds: small calibre stays immune, Captain's call), charges, mines and fire support
 ## (HE with no warhead id), and hits inside no plate keep VehicleDamage. Every number here is
 ## Proposed.
@@ -466,7 +467,11 @@ static func vehicle_hit(vehicle: Vehicle, hit: Dictionary, zone: Dictionary, loc
 		used[f[0]] = flags
 	if not (res.tiles_fired as Array).is_empty():
 		vehicle.set_meta(META_TILES, used)
-	return damage(res, shell, zone, hit)
+	var d := damage(res, shell, zone, hit)
+	if vehicle.modules and vehicle.modules.authored:  # A2: what it does inside (the path, spall, a burst)
+		VehicleModules.plan(vehicle.modules.mods, d, shell, local, ldir, hit,
+			VehicleModules.has_liner(spec, vehicle.get_meta(META_PACKAGES, [])))
+	return d
 
 
 ## The voxel face (an axis normal, vehicle frame) a round along `ldir` met at `local` on

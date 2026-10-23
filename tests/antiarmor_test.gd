@@ -369,10 +369,14 @@ func _real_matv() -> void:
 		and matv.zone_health(Vehicle.ZONE_CREW) < 1.0 and _carves(matv, VehicleHull.HOLE) > holes,
 		"AT4 HEAT (420 mm) through the M-ATV's side (32 mm): the crew zone %.0f%%, a hole in the hull (%s)" % [matv.zone_health(Vehicle.ZONE_CREW) * 100.0, _describe(r, b.get("vehicle_hit", {}))])
 	check(rear.vitals.is_dead(), "the jet kills the rider on its line (%s)" % rear.vitals.condition_text())
+	# Combined arms A2: the spall is a cone of fragments along the jet (narrowed by the M-ATV's
+	# spall liner), not everyone within 2.5 m of the hole: the commander, ahead of the hole and off
+	# the jet's line, is hit only if a fragment's ray met him (the HitEvent's seats say so).
+	var ev: Dictionary = matv.modules.events.back() if not matv.modules.events.is_empty() else {}
 	var spall := cmdr.vitals.wound_list().size()
 	Vehicle.spall_rng.randomize()
-	check(spall >= 1 and spall <= SPALL_WOUNDS_MAX and not cmdr.vitals.is_dead(),
-		"the commander beside him takes the spall, one pass of it (%d wounds; %s)" % [spall, cmdr.vitals.condition_text()])
+	check(bool(res.get("traced", false)) and 2 in ev.get("c", []) and (1 in ev.get("c", [])) == (spall > 0) and spall <= SPALL_WOUNDS_MAX and not cmdr.vitals.is_dead(),
+		"the jet's path and spall cone are the M-ATV's modules' (%s); the commander beside him: %d wounds, as the cone's rays met him (%s)" % [matv.modules.describe(ev), spall, cmdr.vitals.condition_text()])
 	await _clear(matv, [rear, cmdr])
 
 

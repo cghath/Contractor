@@ -111,6 +111,7 @@ func _reset(v: Vehicle, pos: Vector3, yaw_deg := 0.0) -> void:
 	v.sleeping = false
 	for z in Vehicle.ZONES:
 		v.server_set_zone(z, 1.0)
+	v.modules.server_reset()
 	v.server_set_fuel(float(v.spec.fuel_l))
 	v.server_set_battery(true)
 	await get_tree().physics_frame
@@ -195,6 +196,8 @@ func _run_host(wait_for_client: bool) -> void:
 		await _test_service()
 	if _want("fire"):
 		await _test_fire()
+	if _want("modules"):
+		await _test_modules()
 	if _want("save_reload"):
 		await _test_save_reload()
 	if _want("ai_driver"):
@@ -1049,11 +1052,17 @@ func _test_damage_effects() -> void:
 	await _drive(v, 1.0, 0.0, false, 2.0)
 	check(v.global_position.distance_to(start) < 0.5, "full throttle goes nowhere (moved %.2f m)" % v.global_position.distance_to(start))
 	v.server_set_zone(Vehicle.ZONE_ENGINE, 1.0)
-	v.server_set_zone(Vehicle.ZONE_WHEELS, 0.0)
-	check(v.can_drive() and v.top_speed() < top * 0.2, "wheels shot out: it crawls on its rims (%.1f m/s top)" % v.top_speed())
+	# Combined arms A2 (2.2.2): a wheel shot out runs flat (x0.75 each, two at most); a third
+	# and it's a mobility kill (it was a crawl on its rims on every wheel before).
+	v.modules.server_set("wheel_fl", 0.0)
+	v.modules.server_set("wheel_rr", 0.0)
+	check(v.can_drive() and v.top_speed() < top * 0.6 and v.top_speed() > top * 0.5, "two wheels shot out: it runs on its run-flats (%.1f of %.1f m/s top)" % [v.top_speed(), top])
 	await _drive(v, 1.0, 0.0, false, 3.0)
-	check(v.forward_speed() < top * 0.2 + 0.5, "and can't go faster (%.1f m/s)" % v.forward_speed())
+	check(v.forward_speed() < top * 0.6 + 0.5, "and can't go faster (%.1f m/s)" % v.forward_speed())
+	v.server_set_zone(Vehicle.ZONE_WHEELS, 0.0)
+	check(not v.can_drive() and v.modules.kill_state().mobility, "every wheel gone: it's a mobility kill, going nowhere")
 	await _drive(v, 0.0, 0.0, true, 2.0)
+	v.server_set_zone(Vehicle.ZONE_WHEELS, 1.0)
 	v.server_exit(player)
 	var aav := _vehicle("range_aav7")
 	aav.server_set_zone(Vehicle.ZONE_WHEELS, 0.0)
@@ -2540,6 +2549,12 @@ func _stage_for_client() -> void:
 	await _reset(matv, Vector3(-12, 0, 6))
 	matv.turret.aim(0.0, 0.0)
 	matv.turret.settle()
+	# Combined arms A2: a Bradley with a thrown track, a damaged breech and part of its 25 mm used.
+	var late := await _mod_vehicle("bradley", Vector3(40, 0, -40), "late_bradley")
+	late.modules.server_set("track_l", 0.0)
+	late.modules.server_set("breech", 0.3)
+	late.modules.rounds[late.modules.index_of("rack_25")] = 120
+	late.modules.server_set("radio", 0.6)
 	player.global_position = Vector3(0, 0.1, 20)
 
 
@@ -2566,8 +2581,17 @@ func _digest() -> Dictionary:
 			if v.occupant(i):
 				seated[str(i)] = String(v.occupant(i).name)
 		out[v.vehicle_id] = {"model": v.model, "wrecked": v.wrecked, "carves": v.net_carves.size(), "engine": v.zone_health(Vehicle.ZONE_ENGINE),
-			"seated": seated, "pos": v.global_position, "turret": Vector2(v.turret.yaw, v.turret.pitch) if v.turret else Vector2.ZERO}
+			"seated": seated, "pos": v.global_position, "turret": Vector2(v.turret.yaw, v.turret.pitch) if v.turret else Vector2.ZERO,
+			"mods": Array(v.modules.net_state.get("h", PackedByteArray())), "kill": v.modules.kill, "racks": v.modules.net_state.get("r", [])}
 	return out
+
+
+## Client asks: a hit on the staged Bradley now (its HitEvent goes to every peer).
+@rpc("any_peer", "reliable")
+func _ask_hit() -> void:
+	var v := _vehicle("late_bradley")
+	if v:
+		_mod_hit(v, "pg7v", Vector3(0.0, 1.2, 4.2), Vector3(0, 0, -1))
 
 
 ## Client tells the host what it drove: the host checks it saw the M-ATV move there too.
@@ -2617,6 +2641,7 @@ func _run_client(address: String) -> void:
 			same = false
 			print("    differs: %s %s vs host %s" % [id, [v.model, v.wrecked, v.net_carves.size(), v.zone_health(Vehicle.ZONE_ENGINE), v.global_position] if v else "missing", h])
 	check(same, "each as the host has it: model, place, wreck, damage marks, engine health")
+	await _client_modules()
 	var mrap := _vehicle("range_maxxpro")
 	var rider := mrap.occupant(3) if mrap else null
 	check(rider != null and String(rider.name) == LATE_SEATED and rider.global_position.distance_to(mrap.seat_transform("3").origin) < 0.1 and not rider.model.visible,
@@ -2717,3 +2742,265 @@ func _client_turret(matv: Vehicle) -> void:
 	matv.request_exit.rpc_id(1)
 	await _wait_for(func() -> bool: return player.vehicle == null, 5.0)
 	VehicleCamera.chase = true
+
+
+# --- Combined arms A2: modules, crew hits, kill states (cg_brief queue item 2.1) ---------------
+
+## A hit's whole cost on the host with its spall (Proposed, docs/combined_arms.md 9.3).
+const MODULE_HIT_BUDGET_MS := 0.5
+
+
+## Host: a vehicle of `model` parked for these checks at `pos` (ground), its hull ready.
+func _mod_vehicle(model: String, pos: Vector3, id: String) -> Vehicle:
+	VehicleHull.prewarm(model)
+	var v := layer.server_spawn(model, Transform3D(Basis(), level.ground_point(pos) + Vector3.UP * 0.3), "", &"player", id)
+	await _wait_for(func() -> bool: return VehicleHull.is_ready(model), 20.0)
+	await _seconds(1.2)
+	return v
+
+
+## Host: `v` crewed: an AI soldier in each of `seats`, seeded dice, their hitboxes in the seats.
+func _mod_crew(v: Vehicle, seats: Array) -> Array:
+	var out: Array = []
+	for seat: int in seats:
+		var s := _soldier("friendly", v.global_position + Vector3(4.0, 0.1, float(seat) - 3.0), "%s%d" % [v.model.capitalize(), seat])
+		s.vitals.rng.seed = 40 + seat
+		await get_tree().physics_frame
+		v.server_enter(s, seat)
+		out.append(s)
+	await _seconds(0.6)
+	return out
+
+
+## Host: shell or warhead `id` into `v` at `local` (vehicle frame, outside the hull) along
+## `ldir`, the tiles missed: server_take_hit's result.
+func _mod_hit(v: Vehicle, id: String, local: Vector3, ldir: Vector3) -> Dictionary:
+	return v.server_take_hit(_mod_hit_dict(v, id, local, ldir))
+
+
+func _mod_hit_dict(v: Vehicle, id: String, local: Vector3, ldir: Vector3) -> Dictionary:
+	var w := Warheads.data(StringName(id))
+	var hit := {"position": v.global_transform * local, "direction": (v.global_basis * ldir).normalized(), "shooter": null, "probe_m": 1.5,
+		"force": {"coverage": false, "ricochet": false}}
+	if w.is_empty():
+		hit.merge({"kind": Vehicle.KINETIC, "shell": id})
+	else:
+		hit.merge({"kind": Warheads.kind_of(StringName(id)), "warhead": id, "penetration_mm": float(w.get("penetration_mm", 0.0)), "blast_kg": float(w.get("blast_kg", 0.0))})
+	return hit
+
+
+func _mod_wounded(s: Soldier) -> bool:
+	return s.vitals.is_dead() or not s.vitals.wound_list().is_empty()
+
+
+func _test_modules() -> void:
+	print("Modules, crew hits and kill states (combined arms A2)")
+	var ifv := await _mod_vehicle("bradley", Vector3(40, 0, -40), "test_mod_bradley")
+	var crew := await _mod_crew(ifv, [0, 1, 2, 3, 6])
+	ifv.server_rearm()
+	check(ifv.modules.authored and ifv.modules.kill == 0 and ifv.seat_of(crew[3]) == 3 and ifv.seat_of(crew[4]) == 6,
+		"a Bradley with its crew of three and two dismounts: no kill state")
+	# A TOW through the troop compartment: the two dismounts on its line die, the crew fights on.
+	var chest := ifv.to_local(CharacterModel.part_position(crew[4], Vitals.CHEST))
+	var r := _mod_hit(ifv, "tow2a", Vector3(2.6, chest.y, chest.z), Vector3(-1, 0, 0))
+	var ev: Dictionary = ifv.modules.events.back() if not ifv.modules.events.is_empty() else {}
+	print("    %s" % ifv.modules.describe(ev))
+	check(bool(r.penetrated) and bool(r.traced) and crew[4].vitals.is_dead() and crew[3].vitals.is_dead() and 6 in ev.get("c", []) and 3 in ev.get("c", []),
+		"a TOW-2A through its side kills both dismounts on its line, through their real hitboxes (%s / %s)" % [crew[4].vitals.condition_text(), crew[3].vitals.condition_text()])
+	check(crew.slice(0, 3).all(func(s: Soldier) -> bool: return s.vitals.is_up() and s.vitals.wound_list().is_empty()) and ifv.modules.kill == 0,
+		"the driver, gunner and commander are out of its path and spall: the Bradley fights on (no kill state)")
+	# Kill states from their causes, not from lesser hits.
+	ifv.modules.server_reset()
+	_mod_hit(ifv, "m33", Vector3(0.9, 0.85, -3.9), Vector3(0, 0, 1))
+	check(ifv.modules.kill == 0 and ifv.modules.health_of("transmission") == 1.0 and ifv.can_drive(), "a .50 on its front: stopped, nothing inside touched")
+	_mod_hit(ifv, "m829a3", Vector3(0.9, 0.85, -3.9), Vector3(0, 0, 1))
+	var ks := ifv.modules.kill_state()
+	check(ifv.modules.state("transmission") == VehicleModules.DESTROYED and ks.mobility and not ks.firepower and not ks.knocked_out and not ifv.can_drive()
+		and DriveContact.is_disabled(ifv) and ifv.zone_health(Vehicle.ZONE_ENGINE) <= 0.0,
+		"an M829A3 through its lower front wrecks the transmission and engine: a mobility kill, its guns still in the fight (%s)" % VehicleModules.kill_text(ifv.modules.kill))
+	check(not ifv.server_fire_gun(crew[1], -ifv.global_basis.z).is_empty(), "its gunner still fires")
+	_mod_hit(ifv, "m829a3", Vector3(-0.05, 3.6, -1.0), Vector3(0, -1, 0))
+	print("    %s" % ifv.modules.describe(ifv.modules.events.back() if not ifv.modules.events.is_empty() else {}))
+	ks = ifv.modules.kill_state()
+	check(ks.firepower and ks.mobility and ks.knocked_out and ks.repairable and not ks.catastrophic and crew[1].vitals.is_up(),
+		"another down through the turret roof takes the breech: firepower and mobility, knocked out but repairable (%s)" % VehicleModules.kill_text(ifv.modules.kill))
+	await get_tree().create_timer(0.3).timeout
+	check(ifv.server_fire_gun(crew[1], -ifv.global_basis.z).is_empty(), "the gunner can't fire now")
+	# Saved with the zone: a copy from the save has the same modules and kill states.
+	var rec: Dictionary = JSON.parse_string(JSON.stringify(ifv.to_save()))
+	rec.erase("pos")
+	rec.erase("rot")
+	rec.erase("bodies")
+	var copy := layer.server_spawn("bradley", Transform3D(Basis(), level.ground_point(Vector3(55, 0, -40)) + Vector3.UP * 0.3), "", &"player", "test_mod_copy", rec)
+	await _seconds(0.7)
+	var worst := 0.0
+	for i in ifv.modules.health.size():
+		worst = maxf(worst, absf(ifv.modules.health[i] - copy.modules.health[i]))
+	var mask := VehicleModules.MOBILITY | VehicleModules.FIREPOWER
+	check(worst < 0.001 and (copy.modules.kill & mask) == (ifv.modules.kill & mask) and copy.modules.rounds == ifv.modules.rounds
+		and is_equal_approx(copy.zone_health(Vehicle.ZONE_ENGINE), ifv.zone_health(Vehicle.ZONE_ENGINE)),
+		"saved and restored: every module's health, the racks and the kill states come back (worst %.4f)" % worst)
+	copy.queue_free()
+	# A crew kill: the three crewmen taken out.
+	for s: Soldier in crew.slice(0, 3):
+		s.vitals.server_kill()
+	await _seconds(VehicleModules.CREW_CHECK_S + 0.2)
+	ks = ifv.modules.kill_state()
+	check(ks.crew and ks.knocked_out and ifv.occupant(0) == null,
+		"its crew dead and put out of their seats: a crew kill (%s)" % VehicleModules.kill_text(ifv.modules.kill))
+	# A cook-off: the 25 mm stowed under the floor goes up in a fire.
+	ifv.modules.server_reset()
+	ifv.set_meta(&"force_detonate", true)
+	_mod_hit(ifv, "pg7vl", Vector3(-2.5, 0.7, -0.8), Vector3(1, 0, 0))
+	check(ifv.modules.state("rack_25") == VehicleModules.DESTROYED and bool(ifv.modules.flags.get("cook_off", false)) and ifv.is_burning()
+		and ifv.modules.kill_state().knocked_out and not ifv.modules.kill_state().repairable,
+		"PG-7VL into the hull side over the stowed 25 mm: the rack cooks off, it's burning (%s)" % VehicleModules.kill_text(ifv.modules.kill))
+	ifv.burning_s = minf(ifv.burning_s, 0.5)
+	await _wait_for(func() -> bool: return ifv.wrecked, 5.0)
+	await get_tree().physics_frame
+	check(ifv.wrecked and ifv.modules.kill_state().catastrophic and ifv.modules.health_of("engine") == 0.0, "and burns out: a catastrophic kill, every module gone")
+	for s: Soldier in crew:
+		if is_instance_valid(s):
+			if ifv.seat_of(s) >= 0:
+				ifv.server_exit(s)
+			s.queue_free()
+	ifv.queue_free()
+	await _test_modules_abrams()
+	await _test_modules_belly()
+	await _test_modules_budget()
+
+
+## The Abrams' ammunition: the bustle vents through its blow-out panels, the hull rack doesn't.
+func _test_modules_abrams() -> void:
+	var mbt := await _mod_vehicle("abrams", Vector3(40, 0, -65), "test_mod_abrams")
+	var crew := await _mod_crew(mbt, [0, 1, 2, 3])
+	mbt.set_meta(&"force_detonate", true)
+	_mod_hit(mbt, "pg7v", Vector3(2.7, 2.0, 3.2), Vector3(-1, 0, 0))
+	var ev: Dictionary = mbt.modules.events.back() if not mbt.modules.events.is_empty() else {}
+	print("    %s" % mbt.modules.describe(ev))
+	check(mbt.modules.state("ammo_rack_bustle") == VehicleModules.DESTROYED and bool(mbt.modules.flags.get("vented", false))
+		and int(mbt.modules.rounds[mbt.modules.index_of("ammo_rack_bustle")]) == 0 and not mbt.is_burning() and not mbt.wrecked
+		and crew.all(func(s: Soldier) -> bool: return s.vitals.is_up()) and not mbt.modules.kill_state().knocked_out,
+		"PG-7V into the Abrams' bustle: its 34 rounds go off up through the blow-out panels, the crew unhurt, the tank fights on")
+	_mod_hit(mbt, "pg7vr", Vector3(-2.7, 1.0, -1.45), Vector3(1, 0, 0))
+	ev = mbt.modules.events.back() if not mbt.modules.events.is_empty() else {}
+	print("    %s" % mbt.modules.describe(ev))
+	await _wait_for(func() -> bool: return mbt.wrecked, 3.0)
+	await get_tree().physics_frame
+	check(mbt.modules.state("ammo_rack_hull") == VehicleModules.DESTROYED and mbt.wrecked and mbt.modules.kill_state().catastrophic
+		and not mbt.modules.kill_state().repairable and crew.all(func(s: Soldier) -> bool: return s.vitals.is_dead()),
+		"PG-7VR through the left skirt into the hull rack (no blow-out panels): it goes up, a catastrophic kill, the crew with it")
+	for s: Soldier in crew:
+		if is_instance_valid(s):
+			s.queue_free()
+	mbt.queue_free()
+	await get_tree().physics_frame
+
+
+## Belly blasts on a MaxxPro (mine rating 4a/3b): 8 kg under its belly and 10 kg under a wheel
+## leave the crew able (ringing ears); 20 kg under the belly is past what it's rated for.
+func _test_modules_belly() -> void:
+	var mrap := await _mod_vehicle("maxxpro", Vector3(25, 0, -55), "test_mod_mrap")
+	var crew := await _mod_crew(mrap, [0, 1, 2, 3])
+	mrap.server_take_hit({"kind": Vehicle.HE, "position": mrap.global_transform * Vector3(0, 0.02, 0.4), "direction": mrap.global_basis.y, "blast_kg": 8.0, "shooter": null})
+	var ev: Dictionary = mrap.modules.events.back() if not mrap.modules.events.is_empty() else {}
+	print("    %s" % mrap.modules.describe(ev))
+	mrap.modules.server_reset()  # (each blast on a whole hull: the structure took the first)
+	check(ev.has("b") and String(ev.b.st) == "belly" and bool(ev.b.held)
+		and crew.all(func(s: Soldier) -> bool: return VehicleModules.able(s) and s.vitals.wound_list().is_empty() and s.vitals.deaf_left() > 0.0),
+		"8 kg TNT under the MaxxPro's belly (STANAG 3b): %.2f kg reaches the crew floor, it holds: ears ringing, nobody hurt" % float(ev.get("b", {}).get("kg", -1.0)))
+	mrap.server_take_hit({"kind": Vehicle.HE, "position": mrap.global_transform * Vector3(1.1, 0.02, -2.15), "direction": mrap.global_basis.y, "blast_kg": 10.0, "shooter": null})
+	ev = mrap.modules.events.back() if not mrap.modules.events.is_empty() else {}
+	check(ev.has("b") and String(ev.b.st) == "wheel" and bool(ev.b.held) and mrap.modules.state("wheel_fr") == VehicleModules.DESTROYED
+		and crew.all(func(s: Soldier) -> bool: return VehicleModules.able(s)) and not mrap.modules.kill_state().mobility,
+		"10 kg under its front right wheel (4a): the wheel's gone, the crew able, and it limps on its run-flats")
+	mrap.modules.server_reset()
+	mrap.server_take_hit({"kind": Vehicle.HE, "position": mrap.global_transform * Vector3(0, 0.02, 0.4), "direction": mrap.global_basis.y, "blast_kg": 20.0, "shooter": null})
+	ev = mrap.modules.events.back() if not mrap.modules.events.is_empty() else {}
+	var hurt := crew.filter(func(s: Soldier) -> bool: return s.vitals.is_dead() or s.vitals.wound_list().any(func(w: Dictionary) -> bool: return String(w.get("kind", "")) == "fracture"))
+	check(ev.has("b") and not bool(ev.b.held) and hurt.size() >= 1,
+		"20 kg under its belly, past its rating (%.2f kg on the floor): %d of 4 hurt (broken legs, killed)" % [float(ev.get("b", {}).get("kg", -1.0)), hurt.size()])
+	for s: Soldier in crew:
+		if is_instance_valid(s):
+			if mrap.seat_of(s) >= 0:
+				mrap.server_exit(s)
+			s.queue_free()
+	mrap.queue_free()
+	await get_tree().physics_frame
+
+
+## A hit with its spall, the whole of it on the host: an AAV-7 (no spall liner) taking PG-7Vs.
+func _test_modules_budget() -> void:
+	var aav := await _mod_vehicle("aav7", Vector3(25, 0, -75), "test_mod_aav")
+	aav.damage_mult = 0.0001  # (it never wrecks: every hit runs the same)
+	var whole: Array = []
+	var traced := 0
+	var ldir := Vector3(-1, 0, 0)
+	for i in 5:
+		var t0 := Time.get_ticks_usec()
+		_mod_hit(aav, "pg7v", Vector3(2.4, 1.6, -0.2 + float(i) * 0.4), ldir)
+		whole.append(float(Time.get_ticks_usec() - t0) / 1000.0)
+	whole.sort()
+	# The armour's part of server_take_hit, timed apart from V1's voxel work (finding the hull's
+	# voxel, carving the hole): resolve, plan (path, spall), apply. The best of three batches'
+	# medians: a busy machine slows a batch, not the model (as armour_test's budgets).
+	var best := INF
+	var planned := INF
+	var worst := 0.0
+	for batch in 3:
+		var times: Array = []
+		var plans: Array = []
+		for i in 10:
+			var at := Vector3(2.4, 1.6, -0.2 + float(i % 5) * 0.4)
+			var hit := _mod_hit_dict(aav, "pg7v", at, ldir)
+			var found: Dictionary = aav.hull.first_solid(at, ldir, 1.5)
+			var local: Vector3 = found.get("local", at)
+			var zone := VehicleDamage.zone_at(aav.spec, local)
+			var t0 := Time.get_ticks_usec()
+			var res := ArmourModel.vehicle_hit(aav, hit, zone, local, ldir)
+			var t1 := Time.get_ticks_usec()
+			aav.modules.server_apply(zone, res, aav.to_global(local), hit)
+			times.append(float(Time.get_ticks_usec() - t0) / 1000.0)
+			plans.append(float(t1 - t0) / 1000.0)
+			traced += 1 if bool(res.get("traced", false)) else 0
+		times.sort()
+		plans.sort()
+		if float(times[times.size() / 2]) < best:
+			best = float(times[times.size() / 2])
+			planned = float(plans[plans.size() / 2])
+		worst = maxf(worst, float(times.back()))
+	print("    a PG-7V through the AAV's side: resolve, path, spall and apply %.3f ms (resolve and plan %.3f, worst %.3f); the whole server_take_hit with V1's voxel work %.3f ms" % [
+		best, planned, worst, float(whole[whole.size() / 2])])
+	check(traced == 30 and best < MODULE_HIT_BUDGET_MS, "a hit with its spall cone: %.3f ms of armour work on the host (budget %.1f ms, Proposed)" % [best, MODULE_HIT_BUDGET_MS])
+	aav.queue_free()
+	await get_tree().physics_frame
+
+
+## Client (combined arms A2): every vehicle's modules and kill states as the host has them, and
+## a hit made after joining reaches this peer as a HitEvent.
+func _client_modules() -> void:
+	var same := true
+	for id: String in _host_digest:
+		var h: Dictionary = _host_digest[id]
+		var v := _vehicle(id)
+		if v == null or Array(v.modules.net_state.get("h", PackedByteArray())) != (h.get("mods", []) as Array) or v.modules.kill != int(h.get("kill", -1)) \
+				or v.modules.net_state.get("r", []) != h.get("racks", []):
+			same = false
+			print("    modules differ: %s %s vs host %s" % [id, [Array(v.modules.net_state.get("h", PackedByteArray())), v.modules.kill] if v else "missing", [h.get("mods"), h.get("kill")]])
+	check(same, "every vehicle's modules, racks and kill states as the host has them (a late joiner)")
+	var late := _vehicle("late_bradley")
+	if late == null:
+		check(false, "the staged Bradley is here")
+		return
+	check(late.modules.kill_state().mobility and late.modules.state("track_l") == VehicleModules.DESTROYED and late.modules.state("breech") == VehicleModules.DAMAGED
+		and int(late.modules.rounds.get(late.modules.index_of("rack_25"), -1)) == 120 and not late.can_drive(),
+		"the staged Bradley here too: its thrown track a mobility kill, its breech damaged, 120 rounds of 25 mm left below")
+	var before := late.modules.events.size()
+	_ask_hit.rpc_id(1)
+	await _wait_for(func() -> bool: return late.modules.events.size() > before, 10.0)
+	var ev: Dictionary = late.modules.events.back() if late.modules.events.size() > before else {}
+	check(String(ev.get("o", "")) == "pen" and String(ev.get("sh", "")) == "pg7v" and not (ev.get("m", []) as Array).is_empty(),
+		"a hit after joining: its HitEvent reaches this peer (%s)" % late.modules.describe(ev))
+	var changed: Array = ev.get("m", [])
+	await _wait_for(func() -> bool: return not changed.is_empty() and late.modules.health[int(changed[0]) / 4] < 0.999, 5.0)
+	check(not changed.is_empty() and late.modules.health[int(changed[0]) / 4] < 0.999, "and the module it hit shows its damage here")

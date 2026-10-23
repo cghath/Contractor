@@ -313,6 +313,19 @@ outside. Consequences:
 The convoy and park objectives (`destroy_vehicles`: "burns, is a wreck or can't drive") read
 "knocked out or mobility kill", which keeps their meaning.
 
+**Built in A2** (cg_brief queue item 2.1, branch `armour/modules`): `VehicleModules`
+(scripts/vehicles/vehicle_modules.gd, a `Modules` child of every vehicle) with the layouts above
+in data/vehicle_modules.json for the Abrams, Bradley, AAV-7, M-ATV and MaxxPro; the path, spall
+cone, HE inside and partials of 2.3.5 (`plan()`, called by `ArmourModel.vehicle_hit`; applied by
+`server_apply`, `Vehicle._apply_damage`'s hook); crew hits through the seated men's real hitboxes
+and Vitals; the 2.2.2 effects that have something to act on today (speed and mobility, leaks and
+fires, racks, guns, the radio's `radio_down`, turret drive rates); the kill states, with
+"repairable"; belly blasts as crew injuries from the mine proof's floor sum
+(`ArmourStandards.floor_kg`, 2.3.6 and 2.4.7); net_state, HitEvents and saves. Technicals,
+aircraft and static weapons keep their zones. The calls made building it are in
+docs/audits/followups.md ("Calls made", 2026-10-23, cg_brief 2.1) and what's left for later phases
+is F-228 to F-234 there.
+
 ### 2.3 The shell model
 
 Every round that can hurt a vehicle, from a 7.62x54R LPS bullet to a 120 mm sabot, goes through

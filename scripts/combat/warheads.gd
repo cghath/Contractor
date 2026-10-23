@@ -187,10 +187,13 @@ static func server_burst(level: CompoundLevel, id: StringName, pos: Vector3, dir
 				_jet_behind(level, pos, dir, shooter, [], out, false)
 		elif pen > 0.0 and (bool(result.get("penetrated", false)) or not bool(result.get("stopped", true))):
 			# Through the armour: the jet kills whoever is on its line. The spall inside is
-			# the vehicle's (Vehicle._spall, V1), so the jet throws none of its own here.
+			# the vehicle's (Vehicle._spall, V1), so the jet throws none of its own here. A
+			# vehicle with modules (combined arms A2) took the jet's whole path itself ("traced":
+			# the modules and men it crossed, its spall cone).
 			out.through = true
 			var at: Vector3 = result.get("position", pos)
-			_jet_behind(level, at + dir * 0.05, dir, shooter, _rids_of(vehicle), out, false)
+			if not bool(result.get("traced", false)):
+				_jet_behind(level, at + dir * 0.05, dir, shooter, _rids_of(vehicle), out, false)
 	else:
 		var body := body_of(collider)
 		if body and body.get_node_or_null(^"Vitals"):

@@ -11,6 +11,64 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Inside the armour: modules, spall, crew hits and kill states (cg_brief queue item 2.1 (A2), armour/modules)
+
+Combined arms phase A2: what happens after a round or blast gets through a vehicle's plate. Design:
+docs/combined_arms.md 2.2 and 2.3.5 ("Built in A2" there says what's in); layouts in
+data/vehicle_modules.json; every number Proposed; calls in docs/audits/followups.md "Calls made".
+
+#### Added
+- **Modules inside the Abrams, Bradley, AAV-7, M-ATV and MaxxPro** (VehicleModules): engine,
+  transmission, tracks or wheels, fuel tanks, ammunition racks (the Abrams' bustle with blow-out
+  panels and its hull rack, the Bradley's 25 mm and TOW racks, the AAV's Mk19 and M2 cans),
+  breech and barrel, gunner's and auxiliary sights, fire control, commander's sight, turret ring
+  and elevation drives, radio, driver's vision, smoke dischargers, external guns (CROWS, the
+  loader's M240, the UGWS), compartments, the structure, and a crew station for every seat. Each
+  is working, damaged or destroyed, and its damage does what docs/combined_arms.md 2.2.2 says:
+  slower or stopped (engine, transmission, a thrown track, run-flat wheels and a third gone),
+  leaks, emptied tanks and fires, guns that won't fire, jam or scatter, a dark radio (the Blue
+  Force Tracker loses it), slowed or hand-cranked turret drives.
+- **The path through the vehicle**: a round, rod or shaped-charge jet that beats the plate
+  goes on along its line through the modules in order, each taking its share by the residual
+  left and eating some of it (a jet spends itself faster than a rod), until nothing is left. A
+  crewman on its line is struck through his real hitboxes (lethal: a rod, jet or 12.7 mm+). A
+  bullet that gets in keeps only what the modules leave it before Ballistics carries it into the
+  cabin.
+- **Spall**: a cone of fragments behind the hole, more and wider when the plate nearly held,
+  cut 60% (and narrowed 40%) by a spall liner (Abrams, Bradley, MRAPs; the AAV's kit). Each
+  fragment stops in the first module or man it meets: a fragment wound through the wound model,
+  his body armour checked as for a grenade's. This replaces "everyone within 2.5 m of the hole".
+- **HE inside**: a filling that gets in (HEI, HE-FRAG, thermobaric, HE punching a thin plate)
+  bursts behind the plate: overpressure on the modules near it, blast, lethal zone and fragments
+  on the crew in the compartment. HE and stopped shaped charges on the outside wear the external
+  modules near the burst (tracks, wheels, optics, guns, smoke boxes).
+- **Ammunition**: a rack that's damaged loses rounds; one destroyed rolls to go off (the 2.10.2
+  table): the Abrams' bustle vents through its blow-out panels and the tank fights on, the 25 mm,
+  Mk19 and M2 stowage cooks off in a fire, the Abrams' hull rack and the Bradley's TOW rack go up
+  (a catastrophic kill).
+- **Kill states** on every vehicle, replicated and saved: mobility, firepower, crew, knocked out
+  (and whether it's repairable), catastrophic. `Vehicle.modules.kill_state()`, the
+  `kill_changed` signal and `server_bail_out()` are there for the AI crews (A9).
+- **Belly blasts become crew injuries**: a mine or IED under the hull puts what reaches the crew
+  floor (by the same sum the STANAG 4569 mine ratings are proven with) on every man aboard. At or
+  below what the floor holds they come away with ringing ears and fight on; past it, broken legs
+  and spines, then deaths. The wheel or track station over a big charge is destroyed, and what
+  sits on the floor takes it (the AAV's fuel under its troops). The mine ratings were rechecked:
+  every vehicle's stored rating still holds, and armour_test now proves the crew stay able at it
+  and are hurt one level past it.
+- **HitEvents**: every resolved hit goes to every peer (outcome, plate, modules hit and their
+  states, crew hit, kill states); the last 10 are kept on each for the x-ray (A5).
+
+#### Changed
+- A wheeled armoured vehicle with wheels shot out now runs on its run-flats (x0.75 each, two at
+  most) and a third stops it, in place of crawling at 15% on every rim. One thrown track stops a
+  tracked one (it was both).
+- Launcher jets into the Abrams, Bradley, AAV-7, M-ATV and MaxxPro no longer use the flat 3 m
+  kill line behind the plate: the modules trace the jet. Technicals, helicopters and static
+  weapons take hits on their old zones exactly as before.
+- The old hit zones (`Vehicle.zone_health`) are answered from the modules on those five, so
+  repairs, the motor pool, the HUD readout and the AI's "it can't go on" read the same as before.
+
 ### Armour standards: STANAG 4569 for vehicles, NIJ 0101.07 for body armour (cg_brief queue item 2.0, armour/standards)
 
 Captain, 2026-10-22: "make sure it follows the current standards for armor". Design and tables:

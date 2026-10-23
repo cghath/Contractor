@@ -7,7 +7,13 @@ extends Node
 ## the real data, the damage bridge, determinism, the 2.4.6 "who beats what" table asserted
 ## cell by cell from data, every vehicle's and package's STANAG 4569 ratings proven from its
 ## plates and belly (cg_brief queue item 2.0: each level's threats stopped at its range, the
-## next level's not always), and resolve()'s budget (under 0.05 ms).
+## next level's not always), and resolve()'s budget (under 0.05 ms). Phase A2 (cg_brief queue
+## item 2.1, VehicleModules): every armoured model's module layout, a defeated plate's path
+## through the right modules in order, residual-scaled and stopped where the residual runs out
+## (a jet sooner than a rod), the spall cone's count, width and liner over the seeds, each kill
+## state from its causes and not from lesser damage, speed from the modules, belly blasts as crew
+## injuries that match each vehicle's STANAG mine rating (held at it, hurt past it, on real
+## Vitals), and a hit's plan with spall under its budget (0.5 ms).
 ##   <voxel godot exe> --headless --path . res://tests/armour_test.tscn
 ## Exits with the number of failures.
 
@@ -72,6 +78,12 @@ func _ready() -> void:
 	_test_table()
 	_test_budget()
 	_test_stanag()
+	_test_module_layouts()
+	_test_module_paths()
+	_test_spall()
+	_test_kill_states()
+	_test_belly()
+	_test_module_budget()
 	print("ARMOUR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -642,3 +654,374 @@ func _test_budget() -> void:
 		bare = minf(bare, float(Time.get_ticks_usec() - t0) / 1000.0 / float(n))
 	print("    a bare KE hit (no tiles, its plate and hit built in the loop): %.4f ms" % bare)
 	check(ms < BUDGET_MS, "resolve: %.4f ms a hit (budget %.2f ms; tiles, spacing and rolls included)" % [ms, BUDGET_MS])
+
+
+# --- Phase A2: modules, spall, kill states, belly (cg_brief queue item 2.1) --------------------
+
+const MODULE_BUDGET_MS := 0.5
+const ARMOURED: Array[String] = ["abrams", "bradley", "aav7", "matv", "maxxpro"]
+
+
+static func _plate_of(spec: Dictionary, id: String) -> Dictionary:
+	for p: Dictionary in spec.get("plates", []):
+		if String(p.id) == id:
+			return p
+	return {}
+
+
+## `shell_id` through plate `plate_id` of `model` at `at` (vehicle frame) flying along `dir`,
+## tiles missed: ArmourModel's damage dictionary with VehicleModules.plan's keys.
+func _through(model: String, plate_id: String, shell_id: String, at: Vector3, dir: Vector3, range_m := 100.0, seed := 7,
+		hit := {}, packages: Array = []) -> Dictionary:
+	var spec := VehicleSpecs.spec(model)
+	var shell := Shells.shell(shell_id)
+	var res := ArmourModel.resolve(shell, _plate_of(spec, plate_id), {"dir": dir.normalized(), "range_m": range_m, "seed": seed, "force": {"coverage": false, "ricochet": false}})
+	var d := ArmourModel.damage(res, shell, VehicleDamage.zone_at(spec, at), hit)
+	VehicleModules.plan(VehicleModules.layout_of(model, spec), d, shell, at, dir.normalized(), hit, VehicleModules.has_liner(spec, packages))
+	return d
+
+
+## The module ids along a plan's path (compartments left out unless `all`).
+func _path_ids(model: String, d: Dictionary, all := false) -> Array:
+	var mods := VehicleModules.layout_of(model, VehicleSpecs.spec(model))
+	var out: Array = []
+	for p: Dictionary in d.get("path", []):
+		var m: Dictionary = mods[int(p.i)]
+		if all or String(m.kind) != "compartment":
+			out.append(String(m.id))
+	return out
+
+
+func _test_module_layouts() -> void:
+	print("A2: module layouts (2.2.3)")
+	var want := {
+		"abrams": ["engine", "transmission", "track_l", "track_r", "fuel_tank_fl", "fuel_tank_fr", "fuel_tank_rear", "ammo_rack_hull", "ammo_rack_bustle",
+			"breech", "barrel", "gunner_sight", "aux_sight", "fcs", "commander_sight", "traverse", "elevation", "radio", "driver_vision", "smoke_l", "smoke_r",
+			"ext_gun_commander", "ext_gun_loader", "structure"],
+		"bradley": ["engine", "transmission", "track_l", "track_r", "fuel_tank_l", "fuel_tank_r", "ready_25", "rack_25", "rack_tow", "tow_launcher", "breech",
+			"barrel", "gunner_sight", "aux_sight", "fcs", "commander_sight", "traverse", "elevation", "radio", "driver_vision", "smoke_l", "smoke_r", "structure"],
+		"aav7": ["engine", "transmission", "track_l", "track_r", "fuel_tank", "ugws", "ready_mk19", "ready_m2", "rack_mk19", "rack_m2", "waterjet_l", "waterjet_r",
+			"radio", "driver_vision", "structure"],
+		"matv": ["engine", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "fuel_tank", "ext_gun", "radio", "spare_wheel", "structure"],
+		"maxxpro": ["engine", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "fuel_tank", "ext_gun", "radio", "spare_wheel", "structure"],
+	}
+	var problems := PackedStringArray()
+	for model: String in want:
+		var spec := VehicleSpecs.spec(model)
+		var mods := VehicleModules.layout(spec)
+		var ids := mods.map(func(m: Dictionary) -> String: return String(m.id))
+		for id: String in want[model]:
+			if not id in ids:
+				problems.append("%s has no %s" % [model, id])
+		var extent := AABB()
+		for b: Array in spec.get("boxes", []):
+			extent = extent.merge(VehicleSpecs.box(b)) if extent.has_volume() else VehicleSpecs.box(b)
+		for p: Dictionary in spec.get("plates", []):
+			extent = extent.merge(VehicleSpecs.box(p.box))
+		var seats := {}
+		for m: Dictionary in mods:
+			if String(m.kind) == "crew":
+				seats[int(m.seat)] = int(seats.get(int(m.seat), 0)) + 1
+			if m.box != null and not bool(m.external) and not extent.grow(0.3).encloses(m.box):
+				problems.append("%s %s sits outside the hull" % [model, m.id])
+			if not String(m.kind) in ["crew", "compartment"] and float(m.hp) <= 0.0:
+				problems.append("%s %s has no hp" % [model, m.id])
+		for i in (spec.seats as Array).size():
+			if int(seats.get(i, 0)) != 1:
+				problems.append("%s seat %d has %d crew modules" % [model, i, int(seats.get(i, 0))])
+		var gun_seat := int((spec.get("gun", {}) as Dictionary).get("seat", -1))
+		if not VehicleModules.armed(mods, gun_seat):
+			problems.append("%s: no armament modules on its gun seat %d" % [model, gun_seat])
+	check(problems.is_empty(), "the Abrams, Bradley, AAV-7, M-ATV and MaxxPro have the doc's modules inside their hulls, one crew station a seat, their guns' modules (%s)" % ", ".join(problems))
+	var abrams := VehicleModules.layout(VehicleSpecs.spec("abrams"))
+	var by_id := {}
+	for m: Dictionary in abrams:
+		by_id[String(m.id)] = m
+	check(is_equal_approx(float(by_id.engine.absorb), 70.0) and is_equal_approx(float(by_id.breech.absorb), 150.0) and is_equal_approx(float(by_id.fuel_tank_fl.absorb), 25.0)
+		and is_equal_approx(float(by_id.driver.absorb), 8.0) and is_equal_approx(float(by_id.structure.hp), 900.0) and int(by_id.ammo_rack_bustle.rounds) == 34
+		and String(by_id.ammo_rack_bustle.on_detonate) == "vent" and String(by_id.ammo_rack_hull.on_detonate) == "catastrophic",
+		"2.3.5's absorb figures (engine 70, breech 150, fuel 25, a man 8), the hull's 900 as the structure, 34 rounds in the bustle that vents, 6 in the hull rack that doesn't")
+	var tech_spec := VehicleSpecs.spec("technical")
+	var tech := VehicleModules.layout(tech_spec)
+	var kinds := tech.map(func(m: Dictionary) -> String: return String(m.kind))
+	var structure: Array = tech.filter(func(m: Dictionary) -> bool: return String(m.kind) == "structure")
+	check(not tech_spec.has("modules") and "engine" in kinds and "wheel" in kinds and "fuel_tank" in kinds and "compartment" in kinds
+		and structure.size() == 1 and is_equal_approx(float(structure[0].hp), float(tech_spec.hp.hull))
+		and tech.filter(func(m: Dictionary) -> bool: return String(m.kind) == "crew").size() == (tech_spec.seats as Array).size(),
+		"a technical has no authored modules: its layout is built from its zones (2.2.1's migration) and it keeps taking hits on them")
+	check("rotor" in VehicleModules.layout(VehicleSpecs.spec("uh60")).map(func(m: Dictionary) -> String: return String(m.kind)), "so does a helicopter (its rotor)")
+
+
+func _test_module_paths() -> void:
+	print("A2: a defeated plate's path through the modules (2.3.5)")
+	var d := _through("abrams", "hull_rear", "m829a3", Vector3(0.0, 0.9, 5.0), Vector3(0, 0, -1), 1000.0)
+	var ids := _path_ids("abrams", d)
+	var path: Array = d.get("path", [])
+	var all := _path_ids("abrams", d, true)
+	check(d.armour.outcome == ArmourModel.PEN and ids.size() >= 3 and ids[0] == "transmission" and ids[1] == "engine" and "driver" in ids
+		and all.find("engine") < all.find("driver_compartment") and bool(d.traced) and not bool(d.spall),
+		"M829A3 into the Abrams' hull rear: the transmission, then the engine, then on through the hull to the driver (%s)" % ", ".join(all))
+	var dmg := {}
+	for p: Dictionary in path:
+		dmg[_path_ids("abrams", {"path": [p]}, true)[0]] = float(p.dmg)
+	check(float(dmg.get("transmission", 0.0)) > float(dmg.get("engine", 0.0)) and float(dmg.get("engine", 0.0)) > 150.0,
+		"each module takes module_dmg x its share of the residual left (transmission %.0f, engine %.0f kJ: past the engine's 150)" % [float(dmg.get("transmission", 0.0)), float(dmg.get("engine", 0.0))])
+	d = _through("abrams", "turret_bustle_r", "pg7v", Vector3(1.95, 2.0, 3.2), Vector3(-1, 0, 0))
+	ids = _path_ids("abrams", d)
+	check(d.armour.outcome == ArmourModel.PEN and not ids.is_empty() and ids[0] == "ammo_rack_bustle",
+		"PG-7V into the Abrams' bustle side: straight into the bustle's ammunition (%s)" % ", ".join(ids))
+	d = _through("bradley", "hull_side_r", "tow2a", Vector3(1.9, 1.2, 0.45), Vector3(-1, 0, 0), 1500.0)
+	ids = _path_ids("bradley", d)
+	check(d.armour.outcome == ArmourModel.PEN and not ids.is_empty() and ids[0] == "rack_tow" and ("seat_6" in ids or "seat_3" in ids),
+		"TOW-2A into the Bradley's right side behind the turret: the TOW rack, then the dismounts in its line (%s)" % ", ".join(ids))
+	d = _through("abrams", "turret_roof", "javelin", Vector3(0.7, 2.55, -0.2), Vector3(0, -1, 0))
+	ids = _path_ids("abrams", d)
+	check(d.armour.outcome == ArmourModel.PEN and "gunner" in ids and "traverse" in ids,
+		"a Javelin down through the Abrams' turret roof: through the gunner's station and the turret ring (%s)" % ", ".join(ids))
+	var mods := VehicleModules.layout_of("abrams", VehicleSpecs.spec("abrams"))
+	var rod := VehicleModules.trace(mods, Vector3(0.0, 0.9, 5.0), Vector3(0, 0, -1), 200.0, 100.0, "ke")
+	var jet := VehicleModules.trace(mods, Vector3(0.0, 0.9, 5.0), Vector3(0, 0, -1), 200.0, 100.0, "ce")
+	check(float(jet.left) < float(rod.left) and (jet.path as Array).size() <= (rod.path as Array).size(),
+		"a jet spends itself faster than a rod after the first module (200 mm in: %.0f left against %.0f)" % [float(jet.left), float(rod.left)])
+	d = _through("matv", "engine_bay", "m33", Vector3(-1.3, 1.3, -2.5), Vector3(1, 0, 0), 0.0, 7, {"energy_j": 18000.0})
+	ids = _path_ids("matv", d)
+	check(d.armour.outcome == ArmourModel.PEN and ids == ["engine"] and is_zero_approx(float(d.energy_left)) and bool(d.stopped),
+		"a .50 through the M-ATV's bonnet stops in its engine, nothing left to fly on (%s)" % ", ".join(ids))
+	d = _through("maxxpro", "side_l", "m33", Vector3(-1.35, 2.2, 0.4), Vector3(1, 0, 0), 0.0, 7, {"energy_j": 18000.0})
+	check(d.armour.outcome == ArmourModel.PEN and float(d.energy_left) > 0.0 and not "seat_2" in _path_ids("maxxpro", d),
+		"a .50 through the MaxxPro's side flies on into the cabin (%.0f J) for Ballistics to carry into the rider; the path leaves him to it" % float(d.energy_left))
+	d = _through("bradley", "hull_front", "m791", Vector3(0.0, 1.3, -3.3), Vector3(0, 0, 1), 2000.0)
+	check(d.armour.outcome != ArmourModel.PEN and not d.has("path") and not bool(d.get("traced", false)),
+		"M791 on the Bradley's front at 2,000 m: stopped (%s), nothing inside touched" % d.armour.outcome)
+
+
+func _test_spall() -> void:
+	print("A2: the spall cone (2.3.5)")
+	var spec := VehicleSpecs.spec("abrams")
+	var shell := Shells.shell(&"m829a3")
+	var res := ArmourModel.resolve(shell, _plate_of(spec, "side_rear_r"), {"dir": Vector3(-1, 0, 0), "range_m": 1000.0, "seed": 3})
+	var bare := VehicleModules.spall_count(shell, res, false)
+	var lined := VehicleModules.spall_count(shell, res, true)
+	check(res.outcome == ArmourModel.PEN and bare == roundi(26.0 * 1.5) and lined == roundi(26.0 * 1.5 * VehicleModules.LINER_COUNT),
+		"M829A3 through the Abrams' side with %.0f mm left: %d fragments (26 x 1.5), %d behind a spall liner" % [float(res.residual), bare, lined])
+	var cone := VehicleModules.spall_cone(shell, res, false)
+	var thick := res.duplicate()
+	thick.t_eff = float(res.pen) * 0.9
+	check(is_equal_approx(VehicleModules.spall_cone(shell, res, true), cone * VehicleModules.LINER_CONE) and VehicleModules.spall_cone(shell, thick, false) > cone * 1.5,
+		"its cone %.1f deg, %.1f behind a liner; wider when the plate was nearly enough (%.1f)" % [cone, VehicleModules.spall_cone(shell, res, true), VehicleModules.spall_cone(shell, thick, false)])
+	var mods := VehicleModules.layout_of("abrams", spec)
+	var from := Vector3(1.5, 1.0, 1.5)
+	var widest := 0.0
+	var same := true
+	var differs := false
+	var first := VehicleModules.spall_rays(mods, from, Vector3(-1, 0, 0), shell, res, false, 11)
+	for s in 200:
+		var rays := VehicleModules.spall_rays(mods, from, Vector3(-1, 0, 0), shell, res, false, s)
+		for r: Dictionary in rays:
+			widest = maxf(widest, rad_to_deg((r.d as Vector3).angle_to(Vector3(-1, 0, 0))))
+		if s == 11:
+			same = rays.size() == first.size() and rays.map(func(r: Dictionary) -> Vector3: return r.d) == first.map(func(r: Dictionary) -> Vector3: return r.d)
+		elif not rays.is_empty() and not first.is_empty():
+			differs = differs or not (rays[0].d as Vector3).is_equal_approx(first[0].d)
+	check(widest <= cone + 0.01 and widest > cone * 0.8 and same and differs, "every fragment within the cone over 200 seeds (widest %.1f deg), one seed one spray (host and replay agree)" % widest)
+	# The AAV: no liner. A PG-7V into its side sprays the dismounts; its spall liner package cuts it.
+	var aav := VehicleSpecs.spec("aav7")
+	var amods := VehicleModules.layout_of("aav7", aav)
+	var rpg := Shells.shell(&"pg7v")
+	var hits := [0, 0]
+	for lined_kit in 2:
+		for s in 40:
+			var r := ArmourModel.resolve(rpg, _plate_of(aav, "side_r"), {"dir": Vector3(-1, 0, 0), "seed": s, "force": {"coverage": false}})
+			for ray: Dictionary in VehicleModules.spall_rays(amods, Vector3(1.75, 1.6, 1.3), Vector3(-1, 0, 0), rpg, r, lined_kit == 1, s):
+				for x: Array in ray.x:
+					if String(amods[int(x[2])].kind) == "crew":
+						hits[lined_kit] += 1
+						break
+	check(not VehicleModules.has_liner(aav) and VehicleModules.has_liner(aav, ["aav_spall_liner"]) and hits[0] > 0 and hits[1] < hits[0] * 0.6,
+		"PG-7V into the AAV-7's side: its spall reaches the troop seats (%.1f fragments a hit), its spall liner kit cuts that (%.1f)" % [hits[0] / 40.0, hits[1] / 40.0])
+
+
+func _test_kill_states() -> void:
+	print("A2: kill states from their causes, not from lesser hits (2.2.5)")
+	var spec := VehicleSpecs.spec("abrams")
+	var mods := VehicleModules.layout_of("abrams", spec)
+	var idx := func(id: String) -> int:
+		for m: Dictionary in mods:
+			if String(m.id) == id:
+				return int(m.i)
+		return -1
+	var hp := func(changes: Dictionary) -> PackedFloat32Array:
+		var h := PackedFloat32Array()
+		h.resize(mods.size())
+		h.fill(1.0)
+		for id: String in changes:
+			h[idx.call(id)] = float(changes[id])
+		return h
+	var crew_ok := {"able": true}
+	var bits := func(changes: Dictionary, crew: Dictionary, wrecked: bool, burning: bool) -> int:
+		return VehicleModules.kill_bits(mods, hp.call(changes), Vehicle.TRACKED, 1, crew, wrecked, burning)
+	var M := VehicleModules.MOBILITY
+	var F := VehicleModules.FIREPOWER
+	var C := VehicleModules.CREW
+	var K := VehicleModules.KNOCKED_OUT
+	var X := VehicleModules.CATASTROPHIC
+	var R := VehicleModules.REPAIRABLE
+	var cases := [
+		["whole", {}, 0],
+		["engine at 30%", {"engine": 0.3}, 0],
+		["engine destroyed", {"engine": 0.0}, M],
+		["transmission destroyed", {"transmission": 0.0}, M],
+		["one track damaged", {"track_l": 0.4}, 0],
+		["one track thrown", {"track_r": 0.0}, M],
+		["barrel bent", {"barrel": 0.3}, 0],
+		["breech destroyed", {"breech": 0.0}, F],
+		["barrel destroyed", {"barrel": 0.0}, F],
+		["gunner's sight gone, the aux sight left", {"gunner_sight": 0.0}, 0],
+		["both sights gone", {"gunner_sight": 0.0, "aux_sight": 0.0}, F],
+		["the radio, the loader's M240 and a smoke box gone", {"radio": 0.0, "ext_gun_loader": 0.0, "smoke_l": 0.0}, 0],
+		["engine and breech destroyed", {"engine": 0.0, "breech": 0.0}, M | F | K | R],
+		["structure gone with them", {"engine": 0.0, "breech": 0.0, "structure": 0.0}, M | F | K],
+	]
+	var wrong := PackedStringArray()
+	for c: Array in cases:
+		var got: int = bits.call(c[1], crew_ok, false, false)
+		if got != int(c[2]):
+			wrong.append("%s: %s (want %s)" % [c[0], VehicleModules.kill_text(got), VehicleModules.kill_text(int(c[2]))])
+	check(wrong.is_empty(), "the Abrams: mobility from an engine, transmission or track gone, firepower from the breech, barrel or both sights, knocked out (repairable) from both, not from lesser damage (%d cases; %s)" % [cases.size(), "; ".join(wrong)])
+	var down := {"able": false, "unable": true}
+	var lost := {"able": false, "unable": false, "lost": true}
+	var one_left := {"able": true, "unable": true}
+	check(bits.call({}, down, false, false) == (C | K | R) and bits.call({}, lost, false, false) == (C | K | R) and bits.call({}, one_left, false, false) == 0
+		and bits.call({}, {"able": false}, false, false) == 0,
+		"a crew kill when nobody in a crew seat can act (down, or dead and put out); not with one man still able, nor an empty parked tank")
+	check((bits.call({}, crew_ok, true, false) & (X | K | R)) == (X | K) and (bits.call({}, crew_ok, false, true) & (K | R)) == K,
+		"catastrophic (it went up or burned out) and burning are knocked out for good, not repairable")
+	# Wheels: two run-flats keep an MRAP going; a third and it's immobile.
+	var mx := VehicleSpecs.spec("maxxpro")
+	var mmods := VehicleModules.layout_of("maxxpro", mx)
+	var mh := PackedFloat32Array()
+	mh.resize(mmods.size())
+	mh.fill(1.0)
+	var wheel_ids := ["wheel_fl", "wheel_fr", "wheel_rl"]
+	var speeds: Array = [VehicleModules.speed_mult(mmods, mh, Vehicle.WHEELED)]
+	var mobile: Array = []
+	for w: String in wheel_ids:
+		for m: Dictionary in mmods:
+			if String(m.id) == w:
+				mh[int(m.i)] = 0.0
+		speeds.append(VehicleModules.speed_mult(mmods, mh, Vehicle.WHEELED))
+		mobile.append((VehicleModules.kill_bits(mmods, mh, Vehicle.WHEELED, 6, crew_ok, false, false) & M) == 0)
+	check(mobile == [true, true, false] and is_equal_approx(float(speeds[2]), 0.75 * 0.75) and is_zero_approx(float(speeds[3])),
+		"the MaxxPro: one and two wheels gone it runs on its run-flats (x%.2f, x%.2f), a third and it's a mobility kill" % [float(speeds[1]), float(speeds[2])])
+	for m: Dictionary in mmods:
+		mh[int(m.i)] = 0.0 if String(m.id) == "engine" else 1.0
+	var engine_only := VehicleModules.kill_bits(mmods, mh, Vehicle.WHEELED, 6, crew_ok, false, false)
+	for m: Dictionary in mmods:
+		if String(m.id) == "ext_gun":
+			mh[int(m.i)] = 0.0
+	check(engine_only == M and VehicleModules.kill_bits(mmods, mh, Vehicle.WHEELED, 6, crew_ok, false, false) == (M | F | K | R),
+		"its engine gone it's a mobility kill that can still fight; its M2 gone too and it's knocked out")
+	var am := VehicleModules.layout_of("abrams", spec)
+	var ah := PackedFloat32Array()
+	ah.resize(am.size())
+	ah.fill(1.0)
+	var top := VehicleModules.speed_mult(am, ah, Vehicle.TRACKED)
+	for m: Dictionary in am:
+		if String(m.id) == "transmission":
+			ah[int(m.i)] = 0.4
+	var slow := VehicleModules.speed_mult(am, ah, Vehicle.TRACKED)
+	check(is_equal_approx(top, 1.0) and is_equal_approx(slow, VehicleModules.TRANSMISSION_DAMAGED_SPEED), "a damaged transmission: top speed x%.1f" % slow)
+
+
+func _test_belly() -> void:
+	print("A2: belly blasts as crew injuries, by each vehicle's STANAG mine rating (2.3.6, 2.4.7)")
+	var mine: Dictionary = ArmourStandards.data().stanag_4569.mine
+	var wrong := PackedStringArray()
+	var rows := PackedStringArray()
+	var vitals_seed := 1
+	for model: String in ARMOURED:
+		var spec := VehicleSpecs.spec(model)
+		var sets: Array = [[]]
+		for id: String in (spec.get("packages", {}) as Dictionary):
+			if (spec.packages[id] as Dictionary).has("belly"):
+				sets.append([id])
+		for packages: Array in sets:
+			var rating: Dictionary = ArmourStandards.rating(spec, packages).mine
+			if ArmourStandards.mine_proven(spec, packages) != rating:
+				wrong.append("%s%s: rated %s, its belly holds %s" % [model, packages, rating, ArmourStandards.mine_proven(spec, packages)])
+			for station: String in ["wheel", "belly"]:
+				var level := String(rating[station])
+				var next := ArmourStandards.mine_next(station, level)
+				for lv: String in [level, next]:
+					if lv == "" or lv == "0":
+						continue
+					var def: Dictionary = mine[lv]
+					var st := String(def.station)
+					if st == "wheel" and String(spec.kind) == Vehicle.TRACKED:
+						st = "track"
+					var floor := ArmourStandards.floor_kg(spec, float(def.kg), st, packages)
+					var injury := VehicleModules.belly_injury(floor)
+					var hurt := 0
+					var unable := 0
+					for k in 12:
+						var v := Vitals.new()
+						add_child(v)
+						v.rng.seed = vitals_seed
+						vitals_seed += 1
+						VehicleModules.injure_belly(v, injury)
+						if v.wound_list().any(func(w: Dictionary) -> bool: return String(w.get("kind", "")) == "fracture") or v.is_dead():
+							hurt += 1
+						if not v.is_up() or v.is_dying():
+							unable += 1
+						v.queue_free()
+					if lv == level and (not bool(injury.held) or hurt > 0 or unable > 0):
+						wrong.append("%s%s at its rated %s (%s): %.2f kg on the floor, %d of 12 hurt, %d down" % [model, packages, lv, st, floor, hurt, unable])
+					if lv == next and (bool(injury.held) or hurt == 0):
+						wrong.append("%s%s past its rating, %s (%s): %.2f kg on the floor, only %d of 12 hurt" % [model, packages, lv, st, floor, hurt])
+					if lv == next:
+						rows.append("%s%s %s %.2f kg %d/12" % [model, "+" + packages[0] if not packages.is_empty() else "", lv, floor, hurt])
+	check(wrong.is_empty(), "at each vehicle's rated mine level the crew floor holds and its men fight on, uninjured; one level past it they're hurt (fractures), on real Vitals (%s)" % ("; ".join(wrong) if not wrong.is_empty() else "; ".join(rows)))
+	var aav := VehicleSpecs.spec("aav7")
+	var big := VehicleModules.belly_injury(ArmourStandards.floor_kg(aav, 10.0, "belly"))
+	var dead := 0
+	for k in 12:
+		var v := Vitals.new()
+		add_child(v)
+		v.rng.seed = 500 + k
+		VehicleModules.injure_belly(v, big)
+		dead += 1 if v.is_dead() else 0
+		v.queue_free()
+	check(not bool(big.held) and dead >= 8, "10 kg under the AAV-7's flat belly (5 kg on its floor): %d of 12 killed" % dead)
+	var mx := VehicleSpecs.spec("maxxpro")
+	check(VehicleModules.belly_station(mx, Vector3(1.1, 0.0, -2.15)) == "wheel" and VehicleModules.belly_station(mx, Vector3(0.0, 0.0, 0.0)) == "belly"
+		and VehicleModules.belly_station(VehicleSpecs.spec("abrams"), Vector3(1.5, 0.0, 0.0)) == "track" and VehicleModules.belly_station(VehicleSpecs.spec("abrams"), Vector3(0.2, 0.0, 0.0)) == "belly"
+		and VehicleModules.under_belly(mx, Vector3(0, 0.05, 0), Vector3.UP) and not VehicleModules.under_belly(mx, Vector3(-1.4, 1.5, 0), Vector3.RIGHT),
+		"a charge under a wheel is the wheel station's, under a track the track's, in between the belly's; a blast beside it isn't under it")
+
+
+func _test_module_budget() -> void:
+	print("A2: budget")
+	var plans := [
+		["abrams", "side_rear_r", "m829a3", Vector3(2.0, 1.0, 1.5), Vector3(-1, 0, 0), 1000.0],
+		["aav7", "side_r", "pg7v", Vector3(1.8, 1.6, 1.3), Vector3(-1, 0, 0), 100.0],
+		["bradley", "hull_side_r", "tow2a", Vector3(1.9, 1.2, 0.45), Vector3(-1, 0, 0), 1500.0],
+	]
+	var staged: Array = []
+	for p: Array in plans:
+		var spec := VehicleSpecs.spec(p[0])
+		var shell := Shells.shell(StringName(p[2]))
+		var res := ArmourModel.resolve(shell, _plate_of(spec, p[1]), {"dir": p[4], "range_m": p[5], "seed": 5, "force": {"coverage": false}})
+		staged.append([VehicleModules.layout_of(p[0], spec), ArmourModel.damage(res, shell, VehicleDamage.zone_at(spec, p[3]), {}), shell, p[3], p[4],
+			VehicleModules.has_liner(spec)])
+	var n := 300
+	var ms := INF
+	var rays := 0
+	for batch in 3:
+		var t0 := Time.get_ticks_usec()
+		for i in n:
+			var s: Array = staged[i % staged.size()]
+			var d: Dictionary = (s[1] as Dictionary).duplicate()
+			VehicleModules.plan(s[0], d, s[2], s[3], s[4], {}, s[5])
+			rays += (d.get("spall_rays", []) as Array).size()
+		ms = minf(ms, float(Time.get_ticks_usec() - t0) / 1000.0 / float(n))
+	check(ms < MODULE_BUDGET_MS, "a penetration's path and spall cone: %.3f ms a hit, %.1f fragments each (budget %.1f ms, Proposed)" % [ms, float(rays) / float(n * 3), MODULE_BUDGET_MS])
