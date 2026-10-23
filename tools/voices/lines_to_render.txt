@@ -1,0 +1,82 @@
+en	contact_twelve_1	Contact, twelve o'clock!
+en	contact_twelve_close_1	Contact, twelve o'clock, close!
+en	contact_two_1	Contact, two o'clock!
+en	contact_two_close_1	Contact, two o'clock, close!
+en	contact_three_1	Contact, three o'clock!
+en	contact_three_close_1	Contact, three o'clock, close!
+en	contact_five_1	Contact, five o'clock!
+en	contact_five_close_1	Contact, five o'clock, close!
+en	contact_six_1	Contact, six o'clock!
+en	contact_six_close_1	Contact, six o'clock, close!
+en	contact_eight_1	Contact, eight o'clock!
+en	contact_eight_close_1	Contact, eight o'clock, close!
+en	contact_nine_1	Contact, nine o'clock!
+en	contact_nine_close_1	Contact, nine o'clock, close!
+en	contact_eleven_1	Contact, eleven o'clock!
+en	contact_eleven_close_1	Contact, eleven o'clock, close!
+en	intel_hq_1	Got the HQ marked!
+en	intel_qrf_base_1	Got a QRF base marked!
+en	intel_aa_1	Got an AA site marked!
+en	intel_outpost_1	Got an outpost marked!
+en	intel_checkpoint_1	Got a checkpoint marked!
+en	reloading_last_rifle_1	Last mag for the rifle!
+en	reloading_last_mg_1	Last mag for the gun!
+en	reloading_last_pistol_1	Last mag for the pistol!
+en	set_1	Set!
+en	set_2	I'm set!
+en	grenade_1	Grenade!
+en	grenade_2	Grenade, get down!
+en	out_of_ammo_1	I'm out! Need ammo!
+en	out_of_ammo_2	Out of ammo!
+en	check_fire_1	Check fire! Check fire!
+en	check_fire_2	Cease fire, friendlies!
+en	enemy_down_1	Enemy down!
+en	enemy_down_2	Got him!
+en	enemy_down_mg_1	Gunner down!
+en	enemy_down_at_1	RPG's down!
+en	enemy_down_sniper_1	Sniper down!
+en	suppressed_1	I'm pinned!
+en	suppressed_2	Pinned down!
+en	ack_follow_1	On you.
+en	ack_move_1	Moving.
+en	ack_hold_1	Holding.
+en	ack_bound_1	Bounding.
+en	ack_cover_1	Taking cover.
+en	ack_fall_back_1	Falling back!
+en	ack_garrison_1	Moving to garrison.
+en	ack_clear_1	Stacking up.
+en	ack_attack_1	Moving.
+en	ack_target_1	Target.
+en	ack_suppress_1	Suppressing!
+en	ack_watch_1	Watching.
+en	ack_fire_1	Weapons free.
+en	ack_hold_fire_1	Holding fire.
+en	ack_mount_1	Mounting up.
+en	ack_dismount_1	Getting out.
+en	ack_smoke_1	Smoke, wilco.
+en	ack_frag_1	Frag, wilco.
+ru	set_1	На месте!
+ru	set_2	Готов, прикрываю!
+ru	grenade_1	Граната!
+ru	grenade_2	Ложись, граната!
+ru	out_of_ammo_1	Патроны кончились!
+ru	out_of_ammo_2	Пустой!
+ru	check_fire_1	Не стрелять, свои!
+ru	check_fire_2	Свои!
+ru	enemy_down_1	Готов!
+ru	enemy_down_2	Минус один!
+ru	suppressed_1	Прижали!
+ru	suppressed_2	Голову не поднять!
+fa	set_1	مستقرم!
+fa	set_2	آماده‌ام!
+fa	grenade_1	نارنجک!
+fa	grenade_2	بخواب، نارنجک!
+fa	out_of_ammo_1	مهماتم تموم شد!
+fa	out_of_ammo_2	فشنگ ندارم!
+fa	check_fire_1	نزنید، خودی!
+fa	check_fire_2	خودی!
+fa	enemy_down_1	زدمش!
+fa	enemy_down_2	یکی افتاد!
+fa	suppressed_1	زیر آتشم!
+fa	suppressed_2	نمی‌تونم سر بلند کنم!
+720 clips missing (81 lines x their voices)

@@ -2626,6 +2626,7 @@ func _on_died() -> void:
 		return
 	_log_casualty("died")
 	_note_nemesis_kill()
+	_call_enemy_down()
 	_reload_n += 1  # a reload in progress dies with them
 	release_carried()
 	_drop_held()
@@ -2641,6 +2642,18 @@ func _on_died() -> void:
 	vitals.server_reset_health()
 	_gave_up = false
 	_server_respawn_after(level, respawn_delay_s)
+
+
+## Host only: whoever's shot just killed this soldier, an AI of another side, calls it
+## (Callouts.enemy_down: "Enemy down!", "Gunner down!").
+func _call_enemy_down() -> void:
+	var info: Dictionary = get_meta(Harm.META, {})
+	if info.is_empty() or Soldier._now() - float(info.get("at", -100.0)) > 2.0 or String(info.get("path", "")) == "":
+		return
+	var killer := get_node_or_null(NodePath(String(info.path))) as Soldier
+	var callouts := Callouts.of(self)
+	if killer and killer != self and callouts:
+		callouts.enemy_down(killer, self)
 
 
 ## Host only. A dead player waits `delay` seconds out of the fight (RESPAWN_WAITING), then

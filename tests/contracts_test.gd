@@ -53,6 +53,7 @@ func _ready() -> void:
 	_test_wages_and_floor()
 	_test_economy_balance()
 	_test_overhaul_numbers()
+	_test_money_curve()
 	_test_lapse()
 	_test_reputation_core()
 	_test_world_sites()
@@ -634,17 +635,47 @@ func _test_wages_and_floor() -> void:
 	check(Economy.weekly_bill().wages == Prices.default_wage_bill(), "without a roster, the stand-in wage bill")
 
 
+## The money curve (economy pass 2026-10-22, docs/economy.md): a few short campaigns through the
+## sim (tools/economy_sim.gd, the real economy code with the fighting's dice) on the data as it
+## stands. Normal play builds the company, careless play goes negative, and an expensive op
+## (heli insertion, three supports, three dead, four bought respawns) hurts but isn't ruinous.
+func _test_money_curve() -> void:
+	print("The money curve (tools/economy_sim.gd)")
+	var sim: Node = load("res://tools/economy_sim.gd").new()
+	var careful: Dictionary = sim.curve("careful", 3, 14)
+	var median: Dictionary = sim.curve("median", 4, 21)
+	var sloppy: Dictionary = sim.curve("sloppy", 3, 14)
+	var won: Dictionary = sim.op_result(true, 3)
+	var lost: Dictionary = sim.op_result(false, 3)
+	sim.free()
+	check(float(careful.end) > float(careful.start) + 20000.0, "careful play builds the company ($%.0fk -> $%.0fk in 14 days)" % [float(careful.start) / 1000.0, float(careful.end) / 1000.0])
+	check(float(median.end) > float(median.start) and int(median.broke) == 0, "normal play builds it too ($%.0fk -> $%.0fk in 21 days, %d broke)" % [float(median.start) / 1000.0, float(median.end) / 1000.0, int(median.broke)])
+	check(float(sloppy.end) < float(sloppy.start) - 50000.0, "careless play goes negative ($%.0fk -> $%.0fk in 14 days, less loans)" % [float(sloppy.start) / 1000.0, float(sloppy.end) / 1000.0])
+	check(int(won.n) > 0 and float(won.net) < 0.0 and float(won.net) > -45000.0, "an expensive op that's won hurts (net $%.1fk)" % (float(won.net) / 1000.0))
+	check(int(lost.n) > 0 and float(lost.cash_after) > 0.0 and float(lost.net) > -100000.0, "one that fails hurts more but isn't ruinous (net $%.1fk, $%.0fk left)" % [float(lost.net) / 1000.0, float(lost.cash_after) / 1000.0])
+	Contracts.new_full_campaign(1)  # (the sim's campaigns leave theirs behind)
+
+
 ## The economy overhaul's numbers (docs/economy_proposal_2026-10-20.md, built 2026-10-20) and its
 ## closed loopholes that live in Contracts and Economy.
 func _test_overhaul_numbers() -> void:
 	print("Economy overhaul numbers")
 	var pay: Array = MissionRegistry.data().settings.difficulty_pay
-	var want := [0.0, 0.35, 0.5, 0.6, 0.75, 0.95]
+	var want := [0.0, 0.46, 0.63, 0.8, 0.98, 1.22]  # economy pass 2026-10-22 (the overhaul's 0.35-0.95, back up a third)
 	check(pay.size() == want.size() and range(want.size()).all(func(i: int) -> bool: return is_equal_approx(float(pay[i]), want[i])) and is_equal_approx(MissionRegistry.setting_f("hot_zone_pay_mult"), 1.4)
-		and is_equal_approx(MissionRegistry.setting_f("clean_bonus_share"), 0.05), "pay a third lower, hot zones still x1.4 (no arrival contracts now), the clean bonus 5%")
-	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 10000
-		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_max() == 8000,
-		"a lost helicopter's deductible $15,000, death benefit $10,000, respawns +25% each up to $8,000")
+		and is_equal_approx(MissionRegistry.setting_f("clean_bonus_share"), 0.05), "pay by rating 0.46-1.22 (2026-10-22), hot zones still x1.4 (no arrival contracts now), the clean bonus 5%")
+	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 8000
+		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_price() == 3000 and Prices.respawn_max() == 6000,
+		"a lost helicopter's deductible $15,000, death benefit $8,000, respawns $3,000 +25% each up to $6,000")
+	check(Prices.operations("per_head_day") == 550 and Prices.operations("hc_per_head_day") == 250 and Prices.operations("wounded_care") == 900
+		and Prices.support_price("insertion") == 6000 and Prices.support_price("resupply") == 10000 and Prices.support_price("extraction") == 12000,
+		"field costs $550 a head a day ($250 for the high command squads), treatment $900, a heli insertion $6,000, supports a little cheaper")
+	# The high command squads' men have their own field rate in the debrief (economy pass 2026-10-22).
+	var hc_report := {"extracted": ["A", "B", "H1", "H2", "H3"], "casualties": [{"name": "H4", "status": "kia"}], "hc_names": ["H1", "H2", "H3", "H4"]}
+	var hc_lines: Array = DebriefCalc.expenses(hc_report, 2, [], false).lines
+	var hc_field: Array = hc_lines.filter(func(l: Dictionary) -> bool: return String(l.what).begins_with("Field costs"))
+	check(hc_field.size() == 1 and int(hc_field[0].amount) == (2 * 550 + 4 * 250) * 2 and String(hc_field[0].what).contains("4 of them high command"),
+		"field costs: 2 of the squad at $550 and 4 high command at $250 for 2 days (%s)" % [hc_field])
 	# Intel sells for its own worth, and prices.json keeps intel at its intel_value (loot rotation's pieces too).
 	var off := PackedStringArray()
 	for id: StringName in ItemDB.all_ids():

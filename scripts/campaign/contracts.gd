@@ -1304,10 +1304,13 @@ static func report_from_level(level: CompoundLevel, extracted: Array, banked := 
 	var items: Array = []
 	var names: Array = []
 	var casualties: Array = []
+	var hc_names: Array = []  # the high command squads' men among them (their own field rate)
 	var out := {}
 	for s: Soldier in extracted:
 		out[s] = true
 		names.append(s.display_name())
+		if s.hc_id != &"":
+			hc_names.append(s.display_name())
 		items.append_array(inventory_items(s.inventory))
 		if s.vitals.injury() > 0.05 or not s.vitals.is_up():
 			casualties.append({"name": s.display_name(), "status": "wounded", "injury": s.vitals.condition_text()})
@@ -1329,8 +1332,10 @@ static func report_from_level(level: CompoundLevel, extracted: Array, banked := 
 			field.append_array(inventory_items(s.inventory))
 		if s.faction == &"friendly":
 			casualties.append({"name": s.display_name(), "status": "kia" if s.vitals.is_dead() else "mia", "injury": s.vitals.condition_text()})
+			if s.hc_id != &"":
+				hc_names.append(s.display_name())
 	var pallet_field := PalletField.of(level)  # tagged pallets and vehicles are hauled home (feat/pallet-tagging)
-	return {"items": items, "field_items": field, "extracted": names, "casualties": casualties,
+	return {"items": items, "field_items": field, "extracted": names, "casualties": casualties, "hc_names": hc_names,
 		"tagged": pallet_field.lots() if pallet_field else []}
 
 

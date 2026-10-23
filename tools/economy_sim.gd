@@ -533,7 +533,10 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		for veh: Dictionary in Pallets.site_vehicles(String(x.module)):
 			if _rng.randf() < float(prof.vehicles):
 				tagged.append(Pallets.vehicle_lot(String(veh.model), false, "%s_veh_%d" % [x.cid, _rng.randi()], String(veh.model)))
-	var report := {"items": [], "bank": bank, "field_items": field, "extracted": extracted, "casualties": casualties, "tagged": tagged}
+	var hc_names: Array = hc_out.duplicate()
+	for m: Dictionary in hc_dead:
+		hc_names.append(String(m.name))
+	var report := {"items": [], "bank": bank, "field_items": field, "extracted": extracted, "casualties": casualties, "tagged": tagged, "hc_names": hc_names}
 	var debrief := Contracts.server_end_deployment(report)
 	if OS.get_environment("ECONOMY_SIM_DEBUG") != "":
 		print("sim debrief: ", (debrief.contracts as Array).map(func(l: Dictionary) -> String: return "%s %s %s" % [l.cid, l.outcome, l.objectives]))
@@ -735,6 +738,58 @@ func _poisson(mean: float) -> int:
 			return k
 		k += 1
 	return k
+
+
+# --- For the tests -------------------------------------------------------------------------------
+
+## A quick money curve (contracts_test "The money curve"): `runs` campaigns of `profile` for
+## `days` on the data as it stands. {"start": mean day-0 cash, "end": mean cash less loans at the
+## end, "broke": campaigns out of credit and in debt}. Leaves the autosave flags as it found them.
+func curve(profile: String, runs: int, days: int, first_seed := 1) -> Dictionary:
+	_orig_prices = Prices.data().duplicate(true)
+	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
+	var autosave := Contracts.autosave
+	var show := Contracts.auto_show_debrief
+	Contracts.autosave = false
+	Contracts.auto_show_debrief = false
+	Economy.bill_paid.connect(_on_bill_paid)
+	var starts: Array = []
+	var ends: Array = []
+	var broke := 0
+	for r in runs:
+		var res := _run_campaign(PROFILES[profile], first_seed + r, days)
+		starts.append(float(res.cash_at[0]))
+		ends.append(float(res.worth_at[CHECKPOINTS[-1]]))
+		broke += 1 if res.broke else 0
+	Economy.bill_paid.disconnect(_on_bill_paid)
+	Contracts.autosave = autosave
+	Contracts.auto_show_debrief = show
+	return {"start": _mean(starts), "end": _mean(ends), "broke": broke}
+
+
+## The scripted expensive op for the tests: {"net": mean economic net, "cash_after": mean cash
+## after it} over `runs` fresh campaigns, won or failed.
+func op_result(won: bool, runs: int, first_seed := 1) -> Dictionary:
+	_orig_prices = Prices.data().duplicate(true)
+	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
+	var autosave := Contracts.autosave
+	var show := Contracts.auto_show_debrief
+	Contracts.autosave = false
+	Contracts.auto_show_debrief = false
+	Economy.bill_paid.connect(_on_bill_paid)
+	var prof: Dictionary = EXPENSIVE_OP.duplicate(true)
+	prof.win = [1.0, 1.0, 1.0, 1.0, 1.0] if won else [0.0, 0.0, 0.0, 0.0, 0.0]
+	var nets: Array = []
+	var after: Array = []
+	for r in runs:
+		var res := _run_campaign(prof, first_seed + r, 0, true)
+		if not res.deploys.is_empty():
+			nets.append(float(res.deploys[0].econ_net))
+			after.append(float(res.cash_after_op))
+	Economy.bill_paid.disconnect(_on_bill_paid)
+	Contracts.autosave = autosave
+	Contracts.auto_show_debrief = show
+	return {"net": _mean(nets), "cash_after": _mean(after), "n": nets.size()}
 
 
 # --- The expensive op ---------------------------------------------------------------------------

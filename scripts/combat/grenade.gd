@@ -11,6 +11,10 @@ var _fuse := 3.0
 ## A thrown chem light settles once it's slower than this (m/s), or this long after its fuse.
 const CHEMLIGHT_REST_MS := 0.3
 const CHEMLIGHT_ROLL_S := 3.0
+## Host: the side it threatens shouts "Grenade!" this long before it goes off (Callouts.
+## grenade_incoming). Proposed.
+const CALL_FUSE_S := 1.8
+var _called := false
 
 
 func setup(id: StringName) -> void:
@@ -49,6 +53,11 @@ func setup(id: StringName) -> void:
 
 func _physics_process(delta: float) -> void:
 	_fuse -= delta
+	if not _called and _fuse <= CALL_FUSE_S and kind in ["frag", "flash"] and multiplayer.is_server():
+		_called = true
+		var callouts := Callouts.of(self)
+		if callouts:
+			callouts.grenade_incoming(global_position, thrower, str(get_instance_id()))
 	if _fuse > 0.0:
 		return
 	if kind == "chemlight" and linear_velocity.length() > CHEMLIGHT_REST_MS and _fuse > -CHEMLIGHT_ROLL_S:

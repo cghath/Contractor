@@ -65,9 +65,12 @@ func _submit(text: String) -> void:
 
 
 ## A question, if someone's there to ask: a living friendly or civilian answers with their
-## own live state. Otherwise runs the key sequence a recognized order maps to, exactly as if
-## it had been typed on the keyboard. Flashes a message if nothing in either bounded
-## vocabulary matched.
+## own live state. Otherwise a go code ("alpha go") or an order to a high command squad by its
+## callsign ("Hawk two, move there"), sent as the map's orders are (HighCommand: its own
+## "copy" comes back over the net); else the key sequence a recognized order maps to, exactly
+## as if it had been typed on the keyboard, after selecting whoever it was addressed to
+## ("Bravo, hold"; nobody named and nobody selected: everyone), and the one who got it
+## confirms ("Holding."). Flashes a message if nothing in the bounded vocabularies matched.
 func run(text: String) -> void:
 	var target := askable_target()
 	if target != null:
@@ -75,12 +78,84 @@ func run(text: String) -> void:
 		if qid != &"":
 			command_menu.player._hud.flash("%s: %s" % [target.display_name(), _answer_text(target, qid)])
 			return
-	var keys := VoiceCommands.resolve(text)
-	if keys.is_empty():
-		command_menu.player._hud.flash("Didn't catch that order: \"%s\"" % text)
+	var hud := command_menu.player._hud
+	var code := VoiceCommands.go_code(text)
+	var hc := HighCommand.of(command_menu.player)
+	if code != "" and hc:
+		hc.request_go(code)
+		hud.flash("%s, go" % ("H-hour" if code == "hhour" else code.capitalize()))
 		return
+	var names := addressees()
+	var split := VoiceCommands.split_addressee(text, names)
+	var to: Variant = split.to
+	if to is Dictionary and hc:  # a high command squad
+		_hc_order(hc, to as Dictionary, String(split.rest))
+		return
+	var keys := VoiceCommands.resolve(String(split.rest) if to != null else text)
+	if keys.is_empty():
+		hud.flash("Didn't catch that order: \"%s\"" % text)
+		return
+	var picks := keys[0].begins_with("F") or keys[0] in ["`", "Backspace"]
+	if to is String:
+		command_menu.close()
+		command_menu.handle_input(_key_event(String(to)))
+	elif not picks and not command_menu.is_open():
+		command_menu.handle_input(_key_event("`"))  # an order to nobody in particular: the squad
+	var who := command_menu.selected.duplicate()
 	for key: String in keys:
 		command_menu.handle_input(_key_event(key))
+	var ack := VoiceCommands.ack_for(keys)
+	if not picks and not ack.is_empty():
+		_confirm(who, String(ack[0]), String(ack[1]))
+
+
+## Who a voice order can be addressed to, as spoken: each AI squadmate's callsign (its select
+## key, F<n>), the whole squad (`), and each high command squad out ({"id", "callsign"}).
+func addressees() -> Dictionary:
+	var out := {}
+	var units := command_menu.roster()
+	for i in mini(units.size(), CommandMenu.F_KEYS.size()):
+		if units[i].is_ai():
+			out[VoiceCommands.spoken(String(units[i].name))] = "F%d" % (i + 1)
+	for w: String in VoiceCommands.EVERYONE:
+		out[w] = "`"
+	var hc := HighCommand.of(command_menu.player)
+	if hc:
+		for v: Dictionary in hc.view:
+			if String(v.get("callsign", "")) != "":
+				out[VoiceCommands.spoken(String(v.callsign))] = {"id": String(v.id), "callsign": String(v.callsign)}
+	return out
+
+
+## An order to high command squad `g` ({"id", "callsign"}) from what was said after its callsign.
+func _hc_order(hc: HighCommand, g: Dictionary, rest: String) -> void:
+	var hud := command_menu.player._hud
+	var said := VoiceCommands.hc_order(rest)
+	if said.is_empty():
+		hud.flash("Didn't catch the order for %s: \"%s\"" % [g.callsign, rest])
+		return
+	var points: Array = []
+	if String(said.verb) in HcOrder.POINTED:
+		var hit: Variant = command_menu.player.crosshair_ground()
+		if hit == null:
+			hud.flash("Look at a spot on the ground")
+			return
+		points = [[(hit as Vector3).x, (hit as Vector3).z]]
+	hc.request_order(HcOrder.make(String(g.id), String(said.verb), points, {"go": String(said.go)}))
+	hud.flash("%s: %s%s" % [g.callsign, HcOrder.verb_text(String(said.verb)), " on %s" % String(said.go).capitalize() if String(said.go) != "" else ""])
+
+
+## The first of `who` (callsigns selected for the order) still up confirms it out loud.
+func _confirm(who: PackedStringArray, what: String, line: String) -> void:
+	var callouts := Callouts.of(command_menu.player)
+	var level := CompoundLevel.current(command_menu.player)
+	if callouts == null or level == null:
+		return
+	for name in who:
+		var s := level.ai.get_node_or_null(NodePath(name)) as Soldier
+		if s and s.vitals.is_up():
+			callouts.request_ack(s, what, line)
+			return
 
 
 ## The living friendly or civilian under the crosshair, if any - someone it makes sense to

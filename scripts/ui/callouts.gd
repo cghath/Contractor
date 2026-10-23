@@ -47,7 +47,33 @@ const LINES := {
 	&"covering": "Covering!",
 	&"no_shot": "No shot!",
 	&"medic": "Medic!",
+	&"set": "Set!",
+	&"grenade": "Grenade!",
+	&"out_of_ammo": "I'm out! Need ammo!",
+	&"check_fire": "Check fire! Check fire!",
+	&"enemy_down": "Enemy down!",
+	&"suppressed": "I'm pinned!",
 }
+## Context-aware barks (2026-10-22, claude/voice-economy; the Captain's immersion backlog,
+## "nothing insane"): one voice at a time per group (a squad; a side's men in no squad share
+## one), by priority. A line while someone else in its group is talking (GROUP_GAP_S) waits its
+## turn like a speaker-gap line (PENDING_S) unless it outranks what's being said; 3 cuts in on
+## anyone. Ids not listed are 0; a templated id takes its prefix's ("contact_two_close" is a
+## contact). Proposed.
+const GROUP_GAP_S := 1.0
+const PRIORITY := {
+	&"man_down": 3, &"grenade": 3, &"check_fire": 3, &"frag_out": 3, &"smoke_out": 3, &"flash_out": 3,
+	&"medic": 3, &"moving_to": 3, &"treating": 3, &"need_medic": 3,
+	&"contact": 2, &"enemy_down": 2, &"suppressed": 2, &"out_of_ammo": 2, &"tactic": 2, &"ack": 2, &"intel": 2,
+	&"reloading": 1, &"moving": 1, &"covering": 1, &"set": 1, &"no_shot": 1, &"clear": 1,
+}
+## Enemy down, by what the man was (GroupBoard.soldier_kind): its own line.
+const ENEMY_DOWN_LINES := {"mg": "Gunner down!", "at": "RPG's down!", "sniper": "Sniper down!"}
+## Grenade!: who's this close to where a live grenade lands calls it (the nearest of the side it
+## threatens). Proposed.
+const GRENADE_CALL_M := 12.0
+## A suppressed man calls where it's coming from when the threat is this fresh (s).
+const THREAT_FRESH_S := 5.0
 ## Callout ids for thrown items.
 const THROW_IDS := {&"frag_grenade": &"frag_out", &"smoke_grenade": &"smoke_out", &"flashbang": &"flash_out"}
 const DIRECTIONS: Array[String] = ["front", "front right", "right", "back right", "back", "back left", "left", "front left"]
@@ -73,6 +99,7 @@ var _last_by_speaker := {}  # speaker node name -> time of their last line
 var _last_by_key := {}  # "speaker/key" -> time that callout was last said
 var _last_by_side_key := {}  # "faction/key" -> time someone on that side last said it
 var _pending := {}  # speaker node name -> the line waiting for the speaker gap
+var _group_air := {}  # group key -> {"until": time its line holds the air, "prio", "who"}
 
 
 ## The level's Callouts node, or null.
@@ -142,7 +169,7 @@ func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := ""
 	if shared != "" and now - float(_last_by_side_key.get(shared, -1000.0)) < side_gap:
 		return false
 	var line := text if text != "" else String(LINES.get(id, String(id)))
-	if id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S:
+	if (id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S) or not group_free(speaker, id):
 		_pending[who] = {"speaker": speaker, "id": id, "line": line, "repeat_key": repeat_key,
 			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S}
 		return false
@@ -163,7 +190,7 @@ func _process(_delta: float) -> void:
 				or now - float(_last_by_key.get(p.repeat_key, -1000.0)) < REPEAT_GAP_S \
 				or (p.shared != "" and now - float(_last_by_side_key.get(p.shared, -1000.0)) < float(p.side_gap)):
 			_pending.erase(who)
-		elif now - float(_last_by_speaker.get(who, -1000.0)) >= SPEAKER_GAP_S:
+		elif (p.id in URGENT or now - float(_last_by_speaker.get(who, -1000.0)) >= SPEAKER_GAP_S) and group_free(speaker, p.id):
 			_pending.erase(who)
 			_send(speaker, p.id, p.line, p.repeat_key, p.shared)
 
@@ -175,12 +202,45 @@ func _send(speaker: Soldier, id: StringName, line: String, repeat_key: String, s
 	if shared != "":
 		_last_by_side_key[shared] = now
 	_last_by_speaker[who] = now
+	_group_air[group_of(speaker)] = {"until": now + GROUP_GAP_S, "prio": priority(id), "who": who}
 	var to := recipients(speaker)
 	sent.append({"speaker": who, "id": id, "text": line, "to": to, "time": now})
 	if sent.size() > LOG_SIZE:
 		sent.pop_front()
 	for peer in to:
 		_show.rpc_id(peer, speaker.get_path(), display_name(speaker), String(id), line)
+
+
+## Callout `id`'s priority (PRIORITY): its own, or its nearest listed prefix's, else 0.
+static func priority(id: StringName) -> int:
+	var base := String(id)
+	while true:
+		if PRIORITY.has(StringName(base)):
+			return int(PRIORITY[StringName(base)])
+		var cut := base.rfind("_")
+		if cut <= 0:
+			return 0
+		base = base.substr(0, cut)
+	return 0
+
+
+## Host only. Who `speaker` shares the air with: his squad, or his side's men in none.
+func group_of(speaker: Soldier) -> String:
+	var level := CompoundLevel.current(self)
+	var squad := level.squad_of(speaker) if level else null
+	return "squad/%d" % squad.get_instance_id() if squad else "side/%s" % speaker.faction
+
+
+## Host only. Whether `speaker` may say `id` now as far as his group goes: nobody else in it is
+## talking, or `id` outranks what is being said (3 always cuts in).
+func group_free(speaker: Soldier, id: StringName) -> bool:
+	var prio := priority(id)
+	if prio >= 3:
+		return true
+	var air: Dictionary = _group_air.get(group_of(speaker), {})
+	if air.is_empty() or Soldier._now() >= float(air.until) or String(air.who) == String(speaker.name):
+		return true
+	return prio > int(air.prio)
 
 
 ## A hero squad's or allied element's man (Soldier.hc_id) is heard only this close (G5); the
@@ -235,6 +295,90 @@ func man_down(casualty: Soldier) -> bool:
 	if speaker == null:
 		return false
 	return say(speaker, &"man_down", "Man down! %s is down" % display_name(casualty), "man_down/%s" % casualty.name)
+
+
+## Host only. A live grenade about to go off at `at`: the nearest AI of the side it threatens
+## (not the thrower's) within GRENADE_CALL_M shouts "Grenade!"; one call a grenade.
+func grenade_incoming(at: Vector3, thrower: Node, grenade_key: String) -> bool:
+	var thrower_side: Variant = (thrower as Soldier).faction if thrower is Soldier and is_instance_valid(thrower) else null
+	var best: Soldier = null
+	var best_d := GRENADE_CALL_M
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s.is_queued_for_deletion() or not s.is_ai() or not s.vitals.is_up() or (thrower_side != null and s.faction == thrower_side):
+			continue
+		var d := s.global_position.distance_to(at)
+		if d <= best_d:
+			best = s
+			best_d = d
+	if best == null:
+		return false
+	return say(best, &"grenade", "", "grenade", "grenade/%s" % grenade_key, 4.0)
+
+
+## Host only. A friendly hit a friendly: the one hit (an AI, up), or the nearest AI who saw it,
+## shouts "Check fire!" ("Check fire! You're hitting Charlie!"); one call per shooter a while.
+func check_fire(victim: Soldier, shooter: Soldier) -> bool:
+	if victim == null or shooter == null or victim == shooter:
+		return false
+	var speaker := victim if victim.is_ai() and victim.vitals.is_up() else witness(victim)
+	if speaker == null or speaker == shooter:
+		return false
+	var line := "Check fire! Check fire!" if speaker == victim else "Check fire! You're hitting %s!" % display_name(victim)
+	return say(speaker, &"check_fire", line, "check_fire", "check_fire/%s" % shooter.name, SQUAD_CONTACT_GAP_S)
+
+
+## Host only. `killer` (an AI) dropped `victim`, an enemy: "Enemy down!", or what he was
+## ("Gunner down!", "RPG's down!", "Sniper down!").
+func enemy_down(killer: Soldier, victim: Soldier) -> bool:
+	if killer == null or victim == null or not killer.is_ai() or killer.faction == victim.faction:
+		return false
+	var kind := GroupBoard.soldier_kind(victim)
+	var id := StringName("enemy_down_%s" % kind) if ENEMY_DOWN_LINES.has(kind) else &"enemy_down"
+	return say(killer, id, String(ENEMY_DOWN_LINES.get(kind, LINES[&"enemy_down"])), "enemy_down", "enemy_down/%s" % victim.name, SQUAD_CONTACT_GAP_S)
+
+
+## Host only. `speaker` is pinned: "Pinned down! Fire from the left!" (where it comes from, when
+## his threat is fresh), else "I'm pinned!".
+func suppressed(speaker: Soldier) -> bool:
+	if speaker == null:
+		return false
+	var fresh := Soldier._now() - speaker.threat_time <= THREAT_FRESH_S and speaker.threat_pos != Vector3.ZERO
+	var line := "Pinned down! Fire from the %s!" % direction_word(speaker, speaker.threat_pos) if fresh else String(LINES[&"suppressed"])
+	return say(speaker, &"suppressed", line)
+
+
+## Host only. `speaker`'s weapon is dry, nothing left to load: "I'm out! Need ammo!".
+func out_of_ammo(speaker: Soldier) -> bool:
+	return say(speaker, &"out_of_ammo")
+
+
+## Host only. `speaker` answers an order (a voice order's confirmation, VoiceCommands "ack"):
+## "Holding.", "Moving.". Voiced as ack_<what> (gen_callouts.py).
+func ack(speaker: Soldier, what: String, line: String) -> bool:
+	if speaker == null or line == "":
+		return false
+	return say(speaker, StringName("ack_%s" % what), line, "ack")
+
+
+## Any peer (a voice order, VoiceOrder._confirm): asks the host for `speaker`'s confirmation.
+func request_ack(speaker: Soldier, what: String, line: String) -> void:
+	if speaker == null:
+		return
+	if multiplayer.is_server():
+		ack(speaker, what, line)
+	else:
+		_rq_ack.rpc_id(1, get_path_to(speaker), what, line)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rq_ack(speaker_path: NodePath, what: String, line: String) -> void:
+	var s := get_node_or_null(speaker_path) as Soldier
+	var level := CompoundLevel.current(self)
+	var asker: Soldier = level.players.get_node_or_null(NodePath(str(multiplayer.get_remote_sender_id()))) as Soldier if level else null
+	if s == null or not s.is_ai() or asker == null or s.faction != asker.faction or line.length() > 40:
+		return
+	ack(s, what.left(20), line)
 
 
 ## Host only. A wounded soldier who can't fix something themselves calls "Medic!".

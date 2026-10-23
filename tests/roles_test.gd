@@ -604,7 +604,8 @@ func _test_callout_rules() -> void:
 			subtitles = child
 	check(subtitles != null and subtitles.text.contains(line), "the HUD shows it")
 	check(not callouts.say(first, &"moving") and said.call(first, &"moving").is_empty(), "a speaker doesn't talk again right away")
-	check(callouts.say(second, &"moving"), "another speaker can")
+	check(not callouts.say(second, &"moving") and callouts._pending.has(String(second.name)), "another speaker in the squad waits while it's talking (one voice per group)")
+	callouts._pending.erase(String(second.name))
 	check(callouts.say(first, &"frag_out"), "urgent calls (Frag out!) cut in")
 	var frag_time := float(said.call(first, &"frag_out")[0].time)
 	await _seconds(Callouts.SPEAKER_GAP_S + 0.3)

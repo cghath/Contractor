@@ -1,16 +1,18 @@
 """Generates the squad's voiced callouts with Piper: audio/callouts/v<k>/<id>_<n>.wav per voice.
 
-usage: python -I gen_callouts.py <piper.exe> <model.onnx> <out dir> <lang tag> <speaker ids, comma list>
-lang tag picks the line set (en for now).
+usage: python -I gen_callouts.py <piper.exe> <model.onnx> <out dir> <lang tag> <speaker ids, comma list> [first voice index]
+       python -I gen_callouts.py --list <callouts dir>   (the lines with no clip yet, per language)
+lang tag picks the line set (en, ru, fa). A clip already on disk is kept (only missing ones are
+rendered), so running it again after new lines are added renders just those.
+
+2026-10-22 (claude/voice-economy): the context-aware barks and the voice orders' confirmations
+(NEW_LINES below) have no clips yet: Piper isn't on the dev PC. The game shows them as subtitles
+until their clips are in audio/callouts (Callouts.voiced_path falls back to the bare category, then
+to silence). docs/voice.md lists the voices and speakers used for the first batch.
 """
 import subprocess
 import sys
 from pathlib import Path
-
-PIPER, MODEL, OUT = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
-LANG = sys.argv[4]
-SPEAKERS = [int(s) for s in sys.argv[5].split(",") if s != ""]
-START = int(sys.argv[6]) if len(sys.argv) > 6 else 0  # first voice folder index
 
 LINES = {
     "en": {
@@ -97,15 +99,102 @@ AMMO_CLASSES = {"rifle": "rifle", "mg": "gun", "pistol": "pistol"}
 for _cls, _label in AMMO_CLASSES.items():
     LINES["en"]["reloading_last_%s" % _cls] = ["Last mag for the %s!" % _label]
 
-lines = LINES[LANG]
-for k, spk in enumerate(SPEAKERS):
-    folder = OUT / ("v%d" % (START + k))
-    folder.mkdir(parents=True, exist_ok=True)
-    for cid, variants in lines.items():
-        for n, text in enumerate(variants, 1):
-            out = folder / ("%s_%d.wav" % (cid, n))
-            args = [str(PIPER), "-m", str(MODEL), "-f", str(out), "--length_scale", "0.85"]
-            if spk >= 0:
-                args += ["--speaker", str(spk)]
-            subprocess.run(args, input=text.encode(), capture_output=True, check=False)
-    print("voice v%d (speaker %d): %d files" % (START + k, spk, len(list(folder.glob("*.wav")))))
+# Context-aware barks and order confirmations (2026-10-22, claude/voice-economy; scripts/ui/
+# callouts.gd LINES, PRIORITY and VoiceCommands.ACKS). Enemies say the barks in their own tongue.
+NEW_LINES = {
+    "en": {
+        "set": ["Set!", "I'm set!"],
+        "grenade": ["Grenade!", "Grenade, get down!"],
+        "out_of_ammo": ["I'm out! Need ammo!", "Out of ammo!"],
+        "check_fire": ["Check fire! Check fire!", "Cease fire, friendlies!"],
+        "enemy_down": ["Enemy down!", "Got him!"],
+        "enemy_down_mg": ["Gunner down!"],
+        "enemy_down_at": ["RPG's down!"],
+        "enemy_down_sniper": ["Sniper down!"],
+        "suppressed": ["I'm pinned!", "Pinned down!"],
+        "ack_follow": ["On you."],
+        "ack_move": ["Moving."],
+        "ack_hold": ["Holding."],
+        "ack_bound": ["Bounding."],
+        "ack_cover": ["Taking cover."],
+        "ack_fall_back": ["Falling back!"],
+        "ack_garrison": ["Moving to garrison."],
+        "ack_clear": ["Stacking up."],
+        "ack_attack": ["Moving."],
+        "ack_target": ["Target."],
+        "ack_suppress": ["Suppressing!"],
+        "ack_watch": ["Watching."],
+        "ack_fire": ["Weapons free."],
+        "ack_hold_fire": ["Holding fire."],
+        "ack_mount": ["Mounting up."],
+        "ack_dismount": ["Getting out."],
+        "ack_smoke": ["Smoke, wilco."],
+        "ack_frag": ["Frag, wilco."],
+    },
+    "ru": {
+        "set": ["На месте!", "Готов, прикрываю!"],
+        "grenade": ["Граната!", "Ложись, граната!"],
+        "out_of_ammo": ["Патроны кончились!", "Пустой!"],
+        "check_fire": ["Не стрелять, свои!", "Свои!"],
+        "enemy_down": ["Готов!", "Минус один!"],
+        "suppressed": ["Прижали!", "Голову не поднять!"],
+    },
+    "fa": {
+        "set": ["مستقرم!", "آماده‌ام!"],
+        "grenade": ["نارنجک!", "بخواب، نارنجک!"],
+        "out_of_ammo": ["مهماتم تموم شد!", "فشنگ ندارم!"],
+        "check_fire": ["نزنید، خودی!", "خودی!"],
+        "enemy_down": ["زدمش!", "یکی افتاد!"],
+        "suppressed": ["زیر آتشم!", "نمی‌تونم سر بلند کنم!"],
+    },
+}
+for _lang, _lines in NEW_LINES.items():
+    LINES[_lang].update(_lines)
+
+# Where each language's voices live under audio/callouts (Callouts.voiced_path).
+LANG_DIRS = {"en": ["v%d" % k for k in range(8)] + ["female/v%d" % k for k in range(4)], "ru": ["ru/v0", "ru/v1"], "fa": ["fa/v0"]}
+
+
+def missing(root):
+    """(lang, voice dir, id, n, text) for every line with no clip under `root` (audio/callouts)."""
+    out = []
+    for lang, dirs in LANG_DIRS.items():
+        for d in dirs:
+            for cid, variants in LINES[lang].items():
+                for n, text in enumerate(variants, 1):
+                    if not (Path(root) / d / ("%s_%d.wav" % (cid, n))).exists():
+                        out.append((lang, d, cid, n, text))
+    return out
+
+
+if __name__ == "__main__":
+    if sys.argv[1] == "--list":
+        sys.stdout.reconfigure(encoding="utf-8")
+        todo = missing(sys.argv[2])
+        seen = set()
+        for lang, d, cid, n, text in todo:
+            if (lang, cid, n) not in seen:
+                seen.add((lang, cid, n))
+                print("%s\t%s_%d\t%s" % (lang, cid, n, text))
+        print("%d clips missing (%d lines x their voices)" % (len(todo), len(seen)))
+        sys.exit(0)
+    PIPER, MODEL, OUT = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+    LANG = sys.argv[4]
+    SPEAKERS = [int(x) for x in sys.argv[5].split(",") if x != ""]
+    START = int(sys.argv[6]) if len(sys.argv) > 6 else 0  # first voice folder index
+    lines = LINES[LANG]
+    for k, spk in enumerate(SPEAKERS):
+        folder = OUT / ("v%d" % (START + k))
+        folder.mkdir(parents=True, exist_ok=True)
+        made = 0
+        for cid, variants in lines.items():
+            for n, text in enumerate(variants, 1):
+                out = folder / ("%s_%d.wav" % (cid, n))
+                if out.exists():
+                    continue  # rendered before: only the new lines
+                args = [str(PIPER), "-m", str(MODEL), "-f", str(out), "--length_scale", "0.85"]
+                if spk >= 0:
+                    args += ["--speaker", str(spk)]
+                subprocess.run(args, input=text.encode(), capture_output=True, check=False)
+                made += 1
+        print("voice v%d (speaker %d): %d new, %d files" % (START + k, spk, made, len(list(folder.glob("*.wav")))))

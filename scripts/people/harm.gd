@@ -32,6 +32,9 @@ static func note_hit(victim: Node, attacker: Node) -> void:
 		var callouts := Callouts.of(hurt)
 		if callouts:
 			callouts.server_vocal(hurt, &"scream" if randf() < 0.3 or not hurt.vitals.is_up() else &"hit")
+			var shooter := attacker as Soldier
+			if shooter and shooter != hurt and hurt.faction in Deconfliction.FRIENDLY and shooter.faction in Deconfliction.FRIENDLY:
+				callouts.check_fire(hurt, shooter)  # friendly fire: "Check fire!"
 	var people := victim.get_node_or_null(^"/root/People")
 	if people:
 		people.server_harmed(victim, info)

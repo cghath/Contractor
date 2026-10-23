@@ -1377,6 +1377,7 @@ func _choose_intent() -> void:
 	var spare := body.inventory.spare_rounds(Soldier._ammo_of(weapon), weapon) if weapon else 0
 	if not contact:
 		_top_up_key()
+	_bark_state(contact, weapon, rounds, spare)
 
 	if body.faction == &"friendly":
 		match order:
@@ -5675,6 +5676,27 @@ static func _weapon_class(weapon: ItemData) -> String:
 	if weapon.tags.has("lmg"):
 		return "mg"
 	return "pistol" if weapon.tags.has("pistol") else "rifle"
+
+
+## Context barks from his own state (Callouts): pinned ("Pinned down! Fire from the left!")
+## when suppression passes PINNED, and dry ("I'm out! Need ammo!") in contact with nothing
+## left for the gun in hand; each once until it clears.
+var _pinned_called := false
+var _dry_called := false
+
+
+func _bark_state(contact: bool, weapon: ItemData, rounds: int, spare: int) -> void:
+	if body.suppression >= PINNED and not _pinned_called:
+		var callouts := Callouts.of(body)
+		_pinned_called = callouts != null and callouts.suppressed(body)
+	elif body.suppression < PINNED * 0.4:
+		_pinned_called = false
+	var dry := contact and weapon != null and weapon.type == "weapon" and rounds <= 0 and spare <= 0
+	if dry and not _dry_called:
+		var callouts := Callouts.of(body)
+		_dry_called = callouts != null and callouts.out_of_ammo(body)
+	elif not dry:
+		_dry_called = false
 
 
 ## Bounding in contact: "Moving!", and the battle buddy answers "Covering!".

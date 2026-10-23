@@ -160,9 +160,23 @@ static func expenses(report: Dictionary, days: int, run: Array, use_stocks := fa
 				heads += 1
 			"wounded":
 				wounded += 1
-	var field := heads * maxi(days, 1) * Prices.operations("per_head_day")
+	# The standing high command squads (Heroes: "never charged per deployment") have a field rate
+	# of their own, operations.hc_per_head_day (economy pass 2026-10-22; the squad's rate if unset).
+	var hc_heads := 0
+	var hc_names: Array = report.get("hc_names", [])
+	if not hc_names.is_empty():
+		for n: Variant in report.get("extracted", []):
+			if n in hc_names:
+				hc_heads += 1
+		for c: Dictionary in report.get("casualties", []):
+			if String(c.get("status", "")) in ["kia", "mia"] and c.get("name") in hc_names:
+				hc_heads += 1
+	var rate := Prices.operations("per_head_day")
+	var hc_rate: int = int((Prices.data().get("operations", {}) as Dictionary).get("hc_per_head_day", rate))
+	var field := ((heads - hc_heads) * rate + hc_heads * hc_rate) * maxi(days, 1)
 	if field > 0:
-		lines.append({"what": "Field costs: ammo, meds, fuel, comms (%d people x %d days)" % [heads, maxi(days, 1)], "amount": field, "charge": true})
+		var who := "%d people" % heads if hc_heads == 0 or hc_rate == rate else "%d people, %d of them high command" % [heads, hc_heads]
+		lines.append({"what": "Field costs: ammo, meds, fuel, comms (%s x %d days)" % [who, maxi(days, 1)], "amount": field, "charge": true})
 		if use_stocks:
 			# FOB stocks cover part of the field costs (Pallets.offset_preview).
 			var stocked := Pallets.offset_preview(field, "field_costs")
