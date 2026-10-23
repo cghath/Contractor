@@ -587,14 +587,17 @@ func _intel(d: Dictionary) -> void:
 			"Hand it to the client: new leads on the board")
 		var buyers := OptionButton.new()
 		buyers.tooltip_text = "Who to sell it to (the client may find out)"
+		var subject := String(d.get("target", ""))
 		for f: String in MissionRegistry.faction_ids():
 			if f != client:
-				buyers.add_item(MissionRegistry.faction_name(f))
+				buyers.add_item(Bounties.intel_offer_text(StringName(e.id), int(e.count), f, subject))  # each buyer's price and standing (claude/income)
 				buyers.set_item_metadata(buyers.item_count - 1, f)
-		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(Prices.intel_sale_value(StringName(e.id), int(e.count))), func() -> void:
+		var sell := UiKit.button("Sell ($%s)" % DebriefCalc.money(Bounties.intel_price(StringName(e.id), int(e.count), String(buyers.get_item_metadata(0)) if buyers.item_count > 0 else "", subject)), func() -> void:
 			if buyers.item_count > 0:
 				Contracts.sell_intel(i, String(buyers.get_item_metadata(buyers.selected))),
-			"Sell it to the faction picked beside it (risks the client's anger)")
+			"Sell it to the faction picked beside it (risks the client's anger). Lawful forces pay fair and like it; fixers pay more; a rival of the faction it's about pays more still and the lawful factions hear of it; the faction itself pays most to have it back")
+		buyers.item_selected.connect(func(j: int) -> void:
+			sell.text = "Sell ($%s)" % DebriefCalc.money(Bounties.intel_price(StringName(e.id), int(e.count), String(buyers.get_item_metadata(j)), subject)))
 		_box.add_child(UiKit.action_row(text, [turn_in, buyers, sell]))
 
 

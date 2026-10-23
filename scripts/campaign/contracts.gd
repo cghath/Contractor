@@ -983,6 +983,7 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 	debrief["zone_name"] = dep.zone_name
 	debrief["extracted"] = report.get("extracted", [])
 	debrief["tagged"] = (report.get("tagged", []) as Array).duplicate(true)  # lots to sell, store, gift or keep (Pallets)
+	debrief["target"] = String(deployed[0].get("target", "")) if not deployed.is_empty() else ""  # who the intel is about (Bounties: intel buyers)
 	s.debriefs = int(s.get("debriefs", 0)) + 1
 	debrief["serial"] = s.debriefs
 	debrief["key"] = "%d:%d" % [int(s.get("tag", 0)), int(s.debriefs)]  # clients show each debrief once, across campaign resets
@@ -1009,6 +1010,7 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 			WorldSites.server_contract_won(String(c.get("zone_id", "")), String(c.get("target", "")), String(c.get("type", "")), String(c.get("leader", "")))  # wave 6c; the living war
 		elif String(result.outcome) == "completed" and String(c.get("leader", "")) != "":
 			WorldSites.server_leader_down(String(c.get("target", "")), String(c.leader))  # the leader it named is taken, in any zone
+		debrief["bounties"] = int(debrief.get("bounties", 0)) + Bounties.server_contract_closed(c, result)  # claude/income: a leader taken pays his bounty
 		if String(c.get("op_front", "")) != "":  # D7: a US operation's result moves its front (6.6)
 			WorldSites.server_operation_ended(c, int(c.get("op_phases", 1)) if String(result.outcome) == "completed" else 0)
 		war.append_array(war_lines(c, war_before, _war_snapshot(c)))
@@ -1215,10 +1217,10 @@ func server_sell_intel(index: int, faction: String) -> String:
 	var entry: Dictionary = d.intel[index]
 	entry.status = "sold"
 	entry.buyer = faction
-	var price := Prices.intel_sale_value(StringName(entry.id), int(entry.count))  # its own worth (was a flat $6,000 a piece)
+	var price := Bounties.intel_price(StringName(entry.id), int(entry.count), faction, String(d.get("target", "")))  # its own worth by who buys it (claude/income)
 	entry.price = price
 	Economy.add_cash(price, "Intel sold to %s" % MissionRegistry.faction_name(faction))
-	Economy.change_reputation(faction, MissionRegistry.setting_i("intel_sale_rep_buyer", 2), "bought intel")
+	Bounties.server_intel_sold(faction, String(d.get("target", "")))  # the buyer's standing, and the lawful factions' view of who it went to
 	entry.caught = randf() < MissionRegistry.setting_f("intel_sale_risk", 0.35)
 	if entry.caught:
 		Economy.change_reputation(client, MissionRegistry.setting_i("intel_sale_rep_client", -8), "intel sold behind their back")

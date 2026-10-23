@@ -1667,10 +1667,12 @@ func _test_intel_and_salvage() -> void:
 	cash = Economy.cash()
 	check(Contracts.server_sell_intel(0, client) != "", "intel can't be sold to the client")
 	var worth := Prices.intel_sale_value(&"hvt_case")
-	check(Contracts.server_sell_intel(0, buyer) == "" and worth == 3000 and Economy.cash() == cash + worth and Economy.reputation(buyer) == buyer_rep + 2
+	var paid := Bounties.intel_price(&"hvt_case", 1, buyer, String(d.get("target", "")))  # claude/income: the price by who buys it
+	var rule := Bounties.intel_rule(buyer, String(d.get("target", "")))
+	check(Contracts.server_sell_intel(0, buyer) == "" and worth == 3000 and Economy.cash() == cash + paid and Economy.reputation(buyer) == buyer_rep + int(rule.rep)
 		and Economy.reputation(client) == client_rep + (-8 if d.intel[0].caught else 0),
-		"sold to %s for its worth, $%d (was a flat $6,000; the client %s)" % [buyer, worth, "found out: -8" if d.intel[0].caught else "never knew"])
-	check(DebriefCalc.money_in(d).any(func(l: Dictionary) -> bool: return l.what == "Intel sold" and int(l.amount) == worth)
+		"sold to %s for its worth x the buyer's rate, $%d of $%d (was a flat $6,000; the client %s)" % [buyer, paid, worth, "found out: -8" if d.intel[0].caught else "never knew"])
+	check(DebriefCalc.money_in(d).any(func(l: Dictionary) -> bool: return l.what == "Intel sold" and int(l.amount) == paid)
 		and DebriefCalc.money_in(d).any(func(l: Dictionary) -> bool: return l.what == "Completion pay" and int(l.amount) == int(d.totals.completion)),
 		"the debrief says where the money came from: completion pay, intel sold")
 	Contracts.server_finish_debrief()
@@ -2131,8 +2133,9 @@ func _test_live_objectives() -> void:
 	check(report.items.any(func(e: Dictionary) -> bool: return e.id == "plate_carrier") and report.field_items.any(func(e: Dictionary) -> bool: return e.id == "m4a1")
 		and report.extracted.size() == 1 and report.casualties.is_empty(), "an extraction report from the level: what the player carries, what's left lying about")
 	var d := Contracts.server_end_deployment(report)
-	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed") and Economy.cash() == cash + int(d.totals.paid_now) - _paid_at_debrief(d)
-		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.salvage.pool_value)])
+	check(d.contracts.size() == 3 and d.contracts.all(func(l: Dictionary) -> bool: return l.outcome == "completed")
+		and Economy.cash() == cash + int(d.totals.paid_now) - _paid_at_debrief(d) + int(d.get("bounties", 0))  # (claude/income: a leader taken pays his bounty too)
+		and int(d.salvage.pool_value) > 0, "all three completed and paid ($%d, bounties $%d); salvage pool $%d" % [int(d.totals.paid_now), int(d.get("bounties", 0)), int(d.salvage.pool_value)])
 	check(Contracts.objectives.list.is_empty() and (panel == null or panel.text() == ""), "after extraction the objective list clears")
 	Contracts.server_finish_debrief()
 	# The zone kept its damage: the next cache contract on this module finds the crates already blown.

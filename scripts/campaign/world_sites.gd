@@ -101,7 +101,7 @@ const SUPPORT_SHURA := 20.0
 const REBELS := "rebels"
 const NEWS_KEEP := 12
 ## Contracts that take a faction's leader (an HVT) when won against it.
-const LEADER_TYPES: Array[String] = ["hvt_capture", "manhunt"]
+const LEADER_TYPES: Array[String] = ["hvt_capture", "manhunt", "hvt_kill"]  # hvt_kill: claude/income, a bounty dead with proof
 ## D7 (docs/combined_arms.md 6.6): what a belligerent's operation does to the war. Success flips the
 ## zone to it at OP_WIN_GRIP (+OP_WIN_STRENGTH for it, -OP_TARGET_HIT for the target); half the
 ## phases or more move its front that share of the way and knock the target's grip OP_PARTIAL_GRIP;

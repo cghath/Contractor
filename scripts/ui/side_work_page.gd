@@ -7,7 +7,7 @@ extends RefCounted
 ## jobs on offer, and the latest reports (debrief cards). The contract board shows a summary
 ## (board_summary) with a button here.
 
-const ABOUT := "Money beyond contracts: send the high command squads on their own jobs. Every offer shows its pay and its risks before you commit."
+const ABOUT := "Money beyond contracts: the high command squads' own jobs, captures sold by standing, bounties on the war's leaders. Every offer shows its pay and its risks before you commit."
 
 
 ## Builds the page into `rows`. `hotkey_root`: the node the send buttons' number keys belong to.
@@ -17,6 +17,8 @@ static func build(rows: VBoxContainer, hotkey_root: Node) -> void:
 	var keys := [0]  # the next number key for a send button (1..9)
 	_squads(rows, roster, s)
 	_offers(rows, roster, s, hotkey_root, keys)
+	_captures(rows, roster, s)
+	_bounties(rows)
 	_reports(rows, s)
 
 
@@ -108,6 +110,65 @@ static func _offers(rows: VBoxContainer, roster: Dictionary, s: Dictionary, root
 		rows.add_child(_indent(box))
 
 
+# --- Captures and bounties ---------------------------------------------------------------
+
+static func _captures(rows: VBoxContainer, roster: Dictionary, s: Dictionary) -> void:
+	var caps := Bounties.stored_captures()
+	rows.add_child(UiKit.heading("Captured vehicles and guns in storage (%d)" % caps.size()))
+	if caps.is_empty():
+		rows.add_child(_indent(UiKit.text("None. Tag an enemy vehicle or heavy gun \"to sell\" in the field and store it from the debrief: buyers here pay by standing.")))
+		return
+	var dets := Heroes.detachments(roster.duplicate(true))
+	var ids: Array = dets.keys()
+	ids.sort()
+	for e: Dictionary in caps:
+		var lot: Dictionary = e.lot
+		var box := VBoxContainer.new()
+		box.add_child(UiKit.text("%s (worth $%s; storage sale $%s)" % [String(lot.get("label", "?")), DebriefCalc.money(lot.get("value", 0)),
+			DebriefCalc.money(Pallets.sell_price(lot, true))]))
+		var buttons: Array = []
+		for b: Dictionary in Bounties.capture_buyers(lot):
+			var tip := "Sell to %s now: %s standing with them%s" % [String(b.from), "%+d" % int(b.rep),
+				(", %+d with every lawful faction (arming a militia)" % int(b.lawful_hit)) if int(b.lawful_hit) != 0 else ""]
+			var sell := UiKit.button("%s %s" % [String(b.from), money(b.price)],
+				func() -> void: BaseHub.request("income", ["capture_sell", int(e.index), String(b.faction)]), tip if String(b.why) == "" else String(b.why))
+			sell.disabled = String(b.why) != ""
+			buttons.append(sell)
+			if String(b.why) != "":
+				continue
+			for did: String in ids:
+				var why := SideJobs.cant_send(roster, did) if SideJobs.job_of(did, s).is_empty() else "out on a job"
+				if why != "":
+					continue
+				var o := Bounties.delivery_offer(int(e.index), String(b.faction))
+				if o.is_empty():
+					continue
+				var od := SideJobs.odds(SideJobs.kind("recover"), float(o.danger), float(SideJobs.quality(roster, did, s).quality))
+				var dv := UiKit.button("%s delivers: %s" % [String(dets[did].callsign), money(o.pay)],
+					func() -> void: BaseHub.request("income", ["capture_deliver", int(e.index), String(b.faction), did]),
+					"%s drives it to %s in %s (%d days, danger %s): trouble %s, a man lost %s, the vehicle lost %s. Paid on delivery." % [String(dets[did].callsign),
+						String(b.from), RegionMap.zone_name(String(o.zone)), int(o.days), Income.danger_word(float(o.danger)), pct(float(od.trouble)), pct(float(od.loss)), pct(float(od.fail))])
+				buttons.append(dv)
+		box.add_child(UiKit.button_row(buttons))
+		rows.add_child(_indent(box))
+
+
+static func _bounties(rows: VBoxContainer) -> void:
+	var open := Bounties.open_bounties()
+	rows.add_child(UiKit.heading("Bounties on the war's leaders (%d)" % open.size()))
+	if open.is_empty():
+		rows.add_child(_indent(UiKit.text("No bounties posted.")))
+		return
+	rows.add_child(_indent(UiKit.hint("Paid at the debrief of the job that takes him: an HVT capture or manhunt brings him in alive; an HVT kill pays the dead bounty only with his ID papers carried out.")))
+	for b: Dictionary in open:
+		var l := UiKit.text("%s, %s: %s alive, %s dead (posted by %s)" % [String(b.leader).capitalize() if String(b.leader).begins_with("the ") else String(b.leader),
+			MissionRegistry.faction_name(String(b.faction)), money(b.alive), money(b.dead), String(b.poster_name)])
+		l.tooltip_text = "The bounty rises while %s is strong in the war. Look for an HVT job against them on the contract board." % MissionRegistry.faction_name(String(b.faction))
+		l.mouse_filter = Control.MOUSE_FILTER_PASS
+		UiKit.fit_label_text(l)
+		rows.add_child(_indent(l))
+
+
 # --- Reports ------------------------------------------------------------------------------
 
 static func _reports(rows: VBoxContainer, s: Dictionary) -> void:
@@ -147,4 +208,12 @@ static func board_summary() -> String:
 		parts.append("%d side job%s for the high command squads (up to %s)" % [offers.size(), "" if offers.size() == 1 else "s", money(best)])
 	for j: Dictionary in s.get("jobs", []):
 		parts.append("%s away until day %d" % [String(j.callsign), int(j.end)])
+	var open := Bounties.open_bounties()
+	if not open.is_empty():
+		var top := 0
+		for b: Dictionary in open:
+			top = maxi(top, int(b.alive))
+		parts.append("%d bount%s on the war's leaders (up to %s)" % [open.size(), "y" if open.size() == 1 else "ies", money(top)])
+	if not Bounties.stored_captures().is_empty():
+		parts.append("%d capture%s in storage to sell" % [Bounties.stored_captures().size(), "" if Bounties.stored_captures().size() == 1 else "s"])
 	return "; ".join(parts) + "." if not parts.is_empty() else "No side work today."

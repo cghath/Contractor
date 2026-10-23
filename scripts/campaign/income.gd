@@ -20,7 +20,7 @@ extends RefCounted
 const SECTION := &"income"
 const PATH := "res://data/income.json"
 ## Ledger lines start with these (Economy.ledger_kind sorts them for the books).
-const LEDGER_SIDE_JOB := "Side job"
+const LEDGER_SIDE_JOB := "Side job"  # (Bounties: "Capture sold", "Bounty")
 const REPORTS_KEEP := 12
 
 static var _data: Dictionary = {}
@@ -135,12 +135,16 @@ static func server_advance_days(days: int) -> void:
 ## Host (BaseHub "income" request): `op` and its `args` from `sender`. Returns the note for the
 ## asker ("" for done, else why not).
 static func server_request(op: String, args: Array, sender: int) -> String:
-	var host_only := op in ["job_send", "job_recall"]
+	var host_only := op in ["job_send", "capture_sell", "capture_deliver"]
 	if host_only and sender != 1:
 		return "Only the host can do that"
 	var why := "Unknown request"
 	match op:
 		"job_send":
 			why = SideJobs.server_send(String(args[0]) if args.size() > 0 else "", String(args[1]) if args.size() > 1 else "")
+		"capture_sell":
+			why = Bounties.server_sell_capture(int(args[0]), String(args[1])) if args.size() >= 2 else "Bad request"
+		"capture_deliver":
+			why = Bounties.server_deliver(int(args[0]), String(args[1]), String(args[2])) if args.size() >= 3 else "Bad request"
 	Campaign.mark_changed(SECTION)
 	return why

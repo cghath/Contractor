@@ -13,10 +13,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Income: ways to make money with the flow of the game (claude/income)
 
-> **Where I stopped / next step (2026-10-22, 20:20 CDT):** item 1 of 4 built (high command side
-> jobs). Next: 2 captures and bounties, 3 FOB businesses, 4 black market, then re-run the
+> **Where I stopped / next step (2026-10-22, 20:45 CDT):** items 1-2 of 4 built (high command side
+> jobs; captures and bounties). Next: 3 FOB businesses, 4 black market, then re-run the
 > 40-campaign economy sim with all four and tune (before/after in docs/economy.md). Design and
-> numbers: docs/income.md, data/income.json (all Proposed). Local: income (R2531), smoke + ui (R2532).
+> numbers: docs/income.md, data/income.json (all Proposed). Local: income (R2531, R2536), smoke + ui
+> (R2532), contracts (R2537), base + ui (R2538).
 
 #### Added
 - **Side jobs for the high command squads** (docs/income.md 1): employers and fixers post jobs
@@ -29,6 +30,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   before you commit. Squads can come back wounded, a man short, or without the job done. They
   report on the company net and leave a debrief card. Training locals raises rebel support.
   Squad morale is new and saved.
+- **Captures sold by standing** (docs/income.md 2): captured vehicles and heavy guns in FOB
+  storage sell to Mama Rook, Halloran, US Forces or (guns and technicals) the Highland Front.
+  Each pays by its rate and your standing with it, each has a standing floor and its own effects.
+  Or have a high command squad deliver one for a quarter more, at the side job's risks.
+- **Bounties on the war's leaders**: every faction leader still free carries a bounty, posted by
+  the lawful employer at war with them and worth more while the faction is strong. Paid at the
+  debrief: in full for an HVT capture or manhunt, 0.6 for an HVT kill and only with his ID
+  papers carried out. HVT kills now name a leader too.
+- **Intel to the right buyer**: the debrief's buyer list shows each buyer's price and standing
+  effect. Lawful forces pay fair, fixers more, a rival of the faction it's about more still (the
+  lawful factions hear of it), and the faction itself pays most to have it back.
 
 ### Voice and economy (claude/voice-economy)
 

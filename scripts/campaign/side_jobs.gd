@@ -199,7 +199,7 @@ static func server_send(oid: String, did: String) -> String:
 	var job := o.duplicate(true)
 	var today := Economy.day()
 	job.merge({"did": did, "callsign": String(d.callsign), "start": today, "end": today + int(o.days),
-		"advance": roundi(int(o.pay) * c("advance_share", 0.25)), "quality": snappedf(float(q.quality), 0.01), "trouble": snappedf(float(od.trouble), 0.001)}, true)
+		"advance": 0 if bool(k.get("recovery", false)) else roundi(int(o.pay) * c("advance_share", 0.25)), "quality": snappedf(float(q.quality), 0.01), "trouble": snappedf(float(od.trouble), 0.001)}, true)
 	(s.offers as Array).erase(o)
 	(s.jobs as Array).append(job)
 	if int(job.advance) > 0:
@@ -274,7 +274,9 @@ static func server_resolve(job: Dictionary) -> Dictionary:
 		Economy.change_reputation(String(job.client), -1, "a side job failed", false)
 	else:
 		m0 += c("morale_win", 0.05)
-		if rest > 0:
+		if bool(k.get("recovery", false)):
+			lines.append(["Paid by the buyer", Bounties.server_recovered(job)])  # (its own ledger line and card)
+		elif rest > 0:
 			Economy.add_cash(rest, "%s: %s, %s for %s" % [Income.LEDGER_SIDE_JOB, callsign, String(k.get("name", "")), String(job.from)])
 			lines.append(["Paid on return", rest])
 		out.paid = int(job.pay)
@@ -292,6 +294,9 @@ static func server_resolve(job: Dictionary) -> Dictionary:
 		"failed":
 			text = "back from %s in %s: the job went wrong and the client won't pay. %s. Kept the $%s advance." % [String(k.get("verb", "a job")), where,
 				_casualty_words(out), DebriefCalc.money(out.paid)]
+			if bool(k.get("recovery", false)):
+				text = "back from %s in %s: ambushed on the way and the %s was lost. %s." % [String(k.get("verb", "a job")), where,
+					String((job.get("lot", {}) as Dictionary).get("label", "vehicle")), _casualty_words(out)]
 	for mid: String in out.wounded:
 		lines.append(["Wounded: %s" % String(Roster.get_member(data, mid).get("callsign", mid)), 0])
 	for mid: String in out.kia:

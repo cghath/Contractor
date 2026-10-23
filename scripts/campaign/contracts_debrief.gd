@@ -239,6 +239,7 @@ static func money_in(debrief: Dictionary) -> Array:
 		if String(lot.get("status", "")) == "sold":
 			lots += int(lot.get("sold_for", 0))
 	add.call("Pallets and vehicles sold", lots)
+	add.call("Bounties", int(debrief.get("bounties", 0)))  # claude/income: a leader taken (Bounties)
 	return out
 
 

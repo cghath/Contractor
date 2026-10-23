@@ -20,6 +20,9 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_new_campaign()
 	_test_side_jobs()
+	_test_captures()
+	_test_bounties()
+	_test_intel_buyers()
 	Campaign.reset_campaign()
 	print("INCOME TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -104,3 +107,80 @@ func _test_side_jobs() -> void:
 	check(rows.get_child_count() >= 3, "the side work page builds (%d rows)" % rows.get_child_count())
 	check(SideWorkPage.board_summary() != "", "the board has a side work line: %s" % SideWorkPage.board_summary())
 	rows.queue_free()
+
+
+func _test_captures() -> void:
+	print("Captured vehicles and heavy weapons (Bounties)")
+	var lot := Pallets.vehicle_lot("technical_dshk", false, "v:t1", "Technical")
+	Economy.server_store_lot(lot)
+	var caps := Bounties.stored_captures()
+	check(caps.size() == 1, "a stored vehicle lot is a capture to sell")
+	var buyers := Bounties.capture_buyers(lot)
+	var by := {}
+	for b: Dictionary in buyers:
+		by[String(b.faction)] = b
+	check(by.has("salvage_union") and by.has("us_forces") and by.has("highland_front"), "the Salvage Union, US Forces and the Highland Front want a technical")
+	check(String(by.highland_front.why) != "", "the Highland Front won't deal below its standing floor (%s)" % String(by.highland_front.why))
+	check(not Bounties.capture_buyers(Pallets.vehicle_lot("aav7", false, "v:a1", "AAV")).any(func(b: Dictionary) -> bool: return String(b.faction) == "highland_front"),
+		"the Highland Front only buys guns and technicals")
+	check(int(by.salvage_union.price) > int(by.us_forces.price), "buyers pay differently (Mama Rook $%d, US $%d)" % [by.salvage_union.price, by.us_forces.price])
+	var cash0 := Economy.cash()
+	var rep0 := Economy.reputation("salvage_union")
+	check(Income.server_request("capture_sell", [int(caps[0].index), "salvage_union"], 1) == "", "sold to Mama Rook")
+	check(Economy.cash() == cash0 + int(by.salvage_union.price) and Economy.reputation("salvage_union") > rep0, "paid her price, and she thinks better of the company")
+	check(Bounties.stored_captures().is_empty(), "the lot leaves storage")
+	check(Income.server_request("capture_sell", [0, "salvage_union"], 1) != "", "nothing left to sell")
+	# Delivered by a high command squad: more, on the side job's risks.
+	Economy.server_store_lot(Pallets.vehicle_lot("matv", false, "v:m1", "M-ATV"))
+	var idx := int(Bounties.stored_captures()[0].index)
+	var o := Bounties.delivery_offer(idx, "us_forces")
+	check(int(o.pay) > Bounties.capture_price(Economy.pallet_store()[idx], {"faction": "us_forces", "mult": 0.7}), "delivered pays more than selling from storage")
+	cash0 = Economy.cash()
+	check(Income.server_request("capture_deliver", [idx, "us_forces", "d02"], 1) == "", "Hawk 2 drives the M-ATV to US Forces")
+	var job := SideJobs.job_of("d02")
+	check(int(job.advance) == 0 and Economy.cash() == cash0 and Bounties.stored_captures().is_empty(), "nothing up front; the lot travels with the squad")
+	job["trouble"] = 0.0
+	Economy.advance_days(int(job.days), "test")
+	var paid := 0
+	for e: Dictionary in Economy.ledger():
+		if String(e.what).begins_with("Capture sold: M-ATV"):
+			paid = int(e.amount)
+	check(paid == int(o.pay) and not SideJobs.is_away("d02"), "delivered: the buyer pays on arrival ($%d)" % paid)
+	check(Economy.ledger_kind("Capture sold: M-ATV to US Forces") == "Captures and bounties", "captures have their own line in the books")
+
+
+func _test_bounties() -> void:
+	print("Bounties on the living war's leaders")
+	var open := Bounties.open_bounties()
+	check(open.size() >= 6, "bounties are posted on the war's leaders (%d)" % open.size())
+	var br: Array = open.filter(func(b: Dictionary) -> bool: return String(b.faction) == "black_ridge")
+	check(not br.is_empty() and int(br[0].dead) < int(br[0].alive), "worth more alive than dead")
+	check(bool(MissionRegistry.faction(String(br[0].poster)).get("lawful", false)), "posted by a lawful employer at war with them (%s)" % br[0].poster_name)
+	check("hvt_kill" in WorldSites.LEADER_TYPES, "an HVT kill names a leader too")
+	var leader := String(br[0].leader)
+	var cash0 := Economy.cash()
+	var c := {"leader": leader, "target": "black_ridge", "type": "hvt_capture"}
+	check(Bounties.server_contract_closed(c, {"outcome": "completed"}) == int(br[0].alive) and Economy.cash() == cash0 + int(br[0].alive), "taken alive: the full bounty")
+	check(Bounties.server_contract_closed(c, {"outcome": "failed"}) == 0, "a failed job pays no bounty")
+	var k := {"leader": leader, "target": "black_ridge", "type": "hvt_kill"}
+	check(Bounties.server_contract_closed(k, {"outcome": "completed", "withheld": 9000}) == 0, "dead without proof: no bounty")
+	check(Bounties.server_contract_closed(k, {"outcome": "completed", "withheld": 0}) == int(br[0].dead), "dead with his ID papers: the dead bounty")
+	WorldSites.server_leader_down("black_ridge", leader)
+	check(not Bounties.open_bounties().any(func(b: Dictionary) -> bool: return String(b.leader) == leader), "a leader taken comes off the bounty board")
+
+
+func _test_intel_buyers() -> void:
+	print("Intel to the right buyer")
+	check(Bounties.intel_buyer_kind("us_forces", "black_ridge") == "lawful", "US Forces: lawful")
+	check(Bounties.intel_buyer_kind("salvage_union", "black_ridge") == "fixer", "the Salvage Union: a fixer's")
+	check(Bounties.intel_buyer_kind("ashen_banner", "black_ridge") == "rival", "the Ashen Banner: a rival of Black Ridge")
+	check(Bounties.intel_buyer_kind("black_ridge", "black_ridge") == "subject", "Black Ridge buying its own secrets back")
+	var p := {}
+	for f: String in ["us_forces", "salvage_union", "ashen_banner", "black_ridge"]:
+		p[f] = Bounties.intel_price(&"hvt_case", 1, f, "black_ridge")
+	check(int(p.black_ridge) > int(p.ashen_banner) and int(p.ashen_banner) > int(p.salvage_union) and int(p.salvage_union) > int(p.us_forces),
+		"prices by buyer: subject > rival > fixer > lawful (%s)" % str(p))
+	var us0 := Economy.reputation("us_forces")
+	Bounties.server_intel_sold("ashen_banner", "black_ridge")
+	check(Economy.reputation("us_forces") < us0, "selling to a terror group costs standing with the lawful factions")
+	check(Bounties.intel_offer_text(&"hvt_case", 1, "us_forces", "black_ridge").contains("+3 standing"), "the debrief's buyer list says the price and the standing")

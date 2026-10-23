@@ -15,7 +15,10 @@
 		"kia_share": 0.3,
 		"fail_share": 0.35,
 		"fail_pay_share": 0.0,
-		"wound_days": [3, 9],
+		"wound_days": [
+			3,
+			9
+		],
 		"kit_full_value": 9000,
 		"morale_start": 0.7,
 		"morale_win": 0.05,
@@ -23,18 +26,164 @@
 		"morale_kia": -0.15,
 		"morale_rest_per_day": 0.02,
 		"kinds": [
-			{"kind": "escort", "name": "Escort a client", "verb": "escorting", "days": 2, "base_pay": 26000, "risk": 0.4,
-			 "brief": "Close protection for a client moving through the zone: in, the meeting, out.", "clients": ["meridian", "vessmark", "us_forces", "uk_forces", "ca_forces", "salvage_union"]},
-			{"kind": "guard", "name": "Guard a site", "verb": "guarding", "days": 3, "base_pay": 30000, "risk": 0.3,
-			 "brief": "Hold a client's site (a depot, a pumping station, a clinic) against whoever comes.", "clients": ["meridian", "salvage_union", "vessmark", "us_forces"]},
-			{"kind": "train", "name": "Train locals", "verb": "training locals", "days": 4, "base_pay": 22000, "risk": 0.15, "rebel_support": 4,
-			 "brief": "Drill a village militia: weapons handling, a patrol, a checkpoint. The locals remember who taught them.", "clients": ["vessmark", "uk_forces", "ca_forces", "us_forces"]},
-			{"kind": "supply", "name": "Run a supply route", "verb": "running a supply route", "days": 2, "base_pay": 20000, "risk": 0.35,
-			 "brief": "Ride shotgun on trucks between two towns and see them through every checkpoint.", "clients": ["salvage_union", "meridian", "vessmark"]},
-			{"kind": "recover", "name": "Recover a vehicle", "verb": "recovering a vehicle", "days": 2, "base_pay": 0, "risk": 0.45, "recovery": true,
-			 "brief": "Go back for a captured vehicle the company left in the zone and drive it out to a buyer.", "clients": []}
+			{
+				"kind": "escort",
+				"name": "Escort a client",
+				"verb": "escorting",
+				"days": 2,
+				"base_pay": 26000,
+				"risk": 0.4,
+				"brief": "Close protection for a client moving through the zone: in, the meeting, out.",
+				"clients": [
+					"meridian",
+					"vessmark",
+					"us_forces",
+					"uk_forces",
+					"ca_forces",
+					"salvage_union"
+				]
+			},
+			{
+				"kind": "guard",
+				"name": "Guard a site",
+				"verb": "guarding",
+				"days": 3,
+				"base_pay": 30000,
+				"risk": 0.3,
+				"brief": "Hold a client's site (a depot, a pumping station, a clinic) against whoever comes.",
+				"clients": [
+					"meridian",
+					"salvage_union",
+					"vessmark",
+					"us_forces"
+				]
+			},
+			{
+				"kind": "train",
+				"name": "Train locals",
+				"verb": "training locals",
+				"days": 4,
+				"base_pay": 22000,
+				"risk": 0.15,
+				"rebel_support": 4,
+				"brief": "Drill a village militia: weapons handling, a patrol, a checkpoint. The locals remember who taught them.",
+				"clients": [
+					"vessmark",
+					"uk_forces",
+					"ca_forces",
+					"us_forces"
+				]
+			},
+			{
+				"kind": "supply",
+				"name": "Run a supply route",
+				"verb": "running a supply route",
+				"days": 2,
+				"base_pay": 20000,
+				"risk": 0.35,
+				"brief": "Ride shotgun on trucks between two towns and see them through every checkpoint.",
+				"clients": [
+					"salvage_union",
+					"meridian",
+					"vessmark"
+				]
+			},
+			{
+				"kind": "recover",
+				"name": "Deliver a capture",
+				"verb": "delivering a captured vehicle",
+				"days": 2,
+				"base_pay": 0,
+				"risk": 0.45,
+				"recovery": true,
+				"brief": "Drive a captured vehicle or gun from FOB storage to the buyer, who pays more for it delivered. Lose it on the way and it is gone.",
+				"clients": []
+			}
 		]
 	},
 	"_danger": "A zone's danger for side jobs and business raids, 0..1 (Income.zone_danger): the holder (the company or the rebels: company; an employer that will deal with the company: friendly; anyone else: hostile, plus its war strength / strength_div), plus front if somebody is attacking it, less grip_calm x (grip - 0.5) for a firm friendly hold.",
-	"danger": {"company": 0.12, "friendly": 0.22, "hostile": 0.45, "strength_div": 250.0, "front": 0.25, "grip_calm": 0.2}
+	"danger": {
+		"company": 0.12,
+		"friendly": 0.22,
+		"hostile": 0.45,
+		"strength_div": 250.0,
+		"front": 0.25,
+		"grip_calm": 0.2
+	},
+	"_captures": "Captured vehicles and heavy weapons (Bounties): a stored vehicle lot sells to a buyer at its value (data/pallets.json vehicle_values) x mult x what the buyer pays the company for its standing (Economy.pay_mult), once the company stands at min_rep with it; rep is the buyer's standing gained, lawful_hit every lawful faction's (arming a militia). \"models\": only those. deliver_mult: a high command squad drives it to the buyer (a side job, its risks; failed, the lot is lost). FOB storage alone sells at 0.8 of value (pallets.json sell_stored_ratio).",
+	"captures": {
+		"deliver_mult": 1.25,
+		"buyers": [
+			{
+				"faction": "salvage_union",
+				"from": "Mama Rook",
+				"mult": 0.85,
+				"min_rep": 0,
+				"rep": 1
+			},
+			{
+				"faction": "meridian",
+				"from": "Halloran",
+				"mult": 1.0,
+				"min_rep": 20,
+				"rep": 1
+			},
+			{
+				"faction": "us_forces",
+				"from": "US Forces",
+				"mult": 0.7,
+				"min_rep": 0,
+				"rep": 2
+			},
+			{
+				"faction": "highland_front",
+				"from": "Highland Free Front",
+				"mult": 1.1,
+				"min_rep": 10,
+				"rep": 2,
+				"lawful_hit": -1,
+				"models": [
+					"technical_dshk",
+					"tripod_m2",
+					"mortar_m224"
+				]
+			}
+		]
+	},
+	"_bounties": "Bounties on the living war's leaders (Bounties): by the leader's role (factions.json leader_roles), x (1 + the faction's war strength / 100 x strength_bonus), posted by the lawful employer at war with it the company stands best with; dead (an hvt_kill, with its proof) dead_mult of it; rep with the poster when paid.",
+	"bounties": {
+		"roles": {
+			"commander": 30000,
+			"financier": 22000,
+			"bomb_maker": 25000
+		},
+		"dead_mult": 0.6,
+		"strength_bonus": 0.5,
+		"rep": 3
+	},
+	"_intel_buyers": "Intel sold in the debrief (Bounties.intel_price): its worth (Prices.intel_sale_value) x mult by the kind of buyer; rep with the buyer; lawful_hit with every lawful faction. subject: the faction the intel is about, buying it back; rival: a hostile faction at war with the subject; fixer: a fixer's faction; lawful: the lawful forces.",
+	"intel_buyers": {
+		"lawful": {
+			"mult": 1.0,
+			"rep": 3
+		},
+		"fixer": {
+			"mult": 1.3,
+			"rep": 1
+		},
+		"rival": {
+			"mult": 1.5,
+			"rep": 2,
+			"lawful_hit": -1
+		},
+		"subject": {
+			"mult": 1.8,
+			"rep": 3,
+			"lawful_hit": -2
+		},
+		"other": {
+			"mult": 0.9,
+			"rep": 1
+		}
+	}
 }

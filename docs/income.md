@@ -13,8 +13,8 @@ and one class per stream. Numbers: data/income.json, **all Proposed**. UI: the b
 | # | Stream | Class | Status |
 |---|---|---|---|
 | 1 | High command squads' side jobs | `SideJobs` | Built |
-| 2 | Captures and bounties | `Bounties` | Next |
-| 3 | FOB businesses | `FobBusiness` | To do |
+| 2 | Captures and bounties | `Bounties` | Built |
+| 3 | FOB businesses | `FobBusiness` | Next |
 | 4 | Black market trading | `BlackMarket` | To do |
 
 ## Shared pieces
@@ -99,6 +99,53 @@ hurt or killed, and every man's history gets a line.
 - training locals raises rebel support;
 - a squad out on a job is a squad not beside you on the next contract;
 - losses come out of the same roster, wall and benefits as the main game.
+
+## 2. Captures and bounties
+
+**Captured vehicles and heavy weapons.** A vehicle or gun tagged "to sell" in the field comes home
+at extraction as a lot (Pallets, as before), and the debrief can put it in FOB storage. From
+storage, the Side work page lists buyers for it:
+
+| Buyer | Rate | Standing floor | Standing effect |
+|---|---|---|---|
+| Mama Rook (Salvage Union) | 0.85 | 0 | +1 |
+| Halloran (Meridian) | 1.0 | 20 | +1 |
+| US Forces | 0.7 | 0 | +2 (off the street) |
+| Highland Free Front (guns and technicals only) | 1.1 | 10 | +2; every lawful faction −1 (arming a militia) |
+
+- Price = the lot's value (pallets.json `vehicle_values`) × rate × what the buyer pays the company
+  for its standing (Hostile/Distrusted 0.9 up to Allied 1.3). For comparison, the storage sale is
+  0.8 and the quick sale at the debrief 0.5. So good standing is worth up to about 1.4× the
+  storage price.
+- **Delivered by a squad** (the "Deliver a capture" side job): a high command squad drives it to the
+  buyer for 1.25× the price. It has the side job's risks (risk 0.45, the buyer's ground's danger),
+  and if it fails the lot is lost. Nothing is paid up front.
+
+**Bounties on the living war's leaders** (factions.json `leaders`: Black Ridge's Warlord, the
+Ashen Banner's Field Emir, the Kestrel Cartel's Patron...).
+- Each one still free has a bounty: by role (commander $30,000, financier $22,000, bomb-maker
+  $25,000) × (1 + the faction's war strength / 100 × 0.5).
+- It's posted by the lawful employer at war with the faction that the company stands best with,
+  and paid at the debrief of the contract that took him:
+  - **alive** (HVT capture, manhunt): the full bounty;
+  - **dead** (HVT kill): 0.6 of it, and only with proof. The job's ID papers objective (missions 2)
+    must be done; without the papers the poster refuses ("Bounty refused" card).
+- HVT kill contracts now name a leader too (`WorldSites.LEADER_TYPES` gained `hvt_kill`), so a
+  kill counts toward wiping a faction out like a capture does.
+- The poster gains +3 standing. The debrief lists the bounty under money in.
+
+**Intel to the right buyer.** The debrief's buyer list now shows each buyer's price and standing
+effect, by kind of buyer. Price = the intel's worth × rate:
+
+| Buyer | Rate | Standing |
+|---|---|---|
+| Lawful forces | 1.0 | +3 with the buyer |
+| A fixer's faction (Meridian, Salvage Union) | 1.3 | +1 |
+| A rival at war with the faction it's about | 1.5 | +2; every lawful faction −1 |
+| The faction it's about, buying it back | 1.8 | +3; every lawful faction −2 |
+| Anyone else | 0.9 | +1 |
+
+The client may still find out, as before (`intel_sale_risk`).
 
 ## Before and after (sim)
 
