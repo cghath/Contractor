@@ -32,6 +32,7 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | Town perf follow-up | claude/perf-towns | yes | Done (a38fab7e): city 136→103 ms, fight 62→35, woods 25→14, drive 16→8.5, heli 15→10.6 ms with hitches 27→3/min; perfcases budgets tightened. Cities are still the heaviest case |
 | Voice + economy tuning | claude/voice-economy | yes (e0caa68d) | Done: new barks, voice orders incl. Hawk 2/Viper 3 by callsign, go codes; economy retuned (median 35-day company -$3k → $329k). Clips need Piper rendering (tools/voices/lines_to_render.txt) |
 | Income systems (v0.5.4) | claude/income | no | Done: HC squad side jobs (SideJobs), captures + bounties + intel buyers (Bounties), FOB businesses (FobBusiness), black market (BlackMarket); Side work page, board line, income suite; economy sim re-run and tuned (docs/economy.md: careful $430k->$677k, median $329k->$514k, sloppy still bleeds). Local: income, contracts (R2545), smoke + base + ui (R2544). Next: CI, merge into claude/ai-driving for v0.5.4; not yet seen in game, 4 black market, then the economy sim re-run and tuning (docs/income.md, CHANGELOG "Income" note) |
+| Render perf fix | claude/render-perf | yes (a01d5c52) | Done: v0.5.3+ ran the GPU buffer pool out in cities (voxel sites now capped at 5 High / 6 Ultra), soldiers ~80k tris drawn from 1 cm stand-ins past 50 m, soldier shadows end at 80 m. **In v0.5.4 (B2568)**; Captain checking in play. Windowed bench steps: docs/performance.md "Render pass" |
 
 ## Open work, in order, and who has it
 

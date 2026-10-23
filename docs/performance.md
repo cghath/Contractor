@@ -219,6 +219,67 @@ frame. No building, prop or scatter cost shows in the city's profile. The render
 headless can't time: 2100 draws in the city, 1630 of them soldiers (F-226). Team spawns in one
 frame (F-206) and a scatter cell's or terrain chunk's single build (F-225) are the hitches left.
 
+## Render pass (2026-10-22): what was found, and the windowed check still to run
+
+Captain, after v0.5.4: the frame rate is "unbelievably bad", stutters and low fps everywhere,
+menus included (v0.5.3 already bad). The headless cases can't see the GPU, so
+`tests/render_bench.tscn` runs the game in a window (today's default video settings from a
+settings file of its own, vsync off, no fps cap) and prints, per case: fps, frame ms, GPU and
+render-thread ms (RenderingServer.viewport_get_measured_render_time_gpu/cpu), draw calls, objects,
+primitives, video and buffer memory, the modules streamed in, and every SubViewport still rendering.
+BENCH_SPLIT=1 hides each of the level's children in turn and prints what each costs.
+`tests/mesh_census.tscn` (headless) counts geometry nodes and meshes by owner.
+
+What the bench found on Captain's PC (RTX 4060 Laptop, 2026-10-22 evening; logs in
+B:/Contractor-test-logs/2026-10-22/bench):
+
+| Build | menu | town (Old Quarter) |
+|---|---|---|
+| v0.5.2 ac4f718b | | 5.3 fps, GPU 31.7 ms, 4284 draws, 3.66M primitives; 2 modules streamed |
+| c1207b17 (before the world/perf merge) | | 4.8 fps, GPU 31.1 ms, 4206 draws, 3.65M primitives |
+| world/perf 4dcf71fa alone | | GPU buffers run out: 121,529 errors, the bench hangs |
+| v0.5.3 9729d106 | | GPU buffers run out: 174,767 errors |
+| v0.5.4 78dc9a17 | 882 fps, GPU 0.75 ms, 181 draws | GPU buffers run out: 379,107 errors in under ten minutes |
+| v0.5.4, the player's voxels not drawn (experiment) | | GPU 41.7 ms, 1182 draws, 6.37M primitives; no errors |
+
+- **The jump is v0.5.3, the world expansion's cities.** The Old Quarter is now 38 modules, its
+  city 20 blocks of 50 m, and from its edge all twenty stream in as voxels. Each is a voxel terrain
+  of a thousand-odd 3.2 m mesh blocks, every block several GPU buffers; the renderer's buffer pool
+  ("RID_Alloc<RenderingDevice::Buffer>: Element limit reached") runs out, and from then on every mesh
+  anything makes (feet, faces, the HUD, flags) fails with an error and a backtrace: about 380,000
+  of them in the first minutes. That is the stutter everywhere, menus included (the game runs on
+  under them). Even nine blocks within 60 m overflowed (BENCH 60 m run).
+- **Soldiers are heavy on the GPU.** Their 0.5 cm parts in per-voxel camo are about 80k triangles
+  each: in the town case the AI is 6.0M of the 6.3M primitives (20.6 ms of GPU) and the sun's
+  shadow pass another 4.7M (15.2 ms).
+- No SubViewport keeps rendering in any case; the menu alone is fine.
+
+The fixes (branch claude/render-perf), all under Video, "World detail at distance" (GameSettings.DETAIL_LEVELS):
+- **At most "voxel_modules" sites as voxels at once** (low 3, medium 4, high 5, ultra 6; every
+  level caps it, so no setting can run the pool out): the nearest to this peer's players first, a
+  site only AI are fighting in ranking 100 m further; the rest stand as their proxies, as
+  streamed-out sites always have (box collision, coarse breaches). Not on a headless server.
+- **Soldiers' far stand-ins** ("soldier_lod_m": low 25, medium 35, high 50 m; ultra none): each
+  0.5 cm part gets a 1 cm copy drawn past that distance (about a quarter of the triangles);
+  a part carved or cut loses it (BodyDeform), whole again gets it back.
+- **Soldiers' sun shadows** end nearer ("soldier_shadow_m": low 30, medium 50, high 80; ultra always).
+
+### The windowed check (when Captain frees the PC; about 10 minutes)
+
+From the branch's worktree (import first, headless), then windowed, one at a time:
+
+    GODOT=".../godot.windows.editor.x86_64.exe"; export CONTRACTOR_PORT=24731 CONTRACTOR_TEST_TAG=bench
+    "$GODOT" --path . res://tests/render_bench.tscn                                   # menu, town, woods, fight at High
+    BENCH_DETAIL=ultra "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town  # the cap at Ultra (6)
+    BENCH_SPLIT=1 "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town       # what's left, by owner
+
+Read: `grep -c "Element limit" <log>` must be 0 in every case and level. The "census" lines show
+how many sites streamed in (at most the cap). Expected at High against v0.5.4 (78dc9a17), Proposed:
+town no errors, GPU under 20 ms (from 41.7 with no voxels at all: soldiers' far stand-ins and shadows
+should take most of the 20.6 + 15.2 ms), primitives under 3M, draws under 3000; menu unchanged
+(about 0.75 ms GPU); woods and fight no worse than v0.5.4 (woods 5.9 ms GPU). If Ultra (6 sites)
+still overflows, lower its cap; if High's town is still over 20 ms GPU, the split shows what's left.
+
 ## What's left
 
 See F-206 in docs/audits/followups.md: a cold building scan's grouping (100-250 ms once its probes
