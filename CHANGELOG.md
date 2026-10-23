@@ -11,6 +11,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Performance: cghath's world content (perf/world-content)
+
+> **Where I stopped (2026-10-23):** done, numbers in docs/performance.md ("cghath's world content").
+> CI 60 Hz frame cost, average / 95th ms, claude/ai-driving 78dc9a17 -> this branch 7a92356a: town
+> 7.5 / 15.3 -> 6.0 / 9.5, city 112 / 127 -> 83 / 95, woods 8.3 / 12.3 -> 5.8 / 8.6, drive 8.4 / 11.6
+> -> 6.7 / 10.0, heli 10.2 / 18.3 -> 5.9 / 8.2, no hitches in any of them; townperf's tick 12-16 ms
+> (budget 20). Quiet local, back to back (R0582 -> R0583): heli 14.4 / 23.9 -> 10.7 / 16.0, city
+> 143 / 203 -> 137 / 153, the rest within noise. Local suites: smoke, terrain, heliflight (R0571,
+> R0574), townperf's checks and city (R0578), perfcases (R0583); forest's one failure ("nothing went
+> into the campaign") fails on claude/ai-driving's CI too. Next: F-230 (soldiers against the city's
+> voxels), F-231 (a look at the async navigation map in a city fight), F-232 (draws).
+
+#### Changed
+- **Terrain and scatter build on a worker thread** (F-225): a fine terrain chunk's vertices and
+  ground colours (22-32 ms of main thread each) and a scatter cell's near-tier ground cover (27-35
+  ms) are worked out on a worker, one at a time, and only the mesh is made on the main thread: no
+  more hitches from the ground and the tufts coming in round a vehicle or the UH-60. A cell's ground
+  cover is laid on the ground as generated (a crater made before the cell was built no longer lowers
+  its tufts).
+- **Navigation**: the zone's navigation map builds its iterations on a worker (a city's updates were
+  10-16 ms on the main thread, twice a second); which chunks the soldiers want is worked out with
+  plain floats and the chunks to drop looked for every fourth pass (5-40 ms a pass for a city's AI);
+  no chunks are baked round a soldier in a helicopter flying faster than 8 m/s or higher than 15 m
+  (from a UH-60, 20-25 bakes a second).
+- **Helicopters**: contour flight's look-ahead points 2 s and further ahead are worked out every
+  third tick in turn (~2 ms a tick a helicopter).
+- **Grass carpet**: not laid or drawn with the eye more than 10 m over the ground (a helicopter at
+  its contour height, a high window): its lays were 12-30 ms frames from the UH-60.
+- **Animals**: only those that walked move their hit box and their place in the herd's MultiMesh.
+- **perfcases**: budgets tightened (town 15 / 25, city 200 / 300, woods 18 / 26, drive 18 / 26, heli
+  18 / 30 ms, 15-20 hitches a minute; fight unchanged); it prints each case's navigation bakes, map
+  updates and the navigation server's frame, and waits up to 100 s for a case's modules (CI's city
+  block still building at 60 s). FrameCost counts "nav_wanted" and "nav_start".
+
 ### Income: ways to make money with the flow of the game (claude/income)
 
 > **Where I stopped / next step (2026-10-22, 22:15 CDT):** done: all 4 income streams built, the

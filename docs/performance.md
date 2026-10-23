@@ -150,6 +150,8 @@ the numbers before the pass, so going back to them fails.
 | drive | 20 | 30 | 15 |
 | heli | 28 | 45 | 20 |
 
+(These were the first pass's; the latest, from the world content pass: town 15 / 25 / 20, city
+200 / 300 / 60, fight 100 / 170 / 70, woods 18 / 26 / 15, drive 18 / 26 / 15, heli 18 / 30 / 15.)
 These are CI's: its runners have nothing else on them. Run locally the budgets get 1.6x room
 (LOCAL_SLACK): on this shared machine a busy run measured 2.5-3x a quiet one (R2431: town 62 ms,
 fight 49 against 21 and 17 in R2425), so a local failure is first a question of what else was
@@ -218,6 +220,82 @@ movement 10-20 ms a tick (most of the city's AI are patrols, walking), the navig
 frame. No building, prop or scatter cost shows in the city's profile. The rendering side, which
 headless can't time: 2100 draws in the city, 1630 of them soldiers (F-226). Team spawns in one
 frame (F-206) and a scatter cell's or terrain chunk's single build (F-225) are the hitches left.
+
+## cghath's world content (perf/world-content, 2026-10-23)
+
+A pass on the world stack's own cost (roads, terrain features, cities, village houses, props,
+dense woods), measured case by case where it goes. Numbers are 60 Hz frame cost, average / 95th
+percentile ms and hitches a minute.
+
+**CI** (its runners are the guard; claude/ai-driving 78dc9a17, run 39888713096, against this branch
+at 7a92356a, run 39911142961; CI's runners vary a little run to run):
+
+| Case | Before | After | Hitches a minute |
+|---|---|---|---|
+| town (village) | 7.46 / 15.27 | **6.02 / 9.47** | 6.7 -> 0 |
+| city | 111.9 / 127.3 | **82.8 / 94.6** | 0 -> 0 |
+| fight | 40.4 / 65.2 | 15.6 / 28.1 | 72.5 -> 52.5 (the AI's: see below) |
+| woods | 8.28 / 12.33 | **5.82 / 8.58** | 3.3 -> 0 |
+| drive | 8.38 / 11.59 | **6.68 / 10.04** | 2.2 -> 0 |
+| heli | 10.19 / 18.34 | **5.85 / 8.20** | 2.9 -> 0 |
+
+The city's navigation server went from 10.9 to 1.4 ms a frame there. townperf's tick on CI: 13.1 ms
+on claude/ai-driving, 14.8, 11.9 and 15.9 ms on this branch's three runs (budget 20; world/perf's
+miss was 20.4).
+
+**Locally** (cghath's PC, back to back with nothing else running: before R0582 at 78dc9a17, after
+R0583 at 7a92356a; earlier runs this session had a game and another agent's suites alongside and
+measured 2-3x):
+
+| Case | Before | After | Worst frame | Hitches a minute |
+|---|---|---|---|---|
+| town | 9.12 / 15.37 | 9.44 / 13.87 | 216 -> 215 | 18 -> 18 (team spawns, F-206) |
+| city | 143.5 / 203.0 | **137.4 / 153.2** | 245 -> 177 | 6 -> 0 |
+| fight | 30.0 / 42.8 | 34.7 / 46.8 | 185 -> 190 | 57 -> 54 |
+| woods | 9.62 / 14.40 | 9.74 / 13.98 | 29 -> 26 | 0 -> 0 |
+| drive | 9.96 / 13.58 | 10.68 / 14.79 | 60 -> 36 | 1.3 -> 0 |
+| heli | 14.35 / 23.93 | **10.69 / 16.02** | 44 -> 32 | 1.7 -> 0 |
+
+Busy, back to back (R0580 -> R0581): town 16.0 -> 9.95, city 349 -> 139, woods 20.6 -> 9.3, drive
+25.3 -> 9.5, heli 61.3 -> 9.3 (the load eased during the second run, so read these as direction only).
+
+### Where the world content's cost was, and what changed
+
+- **Building the world round the camera, on the main thread** (the hitches from a vehicle or the
+  UH-60). A scratch bench on kestrel_valley timed a fine terrain chunk at 22-32 ms (its ground
+  colours: pads, roads, banks, fields) and a scatter cell's near tier at 27-35 ms, nearly all of it
+  ground cover (about 1000 tufts and pebbles a cell, each tested against pads, roads, water and
+  fields and set on the ground). Both now run on a worker thread, one at a time; the main thread
+  only makes the mesh or MultiMeshes (F-225, done). Terrain skirts reuse their edge vertices'
+  normals and colours; pads are shrunk once, not per vertex.
+- **The navigation round soldiers.** In the city a map update (about 500 chunks of floors over
+  floors) was 10-16 ms on the main thread about twice a second: the map now builds its iterations
+  on a worker (ZoneNav.MAP_ASYNC; the regions' stay synchronous, F-231). Working out which chunks the
+  soldiers want was 5-40 ms a pass for ~100 AI (every 0.3 s): plain floats instead of a Rect2 a
+  chunk, and the chunks to drop looked for every fourth pass. From the UH-60 every chunk flown over
+  was baked and dropped (20-25 bakes a second): a soldier in a helicopter flying faster than 8 m/s
+  or higher than 15 m wants none (5 a second now, from the AI on the ground).
+- **The helicopter's contour flight**: 14 look-ahead points a tick, each a dozen ground heights and
+  three rays down through what stands there (props, pylons, buildings), ~2 ms a tick a helicopter
+  on a busy machine. The points 2 s and further ahead are worked out every third tick in turn.
+- **The grass carpet** from a helicopter at its 12.5 m contour height: a lay most frames, 12-30 ms
+  on a busy machine. Off with the eye more than 10 m over the ground.
+- **Animals**: every hit box moved and every herd slot written every tick and frame (about 1 ms a
+  tick in the city on a busy machine): now only those that walked.
+- **No cost found** in the props', roads' (trimesh tiles) and trees' collision: the engine's step
+  is 0.4-0.6 ms a tick on CI in the town, woods, drive and heli cases. The AI's building scans near
+  the new buildings are 0.1-0.3 ms a frame outside the city (2.7 in it, under their 4 ms frame cap),
+  and sight lines through the woods 0.01-0.15 ms.
+
+### What's left (the world content's part)
+
+- **The city is still its AI** (about 100 of them: SquadAI 30-45 ms a tick, soldiers' movement):
+  Claude's. Of the movement, move_and_slide against the city's voxels was about 13% of the AI tick,
+  a soldier there costing about 3x one in the woods: the blocks collide as per-face trimeshes
+  (F-230).
+- **Draws** (not timed headless): the terrain is ~300 draws a view, the scatter's far tier 350-610
+  from a vehicle or the UH-60 (F-232); soldiers are most of a city's (F-226).
+- **fight** isn't world content: its hitches are the AI's ticks (40-110 ms) and team spawns.
 
 ## What's left
 

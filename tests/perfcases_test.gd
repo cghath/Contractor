@@ -52,13 +52,18 @@ const HITCH_MEDIANS := 3.0
 ## doubling; the first budgets (town 75/140, heli 28/45...) are in docs/performance.md.
 ## Tightened 2026-10-22 (claude/perf-towns, R2517/R2519): about twice a quiet local run again, the
 ## town case now a village (the city has its own case).
+## Tightened 2026-10-23 (perf/world-content): about 2.5-3x CI's numbers after the world content pass
+## (town 6.0 / 9.5, city 83 / 95, woods 5.8 / 8.6, drive 6.7 / 10.0, heli 5.9 / 8.2 ms average / 95th,
+## no hitches; run 39911142961), all under CI's before it (claude/ai-driving 78dc9a17, run 39888713096:
+## town 7.5 / 15.3, city 112 / 127, woods 8.3 / 12.3, drive 8.4 / 11.6, heli 10.2 / 18.3). fight, the
+## AI's case, keeps its budgets (CI: 15-40 ms, 30-72 hitches a minute).
 const BUDGETS := {
-	"town": {"avg": 30.0, "p95": 50.0, "hitches_min": 40.0},
-	"city": {"avg": 260.0, "p95": 520.0, "hitches_min": 90.0},
+	"town": {"avg": 15.0, "p95": 25.0, "hitches_min": 20.0},
+	"city": {"avg": 200.0, "p95": 300.0, "hitches_min": 60.0},
 	"fight": {"avg": 100.0, "p95": 170.0, "hitches_min": 70.0},
-	"woods": {"avg": 35.0, "p95": 50.0, "hitches_min": 30.0},
-	"drive": {"avg": 40.0, "p95": 60.0, "hitches_min": 30.0},
-	"heli": {"avg": 40.0, "p95": 70.0, "hitches_min": 45.0},
+	"woods": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
+	"drive": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
+	"heli": {"avg": 18.0, "p95": 30.0, "hitches_min": 15.0},
 }
 ## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
 ## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners

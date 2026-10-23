@@ -209,7 +209,7 @@ func is_settled() -> bool:
 ## Works out the wanted chunks now (they're also refreshed every UPDATE_S).
 func refresh() -> void:
 	_next_update = Time.get_ticks_msec() / 1000.0 + UPDATE_S
-	_update_wanted()
+	_update_wanted(true)
 
 
 ## How many chunks are baked (or baking) now.
@@ -245,18 +245,28 @@ func _physics_process(_delta: float) -> void:
 	FrameCost.spent(&"nav_start", t_s)
 
 
-func _update_wanted() -> void:
+## Perf (world content pass, 2026-10-23): the chunks nobody is near any more are looked for every
+## DROP_EVERY passes (and on refresh), not every pass: the wider ring each soldier keeps was most of
+## a pass's marking (~110 chunks a soldier against ~25 wanted), 5-10 ms a pass for a city's ~100 AI.
+const DROP_EVERY := 4
+var _drop_turn := 0
+
+
+func _update_wanted(full := false) -> void:
 	var near := {}  # Vector2i -> distance
 	var keep := {}
+	_drop_turn += 1
+	var drops := full or _drop_turn % DROP_EVERY == 0
 	for s in zone.soldiers_for_navigation():
 		if _riding_past(s):
 			continue
 		var radius := PLAYER_RADIUS_M if not s.is_ai() else AI_RADIUS_M
 		_mark(near, s.global_position, radius)
-		_mark(keep, s.global_position, radius + DROP_MARGIN_M, false)
+		if drops:
+			_mark(keep, s.global_position, radius + DROP_MARGIN_M, false)
 	_wanted = near
 	# Drop chunks nobody is near any more.
-	for chunk: Vector2i in _regions.keys():
+	for chunk: Vector2i in (_regions.keys() if drops else []):
 		if not keep.has(chunk):
 			_regions[chunk].queue_free()
 			_regions.erase(chunk)

@@ -32,6 +32,9 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-221 | P3 | The woods' GPU frame time is unmeasured: the forest suite counts draws and triangles headless (no renderer); a windowed frame time in a dense copse wants a build on a real GPU (woods perf pass, 2026-10-22) |
 | F-222 | P2 | claude/perf-pass and world/perf both change ZoneScatter's build_near, _process, _build_cell and _build_far: whoever merges second keeps both (woods perf pass, 2026-10-22) |
 | F-223 | P3 | An AI-driven vehicle turning round beside the range's concrete blocks runs into one and never makes the pickup (vehicle AI; the blocks exist since F-121) |
+| F-230 | P2 | A soldier's movement in a city costs about 3x what it does in the woods: the voxel blocks collide as per-face trimeshes (10 cm faces), and move_and_slide was ~13% of the city case's AI tick (world content pass, 2026-10-23) |
+| F-231 | P2 | The zone's navigation map now builds its iterations on a worker (ZoneNav.MAP_ASYNC): watch a city fight in game for AI that stop pathing into chunks just baked (the "missing region updates" ZoneNav's note describes from before); if seen, set it false (world content pass, 2026-10-23) |
+| F-232 | P3 | Draw counts the headless suites can't time: the terrain ~300 draws a view (a mesh per 128 m chunk at every level), the scatter's far tier 350-600 (each stand-in kind a MultiMesh per cell): merged far levels (HLOD, visibility parents) want a GPU check in game (world content pass, 2026-10-23) |
 | F-140 | P2 | ~~Ambushers by a road and a friendly convoy driving past (missions 2 overwatch)~~ fixed 2026-10-21 (Claude, claude/ai-followups: RoadAmbush, the convoy's drive-through; the mission's two calls are F-178) |
 | F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
 | F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
@@ -1082,6 +1085,41 @@ Not measurable headless; worth a GPU capture in game. Options: soldiers' gear me
 body's mesh past ~40 m, visibility ranges on small gear (pouches, tape, optics), no sun shadow from
 gear.
 
+### F-225 update (done, perf/world-content, 2026-10-23)
+A fine terrain chunk's vertices, normals and colours (ZoneTerrain._chunk_arrays) and a scatter
+cell's near-tier ground cover (ZoneScatter._ground_cover, the near tier's whole cost) are worked
+out on a WorkerThreadPool task, one at a time, and the mesh or MultiMeshes made on the main thread
+once it's done (_take_refined, _take_cover). Measured on kestrel_valley (scratch bench, busy
+machine): 22-32 ms a chunk and 27-35 ms a cell of main thread before; now a few hundred
+microseconds of node and resource making. build_near (tests, the first round a spot) still builds
+in place. Ground cover reads the generated ground (plane_height, plane_normal), so a crater made
+before a cell's near tier is built no longer lowers the tufts on it (logged under Calls made).
+
+### F-230 (open): soldiers' movement against a city's voxels
+perfcases city (R0572, busy machine, a temporary timer round SoldierMovement._slide): move_and_slide
+74 ms a frame against the AI's 472 (~13%), per soldier about three times the woods case's; the
+engine's step 6-10 ms a tick in the city against under 1 elsewhere. Every voxel face is two
+triangles in the blocks' collision (VoxelTerrain from the blocky mesher), so a capsule on a floor
+or along a wall touches dozens. Options: a merged collision mesh (greedy faces) per block, or the
+floors and walls as boxes (VoxelWorld.solid_boxes_m, as the navigation reads them) on a movement
+layer, the per-face mesh kept for rounds and sight. scripts/world/voxel_world.gd.
+
+### F-231 (open): the navigation map's async iterations
+ZoneNav.build_zone turned the map's async iterations on (MAP_ASYNC, 2026-10-23): a city's map
+update (~500 chunks of floors over floors) was 10-16 ms on the main thread about twice a second
+(perfcases city: the server's frame median 9.8 -> 2.4 ms locally, R0576 -> R0577; CI 15.9 -> 1.5 ms
+a frame, runs 39903846000 -> 39908072526). The regions' own iterations stay synchronous: an
+earlier note says that with async iterations some region updates never reached the map. townperf's
+seam, breach and proxy checks pass (R0578) and CI's suites do; worth a look in a city fight in game.
+
+### F-232 (open): world draws the headless suites can't time
+The draw proxy (perfcases): the terrain is ~300 draws a view in a city or town (a mesh per 128 m
+chunk at each level, the coarsest out to the horizon), the scatter's far tier 350-610 from a
+vehicle or the UH-60 (trunk, crown, conifer, thicket and scrub stand-ins, a MultiMesh each per
+cell within 1 km). Merging the coarse terrain into 512 m blocks and the stand-ins per FAR_BLOCK
+(the far blobs' blocks) as visibility parents would cut them several times over; both change where
+levels hand over, so they want a look on a real GPU (F-221).
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -1192,3 +1230,9 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-22 | 3D loadout editor: edits are a draft until Apply (Enter) or Buy missing (B), not applied click by click | a draft can hold items the stash lacks and be bought in one go | apply each pick at once like the old menu
 2026-10-22 | Saved kits: on the roster (campaign save, shared in co-op), max 40, any player may save or delete; applying makes it the standing loadout; fire teams = picked squad in fours | one list for the company | per-player kits
 2026-10-22 | 3D armory: a room of 9 shelves by Loadouts group, up to 40 items a shelf (owned first, then cheapest), opened from the base screen rather than walked to in the FOB/LHD level | the levels are other lanes' files | a walk-in room in base_fob/lhd_layout
+2026-10-23 | Navigation chunks aren't kept round a soldier in a helicopter flying faster than 8 m/s or more than 15 m up (ZoneNav.RIDE_FAST_MS, RIDE_AGL_M, Proposed) | he can't walk off; from a UH-60 every chunk passed over was baked and dropped again (~20-25 bakes a second, R0568/R0573) and they come back as it slows to land | keep baking under every flight
+2026-10-23 | The grass carpet isn't laid or drawn with the eye more than 10 m over the ground (GrassCarpet.EYE_MAX_M, Proposed) | view distance over removal: 0.35-0.75 m tufts 10-28 m off are a few pixels, and from a helicopter at 12.5 m the lays were 12-30 ms frames (R0579) | a tighter lay budget, drawn all the same
+2026-10-23 | The zone's navigation map builds its iterations on a worker (ZoneNav.MAP_ASYNC); the regions' stay synchronous | a city's map update was 10-16 ms on the main thread twice a second; townperf's seam checks pass with it | keep it synchronous and bake fewer chunks round the AI (their AI_RADIUS_M, Claude's AI)
+2026-10-23 | A helicopter's contour flight works out its look-ahead points 2 s and further every third tick, in turn (Helicopter.FAR_SAMPLE_S, FAR_SAMPLE_TICKS, Proposed) | ~2 ms a tick a helicopter, and those points are 25-100 m apart while they move a few metres in three ticks; heliflight passes | every point every tick
+2026-10-23 | A scatter cell's ground cover is laid on the ground as generated (plane_height), not with craters made before the cell was built | so it can be laid on a worker thread without reading GroundCuts while the game writes it (F-225) | read the cuts under a lock
+2026-10-23 | perfcases budgets tightened after the world content pass to about 2.5-3x CI's numbers (town 15 / 25 / 20, city 200 / 300 / 60, woods 18 / 26 / 15, drive 18 / 26 / 15, heli 18 / 30 / 15; fight kept at 100 / 170 / 70) | CI is the guard and measured town 6.0, city 83, woods 5.8, drive 6.7, heli 5.9 ms average (run 39911142961); fight is the AI's | twice a quiet local run as before (this PC had a game running all session)
