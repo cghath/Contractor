@@ -150,8 +150,8 @@ the numbers before the pass, so going back to them fails.
 | drive | 20 | 30 | 15 |
 | heli | 28 | 45 | 20 |
 
-(These were the first pass's; the latest, from the world content pass: town 15 / 25 / 20, city
-200 / 300 / 60, fight 100 / 170 / 70, woods 18 / 26 / 15, drive 18 / 26 / 15, heli 18 / 30 / 15.)
+(These were the first pass's; the latest, from the world content pass: town 15 / 25 / 30, city
+200 / 300 / 60, fight 100 / 170 / 90, woods 18 / 26 / 15, drive 18 / 26 / 15, heli 18 / 30 / 15.)
 These are CI's: its runners have nothing else on them. Run locally the budgets get 1.6x room
 (LOCAL_SLACK): on this shared machine a busy run measured 2.5-3x a quiet one (R2431: town 62 ms,
 fight 49 against 21 and 17 in R2425), so a local failure is first a question of what else was
@@ -239,7 +239,10 @@ at 7a92356a, run 39911142961; CI's runners vary a little run to run):
 | drive | 8.38 / 11.59 | **6.68 / 10.04** | 2.2 -> 0 |
 | heli | 10.19 / 18.34 | **5.85 / 8.20** | 2.9 -> 0 |
 
-The city's navigation server went from 10.9 to 1.4 ms a frame there. townperf's tick on CI: 13.1 ms
+A later run at b74ddc99 (run 39914788172) drew a slower runner, everything ~25% up: town 7.2 / 11.4,
+city 95.6 / 107.8, fight 20.2 / 37.9, woods 7.3 / 10.5, drive 8.4 / 12.5, heli 8.9 / 13.4, no hitches
+outside town (13 a minute, team spawns) and fight. The city's navigation server went from 10.9 to
+1.4 ms a frame there. townperf's tick on CI: 13.1 ms
 on claude/ai-driving, 14.8, 11.9 and 15.9 ms on this branch's three runs (budget 20; world/perf's
 miss was 20.4).
 

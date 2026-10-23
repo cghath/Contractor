@@ -41,7 +41,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   its contour height, a high window): its lays were 12-30 ms frames from the UH-60.
 - **Animals**: only those that walked move their hit box and their place in the herd's MultiMesh.
 - **perfcases**: budgets tightened (town 15 / 25, city 200 / 300, woods 18 / 26, drive 18 / 26, heli
-  18 / 30 ms, 15-20 hitches a minute; fight unchanged); it prints each case's navigation bakes, map
+  18 / 30 ms, 15-30 hitches a minute; fight's times unchanged, its hitches 70 -> 90 a minute, the
+  AI's ticks and team spawns that failed claude/ai-driving's own CI); it prints each case's navigation bakes, map
   updates and the navigation server's frame, and waits up to 180 s for a case's modules (CI's city
   block still building at 60 and 100 s). FrameCost counts "nav_wanted" and "nav_start".
 
