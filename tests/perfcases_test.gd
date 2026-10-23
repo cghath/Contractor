@@ -71,9 +71,10 @@ const BUDGETS := {
 const LOCAL_SLACK := 1.6
 const WALK_MPS := 3.0
 ## How long a case waits for its modules and navigation before it measures (ms): the city's 20-odd
-## blocks build their voxels a slice a frame, and at CI's 3 frames a second in the city one was
-## still building at 60 s (run 39908072526).
-const SETTLE_MS := 100000
+## blocks build their voxels a slice a frame (VoxelWorld.BUILD_BUDGET_MS each) while their garrisons
+## come in, and at CI's 3 frames a second there the biggest was still building at 60 s (run
+## 39908072526) and at 100 s (run 39912912838).
+const SETTLE_MS := 180000
 ## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
 ## the import and all five zones); averages and per-minute rates compare the same.
 const CI_MEASURE_SHARE := 0.6
@@ -159,7 +160,7 @@ func _ready() -> void:
 			_no_budgets = true
 	GameState.delete_save()
 	Campaign.reset_campaign()
-	get_tree().create_timer(60.0 + cases.size() * 170.0, true, false, true).timeout.connect(func() -> void:
+	get_tree().create_timer(120.0 + cases.size() * 170.0, true, false, true).timeout.connect(func() -> void:
 		print("PERFCASES TEST FAILED (timed out)")
 		get_tree().quit(99))
 	_first = TickEdge.new()
@@ -403,7 +404,8 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 		if ready and (nav == null or nav.is_settled()):
 			break
 	for m: ZoneModule in wait_for:
-		check(m.is_ready(), "%s streamed in" % m.module_id)
+		check(m.is_ready(), "%s streamed in (%.0f s; %s)" % [m.module_id, (Time.get_ticks_msec() - t0) / 1000.0,
+			"built" if m.voxel_world and m.voxel_world.is_built() else ("building" if m.voxel_world else "not streamed in")])
 	for p in [level.terrain, level.scatter]:
 		if p.has_method(&"build_near"):
 			p.build_near(at, 1000)

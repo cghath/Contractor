@@ -42,8 +42,8 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Animals**: only those that walked move their hit box and their place in the herd's MultiMesh.
 - **perfcases**: budgets tightened (town 15 / 25, city 200 / 300, woods 18 / 26, drive 18 / 26, heli
   18 / 30 ms, 15-20 hitches a minute; fight unchanged); it prints each case's navigation bakes, map
-  updates and the navigation server's frame, and waits up to 100 s for a case's modules (CI's city
-  block still building at 60 s). FrameCost counts "nav_wanted" and "nav_start".
+  updates and the navigation server's frame, and waits up to 180 s for a case's modules (CI's city
+  block still building at 60 and 100 s). FrameCost counts "nav_wanted" and "nav_start".
 
 ### Income: ways to make money with the flow of the game (claude/income)
 
