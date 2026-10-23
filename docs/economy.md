@@ -11,7 +11,128 @@ Three passes so far. Every number is Proposed (the Captain tunes them).
 3. **The economy pass, 2026-10-22** (claude/voice-economy): the two standing high command squads
    (Hawk 2, Viper 3) came after the overhaul and doubled the men on wages and in the field. The
    sim now keeps them, and on the overhaul's numbers a median company went broke. This pass puts
-   the curve back where the Captain wants it. Next section.
+   the curve back where the Captain wants it.
+4. **The income streams, 2026-10-22** (claude/income; Captain: "something that allows the players
+   to make money... good money but it needs to go with the flow of the game"): high command side
+   jobs, captures and bounties, FOB businesses, the black market (docs/income.md). Next section.
+
+## The income streams, 2026-10-22 (all Proposed)
+
+**Targets** (Captain): good play earns well; the streams reward engagement, not grinding; normal
+play still grows steadily; careless play still bleeds.
+
+**What the sim plays now** (tools/economy_sim.gd, `--income 0|1`): the 2026-10-22 economy pass's
+sim plus each profile's use of the streams (assumptions, in `PROFILES`):
+
+| | Careful | Median | Sloppy |
+|---|---|---|---|
+| Sends an idle squad on a side job | 80%, the safest pay | 60%, the best pay | 50%, the best pay |
+| Captured vehicles | stored, sold to the best buyer | stored, sold to the best buyer | quick sale |
+| Hunts bounties (counts them in a job's pay) | yes | yes | no |
+| Has a FOB from day | 14 | 12 | 16 |
+| Businesses | militia, rentals, tolls | all four | convoy, tolls |
+| Takes a threatened business's protection job | 95% | 70% | never |
+| Trades | fuel, medical (8% margin) | everything, a little contraband (5%) | contraband and weapons by the truckload (3%) |
+
+Two costs come with them:
+- a squad away on a side job isn't in the deployment (no field costs or casualties for it);
+- each squad away takes 5% off a contract's win chance.
+
+Before = the same code with `--income 0` (Income.enabled false): no side jobs, businesses or
+trading, no bounties, intel at its plain worth, vehicles quick-sold. Its curve matches the
+economy pass's "after" below, so the comparison is like for like. Full output:
+[economy_sim_income_2026-10-22.txt](economy_sim_income_2026-10-22.txt).
+
+### Before and after: mean cash by day (40 campaigns each)
+
+```mermaid
+xychart-beta
+    title "Before the income streams: mean cash ($k) by day"
+    x-axis [0, 5, 10, 15, 20, 25, 30, 35]
+    y-axis "cash $k" -100 --> 700
+    line [183, 225, 255, 284, 322, 357, 388, 430]
+    line [183, 198, 214, 234, 244, 274, 314, 329]
+    line [183, 104, 56, 21, 4, -4, -31, -53]
+```
+
+```mermaid
+xychart-beta
+    title "With the income streams: mean cash ($k) by day"
+    x-axis [0, 5, 10, 15, 20, 25, 30, 35]
+    y-axis "cash $k" -100 --> 700
+    line [183, 248, 314, 362, 415, 510, 592, 677]
+    line [183, 248, 268, 249, 320, 385, 444, 514]
+    line [183, 126, 96, 54, 38, 47, 47, 24]
+```
+
+(Lines top to bottom: careful, median, sloppy.)
+
+| Day | Careful before | Careful after | Median before | Median after | Sloppy before | Sloppy after |
+|---|---|---|---|---|---|---|
+| 0 | $183k | $183k | $183k | $183k | $183k | $183k |
+| 5 | $225k | $248k | $198k | $248k | $104k | $126k |
+| 10 | $255k | $314k | $214k | $268k | $56k | $96k |
+| 15 | $284k | $362k | $234k | $249k | $21k | $54k |
+| 20 | $322k | $415k | $244k | $320k | $4k | $38k |
+| 25 | $357k | $510k | $274k | $385k | -$4k | $47k |
+| 30 | $388k | $592k | $314k | $444k | -$31k | $47k |
+| 35 | $430k | $677k | $329k | $514k | -$53k | $24k |
+| Day 35 less loans owed | $430k | $677k | $329k | $514k | -$176k | -$61k |
+| Day 35, p10 to p90 | $338k to $540k | $495k to $871k | $167k to $552k | $258k to $785k | -$182k to $19k | -$140k to $280k |
+| Out of credit by day 35 | 0 of 40 | 0 of 40 | 0 of 40 | 0 of 40 | 16 of 40 | 12 of 40 |
+| Net per deployment (mean / p10) | $18.1k / -$1.6k | $36.7k / $5.1k | $11.3k / -$34.2k | $28.4k / -$25.4k | -$28.3k / -$73.6k | -$21.1k / -$77.1k |
+
+What each stream brought in a campaign (after):
+
+| Stream | Careful | Median | Sloppy |
+|---|---|---|---|
+| Side jobs | $110k | $86k | $68k |
+| Captures sold | $13k | $8k | none |
+| Bounties | $9k | none | none |
+| Businesses: pay / setup and upkeep | $136k / -$87k | $162k / -$142k | $27k / -$27k |
+| Trading (net) | $5k | $17k | $5k |
+| Share of income from the streams | 23% | 22% | 12% |
+
+**Reading it:**
+- **Good play earns well:** careful ends 57% higher ($430k → $677k) and a deployment nets twice
+  as much.
+- **Normal play still grows steadily:** median ends 56% higher, nobody broke. Its dip at day
+  12-15 is the four businesses' $80k setup paid at once; they pay it back by day 20.
+- **Careless play still bleeds:** sloppy is still in debt by day 35 ($61k less loans owed; 12 of 40
+  out of credit, from 16). Its side jobs are its risky picks; it leaves its businesses to the
+  raiders and gets fined for contraband.
+- **Engagement, not grinding:**
+  - businesses pay back only for a company that keeps its stocks and protects them (careful
+    nets $49k, median $20k, sloppy nothing);
+  - trading pays only where the war moves prices, and selling drives the price down;
+  - bounties are finite: one per leader, and only for the HVT jobs that take him;
+  - side jobs, the most passive stream, are held to about 7-10% of income: a squad rests a day
+    between jobs, and while it's away it's missing from your contracts.
+- **The expensive op** is unchanged: won −$9.9k, failed −$70.5k.
+
+**Tuning made on the way (all Proposed, data/income.json)** from the first draft. The sim's
+first pass had side jobs at 29% of a median company's income and businesses losing money:
+- side job base pay $20-30k → $7-11k;
+- a rest day between side jobs;
+- business upkeep $400-1,500 → $300-900, and pay up (convoy $3,400 + $1,200 a road zone,
+  militia $3,000, tolls $1,000 + $2,200 a road, rentals $1,600 a vehicle);
+- bounties $45-60k → $15-20k by role (hunting them at the first values paid $219k in a careful
+  campaign);
+- the market spread 16% → 8% and noise 8% → 6%, so trading where the war moves prices pays.
+
+**Not modelled:**
+- the squads' own losses on side jobs don't shrink the sim's high command count for deployments
+  (only their being away does);
+- zones taken by the company (more toll roads, convoy routes) don't happen in the sim;
+- delivering captures with a squad.
+All three would raise the streams a little for engaged play.
+
+**Tests:** `tests/income_test.gd` (suite `income`) checks each stream's rules. contracts_test's
+"The money curve" now runs with the streams on and still holds:
+- careful builds;
+- median grows with nobody broke;
+- sloppy goes negative;
+- the expensive op hurts but isn't ruinous (R2545).
 
 ## The economy pass, 2026-10-22 (all Proposed)
 

@@ -20,11 +20,27 @@ extends Node
 ##     --hot_win X     a hot-zone contract's win chance as a share of the profile's (default 0.92)
 ##     --hot_cap N     at most N contracts done per hot-zone deployment (default 0: no cap)
 ##     --op 0|1        also play the scripted expensive op (default 1; see _expensive_op)
+##     --income 0|1    the income streams (claude/income, docs/income.md; default 1): high command
+##                     side jobs, captures sold to buyers, bounties, intel buyers, FOB businesses
+##                     from the profile's "fob_day", black market trading. 0 plays the game as it
+##                     was before them (Income.enabled false): the "before" of docs/economy.md.
 ##
 ## Since 2026-10-22 (claude/voice-economy) it also keeps the two standing high command squads
 ## (Hawk 2, Viper 3: Heroes.STANDING, eight more men on wages, the start cash's fortnight of
 ## their wages, their own casualties and field costs) and flies a heli insertion with the
 ## profile's "insert" chance (its price, prices.json supports "insertion", when it has one).
+##
+## Since 2026-10-22 (claude/income) each profile also plays the income streams (_income_turn):
+## - side: chance it sends each idle standing squad on a side job when one's offered; side_pick
+##   "safe" (least trouble for the pay) or "pay" (the best paid). A squad away is not in the
+##   deployment's high command count (no field costs or casualties for it there).
+## - captures: "buyer" (vehicles stored and sold to the best buyer) or "quick" (the debrief sale).
+## - fob_day: the campaign day the company has its FOB (before it, no businesses); biz: the
+##   businesses it opens (when cash covers the setup plus BIZ_BUFFER); protect: chance it takes a
+##   business's protection job off the board first.
+## - trade: "" (none), "safe" (fuel, medical), "all" (and weapons, a little contraband) or
+##   "contraband" (contraband and weapons, by the truckload); margin: the profit it wants.
+## - hunt: it counts a leader's bounty in an HVT job's pay when it picks a contract.
 ##
 ## It plays in a campaign of its own ("sim_economy"), never saved, so a real campaign save is
 ## never touched. Quits by itself (a script error would otherwise leave it idling).
@@ -62,17 +78,20 @@ const PROFILES := {
 		"win": [0.97, 0.95, 0.92, 0.85, 0.75], "opt": 0.7, "kia": [0.05, 0.04], "bodies": 0.9, "wounded": 0.8, "deaths": 1.0,
 		"supports": {"transport": 0.5, "extraction": 0.5}, "heli_loss": 0.02,
 		"carry": 12, "boxes": 1.0, "extra_modules": 1, "scatter": 2, "officer_intel": 0.6,
-		"intel": "sell", "pallets": "keep", "vehicles": 0.6, "civ": 0.02, "hazard": 1, "hc_kia": 0.1, "hc_wounded": 0.6, "insert": 0.2},
+		"intel": "sell", "pallets": "keep", "vehicles": 0.6, "civ": 0.02, "hazard": 1, "hc_kia": 0.1, "hc_wounded": 0.6, "insert": 0.2,
+		"side": 0.8, "side_pick": "safe", "captures": "buyer", "fob_day": 14, "biz": ["militia", "rentals", "tolls"], "protect": 0.95, "trade": "safe", "margin": 0.08, "hunt": true},
 	"median": {"max_rated": 4, "hot": true, "terms": {"salvage_points": 1, "support_points": 1},
 		"win": [0.93, 0.88, 0.82, 0.72, 0.6], "opt": 0.5, "kia": [0.1, 0.1], "bodies": 0.6, "wounded": 1.5, "deaths": 3.0,
 		"supports": {"transport": 0.7, "extraction": 0.7, "resupply": 0.4, "medevac": 0.3}, "heli_loss": 0.05,
 		"carry": 6, "boxes": 0.7, "extra_modules": 0, "scatter": 1, "officer_intel": 0.4,
-		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1, "radio": 0.6, "hc_kia": 0.3, "hc_wounded": 1.2, "insert": 0.4},
+		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1, "radio": 0.6, "hc_kia": 0.3, "hc_wounded": 1.2, "insert": 0.4,
+		"side": 0.6, "side_pick": "pay", "captures": "buyer", "fob_day": 12, "biz": ["convoy", "militia", "tolls", "rentals"], "protect": 0.7, "trade": "all", "margin": 0.05, "hunt": true},
 	"sloppy": {"max_rated": 5, "hot": true, "terms": {"support_points": 2},
 		"win": [0.85, 0.78, 0.68, 0.55, 0.42], "opt": 0.3, "kia": [0.3, 0.2], "bodies": 0.3, "wounded": 2.5, "deaths": 6.0,
 		"supports": {"transport": 1.0, "extraction": 1.0, "resupply": 0.8, "medevac": 0.8, "aav": 0.3, "allied_troops": 0.2}, "heli_loss": 0.1,
 		"carry": 2, "boxes": 0.3, "extra_modules": 0, "scatter": 0, "officer_intel": 0.2,
-		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2, "radio": 0.5, "hc_kia": 0.8, "hc_wounded": 2.0, "insert": 0.6},
+		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2, "radio": 0.5, "hc_kia": 0.8, "hc_wounded": 2.0, "insert": 0.6,
+		"side": 0.5, "side_pick": "pay", "captures": "quick", "fob_day": 16, "biz": ["convoy", "tolls"], "protect": 0.0, "trade": "contraband", "margin": 0.03},
 }
 ## The scripted expensive op (_expensive_op): a rated-4 contract flown in by helicopter, with
 ## resupply, medevac and extraction called, two squadmates and one high command man killed
@@ -111,6 +130,12 @@ var _hire_refresh := 0
 var _rng := RandomNumberGenerator.new()
 var _hot_win := 0.92  # --hot_win: a hot-zone contract's win chance, as a share of the profile's
 var _hot_cap := 0  # --hot_cap: at most this many contracts done per hot deployment (0: no cap)
+var _income := true  # --income: the income streams (Income.enabled)
+## Cash a profile keeps in hand beyond a business's setup (or a load of trade goods) before it buys.
+const BIZ_BUFFER := 60000
+## Each standing squad away on a side job takes this off a contract's win chance (it isn't there to
+## help). An assumption.
+const AWAY_WIN_COST := 0.05
 
 
 func _ready() -> void:
@@ -128,9 +153,11 @@ func _ready() -> void:
 	var first_seed := int(args.get("seed", 1))
 	_hot_win = float(args.get("hot_win", _hot_win))
 	_hot_cap = int(args.get("hot_cap", _hot_cap))
+	_income = String(args.get("income", "1")) != "0"
+	Income.enabled = _income
 	var variants: Array = ["current", "proposed"] if String(args.get("variant", "both")) == "both" else [String(args.variant)]
 	var profiles: Array = PROFILES.keys() if String(args.get("profile", "all")) == "all" else [String(args.profile)]
-	print("ECONOMY SIM: %d runs x %d days per profile; variants %s; hot_win %.2f, hot_cap %d" % [runs, days, variants, _hot_win, _hot_cap])
+	print("ECONOMY SIM: %d runs x %d days per profile; variants %s; hot_win %.2f, hot_cap %d; income streams %s" % [runs, days, variants, _hot_win, _hot_cap, "on" if _income else "off"])
 	_print_kit_values()
 	for v: String in variants:
 		for p: String in profiles:
@@ -199,6 +226,8 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 	seed(hash([campaign_seed, "global"]))  # server_sell_intel's randf() (caught or not)
 	_acc = {}
 	Contracts.new_full_campaign(campaign_seed)
+	Campaign.section(Income.SECTION).clear()  # (new_full_campaign leaves the sections it doesn't own)
+	Campaign.section(&"roster").clear()
 	_hire_refresh = 0
 	_roster = []
 	Economy.wages_provider = func() -> int:
@@ -218,6 +247,8 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 	for m: Dictionary in _hc:
 		hc_wages += int(m.wage)
 	Economy.add_cash(hc_wages * Heroes.START_WAGE_DAYS, "Standing squads: their first fortnight")  # as BaseHub
+	Heroes.seed_standing(Campaign.section(&"roster"), Economy.day(), hc_rng)  # the side jobs' squads (their wages are _hc's above)
+	FobBusiness.fob_override = 0  # no FOB until the profile's fob_day
 	_harvest("")
 	var start_day := Economy.day()
 	_start_cash = Economy.cash()
@@ -233,6 +264,7 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 			else:
 				deploys1.append(d1)
 		Economy.wages_provider = Callable()
+		FobBusiness.fob_override = -1
 		return {"acc": _acc.duplicate(), "deploys": deploys1, "cash_after_op": Economy.cash()}
 	var cash_at := {0: Economy.cash()}
 	var worth_at := {0: Economy.cash() - Economy.loans_owed()}
@@ -243,6 +275,8 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 	while Economy.day() - start_day < days and guard < 200:
 		guard += 1
 		var before_day := Economy.day()
+		if _income:
+			_income_turn(prof, Economy.day() - start_day)
 		var d := _deploy(prof)
 		if d.is_empty():
 			Economy.advance_days(1, "waiting for work")
@@ -263,7 +297,90 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 			cash_at[cp] = Economy.cash()
 			worth_at[cp] = Economy.cash() - Economy.loans_owed()
 	Economy.wages_provider = Callable()
+	FobBusiness.fob_override = -1
 	return {"acc": _acc.duplicate(), "cash_at": cash_at, "worth_at": worth_at, "deploys": deploys, "min_worth": min_worth, "broke": broke}
+
+
+# --- The income streams (claude/income) ---------------------------------------------------------
+
+## Between deployments: the profile sends idle squads on side jobs, sells stored captures to the best
+## buyer, gets its FOB on fob_day and opens its businesses, and trades.
+func _income_turn(prof: Dictionary, day: int) -> void:
+	var data := Campaign.section(&"roster")
+	for did: String in ["d02", "d03"]:
+		var offers: Array = Income.state().offers
+		if offers.is_empty() or SideJobs.cant_send(data, did) != "" or _rng.randf() >= float(prof.get("side", 0.0)):
+			continue
+		var q := float(SideJobs.quality(data, did).quality)
+		var best := {}
+		var best_score := -INF
+		for o: Dictionary in offers:
+			var k := SideJobs.kind(String(o.kind))
+			if bool(k.get("recovery", false)):
+				continue
+			var od := SideJobs.odds(k, float(o.danger), q)
+			var per_day := float(o.pay) / maxf(float(o.days), 1.0)
+			var score := per_day * (1.0 - float(od.fail)) if String(prof.get("side_pick", "pay")) == "pay" else per_day * (1.0 - 2.5 * float(od.trouble))
+			if score > best_score:
+				best_score = score
+				best = o
+		if not best.is_empty():
+			SideJobs.server_send(String(best.id), did)
+	if String(prof.get("captures", "quick")) == "buyer":
+		for e: Dictionary in Bounties.stored_captures():
+			var top := {}
+			for b: Dictionary in Bounties.capture_buyers(e.lot):
+				if String(b.why) == "" and (top.is_empty() or int(b.price) > int(top.price)):
+					top = b
+			if not top.is_empty():
+				Bounties.server_sell_capture(int(e.index), String(top.faction))
+				break  # (the indexes move; the next turn sells the next)
+	if day >= int(prof.get("fob_day", 999)):
+		FobBusiness.fob_override = 1
+		for id: String in prof.get("biz", []):
+			if FobBusiness.cant_open(id) == "" and Economy.cash() >= int(FobBusiness.kind(id).get("setup", 0)) + BIZ_BUFFER:
+				FobBusiness.server_open(id)
+	_trade(prof)
+	_harvest("")
+
+
+## The profile's trading: sells what's aboard where it makes its margin, then buys a load of each
+## good it deals in where another open market pays its margin over the price.
+func _trade(prof: Dictionary) -> void:
+	var policy := String(prof.get("trade", ""))
+	if policy == "":
+		return
+	var deals: Array = {"safe": ["fuel", "medical"], "all": ["fuel", "medical", "weapons", "contraband"], "contraband": ["contraband", "weapons"]}.get(policy, [])
+	var lot: int = {"safe": 15, "all": 15, "contraband": 20}.get(policy, 10)
+	var margin := float(prof.get("margin", 0.1))
+	var markets := BlackMarket.markets()
+	for g: String in BlackMarket.cargo().keys():
+		for m: Dictionary in markets:
+			if not BlackMarket.cargo().has(g):
+				break
+			var e: Dictionary = BlackMarket.cargo()[g]
+			var avg := float(e.paid) / maxf(float(e.units), 1.0)
+			if BlackMarket.price(g, String(m.id), "sell") >= avg * (1.0 + margin):
+				BlackMarket.server_sell(g, String(m.id), int(e.units))
+	for g: String in deals:
+		if g == "contraband" and policy == "all" and int((BlackMarket.cargo().get(g, {}) as Dictionary).get("units", 0)) >= 5:
+			continue
+		var cheap := ""
+		var dear := 0
+		for m: Dictionary in markets:
+			var b := BlackMarket.price(g, String(m.id), "buy")
+			if b > 0 and (cheap == "" or b < BlackMarket.price(g, cheap, "buy")):
+				cheap = String(m.id)
+			dear = maxi(dear, BlackMarket.price(g, String(m.id), "sell"))
+		if cheap == "" or float(dear) < BlackMarket.price(g, cheap, "buy") * (1.0 + margin):
+			continue
+		var n := mini(lot, BlackMarket.capacity() - BlackMarket.cargo_units())
+		var paid := BlackMarket.price(g, cheap, "buy")  # (buying lifts the price a little: compare with what was paid)
+		if n > 0 and Economy.cash() > paid * n + BIZ_BUFFER:
+			BlackMarket.server_buy(g, cheap, n)
+			for m: Dictionary in markets:  # and on to the market that pays for it, while it's open
+				if BlackMarket.cargo().has(g) and BlackMarket.price(g, String(m.id), "sell") >= paid * (1.0 + margin):
+					BlackMarket.server_sell(g, String(m.id), int(BlackMarket.cargo()[g].units))
 
 
 # --- Hiring -----------------------------------------------------------------------------------
@@ -319,6 +436,10 @@ func _contracts_section() -> Dictionary:
 func _pick_contract(prof: Dictionary) -> Dictionary:
 	var best := {}
 	var best_score := -1.0
+	if _income and _rng.randf() < float(prof.get("protect", 0.0)):
+		for c: Dictionary in _contracts_section().board:
+			if String(c.get("business", "")) != "":
+				return c  # a business of ours threatened: protect it first
 	for c: Dictionary in _contracts_section().board:
 		var src := String(c.get("source", ""))
 		if src in ["locals", "recovery"]:
@@ -330,7 +451,10 @@ func _pick_contract(prof: Dictionary) -> Dictionary:
 		if Economy.work_problem(String(c.employer)) != "":
 			continue
 		var days := int(c.days) + int(MissionRegistry.region(String(c.get("region", ""))).get("travel_days", 0))
-		var score := float(c.base_pay) / maxf(days, 1.0) * (1.0 + float(prof.get("radio", 0.0)) if String(c.zone_kind) == "hot" else 1.0)  # the radio brings more work there
+		var pay := float(c.base_pay)
+		if _income and bool(prof.get("hunt", false)) and String(c.get("leader", "")) != "":
+			pay += Bounties.bounty(String(c.get("target", "")), String(c.leader)) * (0.6 if String(c.get("type", "")) == "hvt_kill" else 1.0)  # the bounty on the man it takes
+		var score := pay / maxf(days, 1.0) * (1.0 + float(prof.get("radio", 0.0)) if String(c.zone_kind) == "hot" else 1.0)  # the radio brings more work there
 		if score > best_score:
 			best_score = score
 			best = c
@@ -394,7 +518,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 			objectives.server_add([
 				{"oid": "%s_sim1" % x.cid, "cid": x.cid, "kind": "scenario", "text": "scenario", "state": Objectives.ACTIVE, "optional": false, "bonus_share": 0.0, "progress": "", "params": {}, "pos": Vector3.ZERO},
 				{"oid": "%s_sim2" % x.cid, "cid": x.cid, "kind": "scenario", "text": "Bonus: scenario", "state": Objectives.ACTIVE, "optional": true, "bonus_share": share, "progress": "", "params": {}, "pos": Vector3.ZERO}])
-		var won := _rng.randf() < float(prof.win[clampi(int(x.true_rating), 1, 5) - 1]) * (_hot_win if hot else 1.0)
+		var won := _rng.randf() < float(prof.win[clampi(int(x.true_rating), 1, 5) - 1]) * (_hot_win if hot else 1.0) * (1.0 - AWAY_WIN_COST * (Income.state().get("jobs", []) as Array).size())  # a squad on a side job isn't beside you
 		if hot and _hot_cap > 0 and hot_done >= _hot_cap:
 			won = false
 		if won:
@@ -465,7 +589,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		casualties.append({"name": extracted[i], "status": "wounded"})
 	# The high command squads come out too (field costs for each, treatment for their wounded).
 	var hc_out: Array = []
-	for i in HC_MEN - hc_dead.size():
+	for i in maxi(HC_MEN - hc_dead.size() - Heroes.TEAM_ROLES.size() * (Income.state().jobs as Array).size(), 0):  # (a squad on a side job isn't here)
 		hc_out.append("H%d" % i)
 	var hc_wounded := mini(_poisson(float(prof.get("hc_wounded", 0.0)) * (1.3 if hot else 1.0)), hc_out.size())
 	for i in hc_wounded:
@@ -559,6 +683,8 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	for i in (d.get("tagged", []) as Array).size():
 		var lot: Dictionary = d.tagged[i]
 		var act := "sell" if String(lot.kind) == "vehicle" or String(prof.pallets) == "sell" else "keep"
+		if String(lot.kind) == "vehicle" and _income and String(prof.get("captures", "quick")) == "buyer":
+			act = "store"  # sold to the best buyer from storage (_income_turn)
 		Contracts.server_pallet("debrief", i, act)
 	_harvest("pallets")
 	Contracts.server_finish_debrief()
@@ -716,6 +842,20 @@ func _harvest(tag: String) -> void:
 			key = "hiring"
 		elif what.begins_with("Intel sold"):
 			key = "intel"
+		elif what.begins_with("Bounty"):
+			key = "bounties"
+		elif what.begins_with("Side job"):
+			key = "side_jobs"
+		elif what.begins_with("Capture sold"):
+			key = "captures"
+		elif what.begins_with("Business upkeep"):
+			key = "biz_costs"
+		elif what.begins_with("Business"):
+			key = "business"
+		elif what.begins_with("Trade"):
+			key = "trade"
+		elif what.begins_with("Death benefit"):
+			key = "kia_benefit"
 		elif what.begins_with("Sold") or what.begins_with("Kept"):
 			key = tag if tag != "" else "sold_other"
 		_add(key, amount)
@@ -832,8 +972,8 @@ func _expensive_op(v: String, runs: int, first_seed: int) -> void:
 
 # --- Output -------------------------------------------------------------------------------------
 
-const INCOME := ["advance", "completion", "bonuses", "loot", "salvage", "intel", "contraband", "pallets"]
-const EXPENSES := ["wages", "upkeep", "field_costs", "kia_benefit", "treatment", "supports", "lost_heli", "respawns", "hiring", "fines", "clawback", "loan_repay"]
+const INCOME := ["advance", "completion", "bonuses", "loot", "salvage", "intel", "contraband", "pallets", "side_jobs", "captures", "bounties", "business", "trade"]
+const EXPENSES := ["wages", "upkeep", "field_costs", "kia_benefit", "treatment", "supports", "lost_heli", "respawns", "hiring", "fines", "clawback", "loan_repay", "biz_costs"]
 
 
 func _report(pname: String, v: String, runs: int, totals: Dictionary, cash_at: Dictionary, worth_at: Dictionary, deploys: Array, bankrupt: int, min_worth: Array) -> void:

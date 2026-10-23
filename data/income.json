@@ -5,6 +5,7 @@
 		"board_size": 3,
 		"offer_days": 4,
 		"min_ready": 3,
+		"rest_days": 1,
 		"advance_share": 0.25,
 		"pay_floor": 0.6,
 		"pay_danger": 1.3,
@@ -31,7 +32,7 @@
 				"name": "Escort a client",
 				"verb": "escorting",
 				"days": 2,
-				"base_pay": 26000,
+				"base_pay": 9000,
 				"risk": 0.4,
 				"brief": "Close protection for a client moving through the zone: in, the meeting, out.",
 				"clients": [
@@ -48,7 +49,7 @@
 				"name": "Guard a site",
 				"verb": "guarding",
 				"days": 3,
-				"base_pay": 30000,
+				"base_pay": 11000,
 				"risk": 0.3,
 				"brief": "Hold a client's site (a depot, a pumping station, a clinic) against whoever comes.",
 				"clients": [
@@ -63,7 +64,7 @@
 				"name": "Train locals",
 				"verb": "training locals",
 				"days": 4,
-				"base_pay": 22000,
+				"base_pay": 8000,
 				"risk": 0.15,
 				"rebel_support": 4,
 				"brief": "Drill a village militia: weapons handling, a patrol, a checkpoint. The locals remember who taught them.",
@@ -79,7 +80,7 @@
 				"name": "Run a supply route",
 				"verb": "running a supply route",
 				"days": 2,
-				"base_pay": 20000,
+				"base_pay": 7000,
 				"risk": 0.35,
 				"brief": "Ride shotgun on trucks between two towns and see them through every checkpoint.",
 				"clients": [
@@ -153,9 +154,9 @@
 	"_bounties": "Bounties on the living war's leaders (Bounties): by the leader's role (factions.json leader_roles), x (1 + the faction's war strength / 100 x strength_bonus), posted by the lawful employer at war with it the company stands best with; dead (an hvt_kill, with its proof) dead_mult of it; rep with the poster when paid.",
 	"bounties": {
 		"roles": {
-			"commander": 30000,
-			"financier": 22000,
-			"bomb_maker": 25000
+			"commander": 20000,
+			"financier": 15000,
+			"bomb_maker": 17000
 		},
 		"dead_mult": 0.6,
 		"strength_bonus": 0.5,
@@ -202,13 +203,13 @@
 				"name": "Convoy security",
 				"brief": "Your men ride with the locals' trucks between the towns you can reach safely, for a fee per run.",
 				"setup": 30000,
-				"upkeep": 1400,
+				"upkeep": 900,
 				"staff": 6,
 				"supplies": {
 					"fuel": 1
 				},
-				"pay": 2600,
-				"per_unit": 900,
+				"pay": 3400,
+				"per_unit": 1200,
 				"unit": "friendly road zones nearby",
 				"needs_vehicle": true,
 				"client": "salvage_union"
@@ -218,12 +219,12 @@
 				"name": "Militia training camp",
 				"brief": "Train the region's militia at the FOB. The village councils pay a little; the region's rebel support rises every day it runs.",
 				"setup": 25000,
-				"upkeep": 1500,
+				"upkeep": 900,
 				"staff": 4,
 				"supplies": {
 					"supplies": 1
 				},
-				"pay": 2400,
+				"pay": 3000,
 				"per_unit": 0,
 				"unit": "",
 				"rebel_support": 0.6,
@@ -234,11 +235,11 @@
 				"name": "Checkpoint tolls",
 				"brief": "Checkpoints on the roads the company holds: every truck pays to pass. More roads held, more tolls; the locals like it less.",
 				"setup": 15000,
-				"upkeep": 700,
+				"upkeep": 500,
 				"staff": 4,
 				"supplies": {},
-				"pay": 600,
-				"per_unit": 1500,
+				"pay": 1000,
+				"per_unit": 2200,
 				"unit": "roads held",
 				"locals_per_week": -1,
 				"client": "salvage_union"
@@ -248,13 +249,13 @@
 				"name": "Motor pool rentals",
 				"brief": "Rent the motor pool's idle vehicles to aid agencies and traders. Wear costs parts.",
 				"setup": 10000,
-				"upkeep": 400,
+				"upkeep": 300,
 				"staff": 2,
 				"supplies": {
 					"parts": 1
 				},
 				"pay": 0,
-				"per_unit": 1100,
+				"per_unit": 1600,
 				"unit": "vehicles at home",
 				"client": "meridian"
 			}
@@ -264,8 +265,8 @@
 	"market": {
 		"capacity_base": 20,
 		"capacity_per_vehicle": 10,
-		"spread": 0.16,
-		"noise": 0.08,
+		"spread": 0.08,
+		"noise": 0.06,
 		"pressure_per_unit": 0.012,
 		"pressure_decay": 0.25,
 		"contraband_risk": 0.03,

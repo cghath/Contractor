@@ -53,10 +53,10 @@ day until a squad takes it.
 
 | Kind | Days | Base pay | Risk | Clients | Extra |
 |---|---|---|---|---|---|
-| Escort a client | 2 | $26,000 | 0.40 | Meridian, Vessmark, US, UK, CA, Salvage Union | |
-| Guard a site | 3 | $30,000 | 0.30 | Meridian, Salvage Union, Vessmark, US | |
-| Train locals | 4 | $22,000 | 0.15 | Vessmark, UK, CA, US | +4 rebel support in the region on success |
-| Run a supply route | 2 | $20,000 | 0.35 | Salvage Union, Meridian, Vessmark | |
+| Escort a client | 2 | $9,000 | 0.40 | Meridian, Vessmark, US, UK, CA, Salvage Union | |
+| Guard a site | 3 | $11,000 | 0.30 | Meridian, Salvage Union, Vessmark, US | |
+| Train locals | 4 | $8,000 | 0.15 | Vessmark, UK, CA, US | +4 rebel support in the region on success |
+| Run a supply route | 2 | $7,000 | 0.35 | Salvage Union, Meridian, Vessmark | |
 | Recover a vehicle | 2 | (the vehicle's sale) | 0.45 | (from item 2) | brings a captured vehicle out to a buyer |
 
 **Pay** = base pay × (0.6 + danger × 1.3) × the client's pay rate for the company's standing
@@ -83,6 +83,8 @@ squad comes back with the job done.
 
 The page shows each squad's trouble, loss and fail odds on its Send button before anything is
 committed.
+
+**After a job** the squad rests a day before the next one.
 
 **While it's away**, the squad doesn't deploy (`Heroes.deploying` skips it). The page shows where
 it is and when it's back.
@@ -123,8 +125,8 @@ storage, the Side work page lists buyers for it:
 
 **Bounties on the living war's leaders** (factions.json `leaders`: Black Ridge's Warlord, the
 Ashen Banner's Field Emir, the Kestrel Cartel's Patron...).
-- Each one still free has a bounty: by role (commander $30,000, financier $22,000, bomb-maker
-  $25,000) × (1 + the faction's war strength / 100 × 0.5).
+- Each one still free has a bounty: by role (commander $20,000, financier $15,000, bomb-maker
+  $17,000) × (1 + the faction's war strength / 100 × 0.5).
 - It's posted by the lawful employer at war with the faction that the company stands best with,
   and paid at the debrief of the contract that took him:
   - **alive** (HVT capture, manhunt): the full bounty;
@@ -154,10 +156,10 @@ offers four businesses, one of each.
 
 | Business | Setup | Upkeep a day | Local staff | Uses a day | Pays a day |
 |---|---|---|---|---|---|
-| Convoy security (needs a vehicle) | $30,000 | $1,400 | 6 | 1 fuel | $2,600 + $900 per friendly road zone nearby (danger under 0.4) |
-| Militia training camp | $25,000 | $1,500 | 4 | 1 supplies | $2,400, and +0.6 rebel support a day in the region |
-| Checkpoint tolls | $15,000 | $700 | 4 | none | $600 + $1,500 per road held (the FOB's own counts one, plus every company zone with a route or crossing); locals −1 a week |
-| Motor pool rentals | $10,000 | $400 | 2 | 1 parts | $1,100 per vehicle at home (not out on a deployment, not in the workshop) |
+| Convoy security (needs a vehicle) | $30,000 | $900 | 6 | 1 fuel | $3,400 + $1,200 per friendly road zone nearby (danger under 0.4) |
+| Militia training camp | $25,000 | $900 | 4 | 1 supplies | $3,000, and +0.6 rebel support a day in the region |
+| Checkpoint tolls | $15,000 | $500 | 4 | none | $1,000 + $2,200 per road held (the FOB's own counts one, plus every company zone with a route or crossing); locals −1 a week |
+| Motor pool rentals | $10,000 | $300 | 2 | 1 parts | $1,600 per vehicle at home (not out on a deployment, not in the workshop) |
 
 - The supplies come from the FOB's stocks (pallets kept at the debrief). Short of them, a
   business pays half that day.
@@ -203,8 +205,8 @@ the fixers.
   | Medical | +0.5 | +0.3 | | −0.2 |
   | Contraband | +0.1 | | −0.45 (floods it) | +0.6 (dear) |
 
-- **Daily noise** of ±8%.
-- **The spread**: a market sells 8% over its price and buys 8% under it.
+- **Daily noise** of ±6%.
+- **The spread**: a market sells 4% over its price and buys 4% under it.
 - **The company's own trade**: each unit sold drives that market's price for it down 1.2%, easing
   25% a day. So a big load sold in one place sells for less, and the same route doesn't pay twice
   in a row: it rewards following the war, not grinding.
@@ -224,5 +226,5 @@ The books show "Trade bought" and "Trade sold" lines, grouped as "Black market".
 
 ## Before and after (sim)
 
-To come after all four streams are in: the 40-campaign sim (tools/economy_sim.gd) re-run with
-them, and tuned.
+In [economy.md](economy.md), "The income streams, 2026-10-22": the 40-campaign sim with and without
+the streams (`tools/economy_sim.gd --income 0|1`), and the tuning it led to.

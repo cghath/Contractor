@@ -102,6 +102,9 @@ static func cant_send(data: Dictionary, did: String) -> String:
 		return "%s is already out on a job" % String(d.callsign)
 	if RosterDeployment.is_running(data) and not bool(d.get("home", false)):
 		return "%s is deployed with the company" % String(d.callsign)
+	var back := int((Income.view().get("back", {}) as Dictionary).get(did, -99))
+	if Economy.day() < back + int(c("rest_days", 1)):
+		return "%s is resting after its last job (ready on day %d)" % [String(d.callsign), back + int(c("rest_days", 1))]
 	if int(Heroes.strength(data, did).ready) < int(c("min_ready", 3)):
 		return "%s has fewer than %d men fit" % [String(d.callsign), int(c("min_ready", 3))]
 	return ""
@@ -284,6 +287,9 @@ static func server_resolve(job: Dictionary) -> Dictionary:
 		if int(k.get("rebel_support", 0)) != 0:
 			RebelSupport.change(RebelSupport.region_of(String(job.zone)), float(k.rebel_support), "%s trained locals" % callsign)
 	m0 += c("morale_kia", -0.15) * (out.kia as Array).size()
+	if not s.has("back"):
+		s["back"] = {}
+	s.back[did] = Economy.day()  # it rests "rest_days" before the next job
 	mor[did] = snappedf(clampf(m0, 0.1, 1.0), 0.01)
 	var text := ""
 	match String(out.result):

@@ -13,10 +13,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Income: ways to make money with the flow of the game (claude/income)
 
-> **Where I stopped / next step (2026-10-22, 21:35 CDT):** all 4 income streams built (high command
-> side jobs; captures and bounties; FOB businesses; black market). Next: re-run the
-> 40-campaign economy sim with all four and tune (before/after in docs/economy.md). Design and
-> numbers: docs/income.md, data/income.json (all Proposed). Local: income (R2531, R2536), smoke + ui
+> **Where I stopped / next step (2026-10-22, 22:15 CDT):** done: all 4 income streams built, the
+> 40-campaign economy sim re-run with them and tuned (before/after in docs/economy.md: careful
+> $430k -> $677k, median $329k -> $514k, sloppy still in debt). Next: CI on claude/income, merge into
+> claude/ai-driving for v0.5.4, a look at the Side work page in game. Design and
+> numbers: docs/income.md, data/income.json (all Proposed). Sim: tools/economy_sim.gd --income 0|1. Local: income (R2531, R2536), smoke + ui
 > (R2532), contracts (R2537), base + ui (R2538), income (R2541, R2543), smoke + base + ui (R2542, R2544).
 
 #### Added
@@ -52,6 +53,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   ground). Selling a lot in one market drives its price down for a few days. Cargo rides in the
   trucks, more with each vehicle. Contraband can be seized with a fine and US standing, and
   crates of weapons get noticed.
+
+#### Changed
+- **Economy sim with the income streams** (docs/economy.md, `--income 0|1`): the profiles send
+  squads on side jobs, sell captures to buyers, hunt bounties, open businesses once they have a
+  FOB, protect them or not, and trade. Tuned on its results (all Proposed): side job pay
+  $7-11k by kind with a rest day, business upkeep down and pay up, bounties $15-20k by role,
+  market spread 8%. 35 days, 40 campaigns: careful $430k -> $677k, median $329k -> $514k (none
+  broke), sloppy -$176k -> -$61k less loans (12 of 40 out of credit, from 16).
 
 ### Voice and economy (claude/voice-economy)
 
