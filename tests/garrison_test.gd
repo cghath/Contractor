@@ -196,7 +196,7 @@ func _test_road_ambush() -> void:
 		"the truck drives on through, faster (%s, %.1f m/s)" % [drivers.last_contact.get(v.get_instance_id(), "none"), v.ai.cruise_ms])
 	check(amb.priority_vehicle(&"hostile", get_tree()) == v, "the ambush's launchers would go for the lead truck first")
 	# Disabled in the kill zone: the crew bail out on the far side and fight from there.
-	v._zones[Vehicle.ZONE_ENGINE] = 0.0
+	v.server_set_zone(Vehicle.ZONE_ENGINE, 0.0)  # (its engine module too: combined arms A2's zones come from the modules)
 	await _wait_for(func() -> bool: return v.occupants().is_empty(), 5.0)
 	var out_of_it := v.occupants().is_empty()
 	var away := func(c: Soldier) -> bool: return _flat_d(c.global_position, at) > _flat_d(v.global_position, at) + 1.0  # (the lee: the truck between him and the ambush)

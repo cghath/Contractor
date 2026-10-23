@@ -1136,9 +1136,9 @@ A2 leaves out what needs other phases: turned-out crew taking an outside blast a
 a mobility kill (A6's fording).
 
 ### F-235 (open, A7 or the perf lane): a launcher hit on a vehicle costs ~14 ms on the host in the hull carving
-Measured while building A2 (vehicles suite, `_test_modules_budget`, R0594): a PG-7V through an
-AAV-7's side is 0.7 ms of armour work (resolve, path, spall, apply; budget 0.5, tightened since)
-but ~14 ms for the whole `server_take_hit`, nearly all of it V1's `VehicleHull` carve (the SCORCH
+Measured while building A2 (vehicles suite, `_test_modules_budget`, R0599): a PG-7V through an
+AAV-7's side is about 0.5 ms of armour work (resolve, path, spall, apply: the A2 budget) but
+12-14 ms for the whole `server_take_hit`, nearly all of it V1's `VehicleHull` carve (the SCORCH
 and HOLE edits re-meshing the hull's chunks on the host, `_apply` in vehicle_hull.gd). One rocket
 is one hitch; an MG burst on an MRAP is many small ones. Worth deferring the remesh on a headless
 host, batching a frame's carves, or carving on a worker. A7 adds more carves (fired tiles, debris).
