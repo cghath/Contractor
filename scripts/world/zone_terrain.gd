@@ -819,6 +819,7 @@ func _process(_delta: float) -> void:
 			# ground tints: fields, banks, roads, pads), its mesh made here when they're done.
 			var t := Time.get_ticks_usec()
 			_task_chunk = c
+			_task_cuts = cuts.version if cuts else 0
 			_task_out = []
 			_task = WorkerThreadPool.add_task(_refine_arrays.bind(c, _covered_mask(c.x, c.y, LOD_STEPS[0])), false, "terrain fine chunk")
 			FrameCost.spent(&"terrain_fine", t)
@@ -828,6 +829,7 @@ func _process(_delta: float) -> void:
 var _task := -1
 var _task_chunk := Vector2i.ZERO
 var _task_out: Array = []
+var _task_cuts := 0  # GroundCuts.version when it started (a cut since: worked out again)
 
 
 func _refine_arrays(c: Vector2i, covered: PackedByteArray) -> void:
@@ -842,6 +844,10 @@ func _take_refined() -> void:
 	_task = -1
 	var c := _task_chunk
 	if _lod0.has(c) or _task_out.is_empty() or not _lod1.has(c):
+		return
+	if (cuts.version if cuts else 0) != _task_cuts:
+		_queue.push_front(c)  # the ground was cut meanwhile: its cells drawn finely may have changed
+		_task_out = []
 		return
 	var t := Time.get_ticks_usec()
 	_lod0[c] = _lod_instance(c.x, c.y, 0, _mesh_of(_task_out))
