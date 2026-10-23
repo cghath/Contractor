@@ -202,7 +202,73 @@ static func instance(model: String, variant: String, layers := 1, with_mesh := t
 	mesh_instance.scale = Vector3.ONE * voxel / int(spec.get("sub", 1))  # built in sub-voxels
 	mesh_instance.position = -spec.get("pivot", Vector3(spec.size) * 0.5) * voxel
 	pivot.add_child(mesh_instance)
+	if with_mesh:
+		add_far_lod(pivot)
 	return pivot
+
+
+## Render pass (Captain 2026-10-22: frame rates "unbelievably bad"): a fine part (built in
+## sub-voxels: a body at 0.5 cm, about 80k triangles a soldier in camo) gets a stand-in at its
+## base voxel ("LodFar", 1 cm: about a quarter of the triangles) drawn past the Detail setting's
+## "soldier_lod_m" from the view, the fine one up to there. 0 (Ultra), a headless server, or a
+## coarse model: none. Its mesh is the part's first look; a part carved or cut (BodyDeform) loses
+## its stand-in (drop_far_lod) and gets it back made whole (add_far_lod).
+const FAR_LOD := "LodFar"
+
+
+static func add_far_lod(pivot: Node3D) -> void:
+	var lod_m := float(GameSettings.detail().get("soldier_lod_m", 0.0))
+	if lod_m <= 0.0 or DisplayServer.get_name() == "headless" or pivot.get_child_count() == 0 or pivot.has_node(FAR_LOD):
+		return
+	var model := String(pivot.get_meta(&"voxel_model", ""))
+	var variant := String(pivot.get_meta(&"voxel_variant", ""))
+	if model == "" or variant.begins_with(FACE_PREFIX):
+		return
+	var frame := _frame(model)
+	if int(frame.get("sub", 1)) <= 1:
+		return
+	var near := pivot.get_child(0) as MeshInstance3D
+	if near == null or near.mesh == null:
+		return
+	var far := MeshInstance3D.new()
+	far.name = FAR_LOD
+	far.mesh = far_mesh(model, variant)
+	far.material_override = near.material_override
+	far.layers = near.layers
+	var voxel: float = frame.voxel
+	far.scale = Vector3.ONE * voxel  # (built in whole voxels)
+	far.position = near.position
+	far.visibility_range_begin = lod_m
+	far.visibility_range_begin_margin = 2.0
+	near.visibility_range_end = lod_m
+	near.visibility_range_end_margin = 2.0
+	pivot.add_child(far)
+
+
+## Takes `pivot`'s stand-in away (its fine look drawn at every distance again).
+static func drop_far_lod(pivot: Node3D) -> void:
+	var far := pivot.get_node_or_null(FAR_LOD)
+	if far == null:
+		return
+	pivot.remove_child(far)
+	far.queue_free()
+	var near := pivot.get_child(0) as GeometryInstance3D if pivot.get_child_count() > 0 else null
+	if near:
+		near.visibility_range_end = 0.0
+
+
+## `model` in `variant` at its base voxel, no sub-voxels (add_far_lod), built once.
+static func far_mesh(model: String, variant: String) -> Mesh:
+	if variant.begins_with(CIV_PREFIX):
+		variant = _civ_part(model, variant)
+	var key := "%s|far|%s" % [model, variant]
+	if not _meshes.has(key):
+		var t := Time.get_ticks_usec()
+		var spec := _spec(model).duplicate()
+		spec["sub"] = 1
+		_meshes[key] = _get_mesher(variant).build_mesh(_rasterize(spec, variant, model.hash()), [])
+		FrameCost.spent(&"models", t)
+	return _meshes[key]
 
 
 ## The model name of body part `part` ("head", "torso", "upper_arm", "forearm", "leg",

@@ -1060,20 +1060,55 @@ func _process(_delta: float) -> void:
 
 ## Streams modules in near the soldiers this peer streams for (stream_focus) and out far from
 ## all of them; at most one in per call.
+## Render pass (Captain 2026-10-22: v0.5.3-4's frame rates "unbelievably bad", menus and all): at
+## most the Detail setting's "voxel_modules" are streamed in at once on a peer that draws (0: no
+## cap; never on a headless server), the nearest to this peer's players first (one only AI are
+## fighting in ranks AI_RANK_M further off); the rest stand as their proxies, as streamed-out
+## modules always have. A city's twenty 50 m blocks streamed in at once, each a voxel terrain of
+## a thousand-odd 3.2 m mesh blocks, ran the renderer out of GPU buffers, and every mesh after
+## that failed with an error (R2473-R2488 benches). CAP_SWAP_M: a module out of the cap comes in
+## for one in it only when that much nearer (no swapping back and forth at the edge).
+const AI_RANK_M := 100.0
+const CAP_SWAP_M := 20.0
+
+
 func _update_streaming() -> void:
 	var focus := _distinct(stream_focus(), 2.0)  # (perf pass: a garrison's men fighting at one post count once)
+	var cap := 0 if DisplayServer.get_name() == "headless" else int(GameSettings.detail().get("voxel_modules", 0))
+	var mine: Array[Vector3] = []  # this peer's players
+	for p in players.get_children():
+		var s := p as Soldier
+		if s and not s.is_queued_for_deletion() and (multiplayer.is_server() or s.is_local()):
+			mine.append(s.global_position)
 	var nearest: ZoneModule = null
 	var nearest_d := INF
+	var nearest_rank := INF
+	var streamed: Array = []  # [rank, module]
 	for m in _modules:
 		var d := INF
 		for p in focus:
 			d = minf(d, m.distance_to(p))
+		var rank := d + AI_RANK_M
+		for p in mine:
+			rank = minf(rank, m.distance_to(p))
 		if m.is_streamed():
 			if d > STREAM_OUT_M:
 				m.stream_out()
+			else:
+				streamed.append([rank, m])
 		elif d <= STREAM_IN_M and d < nearest_d:
 			nearest = m
 			nearest_d = d
+			nearest_rank = rank
+	if cap > 0:
+		streamed.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+		while streamed.size() > cap:
+			(streamed.pop_back()[1] as ZoneModule).stream_out()  # the furthest past the cap
+		if nearest and streamed.size() >= cap:
+			if nearest_rank + CAP_SWAP_M < float(streamed[-1][0]):
+				(streamed.pop_back()[1] as ZoneModule).stream_out()  # a nearer one comes in for it
+			else:
+				nearest = null  # full: it stays a proxy
 	if nearest:
 		_stream_in(nearest)
 

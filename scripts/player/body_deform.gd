@@ -611,6 +611,7 @@ func _clear_visuals() -> void:
 		var mi := _mesh_of(pivot)
 		if mi:
 			mi.mesh = VoxelArt.mesh(state.model, state.variant)
+			VoxelArt.add_far_lod(pivot)  # whole again: its far stand-in back
 
 
 func _state_for(pivot: Node3D) -> Dictionary:
@@ -839,6 +840,7 @@ func _done_work(pivot: Node3D, buffer: VoxelBuffer, out: Dictionary) -> void:
 		var mesh := mesher.build_mesh(buffer, [])
 		if mesh:
 			mi.mesh = mesh
+			VoxelArt.drop_far_lod(pivot)  # (its far stand-in is the part whole: render pass)
 	for h: Dictionary in out.hangs:  # (first: one cut through as it's hung drops as it hangs)
 		var hang_mesh: Mesh = mesher.build_mesh(h.buffer, [])
 		if hang_mesh and mi:
@@ -869,6 +871,7 @@ func _drop(part: StringName, pivot: Node3D, mi: MeshInstance3D, piece_mesh: Mesh
 	if part == Vitals.HEAD and model.face_rig:
 		model.face_rig.head_severed(look)  # the face goes with the head (FaceRig), none left on the stump
 	var cut_y := _pivot_cut_y(mi, hull)
+	VoxelArt.drop_far_lod(pivot)  # (a part cut: its far stand-in, the part whole, goes: render pass)
 	for i in range(1, pivot.get_child_count()):
 		var child := pivot.get_child(i) as Node3D
 		if child == null or not child.visible or child is MultiMeshInstance3D or child.name.begins_with("Hang"):
@@ -1035,6 +1038,7 @@ func _hang(part: StringName, pivot: Node3D, mi: MeshInstance3D, hang_mesh: Mesh,
 	hinge.set_meta(&"hull", h.hull)
 	hinge.set_meta(&"base", look.transform)
 	var cut_y: float = (mi.transform * Vector3(0, float(h.cut) - 1.0, 0)).y
+	VoxelArt.drop_far_lod(pivot)  # (a part cut: its far stand-in, the part whole, goes: render pass)
 	for i in range(1, pivot.get_child_count()):
 		var child := pivot.get_child(i) as Node3D
 		if child == null or child == hinge or not child.visible or child is MultiMeshInstance3D or child.name.begins_with("Hang"):

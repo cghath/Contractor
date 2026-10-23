@@ -54,24 +54,33 @@ const GORE := [
 ## fixes"): "ultra" draws everything as before, to the horizon; the others stop the far tree canopy
 ## at "far_trees_m" (fading out over its last FAR_FADE_M; 0: to the horizon), draw rocks, scrub,
 ## trees and props out to "scatter" times their usual distance, and soldiers further than
-## "soldier_shadow_m" cast no sun shadow (0: always; CharacterModel). Up close every level looks the
+## "soldier_shadow_m" cast no sun shadow (0: always; CharacterModel); soldiers' parts further than
+## "soldier_lod_m" are drawn from their 1 cm stand-in (0: never; VoxelArt.add_far_lod); and at
+## most "voxel_modules" sites stream in as voxels at once (ZoneLevel._update_streaming: every level
+## caps it, Ultra too, so a city can't run the renderer out of GPU buffers; the rest are their
+## proxies). Up close every level looks the
 ## same. The scatter is read as a zone's visuals are built (the next zone after a change), the
 ## soldiers' shadows at once. All numbers Proposed.
 const DETAIL := [
 	["low", "Low"], ["medium", "Medium"], ["high", "High"], ["ultra", "Ultra (full draw distance)"],
 ]
 const DETAIL_LEVELS := {
-	"low": {"far_trees_m": 1800.0, "scatter": 0.65, "soldier_shadow_m": 60.0},
-	"medium": {"far_trees_m": 2400.0, "scatter": 0.8, "soldier_shadow_m": 100.0},
-	"high": {"far_trees_m": 3200.0, "scatter": 1.0, "soldier_shadow_m": 150.0},
-	"ultra": {"far_trees_m": 0.0, "scatter": 1.0, "soldier_shadow_m": 0.0},
+	"low": {"far_trees_m": 1800.0, "scatter": 0.65, "soldier_shadow_m": 30.0, "soldier_lod_m": 25.0, "voxel_modules": 3},
+	"medium": {"far_trees_m": 2400.0, "scatter": 0.8, "soldier_shadow_m": 50.0, "soldier_lod_m": 35.0, "voxel_modules": 4},
+	"high": {"far_trees_m": 3200.0, "scatter": 1.0, "soldier_shadow_m": 80.0, "soldier_lod_m": 50.0, "voxel_modules": 5},
+	"ultra": {"far_trees_m": 0.0, "scatter": 1.0, "soldier_shadow_m": 0.0, "soldier_lod_m": 0.0, "voxel_modules": 6},
 }
 const FAR_FADE_M := 300.0
 
 
-## The world detail level's numbers (DETAIL_LEVELS).
+## The world detail level's numbers (DETAIL_LEVELS), with detail_override's on top (benches).
 static func detail() -> Dictionary:
-	return DETAIL_LEVELS.get(String(get_value("video", "detail")), DETAIL_LEVELS.high)
+	var d: Dictionary = DETAIL_LEVELS.get(String(get_value("video", "detail")), DETAIL_LEVELS.high)
+	return d if detail_override.is_empty() else d.merged(detail_override, true)
+
+
+## Benches only (tests/render_bench.gd): numbers over the Detail level's.
+static var detail_override := {}
 
 
 const DEFAULTS := {

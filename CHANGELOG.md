@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Render pass: cities and soldiers (Captain, 2026-10-22: v0.5.4's frame rate "unbelievably bad")
+
+#### Fixed
+- **Stutters everywhere after the cities came in (v0.5.3 on).** Near a city, its twenty blocks all
+  loaded as full-detail voxel buildings at once, which ran the graphics card's buffers out; from then
+  on every new mesh in the game failed and logged an error, hundreds of thousands of them, and the
+  game crawled, menus included. Now only the nearest few sites (5 at High, 6 at Ultra) are full
+  voxels at once; the rest stand as their plain stand-ins, as distant sites always have.
+
+#### Changed
+- **Far soldiers are lighter to draw.** Past 50 m (High) a soldier is drawn from a 1 cm copy of his
+  0.5 cm model (about a quarter of the triangles), and past 80 m he casts no sun shadow (was 150 m).
+  Ultra keeps every soldier at full detail with shadows at any range.
+- **World detail at distance** (Settings, Video) now also sets these: how many sites are full voxels
+  at once, and the soldiers' detail and shadow distances.
+
 ### Income: ways to make money with the flow of the game (claude/income)
 
 > **Where I stopped / next step (2026-10-22, 22:15 CDT):** done: all 4 income streams built, the
