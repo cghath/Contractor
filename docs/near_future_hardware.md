@@ -202,12 +202,12 @@ genuinely different things wearing them:
 
 **Superseded in part (Captain, 2026-10-16/17; built on `claude/near-future-vtol-exosuits-cont2`):**
 the "armor stays exactly where it is" bullet below no longer holds. The LX-3 carries twelve Steel
-III++ pads (shoulders/upper arms, forearms, thighs, shins, stomach, collarbones, upper back, spine
+III++ pads (RF2 under NIJ 0101.07) (shoulders/upper arms, forearms, thighs, shins, stomach, collarbones, upper back, spine
 pack) that are real `ArmorRules` armour: `VoxelArmor` pieces on their body parts' bones, with
 their chips and integrity in the frame's item state (`ExoFrame.pad_items`, `GearRig._set_exo_pads`,
 `Inventory.add_armor_hit(slot, chip, changes, pad)`). They're spall-coated, and the frame's
 `spall_cover` keeps spall off arms and neck. A working frame also climbs 1.3 m higher
-(`ExoFrame.climb_assist_m`). It pairs with the LX-3 Visor Helmet (`helmet_lx3`: IIIA shell,
+(`ExoFrame.climb_assist_m`). It pairs with the LX-3 Visor Helmet (`helmet_lx3`: HG2 shell,
 bolted-on face guard, a visor rated for fragments only). Prices: frame $45,000, helmet $6,500. A
 dedicated LX-3 plate carrier is planned (Captain: "later we'll add a dedicated lx-3 plate carrier").
 The original recommendation follows for the record.
@@ -331,7 +331,7 @@ HX-1 Assault Frame (`exo_mech_heavy`) as the Captain decided above. What the sli
   (`CharacterModel.base_transform`'s `MECH_RISE` pitch now pauses on its knees, `MECH_KNEEL_PITCH`,
   before standing the rest of the way, with a matching hip dip in `_action_pose`).
 - **Plates:** fifteen `VoxelArmor` pads (`stats.pads`, reusing the LX-3's per-part pad system):
-  all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs
+  all AR500 steel (Captain, 2026-10-17): IV on the chest, head unit, shoulders and back, steel III on the belly, steel III++ on the arms and legs (NIJ 0101.07: RF3, RF1, RF2)
   (Captain, 2026-10-17: the chest "should be steel 3", then "some of the armor to level 4 steel"), the head unit's
   visor III. Penetration reaches the pilot's real wounds. Painted in the wearer's camo.
 - **Worn, but only by climbing in:** the `exo` slot, so it travels with the soldier like any item

@@ -11,6 +11,58 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Armour standards: STANAG 4569 for vehicles, NIJ 0101.07 for body armour (cg_brief queue item 2.0, armour/standards)
+
+Captain, 2026-10-22: "make sure it follows the current standards for armor". Design and tables:
+docs/combined_arms.md 2.4.7; numbers in data/armour_standards.json (all Proposed); calls in
+docs/audits/followups.md "Calls made".
+
+#### Changed
+- **Body armour is rated by NIJ 0101.07** (2023) in place of 0101.06: the ladder is HG1, HG2,
+  RF1, RF2, RF3 (then .50 BMG above everything). Every plate, helmet, vest, exo pad and round is
+  re-rated: IIA and II became HG1, IIIA HG2, III and III+ RF1, III++ RF2, IV RF3. Item names,
+  descriptions, the inspect panel ("Rating: NIJ RF1", and now "Soft armour: NIJ HG2" on vests),
+  the armory and loadout editor and the armour readout ("Front RF3 64%") show the new names.
+- **What hits now do differently** (only where the new threat lists say so; everything else is
+  as before):
+  - HG1 armour (the old IIA light vest, bump, PASGT, SSh-68 and M1 helmets, the 6B23's soft
+    armour) now stops **.357 Magnum, 9 mm +P+, 7.62x25 Tokarev** and the other old level II
+    rounds: 0101.07's HG1 is tested against .357 Magnum.
+  - RF1 armour (the old III plates: light and medium PE, AR500, the ECH and Altyn helmets, the
+    HX-1's belly plate) now stops **7.62x39 mild steel core (AKM, RPK), 7.62x51 M80 ball (M240,
+    SCAR-H, M110), .303, M118LR and 6.5 Creedmoor**: 0101.07's RF1 list has M80 and 7.62x39
+    MSC with M193. This ends the old swap that kept 7.62 ball above the light plate. M855 and
+    7N6 close in still go through RF1, and still drop to RF1 below 700 m/s.
+  - The old III+ plates (SAPI, UHMWPE III+) are RF1 and stop exactly what they did; III++ (steel,
+    side plates, heavy helmet, exo pads) is RF2 and stops exactly what it did; IV is RF3, same.
+  - The SAPI and UHMWPE plates now share RF1 with the PE and AR500 plates (they differ in
+    weight, durability and fit), so an AI scavenger no longer swaps an old III plate for a III+
+    one (Scavenge weighs a piece by its step on the ladder times its integrity: the ladder has
+    six steps now, not eight).
+- **Old saves and mods load as before**: saves hold item ids, never ratings, so old kits get the
+  new ratings from data; any rating, soft rating, visor rating or weapon "threat" stat that still
+  says IIA-IV reads as its 0101.07 level (Ballistics.level_name, LEGACY_LEVELS).
+- **MaxxPro belly blast share 0.15 to 0.13 and BUSK III's 0.2 to 0.18** (not used in play until
+  phase A2): so they meet mine 3b and 2b. **M-ATV appliqué** now also covers the rear (+10) and
+  roof (+4) and weighs 0.8 t, so it meets KE 3 all round.
+
+#### Added
+- **STANAG 4569 ratings on every vehicle and armour package** (data/vehicle_armour.json
+  `stanag_ke` per arc, `stanag_artillery`, `stanag_mine`; a package's own replace the base's):
+  Abrams KE 6/4/3 (front above STANAG: its RHAe figures stay), artillery 6, mine 2a/1 (TUSK 4a/1);
+  Bradley 4/3/3, 5, 2a/1 (BUSK III 4a/2b); AAV 3/3/3, 5, 1; M-ATV and MaxxPro 2/2/2, 4, 4a/3b
+  (appliqué 3/3/3, artillery 5); technicals 0; aircraft and crew-served weapons not rated.
+  `ArmourStandards.text()` gives one line ("STANAG 4569 KE 2, artillery 4, mine 4a/3b") for the
+  HUDs to come.
+- **A MaxxPro appliqué package** (0.9 t), as the M-ATV's.
+- **Fitted packages' bolt-on armour counts in hits**: `ArmourModel.with_packages` adds a
+  package's `plates_add` to the plate a round meets (the appliqué; packages are fitted from A8).
+- **Tests**: armour_test proves every vehicle's and package's ratings from its plates and belly
+  (each level's threats stopped at its range over the arc, the next level's through somewhere;
+  426 checks) and that the tier rule never lets KE 1's rounds into a rated crew zone; armor_test
+  fires each NIJ level's threat list at its velocity and range at every rated plate, helmet, pad
+  and vest (and the next level's list, at least one through), and reads old names.
+
 ### Income: ways to make money with the flow of the game (claude/income)
 
 > **Where I stopped / next step (2026-10-22, 22:15 CDT):** done: all 4 income streams built, the

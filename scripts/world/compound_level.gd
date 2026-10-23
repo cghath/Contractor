@@ -218,7 +218,7 @@ const PMC_LOADOUT := PMC_BODY + PMC_GUNS.m4a1 + PMC_TAIL
 ## suits but only on higher diffs"), the 1-5 rating ContractGen.rating gives a contract
 ## (ZoneLevel._on_contract_live reads the live contract's true_rating). Cutoffs picked so exo
 ## gear reads as an escalation, not Vantage's default look: LX-3 (a real but moderate edge —
-## speed, carry, Steel III++ pads) only once a mission is already hard (4-5); the HX-1 (a
+## speed, carry, Steel RF2 pads) only once a mission is already hard (4-5); the HX-1 (a
 ## armoured heavy-weapons platform, the far bigger threat jump) reserved for the hardest tier
 ## alone (5), so running into a mech pilot stays a rare, serious escalation, not a mid-tier
 ## nuisance.

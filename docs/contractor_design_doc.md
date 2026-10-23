@@ -79,26 +79,24 @@ Five systems carry the loop; physical inventory and squad AI are the two that th
 
 Plates should behave like real plates (Captain). Today's build treats a plate as voxels that only fail where a hole has been chipped through. The proposal keeps the voxels as the visual and adds how each material actually fails. Material behaviour below is from general knowledge and needs checking; all numbers are proposed starting values.
 
-**Armor ratings (decided: NIJ scale).** Every round has a threat level, and every vest, plate and helmet has a rating on the same NIJ ladder (Captain). Armor stops a round when its rating is at or above the round's level, and lets it through when it is lower. Any aramid layer stops fragments. Ceramic cracks, steel spall and impact damage apply on top of the rating. The ladder uses NIJ names but the game's own order, not strict NIJ (Captain): the light plate stops regular .223 at most, so .223 ball sits below 7.62x39 and .308 ball here.
+**Armor ratings (decided: NIJ scale; NIJ Standard 0101.07 since cg_brief queue item 2.0).** Every round has a threat level, and every vest, plate and helmet has a rating on the same NIJ ladder (Captain). Armor stops a round when its rating is at or above the round's level, and lets it through when it is lower. Any aramid layer stops fragments. Ceramic cracks, steel spall and impact damage apply on top of the rating. Captain, 2026-10-22: "make sure it follows the current standards for armor", so the ladder is NIJ 0101.07 (2023), the current standard, in place of 0101.06's IIA-IV, with the standard's own threat lists (data/armour_standards.json).
 
-| Level | Rounds at this level (proposed) | Armor with this rating |
-| --- | --- | --- |
-| IIA | 9mm, .45 ACP, buckshot | Light vest, front only (proposed); light helmet (proposed) |
-| II | .357 Magnum, hot 9mm | None yet |
-| IIIA | .44 Magnum, 10mm, .357 SIG, shotgun slug | Medium and heavy vests (proposed); medium helmet (proposed) |
-| III | 5.56 / .223 ball (M193) | Light plate (Captain: stops regular .223 at most) |
-| III+ | 7.62x39 mild steel core, 7.62x51 / .308 ball | None yet |
-| III++ | 5.56 M855 green tip, 7.62x54R steel core | Heavy helmet (Captain); medium plate (proposed) |
-| IV | Armor-piercing rifle: .30-06 M2 AP, 7.62x51 AP, 5.56 AP | Heavy plate (proposed) |
-| Above IV | .50 BMG / 12.7 mm | Nothing; it defeats all body armor |
+| Level | 0101.07 test rounds (velocity) | Other game rounds at this level | Armor with this rating |
+| --- | --- | --- | --- |
+| HG1 | 9 mm 124 gr FMJ (398 m/s), .357 Magnum JSP (436 m/s) | .45 ACP, 9 mm +P+, 9x18, 7.62x25 Tokarev, buckshot | Light vests; light helmets |
+| HG2 | 9 mm 124 gr FMJ (448 m/s), .44 Magnum JHP (436 m/s) | 10 mm, .357 SIG, shotgun slug | Medium and heavy vests; medium helmets |
+| RF1 | 7.62x51 M80 ball (847 m/s), 7.62x39 MSC (732 m/s), 5.56 M193 (990 m/s) | .303, 6.5 Creedmoor, M118LR, Mk 262; M855 and 7N6 past their steel-core velocity | Light and medium PE plates, AR500 and SAPI plates, the ECH and Altyn helmets |
+| RF2 | RF1's list and 5.56 M855 (950 m/s) | 5.45 7N6, 7.62x54R LPS | Steel plates and side plates, the heavy helmet, the exo pads |
+| RF3 | .30-06 M2 AP (878 m/s) | 7.62x51 M993, 5.56 M995 | Ceramic IV-class plates (ESAPI, XSAPI, side) |
+| Above RF3 | .50 BMG / 12.7 mm | | Nothing; it defeats all body armor |
 
-In real NIJ testing, .308 ball is Level III and .223 ball is III+. The game swaps them on purpose (Captain) so the light plate stops .223 ball and nothing heavier.
+Old 0101.06 names map on read (old saves, mods, stats): IIA and II to HG1, IIIA to HG2, III and III+ to RF1, III++ to RF2, IV to RF3. Under 0101.06 the game had swapped .308 ball above .223 ball on purpose (Captain) so the light plate stopped .223 ball and nothing heavier; 0101.07's RF1 list puts M80 ball and 7.62x39 MSC with M193, so a light RF1 plate now stops them too (the call is in docs/audits/followups.md; moving M80 back above RF1 is one line in data/rounds.json).
 
 | Material | Highest rating it can carry (proposed) | Under repeated hits |
 | --- | --- | --- |
-| Ceramic (decided behaviour) | Up to IV when fresh, so the only material for heavy plates | Each hit cracks the plate around it. A later hit inside a cracked zone is much more likely to get through, and enough hits destroy the plate (Captain) |
-| Steel | Up to III++; armor-piercing goes through | Doesn't crack, so it takes many hits in one spot. Bullet splash (spall) can wound the neck, arms and face unless the plate has an anti-spall coating |
-| Polyethylene | Up to III, so light plates only | Lightest. Doesn't crack but deforms, and repeated hits in one spot let rounds through |
+| Ceramic (decided behaviour) | Up to RF3 when fresh, so the only material for heavy plates | Each hit cracks the plate around it. A later hit inside a cracked zone is much more likely to get through, and enough hits destroy the plate (Captain) |
+| Steel | Up to RF2; armor-piercing goes through | Doesn't crack, so it takes many hits in one spot. Bullet splash (spall) can wound the neck, arms and face unless the plate has an anti-spall coating |
+| Polyethylene | Up to RF1, so light and medium PE plates | Lightest. Doesn't crack but deforms, and repeated hits in one spot let rounds through |
 
 **Ceramic crack zones (proposed).**
 
@@ -111,7 +109,7 @@ In real NIJ testing, .308 ball is Level III and .223 ball is III+. The game swap
 
 | Vest | Plates it takes | Fragment protection | Spall protection with steel plates |
 | --- | --- | --- | --- |
-| Light | Light plates only; light plates fit no other vest (bespoke). A light plate stops up to standard .223 ball (Captain), which puts it at III on the game's ladder | Front only. The light vest also stops some ballistic threats there (Captain); proposed rating IIA | None beyond the plate face |
+| Light | Light plates only; light plates fit no other vest (bespoke). A light plate stopped up to standard .223 ball (Captain), III under 0101.06; it is RF1 under 0101.07 | Front only. The light vest also stops some ballistic threats there (Captain); rated HG1 | None beyond the plate face |
 | Medium | Medium or heavy plates (interchangeable) | Front and back | Neck covered; arms can still catch spall |
 | Heavy | Medium or heavy plates (interchangeable) | Front, back and sides | Neck, face and arms covered |
 
@@ -121,9 +119,9 @@ So steel plates trade spall risk for durability, and a heavier vest is how you b
 
 | Helmet | Rating and what it stops |
 | --- | --- |
-| Light | IIA (proposed): fragments, 9mm, .45 ACP and buckshot |
-| Medium | IIIA (proposed): fragments and all pistol rounds up to .44 Magnum, plus shotgun slugs |
-| Heavy | NIJ III++ (Captain): fragments, all pistol rounds, and rifle rounds including 5.56 ball and M855 green tip, 7.62x39 mild steel core and 7.62x51 ball. Armor-piercing rounds such as M2 AP still go through. Every stop still deals heavy impact |
+| Light | HG1: fragments, 9 mm, .45 ACP, .357 Magnum and buckshot |
+| Medium | HG2: fragments and all pistol rounds up to .44 Magnum, plus shotgun slugs |
+| Heavy | NIJ III++ (Captain), RF2 under 0101.07: fragments, all pistol rounds, and rifle rounds including 5.56 ball and M855 green tip, 7.62x39 mild steel core and 7.62x51 ball. Armor-piercing rounds such as M2 AP still go through. Every stop still deals heavy impact |
 
 This changes the repo's locked armor rule, so it is also listed under Conflicts with the build.
 

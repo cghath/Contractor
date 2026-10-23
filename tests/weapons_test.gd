@@ -11,20 +11,20 @@ extends Node
 
 ## weapon id -> [ammo id, round id, loose rounds id, ladder level, round class]
 const GUNS := {
-	"akm": ["mag_762x39", "762x39_msc", "rounds_762x39", "III+", "intermediate"],
-	"ak74": ["mag_545", "545x39_7n6", "rounds_545", "III++", "intermediate"],
-	"rpk": ["mag_rpk40", "762x39_msc", "rounds_762x39", "III+", "intermediate"],
-	"pkm": ["belt_762x54r", "762x54r_lps", "rounds_762x54r", "III++", "full_power"],
-	"svd": ["mag_svd", "762x54r_lps", "rounds_762x54r", "III++", "full_power"],
-	"m249": ["box_556", "556_m855", "rounds_556", "III++", "intermediate"],
-	"m240b": ["belt_762x51", "762x51_m80", "rounds_762", "III+", "full_power"],
-	"scar_h": ["mag_762", "762x51_m80", "rounds_762", "III+", "full_power"],
-	"m27": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
-	"hk416": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
-	"l85a2": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
-	"c8": ["mag_556", "556_m855", "rounds_556", "III++", "intermediate"],
-	"mosin9130": ["clip_762x54r", "762x54r_lps", "rounds_762x54r", "III++", "full_power"],
-	"springfield_hs": ["mag_65cm", "65cm_eldm", "rounds_65cm", "III+", "full_power"],
+	"akm": ["mag_762x39", "762x39_msc", "rounds_762x39", "RF1", "intermediate"],
+	"ak74": ["mag_545", "545x39_7n6", "rounds_545", "RF2", "intermediate"],
+	"rpk": ["mag_rpk40", "762x39_msc", "rounds_762x39", "RF1", "intermediate"],
+	"pkm": ["belt_762x54r", "762x54r_lps", "rounds_762x54r", "RF2", "full_power"],
+	"svd": ["mag_svd", "762x54r_lps", "rounds_762x54r", "RF2", "full_power"],
+	"m249": ["box_556", "556_m855", "rounds_556", "RF2", "intermediate"],
+	"m240b": ["belt_762x51", "762x51_m80", "rounds_762", "RF1", "full_power"],
+	"scar_h": ["mag_762", "762x51_m80", "rounds_762", "RF1", "full_power"],
+	"m27": ["mag_556", "556_m855", "rounds_556", "RF2", "intermediate"],
+	"hk416": ["mag_556", "556_m855", "rounds_556", "RF2", "intermediate"],
+	"l85a2": ["mag_556", "556_m855", "rounds_556", "RF2", "intermediate"],
+	"c8": ["mag_556", "556_m855", "rounds_556", "RF2", "intermediate"],
+	"mosin9130": ["clip_762x54r", "762x54r_lps", "rounds_762x54r", "RF2", "full_power"],
+	"springfield_hs": ["mag_65cm", "65cm_eldm", "rounds_65cm", "RF1", "full_power"],
 }
 ## Magazines and belts: capacity.
 const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10, "mag_762": 20}
@@ -140,17 +140,19 @@ func _test_rounds_and_rules() -> void:
 		var tier := VehicleSpecs.round_tier(StringName(String(GUNS[id][1])))
 		var want := 1 if String(GUNS[id][1]) == "762x54r_lps" else 0
 		check(tier == want, "%s's round is vehicle tier %d (want %d)" % [id, tier, want])
-	# plates: a light (level III) plate stops a .223 at most, not AK or 7.62 ball
+	# plates: a light RF1 plate (NIJ 0101.07, cg_brief queue item 2.0) stops RF1's list (M80 ball,
+	# 7.62x39 MSC, M193), not steel-cored M855 or 7N6 close in
 	var akm := Ballistics.threat_level_at(ItemDB.get_item(&"akm"), 20.0)
 	var m249_far := Ballistics.threat_level_at(ItemDB.get_item(&"m249"), 400.0)
-	check(not ArmorRules.stops(&"III", akm), "a light III plate does not stop an AKM round (%s)" % akm)
-	check(not ArmorRules.stops(&"III", Ballistics.threat_level_at(ItemDB.get_item(&"m240b"), 20.0)), "nor 7.62x51 ball")
-	check(not ArmorRules.stops(&"III", Ballistics.threat_level_at(ItemDB.get_item(&"ak74"), 20.0)), "nor a close 5.45 7N6 (steel core)")
-	check(ArmorRules.stops(&"III", m249_far), "but it does stop a far 5.56 (%s)" % m249_far)
+	check(ArmorRules.stops(&"RF1", akm), "a light RF1 plate stops an AKM round (%s; 0101.06's III didn't)" % akm)
+	check(ArmorRules.stops(&"RF1", Ballistics.threat_level_at(ItemDB.get_item(&"m240b"), 20.0)), "and 7.62x51 ball")
+	check(not ArmorRules.stops(&"RF1", Ballistics.threat_level_at(ItemDB.get_item(&"ak74"), 20.0)), "not a close 5.45 7N6 (steel core)")
+	check(not ArmorRules.stops(&"RF1", Ballistics.threat_level_at(ItemDB.get_item(&"m249"), 20.0)), "nor a close M855")
+	check(ArmorRules.stops(&"RF1", m249_far), "but it does stop a far 5.56 (%s)" % m249_far)
 	for id: String in GUNS:
-		check(ArmorRules.stops(&"IV", Ballistics.threat_level_at(ItemDB.get_item(StringName(id)), 10.0)), "a ceramic IV plate stops %s" % id)
+		check(ArmorRules.stops(&"RF3", Ballistics.threat_level_at(ItemDB.get_item(StringName(id)), 10.0)), "a ceramic RF3 plate stops %s" % id)
 	var ak74 := ItemDB.get_item(&"ak74")
-	check(Ballistics.threat_level_at(ak74, 50.0) == &"III++" and Ballistics.threat_level_at(ak74, 400.0) == &"III", "7N6 is III++ close and III far, like M855")
+	check(Ballistics.threat_level_at(ak74, 50.0) == &"RF2" and Ballistics.threat_level_at(ak74, 400.0) == &"RF1", "7N6 is RF2 close and RF1 far, like M855")
 	check(Ballistics.energy_at(ItemDB.get_item(&"akm"), 0.0) > Ballistics.energy_at(ItemDB.get_item(&"m4a1"), 0.0), "an AKM round carries more energy than an M855")
 	check(Ballistics.energy_at(ItemDB.get_item(&"m240b"), 0.0) > Ballistics.energy_at(ItemDB.get_item(&"akm"), 0.0), "7.62x51 beats 7.62x39")
 

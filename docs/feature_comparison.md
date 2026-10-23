@@ -32,7 +32,7 @@ missing something).
 **Now.** Plates and helmets are 1 cm voxel objects, and the model you see is the thing that gets
 hit. Each round is traced voxel by voxel. Stopped rounds dent; repeat hits on one spot wear
 through. Ceramic cracks in zones around each hit and can shatter, steel throws spall, and
-polyethylene deforms. Rounds and armour share one NIJ-named ladder (IIA to IV), and a round loses
+polyethylene deforms. Rounds and armour share one NIJ 0101.07 ladder (HG1 to RF3), and a round loses
 energy with range. The damage belongs to the item: a dropped plate keeps its holes, and saves keep
 them too.
 
@@ -744,7 +744,7 @@ models; turning turrets exist only on the M-ATV, MaxxPro, AAV-7 and technicals
 aircraft.
 
 ### 10.2 Exosuits: the LX-3 Assist Frame and the HX-1 Assault Frame
-**Now.** The LX-3 is a light infantry exo that carries 30 kg of your load, with twelve Steel III++
+**Now.** The LX-3 is a light infantry exo that carries 30 kg of your load, with twelve Steel RF2 (old III++)
 pads and a visor helmet; its struts can be shot until it fails. The HX-1 is a heavy frame you climb
 into: fifteen real armour plates, a .50 BMG Walker Gun, 80 kg of kit, never sprints or goes prone.
 A downed pilot can be punched out. Vantage fields both at high difficulty.

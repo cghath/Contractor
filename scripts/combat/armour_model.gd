@@ -383,6 +383,23 @@ static func fitted_packages(spec: Dictionary, packages: Array) -> Array:
 	return out
 
 
+## `plate` with what `fitted` packages (fitted_packages) bolt onto it: each package's
+## "plates_add" {plate id: [ke_mm, ce_mm]} added to its figures (the M-ATV and MaxxPro
+## appliqué). The plate itself when nothing is added (no copy).
+static func with_packages(plate: Dictionary, spec: Dictionary, fitted: Array) -> Dictionary:
+	var out := plate
+	var defs: Dictionary = spec.get("packages", {})
+	for id: Variant in fitted:
+		var add: Variant = ((defs.get(String(id), {}) as Dictionary).get("plates_add", {}) as Dictionary).get(String(plate.get("id", "")))
+		if typeof(add) != TYPE_ARRAY or (add as Array).size() < 2:
+			continue
+		if is_same(out, plate):
+			out = plate.duplicate()
+		out["ke_mm"] = float(out.get("ke_mm", 0.0)) + float(add[0])
+		out["ce_mm"] = float(out.get("ce_mm", 0.0)) + float(add[1])
+	return out
+
+
 ## Whether tile group `t` is on the vehicle with `fitted` packages (fitted_packages).
 static func tile_fitted(t: Dictionary, fitted: Array) -> bool:
 	for r: Variant in t.get("removed_by", []):
@@ -425,6 +442,7 @@ static func vehicle_hit(vehicle: Vehicle, hit: Dictionary, zone: Dictionary, loc
 	var plate := plate_at(spec, local, ldir, face_of(vehicle.hull, local, ldir))
 	if plate.is_empty():
 		return VehicleDamage.resolve(hit, zone, ldir)
+	plate = with_packages(plate, spec, fitted_packages(spec, vehicle.get_meta(META_PACKAGES, [])))  # appliqué (cg_brief 2.0)
 	var at := vehicle.to_global(local)
 	var range_m := float(hit.get("range_m", 0.0))
 	var shooter: Variant = hit.get("shooter")

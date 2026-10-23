@@ -11,7 +11,8 @@ extends RefCounted
 ## - Its armour is real ArmorRules armour (Captain, 2026-10-16: "armor plates are where they are
 ##   seen ... pilots can be wounded, shot through it eventually"): its "pads" are VoxelArmor
 ##   plates on the body parts they cover, rated per part (Captain, 2026-10-17: AR500 steel, IV on the chest, head
-##   unit, shoulders and back, steel III over the belly, steel III++ on the arms and legs), with their chips and
+##   unit, shoulders and back, steel III over the belly, steel III++ on the arms and legs; under NIJ 0101.07
+##   RF3, RF1 and RF2), with their chips and
 ##   integrity in the suit's state like the LX-3's (ExoFrame.pad_items, GearRig). A round that
 ##   gets through goes on into the pilot. A parked suit's plates are hit targets too.
 ## - It carries "assist_kg" (Soldier.load_kg; itself and a heavy load) but never runs: no

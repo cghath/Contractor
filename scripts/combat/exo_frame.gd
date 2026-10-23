@@ -15,9 +15,9 @@ extends RefCounted
 ##   assist, so the wearer is back to normal walking with the normal weight debuffs, frame and
 ##   all ("slowing the user down to normal walk speed with the regular weight debuffs").
 ## - Armour pads (Captain, 2026-10-16: "they'll use the armor chipping system we already use,
-##   be Steel III++ rated and absorb all spall"): its "pads" (shoulders, forearms, thighs,
+##   be Steel III++ rated (NIJ 0101.07: RF2) and absorb all spall"): its "pads" (shoulders, forearms, thighs,
 ##   shins, stomach, spine pack) are real armour, VoxelArmor pieces on the body like plates
-##   (GearRig), with the frame's "pad_armor" stats (steel III++: ArmorRules dents, wear-through
+##   (GearRig), with the frame's "pad_armor" stats (steel RF2: ArmorRules dents, wear-through
 ##   and integrity). A pad that stops a round lands an impact on the part under it; one the
 ##   round gets through lets it on into the body. They're spall-coated (they throw none), and
 ##   the frame's "spall_cover" keeps a plate's spall off the arms and neck. Working or not,

@@ -99,8 +99,10 @@ static func detail_lines(id: StringName) -> PackedStringArray:
 	if s.has("magnification"):
 		var low := float(s.magnification)
 		out.append("Magnification: %s" % ("%s-%sx" % [_num(low), _num(s.magnification_max)] if s.has("magnification_max") else "%sx" % _num(low)))
-	if s.has("rating"):
-		out.append("Rating: %s%s" % [s.rating, " (%s)" % s.material if s.has("material") else ""])
+	if s.has("rating"):  # NIJ 0101.07 (an old 0101.06 name reads as its new level)
+		out.append("Rating: NIJ %s%s" % [Ballistics.level_name(StringName(s.rating)), " (%s)" % s.material if s.has("material") else ""])
+	if s.has("soft_rating"):
+		out.append("Soft armour: NIJ %s" % Ballistics.level_name(StringName(s.soft_rating)))
 	if s.has("fits"):
 		out.append("Fits %s carriers" % " and ".join(PackedStringArray(s.fits)))
 	if s.has("capacity"):

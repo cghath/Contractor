@@ -89,6 +89,12 @@ static func pen_ke(shell: Dictionary, range_m: float) -> float:
 	return float(table[-1][1])
 
 
+## A row in the shells.json shape that isn't in the files (ArmourStandards' STANAG reference
+## rounds and fragments) in shell()'s normalised shape.
+static func normalised(id: StringName, row: Dictionary) -> Dictionary:
+	return _norm(id, row)
+
+
 static func _norm(id: StringName, row: Dictionary) -> Dictionary:
 	var out := row.duplicate()
 	out["id"] = id

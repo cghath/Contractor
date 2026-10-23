@@ -2,7 +2,8 @@ class_name ArmorRules
 extends RefCounted
 ## How armor behaves, on top of the voxels (which stay the visible damage and still let a
 ## round through a hole). Every round has a threat level and every vest, plate and helmet a
-## rating on the same ladder (Ballistics.LEVELS); armor stops a round when its rating is at
+## rating on the same ladder (Ballistics.LEVELS: NIJ 0101.07's HG1, HG2, RF1, RF2, RF3, each with
+## its threat list in data/armour_standards.json); armor stops a round when its rating is at
 ## or above the round's level. A stopped round only dents the strike face; holes come from
 ## rounds that get through. Every hit, stopped or not, also wears a piece's integrity down by
 ## round class and the piece's "durability"; at zero it stops nothing. Materials then fail in
@@ -81,14 +82,16 @@ static var _rng: RandomNumberGenerator
 
 # --- Ratings ------------------------------------------------------------------------------
 
-## The rating of a plate or helmet (a Ballistics.LEVELS name), or &"" if it has none.
+## The rating of a plate or helmet (a Ballistics.LEVELS name: NIJ 0101.07), or &"" if it has
+## none. An old 0101.06 name (a mod's item, anything saved before cg_brief queue item 2.0) reads
+## as its 0101.07 level (Ballistics.level_name).
 static func rating(item: ItemData) -> StringName:
-	return StringName(item.stats.get("rating", ""))
+	return Ballistics.level_name(StringName(item.stats.get("rating", "")))
 
 
 ## The rating of a vest's soft armor (its aramid), or &"" if it has none.
 static func soft_rating(vest: ItemData) -> StringName:
-	return StringName(vest.stats.get("soft_rating", "")) if vest else &""
+	return Ballistics.level_name(StringName(vest.stats.get("soft_rating", ""))) if vest else &""
 
 
 ## True if armor rated `armor_rating` stops a round of `threat` (at or above it on the ladder).

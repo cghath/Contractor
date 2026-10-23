@@ -158,7 +158,7 @@ which has the full rules.
 | Camera | First-person |
 | Multiplayer | Co-op from day one, listen server (host is authoritative), up to 4 players |
 | Voxels | World structures at 10 cm voxels; characters and gear as 1–2 cm voxel models |
-| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share an NIJ-named rating ladder (IIA to IV); ceramic cracks in zones, steel throws spall |
+| Armor | Plates and helmets are runtime voxel objects; hits chip voxels, holes let rounds through, and every hit wears the piece's integrity down by durability. Rounds and armor share the NIJ 0101.07 rating ladder (HG1, HG2, RF1, RF2, RF3; vehicles are rated by STANAG 4569); ceramic cracks in zones, steel throws spall |
 | Medical | No hitpoints: 6 L of blood, wounds per body part, pain, unconsciousness at 40% lost, cardiac arrest at 50% with a 10-minute window. Blood comes back only through an IV or IO line with a saline or blood bag running |
 | Inventory | Volume budget in **litres** + visible gear; auto-stow, bulky items need two hands |
 | Squad | 8 slots (two fire teams of four, a medic each, battle-buddy pairs); up to 4 players, AI fills the rest. Starts at 1 AI squadmate. |

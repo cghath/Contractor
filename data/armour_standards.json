@@ -1,0 +1,66 @@
+{
+	"_units": "cg_brief queue item 2.0 (Captain, 2026-10-22: \"make sure it follows the current standards for armor\"): the two protection standards the game rates armour by, read by ArmourStandards. nij_0101_07: personal armour, NIJ Standard 0101.07 (2023). levels weakest first (Ballistics.LEVELS between FRAGMENT and ABOVE_RF3); threats per level: round (data/rounds.json id), name (the standard's test round), mps (the standard's reference velocity), range_m (the test range: 5 m handgun, 15 m rifle); includes: a level whose list also takes another's (RF2 = RF1 plus M855). legacy: 0101.06 names and the game's old III+/III++ (Ballistics.LEGACY_LEVELS reads them). stanag_4569: vehicles, NATO STANAG 4569 / AEP-55 Vol 1 (KE and artillery) and Vol 2 (mine blast). ke levels 1-6: threats are a shells.json id (shell) or a reference row in ke_reference (rifle-calibre test rounds: in game they stay on VehicleDamage's tiers, docs/combined_arms.md call 79), each at the standard's range_m; elevations_deg: the round's angle down from level; arc: all (levels 1-4, rated per arc front/side/rear) or front (levels 5-6: the frontal +/-30 degrees only, the sides staying at 4). artillery levels 1-6: a 155 mm HE burst burst_m away, its worst fragment as a 20 mm FSP of frag_pen_mm RHA (Proposed, from the AEP-55 fragment velocities), all round at elevations_deg. mine levels 1, 2a-4b: kg TNT under a wheel or track station (a) or the belly (b); level 1 is a grenade or small AP mine anywhere under. mine_proof (Proposed, docs/combined_arms.md 2.3.6: the belly's blast share of the charge reaches the crew floor, blast seats halve the leg injury): a hull holds a mine when kg x station_share x belly.blast x (blast_seat_mult with blast seats) <= floor_kg; a model without a belly is not mine rated. arcs: azimuth samples (degrees off the front, + to the right) per arc. ke_reference rows read like data/shells.json rows. Vehicles store their ratings in data/vehicle_armour.json (stanag_ke per arc, stanag_artillery, stanag_mine {wheel, belly}); a package's own values replace the base's while it's fitted. Plates with \"stanag\": false (tyres, an MRAP's bonnet, the open gunner's shield) are outside the rated crew envelope. Every number is Proposed, rounded from public summaries of the standards.",
+	"nij_0101_07": {
+		"levels": ["HG1", "HG2", "RF1", "RF2", "RF3"],
+		"legacy": {"IIA": "HG1", "II": "HG1", "IIIA": "HG2", "III": "RF1", "III+": "RF1", "III++": "RF2", "IV": "RF3", "ABOVE_IV": "ABOVE_RF3"},
+		"threats": {
+			"HG1": [
+				{"round": "9x19_fmj", "name": "9 mm Luger 124 gr FMJ RN", "mps": 398, "range_m": 5},
+				{"round": "357mag", "name": ".357 Magnum 158 gr JSP", "mps": 436, "range_m": 5}
+			],
+			"HG2": [
+				{"round": "9x19_fmj", "name": "9 mm Luger 124 gr FMJ RN", "mps": 448, "range_m": 5},
+				{"round": "44mag", "name": ".44 Magnum 240 gr JHP", "mps": 436, "range_m": 5}
+			],
+			"RF1": [
+				{"round": "762x51_m80", "name": "7.62x51 mm M80 ball", "mps": 847, "range_m": 15},
+				{"round": "762x39_msc", "name": "7.62x39 mm mild steel core", "mps": 732, "range_m": 15},
+				{"round": "556_m193", "name": "5.56x45 mm M193", "mps": 990, "range_m": 15}
+			],
+			"RF2": [
+				{"round": "556_m855", "name": "5.56x45 mm M855", "mps": 950, "range_m": 15}
+			],
+			"RF3": [
+				{"round": "3006_m2ap", "name": ".30-06 M2 AP", "mps": 878, "range_m": 15}
+			]
+		},
+		"includes": {"RF2": "RF1"}
+	},
+	"stanag_4569": {
+		"arcs": {"front": [-30, -15, 0, 15, 30], "side": [60, 75, 90, 105, 120, -60, -75, -90, -105, -120], "rear": [150, 165, 180, -165, -150]},
+		"ke": {
+			"1": {"arc": "all", "elevations_deg": [0, 15, 30], "threats": [
+				{"ref": "stanag_762x51_ball", "range_m": 30}, {"ref": "stanag_556_ss109", "range_m": 30}, {"ref": "stanag_556_m193", "range_m": 30}]},
+			"2": {"arc": "all", "elevations_deg": [0, 15, 30], "threats": [{"ref": "stanag_762x39_bz", "range_m": 30}]},
+			"3": {"arc": "all", "elevations_deg": [0, 15, 30], "threats": [{"ref": "stanag_762x51_ap_wc", "range_m": 30}, {"ref": "stanag_762x54r_b32", "range_m": 30}]},
+			"4": {"arc": "all", "elevations_deg": [0, 15, 30], "threats": [{"shell": "b32_145", "range_m": 200}]},
+			"5": {"arc": "front", "elevations_deg": [0], "threats": [{"shell": "m791", "range_m": 500}]},
+			"6": {"arc": "front", "elevations_deg": [0], "threats": [{"ref": "stanag_30mm_apfsds", "range_m": 500}]}
+		},
+		"ke_reference": {
+			"stanag_762x51_ball": {"name": "7.62x51 mm NATO ball (FNB, 833 m/s)", "kind": "ap", "calibre_mm": 7.62, "pen_ke": [[0, 8], [100, 7.5]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_556_ss109": {"name": "5.56x45 mm NATO SS109 (900 m/s)", "kind": "ap", "calibre_mm": 5.56, "pen_ke": [[0, 9], [100, 8]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_556_m193": {"name": "5.56x45 mm M193 (937 m/s)", "kind": "ap", "calibre_mm": 5.56, "pen_ke": [[0, 7], [100, 6]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_762x39_bz": {"name": "7.62x39 mm API BZ (695 m/s)", "kind": "api", "calibre_mm": 7.62, "pen_ke": [[0, 12], [100, 11]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_762x51_ap_wc": {"name": "7.62x51 mm AP, tungsten carbide core (930 m/s)", "kind": "ap", "calibre_mm": 7.62, "pen_ke": [[0, 24], [100, 22]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_762x54r_b32": {"name": "7.62x54R B32 API (854 m/s)", "kind": "api", "calibre_mm": 7.62, "pen_ke": [[0, 16], [100, 15]], "normalise_deg": 8, "ricochet_deg": [55, 72], "overmatch": 3.0},
+			"stanag_30mm_apfsds": {"name": "30 mm APFSDS (1,405 m/s)", "kind": "apfsds", "calibre_mm": 30, "pen_ke": [[0, 120], [500, 110], [1000, 100], [2000, 80]], "normalise_deg": 2, "ricochet_deg": [78, 85], "overmatch": 3.0}
+		},
+		"artillery": {
+			"1": {"burst_m": 100, "frag_pen_mm": 6, "elevations_deg": [0, 18]},
+			"2": {"burst_m": 80, "frag_pen_mm": 8, "elevations_deg": [0, 18]},
+			"3": {"burst_m": 60, "frag_pen_mm": 11, "elevations_deg": [0, 18]},
+			"4": {"burst_m": 30, "frag_pen_mm": 16, "elevations_deg": [0, 30]},
+			"5": {"burst_m": 25, "frag_pen_mm": 19, "elevations_deg": [0, 30]},
+			"6": {"burst_m": 10, "frag_pen_mm": 30, "elevations_deg": [0, 30]}
+		},
+		"artillery_azimuths": [0, 30, 60, 90, 120, 150, 180, -150, -120, -90, -60, -30],
+		"mine": {
+			"1": {"kg": 0.5, "station": "belly"},
+			"2a": {"kg": 6, "station": "wheel"}, "2b": {"kg": 6, "station": "belly"},
+			"3a": {"kg": 8, "station": "wheel"}, "3b": {"kg": 8, "station": "belly"},
+			"4a": {"kg": 10, "station": "wheel"}, "4b": {"kg": 10, "station": "belly"}
+		},
+		"mine_proof": {"floor_kg": 0.55, "station_share": {"belly": 1.0, "wheel": 0.35, "track": 0.2}, "blast_seat_mult": 0.5}
+	}
+}

@@ -66,11 +66,11 @@ Everything here is Captain's call unless marked (proposed), which means a starti
 
 | Topic | Rule |
 | --- | --- |
-| Ratings | Rounds and armor share an NIJ-named ladder in the game's own order: IIA, II, IIIA, III, III+, III++, IV. Armor stops a round when its rating is at or above the round's level |
-| Vests | Aramid-fiber soft armor. Light: IIA (proposed), front-only fragment protection, takes light plates only. Medium: IIIA (proposed), front and back, steel spall blocked at the neck only. Heavy: IIIA (proposed), front, back and sides, steel spall blocked at neck, face and arms |
-| Plates | Light: stops regular .223 at most (III on the game ladder), bespoke to the light vest. Medium: III++ (proposed). Heavy: IV (proposed). Medium and heavy plates fit both medium and heavy vests |
+| Ratings | Rounds and armor share the NIJ 0101.07 ladder (since cg_brief queue item 2.0): HG1, HG2, RF1, RF2, RF3, each with its threat list (data/armour_standards.json); old 0101.06 names map on read. Armor stops a round when its rating is at or above the round's level |
+| Vests | Aramid-fiber soft armor. Light: HG1, front-only fragment protection, takes light plates only. Medium: HG2, front and back, steel spall blocked at the neck only. Heavy: HG2, front, back and sides, steel spall blocked at neck, face and arms |
+| Plates | Light: stops regular .223 at most (III under 0101.06; RF1 under 0101.07, which also stops 7.62x39 MSC and M80 ball), bespoke to the light vest. Medium: RF2. Heavy: RF3. Medium and heavy plates fit both medium and heavy vests |
 | Plate materials | Ceramic cracks in about 5 cm zones, weakens with consecutive hits there and can shatter. Steel throws spall. Polyethylene is lightest (limits proposed) |
-| Helmets | Aramid fiber and composite hybrid. Light IIA (proposed), medium IIIA (proposed), heavy III++ |
+| Helmets | Aramid fiber and composite hybrid. Light HG1, medium HG2, heavy RF2 |
 | Impact | Stopped rounds still deal impact (pain, knockouts). Impact kills only where it would in real life: a helmet stop can be fatal out to about 200 m, depending on the cartridge. Plate stops can crack a rib within 30 m for pistol, 100 m for intermediate and 200 m for full-power rifle rounds |
 | Ballistics | Ammunition uses ACE3's ballistics values, checked in game |
 

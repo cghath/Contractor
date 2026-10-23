@@ -105,7 +105,7 @@ func _ready() -> void:
 	add_child(shooter)
 	var gear := player.get_node(^"Gear") as GearRig
 	var m855 := ItemData.from_dict({"id": "shots_mech_m855", "type": "weapon", "stats": {"round": "556_m855", "damage": 30}})
-	var ap := ItemData.from_dict({"id": "shots_mech_ap", "type": "weapon", "stats": {"threat": "IV", "round_class": String(Vitals.INTERMEDIATE), "damage": 30}})
+	var ap := ItemData.from_dict({"id": "shots_mech_ap", "type": "weapon", "stats": {"threat": "RF3", "round_class": String(Vitals.INTERMEDIATE), "damage": 30}})
 	var chest: VoxelArmor = gear.pads().get("chest")
 	for p: Vector3 in [Vector3(0.08, 0.05, -0.8), Vector3(-0.1, -0.03, -0.8), Vector3(0.0, 0.08, -0.8)]:
 		Ballistics.fire(shooter, chest.to_global(p), chest.global_basis.z, m855)

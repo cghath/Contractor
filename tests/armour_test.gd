@@ -5,7 +5,9 @@ extends Node
 ## each tile kind against single and tandem warheads and KE, slat odds over 1,000 seeds, HE
 ## punch-through, fuzes and arming, spacing, partials and shatters, plate and tile lookup on
 ## the real data, the damage bridge, determinism, the 2.4.6 "who beats what" table asserted
-## cell by cell from data, and resolve()'s budget (under 0.05 ms).
+## cell by cell from data, every vehicle's and package's STANAG 4569 ratings proven from its
+## plates and belly (cg_brief queue item 2.0: each level's threats stopped at its range, the
+## next level's not always), and resolve()'s budget (under 0.05 ms).
 ##   <voxel godot exe> --headless --path . res://tests/armour_test.tscn
 ## Exits with the number of failures.
 
@@ -69,6 +71,7 @@ func _ready() -> void:
 	_test_determinism()
 	_test_table()
 	_test_budget()
+	_test_stanag()
 	print("ARMOUR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -491,6 +494,125 @@ func _test_table() -> void:
 	for w in wrong:
 		print("    ", w)
 	check(wrong.is_empty(), "%d cells as the table has them (%d wrong); not rated yet (no data until D6b): %s" % [cells, wrong.size(), skipped.keys()])
+
+
+# --- STANAG 4569 (cg_brief queue item 2.0) ---------------------------------------------------
+
+## Models with no protection to rate under STANAG 4569 (aircraft, crew-served weapons).
+const NOT_RATED: Array[String] = ["uh60", "vtol_petrel", "vtol_razorback", "ah1z", "mortar_m224", "mortar_2b14", "tripod_m2", "tripod_dshk"]
+## The in-game rounds of STANAG KE level 1 (5.56 ball and SS109, 7.62x51 ball): VehicleDamage's tier 0.
+const LEVEL1_ROUNDS: Array[StringName] = [&"556_m193", &"556_m855", &"762x51_m80"]
+
+
+func _test_stanag() -> void:
+	print("STANAG 4569: every vehicle and package rated per arc, and its plates and belly meet it")
+	var unrated := PackedStringArray()
+	for model: String in VehicleSpecs.models():
+		var spec := VehicleSpecs.spec(model)
+		if model in NOT_RATED:
+			if ArmourStandards.rated(spec) or String(spec.get("stanag_note", "")) == "":
+				unrated.append("%s should be marked not rated, with a note" % model)
+			continue
+		var r := ArmourStandards.rating(spec)
+		if not r.rated or not (r.ke as Dictionary).has_all(["front", "side", "rear"]) or not spec.has("stanag_artillery") or not (r.mine as Dictionary).has_all(["wheel", "belly"]):
+			unrated.append(model)
+	check(unrated.is_empty(), "every model in vehicles.json is rated (stanag_ke per arc, stanag_artillery, stanag_mine) or marked not rated (%d models; %s)" % [VehicleSpecs.models().size(), ", ".join(unrated)])
+	# Plated models, base and with each package: the stored ratings are what the plates and belly
+	# give: every level up to the rating stopped at its range over the arc, the next not always.
+	var wrong := PackedStringArray()
+	var rows := PackedStringArray()
+	var proofs := 0
+	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro"]:
+		var spec := VehicleSpecs.spec(model)
+		var sets: Array = [[]]
+		for id: String in (spec.get("packages", {}) as Dictionary):
+			sets.append([id])
+		for packages: Array in sets:
+			var r := ArmourStandards.rating(spec, packages)
+			var label := "%s%s" % [model, "" if packages.is_empty() else " + " + String(packages[0])]
+			for arc: String in ArmourStandards.ARCS:
+				var level := int(r.ke[arc])
+				var cap := 6 if arc == "front" else 4
+				for l in range(1, level + 1):
+					proofs += 1
+					var res := ArmourStandards.ke_result(spec, l, arc, packages)
+					if not res.stopped:
+						wrong.append("%s %s KE %d not stopped (%s)" % [label, arc, l, res.worst])
+				if level < cap:
+					proofs += 1
+					if not ArmourStandards.ke_result(spec, level + 1, arc, packages).through:
+						wrong.append("%s %s: KE %d always stopped, rated %d" % [label, arc, level + 1, level])
+			var art := int(r.artillery)
+			for l in range(1, art + 1):
+				proofs += 1
+				if not ArmourStandards.artillery_result(spec, l, packages).stopped:
+					wrong.append("%s artillery %d not stopped (%s)" % [label, l, ArmourStandards.artillery_result(spec, l, packages).worst])
+			if art < ArmourStandards.ARTILLERY_MAX and not ArmourStandards.artillery_result(spec, art + 1, packages).through:
+				wrong.append("%s artillery %d always stopped, rated %d" % [label, art + 1, art])
+			for station: String in ["wheel", "belly"]:
+				var stored := String(r.mine[station])
+				var order: Array[String] = ArmourStandards.MINE_WHEEL if station == "wheel" else ArmourStandards.MINE_BELLY
+				for i in range(1, order.find(stored) + 1):
+					proofs += 1
+					if not ArmourStandards.mine_result(spec, order[i], packages).held:
+						wrong.append("%s mine %s not held (%.2f kg at the floor)" % [label, order[i], ArmourStandards.mine_result(spec, order[i], packages).floor_kg])
+				var next := ArmourStandards.mine_next(station, stored)
+				if order.find(stored) < 0:
+					wrong.append("%s mine %s: %s isn't a level" % [label, station, stored])
+				elif next != "" and ArmourStandards.mine_result(spec, next, packages).held:
+					wrong.append("%s mine %s held, rated %s" % [label, next, stored])
+			rows.append("%s: KE %s (front %d, side %d, rear %d), artillery %d, mine %s" % [label, ArmourStandards.ke_overall(r.ke), int(r.ke.front), int(r.ke.side), int(r.ke.rear), art, ArmourStandards.mine_text(r.mine)])
+	print("    ", "\n    ".join(rows))
+	check(wrong.is_empty(), "%d ratings (5 models and their packages) proven from the plates and belly in %d checks (wrong: %s)" % [rows.size(), proofs, ", ".join(wrong)])
+	# The brief's proposed ratings hold.
+	var matv := VehicleSpecs.spec("matv")
+	var maxxpro := VehicleSpecs.spec("maxxpro")
+	check(ArmourStandards.ke_overall(ArmourStandards.rating(matv).ke) == 2 and ArmourStandards.ke_overall(ArmourStandards.rating(maxxpro).ke) == 2
+		and String(ArmourStandards.rating(matv).mine.belly) == "3b" and String(ArmourStandards.rating(maxxpro).mine.belly) == "3b"
+		and ArmourStandards.ke_overall(ArmourStandards.rating(matv, ["matv_applique"]).ke) == 3 and ArmourStandards.ke_overall(ArmourStandards.rating(maxxpro, ["maxxpro_applique"]).ke) == 3,
+		"the M-ATV and MaxxPro are KE 2 / mine 3b, KE 3 with their appliqué")
+	check(int(ArmourStandards.rating(VehicleSpecs.spec("bradley")).ke.front) == 4 and int(ArmourStandards.rating(VehicleSpecs.spec("abrams")).ke.front) == 6
+		and ArmourStandards.ke_result(VehicleSpecs.spec("abrams"), 6, "front").stopped and String(VehicleSpecs.spec("abrams").get("stanag_note", "")).contains("RHAe"),
+		"the Bradley's front is KE 4; the Abrams' front stops level 6 and is above STANAG, keeping its RHAe figures")
+	# Above the plates: KE level 1's rifle rounds (and the rest of small arms) stay on
+	# VehicleDamage's tiers in game (call 79); every rated crew zone stops them there too.
+	var leaks := PackedStringArray()
+	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro"]:
+		var spec := VehicleSpecs.spec(model)
+		for z: Dictionary in spec.get("zones", []):
+			if String(z.zone) != "crew":
+				continue
+			for round_id: StringName in LEVEL1_ROUNDS:
+				var res := VehicleDamage.resolve({"kind": Vehicle.KINETIC, "round": round_id, "energy_j": Ballistics.energy_at(String(round_id), 30.0)}, {"zone": &"crew", "armour": String(z.get("armour", spec.default_armour)), "hp_kj": 100.0, "era": false}, Vector3.BACK)
+				if res.penetrated:
+					leaks.append("%s %s" % [model, round_id])
+	check(leaks.is_empty(), "level 1's rifle rounds don't get through a rated crew zone on the tier rule either (%s)" % ", ".join(leaks))
+	# The technicals: KE 0, artillery 0, mine 0, and the tier rule agrees (soft: level 1's rounds go
+	# through every zone; no belly to rate).
+	var soft_ok := true
+	for model: String in ["technical", "technical_dshk", "technical_zu23", "technical_spg9", "technical_m40", "technical_rockets", "technical_zpu"]:
+		var spec := VehicleSpecs.spec(model)
+		var r := ArmourStandards.rating(spec)
+		soft_ok = soft_ok and r.rated and ArmourStandards.ke_overall(r.ke) == 0 and int(r.artillery) == 0 and ArmourStandards.mine_text(r.mine) == "0"
+		soft_ok = soft_ok and ArmourStandards.mine_proven(spec) == {"wheel": "0", "belly": "0"} and not spec.has("plates")
+		for z: Dictionary in spec.get("zones", []) + [{"zone": "hull"}]:
+			var res := VehicleDamage.resolve({"kind": Vehicle.KINETIC, "round": &"556_m193", "energy_j": Ballistics.energy_at("556_m193", 30.0)}, {"zone": StringName(z.zone), "armour": String(z.get("armour", spec.default_armour)), "hp_kj": 100.0, "era": false}, Vector3.BACK)
+			soft_ok = soft_ok and res.penetrated
+	check(soft_ok, "every technical is rated 0 all round: 5.56 ball goes through each zone, and there's no belly")
+	# The helpers.
+	check(ArmourStandards.text(matv) == "STANAG 4569 KE 2, artillery 4, mine 4a/3b"
+		and ArmourStandards.text(VehicleSpecs.spec("abrams")) == "STANAG 4569 KE 3 (front 6, side 4), artillery 6, mine 2a/1"
+		and ArmourStandards.text(VehicleSpecs.spec("uh60")) == "STANAG 4569: not rated",
+		"one line for a HUD or shop: %s / %s" % [ArmourStandards.text(matv), ArmourStandards.text(VehicleSpecs.spec("abrams"))])
+	check(ArmourStandards.ke_overall({"front": 6, "side": 4, "rear": 4}) == 6 and ArmourStandards.ke_overall({"front": 5, "side": 3, "rear": 4}) == 3
+		and ArmourStandards.ke_overall({"front": 4, "side": 3, "rear": 3}) == 3, "levels 1-4 all round, 5-6 the front's over 4 all round")
+	var side := {}
+	for p: Dictionary in matv.plates:
+		if p.id == "side_r":
+			side = p
+	var fitted := ArmourModel.with_packages(side, matv, ["matv_applique"])
+	check(is_equal_approx(float(fitted.ke_mm), 30.0) and is_equal_approx(float(side.ke_mm), 20.0) and is_same(ArmourModel.with_packages(side, matv, ["matv_slat"]), side),
+		"the appliqué bolts 10 mm onto the M-ATV's side plate where it's fitted (vehicle_hit uses it), and nothing else changes it")
 
 
 # --- Budget --------------------------------------------------------------------------------

@@ -581,7 +581,7 @@ No spall liner by default.
 | Rear | 18 / 22 | 18 / 22 |
 | Roof | 12 / 15 | 12 / 15 |
 | Glass (transparent armour) | 22 / 22 | 22 / 22 |
-| Belly | V-hull, `belly.blast` 0.12, blast seats | V-hull, 0.15, blast seats |
+| Belly | V-hull, `belly.blast` 0.12, blast seats | V-hull, 0.13 (0.15 before cg_brief 2.0: mine 3b, 2.4.7), blast seats |
 
 Engine bays stay `mrap_weak` (18 / 18). Spall liner: yes.
 
@@ -679,13 +679,14 @@ fuel_l_per_km x (mass + added) / mass
 | **Abrams TUSK I** | Abrams | ARAT-1 `light_era` on the hull sides (32 tiles), loader's gun shield, rear slat over the engine grille, belly kit (`belly.blast` 0.45 to 0.25) | 2.4 t | $180,000 | US trusted |
 | **Abrams TUSK II** | Abrams | TUSK I with ARAT-2 `tandem_era` in place of ARAT-1 on hull and turret sides (48 tiles), CROWS on the commander's M2 (fired from inside, thermal and LRF) | 4.0 t | $320,000 | US allied |
 | **Trophy APS** | Abrams | Two launchers (left and right), 2 shots each; intercepts rockets and ATGMs coming at up to 60 degrees above the horizon (not KE, not a Javelin's top-attack dive): 80% per shot. The intercept throws fragments 15 m out in the threat's sector: it can wound friendly infantry beside the tank | 2.5 t | $400,000 | US allied, after TUSK I |
-| **Bradley BUSK III** | Bradley | BRAT II `tandem_era` in place of BRAT I, belly blast kit (0.45 to 0.2) and blast seats, commander's shield (turned-out commander protected from the front against small arms), fuel cell protection (fuel fire chance x0.5) | 1.8 t | $120,000 | US trusted |
+| **Bradley BUSK III** | Bradley | BRAT II `tandem_era` in place of BRAT I, belly blast kit (0.45 to 0.18; 0.2 before cg_brief 2.0, so it meets mine 2b, 2.4.7) and blast seats, commander's shield (turned-out commander protected from the front against small arms), fuel cell protection (fuel fire chance x0.5) | 1.8 t | $120,000 | US trusted |
 | **Bradley M919 ammo** | Bradley | Unlocks M919 APFSDS in the AP feed | 0 | per round | US trusted |
 | **AAV slat kit** | AAV | `slat` on sides and rear | 1.2 t | $45,000 | none |
 | **AAV spall liner** | AAV | `spall_liner` | 0.4 t | $30,000 | none |
 | **M-ATV slat kit** / **MaxxPro slat kit** | MRAPs | `slat` on sides and rear (and the cargo box on the MaxxPro) | 0.6 / 0.7 t | $25,000 | none |
 | **CROWS (M153)** | M-ATV, MaxxPro | The M2 on a remote station: gunner inside the capsule, day/thermal sight with LRF, stabilised | 0.2 t | $60,000 | US trusted |
-| **M-ATV appliqué** | M-ATV | +10 KE and +10 CE on front and sides | 0.6 t | $35,000 | none |
+| **M-ATV appliqué** | M-ATV | +10 KE and +10 CE on the front, sides, glass and rear, +4 on the roof (cg_brief 2.0: the rear and roof added so it meets STANAG KE 3 all round, 2.4.7) | 0.8 t | $35,000 | none |
+| **MaxxPro appliqué** (cg_brief 2.0) | MaxxPro | As the M-ATV's: STANAG KE 3 | 0.9 t | $40,000 (Proposed; prices.json with A8) | none |
 | **MaxxPro mine roller** | MaxxPro | A roller 6.5 m ahead: sets off pressure-plate IEDs and mines under it (they still damage the roller: 3 blasts and it's scrap) | 1.5 t | $50,000 | none |
 | **Thermal sight kit** | AAV UGWS | Adds a thermal channel to the 3x day sight | 0.05 t | $40,000 | US trusted |
 
@@ -733,6 +734,67 @@ phase D6b adds their data. Five cells were corrected against the 2.4.2-2.4.4 num
 Read across a row: the AT4 is a side and rear weapon against tanks and a killer of everything
 light, which is its job. Read down a column: the Abrams' front is beaten only by a tandem ATGM's
 lucky hull hit, and its roof by anything top-attack, which is why it needs infantry.
+
+#### 2.4.7 Protection standards: STANAG 4569 and NIJ 0101.07 (cg_brief queue item 2.0)
+
+Captain, 2026-10-22: "make sure it follows the current standards for armor". Vehicles are rated by
+NATO **STANAG 4569** (AEP-55), personal armour by **NIJ 0101.07** (2023). The threat lists, ranges
+and velocities are in `data/armour_standards.json`; `ArmourStandards` reads them.
+
+**How a vehicle rating is proven** (`ArmourStandards.ke_result`, `artillery_result`,
+`mine_result`; asserted for every model and package in `tests/armour_test.gd`): each level's
+threats go through `ArmourModel.resolve` against every crew-envelope plate the round can meet
+(tyres, an MRAP's bonnet and the open gunner's shield are outside it: `"stanag": false`), from
+each azimuth of the arc (front ±30°, sides 60-120°, rear 150-210°) and the level's elevations
+(0-30° for KE 1-4, level for 5-6), at the level's range, ricochets left out. A rating holds when
+every level up to it is stopped everywhere and the next level gets through somewhere.
+
+| KE level | Threats (range) | Arc |
+|---|---|---|
+| 1 | 7.62x51 ball, 5.56 SS109 and M193 (30 m); reference rows, 7-9 mm RHA | All round, per arc |
+| 2 | 7.62x39 API BZ (30 m), 11.7 mm | All round |
+| 3 | 7.62x51 AP tungsten carbide (30 m), 23.4 mm; 7.62x54R B32 API, 15.7 mm | All round |
+| 4 | 14.5x114 B32 API (200 m), shells.json `b32_145`, 31.75 mm | All round |
+| 5 | 25 mm APDS-T M791 (500 m), 72 mm | Front ±30° (sides stay at 4) |
+| 6 | 30 mm APFSDS (500 m), 110 mm | Front ±30° |
+
+Artillery: a 155 mm HE burst at 100 / 80 / 60 / 30 / 25 / 10 m (levels 1-6), its worst
+fragment as a 20 mm FSP of 6 / 8 / 11 / 16 / 19 / 30 mm RHA, all round. Mine blast: 0.5 kg
+anywhere under (1), 6 / 8 / 10 kg TNT under a wheel or track station (2a / 3a / 4a) or the belly
+(2b / 3b / 4b); a hull holds it when `kg x station share (belly 1, wheel 0.35, track 0.2) x
+belly.blast x (0.5 with blast seats)` reaches the crew floor at 0.55 kg or less (2.3.6; phase A2
+turns the belly into crew injuries). Rifle-calibre rounds stay on `VehicleDamage`'s tiers in game
+(call 79); the KE 1-3 reference rows rate the plates, and every rated crew zone also stops KE 1's
+rounds on the tiers.
+
+**The ratings** (stored as `stanag_ke`, `stanag_artillery`, `stanag_mine` in
+`data/vehicle_armour.json`; a package's own replace the base's while fitted; "KE" overall is the
+standard's: 1-4 all round, 5-6 the front's):
+
+| Vehicle (package) | KE front / side / rear (overall) | Artillery | Mine (wheel/belly) |
+|---|---|---|---|
+| M1 Abrams | 6 / 4 / 3 (3); the front is above STANAG: RHAe figures as 2.4.2 | 6 | 2a/1 |
+| Abrams TUSK I, TUSK II | 6 / 4 / 3 (3) | 6 | 4a/1 |
+| Abrams Trophy | as the base | 6 | 2a/1 |
+| M2A3 Bradley (BRAT I fitted) | 4 / 3 / 3 (3) | 5 | 2a/1 |
+| Bradley BUSK III | 4 / 3 / 3 (3); against RPGs: 2.4.6 | 5 | 4a/2b |
+| Bradley M919 ammo | as the base | 5 | 2a/1 |
+| AAV-7A1 (EAAK fitted; slat, spall liner, thermal kit as the base) | 3 / 3 / 3 (3) | 5 | 1 |
+| M-ATV (slat, CROWS as the base) | 2 / 2 / 2 (2) | 4 | 4a/3b |
+| M-ATV appliqué | 3 / 3 / 3 (3) | 5 | 4a/3b |
+| MaxxPro (slat, CROWS, mine roller as the base) | 2 / 2 / 2 (2) | 4 | 4a/3b |
+| MaxxPro appliqué | 3 / 3 / 3 (3) | 5 | 4a/3b |
+| Technicals (every variant) | 0 | 0 | 0 |
+| UH-60M, Petrel, Razorback, AH-1Z, mortars, tripods | not rated (STANAG 4569 rates land vehicles) | | |
+
+The T-72B3, BMP-2, BTR-82A and MT-LB get theirs with their data in phase D6b (cg_brief 4.2).
+
+**Personal armour, NIJ 0101.07** (Ballistics.LEVELS): HG1 (9 mm FMJ at 398 m/s, .357 Magnum at
+436), HG2 (9 mm at 448, .44 Magnum at 436), RF1 (7.62x51 M80 at 847, 7.62x39 MSC at 732, 5.56
+M193 at 990), RF2 (RF1 plus 5.56 M855 at 950), RF3 (.30-06 M2 AP at 878); handgun rounds at
+5 m, rifle at 15 m. Old 0101.06 names map on read: IIA/II to HG1, IIIA to HG2, III and III+ to
+RF1, III++ to RF2, IV to RF3. `tests/armor_test.gd` fires each level's list at every rated plate,
+helmet, pad and vest, and the next level's own list (at least one through).
 
 ### 2.5 Crew roles and seats
 

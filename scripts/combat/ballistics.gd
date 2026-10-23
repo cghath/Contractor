@@ -48,9 +48,19 @@ const SUPPRESS_RADIUS := 2.5
 const SUPPRESS_BY_CLASS := {&"pistol": Vector2(1.5, 0.6), &"intermediate": Vector2(SUPPRESS_RADIUS, 1.0), &"full_power": Vector2(3.5, 1.3)}
 const SUPPRESS_HEAVY := Vector2(5.0, 1.8)
 const HEAVY_CALIBRE_MM := 12.0
-## The game's armor and threat ladder, weakest first (NIJ names in the game's own order).
-## FRAGMENT is below everything: any aramid layer stops it. ABOVE_IV defeats all body armor.
-const LEVELS: Array[StringName] = [&"FRAGMENT", &"IIA", &"II", &"IIIA", &"III", &"III+", &"III++", &"IV", &"ABOVE_IV"]
+## The game's armor and threat ladder, weakest first: NIJ Standard 0101.07 (2023; cg_brief queue
+## item 2.0) in place of 0101.06's IIA-IV. HG1 and HG2 are the handgun levels, RF1-RF3 the rifle
+## levels; each level's threat list (rounds, test velocities and ranges) is in
+## data/armour_standards.json "nij_0101_07". FRAGMENT is below everything: any aramid layer stops
+## it. ABOVE_RF3 (.50 BMG) defeats all body armor.
+const LEVELS: Array[StringName] = [&"FRAGMENT", &"HG1", &"HG2", &"RF1", &"RF2", &"RF3", &"ABOVE_RF3"]
+## 0101.06 names (and the game's old III+ and III++) as they map onto 0101.07, so an old save, a
+## mod or a weapon "threat" stat that still names one reads right: IIA and II are HG1, IIIA HG2,
+## III and III+ RF1 (no III+ piece stopped M855), III++ RF2 (they all did), IV RF3.
+const LEGACY_LEVELS := {
+	&"IIA": &"HG1", &"II": &"HG1", &"IIIA": &"HG2", &"III": &"RF1", &"III+": &"RF1", &"III++": &"RF2",
+	&"IV": &"RF3", &"ABOVE_IV": &"ABOVE_RF3",
+}
 const ROUNDS_PATH := "res://data/rounds.json"
 ## Air at sea level, 15 C.
 const AIR_DENSITY := 1.225
@@ -398,12 +408,13 @@ static func round_class(weapon: ItemData) -> StringName:
 	return StringName(round_data(weapon).get("class", Vitals.INTERMEDIATE))
 
 
-## The round's threat level at the muzzle on the game's NIJ-named ladder (Ballistics.LEVELS).
-## Armor rated at or above it stops it. A "threat" stat on the weapon overrides the round's.
+## The round's threat level at the muzzle on the NIJ 0101.07 ladder (Ballistics.LEVELS). Armor
+## rated at or above it stops it. A "threat" stat on the weapon overrides the round's (an old
+## 0101.06 name reads as its 0101.07 level: level_name).
 static func threat_level(weapon: ItemData) -> StringName:
 	if weapon.stats.has("threat"):
-		return StringName(weapon.stats.threat)
-	return StringName(round_data(weapon).get("level", "III"))
+		return level_name(StringName(weapon.stats.threat))
+	return level_name(StringName(round_data(weapon).get("level", "RF1")))
 
 
 ## The threat level `distance` metres out. A round whose data has "level_drop_mps" counts as
@@ -416,14 +427,21 @@ static func threat_level_at(weapon: ItemData, distance: float) -> StringName:
 		return level
 	if velocity_at(weapon, distance) < float(data.level_drop_mps):
 		if data.has("level_drop_to"):
-			return StringName(data.level_drop_to)
+			return level_name(StringName(data.level_drop_to))
 		return LEVELS[maxi(level_index(level) - 1, 0)]
 	return level
 
 
-## Position of `level` on LEVELS (0 = FRAGMENT), or -1 for an unknown name.
+## Position of `level` on LEVELS (0 = FRAGMENT), or -1 for an unknown name. An old 0101.06
+## name counts as its 0101.07 level (LEGACY_LEVELS).
 static func level_index(level: StringName) -> int:
-	return LEVELS.find(level)
+	return LEVELS.find(level_name(level))
+
+
+## `level` on the 0101.07 ladder: itself, or an old 0101.06 name mapped (LEGACY_LEVELS), so old
+## saves, mods and stats that still say "IIIA" or "IV" read as HG2 or RF3.
+static func level_name(level: StringName) -> StringName:
+	return LEGACY_LEVELS.get(level, level)
 
 
 ## The round data (an entry of data/rounds.json, with its "id") for a weapon (the round its

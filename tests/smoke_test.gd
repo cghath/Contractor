@@ -172,7 +172,7 @@ func _test_armor() -> void:
 
 	print("VoxelArmor: helmets")
 	var pistol := ItemDB.get_item(&"m17")
-	# Light (IIA) and medium (IIIA) helmets are rated for pistol rounds, the heavy (III++) for rifles.
+	# Light (HG1) and medium (HG2) helmets are rated for pistol rounds, the heavy (RF2) for rifles.
 	for tier: Array in [[&"helmet_bump", "light", pistol], [&"helmet", "medium", pistol], [&"helmet_heavy", "heavy", rifle]]:
 		var helmet := _armor(tier[0], &"helmet")
 		var round: ItemData = tier[2]

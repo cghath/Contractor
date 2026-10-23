@@ -334,14 +334,14 @@ func armor_integrity(slot: StringName) -> float:
 	return minf(ArmorRules.integrity(inventory.state_of(slot)), piece.integrity())
 
 
-## "Front IV 64% 3 cracks  Back IV 100%  Helmet IIIA 92%" for HUDs and labels (rating, what's
+## "Front RF3 64% 3 cracks  Back RF3 100%  Helmet HG2 92%" for HUDs and labels (rating, what's
 ## left, a ceramic plate's cracks or "shattered"); "" with no armor.
 func armor_summary(separator := "  ") -> String:
 	var parts := PackedStringArray()
 	var frame := ExoFrame.summary(inventory)
 	if frame != "":
 		parts.append(frame)
-	if not _pads.is_empty():  # the weakest pad: "Pads III++ 71%"
+	if not _pads.is_empty():  # the weakest pad: "Pads RF2 71%"
 		var worst := 1.0
 		for pad: String in _pads:
 			worst = minf(worst, pad_integrity(pad))

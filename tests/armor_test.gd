@@ -1,5 +1,5 @@
 extends Node3D
-## Headless checks for armor and ballistics: the NIJ-named ladder for every round against
+## Headless checks for armor and ballistics: the NIJ 0101.07 ladder (HG1-RF3; each level stopping its threat list at the standard's velocities, the next level's not always) for every round against
 ## every helmet, plate and vest, ceramic crack zones and shattering, steel spall by vest tier,
 ## soft armor, plate fit, armor state that travels with the item, energy falling with range,
 ## and the impact that every stop lands on the wearer. Run from the project folder with:
@@ -9,24 +9,24 @@ extends Node3D
 const DUMMY := preload("res://scenes/target_dummy.tscn")
 const PROBE := preload("res://tests/armor_probe_vitals.gd")
 
-## The design doc's ladder: each round's threat level.
+## The NIJ 0101.07 ladder (cg_brief queue item 2.0): each round's threat level.
 const ROUND_LEVELS := {
-	"9x19_fmj": "IIA", "45acp_fmj": "IIA", "12g_buck": "IIA", "12g_00_pellet": "IIA", "12g_breach": "IIA", "9x19_hot": "II", "357mag": "II",
-	"44mag": "IIIA", "10mm_fmj": "IIIA", "357sig_fmj": "IIIA", "12g_slug": "IIIA", "556_m193": "III",
-	"762x39_msc": "III+", "545x39_7n6": "III++", "762x51_m80": "III+", "556_m855": "III++", "762x54r_lps": "III++",
-	"556_m995": "IV", "762x51_m993": "IV", "3006_m2ap": "IV", "65cm_eldm": "III+", "50bmg_m33": "ABOVE_IV",
+	"9x19_fmj": "HG1", "45acp_fmj": "HG1", "12g_buck": "HG1", "12g_00_pellet": "HG1", "12g_breach": "HG1", "9x19_hot": "HG1", "357mag": "HG1",
+	"44mag": "HG2", "10mm_fmj": "HG2", "357sig_fmj": "HG2", "12g_slug": "HG2", "556_m193": "RF1",
+	"762x39_msc": "RF1", "545x39_7n6": "RF2", "762x51_m80": "RF1", "556_m855": "RF2", "762x54r_lps": "RF2",
+	"556_m995": "RF3", "762x51_m993": "RF3", "3006_m2ap": "RF3", "65cm_eldm": "RF1", "50bmg_m33": "ABOVE_RF3",
 	# items expansion (2026-10-20)
-	"9x18_pm": "IIA", "762x25_tt": "II", "57x28_ss190": "III", "46x30_dm11": "III", "303_mk7": "III+", "762x51_m118lr": "III+", "556_mk262": "III",
+	"9x18_pm": "HG1", "762x25_tt": "HG1", "57x28_ss190": "RF1", "46x30_dm11": "RF1", "303_mk7": "RF1", "762x51_m118lr": "RF1", "556_mk262": "RF1",
 	# shotgun shells (2026-10-21): hi-brass 00 buck, the shell and each of its pellets
-	"12g_00_mag": "IIA", "12g_00_mag_pellet": "IIA",
+	"12g_00_mag": "HG1", "12g_00_mag_pellet": "HG1",
 }
 ## Each armor piece's rating.
 const PIECE_RATINGS := {
-	"helmet_bump": "IIA", "helmet": "IIIA", "helmet_lx3": "IIIA", "helmet_heavy": "III++",
-	"plate_pe_l3": "III", "plate_steel_l3": "III++", "plate_ceramic_l4": "IV", "plate_side": "III++",
+	"helmet_bump": "HG1", "helmet": "HG2", "helmet_lx3": "HG2", "helmet_heavy": "RF2",
+	"plate_pe_l3": "RF1", "plate_steel_l3": "RF2", "plate_ceramic_l4": "RF3", "plate_side": "RF2",
 }
 ## Each vest's soft armor (aramid) rating.
-const VEST_RATINGS := {"plate_carrier_light": "IIA", "plate_carrier": "IIIA", "plate_carrier_heavy": "IIIA"}
+const VEST_RATINGS := {"plate_carrier_light": "HG1", "plate_carrier": "HG2", "plate_carrier_heavy": "HG2"}
 const ARMS: Array[StringName] = [Vitals.UPPER_ARM_L, Vitals.UPPER_ARM_R, Vitals.FOREARM_L, Vitals.FOREARM_R]
 
 var failures := 0
@@ -58,6 +58,8 @@ func _ready() -> void:
 	_test_integrity_balance()
 	await _test_dropped_armor()
 	await _test_lying_flat()
+	await _test_nij_0101_07()
+	_test_legacy_levels()
 	print("ARMOR TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
 
@@ -170,13 +172,13 @@ func _test_rounds() -> void:
 	check(Ballistics.round_ids().size() == ROUND_LEVELS.size(), "%d rounds in data" % Ballistics.round_ids().size())
 	for expect: Array in [[&"mag_9mm", "9x19_fmj"], [&"mag_556", "556_m855"], [&"mag_762", "762x51_m80"]]:
 		check(Ballistics.round_data(ItemDB.get_item(expect[0])).get("id", "") == expect[1], "%s holds %s" % expect)
-	for expect: Array in [[&"m17", &"IIA", Vitals.PISTOL], [&"m4a1", &"III++", Vitals.INTERMEDIATE],
-			[&"mk18", &"III++", Vitals.INTERMEDIATE], [&"m110", &"III+", Vitals.FULL_POWER]]:
+	for expect: Array in [[&"m17", &"HG1", Vitals.PISTOL], [&"m4a1", &"RF2", Vitals.INTERMEDIATE],
+			[&"mk18", &"RF2", Vitals.INTERMEDIATE], [&"m110", &"RF1", Vitals.FULL_POWER]]:
 		var weapon := ItemDB.get_item(expect[0])
 		check(Ballistics.threat_level(weapon) == expect[1] and Ballistics.round_class(weapon) == expect[2],
 			"%s fires %s (%s, %s)" % [expect[0], Ballistics.round_data(weapon).get("name", "?"), Ballistics.threat_level(weapon), Ballistics.round_class(weapon)])
 	var custom := ItemData.from_dict({"id": "test_override", "type": "weapon", "stats": {"ammo": "mag_556", "threat": "IV", "round_class": "full_power"}})
-	check(Ballistics.threat_level(custom) == &"IV" and Ballistics.round_class(custom) == Vitals.FULL_POWER, "weapon stats can still override the round")
+	check(Ballistics.threat_level(custom) == &"RF3" and Ballistics.round_class(custom) == Vitals.FULL_POWER, "weapon stats can still override the round (an old 0101.06 \"IV\" reads as RF3)")
 
 
 func _test_energy() -> void:
@@ -203,10 +205,10 @@ func _test_energy() -> void:
 	check(m80 > muzzle and bmg > 15000.0, "7.62 M80 %.0f J and .50 BMG %.0f J outhit 5.56" % [m80, bmg])
 	check(Ballistics.velocity_at(m4, 0.0) > Ballistics.velocity_at(ItemDB.get_item(&"mk18"), 0.0), "the short Mk18 barrel is slower than the M4's")
 	check(Ballistics.energy_at(ItemDB.get_item(&"breaching_charge"), 10.0) < 0.0, "unknown round: energy -1")
-	check(Ballistics.threat_level_at(m4, 50.0) == &"III++" and Ballistics.threat_level_at(m4, 300.0) == &"III",
-		"M855 counts as III++ close, III far (%.0f m/s at 300 m)" % Ballistics.velocity_at(m4, 300.0))
+	check(Ballistics.threat_level_at(m4, 50.0) == &"RF2" and Ballistics.threat_level_at(m4, 300.0) == &"RF1",
+		"M855 counts as RF2 close, RF1 far (%.0f m/s at 300 m)" % Ballistics.velocity_at(m4, 300.0))
 	var m110 := ItemDB.get_item(&"m110")
-	check(Ballistics.threat_level_at(m110, 300.0) == &"III+", "M80 ball keeps its level")
+	check(Ballistics.threat_level_at(m110, 300.0) == &"RF1", "M80 ball keeps its level")
 
 
 # --- The ladder -------------------------------------------------------------------------------
@@ -237,14 +239,14 @@ func _test_ladder() -> void:
 			if ArmorRules.stops(ArmorRules.soft_rating(vest), StringName(ROUND_LEVELS[round_id])) != expect:
 				wrong.append(round_id)
 		check(ArmorRules.soft_rating(vest) == StringName(VEST_RATINGS[id]) and wrong.is_empty(), "%s soft armor is %s (wrong: %s)" % [id, ArmorRules.soft_rating(vest), ", ".join(wrong)])
-	check(ArmorRules.stops(&"IIA", &"FRAGMENT") and not ArmorRules.stops(&"IV", &"ABOVE_IV"), "any rating stops fragments; nothing stops .50 BMG")
+	check(ArmorRules.stops(&"HG1", &"FRAGMENT") and not ArmorRules.stops(&"RF3", &"ABOVE_RF3"), "any rating stops fragments; nothing stops .50 BMG")
 
 
 func _test_range() -> void:
 	print("Level changes with range")
 	var m4 := ItemDB.get_item(&"m4a1")
 	var near := _piece(&"plate_pe_l3")
-	check(not near.server_try_stop(_front_of(near), Vector3.BACK, m4, 20.0), "light PE plate (III): M855 goes through at 20 m")
+	check(not near.server_try_stop(_front_of(near), Vector3.BACK, m4, 20.0), "light PE plate (RF1): M855 goes through at 20 m")
 	var far := _piece(&"plate_pe_l3")
 	check(far.server_try_stop(_front_of(far), Vector3.BACK, m4, 280.0), "...but is stopped at 280 m, slowed below its steel-core velocity")
 	var m193 := _piece(&"plate_pe_l3")
@@ -268,11 +270,11 @@ func _test_ceramic() -> void:
 		var state := {"chips": [], "cracks": cracks}
 		var stops := 0
 		for i in 400:
-			if ArmorRules.piece_stops(plate, state, cell, &"III++"):
+			if ArmorRules.piece_stops(plate, state, cell, &"RF2"):
 				stops += 1
 		var expect := pow(0.7, cracks.size())
 		check(absf(stops / 400.0 - expect) < 0.08, "with %d earlier hit(s) nearby, %d of 400 rounds stopped (expect ~%d%%)" % [cracks.size(), stops, roundi(expect * 100.0)])
-	check(not ArmorRules.piece_stops(plate, {"cracks": [[14, 17, 0]]}, cell, &"ABOVE_IV"), "a round above its rating always goes through")
+	check(not ArmorRules.piece_stops(plate, {"cracks": [[14, 17, 0]]}, cell, &"ABOVE_RF3"), "a round above its rating always goes through")
 
 	var piece := _piece(&"plate_ceramic_l4")
 	var m110 := ItemDB.get_item(&"m110")
@@ -312,7 +314,7 @@ func _test_ceramic() -> void:
 	var impact: Dictionary = _impacts(dummy).back() if not _impacts(dummy).is_empty() else {}
 	check(impact.get("part") == Vitals.CHEST and impact.get("round_class") == Vitals.PISTOL, "impact on the chest from a pistol round (%s)" % impact)
 	check(dummy.inventory.chips_in(&"plate_front").size() == 1, "the round still holed the shattered plate")
-	check(dummy.gear.armor_summary().contains("Front IV shattered"), "summary says so: %s" % dummy.gear.armor_summary())
+	check(dummy.gear.armor_summary().contains("Front RF3 shattered"), "summary says so: %s" % dummy.gear.armor_summary())
 	var rifle := _fire_at(plate_y, ItemDB.get_item(&"m4a1"), 0.05)
 	check(rifle.result == "body" and not probe.wound_list().is_empty(), "a 5.56 round goes through plate and aramid (%s)" % rifle.result)
 	dummy.queue_free()
@@ -412,20 +414,20 @@ func _test_soft_armor() -> void:
 	var back := Vector3.FORWARD
 	var side := Vector3.RIGHT
 	var cases := [
-		[light, Vitals.CHEST, &"IIA", front, true, "light: 9mm to the chest front stopped"],
-		[light, Vitals.CHEST, &"IIA", back, false, "light: front only, a 9mm in the back goes through"],
-		[light, Vitals.ABDOMEN, &"IIA", front, false, "light: the abdomen isn't covered"],
-		[light, Vitals.CHEST, &"II", front, false, "light: a .357 Magnum (II) goes through IIA"],
+		[light, Vitals.CHEST, &"HG1", front, true, "light: 9mm to the chest front stopped"],
+		[light, Vitals.CHEST, &"HG1", back, false, "light: front only, a 9mm in the back goes through"],
+		[light, Vitals.ABDOMEN, &"HG1", front, false, "light: the abdomen isn't covered"],
+		[light, Vitals.CHEST, &"HG2", front, false, "light: a .44 Magnum (HG2) goes through HG1 (a .357 Magnum, HG1 under 0101.07, is stopped now)"],
 		[light, Vitals.CHEST, &"FRAGMENT", front, true, "light: fragments stopped at the front"],
 		[light, Vitals.CHEST, &"FRAGMENT", side, false, "light: not at the side"],
-		[medium, Vitals.ABDOMEN, &"IIIA", back, true, "medium: .44 Magnum to the lower back stopped"],
-		[medium, Vitals.CHEST, &"IIIA", side, false, "medium: sides open"],
-		[medium, Vitals.CHEST, &"III", front, false, "medium: rifle ball goes through aramid"],
-		[medium, Vitals.THIGH_L, &"IIA", front, false, "medium: legs aren't covered"],
+		[medium, Vitals.ABDOMEN, &"HG2", back, true, "medium: .44 Magnum to the lower back stopped"],
+		[medium, Vitals.CHEST, &"HG2", side, false, "medium: sides open"],
+		[medium, Vitals.CHEST, &"RF1", front, false, "medium: rifle ball goes through aramid"],
+		[medium, Vitals.THIGH_L, &"HG1", front, false, "medium: legs aren't covered"],
 		[medium, Vitals.NECK, &"FRAGMENT", front, false, "medium: the neck has no aramid"],
-		[heavy, Vitals.CHEST, &"IIIA", side, true, "heavy: sides covered too"],
+		[heavy, Vitals.CHEST, &"HG2", side, true, "heavy: sides covered too"],
 		[heavy, Vitals.ABDOMEN, &"FRAGMENT", back, true, "heavy: fragments stopped at the back"],
-		[heavy, Vitals.CHEST, &"III++", front, false, "heavy: M855 goes through aramid"],
+		[heavy, Vitals.CHEST, &"RF2", front, false, "heavy: M855 goes through aramid"],
 		[none, Vitals.CHEST, &"FRAGMENT", front, false, "no vest: nothing stops it"],
 	]
 	for c: Array in cases:
@@ -439,8 +441,8 @@ func _test_soft_armor() -> void:
 		"a soft-armor stop is an impact on the part hit (%s)" % last)
 	var chest := medium.global_position + Vector3(0, 0.9 + 0.4, -0.12)
 	var thigh := medium.global_position + Vector3(0.1, 0.6, -0.12)
-	check(VoxelArmor.soft_armor_stops(medium, Vitals.TORSO, &"IIA", Vitals.PISTOL, 5.0, front, chest), "a whole-torso hitbox hit at chest height is covered")
-	check(not VoxelArmor.soft_armor_stops(medium, Vitals.TORSO, &"IIA", Vitals.PISTOL, 5.0, front, thigh), "...at thigh height it isn't")
+	check(VoxelArmor.soft_armor_stops(medium, Vitals.TORSO, &"HG1", Vitals.PISTOL, 5.0, front, chest), "a whole-torso hitbox hit at chest height is covered")
+	check(not VoxelArmor.soft_armor_stops(medium, Vitals.TORSO, &"HG1", Vitals.PISTOL, 5.0, front, thigh), "...at thigh height it isn't")
 	for body: TargetDummy in [light, medium, heavy, none]:
 		body.queue_free()
 	await get_tree().process_frame
@@ -483,7 +485,7 @@ func _test_face_guard() -> void:
 	check(piece.trace(nape, Vector3.FORWARD) != VoxelArmor.MISS, "the nape guard covers the back of the head")
 	check(piece.server_try_stop(mouth, Vector3.BACK, ItemDB.get_item(&"m17"), 10.0), "a pistol round at the mask is stopped")
 	var low := piece.to_global(Vector3(0.03, -0.12, -0.185))
-	check(not piece.server_try_stop(low, Vector3.BACK, _gun("556_m855"), 10.0), "a rifle round goes through it (IIIA)")
+	check(not piece.server_try_stop(low, Vector3.BACK, _gun("556_m855"), 10.0), "a rifle round goes through it (HG2)")
 	check(piece.trace(low, Vector3.BACK) == VoxelArmor.MISS, "and leaves a hole you can see the face through")
 	# The visor: fragments and spall only (Captain, 2026-10-17: "the visor shouldnt be bulletproof").
 	var other_eye := piece.to_global(Vector3(-0.04, -0.02, -0.185))
@@ -512,11 +514,11 @@ func _test_helmet_impact() -> void:
 		"with the range (%.2f m) and the energy there (%.0f J)" % [distance, impact.get("energy_j", 0.0)])
 	var impacts := _impacts(dummy).size()
 	var rifle := _fire_at(1.75, ItemDB.get_item(&"m4a1"), 0.04)
-	check(rifle.result == "body" and _impacts(dummy).size() == impacts and _hits(dummy).back().part == Vitals.HEAD, "a 5.56 round goes through the IIIA helmet into the head (%s)" % rifle.result)
+	check(rifle.result == "body" and _impacts(dummy).size() == impacts and _hits(dummy).back().part == Vitals.HEAD, "a 5.56 round goes through the HG2 helmet into the head (%s)" % rifle.result)
 	dummy.queue_free()
 	var heavy := await _dummy(["helmet_heavy"])
 	var stop := _fire_at(1.73, ItemDB.get_item(&"m110"))
-	check(stop.result == "plate" and _impacts(heavy).back().round_class == Vitals.FULL_POWER, "heavy helmet (III++) stops 7.62 ball, with a full-power impact")
+	check(stop.result == "plate" and _impacts(heavy).back().round_class == Vitals.FULL_POWER, "heavy helmet (RF2) stops 7.62 ball, with a full-power impact")
 	heavy.queue_free()
 	await get_tree().process_frame
 
@@ -551,8 +553,8 @@ func _vitals_text(v: Vitals) -> String:
 		v.wound_list().map(func(w: Dictionary) -> String: return "%s %s" % [w.part, w.kind])]
 
 
-## The playtest: a soldier in medium armor (medium carrier, steel III++ plates front and back,
-## the IIIA helmet) hit 2-3 times in the plates by M855 from the M4 and the Mk18 at 10-100 m
+## The playtest: a soldier in medium armor (medium carrier, steel RF2 plates front and back,
+## the HG2 helmet) hit 2-3 times in the plates by M855 from the M4 and the Mk18 at 10-100 m
 ## stays conscious and fighting, and so does one hit 6 times in quick succession (stagger and
 ## winded are fine). A burst hurts (Captain's wave 2 call), but stays under the threshold. The same rounds through an unarmored limb hurt but don't knock out.
 func _test_playtest_knockouts() -> void:
@@ -912,7 +914,7 @@ func _test_state_travels() -> void:
 	var dummy := await _dummy(["plate_carrier"])
 	dummy.inventory.take(removed.id, 1, removed.state)
 	var summary := dummy.gear.armor_summary()
-	check(summary.contains("Front IV 64% 2 cracks"), "armor summary: %s" % summary)
+	check(summary.contains("Front RF3 64% 2 cracks"), "armor summary: %s" % summary)
 	check(is_equal_approx(dummy.gear.armor_integrity(&"plate_front"), 0.64), "armor_integrity is the ceramic integrity")
 	dummy.queue_free()
 	await get_tree().process_frame
@@ -1085,7 +1087,7 @@ func _test_integrity_balance() -> void:
 	check(left[&"helmet_bump"] < left[&"helmet"] and left[&"helmet"] <= left[&"helmet_heavy"],
 		"helmets: bump %d, medium %d, heavy %d" % [left[&"helmet_bump"], left[&"helmet"], left[&"helmet_heavy"]])
 	var steel := ItemDB.get_item(&"plate_steel_l3")
-	check(not ArmorRules.piece_stops(steel, {"integrity": 0.0}, cell, &"IIIA"), "a worn-out steel plate stops nothing")
+	check(not ArmorRules.piece_stops(steel, {"integrity": 0.0}, cell, &"HG2"), "a worn-out steel plate stops nothing")
 	check(ArmorRules.state_text(steel, {"integrity": 0.0}) == "worn out" and ArmorRules.state_text(steel, {"chips": [[1, 1, 0, 1.0]], "integrity": 0.64}) == "1 hit, 64%",
 		"labels: %s, %s" % [ArmorRules.state_text(steel, {"integrity": 0.0}), ArmorRules.state_text(steel, {"chips": [[1, 1, 0, 1.0]], "integrity": 0.64})])
 
@@ -1123,7 +1125,7 @@ func _test_dropped_armor() -> void:
 	check(copy_piece.voxels_removed() == piece.voxels_removed(), "another peer's copy redraws the same damage when the state arrives")
 	copy.queue_free()
 	_shooter.position = Vector3(3.05, 1.05, -5)
-	var through := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, _gun_at("ABOVE_IV"))
+	var through := Ballistics.fire(_shooter, _shooter.position, Vector3.BACK, _gun_at("ABOVE_RF3"))
 	var chips: Array = item.state.get("chips", [])
 	check(through.result == "none" and chips.size() == 2 and int(chips[1][4]) == VoxelArmor.HOLE,
 		"a round above its rating goes through and holes it (%s)" % through.result)
@@ -1200,3 +1202,162 @@ func _test_lying_flat() -> void:
 		item.queue_free()
 	floor_body.queue_free()
 	await get_tree().process_frame
+
+
+# --- NIJ 0101.07 (cg_brief queue item 2.0) -----------------------------------------------------
+
+## A weapon firing NIJ test round `threat` (an ArmourStandards.nij_threats entry) at the
+## standard's reference velocity.
+func _nij_gun(threat: Dictionary) -> ItemData:
+	return ItemData.from_dict({"id": "test_nij_%s_%d" % [threat.round, int(threat.mps)], "type": "weapon",
+		"stats": {"round": String(threat.round), "muzzle_velocity_mps": float(threat.mps), "plate_wear": 1.0, "damage": 30}})
+
+
+## The threat level NIJ test round `threat` meets armour at: fired at the standard's velocity
+## from the standard's range.
+func _nij_level(threat: Dictionary) -> StringName:
+	return Ballistics.threat_level_at(_nij_gun(threat), float(threat.range_m))
+
+
+## Every rated plate, helmet, exo pad and vest in data: [{"what", "rating", "item" (null for a
+## vest's soft armour), "kind": "piece" | "pad" | "soft"}].
+func _rated_armour() -> Array:
+	var out: Array = []
+	for id: StringName in ItemDB.all_ids():
+		var item := ItemDB.get_item(id)
+		if item.stats.has("rating") and (item.is_plate() or item.slot == &"helmet"):
+			out.append({"what": String(id), "rating": ArmorRules.rating(item), "item": item, "kind": "piece"})
+		if item.stats.has("soft_rating"):
+			out.append({"what": "%s (soft)" % id, "rating": ArmorRules.soft_rating(item), "item": null, "kind": "soft"})
+		for pad: Dictionary in ExoFrame.pad_items(item):
+			if (pad.item as ItemData).stats.has("rating"):
+				out.append({"what": "%s %s pad" % [id, pad.id], "rating": ArmorRules.rating(pad.item), "item": pad.item, "kind": "pad"})
+	return out
+
+
+func _test_nij_0101_07() -> void:
+	print("NIJ 0101.07: each level stops its threat list at the standard's velocities and ranges; the next level's isn't always stopped")
+	var levels := ArmourStandards.nij_levels()
+	var ladder: Array = Array(Ballistics.LEVELS).map(func(l: StringName) -> String: return String(l))
+	check(ladder == ["FRAGMENT", "HG1", "HG2", "RF1", "RF2", "RF3", "ABOVE_RF3"] and levels == ["HG1", "HG2", "RF1", "RF2", "RF3"],
+		"the ladder is 0101.07's: %s" % [ladder])
+	var off := PackedStringArray()
+	for id: Variant in Ballistics.round_ids():
+		var data := Ballistics.round_data(id)
+		for key: String in ["level", "level_drop_to"]:
+			if data.has(key) and not String(data[key]) in ladder:
+				off.append("%s %s %s" % [id, key, data[key]])
+	var rated := _rated_armour()
+	for r: Dictionary in rated:
+		if not String(r.rating) in levels:
+			off.append("%s %s" % [r.what, r.rating])
+	for id: StringName in ItemDB.all_ids():
+		var visor := String(ItemDB.get_item(id).stats.get("visor_rating", ""))
+		if visor != "" and not visor in ladder:
+			off.append("%s visor %s" % [id, visor])
+	for r: Dictionary in rated:
+		if r.item != null and String((r.item as ItemData).stats.get("rating", "")) != String(r.rating):
+			off.append("%s still names %s in data" % [r.what, (r.item as ItemData).stats.rating])
+	check(off.is_empty(), "every round, plate, helmet, pad, vest and visor in data is on the 0101.07 ladder by its own name (%d rated pieces; off: %s)" % [rated.size(), ", ".join(off)])
+	var lists := PackedStringArray()
+	for level: String in levels:
+		lists.append("%s: %s" % [level, ", ".join(PackedStringArray(ArmourStandards.nij_threats(level).map(func(t: Dictionary) -> String: return "%s %d m/s" % [t.name, int(t.mps)])))])
+	print("    ", "\n    ".join(lists))
+	check(ArmourStandards.nij_threats("RF2").size() == 4 and ArmourStandards.nij_own_threats("RF2").size() == 1
+		and String(ArmourStandards.nij_own_threats("RF3")[0].round) == "3006_m2ap",
+		"RF2 is RF1's list plus M855; RF3 is .30-06 M2 AP")
+	# Each level against its own list and the next level's, on the ladder and on every rated piece.
+	for i in levels.size():
+		var level: String = levels[i]
+		var missed := PackedStringArray()
+		for t: Dictionary in ArmourStandards.nij_threats(level):
+			var at := _nij_level(t)
+			if not ArmorRules.stops(StringName(level), at):
+				missed.append("%s (%s)" % [t.name, at])
+		check(missed.is_empty(), "%s stops its list at the standard's velocities and ranges (through: %s)" % [level, ", ".join(missed)])
+		var next: Array = ArmourStandards.nij_own_threats(levels[i + 1]) if i + 1 < levels.size() else []
+		var beaten := PackedStringArray()
+		for t: Dictionary in next:
+			if not ArmorRules.stops(StringName(level), _nij_level(t)):
+				beaten.append(String(t.name))
+		if i + 1 < levels.size():
+			check(not beaten.is_empty(), "%s doesn't always stop %s's threats (through: %s)" % [level, levels[i + 1], ", ".join(beaten)])
+		else:
+			check(not ArmorRules.stops(StringName(level), Ballistics.threat_level_at(_gun("50bmg_m33"), 15.0)), "nothing stops above RF3: .50 BMG goes through RF3")
+	# The real pieces: a fresh one shot at its strike face by its level's list (stopped), and
+	# by the next level's own list (at least one through), each round on a fresh piece.
+	var wrong := PackedStringArray()
+	var count := 0
+	for r: Dictionary in rated:
+		var i := levels.find(String(r.rating))
+		var own := ArmourStandards.nij_threats(r.rating)
+		var next: Array = ArmourStandards.nij_own_threats(levels[i + 1]) if i + 1 < levels.size() else [{"round": "50bmg_m33", "name": ".50 BMG", "mps": 890, "range_m": 15}]
+		var any_through := false
+		for pass_next: bool in [false, true]:
+			for t: Dictionary in (next if pass_next else own):
+				var stopped: bool
+				match String(r.kind):
+					"soft":
+						stopped = ArmorRules.stops(r.rating, _nij_level(t))
+					"pad":
+						stopped = ArmorRules.piece_stops(r.item, {}, Vector3i(10, 10, 0), _nij_level(t))
+					_:
+						var piece := _piece(StringName(r.what))
+						if piece.slot == &"helmet":  # the dome, clear of any visor (a visor has its own rating)
+							var size := VoxelArmor.size_m(piece.item)
+							var top := Vector3(0.03, size.y - (0.2 if piece.item.stats.get("tier") == "heavy" else 0.0) - 0.001, 0.02)
+							stopped = piece.server_try_stop(top, Vector3.DOWN, _nij_gun(t), float(t.range_m))
+						else:
+							stopped = piece.server_try_stop(_front_of(piece), Vector3.BACK, _nij_gun(t), float(t.range_m))
+						piece.inventory.queue_free()
+				count += 1
+				if not pass_next and not stopped:
+					wrong.append("%s (%s) let %s through" % [r.what, r.rating, t.name])
+				any_through = any_through or (pass_next and not stopped)
+		if not any_through:
+			wrong.append("%s (%s) stopped all of the next level's" % [r.what, r.rating])
+		await get_tree().process_frame
+	check(wrong.is_empty(), "every rated piece stops its level's list and not all of the next's (%d pieces, %d shots; wrong: %s)" % [rated.size(), count, ", ".join(wrong)])
+	# What 0101.07 changed against 0101.06 (the CHANGELOG's list): an old IIA piece (HG1) now
+	# stops .357 Magnum and 9 mm +P+; an old III piece (RF1) now stops 7.62x39 MSC and 7.62x51
+	# M80; III+ and III++ pieces keep what they stopped.
+	check(ArmorRules.stops(&"HG1", Ballistics.threat_level_at(_gun("357mag"), 5.0)) and ArmorRules.stops(&"HG1", Ballistics.threat_level_at(_gun("9x19_hot"), 5.0))
+		and not ArmorRules.stops(&"HG1", Ballistics.threat_level_at(_gun("44mag"), 5.0)),
+		"HG1 (old IIA and II) stops .357 Magnum and 9 mm +P+, not .44 Magnum")
+	check(ArmorRules.stops(&"RF1", Ballistics.threat_level_at(_gun("762x39_msc"), 15.0)) and ArmorRules.stops(&"RF1", Ballistics.threat_level_at(_gun("762x51_m80"), 15.0))
+		and not ArmorRules.stops(&"RF1", Ballistics.threat_level_at(_gun("556_m855"), 15.0)) and not ArmorRules.stops(&"RF1", Ballistics.threat_level_at(_gun("545x39_7n6"), 15.0)),
+		"RF1 (old III and III+) stops 7.62x39 MSC and M80 ball, not M855 or 7N6 close in")
+	check(ArmorRules.stops(&"RF2", Ballistics.threat_level_at(_gun("762x54r_lps"), 15.0)) and not ArmorRules.stops(&"RF2", Ballistics.threat_level_at(_gun("3006_m2ap"), 15.0)),
+		"RF2 (old III++) still stops 7.62x54R LPS, not .30-06 M2 AP")
+
+
+## Old names on read: anything that still says IIA-IV (a save, a mod, a stat) reads as 0101.07.
+func _test_legacy_levels() -> void:
+	print("Old 0101.06 names read as 0101.07")
+	var mapped := true
+	for old: String in ["IIA", "II", "IIIA", "III", "III+", "III++", "IV", "ABOVE_IV"]:
+		var new := Ballistics.level_name(StringName(old))
+		mapped = mapped and String(new) == String((ArmourStandards.data().nij_0101_07.legacy as Dictionary)[old]) and Ballistics.level_index(StringName(old)) == Ballistics.level_index(new)
+	check(mapped, "IIA/II -> HG1, IIIA -> HG2, III/III+ -> RF1, III++ -> RF2, IV -> RF3, ABOVE_IV -> ABOVE_RF3 (Ballistics and the data agree)")
+	var old_plate := ItemData.from_dict(JSON.parse_string('{"id": "test_old_plate", "name": "Old Plate (III+)", "type": "plate", "slot": "plate", "stats": {"rating": "III+", "material": "ceramic"}}'))
+	var old_vest := ItemData.from_dict(JSON.parse_string('{"id": "test_old_vest", "name": "Old Vest", "type": "armor", "slot": "vest", "stats": {"soft_rating": "IIIA"}}'))
+	check(ArmorRules.rating(old_plate) == &"RF1" and ArmorRules.soft_rating(old_vest) == &"HG2"
+		and ArmorRules.piece_stops(old_plate, {}, Vector3i(5, 5, 0), Ballistics.threat_level_at(_gun("762x51_m80"), 15.0))
+		and not ArmorRules.piece_stops(old_plate, {}, Vector3i(5, 5, 0), Ballistics.threat_level_at(_gun("556_m855"), 15.0))
+		and ArmorRules.stops(ArmorRules.soft_rating(old_vest), Ballistics.threat_level_at(_gun("44mag"), 5.0)),
+		"an item read with old names (a mod, an old save's copy) rates RF1 / HG2 and stops what those stop")
+	check(Ballistics.threat_level(ItemData.from_dict({"id": "test_old_threat", "type": "weapon", "stats": {"threat": "III++"}})) == &"RF2", "a weapon's old \"threat\" stat reads as its new level")
+	# Saves hold item ids and their state (chips, cracks, integrity), never a rating: an old
+	# save's armour loads with the 0101.07 ratings from data.
+	var inv := Inventory.new()
+	add_child(inv)
+	inv.take(&"plate_carrier")
+	inv.take(&"plate_ceramic_l4", 1, {"integrity": 0.7, "cracks": [[3, 4, 0]]})
+	inv.take(&"helmet")
+	var saved := JSON.stringify(Roster.json_safe(inv.net_state))
+	var names := PackedStringArray()
+	for level: String in ["\"IIA\"", "\"IIIA\"", "\"III\"", "\"III+\"", "\"III++\"", "\"IV\"", "\"HG1\"", "\"HG2\"", "\"RF1\"", "\"RF2\"", "\"RF3\""]:
+		if saved.contains(level):
+			names.append(level)
+	check(names.is_empty() and saved.contains("plate_ceramic_l4"), "a saved kit names items, not ratings (%s): old saves load with the new ratings" % ", ".join(names))
+	inv.queue_free()

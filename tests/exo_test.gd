@@ -9,9 +9,9 @@ extends Node
 ## - into the chest from the front it can't; into the back from behind the spine pack can;
 ## - worn down to nothing it's disabled: the whole load is back on the legs, the readout says
 ##   so, the light goes red, and further rounds don't strike it;
-## - its Steel III++ pads (shoulders, forearms, thighs, shins, stomach, spine pack) are real
-##   armour: a III++ round fired at one stops there (a dent in the pad's state, an impact, no
-##   wound), an AP round (IV) goes through it into the leg; the wearer's own shots skip them;
+## - its Steel RF2 pads (shoulders, forearms, thighs, shins, stomach, spine pack) are real
+##   armour: an RF2 round fired at one stops there (a dent in the pad's state, an impact, no
+##   wound), an AP round (RF3) goes through it into the leg; the wearer's own shots skip them;
 ##   they're spall-coated, and the frame keeps spall off the arms and neck;
 ## - taken off, the art and pads go, the pads' damage with the frame.
 ##   <godot> --headless --path . res://tests/exo_test.tscn
@@ -114,8 +114,8 @@ func _test_pads() -> void:
 	var spine: VoxelArmor = pads.get("spine")
 	if thigh == null or spine == null:
 		return
-	check(ArmorRules.rating(thigh.item) == &"III++" and ArmorRules.material(thigh.item) == ArmorRules.STEEL and thigh.item.stats.get("spall_coated", false),
-		"rated III++, steel, spall-coated")
+	check(ArmorRules.rating(thigh.item) == &"RF2" and ArmorRules.material(thigh.item) == ArmorRules.STEEL and thigh.item.stats.get("spall_coated", false),
+		"rated RF2, steel, spall-coated")
 	check(thigh.get_parent() == player.model.part_node(Vitals.THIGH_R) and thigh.body_part == Vitals.THIGH_R, "the thigh pad rides on the thigh")
 	var rids := gear.armor_rids()
 	check(pads.values().all(func(p: VoxelArmor) -> bool: return p.get_rid() in rids), "the wearer's own shots skip them")
@@ -126,25 +126,25 @@ func _test_pads() -> void:
 	var shooter := StaticBody3D.new()
 	add_child(shooter)
 	var m855 := ItemData.from_dict({"id": "test_exo_m855", "type": "weapon", "stats": {"round": "556_m855", "damage": 30}})
-	var ap := ItemData.from_dict({"id": "test_exo_ap", "type": "weapon", "stats": {"threat": "IV", "round_class": String(Vitals.INTERMEDIATE), "damage": 30}})
+	var ap := ItemData.from_dict({"id": "test_exo_ap", "type": "weapon", "stats": {"threat": "RF3", "round_class": String(Vitals.INTERMEDIATE), "damage": 30}})
 	player.vitals.server_reset_health()
 	# From the side, into the thigh pad's outer wall; then from behind, into the spine pack's.
 	var side_on := thigh.to_global(Vector3(0.6, 0.02, 0.0))
 	var side := Ballistics.fire(shooter, side_on, -thigh.global_basis.x, m855)
 	await _frames(2)
-	check(side.result == "plate", "M855 (III++) from the side stops on the thigh pad (%s)" % side.result)
+	check(side.result == "plate", "M855 (RF2) from the side stops on the thigh pad (%s)" % side.result)
 	check(inv.chips_in(ExoFrame.SLOT, "thigh_r").size() == 1 and ArmorRules.integrity(ExoFrame.pad_state(inv, "thigh_r")) < 1.0,
 		"a dent in the pad's own state, its integrity down (%s)" % [ExoFrame.pad_state(inv, "thigh_r").get("integrity", 1.0)])
 	check(not player.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.part == Vitals.THIGH_R), "no wound in the thigh behind it")
 	var back := Ballistics.fire(shooter, spine.to_global(Vector3(0.0, 0.05, -0.6)), spine.global_basis.z, m855)
 	await _frames(2)
 	check(back.result == "plate" and inv.chips_in(ExoFrame.SLOT, "spine").size() == 1, "and from behind on the spine pack's pad (%s)" % back.result)
-	check(gear.armor_summary().contains("Pads III++"), "the armour readout shows the pads (%s)" % gear.armor_summary())
-	# AP (IV) goes through the pad into the leg.
+	check(gear.armor_summary().contains("Pads RF2"), "the armour readout shows the pads (%s)" % gear.armor_summary())
+	# AP (RF3) goes through the pad into the leg.
 	var through := Ballistics.fire(shooter, thigh.to_global(Vector3(0.6, -0.06, 0.0)), -thigh.global_basis.x, ap)
 	await _frames(2)
 	var holes: Array = inv.chips_in(ExoFrame.SLOT, "thigh_r").filter(func(c: Array) -> bool: return int(c[4]) == VoxelArmor.HOLE)
-	check(through.result == "body" and holes.size() == 1, "an AP round (IV) goes through it (%s, %d hole)" % [through.result, holes.size()])
+	check(through.result == "body" and holes.size() == 1, "an AP round (RF3) goes through it (%s, %d hole)" % [through.result, holes.size()])
 	check(player.vitals.wound_list().any(func(w: Dictionary) -> bool: return w.part == Vitals.THIGH_R), "into the thigh")
 	player.vitals.server_reset_health()
 	shooter.queue_free()
