@@ -7,7 +7,7 @@ extends RefCounted
 ## jobs on offer, and the latest reports (debrief cards). The contract board shows a summary
 ## (board_summary) with a button here.
 
-const ABOUT := "Money beyond contracts: the high command squads' own jobs, captures sold by standing, bounties on the war's leaders. Every offer shows its pay and its risks before you commit."
+const ABOUT := "Money beyond contracts: the high command squads' own jobs, captures sold by standing, bounties on the war's leaders, the FOB's businesses. Every offer shows its pay and its risks before you commit."
 
 
 ## Builds the page into `rows`. `hotkey_root`: the node the send buttons' number keys belong to.
@@ -19,6 +19,7 @@ static func build(rows: VBoxContainer, hotkey_root: Node) -> void:
 	_offers(rows, roster, s, hotkey_root, keys)
 	_captures(rows, roster, s)
 	_bounties(rows)
+	_businesses(rows, s)
 	_reports(rows, s)
 
 
@@ -169,6 +170,51 @@ static func _bounties(rows: VBoxContainer) -> void:
 		rows.add_child(_indent(l))
 
 
+# --- FOB businesses -----------------------------------------------------------------------
+
+static func _businesses(rows: VBoxContainer, s: Dictionary) -> void:
+	var run := FobBusiness.running(s)
+	rows.add_child(UiKit.heading("FOB businesses (%d running)" % run.size()))
+	if not FobBusiness.has_fob():
+		rows.add_child(_indent(UiKit.text("The company runs from the LHD. Take a zone and build a FOB there to run businesses from it.")))
+		return
+	rows.add_child(_indent(UiKit.hint("Each pays every day it runs, less its upkeep (its local staff's pay in it), and uses the FOB's stocks. Raiders can threaten one: a protection job goes on the board; leave it and the business is raided. FOB danger now: %s." \
+		% Income.danger_word(FobBusiness.fob_danger()))))
+	for k: Dictionary in FobBusiness.kinds():
+		var id := String(k.id)
+		var b: Dictionary = run.get(id, {})
+		var box := VBoxContainer.new()
+		var sup := PackedStringArray()
+		for st: String in k.get("supplies", {}):
+			sup.append("%d %s" % [int(k.supplies[st]), Pallets.stock_name(st).to_lower()])
+		var units := FobBusiness.units(id)
+		var line := "%s: about %s a day (%s pay%s, %s upkeep, %d local staff%s)" % [String(k.name), money(FobBusiness.day_pay(id) - int(k.get("upkeep", 0))),
+			money(FobBusiness.day_pay(id)), (", %d %s" % [units, String(k.get("unit", ""))]) if String(k.get("unit", "")) != "" else "", money(k.get("upkeep", 0)),
+			int(k.get("staff", 0)), (", uses %s a day" % ", ".join(sup)) if not sup.is_empty() else ""]
+		var l := UiKit.text(line)
+		l.tooltip_text = String(k.get("brief", ""))
+		l.mouse_filter = Control.MOUSE_FILTER_PASS
+		UiKit.fit_label_text(l)
+		box.add_child(l)
+		if not b.is_empty():
+			var t: Dictionary = b.get("threat", {})
+			var state := "Running since day %d, earned %s" % [int(b.get("opened", 0)), money(b.get("earned", 0))]
+			if int(b.get("closed_until", 0)) >= Economy.day():
+				state = "Closed after a raid until day %d" % (int(b.closed_until) + 1)
+			if not t.is_empty():
+				box.add_child(UiKit.warn("Threatened by %s: protect it before day %d (the job is on the contract board)" % [MissionRegistry.faction_name(String(t.get("by", ""))), int(t.get("until", 0)) + 1]))
+			box.add_child(UiKit.hint(state))
+			box.add_child(UiKit.button_row([UiKit.danger_button("Close it", func() -> void: BaseHub.request("income", ["biz_close", id]),
+				"Close the business for good (the setup isn't refunded)")]))
+		else:
+			var why := FobBusiness.cant_open(id)
+			var open := UiKit.accent_button("Open (%s)" % money(k.get("setup", 0)), func() -> void: BaseHub.request("income", ["biz_open", id]),
+				"Set it up for %s: then about %s a day while it runs. %s" % [money(k.get("setup", 0)), money(FobBusiness.day_pay(id) - int(k.get("upkeep", 0))), String(k.get("brief", ""))] if why == "" else why)
+			open.disabled = why != ""
+			box.add_child(UiKit.button_row([open]))
+		rows.add_child(_indent(box))
+
+
 # --- Reports ------------------------------------------------------------------------------
 
 static func _reports(rows: VBoxContainer, s: Dictionary) -> void:
@@ -214,6 +260,11 @@ static func board_summary() -> String:
 		for b: Dictionary in open:
 			top = maxi(top, int(b.alive))
 		parts.append("%d bount%s on the war's leaders (up to %s)" % [open.size(), "y" if open.size() == 1 else "ies", money(top)])
+	var run := FobBusiness.running(s)
+	if not run.is_empty():
+		var threatened: Array = run.keys().filter(func(id: String) -> bool: return not (run[id].get("threat", {}) as Dictionary).is_empty())
+		parts.append("%d FOB business%s running%s" % [run.size(), "" if run.size() == 1 else "es",
+			(", %d threatened: protect %s" % [threatened.size(), "it" if threatened.size() == 1 else "them"]) if not threatened.is_empty() else ""])
 	if not Bounties.stored_captures().is_empty():
 		parts.append("%d capture%s in storage to sell" % [Bounties.stored_captures().size(), "" if Bounties.stored_captures().size() == 1 else "s"])
 	return "; ".join(parts) + "." if not parts.is_empty() else "No side work today."

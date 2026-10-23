@@ -24,6 +24,9 @@ const LEDGER_SIDE_JOB := "Side job"  # (Bounties: "Capture sold", "Bounty")
 const REPORTS_KEEP := 12
 
 static var _data: Dictionary = {}
+## Whether the income streams run (the economy sim's --income 0 turns them off for its "before":
+## no side jobs or businesses move, no bounties paid, intel at its plain worth).
+static var enabled := true
 
 
 static func data() -> Dictionary:
@@ -126,16 +129,17 @@ static func report(title: String, text: String, kind := "neutral", lines: Array 
 
 ## Host (Economy.advance_days): each day that passed, every income stream moves on.
 static func server_advance_days(days: int) -> void:
-	if Campaign.section(&"economy").is_empty():
+	if Campaign.section(&"economy").is_empty() or not enabled:
 		return
 	SideJobs.server_day(days)
+	FobBusiness.server_day(days)
 	Campaign.mark_changed(SECTION)
 
 
 ## Host (BaseHub "income" request): `op` and its `args` from `sender`. Returns the note for the
 ## asker ("" for done, else why not).
 static func server_request(op: String, args: Array, sender: int) -> String:
-	var host_only := op in ["job_send", "capture_sell", "capture_deliver"]
+	var host_only := op in ["job_send", "capture_sell", "capture_deliver", "biz_open", "biz_close"]
 	if host_only and sender != 1:
 		return "Only the host can do that"
 	var why := "Unknown request"
@@ -144,6 +148,10 @@ static func server_request(op: String, args: Array, sender: int) -> String:
 			why = SideJobs.server_send(String(args[0]) if args.size() > 0 else "", String(args[1]) if args.size() > 1 else "")
 		"capture_sell":
 			why = Bounties.server_sell_capture(int(args[0]), String(args[1])) if args.size() >= 2 else "Bad request"
+		"biz_open":
+			why = FobBusiness.server_open(String(args[0])) if not args.is_empty() else "Bad request"
+		"biz_close":
+			why = FobBusiness.server_close(String(args[0])) if not args.is_empty() else "Bad request"
 		"capture_deliver":
 			why = Bounties.server_deliver(int(args[0]), String(args[1]), String(args[2])) if args.size() >= 3 else "Bad request"
 	Campaign.mark_changed(SECTION)

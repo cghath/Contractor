@@ -185,5 +185,135 @@
 			"mult": 0.9,
 			"rep": 1
 		}
+	},
+	"_businesses": "FOB businesses (FobBusiness), once home is a FOB the company holds: open one for setup, then each day it costs upkeep (its local staff's pay in it) and uses its supplies (FOB stocks: Economy.stock), and pays: pay + per_unit x its units (convoy: friendly-held road zones in reach; tolls: company-held zones with a route or crossing, the FOB's own road counting one; rentals: vehicles at home in the motor pool; the camp: none). Short of supplies it pays short_pay of that. Each day raid_base + raid_danger x the FOB's danger is the chance raiders threaten one: a protection contract (Hold the line) goes on the board for threat_days; done, the threat lifts and the locals think better of the company; not done by then, the business is raided: closed raid_days, raid_cost_share of its setup to put right. The FOB lost: every business goes with it.",
+	"businesses": {
+		"raid_base": 0.02,
+		"raid_danger": 0.12,
+		"threat_days": 3,
+		"raid_days": 4,
+		"raid_cost_share": 0.3,
+		"short_pay": 0.5,
+		"protect_rep": 2,
+		"neighbour_danger": 0.08,
+		"kinds": [
+			{
+				"id": "convoy",
+				"name": "Convoy security",
+				"brief": "Your men ride with the locals' trucks between the towns you can reach safely, for a fee per run.",
+				"setup": 30000,
+				"upkeep": 1400,
+				"staff": 6,
+				"supplies": {
+					"fuel": 1
+				},
+				"pay": 2600,
+				"per_unit": 900,
+				"unit": "friendly road zones nearby",
+				"needs_vehicle": true,
+				"client": "salvage_union"
+			},
+			{
+				"id": "militia",
+				"name": "Militia training camp",
+				"brief": "Train the region's militia at the FOB. The village councils pay a little; the region's rebel support rises every day it runs.",
+				"setup": 25000,
+				"upkeep": 1500,
+				"staff": 4,
+				"supplies": {
+					"supplies": 1
+				},
+				"pay": 2400,
+				"per_unit": 0,
+				"unit": "",
+				"rebel_support": 0.6,
+				"client": "vessmark"
+			},
+			{
+				"id": "tolls",
+				"name": "Checkpoint tolls",
+				"brief": "Checkpoints on the roads the company holds: every truck pays to pass. More roads held, more tolls; the locals like it less.",
+				"setup": 15000,
+				"upkeep": 700,
+				"staff": 4,
+				"supplies": {},
+				"pay": 600,
+				"per_unit": 1500,
+				"unit": "roads held",
+				"locals_per_week": -1,
+				"client": "salvage_union"
+			},
+			{
+				"id": "rentals",
+				"name": "Motor pool rentals",
+				"brief": "Rent the motor pool's idle vehicles to aid agencies and traders. Wear costs parts.",
+				"setup": 10000,
+				"upkeep": 400,
+				"staff": 2,
+				"supplies": {
+					"parts": 1
+				},
+				"pay": 0,
+				"per_unit": 1100,
+				"unit": "vehicles at home",
+				"client": "meridian"
+			}
+		]
+	},
+	"_market": "Black market (BlackMarket): goods' base prices; a region's price x (1 + front x the share of its war zones with a front + hostile x the share held by enemies + cartel x the share held by predatory groups or the cartel + lawful x the share held by lawful forces or the company); a fixer's own lean instead (only what it deals in). Noise each day; spread between buy and sell; selling pressure_per_unit a unit drives that market's price down, easing pressure_decay a day. Cargo: capacity_base + capacity_per_vehicle a motor pool vehicle. Risks a day: contraband found contraband_risk x (1 + units/10) x (1 + the US's war strength/100 while it's at war): seized, fine_share of what it cost as a fine, contraband_rep with US Forces and -1 with the other lawful; weapons noticed weapons_risk the same way (-1 US); theft at a FOB theft_risk x its danger x 2 (40% of one good).",
+	"market": {
+		"capacity_base": 20,
+		"capacity_per_vehicle": 10,
+		"spread": 0.16,
+		"noise": 0.08,
+		"pressure_per_unit": 0.012,
+		"pressure_decay": 0.25,
+		"contraband_risk": 0.03,
+		"weapons_risk": 0.015,
+		"theft_risk": 0.02,
+		"fine_share": 0.5,
+		"contraband_rep": -3,
+		"goods": {
+			"fuel": {
+				"name": "Fuel",
+				"price": 400,
+				"front": 0.35,
+				"hostile": 0.25,
+				"lawful": -0.15
+			},
+			"weapons": {
+				"name": "Weapons",
+				"price": 2500,
+				"front": 0.6,
+				"hostile": 0.2,
+				"lawful": -0.25
+			},
+			"medical": {
+				"name": "Medical supplies",
+				"price": 900,
+				"front": 0.5,
+				"hostile": 0.3,
+				"lawful": -0.2
+			},
+			"contraband": {
+				"name": "Contraband",
+				"price": 1800,
+				"front": 0.1,
+				"cartel": -0.45,
+				"lawful": 0.6
+			}
+		},
+		"fixers": {
+			"salvage_union": {
+				"contraband": 1.25,
+				"weapons": 0.9,
+				"fuel": 0.95
+			},
+			"meridian": {
+				"medical": 1.15,
+				"fuel": 1.1,
+				"weapons": 1.05
+			}
+		}
 	}
 }

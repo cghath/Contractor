@@ -151,6 +151,7 @@ func _ready() -> void:
 	Contracts.contract_closed.connect(_on_contract_closed)
 	Contracts.contract_closed.connect(ZoneControl.on_contract_closed)  # a seize-and-hold won moves home (docs/lhd_home.md)
 	Economy.day_advanced.connect(ZoneControl.on_day_advanced)  # the liaison's offer comes back
+	Contracts.contract_closed.connect(FobBusiness.on_contract_closed)  # claude/income: a business's protection job done (or not)
 	Contracts.contract_closed.connect(Story.on_contract_closed)  # a story contract done moves the story on (docs/story.md)
 	Economy.day_advanced.connect(Story.on_day_advanced)  # a failed story contract comes back; an act opens
 	view_changed.connect(ZoneControl.on_view_changed)  # clients: the region map follows home

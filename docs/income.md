@@ -14,8 +14,8 @@ and one class per stream. Numbers: data/income.json, **all Proposed**. UI: the b
 |---|---|---|---|
 | 1 | High command squads' side jobs | `SideJobs` | Built |
 | 2 | Captures and bounties | `Bounties` | Built |
-| 3 | FOB businesses | `FobBusiness` | Next |
-| 4 | Black market trading | `BlackMarket` | To do |
+| 3 | FOB businesses | `FobBusiness` | Built |
+| 4 | Black market trading | `BlackMarket` | Next |
 
 ## Shared pieces
 
@@ -146,6 +146,39 @@ effect, by kind of buyer. Price = the intel's worth × rate:
 | Anyone else | 0.9 | +1 |
 
 The client may still find out, as before (`intel_sale_risk`).
+
+## 3. FOB businesses
+
+Once home is a FOB the company holds (not the LHD: `ZoneControl.home_is_lhd()`), the Side work page
+offers four businesses, one of each.
+
+| Business | Setup | Upkeep a day | Local staff | Uses a day | Pays a day |
+|---|---|---|---|---|---|
+| Convoy security (needs a vehicle) | $30,000 | $1,400 | 6 | 1 fuel | $2,600 + $900 per friendly road zone nearby (danger under 0.4) |
+| Militia training camp | $25,000 | $1,500 | 4 | 1 supplies | $2,400, and +0.6 rebel support a day in the region |
+| Checkpoint tolls | $15,000 | $700 | 4 | none | $600 + $1,500 per road held (the FOB's own counts one, plus every company zone with a route or crossing); locals −1 a week |
+| Motor pool rentals | $10,000 | $400 | 2 | 1 parts | $1,100 per vehicle at home (not out on a deployment, not in the workshop) |
+
+- The supplies come from the FOB's stocks (pallets kept at the debrief). Short of them, a
+  business pays half that day.
+- The books show "Business" and "Business upkeep" lines, grouped as "FOB businesses".
+
+**The war threatens them.**
+- Every day, raiders move on one business with a chance of 2% + 12% × the FOB's danger. The FOB's
+  danger is its zone's danger plus 0.08 for each neighbouring zone held by an enemy or fought over.
+- A threatened business puts a **protection contract** (Hold the line at the FOB, against the
+  raider, for the business's client) on the board for 3 days. The board's Side work line and the
+  page say so.
+- **Protected** (the job done): the threat lifts and locals +2.
+- **Left, or the job failed**: the business is raided. It's closed for 4 days and costs 30% of
+  its setup to put right.
+- **The FOB lost** (home no longer a FOB): every business goes with it.
+
+**Why it goes with the flow:**
+- it needs the FOB from the story's act 2;
+- it pays by what the company has made of the war: roads held, friendly ground, vehicles kept;
+- it uses the stocks the company brings home;
+- protecting it is a contract.
 
 ## Before and after (sim)
 

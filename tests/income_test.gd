@@ -23,6 +23,7 @@ func _ready() -> void:
 	_test_captures()
 	_test_bounties()
 	_test_intel_buyers()
+	_test_businesses()
 	Campaign.reset_campaign()
 	print("INCOME TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -184,3 +185,67 @@ func _test_intel_buyers() -> void:
 	Bounties.server_intel_sold("ashen_banner", "black_ridge")
 	check(Economy.reputation("us_forces") < us0, "selling to a terror group costs standing with the lawful factions")
 	check(Bounties.intel_offer_text(&"hvt_case", 1, "us_forces", "black_ridge").contains("+3 standing"), "the debrief's buyer list says the price and the standing")
+
+
+func _ledger_sum(prefix: String, since_day: int) -> int:
+	var n := 0
+	for e: Dictionary in Economy.ledger():
+		if int(e.day) >= since_day and String(e.what).begins_with(prefix):
+			n += int(e.amount)
+	return n
+
+
+func _test_businesses() -> void:
+	print("FOB businesses (FobBusiness)")
+	FobBusiness.fob_override = 0
+	check(FobBusiness.cant_open("militia").contains("FOB"), "no FOB, no businesses")
+	FobBusiness.fob_override = 1
+	var cash0 := Economy.cash()
+	check(Income.server_request("biz_open", ["militia"], 2) != "", "only the host opens a business")
+	check(Income.server_request("biz_open", ["militia"], 1) == "" and Economy.cash() == cash0 - int(FobBusiness.kind("militia").setup), "the militia camp opens for its setup")
+	check(FobBusiness.cant_open("militia") != "", "one of each")
+	var region := RebelSupport.region_of(FobBusiness.fob_zone())
+	var support0 := RebelSupport.support(region)
+	Economy.server_take_stock("supplies", Economy.stock("supplies"))
+	var d0 := Economy.day() + 1
+	Economy.advance_days(1, "test")
+	check(_ledger_sum("Business: Militia", d0) == roundi(FobBusiness.day_pay("militia") * FobBusiness.c("short_pay", 0.5)), "short of supplies, it pays half")
+	check(_ledger_sum("Business upkeep: Militia", d0) == -int(FobBusiness.kind("militia").upkeep), "and its upkeep comes off every day")
+	check(RebelSupport.support(region) > support0, "the camp raises rebel support in the region (%.1f -> %.1f)" % [support0, RebelSupport.support(region)])
+	Economy.server_add_stock("supplies", 5)
+	d0 = Economy.day() + 1
+	Economy.advance_days(1, "test")
+	check(_ledger_sum("Business: Militia", d0) == FobBusiness.day_pay("militia") and Economy.stock("supplies") == 4, "with supplies it pays in full and uses one")
+	check(FobBusiness.units("tolls") >= 1 and FobBusiness.day_pay("tolls") == int(FobBusiness.kind("tolls").pay) + int(FobBusiness.kind("tolls").per_unit) * FobBusiness.units("tolls"),
+		"tolls pay by the roads held (%d)" % FobBusiness.units("tolls"))
+	check(FobBusiness.units("rentals") == MotorPool.list().filter(func(v: Dictionary) -> bool: return String(v.get("out", "")) == "").size(), "rentals pay by the vehicles at home")
+	check(Economy.ledger_kind("Business: Checkpoint tolls") == "FOB businesses" and Economy.ledger_kind("Business upkeep: Tolls") == "FOB businesses", "businesses have their own line in the books")
+	# The war threatens them: a protection job on the board; done, the threat lifts.
+	var t := FobBusiness.server_threaten("militia", Economy.day())
+	var offer := {}
+	for c: Dictionary in Campaign.section(Contracts.SECTION).board:
+		if String(c.get("business", "")) == "militia":
+			offer = c
+	check(not t.is_empty() and not offer.is_empty() and String(offer.get("type", "")) == "defend_hold", "raiders threaten it: a protection job (Hold the line) goes on the board")
+	var locals0 := Economy.locals()
+	FobBusiness.on_contract_closed({"business": "militia", "cid": "nope"}, "failed")
+	check(not (FobBusiness.running().militia.threat as Dictionary).is_empty(), "another job's result doesn't touch the threat")
+	FobBusiness.on_contract_closed(offer, "completed")
+	check((FobBusiness.running().militia.threat as Dictionary).is_empty() and Economy.locals() > locals0, "protected: the threat lifts and the locals noticed")
+	# Left alone, the raid comes.
+	t = FobBusiness.server_threaten("militia", Economy.day())
+	cash0 = Economy.cash()
+	Economy.advance_days(int(FobBusiness.c("threat_days", 3)) + 1, "test")
+	var b: Dictionary = FobBusiness.running().militia
+	check(int(b.closed_until) >= Economy.day() - 1 and _ledger_sum("Business upkeep: Militia training camp raided", 0) < 0, "unprotected, it's raided: closed and repairs to pay")
+	# The FOB lost takes them all.
+	FobBusiness.fob_override = 0
+	Economy.advance_days(1, "test")
+	check(FobBusiness.running().is_empty(), "the FOB lost, the businesses go with it")
+	FobBusiness.fob_override = 1
+	var rows := VBoxContainer.new()
+	add_child(rows)
+	SideWorkPage.build(rows, self)
+	check(rows.find_children("*", "Button", true, false).any(func(x: Button) -> bool: return x.text.begins_with("Open")), "the side work page offers the businesses with their setup and daily take")
+	rows.queue_free()
+	FobBusiness.fob_override = -1

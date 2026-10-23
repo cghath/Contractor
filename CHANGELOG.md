@@ -13,11 +13,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Income: ways to make money with the flow of the game (claude/income)
 
-> **Where I stopped / next step (2026-10-22, 20:45 CDT):** items 1-2 of 4 built (high command side
-> jobs; captures and bounties). Next: 3 FOB businesses, 4 black market, then re-run the
+> **Where I stopped / next step (2026-10-22, 21:10 CDT):** items 1-3 of 4 built (high command side
+> jobs; captures and bounties; FOB businesses). Next: 4 black market (scripts/campaign/black_market.gd
+> drafted, not wired), then re-run the
 > 40-campaign economy sim with all four and tune (before/after in docs/economy.md). Design and
 > numbers: docs/income.md, data/income.json (all Proposed). Local: income (R2531, R2536), smoke + ui
-> (R2532), contracts (R2537), base + ui (R2538).
+> (R2532), contracts (R2537), base + ui (R2538), income (R2541), smoke + base + ui (R2542).
 
 #### Added
 - **Side jobs for the high command squads** (docs/income.md 1): employers and fixers post jobs
@@ -41,6 +42,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Intel to the right buyer**: the debrief's buyer list shows each buyer's price and standing
   effect. Lawful forces pay fair, fixers more, a rival of the faction it's about more still (the
   lawful factions hear of it), and the faction itself pays most to have it back.
+- **FOB businesses** (docs/income.md 3): with a FOB, open convoy security, a militia training camp
+  (raises rebel support), checkpoint tolls (by the roads you hold) or motor pool rentals (by the
+  vehicles at home). Each has a setup cost, daily upkeep with its local staff, and supplies from
+  the FOB's stocks, and pays daily. Raiders threaten them as the war comes near: a protection
+  contract goes on the board; leave it and the business is raided. Lose the FOB and you lose them.
 
 ### Voice and economy (claude/voice-economy)
 

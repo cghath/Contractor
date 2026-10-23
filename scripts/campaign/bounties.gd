@@ -212,7 +212,7 @@ static func poster_of(faction: String) -> String:
 static func server_contract_closed(c: Dictionary, result: Dictionary) -> int:
 	var leader := String(c.get("leader", ""))
 	var faction := String(c.get("target", ""))
-	if String(result.get("outcome", "")) != "completed" or leader == "" or faction == "":
+	if String(result.get("outcome", "")) != "completed" or leader == "" or faction == "" or not Income.enabled:
 		return 0
 	var type := String(c.get("type", ""))
 	var alive := type != "hvt_kill"
@@ -251,6 +251,8 @@ static func intel_buyer_kind(faction: String, subject: String) -> String:
 
 
 static func intel_rule(faction: String, subject: String) -> Dictionary:
+	if not Income.enabled:
+		return {"mult": 1.0, "rep": MissionRegistry.setting_i("intel_sale_rep_buyer", 2)}  # (before the income streams)
 	var rules: Dictionary = cfg("intel_buyers")
 	return rules.get(intel_buyer_kind(faction, subject), rules.get("other", {"mult": 1.0, "rep": 2}))
 
