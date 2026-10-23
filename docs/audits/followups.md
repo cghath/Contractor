@@ -1105,14 +1105,14 @@ existing fire burnout (DETONATE_BURN_S, the crew killed by `_become_wreck`), a c
 `Warheads.server_burst` on everyone near (min(0.4 x rounds, 12) kg), the thrown turret (10+ rounds
 aboard), debris, the venting column, cook-off pops as small HE events.
 
-### F-230 (open, Claude's A9): AI crews read the kill states
+### F-236 (open, Claude's A9): AI crews read the kill states
 `Vehicle.modules.kill_state()` / `kill_changed` / `server_bail_out()` are there. A9's crews: bail
 out on a crew-compartment fire, a cook-off or a catastrophic warning (2.10.1) and call
 `server_bail_out()` as they go; abandon a knocked-out vehicle that isn't repairable; call for
 recovery or repair when it is; the commander takes the gun when the gunner is down (2.5.3).
 Hooks only, per the brief (one line in squad_drivers or squad_ai).
 
-### F-231 (open, A3): main guns on their own modules
+### F-237 (open, A3): main guns on their own modules
 Until A3 the Abrams' and Bradley's gun seat fires the coax stand-in, so the breech, barrel and
 sights (gun_seat 1) gate it. A3: separate weapons per seat (main gun, coax, TOW, the pintle guns)
 each reading its own modules; breech damaged reload x1.5 (2.2.2); the Abrams' bustle doors open
@@ -1120,22 +1120,22 @@ while loading make a bustle detonation catastrophic (2.10.2: VehicleModules vent
 turret on batteries for 10 min after the engine goes (BATTERY_TURRET_S); traverse and elevation
 drives already slow a VehicleTurret's rates (VehicleModules._effects) once those tanks have one.
 
-### F-232 (open, A8): field and FOB repair by module
+### F-238 (open, A8): field and FOB repair by module
 A2 keeps VehicleService's zone repairs (a repair kit on "engine" lifts the engine and
 transmission). A8: the 2.2.2 repair column per module (damaged only in the field, destroyed at
 the FOB), track links per track, patching a tank, refilling racks, extinguisher bottles.
 
-### F-233 (open, A5): the x-ray reads the HitEvents
+### F-239 (open, A5): the x-ray reads the HitEvents
 `Vehicle.modules.events` (the last 10 on every peer) and `VehicleModules.describe()` are the
 card's line ("pen hull_rear: transmission destroyed, engine destroyed; seats 0 hit
 [mobility]"). A5 builds the HitReport and card from them (2.11).
 
-### F-234 (open, A4 and A6): turned-out crew and flooding
+### F-240 (open, A4 and A6): turned-out crew and flooding
 A2 leaves out what needs other phases: turned-out crew taking an outside blast as in the open
 (2.3.6, hatches are A4), sights losing thermal and LRF when damaged (A4's sights), and flooding as
 a mobility kill (A6's fording).
 
-### F-235 (open, A7 or the perf lane): a launcher hit on a vehicle costs ~14 ms on the host in the hull carving
+### F-241 (open, A7 or the perf lane): a launcher hit on a vehicle costs ~14 ms on the host in the hull carving
 Measured while building A2 (vehicles suite, `_test_modules_budget`, R0599): a PG-7V through an
 AAV-7's side is about 0.5 ms of armour work (resolve, path, spall, apply: the A2 budget) but
 12-14 ms for the whole `server_take_hit`, nearly all of it V1's `VehicleHull` carve (the SCORCH
@@ -1270,7 +1270,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.1: the old zones come from the modules on the five plated models (hull = structure, engine = the worse of engine and transmission, wheels = the worse track or the wheels' mean (0 past two gone), fuel = the worst tank, crew and cargo = their compartments); server_set_zone and server_repair set the modules under a zone | DriveContact, VehicleService, MotorPool, the HUD readout and saves read zones and need no change in A2 (2.2.1) | rewriting each of those readers
 2026-10-23 | cg_brief 2.1: one thrown track is a mobility kill | 2.2.2 makes it immobile (it can only pivot), and objectives' "can't drive" should mean what it says; 2.2.5's "both tracks" read as the pair | a mobility kill only with both tracks gone
 2026-10-23 | cg_brief 2.1: wheeled armour runs on run-flats (x0.75 a wheel, two at most) and a third gone stops it, replacing the 15% crawl on every rim (vehicles_test's check changed to match) | 2.2.2 | keep the crawl on rims
-2026-10-23 | cg_brief 2.1: knocked out = catastrophic, burning, a crew kill, or a mobility kill with the guns out (or with no armament modules at all); repairable = knocked out but not burning or burnt and its structure not gone | 2.2.5 plus the brief's "knocked out but repairable"; an unarmed vehicle's mobility kill puts it out | never knocked out when unarmed; a per-module repairability table now (A8, F-232)
+2026-10-23 | cg_brief 2.1: knocked out = catastrophic, burning, a crew kill, or a mobility kill with the guns out (or with no armament modules at all); repairable = knocked out but not burning or burnt and its structure not gone | 2.2.5 plus the brief's "knocked out but repairable"; an unarmed vehicle's mobility kill puts it out | never knocked out when unarmed; a per-module repairability table now (A8, F-238)
 2026-10-23 | cg_brief 2.1: a crew kill = nobody able (up and not dying) in a crew seat, and a man who can't act in one or a crewman taken out since it last had an able crew (dead AI are put out of their seats); an empty parked vehicle is never one; a bail-out sets it through server_bail_out (A7/A9) | 2.2.5's "dead, unconscious or bailed out" without marking every parked vehicle out | any empty crew seat counting
 2026-10-23 | cg_brief 2.1: catastrophic = a wreck (burned out or gone up) | every wreck in the game is a burnout, and a detonation wrecks at once | a separate flag beside wrecked
 2026-10-23 | cg_brief 2.1: an ammo rack rolls to go off only when destroyed, by 2.10.2's KE / CE / HE-inside column; vent (the Abrams' bustle, doors taken as shut until A3's loader), cook_off (a fire: the Bradley's 25 mm, the AAV's Mk19 and M2 cans), catastrophic (wrecked within 0.1 s: the Abrams' hull rack, the Bradley's TOW rack); gated by Vehicle.fire_rolls like the other fire rolls; the fireball, turret toss and blast on bystanders left to A7 (F-229) | 2.2.2 and 2.10.2, A7 owning the effects | the whole A7 sequence in A2
@@ -1282,7 +1282,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.1: a belly blast is an HE hit at or below the belly plate's top (+0.15 m) going up (dir.y > 0.5); its station is the wheel within 0.7 m, the track outboard of the road wheels' line less 0.4 m, else the belly; the floor's kg is ArmourStandards.floor_kg (the mine proof's sum, refactored out of mine_result) | the brief: the same proof constants as the 2.0 mine ratings | a separate injury model
 2026-10-23 | cg_brief 2.1: belly injuries: at or under 0.55 kg on the floor (what the rating holds) ringing ears for 5-20 s and nothing worse; over it a blast at 0.15 + 0.2 per floor's worth over and a fall from 3 m + 3 m per floor's worth over (WoundModel.add_fall: fractures, then death); the blast seats' halving counted once, inside the floor sum | STANAG 4569 rates a hull by its crew fighting on, so a rated hull leaves them able; 2.3.6's "blast seats halve the leg roll" is the 0.5 the proof already applies | doubling the seats' halving; a concussion roll on held blasts
 2026-10-23 | cg_brief 2.1: a charge of 2 kg or more destroys the wheel or track station over it; smaller (an AP mine) only damages it like other HE; modules whose bottom is within 0.6 m of the belly's top and 1.6 m across take 120 kJ/kg of the floor's kg (the AAV's fuel under its troops) | 2.3.6's "always destroyed" read for anti-vehicle charges: a 0.2 kg AP mine shouldn't throw a 60 t tank's track | always destroyed
-2026-10-23 | cg_brief 2.1: a gun seat can't fire with a gun module of it destroyed (breech, barrel, external gun, UGWS) or all its sights destroyed; until A3 the Abrams' and Bradley's coax stand-in is their armament (F-231); a damaged gun module jams for 3 s every 8 rounds, a damaged barrel scatters x3 | 2.2.2 with what fires today | waiting for A3's weapons
+2026-10-23 | cg_brief 2.1: a gun seat can't fire with a gun module of it destroyed (breech, barrel, external gun, UGWS) or all its sights destroyed; until A3 the Abrams' and Bradley's coax stand-in is their armament (F-237); a damaged gun module jams for 3 s every 8 rounds, a damaged barrel scatters x3 | 2.2.2 with what fires today | waiting for A3's weapons
 2026-10-23 | cg_brief 2.1: a destroyed radio sets meta radio_down (SideIntel's Blue Force Tracker, B1.13); damaged has no effect yet | B1.13's hook is the only reader | a radio state of its own
 2026-10-23 | cg_brief 2.1: a HitEvent for every hit ArmourModel resolves and every belly blast, reliable to every peer, short keys (o, p, pl, sh, t, pen, s, m, c, k, b), the last 10 kept on each; module health goes in net_state as one byte each | 2.3.9 | events for penetrations only
 2026-10-23 | cg_brief 2.1: budgets: a penetration's path and spall cone under 0.5 ms pure (armour_test), and the whole hit with spall under 0.5 ms on the host (vehicles_test, an AAV taking PG-7Vs) | 9.3's "a hit with spall under 0.5 ms on the host" | budget only the pure part

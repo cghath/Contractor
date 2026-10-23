@@ -324,7 +324,7 @@ fires, racks, guns, the radio's `radio_down`, turret drive rates); the kill stat
 (`ArmourStandards.floor_kg`, 2.3.6 and 2.4.7); net_state, HitEvents and saves. Technicals,
 aircraft and static weapons keep their zones. The calls made building it are in
 docs/audits/followups.md ("Calls made", 2026-10-23, cg_brief 2.1) and what's left for later phases
-is F-228 to F-234 there.
+is F-228 to F-240 there.
 
 ### 2.3 The shell model
 
