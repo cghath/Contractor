@@ -612,6 +612,16 @@ func server_pay_support(kind: String, cid := "") -> bool:
 	return false
 
 
+## Host: a helicopter insertion's price (prices.json supports "insertion"; economy pass
+## 2026-10-22, Proposed): paid like a support call (the contract's support budget, FOB stocks,
+## cash), and on credit when none of them covers it: the squad is already aboard.
+func server_pay_insertion(cid := "") -> void:
+	var price := Prices.support_price("insertion")
+	if price <= 0 or server_pay_support("insertion", cid):
+		return
+	charge_run(price, "Support call: insertion (on credit)")
+
+
 ## Host: buys air wing upgrade `id` (HeliUpgrades: one-time, company-wide, kept in this
 ## section's "heli_upgrades"). "" when bought, or why not.
 func server_buy_heli_upgrade(id: String) -> String:

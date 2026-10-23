@@ -19,6 +19,12 @@ extends Node
 ##     --seed N        first campaign seed (default 1)
 ##     --hot_win X     a hot-zone contract's win chance as a share of the profile's (default 0.92)
 ##     --hot_cap N     at most N contracts done per hot-zone deployment (default 0: no cap)
+##     --op 0|1        also play the scripted expensive op (default 1; see _expensive_op)
+##
+## Since 2026-10-22 (claude/voice-economy) it also keeps the two standing high command squads
+## (Hawk 2, Viper 3: Heroes.STANDING, eight more men on wages, the start cash's fortnight of
+## their wages, their own casualties and field costs) and flies a heli insertion with the
+## profile's "insert" chance (its price, prices.json supports "insertion", when it has one).
 ##
 ## It plays in a campaign of its own ("sim_economy"), never saved, so a real campaign save is
 ## never touched. Quits by itself (a script error would otherwise leave it idling).
@@ -26,7 +32,9 @@ extends Node
 const SQUAD_OUT := 6  # heads deployed: 2 players + 4 AI squadmates
 const AI_OUT := 4
 const ROSTER_SIZE := 8
-const CHECKPOINTS := [0, 7, 14, 21, 28, 35]
+const CHECKPOINTS := [0, 5, 10, 15, 20, 25, 30, 35]
+## The standing high command squads (Heroes.STANDING): two teams of four.
+const HC_MEN := 8
 
 ## Play profiles. Every number is an assumption about how a squad plays (stated in the proposal),
 ## not something read from the game.
@@ -44,6 +52,9 @@ const CHECKPOINTS := [0, 7, 14, 21, 28, 35]
 ## - intel: "sell" (to another faction), "half" (sell every other piece) or "turn_in".
 ## - pallets: "keep" (FOB stocks), "sell" or "" (not tagged); vehicles: chance it tags a site vehicle.
 ## - civ: chance of a civilian casualty per deployment; hazard: hot-zone pressure tier reached.
+## - hc_kia / hc_wounded: expected killed / wounded per deployment among the standing high
+##   command squads' eight men (they go on every contract).
+## - insert: chance the briefing picks a helicopter insertion (hot zones x1.5).
 ## - radio: chance it takes a radio follow-up after each contract done in a hot zone (HotZoneOps,
 ##   at most MAX_FOLLOW_UPS a deployment).
 const PROFILES := {
@@ -51,18 +62,28 @@ const PROFILES := {
 		"win": [0.97, 0.95, 0.92, 0.85, 0.75], "opt": 0.7, "kia": [0.05, 0.04], "bodies": 0.9, "wounded": 0.8, "deaths": 1.0,
 		"supports": {"transport": 0.5, "extraction": 0.5}, "heli_loss": 0.02,
 		"carry": 12, "boxes": 1.0, "extra_modules": 1, "scatter": 2, "officer_intel": 0.6,
-		"intel": "sell", "pallets": "keep", "vehicles": 0.6, "civ": 0.02, "hazard": 1},
+		"intel": "sell", "pallets": "keep", "vehicles": 0.6, "civ": 0.02, "hazard": 1, "hc_kia": 0.1, "hc_wounded": 0.6, "insert": 0.2},
 	"median": {"max_rated": 4, "hot": true, "terms": {"salvage_points": 1, "support_points": 1},
 		"win": [0.93, 0.88, 0.82, 0.72, 0.6], "opt": 0.5, "kia": [0.1, 0.1], "bodies": 0.6, "wounded": 1.5, "deaths": 3.0,
 		"supports": {"transport": 0.7, "extraction": 0.7, "resupply": 0.4, "medevac": 0.3}, "heli_loss": 0.05,
 		"carry": 6, "boxes": 0.7, "extra_modules": 0, "scatter": 1, "officer_intel": 0.4,
-		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1, "radio": 0.6},
+		"intel": "half", "pallets": "sell", "vehicles": 0.3, "civ": 0.08, "hazard": 1, "radio": 0.6, "hc_kia": 0.3, "hc_wounded": 1.2, "insert": 0.4},
 	"sloppy": {"max_rated": 5, "hot": true, "terms": {"support_points": 2},
 		"win": [0.85, 0.78, 0.68, 0.55, 0.42], "opt": 0.3, "kia": [0.3, 0.2], "bodies": 0.3, "wounded": 2.5, "deaths": 6.0,
 		"supports": {"transport": 1.0, "extraction": 1.0, "resupply": 0.8, "medevac": 0.8, "aav": 0.3, "allied_troops": 0.2}, "heli_loss": 0.1,
 		"carry": 2, "boxes": 0.3, "extra_modules": 0, "scatter": 0, "officer_intel": 0.2,
-		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2, "radio": 0.5},
+		"intel": "turn_in", "pallets": "", "vehicles": 0.0, "civ": 0.2, "hazard": 2, "radio": 0.5, "hc_kia": 0.8, "hc_wounded": 2.0, "insert": 0.6},
 }
+## The scripted expensive op (_expensive_op): a rated-4 contract flown in by helicopter, with
+## resupply, medevac and extraction called, two squadmates and one high command man killed
+## (one body left), three wounded and four respawns bought past the free ones. "fixed" counts
+## replace the profile's dice.
+const EXPENSIVE_OP := {"max_rated": 4, "min_rated": 4, "hot": false, "terms": {"support_points": 1},
+	"win": [1.0, 1.0, 1.0, 1.0, 1.0], "opt": 0.5, "kia": [0.0, 0.0], "bodies": 0.5, "wounded": 0.0, "deaths": 0.0,
+	"supports": {"resupply": 1.0, "medevac": 1.0, "extraction": 1.0}, "heli_loss": 0.0,
+	"carry": 6, "boxes": 0.7, "extra_modules": 0, "scatter": 1, "officer_intel": 0.4,
+	"intel": "half", "pallets": "sell", "vehicles": 0.0, "civ": 0.0, "hazard": 1, "hc_kia": 0.0, "hc_wounded": 0.0, "insert": 1.0,
+	"fixed": {"kia": 2, "wounded": 3, "deaths": 8, "hc_kia": 1}}
 ## Contract types played quietly: fewer of the enemy die (and less is left to loot).
 const STEALTHY := ["recon", "sabotage", "intel_grab"]
 ## A scenario contract's objectives come from its live scenario (not built headless): the sim
@@ -84,6 +105,8 @@ var _orig_prices: Dictionary
 var _orig_settings: Dictionary
 var _acc: Dictionary = {}
 var _roster: Array = []
+var _hc: Array = []  # the standing high command squads' men (Hawk 2, Viper 3)
+var _start_cash := 0
 var _hire_refresh := 0
 var _rng := RandomNumberGenerator.new()
 var _hot_win := 0.92  # --hot_win: a hot-zone contract's win chance, as a share of the profile's
@@ -112,6 +135,8 @@ func _ready() -> void:
 	for v: String in variants:
 		for p: String in profiles:
 			_run_profile(p, v, runs, days, first_seed)
+		if String(args.get("op", "1")) != "0":
+			_expensive_op(v, runs, first_seed)
 	get_tree().quit(0)
 
 
@@ -169,7 +194,7 @@ func _run_profile(pname: String, v: String, runs: int, days: int, first_seed: in
 	_report(pname, v, runs, totals, cash_at, worth_at, deploys, bankrupt, min_cash)
 
 
-func _run_campaign(prof: Dictionary, campaign_seed: int, days: int) -> Dictionary:
+func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := false) -> Dictionary:
 	_rng.seed = hash([campaign_seed, "sim"])
 	seed(hash([campaign_seed, "global"]))  # server_sell_intel's randf() (caught or not)
 	_acc = {}
@@ -178,14 +203,37 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int) -> Dictionar
 	_roster = []
 	Economy.wages_provider = func() -> int:
 		var total := 0
-		for m: Dictionary in _roster:
+		for m: Dictionary in _roster + _hc:
 			total += int(m.wage)
 		return total * _week_days()
 	_harvest("")
 	while _roster.size() < ROSTER_SIZE:
 		_hire_one()
+	_hc = []
+	var hc_rng := RandomNumberGenerator.new()
+	hc_rng.seed = hash([campaign_seed, "hc"])
+	for i in HC_MEN:
+		_hc.append(_hc_man(hc_rng, i % Heroes.TEAM_ROLES.size()))
+	var hc_wages := 0
+	for m: Dictionary in _hc:
+		hc_wages += int(m.wage)
+	Economy.add_cash(hc_wages * Heroes.START_WAGE_DAYS, "Standing squads: their first fortnight")  # as BaseHub
 	_harvest("")
 	var start_day := Economy.day()
+	_start_cash = Economy.cash()
+	if one_op:
+		var deploys1: Array = []
+		var guard1 := 0
+		while deploys1.is_empty() and guard1 < 20:  # a rated-4 job on the board (it refreshes daily)
+			guard1 += 1
+			var d1 := _deploy(prof)
+			if d1.is_empty():
+				Economy.advance_days(1, "waiting for work")
+				_harvest("")
+			else:
+				deploys1.append(d1)
+		Economy.wages_provider = Callable()
+		return {"acc": _acc.duplicate(), "deploys": deploys1, "cash_after_op": Economy.cash()}
 	var cash_at := {0: Economy.cash()}
 	var worth_at := {0: Economy.cash() - Economy.loans_owed()}
 	var deploys: Array = []
@@ -220,6 +268,34 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int) -> Dictionar
 
 # --- Hiring -----------------------------------------------------------------------------------
 
+## A standing squad's man, as Heroes.seed_standing makes him: a hire of the team's role, with
+## the hero's (slot 0) or a man's history.
+func _hc_man(rng: RandomNumberGenerator, slot: int) -> Dictionary:
+	var person := Hiring.candidate(rng)
+	person["role"] = String(Heroes.TEAM_ROLES[slot])
+	var missions := Heroes.HERO_MISSIONS + rng.randi_range(0, 3) if slot == 0 else Heroes.MAN_MISSIONS + rng.randi_range(0, 3)
+	person["missions"] = missions
+	person["wage"] = Roster.wage_of(person)
+	person.erase("cid")
+	return person
+
+
+## A standing squad's replacement: the cheapest of the board, his fee paid (into debt if need be).
+func _hire_hc_replacement(role: String) -> Dictionary:
+	var pool := Hiring.draw_pool(int(hash(["sim_hc_hire", Economy.day()])), _hire_refresh)
+	_hire_refresh += 1
+	var c: Dictionary = pool[0]
+	for cand: Dictionary in pool:
+		if int(cand.fee) < int(c.fee):
+			c = cand
+	if not Economy.spend(int(c.fee), "Hired %s" % c.name):
+		Economy.add_cash(-int(c.fee), "Hired %s (into debt)" % c.name)
+	var m := c.duplicate(true)
+	m.erase("cid")
+	m["role"] = role
+	return m
+
+
 func _hire_one() -> void:
 	var pool := Hiring.draw_pool(int(hash(["sim_hire", Economy.day()])), _hire_refresh)
 	_hire_refresh += 1
@@ -247,7 +323,7 @@ func _pick_contract(prof: Dictionary) -> Dictionary:
 		var src := String(c.get("source", ""))
 		if src in ["locals", "recovery"]:
 			continue
-		if int(c.rated) > int(prof.max_rated):
+		if int(c.rated) > int(prof.max_rated) or int(c.rated) < int(prof.get("min_rated", 1)):
 			continue
 		if String(c.zone_kind) == "hot" and not bool(prof.hot):
 			continue
@@ -297,6 +373,8 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	var kind := "hot" if hot else "contract"
 	if hot:
 		Contracts.server_note_deployment("hazard_tier", int(prof.hazard))
+	if _rng.randf() < float(prof.get("insert", 0.0)) * (1.5 if hot else 1.0):
+		Economy.server_pay_insertion(cid)  # as HeliSupports.server_insert
 	# The fighting's dice: objectives.
 	# (Through Objectives' own calls: they keep the campaign's copy, which the list is restored from.)
 	var objectives: Objectives = Contracts.objectives
@@ -342,7 +420,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 			if Economy.server_pay_support(k, cid) and Prices.lost_support_price(k) > 0 and _rng.randf() < float(prof.heli_loss):
 				Economy.charge_run(roundi(Prices.lost_support_price(k) * HeliUpgrades.lost_mult(k)), "Lost helicopter (%s support): replacement" % k)
 	_harvest("")
-	var deaths := _poisson(float(prof.deaths) * (1.5 if hot else 1.0))
+	var deaths := _count(prof, "deaths", float(prof.deaths) * (1.5 if hot else 1.0))
 	var free := int(RosterDeployment.FREE_RESPAWNS.get(kind, 4))
 	var bought := 0
 	for i in deaths:
@@ -368,18 +446,31 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	for i in mini(AI_OUT, pool.size()):
 		out_ai.append(pool[i])
 	var dead: Array = []
+	var fixed: Dictionary = prof.get("fixed", {})
 	for m: Dictionary in out_ai:
-		if _rng.randf() < kia_expect / AI_OUT:
+		if (dead.size() < int(fixed.kia)) if fixed.has("kia") else _rng.randf() < kia_expect / AI_OUT:
 			dead.append(m)
+	var hc_dead: Array = []
+	for m: Dictionary in _hc:
+		if (hc_dead.size() < int(fixed.hc_kia)) if fixed.has("hc_kia") else _rng.randf() < float(prof.get("hc_kia", 0.0)) * (1.3 if hot else 1.0) / HC_MEN:
+			hc_dead.append(m)
 	var casualties: Array = []
 	var extracted: Array = []
 	for i in SQUAD_OUT - dead.size():
 		extracted.append("S%d" % i)
-	for m: Dictionary in dead:
+	for m: Dictionary in dead + hc_dead:
 		casualties.append({"name": String(m.name), "status": "kia"})
-	var wounded := mini(_poisson(float(prof.wounded) * (1.3 if hot else 1.0)), extracted.size())
+	var wounded := mini(_count(prof, "wounded", float(prof.wounded) * (1.3 if hot else 1.0)), extracted.size())
 	for i in wounded:
 		casualties.append({"name": extracted[i], "status": "wounded"})
+	# The high command squads come out too (field costs for each, treatment for their wounded).
+	var hc_out: Array = []
+	for i in HC_MEN - hc_dead.size():
+		hc_out.append("H%d" % i)
+	var hc_wounded := mini(_poisson(float(prof.get("hc_wounded", 0.0)) * (1.3 if hot else 1.0)), hc_out.size())
+	for i in hc_wounded:
+		casualties.append({"name": hc_out[i], "status": "wounded"})
+	extracted.append_array(hc_out)
 	# Loot: the dead enemy's kit (the real hostile loadouts), what the squad carries out, the
 	# site's loot boxes (the real rolls), dead drops, an officer's intel and the objective intel.
 	var field: Array = []
@@ -478,6 +569,13 @@ func _deploy(prof: Dictionary) -> Dictionary:
 			Roster.after_mission(m, _rng, Economy.day())
 	while _roster.size() < ROSTER_SIZE:
 		_hire_one()
+	# A standing squad's dead are replaced from the hiring board (their fee), the rest a mission older.
+	for i in _hc.size():
+		var m: Dictionary = _hc[i]
+		if m in hc_dead:
+			_hc[i] = _hire_hc_replacement(String(m.role))
+		else:
+			Roster.after_mission(m, _rng, Economy.day())
 	_harvest("")
 	var delta := {}
 	for k: String in _acc:
@@ -499,9 +597,9 @@ func _deploy(prof: Dictionary) -> Dictionary:
 ## Wages plus upkeep per day, as the bill stands.
 func _fixed_daily() -> float:
 	var wages := 0
-	for m: Dictionary in _roster:
+	for m: Dictionary in _roster + _hc:
 		wages += int(m.wage)
-	return wages + float(_orig_prices.get("weekly_upkeep", 0)) / 7.0
+	return wages + float(Prices.data().get("weekly_upkeep", 0)) / 7.0
 
 
 func _intel_buyer(client: String) -> String:
@@ -621,6 +719,12 @@ func _harvest(tag: String) -> void:
 	ledger.clear()
 
 
+## A count from the profile's "fixed" table, or a Poisson draw with `mean`.
+func _count(prof: Dictionary, key: String, mean: float) -> int:
+	var fixed: Dictionary = prof.get("fixed", {})
+	return int(fixed[key]) if fixed.has(key) else _poisson(mean)
+
+
 func _poisson(mean: float) -> int:
 	var l := exp(-mean)
 	var k := 0
@@ -631,6 +735,40 @@ func _poisson(mean: float) -> int:
 			return k
 		k += 1
 	return k
+
+
+# --- The expensive op ---------------------------------------------------------------------------
+
+## The scripted expensive op (EXPENSIVE_OP), the first rated-4 job of `runs` fresh campaigns: its
+## economic net (as a deployment's "econ_net") when it's won and when it fails, and the cash
+## after it against the start, so "an expensive op hurts but isn't ruinous" has a number.
+func _expensive_op(v: String, runs: int, first_seed: int) -> void:
+	_apply_variant(v)
+	print("")
+	print("=== expensive op / %s (%d campaigns): rated 4, heli insertion, resupply + medevac + extraction, 2 KIA + 1 high command KIA, 3 wounded, 4 respawns bought ===" % [v, runs])
+	for won: bool in [true, false]:
+		var prof: Dictionary = EXPENSIVE_OP.duplicate(true)
+		prof.win = [1.0, 1.0, 1.0, 1.0, 1.0] if won else [0.0, 0.0, 0.0, 0.0, 0.0]
+		var nets: Array = []
+		var cash_after: Array = []
+		var starts: Array = []
+		var parts := {}
+		for r in runs:
+			var res := _run_campaign(prof, first_seed + r, 0, true)
+			if res.deploys.is_empty():
+				continue
+			var d: Dictionary = res.deploys[0]
+			nets.append(float(d.econ_net))
+			cash_after.append(float(res.cash_after_op))
+			starts.append(float(_start_cash))
+			for k: String in d.delta:
+				parts[k] = float(parts.get(k, 0.0)) + float(d.delta[k])
+		var line := PackedStringArray()
+		for k: String in INCOME + EXPENSES:
+			if absf(float(parts.get(k, 0.0))) > 0.5:
+				line.append("%s %s" % [k, _k(float(parts[k]) / maxf(nets.size(), 1))])
+		print("  %s: net mean %s, worst %s; cash after it %s (start %s)" % ["won" if won else "failed", _k(_mean(nets)), _k(_pct(nets, 0.0)), _k(_mean(cash_after)), _k(_mean(starts))])
+		print("    " + ", ".join(line))
 
 
 # --- Output -------------------------------------------------------------------------------------

@@ -386,6 +386,8 @@ static func server_insert(from: Node, at: Vector2, via: Variant = null, objectiv
 	if not call.server_launch():
 		return false
 	node.calls.append(call)
+	var cids: Array = Contracts.deployment().get("cids", [])
+	Economy.server_pay_insertion(String(cids[0]) if not cids.is_empty() else "")
 	return true
 
 
