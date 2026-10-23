@@ -1829,10 +1829,15 @@ func built_near_cells() -> int:
 ## Perf pass (2026-10-22): the PER_FRAME builds a check wants ([cell, tier]) are made one a frame,
 ## not all in the check's frame (a cell is tens of milliseconds of main thread).
 func _process(delta: float) -> void:
-	if not _queued.is_empty():
+	if _cover_task >= 0:
+		_take_cover()
+	elif not _queued.is_empty():
 		var w: Array = _queued.pop_front()
 		if not (_built_near if int(w[1]) == Tier.NEAR else _built).has(w[0]):
-			_build_cell(w[0], w[1])
+			if int(w[1]) == Tier.NEAR and not (_entry.get("visual", {}) as Dictionary).has(Vector3i(w[0].x, w[0].y, Tier.NEAR)):
+				_start_cover(w[0])
+			else:
+				_build_cell(w[0], w[1])
 	_next_check -= delta
 	if _next_check > 0.0:
 		return
@@ -1843,6 +1848,44 @@ func _process(delta: float) -> void:
 
 
 var _queued: Array = []  # [cell, tier] builds, one a frame (_process)
+## World content pass (2026-10-23; F-225): a near tier's ground cover (a cell's ~1000 tufts and
+## pebbles, each tested against the pads, roads, water and fields and set on the ground: 20-35 ms of
+## GDScript, the scatter's whole near-tier cost) is laid out on a worker thread, one cell at a time;
+## the cell is built here once it's done (_take_cover). build_near (tests, the first build round a
+## spot) still builds in place.
+var _cover_task := -1
+var _cover_cell := Vector2i.ZERO
+var _cover_out := {}
+
+
+func _start_cover(cell: Vector2i) -> void:
+	var t0 := Time.get_ticks_usec()
+	_cover_cell = cell
+	_cover_out = {}
+	_cover_task = WorkerThreadPool.add_task(_cover_on_worker.bind(cell, _pads_for(cell)), false, "scatter ground cover")
+	FrameCost.spent(&"scatter_cells", t0)
+
+
+func _cover_on_worker(cell: Vector2i, keep: Array[Rect2]) -> void:
+	var groups := {}
+	_ground_cover(cell, groups, keep)
+	_cover_out = groups
+
+
+func _take_cover() -> void:
+	if not WorkerThreadPool.is_task_completed(_cover_task):
+		return
+	WorkerThreadPool.wait_for_task_completion(_cover_task)
+	_cover_task = -1
+	if not _built_near.has(_cover_cell):
+		_build_cell(_cover_cell, Tier.NEAR, _cover_out)
+	_cover_out = {}
+
+
+func _exit_tree() -> void:
+	if _cover_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_cover_task)
+		_cover_task = -1
 
 
 ## Builds cell `cell`'s `tier` (Tier): its MultiMeshes (from the cache entry when this zone built
@@ -1851,7 +1894,7 @@ var _queued: Array = []  # [cell, tier] builds, one a frame (_process)
 ## ranges (the trees and thickets till their block's far blobs take over, _far_parent), and the
 ## rocks and props over theirs. Each node has its "centre" (the cell's middle) as a meta, for tests.
 ## Ranges are scaled by the Detail setting (_range_of, GameSettings.detail).
-func _build_cell(cell: Vector2i, tier := Tier.FAR) -> void:
+func _build_cell(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> void:
 	var t0 := Time.get_ticks_usec()
 	if tier == Tier.NEAR:
 		_built_near[cell] = true
@@ -1861,7 +1904,7 @@ func _build_cell(cell: Vector2i, tier := Tier.FAR) -> void:
 	var at := Vector3i(cell.x, cell.y, tier)
 	var parts: Array = kept.get(at, [])
 	if not kept.has(at):
-		parts = _cell_parts(cell, tier)
+		parts = _cell_parts(cell, tier, cover)
 		if _entry.has("visual"):
 			kept[at] = parts  # built once, kept while this zone is among the newest (CACHE_VISUAL_ZONES)
 	var half := _terrain.size_m * 0.5
@@ -1935,7 +1978,7 @@ const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE
 ## Cell `cell`'s MultiMeshes for `tier` (Tier): [[group key, MultiMesh], ...]. The near tier: the
 ## trees, thickets and scrub as visual_parts draws them, and the ground cover; the far tier: their
 ## low-poly stand-ins (LOD_KEYS, at the same transforms), the rocks, props and wires.
-func _cell_parts(cell: Vector2i, tier := Tier.FAR) -> Array:
+func _cell_parts(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> Array:
 	var groups := {}
 	for index: int in _cells[cell]:
 		for part: Array in visual_parts(items[index]):
@@ -1953,7 +1996,10 @@ func _cell_parts(cell: Vector2i, tier := Tier.FAR) -> Array:
 				groups["wire"] = []
 			_wires(items[index - 1], items[index], groups["wire"])
 	if tier == Tier.NEAR:
-		_ground_cover(cell, groups)
+		if cover is Dictionary:
+			groups.merge(cover)  # (laid out on a worker: _start_cover)
+		else:
+			_ground_cover(cell, groups, _pads_for(cell))
 	var parts: Array = []
 	for key in groups:
 		var list: Array = groups[key]
@@ -2169,7 +2215,7 @@ func _far_mesh() -> ArrayMesh:
 
 ## Grass tufts and pebbles for `cell` (visual only, see SEE_TUFT_M): from the cell and the seed,
 ## thicker where the scrub clusters, none on pads, roads, water or steep ground.
-func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
+func _ground_cover(cell: Vector2i, groups: Dictionary, keep: Array[Rect2]) -> void:
 	var tufts := mini(int(float(_spec.get("tufts_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
 	var pebbles := mini(int(float(_spec.get("pebbles_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
 	if tufts + pebbles == 0 and float(_spec.get("rock_clusters_per_km2", 0.0)) <= 0.0:
@@ -2199,12 +2245,12 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 			continue  # tufts in patches
 		if open and roll > _open_weight(x, z):
 			continue  # an open pan's middle stays bare
-		if _ground_blocked(x, z):
+		if _cover_blocked(x, z, keep):
 			continue
-		var h := _terrain.height_at(x, z)
+		var h := _terrain.plane_height(x, z)
 		if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.5:
 			continue
-		var nrm := _terrain.normal_at(x, z)
+		var nrm := _terrain.plane_normal(x, z)
 		if nrm.y < 0.82:
 			continue
 		var basis := Basis(Vector3.UP, yaw)
@@ -2225,12 +2271,12 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 		var cx := x0 + rng.randf() * CELL_M
 		var cz := z0 + rng.randf() * CELL_M
 		var stones := rng.randi_range(3, 7)
-		if absf(cx) > half - EDGE_KEEP_M or absf(cz) > half - EDGE_KEEP_M or _ground_blocked(cx, cz):
+		if absf(cx) > half - EDGE_KEEP_M or absf(cz) > half - EDGE_KEEP_M or _cover_blocked(cx, cz, keep):
 			continue
 		if open and _open_weight(cx, cz) < 0.5:
 			continue  # rubble at the margins and round the compounds, not on the open pan
-		var ch := _terrain.height_at(cx, cz)
-		if (_terrain.sea_side >= 0 and ch < _terrain.sea_level + 0.5) or _terrain.normal_at(cx, cz).y < 0.6:
+		var ch := _terrain.plane_height(cx, cz)
+		if (_terrain.sea_side >= 0 and ch < _terrain.sea_level + 0.5) or _terrain.plane_normal(cx, cz).y < 0.6:
 			continue
 		var base: Color = rock_colours[rng.randi() % rock_colours.size()]
 		for k in stones:
@@ -2241,24 +2287,31 @@ func _ground_cover(cell: Vector2i, groups: Dictionary) -> void:
 			var size := rng.randf_range(0.55, 0.95) if k == 0 else rng.randf_range(0.2, 0.6)
 			var squash := rng.randf_range(0.5, 0.8)
 			var basis := Basis(Vector3.UP, rng.randf() * TAU).rotated(Vector3(cos(a), 0, sin(a)), rng.randf_range(-0.25, 0.25))
-			var h := _terrain.height_at(x, z)
+			var h := _terrain.plane_height(x, z)
 			groups["outcrop"].append([Transform3D(basis.scaled(Vector3(size, size * squash, size * rng.randf_range(0.8, 1.3))), Vector3(x, h + size * squash * 0.2, z)),
 				base.darkened(rng.randf() * 0.12).lightened(rng.randf() * 0.08)])
 
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.
 ## Perf pass (2026-10-22): the pads and roads are narrowed to those reaching (x, z)'s cell, once
-## per cell (_blockers_for): every tuft and pebble of a cell tested every road in the zone.
+## per cell (_pads_for): every tuft and pebble of a cell tested every road in the zone.
 func _ground_blocked(x: float, z: float) -> bool:
+	var cell := _cell_of(x, z)
+	if cell != _gb_cell:
+		_gb_cell = cell
+		_gb_keep = _pads_for(cell)
+	return _cover_blocked(x, z, _gb_keep)
+
+
+## _ground_blocked with the pads reaching the point's cell given (_pads_for): no shared state, so
+## a worker thread can lay ground cover with it (_start_cover). Reads only the generated layout.
+func _cover_blocked(x: float, z: float, keep: Array[Rect2]) -> bool:
 	if _terrain.water and _terrain.water.keeps_clear(x, z):
 		return true  # a river, lake or bridge (ZoneWater)
 	if _terrain.features and _terrain.features.keeps_clear(x, z):
 		return true  # a field (ZoneFeatures)
 	var p := Vector2(x, z)
-	var cell := _cell_of(x, z)
-	if cell != _gb_cell:
-		_blockers_for(cell)
-	for r in _gb_keep:
+	for r in keep:
 		if r.has_point(p):
 			return true
 	for road: Array in _roads_near(p, 4.0):
@@ -2275,15 +2328,15 @@ var _gb_keep: Array[Rect2] = []
 
 ## The pads (shrunk as ground cover keeps off them) reaching `cell` (perf pass 2026-10-22: every
 ## tuft and pebble of a cell tested every pad of the zone; the roads go by _roads_near's index).
-func _blockers_for(cell: Vector2i) -> void:
-	_gb_cell = cell
-	_gb_keep.clear()
+func _pads_for(cell: Vector2i) -> Array[Rect2]:
+	var out: Array[Rect2] = []
 	var half := _terrain.size_m * 0.5
 	var box := Rect2(Vector2(-half + cell.x * CELL_M, -half + cell.y * CELL_M), Vector2(CELL_M, CELL_M)).grow(8.0)
 	for r in _keep:
 		var g := r.grow(-PAD_KEEP_M + 2.0)
 		if g.intersects(box):
-			_gb_keep.append(g)
+			out.append(g)
+	return out
 
 
 # --- Shapes: low-poly blocks, flat shaded ----------------------------------------------------

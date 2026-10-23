@@ -29,6 +29,8 @@ const MAX_BAKES := 8
 const UPDATE_S := 0.3
 ## Room above the ground in a chunk's bake for the structures (m).
 const HEADROOM_M := 8.0
+## Whether the zone's navigation map builds its iterations on a worker thread (build_zone).
+const MAP_ASYNC := true
 
 var zone: ZoneLevel
 var _origin := Vector2.ZERO  # the grid's corner (x, z)
@@ -53,7 +55,11 @@ static func build_zone(p_zone: ZoneLevel) -> ZoneNav:
 	# Chunks come and go all the time here; with asynchronous iterations some region updates
 	# never reached the map (measured: whole chunks missing from paths while their regions
 	# held the right meshes). Synchronous updates (map and regions) cost well under 1 ms.
-	NavigationServer3D.map_set_use_async_iterations(nav.get_world_3d().navigation_map, false)
+	# World content pass (2026-10-23): in a city (~500 chunks with floors over floors) a map
+	# update is 10-16 ms on the main thread, about twice a second (perfcases city, R0576: the
+	# server's frame median 9.8 ms): the map's own iterations are built on a worker (MAP_ASYNC);
+	# the regions' stay synchronous (the missing updates above).
+	NavigationServer3D.map_set_use_async_iterations(nav.get_world_3d().navigation_map, MAP_ASYNC)
 	return nav
 
 
@@ -203,7 +209,7 @@ func is_settled() -> bool:
 ## Works out the wanted chunks now (they're also refreshed every UPDATE_S).
 func refresh() -> void:
 	_next_update = Time.get_ticks_msec() / 1000.0 + UPDATE_S
-	_update_wanted()
+	_update_wanted(true)
 
 
 ## How many chunks are baked (or baking) now.
@@ -215,7 +221,10 @@ func _physics_process(_delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if now >= _next_update:
 		_next_update = now + UPDATE_S
+		var t_w := Time.get_ticks_usec()
 		_update_wanted()
+		FrameCost.spent(&"nav_wanted", t_w)
+	var t_s := Time.get_ticks_usec()
 	# Start new chunks, nearest first, while there's room, for at most REBAKE_BUDGET_MS a frame
 	# (gathering a chunk's voxels takes milliseconds; 8 at once held fights' frames for 50-200 ms).
 	var until := Time.get_ticks_usec() + int(REBAKE_BUDGET_MS * 1000.0)
@@ -233,18 +242,31 @@ func _physics_process(_delta: float) -> void:
 		NavigationServer3D.region_set_use_async_iterations(region.get_rid(), false)
 		_regions[chunk] = region
 		_request_rebake(chunk)
+	FrameCost.spent(&"nav_start", t_s)
 
 
-func _update_wanted() -> void:
+## Perf (world content pass, 2026-10-23): the chunks nobody is near any more are looked for every
+## DROP_EVERY passes (and on refresh), not every pass: the wider ring each soldier keeps was most of
+## a pass's marking (~110 chunks a soldier against ~25 wanted), 5-10 ms a pass for a city's ~100 AI.
+const DROP_EVERY := 4
+var _drop_turn := 0
+
+
+func _update_wanted(full := false) -> void:
 	var near := {}  # Vector2i -> distance
 	var keep := {}
+	_drop_turn += 1
+	var drops := full or _drop_turn % DROP_EVERY == 0
 	for s in zone.soldiers_for_navigation():
+		if _riding_past(s):
+			continue
 		var radius := PLAYER_RADIUS_M if not s.is_ai() else AI_RADIUS_M
 		_mark(near, s.global_position, radius)
-		_mark(keep, s.global_position, radius + DROP_MARGIN_M)
+		if drops:
+			_mark(keep, s.global_position, radius + DROP_MARGIN_M, false)
 	_wanted = near
 	# Drop chunks nobody is near any more.
-	for chunk: Vector2i in _regions.keys():
+	for chunk: Vector2i in (_regions.keys() if drops else []):
 		if not keep.has(chunk):
 			_regions[chunk].queue_free()
 			_regions.erase(chunk)
@@ -259,18 +281,54 @@ func _update_wanted() -> void:
 	_queue = missing
 
 
-## Marks every chunk within `radius` of `pos` (flat) with its distance from `pos`.
-func _mark(into: Dictionary, pos: Vector3, radius: float) -> void:
+## Proposed (world content pass, 2026-10-23): a soldier in a flying helicopter going faster than
+## RIDE_FAST_MS, or more than RIDE_AGL_M over the ground, wants no navigation round him: he can't
+## walk off, and every chunk he flew over was baked and dropped again (from a UH-60 contour-flying
+## at 12.5 m, ~20 bakes a second, each a few ms of gathering on the main thread, R0568). Slowing
+## and coming down to land, the chunks round him are wanted again (UPDATE_S) and bake before anyone
+## gets out. (Ground vehicles keep theirs: VehicleAI plans on the navigation mesh round the vehicle.)
+const RIDE_FAST_MS := 8.0
+const RIDE_AGL_M := 15.0
+
+
+func _riding_past(s: Soldier) -> bool:
+	if s.vehicle == null or not is_instance_valid(s.vehicle):
+		return false
+	var heli := s.vehicle as Helicopter
+	if heli == null or not heli.is_airborne():
+		return false
+	var v := heli.linear_velocity
+	return Vector2(v.x, v.z).length() > RIDE_FAST_MS or heli.height_agl() > RIDE_AGL_M
+
+
+## Marks every chunk within `radius` of `pos` (flat) with its distance from `pos` (`distances`
+## false: with true, for a set). Perf (world content pass, 2026-10-23): the same chunks as before,
+## worked out with plain floats (a Rect2 and a Vector2 per chunk, ~100 AI each marking ~110
+## chunks every UPDATE_S, was a few ms a pass in a city).
+func _mark(into: Dictionary, pos: Vector3, radius: float, distances := true) -> void:
 	var lo := _chunk_of(pos - Vector3(radius, 0, radius))
 	var hi := _chunk_of(pos + Vector3(radius, 0, radius))
-	var p := Vector2(pos.x, pos.z)
 	var half := zone.terrain.size_m * 0.5
+	var r2 := radius * radius
 	for cz in range(lo.y, hi.y + 1):
+		var z0 := _origin.y + cz * ZONE_CHUNK_M
+		var z1 := z0 + ZONE_CHUNK_M
+		if z1 < -half or z0 > half:
+			continue
+		var dz := maxf(maxf(z0 - pos.z, pos.z - z1), 0.0)
 		for cx in range(lo.x, hi.x + 1):
-			var chunk := Vector2i(cx, cz)
-			var r := _rect_of(chunk)
-			if r.end.x < -half or r.position.x > half or r.end.y < -half or r.position.y > half:
+			var x0 := _origin.x + cx * ZONE_CHUNK_M
+			var x1 := x0 + ZONE_CHUNK_M
+			if x1 < -half or x0 > half:
 				continue
-			var d := ZoneTerrain._distance_to_rect(p, r)
-			if d <= radius and d < float(into.get(chunk, INF)):
+			var dx := maxf(maxf(x0 - pos.x, pos.x - x1), 0.0)
+			var d2 := dx * dx + dz * dz
+			if d2 > r2:
+				continue
+			var chunk := Vector2i(cx, cz)
+			if not distances:
+				into[chunk] = true
+				continue
+			var d := sqrt(d2)
+			if d < float(into.get(chunk, INF)):
 				into[chunk] = d

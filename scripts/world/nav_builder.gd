@@ -43,6 +43,8 @@ var _waiting := {}   # Vector2i -> true: voxels not loaded yet, rebake when they
 var _holds := 0      # hold() calls not yet released
 var _held := {}      # Vector2i -> true: rebakes asked for while held, done once on release
 var _mesh_iteration := -1  # the navigation map's iteration id when a chunk's mesh last changed
+## Background bakes started (for the perf cases and tests).
+var bakes := 0
 
 
 ## Host only. Bakes the compound's navigation from the structures' boxes and keeps it up to
@@ -153,6 +155,7 @@ func _request_rebake(chunk: Vector2i) -> void:
 		set_process(true)
 		return
 	_baking[chunk] = true
+	bakes += 1
 	var mesh := _mesh_for(chunk)
 	# Through a weak reference: the level may be gone by the time the bake finishes.
 	NavigationServer3D.bake_from_source_geometry_data_async(mesh, source, NavBuilder._bake_done.bind(weakref(self), chunk, mesh))

@@ -52,19 +52,31 @@ const HITCH_MEDIANS := 3.0
 ## doubling; the first budgets (town 75/140, heli 28/45...) are in docs/performance.md.
 ## Tightened 2026-10-22 (claude/perf-towns, R2517/R2519): about twice a quiet local run again, the
 ## town case now a village (the city has its own case).
+## Tightened 2026-10-23 (perf/world-content): about 2.5-3x CI's numbers after the world content pass
+## (town 6.0 / 9.5, city 83 / 95, woods 5.8 / 8.6, drive 6.7 / 10.0, heli 5.9 / 8.2 ms average / 95th,
+## no hitches; run 39911142961), all under CI's before it (claude/ai-driving 78dc9a17, run 39888713096:
+## town 7.5 / 15.3, city 112 / 127, woods 8.3 / 12.3, drive 8.4 / 11.6, heli 10.2 / 18.3). The town's
+## hitches are team spawns (F-206: 0-13 a minute on CI, 30 allowed). fight, the AI's case, keeps its
+## times; its hitches (the AI's ticks and team spawns, 30-72 a minute on CI, 72.5 failed 70 on
+## claude/ai-driving's own run) get 90.
 const BUDGETS := {
-	"town": {"avg": 30.0, "p95": 50.0, "hitches_min": 40.0},
-	"city": {"avg": 260.0, "p95": 520.0, "hitches_min": 90.0},
-	"fight": {"avg": 100.0, "p95": 170.0, "hitches_min": 70.0},
-	"woods": {"avg": 35.0, "p95": 50.0, "hitches_min": 30.0},
-	"drive": {"avg": 40.0, "p95": 60.0, "hitches_min": 30.0},
-	"heli": {"avg": 40.0, "p95": 70.0, "hitches_min": 45.0},
+	"town": {"avg": 15.0, "p95": 25.0, "hitches_min": 30.0},
+	"city": {"avg": 200.0, "p95": 300.0, "hitches_min": 60.0},
+	"fight": {"avg": 100.0, "p95": 170.0, "hitches_min": 90.0},
+	"woods": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
+	"drive": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
+	"heli": {"avg": 18.0, "p95": 30.0, "hitches_min": 15.0},
 }
 ## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
 ## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners
 ## are the guard.
 const LOCAL_SLACK := 1.6
 const WALK_MPS := 3.0
+## How long a case waits for its modules and navigation before it measures (ms): the city's 20-odd
+## blocks build their voxels a slice a frame (VoxelWorld.BUILD_BUDGET_MS each) while their garrisons
+## come in, and at CI's 3 frames a second there the biggest was still building at 60 s (run
+## 39908072526) and at 100 s (run 39912912838).
+const SETTLE_MS := 180000
 ## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
 ## the import and all five zones); averages and per-minute rates compare the same.
 const CI_MEASURE_SHARE := 0.6
@@ -102,6 +114,7 @@ var _scripts_ms: Array[float] = []
 var _engine_ms: Array[float] = []
 var _proc_ms: Array[float] = []
 var _nav_ms := 0.0
+var _nav_frames: Array[float] = []  # the navigation server's time each frame (ms)
 var _costs := {}  # FrameCost system -> usec over the case
 var _frame_costs := {}  # this frame's FrameCost
 var _hitches: Array = []  # {"ms", "why"}
@@ -149,7 +162,7 @@ func _ready() -> void:
 			_no_budgets = true
 	GameState.delete_save()
 	Campaign.reset_campaign()
-	get_tree().create_timer(60.0 + cases.size() * 170.0, true, false, true).timeout.connect(func() -> void:
+	get_tree().create_timer(120.0 + cases.size() * 170.0, true, false, true).timeout.connect(func() -> void:
 		print("PERFCASES TEST FAILED (timed out)")
 		get_tree().quit(99))
 	_first = TickEdge.new()
@@ -387,13 +400,19 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 		player.global_position = at
 	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
 	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < 60000:
+	var ready_s := -1.0
+	while Time.get_ticks_msec() - t0 < SETTLE_MS:
 		await get_tree().physics_frame
 		var ready := wait_for.all(func(m: ZoneModule) -> bool: return m.is_ready())
+		if ready and ready_s < 0.0:
+			ready_s = (Time.get_ticks_msec() - t0) / 1000.0
 		if ready and (nav == null or nav.is_settled()):
 			break
+	print("perf: the case's %d modules ready after %s, the navigation %s" % [wait_for.size(), ("%.1f s" % ready_s) if ready_s >= 0.0 else "-",
+		"settled" if nav == null or nav.is_settled() else "still baking (%d chunks queued)" % nav._queue.size()])
 	for m: ZoneModule in wait_for:
-		check(m.is_ready(), "%s streamed in" % m.module_id)
+		check(m.is_ready(), "%s streamed in (%.0f s; %s)" % [m.module_id, (Time.get_ticks_msec() - t0) / 1000.0,
+			"built" if m.voxel_world and m.voxel_world.is_built() else ("building" if m.voxel_world else "not streamed in")])
 	for p in [level.terrain, level.scatter]:
 		if p.has_method(&"build_near"):
 			p.build_near(at, 1000)
@@ -481,6 +500,7 @@ func _measure(name: String, walk: Array) -> void:
 	_engine_ms.clear()
 	_proc_ms.clear()
 	_nav_ms = 0.0
+	_nav_frames.clear()
 	_costs = {}
 	_hitches.clear()
 	_by_script = {}
@@ -493,6 +513,10 @@ func _measure(name: String, walk: Array) -> void:
 		SquadAI.prof = {}
 	_nodes_at_frame = get_tree().get_node_count()
 	_ai_at_frame = level.ai.get_child_count()
+	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
+	var bakes_before := nav.bakes if nav else 0
+	var map := level.get_world_3d().navigation_map
+	var syncs_before := NavigationServer3D.map_get_iteration_id(map)
 	_prev_event_process = true
 	_frame_start = Time.get_ticks_usec()
 	_measuring = true
@@ -541,6 +565,11 @@ func _measure(name: String, walk: Array) -> void:
 			var k: String = SquadAI.Intent.keys()[brain.intent]
 			intents[k] = int(intents.get(k, 0)) + 1
 	print("perf: %s: awake AI's intents at the end: %s" % [name, intents])
+	if nav and is_instance_valid(nav):
+		var syncs := NavigationServer3D.map_get_iteration_id(map) - syncs_before
+		print("perf: %s: navigation: %d chunk bakes (%.1f a second), %d chunks held at the end, the map synced %d times (%.1f a second); the server's frame median %.2f ms, 95th %.2f, worst %.2f" % [
+			name, nav.bakes - bakes_before, (nav.bakes - bakes_before) / secs, nav.chunk_total(), syncs, syncs / secs,
+			_pct(_nav_frames, 0.5), _pct(_nav_frames, 0.95), _nav_frames.max() if not _nav_frames.is_empty() else 0.0])
 	var n_frames := maxi(_frames.size(), 1)
 	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
 	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
@@ -652,7 +681,9 @@ func _on_frame_first() -> void:
 	_boundary()
 	_process_start = Time.get_ticks_usec()
 	if _measuring:
-		_nav_ms += Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0
+		var nav_now := Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0
+		_nav_ms += nav_now
+		_nav_frames.append(nav_now)
 		if _profile:
 			_run_profiled(false)
 
@@ -829,7 +860,10 @@ func _draw_kind(g: GeometryInstance3D) -> String:
 	var n: Node = g
 	while n and n != level:
 		if n is ZoneScatter:
-			return "scatter_far" if String(g.name).begins_with("Far") or g.visibility_range_begin > 0.0 else "scatter"
+			var nm := String(g.name)
+			if nm.contains("lib:"):
+				return "props_far" if g.visibility_range_begin > 0.0 else "props"
+			return "scatter_far" if nm.begins_with("Far") or g.visibility_range_begin > 0.0 else "scatter"
 		if n is ZoneTerrain:
 			return "terrain"
 		if n is Soldier:
