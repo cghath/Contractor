@@ -16,8 +16,9 @@ const EDGE_SHARE := 0.35
 const SNAP_M := 6.0
 const SIZE := Vector2(0.35, 0.75)
 const MIN_UP := 0.8
-## Proposed: no carpet with the eye this far over the ground (m; _process).
-const EYE_MAX_M := 20.0
+## Proposed: no carpet with the eye this far over the ground (m; _process): a helicopter at its
+## contour height (12.5 m) and up, a third-storey window.
+const EYE_MAX_M := 10.0
 
 var _scatter: ZoneScatter
 var _terrain: ZoneTerrain

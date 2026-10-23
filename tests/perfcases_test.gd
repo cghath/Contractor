@@ -65,6 +65,10 @@ const BUDGETS := {
 ## are the guard.
 const LOCAL_SLACK := 1.6
 const WALK_MPS := 3.0
+## How long a case waits for its modules and navigation before it measures (ms): the city's 20-odd
+## blocks build their voxels a slice a frame, and at CI's 3 frames a second in the city one was
+## still building at 60 s (run 39908072526).
+const SETTLE_MS := 100000
 ## CI measures each case for this share of MEASURE_S (its runners have the job's 30 minutes for
 ## the import and all five zones); averages and per-minute rates compare the same.
 const CI_MEASURE_SHARE := 0.6
@@ -388,7 +392,7 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 		player.global_position = at
 	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
 	var t0 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t0 < 60000:
+	while Time.get_ticks_msec() - t0 < SETTLE_MS:
 		await get_tree().physics_frame
 		var ready := wait_for.all(func(m: ZoneModule) -> bool: return m.is_ready())
 		if ready and (nav == null or nav.is_settled()):
