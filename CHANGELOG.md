@@ -13,9 +13,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Voice and economy (claude/voice-economy)
 
-> **Where I stopped / next step (2026-10-22, 20:05 CDT):** both parts built and pushed. Local:
-> smoke passes (R2525); voice and contracts pass (R2526); roles rerun after its fixes. Not yet: CI on the
-> branch, merge into claude/ai-driving, a look in game (no windows while the Captain plays).
+> **Where I stopped / next step (2026-10-22, 19:50 CDT):** both parts built and pushed. Local:
+> smoke, voice (R2527), contracts (R2526) and roles (R2529) pass. Not yet: CI on the branch,
+> merge into claude/ai-driving, a look in game (no windows while the Captain plays).
 > Next: render the 81 new lines with Piper when it's on a PC (tools/voices/lines_to_render.txt,
 > docs/voice.md), wire a speech recognizer to `VoiceOrder.run`, and price armour packages into
 > the sim once phase A8 has them. Every number is Proposed.
@@ -39,6 +39,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   what's left (tools/voices/lines_to_render.txt: 81 lines, 720 clips). Subtitles meanwhile.
 - **Economy sim** (tools/economy_sim.gd): the standing high command squads, heli insertions, a
   scripted expensive op, 5-day checkpoints; `curve()` and `op_result()` for the tests.
+
+#### Fixed
+- **Squad spacing** (`SquadAI._apart`): the formation slots kept between ticks (perf-towns) could
+  still list a man freed since; the loop's typed variable threw "previously freed instance"
+  every tick (roles suite).
 
 #### Changed
 - **Economy pass** (docs/economy.md, all Proposed): the standing squads' men get their own

@@ -5822,8 +5822,11 @@ func _apart(dir: Vector3) -> Vector3:
 	var push := Vector3.ZERO
 	var stacked := false
 	var at := body.global_position
-	for other: Soldier in squad.neighbours():
-		if other == body or not is_instance_valid(other) or not other.vitals.is_up():
+	for n: Variant in squad.neighbours():  # (untyped: the kept slots can hold a man freed since, perf-towns)
+		if not is_instance_valid(n) or n == body:
+			continue
+		var other := n as Soldier
+		if other == null or not other.vitals.is_up():
 			continue
 		var away := Vector3(at.x - other.global_position.x, 0.0, at.z - other.global_position.z)
 		var d := away.length()

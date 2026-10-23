@@ -30,7 +30,7 @@ cleanup); it moves again once claude/ai-driving's CI is no worse.
 | 3D loadout editor + 3D armory | claude/loadout-3d | yes | Done: 3D soldier with clickable slots, buy-in-place and "Buy missing", saved kits applied to anyone incl. Hawk 2/Viper 3, armory room by shelf. Not yet seen in game: check marker placement on the female build, gun rail markers, shelf spacing (docs/loadout_3d.md) |
 | Mission UI pass | claude/mission-ui | yes | Done (9aa87f16): contract board, briefing, objectives tracker, debrief; contracts, missions, ui, smoke pass (R2510, R2511). Not yet seen in game |
 | Town perf follow-up | claude/perf-towns | yes | Done (a38fab7e): city 136→103 ms, fight 62→35, woods 25→14, drive 16→8.5, heli 15→10.6 ms with hitches 27→3/min; perfcases budgets tightened. Cities are still the heaviest case |
-| Voice + economy tuning | (next) | no | Queued: last of Captain's one-at-a-time list |
+| Voice + economy tuning | claude/voice-economy | no | Built and pushed: context-aware barks with priorities and one voice per group, voice orders (callsigns, HC squads, go codes, confirmations), docs/voice.md; economy pass (standing squads' own field rate, insertion priced, shock costs down, pay up a third) with before/after curves in docs/economy.md. Local: smoke, voice, contracts, roles pass (R2526-R2529; roles needed a fix for perf-towns' kept slots holding freed men, SquadAI._apart). Next: CI, merge into claude/ai-driving; render the 81 lines in tools/voices/lines_to_render.txt with Piper later |
 
 ## Open work, in order, and who has it
 

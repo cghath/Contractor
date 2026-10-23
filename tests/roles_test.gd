@@ -638,7 +638,10 @@ func _test_callout_rules() -> void:
 	check(callouts.contact(spotters[0], hostile), "%s spots an enemy and calls the contact" % spotters[0].name)
 	check(not callouts.contact(spotters[1], hostile) and said.call(spotters[1], &"contact").is_empty(),
 		"a squadmate who spots the same enemy right after stays quiet")
-	check(callouts.contact(spotters[2], other), "a different enemy is still called")
+	callouts.contact(spotters[2], other)  # (one voice per group: it waits for the first report)
+	await _seconds(Callouts.GROUP_GAP_S + 0.3)
+	check(said.call(spotters[2], &"contact").size() + callouts.sent.filter(func(c: Dictionary) -> bool: return c.speaker == String(spotters[2].name) and String(c.id).begins_with("contact")).size() > 0,
+		"a different enemy is still called, once the first report is done")
 	_free(other)
 	_free(hostile)
 	check(Callouts.play(&"__test_missing_audio__", first) == null, "an unavailable voice line stays silent")
@@ -676,7 +679,7 @@ func _test_callout_events() -> void:
 	# Spotting takes time (queue 17): the one squadmate with a line to him may be facing away.
 	await _wait_for(func() -> bool: return not _said(&"contact_twelve_close").is_empty(), 8.0)
 	var contact := _said(&"contact_twelve_close")
-	check(not contact.is_empty() and contact[0].text.begins_with("Contact, twelve o'clock, ") and contact[0].text.ends_with(" m"),
+	check(not contact.is_empty() and contact[0].text.begins_with("Contact, twelve o'clock, ") and contact[0].text.contains(" m"),  # (", one man": the report's third D, T-B2)
 		"contact: %s" % (contact[0].text if not contact.is_empty() else "nothing"))
 	await _wait_for(func() -> bool: return not _said(&"moving").is_empty(), 10.0)
 	var moving := _said(&"moving")
