@@ -3408,6 +3408,8 @@ func _server_request(action: String, args: Array) -> void:
 		why = "Bad request"
 	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
 		why = "Only the host can do that"  # the company's big decisions are the host's
+	elif action == "income":
+		why = Income.server_request(String(args[0]) if not args.is_empty() else "", args.slice(1), sender if sender != 0 else 1)  # side work: from anywhere (Income checks)
 	elif action not in ["save"] and not at_base:
 		why = "Only at the base"
 	else:

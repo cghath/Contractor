@@ -21,6 +21,7 @@ var _details: Label
 ## Who holds each hot zone and how firmly (wave 6c).
 var _zones: Label
 var _leads: Label  # the story: act, evidence, clues (docs/story.md)
+var _side: Label  # side work (Income): the high command squads' jobs and the rest, SideWorkPage.board_summary
 ## The details' scroll area (P0-5: a long briefing ran the panel off a small window).
 var _details_scroll: ScrollContainer
 ## Offers / held and details side by side on a wide window, one above the other on a narrow one.
@@ -132,6 +133,14 @@ func _ready() -> void:
 	_left.add_child(UiKit.heading("Leads"))  # the story (docs/story.md): what the intel has said so far
 	_leads = UiKit.text("")
 	_left.add_child(_leads)
+	_left.add_child(UiKit.heading("Side work"))  # claude/income: money beyond contracts, on the base screen's Side work page
+	_side = UiKit.text("")
+	_side.tooltip_text = "Side jobs for the high command squads and the company's other income. Side work opens the page with the payouts and risks"
+	_side.mouse_filter = Control.MOUSE_FILTER_PASS
+	_left.add_child(_side)
+	if BaseHub.campaign_running:
+		_left.add_child(UiKit.button_row([UiKit.hotkey(UiKit.button("Side work", _open_side_work,
+			"Open the base screen's Side work page: send the high command squads on jobs, with the pay and the risks shown first"), KEY_J, panel)]))
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -192,6 +201,12 @@ func _ready() -> void:
 	_restore_choices()
 	refresh()
 	UiKit.focus_first(panel)  # keyboard: Tab/arrows and Enter work at once
+
+
+## The base screen's Side work page in place of the board.
+func _open_side_work() -> void:
+	close()
+	BaseHub.open_ui("side_work")
 
 
 ## Lists beside the details on a wide window (the left column up to 460 px), above them on a
@@ -271,6 +286,7 @@ func refresh() -> void:
 		_held.set_item_tooltip(_held.item_count - 1, "[%s] %s" % [String(c.state).to_upper(), _tooltip(c)])
 	_zones.text = zones_text()
 	_leads.text = Story.leads_text()
+	_side.text = SideWorkPage.board_summary()
 	if _pick_when_held != "" and _pick_when_held in _held_ids:
 		_selected = _pick_when_held
 		_selected_held = true

@@ -157,7 +157,7 @@ static func deploying(data: Dictionary, max_squads := FLOOR) -> Array[String]:
 		if out.size() >= max_squads:
 			break
 		var d := get_detachment(data, did)
-		if not bool(d.get("home", false)) and int(strength(data, did).ready) > 0:
+		if not bool(d.get("home", false)) and int(strength(data, did).ready) > 0 and not SideJobs.is_away(did):  # out on a side job: not here to deploy
 			out.append(did)
 	return out
 

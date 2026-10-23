@@ -11,6 +11,25 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Income: ways to make money with the flow of the game (claude/income)
+
+> **Where I stopped / next step (2026-10-22, 20:20 CDT):** item 1 of 4 built (high command side
+> jobs). Next: 2 captures and bounties, 3 FOB businesses, 4 black market, then re-run the
+> 40-campaign economy sim with all four and tune (before/after in docs/economy.md). Design and
+> numbers: docs/income.md, data/income.json (all Proposed). Local: income (R2531), smoke + ui (R2532).
+
+#### Added
+- **Side jobs for the high command squads** (docs/income.md 1): employers and fixers post jobs
+  (escort a client, guard a site, train locals, run a supply route) on the base screen's new
+  **Side work** page and as a line on the contract board (**Side work [J]**). Send Hawk 2 or
+  Viper 3: a quarter of the pay up front, the rest when they come back. The squad is away for the
+  job's days and can't deploy with you. The job is settled off-screen by a risk roll on the
+  squad's skill, kit, morale and fit men against the zone's danger in the living war; pay rises
+  with the danger. Every Send button shows the odds of trouble, of losing a man and of failing
+  before you commit. Squads can come back wounded, a man short, or without the job done. They
+  report on the company net and leave a debrief card. Training locals raises rebel support.
+  Squad morale is new and saved.
+
 ### Voice and economy (claude/voice-economy)
 
 > **Where I stopped / next step (2026-10-22, 19:50 CDT):** both parts built and pushed. Local:

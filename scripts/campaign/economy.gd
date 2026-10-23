@@ -128,7 +128,7 @@ static func ledger_kind(what: String) -> String:
 		["Lost helicopter", "Lost helicopters"], ["Respawn", "Respawns"], ["Hired", "Hiring"], ["Medbay", "Medical"],
 		["Bought", "Purchases"], ["Air wing upgrade", "Upgrades"], ["FOB upgrade", "Upgrades"], ["Rebel ", "Upgrades"],
 		["HX-1", "Upgrades"], ["Repaired", "Repairs and service"], ["Motor pool", "Repairs and service"],
-		["Death benefit", "Death benefits"]]
+		["Death benefit", "Death benefits"], ["Side job", "Side jobs"]]
 	for pair: Array in KINDS:
 		if what.begins_with(String(pair[0])):
 			return String(pair[1])
@@ -430,6 +430,7 @@ func advance_days(days: int, reason := "") -> void:
 		_decay_reputation()
 		_cool_heat()
 	WorldSites.server_advance_days(days)  # wave 6c: the faction war and site repair/reoccupation
+	Income.server_advance_days(days)  # claude/income: side jobs come back, businesses pay, markets move
 	if reason != "":
 		print("[economy] %d day%s pass (%s): day %d" % [days, "" if days == 1 else "s", reason, int(s.day)])
 	_commit()
@@ -835,6 +836,7 @@ func _public() -> Dictionary:
 	out["world_sites"] = WorldSites.rows()  # wave 6c: who holds each hot zone, for every peer's board
 	out["war"] = WorldSites.war_view()  # the living war (2026-10-20): every zone's holder and front, strength, the news
 	out[String(ZoneControl.SECTION)] = Campaign.section(ZoneControl.SECTION).duplicate(true)  # who controls each zone (the world map)
+	out[String(Income.SECTION)] = Income.state().duplicate(true)  # side jobs, bounties, businesses, the market (the side work page)
 	return out
 
 

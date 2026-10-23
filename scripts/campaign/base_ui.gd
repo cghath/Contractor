@@ -14,9 +14,9 @@ extends CanvasLayer
 ## (filter, prices, Buy and Buy 5, support call prices) instead of a second, plainer shop; and
 ## the motor pool has a page of its own (it was only an interaction ring).
 
-const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores", "books", "memorial"]
+const PAGES: Array[String] = ["squad", "roster", "hiring", "medbay", "shop", "armory", "motor_pool", "stores", "side_work", "books", "memorial"]
 const TITLES := {"squad": "Squad & deploy", "roster": "Roster", "hiring": "Hiring board", "medbay": "Medbay",
-	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage", "books": "Books", "memorial": "Memorial"}
+	"shop": "Shop", "armory": "Armory", "motor_pool": "Motor pool", "stores": "Supply cage", "side_work": "Side work", "books": "Books", "memorial": "Memorial"}
 ## The books page's window: the ledger summed over this many days.
 const BOOKS_DAYS := 7
 ## Ledger lines listed on the books page, newest first.
@@ -39,6 +39,7 @@ const ABOUT := {
 	"armory": "What's in the company stash. It lies in the armory: pick up what you need there, drop what you bring back.",
 	"motor_pool": "The company's vehicles, their condition and service, and vehicles you can buy.",
 	"stores": "The FOB's stocks from pallets: fuel, parts, ammunition, supplies and medical.",
+	"side_work": SideWorkPage.ABOUT,
 	"books": "Where the company's money came from and went: the running costs a day, loans, the last week by kind, and every recent payment.",
 	"memorial": "The memorial wall: everyone the company has lost, when and where, and whether their dog tags came home.",
 }
@@ -104,7 +105,7 @@ func _ready() -> void:
 	_box.add_child(_status)
 	_box.add_child(UiKit.key_hint("Esc", "Close"))
 	BaseHub.view_changed.connect(refresh)
-	Economy.changed.connect(refresh)  # the supply cage shows the FOB stocks
+	Economy.changed.connect(refresh)  # the supply cage shows the FOB stocks; side work (Income) rides on Economy's sync
 	BaseHub.note.connect(func(text: String) -> void: _status.text = text)
 	visible = false
 
@@ -194,6 +195,8 @@ func refresh() -> void:
 			_build_motor_pool(rows)
 		"stores":
 			_build_stores(rows)
+		"side_work":
+			SideWorkPage.build(rows, self)
 		"books":
 			_build_books(rows)
 		"memorial":

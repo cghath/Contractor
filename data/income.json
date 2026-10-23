@@ -1,0 +1,40 @@
+{
+	"_note": "Income that comes from what the company already does (claude/income, 2026-10-22; Captain: \"we need something that allows the players to make money... like good money but it needs to go with the flow of the game\"). docs/income.md has the design. Every number here is Proposed and tunable; Income, SideJobs, Bounties, FobBusiness and BlackMarket read them.",
+	"_side_jobs": "High command squads' own jobs (SideJobs). Offers come from employers and fixers that will deal with the company (Neutral or better; a fixer at its min_rep), one region's zone each, and expire after offer_days. The squad is away for the job's days and resolved off-screen by a risk roll: the job's risk x the zone's danger (the living war: who holds it, how strong, a front there) against the squad's quality (skill, kit, morale, men ready). pay = base_pay x (pay_floor + danger x pay_danger) x the client's pay rate; advance_share of it up front, kept whatever happens. trouble = risk x (trouble_base + danger) x (trouble_quality - quality), then a second roll decides wounds, a man lost, or the job failing.",
+	"side_jobs": {
+		"board_size": 3,
+		"offer_days": 4,
+		"min_ready": 3,
+		"advance_share": 0.25,
+		"pay_floor": 0.6,
+		"pay_danger": 1.3,
+		"trouble_base": 0.5,
+		"trouble_quality": 1.45,
+		"trouble_min": 0.04,
+		"trouble_max": 0.85,
+		"kia_share": 0.3,
+		"fail_share": 0.35,
+		"fail_pay_share": 0.0,
+		"wound_days": [3, 9],
+		"kit_full_value": 9000,
+		"morale_start": 0.7,
+		"morale_win": 0.05,
+		"morale_fail": -0.1,
+		"morale_kia": -0.15,
+		"morale_rest_per_day": 0.02,
+		"kinds": [
+			{"kind": "escort", "name": "Escort a client", "verb": "escorting", "days": 2, "base_pay": 26000, "risk": 0.4,
+			 "brief": "Close protection for a client moving through the zone: in, the meeting, out.", "clients": ["meridian", "vessmark", "us_forces", "uk_forces", "ca_forces", "salvage_union"]},
+			{"kind": "guard", "name": "Guard a site", "verb": "guarding", "days": 3, "base_pay": 30000, "risk": 0.3,
+			 "brief": "Hold a client's site (a depot, a pumping station, a clinic) against whoever comes.", "clients": ["meridian", "salvage_union", "vessmark", "us_forces"]},
+			{"kind": "train", "name": "Train locals", "verb": "training locals", "days": 4, "base_pay": 22000, "risk": 0.15, "rebel_support": 4,
+			 "brief": "Drill a village militia: weapons handling, a patrol, a checkpoint. The locals remember who taught them.", "clients": ["vessmark", "uk_forces", "ca_forces", "us_forces"]},
+			{"kind": "supply", "name": "Run a supply route", "verb": "running a supply route", "days": 2, "base_pay": 20000, "risk": 0.35,
+			 "brief": "Ride shotgun on trucks between two towns and see them through every checkpoint.", "clients": ["salvage_union", "meridian", "vessmark"]},
+			{"kind": "recover", "name": "Recover a vehicle", "verb": "recovering a vehicle", "days": 2, "base_pay": 0, "risk": 0.45, "recovery": true,
+			 "brief": "Go back for a captured vehicle the company left in the zone and drive it out to a buyer.", "clients": []}
+		]
+	},
+	"_danger": "A zone's danger for side jobs and business raids, 0..1 (Income.zone_danger): the holder (the company or the rebels: company; an employer that will deal with the company: friendly; anyone else: hostile, plus its war strength / strength_div), plus front if somebody is attacking it, less grip_calm x (grip - 0.5) for a firm friendly hold.",
+	"danger": {"company": 0.12, "friendly": 0.22, "hostile": 0.45, "strength_div": 250.0, "front": 0.25, "grip_calm": 0.2}
+}
