@@ -214,11 +214,14 @@ static func instance(model: String, variant: String, layers := 1, with_mesh := t
 ## coarse model: none. Its mesh is the part's first look; a part carved or cut (BodyDeform) loses
 ## its stand-in (drop_far_lod) and gets it back made whole (add_far_lod).
 const FAR_LOD := "LodFar"
+static var _headless := DisplayServer.get_name() == "headless"
 
 
 static func add_far_lod(pivot: Node3D) -> void:
+	if _headless or pivot.get_child_count() == 0 or pivot.has_node(FAR_LOD):
+		return
 	var lod_m := float(GameSettings.detail().get("soldier_lod_m", 0.0))
-	if lod_m <= 0.0 or DisplayServer.get_name() == "headless" or pivot.get_child_count() == 0 or pivot.has_node(FAR_LOD):
+	if lod_m <= 0.0:
 		return
 	var model := String(pivot.get_meta(&"voxel_model", ""))
 	var variant := String(pivot.get_meta(&"voxel_variant", ""))
