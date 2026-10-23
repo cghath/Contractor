@@ -85,6 +85,11 @@ const DRIVER := &"driver"
 const GUNNER := &"gunner"
 const PASSENGER := &"passenger"
 const PILOT := &"pilot"  # helicopters: AI only (Captain: aircraft are AI-flown)
+## Combined arms A3 (docs/combined_arms.md 2.5.1): a tank's or IFV's commander and loader, crew
+## seats in the turret (VehicleWeapons gives them their jobs). Boarding and loading casualties
+## treat them as riders' seats did (rider_like).
+const COMMANDER := &"commander"
+const LOADER := &"loader"
 ## Vehicle kinds (data/vehicles.json "kind").
 const WHEELED := "wheeled"
 const TRACKED := "tracked"
@@ -311,6 +316,9 @@ var bay: VehicleBay
 var ai: VehicleAI
 ## Combined arms A2: its modules and kill states (VehicleModules; replicated, saved).
 var modules: VehicleModules
+## Combined arms A3: the mounts its crew fights with (the main gun and its loader, the dual feed,
+## the TOW, the commander's and loader's guns), on models with "weapons"; null on the rest.
+var weapons: VehicleWeapons
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -355,6 +363,7 @@ var turret: VehicleTurret
 var _gun_seat := -1
 var _aim_send_left := 0.0
 var _aim_sent := Vector2(INF, INF)
+var _moving := {}  # host: soldier instance id -> {"to": seat, "at": when he's there} (A3: timed seat moves)
 
 
 ## A new vehicle of `model` (VehicleArt.MODELS, with numbers in data/vehicles.json), ready
@@ -402,6 +411,9 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	add_child(cargo_hold)
 	modules = VehicleModules.new(self)
 	add_child(modules)
+	if spec.has("weapons"):
+		weapons = VehicleWeapons.new(self)  # A3: "Weapons", its state in the StateSync
+		add_child(weapons)
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -439,7 +451,10 @@ func _add_sync() -> void:
 	pose_sync.replication_interval = 1.0 / POSE_HZ
 	add_child(pose_sync)
 	var state := SceneReplicationConfig.new()
-	for path: NodePath in [^".:net_state", ^".:net_carves", ^"Cargo:net_state", ^"Modules:net_state"]:
+	var paths: Array[NodePath] = [^".:net_state", ^".:net_carves", ^"Cargo:net_state", ^"Modules:net_state"]
+	if weapons:
+		paths.append(^"Weapons:net_state")
+	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 		state.property_set_spawn(path, true)
@@ -647,10 +662,29 @@ func seat_transform(seat: String) -> Transform3D:
 	return global_transform * _seat_at(index) if not _seat_local.is_empty() else global_transform
 
 
-## A seat's eye point in the world (the gunner's turns with the turret).
+## A seat's eye point in the world (the gunner's turns with the turret, and a turret seat's).
 func seat_eye_point(index: int) -> Vector3:
 	var at := VehicleSpecs.vec(spec.seats[index].at)
-	return global_transform * (turret.carry(at) if index == _gun_seat and not _gun_remote() else at)
+	return global_transform * (turret.carry(at) if turns_with_turret(index) else at)
+
+
+## Whether seat `index` goes round with the turret: the gunner's, and a seat marked "turret" (A3:
+## the Abrams' commander and loader, the Bradley's commander).
+func turns_with_turret(index: int) -> bool:
+	if turret == null or _gun_remote():
+		return false
+	return index == _gun_seat or (index >= 0 and index < (spec.get("seats", []) as Array).size() and bool(spec.seats[index].get("turret", false)))
+
+
+## Whether seat `index` is a rider's (a passenger: troops, cab and bed riders), not a crew job (A3).
+func is_rider(index: int) -> bool:
+	return seat_kind(index) == PASSENGER
+
+
+## Seat kinds boarding and casualty loading treat as riders' seats did before A3 (a passenger's,
+## and a tank's commander and loader, which were passenger seats).
+static func rider_like(k: StringName) -> bool:
+	return k == PASSENGER or k == COMMANDER or k == LOADER
 
 
 ## The gun is worked from a seat that doesn't turn with it ("gun" "remote": the Petrel's belly
@@ -727,7 +761,7 @@ func seat_floor(index: int) -> float:
 ## round with the ring.
 func _seat_at(index: int) -> Transform3D:
 	var t := _seat_local[index]
-	if index == _gun_seat and not _gun_remote():
+	if turns_with_turret(index):
 		t.origin = turret.carry(t.origin)
 	return t
 
@@ -796,7 +830,7 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	if index < 0 or index >= _seat_nodes.size() or occupant(index) != null:
 		return false
 	var k := seat_kind(index)
-	if body and k != PASSENGER:
+	if body and not rider_like(k):
 		return false
 	if k == PILOT and not s.is_ai():
 		return false  # aircraft are AI-flown only (Captain)
@@ -1210,7 +1244,7 @@ func _dismount_followers(leader: Soldier) -> void:
 
 func _first_free_passenger() -> int:
 	for i in _seat_nodes.size():
-		if occupant(i) == null and seat_kind(i) == PASSENGER and not exo_seat(i):
+		if occupant(i) == null and rider_like(seat_kind(i)) and not exo_seat(i):
 			return i
 	return -1
 
@@ -1246,7 +1280,9 @@ func _first_free_for(s: Soldier) -> int:
 	var order: Array[StringName] = [PASSENGER, GUNNER, DRIVER, PILOT]
 	for k in order:
 		for i in _seat_nodes.size():
-			if occupant(i) == null and seat_kind(i) == k and (k != PILOT or s.is_ai()) and not exo_seat(i):
+			# (A3: a tank's commander and loader seats fill with the riders' seats, as when they were passenger seats)
+			var match_k := rider_like(seat_kind(i)) if k == PASSENGER else seat_kind(i) == k
+			if occupant(i) == null and match_k and (k != PILOT or s.is_ai()) and not exo_seat(i):
 				return i
 	return -1
 
@@ -1409,7 +1445,10 @@ func _step_run_outs() -> void:
 			server_exit(s, at + Vector3.UP * 0.05)
 
 
-## Host: move `soldier` to seat `index` of this vehicle (they must be in it already).
+## Host: move `soldier` to seat `index` of this vehicle (they must be in it already). On a model
+## with "switch_s" (A3, docs/combined_arms.md 2.5.3: the Abrams, the Bradley) the move takes
+## time (switch_time): he stays where he is, at no job (moving_seat), until it's done (_step_moves);
+## turret to driver on the Abrams needs the turret near the front. Elsewhere it's at once.
 func server_switch(soldier: Node, index: int) -> bool:
 	var s := soldier as Soldier
 	var from := seat_of(s)
@@ -1417,6 +1456,74 @@ func server_switch(soldier: Node, index: int) -> bool:
 		return false
 	if seat_kind(index) == PILOT and not s.is_ai():
 		return false
+	var wait := switch_time(from, index)
+	if wait < 0.0:
+		_tell(s, "Traverse the turret to the front first")
+		return false
+	if wait > 0.0:
+		_moving[s.get_instance_id()] = {"to": index, "at": Soldier._now() + wait}
+		return true
+	_moving.erase(s.get_instance_id())
+	return _switch_now(s, from, index)
+
+
+## How long a move from seat `from` to `to` takes (A3, 2.5.3; "switch_s" in the model's data):
+## 0 at once (no "switch_s", or rider to rider), -1 not now (the Abrams' turret off the front for
+## the driver's hatch).
+func switch_time(from: int, to: int) -> float:
+	var t: Dictionary = spec.get("switch_s", {})
+	if t.is_empty():
+		return 0.0
+	var a := _move_group(from)
+	var b := _move_group(to)
+	if a == "troop" and b == "troop":
+		return 0.0
+	if a == "troop" or b == "troop":
+		return float(t.get("troop", t.get("turret", 0.0)))
+	if a == b:
+		return float(t.get("turret", 0.0)) if a == "turret" else 0.0
+	var front := float(t.get("front_deg", 0.0))
+	if front > 0.0 and turret and absf(rad_to_deg(wrapf(turret.yaw, -PI, PI))) > front:
+		return -1.0
+	return float(t.get("driver", 0.0))
+
+
+func _move_group(index: int) -> String:
+	if seat_kind(index) == DRIVER:
+		return "driver"
+	return "turret" if seat_kind(index) in [GUNNER, COMMANDER, LOADER] or turns_with_turret(index) else "troop"
+
+
+## Whether `s` is moving between seats here (A3): he does no job until he's in the new one.
+func moving_seat(s: Node) -> bool:
+	return s != null and _moving.has(s.get_instance_id())
+
+
+## The seat `s` is moving to (-1: none) and the seconds left.
+func move_of(s: Node) -> Vector2:
+	if not moving_seat(s):
+		return Vector2(-1, 0)
+	var m: Dictionary = _moving[s.get_instance_id()]
+	return Vector2(int(m.to), maxf(float(m.at) - Soldier._now(), 0.0))
+
+
+## Host: the timed seat moves that are done happen (the seat still free and he still aboard and
+## up); the rest wait.
+func _step_moves() -> void:
+	var now := Soldier._now()
+	for id: int in _moving.keys():
+		var m: Dictionary = _moving[id]
+		var s := instance_from_id(id) as Soldier
+		var from := seat_of(s) if is_instance_valid(s) else -1
+		if from < 0 or not s.vitals.is_up() or occupant(int(m.to)) != null:
+			_moving.erase(id)  # out, down, or someone took the seat first
+			continue
+		if now >= float(m.at):
+			_moving.erase(id)
+			_switch_now(s, from, int(m.to))
+
+
+func _switch_now(s: Soldier, from: int, index: int) -> bool:
 	_seat_nodes[from] = null
 	_seat_nodes[index] = s
 	s.remove_meta(&"seat_veh_yaw")
@@ -1781,6 +1888,8 @@ func _server_step(delta: float) -> void:
 	if burning_s > 0.0:
 		_fire_step(delta)
 	_job_step()
+	if not _moving.is_empty():
+		_step_moves()  # A3: timed seat moves
 	if bay:
 		bay.server_step(delta)
 	if turret and not wrecked:
@@ -2882,6 +2991,9 @@ func server_rearm() -> int:
 		var g := gun_info(seat)
 		if not g.is_empty():
 			wants[g.feed] = int(wants.get(g.feed, 0)) + int(VehicleSpecs.gun(String(g.id)).get("load", 0))
+	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts
+		for f: Array in weapons.server_rearm():
+			wants[f[0]] = int(wants.get(f[0], 0)) + int(f[1])
 	if cargo_hold:
 		for feed: StringName in wants:
 			_rearm_feed(feed, int(wants[feed]))
@@ -3030,7 +3142,7 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if not seat in gun_seats():
 		seat = _main_gun_seat()
 	var info := gun_info(seat)
-	if info.is_empty() or wrecked or not modules.gun_ok(seat):  # A2: its breech, barrel or sights out
+	if info.is_empty() or wrecked or not _gun_seat_ok(seat, shooter):  # A2: its breech, barrel or sights out (A3: its own)
 		return {}
 	var main := seat == _main_gun_seat()
 	if not main and not door_arc_ok(seat, direction):
@@ -3040,14 +3152,31 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	if now < next:
 		return {}
 	var item := VehicleSpecs.gun_item(info.id)
-	_gun_next[seat] = maxf(next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm) + modules.gun_jam_s(seat)
+	_gun_next[seat] = maxf(next, now - GUN_BUNCH_S) + 60.0 / float(info.rpm) + (weapons.legacy_jam_s(seat) if weapons else modules.gun_jam_s(seat))
 	if not cargo_hold.take_feed(info.feed):
 		_tell(shooter, "%s: no ammunition in the %s" % [info.name, display_name()])
 		return {}
 	var origin := gun_origin(seat)
-	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3))) * modules.gun_spread_mult(seat)
+	var spread := deg_to_rad(float(item.stats.get("spread_deg", 0.3))) * (weapons.legacy_spread_mult(seat) if weapons else modules.gun_spread_mult(seat))
 	# A turret's rounds go where its barrel points (the gunner turns it: request_aim, server_aim).
 	var dir := barrel_direction() if turret and main else direction.normalized()
+	return fire_mg_round(shooter, item, String(info.sound), origin, dir, spread)
+
+
+## Host: whether gun seat `seat`'s own gun may fire for `shooter`: A2's armament modules of the
+## seat; on a model with VehicleWeapons (A3) the legacy gun's own (the coax by its sights, not
+## the main gun's breech), its man at the job (not moving seats, not loading short-crewed).
+func _gun_seat_ok(seat: int, shooter: Soldier) -> bool:
+	if weapons:
+		return weapons.legacy_ok(seat, shooter)
+	return modules.gun_ok(seat)
+
+
+## Host: one round of a machine gun `item` (VehicleSpecs.gun_item) from `origin` along `dir`
+## scattered by `spread` (radians) through Ballistics, with its sound (`sound`: the gun's Sfx
+## kind), noise and tracer on every peer. Returns Ballistics' result. The vehicle's own gun
+## (server_fire_gun) and VehicleWeapons' cupola and pintle guns (A3) fire through it.
+func fire_mg_round(shooter: Soldier, item: ItemData, sound: String, origin: Vector3, dir: Vector3, spread: float) -> Dictionary:
 	var side := dir.cross(Vector3.UP).normalized() if absf(dir.y) < 0.99 else Vector3.RIGHT
 	var lift := side.cross(dir).normalized()
 	dir = (dir + side * randf_range(-1, 1) * tan(spread) + lift * randf_range(-1, 1) * tan(spread)).normalized()
@@ -3057,7 +3186,7 @@ func server_fire_gun(shooter: Soldier, direction: Vector3) -> Dictionary:
 	## Captain, 2026-10-15 (v0.4.3): the .50 cal made no sound: mounted guns never called Sfx.
 	## Every peer hears each shot (the gun's "sound": "hmg" for the heavy guns, else a rifle's).
 	var round_end: Variant = result.get("position")
-	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + dir * 400.0, String(info.sound))
+	Sfx.server_shot(origin, round_end if round_end is Vector3 else origin + dir * 400.0, sound)
 	var lvl := level()
 	if lvl:
 		PeopleLayer.server_noise(shooter, origin)
@@ -3103,6 +3232,8 @@ func _local_controls(delta: float) -> void:
 			_last_sent = now
 			_send_left = 0.1
 			request_drive.rpc_id(1, throttle, steer, brake)
+	elif weapons and weapons.local_controls(me, seat, free):
+		pass  # A3: the seat's mounts (main gun, TOW, the loader's cycle, the commander's gun) took the keys
 	elif k == GUNNER and free and Input.is_action_pressed(&"fire"):
 		var info := gun_info(seat)
 		if not info.is_empty() and Soldier._now() >= _gun_local_next:
@@ -3128,6 +3259,8 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		var h := zone_health(z)
 		if h < 0.999:
 			parts.append({"text": "%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)], "style": &"warn" if h < 0.35 else &""})
+	if weapons:
+		parts.append_array(weapons.readout_parts(seat))  # A3: main gun, loader, feeds, TOW, seat moves
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3158,7 +3291,10 @@ func condition() -> Dictionary:
 	var zones_out := {}
 	for z: StringName in _zones:
 		zones_out[String(z)] = float(_zones[z])
-	return {"zones": zones_out, "fuel": fuel, "leak": _leak, "carves": net_carves.duplicate(true), "modules": modules.to_save()}
+	var out := {"zones": zones_out, "fuel": fuel, "leak": _leak, "carves": net_carves.duplicate(true), "modules": modules.to_save()}
+	if weapons:
+		out["weapons"] = weapons.to_save()  # A3: which rounds where, what's loaded
+	return out
 
 
 ## Host: puts a saved condition() back on this vehicle.
@@ -3173,6 +3309,8 @@ func apply_condition(c: Dictionary) -> void:
 	if c.has("carves"):
 		net_carves = (c.carves as Array).duplicate(true)
 	modules.from_save(c.get("modules", {}), zones_in)
+	if weapons and c.get("weapons") is Dictionary:
+		weapons.from_save(c.weapons)
 
 
 func to_save() -> Dictionary:
@@ -3181,10 +3319,13 @@ func to_save() -> Dictionary:
 	var zones_out := {}
 	for z: StringName in _zones:
 		zones_out[String(z)] = float(_zones[z])
-	return {"id": vehicle_id, "model": model, "scheme": scheme, "faction": String(faction), "wrecked": wrecked,
+	var out := {"id": vehicle_id, "model": model, "scheme": scheme, "faction": String(faction), "wrecked": wrecked,
 		"pos": [p.x, p.y, p.z], "rot": [q.x, q.y, q.z, q.w], "zones": zones_out, "fuel": fuel, "burning": burning_s,
 		"battery": battery_ok, "salvaged": salvaged, "leak": _leak, "carves": net_carves.duplicate(true),
 		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids(), "modules": modules.to_save()}
+	if weapons:
+		out["weapons"] = weapons.to_save()  # A3
+	return out
 
 
 ## Host: the dead riding in seats, by seat (as text), by their body uid (Soldier.body_record:
@@ -3245,6 +3386,8 @@ func from_save(data: Dictionary) -> void:
 	_lost = wrecked or burning_s > 0.0
 	net_carves = (GameState.from_json(data.get("carves", [])) as Array) if data.has("carves") else []
 	modules.from_save(data.get("modules", {}) if data.get("modules") is Dictionary else {}, zones_in)  # A2 (an older save: from its zones)
+	if weapons:
+		weapons.from_save(data.get("weapons", {}) if data.get("weapons") is Dictionary else {})  # A3 (an older save: the racks' default mix)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

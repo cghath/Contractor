@@ -117,7 +117,7 @@ static func report(v: Vehicle) -> String:
 
 ## A door's ring (Captain, P0164 queue 8: get in and the seat choices first, nothing you can't
 ## do): a Get in entry for each kind of seat this door serves that has one free (driver,
-## gunner, then passenger), never a pilot's (aircraft are flown by AI); when none is free, one
+## gunner, a tank's commander and loader (A3), then passenger), never a pilot's (aircraft are flown by AI); when none is free, one
 ## greyed Get in saying why (on fire, every seat taken, or only a pilot's seat here). Then Pull
 ## out for each body down or dead in a seat here (two or more share a "Pull out" submenu),
 ## then Check vehicle. Carrying a body, only Load casualty.
@@ -130,10 +130,12 @@ func _door_actions(actor: Soldier) -> Array[Dictionary]:
 	var v := vehicle
 	if actor.carry_mode != &"":
 		var free := _first_free(Vehicle.PASSENGER)
+		for k: StringName in [Vehicle.COMMANDER, Vehicle.LOADER]:  # A3: a tank's hatch seats take a casualty as before
+			free = _first_free(k) if free < 0 else free
 		out.append(_entry(&"load_body", "Load casualty", func() -> void: v.request_load_body.rpc_id(1, free),
 			"" if free >= 0 else "No free seat on this side"))
 		return out
-	for k: StringName in [Vehicle.DRIVER, Vehicle.GUNNER, Vehicle.PASSENGER]:
+	for k: StringName in [Vehicle.DRIVER, Vehicle.GUNNER, Vehicle.COMMANDER, Vehicle.LOADER, Vehicle.PASSENGER]:
 		var seat := _first_free(k)
 		if seat < 0 or v.is_burning():
 			continue
@@ -294,7 +296,8 @@ func _first_free(k: StringName) -> int:
 
 
 static func _kind_name(k: StringName) -> String:
-	return {Vehicle.DRIVER: "driver", Vehicle.GUNNER: "gunner", Vehicle.PILOT: "pilot", Vehicle.PASSENGER: "passenger"}.get(k, String(k))
+	return {Vehicle.DRIVER: "driver", Vehicle.GUNNER: "gunner", Vehicle.PILOT: "pilot", Vehicle.PASSENGER: "passenger", Vehicle.COMMANDER: "commander",
+		Vehicle.LOADER: "loader"}.get(k, String(k))
 
 
 static func _state_text(item: ItemData, state: Dictionary) -> String:

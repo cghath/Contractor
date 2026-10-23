@@ -10,8 +10,9 @@ extends RefCounted
 const PATH := "res://data/vehicles.json"
 ## Combined arms (docs/combined_arms.md 9.1): per-topic files keyed by model id, merged into
 ## the model's spec so parallel phases never edit one JSON file: plates, tiles, belly, spall
-## liner and packages (A1); modules (A2); weapons, optics, crew and vision (A3). A file that
-## isn't there yet is skipped.
+## liner and packages (A1); modules (A2); weapons, turrets, racks and crew moves (A3:
+## data/vehicle_weapons.json, whose "guns" join the mounted guns). A file that isn't there yet
+## is skipped.
 const TOPIC_PATHS: Array[String] = ["res://data/vehicle_armour.json", "res://data/vehicle_modules.json", "res://data/vehicle_weapons.json"]
 const KMH := 1.0 / 3.6
 
@@ -52,6 +53,11 @@ static func _load() -> void:
 			push_error("VehicleSpecs: %s is not valid JSON with \"models\"" % path)
 			continue
 		_topics.append(topic.models)
+		# A3: a topic file's own "guns" (data/vehicle_weapons.json: the M256, M242, TOW) join the
+		# mounted guns; vehicles.json's own keep theirs.
+		for id: String in (topic.get("guns", {}) as Dictionary):
+			if not (_data.guns as Dictionary).has(id):
+				_data.guns[id] = topic.guns[id]
 
 
 ## Every model with numbers (the VehicleArt models).

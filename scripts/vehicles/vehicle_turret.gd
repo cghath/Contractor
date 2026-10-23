@@ -5,7 +5,9 @@ extends RefCounted
 ## limits and at its speeds, the host owns where it points, and every peer draws it there. The
 ## turret's mesh, its gun and whoever stands at it turn together, and rounds leave the gun's
 ## real muzzle along its barrel. The O-GPK turrets on the M-ATV and the MaxxPro, the AAV-7's
-## Up-Gunned Weapon Station and a technical's DShK pintle (data/vehicles.json "turret").
+## Up-Gunned Weapon Station and a technical's DShK pintle (data/vehicles.json "turret"); the
+## Abrams' and the Bradley's turrets (combined arms A3: data/vehicle_weapons.json "turret"), whose
+## traverse and elevation drives VehicleModules slows when damaged.
 ##
 ## The look: VehicleArt draws a model whole; split() then lifts the turret's voxels (above the
 ## ring, within its radius) and the gun's (its box, by colour) out of the hull's canvas into two
@@ -135,6 +137,12 @@ func muzzle_local() -> Vector3:
 ## A point on the turret at rest (`rest`, e.g. a seat) where it is now.
 func carry(rest: Vector3) -> Vector3:
 	return turret_transform() * (rest - pivot)
+
+
+## A point on the gun at rest (`rest`, e.g. another muzzle on it: A3's main gun beside the coax)
+## where it is now, elevated with it (vehicle frame).
+func on_gun(rest: Vector3) -> Vector3:
+	return gun_transform() * (rest - trunnion)
 
 
 ## Whether the barrel points within ON_TARGET_DEG of `dir` (vehicle frame).

@@ -471,7 +471,8 @@ func _server_end(p: LauncherProjectile, res: Dictionary) -> void:
 	else:
 		burst = Warheads.server_burst(lvl, p.warhead, pos, dir, collider, shooter, bool(res.get("top_attack", false)))
 	results[p.id] = {"how": how, "position": pos, "direction": dir, "top_attack": bool(res.get("top_attack", false)),
-		"max_height": p.max_height, "burst": burst, "shooter": shooter, "flown": p.travelled, "passed": p.passed.duplicate()}
+		"max_height": p.max_height, "burst": burst, "shooter": shooter, "flown": p.travelled, "passed": p.passed.duplicate(),
+		"wire_cut": p.wire_cut, "wire_why": p.wire_why}  # (A3: a wire-guided missile's broken wire)
 	while results.size() > RESULTS_KEPT:
 		results.erase(results.keys()[0])
 	print("[launchers] round %d (%s) %s at (%.1f, %.1f, %.1f) after %.0f m" % [p.id, warhead_name(p.warhead), how, pos.x, pos.y, pos.z, p.travelled])

@@ -237,8 +237,8 @@ func _test_data() -> void:
 	check(counts.maxxpro == {"driver": 1, "passenger": 5, "gunner": 1}, "MaxxPro: 6 seats and a gunner (%s)" % [counts.maxxpro])
 	check(counts.technical_dshk == {"driver": 1, "passenger": 4, "gunner": 1}, "technical: 2 in the cab, 3 in the bed and the DShK gunner (%s)" % [counts.technical_dshk])
 	check(counts.aav7 == {"driver": 1, "passenger": 22, "gunner": 1}, "AAV-7: 3 crew and 21 troops (%s)" % [counts.aav7])
-	check(counts.bradley == {"driver": 1, "gunner": 1, "passenger": 7}, "Bradley: 3 crew and 6 troops (%s)" % [counts.bradley])
-	check(VehicleSpecs.spec("abrams").seats.size() == 4, "Abrams: 4 crew")
+	check(counts.bradley == {"driver": 1, "gunner": 1, "commander": 1, "passenger": 6}, "Bradley: 3 crew and 6 troops (%s)" % [counts.bradley])
+	check(counts.abrams == {"driver": 1, "gunner": 1, "commander": 1, "loader": 1}, "Abrams: 4 crew: driver, gunner, commander, loader (%s)" % [counts.abrams])
 	check(counts.uh60 == {"pilot": 2, "gunner": 2, "passenger": 15}, "UH-60: 2 pilots, 2 door gunners, 11 passengers (4 benched, 4 kneeling, 3 standing) and 4 on the door sills (%s)" % [counts.uh60])
 	check(VehicleSpecs.round_tier(&"556_m855") == 0 and VehicleSpecs.round_tier(&"762x51_m80") == 0 and VehicleSpecs.round_tier(&"762x54r_lps") == 1
 		and VehicleSpecs.round_tier(&"50bmg_m33") == 2, "vehicle threat tiers: small arms 0, 7.62x54R 1, .50 BMG 2 (Captain: 7.62x54R and up)")
@@ -2825,7 +2825,11 @@ func _test_modules() -> void:
 	check(ks.firepower and ks.mobility and ks.knocked_out and ks.repairable and not ks.catastrophic and crew[1].vitals.is_up(),
 		"another down through the turret roof takes the breech: firepower and mobility, knocked out but repairable (%s)" % VehicleModules.kill_text(ifv.modules.kill))
 	await get_tree().create_timer(0.3).timeout
-	check(ifv.server_fire_gun(crew[1], -ifv.global_basis.z).is_empty(), "the gunner can't fire now")
+	# Combined arms A3 (F-237): each gun on its own modules: the breech gone puts the 25 mm out,
+	# not the coax beside it (its sights are whole).
+	check(ifv.weapons.can_fire(crew[1], "main") != "" and not bool(ifv.weapons.server_fire(crew[1], "main").ok)
+		and not ifv.server_fire_gun(crew[1], -ifv.global_basis.z).is_empty(),
+		"the gunner can't fire the 25 mm now (%s); the coax, on its own sights, still fires" % ifv.weapons.can_fire(crew[1], "main"))
 	# Saved with the zone: a copy from the save has the same modules and kill states.
 	var rec: Dictionary = JSON.parse_string(JSON.stringify(ifv.to_save()))
 	rec.erase("pos")

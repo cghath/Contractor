@@ -16,6 +16,11 @@ extends Node3D
 ##   moving target), ota_height_m above it in overfly top attack, and a sensor looking
 ##   sensor_m down fires the warhead when it passes over a vehicle. Direct attack flies the
 ##   line itself.
+## - "saclos" (combined arms A3, docs/combined_arms.md 2.7.2: the TOW, Konkurs-M): wire-guided
+##   to the line from the launcher's sight through the gunner's crosshair, SACLOS_LAG_S behind
+##   it (its `guide`, VehicleWeapons.saclos_line, gives the line or says the wire broke: a fast
+##   traverse, smoke on the line, the launcher down or gone, past wire_m). After the boost it
+##   holds cruise_mps and turns at turn_dps. A broken wire leaves it falling free: a miss.
 
 ## Proposed: a Javelin's climb ends at its apex this many apex heights short of the target
 ## (flat): top attack dives at about 45 degrees, direct attack comes in flat.
@@ -35,6 +40,10 @@ const NLAW_RISE_M := 15.0
 ## Sensor samples along each step (an NLAW at 200 m/s covers 3 m a physics frame).
 const SENSOR_STEP_M := 0.5
 const GRAVITY := 9.8
+## Proposed (A3, SACLOS): it aims this many seconds of flight ahead on the sight line, and
+## slows from its boost to cruise_mps at SACLOS_DECEL m/s2.
+const SACLOS_LOOKAHEAD_S := 0.5
+const SACLOS_DECEL := 40.0
 
 static var _drops := {}  # drop_at's answers: "warhead|range" -> {"drop", "time"}
 static var _puff_mesh: SphereMesh  # the smoke trail's puffs share it
@@ -65,6 +74,11 @@ var line_s := 0.0
 ## (an open pickup bed, over a hatch), and every vehicle it has flown through so (tests).
 var inside: Vehicle
 var passed: Array = []
+## Host only, SACLOS (A3): what guides it (an object with saclos_line(id, position, flown) ->
+## {"ok", "from", "dir", "why"}: VehicleWeapons), and whether (and why) its wire broke.
+var guide: Object
+var wire_cut := false
+var wire_why := ""
 var _speed := 0.0
 var _last_aim := Vector3.ZERO
 var _visual: Node3D
@@ -112,7 +126,7 @@ func motor_burning() -> bool:
 
 
 func guided() -> bool:
-	return String(data.get("guidance", "")) != ""
+	return String(data.get("guidance", "")) != "" and not wire_cut
 
 
 ## How far below the line it was fired along an unguided round of warhead `w` has dropped
@@ -176,6 +190,8 @@ func server_step(delta: float) -> Dictionary:
 			to = _javelin_step(delta)
 		"nlaw":
 			to = _nlaw_step(delta)
+		"saclos":
+			to = _saclos_step(delta)
 		_:
 			to = integrate(delta)
 	var space := get_world_3d().direct_space_state
@@ -246,6 +262,34 @@ static func hull_hit(v: Vehicle, from: Vector3, dir: Vector3, reach: float) -> D
 	if not found.hit:
 		return {}
 	return {"collider": v, "position": v.to_global(found.local), "normal": -dir}
+
+
+# --- SACLOS (A3) ----------------------------------------------------------------------------
+
+## Host only. One step of a wire-guided missile: towards the point SACLOS_LOOKAHEAD_S ahead on
+## its guide's sight line (as the gunner held it SACLOS_LAG_S ago, VehicleWeapons.WIRE_LAG_S),
+## at its boost's speed, then cruise_mps; with the wire broken, free flight (gravity, no steer).
+func _saclos_step(dt: float) -> Vector3:
+	var line: Dictionary = {}
+	if not wire_cut:
+		line = guide.call(&"saclos_line", id, global_position, travelled) if is_instance_valid(guide) else {"ok": false, "why": "the launcher's gone"}
+		if not bool(line.get("ok", false)):
+			wire_cut = true
+			wire_why = String(line.get("why", "the wire broke"))
+	if wire_cut:
+		return integrate(dt)  # (no longer guided: falls, the motor burns on)
+	age += dt
+	var motor: Dictionary = data.get("motor", {})
+	var boost_end := float(motor.get("delay_s", 0.0)) + float(motor.get("burn_s", 0.0))
+	var want := motor_target(age) if age <= boost_end else float(data.get("cruise_mps", _speed))
+	_speed = maxf(_speed, want) if age <= boost_end else move_toward(maxf(_speed, 1.0), want, SACLOS_DECEL * dt)
+	var from: Vector3 = line.from
+	var d: Vector3 = (line.dir as Vector3).normalized()
+	var along := maxf((global_position - from).dot(d), 0.0)
+	var aim := from + d * (along + maxf(_speed * SACLOS_LOOKAHEAD_S, 10.0))
+	var cur := velocity.normalized() if velocity.length_squared() > 0.01 else d
+	velocity = _turn_toward(cur, (aim - global_position).normalized(), deg_to_rad(float(data.get("turn_dps", 25.0))) * dt) * _speed
+	return global_position + velocity * dt
 
 
 # --- Javelin --------------------------------------------------------------------------------

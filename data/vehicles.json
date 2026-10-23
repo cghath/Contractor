@@ -17,7 +17,13 @@
 		"_note": "Vehicle threat tier per round id (data/rounds.json): 0 small arms (everything not listed: pistol, 5.56, 7.62x39, 7.62x51), 1 full-power from 7.62x54R up (Captain), 2 heavy machine gun (12.7 and 14.5 mm), 3 autocannon. A round not listed with a calibre of 12 mm or more counts as tier 2.",
 		"762x54r_lps": 1,
 		"3006_m2ap": 1,
-		"50bmg_m33": 2
+		"50bmg_m33": 2,
+		"_note_a3": "Combined arms A3: gun shells (data/shells.json ids) that hit a model without armour plates (technicals, aircraft) come as an autocannon or heavier tier.",
+		"m829a3": 3,
+		"m919": 3,
+		"m791": 3,
+		"3bm42": 3,
+		"3ubr8": 3
 	},
 	"guns": {
 		"_note": "Mounted weapons the gunner seat fires through Ballistics: the round (data/rounds.json), rate, spread and what feeds it from the vehicle's cargo (feed: an item id; belts hold rounds in their state, loose rounds count one each). sound: the shot's Sfx kind (data/sounds.json shot_<sound>; rifle when not given; Captain, 2026-10-15: the .50 cal was silent). A seat's own weapon (and gun_at, its muzzle) is a door gun its occupant fires (the UH-60M's M240Hs). load: what a motor-pool vehicle deploys with and is refilled to back at the FOB (MotorPool; Captain, 2026-10-14: the pool M-ATV's M2 had 0 rounds), in units of the feed: full belts, or loose rounds. Proposed. The DShK fires the .50 BMG round's numbers until a 12.7x108 round is in rounds.json.",
@@ -258,7 +264,7 @@
 			"seats": [
 				{"name": "Driver", "kind": "driver", "at": [-0.95, 1.8, -1.9], "stance": "sit", "exit": "rear"},
 				{"name": "Gunner", "kind": "gunner", "at": [0.35, 2.4, -0.3], "stance": "sit", "exit": "rear"},
-				{"name": "Commander", "kind": "passenger", "at": [-0.4, 2.5, -0.1], "stance": "sit", "exit": "rear"},
+				{"name": "Commander", "kind": "commander", "turret": true, "at": [-0.4, 2.5, -0.1], "stance": "sit", "exit": "rear"},
 				{"name": "Troop 1", "kind": "passenger", "at": [-0.8, 1.6, 1.0], "stance": "sit", "exit": "rear"},
 				{"name": "Troop 2", "kind": "passenger", "at": [-0.8, 1.6, 1.8], "stance": "sit", "exit": "rear"},
 				{"name": "Troop 3", "kind": "passenger", "at": [-0.8, 1.6, 2.6], "stance": "sit", "exit": "rear"},
@@ -266,7 +272,7 @@
 				{"name": "Troop 5", "kind": "passenger", "at": [0.8, 1.6, 1.8], "stance": "sit", "exit": "rear"},
 				{"name": "Troop 6", "kind": "passenger", "at": [0.8, 1.6, 2.6], "stance": "sit", "exit": "rear"}
 			],
-			"gun": {"weapon": "m240c", "seat": 1, "at": [0.55, 2.45, -1.6]},
+			"gun": {"weapon": "m240c", "seat": 1, "at": [0.395, 2.185, -1.8]},
 			"points": [
 				{"kind": "door", "at": [0.0, 1.4, 3.7], "seats": [0, 1, 2, 3, 4, 5, 6, 7, 8]},
 				{"kind": "cargo", "at": [0.9, 1.4, 3.7]},
@@ -293,10 +299,10 @@
 			"seats": [
 				{"name": "Driver", "kind": "driver", "at": [0.0, 1.6, -2.35], "stance": "sit", "exit": "left"},
 				{"name": "Gunner", "kind": "gunner", "at": [0.6, 2.1, 0.0], "stance": "sit", "exit": "left"},
-				{"name": "Commander", "kind": "passenger", "at": [0.6, 2.45, 0.8], "stance": "sit", "exit": "left"},
-				{"name": "Loader", "kind": "passenger", "at": [-0.6, 2.35, 0.8], "stance": "sit", "exit": "left"}
+				{"name": "Commander", "kind": "commander", "turret": true, "at": [0.6, 2.45, 0.8], "stance": "sit", "exit": "left"},
+				{"name": "Loader", "kind": "loader", "turret": true, "at": [-0.6, 2.35, 0.8], "stance": "sit", "exit": "left"}
 			],
-			"gun": {"weapon": "m240c", "seat": 1, "at": [0.45, 2.0, -1.8]},
+			"gun": {"weapon": "m240c", "seat": 1, "at": [0.33, 1.9, -1.75]},
 			"points": [
 				{"kind": "door", "at": [-2.1, 2.0, -0.5], "seats": [0, 1, 2, 3]},
 				{"kind": "cargo", "at": [0.0, 2.0, 4.0]},

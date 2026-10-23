@@ -200,6 +200,9 @@ var _immobile := false          # from the health now (_refresh)
 var _speed := 1.0
 var _guns_out := {}             # gun seat -> its armament out (_refresh)
 var _changed := {}              # host: modules a hit changed (server_apply's HitEvent)
+## The turret drives by hand whatever their modules say (A3: the engine out past its batteries,
+## VehicleWeapons.BATTERY_TURRET_S). Set through set_turret_manual.
+var turret_manual := false
 
 
 func _init(p_vehicle: Vehicle = null) -> void:
@@ -332,7 +335,7 @@ static func _norm(m: Dictionary, spec: Dictionary, index: int) -> Dictionary:
 		"zone": StringName(String(m.get("zone", k.get("zone", "")))), "fire": Vector2(float(fire[0]), float(fire[1])),
 		"external": bool(m.get("external", k.get("external", false))), "seat": int(m.get("seat", -1)), "troop": bool(m.get("troop", false)),
 		"gun_seat": int(m.get("gun_seat", -1)), "rounds": int(m.get("rounds", 0)), "detonate": m.get("detonate", [0.0, 0.0, 0.0]),
-		"on_detonate": String(m.get("on_detonate", "catastrophic")),
+		"on_detonate": String(m.get("on_detonate", "catastrophic")), "doors": bool(m.get("doors", false)),
 		# For the hot loops (trace, spall_rays): on a path at all, a crew station, air to a fragment.
 		"on_path": box != null and kind != "structure", "crew": kind == "crew", "air": kind in ["compartment", "structure"]}
 
@@ -1022,14 +1025,20 @@ func _fire_roll(m: Dictionary, column: String, shell: Dictionary, seed: int, cha
 
 ## Host: an ammo rack destroyed with rounds in it rolls to go off (2.10.2): vent through its
 ## blow-out panels (rounds gone, the crew unhurt), cook off (a fire: A7 draws the pops), or go up
-## (a catastrophic kill: everyone aboard dies, a wreck at once).
+## (a catastrophic kill: everyone aboard dies, a wreck at once). A rack with blast doors
+## ("doors") vents only while they're shut: the loader opens them to pull a round (A3,
+## VehicleWeapons.doors_open), and a hit then is catastrophic.
 func _detonation_roll(m: Dictionary, cause: int, seed: int) -> void:
 	var chances: Array = m.detonate
 	var chance := float(chances[clampi(cause, 0, chances.size() - 1)]) if not chances.is_empty() else 0.0
 	var go: bool = bool(vehicle.get_meta(&"force_detonate")) if vehicle.has_meta(&"force_detonate") else (Vehicle.fire_rolls and ArmourModel.roll(seed, ROLL_DETONATE + int(m.i)) < chance)
 	if not go:
 		return
-	match String(m.on_detonate):
+	var how := String(m.on_detonate)
+	if how == "vent" and bool(m.doors) and vehicle.weapons and vehicle.weapons.doors_open(String(m.id)):
+		how = "catastrophic"  # A3: the loader had the blast doors open: nothing to vent it (2.10.2)
+		flags["doors_open"] = true
+	match how:
 		"vent":
 			rounds[int(m.i)] = 0
 			flags["vented"] = true
@@ -1215,6 +1224,23 @@ func server_reset() -> void:
 	_after_set()
 
 
+## Every peer (A3: VehicleWeapons): the turret's drives by hand (true) or by their modules.
+func set_turret_manual(on: bool) -> void:
+	if turret_manual != on:
+		turret_manual = on
+		_effects()
+
+
+## Host (A3: VehicleWeapons keeps which rounds a rack holds, this its total): rack `id`'s rounds
+## set to `n` (at least 0), published.
+func server_set_rounds(id: String, n: int) -> void:
+	var i := index_of(id)
+	if i < 0 or not rounds.has(i) or int(rounds[i]) == maxi(n, 0):
+		return
+	rounds[i] = maxi(n, 0)
+	_publish()
+
+
 ## Host: module `id` set to `h` directly (tests; phase A8's workshop).
 func server_set(id: String, h: float) -> void:
 	var i := index_of(id)
@@ -1304,6 +1330,9 @@ func _effects() -> void:
 		t.yaw_rate = _drive_rate(health[tr], _base_rates.x, MANUAL_TRAVERSE_DPS)
 	if el >= 0:
 		t.pitch_rate = _drive_rate(health[el], _base_rates.y, MANUAL_ELEVATION_DPS)
+	if turret_manual:
+		t.yaw_rate = minf(t.yaw_rate, deg_to_rad(MANUAL_TRAVERSE_DPS))
+		t.pitch_rate = minf(t.pitch_rate, deg_to_rad(MANUAL_ELEVATION_DPS))
 
 
 static func _drive_rate(h: float, base: float, manual_dps: float) -> float:

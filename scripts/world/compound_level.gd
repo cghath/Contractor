@@ -377,6 +377,7 @@ func _ready() -> void:
 	add_child(Demolitions.new())  # "Demolitions": demo blocks, thermite, claymores, mines, chem lights (2026-10-20)
 	add_child(VehicleLayer.new())  # "Vehicles": vehicles and wrecks (wave 5)
 	add_child(Launchers.new())  # "Launchers": anti-armour rockets and missiles in flight (wave 5)
+	add_child(ShellFlight.new())  # "ShellFlight": tank and autocannon shells in flight (combined arms A3)
 	add_child(HeliSupports.new())  # "HeliSupports": Black Hawk resupply, transport, extraction (wave 5b V3)
 	AavSupport.install(self)  # wave 5b (V4): the LHD or FOB origin, the AAV support, the motor pool
 	Digging.of(self)  # every peer: dug berms come to it (Digging)
