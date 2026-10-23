@@ -133,13 +133,14 @@ static func server_advance_days(days: int) -> void:
 		return
 	SideJobs.server_day(days)
 	FobBusiness.server_day(days)
+	BlackMarket.server_day(days)
 	Campaign.mark_changed(SECTION)
 
 
 ## Host (BaseHub "income" request): `op` and its `args` from `sender`. Returns the note for the
 ## asker ("" for done, else why not).
 static func server_request(op: String, args: Array, sender: int) -> String:
-	var host_only := op in ["job_send", "capture_sell", "capture_deliver", "biz_open", "biz_close"]
+	var host_only := op in ["job_send", "capture_sell", "capture_deliver", "biz_open", "biz_close", "trade_buy", "trade_sell"]
 	if host_only and sender != 1:
 		return "Only the host can do that"
 	var why := "Unknown request"
@@ -152,6 +153,10 @@ static func server_request(op: String, args: Array, sender: int) -> String:
 			why = FobBusiness.server_open(String(args[0])) if not args.is_empty() else "Bad request"
 		"biz_close":
 			why = FobBusiness.server_close(String(args[0])) if not args.is_empty() else "Bad request"
+		"trade_buy":
+			why = BlackMarket.server_buy(String(args[0]), String(args[1]), int(args[2])) if args.size() >= 3 else "Bad request"
+		"trade_sell":
+			why = BlackMarket.server_sell(String(args[0]), String(args[1]), int(args[2])) if args.size() >= 3 else "Bad request"
 		"capture_deliver":
 			why = Bounties.server_deliver(int(args[0]), String(args[1]), String(args[2])) if args.size() >= 3 else "Bad request"
 	Campaign.mark_changed(SECTION)

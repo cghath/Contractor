@@ -128,7 +128,7 @@ static func ledger_kind(what: String) -> String:
 		["Lost helicopter", "Lost helicopters"], ["Respawn", "Respawns"], ["Hired", "Hiring"], ["Medbay", "Medical"],
 		["Bought", "Purchases"], ["Air wing upgrade", "Upgrades"], ["FOB upgrade", "Upgrades"], ["Rebel ", "Upgrades"],
 		["HX-1", "Upgrades"], ["Repaired", "Repairs and service"], ["Motor pool", "Repairs and service"],
-		["Death benefit", "Death benefits"], ["Side job", "Side jobs"], ["Capture sold", "Captures and bounties"], ["Bounty", "Captures and bounties"], ["Business", "FOB businesses"]]
+		["Death benefit", "Death benefits"], ["Side job", "Side jobs"], ["Capture sold", "Captures and bounties"], ["Bounty", "Captures and bounties"], ["Business", "FOB businesses"], ["Trade", "Black market"]]
 	for pair: Array in KINDS:
 		if what.begins_with(String(pair[0])):
 			return String(pair[1])

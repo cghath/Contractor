@@ -15,7 +15,7 @@ and one class per stream. Numbers: data/income.json, **all Proposed**. UI: the b
 | 1 | High command squads' side jobs | `SideJobs` | Built |
 | 2 | Captures and bounties | `Bounties` | Built |
 | 3 | FOB businesses | `FobBusiness` | Built |
-| 4 | Black market trading | `BlackMarket` | Next |
+| 4 | Black market trading | `BlackMarket` | Built |
 
 ## Shared pieces
 
@@ -179,6 +179,48 @@ offers four businesses, one of each.
 - it pays by what the company has made of the war: roads held, friendly ground, vehicles kept;
 - it uses the stocks the company brings home;
 - protecting it is a contract.
+
+## 4. Black market trading
+
+Buy low, sell high: fuel, weapons, medical supplies and contraband, between the regions' markets and
+the fixers.
+
+**Where the company can trade:**
+- the home region's market;
+- the market of the region its last job was in (until the next job);
+- the fixers who'll deal with it, from anywhere: Mama Rook (contraband ×1.25, weapons, fuel) and
+  Halloran (medical ×1.15, fuel, weapons). Each deals only in what it lists.
+
+**Prices** start from a base: fuel $400, weapons $2,500, medical $900, contraband $1,800.
+- **The war moves them.** A region's price is the base × (1 + a weight × the share of its war zones
+  with a front, held by enemies, held by the predatory groups or the cartel, or held by lawful
+  forces or the company), per good:
+
+  | Good | Front | Enemy-held | Cartel or predatory | Lawful or company |
+  |---|---|---|---|---|
+  | Fuel | +0.35 | +0.25 | | −0.15 |
+  | Weapons | +0.6 | +0.2 | | −0.25 |
+  | Medical | +0.5 | +0.3 | | −0.2 |
+  | Contraband | +0.1 | | −0.45 (floods it) | +0.6 (dear) |
+
+- **Daily noise** of ±8%.
+- **The spread**: a market sells 8% over its price and buys 8% under it.
+- **The company's own trade**: each unit sold drives that market's price for it down 1.2%, easing
+  25% a day. So a big load sold in one place sells for less, and the same route doesn't pay twice
+  in a row: it rewards following the war, not grinding.
+
+**Cargo** rides in the trucks: 20 units plus 10 for each vehicle in the motor pool.
+
+**The risks, rolled every day:**
+- **Contraband aboard is found**: 3% × (1 + units / 10) × (1 + the US's war strength / 100 while
+  it's at war).
+  - It's seized, with a fine of half what it cost.
+  - US Forces −3 and the other lawful factions −1.
+- **Weapons noticed**: 1.5% the same way; US Forces −1.
+- **Theft**: at a FOB in dangerous ground, 2% × the FOB's danger × 2; 40% of one good is lost.
+- Selling contraband to a fixer pleases them (+1).
+
+The books show "Trade bought" and "Trade sold" lines, grouped as "Black market".
 
 ## Before and after (sim)
 

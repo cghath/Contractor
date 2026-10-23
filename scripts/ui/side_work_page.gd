@@ -7,7 +7,7 @@ extends RefCounted
 ## jobs on offer, and the latest reports (debrief cards). The contract board shows a summary
 ## (board_summary) with a button here.
 
-const ABOUT := "Money beyond contracts: the high command squads' own jobs, captures sold by standing, bounties on the war's leaders, the FOB's businesses. Every offer shows its pay and its risks before you commit."
+const ABOUT := "Money beyond contracts: the high command squads' own jobs, captures sold by standing, bounties on the war's leaders, the FOB's businesses, the black market. Every offer shows its pay and its risks before you commit."
 
 
 ## Builds the page into `rows`. `hotkey_root`: the node the send buttons' number keys belong to.
@@ -20,6 +20,7 @@ static func build(rows: VBoxContainer, hotkey_root: Node) -> void:
 	_captures(rows, roster, s)
 	_bounties(rows)
 	_businesses(rows, s)
+	_market(rows, s, hotkey_root)
 	_reports(rows, s)
 
 
@@ -215,6 +216,38 @@ static func _businesses(rows: VBoxContainer, s: Dictionary) -> void:
 		rows.add_child(_indent(box))
 
 
+# --- Black market -------------------------------------------------------------------------
+
+static func _market(rows: VBoxContainer, s: Dictionary, _root: Node) -> void:
+	var cg := BlackMarket.cargo(s)
+	rows.add_child(UiKit.heading("Black market (cargo %d of %d units)" % [BlackMarket.cargo_units(s), BlackMarket.capacity()]))
+	rows.add_child(_indent(UiKit.hint("Buy where it's cheap and sell where it's scarce: the war moves prices, and selling a lot in one market drives its price down for a few days. Open here: your home region, the region of your last job, and the fixers who'll deal with you. Contraband can be seized with a fine; crates of weapons get noticed.")))
+	var markets := BlackMarket.markets(s)
+	for g: String in BlackMarket.goods():
+		var have: Dictionary = cg.get(g, {})
+		var held := int(have.get("units", 0))
+		var avg := roundi(float(have.get("paid", 0)) / maxf(float(held), 1.0))
+		var box := VBoxContainer.new()
+		box.add_child(UiKit.text("%s: %d aboard%s" % [BlackMarket.good_name(g), held, (" (paid %s each)" % money(avg)) if held > 0 else ""]))
+		var buttons: Array = []
+		for m: Dictionary in markets:
+			var mid := String(m.id)
+			var buy := BlackMarket.price(g, mid, "buy", s)
+			var sell := BlackMarket.price(g, mid, "sell", s)
+			if buy > 0:
+				var bb := UiKit.button("Buy 5 at %s %s" % [String(m.name), money(buy)], func() -> void: BaseHub.request("income", ["trade_buy", g, mid, 5]),
+					"Buy five units of %s at %s for %s each (%s)" % [BlackMarket.good_name(g).to_lower(), String(m.name), money(buy), money(buy * 5)])
+				bb.disabled = BlackMarket.cargo_units(s) + 5 > BlackMarket.capacity()
+				buttons.append(bb)
+			if sell > 0 and held > 0:
+				var n := mini(held, 5)
+				var profit := (sell - avg) * n
+				buttons.append(UiKit.button("Sell %d at %s %s" % [n, String(m.name), money(sell)], func() -> void: BaseHub.request("income", ["trade_sell", g, mid, n]),
+					"Sell %d at %s for %s each: %s%s on what they cost" % [n, String(m.name), money(sell), "+" if profit >= 0 else "-", money(absi(profit))]))
+		box.add_child(UiKit.button_row(buttons))
+		rows.add_child(_indent(box))
+
+
 # --- Reports ------------------------------------------------------------------------------
 
 static func _reports(rows: VBoxContainer, s: Dictionary) -> void:
@@ -265,6 +298,8 @@ static func board_summary() -> String:
 		var threatened: Array = run.keys().filter(func(id: String) -> bool: return not (run[id].get("threat", {}) as Dictionary).is_empty())
 		parts.append("%d FOB business%s running%s" % [run.size(), "" if run.size() == 1 else "es",
 			(", %d threatened: protect %s" % [threatened.size(), "it" if threatened.size() == 1 else "them"]) if not threatened.is_empty() else ""])
+	if BlackMarket.cargo_units(s) > 0:
+		parts.append("%d units of trade goods aboard" % BlackMarket.cargo_units(s))
 	if not Bounties.stored_captures().is_empty():
 		parts.append("%d capture%s in storage to sell" % [Bounties.stored_captures().size(), "" if Bounties.stored_captures().size() == 1 else "s"])
 	return "; ".join(parts) + "." if not parts.is_empty() else "No side work today."

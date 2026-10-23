@@ -24,6 +24,7 @@ func _ready() -> void:
 	_test_bounties()
 	_test_intel_buyers()
 	_test_businesses()
+	_test_market()
 	Campaign.reset_campaign()
 	print("INCOME TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -249,3 +250,61 @@ func _test_businesses() -> void:
 	check(rows.find_children("*", "Button", true, false).any(func(x: Button) -> bool: return x.text.begins_with("Open")), "the side work page offers the businesses with their setup and daily take")
 	rows.queue_free()
 	FobBusiness.fob_override = -1
+
+
+func _test_market() -> void:
+	print("Black market trading (BlackMarket)")
+	var markets := BlackMarket.markets()
+	check(markets.any(func(m: Dictionary) -> bool: return String(m.id).begins_with("r:")), "the home region's market is open (%s)" % str(markets.map(func(m: Dictionary) -> String: return String(m.name))))
+	var home := String(markets[0].id)
+	check(BlackMarket.price("weapons", home, "buy") > BlackMarket.price("weapons", home, "sell"), "a market sells dearer than it buys")
+	# The war moves prices: a front in every zone of a region makes weapons scarce there.
+	var region := home.trim_prefix("r:")
+	var f0 := BlackMarket.war_factor("weapons", region)
+	var zones: Array = WorldSites.war_zones().filter(func(z: String) -> bool: return RebelSupport.region_of(z) == region)
+	for z: String in zones:
+		WorldSites.site(z)["front"] = {"by": "ashen_banner", "since": Economy.day(), "progress": 0.3}
+	check(BlackMarket.war_factor("weapons", region) > f0, "fronts make weapons scarce (x%.2f -> x%.2f)" % [f0, BlackMarket.war_factor("weapons", region)])
+	for z: String in zones:
+		WorldSites.site(z).erase("front")
+	# Buying and selling.
+	var cash0 := Economy.cash()
+	var each := BlackMarket.price("fuel", home, "buy")
+	check(Income.server_request("trade_buy", ["fuel", home, 10], 1) == "" and Economy.cash() == cash0 - each * 10, "bought 10 fuel at $%d" % each)
+	check(BlackMarket.cargo_units() == 10, "it rides in the trucks")
+	check(Income.server_request("trade_buy", ["fuel", home, BlackMarket.capacity()], 1) != "", "the trucks only hold so much (%d)" % BlackMarket.capacity())
+	var sell_before := BlackMarket.price("fuel", home, "sell")
+	check(Income.server_request("trade_sell", ["fuel", home, 10], 1) == "" and BlackMarket.cargo_units() == 0, "sold it again")
+	check(BlackMarket.price("fuel", home, "sell") < sell_before, "selling drives that market's price down ($%d -> $%d)" % [sell_before, BlackMarket.price("fuel", home, "sell")])
+	Economy.advance_days(3, "test")
+	check(float((BlackMarket._s().pressure as Dictionary).get(home, {}).get("fuel", 0.0)) < 0.12 * 0.5, "and it recovers day by day")
+	check(Income.server_request("trade_sell", ["fuel", home, 1], 1) != "", "nothing to sell")
+	check(Income.server_request("trade_buy", ["fuel", "r:nowhere", 1], 1) != "", "only open markets")
+	# The last job's region opens its market.
+	var other := ""
+	for r: Dictionary in MissionRegistry.data().get("regions", []):
+		if "r:" + String(r.region) != home:
+			other = String(r.region)
+	var zone_there := ""
+	for z: String in WorldSites.war_zones():
+		if RebelSupport.region_of(z) == other:
+			zone_there = z
+	BlackMarket.on_contract_closed({"zone_id": zone_there}, "completed")
+	check(BlackMarket.markets().any(func(m: Dictionary) -> bool: return String(m.id) == "r:" + other), "a job in %s opens its market" % other)
+	# Contraband is risky: over many days some gets seized, with a fine and US standing.
+	var us0 := Economy.reputation("us_forces")
+	var cg: Dictionary = BlackMarket._s().cargo
+	cg["contraband"] = {"units": 20, "paid": 30000}
+	var seized := false
+	for i in 40:
+		Economy.advance_days(1, "test")
+		if not BlackMarket.cargo().has("contraband"):
+			seized = true
+			break
+	check(seized and Economy.reputation("us_forces") < us0, "contraband held long enough is found: seized, fined, US standing down")
+	check(Economy.ledger_kind("Trade sold: 10 fuel") == "Black market", "trading has its own line in the books")
+	var rows := VBoxContainer.new()
+	add_child(rows)
+	SideWorkPage.build(rows, self)
+	check(rows.find_children("*", "Button", true, false).any(func(x: Button) -> bool: return x.text.begins_with("Buy 5")), "the side work page has the market's prices to buy at")
+	rows.queue_free()
