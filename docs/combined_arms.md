@@ -954,6 +954,23 @@ The five technical variants that have `"gun": {}` today get real guns in data.
 - **Mk19:** 350 rpm; a new 48-round can is 30 s.
 - **T-72B3 autoloader:** 7.5 s, no loader; carousel hits are the T-72's weak point (2.10.2).
 
+**Built in A3** (cg_brief queue item 2.2, branch `armour/guns`): `VehicleWeapons`
+(scripts/vehicles/vehicle_weapons.gd, the "Weapons" child of a model with `weapons`) with the
+Abrams' and Bradley's mounts, turrets, racks and seat-move times in data/vehicle_weapons.json:
+the M256 and the loader's cycle above (the bustle's doors open during the pull: a bustle
+detonation then is catastrophic, `VehicleModules._detonation_roll`), short-crewed loading, a
+damaged breech x1.5, unloading and restocking; the M242's dual feed, rates and ready-box refill;
+the TOW raised, SACLOS-guided (`LauncherProjectile` guidance `saclos`, `VehicleWeapons.saclos_line`)
+and reloaded; the commander's M2 and loader's M240; the commander's override; each mount on its
+own modules (F-237). `ShellFlight` (scripts/combat/shell_flight.gd) is 2.3.8's shell flight, its
+`drag` tuned to 2.7.5 (`ShellFlight.flight_to`; the `drag` in 2.3.1's example was a placeholder).
+The vehicle's own `gun` stays the coax (every AI and support system reading `gun_info` keeps
+working); the commander and loader are `commander` and `loader` seat kinds; seat moves are timed
+on models with `switch_s`. Not in A3: the AAV's UGWS, the technicals' guns and the crew wheel
+(F-244), sights and fire control (A4, F-243), AI crews firing the new guns (A9, F-242). The calls
+made are in docs/audits/followups.md ("Calls made", 2026-10-23, cg_brief 2.2); the suite is
+`maingun`.
+
 #### 2.7.4 Sights
 
 | Vehicle and seat | Sight | Day | Thermal | Rangefinder | Stabilised |

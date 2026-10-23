@@ -46,6 +46,12 @@ extends RigidBody3D
 ## follows it), in the chase view the turret turns to the camera's crosshair. Rounds leave the
 ## gun's muzzle along its barrel.
 ##
+## Armour's guns (combined arms A3): a model with "weapons" (the Abrams, the Bradley) has a
+## VehicleWeapons child ("Weapons") with its mounts: the main gun and its loader, the dual feed,
+## the TOW, the commander's and loader's guns. The vehicle's own "gun" stays its coax (fired here,
+## by its own sights), the turret's seats turn with it (turns_with_turret), the commander and
+## loader are crew seats (COMMANDER, LOADER), and seat moves take time (switch_time).
+##
 ## Helicopters are this class with kind "helicopter": seats, cargo, damage and saving work; the
 ## ground drive does nothing for them. V3 flies them by overriding _drive_step (or a subclass).
 ## Numbers marked Proposed are tunable.

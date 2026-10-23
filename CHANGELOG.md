@@ -11,6 +11,68 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Main guns: the Abrams' 120 mm and its loader, the Bradley's dual feed and TOW (cg_brief queue item 2.2 (A3), armour/guns)
+
+Combined arms phase A3: the tanks fight with their real guns. Design: docs/combined_arms.md 2.5
+and 2.7 ("Built in A3" there says what's in); the mounts, turrets and racks in
+data/vehicle_weapons.json; every number Proposed; calls in docs/audits/followups.md "Calls made".
+Sights, thermal, the laser and fire control are the next phase (A4): A3 aims along the barrel.
+
+#### Added
+- **Turrets on the Abrams and the Bradley**: the turret and gun split from the hull and turn
+  and elevate at the vehicle's drive rates (Abrams 40 and 25 degrees a second, -9 to +20;
+  Bradley 50 and 30, -9 to +60). A2's drive modules now act on them: damaged halves a drive,
+  destroyed is the hand crank (6 and 3 degrees a second), and with the engine dead the turret
+  runs on its batteries for 10 minutes, then by hand. The commander's and loader's seats turn
+  with it.
+- **The M256 120 mm and its loader**: M829A3 APFSDS, M830A1 HEAT-MP and M1147 AMP, 34 in the
+  bustle (16 / 10 / 8) and 6 in the hull, sabot loaded to start. After each shot the loader pulls
+  the next round from the bustle with its blast doors open, rams, closes and arms: 5 to 6 s for
+  an AI loader by skill. A player loader works it on the reload key: the second press inside the
+  ram window gives a 4.5 s load, outside it 6.5 s. With no loader the commander, else the gunner,
+  loads in 15 s and is off his sight meanwhile (no coax either). A damaged breech makes every
+  load half as long again. The gunner picks the next round (fire mode); the round in the breech
+  stays until fired or unloaded (8 s). Between fights the loader restocks the bustle from the
+  hull, 12 s a round, with the turret to the front.
+- **The bustle's blast doors**: a hit that sets off the bustle while the loader has its doors
+  open is catastrophic; shut, the blow-out panels vent it as before.
+- **The M242 25 mm's dual feed**: AP (M791, or M919 with that ammo package) and HE (M792)
+  ready boxes of 70 and 230, switched in 1.5 s; single shot, low rate (100 a minute) or high
+  rate (200). An empty box is refilled from the 600 stowed in 2 minutes by the gunner and a
+  dismount, stopped and out of contact.
+- **The TOW**: raised in 4 s at a halt (driving off lowers it), fired with the gunner holding the
+  crosshair on the target to impact: the missile is wire-guided to his sight line (SACLOS) at
+  about 190 m/s. Slewing the turret fast, smoke on the line, the launcher coming down or out of
+  wire break the wire: a miss. Two on the launcher; a dismount reloads it from the five in the
+  hull, launcher down, 45 s a missile.
+- **The commander's M2 and the loader's M240** fire where their man looks; the commander can also
+  fire the main gun and the TOW from his seat.
+- **Shells in flight** (ShellFlight): gravity and drag tuned to docs/combined_arms.md 2.7.5's
+  times of flight and drops (an M829A3 is 0.66 s and 2.1 m low at 1 km), hitting vehicles through
+  the armour model with the distance flown, ricochets flying on, an HE or HEAT filling bursting
+  on the people round it (not the crew under armour), a solid shot going through a man and on,
+  HE craters in the ground and walls, fuzes that arm, self-destruct (25 mm HEI) and airburst.
+  Every peer draws the round as a glowing streak.
+- **Commander and loader seats** of their own kinds, and timed seat moves on the Abrams and
+  Bradley: 3 s within the turret, 10 s to the driver's hatch (the Abrams' turret to the front),
+  6 s from the troop compartment, at no job meanwhile.
+- **Keys in a gun seat**: 1 the main gun (or the commander's or loader's gun), 2 the coax,
+  3 the TOW; fire mode cycles the next round or the rate; reload is the loader's key, the feed
+  switch, the launcher up or down, or a dismount's TOW reload. The HUD readout shows what's
+  loaded and next, the racks, the feed and the launcher, and the loader's cycle ("RAM NOW").
+- **maingun test suite** (CI and the default local list): the ballistics table, the turrets and
+  their drives, the loader's cycle and short crews, the doors, the dual feed, every round fired
+  500 m into STANAG-rated armour through ArmourModel and at people, the TOW and its wire, saves,
+  budgets (50 shells in flight under 0.5 ms a step; a shot under 0.5 ms) and a late joiner.
+
+#### Changed
+- **Each gun on its own modules** (F-237): the coax no longer stops with the main gun's breech or
+  barrel, only with its own sights; a damaged gun jams, a bent barrel scatters, per gun.
+- The Abrams' commander and loader and the Bradley's commander are crew seats now, not passenger
+  seats; AI still board them in the same order and casualties can still be loaded into them.
+- Shell drag figures in data/shells.json retuned for the real flight (the A1 numbers were never
+  flown); the TOW-2A and Konkurs-M are wire-guided.
+
 ### Inside the armour: modules, spall, crew hits and kill states (cg_brief queue item 2.1 (A2), armour/modules)
 
 Combined arms phase A2: what happens after a round or blast gets through a vehicle's plate. Design:

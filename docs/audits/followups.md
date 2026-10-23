@@ -1112,7 +1112,13 @@ out on a crew-compartment fire, a cook-off or a catastrophic warning (2.10.1) an
 recovery or repair when it is; the commander takes the gun when the gunner is down (2.5.3).
 Hooks only, per the brief (one line in squad_drivers or squad_ai).
 
-### F-237 (open, A3): main guns on their own modules
+### F-237 (closed by cg_brief queue item 2.2, A3, armour/guns): main guns on their own modules
+Done: VehicleWeapons' mounts each read their own modules (the coax its sights only, the main gun
+its breech, barrel and sights, the TOW its launcher, the commander's and loader's guns their
+ext_gun modules); a damaged breech makes every load x1.5 (the 25 mm keeps the jam); the bustle's
+doors open during the pull make a vent catastrophic; the turret runs on batteries for
+BATTERY_TURRET_S after the engine dies, then by hand; the Abrams and Bradley have turrets, so the
+traverse and elevation modules act. The original note:
 Until A3 the Abrams' and Bradley's gun seat fires the coax stand-in, so the breech, barrel and
 sights (gun_seat 1) gate it. A3: separate weapons per seat (main gun, coax, TOW, the pintle guns)
 each reading its own modules; breech damaged reload x1.5 (2.2.2); the Abrams' bustle doors open
@@ -1142,6 +1148,59 @@ AAV-7's side is about 0.5 ms of armour work (resolve, path, spall, apply: the A2
 and HOLE edits re-meshing the hull's chunks on the host, `_apply` in vehicle_hull.gd). One rocket
 is one hitch; an MG burst on an MRAP is many small ones. Worth deferring the remesh on a headless
 host, batching a frame's carves, or carving on a worker. A7 adds more carves (fired tiles, debris).
+
+### F-242 (open, Claude's A9): AI crews fire the main guns
+cg_brief queue item 2.2 (A3) gives every action a server_* call on `Vehicle.weapons`
+(VehicleWeapons): `can_fire(shooter, mount)` says why not, `server_fire(shooter, mount, dir)`,
+`server_select(seat, mount)`, `server_select_ammo("main", shell)`, `server_set_fuze("main", mode,
+airburst_m)`, `server_switch_feed()`, `server_set_rate(rate)`, `server_raise(up)` (the TOW),
+`server_unload`, `server_restock(n)`, `server_reload_tow(rider)`, `server_refill(s)`; a TOW is
+guided by keeping the turret (server_aim) on the target, slewing under WIRE_BREAK_DPS. The AI
+loader, the short-crewed loads, the restock, the box refill and a dismount's TOW reload already
+run on their own. Today AavGunner still fires only the coax on the Abrams and Bradley (through
+Vehicle.server_fire_gun). A9's CrewGunner picks the mount and round by target (2.7.7); one hook
+line in aav_gunner.gd or its replacement.
+
+### F-243 (open, A4): sights and fire control replace A3's plain aim
+A3 fires along the barrel: the gunner lays the turret (first person: the mouse; chase view: the
+camera's crosshair). The SACLOS sight line is the gunner_sight module's middle along the gun's
+line (VehicleWeapons.sight_origin, barrel), with its parallax to the coax. A4: the sights and
+their crosshairs, the laser's range into `server_set_fuze` for AMP airburst (today a set range
+only), lead and superelevation (ShellFlight.flight_to is the ballistic table), the stabiliser,
+the commander's override's 1.5x lay time, and hatches: the commander's M2, the loader's M240 and
+the TOW reloader are fired or worked from inside today (as if CROWS or turned out, with no
+exposure).
+
+### F-244 (open, cghath, D6b/C6): the rest of 9.2's A3 list
+Not built in A3 (cg_brief 2.2 scoped it to the Abrams and Bradley): the AAV's UGWS as mounts
+(Mk19 and M2 ready cans, 350 rpm, a 30 s can), the five technical guns (ZU-23-2, ZPU-2, SPG-9,
+M40, Type 63) and the enemy's 2A46, 2A42, 2A72 and PKT for D6b's T-72B3, BMP-2 and BTR-82A (the
+data shape is data/vehicle_weapons.json's), the crew wheel's basic orders (2.5.2, C6's contextual
+menus), and timed seat moves on the MRAPs, technicals and AAV (4 s / 6 s: a "switch_s" in their
+data does it).
+
+### F-245 (open, A7): the guns' sounds and effects
+The 120 mm and the 25 mm play the "hmg" shot sound; 2.10.5 wants a 120 mm report with a pressure
+thump, the 25 mm's thud-thud, the TOW's launch whoosh and wire spool. No muzzle flash or blast
+dust, no recoil kick on the hull, and the TOW launcher's voxels don't move when it's raised
+(VehicleWeapons.state "p").
+
+### F-246 (open, A5 or A7): the turret's modules don't turn with it
+A2's module boxes are in the hull's frame, laid out for the turret to the front; A3's turrets
+turn, so a round into a traversed turret meets the breech, sights, bustle rack and ring where the
+turret would be facing front. VehicleModules.trace could carry the turret's modules (a "turret"
+flag) into the turret's frame before the path, as Vehicle._seat_at does for its seats.
+
+### F-247 (open, A8): the racks become item stowage
+A3 keeps which rounds a rack holds in VehicleWeapons.racks (the module's rounds stay the total);
+A8's hook is `server_stow(rack, shell, n)` and `rack_contents(rack)`; `server_rearm` fills the
+racks to data/vehicle_weapons.json's load-out. The M919 package unlocks the AP feed's M919 only
+once some is in the racks (the default load-out is M791): A8 stocks it.
+
+### F-248 (open, A3 follow-up): over-penetration and the player loader's window over the net
+A shell that penetrates a hull ends there (A2 traces it inside); one through a soft vehicle doesn't
+carry on behind it. A client's ram press is judged on the host's clock (RAM_WINDOW_S 0.7 s), so a
+high ping eats into the window; worth a client-side judgement sent with the press time.
 
 ## Calls made for the Captain
 
@@ -1286,3 +1345,25 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.1: a destroyed radio sets meta radio_down (SideIntel's Blue Force Tracker, B1.13); damaged has no effect yet | B1.13's hook is the only reader | a radio state of its own
 2026-10-23 | cg_brief 2.1: a HitEvent for every hit ArmourModel resolves and every belly blast, reliable to every peer, short keys (o, p, pl, sh, t, pen, s, m, c, k, b), the last 10 kept on each; module health goes in net_state as one byte each | 2.3.9 | events for penetrations only
 2026-10-23 | cg_brief 2.1: budgets: a penetration's path and spall cone under 0.5 ms pure (armour_test), and the whole hit with spall under 0.5 ms on the host (vehicles_test, an AAV taking PG-7Vs) | 9.3's "a hit with spall under 0.5 ms on the host" | budget only the pure part
+2026-10-23 | cg_brief 2.2 (A3): turret rates Abrams 40 deg/s traverse, 25 elevation, -9 to +20; Bradley 50 and 30, -9 to +60 (data/vehicle_weapons.json "turret", Proposed, rounded public figures); the turret and gun voxels split as the O-GPK's do (pivot over the ring, the gun's box by colour) | the doc gives the drives' effects but no rates | the default 60/40 deg/s
+2026-10-23 | cg_brief 2.2 (A3): the vehicle's own "gun" stays the coax, fired by Vehicle.server_fire_gun from the cargo's belts; the main gun, TOW and the commander's and loader's guns are VehicleWeapons mounts | every AI and support system that reads gun_info (AavGunner, MotorPool, QRFs, convoys) keeps working unchanged; A9 moves the AI onto the mounts (F-242) | 2.7.2's weapons block replacing "gun" everywhere now
+2026-10-23 | cg_brief 2.2 (A3): the AI loader's whole load 6 s unskilled to 5 s skilled by SquadAI combat; a player's ram window is 0.7 s from the end of the 2 s pull, a press before it gives the slow 6.5 s load | 2.7.3 gives 5-6 s and 4.5 / 6.5 s but no window | a window from the start of the ram step to its end (1.5 s: too easy)
+2026-10-23 | cg_brief 2.2 (A3): short-crewed, the commander loads if he's aboard and able, else the gunner, 15 s, automatically for AI and players alike; whoever loads can't fire anything meanwhile (the coax included) | 2.5.1's table; "off his sight" | a player gunner loading only on his key
+2026-10-23 | cg_brief 2.2 (A3): a damaged breech makes every main-gun load (and the 25 mm's feed switch) x1.5; the 25 mm keeps A2's jam (3 s every 8 rounds) for its damaged breech | 2.2.2's "reload x1.5" for a loaded gun, A2's jam for a belt-fed one | the jam for the 120 mm too
+2026-10-23 | cg_brief 2.2 (A3): the bustle's blast doors are open only during the pull (2 s, x1.5 with a damaged breech); a vent while they're open is catastrophic (flags "doors_open") | 2.7.3, 2.10.2 | doors open the whole cycle
+2026-10-23 | cg_brief 2.2 (A3): the AI loader restocks the bustle from the hull on his own when it's below 10 and the vehicle has been quiet 30 s (no hit taken, nothing fired), or at once when the gun and the bustle are both empty; a kind at a time, the one furthest below its share of the load-out; the turret within 15 deg of the front, aborted (the round back) if it turns away | 2.7.3's "between fights" and "when the bustle is below 10" | only when told
+2026-10-23 | cg_brief 2.2 (A3): which rounds a rack holds lives in VehicleWeapons.racks, the module's "rounds" stays the total (A2's racks the truth for how many); rounds a hit loses come off the most numerous kind first; a count that grew (a reset, an older save) fills by the default mix; rearm counts the round in the breech as one of the load-out (33 + 1) | keeps A2's counts and saves working and gives A8 one hook (server_stow, rack_contents: F-247) | a rack per kind of round
+2026-10-23 | cg_brief 2.2 (A3): the Bradley's 600 stowed 25 mm are 200 AP and 400 HE; an empty ready box is refilled (both boxes, 120 s) on its own when the vehicle is stopped and quiet 30 s with the gunner and a dismount aboard, or when asked (server_refill), and stops on a hit, moving, or either man gone | 2.7.1's "any mix", 2.7.3's refill | a player-only refill key
+2026-10-23 | cg_brief 2.2 (A3): the AP feed takes M919 only with the "m919" package fitted and M919 in the racks, else M791 | the package exists in A1's data; stocking it is A8's | swap every M791 when the package is fitted
+2026-10-23 | cg_brief 2.2 (A3): TOW: raising 4 s at a halt, lowering at once; moving faster than 1 m/s lowers it (a missile in the air loses its wire); a rider or the commander reloads, 45 s a missile, launcher down and stopped; an AI rider does it on his own when quiet; raising or driving off stops it and the missile goes back | 2.7.3 | the gunner reloading from his seat
+2026-10-23 | cg_brief 2.2 (A3): SACLOS: the line is from the gunner_sight module's middle (turning with the turret) along the main gun's line, as it was 0.3 s before; after the boost the missile holds cruise_mps (TOW 190 m/s: 3,750 m in about 20 s), turns at 25 deg/s and steers for the point 0.5 s ahead on the line; the wire breaks on a turret slew over 25 deg/s, smoke between the sight and the missile (SmokeCloud.blocks), the launcher down or destroyed, nobody on the sight, or past wire_m, and it then falls free; Konkurs-M gets the same guidance for D6b | 2.7.2 | the line from the launcher itself (no parallax: wrong for a real TOW)
+2026-10-23 | cg_brief 2.2 (A3): ShellFlight's drag is quadratic per metre (a = g - drag x v|v|), tuned so 2.7.5's table comes out within 5% (M792 7%): M829A3 7.2e-5, M830A1 1.49e-4, M1147 1.63e-4, M791 1.91e-4, M792 3.17e-4, 3BM42 7.8e-5 (the M919 and the Russian rounds by eye) | 2.3.8, 2.7.5 (the 0.00035 in 2.3.1's example was never flown) | G7 tables as rifle rounds use
+2026-10-23 | cg_brief 2.2 (A3): a shell that penetrates a hull ends there (A2 traces it inside); a ricochet flies on along the bounce at 60% speed, twice at most; a solid shot goes through a man (Warheads' direct hit) and flies on; a filling bursts on whatever it meets armed (outside a hull: Warheads.server_people on everyone not under armour, the gore, the objectives), cratering the world by its kg; frag_m from shells.json (M830A1 8 m, M1147 12 m, M792 3 m), else 6 m x (kg / 0.2)^(1/3) | 2.3.3, 2.3.8; Warheads called, not rewritten | over-penetration through soft vehicles (F-248)
+2026-10-23 | cg_brief 2.2 (A3): a late joiner doesn't see shells already in the air (they last seconds); every peer draws each round from the fire event and stops it at the host's end event | 2.3.8 | replaying rounds in flight to a joiner
+2026-10-23 | cg_brief 2.2 (A3): gun shells hitting a model with no plates (technicals, aircraft) count as autocannon tier (data/vehicles.json round_tiers: m829a3, m919, m791, 3bm42, 3ubr8) | VehicleDamage resolves kinetic hits by tier; with no tier a 120 mm sabot bounced off a pickup | a separate kinetic path for soft models
+2026-10-23 | cg_brief 2.2 (A3): the commander and loader are their own seat kinds; boarding, casualty loading and the AI's seat order treat them as the passenger seats they were (Vehicle.rider_like), so the AI's boarding order is unchanged | 2.5.1, and nothing that seats people changes behaviour | every rider check rewritten to is_rider now
+2026-10-23 | cg_brief 2.2 (A3): timed seat moves only on models with "switch_s" (Abrams, Bradley); the man stays in his seat at no job until the move's done; turret to driver on the Abrams needs the turret within 15 deg of the front (refused otherwise) | 2.5.3; the MRAPs, technicals and AAV can take theirs with their mounts (F-244) | every vehicle at once
+2026-10-23 | cg_brief 2.2 (A3): the turret on batteries for 600 s after the engine is destroyed, then the hand crank (VehicleModules.turret_manual), back to powered when the engine's whole | 2.2.2's BATTERY_TURRET_S | ignore the batteries
+2026-10-23 | cg_brief 2.2 (A3): the commander's override fires the main gun and the TOW from his seat at once; the commander's M2 and loader's M240 fire from inside where their man looks (any bearing, -10 to +60 deg), fed from the cargo (M2 belts, 7.62 rounds) and rearmed with the vehicle | 2.5.1; A4 adds the 1.5x lay time and the hatches (F-243) | the commander's M2 only turned out
+2026-10-23 | cg_brief 2.2 (A3): keys in a gun seat: 1 the seat's own gun (main gun, the commander's or loader's), 2 the coax, 3 the TOW; fire mode cycles the next round or the 25 mm's rate; reload is the loader's key, the feed switch, the launcher up or down, or a gunner's unload; a dismount's reload key reloads the TOW | the bindings players already know for weapons, fire mode and reload | new rebindable vehicle actions
+2026-10-23 | cg_brief 2.2 (A3): budgets: 50 shells in flight under 0.5 ms a host physics step (9.3), a shot fired under 0.5 ms (maingun_test, Proposed); the 120 mm and 25 mm play the "hmg" shot sound until A7's (F-245) | 9.3 | no shot budget
