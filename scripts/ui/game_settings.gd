@@ -137,11 +137,14 @@ const BINDABLE := [
 	[&"auto_walk", "Auto-walk (on / off)"],
 	[&"walk", "Walk / jog (toggle)"],
 	[&"context", "Contextual order (tap: the top one, hold: all)"],
+	[&"lase", "Vehicle: lase (hold: first / last return)"], [&"designate", "Vehicle: designate (commander)"],
+	[&"hatch", "Vehicle: turn out / button up"], [&"sight_channel", "Vehicle: sight channel (day / thermal)"],
 ]
 ## Pairs of bindable actions that may share a key, because they never apply at the same time:
 ## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them
 ## to a key never swaps the other away from it.
-const SHARED := [[&"sprint", &"hold_breath"], [&"vehicle_view", &"binoculars"]]  # (B: binoculars on foot, the view seated)
+const SHARED := [[&"sprint", &"hold_breath"], [&"vehicle_view", &"binoculars"],  # (B: binoculars on foot, the view seated)
+	[&"lase", &"lean_right"], [&"designate", &"lean_left"], [&"hatch", &"crouch"], [&"sight_channel", &"mount"]]  # (combined arms A4: seated, on foot)
 ## The audio buses each volume sets (Sfx makes them; the room bus follows effects).
 const BUSES := {"master": [&"Master"], "effects": [&"SFX", &"SFX_Room"], "voice": [&"Voice"], "music": [&"Music"]}
 

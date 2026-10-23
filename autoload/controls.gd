@@ -67,6 +67,14 @@ const KEYS := {
 	&"auto_walk": [KEY_EQUAL],
 	# Walk or jog (a toggle; Captain, 2026-10-20: there was no walk, only the jog): SoldierMovement.walk_pace.
 	&"walk": [KEY_P],
+	# Combined arms A4 (docs/combined_arms.md 2.6, 2.7.4), seated only, each on a key that does
+	# something only on foot (GameSettings.SHARED; the doc's R, T and H are reload, voice orders and
+	# the medical menu): the laser (E; held, first or last return), the commander's hand-off (Q),
+	# turn out or button up (X, as crouching down out of the hatch), the sight's channel (C).
+	&"lase": [KEY_E],
+	&"designate": [KEY_Q],
+	&"hatch": [KEY_X],
+	&"sight_channel": [KEY_C],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.
@@ -147,6 +155,7 @@ const PAD_WHEEL := [
 	[&"nvg_toggle", "NVG up/down"], [&"weapon_light", "Weapon light"], [&"tag_enemy", "Tag enemy"],
 	[&"binoculars", "Binoculars"], [&"auto_walk", "Auto-walk"], [&"walk", "Walk / jog"],
 	[&"weapon_underbarrel", "Underbarrel / shells"],
+	[&"lase", "Lase"], [&"designate", "Designate"], [&"hatch", "Hatch"], [&"sight_channel", "Sight channel"],
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).

@@ -1136,10 +1136,14 @@ the FOB), track links per track, patching a tank, refilling racks, extinguisher 
 card's line ("pen hull_rear: transmission destroyed, engine destroyed; seats 0 hit
 [mobility]"). A5 builds the HitReport and card from them (2.11).
 
-### F-240 (open, A4 and A6): turned-out crew and flooding
+### F-240 (open, A6; A4's part done by cg_brief queue item 2.3, armour/gunnery): turned-out crew and flooding
 A2 leaves out what needs other phases: turned-out crew taking an outside blast as in the open
 (2.3.6, hatches are A4), sights losing thermal and LRF when damaged (A4's sights), and flooding as
-a mobility kill (A6's fording).
+a mobility kill (A6's fording). A4 took its two: a turned-out man is out in the open for blasts
+and fragments (Vehicle.seat_open: VehicleHatches.exposed) and his hitboxes stand over the hull
+for rounds; the sights read their modules (VehicleGunnery.sight_for: the primary damaged loses
+thermal and the laser, destroyed falls back to the aux sight; the commander's viewer damaged loses
+thermal). Left: flooding (A6).
 
 ### F-241 (open, A7 or the perf lane): a launcher hit on a vehicle costs ~14 ms on the host in the hull carving
 Measured while building A2 (vehicles suite, `_test_modules_budget`, R0599): a PG-7V through an
@@ -1161,7 +1165,15 @@ run on their own. Today AavGunner still fires only the coax on the Abrams and Br
 Vehicle.server_fire_gun). A9's CrewGunner picks the mount and round by target (2.7.7); one hook
 line in aav_gunner.gd or its replacement.
 
-### F-243 (open, A4): sights and fire control replace A3's plain aim
+### F-243 (closed by cg_brief queue item 2.3, A4, armour/gunnery): sights and fire control replace A3's plain aim
+Done: the sights and their overlay (VehicleGunnery, VehicleSight, VehicleSightOverlay), the
+laser into the fire control computer (FireControl: the ballistic table from ShellFlight's flight,
+lead from tracking, parallax; the gun laid off the sight by VehicleTurret.lay) and into the AMP's
+airburst range (VehicleGunnery.fuze_for, through VehicleWeapons._fire_shell), the stabiliser, the
+commander's 1.5x lay (VehicleTurret.rate_mult) and hand-off, and hatches (VehicleHatches: the
+commander's M2 and loader's M240 fire only turned out, the M2 from inside with a "crows" package;
+the TOW reloader stands out of the roof hatch, exposed). The TOW's wire follows the sight's line
+(VehicleWeapons.sight_line). The original note:
 A3 fires along the barrel: the gunner lays the turret (first person: the mouse; chase view: the
 camera's crosshair). The SACLOS sight line is the gunner_sight module's middle along the gun's
 line (VehicleWeapons.sight_origin, barrel), with its parallax to the coax. A4: the sights and
@@ -1201,6 +1213,55 @@ once some is in the racks (the default load-out is M791): A8 stocks it.
 A shell that penetrates a hull ends there (A2 traces it inside); one through a soft vehicle doesn't
 carry on behind it. A client's ram press is judged on the host's clock (RAM_WINDOW_S 0.7 s), so a
 high ping eats into the window; worth a client-side judgement sent with the press time.
+
+### F-249 (open, A7 or A9): the smoke dischargers' multispectral screen
+2.7.1's smoke dischargers (the Abrams 2 x 6 salvos, the Bradley 2 x 4) and 2.5.2's "Pop smoke"
+aren't built. ThermalView already treats a SmokeCloud of colour "multispectral"
+(ThermalView.MULTISPECTRAL) as blocking thermal while ordinary smoke is hidden, and the laser
+stops in any screen thick enough to block sight: the dischargers only need to spawn that colour
+(CompoundLevel.server_spawn_smoke) round the turret and use up a salvo (the "smoke" modules).
+
+### F-250 (open, A5 or the perf lane): thermal by part, and its GPU cost
+ThermalView gives each body one heat (a man 0.85, dead 0.4; a running vehicle 0.7, cold 0.3, a
+wreck 0.35, burning 1.0). 2.7.4's list wants parts: engines and exhausts 1.0, a barrel after
+firing 0.8 cooling over 90 s, tracks and tyres after driving 0.6 cooling over 120 s, bodies
+cooling after death, the ground 0.2-0.4 by time of day (today the ambient grey). The hull's
+meshes are per chunk, so a part needs its own GeometryInstance3D or a heat mask in the overlay
+shader. The CPU side is measured (gunnery suite); the GPU's extra additive pass over hot bodies
+and the full-screen pass want a windowed run on a real GPU (as F-221).
+
+### F-251 (open, Claude's A9): AI crews on the A4 API
+With F-242: A9's CrewGunner lases (`Vehicle.gunnery.server_lase(seat)`: 0.5-1.5 s by skill after
+acquiring, 2.7.7), lays the sight (`lay_on(point)`), waits for `laid()` and fires; reads
+`solution()`; sets the AMP's fuze (`server_set_fuze("m1147", "airburst")` against infantry in the
+open); corrects a miss by half. AI commanders scan with the viewer (`server_view(seat, dir)`) and
+hand targets to the gun (`hand_off(point)`). Hatches: VehicleHatches' stand-in rule (out after
+60 s of quiet, in at once on contact) is `auto_ai`; A9's states replace it (SAFE and AWARE out,
+COMBAT in, under artillery or after a near miss, 60 s after contact ends; drivers in towns
+buttoned up) with `server_set(seat, out)`. An AI gunner gets no fire control solution until it
+lases (call A4.10), so today's AavGunner fires as before.
+
+### F-252 (open, A5): what the HUDs and the audio add to A4
+VehicleSightOverlay is minimal for A5's VehicleHud to restyle (2.12.2: crew pips, the damage
+word, the round selector's look, BFT blue chevrons in the sight: B5.6). Not built in A4: buttoned
+up hearing muffled (outside sounds -12 dB, low-passed: 2.6), the vision blocks as a player's view
+when buttoned up (he looks from his seat's eye as before), the driver's periscopes and their night
+channel, the loader's turned-in view (the bustle doors, a big round selector), binoculars for a
+turned-out commander (he has his own if he carries them).
+
+### F-253 (open, cghath D6b with F-244): sights for the rest of 2.7.4's table
+The data shape is data/vehicle_weapons.json's `optics`, `fire_control`, `stab`, `hatches`: the
+AAV's UGWS sight (1x, 3x; no laser, unstabilised), CROWS on the MRAPs and the Abrams' TUSK II
+(also the "crows" package that lets the commander's M2 fire from inside: A8 adds it), the
+T-72B3's Sosna-U, the BMP-2's sight and image intensifier, the BTR-82A's. The MRAP gunner's
+hatch seat stays "open" (always exposed) until CROWS.
+
+### F-254 (open, A4 follow-up): the hand-off in the chase view, and the commander's look
+In the chase view a player gunner's turret follows the camera's crosshair (Arma's third-person
+gunner), so once a hand-off's slew ends his camera takes the turret back; in first person his aim
+carries on from the new line. The commander's viewer looks where his head looks (all round while
+it's up); a full CITV with its own traverse and stabilised head apart from the seat would be
+nicer, and lets him designate while turned out with binoculars (today: buttoned up only).
 
 ## Calls made for the Captain
 
@@ -1367,3 +1428,21 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.2 (A3): the commander's override fires the main gun and the TOW from his seat at once; the commander's M2 and loader's M240 fire from inside where their man looks (any bearing, -10 to +60 deg), fed from the cargo (M2 belts, 7.62 rounds) and rearmed with the vehicle | 2.5.1; A4 adds the 1.5x lay time and the hatches (F-243) | the commander's M2 only turned out
 2026-10-23 | cg_brief 2.2 (A3): keys in a gun seat: 1 the seat's own gun (main gun, the commander's or loader's), 2 the coax, 3 the TOW; fire mode cycles the next round or the 25 mm's rate; reload is the loader's key, the feed switch, the launcher up or down, or a gunner's unload; a dismount's reload key reloads the TOW | the bindings players already know for weapons, fire mode and reload | new rebindable vehicle actions
 2026-10-23 | cg_brief 2.2 (A3): budgets: 50 shells in flight under 0.5 ms a host physics step (9.3), a shot fired under 0.5 ms (maingun_test, Proposed); the 120 mm and 25 mm play the "hmg" shot sound until A7's (F-245) | 9.3 | no shot budget
+2026-10-23 | cg_brief 2.3 (A4.1): keys: lase E (held 0.6 s: first or last return), designate Q, hatch X, sight channel C, each seated only and sharing its key with an on-foot action (lean right, lean left, crouch, rest weapon: GameSettings.SHARED); the sight on aim (right mouse, a toggle), its power on zoom in/out, the main gun's fuze on the underbarrel key (4); all rebindable and on the pad's wheel | the doc's R, T and H are reload (A3's loader and feed), voice orders and the medical menu, and every letter is taken | new actions on spare keys (none left on the letters), or moving A3's reload uses
+2026-10-23 | cg_brief 2.3 (A4.2): thermal is per-body additive overlays (the heat in a magenta channel) plus one full-screen pass on the sight's overlay; the global uniform thermal_view is set but no shared shader was changed | the cheapest way here, headless-safe, no rewrite of the voxel, hull, terrain, scatter, water and sky shaders; walls still hide (one render) | every shared material shader reading the uniform (2.7.4's wording)
+2026-10-23 | cg_brief 2.3 (A4.3): one heat per body: a man 0.85, dead 0.4, a running vehicle 0.7, cold 0.3, a wreck 0.35, burning 1.0 (Proposed) | per-part heat needs parts tagged (F-250) | per-part now
+2026-10-23 | cg_brief 2.3 (A4.4): ordinary smoke is hidden in thermal, a cloud of colour "multispectral" blocks it (the dischargers that make it: F-249); the laser echoes off smoke of optical depth 1 or more (a first return) and stops in a screen thick enough to block sight (no last return) | how lasers and thermal meet smoke, and 2.7.4's call 21 | lasers through all smoke
+2026-10-23 | cg_brief 2.3 (A4.5): turned out = the seat's "out" spot in data (standing, head and shoulders over the hull), so rounds meet the man's own hitboxes and Vehicle.seat_open gives blasts and fragments to him; 1.5 s to turn out or in | exposure through the hit paths that already exist | a separate exposure roll
+2026-10-23 | cg_brief 2.3 (A4.6): AI crewmen's stand-in hatch rule: out once it's been quiet 60 s (counting from the vehicle coming into the level), in at once on contact (a hit, a round fired, a crewman shot at or near-missed in the last 60 s); A9 replaces it (auto_ai, F-251) | 2.6's SAFE/AWARE out, COMBAT in, without A9's states | AI crews buttoned up (blind) or out (exposed) all the time until A9
+2026-10-23 | cg_brief 2.3 (A4.7): the hatch spotting factor (x1 out; x2.5 inside a vision block's cone, unseen outside) applies to hatch seats only (driver, commander, loader); the gunner keeps today's spotting | the gunner sees through his sight; changing it would change every armed vehicle's AI before A9 | sight-cone spotting for gunners
+2026-10-23 | cg_brief 2.3 (A4.8): the primary sight damaged: day only (thermal and the laser gone), the computer on battlesight; the commander's viewer damaged: thermal gone, its lowest power left as a day picture; the aux sight isn't stabilised, so the stabiliser is off on it | 2.2.2 and 2.7.4's table ("GAS: stabilised no") | a blind CITV when damaged
+2026-10-23 | cg_brief 2.3 (A4.9): the Bradley's aux sight 6x day with stadia, battlesight 1,000 m (AP, HE), the computer's error 0.15 mil, the stabiliser 0.12 + 0.05 mil; the Abrams' 0.1 mil and 0.08 + 0.04; roughness = the hull's turn rate over 0.35 rad/s (Proposed) | the doc gives only the Abrams' battlesight and no error figures | none
+2026-10-23 | cg_brief 2.3 (A4.10): the computer gives a solution once the gunner lases, or while a player is at the gun (battlesight); an AI gunner keeps A3's plain aim until A9 lases | AavGunner's coax fire on the Abrams and Bradley stays as it was (battlesight's sabot lay would put it 0.14 degrees high) | battlesight for everyone
+2026-10-23 | cg_brief 2.3 (A4.11): a lase that gets nothing (no return, under the 200 m gate, the laser out) keeps the last good range in the computer and says why on the sight | a slip of the thumb shouldn't throw the lay away | battlesight on a failed lase
+2026-10-23 | cg_brief 2.3 (A4.12): errors per lase from its seed: the laser +-5 m, the computer's err_mil in a random direction (x3 with the fire control damaged), the lead 5% when tracked a second or more, rising linearly to 65% at none; tracking restarts on a slew over 20 deg/s | 2.7.4's LEAD_TRACK_S; the same on a replay | a fixed lead error
+2026-10-23 | cg_brief 2.3 (A4.13): the stabiliser's jitter widens each round's dispersion (added in quadrature to the gun's) rather than shaking the view; unstabilised, firing on the move scatters 1 mil a m/s; past max_kmh it's off (the gun turns with the hull) | a shaking sight picture is hard to play; 2.7.4's "fire at the halt or not at all" | jitter on the sight's line
+2026-10-23 | cg_brief 2.3 (A4.14): the hand-off slews at full speed with a gunner in place (his aim waits until the sight's on, 6 s at most), at 1/1.5 with none (the commander lays it himself, holding designate); the viewer only buttoned up; his lase within 10 s goes with it | 2.5.1 and 2.7.4 | the commander's lay always slower
+2026-10-23 | cg_brief 2.3 (A4.15): the commander's M2 needs him turned out unless a "crows" package is fitted (F-253), the loader's M240 always; the TOW reloader (a rider) stands out of the roof hatch while he reloads, exposed | 2.5.1's table and the brief | the M2 worked from inside as A3 had it
+2026-10-23 | cg_brief 2.3 (A4.16): the vehicle's own speed for the gunnery is measured from where it was each step (the round carries it, the stabiliser reads it), not linear_velocity | the same for a driven tank and a test rig moved by hand | linear_velocity (zero on a frozen rig)
+2026-10-23 | cg_brief 2.3 (A4.17): the AMP's airburst goes off at the computer's range (the lase; battlesight 900 m with none) plus the fuze's 5 m; the fuze is per round, set by the gunner or commander, saved with the vehicle | 2.7.4's "AIRBURST at the lased range" | the range typed in
+2026-10-23 | cg_brief 2.3 (A4.18): budgets (Proposed): thermal under 1 ms an update on the CPU at 4 updates a second (9.3; its GPU cost F-250), the gunnery's host step under 0.25 ms (0.10 measured), a lase with its solution under 0.5 ms; the sight's near plane 0.6 m | 9.3 | no budgets

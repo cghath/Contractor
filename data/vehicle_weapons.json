@@ -1,5 +1,5 @@
 {
-	"_units": "Combined arms A3 (cg_brief queue item 2.2; docs/combined_arms.md 2.5, 2.7, 9.1): what each armoured model's crew fights with, merged into the model's spec by VehicleSpecs (per-topic file, keyed by model id). Every number is Proposed. guns: the new mounted weapons (VehicleSpecs.gun falls back to these): kind cannon (one round at a time from a rack, a loader's cycle), autocannon (belt from a ready box per feed), atgm (missiles from a launcher), mg (Ballistics through the vehicle's cargo feed, as data/vehicles.json's guns). models.<id>.turret: VehicleTurret's numbers (vehicle frame, m; data/vehicles.json's turret key). weapons: the mounts, each {id, gun, seat (the seat that fires it), turret (main: on the main gun, which elevates; ring: on the turret ring, aimed with the gun's line; cupola/pintle: turns with the turret, aimed by its man), muzzle (at rest), modules (any of them destroyed: out), sights (all of them destroyed: out), legacy (the vehicle's own 'gun': fired through Vehicle.server_fire_gun, its feed in the cargo)}. A cannon adds racks (pulled from by the loader, in order), stowage (restocks the first rack), loader_seat, commander_seat, battlecarry (the round loaded at the start). An autocannon adds ready (the ready-box rack), stowage. An atgm adds stowage and ready (missiles on the launcher). racks: {module id of an ammo_rack: {shell id: rounds}}, the default load-out; the module's own 'rounds' (data/vehicle_modules.json) is the total the racks keep. switch_s: timed seat moves (2.5.3): turret (within the turret), driver (turret to the driver's station or back; front_deg: the turret within this of the front), troop (troop compartment to a crew seat).",
+	"_units": "Combined arms A3 (cg_brief queue item 2.2; docs/combined_arms.md 2.5, 2.7, 9.1): what each armoured model's crew fights with, merged into the model's spec by VehicleSpecs (per-topic file, keyed by model id). Every number is Proposed. guns: the new mounted weapons (VehicleSpecs.gun falls back to these): kind cannon (one round at a time from a rack, a loader's cycle), autocannon (belt from a ready box per feed), atgm (missiles from a launcher), mg (Ballistics through the vehicle's cargo feed, as data/vehicles.json's guns). models.<id>.turret: VehicleTurret's numbers (vehicle frame, m; data/vehicles.json's turret key). weapons: the mounts, each {id, gun, seat (the seat that fires it), turret (main: on the main gun, which elevates; ring: on the turret ring, aimed with the gun's line; cupola/pintle: turns with the turret, aimed by its man), muzzle (at rest), modules (any of them destroyed: out), sights (all of them destroyed: out), legacy (the vehicle's own 'gun': fired through Vehicle.server_fire_gun, its feed in the cargo)}. A cannon adds racks (pulled from by the loader, in order), stowage (restocks the first rack), loader_seat, commander_seat, battlecarry (the round loaded at the start). An autocannon adds ready (the ready-box rack), stowage. An atgm adds stowage and ready (missiles on the launcher). racks: {module id of an ammo_rack: {shell id: rounds}}, the default load-out; the module's own 'rounds' (data/vehicle_modules.json) is the total the racks keep. switch_s: timed seat moves (2.5.3): turret (within the turret), driver (turret to the driver's station or back; front_deg: the turret within this of the front), troop (troop compartment to a crew seat). Combined arms A4 (cg_brief queue item 2.3; docs/combined_arms.md 2.6, 2.7.4): optics: each sight {id, name, seat (whose it is), role (primary: the gunner's main sight; aux: its back-up, bore-sighted, stadia per round; commander: his independent viewer), module (data/vehicle_modules.json: damaged or destroyed as 2.2.2 says), head (where its glass is at rest, vehicle frame, m; it turns with the turret), day and thermal (each channel's magnifications, x the player's base view; none: no such channel), lrf_m ([min, max] the laser's ranges, m; none: no laser), lrf_err_m (+- m), stab (its line is stabilised), stadia (hold-over marks per round)}. fire_control: {module, err_mil (the solution's error; x damaged_x with the module damaged), battlesight_m (the range assumed with no lase, by shell kind)}. stab: the stabiliser {aim jitter base_mil + k_mil x speed (m/s) x roughness (the hull's turn rate over rough_rads, 0..1); off past max_kmh}. hatches: {seat: {out: the seat turned out (at, stance), vision: the vision blocks buttoned up [[yaw_deg from the seat's front, width_deg], ...]}}; roof_hatch: where a rider stands out of the roof hatch to reload the TOW. A mount's hatch: out (fired only turned out), remote_package (a fitted package that lets it fire from inside: CROWS).",
 	"guns": {
 		"m256": {"name": "M256 120 mm", "kind": "cannon", "ammo": ["m829a3", "m830a1", "m1147"], "spread_mil": 0.2, "sound": "hmg"},
 		"m242": {"name": "M242 Bushmaster 25 mm", "kind": "autocannon", "feeds": {"ap": ["m919", "m791"], "he": ["m792"]}, "box": {"ap": 70, "he": 230}, "rates_rpm": {"single": 0, "low": 100, "high": 200}, "spread_mil": 0.6, "sound": "hmg"},
@@ -16,9 +16,21 @@
 				{"id": "main", "gun": "m256", "seat": 1, "turret": "main", "muzzle": [0.0, 1.95, -4.95], "modules": ["breech", "barrel"], "sights": ["gunner_sight", "aux_sight"],
 					"racks": ["ammo_rack_bustle"], "stowage": ["ammo_rack_hull"], "loader_seat": 3, "commander_seat": 2, "battlecarry": "m829a3"},
 				{"id": "coax", "gun": "m240c", "seat": 1, "turret": "main", "legacy": true, "sights": ["gunner_sight", "aux_sight"]},
-				{"id": "commander_m2", "gun": "m2_cupola", "seat": 2, "turret": "cupola", "muzzle": [0.7, 2.8, -1.4], "modules": ["ext_gun_commander"]},
-				{"id": "loader_m240", "gun": "m240_pintle", "seat": 3, "turret": "pintle", "muzzle": [-0.75, 2.63, -0.25], "modules": ["ext_gun_loader"]}
+				{"id": "commander_m2", "gun": "m2_cupola", "seat": 2, "turret": "cupola", "muzzle": [0.7, 2.8, -1.4], "modules": ["ext_gun_commander"], "hatch": "out", "remote_package": "crows"},
+				{"id": "loader_m240", "gun": "m240_pintle", "seat": 3, "turret": "pintle", "muzzle": [-0.75, 2.63, -0.25], "modules": ["ext_gun_loader"], "hatch": "out"}
 			],
+			"optics": [
+				{"id": "gps", "name": "GPS", "seat": 1, "role": "primary", "module": "gunner_sight", "head": [0.75, 2.6, -0.95], "day": [3, 10], "thermal": [3, 6, 13, 25], "lrf_m": [200, 8000], "lrf_err_m": 5.0, "stab": true},
+				{"id": "gas", "name": "GAS", "seat": 1, "role": "aux", "module": "aux_sight", "head": [0.5, 2.05, -1.1], "day": [8], "stadia": true},
+				{"id": "citv", "name": "CITV", "seat": 2, "role": "commander", "module": "commander_sight", "head": [0.45, 3.05, 0.0], "thermal": [3, 6, 13], "lrf_m": [200, 8000], "lrf_err_m": 5.0, "stab": true}
+			],
+			"fire_control": {"module": "fcs", "err_mil": 0.1, "damaged_x": 3.0, "battlesight_m": {"apfsds": 1200, "heat": 900, "amp": 900}},
+			"stab": {"base_mil": 0.08, "k_mil": 0.04, "rough_rads": 0.35, "max_kmh": 50.0},
+			"hatches": {
+				"0": {"out": {"at": [0.0, 2.05, -2.45], "stance": "stand"}, "vision": [[0, 100]]},
+				"2": {"out": {"at": [0.6, 3.15, 0.8], "stance": "stand"}, "vision": [[0, 30], [60, 30], [120, 30], [180, 30], [240, 30], [300, 30]]},
+				"3": {"out": {"at": [-0.6, 3.05, 0.8], "stance": "stand"}, "vision": [[30, 45]]}
+			},
 			"racks": {"ammo_rack_bustle": {"m829a3": 16, "m830a1": 10, "m1147": 8}, "ammo_rack_hull": {"m829a3": 4, "m830a1": 2}},
 			"switch_s": {"turret": 3.0, "driver": 10.0, "front_deg": 15.0}
 		},
@@ -33,6 +45,18 @@
 				{"id": "tow", "gun": "tow_launcher", "seat": 1, "turret": "ring", "muzzle": [-1.05, 2.16, -1.3], "modules": ["tow_launcher"], "sights": ["gunner_sight", "aux_sight"],
 					"stowage": ["rack_tow"], "ready": 2, "commander_seat": 2}
 			],
+			"optics": [
+				{"id": "ibas", "name": "IBAS", "seat": 1, "role": "primary", "module": "gunner_sight", "head": [0.45, 2.9, -1.1], "day": [4, 12], "thermal": [4, 12], "lrf_m": [200, 4000], "lrf_err_m": 5.0, "stab": true},
+				{"id": "aux", "name": "AUX", "seat": 1, "role": "aux", "module": "aux_sight", "head": [0.08, 2.55, -1.35], "day": [6], "stadia": true},
+				{"id": "civ", "name": "CIV", "seat": 2, "role": "commander", "module": "commander_sight", "head": [-0.58, 3.05, -0.35], "thermal": [4, 12], "lrf_m": [200, 4000], "lrf_err_m": 5.0, "stab": true}
+			],
+			"fire_control": {"module": "fcs", "err_mil": 0.15, "damaged_x": 3.0, "battlesight_m": {"apds": 1000, "apfsds": 1000, "hei": 1000}},
+			"stab": {"base_mil": 0.12, "k_mil": 0.05, "rough_rads": 0.35, "max_kmh": 40.0},
+			"hatches": {
+				"0": {"out": {"at": [-0.95, 2.4, -1.9], "stance": "stand"}, "vision": [[0, 100]]},
+				"2": {"out": {"at": [-0.4, 3.4, -0.1], "stance": "stand"}, "vision": [[0, 30], [60, 30], [120, 30], [180, 30], [240, 30], [300, 30]]}
+			},
+			"roof_hatch": {"at": [0.5, 2.55, 2.0], "stance": "stand"},
 			"racks": {"ready_25": {"m791": 70, "m792": 230}, "rack_25": {"m791": 200, "m792": 400}, "rack_tow": {"tow2a": 5}},
 			"switch_s": {"turret": 3.0, "driver": 10.0, "troop": 6.0, "front_deg": 0.0}
 		}

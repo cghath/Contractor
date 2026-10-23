@@ -11,6 +11,65 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Gunnery: sights, thermal, the laser and fire control, the stabiliser, hatches (cg_brief queue item 2.3 (A4), armour/gunnery)
+
+Combined arms phase A4: the Abrams and the Bradley aim through real sights. Design:
+docs/combined_arms.md 2.6 and 2.7.4 ("Built in A4" there says what's in); the sights, fire
+control, stabilisers and hatches in data/vehicle_weapons.json; every number Proposed; calls in
+docs/audits/followups.md "Calls made". The full vehicle HUDs and the x-ray are next (A5).
+
+#### Added
+- **Sights, full screen**: the aim key in the gunner's or commander's seat looks through the
+  seat's sight, at its glass on the turret, its power relative to your own view (zoom in and out
+  step it; the mouse slows to match). The Abrams' gunner has the GPS (day 3x and 10x, thermal 3x
+  to 25x, the laser to 8 km) and the GAS (8x, with a stadia mark per range for the round in the
+  breech); the commander the CITV (thermal 3x, 6x, 13x, its own laser). The Bradley: the IBAS
+  (day and thermal 4x and 12x, the laser to 4 km), its aux sight (6x, stadia) and the CIV. A
+  minimal overlay gives the reticle, the channel and power, the range (first or last return),
+  the stabiliser and laser state, the round loaded and next, the rounds left, the fuze, the lead
+  and how long you've tracked, and the turret's and hull's headings.
+- **Thermal** (the sight channel key: day, white-hot, black-hot): living men glow, a dead one
+  less, a running tank warm, a cold one dim; ordinary smoke is see-through, a multispectral
+  screen isn't; walls hide what's behind them. Local to your machine.
+- **The laser and the fire control computer**: lase (E) and the computer lays the gun for the
+  range, the round's ballistic table (from ShellFlight's own flight), the lead (how fast your
+  sight was turning over the last second times the time of flight) and the sight's offset from
+  the bore: the reticle stays on the target, the gun moves. It holds until the next lase, and
+  re-lays for a new round at the same range. Smoke on the line gives a first return at the smoke
+  (MULTIPLE RETURNS); hold lase to switch first and last. With no lase, battlesight: 1,200 m for
+  sabot, 900 for HEAT and HE. Rounds from a moving tank carry its speed.
+- **The M1147 AMP's fuzes** (the underbarrel key in a gun seat cycles PD, delay and airburst;
+  the M830A1's PD and air): airburst goes off at the lased range.
+- **The stabiliser**: the gun holds its line in the world while the hull turns and pitches, with
+  a little more scatter the faster and rougher the drive; past 50 km/h (the Bradley 40) it can't
+  keep up and the gun turns with the hull. Off, firing on the move scatters badly.
+- **The commander's independent viewer and hand-off**: he looks all round through it apart from
+  the gun; designate (Q) slews the turret onto his line at full speed for the gunner ("Gunner,
+  sabot, tank!"), with the range he lased. With no gunner he lays the gun himself, holding
+  designate, half as slowly again.
+- **Hatches** (X): the driver, commander and loader turn out (head and shoulders out of the
+  hatch, 1.5 s) or button up. Turned out, rounds and blasts reach them as anyone in the open,
+  and they see all round; buttoned up they see only through their vision blocks, 2.5x slower
+  for the AI to spot. The loader's M240 and the commander's M2 fire only turned out (the M2 from
+  inside with CROWS fitted); the Bradley's TOW reloader works out of the roof hatch, exposed.
+  AI crewmen ride turned out once it's been quiet a minute and button up at the first contact.
+- **Module fallbacks** (A2's modules): the gunner's primary sight damaged leaves day only and no
+  laser; destroyed, the gunner falls back to the aux sight (no solution, no stabiliser: hold over
+  with the stadia). The fire control damaged triples the solution's error; destroyed, no
+  solution and no stabiliser. A damaged traverse or elevation drive turns the stabiliser off.
+  The commander's viewer damaged loses thermal; destroyed, no hand-off.
+- New suite `gunnery` (in CI): the laser, fire control on real rounds at 1-2 km (static,
+  crossing, from a moving tank), 200 seeded runs (90% hits with the lead, under 40% without),
+  every fallback, the stabiliser, the hand-off, hatches, the AMP's airburst, thermal and its
+  budget, the overlay at 10 resolutions, save and load, late join.
+
+#### Changed
+- The TOW's wire follows the gunner's sight line (it was the barrel's).
+- The gunner's first-person view follows his sight's line.
+- Spotting from a vehicle's hatch seats (driver, commander, loader) depends on the hatch.
+- Keys: lase (E), designate (Q), hatch (X) and sight channel (C) work seated, sharing their keys
+  with lean right, lean left, crouch and rest weapon on foot; rebindable, and on the pad's wheel.
+
 ### Main guns: the Abrams' 120 mm and its loader, the Bradley's dual feed and TOW (cg_brief queue item 2.2 (A3), armour/guns)
 
 Combined arms phase A3: the tanks fight with their real guns. Design: docs/combined_arms.md 2.5

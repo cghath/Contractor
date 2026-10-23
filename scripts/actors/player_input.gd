@@ -298,6 +298,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# The settings' sensitivity (and aiming sensitivity down sights); concussion slows turning.
 		var turn := GameSettings.mouse_turn(MOUSE_SENSITIVITY, body.is_aiming) * body.vitals.turn_mult()
 		turn *= GunSight.zoom_turn(body)  # through a scope: slower with the zoom (P0362)
+		turn *= VehicleSight.zoom_turn(body)  # through a vehicle's sight, the same (combined arms A4)
 		if body.movement.is_sprinting:  # sprinting under load, the view comes round slower
 			turn *= lerpf(1.0, MovementRules.SPRINT_TURN_LOADED, MovementRules.load_fraction(body.load_kg))
 		turn_view(-event.relative.x * turn)

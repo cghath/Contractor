@@ -52,6 +52,13 @@ extends RigidBody3D
 ## by its own sights), the turret's seats turn with it (turns_with_turret), the commander and
 ## loader are crew seats (COMMANDER, LOADER), and seat moves take time (switch_time).
 ##
+## Gunnery (combined arms A4): a model with "optics" has a VehicleGunnery child ("Gunnery": the
+## sights, the laser, fire control, the stabiliser, the commander's viewer and hand-off), one with
+## "hatches" a VehicleHatches ("Hatches": turned out or buttoned up). Their hooks here: a hatch
+## seat's spot, stance and openness (_seat_at, seat_eye_point, seat_open, _place_occupants), the
+## gunner's view along the sight's line (_gunner_look), aims waiting while a hand-off slews
+## (server_aim, request_aim), the keys, the readout, the save.
+##
 ## Helicopters are this class with kind "helicopter": seats, cargo, damage and saving work; the
 ## ground drive does nothing for them. V3 flies them by overriding _drive_step (or a subclass).
 ## Numbers marked Proposed are tunable.
@@ -325,6 +332,10 @@ var modules: VehicleModules
 ## Combined arms A3: the mounts its crew fights with (the main gun and its loader, the dual feed,
 ## the TOW, the commander's and loader's guns), on models with "weapons"; null on the rest.
 var weapons: VehicleWeapons
+## Combined arms A4: sights, the laser, fire control, the stabiliser, the commander's viewer, on
+## models with "optics"; hatches turned out or buttoned up on models with "hatches"; null on the rest.
+var gunnery: VehicleGunnery
+var hatches: VehicleHatches
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -420,6 +431,12 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	if spec.has("weapons"):
 		weapons = VehicleWeapons.new(self)  # A3: "Weapons", its state in the StateSync
 		add_child(weapons)
+	if spec.has("optics"):
+		gunnery = VehicleGunnery.new(self)  # A4: "Gunnery"
+		add_child(gunnery)
+	if spec.has("hatches"):
+		hatches = VehicleHatches.new(self)  # A4: "Hatches"
+		add_child(hatches)
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -460,6 +477,10 @@ func _add_sync() -> void:
 	var paths: Array[NodePath] = [^".:net_state", ^".:net_carves", ^"Cargo:net_state", ^"Modules:net_state"]
 	if weapons:
 		paths.append(^"Weapons:net_state")
+	if gunnery:
+		paths.append(^"Gunnery:net_state")
+	if hatches:
+		paths.append(^"Hatches:net_state")
 	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -670,7 +691,8 @@ func seat_transform(seat: String) -> Transform3D:
 
 ## A seat's eye point in the world (the gunner's turns with the turret, and a turret seat's).
 func seat_eye_point(index: int) -> Vector3:
-	var at := VehicleSpecs.vec(spec.seats[index].at)
+	var out: Variant = hatches.eye_local(index) if hatches else null  # A4: turned out
+	var at: Vector3 = out if out is Vector3 else VehicleSpecs.vec(spec.seats[index].at)
 	return global_transform * (turret.carry(at) if turns_with_turret(index) else at)
 
 
@@ -766,7 +788,7 @@ func seat_floor(index: int) -> float:
 ## Where seat `index` puts its occupant's body, in the vehicle's frame: the turret's seat goes
 ## round with the ring.
 func _seat_at(index: int) -> Transform3D:
-	var t := _seat_local[index]
+	var t := hatches.seat_local(index, _seat_local[index]) if hatches else _seat_local[index]  # A4: out of a hatch
 	if turns_with_turret(index):
 		t.origin = turret.carry(t.origin)
 	return t
@@ -1620,7 +1642,7 @@ func seat_open(index: int) -> bool:
 	var defs: Array = spec.get("seats", [])
 	if index < 0 or index >= defs.size():
 		return false
-	return bool((defs[index] as Dictionary).get("open", false)) or (bay != null and bay.ffv_active(index))
+	return bool((defs[index] as Dictionary).get("open", false)) or (bay != null and bay.ffv_active(index)) or (hatches != null and hatches.exposed(index))
 
 
 ## Whether `s` may fire their own weapon from their seat along `direction` (world): a fire-
@@ -1781,7 +1803,7 @@ func _place_occupants() -> void:
 		now_seen[s.get_instance_id()] = s
 		if not _seen.has(s.get_instance_id()):
 			add_collision_exception_with(s)  # its capsule sits inside the hull: never pushes it
-		var seat_def: Dictionary = defs[i]
+		var seat_def: Dictionary = hatches.seat_def(i, defs[i]) if hatches else defs[i]  # A4: turned out, standing in the hatch
 		var t := global_transform * _seat_at(i)
 		s.vehicle = self
 		var f := -global_basis.z
@@ -1806,7 +1828,7 @@ func _place_occupants() -> void:
 			var rel := face
 			if s.has_meta(&"seat_veh_yaw") and (not s.is_ai() or _door_guns.has(i)):
 				rel = wrapf(s.rotation.y - float(s.get_meta(&"seat_veh_yaw")), -PI, PI)
-				if StringName(seat_def.kind) != GUNNER:
+				if StringName(seat_def.kind) != GUNNER and not (gunnery and gunnery.free_look(i)):  # (A4: the commander's viewer looks all round)
 					rel = clampf(rel, -2.2, 2.2)
 			if i == _gun_seat:
 				rel = _gunner_look(s, rel, veh_yaw)
@@ -1821,7 +1843,7 @@ func _place_occupants() -> void:
 		if not boarding.is_empty():
 			s.seat_pose = boarding.pose
 			continue
-		var seated: Dictionary = _seat_poses[i] if i < _seat_poses.size() else {}
+		var seated: Dictionary = _seat_poses[i] if i < _seat_poses.size() and not (hatches and hatches.overrides(i)) else {}
 		if not seated.is_empty():
 			# Every peer, from the synced turn; the gun's seat turns with its gunner (and the gun).
 			seated["yaw"] = 0.0 if i == _gun_seat and not _gun_remote() else wrapf(veh_yaw + face - s.rotation.y, -PI, PI)
@@ -3047,7 +3069,7 @@ func barrel_direction() -> Vector3:
 ## Host: points the turret towards `direction` (world), within its limits (an AI gunner; it
 ## turns there at the mount's speeds).
 func server_aim(direction: Vector3) -> void:
-	if turret and direction.length_squared() > 0.000001:
+	if turret and direction.length_squared() > 0.000001 and not (gunnery and gunnery.slewing()):  # (A4: a hand-off's slew first)
 		turret.aim_local(global_basis.inverse() * direction)
 
 
@@ -3074,7 +3096,8 @@ func door_arc_ok(seat: int, direction: Vector3) -> bool:
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func request_aim(p_yaw: float, p_pitch: float) -> void:
 	var actor := _sender()
-	if multiplayer.is_server() and turret and actor and actor.vitals.is_up() and gunner() == actor and is_finite(p_yaw) and is_finite(p_pitch):
+	if multiplayer.is_server() and turret and actor and actor.vitals.is_up() and gunner() == actor and is_finite(p_yaw) and is_finite(p_pitch) \
+			and not (gunnery and gunnery.slewing()):
 		turret.aim(p_yaw, p_pitch)
 
 
@@ -3109,7 +3132,7 @@ func _gunner_look(s: Soldier, rel: float, veh_yaw: float) -> float:
 	var was: Vector3 = s.get_meta(&"turret_set", Vector3(0, 0, -INF))
 	if s.vitals.is_up() and Soldier._now() - was.z < 0.25:
 		turret.aim(turret.target_yaw + wrapf(rel - was.x, -PI, PI), turret.target_pitch + (s.head.rotation.x - was.y))
-	var w := global_basis * turret.barrel_local()
+	var w := global_basis * turret.sight_local()  # (A4: the sight's line; the gun sits off it by the solution's lay)
 	var out := wrapf(atan2(-w.x, -w.z) - veh_yaw, -PI, PI)
 	s.set_pitch(asin(clampf(w.y, -1.0, 1.0)))
 	s.set_meta(&"turret_set", Vector3(out, s.head.rotation.x, Soldier._now()))
@@ -3238,6 +3261,12 @@ func _local_controls(delta: float) -> void:
 			_last_sent = now
 			_send_left = 0.1
 			request_drive.rpc_id(1, throttle, steer, brake)
+	if gunnery:
+		gunnery.local_controls(me, seat, free)  # A4: the sight, the laser, the hand-off, the fuze
+	if hatches and free and hatches.has_hatch(seat) and Input.is_action_just_pressed(&"hatch"):
+		hatches.request_toggle.rpc_id(1)  # A4: turn out or button up
+	if k == DRIVER:
+		pass
 	elif weapons and weapons.local_controls(me, seat, free):
 		pass  # A3: the seat's mounts (main gun, TOW, the loader's cycle, the commander's gun) took the keys
 	elif k == GUNNER and free and Input.is_action_pressed(&"fire"):
@@ -3267,6 +3296,10 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 			parts.append({"text": "%s %d%%" % [VehicleService.zone_name(z, kind).capitalize(), roundi(h * 100.0)], "style": &"warn" if h < 0.35 else &""})
 	if weapons:
 		parts.append_array(weapons.readout_parts(seat))  # A3: main gun, loader, feeds, TOW, seat moves
+	if gunnery:
+		parts.append_array(gunnery.readout_parts(seat))  # A4: the lase, the stabiliser, a sight's fallback
+	if hatches:
+		parts.append_array(hatches.readout_parts(seat))  # A4: turned out or buttoned up
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3331,6 +3364,10 @@ func to_save() -> Dictionary:
 		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids(), "modules": modules.to_save()}
 	if weapons:
 		out["weapons"] = weapons.to_save()  # A3
+	if gunnery:
+		out["gunnery"] = gunnery.to_save()  # A4
+	if hatches:
+		out["hatches"] = hatches.to_save()
 	return out
 
 
@@ -3394,6 +3431,10 @@ func from_save(data: Dictionary) -> void:
 	modules.from_save(data.get("modules", {}) if data.get("modules") is Dictionary else {}, zones_in)  # A2 (an older save: from its zones)
 	if weapons:
 		weapons.from_save(data.get("weapons", {}) if data.get("weapons") is Dictionary else {})  # A3 (an older save: the racks' default mix)
+	if gunnery and data.get("gunnery") is Dictionary:
+		gunnery.from_save(data.gunnery)  # A4
+	if hatches and data.get("hatches") is Dictionary:
+		hatches.from_save(data.hatches)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

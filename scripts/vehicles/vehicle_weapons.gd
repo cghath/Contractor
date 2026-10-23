@@ -35,6 +35,11 @@ extends Node
 ## server_stow and rack_contents. AI crews using the guns are phase A9: every action is a
 ## server_* call any brain can make, and can_fire says why one can't.
 ##
+## Gunnery (A4, VehicleGunnery): the main gun is laid off its sight by the fire control (the
+## turret's lay); a shell carries the stabiliser's jitter and the vehicle's measured speed and takes
+## its fuze from the gunner (the AMP's airburst at the lased range); the TOW's wire follows the
+## sight's line (sight_line); a gun worked from a hatch fires only turned out (VehicleHatches).
+##
 ## Host authoritative: the state lives on the host, net_state (in the vehicle's StateSync) gives
 ## every peer and late joiner what's loaded, the racks, the feeds and the launcher, and the zone
 ## save keeps it (to_save). Every number is Proposed.
@@ -189,7 +194,7 @@ static func layout(spec: Dictionary) -> Array:
 			"muzzle": VehicleSpecs.vec(w.get("muzzle"), Vector3.ZERO), "modules": w.get("modules", []), "sights": w.get("sights", []),
 			"legacy": legacy, "racks": w.get("racks", []), "stowage": w.get("stowage", []), "ready": w.get("ready", 0),
 			"loader_seat": int(w.get("loader_seat", -1)), "commander_seat": int(w.get("commander_seat", -1)),
-			"battlecarry": String(w.get("battlecarry", ""))})
+			"battlecarry": String(w.get("battlecarry", "")), "hatch": String(w.get("hatch", "")), "remote": String(w.get("remote_package", ""))})
 	return out
 
 
@@ -335,6 +340,10 @@ func can_fire(shooter: Soldier, id: String) -> String:
 		return "Not at that weapon"
 	if not mount_ok(id):
 		return "%s is out" % String(m.g.get("name", id))
+	if vehicle.hatches:
+		var hatch := vehicle.hatches.mount_why(vehicle.seat_of(shooter), m)  # A4: a gun worked from the hatch
+		if hatch != "":
+			return hatch
 	var st: Dictionary = state[id]
 	var now := Soldier._now()
 	match String(m.kind):
@@ -442,9 +451,19 @@ func barrel() -> Vector3:
 	return vehicle.barrel_direction()
 
 
-## The gunner's sight in the world: the gunner_sight module's middle, turning with the turret
-## (his eye if it has none).
+## The gunner's sight's line in the world (A4: the sight's, apart from the gun by the solution's
+## lay; the barrel's on a model with no sights).
+func sight_line() -> Vector3:
+	var g := vehicle.gunnery
+	return g.sight_dir(g.gunner_seat()) if g and g.gunner_seat() >= 0 else barrel()
+
+
+## The gunner's sight in the world: its glass (A4: VehicleGunnery, the sight in use), else the
+## gunner_sight module's middle, turning with the turret (his eye if it has none).
 func sight_origin() -> Vector3:
+	var g := vehicle.gunnery
+	if g and not g.sight_for(g.gunner_seat()).is_empty():
+		return g.sight_from(g.gunner_seat())
 	var i := vehicle.modules.index_of("gunner_sight")
 	var box: Variant = vehicle.modules.mods[i].box if i >= 0 else null
 	if box is AABB and vehicle.turret:
@@ -482,7 +501,7 @@ func _track(delta: float, now: float) -> void:
 		_yaw_dps = rad_to_deg(absf(wrapf(t.yaw - _yaw_prev, -PI, PI))) / delta
 	_yaw_prev = t.yaw
 	if mounts.any(func(m: Dictionary) -> bool: return String(m.kind) == ATGM and int(state[m.id].g) != 0):
-		_sight.append([now, sight_origin(), barrel()])
+		_sight.append([now, sight_origin(), sight_line()])
 		while not _sight.is_empty() and now - float(_sight[0][0]) > SIGHT_KEEP_S:
 			_sight.pop_front()
 	elif not _sight.is_empty():
@@ -954,13 +973,19 @@ func _fire_shell(m: Dictionary, shooter: Soldier, sid: String, now: float, breec
 	_shot_n += 1
 	var seed := hash([String(vehicle.name), _shot_n])
 	var origin := muzzle(String(m.id))
-	var dir := _scatter(barrel(), float(m.g.get("spread_mil", 0.3)) * MIL * (BARREL_SPREAD if _module_damaged(m, "barrel") else 1.0), seed)
-	var vel := dir * float(row.get("muzzle_mps", 1000.0)) + vehicle.linear_velocity
+	var g := vehicle.gunnery
+	var spread := float(m.g.get("spread_mil", 0.3)) * (BARREL_SPREAD if _module_damaged(m, "barrel") else 1.0)
+	if g:
+		spread = sqrt(spread * spread + pow(g.jitter_mil(), 2.0))  # A4: the stabiliser's jitter (or firing unstabilised on the move)
+	var dir := _scatter(barrel(), spread * MIL, seed)
+	var vel := dir * float(row.get("muzzle_mps", 1000.0)) + (g.own_velocity() if g else vehicle.linear_velocity)
 	var opts := {"vehicle": vehicle, "shot_id": seed}
 	if String(st.get("fz", "")) != "":
 		opts["fuze_mode"] = String(st.fz)
 	if float(st.get("ab", 0.0)) > 0.0:
 		opts["airburst_m"] = float(st.ab)
+	if g:
+		opts.merge(g.fuze_for(sid), true)  # A4: the fuze set for this round, airburst at the lased range
 	var id := flight.server_fire(StringName(sid), origin, vel, shooter, opts)
 	Sfx.server_shot(origin, origin + dir * 800.0, String(m.g.get("sound", "hmg")))
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)
@@ -998,7 +1023,7 @@ func _fire_missile(m: Dictionary, shooter: Soldier, st: Dictionary) -> Dictionar
 	st.rd = int(st.rd) - 1
 	st.g = launchers.last_id
 	_sight.clear()
-	_sight.append([Soldier._now(), sight_origin(), barrel()])
+	_sight.append([Soldier._now(), sight_origin(), sight_line()])
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)
 	_dirty = true
 	print("[weapons] %s fired a %s from the %s" % [shooter.display_name(), Launchers.warhead_name(w), vehicle.display_name()])
@@ -1236,7 +1261,7 @@ func saclos_line(missile_id: int, pos: Vector3, flown: float) -> Dictionary:
 		why = "out of wire"
 	elif _yaw_dps > WIRE_BREAK_DPS:
 		why = "the turret slewed too fast"
-	var sample: Array = _sight.front() if not _sight.is_empty() else [Soldier._now(), sight_origin(), barrel()]
+	var sample: Array = _sight.front() if not _sight.is_empty() else [Soldier._now(), sight_origin(), sight_line()]
 	var now := Soldier._now()
 	for x: Array in _sight:
 		if now - float(x[0]) >= WIRE_LAG_S:

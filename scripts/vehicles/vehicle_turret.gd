@@ -30,6 +30,9 @@ extends RefCounted
 ##   "traverse_deg": [min, max]  left positive; missing: all the way round
 ##   "elevation_deg": [min, max], "traverse_dps", "elevation_dps"
 ## Every number there is Proposed.
+##
+## Combined arms A4: the aim is the sight's; the gun goes to it plus the fire control's `lay`
+## (VehicleGunnery), and both turn at `rate_mult` of the drives' speeds.
 
 ## Default speeds (degrees a second), when the spec leaves them out.
 const TRAVERSE_DPS := 60.0
@@ -50,9 +53,20 @@ var pitch_rate := deg_to_rad(ELEVATION_DPS)
 ## Where it points now (radians, the vehicle's frame: yaw left positive, pitch up positive).
 var yaw := 0.0
 var pitch := 0.0
-## Where it's going (host; and the local gunner's own peer, which runs ahead of the host).
+## Where it's going (host; and the local gunner's own peer, which runs ahead of the host): where
+## the gunner aims his sight (combined arms A4: the gun goes there plus `lay`).
 var target_yaw := 0.0
 var target_pitch := 0.0
+## Combined arms A4 (VehicleGunnery, docs/combined_arms.md 2.7.4): the fire control's lay, how far
+## the gun sits off the sight's line (yaw, pitch radians): "the reticle stays on the target, the
+## gun moves". Zero (no solution) keeps the gun on the sight as before.
+var lay := Vector2.ZERO
+## Where the sight's line points now (radians, the vehicle's frame); it follows the aim at the
+## mount's speeds as the gun does, and the gun follows it plus the lay.
+var sight_yaw := 0.0
+var sight_pitch := 0.0
+## The drives' speeds times this (A4: the commander laying from his override, 2.5.1's 1.5x).
+var rate_mult := 1.0
 
 
 ## The turret of a vehicle spec, or null if its gun doesn't turn (no "turret", or no gun).
@@ -91,21 +105,48 @@ func aim_local(dir: Vector3) -> void:
 	aim(a.x, a.y)
 
 
-## Turns towards the target at the mount's speeds (all-round mounts the short way).
+## Turns towards the target at the mount's speeds (all-round mounts the short way): the sight to
+## the aim, the gun to the aim plus the lay.
 func step(delta: float) -> void:
-	var dy := wrapf(target_yaw - yaw, -PI, PI) if full_circle else target_yaw - yaw
-	yaw += clampf(dy, -yaw_rate * delta, yaw_rate * delta)
+	var yr := yaw_rate * rate_mult * delta
+	var pr := pitch_rate * rate_mult * delta
+	var gun := gun_target()
+	var dy := wrapf(gun.x - yaw, -PI, PI) if full_circle else gun.x - yaw
+	yaw += clampf(dy, -yr, yr)
 	if full_circle:
 		yaw = wrapf(yaw, -PI, PI)
 	else:
 		yaw = clampf(yaw, yaw_min, yaw_max)
-	pitch = clampf(pitch + clampf(target_pitch - pitch, -pitch_rate * delta, pitch_rate * delta), pitch_min, pitch_max)
+	pitch = clampf(pitch + clampf(gun.y - pitch, -pr, pr), pitch_min, pitch_max)
+	if lay == Vector2.ZERO:
+		sight_yaw = yaw
+		sight_pitch = pitch
+		return
+	var sy := wrapf(target_yaw - sight_yaw, -PI, PI) if full_circle else target_yaw - sight_yaw
+	sight_yaw = wrapf(sight_yaw + clampf(sy, -yr, yr), -PI, PI) if full_circle else clampf(sight_yaw + clampf(sy, -yr, yr), yaw_min, yaw_max)
+	sight_pitch = clampf(sight_pitch + clampf(target_pitch - sight_pitch, -pr, pr), pitch_min, pitch_max)
+
+
+## Where the gun is going: the aim plus the lay, inside the limits.
+func gun_target() -> Vector2:
+	var y := target_yaw + lay.x
+	return Vector2(clampf(y, yaw_min, yaw_max) if not full_circle else wrapf(y, -PI, PI), clampf(target_pitch + lay.y, pitch_min, pitch_max))
 
 
 ## Snaps to the target (a reload, tests).
 func settle() -> void:
-	yaw = target_yaw
-	pitch = target_pitch
+	var gun := gun_target()
+	yaw = gun.x
+	pitch = gun.y
+	sight_yaw = target_yaw
+	sight_pitch = target_pitch
+
+
+## The sight's line in the vehicle's frame (A4; the barrel's while there's no lay).
+func sight_local() -> Vector3:
+	if lay == Vector2.ZERO:
+		return barrel_local()
+	return Basis(Vector3.UP, sight_yaw) * Basis(Vector3.RIGHT, sight_pitch) * Vector3.FORWARD
 
 
 ## (yaw, pitch) of a direction in the vehicle's frame.

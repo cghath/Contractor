@@ -889,6 +889,17 @@ replicated in `net_state`.
 - **Thermal sights partly make up for buttoning up:** the CITV or CIV is a sight, not a block,
   with thermal and zoom, but a narrow field of view.
 
+**Built in A4** (cg_brief queue item 2.3): `VehicleHatches` (scripts/vehicles/vehicle_hatches.gd,
+the "Hatches" child of a model with `hatches` in data/vehicle_weapons.json: the Abrams' driver,
+commander and loader, the Bradley's driver and commander, and its `roof_hatch` for the TOW
+reloader). A turned-out man stands in his hatch at the hatch's `out` spot, head and shoulders over
+the hull, so rounds meet his own hitboxes and `Vehicle.seat_open` gives blasts and fragments to
+him (Warheads); `Spotting.spot_seconds` takes `VehicleHatches.spot_x`; the loader's M240 and the
+commander's M2 (unless a `crows` package is fitted) need turned out. The hatch key is X (`hatch`:
+H is the medical menu). AI crewmen follow a stand-in rule until A9's states (F-251): out after 60
+s of quiet, in at once on contact. The hearing, the vision-block views and the driver's
+periscopes are A5's (F-252).
+
 ### 2.7 Weapons and gunnery
 
 #### 2.7.1 What each vehicle carries
@@ -1033,6 +1044,27 @@ made are in docs/audits/followups.md ("Calls made", 2026-10-23, cg_brief 2.2); t
   can also take the trigger himself.
 - **Gun accuracy.** Dispersion per gun in mils (`spread_mil`: 120 mm 0.2, 125 mm 0.3, 25 mm 0.6,
   30 mm 0.8, Mk19 3.0, M2 1.0); a damaged barrel x3.
+
+**Built in A4** (cg_brief queue item 2.3, branch `armour/gunnery`): `VehicleGunnery`
+(scripts/vehicles/vehicle_gunnery.gd, the "Gunnery" child of a model with `optics`) with the
+Abrams' GPS, GAS and CITV and the Bradley's IBAS, aux sight and CIV in data/vehicle_weapons.json
+(`optics`, `fire_control`, `stab`); each sight reads its module as 2.2.2 says (the fallbacks to
+the aux sight, the fire control's x3 and none). `FireControl` (scripts/vehicles/fire_control.gd)
+is the computer's pure sums: the ballistic table per round from ShellFlight's own integrator, the
+solution with lead and parallax, the stadia. `VehicleTurret` keeps the sight's line apart from the
+gun by the solution's `lay`, and turns at `rate_mult` (the commander's 1.5x). The laser (first and
+last return, smoke), battlesight, the stabiliser (a world aim, jitter by speed and roughness, off
+past `max_kmh` or with a damaged drive), the commander's viewer and hand-off, the AMP's airburst at
+the lased range. `VehicleSight` (the full-screen Camera3D) and `VehicleSightOverlay`
+(scripts/ui/vehicle_sight_overlay.gd: minimal, for A5 to restyle) are local. `ThermalView`
+(scripts/combat/thermal_view.gd) is per-body additive heat overlays plus a full-screen pass
+(thermal_view.gdshader), not a change to every shared shader (call A4.2); the uniform
+`thermal_view` is set for any shader that wants it. `VehicleHatches` (2.6) is the hatches. The API
+A9's CrewGunner uses: `server_lase(seat)`, `lay_on(point)`, `hand_off(point)`, `solution()`,
+`laid()`, `server_set_fuze(round, mode)`, `server_view(seat, dir)`; `VehicleHatches.server_set` and
+`auto_ai`. AI gunners get a solution only once they lase. The calls are in
+docs/audits/followups.md ("Calls made", 2026-10-23, cg_brief 2.3); what's left is F-249 to F-254
+there; the suite is `gunnery`.
 
 #### 2.7.5 The ballistics, checked
 
