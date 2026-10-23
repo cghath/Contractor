@@ -917,9 +917,25 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 	var now := 0.0
 	var next := 0.0
 	var drop := _airframe_drop()
-	for t: float in LOOKAHEAD_S:
-		var ahead := _ahead(pos, vel_h, speed * t)
-		var need := _need_y(ahead[0], ahead[1], ahead[2], agl, drop)
+	# Perf (world content pass, 2026-10-23): each point's need is a dozen ground heights and three
+	# rays down through what stands there (props, pylons, buildings): ~2 ms a tick a helicopter on a
+	# busy machine (perfcases heli, R0573). The points from FAR_SAMPLE_S on are worked out every
+	# FAR_SAMPLE_TICKS ticks in turn, each keeping its last need meanwhile (a point 2 s+ ahead moves
+	# a few metres in that time, where the points are 25-100 m apart); the near ones every tick.
+	var key := Vector3(agl, float(_path_i) if has_meta(&"landing") else -1.0, float(_path.size()))
+	if key != _needs_key or _needs.size() != LOOKAHEAD_S.size() or pos.distance_to(_needs_at) > 10.0:
+		_needs_key = key
+		_needs.resize(LOOKAHEAD_S.size())
+		_needs.fill(INF)
+	_needs_at = pos  # (a jump, a new flight from elsewhere: all of them again)
+	_needs_turn += 1
+	for k in LOOKAHEAD_S.size():
+		var t: float = LOOKAHEAD_S[k]
+		var need := _needs[k]
+		if t < FAR_SAMPLE_S or need == INF or (_needs_turn + k) % FAR_SAMPLE_TICKS == 0:
+			var ahead := _ahead(pos, vel_h, speed * t)
+			need = _need_y(ahead[0], ahead[1], ahead[2], agl, drop)
+			_needs[k] = need
 		if t == 0.0:
 			now = need
 		elif t == 1.0:
@@ -936,6 +952,16 @@ func _contour(pos: Vector3, vel_h: Vector3, agl: float) -> Vector2:
 		# (F-218: it sat level 2.5 m under its need over a rise, the fall cancelling the climb).
 		return Vector2(want, maxf(next - now, 0.0) if pos.y < want else next - now)
 	return Vector2(want, climb if pos.y < want + 1.0 else 0.0)
+
+
+## Contour flight's points from this far ahead (s) are worked out every FAR_SAMPLE_TICKS ticks, in
+## turn (_contour; Proposed).
+const FAR_SAMPLE_S := 2.0
+const FAR_SAMPLE_TICKS := 3
+var _needs := PackedFloat32Array()  # each LOOKAHEAD_S point's last need (y)
+var _needs_key := Vector3.INF  # what they were worked out for: the height over the ground, the J-hook's leg
+var _needs_turn := 0
+var _needs_at := Vector3.INF  # where it was when they were last asked for
 
 
 ## Metres it can rise in `t` seconds from a vertical speed of `vy` (m/s), getting to `climb`

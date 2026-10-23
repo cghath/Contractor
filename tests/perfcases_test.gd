@@ -102,6 +102,7 @@ var _scripts_ms: Array[float] = []
 var _engine_ms: Array[float] = []
 var _proc_ms: Array[float] = []
 var _nav_ms := 0.0
+var _nav_frames: Array[float] = []  # the navigation server's time each frame (ms)
 var _costs := {}  # FrameCost system -> usec over the case
 var _frame_costs := {}  # this frame's FrameCost
 var _hitches: Array = []  # {"ms", "why"}
@@ -481,6 +482,7 @@ func _measure(name: String, walk: Array) -> void:
 	_engine_ms.clear()
 	_proc_ms.clear()
 	_nav_ms = 0.0
+	_nav_frames.clear()
 	_costs = {}
 	_hitches.clear()
 	_by_script = {}
@@ -495,6 +497,8 @@ func _measure(name: String, walk: Array) -> void:
 	_ai_at_frame = level.ai.get_child_count()
 	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
 	var bakes_before := nav.bakes if nav else 0
+	var map := level.get_world_3d().navigation_map
+	var syncs_before := NavigationServer3D.map_get_iteration_id(map)
 	_prev_event_process = true
 	_frame_start = Time.get_ticks_usec()
 	_measuring = true
@@ -544,7 +548,10 @@ func _measure(name: String, walk: Array) -> void:
 			intents[k] = int(intents.get(k, 0)) + 1
 	print("perf: %s: awake AI's intents at the end: %s" % [name, intents])
 	if nav and is_instance_valid(nav):
-		print("perf: %s: navigation: %d chunk bakes (%.1f a second), %d chunks held at the end" % [name, nav.bakes - bakes_before, (nav.bakes - bakes_before) / secs, nav.chunk_total()])
+		var syncs := NavigationServer3D.map_get_iteration_id(map) - syncs_before
+		print("perf: %s: navigation: %d chunk bakes (%.1f a second), %d chunks held at the end, the map synced %d times (%.1f a second); the server's frame median %.2f ms, 95th %.2f, worst %.2f" % [
+			name, nav.bakes - bakes_before, (nav.bakes - bakes_before) / secs, nav.chunk_total(), syncs, syncs / secs,
+			_pct(_nav_frames, 0.5), _pct(_nav_frames, 0.95), _nav_frames.max() if not _nav_frames.is_empty() else 0.0])
 	var n_frames := maxi(_frames.size(), 1)
 	# Hitches: the spikes past HITCH_MEDIANS times the median of their kind.
 	var med := {"tick": _pct(_ticks_ms, 0.5), "process": _pct(_proc_ms, 0.5)}
@@ -656,7 +663,9 @@ func _on_frame_first() -> void:
 	_boundary()
 	_process_start = Time.get_ticks_usec()
 	if _measuring:
-		_nav_ms += Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0
+		var nav_now := Performance.get_monitor(Performance.TIME_NAVIGATION_PROCESS) * 1000.0
+		_nav_ms += nav_now
+		_nav_frames.append(nav_now)
 		if _profile:
 			_run_profiled(false)
 

@@ -29,6 +29,8 @@ const MAX_BAKES := 8
 const UPDATE_S := 0.3
 ## Room above the ground in a chunk's bake for the structures (m).
 const HEADROOM_M := 8.0
+## Whether the zone's navigation map builds its iterations on a worker thread (build_zone).
+const MAP_ASYNC := true
 
 var zone: ZoneLevel
 var _origin := Vector2.ZERO  # the grid's corner (x, z)
@@ -53,7 +55,11 @@ static func build_zone(p_zone: ZoneLevel) -> ZoneNav:
 	# Chunks come and go all the time here; with asynchronous iterations some region updates
 	# never reached the map (measured: whole chunks missing from paths while their regions
 	# held the right meshes). Synchronous updates (map and regions) cost well under 1 ms.
-	NavigationServer3D.map_set_use_async_iterations(nav.get_world_3d().navigation_map, false)
+	# World content pass (2026-10-23): in a city (~500 chunks with floors over floors) a map
+	# update is 10-16 ms on the main thread, about twice a second (perfcases city, R0576: the
+	# server's frame median 9.8 ms): the map's own iterations are built on a worker (MAP_ASYNC);
+	# the regions' stay synchronous (the missing updates above).
+	NavigationServer3D.map_set_use_async_iterations(nav.get_world_3d().navigation_map, MAP_ASYNC)
 	return nav
 
 
@@ -265,12 +271,13 @@ func _update_wanted() -> void:
 	_queue = missing
 
 
-## Proposed (world content pass, 2026-10-23): a soldier up in a helicopter more than RIDE_AGL_M
-## over the ground wants no navigation round him: he can't walk off, and every chunk he flew over
-## was baked and dropped again (from a UH-60, ~20 bakes a second, each a few ms of gathering on the
-## main thread). Coming down to land, the chunks round him are wanted again (UPDATE_S) and bake
-## before anyone gets out. (Ground vehicles keep theirs: VehicleAI plans on the navigation mesh
-## round the vehicle.)
+## Proposed (world content pass, 2026-10-23): a soldier in a flying helicopter going faster than
+## RIDE_FAST_MS, or more than RIDE_AGL_M over the ground, wants no navigation round him: he can't
+## walk off, and every chunk he flew over was baked and dropped again (from a UH-60 contour-flying
+## at 12.5 m, ~20 bakes a second, each a few ms of gathering on the main thread, R0568). Slowing
+## and coming down to land, the chunks round him are wanted again (UPDATE_S) and bake before anyone
+## gets out. (Ground vehicles keep theirs: VehicleAI plans on the navigation mesh round the vehicle.)
+const RIDE_FAST_MS := 8.0
 const RIDE_AGL_M := 15.0
 
 
@@ -278,7 +285,10 @@ func _riding_past(s: Soldier) -> bool:
 	if s.vehicle == null or not is_instance_valid(s.vehicle):
 		return false
 	var heli := s.vehicle as Helicopter
-	return heli != null and heli.is_airborne() and heli.height_agl() > RIDE_AGL_M
+	if heli == null or not heli.is_airborne():
+		return false
+	var v := heli.linear_velocity
+	return Vector2(v.x, v.z).length() > RIDE_FAST_MS or heli.height_agl() > RIDE_AGL_M
 
 
 ## Marks every chunk within `radius` of `pos` (flat) with its distance from `pos` (`distances`
