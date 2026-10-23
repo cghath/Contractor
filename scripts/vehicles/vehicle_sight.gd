@@ -80,11 +80,11 @@ func open(g: VehicleGunnery, p_seat: int) -> void:
 	if channel == "day" and (s.get("day", []) as Array).is_empty():
 		channel = "thermal"
 	cull_mask = body.camera.cull_mask
-	if overlay == null and body.player_input and body.player_input.hud:
+	if not is_instance_valid(overlay) and body.player_input and body.player_input.hud:
 		overlay = VehicleSightOverlay.new()
 		body.player_input.hud.add_child(overlay)
 		body.player_input.hud.move_child(overlay, 0)  # under the rest of the HUD
-	if overlay:
+	if is_instance_valid(overlay):
 		overlay.visible = true
 	place()
 	current = true
@@ -95,7 +95,7 @@ func close() -> void:
 		return
 	up = false
 	ThermalView.set_mode(ThermalView.OFF)
-	if overlay:
+	if is_instance_valid(overlay):
 		overlay.visible = false
 	var chase := VehicleCamera.of(body)
 	if chase and chase.active:
@@ -149,6 +149,13 @@ func cycle_channel() -> String:
 	return "Day" if channel == "day" else "Thermal, %s" % ("white-hot" if polarity == ThermalView.WHITE_HOT else "black-hot")
 
 
+func _exit_tree() -> void:
+	if up:
+		ThermalView.set_mode(ThermalView.OFF)  # (the body went: thermal mustn't stay on)
+	if is_instance_valid(overlay):
+		overlay.queue_free()
+
+
 func _process(_delta: float) -> void:
 	if not up:
 		return
@@ -181,5 +188,5 @@ func place() -> void:
 		ThermalView.update(get_tree(), from)
 	else:
 		ThermalView.set_mode(ThermalView.OFF)
-	if overlay:
+	if is_instance_valid(overlay):
 		overlay.show_info(gunnery.sight_info(seat), self)

@@ -87,6 +87,8 @@ func _ready() -> void:
 		await _test_airburst()
 	if _want("thermal"):
 		await _test_thermal()
+	if _want("view"):
+		await _test_sight_view()
 	if _want("save"):
 		await _test_save()
 	if _want("budget"):
@@ -223,7 +225,6 @@ func _test_overlay() -> void:
 	for res: Vector2i in sizes:
 		var logical := Vector2(res) / GameSettings.ui_scale_for(res, 1.0)
 		host.size = logical
-		o.size = logical
 		o.set_text(info, "thermal", ThermalView.BLACK_HOT, 25.0)
 		await get_tree().process_frame
 		var screen := Rect2(Vector2.ZERO, logical)
@@ -787,6 +788,48 @@ func _test_thermal() -> void:
 	for c: SmokeCloud in clouds:
 		c.queue_free()
 	await _clear(v, crew + men)
+
+
+# --- The local player's sight ---------------------------------------------------------------------
+
+func _test_sight_view() -> void:
+	print("The local player's sight: full screen, powers, channels")
+	var v := await _spawn("abrams", Vector3(-600, RIG_Y, -300), 0.0)
+	v.server_enter(player, 1)
+	await _seconds(0.5)
+	var g := v.gunnery
+	var sight := VehicleSight.open_for(player, g, 1)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var base := player.camera.fov
+	var want3 := rad_to_deg(2.0 * atan(tan(deg_to_rad(base) * 0.5) / 3.0))
+	check(sight.up and sight.current and sight.channel == "day" and _near(sight.fov, want3, 0.01) and VehicleSight.zoom_turn(player) < 0.4
+		and sight.global_position.distance_to(g.sight_from(1)) < 0.01 and is_instance_valid(sight.overlay) and sight.overlay.visible,
+		"up: the GPS at its glass, day 3x (%.1f deg of the base %.0f), the mouse at %.2f, the overlay on" % [sight.fov, base, VehicleSight.zoom_turn(player)])
+	sight.step_mag(1)
+	await get_tree().process_frame
+	var ten := sight.mag()
+	var told := sight.cycle_channel()
+	await get_tree().process_frame
+	var thermal_on := ThermalView.mode == ThermalView.WHITE_HOT and sight.mag() == 3.0 and sight.overlay._post.visible
+	sight.step_mag(9)
+	await get_tree().process_frame
+	var top := sight.mag()
+	sight.cycle_channel()
+	await get_tree().process_frame
+	var black := ThermalView.mode == ThermalView.BLACK_HOT
+	sight.cycle_channel()
+	await get_tree().process_frame
+	check(ten == 10.0 and told.begins_with("Thermal") and thermal_on and top == 25.0 and black and ThermalView.mode == ThermalView.OFF and sight.channel == "day" and sight.mag() == 10.0,
+		"zoom to 10x; the channel key: thermal white-hot (3x to 25x), black-hot, back to day (where it was)")
+	sight.close()
+	await get_tree().process_frame
+	check(not sight.up and not sight.current and player.camera.current and not sight.overlay.visible and ThermalView.mode == ThermalView.OFF, "down: the player's own view back")
+	v.server_exit(player)
+	await _physics(3)
+	player.global_position = Vector3(0, 0.1, 0)
+	v.queue_free()
+	await _physics(2)
 
 
 # --- Saving -------------------------------------------------------------------------------------
