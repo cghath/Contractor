@@ -35,6 +35,7 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-230 | P2 | A soldier's movement in a city costs about 3x what it does in the woods: the voxel blocks collide as per-face trimeshes (10 cm faces), and move_and_slide was ~13% of the city case's AI tick (world content pass, 2026-10-23) |
 | F-231 | P2 | The zone's navigation map now builds its iterations on a worker (ZoneNav.MAP_ASYNC): watch a city fight in game for AI that stop pathing into chunks just baked (the "missing region updates" ZoneNav's note describes from before); if seen, set it false (world content pass, 2026-10-23) |
 | F-232 | P3 | Draw counts the headless suites can't time: the terrain ~300 draws a view (a mesh per 128 m chunk at every level), the scatter's far tier 350-600 (each stand-in kind a MultiMesh per cell): merged far levels (HLOD, visibility parents) want a GPU check in game (world content pass, 2026-10-23) |
+| F-233 | P2 | On CI the city case's blocks sometimes aren't built for minutes while their garrisons come in (perfcases "city_x_y streamed in": claude/ai-driving e0caa68 at 60 s, this branch once each at 60, 100 and 180 s; locally ~60 s even on 4 cores): the blocks' voxel stamping is BUILD_BUDGET_MS a frame each at ~3 frames a second (world content pass, 2026-10-23) |
 | F-140 | P2 | ~~Ambushers by a road and a friendly convoy driving past (missions 2 overwatch)~~ fixed 2026-10-21 (Claude, claude/ai-followups: RoadAmbush, the convoy's drive-through; the mission's two calls are F-178) |
 | F-176 | P2 | ~~The dug ground never comes back from a zone save~~ fixed 2026-10-21 (Claude, claude/ai-followups) |
 | F-178 | P2 | The overwatch mission (feat/missions-2) should lay its ambush teams with `RoadAmbush.server_lay` and drive its convoy with `SquadDrivers.server_drive_route` (two lines in MissionScenario) |
@@ -1119,6 +1120,15 @@ vehicle or the UH-60 (trunk, crown, conifer, thicket and scrub stand-ins, a Mult
 cell within 1 km). Merging the coarse terrain into 512 m blocks and the stand-ins per FAR_BLOCK
 (the far blobs' blocks) as visibility parents would cut them several times over; both change where
 levels hand over, so they want a look on a real GPU (F-221).
+
+### F-233 (open): the city's blocks build slowly on CI
+perfcases' city case waits for its 12 nearest blocks before it measures. On CI the wait ran out with
+a block still stamping its voxels on claude/ai-driving's own run (e0caa68, run 39881233361, at 60
+s) and on this branch three times (60, 100 and 180 s; runs 39908072526, 39912912838, 39916162742);
+other runs had them in. Locally, even pinned to 4 CPUs, they're all in at about 60 s, with the
+navigation's map synchronous or not (R0588, R0589). Each block stamps BUILD_BUDGET_MS (4 ms) a
+frame while ~100 garrison men spawn and think, and CI runs that at 2-3 frames a second. Worth a
+look: stamping off the main thread, or a budget shared by the blocks building at once.
 
 ## Calls made for the Captain
 

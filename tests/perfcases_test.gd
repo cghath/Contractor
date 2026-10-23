@@ -400,11 +400,16 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 		player.global_position = at
 	var nav := level.get_node_or_null(^"Navigation") as ZoneNav
 	var t0 := Time.get_ticks_msec()
+	var ready_s := -1.0
 	while Time.get_ticks_msec() - t0 < SETTLE_MS:
 		await get_tree().physics_frame
 		var ready := wait_for.all(func(m: ZoneModule) -> bool: return m.is_ready())
+		if ready and ready_s < 0.0:
+			ready_s = (Time.get_ticks_msec() - t0) / 1000.0
 		if ready and (nav == null or nav.is_settled()):
 			break
+	print("perf: the case's %d modules ready after %s, the navigation %s" % [wait_for.size(), ("%.1f s" % ready_s) if ready_s >= 0.0 else "-",
+		"settled" if nav == null or nav.is_settled() else "still baking (%d chunks queued)" % nav._queue.size()])
 	for m: ZoneModule in wait_for:
 		check(m.is_ready(), "%s streamed in (%.0f s; %s)" % [m.module_id, (Time.get_ticks_msec() - t0) / 1000.0,
 			"built" if m.voxel_world and m.voxel_world.is_built() else ("building" if m.voxel_world else "not streamed in")])
