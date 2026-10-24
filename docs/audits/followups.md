@@ -1135,7 +1135,11 @@ A2 keeps VehicleService's zone repairs (a repair kit on "engine" lifts the engin
 transmission). A8: the 2.2.2 repair column per module (damaged only in the field, destroyed at
 the FOB), track links per track, patching a tank, refilling racks, extinguisher bottles.
 
-### F-239 (open, A5): the x-ray reads the HitEvents
+### F-239 (closed by cg_brief queue item 2.4, A5, armour/hud): the x-ray reads the HitEvents
+Done: HitReport (scripts/ui/hit_report.gd) is built on every peer from `Vehicle.modules.events`
+(VehicleModules._event_path adds the round's direction, angle, range, shooter, the path in order
+and up to 12 spall rays to each HitEvent), never by resolving the hit again; VehicleXray's card,
+full view and the pause menu's last hits read it. The original note:
 `Vehicle.modules.events` (the last 10 on every peer) and `VehicleModules.describe()` are the
 card's line ("pen hull_rear: transmission destroyed, engine destroyed; seats 0 hit
 [mobility]"). A5 builds the HitReport and card from them (2.11).
@@ -1245,7 +1249,12 @@ COMBAT in, under artillery or after a near miss, 60 s after contact ends; driver
 buttoned up) with `server_set(seat, out)`. An AI gunner gets no fire control solution until it
 lases (call A4.10), so today's AavGunner fires as before.
 
-### F-252 (open, A5): what the HUDs and the audio add to A4
+### F-252 (closed by cg_brief queue item 2.4, A5, armour/hud): what the HUDs and the audio add to A4
+Done: VehicleHud (the 3P panel, the compass marks, the gun's ring, BFT chevrons in every view and
+the sights), the sight overlay's crew pips, damage word and bracketed round, muffled hearing in a
+closed seat (Sfx.set_muffled), VehicleVision's vision blocks and the driver's periscopes with
+their night channel, the loader's turned-in view. Binoculars for a turned-out commander: his own,
+if he carries them (nothing new). What's left is F-255 onwards. The original note:
 VehicleSightOverlay is minimal for A5's VehicleHud to restyle (2.12.2: crew pips, the damage
 word, the round selector's look, BFT blue chevrons in the sight: B5.6). Not built in A4: buttoned
 up hearing muffled (outside sounds -12 dB, low-passed: 2.6), the vision blocks as a player's view
@@ -1266,6 +1275,48 @@ gunner), so once a hand-off's slew ends his camera takes the turret back; in fir
 carries on from the new line. The commander's viewer looks where his head looks (all round while
 it's up); a full CITV with its own traverse and stabilised head apart from the seat would be
 nicer, and lets him designate while turned out with binoculars (today: buttoned up only).
+
+### F-255 (open, A6): the BRIDGE MLC alert
+VehicleHud.alerts has every 2.12.1 alert but BRIDGE MLC: bridges have no load class yet (A6's
+`mlc` on ZoneBridges). One line in VehicleHud.alerts once ZoneBridges answers "the next span on
+this vehicle's way and its class".
+
+### F-256 (open, A5 follow-up): a late joiner's x-ray starts empty
+HitEvents go to every peer as they happen (A2) and each keeps the last 10, so a player who joins
+mid-fight has no past hits in his x-ray list (the module states and kill states do replicate). The
+host could send its last EVENTS_KEPT to a joining peer with the vehicle's state.
+
+### F-257 (open, A6): rollover risk from a stand-in centre of mass
+VehicleHud.tip_deg takes the centre of mass at TIP_CG_SHARE (0.45) of the hull box's height and the
+hull's half width; A6's real centres of mass and track widths (2.8.3) should replace it.
+
+### F-258 (open, A7 or the perf lane): the HUD's GPU side
+The panel and markers cost 0.10 ms a frame on the CPU (vehiclehud suite, R0623); the night
+channel's full-glass intensifier pass, the vision mask and the x-ray's SubViewport (drawn only
+while open) want a windowed run on a real GPU, as F-250 and F-221.
+
+### F-259 (open, Claude's A9): main guns keep B5's 50 m area rule
+The door-gunner fix (cg_brief 2.4) gave AavGunner's machine guns a line-of-fire rule
+(Deconfliction.bft_in_line: a tracked vehicle within 6 m of the line, out to 150 m past the target,
+shorter fired downhill). Deconfliction.near_bft (no target within 50 m of a tracked vehicle) is
+still there for A9's CrewGunner to use with HE and main guns, where the splash is the risk.
+
+### F-260 (open, A7): crew voices on the intercom filter, the own engine inside
+Buttoned up, Sfx muffles every outside sound on the effects buses (the vehicle's own engine too);
+2.10.5 also wants the crew's voices on an intercom filter and the engine heard from inside (a
+louder, duller drone) rather than muffled.
+
+### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
+The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
+1087536b): 134.7 ms average, 179.2 p95, **51 hitches a minute** (the local budget 96 passes;
+R2569's 322 a minute was Captain's PC under load). Every hitch logged is a physics tick of 210-320
+ms whose FrameCost is the AI's ("ai" 130-800 ms so far in the frame, nav_wanted 2-11, buildings and
+probes 0-4): ~75 awake AI (63 patrolling) in SquadAI. Nothing from the world content, the vehicles
+or the HUD shows. The AI's tick is Claude's (docs/performance.md "What's left": SquadAI 30-45 ms a
+tick for ~100 AI, F-230's movement); spreading the patrols' think over ticks, or sleeping far
+patrols (DynamicSim) in the city, would take the spikes. On CI the case still sometimes waits on
+its blocks (F-233: "city_3_1 streamed in (180 s; building)", run 40043786957), and fight's hitches
+ran 100 a minute against 90 there (the AI's, as before).
 
 ### F-225 update (done, perf/world-content, 2026-10-23)
 A fine terrain chunk's vertices, normals and colours (ZoneTerrain._chunk_arrays) and a scatter
@@ -1501,3 +1552,17 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | A helicopter's contour flight works out its look-ahead points 2 s and further every third tick, in turn (Helicopter.FAR_SAMPLE_S, FAR_SAMPLE_TICKS, Proposed) | ~2 ms a tick a helicopter, and those points are 25-100 m apart while they move a few metres in three ticks; heliflight passes | every point every tick
 2026-10-23 | A scatter cell's ground cover is laid on the ground as generated (plane_height), not with craters made before the cell was built | so it can be laid on a worker thread without reading GroundCuts while the game writes it (F-225) | read the cuts under a lock
 2026-10-23 | perfcases budgets tightened after the world content pass to about 2.5-3x CI's numbers (town 15 / 25 / 30, city 200 / 300 / 60, woods 18 / 26 / 15, drive 18 / 26 / 15, heli 18 / 30 / 15; fight 100 / 170 with its hitches 70 -> 90 a minute: its AI ticks and team spawns failed 70 on claude/ai-driving's own CI) | CI is the guard and measured town 6.0, city 83, woods 5.8, drive 6.7, heli 5.9 ms average (run 39911142961); fight is the AI's | twice a quiet local run as before (this PC had a game running all session)
+2026-10-23 | cg_brief 2.4 (door gunner): a mounted machine gun (AavGunner: door guns, the M2, the coax) holds fire only for a Blue Force Tracker vehicle within 6 m of its line of fire, out to 150 m past the target, ending where a downhill miss has dropped 2 m below the target's feet (Deconfliction.bft_in_line, BFT_LINE_M / BFT_OVERSHOOT_M / BFT_GROUND_M, Proposed); its own vehicle's key as SideIntel makes it (bft_key) | B5's 50 m around every tracked vehicle held a Black Hawk's door guns and an MRAP's M2 off every enemy near any friendly vehicle (the vehicles suite's two reds since B5, afdb4f9d), and so a whole convoy off an ambush | keep the 50 m area for MGs (it stays for A9's main guns and HE: F-259)
+2026-10-23 | cg_brief 2.4 (A5.1): the armoured HUDs for every vehicle with authored modules (Abrams, Bradley, AAV, M-ATV, MaxxPro); technicals, helicopters and static guns keep the text strip | the modules are what the doll, the pips and the damage word read | the new HUD on every vehicle (empty dolls)
+2026-10-23 | cg_brief 2.4 (A5.2): the 3P HUD fits the HUD's zones: its panel in the strip's place (bottom centre, under the radio), the hull caret, turret bracket and hit tick on the existing compass strip, the gun's ring in the centre; on a small window the keys, the crew names, the drive line and the selector go in turn | the HUD zones keep everything apart at the ui_test's sizes (the doc's full-width bottom strip runs under the squad list and the weapon readout) | a separate full-width vehicle HUD that hides the rest
+2026-10-23 | cg_brief 2.4 (A5.3): the x-ray key is 5 (rebindable, on the pad wheel: "Last hit (x-ray)"); the full view opens the latest report, or protection analysis with none at the vehicle range, the base zone or with dev tools; the pause menu's "Last hits (x-ray)" opens it too | the doc's X is the hatch since A4 and every letter is taken on foot or seated | a Shift chord (Shift is sprint and hold breath)
+2026-10-23 | cg_brief 2.4 (A5.4): HitEvents carry the round's direction, angle, range, the shooter's node name, the path ([module, from, to]) and up to 12 spall rays (EVENT_SPALL); the card shows by GameSettings hud.hit_analysis (off / my shots / my shots and hits on me (default) / every hit), "mine" = the shooter is this player's node | the x-ray must draw the host's own trace (F-239); call 31's default | resolving the hit again on each peer
+2026-10-23 | cg_brief 2.4 (A5.5): muffled = the local player in a closed seat of an armoured vehicle (not Vehicle.seat_open: not turned out, not an open gunner's hatch, not out of the roof hatch): -12 dB and a 900 Hz low-pass on the effects buses (Sfx.MUFFLE_DB, MUFFLE_CUTOFF_HZ, Proposed), the vehicle's own engine included (F-260) | 2.6's numbers; the MRAPs' closed cabs are as shut as a tank's | only hatch seats
+2026-10-23 | cg_brief 2.4 (A5.6): vision blocks only in first person buttoned up in a hatch seat; the chase view is never cut; the block is the one nearest the player's look, pitch within 8 deg, the glass 14 deg tall, the driver's arc split into 35 deg periscopes (VehicleVision, Proposed); the sight (aim) takes over while up | 2.6's "fixed slices, 1x, no peripheral" without taking the third-person view away | a free look with a mask
+2026-10-23 | cg_brief 2.4 (A5.7): the driver's night channel on the sight channel key (C), NvgView's intensifier over the glass with the rest of the HUD at 50%; driver_vision damaged: day only; destroyed: the glass blacked out, "turn out to drive" | 2.2.2's driver_vision row and 2.12.2's night | night vision always on
+2026-10-23 | cg_brief 2.4 (A5.8): BFT chevrons over every friendly vehicle but your own whose radio works (SideIntel.radio_ok), within 2.5 km and dimmed past 1.5 km, in every view and the sights; none over one whose radio is down; the radio's meta now set on every peer (VehicleModules._radio_meta) | B1.13's tracker and 4.5's "blue chevron in the sight"; a dead radio is what makes armour IFF fail | a grey frozen chevron at its last place
+2026-10-23 | cg_brief 2.4 (A5.9): the damage word none / damaged / mobility / firepower / knocked out / burning / wrecked; SHORT-CREWED when the driver's, gunner's or loader's seat is empty or its man is down; ROLLOVER RISK at 70% of a tip angle from half the hull's width over 0.45 of its height (F-257); MISSILE LAUNCH for a rocket or missile within 2.5 km heading within 10 deg of the vehicle (Proposed) | 2.12's alerts with what's built | a commander-only short-crew rule
+2026-10-23 | cg_brief 2.4 (A5.10): budget 0.3 ms a frame for the HUD (9.3; readouts gathered 10 times a second, markers each frame; 0.10 ms measured, R0623), 2x locally under load | 9.3 | gathering every frame
+2026-10-23 | cg_brief 2.4 (A5.11): protection analysis: ArmourModel.resolve with seed 20261023 at 100-3000 m, the ricochet chance over 40 seeds, every shell with a penetration figure, the vehicle's fitted packages and all its tiles whole | 2.11's "fixed seed"; the chance shows how often a bounce happens | one seed only
+2026-10-23 | cg_brief 2.4 (A5.12): the loader's turned-in view is drawn over his periscope (the bustle doors' state and a large tile per round, the next one lit, the reload bar), not a rendered turret interior | the turret's inside has no art yet; the information is what the job needs | an interior model
+2026-10-23 | cg_brief 2.4 (city hitches): perfcases' city budgets kept as they are (60 a minute on CI, 96 locally): alone on a quiet machine the city ran 51 a minute (R0633), every hitch an AI tick (F-261) | the measurement shows the budget holds on a quiet machine; R2569's 322 was load | raising the budget

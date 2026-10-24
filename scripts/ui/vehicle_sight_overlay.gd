@@ -12,6 +12,9 @@ extends Control
 ## The commander's viewer adds where the gun points against his line and the designate prompt.
 ## Thermal's look (ThermalView's post-process) is a ColorRect under the reticle. Fits the
 ## ui_test's 10 resolutions (the gunnery suite checks it). Local only.
+## A5 (cg_brief queue item 2.4, 2.12.2): the crew pips and the damage word bottom right ("CREW D*
+## G* C* L*   DMG none", VehicleHud.sight_line), the loaded round bracketed in the counts
+## ("[SABOT 14]   HEAT 9   HE 8"); VehicleHud draws the Blue Force Tracker's chevrons over it.
 
 const MARGIN := 18.0
 const TICK_MILS: Array[float] = [-10.0, -5.0, 5.0, 10.0]
@@ -68,6 +71,9 @@ func _label(preset: int, align: HorizontalAlignment) -> Label:
 
 ## Shows sight `info` (VehicleGunnery.sight_info) through `sight` (its channel, power, field of view).
 func show_info(info: Dictionary, sight: VehicleSight) -> void:
+	if sight.vehicle:
+		info = info.duplicate()
+		info["crew_line"] = VehicleHud.sight_line(sight.vehicle, sight.body)  # A5
 	_info = info
 	_thermal = sight.channel == "thermal"
 	_fov = sight.fov
@@ -98,7 +104,7 @@ func set_text(info: Dictionary, channel: String, polarity: int, power: float) ->
 	if loaded != "":
 		var next := String(info.get("next", ""))
 		lines.append("%s  > %s%s" % [loaded, "LOADED" if loaded != "-" else "LOADING", ("        next " + next) if next != "" else ""])
-	var counts := String(info.get("rounds", ""))
+	var counts := bracketed(String(info.get("rounds", "")), String(info.get("loaded", "")))
 	var fuze := String(info.get("fuze", ""))
 	if counts != "" or fuze != "":
 		lines.append(counts + (("    (%s)" % fuze) if fuze != "" else ""))
@@ -109,12 +115,30 @@ func set_text(info: Dictionary, channel: String, polarity: int, power: float) ->
 	elif bool(info.get("stadia", false)):
 		right.append("NO SOLUTION: HOLD OVER")
 	right.append("turret %03d   hull %03d" % [int(info.get("turret_deg", 0)), int(info.get("hull_deg", 0))])
+	if String(info.get("crew_line", "")) != "":
+		right.append(String(info.crew_line))
 	_bottom_right.text = "\n".join(right)
 	if bool(info.get("commander", false)):
 		var key := OS.get_keycode_string(GameSettings.key_for(&"designate"))
 		_prompt.text = "[%s] lay the gun here    gun %+d deg" % [key, roundi(float(info.get("gun_rel_deg", 0.0)))]
 	else:
 		_prompt.text = ""
+	# (A5) The prompt sits over the bottom corners' lines, so a small window's never overlap it.
+	var low := maxf(_bottom_left.get_combined_minimum_size().y, _bottom_right.get_combined_minimum_size().y)
+	_prompt.offset_bottom = -MARGIN - low - 6.0
+	_prompt.offset_top = _prompt.offset_bottom - _prompt.get_combined_minimum_size().y
+
+
+## The counts ("SABOT 14   HEAT 9   HE 8") with the `loaded` round's bracketed ("[SABOT 14]").
+static func bracketed(counts: String, loaded: String) -> String:
+	if loaded == "" or loaded == "-":
+		return counts
+	var parts := counts.split("   ")
+	for i in parts.size():
+		if parts[i].begins_with(loaded + " "):
+			parts[i] = "[%s]" % parts[i]
+			break
+	return "   ".join(parts)
 
 
 ## A track bar: a block a fifth of a second, to the lead's full second.

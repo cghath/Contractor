@@ -96,7 +96,9 @@ const DEFAULTS := {
 		"objectives_scale": 1.0, "objectives_opacity": 1.0, "compass_scale": 1.0, "compass_opacity": 1.0,
 		"squad_scale": 1.0, "squad_opacity": 1.0, "radio_scale": 1.0, "radio_opacity": 1.0,
 		"weapon_scale": 1.0, "weapon_opacity": 1.0, "wounds_scale": 1.0, "wounds_opacity": 1.0,
-		"markers_scale": 1.0, "markers_opacity": 1.0},
+		"markers_scale": 1.0, "markers_opacity": 1.0,
+		# The x-ray's card after a hit (VehicleXray.SETTINGS; combined_arms 2.11, call 31).
+		"hit_analysis": "mine_and_me"},
 	# The gamepad's right stick (wave 7, S4: stick_look). curve: the stick's travel to the power
 	# of this (1 straight, higher finer near the centre).
 	"gamepad": {"stick_sensitivity": 1.0, "stick_deadzone": 0.15, "stick_curve": 1.6, "stick_invert_y": false},
@@ -147,7 +149,8 @@ const BINDABLE := [
 	[&"walk", "Walk / jog (toggle)"],
 	[&"context", "Contextual order (tap: the top one, hold: all)"],
 	[&"lase", "Vehicle: lase (hold: first / last return)"], [&"designate", "Vehicle: designate (commander)"],
-	[&"hatch", "Vehicle: turn out / button up"], [&"sight_channel", "Vehicle: sight channel (day / thermal)"],
+	[&"hatch", "Vehicle: turn out / button up"], [&"sight_channel", "Vehicle: sight channel (day / thermal / night)"],
+	[&"xray", "X-ray: the last hit (or protection analysis at a range)"],
 ]
 ## Pairs of bindable actions that may share a key, because they never apply at the same time:
 ## sprint and hold breath (no sprint while aiming; hold breath only aimed). Binding one of them

@@ -3275,7 +3275,8 @@ func _local_controls(delta: float) -> void:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
 			request_gun.rpc_id(1, gun_direction(me))
 	_hud = me.player_input.hud
-	_hud.show_vehicle(readout_parts(seat))
+	if not VehicleHud.local_step(self, me, seat, free):  # A5: armour's HUDs, vision blocks, muffled hearing
+		_hud.show_vehicle(readout_parts(seat))
 
 
 ## The HUD's readout in parts (Hud.show_vehicle lays them out in its bottom-centre zone, each

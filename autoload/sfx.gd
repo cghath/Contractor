@@ -74,6 +74,14 @@ var prebuild_ms := 0.0
 
 ## A sound under a roof this close above it plays through the room bus (reverb).
 const ROOF_M := 8.0
+## Buttoned up inside armour (combined arms A5, cg_brief queue item 2.4; docs/combined_arms.md
+## 2.6, 2.10.5): outside sounds -12 dB and low-passed, on the effects buses (SFX, SFX_Room), while
+## set_muffled is on (VehicleHud: the local player in a closed seat). Proposed.
+const MUFFLE_DB := -12.0
+const MUFFLE_CUTOFF_HZ := 900.0
+const MUFFLE_BUSES: Array[StringName] = [&"SFX", &"SFX_Room"]
+## Whether outside sounds are muffled now (this machine's listener inside a closed vehicle).
+var muffled := false
 ## Engines: heard within their sound's range_m; pitch rises with speed (m/s) up to this.
 const ENGINE_TOP_SPEED := 20.0
 
@@ -108,6 +116,7 @@ func _ready() -> void:
 		reverb.wet = 0.3
 		reverb.dry = 0.85
 		AudioServer.add_bus_effect(room, reverb)
+	_add_muffle()
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer3D.new()
 		p.bus = &"SFX"
@@ -124,6 +133,52 @@ func _load_defs() -> void:
 	var parsed: Variant = JSON.parse_string(f.get_as_text())
 	if parsed is Dictionary:
 		defs = parsed.get("sounds", {})
+
+
+## The muffle's low-pass and gain on each effects bus, off until set_muffled.
+func _add_muffle() -> void:
+	for bus: StringName in MUFFLE_BUSES:
+		var i := AudioServer.get_bus_index(bus)
+		if i < 0 or _muffle_at(i) >= 0:
+			continue
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = MUFFLE_CUTOFF_HZ
+		lp.resource_name = "muffle_lp"
+		var gain := AudioEffectAmplify.new()
+		gain.volume_db = MUFFLE_DB
+		gain.resource_name = "muffle_gain"
+		AudioServer.add_bus_effect(i, lp)
+		AudioServer.add_bus_effect(i, gain)
+		AudioServer.set_bus_effect_enabled(i, AudioServer.get_bus_effect_count(i) - 2, false)
+		AudioServer.set_bus_effect_enabled(i, AudioServer.get_bus_effect_count(i) - 1, false)
+
+
+## The index of the muffle's low-pass on bus `i` (-1 none); its gain is the next one.
+static func _muffle_at(i: int) -> int:
+	for e in AudioServer.get_bus_effect_count(i):
+		if AudioServer.get_bus_effect(i, e).resource_name == "muffle_lp":
+			return e
+	return -1
+
+
+## Outside sounds muffled (buttoned up) or not (out in the open, turned out).
+func set_muffled(on: bool) -> void:
+	if on == muffled:
+		return
+	muffled = on
+	for bus: StringName in MUFFLE_BUSES:
+		var i := AudioServer.get_bus_index(bus)
+		var e := _muffle_at(i) if i >= 0 else -1
+		if e >= 0:
+			AudioServer.set_bus_effect_enabled(i, e, on)
+			AudioServer.set_bus_effect_enabled(i, e + 1, on)
+
+
+## Whether the effects buses are muffled now (tests: the bus effects themselves).
+func muffle_active() -> bool:
+	var i := AudioServer.get_bus_index(&"SFX")
+	var e := _muffle_at(i) if i >= 0 else -1
+	return e >= 0 and AudioServer.is_bus_effect_enabled(i, e) and AudioServer.is_bus_effect_enabled(i, e + 1)
 
 
 static func _ensure_bus(bus: StringName) -> void:

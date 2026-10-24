@@ -75,6 +75,9 @@ const KEYS := {
 	&"designate": [KEY_Q],
 	&"hatch": [KEY_X],
 	&"sight_channel": [KEY_C],
+	# Combined arms A5 (docs/combined_arms.md 2.11; the doc's X is the hatch now): the x-ray's full
+	# view of the last hit, or protection analysis at a range. 5: no letter is free on foot or seated.
+	&"xray": [KEY_5],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.
@@ -156,6 +159,7 @@ const PAD_WHEEL := [
 	[&"binoculars", "Binoculars"], [&"auto_walk", "Auto-walk"], [&"walk", "Walk / jog"],
 	[&"weapon_underbarrel", "Underbarrel / shells"],
 	[&"lase", "Lase"], [&"designate", "Designate"], [&"hatch", "Hatch"], [&"sight_channel", "Sight channel"],
+	[&"xray", "Last hit (x-ray)"],
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
