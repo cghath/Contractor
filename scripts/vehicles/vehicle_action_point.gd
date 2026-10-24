@@ -332,7 +332,7 @@ func _tow_entries() -> Array[Dictionary]:
 			break
 		n += 1
 		var id := t.vehicle_id
-		var e := _entry(&"tow", "Hook up to the %s for a tow (%d s)" % [t.display_name(), roundi(VehicleLogistics.num("tow", "hook_s", 60.0))],
+		var e := _entry(&"tow", ("Hook up to the %s to right it (%d s)" if v.drive and v.drive.is_rolled() else "Hook up to the %s for a tow (%d s)") % [t.display_name(), roundi(VehicleLogistics.num("tow", "hook_s", 60.0))],
 			func() -> void: v.request_service.rpc_id(1, "tow", StringName(id), &""), lg.tow_problem(t))
 		e["group"] = "Tow"
 		out.append(e)

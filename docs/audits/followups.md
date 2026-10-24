@@ -1165,7 +1165,13 @@ full view and the pause menu's last hits read it. The original note:
 card's line ("pen hull_rear: transmission destroyed, engine destroyed; seats 0 hit
 [mobility]"). A5 builds the HitReport and card from them (2.11).
 
-### F-240 (open, A6; A4's part done by cg_brief queue item 2.3, armour/gunnery): turned-out crew and flooding
+### F-240 (closed by cg_brief queue item 2.7, A6, armour/drive; A4's part done by cg_brief queue item 2.3, armour/gunnery): turned-out crew and flooding
+Done (A6): water deeper than a model's ford_m stalls its engine at once, damages it after 5 s and
+destroys it after 20 s (a mobility kill through the engine module); water over its roof_m floods the
+crew compartment (VehicleDrive.server_flood): everyone aboard who can gets out, nobody can board,
+the hull keeps 5% of its buoyancy, and it drains 60 s after it's out of the water; an amphibious
+hull holed under its waterline takes water against its pumps and floods when full. Replicated and
+saved. The original note:
 A2 leaves out what needs other phases: turned-out crew taking an outside blast as in the open
 (2.3.6, hatches are A4), sights losing thermal and LRF when damaged (A4's sights), and flooding as
 a mobility kill (A6's fording). A4 took its two: a turned-out man is out in the open for blasts
@@ -1331,7 +1337,11 @@ carries on from the new line. The commander's viewer looks where his head looks 
 it's up); a full CITV with its own traverse and stabilised head apart from the seat would be
 nicer, and lets him designate while turned out with binoculars (today: buttoned up only).
 
-### F-255 (open, A6): the BRIDGE MLC alert
+### F-255 (closed by cg_brief queue item 2.7, A6, armour/drive): the BRIDGE MLC alert
+Done: VehicleHud.bridge_line: the span within 40 m along the way the vehicle is going (or under
+it), "BRIDGE MLC 40", ": TOO HEAVY" when VehicleDrive.mlc (its mass with packages) is over the
+span's class (ZoneBridges.span_mlc: the type's mlc times the span's health, sent to every peer). The
+original note:
 VehicleHud.alerts has every 2.12.1 alert but BRIDGE MLC: bridges have no load class yet (A6's
 `mlc` on ZoneBridges). One line in VehicleHud.alerts once ZoneBridges answers "the next span on
 this vehicle's way and its class".
@@ -1341,7 +1351,12 @@ HitEvents go to every peer as they happen (A2) and each keeps the last 10, so a 
 mid-fight has no past hits in his x-ray list (the module states and kill states do replicate). The
 host could send its last EVENTS_KEPT to a joining peer with the vehicle's state.
 
-### F-257 (open, A6): rollover risk from a stand-in centre of mass
+### F-257 (closed by cg_brief queue item 2.7, A6, armour/drive): rollover risk from a stand-in centre of mass
+Done: every model has its real centre of mass in data/vehicle_drive.json (the M-ATV 1.25 m, the
+MaxxPro 1.35, the technical 0.75, the AAV 1.15, the Bradley 1.05, the Abrams 0.95, merged over
+vehicles.json's), and VehicleHud.tip_deg is VehicleDrive.tip_deg: the outermost wheel's or track's
+offset over that height. ROLLOVER RISK reads the body's side lean (not its pitch) and shows both
+numbers. The original note:
 VehicleHud.tip_deg takes the centre of mass at TIP_CG_SHARE (0.45) of the hull box's height and the
 hull's half width; A6's real centres of mass and track widths (2.8.3) should replace it.
 
@@ -1387,6 +1402,9 @@ voxels behind it too, and removing those would open the plate (a round then meet
 art needs the tiles' voxels marked (VehicleArt) so REMOVE takes only them.
 
 ### F-264 (open, A7 follow-up): damage shown on a living vehicle
+A6 (cg_brief 2.7) built 2.8.3's rule for throwing a track (VehicleDrive.throw_risk,
+server_throw_track: the track module destroyed); the visuals below are 2.10.4's (A7's section),
+not 2.8's, so they stay here.
 2.10.4's list: done, the barrel drooping to its lower stop when it's destroyed or the vehicle is a
 wreck (VehicleHull.droop). Not built: a broken track running off and lying flat behind, a wheel
 blown off by a mine or HE flying 5-10 m (a rigid body, as the debris), a burning engine glowing
@@ -1444,7 +1462,15 @@ An ammo pallet is an 800 L item: nobody can pick it up ("No room for..."), a tru
 beside its cargo point (Load the pallet) and Cargo > take sets it down. It weighs as full however
 much is left in it, and there's no pallet jack or drag to shift one a few metres by hand.
 
-### F-272 (open, A6 / A8 follow-up): the tow bar, and righting a rollover
+### F-272 (closed by cg_brief queue item 2.7, A6, armour/drive): the tow bar, and righting a rollover
+Done: the bar is drawn on every peer between the tower's rear hitch and the towed vehicle's nearer
+one (VehicleLogistics._process, "TowBar"); the tow is in the zone save ("tow_by") and hooked up
+again once every vehicle is back (server_rehook_saved, VehicleLayer.server_restore); a rolled-over
+vehicle hooked up to a tower of half its mass (the same 60 s job: "Hook up to the X to right it")
+is pulled back onto its wheels (VehicleDrive.server_start_righting) and stays on the tow. A tow up
+a 7 degree hill works (armourdrive): the pair stuck on slopes because part throttle no longer held
+a grade once the grade hold went; the drive now holds one at part throttle as far as the engine's
+power goes (VehicleDrive.drive_force's demand). The original note:
 The tow (VehicleLogistics.server_hook) is a spring between the hitches: no bar is drawn, it isn't
 saved (a zone loaded mid-tow comes back unhooked), and A6's rollovers (2.8.3: righting by a tow,
 60 s) can use it once there are rollovers. On uneven ground an MRAP's hull can scrape and the pair
@@ -1462,6 +1488,44 @@ are drawn whatever is fitted; the appliqué, slat, roller and CROWS have no voxe
 The packages' own behaviour beyond armour and weight isn't built either: Trophy's intercepts, the
 mine roller setting off pressure-plate IEDs 6.5 m ahead (3 blasts and it's scrap), CROWS on the
 MRAPs (F-253's sights; TUSK II's commander's M2 does fire from inside now), the UGWS thermal kit.
+
+### F-275 (open, Claude's A9): heavy vehicles' navmesh paths over light bridges
+A6 keeps the AI off a span too light for it in two places: road routes (TerrainRoute.roads_for,
+one line in SquadDrivers.plan) and the driver's care (VehicleDrive.ai_guard stops it at the deck's
+end, VehicleAI then backs off and goes round, SquadDrivers sees it stuck). A path from the
+navigation mesh can still lead an Abrams to a truss bridge (and every vehicle to a footbridge, MLC
+2): the mesh has no idea of load. Navigation layers or region costs per class, or
+TerrainRoute.path_problem on the planned path with a re-plan, would route it to the concrete one.
+
+### F-276 (open, Claude's AI driving): other road routes by load class
+us_field.gd (D7's US convoys) and mission_scenario.gd call RoadRoute.route with the def's roads as
+they are; `RoadRoute.route(TerrainRoute.roads_for(v, def), ...)` is the one-line change, as in
+SquadDrivers.plan.
+
+### F-277 (open, A6 follow-up): tracks pivot at about 45% of turn_deg_s
+On the spot a Bradley turns 17 deg/s against a commanded 40 (armourdrive): the stations' sideways
+scrub (Vehicle.TRACK_TURN_LATERAL, the grip cap) eats most of the turning torque, as it did before
+A6. The doc's half rate at 30 km/h is in the command (VehicleDrive.track_turn); tuning the scrub or
+the torque cap for real pivot times (an M1 turns about 360 deg in 10-12 s) is a balance pass with
+the AI drivers' corner speeds.
+
+### F-278 (open, cghath world): rubble and other ground the level lays
+VehicleDrive.add_patch(level, rect, kind, heights) lays ground over the terrain (the suite's test
+ground uses it); nothing lays rubble yet: a ruined or bombed-out building's footprint, a demolished
+wall, a city's ruined blocks. One call where those are built gives tracks 0.75 and tyres 0.6 of
+their grip there and the track-throw risk.
+
+### F-279 (open, cghath D6b): the Soviet vehicles' driving numbers
+data/vehicle_drive.json already has 2.8.2's and 2.8.4's numbers for the T-72B3 (840 kW, fords 1.2
+m), BMP-2 (220 kW, swims 7 km/h), BTR-82A (220 kW, 10 km/h) and MT-LB (175 kW, 5 km/h); they take
+effect once the models are in vehicles.json, the swimmers with "amphibious" (their swim speed
+there, as the AAV's). Their centres of mass, roofs and ground pressures need setting with the art.
+No deep-fording or snorkel kits: 2.8.4 has none.
+
+### F-280 (open, cghath world): river current by width
+2.8.4 says ZoneWater.flow_at runs 0.5-2 m/s by width; it gives each body its preset's flow_ms
+(rivers 0.8, streams 0.5, channels 0.25) along its line. A6 reads it as it is (the hull drags
+through the water as it moves with it). Faster narrows and slower wide reaches are cghath's call.
 
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
@@ -1765,3 +1829,23 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-24 | cg_brief 2.6 (A8.21): prices: round items per round (prices.json "ammo", 2.9.2's numbers), pallets their load plus $300, a smoke salvo $600, a periscope $1,500, an ERA tile $3,000, a slat panel $1,200; the enemy's 125 mm and 30 mm sell-only; every package in prices.json "packages" (the MaxxPro appliqué $40,000) | 2.9.2 and 2.4.5 | guessing per item
 2026-10-24 | cg_brief 2.6 (A8.22): budgets (9.3 gives A8 none): a vehicle's logistics tick 0.05 ms, needs() 0.3 ms, the cargo point's menu 3 ms, 3x slack locally | small against the frame; the menu walks nearby vehicles and items | none
 2026-10-24 | cg_brief 2.6 (A8.23): TUSK II includes CROWS ("crows" in its includes), so its commander's M2 fires from inside; VehicleHatches reads the fitted packages, not the raw list | 2.4.5's TUSK II row; F-253 says A8 adds it | a separate Abrams CROWS package
+2026-10-24 | cg_brief 2.7 (A6.1): the driving numbers in data/vehicle_drive.json, a topic file merged into each model's spec (VehicleSpecs.TOPIC_PATHS) and over vehicles.json's "com": power_kw, ford_m, roof_m, ground_kpa, belts, the real centres of mass (M-ATV 1.25, MaxxPro 1.35, technical 0.75, AAV 1.15, Bradley 1.05, Abrams 0.95 m) | 9.1's data split; one file for the driving lane | editing vehicles.json
+2026-10-24 | cg_brief 2.7 (A6.2): ZoneTerrain.ground_at: road cores asphalt (asphalt, street) or dirt; pads dirt, their streets asphalt; water over 0.05 m mud, a ford's gravel track dirt; marsh soft over 0.35 mud; snow over 0.4; slopes over about 37 deg or 4 m over the preset's rock line rock; riverbed weight over 0.45 and beaches sand; a salt pan's crust dirt; else grass; decks asphalt (footbridges dirt); no terrain (compound, range) dirt; level patches (add_patch) over all | 2.8.1's table from what the world has; fords are where columns cross | per-wheel splat reads (cost)
+2026-10-24 | cg_brief 2.7 (A6.3): a wheel's grip is Vehicle.GRIP (0.95) x the table's traction; rolling resistance comes on top of the grip (soft ground holds a vehicle that grips); on sand, mud and snow it scales by sqrt(ground pressure / 150 kPa) within 0.7-1.5; ground pressures M-ATV 290, MaxxPro 320, technical 220, AAV 57, Bradley 76, Abrams 103 kPa | wide tracks float, narrow tyres dig in | rolling resistance inside the grip (an MRAP climbed out of anything)
+2026-10-24 | cg_brief 2.7 (A6.4): power at the wheels power_kw x 0.8; the pull min(P / max(v, 2), the force for accel_ms2 x throttle net of rolling resistance and the slope), so part throttle holds a grade only as far as the power goes; top_speed_kmh the governor | 2.8.2's formula, and AI drivers (VehicleAI's part throttle) still climb | throttle as a share of the power (AI vehicles stalled on hills)
+2026-10-24 | cg_brief 2.7 (A6.5): ground vehicles lose the engine's default linear damping (0.12 x v, 1/s, which held them all near 50 km/h) for air drag 0.5 x 1.2 x 0.9 x the hull box's frontal area x v^2 | the power and governor mean something; the 0-30 km/h times then match 2.8.2 within 5% | compensating the damping in the drive
+2026-10-24 | cg_brief 2.7 (A6.6): tracks turn at turn_deg_s x the ground's tracked traction over firm dirt's (0.85, at most 1), half by 30 km/h | 2.8.3's falloff "scaled by traction" without slowing tanks on the range's dirt | traction as is (every tank 15% slower on dirt)
+2026-10-24 | cg_brief 2.7 (A6.7): the tip angle atan(outermost wheel or track offset / CoM height); rolled over after 0.75 s past it (body tilt); the crew falls 3.2 m (belted seats half: MRAPs' but the gunner's; open seats and riders 1.5x); the HUD's ROLLOVER RISK by the side lean at 70% | 2.8.3; the tilt table holds at 34-38 deg body lean and rolls by 33-35 deg ground for the MRAPs (within 10%) | a hit-point pool for crashes
+2026-10-24 | cg_brief 2.7 (A6.8): righting is A8's tow job (60 s at the service point, a tower of half the mass), then a winch pull: a torque up to 1.4x the weight's turning moment, a lift of 0.45 g while past 45 deg, done under 12 deg and settled, given up after 30 s; it stays on the tow | 2.8.3's "a new tow action" is A8's, so one job | a teleport upright
+2026-10-24 | cg_brief 2.7 (A6.9): the AI driver's care (host, AI input only, in zones): lateral acceleration under 0.6 x the tip's (g x half track / CoM height: off the throttle, then braking), and a look 6 m + 1.5 s ahead at 10 Hz by rays onto the world for a span too light, water deeper than it fords, a side slope over 60% of its tip angle, a grade over its climb; stopped, VehicleAI backs off and goes round | 2.8.3's 60% and 2.8.5's never-over-a-light-span without editing VehicleAI | AI that tips MRAPs in corners
+2026-10-24 | cg_brief 2.7 (A6.10): bogging: a wheeled vehicle of 250 kPa or more on mud, under 3 km/h for 4 s with the throttle open on more than 2 deg, stuck until towed 4 m | 2.8.1's "MRAPs can bog"; the technical doesn't | bogging every wheeled vehicle
+2026-10-24 | cg_brief 2.7 (A6.11): thrown tracks: steer 0.9 or more over 10 km/h on rock or rubble, or leaning over 20 deg, 0.5% a second, the outer track (rolled from the vehicle and the physics frame) | 2.8.3 | a random roll per frame
+2026-10-24 | cg_brief 2.7 (A6.12): fording depth is the water over the ground under the hull (not over its floor, as AavWater had); the engine stalls at once, restarts 3 s after it's out (if it lives), damaged after 5 s, destroyed after 20 s; roofs M-ATV 2.52, MaxxPro 2.92, technical 1.72, AAV 2.64, Bradley 2.0, Abrams 1.5 m; flooded: the crew out, no boarding, 5% buoyancy, dry 60 s after it's out | 2.8.4's depths are depths of water | the hull floor's depth (an M-ATV stalled in 1 m)
+2026-10-24 | cg_brief 2.7 (A6.13): an amphibious hull holed by a penetration under its waterline (1.5 m on the AAV) takes 35 L/s a hole against 25 L/s of pumps and sinks at 9,000 L aboard (its buoyancy falling with it) | 2.8.4's "hull holed below the waterline" | sinking at the first hole
+2026-10-24 | cg_brief 2.7 (A6.14): the waterjets push by the mean of A2's two waterjet modules' health; one out pulls it round at half its turn rate | the brief's "waterjets from A2's modules" | jets ignoring damage
+2026-10-24 | cg_brief 2.7 (A6.15): a hull drags through the water as the water moves (ZoneWater.flow_at), so a swimming AAV crabs and drifts at the current; 2.8.4's 0.5 x rho x 1.0 x A x v_rel^2 pushes a hull that isn't afloat (a truck in a ford) | the formula alone left a floating hull nearly still in the current | both on every hull (counted twice)
+2026-10-24 | cg_brief 2.7 (A6.16): a vehicle's MLC is its mass with its packages in tonnes, rounded up (the Abrams 62, 66 with TUSK II); a span's class is its type's (80 / 40 / 2) times its health share; over it the span loses hp x (load / class - 1) / (0.5 x 8 s) a second, the class as it was when the load came on (1.5x drops it in 8 s; the shown class falls as it weakens); weighed 4 times a second; its health sent to the clients each 0.25 it falls | 2.8.5 | tracked MLC tables by STANAG 2021 (no public tables to tune)
+2026-10-24 | cg_brief 2.7 (A6.17): RoadRoute gets the load classes through TerrainRoute.roads_for (the road pieces within 3 m of a too-light bridge's deck line left out), one line in SquadDrivers.plan (Captain's AI-driving file) | 2.8.5's "RoadRoute gets the bridge's mlc" without changing RoadRoute's graph | an mlc per segment in RoadNet's def
+2026-10-24 | cg_brief 2.7 (A6.18): the HUD lines: ROLLOVER RISK x / y deg, ROLLED OVER: NEEDS A TOW (RIGHTING), FORD x / y m, AFLOAT, FLOODING n%, FLOODED: GET OUT, STALLED: TOO DEEP, BOGGED: NEEDS A TOW, BRIDGE MLC n (: TOO HEAVY) for a span within 40 m ahead | 2.12.1's alerts with A6's numbers | a separate driving panel
+2026-10-24 | cg_brief 2.7 (A6.19): budgets (9.3: the physics step unchanged): a vehicle's drive step 0.03 ms, the AI driver's care 0.05 ms a tick, the bridges' weighing 0.2 ms with 25 vehicles, an Abrams' 14 stations of wheel forces 0.25 ms (most of it the suspension rays from before A6); 3x locally | measured 0.013, 0.018, 0.08 and 0.13 ms (R0672) | none
+2026-10-24 | cg_brief 2.7 (A6.20): no deep-fording or snorkel kits (2.8.4 has none); the thrown-track and blown-wheel visuals stay A7's (2.10.4, F-264) | the doc's split | building them here

@@ -92,6 +92,10 @@ var net_state: Dictionary = {}:
 var _hit_at := -INF
 var _check_left := 0.0
 var _mults := Vector3(1.0, 1.0, 1.0)  # speed, accel, fuel
+## A6 (F-272): the tower's vehicle id from the zone save, hooked up again once every vehicle is
+## back (server_rehook_saved); the tow bar drawn between the hitches on every peer.
+var _saved_tow := ""
+var _bar: MeshInstance3D
 
 
 func _init(p_vehicle: Vehicle = null) -> void:
@@ -105,6 +109,7 @@ func _init(p_vehicle: Vehicle = null) -> void:
 
 func _ready() -> void:
 	set_physics_process(_is_host())
+	set_process(vehicle != null)  # A6: the tow bar's look on every peer
 	if _is_host() and vehicle:
 		vehicle.damaged.connect(_on_damaged)
 	elif not net_state.is_empty():
@@ -1132,7 +1137,11 @@ func _complete(id: int, job: Dictionary) -> bool:
 				_end(id, why)
 				return true
 			server_hook(tower)
-			_end(id, "", "Hooked up: the %s tows the %s" % [tower.display_name(), vehicle.display_name()])
+			if vehicle.drive and vehicle.drive.is_rolled():
+				vehicle.drive.server_start_righting(tower)  # A6 (2.8.3): the tow rights a rolled vehicle
+				_end(id, "", "Hooked up: the %s pulls the %s back onto its wheels" % [tower.display_name(), vehicle.display_name()])
+			else:
+				_end(id, "", "Hooked up: the %s tows the %s" % [tower.display_name(), vehicle.display_name()])
 	return true
 
 
@@ -1716,6 +1725,8 @@ func to_save() -> Dictionary:
 	var out := {"packages": packages.duplicate(), "loadout": loadout, "bottles": bottles.duplicate(), "progress": progress.duplicate(), "tiles": fired_tiles()}
 	if recovery_wanted:
 		out["recovery"] = true
+	if is_instance_valid(tow_by):
+		out["tow_by"] = tow_by.vehicle_id  # A6 (F-272): the tow comes back with the zone
 	return out
 
 
@@ -1738,4 +1749,61 @@ func from_save(d: Dictionary) -> void:
 	if vehicle and d.has("tiles"):
 		vehicle.set_meta(ArmourModel.META_TILES, _tiles_from(d.tiles))
 	recovery_wanted = bool(d.get("recovery", false))
+	_saved_tow = String(d.get("tow_by", ""))
 	_publish()
+
+
+## Host (VehicleLayer.server_restore, once every vehicle is back): a tow the zone save had, hooked
+## up again (a rolled vehicle being righted carries on).
+func server_rehook_saved() -> void:
+	if _saved_tow == "" or not _is_host():
+		return
+	var tower := _find(_saved_tow)
+	_saved_tow = ""
+	if tower and not tower.wrecked and VehicleLogistics.of(tower) and not towed():
+		server_hook(tower)
+		if vehicle.drive and vehicle.drive.is_rolled():
+			vehicle.drive.server_start_righting(tower)
+
+
+## Every peer (A6, F-272): the tow bar drawn from the tower's rear hitch to this vehicle's nearer
+## hitch while it's towed.
+func _process(_delta: float) -> void:
+	var tower: Vehicle = tow_by if _is_host() else null
+	if not _is_host() and String(net_state.get("tw", "")) != "":
+		tower = _find(String(net_state.tw))
+	if not is_instance_valid(tower) or not vehicle.is_inside_tree():
+		if _bar:
+			_bar.visible = false
+		return
+	var a := tower.to_global(hitch(tower, true))
+	var front := vehicle.to_global(hitch(vehicle, false))
+	var back := vehicle.to_global(hitch(vehicle, true))
+	var b := front if a.distance_to(front) <= a.distance_to(back) else back
+	if _bar == null:
+		_bar = MeshInstance3D.new()
+		_bar.name = "TowBar"
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.09, 0.09, 1.0)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.22, 0.23, 0.2)
+		mat.roughness = 0.7
+		mesh.material = mat
+		_bar.mesh = mesh
+		_bar.top_level = true
+		vehicle.add_child(_bar)
+	var length := a.distance_to(b)
+	_bar.visible = length > 0.05
+	if _bar.visible:
+		var mid := (a + b) * 0.5
+		var z := (a - b) / length
+		var x := Vector3.UP.cross(z)
+		if x.length_squared() < 0.0001:
+			x = Vector3.RIGHT
+		x = x.normalized()
+		_bar.global_transform = Transform3D(Basis(x, z.cross(x), z * length), mid)
+
+
+## The tow bar's node while one's drawn (tests).
+func tow_bar() -> MeshInstance3D:
+	return _bar if _bar and _bar.visible else null

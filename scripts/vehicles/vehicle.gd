@@ -118,18 +118,18 @@ const SAG_TRACKED := 0.07
 const TRAVEL := 0.22
 const DROOP := 0.18
 const DAMPING_RATIO := 0.5
-## Tyre and track grip (Proposed): friction coefficient, and how much of a wheel's sideways slip
-## is taken out each physics step; tracks slip sideways while turning on the spot.
+## Tyre and track grip (Proposed): friction coefficient on asphalt (A6: times the ground's traction,
+## VehicleDrive), and how much of a wheel's sideways slip is taken out each physics step; tracks
+## slip sideways while turning on the spot.
 const GRIP := 0.95
 const LATERAL_RESPONSE := 0.45
 const TRACK_TURN_LATERAL := 0.15
 ## Steering falls off with speed (wheeled): full lock below this speed (m/s), half at twice it.
 const STEER_FALLOFF_MS := 8.0
-## Rolling resistance and engine braking with the throttle off (m/s2).
+## Rolling resistance (m/s2; A6: the ground's, VehicleDrive, on every ground vehicle) and engine
+## braking with the throttle off.
 const ROLL_DECEL := 0.3
 const ENGINE_BRAKE := 0.5
-## The steepest grade the drive holds on top of its acceleration (degrees, Proposed, wave 5b).
-const CLIMB_DEG := 35.0
 ## Tracked turn controller: reaches the commanded turn rate in about this long (s).
 const TRACK_TURN_TIME_S := 0.35
 ## Rolling the other way while still moving faster than this (m/s) brakes first.
@@ -351,6 +351,9 @@ var smoke: VehicleSmoke
 ## the tow, fuel pallets, armour packages and their weight, the extinguisher bottles
 ## (VehicleLogistics, "Logistics": its state in the StateSync and the save). Ground vehicles only.
 var logistics: VehicleLogistics
+## Combined arms A6: the driving physics and terrain (VehicleDrive, "Drive": the ground, power and
+## traction, rollovers and righting, fording, flooding, bogging, thrown tracks). Ground vehicles.
+var drive: VehicleDrive
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -462,6 +465,13 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	if VehicleLogistics.wanted(spec):
 		logistics = VehicleLogistics.new(self)  # A8: "Logistics"
 		add_child(logistics)
+	if VehicleDrive.wanted(spec):
+		drive = VehicleDrive.new(self)  # A6: "Drive"
+		add_child(drive)
+		# A6: air drag (VehicleDrive.aero_force) in place of the engine's default linear damping,
+		# which held every ground vehicle near 50 km/h whatever its engine (0.12 x v, 1/s).
+		linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+		linear_damp = 0.0
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -511,6 +521,8 @@ func _add_sync() -> void:
 		paths.append(^"Smoke:net_state")
 	if logistics:
 		paths.append(^"Logistics:net_state")  # A8
+	if drive:
+		paths.append(^"Drive:net_state")  # A6
 	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -850,7 +862,7 @@ func is_burning() -> bool:
 func can_drive() -> bool:
 	return not wrecked and kind != HELICOPTER and kind != STATIC and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
 		and (battery_ok if multiplayer.is_server() else bool(net_state.get("battery", true))) \
-		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed())
+		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed()) 		and not (drive and drive.blocked() != "")  # A6: rolled over, flooded, stalled in deep water, bogged
 
 
 ## Top speed now (m/s): the model's, cut by engine and wheel damage.
@@ -858,6 +870,8 @@ func top_speed(reverse := false) -> float:
 	var top := float(spec.get("reverse_kmh" if reverse else "top_speed_kmh", 0.0)) * VehicleSpecs.KMH
 	if logistics:
 		top = minf(top * logistics.speed_mult(), logistics.tow_top())  # A8: the packages' weight, a tow
+	if drive:
+		top = minf(top, drive.speed_cap_now())  # A6: wheels on sand and mud
 	if modules and modules.authored:
 		return top * modules.speed_share()  # A2: engine, transmission, tracks, wheels and run-flats
 	var engine := zone_health(ZONE_ENGINE)
@@ -885,6 +899,8 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	var body := not s.vitals.is_up()
 	if not body and ExoMech.piloting(s.inventory):
 		return false  # a heavy exo doesn't fit a seat: climb out first (ExoMech)
+	if drive and drive.is_flooded():
+		return false  # A6: its crew compartment is under water
 	if index < 0:
 		index = _first_free_passenger() if body else _first_free_for(s)
 	if index < 0 or index >= _seat_nodes.size() or occupant(index) != null:
@@ -1983,6 +1999,10 @@ func _current_input() -> Dictionary:
 ## and brakes. Helicopters: just their landing gear (V3 overrides this to fly).
 func _drive_step(delta: float) -> void:
 	var input := _current_input()
+	if drive:
+		if is_same(input, _ai_input):
+			input = drive.ai_guard(input, delta)  # A6: the AI keeps off what would tip, sink or stop it
+		drive.server_step(delta, float(input.throttle), float(input.steer))
 	var throttle := clampf(float(input.throttle), -1.0, 1.0) if can_drive() else 0.0
 	var steer := clampf(float(input.steer), -1.0, 1.0)
 	var brake := bool(input.brake) or not can_drive()
@@ -2004,6 +2024,8 @@ func _drive_step(delta: float) -> void:
 			return
 		sleeping = false
 	_wheel_forces(delta, throttle, steer, brake)
+	if drive:
+		apply_central_force(drive.aero_force())  # A6: air drag
 	if wet > 0.0:
 		AavWater.step(self, delta, wet, throttle, steer, brake)  # buoyancy, drag, waterjets
 
@@ -2029,22 +2051,26 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 	if throttle != 0.0 and signf(throttle) != signf(v_fwd) and absf(v_fwd) > REVERSE_BRAKE_MS:
 		brake = true
 		throttle = 0.0
-	var drive := 0.0
+	# A6 (2.8.1-2.8.2): the ground's traction and rolling resistance; the engine's power over the
+	# speed pulls, no more than accel_ms2 net (the old CLIMB_DEG grade hold is gone: power and
+	# traction decide whether it climbs), the governor easing it off at top speed.
+	var mu := drive.traction_now() if drive else 1.0
+	var rr := drive.rolling_now() if drive else ROLL_DECEL / g
+	var pull := 0.0
 	if throttle != 0.0:
 		var top := top_speed(throttle < 0.0)
 		var curve := sqrt(clampf(1.0 - absf(v_fwd) / maxf(top, 0.1), 0.0, 1.0))
-		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve * (logistics.accel_mult() if logistics else 1.0)  # A8: the packages' weight
-		# Wave 5b: uphill the engine gears down and holds the grade (up to CLIMB_DEG; the tyres'
-		# or tracks' grip still limits it), so a hill doesn't stall it at accel_ms2's slope.
-		var grade := clampf(forward.y * signf(throttle), 0.0, sin(deg_to_rad(CLIMB_DEG)))
-		drive += signf(throttle) * mass * g * grade * minf(absf(throttle) * 1.5, 1.0)
+		var accel_mult := logistics.accel_mult() if logistics else 1.0  # A8: the packages' weight
+		var power := drive.power_now() if drive else VehicleDrive.power_w(spec)
+		var train := mass + (logistics.towing.mass if logistics and logistics.towing_one() else 0.0)  # (and what it tows: it holds the grade for both)
+		pull = signf(throttle) * curve * accel_mult * VehicleDrive.drive_force(power, train, v_fwd, rr, forward.y * signf(throttle), float(spec.get("accel_ms2", 2.0)), throttle)
 	var brake_force := mass * float(spec.get("brake_ms2", 6.0)) if brake else 0.0
 	var wheels_ok := zone_health(ZONE_WHEELS)
-	var grip := GRIP * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)
+	var grip := GRIP * mu * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)
 	var steer_angle := 0.0
 	if not tracked:
 		steer_angle = -steer * deg_to_rad(float(spec.get("steer_deg", 30.0))) / (1.0 + absf(v_fwd) / STEER_FALLOFF_MS)
-	var coast := ROLL_DECEL + (ENGINE_BRAKE if throttle == 0.0 else 0.0)
+	var engine_brake := ENGINE_BRAKE if throttle == 0.0 else 0.0
 	var grounded := 0
 	for w: Array in wheels:
 		var r := float(w[2])
@@ -2067,23 +2093,29 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 		var f_lat := -v_lat * share / delta * LATERAL_RESPONSE
 		if tracked and absf(steer) > 0.05:
 			f_lat *= TRACK_TURN_LATERAL
-		var f_long := drive / n
+		var f_long := pull / n
 		if brake_force > 0.0:
 			f_long += clampf(-v_long * share / delta, -brake_force / n, brake_force / n)
-		else:
-			f_long += clampf(-v_long * share / delta, -coast * share, coast * share)
+		elif engine_brake > 0.0:
+			f_long += clampf(-v_long * share / delta, -engine_brake * share, engine_brake * share)
 		var traction := f_dir * f_long + s_dir * f_lat
 		var limit := normal_force * grip
 		if traction.length() > limit:
 			traction = traction.normalized() * limit
-		apply_force(up * normal_force + traction, point - global_position)
+		# A6: the ground's rolling resistance (the tyres or tracks sinking in, not their grip: it
+		# comes on top of what the grip allows, so soft ground can hold a vehicle that grips).
+		var rolling := -clampf(v_long * share / delta, -rr * normal_force, rr * normal_force)
+		apply_force(up * normal_force + traction + f_dir * rolling, point - global_position)
 	if tracked and grounded > 0 and not (logistics and logistics.towed()):
-		# Skid steering: the hull turns at the commanded rate, on the spot or on the move.
+		# Skid steering: the hull turns at the commanded rate, on the spot or on the move. (A6, 2.8.3:
+		# neutral steer at a standstill, falling to half by half_rate_kmh, by the ground's traction.)
 		var size := VehicleArt.size_m(model)
+		var turn_share := VehicleDrive.turn_share(drive.ground()) if drive else 1.0
 		var inertia := mass * (size.x * size.x + size.z * size.z) / 12.0
-		var target := -steer * deg_to_rad(float(spec.get("turn_deg_s", 40.0))) * (lerpf(0.4, 1.0, zone_health(ZONE_ENGINE)) if can_drive() else 0.0)
+		var fall := 1.0 + absf(v_fwd) / (VehicleDrive.num("tracked", "half_rate_kmh", 30.0) * VehicleSpecs.KMH) if drive else 1.0
+		var target := -steer * deg_to_rad(float(spec.get("turn_deg_s", 40.0))) * (lerpf(0.4, 1.0, zone_health(ZONE_ENGINE)) if can_drive() else 0.0) * turn_share / fall
 		var yaw_rate := angular_velocity.dot(up)
-		var torque := clampf((target - yaw_rate) * inertia / TRACK_TURN_TIME_S, -mass * g * size.z * 0.25, mass * g * size.z * 0.25)
+		var torque := clampf((target - yaw_rate) * inertia / TRACK_TURN_TIME_S, -mass * g * size.z * 0.25 * turn_share, mass * g * size.z * 0.25 * turn_share)
 		apply_torque(up * torque * (float(grounded) / n))
 
 
@@ -2442,6 +2474,8 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 		_carve_for(hit_kind, res, local, hit)
 	if not wrecked:
 		_apply_damage(zone, res, out.position, hit)
+	if drive:
+		drive.server_hit(out)  # A6: holed under an amphibious hull's waterline
 	damaged.emit(zone.zone, hit)
 	return out
 
@@ -3325,6 +3359,8 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		parts.append_array(smoke.readout_parts(seat))  # A7: the dischargers' salvos
 	if logistics:
 		parts.append_array(logistics.readout_parts(seat))  # A8: work under way, a tow
+	if drive:
+		parts.append_array(drive.readout_parts(seat))  # A6: rolled over, flooded, stalled, bogged
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3401,6 +3437,10 @@ func to_save() -> Dictionary:
 		out["smoke"] = smoke.to_save()
 	if logistics:
 		out["logistics"] = logistics.to_save()  # A8: packages, the load-out, bottles, repair progress, fired tiles
+	if drive:
+		var d := drive.to_save()
+		if not d.is_empty():
+			out["drive"] = d  # A6: rolled over, flooded, bogged, water aboard
 	return out
 
 
@@ -3474,6 +3514,8 @@ func from_save(data: Dictionary) -> void:
 		smoke.from_save(data.smoke)
 	if logistics:
 		logistics.from_save(data.get("logistics", {}) if data.get("logistics") is Dictionary else {})  # A8 (an older save: no packages)
+	if drive:
+		drive.from_save(data.get("drive", {}) if data.get("drive") is Dictionary else {})  # A6 (an older save: on its wheels, dry)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

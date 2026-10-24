@@ -1206,6 +1206,17 @@ a slope now comes from power and traction, so a wet hill stops a MaxxPro that a 
 - This is what makes **seizing a crossing** (6.4.4) a real objective: the concrete bridge is the
   only way the tanks get over.
 
+**Built in A6** (cg_brief queue item 2.7, branch `armour/drive`): `VehicleDrive` ("Drive" on every
+ground vehicle: the ground, power and traction, rollovers and righting by A8's tow, bogging,
+thrown tracks, fording, stalling, flooding, holes under the waterline), `TerrainRoute` (A9's
+`can_cross`, `ford_ok`, `slope_ok`, `path_problem`, `roads_for`), `ZoneTerrain.ground_at`,
+`ZoneBridges` load classes (`span_mlc`, `deck_at`, `next_span`, overload), `AavWater` (ford depth
+over the ground, waterjets by module, drag through moving water, the current's push), the HUD's
+lines, and the `armourdrive` suite. Numbers in data/vehicle_drive.json; the calls are A6.1-A6.20 in
+docs/audits/followups.md. Two changes beyond the text above: ground vehicles lost the engine's
+default linear damping (it held them all near 50 km/h) for air drag, and part throttle holds a grade
+as far as the power goes (the AI drivers' part throttle stalled on hills without the old grade hold).
+
 ### 2.9 Logistics
 
 #### 2.9.1 Fuel

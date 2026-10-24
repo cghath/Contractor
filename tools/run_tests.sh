@@ -47,6 +47,9 @@ suite_timeout() {
 		# armourlog: its host runs ~14 sections (rearming, repairs, the motor pool, a tow driven), then
 		# a client process joins and checks the packages, tiles, racks and the tow (A8).
 		armourlog) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		# armourdrive: a river valley zone hosted, ~14 sections on its slab and in its river and on its
+		# bridges (A6), then a client process joins and checks the rolled, flooded and stalled vehicles.
+		armourdrive) echo $(( SUITE_TIMEOUT > 1080 ? SUITE_TIMEOUT : 1080 )) ;;
 		# perfcases: five zones hosted and their visuals built, 20-45 s measured in each (perf pass).
 		perfcases) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
@@ -54,7 +57,7 @@ suite_timeout() {
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income)
 status=0
 finished=""
 keep_root="$(run_log_parent)"

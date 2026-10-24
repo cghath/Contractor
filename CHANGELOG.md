@@ -11,6 +11,66 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Driving physics and terrain for armour (cg_brief queue item 2.7 (A6), armour/drive)
+
+Combined arms phase A6: vehicles drive by their engine's power and the ground's grip, can roll over,
+ford rivers up to their depth, swim, flood, bog down and break bridges too light for them. Design:
+docs/combined_arms.md 2.8; every number Proposed (data/vehicle_drive.json, ZoneBridges.TYPES);
+calls in docs/audits/followups.md "Calls made".
+
+#### Added
+- **The ground under a vehicle**: asphalt and dirt roads, a town's streets, packed earth on the
+  sites, mud in a river or lake bed (gravel on a ford's track), marsh mud, snow, rock on steep
+  ground, sand in dry riverbeds and on beaches, grass elsewhere, asphalt on a bridge's deck. Each
+  has its own grip for tyres and for tracks and its own rolling resistance; tyres are capped at
+  40 km/h on sand and 25 km/h in mud, and narrow tyres sink deeper than wide tracks.
+- **Engine power**: every vehicle has its real engine (the Abrams 1,120 kW, the Bradley 450, the
+  AAV 390, the M-ATV 276, the MaxxPro 280, the technical 110). It pulls by its power over its
+  speed, so a light pickup leaps away, an MRAP is quicker than an IFV, and a hill slows a heavy
+  vehicle to what its power can climb (a 20 degree hill: an M-ATV about 16 km/h, an Abrams 13,
+  a Bradley 11). Whether it climbs at all comes from power and grip: a MaxxPro tops a 15 degree
+  dirt hill and spins to a stop on the same hill in mud, where an Abrams' tracks carry on.
+- **Real centres of mass** (the M-ATV's 1.25 m up, the MaxxPro's 1.35, the tanks' low) and
+  **rollovers**: past its tip angle (half its track over that height: the MRAPs about 40 degrees,
+  the Abrams 57) a vehicle goes over. The crew is hurt (a belted seat less, an open hatch more), it
+  can't drive, and the HUD says ROLLED OVER. ROLLOVER RISK shows from 70% of the tip angle, with
+  the numbers. Righting it: hook it up at its service point to a vehicle of at least half its mass
+  (60 s), which pulls it back onto its wheels, still on the tow; or abandon it.
+- **Tracks** turn on the spot at a standstill, half as fast by 30 km/h, slower in mud; a hard pivot
+  at speed on rock or rubble, or on a side slope, can throw a track.
+- **Bogging**: an MRAP that spins to a stop in mud on a slope is stuck (BOGGED: NEEDS A TOW)
+  until a tow pulls it out.
+- **Fording**: each vehicle has its depth (the M-ATV 1.37 m, the Abrams 1.2, the Bradley 1.0, the
+  MaxxPro 0.9, the technical 0.6). The HUD's FORD line shows the water against it. Deeper, the
+  engine stalls at once, is damaged after 5 s and destroyed after 20 s; water over the roof
+  floods the crew compartment and everyone gets out (and nobody can get in). Mud banks hold a
+  vehicle in the river: columns cross at the fords and the bridges.
+- **Swimming**: the AAV swims at 13 km/h on its two waterjets (each one's damage costs push, one out
+  pulls it round, both out and it only drifts); the river's current carries a swimming hull
+  downstream and pushes a grounded one. A hull holed under its waterline takes on water faster
+  than its pumps clear it (FLOODING with the share), floods and sinks.
+- **Bridge load classes**: concrete bridges MLC 80, steel truss 40, footbridges 2, falling with a
+  span's damage. A vehicle's class is its mass with its packages (the Abrams 62, 66 with TUSK II).
+  Over a span's class the span weakens and gives way (about 8 s at 1.5 times its class). The HUD
+  warns approaching one: BRIDGE MLC 40: TOO HEAVY.
+- **The AI driver** keeps its corners under 60% of what would tip it, stops short of side slopes
+  over 60% of its tip angle, water deeper than it fords, grades it can't climb and spans too light
+  for it (then backs off and goes round), and its road routes leave out bridges too light for it.
+  A9's API: TerrainRoute.can_cross, ford_ok, slope_ok, path_problem, roads_for.
+- The tow bar is drawn between the hitches, and a tow is saved with the zone.
+- New suite `armourdrive` (in tools/run_tests.sh and CI).
+
+#### Changed
+- Ground vehicles no longer carry the engine's default linear damping, which held every one of
+  them near 50 km/h whatever its engine; air drag takes its place, so they reach their top speeds.
+- The old 35 degree grade hold is gone: power and traction decide what a vehicle climbs (part
+  throttle still holds a grade as far as the engine's power goes).
+- Rolling resistance comes from the ground on top of the tyres' grip.
+- River water drags a hull through the water as it moves with the current.
+- Rolled-over, flooded, bogged and stalled states, water aboard, a drowning engine's seconds and
+  the tow replicate to every peer and late joiner and go in the zone save; so does a bridge span's
+  health (now sent to the clients as it falls, not only when it drops).
+
 ### Logistics, repair and armour packages (cg_brief queue item 2.6 (A8), armour/logistics)
 
 Combined arms phase A8: tank rounds are things you carry, stow and run out of; a broken tank is

@@ -49,10 +49,11 @@ const JOBS: Array[StringName] = [&"driver", &"gunner", &"loader"]
 ## The doll's size (logical px) and on a small window.
 const DOLL := Vector2(78.0, 112.0)
 const DOLL_SMALL := Vector2(52.0, 76.0)
-## Rollover risk at this share of the static tip angle (2.8.3; the centre of mass taken at
-## TIP_CG_SHARE of the hull's height until A6's real ones).
+## Rollover risk at this share of the static tip angle (2.8.3: A6's real centres of mass and
+## tracks, VehicleDrive.tip_deg; data/vehicle_drive.json rollover.hud_share).
 const ROLLOVER_SHARE := 0.7
-const TIP_CG_SHARE := 0.45
+## A6: the BRIDGE MLC line for a span this far ahead (m) or under it.
+const BRIDGE_WARN_M := 40.0
 ## A launch seen by the crew: a rocket or missile within this far heading within this cone of us.
 const MISSILE_WARN_M := 2500.0
 const MISSILE_CONE_DEG := 10.0
@@ -355,8 +356,10 @@ static func damage_word(v: Vehicle) -> String:
 	return "none"
 
 
-## The alerts that are true now (2.12.1): ON FIRE, TRACK THROWN, ROLLOVER RISK, FORD depth,
-## MISSILE LAUNCH, SHORT-CREWED, NO RADIO. (BRIDGE MLC is A6's: bridges have no load class yet.)
+## The alerts that are true now (2.12.1): ON FIRE, TRACK THROWN, ROLLOVER RISK (or ROLLED OVER),
+## FORD depth over the model's fording depth (or AFLOAT, FLOODING, FLOODED, STALLED), BRIDGE MLC,
+## BOGGED, MISSILE LAUNCH, SHORT-CREWED, NO RADIO. A6 (cg_brief queue item 2.7) gave them their
+## real numbers: VehicleDrive's tip angle, ford depth and flooding, ZoneBridges' load classes.
 static func alerts(v: Vehicle, p_seat: int) -> PackedStringArray:
 	var out: PackedStringArray = []
 	if v.is_burning():
@@ -367,13 +370,31 @@ static func alerts(v: Vehicle, p_seat: int) -> PackedStringArray:
 			if String(m.mods[i].kind) == "track" and m.health[i] <= 0.0:
 				out.append("TRACK THROWN")
 				break
+	var drive := v.drive
 	var tip := tip_deg(v)
-	var tilt := rad_to_deg(v.global_basis.y.angle_to(Vector3.UP))
-	if tip > 0.0 and tilt >= tip * ROLLOVER_SHARE:
-		out.append("ROLLOVER RISK")
-	var wet := AavWater.depth(v)
-	if wet > 0.05 and v.kind != Vehicle.HELICOPTER:
-		out.append("FORD %.1f / %.1f m" % [wet, float(v.spec.get("ford_m", AavWater.FORD_M))])
+	var roll := VehicleDrive.roll_deg(v)
+	if drive and drive.is_rolled():
+		out.append("ROLLED OVER: NEEDS A TOW" if not drive.is_righting() else "RIGHTING")
+	elif tip > 0.0 and roll >= tip * ROLLOVER_SHARE:
+		out.append("ROLLOVER RISK %d / %d deg" % [roundi(roll), roundi(tip)])
+	if drive:
+		var depth := VehicleDrive.ford_depth(v)
+		if drive.is_flooded():
+			out.append("FLOODED: GET OUT")
+		elif VehicleDrive.swims(v.spec):
+			if AavWater.afloat(v):
+				out.append("AFLOAT")
+			if drive.flood_share() > 0.0:
+				out.append("FLOODING %d%%" % roundi(drive.flood_share() * 100.0))
+		elif depth > VehicleDrive.WET_M:
+			out.append("FORD %.1f / %.1f m" % [depth, VehicleDrive.ford_m(v.spec)])
+		if drive.is_stalled():
+			out.append("STALLED: TOO DEEP")
+		if drive.is_bogged():
+			out.append("BOGGED: NEEDS A TOW")
+		var line := bridge_line(v)
+		if line != "":
+			out.append(line)
 	if missile_seen(v):
 		out.append("MISSILE LAUNCH")
 	if short_crewed(v):
@@ -385,11 +406,24 @@ static func alerts(v: Vehicle, p_seat: int) -> PackedStringArray:
 	return out
 
 
-## The static tip angle (degrees): half the track width over the centre of mass's height.
+## The static tip angle (degrees): half the track width over the centre of mass's height
+## (VehicleDrive.tip_deg: the model's real ones, F-257).
 static func tip_deg(v: Vehicle) -> float:
-	var box := VehicleCamera.hull_box(v)
-	var cg := box.size.y * TIP_CG_SHARE
-	return rad_to_deg(atan2(box.size.x * 0.5, maxf(cg, 0.1))) if box.size.y > 0.0 else 0.0
+	return VehicleDrive.tip_deg(v.spec) if v.kind in [Vehicle.WHEELED, Vehicle.TRACKED] else 0.0
+
+
+## 2.8.5's warning (F-255): the span ahead (within BRIDGE_WARN_M along the way it's going) or
+## under it, "BRIDGE MLC 40", with ": TOO HEAVY" when the vehicle's class is over the span's.
+static func bridge_line(v: Vehicle) -> String:
+	var b := TerrainRoute.bridges_of(v)
+	if b == null or b.bridges.is_empty():
+		return ""
+	var dir := -v.global_basis.z * (-1.0 if v.forward_speed() < -0.3 else 1.0)
+	var next := b.next_span(v.global_position + Vector3.UP * 0.3, dir, BRIDGE_WARN_M)
+	if next.is_empty():
+		return ""
+	var cls := float(next.mlc)
+	return "BRIDGE MLC %d%s" % [floori(cls + 0.001), ": TOO HEAVY" if float(VehicleDrive.mlc(v)) > cls else ""]
 
 
 ## Whether a rocket or missile is in flight towards `v` (within MISSILE_WARN_M, heading within
