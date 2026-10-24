@@ -580,6 +580,11 @@ func _test_client() -> void:
 	var log_path := OS.get_user_data_dir().path_join("vehiclefx_client%s.log" % OS.get_environment("CONTRACTOR_TEST_TAG"))
 	DirAccess.remove_absolute(log_path)
 	var args := ["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), "res://tests/vehiclefx_test.tscn", "--", "--vehiclefx-join"]
+	# (CI's runners: a peer building the zone stalls for seconds; ENet's own 5-30 s drop came first.)
+	multiplayer.peer_connected.connect(func(id: int) -> void:
+		var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+		if enet and enet.get_peer(id):
+			enet.get_peer(id).set_timeout(32, 60000, 120000))
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "started the client process")
 	await _until(func() -> bool: return _client_ready or _client_failures >= 0, 300.0)
@@ -645,6 +650,9 @@ func _run_client() -> void:
 		if not ok:
 			failures += 1
 	var joined := await _join_host("127.0.0.1", 120.0)
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if joined and enet and enet.get_peer(1):
+		enet.get_peer(1).set_timeout(32, 60000, 120000)  # (as the host does for this peer: CI's stalls)
 	var asked_until := Time.get_ticks_msec() + 40000
 	while joined and expect.is_empty() and Time.get_ticks_msec() < asked_until and multiplayer.get_unique_id() != 1:
 		_ask_expect.rpc_id(1)
