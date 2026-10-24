@@ -65,6 +65,11 @@ docs/audits/followups.md "Calls made".
 - The motor pool's quote for a vehicle with modules is per part, and its service now really makes
   every part whole (it left the modules' damage in the record).
 
+#### Fixed
+- The base suite's "the pay lands in the one bank" counts a captured leader's bounty: it failed
+  whenever the board's draw gave the loop a manhunt or capture (the bounty is paid beside the
+  debrief's pay since the war's bounties came in).
+
 ### Fire, destruction and sound (cg_brief queue item 2.5 (A7), armour/fx)
 
 Combined arms phase A7: armour burns, cooks off and blows apart the way it should, the guns sound
