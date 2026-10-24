@@ -59,6 +59,8 @@ var _vp: SubViewport
 var _cam: Camera3D
 var _root3d: Node3D
 var _text: Label
+var _scroll: ScrollContainer
+var _analysis_hint: Label
 var _picker: OptionButton
 var _analysis_box: VBoxContainer
 var _shell_pick: OptionButton
@@ -162,6 +164,7 @@ func _process(delta: float) -> void:
 	card.visible = _card_left > 0.0
 	_poll()
 	if full.visible:
+		_fit_full()  # (the window or the UI scale may have changed)
 		var stick := Vector2(Input.get_action_strength(&"look_right") - Input.get_action_strength(&"look_left"),
 			Input.get_action_strength(&"look_down") - Input.get_action_strength(&"look_up"))
 		if stick.length() > 0.15:
@@ -275,10 +278,11 @@ func _build_full() -> void:
 	outer.add_theme_constant_override(&"separation", UiKit.SPACE_S)
 	full.add_child(outer)
 	var head := HBoxContainer.new()
-	head.add_child(UiKit.heading("X-ray: hit analysis"))
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(spacer)
+	var title := UiKit.heading("X-ray: hit analysis")
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.clip_text = true
+	head.add_child(title)
 	head.add_child(UiKit.button("Close", close, "Close the x-ray (Esc)"))
 	outer.add_child(head)
 	var body := HBoxContainer.new()
@@ -296,6 +300,7 @@ func _build_full() -> void:
 	_vpc.gui_input.connect(_on_model_input)
 	body.add_child(_vpc)
 	_vp = SubViewport.new()
+	_vp.size = Vector2i(160, 120)  # (the container stretches it to its own size)
 	_vp.own_world_3d = true
 	_vp.transparent_bg = true
 	_vp.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
@@ -316,13 +321,21 @@ func _build_full() -> void:
 	body.add_child(side)
 	_picker = _options("The last hits this game", _on_pick)
 	side.add_child(_picker)
+	# The text and the analysis' controls scroll: a long report never grows the view past the window.
+	_scroll = ScrollContainer.new()
+	_scroll.name = "TextScroll"
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	side.add_child(_scroll)
+	var inner := VBoxContainer.new()
+	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(inner)
 	_text = UiKit.text("")
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	side.add_child(_text)
+	inner.add_child(_text)
 	_analysis_box = VBoxContainer.new()
 	_analysis_box.visible = false
-	side.add_child(_analysis_box)
+	inner.add_child(_analysis_box)
 	_shell_pick = _options("The round", func(_i: int) -> void: _result.text = "Click the model to see the outcome there")
 	_range_pick = _options("The range it's fired from", func(_i: int) -> void: pass)
 	for r: int in RANGES_M:
@@ -330,7 +343,9 @@ func _build_full() -> void:
 	_range_pick.select(2)
 	_result = UiKit.text("Click the model to see the outcome there")
 	_result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	for c: Control in [UiKit.hint("Protection analysis: pick a round and a range, click the model."), _shell_pick, _range_pick, _result]:
+	_analysis_hint = UiKit.hint("Protection analysis: pick a round and a range, click the model.")
+	_analysis_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	for c: Control in [_analysis_hint, _shell_pick, _range_pick, _result]:
 		_analysis_box.add_child(c)
 	outer.add_child(UiKit.hint("Drag or the right stick: turn it    Wheel: zoom    Esc / %s: close" % GameSettings.binding_name(GameSettings.key_for(ACTION))))
 
@@ -355,11 +370,13 @@ func _fit_full() -> void:
 	full.size = Vector2(w, h)
 	full.position = (view - Vector2(w, h)) * 0.5
 	var body := full.get_node_or_null(^"Outer/Body")
-	var side := _text.get_parent() as Control
+	var side := _scroll.get_parent() as Control
 	side.custom_minimum_size.x = clampf(w * 0.36, 200.0, 360.0)
-	_vpc.custom_minimum_size = Vector2(maxf(w - side.custom_minimum_size.x - UiKit.SPACE_M - 40.0, 160.0), 160.0)
+	for l: Label in [_text, _result, _analysis_hint]:
+		l.custom_minimum_size.x = side.custom_minimum_size.x - 20.0  # (wrapping at the column's width, not one word a line)
+	_vpc.custom_minimum_size = Vector2(maxf(w - side.custom_minimum_size.x - UiKit.SPACE_M - 40.0, 160.0), 120.0)
 	if body:
-		(body as Control).custom_minimum_size.y = maxf(h - 120.0, 120.0)
+		(body as Control).custom_minimum_size.y = maxf(h - 130.0, 100.0)
 
 
 func is_open() -> bool:
