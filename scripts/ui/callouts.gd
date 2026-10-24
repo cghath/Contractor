@@ -130,6 +130,9 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 	var stream := load(path) as AudioStream
 	if stream == null:
 		return null
+	if Sfx.voice_route(speaker) == &"intercom":  # (combined arms A7: a crewmate in your vehicle, on the intercom)
+		Sfx.play_intercom(stream, speaker)
+		return null
 	# A squadmate further than RADIO_M off comes over the net: in your ear, filtered (Sfx "Radio").
 	var ear: Variant = Sfx.listener()
 	if speaker is Soldier and (speaker as Soldier).faction != &"hostile" and ear is Vector3 and (ear as Vector3).distance_to(speaker.global_position) > RADIO_M:

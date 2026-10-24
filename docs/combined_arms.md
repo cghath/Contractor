@@ -1349,6 +1349,22 @@ At most 6 vehicles burning with full effects at once (more show smoke only), 64 
 zone, 2,000 live smoke and fire particles across the zone, and every column a billboard past
 600 m.
 
+**Built in A7** (cg_brief queue item 2.5, branch `armour/fx`): `VehicleFire`
+(scripts/vehicles/vehicle_fire.gd, "FireState", the host's state in the StateSync and the zone
+save), `VehicleFx` (scripts/vehicles/vehicle_fx.gd, "Fx", every peer) and `VehicleSmoke`
+(scripts/vehicles/vehicle_smoke.gd, "Smoke", 2.7.1's dischargers), numbers in
+data/vehicle_fx.json. The stages (smoke, fire, a cook-off's pops, burn-out, smoulder) are drawn
+over the burn that was there: a fire is still a loss at once and a wreck after `Vehicle.FIRE_S`,
+then the wreck burns on 120-300 s under its column; extinguishers and spreading fires are F-262.
+The bustle vents as a column, the other racks go up as a fireball with the turret thrown (10 or
+more main-gun rounds) or the hull ruptured, 12-24 debris pieces, the hulk charred; all from the
+kill's seed, the host's resting places replicated and saved. AI crews bail out by `server_exit`
+(VehicleFire.auto_bail, A9 replaces it: F-236). The guns' sounds, the 120 mm's overpressure, the
+TOW launcher's own part, impacts by round, the intercom and your own engine from inside (Sfx's
+Intercom and Interior buses) are in. Effects are GPU particles in the voxel look (boxes). Not
+built: the tile `REMOVE` edit (F-263), tracks and wheels thrown off a living vehicle and the
+engine's glow (F-264), the rest of 2.10.5's sounds (F-268).
+
 ### 2.11 The x-ray: hit analysis
 
 Learned from War Thunder's hit camera and protection analysis.

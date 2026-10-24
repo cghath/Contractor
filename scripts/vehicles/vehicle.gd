@@ -163,6 +163,11 @@ const FIRE_S := 45.0
 const FIRE_TICK_S := 1.0
 const FIRE_BURN_SHARE := 0.06
 const FIRE_TRAUMA := 4.0
+## A burning hull blackens a spot of FIRE_SCORCH_M every FIRE_SCORCH_EVERY ticks (combined arms
+## A7, Proposed: VehicleFx draws the fire now, and a 0.5 m scorch every second cost a burning
+## vehicle's host ~60-150 ms a second in VehicleHull's carving, F-241).
+const FIRE_SCORCH_EVERY := 4
+const FIRE_SCORCH_M := 0.35
 ## Chance a penetrating engine hit kills the battery (Proposed).
 const BATTERY_KILL_CHANCE := 0.1
 ## Run-overs (Proposed): faster than RUN_OVER_MIN_MS a soldier in the vehicle's path takes
@@ -336,6 +341,12 @@ var weapons: VehicleWeapons
 ## models with "optics"; hatches turned out or buttoned up on models with "hatches"; null on the rest.
 var gunnery: VehicleGunnery
 var hatches: VehicleHatches
+## Combined arms A7 (cg_brief queue item 2.5; docs/combined_arms.md 2.10): the fire's stages, the
+## ammunition's vent, cook-off or detonation and the bail-out (host state, "FireState"); their looks
+## and the guns' on every peer ("Fx"); the smoke dischargers on models that have them ("Smoke").
+var fire_state: VehicleFire
+var fx: VehicleFx
+var smoke: VehicleSmoke
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -355,6 +366,7 @@ var _state_left := 0.0
 var _state_dirty := false
 var _leak := 0.0             # litres a second
 var _fire_tick := 0.0
+var _fire_ticks := 0
 var _gun_next := {}          # host: gun seat -> when it may fire next
 var _gun_rounds := 0  # host: rounds the guns have fired (every tracer_every-th a tracer, as Soldier's)
 var _run_over_at := {}          # soldier instance id -> time last run over
@@ -366,7 +378,6 @@ var _last_pos := Vector3.ZERO
 var _seen := {}              # every peer: instance id -> Soldier seated last frame
 var _snaps: Array = []       # clients: [host time, position, rotation]
 var _clock := INF            # clients: local time minus host time
-var _fire_fx: Node3D
 var _hud: Hud                # the local occupant's HUD, while it shows this vehicle's readout
 var _send_left := 0.0
 var _last_sent := {}
@@ -437,6 +448,13 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	if spec.has("hatches"):
 		hatches = VehicleHatches.new(self)  # A4: "Hatches"
 		add_child(hatches)
+	fire_state = VehicleFire.new(self)  # A7: "FireState", its state in the StateSync
+	add_child(fire_state)
+	fx = VehicleFx.new(self)  # A7: "Fx", every peer's fire, destruction and gun effects
+	add_child(fx)
+	if VehicleSmoke.has_dischargers(spec):
+		smoke = VehicleSmoke.new(self)  # A7: "Smoke", the M250 / M257 dischargers
+		add_child(smoke)
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -481,6 +499,9 @@ func _add_sync() -> void:
 		paths.append(^"Gunnery:net_state")
 	if hatches:
 		paths.append(^"Hatches:net_state")
+	paths.append(^"FireState:net_state")  # A7
+	if smoke:
+		paths.append(^"Smoke:net_state")
 	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -1898,7 +1919,6 @@ func _process(delta: float) -> void:
 	if hull:
 		hull.pose_turret()
 	_local_controls(delta)
-	_update_fire_fx()
 
 
 func _server_step(delta: float) -> void:
@@ -2536,9 +2556,11 @@ func _fire_step(delta: float) -> void:
 				continue
 			s.vitals.server_burn(FIRE_BURN_SHARE)
 			s.vitals.server_damage(FIRE_TRAUMA)
-		var size := VehicleArt.size_m(model)
-		var spot := Vector3(randf_range(-0.4, 0.4) * size.x, randf_range(0.3, 0.9) * size.y, randf_range(-0.4, 0.4) * size.z)
-		_add_carves([[spot.x, spot.y, spot.z, 0.5, VehicleHull.SCORCH]])
+		_fire_ticks += 1
+		if _fire_ticks % FIRE_SCORCH_EVERY == 1:
+			var size := VehicleArt.size_m(model)
+			var spot := Vector3(randf_range(-0.4, 0.4) * size.x, randf_range(0.3, 0.9) * size.y, randf_range(-0.4, 0.4) * size.z)
+			_add_carves([[spot.x, spot.y, spot.z, FIRE_SCORCH_M, VehicleHull.SCORCH]])
 	if burning_s <= 0.0:
 		_become_wreck()
 
@@ -2573,37 +2595,8 @@ func _become_wreck() -> void:
 
 
 # --- Fire on every peer -------------------------------------------------------------------------
-
-func _update_fire_fx() -> void:
-	var on := is_burning()
-	if on and _fire_fx == null:
-		_fire_fx = Node3D.new()
-		_fire_fx.name = "Fire"
-		var light := OmniLight3D.new()
-		light.light_color = Color(1.0, 0.5, 0.15)
-		light.omni_range = 9.0
-		light.light_energy = 3.0
-		_fire_fx.add_child(light)
-		var flame := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.6
-		sphere.height = 1.4
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(1.0, 0.45, 0.1, 0.55)
-		sphere.material = mat
-		flame.mesh = sphere
-		_fire_fx.add_child(flame)
-		_fire_fx.position = Vector3(0, VehicleArt.size_m(model).y * 0.7, 0)
-		add_child(_fire_fx)
-	elif not on and _fire_fx:
-		_fire_fx.queue_free()
-		_fire_fx = null
-	if _fire_fx:
-		var flicker := 0.75 + 0.25 * sin(Soldier._now() * 17.0) * sin(Soldier._now() * 7.3)
-		(_fire_fx.get_child(0) as OmniLight3D).light_energy = 3.0 * flicker
-		_fire_fx.scale = Vector3.ONE * (0.9 + 0.2 * flicker)
+# The fire's look is VehicleFx's (A7: the stages, the column, the flames, the burning wreck), from
+# VehicleFire's state; it replaced the one light and orange sphere that were drawn here.
 
 
 # --- AI driving (host) --------------------------------------------------------------------------
@@ -3022,6 +3015,8 @@ func server_rearm() -> int:
 	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts
 		for f: Array in weapons.server_rearm():
 			wants[f[0]] = int(wants.get(f[0], 0)) + int(f[1])
+	if smoke:
+		smoke.server_restock()  # A7: the smoke grenades (A8: from the stowage items)
 	if cargo_hold:
 		for feed: StringName in wants:
 			_rearm_feed(feed, int(wants[feed]))
@@ -3301,6 +3296,8 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		parts.append_array(gunnery.readout_parts(seat))  # A4: the lase, the stabiliser, a sight's fallback
 	if hatches:
 		parts.append_array(hatches.readout_parts(seat))  # A4: turned out or buttoned up
+	if smoke:
+		parts.append_array(smoke.readout_parts(seat))  # A7: the dischargers' salvos
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3369,6 +3366,12 @@ func to_save() -> Dictionary:
 		out["gunnery"] = gunnery.to_save()  # A4
 	if hatches:
 		out["hatches"] = hatches.to_save()
+	if fire_state:
+		var f := fire_state.to_save()
+		if not f.is_empty():
+			out["fire"] = f  # A7: the fire's stage, the thrown turret and the debris
+	if smoke:
+		out["smoke"] = smoke.to_save()
 	return out
 
 
@@ -3436,6 +3439,10 @@ func from_save(data: Dictionary) -> void:
 		gunnery.from_save(data.gunnery)  # A4
 	if hatches and data.get("hatches") is Dictionary:
 		hatches.from_save(data.hatches)
+	if fire_state:
+		fire_state.from_save(data.get("fire", {}) if data.get("fire") is Dictionary else {})  # A7 (an older wreck: a smoulder)
+	if smoke and data.get("smoke") is Dictionary:
+		smoke.from_save(data.smoke)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

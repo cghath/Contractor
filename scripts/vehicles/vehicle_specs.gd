@@ -11,9 +11,10 @@ const PATH := "res://data/vehicles.json"
 ## Combined arms (docs/combined_arms.md 9.1): per-topic files keyed by model id, merged into
 ## the model's spec so parallel phases never edit one JSON file: plates, tiles, belly, spall
 ## liner and packages (A1); modules (A2); weapons, turrets, racks and crew moves (A3:
-## data/vehicle_weapons.json, whose "guns" join the mounted guns). A file that isn't there yet
+## data/vehicle_weapons.json, whose "guns" join the mounted guns); fire, destruction, smoke
+## dischargers and sounds (A7: data/vehicle_fx.json, as "fx"). A file that isn't there yet
 ## is skipped.
-const TOPIC_PATHS: Array[String] = ["res://data/vehicle_armour.json", "res://data/vehicle_modules.json", "res://data/vehicle_weapons.json"]
+const TOPIC_PATHS: Array[String] = ["res://data/vehicle_armour.json", "res://data/vehicle_modules.json", "res://data/vehicle_weapons.json", "res://data/vehicle_fx.json"]
 const KMH := 1.0 / 3.6
 
 ## Vehicle threat tiers (round_tier): small arms, full-power rifle (7.62x54R up), heavy

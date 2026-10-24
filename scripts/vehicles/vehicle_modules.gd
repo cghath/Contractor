@@ -1074,6 +1074,8 @@ func _detonation_roll(m: Dictionary, cause: int, seed: int) -> void:
 	if how == "vent" and bool(m.doors) and vehicle.weapons and vehicle.weapons.doors_open(String(m.id)):
 		how = "catastrophic"  # A3: the loader had the blast doors open: nothing to vent it (2.10.2)
 		flags["doors_open"] = true
+	if vehicle.fire_state:
+		vehicle.fire_state.server_ammo(how, m)  # A7: the vent's column, the pops, the fireball and the thrown turret (rounds counted before they're gone)
 	match how:
 		"vent":
 			rounds[int(m.i)] = 0

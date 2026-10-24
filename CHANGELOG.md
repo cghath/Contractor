@@ -11,6 +11,55 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Fire, destruction and sound (cg_brief queue item 2.5 (A7), armour/fx)
+
+Combined arms phase A7: armour burns, cooks off and blows apart the way it should, the guns sound
+like what they are, and the crew hears itself on the intercom. Design: docs/combined_arms.md 2.10
+and 2.7.1 ("Built in A7" there); every number Proposed (data/vehicle_fx.json); calls in
+docs/audits/followups.md "Calls made".
+
+#### Added
+- **Fires in stages**: a vehicle set alight smokes grey for a few seconds, then burns with flames,
+  black smoke and a light; once it's a wreck it keeps burning for 2-5 minutes while the flames die
+  down, its smoke column stands for 5-10 minutes (a tall billboard seen from past 600 m), then it
+  smoulders for the rest of the deployment. Saved with the zone, and a player who joins late sees
+  a burning wreck burning. A burning hull is hot in thermal and cools off once it's out.
+- **Ammunition**: the Abrams' bustle vents through its blow-out panels as an 8 m column of fire for
+  4 s and the tank fights on; a rack cooking off (the Bradley's 25 mm, the AAV's) pops a round
+  every 0.5-3 s for 20-60 s, each pop a small blast on anyone close; a rack going up is a
+  **fireball** sized by the rounds aboard, a blast on everyone near (up to 12 kg TNT) and a
+  shake. With 10 or more main-gun rounds aboard the **turret is thrown** into the air and lands
+  where its physics takes it (its crash heard), otherwise the hull ruptures; 12-24 pieces of
+  **debris** fly off and come to rest; the hulk is charred black. The turret and the debris land
+  in the same places on every machine and stay there in the save.
+- **Bail-out**: AI crews get out when a rack cooks off or after a few seconds of flames
+  ("Bail out!"); a catastrophic kill gives nobody the time.
+- **Smoke dischargers** (the Abrams' M250, the Bradley's M257): "Pop smoke" on the crew wheel
+  throws a salvo of grenades across the turret's front that makes a **multispectral screen**: it
+  blocks sight, thermal and the laser until it clears. Two salvos loaded, a reload's worth stowed
+  (10 s a salvo, stopped); a damaged launcher loses half its grenades. The HUD shows SMOKE 6 | 6.
+- **Gun sounds**: the 120 mm's report (heard for kilometres) with a pressure thump and a shake
+  close by, and the dust its overpressure kicks up; it rings the ears of anyone standing in front
+  of the muzzle. The 25 mm's thud, the TOW's launch whoosh and the wire spooling out. Muzzle
+  flashes, the gun's recoil and the hull rocking on a 120 mm shot. The **TOW launcher** visibly
+  raises and lowers.
+- **Impacts by round**: a ricochet sprays sparks with a ping, a stopped round sparks with a clang
+  (steel), a thud (composite) or a clank (aluminium), a penetration flashes white with a muffled
+  boom, a stopped HEAT round flashes orange with a black puff, HE bursts by its filling. Tracers by
+  round: sabot white-hot, HEAT orange, HE red.
+- **Inside the vehicle**: crew voices come over the **intercom** (band-limited, never muffled),
+  buttoned up or turned out; your own engine and tracks are a louder, duller drone from inside
+  rather than muffled with the outside. Tracks clatter louder with speed.
+- New suite `vehiclefx` (in tools/run_tests.sh and CI).
+
+#### Changed
+- The fire's old orange sphere and light are gone (the new effects replace them).
+- A burning hull blackens a smaller spot every 4 s instead of every second, and the hull's damage
+  carving runs about 2.5x faster: eight burning vehicles used to hold the host to a few frames a
+  second.
+- A rack that goes up in a vehicle already on fire from the same hit still goes up at once.
+- Wrecks in older saves smoulder.
+
 ### Vehicle HUDs and the x-ray (cg_brief queue item 2.4 (A5), armour/hud)
 
 Combined arms phase A5, the first build cut: the Abrams and the Bradley (and the AAV, M-ATV and

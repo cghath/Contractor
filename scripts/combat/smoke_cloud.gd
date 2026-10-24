@@ -126,6 +126,7 @@ const COLOURS := {
 	"yellow": Color(0.92, 0.8, 0.3),
 	"blue": Color(0.33, 0.5, 0.86),
 	"purple": Color(0.56, 0.34, 0.72),
+	"multispectral": Color(0.62, 0.6, 0.55),  # (combined arms A7: the vehicles' dischargers, ThermalView.MULTISPECTRAL)
 }
 ## +x, -x, +y, -y, +z, -z: a direction's opposite is k ^ 1.
 const DIRS: Array[Vector3i] = [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0), Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]

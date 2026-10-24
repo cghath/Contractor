@@ -1,0 +1,33 @@
+{
+	"_units": "Combined arms A7 (cg_brief queue item 2.5; docs/combined_arms.md 2.10, 2.7.1, 9.3): fire, destruction, smoke dischargers and the vehicles' sounds. Every number is Proposed. Read by VehicleFire (host state), VehicleSmoke (the dischargers) and VehicleFx (every peer's effects); the \"models\" blocks merge into each model's spec as \"fx\" (VehicleSpecs). fire: the stages of a fire (2.10.1), seconds; smoke_s the grey smoke before the flames show; the hull burns Vehicle.FIRE_S (lost, then a wreck, as before A7), then burns out for burn_out_s (seeded in the range) and its smoke column stands column_s from the wreck (seeded), then a smoulder for the rest of the deployment. cook_off_s: how long a cook-off pops (seeded); pop_gap_s between pops; pop_kg by rack when the rack names none. detonate_per_s: a cook-off of 120/125 mm rounds (a rack marked big) rolls this each second to go up (2.10.2). fireball: radius r0 + r_per x rounds^(1/3) m, blast min(kg_per x rounds, kg_max) kg TNT on everyone near (2.10.4); toss_rounds: main-gun rounds aboard for the turret to be thrown, else the hull ruptures. toss: m/s up and to the side, spin rad/s. debris: pieces by the seed, asleep after sleep_s, frozen static after freeze_s, at most zone_max live bodies (older ones become plain static meshes, at most static_max kept). vent: the Abrams bustle's column through its blow-out panels, metres and seconds. heat (ThermalView): a burning hull, a burnt-out wreck cooling to ThermalView's cold wreck over cool_s, debris and a thrown turret. budgets (2.10.6, 9.3): full_fires vehicles burning with full effects at once (more show smoke only), particles across the zone (GPU particles), billboard_m past which a column is one billboard, lights at once, fx_ms the CPU a frame the fires and debris may add (6 fires and 64 debris), kill_ms what a catastrophic kill may cost the host in its frame. muzzle: the 120 mm's overpressure: heard as a thump and felt (a shake) within thump_m, ears ringing up to deaf_s for dismounts within harm_m in front of the muzzle (within harm_deg of the bore), the dust kicked up dust_m round it. models: racks (by ammo module id): big (a main-gun round or missile: counts for the fireball and the toss), pop_kg (each cook-off pop's HE); dischargers (2.7.1: the doc's 2 x 6 and 2 x 4): tubes per side's launcher, per_salvo grenades each side throws a salvo, landing range_m out at angles_deg off the turret's line (a screen across the front arc, meeting in front), stowed grenades per side (one full reload), the modules, range_m out, reload_s a salvo; sounds: engine and tracks ids for the interior.",
+	"fire": {"smoke_s": 8.0, "burn_out_s": [120.0, 300.0], "column_s": [300.0, 600.0], "cook_off_s": [20.0, 60.0], "pop_gap_s": [0.5, 3.0], "pop_kg": 0.05, "detonate_per_s": 0.05, "bail_fire_s": 3.0},
+	"fireball": {"r0": 2.0, "r_per": 1.5, "kg_per": 0.4, "kg_max": 12.0, "frag_m": 18.0, "toss_rounds": 10, "shake_m": 120.0},
+	"toss": {"up_mps": [8.0, 15.0], "side_mps": [2.0, 4.0], "spin_rads": [0.6, 2.5], "rest_s": 12.0, "crash_mps": 4.0},
+	"debris": {"count": [12, 24], "size_m": [0.18, 0.55], "speed_mps": [6.0, 16.0], "sleep_s": 8.0, "freeze_s": 30.0, "zone_max": 64, "static_max": 256, "holes": 4},
+	"vent": {"column_m": 8.0, "s": 4.0},
+	"heat": {"burning": 1.0, "burn_out": 0.95, "cool_s": 900.0, "debris": 0.8, "turret": 0.9},
+	"budgets": {"full_fires": 6, "particles": 2000, "billboard_m": 600.0, "lights": 10, "fx_ms": 1.5, "kill_ms": 40.0},
+	"muzzle": {"thump_m": 40.0, "harm_m": 10.0, "harm_deg": 60.0, "deaf_s": 8.0, "dust_m": 6.0},
+	"models": {
+		"abrams": {
+			"fx": {
+				"racks": {"ammo_rack_bustle": {"big": true, "pop_kg": 0.3}, "ammo_rack_hull": {"big": true, "pop_kg": 0.3}},
+				"dischargers": {"name": "M250", "tubes": 6, "per_salvo": 3, "angles_deg": [3.0, 17.0, 31.0], "stowed": 6, "modules": ["smoke_l", "smoke_r"], "at": [[-1.75, 2.15, -1.0], [1.75, 2.15, -1.0]], "range_m": 30.0, "reload_s": 10.0},
+				"sounds": {"engine": "engine_mbt", "tracks": "tracks_heavy"}
+			}
+		},
+		"bradley": {
+			"fx": {
+				"racks": {"rack_tow": {"big": true, "pop_kg": 0.3}, "ready_25": {"pop_kg": 0.05}, "rack_25": {"pop_kg": 0.05}},
+				"dischargers": {"name": "M257", "tubes": 4, "per_salvo": 2, "angles_deg": [4.0, 20.0], "stowed": 4, "modules": ["smoke_l", "smoke_r"], "at": [[-1.07, 2.55, -1.35], [1.12, 2.55, -1.35]], "range_m": 30.0, "reload_s": 10.0},
+				"sounds": {"engine": "engine_ifv", "tracks": "tracks_heavy"}
+			}
+		},
+		"aav7": {
+			"fx": {
+				"racks": {"ready_mk19": {"pop_kg": 0.05}, "rack_mk19": {"pop_kg": 0.05}, "ready_m2": {"pop_kg": 0.01}, "rack_m2": {"pop_kg": 0.01}},
+				"sounds": {"engine": "engine_ifv", "tracks": "tracks_heavy"}
+			}
+		}
+	}
+}

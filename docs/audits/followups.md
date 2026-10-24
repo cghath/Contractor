@@ -1102,7 +1102,15 @@ a layout from them for reading). Author theirs (engine, fuel tank, cab crew, bed
 gun as ext_gun with gun_seat) with their guns in A3/D6b, and route VehicleDamage results through
 `server_apply` for them as for the MRAPs.
 
-### F-229 (open, A7): what a catastrophic kill and a cook-off look like and do around them
+### F-229 (closed by cg_brief queue item 2.5, A7, armour/fx): what a catastrophic kill and a cook-off look like and do around them
+Done: VehicleFire (scripts/vehicles/vehicle_fire.gd, the host's state) takes VehicleModules'
+detonation rolls (server_ammo): a catastrophic kill is a fireball of 2 + 1.5 x rounds^(1/3) m with
+min(0.4 x rounds, 12) kg on everyone near (Warheads.server_people, BlastGore) and a shake, the
+turret thrown with 10 or more main-gun rounds aboard (else the hull ruptures), 12-24 debris pieces
+from the seed, the hulk charred; the bustle's vent is an 8 m column of fire for 4 s and nothing
+else; a cook-off pops every 0.5-3 s for 20-60 s, each pop a small HE event, a rack of 120/125 mm
+rolling 5% a second to go up. VehicleFx draws all of it on every peer; the turret's and debris'
+rest poses replicate and save. The original note:
 A2 sets the state and the outcome; A7 draws it. Today a detonation wrecks the vehicle through the
 existing fire burnout (DETONATE_BURN_S, the crew killed by `_become_wreck`), a cook-off is the
 45 s fire, and a vent sets `flags.vented`. Still to do (2.10.2, 2.10.4): the fireball and its
@@ -1110,6 +1118,11 @@ existing fire burnout (DETONATE_BURN_S, the crew killed by `_become_wreck`), a c
 aboard), debris, the venting column, cook-off pops as small HE events.
 
 ### F-236 (open, Claude's A9): AI crews read the kill states
+A7 (cg_brief 2.5) gives the bail-out a stand-in: VehicleFire.server_bail (on a cook-off, or 3 s of
+flames) says "Bail out!", emits `bail_out_called(reason)`, and while `VehicleFire.auto_bail` is on
+puts the AI aboard an armoured vehicle out of its doors (Vehicle.server_exit) and calls
+server_bail_out. A9 turns auto_bail off for its own rule, and adds where they run (the lee side,
+20-40 m to cover) and the smarter triggers; popping smoke is `vehicle.smoke.server_pop(by)`.
 `Vehicle.modules.kill_state()` / `kill_changed` / `server_bail_out()` are there. A9's crews: bail
 out on a crew-compartment fire, a cook-off or a catastrophic warning (2.10.1) and call
 `server_bail_out()` as they go; abandon a knocked-out vehicle that isn't repairable; call for
@@ -1154,6 +1167,13 @@ thermal and the laser, destroyed falls back to the aux sight; the commander's vi
 thermal). Left: flooding (A6).
 
 ### F-241 (open, A7 or the perf lane): a launcher hit on a vehicle costs ~14 ms on the host in the hull carving
+A7 (cg_brief 2.5): VehicleHull._apply walks its cube with integer distances and reads the canvas
+directly, and a voxel marks only the chunks it pads (the same edits): a 0.5 m scorch 150 -> 59 ms
+(R0640, R0641). A burning hull now scorches 0.35 m every 4 s (8.0-9.0 ms each, R0644), not 0.5 m
+every second (8 burning vehicles took the host to a few frames a second), and a catastrophic
+kill's hull marks are carved one a frame (VehicleFire._marks; the kill's own frame ~3 ms, R0645).
+Four kills at once still give 3 frames of 66-190 ms (the debris bodies made, the carves): the
+carve on a worker or a deferred remesh on a headless host is still the fix.
 Measured while building A2 (vehicles suite, `_test_modules_budget`, R0599): a PG-7V through an
 AAV-7's side is about 0.5 ms of armour work (resolve, path, spall, apply: the A2 budget) but
 12-14 ms for the whole `server_take_hit`, nearly all of it V1's `VehicleHull` carve (the SCORCH
@@ -1199,7 +1219,14 @@ data shape is data/vehicle_weapons.json's), the crew wheel's basic orders (2.5.2
 menus), and timed seat moves on the MRAPs, technicals and AAV (4 s / 6 s: a "switch_s" in their
 data does it).
 
-### F-245 (open, A7): the guns' sounds and effects
+### F-245 (closed by cg_brief queue item 2.5, A7, armour/fx): the guns' sounds and effects
+Done: the M256 plays shot_m256 (a report heard to 5 km, duller past 300 m) with m256_blast (a
+pressure thump and a shake within 40 m, ears ringing for dismounts within 10 m in front), a muzzle
+flash, light and the dust its overpressure kicks up, the gun's recoil and the hull rocking; the
+M242 plays shot_m242 (its thud, 3 km) and a small flash; the TOW plays tow_launch and tow_wire with
+a launch flash and back-blast. The TOW launcher is a part of its own (the turret's "launcher" box,
+VehicleTurret.split) raised 25 degrees over the 4 s raise and lowered again (VehicleFx). Left: the
+Mk19's chug and engines by RPM (F-268). The original note:
 The 120 mm and the 25 mm play the "hmg" shot sound; 2.10.5 wants a 120 mm report with a pressure
 thump, the 25 mm's thud-thud, the TOW's launch whoosh and wire spool. No muzzle flash or blast
 dust, no recoil kick on the hull, and the TOW launcher's voxels don't move when it's raised
@@ -1222,7 +1249,14 @@ A shell that penetrates a hull ends there (A2 traces it inside); one through a s
 carry on behind it. A client's ram press is judged on the host's clock (RAM_WINDOW_S 0.7 s), so a
 high ping eats into the window; worth a client-side judgement sent with the press time.
 
-### F-249 (open, A7 or A9): the smoke dischargers' multispectral screen
+### F-249 (closed by cg_brief queue item 2.5, A7, armour/fx): the smoke dischargers' multispectral screen
+Done: VehicleSmoke (scripts/vehicles/vehicle_smoke.gd): the Abrams' M250 (6 a side, salvos of 3 a
+side) and the Bradley's M257 (4 a side, salvos of 2), each salvo a screen of multispectral
+SmokeClouds 30 m out across the turret's front that blocks sight, thermal and the laser for the
+cloud's life; a damaged launcher loses half its grenades, a destroyed one all; reloads from the
+stowage (10 s a salvo, stopped, an able crewman), A8's rearm restocks; the crew wheel's "Pop
+smoke" fires it. A9's call is `vehicle.smoke.server_pop(by)` (why not, "" when it went;
+`can_pop()` says why first; `salvos()` counts). The original note:
 2.7.1's smoke dischargers (the Abrams 2 x 6 salvos, the Bradley 2 x 4) and 2.5.2's "Pop smoke"
 aren't built. ThermalView already treats a SmokeCloud of colour "multispectral"
 (ThermalView.MULTISPECTRAL) as blocking thermal while ordinary smoke is hidden, and the laser
@@ -1230,6 +1264,10 @@ stops in any screen thick enough to block sight: the dischargers only need to sp
 (CompoundLevel.server_spawn_smoke) round the turret and use up a salvo (the "smoke" modules).
 
 ### F-250 (open, A5 or the perf lane): thermal by part, and its GPU cost
+A7 (cg_brief 2.5) left the parts alone (2.7.4 lists them with the sights, and 9.2's A7 row doesn't
+have them): the fire sets the whole vehicle's heat (burning 1.0, a burning wreck 0.95 cooling to
+the cold wreck's 0.35 over 15 minutes; VehicleFire.heat), and debris (0.8) and a thrown turret
+(0.9) are hot through ThermalView's new "thermal_bodies" group.
 ThermalView gives each body one heat (a man 0.85, dead 0.4; a running vehicle 0.7, cold 0.3, a
 wreck 0.35, burning 1.0). 2.7.4's list wants parts: engines and exhausts 1.0, a barrel after
 firing 0.8 cooling over 90 s, tracks and tyres after driving 0.6 cooling over 120 s, bodies
@@ -1301,10 +1339,61 @@ The door-gunner fix (cg_brief 2.4) gave AavGunner's machine guns a line-of-fire 
 shorter fired downhill). Deconfliction.near_bft (no target within 50 m of a tracked vehicle) is
 still there for A9's CrewGunner to use with HE and main guns, where the splash is the risk.
 
-### F-260 (open, A7): crew voices on the intercom filter, the own engine inside
+### F-260 (closed by cg_brief queue item 2.5, A7, armour/fx): crew voices on the intercom filter, the own engine inside
+Done: crewmen (not riders) of an armoured vehicle hear each other's voice clips on the Intercom bus
+(300-3400 Hz, a little clip, never muffled; Sfx.voice_route, play_intercom, one hook in
+Callouts.play) buttoned up or turned out; buttoned up, the own vehicle's engine and its tracks
+play on the Interior bus (louder, duller, not muffled), turned out as anyone outside hears them;
+tracked vehicles' tracks clatter louder with speed. The subtitles' reach is F-267. The original note:
 Buttoned up, Sfx muffles every outside sound on the effects buses (the vehicle's own engine too);
 2.10.5 also wants the crew's voices on an intercom filter and the engine heard from inside (a
 louder, duller drone) rather than muffled.
+
+### F-262 (open, A7 follow-up / A8): extinguishers and fires that spread
+A7 (cg_brief 2.5) draws 2.10.1's stages over the burn that was there (a fire is a loss: lost at
+once, a wreck after Vehicle.FIRE_S). Not built: the automatic halon in the crew compartment of
+the Abrams, Bradley and MRAPs (one shot, 70%, within 1 s), the two manual engine-bay shots (60%,
+the `extinguish` action), a smoke-stage fire put out 60% of the time, a fire spreading module to
+module (engine to fuel to the crew compartment after 20 s), burns only to the crew in the burning
+compartment, and A8's bottle refills at the FOB. They change what "on fire" means to every caller
+(is_burning, destroyed, objectives, the motor pool), so they want a pass of their own.
+
+### F-263 (open, A7 follow-up): fired ERA tiles leave their voxels
+9.2's `REMOVE` edit (2.4.4: fired tiles and torn slat shown missing) isn't built: ArmourModel keeps
+which tiles fired (meta armour_tiles; the HUD's doll greys them), but a tile's box takes in hull
+voxels behind it too, and removing those would open the plate (a round then meets nothing). The
+art needs the tiles' voxels marked (VehicleArt) so REMOVE takes only them.
+
+### F-264 (open, A7 follow-up): damage shown on a living vehicle
+2.10.4's list: done, the barrel drooping to its lower stop when it's destroyed or the vehicle is a
+wreck (VehicleHull.droop). Not built: a broken track running off and lying flat behind, a wheel
+blown off by a mine or HE flying 5-10 m (a rigid body, as the debris), a burning engine glowing
+through the deck grilles, torn slat panels.
+
+### F-265 (open, the perf lane): A7's effects on a real GPU
+The fire, smoke, debris and impact effects are GPUParticles3D (box particles; CPUParticles3D cost
+6-10 ms a frame a thousand, R0642) and billboards past 600 m, at most 2,000 particles and 10 lights
+in a zone (data/vehicle_fx.json budgets). Headless the CPU side is measured (vehiclefx suite: the
+effects' scripts and nodes against fx_ms); the GPU's share wants a windowed run, as F-250 and F-258.
+
+### F-266 (open, Claude's A9): AI crews pop smoke
+`vehicle.smoke.server_pop(by)` fires a salvo ("" when it went, else why: "No smoke left", "Reload
+the smoke", "Wrecked"); `can_pop()` and `salvos()` read it first; `server_reload(by)` reloads from
+the stowage (stopped). 2.13's triggers (a seen ATGM launch, a near miss from a big round, a laser
+warning) and the reverse into the screen are A9's; one hook line where its tactics decide.
+
+### F-267 (open, Claude's Callouts): intercom lines heard only inside the vehicle
+A7 routes a crewman's voice clip to his crewmates on the intercom (Sfx.voice_route), but
+Callouts.say still sends the subtitle ("Gunner: Bail out!") to every player on his side; 2.5.2's
+intercom channel is heard only inside that vehicle (grey, radio-filtered in 4.6's table). A
+recipients rule in Callouts (crew seats of the speaker's vehicle) does it.
+
+### F-268 (open, A7 follow-up): the rest of 2.10.5's sounds
+Built in A7: the guns, the ammunition, the impacts by material, the fire's roar, the thrown
+turret's crash, tracks clattering, the intercom and the engine from inside. Left: engines by type
+and load pitched by RPM (today by speed: the Abrams' engine_mbt is the turbine's whine), tracks
+squealing in a turn, MRAP tyre roar on asphalt, the Mk19's chug (the AAV's UGWS mounts are F-244),
+the ERA tile's crack (the HitEvent says a tile fired; the impact effect doesn't read it yet).
 
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
@@ -1566,3 +1655,22 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.4 (A5.11): protection analysis: ArmourModel.resolve with seed 20261023 at 100-3000 m, the ricochet chance over 40 seeds, every shell with a penetration figure, the vehicle's fitted packages and all its tiles whole | 2.11's "fixed seed"; the chance shows how often a bounce happens | one seed only
 2026-10-23 | cg_brief 2.4 (A5.12): the loader's turned-in view is drawn over his periscope (the bustle doors' state and a large tile per round, the next one lit, the reload bar), not a rendered turret interior | the turret's inside has no art yet; the information is what the job needs | an interior model
 2026-10-23 | cg_brief 2.4 (city hitches): perfcases' city budgets kept as they are (60 a minute on CI, 96 locally): alone on a quiet machine the city ran 51 a minute (R0633), every hitch an AI tick (F-261) | the measurement shows the budget holds on a quiet machine; R2569's 322 was load | raising the budget
+2026-10-24 | cg_brief 2.5 (A7.1): 2.10.1's stages over the burn that was there: grey smoke 8 s, then flames; lost at once and a wreck after Vehicle.FIRE_S (45 s) as before; the wreck burns on 120-300 s (seeded), its column stands 300-600 s from the wreck, then a smoulder for the deployment; extinguishers and spreading fires left (F-262) | every caller reads "on fire = lost" (is_burning, destroyed, objectives) | rebuilding the burn as per-module fires now
+2026-10-24 | cg_brief 2.5 (A7.2): bail-out stand-in: the AI aboard an armoured vehicle get out by its doors on a cook-off or after 3 s of flames ("Bail out!", a crew kill), not on a catastrophic kill, never from a helicopter; VehicleFire.auto_bail for A9 to replace (F-236) | 2.10.1's triggers; A9 owns where they run | crews burning to death in every fire until A9
+2026-10-24 | cg_brief 2.5 (A7.3): a fireball counts main-gun rounds and missiles (racks the fx block marks big) plus the other racks' rounds / 50; the turret goes at 10 or more big rounds (an Abrams with its hull rack: toss; a Bradley's 5 TOWs: the hull ruptures) | 2.10.4's formula wants one count; 25 mm aren't main-gun rounds | every round counted alike (a Bradley's 900 25 mm would throw its turret)
+2026-10-24 | cg_brief 2.5 (A7.4): cook-off pops: 0.05 kg each for 25 mm and 40 mm, 0.3 kg for 120 mm and missiles, 0.01 for .50, every 0.5-3 s (seeded) out of the rack's top | 2.10.1 | one blast at the end
+2026-10-24 | cg_brief 2.5 (A7.5): the fireball's blast reaches people only (Warheads.server_people, 18 m fragments); a vehicle parked beside takes nothing | Warheads' people path is what 2.10.4 names | routing it through every hull near
+2026-10-24 | cg_brief 2.5 (A7.6): every peer throws the turret and the debris from the seed; the host's rest poses (turret asleep or 12 s, debris frozen at 30 s) replace the clients' and go to late joiners and the save; the kill event carries the seed (it can beat the state) | call 30 and BlastGore's pattern; physics differs between machines only in flight | streaming positions
+2026-10-24 | cg_brief 2.5 (A7.7): debris: 12-24 boxes of 0.18-0.55 m off the roof at 6-16 m/s; at most 64 moving in a zone (the oldest frozen static), 256 kept; 4 holes with scorches on the roof, carved one a frame | 2.10.4, 2.10.6 | merging them into one static mesh
+2026-10-24 | cg_brief 2.5 (A7.8): dischargers: a salvo is 3 grenades a side (M250, 6 tubes a side: 2 salvos, 6 a side stowed) or 2 (M257, 4 tubes: 2 salvos, 4 stowed), landing 30 m out at 3/17/31 (4/20) degrees off the turret's line, multispectral clouds lasting a grenade's 30 s; damaged loses half, destroyed all; reload 10 s a salvo, stopped, an able crewman; the FOB rearm restocks | 2.7.1's 2 x 6 and 2 x 4; one grenade a side left a gap the sight line went through | a salvo of one grenade a side
+2026-10-24 | cg_brief 2.5 (A7.9): gun sounds: shot_m256 to 5 km (far past 300 m), m256_blast and a shake within 40 m outside, ears ringing up to 8 s for dismounts within 10 m and 60 degrees of the bore (not with ear protection); shot_m242 to 3 km; tow_launch to 1.5 km, tow_wire at the launcher | 2.10.5's "pressure thump close by" | no overpressure harm
+2026-10-24 | cg_brief 2.5 (A7.10): the intercom: crew seats (not riders) of a vehicle with modules, buttoned up or turned out (CVC helmets), on a 300-3400 Hz band with a little clip, never muffled; riders and men outside hear voices as before; subtitles still go to the side (F-267) | 2.5.2 | everyone inside on the intercom
+2026-10-24 | cg_brief 2.5 (A7.11): your own vehicle from inside: buttoned up its engine and tracks on an Interior bus (+4 dB, 500 Hz low-pass, not muffled), turned out as outside; tracks silent at a halt, full at 8 m/s | 2.10.5, F-260 | muffling your own engine with the outside
+2026-10-24 | cg_brief 2.5 (A7.12): impacts: ricochet sparks and a ping; KE stopped sparks and a thud (MBT composite), clank (IFV aluminium) or clang (steel); a penetration's white flash and boom; HEAT's orange flash, black puff and bang; HE a ball by its filling; tracers white-hot (sabot), orange (HEAT), red (HE) | 2.10.3 | one flash for every end
+2026-10-24 | cg_brief 2.5 (A7.13): budgets: full effects (flames, light) on the 6 nearest fires, smoke only beyond; 2,000 particles, as GPU particles (CPU particles cost 6-10 ms a frame a thousand); 10 lights; 64 moving debris; a billboard past 600 m; fx_ms 1.5 ms a frame of CPU for 8 fires and 4 kills' debris; kill_ms 40 ms for a catastrophic kill's frame on the host; 3x slack locally | 2.10.6, 9.3 | CPU particles
+2026-10-24 | cg_brief 2.5 (A7.14): a burning hull scorches 0.35 m every 4 s (was 0.5 m every second: 60-150 ms a second of host carving per burning vehicle), and VehicleHull's carve loop runs 2.5x faster for the same edits | F-241; VehicleFx draws the fire now | leaving it (8 burning vehicles held the host to a few frames a second)
+2026-10-24 | cg_brief 2.5 (A7.15): F-250's per-part heat stays with A4 and the perf lane; A7 ties the fire to thermal (burning 1.0, a burning wreck 0.95 cooling to 0.35 over 15 minutes, debris 0.8, a thrown turret 0.9) | 9.2's A7 row; 2.7.4 lists parts with the sights | per-part heat in A7
+2026-10-24 | cg_brief 2.5 (A7.16): the TOW launcher is its own part on the turret, raised 25 degrees nose-up about its rear hinge over the 4 s raise and lowered in 1.5 s; rounds meet its voxels as stowed whatever its pose; a thrown turret's voxels leave its hull's hit test | F-245; a few voxels | posing every part for hits
+2026-10-24 | cg_brief 2.5 (A7.17): a rack that goes up in a vehicle already alight from the same hit's fire roll still goes up at once (the burn cut to 0.1 s) | 2.10.2 | A2's order (a 45 s burn first)
+2026-10-24 | cg_brief 2.5 (A7.18): wrecks in saves from before A7 smoulder (no column) | they burned out long ago | no smoke at all
+2026-10-24 | cg_brief 2.5 (A7.19): Pop smoke from the crew wheel (C6's option, VehicleSmoke.request_pop); no key of its own yet | the wheel already had it | a new rebindable key

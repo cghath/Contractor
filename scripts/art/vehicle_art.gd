@@ -115,6 +115,16 @@ static func _add_turret(root: Node3D, model: String, scheme: String) -> void:
 		mi.mesh = _part_meshes[key]
 		mi.scale = Vector3.ONE * vs
 		var gun_part: bool = part.name == "Gun"
+		if part.name == "Launcher":
+			# A7 (F-245): a launcher on its own hinge on the turret (VehicleFx raises it).
+			var hinge := VehicleSpecs.vec(((VehicleSpecs.spec(model).get("turret", {}) as Dictionary).get("launcher", {}) as Dictionary).get("hinge"), t.pivot)
+			var arm := Node3D.new()
+			arm.name = "Launcher"
+			arm.position = hinge - t.pivot
+			turret.add_child(arm)
+			mi.position = VehicleTurret.part_offset(part, size, vs, hinge)
+			arm.add_child(mi)
+			continue
 		mi.position = VehicleTurret.part_offset(part, size, vs, t.trunnion if gun_part else t.pivot)
 		(gun if gun_part else turret).add_child(mi)
 
