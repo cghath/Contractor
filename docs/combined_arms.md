@@ -898,7 +898,7 @@ him (Warheads); `Spotting.spot_seconds` takes `VehicleHatches.spot_x`; the loade
 commander's M2 (unless a `crows` package is fitted) need turned out. The hatch key is X (`hatch`:
 H is the medical menu). AI crewmen follow a stand-in rule until A9's states (F-251): out after 60
 s of quiet, in at once on contact. The hearing, the vision-block views and the driver's
-periscopes are A5's (F-252).
+periscopes came with A5 (F-252 closed; 2.12's "Built in A5").
 
 ### 2.7 Weapons and gunnery
 
@@ -1349,6 +1349,22 @@ At most 6 vehicles burning with full effects at once (more show smoke only), 64 
 zone, 2,000 live smoke and fire particles across the zone, and every column a billboard past
 600 m.
 
+**Built in A7** (cg_brief queue item 2.5, branch `armour/fx`): `VehicleFire`
+(scripts/vehicles/vehicle_fire.gd, "FireState", the host's state in the StateSync and the zone
+save), `VehicleFx` (scripts/vehicles/vehicle_fx.gd, "Fx", every peer) and `VehicleSmoke`
+(scripts/vehicles/vehicle_smoke.gd, "Smoke", 2.7.1's dischargers), numbers in
+data/vehicle_fx.json. The stages (smoke, fire, a cook-off's pops, burn-out, smoulder) are drawn
+over the burn that was there: a fire is still a loss at once and a wreck after `Vehicle.FIRE_S`,
+then the wreck burns on 120-300 s under its column; extinguishers and spreading fires are F-262.
+The bustle vents as a column, the other racks go up as a fireball with the turret thrown (10 or
+more main-gun rounds) or the hull ruptured, 12-24 debris pieces, the hulk charred; all from the
+kill's seed, the host's resting places replicated and saved. AI crews bail out by `server_exit`
+(VehicleFire.auto_bail, A9 replaces it: F-236). The guns' sounds, the 120 mm's overpressure, the
+TOW launcher's own part, impacts by round, the intercom and your own engine from inside (Sfx's
+Intercom and Interior buses) are in. Effects are GPU particles in the voxel look (boxes). Not
+built: the tile `REMOVE` edit (F-263), tracks and wheels thrown off a living vehicle and the
+engine's glow (F-264), the rest of 2.10.5's sounds (F-268).
+
 ### 2.11 The x-ray: hit analysis
 
 Learned from War Thunder's hit camera and protection analysis.
@@ -1457,6 +1473,33 @@ fitted to the ui_test's 10 resolutions. Every key shown is the player's current 
   gun is before he swings the hull. **The loader** turned in sees the bustle doors and a large
   round selector; turned out, the pintle gun.
 - **Night:** the driver's periscope has an image-intensified channel; the rest of the HUD dims.
+
+**Built in A5** (cg_brief queue item 2.4, branch `armour/hud`): `VehicleHud`
+(scripts/ui/vehicle_hud.gd) for any vehicle with authored modules (the Abrams, Bradley, AAV,
+M-ATV, MaxxPro; the rest keep the text strip). The compass strip carries the hull's caret, the
+turret's bracket and the last hit's red tick (`Compass.vehicle_marks`); in the chase view a ring
+shows where the gun is laid apart from the aim; a blue chevron sits over every friendly vehicle on
+the Blue Force Tracker in view, in every view and the sights (`bft_marks`: radio working,
+`SideIntel.radio_ok`). The panel takes the strip's place in the HUD's bottom-centre zone: the doll
+(modules by state, tracks or wheels, ERA tiles grey once fired, crew pips with role letters at
+their seats), the title with the damage word, the alerts that are true (ON FIRE, TRACK THROWN,
+ROLLOVER RISK, FORD, MISSILE LAUNCH, SHORT-CREWED, NO RADIO; BRIDGE MLC waits for A6's load
+classes), the weapons' lines, the round selector with the loaded round bracketed and the reload
+bar, the crew line, the drive line and the keys; on a small window the keys go first, then the
+crew names, the drive line, the selector. The sights keep `VehicleSightOverlay`, which gains the
+crew pips and the damage word and brackets the loaded round. Buttoned up in a hatch seat in first
+person, `VehicleVision` (scripts/vehicles/vehicle_vision.gd) looks out through the vision blocks
+(the hatch's `vision` cones, the driver's arc split into periscopes), at 1x, the player's look
+picking the block, the rest of the screen masked; the driver's periscope has a night channel (the
+sight channel key; NvgView's intensifier over the glass, the HUD dimmed), lost when its
+`driver_vision` module is damaged, and with it destroyed he must turn out. The loader turned in
+sees the bustle doors and a large round selector under his periscope. Outside sounds are muffled
+in a closed seat (`Sfx.set_muffled`: -12 dB and a low-pass on the effects buses). The x-ray (2.11)
+is `VehicleXray` (scripts/ui/vehicle_xray.gd) and `HitReport` (scripts/ui/hit_report.gd), built on
+every peer from A2's HitEvents (which now carry the round's direction, angle, range, shooter, path
+and up to 12 spall rays). The calls are in docs/audits/followups.md ("Calls made", 2026-10-23,
+cg_brief 2.4); what's left is F-255 onwards there; the suite is `vehiclehud` (ui_test fits the
+panel, the card and the full view).
 
 ### 2.13 AI crews and armour tactics
 

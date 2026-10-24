@@ -121,6 +121,7 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 	var muzzle := vehicle.gun_origin(seat)
 	var door := seat != int(vehicle.gun_info().get("seat", -1))
 	var reach := float(_cfg.get("range_m", 600.0))
+	var own_key := Deconfliction.bft_key(vehicle)  # (SideIntel's own key: the id, or the node's name with none)
 	var everyone: Array[Soldier] = []
 	for holder: Node in [lvl.players, lvl.ai]:
 		for n in holder.get_children():
@@ -139,9 +140,9 @@ func _pick(gunner: Soldier, seat: int) -> Soldier:
 			continue
 		if vehicle.has_meta(&"sector") and not GunTeam.in_sector(vehicle.get_meta(&"sector"), muzzle, s.global_position):
 			continue  # a placed gun's arc (GunTeam.sector)
-		if d <= reach and not Deconfliction.near_bft(lvl, s.global_position, Deconfliction.BFT_M, "v:" + vehicle.vehicle_id) \
+		if d <= reach and not Deconfliction.bft_in_line(lvl, muzzle, s.global_position, Deconfliction.BFT_LINE_M, own_key) \
 				and not Deconfliction.checked(s.global_position, gunner.faction):
-			foes.append([d, s])  # (never within 50 m of our tracked vehicles, never into a check fire: combined_arms 4.5)
+			foes.append([d, s])  # (never with our tracked vehicles on the line of fire, never into a check fire: combined_arms 4.5)
 	foes.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 	var exclude: Array[RID] = [vehicle.get_rid()]
 	for f: Array in foes.slice(0, 6):

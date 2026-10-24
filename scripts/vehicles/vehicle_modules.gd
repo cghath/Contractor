@@ -139,6 +139,8 @@ const BELLY_FALL_M_PER_OVER := 3.0
 const CREW_CHECK_S := 0.5
 ## HitEvents kept on each peer (the x-ray's last hits, 2.11).
 const EVENTS_KEPT := 10
+## Spall rays a HitEvent carries for the x-ray (A5; the rest are only counted). Proposed.
+const EVENT_SPALL := 12
 ## Roll salts on the hit's seed (ArmourModel.roll), apart from ArmourModel's own.
 const ROLL_SPALL := 1000
 const ROLL_FIRE := 3000
@@ -175,6 +177,10 @@ var flags := {}
 var kill := 0
 ## The last HitEvents (every peer).
 var events: Array = []
+## When each of `events` arrived on this peer (Soldier._now()), and how many ever have (A5's x-ray
+## card watches the count).
+var event_times: Array = []
+var events_seen := 0
 ## Replicated (host -> every peer, the vehicle's StateSync): "h" health bytes, "r" rack rounds,
 ## "k" kill bits, "f" flags, "cl" crew lost.
 var net_state: Dictionary = {}:
@@ -878,6 +884,7 @@ func server_apply(zone: Dictionary, res: Dictionary, at: Vector3, hit: Dictionar
 	var ev := {"o": String(armour.get("outcome", "")), "p": [snappedf(local.x, 0.01), snappedf(local.y, 0.01), snappedf(local.z, 0.01)],
 		"pl": String(armour.get("plate", "")), "sh": String(armour.get("shell", hit.get("warhead", hit.get("round", "")))),
 		"t": roundi(float(armour.get("t_eff", 0.0))), "pen": roundi(float(armour.get("pen", 0.0))), "s": seed, "m": [], "c": []}
+	_event_path(ev, res, ldir, armour, shooter)  # A5: what the x-ray draws (HitReport)
 	_changed.clear()
 	var seated := _seated()
 	var column := String(armour.get("column", ""))
@@ -972,6 +979,35 @@ func server_apply(zone: Dictionary, res: Dictionary, at: Vector3, hit: Dictionar
 		_send_event(ev)
 
 
+## A5 (cg_brief queue item 2.4; 2.11): the parts of a hit the x-ray draws, added to its HitEvent
+## (so every peer reads the host's own trace, never a recomputed one): "d" the round's direction
+## (vehicle frame), "th" its angle to the plate, "r" the range flown, "by" the shooter's node name,
+## "x" the path through the modules in order ([module index, from m, to m]), "sp" up to
+## EVENT_SPALL of the spall rays ([dx, dy, dz, m to where each stopped]). A few hundred bytes.
+func _event_path(ev: Dictionary, res: Dictionary, ldir: Vector3, armour: Dictionary, shooter: Node) -> void:
+	ev["d"] = [snappedf(ldir.x, 0.01), snappedf(ldir.y, 0.01), snappedf(ldir.z, 0.01)]
+	ev["th"] = roundi(float(armour.get("theta_deg", 0.0)))
+	ev["r"] = roundi(float(armour.get("range_m", 0.0)))
+	ev["by"] = String(shooter.name) if shooter else ""
+	var x: Array = []
+	for p: Dictionary in res.get("path", []):
+		x.append([int(p.i), snappedf(float(p.t0), 0.01), snappedf(float(p.t1), 0.01)])
+	ev["x"] = x
+	var sp: Array = []
+	for ray: Dictionary in res.get("spall_rays", []):
+		if sp.size() >= EVENT_SPALL:
+			break
+		var d: Vector3 = ray.d
+		var stop := SPALL_RAY_M
+		for hit: Array in ray.x:
+			var m: Dictionary = mods[int(hit[2])]
+			if bool(m.crew) or float(m.hp) > 0.0:
+				stop = float(hit[0])
+				break
+		sp.append([snappedf(d.x, 0.01), snappedf(d.y, 0.01), snappedf(d.z, 0.01), snappedf(stop, 0.01)])
+	ev["sp"] = sp
+
+
 ## The module a hit at `local` lands in (not a crew station; the structure when none holds it).
 func module_at(local: Vector3) -> int:
 	for m: Dictionary in mods:
@@ -1038,6 +1074,8 @@ func _detonation_roll(m: Dictionary, cause: int, seed: int) -> void:
 	if how == "vent" and bool(m.doors) and vehicle.weapons and vehicle.weapons.doors_open(String(m.id)):
 		how = "catastrophic"  # A3: the loader had the blast doors open: nothing to vent it (2.10.2)
 		flags["doors_open"] = true
+	if vehicle.fire_state:
+		vehicle.fire_state.server_ammo(how, m)  # A7: the vent's column, the pops, the fireball and the thrown turret (rounds counted before they're gone)
 	match how:
 		"vent":
 			rounds[int(m.i)] = 0
@@ -1313,12 +1351,7 @@ func _sync_zones() -> void:
 func _effects() -> void:
 	if not authored or vehicle == null:
 		return
-	var radio := _radio
-	if radio >= 0:
-		if health[radio] <= 0.0:
-			vehicle.set_meta(&"radio_down", true)
-		elif vehicle.has_meta(&"radio_down"):
-			vehicle.remove_meta(&"radio_down")
+	_radio_meta()
 	var t := vehicle.turret
 	if t == null:
 		return
@@ -1333,6 +1366,14 @@ func _effects() -> void:
 	if turret_manual:
 		t.yaw_rate = minf(t.yaw_rate, deg_to_rad(MANUAL_TRAVERSE_DPS))
 		t.pitch_rate = minf(t.pitch_rate, deg_to_rad(MANUAL_ELEVATION_DPS))
+
+
+func _radio_meta() -> void:
+	if _radio >= 0:
+		if health[_radio] <= 0.0:
+			vehicle.set_meta(&"radio_down", true)
+		elif vehicle.has_meta(&"radio_down"):
+			vehicle.remove_meta(&"radio_down")
 
 
 static func _drive_rate(h: float, base: float, manual_dps: float) -> float:
@@ -1446,7 +1487,10 @@ func _apply_net() -> void:
 
 
 func _effects_client() -> void:
-	if vehicle == null or vehicle.turret == null or not authored:
+	if vehicle == null or not authored:
+		return
+	if vehicle.turret == null:
+		_radio_meta()  # (A5: the radio's meta on every peer, for the HUD's NO RADIO and the sights' BFT)
 		return
 	_effects()
 
@@ -1464,8 +1508,11 @@ func _client_hit_event(ev: Dictionary) -> void:
 
 func _keep_event(ev: Dictionary) -> void:
 	events.append(ev)
+	event_times.append(Soldier._now())
+	events_seen += 1
 	if events.size() > EVENTS_KEPT:
 		events.pop_front()
+		event_times.pop_front()
 	hit_event.emit(ev)
 
 

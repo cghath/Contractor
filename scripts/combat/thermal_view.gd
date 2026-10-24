@@ -114,7 +114,7 @@ static func update(tree: SceneTree, eye: Vector3, force := false) -> bool:
 	_next_at = now + 1.0 / UPDATE_HZ
 	var t0 := Time.get_ticks_usec()
 	var seen := {}
-	for group: StringName in [&"combatants", Soldier.DEAD_GROUP, Vehicle.GROUP]:
+	for group: StringName in [&"combatants", Soldier.DEAD_GROUP, Vehicle.GROUP, VehicleFx.THERMAL_GROUP]:  # (A7: debris and a thrown turret too)
 		for n: Node in tree.get_nodes_in_group(group):
 			var body := n as Node3D
 			if body == null or not body.is_inside_tree() or seen.has(body.get_instance_id()) or body.global_position.distance_to(eye) > RANGE_M:

@@ -987,7 +987,10 @@ func _fire_shell(m: Dictionary, shooter: Soldier, sid: String, now: float, breec
 	if g:
 		opts.merge(g.fuze_for(sid), true)  # A4: the fuze set for this round, airburst at the lased range
 	var id := flight.server_fire(StringName(sid), origin, vel, shooter, opts)
-	Sfx.server_shot(origin, origin + dir * 800.0, String(m.g.get("sound", "hmg")))
+	Sfx.server_shot(origin, origin + dir * 800.0, String(m.g.get("sound", "hmg")))  # (A7: the 120 mm's report, the 25 mm's thud: F-245)
+	VehicleFx.server_event(vehicle, "muzzle", {"kind": String(m.kind), "at": origin, "dir": dir})  # A7: flash, recoil, the overpressure's dust
+	if String(m.kind) == CANNON:
+		VehicleFx.server_overpressure(vehicle, origin, dir)
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)
 	_dirty = true
 	return {"ok": id != 0, "why": "" if id != 0 else "Can't fire", "shell": id, "round": sid}
@@ -1022,6 +1025,8 @@ func _fire_missile(m: Dictionary, shooter: Soldier, st: Dictionary) -> Dictionar
 		p.exclude.append_array(Launchers._rids_of(s))
 	st.rd = int(st.rd) - 1
 	st.g = launchers.last_id
+	Sfx.server_play(StringName(String(m.g.get("sound", "tow_launch"))), origin)  # A7 (F-245): the launch's whoosh
+	VehicleFx.server_event(vehicle, "muzzle", {"kind": ATGM, "at": origin, "dir": dir})
 	_sight.clear()
 	_sight.append([Soldier._now(), sight_origin(), sight_line()])
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)

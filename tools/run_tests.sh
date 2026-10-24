@@ -41,6 +41,9 @@ suite_timeout() {
 		# vehicles: its host runs ~30 sections, and squad driving (convoys, carries, unstuck, 2026-10-20)
 		# took it past 480 s: killed in "Squad drivers part 2" with two sections to go (R2353, CI too).
 		vehicles) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		# vehiclefx: its host runs ~10 sections (fires, kills with physics settling, smoke clouds
+		# growing and clearing), then a client process joins and checks the wreck and the next kill.
+		vehiclefx) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
 		# perfcases: five zones hosted and their visuals built, 20-45 s measured in each (perf pass).
 		perfcases) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
@@ -48,7 +51,7 @@ suite_timeout() {
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income)
 status=0
 finished=""
 keep_root="$(run_log_parent)"

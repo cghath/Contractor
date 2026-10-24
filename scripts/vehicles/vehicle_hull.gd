@@ -44,6 +44,8 @@ const SCUFF := 1    ## a round that glanced off: a bright mark
 const SCORCH := 2   ## fire or blast: blackened
 ## Wreck: the whole hull darkened (albedo times this).
 const WRECK_TINT := Color(0.24, 0.22, 0.2)
+## Combined arms A7 (2.10.4): a hulk that burned or went up, charred darker (Proposed).
+const CHAR_TINT := Color(0.13, 0.12, 0.11)
 
 static var _canvases := {}   # model -> {"buffer": VoxelBuffer, "look": VoxelBuffer, "size": Vector3i, "vs": float}
 static var _tasks := {}      # model -> WorkerThreadPool task id (canvas being built)
@@ -73,6 +75,11 @@ var _wrecked := false
 var turret: VehicleTurret
 var _turret_node: Node3D
 var _gun_node: Node3D
+## Combined arms A7: the turret was thrown (detach_turret): rounds no longer meet its voxels here.
+var parts_gone := false
+## A7: the gun droops to its lower stop (a firepower kill, a wreck; 2.10.4).
+var droop := false
+var _charred := false
 
 
 func _init(p_model := "matv", p_scheme := "") -> void:
@@ -87,7 +94,7 @@ func _ready() -> void:
 	_hull_mesh = art.get_node_or_null(^"Hull") as MeshInstance3D
 	_material = (VehicleArt._get_material() as StandardMaterial3D).duplicate()
 	if _wrecked:
-		_material.albedo_color = WRECK_TINT  # set_wrecked came before the tree (a saved wreck)
+		_material.albedo_color = CHAR_TINT if _charred else WRECK_TINT  # set_wrecked came before the tree (a saved wreck)
 	_dress(_hull_mesh)
 	_turret_node = art.get_node_or_null(^"Turret") as Node3D
 	_gun_node = art.get_node_or_null(^"Turret/Gun") as Node3D
@@ -201,7 +208,7 @@ func first_solid(from: Vector3, dir: Vector3, max_m: float) -> Dictionary:
 	var last := Vector3i(-99999, 0, 0)
 	# The parts at rest: each step's point taken back through the part's pose.
 	var parts: Array = []
-	if turret:
+	if turret and not parts_gone:
 		for part: Dictionary in c.get("parts", []):
 			var gun_part: bool = part.name == "Gun"
 			var pose := turret.gun_transform() if gun_part else turret.turret_transform()
@@ -239,7 +246,21 @@ func pose_turret() -> void:
 	if _turret_node:
 		_turret_node.rotation = Vector3(0.0, turret.yaw, 0.0)
 	if _gun_node:
-		_gun_node.rotation = Vector3(turret.pitch, 0.0, 0.0)
+		_gun_node.rotation = Vector3(turret.pitch_min if droop else turret.pitch, 0.0, 0.0)
+
+
+## Combined arms A7 (2.10.4): the turret and its gun leave the hull (a thrown turret: VehicleFx
+## makes it a body). Returns the art's "Turret" node, out of the art (null: none, or gone).
+func detach_turret() -> Node3D:
+	if _turret_node == null or parts_gone:
+		return null
+	var node := _turret_node
+	parts_gone = true
+	_turret_node = null
+	_gun_node = null
+	if node.get_parent():
+		node.get_parent().remove_child(node)
+	return node
 
 
 ## The turret's and gun's mesh nodes (empty without a turret).
@@ -275,32 +296,51 @@ func is_chunked() -> bool:
 
 
 func _apply(at: Vector3, radius: float, kind: int) -> void:
+	# (Combined arms A7, F-241: a burning vehicle's scorch every second cost ~150 ms in here,
+	# a launcher hit's ~14: the cube is walked with integer distances, the voxels read from the
+	# canvas directly and each voxel marks only the chunks it really pads; the same edits.)
 	var c := canvas(model)
 	var vs: float = c.vs
 	var centre := voxel_of(at)
 	var touched := {}
+	var buffer: VoxelBuffer = c.buffer
+	var size: Vector3i = c.size
 	match kind:
 		SCUFF:
 			_put_voxel(centre, VehicleArt.P.METAL, touched)
 		HOLE:
 			var r := maxi(roundi(radius / vs), 0)
 			var ring := r + maxi(roundi(radius / vs), 1)
+			var in2 := (r + 0.5) * (r + 0.5)
+			var out2 := (ring + 0.5) * (ring + 0.5)
 			for x in range(-ring, ring + 1):
 				for y in range(-ring, ring + 1):
 					for z in range(-ring, ring + 1):
+						var d2 := float(x * x + y * y + z * z)
+						if d2 > out2:
+							continue
 						var v := centre + Vector3i(x, y, z)
-						var d := Vector3(x, y, z).length()
-						if d <= r + 0.5:
+						if d2 <= in2:
 							_put_voxel(v, VehicleArt.P.EMPTY, touched)
-						elif d <= ring + 0.5 and solid(v):
+						elif _voxel_fast(v, buffer, size) != VehicleArt.P.EMPTY:
 							_put_voxel(v, VehicleArt.P.BLACK, touched)
 		SCORCH:
 			var r := maxi(roundi(radius / vs), 1)
+			var r2 := (r + 0.5) * (r + 0.5)
 			for x in range(-r, r + 1):
+				var vx := centre.x + x
+				if vx < 0 or vx >= size.x:
+					continue
 				for y in range(-r, r + 1):
+					var vy := centre.y + y
+					if vy < 0 or vy >= size.y:
+						continue
 					for z in range(-r, r + 1):
-						var v := centre + Vector3i(x, y, z)
-						if Vector3(x, y, z).length() <= r + 0.5 and solid(v) and voxel_at(v) != VehicleArt.P.GLASS:
+						if float(x * x + y * y + z * z) > r2:
+							continue
+						var v := Vector3i(vx, vy, centre.z + z)
+						var was := _voxel_fast(v, buffer, size)
+						if was != VehicleArt.P.EMPTY and was != VehicleArt.P.GLASS:
 							_put_voxel(v, VehicleArt.P.BLACK if (x + y + z) % 3 != 0 else VehicleArt.P.RUST, touched)
 	if touched.is_empty():
 		return
@@ -310,32 +350,52 @@ func _apply(at: Vector3, radius: float, kind: int) -> void:
 		_enqueue(self, "own", "", chunk)
 
 
+## voxel_at without the canvas lookup (the hot loops of _apply).
+func _voxel_fast(v: Vector3i, buffer: VoxelBuffer, size: Vector3i) -> int:
+	var e: Variant = _edits.get(v)
+	if e != null:
+		return int(e)
+	if v.x < 0 or v.y < 0 or v.z < 0 or v.x >= size.x or v.y >= size.y or v.z >= size.z:
+		return VehicleArt.P.EMPTY
+	return buffer.get_voxel(v.x + 1, v.y + 1, v.z + 1, VoxelBuffer.CHANNEL_COLOR)
+
+
 func _put_voxel(v: Vector3i, value: int, touched: Dictionary) -> void:
-	var size: Vector3i = canvas(model).size
+	var c := canvas(model)
+	var size: Vector3i = c.size
 	if v.x < 0 or v.y < 0 or v.z < 0 or v.x >= size.x or v.y >= size.y or v.z >= size.z:
 		return
-	if voxel_at(v) == value or (_edits.size() >= MAX_EDITS and not _edits.has(v)):
+	if _voxel_fast(v, c.buffer, size) == value or (_edits.size() >= MAX_EDITS and not _edits.has(v)):
 		return
 	_edits[v] = value
 	# Every chunk whose padded copy holds this voxel (a voxel on a chunk's edge is in its
-	# neighbour's padding too).
-	for dx in [-1, 0, 1]:
-		for dy in [-1, 0, 1]:
-			for dz in [-1, 0, 1]:
-				var chunk := Vector3i(floori(float(v.x + dx) / CHUNK), floori(float(v.y + dy) / CHUNK), floori(float(v.z + dz) / CHUNK))
-				touched[chunk] = true
+	# neighbour's padding too): the chunks of v - 1 to v + 1 on each axis (one, unless on an edge).
+	var lo := Vector3i(floori(float(v.x - 1) / CHUNK), floori(float(v.y - 1) / CHUNK), floori(float(v.z - 1) / CHUNK))
+	var hi := Vector3i(floori(float(v.x + 1) / CHUNK), floori(float(v.y + 1) / CHUNK), floori(float(v.z + 1) / CHUNK))
+	for cx in range(lo.x, hi.x + 1):
+		for cy in range(lo.y, hi.y + 1):
+			for cz in range(lo.z, hi.z + 1):
+				touched[Vector3i(cx, cy, cz)] = true
 
 
 ## A burnt-out wreck: the whole hull darkened, the windows too (opaque).
 func set_wrecked(on: bool) -> void:
 	_wrecked = on
 	if _material:
-		_material.albedo_color = WRECK_TINT if on else Color.WHITE
+		_material.albedo_color = (CHAR_TINT if _charred else WRECK_TINT) if on else Color.WHITE
 		_dress(_hull_mesh)
 		for chunk: Vector3i in _chunk_nodes:
 			_dress(_chunk_nodes[chunk])
 		for mi in _part_meshes():
 			_dress(mi)
+
+
+## Combined arms A7: a burnt-out or blown-up hulk, darker than a wreck (CHAR_TINT).
+func set_charred(on: bool) -> void:
+	if on == _charred:
+		return
+	_charred = on
+	set_wrecked(_wrecked or on)
 
 
 ## This hull's materials on a mesh's surfaces: its own (tinted on a wreck) for the hull, the
