@@ -271,7 +271,7 @@ func plan(v: Vehicle, point: Vector3, roads := true, info := {}) -> PackedVector
 	var def: Variant = lvl.get(&"def") if lvl else null
 	info["roads"] = false
 	if roads and def is Dictionary and lvl.has_method(&"ground_point"):
-		var way := RoadRoute.route(def, Vector2(v.global_position.x, v.global_position.z), Vector2(point.x, point.z))
+		var way := RoadRoute.route(TerrainRoute.roads_for(v, def), Vector2(v.global_position.x, v.global_position.z), Vector2(point.x, point.z))  # A6: never over a bridge too light for it
 		if not way.is_empty():
 			var path := PackedVector3Array()
 			for p: Vector2 in way:

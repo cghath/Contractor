@@ -754,7 +754,51 @@ func _build_motor_pool(rows: VBoxContainer) -> void:
 			service.tooltip_text = why if why != "" else "Ready: nothing to fix"
 		rows.add_child(_line("%s: %d%% damaged, %d L fuel%s" % [String(e.name), roundi(float(e.get("damage", 0.0)) * 100.0), roundi(float(e.get("fuel", 0.0))),
 			"" if why == "" else "  (%s)" % why], [service]))
+		_build_pool_packages(rows, node, e)
 	_build_air_wing(UiKit.section("Air wing", rows))
+
+
+## Combined arms A8 (cg_brief queue item 2.6): a pool vehicle's armour packages (fitted at the
+## motor pool for their price and days in the workshop, taken off for half back; MotorPool.
+## server_package) with its STANAG rating as fitted, and the load-out its racks are filled to at
+## the FOB (MotorPool.server_set_loadout). Booked at the motor pool's sign, like Service.
+func _build_pool_packages(rows: VBoxContainer, node: MotorPoolNode, e: Dictionary) -> void:
+	var offers: Array = e.get("offers", [])
+	var loadouts: Array = e.get("loadouts", [])
+	if offers.is_empty() and loadouts.is_empty():
+		return
+	var id := String(e.id)
+	var at_pool := node.local_at_terminal()
+	var fitted: Array = offers.filter(func(o: Dictionary) -> bool: return bool(o.fitted)).map(func(o: Dictionary) -> String: return String(o.name))
+	var stanag := String(e.get("stanag", ""))
+	rows.add_child(_indent(_cut("Packages: %s%s" % ["none" if fitted.is_empty() else ", ".join(PackedStringArray(fitted)), "  (STANAG 4569 %s)" % stanag if stanag != "" else ""])))
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override(&"h_separation", UiKit.SPACE_S)
+	flow.add_theme_constant_override(&"v_separation", UiKit.SPACE_S)
+	for o: Dictionary in offers:
+		var pkg := String(o.id)
+		var on := bool(o.fitted)
+		var text := "Remove %s (+$%s)" % [String(o.name), DebriefCalc.money(int(o.refund))] if on 			else "Fit %s ($%s, %d day%s, +%.1f t)" % [String(o.name), DebriefCalc.money(int(o.price)), int(o.days), "" if int(o.days) == 1 else "s", float(o.weight_t)]
+		var b := UiKit.button(text, func() -> void:
+			node.request_package(id, pkg, not on)
+			get_tree().create_timer(0.5).timeout.connect(refresh))
+		b.name = "Package_%s_%s" % [id.validate_node_name(), pkg.validate_node_name()]
+		var why := String(o.get("why", ""))
+		b.disabled = why != "" or not at_pool
+		b.tooltip_text = why if why != "" else (AWAY_FROM_POOL if not at_pool else text)
+		flow.add_child(b)
+	if not loadouts.is_empty():
+		var pick := OptionButton.new()
+		pick.name = "Loadout_" + id.validate_node_name()
+		for lo: Variant in loadouts:
+			pick.add_item("Load-out: %s" % String(lo).replace("_", " "))
+			pick.set_item_metadata(pick.item_count - 1, String(lo))
+			if String(lo) == String(e.get("loadout", "")) or (String(e.get("loadout", "")) == "" and String(lo) == "standard"):
+				pick.select(pick.item_count - 1)
+		pick.tooltip_text = "The rounds its racks are filled to at the FOB, charged per round as it goes out and comes home"
+		pick.item_selected.connect(func(i: int) -> void: node.request_loadout(id, String(pick.get_item_metadata(i))))
+		flow.add_child(pick)
+	rows.add_child(flow)
 
 
 ## The air wing's upgrades (HeliUpgrades, Captain 2026-10-17): each one's name, what it does

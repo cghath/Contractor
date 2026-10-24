@@ -1,0 +1,35 @@
+{
+	"_units": "Combined arms A6 (cg_brief queue item 2.7; docs/combined_arms.md 2.8, 9.2, 9.3): driving physics and terrain, read by VehicleDrive (scripts/vehicles/vehicle_drive.gd), Vehicle._wheel_forces, AavWater, ZoneBridges and TerrainRoute. Every number is Proposed. kg, metres, kW, kPa, km/h, seconds, litres, degrees. ground: per ground kind (ZoneTerrain.ground_at) the traction (a share of the tyre or track grip on asphalt, Vehicle.GRIP) for wheeled and tracked, the rolling resistance (a share of the weight), and a wheeled speed cap (2.8.1's table). power: drive force F = min(P x driveline_eff / max(v, min_v_ms), mu x N) less rolling resistance and the weight's share along the slope (2.8.2), accel_ms2 a cap on the net acceleration, top_speed_kmh the governor; soft ground (sand, mud, snow) scales the rolling resistance by sqrt(ground pressure / ref_kpa) within soft_scale. tracked: the yaw rate falls to half by half_rate_kmh (neutral steer at a standstill), scaled by the ground's tracked traction over turn_ref_traction (firm dirt: turn_deg_s is the firm-ground rate); a hard pivot (steer at least pivot_steer) above throw_kmh on rock or rubble, or on a side slope over throw_side_deg, throws a track at throw_per_s. rollover: the static tip angle is atan(half the wheel track / the centre of mass's height); the HUD warns at hud_share of it, the AI never crosses side slopes over ai_share of it and keeps its lateral acceleration under ai_lat_share of the tip's (g x half track / height); past it for confirm_s the vehicle is rolled over: its crew fall fall_m (belted seats half, open seats open_mult), it can't drive, and a tow from a vehicle of half its mass rights it (the tow job, then a pull of up to right_torque_g x its weight's turning moment until it stands within upright_deg). bog: a wheeled vehicle of ground_kpa or more on mud below bog_kmh for bog_s with the throttle open on a slope over bog_slope_deg is stuck until towed bog_tow_m. ford: deeper water than a model's ford_m (ground to surface under the hull) stalls the engine at once, damages it after damaged_s and destroys it after destroyed_s; water over its roof_m floods the crew compartment and the crew gets out; an amphibious hull holed below its waterline_m takes hole_lps a hole against pump_lps of bilge pumps and sinks at sink_l aboard; out of the water it drains at pump_lps and is dry drain_s after. current: the river pushes the immersed hull 0.5 x rho x cd x area x v_rel^2. aero: air drag 0.5 x rho x cd x frontal area x v^2 (in place of the engine's default linear damping, which had held every ground vehicle near 50 km/h). mlc: a vehicle's military load class is its mass in tonnes with its packages, rounded up (ZoneBridges.TYPES has the spans'). ai: the AI driver's look ahead (look_m plus look_s of travel) and how often it looks. budget_ms: the drive's host step per vehicle (vehicle range, 9.3: the physics step unchanged).",
+	"ground": {
+		"asphalt": {"wheeled": 1.0, "tracked": 0.95, "rr": 0.015},
+		"dirt": {"wheeled": 0.8, "tracked": 0.85, "rr": 0.03},
+		"grass": {"wheeled": 0.7, "tracked": 0.8, "rr": 0.05},
+		"sand": {"wheeled": 0.45, "tracked": 0.7, "rr": 0.1, "cap_kmh": 40, "soft": true},
+		"mud": {"wheeled": 0.3, "tracked": 0.55, "rr": 0.15, "cap_kmh": 25, "soft": true},
+		"rock": {"wheeled": 0.85, "tracked": 0.8, "rr": 0.04, "throws": true},
+		"snow": {"wheeled": 0.4, "tracked": 0.6, "rr": 0.08, "soft": true},
+		"rubble": {"wheeled": 0.6, "tracked": 0.75, "rr": 0.08, "throws": true}
+	},
+	"power": {"driveline_eff": 0.8, "min_v_ms": 2.0, "ref_kpa": 150.0, "soft_scale": [0.7, 1.5], "engine_floor": 0.4},
+	"tracked": {"half_rate_kmh": 30.0, "turn_ref_traction": 0.85, "pivot_steer": 0.9, "throw_kmh": 10.0, "throw_side_deg": 20.0, "throw_per_s": 0.005},
+	"rollover": {"hud_share": 0.7, "ai_share": 0.6, "ai_lat_share": 0.6, "confirm_s": 0.75, "fall_m": 3.2, "belted_mult": 0.5, "open_mult": 1.5,
+		"right_torque_g": 1.4, "upright_deg": 12.0, "right_max_s": 30.0},
+	"bog": {"ground_kpa": 250.0, "bog_kmh": 3.0, "bog_s": 4.0, "bog_slope_deg": 2.0, "bog_tow_m": 4.0},
+	"ford": {"damaged_s": 5.0, "destroyed_s": 20.0, "hole_lps": 35.0, "pump_lps": 25.0, "sink_l": 9000.0, "drain_s": 60.0},
+	"current": {"cd": 1.0, "rho": 1000.0},
+	"aero": {"cd": 0.9, "rho": 1.2},
+	"ai": {"look_m": 6.0, "look_s": 1.5, "every_s": 0.1},
+	"budget_ms": 0.03,
+	"models": {
+		"matv": {"com": [0.0, 1.25, 0.0], "power_kw": 276, "ford_m": 1.37, "roof_m": 2.52, "ground_kpa": 290, "belted": "all_but_gunner"},
+		"maxxpro": {"com": [0.0, 1.35, 0.0], "power_kw": 280, "ford_m": 0.9, "roof_m": 2.92, "ground_kpa": 320, "belted": "all_but_gunner"},
+		"technical": {"com": [0.0, 0.75, 0.0], "power_kw": 110, "ford_m": 0.6, "roof_m": 1.72, "ground_kpa": 220, "belted": "none"},
+		"aav7": {"com": [0.0, 1.15, 0.0], "power_kw": 390, "roof_m": 2.64, "waterline_m": 1.5, "ground_kpa": 57, "belted": "none"},
+		"bradley": {"com": [0.0, 1.05, 0.0], "power_kw": 450, "ford_m": 1.0, "roof_m": 2.0, "ground_kpa": 76, "belted": "none"},
+		"abrams": {"com": [0.0, 0.95, 0.6], "power_kw": 1120, "ford_m": 1.2, "roof_m": 1.5, "ground_kpa": 103, "belted": "none"},
+		"t72b3": {"power_kw": 840, "ford_m": 1.2, "ground_kpa": 90, "belted": "none"},
+		"bmp2": {"power_kw": 220, "swim_kmh": 7, "ground_kpa": 64, "belted": "none"},
+		"btr82a": {"power_kw": 220, "swim_kmh": 10, "ground_kpa": 260, "belted": "none"},
+		"mtlb": {"power_kw": 175, "swim_kmh": 5, "ground_kpa": 46, "belted": "none"}
+	}
+}

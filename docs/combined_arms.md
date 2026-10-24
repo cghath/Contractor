@@ -707,6 +707,15 @@ Prices sit in data/prices.json `packages`; the "Needs" column is the reputation 
 employer whose quartermaster sells it (`Quartermaster.vehicle_deals` already gates the M-ATV and
 MaxxPro this way). Removing a package at the FOB refunds 50%.
 
+**Built in A8** (cg_brief queue item 2.6): the motor pool page fits and removes packages
+(`MotorPool.server_package`: the price, days in the workshop by package, the tier and "after"
+gates, an upgrade crediting the package it includes; half back on removal), showing each vehicle's
+STANAG 4569 rating as fitted. A fitted package goes out with the vehicle (`VehicleLogistics.packages`
+and ArmourModel's meta on every peer), keeps its rating (`ArmourStandards.rating` and the proofs
+read the same list) and costs speed, acceleration and fuel by the formulas above. TUSK II includes
+CROWS (the commander's M2 from inside). Not built: drawing them on the model and their gadgets
+(Trophy, the mine roller): F-274.
+
 **Enemy packages** come with the faction's kit, not a purchase: the Concord's T-72B3 has Kontakt-5
 by default and Kontakt-1 skirts; its BMP-2s get Kontakt-1 at Pressure tier 3; the Ashen Banner's
 captured MaxxPros keep their slat; the Kestrel armoured truck (7.2) is its own build.
@@ -898,7 +907,7 @@ him (Warheads); `Spotting.spot_seconds` takes `VehicleHatches.spot_x`; the loade
 commander's M2 (unless a `crows` package is fitted) need turned out. The hatch key is X (`hatch`:
 H is the medical menu). AI crewmen follow a stand-in rule until A9's states (F-251): out after 60
 s of quiet, in at once on contact. The hearing, the vision-block views and the driver's
-periscopes are A5's (F-252).
+periscopes came with A5 (F-252 closed; 2.12's "Built in A5").
 
 ### 2.7 Weapons and gunnery
 
@@ -1197,6 +1206,17 @@ a slope now comes from power and traction, so a wet hill stops a MaxxPro that a 
 - This is what makes **seizing a crossing** (6.4.4) a real objective: the concrete bridge is the
   only way the tanks get over.
 
+**Built in A6** (cg_brief queue item 2.7, branch `armour/drive`): `VehicleDrive` ("Drive" on every
+ground vehicle: the ground, power and traction, rollovers and righting by A8's tow, bogging,
+thrown tracks, fording, stalling, flooding, holes under the waterline), `TerrainRoute` (A9's
+`can_cross`, `ford_ok`, `slope_ok`, `path_problem`, `roads_for`), `ZoneTerrain.ground_at`,
+`ZoneBridges` load classes (`span_mlc`, `deck_at`, `next_span`, overload), `AavWater` (ford depth
+over the ground, waterjets by module, drag through moving water, the current's push), the HUD's
+lines, and the `armourdrive` suite. Numbers in data/vehicle_drive.json; the calls are A6.1-A6.20 in
+docs/audits/followups.md. Two changes beyond the text above: ground vehicles lost the engine's
+default linear damping (it held them all near 50 km/h) for air drag, and part throttle holds a grade
+as far as the power goes (the AI drivers' part throttle stalled on hills without the old grade hold).
+
 ### 2.9 Logistics
 
 #### 2.9.1 Fuel
@@ -1244,6 +1264,27 @@ a slope now comes from power and traction, so a wet hill stops a MaxxPro that a 
 - A job pauses while the crew member doing it is suppressed or the vehicle is hit.
 - `VehicleService.parts_for` and `repair_problem` gain the new kinds; `zone_name` becomes
   `module_name`.
+
+**Built in A8** (cg_brief queue item 2.6, branch `armour/logistics`): `VehicleLogistics`
+(scripts/vehicles/vehicle_logistics.gd, "Logistics" on every ground vehicle: its state in the
+StateSync, the zone save and the motor pool's record), numbers in data/vehicle_logistics.json,
+prices in data/prices.json ("ammo", "packages", the items) and data/ground_supports.json
+("module_prices"). The rounds are items (data/items.json `shell`, `per_item`, `stow_s`: 2.9.2's
+ids, the 25 mm as cans of 50, `smoke_salvo`, and the enemy's 125 mm and 30 mm as salvage) and the
+racks' counts are their items; they come aboard at the cargo point from a man's kit, the hold (a
+crewman from his seat), another vehicle's hold within 8 m (any truck: the HEMTT isn't in data, so
+it stands in at twice hand speed) or an ammo pallet within 8 m (an item holding its load; a kind
+per calibre in data/pallets.json), stopped, into the right rack, pausing under fire or a hit; they
+go out the same way. The helicopter resupply brings each company tank or IFV that's short a pallet
+of what it's shortest of. The motor pool rearms going out and coming home to the load-out picked
+on its page, priced; it quotes and repairs per module and refills the extinguisher bottles. The
+field repairs are 2.2.2's column at 2.9.3's two men (alone x2, a wheel one man's job), to 60%,
+their progress kept on the module; ERA tiles and slat come back from the spares. Recovery is
+2.8.3's tow (no recovery vehicle in data): 60 s to hook up, a 3 m bar, 15 km/h. Fuel: drum pallets
+at 60 L/min (the M978's numbers wait in the data for D6a). A9's API: `needs()`,
+`rearm_sources()`, `repair_options()`, `tow_candidates()`, `server_start_job()`,
+`server_call_recovery()`. Tests: the `armourlog` suite. Calls: docs/audits/followups.md "Calls made"
+(2026-10-24, cg_brief 2.6); what's left: F-262 (extinguishing, spreading fires), F-269 to F-274.
 
 ### 2.10 Fire, destruction and blast effects
 
@@ -1348,6 +1389,22 @@ New entries in data/sounds.json, played through `Sfx`:
 At most 6 vehicles burning with full effects at once (more show smoke only), 64 debris pieces per
 zone, 2,000 live smoke and fire particles across the zone, and every column a billboard past
 600 m.
+
+**Built in A7** (cg_brief queue item 2.5, branch `armour/fx`): `VehicleFire`
+(scripts/vehicles/vehicle_fire.gd, "FireState", the host's state in the StateSync and the zone
+save), `VehicleFx` (scripts/vehicles/vehicle_fx.gd, "Fx", every peer) and `VehicleSmoke`
+(scripts/vehicles/vehicle_smoke.gd, "Smoke", 2.7.1's dischargers), numbers in
+data/vehicle_fx.json. The stages (smoke, fire, a cook-off's pops, burn-out, smoulder) are drawn
+over the burn that was there: a fire is still a loss at once and a wreck after `Vehicle.FIRE_S`,
+then the wreck burns on 120-300 s under its column; extinguishers and spreading fires are F-262.
+The bustle vents as a column, the other racks go up as a fireball with the turret thrown (10 or
+more main-gun rounds) or the hull ruptured, 12-24 debris pieces, the hulk charred; all from the
+kill's seed, the host's resting places replicated and saved. AI crews bail out by `server_exit`
+(VehicleFire.auto_bail, A9 replaces it: F-236). The guns' sounds, the 120 mm's overpressure, the
+TOW launcher's own part, impacts by round, the intercom and your own engine from inside (Sfx's
+Intercom and Interior buses) are in. Effects are GPU particles in the voxel look (boxes). Not
+built: the tile `REMOVE` edit (F-263), tracks and wheels thrown off a living vehicle and the
+engine's glow (F-264), the rest of 2.10.5's sounds (F-268).
 
 ### 2.11 The x-ray: hit analysis
 
@@ -1457,6 +1514,33 @@ fitted to the ui_test's 10 resolutions. Every key shown is the player's current 
   gun is before he swings the hull. **The loader** turned in sees the bustle doors and a large
   round selector; turned out, the pintle gun.
 - **Night:** the driver's periscope has an image-intensified channel; the rest of the HUD dims.
+
+**Built in A5** (cg_brief queue item 2.4, branch `armour/hud`): `VehicleHud`
+(scripts/ui/vehicle_hud.gd) for any vehicle with authored modules (the Abrams, Bradley, AAV,
+M-ATV, MaxxPro; the rest keep the text strip). The compass strip carries the hull's caret, the
+turret's bracket and the last hit's red tick (`Compass.vehicle_marks`); in the chase view a ring
+shows where the gun is laid apart from the aim; a blue chevron sits over every friendly vehicle on
+the Blue Force Tracker in view, in every view and the sights (`bft_marks`: radio working,
+`SideIntel.radio_ok`). The panel takes the strip's place in the HUD's bottom-centre zone: the doll
+(modules by state, tracks or wheels, ERA tiles grey once fired, crew pips with role letters at
+their seats), the title with the damage word, the alerts that are true (ON FIRE, TRACK THROWN,
+ROLLOVER RISK, FORD, MISSILE LAUNCH, SHORT-CREWED, NO RADIO; BRIDGE MLC waits for A6's load
+classes), the weapons' lines, the round selector with the loaded round bracketed and the reload
+bar, the crew line, the drive line and the keys; on a small window the keys go first, then the
+crew names, the drive line, the selector. The sights keep `VehicleSightOverlay`, which gains the
+crew pips and the damage word and brackets the loaded round. Buttoned up in a hatch seat in first
+person, `VehicleVision` (scripts/vehicles/vehicle_vision.gd) looks out through the vision blocks
+(the hatch's `vision` cones, the driver's arc split into periscopes), at 1x, the player's look
+picking the block, the rest of the screen masked; the driver's periscope has a night channel (the
+sight channel key; NvgView's intensifier over the glass, the HUD dimmed), lost when its
+`driver_vision` module is damaged, and with it destroyed he must turn out. The loader turned in
+sees the bustle doors and a large round selector under his periscope. Outside sounds are muffled
+in a closed seat (`Sfx.set_muffled`: -12 dB and a low-pass on the effects buses). The x-ray (2.11)
+is `VehicleXray` (scripts/ui/vehicle_xray.gd) and `HitReport` (scripts/ui/hit_report.gd), built on
+every peer from A2's HitEvents (which now carry the round's direction, angle, range, shooter, path
+and up to 12 spall rays). The calls are in docs/audits/followups.md ("Calls made", 2026-10-23,
+cg_brief 2.4); what's left is F-255 onwards there; the suite is `vehiclehud` (ui_test fits the
+panel, the card and the full view).
 
 ### 2.13 AI crews and armour tactics
 
@@ -2708,7 +2792,7 @@ Four lanes: **A** armour, **B** the AI commander and cooperation, **C** high com
 | A5 | ui_test (both HUDs and the x-ray at 10 resolutions), a `HitReport` JSON round trip, the protection analysis matches `resolve` | HUD under 0.3 ms |
 | A6 | **driving_test**: dry against muddy climbs, a rollover within 10% of the predicted angle, flooding times, current drift, routing round a light bridge, a span dropping under overload; water_test, vehicles_test | Physics step unchanged on the vehicle range |
 | A7 | vehicles_test: the fire stages and their times, blow-out against catastrophic, bail-out; net_test: two peers make the same debris from one seed | 6 fires and 64 debris within the effects budget |
-| A8 | logistics_test (rearm sources and times, fuel truck), base_test (packages bought, fitted, refunded; weight changes speed and fuel), pallets_test | |
+| A8 | logistics_test (rearm sources and times, fuel truck), base_test (packages bought, fitted, refunded; weight changes speed and fuel), pallets_test. Built as the **armourlog** suite (cg_brief 2.6: logistics_test is the medical logistics suite's name) | |
 | A9 | **armour_ai_test**: a tank finds a hull-down spot against a staged threat, turns its front to it, reverses after a launch and smokes; an AT gunner chooses a side shot | |
 | B1 | **side_command_test**: merging, ageing, latency by side, comms down x3, BFT, fairness (every marker traces to a report); missions_test's hot-zone checks unchanged | Picture under 0.3 ms per side |
 | B2 | side_command_test: allocation on staged boards, the assault waits for its SBF, the reserve commits on a stall, RED falls back and reconstitutes, counterattack ratios, virtual groups tasked; a hot-zone run whose `[tactics]` and operation lines match today's | Tasking under 1 ms for 40 groups |

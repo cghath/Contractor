@@ -43,6 +43,11 @@
 		"repair_days": 6,
 		"zone_weights": {"hull": 0.4, "engine": 0.3, "wheels": 0.2, "fuel": 0.1},
 		"battery_price": 800,
+		"_module_prices": "Combined arms A8 (cg_brief queue item 2.6; docs/combined_arms.md 2.9.3), Proposed: a model with modules (data/vehicle_modules.json) is quoted per module: a module's share of the model's value for a destroyed one, scaled by the health it lacks; days are repair_days x the bill's share of the value (at least 1, and fob_days for a destroyed module only the workshop fixes). Fired ERA tiles and torn slat come back at their item's price (era_tile, slat_panel).",
+		"module_prices": {"structure": 0.12, "engine": 0.06, "transmission": 0.04, "track": 0.01, "wheel": 0.004, "fuel_tank": 0.008, "ammo_rack": 0.01, "breech": 0.05, "barrel": 0.03,
+			"traverse": 0.02, "elevation": 0.015, "gunner_sight": 0.05, "aux_sight": 0.005, "commander_sight": 0.04, "driver_vision": 0.003, "fcs": 0.04, "radio": 0.005, "ext_gun": 0.01,
+			"ugws": 0.04, "launcher": 0.03, "smoke": 0.003, "waterjet": 0.01, "stowage": 0.002, "compartment": 0.01},
+		"fob_days": 2,
 		"fuel_price": 2,
 		"bring_offset_m": 14.0,
 		"return_reach_m": 60.0

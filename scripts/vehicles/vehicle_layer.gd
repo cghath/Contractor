@@ -157,6 +157,8 @@ func server_restore() -> void:
 		_restore_record(record)
 	for v in vehicles():
 		v.server_seat_saved_bodies()
+		if v.logistics:
+			v.logistics.server_rehook_saved()  # A6 (F-272): a tow saved with the zone
 
 
 func _restore_record(record: Dictionary) -> Vehicle:

@@ -242,6 +242,57 @@ func _server_repair(id: String) -> void:
 	who._client_message.rpc_id(sender, reply)
 
 
+## Asks the host to fit (or remove) armour package `pkg` on pool vehicle `id` (A8; at the motor
+## pool's terminal, as a service).
+func request_package(id: String, pkg: String, fit: bool) -> void:
+	_server_package.rpc_id(1, id, pkg, fit)
+
+
+## Asks the host to set pool vehicle `id`'s FOB load-out (A8).
+func request_loadout(id: String, loadout: String) -> void:
+	_server_loadout.rpc_id(1, id, loadout)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_package(id: String, pkg: String, fit: bool) -> void:
+	var who := _asker()
+	if who == null or MotorPool.entry(id).is_empty():
+		return
+	var why := "Packages are fitted at the base's motor pool" if terminal_near(who) == null else MotorPool.server_package(id, pkg, fit)
+	var e := MotorPool.entry(id)
+	var reply := why if why != "" else "%s: %s %s, in the workshop until day %d" % [String(e.name), pkg, "fitted" if fit else "removed", int(e.ready_day)]
+	_reply(who, reply)
+	_send()
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _server_loadout(id: String, loadout: String) -> void:
+	var who := _asker()
+	if who == null or MotorPool.entry(id).is_empty():
+		return
+	var why := MotorPool.server_set_loadout(id, loadout)
+	_reply(who, why if why != "" else "%s: rearms to the %s load-out" % [String(MotorPool.entry(id).name), loadout.replace("_", " ")])
+	_send()
+
+
+## Host: the player who sent the RPC being handled, up (or null).
+func _asker() -> Soldier:
+	if not multiplayer.is_server():
+		return null
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = multiplayer.get_unique_id()
+	var lvl := get_parent() as CompoundLevel
+	var who := lvl.players.get_node_or_null(str(sender)) as Soldier if lvl else null
+	return who if who and who.vitals.is_up() else null
+
+
+func _reply(who: Soldier, text: String) -> void:
+	var peer := who.owner_peer()
+	BaseHub._client_note.rpc_id(peer, text)
+	who._client_message.rpc_id(peer, text)
+
+
 ## Client: the local player is within reach of the base's motor pool terminal, the host's check
 ## for Service (review of ui/base-hub: the page is a tab on every terminal's screen, and from
 ## the ops desk the host only ever refused).

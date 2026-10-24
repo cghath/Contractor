@@ -118,18 +118,18 @@ const SAG_TRACKED := 0.07
 const TRAVEL := 0.22
 const DROOP := 0.18
 const DAMPING_RATIO := 0.5
-## Tyre and track grip (Proposed): friction coefficient, and how much of a wheel's sideways slip
-## is taken out each physics step; tracks slip sideways while turning on the spot.
+## Tyre and track grip (Proposed): friction coefficient on asphalt (A6: times the ground's traction,
+## VehicleDrive), and how much of a wheel's sideways slip is taken out each physics step; tracks
+## slip sideways while turning on the spot.
 const GRIP := 0.95
 const LATERAL_RESPONSE := 0.45
 const TRACK_TURN_LATERAL := 0.15
 ## Steering falls off with speed (wheeled): full lock below this speed (m/s), half at twice it.
 const STEER_FALLOFF_MS := 8.0
-## Rolling resistance and engine braking with the throttle off (m/s2).
+## Rolling resistance (m/s2; A6: the ground's, VehicleDrive, on every ground vehicle) and engine
+## braking with the throttle off.
 const ROLL_DECEL := 0.3
 const ENGINE_BRAKE := 0.5
-## The steepest grade the drive holds on top of its acceleration (degrees, Proposed, wave 5b).
-const CLIMB_DEG := 35.0
 ## Tracked turn controller: reaches the commanded turn rate in about this long (s).
 const TRACK_TURN_TIME_S := 0.35
 ## Rolling the other way while still moving faster than this (m/s) brakes first.
@@ -163,6 +163,11 @@ const FIRE_S := 45.0
 const FIRE_TICK_S := 1.0
 const FIRE_BURN_SHARE := 0.06
 const FIRE_TRAUMA := 4.0
+## A burning hull blackens a spot of FIRE_SCORCH_M every FIRE_SCORCH_EVERY ticks (combined arms
+## A7, Proposed: VehicleFx draws the fire now, and a 0.5 m scorch every second cost a burning
+## vehicle's host ~60-150 ms a second in VehicleHull's carving, F-241).
+const FIRE_SCORCH_EVERY := 4
+const FIRE_SCORCH_M := 0.35
 ## Chance a penetrating engine hit kills the battery (Proposed).
 const BATTERY_KILL_CHANCE := 0.1
 ## Run-overs (Proposed): faster than RUN_OVER_MIN_MS a soldier in the vehicle's path takes
@@ -336,6 +341,19 @@ var weapons: VehicleWeapons
 ## models with "optics"; hatches turned out or buttoned up on models with "hatches"; null on the rest.
 var gunnery: VehicleGunnery
 var hatches: VehicleHatches
+## Combined arms A7 (cg_brief queue item 2.5; docs/combined_arms.md 2.10): the fire's stages, the
+## ammunition's vent, cook-off or detonation and the bail-out (host state, "FireState"); their looks
+## and the guns' on every peer ("Fx"); the smoke dischargers on models that have them ("Smoke").
+var fire_state: VehicleFire
+var fx: VehicleFx
+var smoke: VehicleSmoke
+## Combined arms A8 (cg_brief queue item 2.6): rounds as items, rearming, field repairs by module,
+## the tow, fuel pallets, armour packages and their weight, the extinguisher bottles
+## (VehicleLogistics, "Logistics": its state in the StateSync and the save). Ground vehicles only.
+var logistics: VehicleLogistics
+## Combined arms A6: the driving physics and terrain (VehicleDrive, "Drive": the ground, power and
+## traction, rollovers and righting, fording, flooding, bogging, thrown tracks). Ground vehicles.
+var drive: VehicleDrive
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -355,6 +373,7 @@ var _state_left := 0.0
 var _state_dirty := false
 var _leak := 0.0             # litres a second
 var _fire_tick := 0.0
+var _fire_ticks := 0
 var _gun_next := {}          # host: gun seat -> when it may fire next
 var _gun_rounds := 0  # host: rounds the guns have fired (every tracer_every-th a tracer, as Soldier's)
 var _run_over_at := {}          # soldier instance id -> time last run over
@@ -366,7 +385,6 @@ var _last_pos := Vector3.ZERO
 var _seen := {}              # every peer: instance id -> Soldier seated last frame
 var _snaps: Array = []       # clients: [host time, position, rotation]
 var _clock := INF            # clients: local time minus host time
-var _fire_fx: Node3D
 var _hud: Hud                # the local occupant's HUD, while it shows this vehicle's readout
 var _send_left := 0.0
 var _last_sent := {}
@@ -437,6 +455,23 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	if spec.has("hatches"):
 		hatches = VehicleHatches.new(self)  # A4: "Hatches"
 		add_child(hatches)
+	fire_state = VehicleFire.new(self)  # A7: "FireState", its state in the StateSync
+	add_child(fire_state)
+	fx = VehicleFx.new(self)  # A7: "Fx", every peer's fire, destruction and gun effects
+	add_child(fx)
+	if VehicleSmoke.has_dischargers(spec):
+		smoke = VehicleSmoke.new(self)  # A7: "Smoke", the M250 / M257 dischargers
+		add_child(smoke)
+	if VehicleLogistics.wanted(spec):
+		logistics = VehicleLogistics.new(self)  # A8: "Logistics"
+		add_child(logistics)
+	if VehicleDrive.wanted(spec):
+		drive = VehicleDrive.new(self)  # A6: "Drive"
+		add_child(drive)
+		# A6: air drag (VehicleDrive.aero_force) in place of the engine's default linear damping,
+		# which held every ground vehicle near 50 km/h whatever its engine (0.12 x v, 1/s).
+		linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+		linear_damp = 0.0
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -481,6 +516,13 @@ func _add_sync() -> void:
 		paths.append(^"Gunnery:net_state")
 	if hatches:
 		paths.append(^"Hatches:net_state")
+	paths.append(^"FireState:net_state")  # A7
+	if smoke:
+		paths.append(^"Smoke:net_state")
+	if logistics:
+		paths.append(^"Logistics:net_state")  # A8
+	if drive:
+		paths.append(^"Drive:net_state")  # A6
 	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -820,12 +862,16 @@ func is_burning() -> bool:
 func can_drive() -> bool:
 	return not wrecked and kind != HELICOPTER and kind != STATIC and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
 		and (battery_ok if multiplayer.is_server() else bool(net_state.get("battery", true))) \
-		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed())
+		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed()) 		and not (drive and drive.blocked() != "")  # A6: rolled over, flooded, stalled in deep water, bogged
 
 
 ## Top speed now (m/s): the model's, cut by engine and wheel damage.
 func top_speed(reverse := false) -> float:
 	var top := float(spec.get("reverse_kmh" if reverse else "top_speed_kmh", 0.0)) * VehicleSpecs.KMH
+	if logistics:
+		top = minf(top * logistics.speed_mult(), logistics.tow_top())  # A8: the packages' weight, a tow
+	if drive:
+		top = minf(top, drive.speed_cap_now())  # A6: wheels on sand and mud
 	if modules and modules.authored:
 		return top * modules.speed_share()  # A2: engine, transmission, tracks, wheels and run-flats
 	var engine := zone_health(ZONE_ENGINE)
@@ -853,6 +899,8 @@ func server_enter(soldier: Node, index := -1) -> bool:
 	var body := not s.vitals.is_up()
 	if not body and ExoMech.piloting(s.inventory):
 		return false  # a heavy exo doesn't fit a seat: climb out first (ExoMech)
+	if drive and drive.is_flooded():
+		return false  # A6: its crew compartment is under water
 	if index < 0:
 		index = _first_free_passenger() if body else _first_free_for(s)
 	if index < 0 or index >= _seat_nodes.size() or occupant(index) != null:
@@ -1898,7 +1946,6 @@ func _process(delta: float) -> void:
 	if hull:
 		hull.pose_turret()
 	_local_controls(delta)
-	_update_fire_fx()
 
 
 func _server_step(delta: float) -> void:
@@ -1952,9 +1999,15 @@ func _current_input() -> Dictionary:
 ## and brakes. Helicopters: just their landing gear (V3 overrides this to fly).
 func _drive_step(delta: float) -> void:
 	var input := _current_input()
+	if drive:
+		if is_same(input, _ai_input):
+			input = drive.ai_guard(input, delta)  # A6: the AI keeps off what would tip, sink or stop it
+		drive.server_step(delta, float(input.throttle), float(input.steer))
 	var throttle := clampf(float(input.throttle), -1.0, 1.0) if can_drive() else 0.0
 	var steer := clampf(float(input.steer), -1.0, 1.0)
 	var brake := bool(input.brake) or not can_drive()
+	if logistics and logistics.towed():
+		brake = false  # A8: under tow, it rolls free behind the tow bar
 	if kind == HELICOPTER:
 		throttle = 0.0
 		brake = true
@@ -1971,6 +2024,8 @@ func _drive_step(delta: float) -> void:
 			return
 		sleeping = false
 	_wheel_forces(delta, throttle, steer, brake)
+	if drive:
+		apply_central_force(drive.aero_force())  # A6: air drag
 	if wet > 0.0:
 		AavWater.step(self, delta, wet, throttle, steer, brake)  # buoyancy, drag, waterjets
 
@@ -1996,22 +2051,26 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 	if throttle != 0.0 and signf(throttle) != signf(v_fwd) and absf(v_fwd) > REVERSE_BRAKE_MS:
 		brake = true
 		throttle = 0.0
-	var drive := 0.0
+	# A6 (2.8.1-2.8.2): the ground's traction and rolling resistance; the engine's power over the
+	# speed pulls, no more than accel_ms2 net (the old CLIMB_DEG grade hold is gone: power and
+	# traction decide whether it climbs), the governor easing it off at top speed.
+	var mu := drive.traction_now() if drive else 1.0
+	var rr := drive.rolling_now() if drive else ROLL_DECEL / g
+	var pull := 0.0
 	if throttle != 0.0:
 		var top := top_speed(throttle < 0.0)
 		var curve := sqrt(clampf(1.0 - absf(v_fwd) / maxf(top, 0.1), 0.0, 1.0))
-		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve
-		# Wave 5b: uphill the engine gears down and holds the grade (up to CLIMB_DEG; the tyres'
-		# or tracks' grip still limits it), so a hill doesn't stall it at accel_ms2's slope.
-		var grade := clampf(forward.y * signf(throttle), 0.0, sin(deg_to_rad(CLIMB_DEG)))
-		drive += signf(throttle) * mass * g * grade * minf(absf(throttle) * 1.5, 1.0)
+		var accel_mult := logistics.accel_mult() if logistics else 1.0  # A8: the packages' weight
+		var power := drive.power_now() if drive else VehicleDrive.power_w(spec)
+		var train := mass + (logistics.towing.mass if logistics and logistics.towing_one() else 0.0)  # (and what it tows: it holds the grade for both)
+		pull = signf(throttle) * curve * accel_mult * VehicleDrive.drive_force(power, train, v_fwd, rr, forward.y * signf(throttle), float(spec.get("accel_ms2", 2.0)), throttle)
 	var brake_force := mass * float(spec.get("brake_ms2", 6.0)) if brake else 0.0
 	var wheels_ok := zone_health(ZONE_WHEELS)
-	var grip := GRIP * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)
+	var grip := GRIP * mu * (lerpf(0.55, 1.0, wheels_ok) if wheels_ok > 0.0 else 0.4)
 	var steer_angle := 0.0
 	if not tracked:
 		steer_angle = -steer * deg_to_rad(float(spec.get("steer_deg", 30.0))) / (1.0 + absf(v_fwd) / STEER_FALLOFF_MS)
-	var coast := ROLL_DECEL + (ENGINE_BRAKE if throttle == 0.0 else 0.0)
+	var engine_brake := ENGINE_BRAKE if throttle == 0.0 else 0.0
 	var grounded := 0
 	for w: Array in wheels:
 		var r := float(w[2])
@@ -2034,23 +2093,29 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 		var f_lat := -v_lat * share / delta * LATERAL_RESPONSE
 		if tracked and absf(steer) > 0.05:
 			f_lat *= TRACK_TURN_LATERAL
-		var f_long := drive / n
+		var f_long := pull / n
 		if brake_force > 0.0:
 			f_long += clampf(-v_long * share / delta, -brake_force / n, brake_force / n)
-		else:
-			f_long += clampf(-v_long * share / delta, -coast * share, coast * share)
+		elif engine_brake > 0.0:
+			f_long += clampf(-v_long * share / delta, -engine_brake * share, engine_brake * share)
 		var traction := f_dir * f_long + s_dir * f_lat
 		var limit := normal_force * grip
 		if traction.length() > limit:
 			traction = traction.normalized() * limit
-		apply_force(up * normal_force + traction, point - global_position)
-	if tracked and grounded > 0:
-		# Skid steering: the hull turns at the commanded rate, on the spot or on the move.
+		# A6: the ground's rolling resistance (the tyres or tracks sinking in, not their grip: it
+		# comes on top of what the grip allows, so soft ground can hold a vehicle that grips).
+		var rolling := -clampf(v_long * share / delta, -rr * normal_force, rr * normal_force)
+		apply_force(up * normal_force + traction + f_dir * rolling, point - global_position)
+	if tracked and grounded > 0 and not (logistics and logistics.towed()):
+		# Skid steering: the hull turns at the commanded rate, on the spot or on the move. (A6, 2.8.3:
+		# neutral steer at a standstill, falling to half by half_rate_kmh, by the ground's traction.)
 		var size := VehicleArt.size_m(model)
+		var turn_share := VehicleDrive.turn_share(drive.ground()) if drive else 1.0
 		var inertia := mass * (size.x * size.x + size.z * size.z) / 12.0
-		var target := -steer * deg_to_rad(float(spec.get("turn_deg_s", 40.0))) * (lerpf(0.4, 1.0, zone_health(ZONE_ENGINE)) if can_drive() else 0.0)
+		var fall := 1.0 + absf(v_fwd) / (VehicleDrive.num("tracked", "half_rate_kmh", 30.0) * VehicleSpecs.KMH) if drive else 1.0
+		var target := -steer * deg_to_rad(float(spec.get("turn_deg_s", 40.0))) * (lerpf(0.4, 1.0, zone_health(ZONE_ENGINE)) if can_drive() else 0.0) * turn_share / fall
 		var yaw_rate := angular_velocity.dot(up)
-		var torque := clampf((target - yaw_rate) * inertia / TRACK_TURN_TIME_S, -mass * g * size.z * 0.25, mass * g * size.z * 0.25)
+		var torque := clampf((target - yaw_rate) * inertia / TRACK_TURN_TIME_S, -mass * g * size.z * 0.25 * turn_share, mass * g * size.z * 0.25 * turn_share)
 		apply_torque(up * torque * (float(grounded) / n))
 
 
@@ -2231,7 +2296,7 @@ func _use_fuel(delta: float) -> void:
 	_last_pos = global_position
 	if fuel <= 0.0:
 		return
-	var used := moved / 1000.0 * float(spec.get("fuel_l_per_km", 0.5))
+	var used := moved / 1000.0 * float(spec.get("fuel_l_per_km", 0.5)) * (logistics.fuel_mult() if logistics else 1.0)  # A8: the packages' weight
 	if driver() != null or (is_instance_valid(ai) and ai.active):
 		used += float(spec.get("idle_l_per_h", 1.0)) / 3600.0 * delta
 	used += _leak * delta
@@ -2409,6 +2474,8 @@ func server_take_hit(hit: Dictionary) -> Dictionary:
 		_carve_for(hit_kind, res, local, hit)
 	if not wrecked:
 		_apply_damage(zone, res, out.position, hit)
+	if drive:
+		drive.server_hit(out)  # A6: holed under an amphibious hull's waterline
 	damaged.emit(zone.zone, hit)
 	return out
 
@@ -2536,9 +2603,11 @@ func _fire_step(delta: float) -> void:
 				continue
 			s.vitals.server_burn(FIRE_BURN_SHARE)
 			s.vitals.server_damage(FIRE_TRAUMA)
-		var size := VehicleArt.size_m(model)
-		var spot := Vector3(randf_range(-0.4, 0.4) * size.x, randf_range(0.3, 0.9) * size.y, randf_range(-0.4, 0.4) * size.z)
-		_add_carves([[spot.x, spot.y, spot.z, 0.5, VehicleHull.SCORCH]])
+		_fire_ticks += 1
+		if _fire_ticks % FIRE_SCORCH_EVERY == 1:
+			var size := VehicleArt.size_m(model)
+			var spot := Vector3(randf_range(-0.4, 0.4) * size.x, randf_range(0.3, 0.9) * size.y, randf_range(-0.4, 0.4) * size.z)
+			_add_carves([[spot.x, spot.y, spot.z, FIRE_SCORCH_M, VehicleHull.SCORCH]])
 	if burning_s <= 0.0:
 		_become_wreck()
 
@@ -2573,37 +2642,8 @@ func _become_wreck() -> void:
 
 
 # --- Fire on every peer -------------------------------------------------------------------------
-
-func _update_fire_fx() -> void:
-	var on := is_burning()
-	if on and _fire_fx == null:
-		_fire_fx = Node3D.new()
-		_fire_fx.name = "Fire"
-		var light := OmniLight3D.new()
-		light.light_color = Color(1.0, 0.5, 0.15)
-		light.omni_range = 9.0
-		light.light_energy = 3.0
-		_fire_fx.add_child(light)
-		var flame := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.6
-		sphere.height = 1.4
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(1.0, 0.45, 0.1, 0.55)
-		sphere.material = mat
-		flame.mesh = sphere
-		_fire_fx.add_child(flame)
-		_fire_fx.position = Vector3(0, VehicleArt.size_m(model).y * 0.7, 0)
-		add_child(_fire_fx)
-	elif not on and _fire_fx:
-		_fire_fx.queue_free()
-		_fire_fx = null
-	if _fire_fx:
-		var flicker := 0.75 + 0.25 * sin(Soldier._now() * 17.0) * sin(Soldier._now() * 7.3)
-		(_fire_fx.get_child(0) as OmniLight3D).light_energy = 3.0 * flicker
-		_fire_fx.scale = Vector3.ONE * (0.9 + 0.2 * flicker)
+# The fire's look is VehicleFx's (A7: the stages, the column, the flames, the burning wreck), from
+# VehicleFire's state; it replaced the one light and orange sphere that were drawn here.
 
 
 # --- AI driving (host) --------------------------------------------------------------------------
@@ -2854,6 +2894,8 @@ func request_service(action: String, zone: StringName, item: StringName) -> void
 func server_start_job(actor: Soldier, action: String, zone: StringName, item: StringName) -> String:
 	if _jobs.has(actor.get_instance_id()):
 		return "Already working on it"
+	if logistics and action in VehicleLogistics.ACTIONS:
+		return logistics.server_start_job(actor, action, String(zone), item)  # A8: modules, rearming, the tow, fuel pallets
 	var seconds := 0.0
 	var label := ""
 	match action:
@@ -2910,7 +2952,7 @@ func _job_step() -> void:
 ## Host: the seconds left on `actor`'s job (0 for none).
 func job_left(actor: Node) -> float:
 	var job: Dictionary = _jobs.get(actor.get_instance_id(), {})
-	return maxf(float(job.get("until", 0.0)) - Soldier._now(), 0.0)
+	return maxf(maxf(float(job.get("until", 0.0)) - Soldier._now(), 0.0), logistics.job_left(actor) if logistics else 0.0)
 
 
 ## Host (V2, tests): sets a zone's health directly (0 to 1).
@@ -2944,6 +2986,16 @@ func server_repair(zone: StringName, to_health: float, add := 0.0) -> void:
 	modules.server_repair(zone, to_health, add)
 	if zone == ZONE_FUEL:
 		_leak = 0.0
+	_publish_state(true)
+
+
+## Host (A8: a patched fuel tank): the leak stops once no fuel tank is still holed.
+func server_stop_leak() -> void:
+	if modules and modules.authored:
+		for m: Dictionary in modules.mods:
+			if String(m.kind) == "fuel_tank" and modules.health[int(m.i)] <= VehicleModules.DAMAGED_SHARE:
+				return
+	_leak = 0.0
 	_publish_state(true)
 
 
@@ -3019,9 +3071,11 @@ func server_rearm() -> int:
 		var g := gun_info(seat)
 		if not g.is_empty():
 			wants[g.feed] = int(wants.get(g.feed, 0)) + int(VehicleSpecs.gun(String(g.id)).get("load", 0))
-	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts
-		for f: Array in weapons.server_rearm():
+	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts (A8: to the motor pool's load-out)
+		for f: Array in weapons.server_rearm(VehicleLogistics.loadout_racks(spec, logistics.loadout, logistics.packages) if logistics else {}):
 			wants[f[0]] = int(wants.get(f[0], 0)) + int(f[1])
+	if smoke:
+		smoke.server_restock()  # A7: the smoke grenades (A8: the stowage is smoke_salvo items; MotorPool prices them)
 	if cargo_hold:
 		for feed: StringName in wants:
 			_rearm_feed(feed, int(wants[feed]))
@@ -3275,7 +3329,8 @@ func _local_controls(delta: float) -> void:
 			_gun_local_next = Soldier._now() + 60.0 / float(info.rpm)
 			request_gun.rpc_id(1, gun_direction(me))
 	_hud = me.player_input.hud
-	_hud.show_vehicle(readout_parts(seat))
+	if not VehicleHud.local_step(self, me, seat, free):  # A5: armour's HUDs, vision blocks, muffled hearing
+		_hud.show_vehicle(readout_parts(seat))
 
 
 ## The HUD's readout in parts (Hud.show_vehicle lays them out in its bottom-centre zone, each
@@ -3300,6 +3355,12 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		parts.append_array(gunnery.readout_parts(seat))  # A4: the lase, the stabiliser, a sight's fallback
 	if hatches:
 		parts.append_array(hatches.readout_parts(seat))  # A4: turned out or buttoned up
+	if smoke:
+		parts.append_array(smoke.readout_parts(seat))  # A7: the dischargers' salvos
+	if logistics:
+		parts.append_array(logistics.readout_parts(seat))  # A8: work under way, a tow
+	if drive:
+		parts.append_array(drive.readout_parts(seat))  # A6: rolled over, flooded, stalled, bogged
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3368,6 +3429,18 @@ func to_save() -> Dictionary:
 		out["gunnery"] = gunnery.to_save()  # A4
 	if hatches:
 		out["hatches"] = hatches.to_save()
+	if fire_state:
+		var f := fire_state.to_save()
+		if not f.is_empty():
+			out["fire"] = f  # A7: the fire's stage, the thrown turret and the debris
+	if smoke:
+		out["smoke"] = smoke.to_save()
+	if logistics:
+		out["logistics"] = logistics.to_save()  # A8: packages, the load-out, bottles, repair progress, fired tiles
+	if drive:
+		var d := drive.to_save()
+		if not d.is_empty():
+			out["drive"] = d  # A6: rolled over, flooded, bogged, water aboard
 	return out
 
 
@@ -3435,6 +3508,14 @@ func from_save(data: Dictionary) -> void:
 		gunnery.from_save(data.gunnery)  # A4
 	if hatches and data.get("hatches") is Dictionary:
 		hatches.from_save(data.hatches)
+	if fire_state:
+		fire_state.from_save(data.get("fire", {}) if data.get("fire") is Dictionary else {})  # A7 (an older wreck: a smoulder)
+	if smoke and data.get("smoke") is Dictionary:
+		smoke.from_save(data.smoke)
+	if logistics:
+		logistics.from_save(data.get("logistics", {}) if data.get("logistics") is Dictionary else {})  # A8 (an older save: no packages)
+	if drive:
+		drive.from_save(data.get("drive", {}) if data.get("drive") is Dictionary else {})  # A6 (an older save: on its wheels, dry)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

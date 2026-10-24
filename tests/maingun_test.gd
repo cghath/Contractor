@@ -187,7 +187,7 @@ func _test_turrets() -> void:
 			t.step(1.0 / 60.0)
 		var up := minf(float(row[2]), float(row[4]))  # a second's elevation, or its stop
 		check(t != null and _near(rad_to_deg(t.yaw), row[1], 0.02) and _near(rad_to_deg(t.pitch), up, 0.02) and _near(rad_to_deg(t.pitch_min), row[3], 0.01)
-			and _near(rad_to_deg(t.pitch_max), row[4], 0.01) and names == ["Turret", "Gun"],
+			and _near(rad_to_deg(t.pitch_max), row[4], 0.01) and names.slice(0, 2) == ["Turret", "Gun"] and (names.size() == 2 or names == ["Turret", "Gun", "Launcher"]),
 			"%s: traverses %.0f degrees in a second (%.0f), elevates %.0f (%.0f; limits %.0f to %.0f), its turret and gun split from the hull (%s)" % [
 			row[0], rad_to_deg(t.yaw), row[1], rad_to_deg(t.pitch), up, row[3], row[4], names])
 	var v := await _spawn("abrams", Vector3(-60, RIG_Y, 60), 0.0)

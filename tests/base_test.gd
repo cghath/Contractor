@@ -1781,6 +1781,7 @@ func _test_contract_loop() -> void:
 	extraction.countdown_s = 0.2
 	extraction.server_add_point(Vector2(player.global_position.x, player.global_position.z))
 	var cash_before := Economy.cash()
+	var ledger_before := Economy.ledger().duplicate(true)  # a captured leader's bounty is paid beside the debrief (Bounties)
 	var bills := [0]  # the bills (daily wages and upkeep, loan installments) that fall due in the deployment's days
 	var on_bill := func(_day: int, bill: Dictionary) -> void: bills[0] += int(bill.total) - int(bill.get("loan_taken", 0))
 	Economy.bill_paid.connect(on_bill)
@@ -1792,7 +1793,11 @@ func _test_contract_loop() -> void:
 	check(home and String(line.get("cid", "")) == cid and line.get("outcome") == "completed", "extraction ends it once: the debrief (%s) and back at the base" % line.get("outcome", "none"))
 	Economy.bill_paid.disconnect(on_bill)
 	_check_story(cid, String(BaseHub.member(lost).callsign))
-	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(line.get("pay", 0)) > 0,
+	var bounty := 0  # a manhunt or capture on the board draw: its leader's bounty, paid on top of the debrief's pay
+	for e: Dictionary in Economy.ledger():
+		if String(e.get("what", "")).begins_with(Bounties.LEDGER_BOUNTY + ":") and not ledger_before.has(e):
+			bounty += int(e.amount)
+	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) + bounty - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0) and int(line.get("pay", 0)) > 0,
 		"the pay lands in the one bank (+$%s)" % DebriefCalc.money(debrief.totals.paid_now))
 	check(Economy.day() == day0 + int(debrief.days) and BaseHub.day() == Economy.day(), "the days pass once, on one clock (%d -> %d)" % [day0, Economy.day()])
 	check(String(BaseHub.member(stay).status) != Roster.MIA and String(BaseHub.member(lost).status) == Roster.MIA,

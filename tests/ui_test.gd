@@ -625,6 +625,7 @@ func _test_hud() -> void:
 	check(hud._subtitles.theme_type_variation == &"HudLabel" and hud._status.theme_type_variation == &"HudLabel" and hud._downed.theme_type_variation == &"HudAlertLabel"
 		and UiKit.THEME.get_constant(&"outline_size", &"HudLabel") > 0 and UiKit.THEME.get_font_size(&"font_size", &"HudSmallLabel") >= UiKit.FONT_SMALL,
 		"the HUD lines share the theme's outlined style, nothing under 14 px")
+	await _test_vehicle_hud(hud, root)
 	# The HUD layout setting (HudLayout, ui-modern): every part at its biggest and half see-through
 	# still fits the window, and the reset puts it back. On a test settings file (never the player's).
 	GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_hudlayout_settings.cfg"))
@@ -652,6 +653,71 @@ func _test_hud() -> void:
 	root.content_scale_size = keep[2]
 	root.content_scale_factor = keep[3]
 	hot.queue_free()  # the level stays up until the test quits, as in map_test
+	await _frames(2)
+
+
+## The armoured vehicles' HUD (VehicleHud's panel in the bottom-centre zone, the strip's place),
+## the x-ray's card (top-right zone) and its full view, at every window size and UI scale
+## (combined arms A5, cg_brief queue item 2.4; docs/combined_arms.md 9.3): a full commander's
+## readout, every alert, a long hit report.
+func _test_vehicle_hud(hud: Hud, root: Window) -> void:
+	print("The armoured vehicle HUD and the x-ray")
+	hud.hide_vehicle()
+	var vh := VehicleHud.new(hud)
+	hud.add_child(vh)
+	var spec := VehicleSpecs.spec("abrams")
+	var mods := VehicleModules.layout_of("abrams", spec)
+	var health := PackedFloat32Array()
+	health.resize(mods.size())
+	health.fill(1.0)
+	var report := HitReport.build("abrams", spec, mods, health, {"o": "pen", "p": [0.0, 1.0, 4.95], "pl": "hull_rear", "sh": "m829a3", "t": 30, "pen": 780,
+		"m": [], "c": [1, 3], "d": [0.0, 0.0, -1.0], "th": 12, "r": 1874, "x": [], "k": VehicleModules.MOBILITY | VehicleModules.KNOCKED_OUT}, {1: "down", 3: "wounded"},
+		{1: "gunner", 3: "loader"})
+	report["vehicle"] = "M1A2 Abrams"
+	vh.show_view({"title": "M1A2 Abrams, Commander", "kind": "commander", "damage": "knocked out",
+		"alerts": PackedStringArray(["ON FIRE: GET OUT", "TRACK THROWN", "ROLLOVER RISK", "FORD 0.9 / 1.2 m", "MISSILE LAUNCH", "SHORT-CREWED", "NO RADIO"]),
+		"weapons": PackedStringArray(["> M256 120 mm: SABOT up, next HEAT", "bustle 14 SABOT, 9 HEAT, 8 HE; hull 6 SABOT, 0 HEAT, 0 HE", "LRF 1874 m (last return)"]),
+		"selector": {"rounds": [{"name": "SABOT", "n": 14, "loaded": true, "next": false}, {"name": "HEAT", "n": 9, "loaded": false, "next": true},
+			{"name": "HE", "n": 8, "loaded": false, "next": false}], "reload": [0.4, 3.1]},
+		"crew": [{"seat": 0, "letter": "D", "name": "Okafor", "state": "up", "you": false}, {"seat": 1, "letter": "G", "name": "Mercer", "state": "down", "you": false},
+			{"seat": 2, "letter": "C", "name": "", "state": "up", "you": true}, {"seat": 3, "letter": "L", "name": "Hale", "state": "wounded", "you": false}],
+		"drive": "24 km/h  F   FUEL [======--] 1420 L   ENGINE damaged   TRANS ok",
+		"keys": [["RMB", "sight"], ["E", "lase"], ["Q", "designate"], ["X", "hatch"], ["B", "view"], ["5", "last hit"], ["V", "get out"]]})
+	var x := hud.xray
+	var bad := PackedStringArray()
+	for ui_scale: float in UI_SCALES:
+		for res in SIZES:
+			var view := (Vector2(res) / GameSettings.ui_scale_for(res, ui_scale)).floor()
+			root.content_scale_size = Vector2i(view)
+			x.show_card(report, true)
+			await _frames(3)
+			var window := Rect2(Vector2.ZERO, view).grow(1.0)
+			var why := PackedStringArray()
+			why.append_array(_off_screen(vh.panel, window))
+			why.append_array(_off_screen(x.card, window))
+			if not (vh.panel.visible and vh._title.visible and x.card.visible):
+				why.append("panel %s, title %s, card %s" % [vh.panel.visible, vh._title.visible, x.card.visible])
+			var centre := hud.zone_bottom_centre.get_global_rect()
+			for z: Array in [["squad list", hud._status], ["objectives", hud.zone_top_right], ["weapon", hud.ammo_readout], ["compass", hud.compass]]:
+				var c: Control = z[1]
+				if c.is_visible_in_tree() and centre.intersects(c.get_global_rect()):
+					why.append("the vehicle panel %s over the %s %s" % [centre, z[0], c.get_global_rect()])
+			if not window.encloses(vh.panel.get_global_rect()):
+				why.append("the panel %s off the window" % vh.panel.get_global_rect())
+			x.open_report(report)
+			await _frames(2)
+			if not window.encloses(x.full.get_global_rect()):
+				why.append("the x-ray %s off the window" % x.full.get_global_rect())
+			why.append_array(_off_screen(x.full, window))
+			x.close()
+			if not why.is_empty():
+				bad.append("%dx%d @%.1f: %s" % [res.x, res.y, ui_scale, ", ".join(why.slice(0, 3))])
+	check(bad.is_empty(), "the vehicle panel, the x-ray card and its full view fit at %d window sizes and %d UI scales%s" % [SIZES.size(), UI_SCALES.size(),
+		"" if bad.is_empty() else ": " + "; ".join(bad.slice(0, 6))])
+	x.card.visible = false
+	x._card_left = 0.0
+	vh.queue_free()
+	root.content_scale_size = Vector2i(1920, 1080)
 	await _frames(2)
 
 

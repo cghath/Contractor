@@ -63,8 +63,10 @@ var last_step_ms := 0.0
 var last_id := 0
 var _next_id := 1
 var _visuals := {}  # every peer: id -> {"node", "vel", "k", "age"}
+## Every peer: the last impact drawn (VehicleFx.impact's kind; tests).
+var last_impact := ""
 static var _streak_mesh: BoxMesh
-static var _streak_mat: StandardMaterial3D
+static var _streak_mats := {}  # A7: the tracer's colour by round kind
 
 signal ended(id: int, result: Dictionary)
 
@@ -337,7 +339,9 @@ func _end(sh: Dictionary, how: String, pos: Vector3, extra: Dictionary) -> bool:
 	results[int(sh.id)] = r
 	while results.size() > RESULTS_KEPT:
 		results.erase(results.keys()[0])
-	_client_end.rpc(int(sh.id), pos, how)
+	var v := extra.get("vehicle") as Vehicle
+	var cls := String(v.spec.get("class", "")) if is_instance_valid(v) else ""
+	_client_end.rpc(int(sh.id), pos, how, String(r.outcome), String(sh.sid), cls, (sh.vel as Vector3).normalized())  # (A7: the impact by round, VehicleFx.impact)
 	ended.emit(int(sh.id), r)
 	return true
 
@@ -409,15 +413,9 @@ func _client_fire(id: int, shell_id: String, origin: Vector3, velocity: Vector3)
 	if _streak_mesh == null:
 		_streak_mesh = BoxMesh.new()
 		_streak_mesh.size = Vector3(STREAK_W, STREAK_W, STREAK_M)
-		_streak_mat = StandardMaterial3D.new()
-		_streak_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_streak_mat.albedo_color = Color(1.0, 0.55, 0.25)
-		_streak_mat.emission_enabled = true
-		_streak_mat.emission = Color(1.0, 0.5, 0.2)
-		_streak_mat.emission_energy_multiplier = 4.0
 	var mi := MeshInstance3D.new()
 	mi.mesh = _streak_mesh
-	mi.material_override = _streak_mat
+	mi.material_override = tracer_material(String(Shells.shell(StringName(shell_id)).get("kind", "he")))
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	mi.global_position = origin
@@ -425,7 +423,7 @@ func _client_fire(id: int, shell_id: String, origin: Vector3, velocity: Vector3)
 
 
 @rpc("authority", "call_local", "reliable")
-func _client_end(id: int, pos: Vector3, how: String) -> void:
+func _client_end(id: int, pos: Vector3, how: String, outcome := "", sid := "", cls := "", dir := Vector3.FORWARD) -> void:
 	var vis: Dictionary = _visuals.get(id, {})
 	_visuals.erase(id)
 	if vis.is_empty():
@@ -433,14 +431,12 @@ func _client_end(id: int, pos: Vector3, how: String) -> void:
 	var node := vis.node as Node3D
 	if is_instance_valid(node):
 		node.queue_free()
-	if how in ["vehicle", "world", "air", "body"] and DisplayServer.get_name() != "headless":
-		var flash := OmniLight3D.new()
-		flash.light_color = Color(1.0, 0.7, 0.4)
-		flash.light_energy = 6.0
-		flash.omni_range = 6.0
-		add_child(flash)
-		flash.global_position = pos
-		get_tree().create_timer(0.12).timeout.connect(flash.queue_free)
+	if how in ["vehicle", "world", "air", "body"]:
+		_show_impact.call_deferred(pos, how, outcome, sid, cls, dir)  # A7 (2.10.3): after the step, not in the host's shell physics
+
+
+func _show_impact(pos: Vector3, how: String, outcome: String, sid: String, cls: String, dir: Vector3) -> void:
+	last_impact = VehicleFx.impact(self, pos, how, outcome, sid, cls, dir)
 
 
 ## Every peer: the drawn rounds fly on as the host's do (no hit tests: the host's end event stops them).
@@ -461,6 +457,24 @@ func _draw_step(dt: float) -> void:
 			if is_instance_valid(node):
 				node.queue_free()
 			_visuals.erase(id)
+
+
+## A7 (2.10.3): a round's tracer by its kind: a sabot's white-hot, HEAT's orange, HE's red.
+const TRACER_COLOURS := {"apfsds": Color(1.0, 0.95, 0.8), "apds": Color(1.0, 0.9, 0.7), "heat": Color(1.0, 0.6, 0.25), "amp": Color(1.0, 0.45, 0.2),
+	"he": Color(1.0, 0.35, 0.2), "hei": Color(1.0, 0.35, 0.2)}
+
+
+static func tracer_material(kind: String) -> StandardMaterial3D:
+	if not _streak_mats.has(kind):
+		var c: Color = TRACER_COLOURS.get(kind, Color(1.0, 0.55, 0.25))
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.albedo_color = c
+		mat.emission_enabled = true
+		mat.emission = c
+		mat.emission_energy_multiplier = 4.0
+		_streak_mats[kind] = mat
+	return _streak_mats[kind]
 
 
 ## Every peer: how many rounds it's drawing now (tests).

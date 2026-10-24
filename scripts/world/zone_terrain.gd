@@ -325,7 +325,7 @@ func set_roads(pieces: Array) -> void:
 		var verge := core + ROAD_VERGE_M - ROAD_CORE_M
 		var bounds := Rect2(a, Vector2.ZERO).expand(b).grow(verge)
 		var i := _roads.size()
-		_roads.append([a, b, bounds, core, verge, colour])
+		_roads.append([a, b, bounds, core, verge, colour, String(road[2]) if road.size() > 2 else "dirt"])  # (A6: the kind is ground_at's)
 		for cy in range(floori(bounds.position.y / ROAD_GRID_M), floori(bounds.end.y / ROAD_GRID_M) + 1):
 			for cx in range(floori(bounds.position.x / ROAD_GRID_M), floori(bounds.end.x / ROAD_GRID_M) + 1):
 				var key := Vector2i(cx, cy)
@@ -1051,6 +1051,69 @@ func _road_tint(x: float, z: float) -> Color:
 		if w > best.a:
 			best = Color(r[5], w)
 	return best
+
+
+## Combined arms A6 (cg_brief queue item 2.7; docs/combined_arms.md 2.8.1): the ground at (x, z)
+## for the vehicles' traction and rolling resistance (VehicleDrive, data/vehicle_drive.json
+## "ground"): on a road's core asphalt (asphalt and street roads) or dirt (dirt roads and
+## trails); a pad's town streets asphalt, the rest of a pad packed dirt; under water a river or
+## lake bed is mud, but a ford's gravel track (ZoneBridges.on_ford) dirt; marsh mud, snow, rock
+## (steep ground over STEEP_ROCK_Y, or the preset's high rock), riverbed and beach sand; else
+## grass (fields too). Roads are looked up each time (they're narrow); the rest is kept per grid
+## vertex once worked out (it never changes in a zone). Bridges' decks are VehicleDrive's
+## (ZoneBridges.deck_at), patches of rubble the level's.
+const GROUND_KINDS: Array[StringName] = [&"asphalt", &"dirt", &"grass", &"sand", &"mud", &"rock", &"snow", &"rubble"]
+const STEEP_ROCK_Y := 0.8  # a slope over about 37 degrees reads as rock
+var _ground := PackedByteArray()
+
+
+func ground_at(x: float, z: float) -> StringName:
+	if points == 0:
+		return &"dirt"
+	var p := Vector2(x, z)
+	for i: int in _road_grid.get(Vector2i(floori(x / ROAD_GRID_M), floori(z / ROAD_GRID_M)), []):
+		var r: Array = _roads[i]
+		if (r[2] as Rect2).has_point(p) and Geometry2D.get_closest_point_to_segment(p, r[0], r[1]).distance_to(p) <= float(r[3]):
+			return &"dirt" if String(r[6]) == "dirt" else &"asphalt"
+	if water and water.depth_at(x, z) > 0.05:
+		return &"dirt" if water.bridges and water.bridges.on_ford(p) else &"mud"
+	if _ground.size() != heights.size():
+		_ground.resize(heights.size())
+		_ground.fill(255)
+	var i := clampi(roundi((x + _half) / CELL_M), 0, points - 1)
+	var j := clampi(roundi((z + _half) / CELL_M), 0, points - 1)
+	var k := _ground[i + j * points]
+	if k == 255:
+		k = maxi(GROUND_KINDS.find(_ground_kind(i, j)), 0)
+		_ground[i + j * points] = k
+	return GROUND_KINDS[k]
+
+
+func _ground_kind(i: int, j: int) -> StringName:
+	var p := Vector2(v_x(i), v_x(j))
+	for k in pads.size():
+		if (pads[k][0] as Rect2).has_point(p):
+			for r in _streets:
+				if r.has_point(p):
+					return &"asphalt"
+			return &"dirt"
+	if features:
+		if features.soft_at(p.x, p.y) > 0.35:
+			return &"mud"
+		if features.snow_at(p.x, p.y) > 0.4:
+			return &"snow"
+	var n := vertex_normal(i, j)
+	if n.y < STEEP_ROCK_Y or _h(i, j) > rock_above_m + 4.0:
+		return &"rock"
+	if mud_margin_m > 0.0 and minf(minf(p.x + _half, _half - p.x), minf(p.y + _half, _half - p.y)) < mud_margin_m * 0.5:
+		return &"mud"
+	if _bed.size() == heights.size() and float(_bed[i + j * points]) / 255.0 > 0.45:
+		return &"sand"
+	if sea_side >= 0 and sand_below_m > -100.0 and sea_edge_distance(p.x, p.y) < sea_m + SEA_MARGIN_M + 40.0 and shore_distance(p.x, p.y) < 30.0:
+		return &"sand"
+	if crust > 0.5:
+		return &"dirt"  # a salt pan's crust
+	return &"grass"
 
 
 func v_x(i: int) -> float:

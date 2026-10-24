@@ -18,6 +18,16 @@ extends Node3D
 ## Blasts smaller than MIN_BLAST_M (grenades, breaching shells, claymores) only chip. The host
 ## sends a drop to every peer (_client_drop), a late joiner asks for them all (_ask_all), and
 ## every span's health goes in the zone save (to_save, GameState.bridges). Numbers Proposed.
+##
+## Load classes (combined arms A6, cg_brief queue item 2.7; docs/combined_arms.md 2.8.5): each type
+## has an `mlc` (tonnes: concrete 80, steel truss 40, footbridge 2), a span's falls with its health
+## (span_mlc: blast damage takes it down in proportion), and the host weighs what stands on every
+## span (_load_step, LOAD_EVERY_S): over its class the span takes damage each second in proportion
+## to the overload, so that at OVERLOAD_REF x its class it drops after the type's `overload_s`
+## (8 s), sooner as the damage lowers its class further. The health goes to every peer
+## (_client_hp; a late joiner with the drops), so the HUD's BRIDGE MLC line (VehicleHud.alerts)
+## and the AI's routes (TerrainRoute) read the same class everywhere. deck_at() and next_span()
+## answer where a vehicle is and what's ahead of it.
 
 const CONCRETE := "concrete"
 const TRUSS := "truss"
@@ -31,12 +41,23 @@ const GROUP := &"zone_bridges"
 ## 1.15 m, 1.5; an 82 mm mortar round 0.33), the parapet or rail height, the truss height, colours.
 const TYPES := {
 	CONCRETE: {"name": "concrete bridge", "deck_w": 7.4, "deck_t": 0.75, "max_span": 14.0, "hp": 12.0, "rail_h": 0.95, "rail_t": 0.32,
-		"colour": "8e8b83", "dark": "6d6a63"},
+		"colour": "8e8b83", "dark": "6d6a63", "mlc": 80.0, "overload_s": 8.0},
 	TRUSS: {"name": "steel truss bridge", "deck_w": 6.6, "deck_t": 0.45, "max_span": 32.0, "hp": 8.0, "rail_h": 0.0, "truss_h": 5.2,
-		"colour": "4f5d5a", "dark": "3b4442", "deck": "6c6a64"},
+		"colour": "4f5d5a", "dark": "3b4442", "deck": "6c6a64", "mlc": 40.0, "overload_s": 8.0},
 	FOOT: {"name": "footbridge", "deck_w": 1.9, "deck_t": 0.18, "max_span": 24.0, "hp": 2.0, "rail_h": 1.05, "rail_t": 0.08,
-		"colour": "7b5b3c", "dark": "5a4230"},
+		"colour": "7b5b3c", "dark": "5a4230", "mlc": 2.0, "overload_s": 8.0},
 }
+## A6: a span loaded to this many times its class drops after its type's overload_s; the host
+## weighs the spans this often (s), and sends a span's health to the clients when it has fallen
+## this much since it last did (or it dropped).
+const OVERLOAD_REF := 1.5
+const LOAD_EVERY_S := 0.25
+const HP_SEND_STEP := 0.25
+## A6: what's on a deck: within this far (m) of its edges across, and this far over its top or
+## under it.
+const DECK_MARGIN_M := 0.6
+const DECK_ABOVE_M := 4.0
+const DECK_BELOW_M := 1.5
 ## A blast smaller than this (carve radius, m) does a bridge no damage worth counting.
 const MIN_BLAST_M := 0.5
 ## Full damage out to radius x FALLOFF_NEAR_MULT + FALLOFF_NEAR_M from a span, none past
@@ -81,6 +102,11 @@ var _keep_off: Array = []
 var _collision_built := false
 var _visuals_built := false
 var _material: StandardMaterial3D
+## A6 (host): seconds to the next weighing; what each loaded span carried when last weighed
+## ("<bridge>_<span>" -> tonnes); the health each span last sent to the clients.
+var _load_left := 0.0
+var loads := {}
+var _sent_hp := {}
 
 
 ## Lays out the bridges, culverts and fords from `w`'s crossings (after the ground is carved).
@@ -169,8 +195,144 @@ func _plan_keep_off() -> void:
 
 
 func _ready() -> void:
+	set_physics_process(multiplayer.is_server())
 	if not multiplayer.is_server():
 		(func() -> void: _ask_all.rpc_id(1)).call_deferred()
+
+
+# --- Load classes (A6) ----------------------------------------------------------------------
+
+## A span's load class now (t): its type's, times its health (0 once down).
+func span_mlc(bi: int, k: int) -> float:
+	var b: Dictionary = bridges[bi]
+	var span: Dictionary = b.spans[k]
+	if bool(span.down):
+		return 0.0
+	var spec: Dictionary = TYPES[b.type]
+	return float(spec.mlc) * clampf(float(span.hp) / maxf(float(spec.hp), 0.001), 0.0, 1.0)
+
+
+## The weakest span's class of bridge `bi` (0 with one down): what a vehicle crossing all of it
+## needs (TerrainRoute).
+func bridge_mlc(bi: int) -> float:
+	var worst := INF
+	for k in (bridges[bi].spans as Array).size():
+		worst = minf(worst, span_mlc(bi, k))
+	return worst if worst < INF else 0.0
+
+
+## Which bridge and span's deck `p` is on (Vector2i(bridge, span)), or (-1, -1); `any_height`: over
+## or under it at any height (the way ahead).
+func deck_at(p: Vector3, margin := DECK_MARGIN_M, any_height := false) -> Vector2i:
+	for bi in bridges.size():
+		var b: Dictionary = bridges[bi]
+		var xf: Transform3D = b.xform
+		var half := float(b.length) * 0.5
+		if absf(p.x - xf.origin.x) > half + 8.0 or absf(p.z - xf.origin.z) > half + 8.0:
+			continue
+		var local := xf.affine_inverse() * p
+		if absf(local.x) > float(TYPES[b.type].deck_w) * 0.5 + margin or absf(local.z) > half 				or (not any_height and (local.y > DECK_ABOVE_M or local.y < -DECK_BELOW_M)):
+			continue
+		for k in (b.spans as Array).size():
+			if local.z >= float(b.spans[k].z0) and local.z <= float(b.spans[k].z1):
+				return Vector2i(bi, k)
+	return Vector2i(-1, -1)
+
+
+## The first span along `dir` from `from` within `reach` m (sampled every 2 m): {"bi", "k", "mlc",
+## "d" (m to it), "type"}, or {} (VehicleHud's BRIDGE MLC line).
+func next_span(from: Vector3, dir: Vector3, reach: float) -> Dictionary:
+	var flat := Vector3(dir.x, 0.0, dir.z).normalized()
+	if flat.length_squared() < 0.5:
+		return {}
+	var d := 0.0
+	while d <= reach:
+		var at := deck_at(from + flat * d)
+		if at.x >= 0:
+			return {"bi": at.x, "k": at.y, "mlc": span_mlc(at.x, at.y), "d": d, "type": String(bridges[at.x].type)}
+		d += 2.0
+	return {}
+
+
+## Whether `p` (x, z) is on a ford's gravel track across the water (ZoneTerrain.ground_at).
+func on_ford(p: Vector2) -> bool:
+	for f: Dictionary in fords:
+		var at: Vector3 = f.pos
+		var v := p - Vector2(at.x, at.z)
+		var along: Vector2 = f.dir
+		if absf(v.dot(along)) <= float(f.half) + 4.0 and absf(v.x * -along.y + v.y * along.x) <= FORD_TRACK_HALF_W_M + 4.0:
+			return true
+	return false
+
+
+## Host: the spans weighed every LOAD_EVERY_S (_load_step).
+func _physics_process(delta: float) -> void:
+	_load_left -= delta
+	if _load_left > 0.0 or bridges.is_empty():
+		return
+	var dt := LOAD_EVERY_S - _load_left
+	_load_left = LOAD_EVERY_S
+	_load_step(dt)
+
+
+## Host: every ground vehicle on a deck adds its mass with its packages (VehicleDrive.mass_t) to
+## its span's load; each loaded span then carries it for `dt` (server_load).
+func _load_step(dt: float) -> void:
+	loads = {}
+	for n in get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v == null or v.kind == Vehicle.HELICOPTER or v.kind == Vehicle.STATIC:
+			continue
+		var at := deck_at(v.global_position)
+		if at.x < 0:
+			continue
+		var key := "%d_%d" % [at.x, at.y]
+		loads[key] = float(loads.get(key, 0.0)) + VehicleDrive.mass_t(v)
+	for key: String in loads:
+		var bk := key.split("_")
+		server_load(int(bk[0]), int(bk[1]), float(loads[key]), dt)
+	for b: Dictionary in bridges:
+		for k in (b.spans as Array).size():
+			if (b.spans[k] as Dictionary).has("cls0") and not loads.has("%d_%d" % [bridges.find(b), k]):
+				(b.spans[k] as Dictionary).erase("cls0")  # unloaded: the next overload is weighed afresh
+
+
+## Host: span `k` of bridge `bi` carries `tonnes` for `dt` s: over its class it loses
+## hp x (load / class - 1) / ((OVERLOAD_REF - 1) x overload_s) a second, the class taken as it was
+## when the load came on (so 1.5x drops it in overload_s, as 2.8.5 says; its shown class falls as it
+## weakens); out of health it drops.
+func server_load(bi: int, k: int, tonnes: float, dt: float) -> void:
+	var b: Dictionary = bridges[bi]
+	var span: Dictionary = b.spans[k]
+	if bool(span.down):
+		return
+	var spec: Dictionary = TYPES[b.type]
+	var cls := maxf(float(span.get("cls0", span_mlc(bi, k))), 0.001)
+	if tonnes <= cls:
+		return
+	span["cls0"] = cls
+	var rate := float(spec.hp) * (tonnes / cls - 1.0) / ((OVERLOAD_REF - 1.0) * float(spec.overload_s))
+	span.hp = float(span.hp) - rate * dt
+	if float(span.hp) <= 0.0:
+		print("[bridges] %s (%s, MLC %.0f): span %d gives way under %.1f t" % [b.id, spec.name, float(spec.mlc), k, tonnes])
+		_client_drop.rpc(bi, k)
+	else:
+		_send_hp(bi, k)
+
+
+## Host: a span's health to the clients once it has fallen HP_SEND_STEP since it last went.
+func _send_hp(bi: int, k: int, force := false) -> void:
+	var key := "%d_%d" % [bi, k]
+	var hp := float(bridges[bi].spans[k].hp)
+	if force or absf(float(_sent_hp.get(key, float(TYPES[bridges[bi].type].hp))) - hp) >= HP_SEND_STEP:
+		_sent_hp[key] = hp
+		_client_hp.rpc(bi, k, hp)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_hp(bi: int, k: int, hp: float) -> void:
+	if bi >= 0 and bi < bridges.size() and k >= 0 and k < (bridges[bi].spans as Array).size():
+		(bridges[bi].spans[k] as Dictionary).hp = hp
 
 
 # --- Collision ------------------------------------------------------------------------------
@@ -570,6 +732,8 @@ func server_blast(pos: Vector3, radius_m: float) -> void:
 			print("[bridges] %s span %d: blast %.2f m at %.1f m, %.2f damage, %.2f left" % [b.id, k, radius_m, d, hit, float(span.hp)])
 			if float(span.hp) <= 0.0:
 				_client_drop.rpc(bi, k)
+			else:
+				_send_hp(bi, k, true)  # A6: its load class falls with it
 
 
 ## Every peer: span `k` of bridge `bi` drops (its collision goes, it lies fallen in the river).
@@ -661,11 +825,19 @@ func standing() -> int:
 func _ask_all() -> void:
 	if not multiplayer.is_server():
 		return
-	_client_state.rpc_id(multiplayer.get_remote_sender_id(), _downs())
+	var hps: Array = []
+	for bi in bridges.size():
+		for k in (bridges[bi].spans as Array).size():
+			var hp := float(bridges[bi].spans[k].hp)
+			if hp < float(TYPES[bridges[bi].type].hp):
+				hps.append([bi, k, hp])
+	_client_state.rpc_id(multiplayer.get_remote_sender_id(), _downs(), hps)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _client_state(downs: Array) -> void:
+func _client_state(downs: Array, hps: Array = []) -> void:
+	for h: Array in hps:
+		_client_hp(int(h[0]), int(h[1]), float(h[2]))  # A6: worn spans' classes
 	for d: Array in downs:
 		_client_drop(int(d[0]), int(d[1]))
 
@@ -697,3 +869,5 @@ func server_restore(saved: Dictionary) -> void:
 			(b.spans[k] as Dictionary).hp = float(list[k])
 			if float(list[k]) <= 0.0:
 				_client_drop.rpc(bi, k)
+			elif float(list[k]) < float(TYPES[b.type].hp):
+				_send_hp(bi, k, true)  # A6: a worn span's class
