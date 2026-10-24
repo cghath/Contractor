@@ -6,6 +6,12 @@ extends RefCounted
 ## does it at the end. A part says what it repairs in its stats: "repairs" (zones), "repair_s"
 ## (seconds), "repair_to" (the zone's health after, at least) or "repair_add" (health added),
 ## "kinds" (wheeled or tracked only), "battery" (fits a new battery). Proposed numbers.
+##
+## Combined arms A8 (cg_brief queue item 2.6): a model with modules is repaired module by module
+## (VehicleLogistics: 2.2.2's field column, data/vehicle_logistics.json "repair"), and the service
+## point offers those jobs. The zone repairs here stay for the models without modules (technicals)
+## and for callers that name a zone; on a model with modules they keep to the same field limits
+## (a destroyed engine, the hull or a breech is the motor pool's).
 
 const JERRYCAN := &"jerrycan"
 ## A wreck salvaged yields these, once (Proposed): a set of engine parts and some salvage.
@@ -22,6 +28,11 @@ static func zone_name(zone: StringName, kind: String) -> String:
 	if zone == Vehicle.ZONE_WHEELS and kind == Vehicle.TRACKED:
 		return "tracks"
 	return String(ZONE_NAMES.get(zone, String(zone)))
+
+
+## A module in words (A8: "left track", "driver's periscope"; 2.9.3's zone_name for modules).
+static func module_name(module_id: String) -> String:
+	return VehicleLogistics.module_name(module_id)
 
 
 ## Whether `actor` has `item` (stowed, or in their hands).
@@ -58,12 +69,35 @@ static func repair_problem(vehicle: Vehicle, actor: Soldier, zone: StringName, i
 		return "" if not vehicle.battery_ok else "The battery is fine"
 	if not String(zone) in (part.stats.get("repairs", []) as Array):
 		return "%s can't fix the %s" % [part.name, zone_name(zone, vehicle.kind)]
+	if vehicle.modules and vehicle.modules.authored:
+		var limit := field_limit(vehicle, zone)
+		if limit != "":
+			return limit
 	var health := vehicle.zone_health(zone)
 	var to := float(part.stats.get("repair_to", 0.0))
 	var add := float(part.stats.get("repair_add", 0.0))
 	if health >= 0.999 or (add <= 0.0 and health >= to - 0.001):
 		return "The %s needs no more than that" % zone_name(zone, vehicle.kind)
 	return ""
+
+
+## A8: "" when some module under `zone` of a model with modules is one a field repair may fix in
+## the state it's in (VehicleLogistics.repair_rules), else why only the motor pool can.
+static func field_limit(vehicle: Vehicle, zone: StringName) -> String:
+	var mods := vehicle.modules
+	var needs := 0
+	for m: Dictionary in mods.mods:
+		var mine := String(m.kind) == "structure" if zone == Vehicle.ZONE_HULL else (StringName(m.zone) == zone and float(m.hp) > 0.0)
+		if not mine or mods.health[int(m.i)] >= 0.999:
+			continue
+		needs += 1
+		var st := VehicleModules.state_of(mods.health[int(m.i)])
+		if st == VehicleModules.WORKING:
+			return ""
+		for r: Dictionary in VehicleLogistics.repair_rules(String(m.kind)):
+			if st in (r.states as Array):
+				return ""
+	return "" if needs == 0 else "Only the motor pool fixes the %s now" % zone_name(zone, vehicle.kind)
 
 
 ## Litres in the jerrycans `actor` carries.

@@ -21,6 +21,19 @@ extends RefCounted
 ##   PARTS_SHARE of it (items expansion, 2026-10-20).
 ## A new campaign starts with data/ground_supports.json "motor_pool" "start" (Proposed: one
 ## M-ATV), given the first time the section is used. Numbers there are Proposed.
+##
+## Combined arms A8 (cg_brief queue item 2.6; docs/combined_arms.md 2.4.5, 2.9.2, 2.9.3):
+## - A model with modules is quoted module by module (module_prices: a destroyed module's share of
+##   the model's value, scaled by the health it lacks; days by the bill's share, the workshop-only
+##   ones at least fob_days), fired ERA tiles and slat at their spare's price; the service makes
+##   every module whole, the tiles back, the work in progress done.
+## - The rearm going out and coming home (server_bring, server_return) fills the racks to the
+##   load-out picked here (server_set_loadout) and restocks the smoke and the bottles, charged
+##   to the run at data/prices.json "ammo" (VehicleLogistics.server_fob_rearm).
+## - Armour packages (server_package): fitted for their price and days in the workshop (the
+##   employer's tier and any package they need first), removed for half back; an upgrade that
+##   includes a fitted one credits it. The record's "logistics" keeps them, so a vehicle brought
+##   out has its packages, their armour and STANAG rating, and their weight.
 
 const SECTION := &"motor_pool"
 ## Record keys that are about one zone, not the vehicle.
@@ -134,7 +147,7 @@ static func server_bring(id: String, level: Node, xform: Transform3D) -> Vehicle
 		return null
 	v.set_meta(&"pool_id", id)
 	## Captain, 2026-10-14: the pool M-ATV deployed with its M2 on 0 rounds. It goes out loaded.
-	v.server_rearm()
+	_rearm(v, "going out")  # A8: to its load-out, the armour's rounds and smoke charged
 	v.set_meta(&"no_save", true)  # it goes home with the squad; left behind, MotorPoolNode lets the zone keep it
 	e.out = GameState.zone_id
 	Campaign.mark_changed(SECTION)
@@ -186,7 +199,7 @@ static func server_return(v: Vehicle) -> bool:
 	if v.wrecked or v.is_burning():
 		remove(id)
 		return false
-	v.server_rearm()  # home at the FOB: the gun's belts refilled (Captain, 2026-10-14)
+	_rearm(v, "back at the FOB")  # home at the FOB: the gun's belts refilled (Captain, 2026-10-14); A8: the racks to the load-out, charged
 	var rec := v.to_save()
 	for k: String in PLACE_KEYS:
 		rec.erase(k)
@@ -200,11 +213,85 @@ static func server_return(v: Vehicle) -> bool:
 	return true
 
 
-## How much vehicle `id` is damaged, 0 (whole) to 1 (written off): its hit zones' wear, weighted.
+## Host: `v` rearmed at the FOB (VehicleLogistics.server_fob_rearm: the load-out, the smoke, the
+## bottles), the bill charged to the run. A vehicle without logistics: as before.
+static func _rearm(v: Vehicle, why: String) -> void:
+	if v.logistics == null:
+		v.server_rearm()
+		return
+	var bill := v.logistics.server_fob_rearm()
+	if int(bill.cost) > 0:
+		Economy.charge_run(int(bill.cost), "Motor pool: %s rearmed %s" % [v.display_name(), why])
+		print("[motor pool] %s rearmed %s: $%d %s" % [v.display_name(), why, int(bill.cost), bill.lines])
+
+
+## A8: the health of each module of `model` in a pool record (its saved modules, else its zones'
+## as VehicleModules.from_save reads an older one): {module id: 0..1}; {} for a model without modules.
+static func module_health(model: String, rec: Dictionary) -> Dictionary:
+	var spec := VehicleSpecs.spec(model)
+	if not spec.has("modules"):
+		return {}
+	var out := {}
+	var saved: Dictionary = rec.get("modules", {}) if rec.get("modules") is Dictionary else {}
+	var hp: Dictionary = saved.get("hp", {}) if saved.get("hp") is Dictionary else {}
+	var zones: Dictionary = rec.get("zones", {}) if rec.get("zones") is Dictionary else {}
+	for m: Dictionary in VehicleModules.layout_of(model, spec):
+		var h := 1.0
+		if not saved.is_empty():
+			h = float(hp.get(String(m.id), 1.0))
+		else:
+			var z := "hull" if String(m.kind) == "structure" else String(m.zone)
+			if z != "" and (float(m.hp) > 0.0 or String(m.kind) == "structure") and zones.has(z):
+				h = float(zones[z])
+		if bool(rec.get("wrecked", false)):
+			h = 0.0
+		out[String(m.id)] = clampf(h, 0.0, 1.0)
+	return out
+
+
+## A8: what the workshop's module work on record `e` comes to: {"cost", "damage" (0-1, the bill's
+## share of the model's value), "fob" (a destroyed module only the workshop fixes), "tiles"}.
+static func _module_bill(e: Dictionary) -> Dictionary:
+	var model := String(e.model)
+	var spec := VehicleSpecs.spec(model)
+	var cfg := _cfg()
+	var shares: Dictionary = cfg.get("module_prices", {})
+	var value := float((cfg.get("value", {}) as Dictionary).get(model, cfg.get("default_value", 250000)))
+	var health := module_health(model, e.record)
+	var cost := 0.0
+	var total := 0.0
+	var fob := false
+	for m: Dictionary in VehicleModules.layout_of(model, spec):
+		var share := float(shares.get(String(m.kind), 0.0))
+		if share <= 0.0 or (float(m.hp) <= 0.0 and String(m.kind) != "structure"):
+			continue
+		total += share
+		var h := float(health.get(String(m.id), 1.0))
+		cost += share * (1.0 - h) * value
+		if h <= 0.0001 and not VehicleLogistics.repair_rules(String(m.kind)).any(func(r: Dictionary) -> bool: return VehicleModules.DESTROYED in (r.states as Array)):
+			fob = true  # (destroyed past what a field repair fixes)
+	var tiles := 0
+	var lg: Dictionary = (e.record as Dictionary).get("logistics", {}) if (e.record as Dictionary).get("logistics") is Dictionary else {}
+	var fired: Dictionary = lg.get("tiles", {}) if lg.get("tiles") is Dictionary else {}
+	for g: Variant in fired:
+		var kind := ""
+		for t: Dictionary in spec.get("tiles", []):
+			if String(t.group) == String(g):
+				kind = String(t.kind)
+		var n := (fired[g] as Array).size() if fired[g] is Array else 0
+		tiles += n
+		cost += n * Prices.price_of(VehicleLogistics.tile_spare(kind))
+	return {"cost": roundi(cost), "damage": clampf(cost / maxf(value * maxf(total, 0.0001), 1.0), 0.0, 1.0), "fob": fob, "tiles": tiles}
+
+
+## How much vehicle `id` is damaged, 0 (whole) to 1 (written off): its hit zones' wear, weighted
+## (A8: a model with modules, the module bill's share of its value).
 static func damage_of(id: String) -> float:
 	var e := _find(id)
 	if e.is_empty():
 		return 0.0
+	if VehicleSpecs.spec(String(e.model)).has("modules"):
+		return float(_module_bill(e).damage)
 	var zones: Dictionary = (e.record as Dictionary).get("zones", {})
 	var weights: Dictionary = _cfg().get("zone_weights", {"hull": 0.4, "engine": 0.3, "wheels": 0.2, "fuel": 0.1})
 	var total := 0.0
@@ -228,6 +315,12 @@ static func repair_quote(id: String) -> Dictionary:
 	var value := float((cfg.get("value", {}) as Dictionary).get(String(e.model), cfg.get("default_value", 250000)))
 	var cost := roundi(value * float(cfg.get("repair_share", 0.12)) * damage)
 	var days := ceili(damage * float(cfg.get("repair_days", 6))) if damage > 0.001 else 0
+	if spec.has("modules"):  # A8: per module
+		var bill := _module_bill(e)
+		cost = int(bill.cost)
+		days = ceili(float(bill.damage) * float(cfg.get("repair_days", 6))) if cost > 0 else 0
+		if bool(bill.fob):
+			days = maxi(days, int(cfg.get("fob_days", 2)))
 	if not bool(rec.get("battery", true)):
 		cost += int(cfg.get("battery_price", 800))
 		days = maxi(days, 1)
@@ -281,6 +374,14 @@ static func server_repair(id: String) -> String:
 	for z: StringName in Vehicle.ZONES:
 		zones[String(z)] = 1.0
 	rec["zones"] = zones
+	if rec.get("modules") is Dictionary:  # A8: every module whole (the racks' rounds stay: the rearm fills them)
+		var mods: Dictionary = rec.modules
+		mods["hp"] = {}
+		mods["flags"] = {}
+		mods["crew_lost"] = false
+	var lg := _logistics_of(rec)
+	lg["tiles"] = {}
+	lg["progress"] = {}
 	rec["battery"] = true
 	rec["leak"] = 0.0
 	rec["carves"] = []
@@ -292,12 +393,150 @@ static func server_repair(id: String) -> String:
 
 
 ## Host: what each vehicle looks like on a screen: {"id", "name", "model", "damage", "fuel",
-## "problem", "quote"}.
+## "problem", "quote"}; A8: "packages" (fitted ids), "stanag" (its rating with them), "offers"
+## (package_offers), "loadout" and "loadouts" (the FOB load-outs it can pick).
 static func view() -> Array:
 	var out: Array = []
 	for e: Dictionary in _s().vehicles:
 		var id := String(e.id)
+		var spec := VehicleSpecs.spec(String(e.model))
+		var lg := _logistics_of(e.record)
 		out.append({"id": id, "name": String(e.name), "model": String(e.model), "damage": snappedf(damage_of(id), 0.01),
-			"fuel": snappedf(float((e.record as Dictionary).get("fuel", VehicleSpecs.spec(String(e.model)).get("fuel_l", 0.0))), 0.1),
-			"problem": problem(id), "quote": repair_quote(id)})
+			"fuel": snappedf(float((e.record as Dictionary).get("fuel", spec.get("fuel_l", 0.0))), 0.1),
+			"problem": problem(id), "quote": repair_quote(id), "packages": (lg.get("packages", []) as Array).duplicate(),
+			"stanag": ArmourStandards.text(spec, lg.get("packages", [])) if ArmourStandards.rated(spec) else "", "offers": package_offers(id),
+			"loadout": String(lg.get("loadout", "")), "loadouts": VehicleLogistics.loadouts(spec).keys()})
 	return out
+
+
+# --- A8: armour packages and load-outs ----------------------------------------------------------
+
+## The record's "logistics" section (made if it's missing).
+static func _logistics_of(rec: Dictionary) -> Dictionary:
+	if not rec.get("logistics") is Dictionary:
+		rec["logistics"] = {"packages": [], "loadout": ""}
+	var lg: Dictionary = rec.logistics
+	if not lg.get("packages") is Array:
+		lg["packages"] = []
+	return lg
+
+
+## The packages vehicle `id` can have: [{"id", "name", "fitted", "price" (to fit, less an included
+## one's credit), "refund" (taking it off), "days" (to fit or remove), "why" ("" can fit or remove
+## now), "weight_t"}], in data order.
+static func package_offers(id: String) -> Array:
+	var e := _find(id)
+	var out: Array = []
+	if e.is_empty():
+		return out
+	var defs: Dictionary = VehicleSpecs.spec(String(e.model)).get("packages", {})
+	var fitted: Array = _logistics_of(e.record).packages
+	for pid: String in defs:
+		var on := pid in fitted
+		out.append({"id": pid, "name": String((defs[pid] as Dictionary).get("name", pid)), "fitted": on, "price": package_cost(id, pid),
+			"refund": package_refund(pid), "days": VehicleLogistics.package_days(pid, not on), "why": package_problem(id, pid, not on),
+			"weight_t": float((defs[pid] as Dictionary).get("weight_t", 0.0))})
+	return out
+
+
+## What fitting `pkg` on vehicle `id` costs: its price, less a fitted package it includes (an upgrade).
+static func package_cost(id: String, pkg: String) -> int:
+	var e := _find(id)
+	var price := VehicleLogistics.package_price(pkg)
+	if e.is_empty() or price < 0:
+		return price
+	var defs: Dictionary = VehicleSpecs.spec(String(e.model)).get("packages", {})
+	if bool((VehicleLogistics.data().get("packages", {}) as Dictionary).get("upgrade_credit", true)):
+		for inc: Variant in (defs.get(pkg, {}) as Dictionary).get("includes", []):
+			if String(inc) in (_logistics_of(e.record).packages as Array):
+				price -= maxi(VehicleLogistics.package_price(String(inc)), 0)
+	return maxi(price, 0)
+
+
+## What taking `pkg` off pays back (data "refund" of its price).
+static func package_refund(pkg: String) -> int:
+	return roundi(maxi(VehicleLogistics.package_price(pkg), 0) * VehicleLogistics.num("packages", "refund", 0.5))
+
+
+## Why `pkg` can't be fitted (fit) or removed on vehicle `id` now ("" it can).
+static func package_problem(id: String, pkg: String, fit := true) -> String:
+	var e := _find(id)
+	if e.is_empty():
+		return "Not in the motor pool"
+	var defs: Dictionary = VehicleSpecs.spec(String(e.model)).get("packages", {})
+	if not defs.has(pkg):
+		return "That doesn't fit a %s" % String(e.name)
+	if String(e.get("out", "")) != "":
+		return "It's out on a deployment"
+	if bool((e.record as Dictionary).get("wrecked", false)):
+		return "Written off"
+	var fitted: Array = _logistics_of(e.record).packages
+	var all := ArmourModel.fitted_packages(VehicleSpecs.spec(String(e.model)), fitted)
+	var d: Dictionary = defs[pkg]
+	if fit:
+		if pkg in all:
+			return "Already fitted"
+		if VehicleLogistics.package_price(pkg) < 0:
+			return "Not sold"
+		var needs := String(d.get("needs", ""))
+		if needs.contains(":"):
+			var faction := needs.get_slice(":", 0)
+			var tier := needs.get_slice(":", 1)
+			var ids: Array = MissionRegistry.reputation_tiers().map(func(t: Dictionary) -> String: return String(t.id))
+			if MissionRegistry.tier_index(Economy.reputation(faction)) < ids.find(tier):
+				return "Needs %s standing with %s" % [tier.capitalize(), MissionRegistry.faction_name(faction)]
+		for a: Variant in d.get("after", []):
+			if not String(a) in all:
+				return "Fit the %s first" % String((defs.get(String(a), {}) as Dictionary).get("name", a))
+		if Economy.cash() < package_cost(id, pkg):
+			return "Can't afford it ($%s)" % DebriefCalc.money(package_cost(id, pkg))
+	else:
+		if not pkg in fitted:
+			return "Not fitted" if not pkg in all else "Part of another package: remove that one"
+		for other: Variant in fitted:
+			if pkg in ((defs.get(String(other), {}) as Dictionary).get("after", []) as Array):
+				return "Remove the %s first" % String((defs.get(String(other), {}) as Dictionary).get("name", other))
+	return ""
+
+
+## Host: fit (or remove) armour package `pkg` on pool vehicle `id`: paid (or half refunded), in the
+## workshop for its days. An upgrade drops the package it includes. Returns "" or why not.
+static func server_package(id: String, pkg: String, fit := true) -> String:
+	var why := package_problem(id, pkg, fit)
+	if why != "":
+		return why
+	var e := _find(id)
+	var lg := _logistics_of(e.record)
+	var defs: Dictionary = VehicleSpecs.spec(String(e.model)).get("packages", {})
+	var fitted: Array = lg.packages
+	if fit:
+		var cost := package_cost(id, pkg)
+		if cost > 0 and not Economy.spend(cost, "Motor pool: %s fitted to the %s" % [String((defs[pkg] as Dictionary).get("name", pkg)), String(e.name)]):
+			return "Can't afford it ($%s)" % DebriefCalc.money(cost)
+		for inc: Variant in (defs[pkg] as Dictionary).get("includes", []):
+			fitted.erase(String(inc))
+		fitted.append(pkg)
+	else:
+		fitted.erase(pkg)
+		var back := package_refund(pkg)
+		if back > 0:
+			Economy.add_cash(back, "Motor pool: %s taken off the %s" % [String((defs[pkg] as Dictionary).get("name", pkg)), String(e.name)])
+	var days := VehicleLogistics.package_days(pkg, fit)
+	if days > 0:
+		e.ready_day = maxi(int(e.get("ready_day", 0)), today() + days)
+	Campaign.mark_changed(SECTION)
+	print("[motor pool] %s (%s): %s %s, %d days" % [e.name, id, "fitted" if fit else "removed", pkg, days])
+	return ""
+
+
+## Host: the FOB load-out (data/vehicle_logistics.json "loadouts") vehicle `id`'s racks are filled
+## to on its next rearm. Returns "" or why not.
+static func server_set_loadout(id: String, loadout: String) -> String:
+	var e := _find(id)
+	if e.is_empty():
+		return "Not in the motor pool"
+	if not VehicleLogistics.loadouts(VehicleSpecs.spec(String(e.model))).has(loadout):
+		return "No such load-out"
+	_logistics_of(e.record)["loadout"] = loadout
+	Campaign.mark_changed(SECTION)
+	return ""

@@ -12,6 +12,11 @@ extends Node3D
 ## - Service: repairs with the parts you carry, a new battery, refuel; on a wreck, salvage.
 ## - Seat (inside, only for its occupant): get out (unless the get-out key does it:
 ##   ControlOptions), move to another seat, check the vehicle.
+## Combined arms A8 (cg_brief queue item 2.6, VehicleLogistics): the cargo point rearms (from your
+## kit, the hold, a truck's hold or a pallet within 8 m), takes rounds out, refuels from fuel
+## pallets and loads a pallet lying by it; the service point repairs module by module (a model
+## with modules), puts back fired ERA tiles and slat, and hooks up or drops a tow; a crewman
+## stows rounds from the hold from his seat.
 ## Rare entries carry a "group" (Check vehicle: InteractionMenu.MORE; "Pull out", "Repair") so
 ## the ring folds them into a submenu (InteractionMenu.grouped).
 
@@ -112,7 +117,36 @@ static func report(v: Vehicle) -> String:
 	var hold := v.cargo() as VehicleCargo
 	if hold:
 		lines.append("Cargo: %.0f of %.0f L, %.0f of %.0f kg" % [hold.used_litres(), hold.capacity_l, hold.total_mass(), hold.max_kg])
+	lines.append_array(logistics_report(v))
 	return "\n".join(lines)
+
+
+## A8's lines for Check vehicle: packages and their STANAG rating, the racks as items, the smoke
+## stowage, the extinguisher bottles, a tow.
+static func logistics_report(v: Vehicle) -> PackedStringArray:
+	var lines := PackedStringArray()
+	var lg := v.logistics
+	if lg == null:
+		return lines
+	if not lg.packages.is_empty():
+		var names: Array = lg.packages.map(func(p: Variant) -> String: return String((v.spec.get("packages", {}) as Dictionary).get(String(p), {}).get("name", p)))
+		lines.append("Packages: %s (%s)" % [", ".join(PackedStringArray(names)), ArmourStandards.text(v.spec, lg.packages)])
+	if v.weapons:
+		for rack: Variant in v.weapons.racks:
+			var parts := PackedStringArray()
+			for e: Dictionary in lg.rack_items(String(rack)):
+				if int(e.count) > 0 or int(e.loose) > 0:
+					parts.append("%d %s%s" % [int(e.count), ItemDB.get_item(e.id).name, " + %d loose" % int(e.loose) if int(e.loose) > 0 else ""])
+			lines.append("%s: %s" % [VehicleLogistics.module_name(String(rack)).capitalize(), ", ".join(parts) if not parts.is_empty() else "empty"])
+	if v.smoke:
+		lines.append("Smoke stowage: %d salvos" % v.smoke.stowed_salvos())
+	if not lg.bottles.is_empty():
+		var full := VehicleLogistics.full_bottles(v.model)
+		lines.append("Extinguishers: %s" % ", ".join(PackedStringArray(lg.bottles.keys().map(func(k: Variant) -> String:
+			return "%s %d/%d" % [String(k), int(lg.bottles[k]), int(full.get(k, 0))]))))
+	if lg.towed():
+		lines.append("Under tow")
+	return lines
 
 
 ## A door's ring (Captain, P0164 queue 8: get in and the seat choices first, nothing you can't
@@ -219,6 +253,7 @@ func _cargo_actions(actor: Soldier) -> Array[Dictionary]:
 			load_items.append(_entry(&"load_cargo", "%s%s" % [item.name, " x%d" % int(e.count) if int(e.count) > 1 else ""],
 				func() -> void: v.request_cargo_load.rpc_id(1, container, index, id)))
 	out.append({"id": &"load", "label": "Load", "disabled": "" if not load_items.is_empty() else "Nothing to load", "items": load_items, "target": self})
+	out.append_array(_logistics_cargo(actor))  # A8
 	if VehicleService.jerrycan_fuel(actor) > 0.0:
 		out.append(_entry(&"refuel", "Refuel (jerrycan)", func() -> void: v.request_service.rpc_id(1, "refuel", &"", VehicleService.JERRYCAN)))
 	out.append(_check())
@@ -234,7 +269,11 @@ func _service_actions(actor: Soldier) -> Array[Dictionary]:
 			"Already stripped" if salvaged else ""))
 		out.append(_check())
 		return out
-	for z: StringName in [Vehicle.ZONE_ENGINE, Vehicle.ZONE_WHEELS, Vehicle.ZONE_FUEL, Vehicle.ZONE_HULL, &"battery"]:
+	var lg := v.logistics
+	var by_module := v.modules != null and v.modules.authored and lg != null
+	if by_module:
+		out.append_array(_module_repairs(actor))  # A8: module by module, 2.2.2's field column
+	for z: StringName in ([&"battery"] if by_module else [Vehicle.ZONE_ENGINE, Vehicle.ZONE_WHEELS, Vehicle.ZONE_FUEL, Vehicle.ZONE_HULL, &"battery"]):
 		for part: StringName in VehicleService.parts_for(v, actor, z):
 			var zone := z
 			var id := part
@@ -244,7 +283,112 @@ func _service_actions(actor: Soldier) -> Array[Dictionary]:
 			out.append(repair)
 	if VehicleService.jerrycan_fuel(actor) > 0.0:
 		out.append(_entry(&"refuel", "Refuel (jerrycan)", func() -> void: v.request_service.rpc_id(1, "refuel", &"", VehicleService.JERRYCAN)))
+	if lg:
+		out.append_array(_tow_entries())
 	out.append(_check())
+	return out
+
+
+## A8: the field repairs of a model with modules, each "<part>: <module>" in the Repair submenu,
+## greyed with why (a part missing, the workshop's job); fired ERA tiles and slat with a spare.
+func _module_repairs(actor: Soldier) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var v := vehicle
+	var lg := v.logistics
+	for o: Dictionary in lg.repair_options(actor):
+		var module := String(o.module)
+		var id: StringName = o.item
+		var e := _entry(&"repair", String(o.label), (func() -> void: v.request_service.rpc_id(1, "repair_module", StringName(module), id)) if id != &"" else Callable(),
+			String(o.why))
+		e["group"] = "Repair"
+		out.append(e)
+	var fired := lg.fired_tiles()
+	for g: String in fired:
+		var spare := VehicleLogistics.tile_spare(lg.tile_kind(g))
+		if spare == &"" or not lg.has_part(actor, spare):
+			continue
+		var group := g
+		var e2 := _entry(&"replace_tile", "%s: %s (%d missing)" % [ItemDB.get_item(spare).name, g.replace("_", " "), (fired[g] as Array).size()],
+			func() -> void: v.request_service.rpc_id(1, "tile", StringName(group), spare))
+		e2["group"] = "Repair"
+		out.append(e2)
+	return out
+
+
+## A8: the tow at the service point: Unhook while it's towed or towing; on a vehicle that can't
+## drive, Hook up to each vehicle near enough to tow it (2.8.3's stand-in for a recovery vehicle).
+func _tow_entries() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var v := vehicle
+	var lg := v.logistics
+	if lg.towed() or String(lg.net_state.get("tg", "")) != "":
+		out.append(_entry(&"unhook", "Unhook the tow", func() -> void: v.request_service.rpc_id(1, "unhook", &"", &"")))
+		return out
+	if v.can_drive() or v.wrecked:
+		return out
+	var n := 0
+	for t: Vehicle in lg.tow_candidates():
+		if n >= 3:
+			break
+		n += 1
+		var id := t.vehicle_id
+		var e := _entry(&"tow", "Hook up to the %s for a tow (%d s)" % [t.display_name(), roundi(VehicleLogistics.num("tow", "hook_s", 60.0))],
+			func() -> void: v.request_service.rpc_id(1, "tow", StringName(id), &""), lg.tow_problem(t))
+		e["group"] = "Tow"
+		out.append(e)
+	return out
+
+
+## A8: the cargo point's rearming: one entry per source (your kit, the hold, a truck's hold, a
+## pallet within 8 m) in a Rearm submenu, rounds out of the racks in a Take out rounds submenu,
+## refuelling from fuel pallets, and loading a pallet lying by the cargo point.
+func _logistics_cargo(actor: Soldier) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var v := vehicle
+	var lg := v.logistics
+	if lg == null or v.wrecked:
+		return out
+	for src: Dictionary in lg.rearm_sources(actor):
+		var key := String(src.key)
+		var items: Dictionary = src.items
+		var n := 0
+		var why := ""
+		var ok := false
+		for id: Variant in items:
+			n += int(items[id])
+			var w := lg.stow_problem(StringName(String(id)))
+			if w == "":
+				ok = true
+			elif why == "":
+				why = w
+		var e := _entry(&"rearm", "Rearm: %s (%d)%s" % [String(src.label).to_lower(), n, " x%d speed" % roundi(float(src.mult)) if float(src.mult) > 1.0 else ""],
+			func() -> void: v.request_service.rpc_id(1, "stow", StringName(key), &""), "" if ok else why)
+		e["group"] = "Rearm"
+		out.append(e)
+	var racks: Array = (v.weapons.racks.keys() if v.weapons else []) + ([VehicleLogistics.SMOKE_RACK] if v.smoke else [])
+	var taken := 0
+	for rack: Variant in racks:
+		for e: Dictionary in lg.rack_items(String(rack)):
+			if int(e.count) <= 0 or taken >= MAX_ENTRIES:
+				continue
+			taken += 1
+			var r := String(rack)
+			var id: StringName = e.id
+			var out_e := _entry(&"unstow", "%s from the %s (%d)" % [ItemDB.get_item(id).name, VehicleLogistics.module_name(r), int(e.count)],
+				func() -> void: v.request_service.rpc_id(1, "unstow", StringName(r), id))
+			out_e["group"] = "Take out rounds"
+			out.append(out_e)
+	for f: Dictionary in lg.fuel_sources():
+		var key2 := String(f.key)
+		out.append(_entry(&"refuel_from", "Refuel: %s (%.0f L, %.0f L/min)" % [String(f.label).to_lower(), float(f.litres), float(f.lpm)],
+			func() -> void: v.request_service.rpc_id(1, "refuel_from", StringName(key2), &""),
+			"The tank is full" if v.fuel_litres() >= float(v.spec.get("fuel_l", 0.0)) - 0.5 else ""))
+	if v.cargo_hold:
+		for wi: WorldItem in lg._pallets_near(6.0):
+			var uid := wi.uid
+			var item := ItemDB.get_item(wi.item_id)
+			out.append(_entry(&"load_pallet", "Load the %s" % item.name.to_lower(), func() -> void: v.request_service.rpc_id(1, "load_pallet", &"", StringName(uid)),
+				"" if v.cargo_hold.room_for(VehicleCargo.HOLD, item, wi.state) > 0 else "No room in the hold"))
 	return out
 
 
@@ -264,6 +408,10 @@ func _seat_actions(_actor: Soldier) -> Array[Dictionary]:
 		var index := i
 		moves.append(_entry(&"switch", v.seat_name(i), func() -> void: v.request_switch.rpc_id(1, index)))
 	out.append({"id": &"move_seat", "label": "Move to", "disabled": "" if not moves.is_empty() else "No free seat", "items": moves, "target": self})
+	if v.logistics and not v.wrecked:  # A8: a crewman stows rounds from the hold
+		for src: Dictionary in v.logistics.rearm_sources(null):
+			if String(src.key) == VehicleLogistics.HOLD:
+				out.append(_entry(&"rearm", "Stow rounds from the hold", func() -> void: v.request_service.rpc_id(1, "stow", StringName(VehicleLogistics.HOLD), &"")))
 	out.append(_check())
 	return out
 

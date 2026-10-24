@@ -54,6 +54,11 @@ var _downed: Label
 var _downed_detail: Label
 var _message: Label
 var _subtitles: Label
+## The armoured vehicles' HUD (VehicleHud, combined arms A5): its panel takes the strip's place
+## in the bottom-centre zone; made the first time the player sits in one.
+var vehicle_hud: VehicleHud
+## The x-ray's card and full view (VehicleXray, combined arms A5).
+var xray: VehicleXray
 ## The vehicle readout: one label per part (Vehicle.readout_parts), flowing onto more lines.
 var _vehicle: HFlowContainer
 var _vehicle_parts: Array = []
@@ -162,6 +167,8 @@ func _ready() -> void:
 	zone_top_right.add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	zone_top_right.add_child(HcStrip.new())  # high command: the squads' line and the latest request (high_command.md 10)
 	zone_top_right.add_child(RequestCards.new(player))  # requests to friendly units and their asks (combined_arms 4.1, 4.3)
+	xray = VehicleXray.new(player, self)  # the x-ray: its card goes in this zone, the full view over the HUD (combined_arms 2.11)
+	add_child(xray)
 	objective_helper = ObjectiveHelper.new(player)  # what to do now, and small markers on its target
 	add_child(objective_helper)
 	ammo_readout = AmmoReadout.new(player)  # mags and roughly how full, not a count
@@ -360,6 +367,8 @@ func _fit_bottom_centre() -> void:
 	_vehicle.visible = _vehicle_left > 0.0 and not _vehicle_parts.is_empty()
 	if _vehicle.visible:
 		room -= _fit_vehicle(room, zone_bottom_centre.size.x) + UiKit.SPACE_S
+	if is_instance_valid(vehicle_hud) and vehicle_hud.panel_shown():
+		room -= vehicle_hud.fit(room, zone_bottom_centre.size.x) + UiKit.SPACE_S  # (A5's panel in the strip's place)
 	_subtitles.room = room
 	_subtitles.refit(zone_bottom_centre.size.x)
 

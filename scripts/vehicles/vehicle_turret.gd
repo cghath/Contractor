@@ -237,8 +237,19 @@ static func split(model: String, c: VehicleArt.Canvas) -> void:
 					gun_cells[cell] = [hit, seen]
 				elif m.y >= piv.y and m.y < top and Vector2(m.x - piv.x, m.z - piv.z).length() <= radius:
 					turret_cells[cell] = [hit, seen]
+	# Combined arms A7 (F-245): a launcher on the turret that raises on its own hinge (the
+	# Bradley's TOW: turret "launcher" {"box", "hinge", "raise_deg"}) is a part of its own.
+	var launcher_cells := {}
+	var launcher: Dictionary = t.get("launcher", {})
+	if not launcher.is_empty():
+		var l_box := VehicleSpecs.box(launcher.get("box", [0, 0, 0, 0, 0, 0]))
+		for cell: Vector3i in turret_cells.keys():
+			var m := Vector3((cell.x + 0.5 - c.size.x * 0.5) * vs, (cell.y + 0.5) * vs, (cell.z + 0.5) * vs - half_z)
+			if l_box.has_point(m):
+				launcher_cells[cell] = turret_cells[cell]
+				turret_cells.erase(cell)
 	var parts: Array = []
-	for pair: Array in [["Turret", turret_cells], ["Gun", gun_cells]]:
+	for pair: Array in [["Turret", turret_cells], ["Gun", gun_cells], ["Launcher", launcher_cells]]:
 		var cells: Dictionary = pair[1]
 		if cells.is_empty():
 			continue

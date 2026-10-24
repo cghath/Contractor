@@ -11,6 +11,176 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Logistics, repair and armour packages (cg_brief queue item 2.6 (A8), armour/logistics)
+
+Combined arms phase A8: tank rounds are things you carry, stow and run out of; a broken tank is
+fixed module by module in the field or at the motor pool; a disabled one is towed home; and armour
+packages are bought, fitted and paid for in speed and fuel. Design: docs/combined_arms.md 2.9,
+2.2.2 and 2.4.5 ("Built in A8" there); every number Proposed (data/vehicle_logistics.json,
+data/prices.json "ammo" and "packages", data/ground_supports.json "module_prices"); calls in
+docs/audits/followups.md "Calls made".
+
+#### Added
+- **Rounds as items**: 120 mm M829A3, M830A1 and M1147 rounds (21-24 kg, carried in both hands),
+  25 mm cans of 50 (M791, M919, M792), TOW-2A missiles, 40 mm Mk19 cans, vehicle smoke salvos, and
+  the enemy's 125 mm and 30 mm rounds as salvage. The racks hold them: firing a sabot takes one
+  out, Check vehicle lists each rack by round. All of them in the shop, priced per round.
+- **Rearming** at a vehicle's cargo point (Left Ctrl > Rearm), the vehicle stopped: from your own
+  kit, from its hold (a crewman can do that from his seat), from another vehicle's hold within 8 m
+  (any truck carrying rounds, twice as fast) or from an **ammunition pallet** within 8 m. 10 s a
+  120 mm round, 15 s a can, 30 s a TOW, 10 s a smoke salvo; each goes into the right rack, and the
+  job pauses while you're under fire or the vehicle is hit. Rounds come out the same way (Take
+  out rounds). Pallets per calibre (120 mm, 25 mm, TOW, smoke, fuel drums) are too big to carry:
+  a truck loads one from beside its cargo point, and a helicopter resupply now brings each of the
+  company's tanks and IFVs the ammunition it's shortest of (8 x 120 mm, 300 x 25 mm or 2 TOW).
+- **Field repairs by module** at the service point: track links for a thrown track (3 minutes with
+  two men, 6 alone), a spare wheel, a repair kit for a damaged engine, transmission, turret drive
+  or mounted gun, a patch for a holed fuel tank (the leak stops), a spare periscope or radio, a
+  spare ERA tile or slat panel (from the hold) for one that fired. Repairs bring a part back to
+  60% and clear the kill states with it; the work done stays on the part if you walk off, and the
+  job pauses under fire. A destroyed engine, breech, barrel, sight, fire control, ammo rack or
+  hull is the motor pool's.
+- **The motor pool** quotes and fixes each part (a destroyed module costs its share of the
+  vehicle's value; fired tiles their spares), rearms vehicles going out and coming home to the
+  **load-out** you pick (standard, anti-armour, urban) and charges the rounds and smoke it puts in,
+  and refills the extinguisher bottles.
+- **Armour packages** at the motor pool page: fit TUSK I/II, Trophy, BUSK III, the slat kits, the
+  spall liner, CROWS, the M-ATV and **MaxxPro appliqué ($40,000)**, the mine roller or the thermal
+  kit for their price and days in the workshop (some need standing with the US, Trophy needs TUSK
+  I, TUSK II credits a TUSK I already fitted); take one off for half back. Each keeps its STANAG
+  4569 rating (shown on the page), and its weight costs top speed, acceleration and fuel.
+- **Towing** (recovery): a vehicle that can't drive is hooked up to one at least half its mass at
+  its service point (60 s, both stopped) and towed on a bar at up to 15 km/h; towed home inside
+  the extraction's reach, it goes back to the motor pool.
+- **Fuel drums**: refuel at 60 L a minute from a drum pallet on the ground or in a truck's hold.
+- An API for AI crews and support (A9): what a vehicle needs, where it can rearm, what can be
+  repaired, a recovery call.
+- New suite `armourlog` (in tools/run_tests.sh and CI).
+
+#### Changed
+- On the M-ATV, MaxxPro, AAV, Bradley and Abrams the service point lists repairs by part ("Track
+  Links: left track") instead of by zone; technicals keep the zone repairs.
+- Fitted packages and fired ERA tiles now reach every player and late joiner and are saved with
+  the vehicle (they were the host's alone), so the HUD's doll and the x-ray show them everywhere.
+- The motor pool's quote for a vehicle with modules is per part, and its service now really makes
+  every part whole (it left the modules' damage in the record).
+
+#### Fixed
+- The base suite's "the pay lands in the one bank" counts a captured leader's bounty: it failed
+  whenever the board's draw gave the loop a manhunt or capture (the bounty is paid beside the
+  debrief's pay since the war's bounties came in).
+
+### Fire, destruction and sound (cg_brief queue item 2.5 (A7), armour/fx)
+
+Combined arms phase A7: armour burns, cooks off and blows apart the way it should, the guns sound
+like what they are, and the crew hears itself on the intercom. Design: docs/combined_arms.md 2.10
+and 2.7.1 ("Built in A7" there); every number Proposed (data/vehicle_fx.json); calls in
+docs/audits/followups.md "Calls made".
+
+#### Added
+- **Fires in stages**: a vehicle set alight smokes grey for a few seconds, then burns with flames,
+  black smoke and a light; once it's a wreck it keeps burning for 2-5 minutes while the flames die
+  down, its smoke column stands for 5-10 minutes (a tall billboard seen from past 600 m), then it
+  smoulders for the rest of the deployment. Saved with the zone, and a player who joins late sees
+  a burning wreck burning. A burning hull is hot in thermal and cools off once it's out.
+- **Ammunition**: the Abrams' bustle vents through its blow-out panels as an 8 m column of fire for
+  4 s and the tank fights on; a rack cooking off (the Bradley's 25 mm, the AAV's) pops a round
+  every 0.5-3 s for 20-60 s, each pop a small blast on anyone close; a rack going up is a
+  **fireball** sized by the rounds aboard, a blast on everyone near (up to 12 kg TNT) and a
+  shake. With 10 or more main-gun rounds aboard the **turret is thrown** into the air and lands
+  where its physics takes it (its crash heard), otherwise the hull ruptures; 12-24 pieces of
+  **debris** fly off and come to rest; the hulk is charred black. The turret and the debris land
+  in the same places on every machine and stay there in the save.
+- **Bail-out**: AI crews get out when a rack cooks off or after a few seconds of flames
+  ("Bail out!"); a catastrophic kill gives nobody the time.
+- **Smoke dischargers** (the Abrams' M250, the Bradley's M257): "Pop smoke" on the crew wheel
+  throws a salvo of grenades across the turret's front that makes a **multispectral screen**: it
+  blocks sight, thermal and the laser until it clears. Two salvos loaded, a reload's worth stowed
+  (10 s a salvo, stopped); a damaged launcher loses half its grenades. The HUD shows SMOKE 6 | 6.
+- **Gun sounds**: the 120 mm's report (heard for kilometres) with a pressure thump and a shake
+  close by, and the dust its overpressure kicks up; it rings the ears of anyone standing in front
+  of the muzzle. The 25 mm's thud, the TOW's launch whoosh and the wire spooling out. Muzzle
+  flashes, the gun's recoil and the hull rocking on a 120 mm shot. The **TOW launcher** visibly
+  raises and lowers.
+- **Impacts by round**: a ricochet sprays sparks with a ping, a stopped round sparks with a clang
+  (steel), a thud (composite) or a clank (aluminium), a penetration flashes white with a muffled
+  boom, a stopped HEAT round flashes orange with a black puff, HE bursts by its filling. Tracers by
+  round: sabot white-hot, HEAT orange, HE red.
+- **Inside the vehicle**: crew voices come over the **intercom** (band-limited, never muffled),
+  buttoned up or turned out; your own engine and tracks are a louder, duller drone from inside
+  rather than muffled with the outside. Tracks clatter louder with speed.
+- New suite `vehiclefx` (in tools/run_tests.sh and CI).
+
+#### Changed
+- The fire's old orange sphere and light are gone (the new effects replace them).
+- A burning hull blackens a smaller spot every 4 s instead of every second, and the hull's damage
+  carving runs about 2.5x faster: eight burning vehicles used to hold the host to a few frames a
+  second.
+- A rack that goes up in a vehicle already on fire from the same hit still goes up at once.
+- Wrecks in older saves smoulder.
+
+### Vehicle HUDs and the x-ray (cg_brief queue item 2.4 (A5), armour/hud)
+
+Combined arms phase A5, the first build cut: the Abrams and the Bradley (and the AAV, M-ATV and
+MaxxPro) get their own HUDs, the x-ray shows what each hit did, and a buttoned-up crew sees and
+hears the world from inside. Design: docs/combined_arms.md 2.6, 2.11 and 2.12 ("Built in A5"
+there); every number Proposed; calls in docs/audits/followups.md "Calls made".
+
+#### Added
+- **The vehicle HUD** (any seat of a vehicle with modules; soft vehicles, helicopters and static
+  guns keep the text line): a panel in the old line's place with a top-down **doll** of the
+  vehicle (its modules white, yellow when damaged, red when destroyed; tracks or wheels; reactive
+  armour tiles, grey once fired; a coloured pip with a letter for each crewman at his seat), the
+  vehicle and seat with a short damage word (none, damaged, mobility, firepower, knocked out,
+  burning), the **alerts** when they're true (ON FIRE, TRACK THROWN, ROLLOVER RISK, FORD depth,
+  MISSILE LAUNCH, SHORT-CREWED, NO RADIO), the guns' lines, a **round selector** (every round
+  type, the loaded one in brackets, the next named, the reload bar), the crew line (names, jobs,
+  wounded or down, "you"), the drive line (speed, gear, fuel, engine and transmission) and your
+  own keys. On a small window it drops the keys first, then the crew names, the drive line and the
+  selector. The compass strip shows the hull's heading, the turret's direction and a red tick for
+  where the last hit came from; in third person a ring shows where the gun really points.
+- **Blue Force Tracker chevrons**: a blue chevron over every friendly vehicle whose radio works,
+  in every view and through the sights. A vehicle whose radio is knocked out drops off it.
+- **The sights** show the crew pips and the damage word, and bracket the loaded round.
+- **Vision blocks and periscopes**: buttoned up in first person (the Abrams' driver, commander and
+  loader, the Bradley's driver and commander) you see only through your blocks: thin slits of glass
+  at 1x, the one you look towards; the sight (aim) and the third-person view are as before. The
+  driver's three periscopes have a **night channel** (the sight channel key): green intensifier,
+  the rest of the HUD dimmed; a damaged periscope loses it, a destroyed one means turning out to
+  drive. The loader turned in sees the bustle doors and a large round selector.
+- **Muffled hearing**: in a closed seat outside sounds are 12 dB quieter and dull; turned out or in
+  an open seat, clear.
+- **The x-ray** (5, rebindable; the pad wheel's "Last hit (x-ray)"; the pause menu's "Last hits"):
+  after a hit on armour a small card says what happened ("PEN: transmission destroyed, engine
+  damaged, loader wounded" or "RICOCHET: Turret side, 81 degrees"); the key opens the full view:
+  the vehicle drawn from its data, turnable, its plates shaded by thickness, its modules and crew
+  coloured by state, the round's line through what it hit, the angle, the spall, and the numbers
+  ("Hull rear, 30 mm KE at 0 degrees: 30 mm effective. M829A3 at 1000 m: 780 mm. PENETRATION.").
+  It reads what the host worked out for that hit, never a second guess. The last 10 hits are
+  kept. A setting (HUD tab, "Hit analysis") picks the cards: off, my shots, my shots and hits on me
+  (the default), every hit. `--xray-log` writes every report to the session log.
+- **Protection analysis** at the vehicle range and the base: with no hit to show, the x-ray key
+  opens it on the vehicle you're in or next to: pick a round and a range, click the model, and
+  see what happens there and how often it ricochets.
+- New suite `vehiclehud` (in tools/run_tests.sh and CI); ui_test fits the panel, the card and the
+  full view at its 10 window sizes.
+
+#### Fixed
+- **Door gunners and mounted MGs fire again** near friendly vehicles. B5's armour IFF held every
+  vehicle gunner off any enemy within 50 m of any friendly tracked vehicle, so a Black Hawk's door
+  gunner or an M-ATV's M2 at the range (or in any convoy) never fired (vehicles suite: "engages the
+  enemy out of his door (0 rounds)", "fires at an enemy in view (0 rounds)", red since B5). A
+  machine gun now holds fire only when a tracked friendly vehicle is on its line of fire (within
+  6 m of it, out to 150 m past the target, less when firing downhill). Its own vehicle is also
+  recognised by the tracker's own key.
+
+#### Changed
+- HitEvents carry the round's direction, angle, range, shooter, path and spall for the x-ray
+  (a few hundred bytes each); a vehicle's dead radio shows on every machine, not only the host.
+- perfcases' city rechecked alone on a quiet machine: 51 hitches a minute against the local
+  budget of 96 (R0633; the 322 after the armour merge was a busy PC). The hitches left are the AI's
+  ticks (F-261), so the budgets stay.
+
 ### Gunnery: sights, thermal, the laser and fire control, the stabiliser, hatches (cg_brief queue item 2.3 (A4), armour/gunnery)
 
 Combined arms phase A4: the Abrams and the Bradley aim through real sights. Design:

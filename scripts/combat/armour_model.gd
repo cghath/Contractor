@@ -459,6 +459,7 @@ static func vehicle_hit(vehicle: Vehicle, hit: Dictionary, zone: Dictionary, loc
 	if hit.has("force"):
 		shot.force = hit.force
 	var res := resolve(shell, plate, shot)
+	res["range_m"] = range_m  # (A5: the x-ray's "at 640 m")
 	for f: Array in res.tiles_fired:
 		var flags: PackedByteArray = used.get(f[0], PackedByteArray())
 		if flags.size() <= int(f[1]):

@@ -31,8 +31,10 @@ extends Node
 ##
 ## Shells fly through ShellFlight; missiles through Launchers. Which rounds a rack holds lives here
 ## (`racks`: {rack module id: {shell id: rounds}}); VehicleModules' rack count stays their total
-## (losses to hits come back here: _reconcile_racks). Phase A8 makes the rounds items: its hook is
-## server_stow and rack_contents. AI crews using the guns are phase A9: every action is a
+## (losses to hits come back here: _reconcile_racks). The rounds are items (A8, VehicleLogistics:
+## a 120 mm round or a TOW is one, a 25 mm can 50; they come aboard through server_stow and out
+## through server_take_rounds, and the motor pool rearms to a load-out: server_rearm). AI crews
+## using the guns are phase A9: every action is a
 ## server_* call any brain can make, and can_fire says why one can't.
 ##
 ## Gunnery (A4, VehicleGunnery): the main gun is laid off its sight by the fire control (the
@@ -696,6 +698,11 @@ func _capacity(rack: String) -> int:
 	return int(vehicle.modules.mods[i].rounds) if i >= 0 else 0
 
 
+## Rounds rack `rack` has room for now (A8: VehicleLogistics stows items by it; every peer).
+func rack_room(rack: String) -> int:
+	return maxi(_capacity(rack) - rack_total(rack), 0)
+
+
 ## The stowage rack holding a round of `sid` for mount `m` ("" none).
 func _stowage_rack(m: Dictionary, sid: String) -> String:
 	for r: Variant in m.stowage:
@@ -903,10 +910,35 @@ func server_stow(rack_id: String, shell_id: String, n: int) -> int:
 	return put
 
 
-## Host (Vehicle.server_rearm; the motor pool): racks full, the TOW's launcher full, the main
+## Host (A8's hook: VehicleLogistics takes rounds out as items): up to `n` rounds of `shell_id`
+## out of rack `rack_id`. How many came out.
+func server_take_rounds(rack_id: String, shell_id: String, n: int) -> int:
+	var c: Dictionary = racks.get(rack_id, {})
+	var got := clampi(int(c.get(shell_id, 0)), 0, maxi(n, 0))
+	if got > 0:
+		c[shell_id] = int(c[shell_id]) - got
+		racks[rack_id] = c
+		_sync_rack(rack_id)
+		_dirty = true
+	return got
+
+
+## Host (Vehicle.server_rearm; the motor pool): racks full (to `loadout`, {rack: {shell: rounds}}:
+## the load-out picked at the motor pool, A8; {} the default), the TOW's launcher full, the main
 ## gun loaded. Returns the cupola and pintle guns' feeds to top up in the hold: [[feed, load]].
-func server_rearm() -> Array:
+func server_rearm(loadout: Dictionary = {}) -> Array:
 	server_reset_racks()
+	for rack: Variant in loadout:
+		if racks.has(String(rack)) and loadout[rack] is Dictionary:
+			var c := {}
+			var room := _capacity(String(rack))
+			for sid: Variant in loadout[rack]:
+				var n := clampi(int(loadout[rack][sid]), 0, room)
+				room -= n
+				if n > 0:
+					c[String(sid)] = n
+			racks[String(rack)] = c
+			_sync_rack(String(rack))
 	var out: Array = []
 	for m: Dictionary in mounts:
 		var st: Dictionary = state[m.id]
@@ -987,7 +1019,10 @@ func _fire_shell(m: Dictionary, shooter: Soldier, sid: String, now: float, breec
 	if g:
 		opts.merge(g.fuze_for(sid), true)  # A4: the fuze set for this round, airburst at the lased range
 	var id := flight.server_fire(StringName(sid), origin, vel, shooter, opts)
-	Sfx.server_shot(origin, origin + dir * 800.0, String(m.g.get("sound", "hmg")))
+	Sfx.server_shot(origin, origin + dir * 800.0, String(m.g.get("sound", "hmg")))  # (A7: the 120 mm's report, the 25 mm's thud: F-245)
+	VehicleFx.server_event(vehicle, "muzzle", {"kind": String(m.kind), "at": origin, "dir": dir})  # A7: flash, recoil, the overpressure's dust
+	if String(m.kind) == CANNON:
+		VehicleFx.server_overpressure(vehicle, origin, dir)
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)
 	_dirty = true
 	return {"ok": id != 0, "why": "" if id != 0 else "Can't fire", "shell": id, "round": sid}
@@ -1022,6 +1057,8 @@ func _fire_missile(m: Dictionary, shooter: Soldier, st: Dictionary) -> Dictionar
 		p.exclude.append_array(Launchers._rids_of(s))
 	st.rd = int(st.rd) - 1
 	st.g = launchers.last_id
+	Sfx.server_play(StringName(String(m.g.get("sound", "tow_launch"))), origin)  # A7 (F-245): the launch's whoosh
+	VehicleFx.server_event(vehicle, "muzzle", {"kind": ATGM, "at": origin, "dir": dir})
 	_sight.clear()
 	_sight.append([Soldier._now(), sight_origin(), sight_line()])
 	PeopleLayer.server_noise(shooter, origin, PeopleLayer.BLAST_HEARD_M)

@@ -1,0 +1,43 @@
+{
+	"_units": "Combined arms A8 (cg_brief queue item 2.6; docs/combined_arms.md 2.2.2, 2.4.5, 2.9, 9.2, 9.3): logistics and armour packages, read by VehicleLogistics (scripts/vehicles/vehicle_logistics.gd) and MotorPool. Every number is Proposed. Seconds, metres, tonnes, litres. rearm: rounds as items (data/items.json: stats.shell names the data/shells.json round, per_item the rounds an item holds, stow_s the hand time to stow one through the cargo point into the right rack, 2.9.2: 10 s a 120 mm round, 15 s a link box, 30 s a TOW, 10 s a smoke salvo); stopped_mps: the vehicle at most this fast; from an ammo carrier (another vehicle's hold: the HEMTT stand-in) within carrier_reach_m at carrier_mult x hand speed; from a pallet (an ammo pallet item on the ground or in the vehicle's own hold) within pallet_reach_m at pallet_mult. heli_load: the helicopter resupply's armour ammo, by calibre (2.9.2: 8 x 120 mm or 300 x 25 mm or 2 TOW), shortest first. fuel: refuelling from a fuel pallet (drums, hand pump) or a tanker model (tankers: none in vehicles.json yet; the M978's 9,500 L at 300 L/min when D6a adds it) within reach_m. repair: the field table (2.2.2 and 2.9.3) by module kind, each job [item, seconds with two men, the states it fixes] plus to (the health after; field_to by default) and solo_x (one man alone takes this many times as long; solo_x by default); helper_m: a second able man on foot within this of the worker (or an able crewman aboard) makes two; a job pauses while its worker is suppressed (suppression over suppressed, or fire at him within threat_pause_s) or the vehicle was hit within hit_pause_s, and stops (its progress kept on the module) if he moves job_move_m or the vehicle does; tiles: an ERA tile or slat panel back from the spares (40 s); fob_only: kinds only the motor pool fixes. tow (2.8.3's stand-in for a recovery vehicle: no M88 in data): a tower of at least min_mass_share of the towed vehicle's mass, hitches within hook_m, hooked up in hook_s by a man at the towed vehicle's service point, both stopped; the bar bar_m long, stiff k_per_kg N/m per kg of the towed vehicle, damped; the pair at most max_kmh. packages (2.4.5): fit_days and remove_days at the motor pool (default by package, days), refund (a removed package's share back), upgrade_credit (fitting a package that includes one already fitted credits that one's price). extinguishers (2.10.1, F-262's bottles): halon (the crew compartment's automatic shot) and engine (the manual engine-bay shots) per model; refilled at the FOB at refill_price each. models: per model (merged into its spec as logistics): loadouts, the FOB load-outs the motor pool page picks from ({rack module id: {shell id: rounds}}; standard is data/vehicle_weapons.json's racks). The tow hitches are the hull boxes' front and back ends, 0.5 m up.",
+	"rearm": {"stopped_mps": 0.5, "carrier_reach_m": 8.0, "carrier_mult": 2.0, "pallet_reach_m": 8.0, "pallet_mult": 1.0, "check_s": 0.25,
+		"heli_load": {"120": 8, "25": 300, "tow": 2}},
+	"fuel": {"reach_m": 8.0, "tankers": {"m978": {"litres": 9500, "lpm": 300}}},
+	"repair": {
+		"field_to": 0.6, "solo_x": 2.0, "helper_m": 3.0, "suppressed": 0.3, "threat_pause_s": 2.0, "hit_pause_s": 5.0, "job_move_m": 1.5,
+		"jobs": {
+			"engine": [["engine_parts", 60, ["damaged"], {"to": 1.0}], ["repair_kit", 90, ["damaged"]]],
+			"transmission": [["engine_parts", 60, ["damaged"], {"to": 1.0}], ["repair_kit", 120, ["damaged"]]],
+			"track": [["track_links", 180, ["damaged", "destroyed"]]],
+			"wheel": [["spare_wheel", 25, ["damaged", "destroyed"], {"solo_x": 1.0}]],
+			"fuel_tank": [["repair_kit", 45, ["damaged", "destroyed"]]],
+			"traverse": [["repair_kit", 60, ["damaged"]]],
+			"elevation": [["repair_kit", 60, ["damaged"]]],
+			"ext_gun": [["repair_kit", 60, ["damaged"]]],
+			"ugws": [["repair_kit", 90, ["damaged"]]],
+			"driver_vision": [["periscope", 30, ["damaged", "destroyed"]]],
+			"radio": [["radio", 20, ["damaged", "destroyed"]]]
+		},
+		"tiles": {"era_tile": {"s": 40, "kinds": ["light_era", "heavy_era", "tandem_era"]}, "slat_panel": {"s": 40, "kinds": ["slat"]}},
+		"fob_only": ["structure", "breech", "barrel", "gunner_sight", "aux_sight", "commander_sight", "fcs", "ammo_rack", "smoke", "launcher", "waterjet", "compartment", "stowage"]
+	},
+	"tow": {"min_mass_share": 0.5, "hook_m": 8.0, "hook_s": 60.0, "bar_m": 3.0, "k_per_kg": 6.0, "damping": 0.7, "max_kmh": 15.0, "max_accel": 6.0},
+	"packages": {"fit_days": 2, "remove_days": 1, "refund": 0.5, "upgrade_credit": true,
+		"days": {"tusk1": 3, "tusk2": 4, "trophy": 4, "busk3": 3, "m919": 0, "crows": 2, "mine_roller": 1, "matv_slat": 1, "maxxpro_slat": 1, "aav_slat": 1, "ugws_thermal": 1}},
+	"extinguishers": {"refill_price": {"halon": 2500, "engine": 600},
+		"models": {"abrams": {"halon": 1, "engine": 2}, "bradley": {"halon": 1, "engine": 2}, "matv": {"halon": 1, "engine": 2}, "maxxpro": {"halon": 1, "engine": 2}}},
+	"models": {
+		"abrams": {"logistics": {
+			"loadouts": {
+				"standard": {"ammo_rack_bustle": {"m829a3": 16, "m830a1": 10, "m1147": 8}, "ammo_rack_hull": {"m829a3": 4, "m830a1": 2}},
+				"anti_armour": {"ammo_rack_bustle": {"m829a3": 24, "m830a1": 8, "m1147": 2}, "ammo_rack_hull": {"m829a3": 6}},
+				"urban": {"ammo_rack_bustle": {"m829a3": 8, "m830a1": 12, "m1147": 14}, "ammo_rack_hull": {"m829a3": 2, "m830a1": 2, "m1147": 2}}
+			}}},
+		"bradley": {"logistics": {
+			"loadouts": {
+				"standard": {"ready_25": {"m791": 70, "m792": 230}, "rack_25": {"m791": 200, "m792": 400}, "rack_tow": {"tow2a": 5}},
+				"anti_armour": {"ready_25": {"m791": 70, "m792": 230}, "rack_25": {"m791": 350, "m792": 250}, "rack_tow": {"tow2a": 5}},
+				"urban": {"ready_25": {"m791": 70, "m792": 230}, "rack_25": {"m791": 100, "m792": 500}, "rack_tow": {"tow2a": 5}}
+			}}}
+	}
+}

@@ -167,7 +167,7 @@ func mount_why(seat: int, m: Dictionary) -> String:
 	if String(m.get("hatch", "")) != "out" or is_out(seat):
 		return ""
 	var remote := String(m.get("remote", ""))
-	if remote != "" and remote in (vehicle.get_meta(ArmourModel.META_PACKAGES, []) as Array):
+	if remote != "" and remote in ArmourModel.fitted_packages(vehicle.spec, vehicle.get_meta(ArmourModel.META_PACKAGES, [])):  # (A8: TUSK II includes CROWS)
 		return ""
 	return "Turn out first"
 

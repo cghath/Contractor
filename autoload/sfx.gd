@@ -15,7 +15,8 @@ extends Node
 ## follow what the AI hears (SquadAI.HEAR_SHOT_M, HEAR_SUPPRESSED_M).
 ##
 ## Vehicles (cghath's side) call play_at / play_loop with their own ids: add them to
-## data/sounds.json (a "synth" recipe or real files).
+## data/sounds.json (a "synth" recipe or real files). Combined arms A7 adds the crew's intercom
+## and the own vehicle heard from inside (voice_route, play_intercom, the Interior bus).
 
 const PATH := "res://data/sounds.json"
 const AUDIO_DIR := "res://audio/sfx/"
@@ -74,8 +75,32 @@ var prebuild_ms := 0.0
 
 ## A sound under a roof this close above it plays through the room bus (reverb).
 const ROOF_M := 8.0
+## Buttoned up inside armour (combined arms A5, cg_brief queue item 2.4; docs/combined_arms.md
+## 2.6, 2.10.5): outside sounds -12 dB and low-passed, on the effects buses (SFX, SFX_Room), while
+## set_muffled is on (VehicleHud: the local player in a closed seat). Proposed.
+const MUFFLE_DB := -12.0
+const MUFFLE_CUTOFF_HZ := 900.0
+const MUFFLE_BUSES: Array[StringName] = [&"SFX", &"SFX_Room"]
+## Whether outside sounds are muffled now (this machine's listener inside a closed vehicle).
+var muffled := false
 ## Engines: heard within their sound's range_m; pitch rises with speed (m/s) up to this.
 const ENGINE_TOP_SPEED := 20.0
+## Combined arms A7 (cg_brief queue item 2.5; docs/combined_arms.md 2.10.5, 2.5.2; F-260), Proposed:
+## - the crew's intercom: a crewman's voice to the others in crew seats of the same vehicle (CVC
+##   helmets: buttoned up or turned out) comes in your ear on the Intercom bus, band-limited
+##   (INTERCOM_BAND_HZ) and a little crunchy, never muffled (voice_route, play_intercom);
+## - your own vehicle from inside: buttoned up, its engine and tracks play on the Interior bus (a
+##   louder, duller drone: INTERIOR_DB, INTERIOR_CUTOFF_HZ) instead of muffled with the outside;
+##   turned out, as anyone outside hears them;
+## - tracks (data/vehicle_fx.json "sounds"): a clatter loop under a tracked vehicle's engine, up
+##   from silent at a halt to its full level at TRACKS_FULL_MPS.
+const INTERCOM_BAND_HZ := Vector2(300.0, 3400.0)
+const INTERCOM_DB := 0.0
+const INTERIOR_DB := 4.0
+const INTERIOR_CUTOFF_HZ := 500.0
+const TRACKS_FULL_MPS := 8.0
+const TRACKS_QUIET_DB := -30.0
+var _local: Soldier  # this peer's own soldier (seen in _process)
 
 
 func _ready() -> void:
@@ -108,6 +133,8 @@ func _ready() -> void:
 		reverb.wet = 0.3
 		reverb.dry = 0.85
 		AudioServer.add_bus_effect(room, reverb)
+	_add_muffle()
+	_add_crew_buses()
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer3D.new()
 		p.bus = &"SFX"
@@ -124,6 +151,137 @@ func _load_defs() -> void:
 	var parsed: Variant = JSON.parse_string(f.get_as_text())
 	if parsed is Dictionary:
 		defs = parsed.get("sounds", {})
+
+
+## The muffle's low-pass and gain on each effects bus, off until set_muffled.
+func _add_muffle() -> void:
+	for bus: StringName in MUFFLE_BUSES:
+		var i := AudioServer.get_bus_index(bus)
+		if i < 0 or _muffle_at(i) >= 0:
+			continue
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = MUFFLE_CUTOFF_HZ
+		lp.resource_name = "muffle_lp"
+		var gain := AudioEffectAmplify.new()
+		gain.volume_db = MUFFLE_DB
+		gain.resource_name = "muffle_gain"
+		AudioServer.add_bus_effect(i, lp)
+		AudioServer.add_bus_effect(i, gain)
+		AudioServer.set_bus_effect_enabled(i, AudioServer.get_bus_effect_count(i) - 2, false)
+		AudioServer.set_bus_effect_enabled(i, AudioServer.get_bus_effect_count(i) - 1, false)
+
+
+## A7: the Intercom bus (into Voice: band-limited, a little crunch) and the Interior bus (your
+## own vehicle from inside: duller, never muffled; into Master, at the effects' volume).
+func _add_crew_buses() -> void:
+	_ensure_bus(&"Intercom")
+	var ic := AudioServer.get_bus_index(&"Intercom")
+	AudioServer.set_bus_send(ic, &"Voice")
+	if AudioServer.get_bus_effect_count(ic) == 0:
+		var hp := AudioEffectHighPassFilter.new()
+		hp.cutoff_hz = INTERCOM_BAND_HZ.x
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = INTERCOM_BAND_HZ.y
+		var crunch := AudioEffectDistortion.new()
+		crunch.mode = AudioEffectDistortion.MODE_CLIP
+		crunch.drive = 0.2
+		crunch.post_gain = -2.0
+		for fx: AudioEffect in [hp, lp, crunch]:
+			AudioServer.add_bus_effect(ic, fx)
+	_ensure_bus(&"Interior")
+	var inside := AudioServer.get_bus_index(&"Interior")
+	if AudioServer.get_bus_effect_count(inside) == 0:
+		var lp := AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = INTERIOR_CUTOFF_HZ
+		AudioServer.add_bus_effect(inside, lp)
+
+
+## The Intercom bus's band ([high-pass, low-pass] Hz; tests: the bus effects themselves).
+func intercom_band() -> Vector2:
+	var i := AudioServer.get_bus_index(&"Intercom")
+	var out := Vector2.ZERO
+	for e in (AudioServer.get_bus_effect_count(i) if i >= 0 else 0):
+		var fx := AudioServer.get_bus_effect(i, e)
+		if fx is AudioEffectHighPassFilter:
+			out.x = (fx as AudioEffectHighPassFilter).cutoff_hz
+		elif fx is AudioEffectLowPassFilter:
+			out.y = (fx as AudioEffectLowPassFilter).cutoff_hz
+	return out
+
+
+## This peer's own soldier's vehicle (null: on foot, or none yet).
+func local_vehicle() -> Vehicle:
+	return Vehicle.ride_of(_local) if is_instance_valid(_local) else null
+
+
+## Whether this peer's soldier sits closed in `v` (buttoned up: its own engine on the Interior bus).
+func inside_closed(v: Vehicle) -> bool:
+	if v == null or not is_instance_valid(_local) or Vehicle.ride_of(_local) != v:
+		return false
+	var seat := v.seat_of(_local)
+	return seat >= 0 and not v.seat_open(seat) and v.kind != Vehicle.HELICOPTER
+
+
+## How `speaker`'s voice reaches this peer's soldier (A7, 2.5.2): &"intercom" (both in crew seats
+## of one vehicle with an intercom: an armoured one), &"open" otherwise (Callouts' own rule: near
+## by air, far by radio). `listener` stands in for this peer's soldier (tests).
+func voice_route(speaker: Node, listener: Soldier = null) -> StringName:
+	var me := listener if listener else _local
+	var s := speaker as Soldier
+	if s == null or me == null or not is_instance_valid(me) or s == me:
+		return &"open"
+	var v := Vehicle.ride_of(s)
+	if v == null or v != Vehicle.ride_of(me) or not VehicleHud.applies(v):
+		return &"open"
+	var a := v.seat_of(s)
+	var b := v.seat_of(me)
+	if a < 0 or b < 0 or v.is_rider(a) or v.is_rider(b):
+		return &"open"
+	return &"intercom"
+
+
+## Plays `stream` from `speaker` on the intercom (in your ear, band-limited). The player, or null.
+func play_intercom(stream: AudioStream, speaker: Node) -> AudioStreamPlayer:
+	if stream == null or speaker == null or not is_instance_valid(speaker):
+		return null
+	var p := AudioStreamPlayer.new()
+	p.stream = stream
+	p.bus = &"Intercom"
+	p.volume_db = INTERCOM_DB
+	speaker.add_child(p)
+	p.finished.connect(p.queue_free)
+	if enabled:
+		p.play()
+	_remember(&"intercom", (speaker as Node3D).global_position if speaker is Node3D else Vector3.ZERO)
+	return p
+
+
+## The index of the muffle's low-pass on bus `i` (-1 none); its gain is the next one.
+static func _muffle_at(i: int) -> int:
+	for e in AudioServer.get_bus_effect_count(i):
+		if AudioServer.get_bus_effect(i, e).resource_name == "muffle_lp":
+			return e
+	return -1
+
+
+## Outside sounds muffled (buttoned up) or not (out in the open, turned out).
+func set_muffled(on: bool) -> void:
+	if on == muffled:
+		return
+	muffled = on
+	for bus: StringName in MUFFLE_BUSES:
+		var i := AudioServer.get_bus_index(bus)
+		var e := _muffle_at(i) if i >= 0 else -1
+		if e >= 0:
+			AudioServer.set_bus_effect_enabled(i, e, on)
+			AudioServer.set_bus_effect_enabled(i, e + 1, on)
+
+
+## Whether the effects buses are muffled now (tests: the bus effects themselves).
+func muffle_active() -> bool:
+	var i := AudioServer.get_bus_index(&"SFX")
+	var e := _muffle_at(i) if i >= 0 else -1
+	return e >= 0 and AudioServer.is_bus_effect_enabled(i, e) and AudioServer.is_bus_effect_enabled(i, e + 1)
 
 
 static func _ensure_bus(bus: StringName) -> void:
@@ -281,6 +439,8 @@ func _process(delta: float) -> void:
 			continue
 		var key := s.get_instance_id()
 		var pos := s.global_position
+		if s.is_local():
+			_local = s  # (A7: the intercom and your own vehicle's sound from inside)
 		# (A random start in the stride, so a squad setting off together doesn't step in unison.)
 		var e: Variant = _steps.get(key)  # (perf pass: no default dictionary made per soldier per frame)
 		if e == null:
@@ -437,7 +597,7 @@ func _update_engines(ear: Vector3, delta: float) -> void:
 			if enabled:
 				p.play()
 			_remember(id, v.global_position)
-			e = {"player": p, "pos": v.global_position, "speed": 0.0, "id": id}
+			e = {"player": p, "pos": v.global_position, "speed": 0.0, "id": id, "tracks": _tracks_player(v)}
 			_engines[key] = e
 		var pos := v.global_position
 		e.speed = lerpf(float(e.speed), pos.distance_to(e.pos) / maxf(delta, 0.001), 0.1)
@@ -451,11 +611,56 @@ func _update_engines(ear: Vector3, delta: float) -> void:
 		else:
 			player.pitch_scale = 0.8 + effort * 0.8
 			player.volume_db = float(def.get("volume_db", 0.0)) + effort * 5.0
+		# A7 (F-260): your own vehicle buttoned up: its engine and tracks from inside (Interior),
+		# louder and duller rather than muffled with the outside.
+		var inside := inside_closed(v)
+		var bus := &"Interior" if inside else &"SFX"
+		if player.bus != bus:
+			player.bus = bus
+			AudioServer.set_bus_volume_db(AudioServer.get_bus_index(&"Interior"), AudioServer.get_bus_volume_db(AudioServer.get_bus_index(&"SFX")))
+		if inside:
+			player.volume_db += INTERIOR_DB
+		e["inside"] = inside
+		var tracks := e.get("tracks") as AudioStreamPlayer3D
+		if tracks and is_instance_valid(tracks):
+			var tdef: Dictionary = defs.get(String(tracks.get_meta(&"id", "")), {})
+			var roll := clampf(float(e.speed) / TRACKS_FULL_MPS, 0.0, 1.0)
+			tracks.global_position = pos
+			tracks.bus = bus
+			tracks.volume_db = lerpf(TRACKS_QUIET_DB, float(tdef.get("volume_db", 0.0)), roll) + (INTERIOR_DB if inside else 0.0)
+			tracks.pitch_scale = 0.7 + roll * 0.6
 		alive[key] = true
 	for key in _engines.keys():
 		if not alive.has(key):
 			(_engines[key].player as Node).queue_free()
+			if is_instance_valid(_engines[key].get("tracks")):
+				(_engines[key].tracks as Node).queue_free()
 			_engines.erase(key)
+
+
+## A7: the clatter of `v`'s tracks (its fx block's "tracks" sound, tracked vehicles), playing
+## along with its engine; null for none.
+func _tracks_player(v: Vehicle) -> AudioStreamPlayer3D:
+	if v.kind != Vehicle.TRACKED:
+		return null
+	var id := String(((v.spec.get("fx", {}) as Dictionary).get("sounds", {}) as Dictionary).get("tracks", "tracks_heavy"))
+	var def: Dictionary = defs.get(id, {})
+	var options := streams(StringName(id)) if not def.is_empty() else []
+	if options.is_empty():
+		return null
+	var p := AudioStreamPlayer3D.new()
+	p.stream = options[0]
+	p.bus = &"SFX"
+	p.unit_size = float(def.get("unit_size", 10.0))
+	p.max_distance = float(def.get("range_m", 200.0))
+	p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	p.volume_db = TRACKS_QUIET_DB
+	p.set_meta(&"id", id)
+	add_child(p)
+	p.global_position = v.global_position
+	if enabled:
+		p.play()
+	return p
 
 
 ## The engine sound playing for `v` (tests), or {}.

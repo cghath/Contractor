@@ -212,6 +212,9 @@ func _local(what: String, at: Vector3) -> void:
 		"bail":
 			if is_instance_valid(player.vehicle):
 				player.vehicle.request_exit.rpc_id(1)
+		"pop_smoke":  # (combined arms A7: the dischargers, VehicleSmoke)
+			if is_instance_valid(player.vehicle) and player.vehicle.smoke:
+				player.vehicle.smoke.request_pop.rpc_id(1)
 		"fire_support":
 			if player._hud and player._hud.command_menu:
 				player._hud.command_menu.open()  # (fire support is on the Support page)

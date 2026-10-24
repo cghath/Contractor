@@ -19,6 +19,14 @@ const OUTLINE := UiKit.OUTLINE
 
 var player: Soldier
 var _heading := 0.0
+## Seated in an armoured vehicle (VehicleHud, combined arms A5): [[bearing_deg, "hull" | "turret"
+## | "hit"], ...]: the hull's heading (a caret under the strip), the turret's (a bracket) and the
+## bearing the last hit came from (a red tick). Empty on foot.
+var vehicle_marks: Array = []:
+	set(value):
+		if value != vehicle_marks:
+			vehicle_marks = value
+			queue_redraw()
 
 
 func _init(p: Soldier = null) -> void:
@@ -81,3 +89,22 @@ func _draw() -> void:
 	var tpos := Vector2(mid - tw * 0.5, HEIGHT + 16.0)
 	draw_string_outline(font, tpos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 5, OUTLINE)
 	draw_string(font, tpos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiKit.ACCENT)
+	for m: Array in vehicle_marks:
+		var off := wrapf(float(m[0]) - _heading, -180.0, 180.0)
+		var kind := String(m[1])
+		if absf(off) > half and kind != "hit":
+			continue
+		var mx := clampf(mid + off * px_per_deg, 2.0, size.x - 2.0)
+		match kind:
+			"hull":  # a caret under the strip
+				var tri := PackedVector2Array([Vector2(mx - 7, HEIGHT + 2), Vector2(mx + 7, HEIGHT + 2), Vector2(mx, HEIGHT - 6)])
+				draw_colored_polygon(tri, OUTLINE)
+				draw_colored_polygon(PackedVector2Array([tri[0] + Vector2(2, -1), tri[1] + Vector2(-2, -1), tri[2] + Vector2(0, 2)]), COLOUR)
+			"turret":  # a bracket over the strip
+				for sx: float in [-1.0, 1.0]:
+					var pts := PackedVector2Array([Vector2(mx + sx * 4, 1), Vector2(mx + sx * 9, 1), Vector2(mx + sx * 9, 11), Vector2(mx + sx * 4, 11)])
+					draw_polyline(pts, OUTLINE, 4.0)
+					draw_polyline(pts, UiKit.ACCENT_HOT, 2.0)
+			"hit":  # a red tick, full height (at the strip's edge when it's behind)
+				draw_line(Vector2(mx, 0.0), Vector2(mx, HEIGHT), OUTLINE, 6.0)
+				draw_line(Vector2(mx, 0.0), Vector2(mx, HEIGHT), UiKit.BAD, 4.0)
