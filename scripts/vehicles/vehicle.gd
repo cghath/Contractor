@@ -347,6 +347,10 @@ var hatches: VehicleHatches
 var fire_state: VehicleFire
 var fx: VehicleFx
 var smoke: VehicleSmoke
+## Combined arms A8 (cg_brief queue item 2.6): rounds as items, rearming, field repairs by module,
+## the tow, fuel pallets, armour packages and their weight, the extinguisher bottles
+## (VehicleLogistics, "Logistics": its state in the StateSync and the save). Ground vehicles only.
+var logistics: VehicleLogistics
 
 ## Host: fuel (litres), fire time left, battery, salvaged.
 var fuel := 0.0
@@ -455,6 +459,9 @@ func setup(p_model: String, p_scheme := "", p_faction := &"player", id := "") ->
 	if VehicleSmoke.has_dischargers(spec):
 		smoke = VehicleSmoke.new(self)  # A7: "Smoke", the M250 / M257 dischargers
 		add_child(smoke)
+	if VehicleLogistics.wanted(spec):
+		logistics = VehicleLogistics.new(self)  # A8: "Logistics"
+		add_child(logistics)
 	fuel = float(spec.get("fuel_l", 100.0))
 	for z in ZONES:
 		_zones[z] = 1.0
@@ -502,6 +509,8 @@ func _add_sync() -> void:
 	paths.append(^"FireState:net_state")  # A7
 	if smoke:
 		paths.append(^"Smoke:net_state")
+	if logistics:
+		paths.append(^"Logistics:net_state")  # A8
 	for path: NodePath in paths:
 		state.add_property(path)
 		state.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
@@ -847,6 +856,8 @@ func can_drive() -> bool:
 ## Top speed now (m/s): the model's, cut by engine and wheel damage.
 func top_speed(reverse := false) -> float:
 	var top := float(spec.get("reverse_kmh" if reverse else "top_speed_kmh", 0.0)) * VehicleSpecs.KMH
+	if logistics:
+		top = minf(top * logistics.speed_mult(), logistics.tow_top())  # A8: the packages' weight, a tow
 	if modules and modules.authored:
 		return top * modules.speed_share()  # A2: engine, transmission, tracks, wheels and run-flats
 	var engine := zone_health(ZONE_ENGINE)
@@ -1975,6 +1986,8 @@ func _drive_step(delta: float) -> void:
 	var throttle := clampf(float(input.throttle), -1.0, 1.0) if can_drive() else 0.0
 	var steer := clampf(float(input.steer), -1.0, 1.0)
 	var brake := bool(input.brake) or not can_drive()
+	if logistics and logistics.towed():
+		brake = false  # A8: under tow, it rolls free behind the tow bar
 	if kind == HELICOPTER:
 		throttle = 0.0
 		brake = true
@@ -2020,7 +2033,7 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 	if throttle != 0.0:
 		var top := top_speed(throttle < 0.0)
 		var curve := sqrt(clampf(1.0 - absf(v_fwd) / maxf(top, 0.1), 0.0, 1.0))
-		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve
+		drive = throttle * mass * float(spec.get("accel_ms2", 2.0)) * curve * (logistics.accel_mult() if logistics else 1.0)  # A8: the packages' weight
 		# Wave 5b: uphill the engine gears down and holds the grade (up to CLIMB_DEG; the tyres'
 		# or tracks' grip still limits it), so a hill doesn't stall it at accel_ms2's slope.
 		var grade := clampf(forward.y * signf(throttle), 0.0, sin(deg_to_rad(CLIMB_DEG)))
@@ -2064,7 +2077,7 @@ func _wheel_forces(delta: float, throttle: float, steer: float, brake: bool) -> 
 		if traction.length() > limit:
 			traction = traction.normalized() * limit
 		apply_force(up * normal_force + traction, point - global_position)
-	if tracked and grounded > 0:
+	if tracked and grounded > 0 and not (logistics and logistics.towed()):
 		# Skid steering: the hull turns at the commanded rate, on the spot or on the move.
 		var size := VehicleArt.size_m(model)
 		var inertia := mass * (size.x * size.x + size.z * size.z) / 12.0
@@ -2251,7 +2264,7 @@ func _use_fuel(delta: float) -> void:
 	_last_pos = global_position
 	if fuel <= 0.0:
 		return
-	var used := moved / 1000.0 * float(spec.get("fuel_l_per_km", 0.5))
+	var used := moved / 1000.0 * float(spec.get("fuel_l_per_km", 0.5)) * (logistics.fuel_mult() if logistics else 1.0)  # A8: the packages' weight
 	if driver() != null or (is_instance_valid(ai) and ai.active):
 		used += float(spec.get("idle_l_per_h", 1.0)) / 3600.0 * delta
 	used += _leak * delta
@@ -2847,6 +2860,8 @@ func request_service(action: String, zone: StringName, item: StringName) -> void
 func server_start_job(actor: Soldier, action: String, zone: StringName, item: StringName) -> String:
 	if _jobs.has(actor.get_instance_id()):
 		return "Already working on it"
+	if logistics and action in VehicleLogistics.ACTIONS:
+		return logistics.server_start_job(actor, action, String(zone), item)  # A8: modules, rearming, the tow, fuel pallets
 	var seconds := 0.0
 	var label := ""
 	match action:
@@ -2903,7 +2918,7 @@ func _job_step() -> void:
 ## Host: the seconds left on `actor`'s job (0 for none).
 func job_left(actor: Node) -> float:
 	var job: Dictionary = _jobs.get(actor.get_instance_id(), {})
-	return maxf(float(job.get("until", 0.0)) - Soldier._now(), 0.0)
+	return maxf(maxf(float(job.get("until", 0.0)) - Soldier._now(), 0.0), logistics.job_left(actor) if logistics else 0.0)
 
 
 ## Host (V2, tests): sets a zone's health directly (0 to 1).
@@ -2937,6 +2952,16 @@ func server_repair(zone: StringName, to_health: float, add := 0.0) -> void:
 	modules.server_repair(zone, to_health, add)
 	if zone == ZONE_FUEL:
 		_leak = 0.0
+	_publish_state(true)
+
+
+## Host (A8: a patched fuel tank): the leak stops once no fuel tank is still holed.
+func server_stop_leak() -> void:
+	if modules and modules.authored:
+		for m: Dictionary in modules.mods:
+			if String(m.kind) == "fuel_tank" and modules.health[int(m.i)] <= VehicleModules.DAMAGED_SHARE:
+				return
+	_leak = 0.0
 	_publish_state(true)
 
 
@@ -3012,11 +3037,11 @@ func server_rearm() -> int:
 		var g := gun_info(seat)
 		if not g.is_empty():
 			wants[g.feed] = int(wants.get(g.feed, 0)) + int(VehicleSpecs.gun(String(g.id)).get("load", 0))
-	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts
-		for f: Array in weapons.server_rearm():
+	if weapons:  # A3: the main guns' racks, the TOW, and the cupola and pintle guns' belts (A8: to the motor pool's load-out)
+		for f: Array in weapons.server_rearm(VehicleLogistics.loadout_racks(spec, logistics.loadout, logistics.packages) if logistics else {}):
 			wants[f[0]] = int(wants.get(f[0], 0)) + int(f[1])
 	if smoke:
-		smoke.server_restock()  # A7: the smoke grenades (A8: from the stowage items)
+		smoke.server_restock()  # A7: the smoke grenades (A8: the stowage is smoke_salvo items; MotorPool prices them)
 	if cargo_hold:
 		for feed: StringName in wants:
 			_rearm_feed(feed, int(wants[feed]))
@@ -3298,6 +3323,8 @@ func readout_parts(seat: int) -> Array[Dictionary]:
 		parts.append_array(hatches.readout_parts(seat))  # A4: turned out or buttoned up
 	if smoke:
 		parts.append_array(smoke.readout_parts(seat))  # A7: the dischargers' salvos
+	if logistics:
+		parts.append_array(logistics.readout_parts(seat))  # A8: work under way, a tow
 	if seat_kind(seat) == GUNNER:
 		var info := gun_info(seat)
 		if not info.is_empty():
@@ -3372,6 +3399,8 @@ func to_save() -> Dictionary:
 			out["fire"] = f  # A7: the fire's stage, the thrown turret and the debris
 	if smoke:
 		out["smoke"] = smoke.to_save()
+	if logistics:
+		out["logistics"] = logistics.to_save()  # A8: packages, the load-out, bottles, repair progress, fired tiles
 	return out
 
 
@@ -3443,6 +3472,8 @@ func from_save(data: Dictionary) -> void:
 		fire_state.from_save(data.get("fire", {}) if data.get("fire") is Dictionary else {})  # A7 (an older wreck: a smoulder)
 	if smoke and data.get("smoke") is Dictionary:
 		smoke.from_save(data.smoke)
+	if logistics:
+		logistics.from_save(data.get("logistics", {}) if data.get("logistics") is Dictionary else {})  # A8 (an older save: no packages)
 	if cargo_hold and data.get("cargo") is Dictionary and not (data.cargo as Dictionary).is_empty():
 		cargo_hold.net_state = GameState.from_json(data.cargo)
 	_saved_bodies.clear()

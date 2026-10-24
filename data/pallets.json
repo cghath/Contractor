@@ -14,8 +14,13 @@
 		"ammo": {"name": "Ammunition crates", "contents": {"ammo": 10}, "colour": "7a6a3a"},
 		"parts": {"name": "Spare parts", "contents": {"parts": 8}, "colour": "5a5f66"},
 		"medical": {"name": "Medical supplies", "contents": {"medical": 8}, "colour": "b8c2c4"},
-		"mixed": {"name": "Mixed load", "contents": {"fuel": 4, "ammo": 4, "supplies": 5, "parts": 3, "medical": 2}, "colour": "6e6a5c"}
+		"mixed": {"name": "Mixed load", "contents": {"fuel": 4, "ammo": 4, "supplies": 5, "parts": 3, "medical": 2}, "colour": "6e6a5c"},
+		"ammo_120mm": {"name": "120 mm ammunition", "contents": {"ammo": 40}, "colour": "6b6a3a", "item": "pallet_ammo_120", "load": [["round_120_m829a3", 6], ["round_120_m830a1", 4], ["round_120_m1147", 2]]},
+		"ammo_25mm": {"name": "25 mm ammunition", "contents": {"ammo": 60}, "colour": "6b6a3a", "item": "pallet_ammo_25", "load": [["links_25_m791", 4], ["links_25_m792", 8]]},
+		"ammo_tow": {"name": "TOW missiles", "contents": {"ammo": 120}, "colour": "5a6346", "item": "pallet_ammo_tow", "load": [["tow_2a", 6]]},
+		"smoke_salvos": {"name": "Vehicle smoke salvos", "contents": {"ammo": 20}, "colour": "7a7a70", "item": "pallet_smoke", "load": [["smoke_salvo", 12]]}
 	},
+	"_ammo_pallets": "Combined arms A8 (cg_brief queue item 2.6, docs/combined_arms.md 2.9.2), Proposed: an ammunition pallet per calibre (ammo_120mm, ammo_25mm, ammo_tow, smoke_salvos). In the field one is an item (item: data/items.json, too big for a man to carry: a truck's hold moves it, a helicopter sets it down) holding its load (load: [round item, count], the full pallet; what is left rides in the item's state). A vehicle within 8 m rearms from it at hand speed (VehicleLogistics). contents: its stock units if a tagged one is hauled home as a lot. They are not at enemy sites (sites lists none).",
 	"variance": [0.7, 1.3],
 	"sell_now_ratio": 0.5,
 	"sell_stored_ratio": 0.8,

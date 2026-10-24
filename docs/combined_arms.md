@@ -707,6 +707,15 @@ Prices sit in data/prices.json `packages`; the "Needs" column is the reputation 
 employer whose quartermaster sells it (`Quartermaster.vehicle_deals` already gates the M-ATV and
 MaxxPro this way). Removing a package at the FOB refunds 50%.
 
+**Built in A8** (cg_brief queue item 2.6): the motor pool page fits and removes packages
+(`MotorPool.server_package`: the price, days in the workshop by package, the tier and "after"
+gates, an upgrade crediting the package it includes; half back on removal), showing each vehicle's
+STANAG 4569 rating as fitted. A fitted package goes out with the vehicle (`VehicleLogistics.packages`
+and ArmourModel's meta on every peer), keeps its rating (`ArmourStandards.rating` and the proofs
+read the same list) and costs speed, acceleration and fuel by the formulas above. TUSK II includes
+CROWS (the commander's M2 from inside). Not built: drawing them on the model and their gadgets
+(Trophy, the mine roller): F-274.
+
 **Enemy packages** come with the faction's kit, not a purchase: the Concord's T-72B3 has Kontakt-5
 by default and Kontakt-1 skirts; its BMP-2s get Kontakt-1 at Pressure tier 3; the Ashen Banner's
 captured MaxxPros keep their slat; the Kestrel armoured truck (7.2) is its own build.
@@ -1244,6 +1253,27 @@ a slope now comes from power and traction, so a wet hill stops a MaxxPro that a 
 - A job pauses while the crew member doing it is suppressed or the vehicle is hit.
 - `VehicleService.parts_for` and `repair_problem` gain the new kinds; `zone_name` becomes
   `module_name`.
+
+**Built in A8** (cg_brief queue item 2.6, branch `armour/logistics`): `VehicleLogistics`
+(scripts/vehicles/vehicle_logistics.gd, "Logistics" on every ground vehicle: its state in the
+StateSync, the zone save and the motor pool's record), numbers in data/vehicle_logistics.json,
+prices in data/prices.json ("ammo", "packages", the items) and data/ground_supports.json
+("module_prices"). The rounds are items (data/items.json `shell`, `per_item`, `stow_s`: 2.9.2's
+ids, the 25 mm as cans of 50, `smoke_salvo`, and the enemy's 125 mm and 30 mm as salvage) and the
+racks' counts are their items; they come aboard at the cargo point from a man's kit, the hold (a
+crewman from his seat), another vehicle's hold within 8 m (any truck: the HEMTT isn't in data, so
+it stands in at twice hand speed) or an ammo pallet within 8 m (an item holding its load; a kind
+per calibre in data/pallets.json), stopped, into the right rack, pausing under fire or a hit; they
+go out the same way. The helicopter resupply brings each company tank or IFV that's short a pallet
+of what it's shortest of. The motor pool rearms going out and coming home to the load-out picked
+on its page, priced; it quotes and repairs per module and refills the extinguisher bottles. The
+field repairs are 2.2.2's column at 2.9.3's two men (alone x2, a wheel one man's job), to 60%,
+their progress kept on the module; ERA tiles and slat come back from the spares. Recovery is
+2.8.3's tow (no recovery vehicle in data): 60 s to hook up, a 3 m bar, 15 km/h. Fuel: drum pallets
+at 60 L/min (the M978's numbers wait in the data for D6a). A9's API: `needs()`,
+`rearm_sources()`, `repair_options()`, `tow_candidates()`, `server_start_job()`,
+`server_call_recovery()`. Tests: the `armourlog` suite. Calls: docs/audits/followups.md "Calls made"
+(2026-10-24, cg_brief 2.6); what's left: F-262 (extinguishing, spreading fires), F-269 to F-274.
 
 ### 2.10 Fire, destruction and blast effects
 
@@ -2751,7 +2781,7 @@ Four lanes: **A** armour, **B** the AI commander and cooperation, **C** high com
 | A5 | ui_test (both HUDs and the x-ray at 10 resolutions), a `HitReport` JSON round trip, the protection analysis matches `resolve` | HUD under 0.3 ms |
 | A6 | **driving_test**: dry against muddy climbs, a rollover within 10% of the predicted angle, flooding times, current drift, routing round a light bridge, a span dropping under overload; water_test, vehicles_test | Physics step unchanged on the vehicle range |
 | A7 | vehicles_test: the fire stages and their times, blow-out against catastrophic, bail-out; net_test: two peers make the same debris from one seed | 6 fires and 64 debris within the effects budget |
-| A8 | logistics_test (rearm sources and times, fuel truck), base_test (packages bought, fitted, refunded; weight changes speed and fuel), pallets_test | |
+| A8 | logistics_test (rearm sources and times, fuel truck), base_test (packages bought, fitted, refunded; weight changes speed and fuel), pallets_test. Built as the **armourlog** suite (cg_brief 2.6: logistics_test is the medical logistics suite's name) | |
 | A9 | **armour_ai_test**: a tank finds a hull-down spot against a staged threat, turns its front to it, reverses after a launch and smokes; an AT gunner chooses a side shot | |
 | B1 | **side_command_test**: merging, ageing, latency by side, comms down x3, BFT, fairness (every marker traces to a report); missions_test's hot-zone checks unchanged | Picture under 0.3 ms per side |
 | B2 | side_command_test: allocation on staged boards, the assault waits for its SBF, the reserve commits on a stall, RED falls back and reconstitutes, counterattack ratios, virtual groups tasked; a hot-zone run whose `[tactics]` and operation lines match today's | Tasking under 1 ms for 40 groups |

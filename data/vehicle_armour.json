@@ -37,7 +37,7 @@
 			"spall_liner": true,
 			"stanag_ke": {"front": 6, "side": 4, "rear": 3}, "stanag_artillery": 6, "stanag_mine": {"wheel": "2a", "belly": "1"},
 			"stanag_note": "The front is above STANAG 4569's level 6: its plates keep their RHAe line-of-sight figures from public estimates (docs/combined_arms.md 2.4.2: turret front 900 KE / 1300 CE, hull front 560 / 800).",
-			"packages": {"tusk1": {"name": "Abrams TUSK I", "weight_t": 2.4, "needs": "us_forces:trusted", "belly": {"blast": 0.25}, "stanag_mine": {"wheel": "4a"}}, "tusk2": {"name": "Abrams TUSK II", "weight_t": 4.0, "needs": "us_forces:allied", "includes": ["tusk1"], "belly": {"blast": 0.25}, "stanag_mine": {"wheel": "4a"}}, "trophy": {"name": "Trophy APS", "weight_t": 2.5, "needs": "us_forces:allied", "after": ["tusk1"]}}
+			"packages": {"tusk1": {"name": "Abrams TUSK I", "weight_t": 2.4, "needs": "us_forces:trusted", "belly": {"blast": 0.25}, "stanag_mine": {"wheel": "4a"}}, "tusk2": {"name": "Abrams TUSK II", "weight_t": 4.0, "needs": "us_forces:allied", "includes": ["tusk1", "crows"], "belly": {"blast": 0.25}, "stanag_mine": {"wheel": "4a"}}, "trophy": {"name": "Trophy APS", "weight_t": 2.5, "needs": "us_forces:allied", "after": ["tusk1"]}}
 		},
 		"bradley": {
 			"plates": [

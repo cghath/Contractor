@@ -1143,7 +1143,15 @@ while loading make a bustle detonation catastrophic (2.10.2: VehicleModules vent
 turret on batteries for 10 min after the engine goes (BATTERY_TURRET_S); traverse and elevation
 drives already slow a VehicleTurret's rates (VehicleModules._effects) once those tanks have one.
 
-### F-238 (open, A8): field and FOB repair by module
+### F-238 (closed by cg_brief queue item 2.6, A8, armour/logistics): field and FOB repair by module
+Done: VehicleLogistics (scripts/vehicles/vehicle_logistics.gd) runs 2.2.2's field column by module
+(data/vehicle_logistics.json "repair": the part, the time with two men, alone x2 but a wheel, the
+states it fixes, to 60%), the service point lists them by part, a job pauses under fire or a hit
+and keeps its progress on the module; ERA tiles and slat from the spares; the zone repairs keep
+to the same limits on a model with modules (VehicleService.field_limit). The motor pool quotes and
+services per module (data/ground_supports.json "module_prices"), fired tiles at their spare's
+price, and its service clears the record's modules (it left them damaged). Track links per track,
+racks (the rearm) and the bottles' refill are in. The original note:
 A2 keeps VehicleService's zone repairs (a repair kit on "engine" lifts the engine and
 transmission). A8: the 2.2.2 repair column per module (damaged only in the field, destroyed at
 the FOB), track links per track, patching a tank, refilling racks, extinguisher bottles.
@@ -1238,7 +1246,13 @@ turn, so a round into a traversed turret meets the breech, sights, bustle rack a
 turret would be facing front. VehicleModules.trace could carry the turret's modules (a "turret"
 flag) into the turret's frame before the path, as Vehicle._seat_at does for its seats.
 
-### F-247 (open, A8): the racks become item stowage
+### F-247 (closed by cg_brief queue item 2.6, A8, armour/logistics): the racks become item stowage
+Done: rounds are items (data/items.json "shell", "per_item", "stow_s"); a rack's rounds are its
+items (VehicleLogistics.rack_items: one 120 mm round or TOW an item, a 25 mm can 50); they come
+aboard through server_stow and out through VehicleWeapons.server_take_rounds (rearm and unstow
+jobs at the cargo point), and the motor pool rearms to a load-out (VehicleWeapons.server_rearm's
+load-out, VehicleLogistics.loadout_racks), stocking M919 for M791 when the Bradley's M919 package
+is fitted. The original note:
 A3 keeps which rounds a rack holds in VehicleWeapons.racks (the module's rounds stay the total);
 A8's hook is `server_stow(rack, shell, n)` and `rack_contents(rack)`; `server_rearm` fills the
 racks to data/vehicle_weapons.json's load-out. The M919 package unlocks the AP feed's M919 only
@@ -1301,6 +1315,9 @@ channel, the loader's turned-in view (the bustle doors, a big round selector), b
 turned-out commander (he has his own if he carries them).
 
 ### F-253 (open, cghath D6b with F-244): sights for the rest of 2.7.4's table
+A8 (cg_brief 2.6) did its part: TUSK II now includes "crows" (data/vehicle_armour.json), and
+VehicleHatches reads the fitted packages, so a TUSK II Abrams' commander fires his M2 from inside;
+the CROWS sight (day/thermal with LRF) is still to do here.
 The data shape is data/vehicle_weapons.json's `optics`, `fire_control`, `stab`, `hatches`: the
 AAV's UGWS sight (1x, 3x; no laser, unstabilised), CROWS on the MRAPs and the Abrams' TUSK II
 (also the "crows" package that lets the commander's M2 fire from inside: A8 adds it), the
@@ -1349,7 +1366,12 @@ Buttoned up, Sfx muffles every outside sound on the effects buses (the vehicle's
 2.10.5 also wants the crew's voices on an intercom filter and the engine heard from inside (a
 louder, duller drone) rather than muffled.
 
-### F-262 (open, A7 follow-up / A8): extinguishers and fires that spread
+### F-262 (open, A7 follow-up; A8's bottles and refills done by cg_brief queue item 2.6): extinguishers and fires that spread
+A8 (armour/logistics) took the logistics part: VehicleLogistics.bottles (halon 1, engine 2 on the
+Abrams, Bradley and MRAPs, data/vehicle_logistics.json "extinguishers"), replicated and saved,
+server_use_bottle(kind) for the extinguishing to call, and the FOB refill priced
+(MotorPool's rearm, server_fob_rearm). The extinguishing and the spread are 2.10.1's (A7's
+section, not 9.2's A8 row), so they stay here:
 A7 (cg_brief 2.5) draws 2.10.1's stages over the burn that was there (a fire is a loss: lost at
 once, a wreck after Vehicle.FIRE_S). Not built: the automatic halon in the crew compartment of
 the Abrams, Bradley and MRAPs (one shot, 70%, within 1 s), the two manual engine-bay shots (60%,
@@ -1394,6 +1416,52 @@ turret's crash, tracks clattering, the intercom and the engine from inside. Left
 and load pitched by RPM (today by speed: the Abrams' engine_mbt is the turbine's whine), tracks
 squealing in a turn, MRAP tyre roar on asphalt, the Mk19's chug (the AAV's UGWS mounts are F-244),
 the ERA tile's crack (the HitEvent says a tile fired; the impact effect doesn't read it yet).
+
+### F-269 (open, Claude's A9 / B4): AI crews and support on A8's API
+cg_brief queue item 2.6 (A8) gives every logistics action a host call any brain can make, as
+players get: `vehicle.logistics.needs()` (rounds short of the load-out by shell, salvos, field
+repairs with their part and time, workshop-only modules, fired tiles, fuel room, empty bottles,
+recovery), `rearm_sources(actor)` and `fuel_sources()` (where from, at what speed),
+`repair_options(actor)` (the field jobs and why not), `tow_candidates()` / `tow_problem(tower)`,
+`server_start_job(actor, action, key, item)` (repair_module, tile, stow, unstow, refuel_from,
+load_pallet, tow, unhook; the same timing, pauses and stops as a player's), `job_done` (signal),
+`server_call_recovery(by)` and `VehicleLogistics.recoveries(level)` (the vehicles waiting for
+one, `recovery_called`). A9: crews rearm, repair and call for recovery when the kill states say so
+(F-236), a dismount helps (two men make the times), a truck's AI driver backs up within 8 m; B4's
+"Request rearm" and "Tow or recovery" (4.2.8, 4.3) answer with them. One hook line each.
+
+### F-270 (open, cghath D6a/D6b): the real ammo truck, fuel truck and recovery vehicle
+No HEMTT, M978 or M88 is in data/vehicles.json yet, so A8 stands in: any vehicle's hold within 8 m
+is an ammo carrier at twice hand speed (2.9.2's "ammo truck"), a drum pallet the fuel source, and
+2.8.3's tow (a vehicle of half the mass) the recovery. When D6a adds the HEMTTs: give the cargo
+HEMTT its ammo load in its spawn record (pallets in its hold work as they are), name the M978 in
+data/vehicle_logistics.json "fuel.tankers" (9,500 L at 300 L/min is already there: its hose is
+VehicleLogistics.fuel_sources' "t:" key), and an M88 is just a heavy tower (its mass already lets
+it tow an Abrams).
+
+### F-271 (open, A8 follow-up): pallets by hand
+An ammo pallet is an 800 L item: nobody can pick it up ("No room for..."), a truck loads it from
+beside its cargo point (Load the pallet) and Cargo > take sets it down. It weighs as full however
+much is left in it, and there's no pallet jack or drag to shift one a few metres by hand.
+
+### F-272 (open, A6 / A8 follow-up): the tow bar, and righting a rollover
+The tow (VehicleLogistics.server_hook) is a spring between the hitches: no bar is drawn, it isn't
+saved (a zone loaded mid-tow comes back unhooked), and A6's rollovers (2.8.3: righting by a tow,
+60 s) can use it once there are rollovers. On uneven ground an MRAP's hull can scrape and the pair
+sticks (seen in the armourlog suite on a slope: the suite looks for flat ground).
+
+### F-273 (open, cghath D6b / F-244): racks for the Mk19 and the enemy's rounds
+can_40_m430 (48 rounds of 40 mm HEDP) and the enemy's round_125_3bm42, round_125_3of26 and
+links_30_3ubr8 are items with prices, but nothing stows them yet: the AAV's UGWS mounts (F-244) and
+the T-72B3's, BMP-2's and BTR-82A's weapons and racks (D6b) give them racks, and then salvaging an
+enemy's racks (Take out rounds) works as on ours.
+
+### F-274 (open, A8 follow-up / art): packages drawn on the model, and their gadgets
+2.4.5 says packages are "drawn on the model": the hull art is the same with or without (A1's tiles
+are drawn whatever is fitted; the appliqué, slat, roller and CROWS have no voxels of their own).
+The packages' own behaviour beyond armour and weight isn't built either: Trophy's intercepts, the
+mine roller setting off pressure-plate IEDs 6.5 m ahead (3 blasts and it's scrap), CROWS on the
+MRAPs (F-253's sights; TUSK II's commander's M2 does fire from inside now), the UGWS thermal kit.
 
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
@@ -1674,3 +1742,26 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-24 | cg_brief 2.5 (A7.17): a rack that goes up in a vehicle already alight from the same hit's fire roll still goes up at once (the burn cut to 0.1 s) | 2.10.2 | A2's order (a 45 s burn first)
 2026-10-24 | cg_brief 2.5 (A7.18): wrecks in saves from before A7 smoulder (no column) | they burned out long ago | no smoke at all
 2026-10-24 | cg_brief 2.5 (A7.19): Pop smoke from the crew wheel (C6's option, VehicleSmoke.request_pop); no key of its own yet | the wheel already had it | a new rebindable key
+2026-10-24 | cg_brief 2.6 (A8.1): rounds are items of type "vehicle" with stats shell / per_item / stow_s (round_120_m829a3, _m830a1, _m1147, links_25_m791, _m919, _m792, tow_2a, can_40_m430, smoke_salvo; the 120 mm and TOW two-handed); the racks keep counts by shell, so a rack's items are its rounds (one each, 25 mm by cans of 50) and a can goes in only whole | 2.9.2's ids; one model for racks, saves and hits | type "ammo" (the inventory pools those by calibre as magazines and loose rounds) or a rack of item entries
+2026-10-24 | cg_brief 2.6 (A8.2): the right rack: a cannon's racks then its stowage (the bustle, then the hull rack); the 25 mm and the TOW into the hull's stowage only, the crew filling the ready boxes and the launcher from there as A3 has it | 2.9.2's "into the right rack" without breaking A3's feeds | anything into the ready boxes
+2026-10-24 | cg_brief 2.6 (A8.3): the ammo truck: no HEMTT in data, so any vehicle's hold within 8 m (with its pallets) is an ammo carrier at twice hand speed (F-270) | 2.9.2's rule works today with the M-ATV and MaxxPro holds | waiting for D6a's HEMTT
+2026-10-24 | cg_brief 2.6 (A8.4): an ammo pallet is an item (800 L: too big for a man, a truck's hold takes one) holding its load in its state, one data/pallets.json kind per calibre (120 mm 6/4/2, 25 mm 4 M791 + 8 M792 cans, 6 TOW, 12 salvos, and the drum pallet 4 x 208 L); a vehicle within 8 m rearms from it at hand speed | the item system already replicates and saves state on the ground and in holds | PalletField site pallets (enemy sites, no shared contents) or a static vehicle model per pallet
+2026-10-24 | cg_brief 2.6 (A8.5): rearming needs one able man on foot at the cargo point (or a crewman aboard working from the hold), the vehicle stopped (0.5 m/s), not burning; it pauses under fire and while the vehicle is being hit, as repairs do | 2.9.2 gives times, not crew; the repair rules for the rest | two men for every rearm
+2026-10-24 | cg_brief 2.6 (A8.6): the helicopter resupply's armour load rides on the existing resupply drop: for each company tank or IFV in the zone that's short, a pallet of the calibre it's shortest of (by share of its load-out), 8 x 120 mm, 6 cans of 25 mm or 2 TOW in its load-out's mix | 2.9.2's "the existing support gets an armour ammo load" | a separate support with its own price
+2026-10-24 | cg_brief 2.6 (A8.7): the FOB rearm charges the main-gun, autocannon and TOW rounds and the smoke salvos it puts in at prices.json "ammo" (and the bottles' refill), to the run (Economy.charge_run) going out and coming home; MG belts stay a free top-up; rounds swapped out by a new load-out aren't refunded | 2.9.2's "everything, priced" without moving the MRAP-only economy (Captain's 2026-10-14 belts fix) | charging belts too
+2026-10-24 | cg_brief 2.6 (A8.8): three FOB load-outs per armoured model (standard = the racks' default, anti_armour, urban), picked on the motor pool page | quick to tune, readable | a per-round editor
+2026-10-24 | cg_brief 2.6 (A8.9): the field table is 2.2.2's (engine 90 s, transmission 120, tracks 180, a wheel 25, a fuel tank patch 45, traverse and elevation 60, a mounted gun 60, the UGWS 90, a periscope 30, a radio 20, a tile 40) at 2.9.3's two men (alone x2), but the wheel a one-man job as today; to 60% (engine parts to 100%, their own numbers); a destroyed track, wheel, fuel tank, periscope or radio is fixed in the field, the rest damaged only | 2.2.2 is the per-module source, 2.9.3 the crew rule | 2.9.3's 60-120 s band for the engine
+2026-10-24 | cg_brief 2.6 (A8.10): a helper is an able man of the same side on foot within 3 m of the worker | two men work a track together | crewmen inside counting
+2026-10-24 | cg_brief 2.6 (A8.11): a job pauses (worker suppressed over 0.3, or fired at in the last 2 s; the vehicle hit in the last 5 s) and stops if the worker walks 1.5 m off or the vehicle moves, its progress kept on the module (saved, replicated) | 2.9.3's "pauses while suppressed or hit" | restarting from zero
+2026-10-24 | cg_brief 2.6 (A8.12): parts come from the worker's kit first, else the vehicle's hold | 2.9.3: spares carried in the cargo hold | the worker's kit only
+2026-10-24 | cg_brief 2.6 (A8.13): the old zone repairs stay for technicals and callers that name a zone, kept to the same field limits on a model with modules (VehicleService.field_limit); the service point lists repairs by part there | the vehicles suite's zone checks keep their meaning | removing the zone repairs
+2026-10-24 | cg_brief 2.6 (A8.14): the motor pool's quote per module: a destroyed module costs its kind's share of the model's value (module_prices: structure 0.12, engine 0.06, breech 0.05, gunner's sight 0.05...), scaled by the health it lacks; days repair_days x the bill's share, at least 1, at least fob_days 2 with a module destroyed past what the field fixes; fired tiles at their spare's price | 2.9.3's "priced per module, days by damage" | flat prices per module
+2026-10-24 | cg_brief 2.6 (A8.15): packages: fit days by package (TUSK I 3, TUSK II 4, Trophy 4, BUSK III 3, CROWS 2, slat, roller and thermal kit 1, the rest 2, M919 0), removing 1 day for half the price back; an upgrade (TUSK II over TUSK I) credits the one it includes and drops it from the list; "needs" gates on the employer's tier, "after" on a fitted package, and one another needs can't come off first | 2.4.5's table, prices and refund | days by weight
+2026-10-24 | cg_brief 2.6 (A8.16): the packages' weight changes top speed, the drive's acceleration and fuel per km by 2.4.5's formulas; the body's physical mass stays the model's | the suspension and handling stay as tuned | raising the RigidBody's mass (sag, braking change)
+2026-10-24 | cg_brief 2.6 (A8.17): fitted packages live in VehicleLogistics (net_state, the zone save, the motor pool record's "logistics") and set ArmourModel's meta on every peer; fired tiles replicate and save the same way | A1 call 86 left them host meta "until A2/A7 move them" | separate syncs per system
+2026-10-24 | cg_brief 2.6 (A8.18): recovery is 2.8.3's tow: a vehicle of at least half the towed one's mass, 60 s hooking up at the towed vehicle's service point by a man on foot, both stopped, hitches within 8 m; a 3 m stiff damped bar (6 N/m per kg), the pair at 15 km/h, the towed vehicle's brakes and skid steering off; not saved | no recovery vehicle in data (F-270); A6's rollovers want the same tow | an off-map recovery purchase
+2026-10-24 | cg_brief 2.6 (A8.19): fuel: a drum pallet (4 x 208 L, a hand pump at 60 L/min) on the ground or in a hold within 8 m; the M978's 9,500 L at 300 L/min as data for D6a | 2.9.1's sources with what exists | waiting for the tanker
+2026-10-24 | cg_brief 2.6 (A8.20): extinguisher bottles: halon 1 and engine 2 on the Abrams, Bradley and MRAPs, refilled at the FOB at $2,500 and $600 | 2.10.1's shots; F-262 uses them | no counts until F-262
+2026-10-24 | cg_brief 2.6 (A8.21): prices: round items per round (prices.json "ammo", 2.9.2's numbers), pallets their load plus $300, a smoke salvo $600, a periscope $1,500, an ERA tile $3,000, a slat panel $1,200; the enemy's 125 mm and 30 mm sell-only; every package in prices.json "packages" (the MaxxPro appliqué $40,000) | 2.9.2 and 2.4.5 | guessing per item
+2026-10-24 | cg_brief 2.6 (A8.22): budgets (9.3 gives A8 none): a vehicle's logistics tick 0.05 ms, needs() 0.3 ms, the cargo point's menu 3 ms, 3x slack locally | small against the frame; the menu walks nearby vehicles and items | none
+2026-10-24 | cg_brief 2.6 (A8.23): TUSK II includes CROWS ("crows" in its includes), so its commander's M2 fires from inside; VehicleHatches reads the fitted packages, not the raw list | 2.4.5's TUSK II row; F-253 says A8 adds it | a separate Abrams CROWS package

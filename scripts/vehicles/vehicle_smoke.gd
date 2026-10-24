@@ -9,8 +9,9 @@ extends Node
 ## (SmokeCloud.blocks), thermal (ThermalView.smoke_blocks) and the laser (VehicleGunnery.
 ## range_along) for the cloud's life, then clears as any smoke does. A side's module (smoke_l,
 ## smoke_r) damaged loses half its grenades, destroyed all of them. Reloads come from stowage
-## (stowed per side: one full load), reload_s a salvo, stopped, by an able crewman; A8's FOB rearm
-## refills the stowage (server_restock) until the smoke_salvo items are stowage of their own.
+## (stowed per side: one full load), reload_s a salvo, stopped, by an able crewman. The stowage is
+## smoke_salvo items (A8, VehicleLogistics: a salvo through the cargo point is per_salvo grenades
+## for each side, server_stow_salvos), and the FOB's rearm restocks it all (server_restock).
 ##
 ## Who pops it: a player from the crew wheel ("Pop smoke": request_pop), and A9's AI with the
 ## one call server_pop(by) (on a launch at it, a near miss, a laser warning: 2.13). Host
@@ -200,14 +201,54 @@ func _wants_reload() -> bool:
 	return false
 
 
-## Host (A8's FOB rearm): the stowage full again, and the launchers.
-func server_restock() -> void:
+## Host (A8's FOB rearm, MotorPool through VehicleLogistics): the stowage full again, and the
+## launchers. Returns the salvos that took (what the FOB's bill counts).
+func server_restock() -> int:
+	var before := salvos_aboard()
 	var n := int(d.get("tubes", 0))
 	loaded = [n, n]
 	stowed = [int(d.get("stowed", 0)), int(d.get("stowed", 0))]
 	_halved = [false, false]
 	reload_until = 0.0
 	_publish()
+	return maxi(salvos_aboard() - before, 0)
+
+
+## Salvos (smoke_salvo items: per_salvo grenades for each side) the stowage has room for (every peer).
+func stow_room() -> int:
+	if d.is_empty():
+		return 0
+	var cap := int(d.get("stowed", 0))
+	return mini(cap - stowed[0], cap - stowed[1]) / per_salvo() if cap > 0 else 0
+
+
+## Whole salvos in the stowage (every peer).
+func stowed_salvos() -> int:
+	return mini(stowed[0], stowed[1]) / per_salvo()
+
+
+## Salvos aboard, loaded and stowed (grenades over both sides' salvo).
+func salvos_aboard() -> int:
+	return (loaded[0] + loaded[1] + stowed[0] + stowed[1]) / (per_salvo() * 2)
+
+
+## Host (A8: a smoke_salvo item stowed through the cargo point): `n` salvos into the stowage, up
+## to its room. How many went in.
+func server_stow_salvos(n: int) -> int:
+	var put := clampi(n, 0, stow_room())
+	if put > 0:
+		stowed = [stowed[0] + put * per_salvo(), stowed[1] + put * per_salvo()]
+		_publish()
+	return put
+
+
+## Host (A8: a salvo taken out as an item): one salvo out of the stowage. Whether there was one.
+func server_take_salvo() -> bool:
+	if stowed_salvos() <= 0:
+		return false
+	stowed = [stowed[0] - per_salvo(), stowed[1] - per_salvo()]
+	_publish()
+	return true
 
 
 func _physics_process(delta: float) -> void:

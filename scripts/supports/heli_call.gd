@@ -841,6 +841,10 @@ func _drop_pallet() -> void:
 		var off := Vector3((i % 4 - 1.5) * 0.28, 0.45 + floorf(i / 8.0) * 0.25, (floori(i / 4.0) % 2 - 0.5) * 0.4)
 		lvl.server_spawn_dropped(StringName(String(entry[0])), int(entry[1]), at + off)
 		i += 1
+	var j := 0
+	for p: Dictionary in VehicleLogistics.heli_armour_load(lvl):  # A8 (cg_brief 2.6): the armour's ammo pallets, 2.9.2
+		j += 1
+		VehicleLogistics.server_drop_pallet(lvl, StringName(p.id), lvl.ground_point(at + side * (1.8 * j)) + Vector3.UP * 0.3, p.load)
 
 
 ## The pallet's load: [[item id, count], ...] (Captain, 2026-10-16: "it needs to bring supplies for
