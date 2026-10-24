@@ -1254,6 +1254,11 @@ func _test_gun_team() -> void:
 			var q := PhysicsRayQueryParameters3D.create(muzzle, foe.aim_point(), 1 | Vehicle.LAYER, [team.gun.get_rid()])
 			print("    gun at %s, muzzle %s, foe %s (%.0f m), line hit %s" % [team.gun.global_position, muzzle, foe.aim_point(),
 				muzzle.distance_to(foe.aim_point()), team.gun.get_world_3d().direct_space_state.intersect_ray(q)])
+			var pic := SideIntel.picture_of(level, &"friendly")
+			print("    tracked vehicle on the line: %s (own %s; tracked %s); foe up %s, made out %s" % [Deconfliction.bft_in_line(level, muzzle, foe.global_position,
+				Deconfliction.BFT_LINE_M, Deconfliction.bft_key(team.gun)), Deconfliction.bft_key(team.gun),
+				pic.bft.values().filter(func(b: Dictionary) -> bool: return String(b.what) == "vehicle").map(func(b: Dictionary) -> String: return "%s %s" % [b.key, b.pos]) if pic else [],
+				foe.vitals.is_up(), g.made_out(foe) if g else false])
 		check(g != null and g.fired > 0, "and fires on him (%d rounds)" % (g.fired if g else 0))
 		var dig := Digging.of(team.gun)
 		await _wait_for(func() -> bool: return team._dug, 5.0)
@@ -1468,6 +1473,13 @@ func _test_vehicle_guns() -> void:
 	var belt := v.cargo_hold.feed_rounds(&"belt_50bmg")
 	await _wait_for(func() -> bool: return g != null and g.fired > 0, 10.0)
 	check(g != null and g.fired > 0 and v.cargo_hold.feed_rounds(&"belt_50bmg") < belt, "and fires at an enemy in view (%d rounds)" % (g.fired if g else 0))
+	# (cg_brief queue item 2.4: B5's 50 m around every tracked vehicle held these two guns, the MaxxPro
+	# parked 8 m off; a machine gun now holds only for a tracked vehicle on its line of fire.)
+	var maxx := _vehicle("range_maxxpro")
+	var muzzle := v.gun_origin(v.gun_seats()[0])
+	check(maxx != null and Deconfliction.bft_in_line(level, muzzle, maxx.global_position + (maxx.global_position - muzzle).normalized() * 40.0, Deconfliction.BFT_LINE_M, Deconfliction.bft_key(v))
+		and not Deconfliction.bft_in_line(level, muzzle, foe.global_position, Deconfliction.BFT_LINE_M, Deconfliction.bft_key(v)),
+		"the M2 holds for a friendly vehicle on its line of fire, not for one parked beside it")
 	check(layer.server_order_mount(player, v.global_position, PackedStringArray(["GunB_Rifle"]), true) == "Someone's already on the gun",
 		"Take the gun: refused while someone's on it")
 	v.server_exit(team[2])
