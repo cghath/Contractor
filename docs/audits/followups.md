@@ -1306,6 +1306,18 @@ Buttoned up, Sfx muffles every outside sound on the effects buses (the vehicle's
 2.10.5 also wants the crew's voices on an intercom filter and the engine heard from inside (a
 louder, duller drone) rather than muffled.
 
+### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
+The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
+1087536b): 134.7 ms average, 179.2 p95, **51 hitches a minute** (the local budget 96 passes;
+R2569's 322 a minute was Captain's PC under load). Every hitch logged is a physics tick of 210-320
+ms whose FrameCost is the AI's ("ai" 130-800 ms so far in the frame, nav_wanted 2-11, buildings and
+probes 0-4): ~75 awake AI (63 patrolling) in SquadAI. Nothing from the world content, the vehicles
+or the HUD shows. The AI's tick is Claude's (docs/performance.md "What's left": SquadAI 30-45 ms a
+tick for ~100 AI, F-230's movement); spreading the patrols' think over ticks, or sleeping far
+patrols (DynamicSim) in the city, would take the spikes. On CI the case still sometimes waits on
+its blocks (F-233: "city_3_1 streamed in (180 s; building)", run 40043786957), and fight's hitches
+ran 100 a minute against 90 there (the AI's, as before).
+
 ### F-225 update (done, perf/world-content, 2026-10-23)
 A fine terrain chunk's vertices, normals and colours (ZoneTerrain._chunk_arrays) and a scatter
 cell's near-tier ground cover (ZoneScatter._ground_cover, the near tier's whole cost) are worked
@@ -1553,3 +1565,4 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-23 | cg_brief 2.4 (A5.10): budget 0.3 ms a frame for the HUD (9.3; readouts gathered 10 times a second, markers each frame; 0.10 ms measured, R0623), 2x locally under load | 9.3 | gathering every frame
 2026-10-23 | cg_brief 2.4 (A5.11): protection analysis: ArmourModel.resolve with seed 20261023 at 100-3000 m, the ricochet chance over 40 seeds, every shell with a penetration figure, the vehicle's fitted packages and all its tiles whole | 2.11's "fixed seed"; the chance shows how often a bounce happens | one seed only
 2026-10-23 | cg_brief 2.4 (A5.12): the loader's turned-in view is drawn over his periscope (the bustle doors' state and a large tile per round, the next one lit, the reload bar), not a rendered turret interior | the turret's inside has no art yet; the information is what the job needs | an interior model
+2026-10-23 | cg_brief 2.4 (city hitches): perfcases' city budgets kept as they are (60 a minute on CI, 96 locally): alone on a quiet machine the city ran 51 a minute (R0633), every hitch an AI tick (F-261) | the measurement shows the budget holds on a quiet machine; R2569's 322 was load | raising the budget

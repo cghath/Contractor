@@ -69,6 +69,9 @@ there); every number Proposed; calls in docs/audits/followups.md "Calls made".
 #### Changed
 - HitEvents carry the round's direction, angle, range, shooter, path and spall for the x-ray
   (a few hundred bytes each); a vehicle's dead radio shows on every machine, not only the host.
+- perfcases' city rechecked alone on a quiet machine: 51 hitches a minute against the local
+  budget of 96 (R0633; the 322 after the armour merge was a busy PC). The hitches left are the AI's
+  ticks (F-261), so the budgets stay.
 
 ### Gunnery: sights, thermal, the laser and fire control, the stabiliser, hatches (cg_brief queue item 2.3 (A4), armour/gunnery)
 
