@@ -96,7 +96,7 @@ var _turret_t0 := -1.0
 var _turret_max_y := -INF
 var _turret_crashed := false
 var _pieces: Array = []  # this vehicle's debris bodies, by plan index
-var _debris_t0 := -1.0
+var _debris_t0 := VehicleFire.NEVER
 var _kill_shown := ""    # the kill kind drawn (once)
 var _rested := false
 var _excepted_off := false
@@ -143,16 +143,20 @@ static func server_event(v: Vehicle, kind: String, args: Dictionary) -> void:
 			fx._event_u.rpc(kind, args)
 		else:
 			fx._event.rpc(kind, args)
-	else:
+	# The host's own look after the frame's work (a shot, a hit, a kill), not inside its call;
+	# "kill" at once, so its pieces exist for the host's next steps.
+	if kind == "kill":
 		fx._play(kind, args)
+	else:
+		fx._play.call_deferred(kind, args)
 
 
-@rpc("authority", "call_local", "reliable")
+@rpc("authority", "call_remote", "reliable")
 func _event(kind: String, args: Dictionary) -> void:
 	_play(kind, args)
 
 
-@rpc("authority", "call_local", "unreliable")
+@rpc("authority", "call_remote", "unreliable")
 func _event_u(kind: String, args: Dictionary) -> void:
 	_play(kind, args)
 
@@ -442,11 +446,25 @@ static func static_debris_count() -> int:
 ## simulated on the GPU (GPUParticles3D cost 6-10 ms a frame a thousand in a zone, R0642), and a
 ## headless peer (the dummy renderer) keeps the node and its numbers only.
 static func _emitter(amount: int, life: float, box_m: float, colour: Color, speed: Vector2, spread_deg: float, gravity: Vector3,
-		scale: Vector2, extents: Vector3, glow := false) -> GPUParticles3D:
+		scale: Vector2, extents: Vector3, glow := false, ring := 0.0) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
 	p.amount = maxi(amount, 1)
 	p.lifetime = life
 	p.draw_pass_1 = _box_mesh(box_m, glow)
+	p.process_material = _process_material(colour, speed, spread_deg, gravity, scale, extents, ring)
+	p.local_coords = false
+	p.visibility_aabb = AABB(Vector3(-20.0, -5.0, -20.0), Vector3(40.0, 60.0, 40.0))
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_emitters.append(p)
+	return p
+
+
+## The particles' process material for these numbers, made once and shared (a burst a shell's
+## end must cost little: maingun's budgets). Emitted along the node's up (_burst turns the node).
+static func _process_material(colour: Color, speed: Vector2, spread_deg: float, gravity: Vector3, scale: Vector2, extents: Vector3, ring: float) -> ParticleProcessMaterial:
+	var key := "ppm|%s|%s|%s|%s|%s|%s|%s" % [colour, speed, spread_deg, gravity, scale, extents, ring]
+	if _mats.has(key):
+		return _mats[key]
 	var m := ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
 	m.emission_box_extents = extents
@@ -474,12 +492,14 @@ static func _emitter(amount: int, life: float, box_m: float, colour: Color, spee
 	m.color_ramp = gt
 	m.angle_min = 0.0
 	m.angle_max = 90.0
-	p.process_material = m
-	p.local_coords = false
-	p.visibility_aabb = AABB(Vector3(-20.0, -5.0, -20.0), Vector3(40.0, 60.0, 40.0))
-	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_emitters.append(p)
-	return p
+	if ring > 0.0:
+		m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
+		m.emission_ring_axis = Vector3.UP
+		m.emission_ring_radius = ring
+		m.emission_ring_inner_radius = minf(0.5, ring * 0.5)
+		m.emission_ring_height = 0.2
+	_mats[key] = m
+	return m
 
 
 static func _box_mesh(size: float, glow: bool) -> BoxMesh:
@@ -549,21 +569,33 @@ static func _billboard_mesh() -> QuadMesh:
 ## A ball of `colour` growing to `radius` and fading over `life` s at `pos`, with a flash.
 func _ball(pos: Vector3, radius: float, colour: Color, life: float, flash := true) -> void:
 	var ball := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.5
-	sphere.height = 1.0
-	var mat := (_solid_material(colour, true)).duplicate() as StandardMaterial3D
-	sphere.material = mat
-	ball.mesh = sphere
+	if not _meshes.has("ball"):
+		var sphere := SphereMesh.new()
+		sphere.radius = 0.5
+		sphere.height = 1.0
+		sphere.radial_segments = 16
+		sphere.rings = 8
+		_meshes["ball"] = sphere
+	ball.mesh = _meshes["ball"]
 	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ball.top_level = true
 	add_child(ball)
 	ball.global_position = pos
 	ball.scale = Vector3.ONE * 0.3
-	var tween := ball.create_tween().set_parallel()
-	tween.tween_property(ball, "scale", Vector3.ONE * radius * 2.0, life * 0.6).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-	tween.tween_property(mat, "albedo_color:a", 0.0, life)
-	tween.chain().tween_callback(ball.queue_free)
+	var tween := ball.create_tween()
+	if life < 0.3:
+		# A flash (a muzzle's, a grenade's burst): one shared material, grown then gone.
+		ball.material_override = _solid_material(colour, true)
+		tween.tween_property(ball, "scale", Vector3.ONE * radius * 2.0, life * 0.5)
+		tween.tween_property(ball, "scale", Vector3.ONE * 0.05, life * 0.5)
+	else:
+		var mat := (_solid_material(colour, true)).duplicate() as StandardMaterial3D
+		ball.material_override = mat
+		tween.set_parallel()
+		tween.tween_property(ball, "scale", Vector3.ONE * radius * 2.0, life * 0.6).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tween.tween_property(mat, "albedo_color:a", 0.0, life)
+		tween.chain()
+	tween.tween_callback(ball.queue_free)
 	if flash:
 		var l := _take_light(colour, 4.0 + radius * 4.0, 10.0)
 		if l:
@@ -573,17 +605,18 @@ func _ball(pos: Vector3, radius: float, colour: Color, life: float, flash := tru
 
 
 ## A one-shot burst of `amount` boxes at `pos` (world).
-func _burst(pos: Vector3, amount: int, life: float, box_m: float, colour: Color, speed: Vector2, spread: float, gravity: Vector3, scale: Vector2, glow := false, dir := Vector3.UP) -> GPUParticles3D:
+func _burst(pos: Vector3, amount: int, life: float, box_m: float, colour: Color, speed: Vector2, spread: float, gravity: Vector3, scale: Vector2, glow := false, dir := Vector3.UP, ring := 0.0) -> GPUParticles3D:
 	var granted := _grant(amount)
 	if granted <= 0:
 		return null
-	var p := _emitter(granted, life, box_m, colour, speed, spread, gravity, scale, Vector3.ONE * 0.2, glow)
+	var p := _emitter(granted, life, box_m, colour, speed, spread, gravity, scale, Vector3.ONE * 0.2, glow, ring)
 	p.one_shot = true
 	p.explosiveness = 0.95
-	(p.process_material as ParticleProcessMaterial).direction = dir
 	p.top_level = true
 	add_child(p)
-	p.global_position = pos
+	var up := dir.normalized() if dir.length_squared() > 0.0001 else Vector3.UP
+	var side := up.cross(Vector3.FORWARD if absf(up.dot(Vector3.FORWARD)) < 0.95 else Vector3.RIGHT).normalized()
+	p.global_transform = Transform3D(Basis(side, up, side.cross(up)).orthonormalized(), pos)  # (emitted along the node's up: dir)
 	p.emitting = true
 	get_tree().create_timer(life + 0.5).timeout.connect(p.queue_free)  # (particles_live drops it from _emitters)
 	return p
@@ -649,14 +682,8 @@ func _show_muzzle(kind: String, at: Vector3, dir: Vector3) -> void:
 		"cannon":
 			_ball(at + dir * 1.0, 1.4, Color(1.0, 0.75, 0.4, 0.9), 0.12)
 			var ground := at + Vector3.DOWN * maxf(at.y - vehicle.global_position.y, 0.5)
-			var dust := _burst(ground + dir * 3.0, WANT_DUST, 2.0, 0.6, Color(0.62, 0.57, 0.48, 0.6), Vector2(4.0, 9.0), 80.0, Vector3(0.0, -0.5, 0.0), Vector2(1.0, 4.0), false, Vector3.UP)
-			if dust:
-				var dm := dust.process_material as ParticleProcessMaterial
-				dm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
-				dm.emission_ring_axis = Vector3.UP
-				dm.emission_ring_radius = num("muzzle", "dust_m", 6.0) * 0.5
-				dm.emission_ring_inner_radius = 0.5
-				dm.emission_ring_height = 0.2
+			_burst(ground + dir * 3.0, WANT_DUST, 2.0, 0.6, Color(0.62, 0.57, 0.48, 0.6), Vector2(4.0, 9.0), 80.0, Vector3(0.0, -0.5, 0.0), Vector2(1.0, 4.0), false, Vector3.UP,
+				num("muzzle", "dust_m", 6.0) * 0.5)
 			_recoil(RECOIL_M, ROCK_RAD)
 			var ear: Variant = Sfx.listener()
 			var thump := num("muzzle", "thump_m", 40.0)
@@ -860,7 +887,7 @@ static func _cap_debris() -> void:
 func _step_pieces() -> void:
 	var f := _fire()
 	var now := Soldier._now()
-	if not _pieces.is_empty() and not _rested and _debris_t0 >= 0.0:
+	if not _pieces.is_empty() and not _rested and _debris_t0 > VehicleFire.NEVER * 0.5:
 		var age := now - _debris_t0
 		if age >= EXCEPTION_S and not _excepted_off:
 			_excepted_off = true

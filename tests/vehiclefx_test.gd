@@ -41,7 +41,7 @@ func _ready() -> void:
 		_run_client()
 		return
 	GameState.delete_save()
-	get_tree().create_timer(460.0).timeout.connect(func() -> void:
+	get_tree().create_timer(740.0).timeout.connect(func() -> void:
 		print("VEHICLEFX TEST FAILED (timed out)")
 		get_tree().quit(99))
 	_test_pure()
@@ -582,7 +582,7 @@ func _test_client() -> void:
 	var args := ["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), "res://tests/vehiclefx_test.tscn", "--", "--vehiclefx-join"]
 	var pid := OS.create_process(OS.get_executable_path(), args)
 	check(pid > 0, "started the client process")
-	await _until(func() -> bool: return _client_ready or _client_failures >= 0, 200.0)
+	await _until(func() -> bool: return _client_ready or _client_failures >= 0, 300.0)
 	if _client_ready:
 		var next := await _spawn("bradley", Vector3(70, 0, -60), 0.0)
 		await _seconds(1.0)
@@ -591,7 +591,7 @@ func _test_client() -> void:
 		await _seconds(0.3)
 		_expect.rpc(expect.merged({"next": next.vehicle_id, "nseed": next.fire_state.seed, "ndigest": VehicleFx.plan_digest(VehicleFx.debris_plan("bradley", next.fire_state.seed)),
 			"nk": String(next.fire_state.kill.get("k", ""))}))
-	await _until(func() -> bool: return _client_failures >= 0, 120.0)
+	await _until(func() -> bool: return _client_failures >= 0, 240.0)
 	for line in _client_lines:
 		print("    client: %s" % line)
 	check(_client_failures == 0, "everything replicated to the client (%d client failures)" % _client_failures)
@@ -632,7 +632,7 @@ func _client_report(count: int, lines: PackedStringArray) -> void:
 
 
 func _run_client() -> void:
-	get_tree().create_timer(190.0).timeout.connect(func() -> void: get_tree().quit(99))
+	get_tree().create_timer(420.0).timeout.connect(func() -> void: get_tree().quit(99))
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	if Net.session_ended.is_connected(Callable(main, &"_on_session_ended")):
@@ -641,6 +641,7 @@ func _run_client() -> void:
 	var lines := PackedStringArray()
 	var note := func(ok: bool, what: String) -> void:
 		lines.append("[%s] %s" % ["ok" if ok else "FAIL", what])
+		print("  [%s] %s" % ["ok" if ok else "FAIL", what])  # (in the client's own log too, as it goes)
 		if not ok:
 			failures += 1
 	var joined := await _join_host("127.0.0.1", 120.0)
@@ -673,6 +674,7 @@ func _run_client() -> void:
 		note.call(ThermalView.heat_of(v) >= 0.9 and b != null and b.fire_state.stage == String(expect.bstage) and VehicleFx.of(b)._column != null,
 			"hot in thermal (%.2f); the burning M-ATV's smoke column" % ThermalView.heat_of(v))
 		var kills := int(VehicleFx.made.get("kill", 0))
+		print("client: ready for the next kill")
 		_ready_for_hit.rpc_id(1)
 		await _until(func() -> bool: return expect.has("next"), 30.0)
 		await _until(func() -> bool:

@@ -432,7 +432,11 @@ func _client_end(id: int, pos: Vector3, how: String, outcome := "", sid := "", c
 	if is_instance_valid(node):
 		node.queue_free()
 	if how in ["vehicle", "world", "air", "body"]:
-		last_impact = VehicleFx.impact(self, pos, how, outcome, sid, cls, dir)  # A7 (2.10.3): sparks, a flash, a burst by the round and what it did
+		_show_impact.call_deferred(pos, how, outcome, sid, cls, dir)  # A7 (2.10.3): after the step, not in the host's shell physics
+
+
+func _show_impact(pos: Vector3, how: String, outcome: String, sid: String, cls: String, dir: Vector3) -> void:
+	last_impact = VehicleFx.impact(self, pos, how, outcome, sid, cls, dir)
 
 
 ## Every peer: the drawn rounds fly on as the host's do (no hit tests: the host's end event stops them).

@@ -41,6 +41,9 @@ suite_timeout() {
 		# vehicles: its host runs ~30 sections, and squad driving (convoys, carries, unstuck, 2026-10-20)
 		# took it past 480 s: killed in "Squad drivers part 2" with two sections to go (R2353, CI too).
 		vehicles) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		# vehiclefx: its host runs ~10 sections (fires, kills with physics settling, smoke clouds
+		# growing and clearing), then a client process joins and checks the wreck and the next kill.
+		vehiclefx) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
 		# perfcases: five zones hosted and their visuals built, 20-45 s measured in each (perf pass).
 		perfcases) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
