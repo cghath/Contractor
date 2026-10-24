@@ -14,6 +14,7 @@ var _confirm: Control
 var _status: Label
 ## The settings screen (GameSettings): the pause panel hides while it's open.
 var settings_menu: SettingsMenu
+var _hits_button: Button
 
 
 func _init() -> void:
@@ -36,6 +37,8 @@ func _ready() -> void:
 	var resume := UiKit.accent_button("Resume", close, "Back to the game (Esc)")
 	box.add_child(resume)
 	box.add_child(UiKit.button("Settings", _open_settings, "Video, sound, controls, keys and the HUD layout"))
+	_hits_button = UiKit.button("Last hits (x-ray)", _open_hits, "The last hits on armour this game, in the x-ray (combined arms A5)")
+	box.add_child(_hits_button)
 	get_out_toggle = ControlOptions.get_out_toggle()  # changeable mid-game
 	box.add_child(get_out_toggle)
 	var leave := UiKit.section("Leave", box)
@@ -72,6 +75,19 @@ func is_open() -> bool:
 	return visible
 
 
+## The local player's x-ray (VehicleXray), or null.
+func _xray() -> VehicleXray:
+	return get_tree().get_first_node_in_group(VehicleXray.GROUP) as VehicleXray if is_inside_tree() else null
+
+
+## The last hits in the x-ray: the pause menu shuts and the x-ray opens on the latest.
+func _open_hits() -> void:
+	var x := _xray()
+	close()
+	if x:
+		x.open_latest()
+
+
 func _open_settings() -> void:
 	if settings_menu == null:
 		settings_menu = SettingsMenu.new()
@@ -89,6 +105,7 @@ func open() -> void:
 	_status.text = ""
 	_base_button.visible = can_return_to_base()
 	get_out_toggle.set_pressed_no_signal(ControlOptions.get_out_key())
+	_hits_button.visible = _xray() != null and not _xray().reports.is_empty()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	UiKit.focus_first(_panel)  # keyboard: Tab/arrows and Enter work at once
 

@@ -11,6 +11,65 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Vehicle HUDs and the x-ray (cg_brief queue item 2.4 (A5), armour/hud)
+
+Combined arms phase A5, the first build cut: the Abrams and the Bradley (and the AAV, M-ATV and
+MaxxPro) get their own HUDs, the x-ray shows what each hit did, and a buttoned-up crew sees and
+hears the world from inside. Design: docs/combined_arms.md 2.6, 2.11 and 2.12 ("Built in A5"
+there); every number Proposed; calls in docs/audits/followups.md "Calls made".
+
+#### Added
+- **The vehicle HUD** (any seat of a vehicle with modules; soft vehicles, helicopters and static
+  guns keep the text line): a panel in the old line's place with a top-down **doll** of the
+  vehicle (its modules white, yellow when damaged, red when destroyed; tracks or wheels; reactive
+  armour tiles, grey once fired; a coloured pip with a letter for each crewman at his seat), the
+  vehicle and seat with a short damage word (none, damaged, mobility, firepower, knocked out,
+  burning), the **alerts** when they're true (ON FIRE, TRACK THROWN, ROLLOVER RISK, FORD depth,
+  MISSILE LAUNCH, SHORT-CREWED, NO RADIO), the guns' lines, a **round selector** (every round
+  type, the loaded one in brackets, the next named, the reload bar), the crew line (names, jobs,
+  wounded or down, "you"), the drive line (speed, gear, fuel, engine and transmission) and your
+  own keys. On a small window it drops the keys first, then the crew names, the drive line and the
+  selector. The compass strip shows the hull's heading, the turret's direction and a red tick for
+  where the last hit came from; in third person a ring shows where the gun really points.
+- **Blue Force Tracker chevrons**: a blue chevron over every friendly vehicle whose radio works,
+  in every view and through the sights. A vehicle whose radio is knocked out drops off it.
+- **The sights** show the crew pips and the damage word, and bracket the loaded round.
+- **Vision blocks and periscopes**: buttoned up in first person (the Abrams' driver, commander and
+  loader, the Bradley's driver and commander) you see only through your blocks: thin slits of glass
+  at 1x, the one you look towards; the sight (aim) and the third-person view are as before. The
+  driver's three periscopes have a **night channel** (the sight channel key): green intensifier,
+  the rest of the HUD dimmed; a damaged periscope loses it, a destroyed one means turning out to
+  drive. The loader turned in sees the bustle doors and a large round selector.
+- **Muffled hearing**: in a closed seat outside sounds are 12 dB quieter and dull; turned out or in
+  an open seat, clear.
+- **The x-ray** (5, rebindable; the pad wheel's "Last hit (x-ray)"; the pause menu's "Last hits"):
+  after a hit on armour a small card says what happened ("PEN: transmission destroyed, engine
+  damaged, loader wounded" or "RICOCHET: Turret side, 81 degrees"); the key opens the full view:
+  the vehicle drawn from its data, turnable, its plates shaded by thickness, its modules and crew
+  coloured by state, the round's line through what it hit, the angle, the spall, and the numbers
+  ("Hull rear, 30 mm KE at 0 degrees: 30 mm effective. M829A3 at 1000 m: 780 mm. PENETRATION.").
+  It reads what the host worked out for that hit, never a second guess. The last 10 hits are
+  kept. A setting (HUD tab, "Hit analysis") picks the cards: off, my shots, my shots and hits on me
+  (the default), every hit. `--xray-log` writes every report to the session log.
+- **Protection analysis** at the vehicle range and the base: with no hit to show, the x-ray key
+  opens it on the vehicle you're in or next to: pick a round and a range, click the model, and
+  see what happens there and how often it ricochets.
+- New suite `vehiclehud` (in tools/run_tests.sh and CI); ui_test fits the panel, the card and the
+  full view at its 10 window sizes.
+
+#### Fixed
+- **Door gunners and mounted MGs fire again** near friendly vehicles. B5's armour IFF held every
+  vehicle gunner off any enemy within 50 m of any friendly tracked vehicle, so a Black Hawk's door
+  gunner or an M-ATV's M2 at the range (or in any convoy) never fired (vehicles suite: "engages the
+  enemy out of his door (0 rounds)", "fires at an enemy in view (0 rounds)", red since B5). A
+  machine gun now holds fire only when a tracked friendly vehicle is on its line of fire (within
+  6 m of it, out to 150 m past the target, less when firing downhill). Its own vehicle is also
+  recognised by the tracker's own key.
+
+#### Changed
+- HitEvents carry the round's direction, angle, range, shooter, path and spall for the x-ray
+  (a few hundred bytes each); a vehicle's dead radio shows on every machine, not only the host.
+
 ### Gunnery: sights, thermal, the laser and fire control, the stabiliser, hatches (cg_brief queue item 2.3 (A4), armour/gunnery)
 
 Combined arms phase A4: the Abrams and the Bradley aim through real sights. Design:
