@@ -1241,7 +1241,15 @@ func _test_gun_team() -> void:
 	if team == null:
 		return
 	team.squad.note_enemy(foe, foe.global_position)
+	# (Their rifles hold until the gun's manned: in the 30-100 s of carrying and setting up they
+	# sometimes killed him at 130 m, can_go_down or not: "fires on him (0 rounds)" with the foe dead,
+	# R0390, R0543, R0624, CI run 40045822231.)
+	for s: Soldier in [a, b]:
+		SquadAI.of(s).hold_fire = true
+	foe.vitals.died.connect(func() -> void: print("    (the gun team's foe died at %.1f s: %s)" % [Soldier._now(), foe.vitals.wound_list().map(func(w: Dictionary) -> String: return String(w.get("part", "?")))]))
 	await _wait_for(func() -> bool: return team.state == GunTeam.State.MANNED, 100.0)
+	for s: Soldier in [a, b]:
+		SquadAI.of(s).hold_fire = false
 	if team.state != GunTeam.State.MANNED:
 		print("    %s; gunner at %s (spot %s), %s" % [GunTeam.STATE_NAMES[team.state], a.global_position, team.spot, a.ai_status])
 	check(team.state == GunTeam.State.MANNED and is_instance_valid(team.gun) and team.gun.gunner() in [a, b],
