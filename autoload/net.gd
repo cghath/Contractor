@@ -14,7 +14,11 @@ const MAX_CLIENTS := 3
 ## While connecting, give up on an unanswered host after about this long (ENet's default is
 ## 5-30 s), so the menu can retry quickly. Normal timeouts are restored once connected.
 const CONNECT_TIMEOUT_MS := 2500
-const ENET_TIMEOUT := [32, 5000, 30000]  # ENet defaults: limit, min ms, max ms
+## Once connected, both ends (limit, min ms, max ms). ENet's defaults (32, 5000, 30000) dropped a
+## peer whose main thread was busy for ~5 s: a joining client generating its zone, a host
+## switching levels, on a slow PC or CI (map and lhd_home: the client's first session ended and it
+## joined again as a new peer). Proposed.
+const ENET_TIMEOUT := [32, 20000, 60000]
 
 
 func _ready() -> void:
@@ -23,7 +27,7 @@ func _ready() -> void:
 	peer_joined.connect(func(id: int) -> void: print("[net] peer %d connected" % id))
 	peer_left.connect(func(id: int) -> void: print("[net] peer %d left" % id))
 	join_failed.connect(func() -> void: print("[net] could not connect"))
-	multiplayer.peer_connected.connect(func(id: int) -> void: peer_joined.emit(id))
+	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(func(id: int) -> void: peer_left.emit(id))
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_connection_failed)
@@ -76,6 +80,17 @@ func _on_connected() -> void:
 	if peer:
 		_server_peer(peer).set_timeout(ENET_TIMEOUT[0], ENET_TIMEOUT[1], ENET_TIMEOUT[2])
 	joined.emit()
+
+
+## Host: a joined client's link gets the connected timeouts too (the client sets its own in
+## _on_connected).
+func _on_peer_connected(id: int) -> void:
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer and multiplayer.is_server():
+		var link := peer.get_peer(id)
+		if link:
+			link.set_timeout(ENET_TIMEOUT[0], ENET_TIMEOUT[1], ENET_TIMEOUT[2])
+	peer_joined.emit(id)
 
 
 func _on_connection_failed() -> void:

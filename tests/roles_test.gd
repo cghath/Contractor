@@ -588,7 +588,9 @@ func _test_callout_rules() -> void:
 	callouts.shown.clear()
 	# And their own brains stay quiet meanwhile (the newest held-back line wins: anything they
 	# called on their own in the gap would take the place of the test's Moving!; CI, R0274).
-	var brains: Array = [SquadAI.of(first), SquadAI.of(second)].filter(func(b: SquadAI) -> bool: return b != null)
+	# Every squadmate's, not just these two: a third man's line holds the group's air (one voice
+	# per group), and the held-back Moving! waited behind his bounding calls (CI, ops/zones).
+	var brains: Array = _squad().map(func(s: Soldier) -> SquadAI: return SquadAI.of(s)).filter(func(b: SquadAI) -> bool: return b != null)
 	for b: SquadAI in brains:
 		b.process_mode = Node.PROCESS_MODE_DISABLED
 	var said := func(who: Soldier, id: StringName) -> Array:

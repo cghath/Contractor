@@ -11,6 +11,29 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The rest of the reds: map, contracts, perfcases, casualty, roles (integrate/cg-oct24, v0.6.1)
+
+Local R2581, R2583, R2584 (perfcases, townperf, city) and R2585 PASS.
+
+- **Fixed (net):** a joined peer whose game was busy ~5 s (a client generating its zone on join,
+  a host switching levels; slow PCs and CI) was dropped, and the client came back as a new peer
+  (map's and lhd_home's CI reds). The connected timeouts are now 20-60 s, set on the host's link
+  to each client too (`Net.ENET_TIMEOUT`, `_on_peer_connected`). Proposed.
+- **Fixed (voxels, F-233):** a city's blocks stamped a fixed 4 ms a frame, so at 2-3 frames a
+  second a city took minutes to appear. On slow frames the budget is 3% of the last frame, up to
+  12 ms a block (`VoxelWorld.BUILD_FRAME_SHARE`, `BUILD_BUDGET_MAX_MS`); over ~12 fps unchanged.
+- **Fixed (squad AI, F-192):** a follower whose slot swung round a building replanned north of
+  it, then south, and ran loops. A new path that sets off the other way is taken only when it's
+  under 75% of the old way's length (`KEEP_WAY_SHARE`), the old way kept at most 3 re-plans,
+  only with its end within 4 m of the new spot and never while blocked.
+- **Fixed (economy sim):** its campaigns started from whatever the last one (or a test's earlier
+  sections) left in bounties, the war and zone control, so one seed ended $50k apart; each now
+  starts empty and the caller's campaign is put back after.
+- **Tests:** contracts' careless-play bar is -$25k (was -$50k: sloppy loses $36k in 14 days
+  since the bounties and income streams; how hard careless play should bleed is the economy
+  follow-up's) and its zone UI check takes a belligerent holder (the US gains ground); roles
+  quiets every squadmate's brain for the held-back Moving! (a third man's lines held the air).
+
 ### The high command reds: base_zone, loop, forest, story, lhd_home (integrate/cg-oct24, v0.6.0)
 
 Red on CI since high command C2 (b066b9ed, two standing squads) and the mission UI pass; local

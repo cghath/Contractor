@@ -5722,6 +5722,17 @@ func _go(point: Vector3, run := false) -> void:
 ## baked mesh sits a little above the ground, so 3D distances never quite close).
 const REPATH_SHARE := 0.15
 const REPATH_DRIFT_MAX_M := 3.0
+## A new path that sets off the other way from the one being walked (a slot swinging round a
+## building as the lead turns: north of it, then south) is taken only when it's under this share
+## of the old way's length; else the old way goes on, to the new destination (F-192: a follower
+## turning back and forth ran loops round the compound's building, casualty soak, CI). Proposed.
+const KEEP_WAY_SHARE := 0.75
+const KEEP_WAY_DOT := -0.2
+## The kept way ends in a straight line to the new destination, so only when that's short, never
+## while pushing into something, and at most KEEP_WAY_MAX re-plans running before the new path.
+const KEEP_WAY_END_M := 4.0
+const KEEP_WAY_MAX := 3
+var _kept_way := 0
 
 
 func _steer(delta: float) -> void:
@@ -5735,7 +5746,14 @@ func _steer(delta: float) -> void:
 		if _repath_cd <= 0.0 or _path_target.distance_to(_destination) > drift_ok:
 			_repath_cd = REPATH_S * _lod_now()
 			_path_target = _destination
-			_path = NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, _destination, true)
+			var path := NavigationServer3D.map_get_path(body.get_world_3d().navigation_map, body.global_position, _destination, true)
+			if _kept_way < KEEP_WAY_MAX and _blocked_s <= 0.0 and _keeps_way_round(path):
+				_kept_way += 1
+				path = _path.slice(_path_index)
+				path.append(_destination)
+			else:
+				_kept_way = 0
+			_path = path
 			_path_index = 0
 		while _path_index < _path.size() and _flat_distance(_path[_path_index]) < WAYPOINT_REACH:
 			_path_index += 1
@@ -5765,6 +5783,35 @@ func _steer(delta: float) -> void:
 		_aim_at(body.threat_pos + Vector3.UP * 1.2)
 	elif foe == null and dir == Vector3.ZERO and suspecting() and intent != Intent.CASUALTY:
 		_aim_at(_suspect_pos + Vector3.UP * 1.0)  # something there: look (Spotting)
+
+
+## Whether to keep walking the old path rather than `new_path` (KEEP_WAY_SHARE): the new one
+## sets off the other way, and isn't much shorter than the old one's rest plus its end to the
+## destination.
+func _keeps_way_round(new_path: PackedVector3Array) -> bool:
+	if _path_index >= _path.size() or new_path.size() < 2:
+		return false
+	if Vector2(_destination.x - _path[-1].x, _destination.z - _path[-1].z).length() > KEEP_WAY_END_M:
+		return false
+	var here := body.global_position
+	var old_next := _path[_path_index]
+	var new_next := new_path[1]
+	for p: Vector3 in new_path:
+		if _flat_distance(p) >= WAYPOINT_REACH:
+			new_next = p
+			break
+	var old_dir := Vector2(old_next.x - here.x, old_next.z - here.z)
+	var new_dir := Vector2(new_next.x - here.x, new_next.z - here.z)
+	if old_dir.length() < 0.05 or new_dir.length() < 0.05 or old_dir.normalized().dot(new_dir.normalized()) > KEEP_WAY_DOT:
+		return false
+	var old_len := _flat_distance(old_next)
+	for i in range(_path_index, _path.size() - 1):
+		old_len += Vector2(_path[i + 1].x - _path[i].x, _path[i + 1].z - _path[i].z).length()
+	old_len += Vector2(_destination.x - _path[-1].x, _destination.z - _path[-1].z).length()
+	var new_len := 0.0
+	for i in new_path.size() - 1:
+		new_len += Vector2(new_path[i + 1].x - new_path[i].x, new_path[i + 1].z - new_path[i].z).length()
+	return new_len >= old_len * KEEP_WAY_SHARE
 
 
 ## A wall's end met head on (F-190: the navmesh keeps a path only ~0.1-0.25 m off a corner and

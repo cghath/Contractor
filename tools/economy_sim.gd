@@ -225,6 +225,10 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 	_rng.seed = hash([campaign_seed, "sim"])
 	seed(hash([campaign_seed, "global"]))  # server_sell_intel's randf() (caught or not)
 	_acc = {}
+	# Every section empty first: bounties, the faction war, zone control, the story... from the
+	# last campaign (or a test's earlier sections) changed the board and pay, so the same seed
+	# ended $50k apart in contracts_test (careless play $184k locally, $235k on CI)
+	Campaign.restore({})
 	Contracts.new_full_campaign(campaign_seed)
 	Campaign.section(Income.SECTION).clear()  # (new_full_campaign leaves the sections it doesn't own)
 	Campaign.section(&"roster").clear()
@@ -886,6 +890,7 @@ func _poisson(mean: float) -> int:
 ## `days` on the data as it stands. {"start": mean day-0 cash, "end": mean cash less loans at the
 ## end, "broke": campaigns out of credit and in debt}. Leaves the autosave flags as it found them.
 func curve(profile: String, runs: int, days: int, first_seed := 1) -> Dictionary:
+	var before := Campaign.snapshot()  # (the caller's campaign, put back after: each run empties it)
 	_orig_prices = Prices.data().duplicate(true)
 	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
 	var autosave := Contracts.autosave
@@ -906,12 +911,14 @@ func curve(profile: String, runs: int, days: int, first_seed := 1) -> Dictionary
 	Economy.wages_provider = wages
 	Contracts.autosave = autosave
 	Contracts.auto_show_debrief = show
+	Campaign.restore(before)
 	return {"start": _mean(starts), "end": _mean(ends), "broke": broke}
 
 
 ## The scripted expensive op for the tests: {"net": mean economic net, "cash_after": mean cash
 ## after it} over `runs` fresh campaigns, won or failed.
 func op_result(won: bool, runs: int, first_seed := 1) -> Dictionary:
+	var before := Campaign.snapshot()  # (the caller's campaign, put back after: each run empties it)
 	_orig_prices = Prices.data().duplicate(true)
 	_orig_settings = (MissionRegistry.data().get("settings", {}) as Dictionary).duplicate(true)
 	var autosave := Contracts.autosave
@@ -933,6 +940,7 @@ func op_result(won: bool, runs: int, first_seed := 1) -> Dictionary:
 	Economy.wages_provider = wages
 	Contracts.autosave = autosave
 	Contracts.auto_show_debrief = show
+	Campaign.restore(before)
 	return {"net": _mean(nets), "cash_after": _mean(after), "n": nets.size()}
 
 

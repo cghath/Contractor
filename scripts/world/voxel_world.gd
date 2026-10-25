@@ -172,6 +172,11 @@ var _next_structure := 0  # how many of _structures are stamped so far
 ## The base structures are stamped a few at a time, at most BUILD_BUDGET_MS a frame (a
 ## generated town is over a thousand boxes: all at once held a frame for half a second).
 const BUILD_BUDGET_MS := 4.0
+## On slow frames the budget grows to this share of the last frame, up to BUILD_BUDGET_MAX_MS:
+## at 2-3 frames a second a fixed 4 ms stamped a city's blocks for minutes (F-233: CI's
+## perfcases, and a slow PC's city the same). Over ~12 fps it stays BUILD_BUDGET_MS. Proposed.
+const BUILD_FRAME_SHARE := 0.03
+const BUILD_BUDGET_MAX_MS := 12.0
 var _pending: Array = []
 var _dirty: Array[AABB] = []  # host: carved voxel boxes not checked for breaches yet
 var _breached := {}           # host: Vector2i columns already reported as part of a gap
@@ -309,7 +314,7 @@ func structure_boxes_m() -> Array[AABB]:
 	return boxes
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _built:
 		_check_breaches()
 		return
@@ -320,7 +325,8 @@ func _process(_delta: float) -> void:
 		return
 	_tool.mode = VoxelTool.MODE_SET
 	var started := Time.get_ticks_usec()
-	var until := started + int(BUILD_BUDGET_MS * 1000.0)
+	var budget_ms := clampf(delta * 1000.0 * BUILD_FRAME_SHARE, BUILD_BUDGET_MS, BUILD_BUDGET_MAX_MS)
+	var until := started + int(budget_ms * 1000.0)
 	while _next_structure < _structures.size():
 		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]
