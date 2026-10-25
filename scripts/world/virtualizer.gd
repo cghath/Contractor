@@ -456,11 +456,13 @@ func _wake_due(r: Dictionary, eyes: Dictionary) -> bool:
 	var near := INF
 	for e: Vector3 in eyes.pos:
 		near = minf(near, _flat(e, at))
+	if near <= FORCE_M:
+		return true
+	if BigZoneStreaming.at_cap(get_parent(), not (p.get("rides", []) as Array).is_empty()):
+		return false  # an 8 km zone at its live cap: the profile waits (docs/combined_arms.md 6.2.3)
 	for o: Soldier in _enemies(eyes, StringName(p.side)):
 		if _flat(o.global_position, at) < AI_SPAWN_M:
 			return true
-	if near <= FORCE_M:
-		return true
 	if near > SPAWN_M:
 		return false
 	return not spots_seen(spawn_spots(r), eyes.players)

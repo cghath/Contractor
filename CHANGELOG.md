@@ -11,6 +11,84 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Operation zones of about 8 km: combined arms D1 + D2 (cg_brief queue item 3.1, ops/zones)
+
+The big government operations get their ground: 8,192 m zones made fresh from the contract zones
+they cover, and the streaming that lets one run. Design: docs/combined_arms.md 6.2; every number
+Proposed (data/operation_zones.json, named consts); calls D1-1 to D1-12 and D2-1 to D2-13 in
+docs/combined_arms.md section 10, the rest in docs/audits/followups.md "Calls made". Nothing offers
+or hosts an operation yet: that's D3 (cg_brief 3.2), which builds on `ZoneDef.generate_operation`.
+This finishes the work left on claude/ca-d1-operation-zones (D1 done, D2 untested then), merged
+onto armour/drive and re-applied to the world expansion and the perf pass that came after it.
+
+#### Added
+- **Operation zones.** `ZoneDef.generate_operation(seed, op_type, covers)` makes an 8,192 m zone
+  for the big government operations from the contract zones it covers. It takes their region,
+  terrain (river valley, desert wadi, farmland or marsh inland; the coast presets for a landing),
+  assets and landmarks, and lays them out with today's water, roads, villages and landmarks.
+- **Bands along an axis of advance.** The zone runs from the friendly edge, or the sea, into the
+  enemy's depth. First comes the start: an allied FOB inland, or the beach on the coast. Then
+  outposts, checkpoints and villages. Then a river crossing, then the town, then the HQ with its
+  comms site, QRF bases and the depth target (an airfield, an oil site or a fuel depot). The
+  enemy's rear comes last.
+- **The main supply route.** The MSR runs the length of the zone: start, its checkpoint, the
+  river, the town, the HQ, the depth target. Two laterals cross it, and every other site has a
+  track to the nearest road. The roads are curved and graded like any zone's.
+- **A river with real crossings.** The river crosses the axis in band 2. The MSR crosses it on a
+  concrete road bridge. A second route has a steel truss bridge, and one or two tracks ford it.
+  Footbridges sit between them for the infantry. A checkpoint holds the far end of the bridge,
+  with an outpost overlooking it.
+- **Landmarks from the covered zones**, each in its own band. A beach landing's harbour stands on
+  the coast. The mosque and the office are in the town, and the airfield and oil field are in the
+  depth.
+- **Holding a town means a city.** An operation to hold a town puts one of cghath's cities in the
+  town band, where the town would be. The MSR comes in at its ring street on the bridge's side and
+  leaves on the far side.
+- **An 8 km zone streams its ground** (BigZoneStreaming, on every peer):
+  - the ground's collision is built round every player (1 km), vehicle (300 m) and soldier (150 m;
+    450 m on the host for a squad in a fight), nearest first, a little every frame, and freed
+    once everyone has gone; the cover (trees, rocks, props) the same by its 128 m cells;
+  - a chunk with something lying on it (a body, a dropped item, a wreck) is kept, so nothing
+    falls through the world;
+  - a late joiner, a respawn or a spawned vehicle gets the ground round it at once, anywhere on
+    the map;
+  - a door gunner going fast or high keeps his ground but not the far cover, as the perf pass
+    already does for navigation.
+- **The ground is drawn in rings.** An 8 km zone's terrain is 256 far tiles from 2 km out, and
+  each chunk's own detail levels built on a worker round the camera and freed behind it. The
+  scatter frees its drawn cells behind the camera too. Driving or flying across the zone holds the
+  memory steady instead of filling it.
+- **Far drawing.** In an 8 km zone soldiers are drawn to 1.5 km and vehicles to 1.2 km, with a box
+  of their size and colour out to 3 km.
+- **Live caps.** Past the Virtualizer's force-spawn distance, a group waits as a profile while 80
+  soldiers (or, for a ride, 16 vehicles) are live. Nobody near a player is ever held back.
+- **The `invasion` suite** (also on CI): the 6.2.3 case on an 8 km operation zone, with two armour
+  columns on the move, 60 live AI fighting, 200 virtual and one player. Then a drive along the MSR
+  and a UH-60 contour flight across the zone, measuring how fast the ground catches up. Then the
+  same load in a 4 km hot zone on the same terrain, built up front, to hold it against. It measures frame and physics time, hitches a
+  minute, the streaming's worst frame, the catch-up and the memory, against Proposed budgets.
+  It replaces the WIP's tests/invasion_perf.gd timing script.
+- world_test: the D1 checks, plus the city for holding a town, a crater cut before its chunk is
+  built (a save's cuts) still there when the chunk comes, a chunk kept while something lies on
+  it, and the ground's rings.
+
+#### Changed
+- cghath's world files (each change only for zones of 4,224 m or more, apart from two that come
+  out the same everywhere): ZoneTerrain (collision on demand; far tiles and rings; a chunk's
+  collision read from the height grid by rows, and `_wanted_near` only looking at the chunks near
+  the camera, both giving the same chunks as before), ZoneScatter (caps scaled by area, cover
+  streamed by cell, drawn cells freed, the layout let go from memory as its zone goes; a cell's
+  cover body now gets its shapes before it enters the tree, which builds the same collision
+  faster everywhere), ZoneWater, ZoneBridges and ZoneModules (one hint each, F-195 to F-197).
+  Hot and contract zones build and draw everything up front as before.
+- perfcases' meter takes a case's length and a per-tick hook from a subclass (the invasion suite
+  extends it); perfcases itself runs as before.
+
+#### Fixed
+- The D2 work-in-progress had pasted ZoneScatter's new `_cap()` into the middle of `_set_caps`, so
+  the woods' and copses' shares were never set on that branch (it never ran a test). Fixed in the
+  merge; armour/drive never had the bug.
+
 ### Driving physics and terrain for armour (cg_brief queue item 2.7 (A6), armour/drive)
 
 Combined arms phase A6: vehicles drive by their engine's power and the ground's grip, can roll over,

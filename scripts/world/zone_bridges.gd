@@ -128,7 +128,7 @@ func setup(w: ZoneWater) -> void:
 		var s := maxf(absf(road.cross(flow)), MIN_SIN)
 		match String(c.kind):
 			CONCRETE, TRUSS, FOOT:
-				bridges.append(_layout(String(c.id), String(c.kind), pos, road, (half + bank_w + END_M) / s, level, level - depth))
+				bridges.append(_layout(String(c.id), String(c.kind), pos, road, (half + bank_w + END_M) / s, level, level - depth).merged({"role": String(c.get("role", ""))}))  # an operation's "msr" bridge (OperationGen; F-item)
 			CULVERT:
 				var reach := (ZoneWater.ROAD_HALF_M + (float(c.get("top", level + 1.4)) - (level - depth)) * ZoneWater.EMBANK_RUN) / s
 				culverts.append({"id": c.id, "pos": Vector3(pos.x, level - depth * 0.5, pos.y), "dir": flow, "half_len": reach, "top": float(c.get("top", level + 1.4)), "water": level})

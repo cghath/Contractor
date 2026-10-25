@@ -18,6 +18,8 @@ const BUDGET_GENERATE_MS := 1500.0
 const BUDGET_WORST_FRAME_MS := 150.0
 const BUDGET_AVERAGE_FRAME_MS := 25.0
 const BUDGET_MEMORY_MB := 250.0
+## docs/combined_arms.md 9.3, D1: an operation zone's def, terrain and water made in under this.
+const BUDGET_OPERATION_MS := 8000.0
 ## The shed's plank wall in the compound module, and the live mark the host makes once the
 ## client is in (module space, metres).
 const SHED_SHOT_FROM := Vector3(17.05, 1.35, -3)
@@ -93,7 +95,7 @@ func _run_host(wait_for_client: bool) -> void:
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(^"1") != null, 5.0)
 	player = level.players.get_node(^"1")
 	player.set_physics_process(false)
-	_test_generation(mem_before)
+	await _test_generation(mem_before)
 	await _test_streaming()
 	await _test_edits()
 	await _test_shot_in_module()
@@ -150,6 +152,7 @@ func _test_generation(mem_before: float) -> void:
 	_test_building_gen()
 	_test_towns()
 	_test_presets()
+	await _test_operation_zones()
 	_test_ship_placement()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
@@ -1700,3 +1703,216 @@ func _eye_foliage(sc: ZoneScatter, t: ZoneTerrain, p0: Vector2, p1: Vector2) -> 
 		var v := p0.lerp(p1, float(k + 1) / pieces)
 		sum += sc.foliage_between(Vector3(u.x, t.height_at(u.x, u.y) + 1.6, u.y), Vector3(v.x, t.height_at(v.x, v.y) + 1.6, v.y))
 	return sum
+
+
+## docs/combined_arms.md 6.2 (phase D1): operation zones of 8,192 m in bands along an axis of
+## advance, made from the zones they cover: the same every time, every site in its band, the MSR
+## the length with a concrete bridge over the band-2 river, the other crossings in band 2, and
+## landmarks from the covered zones in their bands. Budget: BUDGET_OPERATION_MS for the def, the
+## terrain and the water.
+func _test_operation_zones() -> void:
+	print("Operation zones")
+	var d := OperationGen.data()
+	var started := Time.get_ticks_msec()
+	var op := ZoneDef.generate_operation(11, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"])
+	var def_ms := Time.get_ticks_msec() - started
+	check(ZoneDef.generate_operation(11, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"]).hash() == op.hash()
+		and ZoneDef.generate_operation(12, "phased_invasion", ["ashfield", "red_mesa", "salt_pan"]).hash() != op.hash(),
+		"the same seed, type and covers give the same operation zone; another seed another")
+	check(is_equal_approx(float(op.size_m), 8192.0) and OperationGen.is_operation(op) and op.covers == ["ashfield", "red_mesa", "salt_pan"]
+		and op.region == "inland" and op.terrain == "river_valley" and op.controller == "ashen_banner",
+		"an 8,192 m operation zone over its covered zones: inland, %s terrain, held by %s" % [op.terrain, op.controller])
+	var bands: Array = op.op.bands
+	var contiguous := bands.size() == 6 and is_zero_approx(float(bands[0].from_m)) and is_equal_approx(float(bands.back().to_m), 8192.0)
+	for k in range(1, bands.size()):
+		contiguous = contiguous and is_equal_approx(float(bands[k].from_m), float(bands[k - 1].to_m))
+	check(contiguous and bands.map(func(b: Dictionary) -> String: return b.id) == ["start", "outposts", "crossing", "town", "depth", "keep"],
+		"six bands along the axis, end to end: %s" % [bands.map(func(b: Dictionary) -> String: return "%s %d-%d" % [b.id, b.from_m, b.to_m])])
+	var band_of := func(def: Dictionary, id: String) -> String:
+		for m: Dictionary in def.modules:
+			if m.id == id:
+				return OperationGen.band_at(def, Vector2(m.pos[0], m.pos[1]))
+		return "(none)"
+	var count := func(def: Dictionary, type: String) -> int:
+		return (def.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) == type).size()
+	var in_band := func(def: Dictionary, type: String, band: String) -> bool:
+		return (def.modules as Array).all(func(m: Dictionary) -> bool:
+			return ZoneModules.base(String(m.type)) != type or OperationGen.band_at(def, Vector2(m.pos[0], m.pos[1])) == band)
+	var sites: Dictionary = d.sites
+	var posts: int = count.call(op, "outpost") + count.call(op, "checkpoint")
+	check(band_of.call(op, "fob") == "start" and band_of.call(op, "cp_msr") == "outposts" and band_of.call(op, "cp_bridge") == "crossing"
+		and band_of.call(op, "town") == "town" and band_of.call(op, "hq") == "depth" and in_band.call(op, "qrf_base", "depth") and in_band.call(op, "comms", "depth")
+		and not (op.modules as Array).any(func(m: Dictionary) -> bool: return OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1])) in ["keep", ""]),
+		"every site in its band: the FOB at the start, the MSR checkpoint in the outposts, the bridge's in the crossing, the town, the HQ, comms and QRF bases in the depth, none in the keep")
+	check(posts >= int(sites.outposts_checkpoints[0]) and posts <= int(sites.outposts_checkpoints[1]) and count.call(op, "hq") == 1
+		and count.call(op, "qrf_base") >= int(sites.qrf_bases[0]) and count.call(op, "qrf_base") <= int(sites.qrf_bases[1]) and count.call(op, "town") == 1
+		and count.call(op, "village") >= int(sites.villages[0]) and count.call(op, "village") <= int(sites.villages[1]),
+		"hot-zone sites, scaled: %d outposts and checkpoints, %d QRF bases, an HQ, %d villages, a town" % [posts, count.call(op, "qrf_base"), count.call(op, "village")])
+	# The MSR: start to depth target, crossed by both laterals.
+	var msr: Array = op.op.msr
+	var first := Vector2(msr[0][0], msr[0][1])
+	var last := Vector2(msr.back()[0], msr.back()[1])
+	var crossed := 0
+	for line: Array in op.op.laterals:
+		var hit := false
+		for i in range(1, line.size()):
+			for j in range(1, msr.size()):
+				hit = hit or Geometry2D.segment_intersects_segment(Vector2(line[i - 1][0], line[i - 1][1]), Vector2(line[i][0], line[i][1]),
+					Vector2(msr[j - 1][0], msr[j - 1][1]), Vector2(msr[j][0], msr[j][1])) != null
+		crossed += 1 if hit else 0
+	check(OperationGen.band_at(op, first) == "start" and OperationGen.band_at(op, last) == "depth" and String(op.op.depth).begins_with("lm_")
+		and (op.op.msr_roads as Array).size() == msr.size() - 1 and crossed == 2,
+		"the MSR runs from the start (%.0f m) to the depth target %s (%.0f m) in %d legs; both laterals cross it" % [OperationGen.along(op, first), op.op.depth, OperationGen.along(op, last), msr.size() - 1])
+	# Landmarks from the covered zones (Ashfield's airfield and mosque, Red Mesa's and Salt Pan's
+	# oil), each in its band.
+	var lm_bands: Dictionary = d.landmark_bands
+	var lms := (op.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.id).begins_with("lm_"))
+	var kinds := lms.map(func(m: Dictionary) -> String: return String(m.id).trim_prefix("lm_"))
+	var placed_right := lms.all(func(m: Dictionary) -> bool:
+		var kind := String(m.id).trim_prefix("lm_")
+		return not lm_bands.has(kind) or OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1])) == String(lm_bands[kind]))
+	check("airfield" in kinds and "oil_field" in kinds and "mosque" in kinds and placed_right
+		and kinds.all(func(k: String) -> bool: return k in ZoneModules.landmark_kinds(op)),
+		"landmarks from the covered zones, each in its band: %s" % [lms.map(func(m: Dictionary) -> String: return "%s (%s)" % [m.id, OperationGen.band_at(op, Vector2(m.pos[0], m.pos[1]))])])
+	var dry := ZoneDef.generate_operation(13, "seize_crossing", ["kestrel_valley", "old_orchards"])
+	check(dry.op.depth == "lm_fuel_depot" and band_of.call(dry, "lm_fuel_depot") == "depth",
+		"covered zones with no airfield or oil site get a fuel depot as the depth target (%s, %s)" % [dry.op.depth, band_of.call(dry, String(dry.op.depth))])
+	# cg_brief 3.1: holding a town is fought for a city (cghath's queue item 1.5) in the town band,
+	# the MSR in at its near side and out at its far side, through its own streets.
+	var held := ZoneDef.generate_operation(14, "hold_town", ["ashfield", "red_mesa"])
+	var blocks := (held.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.city_of(String(m.type)) != "")
+	var city_in_band := blocks.all(func(m: Dictionary) -> bool: return OperationGen.band_at(held, Vector2(m.pos[0], m.pos[1])) == "town")
+	var town_modules := (held.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.TOWN)).size()  # (a city's blocks are towns to ZoneModules.base)
+	check(blocks.size() == BuildingGen.CITY_BLOCKS.x * BuildingGen.CITY_BLOCKS.y and city_in_band and town_modules == 0
+		and (held.get("cities", []) as Array).size() == 1 and held.op.town == "city" and (held.op.msr_roads as Array).size() == (held.op.msr as Array).size() - 2,
+		"holding a town: a city of %d blocks in the town band (no town module), the MSR to its near side and on from its far side (%d legs of %d points)" % [blocks.size(),
+		(held.op.msr_roads as Array).size(), (held.op.msr as Array).size()])
+	var coast := ZoneDef.generate_operation(12, "beach_landing", ["landing_beach", "cove_outpost", "ashfield"])
+	check(coast.region == "coast" and coast.terrain == "amphibious_coast" and int(coast.sea_side) == int(coast.op.side) and String(coast.op.fob) == ""
+		and band_of.call(coast, "lm_harbour") == "start" and OperationGen.band_at(coast, Vector2(coast.op.msr[0][0], coast.op.msr[0][1])) == "start",
+		"a beach landing: the sea on the friendly edge (side %d, sea %d), no FOB (the LHD stands off), the harbour on the coast, the MSR from the beach" % [coast.op.side, coast.sea_side])
+	# The river and its crossings (ZoneWater and ZoneBridges from the def's river_hint).
+	var flat: Array = []
+	for m: Dictionary in op.modules:
+		flat.append(ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))))
+	var t := ZoneTerrain.new()
+	var terrain_started := Time.get_ticks_msec()
+	t.generate(op, flat)
+	var gen_ms := def_ms + Time.get_ticks_msec() - terrain_started
+	var w := t.water
+	var rivers := (w.bodies as Array).filter(func(b: Dictionary) -> bool: return b.kind == "river") if w else []
+	var on_river := (w.crossings as Array).filter(func(c: Dictionary) -> bool: return w.bodies[int(c.body)].kind == "river") if w else []
+	var vehicle := on_river.filter(func(c: Dictionary) -> bool: return int(c.road) >= 0)
+	var msr_bridge := (w.bridges.bridges as Array).filter(func(b: Dictionary) -> bool: return b.type == ZoneBridges.CONCRETE and b.get("role", "") == "msr") if w else []
+	var msr_x := vehicle.filter(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.CONCRETE and int(c.road) in (op.op.msr_roads as Array))
+	check(rivers.size() == 1 and msr_bridge.size() == 1 and msr_x.size() == 1 and OperationGen.band_at(op, msr_x[0].pos) == "crossing",
+		"a river across the axis at %.0f m with one concrete bridge on the MSR, in band 2" % float(op.op.river_at_m))
+	check(on_river.all(func(c: Dictionary) -> bool: return OperationGen.band_at(op, c.pos) == "crossing")
+		and vehicle.size() >= 2 and vehicle.size() <= 4 and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.TRUSS)
+		and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.FORD),
+		"every crossing in band 2: %d for vehicles (%s), %d footbridges between" % [vehicle.size(),
+		vehicle.map(func(c: Dictionary) -> String: return "%s %s" % [c.kind, c.get("role", "")]), on_river.size() - vehicle.size()])
+	await _test_big_zone_streaming(op, t)
+	t.free()
+	check(gen_ms < BUDGET_OPERATION_MS, "an operation zone generates in %d ms: the def %d, its terrain and water %d (budget %.0f)" % [gen_ms, def_ms, gen_ms - def_ms, BUDGET_OPERATION_MS])
+
+
+## docs/combined_arms.md 6.2.2 (phase D2): an 8 km zone's ground collides only near the action
+## (BigZoneStreaming): terrain chunks within collision_in_m of a point built, nearest first and by
+## the budget, freed past collision_out_m; GroundCuts' holes kept through a rebuild; the scatter at a
+## hot zone's density (its caps times the area) with its cover streamed the same way. Hot and contract
+## zones build everything up front as before.
+func _test_big_zone_streaming(op: Dictionary, t: ZoneTerrain) -> void:
+	print("8 km zone streaming")
+	var spec := BigZoneStreaming.spec()
+	var in_m := float(spec.collision_in_m)
+	var out_m := float(spec.collision_out_m)
+	check(not BigZoneStreaming.streams(ZoneDef.HOT_SIZE_M) and BigZoneStreaming.streams(float(op.size_m)) and t.on_demand
+		and is_equal_approx(BigZoneStreaming.scatter_scale(ZoneDef.HOT_SIZE_M), 1.0) and BigZoneStreaming.scatter_scale(float(op.size_m)) > 3.9,
+		"only zones over a hot zone's size stream their ground; their scatter caps scale x%.1f" % BigZoneStreaming.scatter_scale(float(op.size_m)))
+	t.build_collision()
+	var none := t.collision_chunks()
+	var a: Array[Vector3] = [Vector3(-1500, 0, 600)]
+	var first := t.stream_collision(a, in_m, out_m, 12)
+	var all_a := first + t.stream_collision(a, in_m, out_m, -1)
+	var chunk_m := ZoneTerrain.CHUNK_CELLS * ZoneTerrain.CELL_M
+	var expect := PI * in_m * in_m / (chunk_m * chunk_m)
+	check(none == 0 and first == 12 and absf(all_a - expect) < expect * 0.15 and t.collision_chunks() == all_a,
+		"no ground collision up front; round a point, 12 chunks a tick, %d in all within %.0f m (about %.0f of %d)" % [all_a, in_m, expect, t.chunk_count() * t.chunk_count()])
+	var hole := Vector2i(t.points / 2 - 1500 / int(ZoneTerrain.CELL_M) + 3, t.points / 2 + 600 / int(ZoneTerrain.CELL_M) + 3)
+	var holes: Array[Vector2i] = [hole]
+	t.blank_samples(holes)
+	var near_b: Array[Vector3] = [Vector3(-1500 + out_m - 300.0, 0, 600)]
+	t.stream_collision(near_b, in_m, out_m, -1)
+	var kept := t.collision_chunks() > all_a
+	var b: Array[Vector3] = [Vector3(2500, 0, -2000)]
+	t.stream_collision(b, in_m, out_m, -1)
+	var moved := t.collision_chunks()
+	t.stream_collision(a, in_m, out_m, -1)
+	var c := Vector2i(hole.x / ZoneTerrain.CHUNK_CELLS, hole.y / ZoneTerrain.CHUNK_CELLS)
+	var shape: HeightMapShape3D = t._chunk_shapes.get(c)
+	var li := hole.x - c.x * ZoneTerrain.CHUNK_CELLS + (hole.y - c.y * ZoneTerrain.CHUNK_CELLS) * (ZoneTerrain.CHUNK_CELLS + 1)
+	check(kept and absf(moved - expect) < expect * 0.15 and shape != null and is_nan(shape.map_data[li]),
+		"chunks kept within %.0f m of the action, freed past it (%d after a 5 km move); a dug hole survives its chunk being freed and built again" % [out_m, moved])
+	# A crater dug (or a save's cuts put back) where no chunk is built yet: its holes are there when
+	# the chunk comes (cg_brief 3.1: saves and late cuts in a streamed zone).
+	var far_pos := Vector3(3000, 0, -3200)
+	var dug := GroundCuts.of(t).apply(GroundCuts.crater_op(far_pos, 3.0))
+	var dug_cell := GroundCuts.of(t).cell_of(far_pos.x, far_pos.z)
+	var far_at: Array[Vector3] = [far_pos]
+	t.stream_collision(far_at, 200.0, 260.0, -1)
+	var dc := Vector2i(dug_cell.x / ZoneTerrain.CHUNK_CELLS, dug_cell.y / ZoneTerrain.CHUNK_CELLS)
+	var dshape: HeightMapShape3D = t._chunk_shapes.get(dc)
+	var dli := dug_cell.x - dc.x * ZoneTerrain.CHUNK_CELLS + (dug_cell.y - dc.y * ZoneTerrain.CHUNK_CELLS) * (ZoneTerrain.CHUNK_CELLS + 1)
+	check(dug and dshape != null and is_nan(dshape.map_data[dli]), "a crater cut before its chunk was built is in the chunk when it comes (a save's cuts put back on an 8 km zone)")
+	# Something lying on a chunk keeps it (BigZoneStreaming.held): an item, a ragdoll or a vehicle.
+	add_child(t)  # (far outside the test zone: nothing else of this world is out there)
+	var lying := RigidBody3D.new()
+	lying.collision_layer = 1 << 2
+	lying.freeze = true
+	var lying_shape := CollisionShape3D.new()
+	lying_shape.shape = BoxShape3D.new()
+	lying.add_child(lying_shape)
+	add_child(lying)
+	lying.global_position = Vector3(far_pos.x, t.height_at(far_pos.x, far_pos.z) + 0.3, far_pos.z)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var under := Vector2i(floori((far_pos.x + t.size_m * 0.5) / chunk_m), floori((far_pos.z + t.size_m * 0.5) / chunk_m))
+	var away: Array[Vector3] = [Vector3(-3000, 0, 3200)]
+	t.stream_collision(away, 200.0, 260.0, -1)
+	var kept_under := t.has_collision(under)
+	var others := t.collision_chunks()
+	lying.queue_free()
+	t.set_meta(&"held_until", {})
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	t.stream_collision(away, 200.0, 260.0, -1)
+	check(kept_under and not t.has_collision(under) and t.collision_chunks() < others,
+		"a chunk with an item lying on it is kept when everyone leaves (%d chunks then), and freed once it's gone (%d)" % [others, t.collision_chunks()])
+	remove_child(t)
+	# The terrain's visuals in an 8 km zone: far tiles up front, every chunk's levels in rings round
+	# the camera (none of the 4,096 x 2 coarse meshes a smaller zone builds).
+	t.build_visuals()
+	var rings := t.ring_counts()
+	var plan := t._ring_plan(Vector3(0, 0, 0))
+	var lod1 := plan.filter(func(j: Array) -> bool: return int(j[1]) == 1).size()
+	var lod2 := plan.filter(func(j: Array) -> bool: return int(j[1]) == 2).size()
+	var ring_expect := func(r: float) -> float: return PI * r * r / (chunk_m * chunk_m)
+	check(int(rings.tiles) == 256 and int(rings.lod1) == 0 and int(rings.lod2) == 0 and absf(lod1 - ring_expect.call(ZoneTerrain.RING_BUILD_M[1])) < ring_expect.call(ZoneTerrain.RING_BUILD_M[1]) * 0.1
+		and absf(lod2 - ring_expect.call(ZoneTerrain.RING_BUILD_M[2])) < ring_expect.call(ZoneTerrain.RING_BUILD_M[2]) * 0.1,
+		"an 8 km zone's ground drawn as %d far tiles up front, its chunks' levels in rings round the camera (%d middle within %.0f m, %d coarse within %.0f m)" % [rings.tiles,
+		lod1, ZoneTerrain.RING_BUILD_M[1], lod2, ZoneTerrain.RING_BUILD_M[2]])
+	var s := ZoneScatter.new()
+	t.add_child(s)
+	var started := Time.get_ticks_msec()
+	s.generate(t, op)
+	var scatter_ms := Time.get_ticks_msec() - started
+	s.build_collision()
+	var cover_none := s.cover_cells()
+	s.stream_collision(a, float(spec.scatter_in_m), float(spec.scatter_out_m), -1)
+	var cells := s.cover_cells()
+	s.stream_collision(b, float(spec.scatter_in_m), float(spec.scatter_out_m), -1)
+	var area_km2 := float(op.size_m) * float(op.size_m) / 1.0e6
+	check(s.on_demand and cover_none == 0 and cells > 100 and absf(s.cover_cells() - cells) < cells * 0.3 and s.total() > ZoneScatter.CAP_TREES * 3,
+		"the scatter at a hot zone's density: %d items (%.0f a km2) in %d ms; its cover built in %d cells round a point, none up front" % [s.total(), s.total() / area_km2, scatter_ms, cells])
+	s.forget()  # (an 8 km layout is let go as its zone goes: the budget check below is the test zone's)

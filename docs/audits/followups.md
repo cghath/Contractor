@@ -55,6 +55,9 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-218 | P3 | ~~A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1)~~ fixed 2026-10-22 (cghath's agent, world/roads: Helicopter._contour) |
 | F-07 | P2 | The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground |
 | F-08 | P2 | A squadmate walking into something the navmesh doesn't know stands there pushing (casualty soak "stuck") |
+| F-195 | P3 | Note: ZoneWater takes an operation zone's `river_hint` (combined arms D1, 2026-10-22): keep it when reworking the river line and road crossings |
+| F-196 | P3 | Note: ZoneBridges' bridge records carry the crossing's `role` ("msr" on an operation's main bridge; combined arms D1, 2026-10-22) |
+| F-197 | P3 | Note: ZoneModules.place_landmarks and landmark_kinds take an operation zone's band hint, covered zones, own list and max (combined arms D1, 2026-10-22) |
 
 ## F-01: the building scan only sees one floor
 
@@ -1529,6 +1532,63 @@ No deep-fording or snorkel kits: 2.8.4 has none.
 (rivers 0.8, streams 0.5, channels 0.25) along its line. A6 reads it as it is (the hull drags
 through the water as it moves with it). Faster narrows and slower wide reaches are cghath's call.
 
+### F-281 (open, cghath world; note): ZoneTerrain and ZoneScatter in an 8 km zone (cg_brief 3.1, D2)
+For zones of 4,224 m or more (`on_demand`, BigZoneStreaming.streams) ZoneTerrain builds its
+collision by chunk (`stream_plan` / `build_chunks`, `has_collision`, `_blanks` for GroundCuts) and
+draws far tiles and rings (`_build_far_tiles`, `_ring_process`, `_ring_plan`, `ring_counts`);
+ZoneScatter scales its caps by area (`_scale`, `_cap`), streams its cover by cell (`stream_plan` /
+`build_cells`, `_build_cover`), frees drawn cells behind the camera (`_free_far_cells`,
+`_cell_nodes`) and lets its layout go from memory as its zone goes (`forget`). Two changes give
+the same result everywhere and are worth keeping when reworking these files: a chunk's collision
+reads the height grid by rows (`_build_chunk`), and a cover cell's bodies get their shapes before
+they enter the tree (`_build_cover`; the same collision, built much faster). Keep the `on_demand`
+paths when reworking the collision, the coarse levels or the scatter's cells.
+
+### F-282 (open, Claude's world/net): a two-process late join on an 8 km zone
+The late joiner's ground (BigZoneStreaming builds the 200 m round a player who appears, anywhere,
+on every peer) is checked on the host only: world_test's client joins the 2 km test zone, and the
+invasion suite is one process. A client joining an operation zone generates the same 8 km zone
+from the def LevelSwitch sends (~15 s headless here) and streams round its own player and everyone
+it sees. A net or world suite case that joins one and walks off the start would prove it end to end.
+
+### F-283 (open, Claude's Virtualizer): wrecks from off-screen kills of virtual rides
+B2.15 left "wrecks from off-screen kills wait for virtual vehicles on profiles (A7, D2)": a ride's
+vehicles killed in an off-screen fight should become real wrecks where they were (3.8). The
+Virtualizer's fights don't touch rides' vehicles yet. D2 only adds the live caps (one hook in
+`_wake_due`).
+
+### F-284 (open, D1 follow-up): band 2 as a ridge with two passes on dry inland ground
+Call D1-3: band 2 is always a river for now (the hint brings its own to dry presets). The ridge
+with two passes needs a ZoneTerrain hook (a raised band across the axis with two cuts).
+
+### F-285 (open, Claude's AI / perf lane): the invasion load's AI cost in an 8 km zone
+The invasion suite's two cases put the same load (60 live AI fighting, 200 virtual, two columns)
+in the operation zone and in a 4 km hot zone on the same terrain preset. The streaming is under 2
+ms a frame at worst, but the operation zone's frames cost 1.3-1.45x the hot zone's (CI 40161930345:
+70.5 against 50.3 ms), nearly all of it the AI's own ticks (squad_ai.gd 213 against 115 ms a frame
+in a profiled local run; "ai" in FrameCost). The columns start at the FOB, beside the fight, in the
+operation zone and away from it in the hot zone, which likely accounts for some of it. The budget
+holds it to VS_HOT (1.6x); spreading SquadAI's work (F-261's idea) helps both.
+
+### F-286 (open, D3 hook; cg_brief 3.2): what an operation contract needs from the zone
+D3 can host an operation zone as any zone (`ZoneDef.generate_operation(seed, op_type, covers)`,
+then the level switch's def). Its layout is in the def's "op": the bands, the axis, `msr`
+(points) and `msr_roads` (road indices), `laterals`, `route` (the truss route), `fords`, `start`,
+`fob`, `town` ("town" or "city"), `hq`, `depth` (the depth target's module id) and `river_at_m`;
+`OperationGen.band_at`, `along`, `across` and `band_range` place things in it. The front grid's
+32 x 32 cells of 256 m line up with the zone (8,192 / 256); BigZoneStreaming.at_cap and its live
+counts are there for spawning by the front. `controller` is the first covered zone's (call D1-8):
+D3 sets it from WorldSites when it offers the operation.
+
+### F-287 (open, cghath world; CI only): props' client animals a little behind the host's
+props_test's "the host's animals, where the host has them" allows ANIMAL_SLACK_M 1.5 m between the
+client's glided animals and the host's when it asks. On ops/zones' CI run 40165318361 it failed on
+both attempts (worst 2.57 m, then 2.71 m: a dog's 1.4 m/s over about 2 s of lag), while the same
+zone code passed on runs 40161930345 and 40163881923 and locally (R0676), and props passed on
+armour/drive's and claude/ai-driving's runs. Nothing in cg_brief 3.1 touches ZoneAnimals or its
+sync in a normal zone. Measuring the client's position against the host's at the same packet (or
+the slack from the packet's age) would take the runner's speed out of it.
+
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
 1087536b): 134.7 ms average, 179.2 p95, **51 hitches a minute** (the local budget 96 passes;
@@ -1584,6 +1644,42 @@ other runs had them in. Locally, even pinned to 4 CPUs, they're all in at about 
 navigation's map synchronous or not (R0588, R0589). Each block stamps BUILD_BUDGET_MS (4 ms) a
 frame while ~100 garrison men spawn and think, and CI runs that at 2-3 frames a second. Worth a
 look: stamping off the main thread, or a budget shared by the blocks building at once.
+
+## F-195 to F-197: combined arms D1's hints in the world files (notes, nothing to fix)
+
+Branch `claude/ca-d1-operation-zones` (docs/combined_arms.md 6.2, phase D1: operation zones of
+8,192 m, `OperationGen`, `ZoneDef.generate_operation`). The doc (9.1) allows one hint each in
+ZoneWater and ZoneBridges; these are them, plus the landmark band hint, so the world work rebases
+cleanly. Every hint is inert for a def without the key: hot and contract zones generate exactly as
+before (the same seeds give the same water, crossings and landmarks).
+
+### F-195: ZoneWater's `river_hint`
+
+[zone_water.gd](../../scripts/world/zone_water.gd): `carve` merges the def's `river_hint.water`
+into the preset's water spec (an operation brings its own river to a dry preset: `rivers` count 1,
+`crossing_gap_m` 900, `footbridge_share` 1.0); `_generate` keeps the hint in `_hint`; `_make_river`
+lays its first river across the hint's `axis` at `at_m` from the friendly edge (the tries still
+pick the meander furthest from the pads); `_plan_crossings` gives a road crossing the river the
+kind the hint planned for it within `match_m` (`_planned`: the MSR's concrete bridge, the second
+route's truss, the ford tracks' fords), its `default` (a ford) for any other road, and puts the
+plan's `role` on the crossing. The rng is drawn as before, so zones without a hint don't change.
+If the river line or crossing planning is reworked, keep the hint: operation zones rely on the
+river crossing band 2 and the MSR's bridge being concrete (seizing a crossing, 6.4.4).
+
+### F-196: ZoneBridges' `role`
+
+[zone_bridges.gd](../../scripts/world/zone_bridges.gd) `setup`: each bridge record gets
+`"role"` from its crossing ("msr", "route", "ford" or ""), so later phases find the operation's
+main bridge (A6's `mlc`, D5's demolition and firing point) without matching positions.
+
+### F-197: ZoneModules' landmark band hint
+
+[zone_modules.gd](../../scripts/world/zone_modules.gd): `place_landmarks` asks
+`OperationGen.landmark_area(def, kind, half)` for the rect a landmark's centre may go in (its band
+in an operation zone, from data/operation_zones.json `landmark_bands`; an empty rect elsewhere: the
+old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers` (data/landmarks.json
+"zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
+`landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
 ## Calls made for the Captain
 
@@ -1851,6 +1947,22 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-24 | cg_brief 2.7 (A6.18): the HUD lines: ROLLOVER RISK x / y deg, ROLLED OVER: NEEDS A TOW (RIGHTING), FORD x / y m, AFLOAT, FLOODING n%, FLOODED: GET OUT, STALLED: TOO DEEP, BOGGED: NEEDS A TOW, BRIDGE MLC n (: TOO HEAVY) for a span within 40 m ahead | 2.12.1's alerts with A6's numbers | a separate driving panel
 2026-10-24 | cg_brief 2.7 (A6.19): budgets (9.3: the physics step unchanged): a vehicle's drive step 0.03 ms, the AI driver's care 0.05 ms a tick, the bridges' weighing 0.2 ms with 25 vehicles, an Abrams' 14 stations of wheel forces 0.25 ms (most of it the suspension rays from before A6); 3x locally | measured 0.013, 0.018, 0.08 and 0.13 ms (R0672) | none
 2026-10-24 | cg_brief 2.7 (A6.20): no deep-fording or snorkel kits (2.8.4 has none); the thrown-track and blown-wheel visuals stay A7's (2.10.4, F-264) | the doc's split | building them here
+2026-10-25 | cg_brief 3.1: ops/zones starts from armour/drive (PR #34) and merges claude/ca-d1-operation-zones as a real merge, both sides kept in every conflict (zone_def, zone_water, zone_scatter: the prop library's collision moved into D2's per-cell _build_cover; CHANGELOG, followups) | the brief's plan: conflicts resolved once, on the newest world code | rebasing the WIP (rewrites its commits)
+2026-10-25 | cg_brief 3.1: the D1/D2 calls renumbered D1-1..D1-12 and D2-1..D2-13 in their own section of docs/combined_arms.md 10 (the WIP had 74-90, which A1's calls 74-92 also use) | no two calls with one number | prefixing the old numbers
+2026-10-25 | cg_brief 3.1 (D1-12): an operation of data "city_op_types" (hold_town) gets a city (BuildingGen.city_layout) where its town module would stand; the MSR to the city's near side and on from its far side, through its own streets | 6.2.1's "urban types where cghath's city work allows"; a city is the heaviest perf case | every operation's town a city
+2026-10-25 | cg_brief 3.1 (D2-2): ground collision planned every 0.25 s and built every physics frame for 0.75 ms (data "frame_ms"), nearest first, at least one chunk and one cell a frame; a soldier whose squad is in a fight holds 450 m on the host ("engaged_in_m") | the WIP's 12 chunks + 3 cells a tick were 25-50 ms spikes (one wooded cell was 25 ms); an AI fight far from the players needs the hills between the sides | a time budget per 0.25 s tick (2 ms: the 1 km round a flying player then lagged 10-12 s)
+2026-10-25 | cg_brief 3.1 (D2-7): an 8 km zone's terrain drawn as 256 far tiles (512 m, coarsest step, from 2 km) plus each chunk's levels in rings on a worker (650 m / 1.5 km / 2.6 km, freed past 0.9 / 1.8 / 3.0 km); a level drawn from 0 while the one inside isn't built (ZoneTerrain FAR_TILE_*, RING_*) | 8,192 coarse meshes and draws up front, held all game; the rings keep memory and draws to where the camera is | every chunk's coarse levels up front as in smaller zones
+2026-10-25 | cg_brief 3.1 (D2-3): an 8 km zone's scatter frees a drawn cell's near tier past 620 m and its far tier past 1.4 km (ZoneScatter NEAR_FREE_M, FAR_FREE_M), and looks only at the cells near the camera | its 4,096 cells were all looked at every 0.5 s and every one passed stayed built | keeping them (memory grows with the ground seen)
+2026-10-25 | cg_brief 3.1 (D2-8): a chunk or cover cell with an item, ragdoll or vehicle in it is kept (one shape query, every 5 s while held, at most 24 looks a plan: BigZoneStreaming.held, FREE_PER_PLAN) | nothing falls through when everyone leaves; a teleport leaves hundreds of chunks behind at once | freeing them and letting GroundGuard put bodies back
+2026-10-25 | cg_brief 3.1 (D2-9): a player or vehicle that appears gets the 200 m round it at once (ensure_m), the cover cell under it too; every peer streams round every player, vehicle and soldier it has | late joiners anywhere on the map, respawns, spawned vehicles | waiting for the next frames' budget
+2026-10-25 | cg_brief 3.1 (D2-10): the perf pass's helicopter rule (ZoneNav.RIDE_FAST_MS / RIDE_AGL_M) for a player aboard: his ground stays at 1 km, his cover drops to 300 m | reuse the rule the perf pass already has for the heli; rounds still meet the ground | the full 1.2 km of cover at 250 km/h
+2026-10-25 | cg_brief 3.1 (D2-11): an 8 km zone's scatter layout (~164,000 items) is let go from memory as its zone goes, kept on disk (ZoneScatter.forget) | up to CACHE_ZONES of them in memory would be gigabytes | keeping it like a hot zone's
+2026-10-25 | cg_brief 3.1 (D2-6): the invasion case is a suite (tests/invasion_test.gd extends perfcases_test.gd for its meter; `invasion` in run_tests.sh and CI's ALL_SUITES, 1200 s); the WIP's tests/invasion_perf.gd goes | one meter, a real suite with budgets, the hot zone in the same run | a second copy of the meter, or the timing script
+2026-10-25 | cg_brief 3.1 (D2-12): headless budgets (60 Hz frame cost; perfcases' LOCAL_SLACK off CI): invasion and hot 140 / 190 ms avg / p95 (about twice CI's first run), 60 hitches a min, invasion at most 1.6x a 4 km hot zone on the same preset under the same load (CI 1.40x, the AI's own ticks: F-285); drive and flight 20 / 30-32 ms, 15 hitches a min, nothing missing within 300 m, the 1 km whole again within 4 s; the physics step 6 / 1.5 ms a tick; a frame's streaming 8 ms; the zone hosted in 45 s, 1.4 GB static, growing 150 MB at most across it (30 MB here); the doc's 14 / 33 ms printed beside | headless can't time the GPU and 60 live AI already cost the hot zone 50-100 ms of CPU here; D2 must not add to it and must keep up | the doc's 14 / 33 ms as the headless check (every AI-heavy case fails it today)
+2026-10-25 | cg_brief 3.1 (D2-13): CI runs the same 8 km zone and cases, for perfcases' CI_MEASURE_SHARE of the time | it loads in ~15 s headless here; a smaller stand-in would test less | a smaller zone on CI
+2026-10-25 | cg_brief 3.1: far drawing scans soldiers new to the zone first and each again every 10 s, 12 a scan (BigZoneStreaming DRAW_AGAIN_S, DRAW_PER_SCAN) | the WIP walked every soldier's meshes every 2 s | once per soldier only (gear and stand-ins that come later stay unlimited)
+2026-10-25 | cg_brief 3.1: hooks for D3 left, not built: the def's "op" (bands, MSR and its road indices, laterals, route, fords, start, FOB, town or city, HQ, depth target), OperationGen.band_at/along/across, BigZoneStreaming.at_cap and its live counts (F-286) | 3.2 is D3's | building the front grid now
+
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
 Found by cghath's side (fix/ci-flakes, 2026-10-20) in casualty_test's soak and CCP checks; the

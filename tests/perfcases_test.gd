@@ -520,7 +520,7 @@ func _measure(name: String, walk: Array) -> void:
 	_prev_event_process = true
 	_frame_start = Time.get_ticks_usec()
 	_measuring = true
-	var secs: float = MEASURE_S[name] * (CI_MEASURE_SHARE if OS.get_environment("GITHUB_ACTIONS") != "" else 1.0)
+	var secs: float = _measure_s(name) * (CI_MEASURE_SHARE if OS.get_environment("GITHUB_ACTIONS") != "" else 1.0)
 	var t0 := Time.get_ticks_msec()
 	var leg := 0
 	var last_draw := -10.0
@@ -535,6 +535,7 @@ func _measure(name: String, walk: Array) -> void:
 			else:
 				var p := player.global_position + flat.normalized() * step
 				player.global_position = Vector3(p.x, level.ground_height(p.x, p.z), p.z)
+		_on_measure_tick(name)
 		var now_s := (Time.get_ticks_msec() - t0) / 1000.0
 		if now_s - last_draw >= 5.0:
 			last_draw = now_s
@@ -603,6 +604,17 @@ func _measure(name: String, walk: Array) -> void:
 		for part: StringName in ai_parts.slice(0, 24):
 			var e: Array = SquadAI.prof[part]
 			print("perf: %s: AI part %s %.3f ms a tick, %d calls, worst %.2f ms" % [name, part, int(e[0]) / 1000.0 / ticks, int(e[1]), int(e[2]) / 1000.0])
+
+
+## How long case `name` is measured (s, before CI's share): MEASURE_S (the invasion suite has its own).
+func _measure_s(name: String) -> float:
+	return float(MEASURE_S[name])
+
+
+## Called every physics frame while case `name` is measured (the invasion suite samples its ground
+## streaming here).
+func _on_measure_tick(_name: String) -> void:
+	pass
 
 
 ## A frame boundary: the previous event was a frame's last _process, so this event starts a frame.

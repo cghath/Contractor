@@ -361,6 +361,31 @@ Busy, back to back (R0580 -> R0581): town 16.0 -> 9.95, city 349 -> 139, woods 2
   from a vehicle or the UH-60 (F-232); soldiers are most of a city's (F-226).
 - **fight** isn't world content: its hitches are the AI's ticks (40-110 ms) and team spawns.
 
+## Operation zones of 8 km (cg_brief queue item 3.1, D2, 2026-10-25)
+
+`tests/invasion_test.tscn` (suite **invasion**, in CI) extends perfcases' meter for an 8,192 m
+operation zone (ZoneDef.generate_operation): the 6.2.3 load (two armour columns, 60 live AI
+fighting, 200 virtual, one player), a drive along the MSR, a UH-60 contour flight across the zone,
+and the same load in a 4 km hot zone on the same terrain preset. Besides the frame cost and hitches
+it measures the ground's streaming (its worst frame, chunks missing near the player, how long the
+1 km round him takes to fill again), the physics step, the zone's hosting time and the static
+memory. CI's first run (40161930345), average / 95th of the 60 Hz frame cost:
+
+| Case | avg | p95 | Streaming, worst frame | Note |
+|---|---|---|---|---|
+| invasion (8 km) | 70.5 | 94.8 | 1.1 ms | 1.40x the hot zone: the AI's own ticks (F-285) |
+| hot zone, same load | 50.3 | 59.0 | - | everything built up front |
+| drive (M-ATV, MSR) | 3.0 | 5.2 | 1.7 ms | nothing missing within 300 m |
+| heli (UH-60 contour) | 3.6 | 6.4 | 1.6 ms | the 1 km round it whole again within 0.6 s |
+
+The zone hosts in about 17 s locally (generating its ground, water, roads, 164,000 scatter items and
+its modules; 4 s for a hot zone) and takes about 330 MB of static memory with its visuals; driving
+and flying across it adds about 40 MB (the terrain's rings and the scatter's cells free behind the
+camera). What made it run (docs/combined_arms.md D2-1 to D2-13): collision on demand round every
+player, vehicle and soldier, built a little every frame; the terrain drawn as far tiles and rings
+instead of every chunk's levels up front; the scatter's cover streamed and its drawn cells freed;
+far drawing; live caps.
+
 ## What's left
 
 See F-206 in docs/audits/followups.md: a cold building scan's grouping (100-250 ms once its probes
