@@ -1,0 +1,156 @@
+# Survival: an open world, persistent, overrun
+
+**Status:** design 2026-10-25, building on `claude/survival`. The Captain's calls (2026-10-25,
+asked with the question tool) are in **Calls**; everything marked Proposed is a default to tune.
+
+The Captain's direction (2026-10-25): "open world persistent zombie survival mode", from the main
+menu, "players and there should be companions you can meet out in the world and hire for money,
+an item or something else", and on the world: "reuse a lot of our zones with some assets edits to
+make it more like an abandoned world". Scope: "design doc then more than a slice, much more".
+
+Inspired by DayZ's persistence and scavenging, 7 Days to Die's hordes and nights, and Project
+Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
+
+## Calls
+
+| # | Call | Decided |
+|---|---|---|
+| 1 | Where | Standalone, the main menu's **Survival** section; never touches the campaign. Co-op joins as today. |
+| 2 | Who | Players, plus **companions met out in the world**, each hired for **money, an item or a favour**. |
+| 3 | Zombies | **Mixed**: mostly slow walkers in groups and hordes, some runners, tougher specials later; worse at night. |
+| 4 | Death | **Respawn, lose your kit**: your body and everything on it stay where you fell; the world goes on. |
+| 5 | World | **Our zones, made to look abandoned**: overgrowth, wrecks, litter, boarded and broken buildings, no lights. |
+| 6 | Scope | Design first, then the whole mode in phases (S1-S7), not a one-zone slice. |
+
+## Already in the code to build on
+
+| Piece | Where | What it gives survival |
+|---|---|---|
+| Zones from a definition, linked | `ZoneDef`, `ZoneLevel`, `RegionMap.links`, crossings (`Extraction`, `BaseHub.server_cross_on`) | The open world: the campaign's region map, every zone joined to its neighbours at the edges |
+| Per-zone saves | `GameState` (`looted`, `dropped`, `voxel_edits`, `bodies`, `vehicles`), `save_zone` | A zone you leave keeps what happened in it |
+| A whole world's save | `Campaign` sections under a `campaign_id` | The survival world's own save (`survival_<world>`), never the campaign's |
+| Hosting a zone from the menu | `Menu.host_forest_zone` (test zones) | The pattern for New world / Continue |
+| Bodies, wounds, ragdolls, gore | `Soldier`, `Vitals`, `BodyDeform`, `Ragdoll` | Zombies and survivors are Soldier bodies near players |
+| A cheap crowd | `ZoneAnimals` (MultiMesh, one host packet, hit areas) | The far tier of a horde |
+| Sleep and virtual groups | `DynamicSim`, `Virtualizer` | What's far stays cheap |
+| Noise | `PeopleLayer.server_noise`, `Alert.server_noise` (every shot, kicked doors) | What draws zombies |
+| Food and water | `Consumables` (MRE, IRP, bottled water, ...: "hunger and thirst deferred") | The needs' items: eating and drinking now matter |
+| Loot | `data/loot_tables.json`, `WorldValuables`, rarity boxes, compound loot | What there is to find |
+| Hiring and the squad | `Hiring.candidate`, `Roster`, `SquadAI`, orders, the 8-slot squad | A recruited survivor is a squadmate |
+| Day and night | `DayNight` (hour, weather) | Nights are when they come |
+
+## S1: the mode, the world, the needs
+
+**Menu.** A Survival section: **New world** (a name, a seed), **Continue** (the newest world),
+**Join** as every session. The host's world is the save; joiners bring nothing in (their survivor
+lives in the host's world, keyed by their profile).
+
+**The world** (`Survival`, an autoload, host-authoritative, its state in Campaign sections under
+`survival_<world>`): the campaign's zones on `RegionMap`'s grid, each marked abandoned, the base
+zone's cell a **safehouse** (the start and the respawn: a fenced farm with a stash). The world's
+clock runs only while it's hosted; a day is DAY_MIN (Proposed 48) real minutes, with
+`DayNight` driven by it. Zone saves are `surv_<world>_<zone>`: crossing into a zone loads it as
+it was left. Sections:
+- `survival`: seed, day, hour, the zones' state (density of the dead, looted containers' times);
+- `survivors`: each player's survivor by profile: zone, position, kit, needs, alive;
+- `companions`: who's been recruited, their kit, needs and wounds; who's still out there.
+
+**Needs** (on `Vitals`, replicated like stamina): **hunger** and **thirst**, 100 full to 0.
+Proposed rates: thirst empties in 1.5 world days, hunger in 3. Under 25: stamina comes back slower
+and the screen edges dim; at 0: a slow loss of blood volume (thirst faster) until it's fixed.
+Eating and drinking (`Consumables`: `"food": n`, `"water": n` in an item's `consume`) fill them.
+Running and carrying weight drain faster. The HUD shows two small bars by the stamina.
+
+**Loot.** A `survival` loot table: food (tins, MREs, crackers), water (bottles, dirty water to
+treat), meds, scarce ammo, melee weapons, tools; containers in houses and shops roll from it. A
+looted container comes back after LOOT_BACK_DAYS (Proposed 3) world days, rolled again.
+
+**Death.** Respawn at the safehouse with the starter kit (a knife, a bottle of water, a tin, a
+torch, bandages). The body stays where it fell with everything on it, never cleaned up in
+survival, marked on its owner's map until looted.
+
+## S2: the dead
+
+**Faction `infected`.** Every side's enemy; nobody's squad counts them.
+
+**Kinds** (`data/zombies.json`, Proposed): **walker** (most; 1.1 m/s, hears shots 180 m),
+**runner** (15%; sprints 5 m/s once it sees you), **brute** (S6: slow, armoured, knocks you down).
+At night walkers go 1.4 m/s and hear 1.3x further.
+
+**A zombie near players** is a Soldier body in civilian clothes (`PersonLook`, torn and grey)
+with a host brain, `ZombieAI` (like `CivilianAI`: it only writes the body's intent fields):
+- idle: shuffles about its spot, or along a street;
+- hears (a shot, a door kicked, a car, a scream: `Survival.server_noise`): walks to the sound,
+  searches round it, then idles there;
+- sees (short sight, 40 m by day, 15 m by night; a crouched man half): chases at its kind's pace,
+  groaning; others within GROUP_M join in;
+- reaches: **melee** (`Melee`, new: a hit `round_class` `"bite"` or `"blow"` through
+  `Vitals.server_hit`, shallow, bleeding; a bite can infect, S7) every ATTACK_S (Proposed 1.3 s);
+- **dies** only to the head or to a lot of damage (Vitals in its `undead` mode: no pain, no
+  shock, no bleeding out; the head kills; DAMAGE_POOL Proposed 12 hit points elsewhere).
+
+**A zone's dead.** Each zone has a density per 64 m cell (rural low, towns high, cities highest),
+from the zone's modules and buildings, saved in `survival`. The host keeps up to LIVE_CAP
+(Proposed 40) zombies as bodies within LIVE_M (Proposed 70 m) of players; past that a cell's dead
+are the **crowd** (S3). Kills thin a cell; cells refill slowly (REFILL_DAYS, Proposed 2) from the
+neighbours, so cleared ground stays safer for a while.
+
+## S3: hordes and the crowd
+
+The crowd is the far tier: `ZoneDead`, like `ZoneAnimals` (one MultiMesh per look, host walks
+them, one small unreliable packet SEND_S apart), so hundreds cost little. A crowd zombie that
+comes within LIVE_M of a player becomes a body (where it was, the same kind); a body that's out of
+it and not chasing goes back. **Hordes**: some nights (Proposed every 4th, and on a gunfight's
+noise in a city) a horde of 30-60 forms in the zone and walks towards the noise or the players.
+
+## S4: survivors and companions
+
+**Survivors** are people out in the world (`PeopleLayer`, kind `survivor`): holed up in a house,
+on a roof, at a camp, wandering. Each is a `Hiring.candidate` (name, role, skills) with **a
+want** (Proposed: 40% money, 40% an item, 20% a favour):
+- **money**: cash found as loot (survival's currency), Proposed $200-1500 by skill;
+- **an item**: something from a want list (antibiotics, a rifle and mags, 5 tins, a backpack);
+- **a favour**: clear a building, bring something from a marked place, find someone.
+
+Talk (the interaction menu) shows who they are and what they want; give it (or come back with it)
+and they join: a squadmate (`SquadAI`, friendly, follow and every order), in the 8-slot squad
+with the players (at most 8 together). Companions eat and drink from what they carry and ask for
+more; they can be wounded, treated, and killed for good. Some survivors are hostile (bandits,
+S6) and some won't join at any price.
+
+## S5: crossings and persistence
+
+Walking out of a zone's edge at a crossing loads the next zone for the whole session (as the
+campaign's crossings), saving the one left. Saving: the world on every crossing, every
+SAVE_MIN (Proposed 5) real minutes, and on quit. Continue loads the world where it was: each
+survivor in the zone they were in (the host's zone wins: everyone joins the host's zone).
+
+## S6: an abandoned world
+
+A zone def's `abandoned: true` (every survival zone) changes how it's built, never the
+campaign's: roads and yards overgrown (grass and bushes through the asphalt, ZoneScatter),
+wrecked and burnt cars on the roads (VehicleLayer wrecks, a few to a road), litter and bags,
+boarded windows and broken doors (BuildingGen), some buildings partly fallen, no street lights or
+lit windows at night, no civilians, no garrisons. Bandit camps (hostile survivors) stand in for
+some of the compounds.
+
+## S7: deeper survival
+
+Infection from bites (a slow fever; antibiotics hold it, a cure is rare), boiling or purifying
+water, cooking, crafting basics (bandages from cloth, a spear, barricades), sleeping to pass the
+night at the safehouse.
+
+## Performance
+
+Live zombies are AI soldiers: LIVE_CAP keeps them under the fight case's AI count (32). Their
+brain is lighter than SquadAI (no tactics, no cover search): one sight check and one path every
+THINK_S (Proposed 0.4 s), less when far. The crowd costs what animals cost. `DynamicSim` sleeps
+the rest. A survival case joins perfcases once S3 lands.
+
+## Tests
+
+`survival` suite: the menu's New world hosts the safehouse with the starter kit; needs drain
+and eating fills them; a zombie hears a shot, walks to it, sees, chases and bites; a headshot
+kills it, body shots take the pool; death respawns at the safehouse with the body left where it
+fell; a survivor's want is met and he joins; a crossing saves the zone and the world and Continue
+puts it back.
