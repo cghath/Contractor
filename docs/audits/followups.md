@@ -53,6 +53,8 @@ doctrine numbers), so Captain's side hasn't changed them.
 | F-216 | P3 | AI drivers can go round a roundabout the wrong way, and RoadRoute's graph has no one-way edges (Claude's files) |
 | F-217 | P3 | A crater or a dug pit on a road leaves the road's surface hanging over the hole (GroundCuts doesn't tell ZoneRoads) |
 | F-218 | P3 | ~~A helicopter's J-hook can come over a natural hump 4 m clear (heliflight ridge_hot insertion 1)~~ fixed 2026-10-22 (cghath's agent, world/roads: Helicopter._contour) |
+| F-07 | P2 | The far-AI sleep (DynamicSim) can freeze a falling soldier in his last metre above the ground |
+| F-08 | P2 | A squadmate walking into something the navmesh doesn't know stands there pushing (casualty soak "stuck") |
 
 ## F-01: the building scan only sees one floor
 
@@ -1849,3 +1851,33 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-24 | cg_brief 2.7 (A6.18): the HUD lines: ROLLOVER RISK x / y deg, ROLLED OVER: NEEDS A TOW (RIGHTING), FORD x / y m, AFLOAT, FLOODING n%, FLOODED: GET OUT, STALLED: TOO DEEP, BOGGED: NEEDS A TOW, BRIDGE MLC n (: TOO HEAVY) for a span within 40 m ahead | 2.12.1's alerts with A6's numbers | a separate driving panel
 2026-10-24 | cg_brief 2.7 (A6.19): budgets (9.3: the physics step unchanged): a vehicle's drive step 0.03 ms, the AI driver's care 0.05 ms a tick, the bridges' weighing 0.2 ms with 25 vehicles, an Abrams' 14 stations of wheel forces 0.25 ms (most of it the suspension rays from before A6); 3x locally | measured 0.013, 0.018, 0.08 and 0.13 ms (R0672) | none
 2026-10-24 | cg_brief 2.7 (A6.20): no deep-fording or snorkel kits (2.8.4 has none); the thrown-track and blown-wheel visuals stay A7's (2.10.4, F-264) | the doc's split | building them here
+## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
+
+Found by cghath's side (fix/ci-flakes, 2026-10-20) in casualty_test's soak and CCP checks; the
+unsticking is SquadAI's (Claude's file), so it isn't changed here.
+
+Location: [squad_ai.gd](../../scripts/ai/squad_ai.gd), following a path (`_path`, `move_input`);
+on cghath's side [nav_builder.gd](../../scripts/world/nav_builder.gd) (what the compound's
+navmesh is baked from, and `AGENT_RADIUS`).
+
+A following squadmate whose path runs into something solid stands there with `move_input` full
+forward and his velocity exactly zero for 8 s and more, and never side-steps or repaths:
+- Into a target dummy (`TargetDummy`, `scenes/levels/compound.tscn`: (-4, 0, 12), (4, 0, 12),
+  (0, 0, -8)): a static body on the bodies' layer, not voxels, so not in the navmesh and paths
+  run straight through it. CI 39435450203: Foxtrot at (-3.5, 12.3), touching nothing else; CI
+  39441304589 and 39442290938 (and claude/lhd-home 39443651706, claude/ai-driving 39424984277):
+  Golf pushing into HeavyDummy, and "with a collection point set, a squadmate picks his body up"
+  failed with nobody picking Echo up.
+- Into the corner of the compound's low concrete wall at (-1.5, 10): the navmesh is baked for a
+  0.25 m agent (`NavBuilder.AGENT_RADIUS`) and the capsule is 0.3 m round
+  (`SoldierMovement.CAPSULE_RADIUS`), so a path hugging a corner is 5 cm too tight. Seen locally
+  (R0274) with the dummies baked into the navmesh as a try (paths then went by that corner;
+  the try was taken back out).
+Seen on several branches since 2026-10-20 ~12:00 UTC, so CI's timing seems to have made it
+likelier; dev's code has it too.
+
+Suggested fix: in SquadAI, a body that wants to move (`move_input` not zero) but hasn't moved
+for a second or so side-steps along the obstacle's normal (`get_slide_collision`) and repaths,
+as a player would. On cghath's side, separately: bake static props (the dummies) into the
+compound's navmesh and keep the agent radius at least the capsule's (each changes paths
+everywhere in the compound, so both want the full suite).
