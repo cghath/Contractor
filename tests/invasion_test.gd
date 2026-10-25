@@ -46,25 +46,29 @@ const CATCH_FAR_M := 1000.0
 const DOC_AVG_MS := 14.0
 const DOC_P99_MS := 33.0
 ## Proposed budgets (ms of 60 Hz frame cost; hitches a minute; catch-up seconds; memory MB), set
-## 2026-10-25 (cg_brief 3.1) like perfcases': room for CI's runners (about 2-2.5x a quiet local run;
-## local runs get LOCAL_SLACK on top). The AI-heavy cases' absolute times are the AI's (perfcases'
-## fight is 100 / 170 on CI with fewer men); what D2 answers for is VS_HOT, the invasion case's
+## 2026-10-25 (cg_brief 3.1) at about twice CI's first run (40161930345: invasion 70.5 / 94.8, hot
+## 50.3 / 59.0, drive 3.0 / 5.2, heli 3.6 / 6.4; local runs get LOCAL_SLACK on top). The AI-heavy
+## cases' absolute times are the AI's; what D2 answers for is VS_HOT, the invasion case's
 ## average against the hot zone's under the same load on the same ground (6.2.3: "it must hold the
 ## budget against today's hot-zone case"), the streaming's worst frame, the catch-up and the memory.
 const INV_BUDGETS := {
-	"invasion": {"avg": 250.0, "p95": 320.0, "hitches_min": 90.0},
-	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0, "catch_s": 4.0},
-	"heli": {"avg": 20.0, "p95": 32.0, "hitches_min": 15.0, "catch_s": 4.0},
-	"hot": {"avg": 250.0, "p95": 320.0, "hitches_min": 90.0},
+	"invasion": {"avg": 140.0, "p95": 190.0, "hitches_min": 60.0, "physics": 6.0},
+	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0, "catch_s": 4.0, "physics": 1.5},
+	"heli": {"avg": 20.0, "p95": 32.0, "hitches_min": 15.0, "catch_s": 4.0, "physics": 1.5},
+	"hot": {"avg": 140.0, "p95": 190.0, "hitches_min": 60.0, "physics": 6.0},
 }
-const VS_HOT := 1.5
+const VS_HOT := 1.6
 const STREAM_TICK_MS := 8.0
 const MEMORY_MB := {"zone": 1400.0, "growth": 250.0}
+## The operation zone hosted (generated: ground, water, roads, scatter, modules; its visuals) within
+## this long (s; 17 s locally with the scatter laid out afresh).
+const HOST_S := 45.0
 
 var _mem := {}
 var _catch := {}  # case -> {"near_max", "far_worst_s", "behind_since", "fine_missing_max", "samples"}
 var _stream: BigZoneStreaming
 var _far := {}  # the invasion case's far drawing
+var _host_s := -1.0  # how long the operation zone took to host, its visuals built (s)
 var _rings := {}  # the flight's terrain rings and scatter cells
 
 
@@ -265,8 +269,10 @@ func _host_op() -> bool:
 	var t := Time.get_ticks_msec()
 	var def := ZoneDef.generate_operation(OP_SEED, OP_TYPE, OP_COVERS)
 	print("invasion: operation zone %s generated in %d ms (%d modules, %s terrain)" % [def.id, Time.get_ticks_msec() - t, (def.modules as Array).size(), def.terrain])
+	var t_host := Time.get_ticks_msec()
 	if not await _host_def(def, String(def.id)):
 		return false
+	_host_s = (Time.get_ticks_msec() - t_host) / 1000.0
 	_stream = level.get_node_or_null(NodePath(BigZoneStreaming.NODE_NAME)) as BigZoneStreaming
 	check(_stream != null and level.terrain.on_demand and level.scatter.on_demand, "the operation zone streams its ground (BigZoneStreaming)")
 	_mem.zone = _mem_mb()
@@ -490,6 +496,7 @@ func _summary() -> void:
 		check(r.avg <= b.avg * k, "%s: average frame %.2f ms (Proposed budget %.1f)" % [r.name, r.avg, b.avg * k])
 		check(r.p95 <= b.p95 * k, "%s: 95th percentile frame %.2f ms (Proposed budget %.1f)" % [r.name, r.p95, b.p95 * k])
 		check(r.hitches_min <= b.hitches_min * k, "%s: %.1f hitches a minute over %.0f ms (Proposed budget %.0f)" % [r.name, r.hitches_min, HITCH_MS, b.hitches_min * k])
+		check(r.engine <= float(b.physics) * k, "%s: the physics step %.2f ms a tick (Proposed budget %.1f)" % [r.name, r.engine, float(b.physics) * k])
 		if r.has("stream_ms"):
 			check(float(r.stream_ms) <= STREAM_TICK_MS * k, "%s: the ground streaming's worst tick %.1f ms (Proposed budget %.1f)" % [r.name, r.stream_ms, STREAM_TICK_MS * k])
 		var c: Dictionary = r.get("catch", {})
@@ -499,6 +506,8 @@ func _summary() -> void:
 			check(int(c.fine_missing_max) == 0, "%s: the ground round the camera always drawn at its near levels (at most %d of 25 chunks without)" % [r.name, c.fine_missing_max])
 	if by.has("invasion") and by.has("hot"):
 		check(float(by.invasion.avg) <= float(by.hot.avg) * VS_HOT * k, "the invasion case holds against the hot zone's under the same load: %.2f ms against %.2f (Proposed: at most %.2fx)" % [by.invasion.avg, by.hot.avg, VS_HOT * k])
+	if _host_s >= 0.0:
+		check(_host_s <= HOST_S * k, "the operation zone hosts, its visuals built, in %.1f s (Proposed budget %.0f)" % [_host_s, HOST_S * k])
 	if not _far.is_empty():
 		check(int(_far.soldiers) > 0 and int(_far.soldier_ok) == int(_far.soldiers) and int(_far.proxies) >= int(_far.vehicles) - 1,
 			"far drawing: every soldier to the zone's draw distance (%d of %d), the vehicles with far boxes (%d of %d)" % [_far.soldier_ok, _far.soldiers, _far.proxies, _far.vehicles])

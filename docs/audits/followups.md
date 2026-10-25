@@ -1561,10 +1561,12 @@ with two passes needs a ZoneTerrain hook (a raised band across the axis with two
 
 ### F-285 (open, Claude's AI / perf lane): the invasion load's AI cost in an 8 km zone
 The invasion suite's two cases put the same load (60 live AI fighting, 200 virtual, two columns)
-in the operation zone and in ridge_hot. The streaming is under 2 ms a frame at worst, but the
-operation zone's frames cost more than the hot zone's, nearly all of it the AI's own ticks
-("ai" in FrameCost: woods and longer sight lines in a river valley against Black Ridge's rocks).
-The budget holds it to VS_HOT; spreading SquadAI's work (F-261's idea) helps both.
+in the operation zone and in a 4 km hot zone on the same terrain preset. The streaming is under 2
+ms a frame at worst, but the operation zone's frames cost 1.3-1.45x the hot zone's (CI 40161930345:
+70.5 against 50.3 ms), nearly all of it the AI's own ticks (squad_ai.gd 213 against 115 ms a frame
+in a profiled local run; "ai" in FrameCost). The columns start at the FOB, beside the fight, in the
+operation zone and away from it in the hot zone, which likely accounts for some of it. The budget
+holds it to VS_HOT (1.6x); spreading SquadAI's work (F-261's idea) helps both.
 
 ### F-286 (open, D3 hook; cg_brief 3.2): what an operation contract needs from the zone
 D3 can host an operation zone as any zone (`ZoneDef.generate_operation(seed, op_type, covers)`,
@@ -1945,7 +1947,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.1 (D2-10): the perf pass's helicopter rule (ZoneNav.RIDE_FAST_MS / RIDE_AGL_M) for a player aboard: his ground stays at 1 km, his cover drops to 300 m | reuse the rule the perf pass already has for the heli; rounds still meet the ground | the full 1.2 km of cover at 250 km/h
 2026-10-25 | cg_brief 3.1 (D2-11): an 8 km zone's scatter layout (~164,000 items) is let go from memory as its zone goes, kept on disk (ZoneScatter.forget) | up to CACHE_ZONES of them in memory would be gigabytes | keeping it like a hot zone's
 2026-10-25 | cg_brief 3.1 (D2-6): the invasion case is a suite (tests/invasion_test.gd extends perfcases_test.gd for its meter; `invasion` in run_tests.sh and CI's ALL_SUITES, 1200 s); the WIP's tests/invasion_perf.gd goes | one meter, a real suite with budgets, the hot zone in the same run | a second copy of the meter, or the timing script
-2026-10-25 | cg_brief 3.1 (D2-12): headless budgets (60 Hz frame cost; perfcases' LOCAL_SLACK off CI): invasion and hot 60 / 90 ms avg / p95, 60 hitches a min, invasion at most 1.35x hot under the same load; drive and flight 20 / 30-32 ms, 15 hitches a min, nothing missing within 300 m, the 1 km whole again within 3 s; a frame's streaming 8 ms; the zone 1.4 GB static, growing 250 MB at most across it; the doc's 14 / 33 ms printed beside | headless can't time the GPU and 60 live AI already cost the hot zone 50-100 ms of CPU here; D2 must not add to it and must keep up | the doc's 14 / 33 ms as the headless check (every AI-heavy case fails it today)
+2026-10-25 | cg_brief 3.1 (D2-12): headless budgets (60 Hz frame cost; perfcases' LOCAL_SLACK off CI): invasion and hot 140 / 190 ms avg / p95 (about twice CI's first run), 60 hitches a min, invasion at most 1.6x a 4 km hot zone on the same preset under the same load (CI 1.40x, the AI's own ticks: F-285); drive and flight 20 / 30-32 ms, 15 hitches a min, nothing missing within 300 m, the 1 km whole again within 4 s; the physics step 6 / 1.5 ms a tick; a frame's streaming 8 ms; the zone hosted in 45 s, 1.4 GB static, growing 250 MB at most across it; the doc's 14 / 33 ms printed beside | headless can't time the GPU and 60 live AI already cost the hot zone 50-100 ms of CPU here; D2 must not add to it and must keep up | the doc's 14 / 33 ms as the headless check (every AI-heavy case fails it today)
 2026-10-25 | cg_brief 3.1 (D2-13): CI runs the same 8 km zone and cases, for perfcases' CI_MEASURE_SHARE of the time | it loads in ~15 s headless here; a smaller stand-in would test less | a smaller zone on CI
 2026-10-25 | cg_brief 3.1: far drawing scans soldiers new to the zone first and each again every 10 s, 12 a scan (BigZoneStreaming DRAW_AGAIN_S, DRAW_PER_SCAN) | the WIP walked every soldier's meshes every 2 s | once per soldier only (gear and stand-ins that come later stay unlimited)
 2026-10-25 | cg_brief 3.1: hooks for D3 left, not built: the def's "op" (bands, MSR and its road indices, laterals, route, fords, start, FOB, town or city, HQ, depth target), OperationGen.band_at/along/across, BigZoneStreaming.at_cap and its live counts (F-286) | 3.2 is D3's | building the front grid now

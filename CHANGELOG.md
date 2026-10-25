@@ -65,7 +65,7 @@ onto armour/drive and re-applied to the world expansion and the perf pass that c
 - **The `invasion` suite** (also on CI): the 6.2.3 case on an 8 km operation zone, with two armour
   columns on the move, 60 live AI fighting, 200 virtual and one player. Then a drive along the MSR
   and a UH-60 contour flight across the zone, measuring how fast the ground catches up. Then the
-  same load in ridge_hot to hold it against. It measures frame and physics time, hitches a
+  same load in a 4 km hot zone on the same terrain, built up front, to hold it against. It measures frame and physics time, hitches a
   minute, the streaming's worst frame, the catch-up and the memory, against Proposed budgets.
   It replaces the WIP's tests/invasion_perf.gd timing script.
 - world_test: the D1 checks, plus the city for holding a town, a crater cut before its chunk is
