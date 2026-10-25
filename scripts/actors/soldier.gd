@@ -177,6 +177,9 @@ var binoculars_up := false
 ## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
 var move_input := Vector2.ZERO
 var want_sprint := false
+## Survival (docs/survival.md): stamina recovery's share left by hunger and thirst (1 fed and
+## watered), set where the body's movement runs (Survival: the host for AI, the owner's peer).
+var needs_stamina := 1.0
 var want_crouch := false
 var want_aim := false
 ## AI stance intent: a SoldierMovement.Stance, or -1 to follow want_crouch.
@@ -2639,6 +2642,8 @@ func _on_died() -> void:
 		carried_by.release_carried()  # no body to go on carrying
 	carried_by = null
 	care_by = null
+	if level and level.is_survival():
+		Survival.server_player_died(self)  # survival: everything he had stays where he fell; back with a starter kit
 	vitals.server_reset_health()
 	_gave_up = false
 	_server_respawn_after(level, respawn_delay_s)

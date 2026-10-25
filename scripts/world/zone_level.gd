@@ -531,10 +531,11 @@ func _on_hosted() -> void:
 	nav = ZoneNav.build_zone(self)
 	_restore_bodies()
 	virtualizer.server_restore()  # the groups the save kept, as profiles (before the patrols set out: they take theirs back)
-	UsField.install(self)  # D7: US garrisons, patrols, convoys and armour where the US holds or fights (before the garrisons come out)
+	if not is_survival():
+		UsField.install(self)  # D7: US garrisons, patrols, convoys and armour where the US holds or fights (before the garrisons come out)
 	if spawn_ai:
 		_spawn_ai()
-	if not is_base():
+	if not is_base() and not is_survival():
 		add_child(FactionSkirmish.new())  # now and then a faction at war with the holder hits one of its sites (wave 6)
 	_update_streaming()
 	if BaseHub.deployment_running():

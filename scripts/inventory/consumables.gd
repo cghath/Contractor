@@ -6,8 +6,8 @@ extends RefCounted
 ##     caffeine (energy drink, caffeine tablets): stamina comes back faster for a while;
 ##     ibuprofen, paracetamol: a little pain relief (far under morphine);
 ##     water, ration (bottled water, electrolytes, MRE, IRP, energy bar, canned meat): stamina
-##     comes back a little faster. Food and water aren't tracked yet (deferred), so there's no
-##     hunger or thirst: eating and drinking only help.
+##     comes back a little faster. Outside survival food and water aren't tracked, so eating and
+##     drinking only help; in survival they fill thirst and hunger (Survival.server_feed).
 ##   {"battery": true} (AA, CR123A): a fresh battery for an NVG (Nvg.server_recharge).
 ## Right-click > Use in the inventory (InventoryScreen; Soldier "consume"): instant, one unit used.
 
@@ -59,6 +59,8 @@ static func server_use(soldier: Soldier, container: StringName, index: int) -> S
 		problem = Nvg.server_recharge(soldier.inventory)
 	elif not soldier.vitals.server_take_drug(StringName(String(c.drug)), float(c.get("doses", 1.0))):
 		problem = "You can't use that"
+	else:
+		Survival.server_feed(soldier, StringName(String(c.drug)), float(c.get("doses", 1.0)))  # survival: water and rations fill thirst and hunger
 	if problem != "":
 		return problem
 	# Re-find the entry: a recharge moves an NVG entry, which can shift the indices.

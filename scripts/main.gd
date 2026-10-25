@@ -35,8 +35,8 @@ func _ready() -> void:
 
 ## Hosts a zone (a ZoneDef definition) in place of the compound. The caller sets
 ## GameState.zone_id (the zone's save) first.
-func host_zone(def: Dictionary) -> void:
-	LevelSwitch.load_level(self, {"level": "zone", "def": ZoneDef.normalize(def)})
+func host_zone(def: Dictionary, kind := "zone") -> void:
+	LevelSwitch.load_level(self, {"level": kind, "def": ZoneDef.normalize(def)})
 	menu.host()
 
 

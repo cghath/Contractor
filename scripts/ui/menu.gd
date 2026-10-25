@@ -106,6 +106,12 @@ func _ready() -> void:
 	new_campaign_button.tooltip_text = "Moves the campaign save and all its zone saves into an archive folder (nothing is deleted); the next campaign host starts a new company"
 	campaign.add_child(new_campaign_button)
 	campaign.add_child(_button("Contract board (offline)", func() -> void: Contracts.open_board()))  # wave 4 economy, on its own
+	# Survival (docs/survival.md): an open world, persistent and overrun, apart from the campaign.
+	var survival := UiKit.section("Survival", right)
+	survival.add_child(_button("Survival: new world", host_survival_new))
+	var cont := _button("Survival: continue", host_survival_continue)
+	cont.disabled = Survival.newest_world() == ""
+	survival.add_child(cont)
 	var tests := UiKit.section("Test zones", right)
 	# Only the plain session's compound (the test contract starts fresh on its own); the
 	# campaign's saves are the "New campaign" button's (Captain, 2026-10-14: this button was
@@ -159,6 +165,23 @@ func host_with_briefing() -> void:
 	host()
 	if Net.is_hosting():
 		Briefing.debug_open(self)
+
+
+## Survival (docs/survival.md): a new world, named for the day it was made, from a fresh seed.
+func host_survival_new() -> void:
+	CompoundLevel.player_role_kits = false  # a survivor has what he finds (Survival's starter kit)
+	CompoundLevel.clean_loot = false
+	var name := "world %s" % Time.get_datetime_string_from_system().replace(":", "").replace("T", " ")
+	if not Survival.server_new_world(get_parent(), name, randi()):
+		_status.text = "Couldn't start a survival world."
+
+
+## Survival: carries on the newest world where it was left.
+func host_survival_continue() -> void:
+	CompoundLevel.player_role_kits = false
+	CompoundLevel.clean_loot = false
+	if not Survival.server_continue(get_parent()):
+		_status.text = "No survival world to continue."
 
 
 ## Debug entry: hosts the 2 km test zone (data/zones.json "test") instead of the compound.

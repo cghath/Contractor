@@ -25,6 +25,7 @@ const LEVEL_SCENES := {
 	"base_zone": "res://scenes/levels/base_zone.tscn",  # the base as a zone (BaseZoneLevel, LZ-1)
 	"lhd": "res://scenes/levels/lhd.tscn",  # the company's LHD, home until a zone is the FOB (LhdLevel, docs/lhd_home.md)
 	"range": "res://scenes/levels/vehicle_range.tscn",  # wave 5: the vehicle range (VehicleRange)
+	"survival": "res://scenes/levels/survival.tscn",  # a survival world's zone (SurvivalLevel, docs/survival.md)
 }
 ## Long enough for a client to generate a zone (about a second) while connecting.
 const AUTH_TIMEOUT_S := 30.0

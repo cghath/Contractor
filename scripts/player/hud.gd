@@ -48,6 +48,7 @@ var zone_bottom_centre: VBoxContainer
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
+var _needs: Label  # survival: hunger and thirst (docs/survival.md)
 ## The downed or killed title (HudAlertLabel) and the lines under it, which wrap.
 var _downed_box: VBoxContainer
 var _downed: Label
@@ -148,6 +149,9 @@ func _ready() -> void:
 	_status = UiKit.hud_label()
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # a long line cuts with "...", never runs under the radio
 	zone_left.add_child(_status)
+	_needs = UiKit.hud_label()
+	_needs.visible = false
+	zone_left.add_child(_needs)
 	# Bottom-centre: the radio feed and subtitles over the vehicle readout.
 	zone_bottom_centre = _zone("BottomCentreZone")
 	zone_bottom_centre.alignment = BoxContainer.ALIGNMENT_END
@@ -534,6 +538,22 @@ func _process(delta: float) -> void:
 	_white_left = maxf(_white_left - delta, 0.0)
 	_white.color.a = clampf(_white_left / 1.5, 0.0, 1.0)
 	_update_vision()
+	_update_needs()
+
+
+## Survival: the local survivor's hunger and thirst, as words past a glance (Survival.my_*).
+func _update_needs() -> void:
+	_needs.visible = SurvivalLevel.of(self) != null
+	if _needs.visible:
+		_needs.text = "Food %s   Water %s" % [_need_word(Survival.my_hunger), _need_word(Survival.my_thirst)]
+
+
+static func _need_word(v: float) -> String:
+	if v <= 0.0:
+		return "EMPTY"
+	if v < Survival.LOW:
+		return "low (%d%%)" % roundi(v)
+	return "%d%%" % roundi(v)
 
 
 ## Draws what blood loss, concussion and being out do to the local player's view.

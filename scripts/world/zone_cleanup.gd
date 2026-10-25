@@ -50,8 +50,8 @@ func server_sweep(now := -1.0) -> void:
 			continue
 		b.remove_from_group(Soldier.DEAD_GROUP)
 		b.queue_free()
-	if level.items == null:
-		return
+	if level.items == null or level.is_survival():
+		return  # (survival: what's dropped stays, a dead survivor's kit where he fell; docs/survival.md)
 	for child in level.items.get_children():
 		var item := child as WorldItem
 		if item == null or item.is_queued_for_deletion() or not GameState.dropped.has(item.uid):

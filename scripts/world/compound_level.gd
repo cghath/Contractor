@@ -539,6 +539,12 @@ func is_base() -> bool:
 	return false
 
 
+## Whether this is a survival world's zone (SurvivalLevel, docs/survival.md): nobody living holds
+## or patrols it.
+func is_survival() -> bool:
+	return self is SurvivalLevel
+
+
 ## A base: whether its FOB is up for the muster line (BaseLevel waits for its voxels).
 func fob_ready() -> bool:
 	return true

@@ -1085,7 +1085,7 @@ func update_stamina(delta: float, sprinting: bool, moving: bool) -> void:
 		stamina -= delta / SPRINT_STAMINA_S * MovementRules.TIER_DRAIN[body.load_tier()]
 	else:
 		var posture := MovementRules.REGEN_PRONE_MULT if is_prone() else (MovementRules.REGEN_CROUCH_MULT if is_crouched() else 1.0)
-		stamina += delta / STAMINA_REGEN_S * body.vitals.stamina_mult() * (STAMINA_REGEN_MOVING if moving else 1.0) * posture
+		stamina += delta / STAMINA_REGEN_S * body.vitals.stamina_mult() * body.needs_stamina * (STAMINA_REGEN_MOVING if moving else 1.0) * posture
 	_settle_winded()
 
 
