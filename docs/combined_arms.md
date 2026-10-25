@@ -3101,6 +3101,7 @@ Numbered D3-n. All Proposed; the numbers are in data/operations.json.
 | D3-18 | The war hears the phases done (WorldSites.server_operation_ended, D7's rules unchanged); the debrief lists the covered zones that changed hands | 6.6 | A war rule of D3's own |
 | D3-19 | Budgets: the front's grid 0.2 ms a cycle with the zone's own load, 0.6 ms with a 160-group fight along the front, the whole cycle (gathering the presence and sites) 1 ms, the strip 0.3 ms a refresh; the test allows 3x on a loaded machine | 9.3's 0.2 ms holds for the zone's load (about 0.13 ms measured); a fight-sized load costs about 0.4 ms in GDScript, every 10 s | 0.2 ms for any load |
 | D3-20 | The operations suite plays the phased invasion with a small OOB of its own (three allied rifle teams and a Bradley section; the enemy far back), registered with `register_type` | The data's full OOB would take the suite past CI's time | The full OOB |
+| D3-21 | A client joining an 8 km zone gets up to 3 minutes to make it: the host's authentication timeout and both ends' ENet timeouts (32, 120 s, 180 s) while it loads, the normal ones 15 s after it's in (LevelSwitch `LOAD_TIMEOUT`) | Making the zone holds the client's frames 10-60 s, past the 30 s timeouts: late joiners were dropped mid-load | The test raising timeouts for itself |
 
 ### The plan
 

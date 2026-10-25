@@ -17,7 +17,7 @@ The big government jobs can be taken and fought. A belligerent employer at war p
 contract on its front: the company joins its battlegroup in an 8 km operation zone, fights it phase
 by phase beside the allied commander, and is paid as each phase is done. The result moves the war.
 Design: docs/combined_arms.md 6.1, 6.3, 6.5, 6.6 and 3.5; numbers Proposed (data/operations.json);
-calls D3-1 to D3-20 in docs/combined_arms.md section 10 and under "Calls made" in
+calls D3-1 to D3-21 in docs/combined_arms.md section 10 and under "Calls made" in
 docs/audits/followups.md. Closes F-286; follow-ups F-288 to F-293.
 
 #### Added
@@ -65,6 +65,11 @@ docs/audits/followups.md. Closes F-286; follow-ups F-288 to F-293.
 - The objectives panel makes room for whatever sits above it in the HUD's top-right corner.
 - The economy sim plays an operation phase by phase through the real pay, and skips offers the
   company can't sign.
+
+#### Fixed
+- A client joining an 8 km operation zone was dropped while it made the zone (10-60 s, past the
+  30 s authentication and ENet timeouts), then tried again from the start. Now both ends wait up to
+  3 minutes while it loads, then go back to the normal timeouts (LevelSwitch, `LOAD_TIMEOUT`).
 
 ### Operation zones of about 8 km: combined arms D1 + D2 (cg_brief queue item 3.1, ops/zones)
 

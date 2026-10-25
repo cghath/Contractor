@@ -57,7 +57,7 @@ suite_timeout() {
 		invasion) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		# operations: an 8 km operation zone hosted with an operation running in it (its OOB out, phases
 		# played by the clock, a save and load), then a client joins it late and loads the zone too (D3).
-		operations) echo $(( SUITE_TIMEOUT > 1080 ? SUITE_TIMEOUT : 1080 )) ;;
+		operations) echo $(( SUITE_TIMEOUT > 1440 ? SUITE_TIMEOUT : 1440 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
 	esac
 }

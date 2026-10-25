@@ -42,6 +42,12 @@ var _client_left := false
 var _spawn_frames := {}  # process frame -> men spawned in it
 
 
+## The host's sign that its door is open (the late-joiner part): the client waits for it before it
+## joins, so it isn't let in and dropped (its 8 km zone loaded each time) while the host's checks run.
+static func _door_file() -> String:
+	return "user://operations_test_door%s_%d.txt" % [OS.get_environment("CONTRACTOR_TEST_TAG"), Net.port()]
+
+
 func _ready() -> void:
 	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 	GameState.zone_id = "test_operations" + tag  # never touch a real save
@@ -50,13 +56,14 @@ func _ready() -> void:
 	Contracts.auto_show_debrief = false
 	Contracts.autosave = false
 	var args := OS.get_cmdline_user_args()
-	get_tree().create_timer(1040.0, true, false, true).timeout.connect(func() -> void:
+	get_tree().create_timer(1380.0, true, false, true).timeout.connect(func() -> void:
 		print("OPERATIONS TEST FAILED (timed out)")
 		get_tree().quit(99))
 	if "--operations-join" in args:
 		await _run_client(args[args.find("--operations-join") + 1] if args.find("--operations-join") + 1 < args.size() else "127.0.0.1")
 	else:
 		GameState.delete_save()
+		DirAccess.remove_absolute(_door_file())
 		await _run_host("--operations-host" in args)
 
 
@@ -137,12 +144,17 @@ func _run_host(wait_for_client: bool) -> void:
 		print("[host] waiting for the client")
 		Net.peer_left.connect(func(_id: int) -> void: _client_left = true)
 		(multiplayer.multiplayer_peer as ENetMultiplayerPeer).refuse_new_connections = false
+		var door := FileAccess.open(_door_file(), FileAccess.WRITE)
+		if door:
+			door.store_string("open")
+			door.close()
 		await _wait_for(func() -> bool: return _client_left, 420.0)
+		DirAccess.remove_absolute(_door_file())
 		check(_client_left, "the late joiner came and went")
 	_test_stall()
 	_test_fall_back()
+	_test_budgets()  # (while the contract is still held: after its debrief the run is over)
 	_test_debrief_and_war()
-	_test_budgets()
 	_finish()
 
 
@@ -598,9 +610,20 @@ func _test_budgets() -> void:
 	print("Budgets")
 	var slack := Operations.knob("front", "budget_slack", 3.0)
 	if ops and is_instance_valid(ops):
-		ops.server_front_cycle()
-		check(ops.grid.last_us <= Operations.knob("front", "budget_ms", 0.2) * 1000.0 * slack and ops.cycle_us <= Operations.knob("front", "budget_gather_ms", 1.0) * 1000.0 * slack,
-			"the zone's front cycle: the grid %.0f µs (budget %.0f, x%.0f allowed); all of it %.0f µs (budget %.0f: %s)" % [ops.grid.last_us, Operations.knob("front", "budget_ms", 0.2) * 1000.0, slack, ops.cycle_us, Operations.knob("front", "budget_gather_ms", 1.0) * 1000.0, ops.cycle_parts])
+		# Five cycles, the median of each (one may carry an event: a site taken off-screen, said on the net).
+		var grid_us: Array[float] = []
+		var all_us: Array[float] = []
+		var parts := {}
+		for k in 5:
+			ops.cycle_us = -1.0  # (stays so if the cycle didn't run)
+			ops.server_front_cycle()
+			grid_us.append(ops.grid.last_us)
+			all_us.append(ops.cycle_us)
+			parts[ops.cycle_us] = ops.cycle_parts
+		grid_us.sort()
+		all_us.sort()
+		check(all_us[0] >= 0.0 and grid_us[2] <= Operations.knob("front", "budget_ms", 0.2) * 1000.0 * slack and all_us[2] <= Operations.knob("front", "budget_gather_ms", 1.0) * 1000.0 * slack,
+			"the zone's front cycle (median of 5): the grid %.0f µs (budget %.0f, x%.0f allowed); all of it %.0f µs (budget %.0f: %s; worst %.0f)" % [grid_us[2], Operations.knob("front", "budget_ms", 0.2) * 1000.0, slack, all_us[2], Operations.knob("front", "budget_gather_ms", 1.0) * 1000.0, parts[all_us[2]], all_us[4]])
 	var strip: OperationStrip = null
 	if player and player._hud:
 		for n in player._hud.zone_top_right.get_children():
@@ -639,7 +662,12 @@ func _run_client(address: String) -> void:
 	await get_tree().process_frame
 	var joined := [false]
 	Net.joined.connect(func() -> void: joined[0] = true)
-	var deadline := Time.get_ticks_msec() + 700000
+	var open_by := Time.get_ticks_msec() + 1150000
+	while not FileAccess.file_exists(_door_file()) and Time.get_ticks_msec() < open_by:
+		await get_tree().create_timer(2.0).timeout
+		if not is_inside_tree():
+			return
+	var deadline := Time.get_ticks_msec() + 120000
 	while not joined[0] and Time.get_ticks_msec() < deadline:
 		var peer := multiplayer.multiplayer_peer
 		if not (peer is ENetMultiplayerPeer) or peer.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED:

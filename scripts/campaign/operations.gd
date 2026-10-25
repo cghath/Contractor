@@ -83,7 +83,7 @@ var records := {}
 var said: Array[String] = []
 ## Host: the last front cycle's cost (µs): the grid's and the whole gather.
 var cycle_us := 0.0
-## Its parts, µs: {"presence", "sites", "grid", "rest"} (the budgets check reads them).
+## Its parts, µs: {"presence", "sites", "grid", "overrun", "withdrawal", "lost_vehicles"} (the budgets check prints them).
 var cycle_parts := {}
 
 var _level: Node
@@ -1139,6 +1139,7 @@ func server_front_cycle() -> void:
 	var flipped := grid.cycle(presence, sites, float(run.clock_s))
 	var t3 := Time.get_ticks_usec()
 	_overrun(run, sites)
+	var t4 := Time.get_ticks_usec()
 	if friendly and friendly.withdrawn and not _withdraw_seen:
 		_withdraw_seen = true
 		run.withdrawn = true
@@ -1151,9 +1152,11 @@ func server_front_cycle() -> void:
 		var given := grid.give_back(back)
 		flipped.append_array(given)
 		_say("Citadel: all elements, fall back to %s and dig in." % (String(phases[int(run.phase) - 1].name) if int(run.phase) > 0 else "the line of departure"))
+	var t5 := Time.get_ticks_usec()
 	_lost_vehicles(run)
 	cycle_us = float(Time.get_ticks_usec() - started)
-	cycle_parts = {"presence": float(t1 - started), "sites": float(t2 - t1), "grid": float(t3 - t2), "rest": float(Time.get_ticks_usec() - t3)}
+	cycle_parts = {"presence": float(t1 - started), "sites": float(t2 - t1), "grid": float(t3 - t2), "overrun": float(t4 - t3), "withdrawal": float(t5 - t4),
+		"lost_vehicles": float(Time.get_ticks_usec() - t5)}
 	if not flipped.is_empty():
 		_front_moved(flipped)
 	_update_front_marker()
@@ -1248,7 +1251,7 @@ func _overrun(run: Dictionary, sites: Array) -> void:
 		var ours := grid.presence_near(i, FrontGrid.FRIENDLY)
 		var theirs := grid.presence_near(i, FrontGrid.HOSTILE)
 		var id := String(s.id)
-		if ours > 0.0 and ours >= ratio * theirs and not _players_near(_v3([s.pos.x, s.pos.y]), knob("run", "spawn_far_m", 600.0)):
+		if ours > 0.0 and ours >= ratio * theirs and not _players_near(Vector3(s.pos.x, 0.0, s.pos.y), knob("run", "spawn_far_m", 600.0)):
 			if not _overrun_since.has(id):
 				_overrun_since[id] = float(run.clock_s)
 			elif float(run.clock_s) - float(_overrun_since[id]) >= grid.flip_s:
@@ -1513,12 +1516,13 @@ func _front_spot(near: Vector3, side: int, reach: float, behind := false) -> Vec
 	var far := knob("run", "spawn_far_m", 600.0)
 	var best := Vector2.INF
 	var best_d := INF
+	var players := _players()
 	for i in grid.cells * grid.cells:
 		if grid.owner[i] != side:
 			continue
 		var p := grid.centre(i)
 		var d := p.distance_to(Vector2(near.x, near.z))
-		if d > reach or _players_near(_v3([p.x, p.y]), far):
+		if d > reach or _players_near(Vector3(p.x, 0.0, p.y), far, players):
 			continue
 		if behind and grid.raw_at(i, FrontGrid.FRIENDLY) > 0.0:
 			continue
@@ -1550,8 +1554,9 @@ func _players() -> Array:
 	return out
 
 
-func _players_near(at: Vector3, radius: float) -> bool:
-	for p: Node in _players():
+## Whether a player (of `players`, else the level's) stands within `radius` of `at` (x, z).
+func _players_near(at: Vector3, radius: float, players: Variant = null) -> bool:
+	for p: Node in (players as Array if players is Array else _players()):
 		if Vector2((p as Node3D).global_position.x - at.x, (p as Node3D).global_position.z - at.z).length() < radius:
 			return true
 	return false
