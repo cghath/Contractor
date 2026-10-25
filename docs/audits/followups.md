@@ -1578,6 +1578,15 @@ then the level switch's def). Its layout is in the def's "op": the bands, the ax
 counts are there for spawning by the front. `controller` is the first covered zone's (call D1-8):
 D3 sets it from WorldSites when it offers the operation.
 
+### F-287 (open, cghath world; CI only): props' client animals a little behind the host's
+props_test's "the host's animals, where the host has them" allows ANIMAL_SLACK_M 1.5 m between the
+client's glided animals and the host's when it asks. On ops/zones' CI run 40165318361 it failed on
+both attempts (worst 2.57 m, then 2.71 m: a dog's 1.4 m/s over about 2 s of lag), while the same
+zone code passed on runs 40161930345 and 40163881923 and locally (R0676), and props passed on
+armour/drive's and claude/ai-driving's runs. Nothing in cg_brief 3.1 touches ZoneAnimals or its
+sync in a normal zone. Measuring the client's position against the host's at the same packet (or
+the slack from the packet's age) would take the runner's speed out of it.
+
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
 1087536b): 134.7 ms average, 179.2 p95, **51 hitches a minute** (the local budget 96 passes;
