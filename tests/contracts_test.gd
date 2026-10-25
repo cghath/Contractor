@@ -1050,13 +1050,14 @@ func _test_us_war() -> void:
 	var us_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "us_forces")
 	var vm_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "vessmark")
 	# D3 (cg_brief 3.2): the US's is a real operation contract (its 8 km zone, phases, pay by phase);
-	# Vessmark, with no operation type on offer yet (D5's), keeps D7's one-phase stand-in.
+	# D5 (cg_brief 3.3): Vessmark's beside it is a real operation of its own types (seizing a crossing,
+	# holding a town), D7's one-phase stand-in retired.
 	check(us_op.size() == 1 and vm_op.size() == 1 and String(us_op[0].target) == "ashen_banner" and Operations.is_operation(us_op[0])
-		and String(us_op[0].title).begins_with("Operation ") and String(us_op[0].op_type) in Operations.offered_types("us_forces")
+		and String(us_op[0].title).begins_with("Operation ") and String(us_op[0].op_type) in Operations.offered_types("us_forces", "cove_outpost")
 		and int(us_op[0].op_phases) == (us_op[0].phases as Array).size() and String(us_op[0].op_zone).begins_with(Operations.ZONE_PREFIX)
-		and String(vm_op[0].title).begins_with("Vessmark operation: ") and String(vm_op[0].op_side) == "us_forces" and bool(us_op[0].operation)
-		and not Operations.is_operation(vm_op[0]) and int(us_op[0].expires_day) == Economy.day() + Contracts.OP_OFFER_DAYS,
-		"a trusted company gets the US front's operation contract, and Vessmark's stand-in beside it (%s)" % [ops.map(func(c: Dictionary) -> String: return "%s [%s]" % [c.title, c.employer])])
+		and Operations.is_operation(vm_op[0]) and String(vm_op[0].op_type) in ["seize_crossing", "hold_town"] and String(vm_op[0].op_side) == "us_forces" and bool(us_op[0].operation)
+		and int(us_op[0].expires_day) == Economy.day() + Contracts.OP_OFFER_DAYS,
+		"a trusted company gets the US front's operation contract, and Vessmark's beside it (%s)" % [ops.map(func(c: Dictionary) -> String: return "%s [%s]" % [c.title, c.employer])])
 	Contracts.server_refresh_board()
 	check((Campaign.section(Contracts.SECTION).board as Array).filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == "cove_outpost").size() == 2,
 		"once per front: the next refresh doesn't post it again")

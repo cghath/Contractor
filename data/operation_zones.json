@@ -25,6 +25,8 @@
 	"town_lateral_m": 500,
 	"_city_note": "cg_brief 3.1: an operation of these types fights for a city (BuildingGen.city_layout, cghath's queue item 1.5) where the town module would stand; the MSR comes in at its ring street on the bridge's side and leaves on the far side. Proposed.",
 	"city_op_types": ["hold_town"],
+	"_town_start_note": "cg_brief 3.3 (D5): an operation of these types starts in its town (the company is its new garrison): the insertion and extraction points on the city's ring street where the MSR comes in (else 80 m short of the town module). Proposed.",
+	"town_start_types": ["hold_town"],
 	"hq_at_m": [6000, 6600],
 	"hq_lateral_m": 800,
 	"qrf_ring_m": [450, 1100],

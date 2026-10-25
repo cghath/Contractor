@@ -87,4 +87,6 @@ static func strip_text(v: Dictionary, clock_s: float) -> String:
 	if String(v.get("allied", "")) != "":
 		front += "  |  %s" % String(v.allied)
 	lines.append(front)
+	if String(v.get("special", "")) != "":
+		lines.append(String(v.special))  # (D4/D5: the type's own line: the column, the AAVs, the bridge's charges, the defence)
 	return "\n".join(lines)

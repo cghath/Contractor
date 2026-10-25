@@ -149,17 +149,22 @@ static func unregister_type(op_type: String) -> void:
 	_hooks.erase(op_type)
 
 
-## Type `op_type`'s hook `hook_name` (an invalid Callable when it has none).
+## Type `op_type`'s hook `hook_name` (an invalid Callable when it has none). D4/D5's five types
+## register theirs the first time one is asked for (OpTypes.register_all).
 static func hook(op_type: String, hook_name: String) -> Callable:
+	if not _hooks.has(op_type) and op_type in OpTypes.TYPES:
+		OpTypes.register_all()
 	var c: Variant = (_hooks.get(op_type, {}) as Dictionary).get(hook_name)
 	return c if c is Callable and (c as Callable).is_valid() else Callable()
 
 
-## The types `employer` posts now: its factions.json "operation_types" whose data says "offer".
-static func offered_types(employer: String) -> Array[String]:
+## The types `employer` posts now: its factions.json "operation_types" whose data says "offer";
+## for the front in `zone_id` only those its rules allow there (OpTypes.eligible: the region, the
+## standing each needs; cg_brief queue item 3.3).
+static func offered_types(employer: String, zone_id := "") -> Array[String]:
 	var out: Array[String] = []
 	for t: Variant in MissionRegistry.faction(employer).get("operation_types", []):
-		if bool(type_def(String(t)).get("offer", false)):
+		if bool(type_def(String(t)).get("offer", false)) and (zone_id == "" or OpTypes.eligible(String(t), zone_id, employer) == ""):
 			out.append(String(t))
 	return out
 
@@ -192,7 +197,7 @@ static func covers_for(zone_id: String, target: String) -> Array:
 ## holding) for `employer`, of `op_type` (one of its offered types when ""), {} when it posts none.
 ## Rolled on a generator of its own (seeded from `rng`, which it leaves alone).
 static func make_offer(rng: RandomNumberGenerator, today: int, zone_id: String, side: String, target: String, employer: String, op_type := "") -> Dictionary:
-	var types := offered_types(employer)
+	var types := offered_types(employer, zone_id)
 	if op_type == "":
 		if types.is_empty():
 			return {}
@@ -225,9 +230,9 @@ static func make_offer(rng: RandomNumberGenerator, today: int, zone_id: String, 
 			threats.append("mg_nest")
 		if String(e.kind) == "qrf" and not "qrf" in threats:
 			threats.append("qrf")
-	for m: Dictionary in zdef.get("modules", []):
-		if ZoneModules.base(String(m.type)) in ENEMY_SITES:
-			count += (ZoneModules.GARRISON.get(ZoneModules.base(String(m.type)), []) as Array).size()
+	for m: Dictionary in OpTypes.rated_sites(zdef, op_type):  # (D4/D5: the sites in the ground it fights over, its "rate_bands")
+		count += (ZoneModules.GARRISON.get(ZoneModules.base(String(m.type)), []) as Array).size()
+	count += OpTypes.wave_men(op_type)  # (and the counterattack's waves its type sends)
 	var quality := snappedf(roll.randf_range(0.4, 0.65), 0.01)
 	var rated := ContractGen.rating(count, quality, threats)
 	var pay_mult := float((MissionRegistry.setting("difficulty_pay", [0, 1, 1, 1, 1, 1]) as Array)[rated])
@@ -256,6 +261,12 @@ static func make_offer(rng: RandomNumberGenerator, today: int, zone_id: String, 
 		"phases": phases, "h_hour": String(t.get("h_hour", "now")), "friendly_oob": (t.get("friendly_oob", []) as Array).duplicate(true),
 		"enemy_oob": oob, "allied_fires": (t.get("allied_fires", {}) as Dictionary).duplicate(), "attached": (t.get("attached", []) as Array).duplicate(true),
 	}
+	# D5: the dawn its H-hour comes at (the contract's sky: the deployment starts before it), or a
+	# quiet dawn the type may roll (a crossing approached at first light).
+	if t.has("hour"):
+		offer["hour"] = float(t.hour)
+	elif roll.randf() < float(t.get("dawn_chance", 0.0)):
+		offer["hour"] = float(t.get("dawn_hour", 5.0))
 	return offer
 
 
@@ -348,6 +359,9 @@ static func resolve(zdef: Dictionary, sel: Dictionary) -> Array:
 	var as_site := func(m: Dictionary) -> Dictionary:
 		return {"id": String(m.id), "label": "the %s" % MissionRegistry.module_name(String(m.type)), "pos": [float(m.pos[0]), float(m.pos[1])],
 			"module_id": String(m.id), "type": String(m.type)}
+	var extra := OpTypes.resolve_extra(zdef, sel)  # (D4/D5's own: beach exits, banks, the harbour, the firing point)
+	if not extra.is_empty():
+		return extra
 	if sel.has("site"):
 		var id := String(sel.site)
 		match id:
@@ -445,7 +459,11 @@ static func _oob(zdef: Dictionary, spec: Array, side: String, roll: RandomNumber
 		var n := roll.randi_range(int(groups[0]), int(groups[1])) if groups is Array else int(groups)
 		for g in n:
 			var pos := Vector2.ZERO
-			if side == "friendly":
+			if side == "friendly" and e.has("at") and not resolve(zdef, e.at).is_empty():
+				var s0: Dictionary = resolve(zdef, e.at)[0]  # (D5: a town's garrison stands in it)
+				pos = Vector2(float(s0.pos[0]), float(s0.pos[1])) + Vector2.from_angle(TAU * float(slot) / 7.0) * (80.0 + 40.0 * floorf(slot / 7.0))
+				slot += 1
+			elif side == "friendly":
 				var across := (slot % 2 * 2 - 1) * (220.0 + floori(slot / 2.0) * 260.0)
 				pos = start_p + left * across - axis * 120.0
 				slot += 1
@@ -464,6 +482,9 @@ static func _oob(zdef: Dictionary, spec: Array, side: String, roll: RandomNumber
 				"callsign": "%s %d" % [String(e.get("callsign", "Saber")), g + 1], "men": int(e.get("men", 4)), "crew": int(e.get("crew", 0)),
 				"vehicles": (e.get("vehicles", []) as Array).duplicate(), "kit": String(e.get("kit", "")), "pos": [snappedf(pos.x, 1.0), snappedf(pos.y, 1.0)],
 				"reserve": bool(e.get("reserve", false)), "wave_s": float(e.get("wave", 0.0)) * 60.0, "state": PENDING})
+			for key: String in ["carrier", "logistics", "known"]:  # (D4/D5: how it comes in, the trucks' job, beach defences the guns know of)
+				if e.has(key):
+					(out.back() as Dictionary)[key] = e[key]
 	return out
 
 
@@ -622,6 +643,7 @@ static func debrief_into(c: Dictionary, line: Dictionary, rep: Dictionary) -> St
 		(line.bonuses as Array).append({"text": "Equipment indemnity (%d%%): %s" % [roundi(share * 100.0), String(v.get("name", v.get("model", "vehicle")))],
 			"amount": roundi(int(v.get("value", 0)) * share)})
 	line["phases"] = shown
+	line["notes"] = (run.get("notes", []) as Array).duplicate()  # (D4/D5: what the type's mechanics said happened)
 	line["paid_at_phases"] = int(run.get("paid", 0))
 	line["phases_done"] = done
 	if done > 0:
@@ -655,6 +677,8 @@ static func summary_lines(line: Dictionary) -> PackedStringArray:
 				out.append("    %s: not reached, not paid" % String(p.name))
 	if int(line.get("paid_at_phases", 0)) > 0:
 		out.append("    Paid as each phase was done: $%s" % DebriefCalc.money(line.paid_at_phases))
+	for n: Variant in line.get("notes", []):
+		out.append("    %s" % String(n))
 	return out
 
 
@@ -683,6 +707,7 @@ static func install(level: Node, p_def: Dictionary) -> void:
 func _ready() -> void:
 	_level = get_parent()
 	grid = FrontGrid.for_zone(def, data().get("front", {}))
+	OpTypes.install(self)  # (D4/D5: the support every type has, and its type's own mechanic: every peer)
 	_rng.seed = hash([String(def.get("id", "")), "operations"])
 	if not multiplayer.has_multiplayer_peer() or multiplayer.is_server():
 		Contracts.deployment_started.connect(func(_d: Dictionary) -> void: _try_start.call_deferred())
@@ -744,6 +769,10 @@ func _try_start() -> void:
 		var start := hook(String(c.op_type), "start")
 		if start.is_valid():
 			start.call(self)
+	else:
+		var resume := hook(String(c.op_type), "resume")  # (D4/D5: a loaded save's run picks its mechanics up)
+		if resume.is_valid():
+			resume.call(self)
 	_say("Citadel: %s is on. %s" % [String(c.get("zone_name", "The operation")), _phase_brief(c)])
 	SessionLog.note("operation %s: %s in %s, phase %d of %d, %s" % [cid, String(c.op_type), String(def.id), int(run.phase) + 1, (c.phases as Array).size(), String(run.state)])
 	_front_left = 0.0
@@ -1348,6 +1377,8 @@ func _spawn_step() -> void:
 
 
 func _due(e: Dictionary, run: Dictionary) -> bool:
+	if bool(e.get("by_type", false)):
+		return false  # (D5: its type brings it in its own way: the AAV waves)
 	var at := _v3(e.pos)
 	if String(e.side) == "friendly":
 		return String(run.state) != WAITING and float(run.clock_s) - float(run.hhour_s) >= float(e.get("wave_s", 0.0))
@@ -1762,9 +1793,17 @@ func _make_view(c: Dictionary) -> Dictionary:
 		for g: Dictionary in friendly.groups.values():
 			if String(g.role) != "" and allied.size() < 3:
 				allied.append("%s %s" % [String(g.callsign), String(g.role).to_upper() if String(g.role) == "sbf" else String(g.role)])
+	var extra := {}
+	var special := PackedStringArray()
+	for n: String in [OpSupport.NODE_NAME, OpTypes.MECHANIC]:
+		var m := get_node_or_null(n) as OpBase
+		if m:
+			extra[n] = m.view()
+			if m.strip_line() != "":
+				special.append(m.strip_line())
 	return {"name": String(c.get("zone_name", "Operation")), "codename": String(c.get("codename", "")), "type": String(c.get("op_type", "")),
 		"state": String(run.state), "phase": int(run.phase), "clock_s": float(run.clock_s), "phases": list, "task": tasks,
-		"front_m": grid.front_m(), "share": grid.share(FrontGrid.FRIENDLY), "allied": ", ".join(allied)}
+		"front_m": grid.front_m(), "share": grid.share(FrontGrid.FRIENDLY), "allied": ", ".join(allied), "extra": extra, "special": "  |  ".join(special)}
 
 
 func _broadcast_view() -> void:

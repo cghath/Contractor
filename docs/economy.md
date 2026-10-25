@@ -16,6 +16,29 @@ Three passes so far. Every number is Proposed (the Captain tunes them).
    to make money... good money but it needs to go with the flow of the game"): high command side
    jobs, captures and bounties, FOB businesses, the black market (docs/income.md). Next section.
 
+## The five operation types, 2026-10-25 (combined arms D4 and D5, cg_brief 3.3; Proposed)
+
+D4 and D5 post every type (docs/combined_arms.md 6.1): the US its phased invasion ($320,000 base),
+armoured thrust ($220,000, inland fronts) and beach landing ($280,000, coast fronts), Vessmark its
+seizing a crossing ($180,000) and holding a town ($160,000), so D7's stand-in Vessmark contract is
+gone. Each needs its employer at trusted (30). Rated by the ground it fights over and the waves it
+sends, every one still rates 5. On the optypes suite's board that came to $268,500 for a thrust,
+$241,500 for a crossing and $214,500 for holding a town (20% on signing, the rest by phase). The employer pays the company's first
+medevac calls on an operation and loses its own attached armour; the company pays nothing new.
+
+**The sim, re-run** (tools/economy_sim.gd, 40 campaigns per profile, seeds 1 and 101): no profile
+took an operation, the same as after D3 (careful and median stop at rating 3 and 4, and the sloppy
+company seldom reaches trusted). The day-35 means came out the same as D3's to the thousand:
+
+| Day 35, mean cash | After D3, seed 1 | After D4/D5, seed 1 | After D3, seed 101 | After D4/D5, seed 101 |
+|---|---|---|---|---|
+| Careful | $627k | $627k | $622k | $622k |
+| Median | $666k | $666k | $596k | $596k |
+| Sloppy | $113k (6 of 40 in debt) | $113k (6 of 40) | $61k (10 of 40) | $61k (10 of 40) |
+
+The targets hold: careful builds, the median grows and nobody goes broke, and sloppy play still
+bleeds (p10 -$65k and -$115k, its lowest cash below zero on average). Nothing was tuned.
+
 ## Operation contracts and pay by phase, 2026-10-25 (combined arms D3, cg_brief 3.2; Proposed)
 
 A government employer's operation (docs/combined_arms.md 6.5; data/operations.json "pay") pays

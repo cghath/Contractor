@@ -7,6 +7,12 @@ extends Node3D
 ## modules), green where it can go and red where it can't (BaseFob.placement_problem, the host's
 ## own check). Enter places it (BaseHub request "place_defence": paid then, the base reloads with
 ## it), Esc puts it away. This peer only; one at a time.
+##
+## Field mode (cg_brief queue item 3.3, holding a town: docs/combined_arms.md 6.4.5): start_field()
+## places one of the operation's field defences instead (OpTown.catalogue(): sandbags, HESCO, wire),
+## freely on the ground (half-metre steps, turned to face where the player looks), green where
+## OpTown.placement_problem() allows it; Enter asks the host for it (OpTown.request_place), from the
+## defence budget, no charge.
 
 const NODE_NAME := "DefencePlacer"
 const REACH_M := 150.0
@@ -22,6 +28,9 @@ var problem := "Look at the ground"
 var _ghost: MeshInstance3D
 var _mat: StandardMaterial3D
 var _hint := 0.0
+## Field mode: the operation's piece kind ("" at the base).
+var field := ""
+var _yaw := 0.0
 
 
 ## Opens the tool for defence `p_id` in the level `from` is in. Returns it, or null.
@@ -39,10 +48,29 @@ static func start(from: Node, p_id: String) -> DefencePlacer:
 	return p
 
 
+## Field mode: opens the tool for one of the operation's field defences `kind` (OpTown). Or null.
+static func start_field(from: Node, kind: String) -> DefencePlacer:
+	var lvl := CompoundLevel.current(from) if from and from.is_inside_tree() else null
+	if lvl == null or not OpTown.catalogue().has(kind):
+		return null
+	var old := lvl.get_node_or_null(NODE_NAME)
+	if old:
+		old.free()
+	var p := DefencePlacer.new()
+	p.name = NODE_NAME
+	p.field = kind
+	lvl.add_child(p)
+	return p
+
+
 func _ready() -> void:
-	var half: Array = BaseFob.DEFENCES[id].half
 	var box := BoxMesh.new()
-	box.size = Vector3(float(half[0]) * 2.0, GHOST_H, float(half[1]) * 2.0)
+	if field != "":
+		var size: Array = (OpTown.catalogue()[field] as Dictionary).get("size", [3.0, 1.1, 0.7])
+		box.size = Vector3(float(size[0]), float(size[1]), float(size[2]))
+	else:
+		var half: Array = BaseFob.DEFENCES[id].half
+		box.size = Vector3(float(half[0]) * 2.0, GHOST_H, float(half[1]) * 2.0)
 	_mat = StandardMaterial3D.new()
 	_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -64,6 +92,17 @@ func _process(delta: float) -> void:
 		at = Vector2.INF
 		problem = "Look at the ground"
 		_ghost.visible = false
+	elif field != "":
+		var p: Vector3 = hit.position
+		at = Vector2(snappedf(p.x, 0.5), snappedf(p.z, 0.5))
+		var town := OpTown.of(self)
+		var lvl := CompoundLevel.current(self)
+		var ground: Vector3 = lvl.ground_point(Vector3(at.x, 0.0, at.y)) if lvl and lvl.has_method(&"ground_point") else Vector3(at.x, p.y, at.y)
+		problem = town.placement_problem(field, ground) if town else "Field defences are for holding a town"
+		_yaw = atan2(cam.global_basis.z.x, cam.global_basis.z.z)
+		_ghost.global_transform = Transform3D(Basis(Vector3.UP, _yaw), ground + Vector3.UP * (_ghost.mesh as BoxMesh).size.y * 0.5)
+		_ghost.visible = true
+		_mat.albedo_color = OK if problem == "" else BAD
 	else:
 		var p: Vector3 = hit.position
 		at = Vector2(snappedf(p.x, ZoneDef.GRID_M), snappedf(p.z, ZoneDef.GRID_M))
@@ -79,7 +118,8 @@ func _process(delta: float) -> void:
 		var me := MapNodes.local_player(self)
 		var hud: Variant = me.get(&"_hud") if me else null
 		if hud is Object and (hud as Object).has_method(&"flash"):
-			(hud as Object).call(&"flash", "%s: Enter to place it%s, Esc to put it away" % [String(BaseFob.DEFENCES[id].name), "" if problem == "" else " (%s)" % problem])
+			var what := String((OpTown.catalogue()[field] as Dictionary).get("name", field)) if field != "" else String(BaseFob.DEFENCES[id].name)
+			(hud as Object).call(&"flash", "%s: Enter to place it%s, Esc to put it away" % [what, "" if problem == "" else " (%s)" % problem])
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -91,6 +131,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		queue_free()
 	elif key.keycode == KEY_ENTER or key.keycode == KEY_KP_ENTER:
 		get_viewport().set_input_as_handled()
-		if problem == "" and at.is_finite():
+		if problem == "" and at.is_finite() and field != "":
+			var town := OpTown.of(self)
+			if town:
+				town.request_place(field, Vector3(at.x, 0.0, at.y), _yaw)
+			queue_free()
+		elif problem == "" and at.is_finite():
 			BaseHub.request("place_defence", [id, at.x, at.y])
 			queue_free()

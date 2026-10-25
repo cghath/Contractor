@@ -2,7 +2,7 @@
 # Runs the headless test suites. Set GODOT to the Voxel Tools editor executable, e.g.
 #   GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 # With arguments, runs only those suites:  tools/run_tests.sh smoke gameplay
-# Suites are tests/<name>_test.tscn; "net", "levelswitch", "world", "vehicles", "supports", "aav", "props" and "operations" are two-process host/client tests.
+# Suites are tests/<name>_test.tscn; "net", "levelswitch", "world", "vehicles", "supports", "aav", "props", "operations" and "optypes" are two-process host/client tests.
 # Parallel runs (separate worktrees) should set CONTRACTOR_TEST_TAG (keeps test saves apart)
 # and CONTRACTOR_PORT (keeps the net test's port apart).
 #
@@ -58,12 +58,16 @@ suite_timeout() {
 		# operations: an 8 km operation zone hosted with an operation running in it (its OOB out, phases
 		# played by the clock, a save and load), then a client joins it late and loads the zone too (D3).
 		operations) echo $(( SUITE_TIMEOUT > 1440 ? SUITE_TIMEOUT : 1440 )) ;;
+		# optypes: the five operation types played one after another, each in its own 8 km zone (offered,
+		# phases, mechanic, pay, a save, the debrief), a client joining late in the first and following
+		# the host into each (cg_brief 3.3, D4/D5).
+		optypes) echo $(( SUITE_TIMEOUT > 1700 ? SUITE_TIMEOUT : 1700 )) ;;
 		*) echo "$SUITE_TIMEOUT" ;;
 	esac
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes)
 status=0
 finished=""
 keep_root="$(run_log_parent)"
@@ -209,7 +213,7 @@ judge import "$logs/import.log" $? ""
 [ "$status" -ne 0 ] && { finished=1; exit 1; }
 for suite in "${SUITES[@]}"; do
 	timeout_s="$(suite_timeout "$suite")"
-	if [ "$suite" = net ] || [ "$suite" = levelswitch ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ] || [ "$suite" = props ] || [ "$suite" = operations ]; then
+	if [ "$suite" = net ] || [ "$suite" = levelswitch ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ] || [ "$suite" = props ] || [ "$suite" = operations ] || [ "$suite" = optypes ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
 		# exits when the client leaves. world, vehicles and aav: the host runs its own checks first
 		# (refusing connections), then lets the client in; both print a summary. levelswitch: both

@@ -11,6 +11,74 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The operation types: combined arms D4 and D5 (cg_brief queue item 3.3 (D4/D5), ops/types)
+
+All five operation types are posted and play end to end: the phased invasion made full, the
+armoured thrust, the beach landing, seizing a crossing and holding a town. Each has its own
+phases, company tasks, order of battle, H-hour, pay and offer rules, and its own mechanic.
+Attached armour and allied fires now work on every operation. Design: docs/combined_arms.md 6.1,
+6.3-6.5; numbers Proposed (data/operations.json, data/fire_support.json "allied_units"); calls
+D4-1 to D4-15 and D5-1 to D5-14 in docs/combined_arms.md section 10 and under "Calls made" in
+docs/audits/followups.md. Closes F-288 and F-292; follow-ups F-294 to F-302.
+
+#### Added
+- **Who posts what.** US forces post the phased invasion, the armoured thrust (inland fronts only)
+  and the beach landing (coast fronts only). Vessmark posts its smaller ones, seizing a crossing
+  and holding a town, so D7's stand-in Vessmark contract is gone. Every type needs the employer
+  at trusted (30). An operation is rated by the ground it fights over and the waves it sends,
+  not by every garrison in the 8 km zone.
+- **Attached armour** (the invasion's Abrams section, the thrust's Bradley section). It comes out
+  at the start line at H-hour with an allied driver and gunner (and loader), and the commander's
+  hatch is left free for a player. By default it overwatches the company's task from 300 m back.
+  Support > Operation > Attached armour orders it to move, hold or follow, and a player aboard can
+  take its gun and hand it back. A lost vehicle is the employer's loss.
+- **Allied fires.** The employer's mortars (fired from the mortar section's real tubes), its
+  battery and naval gunfire fire the operation's rounds. They fire preparation fires on each
+  phase's enemy sites, smoke when the allied commander asks for it for a breach, and three rounds
+  wherever the company calls them (Support > Operation > Allied fires), never danger close.
+- **The phased invasion, full.** Its full order of battle, with a mortar section, an ammunition
+  and a fuel truck that rearm and refuel the armour at the logistics point behind the front, and
+  the employer's Dustoff flying the company's first two medevac calls. In phase 4 there's a
+  bonus for taking the HQ's commander alive.
+- **The armoured thrust.** The column (the Abrams and mechanised platoons, plus the attached
+  Bradleys carrying the company) drives down the MSR and halts short of each blocking position
+  until the company has cleared it. It moves on once everyone is aboard. Support > Operation >
+  Column can bypass a position off-road, if the ground allows, but that leaves its enemy behind
+  the front. The whole thrust has 45 minutes, and it fails if the column loses half its vehicles.
+- **The beach landing.** It starts before dawn with the company in its AAVs in the LHD's well
+  deck. Wave 1 (the company's two AAVs and four allied ones) swims in on its lanes, and wave 2
+  follows four minutes later. Artillery and naval gunfire hit the known beach defences, then
+  smoke goes on the exits. H-hour is when wave 1 hits the sand. The phases are the left beach
+  exit, the harbour, then holding the beachhead against a counterattack.
+- **Seizing a crossing.** The bridge has three charges under its middle span, wired to a firing
+  point on the far bank where two engineers wait. Once they see us within a kilometre, they blow
+  it 90 seconds later; a vehicle on the span sets it off at once. To stop it, kill them, cut the
+  wire at a marked point (Support > Operation > Cut the firing wire) or take the firing point. An
+  intact bridge pays +40% of phase 2. If it's blown, the armour crosses at a ford.
+- **Holding a town.** The company starts in the town it has just taken (a city), beside an
+  allied platoon, two Bradleys and mortars. It gets ten minutes to dig in, site its guns and
+  place six pieces of field defences (Support > Operation > Field defences: sandbag wall, HESCO,
+  concertina wire). Then two or three waves come in, each from the approach the enemy picks
+  round what it has seen of the defence, so a hidden piece pays off. The second wave brings
+  technicals and comes after a mortar barrage. Hold the centre to win.
+- **On screen and after.** The operation strip gets a line for the type (the column, the AAVs,
+  the bridge's charges, the defence and its waves), and the debrief lists what happened in it.
+- **The optypes suite** (tools/run_tests.sh and CI): each type offered, taken, played through
+  its phases and its mechanic, paid, saved and loaded, debriefed and fed to the war, with a client
+  joining late and following the host into each zone.
+
+#### Changed
+- FireSupport can fire an operation's own guns (`server_allied_fire`), and FireMission reads
+  their units from data/fire_support.json "allied_units". The company's fire support is
+  unchanged.
+- DefencePlacer has a field mode for the town's defences. The base's defences are unchanged.
+- OperationGen starts a town-holding operation's insertion in its town.
+
+#### Fixed
+- A client already in the session is no longer dropped when the host switches to an 8 km
+  operation zone. Every end now waits up to three minutes while the zone is made, as a late
+  joiner already did (BaseHub, F-302).
+
 ### Operation contracts: combined arms D3 (cg_brief queue item 3.2 (D3), ops/contracts)
 
 The big government jobs can be taken and fought. A belligerent employer at war posts an operation

@@ -92,7 +92,8 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 func _finish() -> void:
 	GameState.delete_save()
 	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
-		Operations.unregister_type("phased_invasion")
+		for t: String in ["phased_invasion", "armoured_thrust", "beach_landing"]:
+			Operations.unregister_type(t)
 		BaseHub.delete_test_campaign_files()
 	print("OPERATIONS TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -106,6 +107,8 @@ func _run_host(wait_for_client: bool) -> void:
 	_test_api()
 	Contracts.new_full_campaign(3177, 400000)
 	Operations.register_type("phased_invasion", {"friendly_oob": TEST_FRIENDLY, "enemy_oob": TEST_ENEMY})
+	for t: String in ["armoured_thrust", "beach_landing"]:  # (the US's other types are the optypes suite's: this one plays the invasion)
+		Operations.register_type(t, {"offer": false})
 	if not _test_offer():
 		_finish()
 		return
@@ -318,12 +321,12 @@ func _test_offer() -> bool:
 	Contracts.server_refresh_board()
 	var board: Array = Campaign.section(Contracts.SECTION).board
 	var ops_on: Array = board.filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == front_zone)
-	var us: Array = ops_on.filter(func(c: Dictionary) -> bool: return Operations.is_operation(c))
+	var us: Array = ops_on.filter(func(c: Dictionary) -> bool: return Operations.is_operation(c) and String(c.employer) == "us_forces")
 	var vm: Array = ops_on.filter(func(c: Dictionary) -> bool: return String(c.employer) == "vessmark")
 	check(us.size() == 1 and String(us[0].employer) == "us_forces" and String(us[0].op_type) == "phased_invasion" and String(us[0].target) == "ashen_banner",
 		"a US front at %s posts an operation contract to a trusted company (%s)" % [front_zone, String(us[0].title) if not us.is_empty() else "none"])
-	check(vm.size() == 1 and not Operations.is_operation(vm[0]) and String(vm[0].title).begins_with("Vessmark operation: "),
-		"Vessmark's beside it stays D7's stand-in until D5 builds its types")
+	check(vm.size() == 1 and Operations.is_operation(vm[0]) and String(vm[0].op_type) in ["seize_crossing", "hold_town"],
+		"Vessmark's beside it is an operation of its own types now (D5, cg_brief 3.3): %s" % (String(vm[0].title) if not vm.is_empty() else "none"))
 	if us.is_empty():
 		return false
 	var c: Dictionary = us[0]
