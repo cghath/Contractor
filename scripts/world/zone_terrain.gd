@@ -662,12 +662,18 @@ func _build_chunk(c: Vector2i) -> void:
 	var shape := HeightMapShape3D.new()
 	shape.map_width = CHUNK_CELLS + 1
 	shape.map_depth = CHUNK_CELLS + 1
+	# The chunk's rows of the height grid, a slice each (D2: 33 slices, not 1,089 _h calls: a chunk
+	# streamed in an 8 km zone is ~0.05 ms of GDScript, not ~0.6); then GroundCuts' holes put back.
 	var data := PackedFloat32Array()
-	data.resize((CHUNK_CELLS + 1) * (CHUNK_CELLS + 1))
+	var i0 := c.x * CHUNK_CELLS
 	for j in CHUNK_CELLS + 1:
-		for i in CHUNK_CELLS + 1:
-			var s := Vector2i(c.x * CHUNK_CELLS + i, c.y * CHUNK_CELLS + j)
-			data[i + j * (CHUNK_CELLS + 1)] = NAN if not _blanks.is_empty() and _blanks.has(s) else _h(s.x, s.y)
+		var row := (c.y * CHUNK_CELLS + j) * points + i0
+		data.append_array(heights.slice(row, row + CHUNK_CELLS + 1))
+	if not _blanks.is_empty():
+		for j in CHUNK_CELLS + 1:
+			for i in CHUNK_CELLS + 1:
+				if _blanks.has(Vector2i(i0 + i, c.y * CHUNK_CELLS + j)):
+					data[i + j * (CHUNK_CELLS + 1)] = NAN
 	shape.map_data = data
 	_chunk_shapes[c] = shape
 	var node := CollisionShape3D.new()
@@ -683,14 +689,28 @@ func _build_chunk(c: Vector2i) -> void:
 ## An on_demand zone (BigZoneStreaming): builds the chunks within `in_m` of any of `focus` (or
 ## `reach[k]` of focus k, where given), nearest first, at most `budget` of them (-1: all), and frees
 ## those further than `out_m` (scaled the same) from all of them. Returns how many it built.
-func stream_collision(focus: Array[Vector3], in_m: float, out_m: float, budget := -1, reach := PackedFloat32Array()) -> int:
+## `until_usec` (Time.get_ticks_usec): stops building past it, after the first.
+func stream_collision(focus: Array[Vector3], in_m: float, out_m: float, budget := -1, reach := PackedFloat32Array(), until_usec := 0) -> int:
+	var todo := stream_plan(focus, in_m, out_m, reach)
+	if budget >= 0:
+		todo = todo.slice(0, budget)
+	return build_chunks(todo, until_usec)
+
+
+## stream_collision's first half: frees the chunks past reach (but those something lies on: held)
+## and returns the wanted ones not built yet, nearest first, for build_chunks.
+func stream_plan(focus: Array[Vector3], in_m: float, out_m: float, reach := PackedFloat32Array()) -> Array:
 	if not on_demand:
-		return 0
-	var plan := BigZoneStreaming.plan(focus, reach, in_m, out_m, CHUNK_CELLS * CELL_M, chunk_count(), _half)
+		return []
+	var chunk_m := CHUNK_CELLS * CELL_M
+	var plan := BigZoneStreaming.plan(focus, reach, in_m, out_m, chunk_m, chunk_count(), _half)
 	var wanted: Dictionary = plan[0]
 	var keep: Dictionary = plan[1]
 	for c: Vector2i in _chunk_bodies.keys():
 		if not keep.has(c):
+			var r := Rect2(-_half + c.x * chunk_m, -_half + c.y * chunk_m, chunk_m, chunk_m)
+			if BigZoneStreaming.held(self, c, r, self):
+				continue  # something lies on it (a body, a dropped item, a wreck): its ground stays
 			(_chunk_bodies[c] as Node).queue_free()
 			_chunk_bodies.erase(c)
 			_chunk_shapes.erase(c)
@@ -699,16 +719,32 @@ func stream_collision(focus: Array[Vector3], in_m: float, out_m: float, budget :
 		if not _chunk_bodies.has(c):
 			todo.append(c)
 	todo.sort_custom(func(x: Vector2i, y: Vector2i) -> bool: return float(wanted[x]) < float(wanted[y]))
-	if budget >= 0:
-		todo = todo.slice(0, budget)
-	for c: Vector2i in todo:
+	return todo
+
+
+## Builds the chunks of `todo` (stream_plan's) from its front, taking each out as it's built,
+## until `until_usec` passes (after the first; 0: all). Returns how many it built.
+func build_chunks(todo: Array, until_usec := 0) -> int:
+	var built := 0
+	while not todo.is_empty():
+		if until_usec > 0 and built > 0 and Time.get_ticks_usec() > until_usec:
+			break  # (the time is spent: the rest next time, nearest first)
+		var c: Vector2i = todo.pop_front()
+		if _chunk_bodies.has(c):
+			continue
 		_build_chunk(c)
-	return todo.size()
+		built += 1
+	return built
 
 
 ## How many chunks have collision now.
 func collision_chunks() -> int:
-	return _chunk_bodies.size()
+	return _chunk_bodies.size() if on_demand else _chunk_shapes.size()
+
+
+## Whether chunk `c` has its collision now (always, in a zone that doesn't stream).
+func has_collision(c: Vector2i) -> bool:
+	return _chunk_shapes.has(c)
 
 
 # --- Visuals ---------------------------------------------------------------------------------
@@ -760,13 +796,16 @@ func build_visuals() -> void:
 	_shrink_pads()
 	_material = ground_material()
 	var count := chunk_count()
-	for cz in count:
-		for cx in count:
-			for lod in range(1, LOD_STEPS.size()):
-				var node := _lod_instance(cx, cz, lod)
-				if lod == 1:
-					node.visibility_range_begin = 0.0  # until the finest level is built
-					_lod1[Vector2i(cx, cz)] = node
+	if on_demand:
+		_build_far_tiles()  # an 8 km zone: far tiles, and every chunk's levels in rings round the camera (_ring_process)
+	else:
+		for cz in count:
+			for cx in count:
+				for lod in range(1, LOD_STEPS.size()):
+					var node := _lod_instance(cx, cz, lod)
+					if lod == 1:
+						node.visibility_range_begin = 0.0  # until the finest level is built
+						_lod1[Vector2i(cx, cz)] = node
 	add_child(_apron(_material))
 	if sea_side >= 0:
 		add_child(_water())
@@ -809,7 +848,10 @@ func build_near(pos: Vector3, budget: int) -> int:
 ## The finest mesh for chunk `c`.
 func _refine(c: Vector2i) -> void:
 	_lod0[c] = _lod_instance(c.x, c.y, 0)
-	_lod1[c].visibility_range_begin = LOD_END_M[0]
+	if on_demand:
+		_ring_ranges(c)
+	else:
+		_lod1[c].visibility_range_begin = LOD_END_M[0]
 
 
 ## The nearest `budget` chunks within LOD0_BUILD_M of `pos` without their finest mesh, nearest first.
@@ -819,8 +861,11 @@ func _wanted_near(pos: Vector3, budget: int) -> Array:
 	var chunk_m := CHUNK_CELLS * CELL_M
 	var wanted: Array = []
 	var count := chunk_count()
-	for cz in count:
-		for cx in count:
+	# (D2: the chunks within LOD0_BUILD_M's square, not all 4,096 of an 8 km zone; the same ones.)
+	var lo := Vector2i(clampi(floori((pos.x - LOD0_BUILD_M + _half) / chunk_m), 0, count - 1), clampi(floori((pos.z - LOD0_BUILD_M + _half) / chunk_m), 0, count - 1))
+	var hi := Vector2i(clampi(floori((pos.x + LOD0_BUILD_M + _half) / chunk_m), 0, count - 1), clampi(floori((pos.z + LOD0_BUILD_M + _half) / chunk_m), 0, count - 1))
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
 			var c := Vector2i(cx, cz)
 			if _lod0.has(c):
 				continue
@@ -847,6 +892,8 @@ var _plan_full := false
 
 
 func _process(_delta: float) -> void:
+	if on_demand and _visuals_built:
+		_ring_process()
 	if _task >= 0:
 		_take_refined()
 		return
@@ -890,7 +937,7 @@ func _take_refined() -> void:
 	WorkerThreadPool.wait_for_task_completion(_task)
 	_task = -1
 	var c := _task_chunk
-	if _lod0.has(c) or _task_out.is_empty() or not _lod1.has(c):
+	if _lod0.has(c) or _task_out.is_empty() or not (_lod1.has(c) or on_demand):
 		return
 	if (cuts.version if cuts else 0) != _task_cuts:
 		_queue.push_front(c)  # the ground was cut meanwhile: its cells drawn finely may have changed
@@ -898,7 +945,10 @@ func _take_refined() -> void:
 		return
 	var t := Time.get_ticks_usec()
 	_lod0[c] = _lod_instance(c.x, c.y, 0, _mesh_of(_task_out))
-	_lod1[c].visibility_range_begin = LOD_END_M[0]
+	if on_demand:
+		_ring_ranges(c)
+	else:
+		_lod1[c].visibility_range_begin = LOD_END_M[0]
 	_task_out = []
 	FrameCost.spent(&"terrain_fine", t)
 
@@ -907,6 +957,150 @@ func _exit_tree() -> void:
 	if _task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_task = -1
+	if _ring_task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_ring_task)
+		_ring_task = -1
+
+
+# --- An 8 km zone's ground in rings (D2, cg_brief queue item 3.1) ------------------------------
+
+## An on_demand zone (BigZoneStreaming.streams) draws its ground in tiers, none of them built for
+## the whole zone up front (4,096 chunks at three levels were 12,288 meshes and as many draws):
+## - far tiles: FAR_TILE_CHUNKS x FAR_TILE_CHUNKS chunks (512 m) at the coarsest step, all built at
+##   load (256 of them), drawn once the camera is FAR_TILE_BEGIN_M from a tile's middle;
+## - nearer than that, each chunk's own levels (the coarsest with its tile as visibility_parent),
+##   built on a worker in rings round the camera (RING_BUILD_M per level, RING_BATCH chunks a task,
+##   nearest first) and freed past RING_FREE_M, so the memory held follows the camera, not the
+##   ground it has seen;
+## - each level's nearer edge waits for the level inside it (_ring_ranges), so a chunk is never a
+##   hole while the finer level is still coming.
+## Proposed.
+const FAR_TILE_CHUNKS := 4
+const FAR_TILE_BEGIN_M := 2000.0
+const RING_BUILD_M: Array[float] = [LOD0_BUILD_M, 1500.0, 2600.0]
+const RING_FREE_M: Array[float] = [900.0, 1800.0, 3000.0]
+const RING_BATCH := 8
+const RING_REPLAN_M := 32.0
+var _lod2 := {}  # Vector2i chunk -> its coarsest MeshInstance3D (on_demand)
+var _far_tiles := {}  # Vector2i tile -> MeshInstance3D
+var _ring_task := -1
+var _ring_jobs: Array = []  # [[chunk, lod], ...] on the worker
+var _ring_out: Array = []  # their arrays, in order
+var _ring_queue: Array = []  # [[chunk, lod], ...] to build, nearest first
+var _ring_planned_at := Vector3.INF
+## Tests and the invasion suite: ring meshes built and freed so far.
+var ring_built := 0
+var ring_freed := 0
+
+
+func _build_far_tiles() -> void:
+	var tiles := ceili(chunk_count() / float(FAR_TILE_CHUNKS))
+	var cells := CHUNK_CELLS * FAR_TILE_CHUNKS
+	for tz in tiles:
+		for tx in tiles:
+			var node := MeshInstance3D.new()
+			node.name = "Far_%d_%d" % [tx, tz]
+			node.mesh = _mesh_of(_chunk_arrays(tx, tz, LOD_STEPS[2], SKIRT_M[2], PackedByteArray(), cells))
+			node.material_override = _material
+			node.visibility_range_begin = FAR_TILE_BEGIN_M
+			node.visibility_range_begin_margin = 40.0
+			node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(node)
+			_far_tiles[Vector2i(tx, tz)] = node
+
+
+## How many far tiles and chunk meshes (by level) are built now.
+func ring_counts() -> Dictionary:
+	return {"tiles": _far_tiles.size(), "lod0": _lod0.size(), "lod1": _lod1.size(), "lod2": _lod2.size()}
+
+
+## Each level of chunk `c` drawn from where the level inside it ends, or nearer while that one
+## isn't built (a coarser level stands in under the camera until the finer comes).
+func _ring_ranges(c: Vector2i) -> void:
+	if _lod1.has(c):
+		(_lod1[c] as MeshInstance3D).visibility_range_begin = LOD_END_M[0] if _lod0.has(c) else 0.0
+	if _lod2.has(c):
+		var begin := LOD_END_M[1] if _lod1.has(c) else (LOD_END_M[0] if _lod0.has(c) else 0.0)
+		(_lod2[c] as MeshInstance3D).visibility_range_begin = begin
+
+
+func _ring_process() -> void:
+	if _ring_task >= 0:
+		if not WorkerThreadPool.is_task_completed(_ring_task):
+			return
+		WorkerThreadPool.wait_for_task_completion(_ring_task)
+		_ring_task = -1
+		var t := Time.get_ticks_usec()
+		for k in _ring_jobs.size():
+			var c: Vector2i = _ring_jobs[k][0]
+			var lod: int = _ring_jobs[k][1]
+			var into: Dictionary = _lod1 if lod == 1 else _lod2
+			if into.has(c) or k >= _ring_out.size():
+				continue
+			var node := _lod_instance(c.x, c.y, lod, _mesh_of(_ring_out[k]))
+			if lod == 2:
+				var tile: MeshInstance3D = _far_tiles.get(Vector2i(c.x / FAR_TILE_CHUNKS, c.y / FAR_TILE_CHUNKS))
+				if tile:
+					node.visibility_parent = node.get_path_to(tile)
+			into[c] = node
+			ring_built += 1
+			_ring_ranges(c)
+		_ring_jobs = []
+		_ring_out = []
+		FrameCost.spent(&"terrain_rings", t)
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var at := camera.global_position
+	if _ring_queue.is_empty() and at.distance_to(_ring_planned_at) > RING_REPLAN_M:
+		var t := Time.get_ticks_usec()
+		_ring_planned_at = at
+		_ring_queue = _ring_plan(at)
+		FrameCost.spent(&"terrain_rings", t)
+	if not _ring_queue.is_empty():
+		_ring_jobs = _ring_queue.slice(0, RING_BATCH)
+		_ring_queue = _ring_queue.slice(RING_BATCH)
+		_ring_out = []
+		_ring_task = WorkerThreadPool.add_task(_ring_arrays.bind(_ring_jobs.duplicate()), false, "terrain ring chunks")
+
+
+func _ring_arrays(jobs: Array) -> void:
+	var out: Array = []
+	for j: Array in jobs:
+		var c: Vector2i = j[0]
+		var lod: int = j[1]
+		out.append(_chunk_arrays(c.x, c.y, LOD_STEPS[lod], SKIRT_M[lod], PackedByteArray()))
+	_ring_out = out
+
+
+## Frees every level past its RING_FREE_M from `at`, and returns the levels 1 and 2 to build within
+## their RING_BUILD_M, nearest first (level 1 counted nearer: it's what shows round the camera).
+func _ring_plan(at: Vector3) -> Array:
+	var chunk_m := CHUNK_CELLS * CELL_M
+	var flat := Vector2(at.x, at.z)
+	for lod in 3:
+		var held: Dictionary = [_lod0, _lod1, _lod2][lod]
+		for c: Vector2i in held.keys():
+			if Vector2(-_half + (c.x + 0.5) * chunk_m, -_half + (c.y + 0.5) * chunk_m).distance_to(flat) > RING_FREE_M[lod]:
+				(held[c] as Node).queue_free()
+				held.erase(c)
+				ring_freed += 1
+				_ring_ranges(c)
+	var count := chunk_count()
+	var reach := RING_BUILD_M[2]
+	var lo := Vector2i(clampi(floori((at.x - reach + _half) / chunk_m), 0, count - 1), clampi(floori((at.z - reach + _half) / chunk_m), 0, count - 1))
+	var hi := Vector2i(clampi(floori((at.x + reach + _half) / chunk_m), 0, count - 1), clampi(floori((at.z + reach + _half) / chunk_m), 0, count - 1))
+	var wanted: Array = []
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			var c := Vector2i(cx, cz)
+			var d := Vector2(-_half + (cx + 0.5) * chunk_m, -_half + (cz + 0.5) * chunk_m).distance_to(flat)
+			if d <= RING_BUILD_M[1] and not _lod1.has(c):
+				wanted.append([d * 0.5, c, 1])
+			if d <= RING_BUILD_M[2] and not _lod2.has(c):
+				wanted.append([d, c, 2])
+	wanted.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	return wanted.map(func(w: Array) -> Array: return [w[1], w[2]])
 
 
 func _lod_instance(cx: int, cz: int, lod: int, mesh: ArrayMesh = null) -> MeshInstance3D:
@@ -958,14 +1152,14 @@ func _mesh_of(data: Array) -> ArrayMesh:
 ## a skirt `skirt` metres deep, leaving out the cells `covered` marks (_covered_mask). Reads only
 ## the zone's generated ground (heights, pads, roads, water, features), never the scene: safe on a
 ## worker thread. A skirt's vertices take their edge vertex's normal and colour (worked out once).
-func _chunk_arrays(cx: int, cz: int, step: int, skirt: float, covered: PackedByteArray) -> Array:
-	var n := CHUNK_CELLS / step
+func _chunk_arrays(cx: int, cz: int, step: int, skirt: float, covered: PackedByteArray, cells := CHUNK_CELLS) -> Array:
+	var n := cells / step
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
 	var indices := PackedInt32Array()
-	var i0 := cx * CHUNK_CELLS
-	var j0 := cz * CHUNK_CELLS
+	var i0 := cx * cells
+	var j0 := cz * cells
 	for b in n + 1:
 		for a in n + 1:
 			var i := i0 + a * step

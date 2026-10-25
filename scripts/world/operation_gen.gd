@@ -222,6 +222,25 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 	var lt := clampf(lb + rng.randf_range(-1.0, 1.0) * float(d.town_lateral_m), -lat, lat)
 	var town_type := "%s%d" % [ZoneModules.TOWN, absi(hash([seed, "op_town"])) % 1000000]
 	place.call("town", town_type, pt.call(rng.randf_range(float(d.town_at_m[0]), float(d.town_at_m[1])), lt), float(d.town_spacing_m))
+	# cghath's cities (queue item 1.5): an operation of "city_op_types" (holding a town) fights for a
+	# city: its blocks stand where the town module would ("city_<ix>_<iz>", as an urban hot zone's),
+	# the MSR coming in at its ring street on the bridge's side and out on the far side.
+	var city := {}
+	var city_entries: Array = []
+	if op_type in (d.get("city_op_types", []) as Array):
+		var at: Vector2 = pos_of.call("town")
+		if at.is_finite():
+			var city_seed := absi(hash([seed, "op_city"])) % 1000000
+			var layout := BuildingGen.city_layout(city_seed)
+			var along := absf(axis.x) * (layout.half as Vector2).x + absf(axis.y) * (layout.half as Vector2).y
+			modules = modules.filter(func(m: Dictionary) -> bool: return String(m.id) != "town")
+			for iz in int(layout.rows):
+				for ix in int(layout.cols):
+					var c := at + BuildingGen.city_block_centre(ix, iz)
+					placed.append(c)
+					modules.append({"id": "city_%d_%d" % [ix, iz], "type": "%s%d#%d#%d" % [ZoneModules.CITY, city_seed, ix, iz], "pos": [c.x, c.y]})
+			city = {"id": "city", "seed": city_seed, "pos": [at.x, at.y]}
+			city_entries = [at - axis * along, at + axis * along]
 	var lh := clampf(lt + rng.randf_range(-1.0, 1.0) * float(d.hq_lateral_m), -lat, lat)
 	var s_h := rng.randf_range(float(d.hq_at_m[0]), float(d.hq_at_m[1]))
 	place.call("hq", "hq", pt.call(s_h, lh), spacing)
@@ -278,7 +297,9 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 			out.append([p.x, p.y])
 		return out
 	var msr_line: Array = [start, pos_of.call("cp_msr"), pt.call(b2.x - float(msr.approach_m), lb),
-		pt.call(b2.y + float(msr.approach_m), lb), pos_of.call("town"), pos_of.call("hq")]
+		pt.call(b2.y + float(msr.approach_m), lb)]
+	msr_line.append_array(city_entries if not city_entries.is_empty() else [pos_of.call("town")])
+	msr_line.append(pos_of.call("hq"))
 	msr_line = msr_line.filter(func(p: Vector2) -> bool: return p.is_finite()).map(func(p: Vector2) -> Array: return [p.x, p.y])
 	var across_line := func(l: float) -> Array:
 		return to_world.call([Vector2(_lateral_s(laterals[0], l), l), Vector2(b2.x - float(msr.approach_m), l),
@@ -294,7 +315,13 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 			idx.append(roads.size())
 			roads.append([line[k - 1], line[k]])
 		return idx
-	var msr_roads: Array = add_line.call(msr_line)
+	var msr_roads: Array = []
+	if city_entries.is_empty():
+		msr_roads = add_line.call(msr_line)
+	else:  # through the city by its own streets: the legs up to its near side and on from its far side
+		var k_in := msr_line.size() - 3  # (the near entry's index: then the far entry, then the HQ)
+		msr_roads = add_line.call(msr_line.slice(0, k_in + 1))
+		msr_roads.append_array(add_line.call(msr_line.slice(k_in + 1)))
 	var lateral_lines: Array = []
 	for line: Array in laterals:
 		lateral_lines.append(to_world.call(line))
@@ -304,7 +331,7 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 		add_line.call(f)
 	var mains := roads.duplicate()
 	for m: Dictionary in modules:
-		if String(m.id) in ["fob", "cp_msr", "cp_bridge", "town", "hq"]:
+		if String(m.id) in ["fob", "cp_msr", "cp_bridge", "town", "hq"] or String(m.id).begins_with("city_"):
 			continue
 		var p := Vector2(float(m.pos[0]), float(m.pos[1]))
 		var best := Vector2.INF
@@ -359,6 +386,8 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 		"kind": KIND, "op_type": op_type, "covers": cover_ids, "region": region, "terrain": terrain, "controller": controller,
 		"assets": assets, "landmark_max": int(d.landmark_max), "modules": modules, "insertion": insertion, "extraction": extraction,
 		"roads": roads, "patrols": patrols, "op": {"type": op_type, "side": side, "axis": [axis.x, axis.y], "bands": bands}}
+	if not city.is_empty():
+		def["cities"] = [city]
 	var depth_kinds: Array = d.depth_targets
 	if not ZoneModules.landmark_kinds(def).any(func(k: String) -> bool: return k in depth_kinds):
 		def["landmarks"] = [String(d.depth_fallback)]
@@ -398,7 +427,7 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 	op["route"] = route
 	op["fords"] = fords
 	op["fob"] = "fob" if sea_w <= 0.0 else ""
-	op["town"] = "town"
+	op["town"] = "city" if not city.is_empty() else "town"
 	op["hq"] = "hq"
 	op["depth"] = depth
 	return def

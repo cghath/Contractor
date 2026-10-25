@@ -23,6 +23,8 @@
 	"msr": {"lateral_m": 800, "checkpoint_at_m": [1550, 1850], "bridge_jitter_m": 300, "approach_m": 120, "far_checkpoint_m": 3440},
 	"town_at_m": [4300, 4700],
 	"town_lateral_m": 500,
+	"_city_note": "cg_brief 3.1: an operation of these types fights for a city (BuildingGen.city_layout, cghath's queue item 1.5) where the town module would stand; the MSR comes in at its ring street on the bridge's side and leaves on the far side. Proposed.",
+	"city_op_types": ["hold_town"],
 	"hq_at_m": [6000, 6600],
 	"hq_lateral_m": 800,
 	"qrf_ring_m": [450, 1100],
@@ -39,8 +41,8 @@
 	"depth_targets": ["airfield", "oil_field", "fuel_depot"],
 	"depth_fallback": "fuel_depot",
 	"terrain": {"coast": ["amphibious_coast", "coastal_lowland"], "inland": ["river_valley", "desert_wadi", "farmland", "marsh"]},
-	"_streaming_note": "D2 (docs/combined_arms.md 6.2.2-6.2.3; BigZoneStreaming): zones of 'from_size_m' or more stream their ground: terrain collision chunks within 'collision_in_m' of any player, 'vehicle_in_m' of a vehicle and 'soldier_in_m' of any other live soldier, freed past 'collision_out_m' (at most 'chunks_per_tick' built a tick, every 'tick_s'); scatter cover collision by its cells the same way ('scatter_in_m', 'scatter_out_m'); the scatter's caps grow with the zone's area over 'scatter_area_km2' (a hot zone's density held). Soldiers drawn to 'soldier_draw_m', vehicles to 'vehicle_draw_m' as a proxy past 'vehicle_proxy_m'. The Virtualizer holds profiles back (past its FORCE_M) while 'live_soldiers' are live, rides while 'live_vehicles' are. All Proposed.",
-	"streaming": {"from_size_m": 4224, "tick_s": 0.25, "collision_in_m": 1000, "collision_out_m": 1300, "chunks_per_tick": 12,
-		"scatter_in_m": 1200, "scatter_out_m": 1500, "vehicle_in_m": 300, "soldier_in_m": 150, "cells_per_tick": 3, "scatter_area_km2": 16.78, "draw_scan_s": 2.0,
+	"_streaming_note": "D2 (docs/combined_arms.md 6.2.2-6.2.3; BigZoneStreaming; cg_brief 3.1): zones of 'from_size_m' or more stream their ground on every peer: terrain collision chunks within 'collision_in_m' of any player, 'vehicle_in_m' of a vehicle and 'soldier_in_m' of any other live soldier ('engaged_in_m' on the host for one whose squad is in a fight), freed past 'collision_out_m' x reach / collision_in_m; the scatter's cover by its cells the same way ('scatter_in_m', 'scatter_out_m'). Planned every 'tick_s', built every physics frame for 'frame_ms' (nearest first, at least one of each); a player or vehicle that appears gets 'ensure_m' at once. The scatter's caps grow with the zone's area over 'scatter_area_km2' (a hot zone's density held). Soldiers drawn to 'soldier_draw_m', vehicles to 'vehicle_draw_m' as a box past 'vehicle_proxy_m'. The Virtualizer holds profiles back (past its FORCE_M) while 'live_soldiers' are live, rides while 'live_vehicles' are. All Proposed.",
+	"streaming": {"from_size_m": 4224, "tick_s": 0.25, "collision_in_m": 1000, "collision_out_m": 1300,
+		"scatter_in_m": 1200, "scatter_out_m": 1500, "vehicle_in_m": 300, "soldier_in_m": 150, "engaged_in_m": 450, "ensure_m": 200, "frame_ms": 0.75, "scatter_area_km2": 16.78, "draw_scan_s": 2.0,
 		"soldier_draw_m": 1500, "vehicle_draw_m": 3000, "vehicle_proxy_m": 1200, "live_soldiers": 80, "live_vehicles": 16}
 }

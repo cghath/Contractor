@@ -95,7 +95,7 @@ func _run_host(wait_for_client: bool) -> void:
 	await _wait_for(func() -> bool: return level.players.get_node_or_null(^"1") != null, 5.0)
 	player = level.players.get_node(^"1")
 	player.set_physics_process(false)
-	_test_generation(mem_before)
+	await _test_generation(mem_before)
 	await _test_streaming()
 	await _test_edits()
 	await _test_shot_in_module()
@@ -152,7 +152,7 @@ func _test_generation(mem_before: float) -> void:
 	_test_building_gen()
 	_test_towns()
 	_test_presets()
-	_test_operation_zones()
+	await _test_operation_zones()
 	_test_ship_placement()
 	var ins := level.insertion_points()[0]
 	check(player.global_position.distance_to(ins) < 5.0 and absf(player.global_position.y - t.height_at(player.global_position.x, player.global_position.z) - 0.1) < 0.05,
@@ -1777,6 +1777,16 @@ func _test_operation_zones() -> void:
 	var dry := ZoneDef.generate_operation(13, "seize_crossing", ["kestrel_valley", "old_orchards"])
 	check(dry.op.depth == "lm_fuel_depot" and band_of.call(dry, "lm_fuel_depot") == "depth",
 		"covered zones with no airfield or oil site get a fuel depot as the depth target (%s, %s)" % [dry.op.depth, band_of.call(dry, String(dry.op.depth))])
+	# cg_brief 3.1: holding a town is fought for a city (cghath's queue item 1.5) in the town band,
+	# the MSR in at its near side and out at its far side, through its own streets.
+	var held := ZoneDef.generate_operation(14, "hold_town", ["ashfield", "red_mesa"])
+	var blocks := (held.modules as Array).filter(func(m: Dictionary) -> bool: return ZoneModules.city_of(String(m.type)) != "")
+	var city_in_band := blocks.all(func(m: Dictionary) -> bool: return OperationGen.band_at(held, Vector2(m.pos[0], m.pos[1])) == "town")
+	var town_modules := (held.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.type).begins_with(ZoneModules.TOWN)).size()  # (a city's blocks are towns to ZoneModules.base)
+	check(blocks.size() == BuildingGen.CITY_BLOCKS.x * BuildingGen.CITY_BLOCKS.y and city_in_band and town_modules == 0
+		and (held.get("cities", []) as Array).size() == 1 and held.op.town == "city" and (held.op.msr_roads as Array).size() == (held.op.msr as Array).size() - 2,
+		"holding a town: a city of %d blocks in the town band (no town module), the MSR to its near side and on from its far side (%d legs of %d points)" % [blocks.size(),
+		(held.op.msr_roads as Array).size(), (held.op.msr as Array).size()])
 	var coast := ZoneDef.generate_operation(12, "beach_landing", ["landing_beach", "cove_outpost", "ashfield"])
 	check(coast.region == "coast" and coast.terrain == "amphibious_coast" and int(coast.sea_side) == int(coast.op.side) and String(coast.op.fob) == ""
 		and band_of.call(coast, "lm_harbour") == "start" and OperationGen.band_at(coast, Vector2(coast.op.msr[0][0], coast.op.msr[0][1])) == "start",
@@ -1802,7 +1812,7 @@ func _test_operation_zones() -> void:
 		and vehicle.any(func(c: Dictionary) -> bool: return c.kind == ZoneBridges.FORD),
 		"every crossing in band 2: %d for vehicles (%s), %d footbridges between" % [vehicle.size(),
 		vehicle.map(func(c: Dictionary) -> String: return "%s %s" % [c.kind, c.get("role", "")]), on_river.size() - vehicle.size()])
-	_test_big_zone_streaming(op, t)
+	await _test_big_zone_streaming(op, t)
 	t.free()
 	check(gen_ms < BUDGET_OPERATION_MS, "an operation zone generates in %d ms: the def %d, its terrain and water %d (budget %.0f)" % [gen_ms, def_ms, gen_ms - def_ms, BUDGET_OPERATION_MS])
 
@@ -1844,6 +1854,54 @@ func _test_big_zone_streaming(op: Dictionary, t: ZoneTerrain) -> void:
 	var li := hole.x - c.x * ZoneTerrain.CHUNK_CELLS + (hole.y - c.y * ZoneTerrain.CHUNK_CELLS) * (ZoneTerrain.CHUNK_CELLS + 1)
 	check(kept and absf(moved - expect) < expect * 0.15 and shape != null and is_nan(shape.map_data[li]),
 		"chunks kept within %.0f m of the action, freed past it (%d after a 5 km move); a dug hole survives its chunk being freed and built again" % [out_m, moved])
+	# A crater dug (or a save's cuts put back) where no chunk is built yet: its holes are there when
+	# the chunk comes (cg_brief 3.1: saves and late cuts in a streamed zone).
+	var far_pos := Vector3(3000, 0, -3200)
+	var dug := GroundCuts.of(t).apply(GroundCuts.crater_op(far_pos, 3.0))
+	var dug_cell := GroundCuts.of(t).cell_of(far_pos.x, far_pos.z)
+	var far_at: Array[Vector3] = [far_pos]
+	t.stream_collision(far_at, 200.0, 260.0, -1)
+	var dc := Vector2i(dug_cell.x / ZoneTerrain.CHUNK_CELLS, dug_cell.y / ZoneTerrain.CHUNK_CELLS)
+	var dshape: HeightMapShape3D = t._chunk_shapes.get(dc)
+	var dli := dug_cell.x - dc.x * ZoneTerrain.CHUNK_CELLS + (dug_cell.y - dc.y * ZoneTerrain.CHUNK_CELLS) * (ZoneTerrain.CHUNK_CELLS + 1)
+	check(dug and dshape != null and is_nan(dshape.map_data[dli]), "a crater cut before its chunk was built is in the chunk when it comes (a save's cuts put back on an 8 km zone)")
+	# Something lying on a chunk keeps it (BigZoneStreaming.held): an item, a ragdoll or a vehicle.
+	add_child(t)  # (far outside the test zone: nothing else of this world is out there)
+	var lying := RigidBody3D.new()
+	lying.collision_layer = 1 << 2
+	lying.freeze = true
+	var lying_shape := CollisionShape3D.new()
+	lying_shape.shape = BoxShape3D.new()
+	lying.add_child(lying_shape)
+	add_child(lying)
+	lying.global_position = Vector3(far_pos.x, t.height_at(far_pos.x, far_pos.z) + 0.3, far_pos.z)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var under := Vector2i(floori((far_pos.x + t.size_m * 0.5) / chunk_m), floori((far_pos.z + t.size_m * 0.5) / chunk_m))
+	var away: Array[Vector3] = [Vector3(-3000, 0, 3200)]
+	t.stream_collision(away, 200.0, 260.0, -1)
+	var kept_under := t.has_collision(under)
+	var others := t.collision_chunks()
+	lying.queue_free()
+	t.set_meta(&"held_until", {})
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	t.stream_collision(away, 200.0, 260.0, -1)
+	check(kept_under and not t.has_collision(under) and t.collision_chunks() < others,
+		"a chunk with an item lying on it is kept when everyone leaves (%d chunks then), and freed once it's gone (%d)" % [others, t.collision_chunks()])
+	remove_child(t)
+	# The terrain's visuals in an 8 km zone: far tiles up front, every chunk's levels in rings round
+	# the camera (none of the 4,096 x 2 coarse meshes a smaller zone builds).
+	t.build_visuals()
+	var rings := t.ring_counts()
+	var plan := t._ring_plan(Vector3(0, 0, 0))
+	var lod1 := plan.filter(func(j: Array) -> bool: return int(j[1]) == 1).size()
+	var lod2 := plan.filter(func(j: Array) -> bool: return int(j[1]) == 2).size()
+	var ring_expect := func(r: float) -> float: return PI * r * r / (chunk_m * chunk_m)
+	check(int(rings.tiles) == 256 and int(rings.lod1) == 0 and int(rings.lod2) == 0 and absf(lod1 - ring_expect.call(ZoneTerrain.RING_BUILD_M[1])) < ring_expect.call(ZoneTerrain.RING_BUILD_M[1]) * 0.1
+		and absf(lod2 - ring_expect.call(ZoneTerrain.RING_BUILD_M[2])) < ring_expect.call(ZoneTerrain.RING_BUILD_M[2]) * 0.1,
+		"an 8 km zone's ground drawn as %d far tiles up front, its chunks' levels in rings round the camera (%d middle within %.0f m, %d coarse within %.0f m)" % [rings.tiles,
+		lod1, ZoneTerrain.RING_BUILD_M[1], lod2, ZoneTerrain.RING_BUILD_M[2]])
 	var s := ZoneScatter.new()
 	t.add_child(s)
 	var started := Time.get_ticks_msec()
@@ -1857,3 +1915,4 @@ func _test_big_zone_streaming(op: Dictionary, t: ZoneTerrain) -> void:
 	var area_km2 := float(op.size_m) * float(op.size_m) / 1.0e6
 	check(s.on_demand and cover_none == 0 and cells > 100 and absf(s.cover_cells() - cells) < cells * 0.3 and s.total() > ZoneScatter.CAP_TREES * 3,
 		"the scatter at a hot zone's density: %d items (%.0f a km2) in %d ms; its cover built in %d cells round a point, none up front" % [s.total(), s.total() / area_km2, scatter_ms, cells])
+	s.forget()  # (an 8 km layout is let go as its zone goes: the budget check below is the test zone's)
