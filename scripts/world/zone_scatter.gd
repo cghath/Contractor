@@ -268,6 +268,11 @@ var _cap_thickets := ROUND4_CAP_THICKETS
 var _cap_solid := ROUND4_CAP_SOLID
 var _woods_share := ROUND4_WOODS_SHARE
 var _copses_share := ROUND4_COPSES_SHARE
+## An 8 km zone (BigZoneStreaming): every cap times its area over a hot zone's (the density held,
+## not the count: docs/combined_arms.md 6.2.2), and its cover collides only near the action.
+var _scale := 1.0
+var on_demand := false
+var _cover_bodies := {}  # Vector2i cell -> its StaticBody3D
 
 
 ## Lays the items out. `terrain` must be generated; `def` is the zone's def ("roads" in it
@@ -321,11 +326,20 @@ func generate(terrain: ZoneTerrain, def: Dictionary) -> void:
 ## The caps for this preset: the copses-as-cover ones with "copse_cover", else round 4's.
 func _set_caps() -> void:
 	_cover = bool(_spec.get("copse_cover", false))
-	_cap_trees = CAP_TREES if _cover else ROUND4_CAP_TREES
-	_cap_thickets = CAP_THICKETS if _cover else ROUND4_CAP_THICKETS
-	_cap_solid = CAP_SOLID if _cover else ROUND4_CAP_SOLID
+	on_demand = _terrain != null and BigZoneStreaming.streams(_terrain.size_m)
+	_scale = BigZoneStreaming.scatter_scale(_terrain.size_m) if on_demand else 1.0
+	_cap_trees = _cap(CAP_TREES if _cover else ROUND4_CAP_TREES)
+	_cap_thickets = _cap(CAP_THICKETS if _cover else ROUND4_CAP_THICKETS)
+	_cap_solid = _cap(CAP_SOLID if _cover else ROUND4_CAP_SOLID)
+
+
 	_woods_share = WOODS_SHARE if _cover else ROUND4_WOODS_SHARE
 	_copses_share = COPSES_SHARE if _cover else ROUND4_COPSES_SHARE
+
+
+## Cap `n` for this zone (times _scale).
+func _cap(n: int) -> int:
+	return int(n * _scale)
 
 
 func _lay_out() -> void:
@@ -360,7 +374,7 @@ func _lay_out() -> void:
 	_props.lay_out(self, terrain, _def)
 	props_report = _props.report
 	# Rocks.
-	var want := mini(int(round(float(_spec.get("rocks_per_km2", 0.0)) * area_km2)), CAP_ROCKS)
+	var want := mini(int(round(float(_spec.get("rocks_per_km2", 0.0)) * area_km2)), _cap(CAP_ROCKS))
 	var attempts := int(want * tries_per)
 	while counts[Kind.ROCK] < want and attempts > 0:
 		attempts -= 1
@@ -389,7 +403,7 @@ func _lay_out() -> void:
 	# in the wilderness like rocks.
 	var prop_colours := _colours(colours.get("prop", ["5a5440", "6b4f33", "767166"]))
 	var props_near := float(_spec.get("props_near_m", 0.0))
-	want = mini(int(round(float(_spec.get("props_per_km2", 0.0)) * area_km2)), CAP_PROPS)
+	want = mini(int(round(float(_spec.get("props_per_km2", 0.0)) * area_km2)), _cap(CAP_PROPS))
 	attempts = int(want * tries_per)
 	while counts[Kind.PROP] < want and attempts > 0 and props_near > 0.0:
 		attempts -= 1
@@ -411,7 +425,7 @@ func _lay_out() -> void:
 	# (Captain, 2026-10-16, playtest B1399 on Red Mesa: "open terrain reads nearly empty"),
 	# not gated to a road or a pad like the crates above — placed like the rocks are.
 	var ruin_colours := _colours(colours.get("ruin", ["5a5648", "6b645a", "4a4038", "68503c"]))
-	want = mini(int(round(float(_spec.get("ruins_per_km2", 0.0)) * area_km2)), CAP_PROPS - counts[Kind.PROP])
+	want = mini(int(round(float(_spec.get("ruins_per_km2", 0.0)) * area_km2)), _cap(CAP_PROPS) - counts[Kind.PROP])
 	attempts = int(want * tries_per)
 	while want > 0 and attempts > 0:
 		attempts -= 1
@@ -441,7 +455,7 @@ func _lay_out() -> void:
 	# crates, wrecks with kit, dead drops) — well away from a site or a road (VALUABLE_AVOID_M,
 	# more than the bare pad/road keep-out), so this never marks a spot right by a mission.
 	# No mesh of its own: ZoneScatter only places the marker, deterministic like everything else.
-	want = mini(int(round(float(_spec.get("valuables_per_km2", 0.0)) * area_km2)), CAP_VALUABLES)
+	want = mini(int(round(float(_spec.get("valuables_per_km2", 0.0)) * area_km2)), _cap(CAP_VALUABLES))
 	attempts = int(want * tries_per)
 	while counts[Kind.VALUABLE] < want and attempts > 0:
 		attempts -= 1
@@ -477,7 +491,7 @@ func _lay_out() -> void:
 		if _try_tree(rng, x, z, 0.8, 1.45):
 			lone += 1
 	# Scrub everywhere, in clumps: denser where the cluster noise is high.
-	want = mini(int(round(float(_spec.get("scrub_per_km2", 0.0)) * area_km2)), CAP_SCRUB - counts[Kind.SCRUB])
+	want = mini(int(round(float(_spec.get("scrub_per_km2", 0.0)) * area_km2)), _cap(CAP_SCRUB) - counts[Kind.SCRUB])
 	var bushes := 0
 	attempts = int(want * tries_per)
 	while bushes < want and attempts > 0:
@@ -600,7 +614,7 @@ func _scrub_belts(rng: RandomNumberGenerator, count: int) -> void:
 	if count <= 0:
 		return
 	var cap := _cap_thickets
-	_cap_thickets = counts[Kind.THICKET] + BELT_CAP
+	_cap_thickets = counts[Kind.THICKET] + _cap(BELT_CAP)
 	var inner := _half - EDGE_KEEP_M
 	for n in count:
 		var at := Vector2(rng.randf_range(-inner, inner), rng.randf_range(-inner, inner))
@@ -751,7 +765,7 @@ func _copse_rock(rng: RandomNumberGenerator, x: float, z: float) -> bool:
 	var squash := rng.randf()
 	var yaw := rng.randf() * TAU
 	var tint := rng.randf()
-	if counts[Kind.ROCK] >= CAP_ROCKS or solid_count >= _cap_solid or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
+	if counts[Kind.ROCK] >= _cap(CAP_ROCKS) or solid_count >= _cap_solid or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
 	if _crowded(x, z) or _blocked(x, z, _keep, _roads) or (_props and _props.blocks(x, z, s * 0.6)):
 		return false
@@ -876,7 +890,7 @@ func _try_bush(rng: RandomNumberGenerator, x: float, z: float, kind: int, lo: fl
 	var squash := rng.randf()
 	var yaw := rng.randf() * TAU
 	var tint := rng.randf()
-	var cap := _cap_thickets if kind == Kind.THICKET else CAP_SCRUB
+	var cap := _cap_thickets if kind == Kind.THICKET else _cap(CAP_SCRUB)
 	if counts[kind] >= cap or absf(x) > _half - EDGE_KEEP_M or absf(z) > _half - EDGE_KEEP_M:
 		return false
 	if _blocked(x, z, _keep, _roads) or (_props and _props.blocks(x, z, s * SCRUB_R)):
@@ -1469,39 +1483,78 @@ static var _trunk_shapes := {}
 ## sight lines or rounds, which look on layer 1. Also adds the zone's animals (ZoneAnimals, from the
 ## ANIMAL markers), at the same path on every peer.
 func build_collision() -> void:
-	for cell: Vector2i in _cells:
-		var body: StaticBody3D = null
-		var through: StaticBody3D = null
-		for index: int in _cells[cell]:
-			var item: Dictionary = items[index]
-			if not item.solid:
-				continue
-			if body == null:
-				body = StaticBody3D.new()
-				body.name = "Cover_%d_%d" % [cell.x, cell.y]
-				body.collision_layer = 1
-				body.collision_mask = 0
-				add_child(body)
-			for part: Array in collision_parts(item):
-				var shape := CollisionShape3D.new()
-				shape.shape = part[0]
-				shape.transform = part[1]
-				var holder := body
-				if part.size() > 2:
-					shape.set_meta(&"prop", Vector2i(index, int(part[2])))
-					if bool(part[3]):
-						if through == null:
-							through = StaticBody3D.new()
-							through.name = "SeeThrough_%d_%d" % [cell.x, cell.y]
-							through.collision_layer = Soldier.BODY_LAYER
-							through.collision_mask = 0
-							add_child(through)
-						holder = through
-				holder.add_child(shape)
+	if not on_demand:  # an 8 km zone's cover is built near the action instead (stream_collision)
+		for cell: Vector2i in _cells:
+			_build_cover(cell)
 	if get_node_or_null(^"Animals") == null:
 		var zoo := ZoneAnimals.new()
 		zoo.setup(self, _terrain)
 		add_child(zoo)
+
+
+## Cell `cell`'s cover body (and its see-through body), as build_collision describes.
+func _build_cover(cell: Vector2i) -> void:
+	var body: StaticBody3D = null
+	var through: StaticBody3D = null
+	for index: int in _cells[cell]:
+		var item: Dictionary = items[index]
+		if not item.solid:
+			continue
+		if body == null:
+			body = StaticBody3D.new()
+			body.name = "Cover_%d_%d" % [cell.x, cell.y]
+			body.collision_layer = 1
+			body.collision_mask = 0
+			add_child(body)
+		for part: Array in collision_parts(item):
+			var shape := CollisionShape3D.new()
+			shape.shape = part[0]
+			shape.transform = part[1]
+			var holder := body
+			if part.size() > 2:
+				shape.set_meta(&"prop", Vector2i(index, int(part[2])))
+				if bool(part[3]):
+					if through == null:
+						through = StaticBody3D.new()
+						through.name = "SeeThrough_%d_%d" % [cell.x, cell.y]
+						through.collision_layer = Soldier.BODY_LAYER
+						through.collision_mask = 0
+						add_child(through)
+					holder = through
+			holder.add_child(shape)
+	_cover_bodies[cell] = [body, through]  # (nulls: a cell with nothing solid, still counted as built)
+
+
+## An on_demand zone (BigZoneStreaming): the cover collision of the cells within `in_m` of any of
+## `focus` (or `reach[k]` of focus k, where given), nearest first, at most `budget` (-1: all);
+## cells further than `out_m` (scaled the same) from all of them freed. Returns how many it built.
+func stream_collision(focus: Array[Vector3], in_m: float, out_m: float, budget := -1, reach := PackedFloat32Array()) -> int:
+	if not on_demand:
+		return 0
+	var plan := BigZoneStreaming.plan(focus, reach, in_m, out_m, CELL_M, ceili(_terrain.size_m / CELL_M), _terrain.size_m * 0.5)
+	var wanted: Dictionary = plan[0]
+	var keep: Dictionary = plan[1]
+	for c: Vector2i in _cover_bodies.keys():
+		if not keep.has(c):
+			for body: Variant in _cover_bodies[c]:
+				if body != null:
+					(body as Node).queue_free()
+			_cover_bodies.erase(c)
+	var todo: Array = []
+	for c: Vector2i in wanted:
+		if _cells.has(c) and not _cover_bodies.has(c):
+			todo.append(c)
+	todo.sort_custom(func(x: Vector2i, y: Vector2i) -> bool: return float(wanted[x]) < float(wanted[y]))
+	if budget >= 0:
+		todo = todo.slice(0, budget)
+	for c: Vector2i in todo:
+		_build_cover(c)
+	return todo.size()
+
+
+## How many cells have their cover collision built (on_demand: near the action; else all).
+func cover_cells() -> int:
+	return _cover_bodies.size()
 
 
 ## The shapes item `item` collides as, each [Shape3D, Transform3D (world)], exactly as it's drawn

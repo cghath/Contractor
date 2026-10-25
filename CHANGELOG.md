@@ -11,6 +11,81 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Combined arms D1: operation zones of about 8 km (docs/combined_arms.md 6.2)
+
+> **Where I stopped / next step (2026-10-22, paused for usage; branch claude/ca-d1-operation-zones).**
+> **D1 is done.** It is commit dcc6c4c0: world passed (R2394) and smoke passed (R2399) locally,
+> and CI was queued when I stopped. Its pieces:
+> - OperationGen (scripts/world/operation_gen.gd), with its numbers in data/operation_zones.json;
+> - `ZoneDef.generate_operation`;
+> - hints in ZoneWater, ZoneBridges and ZoneModules (F-195 to F-197);
+> - `_test_operation_zones` in world_test;
+> - calls 74-84 in docs/combined_arms.md section 10.
+>
+> **D2 (8 km performance) is WIP in the commit after it.** Coded, not yet passing a test run.
+> - **Done:**
+>   - `BigZoneStreaming` (scripts/world/big_zone_streaming.gd), which ZoneLevel adds for zones
+>     of 4,224 m or more (one line in `_build_environment`).
+>   - ZoneTerrain: `on_demand`, `_build_chunk`, `stream_collision`, `collision_chunks`, and
+>     `_blanks` so GroundCuts holes survive a rebuild.
+>   - ZoneScatter: `_scale`/`_cap()` (caps times the area over a hot zone's), `_build_cover`,
+>     `stream_collision`, `cover_cells`. Plus `BigZoneStreaming.plan()`, shared by both.
+>   - Far drawing: soldiers to 1.5 km, vehicles to 1.2 km plus a box proxy to 3 km.
+>   - Live caps: the Virtualizer `_wake_due` hook calls `BigZoneStreaming.at_cap`.
+>   - Data in operation_zones.json "streaming"; calls 85-90 in section 10.
+>   - tests/invasion_perf.gd (+ .tscn): the 6.2.3 invasion case; `-- --zone hot` runs the
+>     same load on ridge_hot.
+>   - world_test `_test_big_zone_streaming`, called from `_test_operation_zones`.
+> - **Not yet run:**
+>   - `_test_big_zone_streaming`;
+>   - the last refactor (`plan()`, per-point reach: players 1 km, vehicles 300 m, other
+>     soldiers 150 m);
+>   - the `-- --zone hot` baseline (stopped mid-run).
+> - **Measured before that refactor** (headless, with 3 other Godot runs on the machine): op_11
+>   generates in about 8.2-8.9 s. The invasion case ran **348 ms average / 840 ms 99th, far over
+>   the 14 / 33 ms budget**, and its streaming tick peaked at 132 ms. That was every soldier
+>   holding 1 km of ground and freeing comparing every chunk with every point, which the
+>   refactor addresses. The 8 column drivers also failed to spawn then (`spawn_soldier` needs a
+>   "guard" key; fixed since).
+> - **Next:**
+>   1. Re-import, run world + smoke through agent-tools/run_tests_locked.sh, and fix what fails.
+>   2. Run invasion_perf for op_11 and with `-- --zone hot` on a quiet machine. Find what is
+>      over: the AI fight, physics, the Virtualizer taking 200 men, or streaming.
+>   3. Fix that, add a D2 CHANGELOG entry and F-items. ZoneScatter's caps and build_collision
+>      changed, and cghath's world/props reworks zone_scatter.gd; perf-pass has uncommitted
+>      edits in its build_near/_process/ground cover, which are different functions.
+>   4. Commit and push.
+> - **Lane plan after D2:** A6 (driving physics) while D3 waits for B2, D4 for A3 and D5 for A6.
+
+#### Added
+- **Operation zones.** `ZoneDef.generate_operation(seed, op_type, covers)` makes an 8,192 m zone
+  for the big government operations from the contract zones it covers. It takes their region,
+  terrain, assets and landmarks. Nothing offers or hosts one yet: that comes with operation
+  contracts (D3) and the 8 km performance work (D2).
+- **Bands along an axis of advance.** The zone runs from the friendly edge, or the sea, into the
+  enemy's depth. First comes the start: an allied FOB inland, or the beach on the coast. Then
+  outposts, checkpoints and villages. Then a river crossing, then the town, then the HQ with its
+  comms site, QRF bases and the depth target (an airfield, an oil site or a fuel depot). The
+  enemy's rear comes last.
+- **The main supply route.** The MSR runs the length of the zone: start, its checkpoint, the
+  river, the town, the HQ, the depth target. Two laterals cross it, and every other site has a
+  track to the nearest road.
+- **A river with real crossings.** The river crosses the axis in band 2. The MSR crosses it on a
+  concrete road bridge. A second route has a steel truss bridge, and one or two tracks ford it.
+  Footbridges sit between them for the infantry. A checkpoint holds the far end of the bridge,
+  with an outpost overlooking it.
+- **Landmarks from the covered zones**, each in its own band. A beach landing's harbour stands on
+  the coast. The mosque and the office are in the town, and the airfield and oil field are in the
+  depth.
+
+#### Changed
+- cghath's world files get one small hint each: ZoneWater lays an operation's river and plans its
+  crossings, ZoneBridges tags the MSR's bridge, and ZoneModules places landmarks in their bands.
+  Other zones generate exactly as before. These are noted as F-195 to F-197 in
+  docs/audits/followups.md.
+- Every number is in data/operation_zones.json (Proposed). The calls made are listed in
+  docs/combined_arms.md section 10, numbers 74 to 84.
+
 ### Driving physics and terrain for armour (cg_brief queue item 2.7 (A6), armour/drive)
 
 Combined arms phase A6: vehicles drive by their engine's power and the ground's grip, can roll over,

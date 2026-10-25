@@ -242,6 +242,9 @@ static func _choose_sea(def: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(def.seed) ^ 0x5EA
 	var pick: Array = options[rng.randi() % options.size()]
+	for o: Array in options:
+		if int(o[0]) == int(def.get("sea_side_pref", -1)):  # an operation's beach is its friendly edge (OperationGen)
+			pick = o
 	def["sea_side"] = int(pick[0])
 	def["sea_m"] = float(pick[1])
 
@@ -505,6 +508,14 @@ static func _place_city(city_seed: int, hq: Vector2, reach: float, rng: RandomNu
 		var entry := p + (Vector2(signf(toward.x) * half.x, 0.0) if absf(toward.x) / half.x >= absf(toward.y) / half.y else Vector2(0.0, signf(toward.y) * half.y))
 		return {"id": "city", "seed": city_seed, "pos": [p.x, p.y], "entry": entry}
 	return {}
+
+## An operation zone (docs/combined_arms.md 6.2, phase D1): an 8,192 m square in bands along an
+## axis of advance, its sites, landmarks, terrain and region from the contract zones it `covers`
+## (data/contracts.json ids), a river across the axis with a concrete bridge on the main supply
+## route, the MSR and two laterals. `op_type` as data/operation_zones.json "op_types". The same
+## arguments give the same zone. OperationGen has the layout.
+static func generate_operation(seed: int, op_type: String, covers: Array) -> Dictionary:
+	return OperationGen.generate(seed, op_type, covers)
 
 
 ## How far `p` is from the nearest of `sites`.
