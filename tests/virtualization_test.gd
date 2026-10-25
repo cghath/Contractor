@@ -62,6 +62,7 @@ func _ready() -> void:
 	await _test_save()
 	await _test_capacity()
 	await _test_rides()
+	await _test_allied_and_caps()
 	_finish()
 
 
@@ -671,3 +672,41 @@ func _test_rides() -> void:
 				"loaded, the same technical comes back with its two men aboard")
 			_drop(rec)
 	_drop(team)
+
+
+# --- Allied groups and an 8 km zone's live caps (docs/combined_arms.md 9.3, D2; cg_brief 3.1) ---
+
+## An allied group (B2's "allied" kind, friendly) is tracked like the others: real within DESPAWN_M
+## of a player (HC_LIVE_M, 3.8: players see the allies they fight beside), virtual past it. In an 8 km
+## zone at its live cap (BigZoneStreaming.at_cap) a profile between FORCE_M and SPAWN_M waits; one
+## inside FORCE_M comes back regardless.
+func _test_allied_and_caps() -> void:
+	print("Allied groups, and an 8 km zone's live caps")
+	_put_player(level.insertion_points()[0])
+	var far := _team(4, _away(Virtualizer.DESPAWN_M + 250.0, 0.7), "allied", "friendly")
+	var near := _team(4, _away(Virtualizer.DESPAWN_M - 250.0, 2.0), "allied", "friendly")
+	await _frames(3)
+	var eyes := v._eyes(level)
+	check(not v.can_virtualize(near.soldiers, eyes, Virtualizer.DESPAWN_M) and (v.can_virtualize(far.soldiers, eyes, Virtualizer.DESPAWN_M) or v._seen(far.soldiers, eyes)),
+		"an allied group stays real within %.0f m of a player and may go virtual past it" % Virtualizer.DESPAWN_M)
+	check(v.server_virtualize(far, true) and Virtualizer.is_virtual(far), "an allied group goes into a profile like any other")
+	_drop(near)
+	# The live cap: a stand-in BigZoneStreaming (this zone doesn't stream; only its counts are read).
+	var bzs := BigZoneStreaming.new()
+	bzs.process_mode = Node.PROCESS_MODE_DISABLED
+	level.add_child(bzs)
+	bzs._spec = BigZoneStreaming.spec()
+	(far.virtual as Dictionary).pos = _away((Virtualizer.FORCE_M + Virtualizer.SPAWN_M) * 0.5, 0.7)
+	eyes = v._eyes(level)
+	bzs.live_soldiers = 0
+	var free_wakes := v._wake_due(far, eyes) or v.spots_seen(v.spawn_spots(far), eyes.players)
+	bzs.live_soldiers = int(bzs._spec.live_soldiers)
+	var capped := v._wake_due(far, eyes)
+	(far.virtual as Dictionary).pos = _away(Virtualizer.FORCE_M * 0.5, 0.7)
+	var forced := v._wake_due(far, eyes)
+	check(free_wakes and not capped and forced and not BigZoneStreaming.at_cap(null, false),
+		"at the cap (%d live) a profile %.0f m off waits, one inside %.0f m comes back regardless; below the cap it comes back as before" % [bzs.live_soldiers,
+		(Virtualizer.FORCE_M + Virtualizer.SPAWN_M) * 0.5, Virtualizer.FORCE_M])
+	bzs.queue_free()
+	_drop(far)
+	await _frames(2)

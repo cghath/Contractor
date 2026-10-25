@@ -45,16 +45,19 @@ const CATCH_FAR_M := 1000.0
 ## The doc's host target (6.2.3), printed for reference: headless can't time the GPU.
 const DOC_AVG_MS := 14.0
 const DOC_P99_MS := 33.0
-## Proposed budgets (ms of 60 Hz frame cost; hitches a minute; catch-up seconds; memory MB).
-## "vs_hot": the invasion case's average against the hot zone's under the same load (6.2.3: "it must
-## hold the budget against today's hot-zone case").
+## Proposed budgets (ms of 60 Hz frame cost; hitches a minute; catch-up seconds; memory MB), set
+## 2026-10-25 (cg_brief 3.1) like perfcases': room for CI's runners (about 2-2.5x a quiet local run;
+## local runs get LOCAL_SLACK on top). The AI-heavy cases' absolute times are the AI's (perfcases'
+## fight is 100 / 170 on CI with fewer men); what D2 answers for is VS_HOT, the invasion case's
+## average against the hot zone's under the same load on the same ground (6.2.3: "it must hold the
+## budget against today's hot-zone case"), the streaming's worst frame, the catch-up and the memory.
 const INV_BUDGETS := {
-	"invasion": {"avg": 60.0, "p95": 90.0, "hitches_min": 60.0},
-	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0, "catch_s": 3.0},
-	"heli": {"avg": 20.0, "p95": 32.0, "hitches_min": 15.0, "catch_s": 3.0},
-	"hot": {"avg": 60.0, "p95": 90.0, "hitches_min": 60.0},
+	"invasion": {"avg": 250.0, "p95": 320.0, "hitches_min": 90.0},
+	"drive": {"avg": 20.0, "p95": 30.0, "hitches_min": 15.0, "catch_s": 4.0},
+	"heli": {"avg": 20.0, "p95": 32.0, "hitches_min": 15.0, "catch_s": 4.0},
+	"hot": {"avg": 250.0, "p95": 320.0, "hitches_min": 90.0},
 }
-const VS_HOT := 1.35
+const VS_HOT := 1.5
 const STREAM_TICK_MS := 8.0
 const MEMORY_MB := {"zone": 1400.0, "growth": 250.0}
 

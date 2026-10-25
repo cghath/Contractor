@@ -314,6 +314,9 @@ func missing_near(pos: Vector3, radius_m: float) -> int:
 
 
 func _on_node_added(n: Node) -> void:
+	if n is GeometryInstance3D:
+		_limit_new(n as GeometryInstance3D)
+		return
 	if not level.is_ancestor_of(n):
 		return
 	if n is Vehicle or (n is Soldier and n.get_parent() == level.players):
@@ -326,9 +329,27 @@ func _on_node_added(n: Node) -> void:
 
 # --- Far drawing ------------------------------------------------------------------------------
 
-## Soldiers new to the zone first, then each again every DRAW_AGAIN_S (gear and stand-ins come and
-## go), at most DRAW_PER_SCAN a scan; every vehicle without its far box.
-const DRAW_AGAIN_S := 10.0
+## A mesh that comes later to a soldier or a vehicle (gear, a weapon drawn, a stand-in, a hatch)
+## gets its draw distance at once, as the scans gave its owner's others.
+func _limit_new(g: GeometryInstance3D) -> void:
+	if g.has_meta(&"far_proxy"):
+		return
+	var p := g.get_parent()
+	for k in 12:
+		if p == null or p == level:
+			return
+		if p is Soldier or p is Vehicle:
+			var range_m := float(_spec.get("soldier_draw_m", 1500.0)) if p is Soldier else float(_spec.get("vehicle_proxy_m", 1200.0))
+			(func() -> void:  # (after its own _ready, which may set a range of its own)
+				if is_instance_valid(g) and (g.visibility_range_end <= 0.0 or g.visibility_range_end > range_m):
+					g.visibility_range_end = range_m).call_deferred()
+			return
+		p = p.get_parent()
+
+
+## Soldiers new to the zone first, then each again every DRAW_AGAIN_S (a mesh that comes later is
+## limited as it comes: _limit_new), at most DRAW_PER_SCAN a scan; every vehicle without its far box.
+const DRAW_AGAIN_S := 30.0
 const DRAW_PER_SCAN := 12
 
 
