@@ -91,7 +91,7 @@ func _ready() -> void:
 	await _test_copse_frames(level, scatter)
 	await _test_dense_normal()
 	check(Campaign.section(Contracts.SECTION).is_empty() and Contracts.board().is_empty(),
-		"nothing went into the campaign (no contracts section, no board)")
+		"nothing went into the campaign (no contracts section, no board): %s" % [JSON.stringify(Campaign.section(Contracts.SECTION)).left(600)])
 	_finish()
 
 

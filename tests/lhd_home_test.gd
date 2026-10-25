@@ -53,9 +53,9 @@ func _say(text: String) -> void:
 
 func _wait_until(cond: Callable, timeout: float) -> bool:
 	var deadline := Time.get_ticks_msec() + int(timeout * 1000.0)
-	while not cond.call() and Time.get_ticks_msec() < deadline:
+	while is_inside_tree() and not cond.call() and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
-	return cond.call()
+	return is_inside_tree() and cond.call()  # (out of the tree: see _run_client)
 
 
 func _cheapest(pool: Array) -> Dictionary:
@@ -288,6 +288,8 @@ func _run_client() -> void:
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
 	var followed := await _wait_until(func() -> bool: return CompoundLevel.current(self) is LhdLevel and BaseHub.campaign_running, 30.0)
+	if not is_inside_tree():
+		return  # a first join's session ended (slow CI) and Main reloaded the scene: the reloaded test joins again and checks
 	check(followed, "a plain Join follows the host aboard the LHD, in campaign mode")
 	var ship := CompoundLevel.current(self) as LhdLevel
 	if ship:

@@ -245,7 +245,13 @@ func _start_campaign() -> void:
 				cheapest = c
 		if not cheapest.is_empty():
 			BaseHub.server_hire(String(cheapest.cid))
-	_team = Roster.ids(BaseHub.roster())
+	# (the hires only: a new campaign's two standing high command detachments are on the roster too)
+	var standing := Heroes.detachment_members(BaseHub.roster())
+	_team.assign(Roster.ids(BaseHub.roster()).filter(func(mid: String) -> bool: return mid not in standing))
+	# They stay home: this is the player squad's loop (high_command_test has theirs), and out in
+	# the zone they'd be "Leaving behind" at every extraction
+	for did: String in Heroes.detachments(BaseHub.roster()):
+		Heroes.set_home(BaseHub.roster(), did, true)
 	Campaign.save_campaign()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
@@ -309,6 +315,9 @@ func _mission(type: String) -> String:
 		return "no offer taken from the board"
 	var c := Contracts.contract(cid)
 	var title := String(c.title)
+	if heli and bool((DayNight.WEATHER.get(String(c.get("weather", "")), {}) as Dictionary).get("grounds", false)):
+		print("    (the heli contract rolled %s, which grounds aircraft: flown in clear)" % c.weather)
+		c.erase("weather")  # the insertion is what's tested; a storm walks the squad in instead
 	if not await _deploy(cid, squad, heli):
 		return "the deployment didn't start"
 	if heli and not await _heli_insert(squad):
@@ -353,6 +362,7 @@ func _mission(type: String) -> String:
 	# B-18: the HVT's phone goes out in the hold of the pool's M-ATV, not on the player.
 	var stow: Array = [&"intel_phone"] if type == "hvt_capture" else []
 	var cash_before := Economy.cash()
+	var ledger_before := Economy.ledger().duplicate(true)  # a captured leader's bounty is paid beside the debrief (Bounties)
 	var stash_before := BaseArmory.counts(BaseHub.stash())
 	var stash_before_all := _with_contents(BaseHub.stash())
 	var bills := [0]
@@ -392,8 +402,13 @@ func _mission(type: String) -> String:
 	else:
 		check(pay > 0 and ledger_has, "pay credited: $%s (completion $%s + bonuses %s), in the ledger" % [
 			DebriefCalc.money(pay), DebriefCalc.money(line.get("completion", 0)), (line.get("bonuses", []) as Array).map(func(b: Dictionary) -> String: return "%s $%s" % [b.text, DebriefCalc.money(b.amount)])])
-	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0),
-		"the bank moved by what the debrief paid ($%s, bills $%s)" % [DebriefCalc.money(debrief.totals.paid_now), DebriefCalc.money(bills[0])])
+	var bounty := 0  # an HVT capture's leader on the bounty list: his bounty, paid on top of the debrief's pay
+	for e: Dictionary in Economy.ledger():
+		if String(e.get("what", "")).begins_with(Bounties.LEDGER_BOUNTY + ":") and not ledger_before.has(e):
+			bounty += int(e.amount)
+	check(Economy.cash() == cash_before + int(debrief.totals.paid_now) + bounty - bills[0] - (debrief.expenses as Array).reduce(func(a: int, l: Dictionary) -> int: return a + (int(l.amount) if bool(l.charge) else 0), 0),
+		"the bank moved by what the debrief paid ($%s, bounty $%s, bills $%s; $%s -> $%s)" % [DebriefCalc.money(debrief.totals.paid_now), DebriefCalc.money(bounty), DebriefCalc.money(bills[0]),
+			DebriefCalc.money(cash_before), DebriefCalc.money(Economy.cash())])
 	check(Contracts.history().any(func(h: Dictionary) -> bool: return h.cid == cid and h.outcome == "completed"), "the contract closes as completed in the history")
 	if not stow.is_empty():
 		var pool_id := String(out.get("pool_id", ""))
@@ -871,8 +886,12 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 	var body_items := {}
 	var put_body: Soldier = null
 	if deposit:
+		var held := player.inventory.hands
 		player._server_drop.rpc_id(1, &"primary")
 		await _frames(3)
+		if held != &"" and player.inventory.slots[&"primary"] != &"":
+			player._server_drop.rpc_id(1, &"primary")  # what was in hands (the raid's charge, a grenade) went down first
+			await _frames(3)
 		deposited_ok = player.inventory.slots[&"primary"] == &""
 		var body := _hostile_body()  # and a dead hostile brought to the point
 		put_body = body
@@ -897,6 +916,7 @@ func _extract(bring: Array, cargo: Array, left: String, deposit: bool, stow: Arr
 				is_instance_valid(put_body.ragdoll), bp.y, (level as ZoneLevel).ground_point(bp).y if level is ZoneLevel else 0.0]
 		else:
 			where_deposit += "the body brought there is gone"
+		where_deposit += "; primary %s, hands %s" % [player.inventory.slots[&"primary"], player.inventory.hands]
 		for n: Node in get_tree().get_nodes_in_group(WorldItem.GROUP):
 			var item := n as WorldItem
 			if item and item.item_id == &"m4a1":

@@ -11,6 +11,24 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### The high command reds: base_zone, loop, forest, story, lhd_home (integrate/cg-oct24, v0.6.0)
+
+Red on CI since high command C2 (b066b9ed, two standing squads) and the mission UI pass; local
+R2578 and R2579 PASS.
+
+- **Fixed:** the map's briefing screen started a contracts campaign and rolled a board on a host
+  with none (the Experimental forest): asking `Contracts.contract` for the held contract does that
+  lazily. It now asks only when the host has a contracts campaign (forest's "nothing went into the
+  campaign").
+- **Tests:** base_zone picks one of the player's own men (a standing detachment's "deploy with
+  their high command squad"); loop counts its hires without the standing detachments, counts a
+  captured leader's bounty in the bank check (as base_test does), drops again when the first drop
+  only emptied the hands, and flies its heli contract in clear weather if it rolled a grounding
+  storm; loop and story leave the standing detachments home (out in the zone they're "Leaving
+  behind" at every extraction and crossing, by design: high_command_test covers them);
+  lhd_home's client stops quietly when a first join's session ends and Main reloads the scene
+  (slow CI), instead of running on out of the tree into script errors.
+
 ### Operation zones of about 8 km: combined arms D1 + D2 (cg_brief queue item 3.1, ops/zones)
 
 The big government operations get their ground: 8,192 m zones made fresh from the contract zones

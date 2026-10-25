@@ -209,7 +209,9 @@ func _test_crossings() -> void:
 	if out_point.is_empty():
 		return
 	var to := String(out_point.to)
-	var pick := BaseHub.server_pick(Roster.ids(BaseHub.roster())[0], true) if not Roster.ids(BaseHub.roster()).is_empty() else "no roster"
+	# (one of the player's own men: the standing detachments' deploy with their high command squad)
+	var own := Roster.ids(BaseHub.roster()).filter(func(mid: String) -> bool: return not Heroes.in_detachment(BaseHub.roster(), mid))
+	var pick := BaseHub.server_pick(own[0], true) if not own.is_empty() else "no roster"
 	check(pick == "" or pick.contains("already"), "a squadmate picked to come along (%s)" % pick)
 	extraction.countdown_s = 0.5
 	var me := base.players.get_node(^"1") as Soldier

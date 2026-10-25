@@ -166,7 +166,10 @@ func show_briefing(briefing: Briefing) -> void:
 	_title.text = String(c.get("title", "Contract")) + ("  " + "*".repeat(stars) if stars > 0 else "")
 	_summary.text = String(c.get("summary", ""))
 	# The held contract behind the briefing (its pay, intel, conditions...), else the briefing's own.
-	var held := Contracts.contract(String(c.get("id", ""))) if String(c.get("id", "")) != "" else {}
+	# (a host with no contracts campaign, as in a test zone, has none held: asking would start one
+	# and roll a board on the spot)
+	var no_campaign := Contracts.is_host() and Campaign.section(Contracts.SECTION).is_empty()
+	var held := Contracts.contract(String(c.get("id", ""))) if String(c.get("id", "")) != "" and not no_campaign else {}
 	for child in _glance.get_children():
 		_glance.remove_child(child)
 		child.queue_free()

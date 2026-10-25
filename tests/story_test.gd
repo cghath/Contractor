@@ -54,6 +54,10 @@ func _run() -> void:
 	Roles.local_choice = Roles.TEAM_LEADER
 	BaseHub.local_profile = "host_profile"
 	BaseHub.new_campaign(SEED)
+	# The standing high command detachments stay home: out in the zone they'd be "Leaving behind"
+	# at every crossing on (the story's walk-on); high_command_test covers them
+	for did: String in Heroes.detachments(BaseHub.roster()):
+		Heroes.set_home(BaseHub.roster(), did, true)
 	Campaign.save_campaign()
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
