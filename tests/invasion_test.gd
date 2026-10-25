@@ -59,7 +59,7 @@ const INV_BUDGETS := {
 }
 const VS_HOT := 1.6
 const STREAM_TICK_MS := 8.0
-const MEMORY_MB := {"zone": 1400.0, "growth": 250.0}
+const MEMORY_MB := {"zone": 1400.0, "growth": 150.0}
 ## The operation zone hosted (generated: ground, water, roads, scatter, modules; its visuals) within
 ## this long (s; 17 s locally with the scatter laid out afresh).
 const HOST_S := 45.0
@@ -519,5 +519,5 @@ func _summary() -> void:
 	if _mem.has("zone"):
 		check(float(_mem.zone) - float(_mem.start) <= float(MEMORY_MB.zone) * k, "the operation zone and its visuals take %.0f MB of static memory (Proposed budget %.0f)" % [float(_mem.zone) - float(_mem.start), float(MEMORY_MB.zone) * k])
 	var peak := maxf(float(_mem.get("drive_peak", 0.0)), float(_mem.get("heli_peak", 0.0)))
-	if peak > 0.0 and _mem.has("zone"):
-		check(peak - float(_mem.zone) <= float(MEMORY_MB.growth) * k, "driving and flying across the zone grows memory %.0f MB at most (Proposed budget %.0f: the rings and cells free behind)" % [peak - float(_mem.zone), float(MEMORY_MB.growth) * k])
+	if peak > 0.0 and _mem.has("drive_start"):  # (from the drive's start: the invasion load's men and vehicles are gone by then)
+		check(peak - float(_mem.drive_start) <= float(MEMORY_MB.growth) * k, "driving and flying across the zone grows memory %.0f MB at most (Proposed budget %.0f: the rings and cells free behind)" % [peak - float(_mem.drive_start), float(MEMORY_MB.growth) * k])
