@@ -11,6 +11,61 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Operation contracts: combined arms D3 (cg_brief queue item 3.2 (D3), ops/contracts)
+
+The big government jobs can be taken and fought. A belligerent employer at war posts an operation
+contract on its front: the company joins its battlegroup in an 8 km operation zone, fights it phase
+by phase beside the allied commander, and is paid as each phase is done. The result moves the war.
+Design: docs/combined_arms.md 6.1, 6.3, 6.5, 6.6 and 3.5; numbers Proposed (data/operations.json);
+calls D3-1 to D3-20 in docs/combined_arms.md section 10 and under "Calls made" in
+docs/audits/followups.md. Closes F-286; follow-ups F-288 to F-293.
+
+#### Added
+- **Operation contracts.** US forces post a phased invasion on their front (Contracts'
+  operation offers; their factions.json `operation_types`). It covers the front's zone and up to two
+  neighbouring zones the target holds, in an 8 km zone made for it. It needs the employer at
+  trusted (30) to sign. Vessmark keeps D7's stand-in until its types (D5) are built. The armoured
+  thrust, beach landing, seize crossing and hold town types are in the data but not posted yet.
+- **Phases.** Four phase lines (PL COPPER, the outposts; BRASS, the crossing; IRON, the town;
+  STEEL, the HQ and the depth), each with a time limit, a pay share, the allied objectives and the
+  company's own task: seize the MSR checkpoint, the bridge (and keep it standing for a bonus), the
+  town centre, the HQ. A phase is done when its task and its required allied objectives are. It
+  stalls at 1.5 x its limit, and the operation stops there.
+- **The allied and enemy commanders run it.** The friendly side's commander gets an operation plan
+  made from the phases. It moves on as objectives fall, sends its reserve, and falls back to the
+  last line it held when it withdraws. The enemy's commander defends the sites band by band.
+- **The order of battle comes out by the front.** Allied rifle squads, Bradley sections and an
+  Abrams reserve start at H-hour. The enemy's roamers, QRFs, AT teams, gun teams, mortar team and
+  light armour come out when a player is 0.6-2.6 km from them and nobody can see the spot, two men
+  a frame, within the live caps. Waves come in on the enemy's side of the front, teams slip in
+  behind it, and IEDs lie along the MSR.
+- **The front.** The zone is 32 x 32 cells of 256 m, each held by a side. A cell flips where one
+  side has twice the other's presence for a minute and no garrison of the other stands. Cells
+  flip at once as objectives fall. A phase done takes everything short of its line, and a
+  withdrawal gives back everything past the last line held. The front is saved, replicated (a
+  late joiner gets it whole) and drawn as a line on everyone's map.
+- **The operation strip on the HUD** (top right, over the objectives): the operation, each
+  phase's state, the clock against the limit, the company's task and how far the front has come.
+- **Pay by phase.** 20% on signing. Each phase pays its share of the rest into the bank when it's
+  done (one ledger line each), with its bonuses (fast, low allied losses, allied asks answered, no
+  civilians hurt, the bridge kept) and penalties (late, friendly fire). The debrief shows it phase
+  by phase, outcome completed, partial or failed, and pays nothing twice. Company vehicles lost
+  are half reimbursed.
+- **The war hears it.** The phases done go to the living war (WorldSites): carried, the covered
+  zones change hands; half or more moves the front there. The debrief says which zones moved.
+- **For D4 and D5.** `Operations.register_type(type, data, hooks)` and its hooks (phases, start,
+  tick, phase_begun, phase_done, task, pay, h_hour), the objective kinds seize_site, hold_line and
+  keep_intact, and `Operations.make_offer` with a type.
+- **The `operations` suite** (two processes: host and late joiner), in run_tests.sh and CI.
+
+#### Changed
+- Contracts: an operation is signed with its 20% advance (`Operations.deal`). Its debrief is
+  written phase by phase (`Operations.debrief_into`) and the completion already paid is taken off.
+  The war hears the phases done. A held operation's covered zones are in the war snapshot.
+- The objectives panel makes room for whatever sits above it in the HUD's top-right corner.
+- The economy sim plays an operation phase by phase through the real pay, and skips offers the
+  company can't sign.
+
 ### Operation zones of about 8 km: combined arms D1 + D2 (cg_brief queue item 3.1, ops/zones)
 
 The big government operations get their ground: 8,192 m zones made fresh from the contract zones

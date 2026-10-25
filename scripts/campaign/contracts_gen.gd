@@ -21,7 +21,7 @@ extends RefCounted
 ##   it is after (factions.json "leaders": its next one still free), "" when none.
 
 ## Keys only the host knows until the threat is revealed.
-const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
+const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated", "enemy_oob"]  # (enemy_oob: an operation's, D3)
 ## Proposed: how far off intel can be at no accuracy (_intel_fog): the share of the count, and
 ## the quality (0-1) either way.
 const INTEL_COUNT_ERROR := 0.7
@@ -556,6 +556,8 @@ static func public_view(contract: Dictionary) -> Dictionary:
 	if not contract.get("revealed", false):
 		for key: String in HIDDEN_KEYS:
 			view.erase(key)
+	if view.get("op_run") is Dictionary:
+		(view.op_run as Dictionary).erase("oob")  # an operation's groups where they wait, enemy ones too (D3): the host's
 	return view
 
 

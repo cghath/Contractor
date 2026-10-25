@@ -1568,7 +1568,13 @@ in a profiled local run; "ai" in FrameCost). The columns start at the FOB, besid
 operation zone and away from it in the hot zone, which likely accounts for some of it. The budget
 holds it to VS_HOT (1.6x); spreading SquadAI's work (F-261's idea) helps both.
 
-### F-286 (open, D3 hook; cg_brief 3.2): what an operation contract needs from the zone
+### F-286 (done 2026-10-25, ops/contracts, cg_brief 3.2): what an operation contract needs from the zone
+Used as written: `Operations` (scripts/campaign/operations.gd) hosts the zone from
+`ZoneDef.generate_operation` (MissionRegistry.zone_def answers for "op_<seed>"), places its phases
+and OOB by the def's "op" (bands, MSR, crossings, town, HQ, depth, FOB) with `OperationGen.band_at`,
+`along` and `band_range`, lines `FrontGrid`'s 32 x 32 cells of 256 m up with the zone, spawns by the
+front within `BigZoneStreaming.at_cap`, and sets the def's controller to the target as WorldSites
+has it when it offers the operation. What was:
 D3 can host an operation zone as any zone (`ZoneDef.generate_operation(seed, op_type, covers)`,
 then the level switch's def). Its layout is in the def's "op": the bands, the axis, `msr`
 (points) and `msr_roads` (road indices), `laterals`, `route` (the truss route), `fords`, `start`,
@@ -1586,6 +1592,50 @@ zone code passed on runs 40161930345 and 40163881923 and locally (R0676), and pr
 armour/drive's and claude/ai-driving's runs. Nothing in cg_brief 3.1 touches ZoneAnimals or its
 sync in a normal zone. Measuring the client's position against the host's at the same packet (or
 the slack from the packet's age) would take the runner's speed out of it.
+
+### F-288 (open, D4; cg_brief 3.3): the allies' fires and the attached armour aren't used yet
+An operation contract carries its `allied_fires` (phased invasion: 40 mortar and 24 artillery
+rounds) and `attached` vehicles (2 Abrams under the company's orders) from data/operations.json,
+shown in the brief, but nothing fires the rounds or brings the tanks out: the allied commander's
+fire jobs (B4) and the attached-vehicle handover are D4's (6.4.1, 6.4.2). Operations keeps both on
+the contract for them.
+
+### F-289 (open, D3 follow-up): a saved operation's live groups come back fresh
+`Operations._store` keeps each live OOB group's men still up, its vehicles not wrecked and its
+lead's position on the contract (op_run.oob), so a loaded save brings them back there by the same
+rules (pending, then out as the front and the players allow). Their wounds, ammunition and the
+vehicles' damage aren't kept: they come back whole. The Virtualizer's own save of them is off
+(`v_nosave`), so they aren't twice in the world; keeping a profile's members (Virtualizer's
+records) would take their state along.
+
+### F-290 (open, D3 follow-up): taken off-screen, a site costs the allies nothing real
+Call D3-6: a site nobody has been near falls once the allies have twice its expected garrison
+round it for the flip time; `overrun_loss_share` (34%) of that garrison is counted against the
+allies in the phase's record (the low-losses bonus reads it), but no profile or live group loses
+the men. Taking them from the nearest friendly profile's members (Virtualizer) would make the
+front's numbers honest.
+
+### F-291 (open, D3 follow-up): the front on the map is one line
+The front grid draws on the map as one blue line marker ("Front", intel channel) along the far
+edge of the friendly cells. 6.3's arrows for the main and alternate axes, the cells shaded by
+side, and the high command map's own drawing of it aren't built. The view (`Operations.view`)
+and the grid on every peer have what they need.
+
+### F-292 (open, D3 follow-up): no trucks or medevac in the OOB
+The friendly OOB is rifle squads, mechanised sections and an armour reserve; the enemy's is
+roamers, QRFs, AT and gun teams, a mortar team and a light armour reserve. 6.2.2's logistics (fuel
+and ammunition trucks, medevac) aren't in it: no system resupplies an AI group in the field yet,
+and an empty truck would only add to the live cap.
+
+### F-293 (note, B2): hooks into the commander, none made inside Captain's files
+D3 drives B2 only through its public API: `SideCommand.install(level, side, plan)`,
+`server_register(squad, kind, callsign, record)`, `withdrawn`, `advance()`, and on OperationPlan
+`phase`, `started`, `taken`, `taken_by`, `reserve`, `start_phase()` and `withdraw()`; DefencePlan
+from the enemy's sites with their band as `line`. The hostile commander's picture is fed from
+Alert's contact reports as EnemyCommand's is. Nothing in side_command.gd, operation_plan.gd,
+hot_zone_policy.gd, defence_plan.gd, squad_ai.gd, tactics.gd or squad.gd changed. Worth a hook
+later (Captain's side): OperationPlan saying when a phase's objectives are seized (D3 polls `taken`
+each tick) and the plan's own time limits reading the contract's (D3 passes them in the spec).
 
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
@@ -1960,3 +2010,18 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.1 (D2-13): CI runs the same 8 km zone and cases, for perfcases' CI_MEASURE_SHARE of the time | it loads in ~15 s headless here; a smaller stand-in would test less | a smaller zone on CI
 2026-10-25 | cg_brief 3.1: far drawing scans soldiers new to the zone first and each again every 10 s, 12 a scan (BigZoneStreaming DRAW_AGAIN_S, DRAW_PER_SCAN) | the WIP walked every soldier's meshes every 2 s | once per soldier only (gear and stand-ins that come later stay unlimited)
 2026-10-25 | cg_brief 3.1: hooks for D3 left, not built: the def's "op" (bands, MSR and its road indices, laterals, route, fords, start, FOB, town or city, HQ, depth target), OperationGen.band_at/along/across, BigZoneStreaming.at_cap and its live counts (F-286) | 3.2 is D3's | building the front grid now
+2026-10-25 | cg_brief 3.2 (D3-1): operation types in data/operations.json with an `offer` flag; the employer's factions.json `operation_types` names what it posts | an operation is phases, OOBs and a front, not one mission type; D4/D5 flip a flag | entries in contracts.json mission_types
+2026-10-25 | cg_brief 3.2 (D3-2): US forces post the phased invasion only; Vessmark keeps D7's stand-in operation | the other types' mechanics are D4/D5's | posting every type with stand-in mechanics
+2026-10-25 | cg_brief 3.2 (D3-3): an operation covers its front's zone and up to two neighbours the target holds; its zone `op_<seed>` is generated from the contract on asking and cached, controller the target from WorldSites | one seed, the same zone everywhere and after a load | saving the def with the contract
+2026-10-25 | cg_brief 3.2 (D3-4): pay = type base ($320,000 phased invasion) x difficulty_pay x op_pay_mult; 20% on signing whatever the terms; the rest by phase share 20/25/25/30% | 6.5 | the terms' advance points
+2026-10-25 | cg_brief 3.2 (D3-5): phase bonuses and penalties as shares of the phase's pay (fast +10%, low allied losses +5%, asks answered +2% each to +10%, clean, bridge kept +10%, late -20%, friendly fire -5% each and -1 rep), never below nothing | 6.5's list; a good phase pays about a third more | flat sums
+2026-10-25 | cg_brief 3.2 (D3-6): unvisited sites fall off-screen at 2x the expected garrison for the flip time, 34% of it counted as allied losses (F-290) | the allies take ground the players never see | spawning every site's fight
+2026-10-25 | cg_brief 3.2 (D3-7): a phase is done with its required task and required allied objectives; it stalls at side_command phase_fail_share x its limit and the operation stops, what's done paid | B2's own stall rule | the company going on alone
+2026-10-25 | cg_brief 3.2 (D3-8, D3-9): friendly fire counts players' incidents only; the debrief outcome completed / partial / failed, partial +2 rep at half or more | the AI's mistakes aren't the company's; a partial push still did work | every incident; success or failure only
+2026-10-25 | cg_brief 3.2 (D3-10, D3-11): the front is 32 x 32 cells of 256 m, cycled every 10 s, a cell weighing its 3 x 3 and flipping at 2x for 60 s with no defending garrison standing; objectives falling flip their cells, a phase consolidates behind its line, a withdrawal gives back past the last line held | 6.3 | each cell alone; presence only
+2026-10-25 | cg_brief 3.2 (D3-12, D3-13): OOB out by the front (friendly at H-hour, enemy 600-2,600 m from a player and unseen, two men a frame, held at the live caps); waves of 6 every 7 min (3 a phase) on enemy cells near the main objective; a 50% team behind the front every 15 min | 6.2.3's caps; 6.3's reinforcements from the enemy's side | everyone at once; fixed spawn points
+2026-10-25 | cg_brief 3.2 (D3-15, D3-16): the run saved on the contract (op_run: clock, phases, pay, front, OOB where it stands); peers ask for the whole run and grid, then get flipped cells and the view every 10 s | one save with the campaign; small and in step | a zone save; the whole grid each time
+2026-10-25 | cg_brief 3.2 (D3-17): the HUD's operation strip in the top-right corner over the objectives (the objectives panel shrinks for what's above it) | where a player looks for what to do | a banner at the top
+2026-10-25 | cg_brief 3.2 (D3-19): budgets 0.2 ms a front cycle for the zone's own load (~0.13 ms measured), 0.6 ms for a 160-group fight, 1 ms the whole cycle, 0.3 ms the strip, 3x allowed in the test | GDScript costs ~0.4 ms for the fight load, every 10 s | 0.2 ms for any load
+2026-10-25 | cg_brief 3.2 (D3-20): the operations suite plays the invasion with a small OOB of its own via register_type | the full OOB would take the suite past CI's time | the data's OOB
+2026-10-25 | cg_brief 3.2: no hooks in Captain's commander files (side_command, operation_plan, hot_zone_policy, defence_plan) or in squad_ai, tactics, squad; D3 uses B2's public API only (F-293) | the brief: public API first | one-line hooks

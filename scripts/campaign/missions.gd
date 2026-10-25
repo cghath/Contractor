@@ -160,6 +160,8 @@ static func zones() -> Array:
 static func zone_def(zone_id: String) -> Dictionary:
 	if _zone_defs.has(zone_id):
 		return _zone_defs[zone_id]
+	if zone_id.begins_with(Operations.ZONE_PREFIX):
+		return Operations.zone_def(zone_id)  # an operation contract's 8 km zone (combined_arms D3; cached there)
 	var raw: Dictionary = {}
 	for z: Dictionary in data().get("zones", []):
 		if z.zone_id == zone_id:

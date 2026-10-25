@@ -80,8 +80,16 @@ const KILL_HVT := "kill_hvt"
 const DESTROY_WRECK := "destroy_wreck"
 const OVERWATCH := "overwatch"
 const FIRE_TARGET := "fire_target"
+## An operation's company tasks (docs/combined_arms.md 6.3, D3; Operations plays them and marks them):
+## - SEIZE_SITE: no hostile left within "radius" of "pos" (a garrison not out yet counts) and the
+##   company there for the run's seize_hold_s;
+## - HOLD_LINE: the front's cell at "pos" ours with no hostile within "radius", "hold_s" in all;
+## - KEEP_INTACT: the bridge at "pos" standing when its phase is done; failed when a span drops.
+const SEIZE_SITE := "seize_site"
+const HOLD_LINE := "hold_line"
+const KEEP_INTACT := "keep_intact"
 const KINDS: Array[String] = [CLEAR_AREA, EXTRACT_ITEM, DELIVER_HVT, DESTROY_CACHE, CONVOY, HOLD_POINT, RESCUE_CREW, RECON_SITE, UNDETECTED, DESTROY_VEHICLES,
-	KILL_HVT, DESTROY_WRECK, OVERWATCH, FIRE_TARGET]
+	KILL_HVT, DESTROY_WRECK, OVERWATCH, FIRE_TARGET, SEIZE_SITE, HOLD_LINE, KEEP_INTACT]
 ## The breaching charge item that destroys a cache when placed on it.
 const CHARGE_ITEM := &"breaching_charge"
 const POLL_S := 0.5

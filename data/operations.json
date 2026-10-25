@@ -1,0 +1,133 @@
+{
+	"_note": "Operation contracts (docs/combined_arms.md 6.1, 6.3-6.6, 3.5; phase D3, cg_brief queue item 3.2; Operations, FrontGrid). Each type: 'offer' (posted on the board now: D4 and D5 turn on theirs when they build their mechanics), 'base_pay' (6.5, before the rating's difficulty_pay, the employer tier's pay_mult and an employer's 'op_pay_mult'), 'days' (campaign days), 'h_hour' ('now', 'player': waits for the company to cross the line of departure, 'dawn': D5's beach landing), 'phases' (2-4: a name, the band whose far end is its phase 'line', 'limit_min', 'pay_share', the allied 'objectives' and the company's 'company_task'), the OOBs and the allied fires. A site selector ('at', or an entry of 'objectives'): {'site': module id, or '@town', '@hq', '@depth', '@fob'}, {'crossing': 'msr'|'route'|'ford'} (where that crossing meets the river), or {'band', 'types', 'max'} (the band's sites of those types, nearest the MSR first). Company task kinds: seize_site, keep_intact (a bridge span standing), hold_line ('hold_s' with the ground ours). OOB entries: 'kind' (a GroupBoard kind), 'groups' (a count, or [min, max]), 'men' a group, 'vehicles' (models; their crew from 'crew'), 'at' (a selector, else 'bands' to spread over), 'callsign', 'kit' (friendly: a Kits id; hostile: 'rifles', 'at', 'mg'), 'reserve' (held back as the side's reserve), 'wave' (friendly: arrives at the start edge this many minutes after H-hour). All Proposed.",
+	"advance_share": 0.2,
+	"trusted_rep": 30,
+	"covers_max": 3,
+	"names": {
+		"first": ["IRON", "COLD", "GREY", "SILENT", "BROKEN", "NORTHERN", "HOLLOW", "BRIGHT", "STONE", "WINTER", "LONG", "RED"],
+		"second": ["LANCE", "TIDE", "HAMMER", "GATE", "RIDGE", "HARVEST", "LANTERN", "FURROW", "WARDEN", "BELL", "COMPASS", "ORCHARD"]
+	},
+	"phase_lines": ["PL COPPER", "PL BRASS", "PL IRON", "PL STEEL"],
+	"_pay_note": "6.5: each phase pays its 'pay_share' of the completion pay (the pay less the advance) when it's done, with its bonuses and penalties (shares of that phase's pay): done in under 'fast_share' of its limit 'fast_bonus'; allied losses in it under 'low_losses_share' of the allied OOB 'low_losses_bonus'; 'coop_bonus' an allied ask answered in it (RequestBroker), up to 'coop_max'; no civilian casualty in it, contracts.json 'clean_bonus_share'; done past its limit 'late_penalty'; each friendly-fire incident in it 'ff_penalty' (and 'ff_rep' with the employer). Company vehicles (the motor pool's) lost on it are 'indemnity_share' reimbursed at the debrief. Reputation at the debrief: every phase done contracts.json 'rep_success', at least half 'rep_partial', fewer 'rep_fail'.",
+	"pay": {"fast_share": 0.6, "fast_bonus": 0.1, "low_losses_share": 0.15, "low_losses_bonus": 0.05, "coop_bonus": 0.02, "coop_max": 0.1,
+		"late_penalty": 0.2, "ff_penalty": 0.05, "ff_rep": -1, "indemnity_share": 0.5, "rep_partial": 2},
+	"_run_note": "The run in the zone (Operations): the clock and phases checked every 'tick_s'; the phase stalls (the operation stops, what's left unpaid) at side_command.json phase_fail_share x its limit. A seize_site is taken with no hostile left within its radius and one of ours there for 'seize_hold_s'; a site in a cell the allies hold by 'overrun_ratio' x its expected garrison's CP for the front's flip time, never visited by a player, is taken off-screen and the allies lose 'overrun_loss_share' of its garrison in men. 'crossed_m': past the start band's end by this, a player has crossed the line of departure. The OOB comes out 'spawn_men_frame' men a frame while the live caps (BigZoneStreaming) allow, enemy groups only once a player is within 'spawn_near_m' of them and none within 'spawn_far_m' or in sight; the enemy's reinforcements every 'reinforce_s' while a phase runs ('reinforce_men' a group, at most 'reinforce_max' a phase), on its side of the front at least spawn_far_m from every player, out of sight; an infiltrator team ('infiltrator_men') behind the front at most every 'infiltrator_s' with 'infiltrator_chance'. 'ied_count' IEDs on the MSR in the enemy's bands.",
+	"run": {"tick_s": 1.0, "seize_hold_s": 60.0, "seize_radius_m": 70.0, "overrun_ratio": 2.0, "overrun_loss_share": 0.34, "crossed_m": 60.0,
+		"spawn_men_frame": 2, "spawn_near_m": 2600.0, "spawn_far_m": 600.0, "reinforce_s": 420.0, "reinforce_men": 6, "reinforce_max": 3,
+		"infiltrator_s": 900.0, "infiltrator_chance": 0.5, "infiltrator_men": 4, "ied_count": 4, "sync_s": 10.0, "save_s": 30.0},
+	"_front_note": "The front (6.3, FrontGrid): 'cells' x 'cells' of 'cell_m' over the zone, recomputed every 'cycle_s'. A cell's presence by side is the CP of its groups (live and virtual, and the OOB still to come) in it and its eight neighbours, and the sites held in it (a site's expected garrison while it stands, 'site_cp' a man). A cell flips when the attacker's presence is 'flip_ratio' x the defender's for 'flip_s' and no defending garrison is left in it. At the start the friendly side holds the cells short of the start band's far end (and the sea). A phase done consolidates every cell short of its line with no enemy presence; the side's withdrawal gives back every cell past the last line it held with none of ours in it. Budget: 'budget_ms' a cycle for the zone's own load, 'budget_fight_ms' for a 160-group fight along the front, 'budget_gather_ms' for the whole cycle in the zone (gathering the presence and the sites, the overrun, the marker) (the test allows 'budget_slack' x each on a loaded machine).",
+	"front": {"cells": 32, "cell_m": 256.0, "cycle_s": 10.0, "flip_ratio": 2.0, "flip_s": 60.0, "site_cp": 1.0, "man_cp": 1.0, "vehicle_cp": 4.0,
+		"budget_ms": 0.2, "budget_fight_ms": 0.6, "budget_gather_ms": 1.0, "budget_slack": 3.0},
+	"_hud_note": "The operation strip (OperationStrip, the HUD's top-right zone above the objectives): the operation's name, each phase's state, the current one's clock against its limit, the company's task and the front. Budget 'budget_ms' a refresh, every 'refresh_s'.",
+	"hud": {"refresh_s": 0.5, "budget_ms": 0.3},
+	"types": {
+		"phased_invasion": {
+			"name": "Phased invasion", "offer": true, "built": "D3", "base_pay": 320000, "days": 2, "h_hour": "now",
+			"brief": "A four-phase invasion down the main supply route: the outposts, the crossing, the town, then the HQ and the depth target. The company fights beside the allied battlegroup with its own task in each phase and is paid as each phase is done.",
+			"phases": [
+				{"name": "PL COPPER", "line": "outposts", "limit_min": 25, "pay_share": 0.2,
+				 "objectives": [{"site": "cp_msr", "required": true}, {"band": "outposts", "types": ["outpost", "checkpoint"], "max": 3}],
+				 "company_task": [{"kind": "seize_site", "at": {"site": "cp_msr"}, "text": "Seize the checkpoint on the MSR at {grid}"}]},
+				{"name": "PL BRASS", "line": "crossing", "limit_min": 25, "pay_share": 0.25,
+				 "objectives": [{"crossing": "msr", "required": true, "label": "the MSR bridge"}, {"site": "cp_bridge"}, {"band": "crossing", "types": ["outpost"], "max": 1}],
+				 "company_task": [{"kind": "seize_site", "at": {"crossing": "msr"}, "radius": 90, "text": "Seize the bridge on the MSR at {grid}"},
+					{"kind": "keep_intact", "at": {"crossing": "msr"}, "optional": true, "bonus_share": 0.1, "text": "Bonus: keep the bridge at {grid} standing"}]},
+				{"name": "PL IRON", "line": "town", "limit_min": 30, "pay_share": 0.25,
+				 "objectives": [{"site": "@town", "required": true, "town": true}, {"band": "town", "types": ["outpost", "checkpoint", "village"], "max": 2}],
+				 "company_task": [{"kind": "seize_site", "at": {"site": "@town"}, "radius": 120, "text": "Clear the centre of the town at {grid}"}]},
+				{"name": "PL STEEL", "line": "depth", "limit_min": 30, "pay_share": 0.3,
+				 "objectives": [{"site": "@hq", "required": true}, {"site": "@depth"}, {"band": "depth", "types": ["qrf_base", "comms"], "max": 2}],
+				 "company_task": [{"kind": "seize_site", "at": {"site": "@hq"}, "radius": 90, "text": "Seize the HQ compound at {grid}"}]}
+			],
+			"friendly_oob": [
+				{"kind": "rifle_squad", "groups": 6, "men": 8, "callsign": "Saber", "kit": "allied_us"},
+				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 6, "callsign": "Hammer", "kit": "allied_us"},
+				{"kind": "armour_section", "groups": 2, "vehicles": ["abrams", "abrams"], "crew": 4, "men": 0, "callsign": "Iron", "kit": "allied_us", "reserve": true}
+			],
+			"enemy_oob": [
+				{"kind": "rifle_squad", "groups": [3, 4], "men": 4, "bands": ["outposts", "crossing", "town"], "callsign": "Roamer", "kit": "rifles"},
+				{"kind": "qrf", "groups": 2, "vehicles": ["technical"], "crew": 2, "men": 4, "at": {"band": "depth", "types": ["qrf_base"], "max": 2}, "callsign": "Rider", "kit": "rifles"},
+				{"kind": "at_team", "groups": [2, 3], "men": 3, "bands": ["crossing", "town"], "callsign": "Spear", "kit": "at"},
+				{"kind": "gun_team", "groups": 2, "men": 3, "bands": ["crossing", "town"], "callsign": "Anvil", "kit": "mg"},
+				{"kind": "weapons_team", "groups": 1, "men": 3, "at": {"site": "@hq"}, "callsign": "Mortar", "kit": "rifles"},
+				{"kind": "light_armour", "groups": 1, "vehicles": ["technical_dshk", "technical_spg9", "technical_spg9"], "crew": 2, "men": 0, "at": {"site": "@hq"}, "callsign": "Hornet", "kit": "rifles", "reserve": true}
+			],
+			"allied_fires": {"mortar": 40, "artillery": 24},
+			"attached": [{"model": "abrams", "count": 2, "built": "D4"}]
+		},
+		"armoured_thrust": {
+			"name": "Armoured thrust", "offer": false, "built": "D4", "base_pay": 220000, "days": 1, "h_hour": "player",
+			"brief": "Ride with an allied armoured column down the axis through its blocking positions to the depth target, fast: the whole thrust has 45 minutes. The company is the column's infantry screen.",
+			"phases": [
+				{"name": "PL COPPER", "line": "outposts", "limit_min": 12, "pay_share": 0.3,
+				 "objectives": [{"site": "cp_msr", "required": true}], "company_task": [{"kind": "seize_site", "at": {"site": "cp_msr"}, "text": "Clear the blocking position at {grid}"}]},
+				{"name": "PL BRASS", "line": "town", "limit_min": 15, "pay_share": 0.3,
+				 "objectives": [{"site": "@town", "required": true, "town": true}], "company_task": [{"kind": "seize_site", "at": {"site": "@town"}, "radius": 120, "text": "Clear the AT threat in the town at {grid}"}]},
+				{"name": "PL IRON", "line": "depth", "limit_min": 18, "pay_share": 0.4,
+				 "objectives": [{"site": "@depth", "required": true}], "company_task": [{"kind": "seize_site", "at": {"site": "@depth"}, "radius": 150, "text": "Seize the depth target at {grid}"}]}
+			],
+			"friendly_oob": [
+				{"kind": "armour_section", "groups": 2, "vehicles": ["abrams", "abrams"], "crew": 4, "men": 0, "callsign": "Iron", "kit": "allied_us"},
+				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 6, "callsign": "Hammer", "kit": "allied_us"}
+			],
+			"enemy_oob": [
+				{"kind": "at_team", "groups": [3, 4], "men": 3, "bands": ["outposts", "town"], "callsign": "Spear", "kit": "at"},
+				{"kind": "qrf", "groups": 2, "vehicles": ["technical"], "crew": 2, "men": 4, "bands": ["town", "depth"], "callsign": "Rider", "kit": "rifles"}
+			],
+			"allied_fires": {"artillery": 18},
+			"attached": [{"model": "bradley", "count": 2, "built": "D4"}]
+		},
+		"beach_landing": {
+			"name": "Beach landing", "offer": false, "built": "D5", "base_pay": 280000, "days": 2, "h_hour": "dawn",
+			"brief": "Land from the LHD in AAVs at dawn, seize the beach exits and the harbour, then hold the beachhead against the counterattack.",
+			"phases": [
+				{"name": "PL COPPER", "line": "start", "limit_min": 20, "pay_share": 0.35,
+				 "objectives": [{"band": "outposts", "types": ["outpost", "checkpoint"], "max": 2, "required": true}], "company_task": [{"kind": "seize_site", "at": {"site": "cp_msr"}, "text": "Seize the beach exit at {grid}"}]},
+				{"name": "PL BRASS", "line": "outposts", "limit_min": 25, "pay_share": 0.35,
+				 "objectives": [{"band": "outposts", "types": ["village"], "max": 1, "required": true}], "company_task": [{"kind": "seize_site", "at": {"band": "outposts", "types": ["village"], "max": 1}, "radius": 120, "text": "Seize the coastal village at {grid}"}]},
+				{"name": "PL IRON", "line": "outposts", "limit_min": 15, "pay_share": 0.3,
+				 "objectives": [], "company_task": [{"kind": "hold_line", "at": {"site": "cp_msr"}, "radius": 150, "hold_s": 900, "text": "Hold the beachhead at {grid} for 15 minutes"}]}
+			],
+			"friendly_oob": [{"kind": "rifle_squad", "groups": 4, "men": 8, "callsign": "Saber", "kit": "allied_us"}],
+			"enemy_oob": [{"kind": "rifle_squad", "groups": [3, 4], "men": 4, "bands": ["outposts"], "callsign": "Roamer", "kit": "rifles"},
+				{"kind": "gun_team", "groups": 2, "men": 3, "bands": ["outposts"], "callsign": "Anvil", "kit": "mg"}],
+			"allied_fires": {"artillery": 24, "naval": 12},
+			"attached": []
+		},
+		"seize_crossing": {
+			"name": "Seizing a crossing", "offer": false, "built": "D5", "base_pay": 180000, "days": 1, "h_hour": "player",
+			"brief": "Take the concrete bridge intact and hold both banks while the armour crosses. Its charges are wired to a firing point on the far bank.",
+			"phases": [
+				{"name": "PL COPPER", "line": "outposts", "limit_min": 20, "pay_share": 0.3,
+				 "objectives": [{"site": "cp_msr", "required": true}], "company_task": [{"kind": "seize_site", "at": {"site": "cp_msr"}, "text": "Close on the bridge: take the checkpoint at {grid}"}]},
+				{"name": "PL BRASS", "line": "crossing", "limit_min": 20, "pay_share": 0.4,
+				 "objectives": [{"crossing": "msr", "required": true, "label": "the bridge"}, {"site": "cp_bridge", "required": true}],
+				 "company_task": [{"kind": "seize_site", "at": {"crossing": "msr"}, "radius": 90, "text": "Seize the bridge at {grid} and both banks"},
+					{"kind": "keep_intact", "at": {"crossing": "msr"}, "optional": true, "bonus_share": 0.4, "text": "Bonus: the bridge at {grid} intact"}]},
+				{"name": "PL IRON", "line": "crossing", "limit_min": 10, "pay_share": 0.3,
+				 "objectives": [], "company_task": [{"kind": "hold_line", "at": {"crossing": "msr"}, "radius": 200, "hold_s": 600, "text": "Hold the crossing at {grid} for 10 minutes"}]}
+			],
+			"friendly_oob": [{"kind": "rifle_squad", "groups": 2, "men": 8, "callsign": "Saber", "kit": "allied_vm"},
+				{"kind": "armour_section", "groups": 1, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 0, "callsign": "Iron", "kit": "allied_vm", "reserve": true}],
+			"enemy_oob": [{"kind": "rifle_squad", "groups": [2, 3], "men": 4, "bands": ["crossing", "town"], "callsign": "Roamer", "kit": "rifles"},
+				{"kind": "engineers", "groups": 1, "men": 2, "at": {"site": "cp_bridge"}, "callsign": "Fuse", "kit": "rifles"}],
+			"allied_fires": {"mortar": 24},
+			"attached": []
+		},
+		"hold_town": {
+			"name": "Holding a town", "offer": false, "built": "D5", "base_pay": 160000, "days": 1, "h_hour": "now",
+			"brief": "The town has just been taken. The company is its garrison with an allied platoon: ten minutes to prepare, then hold the centre against two or three waves.",
+			"phases": [
+				{"name": "PL COPPER", "line": "town", "limit_min": 10, "pay_share": 0.2,
+				 "objectives": [], "company_task": [{"kind": "hold_line", "at": {"site": "@town"}, "radius": 150, "hold_s": 600, "text": "Prepare the defence of the town at {grid}"}]},
+				{"name": "PL BRASS", "line": "town", "limit_min": 35, "pay_share": 0.8,
+				 "objectives": [], "company_task": [{"kind": "hold_line", "at": {"site": "@town"}, "radius": 150, "hold_s": 1800, "text": "Hold the town centre at {grid} against the counterattack"}]}
+			],
+			"friendly_oob": [{"kind": "rifle_squad", "groups": 3, "men": 8, "callsign": "Saber", "kit": "allied_vm"},
+				{"kind": "mech_infantry", "groups": 1, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 0, "callsign": "Hammer", "kit": "allied_vm"}],
+			"enemy_oob": [{"kind": "rifle_squad", "groups": [4, 6], "men": 5, "bands": ["depth"], "callsign": "Roamer", "kit": "rifles"}],
+			"allied_fires": {"mortar": 30},
+			"attached": []
+		}
+	}
+}
