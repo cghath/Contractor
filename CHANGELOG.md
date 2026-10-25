@@ -1417,6 +1417,14 @@ Closes the list items "mission types: HVT kill with proof, crash site / black bo
   door, the compound's shed, sight through thick and thin smoke and through a doorway, thinning,
   wind, a frag's hole refilling, rounds parting it, purple, the same cloud from the same seed (for a
   late joiner, and after an event that arrived late), and the cost of eight clouds at once.
+### Docs brought up to date with the build (cghath, 2026-10-20)
+
+#### Changed
+- `docs/feature_comparison.md` 11.2: ALiVE-style virtualization is built, not only designed.
+- `docs/contractor_design_doc.md`, player death: the default kit, the marker and the respawn pool
+  are built (it still said the build respawns players at the gate with full gear).
+- `docs/ui_audit.md`: the gamepad layout and pad wheel (wave 7) and the automatic UI scale are
+  noted where the audit said there were none.
 
 ### Water: rivers, streams, lakes and bridges (cghath's brief, queue item 1.1)
 
