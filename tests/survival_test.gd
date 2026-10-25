@@ -22,6 +22,8 @@ func _ready() -> void:
 	await _test_new_world()
 	if level != null and player != null:
 		_test_needs()
+		await _test_dead()
+		await _test_melee()
 		await _test_death()
 		await _test_save_and_continue()
 	_finish()
@@ -44,7 +46,7 @@ func _test_new_world() -> void:
 		return
 	for i in 240:  # a few seconds of the zone running: modules stream in, anything that spawns would
 		await get_tree().process_frame
-	var living := level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and not (s as Soldier).vitals.is_dead())
+	var living := level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and not (s as Soldier).vitals.is_dead() and s.faction != ZombieAI.INFECTED)
 	check(living.is_empty(), "nobody living holds or walks the zone: no garrisons, patrols or squad bots (%d)" % living.size())
 	var have := Survival.kit_of(player.inventory).map(func(e: Dictionary) -> String: return String(e.id))
 	check(have.has("knife") and have.has("water_bottle") and have.has("canned_meat") and not have.has("m4a1"),
@@ -79,6 +81,107 @@ func _test_needs() -> void:
 	n.hunger = 80.0
 	Survival.server_drain(player, 1.0)
 	player.vitals.server_reset_health()
+
+
+func _test_dead() -> void:
+	print("The dead")
+	player.server_end_spawn_protection()
+	await _wait_for(func() -> bool: return not Survival.zombies(level).is_empty(), 12.0)
+	var near := Survival.zombies(level)
+	check(not near.is_empty() and near.all(func(z: Soldier) -> bool: return z.global_position.distance_to(player.global_position) >= Survival.SPAWN_MIN_M - 8.0),
+		"the dead come about a survivor, out of reach and out of sight (%d; want %d here)" % [near.size(), Survival.dead_near(level, player.global_position)])
+	for z: Soldier in Survival.zombies(level):
+		z.queue_free()
+	await get_tree().process_frame
+	Survival._pop = -1000.0  # (no more for now: the test sets its own)
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	# Hearing: one behind him, far off, goes to a shot.
+	var far := Survival.server_spawn_zombie(level, level.ground_point(player.global_position - fwd * 90.0))
+	await get_tree().physics_frame
+	Survival.server_noise(player, player.global_position, ZombieAI.SHOT_HEARD_M)
+	var brain := ZombieAI.of(far)
+	check(brain != null and brain.mode == ZombieAI.Mode.INVESTIGATE and brain.goal.distance_to(player.global_position) < 2.0,
+		"one 90 m off hears a shot and goes to where it was (%s)" % [ZombieAI.Mode.keys()[brain.mode] if brain else "no brain"])
+	far.queue_free()
+	# Sight, the chase and the bite.
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 12.0))
+	var blood := player.vitals.blood_fraction()
+	var wounds_before := player.vitals.wound_list().size()
+	var bit := await _wait_for(func() -> bool: return player.vitals.blood_fraction() < blood or player.vitals.wound_list().size() > wounds_before, 20.0)
+	brain = ZombieAI.of(z)
+	check(brain != null and brain.mode == ZombieAI.Mode.CHASE and brain.target == player, "one 12 m in front sees him and comes for him")
+	check(bit, "and gets to him and bites (blood %.3f -> %.3f)" % [blood, player.vitals.blood_fraction()])
+	# The head kills; the body wears the pool down.
+	z.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
+	check(z.vitals.is_up(), "a round in the chest doesn't stop it (pool %.1f)" % z.vitals.undead_pool)
+	z.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "energy_j": 400.0})
+	check(z.vitals.is_dead(), "one in the head does")
+	var tough := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 30.0))
+	await get_tree().physics_frame
+	for i in 12:
+		if tough.vitals.is_dead():
+			break
+		tough.vitals.server_hit(Vitals.ABDOMEN, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
+	check(tough.vitals.is_dead(), "enough in the body puts it down too (%s)" % tough.vitals.last_cause.get("cause", "?"))
+	check(Survival.thinned(z.global_position) > 0.0, "and every kill thins the dead about there (%.2f)" % Survival.thinned(z.global_position))
+	player.vitals.server_reset_health()
+
+
+func _test_melee() -> void:
+	print("Melee: block, parry, counter, dodge")
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var z := Survival.server_spawn_zombie(level, player.global_position + fwd * 1.0)
+	await get_tree().physics_frame
+	z.process_mode = Node.PROCESS_MODE_DISABLED  # (the test drives it)
+	z.look_at(player.global_position, Vector3.UP)
+	z.rotation.x = 0.0
+	player.look_at(z.global_position, Vector3.UP)
+	player.rotation.x = 0.0
+	var blood := player.vitals.blood_fraction()
+	var front := Melee.target_in_front(z)
+	check(front == player, "the bite has him in front of it (%s; %.2f m, z faces %s, to him %s)" % [front, z.global_position.distance_to(player.global_position),
+		-z.global_basis.z, (player.global_position - z.global_position).normalized()])
+	# A parry: the block comes just before the bite lands.
+	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s)" % float(Melee.ZOMBIE_ATTACK.windup))
+	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) - 0.1)
+	Melee.server_block(player, true)
+	await _seconds(0.2)
+	check(Melee.staggered(z) and is_equal_approx(player.vitals.blood_fraction(), blood), "a block raised just before it lands parries: it staggers, nothing gets through (now %.2f; his guard %s; its %s; winding %s)" % [
+		Soldier._now(), Melee.guard_of(player), Melee.guard_of(z), z.get_meta(&"melee_winding", "landed")])
+	var counter_ready := Soldier._now() < float(Melee.guard_of(player).counter_until)
+	check(counter_ready, "and the parry opens a counter")
+	var pool := z.vitals.undead_pool
+	Melee.server_attack(player, {"windup": 0.6, "round_class": Vitals.PISTOL, "energy_j": 300.0, "parts": [Vitals.CHEST], "name": "knife"})
+	check(z.vitals.undead_pool < pool, "the counter lands at once, twice as hard (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
+	Melee.server_block(player, false)
+	# A block held long before: a jolt gets through.
+	await _seconds(Melee.STAGGER_S)
+	Melee.server_block(player, true)
+	await _seconds(0.5)
+	Melee.server_attack(z, Melee.ZOMBIE_ATTACK)
+	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) + 0.1)
+	check(not Melee.staggered(z), "a block held a while just blocks (no parry)")
+	Melee.server_block(player, false)
+	# A dodge: nothing lands.
+	player.vitals.server_reset_health()
+	blood = player.vitals.blood_fraction()
+	Melee.server_attack(z, Melee.ZOMBIE_ATTACK)
+	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) - 0.15)
+	check(Melee.server_dodge(player), "a dodge, for stamina")
+	await _seconds(0.3)
+	check(is_equal_approx(player.vitals.blood_fraction(), blood), "and the bite misses")
+	z.queue_free()
+	player.vitals.server_reset_health()
+
+
+func _seconds(s: float) -> void:
+	await get_tree().create_timer(s).timeout
 
 
 func _test_death() -> void:

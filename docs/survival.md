@@ -1,5 +1,30 @@
 # Survival: an open world, persistent, overrun
 
+## Where the build is (handoff 2026-10-25 ~09:00 CDT, at the 5-hour limit)
+
+Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`, from integrate/cg-oct24 841f0ff0).
+- **S1 done** (182e519f, survival suite R2592 PASS): menu Survival new world / continue, `Survival` autoload
+  (world save `survival_<world>`, clock -> DayNight, hunger/thirst via Consumables' water/ration doses, slower
+  stamina low, blood loss empty, death drops everything where he fell (no cleanup in survival) + starter kit,
+  survivors' kit/needs saved), `SurvivalLevel` (no garrisons/patrols/US/skirmish/bots), HUD Food/Water line.
+- **S2 mostly done** (next commit): `ZombieAI` (idle/hear/see/chase/search, walkers + 15% runners, night
+  faster and blinder), `Vitals.undead` (head/face kill, else a hit-point pool), `CompoundLevel._make_zombie`
+  (grey civilian on every peer via the AI spawner), `Survival._populate` (spawn out of view 45-75 m by site
+  density, despawn past 110 m, kills thin a 64 m cell, refill 2 days), shots wake the dead (Soldier ->
+  `Survival.server_noise`). Tested OK: spawning, hearing, chase + bite, headshot, pool, thinning.
+- **S2b melee core** `scripts/survival/melee.gd`: telegraphed attacks (windup), dodge/sidestep i-frames,
+  block (20% through, stamina, heavy breaks it), parry (block within 0.25 s of landing: stagger + 1.2 s
+  counter window, counter instant x2). Zombie bites go through it. Tested OK: windup, held block, dodge.
+- **OPEN BUG (first thing):** survival_test's parry check fails: the bite lands ("melee_winding" gone) but the
+  parry branch isn't taken and the player isn't hurt, so `Melee._land` most likely found no target at land time
+  (`target_in_front` null: the player may move or turn in the windup; the test's zombie has process disabled).
+  Print `target_in_front(attacker)` in `_land`, then fix (maybe lock the victim at windup start and re-check reach).
+- **Then:** regression suites on the S2 tree (R2593 ran mid-edit: loot/medical results void; smoke, world and
+  levelswitch passed), commit/push, then player melee: melee weapons as weapon items tagged "melee"
+  (sidearm one-handed: knife, machete, crowbar; primary two-handed: bat, axe, sledge), MeleeInput (fire = light,
+  hold = heavy, aim = block/parry, dodge key + direction, sidestep), owner -> host RPCs; then S3 crowd/hordes,
+  S4 survivors/companions, S5 crossings, S6 abandoned look, S7.
+
 **Status:** design 2026-10-25, building on `claude/survival`. The Captain's calls (2026-10-25,
 asked with the question tool) are in **Calls**; everything marked Proposed is a default to tune.
 

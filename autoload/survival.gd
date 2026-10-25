@@ -273,6 +273,10 @@ func _process(delta: float) -> void:
 		for s: Soldier in MapNodes.players(level):
 			if s.vitals.is_up() and s.respawn_state != Soldier.RESPAWN_WAITING:
 				server_drain(s, dt)
+	_pop += delta
+	if _pop >= POP_TICK_S:
+		_pop = 0.0
+		_populate(level as SurvivalLevel)
 	if _send >= SEND_S:
 		_send = 0.0
 		for s: Soldier in MapNodes.players(level):
@@ -373,3 +377,151 @@ func server_survivor_joined(s: Soldier) -> void:
 		n.thirst = float((saved.get("needs", {}) as Dictionary).get("thirst", 100.0))
 	s.needs_stamina = stamina_mult_for(float(needs_of(s).hunger), float(needs_of(s).thirst))
 	_send_needs(s)
+
+
+# --- The dead (S2) ------------------------------------------------------------------------
+
+## Proposed: how many of the dead are about a survivor (within SPAWN_MAX_M) by where he is: the
+## open country, or a site of a ZoneModule type (by its base type, ZoneModules.base).
+const DEAD_NEAR := {"": 2, "village": 8, "town": 12, "city": 12, "compound": 6, "outpost": 4, "checkpoint": 4, "hq": 6, "qrf_base": 6, "farm": 4}
+const LIVE_CAP := 40
+const SPAWN_MIN_M := 45.0
+const SPAWN_MAX_M := 75.0
+const DESPAWN_M := 110.0
+const POP_TICK_S := 2.0
+const RUNNER_SHARE := 0.15
+## A cell's dead (CELL_M square) thin with every kill there, by KILL_THIN of its own; it refills
+## over REFILL_DAYS world days.
+const CELL_M := 64.0
+const KILL_THIN := 0.08
+const REFILL_DAYS := 2.0
+
+var _pop := 0.0
+var _zombie_n := 0
+
+
+## Host: how many of the dead belong about `pos` in `level`, by its site and how many have been
+## killed in its cell.
+func dead_near(level: ZoneLevel, pos: Vector3) -> int:
+	var m := level.module_at(pos)
+	var base := ZoneModules.base(String(m.type)) if m else ""
+	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2)))
+	return roundi(n * (1.0 - thinned(pos)))
+
+
+## How much of a cell's dead the survivors have killed off (0 untouched .. 1 cleared), healed by
+## the days since.
+func thinned(pos: Vector3) -> float:
+	var cells: Dictionary = (state().get("thinned", {}) as Dictionary).get(String(state().get("zone", "")), {})
+	var c: Variant = cells.get(_cell_key(pos))
+	if not c is Dictionary:
+		return 0.0
+	var days := (day() + hour() / 24.0) - float(c.at)
+	return clampf(float(c.v) - days / REFILL_DAYS, 0.0, 1.0)
+
+
+func _cell_key(pos: Vector3) -> String:
+	return "%d,%d" % [floori(pos.x / CELL_M), floori(pos.z / CELL_M)]
+
+
+## Host: one of the dead fell at `pos`: its cell thins.
+func _on_zombie_died(s: Soldier) -> void:
+	var zone := String(state().get("zone", ""))
+	var all: Dictionary = state().get("thinned", {})
+	var cells: Dictionary = all.get(zone, {})
+	var now := day() + hour() / 24.0
+	cells[_cell_key(s.global_position)] = {"v": minf(1.0, thinned(s.global_position) + KILL_THIN), "at": now}
+	all[zone] = cells
+	state()["thinned"] = all
+	state()["kills"] = int(state().get("kills", 0)) + 1
+
+
+## The living dead in `level`.
+static func zombies(level: Node) -> Array:
+	var ai: Node = level.get(&"ai") if level else null
+	if ai == null:
+		return []
+	return ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and s.faction == ZombieAI.INFECTED and not s.is_queued_for_deletion() and not (s as Soldier).vitals.is_dead())
+
+
+## Host: the dead about the survivors kept to dead_near: new ones out of sight SPAWN_MIN_M to
+## SPAWN_MAX_M off, those past DESPAWN_M of everyone and after nobody gone (back into the zone).
+func _populate(level: SurvivalLevel) -> void:
+	var live := zombies(level)
+	var players := MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up() and p.respawn_state != Soldier.RESPAWN_WAITING)
+	for z: Soldier in live:
+		var brain := ZombieAI.of(z)
+		if brain and brain.mode == ZombieAI.Mode.CHASE:
+			continue
+		var far := players.all(func(p: Soldier) -> bool: return p.global_position.distance_to(z.global_position) > DESPAWN_M)
+		if far:
+			z.queue_free()
+			live.erase(z)
+	if live.size() >= LIVE_CAP:
+		return
+	for p: Soldier in players:
+		var near := live.filter(func(z: Soldier) -> bool: return z.global_position.distance_to(p.global_position) <= SPAWN_MAX_M).size()
+		if near >= dead_near(level, p.global_position) or live.size() >= LIVE_CAP:
+			continue
+		var at: Variant = _spawn_spot(level, p, players)
+		if at is Vector3:
+			var z := server_spawn_zombie(level, at, "runner" if randf() < RUNNER_SHARE else "walker")
+			if z:
+				live.append(z)
+
+
+## A navmesh spot SPAWN_MIN_M to SPAWN_MAX_M from `p`, at least SPAWN_MIN_M from every survivor
+## and out of their sight (behind them, or something in the way); or null.
+func _spawn_spot(level: SurvivalLevel, p: Soldier, players: Array) -> Variant:
+	var map := level.get_world_3d().navigation_map
+	for i in 6:
+		var a := randf() * TAU
+		var r := randf_range(SPAWN_MIN_M, SPAWN_MAX_M)
+		var want := p.global_position + Vector3(cos(a), 0.0, sin(a)) * r
+		var at := NavigationServer3D.map_get_closest_point(map, want)
+		if at.distance_to(want) > 8.0:
+			continue
+		var ok := true
+		for q: Soldier in players:
+			if q.global_position.distance_to(at) < SPAWN_MIN_M or (_in_view(q, at) and Throwables.clear_line(level.get_world_3d(), q.global_position + Vector3.UP * 1.6, at + Vector3.UP * 1.4)):
+				ok = false
+				break
+		if ok:
+			return at
+	return null
+
+
+## Whether `at` is in front of `p`, where he'd see it come in (within VIEW_DOT of his facing).
+const VIEW_DOT := 0.2
+
+
+static func _in_view(p: Soldier, at: Vector3) -> bool:
+	var to := at - p.global_position
+	to.y = 0.0
+	var fwd := -p.global_basis.z
+	fwd.y = 0.0
+	return to.length() > 0.1 and fwd.normalized().dot(to.normalized()) > VIEW_DOT
+
+
+## Host: one of the dead at `at`.
+func server_spawn_zombie(level: CompoundLevel, at: Vector3, kind := "walker") -> Soldier:
+	_zombie_n += 1
+	var s := level.ai_spawner.spawn({"zombie": true, "kind": kind, "name": "Z%d_%d" % [Time.get_ticks_msec() % 100000, _zombie_n], "pos": at}) as Soldier
+	if s:
+		s.died_for_good.connect(_on_zombie_died)
+	return s
+
+
+## Host: a noise at `pos` (a shot, a door, a car: Soldier's shots) heard by the dead within
+## `radius`.
+func server_noise(source: Node, pos: Vector3, radius: float) -> void:
+	if not running or source == null:
+		return
+	var level := CompoundLevel.current(source)
+	if not level is SurvivalLevel:
+		return
+	for z: Soldier in zombies(level):
+		if z.global_position.distance_to(pos) <= radius:
+			var brain := ZombieAI.of(z)
+			if brain:
+				brain.hear(pos)

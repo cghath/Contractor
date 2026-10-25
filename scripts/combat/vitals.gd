@@ -168,6 +168,12 @@ var _timers_fresh := false     # peer: a pulse (with its countdowns) came since 
 ## Host only: spawn protection (Soldier.respawn_state, after a respawn or while waiting for one):
 ## rounds, impacts, blasts, falls, burns and trauma do nothing.
 var shielded := false
+## Host only: the walking dead (survival's zombies, docs/survival.md S2): no pain, shock or
+## bleeding; a hit to the head or face kills, anything else takes its round's hit points
+## (round_damage) off undead_pool, and it falls for good when that's gone.
+var undead := false
+var undead_pool := 12.0
+const UNDEAD_KILL_PARTS: Array[StringName] = [HEAD, FACE]
 
 
 ## A body part in words: "upper_arm_l" -> "left upper arm", TORSO -> "torso".
@@ -815,6 +821,13 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			"time": Time.get_ticks_msec() / 1000.0}
 	var was_dead := _m().dead  # a corpse still takes holes (BodyDeform), nothing else
 	var round_class := StringName(hit.get("round_class", INTERMEDIATE))
+	if undead:
+		if not was_dead:
+			undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false)))
+			if part in UNDEAD_KILL_PARTS or undead_pool <= 0.0:
+				last_cause = {"cause": "head" if part in UNDEAD_KILL_PARTS else "torn apart"}
+				server_kill()
+		return
 	var channel_in := _rest_channel(part, hit)
 	var entry: Vector3 = channel_in[0]
 	if part == TORSO or not BodyMap.PART_BOXES.has(part):

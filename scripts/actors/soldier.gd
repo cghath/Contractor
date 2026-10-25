@@ -1087,6 +1087,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	CompoundLevel.current(self).show_tracer.rpc(muzzle, launch if launch is Vector3 and round_end is Vector3 else Vector3.ZERO,
 		Ballistics.round_id(Shotguns.shot_item(weapon, shell) if tube else weapon), round_point, suppressed, kind)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
+	Survival.server_noise(self, origin, ZombieAI.SUPPRESSED_HEARD_M if suppressed else ZombieAI.SHOT_HEARD_M)  # survival: the dead hear it
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)
 	SquadAI.server_heard_shot(self, origin, suppressed)  # the other side hears it (and half finds the shooter: Spotting)

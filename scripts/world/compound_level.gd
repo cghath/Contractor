@@ -1151,7 +1151,38 @@ func _names_on(faction: StringName) -> Dictionary:
 const POCKETS := &"pockets"
 
 
+## Survival's dead (docs/survival.md S2), from Survival's spawner: a civilian's clothes and a
+## grey face on every peer; on the host Vitals.undead and a ZombieAI.
+const ZOMBIE_SKIN := "8a9183"
+
+
+func _make_zombie(data: Dictionary) -> Node:
+	var s: Soldier = PLAYER_SCENE.instantiate()
+	s.name = data.name
+	s.spawn_id = String(data.name)
+	s.faction = ZombieAI.INFECTED
+	var look := PersonLook.outfit(Person.CIVILIAN, Person.NEUTRAL, {"name": String(data.name)}).split(":")
+	if look.size() >= 5:
+		look[3] = ZOMBIE_SKIN
+	s.variant = ":".join(look)
+	s.face = SoldierLook.make(SoldierLook.seed_of([data.name, "zombie"]), "insurgent", VoxelArt.MALE, ZOMBIE_SKIN)
+	s.position = data.pos
+	s.set_meta(&"zombie", String(data.get("kind", "walker")))
+	if multiplayer.is_server():
+		var vitals: Vitals = s.get_node(^"Vitals")
+		vitals.undead = true
+		vitals.can_go_down = false
+		vitals.undead_pool = float((ZombieAI.KINDS.get(String(data.get("kind", "walker")), ZombieAI.KINDS.walker) as Dictionary).pool)
+		var brain := ZombieAI.new()
+		brain.name = "ZombieAI"
+		brain.kind = String(data.get("kind", "walker"))
+		s.add_child(brain)
+	return s
+
+
 func _make_soldier(data: Dictionary) -> Node:
+	if bool(data.get("zombie", false)):
+		return _make_zombie(data)
 	var soldier: Soldier = PLAYER_SCENE.instantiate()
 	soldier.name = data.name
 	soldier.spawn_id = String(data.get("spawn_id", data.name))
