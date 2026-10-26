@@ -494,7 +494,9 @@ func _redraw() -> void:
 	var had_focus := focus != null and is_ancestor_of(focus)
 	_tiles.clear()
 	var mass := inv.total_mass()
-	_mass_label.text = "Mass  %.1f kg" % mass
+	var tier := MovementRules.tier_of(mass)
+	_mass_label.text = "Mass  %.1f kg, %s" % [mass, Accessibility.load_text(tier)]  # (call 142: the tier's word, and its mark in the safe mode)
+	_mass_label.add_theme_color_override(&"font_color", Accessibility.load_colour(tier))
 	_mass_bar.value = mass
 	for v: View in _view_buttons:
 		_view_buttons[v].set_pressed_no_signal(v == view)

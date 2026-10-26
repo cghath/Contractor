@@ -87,6 +87,8 @@ static func resolve(ctx: Dictionary) -> Array[Dictionary]:
 			if String(ctx.get("selected", "")) != "gun_team":
 				out.append(_o("gun_here", "Place the gun", "squad", {"cmd": "wt_setup", "point": true}))
 			out.append(_o("check_fire", "Check fire here", "request", {"kind": "check_fire"}))  # every friendly gun into 100 m stops 30 s (combined_arms 4.5)
+			if Survival.running:  # survival: pass the time at a safe spot (call 136)
+				out.append_array(Fieldwork.options({"kind": "wait"}))
 	out = _recent_first(out, kind, ctx.get("recent", recent))
 	out.append(MORE.duplicate())
 	return out

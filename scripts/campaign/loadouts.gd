@@ -181,6 +181,64 @@ static func add_units(t: Dictionary, id: String, n: int) -> Dictionary:
 	return out
 
 
+# --- Into a pouch or a pocket (call 134; the 3D loadout editor) --------------------------------
+# A "box" is a container things go INTO: "vest", "pockets", "backpack" (the template's
+# "containers") or "molle:<point>" (the pouch on that point: its "held"). Inventory's own names,
+# so Inventory.room_for and container_label read them as they are.
+
+## The template's list for box `box` ([] when there's no such box: no pouch on that point).
+static func box_items(t: Dictionary, box: String) -> Array:
+	if box.begins_with(Inventory.MOLLE_PREFIX):
+		var att: Variant = t.get("molle", {}).get(box.trim_prefix(Inventory.MOLLE_PREFIX))
+		return (att as Dictionary).get("held", []) if att is Dictionary else []
+	return t.get("containers", {}).get(box, [])
+
+
+## Units of `id` in box `box`.
+static func box_count(t: Dictionary, box: String, id: String) -> int:
+	var n := 0
+	for it: Dictionary in box_items(t, box):
+		if String(it.id) == id:
+			n += int(it.count)
+	return n
+
+
+## `n` of `id` put INTO box `box` (from the stash when the kit is fitted; Restock.build draws them
+## into that very container). Moving from another box: take_out_of that one first.
+static func put_into(t: Dictionary, box: String, id: String, n := 1) -> Dictionary:
+	var out := _copy(t)
+	if n <= 0 or ItemDB.get_item(StringName(id)) == null:
+		return out
+	if box.begins_with(Inventory.MOLLE_PREFIX):
+		var point := box.trim_prefix(Inventory.MOLLE_PREFIX)
+		if not out.molle.has(point):
+			return out
+		_merge(out.molle[point].held, id, n)
+	elif out.containers.has(box):
+		_merge(out.containers[box], id, n)
+	return out
+
+
+## Up to `n` of `id` out of box `box` (back to the stash). Returns {"template", "removed"}.
+static func take_out_of(t: Dictionary, box: String, id: String, n := 1) -> Dictionary:
+	var out := _copy(t)
+	var list: Array = []
+	if box.begins_with(Inventory.MOLLE_PREFIX):
+		var point := box.trim_prefix(Inventory.MOLLE_PREFIX)
+		if out.molle.has(point):
+			list = out.molle[point].held
+	elif out.containers.has(box):
+		list = out.containers[box]
+	var removed := _take_from(list, id, n)
+	return {"template": out, "removed": removed}
+
+
+## Moves `n` of `id` from box `from` to box `to` in the template.
+static func move_between(t: Dictionary, from: String, to: String, id: String, n := 1) -> Dictionary:
+	var res := take_out_of(t, from, id, n)
+	return put_into(res.template, to, id, int(res.removed))
+
+
 ## Up to `n` fewer of `id` (from the pack, pockets and carrier first, then the pouches; a pouch
 ## taken off leaves what it held in the carrier). Returns {"template", "removed"}.
 static func remove_units(t: Dictionary, id: String, n: int) -> Dictionary:

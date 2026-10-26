@@ -184,6 +184,9 @@ static func options(ctx: Dictionary) -> Array[Dictionary]:
 				out.append(_o("fish", "Fish through the ice"))
 			else:
 				out.append(_o("fish", "Fish"))
+		"wait":  # the ground's own (ContextResolver, call 136): waiting at a safe spot
+			for mode: String in SurvivalSleep.WAIT_MODES:
+				out.append(_o("wait", String(SurvivalSleep.WAIT_LABELS[mode]), mode))
 		"woods":
 			out.append(_o("set_snare", "Set a snare"))
 			out.append(_o("check_snare", "Check the snare"))
@@ -221,6 +224,8 @@ static func server_request(s: Soldier, what: String, arg: String, at: Vector3) -
 			return server_cut_ice(s)
 		"set_snare":
 			return Wildlife.server_set_snare(s)
+		"wait":
+			return Survival.server_wait(s, arg if arg in SurvivalSleep.WAIT_MODES else "hour")
 		"check_snare":
 			var got := Wildlife.server_check_snare(s)
 			return "No snare of yours here" if got == "?" else ""

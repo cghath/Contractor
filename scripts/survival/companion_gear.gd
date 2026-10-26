@@ -199,7 +199,9 @@ static func kit(name: String) -> Dictionary:
 	return kits().get(name, {})
 
 
-## `inv`'s kit as a template: {"worn": {slot: id}, "points": {point: id}, "carry": {id: count}}.
+## `inv`'s kit as a template: {"worn": {slot: id}, "points": {point: id}, "carry": {id: count},
+## "into": {container: {id: count}}} (call 134: what's in each pouch and pocket, so applying the
+## kit fills the same ones).
 static func template_of(inv: Inventory) -> Dictionary:
 	var worn := {}
 	for slot: StringName in Inventory.all_slots():
@@ -211,10 +213,15 @@ static func template_of(inv: Inventory) -> Dictionary:
 		if not att.is_empty():
 			points[String(p.id)] = String(att.id)
 	var carry := {}
+	var into := {}
 	for c: StringName in inv.search_containers():
+		var here := {}
 		for e: Dictionary in inv.containers.get(c, []):
 			carry[String(e.id)] = int(carry.get(String(e.id), 0)) + int(e.get("count", 1))
-	return {"worn": worn, "points": points, "carry": carry}
+			here[String(e.id)] = int(here.get(String(e.id), 0)) + int(e.get("count", 1))
+		if not here.is_empty():
+			into[String(c)] = here
+	return {"worn": worn, "points": points, "carry": carry, "into": into}
 
 
 ## Host: `inv`'s kit saved as `name`. "" or why not.
@@ -271,6 +278,27 @@ static func apply_kit(pool: Inventory, target: Inventory, tpl: Dictionary) -> Di
 			_missing(out, want)
 		else:
 			out.moved = int(out.moved) + 1
+	# What goes INTO each pouch and pocket (call 134): from the pool, or (applying to oneself, or
+	# what the pool lacks) from the target's other containers.
+	var into: Dictionary = tpl.get("into", {})
+	for c: String in into:
+		if not target.containers.has(StringName(c)) or not into[c] is Dictionary:
+			continue
+		for id: String in into[c]:
+			var need := int(into[c][id]) - _count_in(target, StringName(c), StringName(id))
+			while need > 0:
+				var from: Inventory = pool
+				var at := find_stowed(pool, StringName(id)) if pool != target else []
+				if at.is_empty():
+					from = target
+					at = _find_elsewhere(target, StringName(id), StringName(c))
+				if at.is_empty() or transfer(from, "container:" + String(at[0]), int(at[1]), target, "container:" + c) != "":
+					if pool != target and find_stowed(pool, StringName(id)).is_empty() and target.count_of(StringName(id)) < int(tpl.get("carry", {}).get(id, 0)):
+						_missing(out, StringName(id))
+					break
+				if from == pool:
+					out.moved = int(out.moved) + 1
+				need -= 1
 	if pool != target:
 		var carry: Dictionary = tpl.get("carry", {})
 		for id: String in carry:
@@ -283,6 +311,27 @@ static func apply_kit(pool: Inventory, target: Inventory, tpl: Dictionary) -> Di
 				out.moved = int(out.moved) + 1
 				need -= 1
 	return out
+
+
+## Units of `id` in container `c` of `inv`.
+static func _count_in(inv: Inventory, c: StringName, id: StringName) -> int:
+	var n := 0
+	for e: Dictionary in inv.containers.get(c, []):
+		if StringName(String(e.id)) == id:
+			n += int(e.get("count", 1))
+	return n
+
+
+## Where a unit of `id` is in `inv` outside container `not_in`: [container, index], or [].
+static func _find_elsewhere(inv: Inventory, id: StringName, not_in: StringName) -> Array:
+	for c: StringName in inv.search_containers():
+		if c == not_in:
+			continue
+		var list: Array = inv.containers.get(c, [])
+		for i in list.size():
+			if StringName(String(list[i].id)) == id:
+				return [c, i]
+	return []
 
 
 static func _missing(out: Dictionary, id: StringName) -> void:

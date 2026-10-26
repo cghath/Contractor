@@ -248,6 +248,8 @@ static func places_of(inv: Inventory) -> Array:
 static func place_of_marker(key: String) -> String:
 	if key == "pockets":
 		return "container:pockets"
+	if key.begins_with("box:"):  # a container's hotspot (call 134)
+		return "container:" + key.trim_prefix("box:")
 	if key.begins_with("slot:") or key.begins_with("point:"):
 		return key
 	return ""
@@ -256,6 +258,8 @@ static func place_of_marker(key: String) -> String:
 static func marker_of_place(p: String) -> String:
 	if p == "container:pockets":
 		return "pockets"
+	if p.begins_with("container:"):
+		return "box:" + p.trim_prefix("container:")
 	return p if p.begins_with("slot:") or p.begins_with("point:") else ""
 
 

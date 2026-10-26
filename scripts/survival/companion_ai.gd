@@ -105,6 +105,8 @@ func server_step(dt: float) -> void:
 		_slept_where = "ground"
 		if SurvivalSleep.start(body, n, SLEEP_HOURS, _slept_where, false) == "":
 			layer.say(body, "I need to sleep. Wake me if they come.")
+	if SurvivalSleep.is_waiting(n):
+		return  # waiting with the survivor (call 136): no wandering off to loot or plan
 	if calm and _halted() and now - _loot_at >= LOOT_GAP_S:
 		_loot_at = now
 		_pick_up_near()

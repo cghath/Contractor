@@ -29,6 +29,8 @@ var _card_note: Label
 var _picks := {}
 var survivor: SurvivorPicker
 var _start_button: Button
+## Call 139: a warning under the name when a saved world has it already (Start would replace it).
+var name_warning: Label
 
 
 func _init(start: Callable) -> void:
@@ -45,6 +47,11 @@ func _ready() -> void:
 	_name.text = "world %s" % Time.get_datetime_string_from_system().replace(":", "").replace("T", " ")
 	_name.custom_minimum_size = Vector2(320, 0)
 	box.add_child(UiKit.row("Name", _name))
+	name_warning = UiKit.warn("")
+	name_warning.name = "NameWarning"
+	box.add_child(name_warning)
+	_name.text_changed.connect(func(_t: String) -> void: check_name())
+	check_name()
 	_seed = LineEdit.new()
 	_seed.text = str(randi() % 1000000)
 	_seed.custom_minimum_size = Vector2(160, 0)
@@ -92,6 +99,7 @@ func apply_card(text: String) -> String:
 	if c.has("error"):
 		return String(c.error)
 	_name.text = String(c.name)
+	check_name()
 	_seed.text = str(int(c.seed))
 	var opts: Dictionary = c.options
 	for i in GOALS.size():
@@ -109,6 +117,22 @@ func apply_card(text: String) -> String:
 				(_picks[key] as OptionButton).selected = i
 	var missing: Array = c.get("missing_mods", [])
 	return "" if missing.is_empty() else "Imported; made with mods not on here: %s" % ", ".join(PackedStringArray(missing.map(func(m: Variant) -> String: return String(m))))
+
+
+## Shows the duplicate-name warning when a saved world is called this already. Returns it.
+func check_name() -> String:
+	var text := ""
+	if _name and Survival.world_exists(_name.text):
+		text = "A saved world is called that already: Start would start it over. Pick another name, or Continue that one."
+	if name_warning:
+		name_warning.text = text
+		name_warning.visible = text != ""
+	return text
+
+
+func set_world_name(text: String) -> void:
+	_name.text = text
+	check_name()
 
 
 func _import() -> void:

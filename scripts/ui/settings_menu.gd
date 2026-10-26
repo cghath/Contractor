@@ -148,6 +148,7 @@ func _build() -> void:
 	_tabs.add_child(_controls_tab())
 	_tabs.add_child(_keys_tab())
 	_tabs.add_child(_hud_tab())
+	_tabs.add_child(_access_tab())
 
 
 func _page(title: String) -> VBoxContainer:
@@ -208,6 +209,27 @@ func _hud_tab() -> Control:
 		_tabs.current_tab = _tabs.get_tab_count() - 1, "Every HUD part back to full size and opacity")
 	reset.name = "ResetHud"
 	page.add_child(reset)
+	return page.get_parent()
+
+
+## The Accessibility tab (call 142; Accessibility): the colour-blind-safe tells with shapes, the
+## text scale, the tension audio and the subtitles.
+func _access_tab() -> Control:
+	var page := _page("Accessibility")
+	page.add_child(UiKit.hint("Readability for everyone: these apply to Contractor: Fallen's tells and to every menu and HUD line."))
+	page.add_child(_toggle("Colour-blind-safe tells (blue and orange, with shapes)", "access", "colour_safe",
+		"The noise ring, the eye and the load colours in a palette safe for colour blindness, with shapes too: the ring dashed (more dashes, louder), the eye boxed, each load tier its own mark."))
+	page.add_child(_slider("Text size", "access", "text_scale", func(v: float) -> String: return "%d%%" % roundi(v * 100.0), [],
+		"Every menu's and the HUD's text, from 80% to 150% (on top of the Menu and HUD size)."))
+	var tension := CheckBox.new()
+	tension.name = "TensionAudio"
+	tension.text = "Tension audio (the drone and heartbeat when the dead are near; music stays)"
+	tension.tooltip_text = "The near-subliminal bed under the world in Contractor: Fallen. Off mutes it; the music moments still play."
+	tension.button_pressed = Accessibility.tension_audio()
+	tension.toggled.connect(func(on: bool) -> void: Accessibility.set_tension_audio(on))
+	page.add_child(tension)
+	page.add_child(_toggle("Subtitles for every bark and voice line (with the speaker's name)", "access", "subtitles",
+		"A small line at the bottom: who said it and what."))
 	return page.get_parent()
 
 

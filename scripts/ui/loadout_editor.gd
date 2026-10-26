@@ -111,6 +111,7 @@ func _ready() -> void:
 	preview.name = "Preview"
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	preview.slot_clicked.connect(pick_slot)
+	preview.set_drag_forwarding(Callable(), _can_drop_preview, _drop_preview)  # (call 134: drop into a pouch's hotspot)
 	left.add_child(preview)
 	var regions: Array = []
 	for pair: Array in REGION_KEYS:
@@ -364,6 +365,12 @@ func slot_label(key: String) -> String:
 			return "MOLLE point %s: %s" % [parts[1], _name(String(att.get("id", ""))) if not att.is_empty() else "empty"]
 		"pockets":
 			return "Carried: pockets, carrier and pack"
+		"box":
+			var box := key.substr(4)
+			var inv := draft_inventory()
+			var text := "%s: %s" % [inv.container_label(StringName(box)), LoadoutPreview.box_fill(inv, StringName(box))] if inv.containers.has(StringName(box)) else "Nothing to put things in there"
+			inv.free()
+			return text
 	return "Click a marker on the soldier"
 
 
@@ -395,6 +402,9 @@ func choices(key: String) -> Array:
 				ok = not point.is_empty() and Inventory.is_attachable(item) and Inventory.point_types(point).any(func(t: String) -> bool: return t in item.stats.get("attach", []))
 			"pockets":
 				ok = Loadouts.group_of(item) in CARRY_GROUPS and item.slot == &"" and not Inventory.is_attachable(item) and item.type != "weapon"
+			"box":
+				ok = Loadouts.group_of(item) in CARRY_GROUPS and item.slot == &"" and not Inventory.is_attachable(item) and item.type != "weapon" \
+					and inv.room_for(StringName(key.substr(4)), item) >= 1
 		if ok and (owned(String(id)) > 0 or BaseEconomy.item_price(id) > 0):
 			out.append(String(id))
 	inv.free()
@@ -426,7 +436,13 @@ func _build_picker() -> void:
 	var parts := slot_key.split(":")
 	if parts[0] == "pockets":
 		_build_carried()
+	elif parts[0] == "box":
+		_build_box(slot_key.substr(4))
 	elif parts[0] != "pockets":
+		if parts[0] == "point" and draft.molle.has(parts[1]) and Inventory.is_pouch(ItemDB.get_item(StringName(String(draft.molle[parts[1]].id)))):
+			var fill := UiKit.accent_button("Fill this pouch", pick_slot.bind("box:" + Inventory.MOLLE_PREFIX + parts[1]), "What goes INTO this pouch (call 134)")
+			fill.name = "FillPouch"
+			picker_list.add_child(fill)
 		var off := UiKit.button("None: take it off", func() -> void: choose(""), "Leave this slot empty (Del)")
 		off.name = "PickNone"
 		picker_list.add_child(off)
@@ -440,6 +456,9 @@ func _build_picker() -> void:
 		var text := "%s   %s" % [_name(id), ("owned %d" % have) if have > 0 else ("$%d, not owned" % price)]
 		var b := UiKit.button(text, choose.bind(id), LoadoutScreen.item_tooltip(id) + ("" if have > 0 else "\nNot owned: picking it offers to buy it ($%d; cash $%d)" % [price, funds]))
 		b.name = "Pick_" + id
+		if parts[0] == "box" or parts[0] == "pockets":  # drag it onto a pouch or pocket hotspot on the model (call 134)
+			var data := {"lo_item": id}
+			b.set_drag_forwarding(func(_at: Vector2) -> Variant: return data, Callable(), Callable())
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		if have <= 0:
 			b.add_theme_color_override(&"font_color", UiKit.TEXT_DIM)
@@ -465,6 +484,14 @@ func choose(id: String) -> void:
 			next = Loadouts.set_point(draft, parts[1], id)
 		"pockets":
 			next = Loadouts.add_units(draft, id, 1) if id != "" else draft
+		"box":
+			if id == "":
+				return
+			var why := box_problem(slot_key.substr(4), id)
+			if why != "":
+				_say(why)
+				return
+			next = Loadouts.put_into(draft, slot_key.substr(4), id, 1)
 	_offer = id if id != "" and owned(id) <= 0 else ""
 	edit(next)
 	_say("%s%s" % [slot_label(slot_key), "" if _offer == "" else ": not owned, Buy now or Buy missing [B]"])
@@ -511,6 +538,13 @@ func _build_carried() -> void:
 	var medic := UiKit.button("Medic kit", func() -> void: edit(Loadouts.medic_kit(draft)), "The medic role's medical items and pouches")
 	medic.name = "MedicKit"
 	picker_list.add_child(UiKit.button_row([fill, medic]))
+	picker_list.add_child(UiKit.heading("Pouches and pockets"))
+	for b: Dictionary in boxes():
+		var open := UiKit.button("Open", pick_slot.bind("box:" + String(b.box)), "Put things INTO this one, or take them out (call 134)")
+		open.name = "Open_" + String(b.box).replace(":", "_")
+		var row := UiKit.action_row("%s: %s" % [String(b.label), String(b.fill)], [open])
+		row.set_drag_forwarding(Callable(), _can_drop_box, _drop_box.bind(String(b.box)))
+		picker_list.add_child(row)
 	picker_list.add_child(UiKit.hint("Add to what they carry:"))
 
 
@@ -547,6 +581,154 @@ func fit_item(id: String) -> void:
 	choose(id)
 
 
+# --- Into pouches and pockets (call 134) -----------------------------------------------------
+# Every pouch on the carrier or the pack, the carrier's own room, the pack and the pockets are
+# places things go INTO ("box:<container>": Inventory's container names): a square hotspot beside
+# each on the model (LoadoutPreview) and a row in the Carried panel. Picking one lists what's in
+# it (Take out, or drag the row onto another box's hotspot or row) and what fits it (pick, or drag
+# onto a hotspot). The draft's template records the box (Restock: "containers", a point's
+# "held"), so a saved kit and Apply fill the same pouch.
+
+## The draft worn, as an Inventory (free it after).
+func draft_inventory() -> Inventory:
+	var inv := Inventory.new()
+	inv.net_state = GameState.from_json(dressed(draft).duplicate(true))
+	return inv
+
+
+## The boxes on the draft: [{"box", "label", "fill"}], pouches first.
+func boxes() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var inv := draft_inventory()
+	for c: StringName in inv.search_containers():
+		if inv.capacity(c) <= 0.0:
+			continue
+		if Inventory.is_pouch_container(c) and not draft.molle.has(String(Inventory.point_of(c))):
+			continue  # (a pouch the template hasn't placed on a point yet: Apply first)
+		out.append({"box": String(c), "label": inv.container_label(c), "fill": LoadoutPreview.box_fill(inv, c)})
+	inv.free()
+	return out
+
+
+## Why one `id` won't go INTO `box` on the draft ("" when it will).
+func box_problem(box: String, id: String) -> String:
+	var item := ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
+	if item == null:
+		return "Nothing to put in"
+	var inv := draft_inventory()
+	var why := ""
+	if not inv.containers.has(StringName(box)):
+		why = "Nothing to put things in there"
+	elif inv.room_for(StringName(box), item) < 1:
+		why = inv.refusal(item, {}, StringName(box))
+		if why == "":
+			why = "No room for %s in the %s" % [item.name, inv.container_label(StringName(box)).to_lower()]
+	inv.free()
+	return why
+
+
+## One `id` INTO `box` (the drop on a hotspot). "" done, else why not (said too).
+func drop_into(box: String, id: String) -> String:
+	var why := box_problem(box, id)
+	if why != "":
+		_say(why)
+		return why
+	edit(Loadouts.put_into(draft, box, id, 1))
+	_offer = id if owned(id) <= 0 else ""
+	_say("%s into the %s%s" % [_name(id), _box_name(box), "" if _offer == "" else ": not owned, Buy now or Buy missing [B]"])
+	return ""
+
+
+## One `id` out of `box`, back to the stash.
+func take_out(box: String, id: String) -> void:
+	var res := Loadouts.take_out_of(draft, box, id, 1)
+	if int(res.removed) <= 0:
+		return
+	edit(res.template)
+	_say("%s out of the %s" % [_name(id), _box_name(box)])
+
+
+## One `id` from box `from` into box `to`. "" done, else why not.
+func move_between(from: String, to: String, id: String) -> String:
+	if from == to:
+		return ""
+	if Loadouts.box_count(draft, from, id) <= 0:
+		return "Nothing there"
+	var why := box_problem(to, id)
+	if why != "":
+		_say(why)
+		return why
+	edit(Loadouts.move_between(draft, from, to, id, 1))
+	_say("%s moved into the %s" % [_name(id), _box_name(to)])
+	return ""
+
+
+func _box_name(box: String) -> String:
+	var inv := draft_inventory()
+	var text := inv.container_label(StringName(box)).to_lower()
+	inv.free()
+	return text
+
+
+## A box's panel: what's in it (Take out; drag a row onto another box), then what fits.
+func _build_box(box: String) -> void:
+	var held := Loadouts.box_items(draft, box)
+	if held.is_empty():
+		picker_list.add_child(UiKit.hint("Empty. Pick something below, or drag it here or onto the hotspot."))
+	for it: Dictionary in held:
+		var id := String(it.id)
+		var out := UiKit.button("Take out", take_out.bind(box, id), "Back to the stash (or drag it onto another pouch)")
+		out.name = "TakeOut_" + id
+		var row := UiKit.action_row("%s x%d" % [_name(id), int(it.count)], [out])
+		row.name = "Held_" + id
+		var data := {"lo_box": box, "id": id}
+		row.set_drag_forwarding(func(_at: Vector2) -> Variant: return data, Callable(), Callable())
+		picker_list.add_child(row)
+	var zone := UiKit.hint("Drag a row here to take it out; drop one on a pouch's hotspot on the model to move it.")
+	zone.name = "TakeOutZone"
+	zone.mouse_filter = Control.MOUSE_FILTER_STOP
+	zone.set_drag_forwarding(Callable(), func(_at: Vector2, d: Variant) -> bool: return d is Dictionary and (d as Dictionary).has("lo_box"),
+		func(_at: Vector2, d: Variant) -> void: take_out(String(d.lo_box), String(d.id)))
+	picker_list.add_child(zone)
+	picker_list.add_child(UiKit.hint("Put in (what fits):"))
+
+
+func _can_drop_preview(at: Vector2, data: Variant) -> bool:
+	return data is Dictionary and ((data as Dictionary).has("lo_item") or (data as Dictionary).has("lo_box")) and _box_at(at) != ""
+
+
+func _drop_preview(at: Vector2, data: Variant) -> void:
+	drop_on_marker(_box_at(at), data as Dictionary)
+
+
+## The box under `at` on the model: a box hotspot, or a MOLLE point holding a pouch.
+func _box_at(at: Vector2) -> String:
+	var key := preview.key_at(at)
+	if key.begins_with("box:"):
+		return key.substr(4)
+	if key.begins_with("point:") and draft.molle.has(key.substr(6)) and Inventory.is_pouch(ItemDB.get_item(StringName(String(draft.molle[key.substr(6)].id)))):
+		return Inventory.MOLLE_PREFIX + key.substr(6)
+	return ""
+
+
+## A drop of `data` ({"lo_item": id} from the picker, {"lo_box", "id"} from a box's row) into
+## `box`. "" done, else why not.
+func drop_on_marker(box: String, data: Dictionary) -> String:
+	if box == "":
+		return "Not a pouch or a pocket"
+	if data.has("lo_box"):
+		return move_between(String(data.lo_box), box, String(data.id))
+	return drop_into(box, String(data.get("lo_item", "")))
+
+
+func _can_drop_box(_at: Vector2, data: Variant) -> bool:
+	return data is Dictionary and ((data as Dictionary).has("lo_item") or (data as Dictionary).has("lo_box"))
+
+
+func _drop_box(_at: Vector2, data: Variant, box: String) -> void:
+	drop_on_marker(box, data as Dictionary)
+
+
 # --- Stats ------------------------------------------------------------------------------------
 
 func _build_stats() -> void:
@@ -559,7 +741,7 @@ func _build_stats() -> void:
 	grid.add_theme_constant_override(&"h_separation", UiKit.SPACE_M)
 	stats_box.add_child(grid)
 	var rows := [
-		["Weight", "%.1f kg, %s" % [float(st.kg), Loadouts.tier_name(tier)]],
+		["Weight", "%.1f kg, %s%s" % [float(st.kg), (Accessibility.load_shape(tier) + " ") if Accessibility.load_shape(tier) != "" else "", Loadouts.tier_name(tier)]],
 		["Litres", "%.1f of %.1f L" % [float(st.litres_used), float(st.litres)]],
 		["Mobility", "%d%% speed%s" % [roundi(float(st.speed) * 100.0), "" if MovementRules.can_sprint_at(tier) else ", can't sprint"]],
 	]
@@ -574,6 +756,9 @@ func _build_stats() -> void:
 		k.add_theme_color_override(&"font_color", UiKit.TEXT_DIM)
 		grid.add_child(k)
 		var v := UiKit.cell(String(r[1]))
+		if String(r[0]) == "Weight":
+			v.name = "LoadTell"
+			v.add_theme_color_override(&"font_color", Accessibility.load_colour(tier))  # (call 142)
 		v.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(v)

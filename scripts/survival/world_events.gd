@@ -228,6 +228,8 @@ static func begin(m: WorldModel, kind: String, z: String, opts := {}, rng: Rando
 	if bool(opts.get("by_player", false)):
 		e["actor"] = String(opts.get("profile", ""))
 	records(m.w)[str(rec.id)] = rec
+	if Survival.running and z == String(Survival.state().get("zone", "")):
+		SurvivalSleep.server_interrupt_waits("wait_event")  # (call 136: something happening here stops a wait)
 	match kind:
 		"supply_drop":
 			_race(m, rec)

@@ -252,6 +252,7 @@ func anchors() -> Array:
 			_add(torso * Vector3(-0.2, 0.3, 0), "slot:plate_left", "Left side plate", "torso")
 			_add(torso * Vector3(0.2, 0.3, 0), "slot:plate_right", "Right side plate", "torso")
 	_add(torso * Vector3(0, 0.3, 0.3), "slot:backpack", "Pack", "torso")
+	var point_spots := {}  # attach point id -> where its marker is (its pouch's box sits beside it)
 	for p: Dictionary in inventory.attach_points():
 		var on_pack := inventory.point_slot(StringName(p.id)) == &"backpack"
 		var face := String(p.get("face", "front"))
@@ -261,6 +262,7 @@ func anchors() -> Array:
 		var what := ItemDB.get_item(StringName(att.id)).name if not att.is_empty() else "empty"
 		_add(spot.origin, "point:" + String(p.id), "%s point (%s): %s" % [Inventory.POINT_TYPES.get(String(p.get("type", "")), "MOLLE"),
 			"pack" if on_pack else face, what], "torso")
+		point_spots[String(p.id)] = spot.origin
 	for slot: StringName in Inventory.WEAPON_SLOTS:
 		var node: Node3D = (gear._gear.get(slot, [&"", null])[1] if gear else null)
 		var at: Vector3
@@ -286,6 +288,26 @@ func anchors() -> Array:
 				"choke": Vector3(0, 0.0, -length * 0.48)}.get(m, Vector3.ZERO)
 			_add(at + b * local, "mount:%s:%s" % [slot, m], "%s: %s" % [Loadouts.SLOT_NAMES[slot], GearMounts.NAMES.get(m, m)], "weapon")
 	_add(model.global_transform * Vector3(0.12, 0.62, -0.06), "pockets", "Pockets", "legs")
+	# Call 134: the containers things go INTO, each a small hotspot beside its slot ("box:<container>":
+	# a pouch's beside its point, the carrier's, the pack's, the pockets'), labelled with its fill.
+	for c: StringName in inventory.search_containers():
+		if inventory.capacity(c) <= 0.0:
+			continue
+		var at := Vector3.ZERO
+		var where := "torso"
+		if Inventory.is_pouch_container(c):
+			var point := String(Inventory.point_of(c))
+			if not point_spots.has(point):
+				continue
+			at = point_spots[point] + torso.basis * Vector3(0.0, -0.045, -0.03)
+		elif c == &"vest":
+			at = torso * Vector3(-0.12, 0.22, -0.22)
+		elif c == &"backpack":
+			at = torso * Vector3(0.12, 0.18, 0.33)
+		else:
+			at = model.global_transform * Vector3(-0.13, 0.6, -0.07)
+			where = "legs"
+		_add(at, "box:" + String(c), "%s: %s" % [inventory.container_label(c), box_fill(inventory, c)], where)
 	if clothing:
 		var spots := {&"head": [head * Vector3(0.06, 0.24, -0.06), "head"], &"face": [head * Vector3(0, 0.07, -0.13), "head"],
 			&"torso_base": [torso * Vector3(-0.16, 0.12, -0.13), "torso"], &"torso_mid": [torso * Vector3(-0.19, 0.22, -0.12), "torso"],
@@ -295,6 +317,13 @@ func anchors() -> Array:
 			var id := StringName(inventory.slots.get(slot, &""))
 			_add(spots[slot][0], "slot:" + String(slot), "%s: %s" % [Clothing.NAMES.get(slot, String(slot)), ItemDB.get_item(id).name if id != &"" else "nothing"], String(spots[slot][1]))
 	return _anchors
+
+
+## How full container `c` of `inv` is: "2 of 3" (a pouch counting units) or "1.5 of 6.0 L".
+static func box_fill(inv: Inventory, c: StringName) -> String:
+	var pouch: ItemData = inv.pouch_item(c) if Inventory.is_pouch_container(c) else null
+	var units := int(pouch.stats.get("max_units", 0)) if pouch else 0
+	return "%d of %d" % [inv.units_in(c), units] if units > 0 else "%.1f of %.1f L" % [inv.used(c), inv.capacity(c)]
 
 
 func _add(at: Vector3, key: String, label: String, where: String) -> void:
@@ -357,9 +386,15 @@ func _draw_markers() -> void:
 		var hot := String(a.key) == hovered
 		var r := MARK_R * (1.35 if lit or hot else 1.0)
 		var fill := UiKit.ACCENT if lit else (UiKit.ACCENT_HOT if hot else Color(UiKit.TEXT_BRIGHT, 0.85))
-		overlay.draw_circle(at, r + 2.0, UiKit.OUTLINE)
-		overlay.draw_circle(at, r, fill)
-		overlay.draw_circle(at, r * 0.45, UiKit.INK)
+		if String(a.key).begins_with("box:"):  # a container: a small square, not a ring (call 134)
+			var h := r * 0.75
+			overlay.draw_rect(Rect2(at - Vector2(h + 2.0, h + 2.0), Vector2(h + 2.0, h + 2.0) * 2.0), UiKit.OUTLINE)
+			overlay.draw_rect(Rect2(at - Vector2(h, h), Vector2(h, h) * 2.0), fill)
+			overlay.draw_rect(Rect2(at - Vector2(h, h) * 0.4, Vector2(h, h) * 0.8), UiKit.INK)
+		else:
+			overlay.draw_circle(at, r + 2.0, UiKit.OUTLINE)
+			overlay.draw_circle(at, r, fill)
+			overlay.draw_circle(at, r * 0.45, UiKit.INK)
 		if (lit or hot) and font:
 			var text := String(a.label)
 			var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL).x

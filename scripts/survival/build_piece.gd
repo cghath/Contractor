@@ -43,6 +43,13 @@ func apply(p_rec: Dictionary) -> void:
 	_mat.albedo_color = colour
 	var solid := built and bool(def.get("solid", true)) and not open
 	_shape.set_deferred(&"disabled", not solid)
+	# Call 141: a built piece standing solid is baked into the navigation (NavBuilder's obstacles);
+	# a door, gate or hatch isn't (the dead push on it), nor stairs (walked up).
+	var blocks_nav := solid and not bool(def.get("door", false)) and String(def.get("look", "full")) != "steps"
+	if blocks_nav and not is_in_group(NavBuilder.OBSTACLES_GROUP):
+		add_to_group(NavBuilder.OBSTACLES_GROUP)
+	elif not blocks_nav and is_in_group(NavBuilder.OBSTACLES_GROUP):
+		remove_from_group(NavBuilder.OBSTACLES_GROUP)
 	# A door swings a quarter turn about its hinge (the footprint's left edge) when open.
 	_mesh.rotation.y = PI * 0.5 if open else 0.0
 

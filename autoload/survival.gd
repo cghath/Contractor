@@ -149,6 +149,92 @@ func newest_world() -> String:
 	return best
 
 
+## Every saved world, newest first (call 139: Continue's world list): [{"id", "name", "day",
+## "season", "survivor", "generation", "played" (unix time), "played_text"}]. Reads each world's
+## save on disk (not the one in memory).
+func worlds() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var dir := DirAccess.open(Campaign.SAVE_DIR)
+	if dir == null:
+		return out
+	for f: String in dir.get_files():
+		if not f.begins_with(PREFIX) or not f.ends_with(".json"):
+			continue
+		var id := f.trim_prefix(PREFIX).trim_suffix(".json")
+		var path := "%s/%s" % [Campaign.SAVE_DIR, f]
+		var info := world_info(id, JSON.parse_string(FileAccess.get_file_as_string(path)))
+		info["played"] = FileAccess.get_modified_time(path)
+		info["played_text"] = Time.get_datetime_string_from_unix_time(int(info.played) + int(Time.get_time_zone_from_system().get("bias", 0)) * 60, true)
+		out.append(info)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.played) > int(b.played))
+	return out
+
+
+## One world's line in the list from its save `data` (Campaign's JSON; anything else gives the
+## id alone).
+static func world_info(id: String, data: Variant) -> Dictionary:
+	var info := {"id": id, "name": id, "day": 1, "season": "spring", "survivor": "", "generation": 1}
+	if not data is Dictionary or not (data as Dictionary).get("sections") is Dictionary:
+		return info
+	var sections: Dictionary = data.sections
+	var st: Dictionary = sections.get(String(SECTION), {}) if sections.get(String(SECTION)) is Dictionary else {}
+	info["name"] = String(st.get("name", id))
+	info["day"] = int(st.get("day", 1))
+	var opts: Dictionary = st.get("options", {}) if st.get("options") is Dictionary else {}
+	var start := String(opts.get("season", Seasons.START))
+	info["season"] = Seasons.of_day(int(info.day), start if start in Seasons.ALL else Seasons.START)
+	var lineage: Array = st.get(Legacy.KEY, []) if st.get(Legacy.KEY) is Array else []
+	var people: Dictionary = sections.get(String(SURVIVORS), {}) if sections.get(String(SURVIVORS)) is Dictionary else {}
+	for profile: Variant in people:
+		var rec: Variant = people[profile]
+		if rec is Dictionary and String((rec as Dictionary).get("name", "")) != "":
+			info["survivor"] = String(rec.name)
+			info["generation"] = int((rec as Dictionary).get("generation", lineage.size() + 1))
+			break
+	return info
+
+
+## Whether a saved world is called `name` already (New world's warning; the same file name).
+func world_exists(name: String) -> bool:
+	return FileAccess.file_exists("%s/%s%s.json" % [Campaign.SAVE_DIR, PREFIX, _world_id(name)])
+
+
+## The world `id` put away, never deleted (as the campaign's reset: BaseHub.archive_campaign): its
+## save and every zone save of it, backups and all, move into user://saves/archive-<date>/
+## (`into`: a folder instead, for tests). Returns {"dir", "moved", "failed"}.
+func archive_world(id: String, into := "") -> Dictionary:
+	var out := {"dir": "", "moved": [], "failed": []}
+	if running and world == id:
+		return out
+	var own := PREFIX + id + ".json"
+	var zones := {}
+	for z: Dictionary in MissionRegistry.data().get("zones", []):
+		zones[String(z.get("zone_id", ""))] = true
+	zones["test"] = true
+	var files: Array[String] = []
+	for f: String in DirAccess.get_files_at(Campaign.SAVE_DIR) if DirAccess.dir_exists_absolute(Campaign.SAVE_DIR) else PackedStringArray():
+		if f == own or f.begins_with(own + "."):
+			files.append(f)
+		elif f.begins_with("surv_%s_" % id):
+			var zone := f.trim_prefix("surv_%s_" % id).get_slice(".json", 0)
+			if zones.has(zone):
+				files.append(f)
+	if files.is_empty():
+		return out
+	var t := Time.get_datetime_dict_from_system()
+	var dir := into if into != "" else "%s/archive-%04d-%02d-%02d" % [Campaign.SAVE_DIR, t.year, t.month, t.day]
+	if files.any(func(f: String) -> bool: return FileAccess.file_exists("%s/%s" % [dir, f])):
+		dir += "-%02d%02d%02d" % [t.hour, t.minute, t.second]
+	DirAccess.make_dir_recursive_absolute(dir)
+	for f: String in files:
+		if DirAccess.rename_absolute("%s/%s" % [Campaign.SAVE_DIR, f], "%s/%s" % [dir, f]) == OK:
+			(out.moved as Array).append(f)
+		else:
+			(out.failed as Array).append(f)
+	out["dir"] = ProjectSettings.globalize_path(dir)
+	return out
+
+
 ## The zone a new world starts in: the first inland zone of the region map (the countryside by
 ## the old FOB: farms and a village, quieter than the towns).
 func start_zone() -> String:
@@ -869,24 +955,51 @@ func server_sleep(s: Soldier, hours: float, where := "ground") -> String:
 
 
 ## Host: `s` waits at a safe spot (call 136): `mode` "hour", "dusk" or "dawn"; the world runs at
-## SurvivalSleep.SPEED while every survivor sleeps or waits, without sleep's restore. "" or why
-## not (he's told either way).
+## SurvivalSleep.SPEED while every survivor sleeps or waits (in co-op each player waits too: the
+## others are asked), without sleep's restore; his companions within WAIT_COMPANION_M wait with
+## him. "" or why not (he's told either way; the HUD fades on "You wait").
 func server_wait(s: Soldier, mode: String) -> String:
 	var n := needs_of(s)
-	var problem := SurvivalSleep.start_wait(s, n, SurvivalSleep.wait_hours(mode, hour()), CompoundLevel.current(s))
-	_tell(s, problem if problem != "" else "You wait (moving stops it)")
+	var level := CompoundLevel.current(s)
+	var hours := SurvivalSleep.wait_hours(mode, hour())
+	var problem := SurvivalSleep.start_wait(s, n, hours, level, mode)
+	if problem == "":
+		var layer := SurvivorsLayer.find(level) if level else null
+		if layer:
+			for c: Soldier in layer.companions():
+				if c.global_position.distance_to(s.global_position) <= SurvivalSleep.WAIT_COMPANION_M and not SurvivalSleep.is_asleep(needs_of(c)):
+					SurvivalSleep.begin_wait(c, needs_of(c), hours, level, mode)
+		if level:
+			for p: Soldier in MapNodes.players(level):
+				if p != s and p.vitals.is_up() and not SurvivalSleep.is_waiting(needs_of(p)) and not SurvivalSleep.is_asleep(needs_of(p)):
+					_tell(p, "%s wants to %s: wait too to pass the time" % [s.display_name(), String(SurvivalSleep.WAIT_LABELS.get(mode, "wait")).to_lower()])
+	_tell(s, problem if problem != "" else SurvivalSleep.WAIT_START_TEXT)
 	_send_needs(s)
 	return problem
 
 
 func _wake(s: Soldier, why: String) -> void:
-	SurvivalSleep.wake(needs_of(s))
+	var n := needs_of(s)
+	var was_waiting := SurvivalSleep.is_waiting(n)
+	var mode := String(n.get("wait_mode", "hour"))
+	SurvivalSleep.wake(n)
 	var text := SurvivalSleep.wake_text(why)
-	var dream := Dreams.take_line(needs_of(s))  # the night's dream (Dreams)
+	if why == "waited":
+		text = SurvivalSleep.waited_text(mode, hour())
+	elif was_waiting and why.begins_with("wait_"):
+		text += ". " + SurvivalSleep.waited_text(mode, hour())
+	var dream := Dreams.take_line(n)  # the night's dream (Dreams)
 	if dream != "":
 		text = (text + ". " + dream) if text != "" else dream
 	if text != "":
 		_tell(s, text)
+	if was_waiting and not s.is_ai():
+		var level := CompoundLevel.current(s)
+		var layer := SurvivorsLayer.find(level) if level else null
+		if layer:
+			for c: Soldier in layer.companions():  # (they wait with him: they stop with him)
+				if SurvivalSleep.is_waiting(needs_of(c)):
+					SurvivalSleep.stop_wait(needs_of(c))
 	_send_needs(s)
 
 

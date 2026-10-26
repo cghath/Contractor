@@ -111,7 +111,7 @@ func _ready() -> void:
 	# Survival (docs/survival.md): an open world, persistent and overrun, apart from the campaign.
 	var survival := UiKit.section("Survival", right)
 	survival.add_child(_button("Survival: new world", host_survival_new))
-	var cont := _button("Survival: continue", host_survival_continue)
+	var cont := _button("Survival: continue", open_world_list)
 	cont.disabled = Survival.newest_world() == ""
 	survival.add_child(cont)
 	var tests := UiKit.section("Test zones", right)
@@ -189,11 +189,18 @@ func start_survival_world(name: String, world_seed: int, options := {}) -> void:
 		_status.text = "Couldn't start a survival world."
 
 
-## Survival: carries on the newest world where it was left.
-func host_survival_continue() -> void:
+## Survival: Continue's world list (call 139: WorldListScreen); the world picked is carried on.
+func open_world_list() -> WorldListScreen:
+	var screen := WorldListScreen.new(host_survival_continue)
+	add_child(screen)
+	return screen
+
+
+## Survival: carries on world `id` (the newest when "") where it was left.
+func host_survival_continue(id := "") -> void:
 	CompoundLevel.player_role_kits = false
 	CompoundLevel.clean_loot = false
-	if not Survival.server_continue(get_parent()):
+	if not Survival.server_continue(get_parent(), id):
 		_status.text = "No survival world to continue."
 
 

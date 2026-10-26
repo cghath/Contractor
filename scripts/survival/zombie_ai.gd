@@ -114,6 +114,11 @@ var aware_of: Soldier  # who it's becoming aware of (ALERT), or null
 var groaned_at := -100.0
 var _path := PackedVector3Array()
 var _path_index := 0
+## The navigation map's iteration the path was asked on, and when (call 141: a build placed or
+## taken down changes the map; the path is asked again, at most every REPATH_S).
+var _path_iter := -1
+var _path_t := -1000.0
+const REPATH_S := 0.5
 var _think := 0.0
 var _attack_at := 0.0
 var _seen_at := -100.0
@@ -412,13 +417,21 @@ func _wander() -> void:
 
 
 func _set_goal(at: Vector3) -> void:
-	if goal != Vector3.INF and goal.distance_to(at) < 1.0 and not _path.is_empty():
+	var map := body.get_world_3d().navigation_map
+	if goal != Vector3.INF and goal.distance_to(at) < 1.0 and not _path.is_empty() and not _map_changed(map):
 		goal = at
 		return
 	goal = at
-	var map := body.get_world_3d().navigation_map
 	_path = NavigationServer3D.map_get_path(map, body.global_position, at, true, NAV_LAYERS)  # (never a climb link: call 140)
 	_path_index = 0
+	_path_iter = NavigationServer3D.map_get_iteration_id(map)
+	_path_t = Soldier._now()
+
+
+## Whether the navigation changed since the path was asked (a build placed or taken down: call
+## 141), and the last ask is REPATH_S old.
+func _map_changed(map: RID) -> bool:
+	return NavigationServer3D.map_get_iteration_id(map) != _path_iter and Soldier._now() - _path_t >= REPATH_S
 
 
 func _steer(delta: float) -> void:
@@ -440,6 +453,8 @@ func _steer(delta: float) -> void:
 		if mode == Mode.CHASE and is_instance_valid(target):
 			_face(target.global_position, delta)
 		return
+	if goal != Vector3.INF and _map_changed(body.get_world_3d().navigation_map):
+		_set_goal(goal)  # (the map changed under the path: a build, call 141)
 	while _path_index < _path.size() and _flat(_path[_path_index]) < 0.8:
 		_path_index += 1
 	var next := _path[_path_index] if _path_index < _path.size() else goal

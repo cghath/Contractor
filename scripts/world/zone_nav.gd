@@ -193,7 +193,25 @@ func _add_structures(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -
 		var ramps := ZoneModules.ramps(module.type)
 		if not ramps.is_empty():
 			source.add_faces(ramps, module.global_transform)
+	_add_builds(source, bounds)
 	return true
+
+
+## Survival's builds (call 141; docs/survival_building.md): the built blocks in Builder's voxel
+## chunks as they are now, so the dead path round a wall (or push on it: BuildIntegrity's
+## battering) and never through. Built pieces that stand solid join NavBuilder.OBSTACLES_GROUP
+## themselves (BuildPiece.apply); doors don't (the dead push on them). Builder rebakes the
+## chunks a change touches (Builder._nav_touch).
+func _add_builds(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> void:
+	var b := zone.get_node_or_null(NodePath(Builder.NODE_NAME)) as Builder
+	if b == null:
+		return
+	for w: BuildVoxels in b.chunks_in(bounds):
+		if not w.is_built():
+			continue
+		var local := w.global_transform.affine_inverse() * bounds
+		for box in w.solid_boxes_m(local):
+			source.add_faces(_box_faces(box), w.global_transform)
 
 
 ## True once every chunk wanted around the soldiers is baked and nothing is waiting.

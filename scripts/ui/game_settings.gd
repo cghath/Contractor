@@ -105,6 +105,10 @@ const DEFAULTS := {
 	# Co-op assists (wave 7, S4; Assists): this machine's picks when it hosts. Off by default; a
 	# client follows its host's.
 	"assists": {"aim_slowdown": false, "wound_hints": false},
+	# Accessibility (call 142, Accessibility): the colour-blind-safe tells with shapes, the text
+	# scale over the shared theme, the barks' subtitles. (The tension audio's toggle is
+	# FallenAudio's own "tension_on".)
+	"access": {"colour_safe": false, "text_scale": 1.0, "subtitles": true},
 	# The mission screens' last choices (claude/mission-ui, "the last choices remembered"): the
 	# board's negotiation terms and the contract picked, the briefing's drop and supports, the
 	# debrief's salvage sort.
@@ -118,6 +122,7 @@ const RANGES := {
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
 	"stick_sensitivity": [0.2, 3.0, 0.05], "stick_deadzone": [0.0, 0.5, 0.01], "stick_curve": [1.0, 3.0, 0.1],
 	"spot_diamond_range_m": [100.0, 1500.0, 50.0],
+	"text_scale": [0.8, 1.5, 0.05],
 }
 ## The UI scale (docs/ui_audit.md P1-7, "no automatic UI scale": on 1440p and 4K every screen
 ## was laid out for 1600x900 and its text was physically tiny). The window height over
@@ -185,6 +190,8 @@ static func set_value(section: String, key: String, value: Variant) -> void:
 			apply_video()
 		"audio":
 			apply_audio()
+		"access":
+			Accessibility.apply_text_scale()
 
 
 ## Every setting back to its default (the key bindings too), saved and in effect.
@@ -262,6 +269,7 @@ static func apply_all() -> void:
 	apply_video()
 	apply_audio()
 	apply_keys()
+	Accessibility.apply_text_scale()  # (call 142: the text scale over the shared theme)
 
 
 static func _headless() -> bool:

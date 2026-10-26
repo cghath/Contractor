@@ -558,7 +558,7 @@ class Subtitles extends Label:
 
 	func _process(_delta: float) -> void:
 		var callouts := Callouts.of(self)
-		feed = callouts.current_lines() if callouts else PackedStringArray()
+		feed = callouts.current_lines() if callouts and Accessibility.subtitles() else PackedStringArray()  # (call 142: the toggle)
 
 	## Shows the newest callouts that fit `room` px tall in a column `width` wide (measured with
 	## the font, not the label: a hidden label keeps a stale width).

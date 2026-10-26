@@ -81,6 +81,10 @@ var _layout_changes := -1
 var _message_time := 0.0
 var _white: ColorRect
 var _white_left := 0.0  # seconds of whiteout remaining
+## Survival's wait (call 136): a short fade to black and back as time passes.
+var _fade: ColorRect
+var _fade_left := 0.0
+const FADE_S := 1.2
 ## Blood loss, concussion and unconsciousness drawn over the view (Vitals.vision).
 var _vision: ColorRect
 ## The wound silhouette (top left).
@@ -123,6 +127,12 @@ func _ready() -> void:
 	_white.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_white)
 	_white.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fade = ColorRect.new()
+	_fade.name = "WaitFade"
+	_fade.color = Color(0, 0, 0, 0)
+	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_fade)
+	_fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_crosshair = _add(UiKit.hud_label("+")) as Label
 	_crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_downed_box = VBoxContainer.new()
@@ -539,15 +549,32 @@ class StealthTells extends Control:
 			queue_redraw()
 		_was_visible = on
 
+	## Call 142 (Accessibility): the palette and, in the colour-blind-safe mode, the shapes: the
+	## ring dashed (dashes() of them, more the further the noise carried), the eye boxed.
+	func dashes() -> int:
+		return Accessibility.ring_dashes(clampf(player.noise_radius / FAR_M, 0.0, 1.0)) if player != null else 0
+
+	func eye_boxed() -> bool:
+		return Accessibility.colour_safe()
+
 	func _draw() -> void:
 		var centre := size * 0.5
 		var share := ring_share()
 		if share > 0.0 and player != null:
 			var r := lerpf(RING_MIN_PX, RING_MAX_PX, clampf(player.noise_radius / FAR_M, 0.0, 1.0)) * (1.0 + (1.0 - share) * 0.35)
-			draw_arc(centre + Vector2(0, 26), r, 0.0, TAU, 40, Color(1.0, 0.9, 0.6, 0.55 * share), 1.5, true)
+			var ring := Accessibility.ring_colour()
+			ring.a = 0.55 * share
+			var n := dashes()
+			if n <= 0:
+				draw_arc(centre + Vector2(0, 26), r, 0.0, TAU, 40, ring, 1.5, true)
+			else:
+				var step := TAU / n
+				for i in n:
+					draw_arc(centre + Vector2(0, 26), r, i * step, i * step + step * 0.55, 8, ring, 2.0, true)
 		if watched():
 			# A small eye: an almond and a pupil.
 			var at := centre + Vector2(0, -26)
+			var eye := Accessibility.eye_colour()
 			var pts := PackedVector2Array()
 			for i in 17:
 				var t := float(i) / 16.0
@@ -555,8 +582,12 @@ class StealthTells extends Control:
 			for i in 17:
 				var t := float(i) / 16.0
 				pts.append(at + Vector2(lerpf(9.0, -9.0, t), sin(t * PI) * 5.0))
-			draw_polyline(pts, Color(1.0, 0.45, 0.35, 0.85), 1.5, true)
-			draw_circle(at, 2.2, Color(1.0, 0.45, 0.35, 0.9))
+			draw_polyline(pts, Color(eye, 0.85), 1.5, true)
+			draw_circle(at, 2.2, Color(eye, 0.9))
+			if eye_boxed():  # brackets round it: the eye reads by its shape too
+				for sx: float in [-1.0, 1.0]:
+					draw_polyline(PackedVector2Array([at + Vector2(sx * 10.0, -8.0), at + Vector2(sx * 13.0, -8.0), at + Vector2(sx * 13.0, 8.0), at + Vector2(sx * 10.0, 8.0)]),
+						Color(eye, 0.85), 1.5, true)
 
 
 ## A small body silhouette in the top-left corner while the local player has an untreated bleed,
@@ -597,6 +628,8 @@ func _process(delta: float) -> void:
 	_fit_bottom_centre()
 	_white_left = maxf(_white_left - delta, 0.0)
 	_white.color.a = clampf(_white_left / 1.5, 0.0, 1.0)
+	_fade_left = maxf(_fade_left - delta, 0.0)
+	_fade.color.a = sin(clampf(_fade_left / FADE_S, 0.0, 1.0) * PI) * 0.85
 	_update_vision()
 	_update_needs()
 
@@ -674,7 +707,19 @@ func inspected() -> StringName:
 func flash(text: String) -> void:
 	_message.text = text
 	_message_time = 2.5
+	if text == SurvivalSleep.WAIT_START_TEXT or text.begins_with(SurvivalSleep.WAITED_PREFIX):
+		fade()
 	FallenAudio.on_flash(self, text)  # a survival radio broadcast: its static and voice (docs/survival_audio.md)
+
+
+## A short fade to black and back (survival's wait, call 136).
+func fade() -> void:
+	_fade_left = FADE_S
+
+
+## The message line now ("" when none shows; tests).
+func message_text() -> String:
+	return _message.text if _message_time > 0.0 else ""
 
 
 func is_inventory_open() -> bool:

@@ -65,6 +65,9 @@ const WORK_HOLD_S := 0.6
 const PIECES_CAP := 600
 ## A cluster solve takes at most this many blocks (a settlement is a few hundred).
 const CLUSTER_MAX := 6000
+## Call 141 (Proposed): a change to the builds rebakes the navigation this long after the first
+## change of a run (so a row of blocks bakes once), well inside the second the call asks for.
+const NAV_BATCH_S := 0.25
 
 ## How long a cracked block stands (crack_s; tests shorten it).
 var crack_s := CRACK_S
@@ -95,6 +98,13 @@ var _crack_at := {}  # cell -> msec it cracked
 var _workers := {}  # soldier instance id -> {"s", "kind": "block"/"piece", "at", "until"}
 var _grounded := {}  # cell -> grounded() (cleared when a blast may have cut the ground)
 var _sending := true  # host: record changes go to the clients as they happen
+## Call 141: what changed since the navigation was last rebaked round the builds (world x, z),
+## flushed NAV_BATCH_S after the first change (a run of placements bakes once).
+var _nav_rect := Rect2()
+var _nav_dirty := false
+var _nav_due := 0.0
+## Host: navigation rebakes asked for round the builds (tests).
+var nav_flushes := 0
 
 
 static func of(from: Node) -> Builder:
@@ -990,6 +1000,11 @@ func _set_piece(id: int, rec: Dictionary) -> void:
 			_piece_nodes[id] = node
 			add_child(node)
 		node.apply(rec)
+	if multiplayer.is_server() and (not old.is_empty() or not rec.is_empty()):
+		var r: Dictionary = rec if not rec.is_empty() else old
+		var size := Vector3(BuildPieces.piece_size(String(r.k), int(r.r))) * BuildPieces.BLOCK_M
+		var at := Vector3(int(r.c[0]), int(r.c[1]), int(r.c[2])) * BuildPieces.BLOCK_M
+		_nav_touch(Rect2(at.x, at.z, size.x, size.z))
 	if multiplayer.is_server() and _sending:
 		_client_piece.rpc(id, rec)
 
@@ -1051,6 +1066,8 @@ func _log(key: String) -> Array:
 ## Host: a build op on cell `c`'s voxels ("bset": the block's shape in its material, "bclr"):
 ## logged, applied and sent like any voxel edit.
 func _op(c: Vector3i, edit: Dictionary) -> void:
+	var at := Vector3(c) * BuildPieces.BLOCK_M
+	_nav_touch(Rect2(at.x, at.z, BuildPieces.BLOCK_M, BuildPieces.BLOCK_M))
 	var ch := chunk_of(c)
 	var local := (c - ch * CHUNK_CELLS) * BuildPieces.BLOCK_VOX
 	edit["c"] = [local.x, local.y, local.z]
@@ -1101,6 +1118,39 @@ func _chunk(key: String, make: bool) -> BuildVoxels:
 	return w
 
 
+## Host: the builds changed over `area` (world x, z): the navigation round it is rebaked soon
+## (NAV_BATCH_S; call 141).
+func _nav_touch(area: Rect2) -> void:
+	if not multiplayer.is_server():
+		return
+	if _nav_dirty:
+		_nav_rect = _nav_rect.merge(area)
+		return
+	_nav_rect = area
+	_nav_dirty = true
+	_nav_due = _now_ms() / 1000.0 + NAV_BATCH_S
+
+
+## Host: rebakes the zone navigation's chunks over what changed (ZoneNav.rebake_rect: those baked
+## now; the bake reads the builds' voxels and solid pieces: ZoneNav._add_builds).
+func _nav_flush() -> void:
+	_nav_dirty = false
+	var lvl := _level()
+	var nav: Variant = lvl.get(&"nav") if lvl else null
+	if nav is ZoneNav and is_instance_valid(nav):
+		(nav as ZoneNav).rebake_rect(_nav_rect)
+		nav_flushes += 1
+
+
+## The streamed-in chunks whose space meets `bounds` (world).
+func chunks_in(bounds: AABB) -> Array[BuildVoxels]:
+	var out: Array[BuildVoxels] = []
+	for w: BuildVoxels in _chunks.values():
+		if is_instance_valid(w) and AABB(w.global_position, Vector3.ONE * CHUNK_M).intersects(bounds):
+			out.append(w)
+	return out
+
+
 ## The chunk holding cell `c`, if streamed in.
 func chunk_at(c: Vector3i) -> BuildVoxels:
 	return _chunks.get(_chunk_key(c))
@@ -1149,6 +1199,8 @@ func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
 	_advance_workers(delta)
+	if _nav_dirty and now >= _nav_due:
+		_nav_flush()
 	if _job and _job.done():
 		_apply_solve(_job.finish())
 		_job = null
