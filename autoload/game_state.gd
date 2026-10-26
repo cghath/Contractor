@@ -24,6 +24,9 @@ var vehicles: Array = []
 ## The ground as dug and blasted (Digging.to_save: {"cuts", "berms"}), put back by Digging on
 ## load ({} for a zone never saved). Rebuilt from the level's Digging on every save.
 var ground: Dictionary = {}
+## What the survivors built (Builder.to_save: {"blocks", "pieces", "logs"}), put back by
+## ZoneLevel._restore_builds on load ({} for none). Rebuilt from the level's Builder on every save.
+var builds: Dictionary = {}
 ## Lootable caches and site boxes (WorldCache.to_save, by uid: {"items": [{"id", "count",
 ## "state"?}], "unlocked"}): what's in each as it was left, put back instead of a fresh roll
 ## (WorldCache.server_fill), so a looted box stays looted. Updated from the live caches on every
@@ -105,6 +108,7 @@ func save_zone() -> bool:
 			vehicles.append(node.to_save())
 	var digging := get_tree().get_first_node_in_group(&"digging")
 	ground = digging.to_save() if digging and digging.has_method(&"to_save") else {}
+	_save_builds()
 	var virtualizer := get_tree().get_first_node_in_group(&"virtualizer")
 	profiles = virtualizer.to_save() if virtualizer and virtualizer.has_method(&"to_save") else []
 	var placed := get_tree().get_first_node_in_group(&"demolitions")
@@ -124,6 +128,7 @@ func save_zone() -> bool:
 		"fallen_posts": fallen_posts.keys(),
 		"vehicles": vehicles,
 		"ground": ground,
+		"builds": builds,
 		"caches": caches,
 		"profiles": profiles,
 		"demolitions": demolitions,
@@ -148,6 +153,7 @@ func load_zone() -> void:
 	fallen_posts.clear()
 	vehicles.clear()
 	ground = {}
+	builds = {}
 	sky = {}
 	caches = {}
 	profiles = []
@@ -172,6 +178,7 @@ func load_zone() -> void:
 	fallen_posts = zone.fallen_posts
 	vehicles = zone.get("vehicles", [])
 	ground = zone.get("ground", {})
+	builds = zone.get("builds", {})
 	sky = zone.get("sky", {})
 	caches = zone.get("caches", {})  # boxes stay as they were left even when the loose gear fades
 	profiles = zone.get("profiles", [])
@@ -399,11 +406,27 @@ static func read_save(path: String) -> Dictionary:
 			out.ground = {"cuts": cuts, "berms": berms}
 	elif typeof(ground_in) != TYPE_DICTIONARY or not (ground_in as Dictionary).is_empty():
 		push_warning("GameState: %s: the ground section has the wrong type; the zone is dug afresh" % path)
+	_read_builds(data, out, path)
 	var sky_in: Variant = data.get("sky", {})  # saves from before wave 7 have none
 	if typeof(sky_in) == TYPE_DICTIONARY and is_number(sky_in.get("hour")) and is_finite(float(sky_in.hour)) \
 			and typeof(sky_in.get("weather")) == TYPE_STRING:  # an unknown weather reads as clear (DayNight)
 		out["sky"] = {"hour": float(sky_in.hour), "weather": String(sky_in.weather)}
 	return out
+
+
+## The level's builds (Builder) into `builds` for the save; a zone with none keeps what it had.
+func _save_builds() -> void:
+	var builder := get_tree().get_first_node_in_group(&"builder")
+	if builder and builder.has_method(&"to_save"):
+		builds = builder.to_save()
+
+
+## A save's builds section (Builder.save_ok) into `out` ({} when it's missing or the wrong shape).
+static func _read_builds(data: Dictionary, out: Dictionary, path: String) -> void:
+	var builds_in: Variant = data.get("builds", {})  # saves from before building have none
+	out["builds"] = builds_in if Builder.save_ok(builds_in) else {}
+	if not Builder.save_ok(builds_in):
+		push_warning("GameState: %s: the builds section has the wrong shape; nothing built comes back" % path)
 
 
 ## Whether `c` is a saved cache (WorldCache.to_save): its items known ones, each a count of 1 or

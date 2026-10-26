@@ -344,6 +344,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return  # downed: you come round on your own, the arrest window runs out, or you give up (_update_give_up)
 	elif body.respawn_state == Soldier.RESPAWN_WAITING:
 		return  # dead, waiting to respawn: nothing to do but wait
+	elif BuildMode.handle(body, event):
+		return  # survival: the build key, and build mode's keys while it's on (BuildMode)
 	elif event.is_action_pressed(ControlOptions.GET_OUT_ACTION) and ControlOptions.get_out_key() and Vehicle.ride_of(body) != null:
 		Vehicle.ride_of(body).request_exit.rpc_id(1)  # the get-out key (an option; the seat's menu then has no Get out)
 	elif interaction.is_open() and event is InputEventMouseButton:
@@ -972,6 +974,8 @@ func _update_voice() -> void:
 
 
 func _try_fire() -> void:
+	if BuildMode.is_on(body):
+		return  # building: Fire places and works blocks (BuildMode)
 	if body.binoculars_up or body.vitals.is_dying():
 		return  # glassing, or dying on the ground: no shooting
 	if not _captured() or placing or nade_up or body.inventory.hands != &"" or not body.vitals.is_up() or interaction.is_open() \

@@ -1,5 +1,25 @@
 # Contractor: Fallen — building, the settlement's work and infrastructure
 
+## Where the build is (2026-10-26 ~03:00 CDT)
+
+Phase B's free building (§1-4, §10-11's building part) built on `claude/survival-building`
+(worktree `B:\Contractor\.claude\worktrees\survival-building`), building suite R2638 PASS (survival PASS):
+- `scripts/survival/`: `BuildPieces` (the catalogue: six materials, six shapes, twelve pieces, tools,
+  costs), `Builder` (the host's authority: blocks as sites that fill with work, blueprints, upgrade in
+  place, dismantle 60%, repair, damage, chewing, doors and locks, saves, late joiners), `BuildVoxels`
+  (a 16 m `VoxelWorld` chunk replaying its edit log: "bset"/"bclr" beside shots and blasts),
+  `BuildIntegrity` (load and span on a worker thread; cracks, falls, debris), `BuildPiece` (a piece's
+  node and its interaction menu), `BuildMode` (the owner's ghost, key 6).
+- Hooks: `ZoneLevel` (_add_builder, _restore_builds, _blast_builds, _breach_builds), `GameState.builds`
+  (the zone save's "builds"), `PlayerInput` (BuildMode.handle, no firing while building), `Controls`
+  (build_mode on 6). Items: planks, scrap_sheet, sandbag, brick, concrete_bag, steel_beam; hammer,
+  saw, trowel, shovel, cutting_torch; door_key. Some in the "stores" loot table.
+- Not yet: materials from felling and stripping (a dev kit: build mode with dev tools on), templates
+  of blueprints, arches and the wall shape, pieces as structural support, stash storage, ladder
+  climbing, the workbench's crafting, navigation rebaked round builds, weather wear (§3), the
+  settlement (§5-9), the "settlement" perfcase, collapses hurting whoever's under them,
+  ZombieAI calling `Builder.server_chew_at`.
+
 The free building system (calls 8, 12, 39), the settlement's economy of stocks, jobs, work
 orders and the council (calls 23, 28, 59), and the old world's infrastructure brought back
 (call 60). Written 2026-10-26 from the Captain's calls in docs/survival.md. The aim he set:
