@@ -402,6 +402,11 @@ func _test_kits_at_hub(ids: Array, me: String) -> void:
 func _test_3d(me: String) -> void:
 	print("The 3D loadout editor")
 	Economy.add_cash(50000, "test: the 3D editor")
+	# The editor reopens on whoever was edited last (a per-machine setting other suites share): start from yourself.
+	var ed_cfg := ConfigFile.new()
+	ed_cfg.load(LoadoutEditor.SETTINGS)
+	ed_cfg.set_value("editor", "who", "")
+	ed_cfg.save(LoadoutEditor.SETTINGS)
 	var editor := BaseHub.open_loadout_3d()
 	check(editor != null, "the 3D editor opens at the base")
 	if editor == null:

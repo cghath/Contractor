@@ -46,7 +46,7 @@ static func server_op(actor: Soldier, target: Soldier, op: Dictionary) -> String
 			"give":
 				why = transfer(actor.inventory, String(op.get("from", "")), int(op.get("index", -1)), target.inventory, String(op.get("to", "auto")))
 			"take":
-				why = transfer(target.inventory, String(op.get("from", "")), int(op.get("index", -1)), actor.inventory, String(op.get("to", "auto")))
+				why = transfer(target.inventory, String(op.get("from", "")), int(op.get("index", -1)), actor.inventory, String(op.get("to", "auto")), false)
 			"move":
 				why = transfer(target.inventory, String(op.get("from", "")), int(op.get("index", -1)), target.inventory, String(op.get("to", "auto")))
 			"kit_save":
@@ -79,7 +79,7 @@ static func _after(target: Soldier) -> void:
 
 ## Host: one unit from `from` (a place; `index` for a container's entry) of `src` into `to` of
 ## `dst` (src and dst may be the same inventory). "" done, else why not (it stays where it was).
-static func transfer(src: Inventory, from: String, index: int, dst: Inventory, to: String) -> String:
+static func transfer(src: Inventory, from: String, index: int, dst: Inventory, to: String, wear_free := true) -> String:
 	if src == null or dst == null:
 		return "Nothing there"
 	var entry := take_out(src, from, index)
@@ -88,7 +88,7 @@ static func transfer(src: Inventory, from: String, index: int, dst: Inventory, t
 		if kind == "slot" and StringName(src.slots.get(StringName(from.get_slice(":", 1)), &"")) != &"":
 			return "It won't come off now (empty it first)"
 		return "Nothing there"
-	var why := put_in(dst, entry, to)
+	var why := put_in(dst, entry, to, wear_free)
 	if why != "":
 		put_back(src, entry, from)
 	return why
@@ -114,8 +114,10 @@ static func take_out(inv: Inventory, place: String, index := -1) -> Dictionary:
 	return {}
 
 
-## Host: `entry` into `place` of `inv`. "" done, else why not (nothing changed).
-static func put_in(inv: Inventory, entry: Dictionary, place: String) -> String:
+## Host: `entry` into `place` of `inv`. "" done, else why not (nothing changed). `wear_free`: an
+## "auto" place puts clothes on when their slot is free (giving to someone); false stows them
+## (taking back: what you take goes in your pack, so a saved kit can find it).
+static func put_in(inv: Inventory, entry: Dictionary, place: String, wear_free := true) -> String:
 	var item := ItemDB.get_item(StringName(String(entry.get("id", ""))))
 	if item == null:
 		return "Nothing there"
@@ -131,6 +133,12 @@ static func put_in(inv: Inventory, entry: Dictionary, place: String) -> String:
 			if not inv.containers.has(what):
 				return "No %s" % String(what).capitalize()
 			return "" if inv.insert_entry(what, {"id": item.id, "count": 1, "state": state} if not state.is_empty() else {"id": item.id, "count": 1}) else inv.refusal(item, state, what)
+	if not wear_free and Clothing.slot_of(item) != &"":  # taken-back clothes go in a container, not on
+		var one: Dictionary = {"id": item.id, "count": 1, "state": state} if not state.is_empty() else {"id": item.id, "count": 1}
+		for c: StringName in inv.stow_order(item):
+			if inv.insert_entry(c, one.duplicate(true)):
+				return ""
+		# (no room anywhere: worn if its slot is free, as before)
 	var was := Clothing.force
 	Clothing.force = true  # (given clothes go on when their slot is free)
 	var took := inv.take(item.id, 1, state)
