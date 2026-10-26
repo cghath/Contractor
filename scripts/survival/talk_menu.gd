@@ -89,6 +89,7 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if status == "companion":
 			out.append({"id": &"talk_gear", "label": "Gear", "target": target, "disabled": "", "call": func() -> void: LoadoutGear.open_on(actor, target as Soldier)})
 			out.append(talk.call("how", "How are you?", {}, ""))
+			out.append(talk.call("talk_down", "Talk me down", {}, ""))  # the nerve (Nerve, call 116)
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
 			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.DEAD and Masking.is_dead_one(target):
@@ -97,6 +98,11 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if status == "dead" and not bool(info.get("buried", false)):
 			var shovel := SurvivorsLayer.shovel_of(actor) != &""
 			out.append(talk.call("bury", "Bury (%s)" % ("with the shovel" if shovel else "by hand, slow"), {}, ""))
+			if not bool(info.get("butchered", false)):  # the dark line (Cannibalism, call 117)
+				var cut: Dictionary = talk.call("butcher", "Butcher for meat", {}, InteractionMenu.MORE)
+				if not Crafting.has_tool(actor, ["tag:blade", "tag:knife"]):
+					cut.disabled = "You need a knife or a blade"
+				out.append(cut)
 	return out
 
 
@@ -191,6 +197,9 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	if action == "smear":
 		Masking.server_smear(actor, target)
 		return ""
+	if action == "butcher":
+		Cannibalism.server_butcher(actor, target, rec)
+		return ""
 	if not target.vitals.is_up():
 		return ""
 	if actor.global_position.distance_to(target.global_position) > InteractionMenu.REACH + 1.5:
@@ -274,6 +283,11 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 			return said_now
 		"think":
 			topic = "think"
+		"talk_down":
+			var busy := Nerve.server_talk_down(actor, rec) != ""
+			var said_n := Nerve.talk_line(rec, busy)
+			layer.say(target, said_n)
+			return said_n
 	var said := line_for(rec, topic, extra)
 	layer.say(target, said)
 	return said

@@ -159,6 +159,8 @@ static func target_in_front(attacker: Soldier, reach := REACH_M) -> Soldier:
 ## blow aimed there, Vitals.undead).
 static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: float) -> void:
 	if mult <= 0.01:
+		if String(attack.get("name", "")) == "bite":
+			Nerve.server_close_call(victim)  # a bite dodged (Mind)
 		return
 	if bool(attack.get("shove", false)):
 		guard_of(victim).stagger_until = Soldier._now() + SHOVE_STAGGER_S  # a shove: a second bought, little harm

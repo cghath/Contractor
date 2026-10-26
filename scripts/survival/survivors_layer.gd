@@ -560,6 +560,7 @@ func server_hour() -> void:
 				var n: Dictionary = rec.get("needs", {})
 				if not n.is_empty() and float(n.get("sleep", 100.0)) < 10.0:
 					Moods.add(rec, "no_sleep")
+				Mind.person_hour(rec, horde)  # nerve and habits in the mood (Mind)
 				var kind := Moods.hour_tick(rec, night, _rng)
 				if kind != "":
 					_on_break(rec, kind)
@@ -716,6 +717,7 @@ func _on_died(s: Soldier) -> void:
 	rec.rise_at = Soldier._now() + RISE_S if bool(rec.killed_by_dead) else 0.0
 	_set_known(s, rec)
 	Survival._journal_line("%s died." % String(rec.name))
+	Nerve.server_on_death(s, rec, was)  # the living's nerve, the killer's (Mind)
 	if was != "companion" and was != "settler":
 		return
 	var id := String(rec.id)

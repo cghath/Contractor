@@ -372,3 +372,31 @@ func _server_radio(action: String, peer: int) -> void:
 		_client_journal(JournalScreen.view())
 	else:
 		_client_journal.rpc_id(peer, JournalScreen.view())
+
+
+## Any peer: "Write a letter" (the journal screen; Letters, call 130): `text` kept on his survivor.
+func request_letter(text: String) -> void:
+	if multiplayer.is_server():
+		_server_letter(text, multiplayer.get_unique_id())
+	else:
+		_rpc_letter.rpc_id(1, text)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_letter(text: String) -> void:
+	if multiplayer.is_server():
+		_server_letter(text, multiplayer.get_remote_sender_id())
+
+
+func _server_letter(text: String, peer: int) -> void:
+	var level := CompoundLevel.current(self)
+	var actor: Soldier = level.players.get_node_or_null(str(peer)) as Soldier if level else null
+	if actor == null:
+		return
+	var why := Letters.server_write(actor, text.substr(0, Letters.MAX_CHARS))
+	if why != "":
+		Survival._tell(actor, why)
+	if peer == multiplayer.get_unique_id():
+		_client_journal(JournalScreen.view())
+	else:
+		_client_journal.rpc_id(peer, JournalScreen.view())

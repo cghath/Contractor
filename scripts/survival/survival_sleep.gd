@@ -34,6 +34,7 @@ static func start(s: Soldier, n: Dictionary, hours: float, where: String, chased
 	if float(n.get("sleep", 100.0)) >= RESTED:
 		return "You're not tired"
 	n.asleep = where if where in WHERE else "ground"
+	Dreams.on_sleep(n)  # tonight's kind: a nightmare after a death (Dreams)
 	n.sleep_left_h = maxf(0.25, hours)
 	var p := s.global_position
 	n.sleep_at = [p.x, p.y, p.z]
@@ -42,6 +43,8 @@ static func start(s: Soldier, n: Dictionary, hours: float, where: String, chased
 
 ## Wakes `n`.
 static func wake(n: Dictionary) -> void:
+	if is_asleep(n):
+		Dreams.on_wake(n)  # the night's dream line (told by Survival._wake)
 	n.asleep = ""
 	n.erase("sleep_left_h")
 	n.erase("sleep_at")

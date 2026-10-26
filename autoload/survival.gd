@@ -362,6 +362,7 @@ func server_player_died(s: Soldier) -> void:
 	# Permadeath (calls 13, 51): the survivor is gone; the player wakes as a new one, from zero
 	# (the skills and perks of the RPG layer die with the old one, phase B), at the safehouse.
 	var old_name := survivor_name(s)
+	Letters.server_on_death(s, level, at)  # his letters lie with his things (call 130)
 	var fresh := _new_survivor(s)  # (the new record has no "rpg": lines, perks and flaws die with him)
 	Rpg.server_sync(s)
 	server_give_starter_kit(s)
@@ -414,6 +415,7 @@ func _new_survivor(s: Soldier, keep := {}) -> Dictionary:
 	var who := Names.person(rng, &"friendly", &"rifleman")
 	var rec := keep.duplicate()
 	rec.merge({"name": "%s %s" % [String(who.get("first", "Sam")), String(who.get("surname", "Reed"))], "generation": gen, "born_day": day()}, true)
+	rec["traits"] = JournalVoice.roll_voice(rng)  # the journal's voice (call 119)
 	all[profile_of(s)] = rec
 	s.set_meta(&"survivor_name", String(rec.name))
 	return rec
@@ -421,7 +423,11 @@ func _new_survivor(s: Soldier, keep := {}) -> Dictionary:
 
 func _journal_line(line: String) -> void:
 	var j: Array = state().get("journal", [])
-	j.append({"day": day(), "hour": snappedf(hour(), 0.1), "text": line})
+	var e := {"day": day(), "hour": snappedf(hour(), 0.1), "text": line}
+	var voiced := JournalVoice.phrase(line, JournalVoice.writer_traits())  # the writer's voice (call 119)
+	if voiced != line:
+		e["voice"] = voiced
+	j.append(e)
 	state()["journal"] = j.slice(-200)
 
 
@@ -861,6 +867,9 @@ func server_wait(s: Soldier, mode: String) -> String:
 func _wake(s: Soldier, why: String) -> void:
 	SurvivalSleep.wake(needs_of(s))
 	var text := SurvivalSleep.wake_text(why)
+	var dream := Dreams.take_line(needs_of(s))  # the night's dream (Dreams)
+	if dream != "":
+		text = (text + ". " + dream) if text != "" else dream
 	if text != "":
 		_tell(s, text)
 	_send_needs(s)
@@ -871,6 +880,7 @@ func _wake(s: Soldier, why: String) -> void:
 func server_eat(s: Soldier, item: ItemData, state: Dictionary, drug: StringName, doses: float) -> bool:
 	if not running:
 		return false
+	Mind.server_on_used(s, needs_of(s), item)  # a habit's dose, human flesh (Mind)
 	if not Needs.has_values(item):
 		return server_feed(s, drug, doses)
 	var n := needs_of(s)

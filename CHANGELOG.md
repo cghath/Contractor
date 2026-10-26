@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the survivor's mind (claude/survival-mind)
+
+- **Added** the nerve meter (`Nerve`, call 116): 0-100 in the body's stores, shaken by a horde in the zone, a bite, a friend's death, nights without sleep, close calls (a bite dodged, a screamer near), killing a person; low nerve shakes the aim, rings the ears (`Needs.dulled`), slows stamina's return and shows on the HUD's low-only signs; it settles with sleep, an hour safe at the settlement, a drink or a smoke, and "Talk me down" on a companion (their time, a moodlet for them); `Nerve.level(s)` 0-3 for the audio lane's tension layer; companions' nerve feeds their moods (shaken, nerve broken) and so their breaks
+- **Added** addictions and withdrawal (`Addictions`, call 118): tobacco, alcohol, painkillers (codeine, ibuprofen, morphine) and stimulants (caffeine, amphetamine) give relief and grow a habit; past the line without a dose, withdrawal (tremors, nerve worn down, slower stamina and work) that eases over days; the smoker and drinker flaws start hooked; habits show on the body screen, the readout and the character screen; new items: loose cigarettes, a flask of spirits, codeine, amphetamine
+- **Added** cannibalism as a last resort (`Cannibalism`, call 117): "Butcher for meat" on a dead survivor's body with a blade gives human meat (food by its values); it costs nerve and a heavy moodlet (less for the cruel), the companions who see it think less of you, the zone's groups learn of it (a "cannibalism" world event, standing down; cultists don't mind), the journal keeps it tagged "dark", and each meal risks a wasting sickness with tremors, memory loss and death in weeks that nothing cures; `Cannibalism.eats_the_dead` flags cultists and starving groups
+- **Added** dreams and the journal's voice (`Dreams`, `JournalVoice`, call 119): a dream line on waking coloured by the day (a loss, a horde, a bite, a kill, hunger, a kindness), a nightmare after a death that halves sleep's restore; the journal's lines written in the survivor's voice by trait (optimist, gloomy, hot-headed, pious, calm), the fact kept word for word; data/survival_lines.json "dreams" and "journal" sections
+- **Added** letters (`Letters`, call 130 first form): "Write a letter" in the journal's People tab keeps it on the survivor; on death it lies on the body as a letter item, and whoever carries it reads it in the People tab
+- **Added** the mind suite (tests/mind_test.gd)
+
 ### Contractor: Fallen, clothing, the gear editor and third person (claude/survival-clothing)
 
 - **Added** clothing slots and layers (`Clothing`, `Inventory.CLOTHING_SLOTS`, call 132): head, face, torso base / mid / outer, hands, legs, feet beside the carrier, helmet and pack; 25 clothing items (type "clothing": layer, warmth, wet_resist, noise, camo, pockets, durability) as loot (home, barracks, stores, a "clothes" table and pool); every survivor and companion starts dressed; the tactical gloves, balaclava, shemagh and enclave uniform are clothing now (still counted for the disguise and the frost)

@@ -34,19 +34,19 @@ const ALL := {
 
 ## id -> {name, points, text, fx (wired now), later: true (recorded for its system)}.
 const FLAWS := {
-	"smoker": {"name": "Smoker", "points": 2, "text": "Needs tobacco or goes short-tempered; a cough", "fx": {"moodlet": "craving"}, "later": true},
+	"smoker": {"name": "Smoker", "points": 2, "text": "Starts hooked on tobacco: a smoke settles the nerves, going without brings the shakes (Addictions)", "fx": {"habit": "tobacco"}},
 	"bad_knee": {"name": "Bad knee", "points": 2, "text": "Moves 7% slower", "fx": {"speed": 0.93}},
 	"short_sighted": {"name": "Short-sighted", "points": 2, "text": "Sees less far without glasses", "fx": {"sight": 0.7}, "later": true},
 	"hard_of_hearing": {"name": "Hard of hearing", "points": 2, "text": "Hears the dead later", "fx": {"hearing": 0.7}, "later": true},
 	"asthma": {"name": "Asthma", "points": 2, "text": "Stamina runs out sooner", "fx": {"stamina": 0.85}, "later": true},
 	"weak_stomach": {"name": "Weak stomach", "points": 1, "text": "Raw or spoiled food makes him sick more", "fx": {"raw_risk": 1.5}, "later": true},
-	"coward": {"name": "Coward", "points": 2, "text": "Courage down; refuses more", "later": true},
+	"coward": {"name": "Coward", "points": 2, "text": "Courage down; refuses more; every shock shakes the nerve a third harder (Nerve)", "later": true},
 	"hot_headed": {"name": "Hot-headed", "points": 1, "text": "Rage breaks", "later": true},
 	"heavy_sleeper": {"name": "Heavy sleeper", "points": 1, "text": "Never wakes to the ring", "fx": {"heavy_sleeper": true}},
 	"clumsy": {"name": "Clumsy", "points": 2, "text": "Louder on his feet", "fx": {"step_noise": 1.2}},
 	"slow_learner": {"name": "Slow learner", "points": 3, "text": "XP x0.8 in every line", "fx": {"xp": 0.8}},
 	"thin_skinned": {"name": "Thin-skinned", "points": 2, "text": "The cold gets in 30% faster", "fx": {"cold": 1.3}},
-	"drinker": {"name": "A drinker", "points": 2, "text": "Needs a drink; shakes without", "later": true},
+	"drinker": {"name": "A drinker", "points": 2, "text": "Starts hooked on drink: a drink settles the nerves, going without brings the shakes (Addictions)", "fx": {"habit": "alcohol"}},
 	"insomniac": {"name": "Insomniac", "points": 2, "text": "Sleep restores less", "later": true},
 	"allergic": {"name": "Allergic", "points": 1, "text": "Certain foods make him ill", "later": true},
 }

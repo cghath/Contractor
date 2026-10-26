@@ -134,6 +134,7 @@ static func respawn(n: Dictionary, needs: float) -> void:
 	n._seen_hunger = needs
 	n._seen_thirst = needs
 	Body.reset(n)  # phase D's bite, wounds, sicknesses: a new survivor has none of them
+	Mind.reset(n)  # nor the old one's nerve, habits or dreams
 
 
 # --- Stepping ------------------------------------------------------------------------------
@@ -198,7 +199,7 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 	n.vitamin_d = clampf(float(n.vitamin_d) - vit + vit * sun, 0.0, 100.0)
 	# Sleep.
 	if asleep != "":
-		n.sleep = minf(100.0, float(n.sleep) + float(SLEEP_FILL_H.get(asleep, SLEEP_FILL_H.ground)) * world_h)
+		n.sleep = minf(100.0, float(n.sleep) + float(SLEEP_FILL_H.get(asleep, SLEEP_FILL_H.ground)) * world_h * Dreams.restore_mult(n))  # (a nightmare: less)
 	else:
 		n.sleep = maxf(0.0, float(n.sleep) - 100.0 / SLEEP_AWAKE_H * world_h * (1.5 if work > 1.0 else 1.0))
 	# Wet, then warmth.
@@ -243,6 +244,7 @@ static func server_step(s: Soldier, n: Dictionary, seconds: float) -> void:
 	var ctx := context_of(s)
 	step(n, world_h, ctx)
 	Body.server_step(s, n, world_h, ctx)  # phase D: the bite's clock, wounds, sicknesses, the season
+	Mind.server_step(s, n, world_h, ctx)  # the nerve, habits, the shaking sickness (calls 116-118)
 	if s.vitals.is_dead():
 		return
 	apply(s, n)
@@ -283,18 +285,19 @@ static func stamina_mult(n: Dictionary) -> float:
 	m *= lerpf(SLEEPY_STAMINA_MULT, 1.0, 1.0 - dulled(n))
 	m *= 1.0 - SHIVER_STAMINA * shivering(n)
 	m *= Body.stamina_factor(n)  # fever, sickness, sepsis, heat stroke
+	m *= Mind.stamina_factor(n)  # low nerve, withdrawal (Mind)
 	return m
 
 
 ## Aim sway's share (Vitals.needs_sway): tired and shivering hands shake.
 static func sway_mult(n: Dictionary) -> float:
-	return 1.0 + DULLED_SWAY * dulled(n) + SHIVER_SWAY * shivering(n) + Body.sway_add(n)
+	return 1.0 + DULLED_SWAY * dulled(n) + SHIVER_SWAY * shivering(n) + Body.sway_add(n) + Mind.sway_add(n)  # shaking hands: nerve, withdrawal
 
 
 ## How dulled the senses are by lack of sleep, 0 (rested) .. 1 (none left): the stealth model can
 ## shrink a survivor's sight and hearing by it (call 47).
 static func dulled(n: Dictionary) -> float:
-	return maxf(clampf((SLEEP_LOW - float(n.get("sleep", 100.0))) / SLEEP_LOW, 0.0, 1.0), Body.dulled_add(n))  # and delirium
+	return maxf(clampf((SLEEP_LOW - float(n.get("sleep", 100.0))) / SLEEP_LOW, 0.0, 1.0), maxf(Body.dulled_add(n), Mind.dulled_add(n)))  # and delirium, ringing ears (Mind)
 
 
 ## How hard he shivers, 0 (warm) .. 1 (frozen through).
@@ -428,6 +431,7 @@ static func signs(n: Dictionary) -> Array:
 		out.append("sick")
 	if float(n.hygiene) < 30.0:
 		out.append(w.hygiene)
+	out.append_array(Mind.signs(n))  # shaken, withdrawal (Mind)
 	return out
 
 
@@ -449,6 +453,9 @@ static func readout(n: Dictionary) -> String:
 	lines.append("Health: %s" % (w.sick if w.sick == "well" else "%s (%d h left)" % [w.sick, ceili(float(sick.left_h))]))
 	if String(n.get("asleep", "")) != "":
 		lines.append("Asleep (%s)" % n.asleep)
+	var mind := Mind.words(n)
+	if not mind.is_empty():
+		lines.append("Mind: %s" % ", ".join(PackedStringArray(mind)))
 	return "\n".join(lines)
 
 

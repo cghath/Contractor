@@ -207,5 +207,107 @@
 			{"text": "Checkpoint. State your business.", "voice": "enclave_halt_02", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}},
 			{"text": "Toll's due. No toll, no road.", "voice": "enclave_halt_03", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}}
 		]
+	},
+	"dreams": {
+		"_about": "Dreams (Dreams, call 119): a line on waking from sleep by the day's colour (the strongest mark: a loss, a horde, a bite, a kill, the dark line, hunger, a kindness) or a nightmare after a death. Written, not spoken: no voice keys.",
+		"calm": [
+			"You dreamt of nothing. It was good.",
+			"You dreamt of rain on a tin roof, and nobody needed you.",
+			"You dreamt you were somewhere warm, and you stayed."
+		],
+		"horde": [
+			"You dreamt of a crowd walking past the window, all night, and none of them looked in.",
+			"You dreamt the field was full of them, standing still, waiting for you to move.",
+			"You dreamt of feet on gravel, thousands, and woke counting."
+		],
+		"loss": [
+			"You dreamt they were still here, laughing at something you said.",
+			"You dreamt you were digging, and the grave kept filling with water.",
+			"You dreamt of an empty chair and a plate set at it."
+		],
+		"kindness": [
+			"You dreamt of a warm kitchen and somebody calling you in.",
+			"You dreamt someone put a blanket over you and didn't say a word.",
+			"You dreamt of a fire, and of voices around it you trusted."
+		],
+		"hunger": [
+			"You dreamt of bread, and woke chewing.",
+			"You dreamt of a supermarket, full, lit, and nobody else there.",
+			"You dreamt of your mother's cooking. Your stomach woke you."
+		],
+		"bite": [
+			"You dreamt your arm was someone else's.",
+			"You dreamt you were hungry for something you couldn't name.",
+			"You dreamt of teeth, and checked the dressing twice before you got up."
+		],
+		"killed": [
+			"You dreamt of a face. You didn't know it then either.",
+			"You dreamt the shot never stopped echoing.",
+			"You dreamt the man got up and asked you why."
+		],
+		"dark": [
+			"You dreamt of a table laid for a feast, and you knew what was on it.",
+			"You dreamt they were all watching you eat.",
+			"You dreamt you were the meat."
+		],
+		"nightmare": [
+			"You woke screaming. You don't remember why; your hands do.",
+			"You dreamt they came back wrong, and you let them in.",
+			"You woke sure someone was standing over you. Nobody was. Probably."
+		]
+	},
+	"journal": {
+		"_about": "The journal's voice (JournalVoice, call 119): a templated journal line ({line}, kept word for word) in the writer's voice by trait (optimist, gloomy, hot_headed, pious, calm), per event (death, bite, dark, break, arrival, letter) or any. Written, not spoken: no voice keys.",
+		"voices": {
+			"death": {
+				"optimist": "{line} We keep going; it's what they'd want.",
+				"gloomy": "{line} Another name for the list. The list only gets longer.",
+				"hot_headed": "{line} Somebody is going to pay for this.",
+				"pious": "{line} Lord, keep them. Keep the rest of us too.",
+				"calm": "{line} We buried what we could and went on."
+			},
+			"bite": {
+				"optimist": "{line} Plenty heal clean. Plenty.",
+				"gloomy": "{line} We all know how this ends.",
+				"hot_headed": "{line} I put the thing down myself, twice over.",
+				"pious": "{line} I prayed over the wound.",
+				"calm": "{line} Cleaned it, dressed it, wrote down the hour."
+			},
+			"dark": {
+				"optimist": "{line} We lived. That has to count for something.",
+				"gloomy": "{line} There's no coming back from this, and we know it.",
+				"hot_headed": "{line} Don't judge me. You weren't there, you weren't starving.",
+				"pious": "{line} Forgive us. I don't think anyone will.",
+				"calm": "{line} It was that or nothing. I won't write about it again."
+			},
+			"break": {
+				"optimist": "{line} They'll come round. We all do.",
+				"gloomy": "{line} It's only a matter of time for the rest of us.",
+				"hot_headed": "{line} I nearly lost it myself.",
+				"pious": "{line} I sat with them and prayed.",
+				"calm": "{line} I gave them space and water."
+			},
+			"arrival": {
+				"optimist": "{line} New faces. Good.",
+				"gloomy": "{line} Another mouth. Let's see how long.",
+				"hot_headed": "{line} They'd better pull their weight.",
+				"pious": "{line} Someone sent them to us.",
+				"calm": "{line} We made room."
+			},
+			"letter": {
+				"optimist": "{line} Maybe someone will read it.",
+				"gloomy": "{line} For whoever finds my body.",
+				"hot_headed": "{line} Said what I should have said years ago.",
+				"pious": "{line} Sealed with a prayer.",
+				"calm": "{line}"
+			},
+			"any": {
+				"optimist": "{line} Still here, though.",
+				"gloomy": "{line} Nothing gets better.",
+				"hot_headed": "{line} I'm sick of it.",
+				"pious": "{line} God willing, tomorrow.",
+				"calm": "{line}"
+			}
+		}
 	}
 }

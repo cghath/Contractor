@@ -38,6 +38,10 @@ const TABLE := {
 	# loss), a faction low or high together, a challenger who lost, a siege lived through, a raid lost.
 	"stole": [-4.0, 48.0], "theft": [-5.0, 48.0], "faction_low": [-5.0, -1.0], "faction_high": [4.0, -1.0],
 	"lost_challenge": [-10.0, 72.0], "siege_survived": [6.0, 48.0], "raided": [-12.0, 72.0],
+	# The mind (Mind, calls 116-118; Proposed): nerve low or breaking, withdrawal, talking someone
+	# down (their time, a good deed), the dark line crossed and seen.
+	"shaken": [-6.0, -1.0], "nerve_broken": [-14.0, -1.0], "withdrawal": [-10.0, -1.0], "talked_down": [3.0, 24.0],
+	"butchered": [-20.0, 240.0], "ate_human": [-25.0, 240.0], "saw_cannibalism": [-15.0, 120.0], "nightmare": [-5.0, 24.0],
 }
 ## Traits lean the mood (Proposed).
 const TRAIT_LEAN := {"optimist": 6.0, "gloomy": -6.0}
@@ -70,7 +74,7 @@ static func add(rec: Dictionary, cause: String, value := NAN, hours := NAN) -> v
 	var row: Array = TABLE.get(base_of(cause), [0.0, 24.0])
 	var v := float(row[0]) if is_nan(value) else value
 	var h := float(row[1]) if is_nan(hours) else hours
-	if base_of(cause) == "killed_person" and SurvivorPerson.has_trait(rec, "cruel"):
+	if base_of(cause) in ["killed_person", "butchered", "ate_human", "saw_cannibalism"] and SurvivorPerson.has_trait(rec, "cruel"):
 		v *= 0.4  # less for the cruel
 	var list: Array = rec.get("moodlets", [])
 	for m: Dictionary in list:

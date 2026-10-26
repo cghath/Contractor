@@ -90,7 +90,8 @@ static func log_days() -> Array:
 			by_day[d] = []
 			days.append(d)
 		var h := float((e as Dictionary).get("hour", 0.0))
-		(by_day[d] as Array).append("%02d:%02d %s" % [floori(h), floori(fmod(h, 1.0) * 60.0), String((e as Dictionary).get("text", ""))])
+		var said := String((e as Dictionary).get("voice", (e as Dictionary).get("text", "")))  # the writer's voice (JournalVoice)
+		(by_day[d] as Array).append("%02d:%02d %s" % [floori(h), floori(fmod(h, 1.0) * 60.0), said])
 	days.sort()
 	days.reverse()
 	var out: Array = []
@@ -126,6 +127,7 @@ static func people_lines() -> Array:
 		if String(rec.get("status", "")) == "dead":
 			parts.append("dead")
 		out.append("%s (%s): %s" % [who, String(rec.get("background", "?")), "; ".join(parts)])
+	out.append_array(Letters.lines(CompoundLevel.current(Survival)))  # the dead's letters, read (call 130)
 	return out
 
 
@@ -201,6 +203,15 @@ func refresh() -> void:
 				for l: String in d.lines:
 					_box.add_child(UiKit.text(l))
 		_:
+			if tab == "people":  # write a letter (Letters, call 130): kept on you, found on your body
+				var letter := LineEdit.new()
+				letter.placeholder_text = "A letter to whoever finds it"
+				letter.max_length = Letters.MAX_CHARS
+				_box.add_child(letter)
+				_box.add_child(UiKit.button("Write a letter", func() -> void:
+					var intel_l := Intel.get_intel()
+					if intel_l and letter.text.strip_edges() != "":
+						intel_l.request_letter(letter.text)))
 			var lines: Array = _view.get(tab, [])
 			if lines.is_empty():
 				_box.add_child(UiKit.hint({"people": "Nobody met yet.", "places": "No marks yet.", "deadlines": "No clocks running.",

@@ -222,6 +222,7 @@ static func on_bitten(victim: Soldier, part: StringName) -> void:
 	if not newest.is_empty():
 		newest.bite = true
 		newest.stage = maxi(int(newest.stage), 1)
+	Nerve.shake(n, "bite", Mind.traits_of(victim))  # the nerve (Mind)
 	if BiteFever.bitten(n):
 		return
 	BiteFever.start(n, immune_of(victim), Survival.day())
@@ -248,6 +249,7 @@ static func on_treated(treater: Soldier, target: Node, item_id: StringName, part
 	if not Survival.running or patient == null or not is_instance_valid(patient) or patient.vitals == null:
 		return
 	var n := Survival.needs_of(patient)
+	Mind.on_treated(patient, item_id)  # morphine: a painkiller habit (Addictions)
 	if item_id in DRESSINGS:
 		Infection.server_sync(patient, n)
 		Infection.dress(n, String(part))

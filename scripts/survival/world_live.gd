@@ -324,6 +324,7 @@ func _on_died(s: Soldier, gid: String, pid: String) -> void:
 		m.event(String(g.zone), "death", [gid] + (["player"] if by_player else []), "%s of %s was killed%s" % [nm, String(g.name), " by %s" % String(info.get("name", "")) if by_player else (" by the dead" if by_dead else "")])
 		if WorldGroup.size(g) == 0:
 			m._group_dies(g, "wiped out"))
+	Nerve.server_on_killed(s)  # killing a person shakes the killer (Mind)
 	if by_player:
 		sim.server_change_relation(gid, KILL_RELATION, "%s killed one of ours" % String(info.get("name", "a stranger")))
 
