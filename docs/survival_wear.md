@@ -5,7 +5,7 @@ Calls 120-123 (docs/survival.md), with call 38 (durability), 43 (improvised guns
 
 ## Where the build is
 
-- 2026-10-26: weapon, ammo, clothing and vehicle wear built; see the CHANGELOG's entry and the
+- 2026-10-26: weapon, ammo, clothing and vehicle wear built; R2684 wear PASS, R2680 survival, weapons, clothing PASS; see the CHANGELOG entry and the
   verdict in docs/survival.md's "Where the build is".
 
 ## The model
