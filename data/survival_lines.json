@@ -1,184 +1,211 @@
 {
-	"_about": "Contractor: Fallen's people's lines (docs/survival_people.md section 5, call 54/76). A topic lists lines; a line's tags must all be the speaker's (TalkMenu.tags_of: status, mood band, scared/cocky, traits, want kind, disposition, grudge) and the most specific match wins, ties picked at random. Untagged lines are the fallback. {name} {first} {want} {zone} {background} {item} fill in. Short and plain: the TTS voices them later.",
+	"_about": "Contractor: Fallen's people's lines (docs/survival_people.md section 5, call 54/76). A topic lists lines; a line's tags must all be the speaker's (TalkMenu.tags_of: status, mood band, scared/cocky, traits, want kind, disposition, grudge) and the most specific match wins, ties picked at random. Untagged lines are the fallback. {name} {first} {want} {zone} {background} {item} fill in. Short and plain: the TTS voices them later. Each line has a `voice` (its clip's name, <topic>_<NN>, under assets/voices/survival/<voice set>/) and a `speaker` (kind, sex, age: the voices tools/voices/render_survival.py renders it in); `voice_text` is what's said when it differs from the subtitle (VoiceLines, docs/survival_audio.md).",
 	"topics": {
 		"greet": [
-			{"text": "I'm {first}. That's all you need for now."},
-			{"text": "Name's {first}. I was a {background}, before."},
-			{"text": "Stay back. Please. I don't want any trouble.", "tags": ["scared"]},
-			{"text": "Don't come closer. I mean it. I'm just {first}.", "tags": ["scared", "wary"]},
-			{"text": "Look what crawled in. You lost, or just stupid?", "tags": ["cocky"]},
-			{"text": "{first}. And this is my patch, so talk fast.", "tags": ["cocky", "hostile"]},
-			{"text": "Oh thank god, a living face. I'm {first}.", "tags": ["optimist"]},
-			{"text": "{first}. Not that names matter much now.", "tags": ["gloomy"]},
-			{"text": "It's me, {first}. Who else would it be.", "tags": ["companion"]}
+			{"text": "I'm {first}. That's all you need for now.", "voice": "greet_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Name's {first}. I was a {background}, before.", "voice": "greet_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Stay back. Please. I don't want any trouble.", "tags": ["scared"], "voice": "greet_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Don't come closer. I mean it. I'm just {first}.", "tags": ["scared", "wary"], "voice": "greet_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Look what crawled in. You lost, or just stupid?", "tags": ["cocky"], "voice": "greet_05", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "{first}. And this is my patch, so talk fast.", "tags": ["cocky", "hostile"], "voice": "greet_06", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Oh thank god, a living face. I'm {first}.", "tags": ["optimist"], "voice": "greet_07", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "{first}. Not that names matter much now.", "tags": ["gloomy"], "voice": "greet_08", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "It's me, {first}. Who else would it be.", "tags": ["companion"], "voice": "greet_09", "speaker": {"kind": "companion", "sex": "any", "age": "any"}}
 		],
 		"warn": [
-			{"text": "That's close enough!"},
-			{"text": "Hands where I can see them!", "tags": ["hostile"]},
-			{"text": "Keep walking. I've got nothing for you.", "tags": ["wary"]},
-			{"text": "Please, just go past. Please.", "tags": ["scared"]}
+			{"text": "That's close enough!", "voice": "warn_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Hands where I can see them!", "tags": ["hostile"], "voice": "warn_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Keep walking. I've got nothing for you.", "tags": ["wary"], "voice": "warn_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Please, just go past. Please.", "tags": ["scared"], "voice": "warn_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"want": [
-			{"text": "You want me along? Then I want {want}."},
-			{"text": "Bring me {want} and I'm yours.", "tags": ["want_item"]},
-			{"text": "Cash still talks to me. {want}, and I come with you.", "tags": ["want_money"]},
-			{"text": "{want}. Do that for me and we'll talk.", "tags": ["want_favour"]},
-			{"text": "I just want {want}. Somewhere I can sleep.", "tags": ["want_place"]},
-			{"text": "Everything has a price. Mine's {want}.", "tags": ["want_money", "greedy"]},
-			{"text": "I'll come. I'd rather not be alone anymore.", "tags": ["companion"]}
+			{"text": "You want me along? Then I want {want}.", "voice": "want_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Bring me {want} and I'm yours.", "tags": ["want_item"], "voice": "want_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Cash still talks to me. {want}, and I come with you.", "tags": ["want_money"], "voice": "want_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "{want}. Do that for me and we'll talk.", "tags": ["want_favour"], "voice": "want_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I just want {want}. Somewhere I can sleep.", "tags": ["want_place"], "voice": "want_05", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Everything has a price. Mine's {want}.", "tags": ["want_money", "greedy"], "voice": "want_06", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I'll come. I'd rather not be alone anymore.", "tags": ["companion"], "voice": "want_07", "speaker": {"kind": "companion", "sex": "any", "age": "any"}}
 		],
 		"place": [
-			{"text": "{zone}? Quiet in the day. Don't trust the nights."},
-			{"text": "I came through {zone} on foot. The dead sit in the houses.", "tags": ["out_there"]},
-			{"text": "The church still had food last week. Maybe.", "tags": ["pious"]},
-			{"text": "Every place is the same now. Empty or full of them.", "tags": ["gloomy"]}
+			{"text": "{zone}? Quiet in the day. Don't trust the nights.", "voice": "place_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I came through {zone} on foot. The dead sit in the houses.", "tags": ["out_there"], "voice": "place_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "The church still had food last week. Maybe.", "tags": ["pious"], "voice": "place_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Every place is the same now. Empty or full of them.", "tags": ["gloomy"], "voice": "place_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"trade": [
-			{"text": "Let's see what you've got."},
-			{"text": "I'll trade when you've got something worth it.", "tags": ["greedy"]},
-			{"text": "Fair's fair. What are you carrying?", "tags": ["kind"]},
-			{"text": "Quick, before anyone sees.", "tags": ["scared"]}
+			{"text": "Let's see what you've got.", "voice": "trade_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I'll trade when you've got something worth it.", "tags": ["greedy"], "voice": "trade_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Fair's fair. What are you carrying?", "tags": ["kind"], "voice": "trade_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Quick, before anyone sees.", "tags": ["scared"], "voice": "trade_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"trade_no": [
-			{"text": "I don't do the trading. Ask around."},
-			{"text": "Not with you.", "tags": ["grudge"]}
+			{"text": "I don't do the trading. Ask around.", "voice": "trade_no_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Not with you.", "tags": ["grudge"], "voice": "trade_no_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"trade_unfair": [
-			{"text": "That's not a fair trade."},
-			{"text": "You think I'm stupid?", "tags": ["hot_headed"]},
-			{"text": "Put more on the table or walk.", "tags": ["greedy"]}
+			{"text": "That's not a fair trade.", "voice": "trade_unfair_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "You think I'm stupid?", "tags": ["hot_headed"], "voice": "trade_unfair_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Put more on the table or walk.", "tags": ["greedy"], "voice": "trade_unfair_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"trade_done": [
-			{"text": "Deal."},
-			{"text": "Pleasure. Come back when you've more.", "tags": ["greedy"]},
-			{"text": "Good trade. Stay safe out there.", "tags": ["kind"]}
+			{"text": "Deal.", "voice": "trade_done_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Pleasure. Come back when you've more.", "tags": ["greedy"], "voice": "trade_done_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Good trade. Stay safe out there.", "tags": ["kind"], "voice": "trade_done_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"rumour_none": [
-			{"text": "I haven't heard anything about that."},
-			{"text": "Nothing I'd swear to.", "tags": ["calm"]},
-			{"text": "Why would I tell you?", "tags": ["grudge"]}
+			{"text": "I haven't heard anything about that.", "voice": "rumour_none_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Nothing I'd swear to.", "tags": ["calm"], "voice": "rumour_none_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Why would I tell you?", "tags": ["grudge"], "voice": "rumour_none_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"recruit_yes": [
-			{"text": "Alright. I'm with you."},
-			{"text": "Deal. Don't make me regret it.", "tags": ["cocky"]},
-			{"text": "Thank you. Thank you. I'll pull my weight.", "tags": ["scared"]},
-			{"text": "Good. Let's get moving.", "tags": ["hard_worker"]}
+			{"text": "Alright. I'm with you.", "voice": "recruit_yes_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Deal. Don't make me regret it.", "tags": ["cocky"], "voice": "recruit_yes_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Thank you. Thank you. I'll pull my weight.", "tags": ["scared"], "voice": "recruit_yes_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Good. Let's get moving.", "tags": ["hard_worker"], "voice": "recruit_yes_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"recruit_no": [
-			{"text": "Not yet. You know what I want."},
-			{"text": "Come back with {want}. Then we'll talk.", "tags": ["want_item"]},
-			{"text": "That's not {want}. Try again.", "tags": ["want_money"]},
-			{"text": "You haven't done it yet. I'd know.", "tags": ["want_favour"]},
-			{"text": "Where would I even sleep? Find a place first.", "tags": ["want_place"]},
-			{"text": "Not with you. Not after that.", "tags": ["grudge"]}
+			{"text": "Not yet. You know what I want.", "voice": "recruit_no_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Come back with {want}. Then we'll talk.", "tags": ["want_item"], "voice": "recruit_no_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "That's not {want}. Try again.", "tags": ["want_money"], "voice": "recruit_no_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "You haven't done it yet. I'd know.", "tags": ["want_favour"], "voice": "recruit_no_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Where would I even sleep? Find a place first.", "tags": ["want_place"], "voice": "recruit_no_05", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Not with you. Not after that.", "tags": ["grudge"], "voice": "recruit_no_06", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"gift": [
-			{"text": "For me? Thanks."},
-			{"text": "Huh. Didn't expect that.", "tags": ["cocky"]},
-			{"text": "God bless you.", "tags": ["pious"]}
+			{"text": "For me? Thanks.", "voice": "gift_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Huh. Didn't expect that.", "tags": ["cocky"], "voice": "gift_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "God bless you.", "tags": ["pious"], "voice": "gift_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"threaten_fold": [
-			{"text": "Okay, okay! Don't hurt me!"},
-			{"text": "Please! Take what you want!", "tags": ["scared"]}
+			{"text": "Okay, okay! Don't hurt me!", "voice": "threaten_fold_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Please! Take what you want!", "tags": ["scared"], "voice": "threaten_fold_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"threaten_draw": [
-			{"text": "Try it. See what happens."},
-			{"text": "You picked the wrong one.", "tags": ["cocky"]}
+			{"text": "Try it. See what happens.", "voice": "threaten_draw_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "You picked the wrong one.", "tags": ["cocky"], "voice": "threaten_draw_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"threaten_calm": [
-			{"text": "Put that down. Nobody needs to die today."}
+			{"text": "Put that down. Nobody needs to die today.", "voice": "threaten_calm_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"how_are_you": [
-			{"text": "I'm alright."},
-			{"text": "Good, actually. Feels like we've got a chance.", "tags": ["mood_high"]},
-			{"text": "Getting by.", "tags": ["mood_ok"]},
-			{"text": "Not great. I keep thinking about before.", "tags": ["mood_low"]},
-			{"text": "I can't do this much longer.", "tags": ["mood_broken"]},
-			{"text": "I'm starving, honestly.", "tags": ["hungry"]},
-			{"text": "Cold. So cold.", "tags": ["cold"]}
+			{"text": "I'm alright.", "voice": "how_are_you_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Good, actually. Feels like we've got a chance.", "tags": ["mood_high"], "voice": "how_are_you_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Getting by.", "tags": ["mood_ok"], "voice": "how_are_you_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Not great. I keep thinking about before.", "tags": ["mood_low"], "voice": "how_are_you_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I can't do this much longer.", "tags": ["mood_broken"], "voice": "how_are_you_05", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I'm starving, honestly.", "tags": ["hungry"], "voice": "how_are_you_06", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Cold. So cold.", "tags": ["cold"], "voice": "how_are_you_07", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"think": [
-			{"text": "We're doing alright. Keep it quiet and keep moving."},
-			{"text": "We should push harder. They're slow.", "tags": ["cocky"]},
-			{"text": "We take too many chances.", "tags": ["timid"]},
-			{"text": "I trust you. Mostly.", "tags": ["loyal"]}
+			{"text": "We're doing alright. Keep it quiet and keep moving.", "voice": "think_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "We should push harder. They're slow.", "tags": ["cocky"], "voice": "think_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "We take too many chances.", "tags": ["timid"], "voice": "think_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I trust you. Mostly.", "tags": ["loyal"], "voice": "think_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"hungry": [
-			{"text": "I'm out of food. Anyone got a tin?"},
-			{"text": "I need to eat something soon.", "tags": ["mood_low"]}
+			{"text": "I'm out of food. Anyone got a tin?", "voice": "hungry_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I need to eat something soon.", "tags": ["mood_low"], "voice": "hungry_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"thirsty": [
-			{"text": "I need water. I'm all out."}
+			{"text": "I need water. I'm all out.", "voice": "thirsty_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"ate": [
-			{"text": "Eating something, give me a second."}
+			{"text": "Eating something, give me a second.", "voice": "ate_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"spotted_dead": [
-			{"text": "Dead, close!"},
-			{"text": "One of them, there!", "tags": ["calm"]},
-			{"text": "Oh god, they're here!", "tags": ["scared"]}
+			{"text": "Dead, close!", "voice": "spotted_dead_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "One of them, there!", "tags": ["calm"], "voice": "spotted_dead_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Oh god, they're here!", "tags": ["scared"], "voice": "spotted_dead_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"took_item": [
-			{"text": "Got {item}."},
-			{"text": "Mine now: {item}.", "tags": ["greedy"]}
+			{"text": "Got {item}.", "voice": "took_item_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Mine now: {item}.", "tags": ["greedy"], "voice": "took_item_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"plan_dusk": [
-			{"text": "We should find somewhere before dark."},
-			{"text": "Getting dark. Let's get walls around us.", "tags": ["timid"]}
+			{"text": "We should find somewhere before dark.", "voice": "plan_dusk_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Getting dark. Let's get walls around us.", "tags": ["timid"], "voice": "plan_dusk_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"plan_horde": [
-			{"text": "There's a horde out there. We need to go quiet."},
-			{"text": "That's a lot of them. Let's not be here.", "tags": ["scared"]}
+			{"text": "There's a horde out there. We need to go quiet.", "voice": "plan_horde_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "That's a lot of them. Let's not be here.", "tags": ["scared"], "voice": "plan_horde_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"plan_idle": [
-			{"text": "I know a clinic two towns over. Might be worth it."},
-			{"text": "That smoke earlier. Could be a camp."},
-			{"text": "We need more water before tomorrow."}
+			{"text": "I know a clinic two towns over. Might be worth it.", "voice": "plan_idle_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "That smoke earlier. Could be a camp.", "voice": "plan_idle_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "We need more water before tomorrow.", "voice": "plan_idle_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"refuse_order": [
-			{"text": "No. Not in there. That's a horde."},
-			{"text": "You go if you want. I'm not walking into that.", "tags": ["cocky"]},
-			{"text": "I can't. I'm sorry, I can't.", "tags": ["scared"]},
-			{"text": "No. Not today.", "tags": ["mood_broken"]}
+			{"text": "No. Not in there. That's a horde.", "voice": "refuse_order_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "You go if you want. I'm not walking into that.", "tags": ["cocky"], "voice": "refuse_order_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I can't. I'm sorry, I can't.", "tags": ["scared"], "voice": "refuse_order_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "No. Not today.", "tags": ["mood_broken"], "voice": "refuse_order_04", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"refuse_again": [
-			{"text": "I said no."},
-			{"text": "Ask me a hundred times. Still no.", "tags": ["fickle"]}
+			{"text": "I said no.", "voice": "refuse_again_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Ask me a hundred times. Still no.", "tags": ["fickle"], "voice": "refuse_again_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"obey_grudging": [
-			{"text": "Fine. Fine! I'm going."},
-			{"text": "If you say so. I'm with you.", "tags": ["loyal"]}
+			{"text": "Fine. Fine! I'm going.", "voice": "obey_grudging_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "If you say so. I'm with you.", "tags": ["loyal"], "voice": "obey_grudging_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"grief": [
-			{"text": "They didn't deserve that."},
-			{"text": "We should bury them. We owe them that."},
-			{"text": "I can't look at it.", "tags": ["squeamish"]}
+			{"text": "They didn't deserve that.", "voice": "grief_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "We should bury them. We owe them that.", "voice": "grief_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "I can't look at it.", "tags": ["squeamish"], "voice": "grief_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"bury_thanks": [
-			{"text": "Thank you. They'd have wanted that."},
-			{"text": "Rest now.", "tags": ["pious"]}
+			{"text": "Thank you. They'd have wanted that.", "voice": "bury_thanks_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Rest now.", "tags": ["pious"], "voice": "bury_thanks_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"put_down": [
-			{"text": "That wasn't them anymore. It wasn't."}
+			{"text": "That wasn't them anymore. It wasn't.", "voice": "put_down_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"newcomer": [
-			{"text": "Who are you? Where's the one who led us?"},
-			{"text": "New face. We'll see.", "tags": ["cocky"]}
+			{"text": "Who are you? Where's the one who led us?", "voice": "newcomer_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "New face. We'll see.", "tags": ["cocky"], "voice": "newcomer_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"take_over": [
-			{"text": "Then I'll lead. Follow me."}
+			{"text": "Then I'll lead. Follow me.", "voice": "take_over_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
-		"break_crying": [{"text": "I can't. I just need a minute. I can't."}],
-		"break_rage": [{"text": "I'm sick of this! Sick of all of it!"}],
-		"break_binge": [{"text": "Leave me alone. I'm having this."}],
-		"break_hiding": [{"text": "I'm not going out there. Not today."}],
-		"break_desertion": [{"text": "I'm done. Don't come after me."}],
-		"break_refusal": [{"text": "Don't ask me anything. I won't."}],
+		"break_crying": [
+			{"text": "I can't. I just need a minute. I can't.", "voice": "break_crying_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"break_rage": [
+			{"text": "I'm sick of this! Sick of all of it!", "voice": "break_rage_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"break_binge": [
+			{"text": "Leave me alone. I'm having this.", "voice": "break_binge_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"break_hiding": [
+			{"text": "I'm not going out there. Not today.", "voice": "break_hiding_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"break_desertion": [
+			{"text": "I'm done. Don't come after me.", "voice": "break_desertion_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"break_refusal": [
+			{"text": "Don't ask me anything. I won't.", "voice": "break_refusal_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
 		"favour_done": [
-			{"text": "You did it? Then I keep my word."}
+			{"text": "You did it? Then I keep my word.", "voice": "favour_done_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
 		"favour_marked": [
-			{"text": "I marked it on your map. Don't take forever."}
+			{"text": "I marked it on your map. Don't take forever.", "voice": "favour_marked_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"radio": [
+			{"text": "A woman's voice, flat: \"Seven. Four. Four. Nine. Arche. Seven. Four...\" Then a tone, and nothing.", "voice_text": "Seven. Four. Four. Nine. Arche. Seven. Four.", "speaker": {"kind": "radio", "sex": "f", "age": "adult"}, "voice": "radio_01"},
+			{"text": "A child's music box, then numbers in a man's voice: \"Two. Zero. One. One. Arche holds.\"", "voice_text": "Two. Zero. One. One. Arche holds.", "speaker": {"kind": "radio", "sex": "m", "age": "adult"}, "voice": "radio_02"},
+			{"text": "Three long tones. \"Station Arche. Group one. Six, one, eight. Repeat: six, one, eight.\"", "voice_text": "Station Arche. Group one. Six, one, eight. Repeat: six, one, eight.", "speaker": {"kind": "radio", "sex": "any", "age": "adult"}, "voice": "radio_03"}
+		],
+		"raider_warn": [
+			{"text": "This road's ours. Pay or turn around.", "tags": ["hostile"], "voice": "raider_warn_01", "speaker": {"kind": "raider", "sex": "any", "age": "any"}},
+			{"text": "Drop the bag and walk away.", "voice": "raider_warn_02", "speaker": {"kind": "raider", "sex": "any", "age": "any"}},
+			{"text": "Wrong street, friend. Keep walking.", "tags": ["cocky"], "voice": "raider_warn_03", "speaker": {"kind": "raider", "sex": "any", "age": "any"}}
+		],
+		"enclave_halt": [
+			{"text": "Halt. Hands where we can see them.", "voice": "enclave_halt_01", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}},
+			{"text": "Checkpoint. State your business.", "voice": "enclave_halt_02", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}},
+			{"text": "Toll's due. No toll, no road.", "voice": "enclave_halt_03", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}}
 		]
 	}
 }

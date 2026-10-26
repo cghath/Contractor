@@ -532,6 +532,9 @@ func _show(speaker_path: NodePath, speaker_name: String, id: String, text: Strin
 	if shown.size() > LOG_SIZE:
 		shown.pop_front()
 	line_shown.emit(speaker_name, text)
+	if id == "people" and CompoundLevel.current(self) is SurvivalLevel:
+		VoiceLines.play_people(text, get_node_or_null(speaker_path))  # Fallen's lines: their clip, else the subtitle alone
+		return
 	play(StringName(id), get_node_or_null(speaker_path) as Node3D)
 
 

@@ -136,7 +136,8 @@ func _ask(topic: String, now: float) -> void:
 	if now - _asked_at < ASK_GAP_S:
 		return
 	_asked_at = now
-	layer.say(body, TalkMenu.line_for(rec, topic))
+	if VoiceLines.should_say(rec, topic, VoiceLines.quiet_now()):  # talkativeness; quiet when it's tense (call 76)
+		layer.say(body, TalkMenu.line_for(rec, topic))
 
 
 ## Eats or drinks the first thing in the kit `ok` accepts (Consumables, so the food's values go
@@ -207,7 +208,8 @@ func _pick_up_near() -> void:
 		var taken := body.inventory.take(it.item_id, it.count, it.state)
 		if taken > 0:
 			body._server_took(it, taken)
-			layer.say(body, TalkMenu.line_for(rec, "took_item", {"item": item.name.to_lower()}))
+			if VoiceLines.should_say(rec, "took_item", VoiceLines.quiet_now()):
+				layer.say(body, TalkMenu.line_for(rec, "took_item", {"item": item.name.to_lower()}))
 			return
 
 
@@ -220,7 +222,8 @@ func _suggest() -> void:
 		topic = "plan_horde"
 	elif h >= 17.0 and h < 20.0:
 		topic = "plan_dusk"
-	layer.say(body, TalkMenu.line_for(rec, topic))
+	if VoiceLines.should_say(rec, topic, VoiceLines.quiet_now()):
+		layer.say(body, TalkMenu.line_for(rec, topic))
 
 
 ## Whether this companion refuses `order` to `point` (vetoes): see the class doc.

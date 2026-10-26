@@ -303,6 +303,9 @@ func _client_needs(hunger: float, thirst: float, stamina: float) -> void:
 
 
 func _process(delta: float) -> void:
+	var here := CompoundLevel.current(self)
+	if here is SurvivalLevel and here.get_node_or_null(FallenAudio.NODE_NAME) == null:
+		FallenAudio.install(here)  # the soundscape, tension and music, every peer (docs/survival_audio.md)
 	if not running or not multiplayer.is_server():
 		return
 	var level := CompoundLevel.current(self)

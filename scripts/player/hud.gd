@@ -674,6 +674,7 @@ func inspected() -> StringName:
 func flash(text: String) -> void:
 	_message.text = text
 	_message_time = 2.5
+	FallenAudio.on_flash(self, text)  # a survival radio broadcast: its static and voice (docs/survival_audio.md)
 
 
 func is_inventory_open() -> bool:

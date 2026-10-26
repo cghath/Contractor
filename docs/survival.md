@@ -2,6 +2,9 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
+  lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
+  (fallenaudio, survival, sound, voice); see docs/survival_audio.md.
 - **PHASE D COMPLETE on claude/survival**: the body (claude/survival-body: bite clock, infection, surgery, sicknesses,
   water works, hygiene, seasons on the body, the body screen) and the world (claude/survival-seasons: seasons + the thaw,
   sieges, politics, infrastructure, traps/lures/masking) merged; survival, body, seasons, worldsim, settlement, medical
