@@ -7,6 +7,7 @@
 - **Phase C started ~06:40**: the world sim (claude/survival-worldsim) and the settlement's work (claude/survival-settlement)
   on Opus lanes; next lanes once the sim lands: the enclave + ARCHE trail + bunkers, trade + the intel layer, mounts.
 - Calls now 1-142 (the table below).
+- **Phase D body built on `claude/survival-body`** (survival_medical.md 2, 3, 5, 6, 7; calls 10, 14, 15, 46, 48, 58, 78-81): the bite's fever clock, wound infection and healing, field surgery, the sicknesses, water works and hygiene, the seasons on the body, the body screen (backslash); R2662 body PASS; see survival_medical.md's "Where the build is".
 - **Phase C core (the world sim) built on `claude/survival-worldsim`** (survival_world.md 2-5, 9, 11-13): groups,
   regions, the judgement, far fights, pressure and hordes across the map, live groups, the catch-up, rumours, goal
   modes; R2652 PASS (worldsim, survival, settlement; a far tick 13 ms for 78 groups); see survival_world.md's "Where the build is".

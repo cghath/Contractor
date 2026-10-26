@@ -6,6 +6,24 @@ cure (calls 10, 15, 46), sleep (call 47), water and hygiene (call 48), the seaso
 (call 34), the body screen and its skill gate (call 58), and the world options that scale it
 (call 49). Written 2026-10-26.
 
+## Where the build is (2026-10-26, phase D's body lane, `claude/survival-body`)
+
+- **Built** sections 2, 3, 5, 6, 7 on top of the metabolism (`Needs`): `Needs.server_step` now runs `Body.server_step`
+  (scripts/survival/body.gd) after the stores, which drives `BiteFever` (the week-long clock, its stages, slowers,
+  collapse and the rise; companion choices), `Infection` (a record per wound in the body's "wounds": staging to
+  sepsis, cleaning, dressings, antibiotic courses, abscess, gangrene, tetanus, healing by days with days-left and
+  why), `Sickness` (colds, flu, pneumonia, tetanus, scurvy, rickets, anaemia, the transfusion reaction, blood types,
+  the cough's noise, spreading among companions and settlers each world hour), `Hygiene` (washing, soap, clothes,
+  gore and smell), `BodySeason` (cold, thirst, shelf life, clothing warmth, heat stroke, frostbite). `Surgery` does
+  the six operations; `WaterWorks` the sources, taps, repairs and treating water. The body screen (`BodyScreen`
+  inside `BodyReadout`, backslash) replaces the text readout. Hooks: Melee's bite -> `Body.on_bitten`;
+  `Soldier._log_care` -> `Body.on_treated`; `Cure.server_apply` also clears the clock; `Survival._server_body_action`
+  for the screen's actions. Every number is **Proposed** (consts at the top of each file).
+- **Not yet**: the settlement's clinic, basin and bath pieces (surgery and washing read a bunk/table and a `where`
+  argument for now), the wash job's call (`Hygiene.on_wash_job` is the hook), spoiling food (`BodySeason.spoils_days`
+  is ready), a lone bitten survivor's clock in the far sim, the camera reading `vision_sway`, permanent consequences
+  (flags in "permanent" only), the clothing slots (carried clothing counts as worn).
+
 Built on: `Vitals` and `WoundModel` (per-part wounds with voxel hit volumes; bleeding classes
 arterial, junctional, venous, internal; tension and chest wounds, airway, fractures and pelvis,
 burns, hypothermia; blood volume, pulse, pressure, arrest and CPR, defib, epinephrine, fluids
