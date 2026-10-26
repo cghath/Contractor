@@ -152,6 +152,9 @@ var _model := WoundModel.new()
 var _last_hit_at := -1000.0   # host: when a round or impact last landed (Time seconds)
 ## Host: what last hurt this body ({"cause", "part", "distance"}), for the session log (SessionLog) and nothing else.
 var last_cause := {}
+## Survival's metabolism (Needs.sway_mult): tired or shivering hands shake the aim (1 off survival;
+## set on the host and on the owner, where aiming runs).
+var needs_sway := 1.0
 var _net_dirty := false       # clients: net_state not yet applied to _model
 var _last_pos := Vector3.INF  # host: where the body was last step (_track_stillness)
 var _sim_left := 0.0          # host: time not yet simulated
@@ -272,7 +275,7 @@ func speed_mult() -> float:
 
 ## `rifle`: a shouldered weapon in hand (a broken collarbone only hurts then).
 func sway_mult(rifle := false) -> float:
-	return _m().sway_mult(rifle)
+	return _m().sway_mult(rifle) * needs_sway
 
 
 ## How fast aiming down sights moves (a broken collarbone, rifles only).

@@ -13,6 +13,7 @@ extends Node
 ## Clients know they're in survival by the level (SurvivalLevel.of); `running` is the host's.
 
 signal needs_changed(hunger: float, thirst: float)  # this peer's own survivor
+signal body_changed  # this peer's own survivor's body (my_body)
 
 const PREFIX := "survival_"
 const SECTION := &"survival"
@@ -47,6 +48,8 @@ var world := ""
 ## This peer's own needs (the host sends them to their owner).
 var my_hunger := 100.0
 var my_thirst := 100.0
+## This peer's own survivor's body, every store (Needs; the host sends it to its owner).
+var my_body := {}
 
 var _tick := 0.0
 var _send := 0.0
@@ -190,30 +193,22 @@ func _apply_sky(level: Node) -> void:
 ## A survivor's needs, {"hunger", "thirst"} (host: the truth, kept on the body).
 static func needs_of(s: Soldier) -> Dictionary:
 	if not s.has_meta(&"needs"):
-		s.set_meta(&"needs", {"hunger": 100.0, "thirst": 100.0})
-	return s.get_meta(&"needs")
+		s.set_meta(&"needs", Needs.fresh())
+	return Needs.ensure(s.get_meta(&"needs"))
 
 
 ## Stamina recovery's share from these needs (1 fed and watered, less when low).
 static func stamina_mult_for(hunger: float, thirst: float) -> float:
-	var worst := minf(hunger, thirst)
-	if worst >= LOW:
-		return 1.0
-	return lerpf(EMPTY_STAMINA_MULT, LOW_STAMINA_MULT, worst / LOW)
+	return Needs.food_stamina_mult(hunger, thirst)
 
 
-## Host: `seconds` of a survivor's life: thirst and hunger go down (faster sprinting or heavy),
-## and an empty one costs blood.
+## Host: `seconds` of a survivor's life: the metabolism steps (Needs: calories, water, macros,
+## vitamins, sleep, warmth, hygiene; faster sprinting or heavy, asleep at SurvivalSleep.SPEED),
+## its effects go on the body (stamina, sway, blood when empty) and a sickness that shows is told.
 func server_drain(s: Soldier, seconds: float) -> void:
 	var n := needs_of(s)
-	var world_days := seconds / (DAY_MIN * 60.0)
-	var mult := SPRINT_DRAIN_MULT if s.want_sprint and s.velocity.length() > 3.0 else 1.0
-	n.thirst = maxf(0.0, float(n.thirst) - 100.0 * world_days / THIRST_DAYS * mult)
-	n.hunger = maxf(0.0, float(n.hunger) - 100.0 * world_days / HUNGER_DAYS * mult)
-	s.needs_stamina = stamina_mult_for(float(n.hunger), float(n.thirst))
-	var hurt := (EMPTY_DAMAGE * 2.0 if float(n.thirst) <= 0.0 else 0.0) + (EMPTY_DAMAGE if float(n.hunger) <= 0.0 else 0.0)
-	if hurt > 0.0 and s.vitals.is_up():
-		s.vitals.server_damage(hurt * seconds)
+	Needs.server_step(s, n, seconds)
+	_after_body_step(s, n, seconds)
 
 
 ## Host: `s` ate or drank (Consumables): a "water" dose fills thirst, a "ration" hunger. Returns
@@ -222,13 +217,9 @@ func server_feed(s: Soldier, drug: StringName, doses: float) -> bool:
 	if not running:
 		return false
 	var n := needs_of(s)
-	if drug == &"water":
-		n.thirst = minf(100.0, float(n.thirst) + WATER_PER_DOSE * doses)
-	elif drug == &"ration":
-		n.hunger = minf(100.0, float(n.hunger) + FOOD_PER_DOSE * doses)
-	else:
+	if not Needs.feed_dose(n, drug, doses):
 		return false
-	s.needs_stamina = stamina_mult_for(float(n.hunger), float(n.thirst))
+	Needs.apply(s, n)
 	_send_needs(s)
 	return true
 
@@ -240,8 +231,10 @@ func _send_needs(s: Soldier) -> void:
 	var peer := s.owner_peer()
 	if peer == multiplayer.get_unique_id():
 		_client_needs(float(n.hunger), float(n.thirst), s.needs_stamina)
+		_client_body(n)
 	elif peer in multiplayer.get_peers():
 		_client_needs.rpc_id(peer, float(n.hunger), float(n.thirst), s.needs_stamina)
+		_client_body.rpc_id(peer, n)
 
 
 ## Owner: his survivor's needs (and the stamina share they leave him: movement runs here).
@@ -269,10 +262,7 @@ func _process(delta: float) -> void:
 	if _tick >= TICK_S:
 		var dt := _tick
 		_tick = 0.0
-		_advance_clock(dt)
-		for s: Soldier in MapNodes.players(level):
-			if s.vitals.is_up() and s.respawn_state != Soldier.RESPAWN_WAITING:
-				server_drain(s, dt)
+		server_tick_survivors(level, dt)
 	_pop += delta
 	if _pop >= POP_TICK_S:
 		_pop = 0.0
@@ -311,9 +301,8 @@ func server_player_died(s: Soldier) -> void:
 	state()["graves"] = graves.slice(-20)
 	server_give_starter_kit(s)
 	var n := needs_of(s)
-	n.hunger = RESPAWN_NEEDS
-	n.thirst = RESPAWN_NEEDS
-	s.needs_stamina = 1.0
+	Needs.respawn(n, RESPAWN_NEEDS)
+	Needs.apply(s, n)
 	_send_needs(s)
 	SessionLog.note("survival: %s died at (%.0f, %.0f); %d things left there; back with the starter kit" % [s.log_name(), at.x, at.z, entries.size()])
 
@@ -376,10 +365,9 @@ func server_survivor_joined(s: Soldier) -> void:
 	else:
 		for e: Dictionary in saved.get("kit", []):
 			s.inventory.take(StringName(e.id), int(e.get("count", 1)), GameState.from_json(e.get("state", {})))
-		var n := needs_of(s)
-		n.hunger = float((saved.get("needs", {}) as Dictionary).get("hunger", 100.0))
-		n.thirst = float((saved.get("needs", {}) as Dictionary).get("thirst", 100.0))
-	s.needs_stamina = stamina_mult_for(float(needs_of(s).hunger), float(needs_of(s).thirst))
+		Needs.restore(needs_of(s), saved.get("needs", {}))
+	SurvivalSleep.wake(needs_of(s))
+	Needs.apply(s, needs_of(s))
 	_send_needs(s)
 
 
@@ -551,3 +539,84 @@ func _footsteps(level: SurvivalLevel) -> void:
 		var radius := float(STEP_M[key]) * DayNight.hearing_x()
 		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
 		server_noise(s, s.global_position, radius, loud)
+
+
+# --- The metabolism and sleep (phase A step 5; Needs, SurvivalSleep) -----------------------
+
+## Host: one survival tick of `dt` real seconds in `level`: the clock (at SurvivalSleep.SPEED
+## while everyone is asleep), every survivor's body (a sleeper's at SPEED), and who wakes.
+func server_tick_survivors(level: Node, dt: float) -> void:
+	var players := MapNodes.players(level)
+	_advance_clock(dt * SurvivalSleep.clock_mult(players))
+	for s: Soldier in players:
+		if s.vitals.is_up() and s.respawn_state != Soldier.RESPAWN_WAITING:
+			server_drain(s, dt * SurvivalSleep.body_mult(s))
+	var sleepers := players.filter(func(p: Soldier) -> bool: return SurvivalSleep.is_asleep(needs_of(p)))
+	if not sleepers.is_empty() and SurvivalSleep.chased(level, players):
+		for p: Soldier in sleepers:
+			_wake(p, "dead")
+
+
+## Host: after a body's step: the sleeper's hours, a sickness that began showing.
+func _after_body_step(s: Soldier, n: Dictionary, seconds: float) -> void:
+	var why := SurvivalSleep.after_step(s, n, seconds / (DAY_MIN * 60.0) * 24.0)
+	if why != "":
+		_wake(s, why)
+	if n.has("_announce"):
+		_tell(s, String(n._announce))
+		n.erase("_announce")
+
+
+## Host: `s` lies down to sleep for `hours` world hours on `where` ("bed", "bedroll" or
+## "ground"; the bed and bedroll pieces are phase B: a dev call or a test says which for now).
+## "" or why not (he's told either way).
+func server_sleep(s: Soldier, hours: float, where := "ground") -> String:
+	var level := CompoundLevel.current(s)
+	var problem := SurvivalSleep.start(s, needs_of(s), hours, where, level != null and SurvivalSleep.chased(level, MapNodes.players(level)))
+	_tell(s, problem if problem != "" else "You lie down to sleep (moving wakes you)")
+	_send_needs(s)
+	return problem
+
+
+func _wake(s: Soldier, why: String) -> void:
+	SurvivalSleep.wake(needs_of(s))
+	var text := SurvivalSleep.wake_text(why)
+	if text != "":
+		_tell(s, text)
+	_send_needs(s)
+
+
+## Host: `s` ate or drank one `item` (Consumables, after its drug went in; `state` its entry's):
+## its food values into his body (Needs.eat), else S1's dose of `drug`. Returns whether it counted.
+func server_eat(s: Soldier, item: ItemData, state: Dictionary, drug: StringName, doses: float) -> bool:
+	if not running:
+		return false
+	if not Needs.has_values(item):
+		return server_feed(s, drug, doses)
+	var n := needs_of(s)
+	Needs.eat(n, item, state)
+	Needs.apply(s, n)
+	_send_needs(s)
+	return true
+
+
+## Host: a line for `s`'s owner (Soldier._client_message: the flash).
+func _tell(s: Soldier, text: String) -> void:
+	if s.is_ai() or text == "" or not s.is_inside_tree():
+		return
+	var peer := s.owner_peer()
+	if peer == multiplayer.get_unique_id() or peer in multiplayer.get_peers():
+		s._client_message.rpc_id(peer, text)
+
+
+## Owner: his survivor's whole body (Needs), for the HUD's signs and the body readout, and the
+## aim sway it leaves him (aiming runs here).
+@rpc("authority", "call_remote", "reliable")
+func _client_body(body: Dictionary) -> void:
+	my_body = body.duplicate(true)
+	var level := CompoundLevel.current(self)
+	if level:
+		var me := level.players.get_node_or_null(str(multiplayer.get_unique_id())) as Soldier
+		if me and me.vitals:
+			me.vitals.needs_sway = Needs.sway_mult(my_body)
+	body_changed.emit()

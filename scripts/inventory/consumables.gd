@@ -7,7 +7,9 @@ extends RefCounted
 ##     ibuprofen, paracetamol: a little pain relief (far under morphine);
 ##     water, ration (bottled water, electrolytes, MRE, IRP, energy bar, canned meat): stamina
 ##     comes back a little faster. Outside survival food and water aren't tracked, so eating and
-##     drinking only help; in survival they fill thirst and hunger (Survival.server_feed).
+##     drinking only help; in survival they feed the metabolism (Survival.server_eat, Needs.eat:
+##     an item's kcal, water_l, protein, carbs, fat, vitamins, raw and quality; items without
+##     values fall back to S1's water and ration doses, Survival.server_feed).
 ##   {"battery": true} (AA, CR123A): a fresh battery for an NVG (Nvg.server_recharge).
 ## Right-click > Use in the inventory (InventoryScreen; Soldier "consume"): instant, one unit used.
 
@@ -53,14 +55,17 @@ static func server_use(soldier: Soldier, container: StringName, index: int) -> S
 	var problem := use_problem(soldier, container, index)
 	if problem != "":
 		return problem
-	var item := ItemDB.get_item(StringName(soldier.inventory.containers[container][index].id))
+	var entry: Dictionary = soldier.inventory.containers[container][index]
+	var item := ItemDB.get_item(StringName(entry.id))
 	var c: Dictionary = item.stats.consume
 	if bool(c.get("battery", false)):
 		problem = Nvg.server_recharge(soldier.inventory)
 	elif not soldier.vitals.server_take_drug(StringName(String(c.drug)), float(c.get("doses", 1.0))):
 		problem = "You can't use that"
 	else:
-		Survival.server_feed(soldier, StringName(String(c.drug)), float(c.get("doses", 1.0)))  # survival: water and rations fill thirst and hunger
+		# Survival: its food values (kcal, water_l, macros, vitamins; raw or dirty ones can make him
+		# sick) into his body (Needs), else the old water and ration doses.
+		Survival.server_eat(soldier, item, entry.get("state", {}), StringName(String(c.drug)), float(c.get("doses", 1.0)))
 	if problem != "":
 		return problem
 	# Re-find the entry: a recharge moves an NVG entry, which can shift the indices.

@@ -1,7 +1,9 @@
 extends Node
 ## Survival (docs/survival.md): a new world from the menu's entry hosts its start zone as a
 ## SurvivalLevel with nobody living in it but the players; a survivor starts with the starter
-## kit; hunger and thirst drain and eating and drinking fill them; empty needs slow stamina;
+## kit; the metabolism (calories, water, macros, sleep, warmth, hygiene) drains at its rates and
+## food and water fill it; dirty water can make him sick; sleep passes time at speed and a chasing
+## zombie wakes him; the HUD shows only low stores; empty needs slow stamina;
 ## dying drops everything where he fell, it stays, and he's back with a starter kit; the world
 ## saves and Continue hosts it again where it was.
 
@@ -22,6 +24,7 @@ func _ready() -> void:
 	await _test_new_world()
 	if level != null and player != null:
 		_test_needs()
+		await _test_metabolism()
 		await _test_dead()
 		await _test_melee()
 		await _test_melee_weapons()
@@ -56,20 +59,36 @@ func _test_new_world() -> void:
 
 
 func _test_needs() -> void:
-	print("Hunger and thirst")
+	print("Hunger and thirst: the metabolism's calories and water")
 	var n := Survival.needs_of(player)
-	n.hunger = 100.0
-	n.thirst = 100.0
-	Survival.server_drain(player, Survival.DAY_MIN * 60.0 * 0.75)  # three quarters of a world day
-	check(absf(float(n.thirst) - 50.0) < 1.0 and absf(float(n.hunger) - 75.0) < 1.0,
-		"three quarters of a day: thirst at half, hunger at three quarters (%.0f, %.0f)" % [n.thirst, n.hunger])
+	Needs.respawn(n, 100.0)
+	Needs.step(n, 18.0, {})  # three quarters of a world day, calm
+	check(absf(float(n.calories) - (Needs.FED_KCAL - Needs.KCAL_DAY * 0.75)) < 1.0 and absf(float(n.water) - (Needs.FED_L - Needs.WATER_DAY * 0.75)) < 0.01,
+		"three quarters of a day: 1,350 kcal and about 1.9 l gone (%.0f kcal, %.2f l)" % [n.calories, n.water])
+	check(absf(float(n.hunger) - 46.0) < 1.0 and absf(float(n.thirst) - 37.5) < 1.0, "S1's hunger and thirst still read off them (%.0f, %.0f)" % [n.hunger, n.thirst])
+	var hour_kcal := float(n.calories)
+	Survival.server_drain(player, Survival.DAY_MIN * 60.0 / 24.0)  # one world hour, scaled by the day's length
+	var burnt := hour_kcal - float(n.calories)
+	check(burnt > 60.0 and burnt < 200.0, "an hour on the body burns about 75 kcal (%.0f)" % burnt)
+	var calm := Needs.fresh()
+	var running := Needs.fresh()
+	Needs.step(calm, 6.0, {})
+	Needs.step(running, 6.0, {"sprint": true})
+	check(absf((Needs.FED_KCAL - float(running.calories)) - 2.0 * (Needs.FED_KCAL - float(calm.calories))) < 1.0, "running burns twice as fast")
 	check(is_equal_approx(player.needs_stamina, 1.0), "still fed enough: stamina comes back as ever")
+	Needs.respawn(n, 50.0)
+	var kcal := float(n.calories)
+	var protein := float(n.protein)
 	var tin := _index_of(player, &"canned_meat")
-	check(tin[0] != &"" and Consumables.server_use(player, tin[0], tin[1]) == "" and float(n.hunger) > 75.0,
-		"eating the tin fills hunger (%.0f)" % n.hunger)
+	check(tin[0] != &"" and Consumables.server_use(player, tin[0], tin[1]) == "" and absf(float(n.calories) - kcal - 450.0) < 1.0 and float(n.protein) > protein,
+		"eating the tin: its 450 kcal and its protein (%.0f -> %.0f kcal, protein %.0f -> %.0f)" % [kcal, n.calories, protein, n.protein])
+	var water_l := float(n.water)
 	var water := _index_of(player, &"water_bottle")
-	check(water[0] != &"" and Consumables.server_use(player, water[0], water[1]) == "" and float(n.thirst) >= 84.0,
-		"drinking the water fills thirst (%.0f)" % n.thirst)
+	check(water[0] != &"" and Consumables.server_use(player, water[0], water[1]) == "" and absf(float(n.water) - water_l - 1.0) < 0.01,
+		"drinking the bottle: a litre (%.2f -> %.2f l)" % [water_l, n.water])
+	kcal = float(n.calories)
+	Survival.server_feed(player, &"ration", 1.0)
+	check(float(n.calories) > kcal + 500.0, "an item without food values still feeds by S1's dose (%.0f -> %.0f)" % [kcal, n.calories])
 	n.thirst = 10.0
 	Survival.server_drain(player, 1.0)
 	check(player.needs_stamina < Survival.LOW_STAMINA_MULT, "parched: stamina comes back slower (%.2f)" % player.needs_stamina)
@@ -78,10 +97,110 @@ func _test_needs() -> void:
 	var blood := player.vitals.blood_fraction()
 	Survival.server_drain(player, 30.0)
 	var after := player.vitals.blood_fraction()
-	check(after < blood, "empty: it costs blood (%.3f -> %.3f)" % [blood, after])
-	n.thirst = 80.0
-	n.hunger = 80.0
+	check(after < blood, "empty water: it costs blood (%.3f -> %.3f)" % [blood, after])
+	Needs.respawn(n, 80.0)
 	Survival.server_drain(player, 1.0)
+	player.vitals.server_reset_health()
+
+
+func _test_metabolism() -> void:
+	print("The metabolism: water quality, sickness, sleep, warmth, the body readout")
+	var n := Survival.needs_of(player)
+	Needs.respawn(n, 80.0)
+	# Water quality: raw dirty water rolls dysentery; treated water doesn't.
+	var dirty := ItemDB.get_item(&"dirty_water_bottle")
+	check(dirty != null and Needs.quality_of(dirty) == "dirty" and bool(dirty.stats.get("raw", false)), "a bottle of dirty water is dirty and raw")
+	player.inventory.take(&"dirty_water_bottle", 1)
+	Needs.force_roll = 0.0
+	var bottle := _index_of(player, &"dirty_water_bottle")
+	check(bottle[0] != &"" and Consumables.server_use(player, bottle[0], bottle[1]) == "" and String((n.sick as Dictionary).get("id", "")) == "dysentery",
+		"drinking it raw, an unlucky roll: dysentery (%s)" % [n.sick])
+	var lucky := Needs.fresh()
+	Needs.force_roll = 0.99
+	Needs.eat(lucky, dirty, {})
+	var treated := Needs.fresh()
+	Needs.force_roll = 0.0
+	Needs.eat(treated, dirty, Needs.treat_water({}))
+	Needs.force_roll = -1.0
+	check((lucky.sick as Dictionary).is_empty() and (treated.sick as Dictionary).is_empty(), "a lucky roll, or treated water (treat_water), stays well")
+	var well := Needs.fresh()
+	var sick := Needs.fresh()
+	sick.sick = {"id": "dysentery", "left_h": 36.0, "onset_h": 1.0}
+	Needs.step(well, 6.0, {})
+	Needs.step(sick, 6.0, {})
+	check(float(sick.water) < float(well.water) - 0.3 and float(sick.calories) < float(well.calories) - 150.0 and sick.has("_announce"),
+		"once it shows, it says so and drains water and calories fast (%.2f vs %.2f l, %.0f vs %.0f kcal)" % [sick.water, well.water, sick.calories, well.calories])
+	n.sick = {}
+	# Sleep: low sleep dulls the senses and shakes the aim.
+	var rested := Needs.fresh()
+	var tired := Needs.fresh()
+	tired.sleep = 5.0
+	check(Needs.dulled(rested) == 0.0 and Needs.dulled(tired) > 0.5 and Needs.sway_mult(tired) > 1.2 and Needs.stamina_mult(tired) < Needs.stamina_mult(rested),
+		"short of sleep: dulled %.2f, aim sway x%.2f, stamina x%.2f" % [Needs.dulled(tired), Needs.sway_mult(tired), Needs.stamina_mult(tired)])
+	n.sleep = 5.0
+	Survival.server_drain(player, 0.1)
+	check(Needs.dulled_of(player) > 0.5 and player.vitals.needs_sway > 1.2, "and on the body (dulled %.2f, sway x%.2f)" % [Needs.dulled_of(player), player.vitals.needs_sway])
+	# Warmth: a cold wet night out drains it and he shivers; indoors holds it.
+	var out := Needs.fresh()
+	var inside := Needs.fresh()
+	Needs.step(out, 4.0, {"dark": 1.0, "wind": 14.0, "rain": true})
+	Needs.step(inside, 4.0, {"dark": 1.0, "wind": 14.0, "rain": true, "indoors": true})
+	check(float(out.warmth) < Needs.SHIVER_C and float(out.wet) > 0.5 and Needs.shivering(out) > 0.5 and float(inside.warmth) > float(out.warmth) + 1.0,
+		"a stormy night out: soaked and %.1f C (indoors %.1f C)" % [out.warmth, inside.warmth])
+	check(Needs.stamina_mult(out) < Needs.stamina_mult(Needs.fresh()) * 0.8, "shivering: stamina comes back slower (x%.2f)" % Needs.stamina_mult(out))
+	check(Needs.words(out).warmth in ["freezing", "frozen through"], "in words: %s" % Needs.words(out).warmth)
+	# Sleep: the clock runs at speed and sleep fills; a chasing zombie wakes him.
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	var pop := Survival._pop
+	Survival._pop = -1000.0
+	await get_tree().process_frame
+	var hour0: float = Survival.hour()
+	var t0 := Survival.day() * 24.0 + Survival.hour()
+	Needs.respawn(n, 80.0)
+	n.sleep = 20.0
+	check(Survival.server_sleep(player, 2.0, "bed") == "" and SurvivalSleep.is_asleep(n), "tired, he lies down in a bed")
+	check(is_equal_approx(SurvivalSleep.clock_mult(MapNodes.players(level)), SurvivalSleep.SPEED), "everyone asleep: the world runs at x%.0f" % SurvivalSleep.SPEED)
+	Survival.server_tick_survivors(level, 10.0)  # ten real seconds: one world hour at x12
+	var passed := Survival.day() * 24.0 + Survival.hour() - t0
+	check(passed > 0.9 and float(n.sleep) > 30.0 and SurvivalSleep.is_asleep(n), "ten seconds asleep: %.1f world hours pass and sleep fills (%.0f)" % [passed, n.sleep])
+	Survival.server_tick_survivors(level, 15.0)
+	check(not SurvivalSleep.is_asleep(n), "the hours up, he wakes (sleep %.0f)" % n.sleep)
+	n.sleep = 20.0
+	Survival.server_sleep(player, 8.0, "ground")
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd.normalized() * 30.0))
+	await get_tree().physics_frame
+	var brain: ZombieAI = ZombieAI.of(z) if z else null
+	if z:
+		z.process_mode = Node.PROCESS_MODE_DISABLED
+	if brain:
+		brain.mode = ZombieAI.Mode.CHASE
+		brain.target = player
+	Survival.server_tick_survivors(level, 0.5)
+	check(brain != null and SurvivalSleep.is_asleep(n) == false, "one of the dead coming for him wakes him")
+	check(Survival.server_sleep(player, 8.0) != "", "and he can't lie down again while it chases")
+	if z:
+		z.queue_free()
+	Survival.state()["hour"] = hour0
+	Survival._pop = pop
+	# The HUD: small signs only when low, and the body readout names every store.
+	Needs.respawn(n, 80.0)
+	Survival._send_needs(player)
+	var hud: Hud = player._hud
+	check(hud != null and hud.needs_text() == "", "fed, watered and rested: no signs on the HUD (%s)" % [hud.needs_text() if hud else "no HUD"])
+	n.water = 0.75
+	Survival.server_drain(player, 0.1)
+	Survival._send_needs(player)
+	check(hud != null and hud.needs_text().contains("parched"), "low on water: the HUD says so (%s)" % [hud.needs_text() if hud else "no HUD"])
+	if hud:
+		hud.body_readout.refresh()
+	var text := hud.body_readout.label.text if hud else ""
+	check(text.contains("Water: parched") and text.contains("Calories:") and text.contains("Sleep:") and text.contains("Warmth:") and text.contains("Hygiene:"),
+		"the body readout lists every store in words (%s)" % text.replace("\n", " | "))
+	Needs.respawn(n, 80.0)
+	Survival.server_drain(player, 0.1)
 	player.vitals.server_reset_health()
 
 

@@ -49,7 +49,9 @@ var zone_bottom_centre: VBoxContainer
 var _crosshair: Label
 var _prompt: Label
 var _status: Label
-var _needs: Label  # survival: hunger and thirst (docs/survival.md)
+var _needs: Label  # survival: the body's small signs, only when low (Needs.signs)
+## Survival: the body readout (BodyReadout: every store as a word and a number).
+var body_readout: BodyReadout
 ## The downed or killed title (HudAlertLabel) and the lines under it, which wrap.
 var _downed_box: VBoxContainer
 var _downed: Label
@@ -153,6 +155,7 @@ func _ready() -> void:
 	_needs = UiKit.hud_label()
 	_needs.visible = false
 	zone_left.add_child(_needs)
+	_make_body_readout()
 	# Bottom-centre: the radio feed and subtitles over the vehicle readout.
 	zone_bottom_centre = _zone("BottomCentreZone")
 	zone_bottom_centre.alignment = BoxContainer.ALIGNMENT_END
@@ -598,11 +601,25 @@ func _process(delta: float) -> void:
 	_update_needs()
 
 
-## Survival: the local survivor's hunger and thirst, as words past a glance (Survival.my_*).
+## Survival: the local survivor's body as small signs, shown only while something is low
+## (docs/survival_medical.md section 7: "hungry", "parched", "frozen through"; Needs.signs).
 func _update_needs() -> void:
-	_needs.visible = SurvivalLevel.of(self) != null
+	var signs := Needs.signs(Survival.my_body) if SurvivalLevel.of(self) != null else []
+	_needs.visible = not signs.is_empty()
 	if _needs.visible:
-		_needs.text = "Food %s   Water %s" % [_need_word(Survival.my_hunger), _need_word(Survival.my_thirst)]
+		_needs.text = ", ".join(signs)
+
+
+## Survival: the body readout panel (hidden until its key; BodyReadout).
+func _make_body_readout() -> void:
+	body_readout = BodyReadout.new()
+	add_child(body_readout)
+
+
+## The small signs' text now (tests).
+func needs_text() -> String:
+	_update_needs()
+	return _needs.text if _needs.visible else ""
 
 
 static func _need_word(v: float) -> String:
