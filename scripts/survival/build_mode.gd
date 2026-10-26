@@ -239,7 +239,7 @@ func _aim() -> void:
 	var p: Vector3 = hit.position
 	var n: Vector3 = hit.normal
 	var collider: Object = hit.collider
-	var world := VoxelWorld.find_on(collider as Node) if collider is Node else null
+	var world: VoxelWorld = VoxelWorld.find_on(collider as Node) if collider is Node else null
 	if collider is BuildPiece:
 		aim_piece = (collider as BuildPiece).id
 		cell = BuildPieces.cell_at(p + n * 0.25)

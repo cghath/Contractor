@@ -64,7 +64,7 @@ func _test_host() -> void:
 	# Flat open ground near the survivor, clear of the zone's own buildings.
 	var found := false
 	var start := player.global_position
-	for ring in [6.0, 10.0, 14.0, 20.0, 28.0, 36.0]:
+	for ring: float in [6.0, 10.0, 14.0, 20.0, 28.0, 36.0]:
 		for k in 16:
 			var a := TAU * k / 16.0
 			var x := start.x + cos(a) * ring
