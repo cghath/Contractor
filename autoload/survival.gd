@@ -138,6 +138,7 @@ func zone_save(zone_id: String) -> String:
 func server_level_ready(level: SurvivalLevel) -> void:
 	running = true
 	_apply_sky(level)
+	_seed_crowd(level)
 
 
 ## Host: the world is saved: the world's sections and the zone being played.
@@ -281,6 +282,9 @@ func _process(delta: float) -> void:
 	if _steps >= STEP_NOISE_S:
 		_steps = 0.0
 		_footsteps(level as SurvivalLevel)
+	if _tick == 0.0:  # (a clock tick just ran: dt real seconds)
+		pass
+	_pressure_tick(level as SurvivalLevel, delta)
 	if _send >= SEND_S:
 		_send = 0.0
 		for s: Soldier in MapNodes.players(level):
@@ -428,8 +432,22 @@ func _cell_key(pos: Vector3) -> String:
 	return "%d,%d" % [floori(pos.x / CELL_M), floori(pos.z / CELL_M)]
 
 
-## Host: one of the dead fell at `pos`: its cell thins.
+## Host: one of the dead fell at `pos`: its cell thins; a bloater bursts (a noise, pressure, and
+## the taint on anyone within BURST_M: survival_medical.md's hygiene, later).
+const BURST_M := 4.0
+const BURST_HEARD_M := 60.0
+
+
 func _on_zombie_died(s: Soldier) -> void:
+	if String(s.get_meta(&"zombie", "walker")) == "bloater":
+		server_noise(s, s.global_position, BURST_HEARD_M, ZombieAI.HEAR_RUN)
+		_raise_pressure(CompoundLevel.current(s), s.global_position, 10.0)
+		for n in s.get_tree().get_nodes_in_group(&"combatants"):
+			var other := n as Soldier
+			if other and other != s and other.faction != ZombieAI.INFECTED and other.global_position.distance_to(s.global_position) <= BURST_M:
+				other.set_meta(&"tainted_at", day() + hour() / 24.0)
+				if not other.is_ai():
+					other._client_message.rpc_id(other.owner_peer(), "It burst over you")
 	var zone := String(state().get("zone", ""))
 	var all: Dictionary = state().get("thinned", {})
 	var cells: Dictionary = all.get(zone, {})
@@ -459,6 +477,9 @@ func _populate(level: SurvivalLevel) -> void:
 			continue
 		var far := players.all(func(p: Soldier) -> bool: return p.global_position.distance_to(z.global_position) > DESPAWN_M)
 		if far:
+			var crowd := ZoneDead.of(level)
+			if crowd:
+				crowd.server_add(z.global_position, String(z.get_meta(&"zombie", "walker")))  # back into the far tier where it stood
 			z.queue_free()
 			live.erase(z)
 	if live.size() >= LIVE_CAP:
@@ -469,7 +490,7 @@ func _populate(level: SurvivalLevel) -> void:
 			continue
 		var at: Variant = _spawn_spot(level, p, players)
 		if at is Vector3:
-			var z := server_spawn_zombie(level, at, "runner" if randf() < RUNNER_SHARE else "walker")
+			var z := server_spawn_zombie(level, at, roll_kind(level, at))
 			if z:
 				live.append(z)
 
@@ -527,6 +548,7 @@ func server_noise(source: Node, pos: Vector3, radius: float, loud := ZombieAI.HE
 		return
 	if source is Soldier and not (source as Soldier).is_ai():
 		(source as Soldier).server_noise_made(radius)
+	_raise_pressure(level, pos, loud * clampf(radius / ZombieAI.SHOT_HEARD_M, 0.1, 1.0) * PRESSURE_PER_SHOT)
 	for z: Soldier in zombies(level):
 		if z.global_position.distance_to(pos) <= radius:
 			var brain := ZombieAI.of(z)
@@ -551,3 +573,123 @@ func _footsteps(level: SurvivalLevel) -> void:
 		var radius := float(STEP_M[key]) * DayNight.hearing_x()
 		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
 		server_noise(s, s.global_position, radius, loud)
+
+
+# --- Pressure, hordes, the crowd, the specials (S3; survival_world.md section 5, calls 19, 22) ----
+
+## A zone's pressure (0-100): shots, fights, running feet, generators and lights raise it, time
+## lowers it (a half-life of PRESSURE_HALF_H world hours). The local dead drift toward the loudest
+## recent noise (the pressure point) from DRIFT_AT; at HORDE_AT a horde forms from the zone's own
+## dead and walks at it; under HORDE_DISPERSE_AT the horde thins. Proposed numbers.
+const PRESSURE_PER_SHOT := 6.0
+const PRESSURE_HALF_H := 6.0
+const DRIFT_AT := 20.0
+const HORDE_AT := 80.0
+const HORDE_DISPERSE_AT := 30.0
+const HORDE_COOLDOWN_S := 900.0
+## The crowd a zone starts with, by its site types (dead_near's table scaled), and the specials'
+## shares of the dead by base type (call 19: the city and the lab most; none in the open).
+const CROWD_SEED := 6  # per site, Proposed
+const SPECIALS := {
+	"city": {"screamer": 0.04, "crawler": 0.04, "bloater": 0.02, "hazmat": 0.01},
+	"town": {"screamer": 0.03, "crawler": 0.03, "bloater": 0.015, "hazmat": 0.005},
+	"village": {"screamer": 0.015, "crawler": 0.02, "bloater": 0.0, "hazmat": 0.0},
+	"hq": {"screamer": 0.02, "crawler": 0.02, "bloater": 0.01, "hazmat": 0.02},
+	"compound": {"screamer": 0.02, "crawler": 0.02, "bloater": 0.01, "hazmat": 0.0},
+}
+var _pressure_sum := 0.0
+var _horde_at := -10000.0
+
+
+## The zone's pressure now (0-100; decayed since it was last raised).
+func pressure(level: Node) -> float:
+	var p: Dictionary = _pressure_rec(level)
+	if p.is_empty():
+		return 0.0
+	var hours := ((day() + hour() / 24.0) - float(p.at)) * 24.0
+	return float(p.v) * pow(0.5, maxf(hours, 0.0) / PRESSURE_HALF_H)
+
+
+## Where the zone's loudest recent noise was (Vector3), or null.
+func pressure_point(level: Node) -> Variant:
+	var p: Dictionary = _pressure_rec(level)
+	if p.is_empty() or not p.has("x"):
+		return null
+	return Vector3(float(p.x), float(p.get("y", 0.0)), float(p.z))
+
+
+func _pressure_rec(level: Node) -> Dictionary:
+	var zone := String(state().get("zone", ""))
+	if level == null or zone == "":
+		return {}
+	var all: Dictionary = state().get("pressure", {})
+	return all.get(zone, {})
+
+
+func _raise_pressure(level: Node, pos: Vector3, amount: float) -> void:
+	if amount <= 0.0:
+		return
+	var zone := String(state().get("zone", ""))
+	if zone == "":
+		return
+	var all: Dictionary = state().get("pressure", {})
+	var p: Dictionary = all.get(zone, {})
+	var now := day() + hour() / 24.0
+	var v := pressure(level)
+	# The point moves toward the new noise by its share of what's there.
+	var share := clampf(amount / maxf(v + amount, 0.01), 0.0, 1.0)
+	var x := lerpf(float(p.get("x", pos.x)), pos.x, share)
+	var z := lerpf(float(p.get("z", pos.z)), pos.z, share)
+	all[zone] = {"v": clampf(v + amount, 0.0, 100.0), "at": now, "x": x, "y": pos.y, "z": z}
+	state()["pressure"] = all
+
+
+## Host, every frame: a horde when the pressure peaks (once a HORDE_COOLDOWN_S).
+func _pressure_tick(level: SurvivalLevel, _delta: float) -> void:
+	if level == null:
+		return
+	var crowd := ZoneDead.of(level)
+	if crowd == null:
+		return
+	var v := pressure(level)
+	if v >= HORDE_AT and Soldier._now() - _horde_at >= HORDE_COOLDOWN_S:
+		var point: Variant = pressure_point(level)
+		if point is Vector3:
+			_horde_at = Soldier._now()
+			var n := randi_range(ZoneDead.HORDE_N.x, ZoneDead.HORDE_N.y)
+			var made := crowd.server_horde(point, n)
+			SessionLog.note("survival: a horde of %d forms at pressure %.0f, %.0f m from (%.0f, %.0f)" % [made, v, ZoneDead.HORDE_FROM_M, point.x, point.z])
+			state()["hordes"] = int(state().get("hordes", 0)) + 1
+
+
+## Host: the crowd a zone starts with: CROWD_SEED about each site (its base type's dead_near
+## share), scattered 20-60 m round it; the open country has none (they come with the noise).
+func _seed_crowd(level: SurvivalLevel) -> void:
+	var crowd := ZoneDead.of(level)
+	if crowd == null or crowd.count() > 0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(String(state().get("zone", "")) + "|crowd")
+	for m: ZoneModule in level.modules():
+		var base := ZoneModules.base(String(m.type))
+		var n := roundi(float(DEAD_NEAR.get(base, 0)) / 4.0 * CROWD_SEED / 2.0)
+		for i in n:
+			var a := rng.randf() * TAU
+			var r := rng.randf_range(20.0, 60.0)
+			var at := m.global_position + Vector3(cos(a), 0.0, sin(a)) * r
+			crowd.server_add(level.ground_point(at), roll_kind(level, at, rng))
+
+
+## The kind of one of the dead spawned at `at`: a runner RUNNER_SHARE of the time, a special by
+## the site's SPECIALS shares, else a walker.
+func roll_kind(level: ZoneLevel, at: Vector3, rng: RandomNumberGenerator = null) -> String:
+	var r := rng.randf() if rng else randf()
+	var m := level.module_at(at) if level else null
+	var base := ZoneModules.base(String(m.type)) if m else ""
+	var shares: Dictionary = SPECIALS.get(base, {})
+	var acc := 0.0
+	for kind: String in shares:
+		acc += float(shares[kind])
+		if r < acc:
+			return kind
+	return "runner" if r < acc + RUNNER_SHARE else "walker"

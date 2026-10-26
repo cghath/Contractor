@@ -26,6 +26,7 @@ func _ready() -> void:
 		await _test_melee()
 		await _test_melee_weapons()
 		await _test_stealth()
+		await _test_crowd_and_pressure()
 		await _test_death()
 		await _test_save_and_continue()
 	_finish()
@@ -272,12 +273,15 @@ func _test_melee_weapons() -> void:
 	check(Melee.silent_kill_target(player) == quiet, "behind an unaware zombie within reach, the silent kill is on offer (%.2f m)" % quiet.global_position.distance_to(player.global_position))
 	MeleeWeapons.server_action(player, "silent")
 	check(player._server_busy_until > Soldier._now() + 1.0, "it takes %.0f s with the hands on it" % MeleeWeapons.SILENT_KILL_S)
-	await _seconds(MeleeWeapons.SILENT_KILL_S + 0.4)
-	check(quiet.vitals.is_dead() and String(quiet.vitals.last_cause.get("cause", "")) == "head", "and the blade goes in quietly (%s; %.2f m apart)" % [quiet.vitals.last_cause.get("cause", "still up"), quiet.global_position.distance_to(player.global_position)])
+	var killed_at := Soldier._now()
+	var quiet_dead := await _wait_for(func() -> bool: return quiet.vitals.is_dead(), MeleeWeapons.SILENT_KILL_S + 3.0)
+	check(quiet_dead and String(quiet.vitals.last_cause.get("cause", "")) == "head", "and the blade goes in quietly (%s after %.1f s; %.2f m apart; unaware %s)" % [
+		quiet.vitals.last_cause.get("cause", "still up"), Soldier._now() - killed_at, quiet.global_position.distance_to(player.global_position), ZombieAI.of(quiet).unaware() if ZombieAI.of(quiet) else "no brain"])
 	quiet.queue_free()
 	await get_tree().process_frame
 	# The shove with a gun up: a second bought.
-	check(player.inventory.take(&"m17") == 1, "a pistol for the sidearm slot")
+	player.inventory.unequip(&"sidearm")  # (the starter kit's combat knife sits there)
+	check(player.inventory.take(&"m17") == 1 and player.inventory.slots.get(&"sidearm", &"") == &"m17", "a pistol for the sidearm slot (%s)" % player.inventory.slots.get(&"sidearm", &""))
 	player.select_weapon(&"sidearm")
 	var shoved := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.1))
 	await get_tree().physics_frame
@@ -337,6 +341,7 @@ func _test_stealth() -> void:
 	await get_tree().process_frame
 	check(is_equal_approx(player.noise_radius, ZombieAI.SHOT_HEARD_M) and Soldier._now() - player.noise_at < 1.0, "his own noise shows on his HUD as the ring (%.0f m)" % player.noise_radius)
 	# Footsteps: a man running is heard by the dead STEP_M away, a crouched one hardly.
+	await _seconds(0.3)  # (the ring is told at most four times a second)
 	player.noise_at = -100.0
 	player.velocity = fwd * 4.0
 	player.movement.is_sprinting = true
@@ -359,6 +364,99 @@ func _test_stealth() -> void:
 	sniffer.queue_free()
 	player.vitals.server_reset_health()
 	player.watched_until = -1.0
+
+
+func _test_crowd_and_pressure() -> void:
+	print("The crowd, pressure, hordes and the specials")
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	await get_tree().process_frame
+	var crowd := ZoneDead.of(level)
+	check(crowd != null, "the zone has its crowd tier (ZoneDead)")
+	if crowd == null:
+		return
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	# Pressure: quiet, then shots raise it at the place; it decays with the hours.
+	Survival.state()["pressure"] = {}
+	check(Survival.pressure(level) == 0.0, "a quiet zone has no pressure")
+	var at := player.global_position + fwd * 30.0
+	for i in 5:
+		Survival.server_noise(player, at, ZombieAI.SHOT_HEARD_M)
+	var p := Survival.pressure(level)
+	check(is_equal_approx(p, 5.0 * Survival.PRESSURE_PER_SHOT), "five shots raise it by %.0f each (%.0f)" % [Survival.PRESSURE_PER_SHOT, p])
+	var point: Variant = Survival.pressure_point(level)
+	check(point is Vector3 and (point as Vector3).distance_to(at) < 1.0, "and the pressure point is where they were fired")
+	var rec: Dictionary = (Survival.state().pressure as Dictionary)[String(Survival.state().zone)]
+	rec.at = float(rec.at) - Survival.PRESSURE_HALF_H / 24.0  # six world hours ago
+	check(absf(Survival.pressure(level) - p * 0.5) < 0.5, "six world hours later it has halved (%.1f)" % Survival.pressure(level))
+	# The crowd: far heads cost a record each; one that comes near a player becomes a body.
+	Survival.state()["pressure"] = {}
+	var before := crowd.count()
+	check(crowd.server_add(player.global_position + fwd * 200.0, "walker"), "one of the crowd stands 200 m off")
+	crowd.server_add(player.global_position + fwd * 40.0, "walker")
+	var bodies := Survival.zombies(level).size()
+	var converted := await _wait_for(func() -> bool: return Survival.zombies(level).size() > bodies, 3.0)
+	check(converted and crowd.count() == before + 1, "the one within LIVE_M becomes a body, the far one stays in the crowd (%d bodies, %d in the crowd)" % [Survival.zombies(level).size(), crowd.count()])
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	await get_tree().process_frame
+	# A horde: pressure at the threshold puts dozens of the crowd down round the point and walks them at it.
+	var hordes := int(Survival.state().get("hordes", 0))
+	Survival._horde_at = -10000.0
+	for i in 14:
+		Survival.server_noise(player, player.global_position + fwd * 300.0, ZombieAI.SHOT_HEARD_M)
+	check(Survival.pressure(level) >= Survival.HORDE_AT, "fourteen shots take the pressure to the horde line (%.0f)" % Survival.pressure(level))
+	var horde := await _wait_for(func() -> bool: return crowd.horde_count() >= ZoneDead.HORDE_N.x, 3.0)
+	check(horde and int(Survival.state().get("hordes", 0)) == hordes + 1, "a horde of %d or more forms (%d; %d hordes so far)" % [ZoneDead.HORDE_N.x, crowd.horde_count(), int(Survival.state().get("hordes", 0))])
+	var walking := crowd.dead.filter(func(d: Dictionary) -> bool: return d.horde and (d.target as Vector2).distance_to(Vector2(player.global_position.x, player.global_position.z) + Vector2(fwd.x, fwd.z) * 300.0) < 2.0)
+	check(walking.size() >= ZoneDead.HORDE_N.x, "and it walks at the noise (%d heading there)" % walking.size())
+	# The specials: kinds with their rules.
+	check(ZombieAI.KINDS.has("screamer") and ZombieAI.KINDS.has("crawler") and ZombieAI.KINDS.has("bloater") and ZombieAI.KINDS.has("hazmat"), "the four specials are kinds")
+	var city_rolls := {}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in 400:
+		var k := Survival.roll_kind(level, player.global_position, rng)
+		city_rolls[k] = int(city_rolls.get(k, 0)) + 1
+	check(city_rolls.get("walker", 0) > 200, "the open country rolls walkers and runners, no specials (%s)" % [city_rolls])
+	Survival.state()["pressure"] = {}
+	var hz := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 20.0), "hazmat")
+	await get_tree().physics_frame
+	hz.process_mode = Node.PROCESS_MODE_DISABLED
+	var pool := hz.vitals.undead_pool
+	hz.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
+	var taken := pool - hz.vitals.undead_pool
+	var plain := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 24.0), "walker")
+	await get_tree().physics_frame
+	plain.process_mode = Node.PROCESS_MODE_DISABLED
+	var pool2 := plain.vitals.undead_pool
+	plain.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
+	var taken2 := pool2 - plain.vitals.undead_pool
+	check(hz.vitals.is_up() and taken > 0.0 and taken < taken2 * 0.4, "a hazmat one's suit takes a quarter of a body hit (%.1f vs %.1f on a walker)" % [taken, taken2])
+	hz.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "energy_j": 400.0})
+	check(hz.vitals.is_dead(), "the head still kills it")
+	var bl := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 2.0), "bloater")
+	await get_tree().physics_frame
+	bl.process_mode = Node.PROCESS_MODE_DISABLED
+	var pr := Survival.pressure(level)
+	bl.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "energy_j": 400.0})
+	await get_tree().process_frame
+	check(bl.vitals.is_dead() and Survival.pressure(level) > pr and player.has_meta(&"tainted_at"), "a bloater bursts when it dies: a noise, pressure up, the taint on a man beside it (pressure %.0f -> %.0f)" % [pr, Survival.pressure(level)])
+	var sc := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 6.0), "screamer")
+	await get_tree().physics_frame
+	var scb := ZombieAI.of(sc)
+	pr = Survival.pressure(level)
+	var screamed := await _wait_for(func() -> bool: return scb.screamed, 4.0)
+	check(screamed and Survival.pressure(level) >= pr + ZombieAI.SCREAM_PRESSURE - 0.5 and sc.has_meta(&"zombie_scream"), "a screamer that sees him screams: the zone hears it and the pressure jumps (%.0f -> %.0f)" % [pr, Survival.pressure(level)])
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	player.remove_meta(&"tainted_at")
+	Survival.state()["pressure"] = {}
+	Survival._horde_at = -10000.0
+	crowd.dead.clear()
+	player.vitals.server_reset_health()
 
 
 func _seconds(s: float) -> void:

@@ -828,10 +828,11 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			# drops it outright, a light one takes HEAD_LIGHT_SHARE of the pool (two or three kill:
 			# survival call 88). A round in the head always does.
 			var melee_light := hit.has("melee") and part in UNDEAD_KILL_PARTS and String(hit.melee) != "silent" and float(hit.get("energy_j", 0.0)) < MeleeWeapons.HEAD_ONE_HIT_J
+			var armoured := String(get_parent().get_meta(&"zombie", "walker")) == "hazmat" and part not in UNDEAD_KILL_PARTS  # a hazmat one's suit (ZombieAI.KINDS)
 			if melee_light:
 				undead_pool -= UNDEAD_POOL * MeleeWeapons.HEAD_LIGHT_SHARE
 			else:
-				undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false)))
+				undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false))) * (0.25 if armoured else 1.0)
 			if (part in UNDEAD_KILL_PARTS and not melee_light) or undead_pool <= 0.0:
 				last_cause = {"cause": "head" if part in UNDEAD_KILL_PARTS else "torn apart"}
 				server_kill()
