@@ -206,7 +206,7 @@ func _add_builds(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bo
 	if b == null:
 		return true
 	for box in b.nav_boxes(bounds):
-		source.add_faces(_box_faces(box), b.global_transform)
+		source.add_faces(_box_faces(box), Transform3D.IDENTITY)  # (Builder is a plain Node: its cells are in level space)
 	return true
 
 
