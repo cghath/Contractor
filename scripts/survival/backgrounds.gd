@@ -52,6 +52,15 @@ const FLAWS := {
 }
 
 
+## Every background and every flaw: ALL and FLAWS with the mods' "backgrounds" over them (ModKit).
+static func all() -> Dictionary:
+	return ModKit.backgrounds()
+
+
+static func flaws() -> Dictionary:
+	return ModKit.flaws()
+
+
 static func blank() -> Dictionary:
 	return {"background": "", "flaws": [], "buys": {}}
 
@@ -60,7 +69,7 @@ static func blank() -> Dictionary:
 static func points(flaws: Array) -> int:
 	var n := 0
 	for f: String in flaws:
-		n += int((FLAWS.get(f, {}) as Dictionary).get("points", 0))
+		n += int((flaws().get(f, {}) as Dictionary).get("points", 0))
 	return n
 
 
@@ -76,7 +85,7 @@ static func cost(buys: Dictionary) -> int:
 ## line stops at BUY_CAP).
 static func start_levels(choice: Dictionary) -> Dictionary:
 	var out := {}
-	var bg: Dictionary = ALL.get(String(choice.get("background", "")), {})
+	var bg: Dictionary = all().get(String(choice.get("background", "")), {})
 	var lines: Dictionary = bg.get("lines", {})
 	for line: String in lines:
 		out[line] = maxi(0, int(lines[line]))
@@ -91,10 +100,10 @@ static func start_levels(choice: Dictionary) -> Dictionary:
 ## "" if `choice` is a valid creation, else why not.
 static func problem(choice: Dictionary) -> String:
 	var bg := String(choice.get("background", ""))
-	if bg != "" and not ALL.has(bg):
+	if bg != "" and not all().has(bg):
 		return "No background %s" % bg
 	for f: String in choice.get("flaws", []):
-		if not FLAWS.has(f):
+		if not flaws().has(f):
 			return "No flaw %s" % f
 	var buys: Dictionary = choice.get("buys", {})
 	for line: String in buys:
@@ -109,7 +118,7 @@ static func problem(choice: Dictionary) -> String:
 static func fx(flaws: Array, key: String) -> float:
 	var out := 1.0
 	for f: String in flaws:
-		var e: Dictionary = (FLAWS.get(f, {}) as Dictionary).get("fx", {})
+		var e: Dictionary = (flaws().get(f, {}) as Dictionary).get("fx", {})
 		if e.has(key) and typeof(e[key]) in [TYPE_FLOAT, TYPE_INT]:
 			out *= float(e[key])
 	return out
@@ -117,6 +126,6 @@ static func fx(flaws: Array, key: String) -> float:
 
 static func has_flag(flaws: Array, key: String) -> bool:
 	for f: String in flaws:
-		if bool(((FLAWS.get(f, {}) as Dictionary).get("fx", {}) as Dictionary).get(key, false)):
+		if bool(((flaws().get(f, {}) as Dictionary).get("fx", {}) as Dictionary).get(key, false)):
 			return true
 	return false

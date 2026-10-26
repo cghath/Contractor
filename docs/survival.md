@@ -2,6 +2,11 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **World events, loot states, drop-in co-op and the mod kit built on `claude/survival-events`** (calls 124-127):
+  `WorldEvents` (supply drop, convoy, downed helicopter, bells, a burning town's glow, a storm's bridge), `LootStates`
+  (picked over, hidden caches with clues, keys and the crowbar, refill where people pass), `CoopFallen` (newcomers at the
+  farm or beside the host, the shared journal, opinions per player, leavers asleep at home), `ModKit` + world cards;
+  see docs/survival_events.md and docs/fallen_modding.md.
 - **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
   lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
   (fallenaudio, survival, sound, voice); see docs/survival_audio.md.

@@ -105,7 +105,7 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 static func lines() -> Dictionary:
 	if _lines.is_empty():
 		var f := FileAccess.open(LINES_PATH, FileAccess.READ)
-		var parsed: Variant = JSON.parse_string(f.get_as_text()) if f else null
+		var parsed: Variant = ModKit.overlay("survival_lines", JSON.parse_string(f.get_as_text()) if f else null)  # (mods: docs/fallen_modding.md)
 		_lines = (parsed as Dictionary).get("topics", {}) if parsed is Dictionary else {}
 	return _lines
 

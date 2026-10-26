@@ -25,7 +25,8 @@ const GAP_HOURS := 2.0
 const BATTERY_HOURS := 12.0
 const RANGE_LINKS := {"hills": 3, "desert": 3, "plains": 2, "coast": 2, "city": 1}
 const CHATTER_KINDS: Array[String] = ["fight", "raid", "horde", "horde_moved", "horde_attack", "capture", "supply_drop", "burning", "bell",
-	"settled", "group_gone", "trade", "hunt", "rescue", "split", "formed", "death", "arrived"]
+	"settled", "group_gone", "trade", "hunt", "rescue", "split", "formed", "death", "arrived",
+	"convoy", "heli_down", "storm", "supply_taken", "convoy_ambushed", "heli_lost"]
 const NUMBERS_CANNED: Array[String] = [
 	"A woman's voice, flat: \"Seven. Four. Four. Nine. Arche. Seven. Four...\" Then a tone, and nothing.",
 	"A child's music box, then numbers in a man's voice: \"Two. Zero. One. One. Arche holds.\"",

@@ -62,6 +62,7 @@ func _ready() -> void:
 	add_child(Rpg.new())  # the RPG layer's RPCs and tick (Rpg)
 	add_child(WorldSim.new())  # the living world's far tick (WorldSim, survival_world.md)
 	add_child(Intel.new())  # the intel layer: rumours, reports, the radio, trade's RPCs (Intel)
+	add_child(CoopFallen.new())  # drop-in co-op and the shared journal (CoopFallen, docs/survival_events.md)
 
 
 func state() -> Dictionary:
@@ -72,6 +73,7 @@ func state() -> Dictionary:
 ## (the session's Main: the menu's parent).
 func server_new_world(main: Node, name: String, world_seed: int, options := {}) -> bool:
 	var id := _world_id(name)
+	ModKit.activate()  # the world's mods (user://mods, res://mods; docs/fallen_modding.md)
 	Campaign.campaign_id = PREFIX + id
 	Campaign.reset_campaign()
 	world = id
@@ -122,6 +124,7 @@ func server_continue(main: Node, name := "") -> bool:
 	var id := _world_id(name) if name != "" else newest_world()
 	if id == "":
 		return false
+	ModKit.activate()  # the world's mods (docs/fallen_modding.md)
 	Campaign.campaign_id = PREFIX + id
 	if not Campaign.load_campaign():
 		return false
@@ -212,6 +215,7 @@ func server_stop() -> void:
 	server_save()
 	running = false
 	world = ""
+	ModKit.deactivate()  # (the campaign plays the game's own data)
 
 
 # --- The clock ---------------------------------------------------------------------------
@@ -445,6 +449,8 @@ func respawn_at(level: SurvivalLevel, _player: Soldier) -> Variant:
 ## Who `s` is in the world's save: the host's profile for peer 1, else the peer's (a joiner's
 ## own profile key comes with S5).
 func profile_of(s: Soldier) -> String:
+	if s.has_meta(&"fallen_profile"):  # (a joiner's own profile key, or a test's second survivor: CoopFallen)
+		return String(s.get_meta(&"fallen_profile"))
 	var peer := s.owner_peer()
 	return BaseHub.profile() if peer == 1 else "peer_%d" % peer
 
@@ -807,6 +813,11 @@ func roll_kind(level: ZoneLevel, at: Vector3, rng: RandomNumberGenerator = null)
 		acc += float(shares[kind])
 		if r < acc:
 			return kind
+	var extra := ModKit.extra_zombie_shares()  # (the mods' own kinds of the dead: docs/fallen_modding.md)
+	for kind: String in extra:
+		acc += float(extra[kind])
+		if r < acc:
+			return kind
 	return "runner" if r < acc + RUNNER_SHARE else "walker"
 
 
@@ -958,6 +969,7 @@ func _world_continue() -> void:
 ## lone survivors in this zone put on its ground.
 func _world_level_ready(level: SurvivalLevel) -> void:
 	WorldSim.server_setup()
+	WorldEvents.server_level_ready(level)  # world events open in this zone: their caches, a bell, a fire (docs/survival_events.md)
 	if level.get_node_or_null(NodePath(WorldLive.NODE_NAME)) == null:
 		level.add_child(WorldLive.new())
 	var zone := String(state().get("zone", ""))

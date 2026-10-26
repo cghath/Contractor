@@ -26,8 +26,8 @@ const JOURNAL_CAP := 200
 ## The talk menu's "Ask about..." topics: [id, label].
 const TOPICS: Array = [["here", "What happened here?"], ["places", "Other places"], ["groups", "The groups out there"], ["enclave", "The enclave"]]
 ## Event kinds that are about groups (the "groups" topic) and about the enclave.
-const GROUP_KINDS: Array[String] = ["fight", "raid", "trade", "settled", "formed", "split", "group_gone", "capture", "demand", "hunt", "rescue", "arrived", "death"]
-const ENCLAVE_KINDS: Array[String] = ["broadcast", "supply_drop", "evac"]
+const GROUP_KINDS: Array[String] = ["fight", "raid", "trade", "settled", "formed", "split", "group_gone", "capture", "demand", "hunt", "rescue", "arrived", "death", "supply_taken", "convoy_ambushed"]
+const ENCLAVE_KINDS: Array[String] = ["broadcast", "supply_drop", "evac", "convoy", "heli_down", "heli_recovered", "convoy_robbed"]
 
 var _tick := 0.0
 

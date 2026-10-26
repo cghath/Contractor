@@ -45,6 +45,10 @@ const DEV_WEATHER_KEY := KEY_APOSTROPHE
 const DEV_HOURS := 2.0
 ## The sun's highest elevation (degrees, at noon); it rises at 06:00 and sets at 18:00.
 const NOON_ELEVATION_DEG := 62.0
+## A far fire's glow on the horizon (the "glow" meta, 0-1, set by Fallen's WorldEvents): toward this
+## colour, at most GLOW_MAX of the way.
+const GLOW_COLOUR := Color(0.95, 0.42, 0.12)
+const GLOW_MAX := 0.45
 ## Darkness: none with the sun this high (degrees), full this far below the horizon.
 const LIGHT_FROM_DEG := 8.0
 const DARK_FROM_DEG := -12.0
@@ -381,6 +385,7 @@ func _apply_look() -> void:
 		return
 	var top := (_base.top as Color).lerp(OVERCAST_SKY * 0.85, grey).lerp(NIGHT_SKY_TOP, dark)
 	var horizon := (_base.horizon as Color).lerp(OVERCAST_SKY, grey).lerp(NIGHT_SKY_HORIZON, dark)
+	horizon = horizon.lerp(GLOW_COLOUR, clampf(float(get_meta(&"glow", 0.0)), 0.0, 1.0) * GLOW_MAX)  # a town burning on the horizon (Fallen's WorldEvents)
 	var mat := _env.sky.sky_material
 	if mat is ProceduralSkyMaterial:
 		var p := mat as ProceduralSkyMaterial

@@ -21,7 +21,7 @@ static func recipes() -> Dictionary:
 	if _recipes.is_empty():
 		var f := FileAccess.open(PATH, FileAccess.READ)
 		if f:
-			var parsed: Variant = JSON.parse_string(f.get_as_text())
+			var parsed: Variant = ModKit.overlay("survival_recipes", JSON.parse_string(f.get_as_text()))  # (mods: docs/fallen_modding.md)
 			if parsed is Dictionary:
 				_recipes = (parsed as Dictionary).get("recipes", {})
 	return _recipes

@@ -10,6 +10,8 @@ const GOALS := [["evac", "Reach the evac"], ["sandbox", "Sandbox"], ["clear", "C
 const LEVELS := [["low", "Low"], ["normal", "Normal"], ["high", "High"]]
 ## The season you wake in (call 137; Seasons): spring by default.
 const SEASONS := [["spring", "Spring"], ["summer", "Summer"], ["autumn", "Autumn"], ["winter", "Winter"]]
+## Where a friend joining the running world comes in (call 126; CoopFallen): the farm by default.
+const JOINS := [["farm", "At the farm"], ["host", "Beside the host"]]
 const OPTIONS := [
 	["dead", "The dead", "How many of the dead a place holds, how fast they move at night, the share of runners and specials."],
 	["loot", "Loot", "How often containers hold something and how fast they refill; ammo's weight in the tables."],
@@ -22,6 +24,8 @@ var _name: LineEdit
 var _seed: LineEdit
 var _goal: OptionButton
 var _season: OptionButton
+var _join: OptionButton
+var _card_note: Label
 var _picks := {}
 var survivor: SurvivorPicker
 var _start_button: Button
@@ -56,6 +60,12 @@ func _ready() -> void:
 	_season.selected = 0
 	_season.tooltip_text = "The season you wake in: a year is four seasons of about ten world days; winter freezes crops, water and the dead."
 	box.add_child(UiKit.row("Season", _season))
+	_join = OptionButton.new()
+	for j: Array in JOINS:
+		_join.add_item(String(j[1]))
+	_join.selected = 0
+	_join.tooltip_text = "Where a friend who joins the running world wakes: at the farm, or beside you."
+	box.add_child(UiKit.row("Friends join", _join))
 	var options := UiKit.section("World options", box)
 	for o: Array in OPTIONS:
 		var pick := OptionButton.new()
@@ -70,11 +80,50 @@ func _ready() -> void:
 	who.add_child(survivor)
 	_start_button = UiKit.accent_button("Start", _start, "Wake at the farm")
 	survivor.valid_changed.connect(func(ok: bool) -> void: _start_button.disabled = not ok)
-	box.add_child(UiKit.button_row([_start_button, UiKit.button("Back", queue_free, "Back to the menu")], true))
+	_card_note = Label.new()
+	box.add_child(_card_note)
+	var import_button := UiKit.button("Import card", _import, "A world card's seed and options (the clipboard, else the newest in user://world_cards)")
+	box.add_child(UiKit.button_row([_start_button, import_button, UiKit.button("Back", queue_free, "Back to the menu")], true))
+
+
+## A world card (ModKit.import_card) onto the screen: its name, seed and options. Returns why not ("" done).
+func apply_card(text: String) -> String:
+	var c := ModKit.import_card(text)
+	if c.has("error"):
+		return String(c.error)
+	_name.text = String(c.name)
+	_seed.text = str(int(c.seed))
+	var opts: Dictionary = c.options
+	for i in GOALS.size():
+		if String(GOALS[i][0]) == String(opts.get("goal", "")):
+			_goal.selected = i
+	for i in SEASONS.size():
+		if String(SEASONS[i][0]) == String(opts.get("season", "")):
+			_season.selected = i
+	for i in JOINS.size():
+		if String(JOINS[i][0]) == String(opts.get("join", "")):
+			_join.selected = i
+	for key: String in _picks:
+		for i in LEVELS.size():
+			if String(LEVELS[i][0]) == String(opts.get(key, "")):
+				(_picks[key] as OptionButton).selected = i
+	var missing: Array = c.get("missing_mods", [])
+	return "" if missing.is_empty() else "Imported; made with mods not on here: %s" % ", ".join(PackedStringArray(missing.map(func(m: Variant) -> String: return String(m))))
+
+
+func _import() -> void:
+	var text := DisplayServer.clipboard_get() if DisplayServer.get_name() != "headless" else ""
+	if not text.strip_edges().begins_with("{"):
+		text = ModKit.newest_card_text()
+	var why := apply_card(text) if text != "" else "No world card found (copy one, or put it in user://world_cards)"
+	if _card_note:
+		_card_note.text = why if why != "" else "World card imported."
 
 
 func choices() -> Dictionary:
 	var options := {"goal": String(GOALS[_goal.selected][0]), "season": String(SEASONS[maxi(_season.selected, 0)][0]) if _season else "spring"}
+	if _join:
+		options["join"] = String(JOINS[maxi(_join.selected, 0)][0])
 	for key: String in _picks:
 		options[key] = String(LEVELS[(_picks[key] as OptionButton).selected][0])
 	if survivor:

@@ -125,7 +125,7 @@ var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	body = get_parent() as Soldier
-	if bool((KINDS.get(kind, KINDS.walker) as Dictionary).get("low", false)):
+	if bool((ModKit.zombie_kind(kind) as Dictionary).get("low", false)):
 		body.want_stance = SoldierMovement.Stance.PRONE  # a crawler
 	_rng.seed = hash(String(body.name))
 	_think = _rng.randf() * THINK_S  # (not every one on the same frame)
@@ -172,7 +172,7 @@ func ledge_blocked(at: Vector3) -> bool:
 ## The pace it walks (or chases) at now, a share of the run (the kind's, by night, the season,
 ## the world's "dead" option, its decay).
 func pace() -> float:
-	var k: Dictionary = KINDS.get(kind, KINDS.walker)
+	var k: Dictionary = ModKit.zombie_kind(kind)
 	var night := DayNight.darkness_at(body.global_position) > 0.5 if body else false
 	var p := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
@@ -285,7 +285,7 @@ func _decide() -> void:
 			body.set_meta(&"under_ledge", now)  # (call 140: it can't get up to him: it stops and piles under him)
 		if _flat(target.global_position) <= ATTACK_M and now >= _attack_at and absf(target.global_position.y - body.global_position.y) <= REACH_UP_M:
 			_attack_at = now + ATTACK_S
-			if bool((KINDS.get(kind, KINDS.walker) as Dictionary).get("trip", false)):
+			if bool((ModKit.zombie_kind(kind) as Dictionary).get("trip", false)):
 				Melee.server_trip(body, target)  # a crawler grabs his legs
 			else:
 				Melee.server_strike(body, target)
@@ -382,7 +382,7 @@ func _groan(now: float) -> void:
 		return
 	groaned_at = now
 	body.set_meta(&"zombie_groan", now)
-	var k: Dictionary = KINDS.get(kind, KINDS.walker)
+	var k: Dictionary = ModKit.zombie_kind(kind)
 	if bool(k.get("scream", false)) and not screamed:
 		screamed = true
 		body.set_meta(&"zombie_scream", now)
@@ -449,7 +449,7 @@ func _steer(delta: float) -> void:
 		body.move_input = Vector2.ZERO
 		return
 	dir = dir.normalized()
-	var k: Dictionary = KINDS.get(kind, KINDS.walker)
+	var k: Dictionary = ModKit.zombie_kind(kind)
 	_face(body.global_position + dir, delta)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z) * clampf(pace(), 0.0, 1.0)
