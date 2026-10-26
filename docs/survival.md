@@ -198,6 +198,15 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 128 | Children in the world | **Added 2026-10-26**: kids among settlers and lone survivors from the start: can't fight, need care, change every moodlet and vote around them, a reason groups settle; never harmed on screen (phase C people). |
 | 129 | Faith and funerals | **Added 2026-10-26**: a pious companion asks for words at a grave, settlements keep a chapel, cultists' faith is the dark mirror; small rites that move morale (phase D politics). |
 | 130 | Letters and legacy | **Added 2026-10-26**: a survivor writes a letter kept in the journal and found on the body; the newcomer reads the dead one's letters; a world keeps a lineage of survivors on one page (phase B with the scars page). |
+| 131 | One stealth model for the living too | **Added 2026-10-26**: raiders, settlers and the enclave see, hear and smell with the same cone, noise rings and awareness states as the dead; sneaking past a camp works the same way; their guards are better at it than walkers (phase C). |
+| 132 | Clothing slots and layers | **Added 2026-10-26**: head, face, torso (base, mid, outer), hands, legs, feet, plus the carrier and pack; layers set warmth, wetness, noise (a rain jacket rustles), camouflage and pockets; found clothes as loot that matters (phase B/D). |
+| 133 | Companions use the loadout editor | **Added 2026-10-26**: give and take gear with the 3D loadout editor on a companion, saved kits applied to them, their needs shown beside it (phase B people). |
+| 134 | The 3D loadout editor takes pouches and pockets | **Added 2026-10-26**: **the Captain's addition**: the editor also puts items INTO pouches, backpack pockets and clothing pockets (not only the slots and MOLLE points), for the player and companions (phase B UI). |
+| 135 | Third-person option | **Added 2026-10-26**: a toggle to third person on foot (as the vehicle camera), aiming first person; melee and stealth unchanged (phase B/C). |
+| 136 | Wait and pass time | **Added 2026-10-26**: at a safe spot (the safehouse, a held building) wait an hour or until dusk or dawn, the world ticking at speed as sleep does, interrupted if something comes (phase B with sleep). |
+| 137 | Starting season and world size options | **Added 2026-10-26**: New world adds the season you wake in (spring default) and the world size (24 zones now, 48 with wilderness later) (phase D seasons; the size with the wilderness). |
+| 138 | Solo pause, co-op never | **Added 2026-10-26**: a world hosted with nobody joined pauses on the menu; with anyone joined it never does (phase B). |
+| 139 | Saves | **Declined 2026-10-26**: ironman (one save, no reloads) NOT taken; a world autosaves as today and the save rules stay as they are (a world list on Continue still worth having). |
 
 ## Already in the code to build on
 
