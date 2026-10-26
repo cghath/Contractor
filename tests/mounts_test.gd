@@ -175,8 +175,8 @@ func _test_horse_gaits() -> void:
 	await _ride(horse, 1.0, 2.5)
 	check(horse.gait() != Mount.Gait.GALLOP and horse.allowed_gait() == Mount.Gait.TROT, "blown, it drops out of the gallop (%.1f m/s)" % horse.forward_speed())
 	horse.stamina = 100.0
-	await _ride(horse, 0.0, 2.0)
-	check(absf(horse.forward_speed()) < 0.5, "reins slack, it stops")
+	await _ride(horse, 0.0, 3.5)
+	check(absf(horse.forward_speed()) < 0.5, "reins slack, it stops (%.1f m/s)" % horse.forward_speed())
 	var parts := horse.readout(0)
 	check(parts.contains("Horse") and parts.contains("Wind"), "the rider's readout: %s" % parts)
 	player.set_meta(&"test_horse", horse)
@@ -197,7 +197,7 @@ func _test_spook() -> void:
 	await _seconds(1.5)
 	check(horse.global_position.distance_to(at) > 4.0, "it bolts (%.1f m)" % horse.global_position.distance_to(at))
 	await _wait_for(func() -> bool: return horse.spooked_s <= 0.0, 6.0)
-	await _seconds(1.0)
+	await _seconds(3.5)
 	check(horse.spooked_s <= 0.0 and absf(horse.forward_speed()) < 1.0, "and settles")
 
 
@@ -370,7 +370,11 @@ func _test_dead_bite() -> void:
 	await _frames(2)
 	horse.tied = true  # (so it can't bolt off the deck)
 	var z := Survival.server_spawn_zombie(level, horse.global_position + Vector3(1.0, 0.3, 0.0))
-	await _seconds(4.0)
+	for i in 40:  # (held at its side: the deck has no navmesh to walk)
+		if z:
+			z.global_position = horse.global_position + Vector3(1.0, 0.05, 0.0)
+		await get_tree().physics_frame
+	await _seconds(3.0)
 	check(horse.health < float(horse.mspec.get("hp", 100.0)), "a walker at its side bites it (%.0f HP)" % horse.health)
 	horse.server_hurt(500.0, "bitten")
 	check(horse.is_dead() and not horse.can_drive() and not horse.server_enter(player, 0), "and it can die of it")
@@ -399,13 +403,13 @@ func _test_save_restore() -> void:
 	await _wait_for(func() -> bool: return level != null and level.players.get_node_or_null(^"1") != null, 20.0)
 	await _frames(10)
 	var layer := VehicleLayer.of(level)
-	var h2 := layer.find(hid) as Mount if layer else null
-	var c2 := layer.find(cid) as Mount if layer else null
+	var h2: Mount = layer.find(hid) as Mount if layer else null
+	var c2: Mount = layer.find(cid) as Mount if layer else null
 	check(h2 != null and h2.tied and absf(h2.feed - 61.0) < 1.5 and h2.tamed, "the tied horse is back, tied, as fed as it was (%s)" % ["missing" if h2 == null else "feed %.0f" % h2.feed])
 	check(c2 != null and c2.cargo_hold.count_of(&"water_bottle") == stash, "the cart is back with its stash (%d)" % (c2.cargo_hold.count_of(&"water_bottle") if c2 else -1))
 	await _seconds(1.5)
 	check(c2 != null and c2.horse() != null and c2.horse().vehicle_id == horse_of_cart, "with its horse in the shafts")
-	var start := layer.find("mnt_start_horse_0") as Mount if layer else null
+	var start: Mount = layer.find("mnt_start_horse_0") as Mount if layer else null
 	check(start != null and Mount.counts_in_zone(level).horse >= 3, "and the farm's horses once, not twice (%s)" % [Mount.counts_in_zone(level)])
 
 

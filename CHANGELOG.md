@@ -11,6 +11,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, mounts: horses, bicycles and horse carts (claude/survival-mounts)
+
+Local: mounts, survival, vehicles suites (RUN_LINE; docs/survival_mounts.md).
+
+- **Added (`Mount`, `scripts/vehicles/mount.gd`):** mounts as Vehicles of kind "mount" (calls 31, 35):
+  a bicycle (fast on asphalt, slow on grass, useless cross-country; silent; falls on a hard hit, a
+  flat now and then), a horse (walk, trot, gallop with stamina; hooves heard 20-60 m; feed and water
+  a day, grazing, hungry no gallop, starved dead; packs; spooks at shots and the dead within 15 m and
+  bolts, throwing a rider of low fieldcraft; the dead bite it; wild until caught with a rope and
+  fieldcraft 1; tied it stays) and a horse cart (a horse in its shafts, a 1200 L stash, a driver and
+  a bench, loud on hard ground). Ridden from the saddle with a sidearm or a one-handed weapon. Saved
+  with the zone through VehicleLayer. Numbers in `data/mounts.json` (kept off `VehicleSpecs.models()`).
+- **Added (`Mounts`, `scripts/survival/mounts.gd`):** places a zone's mounts by stable ids (wild horses
+  and a cart at the start farm, horses and carts at farms, bicycles at villages and towns); shots spook
+  horses (`Survival.server_noise`); "Everyone mount up" (a companion per free mount, then following in
+  SquadDrivers' column) and "Stay with the horses" (a companion holds by a tied horse and calls the dead);
+  `Mounts.server_spawn` and `Mount.counts_in_zone` for the world lane.
+- **Added (`MountArt`):** voxel horse (four coats), bicycle (three colours) and farm cart, far LOD.
+- **Added:** InteractionMenu's "mount" target kind; the mouse wheel steps a horse's gait, Shift gallops;
+  items `rope`, `horse_feed`, `bicycle_tube` (home loot); the `mounts` suite.
+
 ### Contractor: Fallen, phase B: the settlement's work and the council, first form (claude/survival-settlement)
 
 Local: settlement and survival suites (R2649 PASS (settlement, survival, fallenpeople, building); docs/survival_building.md's "Where the build is").

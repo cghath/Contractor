@@ -94,7 +94,11 @@ static func server_spawn(p_level: Node, model: String, pos: Vector3, yaw_deg := 
 	if layer == null or not Mount.is_mount_model(model):
 		return null
 	var at := pos
-	if p_level.has_method(&"ground_point"):
+	var space := (p_level as Node3D).get_world_3d().direct_space_state if p_level is Node3D else null
+	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 2.0, pos + Vector3.DOWN * 60.0, 1)) if space else {}
+	if not hit.is_empty():
+		at = hit.position  # what's under it: the ground, a floor, a bridge's deck
+	elif p_level.has_method(&"ground_point"):
 		at = p_level.call(&"ground_point", pos)
 	var scheme := String(opts.get("scheme", ""))
 	var v := layer.server_spawn(model, Transform3D(Basis(Vector3.UP, deg_to_rad(yaw_deg)), at), scheme, StringName(String(opts.get("faction", "player"))), String(opts.get("id", "")))
@@ -215,7 +219,8 @@ func server_mount_up(by: Soldier) -> String:
 	var layer := VehicleLayer.of(level)
 	var free := _free_mounts(by.global_position)
 	var mine := Vehicle.ride_of(by)
-	free = free.filter(func(m: Mount) -> bool: return m != mine or m.mount_type == Mount.CART)
+	if mine and mine is Mount and (mine as Mount).mount_type != Mount.CART:
+		free.erase(mine as Mount)  # (his own horse isn't free)
 	var sent := 0
 	for m: Mount in free:
 		var seats := 1
