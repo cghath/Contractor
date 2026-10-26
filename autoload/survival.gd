@@ -60,6 +60,7 @@ var _clock_s := 0.0  # host: real seconds into the world's current hour
 ## The world's saved state ("seed", "day", "hour", "zone" (where it's played), "start_zone").
 func _ready() -> void:
 	add_child(Rpg.new())  # the RPG layer's RPCs and tick (Rpg)
+	add_child(WorldSim.new())  # the living world's far tick (WorldSim, survival_world.md)
 
 
 func state() -> Dictionary:
@@ -117,6 +118,7 @@ func server_continue(main: Node, name := "") -> bool:
 	if not Campaign.load_campaign():
 		return false
 	world = id
+	_world_continue()  # the world's catch-up for the time it sat unhosted (WorldSim)
 	return _host_zone(main, String(state().get("zone", start_zone())))
 
 
@@ -177,6 +179,7 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	_apply_sky(level)
 	_seed_crowd(level)
 	ColdOpen.server_begin(level)  # a new world's first hour (once)
+	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
 
 
 ## Host: the world is saved: the world's sections and the zone being played.
@@ -501,7 +504,7 @@ var _zombie_n := 0
 func dead_near(level: ZoneLevel, pos: Vector3) -> int:
 	var m := level.module_at(pos)
 	var base := ZoneModules.base(String(m.type)) if m else ""
-	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2))) * option_mult("dead")
+	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2))) * option_mult("dead") * WorldSim.dead_mult()
 	return roundi(n * (1.0 - thinned(pos)))
 
 
@@ -513,7 +516,7 @@ func thinned(pos: Vector3) -> float:
 	if not c is Dictionary:
 		return 0.0
 	var days := (day() + hour() / 24.0) - float(c.at)
-	return clampf(float(c.v) - days / REFILL_DAYS, 0.0, 1.0)
+	return clampf(float(c.v) - days * WorldSim.refill_mult() / REFILL_DAYS, 0.0, 1.0)
 
 
 func _cell_key(pos: Vector3) -> String:
@@ -544,6 +547,7 @@ func _on_zombie_died(s: Soldier) -> void:
 	all[zone] = cells
 	state()["thinned"] = all
 	state()["kills"] = int(state().get("kills", 0)) + 1
+	_world_dead_down(s)
 
 
 ## The living dead in `level`.
@@ -862,3 +866,32 @@ func _client_body(body: Dictionary) -> void:
 		if me and me.vitals:
 			me.vitals.needs_sway = Needs.sway_mult(my_body)
 	body_changed.emit()
+
+
+# --- The living world's hooks (WorldSim, docs/survival_world.md) --------------------------------
+
+## Host: Continue: the far ticks for the time the world sat unhosted (up to 2 world days, call 67).
+func _world_continue() -> void:
+	WorldSim.server_on_continue()
+
+
+## Host: a zone is up: the world set up (a new world's groups), its live layer, and the world's own
+## lone survivors in this zone put on its ground.
+func _world_level_ready(level: SurvivalLevel) -> void:
+	WorldSim.server_setup()
+	if level.get_node_or_null(NodePath(WorldLive.NODE_NAME)) == null:
+		level.add_child(WorldLive.new())
+	var zone := String(state().get("zone", ""))
+	for rec: Dictionary in (state().get("people", {}) as Dictionary).values():
+		if bool(rec.get("y_unset", false)) and String(rec.get("zone", "")) == zone:
+			var p := SurvivorPerson.pos_of(rec)
+			SurvivorPerson.set_pos(rec, level.ground_point(p))
+			SurvivorPerson.set_pos(rec, level.ground_point(p), "home")
+			rec.erase("y_unset")
+
+
+## Host: one of the dead fell (the zone's density for the world, help a group saw).
+func _world_dead_down(s: Soldier) -> void:
+	var sim := WorldSim.get_sim()
+	if sim:
+		sim.server_dead_down(s)
