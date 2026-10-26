@@ -95,8 +95,8 @@ static func apply_text_scale() -> float:
 		return 1.0
 	if _base_sizes.is_empty():
 		_base_sizes["|default"] = theme.default_font_size
-		for type: StringName in theme.get_font_size_type_list():
-			for n: StringName in theme.get_font_size_list(type):
+		for type: String in theme.get_font_size_type_list():
+			for n: String in theme.get_font_size_list(type):
 				_base_sizes["%s|%s" % [type, n]] = theme.get_font_size(n, type)
 	var k := text_scale()
 	_applied_scale = k

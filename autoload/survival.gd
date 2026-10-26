@@ -987,7 +987,7 @@ func _wake(s: Soldier, why: String) -> void:
 	if why == "waited":
 		text = SurvivalSleep.waited_text(mode, hour())
 	elif was_waiting and why.begins_with("wait_"):
-		text += ". " + SurvivalSleep.waited_text(mode, hour())
+		text += ". " + SurvivalSleep.waited_text("", hour())  # (stopped early: the time it got to)
 	var dream := Dreams.take_line(n)  # the night's dream (Dreams)
 	if dream != "":
 		text = (text + ". " + dream) if text != "" else dream

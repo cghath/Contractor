@@ -114,11 +114,14 @@ func _test_editor_pouches() -> void:
 	for id: String in counts:
 		pool.append({"id": id, "count": int(counts[id])})
 	var res := Restock.build(kit, pool)
+	var fitted := Inventory.new()
+	fitted.net_state = GameState.from_json((res.gear as Dictionary).duplicate(true))
 	var held := 0
-	for e: Dictionary in (res.gear as Dictionary).get("containers", {}).get(box, []):
-		if String(e.id) == "mag_556":
+	for e: Dictionary in fitted.containers.get(StringName(box), []):
+		if StringName(String(e.id)) == &"mag_556":
 			held += int(e.get("count", 1))
-	check(held == before + 1, "the saved kit restores it: applied, the pouch holds %d magazines" % held)
+	fitted.free()
+	check(held == before + 1, "the saved kit restores it: applied, the pouch holds %d magazines (missing %s)" % [held, res.missing])
 	editor.take_out(box, "mag_556")
 	check(Loadouts.box_count(editor.draft, box, "mag_556") == before, "Take out puts it back in the stash")
 	editor.drop_on_marker("pockets", {"lo_item": "ifak"})
@@ -341,12 +344,13 @@ func _test_navmesh() -> void:
 			var c := origin + Vector3i(0, y, dz)
 			var p := BuildPieces.cell_centre(c)
 			c = Builder.ground_cell(Vector3(p.x, level.ground_height(p.x, p.z), p.z)) + Vector3i(0, y, 0)
-			if b.server_place(null, c, "wood") == "":
+			if b.server_place(null, c, "wood", "block", 0, true) == "":  # (a blueprint: nobody pays; built at once)
 				b._finish_block(c, b.blocks[c])
 	var built_at := Time.get_ticks_msec()
-	var changed := await _wait_for(func() -> bool:
+	var round_it := func() -> bool:
 		var p := NavigationServer3D.map_get_path(map, from, to, true, ZombieAI.NAV_LAYERS)
-		return b.nav_flushes > flushes and not _crosses(p, wall_x, centre.z, 4.0), 3.0)
+		return b.nav_flushes > flushes and not _crosses(p, wall_x, centre.z, 4.0)
+	var changed := await _wait_for(round_it, 3.0)
 	var secs := (Time.get_ticks_msec() - built_at) / 1000.0
 	var path1 := NavigationServer3D.map_get_path(map, from, to, true, ZombieAI.NAV_LAYERS)
 	check(changed and secs <= 1.0, "after: the navigation takes the wall in within a second (%.2f s, %d rebake)" % [secs, b.nav_flushes - flushes])

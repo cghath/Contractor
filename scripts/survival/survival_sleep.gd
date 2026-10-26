@@ -282,5 +282,5 @@ static func server_interrupt_waits(why := "wait_event") -> void:
 static func waited_text(mode: String, hour_now: float) -> String:
 	var hh := int(floor(hour_now)) % 24
 	var mm := int(floor(fposmod(hour_now, 1.0) * 60.0))
-	var until := String({"dusk": "dusk ", "dawn": "dawn "}.get(mode, ""))
-	return "%s %s(%02d:%02d)" % [WAITED_PREFIX, until, hh, mm]
+	var until := String({"dusk": "dusk", "dawn": "dawn"}.get(mode, ""))
+	return "%s %s (%02d:%02d)" % [WAITED_PREFIX, until, hh, mm] if until != "" else "%s %02d:%02d" % [WAITED_PREFIX, hh, mm]
