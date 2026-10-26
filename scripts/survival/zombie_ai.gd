@@ -315,6 +315,8 @@ func _decide() -> void:
 func _spot() -> Dictionary:
 	var dark := DayNight.darkness_at(body.global_position)
 	var reach := minf(lerpf(SIGHT_M, NIGHT_SIGHT_M, clampf(dark, 0.0, 1.0)), DayNight.sight_m(body.global_position))
+	if dormant:
+		reach *= DORMANT_SIGHT  # (lying up in a nest)
 	var eye := body.global_position + Vector3.UP * 1.6
 	var best: Soldier = null
 	var best_score := 0.0
@@ -322,9 +324,7 @@ func _spot() -> Dictionary:
 		var s := n as Soldier
 		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
 			continue
-		if dormant:
-		reach *= DORMANT_SIGHT
-	var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0) * Masking.sight_x(s, dark)
+		var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0) * Masking.sight_x(s, dark)
 		if is_instance_valid(target) and s == target:
 			r *= 1.5  # (one it's after is easier to keep in sight)
 		var d := body.global_position.distance_to(s.global_position)

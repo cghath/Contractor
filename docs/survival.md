@@ -12,6 +12,10 @@
   companions and pouches, third person (132-135), climbing in full, navmesh with builds, accessibility (140-142), the
   audio tension layer and the bigger TTS (63, 76), relationships (74), top crafting (85), spoilage, clinic pieces.
   Next lanes after the 11:30 CDT reset: fauna+flora; the dead over time; clothing + loadout; audio; condition/wear.
+- **The dead over time built on `claude/survival-deadtime`** (calls 112, 114, 115, 140): decay stages by the world's date
+  (fresh fast and strong, old slow and falling apart, winter keeps them), the dead dressed and kitted by what they were (loot on
+  the corpse, a site's mix tells what it was), nests in the dark sites by day pouring out at dusk (dormant when entered, a scream
+  wakes them, cleared for a loot payoff), the climbing rules in full; see docs/survival_deadtime.md.
 - **Fauna and flora built on `claude/survival-nature`** (calls 42's hunting/fishing/foraging, 100-107): wildlife with fear,
   tells and the dead hunting them, predators, infected dogs and wolves, migration and fishing, crows/flies/rats/cats, regrowth,
   foraging with poisons, trees as a resource, wildfire; R2670 PASS (nature, survival, seasons); see docs/survival_nature.md.

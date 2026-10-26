@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the dead over time (claude/survival-deadtime)
+
+- **Added** decay stages (`DeadDecay`, call 112): the world has a date (the fall 2-8 weeks before day one, a world day is about nine of the story's), every one of the dead an age; fresh ones are faster, hit harder and have more pool, old ones are slower and softer and their limbs come apart, and there are more of them as the months go; the date sets the mix; winter's days don't count (the frozen keep); the look greys, dirties and goes to the bone by stage (the `dead_decay` meta); ZoneDead's crowd heads carry their age.
+- **Added** the dead wear what they were (`DeadDress`, call 114): an origin by the site (soldiers at the bases and checkpoints, doctors at a town's clinic, cops at its police station, workers, farmers, townsfolk), dressed in its colours, with its kit on the body for the looting (a soldier's rifle in his pack and plates on him, a doctor's aid bag and meds, a cop's pistol and cuffs; the dead never use them); the hazmat kind is a decon-team soldier; a site's mix of origins tells what it was.
+- **Added** nests and roosts (`DeadNests`, call 115): a nest at the churches, factories, schools, garages, offices, a town's warehouse and the military's barracks; by day its heads sit inside (fewer about outside), at dusk they pour out of its door, at dawn they walk back in; entered by day they lie dormant (dulled senses: a silent kill is possible, a shot or a scream wakes them all); clearing one flags its untouched loot as the payoff, and it refills slowly.
+- **Added** the climbing rules in full (call 140): none of the dead climb ladders, walls or roofs, a runner vaults waist-high, a crawler squeezes under a gap, every one steps up a kerb; the dead's paths keep to the walk layer, and one after a man up out of reach stops under him and piles; no bite up onto a platform.
+- **Added** the `deadtime` suite.
+
 ### Contractor: Fallen, fauna and flora (claude/survival-nature)
 
 - **Added** wildlife (`Wildlife`, `Nature`, data/survival_fauna.json; calls 42, 100, 103): deer, boar, rabbits, bird flocks, wolf and feral dog packs, a bear in deep woods, raccoons at the stores, laid out by habitat and season away from the players, drawn on every peer (`NatureArt`), with hit boxes; prey flees the living, the dead and noise (`Survival.server_noise`), a running herd or a lifted flock is a tell (a companion says it); the dead go after animals they see and bite them down, and walk to carcasses and blood by smell (`Wildlife.smell_sources()`, the crowd drifts to them); a round kills, snares catch rabbits over the hours, tracking at fieldcraft 3, butchering gives raw meat and hides and leaves blood; the hunter's calendar from fieldcraft 2 (fish from 4).

@@ -17,7 +17,7 @@ extends RefCounted
 ## it: look()), "dead_decay_x" (0..1). ZoneDead's crowd records carry "turned" too.
 ## Every number here is Proposed.
 
-const STORY_DAYS := 365.0 / (4.0 * Seasons.SEASON_DAYS)
+const STORY_DAYS := 9.125  # 365 / (4 seasons x Seasons.SEASON_DAYS)
 const FALL_WEEKS := Vector2i(2, 8)
 const FRESH_DAYS := 14.0
 const ROT_DAYS := 120.0
