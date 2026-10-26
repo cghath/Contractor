@@ -1161,21 +1161,37 @@ func _make_zombie(data: Dictionary) -> Node:
 	s.name = data.name
 	s.spawn_id = String(data.name)
 	s.faction = ZombieAI.INFECTED
-	var look := PersonLook.outfit(Person.CIVILIAN, Person.NEUTRAL, {"name": String(data.name)}).split(":")
-	if look.size() >= 5:
-		look[3] = ZOMBIE_SKIN
-	s.variant = ":".join(look)
-	s.face = SoldierLook.make(SoldierLook.seed_of([data.name, "zombie"]), "insurgent", VoxelArt.MALE, ZOMBIE_SKIN)
+	var kind := String(data.get("kind", "walker"))
+	# The dead over time (docs/survival_deadtime.md): what it was dresses it (DeadDress), its age
+	# greys and tears it (DeadDecay: the "dead_decay" stage meta the model reads).
+	var decay := float(data.get("decay", 0.3))
+	var origin := String(data.get("origin", "civilian"))
+	var look := DeadDress.look(PersonLook.outfit(Person.CIVILIAN, Person.NEUTRAL, {"name": String(data.name)}), origin, String(data.name))
+	s.variant = DeadDecay.look(look, decay)
+	var skin := String(DeadDecay.SKIN.get(DeadDecay.stage_of(decay), ZOMBIE_SKIN))
+	s.face = SoldierLook.make(SoldierLook.seed_of([data.name, "zombie"]), "insurgent", VoxelArt.MALE, skin)
 	s.position = data.pos
-	s.set_meta(&"zombie", String(data.get("kind", "walker")))
+	s.set_meta(&"zombie", kind)
+	DeadDecay.apply(s, float(data.get("turned", 0.0)), decay)
+	s.set_meta(&"dead_origin", origin)
+	if String(data.get("nest", "")) != "":
+		s.set_meta(&"dead_nest", String(data.nest))
+		if bool(data.get("dormant", false)):
+			s.set_meta(&"nest_inside", true)
 	if multiplayer.is_server():
 		var vitals: Vitals = s.get_node(^"Vitals")
 		vitals.undead = true
 		vitals.can_go_down = false
-		vitals.undead_pool = float((ZombieAI.KINDS.get(String(data.get("kind", "walker")), ZombieAI.KINDS.walker) as Dictionary).pool)
+		vitals.undead_pool = float((ZombieAI.KINDS.get(kind, ZombieAI.KINDS.walker) as Dictionary).pool) * DeadDecay.pool_mult(decay)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash([data.name, "kit"])
+		DeadDress.server_kit(s, origin, kind, rng)  # what it had on it: the corpse's loot
 		var brain := ZombieAI.new()
 		brain.name = "ZombieAI"
-		brain.kind = String(data.get("kind", "walker"))
+		brain.kind = kind
+		brain.decay = decay
+		brain.nest_id = String(data.get("nest", ""))
+		brain.dormant = bool(data.get("dormant", false))
 		s.add_child(brain)
 	return s
 

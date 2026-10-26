@@ -13,6 +13,11 @@ extends Node3D
 ## **horde** (Survival: the zone's pressure at HORDE_AT) is HORDE_N of the crowd put down
 ## HORDE_FROM_M to HORDE_TO_M from the pressure point and walked at it; when the pressure falls
 ## under HORDE_DISPERSE_AT the horde wanders and thins (THIN_S a head) back to the zone's quiet.
+##
+## The dead over time (docs/survival_deadtime.md): every head carries when it turned ("turned":
+## DeadDecay, its stage: stage_of) and what it was ("origin": DeadDress), rolled where it's put
+## down, and a nest's heads its "nest" (DeadNests, ticked from here: in by day, out at dusk); a
+## head that becomes a body keeps all three.
 
 const CAP := 400
 const SEND_S := 0.5
@@ -28,7 +33,7 @@ const SEE_M := 220.0
 const WAIT_S := Vector2(3.0, 12.0)
 const CONVERT_TICK_S := 1.0
 
-var dead: Array[Dictionary] = []  # {"pos": Vector2, "face", "kind", "alive", "target": Vector2, "wait", "horde", "show", "show_face"}
+var dead: Array[Dictionary] = []  # {"pos": Vector2, "face", "kind", "alive", "target": Vector2, "wait", "horde", "show", "show_face", "turned", "origin", "nest"?}
 var horde_until := -1.0
 var sent := 0
 var received := 0
@@ -64,14 +69,34 @@ func _ready() -> void:
 			_groups[kind] = [node, []]
 
 
-## Host: one more of the crowd at `pos` (world), of `kind`; in a horde if `horde`. False when full.
-func server_add(pos: Vector3, kind := "walker", horde := false) -> bool:
+## Host: one more of the crowd at `pos` (world), of `kind`; in a horde if `horde`. `extra`: its
+## "turned", "origin" and "nest" when it has them (a body going back), else rolled here. False when full.
+func server_add(pos: Vector3, kind := "walker", horde := false, extra := {}) -> bool:
 	if dead.size() >= CAP:
 		return false
 	var at := Vector2(pos.x, pos.z)
-	dead.append({"pos": at, "face": _rng.randf() * TAU, "kind": kind, "alive": true, "target": at,
-		"wait": _rng.randf_range(0.0, WAIT_S.y), "horde": horde, "show": at, "show_face": 0.0})
+	var d := {"pos": at, "face": _rng.randf() * TAU, "kind": kind, "alive": true, "target": at,
+		"wait": _rng.randf_range(0.0, WAIT_S.y), "horde": horde, "show": at, "show_face": 0.0}
+	d.turned = float(extra.turned) if extra.has("turned") else DeadDecay.roll(_rng)
+	d.origin = String(extra.origin) if extra.has("origin") else DeadDress.roll(DeadDress.site_at(get_parent(), pos), _rng, kind)
+	if String(extra.get("nest", "")) != "":
+		d.nest = String(extra.nest)
+	dead.append(d)
 	return true
+
+
+## A head's stage now ("fresh", "worn", "old": DeadDecay).
+static func stage_of(d: Dictionary) -> String:
+	return DeadDecay.stage_of(DeadDecay.decay_of(float(d.get("turned", 0.0))))
+
+
+## What a head carries into a body (Survival.server_spawn_zombie's extra).
+static func carry(d: Dictionary) -> Dictionary:
+	var out := {}
+	for k: String in ["turned", "origin", "nest"]:
+		if d.has(k):
+			out[k] = d[k]
+	return out
 
 
 ## Host: a horde of `n` of the crowd, HORDE_FROM_M to HORDE_TO_M from `at`, walking at it.
@@ -102,7 +127,10 @@ func horde_count() -> int:
 
 func _physics_process(delta: float) -> void:
 	_time += delta
-	if not multiplayer.is_server() or dead.is_empty():
+	if not multiplayer.is_server():
+		return
+	DeadNests.server_process(get_parent(), delta)  # (the nests: in by day, out at dusk)
+	if dead.is_empty():
 		return
 	var level := get_parent()
 	var point: Variant = Survival.pressure_point(level)
@@ -169,7 +197,7 @@ func _convert(level: Node) -> void:
 		var near := players.any(func(p: Soldier) -> bool: return Vector2(p.global_position.x, p.global_position.z).distance_to(pos) <= LIVE_M)
 		if near and live < Survival.LIVE_CAP:
 			var y := _terrain.height_at(pos.x, pos.y) if _terrain else 0.0
-			var z := Survival.server_spawn_zombie(level, Vector3(pos.x, y, pos.y), String(d.kind))
+			var z := Survival.server_spawn_zombie(level, Vector3(pos.x, y, pos.y), String(d.kind), carry(d))
 			if z and bool(d.get("frozen", false)):
 				Seasons.freeze(z)  # (still frozen up close)
 			if z:

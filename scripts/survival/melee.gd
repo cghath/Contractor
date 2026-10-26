@@ -31,7 +31,8 @@ const SIDESTEP_IFRAMES_S := 0.2
 const DODGE_STAMINA := 0.25
 const SIDESTEP_STAMINA := 0.1
 
-## The dead's attack (ZombieAI): a lunge and a bite or a clawing blow.
+## The dead's attack (ZombieAI): a lunge and a bite or a clawing blow, harder from a fresh one and
+## softer from an old one (DeadDecay.strike_mult: the attack's mult).
 const ZOMBIE_ATTACK := {"windup": 0.55, "heavy": false, "round_class": &"pistol", "depth": 0.04, "parts": [&"forearm_l", &"forearm_r", &"upper_arm_l", &"upper_arm_r", &"neck", &"chest"], "name": "bite"}
 
 
@@ -83,7 +84,7 @@ static func server_attack(attacker: Soldier, attack: Dictionary, mult := 1.0) ->
 
 ## Host: the zombie's strike on `victim` (ZombieAI, in reach): the same telegraphed attack.
 static func server_strike(attacker: Soldier, _victim: Soldier) -> bool:
-	return server_attack(attacker, ZOMBIE_ATTACK)
+	return server_attack(attacker, ZOMBIE_ATTACK, DeadDecay.strike_mult(attacker))  # (the dead over time: a fresh one hits harder)
 
 
 ## A crawler's attack (call 19): grabs his legs: a shallow bite low and a trip (TRIP_S staggered:

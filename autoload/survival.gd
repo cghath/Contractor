@@ -518,6 +518,7 @@ func dead_near(level: ZoneLevel, pos: Vector3) -> int:
 	var m := level.module_at(pos)
 	var base := ZoneModules.base(String(m.type)) if m else ""
 	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2))) * option_mult("dead") * WorldSim.dead_mult()
+	n *= DeadDecay.count_mult() * DeadNests.outside_mult(m)  # (the dead over time: more as the months go; by day a nest's sit inside)
 	return roundi(n * (1.0 - thinned(pos)))
 
 
@@ -552,6 +553,7 @@ func _on_zombie_died(s: Soldier) -> void:
 				other.set_meta(&"tainted_at", day() + hour() / 24.0)
 				if not other.is_ai():
 					other._client_message.rpc_id(other.owner_peer(), "It burst over you")
+	DeadNests.on_died(s)  # (a nest's last head clears it)
 	var zone := String(state().get("zone", ""))
 	var all: Dictionary = state().get("thinned", {})
 	var cells: Dictionary = all.get(zone, {})
@@ -583,8 +585,8 @@ func _populate(level: SurvivalLevel) -> void:
 		var far := players.all(func(p: Soldier) -> bool: return p.global_position.distance_to(z.global_position) > DESPAWN_M)
 		if far:
 			var crowd := ZoneDead.of(level)
-			if crowd:
-				crowd.server_add(z.global_position, String(z.get_meta(&"zombie", "walker")))  # back into the far tier where it stood
+			if crowd and not DeadNests.server_back(z):  # (a nest's by day goes back in)
+				crowd.server_add(z.global_position, String(z.get_meta(&"zombie", "walker")), false, DeadDecay.carry(z))  # back into the far tier where it stood
 			z.queue_free()
 			live.erase(z)
 	if live.size() >= LIVE_CAP:
@@ -633,10 +635,12 @@ static func _in_view(p: Soldier, at: Vector3) -> bool:
 	return to.length() > 0.1 and fwd.normalized().dot(to.normalized()) > VIEW_DOT
 
 
-## Host: one of the dead at `at`.
-func server_spawn_zombie(level: CompoundLevel, at: Vector3, kind := "walker") -> Soldier:
+## Host: one of the dead at `at`; `extra` its "turned", "origin", "nest", "dormant" (DeadDecay.spawn_data).
+func server_spawn_zombie(level: CompoundLevel, at: Vector3, kind := "walker", extra := {}) -> Soldier:
 	_zombie_n += 1
-	var s := level.ai_spawner.spawn({"zombie": true, "kind": kind, "name": "Z%d_%d" % [Time.get_ticks_msec() % 100000, _zombie_n], "pos": at}) as Soldier
+	var data := {"zombie": true, "kind": kind, "name": "Z%d_%d" % [Time.get_ticks_msec() % 100000, _zombie_n], "pos": at}
+	data.merge(DeadDecay.spawn_data(level, at, kind, extra), true)  # (the dead over time: its age, what it was, its nest)
+	var s := level.ai_spawner.spawn(data) as Soldier
 	if s:
 		s.died_for_good.connect(_on_zombie_died)
 	return s
