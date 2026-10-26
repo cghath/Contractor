@@ -7,6 +7,12 @@
   within 250 m of the farm), a soldier's rifle kept 25% and weathered, near empty; no guns in the commonest home
   and stash tiers, loose rounds halved; the dead's kit, ground loot and boxes' first rolls get a found condition;
   before/after in docs/survival_deadtime.md "Early loot curve" (R2712 before); R2714 PASS (deadtime, survival, wear, loot, fallenevents).
+- **The live convoy and the crew's reward built on `claude/survival-convoy`**: a convoy event in the played zone is a
+  column on the main road (enclave truck + escort or a trader's carts, 4-8 people, a real cargo hold) that halts at
+  wrecks, the dead and raiders, is hailed into a trade (the enclave's by standing), turns on robbers and meets a live
+  ambush; the wagon cache without a road; the downed crew escorted home ("Come with me", an enclave post or a radio
+  pickup) for standing, medical stock and a serum chance; R2718 PASS (fallenevents, survival, worldsim, enclave, mounts); see
+  docs/survival_events.md 1b-1c.
 - **The last calls built on `claude/survival-polish`** (calls 134, 136, 139, 141, 142): the 3D loadout editor's
   pouch and pocket hotspots (drop INTO a pouch, saved kits refill it, survival kits too), Wait an hour / until dusk /
   until dawn from the ground's menu (interrupted by the dead, a noise, a horde, an event; companions wait along),

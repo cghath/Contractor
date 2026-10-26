@@ -13,11 +13,14 @@ extends RefCounted
 ##   player: the enclave's standing drops a little, it was theirs).
 ## - convoy: an enclave or trader column moving along the road through a zone with 3+ links (the
 ##   MSR) toward the next; at the window's end raiders in reach may ambush it (their supplies up,
-##   the enclave's grudge), else it passes and the settlers it passed traded with it; hosted, the
-##   column's wagon stands at the place (a cache: robbing it is an event, the column's people turn).
+##   the enclave's grudge), else it passes and the settlers it passed traded with it; hosted, a live
+##   column on the zone's main road (FallenConvoy: vehicles, guards, a trader, its cargo, halts,
+##   hails, robbery, a live ambush), or the column's wagon (a cache) where the zone has no road.
 ## - heli_down: a wreck at a place (a cache when hosted) and its crew as lone survivors beside it;
-##   the enclave asks for them back (a broadcast); at the window's end the enclave recovers the crew
-##   still out there, else they're lost to it.
+##   the enclave asks for them back (a broadcast); the players can bring them home (HeliCrew: "Come
+##   with me", delivered at a post or by a radio pickup, the enclave's reward); at the window's end
+##   the enclave recovers the crew still out there (a little standing lost if a player was near and
+##   left them), else they're lost to it.
 ## - bell: cultists ring a bell to call the dead (pressure in the zone, a lure ringing in the live
 ##   zone); a player rings one too (FallenBell: server_ring).
 ## - burning: a town burns on the horizon: the zone's pressure up, its places poorer, a glow in the
@@ -295,13 +298,22 @@ static func tick(m: WorldModel) -> void:
 					if not place.is_empty():
 						place["richness"] = 1.0
 			"convoy":
-				if m.now >= float(r.until):
+				if m.now >= float(r.until) and not bool(r.get("live", false)):  # (a live column ends itself: FallenConvoy)
 					_resolve_convoy(m, r, def, fill)
 			"heli_down":
 				if m.now >= float(r.until):
 					var out_there := (r.get("crew", []) as Array).filter(func(pid: String) -> bool: return String((m.people.get(pid, {}) as Dictionary).get("status", "")) == "out_there")
+					var escorted := (r.get("crew", []) as Array).filter(func(pid: String) -> bool: return bool((m.people.get(pid, {}) as Dictionary).get("heli_escort", false)) or bool((m.people.get(pid, {}) as Dictionary).get("heli_home", false)))
 					if not out_there.is_empty():
 						_end(m, r, "recovered", "heli_recovered", String(def.get("recovered", "")).format(fill), [])
+						if bool(r.get("near", false)) and escorted.is_empty():  # (a player was near and left them: HeliCrew)
+							var enc := m.group(String((m.w.get("goal", {}) as Dictionary).get("evac_group", "")))
+							if not enc.is_empty():
+								WorldGroup.change_relation(enc, "player", float(HeliCrew.cfg().get("ignore_standing", -5.0)))
+								WorldGroup.remember(enc, m.now, "player", "left our crew at the wreck", "player")
+					elif not escorted.is_empty():
+						r.state = "done"
+						r.outcome = "escorted"  # (the players have them: HeliCrew delivers)
 					else:
 						_end(m, r, "lost", "heli_lost", String(def.get("lost", "")).format(fill), [])
 			"burning":
@@ -333,14 +345,28 @@ static func _group_at(m: WorldModel, z: String, place: Dictionary) -> Dictionary
 	return {}
 
 
-## A convoy's window ends: raiders in reach ambush it (ambush_chance), else it passes and the
-## settlers it passed traded with it (trade_share of a day's food and water).
-static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill: Dictionary) -> void:
-	var rng := m.rng_for("convoy%d" % int(r.id), "ambush")
+## The raiders who ambush convoy `r` ({} none): raiders in reach (its zone and the next), at
+## ambush_chance; a live column's roll ("ambush_by": a group id, "-" none) holds once made.
+static func ambush_group(m: WorldModel, r: Dictionary) -> Dictionary:
+	var by := String(r.get("ambush_by", ""))
+	if by == "-":
+		return {}
+	if by != "":
+		var known := m.group(by)
+		return known if not known.is_empty() and bool(known.get("alive", false)) else {}
+	var rng := m.rng_for("convoy%d" % int(r.get("id", 0)), "ambush")
 	var near: Array = [String(r.zone)] + (m.zone(String(r.zone)).get("links", []) as Array)
 	var raiders: Array = m.groups_near(near).filter(func(g: Dictionary) -> bool: return String(g.kind) == "raiders" and not bool(g.get("live", false)))
-	if not raiders.is_empty() and rng.randf() < float(def.get("ambush_chance", 0.35)):
-		var g: Dictionary = raiders[rng.randi_range(0, raiders.size() - 1)]
+	if not raiders.is_empty() and rng.randf() < float(kind_def("convoy").get("ambush_chance", 0.35)):
+		return raiders[rng.randi_range(0, raiders.size() - 1)]
+	return {}
+
+
+## A convoy's window ends: raiders in reach ambush it (ambush_group), else it passes and the
+## settlers it passed traded with it (trade_share of a day's food and water).
+static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill: Dictionary) -> void:
+	var g := ambush_group(m, r)
+	if not g.is_empty():
 		fill.group = String(g.name)
 		for k: String in ["food", "ammo", "fuel"]:
 			if k in WorldGroup.SUPPLY_KEYS:
@@ -350,11 +376,11 @@ static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill:
 			(col.relations as Dictionary)[String(g.id)] = float((col.relations as Dictionary).get(String(g.id), 0.0)) - 30.0
 		_end(m, r, "ambushed", "convoy_ambushed", String(def.get("ambushed", "")).format(fill), [String(g.id)])
 		return
-	for g: Dictionary in m.groups_in_zone(String(r.zone)):
-		if String(g.kind) in ["settlers", "scavengers"]:
+	for sg: Dictionary in m.groups_in_zone(String(r.zone)):
+		if String(sg.kind) in ["settlers", "scavengers"]:
 			for k: String in ["food", "water"]:
 				if k in WorldGroup.SUPPLY_KEYS:
-					WorldGroup.add_supply(g, k, float(def.get("trade_share", 0.5)) * WorldGroup.size(g))
+					WorldGroup.add_supply(sg, k, float(def.get("trade_share", 0.5)) * WorldGroup.size(sg))
 	_end(m, r, "passed", "convoy_passed", String(def.get("passed", "")).format(fill), [])
 
 
@@ -364,6 +390,7 @@ static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill:
 ## come once the zone's save is loaded: SurvivalLevel._on_hosted calls server_live).
 static func server_level_ready(_level: Node) -> void:
 	data()
+	FallenConvoy.data()  # (HeliCrew's numbers are read on the worker's tick)
 
 
 ## Host, after every far step (WorldSim._after_step): the world option's frequency, the live pieces,
@@ -393,7 +420,12 @@ static func server_live(level: Node) -> void:
 		done[int(r.id)] = true
 		var at := _place_pos3(level as SurvivalLevel, r)
 		match String(r.kind):
-			"supply_drop", "heli_down", "convoy":
+			"convoy":
+				if is_open and FallenConvoy.server_spawn(level as SurvivalLevel, r) != null:
+					pass  # (the live column on the main road)
+				elif is_open or bool(r.get("spawned", false)):
+					_spawn_cache(level as SurvivalLevel, r, at)  # (no road: the column's wagon)
+			"supply_drop", "heli_down":
 				if is_open or bool(r.get("spawned", false)):
 					_spawn_cache(level as SurvivalLevel, r, at)
 			"bell":
@@ -531,20 +563,43 @@ static func server_cache_opened(cache: WorldCache, actor: Soldier) -> void:
 			if actor:
 				CoopFallen.server_deed(actor, "got us the supply drop", 3.0)
 		"convoy":
-			r.state = "done"
-			r.outcome = "robbed"
-			r["by"] = profile
-			var gid := String(r.get("group", ""))
-			if sim and gid != "":
-				sim.server_change_relation(gid, -30.0, "robbed the convoy")
-			var def := kind_def("convoy")
-			var e := Intel.server_event(String(r.zone), "convoy_robbed", ["player"] + ([gid] if gid != "" else []),
-				String(def.get("robbed", "")).format({"column": String(r.get("column", "")), "zone": RegionMap.zone_name(String(r.zone))}), String(r.place))
-			var stored := Intel.event_by_id(int(e.get("id", 0)))
-			if not stored.is_empty():
-				stored["actor"] = profile
-			if actor:
-				CoopFallen.server_deed(actor, "robbed a convoy", -4.0)
+			server_convoy_robbed(r, actor)
+
+
+## Host: the players robbed convoy `r` (its wagon opened, or its live column attacked or its cargo
+## taken: FallenConvoy): done, robbed; the column's group -30 with the players; an event naming
+## the actor (his profile); the companions remember.
+static func server_convoy_robbed(r: Dictionary, actor: Soldier) -> void:
+	if String(r.get("outcome", "")) == "robbed":
+		return
+	var sim := WorldSim.get_sim()
+	var profile := Survival.profile_of(actor) if actor else ""
+	r.state = "done"
+	r.outcome = "robbed"
+	r["by"] = profile
+	var gid := String(r.get("group", ""))
+	if sim and gid != "":
+		sim.server_change_relation(gid, -30.0, "robbed the convoy")
+	var def := kind_def("convoy")
+	var who := Survival.survivor_name(actor) if actor else "someone"
+	var text := String(def.get("robbed", "")).format({"column": String(r.get("column", "")), "zone": RegionMap.zone_name(String(r.zone)), "who": who})
+	var e := Intel.server_event(String(r.zone), "convoy_robbed", ["player"] + ([gid] if gid != "" else []), text, String(r.place))
+	var stored := Intel.event_by_id(int(e.get("id", 0)))
+	if not stored.is_empty():
+		stored["actor"] = profile
+	if actor:
+		CoopFallen.server_deed(actor, "robbed a convoy", -4.0)
+
+
+## Host: a live piece ends event `r` (a live convoy through or lost): done with `outcome`, an event
+## of `kind` with `text` (the journal and the radio read it like the far tick's).
+static func server_end_live(r: Dictionary, outcome: String, kind: String, text: String, gids: Array) -> void:
+	if String(r.get("state", "")) != "open":
+		return
+	r.state = "done"
+	r.outcome = outcome
+	if text != "":
+		FallenStory.event(String(r.zone), kind, gids.filter(func(g: String) -> bool: return g != ""), text, String(r.get("place", "")))
 
 
 # --- The sky's glow (a far town burning) -----------------------------------------------------------

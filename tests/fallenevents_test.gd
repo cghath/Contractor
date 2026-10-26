@@ -9,7 +9,11 @@ extends Node
 ## lands at the farm with the starter kit, the journal goes to peers, a leaver sleeps at home and
 ## wakes there; ModKit loads a mod from a folder (an item patched and one added, a kind of the dead
 ## added) and skips a broken one; the validator passes the shipped data and fails a broken mod; a
-## world card exports and imports.
+## world card exports and imports. The live convoy: a column on the zone's main road that advances,
+## halts at a wreck and goes on once it's cleared, hails into a trade (the enclave's by standing),
+## turns on a robber (standing, an event), meets a raider ambush ahead; the wagon without a road.
+## The downed crew: "Come with me", brought to an enclave post (standing, the reward, the journal),
+## their tags, and the enclave's reclaim (a little standing lost when a player was near).
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -32,6 +36,10 @@ func _ready() -> void:
 		_test_supply_drop()
 		_test_live_drop()
 		_test_other_events()
+		_test_live_convoy()
+		_test_convoy_robbed_and_ambush()
+		_test_convoy_no_road()
+		_test_crew_home()
 		_test_frequency_and_roll()
 		await _test_bell()
 		_test_searched_and_saved()
@@ -149,9 +157,13 @@ func _test_other_events() -> void:
 	var crew: Array = h.get("crew", [])
 	check(crew.size() == 2 and crew.all(func(pid: String) -> bool: return String((iso.people.get(pid, {}) as Dictionary).get("status", "")) == "out_there"),
 		"a helicopter down: its crew of %d are lone survivors at the wreck" % crew.size())
+	h["near"] = true  # (a player came near them and left them: HeliCrew's tick sets it)
+	var enc_iso := iso.group(String((iso.w.get("goal", {}) as Dictionary).get("evac_group", "")))
+	var before := WorldGroup.relation(enc_iso, "player")
 	iso.now = float(h.get("until", iso.now)) + 0.01
 	WorldEvents.tick(iso)
 	check(String(h.get("outcome", "")) == "recovered", "with the crew still out there at the window's end, the enclave takes them back (%s)" % String(h.get("outcome", "")))
+	check(enc_iso.is_empty() or WorldGroup.relation(enc_iso, "player") < before, "a player who was near and left them costs a little standing (%.0f -> %.0f)" % [before, WorldGroup.relation(enc_iso, "player")])
 	# A burning town near the farm glows on its horizon.
 	var near := _near_zone()
 	var m := WorldSim.model()
@@ -169,6 +181,232 @@ func _test_other_events() -> void:
 		"a storm closes the crossing between %s and %s" % [near, to])
 	Infrastructure.server_set_crossing(near, to, true)
 	check(m.crossing_open(near, to), "the bridge repaired opens it again (Infrastructure)")
+
+
+# --- The live convoy and the crew ------------------------------------------------------------------
+
+## The scene for a column: nothing of the zone's own on the road (its cars, the dead) for these checks.
+func _clear_road() -> void:
+	for z: Soldier in Survival.zombies(level):
+		z.queue_free()
+	var layer := VehicleLayer.of(level)
+	if layer:
+		for v: Vehicle in layer.vehicles():
+			if not v.has_meta(&"fallen_convoy"):
+				v.set_meta(&"convoy_cleared", true)
+
+
+func _live_convoy(column: String, extra := {}) -> FallenConvoy:
+	var m := WorldSim.model()
+	var r := WorldEvents.begin(m, "convoy", start, {"column": column})
+	if r.is_empty():
+		return null
+	r["manual"] = true
+	r["ambush_by"] = "-"
+	r.merge(extra, true)
+	WorldEvents.server_live(level)
+	var c := FallenConvoy.of_event(level, int(r.id))
+	if c:
+		c.hail_ok = false
+	return c
+
+
+func _test_live_convoy() -> void:
+	print("A live convoy on the road")
+	var road := FallenConvoy.main_road(level)
+	check(road.size() >= 2, "the zone has a main road (%d points)" % road.size())
+	if road.size() < 2:
+		return
+	_clear_road()
+	var c := _live_convoy("trader")
+	check(c != null, "a convoy in the zone being played comes in as a live column")
+	if c == null:
+		return
+	var r := c.rec
+	var n_people := c.people.size() + (1 if c.trader else 0)
+	check(c.vehicles.size() >= 2 and c.vehicles.size() <= 3 and n_people >= 4 and n_people <= 8,
+		"a trader's cart train: %d vehicles, %d people (drivers, guards, the trader)" % [c.vehicles.size(), n_people])
+	check(c.cargo_vehicle != null and c.cargo_vehicle.cargo() != null and not c.cargo_vehicle.cargo_hold.entries().is_empty(),
+		"its cargo is a real hold on the cart (%d entries)" % (c.cargo_vehicle.cargo_hold.entries().size() if c.cargo_vehicle and c.cargo_vehicle.cargo_hold else -1))
+	check(LootStates.cache_by_uid(level, WorldEvents.cache_uid(int(r.id))) == null, "no wagon cache when it's on the road")
+	var lv := c.lead()
+	check(lv != null and c.along_of(lv.global_position)[1] < 1.5, "the lead is on the road (%.1f m off)" % (c.along_of(lv.global_position)[1] if lv else -1.0))
+	var s0 := c.s
+	var p0 := lv.global_position if lv else Vector3.ZERO
+	for i in 20:
+		c.server_step(0.5)
+	check(c.state == "moving" and c.s > s0 + 5.0 and lv != null and lv.global_position.distance_to(p0) > 5.0 and c.along_of(lv.global_position)[1] < 1.5,
+		"it advances along the road (%.1f -> %.1f m of %.0f, %s)" % [s0, c.s, c.length, c.state])
+	check(bool(r.get("live", false)) and float(r.get("s", 0.0)) > s0, "the record knows it's live and how far it got")
+	# A wreck across the road ahead.
+	var at := c.point_at(c.s + 8.0)
+	var wreck := VehicleLayer.of(level).server_spawn("technical", Transform3D(Basis(), at + Vector3.UP * 0.3), "", &"player")
+	if wreck:
+		wreck.set_meta(&"no_save", true)
+		wreck.freeze = true
+		wreck.global_position = at + Vector3.UP * 0.3
+	c.server_step(0.5)
+	var s_h := c.s
+	check(wreck != null and c.state == "halted" and c.why == "wreck" and not c.riding, "it halts at a wreck on the road and they get down (%s, %s)" % [c.state, c.why])
+	for i in 4:
+		c.server_step(0.5)
+	check(c.state == "halted" and is_equal_approx(c.s, s_h), "it holds while they clear it")
+	for i in 20:
+		c.server_step(0.5)
+	check(wreck != null and wreck.has_meta(&"convoy_cleared") and c.state == "moving" and c.s > s_h + 1.0 and c.riding,
+		"the wreck pushed off the road, they mount up and go on (%.1f -> %.1f)" % [s_h, c.s])
+	if wreck:
+		wreck.queue_free()
+	# Hailed: the trader's stock on the barter screen.
+	var line := c.server_hail(player)
+	var trec: Dictionary = WorldSim.people().get(c.trader_id, {})
+	check(c.state == "hailed" and line != "" and Barter.trader_problem(trec) == "", "walking up openly hails it: it holds (\"%s\")" % line)
+	var deal := Barter.deal(player, trec)
+	var kit_ids: Array = (trec.get("kit", []) as Array).map(func(e: Dictionary) -> String: return String(e.id))
+	check(not kit_ids.is_empty() and (deal.theirs as Array).any(func(row: Dictionary) -> bool: return String(row.id) in kit_ids),
+		"its trader deals from the column's stock (%d lines)" % (deal.theirs as Array).size())
+	if c.trader:
+		c.trader.global_position = player.global_position + Vector3(1.5, 0.0, 0.0)
+		TalkMenu.server_talk(SurvivorsLayer.find(level), player, c.trader, "trade", {})
+		var ts := TradeScreen.current()
+		check(ts == null or (ts.visible and String(ts.deal.get("trader", "")) == c.trader_id), "the talk menu's Trade opens the barter screen on him")
+		if ts:
+			ts.close()
+	c._hail_t = 9999.0  # (the hail's hold over)
+	c.server_step(0.5)
+	check(c.state == "moving", "left alone, it goes on")
+	# The enclave's sells only to its friends.
+	var gid := String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
+	if gid != "":
+		var qrec := {"id": "test_conv_qm", "status": "convoy", "world_group": gid, "enclave_quartermaster": true, "min_standing": 10.0, "kit": []}
+		var rel := WorldGroup.relation(WorldSim.group(gid), "player")
+		sim.server_change_relation(gid, -rel)
+		check(Barter.trader_problem(qrec) != "", "an enclave convoy won't sell to a stranger (%s)" % Barter.trader_problem(qrec))
+		sim.server_change_relation(gid, 20.0)
+		check(Barter.trader_problem(qrec) == "", "and sells to a friend of the enclave (standing 20)")
+		sim.server_change_relation(gid, rel - 20.0)
+	# It reaches the far edge: through, gone.
+	c.s = c.length - 1.0
+	c.server_step(1.0)
+	check(String(r.get("outcome", "")) == "passed" and String(r.state) == "done" and c.is_queued_for_deletion() and not WorldSim.people().has(c.trader_id),
+		"at the far edge it's through (%s) and leaves the zone" % String(r.get("outcome", "")))
+
+
+func _test_convoy_robbed_and_ambush() -> void:
+	print("Robbing a convoy, and a raider ambush")
+	if FallenConvoy.main_road(level).size() < 2:
+		return
+	_clear_road()
+	var gid := String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
+	var c := _live_convoy("enclave" if gid != "" else "trader")
+	check(c != null and (gid == "" or String(c.rec.get("group", "")) == gid), "an enclave column (%s)" % (c.column if c else "none"))
+	if c == null:
+		return
+	var r := c.rec
+	var rel0 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+	var who: Soldier = c.guards[0] if not c.guards.is_empty() else c.people[0]
+	Harm.note_hit(who, player)
+	c.server_step(0.2)
+	var rel1 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+	check(c.state == "hostile" and String(r.get("outcome", "")) == "robbed" and who.faction == &"hostile", "shooting one of its people turns the column on you (%s)" % c.state)
+	check(gid == "" or rel1 <= rel0 - 25.0, "the owner's standing falls (%.0f -> %.0f)" % [rel0, rel1])
+	var ev := (WorldSim.section().events as Array).filter(func(x: Dictionary) -> bool: return String(x.kind) == "convoy_robbed" and int(x.id) > int(r.id) and String(x.get("actor", "")) == Survival.profile_of(player))
+	check(not ev.is_empty() and String(ev[0].text).contains(Survival.survivor_name(player)), "a world event names the robber (%s)" % (String(ev[0].text) if not ev.is_empty() else "none"))
+	c.server_despawn()
+	# The ambush, rolled: raiders wait up the road.
+	var m := WorldSim.model()
+	var raid := m.new_group("raiders", start, Vector2.ZERO, m.rng_for("test_conv_raiders", "made"), 4)
+	raid.kind = "raiders"
+	var a := _live_convoy("trader", {"ambush_by": String(raid.id)})
+	check(a != null and String(a.rec.get("ambush_by", "")) == String(raid.id), "a column with the ambush rolled")
+	if a == null:
+		return
+	a.s = maxf(a.s, a.length * FallenConvoy.num("ambush_at", 0.35))
+	a.server_step(0.1)
+	check(a.raiders.size() >= 3 and a.raiders.size() <= 5 and a.raiders.all(func(x: Soldier) -> bool: return x.faction == &"hostile" and a.along_of(x.global_position)[0] > a.s + 20.0),
+		"%d raiders come out ahead on the road" % a.raiders.size())
+	a.server_step(0.1)
+	check(a.state == "halted" and a.why == "raiders", "the column halts and fights (%s, %s)" % [a.state, a.why])
+	for g: Soldier in a.guards:
+		g.vitals.server_kill()
+	a.server_step(0.1)
+	check(a.state == "lost" and String(a.rec.get("outcome", "")) == "ambushed", "the guards all down: the column is lost to the raiders (%s)" % String(a.rec.get("outcome", "")))
+	for x: Soldier in a.raiders:
+		if is_instance_valid(x):
+			x.queue_free()
+	a.server_despawn()
+	raid.alive = false
+
+
+func _test_convoy_no_road() -> void:
+	print("A convoy where the zone has no road")
+	FallenConvoy.force_no_road = true
+	var m := WorldSim.model()
+	var r := WorldEvents.begin(m, "convoy", start, {"column": "trader"})
+	WorldEvents.server_live(level)
+	FallenConvoy.force_no_road = false
+	var cache := LootStates.cache_by_uid(level, WorldEvents.cache_uid(int(r.get("id", 0))))
+	check(FallenConvoy.of_event(level, int(r.get("id", 0))) == null and cache != null and cache.cargo_hold.entries().size() >= 1, "it's the column's wagon, a cache, as before")
+	if cache == null:
+		return
+	cache.global_position = player.global_position + Vector3(1.0, 0.0, 0.0)
+	check(cache.server_open_for(player) == "" and String(r.get("outcome", "")) == "robbed", "and opening it robs it (%s)" % String(r.get("outcome", "")))
+
+
+func _test_crew_home() -> void:
+	print("The downed crew brought home")
+	var layer := SurvivorsLayer.find(level)
+	var m := WorldSim.model()
+	var h := WorldEvents.begin(m, "heli_down", start)
+	var crew: Array = h.get("crew", [])
+	check(layer != null and crew.size() == 2, "a helicopter down in the zone being played, its crew of %d" % crew.size())
+	if layer == null or crew.size() < 2:
+		return
+	var a: Dictionary = WorldSim.people()[String(crew[0])]
+	var b: Dictionary = WorldSim.people()[String(crew[1])]
+	var line := HeliCrew.server_come(layer, player, a)
+	var body := layer.body_of(String(a.id))
+	check(line != "" and String(a.status) == "companion" and HeliCrew.is_escort(a) and body != null, "\"Come with me\": they follow as a companion (%s)" % String(a.status))
+	var acts: Array = []
+	if body:
+		acts = TalkMenu.actions_for(player, body, InteractionMenu.SQUADMATE)
+	check(acts.any(func(e: Dictionary) -> bool: return StringName(e.id) == &"talk_crew_pickup"), "an escorted one's menu offers a radio pickup")
+	check(HeliCrew.radio_problem(player) != "" or FallenRadio.has_radio(player), "a pickup needs a working radio (%s)" % HeliCrew.radio_problem(player))
+	# The other dead: their tags.
+	b.status = "dead"
+	check(HeliCrew.server_take_tags(player, b) != "" and HeliCrew.tags_of(Survival.profile_of(player)).has(String(b.id)), "a dead one's tags taken")
+	# At an enclave post.
+	var gid := Enclave.gid() if Enclave.is_set_up() else String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
+	var rel0 := WorldGroup.relation(WorldSim.group(gid), "player")
+	var med0 := 0
+	var had := {"serum": player.inventory.count_of(&"serum")}
+	for row: Array in HeliCrew.cfg().get("reward", []):
+		med0 += player.inventory.count_of(StringName(String(row[0])))
+		had[String(row[0])] = player.inventory.count_of(StringName(String(row[0])))
+	var j0 := (Survival.state().get("journal", []) as Array).size()
+	var faked := Enclave.is_set_up()
+	if faked:
+		Enclave.posts()["test_post"] = {"id": "test_post", "kind": "post", "name": "Test Post", "zone": start, "place": "", "pos": [player.global_position.x, player.global_position.z], "members": [], "kit": {}}
+		body.global_position = player.global_position + Vector3(2.0, 0.0, 0.0)
+		HeliCrew.server_tick(layer)
+		Enclave.posts().erase("test_post")
+	else:
+		HeliCrew.server_deliver(layer, player, [String(a.id), String(b.id)], "enclave")
+	var rel1 := WorldGroup.relation(WorldSim.group(gid), "player")
+	var med1 := 0
+	for row: Array in HeliCrew.cfg().get("reward", []):
+		med1 += player.inventory.count_of(StringName(String(row[0])))
+	check(bool(a.get("heli_home", false)) and String(a.status) != "companion" and layer.body_of(String(a.id)) == null, "walked to an enclave post, they're home (%s)" % String(a.status))
+	check(gid == "" or rel1 >= rel0 + 19.0, "the enclave's standing up for the crew and the tags (%.0f -> %.0f)" % [rel0, rel1])
+	check(med1 > med0 or player.inventory.count_of(&"serum") > 0, "the reward: medical stock (%d -> %d)" % [med0, med1])
+	var lines := (Survival.state().get("journal", []) as Array).slice(j0)
+	check(lines.any(func(e: Dictionary) -> bool: return String(e.get("text", "")).contains("home to the enclave")), "a journal line")
+	check(gid == "" or (WorldSim.section().events as Array).any(func(x: Dictionary) -> bool: return String(x.kind) == "broadcast" and String(x.text).contains("thanks")), "and the enclave's thanks on the radio")
+	check(String(h.get("outcome", "")) == "delivered", "the event's done: delivered (%s)" % String(h.get("outcome", "")))
+	for id: String in had:  # (the reward back out of his kit: the later checks want the room)
+		while player.inventory.count_of(StringName(id)) > int(had[id]):
+			if not player.inventory.remove_one(StringName(id)):
+				break
 
 
 func _test_frequency_and_roll() -> void:

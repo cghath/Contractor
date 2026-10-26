@@ -77,6 +77,8 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(_gift_entry(actor, target, talk))  # bonds (call 74)
 		out.append(talk.call("settle_it", "Settle it (a feud)", {}, InteractionMenu.MORE))
 	elif menu_kind == KIND:
+		if bool(info.get("crew", false)):  # the downed helicopter's crew: escort them home (HeliCrew)
+			out.append(talk.call("crew_come", "Come with me", {}, ""))
 		out.append(talk.call("who", "Who are you?", {}, ""))
 		out.append(talk.call("want", "What do you want?", {}, ""))
 		out.append(talk.call("recruit", "Recruit", {}, ""))
@@ -98,6 +100,10 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(talk.call("threaten", "Threaten", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.SQUADMATE:
 		if status == "companion":
+			if bool(info.get("escort", false)):  # an escorted crew member: the enclave's pickup by radio (HeliCrew)
+				var pick: Dictionary = talk.call("crew_pickup", "Radio a pickup", {}, "")
+				pick.disabled = HeliCrew.radio_problem(actor)
+				out.append(pick)
 			out.append({"id": &"talk_gear", "label": "Gear", "target": target, "disabled": "", "call": func() -> void: LoadoutGear.open_on(actor, target as Soldier)})
 			out.append(talk.call("how", "How are you?", {}, ""))
 			out.append(talk.call("talk_down", "Talk me down", {}, ""))  # the nerve (Nerve, call 116)
@@ -111,6 +117,8 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 	elif menu_kind == InteractionMenu.DEAD and Masking.is_dead_one(target):
 		out.append(talk.call("smear", "Smear its gore on you", {}, ""))  # (phase D masking: Masking)
 	elif menu_kind == InteractionMenu.DEAD:
+		if status == "dead" and bool(info.get("crew", false)) and not bool(info.get("tags", false)):
+			out.append(talk.call("crew_tags", "Take their tags", {}, ""))  # (HeliCrew: the enclave wants them)
 		if status == "dead" and not bool(info.get("buried", false)):
 			var shovel := SurvivorsLayer.shovel_of(actor) != &""
 			out.append(talk.call("bury", "Bury (%s)" % ("with the shovel" if shovel else "by hand, slow"), {}, ""))
@@ -223,6 +231,11 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		rec = WorldSim.people().get(String(target.get_meta(&"world_person")), {})
 	if rec.is_empty() or actor == null or not actor.vitals.is_up():
 		return ""
+	if action == "crew_tags":
+		var took: String = HeliCrew.server_take_tags(actor, rec)
+		layer._set_known(target, rec)
+		Survival._tell(actor, took)
+		return took
 	if action == "bury":
 		layer.server_start_bury(actor, target)
 		return ""
@@ -244,6 +257,13 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	if Children.is_child_rec(rec) and action in ["recruit", "threaten", "trade", "take_along", "settle", "talk_down", "settle_it"]:
 		return ""  # (call 128: a child is never a companion, never threatened)
 	match action:
+		"crew_come":  # the downed crew follow (HeliCrew)
+			var come: String = HeliCrew.server_come(layer, actor, rec)
+			return come
+		"crew_pickup":
+			var pickup: String = HeliCrew.server_radio_pickup(layer, actor)
+			Survival._tell(actor, pickup if pickup != "" else "Nobody here to pick up")
+			return pickup
 		"come":  # an orphan comes along: a settler (call 128)
 			if not Children.is_child_rec(rec) or String(rec.get("status", "")) != "out_there":
 				return ""

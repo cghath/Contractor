@@ -47,6 +47,8 @@ static func trader_problem(rec: Dictionary) -> String:
 		return "They won't trade"
 	if not g.is_empty() and WorldTrade.relation_of(g) <= HOSTILE:
 		return "They won't deal with you"
+	if rec.has("min_standing") and not g.is_empty() and WorldTrade.relation_of(g) < float(rec.min_standing):
+		return "They only deal with friends of the enclave"  # (a live enclave convoy: FallenConvoy)
 	match kind:
 		"settlers":
 			if String(g.get("leader", "")) == String(rec.get("id", "")) or String(rec.get("role", "")) == "trader":

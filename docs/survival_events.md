@@ -1,7 +1,8 @@
 # Contractor: Fallen — world events, loot states, drop-in co-op
 
 Lane `claude/survival-events` (calls 124-126; the mod kit, call 127, is docs/fallen_modding.md).
-Suite: `fallenevents` (tests/fallenevents_test.gd); R2688 PASS (fallenevents, survival, worldsim, loot). Every number below is **Proposed**.
+Suite: `fallenevents` (tests/fallenevents_test.gd); R2688 PASS (fallenevents, survival, worldsim, loot); the live convoy and the
+crew's reward (lane `claude/survival-convoy`, sections 1b-1c): R2718 PASS (fallenevents, survival, worldsim, enclave, mounts). Every number below is **Proposed**.
 
 ## 1. World events (call 124): `WorldEvents`, data/survival_events.json
 
@@ -16,8 +17,8 @@ record in the world section's `fallen_events` ({id: kind, zone, place, t, until,
 | Kind | Weight | Window | What it does |
 |---|---|---|---|
 | supply_drop | 3 | 18 h | A place goes rich (3.0); every group in reach gets a forage goal there (the race); the enclave broadcasts it. A group foraging it first takes it (`supply_taken`); else it lapses. Hosted: a "Supply drop" crate (4 rolls of its loot); the players opening it first claim it (the enclave -5). |
-| convoy | 2 | 6 h | An enclave or trader column on the road (a zone with 3+ links) toward the next zone. At the end raiders in reach ambush it (35%: their supplies up, the column's grudge), else it passes and the settlers there trade with it. Hosted: the column's wagon (a cache); robbing it is `convoy_robbed` with the actor, the column's group -30. |
-| heli_down | 1 | 48 h | A wreck at a place (hosted: a "Helicopter wreck" cache) and its crew of 2 as lone survivors beside it; the enclave asks for them back. At the end the enclave takes back the crew still out there (`heli_recovered`), else `heli_lost`. |
+| convoy | 2 | 6 h | An enclave or trader column on the road (a zone with 3+ links) toward the next zone. At the end raiders in reach ambush it (35%: their supplies up, the column's grudge), else it passes and the settlers there trade with it. Hosted: a live column on the main road (1b); with no road, the column's wagon (a cache); robbing either is `convoy_robbed` naming the actor, the column's group -30. |
+| heli_down | 1 | 48 h | A wreck at a place (hosted: a "Helicopter wreck" cache) and its crew of 2 as lone survivors beside it; the enclave asks for them back (1c: the players can bring them home for its reward). At the end the enclave takes back the crew still out there (`heli_recovered`; -5 standing if a player came near and left them), `escorted` when the players have them, else `heli_lost`. |
 | bell | 2 | 2 h | Cultists ring a bell to call the dead (+20 pressure; a ringing lure in the live zone). A player rings one too: `FallenBell` at each church / village / square (at most 2 a zone), "Ring the bell": a lure for 90 s heard 220 m, +18 pressure, an event carrying his profile, the journal, the companions' memory (-3). 30 s cooldown. |
 | burning | 2 | 24 h | +30 pressure, its place's richness halved; zones within 2 links see a glow on the horizon (DayNight's `glow` meta: the horizon leans orange, most at night; `Survival.state().sky_glow`); hosted while it burns, the fire is lit there (`Wildfire.server_ignite`). |
 | storm | 1 | 12 h | Takes a bridge out: the crossing to a linked zone closed (`crossings` "storm"; goals, journeys and hordes go round). It stays out until repaired (`Infrastructure.server_set_crossing` / the bridge_repair project). |
@@ -26,6 +27,47 @@ Hooks: `WorldModel._world_event` and `step` (roll, tick), `WorldSim._after_step`
 (`WorldEvents.server_after_step`: the frequency, the live pieces, the glow), `WorldSim.JOURNAL_KINDS`,
 `Intel.GROUP_KINDS`/`ENCLAVE_KINDS`, `FallenRadio.CHATTER_KINDS`, `SurvivalLevel._on_hosted`
 (`server_live`), DayNight's horizon (the `glow` meta).
+
+### 1b. The live convoy: `FallenConvoy` (scripts/survival/fallen_convoy.gd), data/survival_convoy.json
+
+- **The column**: `WorldEvents.server_live` brings an open convoy in the hosted zone in as a node `Convoy_<id>` under
+  the level, on the zone's main road (the longest laid road of `ZoneRoads.segments()`, 80 m at least), in at one end
+  (by the event's id) and along it to the other at the road's length over the window left (enclave 2-5 m/s, carts
+  1.5-3). Enclave: an M-ATV (the cargo) and a technical, 4 guards (M4s, an AKM); trader: two carts and a horse, 2 guards
+  (AKMs). A driver a vehicle and the trader: 5-7 people. The cargo is the lead vehicle's real hold (`enclave_cargo` /
+  `trader_cargo` rolled by the event's id). The vehicles are frozen and set along the road each frame (no VehicleAI);
+  the people ride pinned beside them while it moves. The guards and drivers are a friendly-faction squad of their own
+  (hc_id `convoy_<id>`): they shoot the dead and never the players.
+- **Halts**: a vehicle (a wreck) or a `convoy_blocks` node (a barricade) on the road within 14 m ahead: they get down,
+  and after 8 s push it 9 m off the road, then mount up; the dead within 22 m of the lead: they fight until none are near;
+  raiders within 110 m. Its noise every 3 s (`Survival.server_noise`: 70 m truck, 35 m carts) brings the dead and the
+  zone's pressure as a shot's would, scaled.
+- **Hailing**: a player up and not aiming within 18 m: it holds while someone stays within 30 m (120 s at most), the
+  trader (a world person: meta `world_person`, record status `convoy`, his kit the `*_stock` roll) answers the talk
+  menu's Trade (the barter screen); an enclave convoy's record carries `min_standing` 10 (`Barter.trader_problem`:
+  "They only deal with friends of the enclave").
+- **Robbing**: a player's hit on one of its people or anything taken from its cargo: its people turn hostile and fight,
+  `WorldEvents.server_convoy_robbed` (outcome robbed, the owner -30, a `convoy_robbed` event naming the player, the
+  companions' memory).
+- **The ambush**: `WorldEvents.ambush_group` (raiders in reach at 35%; the live roll is kept as `ambush_by`, the far tick
+  honours it). Live: at 35% of the road 3-5 raiders (hostile, a squad of their own) come out 90 m up the road either
+  side; the guards all down: `convoy_ambushed` and the column is lost; the raiders all down: it goes on.
+- **The end**: the far edge reached (or the window 6 h over): `convoy_passed`, its bodies and vehicles gone. The record
+  keeps `live` (the far tick leaves a live column alone; the level going clears it and saves `s`, how far it got) and
+  `s`. No road: the wagon cache as before (`FallenConvoy.force_no_road` for tests).
+
+### 1c. The downed crew's reward: `HeliCrew` (scripts/survival/heli_crew.gd), data/survival_convoy.json "crew"
+
+- "Come with me" (the talk menu on a crew member out there): a companion (`heli_escort`), following, zone to zone.
+- Delivered by walking them within 60 m of an enclave post (`Enclave.posts()`, checked on SurvivorsLayer's tick), or
+  "Radio a pickup" on an escorted one (a repaired radio carried, powered; the enclave set up and not broken).
+  "Take their tags" on a dead crew member's body: the profile carries them, handed in at a post or with a pickup.
+- The reward: the enclave's standing +15 a crew member, +5 a set of tags; 3 rolls a crew member of medical stock (IFAK,
+  morphine, antibiotics, saline, a surgical kit), a serum dose at 15%; into the deliverer's kit (the rest at his feet);
+  a journal line and the enclave's thanks as a broadcast (the radio's enclave channel); the crew join the enclave
+  (`Enclave._take_person`); the event closes `delivered`.
+- Left: the window's end as before (the enclave takes back those still out there); a player who came within 120 m of
+  them (`near` on the record) and left them: -5 standing with the enclave.
 
 ## 2. Loot that shows its state (call 125): `LootStates`, `WorldCache`
 
@@ -67,8 +109,10 @@ Hooks: `WorldModel._world_event` and `step` (roll, tick), `WorldSim._after_step`
 
 ## 4. Left out / later
 
-- A live convoy column (vehicles and people walking the road) and trading with it: hosted, it's
-  the wagon cache; trade happens in the far sim.
-- The enclave's reward for bringing the crew home; a player-dropped bell piece.
+- The convoy steering on its own (VehicleAI / SquadDrivers following the road with real physics): it's kinematic on
+  the road; guards on foot beside it rather than seated in the vehicles; a column crossing into the next zone (it ends
+  at the edge); players boarding or driving off its vehicles isn't treated as robbery yet.
+- Dog tags as an item (the tags are carried on the profile); the pickup by radio is instant (no truck drives in).
+- A player-dropped bell piece.
 - The joiner's own survivor picker (a client message) and a joiner's own profile key (S5).
 - A trail of chalk marks as a second kind of clue.
