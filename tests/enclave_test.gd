@@ -124,7 +124,8 @@ func _test_patrols_move() -> void:
 			var rec: Dictionary = WorldSim.people().get(String(p.members[0]), {})
 			check(String(rec.get("zone", "")) == String(p.zone), "%s's people walked with it" % String(p.id))
 	check(not moved.is_empty(), "a patrol came into its next zone after %d ticks: %s" % [int(EnclaveDetachment.TICKS_A_ZONE) + 1, ", ".join(moved)])
-	check(not _events("broadcast").is_empty() and (_events("broadcast")[0] as Dictionary).has("freq"), "ARCHE's frequency aired: \"%s\"" % String((_events("broadcast")[0] as Dictionary).get("text", "")) if not _events("broadcast").is_empty() else "ARCHE's frequency aired")
+	var aired := _events("broadcast").filter(func(e: Dictionary) -> bool: return bool(e.get("arche", false)) and e.has("freq"))
+	check(not aired.is_empty(), "ARCHE's frequency aired: \"%s\"" % String((aired[0] as Dictionary).get("text", "")) if not aired.is_empty() else "ARCHE's frequency aired")
 
 
 func _test_player_toll() -> void:

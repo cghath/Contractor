@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase C: the enclave, ARCHE's trail, bunkers (claude/survival-enclave)
+
+- **Added** the enclave as a faction on the world sim: posts at the port and the base, patrols walking routes on the far tick, tolls (far groups pay or are turned back; the players get the council's question or a pay/refuse ask), looters shot, trade with trusted settlements, three officers and a quartermaster, its nature and price by seed, paying the price (the evac), infiltration (uniform + forged pass), breaking the port, joining as a path (docs/survival_enclave.md).
+- **Added** ARCHE's trail (data/arche_trail.json): 16 pieces laid by seed across the lab, the sealed level, bunkers, relay stations and the quarantine camp; reading adds a journal line, map marks and door codes; broadcasts on ARCHE's frequency.
+- **Added** ARCHE bunkers (data/bunkers.json): 3-6 a world, opened by code, torch or breach; stocked rooms, traps, the sealed dead, survivors.
+- **Added** the cure chain's places: the lab's equipment, the immune, making the serum (medical 9) and applying it; items serum, enclave uniform, forged pass, cutting torch, ARCHE document and recording.
+- **Added** the `enclave` test suite.
+
 ### Contractor: Fallen, phase C: trade and the intel layer (claude/survival-intel)
 
 Local: intel, worldsim and survival suites R2656 PASS (intel, worldsim, survival).
