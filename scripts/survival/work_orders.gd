@@ -16,6 +16,7 @@ const KINDS := {
 	"boil_water": {"job": "cook", "name": "Boil water to"},
 	"repair": {"job": "maintain", "name": "Repair the builds"},
 	"craft": {"job": "craft", "name": "Craft"},
+	"medical_supplies": {"job": "doctor", "name": "Medical supplies for the clinic"},  # (Clinic: the cabinet low)
 }
 ## Made an hour by one worker: planks cut (a woodpile stub until felling ZoneScatter's trees
 ## with an axe), sandbags filled (a cloth rag each: the sand is dug on the spot), meat smoked and
@@ -171,6 +172,8 @@ static func work_on(st: Settlement, o: Dictionary, hours: float) -> bool:
 			return true
 		"craft":
 			return _craft(st, o, h)
+		"medical_supplies":
+			return Clinic.work_order(o, hours)
 	return false
 
 

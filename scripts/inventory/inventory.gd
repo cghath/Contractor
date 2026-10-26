@@ -1399,7 +1399,7 @@ func _append(container: StringName, item: ItemData, count: int, state: Dictionar
 ## Items whose stateful entries still stack when the state is the same: magazines (their
 ## state is just the round count). Plates and helmets never do.
 static func _state_stacks(item: ItemData) -> bool:
-	return item.type == "ammo"
+	return item.type == "ammo" or Spoilage.perishable(item)  # (survival: food with the same freshness stamp stacks)
 
 
 func _commit() -> void:

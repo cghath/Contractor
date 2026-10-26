@@ -12,6 +12,7 @@
   the chapel and its service, grace, prayer, vigils, cultist deserters cleansed; the lineage tab, letters found on the dead,
   last words, inscribed grave markers on the map; R2693 FLAKY (children, fallenpeople, settlement, mind PASS; survival flaked
   once on the footsteps check, passed the rerun); see docs/survival_children.md.
+- **The survivor's hands, spoilage and the clinic built on `claude/survival-hands`** (calls 42, 96, 100-107's player side, 23-26, 60-63): butcher, snare, fish, forage, fell and deadfall through the contextual menu, food freshness and the larder, the smoker/rack/cold store/ice box/fish trap pieces, the clinic's beds and cabinet, the doctor job and quarantine; R2697 PASS (hands, survival, nature, body, settlement); see docs/survival_hands.md.
 - **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
   lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
   (fallenaudio, survival, sound, voice); see docs/survival_audio.md.

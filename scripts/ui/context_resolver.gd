@@ -69,6 +69,8 @@ static func resolve(ctx: Dictionary) -> Array[Dictionary]:
 		"gun_team":
 			out = [_o("gun_here", "Set up here", "squad", {"cmd": "wt_setup", "point": true}), _o("gun_facing", "Facing", "squad", {"cmd": "wt_setup", "point": true, "aim": true}),
 				_o("gun_pack", "Pack up", "squad", {"cmd": "wt_pack"})]
+		"carcass", "tree", "plant", "water", "woods":  # survival's hands on nature (Fieldwork)
+			out = Fieldwork.options(ctx)
 		"crew":
 			var role := String(ctx.get("seat_role", "driver"))
 			if role == "driver":

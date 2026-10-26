@@ -1235,6 +1235,9 @@ func _do(s: Soldier, action: String, args: Array) -> String:
 			var extra := Infrastructure.server_piece_act(self, s, id, what)  # (phase D pieces: traps, lures, the pyre)
 			if extra != "?":
 				return extra
+			extra = Fieldwork.server_piece_act(self, s, id, what)  # (the hands lane's pieces: docs/survival_hands.md)
+			if extra != "?":
+				return extra
 			return server_door(s, id, what, String(args[2]) if args.size() > 2 else "")
 		"dev_kit":
 			if not DevTools.on():

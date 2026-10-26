@@ -126,6 +126,8 @@ static func part_lines(n: Dictionary, wounds: Array, sees: int) -> Dictionary:
 ## The whole body's state in words (the bite, fever, sicknesses, the course), by `sees`.
 static func summary(n: Dictionary, sees: int) -> Array:
 	var out: Array = Mind.words(n) if sees > 0 else Mind.signs(n)  # the nerve, habits (Mind)
+	if Clinic.words(n) != "":
+		out.append(Clinic.words(n))  # in care, with the doctor's name (docs/survival_hands.md)
 	var hot := Body.has_fever(n) or float(n.get("warmth", Needs.NORMAL_C)) >= 37.8
 	if sees <= 0:
 		if hot:

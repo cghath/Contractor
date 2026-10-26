@@ -844,6 +844,7 @@ func server_tick_survivors(level: Node, dt: float) -> void:
 		for p: Soldier in sleepers:
 			_wake(p, "dead")
 	Wear.server_tick(level, players, dt)  # condition and wear (calls 120-123)
+	Fieldwork.server_tick(level, players, dt)  # food going off, the fish traps (docs/survival_hands.md)
 
 
 ## Host: after a body's step: the sleeper's hours, a sickness that began showing.
@@ -941,6 +942,26 @@ func _server_body_action(path: NodePath, action: String, part: String, arg: Stri
 
 
 const BODY_REACH_M := 3.0
+
+
+## Owner -> host: the contextual menu's fieldwork (Fieldwork: butcher, fell, forage, fish, snares)
+## `what` with `arg` at the spot `at` he looked at.
+@rpc("any_peer", "call_local", "reliable")
+func _server_fieldwork(what: String, arg: String, at: Vector3) -> void:
+	if not multiplayer.is_server() or not running:
+		return
+	var level := CompoundLevel.current(self)
+	if level == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = multiplayer.get_unique_id()
+	var actor := level.players.get_node_or_null(str(sender)) as Soldier
+	if actor == null:
+		return
+	var why := Fieldwork.server_request(actor, what, arg, at)
+	if why != "" and why != "?":
+		_tell(actor, why)
 
 
 @rpc("authority", "call_remote", "reliable")

@@ -578,6 +578,7 @@ func refresh() -> void:
 	d["lamps"] = int(counts.get("lamp", 0))
 	d["altars"] = int(counts.get("altar", 0))  # the chapel (Faith, call 129)
 	d["chapel_benches"] = int(counts.get("chapel_bench", 0))
+	Fieldwork.refresh_counts(d, counts)  # smokers, racks, cold stores, ice boxes, fish traps, the clinic (docs/survival_hands.md)
 	d["defence_builds"] = snappedf(defence, 0.1)
 	d["store_kinds"] = kinds
 	Infrastructure.server_refresh(self, b)  # (phase D: power, what it runs, the lit lamps)
@@ -727,6 +728,7 @@ func server_hour(hod: int) -> void:
 		d["watch"] = w
 	var watcher := watcher_at(hod)
 	var mult := Survival.option_mult("needs")
+	Spoilage.server_larder_hour(self)  # the larder: food going off, spoiled stock out, oldest first (docs/survival_hands.md)
 	for rec: Dictionary in settlers():
 		var n: Dictionary = rec.get("needs", {})
 		if n.is_empty():
