@@ -55,6 +55,8 @@ suite_timeout() {
 		# invasion: an 8 km operation zone hosted with its visuals, three cases measured in it (the 6.2.3
 		# load, a drive and a flight across it), then ridge_hot with the same load (cg_brief 3.1, D2).
 		invasion) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
+		# fallen: Contractor: Fallen's perf case (a survival night: the live cap of the dead, a crowd, a horde) on perfcases' meter.
+		fallen) echo $(( SUITE_TIMEOUT > 900 ? SUITE_TIMEOUT : 900 )) ;;
 		# operations: an 8 km operation zone hosted with an operation running in it (its OOB out, phases
 		# played by the clock, a save and load), then a client joins it late and loads the zone too (D3).
 		operations) echo $(( SUITE_TIMEOUT > 1440 ? SUITE_TIMEOUT : 1440 )) ;;
@@ -67,7 +69,7 @@ suite_timeout() {
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes survival)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes survival fallen)
 status=0
 finished=""
 # Three verdicts (Captain, 2026-10-26: "orange for a flaky test that isn't outright failing, red

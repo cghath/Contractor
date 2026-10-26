@@ -49,6 +49,22 @@ Local: survival suite (see the run number in docs/survival.md's "Where the build
 - **Tests:** `tests/survival_test.gd`'s needs section at the new rates and a metabolism section
   (dysentery by a forced roll, treated water, sickness drain, sleep's dulling, a cold wet night,
   sleep at speed and a chasing zombie waking him, the HUD signs and readout).
+### Contractor: Fallen, phase A step 7: the map, first form (claude/survival-map, calls 37 and 45)
+
+Local: survival and map suites (see the run number in docs/survival.md's "Where the build is").
+
+- **Added (what the survivors know):** `SurvivalMap` over the world save's "map" section: the
+  64 m cells the survivors have come within 120 m of, per zone (a host tick); the known zones
+  (visited or told); marks `{zone, pos, text, kind, day_added, day_seen}` that age in world days
+  and fade past 3 days unseen (Proposed; the safehouse never fades), seen again when a survivor
+  passes within 30 m. The safehouse (the start zone's insertion point) is a mark from the start.
+  The host sends the section on join and on every change (new cells as they come).
+- **Added (one map):** `FallenMap`, shown by the map screen (M) on a survival zone: the world grid
+  far out (known zones named, the rest fog, the zone being played framed, marks as glyphs) blending
+  as you zoom into the zone under the view (its map picture for the zone being played, a plain
+  shade for the others), unexplored cells fogged, your position, marks with their text and age,
+  fainter as they age. Tab / World zooms out to the world instead of the theatre map; right click
+  or a double click adds a mark, Delete removes one. The campaign's map is unchanged.
 
 ### Contractor: Fallen, phase A: the melee core fixed and the melee weapons (claude/survival, S2b)
 
@@ -116,6 +132,10 @@ Local: survival suite (see the run numbers in docs/survival.md's "Where the buil
 - **Changed (ZombieAI):** sight is a forward cone (`SEE_DOT`, about 100 degrees each side): behind
   one of the dead you are unseen, which is what the silent kill needs (survival R2618/R2619 found
   it seeing all round).
+- **Added (perf, phase A step 8):** the `fallen` suite (tests/fallen_test.gd, on perfcases' meter): a
+  survival night at the farm with the live cap of the dead about the player (most chasing), a crowd
+  of 200 in the far tier and a horde of 50 walking in; Proposed budgets beside the fight case's
+  (avg 110 / p95 180 / hitches 140 / physics 6 ms, LOCAL_SLACK off CI). In run_tests.sh and CI.
 - **Added (tests):** three verdicts in `tools/run_tests.sh` (the Captain: orange for a flaky
   test, red for a failed, green for a pass): a suite that fails is run once more; passing the
   rerun it's **FLAKY** (the run exits 0, the first try's logs kept as `<suite>.first-fail.log`),

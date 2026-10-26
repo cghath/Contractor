@@ -31,6 +31,7 @@ func _ready() -> void:
 		await _test_melee_weapons()
 		await _test_stealth()
 		await _test_crowd_and_pressure()
+		await _test_map()
 		await _test_death()
 		await _test_save_and_continue()
 	_finish()
@@ -274,12 +275,16 @@ func _test_dead() -> void:
 	far.queue_free()
 	# Sight, the chase and the bite.
 	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 12.0))
+	await get_tree().physics_frame
+	z.look_at(player.global_position, Vector3.UP)  # (sight is a cone: facing him)
+	z.rotation.x = 0.0
 	var blood := player.vitals.blood_fraction()
 	var wounds_before := player.vitals.wound_list().size()
 	var bit := await _wait_for(func() -> bool: return player.vitals.blood_fraction() < blood or player.vitals.wound_list().size() > wounds_before, 20.0)
 	brain = ZombieAI.of(z)
-	check(brain != null and brain.mode == ZombieAI.Mode.CHASE and brain.target == player, "one 12 m in front sees him and comes for him")
-	check(bit, "and gets to him and bites (blood %.3f -> %.3f)" % [blood, player.vitals.blood_fraction()])
+	check(brain != null and brain.mode == ZombieAI.Mode.CHASE and brain.target == player, "one 12 m in front sees him and comes for him (%s, awareness %.2f)" % [brain.state_name() if brain else "no brain", brain.awareness if brain else 0.0])
+	check(bit, "and gets to him and bites (blood %.3f -> %.3f; wounds %d -> %d; %.1f m off, %s, in front of it: %s)" % [blood, player.vitals.blood_fraction(), wounds_before, player.vitals.wound_list().size(),
+		z.global_position.distance_to(player.global_position), brain.state_name() if brain else "?", Melee.target_in_front(z)])
 	# The head kills; the body wears the pool down.
 	z.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
 	check(z.vitals.is_up(), "a round in the chest doesn't stop it (pool %.1f)" % z.vitals.undead_pool)
@@ -485,6 +490,10 @@ func _test_stealth() -> void:
 	# Sight: one 8 m in front by day turns alert first (it stops and faces him), then comes.
 	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 8.0))
 	await get_tree().physics_frame
+	z.look_at(player.global_position, Vector3.UP)  # (sight is a cone: it has to be facing him)
+	z.rotation.x = 0.0
+	player.look_at(z.global_position, Vector3.UP)
+	player.rotation.x = 0.0
 	var brain := ZombieAI.of(z)
 	check(brain != null and brain.mode == ZombieAI.Mode.IDLE and brain.unaware(), "one 8 m off starts idle, unaware")
 	var alert := await _wait_for(func() -> bool: return brain.mode == ZombieAI.Mode.ALERT, 3.0)
@@ -616,6 +625,8 @@ func _test_crowd_and_pressure() -> void:
 	check(bl.vitals.is_dead() and Survival.pressure(level) > pr and player.has_meta(&"tainted_at"), "a bloater bursts when it dies: a noise, pressure up, the taint on a man beside it (pressure %.0f -> %.0f)" % [pr, Survival.pressure(level)])
 	var sc := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 6.0), "screamer")
 	await get_tree().physics_frame
+	sc.look_at(player.global_position, Vector3.UP)  # (sight is a cone)
+	sc.rotation.x = 0.0
 	var scb := ZombieAI.of(sc)
 	pr = Survival.pressure(level)
 	var screamed := await _wait_for(func() -> bool: return scb.screamed, 4.0)
@@ -627,6 +638,75 @@ func _test_crowd_and_pressure() -> void:
 	Survival._horde_at = -10000.0
 	crowd.dead.clear()
 	player.vitals.server_reset_health()
+
+
+## The map (phase A step 7, calls 37 and 45): known zones, explored cells, marks that age,
+## and the one map (FallenMap) from the zone out to the world and back.
+func _test_map() -> void:
+	print("The map")
+	var zone := String(Survival.state().get("zone", ""))
+	var node := SurvivalMap.of(level)
+	check(node != null, "the zone has its map node (SurvivalMap)")
+	check(SurvivalMap.is_known(zone), "the start zone is known (%s)" % zone)
+	var safe := SurvivalMap.safehouse()
+	check(not safe.is_empty() and String(safe.get("zone", "")) == zone and not SurvivalMap.is_faded(safe),
+		"the safehouse is a mark from the start (%s)" % [safe])
+	if node == null:
+		return
+	# Explored cells: cleared, then one look about.
+	(SurvivalMap.section().explored as Dictionary).erase(zone)
+	var at := player.global_position
+	check(not SurvivalMap.is_explored(zone, at), "a cleared zone has nothing explored")
+	node.server_tick()
+	check(SurvivalMap.is_explored(zone, at) and SurvivalMap.is_explored(zone, at + Vector3(80, 0, 0)),
+		"after the tick the cells about him are explored (%d cells)" % SurvivalMap.explored(zone).size())
+	check(not SurvivalMap.is_explored(zone, at + Vector3(500, 0, 500)) and not SurvivalMap.is_explored(zone, at + Vector3(0, 0, 200)),
+		"and the far ones are not")
+	# Marks and their age.
+	var m := SurvivalMap.server_add_mark(zone, at + Vector3(500, 0, 0), "Camp", "camp")
+	check(SurvivalMap.marks(zone).has(m) and is_equal_approx(float(m.day_added), SurvivalMap.now()) and not SurvivalMap.is_faded(m),
+		"server_add_mark adds a mark with the day (%.2f), fresh (%s)" % [float(m.day_added), SurvivalMap.age_text(m)])
+	m["day_seen"] = SurvivalMap.now() - SurvivalMap.FADE_DAYS - 0.5
+	check(SurvivalMap.is_faded(m) and SurvivalMap.age_text(m) == "3 days", "a mark seen 3.5 days ago is faded (%s)" % SurvivalMap.age_text(m))
+	var bare := {"zone": zone, "pos": [at.x + 600.0, 0.0, at.z], "text": "Note", "kind": "note", "day_added": SurvivalMap.now() - 1.0}
+	(SurvivalMap.section().marks as Array).append(bare)  # (the cold open's shape: no day_seen)
+	check(absf(SurvivalMap.age_days(bare) - 1.0) < 0.05 and not SurvivalMap.is_faded(bare), "a mark with no day_seen ages from its day_added")
+	# The one map.
+	var screen: MapScreen = player._hud.map_screen if player._hud else null
+	check(screen != null, "the HUD has its map screen")
+	if screen == null:
+		return
+	screen.open()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var fm := screen.get_node_or_null(^"FallenMap") as FallenMap
+	check(fm != null and fm.visible and screen.visible, "M opens the one map (FallenMap) on a survival zone")
+	if fm == null:
+		screen.close()
+		return
+	check(not fm.is_world() and fm.focus_zone() == zone, "at the zone level of the zone being played (%s, blend %.2f)" % [fm.focus_zone(), fm.blend()])
+	screen.show_world(true)
+	await get_tree().process_frame
+	check(fm.is_world() and not screen.is_world_open(), "Tab zooms it out to the world (blend %.2f), no theatre map" % fm.blend())
+	var listed := FallenMap.listed_zones()
+	var unknown := RegionMap.layout().keys().filter(func(id: String) -> bool: return not SurvivalMap.is_known(id))
+	check(listed.has(zone) and listed.all(func(id: String) -> bool: return SurvivalMap.is_known(id)) and not unknown.is_empty()
+		and unknown.all(func(id: String) -> bool: return not listed.has(id) and not fm.drawn_zones.has(id)),
+		"the world view lists known zones only (%s of %d)" % [listed, RegionMap.layout().size()])
+	screen.show_world(false)
+	check(not fm.is_world(), "and Tab again goes back into the zone")
+	for i in 30:
+		fm.zoom_at(fm.view_size() * 0.5, 1.0 / FallenMap.ZOOM_STEP)
+	var out := fm.is_world()
+	for i in 30:
+		fm.zoom_at(fm.view_size() * 0.5, FallenMap.ZOOM_STEP)
+	check(out and not fm.is_world(), "the wheel zooms out to the world and back in, one map")
+	var n := SurvivalMap.marks(zone).size()
+	fm.add_mark_at(fm.to_world(zone, Vector2(at.x + 20.0, at.z)), "Water here")
+	var added := SurvivalMap.marks(zone)
+	check(added.size() == n + 1 and String((added[-1] as Dictionary).get("text", "")) == "Water here", "a mark placed on the map goes into the world's marks")
+	screen.close()
+	check(not screen.visible, "and M closes it")
 
 
 func _seconds(s: float) -> void:
