@@ -1,0 +1,65 @@
+{
+	"_note": "ARCHE's bunkers (docs/survival_world.md section 7, call 62; docs/survival_enclave.md): 3-6 a world by seed (Bunkers.lay), each a sealed door at a place of a zone (never the farm's zone or the city) that opens by its code at a powered keypad (the code from the trail), a torch cut or a breach charge; inside a room or two (rooms: the prefabs, each with its loot table), a trap or two (a tripwire: noise and the zone's pressure; a gas pocket: taint), sometimes the dead that were sealed in (spawned when it opens), sometimes a survivor, always a piece of the trail. Opened, the bunker is known to the groups in its zone (an event) and raiders may claim it. Loot tables read like data/loot_tables.json's: per tier a list of bundles, a bundle a list of [item id, count] or [item id, min, max]; tier_weights in percent. hospital and lab are the cure chain's rare-serum tables for those places (Bunkers.roll_table). Every number Proposed: tune freely.",
+	"count": [3, 6],
+	"rooms": [2, 3],
+	"power_items": ["vehicle_battery", "jerrycan"],
+	"torch_item": "cutting_torch",
+	"breach_item": "breaching_charge",
+	"sealed_dead_chance": 0.4,
+	"sealed_dead": [3, 8],
+	"hazmat_share": 0.3,
+	"survivor_chance": 0.2,
+	"traps": [1, 2],
+	"gas_share": 0.5,
+	"gas_taint": 25.0,
+	"tripwire_pressure": 15.0,
+	"breach_pressure": 30.0,
+	"torch_pressure": 8.0,
+	"claim_chance": 0.25,
+	"names": ["Site 7", "Site 11", "Site 12", "Site 19", "Site 23", "Site 31", "Site 40", "Site 44"],
+	"prefabs": [
+		{"role": "stores", "size": [6.0, 4.0], "table": "bunker_stores", "label": "ARCHE stores locker"},
+		{"role": "medical", "size": [5.0, 4.0], "table": "bunker_medical", "label": "ARCHE medical cabinet"},
+		{"role": "armoury", "size": [4.0, 3.0], "table": "bunker_armoury", "label": "ARCHE weapons locker"},
+		{"role": "quarters", "size": [6.0, 3.0], "table": "bunker_quarters", "label": "Footlocker"}
+	],
+	"tier_weights": {"common": 45, "uncommon": 33, "rare": 17, "very_rare": 5},
+	"tables": {
+		"bunker_stores": {
+			"common": [[["mre", 2, 4]], [["beans_tin", 2, 4], ["water_bottle", 2]], [["canned_meat", 2, 3], ["water_bottle", 1, 2]]],
+			"uncommon": [[["mre", 4, 6], ["water_bottle", 3]], [["irp_ration", 2], ["chemlight_green", 3]]],
+			"rare": [[["mre", 6], ["jerrycan", 1]], [["vehicle_battery", 1], ["mre", 3]]],
+			"very_rare": [[["serum", 1], ["mre", 4]]]
+		},
+		"bunker_medical": {
+			"common": [[["pressure_bandage", 2, 3]], [["ifak", 1]], [["ibuprofen", 1, 2], ["paracetamol", 1, 2]], [["hemostatic_gauze", 1, 2]]],
+			"uncommon": [[["antibiotics", 1, 2]], [["morphine", 2]], [["suture_kit", 1], ["saline_500", 1]], [["epinephrine", 2]]],
+			"rare": [[["trauma_kit", 1], ["antibiotics", 2]], [["surgery_kit_3", 1], ["blood_500", 1]], [["serum", 1]]],
+			"very_rare": [[["serum", 1], ["antibiotics", 3]], [["serum", 2]]]
+		},
+		"bunker_armoury": {
+			"common": [[["mag_556", 2]], [["mag_545", 2]], [["rounds_556", 30, 60]]],
+			"uncommon": [[["m4a1", 1], ["mag_556", 2]], [["akm", 1], ["mag_762x39", 2]], [["gas_mask_gp5", 1]]],
+			"rare": [[["gas_mask_m50", 1], ["mag_556", 3]], [["breaching_charge", 1]]],
+			"very_rare": [[["m4a1", 1], ["mag_556", 4], ["gas_mask_m50", 1]]]
+		},
+		"bunker_quarters": {
+			"common": [[["water_bottle", 1], ["chemlight_green", 2]], [["beans_tin", 1]], [["battery_aa", 2]]],
+			"uncommon": [[["antibiotics", 1]], [["combat_knife", 1]]],
+			"rare": [[["cutting_torch", 1]], [["enclave_pass", 1]]],
+			"very_rare": [[["serum", 1]]]
+		},
+		"hospital": {
+			"common": [[["pressure_bandage", 2]], [["ibuprofen", 2]], [["saline_500", 1]]],
+			"uncommon": [[["antibiotics", 1, 2]], [["morphine", 1]], [["suture_kit", 1]]],
+			"rare": [[["antibiotics", 3]], [["surgery_kit_3", 1]]],
+			"very_rare": [[["serum", 1]], [["serum", 1], ["antibiotics", 2]]]
+		},
+		"lab": {
+			"common": [[["antibiotics", 1]], [["saline_500", 1]]],
+			"uncommon": [[["antibiotics", 2]], [["epinephrine", 2]]],
+			"rare": [[["serum", 1]], [["antibiotics", 3], ["blood_500", 1]]],
+			"very_rare": [[["serum", 2]]]
+		}
+	}
+}

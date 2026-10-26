@@ -143,6 +143,7 @@ static func server_setup() -> void:
 	var start := String(Survival.state().get("start_zone", Survival.start_zone()))
 	m.setup(table, start, Survival.option_mult("world"))
 	_setup_goal(m, start)
+	FallenStory.server_setup(m)  # (the enclave lane: the enclave, ARCHE's trail, the bunkers, the cure's places)
 	SessionLog.note("survival world: %d zones, %d groups, %d people at setup (%d ms)" % [table.size(), m.groups().size(), people().size(), Time.get_ticks_msec() - t0])
 
 
@@ -271,6 +272,7 @@ func mutate(fn: Callable) -> void:
 
 ## Main thread, after each step: its actions, its events near the players, the goal's state.
 func _after_step(m: WorldModel) -> void:
+	FallenStory.server_after_step(m)  # (the enclave lane: patrols, tolls, looters, bunkers; its events join this step's)
 	for a: Dictionary in m.actions:
 		_do_action(a)
 	for e: Dictionary in m.new_events:
@@ -586,7 +588,7 @@ static func goal_state() -> Dictionary:
 		if bool(zd.get("held_by_player", false)):
 			held.append(z)
 	var enclave := group(String(g.get("evac_group", "")))
-	var evac := mode == "evac" and not enclave.is_empty() and bool(enclave.get("alive", false))
+	var evac := mode == "evac" and ((not enclave.is_empty() and bool(enclave.get("alive", false))) or bool(g.get("port_taken", false)))  # (port_taken: the enclave lane's break)
 	var text := ""
 	match mode:
 		"evac":
