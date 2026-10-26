@@ -1,8 +1,10 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (handoff 2026-10-25 ~09:00 CDT, at the 5-hour limit)
+## Where the build is (2026-10-26 ~01:00 CDT)
 
-Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`, from integrate/cg-oct24 841f0ff0).
+Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), dev (37ff24ca, v0.7.0) merged in 2026-10-26.
+- **Design done 2026-10-25/26:** calls 1-85 below; docs/survival_world.md, survival_building.md, survival_people.md,
+  survival_medical.md, survival_rpg.md; the phase plan A-D at the end of this file. Next: phase A, step 1 (the parry bug).
 - **S1 done** (182e519f, survival suite R2592 PASS): menu Survival new world / continue, `Survival` autoload
   (world save `survival_<world>`, clock -> DayNight, hunger/thirst via Consumables' water/ration doses, slower
   stamina low, blood loss empty, death drops everything where he fell (no cleanup in survival) + starter kit,
@@ -121,6 +123,10 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 79 | Surgery | **The full set, skill-gated with tools and a place, now** (remove fragments, debride, stitch, set bones, drain, amputate; a surgical kit or improvised at a penalty; light, a clean surface, time; anaesthesia); **permanent consequences planned for later** (crooked bones, a limp, amputations changing what a survivor can do, scars). |
 | 80 | Fever clock | **A world week** from bite to collapse: time to run the whole chain; the fever a slow shadow over the week rather than a race. |
 | 81 | Sicknesses | **All four families**: dysentery and food poisoning; colds, flu and pneumonia (spread in a settlement, a cough is noise); tetanus and gangrene; deficiency illnesses (scurvy, rickets, anaemia). |
+| 82 | XP pace | **Faster early, slow late**: lines 1-4 in a few real hours (a new survivor is useful fast), 5-10 a season each; survivor levels quick early, slowing. |
+| 83 | Perks | **One per survivor level, permanent, ~20 to choose from**, a few needing a line level. |
+| 84 | Creation numbers | **Background +3/+1, flaws worth 1-3 points, ~15 of each**; a 3-flaw survivor can start one line at 5; blank slate stays available. |
+| 85 | Top crafting | **Reloads, suppressors, antibiotics and the serum at the top of their lines, plus gunsmithing**: repairing and assembling real guns from parts at firearms 8-9 on a gunsmith bench; gun parts become loot; ceramic plates never crafted. |
 
 ## Already in the code to build on
 
@@ -139,118 +145,44 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | Hiring and the squad | `Hiring.candidate`, `Roster`, `SquadAI`, orders, the 8-slot squad | A recruited survivor is a squadmate |
 | Day and night | `DayNight` (hour, weather) | Nights are when they come |
 
-## S1: the mode, the world, the needs
+## The build order: phases A-D (call 50)
 
-**Menu.** A Survival section: **New world** (a name, a seed), **Continue** (the newest world),
-**Join** as every session. The host's world is the save; joiners bring nothing in (their survivor
-lives in the host's world, keyed by their profile).
+The design is in five docs; this file is the index and the calls. Each phase ends playable,
+tested (its suites green locally and on CI) and merged into this branch; the branch stays off
+dev until the Captain says (call: "needs to stay here for now").
 
-**The world** (`Survival`, an autoload, host-authoritative, its state in Campaign sections under
-`survival_<world>`): the campaign's zones on `RegionMap`'s grid, each marked abandoned, the base
-zone's cell a **safehouse** (the start and the respawn: a fenced farm with a stash). The world's
-clock runs only while it's hosted; a day is DAY_MIN (Proposed 48) real minutes, with
-`DayNight` driven by it. Zone saves are `surv_<world>_<zone>`: crossing into a zone loads it as
-it was left. Sections:
-- `survival`: seed, day, hour, the zones' state (density of the dead, looted containers' times);
-- `survivors`: each player's survivor by profile: zone, position, kit, needs, alive;
-- `companions`: who's been recruited, their kit, needs and wounds; who's still out there.
+| Phase | What lands | Docs | Suites |
+|---|---|---|---|
+| **A: the core loop** | S1 as built (mode, world save, needs, safehouse, starter kit, HUD) kept; **S2 finished** (ZombieAI, Vitals.undead, melee core; the open parry bug first); **the stealth model** (sight, sound, smell, awareness states, the noise ring and eye icon, the tension layer's hooks); **S3** (the crowd tier, zone pressure, local hordes, the four specials); **the metabolism** (calories, water, protein/carbs/fat, vitamins, sleep, warmth, hygiene; food items' values; raw and dirty water); **player melee weapons and inputs**; **the cold open** with its random element; **permadeath** and the new survivor (blank slate); the real **zoomable map** (world to zone) in its first form; **world options** at New world. | survival_medical.md §1, §4, §5; survival_world.md §5, §12; survival.md | survival (extended), a perfcases "fallen night" case |
+| **B: building, settlement, people, RPG** | **Voxel-block building** (grid, shapes, pieces, materials, tools, time, blueprints, integrity, upgrade, dismantle, the build mode); **the settlement** (stocks, jobs, work orders, hauling, schedules, beds; the council's first form); **companions as people** (Person records, traits, needs, moodlets, breaks, autonomy, the contextual talk menu, hiring by wants, graves, the rise); **the RPG layer** (lines, XP, levels, perks, backgrounds and flaws, the character screen, crafting essentials and improvised weapons, the gates); **S5 crossings and persistence** for builds and people. | survival_building.md, survival_people.md, survival_rpg.md | building, people, rpg, survival |
+| **C: the living world** | **WorldSim** (groups, people everywhere, the far tick, the judgement, goals, far fights, forming/splitting/dying, the trickle); **regions as territories**; **the dead as pressure across the map**; **the enclave**; **ARCHE and the trail, bunkers**; **trade** (barter + cash); **the intel layer** (rumours, journal, radio, aging marks, the map table); **the catch-up**; **the goal modes**; **S6's abandoned look** across every zone type; **mounts** (horses, bikes, carts, tie-and-guard). | survival_world.md | worldsim, survival, perfcases "settlement night" |
+| **D: depth** | **Seasons** (the clock, winter/summer/harvest, group behaviour by season); **the infection chain** (stages, the week, antibiotics, the serum and the chain, immunity); **wound infection, surgery, sicknesses**; **water works and hygiene**; **settlement politics** (factions, council votes, leader challenge, relations between settlements); **raids and horde sieges** against builds; **infrastructure** (power, water works, the dam, roads and bridges); **relationships** (romance, families, children); **top-end crafting** (reloads, suppressors, antibiotics, gunsmithing); **the tension audio layer** and the bigger TTS model; **traps, lures, masking**. | survival_medical.md §2, §3, §6; survival_building.md §7-§9; survival_people.md §9; survival_world.md §6-§8 | all of the above, extended |
+| **After D** | Wilderness zones (the 48-zone plan, call 69); permanent surgical consequences (call 79); boats on the coast. | | |
 
-**Needs** (on `Vitals`, replicated like stamina): **hunger** and **thirst**, 100 full to 0.
-Proposed rates: thirst empties in 1.5 world days, hunger in 3. Under 25: stamina comes back slower
-and the screen edges dim; at 0: a slow loss of blood volume (thirst faster) until it's fixed.
-Eating and drinking (`Consumables`: `"food": n`, `"water": n` in an item's `consume`) fill them.
-Running and carrying weight drain faster. The HUD shows two small bars by the stamina.
+### Phase A, in order (next)
 
-**Loot.** A `survival` loot table: food (tins, MREs, crackers), water (bottles, dirty water to
-treat), meds, scarce ammo, melee weapons, tools; containers in houses and shops roll from it. A
-looted container comes back after LOOT_BACK_DAYS (Proposed 3) world days, rolled again.
-
-**Death.** Respawn at the safehouse with the starter kit (a knife, a bottle of water, a tin, a
-torch, bandages). The body stays where it fell with everything on it, never cleaned up in
-survival, marked on its owner's map until looted.
-
-## S2: the dead
-
-**Faction `infected`.** Every side's enemy; nobody's squad counts them.
-
-**Kinds** (`data/zombies.json`, Proposed): **walker** (most; 1.1 m/s, hears shots 180 m),
-**runner** (15%; sprints 5 m/s once it sees you), **brute** (S6: slow, armoured, knocks you down).
-At night walkers go 1.4 m/s and hear 1.3x further.
-
-**A zombie near players** is a Soldier body in civilian clothes (`PersonLook`, torn and grey)
-with a host brain, `ZombieAI` (like `CivilianAI`: it only writes the body's intent fields):
-- idle: shuffles about its spot, or along a street;
-- hears (a shot, a door kicked, a car, a scream: `Survival.server_noise`): walks to the sound,
-  searches round it, then idles there;
-- sees (short sight, 40 m by day, 15 m by night; a crouched man half): chases at its kind's pace,
-  groaning; others within GROUP_M join in;
-- reaches: **melee** (`Melee`, new: a hit `round_class` `"bite"` or `"blow"` through
-  `Vitals.server_hit`, shallow, bleeding; a bite can infect, S7) every ATTACK_S (Proposed 1.3 s);
-- **dies** only to the head or to a lot of damage (Vitals in its `undead` mode: no pain, no
-  shock, no bleeding out; the head kills; DAMAGE_POOL Proposed 12 hit points elsewhere).
-
-**A zone's dead.** Each zone has a density per 64 m cell (rural low, towns high, cities highest),
-from the zone's modules and buildings, saved in `survival`. The host keeps up to LIVE_CAP
-(Proposed 40) zombies as bodies within LIVE_M (Proposed 70 m) of players; past that a cell's dead
-are the **crowd** (S3). Kills thin a cell; cells refill slowly (REFILL_DAYS, Proposed 2) from the
-neighbours, so cleared ground stays safer for a while.
-
-## S3: hordes and the crowd
-
-The crowd is the far tier: `ZoneDead`, like `ZoneAnimals` (one MultiMesh per look, host walks
-them, one small unreliable packet SEND_S apart), so hundreds cost little. A crowd zombie that
-comes within LIVE_M of a player becomes a body (where it was, the same kind); a body that's out of
-it and not chasing goes back. **Hordes**: some nights (Proposed every 4th, and on a gunfight's
-noise in a city) a horde of 30-60 forms in the zone and walks towards the noise or the players.
-
-## S4: survivors and companions
-
-**Survivors** are people out in the world (`PeopleLayer`, kind `survivor`): holed up in a house,
-on a roof, at a camp, wandering. Each is a `Hiring.candidate` (name, role, skills) with **a
-want** (Proposed: 40% money, 40% an item, 20% a favour):
-- **money**: cash found as loot (survival's currency), Proposed $200-1500 by skill;
-- **an item**: something from a want list (antibiotics, a rifle and mags, 5 tins, a backpack);
-- **a favour**: clear a building, bring something from a marked place, find someone.
-
-Talk (the interaction menu) shows who they are and what they want; give it (or come back with it)
-and they join: a squadmate (`SquadAI`, friendly, follow and every order), in the 8-slot squad
-with the players (at most 8 together). Companions eat and drink from what they carry and ask for
-more; they can be wounded, treated, and killed for good. Some survivors are hostile (bandits,
-S6) and some won't join at any price.
-
-## S5: crossings and persistence
-
-Walking out of a zone's edge at a crossing loads the next zone for the whole session (as the
-campaign's crossings), saving the one left. Saving: the world on every crossing, every
-SAVE_MIN (Proposed 5) real minutes, and on quit. Continue loads the world where it was: each
-survivor in the zone they were in (the host's zone wins: everyone joins the host's zone).
-
-## S6: an abandoned world
-
-A zone def's `abandoned: true` (every survival zone) changes how it's built, never the
-campaign's: roads and yards overgrown (grass and bushes through the asphalt, ZoneScatter),
-wrecked and burnt cars on the roads (VehicleLayer wrecks, a few to a road), litter and bags,
-boarded windows and broken doors (BuildingGen), some buildings partly fallen, no street lights or
-lit windows at night, no civilians, no garrisons. Bandit camps (hostile survivors) stand in for
-some of the compounds.
-
-## S7: deeper survival
-
-Infection from bites (a slow fever; antibiotics hold it, a cure is rare), boiling or purifying
-water, cooking, crafting basics (bandages from cloth, a spear, barricades), sleeping to pass the
-night at the safehouse.
+1. The parry bug in survival_test (S2b), then regression suites on the S2 tree, commit.
+2. Player melee weapons and inputs (S2b's plan: weapon items tagged "melee", MeleeInput, RPCs).
+3. The stealth model on ZombieAI: senses, awareness states, the HUD ring and eye.
+4. S3: ZoneDead crowd tier, zone pressure, local hordes, specials.
+5. The metabolism on Vitals; food item values; sleep; warmth; water quality; the body screen's
+   first form (the figure can wait: rings and words first).
+6. The cold open (the note, the neighbour, the nearby thing, the first night), permadeath and
+   the new survivor (blank slate), world options.
+7. The map: one zoomable map, world to zone, known areas only.
+8. A perfcases case; CI green; a build off the branch for the Captain to play.
 
 ## Performance
 
 Live zombies are AI soldiers: LIVE_CAP keeps them under the fight case's AI count (32). Their
 brain is lighter than SquadAI (no tactics, no cover search): one sight check and one path every
 THINK_S (Proposed 0.4 s), less when far. The crowd costs what animals cost. `DynamicSim` sleeps
-the rest. A survival case joins perfcases once S3 lands.
+the rest. Each doc has its own performance section; the budgets meet in perfcases.
 
 ## Tests
 
-`survival` suite: the menu's New world hosts the safehouse with the starter kit; needs drain
-and eating fills them; a zombie hears a shot, walks to it, sees, chases and bites; a headshot
-kills it, body shots take the pool; death respawns at the safehouse with the body left where it
-fell; a survivor's want is met and he joins; a crossing saves the zone and the world and Continue
-puts it back.
+`survival` suite (S1's checks stand): the menu's New world hosts the safehouse with the
+starter kit; needs drain and eating fills them; a zombie hears a shot, walks to it, sees, chases
+and bites; a headshot kills it, body shots take the pool; death respawns as a new survivor with
+the body left where it fell; a survivor's want is met and he joins; a crossing saves the zone
+and the world and Continue puts it back. Each doc lists its phase's suite.
