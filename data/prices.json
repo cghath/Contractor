@@ -74,7 +74,7 @@
 		"optic_c79": 1400, "optic_strike_eagle": 1100, "optic_atacr": 5200, "suppressor_9mm": 700, "suppressor_45": 800, "suppressor_ak": 1000, "suppressor_556_short": 1400, "grip_handstop": 60,
 		"grip_stubby": 120, "bipod_harris": 260, "grip_pod": 320, "light_x300": 300, "light_tlr1": 220, "laser_green": 260, "laser_peq2": 900, "energy_drink": 6,
 		"caffeine_pills": 8, "ibuprofen": 5, "paracetamol": 4, "water_bottle": 2, "electrolyte_sachet": 4, "mre": 12, "irp_ration": 14, "energy_bar": 3,
-		"canned_meat": 4, "beans_tin": 3, "raw_meat": 3, "dirty_water_bottle": 1, "cloth_rag": 1, "wood_stick": 1, "torch": 3, "club": 8, "smoked_meat": 6, "cooked_meal": 6, "vegetables": 2, "campfire": 4, "book_first_aid": 15, "battery_aa": 6, "battery_cr123": 12, "lighter": 3, "matches": 2, "toothpaste": 3, "soap": 2, "bleach": 4,
+		"canned_meat": 4, "beans_tin": 3, "raw_meat": 3, "dirty_water_bottle": 1, "cloth_rag": 1, "wood_stick": 1, "torch": 3, "club": 8, "smoked_meat": 6, "cooked_meal": 6, "vegetables": 2, "seed_packet": 8, "glass_bottle": 1, "campfire": 4, "book_first_aid": 15, "battery_aa": 6, "battery_cr123": 12, "lighter": 3, "matches": 2, "toothpaste": 3, "soap": 2, "bleach": 4,
 		"toilet_paper": 3, "candles": 3, "sugar_bag": 4, "tea_tin": 8, "cigarette_pack": 6, "key_ring": 10, "car_keys": 15, "rubbing_alcohol": 12,
 		"syringes": 25, "gauze_pack": 8, "suture_kit": 30, "medical_tape": 4, "antiseptic": 10, "antibiotics": 120, "serum": 2500, "enclave_uniform": 300, "enclave_pass": 400, "cutting_torch": 350, "arche_dossier": 0, "arche_tape": 0, "multitool": 60, "wrench_set": 120,
 		"pliers": 25, "screwdriver_set": 35, "duct_tape": 15, "cable_ties": 8, "electrical_tape": 5, "hacksaw": 30, "bolt_cutters": 80, "penetrating_oil": 12,

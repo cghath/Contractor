@@ -123,7 +123,7 @@ static func reach(m: WorldModel, g: Dictionary) -> Array:
 	var out: Array = [String(g.zone)]
 	var quiet := String(m.w.get("start_zone", "")) if m.now < 2.0 else ""
 	for z: String in m.zone(String(g.zone)).get("links", []):
-		if z != quiet and m.zones().has(z):
+		if z != quiet and m.zones().has(z) and m.crossing_open(String(g.zone), z):
 			out.append(z)
 	return out
 
@@ -279,6 +279,7 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			out.append({"kind": "hunt_player", "zone": pz, "place": "", "target": "player", "gain": 0.7, "need": 1.0,
 				"loss": float(m.player.get("strength", 3.0)) / mine * 0.5, "noise": noise_cost(m, "hunt_player", pz), "rel": 0.0,
 				"bias": float(p.get("cruelty", 0.2)) * 0.3})
+	Seasons.bias_options(m, g, out)  # (phase D: the season's pull on every goal, a lit settlement)
 	return out
 
 
@@ -400,6 +401,9 @@ static func travel(m: WorldModel, g: Dictionary, to: String) -> void:
 		return
 	var next := String((j.path as Array)[int(j.leg)])
 	var from := String(g.zone)
+	if not m.crossing_open(from, next):
+		_done(g)  # (the bridge is down: think again)
+		return
 	g.zone = next
 	j.leg = int(j.leg) + 1
 	j.progress = 0.0

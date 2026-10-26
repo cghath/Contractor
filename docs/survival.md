@@ -28,6 +28,10 @@
 - **Phase C trade and intel built on `claude/survival-intel`** (survival_world.md 8 and 10; calls 26, 37, 45, 54, 95, 98):
   the value scale and traders' prices, the barter screen, rumours in the talk menu, the journal (7), the radio, landmarks,
   the map's political colour and the settlement's map table; R2656 PASS (intel, worldsim, survival); see docs/survival_intel.md.
+- **Phase D of the world built on `claude/survival-seasons`** (calls 28, 30, 34, 53, 55, 59, 60, 92, 113, 137, 140): seasons
+  (`Seasons`, `Survival.season()`: weather, winter's frost and frozen dead, the spring thaw horde, summer flags, planting and
+  harvest), raids and horde sieges on builds (`Sieges`: chew, pile, climb, vault, squeeze; breach charges; stores taken),
+  politics (`Politics`), infrastructure (`Infrastructure`: power, projects, bridges), traps, lures, masking; R2665 PASS (seasons, survival, worldsim, settlement); see docs/survival_seasons.md.
 - **Mounts built on `claude/survival-mounts`** (calls 31, 35; horses, bicycles, carts, tie-and-guard, companions riding): R2659: mounts PASS, survival PASS, vehicles single-peer PASS; vehicles host FAIL only on "V does nothing else" (quick_melee on V in autoload/controls.gd, from the melee lane, not mounts); see docs/survival_mounts.md.
 
 ### (earlier) 2026-10-26 ~02:15 CDT

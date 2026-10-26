@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase D: the world's year, sieges, politics, infrastructure (claude/survival-seasons)
+
+- **Added** seasons (`Seasons`, `Survival.season()`): four seasons of 10 world days from the New world option "season" (spring by default); the weather rolled by season every 6 world hours (winter snow as overcast with a snow flag); winter stops crops, freezes water and slows the dead, a hard frost freezes the dead outdoors solid (one hit shatters them) and the spring thaw wakes them all at once as a horde, with a thaw event in every far zone that froze; summer flags (thirst x1.5, food keeps x0.5), wildfires as a world event; planting (seed packets) and harvest windows for farm beds; the season's biases on the world sim's goals (autumn raids and stocking up, scavengers to the cities in spring, enclave patrols).
+- **Added** raids and horde sieges against builds (`Sieges`): the dead at a wall chew wood, pile into a ramp and climb, runners vault waist-high, crawlers squeeze through gaps, gates take a push (ZombieAI calls it when stuck); horde siege nights in waves at the settlement; a live raid's support fire on a lookout, a breach charge on a wood wall, and the stores taken when it's lost.
+- **Added** settlement politics (`Politics`): the pious as a faction, shared faction moodlets, night theft, splits as new world groups, the leader challenge's contest (standing, a duel, a vote, leaving) passing the settlement on, alliances, protection and feuds with other settlements.
+- **Added** infrastructure (`Infrastructure`): solar panels, battery banks, wind turbines and wiring; powered lamps (the footprint), a fridge, an electric fence, power tools, a water pump, the radio's power; projects (the water works, the dam, clearing a road, a bridge) worked by the maintain job; a blown bridge closes the crossing in the world sim.
+- **Added** traps (`Traps`: spike pit, wire that holds, bear trap, drawbridge, kill corridor markers), lures (`Lures`: a thrown bottle, a car alarm, a radio left playing, flares, a tied goat), masking and bodies (`Masking`: gore smeared from a fresh corpse hides the smell, piles rot and breed bloaters, a pyre burns them, the haul job buries them); items seed_packet and glass_bottle; fifteen build pieces.
+- **Added** the `seasons` test suite.
+
 ### Contractor: Fallen, phase C: the enclave, ARCHE's trail, bunkers (claude/survival-enclave)
 
 - **Added** the enclave as a faction on the world sim: posts at the port and the base, patrols walking routes on the far tick, tolls (far groups pay or are turned back; the players get the council's question or a pay/refuse ask), looters shot, trade with trusted settlements, three officers and a quartermaster, its nature and price by seed, paying the price (the evac), infiltration (uniform + forged pass), breaking the port, joining as a path (docs/survival_enclave.md).

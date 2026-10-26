@@ -141,6 +141,7 @@ static func server_setup() -> void:
 	m.w["t"] = world_now()
 	m.w["wall"] = Time.get_unix_time_from_system()
 	var start := String(Survival.state().get("start_zone", Survival.start_zone()))
+	m.w["season_start"] = Seasons.start()  # (the New world option: Seasons)
 	m.setup(table, start, Survival.option_mult("world"))
 	_setup_goal(m, start)
 	FallenStory.server_setup(m)  # (the enclave lane: the enclave, ARCHE's trail, the bunkers, the cure's places)
@@ -281,6 +282,7 @@ func _after_step(m: WorldModel) -> void:
 			Survival._journal_line(_cap(String(e.text)) + ".")
 	_update_held()
 	_check_goal()
+	Politics.server_after_step(m)  # (phase D: allies' warnings)
 
 
 func _do_action(a: Dictionary) -> void:
@@ -397,6 +399,7 @@ static func player_info() -> Dictionary:
 	return {"zone": zone, "place": "safehouse", "place_pos": [pos.x, pos.y], "strength": strength + defence * DEFENCE_X,
 		"home_strength": home, "stocks_value": stocks_value, "defence": defence,
 		"can_take": Settlement.exists(), "hunt_zone": hosted_zone() if hosted_zone() != "" else zone,
+		"footprint": float(Settlement.footprint().get("value", 0.0)) if Settlement.exists() else 0.0,
 		"safe": bool(section().get("catching_up", false))}
 
 

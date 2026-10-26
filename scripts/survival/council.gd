@@ -201,7 +201,7 @@ static func _pick(score: Dictionary, opts: Array) -> String:
 
 
 ## The factions inside the settlement (survival_people.md §9): {name: [records]}: a family
-## ("family" on the record) votes together, the rest split into the old crew and the newcomers
+## ("family" on the record) votes together, then the pious, the rest split into the old crew and the newcomers
 ## (settled within NEWCOMER_DAYS); one whose relations with the rest of their faction average
 ## under ODD_ONE_OUT votes alone ("alone:<id>").
 static func factions() -> Dictionary:
@@ -211,6 +211,8 @@ static func factions() -> Dictionary:
 		var f := ""
 		if String(r.get("family", "")) != "":
 			f = "family:" + String(r.family)
+		elif SurvivorPerson.has_trait(r, "pious"):
+			f = "the pious"  # (phase D politics: the pious vote together, Politics)
 		else:
 			f = "newcomers" if now - float(r.get("settled_h", now)) < NEWCOMER_DAYS * 24.0 else "old crew"
 		if not out.has(f):

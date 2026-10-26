@@ -129,6 +129,8 @@ static func server_detonate(level: CompoundLevel, kind: String, pos: Vector3, it
 			_flash(level, pos)
 		"smoke":
 			level.server_spawn_smoke(pos, SmokeCloud.colour_of(item_id))
+		"bottle":
+			Lures.server_bottle(level, pos)  # (survival: a thrown bottle smashes, the dead go to it)
 		"chemlight":
 			# No bang: where it came to rest it becomes a placed chem light (Demolitions), riding
 			# whoever or whatever it landed on.
