@@ -13,7 +13,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Contractor: Fallen, phase C core: the living world (claude/survival-worldsim)
 
-Local: worldsim and survival suites (see the run number in docs/survival_world.md's "Where the build is").
+Local: worldsim and survival suites R2652 PASS (worldsim, survival, settlement).
 
 - **Added (`WorldSim`, `scripts/survival/world_sim.gd`, a child of the Survival autoload):** the world's
   groups and regions in `Survival.state()["world"]`, a far tick every 15 world minutes (30 s real) on a

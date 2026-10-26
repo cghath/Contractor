@@ -9,7 +9,7 @@
 - Calls now 1-142 (the table below).
 - **Phase C core (the world sim) built on `claude/survival-worldsim`** (survival_world.md 2-5, 9, 11-13): groups,
   regions, the judgement, far fights, pressure and hordes across the map, live groups, the catch-up, rumours, goal
-  modes; RUNNUM; see survival_world.md's "Where the build is".
+  modes; R2652 PASS (worldsim, survival, settlement; a far tick 13 ms for 78 groups); see survival_world.md's "Where the build is".
 
 ### (earlier) 2026-10-26 ~02:15 CDT
 

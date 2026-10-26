@@ -16,7 +16,7 @@ virtualizer, the region map, hiring and the roster).
   patrol/enforce), `WorldFights`, `WorldRegions` + `data/survival_regions.json`, `WorldTrade.value`, `Rumours`,
   `WorldLive` (live groups: people for settlers/scavengers, hostile SquadAI squads with SquadOrders for
   raiders/cultists). Raider demands on the players' farm go to the settlement's council (`Council.server_put`);
-  the sim reads `Settlement` stores and defence. Suites: worldsim + survival + settlement, RUNNUM.
+  the sim reads `Settlement` stores and defence. Suites: worldsim + survival + settlement, R2652 PASS (worldsim, survival, settlement; a far tick 13 ms for 78 groups).
 - Proposed defaults (in code): tick 15 world min; travel 2 h a zone; a busy group rethinks hourly; live 400 m,
   fold 500 m, 24 live people in a 64 budget with the dead; demand 6 h to pay, 40% share; catch-up 2 days and the
   clock moves with it; evac refill +10% / dead +5% each 10 days; clear refill x2, quiet under 15% of a zone's dead;
