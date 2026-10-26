@@ -1,6 +1,18 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~06:45 CDT)
+## Where the build is (2026-10-26 ~08:40 CDT)
+
+- **PHASE C COMPLETE on claude/survival (8e58e721)**: world sim, settlement work, intel/trade, enclave/ARCHE/bunkers/cure
+  and mounts lanes merged; survival, mounts, enclave, intel, worldsim, vehicles PASS (R2660). **Slice C build B2661**:
+  B:\Contractoruilds\contractor-2026-10-26-083242-B2661-fallen-slice-c-8e58e721 (+ .zip).
+- **Phase D started ~08:35**: the body (claude/survival-body: the bite clock, wound infection, surgery, sicknesses, water
+  works, hygiene, seasons on the body, the body screen) and the world (claude/survival-seasons: seasons + the thaw, raids and
+  horde sieges against builds, politics, infrastructure, traps/lures/masking) on Opus lanes.
+- Still open after D (the calls table): relationships/romance, top-end crafting and gunsmithing, the audio tension layer and
+  the bigger TTS, clothing slots and layers, climbing rules in full, fauna and flora (calls 100-108), the dead's decay/dress/
+  nests, the nerve meter and the rest of calls 116-142.
+
+### (earlier) 2026-10-26 ~06:45 CDT
 
 - **PHASE B COMPLETE on claude/survival (0996f909)**: building, RPG and people lanes merged; survival, fallenpeople,
   building, rpg PASS (R2646). **Slice B build B2647**: B:\Contractoruilds\contractor-2026-10-26-063915-B2647-fallen-slice-b-0996f909.
@@ -17,6 +29,10 @@
 - **Phase C trade and intel built on `claude/survival-intel`** (survival_world.md 8 and 10; calls 26, 37, 45, 54, 95, 98):
   the value scale and traders' prices, the barter screen, rumours in the talk menu, the journal (7), the radio, landmarks,
   the map's political colour and the settlement's map table; R2656 PASS (intel, worldsim, survival); see docs/survival_intel.md.
+- **Phase D of the world built on `claude/survival-seasons`** (calls 28, 30, 34, 53, 55, 59, 60, 92, 113, 137, 140): seasons
+  (`Seasons`, `Survival.season()`: weather, winter's frost and frozen dead, the spring thaw horde, summer flags, planting and
+  harvest), raids and horde sieges on builds (`Sieges`: chew, pile, climb, vault, squeeze; breach charges; stores taken),
+  politics (`Politics`), infrastructure (`Infrastructure`: power, projects, bridges), traps, lures, masking; R2665 PASS (seasons, survival, worldsim, settlement); see docs/survival_seasons.md.
 - **Mounts built on `claude/survival-mounts`** (calls 31, 35; horses, bicycles, carts, tie-and-guard, companions riding): R2659: mounts PASS, survival PASS, vehicles single-peer PASS; vehicles host FAIL only on "V does nothing else" (quick_melee on V in autoload/controls.gd, from the melee lane, not mounts); see docs/survival_mounts.md.
 
 ### (earlier) 2026-10-26 ~02:15 CDT

@@ -17,6 +17,8 @@ const GORE_HYGIENE := 25.0
 const GORE_H := 12.0
 const GORE_RISK := 0.4
 const GORE_META := &"gore_until"
+## When the gore went on (world days: Masking sets both metas), so one smear costs hygiene once.
+const GORE_AT_META := &"gore_at"
 ## Clothes go dirty after CLOTHES_DAYS world days unwashed: hygiene drains faster (x DIRTY_CLOTHES).
 const CLOTHES_DAYS := 5.0
 const DIRTY_CLOTHES := 1.5
@@ -41,8 +43,9 @@ static func server_wash(s: Soldier, where: String, use_soap := true) -> String:
 	var n := Survival.needs_of(s)
 	var soap := use_soap and FallenStory.take_one(s, "soap")
 	wash(n, where, soap, BodySeason.season())
-	if s.has_meta(GORE_META):
-		s.remove_meta(GORE_META)
+	for m: StringName in [GORE_META, GORE_AT_META]:
+		if s.has_meta(m):
+			s.remove_meta(m)
 	Needs.apply(s, n)
 	return "You wash%s: %s" % [" with soap" if soap else "", Needs.words(n).hygiene]
 
@@ -55,8 +58,21 @@ static func gore(n: Dictionary) -> void:
 
 ## Host: `s` smears himself with the dead's gore: the body's gore and the smell meta.
 static func server_gore(s: Soldier) -> void:
-	gore(Survival.needs_of(s))
 	s.set_meta(GORE_META, Soldier._now() + GORE_H / 24.0 * Survival.DAY_MIN * 60.0)
+	s.set_meta(GORE_AT_META, Survival.day() + Survival.hour() / 24.0)
+	server_take_gore(s, Survival.needs_of(s))
+
+
+## Host: gore the world lane's masking put on `s` (its metas "gore_until" and "gore_at") counted on
+## the body once per smear: hygiene down, the wound infection risk up while it lasts.
+static func server_take_gore(s: Soldier, n: Dictionary) -> void:
+	if not s.has_meta(GORE_AT_META) or not s.has_meta(GORE_META) or Soldier._now() >= float(s.get_meta(GORE_META)):
+		return
+	var at := float(s.get_meta(GORE_AT_META))
+	if is_equal_approx(at, float(n.get("gore_seen", -1.0))):
+		return
+	n["gore_seen"] = at
+	gore(n)
 
 
 ## Clean clothes on (a wash job done, a fresh set found): the dirty clock back to zero.

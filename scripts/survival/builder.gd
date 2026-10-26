@@ -1230,6 +1230,9 @@ func _do(s: Soldier, action: String, args: Array) -> String:
 					return server_dismantle_piece(s, id)
 				"repair":
 					return server_repair_piece(s, id)
+			var extra := Infrastructure.server_piece_act(self, s, id, what)  # (phase D pieces: traps, lures, the pyre)
+			if extra != "?":
+				return extra
 			return server_door(s, id, what, String(args[2]) if args.size() > 2 else "")
 		"dev_kit":
 			if not DevTools.on():

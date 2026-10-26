@@ -9,8 +9,10 @@ extends RefCounted
 
 const KEY := "water_works"
 ## Proposed: the quality of each kind of source. A tap runs clean only while the works do.
-const SOURCES := {"tap": "clean", "well": "questionable", "river": "questionable", "lake": "questionable",
+const SOURCES := {"tap": "clean", "pump": "clean", "well": "questionable", "river": "questionable", "lake": "questionable",
 	"dam": "clean", "rain_barrel": "clean", "snow": "clean", "puddle": "dirty", "pond": "dirty"}
+## Open water that freezes in winter (Seasons.water_frozen): snow and ice are melted instead.
+const FREEZES: Array[String] = ["well", "river", "lake", "rain_barrel", "puddle", "pond"]
 ## Sources that need a fire to be drinkable at all (snow is melted).
 const NEEDS_FIRE: Array[String] = ["snow"]
 ## Proposed: a zone's works still intact at the start (by the seed), the repair's skill, parts
@@ -49,9 +51,21 @@ static func taps_run(zone: String) -> bool:
 	return bool(w.get("intact", false)) or bool(w.get("repaired", false))
 
 
+## The world lane's call when its infrastructure work brings `zone`'s water works back
+## (Infrastructure, through the global class list): the taps run.
+static func server_repaired(zone: String) -> void:
+	works(zone)["repaired"] = true
+
+
 ## The quality of water from `source` (SOURCES' keys) in `zone`: "" when there's none (a dry tap).
 static func quality(source: String, zone := "") -> String:
 	if source == "tap" and not taps_run(zone):
+		return ""
+	if source == "pump" and not Infrastructure.pump_on():
+		return ""  # the settlement's water pump needs power (Infrastructure)
+	if source in FREEZES and Seasons.water_frozen():
+		return ""
+	if source == "snow" and Seasons.current() != "winter":
 		return ""
 	return String(SOURCES.get(source, "dirty"))
 
@@ -152,7 +166,9 @@ static func server_treat(s: Soldier, how: String, fire := false) -> int:
 static func server_fill(s: Soldier, source: String, zone := "") -> String:
 	var q := quality(source, zone)
 	if q == "":
-		return "The tap is dry: the zone's water works are down"
+		if source in FREEZES:
+			return "Frozen solid: melt snow on a fire"
+		return "The tap is dry: the zone's water works are down" if source in ["tap", "pump"] else "There's no water there now"
 	if source in NEEDS_FIRE and not near_fire(s):
 		return "Snow has to be melted on a fire"
 	if s.inventory.take(&"dirty_water_bottle", 1, {"quality": q, "source": source}) != 1:

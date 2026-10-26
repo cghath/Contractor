@@ -18,7 +18,11 @@ cure (calls 10, 15, 46), sleep (call 47), water and hygiene (call 48), the seaso
   the six operations; `WaterWorks` the sources, taps, repairs and treating water. The body screen (`BodyScreen`
   inside `BodyReadout`, backslash) replaces the text readout. Hooks: Melee's bite -> `Body.on_bitten`;
   `Soldier._log_care` -> `Body.on_treated`; `Cure.server_apply` also clears the clock; `Survival._server_body_action`
-  for the screen's actions. Every number is **Proposed** (consts at the top of each file).
+  for the screen's actions. With the world lane merged: the season from `Survival.season()`, thirst and shelf life on
+  `Seasons`' numbers, frozen open water in winter (`Seasons.water_frozen`: melt snow), the settlement's powered pump
+  (`Infrastructure.pump_on`, source "pump") and fridge (`BodySeason.spoils_days(..., in_fridge)`), masking's
+  `gore_until`/`gore_at` metas counted once a smear (`Hygiene.server_take_gore`), and `WaterWorks.server_repaired`
+  for the infrastructure repair. Every number is **Proposed** (consts at the top of each file).
 - **Not yet**: the settlement's clinic, basin and bath pieces (surgery and washing read a bunk/table and a `where`
   argument for now), the wash job's call (`Hygiene.on_wash_job` is the hook), spoiling food (`BodySeason.spoils_days`
   is ready), a lone bitten survivor's clock in the far sim, the camera reading `vision_sway`, permanent consequences

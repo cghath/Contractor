@@ -34,6 +34,10 @@ const TABLE := {
 	"put_down_friend": [-12.0, 72.0],  # (Proposed: call 77, putting a risen friend down)
 	"threatened": [-15.0, 72.0], "gift": [4.0, 24.0], "joined": [8.0, 48.0],  # (Proposed)
 	"lost_their_player": [-10.0, 72.0], "break_vented": [6.0, 12.0],  # (Proposed)
+	# Phase D politics and sieges (Politics, Sieges; Proposed): a theft (the thief's guilt, the rest's
+	# loss), a faction low or high together, a challenger who lost, a siege lived through, a raid lost.
+	"stole": [-4.0, 48.0], "theft": [-5.0, 48.0], "faction_low": [-5.0, -1.0], "faction_high": [4.0, -1.0],
+	"lost_challenge": [-10.0, 72.0], "siege_survived": [6.0, 48.0], "raided": [-12.0, 72.0],
 }
 ## Traits lean the mood (Proposed).
 const TRAIT_LEAN := {"optimist": 6.0, "gloomy": -6.0}

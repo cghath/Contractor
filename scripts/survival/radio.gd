@@ -82,7 +82,7 @@ static func powered(s: Soldier) -> bool:
 static func at_generator(s: Soldier) -> bool:
 	if not Settlement.exists() or Settlement.zone() != String(Survival.state().get("zone", "")):
 		return false
-	if float(Settlement.footprint().get("noise_m", 0.0)) <= 0.0:
+	if float(Settlement.footprint().get("noise_m", 0.0)) <= 0.0 and not Infrastructure.powered_here():  # (phase D: solar, wind, batteries)
 		return false
 	return s.global_position.distance_to(Settlement.pos()) <= Settlement.radius()
 

@@ -90,6 +90,8 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 			out.append(talk.call("how", "How are you?", {}, ""))
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
 			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
+	elif menu_kind == InteractionMenu.DEAD and Masking.is_dead_one(target):
+		out.append(talk.call("smear", "Smear its gore on you", {}, ""))  # (phase D masking: Masking)
 	elif menu_kind == InteractionMenu.DEAD:
 		if status == "dead" and not bool(info.get("buried", false)):
 			var shovel := SurvivorsLayer.shovel_of(actor) != &""
@@ -182,6 +184,9 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		return ""
 	if action == "bury":
 		layer.server_start_bury(actor, target)
+		return ""
+	if action == "smear":
+		Masking.server_smear(actor, target)
 		return ""
 	if not target.vitals.is_up():
 		return ""

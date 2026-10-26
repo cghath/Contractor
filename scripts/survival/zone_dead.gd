@@ -112,11 +112,15 @@ func _physics_process(delta: float) -> void:
 		var d := dead[i]
 		if not d.alive:
 			continue
+		if bool(d.get("frozen", false)):
+			continue  # (phase D: frozen solid in a hard frost: Seasons; the thaw wakes them)
 		var pos: Vector2 = d.pos
 		if float(d.wait) > 0.0:
 			d.wait = float(d.wait) - delta
 			if float(d.wait) <= 0.0:
-				if bool(d.horde) and pull != Vector2.INF and pressure >= Survival.HORDE_DISPERSE_AT:
+				if d.has("to"):
+					d.target = d.to  # (phase D: a siege's wave walks at the settlement: Sieges)
+				elif bool(d.horde) and pull != Vector2.INF and pressure >= Survival.HORDE_DISPERSE_AT:
 					d.target = pull
 				elif pull != Vector2.INF and pressure >= Survival.DRIFT_AT and pos.distance_to(pull) > 20.0:
 					d.target = pos + (pull - pos).normalized() * minf(DRIFT_M, pos.distance_to(pull))  # drifts toward the noise
@@ -125,7 +129,7 @@ func _physics_process(delta: float) -> void:
 					d.target = pos + Vector2(cos(a), sin(a)) * _rng.randf_range(2.0, DRIFT_M)
 			continue
 		var to: Vector2 = (d.target as Vector2) - pos
-		var speed := WALK_MPS if bool(d.horde) else DRIFT_MPS
+		var speed := (WALK_MPS if bool(d.horde) else DRIFT_MPS) * Seasons.dead_pace_mult()
 		var step := speed * delta
 		if to.length() <= step:
 			d.pos = d.target
@@ -166,6 +170,8 @@ func _convert(level: Node) -> void:
 		if near and live < Survival.LIVE_CAP:
 			var y := _terrain.height_at(pos.x, pos.y) if _terrain else 0.0
 			var z := Survival.server_spawn_zombie(level, Vector3(pos.x, y, pos.y), String(d.kind))
+			if z and bool(d.get("frozen", false)):
+				Seasons.freeze(z)  # (still frozen up close)
 			if z:
 				if bool(d.horde):
 					var brain := ZombieAI.of(z)

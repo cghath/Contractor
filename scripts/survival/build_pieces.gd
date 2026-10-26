@@ -100,9 +100,32 @@ const PIECES := {
 	"lamp": {"name": "Lamp", "size": [1, 3, 1], "cost": [[&"scrap_sheet", 1]], "tool": "wrench", "build_s": 3.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "scrap"},
 	# The map table (call 45, the intel lane: MapTable): standing at it, the map shows the reports.
 	"map_table": {"name": "Map table", "size": [4, 2, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "frame", "mat": "wood"},
+	# Phase D (docs/survival_seasons.md; calls 53, 60; Proposed): power (Infrastructure: a solar panel
+	# and a battery bank quiet and scarce, a wind turbine for the hills and coast, wiring as reach
+	# between them), what power runs (a fridge, an electric fence that stuns walkers, a power tool
+	# bench for faster builds, a water pump), traps (Traps: a spike pit, a bear trap, a drawbridge,
+	# kill corridor markers; the wire above holds walkers), lures (Lures: a radio left playing, a tied
+	# goat) and a pyre to burn the dead on (Masking).
+	"solar_panel": {"name": "Solar panel", "size": [2, 1, 2], "cost": [[&"solar_panel", 1], [&"scrap_sheet", 1]], "tool": "wrench", "build_s": 10.0, "hp": 60.0, "solid": false, "look": "slab", "mat": "scrap"},
+	"battery_bank": {"name": "Battery bank", "size": [1, 1, 1], "cost": [[&"vehicle_battery", 1], [&"copper_wire", 1]], "tool": "wrench", "build_s": 6.0, "hp": 50.0, "solid": true, "look": "full", "mat": "scrap"},
+	"wind_turbine": {"name": "Wind turbine", "size": [1, 8, 1], "cost": [[&"scrap_sheet", 4], [&"engine_parts", 1], [&"copper_wire", 1]], "tool": "wrench", "build_s": 30.0, "hp": 150.0, "solid": true, "look": "panel", "mat": "scrap"},
+	"wiring": {"name": "Wiring", "size": [1, 1, 1], "cost": [[&"copper_wire", 1]], "tool": "wrench", "build_s": 1.0, "hp": 10.0, "solid": false, "look": "slab", "mat": "scrap"},
+	"fridge": {"name": "Fridge", "size": [2, 4, 2], "cost": [[&"scrap_sheet", 3], [&"electronics_salvage", 1]], "tool": "wrench", "build_s": 10.0, "hp": 100.0, "solid": true, "look": "full", "mat": "scrap"},
+	"electric_fence": {"name": "Electric fence", "size": [4, 3, 1], "cost": [[&"copper_wire", 2], [&"scrap_sheet", 1]], "tool": "wrench", "build_s": 6.0, "hp": 60.0, "solid": true, "look": "panel", "mat": "scrap"},
+	"power_tools": {"name": "Power tool bench", "size": [2, 2, 2], "cost": [[&"machine_parts", 1], [&"copper_wire", 1]], "tool": "wrench", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "frame", "mat": "scrap"},
+	"water_pump": {"name": "Water pump", "size": [2, 2, 2], "cost": [[&"engine_parts", 1], [&"scrap_sheet", 2]], "tool": "wrench", "build_s": 12.0, "hp": 120.0, "solid": true, "look": "full", "mat": "scrap"},
+	"spike_pit": {"name": "Spike pit", "size": [2, 1, 2], "cost": [[&"planks", 4]], "tool": "shovel", "build_s": 10.0, "hp": 60.0, "solid": false, "look": "slab", "mat": "wood"},
+	"bear_trap": {"name": "Bear trap", "size": [1, 1, 1], "cost": [[&"scrap_sheet", 1]], "tool": "wrench", "build_s": 2.0, "hp": 40.0, "solid": false, "look": "slab", "mat": "steel"},
+	"drawbridge": {"name": "Drawbridge", "size": [4, 1, 4], "cost": [[&"planks", 8], [&"scrap_sheet", 2]], "tool": "hammer", "build_s": 14.0, "hp": 250.0, "solid": true, "door": true, "look": "slab", "mat": "wood"},
+	"corridor_marker": {"name": "Kill corridor marker", "size": [1, 2, 1], "cost": [[&"planks", 1]], "tool": "hammer", "build_s": 1.0, "hp": 20.0, "solid": false, "look": "panel", "mat": "wood"},
+	"lure_radio": {"name": "Radio left playing", "size": [1, 1, 1], "cost": [[&"radio_parts", 1], [&"battery_aa", 2]], "tool": "wrench", "build_s": 2.0, "hp": 20.0, "solid": false, "look": "full", "mat": "scrap"},
+	"goat_stake": {"name": "Tied goat", "size": [1, 1, 1], "cost": [[&"planks", 1], [&"cable_ties", 1]], "tool": "hammer", "build_s": 2.0, "hp": 30.0, "solid": false, "look": "frame", "mat": "wood"},
+	"pyre": {"name": "Pyre", "size": [2, 1, 2], "cost": [[&"planks", 4]], "tool": "hammer", "build_s": 3.0, "hp": 60.0, "solid": false, "look": "slab", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
-	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table"]
+	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
+	"solar_panel", "battery_bank", "wind_turbine", "wiring", "fridge", "electric_fence", "power_tools", "water_pump",
+	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"
