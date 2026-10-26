@@ -220,8 +220,7 @@ everything that follows).
 ## 7. The organization behind the fall (call 62)
 
 Not the military: an **internal R&D branch tied to it**, a mix of the CIA and the CDC. Its own
-name (Proposed working name **ARCHE**, "Applied Research and Containment, Health and
-Epidemics"; the Captain to pick), logo, jargon, and sites: the **lab** on the coast, the
+name (**ARCHE**, "Applied Research and Containment, Health and Epidemics": the Captain's call 66; a quiet blue-and-grey seal, acronyms everywhere), logo, jargon, and sites: the **lab** on the coast, the
 **sealed level under the military base**, **bunkers** across the map (call 62: sealed, stocked,
 trapped, the best loot and the best player stories), relay stations, a quarantine camp that
 failed. The story is a **trail**: notes, terminals, recordings, a survivor who worked there, an
@@ -310,10 +309,10 @@ takes a toll and shoots a looter; the catch-up moves the world within bounds and
 lists it; a rumour from a raider lies and from a scout is true; the map draws only what's known
 and ages a mark; each goal mode's win condition.
 
-## 15. Open calls for the Captain
+## 15. Calls answered (2026-10-25)
 
-1. The organization's name and look (ARCHE is a placeholder).
-2. How many world days the catch-up may run (2 proposed) and whether companions may be hurt
-   offline (proposed: no).
-3. Whether the enclave can be joined outright (serve, then leave on the evac) or only dealt with.
-4. The wilderness zones' timing (the 48-zone plan): phase C or after.
+1. The organization is **ARCHE** (call 66).
+2. The catch-up runs up to **2 world days**, companions safe (call 67).
+3. The enclave **can be joined** as a path with a cost (call 68): serving it is the third route
+   to the evac in §6, beside helping and breaking it; infiltration is a flavour of serving.
+4. Wilderness zones come **after phase D** (call 69): §3's wilderness row is the expansion.
