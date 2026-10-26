@@ -162,6 +162,10 @@ func _set_known(s: Soldier, rec: Dictionary) -> void:
 		info["rite"] = true
 	if bool(rec.get("cult_deserter", false)):
 		info["deserter"] = true
+	if HeliCrew.is_crew(rec):  # (the downed helicopter's crew: HeliCrew's talk entries)
+		info["crew"] = true
+		info["escort"] = bool(rec.get("heli_escort", false))
+		info["tags"] = String(rec.get("tags_by", "")) != ""
 	known[key] = info
 	if _has_peers():
 		_client_known.rpc(key, info)
@@ -558,6 +562,7 @@ func server_tick() -> void:
 			_check_rise(rec, now)
 	_tick_burials(now)
 	Children.server_tick(self, dead)  # children flee the dead, or are taken (call 128)
+	HeliCrew.server_tick(self)  # the downed crew: near, or brought to an enclave post
 
 
 ## Host, every world hour: moods (Moods.hour_tick: needs' conditions, expiry, breaks), a horde

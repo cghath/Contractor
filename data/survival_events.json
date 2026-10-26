@@ -9,7 +9,7 @@
 			"loot": [["canned_meat", 2, 4], ["water_bottle", 2, 3], ["mre", 1, 3], ["pressure_bandage", 2, 4], ["ifak", 1, 1], ["antibiotics", 1, 2], ["rounds_9mm", 15, 30], ["rounds_556", 20, 40], ["battery_aa", 2, 4], ["chemlight_green", 2, 4]]},
 		"convoy": {"weight": 2, "window_h": 6, "pressure": 6, "ambush_chance": 0.35, "trade_share": 0.5, "rolls": 3, "label": "Convoy wagon",
 			"text": "a {column} column is moving along the road through {zone} toward {to}", "ambushed": "{group} ambushed the {column} column in {zone}",
-			"passed": "the {column} column got through {zone}", "robbed": "someone robbed the {column} column's wagon in {zone}",
+			"passed": "the {column} column got through {zone}", "robbed": "{who} robbed the {column} column in {zone}",
 			"loot": [["canned_meat", 2, 5], ["jerrycan", 1, 1], ["machine_parts", 1, 2], ["rounds_762x39", 20, 40], ["pressure_bandage", 1, 3], ["cash_roll", 1, 2], ["smuggled_cigarettes", 1, 2]]},
 		"heli_down": {"weight": 1, "window_h": 48, "pressure": 25, "crew": 2, "rolls": 3, "reward": 25, "label": "Helicopter wreck",
 			"text": "a helicopter came down by {place} in {zone}; smoke for miles", "broadcast": "the enclave asks after a crew down by {place} in {zone}: bring them home and be paid",
