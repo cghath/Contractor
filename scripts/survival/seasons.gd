@@ -328,6 +328,7 @@ static func _wildfire_roll() -> void:
 	rng.seed = hash([int(Survival.state().get("seed", 0)), "wildfire", Survival.day()])
 	if rng.randf() >= WILDFIRE_CHANCE:
 		return
+	Wildfire.server_natural(rng.randi())  # (a real fire in the hosted zone: docs/survival_nature.md)
 	server_wildfire(rng.randi())
 
 

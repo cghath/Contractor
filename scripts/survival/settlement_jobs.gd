@@ -63,7 +63,7 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 		"farm":
 			return farm(st, hours)
 		"hunt":
-			return _yield(st, "hunt", HUNT_PER_H * hours, "raw_meat")
+			return _yield(st, "hunt", HUNT_PER_H * hours * Migration.hunt_x(), "raw_meat")  # (the season's game)
 		"cook":
 			return WorkOrders.work_for(st, "cook", hours) or cook(st, hours)
 		"medic":

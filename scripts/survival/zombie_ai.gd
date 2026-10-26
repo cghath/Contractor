@@ -162,6 +162,8 @@ func _decide() -> void:
 		fed = true
 	if not fed and mode != Mode.CHASE:
 		awareness = maxf(awareness - FALL * THINK_S, 0.0)
+	if who == null and mode != Mode.CHASE and mode != Mode.ALERT:
+		Wildlife.zombie_hunt(self)  # (fauna: animals as prey, carcasses and blood by smell)
 	# The states.
 	if awareness >= 1.0 and (who != null or is_instance_valid(target)):
 		var chase := who if who != null else target

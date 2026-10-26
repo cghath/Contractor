@@ -2072,10 +2072,30 @@ func _build_cell(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> voi
 		if key is String and String(key).begins_with(LIBRARY):
 			shade = bool(PropArt.shape(String(key).trim_prefix(LIBRARY).get_slice("#", 0)).shadow)
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.set_meta(&"tier", tier)
 		add_child(node)
 		if on_demand:
 			(_cell_nodes.get_or_add(at, []) as Array).append(node)
 	FrameCost.spent(&"scatter_cells", t0)
+
+
+## A tree felled or grown back at `pos` (survival's Trees): the near tier of its cell is drawn again
+## (the stump), when the camera comes by.
+const STUMP_SHARE := 0.12
+
+
+func redraw_at(pos: Vector3) -> void:
+	var cell := _cell_of(pos.x, pos.z)
+	var at := Vector3i(cell.x, cell.y, Tier.NEAR)
+	(_entry.get("visual", {}) as Dictionary).erase(at)
+	if not _built_near.has(cell):
+		return
+	_built_near.erase(cell)
+	var prefix := "Scatter_%d_%d_" % [cell.x, cell.y]
+	for child in get_children():
+		if String(child.name).begins_with(prefix) and int(child.get_meta(&"tier", -1)) == Tier.NEAR:
+			child.queue_free()
+	_cell_nodes.erase(at)
 
 
 ## The name of the far blobs' node for cell `cell`'s block ("" when its block has no trees).
@@ -2222,6 +2242,8 @@ func visual_parts(item: Dictionary) -> Array:
 			# tall, as foliage_between counts it.
 			return [["thicket", Transform3D(basis.scaled(Vector3(size.x, size.y * SCRUB_TOP / 0.58, size.z)), p), item.colour]]
 		Kind.TREE:
+			if item.has("felled"):
+				return [["trunk", Transform3D(basis.scaled(Vector3(size.x, size.y * STUMP_SHARE, size.z)), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE]]  # (a stump: Trees)
 			return [["trunk", Transform3D(basis.scaled(size), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE],
 				["conifer" if (bool(item.conifer) if item.has("conifer") else _is_conifer(item)) else "crown", xf, item.colour]]
 	return []
@@ -2352,7 +2374,8 @@ func _far_mesh() -> ArrayMesh:
 ## Grass tufts and pebbles for `cell` (visual only, see SEE_TUFT_M): from the cell and the seed,
 ## thicker where the scrub clusters, none on pads, roads, water or steep ground.
 func _ground_cover(cell: Vector2i, groups: Dictionary, keep: Array[Rect2]) -> void:
-	var tufts := mini(int(float(_spec.get("tufts_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
+	var base_tufts := mini(int(float(_spec.get("tufts_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
+	var tufts := _regrown(base_tufts)  # (survival's regrowth, Flora: more grass the longer a world runs)
 	var pebbles := mini(int(float(_spec.get("pebbles_per_km2", 0.0)) * CELL_M * CELL_M / 1.0e6), CAP_TUFTS_PER_CELL)
 	if tufts + pebbles == 0 and float(_spec.get("rock_clusters_per_km2", 0.0)) <= 0.0:
 		return
@@ -2381,8 +2404,10 @@ func _ground_cover(cell: Vector2i, groups: Dictionary, keep: Array[Rect2]) -> vo
 			continue  # tufts in patches
 		if open and roll > _open_weight(x, z):
 			continue  # an open pan's middle stays bare
-		if _cover_blocked(x, z, keep):
+		if _cover_blocked(x, z, keep) and (pebble or not _grows_through(x, z, tint, keep)):
 			continue
+		if not pebble and n >= base_tufts and Flora.path_clear(x, z):
+			continue  # (the settlement's walked paths stay clear)
 		var h := _terrain.plane_height(x, z)
 		if _terrain.sea_side >= 0 and h < _terrain.sea_level + 0.5:
 			continue
@@ -2426,6 +2451,26 @@ func _ground_cover(cell: Vector2i, groups: Dictionary, keep: Array[Rect2]) -> vo
 			var h := _terrain.plane_height(x, z)
 			groups["outcrop"].append([Transform3D(basis.scaled(Vector3(size, size * squash, size * rng.randf_range(0.8, 1.3))), Vector3(x, h + size * squash * 0.2, z)),
 				base.darkened(rng.randf() * 0.12).lightened(rng.randf() * 0.08)])
+
+
+## Survival's regrowth (Flora, call 104): a cell's `tufts` times the grass multiplier now (1 off
+## survival: the same as ever).
+func _regrown(tufts: int) -> int:
+	return mini(int(tufts * Flora.grass_now), CAP_TUFTS_PER_CELL * 2)
+
+
+## Whether a tuft at (x, z), kept off by a road, grows through it now (Flora.road_now of them: never
+## in the water, a field, on a pad or the settlement's paths). `roll` 0..1 picks which.
+func _grows_through(x: float, z: float, roll: float, keep: Array[Rect2]) -> bool:
+	if Flora.road_now <= 0.0 or roll >= Flora.road_now or Flora.path_clear(x, z):
+		return false
+	if (_terrain.water and _terrain.water.keeps_clear(x, z)) or (_terrain.features and _terrain.features.keeps_clear(x, z)):
+		return false
+	var p := Vector2(x, z)
+	for r in keep:
+		if r.has_point(p):
+			return false
+	return true
 
 
 ## Whether ground cover keeps off (x, z): a pad or the line of a road.

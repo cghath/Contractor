@@ -19,6 +19,7 @@ func _ready() -> void:
 	add_child(ZoneDead.new())  # the crowd tier of the dead (S3), the same path on every peer
 	add_child(SurvivalMap.new())  # what the survivors know: explored cells, known zones, marks
 	add_child(SurvivorsLayer.new())  # the living: lone survivors, companions, graves (survival_people.md)
+	add_child(Nature.new())  # the wildlife, crows, trees, fire and regrowth (docs/survival_nature.md)
 	if multiplayer.is_server():
 		Survival.server_level_ready(self)
 

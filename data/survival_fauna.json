@@ -1,0 +1,36 @@
+{
+	"_doc": "Contractor: Fallen's wildlife (docs/survival_nature.md; calls 42, 100-103). Every number Proposed. kind: prey (flees), flock (lifts), predator (hunts the weak, attacks at night), thief (raids open stores). speed/run m/s; fear_*_m how near the living or the dead come before it runs; herd [min, max]; groups per zone; meat/hide what butchering gives; habitat where it lives (woods, open, hills, deep_woods, stores); where by season (Migration): woods, open, hills, valleys, den, gone. size [length, height, width] m (the hit box and the drawn body).",
+	"species": {
+		"deer": {"name": "deer", "kind": "prey", "herd": [3, 6], "groups": 3, "speed": 1.1, "run": 9.0, "fear_living_m": 45.0, "fear_dead_m": 30.0, "hp": 1.0, "meat": 4, "hide": 1, "habitat": "woods",
+			"seasons": {"spring": "woods", "summer": "hills", "autumn": "woods", "winter": "valleys"}, "size": [1.3, 1.1, 0.4], "colour": "7b5a3a"},
+		"boar": {"name": "wild boar", "kind": "prey", "herd": [2, 4], "groups": 1, "speed": 0.9, "run": 7.0, "fear_living_m": 30.0, "fear_dead_m": 20.0, "hp": 2.0, "meat": 3, "hide": 1, "habitat": "woods",
+			"seasons": {"spring": "woods", "summer": "woods", "autumn": "woods", "winter": "valleys"}, "size": [1.1, 0.7, 0.45], "colour": "3e3329"},
+		"rabbit": {"name": "rabbit", "kind": "prey", "herd": [1, 3], "groups": 3, "speed": 0.8, "run": 8.0, "fear_living_m": 15.0, "fear_dead_m": 12.0, "hp": 0.5, "meat": 1, "hide": 1, "habitat": "open",
+			"seasons": {"spring": "open", "summer": "open", "autumn": "open", "winter": "open"}, "size": [0.35, 0.25, 0.18], "colour": "8a7a64"},
+		"bird": {"name": "birds", "kind": "flock", "herd": [6, 12], "groups": 3, "speed": 0.4, "run": 12.0, "fear_living_m": 25.0, "fear_dead_m": 15.0, "hp": 0.2, "meat": 0, "hide": 0, "habitat": "open",
+			"seasons": {"spring": "open", "summer": "open", "autumn": "open", "winter": "gone"}, "size": [0.25, 0.15, 0.3], "colour": "4a4640"},
+		"wolf": {"name": "wolf", "kind": "predator", "herd": [3, 5], "groups": 1, "speed": 1.2, "run": 10.0, "fear_living_m": 0.0, "fear_dead_m": 25.0, "hp": 1.5, "meat": 2, "hide": 1, "habitat": "hills",
+			"bite": 8.0, "turns": true, "seasons": {"spring": "hills", "summer": "hills", "autumn": "hills", "winter": "valleys"}, "size": [1.1, 0.8, 0.35], "colour": "6c6a66"},
+		"feral_dog": {"name": "feral dog", "kind": "predator", "herd": [3, 6], "groups": 1, "speed": 1.3, "run": 9.0, "fear_living_m": 0.0, "fear_dead_m": 20.0, "hp": 1.0, "meat": 2, "hide": 1, "habitat": "hills",
+			"bite": 6.0, "turns": true, "seasons": {"spring": "hills", "summer": "hills", "autumn": "hills", "winter": "open"}, "size": [0.85, 0.6, 0.3], "colour": "5b4a36"},
+		"bear": {"name": "bear", "kind": "predator", "herd": [1, 1], "groups": 1, "speed": 0.8, "run": 8.5, "fear_living_m": 0.0, "fear_dead_m": 10.0, "hp": 4.0, "meat": 10, "hide": 2, "habitat": "deep_woods",
+			"bite": 25.0, "seasons": {"spring": "deep_woods", "summer": "deep_woods", "autumn": "deep_woods", "winter": "den"}, "size": [1.8, 1.2, 0.8], "colour": "3a2c20"},
+		"raccoon": {"name": "raccoon", "kind": "thief", "herd": [1, 2], "groups": 2, "speed": 0.7, "run": 5.0, "fear_living_m": 12.0, "fear_dead_m": 10.0, "hp": 0.5, "meat": 1, "hide": 1, "habitat": "stores",
+			"seasons": {"spring": "stores", "summer": "stores", "autumn": "stores", "winter": "den"}, "size": [0.6, 0.35, 0.25], "colour": "5d5a55"}
+	},
+	"butcher": {"blade_tags": ["blade"], "blood_h": 6.0, "carcass_h": 72.0},
+	"fish": {
+		"_doc": "Fish an hour with a rod by water body and season (a net NET_X): Migration.fish_rate. species: what bites there.",
+		"coast": {"species": ["mackerel", "cod", "sea bass"], "spring": 0.8, "summer": 1.0, "autumn": 0.9, "winter": 0.4},
+		"river": {"species": ["trout", "perch", "pike"], "spring": 1.0, "summer": 0.7, "autumn": 0.9, "winter": 0.2},
+		"stream": {"species": ["trout", "minnows"], "spring": 0.6, "summer": 0.4, "autumn": 0.5, "winter": 0.1},
+		"lake": {"species": ["perch", "carp", "pike"], "spring": 0.7, "summer": 0.9, "autumn": 0.6, "winter": 0.3},
+		"pond": {"species": ["carp", "tench"], "spring": 0.4, "summer": 0.5, "autumn": 0.4, "winter": 0.1},
+		"dam": {"species": ["pike", "carp", "perch"], "spring": 0.9, "summer": 1.1, "autumn": 0.9, "winter": 0.3}
+	},
+	"infected": {
+		"_doc": "Turned dogs and wolves (call 102): run m/s (a runner zombie sprints about 6), height_m of what you see and hit, heard_m how far its feet carry, bite trauma, chance a predator pack has one.",
+		"feral_dog": {"run": 9.5, "height_m": 0.45, "heard_m": 3.0, "bite": 10.0, "chance": 0.15},
+		"wolf": {"run": 10.5, "height_m": 0.55, "heard_m": 4.0, "bite": 12.0, "chance": 0.1}
+	}
+}

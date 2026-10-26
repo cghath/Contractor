@@ -1,0 +1,26 @@
+{
+	"_doc": "Contractor: Fallen's plants (docs/survival_nature.md; calls 42, 104-107). Every number Proposed. forage: what a scrub, thicket or tree spot gives by season (on: which scatter kind; share: of those spots; item: what you pick; n: how many; looks_like: a poison is picked as this when you can't tell them apart; tell: the fieldcraft level that tells it apart (a field guide counts GUIDE_LEVELS more); regrow_days: before the spot gives again). trees: by species (fell_s with a felling axe; a hatchet HATCHET_X slower; planks and firewood it yields; noise_m each chop).",
+	"forage": {
+		"berries": {"name": "berries", "on": ["scrub", "thicket"], "share": 0.35, "seasons": ["summer"], "item": "wild_berries", "n": [2, 4], "regrow_days": 4},
+		"nightshade": {"name": "nightshade", "on": ["scrub", "thicket"], "share": 0.08, "seasons": ["summer", "autumn"], "item": "nightshade", "looks_like": "wild_berries", "tell": 2, "poison": "nightshade", "n": [1, 3], "regrow_days": 6},
+		"mushrooms": {"name": "mushrooms", "on": ["tree"], "share": 0.3, "seasons": ["autumn"], "item": "wild_mushrooms", "n": [2, 4], "regrow_days": 3},
+		"death_cap": {"name": "death cap", "on": ["tree"], "share": 0.1, "seasons": ["autumn"], "item": "death_cap", "looks_like": "wild_mushrooms", "tell": 4, "poison": "death_cap", "n": [1, 2], "regrow_days": 5},
+		"nettles": {"name": "nettles", "on": ["scrub"], "share": 0.3, "seasons": ["spring"], "item": "nettles", "n": [2, 4], "regrow_days": 3},
+		"wild_garlic": {"name": "wild garlic", "on": ["tree", "thicket"], "share": 0.2, "seasons": ["spring"], "item": "wild_garlic", "n": [2, 3], "regrow_days": 4},
+		"willow_bark": {"name": "willow bark", "on": ["tree"], "share": 0.08, "seasons": ["spring", "summer", "autumn", "winter"], "item": "willow_bark", "n": [1, 2], "regrow_days": 10},
+		"yarrow": {"name": "yarrow", "on": ["scrub"], "share": 0.12, "seasons": ["summer", "autumn"], "item": "yarrow", "n": [1, 3], "regrow_days": 5},
+		"honey": {"name": "a wild hive", "on": ["tree"], "share": 0.02, "seasons": ["summer", "autumn"], "item": "wild_honey", "n": [1, 2], "regrow_days": 15, "stings": true}
+	},
+	"poisons": {
+		"nightshade": {"name": "nightshade", "hours": 18.0, "trauma": 8.0, "line": "Your mouth's dry, your heart's racing, the light's too bright: nightshade"},
+		"death_cap": {"name": "a death cap", "hours": 48.0, "trauma": 30.0, "line": "Cramps, then a day of feeling fine, then your liver: a death cap"}
+	},
+	"trees": {
+		"oak": {"name": "oak", "fell_s": 90.0, "planks": 8, "firewood": 6, "noise_m": 45.0, "share": 0.4},
+		"pine": {"name": "pine", "fell_s": 35.0, "planks": 6, "firewood": 4, "noise_m": 40.0, "share": 0.0},
+		"birch": {"name": "birch", "fell_s": 50.0, "planks": 4, "firewood": 5, "noise_m": 40.0, "share": 0.3},
+		"apple": {"name": "apple tree", "fell_s": 45.0, "planks": 3, "firewood": 4, "noise_m": 40.0, "share": 0.15, "fruit": "apples", "fruit_seasons": ["autumn"], "fruit_n": [3, 6]},
+		"hedge": {"name": "hedgerow", "fell_s": 20.0, "planks": 0, "firewood": 3, "noise_m": 30.0, "share": 0.15}
+	},
+	"regrowth": {"_doc": "Flora.regrowth: share of the way to fully overgrown after a world's days (1 - exp(-day / days)); the settlement keeps paths clear within its radius.", "days": 120.0, "grass_max_x": 1.8, "road_share_max": 0.6}
+}

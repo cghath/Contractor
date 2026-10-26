@@ -141,6 +141,7 @@ static func work_on(st: Settlement, o: Dictionary, hours: float) -> bool:
 			var n := mini(WOOD_PER_H * h, left)
 			if n <= 0:
 				return false
+			Trees.settlement_cut(st, n)  # (the trees near the settlement fall for it: docs/survival_nature.md)
 			st.server_put("planks", n)
 			o["done"] = int(o.done) + n
 			return true

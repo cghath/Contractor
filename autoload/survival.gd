@@ -655,6 +655,7 @@ func server_noise(source: Node, pos: Vector3, radius: float, loud := ZombieAI.HE
 		(source as Soldier).server_noise_made(radius)
 	_raise_pressure(level, pos, loud * clampf(radius / ZombieAI.SHOT_HEARD_M, 0.1, 1.0) * PRESSURE_PER_SHOT)
 	Mounts.on_noise(level, source, pos, radius, loud)  # a shot spooks the horses near it
+	Wildlife.server_noise(level, pos, radius, loud)  # and the wild animals run from it (docs/survival_nature.md)
 	for z: Soldier in zombies(level):
 		if z.global_position.distance_to(pos) <= radius:
 			var brain := ZombieAI.of(z)
@@ -866,6 +867,7 @@ func server_eat(s: Soldier, item: ItemData, state: Dictionary, drug: StringName,
 		return server_feed(s, drug, doses)
 	var n := needs_of(s)
 	Needs.eat(n, item, state)
+	Foraging.on_eaten(s, n, item, state)  # a poison picked by mistake (docs/survival_nature.md)
 	Needs.apply(s, n)
 	_send_needs(s)
 	return true

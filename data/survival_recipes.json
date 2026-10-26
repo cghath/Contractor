@@ -7,6 +7,7 @@
 		"spear": {"name": "Spear", "inputs": [["wood_stick", 2], ["cloth_rag", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 12.0, "line": "building", "level": 1, "xp": 12, "output": ["spear", 1]},
 		"campfire": {"name": "Campfire kit", "inputs": [["wood_stick", 3]], "tool": ["lighter", "matches"], "station": "hands", "time_s": 6.0, "line": "fieldcraft", "level": 0, "xp": 6, "output": ["campfire", 1]},
 		"boiled_water": {"name": "Boil dirty water", "inputs": [["dirty_water_bottle", 1]], "tool": [], "station": "fire", "time_s": 10.0, "line": "fieldcraft", "level": 0, "xp": 5, "output": ["dirty_water_bottle", 1], "treat_water": true},
-		"smoked_meat": {"name": "Smoked meat", "inputs": [["raw_meat", 1]], "tool": [], "station": "fire", "time_s": 20.0, "line": "cooking", "level": 2, "xp": 10, "output": ["smoked_meat", 1]}
+		"smoked_meat": {"name": "Smoked meat", "inputs": [["raw_meat", 1]], "tool": [], "station": "fire", "time_s": 20.0, "line": "cooking", "level": 2, "xp": 10, "output": ["smoked_meat", 1]},
+		"smoked_fish": {"name": "Smoked fish", "inputs": [["raw_fish", 1]], "tool": [], "station": "fire", "time_s": 15.0, "line": "cooking", "level": 1, "xp": 8, "output": ["smoked_fish", 1]}
 	}
 }

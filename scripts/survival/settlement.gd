@@ -41,7 +41,7 @@ const CATCH_UP_H := 72
 ## The stock categories (doc §5, call 59) and the items that are each (the rest by tag/type).
 const CATEGORIES: Array[String] = ["food", "water", "fuel", "firewood", "wood", "scrap", "sand", "brick", "concrete", "steel", "meds", "ammo", "parts"]
 const ITEM_CATS := {"planks": "wood", "scrap_sheet": "scrap", "sandbag": "sand", "brick": "brick", "concrete_bag": "concrete",
-	"steel_beam": "steel", "wood_stick": "firewood", "jerrycan": "fuel"}
+	"steel_beam": "steel", "wood_stick": "firewood", "firewood": "firewood", "jerrycan": "fuel"}
 ## The schedule (doc §6): sleep from SLEEP_FROM to SLEEP_TO, meals at MEALS, work the day.
 const SLEEP_FROM := 22
 const SLEEP_TO := 6
