@@ -88,8 +88,19 @@ const PIECES := {
 	"fence": {"name": "Fence", "size": [2, 3, 1], "cost": [[&"planks", 2]], "tool": "hammer", "build_s": 4.0, "hp": 50.0, "solid": true, "look": "panel", "mat": "wood"},
 	"hesco": {"name": "HESCO", "size": [2, 3, 2], "cost": [[&"sandbag", 6], [&"scrap_sheet", 2]], "tool": "shovel", "build_s": 12.0, "hp": 600.0, "solid": true, "look": "full", "mat": "sandbag"},
 	"wire": {"name": "Wire", "size": [4, 2, 1], "cost": [[&"scrap_sheet", 2]], "tool": "wrench", "build_s": 5.0, "hp": 60.0, "solid": false, "look": "full", "mat": "scrap"},
+	# The settlement's pieces (docs/survival_building.md §5-6, Settlement; Proposed): a pile (a stock
+	# spot for anything, bigger than a stash), a stove (cooking, smoking, boiling), a lookout (a
+	# guard post and a tower in the defence value), a farm bed (crops: phase D; the farm job's stub
+	# yield), a generator (fuel, loud: the noise footprint) and a lamp (the light footprint).
+	"pile": {"name": "Stock pile", "size": [2, 1, 2], "cost": [[&"planks", 1]], "tool": "hammer", "build_s": 2.0, "hp": 40.0, "solid": false, "look": "slab", "mat": "wood"},
+	"stove": {"name": "Stove", "size": [2, 2, 2], "cost": [[&"scrap_sheet", 3], [&"brick", 1]], "tool": "wrench", "build_s": 10.0, "hp": 150.0, "solid": true, "look": "full", "mat": "scrap"},
+	"lookout": {"name": "Lookout", "size": [2, 6, 2], "cost": [[&"planks", 10]], "tool": "hammer", "build_s": 20.0, "hp": 200.0, "solid": true, "look": "frame", "mat": "wood"},
+	"farm_bed": {"name": "Farm bed", "size": [2, 1, 4], "cost": [[&"planks", 2]], "tool": "shovel", "build_s": 6.0, "hp": 40.0, "solid": false, "look": "slab", "mat": "wood"},
+	"generator": {"name": "Generator", "size": [2, 2, 2], "cost": [[&"scrap_sheet", 4]], "tool": "wrench", "build_s": 15.0, "hp": 150.0, "solid": true, "look": "full", "mat": "scrap"},
+	"lamp": {"name": "Lamp", "size": [1, 3, 1], "cost": [[&"scrap_sheet", 1]], "tool": "wrench", "build_s": 3.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "scrap"},
 }
-const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire"]
+const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
+	"pile", "stove", "lookout", "farm_bed", "generator", "lamp"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"

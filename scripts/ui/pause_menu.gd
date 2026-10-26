@@ -109,6 +109,8 @@ func open() -> void:
 	_hits_button.visible = _xray() != null and not _xray().reports.is_empty()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	UiKit.focus_first(_panel)  # keyboard: Tab/arrows and Enter work at once
+	if SoloPause.on_open(self):  # survival hosted alone: the world stops (call 138; co-op never)
+		_status.text = "Paused: nobody else is in this world."
 
 
 func close() -> void:
@@ -117,6 +119,7 @@ func close() -> void:
 	_panel.visible = true
 	visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	SoloPause.on_close(self)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -145,6 +148,7 @@ func _return_to_base() -> void:
 
 func _to_main_menu() -> void:
 	_save()
+	SoloPause.on_close(self)
 	visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	Net.leave()

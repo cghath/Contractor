@@ -965,6 +965,50 @@ func server_take_over(player: Soldier, companion_id: String, force := false) -> 
 	return true
 
 
+# --- Host: settlers (Settlement, docs/survival_building.md §5, call 23) -------------------------------
+
+## Host: `rec` becomes a settler (a survivor whose want is a place, or a companion made one):
+## their body here goes (a person body comes back at home when the settlement's zone is played
+## near a player: server_settler_body); they live at the settlement from now on.
+func server_settle(rec: Dictionary, by: Soldier = null) -> void:
+	var s := body_of(String(rec.id))
+	if s:
+		_store(rec, s)
+		_forget(s)
+		s.queue_free()
+	_bodies.erase(String(rec.id))
+	Settlement.server_make_settler(rec, by)
+
+
+## Host: a settler's body at home on (a person like a lone survivor's, standing about their spot)
+## or off (the record kept). Returns the body (or null).
+func server_settler_body(rec: Dictionary, on: bool) -> Soldier:
+	var s := body_of(String(rec.id))
+	if on and s == null:
+		s = _spawn_person(rec)
+	elif not on and s:
+		_store(rec, s)
+		_forget(s)
+		s.queue_free()
+		_bodies.erase(String(rec.id))
+		s = null
+	return s
+
+
+## Host: "Take along": the settler `rec` comes with `by` as a companion again.
+func server_take_along(rec: Dictionary, by: Soldier) -> Soldier:
+	var body := body_of(String(rec.id))
+	var at := body.global_position if body else (by.global_position + Vector3(1.5, 0.0, 0.0) if by else SurvivorPerson.pos_of(rec))
+	server_settler_body(rec, false)
+	Settlement.server_unsettle(rec)
+	var c := server_spawn_companion(rec, level.ground_point(at))
+	if c and by:
+		var brain := SquadAI.of(c)
+		if brain:
+			brain.on_order(Squad.Order.FOLLOW, by.global_position)
+	return c
+
+
 # --- Every peer: talk requests ---------------------------------------------------------------------
 
 ## A player's talk entry (TalkMenu.actions_for), checked and answered on the host.
