@@ -40,13 +40,10 @@ static func build(pick: RandomNumberGenerator, def: Dictionary, zone_id: String,
 	var allowed := MissionRegistry.type_modules(def)
 	var options: Array = (layout.get("modules", []) as Array).filter(
 		func(m: Dictionary) -> bool: return ZoneModules.base(String(m.type)) in allowed)
-	var fresh := options.filter(func(m: Dictionary) -> bool: return String(m.id) not in avoid)  # sites other live contracts (or the reserve) hold: only while another is left
-	if not fresh.is_empty():
-		options = fresh
 	var half := float(layout.get("size_m", 1536.0)) * 0.5
 	var knobs: Dictionary = def.get("scenario_knobs", {})
 	var exact := options.filter(func(m: Dictionary) -> bool: return String(m.id) == at_module)
-	var fresh := options.filter(func(m: Dictionary) -> bool: return String(m.id) not in avoid)
+	var fresh := options.filter(func(m: Dictionary) -> bool: return String(m.id) not in avoid)  # sites other live contracts (or the reserve) hold: only while another is left
 	if not exact.is_empty():
 		options = exact
 	elif not fresh.is_empty():
