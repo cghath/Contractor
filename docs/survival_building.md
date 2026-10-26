@@ -20,6 +20,46 @@ Phase B's free building (§1-4, §10-11's building part) built on `claude/surviv
   settlement (§5-9), the "settlement" perfcase, collapses hurting whoever's under them,
   ZombieAI calling `Builder.server_chew_at`.
 
+### The settlement's work and the council (§5-7), first form (2026-10-26, R2649 PASS (settlement, survival, fallenpeople, building))
+
+Built on `claude/survival-settlement` (worktree `B:\Contractor\.claude\worktrees\survival-settlement`),
+settlement suite `tests/settlement_test.gd` (R2649 PASS (settlement, survival, fallenpeople, building) with survival):
+- `Settlement` (`scripts/survival/settlement.gd`, a node "Settlement" in the zone played, installed by
+  `Survival.server_level_ready`): the record in `Survival.state()["settlement"]` (zone, pos, radius 40 m,
+  stores by stash/pile piece id plus the "yard", orders, council, the cached beds/defence/footprint/
+  stations), members, stocks by category with trends, beds, defence, `footprint()` (call 90's input),
+  morale, size cap (min of 24, beds, food for 3 days), the settlers' hour (schedule, meals and drinks
+  from the stores, the night watch rota, moodlets for jobs liked/hated and too long a watch),
+  `server_guard_check` (a guard calls out the dead chasing within 60 m and wakes every sleeper),
+  settler bodies at home, stow/take for players, the screen's view and actions over RPC.
+- `SettlementJobs` (the twelve jobs, an hour each), `WorkOrders` (orders, claims, the planning view),
+  `Council` (`server_put`, `server_choose`, `server_resolve`, factions, influence, standing, the
+  challenge), `SettlementScreen` (key [), `SoloPause` (call 138).
+- Hooks: `Builder.server_work_from_stock`, `server_work_piece_from_stock`, `server_repair_from_stock`,
+  `worked_by_player`, `pieces_of`, `piece_pos`; `BuildPieces` pile, stove, lookout, farm_bed, generator,
+  lamp; `SurvivorsLayer.server_settle`, `server_settler_body`, `server_take_along`; `TalkMenu` ("Make a
+  settler", "Take along", a place want settles when a bed is free); `SurvivalSleep` wait functions
+  (`is_waiting`, `start_wait`, `wait_step`; the clock runs at SPEED while everyone sleeps or waits);
+  `Survival.server_wait`; `PauseMenu` (SoloPause.on_open/on_close); `Hud` (the screen); items
+  cooked_meal and vegetables.
+- Proposed defaults: radius 40 m; stash 60 items, pile 300, the yard unlimited; sleep 22-6, meals 7/12/18,
+  work 7-19, watch shifts 4 h (over 4 h a night: "too long a watch"); eat under hunger 70 at a meal or
+  35 any hour, drink under 60; scavenge 150 m at 0.6 finds an hour; a farm bed 1 vegetables per 8 worked
+  hours; hunting 0.25 raw meat an hour; cook 3 an hour, 2 hot meals a member kept; build 120 s of work
+  an hour; haul 12 items an hour; 4 repairs an hour; a generator burns a fuel item per 12 h; cut wood 3
+  planks an hour (woodpile stub), sandbags 3 an hour (a cloth rag each), the stove 3 an hour; a claim
+  holds 2 h; defence wood 0.2 a block .. steel 1.2, gate 6, lookout 10, HESCO 8, wire 3, a guard 10;
+  footprint 60 m a generator, 15 m a lamp; the vote closes after 2 world hours, the players' weight
+  1 + standing / 20, influence +1 the oldest, a medic, the first settled; a challenge under morale 35
+  and standing 0, once in 3 days; waiting: 60 m clear of the dead, home within 40 m or indoors, dusk
+  19:00, dawn 06:00.
+- Not yet: felling ZoneScatter's trees (cut wood is a woodpile stub), crops (farm beds yield a stub),
+  animals, power runs nothing but the footprint, settlers walking to their jobs (a body stands at home),
+  stash contents shown on the stash piece (stow and take go through the screen), theft, desertion
+  splits as a new group (call 52), the challenge's contest, relations with other settlements, the
+  raid AI against the defence value (§9), the "settlement" perfcase, the settlement's world-sim record
+  for the world lane (it reads `Settlement.data()`, `defence()`, `footprint()`, `stocks()`).
+
 The free building system (calls 8, 12, 39), the settlement's economy of stocks, jobs, work
 orders and the council (calls 23, 28, 59), and the old world's infrastructure brought back
 (call 60). Written 2026-10-26 from the Captain's calls in docs/survival.md. The aim he set:

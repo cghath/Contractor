@@ -11,6 +11,10 @@
 - **Phase B people built on `claude/survival-people`** (survival_people.md sections 1-6 and 8: the Person
   record, moods and breaks, lone survivors, hiring by wants, companions with CompanionAI, the talk menu, grief,
   graves, the rise, the take-over): R2645 FLAKY (fallenpeople PASS, survival flaked once on a melee block check, passed the rerun); see survival_people.md's "Where the build is".
+- **Phase B's settlement work and council (first form) built 2026-10-26 on `claude/survival-settlement`** (R2649 PASS (settlement, survival, fallenpeople, building)): `Settlement`
+  (stocks, beds, defence, footprint, morale, settlers' schedules and meals), `SettlementJobs` (twelve jobs), `WorkOrders`
+  (orders and the planning view), `Council` (votes, factions, standing; `Council.server_put` for the world lane's demands),
+  `SettlementScreen` ([), waiting (call 136) and solo pause (call 138); see survival_building.md's "Where the build is".
 - Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
   check now prints why.
 
