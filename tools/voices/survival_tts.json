@@ -1,0 +1,42 @@
+{
+    "_about": "Contractor: Fallen's TTS config (tools/voices/render_survival.py; docs/survival_audio.md). 'engine' picks the renderer: piper (the repo's existing pipeline, the default), kokoro (Kokoro-82M ONNX, kokoro-onnx package) or xtts (Coqui XTTS-v2, the TTS package; clones from a short reference wav per voice). Paths are relative to the repo root or absolute; fill them in on the PC that renders. 'voices' are the game's voice sets (VoiceLines.VOICE_SETS): each names its sex and age band and, per engine, the voice to use. Every number and voice choice here is Proposed.",
+    "engine": "piper",
+    "gpu": false,
+    "out_dir": "assets/voices/survival",
+    "format": "wav",
+    "sample_rate": 22050,
+    "engines": {
+        "piper": {
+            "exe": "B:/dev-tools/piper/piper.exe",
+            "model": "B:/dev-tools/piper/en_US-libritts_r-medium.onnx",
+            "length_scale": 1.0
+        },
+        "kokoro": {
+            "model": "B:/dev-tools/kokoro/kokoro-v1.0.onnx",
+            "voices_file": "B:/dev-tools/kokoro/voices-v1.0.bin",
+            "lang": "en-us",
+            "speed": 1.0
+        },
+        "xtts": {
+            "model_name": "tts_models/multilingual/multi-dataset/xtts_v2",
+            "model_dir": "",
+            "language": "en",
+            "refs_dir": "B:/Contractor-refs/voices"
+        }
+    },
+    "voices": {
+        "m_adult_1": {"sex": "m", "age": "adult", "piper": {"speaker": 3}, "kokoro": "am_michael", "xtts": {"speaker_wav": "m_adult_1.wav"}},
+        "m_adult_2": {"sex": "m", "age": "adult", "piper": {"speaker": 20}, "kokoro": "am_adam", "xtts": {"speaker_wav": "m_adult_2.wav"}},
+        "m_adult_3": {"sex": "m", "age": "adult", "piper": {"speaker": 45}, "kokoro": "bm_george", "xtts": {"speaker_wav": "m_adult_3.wav"}},
+        "f_adult_1": {"sex": "f", "age": "adult", "piper": {"speaker": 7}, "kokoro": "af_heart", "xtts": {"speaker_wav": "f_adult_1.wav"}},
+        "f_adult_2": {"sex": "f", "age": "adult", "piper": {"speaker": 12}, "kokoro": "af_sarah", "xtts": {"speaker_wav": "f_adult_2.wav"}},
+        "f_adult_3": {"sex": "f", "age": "adult", "piper": {"speaker": 60}, "kokoro": "bf_emma", "xtts": {"speaker_wav": "f_adult_3.wav"}},
+        "m_old_1": {"sex": "m", "age": "old", "piper": {"speaker": 88}, "kokoro": "bm_lewis", "xtts": {"speaker_wav": "m_old_1.wav"}},
+        "f_old_1": {"sex": "f", "age": "old", "piper": {"speaker": 95}, "kokoro": "bf_isabella", "xtts": {"speaker_wav": "f_old_1.wav"}},
+        "m_young_1": {"sex": "m", "age": "young", "piper": {"speaker": 31}, "kokoro": "am_puck", "xtts": {"speaker_wav": "m_young_1.wav"}},
+        "f_young_1": {"sex": "f", "age": "young", "piper": {"speaker": 40}, "kokoro": "af_nova", "xtts": {"speaker_wav": "f_young_1.wav"}},
+        "radio_1": {"sex": "f", "age": "adult", "kind": "radio", "piper": {"speaker": 7}, "kokoro": "af_bella", "xtts": {"speaker_wav": "radio_1.wav"}},
+        "radio_2": {"sex": "m", "age": "adult", "kind": "radio", "piper": {"speaker": 20}, "kokoro": "am_eric", "xtts": {"speaker_wav": "radio_2.wav"}}
+    },
+    "fills": {"{item}": "it", "{zone}": "that place", "{want}": "what I asked for", "{background}": "nobody much"}
+}

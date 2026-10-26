@@ -51,6 +51,26 @@ python -I tools/voices/gen_callouts.py <piper.exe> <model.onnx> audio/callouts <
 voices on 2026-10-22. A render keeps every clip already on disk, so it only makes the missing
 ones. The speakers per folder are the ones the first batch used (audio/sfx/CREDITS.md).
 
+## Contractor: Fallen's lines and the bigger TTS (call 76)
+
+The survival mode's lines (data/survival_lines.json) each carry a `voice` key and a `speaker`;
+the game plays `assets/voices/survival/<voice set>/<voice>.ogg|wav` when it's there and shows the
+subtitle always (VoiceLines; docs/survival_audio.md). To render them (from the repo root, on a PC
+that isn't busy; nothing is downloaded by the script):
+
+```
+python -I tools/voices/render_survival.py --dry-run          # what it would render; writes tools/voices/survival_manifest.json
+python -I tools/voices/render_survival.py                    # Piper, the config's paths (the default engine)
+python -I tools/voices/render_survival.py --engine kokoro    # Kokoro-82M: pip install kokoro-onnx soundfile; model + voices files in the config
+python -I tools/voices/render_survival.py --engine xtts --gpu  # XTTS-v2: pip install TTS; a reference wav per voice in refs_dir
+```
+
+Edit tools/voices/survival_tts.json first: the engine, the GPU flag, each engine's model paths, and
+for each voice set (m_adult_1.. f_old_1, radio_1/2) the Piper speaker id, the Kokoro voice name and
+the XTTS reference wav. Existing clips are kept (`--force` re-renders: a new engine replacing the
+old). `--only greet --voices f_adult_1` renders a slice to listen to first. Lines with a name in
+them stay subtitles. Commit the clips and the .import files Godot makes for them.
+
 ## Voice orders (scripts/ui/voice_commands.gd, voice_order.gd)
 
 Hold T and say it (a typed box stands in for speech recognition until a recognizer is wired to

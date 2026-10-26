@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, audio (claude/survival-audio)
+
+- **Added** the soundscape (`Soundscape`, call 63): wind by the weather and the region (a murmur indoors), rain (on the roof indoors), the crowd's groans from its bearing and by its density, the settlement's hum where it's powered, your own breathing when spent or sleepy and shivering when cold, birds by day that go quiet when the dead or a stranger comes within 30 m and stay quiet 40 s (silence is information); procedural loops (`FallenSynth`) on a new World bus.
+- **Added** the tension layer (`Tension`, calls 63, 142): a near-subliminal drone and heartbeat on a new Tension bus, calm / unease / alert / danger from the dead within 60 m (suspicious, ALERT or searching, a chase or a scream), a horde, a raid, the bite's fever and delirium; it rises at once and steps down after an 8 s cooldown; a toggle and a level (`FallenAudio.set_setting`). Companions keep their chatter in while it's alert or worse.
+- **Added** music moments (`MusicMoments`): no combat music; a short loop at the settlement when a radio or a guitar player is there, by its mood; stingers for the first night survived, a death, the evac and the spring thaw; placeholders until files of the cue's name land in data/music/. Radio broadcasts play static and their voiced line on the Radio bus.
+- **Added** voiced lines (`VoiceLines`, call 76): every line in data/survival_lines.json has a `voice` key and a `speaker` (kind, sex, age); new radio, raider and enclave lines; the game plays assets/voices/survival/<voice set>/<key> when it's there and always shows the subtitle; talkativeness from traits sets how often people chat. tools/voices/render_survival.py renders them with Piper (default), Kokoro or XTTS-v2 from tools/voices/survival_tts.json, with a dry run and a manifest (no clips rendered yet).
+- **Added** the fallenaudio suite.
+
 ### Contractor: Fallen, fauna and flora (claude/survival-nature)
 
 - **Added** wildlife (`Wildlife`, `Nature`, data/survival_fauna.json; calls 42, 100, 103): deer, boar, rabbits, bird flocks, wolf and feral dog packs, a bear in deep woods, raccoons at the stores, laid out by habitat and season away from the players, drawn on every peer (`NatureArt`), with hit boxes; prey flees the living, the dead and noise (`Survival.server_noise`), a running herd or a lifted flock is a tell (a companion says it); the dead go after animals they see and bite them down, and walk to carcasses and blood by smell (`Wildlife.smell_sources()`, the crowd drifts to them); a round kills, snares catch rabbits over the hours, tracking at fieldcraft 3, butchering gives raw meat and hides and leaves blood; the hunter's calendar from fieldcraft 2 (fish from 4).
