@@ -134,6 +134,8 @@ func _test_dead() -> void:
 
 func _test_melee() -> void:
 	print("Melee: block, parry, counter, dodge")
+	if ZoneDead.of(level):
+		ZoneDead.of(level).dead.clear()  # (the crowd would turn into bodies beside him and rally the test's zombies: R2618)
 	for zz: Soldier in Survival.zombies(level):
 		zz.queue_free()
 	await get_tree().process_frame
@@ -204,6 +206,8 @@ func _test_melee() -> void:
 
 func _test_melee_weapons() -> void:
 	print("Melee weapons: a bat, a knife, the heavy to the head, the silent kill, the shove")
+	if ZoneDead.of(level):
+		ZoneDead.of(level).dead.clear()  # (the crowd would turn into bodies beside him and rally the test's zombies: R2618)
 	for zz: Soldier in Survival.zombies(level):
 		zz.queue_free()
 	await get_tree().process_frame
@@ -304,6 +308,8 @@ func _test_melee_weapons() -> void:
 
 func _test_stealth() -> void:
 	print("Stealth: awareness by sight, sound and smell; the eye and the ring")
+	if ZoneDead.of(level):
+		ZoneDead.of(level).dead.clear()  # (the crowd would turn into bodies beside him and rally the test's zombies: R2618)
 	for zz: Soldier in Survival.zombies(level):
 		zz.queue_free()
 	await get_tree().process_frame
