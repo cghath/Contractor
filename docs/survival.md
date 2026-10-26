@@ -1,6 +1,14 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~02:15 CDT)
+## Where the build is (2026-10-26 ~06:45 CDT)
+
+- **PHASE B COMPLETE on claude/survival (0996f909)**: building, RPG and people lanes merged; survival, fallenpeople,
+  building, rpg PASS (R2646). **Slice B build B2647**: B:\Contractoruilds\contractor-2026-10-26-063915-B2647-fallen-slice-b-0996f909.
+- **Phase C started ~06:40**: the world sim (claude/survival-worldsim) and the settlement's work (claude/survival-settlement)
+  on Opus lanes; next lanes once the sim lands: the enclave + ARCHE trail + bunkers, trade + the intel layer, mounts.
+- Calls now 1-142 (the table below).
+
+### (earlier) 2026-10-26 ~02:15 CDT
 
 - **PHASE A COMPLETE on claude/survival** (c46fef0b + test tweaks): steps 1-8 all in; the metabolism
   (claude/survival-metabolism) and the map (claude/survival-map) lanes merged. Survival, map and fallen suites
