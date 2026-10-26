@@ -76,6 +76,7 @@ func refresh(view: Dictionary = {}) -> void:
 	_box.add_child(UiKit.text("Background: %s" % String(bg.get("name", "blank slate"))))
 	var flaws: Array = view.get("flaws", [])
 	_box.add_child(UiKit.text(Mind.character_line(Survival.my_body)))  # nerve and habits (Mind)
+	_box.add_child(UiKit.text(Gunsmith.tier_line(int(levels.get("firearms", 0)))))  # the gunsmith's tier (call 85)
 	_box.add_child(UiKit.text("Flaws: %s" % (", ".join(PackedStringArray(flaws.map(func(f: String) -> String: return String(Backgrounds.flaws().get(f, {}).get("name", f))))) if not flaws.is_empty() else "none")))
 
 

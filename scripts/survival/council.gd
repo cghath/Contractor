@@ -193,6 +193,7 @@ static func preference(st: Settlement, rec: Dictionary, v: Dictionary) -> Dictio
 			for p: String in (v.player as Dictionary):
 				score[String(v.player[p])] = float(score.get(String(v.player[p]), 0.0)) + (1.0 if liked > 0.0 else -1.0)
 	Children.lean(rec, v, score)  # children here: safety first (call 128)
+	Relationships.lean(rec, v, score)  # sending someone away after a fight (call 74)
 	Faith.lean(rec, v, score)  # the settlement's faith (call 129)
 	return score
 
@@ -237,6 +238,7 @@ static func factions() -> Dictionary:
 			if sum / (list.size() - 1) < ODD_ONE_OUT:
 				list.erase(r)
 				out["alone:" + String(r.id)] = [r]
+	Relationships.split_rivals(out)  # rivals don't vote together (call 74)
 	return out
 
 
@@ -315,6 +317,8 @@ static func _apply(_st: Settlement, v: Dictionary) -> void:
 		"raid":
 			if yes:
 				Faith.server_prayer()  # a prayer before going out (call 129)
+		"vote_out":  # (call 74: Relationships.VOTE_OUT)
+			Relationships.apply_vote(_st, v, yes)
 		"move":
 			if yes:
 				var p: Array = q.get("pos", [])

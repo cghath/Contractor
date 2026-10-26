@@ -48,6 +48,7 @@ const GATES := {
 	"fit_battery": ["mechanics", 1], "fit_tyre": ["mechanics", 2], "engine": ["mechanics", 4], "rebuild_wreck": ["mechanics", 6], "dam": ["mechanics", 9],
 	"heavy_swing": ["melee", 2], "silent_kill_any_blade": ["melee", 4], "two_handed_mastery": ["melee", 6],
 	"reload_ammo": ["firearms", 7], "suppressor": ["firearms", 6],
+	"gunsmith_strip": ["firearms", 7], "gunsmith": ["firearms", 8], "gunsmith_build": ["firearms", 9],  # (call 85: Gunsmith)
 	"horses": ["fieldcraft", 3], "tracking": ["fieldcraft", 3], "mushrooms": ["fieldcraft", 4], "weather": ["fieldcraft", 5],
 	"masking": ["stealth", 4], "crawl_among": ["stealth", 7],
 }

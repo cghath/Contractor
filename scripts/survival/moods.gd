@@ -49,6 +49,10 @@ const TABLE := {
 	# service, grace at a meal, a prayer before a raid, a vigil kept, a deserter cleansed.
 	"words_said": [6.0, 72.0], "no_words": [-8.0, 48.0], "service": [5.0, 24.0], "grace": [2.0, 12.0],
 	"prayer": [3.0, 12.0], "vigil": [2.0, 24.0], "cleansed": [8.0, 120.0],
+	# Bonds (Relationships, call 74; Proposed): an argument, a comfort, a brawl, a couple formed, a
+	# partner about, a partner lost (the long grief), a breakup, peace made.
+	"argued": [-4.0, 12.0], "comforted": [5.0, 12.0], "brawled": [-8.0, 48.0], "partnered": [10.0, 72.0], "with_partner": [4.0, -1.0],
+	"partner_died": [-30.0, 240.0], "breakup": [-10.0, 72.0], "made_peace": [4.0, 24.0],
 }
 ## Traits lean the mood (Proposed).
 const TRAIT_LEAN := {"optimist": 6.0, "gloomy": -6.0}

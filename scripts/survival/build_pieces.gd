@@ -139,13 +139,18 @@ const PIECES := {
 	"clinic_bed": {"name": "Clinic bed", "size": [2, 2, 4], "cost": [[&"planks", 6], [&"cloth_rag", 4]], "tool": "hammer", "build_s": 12.0, "hp": 80.0, "solid": true, "look": "frame", "mat": "wood"},
 	"clinic_cabinet": {"name": "Medical cabinet", "size": [2, 3, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 2]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "full", "mat": "wood"},
 	"clinic_lamp": {"name": "Clinic lamp", "size": [1, 3, 1], "cost": [[&"scrap_sheet", 1], [&"copper_wire", 1]], "tool": "wrench", "build_s": 3.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "scrap"},
+	# Gunsmithing (call 85; Gunsmith; Proposed): the gunsmith bench (the bench recipes, stripping and
+	# rebuilding guns, zeroing) and the armoury rack (the gunsmith's overnight work order).
+	"gun_bench": {"name": "Gunsmith bench", "size": [4, 2, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 2], [&"machine_parts", 1]], "tool": "wrench", "build_s": 15.0, "hp": 140.0, "solid": true, "look": "frame", "mat": "scrap"},
+	"gun_rack": {"name": "Armoury rack", "size": [2, 3, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 6.0, "hp": 80.0, "solid": true, "look": "panel", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
 	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
 	"solar_panel", "battery_bank", "wind_turbine", "wiring", "fridge", "electric_fence", "power_tools", "water_pump",
 	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre",
 	"chapel_bench", "altar", "grave_marker",
-	"smoker", "drying_rack", "cold_store", "ice_box", "fish_trap", "clinic_bed", "clinic_cabinet", "clinic_lamp"]
+	"smoker", "drying_rack", "cold_store", "ice_box", "fish_trap", "clinic_bed", "clinic_cabinet", "clinic_lamp",
+	"gun_bench", "gun_rack"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"

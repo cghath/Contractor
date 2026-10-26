@@ -391,6 +391,7 @@ func _dress(s: Soldier, rec: Dictionary) -> void:
 	if not s.died_for_good.is_connected(_on_died):
 		s.died_for_good.connect(_on_died)
 	Children.dress_body(s, rec)  # a child: shielded, unarmed, child-sized (call 128)
+	Relationships.watch_body(self, s)  # down and back up beside someone: a life saved (call 74)
 
 
 ## Host: `rec`'s companion body at `at`: a friendly AI squadmate (the level's spawn_soldier, no
@@ -567,6 +568,7 @@ func server_hour() -> void:
 	var crowd := ZoneDead.of(level)
 	var horde := crowd != null and crowd.horde_count() > 0
 	Faith.server_hour(self)  # rites left unsaid lapse (call 129)
+	Relationships.server_hour(self, horde)  # bonds in the field, the players' bond, partners (call 74)
 	var zone := _zone()
 	for id: String in records().keys():
 		var rec: Dictionary = records()[id]
@@ -736,6 +738,7 @@ func _on_died(s: Soldier) -> void:
 	Survival._journal_line("%s died." % String(rec.name))
 	Nerve.server_on_death(s, rec, was)  # the living's nerve, the killer's (Mind)
 	Faith.server_on_death(rec, was)  # a vigil the coming night (call 129)
+	Relationships.server_on_death(rec)  # a partner's long grief (call 74)
 	if was != "companion" and was != "settler":
 		return
 	var id := String(rec.id)
