@@ -7,6 +7,8 @@ Calls 120-123 (docs/survival.md), with call 38 (durability), 43 (improvised guns
 
 - 2026-10-26: weapon, ammo, clothing and vehicle wear built; R2684 wear PASS, R2680 survival, weapons, clothing PASS; see the CHANGELOG entry and the
   verdict in docs/survival.md's "Where the build is".
+- 2026-10-26 (`claude/survival-wear2`): the left-out list built (the AI's guns, loose rounds and shells into magazines and
+  tubes, suppressor wear, hot hand-loads, the farrier); R2721 PASS (wear, survival, weapons, fallenpeople, bonds); see "Wear 2" below.
 
 ## The model
 
@@ -67,6 +69,34 @@ tests set `Wear.force`). The host's tick (`Wear.server_tick`, from
 - A settlement's "maintain" job services the vehicles in its radius (engine and battery +5 an
   hour, to 90). Horses' hooves wear by distance (a stub for a farrier later).
 
+## Wear 2: the AI's guns, loading, suppressors, hand-loads, the farrier
+
+- **The AI's guns** (`WeaponCondition.ai_clear`, `server_used_guns`): companions, settlers and raiders fire through
+  the same `Soldier._server_fire`, so their guns wear and jam per shot like a player's (there was never an AI gate:
+  but the AI never pressed R, so a jammed AI gun stayed jammed). An AI clears its own jam: 2 s busy and a "Jammed!"
+  bark (a companion's own `jammed` line). A companion whose gun is under 50 asks for a cleaning (`gun_dirty`, 10 min
+  apart); at the settlement, calm, with a gun cleaning kit in their own kit, they clean it themselves
+  (`CompanionAI.gun_care`). Raiders' guns come used: 30-75% at spawn (`WorldLive`, the convoy's ambush), so a looted
+  raider gun shows its use. World-sim people (the far tick) don't simulate shots.
+- **Loose rounds into a magazine** (`Inventory.load_rounds`, `AmmoCondition.mix_into`): the magazine keeps the mean
+  condition by count (and the hand-loaded share, `handload`); a corroded box loads too (it used to be skipped, its
+  count still counted) and the mix shows on inspection ("tarnished (70%)"). Loaded, the gun keeps the mean
+  (`ammo_cond`, `ammo_hl`); the magazine coming out keeps it. There's no separate "unload a magazine" action yet.
+- **Shotgun shells** (tag `shell`): found and weathered like any ammo; soaked (wading, lying in the rain) a shell is
+  `wet` and fires as at most 30 (a swollen hull: about a 13% dud). Shell by shell or from a speed loader, the tube
+  keeps its shells' mean (`AmmoCondition.tube_add`); tube guns now roll duds like the rest (`Soldier._server_fire`).
+- **Suppressors** (`WeaponCondition.can_wear`, `Suppressors.CAN_KEY`): a mounted can wears per shot, a factory can
+  over 4000 shots, the improvised oil-filter over 60 (`Gunsmith.CAN_SHOTS`, unified; `can_shots` is gone). Under 60 it
+  lets more out: the dead's heard radius grows from 40 m toward 180 m at 0 (`heard_m`); past half lost, the enemy's
+  alert hears it as unsuppressed. At 0 it's shot through and gone. Off the gun the can keeps its condition (the
+  inventory's mount/remove and the gear editor).
+- **Hot hand-loads** (call 43): any gun worn to 5% or under firing hand-loaded rounds under 40 (`AmmoCondition.hot`)
+  may blow like a pipe gun: 5% a shot x the hand-loaded share (`Gunsmith.server_blow`: the gun gone, both forearms
+  burnt). (A gun at 0 is broken and won't fire: the trigger pull is what rolls.)
+- **The farrier** (`VehicleWear.farrier`): the settlement's "maintain" hour reshoes the most worn horse under 80
+  within its radius (back to 100) when a hammer is in its stores or a workbench is built (standing in for an anvil:
+  there's no forge piece). Hooves under 30 slow the horse, to x0.85 at 0 (`VehicleWear.hoof_mult`, `Mount.gait_speed`).
+
 ## Recipes and loot
 
 Gun oil from engine oil (firearms 1, x3), needle and thread from rags and copper wire, tyre
@@ -80,18 +110,22 @@ patches from a bicycle inner tube (mechanics 1, x2). The homes' loot table has t
 axes), `Vehicle` (`_use_fuel`, `can_drive`, `top_speed`, `server_refuel`, `server_repair`,
 `server_set_battery`), `Consumables` (tool items), `SettlementJobs` (the mechanic),
 `WorldCache.server_seed` (found ammo), `InventoryScreen._condition` (the readout),
-`Survival.server_tick_survivors` (the tick).
+`Survival.server_tick_survivors` (the tick). Wear 2: `Soldier._server_fire` (duds for tube guns, the can's heard
+radius), `Inventory.load_rounds`, `Shotguns` (`_load_shells`, `_push_loader`), `Suppressors` (mount/remove keep the
+can's condition), `GearMounts` (the same in the gear editor), `CompanionAI` (gun care), `WorldLive` and
+`FallenConvoy` (raiders' used guns), `Mount.gait_speed` (hooves), `data/survival_lines.json` (jammed, gun_dirty,
+gun_cleaning).
 
 ## What's left
 
 - Gunsmithing at firearms 8-9 on a gunsmith bench (call 85): no recipes yet; the repair kit
   stands in. Gun parts as loot exist (`weapon_parts`) but aren't used here.
-- AI guns don't wear (only the players' `_server_fire` path); companions never jam.
-- Loose rounds loaded into a magazine don't carry their condition (`Inventory.load_rounds`).
-- Shotgun shells have no condition (tube guns skip duds).
+- Done on `claude/survival-wear2` (see "Wear 2"): the AI's guns, loose rounds and shells into magazines and tubes,
+  suppressor wear, hot hand-loads, the farrier.
+- The Skeleton Key's own tube keeps no shell condition; an AI with a broken gun doesn't swap to another; no forge or
+  anvil build piece (the workbench stands in); no "unload a magazine" action.
 - Done on `claude/survival-startloot` (the early loot curve, docs/survival_deadtime.md): the dead's kit, ground
   loot and the first roll of WorldValuables' boxes roll a found condition for guns (`WeaponCondition.found_state`:
   40-85% kept dry; 10-45% out in the weather, wet, a fifth rusted through to 0, often jammed) and ammo.
   A refilled box (`LootStates` refill) still rolls guns as new.
 - No inventory "Inspect" panel line: the condition shows in the item's row readout.
-- Suppressors wearing out (call 38), a gun blowing up (call 43), the farrier job.

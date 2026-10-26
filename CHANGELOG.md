@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, condition and wear 2 (claude/survival-wear2)
+
+- **Added** the AI's guns wear and jam and they clear them (all Proposed; docs/survival_wear.md "Wear 2"): companions, settlers and raiders already fired through the player's `Soldier._server_fire`, but a jammed AI gun stayed jammed; now an AI clears its own jam (2 s and a "Jammed!" bark), a companion under 50% asks for a cleaning and cleans it with their own kit at the settlement, and raiders' guns spawn used (30-75%).
+- **Added** loose rounds carry their condition into a magazine (the mean by count, and the hand-loaded share), the mix shows on inspection; shotgun shells soak (a wet shell fires as 30: duds) and the tube keeps its shells' mean; tube guns roll duds.
+- **Added** suppressor wear: a factory can over 4000 shots, the oil-filter can over 60 (unified with the gunsmith's count), the dead hear a worn can further (40 m toward 180 m under 60%), shot through at 0; a can keeps its condition off the gun.
+- **Added** a gun worn to 5% or under firing hot hand-loads (under 40) may blow apart (5% a shot x the hand-loaded share); the farrier: the settlement's maintain hour reshoes a horse (a hammer in stock or a workbench), worn hooves slow a horse.
+- **Fixed** loading loose rounds skipped any stack with a state (a found or corroded box) while still counting it.
+
 ### Contractor: Fallen, the early loot curve (claude/survival-startloot)
 
 - **Changed** the early loot curve (the Captain's playtest: "got a gun off a mil zombie in the first 5 minutes"; call 38; `FoundLoot`, docs/survival_deadtime.md "Early loot curve"; all Proposed): the dead out of military places are rarely soldiers (the open country 2% soldiers, 3% cops; was 10% soldiers) and the share grows with the zone's tier (links from the start zone, +1 in the city); none turn within 250 m of the farm unless a military place is there.

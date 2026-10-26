@@ -2,6 +2,10 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Condition and wear 2 built on `claude/survival-wear2`** (calls 38, 43, 120-123, the left-out list): the AI's guns
+  jam and get cleared (a bark), companions ask for and do their own cleaning, raiders' guns come used; loose rounds and
+  shells carry condition into magazines and tubes (wet shells dud); suppressors wear, leak sound and break; hot hand-loads
+  can blow a worn-out gun; the farrier reshoes horses; R2721 PASS (wear, survival, weapons, fallenpeople, bonds); see docs/survival_wear.md "Wear 2".
 - **The early loot curve built on `claude/survival-startloot`** (the Captain's playtest: a gun off a military zombie
   in the first five minutes; call 38): soldiers' dead rare out of military places (2%, by the zone's tier, none
   within 250 m of the farm), a soldier's rifle kept 25% and weathered, near empty; no guns in the commonest home
