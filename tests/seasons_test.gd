@@ -152,6 +152,28 @@ func _give(pairs: Array) -> void:
 		player.inventory.take(StringName(pair[0]), int(pair[1]))
 
 
+## Lays and builds a block at `c` of `mat`, its tool and materials given first, standing by it.
+func _block(c: Vector3i, mat: String) -> String:
+	var m: Dictionary = BuildPieces.MATERIALS[mat]
+	_give([[BuildPieces.TOOLS[String(m.tool)][0], 1]] + BuildPieces.block_cost(mat, "block"))
+	_stand_by(c + Vector3i(0, 0, -3) - Vector3i(0, c.y - _at(c.x - origin.x, c.z - origin.z).y, 0))
+	var why := b.server_build_now(player, c, mat)
+	if why != "":
+		print("    (%s at %s: %s)" % [mat, c, why])
+	return why
+
+
+## Builds a piece of `kind` at `c` (its tool and cost given first). Returns its id (-1 none).
+func _piece(kind: String, c: Vector3i) -> int:
+	var def: Dictionary = BuildPieces.PIECES[kind]
+	_give([[BuildPieces.TOOLS[String(def.tool)][0], 1]] + (def.cost as Array))
+	_stand_by(c + Vector3i(0, 0, -3))
+	var id := b.server_build_piece_now(player, kind, c, 0)
+	if id <= 0:
+		print("    (%s at %s: %s)" % [kind, c, b.last_problem])
+	return id
+
+
 func _set_season(s: String, day := 1) -> void:
 	Survival.server_set_options({"season": s})
 	Survival.state()["day"] = day
@@ -243,7 +265,7 @@ func _test_frozen() -> void:
 	if z:
 		await _frames(3)
 		check(z.move_input.length() < 0.01, "it can't move")
-		z.vitals.server_hit(Vitals.TORSO, {"round_class": Vitals.INTERMEDIATE, "energy_j": 50.0})
+		z.vitals.server_hit(Vitals.TORSO, {"round_class": Vitals.INTERMEDIATE})
 		check(z.vitals.is_dead(), "one hit shatters it")
 	var zones: Dictionary = Seasons.rec().get("frozen_zones", {})
 	check(zones.size() > 2, "the world's zones froze with it (%d)" % zones.size())
@@ -353,11 +375,8 @@ func _test_autumn_bias() -> void:
 
 func _test_raid() -> void:
 	print("A live raid on the settlement")
-	_give([[&"hammer", 1], [&"planks", 40]])
 	for x in range(-2, 3):
-		var c := _at(x, -4)
-		_stand_by(c + Vector3i(0, 0, 3))
-		b.server_build_now(player, c, "wood")
+		_block(_at(x, -4), "wood")
 	var walls := 0
 	for x in range(-2, 3):
 		if b.is_built(_at(x, -4)):
@@ -388,15 +407,12 @@ func _test_raid() -> void:
 
 func _test_walls() -> void:
 	print("The dead at a wall")
-	_give([[&"hammer", 1], [&"planks", 40], [&"cutting_torch", 1], [&"steel_beam", 10], [&"scrap_sheet", 4]])
 	# Wood three high at x=6, steel three high at x=8, wood two high (waist) at x=10; a gap: x=12
 	# built from one up, held by x=13 standing from the ground.
 	var specs := [[6, "wood", [0, 1, 2]], [8, "steel", [0, 1, 2]], [10, "wood", [0, 1]], [13, "wood", [0, 1, 2]], [12, "wood", [1, 2]]]
 	for spec: Array in specs:
 		for y: int in spec[2]:
-			var c := _at(int(spec[0]), 6) + Vector3i(0, y, 0)
-			_stand_by(_at(int(spec[0]), 3))
-			b.server_build_now(player, c, String(spec[1]))
+			_block(_at(int(spec[0]), 6) + Vector3i(0, y, 0), String(spec[1]))
 	await _frames(2)
 	var fwd := Vector3(0.0, 0.0, 1.0)
 	var from := func(x: int) -> Vector3: return _pos(_at(x, 5)) + Vector3(0.0, 0.0, 0.1)
@@ -429,7 +445,7 @@ func _test_walls() -> void:
 	for o: Soldier in bodies:
 		climbed = Sieges.server_wall_step(o, "walker", steel, fwd, 0.4)
 	var last: Soldier = bodies[-1] if not bodies.is_empty() else null
-	check(climbed == "climb" and last != null and last.global_position.z > BuildPieces.cell_centre(steel.cell).z, "the pile is a ramp: the next walker climbs over (%s, pile %.1f m)" % [climbed, Sieges.pile_m(String(steel.key))])
+	check(climbed == "climb" and last != null and last.global_position.z > BuildPieces.cell_centre(steel.cell).z, "the pile is a ramp: the next walker climbs over (%s, pile %.1f m)" % [climbed, Sieges.pile_m(String(steel.get("key", "")))])
 	var low := Sieges.wall_ahead(b, from.call(10), fwd)
 	z.global_position = from.call(10)
 	did = Sieges.server_wall_step(z, "runner", low, fwd, 0.4) if not low.is_empty() else ""
@@ -439,9 +455,7 @@ func _test_walls() -> void:
 	did = Sieges.server_wall_step(z, "crawler", gap, fwd, 0.4) if not gap.is_empty() else ""
 	check(bool(gap.get("gap", false)) and did == "squeeze", "a crawler squeezes through the gap under one (%s)" % [gap])
 	# A gate takes a push.
-	_stand_by(_at(16, 3))
-	_give([[&"planks", 6], [&"scrap_sheet", 1]])
-	var gate := b.server_build_piece_now(player, "gate", _at(15, 6), 0)
+	var gate := _piece("gate", _at(15, 6))
 	var gw := Sieges.wall_ahead(b, from.call(16), fwd)
 	z.global_position = from.call(16)
 	var g0 := float(b.pieces[gate].hp) if gate > 0 else 0.0
@@ -477,12 +491,10 @@ func _test_power() -> void:
 	Survival.state()["hour"] = 12.0
 	Seasons.rec()["slot"] = Survival.day() * 4 + 2  # (no re-roll of the weather mid-test)
 	Seasons.server_set_weather("clear")
-	_give([[&"wrench_set", 1], [&"scrap_sheet", 6], [&"solar_panel", 1]])
-	_stand_by(_at(-6, 8))
-	var lamp := b.server_build_piece_now(player, "lamp", _at(-6, 10), 0)
+	var lamp := _piece("lamp", _at(-6, 10))
 	st.refresh()
 	check(lamp > 0 and int(Settlement.data().get("lamps_lit", -1)) == 0 and float(Settlement.footprint().light_m) == 0.0, "a lamp with no power gives no light (%s)" % b.last_problem)
-	var panel := b.server_build_piece_now(player, "solar_panel", _at(-9, 10), 0)
+	var panel := _piece("solar_panel", _at(-9, 10))
 	st.refresh()
 	check(panel > 0 and Infrastructure.is_powered(lamp) and float(Settlement.footprint().light_m) > 0.0,
 		"a solar panel by day powers it: the footprint grows (%s; %s)" % [Settlement.footprint(), b.last_problem])
@@ -491,9 +503,7 @@ func _test_power() -> void:
 
 func _test_fence() -> void:
 	print("An electric fence")
-	_give([[&"copper_wire", 2], [&"scrap_sheet", 1]])
-	_stand_by(_at(-10, 8))
-	var fence := b.server_build_piece_now(player, "electric_fence", _at(-13, 10), 0)
+	var fence := _piece("electric_fence", _at(-13, 10))
 	st.refresh()
 	check(fence > 0 and Infrastructure.is_powered(fence), "a fence wired by the panel has power (%s)" % b.last_problem)
 	var z := _zombie(_pos(_at(-12, 8)))
@@ -528,10 +538,8 @@ func _test_bridge() -> void:
 
 func _test_traps() -> void:
 	print("Traps")
-	_give([[&"shovel", 1], [&"planks", 4], [&"scrap_sheet", 2]])
-	_stand_by(_at(8, -8))
-	var pit := b.server_build_piece_now(player, "spike_pit", _at(8, -11), 0)
-	var wire := b.server_build_piece_now(player, "wire", _at(12, -11), 0)
+	var pit := _piece("spike_pit", _at(8, -11))
+	var wire := _piece("wire", _at(12, -11))
 	check(pit > 0 and wire > 0, "a spike pit and wire (%s)" % b.last_problem)
 	var z1 := _zombie(_pos(_at(8, -11)))
 	var z2 := _zombie(_pos(_at(12, -11)))

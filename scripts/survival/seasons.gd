@@ -6,7 +6,7 @@ extends RefCounted
 ## season seen, the weather slot rolled, the snow flag, the zones with frozen dead).
 ##
 ## - The weather: rolled every WEATHER_SLOT_H world hours from the season's odds (WEATHER) into
-##   DayNight (winter snow is DayNight's "overcast" with the snow flag; summer's clear afternoons
+##   DayNight from day two (day one's is the cold open's) (winter snow is DayNight's "overcast" with the snow flag; summer's clear afternoons
 ##   are the heat).
 ## - Winter: crops stop (farm_yield_x), water freezes (water_frozen, the body lane's flag), the
 ##   dead slow (dead_pace_mult); under a hard frost (hard_frost: winter nights and the deep middle
@@ -270,7 +270,9 @@ static func server_update(level: Node) -> void:
 			Survival._journal_line(String({"spring": "The snow's going: spring.", "summer": "Summer: the days are long and hot.",
 				"autumn": "Autumn: the leaves are turning and the nights drawing in.", "winter": "Winter's here."}.get(now, "")))
 	var slot := Survival.day() * (24 / WEATHER_SLOT_H) + floori(Survival.hour() / WEATHER_SLOT_H)
-	if int(r.get("slot", -1)) != slot:
+	if not r.has("slot") or Survival.day() <= 1:
+		r["slot"] = slot  # (day one's weather is the cold open's: ColdOpen)
+	elif int(r.get("slot", -1)) != slot:
 		r["slot"] = slot
 		_roll_weather(slot)
 		if Survival.hour() < WEATHER_SLOT_H and now == "summer":
