@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, condition and wear (claude/survival-wear)
+
+- **Added** weapon wear, jams and cleaning (`WeaponCondition`, call 120): a `condition` 0-100 on guns and melee weapons; shots wear a gun (more wet, much more improvised), a wet gun rusts; a worn gun jams and R clears it (faster from firearms 3); at 0 it's broken until a Gun Repair Kit; a Gun Cleaning Kit and Gun Oil bring it back; blades dull (x0.7) and a Whetstone sharpens them; a worn axe fells slower.
+- **Added** ammo condition (`AmmoCondition`, call 121): corroded or wet rounds misfire (a dud, R clears it); a magazine's condition goes into the gun; found ammo by where it lay; ammo in the rain corrodes, under a roof it keeps; hand-loaded rounds x0.9; firearms 2 reads it.
+- **Added** clothing wear and repair (`ClothingWear`, call 122): clothes wear by the day (more in rain and water, boots walking), blows tear them, torn clothes keep less warmth and shed less rain; worn-out boots make sore feet (stamina); a Needle and Thread mends.
+- **Added** vehicle wear (`VehicleWear`, call 123): engine, tyres and battery wear by distance, punctures on rough ground and by wrecks (a flat: 40% speed until a Tyre Patch Kit), stale fuel stalls the engine; the service resets the wear and a settlement's mechanic services vehicles; a hoof-wear stub.
+- **Added** items (gun cleaning kit, gun oil, gun repair kit, whetstone, needle and thread, tyre patch kit), three recipes, and the `wear` suite (tests/wear_test.gd).
+
 ### Contractor: Fallen, clothing, the gear editor and third person (claude/survival-clothing)
 
 - **Added** clothing slots and layers (`Clothing`, `Inventory.CLOTHING_SLOTS`, call 132): head, face, torso base / mid / outer, hands, legs, feet beside the carrier, helmet and pack; 25 clothing items (type "clothing": layer, warmth, wet_resist, noise, camo, pockets, durability) as loot (home, barracks, stores, a "clothes" table and pool); every survivor and companion starts dressed; the tactical gloves, balaclava, shemagh and enclave uniform are clothing now (still counted for the disguise and the frost)

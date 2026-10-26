@@ -48,17 +48,26 @@ static func slot_state_rw(inv: Inventory, slot: StringName) -> Dictionary:
 
 
 ## The state (written in place) of the first `id` `inv` carries: a slot first, then the
-## containers ({} if it has none).
+## containers and pouches, then what's on the carrier's attach points ({} if it has none).
+## Every Inventory._commit rebuilds the states: fetch it again after one.
 static func carried_state_rw(inv: Inventory, id: StringName) -> Dictionary:
 	for slot: StringName in Inventory.all_slots():
 		if StringName(inv.slots.get(slot, &"")) == id:
 			return slot_state_rw(inv, slot)
-	for c: StringName in Inventory.CONTAINERS:
+	for c: StringName in inv.search_containers():
 		for e: Dictionary in inv.containers.get(c, []):
 			if StringName(e.id) == id and int(e.get("count", 1)) == 1:
 				if not e.get("state", null) is Dictionary:
 					e["state"] = {}
 				return e.state
+	for slot: StringName in Inventory.ATTACH_SLOTS:
+		var molle: Dictionary = (inv.slot_state.get(slot, {}) as Dictionary).get("molle", {})
+		for point: Variant in molle:
+			var att: Dictionary = molle[point]
+			if StringName(String(att.get("id", ""))) == id:
+				if not att.get("state", null) is Dictionary:
+					att["state"] = {}
+				return att.state
 	return {}
 
 
@@ -195,7 +204,7 @@ static func server_use_tool(s: Soldier, container: StringName, index: int, insta
 ## False if he no longer has it.
 static func spend_tool(inv: Inventory, id: StringName) -> bool:
 	var item := ItemDB.get_item(id)
-	for c: StringName in Inventory.CONTAINERS:
+	for c: StringName in inv.search_containers():
 		var list: Array = inv.containers.get(c, [])
 		for i in list.size():
 			var e: Dictionary = list[i]

@@ -148,10 +148,12 @@ func _test_melee() -> void:
 	check(at[0] != &"" and Wear.server_use_tool(player, at[0], at[1], true) == "" and Wear.cond(player.inventory.state_of(player.active_slot)) > 59.0, "a whetstone sharpens it (%.0f)" % Wear.cond(player.inventory.state_of(player.active_slot)))
 	check(is_equal_approx(WeaponCondition.server_swing(player), 1.0), "sharp again, it hits full")
 	player.inventory.take(&"hatchet")
-	var hs := Wear.carried_state_rw(player.inventory, &"hatchet")
-	Wear.set_cond(hs, 100.0)
+	var probe := Wear.carried_state_rw(player.inventory, &"hatchet")
+	probe["probe"] = true
+	check(Wear.carried_state_rw(player.inventory, &"hatchet").has("probe"), "a hatchet carried, its state found")
+	Wear.set_cond(Wear.carried_state_rw(player.inventory, &"hatchet"), 100.0)
 	var fresh := WeaponCondition.tool_mult(player, "hatchet")
-	Wear.set_cond(hs, 0.0)
+	Wear.set_cond(Wear.carried_state_rw(player.inventory, &"hatchet"), 0.0)
 	check(is_equal_approx(fresh, 1.0) and is_equal_approx(WeaponCondition.tool_mult(player, "hatchet"), WeaponCondition.AXE_SLOW), "a worn-out hatchet fells slower (x%.1f)" % WeaponCondition.tool_mult(player, "hatchet"))
 	await get_tree().process_frame
 
@@ -181,7 +183,7 @@ func _test_ammo() -> void:
 	Wear.force_roll = 0.99
 	# A corroded magazine loaded: its condition goes into the gun, and back out on the next.
 	_gun()["rounds"] = 0
-	for c: StringName in Inventory.CONTAINERS:
+	for c: StringName in player.inventory.search_containers():
 		var list: Array = player.inventory.containers.get(c, [])
 		for i in range(list.size() - 1, -1, -1):
 			if StringName(list[i].id) == &"mag_556":
@@ -335,7 +337,7 @@ func _item(uid: String) -> WorldItem:
 
 
 func _index_of(id: StringName) -> Array:
-	for c: StringName in Inventory.CONTAINERS:
+	for c: StringName in player.inventory.search_containers():
 		var list: Array = player.inventory.containers.get(c, [])
 		for i in list.size():
 			if StringName(list[i].id) == id:

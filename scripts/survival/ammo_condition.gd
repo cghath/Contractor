@@ -92,7 +92,7 @@ static func step_ground(level: Node, world_h: float) -> void:
 ## Host: `world_h` hours of the ammo `inv` carries through water. True if anything changed.
 static func soak_carried(inv: Inventory, world_h: float) -> bool:
 	var changed := false
-	for c: StringName in Inventory.CONTAINERS:
+	for c: StringName in inv.search_containers():
 		for e: Dictionary in inv.containers.get(c, []):
 			if not is_ammo(ItemDB.get_item(StringName(e.id))):
 				continue

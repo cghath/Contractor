@@ -230,8 +230,8 @@ static func server_clean(s: Soldier, slot: StringName, instant := false) -> void
 		if s.inventory.slot_revision(slot) != rev or not Wear.spend_tool(s.inventory, CLEANING_KIT):
 			Wear.tell(s, "Something's missing")
 			return
-		var st := Wear.slot_state_rw(s.inventory, slot)
 		var oiled := s.inventory.remove_one(GUN_OIL)
+		var st := Wear.slot_state_rw(s.inventory, slot)  # (after the commits: they rebuild the states)
 		var c := Wear.cond(st)
 		Wear.set_cond(st, maxf(c, minf(c + CLEAN_ADD + (OIL_ADD if oiled else 0.0), OIL_MAX if oiled else CLEAN_MAX)))
 		for k: String in ["wet", "wet_h", "jammed"]:
