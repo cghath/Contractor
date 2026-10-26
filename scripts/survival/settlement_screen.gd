@@ -128,7 +128,12 @@ func _stocks(view: Dictionary) -> void:
 	for c: String in Settlement.CATEGORIES:
 		var row: Array = st.get(c, [0, 0])
 		var tr := int(row[1])
-		parts.append("%s %d%s" % [c, int(row[0]), (" (%+d)" % tr) if tr != 0 else ""])
+		var lost := ""
+		if c == "food":
+			var sp: Array = view.get("spoiled", [0, 0])
+			if int(sp[0]) > 0:
+				lost = ", %d went off today" % int(sp[0])  # (the larder throws spoiled stock out: Spoilage)
+		parts.append("%s %d%s%s" % [c, int(row[0]), (" (%+d)" % tr) if tr != 0 else "", lost])
 	for i in range(0, parts.size(), 4):
 		sec.add_child(UiKit.text(", ".join(parts.slice(i, i + 4))))
 

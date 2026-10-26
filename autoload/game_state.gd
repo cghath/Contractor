@@ -96,6 +96,7 @@ func save_zone() -> bool:
 			var p: Vector3 = node.global_position
 			dropped[node.uid]["pos"] = [p.x, p.y, p.z]
 			dropped[node.uid]["count"] = node.count
+	Spoilage.stamp_dropped(dropped)  # survival: food lying here ages from now when the zone loads again
 	# Bodies as they are now: moved, carried off or looted since they fell.
 	bodies = []
 	for node in get_tree().get_nodes_in_group(&"dead_bodies"):
@@ -190,6 +191,7 @@ func load_zone() -> void:
 		profiles.clear()  # moved on in the days since: the zone's enemy is fresh
 		demolitions = demolitions.filter(func(r: Dictionary) -> bool: return Demolitions.kind_of(StringName(String(r.item))) != Demolitions.CHEMLIGHT)  # the chem lights are out; mines and charges stay
 	fade_loose = false
+	Spoilage.age_dropped(dropped)  # survival: the food lying about went off while the zone sat unloaded
 
 
 ## The previous good save, kept beside `path` by write_safely.
@@ -356,7 +358,7 @@ static func read_save(path: String) -> Dictionary:
 			var c: Variant = caches_in[uid]
 			if typeof(uid) == TYPE_STRING and _cache_ok(c):
 				var kept := {"items": c.get("items", []), "unlocked": bool(c.get("unlocked", false))}
-				for k: String in ["searched", "searched_day", "refills", "pried"]:  # (Fallen's loot states: LootStates)
+				for k: String in ["searched", "searched_day", "refills", "pried", "aged_h"]:  # (Fallen's loot states: LootStates; the food's age: Spoilage)
 					if (c as Dictionary).has(k):
 						kept[k] = (c as Dictionary)[k]
 				out.caches[uid] = kept

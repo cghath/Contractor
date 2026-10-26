@@ -329,7 +329,7 @@ static func server_refill(level: Node, zone: String, at := -1.0) -> int:
 		if at - c.searched_day < days or c.cargo_hold.entries().size() >= REFILL_FULL:
 			continue
 		c.refills += 1
-		c.server_seed(WorldValuables.pool_roll("field_cache", "%s|refill%d|%d" % [c.uid, c.refills, int(Survival.state().get("seed", 0))], false).items)
+		c.server_seed(Spoilage.found_in_box(WorldValuables.pool_roll("field_cache", "%s|refill%d|%d" % [c.uid, c.refills, int(Survival.state().get("seed", 0))], false).items, c))
 		c.searched = false
 		c.searched_day = at
 		n += 1

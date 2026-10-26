@@ -5,8 +5,10 @@ extends RefCounted
 ## PERISH_MAX_DAYS) carries `fresh_until`, the world hour it turns stale, in its entry's state:
 ## stamped fresh when it's made (butchered, caught, picked, crafted: made_state; anything new to a
 ## kit unstamped counts as made) and, for food found lying in the world, rolled by where it lay
-## (found_state, where_at: a powered fridge keeps it fresh, a warm house has it half gone, outdoors
-## mostly gone; the loot code calls it when it seeds food, which none does yet). Its stages: fresh
+## (found_state, where_box: a powered fridge keeps it fresh, a dead fridge has it half gone, a warm
+## house some, outdoors mostly gone, the season scaling it; FoundLoot seeds boxes and the ground
+## through it). Food left lying (dropped, in boxes) ages by the world hours the zone sat unloaded,
+## worked out when it loads again (age_dropped, age_box: the cold beside a box slows it). Its stages: fresh
 ## (FRESH_SHARE of its life), stale (the rest: half the food, a small risk) and spoiled (a quarter of
 ## the food and a good chance of food poisoning: Needs' "food_poisoning"). The season sets the pace
 ## (Seasons.spoil_mult: summer twice as fast, winter half); the settlement's larder is slowed by a
@@ -29,8 +31,21 @@ const STALE_FOOD := 0.5
 const SPOILED_FOOD := 0.25
 const STALE_RISK := 0.05
 const SPOILED_RISK := 0.6
-## Found food: the share of its life left by where it was [min, max].
-const FOUND := {"fridge": [1.0, 1.0], "indoors": [0.3, 0.7], "outdoors": [0.0, 0.4]}
+## Found food: the share of its life left by where it was [min, max]: a working fridge (in a
+## settlement with power), a dead fridge in a house ("fridge_off": half gone), a cold cellar, a warm
+## house, outdoors. Out of a working fridge or a cellar the season scales what's gone (SEASONED: a
+## summer's pace twice, a winter's half).
+const FOUND := {"fridge": [1.0, 1.0], "fridge_off": [0.5, 0.5], "cellar": [0.5, 0.9], "indoors": [0.3, 0.7], "outdoors": [0.0, 0.4]}
+const SEASONED: Array[String] = ["fridge_off", "indoors", "outdoors"]
+## The foods a house kept in its fridge: found indoors, they were in a dead one ("fridge_off").
+const FRIDGE_FOODS: Array[String] = ["milk_carton", "cheese", "eggs", "milk", "raw_meat", "raw_fish", "cooked_meal", "animal_fat"]
+## A box this far under the ground beside it is in a cellar (m).
+const CELLAR_DEPTH_M := 1.5
+## A container within this of a cold store or an ice box keeps its food at that piece's pace (m).
+const COLD_NEAR_M := 3.0
+## Food left lying (on the ground, in a container) is aged by the world hours since this key's hour
+## when the zone loads again (the zone save's records: GameState.dropped, WorldCache.to_save).
+const AGED := "aged_h"
 ## The larder's pace in the settlement's cold pieces (a powered fridge stops it).
 const COLD := {"cold_store": 0.5, "ice_box": 0.25}
 ## An ice box out of winter melts a block of ice in this many world days.
@@ -65,7 +80,7 @@ static func stamp(item: ItemData, state: Dictionary, share := 1.0) -> Dictionary
 		return state
 	var life := life_h(item)
 	var fu := now_h() - (1.0 - clampf(share, 0.0, 1.0)) * life + FRESH_SHARE * life
-	state[KEY] = snappedf(fu, 1.0)  # (whole hours: what's made together stacks together)
+	state[KEY] = floorf(fu) if share <= 0.0 else snappedf(fu, 1.0)  # (whole hours: what's made together stacks together; nothing left: spoiled now)
 	state[STAGE] = stage(item, state)
 	return state
 
@@ -149,20 +164,153 @@ static func step_state(item: ItemData, state: Dictionary, hours: float, rate: fl
 	return before != String(state[STAGE])
 
 
-## The share of its life a found food has left, by where it was (FOUND).
+## The share of its life a found food has left, by where it was (FOUND) and the season's pace
+## where the season reaches (SEASONED: summer takes twice what spring would, winter half).
 static func found_share(where: String, roll := -1.0) -> float:
 	var r: Array = FOUND.get(where, FOUND.outdoors)
 	var t := roll if roll >= 0.0 else randf()
-	return lerpf(float(r[0]), float(r[1]), t)
+	var share := lerpf(float(r[0]), float(r[1]), t)
+	if where in SEASONED:
+		share = 1.0 - (1.0 - share) * season_rate()
+	return clampf(share, 0.0, 1.0)
 
 
-## The state for found food `id` (the loot code's call when it puts food in the world: none does
-## yet) by where it lies: "fridge", "indoors" or "outdoors" (where_at). `roll` 0..1 (-1 random).
+## The state for found food `id` (the loot code's call when it puts food in the world:
+## found_items, FoundLoot.first_roll and ground_state) by where it lies: "fridge", "fridge_off",
+## "cellar", "indoors" or "outdoors" (where_box). `roll` 0..1 (-1 random).
 static func found_state(id: StringName, where: String, roll := -1.0, state := {}) -> Dictionary:
 	var item := ItemDB.get_item(id)
 	if not perishable(item):
 		return state
 	return stamp(item, state.duplicate(true), found_share(where, roll))
+
+
+## The share of its life `state`'s food has left now (1 just made, 0 spoiled; -1 for none).
+static func share_left(item: ItemData, state: Dictionary) -> float:
+	if not perishable(item) or not state.has(KEY):
+		return -1.0
+	var life := life_h(item)
+	return clampf((float(state[KEY]) + (1.0 - FRESH_SHARE) * life - now_h()) / life, 0.0, 1.0)
+
+
+## Where a box (or anything lying) at `pos` in `level` keeps food: "fridge" (in the settlement with a
+## powered fridge), "cellar" (CELLAR_DEPTH_M under the ground there), "indoors" or "outdoors".
+static func where_box(level: Node, pos: Vector3) -> String:
+	if Settlement.exists() and Infrastructure.fridge_on() and pos.distance_to(Settlement.pos()) <= Settlement.radius():
+		return "fridge"
+	if level is ZoneLevel and pos.y < (level as ZoneLevel).ground_height(pos.x, pos.z) - CELLAR_DEPTH_M:
+		return "cellar"
+	var n3 := level as Node3D
+	if n3 and n3.is_inside_tree() and Throwables.indoors(n3.get_world_3d(), pos):
+		return "indoors"
+	return "outdoors"
+
+
+## Found food in `items` ([{"id", "count", "state"?}]) stamped by `where` (a house's fridge foods
+## in its dead fridge): each perishable without a stamp gets one, rolled by `rng` (the same box
+## rolls the same). Everything else passes as it is. Returns the new list.
+static func found_items(items: Array, where: String, rng: RandomNumberGenerator = null) -> Array:
+	var out: Array = []
+	for e: Dictionary in items:
+		var id := StringName(String(e.get("id", "")))
+		var item := ItemDB.get_item(id)
+		var st0: Dictionary = e.get("state", {}) as Dictionary
+		if not perishable(item) or st0.has(KEY):
+			out.append(e)
+			continue
+		var w := "fridge_off" if where == "indoors" and String(id) in FRIDGE_FOODS else where
+		var e2 := e.duplicate(true)
+		e2["state"] = found_state(id, w, rng.randf() if rng else -1.0, st0)
+		out.append(e2)
+	return out
+
+
+## Host (FoundLoot.first_roll, LootStates' refill): found food in a box at `at` stamped by where the
+## box stands (where_box), rolled by its uid.
+static func found_in_box(items: Array, at: Node3D) -> Array:
+	if not Survival.running or at == null or not at.is_inside_tree():
+		return items
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([String(at.get(&"uid")), "food", int(Survival.state().get("seed", 0))])
+	return found_items(items, where_box(CompoundLevel.current(at), at.global_position), rng)
+
+
+# --- Food left lying (the zone save: stamp-based, aged on load) ----------------------------------
+
+## The pace food keeps at in a container at `pos` in `level`: the season's, slowed by a built cold
+## store or ice box within COLD_NEAR_M (an ice box needs ice in the settlement's stock out of winter,
+## else it keeps as a cold store), stopped by a working fridge in the settlement.
+static func container_rate(level: Node, pos: Vector3) -> float:
+	if where_box(level, pos) == "fridge":
+		return 0.0
+	var x := 1.0
+	var b: Builder = Builder.find(level) if level else null
+	if b:
+		for kind: String in ["ice_box", "cold_store"]:
+			for id: int in b.pieces_of(kind):
+				if not b.is_piece_built(id) or b.piece_pos(id).distance_to(pos) > COLD_NEAR_M:
+					continue
+				var iced := Seasons.current() == "winter" or (Settlement.exists() and Settlement.count("ice_block") > 0)
+				x = minf(x, float(COLD.ice_box) if kind == "ice_box" and iced else float(COLD.cold_store))
+	return season_rate() * x
+
+
+## `entries` ([{"id", "count", "state"}], in place) aged from world hour `from_h` to now at `rate`
+## (the stamp moves out by what the cold saved, in by what the heat cost). Returns how many changed.
+static func age_entries(entries: Array, from_h: float, rate: float) -> int:
+	var hours := now_h() - from_h
+	if hours <= 0.0:
+		return 0
+	var n := 0
+	for e: Dictionary in entries:
+		var item := ItemDB.get_item(StringName(String(e.get("id", ""))))
+		var st: Dictionary = e.get("state", {}) as Dictionary
+		if not perishable(item) or not st.has(KEY):
+			continue
+		var st2 := st.duplicate(true)
+		step_state(item, st2, hours, rate)
+		e["state"] = st2
+		n += 1
+	return n
+
+
+## Host (GameState.load_zone, survival): the dropped items' food (GameState.dropped records, in
+## place) aged by the world hours since each was last saved, at the season's pace. Returns how
+## many changed.
+static func age_dropped(records: Dictionary) -> int:
+	if not Survival.running:
+		return 0
+	var n := 0
+	var now := now_h()
+	for uid: String in records:
+		var d: Dictionary = records[uid]
+		if not d.has(AGED):
+			d[AGED] = now
+			continue
+		var one: Array = [{"id": String(d.get("id", "")), "state": d.get("state", {})}]
+		n += age_entries(one, float(d[AGED]), season_rate())
+		d["state"] = (one[0] as Dictionary).get("state", {})
+		d[AGED] = now
+	return n
+
+
+## Host (GameState.save_zone): every dropped record stamped with the hour it was saved at.
+static func stamp_dropped(records: Dictionary) -> void:
+	if not Survival.running:
+		return
+	var now := now_h()
+	for uid: String in records:
+		var d: Dictionary = records[uid]
+		d[AGED] = now
+
+
+## Host (WorldCache.server_fill, a saved box): its `items` aged since `saved`'s AGED hour at the
+## pace by the box `at` (container_rate). Returns the items.
+static func age_box(items: Array, saved: Dictionary, at: Node3D) -> Array:
+	if not Survival.running or not saved.has(AGED) or at == null or not at.is_inside_tree():
+		return items
+	age_entries(items, float(saved[AGED]), container_rate(CompoundLevel.current(at), at.global_position))
+	return items
 
 
 ## Where food at `pos` lies: "fridge" (in the settlement with a powered fridge), "indoors" or
@@ -321,3 +469,85 @@ static func _melt(hours: float) -> void:
 ## How many items of stock the larder has lost, all told.
 static func lost() -> int:
 	return int(larder().get("lost", 0)) if Settlement.exists() else 0
+
+
+## How many went off and were thrown out today.
+static func lost_today() -> int:
+	if not Settlement.exists():
+		return 0
+	var l := larder()
+	return int(l.get("today", 0)) if int(l.get("day", -1)) == Survival.day() else 0
+
+
+static func _stamp_of(e: Dictionary) -> float:
+	return float((e.get("state", {}) as Dictionary).get(KEY, INF))
+
+
+## The id of the stock that matches `pred` (item, id) whose oldest entry is oldest across every
+## store (a perishable by its stamp; what doesn't spoil after), "" none: what the settlers eat first.
+static func oldest_stocked(pred: Callable) -> String:
+	var best := ""
+	var best_fu := INF
+	var stores := Settlement.stores()
+	for key: String in stores:
+		for e: Dictionary in stores[key]:
+			var item := ItemDB.get_item(StringName(String(e.id)))
+			if item == null or not bool(pred.call(item, String(e.id))):
+				continue
+			var fu := _stamp_of(e)
+			if best == "" or fu < best_fu:
+				best = String(e.id)
+				best_fu = fu
+	return best
+
+
+## Host: `n` of `id` out of the settlement's stores, the oldest stamps first across every store
+## (Settlement.server_take's shape: [{"id", "count", "state"}]).
+static func take_oldest(id: String, n: int) -> Array:
+	var out: Array = []
+	var stores := Settlement.stores()
+	while n > 0:
+		var best_list: Array = []
+		var best_i := -1
+		var best_fu := INF
+		for key: String in stores:
+			var list: Array = stores[key]
+			for i in list.size():
+				var e: Dictionary = list[i]
+				if String(e.id) != id:
+					continue
+				var fu := _stamp_of(e)
+				if best_i < 0 or fu < best_fu:
+					best_list = list
+					best_i = i
+					best_fu = fu
+		if best_i < 0:
+			break
+		var e2: Dictionary = best_list[best_i]
+		var take := mini(n, int(e2.get("count", 1)))
+		out.append({"id": id, "count": take, "state": (e2.get("state", {}) as Dictionary).duplicate(true)})
+		n -= take
+		e2["count"] = int(e2.get("count", 1)) - take
+		if int(e2.count) <= 0:
+			best_list.remove_at(best_i)
+	return out
+
+
+## The settlement's fresh stock of `ids` about to go off: entries whose stamp is within `within_h`
+## world hours (or already going off, not spoiled), oldest first ([{"id", "count", "fu"}]).
+static func aging_stock(ids: Array, within_h: float) -> Array:
+	var out: Array = []
+	var now := now_h()
+	var stores := Settlement.stores()
+	for key: String in stores:
+		for e: Dictionary in stores[key]:
+			if not String(e.id) in ids:
+				continue
+			var item := ItemDB.get_item(StringName(String(e.id)))
+			var st: Dictionary = e.get("state", {}) as Dictionary
+			if not perishable(item) or not st.has(KEY) or stage(item, st) == "spoiled":
+				continue
+			if float(st[KEY]) - now <= within_h:
+				out.append({"id": String(e.id), "count": int(e.get("count", 1)), "fu": float(st[KEY])})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.fu) < float(b.fu))
+	return out

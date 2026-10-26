@@ -25,6 +25,13 @@ const SORE_STAMINA := 0.25
 const SEW_S := 15.0
 const SEW_ADD := 35.0
 const NEEDLE := &"needle_thread"
+## Bone needles and sinew sew as a needle and thread does (docs/survival_hands.md).
+const BONE_NEEDLE := &"bone_needle"
+## A leather good (LEATHER_GOODS, or tagged "leather") mended with a piece of leather carried: the
+## patch takes it LEATHER_ADD further (the leather used up).
+const LEATHER := &"leather"
+const LEATHER_ADD := 30.0
+const LEATHER_GOODS: Array[String] = ["work_boots", "winter_boots", "work_gloves", "leather_pouch", "leather_sling"]
 
 const RAIN_SLOTS: Array[StringName] = [&"head", &"torso_outer", &"torso_mid", &"legs"]
 const WADE_SLOTS: Array[StringName] = [&"legs", &"feet"]
@@ -145,14 +152,24 @@ static func most_worn(inv: Inventory) -> StringName:
 	return best
 
 
-## Host: `s` mends the piece in `slot` with a needle and thread (a use of it): SEW_S, +SEW_ADD.
+## Whether the item `id` is a leather good (mends further with a leather patch).
+static func leather_good(id: StringName) -> bool:
+	var item := ItemDB.get_item(id)
+	return String(id) in LEATHER_GOODS or (item != null and "leather" in item.tags)
+
+
+## Host: `s` mends the piece in `slot` with a needle and thread or bone needles (a use of it):
+## SEW_S, +SEW_ADD; a leather good patched with a piece of leather he carries, +LEATHER_ADD more.
 static func server_sew(s: Soldier, slot: StringName, instant := false) -> void:
 	var rev := s.inventory.slot_revision(slot)
 	var done := func() -> void:
-		if s.inventory.slot_revision(slot) != rev or not Wear.spend_tool(s.inventory, NEEDLE):
+		if s.inventory.slot_revision(slot) != rev or not (Wear.spend_tool(s.inventory, NEEDLE) or Wear.spend_tool(s.inventory, BONE_NEEDLE)):
 			return
-		var st := Wear.slot_state_rw(s.inventory, slot)
-		Wear.set_cond(st, Wear.cond(st) + SEW_ADD)
+		var add := SEW_ADD
+		if leather_good(StringName(s.inventory.slots.get(slot, &""))) and s.inventory.remove_one(LEATHER):
+			add += LEATHER_ADD  # (a leather patch: docs/survival_hands.md)
+		var st := Wear.slot_state_rw(s.inventory, slot)  # (after the leather's taken: that commit swaps the slot states)
+		Wear.set_cond(st, Wear.cond(st) + add)
 		s.inventory._commit()
 		Rpg.xp(s, "fieldcraft", 2.0)
 		Wear.tell(s, "Mended: %d%%" % roundi(Wear.cond(st)))

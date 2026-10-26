@@ -13,12 +13,15 @@ extends RefCounted
 ## - **water**: "Fish" (a rod, a net or a hand line: a cast of CAST_S whose bite chance is the nature
 ##   lane's fish table by water body and season over CAST_H hours), "Cut ice" when it's frozen;
 ## - **woods or an edge** (a tree near the ground he looks at): "Set a snare", "Check the snare",
-##   "Gather firewood".
+##   "Gather firewood";
+## - **livestock** (a tame goat: ZoneAnimals' goats about a farm or a village): "Milk the goat" twice a
+##   day (a tied goat's piece menu too): milk, which goes off within the day (salt it into cheese).
 ## Built pieces (BuildPiece's menu -> piece_menu / server_piece_act): the fish trap (catches by the
 ## world hour by the water it stands in), the smoker and the drying rack (recipe stations: stations_near),
-## the clinic's bed and cabinet (Clinic). Every number here is Proposed.
+## the clinic's bed and cabinet (Clinic); the rack tans hides with salt (leather). Every number here
+## is Proposed.
 
-const KINDS: Array[String] = ["carcass", "tree", "plant", "water", "woods"]
+const KINDS: Array[String] = ["carcass", "tree", "plant", "water", "woods", "livestock"]
 ## How far from him the spot he looks at may be (the water further: a bank).
 const REACH_M := 4.0
 const WATER_LOOK_M := 14.0
@@ -52,6 +55,12 @@ const ICE_N := 2
 const TRAP_X := 0.3
 const TRAP_MAX := 4
 const TRAP_WATER_M := 8.0
+## Milking a tame goat: MILK_S with the hands busy for MILK_N jars, once every MILK_EVERY_H world
+## hours (twice a day); the animals that give it.
+const MILK_S := 20.0
+const MILK_N := 1
+const MILK_EVERY_H := 12.0
+const MILK_SPECIES: Array[String] = ["goat"]
 ## A smoker, a rack or a clinic piece counts within this.
 const STATION_M := 3.0
 ## The pieces this file adds (BuildPieces.PIECES) and the station each is.
@@ -98,6 +107,9 @@ static func classify(me: Soldier, at: Vector3) -> Dictionary:
 				best = spot
 		if not best.is_empty():
 			return {"kind": "plant", "index": int(best.index), "plant": String(best.plant), "label": forage_label(me, String(best.plant))}
+		var g := livestock_near(lvl, at, TREE_PICK_M)
+		if g >= 0:
+			return {"kind": "livestock", "index": g, "sp": "goat", "name": "goat"}
 	if d <= WATER_LOOK_M:
 		var body := water_at(lvl, at)
 		if body != "":
@@ -120,6 +132,26 @@ static func water_at(level: Node, pos: Vector3) -> String:
 	if t.sea_side >= 0 and t.height_at(pos.x, pos.z) < t.sea_level - 0.3:
 		return "coast"
 	return ""
+
+
+## The index of a living tame animal that gives milk (ZoneAnimals: MILK_SPECIES) within `r` of `at`
+## as this peer sees it, or -1.
+static func livestock_near(level: Node, at: Vector3, r: float) -> int:
+	var zoo: ZoneAnimals = Predators.livestock(level)
+	if zoo == null:
+		return -1
+	var best := -1
+	var best_d := r
+	for i in zoo.animals.size():
+		var a: Dictionary = zoo.animals[i]
+		if not bool(a.get("alive", true)) or not String(a.get("species", "")) in MILK_SPECIES:
+			continue
+		var p: Vector2 = a.get("show", a.get("pos", Vector2.ZERO))
+		var dd := Vector2(p.x - at.x, p.y - at.z).length()
+		if dd <= best_d:
+			best_d = dd
+			best = i
+	return best
 
 
 ## A dead animal within `r` of `at` as this peer sees it ({"sp", "pos"}; {} none): the host's records,
@@ -187,6 +219,8 @@ static func options(ctx: Dictionary) -> Array[Dictionary]:
 		"wait":  # the ground's own (ContextResolver, call 136): waiting at a safe spot
 			for mode: String in SurvivalSleep.WAIT_MODES:
 				out.append(_o("wait", String(SurvivalSleep.WAIT_LABELS[mode]), mode))
+		"livestock":
+			out.append(_o("milk", "Milk the %s" % String(ctx.get("name", "goat")), str(int(ctx.get("index", -1)))))
 		"woods":
 			out.append(_o("set_snare", "Set a snare"))
 			out.append(_o("check_snare", "Check the snare"))
@@ -229,7 +263,41 @@ static func server_request(s: Soldier, what: String, arg: String, at: Vector3) -
 		"check_snare":
 			var got := Wildlife.server_check_snare(s)
 			return "No snare of yours here" if got == "?" else ""
+		"milk":
+			var zoo: ZoneAnimals = Predators.livestock(CompoundLevel.current(s))
+			var i := int(arg)
+			if zoo == null or i < 0 or i >= zoo.animals.size() or not String(zoo.animals[i].get("species", "")) in MILK_SPECIES:
+				return "No goat there"
+			var p: Vector2 = zoo.animals[i].pos
+			if Vector2(p.x - s.global_position.x, p.y - s.global_position.z).length() > REACH_M:
+				return "Get closer to the goat"
+			return server_milk(s, zoo.animals[i])
 	return "?"
+
+
+## Why the animal `rec` (a ZoneAnimals goat, a tied goat's piece record) can't be milked now, or "".
+static func milk_problem(rec: Dictionary) -> String:
+	if not bool(rec.get("alive", true)):
+		return "It's dead"
+	var since := Moods.now_h() - float(rec.get("milked_h", -INF))
+	if since < MILK_EVERY_H:
+		return "She's been milked: give her %d hours" % ceili(MILK_EVERY_H - since)
+	return ""
+
+
+## Host: `s` milks the tame animal `rec`: MILK_S with his hands busy, then MILK_N jars of milk (fresh:
+## it goes off within the day). "" when it started, else why not. `instant`: now (tests).
+static func server_milk(s: Soldier, rec: Dictionary, instant := false) -> String:
+	var why := milk_problem(rec)
+	if why != "":
+		return why
+	rec["milked_h"] = Moods.now_h()  # (claimed now: no one milks her twice)
+	var done := func() -> void:
+		Wildlife._give(s, &"milk", MILK_N)
+		Rpg.xp(s, "fieldcraft", 1.0)
+		Survival._tell(s, "A jar of warm milk.")
+	Wear.timed(s, MILK_S, "Milking", done, instant)
+	return ""
 
 
 ## Seconds to butcher `sp` at fieldcraft `lvl`.
@@ -434,7 +502,9 @@ static func piece_menu(rec: Dictionary) -> Array:
 		"smoker":
 			return [[&"fw_smoke", "Smoke the meat and fish you carry", "smoke"]]
 		"drying_rack":
-			return [[&"fw_dry", "Hang meat and fish to dry", "dry"]]
+			return [[&"fw_dry", "Hang meat and fish to dry", "dry"], [&"fw_tan", "Tan a hide with salt", "tan"]]
+		"goat_stake":
+			return [[&"fw_milk", "Milk the goat", "milk"]]
 		"clinic_bed":
 			return [[&"fw_rest", "Rest in the bed (in care)", "clinic_rest"], [&"fw_quarantine", "Quarantine the bitten here", "quarantine"]]
 		"clinic_cabinet":
@@ -464,6 +534,13 @@ static func server_piece_act(b: Builder, s: Soldier, id: int, what: String) -> S
 				if Crafting.problem(s, r) == "":
 					return Crafting.server_craft(s, r)
 			return "You need two raw meat or fish"
+		"tan":
+			var tw := Crafting.problem(s, "tan_hide")
+			return Crafting.server_craft(s, "tan_hide") if tw == "" else tw
+		"milk":
+			if String(rec.get("k", "")) != "goat_stake" or not b.is_piece_built(id):
+				return "?"
+			return server_milk(s, rec)
 		"clinic_rest":
 			return Survival.server_sleep(s, 4.0, "bed")
 		"quarantine":

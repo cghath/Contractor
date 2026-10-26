@@ -8,7 +8,13 @@ extends Node
 ## over world hours, cold slows it, a smoker preserves it, eating spoiled food risks food poisoning,
 ## the larder throws spoiled stock out and keeps the oldest first; a clinic bed speeds healing, surgery
 ## in a clinic goes bad less often, the doctor treats settlers with the cabinet stocked and files a
-## work order when it runs low, and the bitten go into quarantine with a council vote.
+## work order when it runs low, and the bitten go into quarantine with a council vote. The food and
+## fieldwork side (survival-food2): found food fresh by where it lay (a dead fridge half gone, outdoors
+## in summer spoiled, a box's first roll), food left lying ages while the zone sits (two days on the
+## ground spoiled, winter slower) and a box beside an ice box keeps it longer, a tied goat milked twice
+## a day (milk goes off fast, hard cheese keeps), a hide tanned into leather on the rack and leather
+## patching boots, bone needles and hooks, the cook saving the oldest fresh food and the larder's loss
+## on the screen's food line.
 ## The world's clock is set directly.
 
 var failures := 0
@@ -39,6 +45,11 @@ func _ready() -> void:
 		_test_fell()
 		_test_spoilage()
 		_test_clinic()
+		_test_found_food()
+		_test_food_lying()
+		_test_milk_and_cheese()
+		_test_hides_and_bones()
+		_test_cook()
 	_finish()
 
 
@@ -423,7 +434,219 @@ func _test_clinic() -> void:
 	recs.erase("hands_pat")
 
 
+# --- Food and fieldwork (survival-food2) -----------------------------------------------------------
+
+func _test_found_food() -> void:
+	print("Found food: a dead fridge has it half gone, outdoors in summer it's spoiled; a box's first roll")
+	_set_clock(2, 8.0)
+	var carton := ItemDB.get_item(&"milk_carton")
+	var raw := ItemDB.get_item(&"raw_meat")
+	var fst := Spoilage.found_state(&"milk_carton", "fridge_off", 0.5)
+	check(absf(Spoilage.share_left(carton, fst) - 0.5) < 0.02, "a carton in an unpowered house's fridge: half gone (%.2f of its life left)" % Spoilage.share_left(carton, fst))
+	var found := Spoilage.found_items([{"id": "milk_carton", "count": 1}, {"id": "beans_tin", "count": 2}], "indoors")
+	check(found.size() == 2 and absf(Spoilage.share_left(carton, found[0].state) - 0.5) < 0.02 and ((found[1] as Dictionary).get("state", {}) as Dictionary).is_empty(),
+		"found in a house: the milk was in the dead fridge, the tins don't spoil")
+	check(Spoilage.share_left(raw, Spoilage.found_state(&"raw_meat", "fridge", 0.0)) > 0.99, "in a working fridge: as good as new")
+	_set_clock(15, 8.0)
+	check(Seasons.current() == "summer", "summer (%s)" % Seasons.current())
+	var hot := Spoilage.found_state(&"raw_meat", "outdoors", 1.0)
+	check(Spoilage.stage(raw, hot) == "spoiled", "meat found outdoors in summer: spoiled even at the best roll")
+	var box := _cache("test_found_box", _pos(_at(-9, -9)))
+	box.server_fill([{"id": "bread", "count": 1}, {"id": "canned_meat", "count": 1}])
+	var bread := _hold_state(box, "bread")
+	check(Spoilage.stage(ItemDB.get_item(&"bread"), bread) == "spoiled" and not _hold_state(box, "canned_meat").has(Spoilage.KEY),
+		"a box in the open, its first roll in summer: the loaf spoiled, the tin as it was (%s)" % [bread])
+	var gs := FoundLoot.ground_state(level, &"eggs", _pos(_at(-9, -8)), "test_ground_eggs")
+	check(gs.has(Spoilage.KEY), "food lying on the ground is stamped by where it lay")
+	box.queue_free()
+	_set_clock(2, 8.0)
+
+
+func _test_food_lying() -> void:
+	print("Food left lying ages while the zone sits: meat two days on the ground spoiled; winter slower; a box by an ice box")
+	var raw := ItemDB.get_item(&"raw_meat")
+	_set_clock(2, 0.0)
+	var t0 := Moods.now_h()
+	var uid := level.server_spawn_dropped(&"raw_meat", 1, _pos(_at(-9, 6)), Spoilage.made_state(&"raw_meat"))
+	GameState.save_zone()
+	check(is_equal_approx(float((GameState.dropped.get(uid, {}) as Dictionary).get(Spoilage.AGED, -1.0)), t0), "the zone save stamps the hour it was left")
+	_set_now(t0 + 50.0)
+	GameState.load_zone()
+	var d: Dictionary = GameState.dropped.get(uid, {})
+	check(not d.is_empty() and Spoilage.stage(raw, d.get("state", {})) == "spoiled", "two world days on, the zone loads: the meat on the ground is spoiled")
+	_set_clock(35, 0.0)
+	var t1 := Moods.now_h()
+	var uid2 := level.server_spawn_dropped(&"raw_meat", 1, _pos(_at(-9, 7)), Spoilage.made_state(&"raw_meat"))
+	GameState.save_zone()
+	_set_now(t1 + 40.0)
+	GameState.load_zone()
+	var d2: Dictionary = GameState.dropped.get(uid2, {})
+	check(not d2.is_empty() and Spoilage.stage(raw, d2.get("state", {})) == "fresh", "40 hours in winter on the ground: still fresh (the cold kept it)")
+	# A box beside an ice box.
+	_set_clock(2, 0.0)
+	_clear_pack()
+	_give([[&"hammer", 1], [&"planks", 6], [&"scrap_sheet", 2]])
+	var c := _at(-6, 0)
+	_stand_by(c + Vector3i(0, 0, -3))
+	var ice := b.server_build_piece_now(player, "ice_box", c, 0)
+	check(ice > 0 and b.is_piece_built(ice), "an ice box built (%s)" % b.last_problem)
+	if ice <= 0:
+		return
+	st.server_put("ice_block", 2)
+	var ip := b.piece_pos(ice)
+	var near := _cache("test_ice_near", Vector3(ip.x + 1.6, level.ground_height(ip.x + 1.6, ip.z) + 0.05, ip.z))
+	var far := _cache("test_ice_far", _pos(_at(-6, -9)))
+	check(Spoilage.container_rate(level, near.global_position) < Spoilage.container_rate(level, far.global_position),
+		"beside the ice box x%.2f, away from it x%.2f" % [Spoilage.container_rate(level, near.global_position), Spoilage.container_rate(level, far.global_position)])
+	var t2 := Moods.now_h()
+	var meat := Spoilage.made_state(&"raw_meat")
+	for u: String in ["test_ice_near", "test_ice_far"]:
+		GameState.caches[u] = {"items": [{"id": "raw_meat", "count": 1, "state": meat.duplicate(true)}], "unlocked": false, Spoilage.AGED: t2}
+	_set_now(t2 + 30.0)
+	near.server_fill([])
+	far.server_fill([])
+	var sn := _hold_state(near, "raw_meat")
+	var sf := _hold_state(far, "raw_meat")
+	check(Spoilage.stage(raw, sn) == "fresh" and Spoilage.stage(raw, sf) == "stale",
+		"30 hours on, the zone loads: fresh in the box by the ice box, going off in the other (%s, %s)" % [Spoilage.stage(raw, sn), Spoilage.stage(raw, sf)])
+	for u: String in ["test_ice_near", "test_ice_far"]:
+		GameState.caches.erase(u)
+	near.queue_free()
+	far.queue_free()
+	Settlement.server_take("ice_block", 99)
+	Settlement.data()["ice_boxes"] = 0
+	_set_clock(2, 8.0)
+
+
+func _test_milk_and_cheese() -> void:
+	print("Milk: a tied goat milked twice a day; milk spoils fast, hard cheese keeps")
+	_set_clock(2, 6.0)
+	_clear_pack()
+	_give([[&"hammer", 1], [&"planks", 2], [&"cable_ties", 1]])
+	var c := _at(-2, 6)
+	_stand_by(c + Vector3i(0, 0, -3))
+	var goat := b.server_build_piece_now(player, "goat_stake", c, 0)
+	check(goat > 0 and b.is_piece_built(goat), "a goat tied at the settlement (%s)" % b.last_problem)
+	if goat <= 0:
+		return
+	var rec: Dictionary = b.pieces[goat]
+	var menu := Fieldwork.piece_menu(rec)
+	check(menu.any(func(e: Array) -> bool: return String(e[2]) == "milk"), "the tied goat's menu: Milk the goat")
+	check(Fieldwork.options({"kind": "livestock", "index": 0, "name": "goat"})[0].label == "Milk the goat", "a goat looked at: Milk the goat")
+	var m0 := player.inventory.count_of(&"milk")
+	player._server_busy_until = 0.0
+	check(Fieldwork.server_milk(player, rec, true) == "" and player.inventory.count_of(&"milk") == m0 + Fieldwork.MILK_N, "milked: a jar of milk")
+	check(Fieldwork.server_piece_act(b, player, goat, "milk") != "", "and not again for %d hours" % int(Fieldwork.MILK_EVERY_H))
+	_set_now(Moods.now_h() + Fieldwork.MILK_EVERY_H)
+	player._server_busy_until = 0.0
+	check(Fieldwork.server_milk(player, rec, true) == "" and player.inventory.count_of(&"milk") == m0 + 2 * Fieldwork.MILK_N, "twelve hours on: milked again (twice a day)")
+	var milk := ItemDB.get_item(&"milk")
+	var cheese := ItemDB.get_item(&"hard_cheese")
+	Wildlife._give(player, &"milk", 2)
+	player.inventory.take(&"salt", 1)
+	Rpg.set_level(player, "cooking", 2)
+	player._server_busy_until = 0.0
+	var why := Crafting.server_craft(player, "hard_cheese", true)
+	check(why == "" and player.inventory.count_of(&"hard_cheese") == 1 and player.inventory.count_of(&"milk") == 0, "four jars of milk and salt: a hard cheese (%s)" % why)
+	var ms := Spoilage.made_state(&"milk")
+	var cs := _entry_state(&"hard_cheese")
+	_set_now(Moods.now_h() + 30.0)
+	check(Spoilage.stage(milk, ms) == "spoiled" and Spoilage.stage(cheese, cs) == "fresh", "30 hours on: the milk spoiled, the cheese good")
+	_set_now(Moods.now_h() + 30.0 * 24.0)
+	check(Spoilage.stage(cheese, cs) == "fresh", "a month on, the cheese still good (%d days' life)" % int(cheese.stats.spoils_days))
+	_set_clock(2, 8.0)
+
+
+func _test_hides_and_bones() -> void:
+	print("Hides tan into leather on the rack; leather patches boots; bone needles and hooks")
+	_set_clock(2, 8.0)
+	_clear_pack()
+	_give([[&"hammer", 1], [&"planks", 2]])
+	var c := _at(-6, 5)
+	_stand_by(c + Vector3i(0, 0, -3))
+	var rack := b.server_build_piece_now(player, "drying_rack", c, 0)
+	check(rack > 0 and b.is_piece_built(rack), "a drying rack built (%s)" % b.last_problem)
+	if rack <= 0:
+		return
+	player.global_position = level.ground_point(b.piece_pos(rack) + Vector3(1.4, 0, 0)) + Vector3.UP * 0.05
+	check(Fieldwork.piece_menu(b.pieces[rack]).any(func(e: Array) -> bool: return String(e[2]) == "tan"), "the rack's menu: Tan a hide with salt")
+	_give([[&"hide", 1], [&"salt", 2]])
+	Rpg.set_level(player, "fieldcraft", 2)
+	player._server_busy_until = 0.0
+	var why := Crafting.server_craft(player, "tan_hide", true)
+	check(why == "" and player.inventory.count_of(&"leather") == 2 and player.inventory.count_of(&"hide") == 0, "a hide and salt on the rack: two leather (%s)" % why)
+	_give([[&"bone", 2]])
+	player._server_busy_until = 0.0
+	var w1 := Crafting.server_craft(player, "bone_needle", true)
+	player._server_busy_until = 0.0
+	var w2 := Crafting.server_craft(player, "fish_hooks", true)
+	check(w1 == "" and w2 == "" and player.inventory.count_of(&"bone_needle") == 1 and player.inventory.count_of(&"fish_hook") == 4 and player.inventory.count_of(&"bone") == 0, "bones into bone needles and fish hooks (%s %s)" % [w1, w2])
+	player.inventory.unequip(&"feet")
+	var on := player.inventory.put_on(&"feet", &"work_boots", {Wear.KEY: 20.0})
+	player._server_busy_until = 0.0
+	ClothingWear.server_sew(player, &"feet", true)
+	var cond := Wear.cond(player.inventory.state_of(&"feet"))
+	check(on and absf(cond - (20.0 + ClothingWear.SEW_ADD + ClothingWear.LEATHER_ADD)) < 0.5 and player.inventory.count_of(&"leather") == 1,
+		"work boots mended with the bone needles and a leather patch: %d%%, a leather used (on %s, feet %s, needles %d, leather %d)" % [roundi(cond), on,
+		player.inventory.slots.get(&"feet", "?"), player.inventory.count_of(&"bone_needle"), player.inventory.count_of(&"leather")])
+	_clear_pack()
+
+
+func _test_cook() -> void:
+	print("The cook saves the oldest fresh food; settlers eat the oldest first; spoiled stock out and on the food line")
+	_set_clock(2, 0.0)
+	Settlement.data()["cold_stores"] = 0
+	Settlement.data()["ice_boxes"] = 0
+	for id: String in ["raw_meat", "raw_fish", "eggs", "cooked_meal", "apples", "salted_meat"]:
+		Settlement.server_take(id, 999)
+	var stoves0 := int(Settlement.data().get("stoves", 0))
+	Settlement.data()["stoves"] = 1
+	var now := Moods.now_h()
+	st.server_put("raw_meat", 1, {Spoilage.KEY: now + 20.0})
+	st.server_put("raw_meat", 1, {Spoilage.KEY: now + 4.0})
+	st.server_put("eggs", 1, {Spoilage.KEY: now - 2.0})
+	check(SettlementJobs.cook_aging(st, 1.0) and Settlement.count("cooked_meal") == 2 and Settlement.count("eggs") == 0 and Settlement.count("raw_meat") == 1,
+		"the cook: the meat turning in 4 hours and the eggs going off into two meals (%d meals)" % Settlement.count("cooked_meal"))
+	var left := Spoilage.take_oldest("raw_meat", 1)
+	check(not left.is_empty() and absf(float(((left[0] as Dictionary).get("state", {}) as Dictionary).get(Spoilage.KEY, 0.0)) - (now + 20.0)) < 0.5, "the fresh cut left for later")
+	check(not SettlementJobs.cook_aging(st, 1.0), "nothing turning: the cook doesn't touch fresh stock")
+	Settlement.server_take("cooked_meal", 99)
+	st.server_put("salted_meat", 1, {Spoilage.KEY: now + 900.0})
+	st.server_put("apples", 1, {Spoilage.KEY: now + 30.0})
+	check(Spoilage.oldest_stocked(func(item: ItemData, iid: String) -> bool: return iid in ["apples", "salted_meat"] and not bool(item.stats.get("raw", false))) == "apples",
+		"settlers eat the oldest first: the apples before the salted meat")
+	Settlement.server_take("apples", 99)
+	Settlement.server_take("salted_meat", 99)
+	var lost0 := Spoilage.lost()
+	st.server_put("raw_meat", 1, {Spoilage.KEY: now - 40.0})
+	Spoilage.server_larder_hour(st)
+	var view := st.view()
+	var sp: Array = view.get("spoiled", [0, 0])
+	check(Settlement.count("raw_meat") == 0 and Spoilage.lost() == lost0 + 1 and int(sp[0]) >= 1, "spoiled stock thrown out, on the screen's food line (%s)" % [sp])
+	Settlement.data()["stoves"] = stoves0
+	_set_clock(2, 8.0)
+	_stand_by(_at(0, -6))
+
+
 # --- Helpers --------------------------------------------------------------------------------------------
+
+## A loot box (WorldCache) put down at `at` under `uid`.
+func _cache(uid: String, at: Vector3) -> WorldCache:
+	var c := WorldCache.new("Cupboard")
+	c.uid = uid
+	c.name = uid
+	level.add_child(c)
+	c.global_position = at
+	return c
+
+
+## The state of the first `id` in box `c`'s hold ({} none).
+func _hold_state(c: WorldCache, id: String) -> Dictionary:
+	for e: Dictionary in c.cargo_hold.entries():
+		if String(e.id) == id:
+			return (e.get("state", {}) as Dictionary).duplicate(true)
+	return {}
+
 
 func _set_clock(day: int, hour: float) -> void:
 	Survival.server_set_options({"season": "spring"})

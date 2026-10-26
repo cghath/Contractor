@@ -42,6 +42,7 @@ Hooks in shared files: `SurvivalLevel._ready` (adds Nature), `Survival.server_no
 - Ivy on walls and saplings in yards (only grass and roads regrow); the foliage index still counts a felled tree's crown
   for concealment; felled trees keep their trunk collision (a stump that blocks).
 - Animals walk straight lines (no navmesh, no ray check), nothing swims; water as terrain (call 108) is not built.
-- Livestock (chickens, goats, cows penned and fed: call 42's fourth part), tanning hides, the dead's interest in
+- Livestock (chickens, goats, cows penned and fed: call 42's fourth part; goats are milked and hides tanned now:
+  docs/survival_hands.md), the dead's interest in
   the crows themselves, a cat as an item.
 - Poison's trauma (`n.poison.trauma`) is a record for the medical lane; nothing grinds it down yet.
