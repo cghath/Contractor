@@ -6,7 +6,7 @@ Every number below is **Proposed**.
 ## Where the build is
 
 - Built (2026-10-26): wildlife, predators, infected animals, migration and fishing, crows/flies/rats/cats,
-  regrowth, foraging, trees, wildfire; the `nature` suite. Run line: see the bottom.
+  regrowth, foraging, trees, wildfire; the `nature` suite. **R2670 PASS** (nature, survival, seasons).
 
 ## What's built
 

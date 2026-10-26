@@ -12,6 +12,9 @@
   companions and pouches, third person (132-135), climbing in full, navmesh with builds, accessibility (140-142), the
   audio tension layer and the bigger TTS (63, 76), relationships (74), top crafting (85), spoilage, clinic pieces.
   Next lanes after the 11:30 CDT reset: fauna+flora; the dead over time; clothing + loadout; audio; condition/wear.
+- **Fauna and flora built on `claude/survival-nature`** (calls 42's hunting/fishing/foraging, 100-107): wildlife with fear,
+  tells and the dead hunting them, predators, infected dogs and wolves, migration and fishing, crows/flies/rats/cats, regrowth,
+  foraging with poisons, trees as a resource, wildfire; R2670 PASS (nature, survival, seasons); see docs/survival_nature.md.
 
 ### (earlier) 2026-10-26 ~08:40 CDT
 
