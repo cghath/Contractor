@@ -225,8 +225,10 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 
 ## Host: `seconds` of a survivor's life (Survival.server_drain): steps the stores and puts their
 ## effects on the body: stamina return, aim sway, blood lost when empty.
+## The New world screen's "needs" option scales the body's time (call 49: x0.6 to x1.5; Proposed:
+## every store at once, sleep's restore included).
 static func server_step(s: Soldier, n: Dictionary, seconds: float) -> void:
-	step(n, seconds / (Survival.DAY_MIN * 60.0) * 24.0, context_of(s))
+	step(n, seconds / (Survival.DAY_MIN * 60.0) * 24.0 * Survival.option_mult("needs"), context_of(s))
 	apply(s, n)
 	var hurt := blood_cost(n)
 	if hurt > 0.0 and s.vitals.is_up():

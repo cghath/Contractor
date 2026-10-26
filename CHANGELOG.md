@@ -86,6 +86,36 @@ Local: survival suite (see the run numbers in docs/survival.md's "Where the buil
   crosshair that pulses when he makes a noise the dead could hear, sized by how far it carried,
   and a small eye above it while one of the dead has its eyes on him (`Soldier.server_watched`).
   A landed swing is a small noise (8 m).
+- **Added (S3: the crowd, pressure, hordes, the specials; phase A step 4):** `ZoneDead`, the far
+  tier of the dead on every survival zone (a record a head, the host walking them, one packet
+  every 0.5 s, a MultiMesh stand-in a kind: `VoxelArt._crowd_zombie`); a crowd head within 70 m
+  of a player becomes a body and a body past 110 m of everyone goes back into the crowd where it
+  stood. **Zone pressure** (`Survival.pressure`, 0-100: shots and noise raise it by their
+  loudness and reach, a half-life of 6 world hours, the pressure point drifting to the loudest
+  noise); the crowd drifts toward it from 20; at **80 a horde** of 30-60 forms from the zone's own
+  dead 150-250 m from the point and walks at it (once a 15 minutes), thinning once the pressure
+  falls under 30; hordes never cross from another zone (call 22). Zones start with a crowd seeded
+  round their sites. **The specials** (call 19) as kinds: the screamer (its first alert is a
+  scream heard 120 m, pressure +25), the crawler (prone, half as easy to see, its attack a grab
+  that trips him: `Melee.server_trip`), the bloater (slow, a big pool; bursts on death: a noise,
+  pressure +10, the taint on anyone within 4 m), the hazmat one (a quarter of body damage, the
+  head as any); rolled by the site's type (`Survival.SPECIALS`: the city most, none in the open).
+- **Added (the cold open, permadeath, world options; phase A step 6, calls 7, 13, 41, 49, 51, 64):**
+  `ColdOpen`: a new world wakes you at the farm with a note on the table from whoever was here
+  (`handwritten_note`, six authors) and what they left, the nearest village marked on the map, the
+  farm marked, day one's line in the journal, and a thing nearby rolled from the seed (a walker in
+  the barn, the well gone bad, a wreck on the road with a part, or quiet), with day one's weather
+  from the seed; the first night brings a little pressure to the farm. **Permadeath**: a dead
+  survivor is gone; the player wakes at the safehouse as a new one (a new name from `Names`, the
+  next generation, the journal and a message say so; the body and kit lie where they fell). **The
+  New world screen** (`NewWorldScreen`): name, seed, the goal (Reach the evac, Sandbox, Clear the
+  map), four world options Low/Normal/High (the dead, loot, needs and medicine, the living
+  world) kept in the save (`Survival.option`, `option_mult`, `dead_speed_mult`: the dead's density
+  and night speed read them now; loot, needs and the living world read them as they land), and the
+  survivor as a blank slate (backgrounds and flaws come with the RPG layer).
+- **Changed (ZombieAI):** sight is a forward cone (`SEE_DOT`, about 100 degrees each side): behind
+  one of the dead you are unseen, which is what the silent kill needs (survival R2618/R2619 found
+  it seeing all round).
 - **Added (tests):** three verdicts in `tools/run_tests.sh` (the Captain: orange for a flaky
   test, red for a failed, green for a pass): a suite that fails is run once more; passing the
   rerun it's **FLAKY** (the run exits 0, the first try's logs kept as `<suite>.first-fail.log`),

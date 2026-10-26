@@ -27,7 +27,18 @@ const INFECTED := &"infected"
 const KINDS := {
 	"walker": {"walk": 0.3, "chase": 0.38, "sprint": false, "pool": 12.0},
 	"runner": {"walk": 0.32, "chase": 1.0, "sprint": true, "pool": 9.0},
+	# The specials (call 19): a screamer calls the zone (a scream heard SCREAM_M, pressure up) when
+	# it turns alert; a crawler keeps low (half as easy to see, a bite that trips him); a bloater
+	# is slow and bursts when it dies (Survival._on_zombie_died); a hazmat one takes a quarter of
+	# body damage (Vitals), the head as any other.
+	"screamer": {"walk": 0.3, "chase": 0.5, "sprint": false, "pool": 8.0, "scream": true},
+	"crawler": {"walk": 0.25, "chase": 0.6, "sprint": false, "pool": 9.0, "low": true, "trip": true},
+	"bloater": {"walk": 0.22, "chase": 0.28, "sprint": false, "pool": 20.0},
+	"hazmat": {"walk": 0.3, "chase": 0.4, "sprint": false, "pool": 40.0, "armoured": true},
 }
+const SCREAM_M := 120.0
+const SCREAM_PRESSURE := 25.0
+var screamed := false
 const NIGHT_WALK_MULT := 1.25
 const SIGHT_M := 40.0
 const NIGHT_SIGHT_M := 15.0
@@ -57,6 +68,10 @@ const HEAR_SHOT := 1.0
 const HEAR_RUN := 0.3
 const HEAR_STEP := 0.12
 const WATCH_S := 0.7  # how long one think's "watched" holds on the player's HUD
+## Sight is a cone: within SEE_DOT of its facing (about 100 degrees each side; behind it, nothing:
+## the silent kill's "from behind"). Something it's after or alert to it keeps in the corner of
+## its eye a little wider.
+const SEE_DOT := -0.2
 
 enum Mode { IDLE, INVESTIGATE, ALERT, CHASE, SEARCH }
 const MODE_NAMES := ["idle", "suspicious", "alert", "chasing", "searching"]
@@ -82,6 +97,8 @@ var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	body = get_parent() as Soldier
+	if bool((KINDS.get(kind, KINDS.walker) as Dictionary).get("low", false)):
+		body.want_stance = SoldierMovement.Stance.PRONE  # a crawler
 	_rng.seed = hash(String(body.name))
 	_think = _rng.randf() * THINK_S  # (not every one on the same frame)
 	_idle_next = Soldier._now() + _rng.randf_range(1.0, 6.0)
@@ -181,7 +198,10 @@ func _decide() -> void:
 		_set_goal(target.global_position)
 		if _flat(target.global_position) <= ATTACK_M and now >= _attack_at:
 			_attack_at = now + ATTACK_S
-			Melee.server_strike(body, target)
+			if bool((KINDS.get(kind, KINDS.walker) as Dictionary).get("trip", false)):
+				Melee.server_trip(body, target)  # a crawler grabs his legs
+			else:
+				Melee.server_strike(body, target)
 	elif mode in [Mode.INVESTIGATE, Mode.SEARCH]:
 		if goal == Vector3.INF or _flat(goal) <= ARRIVE_M:
 			if mode == Mode.INVESTIGATE:
@@ -219,6 +239,12 @@ func _spot() -> Dictionary:
 		var d := body.global_position.distance_to(s.global_position)
 		if d > r:
 			continue
+		var to := s.global_position - body.global_position
+		to.y = 0.0
+		var fwd := -body.global_basis.z
+		fwd.y = 0.0
+		if d > 0.3 and fwd.normalized().dot(to.normalized()) < (SEE_DOT - 0.3 if (s == target or s == aware_of) else SEE_DOT):
+			continue  # behind it
 		# How well: full within the near third, down to nothing at the edge of its reach.
 		var score := clampf(1.0 - (d - r * 0.33) / (r * 0.67), 0.0, 1.0) if d > r * 0.33 else 1.0
 		if score <= best_score:
@@ -259,11 +285,19 @@ func _smell() -> Soldier:
 
 
 ## The groan when it turns alert or starts the chase (the audio layer's cue; once in a while).
+## A screamer's first is the scream: the zone hears it (SCREAM_M) and the pressure jumps.
 func _groan(now: float) -> void:
 	if now - groaned_at < 2.0:
 		return
 	groaned_at = now
 	body.set_meta(&"zombie_groan", now)
+	var k: Dictionary = KINDS.get(kind, KINDS.walker)
+	if bool(k.get("scream", false)) and not screamed:
+		screamed = true
+		body.set_meta(&"zombie_scream", now)
+		Survival.server_noise(body, body.global_position, SCREAM_M, HEAR_SHOT)
+		Survival._raise_pressure(CompoundLevel.current(body), body.global_position, SCREAM_PRESSURE)
+		SessionLog.note("survival: %s screams" % body.log_name())
 
 
 ## The dead about this one join the chase.
@@ -322,7 +356,7 @@ func _steer(delta: float) -> void:
 	var night := DayNight.darkness_at(body.global_position) > 0.5
 	var pace := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
-		pace *= NIGHT_WALK_MULT if night else 1.0
+		pace *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
 	_face(body.global_position + dir, delta)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z) * clampf(pace, 0.0, 1.0)

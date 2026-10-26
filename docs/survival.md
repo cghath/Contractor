@@ -20,7 +20,10 @@ Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), 
 - **S2b melee weapons built 2026-10-26** (calls 86-89): `MeleeWeapons` (nine weapon items with a `melee` stat,
   light/heavy profiles, the head rule in Vitals.undead), `MeleeInput` (fire/hold/aim/double-tap, V shove, Ctrl
   silent kill), `Soldier._server_melee`, `VoxelArt._melee` models; survival suite's "Melee weapons" section.
-  Next: phase A step 3, the stealth model on ZombieAI (senses, awareness states, the HUD ring and eye).
+  **Step 3 the stealth model and step 4 S3 (ZoneDead crowd, zone pressure, local hordes, the four specials)
+  built 2026-10-26**; step 5 the metabolism on claude/survival-metabolism (an Opus lane). **Step 6 (the cold open,
+  permadeath, the New world screen with the goal and world options) built 2026-10-26.** Step 7 the map on
+  claude/survival-map (an Opus lane). Next: step 8 (perfcases, CI, a build), then phase B.
 - **(closed 2026-10-26) OPEN BUG:** survival_test's parry check failed: the bite lands ("melee_winding" gone) but the
   parry branch isn't taken and the player isn't hurt, so `Melee._land` most likely found no target at land time
   (`target_in_front` null: the player may move or turn in the windup; the test's zombie has process disabled).

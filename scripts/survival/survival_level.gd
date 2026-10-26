@@ -16,6 +16,7 @@ func _ready() -> void:
 	def["survival"] = true
 	def["no_pallets"] = true  # (no supply pallets: nobody's resupplying anyone)
 	super._ready()
+	add_child(ZoneDead.new())  # the crowd tier of the dead (S3), the same path on every peer
 	if multiplayer.is_server():
 		Survival.server_level_ready(self)
 

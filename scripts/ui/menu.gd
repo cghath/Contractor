@@ -175,10 +175,17 @@ func host_with_briefing() -> void:
 
 ## Survival (docs/survival.md): a new world, named for the day it was made, from a fresh seed.
 func host_survival_new() -> void:
+	# The New world screen (NewWorldScreen): name, seed, goal, the world options, the survivor.
+	var screen := NewWorldScreen.new(func(name: String, world_seed: int, options: Dictionary) -> void:
+		start_survival_world(name, world_seed, options))
+	add_child(screen)
+
+
+## Survival: a new world with its options (NewWorldScreen's Start; tests call it directly).
+func start_survival_world(name: String, world_seed: int, options := {}) -> void:
 	CompoundLevel.player_role_kits = false  # a survivor has what he finds (Survival's starter kit)
 	CompoundLevel.clean_loot = false
-	var name := "world %s" % Time.get_datetime_string_from_system().replace(":", "").replace("T", " ")
-	if not Survival.server_new_world(get_parent(), name, randi()):
+	if not Survival.server_new_world(get_parent(), name, world_seed, options):
 		_status.text = "Couldn't start a survival world."
 
 

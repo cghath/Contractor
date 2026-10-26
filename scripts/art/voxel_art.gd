@@ -1013,6 +1013,7 @@ static func _spec_build(model: String) -> Dictionary:
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol(model.get_slice(":", 1) if model.contains(":") else "")
 		"melee": return _melee(model.get_slice(":", 1), maxi(model.get_slice(":", 2).to_int(), 8))
+		"crowd_zombie": return _crowd_zombie(model.get_slice(":", 1) if model.contains(":") else "walker")
 		"head_f": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", true)
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
@@ -2940,3 +2941,30 @@ static func _melee(art: String, n: int) -> Dictionary:
 		_:  # pipe and anything else: a bar
 			boxes = [_fb(1.6, 1.6, 0, 2.4, 2.4, nf, C.GUN)]
 	return {"size": Vector3i(4, 4, n), "sub": 4, "boxes": boxes}
+
+
+## The crowd tier's stand-in for one of the dead (ZoneDead, drawn as a MultiMesh far off): a grey
+## box-man, 2 cm units (~1.7 m); a crawler lies low, a bloater is wide, a hazmat one pale.
+static func _crowd_zombie(kind: String) -> Dictionary:
+	var grey := C.GEAR_DARK
+	var skin := C.SKIN_SHADE
+	match kind:
+		"crawler":
+			return {"size": Vector3i(12, 20, 40), "sub": 1, "boxes": [
+				_fb(2, 0, 0, 10, 10, 34, grey),   # the body along the ground
+				_fb(3, 2, 34, 9, 12, 40, skin),   # the head up
+			]}
+		"bloater":
+			return {"size": Vector3i(18, 85, 14), "sub": 1, "boxes": [
+				_fb(4, 0, 4, 8, 38, 9, grey), _fb(10, 0, 4, 14, 38, 9, grey),  # legs
+				_fb(1, 38, 1, 17, 70, 13, grey),                                 # the swollen trunk
+				_fb(5, 70, 4, 13, 85, 10, skin),                                 # head
+			]}
+		_:
+			var pale := kind == "hazmat"
+			return {"size": Vector3i(14, 85, 10), "sub": 1, "boxes": [
+				_fb(2, 0, 3, 6, 40, 7, grey), _fb(8, 0, 3, 12, 40, 7, grey),   # legs
+				_fb(2, 40, 2, 12, 72, 8, C.PAD if pale else grey),             # torso
+				_fb(0, 44, 3, 2, 70, 7, grey), _fb(12, 44, 3, 14, 70, 7, grey),  # arms, hanging
+				_fb(4, 72, 2, 10, 85, 8, C.PAD if pale else skin),             # head (a hood on the hazmat one)
+			]}

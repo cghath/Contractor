@@ -81,6 +81,16 @@ static func server_strike(attacker: Soldier, _victim: Soldier) -> bool:
 	return server_attack(attacker, ZOMBIE_ATTACK)
 
 
+## A crawler's attack (call 19): grabs his legs: a shallow bite low and a trip (TRIP_S staggered:
+## he can't swing or guard, and the dead about him get their bites in).
+const TRIP_ATTACK := {"windup": 0.45, "heavy": false, "round_class": &"pistol", "depth": 0.03, "parts": [&"shin_l", &"shin_r", &"thigh_l", &"thigh_r"], "name": "grab", "trip": true}
+const TRIP_S := 1.2
+
+
+static func server_trip(attacker: Soldier, _victim: Soldier) -> bool:
+	return server_attack(attacker, TRIP_ATTACK)
+
+
 ## Host: the strike lands: the first body in reach and in front, through its defence. `land_at`
 ## is when the windup said it would land: a parry is judged against that, not against when the
 ## timer got round to firing (a slow frame landed the strike late and turned a timely block into
@@ -146,6 +156,9 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	if bool(attack.get("shove", false)):
 		guard_of(victim).stagger_until = Soldier._now() + SHOVE_STAGGER_S  # a shove: a second bought, little harm
 		mult *= 0.3
+	if bool(attack.get("trip", false)):
+		guard_of(victim).stagger_until = Soldier._now() + TRIP_S  # tripped: no swing, no guard
+		_note(victim, "tripped")
 	var parts: Array = attack.get("parts", [Vitals.CHEST])
 	var part: StringName = parts[absi(hash([attacker.name, victim.name, Soldier._now()])) % parts.size()]
 	if not attacker.is_ai() and attack.has("kind"):
