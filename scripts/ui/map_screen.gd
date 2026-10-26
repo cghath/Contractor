@@ -144,6 +144,7 @@ func open() -> void:
 	var me := MapNodes.local_player(self)
 	if me and not _forced:
 		view.look_at_point(Vector2(me.global_position.x, me.global_position.z))
+	FallenMap.show_on(self, level is SurvivalLevel)  # survival: the one map, world to zone
 
 
 func close() -> void:
@@ -181,6 +182,8 @@ func is_world_open() -> bool:
 
 ## Shows the theatre map over the zone map (World, Tab), or goes back to the zone map.
 func show_world(on: bool) -> void:
+	if FallenMap.on_show_world(self, on):
+		return  # survival: the one map zooms out instead
 	if on and world == null:
 		world = WorldMapScreen.new(true)
 		world.visible = false
