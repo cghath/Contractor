@@ -184,6 +184,7 @@ var _view_poses: Array[StringName] = [&"", &""]
 var _view_press_t := 0.0
 var _view_shot_t := 99.0
 var _view_pistol := false
+var _melee: MeleeInput  # the melee controls (survival: MeleeInput), made on first use
 var _reload_points := {}  # VoxelArt.reload_points of the weapon in view
 var _reload_keys: Array = []  # Reloads.keys of the reload under way
 var _reload_pos := Vector3.ZERO  # its weapon offset and turn this frame (Reloads)
@@ -518,6 +519,33 @@ func _process(delta: float) -> void:
 	body.camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.08
 	_update_hearing()
 	_update_bob(delta)
+	_update_melee()
+
+
+func _melee_input() -> MeleeInput:
+	if _melee == null:
+		_melee = MeleeInput.new(body)
+	return _melee
+
+
+## The melee controls that work with anything up (MeleeInput): the dodge double-tap, the quick
+## melee key (V: a shove with the butt of a gun), the silent kill behind an unaware zombie with a
+## blade (the interact key); and the block let go when the melee weapon goes down.
+func _update_melee() -> void:
+	if not _captured() or not body.vitals.is_up() or is_instance_valid(body.vehicle) or body.respawn_state == Soldier.RESPAWN_WAITING \
+			or hud.is_inventory_open() or interaction.is_open() or body.inventory.hands != &"" or body.carry_mode != &"":
+		if _melee:
+			_melee.drop()
+		return
+	var weapon := body.active_weapon()
+	if not MeleeWeapons.is_melee(weapon):
+		if _melee:
+			_melee.drop()
+		_melee_input()._update_dodge(Soldier._now())
+		if Input.is_action_just_pressed(&"quick_melee") and weapon != null and not nade_up and not placing:
+			body._server_melee.rpc_id(1, "quick")
+	if _melee_input().try_silent_kill():
+		hud.flash("Silent kill")
 
 
 ## The gamepad's right stick each frame (while the game has the mouse): with View held it picks
@@ -962,6 +990,9 @@ func _try_fire() -> void:
 		return
 	if weapon == null or weapon.type != "weapon":
 		return
+	if MeleeWeapons.is_melee(weapon):
+		_melee_input().update(hud)  # swings, the block, the dodge (MeleeInput)
+		return
 	if body.underbarrel_up and Shotguns.key_of(body) != null:
 		if Input.is_action_just_pressed(&"fire"):
 			_fire_key(weapon)  # the Skeleton Key under it (4 switched to it)
@@ -1109,7 +1140,7 @@ func _update_aim(delta: float) -> void:
 		return
 	var weapon := body.active_weapon()
 	var was_aiming := body.is_aiming
-	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" or Launchers.is_launcher(weapon)) \
+	body.is_aiming = _captured() and not nade_up and body.vitals.is_up() and weapon != null and (weapon.type == "weapon" and not MeleeWeapons.is_melee(weapon) or Launchers.is_launcher(weapon)) \
 		and body.inventory.hands == &"" and not body.is_reloading and not body.movement.mantling and Input.is_action_pressed(&"aim")
 	if body.is_aiming and not was_aiming:
 		# Up from low (the sprint carry, the low ready) takes longer than from the ready.

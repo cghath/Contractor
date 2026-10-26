@@ -24,6 +24,8 @@ func _ready() -> void:
 		_test_needs()
 		await _test_dead()
 		await _test_melee()
+		await _test_melee_weapons()
+		await _test_stealth()
 		await _test_death()
 		await _test_save_and_continue()
 	_finish()
@@ -133,51 +135,230 @@ func _test_melee() -> void:
 	print("Melee: block, parry, counter, dodge")
 	for zz: Soldier in Survival.zombies(level):
 		zz.queue_free()
+	await get_tree().process_frame
+	# A clear spot, away from the bodies the last section left (a ragdoll at his feet nudges him
+	# about: R2608-R2613 saw the pair drift apart between a placing and a strike).
 	var fwd := -player.global_basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()
-	var z := Survival.server_spawn_zombie(level, player.global_position + fwd * 1.0)
+	var side := fwd.cross(Vector3.UP).normalized()
+	player.global_position = level.ground_point(player.global_position + side * 25.0)
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	var p0 := player.global_position
+	await _seconds(1.0)
+	check(player.global_position.distance_to(p0) < 0.3, "standing still on clear ground, he stays put (moved %.2f m in a second)" % player.global_position.distance_to(p0))
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.3))
 	await get_tree().physics_frame
 	z.process_mode = Node.PROCESS_MODE_DISABLED  # (the test drives it)
-	z.look_at(player.global_position, Vector3.UP)
-	z.rotation.x = 0.0
-	player.look_at(z.global_position, Vector3.UP)
-	player.rotation.x = 0.0
-	var blood := player.vitals.blood_fraction()
+	var face := func() -> void:
+		z.global_position = level.ground_point(player.global_position + fwd * 1.3)
+		z.look_at(player.global_position, Vector3.UP)
+		z.rotation.x = 0.0
+		player.look_at(z.global_position, Vector3.UP)
+		player.rotation.x = 0.0
+	face.call()
+	await get_tree().physics_frame
+	var wounds := player.vitals.wound_list().size()
 	var front := Melee.target_in_front(z)
 	check(front == player, "the bite has him in front of it (%s; %.2f m, z faces %s, to him %s)" % [front, z.global_position.distance_to(player.global_position),
 		-z.global_basis.z, (player.global_position - z.global_position).normalized()])
-	# A parry: the block comes just before the bite lands.
-	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s)" % float(Melee.ZOMBIE_ATTACK.windup))
-	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) - 0.1)
+	# The judgement, with the strike's landing given (no timers to race: R2607-R2613).
+	var now := Soldier._now()
 	Melee.server_block(player, true)
-	await _seconds(0.2)
-	check(Melee.staggered(z) and is_equal_approx(player.vitals.blood_fraction(), blood), "a block raised just before it lands parries: it staggers, nothing gets through (now %.2f; his guard %s; its %s; winding %s)" % [
-		Soldier._now(), Melee.guard_of(player), Melee.guard_of(z), z.get_meta(&"melee_winding", "landed")])
-	var counter_ready := Soldier._now() < float(Melee.guard_of(player).counter_until)
-	check(counter_ready, "and the parry opens a counter")
+	Melee._land(z, Melee.ZOMBIE_ATTACK, 1.0, now + 0.1)  # a block raised 0.1 s before the landing the windup promised
+	check(Melee.staggered(z) and player.vitals.wound_list().size() == wounds, "a block raised just before it lands parries: it staggers, nothing gets through (%s; its %s; wounds %d -> %d)" % [
+		Melee.guard_of(player), Melee.guard_of(z), wounds, player.vitals.wound_list().size()])
+	check(Soldier._now() < float(Melee.guard_of(player).counter_until), "and the parry opens a counter")
 	var pool := z.vitals.undead_pool
 	Melee.server_attack(player, {"windup": 0.6, "round_class": Vitals.PISTOL, "energy_j": 300.0, "parts": [Vitals.CHEST], "name": "knife"})
-	check(z.vitals.undead_pool < pool, "the counter lands at once, twice as hard (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
+	check(z.vitals.undead_pool < pool and not player.has_meta(&"melee_winding"), "the counter lands at once, twice as hard (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
 	Melee.server_block(player, false)
-	# A block held long before: a jolt gets through.
-	await _seconds(Melee.STAGGER_S)
-	Melee.server_block(player, true)
-	await _seconds(0.5)
-	Melee.server_attack(z, Melee.ZOMBIE_ATTACK)
-	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) + 0.1)
+	# A block held a while: a jolt gets through, no parry.
+	await _seconds(Melee.STAGGER_S + 0.1)
+	Melee.guard_of(player).block_at = Soldier._now() - 1.0
+	Melee._land(z, Melee.ZOMBIE_ATTACK, 1.0, Soldier._now())
 	check(not Melee.staggered(z), "a block held a while just blocks (no parry)")
 	Melee.server_block(player, false)
 	# A dodge: nothing lands.
 	player.vitals.server_reset_health()
-	blood = player.vitals.blood_fraction()
-	Melee.server_attack(z, Melee.ZOMBIE_ATTACK)
-	await _seconds(float(Melee.ZOMBIE_ATTACK.windup) - 0.15)
+	wounds = player.vitals.wound_list().size()
 	check(Melee.server_dodge(player), "a dodge, for stamina")
-	await _seconds(0.3)
-	check(is_equal_approx(player.vitals.blood_fraction(), blood), "and the bite misses")
+	Melee._land(z, Melee.ZOMBIE_ATTACK, 1.0, Soldier._now())
+	check(player.vitals.wound_list().size() == wounds, "and the bite misses (wounds %d -> %d)" % [wounds, player.vitals.wound_list().size()])
+	# And the real thing: a strike wound up on its timer lands on an undefended man.
+	await _seconds(Melee.DODGE_IFRAMES_S + 0.1)
+	player.remove_meta(Melee.GUARD)
+	face.call()
+	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s)" % float(Melee.ZOMBIE_ATTACK.windup))
+	var land_at := float(z.get_meta(&"melee_winding", 0.0))
+	while z.has_meta(&"melee_winding") and Soldier._now() < land_at + 2.0:
+		await get_tree().process_frame
+	await _seconds(0.1)
+	check(player.vitals.wound_list().size() > wounds, "and lands on a man with no guard up (wounds %d -> %d; %.2f m apart)" % [wounds, player.vitals.wound_list().size(), z.global_position.distance_to(player.global_position)])
 	z.queue_free()
+	player.remove_meta(Melee.GUARD)
 	player.vitals.server_reset_health()
+
+
+func _test_melee_weapons() -> void:
+	print("Melee weapons: a bat, a knife, the heavy to the head, the silent kill, the shove")
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	await get_tree().process_frame
+	var bat := ItemDB.get_item(&"bat")
+	check(bat != null and MeleeWeapons.is_melee(bat) and MeleeWeapons.two_handed(bat) and bat.slot == &"primary", "a baseball bat is a two-handed melee weapon in the primary slot")
+	var knife := ItemDB.get_item(&"combat_knife")
+	check(knife != null and MeleeWeapons.is_blade(knife) and knife.slot == &"sidearm", "the combat knife a one-handed blade in the sidearm slot")
+	var model := VoxelArt.model_for(bat) if bat else ""
+	check(model.begins_with("melee:bat:") and not VoxelArt.hand_points(model).is_empty() and VoxelArt._spec(model).boxes.size() >= 3, "and the bat has a model with hand points (%s)" % model)
+	check(MeleeWeapons.profile(bat, true).heavy and MeleeWeapons.profile(bat, true).energy_j >= MeleeWeapons.HEAD_ONE_HIT_J and MeleeWeapons.profile(bat, false).energy_j < MeleeWeapons.HEAD_ONE_HIT_J,
+		"its heavy is hard enough for the head, its light is not (%.0f / %.0f J)" % [MeleeWeapons.profile(bat, true).energy_j, MeleeWeapons.profile(bat, false).energy_j])
+	# Up with the bat.
+	check(player.inventory.take(&"bat") == 1 and player.inventory.slots.get(&"primary", &"") == &"bat", "taking a bat puts it in the primary slot (%s)" % player.inventory.slots.get(&"primary", &""))
+	player.select_weapon(&"primary")
+	check(MeleeWeapons.is_melee(player.active_weapon()), "and it is the weapon in hand")
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var place := func(zz: Soldier, dist: float, facing_away: bool) -> void:
+		zz.global_position = level.ground_point(player.global_position + fwd * dist)
+		if facing_away:
+			zz.look_at(zz.global_position + fwd * 5.0, Vector3.UP)
+		else:
+			zz.look_at(player.global_position, Vector3.UP)
+		zz.rotation.x = 0.0
+		player.look_at(zz.global_position, Vector3.UP)
+		player.rotation.x = 0.0
+		# His eyes on its head (Melee._part_for: a swing lands where he looks).
+		var head := zz.global_position + Vector3.UP * 1.62
+		var eye := player.camera.global_position
+		var flat := Vector2(head.x - eye.x, head.z - eye.z).length()
+		player.set_pitch(atan2(head.y - eye.y, flat))
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.3))
+	await get_tree().physics_frame
+	z.process_mode = Node.PROCESS_MODE_DISABLED
+	place.call(z, 1.3, false)
+	await get_tree().physics_frame
+	check(Melee._part_for(player, z, Vitals.CHEST) == Vitals.HEAD, "looking at its head, a swing goes there")
+	# A light swing: stamina spent, a share of the pool from the head, not its life.
+	player.remove_meta(Melee.GUARD)
+	player.movement.stamina = 1.0
+	var pool := z.vitals.undead_pool
+	MeleeWeapons.server_action(player, "light")
+	check(player.has_meta(&"melee_winding") and player.movement.stamina < 1.0, "a light swing winds up and costs stamina (%.2f)" % player.movement.stamina)
+	var land_at := float(player.get_meta(&"melee_winding", 0.0))
+	while player.has_meta(&"melee_winding") and Soldier._now() < land_at + 2.0:
+		await get_tree().process_frame
+	await _seconds(0.1)
+	check(z.vitals.is_up() and z.vitals.undead_pool <= pool - Vitals.UNDEAD_POOL * MeleeWeapons.HEAD_LIGHT_SHARE + 0.01, "a light to a walker's head takes a share of the pool, not its life (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
+	# A heavy to the head drops it.
+	place.call(z, 1.3, false)
+	MeleeWeapons.server_action(player, "heavy")
+	land_at = float(player.get_meta(&"melee_winding", 0.0))
+	while player.has_meta(&"melee_winding") and Soldier._now() < land_at + 2.0:
+		await get_tree().process_frame
+	await _seconds(0.1)
+	check(z.vitals.is_dead(), "a heavy to the head drops it (%s)" % z.vitals.last_cause.get("cause", "still up"))
+	z.queue_free()
+	await get_tree().process_frame
+	# The silent kill: behind an unaware one with a blade (the starter knife on the rig counts).
+	player.set_pitch(0.0)
+	var quiet := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.2))
+	await get_tree().physics_frame
+	quiet.process_mode = Node.PROCESS_MODE_DISABLED
+	place.call(quiet, 1.2, true)
+	await get_tree().physics_frame
+	check(Melee.silent_kill_target(player) == quiet, "behind an unaware zombie within reach, the silent kill is on offer (%.2f m)" % quiet.global_position.distance_to(player.global_position))
+	MeleeWeapons.server_action(player, "silent")
+	check(player._server_busy_until > Soldier._now() + 1.0, "it takes %.0f s with the hands on it" % MeleeWeapons.SILENT_KILL_S)
+	await _seconds(MeleeWeapons.SILENT_KILL_S + 0.4)
+	check(quiet.vitals.is_dead() and String(quiet.vitals.last_cause.get("cause", "")) == "head", "and the blade goes in quietly (%s; %.2f m apart)" % [quiet.vitals.last_cause.get("cause", "still up"), quiet.global_position.distance_to(player.global_position)])
+	quiet.queue_free()
+	await get_tree().process_frame
+	# The shove with a gun up: a second bought.
+	check(player.inventory.take(&"m17") == 1, "a pistol for the sidearm slot")
+	player.select_weapon(&"sidearm")
+	var shoved := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.1))
+	await get_tree().physics_frame
+	shoved.process_mode = Node.PROCESS_MODE_DISABLED
+	place.call(shoved, 1.1, false)
+	await get_tree().physics_frame
+	MeleeWeapons.server_action(player, "quick")
+	land_at = float(player.get_meta(&"melee_winding", 0.0))
+	while player.has_meta(&"melee_winding") and Soldier._now() < land_at + 2.0:
+		await get_tree().process_frame
+	check(Melee.staggered(shoved) and shoved.vitals.is_up(), "the quick melee with a gun up shoves it back a second, no more (%.2f m apart)" % shoved.global_position.distance_to(player.global_position))
+	shoved.queue_free()
+	# The slots as they were: the death test takes a rifle into the primary.
+	player.inventory.unequip(&"primary")
+	player.inventory.unequip(&"sidearm")
+	player.select_weapon(&"primary")
+	player.set_pitch(0.0)
+	player.vitals.server_reset_health()
+
+
+func _test_stealth() -> void:
+	print("Stealth: awareness by sight, sound and smell; the eye and the ring")
+	for zz: Soldier in Survival.zombies(level):
+		zz.queue_free()
+	await get_tree().process_frame
+	player.vitals.server_reset_health()
+	player.watched_until = -1.0
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	# Sight: one 8 m in front by day turns alert first (it stops and faces him), then comes.
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 8.0))
+	await get_tree().physics_frame
+	var brain := ZombieAI.of(z)
+	check(brain != null and brain.mode == ZombieAI.Mode.IDLE and brain.unaware(), "one 8 m off starts idle, unaware")
+	var alert := await _wait_for(func() -> bool: return brain.mode == ZombieAI.Mode.ALERT, 3.0)
+	check(alert and brain.awareness >= ZombieAI.ALERT_AT and brain.aware_of == player, "it sees him and turns alert (awareness %.2f, %s)" % [brain.awareness, brain.state_name()])
+	check(not brain.unaware(), "an alert one is no longer unaware (no silent kill)")
+	var chase := await _wait_for(func() -> bool: return brain.mode == ZombieAI.Mode.CHASE, 4.0)
+	check(chase and brain.target == player, "then its awareness fills and it comes for him (%s)" % brain.state_name())
+	check(player.watched_until > Soldier._now() - 0.1, "and he knows he's watched (the HUD's eye)")
+	z.queue_free()
+	await get_tree().process_frame
+	# Sound: a quiet step is a little, a shot is everything.
+	var far := Survival.server_spawn_zombie(level, level.ground_point(player.global_position - fwd * 60.0))
+	await get_tree().physics_frame
+	far.process_mode = Node.PROCESS_MODE_DISABLED
+	brain = ZombieAI.of(far)
+	brain.hear(player.global_position, ZombieAI.HEAR_STEP)
+	check(brain.mode == ZombieAI.Mode.INVESTIGATE and brain.awareness < ZombieAI.ALERT_AT, "a step heard: it goes to look, not yet alert (awareness %.2f)" % brain.awareness)
+	brain.hear(player.global_position, ZombieAI.HEAR_SHOT)
+	check(brain.awareness >= 1.0, "a shot heard: its awareness fills at once (%.2f)" % brain.awareness)
+	far.queue_free()
+	# The ring: his own shot shows on his HUD how far it carried.
+	player.noise_at = -100.0
+	Survival.server_noise(player, player.global_position, ZombieAI.SHOT_HEARD_M)
+	await get_tree().process_frame
+	check(is_equal_approx(player.noise_radius, ZombieAI.SHOT_HEARD_M) and Soldier._now() - player.noise_at < 1.0, "his own noise shows on his HUD as the ring (%.0f m)" % player.noise_radius)
+	# Footsteps: a man running is heard by the dead STEP_M away, a crouched one hardly.
+	player.noise_at = -100.0
+	player.velocity = fwd * 4.0
+	player.movement.is_sprinting = true
+	Survival._footsteps(level)
+	check(is_equal_approx(player.noise_radius, Survival.STEP_M.sprint * DayNight.hearing_x()), "a sprinting man's steps carry %.0f m (%.0f)" % [Survival.STEP_M.sprint * DayNight.hearing_x(), player.noise_radius])
+	player.movement.is_sprinting = false
+	player.velocity = Vector3.ZERO
+	# Smell: bleeding, he's smelt downwind within SMELL_M.
+	var sniffer := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 60.0))
+	await get_tree().physics_frame
+	sniffer.process_mode = Node.PROCESS_MODE_DISABLED
+	brain = ZombieAI.of(sniffer)
+	check(brain._smell() == null, "clean and far, nobody is smelt")
+	var wind := DayNight.wind()
+	var downwind := wind.normalized() if wind.length() >= ZombieAI.CALM_MPS else fwd
+	sniffer.global_position = level.ground_point(player.global_position + downwind * 12.0)
+	player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.PISTOL, "energy_j": 200.0})
+	check(player.smell_strength() > 0.0, "bleeding, he smells of blood (%.1f)" % player.smell_strength())
+	check(brain._smell() == player, "and one 12 m downwind smells him (wind %.1f m/s)" % wind.length())
+	sniffer.queue_free()
+	player.vitals.server_reset_health()
+	player.watched_until = -1.0
 
 
 func _seconds(s: float) -> void:

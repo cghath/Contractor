@@ -17,7 +17,11 @@ Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), 
 - **S2b melee core** `scripts/survival/melee.gd`: telegraphed attacks (windup), dodge/sidestep i-frames,
   block (20% through, stamina, heavy breaks it), parry (block within 0.25 s of landing: stagger + 1.2 s
   counter window, counter instant x2). Zombie bites go through it. Tested OK: windup, held block, dodge.
-- **OPEN BUG (first thing):** survival_test's parry check fails: the bite lands ("melee_winding" gone) but the
+- **S2b melee weapons built 2026-10-26** (calls 86-89): `MeleeWeapons` (nine weapon items with a `melee` stat,
+  light/heavy profiles, the head rule in Vitals.undead), `MeleeInput` (fire/hold/aim/double-tap, V shove, Ctrl
+  silent kill), `Soldier._server_melee`, `VoxelArt._melee` models; survival suite's "Melee weapons" section.
+  Next: phase A step 3, the stealth model on ZombieAI (senses, awareness states, the HUD ring and eye).
+- **(closed 2026-10-26) OPEN BUG:** survival_test's parry check failed: the bite lands ("melee_winding" gone) but the
   parry branch isn't taken and the player isn't hurt, so `Melee._land` most likely found no target at land time
   (`target_in_front` null: the player may move or turn in the windup; the test's zombie has process disabled).
   Print `target_in_front(attacker)` in `_land`, then fix (maybe lock the victim at windup start and re-check reach).

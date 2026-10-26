@@ -41,6 +41,7 @@ var ammo_readout: AmmoReadout
 var armor_readout: ArmorReadout
 ## The bearing strip across the top of the screen (Compass).
 var compass: Compass
+var _tells: StealthTells  # survival: the noise ring and the eye
 ## The zones (see the top): the right column, the left column, and the bottom-centre stack.
 var zone_top_right: VBoxContainer
 var zone_left: VBoxContainer
@@ -187,6 +188,8 @@ func _ready() -> void:
 	# The map (M) and the briefing, over everything else (W13).
 	_bleed = BleedSilhouette.new(player)
 	add_child(_bleed)
+	_tells = StealthTells.new(player)
+	add_child(_tells)
 	map_screen = MapScreen.new(player)
 	add_child(map_screen)
 	move_child(_message, -1)  # messages stay readable over the map
@@ -498,6 +501,59 @@ func vehicle_text() -> String:
 		if label.visible:
 			parts.append(label.text)
 	return "  |  ".join(parts)
+
+
+## Survival's stealth tells (calls 29, 33; Captain: "diegetic first, HUD second"): a thin ring
+## under the crosshair that pulses when the local player makes a noise the dead could hear, sized
+## by how far it carried (Soldier.noise_radius), and a small eye above it while one of the dead
+## has its eyes on him (Soldier.watched_until). Nothing drawn otherwise.
+class StealthTells extends Control:
+	const RING_S := 0.9
+	const RING_MIN_PX := 14.0
+	const RING_MAX_PX := 44.0
+	const FAR_M := 180.0
+	var player: Soldier
+	var _was_visible := false
+
+	func _init(p: Soldier = null) -> void:
+		player = p
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_anchors_preset(Control.PRESET_CENTER)
+		size = Vector2(120, 120)
+		position = -size * 0.5
+
+	func ring_share() -> float:
+		if player == null:
+			return 0.0
+		return clampf(1.0 - (Soldier._now() - player.noise_at) / RING_S, 0.0, 1.0)
+
+	func watched() -> bool:
+		return player != null and Soldier._now() < player.watched_until
+
+	func _process(_delta: float) -> void:
+		var on := ring_share() > 0.0 or watched()
+		if on or _was_visible:
+			queue_redraw()
+		_was_visible = on
+
+	func _draw() -> void:
+		var centre := size * 0.5
+		var share := ring_share()
+		if share > 0.0 and player != null:
+			var r := lerpf(RING_MIN_PX, RING_MAX_PX, clampf(player.noise_radius / FAR_M, 0.0, 1.0)) * (1.0 + (1.0 - share) * 0.35)
+			draw_arc(centre + Vector2(0, 26), r, 0.0, TAU, 40, Color(1.0, 0.9, 0.6, 0.55 * share), 1.5, true)
+		if watched():
+			# A small eye: an almond and a pupil.
+			var at := centre + Vector2(0, -26)
+			var pts := PackedVector2Array()
+			for i in 17:
+				var t := float(i) / 16.0
+				pts.append(at + Vector2(lerpf(-9.0, 9.0, t), -sin(t * PI) * 5.0))
+			for i in 17:
+				var t := float(i) / 16.0
+				pts.append(at + Vector2(lerpf(9.0, -9.0, t), sin(t * PI) * 5.0))
+			draw_polyline(pts, Color(1.0, 0.45, 0.35, 0.85), 1.5, true)
+			draw_circle(at, 2.2, Color(1.0, 0.45, 0.35, 0.9))
 
 
 ## A small body silhouette in the top-left corner while the local player has an untreated bleed,

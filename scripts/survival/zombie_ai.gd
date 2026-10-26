@@ -1,16 +1,25 @@
 class_name ZombieAI
 extends Node
-## Host-only brain for one of the dead (docs/survival.md S2). Like CivilianAI it only writes the
-## body's intent fields (move_input, want_sprint, rotation); the body is a Soldier in faction
-## INFECTED with Vitals.undead (the head kills, anything else wears the pool down).
+## Host-only brain for one of the dead (docs/survival.md S2; the stealth model, calls 29 and 33).
+## Like CivilianAI it only writes the body's intent fields (move_input, want_sprint, rotation);
+## the body is a Soldier in faction INFECTED with Vitals.undead (the head kills, anything else
+## wears the pool down).
 ##
-## - Idle: shuffles about where it stands, now and then a few steps somewhere near.
-## - Hears (Survival.server_noise: shots, doors, cars): goes to the sound and looks about there.
-## - Sees (SIGHT_M by day, NIGHT_SIGHT_M at night, half as far for a crouched or prone man): goes
-##   for him, a walker at its shamble, a runner flat out; the dead within GROUP_M of it come too.
-## - Reaches (ATTACK_M): a bite or a blow every ATTACK_S (Melee.server_strike).
-## - Loses him (out of sight LOSE_S): goes where it saw him last, then idles there.
-## Thinks every THINK_S (a sight check and a path), steers every physics frame.
+## Three senses feed one **awareness** (0..1) with a visible state:
+## - **sight** (SIGHT_M by day, NIGHT_SIGHT_M at night and between by the darkness; half as far
+##   for a crouched or prone man; the weather's sight_m caps it and its spot_x slows it; a line
+##   of sight is needed): awareness rises by how well it sees him, faster up close;
+## - **sound** (Survival.server_noise -> hear): a shot, a kicked door, a running man; how loud
+##   sets how much awareness it adds, and it goes to where it was;
+## - **smell** (SMELL_M downwind of a bleeding man, or any way round in calm air; blood and gore
+##   on him: Soldier.smell_strength): a slow rise, and it drifts upwind to the source.
+## States (Mode): IDLE shuffling about; INVESTIGATE walking to a sound or a smell and searching
+## round it; **ALERT** (awareness past ALERT_AT): it stops, faces him, groans, and watches,
+## awareness still rising while it sees him; **CHASE** (awareness 1): after him, a walker at its
+## shamble, a runner flat out, the dead within GROUP_M joining; a bite or a blow every ATTACK_S
+## in reach (Melee.server_strike); **SEARCH** where it lost him. Awareness falls when nothing
+## feeds it. A player it's ALERT to or chasing is told he's watched (Soldier.server_watched: the
+## HUD's eye). Thinks every THINK_S, steers every physics frame.
 
 const INFECTED := &"infected"
 ## The kinds (data/zombies.json in time; Proposed): a walker's shamble (share of the run), a
@@ -25,6 +34,9 @@ const NIGHT_SIGHT_M := 15.0
 const LOW_SIGHT_MULT := 0.5
 const SHOT_HEARD_M := 180.0
 const SUPPRESSED_HEARD_M := 40.0
+const SMELL_M := 30.0
+const SMELL_CALM_M := 10.0   # in calm air, from any side
+const CALM_MPS := 0.6
 const GROUP_M := 12.0
 const ATTACK_M := 1.5
 const ATTACK_S := 1.3
@@ -34,14 +46,29 @@ const SEARCH_S := 12.0
 const ARRIVE_M := 1.5
 const WANDER_M := 8.0
 const TURN_RATE := 6.0
+## Awareness: ALERT past this, CHASE at 1. Sight raises it SIGHT_RISE a second at a full view
+## (a man close, standing, by day), less by the view's share; a sound adds its loudness (a shot
+## 1: straight to the chase); smell SMELL_RISE a second; it falls FALL a second with nothing.
+const ALERT_AT := 0.35
+const SIGHT_RISE := 1.4
+const SMELL_RISE := 0.25
+const FALL := 0.15
+const HEAR_SHOT := 1.0
+const HEAR_RUN := 0.3
+const HEAR_STEP := 0.12
+const WATCH_S := 0.7  # how long one think's "watched" holds on the player's HUD
 
-enum Mode { IDLE, INVESTIGATE, CHASE, SEARCH }
+enum Mode { IDLE, INVESTIGATE, ALERT, CHASE, SEARCH }
+const MODE_NAMES := ["idle", "suspicious", "alert", "chasing", "searching"]
 
 var body: Soldier
 var kind := "walker"
 var mode := Mode.IDLE
 var target: Soldier
 var goal := Vector3.INF
+var awareness := 0.0
+var aware_of: Soldier  # who it's becoming aware of (ALERT), or null
+var groaned_at := -100.0
 var _path := PackedVector3Array()
 var _path_index := 0
 var _think := 0.0
@@ -49,6 +76,7 @@ var _attack_at := 0.0
 var _seen_at := -100.0
 var _search_until := 0.0
 var _idle_next := 0.0
+var _before_alert := Mode.IDLE
 var _rng := RandomNumberGenerator.new()
 
 
@@ -64,11 +92,25 @@ static func of(s: Node) -> ZombieAI:
 	return s.get_node_or_null(^"ZombieAI") as ZombieAI if s else null
 
 
-## Host: a sound at `pos` this one can hear: unless it's after someone, it goes to look.
-func hear(pos: Vector3) -> void:
+## The state's name, for the HUD and the logs ("idle", "suspicious", "alert", "chasing", "searching").
+func state_name() -> String:
+	return MODE_NAMES[mode]
+
+
+## Whether this one has no idea anyone's there (the silent kill's "unaware": idle, or looking
+## into a sound or a smell, not watching him).
+func unaware() -> bool:
+	return mode in [Mode.IDLE, Mode.INVESTIGATE, Mode.SEARCH]
+
+
+## Host: a sound at `pos` this one can hear, `loud` 0..1 (a shot 1, a running man HEAR_RUN, a
+## step HEAR_STEP): awareness up by it; unless it's after someone, it goes to look.
+func hear(pos: Vector3, loud := HEAR_SHOT) -> void:
+	awareness = clampf(awareness + loud, 0.0, 1.0)
 	if mode == Mode.CHASE:
 		return
-	mode = Mode.INVESTIGATE
+	if mode != Mode.ALERT:
+		mode = Mode.INVESTIGATE
 	_set_goal(pos)
 
 
@@ -86,19 +128,55 @@ func _physics_process(delta: float) -> void:
 
 func _decide() -> void:
 	var now := Soldier._now()
-	var seen := _spot()
-	if seen != null:
-		if target != seen:
-			_rally(seen)
-		target = seen
+	var seen := _spot()  # {"who", "score"} or {}
+	var who: Soldier = seen.get("who") if not seen.is_empty() else null
+	var fed := false
+	if who != null:
+		awareness = clampf(awareness + float(seen.score) * SIGHT_RISE * THINK_S / maxf(DayNight.spot_x(body.global_position), 0.1), 0.0, 1.0)
+		aware_of = who
+		fed = true
+	var smelt := _smell()
+	if smelt != null and mode != Mode.CHASE:
+		awareness = clampf(awareness + SMELL_RISE * THINK_S, 0.0, 1.0)
+		if mode in [Mode.IDLE, Mode.SEARCH]:
+			mode = Mode.INVESTIGATE
+			_set_goal(smelt.global_position)
+		fed = true
+	if not fed and mode != Mode.CHASE:
+		awareness = maxf(awareness - FALL * THINK_S, 0.0)
+	# The states.
+	if awareness >= 1.0 and (who != null or is_instance_valid(target)):
+		var chase := who if who != null else target
+		if target != chase:
+			_rally(chase)
+		target = chase
+		if mode != Mode.CHASE:
+			_groan(now)
 		mode = Mode.CHASE
 		_seen_at = now
-		_set_goal(seen.global_position)
+		_set_goal(chase.global_position)
 	elif mode == Mode.CHASE:
 		if not is_instance_valid(target) or not target.vitals.is_up() or now - _seen_at > LOSE_S:
 			mode = Mode.SEARCH
 			_search_until = now + SEARCH_S
 			target = null
+			awareness = ALERT_AT
+		elif who == target:
+			_seen_at = now
+	elif awareness >= ALERT_AT and who != null:
+		if mode != Mode.ALERT:
+			_before_alert = mode
+			_groan(now)
+		mode = Mode.ALERT
+		goal = Vector3.INF  # it stops and watches him
+	elif mode == Mode.ALERT:
+		if awareness < ALERT_AT or who == null:
+			# Lost the sight of him: goes to look where he was.
+			mode = Mode.INVESTIGATE
+			if is_instance_valid(aware_of):
+				_set_goal(aware_of.global_position)
+			_search_until = now + SEARCH_S
+	# What each state does.
 	if mode == Mode.CHASE and is_instance_valid(target):
 		_set_goal(target.global_position)
 		if _flat(target.global_position) <= ATTACK_M and now >= _attack_at:
@@ -117,15 +195,20 @@ func _decide() -> void:
 	elif mode == Mode.IDLE and now >= _idle_next:
 		_idle_next = now + _rng.randf_range(4.0, 12.0)
 		_wander()
+	# The man it's alert to or after knows he's watched (the HUD's eye).
+	var watched: Soldier = target if mode == Mode.CHASE else (aware_of if mode == Mode.ALERT else null)
+	if is_instance_valid(watched) and not watched.is_ai():
+		watched.server_watched(WATCH_S)
 
 
-## The nearest living non-infected this one can see now, or null.
-func _spot() -> Soldier:
-	var night := DayNight.current() != null and DayNight.current().darkness() > 0.5
-	var reach := NIGHT_SIGHT_M if night else SIGHT_M
+## The living non-infected this one sees best now: {"who", "score" 0..1 (how well: distance,
+## stance, light, weather)}, or {} for nobody.
+func _spot() -> Dictionary:
+	var dark := DayNight.darkness_at(body.global_position)
+	var reach := minf(lerpf(SIGHT_M, NIGHT_SIGHT_M, clampf(dark, 0.0, 1.0)), DayNight.sight_m(body.global_position))
 	var eye := body.global_position + Vector3.UP * 1.6
 	var best: Soldier = null
-	var best_d := INF
+	var best_score := 0.0
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
@@ -134,13 +217,53 @@ func _spot() -> Soldier:
 		if is_instance_valid(target) and s == target:
 			r *= 1.5  # (one it's after is easier to keep in sight)
 		var d := body.global_position.distance_to(s.global_position)
-		if d > r or d >= best_d:
+		if d > r:
+			continue
+		# How well: full within the near third, down to nothing at the edge of its reach.
+		var score := clampf(1.0 - (d - r * 0.33) / (r * 0.67), 0.0, 1.0) if d > r * 0.33 else 1.0
+		if score <= best_score:
 			continue
 		if d > ATTACK_M * 2.0 and not Throwables.clear_line(body.get_world_3d(), eye, s.global_position + Vector3.UP * 1.4):
 			continue
 		best = s
-		best_d = d
+		best_score = score
+	return {"who": best, "score": best_score} if best != null else {}
+
+
+## Someone this one smells now (bleeding, or blood and gore on him: Soldier.smell_strength):
+## downwind within SMELL_M, or any way round within SMELL_CALM_M in calm air. Null for nobody.
+func _smell() -> Soldier:
+	var wind := DayNight.wind()
+	var calm := wind.length() < CALM_MPS
+	var best: Soldier = null
+	var best_d := INF
+	for n in get_tree().get_nodes_in_group(&"combatants"):
+		var s := n as Soldier
+		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
+			continue
+		var strength := s.smell_strength()
+		if strength <= 0.0:
+			continue
+		var to_me := body.global_position - s.global_position
+		to_me.y = 0.0
+		var d := to_me.length()
+		if calm:
+			if d > SMELL_CALM_M * strength:
+				continue
+		elif d > SMELL_M * strength or wind.normalized().dot(to_me.normalized()) < 0.5:
+			continue  # not downwind of him
+		if d < best_d:
+			best = s
+			best_d = d
 	return best
+
+
+## The groan when it turns alert or starts the chase (the audio layer's cue; once in a while).
+func _groan(now: float) -> void:
+	if now - groaned_at < 2.0:
+		return
+	groaned_at = now
+	body.set_meta(&"zombie_groan", now)
 
 
 ## The dead about this one join the chase.
@@ -153,6 +276,7 @@ func _rally(who: Soldier) -> void:
 		if other and other.mode != Mode.CHASE:
 			other.target = who
 			other.mode = Mode.CHASE
+			other.awareness = 1.0
 			other._seen_at = Soldier._now()
 			other._set_goal(who.global_position)
 
@@ -173,6 +297,12 @@ func _set_goal(at: Vector3) -> void:
 
 
 func _steer(delta: float) -> void:
+	if mode == Mode.ALERT:
+		body.move_input = Vector2.ZERO
+		body.want_sprint = false
+		if is_instance_valid(aware_of):
+			_face(aware_of.global_position, delta)  # the head turns to him: the tell
+		return
 	if goal == Vector3.INF or _flat(goal) <= (ATTACK_M * 0.8 if mode == Mode.CHASE else ARRIVE_M):
 		body.move_input = Vector2.ZERO
 		body.want_sprint = false
@@ -189,7 +319,7 @@ func _steer(delta: float) -> void:
 		return
 	dir = dir.normalized()
 	var k: Dictionary = KINDS.get(kind, KINDS.walker)
-	var night := DayNight.current() != null and DayNight.current().darkness() > 0.5
+	var night := DayNight.darkness_at(body.global_position) > 0.5
 	var pace := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
 		pace *= NIGHT_WALK_MULT if night else 1.0

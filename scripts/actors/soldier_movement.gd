@@ -364,6 +364,8 @@ func step(delta: float) -> void:
 		_read_keys(adjusting)
 		if not adjusting:  # Caps Lock + WASD changes stance instead of moving
 			input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+			if Soldier._now() < body.dodge_until:
+				input = body.dodge_input  # a melee dodge or sidestep (MeleeInput): that way, hard
 			if auto_walk:
 				if Input.is_action_just_pressed(&"move_forward") or Input.is_action_just_pressed(&"move_back") 						or not body.vitals.is_up() or is_instance_valid(body.vehicle):
 					auto_walk = false

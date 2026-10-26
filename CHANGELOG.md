@@ -11,6 +11,48 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase A: the melee core fixed and the melee weapons (claude/survival, S2b)
+
+Local: survival suite (see the run numbers in docs/survival.md's "Where the build is").
+
+- **Fixed (melee):** a parry was judged against the moment the strike's timer fired, so a slow
+  frame that landed a strike late turned a timely block into a plain block; it's judged against
+  the landing the windup promised (`Melee._land(..., land_at)`), and a dodge begun before that
+  landing counts too. The suite's melee checks poll frames up to the moment instead of racing a
+  second timer, and count wounds rather than compare blood volume (R2607-R2611).
+- **Added (melee weapons, calls 86-89):** weapon items with a `melee` stat
+  (`MeleeWeapons`): one-handed in the sidearm slot (Combat Knife, Machete, Hatchet, Crowbar,
+  Length of Pipe), two-handed in the primary (Baseball Bat, Felling Axe, Sledgehammer, Spear),
+  each with a light and a heavy (windup, energy, stamina), a reach and a kind (blade, blunt,
+  point); voxel models (`VoxelArt._melee`) with hand points. A player's swing lands on the head
+  when his view is on it; a heavy there (`HEAD_ONE_HIT_J`) or a round drops a walker outright, a
+  light there takes `HEAD_LIGHT_SHARE` of the pool (two or three kill); swings cost stamina and
+  refuse when there's none.
+- **Added (controls, `MeleeInput`):** with a melee weapon up, fire = light, fire held = heavy,
+  aim = block (a block raised just before a blow lands parries), a movement key double-tapped =
+  sidestep or dodge that way (the owner moves; the host's i-frames); with a gun up, **V** is a
+  shove with the butt (`quick_melee`; V is also get_out, seated only); behind an unaware zombie
+  with a blade (any blade; the starter knife on the rig counts), **Ctrl** is the **silent kill**
+  (2 s, no noise; seen if it turns in time). One RPC, `Soldier._server_melee`.
+- **Changed (survival):** the starter kit adds the Combat Knife.
+- **Added (the stealth model, calls 29 and 33; phase A step 3):** `ZombieAI` has an awareness
+  (0..1) fed by three senses and shown as a state: sight (by day, by night and between by the
+  darkness, half for a crouched or prone man, the weather's sight cap and spotting factor, a line
+  of sight; rising by how well it sees), sound (`hear(pos, loud)`: a shot fills it at once, a step
+  a little; footsteps are heard by pace and stance: `Survival._footsteps`, a sprint 25 m, a walk 6,
+  crouched 3, prone 1, less in rain), smell (a bleeding man downwind within 30 m, or 10 m any way
+  in calm air: `Soldier.smell_strength`). States idle, suspicious (investigating), **alert** (it
+  stops, faces him and groans; awareness still rising), chasing, searching; the silent kill needs
+  an unaware one. The player's HUD (`Hud.StealthTells`, diegetic first): a thin ring under the
+  crosshair that pulses when he makes a noise the dead could hear, sized by how far it carried,
+  and a small eye above it while one of the dead has its eyes on him (`Soldier.server_watched`).
+  A landed swing is a small noise (8 m).
+- **Added (tests):** three verdicts in `tools/run_tests.sh` (the Captain: orange for a flaky
+  test, red for a failed, green for a pass): a suite that fails is run once more; passing the
+  rerun it's **FLAKY** (the run exits 0, the first try's logs kept as `<suite>.first-fail.log`),
+  failing again it's **FAIL**; folders, `summary.txt` and `index.txt` carry the verdict, coloured
+  on a terminal. `RERUN_FLAKY=0` turns the rerun off. docs/debugging.md.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

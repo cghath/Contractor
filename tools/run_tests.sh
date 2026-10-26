@@ -70,6 +70,13 @@ SUITES=("$@")
 [ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes survival)
 status=0
 finished=""
+# Three verdicts (Captain, 2026-10-26: "orange for a flaky test that isn't outright failing, red
+# for a failed and green for a full pass"): a suite that fails is run once more (RERUN_FLAKY=0
+# turns that off); passing the rerun it's FLAKY (orange: a timing miss, not a red: its first
+# logs are kept as <suite>.first-fail.log for scrutiny) and the run goes on and exits 0; failing
+# again it's FAIL (red). PASS (green) is every suite clean first time.
+flaky=0
+flaky_suites=()
 keep_root="$(run_log_parent)"
 keep=""
 run_id=""
@@ -85,16 +92,32 @@ fi
 logs="$keep"
 [ -z "$logs" ] && logs="$(mktemp -d)"
 # The kept folder never goes: it's renamed PASS or FAIL.
+verdict_colour() {  # green, orange, red on a terminal; plain in a log
+	local v="$1"
+	if [ -t 1 ]; then
+		case "$v" in
+			PASS) printf '\033[32m%s\033[0m' "$v" ;;
+			FLAKY) printf '\033[33m%s\033[0m' "$v" ;;
+			*) printf '\033[31m%s\033[0m' "$v" ;;
+		esac
+	else
+		printf '%s' "$v"
+	fi
+}
 keep_logs() {
 	if [ -n "$keep" ]; then
 		local verdict=PASS
+		[ "$flaky" -gt 0 ] && verdict=FLAKY
 		[ "$status" -ne 0 ] && verdict=FAIL
 		[ -z "$finished" ] && { verdict=FAIL; note "stopped before it finished"; }
+		[ "$flaky" -gt 0 ] && note "flaky (failed once, passed the rerun): ${flaky_suites[*]}"
 		note "result: $verdict"
 		local done_dir="$run_day/$run_id-$run_time-$verdict-$run_tail"
 		mv "$keep" "$done_dir" 2>/dev/null && keep="$done_dir"
-		echo "$run_id $(date +%Y-%m-%d) $run_time $verdict $run_tail suites: ${SUITES[*]}" >>"$keep_root/index.txt"
-		echo "run $run_id: $verdict, logs kept in $keep"
+		local flaky_note=""
+		[ "$flaky" -gt 0 ] && flaky_note=" flaky: ${flaky_suites[*]}"
+		echo "$run_id $(date +%Y-%m-%d) $run_time $verdict $run_tail suites: ${SUITES[*]}$flaky_note" >>"$keep_root/index.txt"
+		echo "run $run_id: $(verdict_colour "$verdict")$flaky_note, logs kept in $keep"
 	else
 		rm -rf "$logs"
 	fi
@@ -182,7 +205,7 @@ judge() {
 		echo "$name: $why"
 		echo "  last lines of its output:"
 		tail -n 40 "$log" | sed "s/^/  | /"
-		if [ -n "${GITHUB_ACTIONS:-}" ]; then  # job logs need repo admin rights; annotations don't
+		if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${FIRST_TRY:-}" ]; then  # job logs need repo admin rights; annotations don't (a first try's failure may be a flake: the rerun's gets them)
 			# GitHub keeps only 10 error annotations per step: the reason first (a suite can print
 			# PASSED and still fail: a script error earlier, or a crash on quit), then the first
 			# failed checks and script errors wherever they are in the log, then the last lines.
@@ -211,7 +234,8 @@ judge() {
 engine "$logs/import.log" --import
 judge import "$logs/import.log" $? ""
 [ "$status" -ne 0 ] && { finished=1; exit 1; }
-for suite in "${SUITES[@]}"; do
+run_suite() {
+	local suite="$1"
 	timeout_s="$(suite_timeout "$suite")"
 	if [ "$suite" = net ] || [ "$suite" = levelswitch ] || [ "$suite" = world ] || [ "$suite" = vehicles ] || [ "$suite" = supports ] || [ "$suite" = aav ] || [ "$suite" = props ] || [ "$suite" = operations ] || [ "$suite" = optypes ]; then
 		# Two processes over ENet on localhost. net: the client prints the summary, the host
@@ -231,6 +255,26 @@ for suite in "${SUITES[@]}"; do
 	else
 		engine "$logs/$suite.log" "res://tests/${suite}_test.tscn"
 		judge "$suite" "$logs/$suite.log" $? "$(echo "$suite" | tr '[:lower:]' '[:upper:]') TEST PASSED"
+	fi
+}
+for suite in "${SUITES[@]}"; do
+	before=$status
+	FIRST_TRY=1 run_suite "$suite"
+	if [ "$status" -ne "$before" ] && [ "${RERUN_FLAKY:-1}" != 0 ]; then
+		note "$suite: failed once; run again to tell a flake (a timing miss) from a red"
+		echo "$suite: failed once; running it again"
+		for f in "$logs/$suite.log" "$logs/$suite-host.log"; do
+			[ -f "$f" ] && mv "$f" "${f%.log}.first-fail.log"
+			[ -f "$f.hung" ] && mv "$f.hung" "${f%.log}.first-fail.log.hung"
+		done
+		status=$before
+		run_suite "$suite"
+		if [ "$status" -eq "$before" ]; then
+			flaky=$((flaky + 1))
+			flaky_suites+=("$suite")
+			note "$suite: FLAKY (failed once, passed the rerun)"
+			echo "$suite: $(verdict_colour FLAKY) (failed once, passed the rerun; its first logs: $suite.first-fail.log)"
+		fi
 	fi
 done
 

@@ -42,6 +42,9 @@ const KEYS := {
 	# Get out of the vehicle you sit in, when that option is on (ControlOptions; Captain, P0164
 	# queue 8). V is free on foot and in a seat (proposed).
 	&"get_out": [KEY_V],
+	# Quick melee with a gun up (MeleeInput; survival call 86: "V"): a shove with the butt. V is
+	# get_out too, which only does anything seated.
+	&"quick_melee": [KEY_V],
 	# Seated: switch the view between the chase camera and first person (VehicleCamera; Captain,
 	# 2026-10-13: "1st person + 3rd toggle"). B is free on foot and in a seat (proposed).
 	&"vehicle_view": [KEY_B],

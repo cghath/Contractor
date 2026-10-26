@@ -297,6 +297,9 @@ static func fitted(model: String, body: String) -> String:
 static func model_for(item: ItemData, state := {}) -> String:
 	if Optics.is_optic(item):
 		return "optic:" + Optics.art_of(item)
+	if item != null and item.stats.has("melee"):  # a melee weapon (MeleeWeapons): "melee:<art>:<length in voxels>"
+		var m: Dictionary = item.stats.melee
+		return "melee:%s:%d" % [String(m.get("art", "pipe")), roundi(float(m.get("length_m", 0.6)) / VOXEL_SIZE)]
 	match item.slot:
 		&"primary":
 			var length: float = item.stats.get("size_m", [0, 0, 0.84])[2]
@@ -350,6 +353,10 @@ static func hand_points(model: String) -> Dictionary:
 		"pistol":  # (measured from its back: a compact's is shorter at the front)
 			grip = Vector3(1, 2.5, n - 2.5)
 			support = Vector3(-0.5, 2, n - 2.5)  # cupping the grip from the left
+		"melee":  # the hand at the handle's end; two-handed ones take the other hand further up
+			var two := model.get_slice(":", 1) in ["bat", "axe", "sledge", "spear"]
+			grip = Vector3(2, 2, 3.0)
+			support = Vector3(2, 2, 9.0) if two else Vector3(0.5, 1.5, 3.0)
 		_:
 			return {}
 	return {"grip": (grip - centre) * VOXEL_SIZE, "support": (support - centre) * VOXEL_SIZE}
@@ -1005,6 +1012,7 @@ static func _spec_build(model: String) -> Dictionary:
 			return _lowered(out, RIFLE_BELOW) if _rifle_style(model) != "walker" else out
 		"optic": return _optic_model(model.get_slice(":", 1))
 		"pistol": return _pistol(model.get_slice(":", 1) if model.contains(":") else "")
+		"melee": return _melee(model.get_slice(":", 1), maxi(model.get_slice(":", 2).to_int(), 8))
 		"head_f": return FaceArt.head(model.get_slice(":", 1) if model.contains(":") else "", true)
 		"torso_f": return _torso_f()
 		"torso_fc": return _torso_f(true)
@@ -2881,3 +2889,54 @@ static func bevel_box_mesh(size: Vector3, colour: Color) -> Mesh:
 
 static func fine_dims(size: Vector3) -> Vector3i:
 	return Vector3i(maxi(1, roundi(size.x / FINE_VOXEL)), maxi(1, roundi(size.y / FINE_VOXEL)), maxi(1, roundi(size.z / FINE_VOXEL)))
+
+
+## A melee weapon (MeleeWeapons; survival S2b): a handle at the back (z 0) and the business end
+## at the front, `n` voxels long. `art`: knife, machete, hatchet, crowbar, pipe, bat, axe, sledge,
+## spear. Simple shapes: the first cut is the feel, the look comes with the weapon model pass.
+static func _melee(art: String, n: int) -> Dictionary:
+	var boxes := []
+	var nf := float(n)
+	match art:
+		"knife":
+			boxes = [
+				_fb(1.5, 1.5, 0, 2.5, 2.5, nf * 0.4, C.GEAR_DARK),      # grip
+				_fb(1.0, 1.0, nf * 0.4, 3.0, 3.0, nf * 0.45, C.METAL),  # guard
+				_fb(1.9, 0.9, nf * 0.45, 2.1, 2.9, nf, C.METAL),        # blade, flat
+			]
+		"machete":
+			boxes = [
+				_fb(1.5, 1.5, 0, 2.5, 2.5, nf * 0.22, C.WOOD_DARK),
+				_fb(1.9, 1.0, nf * 0.22, 2.1, 3.4, nf, C.METAL),
+			]
+		"hatchet", "axe":
+			var head := nf * (0.25 if art == "hatchet" else 0.2)
+			boxes = [
+				_fb(1.6, 1.6, 0, 2.4, 2.4, nf - 1.0, C.WOOD),                       # haft
+				_fb(1.7, 0.5, nf - head, 2.3, 3.5, nf, C.METAL),                    # head
+				_fb(1.9, 0.0, nf - head, 2.1, 4.0, nf - head * 0.3, C.METAL),       # the bit
+			]
+		"crowbar":
+			boxes = [
+				_fb(1.6, 1.6, 0, 2.4, 2.4, nf - 2.0, C.GUN),
+				_fb(1.6, 1.6, nf - 2.5, 2.4, 3.5, nf, C.GUN),   # the hook
+			]
+		"bat":
+			boxes = [
+				_fb(1.6, 1.6, 0, 2.4, 2.4, nf * 0.4, C.WOOD),
+				_fb(1.3, 1.3, nf * 0.4, 2.7, 2.7, nf * 0.7, C.WOOD),
+				_fb(1.0, 1.0, nf * 0.7, 3.0, 3.0, nf, C.WOOD),
+			]
+		"sledge":
+			boxes = [
+				_fb(1.6, 1.6, 0, 2.4, 2.4, nf - 2.5, C.WOOD),
+				_fb(0.5, 0.5, nf - 3.5, 3.5, 3.5, nf, C.GUN),   # the head
+			]
+		"spear":
+			boxes = [
+				_fb(1.7, 1.7, 0, 2.3, 2.3, nf - 6.0, C.WOOD),
+				_fb(1.9, 1.2, nf - 6.0, 2.1, 2.8, nf, C.METAL),  # the blade
+			]
+		_:  # pipe and anything else: a bar
+			boxes = [_fb(1.6, 1.6, 0, 2.4, 2.4, nf, C.GUN)]
+	return {"size": Vector3i(4, 4, n), "sub": 4, "boxes": boxes}

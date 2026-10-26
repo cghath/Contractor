@@ -8,7 +8,7 @@ end so nobody builds it twice.
 
 Anything that runs the game or produces output (test suites, screenshot scripts, helper
 scripts, test builds, playtest sessions) keeps its logs in **one parent folder outside the
-repo**, by date, with a unique run number and PASS or FAIL in the folder's name:
+repo**, by date, with a unique run number and PASS, FLAKY or FAIL in the folder's name:
 
 ```
 <parent>/                                   e.g. B:\Contractor-test-logs (beside the main checkout)
@@ -26,7 +26,7 @@ repo**, by date, with a unique run number and PASS or FAIL in the folder's name:
   under a lock, the folder `run_counter.lock` beside it (`run_log_number` in `tools/run_log.sh`,
   `SessionLog._next_number`): two runs started in the same second both got R0232 before it. A
   lock older than 10 s was left by a killed run and is taken over.
-- **Folder names:** `<letter><number>-<HHMMSS>-<PASS|FAIL>-<branch or topic>-<sha>`. A folder
+- **Folder names:** `<letter><number>-<HHMMSS>-<PASS|FLAKY|FAIL>-<branch or topic>-<sha>`. A folder
   still named RUNNING was killed or hung.
 - **Never delete the parent folder or anything in it.** Cleanups only ever remove temp copies.
 - **Cite run numbers** in commit messages, handoffs, PR notes and Discord posts ("all suites
@@ -44,7 +44,13 @@ GODOT="..." CONTRACTOR_PORT=24790 tools/run_tests.sh missions world             
   `CONTRACTOR_TEST_LOGS=<folder>` to put them elsewhere, or `=none` to keep nothing.
 - On CI (`GITHUB_ACTIONS`) nothing is kept unless `CONTRACTOR_TEST_LOGS` is set.
 - `summary.txt` in each run lists every suite's verdict and every `[FAIL]` line; the run's
-  folder is renamed PASS or FAIL when it ends; `index.txt` gets a line.
+  folder is renamed PASS, FLAKY or FAIL when it ends; `index.txt` gets a line.
+- **Three verdicts** (Captain, 2026-10-26): **green PASS**, every suite clean first time; **orange
+  FLAKY**, a suite failed once and passed when the runner ran it again (a timing miss, not a red:
+  the run exits 0 and goes on; the first try's logs stay as `<suite>.first-fail.log` for
+  scrutiny; `summary.txt` and the `index.txt` line name the flaky suites); **red FAIL**, a suite
+  failed twice, the import failed, or the run stopped. `RERUN_FLAKY=0` turns the rerun off (a
+  first failure is then red). On a terminal the verdict prints in its colour.
 - Always run suites through `tools/run_tests.sh`, not bare `godot`: a bare run's output is
   gone when the terminal is. `tools/test_runner_check.sh` checks the runner keeps logs.
 - Use your own `CONTRACTOR_PORT` (the game and other runs use 24680; two on one port looks
@@ -76,7 +82,7 @@ unauthenticated API allows 60 calls an hour: poll every few minutes, not in a ti
 Take the next number from `run_counter.txt` (by hand: `. tools/run_log.sh; run_log_number <parent>`,
 which takes the lock), make
 `<parent>/<date>/<letter><number>-<time>-RUNNING-<topic>-<sha>/`, run with output into it,
-rename RUNNING to PASS or FAIL, add a line to `index.txt`. A `-s` SceneTree script should
+rename RUNNING to PASS, FLAKY or FAIL, add a line to `index.txt`. A `-s` SceneTree script should
 also quit itself after a deadline (a script error leaves it idling, not quitting).
 Test build folders: `builds/contractor-<date>-<time>-B<number>-<topic>-<sha>/`.
 

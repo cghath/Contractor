@@ -177,6 +177,18 @@ var binoculars_up := false
 ## Input.get_vector: x strafes right, y < 0 moves forward, in the body's own frame.
 var move_input := Vector2.ZERO
 var want_sprint := false
+## A melee dodge or sidestep (MeleeInput): the owner moves this way until dodge_until, the
+## blows that land meanwhile miss (Melee.server_dodge's i-frames on the host).
+var dodge_input := Vector2.ZERO
+var dodge_until := -1.0
+## Survival's stealth model (ZombieAI, calls 29 and 33): on the owner, until when something has
+## its eyes on this man (the HUD's eye), and the last noise he made (the HUD's ring: its radius
+## and when).
+var watched_until := -1.0
+var noise_radius := 0.0
+var noise_at := -100.0
+var _watched_sent := -1.0
+var _noise_sent := -100.0
 ## Survival (docs/survival.md): stamina recovery's share left by hunger and thirst (1 fed and
 ## watered), set where the body's movement runs (Survival: the host for AI, the owner's peer).
 var needs_stamina := 1.0
@@ -1028,6 +1040,66 @@ static func muzzle_clear_of(space: PhysicsDirectSpaceState3D, eye: Vector3, muzz
 	if hit.is_empty():
 		return muzzle
 	return eye.move_toward(hit.position, maxf(eye.distance_to(hit.position) - MUZZLE_WALL_GAP_M, 0.0))
+
+
+## Host: one of the dead is alert to this man or after him (ZombieAI): his HUD shows the eye for
+## `seconds` (told once per WATCH_S, not every think).
+func server_watched(seconds: float) -> void:
+	var until := _now() + seconds
+	if until - _watched_sent < seconds * 0.5:
+		return
+	_watched_sent = until
+	if is_ai():
+		return
+	_client_watched.rpc_id(owner_peer(), seconds)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _client_watched(seconds: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1 and not multiplayer.is_server():
+		return
+	watched_until = _now() + seconds
+
+
+## Host: this man made a noise the dead could hear `radius` m off (Survival.server_noise): his
+## HUD shows the ring (at most four a second).
+func server_noise_made(radius: float) -> void:
+	if is_ai() or _now() - _noise_sent < 0.25:
+		return
+	_noise_sent = _now()
+	_client_noise.rpc_id(owner_peer(), radius)
+
+
+@rpc("any_peer", "call_local", "unreliable")
+func _client_noise(radius: float) -> void:
+	if multiplayer.get_remote_sender_id() != 1 and not multiplayer.is_server():
+		return
+	noise_radius = radius
+	noise_at = _now()
+
+
+## How fast this body moves over the ground now (m/s, level).
+func move_speed_now() -> float:
+	return Vector2(velocity.x, velocity.z).length()
+
+
+## How much this man smells of blood to the dead (ZombieAI._smell): 1 bleeding, half for a
+## dressed wound still fresh, 0 clean. (Gore smeared on, the masking play of call 53, later.)
+func smell_strength() -> float:
+	if not vitals.is_up():
+		return 0.0
+	if vitals.bleed_rate() > 0.0:
+		return 1.0
+	return 0.5 if not vitals.wound_list().is_empty() else 0.0
+
+
+## Melee (MeleeInput -> MeleeWeapons.server_action): "light", "heavy", "block_on", "block_off",
+## "dodge", "sidestep", "quick" (a shove with a gun up), "silent" (the silent kill).
+@rpc("any_peer", "call_local", "reliable")
+func _server_melee(action: String) -> void:
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or respawn_state == RESPAWN_WAITING or is_instance_valid(vehicle):
+		return
+	MeleeWeapons.server_action(self, action)
 
 
 @rpc("any_peer", "call_local", "reliable")

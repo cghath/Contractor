@@ -35,7 +35,7 @@ const WATER_PER_DOSE := 35.0
 const FOOD_PER_DOSE := 25.0
 ## What a new survivor has (docs/survival.md S1: a knife, water, a tin, light (chem lights until
 ## there's a torch), bandages). Proposed.
-const STARTER_KIT: Array = [["knife", 1], ["water_bottle", 1], ["canned_meat", 1], ["chemlight_green", 2], ["pressure_bandage", 2]]
+const STARTER_KIT: Array = [["combat_knife", 1], ["knife", 1], ["water_bottle", 1], ["canned_meat", 1], ["chemlight_green", 2], ["pressure_bandage", 2]]
 const RESPAWN_NEEDS := 70.0
 const TICK_S := 1.0
 const SEND_S := 2.0
@@ -277,6 +277,10 @@ func _process(delta: float) -> void:
 	if _pop >= POP_TICK_S:
 		_pop = 0.0
 		_populate(level as SurvivalLevel)
+	_steps += delta
+	if _steps >= STEP_NOISE_S:
+		_steps = 0.0
+		_footsteps(level as SurvivalLevel)
 	if _send >= SEND_S:
 		_send = 0.0
 		for s: Soldier in MapNodes.players(level):
@@ -512,16 +516,38 @@ func server_spawn_zombie(level: CompoundLevel, at: Vector3, kind := "walker") ->
 	return s
 
 
-## Host: a noise at `pos` (a shot, a door, a car: Soldier's shots) heard by the dead within
-## `radius`.
-func server_noise(source: Node, pos: Vector3, radius: float) -> void:
+## Host: a noise at `pos` (a shot, a door, a car, a running man: Soldier's shots, _footsteps)
+## heard by the dead within `radius`, `loud` 0..1 what it does to their awareness (ZombieAI.hear;
+## a shot 1). A player's own noise shows on his HUD as the ring (Soldier.server_noise_made).
+func server_noise(source: Node, pos: Vector3, radius: float, loud := ZombieAI.HEAR_SHOT) -> void:
 	if not running or source == null:
 		return
 	var level := CompoundLevel.current(source)
 	if not level is SurvivalLevel:
 		return
+	if source is Soldier and not (source as Soldier).is_ai():
+		(source as Soldier).server_noise_made(radius)
 	for z: Soldier in zombies(level):
 		if z.global_position.distance_to(pos) <= radius:
 			var brain := ZombieAI.of(z)
 			if brain:
-				brain.hear(pos)
+				brain.hear(pos, loud)
+
+
+## Footsteps (the stealth model, call 29): every STEP_NOISE_S a man on the move is heard by the
+## dead STEP_M away by his pace and stance (a sprint 25 m, a jog 14, a walk 6, crouched 3, prone
+## 1), rain covering some of it (DayNight.hearing_x).
+const STEP_NOISE_S := 0.6
+const STEP_M := {"sprint": 25.0, "jog": 14.0, "brisk": 10.0, "walk": 6.0, "slow": 4.0, "crouch": 3.0, "prone": 1.0}
+var _steps := 0.0
+
+
+func _footsteps(level: SurvivalLevel) -> void:
+	for s: Soldier in MapNodes.players(level):
+		if not s.vitals.is_up() or s.movement == null or s.move_speed_now() < 0.3 or is_instance_valid(s.vehicle):
+			continue
+		var m := s.movement
+		var key := "prone" if m.is_prone() else ("crouch" if m.is_crouched() else ("sprint" if m.is_sprinting else ["slow", "walk", "brisk", "jog"][clampi(m.pace, 0, 3)]))
+		var radius := float(STEP_M[key]) * DayNight.hearing_x()
+		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
+		server_noise(s, s.global_position, radius, loud)
