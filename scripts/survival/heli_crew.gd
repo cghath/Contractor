@@ -167,7 +167,7 @@ static func server_deliver(layer: SurvivorsLayer, by: Soldier, pids: Array, how 
 	var who := Survival.survivor_name(by) if by else "Someone"
 	var fill := {"who": who, "names": ", ".join(names), "zone": RegionMap.zone_name(String(ev.get("zone", ""))) if not ev.is_empty() else "the hills"}
 	var key := "radio" if how == "radio" else ("delivered" if not alive.is_empty() else "tags")
-	var line := WorldEvents._cap(String(c.get(key, "{who} brought {names} home")).format(fill)) + "."
+	var line: String = WorldEvents._cap(String(c.get(key, "{who} brought {names} home")).format(fill)) + "."
 	if not got.is_empty():
 		var parts := PackedStringArray()
 		for e: Dictionary in got:

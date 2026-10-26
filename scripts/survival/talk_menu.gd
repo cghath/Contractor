@@ -232,7 +232,7 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	if rec.is_empty() or actor == null or not actor.vitals.is_up():
 		return ""
 	if action == "crew_tags":
-		var took := HeliCrew.server_take_tags(actor, rec)
+		var took: String = HeliCrew.server_take_tags(actor, rec)
 		layer._set_known(target, rec)
 		Survival._tell(actor, took)
 		return took
@@ -258,10 +258,10 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		return ""  # (call 128: a child is never a companion, never threatened)
 	match action:
 		"crew_come":  # the downed crew follow (HeliCrew)
-			var come := HeliCrew.server_come(layer, actor, rec)
+			var come: String = HeliCrew.server_come(layer, actor, rec)
 			return come
 		"crew_pickup":
-			var pickup := HeliCrew.server_radio_pickup(layer, actor)
+			var pickup: String = HeliCrew.server_radio_pickup(layer, actor)
 			Survival._tell(actor, pickup if pickup != "" else "Nobody here to pick up")
 			return pickup
 		"come":  # an orphan comes along: a settler (call 128)

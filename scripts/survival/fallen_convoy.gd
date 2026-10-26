@@ -284,7 +284,7 @@ func _build() -> void:
 		squad.hero = men[0]
 	_make_trader(def)
 	if not rec.has("ambush_by"):
-		var g := WorldEvents.ambush_group(WorldSim.model(), rec)
+		var g: Dictionary = WorldEvents.ambush_group(WorldSim.model(), rec)
 		rec["ambush_by"] = String(g.get("id", "")) if not g.is_empty() else "-"
 	rec["live"] = true
 	rec["live_spawned"] = true
@@ -685,7 +685,7 @@ func _lost_to_raiders() -> void:
 	rec["live"] = false
 	var gid := String(rec.get("ambush_by", ""))
 	var g := WorldSim.group(gid)
-	var def := WorldEvents.kind_def("convoy")
+	var def: Dictionary = WorldEvents.kind_def("convoy")
 	WorldEvents.server_end_live(rec, "ambushed", "convoy_ambushed", String(def.get("ambushed", "")).format({"group": String(g.get("name", "Raiders")),
 		"column": column, "zone": RegionMap.zone_name(String(rec.get("zone", "")))}), [gid] if gid != "" else [])
 	var col := String(rec.get("group", ""))
@@ -701,7 +701,7 @@ func _lost_to_raiders() -> void:
 func _arrive() -> void:
 	state = "done"
 	rec["live"] = false
-	var def := WorldEvents.kind_def("convoy")
+	var def: Dictionary = WorldEvents.kind_def("convoy")
 	WorldEvents.server_end_live(rec, "passed", "convoy_passed", String(def.get("passed", "")).format({"column": column,
 		"zone": RegionMap.zone_name(String(rec.get("zone", "")))}), [])
 	server_despawn()
