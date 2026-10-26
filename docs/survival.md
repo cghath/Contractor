@@ -1,6 +1,16 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~01:00 CDT)
+## Where the build is (2026-10-26 ~02:15 CDT)
+
+- **PHASE A COMPLETE on claude/survival** (c46fef0b + test tweaks): steps 1-8 all in; the metabolism
+  (claude/survival-metabolism) and the map (claude/survival-map) lanes merged. Survival, map and fallen suites
+  PASS (R2631). **Slice build B2632**: B:\Contractoruilds\contractor-2026-10-26-020703-B2632-fallen-slice-a-1c5b622b.
+- **Phase B started 2026-10-26 ~02:15**: the building system on claude/survival-building and the RPG layer on
+  claude/survival-rpg (Opus lanes); people and the settlement next (survival_people.md, survival_building.md 5-7).
+- Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
+  check now prints why.
+
+### (earlier) 2026-10-26 ~01:00 CDT
 
 Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), dev (37ff24ca, v0.7.0) merged in 2026-10-26.
 - **Design done 2026-10-25/26:** calls 1-85 below; docs/survival_world.md, survival_building.md, survival_people.md,
