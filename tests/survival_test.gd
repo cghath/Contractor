@@ -155,12 +155,16 @@ func _test_dead() -> void:
 	far.queue_free()
 	# Sight, the chase and the bite.
 	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 12.0))
+	await get_tree().physics_frame
+	z.look_at(player.global_position, Vector3.UP)  # (sight is a cone: facing him)
+	z.rotation.x = 0.0
 	var blood := player.vitals.blood_fraction()
 	var wounds_before := player.vitals.wound_list().size()
 	var bit := await _wait_for(func() -> bool: return player.vitals.blood_fraction() < blood or player.vitals.wound_list().size() > wounds_before, 20.0)
 	brain = ZombieAI.of(z)
-	check(brain != null and brain.mode == ZombieAI.Mode.CHASE and brain.target == player, "one 12 m in front sees him and comes for him")
-	check(bit, "and gets to him and bites (blood %.3f -> %.3f)" % [blood, player.vitals.blood_fraction()])
+	check(brain != null and brain.mode == ZombieAI.Mode.CHASE and brain.target == player, "one 12 m in front sees him and comes for him (%s, awareness %.2f)" % [brain.state_name() if brain else "no brain", brain.awareness if brain else 0.0])
+	check(bit, "and gets to him and bites (blood %.3f -> %.3f; wounds %d -> %d; %.1f m off, %s, in front of it: %s)" % [blood, player.vitals.blood_fraction(), wounds_before, player.vitals.wound_list().size(),
+		z.global_position.distance_to(player.global_position), brain.state_name() if brain else "?", Melee.target_in_front(z)])
 	# The head kills; the body wears the pool down.
 	z.vitals.server_hit(Vitals.CHEST, {"round_class": Vitals.INTERMEDIATE, "energy_j": 1700.0})
 	check(z.vitals.is_up(), "a round in the chest doesn't stop it (pool %.1f)" % z.vitals.undead_pool)
