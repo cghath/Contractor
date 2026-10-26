@@ -366,6 +366,10 @@ func _test_stealth() -> void:
 	# Sight: one 8 m in front by day turns alert first (it stops and faces him), then comes.
 	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 8.0))
 	await get_tree().physics_frame
+	z.look_at(player.global_position, Vector3.UP)  # (sight is a cone: it has to be facing him)
+	z.rotation.x = 0.0
+	player.look_at(z.global_position, Vector3.UP)
+	player.rotation.x = 0.0
 	var brain := ZombieAI.of(z)
 	check(brain != null and brain.mode == ZombieAI.Mode.IDLE and brain.unaware(), "one 8 m off starts idle, unaware")
 	var alert := await _wait_for(func() -> bool: return brain.mode == ZombieAI.Mode.ALERT, 3.0)
@@ -497,6 +501,8 @@ func _test_crowd_and_pressure() -> void:
 	check(bl.vitals.is_dead() and Survival.pressure(level) > pr and player.has_meta(&"tainted_at"), "a bloater bursts when it dies: a noise, pressure up, the taint on a man beside it (pressure %.0f -> %.0f)" % [pr, Survival.pressure(level)])
 	var sc := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 6.0), "screamer")
 	await get_tree().physics_frame
+	sc.look_at(player.global_position, Vector3.UP)  # (sight is a cone)
+	sc.rotation.x = 0.0
 	var scb := ZombieAI.of(sc)
 	pr = Survival.pressure(level)
 	var screamed := await _wait_for(func() -> bool: return scb.screamed, 4.0)
