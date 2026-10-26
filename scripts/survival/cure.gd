@@ -189,6 +189,11 @@ static func server_apply(s: Soldier = null, rec := {}, use_dose := true) -> bool
 	if s != null and s.has_meta(&"bitten"):
 		s.remove_meta(&"bitten")
 		cleared = true
+	# Phase D's fever clock (BiteFever, in the body's Dictionary): gone, unless it already collapsed.
+	if s != null and s.has_meta(&"needs") and BiteFever.cure(Survival.needs_of(s)):
+		cleared = true
+	if rec.get("needs") is Dictionary and BiteFever.cure(rec.needs):
+		cleared = true
 	var body_rec: Dictionary = Survival.survivor_of(s) if s != null and rec.is_empty() else rec
 	for k: String in ["bitten", "bite_day", "fever"]:
 		if body_rec.has(k):

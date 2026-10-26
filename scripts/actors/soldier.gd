@@ -1084,13 +1084,19 @@ func move_speed_now() -> float:
 
 
 ## How much this man smells of blood to the dead (ZombieAI._smell): 1 bleeding, half for a
-## dressed wound still fresh, 0 clean. (Gore smeared on, the masking play of call 53, later.)
+## dressed wound still fresh, 0 clean; gore smeared on (meta "gore_until") or filth in survival
+## (Hygiene.smell).
 func smell_strength() -> float:
 	if not vitals.is_up():
 		return 0.0
 	if vitals.bleed_rate() > 0.0:
 		return 1.0
-	return 0.5 if not vitals.wound_list().is_empty() else 0.0
+	var s := 0.5 if not vitals.wound_list().is_empty() else 0.0
+	if has_meta(&"gore_until") and _now() < float(get_meta(&"gore_until")):
+		s = maxf(s, 0.8)
+	if has_meta(&"needs"):
+		s = maxf(s, Hygiene.smell(get_meta(&"needs")))
+	return s
 
 
 ## Melee (MeleeInput -> MeleeWeapons.server_action): "light", "heavy", "block_on", "block_off",
@@ -2107,6 +2113,7 @@ func _log_care(target, item_id: StringName, part: StringName, outcome: String) -
 	if outcome.begins_with("done") and multiplayer.is_server():
 		_log_shared_care(target, item_id, part, outcome.trim_prefix("done").trim_prefix(": "))
 		Rpg.on_treated(self, item_id)  # survival: medical XP
+		Body.on_treated(self, target, item_id, part)  # survival: a clean dressing, blood types, a doctor's care
 	if SessionLog.session_id == "":
 		return
 	var at := ""

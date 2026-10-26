@@ -175,6 +175,8 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	if mult < 0.5:
 		hit["superficial"] = true
 	victim.vitals.server_hit(part, hit)
+	if String(attack.get("name", "")) == "bite":
+		Body.on_bitten(victim, part)  # the fever clock (phase D)
 	Rpg.on_melee_hit(attacker, victim)
 	if not attacker.vitals.undead:
 		Survival.server_noise(attacker, attacker.global_position, SWING_HEARD_M, ZombieAI.HEAR_STEP)  # a blow landing: a small noise

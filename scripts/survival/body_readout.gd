@@ -1,37 +1,49 @@
 class_name BodyReadout
 extends PanelContainer
-## The body screen's first form (docs/survival_medical.md section 7, call 58): a panel listing
-## every store of the local survivor's body as a word and a number (Needs.readout of
-## Survival.my_body). TOGGLE_KEY shows and hides it, in survival only. The figure, its layers and
-## the rings come in phases B and D; the skill gate with the medical line.
+## The body screen's panel (docs/survival_medical.md section 7, call 58): TOGGLE_KEY shows and
+## hides it, in survival only. Phase D: the body screen itself (BodyScreen: the figure with its
+## layers, words gated by medical skill, numbers on hover, the rings, the treatments) on yourself
+## or on the companion or casualty you look at, and below it every store as a word and a number
+## (Needs.readout of the shown body). The mouse is free while it's up.
 
 ## Proposed: backslash (every letter near H is taken; Alt+H would also open the medical menu).
 const TOGGLE_KEY := KEY_BACKSLASH
 const REFRESH_S := 0.5
 
 var label: Label
+var screen: BodyScreen
 var _left := 0.0
 
 
 func _init() -> void:
 	name = "BodyReadout"
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	visible = false
+	var box := VBoxContainer.new()
+	add_child(box)
+	screen = BodyScreen.new()
+	box.add_child(screen)
 	label = UiKit.hud_label("", &"HudSmallLabel")
-	add_child(label)
+	box.add_child(label)
 	set_anchors_and_offsets_preset(Control.PRESET_CENTER_LEFT)
 	position.x = 24.0
 
 
-## Shows or hides it.
+## Shows or hides it (on whoever you look at within reach, else yourself).
 func toggle() -> void:
 	visible = not visible and SurvivalLevel.of(self) != null
+	if visible:
+		screen.pick_target()
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif DisplayServer.get_name() != "headless":
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	refresh()
 
 
-## The text from this peer's own body now.
+## The text from the shown body now.
 func refresh() -> void:
-	label.text = Needs.readout(Survival.my_body)
+	if visible:
+		screen.refresh()
+	label.text = Needs.readout(screen.body())
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -50,4 +62,4 @@ func _process(delta: float) -> void:
 	_left -= delta
 	if _left <= 0.0:
 		_left = REFRESH_S
-		refresh()
+		label.text = Needs.readout(screen.body())
