@@ -1,0 +1,48 @@
+{
+	"_note": "Contractor: Fallen's mounts (docs/survival_mounts.md): horses, bicycles and horse carts as Vehicles of kind \"mount\" (Mount). Read by VehicleSpecs like data/vehicles.json's models, kept apart so the campaign's vehicle lists (armour ratings, motor pool) never see them. \"mount\" holds the Mount's own numbers. Everything Proposed.",
+	"models": {
+		"horse": {
+			"name": "Horse", "kind": "mount", "class": "soft", "mass_kg": 500, "com": [0.0, 1.2, 0.0],
+			"top_speed_kmh": 43, "reverse_kmh": 3, "accel_ms2": 3.0, "brake_ms2": 5.0, "steer_deg": 0,
+			"fuel_l": 0, "fuel_l_per_km": 0.0, "idle_l_per_h": 0.0, "cargo_l": 120, "cargo_kg": 90,
+			"boxes": [[-0.32, 0.85, -0.95, 0.32, 1.55, 0.95], [-0.13, 1.3, -1.25, 0.13, 1.95, -0.85]],
+			"zones": [], "default_armour": "soft", "hp": {"hull": 40},
+			"mount": {"type": "horse", "hp": 100, "gaits_ms": [1.7, 4.2, 12.0], "accel_ms2": 3.0, "turn_rads": 1.4, "eye_y": 2.35},
+			"seats": [
+				{"name": "Saddle", "kind": "driver", "at": [0.0, 2.35, 0.05], "stance": "sit", "exit": "left", "open": true}
+			],
+			"points": [
+				{"kind": "cargo", "at": [0.42, 1.3, 0.62]}
+			]
+		},
+		"bicycle": {
+			"name": "Bicycle", "kind": "mount", "class": "soft", "mass_kg": 15, "com": [0.0, 0.6, 0.0],
+			"top_speed_kmh": 25, "reverse_kmh": 3, "accel_ms2": 1.6, "brake_ms2": 4.0, "steer_deg": 0,
+			"fuel_l": 0, "fuel_l_per_km": 0.0, "idle_l_per_h": 0.0, "cargo_l": 20, "cargo_kg": 15,
+			"boxes": [[-0.1, 0.3, -0.8, 0.1, 1.05, 0.8]],
+			"zones": [], "default_armour": "soft", "hp": {"hull": 10},
+			"mount": {"type": "bicycle", "hp": 30, "top_ms": 7.0, "accel_ms2": 1.6, "turn_rads": 1.3, "eye_y": 1.65},
+			"seats": [
+				{"name": "Saddle", "kind": "driver", "at": [0.0, 1.65, 0.28], "stance": "sit", "exit": "left", "open": true}
+			],
+			"points": [
+				{"kind": "cargo", "at": [0.0, 0.95, 0.75]}
+			]
+		},
+		"cart": {
+			"name": "Horse cart", "kind": "mount", "class": "soft", "mass_kg": 350, "com": [0.0, 0.8, 0.0],
+			"top_speed_kmh": 13, "reverse_kmh": 2, "accel_ms2": 1.2, "brake_ms2": 3.0, "steer_deg": 0,
+			"fuel_l": 0, "fuel_l_per_km": 0.0, "idle_l_per_h": 0.0, "cargo_l": 1200, "cargo_kg": 600,
+			"boxes": [[-0.75, 0.55, -0.85, 0.75, 1.1, 1.7]],
+			"zones": [], "default_armour": "soft", "hp": {"hull": 30},
+			"mount": {"type": "cart", "hp": 60, "gaits_ms": [1.5, 3.6, 3.6], "accel_ms2": 1.2, "turn_rads": 0.6, "eye_y": 1.9, "hitch": [0.0, 0.0, -2.6]},
+			"seats": [
+				{"name": "Driver", "kind": "driver", "at": [-0.35, 1.9, -0.55], "stance": "sit", "exit": "left", "open": true},
+				{"name": "Bench", "kind": "passenger", "at": [0.35, 1.9, -0.55], "stance": "sit", "exit": "right", "open": true}
+			],
+			"points": [
+				{"kind": "cargo", "at": [0.0, 1.0, 1.95]}
+			]
+		}
+	}
+}

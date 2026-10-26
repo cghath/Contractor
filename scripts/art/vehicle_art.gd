@@ -27,6 +27,11 @@ const SCHEMES := {
 	"white": {"paint": "d8d6cf", "marking": "8a2a22"},
 	"tan": {"paint": "c4ae86", "marking": "4a3b2a"},
 	"red": {"paint": "8e2b23", "marking": "d8d6cf"},
+	# Contractor: Fallen's mounts (MountArt): coats, bike paint, the cart's wood.
+	"bay": {"paint": "6b4226", "marking": "2a1d14"}, "chestnut": {"paint": "8a4b24", "marking": "3a2114"},
+	"grey": {"paint": "8d8a84", "marking": "4a4844"}, "black_horse": {"paint": "2b2420", "marking": "141110"},
+	"bike_red": {"paint": "8e2b23", "marking": "1c1c1b"}, "bike_blue": {"paint": "2f4f7f", "marking": "1c1c1b"},
+	"bike_green": {"paint": "3e5a3a", "marking": "1c1c1b"}, "wood": {"paint": "7a5a3a", "marking": "3b2a1a"},
 }
 ## Models and the schemes they come in (the first is the default).
 const MODELS := {
@@ -50,6 +55,9 @@ const MODELS := {
 	"technical_zpu": ["red", "white", "tan"],
 	"bradley": ["desert", "od"],
 	"abrams": ["desert", "od"],
+	"horse": ["bay", "chestnut", "grey", "black_horse"],  # Contractor: Fallen's mounts (MountArt)
+	"bicycle": ["bike_red", "bike_blue", "bike_green"],
+	"cart": ["wood"],
 }
 
 static var _meshes := {}  # "model|scheme" -> Mesh
@@ -189,6 +197,8 @@ static func _canvas_for(model: String) -> Canvas:
 
 
 static func _shape_for(model: String) -> Canvas:
+	if MountArt.has(model):
+		return MountArt.canvas(model)  # survival mounts: horse, bicycle, cart
 	match model:
 		"uh60": return _uh60()
 		"vtol_petrel": return _vtol_petrel()

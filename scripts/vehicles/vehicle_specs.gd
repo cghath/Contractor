@@ -33,6 +33,9 @@ static var _data: Dictionary = {}
 static var _topics: Array = []       # each TOPIC_PATHS file's "models" ({model: {key: value}})
 static var _models: Dictionary = {}  # model -> merged spec
 static var _guns: Dictionary = {}    # gun id -> ItemData built for Ballistics
+## Contractor: Fallen's mounts (data/mounts.json, Mount): specs like the models', kept out of models().
+const MOUNTS_PATH := "res://data/mounts.json"
+static var _mounts: Dictionary = {}
 
 
 static func _load() -> void:
@@ -49,6 +52,9 @@ static func _load() -> void:
 		_data = {"models": {}, "armour": {}, "round_tiers": {}, "guns": {}}
 		return
 	_data = parsed
+	if FileAccess.file_exists(MOUNTS_PATH):  # (survival mounts: has_model and spec know them, models() doesn't list them)
+		var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(MOUNTS_PATH))
+		_mounts = (m as Dictionary).get("models", {}) if m is Dictionary else {}
 	for path in TOPIC_PATHS:
 		if not FileAccess.file_exists(path):
 			continue
@@ -72,7 +78,7 @@ static func models() -> Array:
 
 static func has_model(model: String) -> bool:
 	_load()
-	return (_data.models as Dictionary).has(model)
+	return (_data.models as Dictionary).has(model) or _mounts.has(model)
 
 
 ## The merged spec of `model` ({} for an unknown one).
@@ -80,7 +86,7 @@ static func spec(model: String) -> Dictionary:
 	_load()
 	if _models.has(model):
 		return _models[model]
-	var raw: Dictionary = (_data.models as Dictionary).get(model, {})
+	var raw: Dictionary = (_data.models as Dictionary).get(model, _mounts.get(model, {}))
 	if raw.is_empty():
 		return {}
 	var out: Dictionary = {}

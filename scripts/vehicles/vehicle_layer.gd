@@ -99,7 +99,8 @@ func _make(data: Dictionary) -> Node:
 	var model := String(data.model)
 	var scheme := String(data.get("scheme", ""))
 	var faction := StringName(String(data.get("faction", "player")))
-	var v: Vehicle = Helicopter.make(model, scheme, faction, String(data.id)) if Helicopter.flies(model) \
+	var v: Vehicle = Mount.make(model, scheme, faction, String(data.id)) if Mount.is_mount_model(model) \
+		else Helicopter.make(model, scheme, faction, String(data.id)) if Helicopter.flies(model) \
 		else Vehicle.create(model, scheme, faction, String(data.id))  # wave 5b: helicopters fly (V3)
 	v.from_save(data)
 	return v
