@@ -179,6 +179,7 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	_apply_sky(level)
 	_seed_crowd(level)
 	ColdOpen.server_begin(level)  # a new world's first hour (once)
+	Settlement.install(level)  # the settlement's work and council (Settlement, survival_building.md 5-7)
 	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
 
 
@@ -820,6 +821,17 @@ func server_sleep(s: Soldier, hours: float, where := "ground") -> String:
 	var level := CompoundLevel.current(s)
 	var problem := SurvivalSleep.start(s, needs_of(s), hours, where, level != null and SurvivalSleep.chased(level, MapNodes.players(level)))
 	_tell(s, problem if problem != "" else "You lie down to sleep (moving wakes you)")
+	_send_needs(s)
+	return problem
+
+
+## Host: `s` waits at a safe spot (call 136): `mode` "hour", "dusk" or "dawn"; the world runs at
+## SurvivalSleep.SPEED while every survivor sleeps or waits, without sleep's restore. "" or why
+## not (he's told either way).
+func server_wait(s: Soldier, mode: String) -> String:
+	var n := needs_of(s)
+	var problem := SurvivalSleep.start_wait(s, n, SurvivalSleep.wait_hours(mode, hour()), CompoundLevel.current(s))
+	_tell(s, problem if problem != "" else "You wait (moving stops it)")
 	_send_needs(s)
 	return problem
 

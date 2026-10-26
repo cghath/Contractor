@@ -1399,3 +1399,112 @@ func _load(p_blocks: Dictionary, p_pieces: Dictionary, p_logs: Dictionary) -> vo
 			_chunks.erase(key)
 			w.queue_free()
 	_next_stream = 0.0  # stream the chunks in round the players now
+
+
+# --- The settlement's work (Settlement, SettlementJobs: docs/survival_building.md §6) ----------
+
+## Host: `seconds` of a settler's work on the block site, blueprint or upgrade at `c` with no
+## body in reach: the materials come through `pay` (a cost -> bool: taken from the settlement's
+## stock) and the settlement's tools are taken as at hand (Proposed). "" while it goes on or done.
+func server_work_from_stock(c: Vector3i, seconds: float, pay: Callable) -> String:
+	var rec: Dictionary = blocks.get(c, {})
+	if rec.is_empty():
+		return "Nothing to build there"
+	var upgrading := rec.has("up")
+	if not upgrading and is_built(c):
+		return "It's built"
+	var mat := String(rec.up) if upgrading else String(rec.m)
+	if not bool(rec.get("paid", false)):
+		if not bool(pay.call(BuildPieces.block_cost(mat, String(rec.s)))):
+			return "Short of materials"
+		rec["paid"] = true
+		rec["bp"] = false
+	var field := "uprog" if upgrading else "prog"
+	var before := float(rec.get(field, 0.0))
+	var after := minf(before + seconds / float(BuildPieces.MATERIALS[mat].build_s), 1.0)
+	var why := ""
+	if after >= 1.0 and not upgrading and int(preview(c, mat, String(rec.s)).state) == BuildIntegrity.State.FREE:
+		after = 0.99
+		why = "Nothing holds it yet"
+	rec[field] = after
+	if after >= 1.0:
+		_finish_block(c, rec)
+	else:
+		_set_block(c, rec)
+	return why
+
+
+## Host: the same for piece `id`'s site or blueprint.
+func server_work_piece_from_stock(id: int, seconds: float, pay: Callable) -> String:
+	var rec: Dictionary = pieces.get(id, {})
+	if rec.is_empty():
+		return "Nothing to build there"
+	if is_piece_built(id):
+		return "It's built"
+	var def: Dictionary = BuildPieces.PIECES[String(rec.k)]
+	if not bool(rec.paid):
+		if not bool(pay.call(def.cost)):
+			return "Short of materials"
+		rec["paid"] = true
+		rec["bp"] = false
+	rec["prog"] = minf(float(rec.prog) + seconds / float(def.build_s), 1.0)
+	if float(rec.prog) >= 1.0:
+		print("[build] %s built at %s (the settlement)" % [rec.k, rec.c])
+	_set_piece(id, rec)
+	return ""
+
+
+## Host: the maintain job repairs the block at `c` (or piece `id` when `id` > 0) to whole from
+## stock: REPAIR_SHARE of its cost times the damage through `pay`. Returns whether it did.
+func server_repair_from_stock(c: Vector3i, id: int, pay: Callable) -> bool:
+	if id > 0:
+		if not is_piece_built(id):
+			return false
+		var prec: Dictionary = pieces[id]
+		var def: Dictionary = BuildPieces.PIECES[String(prec.k)]
+		var lost := 1.0 - float(prec.hp) / float(def.hp)
+		if lost <= 0.001:
+			return false
+		var pcost := BuildPieces.scaled(def.cost, REPAIR_SHARE * lost)
+		if pcost.is_empty():
+			pcost = [[def.cost[0][0], 1]]
+		if not bool(pay.call(pcost)):
+			return false
+		prec["hp"] = float(def.hp)
+		_set_piece(id, prec)
+		return true
+	if not is_built(c) or float(blocks[c].hp) >= 0.999:
+		return false
+	var rec: Dictionary = blocks[c]
+	var full: Array = BuildPieces.block_cost(String(rec.m), String(rec.s))[0]
+	if not bool(pay.call([[full[0], maxi(1, ceili(float(full[1]) * REPAIR_SHARE * (1.0 - float(rec.hp))))]])):
+		return false
+	rec["hp"] = 1.0
+	_set_block(c, rec)
+	_mark_dirty(c)
+	return true
+
+
+## Whether a player is working the block site at `c` (or piece `id` when `id` > 0) right now:
+## a job he's doing isn't taken over (doc §6).
+func worked_by_player(c: Vector3i, id := -1) -> bool:
+	for w: Dictionary in _workers.values():
+		if id > 0 and String(w.kind) != "block" and int(w.at) == id:
+			return true
+		if id <= 0 and String(w.kind) == "block" and w.at == c:
+			return true
+	return false
+
+
+## The built pieces of `kind` (ids).
+func pieces_of(kind: String) -> Array[int]:
+	var out: Array[int] = []
+	for id: int in pieces:
+		if String(pieces[id].k) == kind and is_piece_built(id):
+			out.append(id)
+	return out
+
+
+## Where piece `id` is (its middle), for the settlement's radius.
+func piece_pos(id: int) -> Vector3:
+	return _piece_centre(pieces[id]) if pieces.has(id) else Vector3.INF

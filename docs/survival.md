@@ -1,6 +1,14 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~02:15 CDT)
+## Where the build is (2026-10-26 ~06:45 CDT)
+
+- **PHASE B COMPLETE on claude/survival (0996f909)**: building, RPG and people lanes merged; survival, fallenpeople,
+  building, rpg PASS (R2646). **Slice B build B2647**: B:\Contractoruilds\contractor-2026-10-26-063915-B2647-fallen-slice-b-0996f909.
+- **Phase C started ~06:40**: the world sim (claude/survival-worldsim) and the settlement's work (claude/survival-settlement)
+  on Opus lanes; next lanes once the sim lands: the enclave + ARCHE trail + bunkers, trade + the intel layer, mounts.
+- Calls now 1-142 (the table below).
+
+### (earlier) 2026-10-26 ~02:15 CDT
 
 - **PHASE A COMPLETE on claude/survival** (c46fef0b + test tweaks): steps 1-8 all in; the metabolism
   (claude/survival-metabolism) and the map (claude/survival-map) lanes merged. Survival, map and fallen suites
@@ -11,6 +19,10 @@
 - **Phase B people built on `claude/survival-people`** (survival_people.md sections 1-6 and 8: the Person
   record, moods and breaks, lone survivors, hiring by wants, companions with CompanionAI, the talk menu, grief,
   graves, the rise, the take-over): R2645 FLAKY (fallenpeople PASS, survival flaked once on a melee block check, passed the rerun); see survival_people.md's "Where the build is".
+- **Phase B's settlement work and council (first form) built 2026-10-26 on `claude/survival-settlement`** (R2649 PASS (settlement, survival, fallenpeople, building)): `Settlement`
+  (stocks, beds, defence, footprint, morale, settlers' schedules and meals), `SettlementJobs` (twelve jobs), `WorkOrders`
+  (orders and the planning view), `Council` (votes, factions, standing; `Council.server_put` for the world lane's demands),
+  `SettlementScreen` ([), waiting (call 136) and solo pause (call 138); see survival_building.md's "Where the build is".
 - Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
   check now prints why.
 

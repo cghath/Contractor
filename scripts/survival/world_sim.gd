@@ -43,8 +43,10 @@ const FRIEND_HOLD := 50.0
 const PLAYER_X := 3.0
 const COMPANION_X := 2.0
 const SETTLER_X := 1.5
-## Proposed: the stores' value the raiders hear of when the settlement lane has no stocks to read.
+## Proposed: the stores' value the raiders hear of before there's a settlement, and what its
+## defence value (Settlement.defence: walls, gates, lookouts, guards) adds to its fighting strength.
 const RUMOURED_STOCKS := 1500.0
+const DEFENCE_X := 0.1
 const JOURNAL_KINDS: Array[String] = ["fight", "raid", "demand", "horde", "horde_moved", "horde_attack", "capture", "fed", "settled", "group_gone",
 	"supply_drop", "burning", "bell", "broadcast", "hunt", "rescue", "turned", "split", "formed", "death", "arrived"]
 
@@ -283,9 +285,7 @@ func _do_action(a: Dictionary) -> void:
 	var level := CompoundLevel.current(self) as SurvivalLevel
 	match String(a.kind):
 		"demand":
-			var text := "%s want $%d of goods from the farm within %d hours, or they'll take it." % [String(a.name), int(a.want), roundi(WorldGoals.DEMAND_DAYS * 24.0)]
-			Survival._journal_line(text)
-			_tell_all(text)
+			_put_demand(a)
 		"pressure":
 			if level and String(a.zone) == hosted_zone():
 				var p: Array = a.get("pos", [0.0, 0.0])
@@ -303,8 +303,54 @@ func _do_action(a: Dictionary) -> void:
 				Survival._journal_line("A horde is coming over from %s." % RegionMap.zone_name(String(a.from)))
 				_tell_all("A horde is coming over from %s" % RegionMap.zone_name(String(a.from)))
 		"take_stock":
-			if Survival.has_method(&"server_take_stocks"):
-				Survival.call(&"server_take_stocks", float(a.get("share", 0.3)), String(a.get("group", "")))
+			var share := float(a.get("share", 0.3))
+			var taken := 0
+			for e: Dictionary in _store_entries():
+				taken += Settlement.taken_count(Settlement.server_take(String(e.id), ceili(int(e.get("count", 1)) * share)))
+			Survival._journal_line("%s took %d things from the stores." % [String(group(String(a.get("group", ""))).get("name", "Raiders")), taken])
+
+
+## A demand on the players' settlement (call 55): the council's question (Council.server_put, the
+## goods to pay listed from the stores up to the demand's value), else a journal line and a
+## message. Paying (the council's yes) answers it (server_pay_demand); refusing leaves the raid due.
+func _put_demand(a: Dictionary) -> void:
+	var gid := String(a.group)
+	var text := "%s want $%d of goods from the farm within %d hours, or they'll take it" % [String(a.name), int(a.want), roundi(WorldGoals.DEMAND_DAYS * 24.0)]
+	if Settlement.exists():
+		var pay: Array = []
+		var value := 0.0
+		for e: Dictionary in _store_entries():
+			if value >= float(a.want):
+				break
+			var unit := maxf(1.0, WorldTrade.value(String(e.id)))
+			var n := mini(int(e.get("count", 1)), ceili((float(a.want) - value) / unit))
+			pay.append([String(e.id), n])
+			value += unit * n
+		var id := Council.server_put({"kind": "demand", "text": text, "pay": pay, "from": gid}, ["pay", "refuse"], func(result: String) -> void:
+			if result == "pay":
+				server_pay_demand(gid))
+		if id >= 0:
+			return
+	Survival._journal_line(text + ".")
+	_tell_all(text)
+
+
+## The settlement's store entries ([{id, count}], all its stashes and the yard), food, meds and
+## ammo first (what raiders want).
+static func _store_entries() -> Array:
+	var out: Array = []
+	if not Settlement.exists():
+		return out
+	var stores := Settlement.stores()
+	for key: String in stores:
+		if stores[key] is Array:
+			for e: Variant in stores[key]:
+				if e is Dictionary:
+					out.append(e)
+	var rank := func(e: Dictionary) -> int:
+		return int({"food": 0, "meds": 1, "ammo": 2, "water": 3, "fuel": 4}.get(Settlement.category_of(String(e.id)), 9))
+	out.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return rank.call(x) < rank.call(y))
+	return out
 
 
 func _tell_all(text: String) -> void:
@@ -321,7 +367,7 @@ func _tell_all(text: String) -> void:
 ## "hunt_zone", "safe"}: the players' farm (the start zone's safehouse), their numbers (players,
 ## companions, settlers), their stores (the settlement lane's, when it exposes them).
 static func player_info() -> Dictionary:
-	var zone := String(Survival.state().get("start_zone", ""))
+	var zone := Settlement.zone() if Settlement.exists() else String(Survival.state().get("start_zone", ""))
 	var companions := 0
 	var settlers := 0
 	for id: String in people():
@@ -333,18 +379,22 @@ static func player_info() -> Dictionary:
 	var players := maxi(1, (Campaign.section(Survival.SURVIVORS) as Dictionary).size())
 	var safe := SurvivalMap.safehouse()
 	var pos := SurvivalMap.mark_pos(safe) if not safe.is_empty() else Vector2.ZERO
+	if Settlement.exists():
+		pos = Vector2(Settlement.pos().x, Settlement.pos().z)
 	var strength := players * PLAYER_X + companions * COMPANION_X + settlers * SETTLER_X
 	var at_home := hosted_zone() == zone
 	var stocks_value := RUMOURED_STOCKS
-	if Survival.has_method(&"settlement_stocks"):
-		var stocks: Variant = Survival.call(&"settlement_stocks")
-		if stocks is Dictionary:
-			stocks_value = 0.0
-			for item: String in stocks:
-				stocks_value += WorldTrade.value(item) * float(stocks[item])
-	return {"zone": zone, "place": "safehouse", "place_pos": [pos.x, pos.y], "strength": strength,
-		"home_strength": strength if at_home else settlers * SETTLER_X, "stocks_value": stocks_value,
-		"can_take": Survival.has_method(&"server_take_stocks"), "hunt_zone": hosted_zone() if hosted_zone() != "" else zone,
+	var defence := 0.0
+	if Settlement.exists():
+		stocks_value = 0.0
+		for e: Dictionary in _store_entries():
+			stocks_value += WorldTrade.value(String(e.id)) * int(e.get("count", 1))
+		var node := Settlement.find(Survival)
+		defence = node.defence() if node else float(Settlement.data().get("defence_builds", 0.0))
+	var home := (strength if at_home else settlers * SETTLER_X) + defence * DEFENCE_X
+	return {"zone": zone, "place": "safehouse", "place_pos": [pos.x, pos.y], "strength": strength + defence * DEFENCE_X,
+		"home_strength": home, "stocks_value": stocks_value, "defence": defence,
+		"can_take": Settlement.exists(), "hunt_zone": hosted_zone() if hosted_zone() != "" else zone,
 		"safe": bool(section().get("catching_up", false))}
 
 

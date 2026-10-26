@@ -36,6 +36,7 @@ func _ready() -> void:
 		_test_determinism()
 		await _test_live()
 		await _test_threaded_tick()
+		await _test_settlement_demand()
 		_test_catch_up()
 		_test_goal_modes()
 	_finish()
@@ -434,6 +435,30 @@ func _test_threaded_tick() -> void:
 	check(int(w.get("tick", 0)) == t0 + 1, "its result landed on the main thread (tick %d)" % int(w.get("tick", 0)))
 	check(some == "" or (WorldSim.group(some).memory as Array).any(func(mm: Dictionary) -> bool: return String(mm.text) == "test"), "and a change made meanwhile wasn't lost")
 	sim.threaded = false
+
+
+func _test_settlement_demand() -> void:
+	print("A demand on the players' settlement")
+	await _wait_for(func() -> bool: return Settlement.exists(), 15.0)
+	check(Settlement.exists(), "the farm is a settlement (the settlement lane's)")
+	if not Settlement.exists():
+		return
+	var info := WorldSim.player_info()
+	check(String(info.zone) == Settlement.zone() and bool(info.can_take) and info.has("defence"), "the sim reads its zone, stores and defence (%.0f, $%.0f of stores)" % [float(info.defence), float(info.stocks_value)])
+	var m := WorldSim.model()
+	var k := m.new_group("raiders", Settlement.zone(), Vector2(300.0, 300.0), m.rng_for("council"), 4)
+	var votes0 := Council.votes().size()
+	sim._do_action({"kind": "demand", "group": String(k.id), "name": String(k.name), "want": 300, "due": WorldSim.world_now() + 0.25})
+	var votes := Council.votes()
+	var v: Dictionary = votes[-1] if votes.size() > votes0 else {}
+	check(not v.is_empty() and String((v.question as Dictionary).get("kind", "")) == "demand" and String(v.question.get("from", "")) == String(k.id),
+		"the raiders' demand goes to the council: \"%s\"" % String((v.get("question", {}) as Dictionary).get("text", "")))
+	(WorldSim.section().demands as Dictionary)[String(k.id)] = {"group": String(k.id), "paid": false, "due": WorldSim.world_now() + 0.25}
+	if not v.is_empty() and Council._callbacks.has(int(v.id)):
+		(Council._callbacks[int(v.id)] as Callable).call("pay")
+	check(bool(((WorldSim.section().demands as Dictionary).get(String(k.id), {}) as Dictionary).get("paid", false)), "the council paying answers the demand")
+	(WorldSim.section().demands as Dictionary).erase(String(k.id))
+	WorldSim.group(String(k.id)).alive = false
 
 
 func _test_catch_up() -> void:

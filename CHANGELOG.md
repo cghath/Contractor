@@ -39,6 +39,48 @@ Local: worldsim and survival suites (see the run number in docs/survival_world.m
 - **Changed (`Survival`):** small hooks: the world sim's node, the catch-up on Continue, the live layer on
   level ready, the dead's density and refill by the goal mode, kills thinning the zone's density.
 - **Tests:** new `worldsim` suite (registered in tools/run_tests.sh and CI).
+### Contractor: Fallen, phase B: the settlement's work and the council, first form (claude/survival-settlement)
+
+Local: settlement and survival suites (R2649 PASS (settlement, survival, fallenpeople, building); docs/survival_building.md's "Where the build is").
+
+- **Added (`Settlement`, `scripts/survival/settlement.gd`):** the safehouse as a settlement (calls 23,
+  28, 59): one record in `Survival.state()["settlement"]` (zone, spot, 40 m radius), founded the
+  first time the start zone is played (or `Settlement.server_found`); members (settlers, and
+  companions at home), beds (bunk pieces), stocks in 13 categories (food, water, fuel, firewood,
+  wood, scrap, sand, brick, concrete, steel, meds, ammo, parts) counted from the stash and pile
+  pieces' contents (kept in the record by piece id) and the yard, with a trend over a day; the
+  defence value (blocks by material, gates, lookouts, HESCO, wire, guards on duty), the noise and
+  light footprint (`Settlement.footprint()`: generators and lamps, for call 90), morale (the mean
+  mood) and a size cap by beds and food (Proposed 24). Settlers live by a schedule (sleep 22-6,
+  meals at 7/12/18, work 7-19, the night watch on a rota of 4-hour shifts), eat and drink from the
+  stores (a hot meal and a bed are moodlets; out of food they starve and the moods follow), and
+  bodies stand at home near a player.
+- **Added (`SettlementJobs`, `WorkOrders`):** twelve jobs held in priority order: guard (calls out
+  the dead and wakes the sleepers: settlers and players asleep or waiting), scavenge (the
+  containers within 150 m, else an abstract find), farm and hunt (stub yields), cook (hot meals,
+  smoking, boiling on a stove), medic (light wounds with meds from stock), build (blueprints and
+  sites from stock: `Builder.server_work_from_stock`), haul (drops into the stores), maintain
+  (repairs from stock), craft (`Crafting`'s recipes against the stock), animals and generator
+  (stubs). Work orders with a count and a priority: build the blueprints, cut wood (a woodpile
+  stub), fill sandbags, smoke the meat, boil water to N, repair, craft; the planning view (what's
+  short, who's idle); an order the player claims, and a block site he's working, aren't taken over.
+- **Added (`Council`):** the first form of the vote (`Council.server_put(question, options,
+  on_result)` for the world lane's raider demand): settlers vote by mood, traits and relations,
+  factions (a family, the old crew, the newcomers) vote together, influence (the oldest, a medic,
+  the first to settle) weighs more, the players' standing (opinions times influence) is a weight;
+  the loser's side lives with it (a demand paid from stock, a group taken in, the settlement moved);
+  a leader challenge when morale and standing fall (a flag and a message).
+- **Added (`SettlementScreen`, key [):** people with their jobs and moods, stocks with trends,
+  beds, defence, footprint, the orders (add, remove, "I'll do it"), planning, the council's votes,
+  stow what you carry, and waiting.
+- **Added (waiting, call 136; solo pause, call 138):** `Survival.server_wait(s, "hour" | "dusk" |
+  "dawn")` at home or indoors with nothing chasing within 60 m: the clock runs at sleep's x12
+  without sleep's restore, stopped by moving or the dead (`SurvivalSleep` wait functions).
+  `SoloPause`: the pause menu pauses a survival world hosted alone; with anyone joined it never
+  does, and a join unpauses.
+- **Added (pieces and items):** stock pile, stove, lookout, farm bed, generator and lamp pieces;
+  the cooked meal and vegetables items. "Make a settler" and "Take along" on the talk menu; a
+  survivor wanting a place joins as a settler when there's a free bed.
 
 ### Contractor: Fallen, phase B: the RPG layer, first form (claude/survival-rpg)
 
