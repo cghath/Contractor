@@ -114,7 +114,7 @@ broke the early game. Built on `claude/survival-startloot`; every number is **Pr
   a crowbar, a machete, a hatchet or supplies. Unchanged.
 
 **Before and after** (the deadtime suite's probe: world seed 777, everything within 300 m of the
-farm, the first 30 of the dead spawned 45-300 m about it; R2712 before, R2713 after):
+farm, the first 30 of the dead spawned 45-300 m about it; R2712 before, R2713 after; R2714 PASS: deadtime, survival, wear, loot, fallenevents):
 
 | | Before | After |
 |---|---|---|

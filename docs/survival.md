@@ -6,7 +6,7 @@
   in the first five minutes; call 38): soldiers' dead rare out of military places (2%, by the zone's tier, none
   within 250 m of the farm), a soldier's rifle kept 25% and weathered, near empty; no guns in the commonest home
   and stash tiers, loose rounds halved; the dead's kit, ground loot and boxes' first rolls get a found condition;
-  before/after in docs/survival_deadtime.md "Early loot curve" (R2712 before, see the CHANGELOG for the verdict).
+  before/after in docs/survival_deadtime.md "Early loot curve" (R2712 before); R2714 PASS (deadtime, survival, wear, loot, fallenevents).
 - **The last calls built on `claude/survival-polish`** (calls 134, 136, 139, 141, 142): the 3D loadout editor's
   pouch and pocket hotspots (drop INTO a pouch, saved kits refill it, survival kits too), Wait an hour / until dusk /
   until dawn from the ground's menu (interrupted by the dead, a noise, a horde, an event; companions wait along),
