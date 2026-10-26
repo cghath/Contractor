@@ -71,8 +71,13 @@ static func server_attack(attacker: Soldier, attack: Dictionary, mult := 1.0) ->
 		_land(attacker, attack, mult, land_at)
 		return true
 	attacker.get_tree().create_timer(windup, false).timeout.connect(func() -> void:
-		if is_instance_valid(attacker) and attacker.vitals.is_up() and not staggered(attacker):
-			_land(attacker, attack, mult, land_at))
+		if not is_instance_valid(attacker):
+			return
+		if attacker.vitals.is_up() and not staggered(attacker):
+			_land(attacker, attack, mult, land_at)
+		else:
+			attacker.remove_meta(&"melee_winding")  # parried or put down in the windup: the swing is gone, the next one allowed (R2635: a stale flag kept it from ever swinging again)
+	)
 	return true
 
 

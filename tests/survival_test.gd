@@ -361,6 +361,7 @@ func _test_melee() -> void:
 	# And the real thing: a strike wound up on its timer lands on an undefended man.
 	await _seconds(Melee.DODGE_IFRAMES_S + 0.1)
 	player.remove_meta(Melee.GUARD)
+	z.remove_meta(&"melee_winding")  # (a swing its brain began before the test took it over)
 	face.call()
 	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s; it is up %s, staggered %s, winding %s, its guard %s)" % [
 		float(Melee.ZOMBIE_ATTACK.windup), z.vitals.is_up(), Melee.staggered(z), z.has_meta(&"melee_winding"), Melee.guard_of(z)])

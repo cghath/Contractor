@@ -180,6 +180,8 @@ Local: survival suite (see the run numbers in docs/survival.md's "Where the buil
   survival night at the farm with the live cap of the dead about the player (most chasing), a crowd
   of 200 in the far tier and a horde of 50 walking in; Proposed budgets beside the fight case's
   (avg 110 / p95 180 / hitches 140 / physics 6 ms, LOCAL_SLACK off CI). In run_tests.sh and CI.
+- **Fixed (melee):** a strike parried (or its attacker put down) during its wind-up never cleared the
+  wind-up flag, so that attacker could never swing again; the flag is cleared either way (R2635).
 - **Added (tests):** three verdicts in `tools/run_tests.sh` (the Captain: orange for a flaky
   test, red for a failed, green for a pass): a suite that fails is run once more; passing the
   rerun it's **FLAKY** (the run exits 0, the first try's logs kept as `<suite>.first-fail.log`),
