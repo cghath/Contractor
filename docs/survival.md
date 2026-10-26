@@ -117,6 +117,10 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 75 | Mood breaks | **The full set, rare, trait-driven**: crying fit, rage, binge, hiding, desertion, refusal; needs mood under 20 for hours and rolls by traits; desertion takes some kit and makes a lone survivor with or without a grudge. |
 | 76 | Voice | **TTS lines by tags (chatty when safe, quiet when sneaking) with subtitles until recorded; a bigger, better TTS model will replace the current one** (the game can afford more RAM). |
 | 77 | Companion death | **Body and kit stay, grief until buried or burned (a burial mechanic), AND a companion killed by the dead rises** as a zombie in their kit; putting them down is its own moodlet; a group or the dead may reach the kit first. Emergent and dynamic. |
+| 78 | Metabolism rates | **Realistic rates, generous warning**: ~1,800 kcal and 2.5 l a world day (two real meals and a few drinks per 2-hour day); three days without food before danger, three without water before death; vitamin problems over weeks; warnings well before harm. |
+| 79 | Surgery | **The full set, skill-gated with tools and a place, now** (remove fragments, debride, stitch, set bones, drain, amputate; a surgical kit or improvised at a penalty; light, a clean surface, time; anaesthesia); **permanent consequences planned for later** (crooked bones, a limp, amputations changing what a survivor can do, scars). |
+| 80 | Fever clock | **A world week** from bite to collapse: time to run the whole chain; the fever a slow shadow over the week rather than a race. |
+| 81 | Sicknesses | **All four families**: dysentery and food poisoning; colds, flu and pneumonia (spread in a settlement, a cough is noise); tetanus and gangrene; deficiency illnesses (scurvy, rickets, anaemia). |
 
 ## Already in the code to build on
 
