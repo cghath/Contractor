@@ -9,7 +9,7 @@
   claude/survival-rpg (Opus lanes); people and the settlement next (survival_people.md, survival_building.md 5-7).
 - **Phase B people built on `claude/survival-people`** (survival_people.md sections 1-6 and 8: the Person
   record, moods and breaks, lone survivors, hiring by wants, companions with CompanionAI, the talk menu, grief,
-  graves, the rise, the take-over): RUNRESULT; see survival_people.md's "Where the build is".
+  graves, the rise, the take-over): R2645 FLAKY (fallenpeople PASS, survival flaked once on a melee block check, passed the rerun); see survival_people.md's "Where the build is".
 - Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
   check now prints why.
 

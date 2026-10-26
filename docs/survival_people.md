@@ -13,7 +13,7 @@ Written 2026-10-26. Inspired by RimWorld's colonists and the squad we already ha
   ("Survivors" on every survival zone: lone survivors placed by the seed, bodies in range, hiring,
   companions, favours, grief, graves, the rise, the take-over), `CompanionAI` (autonomy and refusals
   beside SquadAI), `TalkMenu` + `data/survival_lines.json` (the talk and lines by tag).
-- Suite `fallenpeople` (tests/fallenpeople_test.gd): RUNRESULT.
+- Suite `fallenpeople` (tests/fallenpeople_test.gd): R2644 PASS (fallenpeople alone); R2645 FLAKY at f2aabb93 (fallenpeople passed; survival flaked once on the base melee check "a block held a while just blocks", passed the rerun).
 - Proposed defaults (marked in code): 2-5 survivors a zone (+1 a village, up to 2), live within 90 m,
   money wants $200-1,500 paid in cash items (roll $50, bundle $250, brick $2,500, no change), break
   line 20 for 4 world hours then 25% an hour, rise after 180 s, burial 8 s with a shovel (etool) or
