@@ -183,12 +183,17 @@ static func preference(st: Settlement, rec: Dictionary, v: Dictionary) -> Dictio
 			score[yes] = (2.0 if mood < 40.0 else 0.0) + t.call("fickle") + t.call("timid")
 			var days := (Moods.now_h() - float(rec.get("settled_h", Moods.now_h()))) / 24.0
 			score[no] = t.call("loyal") + t.call("hard_worker") + (1.0 if mood >= 60.0 else 0.0) + (1.0 if days > 7.0 else 0.0)
+		"raid":  # yes = go (Proposed: the brave and the hungry for it, the timid against)
+			score[yes] = t.call("brave") + t.call("hot_headed") + t.call("cruel") + (1.0 if food_days < 2.0 else 0.0)
+			score[no] = t.call("timid") + t.call("kind") + t.call("calm") + (1.0 if food_days >= 3.0 else 0.0)
 		_:  # custom: with the players if they think well of them, else against
 			var liked := 0.0
 			for p: String in (v.player as Dictionary):
 				liked += SurvivorPerson.opinion_of(rec, p)
 			for p: String in (v.player as Dictionary):
 				score[String(v.player[p])] = float(score.get(String(v.player[p]), 0.0)) + (1.0 if liked > 0.0 else -1.0)
+	Children.lean(rec, v, score)  # children here: safety first (call 128)
+	Faith.lean(rec, v, score)  # the settlement's faith (call 129)
 	return score
 
 
@@ -208,6 +213,8 @@ static func factions() -> Dictionary:
 	var out := {}
 	var now := Moods.now_h()
 	for r: Dictionary in Settlement.settlers():
+		if Children.is_child_rec(r):
+			continue  # (children don't vote: call 128)
 		var f := ""
 		if String(r.get("family", "")) != "":
 			f = "family:" + String(r.family)
@@ -261,6 +268,7 @@ static func server_resolve(id: int) -> String:
 	for p: String in players:
 		tally[String(players[p])] = float(tally.get(String(players[p]), 0.0)) + player_weight(st, p)
 	var result := _pick(tally, opts)
+	result = Children.risky_result(v, tally, result)  # a risky question with children here needs more (call 128)
 	# A tie goes the players' way when they spoke.
 	for p: String in players:
 		if is_equal_approx(float(tally[String(players[p])]), float(tally[result])):
@@ -304,6 +312,9 @@ static func _apply(_st: Settlement, v: Dictionary) -> void:
 					var r := SurvivorsLayer.record(String(pid))
 					if not r.is_empty() and String(r.get("status", "")) != "dead":
 						Settlement.server_make_settler(r)
+		"raid":
+			if yes:
+				Faith.server_prayer()  # a prayer before going out (call 129)
 		"move":
 			if yes:
 				var p: Array = q.get("pos", [])

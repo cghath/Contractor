@@ -22,9 +22,11 @@ extends RefCounted
 ## - animals, generator: stubs (the generator burns fuel from the stock: the footprint's noise).
 ## Every number here is Proposed.
 
-const JOBS: Array[String] = ["guard", "scavenge", "farm", "hunt", "cook", "medic", "build", "haul", "maintain", "craft", "animals", "generator"]
+const JOBS: Array[String] = ["guard", "scavenge", "farm", "hunt", "cook", "medic", "build", "haul", "maintain", "craft", "animals", "generator",
+	"minding", "forage", "water", "service"]
 const NAMES := {"guard": "Guard", "scavenge": "Scavenge", "farm": "Farm", "hunt": "Hunt and fish", "cook": "Cook", "medic": "Medic",
-	"build": "Build", "haul": "Haul", "maintain": "Maintain", "craft": "Craft", "animals": "Mind the animals", "generator": "Mind the generator"}
+	"build": "Build", "haul": "Haul", "maintain": "Maintain", "craft": "Craft", "animals": "Mind the animals", "generator": "Mind the generator",
+	"minding": "Mind the children", "forage": "Forage", "water": "Fetch water", "service": "Hold the service"}
 ## Scavenging: how far the route goes, the chance an hour finds something, what's found off-zone.
 const SCAV_M := 150.0
 const SCAV_FIND := 0.6
@@ -78,6 +80,14 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 			return WorkOrders.work_for(st, "craft", hours)
 		"generator":
 			return generator(st, hours)
+		"minding":  # (call 128: Children)
+			return Children.mind(rec, hours)
+		"forage":
+			return Children.forage(st, hours)
+		"water":
+			return Children.carry_water(st, hours)
+		"service":  # (call 129: Faith)
+			return Faith.service(st, rec)
 	return false  # (animals: phase D's mounts and pens)
 
 

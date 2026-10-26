@@ -61,7 +61,16 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(talk.call("who", "Who are you?", {}, ""))
 		out.append(_ask_entry(target, talk))
 		out.append(talk.call("trade", "Trade", {}, ""))
+	elif menu_kind == KIND and bool(info.get("child", false)):  # a child (call 128): no recruiting, no threats
+		out.append(talk.call("who", "Who are you?", {}, ""))
+		if status == "out_there" and bool(info.get("orphan", false)):
+			out.append(talk.call("come", "Come with me", {}, ""))
+		elif status == "settler":
+			out.append(talk.call("how", "How are you?", {}, ""))
 	elif menu_kind == KIND and status == "settler":  # (a settler at home: Settlement)
+		if bool(info.get("rite", false)):  # a pious one asks for words at a grave (call 129)
+			out.append(talk.call("words", "Say a few words", {}, ""))
+			out.append(talk.call("no_words", "Not now", {}, InteractionMenu.MORE))
 		out.append(talk.call("how", "How are you?", {}, ""))
 		out.append(talk.call("take_along", "Take along", {}, ""))
 		out.append(talk.call("who", "Who are you?", {}, InteractionMenu.MORE))
@@ -90,6 +99,9 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 			out.append({"id": &"talk_gear", "label": "Gear", "target": target, "disabled": "", "call": func() -> void: LoadoutGear.open_on(actor, target as Soldier)})
 			out.append(talk.call("how", "How are you?", {}, ""))
 			out.append(talk.call("talk_down", "Talk me down", {}, ""))  # the nerve (Nerve, call 116)
+			if bool(info.get("rite", false)):  # a pious companion asks for words at a grave (call 129)
+				out.append(talk.call("words", "Say a few words", {}, ""))
+				out.append(talk.call("no_words", "Not now", {}, InteractionMenu.MORE))
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
 			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.DEAD and Masking.is_dead_one(target):
@@ -207,9 +219,24 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	var profile := Survival.profile_of(actor)
 	var topic := ""
 	var extra := {}
+	if action in ["words", "no_words"]:  # (call 129: Faith's rite at a grave)
+		return Faith.server_words(layer, actor, rec, action == "words")
+	if Children.is_child_rec(rec) and action in ["recruit", "threaten", "trade", "take_along", "settle", "talk_down"]:
+		return ""  # (call 128: a child is never a companion, never threatened)
 	match action:
+		"come":  # an orphan comes along: a settler (call 128)
+			if not Children.is_child_rec(rec) or String(rec.get("status", "")) != "out_there":
+				return ""
+			if not Settlement.exists():
+				topic = "child_wait"
+			else:
+				var yes := line_for(rec, "child_come")
+				layer.say(target, yes)
+				Children.server_take_in(layer, rec)
+				Survival._journal_line("%s came with us. %s'll live at the settlement." % [String(rec.get("first", rec.name)), "She" if String(rec.get("sex", "m")) == "f" else "He"])
+				return yes
 		"who":
-			topic = "greet"
+			topic = "child_greet" if Children.is_child_rec(rec) else ("deserter_ask" if bool(rec.get("cult_deserter", false)) else "greet")
 			Intel.server_met(rec, "who")
 		"want":
 			topic = "want"
@@ -252,6 +279,10 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 			var list: Array = actor.inventory.containers.get(c, [])
 			if i < 0 or i >= list.size():
 				return ""
+			if Children.give_refused(rec, ItemDB.get_item(StringName(String(list[i].id)))):
+				var no := line_for(rec, "child_no_weapon")
+				layer.say(target, no)
+				return no  # (call 128: no weapon for a child)
 			var entry: Dictionary = actor.inventory.remove_entry(c, i, 1)
 			if entry.is_empty():
 				return ""
@@ -276,7 +307,7 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 				if dropped != "":
 					extra.item = dropped
 		"how":
-			topic = "how_are_you"
+			topic = "child_how" if Children.is_child_rec(rec) else "how_are_you"
 		"settle", "take_along":
 			var said_now := settle_talk(layer, actor, rec, action)
 			layer.say(target, said_now)

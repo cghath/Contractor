@@ -280,6 +280,7 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 				"loss": float(m.player.get("strength", 3.0)) / mine * 0.5, "noise": noise_cost(m, "hunt_player", pz), "rel": 0.0,
 				"bias": float(p.get("cruelty", 0.2)) * 0.3})
 	Seasons.bias_options(m, g, out)  # (phase D: the season's pull on every goal, a lit settlement)
+	Children.bias_options(m, g, out)  # (call 128: with children, settle, never raid)
 	return out
 
 

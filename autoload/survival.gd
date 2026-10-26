@@ -363,6 +363,7 @@ func server_player_died(s: Soldier) -> void:
 	# (the skills and perks of the RPG layer die with the old one, phase B), at the safehouse.
 	var old_name := survivor_name(s)
 	Letters.server_on_death(s, level, at)  # his letters lie with his things (call 130)
+	Legacy.server_on_death(s, at)  # the world's lineage, his last words, his grave on the map (call 130)
 	var fresh := _new_survivor(s)  # (the new record has no "rpg": lines, perks and flaws die with him)
 	Rpg.server_sync(s)
 	server_give_starter_kit(s)
@@ -416,6 +417,7 @@ func _new_survivor(s: Soldier, keep := {}) -> Dictionary:
 	var rec := keep.duplicate()
 	rec.merge({"name": "%s %s" % [String(who.get("first", "Sam")), String(who.get("surname", "Reed"))], "generation": gen, "born_day": day()}, true)
 	rec["traits"] = JournalVoice.roll_voice(rng)  # the journal's voice (call 119)
+	Legacy.on_born(rec)  # his counters for the lineage (call 130)
 	all[profile_of(s)] = rec
 	s.set_meta(&"survivor_name", String(rec.name))
 	return rec
@@ -969,6 +971,7 @@ func _world_continue() -> void:
 ## lone survivors in this zone put on its ground.
 func _world_level_ready(level: SurvivalLevel) -> void:
 	WorldSim.server_setup()
+	Children.server_roll_world()  # the world's families (call 128)
 	if level.get_node_or_null(NodePath(WorldLive.NODE_NAME)) == null:
 		level.add_child(WorldLive.new())
 	var zone := String(state().get("zone", ""))

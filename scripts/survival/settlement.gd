@@ -226,6 +226,10 @@ static func server_make_settler(rec: Dictionary, by: Soldier = null) -> void:
 	SurvivorPerson.set_pos(rec, home, "home")
 	if not rec.get("jobs") is Array or (rec.jobs as Array).is_empty():
 		rec["jobs"] = (FIRST_JOBS.get(String(rec.get("background", "")), ["haul", "scavenge"]) as Array).duplicate()
+	if Children.is_child_rec(rec):
+		rec["jobs"] = Children.jobs_for(rec)  # light jobs only, from 12 (call 128)
+	elif Faith.is_pious(rec) and not "service" in (rec.jobs as Array):
+		(rec.jobs as Array).push_front("service")  # the chapel's daily service (call 129)
 	rec["job_now"] = ""
 	rec["activity"] = "free"
 	Moods.add(rec, "joined")
@@ -260,7 +264,7 @@ static func server_set_jobs(rec: Dictionary, jobs: Array) -> void:
 	for j: Variant in jobs:
 		if String(j) in SettlementJobs.JOBS and not String(j) in out:
 			out.append(String(j))
-	rec["jobs"] = out
+	rec["jobs"] = Children.filter_jobs(rec, out)
 
 
 ## Morale: the members' mean mood (50 with nobody).
@@ -572,6 +576,8 @@ func refresh() -> void:
 	d["workbenches"] = int(counts.get("workbench", 0))
 	d["generators"] = int(counts.get("generator", 0))
 	d["lamps"] = int(counts.get("lamp", 0))
+	d["altars"] = int(counts.get("altar", 0))  # the chapel (Faith, call 129)
+	d["chapel_benches"] = int(counts.get("chapel_bench", 0))
 	d["defence_builds"] = snappedf(defence, 0.1)
 	d["store_kinds"] = kinds
 	Infrastructure.server_refresh(self, b)  # (phase D: power, what it runs, the lit lamps)
@@ -763,6 +769,8 @@ func server_hour(hod: int) -> void:
 	WorkOrders.server_hour(self)
 	Politics.server_hour(self, hod)  # (phase D: factions' moods, theft, splits, pacts)
 	Infrastructure.server_hour(self, hod)  # (phase D: batteries, a lit settlement's pull)
+	Children.settlement_hour(self, hod)  # the children's care (call 128)
+	Faith.settlement_hour(self, hod)  # grace, the vigil, the cultists' rites (call 129)
 
 
 ## A meal (at a meal hour under EAT_BELOW, any hour under HUNGRY) and a drink from the stock:

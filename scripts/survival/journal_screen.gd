@@ -12,7 +12,8 @@ extends PanelContainer
 
 ## Proposed: 7 (6 is build mode; no letter is free on foot: controls.gd).
 const TOGGLE_KEY := KEY_7
-const TABS: Array = [["log", "Log"], ["people", "People"], ["places", "Places"], ["deadlines", "Deadlines"], ["trail", "The trail"]]
+const TABS: Array = [["log", "Log"], ["people", "People"], ["places", "Places"], ["deadlines", "Deadlines"], ["trail", "The trail"],
+	["lineage", "Lineage"]]  # (the world's survivors in order: Legacy, call 130)
 ## Proposed: the Log tab shows this many days back.
 const LOG_DAYS := 10
 
@@ -73,6 +74,7 @@ func show_view(v: Dictionary) -> void:
 ## "deadlines", "trail": [lines], "radio": {"repaired", "on", "last"}}.
 static func view() -> Dictionary:
 	return {"log": log_days(), "people": people_lines(), "places": place_lines(), "deadlines": deadline_lines(), "trail": trail_lines(),
+		"lineage": Legacy.lineage_lines((Campaign.section(Survival.SURVIVORS) as Dictionary).get(BaseHub.profile(), {})),
 		"radio": {"repaired": bool(FallenRadio.data().repaired), "on": FallenRadio.is_on(), "last": String(FallenRadio.data().get("last", ""))}}
 
 
@@ -127,6 +129,7 @@ static func people_lines() -> Array:
 		if String(rec.get("status", "")) == "dead":
 			parts.append("dead")
 		out.append("%s (%s): %s" % [who, String(rec.get("background", "?")), "; ".join(parts)])
+	out.append_array(Legacy.found_lines())  # the dead ones' letters, found on them, in their voice (call 130)
 	out.append_array(Letters.lines(CompoundLevel.current(Survival)))  # the dead's letters, read (call 130)
 	return out
 
@@ -215,7 +218,7 @@ func refresh() -> void:
 			var lines: Array = _view.get(tab, [])
 			if lines.is_empty():
 				_box.add_child(UiKit.hint({"people": "Nobody met yet.", "places": "No marks yet.", "deadlines": "No clocks running.",
-					"trail": "Nothing of the trail yet."}.get(tab, "")))
+					"trail": "Nothing of the trail yet.", "lineage": "Nobody has died here yet."}.get(tab, "")))
 			for l: String in lines:
 				_box.add_child(UiKit.text(l))
 	var radio: Dictionary = _view.get("radio", {})

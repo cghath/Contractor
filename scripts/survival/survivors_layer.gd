@@ -155,6 +155,13 @@ func _set_known(s: Soldier, rec: Dictionary) -> void:
 	if key == "":
 		return
 	var info := {"id": String(rec.id), "status": String(rec.status), "name": String(rec.name), "buried": bool(rec.get("buried", false))}
+	if Children.is_child_rec(rec):  # (call 128: the talk and the child-sized body on every peer)
+		info["child"] = true
+		info["orphan"] = bool(rec.get("orphan", false))
+	if not Faith.open_rite(String(rec.id)).is_empty():  # (call 129: a pious one asks for words)
+		info["rite"] = true
+	if bool(rec.get("cult_deserter", false)):
+		info["deserter"] = true
 	known[key] = info
 	if _has_peers():
 		_client_known.rpc(key, info)
@@ -188,6 +195,8 @@ func _client_known(key: String, info: Dictionary) -> void:
 		known.erase(key)
 	else:
 		known[key] = info
+		if bool(info.get("child", false)) and level:
+			Children.apply_look(level.get_node_or_null(NodePath(key)), true)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -195,6 +204,9 @@ func _client_all(all: Dictionary, zone_graves: Array) -> void:
 	known = all
 	graves = zone_graves
 	_build_graves()
+	for key: String in known:
+		if bool((known[key] as Dictionary).get("child", false)) and level:
+			Children.apply_look(level.get_node_or_null(NodePath(key)), true)
 
 
 func _on_peer_joined(id: int) -> void:
@@ -304,6 +316,7 @@ func server_place_zone(zone: String) -> Array:
 		_place(rec, zone, at)
 		SurvivorPerson.note(rec, "%s near %s" % [where, String(site.type) if site else "the road"])
 		made.append(rec)
+	made.append_array(Children.server_place_zone(self, zone, made))  # families and an orphan (call 128)
 	SessionLog.note("survival: %d lone survivors placed in %s" % [made.size(), zone])
 	return made
 
@@ -377,6 +390,7 @@ func _dress(s: Soldier, rec: Dictionary) -> void:
 	s.set_meta(&"survivor_name", String(rec.name))
 	if not s.died_for_good.is_connected(_on_died):
 		s.died_for_good.connect(_on_died)
+	Children.dress_body(s, rec)  # a child: shielded, unarmed, child-sized (call 128)
 
 
 ## Host: `rec`'s companion body at `at`: a friendly AI squadmate (the level's spawn_soldier, no
@@ -428,6 +442,7 @@ func server_recruit(rec: Dictionary, by: Soldier) -> Soldier:
 		_drop_mark(w)
 	SurvivorPerson.note(rec, "joined %s" % Survival.survivor_name(by) if by else "joined the group")
 	Survival._journal_line("%s joined us (%s)." % [String(rec.name), SurvivorPerson.want_text(rec)])
+	Children.server_family_follows(self, rec)  # their children go to the settlement (call 128)
 	var s := server_spawn_companion(rec, at)
 	if s and by:
 		var brain := SquadAI.of(s)
@@ -541,6 +556,7 @@ func server_tick() -> void:
 		elif status == "dead":
 			_check_rise(rec, now)
 	_tick_burials(now)
+	Children.server_tick(self, dead)  # children flee the dead, or are taken (call 128)
 
 
 ## Host, every world hour: moods (Moods.hour_tick: needs' conditions, expiry, breaks), a horde
@@ -550,6 +566,7 @@ func server_hour() -> void:
 	Sickness.server_spread_people(records().values(), 1.0)  # colds and flu pass between people living together (phase D)
 	var crowd := ZoneDead.of(level)
 	var horde := crowd != null and crowd.horde_count() > 0
+	Faith.server_hour(self)  # rites left unsaid lapse (call 129)
 	var zone := _zone()
 	for id: String in records().keys():
 		var rec: Dictionary = records()[id]
@@ -718,6 +735,7 @@ func _on_died(s: Soldier) -> void:
 	_set_known(s, rec)
 	Survival._journal_line("%s died." % String(rec.name))
 	Nerve.server_on_death(s, rec, was)  # the living's nerve, the killer's (Mind)
+	Faith.server_on_death(rec, was)  # a vigil the coming night (call 129)
 	if was != "companion" and was != "settler":
 		return
 	var id := String(rec.id)
@@ -816,6 +834,8 @@ func server_bury(by: Soldier, body: Soldier) -> bool:
 	_bodies.erase(id)
 	body.queue_free()
 	Survival._journal_line("%s was buried%s." % [String(rec.name), (" by " + Survival.survivor_name(by)) if by else ""])
+	rec["grave_piece"] = Legacy.server_grave_marker(level, rec, at, _zone())  # an inscribed marker, on the map (call 130)
+	Faith.server_on_burial(self, rec, at)  # a pious one asks for words (call 129)
 	var mourner := _nearest_companion(at)
 	if mourner:
 		say_topic(record_of(mourner), "bury_thanks")
@@ -991,6 +1011,7 @@ func server_settle(rec: Dictionary, by: Soldier = null) -> void:
 		s.queue_free()
 	_bodies.erase(String(rec.id))
 	Settlement.server_make_settler(rec, by)
+	Children.server_family_follows(self, rec)  # their children come too (call 128)
 
 
 ## Host: a settler's body at home on (a person like a lone survivor's, standing about their spot)

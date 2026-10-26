@@ -158,6 +158,8 @@ static func target_in_front(attacker: Soldier, reach := REACH_M) -> Soldier:
 ## the attack's parts (a blade cuts, a blunt weapon bruises and breaks; the dead's head goes to a
 ## blow aimed there, Vitals.undead).
 static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: float) -> void:
+	if Children.on_harmed(victim, attacker):
+		return  # a child: "You don't." (call 128)
 	if mult <= 0.01:
 		if String(attack.get("name", "")) == "bite":
 			Nerve.server_close_call(victim)  # a bite dodged (Mind)

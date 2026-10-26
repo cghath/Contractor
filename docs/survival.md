@@ -2,6 +2,10 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Children, faith and legacy built on `claude/survival-children`** (calls 128-130): kids in families and alone (never
+  hurt on screen, taken offscreen with no adult near, care, the council's safety lean, groups settle), rites at graves,
+  the chapel and its service, grace, prayer, vigils, cultist deserters cleansed; the lineage tab, letters found on the dead,
+  last words, inscribed grave markers on the map; see docs/survival_children.md.
 - **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
   lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
   (fallenaudio, survival, sound, voice); see docs/survival_audio.md.

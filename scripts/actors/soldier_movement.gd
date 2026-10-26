@@ -574,7 +574,7 @@ func apply_pose() -> void:
 	var seated := not body.seat_pose.is_empty() and is_instance_valid(body.vehicle)
 	body.model.pose = body.seat_pose if seated else pose_for(stance, side, lean)
 	var key := -1 if not body.vitals.is_up() else stance
-	var size := ExoMech.size(body.inventory)  # a heavy exo's capsule is its size (ExoMech)
+	var size := ExoMech.size(body.inventory) * Children.size_of(body)  # a heavy exo's capsule is its size (ExoMech); a child's smaller (survival call 128)
 	if key + size * 100.0 == _shape_key:
 		return
 	_shape_key = key + size * 100.0

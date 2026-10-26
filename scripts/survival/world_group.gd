@@ -136,10 +136,15 @@ static func strength(g: Dictionary, people: Dictionary) -> float:
 	if n == 0:
 		return 0.0
 	var skill := 0.0
+	var kids := 0
 	for id: String in g.members:
 		var rec: Dictionary = people.get(id, {})
+		if Children.is_child_rec(rec):
+			kids += 1  # (call 128: children don't fight)
+			continue
 		skill += 0.5 + float(rec.get("courage", 45.0)) / 200.0
-	skill /= n
+	skill /= maxi(1, n - kids)
+	n -= kids
 	var kit := clampf(0.4 + supply(g, "ammo") / maxf(1.0, n * 4.0), 0.4, 1.4)
 	var morale := 0.5 + float((g.get("mood", {}) as Dictionary).get("morale", 0.5)) * 0.5
 	return n * skill * kit * morale * float(KIND_FIGHT.get(String(g.kind), 1.0))
@@ -150,6 +155,8 @@ static func relation(g: Dictionary, other: String) -> float:
 
 
 static func change_relation(g: Dictionary, other: String, by: float) -> void:
+	if Faith.standing_locked(g, other, by):
+		return  # (call 129: a cult's standing with the players can't be bought)
 	var r: Dictionary = g.relations
 	r[other] = snappedf(clampf(float(r.get(other, 0.0)) + by, -100.0, 100.0), 0.01)
 
