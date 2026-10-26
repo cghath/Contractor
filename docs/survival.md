@@ -155,6 +155,16 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 87 | Melee weapons | **All four groups**: one-handed (sidearm slot: knife, machete, hatchet, crowbar, pipe; fast, 1.2-1.5 m; knife silent-kills and skins, machete cuts, hatchet chops and cuts wood, crowbar pries and is blunt, pipe improvised), two-handed (primary slot: bat, axe, sledge, spear; slow heavies, 1.8-2.4 m; bat and sledge blunt with knockdowns, axe cuts and fells, spear holds at reach and thrusts for the head), **shields and off-hand** (a riot shield or door panel: a block that holds without the timing, slower; a sidearm fires over it), **throwables** (bottles, bricks, a thrown knife; bottle = noise at a spot, brick = a stagger; the grenade throw reused). |
 | 88 | Melee lethality | **Head kills, body wears, numbers overwhelm**: a heavy to the head drops a walker in one, a light in two or three; body hits take the pool slowly (a stagger, not a kill); runners outpace a heavy (parry and counter or a light to the face); three on you is block-and-back-off or death; stamina the real limit (six heavies and you're gasping). |
 | 89 | Silent kill | **Behind an unaware zombie (idle or suspicious), a blade, melee 4 or a knife at any level**: the use key, a 2 s grab-and-stab, little noise; fails and makes noise if the zombie turns in time or another sees you. |
+| 90 | Noise-and-light footprint | **Added 2026-10-26**: the settlement's nightly profile (lamps, fires, generators, cooking smoke) as a visible radius on the map table; blackout discipline matters (phase C/D; feeds zone pressure). |
+| 91 | Weather fronts + barometer | **Added**: fronts seen coming on the horizon; a found barometer item; storms mask you, fog blinds both sides (phase D with seasons). |
+| 92 | Trip-line alarms | **Added**: tin-can lines, flare trips, bells as cheap pieces that warn the watch with a direction (phase B building pieces + the stealth model). |
+| 93 | Vehicles as mobile bases | **Added**: a truck or bus fortified with the block system becomes a rolling safehouse (stash, bunk, mounted light); the world sim treats it as a place that moves (phase C). |
+| 94 | Dogs | **Added**: a found dog companion with its own senses and needs: warns of the dead and strangers, tracks, hunts small game, barks and draws the dead (phase B/C people). |
+| 95 | Radio as a living feed | **Added**: timed broadcasts from groups and ARCHE's numbers station become quests and the trail with no quest giver (phase C intel layer). |
+| 96 | Preserving and the larder | **Added**: salting, smoking, canning, a root cellar block; visible and smellable spoilage; food as a seasonal plan (phase D with the metabolism's spoilage). |
+| 97 | Scars and a story page | **Added**: every wound, bite survived, kill and companion lost on one page per survivor, readable at a grave; weight for permadeath and the takeover (phase B RPG/character screen). |
+| 98 | Landmarks and wayfinding | **Added**: named hills, towers and masts on the real map; companions navigate by them ("meet at the water tower"); getting lost in fog is real (phase C maps). |
+| 99 | Contaminated zones | **Added**: ARCHE sites with a taint meter: masks and suits, limited time inside, the best loot behind it; a home for the hazmat kind (phase C/D). |
 
 ## Already in the code to build on
 
