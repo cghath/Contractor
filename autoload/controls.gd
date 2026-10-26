@@ -81,6 +81,11 @@ const KEYS := {
 	# Combined arms A5 (docs/combined_arms.md 2.11; the doc's X is the hatch now): the x-ray's full
 	# view of the last hit, or protection analysis at a range. 5: no letter is free on foot or seated.
 	&"xray": [KEY_5],
+	# Survival: build mode on or off (BuildMode, docs/survival_building.md §4). No letter is free;
+	# 6 (proposed). While it's on: Fire builds (held: a line), the wheel turns the ghost, Shift and
+	# Alt + wheel pick the shape (piece) and material, R blocks/pieces, P blueprint, F upgrade, 4
+	# repair, G dismantle, right-click puts it away.
+	&"build_mode": [KEY_6],
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.
@@ -166,7 +171,7 @@ const PAD_WHEEL := [
 ]
 ## Not on the pad (keyboard only): the dev key, and the held keyboard modes with no pad
 ## equivalent yet (stance adjust holds W/S/A/D; push-to-talk orders are typed or spoken).
-const PAD_EXEMPT: Array[StringName] = [&"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny", &"high_command", &"context"]  # (requests: the map panel's buttons on a pad; the 3D camera: its button there)
+const PAD_EXEMPT: Array[StringName] = [&"build_mode", &"debug_hurt", &"stance_adjust", &"voice_order", &"hc_approve", &"hc_deny", &"high_command", &"context"]  # (requests: the map panel's buttons on a pad; the 3D camera: its button there)
 
 
 func _enter_tree() -> void:

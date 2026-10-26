@@ -150,6 +150,7 @@ func _ready() -> void:
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
 	Operations.install(self, def)  # an operation zone's run: phases, the front, the OOB (combined_arms D3)
+	_add_builder()
 	Contracts.contract_live.connect(_on_contract_live)
 	players.child_entered_tree.connect(_on_player_entered)
 
@@ -226,12 +227,14 @@ func server_blast(pos: Vector3, radius_m: float, crater_m := -1.0) -> void:
 		digging.server_blast(pos, radius_m, crater_m)  # dug berms wear down (Digging)
 	if terrain and terrain.water:
 		terrain.water.server_blast(pos, radius_m)  # a big enough one drops a bridge's span (ZoneBridges)
+	_blast_builds(pos, radius_m)
 
 
 func server_breach(pos: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
 	for module in _modules:
 		if module.voxel_world and module.distance_to(pos) <= width_m + depth_m + 1.0:
 			module.voxel_world.server_breach(pos, normal, floor_y, width_m, height_m, depth_m)
+	_breach_builds(pos, normal, floor_y, width_m, height_m, depth_m)
 
 
 func modules() -> Array[ZoneModule]:
@@ -482,6 +485,33 @@ func _build_structures() -> void:
 	pass  # the modules hold the structures
 
 
+# --- Builds (survival: Builder, docs/survival_building.md) ------------------------------------
+
+## Every peer: a survival zone's Builder (blocks and pieces players build), there before the
+## host sends any.
+func _add_builder() -> void:
+	if is_survival():
+		Builder.install(self)
+
+
+## Host: the builds the zone's save kept, back (GameState.builds).
+func _restore_builds() -> void:
+	if is_survival() or not GameState.builds.is_empty():
+		Builder.install(self).server_restore(GameState.builds)
+
+
+func _blast_builds(pos: Vector3, radius_m: float) -> void:
+	var b := get_node_or_null(Builder.NODE_NAME) as Builder
+	if b:
+		b.server_blast(pos, radius_m)  # built blocks and pieces take it too
+
+
+func _breach_builds(pos: Vector3, normal: Vector3, floor_y: float, width_m: float, height_m: float, depth_m: float) -> void:
+	var b := get_node_or_null(Builder.NODE_NAME) as Builder
+	if b:
+		b.server_breach(pos, normal, floor_y, width_m, height_m, depth_m)
+
+
 # --- Hosting ----------------------------------------------------------------------------------
 
 func _exit_tree() -> void:
@@ -508,6 +538,7 @@ func _on_hosted() -> void:
 	if terrain.water:
 		terrain.water.bridges.server_restore(GameState.bridges)  # the spans dropped before, down again
 	_zone_loaded()
+	_restore_builds()
 	_logs = {}
 	for edit: Dictionary in GameState.voxel_edits:
 		if edit.has("w"):
