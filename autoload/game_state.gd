@@ -355,7 +355,11 @@ static func read_save(path: String) -> Dictionary:
 		for uid: Variant in caches_in:
 			var c: Variant = caches_in[uid]
 			if typeof(uid) == TYPE_STRING and _cache_ok(c):
-				out.caches[uid] = {"items": c.get("items", []), "unlocked": bool(c.get("unlocked", false))}
+				var kept := {"items": c.get("items", []), "unlocked": bool(c.get("unlocked", false))}
+				for k: String in ["searched", "searched_day", "refills", "pried"]:  # (Fallen's loot states: LootStates)
+					if (c as Dictionary).has(k):
+						kept[k] = (c as Dictionary)[k]
+				out.caches[uid] = kept
 			else:
 				push_warning("GameState: %s: skipping a bad cache record (%s)" % [path, uid])
 	else:

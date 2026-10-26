@@ -110,7 +110,7 @@ static func apply_creation(d: Dictionary, choice: Dictionary) -> String:
 		return why
 	d.background = String(choice.get("background", ""))
 	d.flaws = (choice.get("flaws", []) as Array).duplicate()
-	var bg: Dictionary = Backgrounds.ALL.get(d.background, {})
+	var bg: Dictionary = Backgrounds.all().get(d.background, {})
 	if bg.has("perk"):
 		d.granted = [String(bg.perk)]
 	var lines: Dictionary = d.lines
@@ -227,7 +227,7 @@ static func server_pick_perk(s: Soldier, id: String) -> String:
 	if id in _all_perks(d):
 		return "Already has it"
 	if not Perks.allowed(id, _levels_of(d)):
-		return "Needs %s" % [(Perks.info(id).get("needs", {}) as Dictionary)] if Perks.ALL.has(id) else "No perk %s" % id
+		return "Needs %s" % [(Perks.info(id).get("needs", {}) as Dictionary)] if Perks.all().has(id) else "No perk %s" % id
 	(d.perks as Array).append(id)
 	Survival._journal_line("%s: %s." % [Survival.survivor_name(s), String(Perks.info(id).name).to_lower()])
 	server_sync(s)

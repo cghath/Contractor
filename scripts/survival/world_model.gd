@@ -399,6 +399,7 @@ func step(at: float) -> void:
 	var t2 := Time.get_ticks_usec()
 	_form_and_split()
 	_trickle()
+	WorldEvents.tick(self)  # (world events' windows: docs/survival_events.md)
 	if tick() % TICKS_PER_DAY == 0:
 		_world_event()
 		_prune()
@@ -752,29 +753,11 @@ func _trickle() -> void:
 	event(z, "arrived", [String(g.id)], "a stranger walked into %s from outside" % String(zone(z).get("name", z)))
 
 
-## A world event a day at most (call 124): an enclave supply drop every group races for, a town
-## burning (its pressure up), a bell rung as a lure.
+## A world event a day at most (call 124): WorldEvents (data/survival_events.json): an enclave
+## supply drop every group races for, a convoy on the MSR, a downed helicopter, a bell rung as a
+## lure, a town burning on the horizon, a storm that takes a bridge out.
 func _world_event() -> void:
-	var rng := rng_for("world", "event")
-	if rng.randf() >= WORLD_EVENT_CHANCE:
-		return
-	var zs := _sorted(w.zones.keys()).filter(func(z: String) -> bool: return z != hosted)
-	if zs.is_empty():
-		return
-	var z := String(zs[rng.randi_range(0, zs.size() - 1)])
-	var zd := zone(z)
-	var place: Dictionary = (zd.places as Array)[rng.randi_range(0, (zd.places as Array).size() - 1)]
-	match rng.randi_range(0, 2):
-		0:
-			place.richness = 3.0
-			place.looted = -100.0
-			event(z, "supply_drop", [], "a supply drop came down by %s in %s" % [_place_name(place), String(zd.name)], String(place.id))
-		1:
-			raise_pressure(z, 30.0, _place_v(place))
-			event(z, "burning", [], "smoke over %s: something's burning there" % String(zd.name), String(place.id))
-		_:
-			raise_pressure(z, 20.0, _place_v(place))
-			event(z, "bell", [], "a bell rang for an hour in %s" % String(zd.name), String(place.id))
+	WorldEvents.roll(self)
 
 
 ## Dead groups and old demands forgotten after 10 world days.

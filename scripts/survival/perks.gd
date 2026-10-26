@@ -31,15 +31,20 @@ const ALL := {
 const ADDITIVE := ["carry_kg", "pack_l"]
 
 
+## Every perk: ALL with the mods' "perks" over it (ModKit).
+static func all() -> Dictionary:
+	return ModKit.perks()
+
+
 static func info(id: String) -> Dictionary:
-	return ALL.get(id, {})
+	return all().get(id, {})
 
 
 ## Whether a survivor with `levels` (line -> level) may take `id` (its "needs" met).
 static func allowed(id: String, levels: Dictionary) -> bool:
-	if not ALL.has(id):
+	if not all().has(id):
 		return false
-	var needs: Dictionary = (ALL[id] as Dictionary).get("needs", {})
+	var needs: Dictionary = (all()[id] as Dictionary).get("needs", {})
 	for line: String in needs:
 		if int(levels.get(line, 0)) < int(needs[line]):
 			return false
@@ -51,7 +56,7 @@ static func fx(perks: Array, key: String) -> float:
 	var additive := key in ADDITIVE
 	var out := 0.0 if additive else 1.0
 	for id: String in perks:
-		var f: Dictionary = (ALL.get(id, {}) as Dictionary).get("fx", {})
+		var f: Dictionary = (all().get(id, {}) as Dictionary).get("fx", {})
 		if f.has(key) and typeof(f[key]) in [TYPE_FLOAT, TYPE_INT]:
 			out = (out + float(f[key])) if additive else (out * float(f[key]))
 	return out
@@ -59,6 +64,6 @@ static func fx(perks: Array, key: String) -> float:
 
 static func has_flag(perks: Array, key: String) -> bool:
 	for id: String in perks:
-		if bool(((ALL.get(id, {}) as Dictionary).get("fx", {}) as Dictionary).get(key, false)):
+		if bool(((all().get(id, {}) as Dictionary).get("fx", {}) as Dictionary).get(key, false)):
 			return true
 	return false

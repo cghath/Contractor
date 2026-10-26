@@ -127,7 +127,7 @@ static func server_spawn_site_boxes(level: ZoneLevel) -> void:
 static func loot_data() -> Dictionary:
 	if _data.is_empty():
 		var file := FileAccess.open(TABLES_PATH, FileAccess.READ)
-		var parsed: Variant = JSON.parse_string(file.get_as_text()) if file else null
+		var parsed: Variant = ModKit.overlay("loot_tables", JSON.parse_string(file.get_as_text()) if file else null)  # (Fallen's mods, survival only: ModKit)
 		if typeof(parsed) != TYPE_DICTIONARY:
 			push_error("WorldValuables: cannot read %s" % TABLES_PATH)
 			return {"sites": {}, "tables": {}, "default_weights": {"common": 1}, "fallback": {}}

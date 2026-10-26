@@ -34,7 +34,7 @@ static var _data := {}
 static func bunker_data() -> Dictionary:
 	if _data.is_empty():
 		var f := FileAccess.open(PATH, FileAccess.READ)
-		var parsed: Variant = JSON.parse_string(f.get_as_text()) if f else null
+		var parsed: Variant = ModKit.overlay("bunkers", JSON.parse_string(f.get_as_text()) if f else null)  # (mods: docs/fallen_modding.md)
 		_data = parsed if parsed is Dictionary else {"tables": {}, "prefabs": [], "names": ["Site 1"]}
 	return _data
 

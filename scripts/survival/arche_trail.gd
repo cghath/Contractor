@@ -29,7 +29,7 @@ static var _data := {}
 static func trail_data() -> Dictionary:
 	if _data.is_empty():
 		var f := FileAccess.open(PATH, FileAccess.READ)
-		var parsed: Variant = JSON.parse_string(f.get_as_text()) if f else null
+		var parsed: Variant = ModKit.overlay("arche_trail", JSON.parse_string(f.get_as_text()) if f else null)  # (mods: docs/fallen_modding.md)
 		_data = parsed if parsed is Dictionary else {"pieces": [], "site_kinds": {}, "fragments": []}
 	return _data
 

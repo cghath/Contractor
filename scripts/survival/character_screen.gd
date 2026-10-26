@@ -63,20 +63,20 @@ func refresh(view: Dictionary = {}) -> void:
 	var owed := maxi(0, int(view.get("survivor_level", 0)) - (view.get("perks", []) as Array).size())
 	if owed > 0:
 		var options := []
-		for id: String in Perks.ALL:
+		for id: String in Perks.all():
 			if not id in perks and Perks.allowed(id, levels):
-				options.append([id, "%s: %s" % [String(Perks.ALL[id].name), String(Perks.ALL[id].text)]])
+				options.append([id, "%s: %s" % [String(Perks.all()[id].name), String(Perks.all()[id].text)]])
 		var chosen := [options[0][0] if not options.is_empty() else ""]
 		_box.add_child(UiKit.row("A perk to pick (%d)" % owed, UiKit.picker(options, func(v: Variant) -> void: chosen[0] = String(v), "One per survivor level, for good")))
 		var take := func() -> void:
 			if Rpg.net() and String(chosen[0]) != "":
 				Rpg.net().request_pick(String(chosen[0]))
 		_box.add_child(UiKit.button("Take it", take, "Take the perk picked above"))
-	var bg: Dictionary = Backgrounds.ALL.get(String(view.get("background", "")), {})
+	var bg: Dictionary = Backgrounds.all().get(String(view.get("background", "")), {})
 	_box.add_child(UiKit.text("Background: %s" % String(bg.get("name", "blank slate"))))
 	var flaws: Array = view.get("flaws", [])
 	_box.add_child(UiKit.text(Mind.character_line(Survival.my_body)))  # nerve and habits (Mind)
-	_box.add_child(UiKit.text("Flaws: %s" % (", ".join(PackedStringArray(flaws.map(func(f: String) -> String: return String(Backgrounds.FLAWS.get(f, {}).get("name", f))))) if not flaws.is_empty() else "none")))
+	_box.add_child(UiKit.text("Flaws: %s" % (", ".join(PackedStringArray(flaws.map(func(f: String) -> String: return String(Backgrounds.flaws().get(f, {}).get("name", f))))) if not flaws.is_empty() else "none")))
 
 
 ## The screen's words, top to bottom (tests).

@@ -20,16 +20,16 @@ var _spins := {}
 func _init() -> void:
 	name = "SurvivorPicker"
 	var options := [["", "Blank slate (nothing learned, no flaws)"]]
-	for id: String in Backgrounds.ALL:
-		var bg: Dictionary = Backgrounds.ALL[id]
+	for id: String in Backgrounds.all():
+		var bg: Dictionary = Backgrounds.all()[id]
 		options.append([id, "%s (%s)" % [String(bg.name), _lines_text(bg.get("lines", {}))]])
 	add_child(UiKit.row("Background", UiKit.picker(options, func(v: Variant) -> void: set_background(String(v)), "Who they were: a line +3, another +1")))
 	_bg_line = UiKit.hint("A blank slate: every line at 0. Take flaws for points and spend them on lines below.", false)
 	add_child(_bg_line)
 	add_child(UiKit.heading("Flaws (points)"))
 	var flow := HFlowContainer.new()
-	for id: String in Backgrounds.FLAWS:
-		var f: Dictionary = Backgrounds.FLAWS[id]
+	for id: String in Backgrounds.flaws():
+		var f: Dictionary = Backgrounds.flaws()[id]
 		var box := CheckBox.new()
 		box.text = "%s (%d)" % [String(f.name), int(f.points)]
 		box.tooltip_text = String(f.text) + (" (its effect comes later)" if bool(f.get("later", false)) else "")
@@ -67,7 +67,7 @@ static func _lines_text(lines: Dictionary) -> String:
 
 
 func set_background(id: String) -> void:
-	background = id if Backgrounds.ALL.has(id) else ""
+	background = id if Backgrounds.all().has(id) else ""
 	_refresh()
 
 
@@ -97,19 +97,19 @@ func points_left() -> int:
 
 ## The plain text of the choice (tests, the hint line): who, the flaws, the start lines, the points.
 func summary() -> String:
-	var bg: Dictionary = Backgrounds.ALL.get(background, {})
+	var bg: Dictionary = Backgrounds.all().get(background, {})
 	var start := Backgrounds.start_levels(choice())
 	var lines := PackedStringArray()
 	for line: String in RpgLines.LINES:
 		if int(start.get(line, 0)) > 0:
 			lines.append("%s %d" % [line, int(start[line])])
 	return "%s; flaws: %s; starts with %s; %d points left" % [String(bg.get("name", "Blank slate")),
-		", ".join(PackedStringArray(flaws.map(func(f: String) -> String: return String(Backgrounds.FLAWS[f].name)))) if not flaws.is_empty() else "none",
+		", ".join(PackedStringArray(flaws.map(func(f: String) -> String: return String(Backgrounds.flaws()[f].name)))) if not flaws.is_empty() else "none",
 		", ".join(lines) if not lines.is_empty() else "nothing learned", points_left()]
 
 
 func _refresh() -> void:
-	var bg: Dictionary = Backgrounds.ALL.get(background, {})
+	var bg: Dictionary = Backgrounds.all().get(background, {})
 	_bg_line.text = String(bg.get("line", "A blank slate: every line at 0. Take flaws for points and spend them on lines below."))
 	var left := points_left()
 	_points.text = summary() + ("" if left >= 0 else " (too many bought)")

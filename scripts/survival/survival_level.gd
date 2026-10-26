@@ -20,6 +20,8 @@ func _ready() -> void:
 	add_child(SurvivalMap.new())  # what the survivors know: explored cells, known zones, marks
 	add_child(SurvivorsLayer.new())  # the living: lone survivors, companions, graves (survival_people.md)
 	add_child(Nature.new())  # the wildlife, crows, trees, fire and regrowth (docs/survival_nature.md)
+	ModKit.activate()  # the mods on this peer too (items, zombie kinds: docs/fallen_modding.md)
+	FallenBell.place_all(self)  # a bell to ring at each church or square (docs/survival_events.md)
 	if multiplayer.is_server():
 		Survival.server_level_ready(self)
 
@@ -30,6 +32,34 @@ func _add_player(id: int) -> void:
 	var p := players.get_node_or_null(str(id)) as Soldier
 	if p:
 		Survival.server_survivor_joined(p)
+		var coop := CoopFallen.get_coop()
+		if coop:
+			coop.server_on_joined(p)  # a newcomer at the farm or a sleeper waking; the journal sent (call 126)
+
+
+## Host: a joiner comes in at the farm, or beside the host if the world allows (CoopFallen).
+func _player_start(id: int) -> Vector3:
+	if id != 1 and multiplayer.is_server() and Survival.running:
+		return CoopFallen.join_point(self, id)
+	return super._player_start(id)
+
+
+## Host: a leaving player's survivor sleeps at the safehouse (CoopFallen), then the body goes.
+func _on_peer_left(id: int) -> void:
+	var p := players.get_node_or_null(str(id)) as Soldier
+	if p and multiplayer.is_server() and Survival.running:
+		CoopFallen.server_left(p)
+	super._on_peer_left(id)
+
+
+## Host: the zone's boxes are out: loot that shows its state (LootStates: hidden caches and clues,
+## locks and keys, the refill where people pass).
+func _on_hosted() -> void:
+	super._on_hosted()
+	set_meta(&"fallen_hosted", true)  # (the zone's save is in: WorldEvents may put its pieces out now)
+	if Survival.running or Survival.world != "":
+		LootStates.server_zone_hosted(self)
+		WorldEvents.server_live(self)  # world events open here: a drop's crate, a wreck, a wagon, a bell, a fire
 
 
 ## Host: nobody holds the sites.

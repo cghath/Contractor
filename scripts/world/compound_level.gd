@@ -1182,7 +1182,7 @@ func _make_zombie(data: Dictionary) -> Node:
 		var vitals: Vitals = s.get_node(^"Vitals")
 		vitals.undead = true
 		vitals.can_go_down = false
-		vitals.undead_pool = float((ZombieAI.KINDS.get(kind, ZombieAI.KINDS.walker) as Dictionary).pool) * DeadDecay.pool_mult(decay)
+		vitals.undead_pool = float(ModKit.zombie_kind(kind).pool) * DeadDecay.pool_mult(decay)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = hash([data.name, "kit"])
 		DeadDress.server_kit(s, origin, kind, rng)  # what it had on it: the corpse's loot

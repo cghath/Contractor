@@ -33,11 +33,24 @@ var _label := "Cache"
 ## replicated with the hold).
 var key_id: StringName = &""
 var unlocked := false
+## Fallen's loot states (LootStates, docs/survival_events.md; call 125): searched once opened (the
+## box looks picked over: lid up, its colour dulled; replicated, kept by the zone save), the world
+## day it was searched (the refill reads it), how often it refilled, whether a crowbar opened it,
+## and a hidden cache's buried look (its label).
+var searched := false:
+	set(v):
+		searched = v
+		_apply_look()
+var searched_day := 0.0
+var refills := 0
+var pried := false
+var hidden := false
 
 
 func _init(label := "Cache", key := &"") -> void:
 	_label = label
 	key_id = key
+	hidden = label == LootStates.HIDDEN_LABEL
 	name = "WorldCache"
 	collision_layer = 1
 	collision_mask = 0
@@ -54,6 +67,9 @@ func _ready() -> void:
 	config.property_set_replication_mode(^"Cargo:net_state", SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	config.add_property(^".:unlocked")
 	config.property_set_replication_mode(^".:unlocked", SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
+	for prop: NodePath in [^".:searched", ^".:key_id"]:  # (Fallen's loot states: the picked-over look, a box locked after it spawned)
+		config.add_property(prop)
+		config.property_set_replication_mode(prop, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	var sync := MultiplayerSynchronizer.new()
 	sync.name = "Sync"
 	sync.replication_config = config
@@ -65,6 +81,7 @@ func _ready() -> void:
 	shape.position.y = SIZE.y * 0.5
 	add_child(shape)
 	add_child(_visual())
+	_apply_look()
 
 
 ## A plain low-poly crate (placeholder, like SupplyPallet's make_visual): nothing fancy yet.
@@ -81,6 +98,39 @@ static func _visual() -> Node3D:
 	mesh.position.y = SIZE.y * 0.5
 	root.add_child(mesh)
 	return root
+
+
+## The picked-over look (a searched box: lid tipped up, the wood dulled) and a hidden cache's (low,
+## dark, half in the ground). A colour and a lid: placeholders like the crate itself.
+func _apply_look() -> void:
+	var root := get_node_or_null(^"Visual") as Node3D
+	if root == null:
+		return
+	var mesh: MeshInstance3D = root.get_child(0) as MeshInstance3D if root.get_child_count() > 0 else null
+	if mesh and mesh.mesh is BoxMesh:
+		var mat := (mesh.mesh as BoxMesh).material as StandardMaterial3D
+		if mat:
+			mat = mat.duplicate() as StandardMaterial3D
+			mat.albedo_color = Color("2f2a22") if hidden else (Color("3e352a") if searched else Color("5a4a34"))
+			(mesh.mesh as BoxMesh).material = mat
+		root.position.y = -SIZE.y * 0.45 if hidden else 0.0
+	var lid := root.get_node_or_null(^"Lid") as MeshInstance3D
+	if searched and lid == null:
+		lid = MeshInstance3D.new()
+		lid.name = "Lid"
+		var box := BoxMesh.new()
+		box.size = Vector3(SIZE.x, 0.04, SIZE.z)
+		lid.mesh = box
+		lid.position = Vector3(0.0, SIZE.y + SIZE.z * 0.45, -SIZE.z * 0.5)
+		lid.rotation.x = deg_to_rad(-70.0)
+		root.add_child(lid)
+	elif not searched and lid != null:
+		lid.queue_free()
+
+
+## The look's state for tests and the HUD: "hidden", "searched" or "fresh".
+func look() -> String:
+	return "searched" if searched else ("hidden" if hidden else "fresh")
 
 
 func cargo() -> Node:
@@ -102,8 +152,32 @@ func action_point() -> Vector3:
 func interaction_actions(actor: Node) -> Array[Dictionary]:
 	var me := self
 	var why := lock_problem(actor as Soldier)
-	return [{"id": &"loot", "label": "Unlock and loot" if is_locked() and why == "" else "Loot", "disabled": why, "target": self,
+	var out: Array[Dictionary] = [{"id": &"loot", "label": "Unlock and loot" if is_locked() and why == "" else "Loot", "disabled": why, "target": self,
 		"call": func() -> void: (actor as Soldier)._hud.open_loot(me)}]
+	if is_locked() and why != "" and actor is Soldier and LootStates.has_pry_tool(actor as Soldier):
+		out.append({"id": &"pry", "label": "Pry it open (slow and loud)", "disabled": "", "target": self, "call": func() -> void: me.request_pry()})
+	return out
+
+
+## Any peer: pry the locked box open with a crowbar (LootStates: PRY_S, noise).
+func request_pry() -> void:
+	if multiplayer.is_server():
+		_server_pry(multiplayer.get_unique_id())
+	else:
+		_rpc_pry.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_pry() -> void:
+	if multiplayer.is_server():
+		_server_pry(multiplayer.get_remote_sender_id())
+
+
+func _server_pry(peer: int) -> void:
+	var level := CompoundLevel.current(self)
+	var actor: Soldier = level.players.get_node_or_null(str(peer)) as Soldier if level else null
+	if actor:
+		LootStates.server_start_pry(self, actor)
 
 
 func is_locked() -> bool:
@@ -114,6 +188,8 @@ func is_locked() -> bool:
 func lock_problem(actor: Soldier) -> String:
 	if not is_locked() or actor == null:
 		return ""
+	if key_id == LootStates.KEY_ITEM:  # (Fallen: the key made for this box, or a crowbar's pry)
+		return "" if LootStates.has_key_for(actor, self) else "Locked: it needs its key, or a crowbar to pry it"
 	if actor.inventory.count_of(key_id) > 0 or actor.inventory.slots.values().has(key_id) or actor.inventory.hands == key_id:
 		return ""
 	return "Locked: it needs the %s" % (ItemDB.get_item(key_id).name if ItemDB.has_item(key_id) else String(key_id))
@@ -125,6 +201,8 @@ func server_open_for(actor: Soldier) -> String:
 	if why == "" and is_locked():
 		unlocked = true
 		print("[cache] %s opens %s with the %s" % [actor.display_name(), display_name(), key_id])
+	if why == "" and not searched:
+		LootStates.server_on_open(self, actor)  # (Fallen: picked over from now on, a live event's claim)
 	return why
 
 
@@ -146,6 +224,10 @@ func server_fill(items: Array) -> void:
 		return
 	server_seed(GameState.from_json((saved as Dictionary).get("items", [])))
 	unlocked = bool((saved as Dictionary).get("unlocked", false)) and key_id != &""
+	searched = bool((saved as Dictionary).get("searched", false))
+	searched_day = float((saved as Dictionary).get("searched_day", 0.0))
+	refills = int((saved as Dictionary).get("refills", 0))
+	pried = bool((saved as Dictionary).get("pried", false))
 
 
 ## For the zone save (GameState.save_zone): what's in it and whether it's been unlocked.
@@ -156,7 +238,10 @@ func to_save() -> Dictionary:
 		if not (entry.get("state", {}) as Dictionary).is_empty():
 			e["state"] = (entry.state as Dictionary).duplicate(true)
 		items.append(e)
-	return {"items": items, "unlocked": unlocked}
+	var out := {"items": items, "unlocked": unlocked}
+	if searched or refills > 0 or pried:  # (Fallen's loot states)
+		out.merge({"searched": searched, "searched_day": searched_day, "refills": refills, "pried": pried})
+	return out
 
 
 ## Host: moves one of `actor`'s entries into the hold (as Vehicle.server_load). Returns what to

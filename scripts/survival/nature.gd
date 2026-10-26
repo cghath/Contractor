@@ -72,7 +72,7 @@ static func _load(path: String) -> Dictionary:
 	if f == null:
 		push_error("Nature: cannot open %s" % path)
 		return {}
-	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	var parsed: Variant = ModKit.overlay(path.get_file().get_basename(), JSON.parse_string(f.get_as_text()))  # (mods: docs/fallen_modding.md)
 	return parsed if parsed is Dictionary else {}
 
 
