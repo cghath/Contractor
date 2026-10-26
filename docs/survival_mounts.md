@@ -5,7 +5,7 @@ tied horse guarded). Built on `claude/survival-mounts`. Every number here is **P
 
 ## Where the build is
 
-- RUN_STATUS_LINE
+- 2026-10-26 ~08:15 CDT, R2659: mounts PASS, survival PASS, vehicles single-peer PASS; vehicles host FAIL only on "V does nothing else" (quick_melee on V in autoload/controls.gd, from the melee lane, not mounts). Mounts suite well under 400 s.
 
 ## What's built
 

@@ -13,7 +13,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Contractor: Fallen, mounts: horses, bicycles and horse carts (claude/survival-mounts)
 
-Local: mounts, survival, vehicles suites (RUN_LINE; docs/survival_mounts.md).
+Local: mounts, survival, vehicles suites (R2659: mounts PASS, survival PASS, vehicles single-peer PASS; vehicles host FAIL only on "V does nothing else" (quick_melee on V in autoload/controls.gd, from the melee lane, not mounts); docs/survival_mounts.md).
 
 - **Added (`Mount`, `scripts/vehicles/mount.gd`):** mounts as Vehicles of kind "mount" (calls 31, 35):
   a bicycle (fast on asphalt, slow on grass, useless cross-country; silent; falls on a hard hit, a

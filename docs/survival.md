@@ -7,7 +7,7 @@
 - **Phase C started ~06:40**: the world sim (claude/survival-worldsim) and the settlement's work (claude/survival-settlement)
   on Opus lanes; next lanes once the sim lands: the enclave + ARCHE trail + bunkers, trade + the intel layer, mounts.
 - Calls now 1-142 (the table below).
-- **Mounts built on `claude/survival-mounts`** (calls 31, 35; horses, bicycles, carts, tie-and-guard, companions riding): RUN_LINE; see docs/survival_mounts.md.
+- **Mounts built on `claude/survival-mounts`** (calls 31, 35; horses, bicycles, carts, tie-and-guard, companions riding): R2659: mounts PASS, survival PASS, vehicles single-peer PASS; vehicles host FAIL only on "V does nothing else" (quick_melee on V in autoload/controls.gd, from the melee lane, not mounts); see docs/survival_mounts.md.
 
 ### (earlier) 2026-10-26 ~02:15 CDT
 
