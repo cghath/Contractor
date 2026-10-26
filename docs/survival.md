@@ -55,6 +55,11 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 13 | Death (refines 4) | **Permadeath character**: a dead survivor is gone, body and kit stay where they fell; the player starts a **new survivor from zero** (no XP or skills carried over). |
 | 14 | Metabolism | **Calories, water, protein/carbs/fat and a few vitamins** on a body screen (inspired by SCUM, less spreadsheet), plus fatigue/sleep, body temperature with wet clothes and wind, carried weight, hygiene; every deficit feeds the medical system (healing rate, stamina, sickness) rather than standing alone. Survival depth past today's survival games; medical depth past SCUM (wound infection staging, sepsis, antibiotic courses, field surgery, fever, blood types and transfusions, hypothermia and heat stroke, bones that heal over days, companion medics). Design in docs/survival_medical.md. |
 | 15 | Cure | **Both**: a rare cure serum in hospitals and labs, and a quest chain that makes one reliably (a doctor companion or your own medical skill, a hospital or lab zone, equipment, an immune survivor's blood); antibiotics and rest buy days. |
+| 16 | RPG shape | **Learn by doing + perk picks**: skill lines (medical, building, melee, firearms, archery, scavenging, mechanics, driving, cooking, fieldcraft, fitness, stealth) level from use; total XP gives a survivor level with a few general perk picks. |
+| 17 | Character creation | **Blank slate by default, or background + flaws**: a background starts one line higher; flaws are taken for points that buy other skills higher (inspired by Project Zomboid's traits). |
+| 18 | Companions level | **Yes, by doing**: companions earn XP in what they do beside you; their skills show when you talk to them. |
+| 19 | Specials (first cut) | **Screamer** (calls a horde), **Crawler** (under cars, in grass, grabs legs), **Bloater** (bursts, taints the room: masks or distance), **Hazmat** (hard shell: the head or heavy hits). |
+| 20 | Living world | **A truly living world, inspired by STALKER's A-Life, big scope**: groups of the living form dynamically with their own objectives and goals (settle, raid, trade, flee, hunt, hold ground), move between zones, fight the dead and each other, and leave traces whether or not a player is there. Design in docs/survival_world.md. |
 
 ## Already in the code to build on
 
