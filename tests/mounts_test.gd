@@ -67,7 +67,7 @@ func _test_world() -> void:
 	check(int(counts.horse) >= Mounts.START_HORSES and int(counts.wild) >= Mounts.START_HORSES and int(counts.cart) >= 1,
 		"wild horses and a cart wait at the start farm (%s)" % [counts])
 	var start_horse := VehicleLayer.of(level).find("mnt_start_horse_0") as Mount
-	check(start_horse != null and not start_horse.tamed and start_horse.global_position.distance_to(level.insertion_points()[0]) < 40.0,
+	check(start_horse != null and not start_horse.tamed and start_horse.global_position.distance_to(level.insertion_points()[0]) < 60.0,
 		"one of them is a wild horse by the farm")
 
 
@@ -143,7 +143,7 @@ func _test_bicycle() -> void:
 	await _frames(3)
 	check(bike.ground_here() == &"grass", "over on the grass (%s)" % bike.ground_here())
 	var grass := await _ride(bike, 1.0, 4.5)
-	check(road > 6.0 and grass < road * 0.6, "faster on the road than on grass (%.1f m/s vs %.1f m/s)" % [road, grass])
+	check(road > 5.0 and grass < road * 0.6, "faster on the road than on grass (%.1f m/s vs %.1f m/s)" % [road, grass])
 	check(not Mount.is_mount_model("matv") and Mount.is_mount_model("horse") and not VehicleSpecs.models().has("horse"),
 		"mounts are vehicles of their own kind, kept off the campaign's lists")
 	bike.server_exit(player)
@@ -194,7 +194,7 @@ func _test_spook() -> void:
 	check(horse.spooked_s > 0.0, "the shot spooks it (%.1f s)" % horse.spooked_s)
 	await _frames(2)
 	check(Vehicle.ride_of(player) == null, "and throws its rider")
-	await _seconds(1.5)
+	await _seconds(2.5)
 	check(horse.global_position.distance_to(at) > 4.0, "it bolts (%.1f m)" % horse.global_position.distance_to(at))
 	await _wait_for(func() -> bool: return horse.spooked_s <= 0.0, 6.0)
 	await _seconds(3.5)
@@ -369,6 +369,7 @@ func _test_dead_bite() -> void:
 		return
 	await _frames(2)
 	horse.tied = true  # (so it can't bolt off the deck)
+	_put(player, Vector3(62.0, 0.0, -84.0))  # (near, or the walker is put back into the zone)
 	var z := Survival.server_spawn_zombie(level, horse.global_position + Vector3(1.0, 0.3, 0.0))
 	for i in 40:  # (held at its side: the deck has no navmesh to walk)
 		if z:

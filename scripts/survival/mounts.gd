@@ -149,8 +149,8 @@ func server_place() -> Array[Vehicle]:
 		var farm: Vector3 = points[0]
 		for i in START_HORSES:
 			entries.append({"id": "mnt_start_horse_%d" % i, "model": Mount.HORSE, "scheme": HORSE_SCHEMES[rng.randi() % HORSE_SCHEMES.size()],
-				"pos": zl.ground_point(farm + Vector3(12.0 + 4.0 * i, 0.0, 7.0 - 6.0 * i)), "yaw": rng.randf() * 360.0})
-		entries.append({"id": "mnt_start_cart", "model": Mount.CART, "pos": zl.ground_point(farm + Vector3(-9.0, 0.0, 9.0)), "yaw": rng.randf() * 360.0})
+				"pos": zl.ground_point(farm + Vector3(34.0 + 5.0 * i, 0.0, 12.0 - 10.0 * i)), "yaw": rng.randf() * 360.0})
+		entries.append({"id": "mnt_start_cart", "model": Mount.CART, "pos": zl.ground_point(farm + Vector3(-15.0, 0.0, 14.0)), "yaw": rng.randf() * 360.0})
 	for m: ZoneModule in zl.get(&"_modules"):
 		var base := ZoneModules.base(m.type)
 		var at := m.global_position

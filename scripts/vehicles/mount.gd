@@ -594,6 +594,9 @@ func _make_noise() -> void:
 	if speed < STILL_MS:
 		return
 	var g := _gait_of(speed)
+	if rider() == null and mount_type == HORSE:
+		last_noise_m = 0.0
+		return  # a loose horse (grazing, wandering, bolting off alone) isn't heard; only a ridden one's hooves
 	var hard := String(ground_here()) in HARD_GROUND
 	var radius: float = (CART_M[g] if mount_type == CART else HOOF_M[g]) * (1.0 if hard or mount_type == HORSE else SOFT_MULT)
 	last_noise_m = radius
