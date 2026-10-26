@@ -362,7 +362,8 @@ func _test_melee() -> void:
 	await _seconds(Melee.DODGE_IFRAMES_S + 0.1)
 	player.remove_meta(Melee.GUARD)
 	face.call()
-	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s)" % float(Melee.ZOMBIE_ATTACK.windup))
+	check(Melee.server_attack(z, Melee.ZOMBIE_ATTACK), "the dead's bite winds up (%.2f s; it is up %s, staggered %s, winding %s, its guard %s)" % [
+		float(Melee.ZOMBIE_ATTACK.windup), z.vitals.is_up(), Melee.staggered(z), z.has_meta(&"melee_winding"), Melee.guard_of(z)])
 	var land_at := float(z.get_meta(&"melee_winding", 0.0))
 	while z.has_meta(&"melee_winding") and Soldier._now() < land_at + 2.0:
 		await get_tree().process_frame
