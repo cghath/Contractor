@@ -207,6 +207,9 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 137 | Starting season and world size options | **Added 2026-10-26**: New world adds the season you wake in (spring default) and the world size (24 zones now, 48 with wilderness later) (phase D seasons; the size with the wilderness). |
 | 138 | Solo pause, co-op never | **Added 2026-10-26**: a world hosted with nobody joined pauses on the menu; with anyone joined it never does (phase B). |
 | 139 | Saves | **Declined 2026-10-26**: ironman (one save, no reloads) NOT taken; a world autosaves as today and the save rules stay as they are (a world list on Continue still worth having). |
+| 140 | Climbing rules for the dead | **Added 2026-10-26**: walkers can't climb or jump (a 1 m wall or a ladder stops them; they pile until the pile is a ramp); runners vault waist-high; crawlers squeeze under and through gaps; walls, platforms and roofs are real safety (phase B/C). |
+| 141 | Builds and the navmesh | **Added**: a requirement on the building lane: placed blocks and pieces update the navigation the dead and the living use within a second; the dead path round or push on them, never through; companions path over stairs and ladders (phase B follow-up). |
+| 142 | Accessibility and readability | **Added**: colour-blind-safe HUD tells (the ring, the eye, load colours with shapes), scalable text, a toggle for the tension audio, subtitles for every bark; checked at the 10 resolutions as the rest of the UI (phase D UI pass). Save migration across builds NOT taken now. |
 
 ## Already in the code to build on
 
