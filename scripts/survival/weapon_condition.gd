@@ -42,6 +42,12 @@ const SHARPEN_ADD := 50.0
 const TAPE_S := 6.0
 const TAPE_ADD := 30.0
 const AXE_SLOW := 1.6         # a worn-out axe takes this much longer to fell a tree
+## A found gun's condition (the early loot curve: found_state): kept dry (a home, a store, a sealed
+## box) or out in the weather (on one of the dead, a box in the open). Proposed.
+const FOUND_DRY := Vector2(40.0, 85.0)
+const FOUND_WET := Vector2(10.0, 45.0)
+const FOUND_WET_BROKEN := 0.2   # out in the weather, rusted through (0: a gun repair kit)
+const FOUND_JAMMED := Vector2(0.1, 0.45)  # dry, wet: found with a round stuck in it
 
 const CLEANING_KIT := &"gun_cleaning_kit"
 const GUN_OIL := &"gun_oil"
@@ -73,6 +79,27 @@ static func jam_chance(c: float, item: ItemData = null, wet := false) -> float:
 	var t := (JAM_FROM - c) / JAM_FROM
 	return clampf(JAM_MAX * t * t * (IMPROVISED_X if improvised(item) else 1.0) * (1.25 if wet else 1.0), 0.0, 0.9)
 
+
+## A found gun's state (the early loot curve, docs/survival_deadtime.md): its default state (a full
+## magazine, a full tube) with a found condition: FOUND_DRY kept dry, else FOUND_WET, rusted
+## through (0, broken) FOUND_WET_BROKEN of the time, and wet; jammed FOUND_JAMMED of the time.
+## `rounds` >= 0: what's left loaded (the dead's mostly empty magazine).
+static func found_state(item: ItemData, dry: bool, rng: RandomNumberGenerator, rounds := -1) -> Dictionary:
+	var st: Dictionary = item.default_state().duplicate(true) if item else {}
+	if not is_gun(item):
+		return st
+	var r := FOUND_DRY if dry else FOUND_WET
+	var c := roundf(lerpf(r.x, r.y, rng.randf()))
+	if not dry and rng.randf() < FOUND_WET_BROKEN:
+		c = 0.0
+	Wear.set_cond(st, c)
+	if c > 0.0 and rng.randf() < (FOUND_JAMMED.x if dry else FOUND_JAMMED.y):
+		st["jammed"] = true
+	if not dry:
+		st["wet"] = true
+	if rounds >= 0 and st.has("rounds"):
+		st["rounds"] = mini(rounds, int(st.rounds))
+	return st
 
 # --- Shots (Soldier._server_fire) ----------------------------------------------------------------
 

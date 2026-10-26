@@ -11,12 +11,15 @@ extends RefCounted
 ## dead don't use weapons: a soldier's rifle rides in its pack and a cop's pistol in a pocket,
 ## never in the hands. The mix of origins at a site is a tell for what the place was (tell()).
 ## The hazmat kind is a soldier of the decon teams (plates and a mask).
+## The early loot curve (FoundLoot; docs/survival_deadtime.md): outside military places soldiers
+## and cops are rare and grow with the zone's tier (roll_at), none near the farm; a soldier's rifle
+## is usually gone (the "gun" keep share) and a kept one is weathered, its magazine mostly empty.
 ## Every number here is Proposed.
 
 const ORIGIN_NAMES: Array[String] = ["civilian", "worker", "farmer", "soldier", "cop", "doctor"]
 ## A site's mix of origins (shares), by base type or town lot.
 const ORIGINS := {
-	"": {"civilian": 0.6, "farmer": 0.2, "worker": 0.1, "soldier": 0.1},
+	"": {"civilian": 0.63, "farmer": 0.22, "worker": 0.1, "soldier": 0.02, "cop": 0.03},  # (early loot curve: soldier was 0.1)
 	"hq": {"soldier": 0.75, "worker": 0.1, "doctor": 0.05, "civilian": 0.1},
 	"qrf_base": {"soldier": 0.8, "worker": 0.1, "civilian": 0.1},
 	"outpost": {"soldier": 0.7, "civilian": 0.3},
@@ -60,15 +63,22 @@ const CLOTHES := {
 	"farmer": [["6a5a44", "8a7258", "a65e48"], ["3b4a63", "4a4438"], ["3a3027", "4a3f35"]],
 }
 ## What each origin had on it: [id, count]; "pack" the bag it wears (worn first, the rest goes in
-## it or in the pockets); "maybe" [id, count, chance] rolled each.
+## it or in the pockets); "worn" [id, chance] each (a plate only goes in a carrier he has on);
+## "maybe" [id, count, chance] rolled each; "gun" its weapon (GUN_KEYS: kept `keep` of the time,
+## the rest taken or lost; a kept one weathered, WeaponCondition.found_state, with 0..`loaded`
+## rounds in it and up to `spares` magazines of 0..`loaded` rounds each, their condition by where
+## it lay). (The early loot curve, Proposed: the soldier's carrier, plate and helmet more often
+## than his rifle; a cop's pistol 30% of the time.)
+const GUN_KEYS: Array[String] = ["id", "keep", "loaded", "mag", "spares"]
 const KITS := {
-	"soldier": {"pack": "pack_assault_30", "worn": ["plate_carrier_light", "plate_steel_l3"], "items": [["m4a1", 1], ["mag_556", 2]],
+	"soldier": {"pack": "pack_assault_30", "worn": [["plate_carrier_light", 0.6], ["plate_steel_l3", 0.5], ["helmet_ach", 0.45]],
+		"gun": ["m4a1", 0.25, 8, "mag_556", 1], "items": [],
 		"maybe": [["pressure_bandage", 1, 0.5], ["radio", 1, 0.2]]},
-	"hazmat": {"pack": "pack_assault_30", "worn": ["plate_carrier_light", "plate_steel_l3"], "items": [["gas_mask_m50", 1]],
-		"maybe": [["m4a1", 1, 0.4], ["pressure_bandage", 1, 0.5]]},
-	"doctor": {"pack": "pack_hydration_12", "worn": ["aid_bag"], "items": [["suture_kit", 1], ["antibiotics", 1], ["pressure_bandage", 2]],
+	"hazmat": {"pack": "pack_assault_30", "worn": [["plate_carrier_light", 1.0], ["plate_steel_l3", 0.7]], "items": [["gas_mask_m50", 1]],
+		"gun": ["m4a1", 0.25, 8, "mag_556", 1], "maybe": [["pressure_bandage", 1, 0.5]]},
+	"doctor": {"pack": "pack_hydration_12", "worn": [["aid_bag", 1.0]], "items": [["suture_kit", 1], ["antibiotics", 1], ["pressure_bandage", 2]],
 		"maybe": [["morphine", 1, 0.4]]},
-	"cop": {"items": [["glock17", 1], ["mag_9mm", 1], ["zip_cuffs", 2]], "maybe": [["car_keys", 1, 0.3]]},
+	"cop": {"gun": ["glock17", 0.3, 6, "", 0], "items": [["zip_cuffs", 2]], "maybe": [["car_keys", 1, 0.3]]},
 	"worker": {"items": [], "maybe": [["hammer", 1, 0.4], ["pliers", 1, 0.3], ["wrench_set", 1, 0.15], ["lighter", 1, 0.3]]},
 	"farmer": {"items": [], "maybe": [["seed_packet", 2, 0.5], ["lighter", 1, 0.2], ["car_keys", 1, 0.15]]},
 	"civilian": {"items": [], "maybe": [["car_keys", 1, 0.2], ["lighter", 1, 0.2], ["digital_watch", 1, 0.1]]},
@@ -76,6 +86,8 @@ const KITS := {
 
 ## Tests: a site to use wherever (-"": by the rules).
 static var force_site := ""
+## Tests: the share of the dead that kept their gun (-1: the kit's own).
+static var force_gun_keep := -1.0
 
 
 # --- Where it turned ----------------------------------------------------------------------------
@@ -111,11 +123,27 @@ static func _lot_at(m: ZoneModule, pos: Vector3) -> String:
 	return ""
 
 
-## An origin from `site`'s mix (`kind` the hazmat one is always the decon teams' soldier).
-static func roll(site: String, rng: RandomNumberGenerator, kind := "walker") -> String:
+## An origin for one of the dead turning at `pos` in `level`: its site's mix with the soldiers'
+## and cops' shares by the early loot curve (FoundLoot.armed_mults: the zone's tier, none near the farm).
+static func roll_at(level: Node, pos: Vector3, rng: RandomNumberGenerator, kind := "walker") -> String:
+	var site := site_at(level, pos)
+	return roll(site, rng, kind, FoundLoot.armed_mults(level, pos, site))
+
+
+## An origin from `site`'s mix (`kind` the hazmat one is always the decon teams' soldier);
+## `armed` scales the soldier (x) and cop (y) shares, the difference to or from the townsfolk.
+static func roll(site: String, rng: RandomNumberGenerator, kind := "walker", armed := Vector2.ONE) -> String:
 	if kind == "hazmat":
 		return "soldier"
 	var shares: Dictionary = ORIGINS.get(site, ORIGINS[""])
+	if armed != Vector2.ONE:
+		shares = shares.duplicate()
+		var was := float(shares.get("soldier", 0.0)) + float(shares.get("cop", 0.0))
+		for o: String in ["soldier", "cop"]:
+			if shares.has(o):
+				shares[o] = float(shares[o]) * (armed.x if o == "soldier" else armed.y)
+		var now := float(shares.get("soldier", 0.0)) + float(shares.get("cop", 0.0))
+		shares["civilian"] = maxf(0.0, float(shares.get("civilian", 0.0)) - (now - was))
 	var r := rng.randf()
 	var acc := 0.0
 	for o: String in shares:
@@ -185,46 +213,70 @@ static func look(variant: String, origin: String, name: String) -> String:
 	return ":".join(parts)
 
 
-## Host: what `s` had on it when it turned (its origin's KITS, kind "hazmat" the decon kit), in
-## its Inventory: the pack and worn things first, weapons stowed (never in a weapon slot: the
-## dead don't use them), the rest wherever it fits. Returns the ids given.
+## What one of the dead of `origin` (kind "hazmat" the decon kit) had on it when it turned:
+## [[id, count, state], ...] in the order it goes on (the pack, what's worn, the rest). `dry`: it
+## lay under a roof (a nest's, inside), else out in the weather (its gun and rounds weathered).
+static func kit_roll(origin: String, kind: String, rng: RandomNumberGenerator, dry := false) -> Array:
+	var k: Dictionary = KITS.get("hazmat" if kind == "hazmat" else origin, KITS.civilian)
+	var out: Array = []
+	if String(k.get("pack", "")) != "":
+		out.append([String(k.pack), 1, {}])
+	var carrier := false
+	for w: Array in k.get("worn", []):
+		if rng.randf() >= float(w[1]):
+			continue
+		var item := ItemDB.get_item(StringName(String(w[0])))
+		if item == null or (item.type == "plate" and not carrier):
+			continue  # (a plate rides in a carrier he has on)
+		carrier = carrier or item.slot == &"vest"
+		out.append([String(w[0]), 1, {}])
+	var gun: Array = k.get("gun", [])
+	if gun.size() == GUN_KEYS.size() and rng.randf() < (force_gun_keep if force_gun_keep >= 0.0 else float(gun[1])):
+		var item := ItemDB.get_item(StringName(String(gun[0])))
+		if item:
+			out.append([String(gun[0]), 1, WeaponCondition.found_state(item, dry, rng, rng.randi_range(0, int(gun[2])))])
+			if String(gun[3]) != "":
+				for _i in rng.randi_range(0, int(gun[4])):
+					out.append([String(gun[3]), 1, {"rounds": rng.randi_range(0, int(gun[2])), Wear.KEY: AmmoCondition.roll(dry, rng)}])
+	for e: Array in k.get("items", []):
+		out.append([String(e[0]), int(e[1]), {}])
+	for m: Array in k.get("maybe", []):
+		if rng.randf() < float(m[2]):
+			out.append([String(m[0]), int(m[1]), {}])
+	return out
+
+
+## Host: what `s` had on it when it turned (kit_roll), in its Inventory: the pack and worn things
+## first, weapons stowed (never in a weapon slot: the dead don't use them), the rest wherever it
+## fits. One of a nest's, inside, is dry; the rest have been out in the weather. Returns the ids given.
 static func server_kit(s: Soldier, origin: String, kind: String, rng: RandomNumberGenerator) -> Array:
 	var inv: Inventory = s.get_node_or_null(^"Inventory") as Inventory
 	if inv == null:
 		return []
-	var k: Dictionary = KITS.get("hazmat" if kind == "hazmat" else origin, KITS.civilian)
 	var given: Array = []
-	if String(k.get("pack", "")) != "" and inv.take(StringName(k.pack)) > 0:
-		given.append(String(k.pack))
-	for id: String in k.get("worn", []):
-		if _give(inv, id, 1) > 0:
-			given.append(id)
-	var list: Array = (k.get("items", []) as Array).duplicate()
-	for m: Array in k.get("maybe", []):
-		if rng.randf() < float(m[2]):
-			list.append([m[0], m[1]])
-	for e: Array in list:
-		if _give(inv, String(e[0]), int(e[1])) > 0:
+	for e: Array in kit_roll(origin, kind, rng, s.has_meta(&"nest_inside")):
+		if _give(inv, String(e[0]), int(e[1]), e[2]) > 0:
 			given.append(String(e[0]))
 	return given
 
 
-## Puts `n` of `id` on the body: a weapon into a container (pack, then pockets), else take().
-static func _give(inv: Inventory, id: String, n: int) -> int:
+## Puts `n` of `id` (with `state`) on the body: a weapon into a container (pack, then pockets),
+## else take().
+static func _give(inv: Inventory, id: String, n: int, state := {}) -> int:
 	var item := ItemDB.get_item(StringName(id))
 	if item == null:
 		return 0
 	if item.slot in Inventory.WEAPON_SLOTS:
 		for c: StringName in [&"backpack", &"vest", &"pockets"]:
-			var got := inv._stow(c, item, n, {})
+			var got := inv._stow(c, item, n, state)
 			if got > 0:
 				inv._commit()
 				return got
 		return 0
-	var taken := inv.take(StringName(id), n)
+	var taken := inv.take(StringName(id), n, state)
 	if taken < n:
 		for c: StringName in [&"backpack", &"pockets"]:
-			var more := inv._stow(c, item, n - taken, {})
+			var more := inv._stow(c, item, n - taken, state)
 			if more > 0:
 				inv._commit()
 				taken += more

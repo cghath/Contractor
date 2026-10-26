@@ -3,8 +3,10 @@ extends Node
 ## hosted survival world: a fresh one of the dead is faster, hits harder and has more pool than an
 ## old one, and the old one's limbs come apart; the world's date sets the mix of stages and winter
 ## keeps them (no decay); the look meta and the clothes change with the stage; the crowd's heads
-## carry their stage and origin; one of the dead at a military site has a rifle and plates on it,
-## at a clinic a doctor's bag, and they stay on the corpse for the looting; a site's mix of origins
+## carry their stage and origin; one of the dead at a military site has plates on it and now and
+## then a weathered rifle, at a clinic a doctor's bag, and they stay on the corpse for the looting;
+## the early loot curve: no soldiers' dead or guns in the boxes about the farm, the soldiers' share
+## grows with the zone's tier, a soldier's rifle is usually gone and a kept one is worn and near empty; a site's mix of origins
 ## says what it was; a nest holds its heads by day, pours them out at dusk and takes them back at
 ## dawn; a nest entered by day lies dormant, a silent kill leaves the rest asleep, a scream wakes
 ## them all; clearing it flags the payoff and it refills over the days; walkers don't climb, a
@@ -26,6 +28,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await _test_host()
 	if level != null and player != null:
+		await _probe_start_loot()
 		await _test_decay()
 		_test_mix()
 		await _test_dress()
@@ -53,6 +56,161 @@ func _test_host() -> void:
 	Survival.state()["nests_seeded_" + String(Survival.state().get("zone", ""))] = true  # (the zone's own nests left out: the test makes its own)
 	DeadNests.all().clear()
 	_clear_dead()
+
+
+# --- The early loot curve (the Captain's playtest, 2026-10-26: "got a gun off a mil zombie in the
+# first 5 minutes"): what a fresh world's start puts within START_PROBE_M of the farm. Prints the
+# numbers (docs/survival_deadtime.md "Early loot curve") and holds the targets.
+const START_PROBE_M := 300.0
+const START_PROBE_DEAD := 30
+
+
+func _probe_start_loot() -> void:
+	print("The early loot curve: what lies within %.0f m of the farm" % START_PROBE_M)
+	var points := level.insertion_points()
+	var home := level.ground_point(points[0] if not points.is_empty() else Vector3.ZERO)
+	var guns := 0
+	var working := 0
+	var rounds := 0
+	var gun_ids: Array = []
+	for c: Node in get_tree().get_nodes_in_group(WorldCache.GROUP):
+		var cache := c as WorldCache
+		if cache == null or cache.global_position.distance_to(home) > START_PROBE_M:
+			continue
+		for e: Dictionary in cache.cargo_hold.entries():
+			var r := _probe_count(StringName(String(e.id)), int(e.count), e.get("state", {}))
+			guns += r[0]
+			working += r[1]
+			rounds += r[2]
+			if r[0] > 0:
+				gun_ids.append("%s (%s)" % [e.id, cache.display_name()])
+	for n: Node in level.items.get_children():
+		var wi := n as WorldItem
+		if wi == null or wi.global_position.distance_to(home) > START_PROBE_M:
+			continue
+		var r := _probe_count(wi.item_id, wi.count, wi.state)
+		guns += r[0]
+		working += r[1]
+		rounds += r[2]
+		if r[0] > 0:
+			gun_ids.append("%s (ground)" % wi.item_id)
+	print("  containers and ground: %d guns (%d working), %d rounds: %s" % [guns, working, rounds, gun_ids])
+	# The dead: their origins over many rolls where they'd turn about the farm, then the first
+	# START_PROBE_DEAD as bodies, looted.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var mix := {}
+	for i in 600:
+		var a := rng.randf() * TAU
+		var at := home + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(20.0, START_PROBE_M)
+		var o := String(DeadDecay.spawn_data(level, at, Survival.roll_kind(level, at, rng), {}).origin)
+		mix[o] = int(mix.get(o, 0)) + 1
+	print("  the dead's origins about the farm (600 rolls): %s" % [mix])
+	var armed := 0
+	var armed_working := 0
+	var dead_rounds := 0
+	for i in START_PROBE_DEAD:
+		var a := rng.randf() * TAU
+		var at := level.ground_point(home + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(45.0, START_PROBE_M))
+		var z := Survival.server_spawn_zombie(level, at, Survival.roll_kind(level, at, rng))
+		if z == null:
+			continue
+		var has_gun := false
+		var has_working := false
+		for e: Dictionary in Survival.kit_of(z.inventory):
+			var r := _probe_count(StringName(String(e.id)), int(e.get("count", 1)), e.get("state", {}))
+			has_gun = has_gun or r[0] > 0
+			has_working = has_working or r[1] > 0
+			dead_rounds += r[2]
+		armed += 1 if has_gun else 0
+		armed_working += 1 if has_working else 0
+	print("  the first %d dead: %d carry a gun (%d working), %d rounds between them" % [START_PROBE_DEAD, armed, armed_working, dead_rounds])
+	_clear_dead()
+	await get_tree().process_frame
+	# The targets (Proposed): nothing armed turns or lies in a box near the farm; on the rest of the
+	# start zone's ground fewer than one of the first 30 dead carries a gun, on average.
+	var near_soldiers := 0
+	var near_guns := 0
+	for i in 400:
+		var a := rng.randf() * TAU
+		var at := home + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(5.0, FoundLoot.START_CLEAR_M - 5.0)
+		if not FoundLoot.military(DeadDress.site_at(level, at)) and String(DeadDress.roll_at(level, at, rng)) == "soldier":
+			near_soldiers += 1
+	for c: Node in get_tree().get_nodes_in_group(WorldCache.GROUP):
+		var cache := c as WorldCache
+		if cache and cache.global_position.distance_to(home) <= FoundLoot.START_CLEAR_M - 1.0 and not FoundLoot.military(DeadDress.site_at(level, cache.global_position)) \
+				and FoundLoot.first_roll([{"id": "akm", "count": 1}], cache).size() > 0 and (cache.uid.begins_with("scatter_val") or "_box_" in cache.uid):
+			near_guns += 1
+	var per := 0.0
+	for o: String in mix:
+		var gun: Array = (DeadDress.KITS.get(o, {}) as Dictionary).get("gun", [])
+		per += float(mix[o]) / 600.0 * (float(gun[1]) if gun.size() == DeadDress.GUN_KEYS.size() else 0.0)
+	print("  expected: %.2f of the first %d dead carry a gun" % [per * START_PROBE_DEAD, START_PROBE_DEAD])
+	check(near_soldiers == 0, "no soldiers turn within %.0f m of the farm (%d of 400)" % [FoundLoot.START_CLEAR_M, near_soldiers])
+	check(near_guns == 0, "a box about the farm keeps no gun (%d)" % near_guns)
+	check(per * START_PROBE_DEAD < 1.0, "fewer than one of the first %d dead about the farm carries a gun, on average (%.2f)" % [START_PROBE_DEAD, per * START_PROBE_DEAD])
+	_test_kit_odds()
+
+
+## The soldier's and the cop's kit over many seeded rolls (DeadDress.kit_roll), and the tier.
+func _test_kit_odds() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	var n := 400
+	var tally := {"gun": 0, "carrier": 0, "helmet": 0, "pistol": 0}
+	var worst_rounds := 0
+	var weathered := true
+	for i in n:
+		for e: Array in DeadDress.kit_roll("soldier", "walker", rng):
+			match String(e[0]):
+				"m4a1":
+					tally.gun += 1
+					weathered = weathered and Wear.cond(e[2]) <= WeaponCondition.FOUND_WET.y
+					worst_rounds = maxi(worst_rounds, int((e[2] as Dictionary).get("rounds", 0)))
+				"mag_556":
+					worst_rounds = maxi(worst_rounds, int((e[2] as Dictionary).get("rounds", 0)))
+				"plate_carrier_light":
+					tally.carrier += 1
+				"helmet_ach":
+					tally.helmet += 1
+		for e: Array in DeadDress.kit_roll("cop", "walker", rng):
+			if String(e[0]) == "glock17":
+				tally.pistol += 1
+				worst_rounds = maxi(worst_rounds, int((e[2] as Dictionary).get("rounds", 0)))
+	var g := float(tally.gun) / n
+	check(g > 0.18 and g < 0.32 and int(tally.carrier) > int(tally.gun) and int(tally.helmet) > int(tally.gun),
+		"a soldier keeps his rifle %.0f%% of the time; his carrier (%.0f%%) and helmet (%.0f%%) more often" % [g * 100.0, float(tally.carrier) / n * 100.0, float(tally.helmet) / n * 100.0])
+	var pc := float(tally.pistol) / n
+	check(pc > 0.22 and pc < 0.38 and weathered and worst_rounds <= 8,
+		"a cop's pistol %.0f%% of the time; out in the weather every kept gun is worn, no more than 8 rounds in a magazine (%d)" % [pc * 100.0, worst_rounds])
+	var far := level.ground_point(player.global_position + Vector3(0, 0, 600))
+	var shares: Array[float] = []
+	for t in [0, 2]:
+		FoundLoot.force_tier = t
+		var hits := 0
+		for i in 2000:
+			if DeadDress.roll("", rng, "walker", FoundLoot.armed_mults(level, far, "")) == "soldier":
+				hits += 1
+		shares.append(float(hits) / 2000.0)
+	FoundLoot.force_tier = -1
+	check(shares[0] < 0.04 and shares[1] > shares[0] * 2.0, "away from the military the soldiers' share grows with the zone's tier (%.1f%% at 0, %.1f%% at 2)" % [shares[0] * 100.0, shares[1] * 100.0])
+
+
+## [guns, working guns, rounds] in `n` of `id` with `state` (a gun's loaded rounds count; a
+## working gun is one not broken (condition over 0)).
+func _probe_count(id: StringName, n: int, state: Dictionary) -> Array:
+	var item := ItemDB.get_item(id)
+	if item == null:
+		return [0, 0, 0]
+	if WeaponCondition.is_gun(item):
+		var st: Dictionary = state if not state.is_empty() else item.default_state()
+		var ok := 0 if (st.has(Wear.KEY) and Wear.cond(st) <= 0.0) else n
+		return [n, ok, int(st.get("rounds", 0)) * n]
+	if item.type == "ammo":
+		if Inventory.is_loose_rounds(item):
+			return [0, 0, n]
+		return [0, 0, int(state.get("rounds", item.magazine_rounds())) * n]
+	return [0, 0, 0]
 
 
 func _test_decay() -> void:
@@ -112,6 +270,7 @@ func _test_mix() -> void:
 func _test_dress() -> void:
 	print("The dead wear what they were (call 114)")
 	DeadDress.force_site = "hq"
+	DeadDress.force_gun_keep = 1.0  # (the rifle's share is checked on kit_roll: _test_kit_odds)
 	var soldiers: Array = []
 	for i in 8:
 		var z := _zombie(Vector3(80, 0, i * 2.0), "walker")
@@ -124,28 +283,36 @@ func _test_dress() -> void:
 		if z and String(z.get_meta(&"dead_origin", "")) == "doctor":
 			doctors.append(z)
 	DeadDress.force_site = ""
+	DeadDress.force_gun_keep = -1.0
 	await get_tree().process_frame
 	check(not soldiers.is_empty() and not doctors.is_empty(), "the base's dead are mostly soldiers (%d of 8), the clinic's doctors (%d of 8)" % [soldiers.size(), doctors.size()])
 	if soldiers.is_empty() or doctors.is_empty():
 		return
 	var s: Soldier = soldiers[0]
 	var inv := s.inventory
-	check(DeadDress.carried(inv, &"m4a1") > 0 and DeadDress.carried(inv, &"plate_steel_l3") > 0 and DeadDress.carried(inv, &"plate_carrier_light") > 0,
-		"a soldier has a rifle and plates on him (%s)" % [Survival.kit_of(inv).map(func(e: Dictionary) -> String: return String(e.id))])
+	var plated: Array = soldiers.filter(func(z: Soldier) -> bool: return DeadDress.carried(z.inventory, &"plate_carrier_light") > 0)
+	check(DeadDress.carried(inv, &"m4a1") > 0 and not plated.is_empty(),
+		"a soldier who kept his rifle has it on him, and soldiers wear carriers (%d of %d: %s)" % [plated.size(), soldiers.size(), Survival.kit_of(inv).map(func(e: Dictionary) -> String: return String(e.id))])
+	var gun_st: Dictionary = {}
+	for e: Dictionary in Survival.kit_of(inv):
+		if String(e.id) == "m4a1":
+			gun_st = e.get("state", {})
+	check(gun_st.has(Wear.KEY) and Wear.cond(gun_st) <= WeaponCondition.FOUND_WET.y and int(gun_st.get("rounds", 99)) <= 8,
+		"and it's weathered (%.0f%%), its magazine near empty (%d rounds)" % [Wear.cond(gun_st), int(gun_st.get("rounds", -1))])
 	check(inv.slots[&"primary"] == &"" and inv.slots[&"sidearm"] == &"" and s.active_weapon() == null, "and the rifle rides in his pack: the dead don't use weapons")
 	var shirt := s.variant.split(":")[1]
 	check(Color(shirt).g >= Color(shirt).b, "and he's in uniform colours (%s)" % shirt)
 	var doc: Soldier = doctors[0]
 	check(DeadDress.carried(doc.inventory, &"aid_bag") > 0 and DeadDress.carried(doc.inventory, &"suture_kit") > 0, "a doctor has a doctor's bag and meds")
 	var hz := _zombie(Vector3(92, 0, 0), "hazmat")
-	check(hz != null and String(hz.get_meta(&"dead_origin", "")) == "soldier" and DeadDress.carried(hz.inventory, &"gas_mask_m50") > 0 and DeadDress.carried(hz.inventory, &"plate_steel_l3") > 0,
+	check(hz != null and String(hz.get_meta(&"dead_origin", "")) == "soldier" and DeadDress.carried(hz.inventory, &"gas_mask_m50") > 0 and DeadDress.carried(hz.inventory, &"plate_carrier_light") > 0,
 		"the hazmat one was a soldier of the decon teams: plates and a mask")
 	# Loot yields them: the corpse keeps it all.
 	s.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "energy_j": 400.0})
 	for i in 6:
 		await get_tree().process_frame
-	check(s.vitals.is_dead() and DeadDress.carried(s.inventory, &"m4a1") > 0 and DeadDress.carried(s.inventory, &"plate_steel_l3") > 0,
-		"put down, his corpse still has the rifle and the plates to loot")
+	check(s.vitals.is_dead() and DeadDress.carried(s.inventory, &"m4a1") > 0,
+		"put down, his corpse still has the rifle to loot")
 	# A site's mix of origins tells what it was.
 	check(DeadDress.leading(DeadDress.site_mix("hq")) == "soldier" and DeadDress.leading(DeadDress.site_mix("clinic")) == "doctor"
 		and DeadDress.leading(DeadDress.site_mix("police")) == "cop" and DeadDress.leading(DeadDress.site_mix("farm")) == "farmer"
@@ -208,7 +375,8 @@ func _test_nests() -> void:
 	var screamer: Soldier = DeadNests.bodies(level, id)[0]
 	Survival.server_noise(screamer, screamer.global_position, ZombieAI.SCREAM_M, ZombieAI.HEAR_SHOT)
 	await get_tree().physics_frame
-	var awake := DeadNests.bodies(level, id).filter(func(z: Soldier) -> bool: return not ZombieAI.of(z).dormant and ZombieAI.of(z).awareness >= 0.99).size()
+	# (>= 0.9: a body whose think tick lands on this frame has already let FALL x THINK_S go: a flake, R2713)
+	var awake := DeadNests.bodies(level, id).filter(func(z: Soldier) -> bool: return not ZombieAI.of(z).dormant and ZombieAI.of(z).awareness >= 0.9).size()
 	check(awake == 5, "a scream wakes them all at once (%d of 5)" % awake)
 	for z: Soldier in DeadNests.bodies(level, id):
 		z.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "energy_j": 400.0})
@@ -283,6 +451,8 @@ func _finish() -> void:
 	DeadNests.force_hour = -1.0
 	DeadDecay.force_day = -1.0
 	DeadDress.force_site = ""
+	DeadDress.force_gun_keep = -1.0
+	FoundLoot.force_tier = -1
 	if Survival.world != "":
 		GameState.delete_save()
 		Survival.running = false

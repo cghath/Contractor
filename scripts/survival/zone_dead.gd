@@ -78,7 +78,7 @@ func server_add(pos: Vector3, kind := "walker", horde := false, extra := {}) -> 
 	var d := {"pos": at, "face": _rng.randf() * TAU, "kind": kind, "alive": true, "target": at,
 		"wait": _rng.randf_range(0.0, WAIT_S.y), "horde": horde, "show": at, "show_face": 0.0}
 	d.turned = float(extra.turned) if extra.has("turned") else DeadDecay.roll(_rng)
-	d.origin = String(extra.origin) if extra.has("origin") else DeadDress.roll(DeadDress.site_at(get_parent(), pos), _rng, kind)
+	d.origin = String(extra.origin) if extra.has("origin") else DeadDress.roll_at(get_parent(), pos, _rng, kind)
 	if String(extra.get("nest", "")) != "":
 		d.nest = String(extra.nest)
 	dead.append(d)

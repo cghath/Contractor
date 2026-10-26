@@ -213,7 +213,7 @@ static func spawn_data(level: Node, at: Vector3, kind: String, extra: Dictionary
 	out["turned"] = turned
 	out["decay"] = decay_of(turned)
 	if not extra.has("origin"):
-		out["origin"] = DeadDress.roll(DeadDress.site_at(level, at), _rng, kind)
+		out["origin"] = DeadDress.roll_at(level, at, _rng, kind)
 	return out
 
 

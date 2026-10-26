@@ -4,7 +4,9 @@ extends Node
 ## a dull blade hits softer and a whetstone sharpens it; corroded ammo misfires more than clean,
 ## a magazine's condition goes into the gun, ammo in the rain corrodes and under a roof keeps;
 ## clothes wear by the day, torn ones keep less warmth and a needle and thread mends them; worn
-## boots make sore feet; a tyre punctures and a patch fixes it; stale fuel stalls the engine.
+## boots make sore feet; a tyre punctures and a patch fixes it; stale fuel stalls the engine;
+## found guns come weathered out in the open and kept indoors, a box's gun near the farm is gone
+## (the early loot curve: FoundLoot), and ground loot rolls its found condition.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -25,6 +27,7 @@ func _ready() -> void:
 		await _test_gun()
 		await _test_melee()
 		await _test_ammo()
+		await _test_found()
 		_test_clothes()
 		await _test_vehicle()
 	_finish()
@@ -233,6 +236,59 @@ func _test_ammo() -> void:
 	roof.queue_free()
 
 
+func _test_found() -> void:
+	print("Found guns and the early loot curve (FoundLoot)")
+	var akm := ItemDB.get_item(&"akm")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var wet_ok := true
+	var broken := 0
+	var jammed := 0
+	var dry_ok := true
+	for i in 300:
+		var w := WeaponCondition.found_state(akm, false, rng)
+		wet_ok = wet_ok and Wear.cond(w) <= WeaponCondition.FOUND_WET.y and bool(w.get("wet", false)) and w.has("rounds")
+		broken += 1 if Wear.cond(w) <= 0.0 else 0
+		jammed += 1 if WeaponCondition.jammed(w) else 0
+		var d := WeaponCondition.found_state(akm, true, rng)
+		dry_ok = dry_ok and Wear.cond(d) >= WeaponCondition.FOUND_DRY.x and Wear.cond(d) <= WeaponCondition.FOUND_DRY.y and not d.has("wet")
+	check(wet_ok and broken > 30 and broken < 90 and jammed > 60, "out in the weather a found gun is worn and wet, often broken (%d of 300) or jammed (%d)" % [broken, jammed])
+	check(dry_ok, "kept dry, it's in fair shape (%.0f-%.0f%%)" % [WeaponCondition.FOUND_DRY.x, WeaponCondition.FOUND_DRY.y])
+	check(int(WeaponCondition.found_state(akm, false, rng, 3).rounds) == 3, "and a found magazine can be all but empty")
+	# A box of WorldValuables' about the farm: its gun was taken; one far off in a tier-3 zone keeps it, worn.
+	var near := level.cache_spawner.spawn({"uid": "scatter_val_found_near", "pos": _open_spot(Vector3(8.0, 0.0, -4.0)), "yaw": 0.0, "label": "Cache"}) as WorldCache
+	var kit := [{"id": "akm", "count": 1}, {"id": "mag_762x39", "count": 2}]
+	if near:
+		near.server_fill(kit)
+	check(near != null and near.cargo_hold.count_of(&"akm") == 0 and near.cargo_hold.count_of(&"mag_762x39") == 2,
+		"a cache about the farm: the gun was taken, the magazines left")
+	FoundLoot.force_tier = 3
+	var far := level.cache_spawner.spawn({"uid": "scatter_val_found_far", "pos": level.ground_point(player.global_position + Vector3(0.0, 0.0, 700.0)), "yaw": 0.0, "label": "Cache"}) as WorldCache
+	if far:
+		far.server_fill(kit)
+	FoundLoot.force_tier = -1
+	var far_st: Dictionary = {}
+	if far:
+		for e: Dictionary in far.cargo_hold.entries():
+			if String(e.id) == "akm":
+				far_st = e.get("state", {})
+	check(far != null and far.cargo_hold.count_of(&"akm") == 1 and far_st.has(Wear.KEY) and Wear.cond(far_st) <= WeaponCondition.FOUND_DRY.y,
+		"far off in a dangerous zone it's there, with a found condition (%.0f%%)" % Wear.cond(far_st))
+	var other := level.cache_spawner.spawn({"uid": "bunker_found_room0", "pos": _open_spot(Vector3(-8.0, 0.0, -4.0)), "yaw": 0.0, "label": "Locker"}) as WorldCache
+	if other:
+		other.server_fill(kit)
+	check(other != null and other.cargo_hold.count_of(&"akm") == 1, "a box that isn't WorldValuables' (a bunker's room) is left as it was rolled")
+	for c: WorldCache in [near, far, other]:
+		if c:
+			c.queue_free()
+	# Ground loot.
+	var open_at := _open_spot(Vector3(5.0, 0.0, -7.0))
+	var g := FoundLoot.ground_state(level, &"mag_556", open_at + Vector3.UP * 0.2, "found_ground_mag")
+	check(g.has(Wear.KEY) and Wear.cond(g) <= AmmoCondition.WET_RANGE.y and FoundLoot.ground_state(level, &"ifak", open_at, "found_ground_ifak").is_empty(),
+		"ground loot rolls its found condition (a magazine in the open %.0f), anything else none" % Wear.cond(g))
+	await get_tree().process_frame
+
+
 func _test_clothes() -> void:
 	print("Clothes wear, tear and mend; boots and feet")
 	var inv := player.inventory
@@ -366,6 +422,7 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 func _finish() -> void:
 	Wear.force_roll = -1.0
 	Wear.tick_off = false
+	FoundLoot.force_tier = -1
 	VehicleWear.force_roll = -1.0
 	if Survival.world != "":
 		GameState.delete_save()

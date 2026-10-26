@@ -220,7 +220,7 @@ func server_seed(items: Array) -> void:
 func server_fill(items: Array) -> void:
 	var saved: Variant = GameState.caches.get(uid)
 	if not saved is Dictionary:
-		server_seed(items)
+		server_seed(FoundLoot.first_roll(items, self))  # survival: the early loot curve (guns taken near the farm, a found condition)
 		return
 	server_seed(GameState.from_json((saved as Dictionary).get("items", [])))
 	unlocked = bool((saved as Dictionary).get("unlocked", false)) and key_id != &""

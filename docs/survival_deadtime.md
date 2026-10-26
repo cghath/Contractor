@@ -33,10 +33,11 @@ is **Proposed**.
 - **Look by origin.** The plain-clothes variant in the origin's colours (`CLOTHES`): soldier olive,
   cop navy, doctor whites and scrubs, worker hi-vis and overalls, farmer work clothes. These are
   plain colours, not the factions' camo kits: the zombie body is the civilian voxel body.
-- **Kit on the body.** `KITS` go into the body's Inventory when it spawns, so the corpse is looted
-  like any other body. A soldier has an assault pack, a light carrier, a steel plate, an M4 and two
-  mags. A doctor has a hydration pack, an aid bag, a suture kit, antibiotics and bandages. A cop has
-  a Glock, a mag and cuffs. Workers, farmers and townsfolk carry a few small things. Weapons are
+- **Kit on the body.** `KITS` go into the body's Inventory when it spawns (`kit_roll`, then
+  `server_kit`), so the corpse is looted like any other body. A soldier has an assault pack, a light
+  carrier 60% of the time (a steel plate in it 50%), a helmet 45%, and his M4 only 25% (see the early
+  loot curve below). A doctor has a hydration pack, an aid bag, a suture kit, antibiotics and bandages. A cop has
+  cuffs and, 30% of the time, a Glock with 0-6 rounds in it. Workers, farmers and townsfolk carry a few small things. Weapons are
   stowed, never in a weapon slot: the dead don't use them.
 - **The tell.** `tell(level, pos)`: the origins of the dead about a place say what it was, for
   example "Uniforms and plate carriers among the dead: this was a military post."
@@ -75,6 +76,59 @@ is **Proposed**.
   if a navmesh ever carries them.
 - One chasing a man up out of reach (more than 1.5 m above it and within 3 m) stops under him,
   faces him and piles (`under_ledge`, the `under_ledge` meta). It can't bite more than 1.7 m up.
+
+## Early loot curve (`FoundLoot`, scripts/survival/found_loot.gd)
+
+The Captain's playtest (2026-10-26): "got a gun off a mil zombie in the first 5 minutes". Call 38
+says ammo is scarce and guns common-ish but a real find; a working rifle off the first of the dead
+broke the early game. Built on `claude/survival-startloot`; every number is **Proposed**.
+
+- **The zone's tier** (`zone_tier`): links from the start zone on the region map (0 the start zone,
+  up to 3), +1 in the city region.
+- **Origins** (`DeadDress.roll_at`, `FoundLoot.armed_mults`): the open country's mix is now 2%
+  soldiers and 3% cops (was 10% soldiers, no cops). Outside military places (hq, qrf base, outpost,
+  checkpoint, comms, airfield, fuel depot, compound) the soldier and cop shares are x(1 + tier), the
+  difference to or from the townsfolk; in the start zone no soldiers turn within 250 m of the farm
+  (`START_CLEAR_M`) unless a military place is there. Military places keep their own mix.
+- **What a soldier carries** (`KITS`, `kit_roll`): the rifle 25% of the time (taken or lost), its
+  carrier 60% (a plate in it 50%) and a helmet 45%. A kept rifle is weathered
+  (`WeaponCondition.found_state`: 10-45%, a fifth rusted through to 0, 45% jammed, wet; one of a
+  nest's, lying inside, 40-85% and 10% jammed) with 0-8 rounds in it and 0-1 spare magazines of 0-8
+  rounds, their condition low out in the weather (`AmmoCondition.roll`). The decon teams' rifle 25%
+  too (was 40%). A cop's pistol 30% with 0-6 rounds, no spare (was always, with a full spare).
+- **Boxes, first roll** (`first_roll`, from `WorldCache.server_fill` for WorldValuables' boxes:
+  site boxes, field caches in the open, strongboxes): within 250 m of the farm a box not at a military
+  place holds no gun (taken by whoever left); a box in the open elsewhere keeps its gun 35% / 60% /
+  80% / 100% by tier; a gun that's there gets a found condition (dry 40-85%, in the weather as on
+  the dead). Bunker rooms, events' crates and survivors' stashes pass as rolled; a refill
+  (`LootStates`) still rolls new guns.
+- **Ground loot** (`ground_state`, ZoneLevel's module loot): guns and ammo lying about get a found
+  condition by where they lie.
+- **The tables** (data/loot_tables.json): no firearm in the commonest tier of a home or a stash (the
+  Makarov and the TT-33 uncommon at home; the Lee-Enfield and the Remington 870, the plausible
+  civilian finds, rare; the AKM, Type 56 and M70 out of homes, they stay in stashes, caches and the
+  military's boxes); loose rounds in homes and stashes halved. The TT-33's and the Lee-Enfield's
+  rarity follow the loot suite's rule (uncommon). A home box holds a gun 3.5% of the time (was 7.2%)
+  and 2.3 rounds on average (was 4.9).
+- **The start.** The starter kit is a combat knife and a knife (no gun); the cold open's gifts are
+  a crowbar, a machete, a hatchet or supplies. Unchanged.
+
+**Before and after** (the deadtime suite's probe: world seed 777, everything within 300 m of the
+farm, the first 30 of the dead spawned 45-300 m about it; R2712 before, R2713 after):
+
+| | Before | After |
+|---|---|---|
+| Guns in boxes and on the ground | 1 (an AKM in a field cache, working) | 0 |
+| Rounds in boxes and on the ground | 90 | 60 |
+| Soldiers among 600 origins about the farm | 63 (10.5%) | 1 (0.2%; cops 10) |
+| Of the first 30 dead, carrying a gun | 3, all working, 270 rounds | 0, 0 rounds |
+| Expected guns on the first 30 dead | 3.2 (90 rounds each) | 0.16 (8 or fewer rounds, a fifth broken) |
+
+Away from the farm in the start zone's open country about one in 70 of the dead carries a gun
+(0.02 x 25% + 0.03 x 30%), most of them worn, near empty or jammed; in a tier-2 zone about one in
+25; at a military place most of the dead are soldiers (an hq 75%) and a quarter of those kept the rifle.
+A working gun with ammo is a find of the first hour (a cop's pistol off the road, a stash, a
+village's rare box), and the military places stay the reward.
 
 ## Left out
 

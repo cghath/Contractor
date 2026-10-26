@@ -37,7 +37,7 @@ tests set `Wear.force`). The host's tick (`Wear.server_tick`, from
 - `condition` on a magazine's or loose stack's state; loaded, the gun's state holds it as
   `ammo_cond` (`Inventory.reload` moves it in and the old magazine takes the old one out).
 - Misfire (a dud: a click, jammed, R clears) chance 0.25 x ((85 - c) / 85)^1.5 under 85.
-- Found ammo (WorldCache seeding) rolls 85-100 under a roof, 25-75 in the open.
+- Found ammo (WorldCache seeding, the dead's magazines, ground loot) rolls 85-100 under a roof, 25-75 in the open.
 - Lying outdoors in the rain it loses 3 a world hour; under a roof (a built one too: anything
   overhead within 4 m) it keeps. Carried, only wading/swimming soaks it (6 an hour).
 - Hand-loaded rounds are 90 (`AmmoCondition.reloaded_state()`, for the reloading bench).
@@ -89,6 +89,9 @@ axes), `Vehicle` (`_use_fuel`, `can_drive`, `top_speed`, `server_refuel`, `serve
 - AI guns don't wear (only the players' `_server_fire` path); companions never jam.
 - Loose rounds loaded into a magazine don't carry their condition (`Inventory.load_rounds`).
 - Shotgun shells have no condition (tube guns skip duds).
-- The dead's kit and ground loot don't roll a found condition yet (only WorldCache seeding).
+- Done on `claude/survival-startloot` (the early loot curve, docs/survival_deadtime.md): the dead's kit, ground
+  loot and the first roll of WorldValuables' boxes roll a found condition for guns (`WeaponCondition.found_state`:
+  40-85% kept dry; 10-45% out in the weather, wet, a fifth rusted through to 0, often jammed) and ammo.
+  A refilled box (`LootStates` refill) still rolls guns as new.
 - No inventory "Inspect" panel line: the condition shows in the item's row readout.
 - Suppressors wearing out (call 38), a gun blowing up (call 43), the farrier job.

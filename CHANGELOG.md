@@ -11,6 +11,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the early loot curve (claude/survival-startloot)
+
+- **Changed** the early loot curve (the Captain's playtest: "got a gun off a mil zombie in the first 5 minutes"; call 38; `FoundLoot`, docs/survival_deadtime.md "Early loot curve"; all Proposed): the dead out of military places are rarely soldiers (the open country 2% soldiers, 3% cops; was 10% soldiers) and the share grows with the zone's tier (links from the start zone, +1 in the city); none turn within 250 m of the farm unless a military place is there.
+- **Changed** what the dead carry: a soldier keeps his rifle 25% of the time (was always), weathered (10-45%, a fifth broken, often jammed, wet) with 0-8 rounds in it and at most one near-empty spare; his carrier (60%), plate (50%) and helmet (45%) more often than the gun; a cop's pistol 30% with 0-6 rounds (was always, with a full spare); the decon teams' rifle 25% (was 40%).
+- **Changed** the loot tables: no firearm in a home's or a stash's commonest tier (the Makarov and the TT-33 uncommon; the Lee-Enfield and the Remington 870 a rare home find; the AKM, Type 56 and M70 out of homes), loose rounds in homes and stashes halved; the TT-33's and the Lee-Enfield's rarity follow (uncommon).
+- **Added** found conditions (the wear lane's left-out item): the dead's guns and magazines, ground loot and the first roll of WorldValuables' boxes (`WeaponCondition.found_state`: 40-85% dry, 10-45% in the weather); a site box or field cache within 250 m of the farm holds no gun (taken by whoever left), one in the open elsewhere keeps its gun 35% / 60% / 80% / 100% by tier.
+
 ### Contractor: Fallen, polish (claude/survival-polish)
 
 - **Added** pouches and pockets in the 3D loadout editor (call 134): every pouch, the carrier, the pack and the pockets are drop targets, a square hotspot beside each on the model with its fill; picking one lists what's in it (Take out, drag to another) and what fits (by Inventory's capacities); the template records the container, so saved kits and Apply fill the same pouch. The survival gear editor reads the same hotspots, and survival saved kits refill each pouch.
