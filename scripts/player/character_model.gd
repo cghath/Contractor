@@ -627,6 +627,8 @@ var _boxes_downed := false  # the downed state the hitboxes were last posed in (
 ## A heavy exo's size (ExoMech.size; GearRig sets it): the whole body, its gear, plates and
 ## hitboxes drawn this big while it's piloted, 0 for its own.
 var suit_size := 0.0
+## A child in Contractor: Fallen is drawn this much smaller (Children.SCALE; 1 for an adult).
+var child_scale := 1.0
 
 
 ## How big this body is drawn: a heavy exo's size, else FEMALE_SCALE for a female soldier (1 a
@@ -634,7 +636,7 @@ var suit_size := 0.0
 func body_scale() -> float:
 	if suit_size > 0.0:
 		return suit_size
-	return (FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0) * _height
+	return (FEMALE_SCALE if body == VoxelArt.FEMALE else 1.0) * _height * child_scale
 
 
 ## How broad the part `part` (a VoxelArt body part: "torso", "upper_arm", ...) is drawn for his

@@ -23,6 +23,8 @@ static var blast_source: Node = null
 static func note_hit(victim: Node, attacker: Node) -> void:
 	if victim == null or not is_instance_valid(victim):
 		return
+	if Children.on_harmed(victim, attacker):
+		return  # a child in Contractor: Fallen: shielded, never hurt; a player is told "You don't."
 	var info := info_of(attacker)
 	info["at"] = Soldier._now()
 	victim.set_meta(META, info)

@@ -60,7 +60,7 @@ func _test_new_world() -> void:
 func _test_placed() -> void:
 	print("Lone survivors placed by the seed")
 	var zone := String(Survival.state().zone)
-	var mine := SurvivorsLayer.records().values().filter(func(r: Dictionary) -> bool: return String(r.zone) == zone and String(r.status) == "out_there")
+	var mine := SurvivorsLayer.records().values().filter(func(r: Dictionary) -> bool: return String(r.zone) == zone and String(r.status) == "out_there" and not Children.is_child_rec(r))  # (children: families and orphans on top, call 128)
 	check(mine.size() >= SurvivorsLayer.PER_ZONE.x and mine.size() <= SurvivorsLayer.PER_ZONE.y + SurvivorsLayer.VILLAGE_BONUS_MAX,
 		"a new zone has %d lone survivors (records)" % mine.size())
 	var ok := true

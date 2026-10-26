@@ -322,8 +322,8 @@ func _spot() -> Dictionary:
 	var best_score := 0.0
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
-			continue
+		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s):
+			continue  # (a child: never on screen; Children takes them when no adult's near)
 		var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0) * Masking.sight_x(s, dark)
 		if is_instance_valid(target) and s == target:
 			r *= 1.5  # (one it's after is easier to keep in sight)
@@ -356,7 +356,7 @@ func _smell() -> Soldier:
 	var best_d := INF
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
+		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s):
 			continue
 		var strength := s.smell_strength() * Masking.smell_x(s)  # (phase D: gore smeared on hides it)
 		if strength <= 0.0:

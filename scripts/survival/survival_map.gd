@@ -31,7 +31,7 @@ const MARK_SEEN_M := 30.0
 const TICK_S := 1.0
 const NOW_S := 30.0
 ## Proposed: the safehouse never fades (it's yours).
-const NO_FADE_KINDS := ["safehouse"]
+const NO_FADE_KINDS := ["safehouse", "grave"]  # (a grave: Legacy, call 130)
 
 ## Peer: the host's map section as last sent, and the world day with it.
 static var _client := {}

@@ -333,6 +333,7 @@ func server_work(s: Soldier, c: Vector3i, seconds: float) -> String:
 	rec[field] = after
 	if after >= 1.0:
 		_finish_block(c, rec)
+		Legacy.note_built()  # (call 130: what a survivor built, for the lineage)
 	elif floori(after * 10.0) != floori(before * 10.0):
 		_set_block(c, rec)
 	return why
@@ -767,6 +768,7 @@ func server_work_piece(s: Soldier, id: int, seconds: float) -> String:
 	if float(rec.prog) >= 1.0 or floori(float(rec.prog) * 10.0) != floori(before * 10.0):
 		if float(rec.prog) >= 1.0:
 			print("[build] %s built at %s" % [rec.k, rec.c])
+			Legacy.note_built()  # (call 130)
 		_set_piece(id, rec)
 	return ""
 

@@ -206,6 +206,43 @@
 			{"text": "Halt. Hands where we can see them.", "voice": "enclave_halt_01", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}},
 			{"text": "Checkpoint. State your business.", "voice": "enclave_halt_02", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}},
 			{"text": "Toll's due. No toll, no road.", "voice": "enclave_halt_03", "speaker": {"kind": "enclave", "sex": "any", "age": "any"}}
+		],
+		"child_greet": [
+			{"text": "I'm {first}. Are you one of the good ones?", "voice": "child_greet_01", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "Mum said not to talk to people. Mum's not here.", "voice": "child_greet_02", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "You're not one of them. You're breathing.", "voice": "child_greet_03", "speaker": {"kind": "any", "sex": "any", "age": "young"}}
+		],
+		"child_come": [
+			{"text": "Can I really? I'll be quiet. I'm good at quiet.", "voice": "child_come_01", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "Okay. Don't walk too fast.", "voice": "child_come_02", "speaker": {"kind": "any", "sex": "any", "age": "young"}}
+		],
+		"child_wait": [
+			{"text": "Where would we even go?", "voice": "child_wait_01", "speaker": {"kind": "any", "sex": "any", "age": "young"}}
+		],
+		"child_how": [
+			{"text": "I'm okay. Is it okay if I'm okay?", "voice": "child_how_01", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "I'm hungry. Everybody's hungry, though.", "voice": "child_how_02", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "I drew the farm. Want to see?", "voice": "child_how_03", "speaker": {"kind": "any", "sex": "any", "age": "young"}}
+		],
+		"child_no_weapon": [
+			{"text": "I don't want that.", "voice": "child_no_weapon_01", "speaker": {"kind": "any", "sex": "any", "age": "young"}},
+			{"text": "Grown-ups keep those.", "voice": "child_no_weapon_02", "speaker": {"kind": "any", "sex": "any", "age": "young"}}
+		],
+		"rite_ask": [
+			{"text": "Will you say something over them? Anything. It matters.", "voice": "rite_ask_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "They shouldn't go into the ground without a word said.", "voice": "rite_ask_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"rite_words": [
+			{"text": "Thank you. That was right.", "voice": "rite_words_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Rest now. We'll keep the light on.", "voice": "rite_words_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"rite_declined": [
+			{"text": "Then I'll say them myself, later. Alone.", "voice": "rite_declined_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "No words. Fine. I'll remember that.", "voice": "rite_declined_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"deserter_ask": [
+			{"text": "I walked away from the gathering. I need to be clean of it. Will you help me?", "voice": "deserter_ask_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "They called the dead holy. I don't anymore. Is there a place for someone like me?", "voice": "deserter_ask_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		]
 	},
 	"dreams": {

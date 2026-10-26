@@ -7,6 +7,11 @@
   (picked over, hidden caches with clues, keys and the crowbar, refill where people pass), `CoopFallen` (newcomers at the
   farm or beside the host, the shared journal, opinions per player, leavers asleep at home), `ModKit` + world cards;
   R2688 PASS (fallenevents, survival, worldsim, loot); see docs/survival_events.md and docs/fallen_modding.md.
+- **Children, faith and legacy built on `claude/survival-children`** (calls 128-130): kids in families and alone (never
+  hurt on screen, taken offscreen with no adult near, care, the council's safety lean, groups settle), rites at graves,
+  the chapel and its service, grace, prayer, vigils, cultist deserters cleansed; the lineage tab, letters found on the dead,
+  last words, inscribed grave markers on the map; R2693 FLAKY (children, fallenpeople, settlement, mind PASS; survival flaked
+  once on the footsteps check, passed the rerun); see docs/survival_children.md.
 - **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
   lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
   (fallenaudio, survival, sound, voice); see docs/survival_audio.md.

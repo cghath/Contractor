@@ -14,7 +14,9 @@ extends RefCounted
 ## opinion_of_players ({profile: -100..100}), want ({kind: money | item | favour | place, ...}),
 ## loyalty, courage (0-100), kit (Survival.kit_of entries), wounds, history ([{day, text}]),
 ## disposition (friendly | wary | hostile), zone, pos ([x, y, z]), home, status (STATUSES), and
-## while dead: died_day, body_pos, killed_by_dead, rise_at, buried.
+## while dead: died_day, body_pos, killed_by_dead, rise_at, buried. A child (call 128, Children):
+## child true, age under 16, family / guardian / orphan; status "taken" when the dead took them.
+## A cultist deserter (Faith): cult_deserter, cleansing, cleansed.
 
 const STATUSES := ["out_there", "companion", "settler", "captive", "dead", "player"]
 ## Traits (call 40): pairs that exclude each other, then singles. Proposed: 2-3 a person.

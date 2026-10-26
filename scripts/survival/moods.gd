@@ -42,6 +42,13 @@ const TABLE := {
 	# down (their time, a good deed), the dark line crossed and seen.
 	"shaken": [-6.0, -1.0], "nerve_broken": [-14.0, -1.0], "withdrawal": [-10.0, -1.0], "talked_down": [3.0, 24.0],
 	"butchered": [-20.0, 240.0], "ate_human": [-25.0, 240.0], "saw_cannibalism": [-15.0, 120.0], "nightmare": [-5.0, 24.0],
+	# Children (Children, call 128; Proposed): fed and minded, one gone hungry, one who saw the dead
+	# and ran, one taken.
+	"child_safe": [4.0, -1.0], "child_hungry": [-8.0, 24.0], "child_saw": [-6.0, 48.0], "child_taken": [-25.0, 240.0],
+	# Faith and funerals (Faith, call 129; Proposed): words at a grave, none said (the pious), a
+	# service, grace at a meal, a prayer before a raid, a vigil kept, a deserter cleansed.
+	"words_said": [6.0, 72.0], "no_words": [-8.0, 48.0], "service": [5.0, 24.0], "grace": [2.0, 12.0],
+	"prayer": [3.0, 12.0], "vigil": [2.0, 24.0], "cleansed": [8.0, 120.0],
 }
 ## Traits lean the mood (Proposed).
 const TRAIT_LEAN := {"optimist": 6.0, "gloomy": -6.0}

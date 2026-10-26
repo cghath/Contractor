@@ -121,11 +121,18 @@ const PIECES := {
 	"lure_radio": {"name": "Radio left playing", "size": [1, 1, 1], "cost": [[&"radio_parts", 1], [&"battery_aa", 2]], "tool": "wrench", "build_s": 2.0, "hp": 20.0, "solid": false, "look": "full", "mat": "scrap"},
 	"goat_stake": {"name": "Tied goat", "size": [1, 1, 1], "cost": [[&"planks", 1], [&"cable_ties", 1]], "tool": "hammer", "build_s": 2.0, "hp": 30.0, "solid": false, "look": "frame", "mat": "wood"},
 	"pyre": {"name": "Pyre", "size": [2, 1, 2], "cost": [[&"planks", 4]], "tool": "hammer", "build_s": 3.0, "hp": 60.0, "solid": false, "look": "slab", "mat": "wood"},
+	# Faith and legacy (calls 129-130; Faith, Legacy; Proposed): the chapel's bench and altar (a
+	# cross or a plain altar: the settlement's chapel is where an altar stands), and a grave marker
+	# a burial places, inscribed with the name (the piece's "text").
+	"chapel_bench": {"name": "Chapel bench", "size": [4, 1, 1], "cost": [[&"planks", 3]], "tool": "hammer", "build_s": 5.0, "hp": 60.0, "solid": true, "look": "frame", "mat": "wood"},
+	"altar": {"name": "Altar", "size": [2, 2, 1], "cost": [[&"planks", 4], [&"candles", 1]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "full", "mat": "wood"},
+	"grave_marker": {"name": "Grave marker", "size": [1, 2, 1], "cost": [[&"planks", 1]], "tool": "hammer", "build_s": 2.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
 	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
 	"solar_panel", "battery_bank", "wind_turbine", "wiring", "fridge", "electric_fence", "power_tools", "water_pump",
-	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre"]
+	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre",
+	"chapel_bench", "altar", "grave_marker"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"
