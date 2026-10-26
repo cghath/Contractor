@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Everything merged for one test build (integrate/oct25, v0.7.0)
+
+Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
+ask ("make sure all of the work we have done locally is on dev too"): cghath's operations lane
+(ops/contracts D3 and ops/types D4/D5, their own entries below), the co-op soak harness, and
+mission variety's board rules. Left off on purpose: claude/survival and claude/svd-model (the
+Captain: "needs to stay here for now"); the 2026-10-14 handoff stubs marked untested WIP
+(feat/squad-comms, ai/movement-quality, perf/frame-rate, fix/drag-direction) whose work was
+done since on other branches (voice orders and barks, the movement feel pass, the perf passes).
+Checked and already in: the helicopter door-seat and vehicle _exit_tree fix, the 2026-10-20
+economy overhaul, the ragdoll stand-where-it-lay fix, the weapon-model iron-sight rework.
+
+- **Added (tests, tools):** the co-op soak harness from claude/coop-join (tests/coop_soak.gd,
+  coop_fake_human, coop_replay, soak_wedge_test; tools/coop_soak.sh, coop_relay.py,
+  coop_soak_report.py, coop_watch.sh): bots that host or join a session and play a contract,
+  including joining the Captain's own hosted game (agent-tools/bots_join_me.ps1).
+- **Added (net):** the build check on join (`BuildInfo`, `Net._expect_hello`): a client says its
+  commit on connecting; a host on a different known commit refuses it with the reason, and a
+  peer that never answers gets a warning only (an older build). The main menu's hint and the
+  pause menu show the build label.
+- **Changed (contracts):** the safe offer stays one of the four plain types (raid, HVT capture,
+  hostage rescue, intel grab); a hot zone's live contracts keep to sited types (convoy, crew
+  rescue and recon stay off that board); `ScenarioGen.build` takes the module to play at.
+- **Fixed (medical):** a casualty freed mid-treatment (its player left) no longer stops
+  `_timed_care` with a script error (`_log_care`'s target untyped).
+- **Merge notes:** followups.md kept both sides' additions (cg's D3-D5 calls, our F-08 section);
+  contracts.json kept the newer sabotage brief; net.gd kept the 20-60 s timeouts with the hello
+  check added in `_on_peer_connected`; menu.gd and pause_menu.gd kept the UiKit layouts.
+
 ### The rest of the reds: map, contracts, perfcases, casualty, roles (integrate/cg-oct24, v0.6.1)
 
 Local R2581, R2583, R2584 (perfcases, townperf, city) and R2585 PASS.
