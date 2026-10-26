@@ -7,7 +7,7 @@
   until dawn from the ground's menu (interrupted by the dead, a noise, a horde, an event; companions wait along),
   Continue's world list (put away, never deleted; New world warns on a name in use), builds baked into the navmesh
   (rebaked 0.25 s after a change; the dead re-path), the Accessibility tab (colour-blind-safe tells with shapes, text
-  size, tension audio, subtitles); polish suite; see docs/survival_polish.md.
+  size, tension audio, subtitles); R2708 PASS (polish, survival, loadout, building, ui); see docs/survival_polish.md.
 - **Bonds and gunsmithing built on `claude/survival-bonds`** (calls 74, 85): bonds between every pair who spend time
   together (shifts, danger, saves, arguments by traits, gifts, brawls; friends, rivals, enemies, partners who share a bunk
   and grieve), rivals refusing shifts and voting apart, the players' bond deciding risky orders, Gift and Settle it in the

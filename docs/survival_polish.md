@@ -1,7 +1,7 @@
 # Contractor: Fallen — polish: pouches, waiting, worlds, the navmesh, accessibility
 
 Built 2026-10-26 on `claude/survival-polish` (calls 134, 136, 139, 141, 142). Suite `polish`
-(`tests/polish_test.gd`). Numbers marked Proposed are first guesses for the Captain to tune.
+(`tests/polish_test.gd`), R2708 PASS (polish, survival, loadout, building, ui). Numbers marked Proposed are first guesses for the Captain to tune.
 
 ## The 3D loadout editor fills pouches and pockets (call 134)
 
