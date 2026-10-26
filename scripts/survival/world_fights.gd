@@ -114,8 +114,8 @@ static func _quietest_link(m: WorldModel, z: String) -> String:
 
 ## A far horde in `z` finds the groups there now and then (cautious ones less).
 static func horde_on_groups(m: WorldModel, z: String) -> void:
-	for gid: String in WorldModel._sorted(m.groups().keys()):
-		var g: Dictionary = m.groups()[gid]
+	for g: Dictionary in m.groups_in_zone(z):
+		var gid := String(g.id)
 		if not bool(g.alive) or String(g.zone) != z or String(g.kind) in ["lone", "enclave"] or bool(g.get("live", false)):
 			continue
 		var caution := float((g.get("personality", {}) as Dictionary).get("caution", 0.5))

@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase C core: the living world (claude/survival-worldsim)
+
+Local: worldsim and survival suites (see the run number in docs/survival_world.md's "Where the build is").
+
+- **Added (`WorldSim`, `scripts/survival/world_sim.gd`, a child of the Survival autoload):** the world's
+  groups and regions in `Survival.state()["world"]`, a far tick every 15 world minutes (30 s real) on a
+  WorkerThreadPool task applied on the main thread, determinism from the world seed + group id + tick.
+- **Added (`WorldModel`, `WorldGroup`, `WorldGoals`, `WorldFights`):** settlers, raiders, scavenger crews,
+  cultists, lone survivors (groups of one over SurvivorsLayer's records) and the enclave placeholder; kinds
+  from the leader's personality and their changes; the cost/reward judgement with hysteresis over forage,
+  work, trade, settle, raid (a demand first, the players' farm included), defend, flee, scout, recruit,
+  search, capture, feed the horde, hunt the player; far fights by rules with named deaths, traces and
+  events; forming, splitting, dying, the trickle of strangers at the map's edges; world events (call 124).
+- **Added (`WorldRegions`, `data/survival_regions.json`):** the campaign's zones in plains, hills, desert,
+  coast and the city with their climate, loot, dead and dominant-kind tendencies; places from the zone
+  layouts; `region_of`, `holder_of`, `region_holders`.
+- **Added:** pressure across the map: far zones' pressure (Survival's own record), far hordes that walk the
+  gradient and never cross into a quieter zone (one walking into the hosted zone becomes ZoneDead's horde
+  at the crossing); groups keep loud goals away from a zone near the threshold.
+- **Added (`WorldLive`):** groups within 400 m of a player come live (people for settlers and scavengers;
+  hostile SquadAI squads with SquadOrders for raiders and cultists, stance by standing), capped at 24 live
+  people sharing a 64 budget with the dead; folded back far; standing moves with hits and help seen.
+- **Added:** the catch-up on Continue (up to 2 world days, the farm and companions safe, raids deferred to
+  a demand) with a "while you were away" report; `Rumours` (true / half-true / lie by teller);
+  `WorldTrade.value`; the goal modes' state and win/loss (`WorldSim.goal_state`).
+- **Changed (`Survival`):** small hooks: the world sim's node, the catch-up on Continue, the live layer on
+  level ready, the dead's density and refill by the goal mode, kills thinning the zone's density.
+- **Tests:** new `worldsim` suite (registered in tools/run_tests.sh and CI).
+
 ### Contractor: Fallen, phase B: the RPG layer, first form (claude/survival-rpg)
 
 Local: rpg and survival suites (see the run number in docs/survival_rpg.md's "Where the build is").

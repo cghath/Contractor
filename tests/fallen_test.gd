@@ -13,6 +13,8 @@ extends "res://tests/perfcases_test.gd"
 ## (avg 100 / p95 170 / hitches 140): the dead's brains are lighter than SquadAI's but there are
 ## more of them, and the crowd must cost about what the animals do.
 
+## TODO (phase C, survival_world.md 13): a "settlement night" case (a horde siege on a built settlement with 12
+## people) once the settlement lane's built settlement and its settlers can be set up here.
 const FALLEN_CASES: Array[String] = ["night"]
 const FALLEN_MEASURE_S := {"night": 30.0}
 const FALLEN_BUDGETS := {

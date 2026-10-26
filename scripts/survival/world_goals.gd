@@ -90,8 +90,8 @@ static func danger(m: WorldModel, g: Dictionary, zone_id: String) -> float:
 	var zd := m.zone(zone_id)
 	var d := m.pressure_of(zone_id) / 100.0 * 0.6 + (0.8 if not (zd.get("horde", {}) as Dictionary).is_empty() else 0.0)
 	var mine := maxf(0.5, WorldGroup.strength(g, m.people))
-	for oid: String in WorldModel._sorted(m.groups().keys()):
-		var o: Dictionary = m.groups()[oid]
+	for o: Dictionary in m.groups_in_zone(zone_id):
+		var oid := String(o.id)
 		if oid == String(g.id) or not bool(o.alive) or String(o.zone) != zone_id or String(o.kind) == "lone":
 			continue
 		if WorldGroup.relation(g, oid) <= -30.0 or (String(o.kind) in ["raiders", "cultists"] and String(g.kind) != String(o.kind)):
@@ -123,7 +123,7 @@ static func reach(m: WorldModel, g: Dictionary) -> Array:
 	var out: Array = [String(g.zone)]
 	var quiet := String(m.w.get("start_zone", "")) if m.now < 2.0 else ""
 	for z: String in m.zone(String(g.zone)).get("links", []):
-		if z != quiet:
+		if z != quiet and m.zones().has(z):
 			out.append(z)
 	return out
 
@@ -135,6 +135,7 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 	var need_food := clampf(1.0 - WorldGroup.days_of_food(g) / 5.0, 0.0, 1.0)
 	var mine := maxf(0.5, WorldGroup.strength(g, m.people))
 	var here := String(g.zone)
+	var r := reach(m, g)
 	out.append({"kind": "rest", "zone": here, "place": "", "target": "", "gain": 0.1, "need": 1.0, "loss": 0.0, "noise": 0.0, "rel": 0.0, "bias": 0.0})
 	if kind == "enclave":
 		var h: Dictionary = g.home
@@ -144,7 +145,7 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			"loss": 0.0, "noise": 0.0, "rel": 0.0, "bias": 0.1})
 		return out
 	# forage: the best place within reach by its richness, the zone's loot and how long since it was looted
-	for z: String in reach(m, g):
+	for z: String in r:
 		var zd := m.zone(z)
 		var reg := WorldRegions.region_def(String(zd.get("region", "")))
 		var loot: Dictionary = reg.get("loot", {})
@@ -165,9 +166,9 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			"need": 0.4 + need_food, "loss": danger(m, g, here) * 0.3, "noise": noise_cost(m, "work", here), "rel": 0.0, "bias": 0.15 if kind == "settlers" else 0.0})
 	# trade: a group within reach that'll deal (not cultists), by how much each lacks what the other has
 	if kind != "cultists":
-		for oid: String in WorldModel._sorted(m.groups().keys()):
-			var o: Dictionary = m.groups()[oid]
-			if oid == String(g.id) or not bool(o.alive) or String(o.kind) in ["cultists", "lone"] or bool(o.get("live", false)) or not String(o.zone) in reach(m, g):
+		for o: Dictionary in m.groups_near(r):
+			var oid := String(o.id)
+			if oid == String(g.id) or not bool(o.alive) or String(o.kind) in ["cultists", "lone"] or bool(o.get("live", false)) or not String(o.zone) in r:
 				continue
 			if WorldGroup.relation(g, oid) < -10.0 or WorldGroup.relation(o, String(g.id)) < -20.0:
 				continue
@@ -179,7 +180,7 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 				"bias": 0.1 if kind in ["settlers", "scavengers"] else 0.0})
 	# settle: a home at the best free place (water, defensibility, loot, quiet)
 	if kind in ["settlers", "raiders", "scavengers"] and ((g.home as Dictionary).is_empty() or m.pressure_of(String((g.home as Dictionary).zone)) > 60.0):
-		for z: String in reach(m, g):
+		for z: String in r:
 			var zd := m.zone(z)
 			if bool(WorldRegions.region_def(String(zd.region)).get("unheld", false)):
 				continue
@@ -194,9 +195,9 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 	# raid: raiders, and the desperate and cruel; settlements and the players' farm get a demand first
 	var desperate := need_food > 0.8 and float(p.get("cruelty", 0.0)) > 0.3
 	if kind == "raiders" or desperate:
-		for oid: String in WorldModel._sorted(m.groups().keys()):
-			var o: Dictionary = m.groups()[oid]
-			if oid == String(g.id) or not bool(o.alive) or String(o.kind) in ["enclave", "lone"] or not String(o.zone) in reach(m, g):
+		for o: Dictionary in m.groups_near(r):
+			var oid := String(o.id)
+			if oid == String(g.id) or not bool(o.alive) or String(o.kind) in ["enclave", "lone"] or not String(o.zone) in r:
 				continue
 			if String(o.kind) == kind and kind == "raiders":
 				continue
@@ -235,18 +236,18 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			out.append({"kind": "flee", "zone": best_z, "place": "", "target": "", "gain": dh, "need": 1.0 + float((g.mood as Dictionary).fear),
 				"loss": best_d * 0.5 + 0.1, "noise": 0.0, "rel": 0.0, "bias": -0.2 if not home.is_empty() else 0.0})
 	# scout: a group within reach it knows nothing fresh of (raiders scout their prey, settlers their threats)
-	for oid: String in WorldModel._sorted(m.groups().keys()):
-		var o: Dictionary = m.groups()[oid]
-		if oid == String(g.id) or not bool(o.alive) or String(o.kind) == "lone" or not String(o.zone) in reach(m, g) or scouted(m, g, oid):
+	for o: Dictionary in m.groups_near(r):
+		var oid := String(o.id)
+		if oid == String(g.id) or not bool(o.alive) or String(o.kind) == "lone" or not String(o.zone) in r or scouted(m, g, oid):
 			continue
 		var interest := 0.35 if kind == "raiders" or String(o.kind) in ["raiders", "cultists"] else 0.15
 		out.append({"kind": "scout", "zone": String(o.zone), "place": "", "target": oid, "gain": interest, "need": 0.8, "loss": 0.1,
 			"noise": 0.0, "rel": 0.0, "bias": 0.0})
 		break
 	# recruit / capture: a lone survivor (or a tiny group, for the cult) within reach, not where the players are
-	for oid: String in WorldModel._sorted(m.groups().keys()):
-		var o: Dictionary = m.groups()[oid]
-		if oid == String(g.id) or not bool(o.alive) or not String(o.zone) in reach(m, g) or String(o.zone) == m.hosted:
+	for o: Dictionary in m.groups_near(r):
+		var oid := String(o.id)
+		if oid == String(g.id) or not bool(o.alive) or not String(o.zone) in r or String(o.zone) == m.hosted:
 			continue
 		if String(o.kind) == "lone" and kind in ["settlers", "scavengers", "raiders"] and WorldGroup.relation(g, oid) >= -10.0:
 			out.append({"kind": "recruit", "zone": String(o.zone), "place": "", "target": oid, "gain": 0.3 + (0.3 if WorldGroup.size(g) < 4 else 0.0),
@@ -279,8 +280,8 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 ## itself likes it (0-1+).
 static func _rel_cost(m: WorldModel, g: Dictionary, target: String) -> float:
 	var c := maxf(0.0, WorldGroup.relation(g, target)) / 100.0
-	for oid: String in WorldModel._sorted(m.groups().keys()):
-		var o: Dictionary = m.groups()[oid]
+	for o: Dictionary in m.alive_groups():
+		var oid := String(o.id)
 		if oid == target or oid == String(g.id) or not bool(o.alive):
 			continue
 		var likes := WorldGroup.relation(o, target)

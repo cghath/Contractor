@@ -22,6 +22,8 @@ const TICKS_PER_DAY := 96
 ## Proposed: a zone crossing on foot takes TRAVEL_TICKS (2 world hours); a vehicle halves it.
 const TRAVEL_TICKS := 8.0
 const EVENTS_CAP := 300
+## What a group remembers of the event pool (its intel: the rumours it can tell).
+const INTEL_CAP := 80
 const TRACES_CAP := 20
 ## Proposed: the pressure numbers match Survival's (S3): a horde at HORDE_AT, gone under DISPERSE_AT.
 const HORDE_AT := 80.0
@@ -63,6 +65,8 @@ var player := {}
 ## Out to the main thread: [{"kind", ...}] and the events this step added.
 var actions: Array = []
 var new_events: Array = []
+## Tests: a Dictionary to sum where the step's time goes (usec by phase), else null.
+var profile: Variant = null
 ## Clear-the-map and evac multipliers (WorldSim.goal_state): the dead's refill speed.
 var refill_mult := 1.0
 
@@ -92,6 +96,53 @@ func groups() -> Dictionary:
 
 func zones() -> Dictionary:
 	return w.zones
+
+
+## The living groups (sorted by id), and by zone: an index rebuilt when the tick or the number of
+## groups changes (a tick's decisions read where groups were at its start).
+var _index := {}
+var _index_all: Array = []
+var _index_key := []
+
+
+func _ensure_index() -> void:
+	var key := [tick(), (w.groups as Dictionary).size()]
+	if key == _index_key:
+		return
+	_index_key = key
+	_index = {}
+	_index_all = []
+	for gid: String in _sorted(w.groups.keys()):
+		var g: Dictionary = w.groups[gid]
+		if not bool(g.get("alive", false)):
+			continue
+		_index_all.append(g)
+		var z := String(g.zone)
+		if not _index.has(z):
+			_index[z] = []
+		(_index[z] as Array).append(g)
+
+
+func alive_groups() -> Array:
+	_ensure_index()
+	return _index_all
+
+
+func groups_in_zone(z: String) -> Array:
+	_ensure_index()
+	return _index.get(z, [])
+
+
+## The living groups in any of `zone_ids`, sorted by id.
+func groups_near(zone_ids: Array) -> Array:
+	_ensure_index()
+	if zone_ids.size() == 1:
+		return _index.get(zone_ids[0], [])
+	var out: Array = []
+	for z: String in zone_ids:
+		out.append_array(_index.get(z, []))
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return String(a.id) < String(b.id))
+	return out
 
 
 func group(id: String) -> Dictionary:
@@ -276,9 +327,12 @@ func step(at: float) -> void:
 	w.tick = tick() + 1
 	actions = []
 	new_events = []
+	var t0 := Time.get_ticks_usec()
 	sync_lone()
 	for z: String in _sorted(w.zones.keys()):
 		_zone_tick(z)
+	var t1 := Time.get_ticks_usec()
+	var t_decide := 0
 	for gid: String in _sorted(w.groups.keys()):
 		var g: Dictionary = w.groups.get(gid, {})
 		if g.is_empty() or not bool(g.alive) or bool(g.get("live", false)):
@@ -291,13 +345,19 @@ func step(at: float) -> void:
 			continue
 		_mood(g)
 		_kind_change(g)
+		var td := Time.get_ticks_usec()
 		WorldGoals.decide(self, g)
+		t_decide += Time.get_ticks_usec() - td
 		WorldGoals.act(self, g)
+	var t2 := Time.get_ticks_usec()
 	_form_and_split()
 	_trickle()
 	if tick() % TICKS_PER_DAY == 0:
 		_world_event()
 		_prune()
+	if profile is Dictionary:  # (tests: where a tick's time goes, usec)
+		for pair: Array in [["zones", t1 - t0], ["decide", t_decide], ["act", t2 - t1 - t_decide], ["form", Time.get_ticks_usec() - t2]]:
+			profile[pair[0]] = int(profile.get(pair[0], 0)) + int(pair[1])
 
 
 ## `n` ticks from `from` (the catch-up and tests), each TICK_MIN on.
@@ -693,9 +753,8 @@ func event(zone_id: String, kind: String, gids: Array, text: String, place := ""
 	if ev.size() > EVENTS_CAP:
 		w.events = ev.slice(-EVENTS_CAP)
 	new_events.append(e)
-	for gid: String in _sorted(w.groups.keys()):
-		var g: Dictionary = w.groups[gid]
-		if bool(g.alive) and (gid in gids or String(g.zone) == zone_id):
+	for g: Dictionary in alive_groups():
+		if bool(g.alive) and (String(g.id) in gids or String(g.zone) == zone_id):
 			learn(g, id, "seen")
 	return e
 
@@ -709,10 +768,10 @@ func learn(g: Dictionary, id: int, how: String) -> void:
 	var rank := {"told": 0, "seen": 1, "scout": 2}
 	if not intel.has(key) or int(rank.get(how, 0)) > int(rank.get(String(intel[key]), 0)):
 		intel[key] = how
-	if intel.size() > 80:
+	if intel.size() > INTEL_CAP + 40:  # (trimmed in batches: the oldest go)
 		var keys := intel.keys()
 		keys.sort_custom(func(a: String, b: String) -> bool: return a.to_int() < b.to_int())
-		for k: String in keys.slice(0, intel.size() - 80):
+		for k: String in keys.slice(0, intel.size() - INTEL_CAP):
 			intel.erase(k)
 
 

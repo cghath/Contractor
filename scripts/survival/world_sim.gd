@@ -130,6 +130,9 @@ static func server_setup() -> void:
 		if layout.has(z):
 			var c: Vector2i = layout[z]
 			cells[z] = [c.x, c.y]
+	for z: String in table:  # (links only to the world's zones: the campaign's base zone isn't one)
+		var zd: Dictionary = table[z]
+		zd.links = (zd.links as Array).filter(func(l: String) -> bool: return table.has(l))
 	SurvivorPerson.make(RandomNumberGenerator.new(), "warm")  # (its tables, before a worker uses them)
 	var m := model()
 	m.w["cells"] = cells
