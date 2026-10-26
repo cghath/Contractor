@@ -7,8 +7,7 @@ docs/survival_medical.md sections 1-3). Built on `claude/survival-hands`. Every 
 
 ## Where the build is
 
-- 2026-10-26: fieldwork, spoilage and the clinic built; the `hands` suite. Verdict in docs/survival.md's
-  "Where the build is".
+- 2026-10-26: fieldwork, spoilage and the clinic built; the `hands` suite. **R2697 PASS** (hands, survival, nature, body, settlement).
 
 ## Fieldwork (`Fieldwork`, scripts/survival/fieldwork.gd)
 
