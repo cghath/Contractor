@@ -46,6 +46,11 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 4 | Death | **Respawn, lose your kit**: your body and everything on it stay where you fell; the world goes on. |
 | 5 | World | **Our zones, made to look abandoned**: overgrowth, wrecks, litter, boarded and broken buildings, no lights. |
 | 6 | Scope | Design first, then the whole mode in phases (S1-S7), not a one-zone slice. |
+| 7 | Goal (2026-10-25 brainstorm) | **Three world goals, chosen at New world:** Reach the evac (a far-side evac point or a radio to repair; arriving with your people alive wins the world), Sandbox (no win: the safehouse and roster are the score), Clear the map (the hardest: every zone's dead thinned under a threshold and held). |
+| 8 | Safehouse | **Free building** in the voxel world: walls, barricades, furniture and utilities placed anywhere from scavenged materials (not fixed upgrade tiers). |
+| 9 | Noise | **Loud guns punish**: unsuppressed fire reliably pulls the street and can raise a horde; melee, bows, suppressors and distractions are the main tools. |
+| 10 | Infection | **Players and companions from the start**: a bite starts a fever clock; antibiotics hold it; **a cure must be reachable** so any player has a reasonable chance to save their character (tied to the RPG layer, call 11). |
+| 11 | RPG layer | **Experience and progression** for each survivor (XP, levels, skills); design to come (docs/survival_rpg.md). |
 
 ## Already in the code to build on
 
