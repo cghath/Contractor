@@ -452,8 +452,8 @@ func _pick_contract(prof: Dictionary) -> Dictionary:
 			continue
 		if String(c.zone_kind) == "hot" and not bool(prof.hot):
 			continue
-		if Economy.work_problem(String(c.employer)) != "":
-			continue
+		if Economy.work_problem(String(c.employer)) != "" or Operations.accept_problem(c) != "":
+			continue  # (an operation needs its employer at trusted: D3)
 		var days := int(c.days) + int(MissionRegistry.region(String(c.get("region", ""))).get("travel_days", 0))
 		var pay := float(c.base_pay)
 		if _income and bool(prof.get("hunt", false)) and String(c.get("leader", "")) != "":
@@ -512,6 +512,9 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	while at < deployed.size():  # (grows: a contract done in a hot zone may bring a radio follow-up)
 		var x: Dictionary = deployed[at]
 		at += 1
+		if Operations.is_operation(x):  # D3: an operation, phase by phase, each paid as it's done
+			_play_operation(prof, x, objectives)
+			continue
 		var mine := objectives.for_contract(String(x.cid))
 		if mine.filter(func(o: Dictionary) -> bool: return not o.optional).is_empty():
 			var share := 0.1
@@ -725,6 +728,29 @@ func _deploy(prof: Dictionary) -> Dictionary:
 		"econ_net": econ, "delta": delta, "follow_ups": follow_ups,
 		"completed": (debrief.contracts as Array).filter(func(l: Dictionary) -> bool: return l.outcome == "completed").size(),
 		"contracts": (debrief.contracts as Array).size()}
+
+
+## An operation contract's dice (D3, cg_brief 3.2): each phase won with the profile's chance for its
+## rating spread over the phases (so the whole is as likely as one contract of that rating), paid as
+## it's done (Operations.server_phase_done, the real pay by phase) with a time drawn round its limit,
+## a few allied losses and asks answered; the first phase lost stalls it (what's done stays paid).
+func _play_operation(prof: Dictionary, x: Dictionary, objectives: Objectives) -> void:
+	var phases: Array = x.get("phases", [])
+	var win := float(prof.win[clampi(int(x.true_rating), 1, 5) - 1])
+	var per := pow(win, 1.0 / maxf(phases.size(), 1.0))
+	Operations.run_of(x).state = Operations.RUNNING
+	var done := 0
+	for k in phases.size():
+		if _rng.randf() >= per:
+			Operations.server_phase_failed(x, k, "the dice")
+			break
+		var limit := float((phases[k] as Dictionary).limit_s)
+		Operations.server_phase_done(x, k, {"elapsed_s": limit * _rng.randf_range(0.5, 1.2), "limit_s": limit, "allied_start": 64,
+			"allied_lost": _rng.randi_range(0, 14), "coop": _rng.randi_range(0, 2), "civilians": 1 if _rng.randf() < float(prof.civ) / phases.size() else 0,
+			"ff": 0, "optional": []})
+		done += 1
+	for o: Dictionary in objectives.for_contract(String(x.cid)):
+		objectives.server_set_state(String(o.oid), Objectives.DONE if int((o.get("params", {}) as Dictionary).get("phase", 0)) < done else Objectives.FAILED)
 
 
 ## Wages plus upkeep per day, as the bill stands.

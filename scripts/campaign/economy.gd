@@ -595,6 +595,8 @@ func server_repair(item_id: StringName, item_state: Dictionary) -> Dictionary:
 ## Host: pays for a support call ("resupply", "transport", "aav", "extraction"): from the
 ## contract's negotiated support budget first, the rest from cash. Returns whether it's paid.
 func server_pay_support(kind: String, cid := "") -> bool:
+	if OpSupport.employer_pays(kind):
+		return true  # (cg_brief 3.3, F-292: an operation's battlegroup flies its own Dustoff for the company)
 	var price := Prices.support_price(kind)
 	if price <= 0:
 		return false

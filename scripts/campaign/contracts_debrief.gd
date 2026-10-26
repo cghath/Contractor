@@ -55,7 +55,11 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 			"advance": int(deal.get("advance", 0)), "completion": 0, "bonuses": [], "pay": 0, "clawback": 0, "salvage_share": 0.0,
 			"objectives": mine.map(func(o: Dictionary) -> String: return Objectives.line(o))}
 		var employer := String(c.get("employer", ""))
-		match outcome:
+		var by_phase := Operations.is_operation(c) and outcome not in ["voided", "aborted"]
+		if by_phase:
+			outcome = Operations.debrief_into(c, line, rep)  # D3: paid phase by phase as each was done; its reputation too
+			line.outcome = outcome
+		match "" if by_phase else outcome:
 			"completed":
 				line.completion = int(deal.get("completion", 0)) + int(c.get("raise", 0))
 				for o: Dictionary in mine:  # (missions 2: an HVT kill without its proof pays less)
@@ -256,6 +260,7 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 			out.append("  %s: $%s" % [b.text, money(b.amount)])
 		if int(c.get("clawback", 0)) > 0:
 			out.append("  Advance clawed back (voided, %s): -$%s" % [c.get("clawback_term", "full"), money(c.clawback)])
+		out.append_array(Operations.summary_lines(c))  # an operation's phases, each as it went (D3)
 		for l: String in c.get("objectives", []):
 			out.append("    " + l)
 	var totals: Dictionary = debrief.get("totals", {})

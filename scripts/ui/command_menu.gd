@@ -285,6 +285,31 @@ const MENU := {
 				{"key": "9", "label": "Release all", "cmd": "support:allied_release"},
 				{"key": "0", "label": "Call a company squad (hired)", "cmd": "support:allied_call:company"},
 			]},
+			## An operation's own (cg_brief queue item 3.3, OpSupport and the types' mechanics): the
+			## armour attached to the company, the employer's guns, the column, the bridge, the town.
+			{"key": "0", "label": "Operation", "items": [
+				{"key": "1", "label": "Attached armour", "items": [
+					{"key": "1", "label": "Overwatch our task", "cmd": "support:op_attached:task"},
+					{"key": "2", "label": "Move there", "cmd": "support:op_attached:move", "point": true},
+					{"key": "3", "label": "Hold", "cmd": "support:op_attached:hold"},
+					{"key": "4", "label": "Follow me", "cmd": "support:op_attached:follow"},
+					{"key": "5", "label": "Take its gun (aboard)", "cmd": "support:op_attached:gun"},
+					{"key": "6", "label": "Give its gun back", "cmd": "support:op_attached:crew"},
+				]},
+				{"key": "2", "label": "Allied fires", "items": [
+					{"key": "1", "label": "Mortars there", "cmd": "support:op_fire:mortar", "point": true},
+					{"key": "2", "label": "Artillery there", "cmd": "support:op_fire:artillery", "point": true},
+					{"key": "3", "label": "Naval gunfire there", "cmd": "support:op_fire:naval", "point": true},
+				]},
+				{"key": "3", "label": "Column: bypass the position off-road", "cmd": "support:op_column:bypass"},
+				{"key": "4", "label": "Column: move on now", "cmd": "support:op_column:go"},
+				{"key": "5", "label": "Cut the firing wire", "cmd": "support:op_cut"},
+				{"key": "6", "label": "Field defences", "items": [
+					{"key": "1", "label": "Sandbag wall", "cmd": "local:op_defence:sandbags"},
+					{"key": "2", "label": "HESCO bastion", "cmd": "local:op_defence:hesco"},
+					{"key": "3", "label": "Concertina wire", "cmd": "local:op_defence:wire"},
+				]},
+			]},
 		]},
 	],
 }
@@ -540,6 +565,9 @@ func _pick(i: int) -> void:
 		return
 	if cmd.begins_with("local:"):  # fire support's own screens (the fire mission panel, the UAV feed)
 		close()
+		if cmd.begins_with("local:op_defence:"):  # (an operation's field defences: OpTown, cg_brief 3.3)
+			OpTown.local_command(player, cmd.trim_prefix("local:"))
+			return
 		FireSupport.local_command(player, cmd.trim_prefix("local:"))
 		return
 	var point := player.global_position

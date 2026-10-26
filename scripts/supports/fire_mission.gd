@@ -37,7 +37,8 @@ static func units() -> Array:
 
 
 static func unit(id: String) -> Dictionary:
-	return (data().get("units", {}) as Dictionary).get(id, {})
+	var u: Dictionary = (data().get("units", {}) as Dictionary).get(id, {})
+	return u if not u.is_empty() else (data().get("allied_units", {}) as Dictionary).get(id, {})  # (D4/D5: an operation's allied and enemy guns, never the company's to call)
 
 
 static func uav() -> Dictionary:

@@ -12,6 +12,21 @@
 			"max_rounds": 6, "rounds_per_op": {"he": 30, "smoke": 8}, "cooldown_s": 420, "vehicle_reach_m": 12, "vehicle_blast_x": 2.5,
 			"min_tier": "trusted", "regions": ["inland"]}
 	},
+	"_allied_units": "An operation's own guns (docs/combined_arms.md 6.1 'allied fires', 6.4; cg_brief queue item 3.3, OpSupport): never on the company's menu or bill (FireSupport.server_allied_fire). The employer's mortar section fires from where its tubes stand in the zone (in_zone), its battery and naval gunfire from off the map (the battery from the friendly side, the guns afloat from the sea side), the enemy's mortar from its own side (side 'hostile': it holds for its own men instead of ours). Rounds per operation are the contract's 'allied_fires'. All Proposed.",
+	"allied_units": {
+		"allied_mortar": {"name": "the battlegroup's 81 mm mortars", "callsign": "Hammer 6", "warhead": "mortar_82_he", "in_zone": true,
+			"min_m": 80, "max_m": 5600, "off_map_m": 0, "elevation_mils": 1100, "response_s": 25, "gap_s": 3.0, "dispersion_m": 10, "dispersion_per_km": 5,
+			"danger_close_m": 150, "max_rounds": 8, "vehicle_reach_m": 7, "vehicle_blast_x": 2.5},
+		"allied_artillery": {"name": "the battlegroup's 105 mm battery", "callsign": "Thunder 1", "warhead": "arty_105_he",
+			"min_m": 600, "max_m": 14000, "off_map_m": 3000, "elevation_mils": 450, "response_s": 45, "gap_s": 1.5, "dispersion_m": 16, "dispersion_per_km": 3,
+			"danger_close_m": 250, "max_rounds": 8, "vehicle_reach_m": 12, "vehicle_blast_x": 2.5},
+		"naval_gun": {"name": "naval gunfire (the escort's 5-inch gun)", "callsign": "Trident 2", "warhead": "arty_105_he",
+			"min_m": 900, "max_m": 20000, "off_map_m": 2500, "elevation_mils": 300, "response_s": 30, "gap_s": 3.0, "dispersion_m": 20, "dispersion_per_km": 3,
+			"danger_close_m": 300, "max_rounds": 8, "vehicle_reach_m": 12, "vehicle_blast_x": 2.5},
+		"enemy_mortar": {"name": "the enemy's 82 mm mortar", "callsign": "", "warhead": "mortar_82_he", "side": "hostile", "in_zone": true,
+			"min_m": 100, "max_m": 4000, "off_map_m": 400, "elevation_mils": 1100, "response_s": 15, "gap_s": 4.0, "dispersion_m": 18, "dispersion_per_km": 8,
+			"danger_close_m": 80, "max_rounds": 6, "vehicle_reach_m": 7, "vehicle_blast_x": 2.5}
+	},
 	"_uav": "uav: a loitering recon drone (UavSupport). It flies in from the supports' origin at speed_ms, circles orbit_m round the point it was sent to alt_m up for loiter_s, then flies home. Its camera sees the ground within sensor_m of the point under it: a hostile in its sight (no wall or roof, less than Spotting.FOLIAGE_OPAQUE_M of tree crown in the way) is spotted after spot_s (times the Spotting factors for stance, movement, camo, foliage and weather; thermal: night doesn't hide anyone) and tagged for the squad (EnemyTags) every tag_every_s while it's seen. Storms ground it (DayNight.grounds_aircraft). hits rounds bring it down; a manned hostile AA technical within aa_reach_m with a clear line has aa_hit_chance every aa_every_s to hit it.",
 	"uav": {"name": "recon UAV", "callsign": "Eyeball 1-1", "price": "uav", "loiter_s": 600, "alt_m": 280, "orbit_m": 220, "speed_ms": 35,
 		"sensor_m": 450, "spot_s": 5.0, "tag_every_s": 6.0, "cooldown_s": 900, "hits": 3, "aa_models": ["technical_zu23", "technical_zpu"],

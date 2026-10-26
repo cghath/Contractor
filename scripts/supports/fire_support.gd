@@ -398,6 +398,44 @@ func _request(m: Dictionary, kind: String, shell: String, n: int) -> String:
 	return ""
 
 
+## Host (an operation's guns, cg_brief queue item 3.3: OpSupport): `n` rounds of `shell` from
+## data "allied_units" `unit_id` (the employer's mortars and battery, naval gunfire, the enemy's
+## mortar) on `aim`, from guns off the map past `from` (the side they fire from). No mission, no
+## pay, no adjusting: the firing unit's own plan. Held (and why) when friendlies of the firing side
+## are within its danger_close_m of the aim, or the aim is out of its reach. "" when they're on
+## their way.
+func server_allied_fire(unit_id: String, aim: Vector3, n: int, shell: String, from: Vector3, by: Node = null) -> String:
+	var u := FireMission.unit(unit_id)
+	if u.is_empty():
+		return "No such firing unit"
+	var lvl := level()
+	if lvl == null:
+		return "No level"
+	aim = _ground(aim)
+	var area: Rect2 = lvl.map_area()
+	var gun := Vector3(from.x, 0.0, from.z) if bool(u.get("in_zone", false)) else FireMission.gun_point(area, aim, from, float(u.off_map_m))  # (mortars with the battlegroup fire from where their tubes stand)
+	var gun_range := FireMission.flat(gun, aim)
+	if gun_range < float(u.min_m) or gun_range > float(u.max_m):
+		return "out of the %s's range (%d m)" % [String(u.name), roundi(gun_range)]
+	var hostile := String(u.get("side", "friendly")) == "hostile"
+	if not hostile and int(Deconfliction.friendlies_near(self, aim, float(u.danger_close_m)).count) > 0:
+		return "friendlies within %d m of the aim" % int(u.danger_close_m)
+	if hostile:
+		for s in get_tree().get_nodes_in_group(&"combatants"):
+			if s is Soldier and (s as Soldier).faction == &"hostile" and (s as Soldier).vitals.is_up() \
+					and FireMission.flat((s as Soldier).global_position, aim) < float(u.danger_close_m):
+				return "their own men within %d m of the aim" % int(u.danger_close_m)
+	var flight := FireMission.flight_s(gun_range, float(u.elevation_mils))
+	var start := now() + float(u.response_s)
+	var gap := float(u.get("gap_s", 2.0))
+	var spread := FireMission.dispersion_m(u, gun_range) * dispersion_mult
+	for i in clampi(n, 1, int(u.get("max_rounds", 12))):
+		rounds.append({"unit": unit_id, "land": aim, "aim": aim, "spread": spread, "fire_at": start + gap * i, "when": start + gap * i + flight, "shell": shell,
+			"by": by, "first": false, "last": false, "ffe": true, "shot": false, "warned": false, "range_m": gun_range, "gun": gun, "allied": true})
+	SessionLog.note("fire support: %s, %d x %s on (%.0f, %.0f), %d m, time of flight %.0f s" % [unit_id, n, shell, aim.x, aim.z, roundi(gun_range), flight])
+	return ""
+
+
 ## Host: mission `unit_id` is over; after a fire for effect the unit's cooldown starts.
 func _end(unit_id: String, cooldown: bool) -> void:
 	if not missions.has(unit_id):
@@ -502,7 +540,7 @@ func _step() -> void:
 			r.shot = true
 			var bias: Vector3 = (missions.get(String(r.unit), {}) as Dictionary).get("bias", Vector3.ZERO)
 			r.land = FireMission.in_disc(_rng, (r.aim as Vector3) + bias, float(r.spread))  # the aim, the mission's error, the round's own spread
-			var gun: Variant = (missions.get(String(r.unit), {}) as Dictionary).get("gun")
+			var gun: Variant = r.get("gun", (missions.get(String(r.unit), {}) as Dictionary).get("gun"))  # (an operation's allied rounds carry their own: server_allied_fire)
 			var lvl := level()
 			if gun is Vector3 and lvl:  # every peer sees it come down out of the sky, in the wind (ShellArc)
 				lvl.server_show_shell(Vector3(gun.x, maxf(gun.y, 0.0) + 1.5, gun.z), _ground(r.land), float(r.when) - t)
