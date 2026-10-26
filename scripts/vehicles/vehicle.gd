@@ -862,7 +862,7 @@ func is_burning() -> bool:
 func can_drive() -> bool:
 	return not wrecked and kind != HELICOPTER and kind != STATIC and zone_health(ZONE_ENGINE) > 0.0 and fuel_litres() > 0.0 \
 		and (battery_ok if multiplayer.is_server() else bool(net_state.get("battery", true))) \
-		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed()) 		and not (drive and drive.blocked() != "")  # A6: rolled over, flooded, stalled in deep water, bogged
+		and not (kind == TRACKED and zone_health(ZONE_WHEELS) <= 0.0) and not (modules and modules.mobility_killed()) 		and not (drive and drive.blocked() != "") and not VehicleWear.stalled(self)  # A6: rolled over, flooded, stalled in deep water, bogged; survival: stale fuel stalled it
 
 
 ## Top speed now (m/s): the model's, cut by engine and wheel damage.
@@ -872,6 +872,7 @@ func top_speed(reverse := false) -> float:
 		top = minf(top * logistics.speed_mult(), logistics.tow_top())  # A8: the packages' weight, a tow
 	if drive:
 		top = minf(top, drive.speed_cap_now())  # A6: wheels on sand and mud
+	top *= VehicleWear.speed_mult(self)  # survival wear: a flat, a worn engine (call 123)
 	if modules and modules.authored:
 		return top * modules.speed_share()  # A2: engine, transmission, tracks, wheels and run-flats
 	var engine := zone_health(ZONE_ENGINE)
@@ -2294,6 +2295,7 @@ func _on_body_entered(body: Node) -> void:
 func _use_fuel(delta: float) -> void:
 	var moved := global_position.distance_to(_last_pos)
 	_last_pos = global_position
+	VehicleWear.on_moved(self, moved, delta)  # survival wear: parts, punctures, stale fuel (call 123)
 	if fuel <= 0.0:
 		return
 	var used := moved / 1000.0 * float(spec.get("fuel_l_per_km", 0.5)) * (logistics.fuel_mult() if logistics else 1.0)  # A8: the packages' weight
@@ -2968,6 +2970,7 @@ func server_set_zone(zone: StringName, health: float) -> void:
 func server_refuel(litres: float) -> float:
 	var room := maxf(float(spec.get("fuel_l", 0.0)) - fuel, 0.0)
 	var taken := minf(room, maxf(litres, 0.0))
+	VehicleWear.on_refuel(self, fuel, taken)  # the tank's age (survival, call 123)
 	fuel += taken
 	_publish_state(true)
 	return taken
@@ -2984,6 +2987,7 @@ func server_repair(zone: StringName, to_health: float, add := 0.0) -> void:
 	var h := float(_zones.get(zone, 1.0))
 	_zones[zone] = clampf(maxf(h + add, to_health), 0.0, 1.0)
 	modules.server_repair(zone, to_health, add)
+	VehicleWear.on_repair(self, zone)  # survival wear (call 123)
 	if zone == ZONE_FUEL:
 		_leak = 0.0
 	_publish_state(true)
@@ -3001,6 +3005,7 @@ func server_stop_leak() -> void:
 
 func server_set_battery(ok: bool) -> void:
 	battery_ok = ok
+	VehicleWear.on_battery(self, ok)  # survival wear (call 123)
 	_publish_state(true)
 
 

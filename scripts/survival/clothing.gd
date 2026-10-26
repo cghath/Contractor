@@ -76,7 +76,8 @@ static func layers(inv: Inventory) -> Array:
 	var out: Array = []
 	for w: Dictionary in worn(inv):
 		var it: ItemData = w.item
-		out.append({"slot": w.slot, "id": String(w.id), "warmth": float(it.stats.get("warmth", 0.0)), "wet_resist": float(it.stats.get("wet_resist", 0.0))})
+		var f := ClothingWear.factor_of(inv.state_of(w.slot))  # torn clothes keep less (call 122)
+		out.append({"slot": w.slot, "id": String(w.id), "warmth": float(it.stats.get("warmth", 0.0)) * f, "wet_resist": float(it.stats.get("wet_resist", 0.0)) * f})
 	return out
 
 

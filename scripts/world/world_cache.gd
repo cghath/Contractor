@@ -132,7 +132,7 @@ func server_open_for(actor: Soldier) -> String:
 ## ([{"id", "count"}]) into the hold, as much as fits (sparse flavour loot, never expected to
 ## overflow its small capacity).
 func server_seed(items: Array) -> void:
-	for entry: Dictionary in items:
+	for entry: Dictionary in AmmoCondition.weather_loot(items, self):  # survival: found ammo's condition by where it lay (call 121)
 		cargo_hold.take(StringName(entry.id), int(entry.get("count", 1)), entry.get("state", {}))
 
 

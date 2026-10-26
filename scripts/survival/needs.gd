@@ -283,6 +283,7 @@ static func stamina_mult(n: Dictionary) -> float:
 	m *= lerpf(SLEEPY_STAMINA_MULT, 1.0, 1.0 - dulled(n))
 	m *= 1.0 - SHIVER_STAMINA * shivering(n)
 	m *= Body.stamina_factor(n)  # fever, sickness, sepsis, heat stroke
+	m *= ClothingWear.feet_stamina(n)  # sore feet from worn-out boots (call 122)
 	return m
 
 

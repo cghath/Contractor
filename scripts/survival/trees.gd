@@ -107,9 +107,9 @@ static func nearest(level: Node, pos: Vector3, r := REACH_M, standing := true) -
 
 static func _tool_x(s: Soldier) -> float:
 	if Wildlife.carries(s, "axe"):
-		return 1.0
+		return WeaponCondition.tool_mult(s, "axe")  # a worn axe fells slower (call 120)
 	if Wildlife.carries(s, "hatchet"):
-		return HATCHET_X
+		return HATCHET_X * WeaponCondition.tool_mult(s, "hatchet")
 	return 0.0
 
 
@@ -131,6 +131,7 @@ static func server_fell(s: Soldier, index: int, seconds: float) -> Dictionary:
 	var before := float(progress.get(index, 0.0))
 	var after := before + seconds / x
 	progress[index] = after
+	WeaponCondition.on_chop(s, "axe" if Wildlife.carries(s, "axe") else "hatchet", seconds)  # the edge wears (call 120)
 	var chops := maxi(1, floori(after / CHOP_S) - floori(before / CHOP_S))
 	if chops > 0:
 		Survival.server_noise(s, p, float(d.get("noise_m", 40.0)), CHOP_LOUD)

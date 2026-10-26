@@ -73,7 +73,7 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 		"haul":
 			return haul(st, hours)
 		"maintain":
-			return WorkOrders.work_for(st, "maintain", hours) or repair_some(st, hours) > 0 or Infrastructure.work_project(st, hours)
+			return WorkOrders.work_for(st, "maintain", hours) or repair_some(st, hours) > 0 or Infrastructure.work_project(st, hours) or VehicleWear.settlement_service(st, hours)  # (the mechanic: call 123)
 		"craft":
 			return WorkOrders.work_for(st, "craft", hours)
 		"generator":

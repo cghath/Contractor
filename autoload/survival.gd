@@ -821,6 +821,7 @@ func server_tick_survivors(level: Node, dt: float) -> void:
 	if not sleepers.is_empty() and SurvivalSleep.chased(level, players):
 		for p: Soldier in sleepers:
 			_wake(p, "dead")
+	Wear.server_tick(level, players, dt)  # condition and wear (calls 120-123)
 
 
 ## Host: after a body's step: the sleeper's hours, a sickness that began showing.

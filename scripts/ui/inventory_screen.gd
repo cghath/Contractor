@@ -1455,6 +1455,9 @@ static func _condition(item: ItemData, state: Dictionary) -> String:
 		detail = "%d inside" % state.held.reduce(func(a: int, e: Dictionary) -> int: return a + int(e.count), 0)
 	if detail == "" and not state.get("molle", {}).is_empty():
 		detail = "%d attached" % state.molle.size()
+	var worn := Wear.tag(item, state)  # survival: condition, jammed, dull, torn, corroded (calls 120-122)
+	if worn != "":
+		detail = worn if detail == "" else "%s, %s" % [detail, worn]
 	return detail
 
 

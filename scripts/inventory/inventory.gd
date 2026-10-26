@@ -545,6 +545,7 @@ func reload(slot: StringName) -> int:
 	var out := {"rounds": current}
 	if holder:
 		out[Shotguns.LIST_KEY] = Shotguns.list_of(ItemDB.get_item(id), slot_state[slot]).duplicate()
+	AmmoCondition.on_reload(slot_state[slot], (containers[best_container][best_index].get("state", {}) as Dictionary).duplicate(), out)  # the rounds' condition (survival, call 121)
 	remove_entry(best_container, best_index)
 	_append(best_container, mag, 1, out)
 	slot_state[slot]["rounds"] = best_rounds
