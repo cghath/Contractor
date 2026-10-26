@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, food and fieldwork (claude/survival-food2)
+
+- **Added** found food freshness (`Spoilage.found_items`, `found_in_box`, `where_box`; all Proposed): perishables seeded into a box (its first roll, a refill) or lying as ground loot are stamped by where they lay: a working fridge keeps them, a dead fridge in a house has them half gone, a cellar 50-90% left, a house 30-70%, outdoors 0-40%, the season scaling it (summer twice the loss); bread, cheese, eggs, a carton of milk and apples in homes' commonest tier, bread and cheese in stores.
+- **Added** food going off where it lies: the zone save stamps dropped items and boxes with the world hour; when the zone loads again their food steps by the hours since at the season's pace (stamp-based, no tick); a box within 3 m of an ice box (x0.25) or a cold store (x0.5) keeps it longer.
+- **Added** milk and cheese: "Milk the goat" on a zone's goats (the contextual menu) and on a tied goat, every 12 world hours; goat's milk spoils in a day; hard cheese (4 milk + salt) keeps 90 days.
+- **Added** tanning and bone tools: a hide and 2 salt tan into 2 leather on the drying rack; leather patches leather goods when mending (+30); a leather pouch and a leather sling bag; bone needles (sew as a needle and thread), fish hooks (a hand line), arrowheads (for bows later).
+- **Changed** the settlement's food: settlers eat the oldest first across the stores; the cook first turns fresh stock within 12 hours of going off into hot meals; the settlement screen's food line shows what went off today.
+
 ### Contractor: Fallen, the early loot curve (claude/survival-startloot)
 
 - **Changed** the early loot curve (the Captain's playtest: "got a gun off a mil zombie in the first 5 minutes"; call 38; `FoundLoot`, docs/survival_deadtime.md "Early loot curve"; all Proposed): the dead out of military places are rarely soldiers (the open country 2% soldiers, 3% cops; was 10% soldiers) and the share grows with the zone's tier (links from the start zone, +1 in the city); none turn within 250 m of the farm unless a military place is there.

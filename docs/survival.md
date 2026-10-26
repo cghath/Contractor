@@ -2,6 +2,12 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Food and fieldwork built on `claude/survival-food2`** (the hands lane's left-out list): found food fresh by where
+  it lay (a dead fridge half gone, a cellar, a house, outdoors, by season) through boxes' first rolls and ground loot,
+  bread/cheese/eggs/milk in homes; food on the ground and in boxes ages while a zone sits (worked out on load; an ice
+  box beside a box slows it); milking goats twice a day, hard cheese; tanning hides into leather on the rack, leather
+  patches and goods, bone needles/hooks/arrowheads; settlers eat oldest first and the cook saves aging food, the loss on
+  the food line; R2724 FLAKY (survival's stealth-kill check, unrelated; passed its rerun) (hands, survival, nature, loot, settlement); see docs/survival_hands.md.
 - **The early loot curve built on `claude/survival-startloot`** (the Captain's playtest: a gun off a military zombie
   in the first five minutes; call 38): soldiers' dead rare out of military places (2%, by the zone's tier, none
   within 250 m of the farm), a soldier's rifle kept 25% and weathered, near empty; no guns in the commonest home
