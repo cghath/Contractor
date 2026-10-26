@@ -13,7 +13,7 @@ is **Proposed**.
   world days left out, because the frozen don't rot and the thaw brings back fresh-looking ones).
   Its decay runs 0..1 from `FRESH_DAYS` (14) over `ROT_DAYS` (120) of age.
 - **Stages.** fresh (< 0.25), worn, old (>= 0.6). From fresh to old: pace x1.15 to x0.8, pool
-  x1.3 to x0.6, the bite x1.25 to x0.8, limb hits on the pool x1.0 to x1.6 (they come apart).
+  x1.0 to x0.55 (a fresh one at its kind's full pool), the bite x1.25 to x0.8, limb hits on the pool x1.0 to x1.6 (they come apart).
 - **The mix.** A new head is fresh (turned in the last weeks) at a share that falls from 0.9 at
   the fall by 0.25 a month to 0.1; the rest turned in the fall's first weeks. `count_mult`: the dead
   about grow from x0.9 to x1.3 over 8 months (`Survival.dead_near`).

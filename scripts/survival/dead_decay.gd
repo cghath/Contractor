@@ -26,7 +26,7 @@ const WORN_AT := 0.25
 const OLD_AT := 0.6
 ## What the age does, fresh (decay 0) .. old (decay 1).
 const PACE := Vector2(1.15, 0.8)
-const POOL := Vector2(1.3, 0.6)
+const POOL := Vector2(1.0, 0.55)  # (fresh at the kinds' own pools: the survival suite's 12 rounds to the body)
 const STRIKE := Vector2(1.25, 0.8)
 const LIMB := Vector2(1.0, 1.6)
 ## The fresh share of the dead by months since the fall: FRESH_SHARE.x at the fall, down by
