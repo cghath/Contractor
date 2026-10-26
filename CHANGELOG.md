@@ -13,7 +13,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Contractor: Fallen, phase B: the free building system (claude/survival-building)
 
-Local: building suite RUN_NUMBER (see docs/survival_building.md's "Where the build is").
+Local: R2638, building and survival suites PASS (see docs/survival_building.md's "Where the build is").
 
 - **Added (`Builder`, `BuildPieces`, `BuildVoxels`, docs/survival_building.md §1-4):** survivors build
   anything within reason on a 0.5 m grid (call 70): blocks of wood, scrap, sandbags, brick, concrete

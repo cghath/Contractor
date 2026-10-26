@@ -3,7 +3,7 @@
 ## Where the build is (2026-10-26 ~03:00 CDT)
 
 Phase B's free building (§1-4, §10-11's building part) built on `claude/survival-building`
-(worktree `B:\Contractor\.claude\worktrees\survival-building`), building suite RUN_NUMBER:
+(worktree `B:\Contractor\.claude\worktrees\survival-building`), building suite R2638 PASS (survival PASS):
 - `scripts/survival/`: `BuildPieces` (the catalogue: six materials, six shapes, twelve pieces, tools,
   costs), `Builder` (the host's authority: blocks as sites that fill with work, blueprints, upgrade in
   place, dismantle 60%, repair, damage, chewing, doors and locks, saves, late joiners), `BuildVoxels`
