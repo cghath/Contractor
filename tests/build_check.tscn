@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/build_check.gd" id="1_bc"]
+
+[node name="BuildCheck" type="Node"]
+script = ExtResource("1_bc")

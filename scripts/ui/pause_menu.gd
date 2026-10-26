@@ -34,6 +34,7 @@ func _ready() -> void:
 			"Return to Base (revert) is the host's, during a campaign deployment: everything from this deployment is undone and everyone is back at the base (it asks first).",
 			"Return to main menu and Quit game save first when you're the host."]),
 		[["Esc", "Resume"], ["Tab / arrows", "Move"], ["Enter", "Press"]]))
+	box.add_child(UiKit.hint("Build " + BuildInfo.label(), true))  # which build, to say in a bug report
 	var resume := UiKit.accent_button("Resume", close, "Back to the game (Esc)")
 	box.add_child(resume)
 	box.add_child(UiKit.button("Settings", _open_settings, "Video, sound, controls, keys and the HUD layout"))

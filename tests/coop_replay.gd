@@ -1,0 +1,1011 @@
+extends Node
+## Plays back a co-op soak replay (tests/coop_soak_recorder.gd's replay.jsonl) in the real
+## level (the base, or the zone generated again from its definition), offline: no network, no
+## AI, nothing simulated. Soldiers are drawn as markers (players blue, squad AI green, hostiles
+## red; lying down when down, grey when dead) with their name and blood over them; shots are
+## tracers, hits flash. A follow camera takes each player in turn, with an overhead view in the
+## corner. Given a client's replay too (--compare), every soldier the two disagree about gets a
+## magenta flag and a ghost where the client had it.
+##
+## Rendered to a video with Godot's Movie Maker (tools/coop_replay.sh does all this):
+##   <godot> --path . --gpu-index 0 --resolution 1280x720 --fixed-fps 30 --write-movie out.avi \
+##       res://tests/coop_replay.tscn -- --replay <run>/host/replay.jsonl [--compare <run>/client1/replay.jsonl] \
+##       [--cut highlights|full] [--speed 4] [--from S --to S]
+## --live: watch a soak while it runs (tools/coop_watch.sh): follows the end of the replay files
+## as the host writes them, LIVE_DELAY_S behind. Nothing joins the session: the viewer reads the
+## host's recording, so it is no player, has no body and can't be shot. Keys: Tab next player,
+## 1-4 a player, O swaps the follow view and the overhead map, mouse wheel zoom, right-drag orbit.
+## --cut highlights (default): first contact, a player going down and being treated back up,
+## the reconnect, and the extraction, from the first two contracts; --cut full: the whole run at
+## --speed (4 by default). Without --write-movie it plays in a window. Quits at the end.
+
+const FLAGS := preload("res://tests/coop_soak_recorder.gd")
+const POS_TOL := 2.5
+const SWITCH_HOLD_FRAMES := 45  # frames held after a level loads (the voxels mesh in)
+const CAM_TURN_S := 12.0         # video seconds on each player before the next
+
+var frames: Array = []          # parsed replay frames (dicts), host's
+var compare: Array = []         # the client's, or []
+var compare_t: PackedFloat64Array = PackedFloat64Array()
+var segments: Array = []        # [{"from", "to", "speed", "title", "focus"}] in replay time
+var level: CompoundLevel
+var level_key := ""
+var info_at: PackedInt32Array = PackedInt32Array()  # frame index -> index of the frame holding its level info
+var puppets := {}               # key -> Node3D
+var cam: Camera3D
+var top_cam: Camera3D
+var hud: Label
+var feed: Label
+var title: Label
+var _viewer: Node3D
+var _seg := 0
+var _t := 0.0
+var _i := 0
+var _hold := 0
+var _cam_left := 0.0
+var _cam_target := ""
+var _action_at := Vector3.ZERO  # where something last happened (a player firing, a hit)
+var _action_t := -1000.0
+var _feed_lines: Array[String] = []
+var _tracers: Array = []        # [MeshInstance3D, seconds left]
+var _speed := 1.0
+var _start_t := 0.0
+## Draw soldiers with the game's own body (soldier.tscn, nothing simulated: placed each frame,
+## posed from the replay) instead of capsules (--capsules).
+var models := true
+var live := false
+const LIVE_DELAY_S := 1.0
+var _live_paths: Array[String] = []   # [host replay, compare replay or ""]
+var _live_pos: Array[int] = [0, 0]
+var _live_poll := 0.0
+var _orbit_yaw := 0.0
+var _orbit_pitch := 0.45
+var _orbit_dist := 7.0
+var _dragging := false
+var _swapped := false
+var _objectives: Array = []  # [[text, state]] from the latest frame that had them
+var _box: Control
+var _map_centre := Vector2.ZERO
+var _map_span := 300.0  # metres across the map's width
+var _start_at: Variant = null  # Vector3 where the team started (spawn_point), or null
+var _user_orbit := false
+var _names_left := 5.0
+var _held := false  # live: the viewer picked a player (Tab, 1-4): no automatic switching
+
+
+static func Recorder_now() -> float:
+	return Time.get_unix_time_from_system()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not live:
+		return
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		get_tree().quit(0)
+		return
+	var players: Array[String] = []
+	for key: String in puppets:
+		if key.begins_with("Players/"):
+			players.append(key)
+	players.sort_custom(func(a: String, b: String) -> bool: return _name_of(a) < _name_of(b))
+	if event is InputEventKey and event.pressed and not event.echo:
+		var k := (event as InputEventKey).keycode
+		if k == KEY_TAB and not players.is_empty():
+			_cam_target = players[(players.find(_cam_target) + 1) % players.size()]
+			_held = true
+		elif k >= KEY_1 and k <= KEY_4 and k - KEY_1 < players.size():
+			_cam_target = players[k - KEY_1]
+			_held = true
+		elif k == KEY_O:
+			_swapped = not _swapped
+			_box.offset_left = -810.0 if _swapped else -330.0
+			_box.offset_bottom = 610.0 if _swapped else 250.0
+		elif k == KEY_A:
+			_held = false  # back to automatic
+	elif event is InputEventMouseButton and event.pressed:
+		var b := (event as InputEventMouseButton).button_index
+		if b == MOUSE_BUTTON_WHEEL_UP or b == MOUSE_BUTTON_WHEEL_DOWN:
+			_orbit_dist = clampf(_orbit_dist * (0.9 if b == MOUSE_BUTTON_WHEEL_UP else 1.1), 2.0, 80.0)
+			_user_orbit = true
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
+		_dragging = event.pressed
+	elif event is InputEventMouseMotion and _dragging:
+		_orbit_yaw -= (event as InputEventMouseMotion).relative.x * 0.008
+		_orbit_pitch = clampf(_orbit_pitch + (event as InputEventMouseMotion).relative.y * 0.006, 0.05, 1.4)
+		_user_orbit = true
+## "Players/<peer id>" -> the bot's name ("Host (bot 0)", "Bot 2"), from each client's own replay
+## ("joined" events carry its peer id; a rejoin gets a new one).
+var names := {"Players/1": "Host (bot 0)"}
+## Render layers: names only in the main view, map discs only in the overhead one.
+const LABEL_LAYER := 1 << 10
+const MAP_LAYER := 1 << 11
+
+
+func _ready() -> void:
+	var args := OS.get_cmdline_user_args()
+	var path := _arg(args, "--replay", "")
+	if path == "" or not FileAccess.file_exists(path):
+		push_error("coop_replay: no --replay file (%s)" % path)
+		get_tree().quit(2)
+		return
+	CompoundLevel.spawn_ai = false
+	Ragdoll.enabled = false  # a puppet lies down posed, not as physics
+	models = not args.has("--capsules")
+	live = args.has("--live")
+	var cpath := _arg(args, "--compare", "")
+	if live:
+		_live_paths = [path, cpath if cpath != "" and FileAccess.file_exists(cpath) else ""]
+		var deadline := Time.get_ticks_msec() + 30000
+		while frames.is_empty() and Time.get_ticks_msec() < deadline:
+			_live_read()
+			if frames.is_empty():
+				OS.delay_msec(500)
+	else:
+		frames = _load(path)
+	_load_names(path.get_base_dir().get_base_dir())
+	if not live and cpath != "" and FileAccess.file_exists(cpath):
+		compare = _load(cpath)
+		for f: Dictionary in compare:
+			compare_t.append(float(f.t))
+	if frames.is_empty():
+		push_error("coop_replay: the replay is empty")
+		get_tree().quit(2)
+		return
+	_start_t = float(frames[0].t)
+	if not live:
+		var last := -1
+		for i in frames.size():
+			if frames[i].has("info"):
+				last = i
+			info_at.append(last)
+	var cut := _arg(args, "--cut", "highlights")
+	_speed = float(_arg(args, "--speed", "4" if cut == "full" else "1"))
+	if live:
+		segments = [{"from": float(frames[-1].t) - LIVE_DELAY_S, "to": INF, "speed": 1.0, "title": "LIVE", "focus": ""}]
+	elif args.has("--from"):
+		segments = [{"from": _start_t + float(_arg(args, "--from", "0")), "to": _start_t + float(_arg(args, "--to", "99999")),
+			"speed": _speed, "title": "", "focus": ""}]
+	elif cut == "full":
+		segments = [{"from": _start_t, "to": float(frames[-1].t), "speed": _speed, "title": "Full run (x%s)" % _speed, "focus": ""}]
+	else:
+		segments = _highlights()
+	print("[replay] %d frames (%.0f s), %d segments: %s" % [frames.size(), float(frames[-1].t) - _start_t, segments.size(),
+		JSON.stringify(segments.map(func(s: Dictionary) -> String: return "%s %.0f-%.0f x%.1f" % [s.title, s.from - _start_t, s.to - _start_t, s.speed]))])
+	_build_view()
+	if get_window().size.x >= 2000:
+		get_window().content_scale_factor = 2.0  # a big screen or a native-res video: labels and map at a readable size
+	print("[replay] window %s at %s on %s" % [get_window().size, get_window().position, RenderingServer.get_video_adapter_name()])
+	_begin_segment(0)
+
+
+static func _arg(args: PackedStringArray, flag: String, fallback: String) -> String:
+	var i := args.find(flag)
+	return args[i + 1] if i >= 0 and i + 1 < args.size() else fallback
+
+
+func _load_names(run_dir: String) -> void:
+	for n in range(1, 4):
+		var f := FileAccess.open(run_dir.path_join("client%d" % n).path_join("replay.jsonl"), FileAccess.READ)
+		while f and not f.eof_reached():
+			var line := f.get_line()
+			if not line.contains("\"joined\""):
+				continue
+			var d: Variant = JSON.parse_string(line)
+			if d is Dictionary:
+				for e: Array in d.get("e", []):
+					if e.size() > 1 and String(e[0]) == "joined":
+						names["Players/%d" % int(e[1])] = "Bot %d" % n
+
+
+## Live: reads what the host (and the compared client) wrote since the last read; a line still
+## being written is left for the next read.
+func _live_read() -> void:
+	for n in 2:
+		var path := _live_paths[n]
+		if path == "":
+			continue
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null or f.get_length() <= _live_pos[n]:
+			continue
+		f.seek(_live_pos[n])
+		while true:
+			var at := f.get_position()
+			if at >= f.get_length():
+				break
+			var line := f.get_line()
+			var json := JSON.new()  # quiet: a half-written last line is normal here
+			var d: Variant = json.data if not line.is_empty() and json.parse(line) == OK else null
+			if not line.is_empty() and d == null and f.get_position() >= f.get_length():
+				f.seek(at)  # half written
+				break
+			_live_pos[n] = f.get_position()
+			if d is Dictionary and d.has("t"):
+				if n == 0:
+					frames.append(d)
+					info_at.append(frames.size() - 1 if d.has("info") else (info_at[-1] if not info_at.is_empty() else -1))
+				else:
+					compare.append(d)
+					compare_t.append(float(d.t))
+
+
+static func _load(path: String) -> Array:
+	var out: Array = []
+	var f := FileAccess.open(path, FileAccess.READ)
+	while f and not f.eof_reached():
+		var line := f.get_line()
+		if line.is_empty():
+			continue
+		var d: Variant = JSON.parse_string(line)
+		if d is Dictionary and d.has("t"):
+			out.append(d)
+	return out
+
+
+# --- The cut ------------------------------------------------------------------------------------
+
+## Contact, players going down and coming back (treated, carried, or given up), the reconnect
+## and late join, and the extraction, contract by contract until about HIGHLIGHT_S of video.
+const HIGHLIGHT_S := 270.0
+
+
+func _highlights() -> Array:
+	var phase_at := {}  # "cycle:phase" -> first time
+	var first_fire := {}  # cycle -> time
+	var downs: Array = []  # [time, key, cycle]
+	var ups := {}  # key -> [times]
+	var casevacs: Array = []  # [time, key, cycle]
+	var joins: Array = []
+	var leaves: Array = []
+	var cycle := 0
+	var base_after := {}  # cycle -> first time back at the base after its extract
+	for f: Dictionary in frames:
+		var t := float(f.t)
+		if f.has("ph"):
+			var ph := String(f.ph)
+			cycle = int(ph.get_slice(":", 0))
+			var name_ := "%d:%s" % [cycle, ph.get_slice(":", 1).get_slice("+", 0)]
+			if not phase_at.has(name_):
+				phase_at[name_] = t
+		if phase_at.has("%d:extract" % cycle) and String(f.get("L", "")) == "base" and not base_after.has(cycle):
+			base_after[cycle] = t
+		for e: Array in f.get("e", []):
+			match String(e[0]):
+				"fire":
+					if not first_fire.has(cycle) and phase_at.has("%d:deployed" % cycle) and String(e[1]).begins_with("Players/"):
+						first_fire[cycle] = t
+				"down":
+					if String(e[1]).begins_with("Players/"):
+						downs.append([t, String(e[1]), cycle])
+				"up":
+					if not ups.has(String(e[1])):
+						ups[String(e[1])] = []
+					ups[String(e[1])].append(t)
+				"casevac":
+					casevacs.append([t, String(e[1]), cycle])
+				"join":
+					joins.append(t)
+				"leave":
+					leaves.append(t)
+	var out: Array = []
+	var budget := 0.0
+	for c in range(1, 13):
+		if budget > HIGHLIGHT_S or not phase_at.has("%d:kit" % c):
+			break
+		var mine: Array = []
+		if first_fire.has(c):
+			mine.append({"from": first_fire[c] - 4.0, "to": first_fire[c] + 40.0, "speed": 1.0, "title": "Contract %d: contact" % c, "focus": ""})
+		var shown := 0
+		for d: Array in downs:
+			if int(d[2]) != c or shown >= 2:
+				continue
+			var back := float(d[0]) + 40.0
+			for t: float in ups.get(d[1], []):
+				if t > float(d[0]):
+					back = minf(t, float(d[0]) + 240.0)
+					break
+			var length := back - float(d[0]) + 10.0
+			mine.append({"from": float(d[0]) - 5.0, "to": back + 5.0, "speed": maxf(1.0, length / 35.0),
+				"title": "Contract %d: %s down%s" % [c, _name_of(String(d[1])), ", back up" if back < float(d[0]) + 239.0 else ""], "focus": String(d[1])})
+			shown += 1
+		for cv: Array in casevacs:
+			if int(cv[2]) == c:
+				mine.append({"from": float(cv[0]) - 2.0, "to": float(cv[0]) + 40.0, "speed": 2.0,
+					"title": "Contract %d: carrying %s to the extraction" % [c, _name_of(String(cv[1]))], "focus": ""})
+				break
+		if c == 1:
+			for t: float in leaves:
+				mine.append({"from": t - 3.0, "to": t + 6.0, "speed": 1.0, "title": "A player leaves mid-deployment", "focus": ""})
+				break
+			for t: float in joins:
+				if not leaves.is_empty() and t > float(leaves[0]):
+					mine.append({"from": t - 2.0, "to": t + 8.0, "speed": 1.0, "title": "...and joins again", "focus": ""})
+					break
+		if phase_at.has("%d:extract" % c):
+			var from := float(phase_at["%d:extract" % c])
+			var to := float(base_after.get(c, from + 60.0)) + 4.0
+			mine.append({"from": from, "to": to, "speed": maxf(1.0, (to - from) / 35.0), "title": "Contract %d: extraction" % c, "focus": ""})
+		for m: Dictionary in mine:
+			budget += (float(m.to) - float(m.from)) / float(m.speed)
+		out.append_array(mine)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.from < b.from)
+	# Overlapping pieces become one, titled with all of them.
+	var merged: Array = []
+	for s: Dictionary in out:
+		if not merged.is_empty() and s.from <= merged[-1].to:
+			merged[-1].to = maxf(merged[-1].to, s.to)
+			merged[-1].speed = maxf(merged[-1].speed, s.speed)
+			if not String(merged[-1].title).contains(String(s.title)):
+				merged[-1].title = String(merged[-1].title) + "
+" + String(s.title)
+			if String(merged[-1].focus) == "":
+				merged[-1].focus = s.focus
+			continue
+		merged.append(s.duplicate())
+	if merged.is_empty():
+		merged.append({"from": _start_t, "to": float(frames[-1].t), "speed": 4.0, "title": "Whole run (no highlights found)", "focus": ""})
+	return merged
+
+
+func _name_of(key: String) -> String:
+	return String(names.get(key, key.get_slice("/", 1)))
+
+
+# --- The view -----------------------------------------------------------------------------------
+
+func _build_view() -> void:
+	cam = Camera3D.new()
+	cam.cull_mask &= ~MAP_LAYER
+	cam.fov = 70.0
+	cam.far = 3000.0
+	add_child(cam)
+	cam.current = true
+	_viewer = Node3D.new()
+	add_child(_viewer)
+	var viewer := VoxelViewer.new()
+	viewer.view_distance = VoxelWorld.VIEW_DISTANCE
+	viewer.requires_visuals = true
+	viewer.requires_collisions = false
+	_viewer.add_child(viewer)
+	var ui := CanvasLayer.new()
+	add_child(ui)
+	# The map, top right: drawn (north up), every soldier a dot (friendly players blue, squad AI
+	# green, hostiles red, the dead grey), the objectives and the start; the followed one ringed.
+	# (A second 3D camera from above showed a blank square on the Captain's screen.)
+	var box := Control.new()
+	box.anchor_left = 1.0
+	box.anchor_right = 1.0
+	box.offset_left = -330.0
+	box.offset_right = -10.0
+	box.offset_top = 10.0
+	box.offset_bottom = 250.0
+	box.clip_contents = true
+	box.draw.connect(_draw_map.bind(box))
+	_box = box
+	ui.add_child(box)
+	hud = _label(ui, Vector2(12, 8), 18)
+	feed = _label(ui, Vector2(12, 470), 20)
+	feed.anchor_top = 1.0
+	feed.anchor_bottom = 1.0
+	feed.offset_top = -190.0
+	title = _label(ui, Vector2(0, 0), 30)
+	title.anchor_left = 0.5
+	title.anchor_right = 0.5
+	title.anchor_top = 0.5
+	title.offset_left = -500
+	title.offset_right = 500
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+
+## The map's world (x, z) -> the box's pixels.
+func _map_px(box: Control, p: Vector3) -> Vector2:
+	var scale := box.size.x / _map_span
+	return box.size * 0.5 + Vector2(p.x - _map_centre.x, p.z - _map_centre.y) * scale
+
+
+func _draw_map(box: Control) -> void:
+	box.draw_rect(Rect2(Vector2.ZERO, box.size), Color(0.08, 0.1, 0.08, 0.82))
+	box.draw_rect(Rect2(Vector2.ZERO, box.size), Color(1, 1, 1, 0.5), false, 1.5)
+	var scale := box.size.x / _map_span
+	# A 100 m grid, for distances at a glance.
+	var step := 100.0 * scale
+	if step > 6.0:
+		var off := Vector2(fposmod(-_map_centre.x * scale + box.size.x * 0.5, step), fposmod(-_map_centre.y * scale + box.size.y * 0.5, step))
+		var x := off.x
+		while x < box.size.x:
+			box.draw_line(Vector2(x, 0), Vector2(x, box.size.y), Color(1, 1, 1, 0.08))
+			x += step
+		var y := off.y
+		while y < box.size.y:
+			box.draw_line(Vector2(0, y), Vector2(box.size.x, y), Color(1, 1, 1, 0.08))
+			y += step
+	for o: Array in _objectives:
+		if o.size() >= 4:
+			var at := _map_px(box, Vector3(float(o[2]), 0.0, float(o[3])))
+			var c := Color(1.0, 0.85, 0.2) if String(o[1]) == "active" else Color(0.6, 0.6, 0.6)
+			box.draw_rect(Rect2(at - Vector2(5, 5), Vector2(10, 10)), c, false, 2.0)
+	if _start_at != null:
+		var sp := _map_px(box, _start_at)
+		box.draw_circle(sp, 4.0, Color(1.0, 0.55, 0.1))
+	for key: String in puppets:
+		var flags := int((puppets[key] as Node3D).get_meta(&"flags", 0))
+		var c := _colour(flags)
+		var at := _map_px(box, (puppets[key] as Node3D).global_position)
+		var r := 4.5 if flags & FLAGS.F_PLAYER else 3.0
+		box.draw_circle(at, r, c)
+		if key == _cam_target:
+			box.draw_arc(at, r + 3.0, 0.0, TAU, 16, Color.WHITE, 1.5)
+	box.draw_string(ThemeDB.fallback_font, Vector2(6, box.size.y - 6), "%d m across, north up" % int(_map_span),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.7))
+
+
+func _label(parent: Node, at: Vector2, size: int) -> Label:
+	var l := Label.new()
+	l.position = at
+	l.add_theme_font_size_override(&"font_size", size)
+	l.add_theme_color_override(&"font_outline_color", Color.BLACK)
+	l.add_theme_constant_override(&"outline_size", 6)
+	parent.add_child(l)
+	return l
+
+
+func _begin_segment(n: int) -> void:
+	_seg = n
+	if _seg >= segments.size():
+		print("[replay] done")
+		get_tree().quit(0)
+		return
+	var s: Dictionary = segments[_seg]
+	_t = float(s.from)
+	_i = _frame_at(_t)
+	title.text = String(s.title)
+	_hold = SWITCH_HOLD_FRAMES
+	_ensure_level(_i)
+	_cam_left = 0.0
+	_cam_target = String(s.get("focus", ""))
+	_feed_lines.clear()
+
+
+func _frame_at(t: float) -> int:
+	var lo := 0
+	var hi := frames.size() - 1
+	while lo < hi:
+		var mid := (lo + hi + 1) >> 1
+		if float(frames[mid].t) <= t:
+			lo = mid
+		else:
+			hi = mid - 1
+	return lo
+
+
+## The level the replay was in at frame `i` (loaded again when it changed).
+func _ensure_level(i: int) -> void:
+	var holder := info_at[i]
+	if holder < 0:
+		return
+	var info: Dictionary = frames[holder].info
+	var key := JSON.stringify(info)
+	if key == level_key:
+		return
+	level_key = key
+	for p in puppets.values():
+		(p as Node).queue_free()
+	puppets.clear()
+	if info.is_empty():
+		return
+	level = LevelSwitch.load_level(self, info, true)
+	_hold = SWITCH_HOLD_FRAMES * 2
+	print("[replay] level %s" % String(info.get("level", "?")))
+
+
+func _process(delta: float) -> void:
+	if _seg >= segments.size() or frames.is_empty():
+		return
+	var s: Dictionary = segments[_seg]
+	if live:
+		_live_poll -= delta
+		if _live_poll <= 0.0:
+			_live_poll = 0.5
+			_live_read()
+			_names_left -= 0.5
+			if _names_left <= 0.0:
+				_names_left = 5.0
+				_load_names(_live_paths[0].get_base_dir().get_base_dir())
+	if _hold > 0:
+		_hold -= 1
+		title.modulate.a = 1.0
+	else:
+		title.modulate.a = maxf(title.modulate.a - delta * 0.5, 0.0)
+		_t += delta * float(s.speed)
+	if live:
+		var newest := float(frames[-1].t) - LIVE_DELAY_S
+		if _t > newest:
+			_t = newest  # caught up: wait for the host
+		elif _t < newest - 5.0:
+			_t = newest  # fell behind (the window was busy): jump ahead
+	elif _t >= float(s.to) or _i >= frames.size() - 1:
+		_begin_segment(_seg + 1)
+		return
+	while _i < frames.size() - 1 and float(frames[_i + 1].t) <= _t:
+		_i += 1
+		_ensure_level(_i)
+		_events(frames[_i])
+	_draw_frame(delta)
+
+
+func _events(f: Dictionary) -> void:
+	for e: Array in f.get("e", []):
+		var what := String(e[0])
+		var key := _id(e[1]) if e.size() > 1 else ""
+		match what:
+			"fire":
+				if puppets.has(key) and key.begins_with("Players/"):
+					_action_at = puppets[key].global_position
+					_action_t = _t
+				if e.size() >= 5 and puppets.has(key):
+					_tracer((puppets[key] as Node3D).global_position + Vector3.UP * 1.5, Vector3(float(e[2]), float(e[3]), float(e[4])))
+			"hit":
+				if float(e[2]) >= 0.03:  # a bleed's slow drip would flood the feed
+					_feed("%s hit (-%d%% blood)" % [_name(key), int(float(e[2]) * 100.0)])
+				_action_at = puppets[key].global_position if puppets.has(key) else _action_at
+				_action_t = _t
+				if puppets.has(key):
+					_flash(puppets[key])
+			"down", "up", "dead":
+				_feed("%s %s" % [_name(key), {"down": "is DOWN", "up": "is back up", "dead": "is dead"}[what]])
+			"obj":
+				_feed("objective %s: %s" % [key, String(e[2])])
+			"spawn_point":  # where the bots started: dead ground the host picked (coop_soak.gd)
+				if e.size() >= 5:
+					_mark_start(Vector3(float(e[1]), float(e[2]), float(e[3])), float(e[4]))
+			"phase":
+				_feed("phase %s" % key)
+			"join", "leave", "joined", "lost", "leave_on_purpose":
+				_feed("peer %s %s" % [key, what])
+			"note":
+				if key.begins_with("PROBLEM") or "knocking" in key or "treated" in key or "insertion" in key:
+					_feed(key.left(90))
+
+
+## An event's subject as text: a soldier key, a note, or a peer id (JSON makes ids floats).
+static func _id(v: Variant) -> String:
+	return "%d" % int(v) if v is float or v is int else str(v)
+
+
+var _start_marker: Node3D
+
+
+## A tall orange post where the team started, seen from far off and on the map.
+func _mark_start(at: Vector3, score: float) -> void:
+	_start_at = at
+	if is_instance_valid(_start_marker):
+		_start_marker.queue_free()
+	var m := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.6
+	cyl.bottom_radius = 0.6
+	cyl.height = 30.0
+	m.mesh = cyl
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.55, 0.1)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.material_override = mat
+	add_child(m)
+	m.global_position = at + Vector3.UP * 15.0
+	var label := Label3D.new()
+	label.text = "START (dead ground, score %.1f)" % score
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.fixed_size = true
+	label.pixel_size = 0.0012
+	label.font_size = 30
+	label.modulate = Color(1.0, 0.7, 0.3)
+	label.position = Vector3.UP * 16.0
+	m.add_child(label)
+	_start_marker = m
+	_feed("team starts in dead ground (score %.1f)" % score)
+
+
+func _name(key: String) -> String:
+	for row: Array in frames[_i].get("s", []):
+		if String(row[0]) == key:
+			return names.get(key, String(row[8]))
+	return key
+
+
+func _feed(text: String) -> void:
+	_feed_lines.append("%s  %s" % [_clock(_t), text])
+	while _feed_lines.size() > 8:
+		_feed_lines.pop_front()
+	feed.text = "\n".join(_feed_lines)
+
+
+func _clock(t: float) -> String:
+	var s := int(t - _start_t)
+	return "%02d:%02d" % [floori(s / 60.0), s % 60]
+
+
+func _draw_frame(delta: float) -> void:
+	var a: Dictionary = frames[_i]
+	if a.has("o"):
+		_objectives = a.o
+	var b: Dictionary = frames[mini(_i + 1, frames.size() - 1)]
+	var span := maxf(float(b.t) - float(a.t), 0.001)
+	var w := clampf((_t - float(a.t)) / span, 0.0, 1.0)
+	var next := {}
+	for row: Array in b.get("s", []):
+		next[String(row[0])] = row
+	var seen := {}
+	var client := _compare_frame(_t)
+	var flagged := 0
+	var players: Array[String] = []
+	for row: Array in a.get("s", []):
+		var key := String(row[0])
+		seen[key] = true
+		var p := Vector3(float(row[1]), float(row[2]), float(row[3]))
+		var nrow: Array = next.get(key, row)
+		p = p.lerp(Vector3(float(nrow[1]), float(nrow[2]), float(nrow[3])), w)
+		var flags := int(row[6])
+		if flags & FLAGS.F_PLAYER:
+			players.append(key)
+		var puppet := _puppet(key, flags)
+		puppet.set_meta(&"flags", flags)
+		puppet.global_position = p
+		puppet.rotation.y = lerp_angle(float(row[4]), float(nrow[4]), w)
+		var lying := not (flags & FLAGS.F_UP)
+		var disc: MeshInstance3D = puppet.get_node(^"Disc")
+		(disc.material_override as StandardMaterial3D).albedo_color = _colour(flags)
+		var soldier := puppet.get_node_or_null(^"Soldier") as Soldier
+		if soldier:
+			soldier.vitals.downed = lying
+			soldier.is_aiming = bool(flags & FLAGS.F_AIM) and not lying
+			soldier.is_reloading = bool(flags & FLAGS.F_RELOAD)
+			soldier.head.rotation.x = float(row[5])
+			soldier.role = StringName(String(row[9]))
+		else:
+			var body: Node3D = puppet.get_node(^"Body")
+			body.rotation.x = -PI / 2.0 if lying else 0.0
+			body.position.y = 0.3 if lying else 0.9
+			var mat: StandardMaterial3D = (body as MeshInstance3D).material_override
+			mat.albedo_color = _colour(flags)
+			var aim: Node3D = puppet.get_node(^"Aim")
+			aim.visible = bool(flags & FLAGS.F_AIM) and not lying
+			aim.rotation.x = float(row[5])
+		var label: Label3D = puppet.get_node(^"Label")
+		var state := "DEAD" if flags & FLAGS.F_DEAD else ("DOWN" if flags & FLAGS.F_DOWNED else "")
+		# Friendlies: callsign, role, blood; hostiles: the name only (and DOWN), the dead ones none.
+		var text := ""
+		if flags & FLAGS.F_HOSTILE:
+			text = String(row[8]) + ((" " + state) if state != "" else "")
+		else:
+			text = "%s%s\n%d%%%s" % [_short_name(key, String(row[8])), ("  " + String(row[9]).replace("_", " ")) if String(row[9]) != "" else "",
+				int(float(row[7]) * 100.0), (" " + state) if state != "" else ""]
+		label.visible = not (flags & FLAGS.F_HOSTILE and flags & FLAGS.F_DEAD)
+		var ghost: Node3D = puppet.get_node(^"Ghost")
+		ghost.visible = false
+		label.modulate = Color.WHITE if not (flags & FLAGS.F_HOSTILE) else Color(1.0, 0.75, 0.75)
+		if not client.is_empty():
+			var c: Array = client.get(key, [])
+			var why := ""
+			if c.is_empty():
+				why = "missing on client"
+			else:
+				var cp := Vector3(float(c[1]), float(c[2]), float(c[3]))
+				var d := cp.distance_to(p)
+				if d > POS_TOL + 3.0:
+					why = "%.1f m off" % d
+					ghost.visible = true
+					ghost.global_position = cp
+				if (int(c[6]) & (FLAGS.F_UP | FLAGS.F_DOWNED | FLAGS.F_DEAD)) != (flags & (FLAGS.F_UP | FLAGS.F_DOWNED | FLAGS.F_DEAD)):
+					why += (", " if why != "" else "") + "condition differs"
+			if why != "":
+				text += "\n!! " + why
+				label.modulate = Color(1.0, 0.3, 1.0)
+				flagged += 1
+		label.text = text
+	for key: String in puppets.keys():
+		if not seen.has(key):
+			(puppets[key] as Node).queue_free()
+			puppets.erase(key)
+	_update_tracers(delta)
+	_update_cameras(delta, players)
+	_declutter_labels()
+	var s: Dictionary = segments[_seg]
+	hud.text = "Co-op soak replay   %s   %s   x%.1f\nphase %s   level %s   soldiers %d%s" % [_clock(_t), String(s.title), float(s.speed),
+		_phase_at(_i), String(a.get("L", "")), a.get("s", []).size(), ("   client disagrees on %d" % flagged) if not client.is_empty() else ""]
+	var active: Array = _objectives.filter(func(o: Array) -> bool: return String(o[1]) == "active")
+	if not active.is_empty():
+		hud.text += "
+objective: " + "; ".join(active.map(func(o: Array) -> String: return String(o[0])))
+	if live:
+		hud.text += "
+LIVE, %.0f s behind the host   following %s   Tab/1-4 player, A auto, O map, wheel/right-drag camera, Esc quit" % [
+			Recorder_now() - _t, _name_of(_cam_target)]
+
+
+## A player's name without the peer id: "Bot 2", "Host (bot 0)", or "Player" + the last 4 digits.
+func _short_name(key: String, shown: String) -> String:
+	if names.has(key):
+		return String(names[key])
+	if shown.begins_with("Player ") and shown.length() > 11:
+		return "Player ..%s" % shown.right(4)
+	return shown
+
+
+## Labels that would land on each other on screen go up, nearest first; far ones fade, and
+## hostiles past LABEL_HOSTILE_M (or out of view) aren't labelled.
+const LABEL_HOSTILE_M := 150.0
+
+
+func _declutter_labels() -> void:
+	var items: Array = []
+	for key: String in puppets:
+		var label: Label3D = (puppets[key] as Node3D).get_node(^"Label")
+		label.position.y = 2.3
+		if not label.visible:
+			continue
+		var at := (puppets[key] as Node3D).global_position + Vector3.UP * 2.3
+		var d := cam.global_position.distance_to(at)
+		var hostile := int((puppets[key] as Node3D).get_meta(&"flags", 0)) & FLAGS.F_HOSTILE
+		if cam.is_position_behind(at) or (hostile and d > LABEL_HOSTILE_M):
+			label.visible = false
+			continue
+		label.modulate.a = clampf(1.0 - (d - 60.0) / 200.0, 0.35, 1.0)
+		items.append([d, label, at])
+	items.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var placed: Array[Rect2] = []
+	for it: Array in items:
+		var label: Label3D = it[1]
+		var at: Vector3 = it[2]
+		var lines := label.text.count("\n") + 1
+		var size := Vector2(150.0, 20.0 * lines)
+		for lift in 8:
+			var px := cam.unproject_position(at + Vector3.UP * (0.0 + lift * 0.0))
+			px.y -= lift * size.y
+			var r := Rect2(px - Vector2(size.x * 0.5, size.y), size)
+			if not placed.any(func(q: Rect2) -> bool: return q.intersects(r)) or lift == 7:
+				placed.append(r)
+				# Lift in world units: the screen offset back to metres at this distance.
+				var per_px := 2.0 * float(it[0]) * tan(deg_to_rad(cam.fov) * 0.5) / maxf(get_viewport().get_visible_rect().size.y, 1.0)
+				label.position.y = 2.3 + lift * size.y * per_px
+				break
+
+
+func _phase_at(i: int) -> String:
+	for j in range(i, -1, -1):
+		if frames[j].has("ph"):
+			return String(frames[j].ph)
+	return ""
+
+
+## The client's frame nearest `t`, as key -> row, or {}.
+func _compare_frame(t: float) -> Dictionary:
+	if compare.is_empty():
+		return {}
+	var lo := 0
+	var hi := compare_t.size() - 1
+	while lo < hi:
+		var mid := (lo + hi + 1) >> 1
+		if compare_t[mid] <= t:
+			lo = mid
+		else:
+			hi = mid - 1
+	var f: Dictionary = compare[lo]
+	if absf(float(f.t) - t) > 0.5 or String(f.get("L", "")) != String(frames[_i].get("L", "")):
+		return {}
+	var out := {}
+	for row: Array in f.get("s", []):
+		out[String(row[0])] = row
+	return out
+
+
+func _colour(flags: int) -> Color:
+	if flags & FLAGS.F_DEAD:
+		return Color(0.35, 0.35, 0.35)
+	var c := Color(0.2, 0.45, 1.0) if flags & FLAGS.F_PLAYER else (Color(0.9, 0.2, 0.15) if flags & FLAGS.F_HOSTILE else Color(0.25, 0.8, 0.3))
+	if flags & FLAGS.F_DOWNED:
+		c = c.lerp(Color(1.0, 0.9, 0.1), 0.5)
+	return c
+
+
+func _puppet(key: String, flags: int) -> Node3D:
+	if puppets.has(key):
+		return puppets[key]
+	var root := Node3D.new()
+	add_child(root)  # first: the soldier model's @onready parts exist only once it is in the tree
+	var disc := MeshInstance3D.new()  # the overhead view's marker
+	disc.name = "Disc"
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 1.6
+	cyl.bottom_radius = 1.6
+	cyl.height = 0.2
+	disc.mesh = cyl
+	var dmat := StandardMaterial3D.new()
+	dmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dmat.albedo_color = _colour(flags)
+	disc.material_override = dmat
+	disc.layers = MAP_LAYER
+	disc.position.y = 3.0
+	root.add_child(disc)
+	if models:
+		_add_model(root, key, flags)
+	else:
+		_add_capsule(root, flags)
+	var label := Label3D.new()
+	label.name = "Label"
+	label.layers = LABEL_LAYER
+	label.position = Vector3(0, 2.3, 0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.fixed_size = true
+	label.pixel_size = 0.0012
+	label.font_size = 34 if flags & FLAGS.F_PLAYER else 24
+	label.outline_size = 8
+	root.add_child(label)
+	var ghost := MeshInstance3D.new()
+	ghost.name = "Ghost"
+	var capsule := CapsuleMesh.new()
+	capsule.radius = 0.3
+	capsule.height = 1.8
+	ghost.mesh = capsule
+	var gmat := StandardMaterial3D.new()
+	gmat.albedo_color = Color(1.0, 0.2, 1.0, 0.45)
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ghost.material_override = gmat
+	ghost.top_level = true
+	ghost.visible = false
+	root.add_child(ghost)
+	puppets[key] = root
+	return root
+
+
+## The game's soldier body as a puppet: an AI-named Soldier (so no player input or camera),
+## nothing simulated (no physics step, no wound model, no voxel streaming of its own), in its
+## side's camo with a rifle, armour and helmet.
+func _add_model(root: Node3D, key: String, flags: int) -> void:
+	var s := CompoundLevel.PLAYER_SCENE.instantiate() as Soldier
+	s.name = "Soldier"
+	s.faction = &"hostile" if flags & FLAGS.F_HOSTILE else &"friendly"
+	s.variant = "urban" if flags & FLAGS.F_HOSTILE else ("multicam" if flags & FLAGS.F_PLAYER else "woodland")
+	s.set_meta(&"replay_key", key)
+	root.add_child(s)
+	s.set_physics_process(false)
+	s.vitals.process_mode = Node.PROCESS_MODE_DISABLED
+	s.collision_layer = 0
+	s.collision_mask = 0
+	for n in s.get_children():
+		if n is VoxelViewer:
+			n.queue_free()
+	for id: StringName in [&"m4a1", &"plate_carrier", &"helmet"]:
+		s.inventory.take(id)
+	s.remove_from_group(&"combatants")
+
+
+func _add_capsule(root: Node3D, flags: int) -> void:
+	var body := MeshInstance3D.new()
+	body.name = "Body"
+	var capsule := CapsuleMesh.new()
+	capsule.radius = 0.3
+	capsule.height = 1.8
+	body.mesh = capsule
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = _colour(flags)
+	body.material_override = mat
+	body.position.y = 0.9
+	root.add_child(body)
+	var nose := MeshInstance3D.new()  # which way it faces
+	var box := BoxMesh.new()
+	box.size = Vector3(0.18, 0.12, 0.35)
+	nose.mesh = box
+	nose.position = Vector3(0, 0.6, -0.3)
+	body.add_child(nose)
+	var aim := Node3D.new()
+	aim.name = "Aim"
+	aim.position = Vector3(0, 1.45, 0)
+	var line := MeshInstance3D.new()
+	var rod := BoxMesh.new()
+	rod.size = Vector3(0.04, 0.04, 1.2)
+	line.mesh = rod
+	line.position = Vector3(0, 0, -0.6)
+	var lmat := StandardMaterial3D.new()
+	lmat.albedo_color = Color(1, 1, 0.3)
+	lmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	line.material_override = lmat
+	aim.add_child(line)
+	root.add_child(aim)
+
+
+func _tracer(from: Vector3, dir: Vector3) -> void:
+	var m := MeshInstance3D.new()
+	var rod := BoxMesh.new()
+	rod.size = Vector3(0.05, 0.05, 40.0)
+	m.mesh = rod
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.85, 0.3)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.material_override = mat
+	add_child(m)
+	m.global_position = from + dir.normalized() * 20.0
+	if dir.length() > 0.01:
+		m.look_at(from + dir.normalized() * 40.0, Vector3.UP if absf(dir.normalized().y) < 0.99 else Vector3.RIGHT)
+	_tracers.append([m, 0.12])
+
+
+func _flash(puppet: Node3D) -> void:
+	var m := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 0.5
+	ball.height = 1.0
+	m.mesh = ball
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1, 0, 0, 0.6)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.material_override = mat
+	add_child(m)
+	m.global_position = puppet.global_position + Vector3.UP * 1.2
+	_tracers.append([m, 0.25])
+
+
+func _update_tracers(delta: float) -> void:
+	for tr: Array in _tracers.duplicate():
+		tr[1] = float(tr[1]) - delta
+		if float(tr[1]) <= 0.0:
+			(tr[0] as Node).queue_free()
+			_tracers.erase(tr)
+
+
+func _update_cameras(delta: float, players: Array[String]) -> void:
+	_cam_left -= delta
+	var s: Dictionary = segments[_seg]
+	if String(s.get("focus", "")) != "" and puppets.has(String(s.focus)):
+		_cam_target = String(s.focus)
+	elif (_cam_left <= 0.0 and not _held) or not puppets.has(_cam_target):
+		_cam_left = CAM_TURN_S
+		if not players.is_empty():
+			var at := players.find(_cam_target)
+			_cam_target = players[(at + 1) % players.size()]
+			if _t - _action_t < 6.0:
+				# Something just happened: the player nearest it.
+				var best := INF
+				for key: String in players:
+					var d := (puppets[key] as Node3D).global_position.distance_to(_action_at) if puppets.has(key) else INF
+					if d < best:
+						best = d
+						_cam_target = key
+	var centre := Vector3.ZERO
+	if puppets.has(_cam_target):
+		var target: Node3D = puppets[_cam_target]
+		var back := target.global_basis.z
+		back.y = 0.0
+		back = back.normalized() if back.length() > 0.01 else Vector3.BACK
+		var want := target.global_position + back * 6.0 + Vector3.UP * 3.2
+		if _user_orbit:  # live, after a right-drag or the wheel: the viewer's own orbit
+			want = target.global_position + Vector3.UP * 1.4 + Vector3(sin(_orbit_yaw) * cos(_orbit_pitch), sin(_orbit_pitch),
+				cos(_orbit_yaw) * cos(_orbit_pitch)) * _orbit_dist
+		cam.global_position = cam.global_position.lerp(want, minf(delta * 3.0, 1.0)) if cam.global_position.distance_to(want) < 30.0 else want
+		var ground := level.ground_point(cam.global_position).y if level else -INF
+		if cam.global_position.y < ground + 1.5:
+			cam.global_position.y = ground + 1.5  # never under the terrain
+		cam.look_at(target.global_position + Vector3.UP * 1.4, Vector3.UP)
+		centre = target.global_position
+	elif not puppets.is_empty():
+		centre = (puppets.values()[0] as Node3D).global_position
+		cam.global_position = centre + Vector3(0, 25, 25)
+		cam.look_at(centre, Vector3.UP)
+	# Overhead: over the players' middle, high enough for them all.
+	var sum := Vector3.ZERO
+	var n := 0
+	var spread := 20.0
+	for key: String in players:
+		if puppets.has(key):
+			sum += (puppets[key] as Node3D).global_position
+			n += 1
+	if n > 0:
+		var mid := sum / n
+		for key: String in players:
+			if puppets.has(key):
+				spread = maxf(spread, (puppets[key] as Node3D).global_position.distance_to(mid) * 2.5)
+		_map_centre = Vector2(mid.x, mid.z)
+		_map_span = clampf(spread * 1.6 + 120.0, 250.0, 2000.0)
+	_box.queue_redraw()
+	_viewer.global_position = centre
