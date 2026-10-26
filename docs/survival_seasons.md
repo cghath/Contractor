@@ -2,7 +2,7 @@
 
 Built on `claude/survival-seasons` (from claude/survival 8e58e721, phases A-C merged). Calls 28, 30, 34,
 53, 55, 59, 60, 92, 113, 137, 140 of docs/survival.md. Suite: `tests/seasons_test.gd` (`seasons`).
-Every number below is **Proposed** (constants at the top of each file).
+R2665 PASS (seasons, survival, worldsim, settlement). Every number below is **Proposed** (constants at the top of each file).
 
 ## What's built
 
