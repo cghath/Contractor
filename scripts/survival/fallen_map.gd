@@ -33,7 +33,7 @@ const CELL_FOG := Color(0.1, 0.11, 0.1, 0.78)
 const LINK := Color(0.45, 0.48, 0.42)
 const FRAME := Color(0.93, 0.69, 0.27)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
-const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3)}
+const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3), "village": Color(0.6, 0.8, 1.0)}
 const HOVER_PX := 10.0
 
 var screen: Node
@@ -94,7 +94,7 @@ static func on_show_world(p_screen: Node, on: bool) -> bool:
 	if on and not fm.is_world():
 		fm.zoom_to_world()
 	else:
-		fm.zoom_to_zone(fm.focus_zone() if fm.focus_zone() != "" else SurvivalMap.current_zone())
+		fm.zoom_to_zone(SurvivalMap.current_zone())  # (back to where you are; the wheel goes into any other)
 	return true
 
 

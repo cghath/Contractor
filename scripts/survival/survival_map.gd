@@ -243,7 +243,7 @@ func _server_start() -> void:
 		if level:
 			points = level.insertion_points()
 		if not points.is_empty():
-			server_add_mark(zone, points[0], "Safehouse", "safehouse")
+			server_add_mark(zone, points[0], "Safehouse", "safehouse")["auto"] = true  # (gives way to the cold open's own)
 			dirty = true
 	if dirty:
 		server_changed()
@@ -290,12 +290,28 @@ func server_tick() -> void:
 			if mark_pos(m).distance_to(at) <= MARK_SEEN_M and t - float(m.get("day_seen", m.get("day_added", t))) > 0.01:
 				m["day_seen"] = t
 				seen = true
+	if _drop_auto_safehouse():
+		seen = true
 	if seen:
 		server_changed()
 	elif not fresh.is_empty():
 		changed.emit()
 		if multiplayer.has_multiplayer_peer() and not multiplayer.get_peers().is_empty():
 			_client_cells.rpc(zone, PackedStringArray(fresh))
+
+
+## Host: the cold open writes its own safehouse ("The farm") straight into the section; if it
+## came after ours, ours goes. Returns whether one went.
+func _drop_auto_safehouse() -> bool:
+	var all: Array = section().marks
+	var safe := all.filter(func(m: Variant) -> bool: return m is Dictionary and String((m as Dictionary).get("kind", "")) == "safehouse")
+	if safe.size() < 2:
+		return false
+	for m: Dictionary in safe:
+		if m.get("auto", false):
+			all.erase(m)
+			return true
+	return false
 
 
 ## Any peer: asks for a mark (the host adds it and tells everyone).
