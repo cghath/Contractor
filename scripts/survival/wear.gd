@@ -234,7 +234,7 @@ static func tag(item: ItemData, state: Dictionary, firearms := -1) -> String:
 		return ""
 	if item.type == "ammo":
 		return AmmoCondition.words(state, firearms if firearms >= 0 else _my_firearms())
-	if not state.has(KEY) and not state.has("jammed"):
+	if not state.has(KEY) and not state.has("jammed") and not state.has(Suppressors.CAN_KEY):
 		return ""
 	var c := cond(state)
 	if item.type == "weapon":

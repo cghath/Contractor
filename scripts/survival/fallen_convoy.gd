@@ -670,6 +670,7 @@ func server_spawn_ambush() -> Array[Soldier]:
 			"role": "", "team": 0, "slot": -1, "combat": 0.45, "discipline": 0.4, "guard": false, "mode": "aware", "no_pockets": true, "spawn_id": "amb%d_%d" % [id, i]})
 		if r:
 			r.set_meta(&"fallen_convoy_ambush", id)
+			WeaponCondition.server_used_guns(r, _rng)  # their guns come used (survival wear)
 			r.set_meta(&"world_group", gid)
 			raiders.append(r)
 	var men := rsq.members()

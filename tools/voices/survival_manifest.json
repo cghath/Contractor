@@ -1,9 +1,10 @@
 {
  "engine": "piper",
  "gpu": false,
- "clips": 1154,
- "to_render": 1084,
+ "clips": 1316,
+ "to_render": 1244,
  "skipped_names": [
+  "child_greet_01",
   "greet_01",
   "greet_02",
   "greet_04",
@@ -5405,6 +5406,426 @@
   },
   {
    "voice": "m_adult_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/m_adult_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/m_adult_2/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/m_adult_3/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/f_adult_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/f_adult_2/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/f_adult_3/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/m_old_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/f_old_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/m_young_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "jammed_01",
+   "text": "Jammed!",
+   "path": "assets/voices/survival/f_young_1/jammed_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/m_adult_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/m_adult_2/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/m_adult_3/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/f_adult_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/f_adult_2/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/f_adult_3/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/m_old_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/f_old_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/m_young_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "jammed_02",
+   "text": "Jammed! Clearing!",
+   "path": "assets/voices/survival/f_young_1/jammed_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/m_adult_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/m_adult_2/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/m_adult_3/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/f_adult_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/f_adult_2/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/f_adult_3/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/m_old_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/f_old_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/m_young_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "jammed_03",
+   "text": "Come on, come on... jammed!",
+   "path": "assets/voices/survival/f_young_1/jammed_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/m_adult_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/m_adult_2/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/m_adult_3/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/f_adult_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/f_adult_2/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/f_adult_3/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/m_old_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/f_old_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/m_young_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "gun_dirty_01",
+   "text": "My gun's filthy. It needs a proper cleaning before it quits on me.",
+   "path": "assets/voices/survival/f_young_1/gun_dirty_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/m_adult_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/m_adult_2/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/m_adult_3/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/f_adult_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/f_adult_2/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/f_adult_3/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/m_old_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/f_old_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/m_young_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "gun_dirty_02",
+   "text": "Anyone got a cleaning kit? This thing's starting to stick.",
+   "path": "assets/voices/survival/f_young_1/gun_dirty_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/m_adult_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/m_adult_2/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/m_adult_3/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/f_adult_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/f_adult_2/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/f_adult_3/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/m_old_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/f_old_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/m_young_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "gun_cleaning_01",
+   "text": "Give me a minute. Cleaning my gun.",
+   "path": "assets/voices/survival/f_young_1/gun_cleaning_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
    "key": "plan_dusk_01",
    "text": "We should find somewhere before dark.",
    "path": "assets/voices/survival/m_adult_1/plan_dusk_01.wav",
@@ -8089,6 +8510,720 @@
    "key": "enclave_halt_03",
    "text": "Toll's due. No toll, no road.",
    "path": "assets/voices/survival/f_young_1/enclave_halt_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_greet_01",
+   "text": null,
+   "path": "assets/voices/survival/m_young_1/child_greet_01.wav",
+   "skip": "name"
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_greet_01",
+   "text": null,
+   "path": "assets/voices/survival/f_young_1/child_greet_01.wav",
+   "skip": "name"
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_greet_02",
+   "text": "Mum said not to talk to people. Mum's not here.",
+   "path": "assets/voices/survival/m_young_1/child_greet_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_greet_02",
+   "text": "Mum said not to talk to people. Mum's not here.",
+   "path": "assets/voices/survival/f_young_1/child_greet_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_greet_03",
+   "text": "You're not one of them. You're breathing.",
+   "path": "assets/voices/survival/m_young_1/child_greet_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_greet_03",
+   "text": "You're not one of them. You're breathing.",
+   "path": "assets/voices/survival/f_young_1/child_greet_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_come_01",
+   "text": "Can I really? I'll be quiet. I'm good at quiet.",
+   "path": "assets/voices/survival/m_young_1/child_come_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_come_01",
+   "text": "Can I really? I'll be quiet. I'm good at quiet.",
+   "path": "assets/voices/survival/f_young_1/child_come_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_come_02",
+   "text": "Okay. Don't walk too fast.",
+   "path": "assets/voices/survival/m_young_1/child_come_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_come_02",
+   "text": "Okay. Don't walk too fast.",
+   "path": "assets/voices/survival/f_young_1/child_come_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_wait_01",
+   "text": "Where would we even go?",
+   "path": "assets/voices/survival/m_young_1/child_wait_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_wait_01",
+   "text": "Where would we even go?",
+   "path": "assets/voices/survival/f_young_1/child_wait_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_how_01",
+   "text": "I'm okay. Is it okay if I'm okay?",
+   "path": "assets/voices/survival/m_young_1/child_how_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_how_01",
+   "text": "I'm okay. Is it okay if I'm okay?",
+   "path": "assets/voices/survival/f_young_1/child_how_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_how_02",
+   "text": "I'm hungry. Everybody's hungry, though.",
+   "path": "assets/voices/survival/m_young_1/child_how_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_how_02",
+   "text": "I'm hungry. Everybody's hungry, though.",
+   "path": "assets/voices/survival/f_young_1/child_how_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_how_03",
+   "text": "I drew the farm. Want to see?",
+   "path": "assets/voices/survival/m_young_1/child_how_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_how_03",
+   "text": "I drew the farm. Want to see?",
+   "path": "assets/voices/survival/f_young_1/child_how_03.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_no_weapon_01",
+   "text": "I don't want that.",
+   "path": "assets/voices/survival/m_young_1/child_no_weapon_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_no_weapon_01",
+   "text": "I don't want that.",
+   "path": "assets/voices/survival/f_young_1/child_no_weapon_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "child_no_weapon_02",
+   "text": "Grown-ups keep those.",
+   "path": "assets/voices/survival/m_young_1/child_no_weapon_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "child_no_weapon_02",
+   "text": "Grown-ups keep those.",
+   "path": "assets/voices/survival/f_young_1/child_no_weapon_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/m_adult_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/m_adult_2/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/m_adult_3/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/f_adult_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/f_adult_2/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/f_adult_3/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/m_old_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/f_old_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/m_young_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_ask_01",
+   "text": "Will you say something over them? Anything. It matters.",
+   "path": "assets/voices/survival/f_young_1/rite_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/m_adult_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/m_adult_2/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/m_adult_3/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/f_adult_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/f_adult_2/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/f_adult_3/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/m_old_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/f_old_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/m_young_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_ask_02",
+   "text": "They shouldn't go into the ground without a word said.",
+   "path": "assets/voices/survival/f_young_1/rite_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/m_adult_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/m_adult_2/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/m_adult_3/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/f_adult_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/f_adult_2/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/f_adult_3/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/m_old_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/f_old_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/m_young_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_words_01",
+   "text": "Thank you. That was right.",
+   "path": "assets/voices/survival/f_young_1/rite_words_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/m_adult_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/m_adult_2/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/m_adult_3/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/f_adult_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/f_adult_2/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/f_adult_3/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/m_old_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/f_old_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/m_young_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_words_02",
+   "text": "Rest now. We'll keep the light on.",
+   "path": "assets/voices/survival/f_young_1/rite_words_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/m_adult_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/m_adult_2/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/m_adult_3/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/f_adult_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/f_adult_2/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/f_adult_3/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/m_old_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/f_old_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/m_young_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_declined_01",
+   "text": "Then I'll say them myself, later. Alone.",
+   "path": "assets/voices/survival/f_young_1/rite_declined_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/m_adult_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/m_adult_2/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/m_adult_3/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/f_adult_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/f_adult_2/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/f_adult_3/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/m_old_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/f_old_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/m_young_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "rite_declined_02",
+   "text": "No words. Fine. I'll remember that.",
+   "path": "assets/voices/survival/f_young_1/rite_declined_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/m_adult_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/m_adult_2/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/m_adult_3/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/f_adult_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/f_adult_2/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/f_adult_3/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/m_old_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/f_old_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/m_young_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "deserter_ask_01",
+   "text": "I walked away from the gathering. I need to be clean of it. Will you help me?",
+   "path": "assets/voices/survival/f_young_1/deserter_ask_01.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/m_adult_1/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_2",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/m_adult_2/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_adult_3",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/m_adult_3/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/f_adult_1/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_2",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/f_adult_2/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_adult_3",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/f_adult_3/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_old_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/m_old_1/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_old_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/f_old_1/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "m_young_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/m_young_1/deserter_ask_02.wav",
+   "skip": ""
+  },
+  {
+   "voice": "f_young_1",
+   "key": "deserter_ask_02",
+   "text": "They called the dead holy. I don't anymore. Is there a place for someone like me?",
+   "path": "assets/voices/survival/f_young_1/deserter_ask_02.wav",
    "skip": ""
   }
  ]

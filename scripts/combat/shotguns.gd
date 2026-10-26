@@ -535,17 +535,24 @@ static func _push_loader(s: Soldier, slot: StringName, gun_id: StringName, rev: 
 	var shells := list_of(holder, entry.get("state", {})).duplicate()
 	var tube := tube_of(s.inventory.state_of(slot)).duplicate()
 	var kept: Array = []
+	var was := tube.size()
 	while not shells.is_empty():
 		var shell := String(shells.pop_back())
 		if tube.size() < capacity(gun) and takes(gun, StringName(shell)):
 			tube.append(shell)
 		else:
 			kept.push_front(shell)
+	var hst: Dictionary = (entry.get("state", {}) as Dictionary).duplicate()
 	s.inventory.remove_entry(at.container, at.index)
 	var left := {"rounds": kept.size(), LIST_KEY: kept}
+	for k: String in [Wear.KEY, AmmoCondition.HL]:
+		if hst.has(k) and not kept.is_empty():
+			left[k] = hst[k]  # (the loader's shells keep their condition: survival wear)
 	if not s.inventory.insert_entry(at.container, {"id": entry.id, "count": 1, "state": left}) and s.inventory.take(entry.id, 1, left) < 1:
 		s._server_spawn_in_front(entry.id)  # (no room anywhere: on the ground in front)
 	_set_tube(s, slot, false, tube)
+	var moved := tube.size() - was
+	AmmoCondition.tube_add(s.inventory, slot, tube.size(), moved, AmmoCondition.eff(hst) * moved, AmmoCondition.hl_of(hst) * moved)
 	Sfx.server_play(&"reload_shell", s.global_position + Vector3.UP)
 
 
@@ -574,10 +581,13 @@ static func _load_shells(s: Soldier, slot: StringName, gun_id: StringName, rev: 
 			break  # the Key came off meanwhile
 		var shell := load_choice(item, s.inventory, preferred)
 		var t := _tube_list(s, slot, key).duplicate()
+		var sst: Dictionary = AmmoCondition.first_state(s.inventory, shell).duplicate() if shell != &"" else {}
 		if shell == &"" or t.size() >= capacity(item) or not s.inventory.remove_one(shell):
 			break
 		t.append(String(shell))
 		_set_tube(s, slot, key, t)
+		if not key:
+			AmmoCondition.tube_add(s.inventory, slot, t.size(), 1, AmmoCondition.eff(sst), AmmoCondition.hl_of(sst))  # the shell's condition (survival wear)
 		Sfx.server_play(&"reload_shell", s.global_position + Vector3.UP)
 		if t.size() >= capacity(item) or load_choice(item, s.inventory, preferred) == &"":
 			break

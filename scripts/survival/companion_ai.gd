@@ -12,7 +12,11 @@ extends Node
 ## - they refuse a bad order (vetoes, from SquadAI.on_order): a move into a horde (HORDE_N of the
 ##   dead within HORDE_M of the goal, live or in the crowd tier) or anything while in a refusal
 ##   break, by a roll on loyalty and courage; a second order within SECOND_ORDER_S is obeyed by
-##   the loyal (SurvivorPerson.is_loyal) and refused again by the rest.
+##   the loyal (SurvivorPerson.is_loyal) and refused again by the rest;
+## - their gun (survival wear, docs/survival_wear.md): it wears and jams like a player's (the same
+##   Soldier._server_fire; WeaponCondition.ai_clear clears a jam with a "Jammed!" bark); under
+##   CLEAN_BELOW they ask for a cleaning (a line, ASK_GAP_S apart), and at the settlement, calm,
+##   with a gun cleaning kit in their own kit, they clean it themselves (gun_care).
 
 const NODE_NAME := "CompanionAI"
 ## Proposed numbers.
@@ -32,6 +36,8 @@ const PLAN_GAP_S := 420.0
 const HORDE_M := 20.0
 const HORDE_N := 3
 const SECOND_ORDER_S := 60.0
+const CLEAN_BELOW := 50.0
+const GUN_CARE_GAP_S := 30.0
 ## Tests: a roll to use instead of randf() for the refusal (-1: roll for real).
 static var force_roll := -1.0
 
@@ -47,6 +53,8 @@ var _loot_at := -1000.0
 var _plan_at := 0.0
 var _refused_at := -1000.0
 var _slept_where := ""
+var _gun_at := 0.0
+var _gun_asked_at := -1000.0
 
 
 static func of(s: Node) -> CompanionAI:
@@ -110,9 +118,42 @@ func server_step(dt: float) -> void:
 	if calm and _halted() and now - _loot_at >= LOOT_GAP_S:
 		_loot_at = now
 		_pick_up_near()
+	if calm and now - _gun_at >= GUN_CARE_GAP_S:
+		_gun_at = now
+		gun_care(now)
 	if now >= _plan_at:
 		_plan_at = now + PLAN_GAP_S
 		_suggest()
+
+
+## Their gun under CLEAN_BELOW: cleaned with their own kit at the settlement ("clean"), else they
+## ask for a cleaning ("ask", ASK_GAP_S apart); "" when it's fine or they're busy.
+func gun_care(now: float, instant := false) -> String:
+	if not Wear.enabled():
+		return ""
+	var slot := body.active_slot
+	if not WeaponCondition.is_gun(body.active_weapon()):
+		return ""
+	var st := body.inventory.state_of(slot)
+	if WeaponCondition.is_broken(st) or Wear.cond(st) >= CLEAN_BELOW or now < body._server_busy_until - 0.1:
+		return ""
+	if at_settlement() and body.inventory.count_of(WeaponCondition.CLEANING_KIT) > 0:
+		layer.say(body, TalkMenu.line_for(rec, "gun_cleaning"))
+		WeaponCondition.server_clean(body, slot, instant)
+		return "clean"
+	if now - _gun_asked_at < ASK_GAP_S:
+		return ""
+	_gun_asked_at = now
+	layer.say(body, TalkMenu.line_for(rec, "gun_dirty"))
+	return "ask"
+
+
+## Whether they're within the settlement (its zone and radius).
+func at_settlement() -> bool:
+	if not Settlement.exists() or Settlement.zone() != String(Survival.state().get("zone", "")):
+		return false
+	var p := Settlement.pos()
+	return Vector2(body.global_position.x - p.x, body.global_position.z - p.z).length() <= Settlement.radius()
 
 
 func _nearest(dead: Array) -> Soldier:

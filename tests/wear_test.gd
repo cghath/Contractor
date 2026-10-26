@@ -6,7 +6,11 @@ extends Node
 ## clothes wear by the day, torn ones keep less warmth and a needle and thread mends them; worn
 ## boots make sore feet; a tyre punctures and a patch fixes it; stale fuel stalls the engine;
 ## found guns come weathered out in the open and kept indoors, a box's gun near the farm is gone
-## (the early loot curve: FoundLoot), and ground loot rolls its found condition.
+## (the early loot curve: FoundLoot), and ground loot rolls its found condition. The left-out list
+## (wear 2): a companion's gun wears and jams and they clear it (and ask for a cleaning, and clean it
+## at the settlement); a raider's gun comes used; loose rounds mix into a magazine by count; a wet
+## shell duds; a suppressor wears, lets more out, and breaks; a worn-out gun on hot hand-loads can
+## blow; the farrier reshoes a horse.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -30,6 +34,13 @@ func _ready() -> void:
 		await _test_found()
 		_test_clothes()
 		await _test_vehicle()
+		await _test_companion_gun()
+		await _test_raider_gun()
+		await _test_loose_rounds()
+		await _test_shells()
+		await _test_suppressor()
+		await _test_hot_load()
+		await _test_farrier()
 	_finish()
 
 
@@ -375,6 +386,242 @@ func _test_vehicle() -> void:
 	v.server_exit(player)
 	check(VehicleWear.report(v).contains("engine"), "the check reads its wear (%s)" % VehicleWear.report(v))
 	await get_tree().physics_frame
+
+
+func _ai_fire(s: Soldier) -> void:
+	s._server_next_shot = 0.0
+	s._server_busy_until = 0.0
+	s._server_fire.rpc_id(1, s.camera.global_position, (-s.camera.global_basis.z + Vector3.DOWN * 0.4).normalized(), &"primary")
+	await get_tree().physics_frame
+
+
+func _test_companion_gun() -> void:
+	print("A companion's gun wears and jams, and they clear it; they ask for a cleaning, and clean it at home")
+	_clear_dead()
+	var layer := SurvivorsLayer.find(level)
+	check(layer != null, "the people layer is there")
+	if layer == null:
+		return
+	await _wait_for(func() -> bool: return layer._started, 30.0)
+	var rec := layer.server_add_person(level.ground_point(player.global_position + Vector3(2.0, 0.0, 0.0)), {"traits": ["calm"], "want": {"kind": "place"}})
+	var c := layer.server_recruit(rec, player)
+	for i in 5:
+		await get_tree().physics_frame
+	check(c != null and CompanionAI.of(c) != null, "a companion joins")
+	if c == null:
+		return
+	var brain := SquadAI.of(c)
+	if brain:
+		brain.on_order(Squad.Order.HOLD, c.global_position)
+	c.inventory.unequip(&"primary")
+	check(c.inventory.take(&"m4a1") == 1 and c.inventory.slots.get(&"primary", &"") == &"m4a1", "they carry an M4A1")
+	c.inventory.take(&"mag_556", 2)
+	if c.inventory.slots.get(&"backpack", &"") == &"":
+		c.inventory.take(&"pack_daypack_20")
+	c.select_weapon(&"primary")
+	var cst := func() -> Dictionary: return c.inventory.state_of(&"primary")
+	Wear.force_roll = 0.99
+	var rounds := c.inventory.rounds_in(&"primary")
+	for i in 4:
+		await _ai_fire(c)
+	check(c.inventory.rounds_in(&"primary") == rounds - 4 and Wear.cond(cst.call()) < 100.0 - 3.9 * WeaponCondition.SHOT_WEAR,
+		"four shots from their gun: it wears like anyone's (%.2f)" % Wear.cond(cst.call()))
+	Wear.set_cond(Wear.slot_state_rw(c.inventory, &"primary"), 15.0)
+	Wear.force_roll = 0.0
+	var said := layer.said.size()
+	await _ai_fire(c)
+	check(WeaponCondition.jammed(cst.call()) and c.has_meta(&"jam_bark"), "worn, it jams: they bark it")
+	check(layer.said.size() > said and String((layer.said[-1] as Dictionary).text).contains("ammed"), "\"%s\"" % (String((layer.said[-1] as Dictionary).text) if layer.said.size() > said else ""))
+	check(c._server_busy_until > Soldier._now(), "and they're busy clearing it")
+	Wear.force_roll = 0.99
+	await _seconds(WeaponCondition.AI_CLEAR_S + 0.4)
+	check(not WeaponCondition.jammed(cst.call()), "cleared after %.1f s" % WeaponCondition.AI_CLEAR_S)
+	rounds = c.inventory.rounds_in(&"primary")
+	await _ai_fire(c)
+	check(c.inventory.rounds_in(&"primary") == rounds - 1, "and it fires again")
+	# Under 50: they ask; at the settlement with a kit of their own they clean it.
+	var ai := CompanionAI.of(c)
+	Wear.set_cond(Wear.slot_state_rw(c.inventory, &"primary"), 40.0)
+	c._server_busy_until = 0.0
+	while c.inventory.count_of(WeaponCondition.CLEANING_KIT) > 0:
+		c.inventory.remove_one(WeaponCondition.CLEANING_KIT)
+	check(ai.gun_care(Soldier._now()) == "ask", "under %d%% with no kit: they ask for a cleaning" % roundi(CompanionAI.CLEAN_BELOW))
+	check(ai.gun_care(Soldier._now()) == "", "and not again straight away")
+	Settlement.server_found(String(Survival.state().get("zone", "")), c.global_position)
+	c.inventory.take(WeaponCondition.CLEANING_KIT)
+	check(ai.at_settlement() and ai.gun_care(Soldier._now(), true) == "clean" and absf(Wear.cond(cst.call()) - (40.0 + WeaponCondition.CLEAN_ADD)) < 0.01,
+		"at the settlement with their own kit: they clean it (%.0f)" % Wear.cond(cst.call()))
+	player.set_meta(&"test_companion", c)
+
+
+func _test_raider_gun() -> void:
+	print("A raider's gun comes used, and wears as they fire")
+	var at := level.ground_point(player.global_position + Vector3(0.0, 0.0, 60.0))
+	var r := level.spawn_soldier({"name": "WearRaider", "faction": "hostile", "hc_id": "wear_raider", "variant": "", "body": VoxelArt.MALE, "face": "",
+		"person_name": "Raider", "nation": "US", "pos": at, "loadout": (CompoundLevel.HOSTILE_GUNS["akm"] as Array).slice(0, 3), "role": "", "team": 0,
+		"slot": -1, "combat": 0.4, "discipline": 0.4, "guard": true, "mode": "aware", "no_pockets": true, "spawn_id": "wear_raider"})
+	check(r != null and r.inventory.slots.get(&"primary", &"") != &"", "a raider with a gun (%s)" % (r.inventory.slots.get(&"primary", &"") if r else &""))
+	if r == null:
+		return
+	WeaponCondition.server_used_guns(r)
+	var c := Wear.cond(r.inventory.state_of(&"primary"))
+	check(c >= WeaponCondition.RAIDER_COND.x and c <= WeaponCondition.RAIDER_COND.y, "it comes used (%.0f%%): a looted raider gun shows its use" % c)
+	r.select_weapon(&"primary")
+	await get_tree().physics_frame
+	Wear.force_roll = 0.99
+	await _ai_fire(r)
+	check(Wear.cond(r.inventory.state_of(&"primary")) < c, "a shot wears it on (%.2f)" % Wear.cond(r.inventory.state_of(&"primary")))
+	r.queue_free()
+	await get_tree().physics_frame
+
+
+func _test_loose_rounds() -> void:
+	print("Loose rounds carry their condition into a magazine")
+	player.inventory.unequip(&"primary")
+	player.inventory.take(&"m4a1")
+	player.select_weapon(&"primary")
+	for id: StringName in [&"mag_556", &"rounds_556"]:
+		for c: StringName in player.inventory.search_containers():
+			var list: Array = player.inventory.containers.get(c, [])
+			for i in range(list.size() - 1, -1, -1):
+				if StringName(list[i].id) == id:
+					player.inventory.remove_entry(c, i, int(list[i].count))
+	player.inventory.take(&"mag_556", 1, {"rounds": 0})
+	player.inventory.take(&"rounds_556", 10, {Wear.KEY: 40.0})
+	player.inventory.take(&"rounds_556", 10)
+	check(player.inventory.count_of(&"rounds_556") == 20, "ten corroded rounds and ten clean")
+	check(player.inventory.load_rounds(&"rounds_556", 20) == 20 and player.inventory.count_of(&"rounds_556") == 0, "all twenty load (the corroded box too)")
+	var mag := {}
+	for e: Dictionary in Survival.kit_of(player.inventory):
+		if String(e.id) == "mag_556":
+			mag = e.get("state", {})
+	check(int(mag.get("rounds", 0)) == 20 and absf(float(mag.get(Wear.KEY, 100.0)) - 70.0) < 0.01, "the magazine keeps the mean: 20 rounds at 70 (%s)" % mag)
+	check(AmmoCondition.words(mag, 2).contains("70%"), "the mix shows on inspection (\"%s\")" % AmmoCondition.words(mag, 2))
+	player.inventory.take(&"rounds_556", 10, AmmoCondition.reloaded_state())
+	player.inventory.load_rounds(&"rounds_556", 10)
+	for e: Dictionary in Survival.kit_of(player.inventory):
+		if String(e.id) == "mag_556":
+			mag = e.get("state", {})
+	check(absf(float(mag.get(Wear.KEY, 100.0)) - (20.0 * 70.0 + 10.0 * AmmoCondition.RELOADED) / 30.0) < 0.02 and absf(AmmoCondition.hl_of(mag) - 1.0 / 3.0) < 0.01,
+		"ten hand-loads more: full, %.1f, a third hand-loaded (%s)" % [float(mag.get(Wear.KEY, 100.0)), AmmoCondition.words(mag, 2)])
+	Wear.slot_state_rw(player.inventory, &"primary")["rounds"] = 0
+	player.inventory._commit()
+	player.inventory.reload(&"primary")
+	var gs := _gun()
+	check(absf(float(gs.get(AmmoCondition.IN_GUN, 100.0)) - float(mag.get(Wear.KEY, 100.0))) < 0.01 and float(gs.get(AmmoCondition.IN_GUN_HL, 0.0)) > 0.3,
+		"loaded, the gun's rounds are at the mean (%.1f, hand-loads %.2f)" % [float(gs.get(AmmoCondition.IN_GUN, 100.0)), float(gs.get(AmmoCondition.IN_GUN_HL, 0.0))])
+	player.inventory.take(&"mag_556", 1, {"rounds": 30})
+	_gun()["rounds"] = 4
+	player.inventory.reload(&"primary")
+	var out := {}
+	for e: Dictionary in Survival.kit_of(player.inventory):
+		if String(e.id) == "mag_556" and int((e.get("state", {}) as Dictionary).get("rounds", 30)) == 4:
+			out = e.state
+	check(absf(float(out.get(Wear.KEY, 100.0)) - float(mag.get(Wear.KEY, 100.0))) < 0.01 and AmmoCondition.hl_of(out) > 0.3, "unloaded, the magazine keeps it (%s)" % out)
+
+
+func _test_shells() -> void:
+	print("Shotgun shells: wet ones dud, through the tube")
+	player.inventory.unequip(&"primary")
+	check(player.inventory.take(&"rem870") == 1 and player.inventory.slots.get(&"primary", &"") == &"rem870", "a Remington 870 in hand")
+	player.select_weapon(&"primary")
+	player.inventory.set_slot_state(&"primary", {"rounds": 0, Shotguns.TUBE_KEY: []})
+	player.inventory.take(&"shells_12g_buck", 3)
+	var soaked := false
+	AmmoCondition.soak_carried(player.inventory, 1.0)
+	player.inventory._commit()
+	for e: Dictionary in Survival.kit_of(player.inventory):
+		if String(e.id) == "shells_12g_buck" and bool((e.get("state", {}) as Dictionary).get(AmmoCondition.WET, false)):
+			soaked = true
+	check(soaked, "wading soaks the shells carried")
+	player._server_busy_until = 0.0
+	check(Shotguns.server_load(player, &"primary", &"shells_12g_buck") > 0.0, "R loads the tube shell by shell")
+	await _wait_for(func() -> bool: return not Shotguns.loading(player), 8.0)
+	var st := _gun()
+	check(Shotguns.tube_of(st).size() == 3 and float(st.get(AmmoCondition.IN_GUN, 100.0)) <= AmmoCondition.WET_SHELL_CAP + 0.01,
+		"three wet shells in: the tube's at %.0f" % float(st.get(AmmoCondition.IN_GUN, 100.0)))
+	check(AmmoCondition.misfire_chance(AmmoCondition.WET_SHELL_CAP) > 0.1, "a wet shell's dud chance %.2f" % AmmoCondition.misfire_chance(AmmoCondition.WET_SHELL_CAP))
+	Wear.force_roll = 0.05
+	await _fire()
+	check(WeaponCondition.jammed(_gun()) and Shotguns.tube_of(_gun()).size() == 2, "a wet shell duds: a click, jammed, the shell gone")
+	Wear.slot_state_rw(player.inventory, &"primary").erase("jammed")
+	_gun()[AmmoCondition.IN_GUN] = 100.0
+	await _fire()
+	check(not WeaponCondition.jammed(_gun()) and Shotguns.tube_of(_gun()).size() == 1, "a good shell, the same roll: it fires")
+	Wear.force_roll = 0.99
+
+
+func _test_suppressor() -> void:
+	print("Suppressors wear, let more out, and break")
+	player.inventory.unequip(&"primary")
+	player.inventory.take(&"m4a1")
+	player.inventory.take(&"mag_556", 2)
+	player.select_weapon(&"primary")
+	player.inventory.set_slot_state(&"primary", Suppressors.with_suppressor(_gun(), &"suppressor_556", {Wear.KEY: 70.0}))
+	check(Suppressors.mounted_id(ItemDB.get_item(&"m4a1"), _gun()) == &"suppressor_556" and is_equal_approx(WeaponCondition.can_cond(_gun()), 70.0), "a worn 5.56 can mounted keeps its 70%")
+	await _fire()
+	check(absf(WeaponCondition.can_cond(_gun()) - (70.0 - 100.0 / WeaponCondition.CAN_SHOTS_FACTORY)) < 0.01, "a shot wears it a little (%.3f)" % WeaponCondition.can_cond(_gun()))
+	var m4 := ItemDB.get_item(&"m4a1")
+	var quiet := WeaponCondition.heard_m(true, WeaponCondition.can_loss(m4, _gun()))
+	_gun()[Suppressors.CAN_KEY] = 30.0
+	var worn := WeaponCondition.heard_m(true, WeaponCondition.can_loss(m4, _gun()))
+	check(is_equal_approx(quiet, ZombieAI.SUPPRESSED_HEARD_M) and worn > quiet + 20.0 and worn < ZombieAI.SHOT_HEARD_M,
+		"worn, it's heard further (%.0f m at 70%%, %.0f m at 30%%, %.0f m bare)" % [quiet, worn, ZombieAI.SHOT_HEARD_M])
+	check(Suppressors.server_remove(player.inventory, &"primary") == "", "taken off")
+	var at := _index_of(&"suppressor_556")
+	var kept: Dictionary = player.inventory.containers[at[0]][at[1]].get("state", {}) if at[0] != &"" else {}
+	check(is_equal_approx(float(kept.get(Wear.KEY, 100.0)), 30.0), "off the gun it keeps its condition (%s)" % kept)
+	check(Suppressors.server_mount(player.inventory, at[0], at[1], &"primary") == "" and is_equal_approx(WeaponCondition.can_cond(_gun()), 30.0), "and back on, the same")
+	_gun()[Suppressors.CAN_KEY] = 0.02
+	await _fire()
+	check(Suppressors.mounted(m4, _gun()) == null and not _gun().has(Suppressors.CAN_KEY), "worn to nothing, it's shot through and gone")
+	player.inventory.set_slot_state(&"primary", Suppressors.with_suppressor(_gun(), &"suppressor_improvised"))
+	await _fire()
+	check(absf(WeaponCondition.can_cond(_gun()) - (100.0 - 100.0 / Gunsmith.CAN_SHOTS)) < 0.01, "the oil-filter can wears fast (%.1f a shot)" % (100.0 / Gunsmith.CAN_SHOTS))
+	player.inventory.set_slot_state(&"primary", Suppressors.with_suppressor(_gun(), &""))
+
+
+func _test_hot_load() -> void:
+	print("A worn-out gun on hot hand-loads can blow")
+	player.select_weapon(&"primary")
+	var gs := Wear.slot_state_rw(player.inventory, &"primary")
+	Wear.set_cond(gs, 3.0)
+	gs[AmmoCondition.IN_GUN] = 30.0
+	gs.erase(AmmoCondition.IN_GUN_HL)
+	gs.erase("jammed")
+	Wear.force_roll = 0.01
+	await _fire()
+	check(player.inventory.slots.get(&"primary", &"") == &"m4a1", "factory rounds, worn out: it jams, it doesn't blow")
+	gs = Wear.slot_state_rw(player.inventory, &"primary")
+	gs.erase("jammed")
+	gs[AmmoCondition.IN_GUN_HL] = 1.0
+	check(AmmoCondition.hot(gs), "hand-loads under %d: hot" % roundi(AmmoCondition.HOT_BELOW))
+	await _fire()
+	check(player.inventory.slots.get(&"primary", &"") == &"" and player.has_meta(&"gun_blew"), "at %d%% on a hot hand-load it blows apart in his hands" % roundi(WeaponCondition.HOT_GUN_AT))
+	check(player.vitals.wound_list().size() > 0, "his forearms burnt (%d wounds)" % player.vitals.wound_list().size())
+	Wear.force_roll = 0.99
+
+
+func _test_farrier() -> void:
+	print("The farrier reshoes a horse")
+	var m := Mounts.server_spawn(level, "horse", level.ground_point(player.global_position + Vector3(-8.0, 0.0, 4.0)))
+	for i in 10:
+		await get_tree().physics_frame
+	check(m != null and m.is_horse(), "a horse")
+	if m == null:
+		return
+	var fast := m.gait_speed(Mount.Gait.GALLOP)
+	VehicleWear.of(m)["hooves"] = 10.0
+	check(m.gait_speed(Mount.Gait.GALLOP) < fast, "worn hooves slow its gallop (%.1f -> %.1f m/s)" % [fast, m.gait_speed(Mount.Gait.GALLOP)])
+	Settlement.server_found(String(Survival.state().get("zone", "")), m.global_position)
+	if not VehicleWear.farrier_ok():
+		check(VehicleWear.farrier(level) == null, "no hammer and no workbench: no farrier")
+		Settlement._entries(Settlement.YARD).append({"id": "hammer", "count": 1})
+	check(VehicleWear.farrier_ok(), "a hammer in the stores")
+	VehicleWear.settlement_service(level, 1.0)
+	check(is_equal_approx(float(VehicleWear.of(m).get("hooves", 0.0)), 100.0) and is_equal_approx(m.gait_speed(Mount.Gait.GALLOP), fast),
+		"the maintain job's hour: reshod, full speed again")
+	m.queue_free()
 
 
 ## A spot near him with open sky above (no tree or roof within Throwables.INDOOR_CEILING_M).

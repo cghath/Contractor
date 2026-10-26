@@ -9,7 +9,8 @@ extends RefCounted
 ## level over the work's (quality). Improvised guns (tag "improvised": the wear lane wears them
 ## three times as fast) misfire beyond jams (the round is lost) more as they wear, and a worn-out
 ## one may blow up in the hands (wounds to the forearms through Body's hands, the gun gone). The
-## oil-filter suppressor wears out in CAN_SHOTS shots. The settlement's gunsmith work order: with a
+## oil-filter suppressor wears out in CAN_SHOTS shots (WeaponCondition.can_wear, with the factory
+## cans' slower wear). The settlement's gunsmith work order: with a
 ## bench and an armoury rack ("gun_rack") built, a settler with firearms STRIP_LEVEL+ works the
 ## guns in the settlement's stock overnight. Static, host side; every number is Proposed.
 
@@ -164,18 +165,6 @@ static func server_blow(s: Soldier, slot: StringName, weapon: ItemData) -> void:
 	Wear.tell(s, "The %s blew apart in your hands" % (weapon.name if weapon else "gun"))
 	if Survival.running and not s.is_ai():
 		Survival._journal_line("%s's %s blew apart in their hands." % [Survival.survivor_name(s), (weapon.name if weapon else "gun").to_lower()])
-
-
-## Host (WeaponCondition.on_shot): an improvised suppressor on the gun wears out in CAN_SHOTS.
-static func on_shot(s: Soldier, weapon: ItemData, st: Dictionary) -> void:
-	var can := Suppressors.mounted(weapon, st)
-	if can == null or not can.tags.has("improvised"):
-		return
-	st["can_shots"] = int(st.get("can_shots", 0)) + 1
-	if int(st.can_shots) >= CAN_SHOTS:
-		st.erase(Suppressors.STATE_KEY)
-		st.erase("can_shots")
-		Wear.tell(s, "The %s is shot through" % can.name.to_lower())
 
 
 # --- The bench's work (host) -----------------------------------------------------------------------------

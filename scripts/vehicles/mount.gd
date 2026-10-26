@@ -278,7 +278,7 @@ func gait_speed(g: int) -> float:
 	if mount_type == BICYCLE:
 		return float(mspec.get("top_ms", 7.0)) * (0.5 if flat else 1.0)
 	var gaits: Array = mspec.get("gaits_ms", [1.7, 4.2, 12.0])
-	return float(gaits[clampi(g, 0, gaits.size() - 1)])
+	return float(gaits[clampi(g, 0, gaits.size() - 1)]) * VehicleWear.hoof_mult(self)  # worn hooves (survival wear)
 
 
 ## The fastest gait the horse will go now: no gallop hungry, thirsty or blown.

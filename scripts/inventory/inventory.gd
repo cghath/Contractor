@@ -586,7 +586,8 @@ func loadable_rounds(rounds_id: StringName) -> int:
 
 ## Host only. Puts up to `count` loose `rounds_id` into the carried magazines of the same
 ## calibre, fullest first (a part-used magazine before an empty one). A magazine that fills
-## up rejoins the full ones. Returns how many rounds went in.
+## up rejoins the full ones. The rounds' condition goes in with them: the magazine keeps the
+## mean by count (survival wear: AmmoCondition.mix_into). Returns how many rounds went in.
 func load_rounds(rounds_id: StringName, count := 1) -> int:
 	var loose := ItemDB.get_item(rounds_id)
 	if not is_loose_rounds(loose) or count <= 0:
@@ -602,20 +603,29 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 		var mag := ItemDB.get_item(entry.id)
 		var full := mag.magazine_rounds()
 		var n := mini(mini(count - loaded, full - int(best.rounds)), have)
-		var shells: Array = Shotguns.list_of(mag, entry.get("state", {})).duplicate() if Shotguns.is_holder(mag) else []
+		var old_state: Dictionary = entry.get("state", {})
+		var shells: Array = Shotguns.list_of(mag, old_state).duplicate() if Shotguns.is_holder(mag) else []
 		entry.count -= 1
 		if entry.count <= 0:
 			list.remove_at(best.index)
+		var got := AmmoCondition.take_loose(self, rounds_id, n)  # (any stack: a corroded box too)
+		n = int(got.x)
+		if n <= 0:
+			_append(best.container, mag, 1, old_state)
+			break
 		var rounds := int(best.rounds) + n
+		var state := {"rounds": rounds}
+		AmmoCondition.mix_into(state, int(best.rounds), Wear.cond(old_state), AmmoCondition.hl_of(old_state), n, got.y, got.z)
 		if Shotguns.is_holder(mag):
 			# A speed loader or Saiga magazine keeps which shells went in, in order (Shotguns).
 			for k in n:
 				shells.append(String(rounds_id))
-			var state := {"rounds": rounds, Shotguns.LIST_KEY: shells}
+			state[Shotguns.LIST_KEY] = shells
 			_append(best.container, mag, 1, {} if state == Shotguns.full_holder_state(mag) else state)
 		else:
-			_append(best.container, mag, 1, {} if rounds >= full else {"rounds": rounds})
-		_take_units(rounds_id, n)
+			if rounds >= full:
+				state.erase("rounds")
+			_append(best.container, mag, 1, state)
 		loaded += n
 	if loaded > 0:
 		_commit()

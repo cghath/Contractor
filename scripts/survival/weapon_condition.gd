@@ -10,6 +10,12 @@ extends RefCounted
 ## Melee: every swing wears it; a dull blade hits softer (down to DULL_MULT), a whetstone sharpens
 ## it; a worn-out blunt weapon is taped up with duct tape; a worn axe or hatchet fells slower
 ## (Trees reads tool_mult). Host side; every number is Proposed.
+## The AI fires through the same Soldier._server_fire, so companions', settlers' and raiders' guns
+## wear and jam the same way; an AI clears its own jam (ai_clear: AI_CLEAR_S and a "Jammed!" bark).
+## Raiders' guns come used (server_used_guns, RAIDER_COND). A mounted suppressor wears per shot
+## (can_wear: CAN_SHOTS_FACTORY, the improvised oil-filter Gunsmith.CAN_SHOTS), lets more sound out
+## as it wears (can_loss, heard_m) and is gone at 0. Any gun worn to HOT_GUN_AT or under firing hot
+## hand-loads (AmmoCondition.hot) may blow like a pipe gun (HOT_BLOW_CHANCE: Gunsmith.server_blow).
 
 const SHOT_WEAR := 0.08
 const WET_SHOT_X := 2.5
@@ -48,6 +54,17 @@ const FOUND_DRY := Vector2(40.0, 85.0)
 const FOUND_WET := Vector2(10.0, 45.0)
 const FOUND_WET_BROKEN := 0.2   # out in the weather, rusted through (0: a gun repair kit)
 const FOUND_JAMMED := Vector2(0.1, 0.45)  # dry, wet: found with a round stuck in it
+
+## The AI clearing its own jam (s), and the used guns raiders carry (a found condition, dry-ish).
+const AI_CLEAR_S := 2.0
+const RAIDER_COND := Vector2(30.0, 75.0)
+## A suppressor's life in shots: a factory can, wearing evenly to 0 (the oil-filter can: Gunsmith.CAN_SHOTS).
+const CAN_SHOTS_FACTORY := 4000.0
+## Under CAN_LOSS_FROM the can lets more out: the heard radius grows toward unsuppressed at 0.
+const CAN_LOSS_FROM := 60.0
+## A gun worn to this or under, firing hot hand-loads, may blow (x the hand-loaded share).
+const HOT_GUN_AT := 5.0
+const HOT_BLOW_CHANCE := 0.05
 
 const CLEANING_KIT := &"gun_cleaning_kit"
 const GUN_OIL := &"gun_oil"
@@ -111,9 +128,14 @@ static func server_blocked(s: Soldier, slot: StringName, weapon: ItemData) -> bo
 	var st := Wear.slot_state_rw(s.inventory, slot)
 	if jammed(st):
 		_nag(s, "Jammed: R to clear it")
+		ai_clear(s, slot)
 		return true
 	if improvised(weapon) and Gunsmith.server_improvised(s, slot, weapon, st):
 		return true  # a misfire (the round lost), or at 0% it blew (call 85: Gunsmith)
+	if not improvised(weapon) and Wear.cond(st) <= HOT_GUN_AT and AmmoCondition.hot(st) and Gunsmith._has_round(s, slot, weapon) \
+			and Wear.roll() < HOT_BLOW_CHANCE * float(st.get(AmmoCondition.IN_GUN_HL, 0.0)):
+		Gunsmith.server_blow(s, slot, weapon)  # a worn-out gun on a hot hand-load (call 43)
+		return true
 	if is_broken(st) and not improvised(weapon):  # (a crude gun at 0% still goes bang, until it blows)
 		_nag(s, "It's broken: it needs a gun repair kit")
 		return true
@@ -122,6 +144,7 @@ static func server_blocked(s: Soldier, slot: StringName, weapon: ItemData) -> bo
 		s.inventory._commit()
 		s._server_next_shot = Soldier._now() + 0.3
 		Wear.tell(s, "Jammed! R to clear it")
+		ai_clear(s, slot)
 		return true
 	return false
 
@@ -139,6 +162,7 @@ static func server_dud(s: Soldier, slot: StringName, weapon: ItemData) -> bool:
 	st["jammed"] = true
 	s.inventory._commit()
 	Wear.tell(s, "Click. A dud: R to clear it")
+	ai_clear(s, slot)
 	return true
 
 
@@ -148,11 +172,92 @@ static func on_shot(s: Soldier, slot: StringName, weapon: ItemData) -> void:
 		return
 	var st := Wear.slot_state_rw(s.inventory, slot)
 	Wear.set_cond(st, Wear.cond(st) - shot_wear(weapon, bool(st.get("wet", false))))
-	Gunsmith.on_shot(s, weapon, st)  # an oil-filter can wears out (call 85)
+	can_wear(s, weapon, st)  # the suppressor on it (call 38; the oil-filter can: call 85)
 
 
 static func shot_wear(weapon: ItemData, wet: bool) -> float:
 	return SHOT_WEAR * (WET_SHOT_X if wet else 1.0) * (IMPROVISED_X if improvised(weapon) else 1.0)
+
+
+# --- The AI's guns ---------------------------------------------------------------------------------
+
+## Host: an AI (a companion, a settler, a raider) clears the jam in `slot` itself: AI_CLEAR_S busy,
+## a "Jammed!" bark (a companion's own line), then cleared. Once per jam.
+static func ai_clear(s: Soldier, slot: StringName) -> void:
+	if s == null or not s.is_ai() or not s.is_inside_tree():
+		return
+	var now := Soldier._now()
+	if now < float(s.get_meta(&"jam_clear_until", -1.0)):
+		return
+	s.set_meta(&"jam_clear_until", now + AI_CLEAR_S)
+	s.set_meta(&"jam_bark", now)
+	var ai := CompanionAI.of(s)
+	if ai and ai.layer:
+		var line := TalkMenu.line_for(ai.rec, "jammed")
+		ai.layer.say(s, line if line != "" else "Jammed!")
+	var rev := s.inventory.slot_revision(slot)
+	var done := func() -> void:
+		if s.inventory.slot_revision(slot) == rev:
+			Wear.slot_state_rw(s.inventory, slot).erase("jammed")
+			s.inventory._commit()
+	Wear.timed(s, AI_CLEAR_S, "Clearing the jam", done)
+
+
+## Host (WorldLive, the convoy's ambush): a raider's guns come used: a condition in RAIDER_COND,
+## so a looted raider gun shows its use; they wear on as they fire.
+static func server_used_guns(s: Soldier, rng: RandomNumberGenerator = null) -> void:
+	if not Wear.enabled() or s == null:
+		return
+	var changed := false
+	for slot: StringName in Inventory.WEAPON_SLOTS:
+		var id := StringName(s.inventory.slots.get(slot, &""))
+		if id == &"" or not is_gun(ItemDB.get_item(id)):
+			continue
+		var st := Wear.slot_state_rw(s.inventory, slot)
+		if st.has(Wear.KEY):
+			continue
+		var t := rng.randf() if rng else randf()
+		Wear.set_cond(st, roundf(lerpf(RAIDER_COND.x, RAIDER_COND.y, t)))
+		changed = true
+	if changed:
+		s.inventory._commit()
+
+# --- Suppressors ---------------------------------------------------------------------------------
+
+static func can_cond(state: Dictionary) -> float:
+	return clampf(float(state.get(Suppressors.CAN_KEY, 100.0)), 0.0, 100.0)
+
+
+## How much of the can's suppression is lost on `weapon` with `state`: 0 (as new, or no can) .. 1.
+static func can_loss(weapon: ItemData, state: Dictionary) -> float:
+	if Suppressors.mounted(weapon, state) == null:
+		return 0.0
+	return clampf((CAN_LOSS_FROM - can_cond(state)) / CAN_LOSS_FROM, 0.0, 1.0)
+
+
+## The dead's hearing radius of a shot (Soldier._server_fire): suppressed, it grows with `loss`
+## toward an unsuppressed shot's.
+static func heard_m(suppressed: bool, loss: float) -> float:
+	if not suppressed:
+		return ZombieAI.SHOT_HEARD_M
+	return lerpf(ZombieAI.SUPPRESSED_HEARD_M, ZombieAI.SHOT_HEARD_M, clampf(loss, 0.0, 1.0))
+
+
+## A shot's wear on the can on the gun (`st` its state): a factory can over CAN_SHOTS_FACTORY,
+## the improvised oil-filter over Gunsmith.CAN_SHOTS; at 0 it's shot through and gone.
+static func can_wear(s: Soldier, weapon: ItemData, st: Dictionary) -> void:
+	var can := Suppressors.mounted(weapon, st)
+	if can == null:
+		return
+	var per := 100.0 / (float(Gunsmith.CAN_SHOTS) if can.tags.has("improvised") else CAN_SHOTS_FACTORY)
+	var c := can_cond(st) - per
+	if c <= 0.01:
+		st.erase(Suppressors.STATE_KEY)
+		st.erase(Suppressors.CAN_KEY)
+		s.inventory._commit()
+		Wear.tell(s, "The %s is shot through" % can.name.to_lower())
+		return
+	st[Suppressors.CAN_KEY] = snappedf(c, 0.001)
 
 
 static func _nag(s: Soldier, text: String) -> void:
@@ -388,4 +493,6 @@ static func words(item: ItemData, state: Dictionary) -> String:
 		out.append("wet")
 	if state.has("zeroed"):
 		out.append("zeroed")
+	if state.has(Suppressors.CAN_KEY):
+		out.append("can %d%%" % roundi(can_cond(state)))
 	return ", ".join(out)

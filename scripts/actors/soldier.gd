@@ -1129,9 +1129,9 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var shell := Shotguns.server_take_shell(inventory, slot) if tube else &""
 	if (tube and shell == &"") or (not tube and not inventory.consume_round(slot)):
 		return
-	if not tube and WeaponCondition.server_dud(self, slot, weapon):
+	if WeaponCondition.server_dud(self, slot, weapon):
 		_server_next_shot = now + 0.3
-		return  # a bad round (call 121): a click, and R clears it
+		return  # a bad round or shell (call 121): a click, and R clears it
 	server_end_spawn_protection()  # firing ends spawn protection
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
 	# The weapon's rate holds over time, but shots the network delivered bunched up (paced
@@ -1155,6 +1155,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 		if String(hit.result) != "none":
 			CompoundLevel.current(self).show_impact.rpc(hit.position, hit.normal, hit.result)
 	var suppressed := bool(weapon.stats.get("suppressed", false)) or Suppressors.mounted_id(weapon, inventory.state_of(slot)) != &""
+	var can_loss := WeaponCondition.can_loss(weapon, inventory.state_of(slot))  # a worn can lets more out (survival wear)
 	last_shot_at = now
 	last_shot_suppressed = suppressed
 	var round_end: Variant = result.get("position")
@@ -1171,7 +1172,8 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	CompoundLevel.current(self).show_tracer.rpc(muzzle, launch if launch is Vector3 and round_end is Vector3 else Vector3.ZERO,
 		Ballistics.round_id(Shotguns.shot_item(weapon, shell) if tube else weapon), round_point, suppressed, kind)  # and sees it (Tracer)
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
-	Survival.server_noise(self, origin, ZombieAI.SUPPRESSED_HEARD_M if suppressed else ZombieAI.SHOT_HEARD_M)  # survival: the dead hear it
+	Survival.server_noise(self, origin, WeaponCondition.heard_m(suppressed, can_loss))  # survival: the dead hear it
+	suppressed = suppressed and can_loss < 0.5
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)
 	SquadAI.server_heard_shot(self, origin, suppressed)  # the other side hears it (and half finds the shooter: Spotting)

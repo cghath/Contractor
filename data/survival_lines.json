@@ -122,6 +122,18 @@
 			{"text": "Got {item}.", "voice": "took_item_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
 			{"text": "Mine now: {item}.", "tags": ["greedy"], "voice": "took_item_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
 		],
+		"jammed": [
+			{"text": "Jammed!", "voice": "jammed_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Jammed! Clearing!", "tags": ["calm"], "voice": "jammed_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Come on, come on... jammed!", "tags": ["scared"], "voice": "jammed_03", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"gun_dirty": [
+			{"text": "My gun's filthy. It needs a proper cleaning before it quits on me.", "voice": "gun_dirty_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
+			{"text": "Anyone got a cleaning kit? This thing's starting to stick.", "tags": ["timid"], "voice": "gun_dirty_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
+		"gun_cleaning": [
+			{"text": "Give me a minute. Cleaning my gun.", "voice": "gun_cleaning_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}}
+		],
 		"plan_dusk": [
 			{"text": "We should find somewhere before dark.", "voice": "plan_dusk_01", "speaker": {"kind": "any", "sex": "any", "age": "any"}},
 			{"text": "Getting dark. Let's get walls around us.", "tags": ["timid"], "voice": "plan_dusk_02", "speaker": {"kind": "any", "sex": "any", "age": "any"}}

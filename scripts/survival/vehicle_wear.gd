@@ -10,7 +10,10 @@ extends RefCounted
 ## STALL_S); a worn engine is slower; a flat battery won't start. The vehicle service (engine
 ## parts, a new battery, a wheel) resets those (on_repair, on_battery); a settlement's mechanic
 ## services the vehicles near it an hour at a time (settlement_service: the "maintain" job). A
-## horse's hooves wear by distance (a stub for the farrier later). Every number is Proposed.
+## horse's hooves wear by distance; worn under HOOF_SLOW_AT the horse is slower (hoof_mult, to
+## HOOF_SLOW_MULT), and the settlement's "maintain" job reshoes the horses within its radius
+## (farrier: one an hour, back to new, with a hammer in stock or a workbench built standing in for
+## the anvil). Every number is Proposed.
 
 const META := &"wear"
 const ENGINE_KM := 0.02         # condition a km
@@ -34,6 +37,10 @@ const TYRE_PATCH := &"tyre_patch"
 const SERVICE_PER_H := 5.0      # a mechanic's hour: engine and battery points back (to SERVICE_TO)
 const SERVICE_TO := 90.0
 const HOOVES_KM := 0.05
+const HOOF_SLOW_AT := 30.0
+const HOOF_SLOW_MULT := 0.85
+const FARRIER_BELOW := 80.0     # hooves under this get reshod
+const FARRIER_TOOL := "hammer"
 
 ## Tests: force a puncture or stall roll (0..1); -1 rolls for real. (Wear.force_roll covers both too.)
 static var force_roll := -1.0
@@ -91,7 +98,7 @@ static func on_moved(v: Vehicle, moved_m: float, delta: float) -> void:
 	if v.kind == "mount":
 		if moved_m > 0.01 and moved_m < 50.0 and v.has_method(&"is_horse") and bool(v.call(&"is_horse")):
 			var hw := of(v)
-			hw["hooves"] = maxf(0.0, float(hw.get("hooves", 100.0)) - HOOVES_KM * moved_m / 1000.0)  # (a stub: the farrier's job later)
+			hw["hooves"] = maxf(0.0, float(hw.get("hooves", 100.0)) - HOOVES_KM * moved_m / 1000.0)  # (the farrier reshoes them: farrier)
 		return
 	if not ground_vehicle(v):
 		return
@@ -134,6 +141,43 @@ static func near_wreck(v: Vehicle) -> bool:
 		if o and o != v and o.wrecked and o.global_position.distance_to(v.global_position) <= WRECK_M:
 			return true
 	return false
+
+
+## A horse's speed share by its hooves (Mount.gait_speed): 1, down to HOOF_SLOW_MULT worn out.
+static func hoof_mult(v: Vehicle) -> float:
+	if not v.has_meta(META):
+		return 1.0
+	var h := float(of(v).get("hooves", 100.0))
+	return 1.0 if h >= HOOF_SLOW_AT else lerpf(HOOF_SLOW_MULT, 1.0, h / HOOF_SLOW_AT)
+
+
+## Whether the settlement can shoe a horse: a hammer in its stock, or a workbench built (the anvil).
+static func farrier_ok() -> bool:
+	return Settlement.exists() and (Settlement.count(FARRIER_TOOL) > 0 or int(Settlement.data().get("workbenches", 0)) > 0)
+
+
+## Host (settlement_service, the "maintain" job's hour): the most worn horse within the
+## settlement's radius under FARRIER_BELOW is reshod (hooves back to 100). The horse, or null.
+static func farrier(st: Node) -> Vehicle:
+	if not farrier_ok() or st == null or not st.is_inside_tree():
+		return null
+	var c := Settlement.pos()
+	var best: Vehicle = null
+	var worst := FARRIER_BELOW
+	for n in st.get_tree().get_nodes_in_group(Vehicle.GROUP):
+		var v := n as Vehicle
+		if v == null or v.wrecked or v.kind != "mount" or not v.has_meta(META) or not v.has_method(&"is_horse") or not bool(v.call(&"is_horse")):
+			continue
+		if v.global_position.distance_to(c) > Settlement.radius():
+			continue
+		var h := float(of(v).get("hooves", 100.0))
+		if h < worst:
+			worst = h
+			best = v
+	if best:
+		of(best)["hooves"] = 100.0
+		Survival._journal_line("The farrier reshod a horse.")
+	return best
 
 
 static func set_flat(v: Vehicle, on: bool) -> void:
@@ -213,7 +257,7 @@ static func settlement_service(st: Node, hours: float) -> bool:
 		return false
 	var c := Settlement.pos()
 	var r := Settlement.radius()
-	var did := false
+	var did := farrier(st) != null
 	for n in st.get_tree().get_nodes_in_group(Vehicle.GROUP):
 		var v := n as Vehicle
 		if v == null or v.wrecked or not ground_vehicle(v) or not v.has_meta(META) or v.global_position.distance_to(c) > r:

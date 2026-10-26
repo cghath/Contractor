@@ -84,7 +84,9 @@ static func entry_on(holder: ItemData, state: Dictionary, mount: String) -> Dict
 	if id == "":
 		return {}
 	var out := {"id": id, "count": 1}
-	if mount == "nvg":
+	if mount == "muzzle" and not Suppressors.can_state(state).is_empty():
+		out["state"] = Suppressors.can_state(state)  # a worn can keeps its condition (survival wear)
+	elif mount == "nvg":
 		var n: Dictionary = state.get(Nvg.STATE_KEY, {})
 		if n.has("battery_h"):
 			out["state"] = {"battery_h": n.battery_h}
@@ -101,7 +103,7 @@ static func with(holder: ItemData, state: Dictionary, mount: String, entry: Dict
 	var own: Dictionary = entry.get("state", {})
 	match mount:
 		"muzzle":
-			return Suppressors.with_suppressor(state, StringName(id))
+			return Suppressors.with_suppressor(state, StringName(id), own)
 		"nvg":
 			if id == "":
 				return Nvg.with_nvg(state, {})

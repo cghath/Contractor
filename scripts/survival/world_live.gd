@@ -207,6 +207,7 @@ func _spawn_soldier(rec: Dictionary, gid: String, i: int, at: Vector3) -> Soldie
 			if ItemDB.get_item(StringName(String(e.id))) != null:
 				s.inventory.take(StringName(String(e.id)), int(e.get("count", 1)))
 		s.set_meta(&"survivor_name", String(rec.name))
+		WeaponCondition.server_used_guns(s)  # a raider's gun comes used, and wears on as they fire (survival wear)
 	return s
 
 

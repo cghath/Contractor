@@ -13,6 +13,9 @@ extends RefCounted
 
 const TYPE := "attachment"
 const STATE_KEY := "suppressor"
+## The mounted can's condition (survival wear: WeaponCondition.can_wear), 0-100 (absent = 100). Off
+## the gun, the can's own state keeps it as "condition" (Wear.KEY).
+const CAN_KEY := "can_cond"
 
 
 static func is_suppressor(item: ItemData) -> bool:
@@ -38,14 +41,24 @@ static func mounted(weapon: ItemData, state: Dictionary) -> ItemData:
 	return ItemDB.get_item(id) if id != &"" else null
 
 
-## `state` with `suppressor_id` mounted (&"" for none).
-static func with_suppressor(state: Dictionary, suppressor_id: StringName) -> Dictionary:
+## `state` with `suppressor_id` mounted (&"" for none); `own`: the can's own state (its condition).
+static func with_suppressor(state: Dictionary, suppressor_id: StringName, own := {}) -> Dictionary:
 	var out := state.duplicate(true)
+	out.erase(CAN_KEY)
 	if String(suppressor_id) == "":
 		out.erase(STATE_KEY)
 	else:
 		out[STATE_KEY] = String(suppressor_id)
+		var c := float(own.get("condition", 100.0))
+		if c < 99.5:
+			out[CAN_KEY] = c
 	return out
+
+
+## The mounted can's own state off the gun ({} as new): its condition.
+static func can_state(state: Dictionary) -> Dictionary:
+	var c := float(state.get(CAN_KEY, 100.0))
+	return {"condition": c} if c < 99.5 else {}
 
 
 ## Why the attachment entry at `container`/`index` can't go on the weapon in `slot`, or "".
@@ -66,13 +79,14 @@ static func server_mount(inv: Inventory, container: StringName, index: int, slot
 	if problem != "":
 		return problem
 	var old := mounted_id(ItemDB.get_item(inv.slots[slot]), inv.state_of(slot))
+	var old_state := can_state(inv.state_of(slot))
 	var entry := inv.remove_entry(container, index)
 	if entry.is_empty():
 		return "Can't do that"
-	if old != &"" and not _stow(inv, old, container):
+	if old != &"" and not _stow(inv, old, container, old_state):
 		inv.insert_entry(container, entry)  # no room for the old one: put the new one back
 		return "No room for the %s" % ItemDB.get_item(old).name
-	inv.set_slot_state(slot, with_suppressor(inv.state_of(slot), StringName(entry.id)))
+	inv.set_slot_state(slot, with_suppressor(inv.state_of(slot), StringName(entry.id), entry.get("state", {})))
 	return ""
 
 
@@ -84,19 +98,22 @@ static func server_remove(inv: Inventory, slot: StringName, target: StringName =
 	var old := mounted_id(weapon, inv.state_of(slot)) if weapon else &""
 	if old == &"":
 		return "No suppressor on it"
-	if not _stow(inv, old, target):
+	if not _stow(inv, old, target, can_state(inv.state_of(slot))):
 		return "No room for the %s" % ItemDB.get_item(old).name
 	inv.set_slot_state(slot, with_suppressor(inv.state_of(slot), &""))
 	return ""
 
 
-static func _stow(inv: Inventory, suppressor_id: StringName, first: StringName) -> bool:
+static func _stow(inv: Inventory, suppressor_id: StringName, first: StringName, state := {}) -> bool:
 	var order: Array[StringName] = []
 	if first != &"" and inv.containers.has(first):
 		order.append(first)
 	order.append_array(inv.search_containers())
+	var entry := {"id": suppressor_id, "count": 1}
+	if not state.is_empty():
+		entry["state"] = state
 	for c in order:
-		if inv.insert_entry(c, {"id": suppressor_id, "count": 1}):
+		if inv.insert_entry(c, entry):
 			return true
 	return false
 
