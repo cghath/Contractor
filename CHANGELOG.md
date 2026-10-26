@@ -11,6 +11,45 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase A step 5: the metabolism (claude/survival-metabolism)
+
+Local: survival suite (see the run number in docs/survival.md's "Where the build is").
+
+- **Added (the metabolism, `scripts/survival/needs.gd`, `Needs`):** S1's two bars become a body:
+  calories (0-4,000 kcal), water (0-4 l), protein, carbs and fat, vitamins C, D and iron, sleep,
+  warmth (core temperature), wet and hygiene, plus a sickness with a duration, kept per survivor
+  where S1 kept hunger and thirst (`Survival.needs_of`, saved with him, sent to his owner as
+  `Survival.my_body`). Rates per world day at call 78's defaults (1,800 kcal and 2.5 l), scaled by
+  `Survival.DAY_MIN`; running and a heavy load burn more, shivering burns more. Warmth falls with
+  the dark, wind, rain and being wet (`DayNight` weather, `Throwables.indoors`, wading) and comes
+  back with moving. Effects: hunger and thirst still slow stamina return (S1), so do low sleep
+  and shivering; low sleep and shivering shake the aim (`Vitals.needs_sway`); `Needs.dulled` (low
+  sleep) and `Needs.infection_risk` (low hygiene) are exposed for the stealth model and the
+  infection chain; empty water costs blood at once, empty calories after a day and a half on
+  nothing. Every store has plain words ("hungry", "parched", "frozen through").
+  S1's "hunger" and "thirst" stay readable (and writable) as derived values.
+- **Added (food values, `data/items.json`):** kcal, protein, carbs and fat in grams, vitamins,
+  water_l, spoils_days, raw and (water) quality on the bottled water, electrolytes, MRE, IRP,
+  energy bar, canned meat and energy drink; three new items: Bottle of Dirty Water, Raw Meat Cut
+  and Tin of Beans (priced in `data/prices.json`). `Consumables` feeds them through
+  `Survival.server_eat` (`Needs.eat`); an item without values keeps S1's water and ration doses.
+- **Added (water quality and sickness):** raw questionable or dirty water rolls dysentery (10% and
+  40%), raw meat food poisoning; it shows two world hours later with a message and drains water
+  and calories fast for a day and a half (`Needs.SICKNESS`). `Needs.treat_water` marks an entry's
+  water clean for the boiling, filters and tablets to come.
+- **Added (sleep, `scripts/survival/survival_sleep.gd`, `SurvivalSleep`):**
+  `Survival.server_sleep(player, hours, where)` (bed, bedroll or ground: the pieces are phase B)
+  fills the sleep store, runs the sleeper's body at x12 and the world's clock at x12 while every
+  survivor is asleep, and wakes him when the hours are up, when he moves off, or when one of the
+  dead is chasing a survivor (ZombieAI's CHASE, polled through `Survival.zombies`).
+- **Changed (HUD):** the Food/Water line is gone; small signs appear only for a low store
+  ("parched", "tired", "freezing", "sick"), and backslash opens the body readout
+  (`scripts/survival/body_readout.gd`, `BodyReadout`): every store as a word and a number, the
+  body screen's first form.
+- **Tests:** `tests/survival_test.gd`'s needs section at the new rates and a metabolism section
+  (dysentery by a forced roll, treated water, sickness drain, sleep's dulling, a cold wet night,
+  sleep at speed and a chasing zombie waking him, the HUD signs and readout).
+
 ### Contractor: Fallen, phase A: the melee core fixed and the melee weapons (claude/survival, S2b)
 
 Local: survival suite (see the run numbers in docs/survival.md's "Where the build is").
