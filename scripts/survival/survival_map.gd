@@ -243,7 +243,8 @@ func _server_start() -> void:
 		if level:
 			points = level.insertion_points()
 		if not points.is_empty():
-			server_add_mark(zone, points[0], "Safehouse", "safehouse")["auto"] = true  # (gives way to the cold open's own)
+			var home := server_add_mark(zone, points[0], "Safehouse", "safehouse")
+			home["auto"] = true  # (gives way to the cold open's own)
 			dirty = true
 	if dirty:
 		server_changed()
