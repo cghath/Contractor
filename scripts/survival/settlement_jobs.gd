@@ -73,7 +73,7 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 		"haul":
 			return haul(st, hours)
 		"maintain":
-			return WorkOrders.work_for(st, "maintain", hours) or repair_some(st, hours) > 0
+			return WorkOrders.work_for(st, "maintain", hours) or repair_some(st, hours) > 0 or Infrastructure.work_project(st, hours)
 		"craft":
 			return WorkOrders.work_for(st, "craft", hours)
 		"generator":
@@ -133,7 +133,12 @@ static func farm(st: Settlement, hours: float) -> bool:
 	var beds := int(Settlement.data().get("farm_beds", 0))
 	if beds <= 0:
 		return false
-	return _yield(st, "farm", beds * FARM_PER_BED_H * hours, "vegetables")
+	var x := Seasons.farm_yield_x(st, beds)  # (phase D: planting and harvest windows, winter's stop)
+	if x < 0.0:
+		return false
+	if x == 0.0:
+		return true
+	return _yield(st, "farm", beds * FARM_PER_BED_H * hours * x, "vegetables")
 
 
 static func cook(st: Settlement, hours: float) -> bool:
@@ -193,7 +198,7 @@ static func build_sites(st: Settlement, hours: float) -> bool:
 	var b := Builder.find(st)
 	if b == null:
 		return false
-	var left := WORK_S_PER_H * hours
+	var left := WORK_S_PER_H * hours * Infrastructure.build_mult()  # (phase D: powered tools)
 	var worked := false
 	for site: Array in sites(st):
 		if left <= 0.0:
@@ -268,7 +273,7 @@ static func haul(st: Settlement, hours: float) -> bool:
 		GameState.item_taken(wi.uid)
 		wi.queue_free()
 		moved += 1
-	return moved > 0
+	return moved > 0 or Masking.server_bury_some(st, hours)  # (phase D: the dead's bodies buried)
 
 
 static func generator(_st: Settlement, hours: float) -> bool:

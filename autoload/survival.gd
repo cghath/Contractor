@@ -85,7 +85,7 @@ func server_new_world(main: Node, name: String, world_seed: int, options := {}) 
 ## The world's goal and options (NewWorldScreen; calls 7, 49): "goal" evac | sandbox | clear;
 ## "dead", "loot", "needs", "world" each low | normal | high. option_mult turns a level into the
 ## multiplier the systems use (the dead's density and night speed, the needs' rates, ...).
-const DEFAULT_OPTIONS := {"goal": "evac", "dead": "normal", "loot": "normal", "needs": "normal", "world": "normal"}
+const DEFAULT_OPTIONS := {"goal": "evac", "dead": "normal", "loot": "normal", "needs": "normal", "world": "normal", "season": "spring"}
 const OPTION_MULTS := {"low": 0.6, "normal": 1.0, "high": 1.5}
 const SPEED_MULTS := {"low": 0.85, "normal": 1.0, "high": 1.15}
 
@@ -96,6 +96,13 @@ func option(key: String) -> String:
 
 func option_mult(key: String) -> float:
 	return float(OPTION_MULTS.get(option(key), 1.0))
+
+
+## The season now: "spring", "summer", "autumn" or "winter" (Seasons: ~10 world days each from the
+## New world option "season"; the body lane reads it, and Seasons' flags: thirst_mult, spoil_mult,
+## water_frozen, temperature_c).
+func season() -> String:
+	return Seasons.current()
 
 
 ## The dead's pace multiplier from the "dead" option (ZombieAI).
@@ -183,6 +190,8 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	Settlement.install(level)  # the settlement's work and council (Settlement, survival_building.md 5-7)
 	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
 	Mounts.install(level)  # horses, bicycles, carts (Mounts, docs/survival_mounts.md)
+	Sieges.install(level)  # raids and sieges on the builds, traps, lures, the bodies (phase D: docs/survival_seasons.md)
+	Seasons.server_update(level)  # the season's weather and the dead's frost
 
 
 ## Host: the world is saved: the world's sections and the zone being played.
@@ -318,6 +327,7 @@ func _process(delta: float) -> void:
 	if _tick == 0.0:  # (a clock tick just ran: dt real seconds)
 		pass
 	_pressure_tick(level as SurvivalLevel, delta)
+	Seasons.server_tick(level, delta)  # the year: weather, frost, the thaw (phase D)
 	if _send >= SEND_S:
 		_send = 0.0
 		for s: Soldier in MapNodes.players(level):

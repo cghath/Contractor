@@ -168,7 +168,50 @@ func day() -> int:
 
 
 func season() -> String:
-	return SEASONS[int((day() - 1) / SEASON_DAYS) % SEASONS.size()]
+	return Seasons.of_day(day(), String(w.get("season_start", Seasons.START)))  # (the New world option: Seasons)
+
+
+## The crossing between two zones' key, and whether it's open (a blown bridge closes it:
+## Infrastructure.server_set_crossing; goals, journeys and far hordes go round).
+static func crossing_key(a: String, b: String) -> String:
+	return "%s|%s" % [a, b] if a < b else "%s|%s" % [b, a]
+
+
+func crossing_open(a: String, b: String) -> bool:
+	return not (w.get("crossings", {}) as Dictionary).has(crossing_key(a, b))
+
+
+## A group made of people who already exist (a settlement's faction walking out, the settlement
+## passing to a challenger: Politics): `pids` its members led by `leader_id`, `home` its home if
+## any. Once per id (a mutate re-runs it on the worker's result). Returns the group.
+func group_from_people(gid: String, kind: String, zone_id: String, pos: Vector2, pids: Array, leader_id: String, why: String, home := {}) -> Dictionary:
+	if (w.groups as Dictionary).has(gid):
+		return w.groups[gid]
+	var g := WorldGroup.make(gid, kind, rng_for(gid, "made"), zone_id, pos)
+	g.born_tick = tick()
+	for pid: Variant in pids:
+		var rec: Dictionary = people.get(String(pid), {})
+		if rec.is_empty():
+			continue
+		(g.members as Array).append(String(pid))
+		rec["status"] = WorldGroup.GROUPED
+		rec["world_group"] = gid
+		rec["zone"] = zone_id
+	if leader_id in (g.members as Array):
+		g.leader = leader_id
+		g.personality = WorldGroup.personality_of(people.get(leader_id, {}), rng_for(gid, "leader"))
+	else:
+		_new_leader(g)
+	g.relations["player"] = -20.0 if home.is_empty() else -10.0
+	g.grudge = "player" if home.is_empty() else ""
+	for k: String in WorldGroup.SUPPLY_KEYS:
+		g.supplies[k] = 2.0 * (g.members as Array).size() if k in ["food", "water"] else 0.0
+	if not home.is_empty():
+		g.home = home.duplicate(true)
+		g.defence = 0.5
+	w.groups[gid] = g
+	event(zone_id, "split", [gid], why)
+	return g
 
 
 # --- Setup ---------------------------------------------------------------------------------------
@@ -572,6 +615,8 @@ func _zone_tick(z: String) -> void:
 	var best := ""
 	var best_p := p
 	for nb: String in zd.get("links", []):
+		if not crossing_open(z, nb):
+			continue  # (a blown bridge: the horde goes round)
 		var np := pressure_of(nb)
 		if np > best_p:
 			best_p = np

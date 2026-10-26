@@ -8,6 +8,8 @@ extends Control
 
 const GOALS := [["evac", "Reach the evac"], ["sandbox", "Sandbox"], ["clear", "Clear the map"]]
 const LEVELS := [["low", "Low"], ["normal", "Normal"], ["high", "High"]]
+## The season you wake in (call 137; Seasons): spring by default.
+const SEASONS := [["spring", "Spring"], ["summer", "Summer"], ["autumn", "Autumn"], ["winter", "Winter"]]
 const OPTIONS := [
 	["dead", "The dead", "How many of the dead a place holds, how fast they move at night, the share of runners and specials."],
 	["loot", "Loot", "How often containers hold something and how fast they refill; ammo's weight in the tables."],
@@ -19,6 +21,7 @@ var on_start: Callable
 var _name: LineEdit
 var _seed: LineEdit
 var _goal: OptionButton
+var _season: OptionButton
 var _picks := {}
 var survivor: SurvivorPicker
 var _start_button: Button
@@ -47,6 +50,12 @@ func _ready() -> void:
 		_goal.add_item(String(g[1]))
 	_goal.selected = 0
 	box.add_child(UiKit.row("Goal", _goal))
+	_season = OptionButton.new()
+	for s: Array in SEASONS:
+		_season.add_item(String(s[1]))
+	_season.selected = 0
+	_season.tooltip_text = "The season you wake in: a year is four seasons of about ten world days; winter freezes crops, water and the dead."
+	box.add_child(UiKit.row("Season", _season))
 	var options := UiKit.section("World options", box)
 	for o: Array in OPTIONS:
 		var pick := OptionButton.new()
@@ -65,7 +74,7 @@ func _ready() -> void:
 
 
 func choices() -> Dictionary:
-	var options := {"goal": String(GOALS[_goal.selected][0])}
+	var options := {"goal": String(GOALS[_goal.selected][0]), "season": String(SEASONS[maxi(_season.selected, 0)][0]) if _season else "spring"}
 	for key: String in _picks:
 		options[key] = String(LEVELS[(_picks[key] as OptionButton).selected][0])
 	if survivor:

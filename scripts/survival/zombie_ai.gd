@@ -132,9 +132,10 @@ func hear(pos: Vector3, loud := HEAR_SHOT) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if body == null or not body.vitals.is_up():
+	if body == null or not body.vitals.is_up() or Traps.holds(body):  # (phase D: frozen solid, held by wire or a trap, stunned)
 		if body:
 			body.move_input = Vector2.ZERO
+			body.want_sprint = false
 		return
 	_think -= delta
 	if _think <= 0.0:
@@ -215,6 +216,8 @@ func _decide() -> void:
 	elif mode == Mode.IDLE and now >= _idle_next:
 		_idle_next = now + _rng.randf_range(4.0, 12.0)
 		_wander()
+	if mode != Mode.ALERT:
+		Sieges.server_at_wall(self)  # (phase D: stuck at a build: chew, pile, climb, vault, squeeze; call 140)
 	# The man it's alert to or after knows he's watched (the HUD's eye).
 	var watched: Soldier = target if mode == Mode.CHASE else (aware_of if mode == Mode.ALERT else null)
 	if is_instance_valid(watched) and not watched.is_ai():
@@ -233,7 +236,7 @@ func _spot() -> Dictionary:
 		var s := n as Soldier
 		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
 			continue
-		var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0)
+		var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0) * Masking.sight_x(s, dark)
 		if is_instance_valid(target) and s == target:
 			r *= 1.5  # (one it's after is easier to keep in sight)
 		var d := body.global_position.distance_to(s.global_position)
@@ -267,7 +270,7 @@ func _smell() -> Soldier:
 		var s := n as Soldier
 		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion():
 			continue
-		var strength := s.smell_strength()
+		var strength := s.smell_strength() * Masking.smell_x(s)  # (phase D: gore smeared on hides it)
 		if strength <= 0.0:
 			continue
 		var to_me := body.global_position - s.global_position
@@ -357,10 +360,11 @@ func _steer(delta: float) -> void:
 	var pace := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
 		pace *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
+	pace *= Seasons.dead_pace_mult()  # (phase D: winter's cold, a hard frost's crawl, summer's heat)
 	_face(body.global_position + dir, delta)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z) * clampf(pace, 0.0, 1.0)
-	body.want_sprint = bool(k.sprint) and mode == Mode.CHASE
+	body.want_sprint = bool(k.sprint) and mode == Mode.CHASE and not Seasons.hard_frost()
 
 
 func _face(at: Vector3, delta: float) -> void:

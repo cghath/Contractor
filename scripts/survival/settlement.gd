@@ -62,7 +62,8 @@ const GUARD_SEE_M := 60.0
 const CALL_GAP_S := 30.0
 ## Defence (doc §9's inputs): per full block by material, per piece, per guard on duty.
 const DEFENCE_BLOCK := {"wood": 0.2, "scrap": 0.3, "sandbag": 0.4, "brick": 0.6, "concrete": 0.8, "steel": 1.2}
-const DEFENCE_PIECE := {"gate": 6.0, "door": 1.0, "shutter": 0.5, "hatch": 0.5, "fence": 1.0, "hesco": 8.0, "wire": 3.0, "lookout": 10.0}
+const DEFENCE_PIECE := {"gate": 6.0, "door": 1.0, "shutter": 0.5, "hatch": 0.5, "fence": 1.0, "hesco": 8.0, "wire": 3.0, "lookout": 10.0,
+	"spike_pit": 3.0, "bear_trap": 1.0, "drawbridge": 6.0, "corridor_marker": 2.0, "electric_fence": 5.0}  # (phase D: Traps, Infrastructure)
 const DEFENCE_GUARD := 10.0
 ## The footprint (call 90): a running generator is heard this far, a lamp seen this far.
 const NOISE_GENERATOR_M := 60.0
@@ -573,6 +574,7 @@ func refresh() -> void:
 	d["lamps"] = int(counts.get("lamp", 0))
 	d["defence_builds"] = snappedf(defence, 0.1)
 	d["store_kinds"] = kinds
+	Infrastructure.server_refresh(self, b)  # (phase D: power, what it runs, the lit lamps)
 	# A store whose piece is gone: what was in it is in the yard (after the builds came back).
 	if _hosted_s > 10.0:
 		for key: String in stores().keys():
@@ -594,7 +596,8 @@ static func footprint() -> Dictionary:
 	var d := data()
 	var gens := int(d.get("generators", 0))
 	var noise := NOISE_GENERATOR_M * sqrt(float(gens)) if gens > 0 and count_cat("fuel") > 0 else 0.0
-	var light := LIGHT_LAMP_M * sqrt(float(int(d.get("lamps", 0)))) if int(d.get("lamps", 0)) > 0 else 0.0
+	var lit := int(d.get("lamps_lit", d.get("lamps", 0)))  # (phase D: lamps light with power, Infrastructure)
+	var light := LIGHT_LAMP_M * sqrt(float(lit)) if lit > 0 else 0.0
 	return {"noise_m": snappedf(noise, 0.1), "light_m": snappedf(light, 0.1), "value": snappedf(noise + light, 0.1)}
 
 
@@ -758,6 +761,8 @@ func server_hour(hod: int) -> void:
 		_snapshot()
 	Council.server_hour(self)
 	WorkOrders.server_hour(self)
+	Politics.server_hour(self, hod)  # (phase D: factions' moods, theft, splits, pacts)
+	Infrastructure.server_hour(self, hod)  # (phase D: batteries, a lit settlement's pull)
 
 
 ## A meal (at a meal hour under EAT_BELOW, any hour under HUNGRY) and a drink from the stock:
