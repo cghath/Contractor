@@ -279,6 +279,7 @@ func _test_spoilage() -> void:
 	check(Spoilage.season_rate() < 1.0, "winter keeps food (x%.2f)" % Spoilage.season_rate())
 	_set_clock(2, 0.0)
 	# The smoker preserves it.
+	_clear_pack()
 	_give([[&"hammer", 1], [&"planks", 6], [&"scrap_sheet", 3]])
 	var c := _at(5, 0)
 	_stand_by(c + Vector3i(0, 0, -3))
@@ -346,6 +347,7 @@ func _test_spoilage() -> void:
 
 func _test_clinic() -> void:
 	print("The clinic: the bed heals faster, surgery goes bad less, the doctor and the cabinet, quarantine")
+	_clear_pack()
 	_give([[&"hammer", 1], [&"planks", 12], [&"cloth_rag", 4], [&"scrap_sheet", 3]])
 	var cb := _at(9, 0)
 	_stand_by(cb + Vector3i(0, 0, -3))
@@ -411,7 +413,8 @@ func _test_clinic() -> void:
 	check(Clinic.words(players_n) == "in care: Ana Reyes" and float(players_n.get("care_h", 0.0)) > 0.0, "in care with the doctor: %s (and the bite's fever slower)" % Clinic.words(players_n))
 	# Quarantine.
 	var vid := Clinic.server_quarantine(pat)
-	check(vid >= 0 and bool(pat.get("quarantine", false)) and Clinic.patients(st)[0] == pat, "a bitten settler into quarantine; the council votes (%d)" % vid)
+	var pats := Clinic.patients(st)
+	check(vid >= 0 and bool(pat.get("quarantine", false)) and not pats.is_empty() and pats[0] == pat, "a bitten settler into quarantine; the council votes (%d)" % vid)
 	Clinic.on_vote("hands_pat", "keep them")
 	check(bool(pat.get("quarantine_kept", false)), "the council keeps them in the bed")
 	recs.erase("hands_doc")
@@ -429,6 +432,13 @@ func _set_clock(day: int, hour: float) -> void:
 func _set_now(h: float) -> void:
 	Survival.state()["day"] = floori(h / 24.0)
 	Survival.state()["hour"] = fposmod(h, 24.0)
+
+
+## The pack emptied of what the earlier tests filled it with (firewood, planks, the kills).
+func _clear_pack() -> void:
+	for id: StringName in [&"firewood", &"planks", &"bone", &"hide", &"animal_fat", &"raw_meat", &"raw_fish", &"wild_berries", &"smoked_meat", &"snare", &"axe"]:
+		while player.inventory.remove_one(id):
+			pass
 
 
 func _have(id: StringName) -> int:

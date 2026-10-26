@@ -2,6 +2,7 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **The survivor's hands, spoilage and the clinic built on `claude/survival-hands`** (calls 42, 96, 100-107's player side, 23-26, 60-63): butcher, snare, fish, forage, fell and deadfall through the contextual menu, food freshness and the larder, the smoker/rack/cold store/ice box/fish trap pieces, the clinic's beds and cabinet, the doctor job and quarantine; VERDICT_HERE; see docs/survival_hands.md.
 - **Audio built on `claude/survival-audio`** (calls 63, 76, 142): the soundscape, the tension layer, music moments, voiced
   lines with a bigger-TTS renderer (Piper default, Kokoro / XTTS-v2 by config; no clips rendered yet); R2677 PASS
   (fallenaudio, survival, sound, voice); see docs/survival_audio.md.
