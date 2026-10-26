@@ -1142,12 +1142,44 @@ func _nav_flush() -> void:
 		nav_flushes += 1
 
 
-## The streamed-in chunks whose space meets `bounds` (world).
-func chunks_in(bounds: AABB) -> Array[BuildVoxels]:
-	var out: Array[BuildVoxels] = []
-	for w: BuildVoxels in _chunks.values():
-		if is_instance_valid(w) and AABB(w.global_position, Vector3.ONE * CHUNK_M).intersects(bounds):
-			out.append(w)
+## The built blocks inside `bounds` (this node's space, which is the level's) as boxes for the
+## navigation (call 141): a full block's column merged into one box per run, a half block half
+## high, a slab its slab, a ramp or wedge half high, a pillar its post.
+func nav_boxes(bounds: AABB) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var m := BuildPieces.BLOCK_M
+	var columns := {}  # Vector2i -> [y] of full blocks
+	for c: Vector3i in blocks:
+		if not is_built(c):
+			continue
+		var at := Vector3(c) * m
+		if not AABB(at, Vector3.ONE * m).intersects(bounds):
+			continue
+		match String(blocks[c].get("s", "block")):
+			"block":
+				var key := Vector2i(c.x, c.z)
+				if not columns.has(key):
+					columns[key] = []
+				(columns[key] as Array).append(c.y)
+			"half", "ramp", "wedge":
+				out.append(AABB(at, Vector3(m, m * 0.5, m)))
+			"slab":
+				out.append(AABB(at, Vector3(m, m * 0.2, m)))
+			"pillar":
+				out.append(AABB(at + Vector3(m * 0.2, 0.0, m * 0.2), Vector3(m * 0.6, m, m * 0.6)))
+	for key: Vector2i in columns:
+		var ys: Array = columns[key]
+		ys.sort()
+		var start := int(ys[0])
+		var last := start
+		for i in range(1, ys.size() + 1):
+			if i < ys.size() and int(ys[i]) == last + 1:
+				last = int(ys[i])
+				continue
+			out.append(AABB(Vector3(key.x * m, start * m, key.y * m), Vector3(m, (last - start + 1) * m, m)))
+			if i < ys.size():
+				start = int(ys[i])
+				last = start
 	return out
 
 
