@@ -11,6 +11,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the live convoy and the crew's reward (claude/survival-convoy)
+
+- **Added** the live convoy (`FallenConvoy`, data/survival_convoy.json): a convoy event in the zone being played is a column on the zone's main road, in at one edge and out at the other over its window: the enclave's M-ATV (the cargo) and a technical with 4 guards, or a trader's two carts and a horse with 2 guards; a driver each and the trader (4-8 people). The cargo is the lead vehicle's real hold. It halts at a wreck or a barricade on the road (they get down and push it off, then go on), at the dead near it (the guards shoot; its noise raises the zone's pressure) and at raiders. Walking up openly (not aiming) hails it: it holds and the trader deals from the column's stock on the barter screen; the enclave's sells only to standing 10 and up. Shooting one of its people or taking from its cargo robs it: they turn on you, the owner's standing -30, a convoy_robbed event naming you. The 35% ambush plays out live: raiders wait up the road; the guards all down, the column is lost. A zone with no road keeps the wagon cache; off the played zone it's the far sim's event as before.
+- **Added** the downed crew's reward (`HeliCrew`): "Come with me" on a crew member out at the wreck (they follow as a companion, zone to zone), delivered by walking them to an enclave post or with "Radio a pickup" (a repaired, powered radio); "Take their tags" off a dead one. Delivered: the enclave's standing +15 each (+5 for tags), medical stock (a serum dose at 15%), a journal line and the enclave's thanks on the radio. Left out there, the enclave still takes them back at the window's end, and a player who came near and left them costs 5 standing.
+- **Changed** a robbed convoy's event names the robber; `Barter.trader_problem` honours a record's `min_standing`.
+
 ### Contractor: Fallen, polish (claude/survival-polish)
 
 - **Added** pouches and pockets in the 3D loadout editor (call 134): every pouch, the carrier, the pack and the pockets are drop targets, a square hotspot beside each on the model with its fill; picking one lists what's in it (Take out, drag to another) and what fits (by Inventory's capacities); the template records the container, so saved kits and Apply fill the same pouch. The survival gear editor reads the same hotspots, and survival saved kits refill each pouch.
