@@ -2,6 +2,12 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **The last calls built on `claude/survival-polish`** (calls 134, 136, 139, 141, 142): the 3D loadout editor's
+  pouch and pocket hotspots (drop INTO a pouch, saved kits refill it, survival kits too), Wait an hour / until dusk /
+  until dawn from the ground's menu (interrupted by the dead, a noise, a horde, an event; companions wait along),
+  Continue's world list (put away, never deleted; New world warns on a name in use), builds baked into the navmesh
+  (rebaked 0.25 s after a change; the dead re-path), the Accessibility tab (colour-blind-safe tells with shapes, text
+  size, tension audio, subtitles); polish suite; see docs/survival_polish.md.
 - **Bonds and gunsmithing built on `claude/survival-bonds`** (calls 74, 85): bonds between every pair who spend time
   together (shifts, danger, saves, arguments by traits, gifts, brawls; friends, rivals, enemies, partners who share a bunk
   and grieve), rivals refusing shifts and voting apart, the players' bond deciding risky orders, Gift and Settle it in the
@@ -296,15 +302,15 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 131 | One stealth model for the living too | **Added 2026-10-26**: raiders, settlers and the enclave see, hear and smell with the same cone, noise rings and awareness states as the dead; sneaking past a camp works the same way; their guards are better at it than walkers (phase C). |
 | 132 | Clothing slots and layers | **Added 2026-10-26**: head, face, torso (base, mid, outer), hands, legs, feet, plus the carrier and pack; layers set warmth, wetness, noise (a rain jacket rustles), camouflage and pockets; found clothes as loot that matters (phase B/D). |
 | 133 | Companions use the loadout editor | **Added 2026-10-26**: give and take gear with the 3D loadout editor on a companion, saved kits applied to them, their needs shown beside it (phase B people). |
-| 134 | The 3D loadout editor takes pouches and pockets | **Added 2026-10-26**: **the Captain's addition**: the editor also puts items INTO pouches, backpack pockets and clothing pockets (not only the slots and MOLLE points), for the player and companions (phase B UI). |
+| 134 | The 3D loadout editor takes pouches and pockets | **Added 2026-10-26**: **the Captain's addition**: the editor also puts items INTO pouches, backpack pockets and clothing pockets (not only the slots and MOLLE points), for the player and companions (phase B UI). **Built 2026-10-26**. |
 | 135 | Third-person option | **Added 2026-10-26**: a toggle to third person on foot (as the vehicle camera), aiming first person; melee and stealth unchanged (phase B/C). |
-| 136 | Wait and pass time | **Added 2026-10-26**: at a safe spot (the safehouse, a held building) wait an hour or until dusk or dawn, the world ticking at speed as sleep does, interrupted if something comes (phase B with sleep). |
+| 136 | Wait and pass time | **Added 2026-10-26**: at a safe spot (the safehouse, a held building) wait an hour or until dusk or dawn, the world ticking at speed as sleep does, interrupted if something comes (phase B with sleep). **Built 2026-10-26**. |
 | 137 | Starting season and world size options | **Added 2026-10-26**: New world adds the season you wake in (spring default) and the world size (24 zones now, 48 with wilderness later) (phase D seasons; the size with the wilderness). |
 | 138 | Solo pause, co-op never | **Added 2026-10-26**: a world hosted with nobody joined pauses on the menu; with anyone joined it never does (phase B). |
-| 139 | Saves | **Declined 2026-10-26**: ironman (one save, no reloads) NOT taken; a world autosaves as today and the save rules stay as they are (a world list on Continue still worth having). |
+| 139 | Saves | **Declined 2026-10-26**: ironman (one save, no reloads) NOT taken; a world autosaves as today and the save rules stay as they are (a world list on Continue still worth having). **Built 2026-10-26**. |
 | 140 | Climbing rules for the dead | **Added 2026-10-26**: walkers can't climb or jump (a 1 m wall or a ladder stops them; they pile until the pile is a ramp); runners vault waist-high; crawlers squeeze under and through gaps; walls, platforms and roofs are real safety (phase B/C). |
-| 141 | Builds and the navmesh | **Added**: a requirement on the building lane: placed blocks and pieces update the navigation the dead and the living use within a second; the dead path round or push on them, never through; companions path over stairs and ladders (phase B follow-up). |
-| 142 | Accessibility and readability | **Added**: colour-blind-safe HUD tells (the ring, the eye, load colours with shapes), scalable text, a toggle for the tension audio, subtitles for every bark; checked at the 10 resolutions as the rest of the UI (phase D UI pass). Save migration across builds NOT taken now. |
+| 141 | Builds and the navmesh | **Added**: a requirement on the building lane: placed blocks and pieces update the navigation the dead and the living use within a second; the dead path round or push on them, never through; companions path over stairs and ladders (phase B follow-up). **Built 2026-10-26**. |
+| 142 | Accessibility and readability | **Added**: colour-blind-safe HUD tells (the ring, the eye, load colours with shapes), scalable text, a toggle for the tension audio, subtitles for every bark; checked at the 10 resolutions as the rest of the UI (phase D UI pass). Save migration across builds NOT taken now. **Built 2026-10-26**. |
 
 ## Already in the code to build on
 

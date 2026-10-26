@@ -16,7 +16,7 @@ Phase B's free building (§1-4, §10-11's building part) built on `claude/surviv
   saw, trowel, shovel, cutting_torch; door_key. Some in the "stores" loot table.
 - Not yet: materials from felling and stripping (a dev kit: build mode with dev tools on), templates
   of blueprints, arches and the wall shape, pieces as structural support, stash storage, ladder
-  climbing, the workbench's crafting, navigation rebaked round builds, weather wear (§3), the
+  climbing, the workbench's crafting, weather wear (§3), the
   settlement (§5-9), the "settlement" perfcase, collapses hurting whoever's under them,
   ZombieAI calling `Builder.server_chew_at`.
 
@@ -215,6 +215,31 @@ the attack uses the tactics AI: support by fire on a tower, a breach charge on a
 (chewing wood, piling at a corner until the pile is a ramp: a real risk, the kill corridor and
 the pit are the answers) and on gates. The siege leaves damage to repair and bodies to burn or
 bury (a job).
+
+## 9b. Navigation round builds (call 141, built 2026-10-26 on claude/survival-polish)
+
+Before this, the zone navigation (ZoneNav: 12 m chunks baked in the background around the
+soldiers) read only the modules' voxels: a wall built in the open was not in the navmesh, so the
+dead and companions planned paths straight through it and walked into it. What's done now (the
+cheapest correct fix: a throttled rebake of the touched chunks, no obstacle avoidance):
+- **Blocks**: `ZoneNav._add_builds` adds `Builder.nav_boxes(bounds)` to every chunk's bake: each
+  built block (not a site or blueprint) from Builder's records, a column of full blocks merged into
+  one box per run, a half block, ramp or wedge half high, a slab its slab, a pillar its post. Read
+  from the records, not the voxels (BuildVoxels' edits sit outside VoxelWorld's structures, and
+  reading a chunk's voxels costs too much).
+- **Pieces**: a built piece standing solid joins `NavBuilder.OBSTACLES_GROUP` (BuildPiece.apply),
+  baked in as its collision box. Doors, shutters, hatches, gates and the drawbridge don't (the
+  dead path up to them and push: BuildIntegrity's battering, Builder.server_chew_at); stairs don't
+  (walked up); open or unbuilt pieces don't.
+- **Rebake**: a block stamped or cleared (Builder._op: built, dismantled, fallen) or a piece made,
+  changed or removed marks its footprint (`_nav_touch`); NAV_BATCH_S (0.25 s, Proposed) after the
+  first change of a run, the chunks the merged rectangle touches are rebaked
+  (`ZoneNav.rebake_rect`: off-thread, those baked now). A row of blocks bakes once.
+- **The dead**: ZombieAI asks its path again when the navigation map's iteration changes (at most
+  every REPATH_S, 0.5 s), so a wall built in front of a walker turns it round within a second.
+  Companions path with the squad AI's own queries, which read the same map.
+- Polish suite: a 9 m wall built between two points: the path query goes round it within a second
+  and a zombie's own path changes.
 
 ## 10. Performance
 

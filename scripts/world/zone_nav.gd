@@ -208,3 +208,141 @@ func _add_builds(source: NavigationMeshSourceGeometryData3D, bounds: AABB) -> bo
 	for box in b.nav_boxes(bounds):
 		source.add_faces(_box_faces(box), b.global_transform)
 	return true
+
+
+## True once every chunk wanted around the soldiers is baked and nothing is waiting.
+func is_settled() -> bool:
+	if not _queue.is_empty() or is_rebaking():
+		return false
+	for chunk: Vector2i in _wanted:
+		if region_of(chunk) == null or region_of(chunk).navigation_mesh == null:
+			return false
+	return map_caught_up()  # and the map has taken the last mesh in (a path asked for sooner misses it)
+
+
+## Works out the wanted chunks now (they're also refreshed every UPDATE_S).
+func refresh() -> void:
+	_next_update = Time.get_ticks_msec() / 1000.0 + UPDATE_S
+	_update_wanted(true)
+
+
+## How many chunks are baked (or baking) now.
+func chunk_total() -> int:
+	return _regions.size()
+
+
+func _physics_process(_delta: float) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if now >= _next_update:
+		_next_update = now + UPDATE_S
+		var t_w := Time.get_ticks_usec()
+		_update_wanted()
+		FrameCost.spent(&"nav_wanted", t_w)
+	var t_s := Time.get_ticks_usec()
+	# Start new chunks, nearest first, while there's room, for at most REBAKE_BUDGET_MS a frame
+	# (gathering a chunk's voxels takes milliseconds; 8 at once held fights' frames for 50-200 ms).
+	var until := Time.get_ticks_usec() + int(REBAKE_BUDGET_MS * 1000.0)
+	while not _queue.is_empty() and _baking.size() < MAX_BAKES and Time.get_ticks_usec() < until:
+		var chunk: Vector2i = _queue.pop_front()
+		if _regions.has(chunk) or not _wanted.has(chunk):
+			continue
+		var region := NavigationRegion3D.new()
+		# These chunks share a voxel grid and bake border: their matching vertices join
+		# directly. Skip costly proximity-edge matching only for these zone regions (a chunk
+		# baked from a proxy is baked again once the voxels are: see the class notes).
+		region.use_edge_connections = false
+		region.name = "Chunk_%d_%d" % [chunk.x, chunk.y]
+		add_child(region)
+		NavigationServer3D.region_set_use_async_iterations(region.get_rid(), false)
+		_regions[chunk] = region
+		_request_rebake(chunk)
+	FrameCost.spent(&"nav_start", t_s)
+
+
+## Perf (world content pass, 2026-10-23): the chunks nobody is near any more are looked for every
+## DROP_EVERY passes (and on refresh), not every pass: the wider ring each soldier keeps was most of
+## a pass's marking (~110 chunks a soldier against ~25 wanted), 5-10 ms a pass for a city's ~100 AI.
+const DROP_EVERY := 4
+var _drop_turn := 0
+
+
+func _update_wanted(full := false) -> void:
+	var near := {}  # Vector2i -> distance
+	var keep := {}
+	_drop_turn += 1
+	var drops := full or _drop_turn % DROP_EVERY == 0
+	for s in zone.soldiers_for_navigation():
+		if _riding_past(s):
+			continue
+		var radius := PLAYER_RADIUS_M if not s.is_ai() else AI_RADIUS_M
+		_mark(near, s.global_position, radius)
+		if drops:
+			_mark(keep, s.global_position, radius + DROP_MARGIN_M, false)
+	_wanted = near
+	# Drop chunks nobody is near any more.
+	for chunk: Vector2i in (_regions.keys() if drops else []):
+		if not keep.has(chunk):
+			_regions[chunk].queue_free()
+			_regions.erase(chunk)
+			_waiting.erase(chunk)
+			_again.erase(chunk)
+			_proxied.erase(chunk)
+	var missing: Array[Vector2i] = []
+	for chunk: Vector2i in near:
+		if not _regions.has(chunk):
+			missing.append(chunk)
+	missing.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return near[a] < near[b])
+	_queue = missing
+
+
+## Proposed (world content pass, 2026-10-23): a soldier in a flying helicopter going faster than
+## RIDE_FAST_MS, or more than RIDE_AGL_M over the ground, wants no navigation round him: he can't
+## walk off, and every chunk he flew over was baked and dropped again (from a UH-60 contour-flying
+## at 12.5 m, ~20 bakes a second, each a few ms of gathering on the main thread, R0568). Slowing
+## and coming down to land, the chunks round him are wanted again (UPDATE_S) and bake before anyone
+## gets out. (Ground vehicles keep theirs: VehicleAI plans on the navigation mesh round the vehicle.)
+const RIDE_FAST_MS := 8.0
+const RIDE_AGL_M := 15.0
+
+
+func _riding_past(s: Soldier) -> bool:
+	if s.vehicle == null or not is_instance_valid(s.vehicle):
+		return false
+	var heli := s.vehicle as Helicopter
+	if heli == null or not heli.is_airborne():
+		return false
+	var v := heli.linear_velocity
+	return Vector2(v.x, v.z).length() > RIDE_FAST_MS or heli.height_agl() > RIDE_AGL_M
+
+
+## Marks every chunk within `radius` of `pos` (flat) with its distance from `pos` (`distances`
+## false: with true, for a set). Perf (world content pass, 2026-10-23): the same chunks as before,
+## worked out with plain floats (a Rect2 and a Vector2 per chunk, ~100 AI each marking ~110
+## chunks every UPDATE_S, was a few ms a pass in a city).
+func _mark(into: Dictionary, pos: Vector3, radius: float, distances := true) -> void:
+	var lo := _chunk_of(pos - Vector3(radius, 0, radius))
+	var hi := _chunk_of(pos + Vector3(radius, 0, radius))
+	var half := zone.terrain.size_m * 0.5
+	var r2 := radius * radius
+	for cz in range(lo.y, hi.y + 1):
+		var z0 := _origin.y + cz * ZONE_CHUNK_M
+		var z1 := z0 + ZONE_CHUNK_M
+		if z1 < -half or z0 > half:
+			continue
+		var dz := maxf(maxf(z0 - pos.z, pos.z - z1), 0.0)
+		for cx in range(lo.x, hi.x + 1):
+			var x0 := _origin.x + cx * ZONE_CHUNK_M
+			var x1 := x0 + ZONE_CHUNK_M
+			if x1 < -half or x0 > half:
+				continue
+			var dx := maxf(maxf(x0 - pos.x, pos.x - x1), 0.0)
+			var d2 := dx * dx + dz * dz
+			if d2 > r2:
+				continue
+			var chunk := Vector2i(cx, cz)
+			if not distances:
+				into[chunk] = true
+				continue
+			var d := sqrt(d2)
+			if d < float(into.get(chunk, INF)):
+				into[chunk] = d

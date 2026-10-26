@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, polish (claude/survival-polish)
+
+- **Added** pouches and pockets in the 3D loadout editor (call 134): every pouch, the carrier, the pack and the pockets are drop targets, a square hotspot beside each on the model with its fill; picking one lists what's in it (Take out, drag to another) and what fits (by Inventory's capacities); the template records the container, so saved kits and Apply fill the same pouch. The survival gear editor reads the same hotspots, and survival saved kits refill each pouch.
+- **Added** wait and pass time (call 136): Wait an hour, until dusk or until dawn from the ground's contextual menu at home, indoors or somewhere quiet; the world runs at sleep's speed while everyone waits, needs still run, a short fade and "You waited until dusk (19:00)"; the dead in sight, a horde, a noise or a world event stop it; companions wait along; in co-op every player waits for the clock to speed up.
+- **Added** Continue's world list (call 139): every saved world with its day, season, survivor and generation and when it was last played; Put away moves a world into an archive folder (never deleted); New world warns on a name in use.
+- **Fixed** builds and the navmesh (call 141): built blocks and solid pieces are baked into the zone navigation, rebaked 0.25 s after a change; the dead re-ask their path when the map changes, so they go round a wall (or push on a door) instead of through it.
+- **Added** accessibility (call 142): an Accessibility tab with colour-blind-safe stealth and load tells (blue and orange, the ring dashed, the eye boxed, a mark per load tier), a text size (80-150%) over every UiKit menu and HUD label, the tension audio toggle and subtitles for every bark.
+- **Added** the `polish` suite (tests/polish_test.gd).
+
 ### Contractor: Fallen, bonds and gunsmithing (claude/survival-bonds)
 
 - **Added** bonds between people (`Relationships`, call 74): every pair who spend time together carries a bond (-100..100, kept symmetric in the records' relations) that drifts by the world hour (time together by how their traits get on, the same shift at the settlement, danger shared in the field) and by events (a life saved, arguments between clashing traits like the hot-headed and the calm, the kind comforting someone low, gifts, brawls between enemies); labels stranger, acquaintance, friend, close friend, rival, enemy and partner. Families start bonded and a minded child grows attached to the carer. Adult close friends who get on become partners after two days (a moodlet, one bunk between them, a long grief and a nerve shake when one dies, a breakup when it sours). Rivals refuse to work a shift together and vote apart; a brawl hurts both and puts sending one away to the council. The players' bond: a close companion follows into worse odds and talks you down any time, a low one refuses risky orders and may leave. The talk adds Gift and Settle it (mediation by a computed social skill); the journal's People tab lists each person's bonds.
