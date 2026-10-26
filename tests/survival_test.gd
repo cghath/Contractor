@@ -21,6 +21,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await _test_new_world()
 	if level != null and player != null:
+		await _test_cold_open_and_options()
 		_test_needs()
 		await _test_dead()
 		await _test_melee()
@@ -54,6 +55,50 @@ func _test_new_world() -> void:
 	var have := Survival.kit_of(player.inventory).map(func(e: Dictionary) -> String: return String(e.id))
 	check(have.has("knife") and have.has("water_bottle") and have.has("canned_meat") and not have.has("m4a1"),
 		"a new survivor has the starter kit and no rifle (%s)" % [have])
+
+
+func _test_cold_open_and_options() -> void:
+	print("The cold open and the world options")
+	var st := Survival.state()
+	check(st.has("cold_open") and st.has("start_zone") and String(st.zone) == String(st.start_zone), "a new world opens at the farm with its cold open rolled (%s)" % [st.get("cold_open", {})])
+	var co: Dictionary = st.get("cold_open", {})
+	check(String(co.get("thing", "")) in ColdOpen.THINGS and String(co.get("weather", "")) in ColdOpen.DAY_ONE_WEATHER and String(co.get("author", "")) != "", "the note's author, the thing nearby and day one's weather come from the seed")
+	var points := level.insertion_points()
+	var home := level.ground_point(points[0]) if not points.is_empty() else Vector3.ZERO
+	var notes := level.items.get_children().filter(func(i: Node) -> bool: return i is WorldItem and (i as WorldItem).item_id == &"handwritten_note" and (i as WorldItem).global_position.distance_to(home) < 6.0)
+	check(not notes.is_empty(), "the note lies on the table at the farm (%d within 6 m)" % notes.size())
+	var gifts := level.items.get_children().filter(func(i: Node) -> bool: return i is WorldItem and (i as WorldItem).item_id != &"handwritten_note" and (i as WorldItem).global_position.distance_to(home) < 6.0)
+	check(not gifts.is_empty(), "and what they left beside it (%d things)" % gifts.size())
+	var marks: Array = (st.get("map", {}) as Dictionary).get("marks", [])
+	check(marks.any(func(m: Dictionary) -> bool: return String(m.kind) == "safehouse"), "the farm is marked on the map (%d marks)" % marks.size())
+	check(not (st.get("journal", []) as Array).is_empty(), "the journal has day one's line")
+	if String(co.thing) == "walker_in_barn":
+		check(Survival.zombies(level).any(func(z: Soldier) -> bool: return z.has_meta(&"cold_open")), "and something moves in the barn")
+	check(DayNight.current() != null and DayNight.current().weather == String(co.weather), "the sky is day one's (%s)" % (DayNight.current().weather if DayNight.current() else "no sky"))
+	# The options: defaults, then the dead turned up.
+	check(Survival.option("goal") == "evac" and Survival.option("dead") == "normal" and is_equal_approx(Survival.option_mult("dead"), 1.0), "a world without choices plays at Normal toward the evac")
+	var base := Survival.dead_near(level, player.global_position)
+	Survival.server_set_options({"dead": "high"})
+	check(Survival.dead_near(level, player.global_position) >= base and is_equal_approx(Survival.dead_speed_mult(), 1.15) and is_equal_approx(Survival.option_mult("dead"), 1.5), "the dead on High: half again as many, a little faster (%d -> %d about him)" % [base, Survival.dead_near(level, player.global_position)])
+	Survival.server_set_options({"dead": "normal"})
+	# The screen itself builds and reports its choices.
+	var screen := NewWorldScreen.new(func(_n: String, _s: int, _o: Dictionary) -> void: pass)
+	add_child(screen)
+	await get_tree().process_frame
+	var choices := screen.choices()
+	check(choices.get("goal", "") == "evac" and choices.get("dead", "") == "normal" and choices.has("needs"), "the New world screen offers the goal and the four options (%s)" % [choices])
+	screen.queue_free()
+	# The first night's pressure, when the clock gets there.
+	Survival.state()["pressure"] = {}
+	var hour_was := float(st.hour)
+	st["hour"] = ColdOpen.NIGHT_HOUR + 0.1
+	ColdOpen.server_tick(level)
+	check(Survival.pressure(level) >= ColdOpen.NIGHT_PRESSURE - 0.5 and bool(co.night_done), "the first night brings a little pressure to the farm (%.0f)" % Survival.pressure(level))
+	st["hour"] = hour_was
+	Survival.state()["pressure"] = {}
+	for z: Soldier in Survival.zombies(level):
+		z.queue_free()
+	await get_tree().process_frame
 
 
 func _test_needs() -> void:
@@ -471,6 +516,7 @@ func _seconds(s: float) -> void:
 
 func _test_death() -> void:
 	print("Death")
+	var name_before := Survival.survivor_name(player)
 	player.inventory.take(&"m4a1")
 	var at := player.global_position
 	var before := level.items.get_child_count()
@@ -482,6 +528,9 @@ func _test_death() -> void:
 	check(ids.has("m4a1") and ids.has("knife"), "everything he had lies where he fell (%s)" % [ids])
 	var have := Survival.kit_of(player.inventory).map(func(e: Dictionary) -> String: return String(e.id))
 	check(not have.has("m4a1") and have.has("knife") and have.has("water_bottle"), "and he's back with a starter kit (%s)" % [have])
+	var rec := Survival.survivor_of(player)
+	check(int(rec.get("generation", 0)) >= 2 and String(rec.get("name", "")) != "" and String(rec.name) != name_before, "permadeath: a new survivor, generation %d, %s (was %s)" % [int(rec.get("generation", 0)), rec.get("name", "?"), name_before])
+	check((Survival.state().get("journal", []) as Array).any(func(j: Dictionary) -> bool: return String(j.text).contains("died")), "and the journal says so")
 	check(float(Survival.needs_of(player).thirst) == Survival.RESPAWN_NEEDS, "and his needs at %.0f" % Survival.RESPAWN_NEEDS)
 	var cleanup := level.get_node_or_null(^"ZoneCleanup") as ZoneCleanup
 	if cleanup:

@@ -68,6 +68,10 @@ const HEAR_SHOT := 1.0
 const HEAR_RUN := 0.3
 const HEAR_STEP := 0.12
 const WATCH_S := 0.7  # how long one think's "watched" holds on the player's HUD
+## Sight is a cone: within SEE_DOT of its facing (about 100 degrees each side; behind it, nothing:
+## the silent kill's "from behind"). Something it's after or alert to it keeps in the corner of
+## its eye a little wider.
+const SEE_DOT := -0.2
 
 enum Mode { IDLE, INVESTIGATE, ALERT, CHASE, SEARCH }
 const MODE_NAMES := ["idle", "suspicious", "alert", "chasing", "searching"]
@@ -235,6 +239,12 @@ func _spot() -> Dictionary:
 		var d := body.global_position.distance_to(s.global_position)
 		if d > r:
 			continue
+		var to := s.global_position - body.global_position
+		to.y = 0.0
+		var fwd := -body.global_basis.z
+		fwd.y = 0.0
+		if d > 0.3 and fwd.normalized().dot(to.normalized()) < (SEE_DOT - 0.3 if (s == target or s == aware_of) else SEE_DOT):
+			continue  # behind it
 		# How well: full within the near third, down to nothing at the edge of its reach.
 		var score := clampf(1.0 - (d - r * 0.33) / (r * 0.67), 0.0, 1.0) if d > r * 0.33 else 1.0
 		if score <= best_score:
@@ -346,7 +356,7 @@ func _steer(delta: float) -> void:
 	var night := DayNight.darkness_at(body.global_position) > 0.5
 	var pace := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
-		pace *= NIGHT_WALK_MULT if night else 1.0
+		pace *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
 	_face(body.global_position + dir, delta)
 	var local := body.global_basis.inverse() * dir
 	body.move_input = Vector2(local.x, local.z) * clampf(pace, 0.0, 1.0)

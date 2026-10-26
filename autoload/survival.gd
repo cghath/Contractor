@@ -61,14 +61,44 @@ func state() -> Dictionary:
 
 ## Host: a new world called `name` from `world_seed`, hosted at its start zone under `main`
 ## (the session's Main: the menu's parent).
-func server_new_world(main: Node, name: String, world_seed: int) -> bool:
+func server_new_world(main: Node, name: String, world_seed: int, options := {}) -> bool:
 	var id := _world_id(name)
 	Campaign.campaign_id = PREFIX + id
 	Campaign.reset_campaign()
 	world = id
 	var start := start_zone()
-	state().merge({"seed": world_seed, "day": 1, "hour": START_HOUR, "zone": start, "start_zone": start, "name": name}, true)
+	var opts := DEFAULT_OPTIONS.duplicate()
+	opts.merge(options, true)
+	state().merge({"seed": world_seed, "day": 1, "hour": START_HOUR, "zone": start, "start_zone": start, "name": name, "options": opts}, true)
 	return _host_zone(main, start)
+
+
+## The world's goal and options (NewWorldScreen; calls 7, 49): "goal" evac | sandbox | clear;
+## "dead", "loot", "needs", "world" each low | normal | high. option_mult turns a level into the
+## multiplier the systems use (the dead's density and night speed, the needs' rates, ...).
+const DEFAULT_OPTIONS := {"goal": "evac", "dead": "normal", "loot": "normal", "needs": "normal", "world": "normal"}
+const OPTION_MULTS := {"low": 0.6, "normal": 1.0, "high": 1.5}
+const SPEED_MULTS := {"low": 0.85, "normal": 1.0, "high": 1.15}
+
+
+func option(key: String) -> String:
+	return String((state().get("options", {}) as Dictionary).get(key, DEFAULT_OPTIONS.get(key, "normal")))
+
+
+func option_mult(key: String) -> float:
+	return float(OPTION_MULTS.get(option(key), 1.0))
+
+
+## The dead's pace multiplier from the "dead" option (ZombieAI).
+func dead_speed_mult() -> float:
+	return float(SPEED_MULTS.get(option("dead"), 1.0))
+
+
+## Host: the options changed mid-world (tests, a dev key); the next spawns and ticks use them.
+func server_set_options(options: Dictionary) -> void:
+	var opts: Dictionary = state().get("options", DEFAULT_OPTIONS.duplicate())
+	opts.merge(options, true)
+	state()["options"] = opts
 
 
 ## Host: carries on the world `name` (or the newest), where it was left, under `main`.
@@ -139,6 +169,7 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	running = true
 	_apply_sky(level)
 	_seed_crowd(level)
+	ColdOpen.server_begin(level)  # a new world's first hour (once)
 
 
 ## Host: the world is saved: the world's sections and the zone being played.
@@ -274,6 +305,7 @@ func _process(delta: float) -> void:
 		for s: Soldier in MapNodes.players(level):
 			if s.vitals.is_up() and s.respawn_state != Soldier.RESPAWN_WAITING:
 				server_drain(s, dt)
+		ColdOpen.server_tick(level as SurvivalLevel)
 	_pop += delta
 	if _pop >= POP_TICK_S:
 		_pop = 0.0
@@ -313,13 +345,55 @@ func server_player_died(s: Soldier) -> void:
 	var graves: Array = state().get("graves", [])
 	graves.append({"profile": profile_of(s), "zone": String(state().get("zone", "")), "pos": [at.x, at.y, at.z], "day": day(), "items": entries.size()})
 	state()["graves"] = graves.slice(-20)
+	# Permadeath (calls 13, 51): the survivor is gone; the player wakes as a new one, from zero
+	# (the skills and perks of the RPG layer die with the old one, phase B), at the safehouse.
+	var old_name := survivor_name(s)
+	var fresh := _new_survivor(s)
 	server_give_starter_kit(s)
 	var n := needs_of(s)
 	n.hunger = RESPAWN_NEEDS
 	n.thirst = RESPAWN_NEEDS
 	s.needs_stamina = 1.0
 	_send_needs(s)
-	SessionLog.note("survival: %s died at (%.0f, %.0f); %d things left there; back with the starter kit" % [s.log_name(), at.x, at.z, entries.size()])
+	_journal_line("%s died. %s came to the farm." % [old_name, String(fresh.name)])
+	if not s.is_ai():
+		s._client_message.rpc_id(s.owner_peer(), "%s is dead. You are %s now." % [old_name, String(fresh.name)])
+	SessionLog.note("survival: %s died at (%.0f, %.0f); %d things left there; %s takes his place (generation %d)" % [old_name, at.x, at.z, entries.size(), String(fresh.name), int(fresh.generation)])
+
+
+## The survivor record of `s` in the save ("survivors"[profile]): name, generation, born_day.
+func survivor_of(s: Soldier) -> Dictionary:
+	var all: Dictionary = Campaign.section(SURVIVORS)
+	var rec: Dictionary = all.get(profile_of(s), {})
+	if not rec.has("name"):
+		rec = _new_survivor(s, rec)
+	return rec
+
+
+func survivor_name(s: Soldier) -> String:
+	return String(survivor_of(s).get("name", s.log_name()))
+
+
+## Host: a new survivor for `s`'s profile: a name, the next generation, born today; the old
+## record's zone, pos and kit are replaced on the next store.
+func _new_survivor(s: Soldier, keep := {}) -> Dictionary:
+	var all: Dictionary = Campaign.section(SURVIVORS)
+	var old: Dictionary = all.get(profile_of(s), {})
+	var gen := int(old.get("generation", 0)) + 1
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([profile_of(s), gen, int(state().get("seed", 0))])
+	var who := Names.person(rng, &"friendly", &"rifleman")
+	var rec := keep.duplicate()
+	rec.merge({"name": "%s %s" % [String(who.get("first", "Sam")), String(who.get("surname", "Reed"))], "generation": gen, "born_day": day()}, true)
+	all[profile_of(s)] = rec
+	s.set_meta(&"survivor_name", String(rec.name))
+	return rec
+
+
+func _journal_line(line: String) -> void:
+	var j: Array = state().get("journal", [])
+	j.append({"day": day(), "hour": snappedf(hour(), 0.1), "text": line})
+	state()["journal"] = j.slice(-200)
 
 
 ## Host: a fresh survivor's kit (STARTER_KIT), whatever he had.
@@ -350,7 +424,9 @@ func _store_survivor(s: Soldier) -> void:
 	var all: Dictionary = Campaign.section(SURVIVORS)
 	var entries := kit_of(s.inventory)
 	var p := s.global_position
-	all[profile_of(s)] = {"zone": String(state().get("zone", "")), "pos": [p.x, p.y, p.z], "needs": needs_of(s).duplicate(), "kit": entries}
+	var rec: Dictionary = survivor_of(s).duplicate()
+	rec.merge({"zone": String(state().get("zone", "")), "pos": [p.x, p.y, p.z], "needs": needs_of(s).duplicate(), "kit": entries}, true)
+	all[profile_of(s)] = rec
 
 
 ## What `inv` holds, as Inventory.strip() lists it, without taking it off.
@@ -375,7 +451,9 @@ static func kit_of(inv: Inventory) -> Array:
 func server_survivor_joined(s: Soldier) -> void:
 	var saved: Dictionary = (Campaign.section(SURVIVORS) as Dictionary).get(profile_of(s), {})
 	s.inventory.strip()
-	if saved.is_empty():
+	var rec := survivor_of(s)  # (names a fresh survivor on his first join)
+	s.set_meta(&"survivor_name", String(rec.get("name", "")))
+	if saved.is_empty() or not saved.has("kit"):
 		server_give_starter_kit(s)
 	else:
 		for e: Dictionary in saved.get("kit", []):
@@ -413,7 +491,7 @@ var _zombie_n := 0
 func dead_near(level: ZoneLevel, pos: Vector3) -> int:
 	var m := level.module_at(pos)
 	var base := ZoneModules.base(String(m.type)) if m else ""
-	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2)))
+	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2))) * option_mult("dead")
 	return roundi(n * (1.0 - thinned(pos)))
 
 
