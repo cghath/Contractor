@@ -59,6 +59,19 @@ const NODE_NAME := &"VehicleCamera"
 ## key flips it; it holds across seats, vehicles and levels until the game closes).
 static var chase := not FIRST_PERSON_DEFAULT
 
+## On foot (survival, call 135): the same key (B; with binoculars carried, Shift+B, since B
+## raises them) swaps first person for this camera over the shoulder: FOOT_ARM_M behind the eye
+## and FOOT_SHOULDER_M to the right (left-handed: the left), pulled in by walls like the vehicle
+## arm. Aiming (right mouse), the binoculars and being down give first person back while they
+## last; melee, stealth and the HUD are as they were (the rays still come from the eye). The
+## body is drawn (this camera sees your own layer); the first-person weapon isn't. Proposed.
+static var on_foot := false
+const FOOT_ARM_M := 2.4
+const FOOT_SHOULDER_M := 0.55
+const FOOT_LIFT_M := 0.15
+## The first-person weapon's layer (PlayerInput.VIEW_MODEL_LAYER), left out on foot.
+const VIEW_MODEL_MASK := 1 << 2
+
 var body: Soldier
 ## Whether this camera is the view now (seated with the chase view on).
 var active := false
@@ -93,6 +106,25 @@ static func toggle() -> String:
 	return "Third person" if chase else "First person"
 
 
+## Flips the on-foot view (survival); returns its name for the HUD.
+static func toggle_foot() -> String:
+	on_foot = not on_foot
+	return "Third person" if on_foot else "First person"
+
+
+## Whether the view key on foot is the third-person toggle for `s`: in a survival zone, not
+## aboard anything, and Shift held or no binoculars to raise (B raises them).
+static func foot_key(s: Soldier, shift: bool) -> bool:
+	if s == null or is_instance_valid(s.vehicle) or Vehicle.ride_of(s) != null or SurvivalLevel.of(s) == null:
+		return false
+	return shift or s.inventory.count_of(&"binoculars") == 0
+
+
+## Whether the on-foot third person is the view for `s` now (on, up and about, not aiming).
+static func foot_wanted(s: Soldier) -> bool:
+	return on_foot and s != null and Vehicle.ride_of(s) == null and not is_instance_valid(s.vehicle) and SurvivalLevel.of(s) != null and s.vitals.is_up() and not s.is_aiming and not s.binoculars_up
+
+
 func _process(delta: float) -> void:
 	follow(delta)
 
@@ -103,6 +135,15 @@ func follow(delta: float) -> void:
 		return
 	var v := Vehicle.ride_of(body)
 	var want := v != null and chase
+	if v == null and foot_wanted(body):
+		_vehicle = null
+		place_foot(delta)
+		cull_mask = 0xFFFFF & ~VIEW_MODEL_MASK
+		if not active:
+			active = true
+			current = true
+		return
+	cull_mask = 0xFFFFF
 	if not want:
 		if active:
 			active = false
@@ -173,6 +214,40 @@ func place(delta: float) -> void:
 	global_transform = Transform3D(Basis.from_euler(Vector3(look.y, look.x, 0.0)), _pivot + back * _arm)
 	fov = body.camera.fov  # aiming zooms here too
 	far = body.camera.far
+
+
+## On foot: over the shoulder, behind the eye along the look, pulled in by walls.
+func place_foot(delta: float) -> void:
+	var look := look_angles()
+	var turn := Basis.from_euler(Vector3(look.y, look.x, 0.0))
+	var eye := body.camera.global_position + Vector3.UP * FOOT_LIFT_M
+	var side := turn * Vector3.RIGHT * FOOT_SHOULDER_M * (-1.0 if body.left_handed else 1.0)
+	var shoulder := eye + side * _foot_share(eye, side)
+	var back := turn * Vector3.BACK * FOOT_ARM_M
+	var free := FOOT_ARM_M * _foot_share(shoulder, back)
+	if _arm < 0.0 or _vehicle != null or free < _arm:
+		_arm = free
+	else:
+		_arm = move_toward(_arm, free, ARM_OUT_SPEED * delta)
+	_pivot = shoulder
+	global_transform = Transform3D(turn, shoulder + turn * Vector3.BACK * _arm)
+	fov = body.camera.fov
+	far = body.camera.far
+
+
+func _foot_share(from: Vector3, motion: Vector3) -> float:
+	var space := body.get_world_3d().direct_space_state if body.is_inside_tree() else null
+	if space == null:
+		return 1.0
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _sphere
+	q.transform = Transform3D(Basis(), from)
+	q.motion = motion
+	q.collision_mask = ARM_MASK
+	var exclude: Array[RID] = [body.get_rid()]
+	q.exclude = exclude
+	var r := space.cast_motion(q)
+	return r[0] if r.size() > 0 else 1.0
 
 
 ## How much of `motion` from `from` a sphere travels before it meets terrain, a building or

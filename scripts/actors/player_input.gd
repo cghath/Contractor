@@ -410,6 +410,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"auto_walk") and not is_instance_valid(body.vehicle):
 		body.movement.auto_walk = not body.movement.auto_walk and body.vitals.is_up()
 		hud.flash("Auto-walk on (W or S to stop)" if body.movement.auto_walk else "Auto-walk off")
+	elif event.is_action_pressed(VehicleCamera.ACTION) and VehicleCamera.foot_key(body, event is InputEventWithModifiers and (event as InputEventWithModifiers).shift_pressed):
+		hud.flash(VehicleCamera.toggle_foot())  # survival on foot: third person over the shoulder <-> first (call 135)
 	elif event.is_action_pressed(&"binoculars") and not is_instance_valid(body.vehicle):
 		_set_binoculars(not body.binoculars_up)
 	elif event.is_action_pressed(&"nvg_toggle"):

@@ -3,7 +3,7 @@ extends RefCounted
 ## The seasons on the body (docs/survival_medical.md section 6, call 34): which season it is
 ## (Survival.season() when the world lane has it, else spring), how hard the cold bites
 ## (cold_mult), thirst in the heat, food's shelf life, the warmth clothes add (clothing_warmth:
-## a `warmth` value on the clothing items; the full clothing slots are another call), heat
+## the worn clothing layers, Clothing), heat
 ## stroke in summer (heat_gain, the mirror of hypothermia) and frostbite on exposed hands and
 ## face in winter (Body.server_step adds the wound). Static: the numbers are testable without a body.
 
@@ -72,34 +72,18 @@ static func spoils_days(item: ItemData, season_id := "", in_fridge := false) -> 
 	return float(item.stats.spoils_days) * spoil_mult(season_id if season_id != "" else season())
 
 
-## The warmth `inv`'s clothing adds (0 .. CLOTHING_MAX): every equipped slot's item and every
-## clothing item carried (once per kind: until the clothing slots, a carried layer is worn).
+## The warmth `inv`'s clothing adds (0 .. CLOTHING_MAX): what's worn in the clothing slots, dry
+## (Clothing.inv_warmth; the body's own reading, wet layers and all, is Clothing.warmth).
 static func clothing_warmth(inv: Inventory) -> float:
-	if inv == null:
-		return 0.0
-	var total := 0.0
-	var seen := {}
-	for slot: StringName in inv.slots:
-		var id := StringName(inv.slots[slot])
-		if id != &"" and ItemDB.has_item(id):
-			total += float(ItemDB.get_item(id).stats.get("warmth", 0.0))
-			seen[id] = true
-	for c: StringName in inv.containers:
-		for e: Dictionary in inv.containers[c]:
-			var id := StringName(String(e.get("id", "")))
-			if seen.has(id) or not ItemDB.has_item(id):
-				continue
-			var w := float(ItemDB.get_item(id).stats.get("warmth", 0.0))
-			if w > 0.0:
-				total += w
-				seen[id] = true
-	return clampf(total, 0.0, CLOTHING_MAX)
+	return Clothing.inv_warmth(inv) if inv != null else 0.0
 
 
 ## Whether `inv` covers the hands (gloves) and the face (a balaclava or shemagh) against frost.
 static func covers(inv: Inventory, what: String) -> bool:
 	if inv == null:
 		return false
+	if Clothing.covers(inv, what):  # gloves worn, a face layer worn (call 132)
+		return true
 	var ids: Array = ["gloves_tactical"] if what == "hands" else ["balaclava", "shemagh", "gas_mask_gp5", "gas_mask_m50"]
 	for id: String in ids:
 		if inv.count_of(StringName(id)) > 0:

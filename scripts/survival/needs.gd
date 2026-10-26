@@ -156,7 +156,9 @@ static func context_of(s: Soldier) -> Dictionary:
 		ctx.wading = float(s.movement.wet)
 	ctx["cold_mult"] = Rpg.cold_mult(s)  # thin-skinned, thick skin, fitness (Rpg)
 	ctx["season"] = BodySeason.season()  # phase D: winter bites, summer dries (BodySeason)
-	ctx["clothing"] = BodySeason.clothing_warmth(s.inventory)
+	ctx["clothing"] = Clothing.warmth(s)  # the worn layers, less what's soaked (call 132)
+	ctx["layers"] = Clothing.layers(s.inventory)
+	ctx["fire"] = Clothing.near_fire(s)  # clothes dry by a fire
 	return ctx
 
 
@@ -201,7 +203,10 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 		n.sleep = maxf(0.0, float(n.sleep) - 100.0 / SLEEP_AWAKE_H * world_h * (1.5 if work > 1.0 else 1.0))
 	# Wet, then warmth.
 	var indoors := bool(ctx.get("indoors", false))
-	if float(ctx.get("wading", 0.0)) > WADE_WET_M:
+	if ctx.has("layers"):  # clothes: the rain soaks the outer layer first (Clothing, call 132)
+		Clothing.step_wet(n, ctx.layers, world_h, ctx)
+		ctx["clothing"] = Clothing.layers_warmth(ctx.layers, n)
+	elif float(ctx.get("wading", 0.0)) > WADE_WET_M:
 		n.wet = 1.0
 	elif bool(ctx.get("rain", false)) and not indoors:
 		n.wet = minf(1.0, float(n.wet) + WET_RAIN_H * world_h)

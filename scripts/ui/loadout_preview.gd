@@ -38,6 +38,8 @@ var inventory: Inventory
 var gear: GearRig
 var overlay: Control
 var region := "all"
+## Survival's gear editor (LoadoutGear): the clothing slots are markers too (call 132).
+var clothing := false
 var selected := ""
 var hovered := ""
 ## Marker keys left out of the view (the editor's filter: "" none).
@@ -284,6 +286,14 @@ func anchors() -> Array:
 				"choke": Vector3(0, 0.0, -length * 0.48)}.get(m, Vector3.ZERO)
 			_add(at + b * local, "mount:%s:%s" % [slot, m], "%s: %s" % [Loadouts.SLOT_NAMES[slot], GearMounts.NAMES.get(m, m)], "weapon")
 	_add(model.global_transform * Vector3(0.12, 0.62, -0.06), "pockets", "Pockets", "legs")
+	if clothing:
+		var spots := {&"head": [head * Vector3(0.06, 0.24, -0.06), "head"], &"face": [head * Vector3(0, 0.07, -0.13), "head"],
+			&"torso_base": [torso * Vector3(-0.16, 0.12, -0.13), "torso"], &"torso_mid": [torso * Vector3(-0.19, 0.22, -0.12), "torso"],
+			&"torso_outer": [torso * Vector3(-0.22, 0.32, -0.1), "torso"], &"hands": [torso * Vector3(0.3, -0.05, -0.05), "torso"],
+			&"legs": [model.global_transform * Vector3(-0.12, 0.5, -0.06), "legs"], &"feet": [model.global_transform * Vector3(0.1, 0.06, -0.08), "legs"]}
+		for slot: StringName in Inventory.CLOTHING_SLOTS:
+			var id := StringName(inventory.slots.get(slot, &""))
+			_add(spots[slot][0], "slot:" + String(slot), "%s: %s" % [Clothing.NAMES.get(slot, String(slot)), ItemDB.get_item(id).name if id != &"" else "nothing"], String(spots[slot][1]))
 	return _anchors
 
 
@@ -295,6 +305,8 @@ func _add(at: Vector3, key: String, label: String, where: String) -> void:
 ## region, that region's.
 func shown(a: Dictionary) -> bool:
 	if region == "all":
+		if clothing and String(a.key) in ["slot:head", "slot:torso_outer", "slot:legs", "slot:feet"]:
+			return true
 		return String(a.key) in ["slot:helmet", "slot:vest", "slot:backpack", "slot:primary", "slot:sidearm", "slot:launcher", "pockets"]
 	return String(a.region) == region or String(a.key) == selected
 

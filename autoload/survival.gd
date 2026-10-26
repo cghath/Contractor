@@ -427,6 +427,7 @@ func server_give_starter_kit(s: Soldier) -> void:
 	for e: Array in STARTER_KIT:
 		if ItemDB.get_item(StringName(e[0])) != null:
 			s.inventory.take(StringName(e[0]), int(e[1]))
+	Clothing.give_starting_set(s.inventory, "%s|%d" % [profile_of(s), int(survivor_of(s).get("generation", 0))])  # his own clothes (call 132)
 
 
 ## Host: where a survivor comes back in `level`: the safehouse (the start zone's insertion
@@ -458,7 +459,7 @@ func _store_survivor(s: Soldier) -> void:
 ## What `inv` holds, as Inventory.strip() lists it, without taking it off.
 static func kit_of(inv: Inventory) -> Array:
 	var all: Array = []
-	for slot: StringName in Inventory.SLOTS:
+	for slot: StringName in Inventory.all_slots():  # (the clothes worn too: Clothing)
 		if inv.slots.get(slot, &"") != &"":
 			var entry := {"id": String(inv.slots[slot]), "count": 1}
 			if not (inv.slot_state.get(slot, {}) as Dictionary).is_empty():
@@ -677,7 +678,7 @@ func _footsteps(level: SurvivalLevel) -> void:
 			continue
 		var m := s.movement
 		var key: String = "prone" if m.is_prone() else ("crouch" if m.is_crouched() else ("sprint" if m.is_sprinting else String(["slow", "walk", "brisk", "jog"][clampi(m.pace, 0, 3)])))
-		var radius := float(STEP_M[key]) * DayNight.hearing_x() * Rpg.step_noise_mult(s)  # stealth, perks, flaws
+		var radius := float(STEP_M[key]) * DayNight.hearing_x() * Rpg.step_noise_mult(s) * Clothing.noise_mult(s)  # stealth, perks, flaws; a rain jacket rustles
 		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
 		server_noise(s, s.global_position, radius, loud)
 

@@ -41,6 +41,10 @@ signal changed
 ## "exo": a light exoskeleton frame worn over the rest (ExoFrame.SLOT), or the heavy exo its
 ## pilot climbed into (ExoMech: only ever put on there by put_on, never taken).
 const SLOTS: Array[StringName] = [&"primary", &"sidearm", &"helmet", &"vest", &"backpack", &"plate_front", &"plate_back", &"plate_left", &"plate_right", &"launcher", &"exo"]
+## Clothing (survival, call 132: Clothing): head, face, the torso's base, mid and outer layers,
+## hands, legs, feet. Kept apart from SLOTS so the campaign's code that walks SLOTS is as it was;
+## all_slots() is both. A clothing item (its stats' "layer") goes on only where Clothing.enabled().
+const CLOTHING_SLOTS: Array[StringName] = [&"head", &"face", &"torso_base", &"torso_mid", &"torso_outer", &"hands", &"legs", &"feet"]
 const PLATE_SLOTS: Array[StringName] = [&"plate_front", &"plate_back", &"plate_left", &"plate_right"]
 const WEAPON_SLOTS: Array[StringName] = [&"primary", &"sidearm", &"launcher"]
 ## Containers, in the order auto-stow fills them (and reloads search them).
@@ -113,11 +117,18 @@ func _init() -> void:
 	_apply_state({})
 
 
+## Every body slot: SLOTS, then CLOTHING_SLOTS.
+static func all_slots() -> Array[StringName]:
+	var out: Array[StringName] = SLOTS.duplicate()
+	out.append_array(CLOTHING_SLOTS)
+	return out
+
+
 ## Litres a container holds. A pouch counted in units (a mag pouch) reports 1; room_for
 ## decides what fits.
 func capacity(container: StringName) -> float:
 	if container == &"pockets":
-		return POCKETS_L
+		return POCKETS_L + Clothing.pockets_l(self)  # the clothes' pockets add to it (survival)
 	if is_pouch_container(container):
 		var pouch := pouch_item(container)
 		if pouch == null:
@@ -205,7 +216,7 @@ func free_volume(container: StringName) -> float:
 
 func total_mass() -> float:
 	var total := 0.0
-	for slot in SLOTS:
+	for slot in all_slots():
 		if slots[slot] != &"":
 			var worn := ItemDB.get_item(slots[slot])
 			total += worn.mass_kg + contents_mass(state_of(slot)) + Optics.extra_mass(worn, state_of(slot)) + Suppressors.extra_mass(worn, state_of(slot)) + GunAttachments.extra_mass(worn, state_of(slot))  # a carrier's pouches, a gun's optic/suppressor
@@ -256,6 +267,9 @@ func count_of(id: StringName) -> int:
 		for entry: Dictionary in containers[container]:
 			if entry.id == id:
 				total += entry.count
+	for slot: StringName in CLOTHING_SLOTS:  # clothes worn count as had (a uniform, gloves)
+		if slots.get(slot, &"") == id:
+			total += 1
 	return total
 
 
@@ -349,6 +363,8 @@ func unequip(slot: StringName) -> Dictionary:
 		return {}
 	if slot == &"vest" and (PLATE_SLOTS.any(func(s: StringName) -> bool: return slots[s] != &"") or not containers[&"vest"].is_empty()):
 		return {}
+	if slot in CLOTHING_SLOTS and used(&"pockets") > capacity(&"pockets") - float(ItemDB.get_item(id).stats.get("pockets", 0.0)) + 0.0001:
+		return {}  # its pockets hold what the rest can't: empty them first
 	var removed := {"id": id, "state": slot_state.get(slot, {})}
 	if slot == &"backpack" and not containers[&"backpack"].is_empty():
 		removed.state = removed.state.duplicate(true)
@@ -365,7 +381,7 @@ func unequip(slot: StringName) -> Dictionary:
 ## ({"id", "count", "state"?}), so it can be left in the world.
 func strip() -> Array[Dictionary]:
 	var all: Array[Dictionary] = []
-	for slot in SLOTS:
+	for slot in all_slots():
 		if slots[slot] != &"":
 			var entry := {"id": slots[slot], "count": 1}
 			if not slot_state.get(slot, {}).is_empty():
@@ -406,6 +422,13 @@ func remove_one(id: StringName) -> bool:
 			if list[i].id == id:
 				remove_entry(container, i)
 				return true
+	for slot: StringName in CLOTHING_SLOTS:  # (count_of counts what's worn)
+		if slots.get(slot, &"") == id:
+			slots[slot] = &""
+			slot_state.erase(slot)
+			_bump_revision(slot)
+			_commit()
+			return true
 	return false
 
 
@@ -789,6 +812,11 @@ func entry_fit_problem(container: StringName, index: int) -> String:
 ## takes them (light plates fit only the light carrier; medium and heavy plates only the
 ## bigger ones) and a free pocket of the right kind.
 func fit_problem(item: ItemData) -> String:
+	var cloth := Clothing.slot_of(item)
+	if cloth != &"" and item.slot == &"":
+		if not Clothing.enabled():
+			return "%s isn't worn here" % item.name
+		return "" if slots.get(cloth, &"x") == &"" else "Already wearing %s" % ItemDB.get_item(slots[cloth]).name
 	if item.slot == &"":
 		return "%s isn't worn" % item.name
 	if ExoMech.is_mech(item):
@@ -1309,7 +1337,8 @@ func _free_slot_for(item: ItemData) -> StringName:
 		return &""  # a heavy exo is climbed into (put_on), its gun is only its pilot's
 	match item.slot:
 		&"":
-			return &""
+			var cloth := Clothing.slot_of(item)  # clothing: its layer's slot, when free (survival)
+			return cloth if cloth != &"" and Clothing.enabled() and slots.get(cloth, &"x") == &"" else &""
 		&"plate", &"side_plate":
 			# Plates need a carrier that takes them, and only fit the pockets it has.
 			if slots[&"vest"] == &"" or not ArmorRules.plate_fits(item, ItemDB.get_item(slots[&"vest"])):
@@ -1442,10 +1471,10 @@ func _receive_ammo() -> void:
 
 func _apply_state(state: Dictionary) -> void:
 	if not _committing:
-		for slot in SLOTS:  # replaced wholesale (stripped, a loot undone, a zone load): new items
+		for slot in all_slots():  # replaced wholesale (stripped, a loot undone, a zone load): new items
 			_bump_revision(slot)
 	slots.clear()
-	for slot in SLOTS:
+	for slot in all_slots():
 		slots[slot] = StringName(state.get("slots", {}).get(slot, &""))
 	slot_state = state.get("slot_state", {}).duplicate(true)
 	containers.clear()

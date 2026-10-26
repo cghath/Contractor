@@ -87,6 +87,7 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(talk.call("threaten", "Threaten", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.SQUADMATE:
 		if status == "companion":
+			out.append({"id": &"talk_gear", "label": "Gear", "target": target, "disabled": "", "call": func() -> void: LoadoutGear.open_on(actor, target as Soldier)})
 			out.append(talk.call("how", "How are you?", {}, ""))
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
 			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
@@ -177,6 +178,8 @@ static func _zone_name(zone_id: String) -> String:
 
 ## Host: `actor` did `action` (with `arg`) on the survivor `target`. Returns the line they said.
 static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, action: String, arg := {}) -> String:
+	if action == "gear":  # the gear editor's ops (LoadoutGear; the actor's own kit too)
+		return CompanionGear.server_op(actor, target, arg)
 	var rec := layer.record_of(target)
 	if rec.is_empty() and target and target.has_meta(&"world_person"):
 		rec = WorldSim.people().get(String(target.get_meta(&"world_person")), {})

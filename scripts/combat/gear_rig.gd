@@ -418,6 +418,7 @@ func _rebuild() -> void:
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
+	ClothingArt.dress(model, inventory, render_layers, carrier != null, _armor.has(&"helmet"))  # worn clothes (survival, call 132)
 	# Inside a heavy exo, the pilot's body and kit don't show (ExoMech.hide_pilot): his head does.
 	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _gear.get(&"backpack", [&"", null])[1], _pouches, _straps, _tape]
 	for slot: StringName in _armor:

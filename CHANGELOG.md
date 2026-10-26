@@ -11,6 +11,15 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, clothing, the gear editor and third person (claude/survival-clothing)
+
+- **Added** clothing slots and layers (`Clothing`, `Inventory.CLOTHING_SLOTS`, call 132): head, face, torso base / mid / outer, hands, legs, feet beside the carrier, helmet and pack; 25 clothing items (type "clothing": layer, warmth, wet_resist, noise, camo, pockets, durability) as loot (home, barracks, stores, a "clothes" table and pool); every survivor and companion starts dressed; the tactical gloves, balaclava, shemagh and enclave uniform are clothing now (still counted for the disguise and the frost)
+- **Added** wet layers: rain soaks the outer layer first, what it can't hold goes in to the next and then the skin; a wet layer keeps less warmth; clothes dry over time and six times faster by a fire. The body's cold reads the worn layers (`Clothing.warmth`, `Needs.context_of`), not carried items
+- **Added** a rain jacket's rustle on the dead's hearing (`Clothing.noise_mult` in `Survival._footsteps`), camouflage by terrain for the living's sight later (`Clothing.camo_mult`), the clothes' pockets added to the pockets container; simple coloured overlays for the clothes on the body (`ClothingArt`)
+- **Added** the gear editor in the field (`LoadoutGear`, `CompanionGear`, calls 133-134): "Gear" in a companion's talk menu opens their kit with their body in 3D (the clothing slots marked), their needs, mood, clothes and warmth beside it; give, take and move item by item into slots, MOLLE points and INTO the pockets, vest, backpack and any pouch, with Inventory's capacity rules on the host; saved kits applied to a companion from what you carry; your own kit too
+- **Added** third person on foot in a survival zone (`VehicleCamera.on_foot`, call 135): B (Shift+B with binoculars carried) puts the camera over the shoulder, pulled in by walls; aiming, binoculars and being down give first person back; your own body is drawn
+- **Added** the clothing suite (tests/clothing_test.gd)
+
 ### Contractor: Fallen, fauna and flora (claude/survival-nature)
 
 - **Added** wildlife (`Wildlife`, `Nature`, data/survival_fauna.json; calls 42, 100, 103): deer, boar, rabbits, bird flocks, wolf and feral dog packs, a bear in deep woods, raccoons at the stores, laid out by habitat and season away from the players, drawn on every peer (`NatureArt`), with hit boxes; prey flees the living, the dead and noise (`Survival.server_noise`), a running herd or a lifted flock is a tell (a companion says it); the dead go after animals they see and bite them down, and walk to carcasses and blood by smell (`Wildlife.smell_sources()`, the crowd drifts to them); a round kills, snares catch rabbits over the hours, tracking at fieldcraft 3, butchering gives raw meat and hides and leaves blood; the hunter's calendar from fieldcraft 2 (fish from 4).

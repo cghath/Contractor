@@ -173,6 +173,15 @@ func _has_peers() -> bool:
 	return multiplayer.has_multiplayer_peer() and not multiplayer.get_peers().is_empty()
 
 
+## A companion's state for the gear editor (CompanionGear.info_of), from the host (LoadoutGear).
+signal gear_info(info: Dictionary)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_gear_info(info: Dictionary) -> void:
+	gear_info.emit(info)
+
+
 @rpc("authority", "call_remote", "reliable")
 func _client_known(key: String, info: Dictionary) -> void:
 	if info.is_empty():
@@ -359,6 +368,7 @@ func _dress(s: Soldier, rec: Dictionary) -> void:
 	for e: Dictionary in rec.get("kit", []):
 		if ItemDB.get_item(StringName(String(e.id))) != null:
 			s.inventory.take(StringName(String(e.id)), int(e.get("count", 1)), GameState.from_json(e.get("state", {})))
+	Clothing.dress_if_bare(s.inventory, String(rec.id))  # their own clothes (call 132)
 	if not rec.get("needs") is Dictionary or (rec.needs as Dictionary).is_empty():
 		rec["needs"] = Needs.fresh()
 	Needs.ensure(rec.needs)
