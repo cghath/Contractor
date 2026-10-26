@@ -22,8 +22,11 @@ Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), 
   silent kill), `Soldier._server_melee`, `VoxelArt._melee` models; survival suite's "Melee weapons" section.
   **Step 3 the stealth model and step 4 S3 (ZoneDead crowd, zone pressure, local hordes, the four specials)
   built 2026-10-26**; step 5 the metabolism on claude/survival-metabolism (an Opus lane). **Step 6 (the cold open,
-  permadeath, the New world screen with the goal and world options) built 2026-10-26.** Step 7 the map on
-  claude/survival-map (an Opus lane). Next: step 8 (perfcases, CI, a build), then phase B.
+  permadeath, the New world screen with the goal and world options) built 2026-10-26.** Step 8's `fallen` perf suite built (R2623 PASS: a survival night at 22 ms a frame). Next: merge the lanes, a build, then phase B.
+- **Step 7 the map (first form) built 2026-10-26 on `claude/survival-map`** (R2622, R2626 at 61e1ab91: map PASS, the
+  survival suite's map section all ok; its other fails were the base's melee/stealth ones b2e9038f fixed):
+  `SurvivalMap` (explored 64 m cells, known zones, marks that age and fade past 3 days, the safehouse)
+  and `FallenMap` (one map, the world grid zooming into the zone). Merged into claude/survival 2026-10-26. Later: real-map relief/roads, intel layers.
 - **(closed 2026-10-26) OPEN BUG:** survival_test's parry check failed: the bite lands ("melee_winding" gone) but the
   parry branch isn't taken and the player isn't hurt, so `Melee._land` most likely found no target at land time
   (`target_in_front` null: the player may move or turn in the windup; the test's zombie has process disabled).

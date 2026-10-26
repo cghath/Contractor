@@ -11,6 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase A step 7: the map, first form (claude/survival-map, calls 37 and 45)
+
+Local: survival and map suites (see the run number in docs/survival.md's "Where the build is").
+
+- **Added (what the survivors know):** `SurvivalMap` over the world save's "map" section: the
+  64 m cells the survivors have come within 120 m of, per zone (a host tick); the known zones
+  (visited or told); marks `{zone, pos, text, kind, day_added, day_seen}` that age in world days
+  and fade past 3 days unseen (Proposed; the safehouse never fades), seen again when a survivor
+  passes within 30 m. The safehouse (the start zone's insertion point) is a mark from the start.
+  The host sends the section on join and on every change (new cells as they come).
+- **Added (one map):** `FallenMap`, shown by the map screen (M) on a survival zone: the world grid
+  far out (known zones named, the rest fog, the zone being played framed, marks as glyphs) blending
+  as you zoom into the zone under the view (its map picture for the zone being played, a plain
+  shade for the others), unexplored cells fogged, your position, marks with their text and age,
+  fainter as they age. Tab / World zooms out to the world instead of the theatre map; right click
+  or a double click adds a mark, Delete removes one. The campaign's map is unchanged.
+
 ### Contractor: Fallen, phase A: the melee core fixed and the melee weapons (claude/survival, S2b)
 
 Local: survival suite (see the run numbers in docs/survival.md's "Where the build is").
