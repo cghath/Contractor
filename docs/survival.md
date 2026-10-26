@@ -1,6 +1,19 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~08:40 CDT)
+## Where the build is (2026-10-26 ~09:25 CDT)
+
+- **PHASE D COMPLETE on claude/survival**: the body (claude/survival-body: bite clock, infection, surgery, sicknesses,
+  water works, hygiene, seasons on the body, the body screen) and the world (claude/survival-seasons: seasons + the thaw,
+  sieges, politics, infrastructure, traps/lures/masking) merged; survival, body, seasons, worldsim, settlement, medical
+  PASS (R2666, R2667). **Slice D build**: B:\Contractoruilds\contractor-2026-10-26-090852-B2668-fallen-slice-d-cbd6477d (+ .zip).
+- **Phases A-D are all built.** Left (the calls table): fauna and flora (100-108), the dead's decay/dress/nests (112-115),
+  the nerve meter, cannibalism, addictions, dreams (116-119), condition and wear (120-123), world events, loot states,
+  co-op drop-in, the mod kit (124-127), children, faith, letters (128-130), clothing layers, the loadout editor for
+  companions and pouches, third person (132-135), climbing in full, navmesh with builds, accessibility (140-142), the
+  audio tension layer and the bigger TTS (63, 76), relationships (74), top crafting (85), spoilage, clinic pieces.
+  Next lanes after the 11:30 CDT reset: fauna+flora; the dead over time; clothing + loadout; audio; condition/wear.
+
+### (earlier) 2026-10-26 ~08:40 CDT
 
 - **PHASE C COMPLETE on claude/survival (8e58e721)**: world sim, settlement work, intel/trade, enclave/ARCHE/bunkers/cure
   and mounts lanes merged; survival, mounts, enclave, intel, worldsim, vehicles PASS (R2660). **Slice C build B2661**:
