@@ -537,6 +537,7 @@ func server_tick() -> void:
 ## seen, bodies left out (mood and pressure), promises broken.
 func server_hour() -> void:
 	var night := Survival.hour() >= 21.0 or Survival.hour() < 5.0
+	Sickness.server_spread_people(records().values(), 1.0)  # colds and flu pass between people living together (phase D)
 	var crowd := ZoneDead.of(level)
 	var horde := crowd != null and crowd.horde_count() > 0
 	var zone := _zone()

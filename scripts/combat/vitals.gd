@@ -1031,6 +1031,43 @@ func server_add_wound(part: StringName, kind: String, rate: float) -> Dictionary
 	return w
 
 
+## Host only (survival's body: Infection, Surgery). The wound model's own wound Dictionaries
+## (live: Infection puts its record id "bw" on them).
+func server_wounds() -> Array[Dictionary]:
+	return _model.wounds
+
+
+## Whether wound `w` (one of server_wounds) bleeds now.
+func wound_bleeds(w: Dictionary) -> bool:
+	return _model.rate_now(w) > 0.0
+
+
+## Host only. Wound `w` healed over the days (Infection): it goes.
+func server_heal(w: Dictionary) -> void:
+	_model.wounds.erase(w)
+	_model.update_state(0.0)
+	_after_change(true)
+
+
+## Host only. Every wound on `part` gone (an amputation's surgery: the stump is a new wound).
+func server_heal_part(part: StringName) -> void:
+	for w: Dictionary in _model.wounds.duplicate():
+		if w.part == part:
+			_model.wounds.erase(w)
+	_model.update_state(0.0)
+	_after_change(true)
+
+
+## Host only. The wound Infection knows as `bw` stitched shut: it stops bleeding.
+func server_close_wound(bw: int) -> void:
+	for w: Dictionary in _model.wounds:
+		if int(w.get("bw", -1)) == bw:
+			w["treated"] = true
+			w["rate"] = 0.0
+	_model.update_state(0.0)
+	_after_change(true)
+
+
 ## Host only. Dead at once, without a wound: the body a player leaves behind when they
 ## respawn, or a body restored from a zone save (Soldier.server_leave_body).
 func server_kill() -> void:

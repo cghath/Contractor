@@ -133,6 +133,7 @@ static func respawn(n: Dictionary, needs: float) -> void:
 	n.thirst = needs
 	n._seen_hunger = needs
 	n._seen_thirst = needs
+	Body.reset(n)  # phase D's bite, wounds, sicknesses: a new survivor has none of them
 
 
 # --- Stepping ------------------------------------------------------------------------------
@@ -154,6 +155,8 @@ static func context_of(s: Soldier) -> Dictionary:
 	if s.movement:
 		ctx.wading = float(s.movement.wet)
 	ctx["cold_mult"] = Rpg.cold_mult(s)  # thin-skinned, thick skin, fitness (Rpg)
+	ctx["season"] = BodySeason.season()  # phase D: winter bites, summer dries (BodySeason)
+	ctx["clothing"] = BodySeason.clothing_warmth(s.inventory)
 	return ctx
 
 
@@ -181,7 +184,8 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 			n._announce = String(sick.start)
 	var fat_mult := 1.15 if float(n.fat) <= 0.0 else 1.0
 	n.calories = clampf(float(n.calories) - (KCAL_DAY * work * (1.0 + SHIVER_KCAL * shiver) * fat_mult + float(sick.get("kcal_day", 0.0))) * days, 0.0, MAX_KCAL)
-	n.water = clampf(float(n.water) - (WATER_DAY * work + float(sick.get("water_day", 0.0))) * days, 0.0, MAX_L)
+	var season := String(ctx.get("season", "spring"))
+	n.water = clampf(float(n.water) - (WATER_DAY * work * BodySeason.thirst_mult(season) + float(sick.get("water_day", 0.0))) * days, 0.0, MAX_L)
 	n.protein = maxf(0.0, float(n.protein) - MACRO_DAY * days)
 	n.carbs = maxf(0.0, float(n.carbs) - MACRO_DAY * days * work)
 	n.fat = maxf(0.0, float(n.fat) - MACRO_DAY * days * (1.0 + shiver))
@@ -205,7 +209,7 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 		n.wet = maxf(0.0, float(n.wet) - WET_DRY_H * world_h)
 	var cold := WARM_DARK * float(ctx.get("dark", 0.0)) + WARM_WIND * float(ctx.get("wind", 0.0)) * (0.3 if indoors else 1.0) \
 		+ (WARM_RAIN if bool(ctx.get("rain", false)) and not indoors else 0.0) + WARM_WET * float(n.wet)
-	cold *= float(ctx.get("cold_mult", 1.0))
+	cold *= float(ctx.get("cold_mult", 1.0)) * BodySeason.cold_mult(season) * (1.0 - clampf(float(ctx.get("clothing", 0.0)), 0.0, BodySeason.CLOTHING_MAX))
 	var heat := WARM_BASE + (WARM_MOVE if bool(ctx.get("moving", false)) and asleep == "" else 0.0) + (WARM_BED if asleep == "bed" else 0.0)
 	var core := float(n.warmth)
 	var net := heat - cold
@@ -230,7 +234,12 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 ## The New world screen's "needs" option scales the body's time (call 49: x0.6 to x1.5; Proposed:
 ## every store at once, sleep's restore included).
 static func server_step(s: Soldier, n: Dictionary, seconds: float) -> void:
-	step(n, seconds / (Survival.DAY_MIN * 60.0) * 24.0 * Survival.option_mult("needs"), context_of(s))
+	var world_h := seconds / (Survival.DAY_MIN * 60.0) * 24.0 * Survival.option_mult("needs")
+	var ctx := context_of(s)
+	step(n, world_h, ctx)
+	Body.server_step(s, n, world_h, ctx)  # phase D: the bite's clock, wounds, sicknesses, the season
+	if s.vitals.is_dead():
+		return
 	apply(s, n)
 	var hurt := blood_cost(n)
 	if hurt > 0.0 and s.vitals.is_up():
@@ -268,18 +277,19 @@ static func stamina_mult(n: Dictionary) -> float:
 	var m := food_stamina_mult(float(n.hunger), float(n.thirst))
 	m *= lerpf(SLEEPY_STAMINA_MULT, 1.0, 1.0 - dulled(n))
 	m *= 1.0 - SHIVER_STAMINA * shivering(n)
+	m *= Body.stamina_factor(n)  # fever, sickness, sepsis, heat stroke
 	return m
 
 
 ## Aim sway's share (Vitals.needs_sway): tired and shivering hands shake.
 static func sway_mult(n: Dictionary) -> float:
-	return 1.0 + DULLED_SWAY * dulled(n) + SHIVER_SWAY * shivering(n)
+	return 1.0 + DULLED_SWAY * dulled(n) + SHIVER_SWAY * shivering(n) + Body.sway_add(n)
 
 
 ## How dulled the senses are by lack of sleep, 0 (rested) .. 1 (none left): the stealth model can
 ## shrink a survivor's sight and hearing by it (call 47).
 static func dulled(n: Dictionary) -> float:
-	return clampf((SLEEP_LOW - float(n.get("sleep", 100.0))) / SLEEP_LOW, 0.0, 1.0)
+	return maxf(clampf((SLEEP_LOW - float(n.get("sleep", 100.0))) / SLEEP_LOW, 0.0, 1.0), Body.dulled_add(n))  # and delirium
 
 
 ## How hard he shivers, 0 (warm) .. 1 (frozen through).
@@ -374,7 +384,7 @@ static func words(n: Dictionary) -> Dictionary:
 	w.water = _band(float(n.thirst), [[60.0, "watered"], [35.0, "thirsty"], [15.0, "parched"], [0.01, "dehydrated"]], "bone dry")
 	w.sleep = _band(float(n.sleep), [[60.0, "rested"], [SLEEP_LOW, "tired"], [10.0, "exhausted"]], "dead on your feet")
 	var c := float(n.warmth)
-	w.warmth = "warm" if c >= 36.5 else ("chilly" if c >= SHIVER_C else ("cold, shivering" if c >= FROZEN_C + 0.5 else ("freezing" if c > FROZEN_C else "frozen through")))
+	w.warmth = "overheating" if c >= BodySeason.HEAT_STROKE_C and not Body.has_fever(n) else ("feverish" if c >= 37.8 else ("warm" if c >= 36.5 else ("chilly" if c >= SHIVER_C else ("cold, shivering" if c >= FROZEN_C + 0.5 else ("freezing" if c > FROZEN_C else "frozen through")))))
 	w.hygiene = _band(float(n.hygiene), [[60.0, "clean"], [30.0, "grubby"]], "filthy")
 	for k: String in ["protein", "carbs", "fat", "vitamin_c", "vitamin_d", "iron"]:
 		w[k] = _band(float(n[k]), [[50.0, "good"], [20.0, "low"]], "lacking")
@@ -405,11 +415,11 @@ static func signs(n: Dictionary) -> Array:
 		out.append(w.water)
 	if float(n.sleep) < SLEEP_LOW:
 		out.append(w.sleep)
-	if float(n.warmth) < SHIVER_C:
+	if float(n.warmth) < SHIVER_C or float(n.warmth) >= 37.8:
 		out.append(w.warmth)
 	if float(n.wet) > 0.5:
 		out.append(w.wet)
-	if w.sick != "well":
+	if w.sick != "well" or not Sickness.shown(n).is_empty():
 		out.append("sick")
 	if float(n.hygiene) < 30.0:
 		out.append(w.hygiene)

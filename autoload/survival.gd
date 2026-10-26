@@ -871,6 +871,50 @@ func server_eat(s: Soldier, item: ItemData, state: Dictionary, drug: StringName,
 	return true
 
 
+## The body screen (BodyScreen, phase D): someone else's body as last read from the host
+## ({target path: the body's Dictionary}).
+var read_bodies := {}
+
+
+## Owner -> host: a body screen action (Body.server_action) on the body at `path` (himself, or
+## someone within reach); "read" sends that body's Dictionary back (_client_read_body).
+@rpc("any_peer", "call_local", "reliable")
+func _server_body_action(path: NodePath, action: String, part: String, arg: String) -> void:
+	if not multiplayer.is_server() or not running:
+		return
+	var level := CompoundLevel.current(self)
+	if level == null:
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = multiplayer.get_unique_id()
+	var actor := level.players.get_node_or_null(str(sender)) as Soldier
+	var target := get_node_or_null(path) as Soldier
+	if actor == null or target == null or not actor.vitals.is_up():
+		return
+	if target != actor and actor.global_position.distance_to(target.global_position) > BODY_REACH_M:
+		_tell(actor, "Too far away")
+		return
+	if action == "read":
+		var body := needs_of(target).duplicate(true)
+		if sender == multiplayer.get_unique_id():
+			_client_read_body(path, body)
+		elif sender in multiplayer.get_peers():
+			_client_read_body.rpc_id(sender, path, body)
+		return
+	_tell(actor, Body.server_action(actor, target, action, part, arg))
+	_send_needs(target)
+
+
+const BODY_REACH_M := 3.0
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_read_body(path: NodePath, body: Dictionary) -> void:
+	read_bodies[path] = body
+	body_changed.emit()
+
+
 ## Host: a line for `s`'s owner (Soldier._client_message: the flash).
 func _tell(s: Soldier, text: String) -> void:
 	if s.is_ai() or text == "" or not s.is_inside_tree():
