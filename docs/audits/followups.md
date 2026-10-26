@@ -2155,3 +2155,23 @@ for a second or so side-steps along the obstacle's normal (`get_slide_collision`
 as a player would. On cghath's side, separately: bake static props (the dummies) into the
 compound's navmesh and keep the agent radius at least the capsule's (each changes paths
 everywhere in the compound, so both want the full suite).
+
+## F-224: the co-op soak harness expects the pre-ready-up deploy and a shorter extraction
+
+Found on the v0.7.0 build's first soak (S2605, 2026-10-25, 10 min clean, 3 clients): the harness
+(claude/coop-join, written 2026-10-19) is behind the game it now runs on. Not a game fault: the
+bots joined (late join, leave and rejoin), a contract played with a revive and a confirmed
+extraction, no script errors, no persistent divergence past one 5 s inventory mark.
+
+- Cycle 1 gave up 1.5 s after kitting with "deploy: Waiting for: Player <id>": the briefing now
+  waits for every player's ready-up (FOB ready-up, 2026-10-14) and the bots hadn't readied; the
+  deployment then went ahead on its own at 45 s. The harness should ready each bot up
+  (BaseHub/briefing ready) and wait for all_ready before counting the deploy as failed.
+- Cycle 2 ran 550 s of a 600 s soak and ended "never got back to the base (extraction state 1)":
+  the extraction was gathered and confirmed, the flight home just outran the window. Either count
+  a confirmed extraction as the cycle's end, or make --minutes a per-cycle floor.
+- Shutdown noise: "Attempt to call RPC with unknown peer ID" from Soldier._set_carry_mode via
+  CompoundLevel._server_player_leaves when a carrying peer leaves last; harmless, worth a guard.
+
+Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
+B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
