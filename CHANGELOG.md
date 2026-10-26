@@ -11,6 +11,38 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase B: the free building system (claude/survival-building)
+
+Local: building suite RUN_NUMBER (see docs/survival_building.md's "Where the build is").
+
+- **Added (`Builder`, `BuildPieces`, `BuildVoxels`, docs/survival_building.md §1-4):** survivors build
+  anything within reason on a 0.5 m grid (call 70): blocks of wood, scrap, sandbags, brick, concrete
+  or steel in six shapes (block, half, slab, ramp, wedge, pillar), stamped into voxels that rounds and
+  blasts take like any wall; pieces on the same grid (door, window shutter, floor hatch, gate, stairs,
+  ladder, bunk, stash, workbench, fence, HESCO, wire). Each costs material items and a tool in the
+  inventory (hammer, wrench set, shovel or e-tool, trowel, cutting torch); a block goes in as a site
+  that fills with work (wood 4 s, brick 8, concrete 12, steel 15: Proposed) and keeps its progress when
+  you stop. Blueprints (call 12) are sites nobody has paid for, built later by anyone with the
+  materials. Upgrading in place (wood to brick) costs the difference; dismantling gives back 60%;
+  repair restores a damaged block. Host-authoritative with owner requests, replicated to every peer,
+  late joiners included, and saved with the zone (`GameState.builds`).
+- **Added (`BuildIntegrity`, call 71):** real load: each block's mass flows down and sideways to the
+  ground (terrain or the zone's own buildings) and every material has a capacity and a span (wood 3
+  blocks out, scrap 2, brick 4, concrete 6, steel 8, sandbags stack only). Over either a block cracks
+  and falls 20 s later as voxels with debris, and whatever only it held falls with it. Solved
+  incrementally on a worker thread. Rounds, blasts and breaching charges lower a block's hp and so
+  its capacity; `Builder.server_chew_at` lets the dead chew wood (a block per 6 min with five on it).
+- **Added (`BuildMode`, key 6):** a ghost at the aimed cell coloured green, amber or red by the load
+  it would carry, with the cost; Fire builds (held: a line), the wheel turns it, Shift/Alt + wheel
+  pick the shape (or piece) and material, R blocks/pieces, P blueprint, F upgrade, 4 repair, G
+  dismantle, right-click puts it away.
+- **Added (call 72):** doors, shutters, hatches and gates open and shut from the interaction menu and
+  take a key lock (a door key cut for it) or a code lock; a locked one keeps strangers out and is
+  broken down, not dismantled.
+- **Added (items):** planks, scrap sheet, sandbags, bricks, concrete mix, steel beams; hammer, hand
+  saw, trowel, shovel, cutting torch; door key. Some turn up in stores' loot.
+- **Added (tests):** the `building` suite.
+
 ### Contractor: Fallen, phase A step 5: the metabolism (claude/survival-metabolism)
 
 Local: survival suite (see the run number in docs/survival.md's "Where the build is").

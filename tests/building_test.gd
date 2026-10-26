@@ -196,13 +196,13 @@ func _test_ghost_colour() -> void:
 	check(int(floating.state) == BuildIntegrity.State.FREE and BuildIntegrity.colour(floating.state) == BuildIntegrity.colour(BuildIntegrity.State.OVER),
 		"in the air with nothing under it: red (%s)" % [floating])
 	var cells := {Vector3i(0, 0, 0): BuildIntegrity.entry("wood", 1.0, 1.0, true)}
-	for y in range(1, 11):
+	for y in range(1, 13):
 		cells[Vector3i(0, y, 0)] = BuildIntegrity.entry("wood", 1.0, 1.0, false)
 	var tower := BuildIntegrity.solve(cells)
-	check(int(tower[Vector3i.ZERO].state) == BuildIntegrity.State.OVER and int(tower[Vector3i(0, 4, 0)].state) == BuildIntegrity.State.OK,
-		"a wood tower 11 blocks high overloads its foot (load %.1f of %.1f), its middle holds" % [tower[Vector3i.ZERO].load, tower[Vector3i.ZERO].cap])
+	check(int(tower[Vector3i.ZERO].state) == BuildIntegrity.State.OVER and int(tower[Vector3i(0, 8, 0)].state) == BuildIntegrity.State.OK,
+		"a wood tower 13 blocks high overloads its foot (load %.1f of %.1f), its middle holds" % [tower[Vector3i.ZERO].load, tower[Vector3i.ZERO].cap])
 	var brick := {}
-	for y in 11:
+	for y in 13:
 		brick[Vector3i(0, y, 0)] = BuildIntegrity.entry("brick", 1.0, 1.0, y == 0)
 	check(int(BuildIntegrity.solve(brick)[Vector3i.ZERO].state) != BuildIntegrity.State.OVER, "the same tower in brick stands")
 
@@ -325,6 +325,8 @@ func _test_door() -> void:
 		check(b.server_door(player, id2, "open") == "Locked", "without the key it stays shut")
 		player.inventory.take(BuildPieces.KEY_ITEM, 1, key_entry.get("state", {}))
 		check(b.server_door(player, id2, "open") == "" and bool(b.pieces[id2].open), "with it, it opens")
+		b.server_door(player, id2, "close")
+		check(b.server_door(player, id2, "lock") == "" and bool(b.pieces[id2].locked), "shut and locked again with the key")
 	# Locked doors are broken down.
 	check(b.server_dismantle_piece(player, id) == "It's locked", "a locked door isn't taken down")
 	b.server_hit_piece(id, 30.0)

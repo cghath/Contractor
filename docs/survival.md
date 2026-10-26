@@ -31,6 +31,9 @@ Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), 
   survival suite's map section all ok; its other fails were the base's melee/stealth ones b2e9038f fixed):
   `SurvivalMap` (explored 64 m cells, known zones, marks that age and fade past 3 days, the safehouse)
   and `FallenMap` (one map, the world grid zooming into the zone). Merged into claude/survival 2026-10-26. Later: real-map relief/roads, intel layers.
+- **Phase B's free building built 2026-10-26 on `claude/survival-building`** (building suite RUN_NUMBER): blocks on the 0.5 m grid
+  in six materials and shapes, pieces with key and code locks, real load and span with cracks and falls, blueprints, upgrade
+  in place, build mode on 6; see docs/survival_building.md's "Where the build is" and CHANGELOG.
 - **(closed 2026-10-26) OPEN BUG:** survival_test's parry check failed: the bite lands ("melee_winding" gone) but the
   parry branch isn't taken and the player isn't hurt, so `Melee._land` most likely found no target at land time
   (`target_in_front` null: the player may move or turn in the windup; the test's zombie has process disabled).
