@@ -251,6 +251,8 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 		return DOWNED
 	if vitals.is_dead() and target is Soldier:
 		return DEAD
+	if target is Soldier and vitals.is_up() and TalkMenu.is_survivor(target):
+		return TalkMenu.KIND  # survival: a survivor met in the world (TalkMenu)
 	if target is Soldier and vitals.is_up() and Person.is_person(target):
 		return PERSON
 	if target is Soldier and vitals.is_up() and (target as Soldier).faction == actor.faction:
@@ -268,6 +270,8 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 	var kind := target_kind(actor, target)
 	if kind == &"":
 		return out
+	if kind == TalkMenu.KIND:
+		return TalkMenu.actions_for(actor, target, kind)
 	if kind == OBJECT:
 		for def: Dictionary in target.call(&"interaction_actions", actor):
 			var action := def.duplicate()
@@ -288,6 +292,8 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 			if action.items.is_empty() and why == "":
 				action["disabled"] = {&"stowed_items": "Nothing stowed to give", &"body_items": "Nothing left on them"}.get(def.submenu, "Nothing to treat")
 		out.append(action)
+	if kind in [SQUADMATE, DEAD] and SurvivorsLayer.find(target) != null:
+		out.append_array(TalkMenu.actions_for(actor, target, kind))  # survival: a companion's talk, a burial
 	return _without_repeated_reasons(out)
 
 

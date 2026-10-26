@@ -1250,6 +1250,8 @@ func on_order(new_order: Squad.Order, point: Vector3, slot := 0, count := 1) -> 
 		# 2026-10-14 (helicopter insertion): an AI seated aboard before its first physics
 		# frame (its brain is off while seated) gets its order on the way out: set up first.
 		_setup()
+	if CompanionAI.vetoes(self, new_order, point):
+		return  # a survival companion says no (into a horde, a refusal break: CompanionAI)
 	order = new_order
 	if body == null:
 		return

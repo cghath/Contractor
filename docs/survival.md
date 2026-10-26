@@ -7,6 +7,9 @@
   PASS (R2631). **Slice build B2632**: B:\Contractoruilds\contractor-2026-10-26-020703-B2632-fallen-slice-a-1c5b622b.
 - **Phase B started 2026-10-26 ~02:15**: the building system on claude/survival-building and the RPG layer on
   claude/survival-rpg (Opus lanes); people and the settlement next (survival_people.md, survival_building.md 5-7).
+- **Phase B people built on `claude/survival-people`** (survival_people.md sections 1-6 and 8: the Person
+  record, moods and breaks, lone survivors, hiring by wants, companions with CompanionAI, the talk menu, grief,
+  graves, the rise, the take-over): RUNRESULT; see survival_people.md's "Where the build is".
 - Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
   check now prints why.
 

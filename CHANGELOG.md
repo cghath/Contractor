@@ -11,6 +11,40 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase B: the people (claude/survival-people)
+
+Local: fallenpeople and survival suites (see the run number in docs/survival_people.md's "Where the build is").
+
+- **Added (the one record, `SurvivorPerson`):** everyone living in a survival world is one record in
+  `Survival.state()["people"]` (id, name, age, sex, look, background, traits, skills placeholder, needs,
+  moodlets, break, relations, opinion of each player, want, loyalty, courage, kit, wounds, history,
+  zone, pos, status out_there | companion | settler | captive | dead | player), the same dictionary
+  out in the world, in the squad or dead.
+- **Added (`Moods`):** mood 0-100 from moodlets (survival_people.md section 2's table, ticking per world
+  hour; needs' conditions held while they last); under 20 for four world hours a break rolls by
+  traits: crying, rage, binge, hiding, desertion (at night: a lone survivor again, with a grudge or
+  not), refusal.
+- **Added (`SurvivorsLayer`, "Survivors" on every survival zone):** 2-5 lone survivors a new zone (more
+  near villages) placed by the seed about its sites; bodies within 90 m of a player (PeopleLayer's
+  person, kind "survivor": the dead go for them too), records past 110 m; the wary and hostile warn
+  you off. Hiring by a want (money in cash items, an item off the want list, a favour marked on the
+  map, a place: the safehouse); joined, they're a friendly squadmate (SquadAI, follows, the squad's
+  orders) with a `CompanionAI` beside it; companions come along to the zone hosted and are saved
+  with the world. Death: the body stays, the others grieve, a body left out costs mood and a little
+  pressure; burying (a shovel or by hand) leaves a grave marker and eases the grief; killed by the
+  dead they rise after 3 minutes unless buried; a player's death leaves the newcomer a stranger;
+  `server_take_over` swaps a player's record for a willing companion's (call 51).
+- **Added (`TalkMenu`, `data/survival_lines.json`):** the contextual talk on a survivor (who, want,
+  ask about the place, trade (a stub), recruit, give, threaten), How are you on a companion, Bury on
+  a dead one; lines picked by tags (status, mood band, scared or cocky, traits, want).
+- **Added (`CompanionAI`):** eats and drinks from their kit and asks for more, sleeps when tired and
+  safe, calls out the dead, picks up food and ammo nearby when the group is stopped, suggests plans,
+  refuses a move into a horde (a second order within a minute is obeyed by the loyal).
+- **Changed:** `SquadAI.on_order` asks `CompanionAI.vetoes` first; `InteractionMenu` has the survivor
+  target kind and a companion's and a dead survivor's talk entries; `SurvivalLevel` adds the layer and
+  keeps companions out of `rebalance_squad`; `Survival.server_save` and `server_player_died` call the
+  layer. New suite `fallenpeople`.
+
 ### Contractor: Fallen, phase A step 5: the metabolism (claude/survival-metabolism)
 
 Local: survival suite (see the run number in docs/survival.md's "Where the build is").

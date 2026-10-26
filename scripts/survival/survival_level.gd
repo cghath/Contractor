@@ -18,6 +18,7 @@ func _ready() -> void:
 	super._ready()
 	add_child(ZoneDead.new())  # the crowd tier of the dead (S3), the same path on every peer
 	add_child(SurvivalMap.new())  # what the survivors know: explored cells, known zones, marks
+	add_child(SurvivorsLayer.new())  # the living: lone survivors, companions, graves (survival_people.md)
 	if multiplayer.is_server():
 		Survival.server_level_ready(self)
 
@@ -39,6 +40,18 @@ func garrison_size(_module_id: String) -> int:
 ## empty slots.
 func _spawn_squadmate(_slot: int, _role: StringName, _team: int) -> Soldier:
 	return null
+
+
+## Host: the AI squadmates rebalance_squad may re-slot or remove: never a companion (they hold no
+## slot: the world brought them, SurvivorsLayer).
+func _squad_ai() -> Array:
+	return super._squad_ai().filter(func(s: Soldier) -> bool: return not s.has_meta(&"survivor_id"))
+
+
+## Host: a recruited survivor's companion body at `at` (SurvivorsLayer.server_spawn_companion).
+func server_add_companion(rec: Dictionary, at: Vector3) -> Soldier:
+	var layer := get_node_or_null(^"Survivors") as SurvivorsLayer
+	return layer.server_spawn_companion(rec, at) if layer else null
 
 
 ## Host: the players' squad only; the enemy's answer (patrols, QRF waves, hunters) never starts.
