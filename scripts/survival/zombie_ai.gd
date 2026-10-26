@@ -20,6 +20,14 @@ extends Node
 ## in reach (Melee.server_strike); **SEARCH** where it lost him. Awareness falls when nothing
 ## feeds it. A player it's ALERT to or chasing is told he's watched (Soldier.server_watched: the
 ## HUD's eye). Thinks every THINK_S, steers every physics frame.
+##
+## The dead over time (docs/survival_deadtime.md): its **decay** (DeadDecay: a fresh one faster
+## and harder-hitting, an old one slower); **dormant** in a nest by day (DeadNests: idle, its sight
+## and hearing dulled, a loud noise or one of them seeing him wakes the whole nest); and the
+## **climbing rules** (call 140): none of the dead climb ladders or walls (can_climb), a runner
+## vaults waist-high (VAULT_M), a crawler squeezes under a gap of CRAWL_GAP_M up to STAND_GAP_M,
+## everyone steps up STEP_UP_M; its paths keep to NAV_LAYERS (never a ladder's or climb link's
+## layer), and one after a man up out of its reach stops under him and piles (ledge_blocked).
 
 const INFECTED := &"infected"
 ## The kinds (data/zombies.json in time; Proposed): a walker's shamble (share of the run), a
@@ -39,6 +47,22 @@ const KINDS := {
 const SCREAM_M := 120.0
 const SCREAM_PRESSURE := 25.0
 var screamed := false
+## The climbing rules (call 140; Sieges does the walls built in the way).
+const STEP_UP_M := 0.45
+const VAULT_M := 1.0
+const CRAWL_GAP_M := 0.25
+const STAND_GAP_M := 1.5
+const REACH_UP_M := 1.7
+const LEDGE_M := 3.0
+## The navigation layers the dead's paths use: the walk layer only (CLIMB_LAYER: ladders, climb
+## and jump links a navmesh may carry, left out).
+const NAV_LAYERS := 1
+const CLIMB_LAYER := 2
+## Dormant in a nest (DeadNests): its sight this share, a sound's awareness this share, and a
+## sound this loud (a shot, a scream) wakes the nest.
+const DORMANT_SIGHT := 0.35
+const DORMANT_HEAR := 0.3
+const WAKE_LOUD := 0.9
 const NIGHT_WALK_MULT := 1.25
 const SIGHT_M := 40.0
 const NIGHT_SIGHT_M := 15.0
@@ -78,6 +102,10 @@ const MODE_NAMES := ["idle", "suspicious", "alert", "chasing", "searching"]
 
 var body: Soldier
 var kind := "walker"
+var decay := 0.0  # (DeadDecay: 0 fresh .. 1 old)
+var dormant := false  # (DeadNests: lying up in a nest by day)
+var nest_id := ""
+var under_ledge := false  # stopped under a man up out of its reach (piling)
 var mode := Mode.IDLE
 var target: Soldier
 var goal := Vector3.INF
@@ -114,6 +142,44 @@ func state_name() -> String:
 	return MODE_NAMES[mode]
 
 
+# --- The climbing rules (call 140) -----------------------------------------------------------------
+
+## Whether one of `kind` climbs (ladders, walls, roofs): none of the dead do. Platforms, ladders
+## and roofs are safe from them; a pile at a wall (Sieges) is the only way up.
+static func can_climb(_kind: String) -> bool:
+	return false
+
+
+## Whether one of `kind` gets up a ledge or over an obstacle `height_m` high: a step for all, a
+## vault to waist height for a runner.
+static func can_get_up(kind: String, height_m: float) -> bool:
+	return height_m <= STEP_UP_M + 0.01 or (kind == "runner" and height_m <= VAULT_M + 0.01)
+
+
+## Whether one of `kind` gets through an opening `gap_m` high: standing room for all, a crawler
+## under a low gap.
+static func can_pass_gap(kind: String, gap_m: float) -> bool:
+	return gap_m >= STAND_GAP_M or (kind == "crawler" and gap_m >= CRAWL_GAP_M)
+
+
+## Whether the man at `at` is up out of this one's reach (on a platform, a roof, a ladder): it
+## can't get up there and can't bite him.
+func ledge_blocked(at: Vector3) -> bool:
+	var dy := at.y - body.global_position.y
+	return dy > REACH_UP_M - 0.2 and not can_get_up(kind, dy) and not can_climb(kind)
+
+
+## The pace it walks (or chases) at now, a share of the run (the kind's, by night, the season,
+## the world's "dead" option, its decay).
+func pace() -> float:
+	var k: Dictionary = KINDS.get(kind, KINDS.walker)
+	var night := DayNight.darkness_at(body.global_position) > 0.5 if body else false
+	var p := float(k.chase) if mode == Mode.CHASE else float(k.walk)
+	if not bool(k.sprint) or mode != Mode.CHASE:
+		p *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
+	return p * Seasons.dead_pace_mult() * DeadDecay.pace_mult(decay)  # (phase D: the seasons; the dead over time: its age)
+
+
 ## Whether this one has no idea anyone's there (the silent kill's "unaware": idle, or looking
 ## into a sound or a smell, not watching him).
 func unaware() -> bool:
@@ -123,6 +189,12 @@ func unaware() -> bool:
 ## Host: a sound at `pos` this one can hear, `loud` 0..1 (a shot 1, a running man HEAR_RUN, a
 ## step HEAR_STEP): awareness up by it; unless it's after someone, it goes to look.
 func hear(pos: Vector3, loud := HEAR_SHOT) -> void:
+	if dormant:
+		if loud >= WAKE_LOUD:
+			DeadNests.wake(CompoundLevel.current(body), nest_id, pos)  # a shot or a scream: the whole nest
+		else:
+			awareness = clampf(awareness + loud * DORMANT_HEAR, 0.0, 1.0)
+		return
 	awareness = clampf(awareness + loud, 0.0, 1.0)
 	if mode == Mode.CHASE:
 		return
@@ -153,6 +225,14 @@ func _decide() -> void:
 		awareness = clampf(awareness + float(seen.score) * SIGHT_RISE * THINK_S / maxf(DayNight.spot_x(body.global_position), 0.1), 0.0, 1.0)
 		aware_of = who
 		fed = true
+	if dormant:
+		# Lying up in a nest: nothing but the waking (DeadNests.wake: the whole nest at once).
+		if awareness >= ALERT_AT and who != null:
+			DeadNests.wake(CompoundLevel.current(body), nest_id, who.global_position)
+		elif not fed:
+			awareness = maxf(awareness - FALL * THINK_S, 0.0)
+		if dormant:
+			return
 	var smelt := _smell()
 	if smelt != null and mode != Mode.CHASE:
 		awareness = clampf(awareness + SMELL_RISE * THINK_S, 0.0, 1.0)
@@ -197,9 +277,13 @@ func _decide() -> void:
 				_set_goal(aware_of.global_position)
 			_search_until = now + SEARCH_S
 	# What each state does.
+	under_ledge = false
 	if mode == Mode.CHASE and is_instance_valid(target):
 		_set_goal(target.global_position)
-		if _flat(target.global_position) <= ATTACK_M and now >= _attack_at:
+		under_ledge = ledge_blocked(target.global_position) and _flat(target.global_position) <= LEDGE_M
+		if under_ledge:
+			body.set_meta(&"under_ledge", now)  # (call 140: it can't get up to him: it stops and piles under him)
+		if _flat(target.global_position) <= ATTACK_M and now >= _attack_at and absf(target.global_position.y - body.global_position.y) <= REACH_UP_M:
 			_attack_at = now + ATTACK_S
 			if bool((KINDS.get(kind, KINDS.walker) as Dictionary).get("trip", false)):
 				Melee.server_trip(body, target)  # a crawler grabs his legs
@@ -231,6 +315,8 @@ func _decide() -> void:
 func _spot() -> Dictionary:
 	var dark := DayNight.darkness_at(body.global_position)
 	var reach := minf(lerpf(SIGHT_M, NIGHT_SIGHT_M, clampf(dark, 0.0, 1.0)), DayNight.sight_m(body.global_position))
+	if dormant:
+		reach *= DORMANT_SIGHT  # (lying up in a nest)
 	var eye := body.global_position + Vector3.UP * 1.6
 	var best: Soldier = null
 	var best_score := 0.0
@@ -331,11 +417,17 @@ func _set_goal(at: Vector3) -> void:
 		return
 	goal = at
 	var map := body.get_world_3d().navigation_map
-	_path = NavigationServer3D.map_get_path(map, body.global_position, at, true)
+	_path = NavigationServer3D.map_get_path(map, body.global_position, at, true, NAV_LAYERS)  # (never a climb link: call 140)
 	_path_index = 0
 
 
 func _steer(delta: float) -> void:
+	if dormant or under_ledge:
+		body.move_input = Vector2.ZERO
+		body.want_sprint = false
+		if under_ledge and is_instance_valid(target):
+			_face(target.global_position, delta)
+		return
 	if mode == Mode.ALERT:
 		body.move_input = Vector2.ZERO
 		body.want_sprint = false
@@ -358,14 +450,9 @@ func _steer(delta: float) -> void:
 		return
 	dir = dir.normalized()
 	var k: Dictionary = KINDS.get(kind, KINDS.walker)
-	var night := DayNight.darkness_at(body.global_position) > 0.5
-	var pace := float(k.chase) if mode == Mode.CHASE else float(k.walk)
-	if not bool(k.sprint) or mode != Mode.CHASE:
-		pace *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
-	pace *= Seasons.dead_pace_mult()  # (phase D: winter's cold, a hard frost's crawl, summer's heat)
 	_face(body.global_position + dir, delta)
 	var local := body.global_basis.inverse() * dir
-	body.move_input = Vector2(local.x, local.z) * clampf(pace, 0.0, 1.0)
+	body.move_input = Vector2(local.x, local.z) * clampf(pace(), 0.0, 1.0)
 	body.want_sprint = bool(k.sprint) and mode == Mode.CHASE and not Seasons.hard_frost()
 
 

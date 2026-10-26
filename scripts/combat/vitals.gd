@@ -835,7 +835,7 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			if melee_light:
 				undead_pool -= UNDEAD_POOL * MeleeWeapons.HEAD_LIGHT_SHARE
 			else:
-				undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false))) * (0.25 if armoured else 1.0)
+				undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false))) * (0.25 if armoured else 1.0) * DeadDecay.limb_mult(get_parent(), part)  # (an old one's limbs come apart)
 			if (part in UNDEAD_KILL_PARTS and not melee_light) or undead_pool <= 0.0:
 				last_cause = {"cause": "head" if part in UNDEAD_KILL_PARTS else "torn apart"}
 				server_kill()

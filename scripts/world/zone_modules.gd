@@ -216,7 +216,7 @@ static func _town(type: String) -> bool:
 		top = maxf(top, (bx[1] as Vector3).y + 0.5)
 	TOP[type] = top
 	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache,
-		"reserve": t.garrison_reserve, "fallback": t.fallback}
+		"reserve": t.garrison_reserve, "fallback": t.fallback, "lots": DeadDress.lots(t.get("buildings", []))}  # (lots: the dead's origins and nests, survival_deadtime.md)
 	return true
 
 
@@ -260,7 +260,7 @@ static func _city(type: String, full := false) -> bool:
 	LOOT[type] = t.loot
 	TOP[type] = maxf(TOP_M, float(t.top) + 0.5)
 	_towns[type] = {"civilians": t.civilians, "half": t.half, "points": t.points, "hvt": t.hvt, "hostage": t.hostage, "cache": t.cache,
-		"reserve": t.garrison_reserve, "fallback": t.fallback}
+		"reserve": t.garrison_reserve, "fallback": t.fallback, "lots": DeadDress.lots(t.get("buildings", []))}  # (lots: the dead's origins and nests, survival_deadtime.md)
 	return true
 
 
