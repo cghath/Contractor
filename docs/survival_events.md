@@ -1,7 +1,7 @@
 # Contractor: Fallen — world events, loot states, drop-in co-op
 
 Lane `claude/survival-events` (calls 124-126; the mod kit, call 127, is docs/fallen_modding.md).
-Suite: `fallenevents` (tests/fallenevents_test.gd). Every number below is **Proposed**.
+Suite: `fallenevents` (tests/fallenevents_test.gd); R2688 PASS (fallenevents, survival, worldsim, loot). Every number below is **Proposed**.
 
 ## 1. World events (call 124): `WorldEvents`, data/survival_events.json
 
