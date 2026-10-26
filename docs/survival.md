@@ -60,6 +60,10 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 18 | Companions level | **Yes, by doing**: companions earn XP in what they do beside you; their skills show when you talk to them. |
 | 19 | Specials (first cut) | **Screamer** (calls a horde), **Crawler** (under cars, in grass, grabs legs), **Bloater** (bursts, taints the room: masks or distance), **Hazmat** (hard shell: the head or heavy hits). |
 | 20 | Living world | **A truly living world, inspired by STALKER's A-Life, big scope**: groups of the living form dynamically with their own objectives and goals (settle, raid, trade, flee, hunt, hold ground), move between zones, fight the dead and each other, and leave traces whether or not a player is there. Design in docs/survival_world.md. |
+| 21 | World sim depth | **Full world sim**: every group simulated everywhere on a slow clock (journeys, fights, supplies, deaths resolved by rules while far; live near players). **Groups judge cost against reward** before acting: a raid, a move, a fight or a trade is weighed by its likely gain, losses, noise and the relations it burns, so factions are aware of consequences. |
+| 22 | Hordes | **Local and pressure-driven, never world enders**: a zone carries a noise/pressure level (shots, fights, lights, generators, crowds); the local dead drift to it, and only when the pressure peaks does a horde form in that zone. Hordes don't march in from other maps on gunfire alone; a big fight elsewhere raises that zone's pressure, not yours. (Refines S3.) |
+| 23 | Settlement | **Yes, from the safehouse**: the base can grow into a settlement; survivors ask to join, the player sets jobs (farm, guard, scavenge, medic, build), it trades and gets raided. |
+| 24 | Enclave + groups | A **military enclave** exists, **ambiguous**: the evac, a trap or both by seed and rumour. First-cut group kinds: **settlers, raiders, scavenger crews, cultists** (plus lone survivors as the companion pool, and the enclave). |
 
 ## Already in the code to build on
 
