@@ -1458,6 +1458,9 @@ static func _condition(item: ItemData, state: Dictionary) -> String:
 	var worn := Wear.tag(item, state)  # survival: condition, jammed, dull, torn, corroded (calls 120-122)
 	if worn != "":
 		detail = worn if detail == "" else "%s, %s" % [detail, worn]
+	var fresh := Spoilage.tag(item, state)  # survival: fresh, going off, spoiled (docs/survival_hands.md)
+	if fresh != "":
+		detail = fresh if detail == "" else "%s, %s" % [detail, fresh]
 	return detail
 
 

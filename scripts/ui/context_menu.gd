@@ -139,6 +139,9 @@ static func classify(me: Soldier, n: Node, at: Vector3) -> Dictionary:
 		if d and d.iff in [&"allied", &"rebel"]:
 			return {"kind": "allied_armour"}
 		return {"kind": "our_vehicle"}
+	var fw := Fieldwork.classify(me, at)  # survival: a carcass, a tree, a plant, water, the woods (docs/survival_hands.md)
+	if not fw.is_empty():
+		return fw
 	var lvl := MapNodes.level_of(me)
 	if lvl is Node3D:
 		var b := Buildings.nearest(lvl as Node3D, at, 6.0)
@@ -178,6 +181,9 @@ func run(o: Dictionary) -> void:
 		"menu":
 			if player._hud and player._hud.command_menu:
 				player._hud.command_menu.open()
+		"fieldwork":  # survival: butcher, fell, forage, fish, snares (Fieldwork, on the host)
+			Survival._server_fieldwork.rpc_id(1, String(o.get("what", "")), String(o.get("arg", "")), at)
+			_flash(o.label)
 		_:
 			_local(String(o.get("what", "")), at)
 

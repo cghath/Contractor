@@ -22,9 +22,10 @@ extends RefCounted
 ## - animals, generator: stubs (the generator burns fuel from the stock: the footprint's noise).
 ## Every number here is Proposed.
 
-const JOBS: Array[String] = ["guard", "scavenge", "farm", "hunt", "cook", "medic", "build", "haul", "maintain", "craft", "animals", "generator"]
+const JOBS: Array[String] = ["guard", "scavenge", "farm", "hunt", "cook", "medic", "build", "haul", "maintain", "craft", "animals", "generator", "doctor"]
 const NAMES := {"guard": "Guard", "scavenge": "Scavenge", "farm": "Farm", "hunt": "Hunt and fish", "cook": "Cook", "medic": "Medic",
-	"build": "Build", "haul": "Haul", "maintain": "Maintain", "craft": "Craft", "animals": "Mind the animals", "generator": "Mind the generator"}
+	"build": "Build", "haul": "Haul", "maintain": "Maintain", "craft": "Craft", "animals": "Mind the animals", "generator": "Mind the generator",
+	"doctor": "Doctor (the clinic)"}
 ## Scavenging: how far the route goes, the chance an hour finds something, what's found off-zone.
 const SCAV_M := 150.0
 const SCAV_FIND := 0.6
@@ -78,6 +79,8 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 			return WorkOrders.work_for(st, "craft", hours)
 		"generator":
 			return generator(st, hours)
+		"doctor":  # the clinic (Clinic; docs/survival_hands.md): patients in the beds, then the supplies order
+			return Clinic.work(st, rec, hours) or (Clinic.can_doctor(rec) and WorkOrders.work_for(st, "doctor", hours))
 	return false  # (animals: phase D's mounts and pens)
 
 

@@ -41,6 +41,7 @@ static func stations_of(s: Soldier) -> Array:
 			if wi and not wi.is_queued_for_deletion() and wi.item_id in FIRE_ITEMS and wi.global_position.distance_to(s.global_position) <= FIRE_M:
 				out.append("fire")
 				break
+	out.append_array(Fieldwork.stations_near(s))  # a smoker, a drying rack (docs/survival_hands.md)
 	return out
 
 
@@ -114,6 +115,7 @@ static func _finish(s: Soldier, id: String) -> bool:
 	var state: Dictionary = (r.get("output_state", {}) as Dictionary).duplicate(true)
 	if bool(r.get("treat_water", false)):
 		state = Needs.treat_water(state)  # boiled: clean water (Needs)
+	state = Spoilage.made_state(StringName(out[0]), state)  # made now: fresh (docs/survival_hands.md)
 	var made := s.inventory.take(StringName(out[0]), int(out[1]), state)
 	if made < int(out[1]):
 		var level := CompoundLevel.current(s)

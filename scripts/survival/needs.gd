@@ -340,13 +340,14 @@ static func eat(n: Dictionary, item: ItemData, state: Dictionary = {}) -> String
 	ensure(n)
 	_take_legacy(n)
 	var st := item.stats
-	n.calories = clampf(float(n.calories) + float(st.get("kcal", 0.0)), 0.0, MAX_KCAL)
+	var q := Spoilage.nutrition_mult(item, state)  # stale half, spoiled a quarter (docs/survival_hands.md)
+	n.calories = clampf(float(n.calories) + float(st.get("kcal", 0.0)) * q, 0.0, MAX_KCAL)
 	n.water = clampf(float(n.water) + float(st.get("water_l", 0.0)), 0.0, MAX_L)
-	n.protein = minf(100.0, float(n.protein) + float(st.get("protein", 0.0)) / PROTEIN_G_DAY * MACRO_DAY)
-	n.carbs = minf(100.0, float(n.carbs) + float(st.get("carbs", 0.0)) / CARBS_G_DAY * MACRO_DAY)
-	n.fat = minf(100.0, float(n.fat) + float(st.get("fat", 0.0)) / FAT_G_DAY * MACRO_DAY)
+	n.protein = minf(100.0, float(n.protein) + float(st.get("protein", 0.0)) * q / PROTEIN_G_DAY * MACRO_DAY)
+	n.carbs = minf(100.0, float(n.carbs) + float(st.get("carbs", 0.0)) * q / CARBS_G_DAY * MACRO_DAY)
+	n.fat = minf(100.0, float(n.fat) + float(st.get("fat", 0.0)) * q / FAT_G_DAY * MACRO_DAY)
 	var vits: Dictionary = st.get("vitamins", {})
-	var per_day := 100.0 / VITAMIN_DAYS
+	var per_day := 100.0 / VITAMIN_DAYS * q
 	n.vitamin_c = minf(100.0, float(n.vitamin_c) + float(vits.get("C", 0.0)) / 100.0 * per_day)
 	n.vitamin_d = minf(100.0, float(n.vitamin_d) + float(vits.get("D", 0.0)) / 100.0 * per_day)
 	n.iron = minf(100.0, float(n.iron) + float(vits.get("iron", 0.0)) / 100.0 * per_day)
@@ -358,6 +359,8 @@ static func eat(n: Dictionary, item: ItemData, state: Dictionary = {}) -> String
 		if chance > 0.0 and roll < chance:
 			started = kind
 			n.sick = {"id": kind, "left_h": float(SICKNESS[kind].hours), "onset_h": ONSET_H}
+	if started == "":
+		started = Spoilage.on_eaten(n, item, state)  # gone off: food poisoning (docs/survival_hands.md)
 	_derive(n)
 	return started
 

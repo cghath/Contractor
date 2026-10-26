@@ -121,11 +121,24 @@ const PIECES := {
 	"lure_radio": {"name": "Radio left playing", "size": [1, 1, 1], "cost": [[&"radio_parts", 1], [&"battery_aa", 2]], "tool": "wrench", "build_s": 2.0, "hp": 20.0, "solid": false, "look": "full", "mat": "scrap"},
 	"goat_stake": {"name": "Tied goat", "size": [1, 1, 1], "cost": [[&"planks", 1], [&"cable_ties", 1]], "tool": "hammer", "build_s": 2.0, "hp": 30.0, "solid": false, "look": "frame", "mat": "wood"},
 	"pyre": {"name": "Pyre", "size": [2, 1, 2], "cost": [[&"planks", 4]], "tool": "hammer", "build_s": 3.0, "hp": 60.0, "solid": false, "look": "slab", "mat": "wood"},
+	# The hands lane (docs/survival_hands.md; Proposed): a smoker and a drying rack (recipe stations:
+	# Fieldwork.stations_near), a cold store and an ice box (the larder goes off slower: Spoilage), a
+	# fish trap (catches by the world hour in the water it stands in), and the clinic (Clinic): beds,
+	# a cabinet for the medical stock and a lamp.
+	"smoker": {"name": "Smoker", "size": [2, 3, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 2]], "tool": "hammer", "build_s": 10.0, "hp": 100.0, "solid": true, "look": "full", "mat": "wood"},
+	"drying_rack": {"name": "Drying rack", "size": [2, 2, 1], "cost": [[&"planks", 2]], "tool": "hammer", "build_s": 4.0, "hp": 40.0, "solid": false, "look": "frame", "mat": "wood"},
+	"cold_store": {"name": "Cold store", "size": [2, 2, 2], "cost": [[&"planks", 4], [&"sandbag", 4]], "tool": "shovel", "build_s": 14.0, "hp": 200.0, "solid": true, "look": "full", "mat": "sandbag"},
+	"ice_box": {"name": "Ice box", "size": [2, 2, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 6.0, "hp": 60.0, "solid": true, "look": "full", "mat": "wood"},
+	"fish_trap": {"name": "Fish trap", "size": [1, 1, 2], "cost": [[&"planks", 2], [&"copper_wire", 1]], "tool": "hammer", "build_s": 5.0, "hp": 30.0, "solid": false, "look": "frame", "mat": "wood"},
+	"clinic_bed": {"name": "Clinic bed", "size": [2, 2, 4], "cost": [[&"planks", 6], [&"cloth_rag", 4]], "tool": "hammer", "build_s": 12.0, "hp": 80.0, "solid": true, "look": "frame", "mat": "wood"},
+	"clinic_cabinet": {"name": "Medical cabinet", "size": [2, 3, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 2]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "full", "mat": "wood"},
+	"clinic_lamp": {"name": "Clinic lamp", "size": [1, 3, 1], "cost": [[&"scrap_sheet", 1], [&"copper_wire", 1]], "tool": "wrench", "build_s": 3.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "scrap"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
 	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
 	"solar_panel", "battery_bank", "wind_turbine", "wiring", "fridge", "electric_fence", "power_tools", "water_pump",
-	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre"]
+	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre",
+	"smoker", "drying_rack", "cold_store", "ice_box", "fish_trap", "clinic_bed", "clinic_cabinet", "clinic_lamp"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"

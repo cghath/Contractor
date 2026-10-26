@@ -572,25 +572,39 @@ static func _died(_level: Node, a: Dictionary, cause: String) -> void:
 	a["cause"] = cause
 
 
-## Host: `s` butchers carcass `a` with a blade: its meat as raw meat and its hide, blood on the
-## ground the dead smell for BLOOD_H. "" or why not.
-static func server_butcher(s: Soldier, a: Dictionary) -> String:
+## Why `s` can't butcher carcass `a` now ("" he can).
+static func butcher_problem(s: Soldier, a: Dictionary) -> String:
 	if s == null or a.is_empty() or bool(a.alive):
-		return "?"
+		return "Nothing to butcher there"
 	var p: Vector2 = a.pos
 	if Vector2(s.global_position.x, s.global_position.z).distance_to(p) > BUTCHER_M:
 		return "Too far"
-	if bool(a.get("butchered", false)):
+	if bool(a.get("butchered", false)) or bool(a.get("butchering", false)):
 		return "There's nothing left on it worth taking"
 	if not Crafting.has_tool(s, ["tag:blade", "tag:knife"]):
 		return "You need a knife or a blade"
-	var meat := int(a.get("meat", 0))
+	return ""
+
+
+## Host: `s` butchers carcass `a` with a blade: its meat as raw meat (x`yield_x`: Fieldwork's
+## fieldcraft), its hide, bones and fat (the species' data), blood on the ground the dead smell for
+## BLOOD_H. "" or why not. (Fieldwork.server_butcher is the timed job in front of it.)
+static func server_butcher(s: Soldier, a: Dictionary, yield_x := 1.0) -> String:
+	a.erase("butchering")
+	var why := butcher_problem(s, a)
+	if why != "":
+		return "?" if why == "Nothing to butcher there" else why
+	var p: Vector2 = a.pos
+	var meat := roundi(int(a.get("meat", 0)) * yield_x)
 	var hide := int(a.get("hide", 0))
+	var d := spec(String(a.sp))
 	a["butchered"] = true
 	a.meat = 0
 	a.hide = 0
 	_give(s, &"raw_meat", meat)
 	_give(s, &"hide", hide)
+	_give(s, &"bone", int(d.get("bone", 0)))  # (the hands lane: docs/survival_hands.md)
+	_give(s, &"animal_fat", int(d.get("fat", 0)))
 	var at := Vector3(p.x, float(a.get("y", s.global_position.y)), p.y)
 	blood.append({"pos": at, "until_h": Moods.now_h() + BLOOD_H})
 	Rpg.xp(s, "fieldcraft", 6.0)
@@ -606,10 +620,19 @@ static func carries(s: Soldier, id: String) -> bool:
 	return false
 
 
-## Items into `s`'s kit, the rest at his feet (an entry with a state goes in one by one).
+## Items into `s`'s kit, the rest at his feet (an entry with a state goes in one by one; food
+## that spoils is stamped fresh: Spoilage).
 static func _give(s: Soldier, id: StringName, n: int, state := {}) -> int:
 	if n <= 0:
 		return 0
+	state = Spoilage.made_state(id, state)
+	if not state.is_empty() and Spoilage.perishable(ItemDB.get_item(id)):
+		var got_all := s.inventory.take(id, n, state)  # (perishables with the same stamp stack)
+		if got_all < n:
+			var lvl := CompoundLevel.current(s)
+			if lvl:
+				lvl.server_spawn_dropped(id, n - got_all, s.global_position + Vector3.UP * 0.4, state)
+		return n
 	var got := 0
 	if state.is_empty():
 		got = s.inventory.take(id, n)
@@ -659,20 +682,28 @@ static func server_set_snare(s: Soldier) -> String:
 	return ""
 
 
-## Host: `hours` of the world pass for the zone's snares: each may catch a rabbit (where rabbits
-## are about in this season), lying dead in it.
+## Host: `hours` of the world pass for the zone's snares: each may catch an animal by the species'
+## "snare_h" chance an hour (a rabbit SNARE_CHANCE_H, a raccoon now and then; where they're about this
+## season), lying dead in it.
 static func server_snare_hours(level: Node, hours: float) -> int:
 	var caught := 0
-	if not Migration.present("rabbit", Seasons.current()):
+	var kinds: Array[String] = []
+	for sp: String in data():
+		if float(spec(sp).get("snare_h", SNARE_CHANCE_H if sp == "rabbit" else 0.0)) > 0.0 and Migration.present(sp, Seasons.current()):
+			kinds.append(sp)
+	if kinds.is_empty():
 		return 0
 	for sn: Dictionary in snares():
 		if String(sn.zone) != Nature.zone() or String(sn.caught) != "":
 			continue
-		var chance := 1.0 - pow(1.0 - SNARE_CHANCE_H * (1.0 + SNARE_FIELDCRAFT_X * float(sn.get("lvl", 0))), hours)
-		if _roll() < chance:
-			sn.caught = "rabbit"
-			add(level, "rabbit", Vector3(float(sn.x), float(sn.y), float(sn.z)), {"alive": false, "cause": "snare"})
-			caught += 1
+		for sp: String in kinds:
+			var per_h := float(spec(sp).get("snare_h", SNARE_CHANCE_H))
+			var chance := 1.0 - pow(1.0 - per_h * (1.0 + SNARE_FIELDCRAFT_X * float(sn.get("lvl", 0))), hours)
+			if _roll() < chance:
+				sn.caught = sp
+				add(level, sp, Vector3(float(sn.x), float(sn.y), float(sn.z)), {"alive": false, "cause": "snare"})
+				caught += 1
+				break
 	return caught
 
 

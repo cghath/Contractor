@@ -12,5 +12,13 @@
 		"gun_oil": {"name": "Gun oil from engine oil", "inputs": [["engine_oil", 1]], "tool": [], "station": "hands", "time_s": 6.0, "line": "firearms", "level": 1, "xp": 5, "output": ["gun_oil", 3]},
 		"needle_thread": {"name": "Needle and thread", "inputs": [["cloth_rag", 2], ["copper_wire", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 8.0, "line": "fieldcraft", "level": 0, "xp": 6, "output": ["needle_thread", 1]},
 		"tyre_patch": {"name": "Tyre patches from an inner tube", "inputs": [["bicycle_tube", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 10.0, "line": "mechanics", "level": 1, "xp": 6, "output": ["tyre_patch", 2]}
-	}
+	},
+		"snare_wire": {"name": "Wire snares", "inputs": [["copper_wire", 1]], "tool": [], "station": "hands", "time_s": 6.0, "line": "fieldcraft", "level": 0, "xp": 4, "output": ["snare", 2]},
+		"hand_line": {"name": "A hand line", "inputs": [["copper_wire", 1], ["wood_stick", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 8.0, "line": "fieldcraft", "level": 0, "xp": 4, "output": ["hand_line", 1]},
+		"salt_meat": {"name": "Salt the meat", "inputs": [["raw_meat", 2], ["salt", 1]], "tool": [], "station": "hands", "time_s": 10.0, "line": "cooking", "level": 1, "xp": 6, "output": ["salted_meat", 2]},
+		"salt_fish": {"name": "Salt the fish", "inputs": [["raw_fish", 2], ["salt", 1]], "tool": [], "station": "hands", "time_s": 10.0, "line": "cooking", "level": 1, "xp": 6, "output": ["salted_fish", 2]},
+		"smoker_meat": {"name": "Smoke meat in the smoker", "inputs": [["raw_meat", 3], ["firewood", 1]], "tool": [], "station": "smoker", "time_s": 40.0, "line": "cooking", "level": 0, "xp": 10, "output": ["smoked_meat", 3]},
+		"smoker_fish": {"name": "Smoke fish in the smoker", "inputs": [["raw_fish", 3], ["firewood", 1]], "tool": [], "station": "smoker", "time_s": 30.0, "line": "cooking", "level": 0, "xp": 8, "output": ["smoked_fish", 3]},
+		"dry_meat": {"name": "Dry meat on the rack", "inputs": [["raw_meat", 2]], "tool": [], "station": "rack", "time_s": 60.0, "line": "cooking", "level": 0, "xp": 6, "output": ["dried_meat", 2]},
+		"dry_fish": {"name": "Dry fish on the rack", "inputs": [["raw_fish", 2]], "tool": [], "station": "rack", "time_s": 45.0, "line": "cooking", "level": 0, "xp": 5, "output": ["dried_fish", 2]}
 }

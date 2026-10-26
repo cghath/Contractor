@@ -173,6 +173,8 @@ static func server_operate(surgeon: Soldier, patient: Soldier, op: String, part:
 	if good:
 		text = _succeed(patient, n, r, op, part, surgeon)
 		Rpg.xp(surgeon, "medical", XP, int(row.level))
+		if op != "amputate" and Clinic.after_surgery(r, surface_of(patient), Clinic.post_op_roll(force_roll)):
+			text += ". The wound may go bad: keep it clean"  # (the post-op roll: a clinic's is lowest)
 	else:
 		text = _fail(patient, n, r, op, part)
 		Rpg.xp(surgeon, "medical", XP * 0.5, int(row.level))

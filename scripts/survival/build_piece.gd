@@ -140,6 +140,8 @@ func interaction_actions(actor: Node) -> Array[Dictionary]:
 	if built:
 		for e: Array in Infrastructure.piece_menu(rec):  # (phase D pieces: reset a trap, a radio left playing, the pyre)
 			out.append({"id": e[0], "label": String(e[1]), "disabled": "", "call": act.call(String(e[2]))})
+		for e: Array in Fieldwork.piece_menu(rec):  # (the fish trap, smoker, drying rack, the clinic's bed and cabinet)
+			out.append({"id": e[0], "label": String(e[1]), "disabled": "", "call": act.call(String(e[2]))})
 		out.append({"id": &"build_repair", "label": "Repair", "disabled": "" if float(rec.hp) < float(def.hp) else "It's sound", "call": act.call("repair")})
 	out.append({"id": &"build_dismantle", "label": "Dismantle" if built else "Take the site down", "disabled": "Locked" if bool(rec.get("locked", false)) else "", "call": act.call("dismantle")})
 	return out
