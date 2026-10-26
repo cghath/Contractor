@@ -83,6 +83,8 @@ const KEYS := {
 	&"xray": [KEY_5],
 	# Survival's own panels read raw keys, outside this map (no pad slice yet): the body readout
 	# (BodyReadout, backslash) and the character screen (CharacterScreen, ]: lines, perks, background).
+	# The settlement screen (SettlementScreen, [: people and jobs, stocks, work orders, the council,
+	# waiting an hour / until dusk / until dawn) reads its raw key the same way.
 	# Survival: build mode on or off (BuildMode, docs/survival_building.md §4). No letter is free;
 	# 6 (proposed). While it's on: Fire builds (held: a line), the wheel turns the ghost, Shift and
 	# Alt + wheel pick the shape (piece) and material, R blocks/pieces, P blueprint, F upgrade, 4

@@ -25,7 +25,7 @@ static var _lines: Dictionary = {}
 ## Whether `target` is a survivor on their feet who isn't one of ours yet (out in the world).
 static func is_survivor(target: Node) -> bool:
 	var layer := SurvivorsLayer.find(target)
-	return layer != null and String(layer.info_of(target).get("status", "")) == "out_there"
+	return layer != null and String(layer.info_of(target).get("status", "")) in ["out_there", "settler"]
 
 
 ## The talk entries `actor` gets on `target` (InteractionMenu.actions_for: the SURVIVOR kind, and
@@ -44,7 +44,11 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if group != "":
 			e["group"] = group
 		return e
-	if menu_kind == KIND:
+	if menu_kind == KIND and status == "settler":  # (a settler at home: Settlement)
+		out.append(talk.call("how", "How are you?", {}, ""))
+		out.append(talk.call("take_along", "Take along", {}, ""))
+		out.append(talk.call("who", "Who are you?", {}, InteractionMenu.MORE))
+	elif menu_kind == KIND:
 		out.append(talk.call("who", "Who are you?", {}, ""))
 		out.append(talk.call("want", "What do you want?", {}, ""))
 		out.append(talk.call("recruit", "Recruit", {}, ""))
@@ -67,6 +71,7 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if status == "companion":
 			out.append(talk.call("how", "How are you?", {}, ""))
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
+			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.DEAD:
 		if status == "dead" and not bool(info.get("buried", false)):
 			var shovel := SurvivorsLayer.shovel_of(actor) != &""
@@ -186,7 +191,10 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 				SurvivorPerson.change_opinion(rec, profile, JOIN_OPINION)
 				var line := line_for(rec, "recruit_yes")
 				layer.say(target, line)
-				layer.server_recruit(rec, actor)
+				if String((rec.want as Dictionary).get("kind", "")) == "place" and Settlement.place_problem() == "":
+					layer.server_settle(rec, actor)  # a bed at the settlement (call 23)
+				else:
+					layer.server_recruit(rec, actor)
 				return line
 			topic = "recruit_no"
 		"give":
@@ -220,6 +228,10 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 					extra.item = dropped
 		"how":
 			topic = "how_are_you"
+		"settle", "take_along":
+			var said_now := settle_talk(layer, actor, rec, action)
+			layer.say(target, said_now)
+			return said_now
 		"think":
 			topic = "think"
 	var said := line_for(rec, topic, extra)
@@ -243,7 +255,7 @@ static func want_problem(actor: Soldier, rec: Dictionary, layer: SurvivorsLayer 
 				return "favour"
 			return ""
 		"place":
-			return "" if not SurvivalMap.safehouse().is_empty() else "place"
+			return "" if Settlement.place_problem() == "" or not SurvivalMap.safehouse().is_empty() else "place"
 	return ""
 
 
@@ -326,3 +338,19 @@ static func _take_matching(inv: Inventory, w: Dictionary, need: int, rec: Dictio
 		_to_kit(rec, String(inv.release_hands()), {})
 		got += 1
 	return got
+
+
+## Host: "Make a settler" (a companion stays at the settlement: a free bed wanted) and "Take
+## along" (a settler comes with `actor` as a companion). Returns what they say.
+static func settle_talk(layer: SurvivorsLayer, actor: Soldier, rec: Dictionary, action: String) -> String:
+	if action == "settle":
+		if String(rec.get("status", "")) != "companion":
+			return ""
+		if Settlement.place_problem() != "":
+			return "There's no bed for me there yet."
+		layer.server_settle(rec, actor)
+		return "I'll stay and keep the place."
+	if String(rec.get("status", "")) != "settler":
+		return ""
+	layer.server_take_along(rec, actor)
+	return "Right behind you."
