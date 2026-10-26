@@ -109,6 +109,10 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 67 | Catch-up bounds | **Up to 2 world days, companions safe**: pending raids on the settlement become a demand on return; nothing of yours is lost offline. |
 | 68 | Joining the enclave | **Yes, as a path with a cost**: serve it (patrols, escorts, tolls on settlements you may know) to earn the evac; standing with others suffers, companions with a conscience may leave, what you learn inside feeds the trail. |
 | 69 | Wilderness zones | **After phase D**: ship the 24-zone world complete first; wilderness as the expansion. |
+| 70 | Build grid | **0.5 m blocks** (5 voxels a side) with halves, slabs, ramps, wedges, pillars, arches; finer work through slabs and pieces. |
+| 71 | Integrity | **Real load with cracks and a warning**: load and capacity per block, the ghost coloured by load before placing, cracking ~20 s before a fall; collapses are real voxel destruction and can kill. |
+| 72 | Ownership | **Who holds the place owns it**: no claim markers or locked ground; a group that drives you out takes your builds and you can take theirs; locks with keys or codes keep strangers out. |
+| 73 | Wear | **Slow wear, a maintenance job fixes it**: roofless wood rots in ~20 wet days, salt rust ~30 days, a weak roof fails under one heavy snow; a settler on the maintain job repairs from stock, or you do. |
 
 ## Already in the code to build on
 
