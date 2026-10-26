@@ -20,6 +20,8 @@ var _name: LineEdit
 var _seed: LineEdit
 var _goal: OptionButton
 var _picks := {}
+var survivor: SurvivorPicker
+var _start_button: Button
 
 
 func _init(start: Callable) -> void:
@@ -55,14 +57,19 @@ func _ready() -> void:
 		_picks[String(o[0])] = pick
 		options.add_child(UiKit.row(String(o[1]), pick))
 	var who := UiKit.section("Your survivor", box)
-	who.add_child(UiKit.hint("A blank slate: no background, no flaws, nothing learned yet. Backgrounds and flaws come with the skills.", false))
-	box.add_child(UiKit.button_row([UiKit.accent_button("Start", _start, "Wake at the farm"), UiKit.button("Back", queue_free, "Back to the menu")], true))
+	survivor = SurvivorPicker.new()  # blank slate, or a background and flaws for points (the RPG layer)
+	who.add_child(survivor)
+	_start_button = UiKit.accent_button("Start", _start, "Wake at the farm")
+	survivor.valid_changed.connect(func(ok: bool) -> void: _start_button.disabled = not ok)
+	box.add_child(UiKit.button_row([_start_button, UiKit.button("Back", queue_free, "Back to the menu")], true))
 
 
 func choices() -> Dictionary:
 	var options := {"goal": String(GOALS[_goal.selected][0])}
 	for key: String in _picks:
 		options[key] = String(LEVELS[(_picks[key] as OptionButton).selected][0])
+	if survivor:
+		options["survivor"] = survivor.choice()  # (Rpg applies it on the first join)
 	return options
 
 

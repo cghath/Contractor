@@ -58,6 +58,10 @@ var _clock_s := 0.0  # host: real seconds into the world's current hour
 
 
 ## The world's saved state ("seed", "day", "hour", "zone" (where it's played), "start_zone").
+func _ready() -> void:
+	add_child(Rpg.new())  # the RPG layer's RPCs and tick (Rpg)
+
+
 func state() -> Dictionary:
 	return Campaign.section(SECTION)
 
@@ -338,7 +342,8 @@ func server_player_died(s: Soldier) -> void:
 	# Permadeath (calls 13, 51): the survivor is gone; the player wakes as a new one, from zero
 	# (the skills and perks of the RPG layer die with the old one, phase B), at the safehouse.
 	var old_name := survivor_name(s)
-	var fresh := _new_survivor(s)
+	var fresh := _new_survivor(s)  # (the new record has no "rpg": lines, perks and flaws die with him)
+	Rpg.server_sync(s)
 	server_give_starter_kit(s)
 	var n := needs_of(s)
 	Needs.respawn(n, RESPAWN_NEEDS)
@@ -451,6 +456,7 @@ func server_survivor_joined(s: Soldier) -> void:
 	SurvivalSleep.wake(needs_of(s))
 	Needs.apply(s, needs_of(s))
 	_send_needs(s)
+	Rpg.server_joined(s)  # his lines and perks (a first survivor's creation applied)
 
 
 # --- The dead (S2) ------------------------------------------------------------------------
@@ -636,7 +642,7 @@ func _footsteps(level: SurvivalLevel) -> void:
 			continue
 		var m := s.movement
 		var key: String = "prone" if m.is_prone() else ("crouch" if m.is_crouched() else ("sprint" if m.is_sprinting else String(["slow", "walk", "brisk", "jog"][clampi(m.pace, 0, 3)])))
-		var radius := float(STEP_M[key]) * DayNight.hearing_x()
+		var radius := float(STEP_M[key]) * DayNight.hearing_x() * Rpg.step_noise_mult(s)  # stealth, perks, flaws
 		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
 		server_noise(s, s.global_position, radius, loud)
 

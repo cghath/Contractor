@@ -393,6 +393,7 @@ func _test_melee_weapons() -> void:
 	check(player.inventory.take(&"bat") == 1 and player.inventory.slots.get(&"primary", &"") == &"bat", "taking a bat puts it in the primary slot (%s)" % player.inventory.slots.get(&"primary", &""))
 	player.select_weapon(&"primary")
 	check(MeleeWeapons.is_melee(player.active_weapon()), "and it is the weapon in hand")
+	Rpg.set_level(player, "melee", 2)  # the heavy swing comes at melee 2 (the RPG layer)
 	var fwd := -player.global_basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()

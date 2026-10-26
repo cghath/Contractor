@@ -11,6 +11,50 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase B: the RPG layer, first form (claude/survival-rpg)
+
+Local: rpg and survival suites (see the run number in docs/survival_rpg.md's "Where the build is").
+
+- **Added (`Rpg`, `scripts/survival/rpg.gd`; `RpgLines`, `Perks`, `Backgrounds`):** the twelve skill
+  lines (medical, building, melee, firearms, archery, scavenging, mechanics, driving, cooking,
+  fieldcraft, fitness, stealth), 0-10, levelled by doing. The curve of call 82 (levels 1-4 take
+  60/120/240/480 XP, 5-10 take 1,000 x (n-4)^2 each); the at/below/above rule (full XP at your
+  level, x0.3 a level under, x0.1 further, +50% a level above up to x3); a survivor level every
+  1,000 XP earned (each next one 25% more) with one permanent perk pick from 21 (strong back,
+  quiet feet, thick skin, night eyes (stealth 3), steady hands, brawler (melee 2), scrounger,
+  quick study, cool head...; the ones whose system isn't built yet are recorded). Kept in the
+  survivor record (`Survival.survivor_of(s)["rpg"]`), saved with the world, sent to the owner
+  (`Rpg._client_rpg`); permadeath wipes it (the new record has none). API for the other lanes:
+  `Rpg.xp(s, line, n, task_level)`, `level`, `gate`, `can(s, "stitch")` (the doc's gates table),
+  `build_time_mult`, `medical_sees` (0/1/2), `step_noise_mult`, `server_read` (books),
+  `server_teach` (a stub). Inert outside survival and for the AI (companions later).
+- **Added (XP sources, a line each):** melee hits, kills and parries (`Melee`), the silent kill
+  (stealth and melee), treatments done (`Soldier._log_care`), searches finished
+  (`Soldier._loot_session_ok`), and `Rpg`'s own tick: metres run or carried heavy (fitness),
+  metres at the wheel (driving), time unseen with the dead about (stealth).
+- **Added (effects):** +3 kg carried free a fitness level and the strong back perk
+  (`Soldier._on_inventory_changed`), quieter footsteps with stealth (`Survival._footsteps`),
+  cheaper swings with melee, the heavy swing from melee 2, a wider parry window from melee 3, the
+  silent kill with any blade from melee 4 (a knife at any level), faster searches with
+  scavenging, the cold's rate from flaws and perks (`Needs.context_of` "cold_mult").
+- **Added (character creation, `SurvivorPicker` on the New world screen):** blank slate by
+  default, or one of 15 backgrounds (+3/+1; the doctor medical 4) plus any of 15 flaws worth 1-3
+  points that buy line levels (1 point a level, to 5). Wired flaws: slow learner (XP x0.8), bad
+  knee (7% slower), thin-skinned (cold x1.3), clumsy (louder steps), heavy sleeper (a flag); the
+  rest are recorded. The choice goes in the world's options as "survivor"; the first survivor gets
+  it, a newcomer after a death starts blank (his own pick later).
+- **Added (crafting essentials, `Crafting`, `data/survival_recipes.json`):** recipes as data
+  (inputs, tool, station, time, line and level, output); `Crafting.server_craft` with the hands
+  busy; stations hands and fire (a dropped campfire kit or a chem light within 3 m, until the
+  building lane's fire pit). Bandages from rags, a torch, a club, a spear (building 1), a campfire
+  kit, boiled water (clean, `Needs.treat_water`), smoked meat (cooking 2). New items: Cloth Rags,
+  Stout Stick, Torch, Wooden Club, Smoked Meat, Campfire Kit, First Aid Manual (a book: medical XP
+  once, to medical 3), priced.
+- **Added (the character screen, `CharacterScreen`, the ] key):** the lines as bars with the next
+  unlock named, the survivor level, the perks with a pick when one is owed, the background and
+  flaws.
+- **Changed:** survival_test sets melee 2 before its heavy swing (the heavy is gated now).
+
 ### Contractor: Fallen, phase A step 5: the metabolism (claude/survival-metabolism)
 
 Local: survival suite (see the run number in docs/survival.md's "Where the build is").

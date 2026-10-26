@@ -993,8 +993,8 @@ func load_tier() -> int:
 
 
 func _on_inventory_changed() -> void:
-	load_kg = maxf(inventory.total_mass() - ExoFrame.assist_kg(inventory), 0.0)  # a working exo frame carries some (ExoFrame)
-	load_mult = MovementRules.load_speed_mult(load_kg) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0)
+	load_kg = maxf(inventory.total_mass() - ExoFrame.assist_kg(inventory) - Rpg.carry_bonus_kg(self), 0.0)  # a working exo frame carries some (ExoFrame); survival: fitness and perks (Rpg)
+	load_mult = MovementRules.load_speed_mult(load_kg) * (BULKY_SPEED_MULT if inventory.hands != &"" else 1.0) * Rpg.speed_mult(self)
 	if active_weapon() == null:
 		for slot: StringName in [&"primary", &"sidearm"]:
 			if inventory.slots[slot] != &"":
@@ -2106,6 +2106,7 @@ func _log_care(target, item_id: StringName, part: StringName, outcome: String) -
 		RebelSupport.on_treated(self, target)  # a civilian treated: the locals notice (rebel support)
 	if outcome.begins_with("done") and multiplayer.is_server():
 		_log_shared_care(target, item_id, part, outcome.trim_prefix("done").trim_prefix(": "))
+		Rpg.on_treated(self, item_id)  # survival: medical XP
 	if SessionLog.session_id == "":
 		return
 	var at := ""
@@ -3254,6 +3255,7 @@ func _loot_session_ok(target: Node) -> bool:
 		_client_message.rpc_id(owner_peer(), "Still searching")
 		return false
 	_loot_searched[target.get_instance_id()] = true
+	Rpg.on_searched(self, target)  # survival: scavenging XP
 	return true
 
 
@@ -3263,7 +3265,7 @@ func _server_loot_open(path: NodePath) -> void:
 	var target := _loot_target(path)
 	if target == null:
 		return
-	var secs := 0.0 if _loot_searched.has(target.get_instance_id()) else loot_search_seconds(target)
+	var secs := 0.0 if _loot_searched.has(target.get_instance_id()) else loot_search_seconds(target) * Rpg.search_time_mult(self)
 	_loot_node = target
 	_loot_ready_at = _now() + secs
 	if target is Soldier and secs > 0.0:
