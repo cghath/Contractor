@@ -80,7 +80,7 @@ static func stamp(item: ItemData, state: Dictionary, share := 1.0) -> Dictionary
 		return state
 	var life := life_h(item)
 	var fu := now_h() - (1.0 - clampf(share, 0.0, 1.0)) * life + FRESH_SHARE * life
-	state[KEY] = snappedf(fu, 1.0)  # (whole hours: what's made together stacks together)
+	state[KEY] = floorf(fu) if share <= 0.0 else snappedf(fu, 1.0)  # (whole hours: what's made together stacks together; nothing left: spoiled now)
 	state[STAGE] = stage(item, state)
 	return state
 

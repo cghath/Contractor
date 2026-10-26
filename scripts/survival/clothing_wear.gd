@@ -165,10 +165,10 @@ static func server_sew(s: Soldier, slot: StringName, instant := false) -> void:
 	var done := func() -> void:
 		if s.inventory.slot_revision(slot) != rev or not (Wear.spend_tool(s.inventory, NEEDLE) or Wear.spend_tool(s.inventory, BONE_NEEDLE)):
 			return
-		var st := Wear.slot_state_rw(s.inventory, slot)
 		var add := SEW_ADD
 		if leather_good(StringName(s.inventory.slots.get(slot, &""))) and s.inventory.remove_one(LEATHER):
 			add += LEATHER_ADD  # (a leather patch: docs/survival_hands.md)
+		var st := Wear.slot_state_rw(s.inventory, slot)  # (after the leather's taken: that commit swaps the slot states)
 		Wear.set_cond(st, Wear.cond(st) + add)
 		s.inventory._commit()
 		Rpg.xp(s, "fieldcraft", 2.0)

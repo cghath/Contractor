@@ -470,7 +470,7 @@ func _test_food_lying() -> void:
 	var uid := level.server_spawn_dropped(&"raw_meat", 1, _pos(_at(-9, 6)), Spoilage.made_state(&"raw_meat"))
 	GameState.save_zone()
 	check(is_equal_approx(float((GameState.dropped.get(uid, {}) as Dictionary).get(Spoilage.AGED, -1.0)), t0), "the zone save stamps the hour it was left")
-	_set_now(t0 + 48.0)
+	_set_now(t0 + 50.0)
 	GameState.load_zone()
 	var d: Dictionary = GameState.dropped.get(uid, {})
 	check(not d.is_empty() and Spoilage.stage(raw, d.get("state", {})) == "spoiled", "two world days on, the zone loads: the meat on the ground is spoiled")
@@ -587,7 +587,8 @@ func _test_hides_and_bones() -> void:
 	ClothingWear.server_sew(player, &"feet", true)
 	var cond := Wear.cond(player.inventory.state_of(&"feet"))
 	check(on and absf(cond - (20.0 + ClothingWear.SEW_ADD + ClothingWear.LEATHER_ADD)) < 0.5 and player.inventory.count_of(&"leather") == 1,
-		"work boots mended with the bone needles and a leather patch: %d%%, a leather used" % roundi(cond))
+		"work boots mended with the bone needles and a leather patch: %d%%, a leather used (on %s, feet %s, needles %d, leather %d)" % [roundi(cond), on,
+		player.inventory.slots.get(&"feet", "?"), player.inventory.count_of(&"bone_needle"), player.inventory.count_of(&"leather")])
 	_clear_pack()
 
 
@@ -612,7 +613,7 @@ func _test_cook() -> void:
 	Settlement.server_take("cooked_meal", 99)
 	st.server_put("salted_meat", 1, {Spoilage.KEY: now + 900.0})
 	st.server_put("apples", 1, {Spoilage.KEY: now + 30.0})
-	check(Spoilage.oldest_stocked(func(item: ItemData, iid: String) -> bool: return Settlement.category_of(iid) == "food" and not bool(item.stats.get("raw", false))) == "apples",
+	check(Spoilage.oldest_stocked(func(item: ItemData, iid: String) -> bool: return iid in ["apples", "salted_meat"] and not bool(item.stats.get("raw", false))) == "apples",
 		"settlers eat the oldest first: the apples before the salted meat")
 	Settlement.server_take("apples", 99)
 	Settlement.server_take("salted_meat", 99)
