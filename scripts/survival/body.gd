@@ -10,7 +10,7 @@ extends RefCounted
 
 ## The extra keys phase D keeps in the body's Dictionary (a new survivor starts without them).
 const KEYS: Array[String] = ["bite", "wounds", "wound_seq", "abx", "ills", "chill_h", "def", "care_h", "gore_h", "clothes_h",
-	"frost_h", "cough_h", "vision_sway", "permanent", "killed_by", "blood_type", "immune_known", "heat_h"]
+	"frost_h", "cough_h", "vision_sway", "permanent", "killed_by", "blood_type", "immune_known", "heat_h", "gore_seen"]
 ## Heat stroke's toll a world hour at the top of the scale (Vitals.server_damage), and
 ## frostbite's wound.
 const HEAT_DAMAGE_H := 3.0
@@ -75,6 +75,7 @@ static func server_step(s: Soldier, n: Dictionary, world_h: float, ctx: Dictiona
 	var season := String(ctx.get("season", "spring"))
 	var rain := bool(ctx.get("rain", false)) and not bool(ctx.get("indoors", false))
 	n.care_h = maxf(0.0, float(n.get("care_h", 0.0)) - world_h)
+	Hygiene.server_take_gore(s, n)  # masking's smear (the world lane's metas)
 	Hygiene.step(n, world_h, season, rain)
 	var abx := Infection.covered(n)
 	# Wounds: infection and healing.

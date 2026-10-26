@@ -8,11 +8,10 @@ extends RefCounted
 ## face in winter (Body.server_step adds the wound). Static: the numbers are testable without a body.
 
 const SEASONS: Array[String] = ["spring", "summer", "autumn", "winter"]
-## Proposed: the cold's bite on the warmth store by season (winter's air and wind drain it fast),
-## thirst, and food's shelf life (summer halves it).
+## Proposed: the cold's bite on the warmth store by season (winter's air and wind drain it fast).
+## Thirst and food's shelf life are the world lane's (Seasons.SUMMER_THIRST, SUMMER_SPOIL,
+## WINTER_SPOIL), by the season given so the body's math stays testable.
 const COLD_MULT := {"spring": 1.0, "summer": 0.5, "autumn": 1.2, "winter": 1.8}
-const THIRST_MULT := {"spring": 1.0, "summer": 1.5, "autumn": 1.0, "winter": 1.0}
-const SPOIL_MULT := {"spring": 1.0, "summer": 0.5, "autumn": 1.0, "winter": 1.5}
 ## Spring and autumn rain and mud: open wounds dirty faster, hygiene drains faster (Proposed).
 const MUD_MULT := {"spring": 1.3, "summer": 1.0, "autumn": 1.3, "winter": 1.0}
 ## Clothing: the warmth a worn or carried layer adds (0..1 of the cold kept off), at most MAX.
@@ -48,18 +47,29 @@ static func cold_mult(season_id: String) -> float:
 
 
 static func thirst_mult(season_id: String) -> float:
-	return float(THIRST_MULT.get(season_id, 1.0))
+	return Seasons.SUMMER_THIRST if season_id == "summer" else 1.0
+
+
+## Food's shelf life by season (Seasons' numbers: summer half, winter double).
+static func spoil_mult(season_id: String) -> float:
+	match season_id:
+		"summer":
+			return Seasons.SUMMER_SPOIL
+		"winter":
+			return Seasons.WINTER_SPOIL
+	return 1.0
 
 
 static func mud_mult(season_id: String) -> float:
 	return float(MUD_MULT.get(season_id, 1.0))
 
 
-## Days `item` keeps now (its spoils_days by the season: summer halves it), for the spoiling code.
-static func spoils_days(item: ItemData, season_id := "") -> float:
-	if item == null or not item.stats.has("spoils_days"):
+## Days `item` keeps now (its spoils_days by the season: summer halves it), for the spoiling code;
+## `in_fridge` (a powered fridge: Infrastructure.fridge_on) stops it.
+static func spoils_days(item: ItemData, season_id := "", in_fridge := false) -> float:
+	if item == null or not item.stats.has("spoils_days") or (in_fridge and Infrastructure.fridge_on()):
 		return INF
-	return float(item.stats.spoils_days) * float(SPOIL_MULT.get(season_id if season_id != "" else season(), 1.0))
+	return float(item.stats.spoils_days) * spoil_mult(season_id if season_id != "" else season())
 
 
 ## The warmth `inv`'s clothing adds (0 .. CLOTHING_MAX): every equipped slot's item and every
