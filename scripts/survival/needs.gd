@@ -153,6 +153,7 @@ static func context_of(s: Soldier) -> Dictionary:
 		ctx.indoors = Throwables.indoors(s.get_world_3d(), s.global_position)
 	if s.movement:
 		ctx.wading = float(s.movement.wet)
+	ctx["cold_mult"] = Rpg.cold_mult(s)  # thin-skinned, thick skin, fitness (Rpg)
 	return ctx
 
 
@@ -204,6 +205,7 @@ static func step(n: Dictionary, world_h: float, ctx: Dictionary) -> void:
 		n.wet = maxf(0.0, float(n.wet) - WET_DRY_H * world_h)
 	var cold := WARM_DARK * float(ctx.get("dark", 0.0)) + WARM_WIND * float(ctx.get("wind", 0.0)) * (0.3 if indoors else 1.0) \
 		+ (WARM_RAIN if bool(ctx.get("rain", false)) and not indoors else 0.0) + WARM_WET * float(n.wet)
+	cold *= float(ctx.get("cold_mult", 1.0))
 	var heat := WARM_BASE + (WARM_MOVE if bool(ctx.get("moving", false)) and asleep == "" else 0.0) + (WARM_BED if asleep == "bed" else 0.0)
 	var core := float(n.warmth)
 	var net := heat - cold

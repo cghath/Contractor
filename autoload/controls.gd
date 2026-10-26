@@ -81,6 +81,8 @@ const KEYS := {
 	# Combined arms A5 (docs/combined_arms.md 2.11; the doc's X is the hatch now): the x-ray's full
 	# view of the last hit, or protection analysis at a range. 5: no letter is free on foot or seated.
 	&"xray": [KEY_5],
+	# Survival's own panels read raw keys, outside this map (no pad slice yet): the body readout
+	# (BodyReadout, backslash) and the character screen (CharacterScreen, ]: lines, perks, background).
 }
 ## Keys pressed with Shift held. An action without Shift still matches with it held, so
 ## PlayerInput checks these first.

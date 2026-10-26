@@ -62,7 +62,8 @@ static func server_action(s: Soldier, action: String) -> void:
 		"light", "heavy":
 			if not is_melee(weapon):
 				return
-			Melee.server_attack(s, profile(weapon, action == "heavy"))
+			var heavy := action == "heavy" and Rpg.can(s, "heavy_swing")  # the heavy swing from melee 2 (survival_rpg.md section 1)
+			Melee.server_attack(s, profile(weapon, heavy))
 		"block_on":
 			Melee.server_block(s, true)
 		"block_off":
@@ -75,7 +76,7 @@ static func server_action(s: Soldier, action: String) -> void:
 			if weapon != null and not is_melee(weapon):
 				Melee.server_attack(s, QUICK)  # the butt of the gun, a knife hand: a shove that buys a second
 		"silent":
-			Melee.server_silent_kill(s, is_blade(weapon) or blade_carried(s))
+			Melee.server_silent_kill(s, Rpg.silent_blade_ok(s, weapon))  # a knife at any level, any blade from melee 4
 
 
 ## A knife on the rig counts as a blade in hand for the silent kill (the starter kit's knife is

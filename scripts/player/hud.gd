@@ -614,6 +614,7 @@ func _update_needs() -> void:
 func _make_body_readout() -> void:
 	body_readout = BodyReadout.new()
 	add_child(body_readout)
+	add_child(CharacterScreen.new())  # survival: the character screen (CharacterScreen.TOGGLE_KEY)
 
 
 ## The small signs' text now (tests).

@@ -52,7 +52,7 @@ static func staggered(s: Soldier) -> bool:
 static func server_attack(attacker: Soldier, attack: Dictionary, mult := 1.0) -> bool:
 	if not attacker.vitals.is_up() or staggered(attacker) or attacker.has_meta(&"melee_winding"):
 		return false
-	var cost := float(attack.get("stamina", 0.0))
+	var cost := float(attack.get("stamina", 0.0)) * Rpg.melee_stamina_mult(attacker)
 	if cost > 0.0 and attacker.movement and attacker.movement.stamina < cost:
 		_note(attacker, "too tired")
 		return false
@@ -109,10 +109,11 @@ static func _land(attacker: Soldier, attack: Dictionary, mult: float, land_at :=
 		return
 	var block_at := float(g.block_at)
 	if block_at >= 0.0 and not staggered(victim):
-		if block_at >= land_at - PARRY_WINDOW_S:
+		if block_at >= land_at - PARRY_WINDOW_S * Rpg.parry_window_mult(victim):
 			guard_of(attacker).stagger_until = now + STAGGER_S
 			g.counter_until = now + COUNTER_WINDOW_S
 			_note(victim, "parried")
+			Rpg.on_parry(victim)
 			return
 		var stamina := victim.movement.stamina if victim.movement else 1.0
 		if not bool(attack.get("heavy", false)) and stamina >= BLOCK_STAMINA:
@@ -169,6 +170,7 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	if mult < 0.5:
 		hit["superficial"] = true
 	victim.vitals.server_hit(part, hit)
+	Rpg.on_melee_hit(attacker, victim)
 	if not attacker.vitals.undead:
 		Survival.server_noise(attacker, attacker.global_position, SWING_HEARD_M, ZombieAI.HEAR_STEP)  # a blow landing: a small noise
 	SessionLog.note("melee: %s's %s on %s (%s, x%.1f)" % [attacker.log_name(), String(attack.get("name", "blow")), victim.log_name(), part, mult])
@@ -236,6 +238,7 @@ static func server_silent_kill(s: Soldier, has_blade: bool) -> void:
 			return
 		z.vitals.server_hit(Vitals.HEAD, {"round_class": Vitals.PISTOL, "channel_depth": 0.08, "direction": (z.global_position - s.global_position).normalized(),
 			"melee": "silent", "energy_j": 400.0})
+		Rpg.on_silent_kill(s)
 		SessionLog.note("melee: %s's silent kill on %s" % [s.log_name(), z.log_name()]))
 
 
