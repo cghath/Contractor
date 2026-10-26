@@ -74,7 +74,7 @@ as a const at the top of its file or in the data files.
   `Bunkers.roll_table`).
 - Items: `serum`, `enclave_uniform`, `enclave_pass`, `cutting_torch`, `arche_dossier`, `arche_tape`
   (items.json, prices.json).
-- Suite: `enclave` (tests/enclave_test.gd).
+- Suite: `enclave` (tests/enclave_test.gd): R2658 PASS (enclave, worldsim, survival) on 3ba20216.
 
 ## What's left
 

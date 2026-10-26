@@ -12,7 +12,7 @@
   modes; R2652 PASS (worldsim, survival, settlement; a far tick 13 ms for 78 groups); see survival_world.md's "Where the build is".
 - **Phase C enclave, ARCHE's trail and bunkers built on `claude/survival-enclave`** (survival_world.md 6-7, survival_medical.md 3;
   calls 15, 46, 56, 62, 66, 68): the enclave's posts, patrols, tolls, price, disguise, break and joining; the trail; bunkers; the
-  serum chain; see docs/survival_enclave.md.
+  serum chain; R2658 PASS (enclave, worldsim, survival); see docs/survival_enclave.md.
 - **Phase C trade and intel built on `claude/survival-intel`** (survival_world.md 8 and 10; calls 26, 37, 45, 54, 95, 98):
   the value scale and traders' prices, the barter screen, rumours in the talk menu, the journal (7), the radio, landmarks,
   the map's political colour and the settlement's map table; R2656 PASS (intel, worldsim, survival); see docs/survival_intel.md.
