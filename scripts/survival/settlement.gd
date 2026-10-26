@@ -784,14 +784,15 @@ func server_hour(hod: int) -> void:
 func _meal(rec: Dictionary, n: Dictionary, meal_hour: bool) -> void:
 	var eaten := 0
 	while eaten < MEAL_MAX and float(n.get("hunger", 100.0)) < (EAT_BELOW if meal_hour else HUNGRY):
-		var id := first_stocked(func(item: ItemData, iid: String) -> bool: return "hot" in item.tags and category_of(iid) == "food")
+		# (the oldest first across the stores: Spoilage; docs/survival_hands.md)
+		var id := Spoilage.oldest_stocked(func(item: ItemData, iid: String) -> bool: return "hot" in item.tags and category_of(iid) == "food")
 		if id == "":
-			id = first_stocked(func(item: ItemData, iid: String) -> bool: return category_of(iid) == "food" and not bool(item.stats.get("raw", false)))
+			id = Spoilage.oldest_stocked(func(item: ItemData, iid: String) -> bool: return category_of(iid) == "food" and not bool(item.stats.get("raw", false)))
 		if id == "":
-			id = first_stocked(func(_item: ItemData, iid: String) -> bool: return category_of(iid) == "food")
+			id = Spoilage.oldest_stocked(func(_item: ItemData, iid: String) -> bool: return category_of(iid) == "food")
 		if id == "":
 			break
-		var got := server_take(id, 1)
+		var got := Spoilage.take_oldest(id, 1)
 		if got.is_empty():
 			break
 		var item := ItemDB.get_item(StringName(id))
@@ -892,7 +893,7 @@ func view() -> Dictionary:
 	var s := stocks()
 	for c: String in CATEGORIES:
 		st[c] = [int(s.get(c, 0)), trend(c)]
-	return {"exists": true, "zone": zone(), "people": people, "stocks": st, "beds": beds(), "free_beds": free_beds(), "cap": size_cap(),
+	return {"exists": true, "zone": zone(), "people": people, "stocks": st, "spoiled": [Spoilage.lost_today(), Spoilage.lost()], "beds": beds(), "free_beds": free_beds(), "cap": size_cap(),
 		"defence": snappedf(defence(), 0.1), "footprint": footprint(), "morale": snappedf(morale(), 1.0),
 		"orders": WorkOrders.list().duplicate(true), "planning": WorkOrders.planning(self), "votes": Council.open_votes().duplicate(true),
 		"challenge": Council.challenge().duplicate(true), "last_call": last_call, "standing": snappedf(Council.standing(self, BaseHub.profile()), 1.0)}

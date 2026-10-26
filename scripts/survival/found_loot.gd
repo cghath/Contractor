@@ -17,6 +17,8 @@ extends RefCounted
 ##   condition (WeaponCondition.found_state: dry or weathered).
 ## - **Ground loot** (ground_state, ZoneLevel's module loot): guns and ammo lying about have a
 ##   found condition too.
+## - **Found food** (Spoilage.found_in_box, found_items): perishables in a box or on the ground are
+##   stamped by where they lay (a dead fridge in a house, a cellar, a warm room, outdoors; the season).
 ## Host side, survival only (Wear.enabled). Every number is Proposed.
 
 const START_CLEAR_M := 250.0
@@ -88,6 +90,7 @@ static func armed_mults(level: Node, pos: Vector3, site: String) -> Vector2:
 static func first_roll(items: Array, at: WorldCache) -> Array:
 	if not Wear.enabled() or at == null or not at.is_inside_tree():
 		return items
+	items = Spoilage.found_in_box(items, at)  # found food: fresh by where the box stands (docs/survival_hands.md)
 	var uid := at.uid
 	if not (uid.begins_with("scatter_val") or "_box_" in uid or uid.ends_with("_strongbox")):
 		return items
@@ -114,11 +117,17 @@ static func first_roll(items: Array, at: WorldCache) -> Array:
 
 
 ## Host (ZoneLevel's module loot, survival only): the found state of `id` lying at `pos` (a gun's
-## or ammo's condition by where it lay), {} for anything else or outside survival.
+## or ammo's condition by where it lay, food's freshness: Spoilage), {} for anything else or
+## outside survival.
 static func ground_state(level: Node, id: StringName, pos: Vector3, uid: String) -> Dictionary:
 	if not Wear.enabled() or level == null or not (level as Node3D).is_inside_tree():
 		return {}
 	var item := ItemDB.get_item(id)
+	if Spoilage.perishable(item):
+		var frng := RandomNumberGenerator.new()
+		frng.seed = hash([uid, "food", int(Survival.state().get("seed", 0))])
+		var found: Array = Spoilage.found_items([{"id": String(id), "count": 1}], Spoilage.where_box(level, pos), frng)
+		return ((found[0] as Dictionary).get("state", {}) as Dictionary) if not found.is_empty() else {}
 	if item == null or not (WeaponCondition.is_gun(item) or AmmoCondition.is_ammo(item)):
 		return {}
 	var dry := Throwables.indoors((level as Node3D).get_world_3d(), pos)

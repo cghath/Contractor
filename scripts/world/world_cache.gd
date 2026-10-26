@@ -222,7 +222,7 @@ func server_fill(items: Array) -> void:
 	if not saved is Dictionary:
 		server_seed(FoundLoot.first_roll(items, self))  # survival: the early loot curve (guns taken near the farm, a found condition)
 		return
-	server_seed(GameState.from_json((saved as Dictionary).get("items", [])))
+	server_seed(Spoilage.age_box(GameState.from_json((saved as Dictionary).get("items", [])), saved, self))  # survival: food went off while the zone sat (docs/survival_hands.md)
 	unlocked = bool((saved as Dictionary).get("unlocked", false)) and key_id != &""
 	searched = bool((saved as Dictionary).get("searched", false))
 	searched_day = float((saved as Dictionary).get("searched_day", 0.0))
@@ -239,6 +239,8 @@ func to_save() -> Dictionary:
 			e["state"] = (entry.state as Dictionary).duplicate(true)
 		items.append(e)
 	var out := {"items": items, "unlocked": unlocked}
+	if Survival.running:
+		out[Spoilage.AGED] = Spoilage.now_h()  # (food in it ages from here when the zone loads again)
 	if searched or refills > 0 or pried:  # (Fallen's loot states)
 		out.merge({"searched": searched, "searched_day": searched_day, "refills": refills, "pried": pried})
 	return out

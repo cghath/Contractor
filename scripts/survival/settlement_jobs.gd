@@ -37,6 +37,10 @@ const HUNT_PER_H := 0.25
 ## Raw meat cooked an hour, and how many hot meals in stock a member is enough.
 const COOK_PER_H := 3
 const MEALS_PER_MEMBER := 2
+## Fresh food the cook saves before it turns (docs/survival_hands.md): what a meal takes of each, and
+## how soon before it goes off (or once it's going off) he cooks it whatever the meals in stock.
+const COOK_FROM := {"raw_meat": 1, "raw_fish": 1, "eggs": 1, "milk_carton": 1, "vegetables": 2, "milk": 2}
+const COOK_AGING_H := 12.0
 ## The build job's work an hour, in a player's seconds of building (a world hour is 2 real
 ## minutes at DAY_MIN 48).
 const WORK_S_PER_H := 120.0
@@ -67,7 +71,7 @@ static func do_job(st: Settlement, job: String, rec: Dictionary, hours: float) -
 		"hunt":
 			return _yield(st, "hunt", HUNT_PER_H * hours * Migration.hunt_x(), "raw_meat")  # (the season's game)
 		"cook":
-			return WorkOrders.work_for(st, "cook", hours) or cook(st, hours)
+			return cook_aging(st, hours) or WorkOrders.work_for(st, "cook", hours) or cook(st, hours)  # (what's about to turn first)
 		"medic":
 			return medic(st, rec)
 		"build":
@@ -160,9 +164,30 @@ static func cook(st: Settlement, hours: float) -> bool:
 	var n := mini(mini(COOK_PER_H * maxi(1, roundi(hours)), want), Settlement.count("raw_meat"))
 	if n <= 0:
 		return false
-	Settlement.server_take("raw_meat", n)
+	Spoilage.take_oldest("raw_meat", n)  # (the oldest first)
 	st.server_put("cooked_meal", n)
 	return true
+
+
+## The cook's hour on the fresh stock about to go off (Spoilage.aging_stock: within COOK_AGING_H or
+## going off already), oldest first, into hot meals (COOK_FROM a meal), up to COOK_PER_H meals an
+## hour, on a stove. Whether he cooked anything.
+static func cook_aging(st: Settlement, hours: float) -> bool:
+	if int(Settlement.data().get("stoves", 0)) <= 0:
+		return false
+	var budget := COOK_PER_H * maxi(1, roundi(hours))
+	var made := 0
+	for e: Dictionary in Spoilage.aging_stock(COOK_FROM.keys(), COOK_AGING_H):
+		if made >= budget:
+			break
+		var per := int(COOK_FROM[String(e.id)])
+		var meals := mini(budget - made, maxi(1, floori(float(e.count) / per)))
+		if Settlement.count(String(e.id)) < meals * per:
+			continue
+		Spoilage.take_oldest(String(e.id), meals * per)
+		st.server_put("cooked_meal", meals)
+		made += meals
+	return made > 0
 
 
 static func medic(st: Settlement, _rec: Dictionary) -> bool:
