@@ -7,6 +7,9 @@
 - **Phase C started ~06:40**: the world sim (claude/survival-worldsim) and the settlement's work (claude/survival-settlement)
   on Opus lanes; next lanes once the sim lands: the enclave + ARCHE trail + bunkers, trade + the intel layer, mounts.
 - Calls now 1-142 (the table below).
+- **Phase C core (the world sim) built on `claude/survival-worldsim`** (survival_world.md 2-5, 9, 11-13): groups,
+  regions, the judgement, far fights, pressure and hordes across the map, live groups, the catch-up, rumours, goal
+  modes; RUNNUM; see survival_world.md's "Where the build is".
 
 ### (earlier) 2026-10-26 ~02:15 CDT
 

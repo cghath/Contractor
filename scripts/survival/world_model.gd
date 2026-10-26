@@ -21,6 +21,9 @@ const TICK_MIN := 15.0
 const TICKS_PER_DAY := 96
 ## Proposed: a zone crossing on foot takes TRAVEL_TICKS (2 world hours); a vehicle halves it.
 const TRAVEL_TICKS := 8.0
+## Proposed: a group with a goal under way weighs its options again every RETHINK_TICKS (an hour);
+## an idle one every tick.
+const RETHINK_TICKS := 4
 const EVENTS_CAP := 300
 ## What a group remembers of the event pool (its intel: the rumours it can tell).
 const INTEL_CAP := 80
@@ -345,9 +348,10 @@ func step(at: float) -> void:
 			continue
 		_mood(g)
 		_kind_change(g)
-		var td := Time.get_ticks_usec()
-		WorldGoals.decide(self, g)
-		t_decide += Time.get_ticks_usec() - td
+		if (g.goal as Dictionary).is_empty() or (tick() + absi(hash(gid))) % RETHINK_TICKS == 0:  # (busy groups rethink hourly, staggered)
+			var td := Time.get_ticks_usec()
+			WorldGoals.decide(self, g)
+			t_decide += Time.get_ticks_usec() - td
 		WorldGoals.act(self, g)
 	var t2 := Time.get_ticks_usec()
 	_form_and_split()

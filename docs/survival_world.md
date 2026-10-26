@@ -7,6 +7,29 @@ numbers below refer to them). Inspired by STALKER's A-Life, RimWorld's people an
 factions; built on what Contractor already has (the living war, the AI commander layer, the
 virtualizer, the region map, hiring and the roster).
 
+## Where the build is (2026-10-26 ~07:40 CDT)
+
+- **Phase C core built on `claude/survival-worldsim`** (sections 2-5, 9, 11-13; the settlement lane merged in):
+  `WorldSim` (a child of Survival: the far tick on a WorkerThreadPool task, applied on the main thread; the
+  catch-up; goal modes), `WorldModel` (the pure sim: groups, zones, pressure, far hordes, forming/splitting,
+  the trickle, world events), `WorldGroup`, `WorldGoals` (the judgement of 4.3 and every goal of the table but
+  patrol/enforce), `WorldFights`, `WorldRegions` + `data/survival_regions.json`, `WorldTrade.value`, `Rumours`,
+  `WorldLive` (live groups: people for settlers/scavengers, hostile SquadAI squads with SquadOrders for
+  raiders/cultists). Raider demands on the players' farm go to the settlement's council (`Council.server_put`);
+  the sim reads `Settlement` stores and defence. Suites: worldsim + survival + settlement, RUNNUM.
+- Proposed defaults (in code): tick 15 world min; travel 2 h a zone; a busy group rethinks hourly; live 400 m,
+  fold 500 m, 24 live people in a 64 budget with the dead; demand 6 h to pay, 40% share; catch-up 2 days and the
+  clock moves with it; evac refill +10% / dead +5% each 10 days; clear refill x2, quiet under 15% of a zone's dead;
+  the farm's zone starts with no group and no group walks into it (or raids the farm) on day one.
+- Left for the next lanes: the enclave's price, detachments, patrols/tolls and the arc (section 6: the enclave is a
+  placeholder group, `server_set_evac_paid`); ARCHE's trail and bunkers (section 7: no places of that type yet);
+  trade with the players (section 8: `WorldTrade.value` is a stub, `server_player_trade` moves standing,
+  `server_pay_demand` answers a demand); the intel layer (section 10: events in `world.events`, `rumours_for`,
+  `events_near`, `event_added`; the map's political colour from `region_holders`; radio chatter).
+  Also: CivilianAI tasks for live settlers beyond idling, the one stealth model for the living (call 131),
+  the dead's decay/dress/nests (calls 112-115), fauna (100-103), the "settlement night" perf case (TODO in
+  tests/fallen_test.gd).
+
 Companion docs: survival_building.md, survival_people.md, survival_medical.md, survival_rpg.md.
 Phase C of the build order (call 50) is this doc; its pieces that phase A and B need (zone
 pressure, the dead's density, the safehouse cell) are marked **early**.

@@ -150,13 +150,15 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 		var reg := WorldRegions.region_def(String(zd.get("region", "")))
 		var loot: Dictionary = reg.get("loot", {})
 		var dz := danger(m, g, z)
-		for pl: Dictionary in zd.get("places", []):
+		var nc := noise_cost(m, "forage", z)
+		var forage_v := func(pl: Dictionary) -> float:
 			if String(pl.holder) != "" and String(pl.holder) != String(g.id):
-				continue
+				return -INF
 			var fresh := clampf((m.now - float(pl.get("looted", -100.0))) / WorldModel.REFILL_DAYS, 0.0, 1.0)
-			var gain := 0.15 + 0.5 * float(pl.richness) * fresh * (float(loot.get("food", 1.0)) + float(loot.get("ammo", 1.0))) * 0.5
-			out.append({"kind": "forage", "zone": z, "place": String(pl.id), "target": "", "gain": gain, "need": 0.4 + 1.2 * need_food,
-				"loss": dz + (0.1 if z != here else 0.0), "noise": noise_cost(m, "forage", z), "rel": 0.0, "bias": 0.15 if kind == "scavengers" else 0.0})
+			return 0.15 + 0.5 * float(pl.richness) * fresh * (float(loot.get("food", 1.0)) + float(loot.get("ammo", 1.0))) * 0.5
+		for pl: Dictionary in _best_places(zd, g, forage_v):
+			out.append({"kind": "forage", "zone": z, "place": String(pl.id), "target": "", "gain": float(pl._v), "need": 0.4 + 1.2 * need_food,
+				"loss": dz + (0.1 if z != here else 0.0), "noise": nc, "rel": 0.0, "bias": 0.15 if kind == "scavengers" else 0.0})
 	# work: hunt, fish, farm (settlers and scavengers), by the region's yield and the season
 	if kind in ["settlers", "scavengers"]:
 		var zd := m.zone(here)
@@ -185,12 +187,16 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			if bool(WorldRegions.region_def(String(zd.region)).get("unheld", false)):
 				continue
 			var water := float(WorldRegions.region_def(String(zd.region)).get("water", 1.0))
-			for pl: Dictionary in zd.get("places", []):
+			var pz := m.pressure_of(z) / 100.0 * 0.5
+			var dz := danger(m, g, z) * 0.5
+			var nc := noise_cost(m, "settle", z)
+			var settle_v := func(pl: Dictionary) -> float:
 				if String(pl.holder) != "":
-					continue
-				var v := water * 0.3 + float(pl.defence) * (0.6 if kind == "raiders" else 0.4) + float(pl.richness) * 0.15 - m.pressure_of(z) / 100.0 * 0.5
-				out.append({"kind": "settle", "zone": z, "place": String(pl.id), "target": "", "gain": maxf(0.0, v),
-					"need": 1.0 if (g.home as Dictionary).is_empty() else 0.4, "loss": danger(m, g, z) * 0.5, "noise": noise_cost(m, "settle", z), "rel": 0.0,
+					return -INF
+				return water * 0.3 + float(pl.defence) * (0.6 if kind == "raiders" else 0.4) + float(pl.richness) * 0.15 - pz
+			for pl: Dictionary in _best_places(zd, g, settle_v):
+				out.append({"kind": "settle", "zone": z, "place": String(pl.id), "target": "", "gain": maxf(0.0, float(pl._v)),
+					"need": 1.0 if (g.home as Dictionary).is_empty() else 0.4, "loss": dz, "noise": nc, "rel": 0.0,
 					"bias": (0.2 if kind == "settlers" else 0.05) - (0.15 if kind == "scavengers" else 0.0)})
 	# raid: raiders, and the desperate and cruel; settlements and the players' farm get a demand first
 	var desperate := need_food > 0.8 and float(p.get("cruelty", 0.0)) > 0.3
@@ -273,6 +279,25 @@ static func options(m: WorldModel, g: Dictionary) -> Array:
 			out.append({"kind": "hunt_player", "zone": pz, "place": "", "target": "player", "gain": 0.7, "need": 1.0,
 				"loss": float(m.player.get("strength", 3.0)) / mine * 0.5, "noise": noise_cost(m, "hunt_player", pz), "rel": 0.0,
 				"bias": float(p.get("cruelty", 0.2)) * 0.3})
+	return out
+
+
+## The best place of `zd` by `value` (and the group's current goal's place there, for the
+## hysteresis), each as {"id", "_v"}; places valued -INF are out.
+static func _best_places(zd: Dictionary, g: Dictionary, value: Callable) -> Array:
+	var cur := String((g.get("goal", {}) as Dictionary).get("place", ""))
+	var best := {}
+	var out: Array = []
+	for pl: Dictionary in zd.get("places", []):
+		var v: float = value.call(pl)
+		if v == -INF:
+			continue
+		if best.is_empty() or v > float(best._v):
+			best = {"id": String(pl.id), "_v": v}
+		if String(pl.id) == cur:
+			out.append({"id": cur, "_v": v})
+	if not best.is_empty() and not out.any(func(o: Dictionary) -> bool: return String(o.id) == String(best.id)):
+		out.append(best)
 	return out
 
 
