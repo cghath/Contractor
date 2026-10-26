@@ -77,6 +77,10 @@ Local: survival suite (see the run numbers in docs/survival.md's "Where the buil
 - **Changed (ZombieAI):** sight is a forward cone (`SEE_DOT`, about 100 degrees each side): behind
   one of the dead you are unseen, which is what the silent kill needs (survival R2618/R2619 found
   it seeing all round).
+- **Added (perf, phase A step 8):** the `fallen` suite (tests/fallen_test.gd, on perfcases' meter): a
+  survival night at the farm with the live cap of the dead about the player (most chasing), a crowd
+  of 200 in the far tier and a horde of 50 walking in; Proposed budgets beside the fight case's
+  (avg 110 / p95 180 / hitches 140 / physics 6 ms, LOCAL_SLACK off CI). In run_tests.sh and CI.
 - **Added (tests):** three verdicts in `tools/run_tests.sh` (the Captain: orange for a flaky
   test, red for a failed, green for a pass): a suite that fails is run once more; passing the
   rerun it's **FLAKY** (the run exits 0, the first try's logs kept as `<suite>.first-fail.log`),
