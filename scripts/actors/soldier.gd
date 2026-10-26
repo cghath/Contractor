@@ -1097,8 +1097,8 @@ func smell_strength() -> float:
 ## "dodge", "sidestep", "quick" (a shove with a gun up), "silent" (the silent kill).
 @rpc("any_peer", "call_local", "reliable")
 func _server_melee(action: String) -> void:
-	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or respawn_state == RESPAWN_WAITING or is_instance_valid(vehicle):
-		return
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or respawn_state == RESPAWN_WAITING or (is_instance_valid(vehicle) and not vehicle.ffv_seat(self)):
+		return  # (a mount's rider swings a one-handed weapon: Mount.ffv_seat)
 	MeleeWeapons.server_action(self, action)
 
 

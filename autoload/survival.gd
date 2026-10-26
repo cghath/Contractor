@@ -182,6 +182,7 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	ColdOpen.server_begin(level)  # a new world's first hour (once)
 	Settlement.install(level)  # the settlement's work and council (Settlement, survival_building.md 5-7)
 	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
+	Mounts.install(level)  # horses, bicycles, carts (Mounts, docs/survival_mounts.md)
 
 
 ## Host: the world is saved: the world's sections and the zone being played.
@@ -643,6 +644,7 @@ func server_noise(source: Node, pos: Vector3, radius: float, loud := ZombieAI.HE
 	if source is Soldier and not (source as Soldier).is_ai():
 		(source as Soldier).server_noise_made(radius)
 	_raise_pressure(level, pos, loud * clampf(radius / ZombieAI.SHOT_HEARD_M, 0.1, 1.0) * PRESSURE_PER_SHOT)
+	Mounts.on_noise(level, source, pos, radius, loud)  # a shot spooks the horses near it
 	for z: Soldier in zombies(level):
 		if z.global_position.distance_to(pos) <= radius:
 			var brain := ZombieAI.of(z)

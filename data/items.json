@@ -2339,6 +2339,18 @@
 		{"id": "arche_tape", "name": "ARCHE Recording", "type": "misc", "volume_l": 0.05, "mass_kg": 0.08, "stack": 1, "tags": ["arche", "readable"],
 		 "stats": {"rarity": "rare", "size_m": [0.1, 0.02, 0.07]},
 		 "desc": "A dictation cassette labelled in an ARCHE hand, the seal stamped on its case.",
-		 "uses": ["Survival: play it to add it to the journal and mark where the trail leads"]}
+		 "uses": ["Survival: play it to add it to the journal and mark where the trail leads"]},
+		{"id": "rope", "name": "Rope (15 m)", "type": "utility", "volume_l": 1.2, "mass_kg": 1.0, "tags": ["rope", "tool"],
+		 "stats": {"rarity": "common", "size_m": [0.25, 0.08, 0.25]},
+		 "desc": "A coil of stout rope.",
+		 "uses": ["Survival: catch a horse with it (Left Ctrl on the horse > Catch, fieldcraft 1): it becomes the lead rope"]},
+		{"id": "horse_feed", "name": "Sack of Oats", "type": "barter", "volume_l": 6.0, "mass_kg": 5.0, "stack": 4, "tags": ["feed"],
+		 "stats": {"rarity": "common", "size_m": [0.3, 0.45, 0.2]},
+		 "desc": "Five kilos of oats in a sack: horse feed.",
+		 "uses": ["Survival: Left Ctrl on a horse > Feed: half a day's feed (a horse also grazes where it stands)"]},
+		{"id": "bicycle_tube", "name": "Bicycle Inner Tube", "type": "salvage", "volume_l": 0.3, "mass_kg": 0.15, "stack": 4, "tags": ["salvage", "bicycle"],
+		 "stats": {"rarity": "common", "size_m": [0.2, 0.04, 0.2]},
+		 "desc": "A spare inner tube for a bicycle wheel.",
+		 "uses": ["Survival: Left Ctrl on a bicycle with a flat > Fix the tyre"]}
 	]
 }

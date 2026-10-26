@@ -1089,6 +1089,8 @@ static func gaze_turn(offset: Vector3) -> Vector2:
 ## aiming (nor glassing), not aboard a vehicle, not down; the command menu, the interaction
 ## menu and a grenade in hand take the wheel before this. Whether it stepped.
 func wheel_pace(steps: int) -> bool:
+	if is_instance_valid(body.vehicle) and body.vehicle is Mount and not Input.is_action_pressed(&"aim"):
+		return (body.vehicle as Mount).local_wheel(steps, hud)  # riding: the gait (walk, trot)
 	if body.is_aiming or Input.is_action_pressed(&"aim") or body.binoculars_up or is_instance_valid(body.vehicle) \
 			or not body.vitals.is_up() or body.respawn_state == Soldier.RESPAWN_WAITING:
 		return false

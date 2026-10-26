@@ -792,7 +792,7 @@ func _test_get_out_key(v: Vehicle) -> void:
 	check(bound.size() == 1 and bound[0] is InputEventKey and (bound[0] as InputEventKey).physical_keycode == KEY_V and ControlOptions.get_out_key_name() == "V",
 		"get_out is bound to V (%s)" % ControlOptions.get_out_key_name())
 	var clashes := InputMap.get_actions().filter(func(action: StringName) -> bool:  # the engine's ui_* text-field keys (Ctrl+V paste) aside
-		return action != ControlOptions.GET_OUT_ACTION and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:
+		return action != ControlOptions.GET_OUT_ACTION and action != &"quick_melee" and not String(action).begins_with("ui_") and InputMap.action_get_events(action).any(func(e: InputEvent) -> bool:  # (quick_melee shares V on foot: survival call 86; it does nothing seated)
 			return e is InputEventKey and ((e as InputEventKey).physical_keycode == KEY_V or (e as InputEventKey).keycode == KEY_V)))
 	check(clashes.is_empty(), "and V does nothing else (%s)" % [clashes])
 	check(not ControlOptions.GET_OUT_DEFAULT and not ControlOptions.get_out_key(), "off unless the player turns it on")

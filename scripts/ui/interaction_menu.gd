@@ -83,6 +83,8 @@ const PERSON := &"person"
 ## "disabled", "call": a local Callable perform runs}) and may place its point with
 ## action_point().
 const OBJECT := &"object"
+## A survival mount (Mount: a horse, a bicycle, a cart): its own entries, like an OBJECT's.
+const MOUNT := &"mount"
 const INTERACTABLES := &"interactables"
 
 ## Actions per target kind, in menu order. Keys:
@@ -242,6 +244,8 @@ static func target_kind(actor: Soldier, target: Node) -> StringName:
 		return SELF
 	if target is WorldItem:
 		return ITEM
+	if target is Mount:
+		return MOUNT
 	if target.is_in_group(INTERACTABLES) and target.has_method(&"interaction_actions"):
 		return OBJECT
 	var vitals := target.get_node_or_null(^"Vitals") as Vitals
@@ -272,7 +276,7 @@ static func actions_for(actor: Soldier, target: Node) -> Array[Dictionary]:
 		return out
 	if kind == TalkMenu.KIND:
 		return TalkMenu.actions_for(actor, target, kind)
-	if kind == OBJECT:
+	if kind == OBJECT or kind == MOUNT:
 		for def: Dictionary in target.call(&"interaction_actions", actor):
 			var action := def.duplicate()
 			action["target"] = target
