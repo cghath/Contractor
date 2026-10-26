@@ -13,7 +13,7 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ### Contractor: Fallen, phase C: trade and the intel layer (claude/survival-intel)
 
-Local: intel, worldsim and survival suites RUNPLACEHOLDER.
+Local: intel, worldsim and survival suites R2656 PASS (intel, worldsim, survival).
 
 - **Added (trade, call 26):** `WorldTrade.value` real (prices.json, tags, type; survival weights
   with ammo, meds, food and fuel weighing most; season and region hooks; cash at face, drifting by
