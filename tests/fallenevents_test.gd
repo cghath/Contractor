@@ -262,7 +262,8 @@ func _test_live_convoy() -> void:
 	var trec: Dictionary = WorldSim.people().get(c.trader_id, {})
 	check(c.state == "hailed" and line != "" and Barter.trader_problem(trec) == "", "walking up openly hails it: it holds (\"%s\")" % line)
 	var deal := Barter.deal(player, trec)
-	check(not (deal.theirs as Array).is_empty() and (deal.theirs as Array).any(func(row: Dictionary) -> bool: return String(row.src) == "kit"),
+	var kit_ids: Array = (trec.get("kit", []) as Array).map(func(e: Dictionary) -> String: return String(e.id))
+	check(not kit_ids.is_empty() and (deal.theirs as Array).any(func(row: Dictionary) -> bool: return String(row.id) in kit_ids),
 		"its trader deals from the column's stock (%d lines)" % (deal.theirs as Array).size())
 	if c.trader:
 		c.trader.global_position = player.global_position + Vector3(1.5, 0.0, 0.0)
@@ -378,8 +379,10 @@ func _test_crew_home() -> void:
 	var gid := Enclave.gid() if Enclave.is_set_up() else String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
 	var rel0 := WorldGroup.relation(WorldSim.group(gid), "player")
 	var med0 := 0
+	var had := {"serum": player.inventory.count_of(&"serum")}
 	for row: Array in HeliCrew.cfg().get("reward", []):
 		med0 += player.inventory.count_of(StringName(String(row[0])))
+		had[String(row[0])] = player.inventory.count_of(StringName(String(row[0])))
 	var j0 := (Survival.state().get("journal", []) as Array).size()
 	var faked := Enclave.is_set_up()
 	if faked:
@@ -400,6 +403,10 @@ func _test_crew_home() -> void:
 	check(lines.any(func(e: Dictionary) -> bool: return String(e.get("text", "")).contains("home to the enclave")), "a journal line")
 	check(gid == "" or (WorldSim.section().events as Array).any(func(x: Dictionary) -> bool: return String(x.kind) == "broadcast" and String(x.text).contains("thanks")), "and the enclave's thanks on the radio")
 	check(String(h.get("outcome", "")) == "delivered", "the event's done: delivered (%s)" % String(h.get("outcome", "")))
+	for id: String in had:  # (the reward back out of his kit: the later checks want the room)
+		while player.inventory.count_of(StringName(id)) > int(had[id]):
+			if not player.inventory.remove_one(StringName(id)):
+				break
 
 
 func _test_frequency_and_roll() -> void:
