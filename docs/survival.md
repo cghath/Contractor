@@ -24,6 +24,7 @@
   wakes them, cleared for a loot payoff), the climbing rules in full; R2675 PASS (deadtime, survival, seasons, fallen); see docs/survival_deadtime.md.
 - **The survivor's mind built on `claude/survival-mind`** (calls 116-119, 130 first form): the nerve meter (`Nerve.level(s)` for the
   tension layer), addictions and withdrawal, cannibalism and the wasting sickness, dreams, the journal's voice, letters; R2682 PASS (mind, survival, body, fallenpeople, fallenaudio); see docs/survival_mind.md.
+- **Condition and wear built on `claude/survival-wear`** (calls 120-123): guns wear, jam (R clears) and break, cleaning kits and oil; blades dull, a whetstone; ammo condition and duds, dry storage; clothes wear, tear and mend, sore feet; vehicle parts, punctures and patches, stale fuel; R2684 PASS (wear), R2680 survival, weapons, clothing PASS; see docs/survival_wear.md.
 - **Fauna and flora built on `claude/survival-nature`** (calls 42's hunting/fishing/foraging, 100-107): wildlife with fear,
   tells and the dead hunting them, predators, infected dogs and wolves, migration and fishing, crows/flies/rats/cats, regrowth,
   foraging with poisons, trees as a resource, wildfire; R2670 PASS (nature, survival, seasons); see docs/survival_nature.md.

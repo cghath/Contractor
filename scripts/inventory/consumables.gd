@@ -42,6 +42,8 @@ static func use_problem(soldier: Soldier, container: StringName, index: int) -> 
 	if not soldier.vitals.is_up():
 		return "Not now"
 	var c: Dictionary = item.stats.consume
+	if c.has("wear"):
+		return Wear.tool_problem(soldier, item)  # a cleaning kit, whetstone, needle, tyre patch (survival wear)
 	if bool(c.get("battery", false)):
 		return "" if _nvg_needs_battery(soldier.inventory) else "No NVG needs a battery"
 	if not WoundModel.DRUGS.has(StringName(String(c.get("drug", "")))):
@@ -58,6 +60,8 @@ static func server_use(soldier: Soldier, container: StringName, index: int) -> S
 	var entry: Dictionary = soldier.inventory.containers[container][index]
 	var item := ItemDB.get_item(StringName(entry.id))
 	var c: Dictionary = item.stats.consume
+	if c.has("wear"):
+		return Wear.server_use_tool(soldier, container, index)  # a timed job; the tool's use spent at its end
 	if bool(c.get("battery", false)):
 		problem = Nvg.server_recharge(soldier.inventory)
 	elif not soldier.vitals.server_take_drug(StringName(String(c.drug)), float(c.get("doses", 1.0))):

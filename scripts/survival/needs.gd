@@ -286,6 +286,7 @@ static func stamina_mult(n: Dictionary) -> float:
 	m *= 1.0 - SHIVER_STAMINA * shivering(n)
 	m *= Body.stamina_factor(n)  # fever, sickness, sepsis, heat stroke
 	m *= Mind.stamina_factor(n)  # low nerve, withdrawal (Mind)
+	m *= ClothingWear.feet_stamina(n)  # sore feet from worn-out boots (call 122)
 	return m
 
 

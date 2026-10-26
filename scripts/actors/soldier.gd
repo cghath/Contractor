@@ -1123,10 +1123,15 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var now := _now()
 	if now < _server_next_shot or now < _server_busy_until - 0.1:
 		return
+	if WeaponCondition.server_blocked(self, slot, weapon):
+		return  # survival wear (call 120): jammed, broken, or it jams now
 	var tube := Shotguns.is_shotgun(weapon)  # a 12 gauge's next shell, tube or magazine (Shotguns)
 	var shell := Shotguns.server_take_shell(inventory, slot) if tube else &""
 	if (tube and shell == &"") or (not tube and not inventory.consume_round(slot)):
 		return
+	if not tube and WeaponCondition.server_dud(self, slot, weapon):
+		_server_next_shot = now + 0.3
+		return  # a bad round (call 121): a click, and R clears it
 	server_end_spawn_protection()  # firing ends spawn protection
 	stop_loading_mags("Stopped loading magazines")  # firing needs your hands
 	# The weapon's rate holds over time, but shots the network delivered bunched up (paced
@@ -1158,6 +1163,7 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	Sfx.server_shot(muzzle, round_point,
 		"suppressed" if suppressed else String(weapon.stats.get("sound", "pistol" if weapon.slot == &"sidearm" else "rifle")))  # every peer hears it (Sfx): its family's sound (AR, AK, ...)
 	_rounds_fired += 1
+	WeaponCondition.on_shot(self, slot, weapon)  # survival wear (call 120)
 	var every := int(weapon.stats.get("tracer_every", TRACER_EVERY))
 	var tracer := every > 0 and _rounds_fired % every == 0
 	var kind: int = (Tracer.Kind.GREEN if faction == &"hostile" else Tracer.Kind.RED) if tracer else Tracer.Kind.BALL
@@ -1351,6 +1357,8 @@ func _server_reload(slot: StringName) -> void:
 	var id: StringName = inventory.slots.get(slot, &"")
 	if id == &"":
 		return
+	if WeaponCondition.server_try_clear(self, slot):
+		return  # a jammed gun is cleared, not reloaded (call 120)
 	if Shotguns.is_tube(ItemDB.get_item(id)):
 		Shotguns.server_load(self, slot)  # a tube is loaded shell by shell (the AI's reload too)
 		return

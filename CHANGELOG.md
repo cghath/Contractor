@@ -19,6 +19,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Added** dreams and the journal's voice (`Dreams`, `JournalVoice`, call 119): a dream line on waking coloured by the day (a loss, a horde, a bite, a kill, hunger, a kindness), a nightmare after a death that halves sleep's restore; the journal's lines written in the survivor's voice by trait (optimist, gloomy, hot-headed, pious, calm), the fact kept word for word; data/survival_lines.json "dreams" and "journal" sections
 - **Added** letters (`Letters`, call 130 first form): "Write a letter" in the journal's People tab keeps it on the survivor; on death it lies on the body as a letter item, and whoever carries it reads it in the People tab
 - **Added** the mind suite (tests/mind_test.gd)
+### Contractor: Fallen, condition and wear (claude/survival-wear)
+
+- **Added** weapon wear, jams and cleaning (`WeaponCondition`, call 120): a `condition` 0-100 on guns and melee weapons; shots wear a gun (more wet, much more improvised), a wet gun rusts; a worn gun jams and R clears it (faster from firearms 3); at 0 it's broken until a Gun Repair Kit; a Gun Cleaning Kit and Gun Oil bring it back; blades dull (x0.7) and a Whetstone sharpens them; a worn axe fells slower.
+- **Added** ammo condition (`AmmoCondition`, call 121): corroded or wet rounds misfire (a dud, R clears it); a magazine's condition goes into the gun; found ammo by where it lay; ammo in the rain corrodes, under a roof it keeps; hand-loaded rounds x0.9; firearms 2 reads it.
+- **Added** clothing wear and repair (`ClothingWear`, call 122): clothes wear by the day (more in rain and water, boots walking), blows tear them, torn clothes keep less warmth and shed less rain; worn-out boots make sore feet (stamina); a Needle and Thread mends.
+- **Added** vehicle wear (`VehicleWear`, call 123): engine, tyres and battery wear by distance, punctures on rough ground and by wrecks (a flat: 40% speed until a Tyre Patch Kit), stale fuel stalls the engine; the service resets the wear and a settlement's mechanic services vehicles; a hoof-wear stub.
+- **Added** items (gun cleaning kit, gun oil, gun repair kit, whetstone, needle and thread, tyre patch kit), three recipes, and the `wear` suite (tests/wear_test.gd).
 
 ### Contractor: Fallen, clothing, the gear editor and third person (claude/survival-clothing)
 

@@ -8,6 +8,9 @@
 		"campfire": {"name": "Campfire kit", "inputs": [["wood_stick", 3]], "tool": ["lighter", "matches"], "station": "hands", "time_s": 6.0, "line": "fieldcraft", "level": 0, "xp": 6, "output": ["campfire", 1]},
 		"boiled_water": {"name": "Boil dirty water", "inputs": [["dirty_water_bottle", 1]], "tool": [], "station": "fire", "time_s": 10.0, "line": "fieldcraft", "level": 0, "xp": 5, "output": ["dirty_water_bottle", 1], "treat_water": true},
 		"smoked_meat": {"name": "Smoked meat", "inputs": [["raw_meat", 1]], "tool": [], "station": "fire", "time_s": 20.0, "line": "cooking", "level": 2, "xp": 10, "output": ["smoked_meat", 1]},
-		"smoked_fish": {"name": "Smoked fish", "inputs": [["raw_fish", 1]], "tool": [], "station": "fire", "time_s": 15.0, "line": "cooking", "level": 1, "xp": 8, "output": ["smoked_fish", 1]}
+		"smoked_fish": {"name": "Smoked fish", "inputs": [["raw_fish", 1]], "tool": [], "station": "fire", "time_s": 15.0, "line": "cooking", "level": 1, "xp": 8, "output": ["smoked_fish", 1]},
+		"gun_oil": {"name": "Gun oil from engine oil", "inputs": [["engine_oil", 1]], "tool": [], "station": "hands", "time_s": 6.0, "line": "firearms", "level": 1, "xp": 5, "output": ["gun_oil", 3]},
+		"needle_thread": {"name": "Needle and thread", "inputs": [["cloth_rag", 2], ["copper_wire", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 8.0, "line": "fieldcraft", "level": 0, "xp": 6, "output": ["needle_thread", 1]},
+		"tyre_patch": {"name": "Tyre patches from an inner tube", "inputs": [["bicycle_tube", 1]], "tool": ["tag:blade", "tag:knife"], "station": "hands", "time_s": 10.0, "line": "mechanics", "level": 1, "xp": 6, "output": ["tyre_patch", 2]}
 	}
 }

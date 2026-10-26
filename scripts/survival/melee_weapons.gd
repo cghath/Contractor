@@ -63,7 +63,7 @@ static func server_action(s: Soldier, action: String) -> void:
 			if not is_melee(weapon):
 				return
 			var heavy := action == "heavy" and Rpg.can(s, "heavy_swing")  # the heavy swing from melee 2 (survival_rpg.md section 1)
-			Melee.server_attack(s, profile(weapon, heavy))
+			Melee.server_attack(s, profile(weapon, heavy), WeaponCondition.server_swing(s))  # a dull blade hits softer (call 120)
 		"block_on":
 			Melee.server_block(s, true)
 		"block_off":

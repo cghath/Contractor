@@ -178,6 +178,7 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	if mult < 0.5:
 		hit["superficial"] = true
 	victim.vitals.server_hit(part, hit)
+	ClothingWear.on_hit(victim, part)  # the blow tears what covers it (call 122)
 	if String(attack.get("name", "")) == "bite":
 		Body.on_bitten(victim, part)  # the fever clock (phase D)
 	Rpg.on_melee_hit(attacker, victim)
