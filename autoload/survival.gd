@@ -547,7 +547,7 @@ func _footsteps(level: SurvivalLevel) -> void:
 		if not s.vitals.is_up() or s.movement == null or s.move_speed_now() < 0.3 or is_instance_valid(s.vehicle):
 			continue
 		var m := s.movement
-		var key := "prone" if m.is_prone() else ("crouch" if m.is_crouched() else ("sprint" if m.is_sprinting else ["slow", "walk", "brisk", "jog"][clampi(m.pace, 0, 3)]))
+		var key: String = "prone" if m.is_prone() else ("crouch" if m.is_crouched() else ("sprint" if m.is_sprinting else String(["slow", "walk", "brisk", "jog"][clampi(m.pace, 0, 3)])))
 		var radius := float(STEP_M[key]) * DayNight.hearing_x()
 		var loud := ZombieAI.HEAR_RUN if key in ["sprint", "jog"] else ZombieAI.HEAR_STEP
 		server_noise(s, s.global_position, radius, loud)
