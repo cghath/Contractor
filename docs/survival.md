@@ -1,6 +1,18 @@
 # Contractor: Fallen (survival): an open world, persistent, overrun
 
-## Where the build is (2026-10-26 ~06:45 CDT)
+## Where the build is (2026-10-26 ~08:40 CDT)
+
+- **PHASE C COMPLETE on claude/survival (8e58e721)**: world sim, settlement work, intel/trade, enclave/ARCHE/bunkers/cure
+  and mounts lanes merged; survival, mounts, enclave, intel, worldsim, vehicles PASS (R2660). **Slice C build B2661**:
+  B:\Contractoruilds\contractor-2026-10-26-083242-B2661-fallen-slice-c-8e58e721 (+ .zip).
+- **Phase D started ~08:35**: the body (claude/survival-body: the bite clock, wound infection, surgery, sicknesses, water
+  works, hygiene, seasons on the body, the body screen) and the world (claude/survival-seasons: seasons + the thaw, raids and
+  horde sieges against builds, politics, infrastructure, traps/lures/masking) on Opus lanes.
+- Still open after D (the calls table): relationships/romance, top-end crafting and gunsmithing, the audio tension layer and
+  the bigger TTS, clothing slots and layers, climbing rules in full, fauna and flora (calls 100-108), the dead's decay/dress/
+  nests, the nerve meter and the rest of calls 116-142.
+
+### (earlier) 2026-10-26 ~06:45 CDT
 
 - **PHASE B COMPLETE on claude/survival (0996f909)**: building, RPG and people lanes merged; survival, fallenpeople,
   building, rpg PASS (R2646). **Slice B build B2647**: B:\Contractoruilds\contractor-2026-10-26-063915-B2647-fallen-slice-b-0996f909.
