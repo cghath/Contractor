@@ -14,7 +14,13 @@ extends Control
 ## fogged; your own position; the marks with their text and age, fainter as they age (faded past
 ## SurvivalMap.FADE_DAYS). Left or middle drag pans, right click (or a double click) adds a mark
 ## (its text asked as MapView does), Delete removes the mark under the cursor.
-## First form: the real-map relief and roads at the world level and the intel layers are later.
+## The intel layer (phase C, call 37/45/98): each known zone is washed faintly in the colour of
+## the group that holds most of its region (political_colour, from WorldSim.region_holders); a
+## told mark names its teller; the zone zoom draws the zone's landmarks (Landmarks); standing at
+## the settlement's map table (MapTable.near) adds its reports: allies' sightings (red crosses),
+## trade routes (dashed lines between homes), known group movements (dots, fainter with age) and
+## a list of them at the top left.
+## Still to come: the real-map relief and roads at the world level.
 
 const NODE_NAME := "FallenMap"
 ## Proposed: a zone's square in world metres and the margin round its ground inside it.
@@ -33,8 +39,18 @@ const CELL_FOG := Color(0.1, 0.11, 0.1, 0.78)
 const LINK := Color(0.45, 0.48, 0.42)
 const FRAME := Color(0.93, 0.69, 0.27)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
-const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3), "village": Color(0.6, 0.8, 1.0)}
+const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3), "village": Color(0.6, 0.8, 1.0),
+	"told": Color(0.85, 0.72, 1.0), "radio": Color(0.55, 0.95, 0.85)}
 const HOVER_PX := 10.0
+## Proposed: the political wash's colours by the holder's kind, and its strength.
+const KIND_COLOURS := {"settlers": Color(0.35, 0.8, 0.4), "raiders": Color(0.9, 0.25, 0.2), "scavengers": Color(0.9, 0.8, 0.3),
+	"cultists": Color(0.65, 0.35, 0.85), "enclave": Color(0.3, 0.55, 1.0), "player": Color(0.2, 1.0, 1.0), "lone": Color(0.7, 0.7, 0.7)}
+const POLITICAL_ALPHA := 0.16
+const LANDMARK_COLOUR := Color(0.85, 0.82, 0.7)
+const TABLE_COLOUR := Color(1.0, 0.45, 0.35)
+const ROUTE_COLOUR := Color(0.95, 0.85, 0.45)
+## Proposed: how often (real s) the map table's reports are read again while you stand at it.
+const TABLE_READ_S := 1.0
 
 var screen: Node
 var level: Node
@@ -44,6 +60,11 @@ var zoom := 0.1
 ## Drawn last frame (for tests and the hover): the zones named at the world level, and the marks.
 var drawn_zones: Array[String] = []
 var drawn_marks: Array[Dictionary] = []
+## Drawn last frame: landmarks ({"name", "at"}) and, at a map table, its reports (MapTable.reports).
+var drawn_landmarks: Array[Dictionary] = []
+var table_reports := {}
+var _table_t := -100.0
+var _region_colours := {}
 
 var _sizes := {}
 var _drag := 0
@@ -355,6 +376,8 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	drawn_zones.clear()
 	drawn_marks.clear()
+	drawn_landmarks.clear()
+	_region_colours.clear()
 	draw_rect(Rect2(Vector2.ZERO, size), BACKDROP)
 	var t := blend()
 	var layout := RegionMap.layout()
@@ -380,6 +403,11 @@ func _draw() -> void:
 		draw_rect(r, ZONE_FILL if visited else UNVISITED_FILL)
 		if t > 0.0:
 			_draw_zone(id, r, t)
+		var pc := _political(id)
+		if pc.a > 0.0:
+			draw_rect(r, Color(pc, pc.a * (1.0 - 0.6 * t)))
+		if t >= 0.5 and visited:
+			_draw_landmarks(id, font, t)
 		draw_rect(r, FRAME if id == here else LINK, false, 3.0 if id == here else 1.0)
 		drawn_zones.append(id)
 		if t < 1.0:
@@ -390,6 +418,7 @@ func _draw() -> void:
 			draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, Color(0, 0, 0, 0.75 * (1.0 - t)))
 			draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(UiKit.TEXT, 1.0 - t))
 	_draw_marks(t, font)
+	_draw_table(font)
 	_draw_self()
 
 
@@ -453,7 +482,8 @@ func _draw_marks(t: float, font: Font) -> void:
 			draw_colored_polygon(PackedVector2Array([at + Vector2(0, -r), at + Vector2(r, 0), at + Vector2(0, r), at + Vector2(-r, 0)]), colour)
 		drawn_marks.append({"index": i, "at": at, "faded": faded})
 		if t >= 0.5:
-			var label := "%s (%s)" % [String(m.get("text", "")), SurvivalMap.age_text(m)]
+			var teller := String(m.get("teller", ""))
+			var label := "%s (%s%s)" % [String(m.get("text", "")), SurvivalMap.age_text(m), (", told by " + teller) if teller != "" else ""]
 			var p := at + Vector2(9, 5)
 			draw_string_outline(font, p, label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, Color(0, 0, 0, 0.75 * alpha))
 			draw_string(font, p, label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, Color(UiKit.TEXT, alpha))
@@ -468,3 +498,88 @@ func _draw_self() -> void:
 	var dir := Vector2(f.x, f.z).normalized() if Vector2(f.x, f.z).length() > 0.01 else Vector2.UP
 	var side := dir.orthogonal()
 	draw_colored_polygon(PackedVector2Array([s + dir * 10.0, s - dir * 6.0 + side * 6.0, s - dir * 3.0, s - dir * 6.0 - side * 6.0]), SELF_COLOUR)
+
+
+# --- The intel layer -----------------------------------------------------------------------------
+
+## The faint colour of `region_id`'s holder: the group holding the most places in it
+## (WorldSim.region_holders), by its kind (KIND_COLOURS); clear when nobody holds any.
+static func region_colour(region_id: String) -> Color:
+	if region_id == "" or not WorldSim.is_set_up():
+		return Color(0, 0, 0, 0)
+	var holders := WorldSim.region_holders(region_id)
+	var best := ""
+	var most := 0
+	var keys := holders.keys()
+	keys.sort()
+	for gid: String in keys:
+		if int(holders[gid]) > most:
+			most = int(holders[gid])
+			best = gid
+	if best == "":
+		return Color(0, 0, 0, 0)
+	var kind := "player" if best == "player" else String(WorldSim.group(best).get("kind", "lone"))
+	var c: Color = KIND_COLOURS.get(kind, KIND_COLOURS.lone)
+	return Color(c, POLITICAL_ALPHA)
+
+
+## A zone's political wash: its region's colour.
+static func political_colour(zone_id: String) -> Color:
+	return region_colour(WorldSim.region_of(zone_id)) if WorldSim.is_set_up() else Color(0, 0, 0, 0)
+
+
+func _political(zone_id: String) -> Color:
+	var region := WorldSim.region_of(zone_id) if WorldSim.is_set_up() else ""
+	if not _region_colours.has(region):
+		_region_colours[region] = region_colour(region)
+	return _region_colours[region]
+
+
+## A zone's landmarks (Landmarks) as small triangles with their names (the zone zoom).
+func _draw_landmarks(zone_id: String, font: Font, t: float) -> void:
+	var box := Rect2(Vector2.ZERO, view_size()).grow(20.0)
+	var colour := Color(LANDMARK_COLOUR, clampf((t - 0.5) * 2.0, 0.0, 1.0))
+	for l: Dictionary in Landmarks.of(zone_id):
+		var at := world_to_screen(to_world(zone_id, l.pos as Vector2))
+		if not box.has_point(at):
+			continue
+		draw_colored_polygon(PackedVector2Array([at + Vector2(0, -6), at + Vector2(5, 4), at + Vector2(-5, 4)]), colour)
+		var p := at + Vector2(8, -4)
+		draw_string_outline(font, p, String(l.name), HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, Color(0, 0, 0, 0.7 * colour.a))
+		draw_string(font, p, String(l.name), HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
+		drawn_landmarks.append({"name": String(l.name), "at": at})
+
+
+## At the settlement's map table (host: MapTable.near): its reports over the map, and listed.
+func _draw_table(font: Font) -> void:
+	var me := MapNodes.local_player(self)
+	if not Survival.running or me == null or not MapTable.near(me):
+		table_reports = {}
+		return
+	var real := Time.get_ticks_msec() / 1000.0
+	if real - _table_t >= TABLE_READ_S or table_reports.is_empty():
+		_table_t = real
+		table_reports = MapTable.reports()
+	var layout := RegionMap.layout()
+	var centre_of := func(z: String) -> Vector2:
+		return world_to_screen(cell_rect(layout[z]).get_center()) if layout.has(z) else Vector2(-1000, -1000)
+	for r: Dictionary in table_reports.get("routes", []):
+		var a: Vector2 = centre_of.call(String(r.a_zone))
+		var b: Vector2 = centre_of.call(String(r.b_zone))
+		if a != b:
+			draw_dashed_line(a, b, ROUTE_COLOUR, 2.0, 8.0)
+	for sgt: Dictionary in table_reports.get("sightings", []):
+		var at: Vector2 = centre_of.call(String(sgt.zone))
+		draw_line(at + Vector2(-6, -6), at + Vector2(6, 6), TABLE_COLOUR, 2.0)
+		draw_line(at + Vector2(-6, 6), at + Vector2(6, -6), TABLE_COLOUR, 2.0)
+	for m: Dictionary in table_reports.get("movements", []):
+		var at: Vector2 = centre_of.call(String(m.zone)) + Vector2(10, 10)
+		var alpha := clampf(1.0 - float(m.age) / MapTable.MOVE_DAYS, 0.25, 1.0)
+		draw_circle(at, 4.0, Color(TABLE_COLOUR, alpha))
+		draw_string(font, at + Vector2(6, 4), String(m.name), HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, Color(UiKit.TEXT, alpha))
+	var y := 24.0
+	draw_string(font, Vector2(12, y), "Map table", HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_BODY, UiKit.ACCENT)
+	for line: String in MapTable.lines(table_reports).slice(0, 14):
+		y += 18.0
+		draw_string_outline(font, Vector2(12, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, Color(0, 0, 0, 0.8))
+		draw_string(font, Vector2(12, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, UiKit.TEXT)

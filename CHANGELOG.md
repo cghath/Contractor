@@ -11,6 +11,27 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, phase C: trade and the intel layer (claude/survival-intel)
+
+Local: intel, worldsim and survival suites R2656 PASS (intel, worldsim, survival).
+
+- **Added (trade, call 26):** `WorldTrade.value` real (prices.json, tags, type; survival weights
+  with ammo, meds, food and fuel weighing most; season and region hooks; cash at face, drifting by
+  seed), traders' `buy_price` / `sell_price` by their group's need and standing; `Barter` (who
+  trades, their stock, the deal, the swap through the inventories and the group's supplies and
+  cash with `WorldSim.server_player_trade`, `server_cheated` for everyone who hears); the barter
+  screen (`TradeScreen`) from the talk menu's Trade.
+- **Added (intel, section 10, calls 45, 54, 95, 98):** `Intel` (a child of Survival): the talk
+  menu's "Ask about..." (rumours by topic become journal entries and told map marks with the
+  teller, truth never recorded), companions' hourly road reports, the journal's RPCs; the journal
+  screen (`JournalScreen`, key 7: log, people, places, deadlines, the trail, the radio); the radio
+  (`FallenRadio`: repair with parts and mechanics, battery or generator power, group chatter by
+  range, enclave broadcasts, ARCHE's numbers station); `Landmarks` (named points per zone,
+  "Meet at the water tower"); the settlement's map table (`MapTable`, build piece `map_table`:
+  allies' sightings, trade routes, group movements); the map's political colour, tellers and
+  landmarks (`FallenMap`). World live people now talk (Who, Ask about, Trade).
+- **Added:** the `intel` suite. Docs: docs/survival_intel.md.
+
 ### Contractor: Fallen, phase C core: the living world (claude/survival-worldsim)
 
 Local: worldsim and survival suites R2652 PASS (worldsim, survival, settlement).

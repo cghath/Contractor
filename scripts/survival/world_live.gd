@@ -186,6 +186,8 @@ func _spawn_person(rec: Dictionary, gid: String, at: Vector3) -> Soldier:
 		"label": String(rec.name), "pos": at, "look": String(rec.look), "face": String(rec.get("face", ""))})
 	if s:
 		_dress(s, rec)
+		s.set_meta(&"world_person", String(rec.id))  # (the talk menu and trade: TalkMenu, Barter)
+		s.set_meta(&"world_group", gid)
 	return s
 
 

@@ -98,9 +98,11 @@ const PIECES := {
 	"farm_bed": {"name": "Farm bed", "size": [2, 1, 4], "cost": [[&"planks", 2]], "tool": "shovel", "build_s": 6.0, "hp": 40.0, "solid": false, "look": "slab", "mat": "wood"},
 	"generator": {"name": "Generator", "size": [2, 2, 2], "cost": [[&"scrap_sheet", 4]], "tool": "wrench", "build_s": 15.0, "hp": 150.0, "solid": true, "look": "full", "mat": "scrap"},
 	"lamp": {"name": "Lamp", "size": [1, 3, 1], "cost": [[&"scrap_sheet", 1]], "tool": "wrench", "build_s": 3.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "scrap"},
+	# The map table (call 45, the intel lane: MapTable): standing at it, the map shows the reports.
+	"map_table": {"name": "Map table", "size": [4, 2, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "frame", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
-	"pile", "stove", "lookout", "farm_bed", "generator", "lamp"]
+	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"
