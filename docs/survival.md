@@ -27,6 +27,8 @@ Branch `claude/survival` (worktree `B:\Contractor\.claude\worktrees\survival`), 
   (calories, water, macros, vitamins, sleep, warmth, wet, hygiene, sickness; S1's hunger/thirst derived), food values on
   items + dirty water, raw meat, beans, dysentery by water quality, `SurvivalSleep` (`Survival.server_sleep`, x12), the HUD's
   low-only signs and `BodyReadout` (backslash); see CHANGELOG.
+- **Phase B's RPG layer (first form) built 2026-10-26 on `claude/survival-rpg`** (R2634 rpg + survival PASS at 39231fd8): `Rpg`
+  (twelve lines, XP curve, perks, backgrounds + flaws, gates), `Crafting` (essentials), `CharacterScreen` (]); see survival_rpg.md's top block.
 - **Step 7 the map (first form) built 2026-10-26 on `claude/survival-map`** (R2622, R2626 at 61e1ab91: map PASS, the
   survival suite's map section all ok; its other fails were the base's melee/stealth ones b2e9038f fixed):
   `SurvivalMap` (explored 64 m cells, known zones, marks that age and fade past 3 days, the safehouse)

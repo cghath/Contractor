@@ -10,6 +10,22 @@ Built on: `Hiring.candidate` (names, roles, skills as numbers), `Roles` (medic-o
 role kits), the loadout and inventory, the interaction menu, the existing weapon handling and
 movement stats (stamina, carry weight).
 
+## Where the build is (2026-10-26 ~02:30 CDT)
+
+Branch `claude/survival-rpg` (worktree `B:\Contractor\.claude\worktrees\survival-rpg`, from `claude/survival` 1c5b622b):
+**phase B's RPG layer, first form, built; R2634 PASS (rpg + survival suites) at 39231fd8.**
+- `Rpg` (scripts/survival/rpg.gd) with `RpgLines`, `Perks`, `Backgrounds`: the twelve lines, the call 82 curve, the
+  at/below/above rule, survivor levels and 21 perks, creation (15 backgrounds, 15 flaws), the gates table as
+  `Rpg.can(s, "stitch")`, the effects and XP sources in section 1 (see CHANGELOG). Saved in the survivor record
+  ("rpg"); permadeath wipes it.
+- `Crafting` + `data/survival_recipes.json` (hands and fire stations; 7 recipes), `CharacterScreen` (the ] key),
+  `SurvivorPicker` on the New world screen.
+- **For the other lanes:** building calls `Rpg.xp(s, "building", n)` and reads `Rpg.build_time_mult(s)` and
+  `Rpg.can(s, "build_tier_2")`; the body screen reads `Rpg.medical_sees(s)` (0/1/2); companions' lines, teaching
+  (`Rpg.server_teach` is a stub), the newcomer's own creation pick, the inventory's Read action for books
+  (`Rpg.server_read`), workbench stations and the "later" perks and flaws wait for their systems.
+- Not in this pass: pipe guns and the jam test, firearms/archery/mechanics XP (no hooks yet), tool durability.
+
 ## 1. Skill lines (call 16)
 
 Twelve lines, each 0-10, levelled by **doing**:
