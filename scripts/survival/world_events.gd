@@ -376,11 +376,11 @@ static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill:
 			(col.relations as Dictionary)[String(g.id)] = float((col.relations as Dictionary).get(String(g.id), 0.0)) - 30.0
 		_end(m, r, "ambushed", "convoy_ambushed", String(def.get("ambushed", "")).format(fill), [String(g.id)])
 		return
-	for g: Dictionary in m.groups_in_zone(String(r.zone)):
-		if String(g.kind) in ["settlers", "scavengers"]:
+	for sg: Dictionary in m.groups_in_zone(String(r.zone)):
+		if String(sg.kind) in ["settlers", "scavengers"]:
 			for k: String in ["food", "water"]:
 				if k in WorldGroup.SUPPLY_KEYS:
-					WorldGroup.add_supply(g, k, float(def.get("trade_share", 0.5)) * WorldGroup.size(g))
+					WorldGroup.add_supply(sg, k, float(def.get("trade_share", 0.5)) * WorldGroup.size(sg))
 	_end(m, r, "passed", "convoy_passed", String(def.get("passed", "")).format(fill), [])
 
 
