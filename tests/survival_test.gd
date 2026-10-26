@@ -530,7 +530,7 @@ func _test_stealth() -> void:
 	player.velocity = fwd * 4.0
 	player.movement.is_sprinting = true
 	Survival._footsteps(level)
-	check(is_equal_approx(player.noise_radius, Survival.STEP_M.sprint * DayNight.hearing_x()), "a sprinting man's steps carry %.0f m (%.0f)" % [Survival.STEP_M.sprint * DayNight.hearing_x(), player.noise_radius])
+	check(is_equal_approx(player.noise_radius, Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player)), "a sprinting man's steps carry %.0f m in his clothes (%.0f)" % [Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player), player.noise_radius])
 	player.movement.is_sprinting = false
 	player.velocity = Vector3.ZERO
 	# Smell: bleeding, he's smelt downwind within SMELL_M.

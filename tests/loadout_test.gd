@@ -411,6 +411,8 @@ func _test_3d(me: String) -> void:
 	var host := level.players.get_node(^"1") as Soldier
 	check(Restock.counts(editor.draft) == Restock.counts(Loadouts.template_of(Roster.json_safe(host.inventory.net_state))) and not editor.dirty(),
 		"the draft starts as what he wears")
+	editor.focus_region("all")  # (the editor reopens on the region last used on this machine: user://loadout_editor.cfg)
+	await _frames(2)
 	var main := editor.preview.anchors().filter(func(a: Dictionary) -> bool: return editor.preview.shown(a))
 	editor.focus_region("torso")
 	await _frames(2)
