@@ -67,6 +67,9 @@ func _test_editor_pouches() -> void:
 	var body := _kitted_body()
 	members[mate]["gear"] = Roster.json_safe(body.inventory.net_state)
 	body.queue_free()
+	# The editor remembers the last person picked on this machine (LoadoutEditor.SETTINGS): kept
+	# as it was, so the loadout suite still opens on your own soldier.
+	var cfg_was := FileAccess.get_file_as_bytes(LoadoutEditor.SETTINGS) if FileAccess.file_exists(LoadoutEditor.SETTINGS) else PackedByteArray()
 	var layer := CanvasLayer.new()
 	var editor := LoadoutEditor.new()
 	layer.add_child(editor)
@@ -129,6 +132,12 @@ func _test_editor_pouches() -> void:
 	check(Loadouts.box_count(editor.draft, "pockets", "ifak") == 1 and moved != "", "dragged from the pockets onto a mag pouch, an IFAK stays in the pockets (%s)" % moved)
 	layer.queue_free()
 	await _frames(2)
+	if cfg_was.is_empty():
+		DirAccess.remove_absolute(LoadoutEditor.SETTINGS)
+	else:
+		var f := FileAccess.open(LoadoutEditor.SETTINGS, FileAccess.WRITE)
+		f.store_buffer(cfg_was)
+		f.close()
 	BaseHub.delete_test_campaign_files()
 	Campaign.restore({})
 
