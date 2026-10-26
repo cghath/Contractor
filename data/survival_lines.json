@@ -34,8 +34,29 @@
 			{"text": "Every place is the same now. Empty or full of them.", "tags": ["gloomy"]}
 		],
 		"trade": [
-			{"text": "Trade? Later. Nobody's set prices yet."},
-			{"text": "I'll trade when you've got something worth it.", "tags": ["greedy"]}
+			{"text": "Let's see what you've got."},
+			{"text": "I'll trade when you've got something worth it.", "tags": ["greedy"]},
+			{"text": "Fair's fair. What are you carrying?", "tags": ["kind"]},
+			{"text": "Quick, before anyone sees.", "tags": ["scared"]}
+		],
+		"trade_no": [
+			{"text": "I don't do the trading. Ask around."},
+			{"text": "Not with you.", "tags": ["grudge"]}
+		],
+		"trade_unfair": [
+			{"text": "That's not a fair trade."},
+			{"text": "You think I'm stupid?", "tags": ["hot_headed"]},
+			{"text": "Put more on the table or walk.", "tags": ["greedy"]}
+		],
+		"trade_done": [
+			{"text": "Deal."},
+			{"text": "Pleasure. Come back when you've more.", "tags": ["greedy"]},
+			{"text": "Good trade. Stay safe out there.", "tags": ["kind"]}
+		],
+		"rumour_none": [
+			{"text": "I haven't heard anything about that."},
+			{"text": "Nothing I'd swear to.", "tags": ["calm"]},
+			{"text": "Why would I tell you?", "tags": ["grudge"]}
 		],
 		"recruit_yes": [
 			{"text": "Alright. I'm with you."},

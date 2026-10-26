@@ -61,6 +61,7 @@ var _clock_s := 0.0  # host: real seconds into the world's current hour
 func _ready() -> void:
 	add_child(Rpg.new())  # the RPG layer's RPCs and tick (Rpg)
 	add_child(WorldSim.new())  # the living world's far tick (WorldSim, survival_world.md)
+	add_child(Intel.new())  # the intel layer: rumours, reports, the radio, trade's RPCs (Intel)
 
 
 func state() -> Dictionary:

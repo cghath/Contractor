@@ -10,6 +10,9 @@
 - **Phase C core (the world sim) built on `claude/survival-worldsim`** (survival_world.md 2-5, 9, 11-13): groups,
   regions, the judgement, far fights, pressure and hordes across the map, live groups, the catch-up, rumours, goal
   modes; R2652 PASS (worldsim, survival, settlement; a far tick 13 ms for 78 groups); see survival_world.md's "Where the build is".
+- **Phase C trade and intel built on `claude/survival-intel`** (survival_world.md 8 and 10; calls 26, 37, 45, 54, 95, 98):
+  the value scale and traders' prices, the barter screen, rumours in the talk menu, the journal (7), the radio, landmarks,
+  the map's political colour and the settlement's map table; RUNPLACEHOLDER; see docs/survival_intel.md.
 
 ### (earlier) 2026-10-26 ~02:15 CDT
 

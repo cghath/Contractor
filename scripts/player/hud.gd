@@ -616,6 +616,8 @@ func _make_body_readout() -> void:
 	add_child(body_readout)
 	add_child(CharacterScreen.new())  # survival: the character screen (CharacterScreen.TOGGLE_KEY)
 	add_child(SettlementScreen.new())  # survival: the settlement screen (SettlementScreen.TOGGLE_KEY)
+	add_child(JournalScreen.new())  # survival: the journal (JournalScreen.TOGGLE_KEY)
+	add_child(TradeScreen.new())  # survival: the barter screen (the talk menu's Trade)
 
 
 ## The small signs' text now (tests).

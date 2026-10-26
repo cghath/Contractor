@@ -8,6 +8,9 @@ extends RefCounted
 ## SurvivorsLayer.request_talk to the host, which answers here (server_talk): a line picked by tags
 ## from data/survival_lines.json (pick_line), said as a subtitle (SurvivorsLayer.say), and what the
 ## action does: the want met and they join (meet_want, pay), a gift, a threat remembered.
+## Phase C (the intel lane): "Trade" opens the barter screen on a trader (Barter, TradeScreen) and
+## "Ask about..." tells a rumour by topic (Intel.server_ask); the world sim's live people (WorldLive
+## bodies, metas "world_person" and "world_group") talk too: Who are you, Ask about, Trade.
 
 const LINES_PATH := "res://data/survival_lines.json"
 ## The interaction menu's target kind for a survivor (InteractionMenu.target_kind).
@@ -25,7 +28,17 @@ static var _lines: Dictionary = {}
 ## Whether `target` is a survivor on their feet who isn't one of ours yet (out in the world).
 static func is_survivor(target: Node) -> bool:
 	var layer := SurvivorsLayer.find(target)
+	if layer != null and target.has_meta(&"world_person"):
+		return true  # (a world group's live person: WorldLive)
 	return layer != null and String(layer.info_of(target).get("status", "")) in ["out_there", "settler"]
+
+
+## The "Ask about..." submenu (Intel.TOPICS) built with `talk` (actions_for's maker).
+static func _ask_entry(target: Node, talk: Callable) -> Dictionary:
+	var ask := {"id": &"talk_ask", "label": "Ask about...", "target": target, "disabled": "", "items": [] as Array[Dictionary]}
+	for t: Array in Intel.TOPICS:
+		(ask.items as Array).append(talk.call("ask", String(t[1]), {"topic": String(t[0])}, ""))
+	return ask
 
 
 ## The talk entries `actor` gets on `target` (InteractionMenu.actions_for: the SURVIVOR kind, and
@@ -44,7 +57,11 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if group != "":
 			e["group"] = group
 		return e
-	if menu_kind == KIND and status == "settler":  # (a settler at home: Settlement)
+	if menu_kind == KIND and target.has_meta(&"world_person"):  # (a world group's person: Intel, Barter)
+		out.append(talk.call("who", "Who are you?", {}, ""))
+		out.append(_ask_entry(target, talk))
+		out.append(talk.call("trade", "Trade", {}, ""))
+	elif menu_kind == KIND and status == "settler":  # (a settler at home: Settlement)
 		out.append(talk.call("how", "How are you?", {}, ""))
 		out.append(talk.call("take_along", "Take along", {}, ""))
 		out.append(talk.call("who", "Who are you?", {}, InteractionMenu.MORE))
@@ -53,6 +70,7 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(talk.call("want", "What do you want?", {}, ""))
 		out.append(talk.call("recruit", "Recruit", {}, ""))
 		out.append(talk.call("place", "Ask about this place", {}, ""))
+		out.append(_ask_entry(target, talk))
 		var give := {"id": &"talk_give", "label": "Give", "target": target, "disabled": "", "items": [] as Array[Dictionary]}
 		for c: StringName in actor.inventory.search_containers():
 			var list: Array = actor.inventory.containers[c]
@@ -158,6 +176,8 @@ static func _zone_name(zone_id: String) -> String:
 ## Host: `actor` did `action` (with `arg`) on the survivor `target`. Returns the line they said.
 static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, action: String, arg := {}) -> String:
 	var rec := layer.record_of(target)
+	if rec.is_empty() and target and target.has_meta(&"world_person"):
+		rec = WorldSim.people().get(String(target.get_meta(&"world_person")), {})
 	if rec.is_empty() or actor == null or not actor.vitals.is_up():
 		return ""
 	if action == "bury":
@@ -173,6 +193,7 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	match action:
 		"who":
 			topic = "greet"
+			Intel.server_met(rec, "who")
 		"want":
 			topic = "want"
 			if String((rec.want as Dictionary).get("kind", "")) == "favour":
@@ -181,7 +202,18 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		"place":
 			topic = "place"
 		"trade":
-			topic = "trade"  # (the barter screen is phase C, call 26)
+			Intel.server_met(rec, "trade")
+			var why := Barter.trader_problem(rec)
+			topic = "trade" if why == "" else "trade_no"
+			if why == "" and Intel.get_intel():
+				Intel.get_intel().server_send_deal(actor, Barter.deal(actor, rec))
+			elif why != "":
+				Survival._tell(actor, why)
+		"ask":
+			var told := Intel.server_ask(rec, String(arg.get("topic", "here")), String(Survival.state().get("zone", "")))
+			var said_r := String(told.text) if String(told.text) != "" else line_for(rec, "rumour_none")
+			layer.say(target, said_r)
+			return said_r
 		"recruit":
 			var why := want_problem(actor, rec, layer)
 			if why == "" and bool(rec.get("grudge", false)) and SurvivorPerson.opinion_of(rec, profile) < 0.0:
