@@ -22,6 +22,7 @@
   (fresh fast and strong, old slow and falling apart, winter keeps them), the dead dressed and kitted by what they were (loot on
   the corpse, a site's mix tells what it was), nests in the dark sites by day pouring out at dusk (dormant when entered, a scream
   wakes them, cleared for a loot payoff), the climbing rules in full; R2675 PASS (deadtime, survival, seasons, fallen); see docs/survival_deadtime.md.
+- **SLICE E BUILT: B2687** (`builds/contractor-2026-10-26-124537-B2687-fallen-slice-e-76d38e86`, tip 76d38e86): audio, the mind and wear merged; merged batch R2685 PASS (survival, wear, mind, clothing, weapons, body). Lanes live: events (calls 124-127), children/faith/legacy (128-130), hands (nature menus, spoilage, clinic).
 - **The survivor's mind built on `claude/survival-mind`** (calls 116-119, 130 first form): the nerve meter (`Nerve.level(s)` for the
   tension layer), addictions and withdrawal, cannibalism and the wasting sickness, dreams, the journal's voice, letters; R2682 PASS (mind, survival, body, fallenpeople, fallenaudio); see docs/survival_mind.md.
 - **Condition and wear built on `claude/survival-wear`** (calls 120-123): guns wear, jam (R clears) and break, cleaning kits and oil; blades dull, a whetstone; ammo condition and duds, dry storage; clothes wear, tear and mend, sore feet; vehicle parts, punctures and patches, stale fuel; R2684 PASS (wear), R2680 survival, weapons, clothing PASS; see docs/survival_wear.md.
