@@ -58,9 +58,9 @@ static func water_body_at(level: Node, pos: Vector3) -> String:
 
 
 static func _gear(s: Soldier) -> float:
-	if s.inventory.count_of(&"fishing_net") > 0:
+	if Wildlife.carries(s, "fishing_net"):
 		return NET_X
-	if s.inventory.count_of(&"fishing_rod") > 0:
+	if Wildlife.carries(s, "fishing_rod"):
 		return 1.0
 	return 0.0
 
@@ -83,7 +83,7 @@ static func server_fish(s: Soldier, hours: float, body := "") -> int:
 	var n := floori(got)
 	s.set_meta(&"fish_acc", got - n)
 	if n > 0:
-		Wildlife._give(s, &"raw_fish", n, {"caught_day": Survival.day(), "water": body})
+		Wildlife._give(s, &"raw_fish", n)
 		Rpg.xp(s, "fieldcraft", 2.0 * n)
 	return n
 

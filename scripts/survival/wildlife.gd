@@ -598,11 +598,26 @@ static func server_butcher(s: Soldier, a: Dictionary) -> String:
 	return ""
 
 
-## Items into `s`'s kit, the rest at his feet.
+## Whether `s` carries item `id` anywhere (worn, in hand, stowed).
+static func carries(s: Soldier, id: String) -> bool:
+	for e: Dictionary in Survival.kit_of(s.inventory):
+		if String(e.get("id", "")) == id:
+			return true
+	return false
+
+
+## Items into `s`'s kit, the rest at his feet (an entry with a state goes in one by one).
 static func _give(s: Soldier, id: StringName, n: int, state := {}) -> int:
 	if n <= 0:
 		return 0
-	var got := s.inventory.take(id, n, state)
+	var got := 0
+	if state.is_empty():
+		got = s.inventory.take(id, n)
+	else:
+		for i in n:
+			if s.inventory.take(id, 1, state) != 1:
+				break
+			got += 1
 	if got < n:
 		var level := CompoundLevel.current(s)
 		if level:

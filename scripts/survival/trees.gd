@@ -106,9 +106,9 @@ static func nearest(level: Node, pos: Vector3, r := REACH_M, standing := true) -
 
 
 static func _tool_x(s: Soldier) -> float:
-	if s.inventory.count_of(&"axe") > 0:
+	if Wildlife.carries(s, "axe"):
 		return 1.0
-	if s.inventory.count_of(&"hatchet") > 0:
+	if Wildlife.carries(s, "hatchet"):
 		return HATCHET_X
 	return 0.0
 

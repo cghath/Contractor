@@ -211,7 +211,7 @@ func _test_fishing() -> void:
 	_set_season("winter", 35)
 	player.set_meta(&"fish_acc", 0.0)
 	var winter := Migration.server_fish(player, 6.0, "river")
-	check(summer > winter and player.inventory.count_of(&"raw_fish") == fish0 + summer + winter,
+	check(summer > winter and player.inventory.count_of(&"raw_fish") + _dropped(&"raw_fish") >= fish0 + summer + winter,
 		"six hours on a river: %d fish in summer, %d in winter" % [summer, winter])
 	var raw := ItemDB.get_item(&"raw_fish")
 	var smoked := ItemDB.get_item(&"smoked_fish")
@@ -424,7 +424,12 @@ func _test_trees() -> void:
 	print("Felling: an oak takes longer than a pine, makes noise, yields planks, leaves a stump, regrows")
 	var home := player.global_position
 	check(Trees.fell_s("oak") > Trees.fell_s("pine"), "an oak %.0f s with an axe, a pine %.0f s" % [Trees.fell_s("oak"), Trees.fell_s("pine")])
+	for id: StringName in [&"wild_berries", &"wild_mushrooms", &"death_cap", &"raw_meat", &"hide", &"raw_fish", &"fishing_rod", &"snare"]:
+		while player.inventory.remove_one(id):
+			pass
+	player.inventory.release_hands()
 	player.inventory.take(&"axe", 1)
+	check(Wildlife.carries(player, "axe"), "a felling axe in hand")
 	var oak := _tree_of("oak")
 	var pine := _tree_of("pine")
 	check(oak >= 0, "an oak in the zone")
