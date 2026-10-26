@@ -291,7 +291,11 @@ static func ledger_lines(d: Dictionary) -> Array:
 		out.append({"what": String(c.get("title", "Contract")), "amount": String(c.get("outcome", "")).to_upper(), "why": ""})
 		out.append({"what": "Advance", "amount": "$" + DebriefCalc.money(c.get("advance", 0)), "why": "paid at signing, already in the bank", "sub": true})
 		out.append({"what": "Completion", "amount": "$" + DebriefCalc.money(c.get("completion", 0)), "sub": true, "tone": "good" if int(c.get("completion", 0)) > 0 else "",
-			"why": "paid now" if int(c.get("completion", 0)) > 0 else "nothing: the job wasn't done"})
+			"why": ("paid as each phase was done (%d of %d)" % [int(c.get("phases_done", 0)), (c.phases as Array).size()] if c.has("phases") else "paid now")
+				if int(c.get("completion", 0)) > 0 else "nothing: the job wasn't done"})
+		for p: Dictionary in c.get("phases", []):  # an operation's phases (D3)
+			out.append({"what": String(p.name), "amount": "$" + DebriefCalc.money(p.get("pay", 0)), "sub": true, "tone": "good" if String(p.state) == "done" else "bad",
+				"why": ("done in %s" % Operations.clock_text(float(p.elapsed_s))) if String(p.state) == "done" else ("stalled: " + String(p.get("why", ""))) if String(p.state) == "failed" else "not reached"})
 		for b: Dictionary in c.get("bonuses", []):
 			out.append({"what": String(b.text), "amount": "$" + DebriefCalc.money(b.amount), "why": "bonus", "sub": true, "tone": "good"})
 		if int(c.get("withheld", 0)) > 0:

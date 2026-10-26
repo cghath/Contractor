@@ -8,6 +8,10 @@ signal join_failed
 signal peer_joined(id: int)
 signal peer_left(id: int)
 signal session_ended
+## The host turned this player away: another build (the reason, for the menu).
+signal refused(reason: String)
+## The join's build check could not be made (the other side is an older build): a warning.
+signal version_warning(text: String)
 
 const DEFAULT_PORT := 24680
 const MAX_CLIENTS := 3
@@ -19,9 +23,18 @@ const CONNECT_TIMEOUT_MS := 2500
 ## switching levels, on a slow PC or CI (map and lhd_home: the client's first session ended and it
 ## joined again as a new peer). Proposed.
 const ENET_TIMEOUT := [32, 20000, 60000]
+## The build check on join (BuildInfo): a client says its commit right after connecting; the
+## host welcomes it, or refuses it when both commits are known and differ (the game code would
+## not match: RPCs and replication would break in odd ways). No answer within this long means
+## the other side has no check (an older build): a warning only.
+const HELLO_WAIT_S := 6.0
+
+var _welcomed := false
+var _said_hello := {}  # host: peer id -> true once it sent its build
 
 
 func _ready() -> void:
+	print("[build] %s" % BuildInfo.label())
 	hosted.connect(func() -> void: print("[net] hosting on port %d" % Net.port()))
 	joined.connect(func() -> void: print("[net] joined as peer %d" % multiplayer.get_unique_id()))
 	peer_joined.connect(func(id: int) -> void: print("[net] peer %d connected" % id))
@@ -80,6 +93,73 @@ func _on_connected() -> void:
 	if peer:
 		_server_peer(peer).set_timeout(ENET_TIMEOUT[0], ENET_TIMEOUT[1], ENET_TIMEOUT[2])
 	joined.emit()
+	_welcomed = false
+	_hello.rpc_id(1, BuildInfo.commit(), BuildInfo.label(), OS.get_environment("CONTRACTOR_SESSION_TOKEN"))
+	get_tree().create_timer(HELLO_WAIT_S).timeout.connect(func() -> void:
+		if not _welcomed and multiplayer.multiplayer_peer is ENetMultiplayerPeer and not multiplayer.is_server():
+			_warn("The host did not answer the build check: it may be an older build than yours (%s). If things act oddly, play the same build." % BuildInfo.label()))
+
+
+func _warn(text: String) -> void:
+	print("[net] WARNING: " + text)
+	push_warning(text)
+	version_warning.emit(text)
+
+
+## Host: a peer that never says its build within HELLO_WAIT_S is an older build (a warning).
+func _expect_hello(id: int) -> void:
+	_said_hello.erase(id)
+	get_tree().create_timer(HELLO_WAIT_S).timeout.connect(func() -> void:
+		if not _said_hello.has(id) and id in multiplayer.get_peers():
+			if OS.get_environment("CONTRACTOR_SESSION_TOKEN") != "":
+				print("[net] dropped peer %d: no hello in a private test session" % id)
+				(multiplayer.multiplayer_peer as ENetMultiplayerPeer).disconnect_peer(id)
+				return
+			_warn("Player %d did not say which build they run (an older build?); this host is %s" % [id, BuildInfo.label()]))
+
+
+## Client -> host, right after connecting: this player's build.
+@rpc("any_peer", "reliable")
+func _hello(commit: String, label: String, token := "") -> void:
+	if not multiplayer.is_server():
+		return
+	var id := multiplayer.get_remote_sender_id()
+	_said_hello[id] = true
+	var mine := BuildInfo.commit()
+	# A private session (tools: CONTRACTOR_SESSION_TOKEN, e.g. a co-op soak's bots) takes only
+	# joiners with its token: a test from another run that hit its port by chance is turned away.
+	var my_token := OS.get_environment("CONTRACTOR_SESSION_TOKEN")
+	var why := ""
+	if my_token != "" and token != my_token:
+		why = "This is a private test session."
+	elif commit != "" and mine != "" and commit != mine:
+		why = "This session runs %s; you are on %s. Play the same build to join." % [BuildInfo.label(), label]
+	if why != "":
+		print("[net] refused peer %d: on %s, this host %s" % [id, label, BuildInfo.label()])
+		_refuse.rpc_id(id, why)
+		get_tree().create_timer(1.0).timeout.connect(func() -> void:
+			var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+			if enet and id in multiplayer.get_peers():
+				enet.disconnect_peer(id))
+		return
+	print("[net] peer %d runs %s" % [id, label])
+	_welcome.rpc_id(id, BuildInfo.label())
+
+
+## Host -> client: same build (or one side can't tell), welcome.
+@rpc("authority", "reliable")
+func _welcome(host_label: String) -> void:
+	_welcomed = true
+	print("[net] host runs %s" % host_label)
+
+
+## Host -> client: another build; the host drops the connection a moment later.
+@rpc("authority", "reliable")
+func _refuse(reason: String) -> void:
+	_welcomed = true
+	print("[net] refused: " + reason)
+	push_warning(reason)
+	refused.emit(reason)
 
 
 ## Host: a joined client's link gets the connected timeouts too (the client sets its own in
@@ -91,6 +171,8 @@ func _on_peer_connected(id: int) -> void:
 		if link:
 			link.set_timeout(ENET_TIMEOUT[0], ENET_TIMEOUT[1], ENET_TIMEOUT[2])
 	peer_joined.emit(id)
+	if multiplayer.is_server():
+		_expect_hello(id)
 
 
 func _on_connection_failed() -> void:

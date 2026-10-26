@@ -495,7 +495,18 @@ func _test_hud() -> void:
 	hud._status_lines = PackedStringArray(["Carrying Ammunition crate, 7.62x51 mm, linked (Alt+G to drop)", "Spawn protection 9 s - firing ends it"]) \
 		+ hud._status_lines
 	hud.command_menu.open()
-	var panel := hud.zone_top_right.get_child(0) as ObjectivesPanel
+	var panel: ObjectivesPanel = hud.zone_top_right.get_children().filter(func(n: Node) -> bool: return n is ObjectivesPanel)[0]
+	# The operation strip over it (combined_arms D3), full: a running phase, its task, the front.
+	var strip: OperationStrip = hud.zone_top_right.get_children().filter(func(n: Node) -> bool: return n is OperationStrip)[0]
+	strip.set_process(false)
+	strip.preview = {"codename": "GREY LANCE", "state": "running", "phase": 1, "clock_s": 1460.0, "front_m": 3120.0, "share": 0.34,
+		"allied": "Saber 1 assault, Hammer 1 SBF, Iron 1 overwatch",
+		"phases": [{"name": "PL COPPER", "state": "done", "limit_s": 1500.0, "started_s": 0.0}, {"name": "PL BRASS", "state": "running", "limit_s": 1500.0, "started_s": 700.0},
+			{"name": "PL IRON", "state": "pending", "limit_s": 1800.0}, {"name": "PL STEEL", "state": "pending", "limit_s": 1800.0}],
+		"task": ["Seize the bridge on the MSR at 041 052 (holding 40 of 60 s)", "Bonus: keep the bridge at 041 052 standing"]}
+	strip.refresh()
+	check(strip.visible and strip._label.text.contains("PH2/4 BRASS") and strip._label.text.contains("Front 3.1 km in"),
+		"the operation strip shows the phase, its clock, the task and the front ('%s')" % strip._label.text.replace("\n", " | "))
 	panel.visible = true
 	panel.set_process(false)
 	panel._label.text = "OBJECTIVES - Kessler Farm compound\n[ ] Destroy the weapons cache in the farmhouse cellar\n[ ] Recover the field laptop" \

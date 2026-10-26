@@ -149,6 +149,7 @@ func _ready() -> void:
 		SideCommand.install(self, &"hostile", HotZonePolicy.new())  # its side's commander (combined_arms B2): EnemyCommand's rules
 		if DevTools.on():
 			add_child(HotZoneDebug.new())  # playtests: PgUp readout, PgDn skips the enemy's clock
+	Operations.install(self, def)  # an operation zone's run: phases, the front, the OOB (combined_arms D3)
 	Contracts.contract_live.connect(_on_contract_live)
 	players.child_entered_tree.connect(_on_player_entered)
 

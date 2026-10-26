@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Everything merged for one test build (integrate/oct25, v0.7.0)
+
+Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
+ask ("make sure all of the work we have done locally is on dev too"): cghath's operations lane
+(ops/contracts D3 and ops/types D4/D5, their own entries below), the co-op soak harness, and
+mission variety's board rules. Left off on purpose: claude/survival and claude/svd-model (the
+Captain: "needs to stay here for now"); the 2026-10-14 handoff stubs marked untested WIP
+(feat/squad-comms, ai/movement-quality, perf/frame-rate, fix/drag-direction) whose work was
+done since on other branches (voice orders and barks, the movement feel pass, the perf passes).
+Checked and already in: the helicopter door-seat and vehicle _exit_tree fix, the 2026-10-20
+economy overhaul, the ragdoll stand-where-it-lay fix, the weapon-model iron-sight rework.
+
+- **Added (tests, tools):** the co-op soak harness from claude/coop-join (tests/coop_soak.gd,
+  coop_fake_human, coop_replay, soak_wedge_test; tools/coop_soak.sh, coop_relay.py,
+  coop_soak_report.py, coop_watch.sh): bots that host or join a session and play a contract,
+  including joining the Captain's own hosted game (agent-tools/bots_join_me.ps1).
+- **Added (net):** the build check on join (`BuildInfo`, `Net._expect_hello`): a client says its
+  commit on connecting; a host on a different known commit refuses it with the reason, and a
+  peer that never answers gets a warning only (an older build). The main menu's hint and the
+  pause menu show the build label.
+- **Changed (contracts):** the safe offer stays one of the four plain types (raid, HVT capture,
+  hostage rescue, intel grab); a hot zone's live contracts keep to sited types (convoy, crew
+  rescue and recon stay off that board); `ScenarioGen.build` takes the module to play at.
+- **Fixed (medical):** a casualty freed mid-treatment (its player left) no longer stops
+  `_timed_care` with a script error (`_log_care`'s target untyped).
+- **Merge notes:** followups.md kept both sides' additions (cg's D3-D5 calls, our F-08 section);
+  contracts.json kept the newer sabotage brief; net.gd kept the 20-60 s timeouts with the hello
+  check added in `_on_peer_connected`; menu.gd and pause_menu.gd kept the UiKit layouts.
+
 ### The rest of the reds: map, contracts, perfcases, casualty, roles (integrate/cg-oct24, v0.6.1)
 
 Local R2581, R2583, R2584 (perfcases, townperf, city) and R2585 PASS.
@@ -51,6 +80,133 @@ R2578 and R2579 PASS.
   behind" at every extraction and crossing, by design: high_command_test covers them);
   lhd_home's client stops quietly when a first join's session ends and Main reloads the scene
   (slow CI), instead of running on out of the tree into script errors.
+### The operation types: combined arms D4 and D5 (cg_brief queue item 3.3 (D4/D5), ops/types)
+
+All five operation types are posted and play end to end: the phased invasion made full, the
+armoured thrust, the beach landing, seizing a crossing and holding a town. Each has its own
+phases, company tasks, order of battle, H-hour, pay and offer rules, and its own mechanic.
+Attached armour and allied fires now work on every operation. Design: docs/combined_arms.md 6.1,
+6.3-6.5; numbers Proposed (data/operations.json, data/fire_support.json "allied_units"); calls
+D4-1 to D4-15 and D5-1 to D5-14 in docs/combined_arms.md section 10 and under "Calls made" in
+docs/audits/followups.md. Closes F-288 and F-292; follow-ups F-294 to F-302.
+
+#### Added
+- **Who posts what.** US forces post the phased invasion, the armoured thrust (inland fronts only)
+  and the beach landing (coast fronts only). Vessmark posts its smaller ones, seizing a crossing
+  and holding a town, so D7's stand-in Vessmark contract is gone. Every type needs the employer
+  at trusted (30). An operation is rated by the ground it fights over and the waves it sends,
+  not by every garrison in the 8 km zone.
+- **Attached armour** (the invasion's Abrams section, the thrust's Bradley section). It comes out
+  at the start line at H-hour with an allied driver and gunner (and loader), and the commander's
+  hatch is left free for a player. By default it overwatches the company's task from 300 m back.
+  Support > Operation > Attached armour orders it to move, hold or follow, and a player aboard can
+  take its gun and hand it back. A lost vehicle is the employer's loss.
+- **Allied fires.** The employer's mortars (fired from the mortar section's real tubes), its
+  battery and naval gunfire fire the operation's rounds. They fire preparation fires on each
+  phase's enemy sites, smoke when the allied commander asks for it for a breach, and three rounds
+  wherever the company calls them (Support > Operation > Allied fires), never danger close.
+- **The phased invasion, full.** Its full order of battle, with a mortar section, an ammunition
+  and a fuel truck that rearm and refuel the armour at the logistics point behind the front, and
+  the employer's Dustoff flying the company's first two medevac calls. In phase 4 there's a
+  bonus for taking the HQ's commander alive.
+- **The armoured thrust.** The column (the Abrams and mechanised platoons, plus the attached
+  Bradleys carrying the company) drives down the MSR and halts short of each blocking position
+  until the company has cleared it. It moves on once everyone is aboard. Support > Operation >
+  Column can bypass a position off-road, if the ground allows, but that leaves its enemy behind
+  the front. The whole thrust has 45 minutes, and it fails if the column loses half its vehicles.
+- **The beach landing.** It starts before dawn with the company in its AAVs in the LHD's well
+  deck. Wave 1 (the company's two AAVs and four allied ones) swims in on its lanes, and wave 2
+  follows four minutes later. Artillery and naval gunfire hit the known beach defences, then
+  smoke goes on the exits. H-hour is when wave 1 hits the sand. The phases are the left beach
+  exit, the harbour, then holding the beachhead against a counterattack.
+- **Seizing a crossing.** The bridge has three charges under its middle span, wired to a firing
+  point on the far bank where two engineers wait. Once they see us within a kilometre, they blow
+  it 90 seconds later; a vehicle on the span sets it off at once. To stop it, kill them, cut the
+  wire at a marked point (Support > Operation > Cut the firing wire) or take the firing point. An
+  intact bridge pays +40% of phase 2. If it's blown, the armour crosses at a ford.
+- **Holding a town.** The company starts in the town it has just taken (a city), beside an
+  allied platoon, two Bradleys and mortars. It gets ten minutes to dig in, site its guns and
+  place six pieces of field defences (Support > Operation > Field defences: sandbag wall, HESCO,
+  concertina wire). Then two or three waves come in, each from the approach the enemy picks
+  round what it has seen of the defence, so a hidden piece pays off. The second wave brings
+  technicals and comes after a mortar barrage. Hold the centre to win.
+- **On screen and after.** The operation strip gets a line for the type (the column, the AAVs,
+  the bridge's charges, the defence and its waves), and the debrief lists what happened in it.
+- **The optypes suite** (tools/run_tests.sh and CI): each type offered, taken, played through
+  its phases and its mechanic, paid, saved and loaded, debriefed and fed to the war, with a client
+  joining late and following the host into each zone.
+
+#### Changed
+- FireSupport can fire an operation's own guns (`server_allied_fire`), and FireMission reads
+  their units from data/fire_support.json "allied_units". The company's fire support is
+  unchanged.
+- DefencePlacer has a field mode for the town's defences. The base's defences are unchanged.
+- OperationGen starts a town-holding operation's insertion in its town.
+
+#### Fixed
+- A client already in the session is no longer dropped when the host switches to an 8 km
+  operation zone. Every end now waits up to three minutes while the zone is made, as a late
+  joiner already did (BaseHub, F-302).
+
+### Operation contracts: combined arms D3 (cg_brief queue item 3.2 (D3), ops/contracts)
+
+The big government jobs can be taken and fought. A belligerent employer at war posts an operation
+contract on its front: the company joins its battlegroup in an 8 km operation zone, fights it phase
+by phase beside the allied commander, and is paid as each phase is done. The result moves the war.
+Design: docs/combined_arms.md 6.1, 6.3, 6.5, 6.6 and 3.5; numbers Proposed (data/operations.json);
+calls D3-1 to D3-21 in docs/combined_arms.md section 10 and under "Calls made" in
+docs/audits/followups.md. Closes F-286; follow-ups F-288 to F-293.
+
+#### Added
+- **Operation contracts.** US forces post a phased invasion on their front (Contracts'
+  operation offers; their factions.json `operation_types`). It covers the front's zone and up to two
+  neighbouring zones the target holds, in an 8 km zone made for it. It needs the employer at
+  trusted (30) to sign. Vessmark keeps D7's stand-in until its types (D5) are built. The armoured
+  thrust, beach landing, seize crossing and hold town types are in the data but not posted yet.
+- **Phases.** Four phase lines (PL COPPER, the outposts; BRASS, the crossing; IRON, the town;
+  STEEL, the HQ and the depth), each with a time limit, a pay share, the allied objectives and the
+  company's own task: seize the MSR checkpoint, the bridge (and keep it standing for a bonus), the
+  town centre, the HQ. A phase is done when its task and its required allied objectives are. It
+  stalls at 1.5 x its limit, and the operation stops there.
+- **The allied and enemy commanders run it.** The friendly side's commander gets an operation plan
+  made from the phases. It moves on as objectives fall, sends its reserve, and falls back to the
+  last line it held when it withdraws. The enemy's commander defends the sites band by band.
+- **The order of battle comes out by the front.** Allied rifle squads, Bradley sections and an
+  Abrams reserve start at H-hour. The enemy's roamers, QRFs, AT teams, gun teams, mortar team and
+  light armour come out when a player is 0.6-2.6 km from them and nobody can see the spot, two men
+  a frame, within the live caps. Waves come in on the enemy's side of the front, teams slip in
+  behind it, and IEDs lie along the MSR.
+- **The front.** The zone is 32 x 32 cells of 256 m, each held by a side. A cell flips where one
+  side has twice the other's presence for a minute and no garrison of the other stands. Cells
+  flip at once as objectives fall. A phase done takes everything short of its line, and a
+  withdrawal gives back everything past the last line held. The front is saved, replicated (a
+  late joiner gets it whole) and drawn as a line on everyone's map.
+- **The operation strip on the HUD** (top right, over the objectives): the operation, each
+  phase's state, the clock against the limit, the company's task and how far the front has come.
+- **Pay by phase.** 20% on signing. Each phase pays its share of the rest into the bank when it's
+  done (one ledger line each), with its bonuses (fast, low allied losses, allied asks answered, no
+  civilians hurt, the bridge kept) and penalties (late, friendly fire). The debrief shows it phase
+  by phase, outcome completed, partial or failed, and pays nothing twice. Company vehicles lost
+  are half reimbursed.
+- **The war hears it.** The phases done go to the living war (WorldSites): carried, the covered
+  zones change hands; half or more moves the front there. The debrief says which zones moved.
+- **For D4 and D5.** `Operations.register_type(type, data, hooks)` and its hooks (phases, start,
+  tick, phase_begun, phase_done, task, pay, h_hour), the objective kinds seize_site, hold_line and
+  keep_intact, and `Operations.make_offer` with a type.
+- **The `operations` suite** (two processes: host and late joiner), in run_tests.sh and CI.
+
+#### Changed
+- Contracts: an operation is signed with its 20% advance (`Operations.deal`). Its debrief is
+  written phase by phase (`Operations.debrief_into`) and the completion already paid is taken off.
+  The war hears the phases done. A held operation's covered zones are in the war snapshot.
+- The objectives panel makes room for whatever sits above it in the HUD's top-right corner.
+- The economy sim plays an operation phase by phase through the real pay, and skips offers the
+  company can't sign.
+
+#### Fixed
+- A client joining an 8 km operation zone was dropped while it made the zone (10-60 s, past the
+  30 s authentication and ENet timeouts), then tried again from the start. Now both ends wait up to
+  3 minutes while it loads, then go back to the normal timeouts (LevelSwitch, `LOAD_TIMEOUT`).
 
 ### Operation zones of about 8 km: combined arms D1 + D2 (cg_brief queue item 3.1, ops/zones)
 

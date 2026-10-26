@@ -2026,7 +2026,10 @@ func _server_remove_tourniquet(path: NodePath, part: StringName) -> void:
 ## same-named hostiles apart, a target dummy as one), with what, on which part, how far the
 ## casualty is (_treat_distance; not on yourself), and how it went (`outcome`: "started (4.0 s)",
 ## "done", "interrupted: why", "refused: why") (Captain, P0164 queue 7).
-func _log_care(target: Node, item_id: StringName, part: StringName, outcome: String) -> void:
+## `target` is untyped on purpose: when the casualty is freed mid-treatment (its player left:
+## co-op soak S0494) the interrupted line still gets logged, and a typed argument would stop
+## _timed_care with a script error before it ends the treatment.
+func _log_care(target, item_id: StringName, part: StringName, outcome: String) -> void:
 	if outcome == "done" and multiplayer.is_server() and faction == &"friendly":
 		RebelSupport.on_treated(self, target)  # a civilian treated: the locals notice (rebel support)
 	if outcome.begins_with("done") and multiplayer.is_server():
@@ -2034,9 +2037,11 @@ func _log_care(target: Node, item_id: StringName, part: StringName, outcome: Str
 	if SessionLog.session_id == "":
 		return
 	var at := ""
-	if target != self and is_instance_valid(target) and target is Node3D:
+	if not is_instance_valid(target):
+		target = null
+	elif target != self and target is Node3D:
 		at = " at %.1f m" % _treat_distance(target)
-	SessionLog.note("%s treats %s: %s%s%s, %s" % [log_name(), "themself" if target == self else SessionLog.who(target),
+	SessionLog.note("%s treats %s: %s%s%s, %s" % [log_name(), "themself" if target == self else (SessionLog.who(target) if target else "a casualty who is gone"),
 		String(item_id) if item_id != &"" else "care", (" on " + Vitals.part_name(part)) if part != &"" else "", at, outcome])
 
 

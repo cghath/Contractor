@@ -116,6 +116,9 @@ var _switch_to := {}       # host: the level (level_info) a switch is waiting to
 var _switch_zone := ""     # host: and the zone save it goes with ("" keeps GameState.zone_id)
 var _switch_waiting := {}  # host: peers not ready for it yet
 var _switch_serial := 0
+## Every peer: the ENet peers given LevelSwitch.LOAD_TIMEOUT for a switch into an 8 km zone, and
+## when that runs out (msec) (_hold_timeouts).
+var _timeouts_held := {}
 var _zone_before := ""     # host: GameState.zone_id before the campaign took over (restored after)
 var _host_notice := ""     # host: what loading the campaign has to tell the host (shown again on open_ui)
 var _loading: CanvasLayer  # client: the loading screen while a switched level arrives (B-04)
@@ -1109,6 +1112,9 @@ func server_switch_level(level_info: Variant, zone_id := "") -> void:
 	if _switch_waiting.is_empty():
 		_do_switch()
 		return
+	if LevelSwitch._big(_switch_to):  # (cg_brief 3.3, F-302: the clients kept in while every end makes the 8 km zone)
+		_hold_timeouts(Array(multiplayer.get_peers()))
+		_client_hold_timeouts.rpc()
 	_client_hold_sync.rpc()
 	var serial := _switch_serial + 1
 	_switch_serial = serial
@@ -1270,6 +1276,46 @@ func _client_hold_sync() -> void:
 	_server_switch_ready.rpc_id(1)
 
 
+## A switch into an 8 km zone (LevelSwitch._big) holds each end's frames 10-60 s while it makes the
+## zone, the host's first; past ENet's 5 s a client was dropped mid-switch (the optypes suite's, as
+## it followed the host from one operation to the next). Both ends give each other
+## LevelSwitch.LOAD_TIMEOUT from the switch's start until the client has the level and
+## LevelSwitch.LOAD_SETTLE_S more (at most LOAD_TIMEOUT's max), then Net.ENET_TIMEOUT again, as a
+## late joiner gets (D3-21). cg_brief 3.3, F-302; Proposed.
+func _hold_timeouts(ids: Array) -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return
+	var t: Array = LevelSwitch.LOAD_TIMEOUT
+	for id: int in ids:
+		if enet.get_peer(id):
+			enet.get_peer(id).set_timeout(int(t[0]), int(t[1]), int(t[2]))
+			_timeouts_held[id] = Time.get_ticks_msec() + int(t[2])
+	get_tree().create_timer(float(t[2]) / 1000.0 + 1.0).timeout.connect(_release_timeouts.bind(ids, true))
+
+
+func _release_timeouts(ids: Array, only_overdue := false) -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	for id: int in ids:
+		if not _timeouts_held.has(id) or (only_overdue and Time.get_ticks_msec() < int(_timeouts_held[id])):
+			continue
+		_timeouts_held.erase(id)
+		if enet and enet.get_peer(id):
+			enet.get_peer(id).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_hold_timeouts() -> void:
+	_hold_timeouts([MultiplayerPeer.TARGET_PEER_SERVER])
+
+
+## Host: a client has the 8 km zone it switched to: its timeouts back once it has settled.
+@rpc("any_peer", "call_remote", "reliable")
+func _server_level_loaded() -> void:
+	if multiplayer.is_server():
+		get_tree().create_timer(LevelSwitch.LOAD_SETTLE_S).timeout.connect(_release_timeouts.bind([multiplayer.get_remote_sender_id()]))
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func _server_switch_ready() -> void:
 	if not multiplayer.is_server() or not switch_pending():
@@ -1297,6 +1343,9 @@ func _client_switch_level(info: Dictionary) -> void:
 func _client_level_synced(summary: Dictionary) -> void:
 	last_switch_summary = summary
 	_hide_loading()
+	if _timeouts_held.has(MultiplayerPeer.TARGET_PEER_SERVER):  # (F-302)
+		_server_level_loaded.rpc_id(1)
+		get_tree().create_timer(LevelSwitch.LOAD_SETTLE_S).timeout.connect(_release_timeouts.bind([MultiplayerPeer.TARGET_PEER_SERVER]))
 	level_synced.emit(summary)
 
 

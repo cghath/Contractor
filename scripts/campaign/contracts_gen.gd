@@ -21,7 +21,7 @@ extends RefCounted
 ##   it is after (factions.json "leaders": its next one still free), "" when none.
 
 ## Keys only the host knows until the threat is revealed.
-const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated"]
+const HIDDEN_KEYS := ["true_rating", "enemy_count", "quality", "threats", "understated", "enemy_oob"]  # (enemy_oob: an operation's, D3)
 ## Proposed: how far off intel can be at no accuracy (_intel_fog): the share of the count, and
 ## the quality (0-1) either way.
 const INTEL_COUNT_ERROR := 0.7
@@ -129,6 +129,17 @@ static func generate(rng: RandomNumberGenerator, ctx: Dictionary) -> Dictionary:
 			type_ids = fits
 	if String(MissionRegistry.zone(String(ctx.get("zone_id", ""))).get("kind", "")) == "hot":
 		type_ids = type_ids.filter(func(t: String) -> bool: return not MissionRegistry.type_def(t).has("legs"))  # (multi-zone: contract zones only)
+	if safe and ctx.get("type", "") == "":
+		# The safe offer is plain low-risk work: one of the four first types, as before mission variety.
+		var plain := type_ids.filter(func(t: String) -> bool: return t in ["raid", "hvt_capture", "hostage_rescue", "intel_grab"])
+		if not plain.is_empty():
+			type_ids = plain
+	if ctx.has("avoid_modules") and ctx.get("type", "") == "":
+		# A hot zone's live contracts each hold a site of their own: the scenario types that are
+		# not tied to a site (convoy, crew rescue, recon) stay off the board there.
+		var sited := type_ids.filter(func(t: String) -> bool: return String(MissionRegistry.type_def(t).get("scenario", "")) not in [ScenarioGen.CONVOY, ScenarioGen.RESCUE, ScenarioGen.RECON])
+		if not sited.is_empty():
+			type_ids = sited
 	if type_ids.is_empty():
 		type_ids = MissionRegistry.types()
 	var type_id: String = type_ids[rng.randi() % type_ids.size()]
@@ -300,7 +311,7 @@ static func mission_target(rng: RandomNumberGenerator, def: Dictionary, zone_id:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash([rng.state, "mission"])
 	if def.has("scenario"):  # convoy, defend, rescue, recon: ScenarioGen builds the objectives with their positions
-		return ScenarioGen.build(pick, def, zone_id, target, avoid)
+		return ScenarioGen.build(pick, def, zone_id, target, at_module, avoid)
 	var allowed := MissionRegistry.type_modules(def)
 	var module_type: String = String(allowed[0]) if not allowed.is_empty() else ""
 	var module_id := ""
@@ -556,6 +567,8 @@ static func public_view(contract: Dictionary) -> Dictionary:
 	if not contract.get("revealed", false):
 		for key: String in HIDDEN_KEYS:
 			view.erase(key)
+	if view.get("op_run") is Dictionary:
+		(view.op_run as Dictionary).erase("oob")  # an operation's groups where they wait, enemy ones too (D3): the host's
 	return view
 
 

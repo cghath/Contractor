@@ -168,6 +168,7 @@ func _ready() -> void:
 	# Top-right: the objectives, then the hint under them (ObjectiveHelper puts it here).
 	zone_top_right = _zone("TopRightZone")
 	zone_top_right.add_to_group(TOP_RIGHT_GROUP)
+	zone_top_right.add_child(OperationStrip.new())  # an operation's phases, clock, task and front (combined_arms 6.3, D3)
 	zone_top_right.add_child(ObjectivesPanel.new())  # the deployment's objectives (wave 4, Contracts)
 	zone_top_right.add_child(HcStrip.new())  # high command: the squads' line and the latest request (high_command.md 10)
 	zone_top_right.add_child(RequestCards.new(player))  # requests to friendly units and their asks (combined_arms 4.1, 4.3)

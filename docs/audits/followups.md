@@ -1570,7 +1570,13 @@ in a profiled local run; "ai" in FrameCost). The columns start at the FOB, besid
 operation zone and away from it in the hot zone, which likely accounts for some of it. The budget
 holds it to VS_HOT (1.6x); spreading SquadAI's work (F-261's idea) helps both.
 
-### F-286 (open, D3 hook; cg_brief 3.2): what an operation contract needs from the zone
+### F-286 (done 2026-10-25, ops/contracts, cg_brief 3.2): what an operation contract needs from the zone
+Used as written: `Operations` (scripts/campaign/operations.gd) hosts the zone from
+`ZoneDef.generate_operation` (MissionRegistry.zone_def answers for "op_<seed>"), places its phases
+and OOB by the def's "op" (bands, MSR, crossings, town, HQ, depth, FOB) with `OperationGen.band_at`,
+`along` and `band_range`, lines `FrontGrid`'s 32 x 32 cells of 256 m up with the zone, spawns by the
+front within `BigZoneStreaming.at_cap`, and sets the def's controller to the target as WorldSites
+has it when it offers the operation. What was:
 D3 can host an operation zone as any zone (`ZoneDef.generate_operation(seed, op_type, covers)`,
 then the level switch's def). Its layout is in the def's "op": the bands, the axis, `msr`
 (points) and `msr_roads` (road indices), `laterals`, `route` (the truss route), `fords`, `start`,
@@ -1588,6 +1594,120 @@ zone code passed on runs 40161930345 and 40163881923 and locally (R0676), and pr
 armour/drive's and claude/ai-driving's runs. Nothing in cg_brief 3.1 touches ZoneAnimals or its
 sync in a normal zone. Measuring the client's position against the host's at the same packet (or
 the slack from the packet's age) would take the runner's speed out of it.
+
+### F-288 (done 2026-10-25, ops/types, cg_brief 3.3): the allies' fires and the attached armour
+Done by `OpSupport` (scripts/campaign/op_support.gd; calls D4-4, D4-5). The contract's `attached`
+vehicles come out at the start line at H-hour with an allied driver and gunner (and loader), the
+commander's hatch left to players, overwatch the company's task (or move, hold, follow on the
+company's orders: Support > Operation > Attached armour), and a player aboard can take the gun.
+The `allied_fires` rounds are fired by the employer's guns (`FireSupport.server_allied_fire`, data
+`allied_units`): each type's preparation fires, the allied commander's `fire_support_wanted` (smoke
+for a breach) and the company's calls (Support > Operation > Allied fires), never danger close.
+What was: the contract carried both and nothing used them.
+
+### F-289 (open, D3 follow-up): a saved operation's live groups come back fresh
+`Operations._store` keeps each live OOB group's men still up, its vehicles not wrecked and its
+lead's position on the contract (op_run.oob), so a loaded save brings them back there by the same
+rules (pending, then out as the front and the players allow). Their wounds, ammunition and the
+vehicles' damage aren't kept: they come back whole. The Virtualizer's own save of them is off
+(`v_nosave`), so they aren't twice in the world; keeping a profile's members (Virtualizer's
+records) would take their state along.
+
+### F-290 (open, D3 follow-up): taken off-screen, a site costs the allies nothing real
+Call D3-6: a site nobody has been near falls once the allies have twice its expected garrison
+round it for the flip time; `overrun_loss_share` (34%) of that garrison is counted against the
+allies in the phase's record (the low-losses bonus reads it), but no profile or live group loses
+the men. Taking them from the nearest friendly profile's members (Virtualizer) would make the
+front's numbers honest.
+
+### F-291 (open, D3 follow-up): the front on the map is one line
+The front grid draws on the map as one blue line marker ("Front", intel channel) along the far
+edge of the friendly cells. 6.3's arrows for the main and alternate axes, the cells shaded by
+side, and the high command map's own drawing of it aren't built. The view (`Operations.view`)
+and the grid on every peer have what they need.
+
+### F-292 (done 2026-10-25, ops/types, cg_brief 3.3): trucks and medevac in the OOB
+Done for the types whose OOB the doc gives them (the phased invasion: an ammunition and a fuel
+truck; the armoured thrust: a fuel truck; call D4-7): an OOB entry's `logistics` ("ammo", "fuel")
+drives to the logistics point (the MSR 400 m short of the last phase line taken) and rearms or
+refuels the allied and attached vehicles within 50 m every 60 s (the vehicles' own `server_rearm`
+and `server_refuel`). MaxxPros stand in for the HEMTTs until D6a (F-297). The medevac is each
+type's `medevac` count of the company's Dustoff calls, flown on the employer (one line in
+Economy.server_pay_support). Still not built: resupplying AI infantry in the field (no system
+for it yet).
+
+### F-293 (note, B2): hooks into the commander, none made inside Captain's files
+D3 drives B2 only through its public API: `SideCommand.install(level, side, plan)`,
+`server_register(squad, kind, callsign, record)`, `withdrawn`, `advance()`, and on OperationPlan
+`phase`, `started`, `taken`, `taken_by`, `reserve`, `start_phase()` and `withdraw()`; DefencePlan
+from the enemy's sites with their band as `line`. The hostile commander's picture is fed from
+Alert's contact reports as EnemyCommand's is. Nothing in side_command.gd, operation_plan.gd,
+hot_zone_policy.gd, defence_plan.gd, squad_ai.gd, tactics.gd or squad.gd changed. Worth a hook
+later (Captain's side): OperationPlan saying when a phase's objectives are seized (D3 polls `taken`
+each tick) and the plan's own time limits reading the contract's (D3 passes them in the spec).
+
+### F-294 (open, D5 follow-up): the beach landing's x4 time afloat
+6.4.2: "the host can speed time x4 while afloat and out of contact". Not built (call D5-4):
+Engine.time_scale on the host also runs every client's view of the physics faster, and the AAV's
+swim (AavWater) isn't proven stable at 4x its step. The waves swim in at their speed (a few
+minutes from the stern gate to the beach). A host-only "skip the swim" (the waves moved along their
+lanes while every player is aboard and nothing hostile is within 800 m) would do it without
+touching the physics.
+
+### F-295 (open, armour lane / D5): troops at the AAV's open hatches
+6.4.2: "troops can stand at the open cargo hatches to see and shoot (the AAV's FFV positions, as
+FfvGunner does for helicopters)". The AAV's spec has no FFV positions (data/vehicles.json `aav7`
+seats: driver, gunner, 22 passengers), so the run-in is ridden inside. Two FFV seats on the cargo
+hatches and FfvGunner's rules would do it.
+
+### F-296 (open, Claude's A9): what A9 would improve for the operation types
+The types use the AI that exists (cg_brief 3.3: "Don't build A9"). What A9's ArmourTactics would
+add: the attached armour picking a hull-down overwatch spot with its front to the threat (today:
+a point 300 m short of the task, by road), shoot and scoot and smoke on a launch; AI gunners on
+the main gun and the TOW, not only the coax (AavGunner); the thrust's column keeping its spacing
+by speed (a ConvoyColumn) and turning its fronts to an ambush; AT gunners aiming at the attached
+vehicles' weak faces; AAV crews swimming evasive lanes under fire. OpSupport and OpThrust drive
+them through SquadDrivers and Vehicle's own API, so A9 can take them over vehicle by vehicle.
+
+### F-297 (open, D6a/D6b): the phased invasion against the Eastern Concord, and the HEMTTs
+6.4.1's enemy OOB against the Concord (a mechanised company of BMP-2s, a T-72B3 platoon, Konkurs
+teams) needs D6b's vehicles and data; the trucks are MaxxPros standing in for the fuel and
+ammunition HEMTTs (D6a). Add a `concord` OOB to data/operations.json's phased_invasion (and the
+thrust's hull-down T-72B3s) when the models land.
+
+### F-298 (open, D5 follow-up): the town's field defences are coloured boxes
+OpTown's pieces (sandbag wall, HESCO, concertina wire) are solid boxes of their size and colour on
+collision layer 1: they stop rounds and people alike, wire included, and the AI's cover search
+(Tactics) doesn't know them as cover points. Art (the bag pattern, HESCO frames, coiled wire),
+wire that blocks movement but not rounds, and cover points for the squads would finish them.
+
+### F-299 (note, D5): the crossing's H-hour is rolled, not chosen
+6.4.4: "quietly, if the player chooses: a night or dawn H-hour". There's no briefing choice of
+H-hour yet, so a seizing-a-crossing offer rolls a dawn start (05:00) half the time (call D5-6). A
+briefing choice (now, dawn, night) on the contract's sky would make it the company's.
+
+### F-300 (note, Captain's B2 side): what the types would like from the commander
+The types use B2's public API only (call D4-14; no hooks in Captain's files). Worth a hook later:
+DefencePlan accepting a counterattack force handed to it (today a type leads its own waves with a
+SquadOrders, D5-12, because a free group would be garrisoned or contained); OperationPlan knowing
+the attached armour and the column, so its own armour pairing (B3) works with them.
+
+### F-301 (open, cghath's D3 front): a hold's ground can go back to the enemy from far off
+A hold_line task needs its cell (256 m) the company's. The front's flip looks at the 3 x 3 cells
+round it, so a site still standing or a group 400-600 m off can take the held cell back with no
+enemy within the task's 200 m, and the hold's clock stops. Seen in the optypes suite's crossing
+hold (its zones spawn no garrisons, so the bridge's checkpoint "stood"; the suite now clears the
+sites by the bridge and gives the ground back as if the waves were beaten off). Worth watching in
+play: a crossing or town held for minutes against nothing near. Ask: flip a held task's cell by
+its own presence only, or let the hold count while no enemy is within its radius.
+
+### F-302 (done in ops/types, cg_brief 3.3; a few lines in BaseHub, shared): clients dropped by a switch into an 8 km zone
+D3-21 kept a late joiner in while it makes an 8 km zone; a client already in the session when the
+host switched to one wasn't: the host makes the zone first (8-10 s of frames held, more on CI), past
+ENet's 5 s, and the client dropped it (the optypes suite's client, following the host from the
+invasion's zone to the thrust's: R0701, R0702). BaseHub now gives both ends LevelSwitch's
+LOAD_TIMEOUT from the switch's start until the client has the level and LOAD_SETTLE_S more
+(`_hold_timeouts`, two small RPCs), only for an 8 km zone. level_switch.gd unchanged. Call D4-15.
 
 ### F-261 (open, Claude's AI / the perf lane): the city's hitches are the AI's ticks
 The post-merge recheck (cg_brief 2.4) of perfcases' city, alone on a quiet machine (R0633, at
@@ -1962,6 +2082,48 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.1 (D2-13): CI runs the same 8 km zone and cases, for perfcases' CI_MEASURE_SHARE of the time | it loads in ~15 s headless here; a smaller stand-in would test less | a smaller zone on CI
 2026-10-25 | cg_brief 3.1: far drawing scans soldiers new to the zone first and each again every 10 s, 12 a scan (BigZoneStreaming DRAW_AGAIN_S, DRAW_PER_SCAN) | the WIP walked every soldier's meshes every 2 s | once per soldier only (gear and stand-ins that come later stay unlimited)
 2026-10-25 | cg_brief 3.1: hooks for D3 left, not built: the def's "op" (bands, MSR and its road indices, laterals, route, fords, start, FOB, town or city, HQ, depth target), OperationGen.band_at/along/across, BigZoneStreaming.at_cap and its live counts (F-286) | 3.2 is D3's | building the front grid now
+2026-10-25 | cg_brief 3.2 (D3-1): operation types in data/operations.json with an `offer` flag; the employer's factions.json `operation_types` names what it posts | an operation is phases, OOBs and a front, not one mission type; D4/D5 flip a flag | entries in contracts.json mission_types
+2026-10-25 | cg_brief 3.2 (D3-2): US forces post the phased invasion only; Vessmark keeps D7's stand-in operation | the other types' mechanics are D4/D5's | posting every type with stand-in mechanics
+2026-10-25 | cg_brief 3.2 (D3-3): an operation covers its front's zone and up to two neighbours the target holds; its zone `op_<seed>` is generated from the contract on asking and cached, controller the target from WorldSites | one seed, the same zone everywhere and after a load | saving the def with the contract
+2026-10-25 | cg_brief 3.2 (D3-4): pay = type base ($320,000 phased invasion) x difficulty_pay x op_pay_mult; 20% on signing whatever the terms; the rest by phase share 20/25/25/30% | 6.5 | the terms' advance points
+2026-10-25 | cg_brief 3.2 (D3-5): phase bonuses and penalties as shares of the phase's pay (fast +10%, low allied losses +5%, asks answered +2% each to +10%, clean, bridge kept +10%, late -20%, friendly fire -5% each and -1 rep), never below nothing | 6.5's list; a good phase pays about a third more | flat sums
+2026-10-25 | cg_brief 3.2 (D3-6): unvisited sites fall off-screen at 2x the expected garrison for the flip time, 34% of it counted as allied losses (F-290) | the allies take ground the players never see | spawning every site's fight
+2026-10-25 | cg_brief 3.2 (D3-7): a phase is done with its required task and required allied objectives; it stalls at side_command phase_fail_share x its limit and the operation stops, what's done paid | B2's own stall rule | the company going on alone
+2026-10-25 | cg_brief 3.2 (D3-8, D3-9): friendly fire counts players' incidents only; the debrief outcome completed / partial / failed, partial +2 rep at half or more | the AI's mistakes aren't the company's; a partial push still did work | every incident; success or failure only
+2026-10-25 | cg_brief 3.2 (D3-10, D3-11): the front is 32 x 32 cells of 256 m, cycled every 10 s, a cell weighing its 3 x 3 and flipping at 2x for 60 s with no defending garrison standing; objectives falling flip their cells, a phase consolidates behind its line, a withdrawal gives back past the last line held | 6.3 | each cell alone; presence only
+2026-10-25 | cg_brief 3.2 (D3-12, D3-13): OOB out by the front (friendly at H-hour, enemy 600-2,600 m from a player and unseen, two men a frame, held at the live caps); waves of 6 every 7 min (3 a phase) on enemy cells near the main objective; a 50% team behind the front every 15 min | 6.2.3's caps; 6.3's reinforcements from the enemy's side | everyone at once; fixed spawn points
+2026-10-25 | cg_brief 3.2 (D3-15, D3-16): the run saved on the contract (op_run: clock, phases, pay, front, OOB where it stands); peers ask for the whole run and grid, then get flipped cells and the view every 10 s | one save with the campaign; small and in step | a zone save; the whole grid each time
+2026-10-25 | cg_brief 3.2 (D3-17): the HUD's operation strip in the top-right corner over the objectives (the objectives panel shrinks for what's above it) | where a player looks for what to do | a banner at the top
+2026-10-25 | cg_brief 3.2 (D3-19): budgets 0.2 ms a front cycle for the zone's own load (~0.13 ms measured), 0.6 ms for a 160-group fight, 1 ms the whole cycle, 0.3 ms the strip, 3x allowed in the test | GDScript costs ~0.4 ms for the fight load, every 10 s | 0.2 ms for any load
+2026-10-25 | cg_brief 3.2 (D3-20): the operations suite plays the invasion with a small OOB of its own via register_type | the full OOB would take the suite past CI's time | the data's OOB
+2026-10-25 | cg_brief 3.2: no hooks in Captain's commander files (side_command, operation_plan, hot_zone_policy, defence_plan) or in squad_ai, tactics, squad; D3 uses B2's public API only (F-293) | the brief: public API first | one-line hooks
+2026-10-25 | cg_brief 3.2: the economy sim plays operations phase by phase through the real pay (_play_operation) and skips offers the company can't sign; no profile took one in 2 x 40 campaigns (rated 5; careful/median take 3/4; sloppy seldom trusted by the US), so pay by phase leaves the money curve as it was; the war's stream moved it within the seed spread (docs/economy.md); nothing tuned | the brief: re-run the sim if pay by phase moves the curve | lowering an operation's rating so the sim takes one
+2026-10-25 | cg_brief 3.2: the phased invasion's bridge kept is +10% of phase 2 (6.5's +40% is the seize-crossing type's, data/operations.json seize_crossing) | the bridge is the whole job only in a crossing operation | +40% for every type
+2026-10-25 | cg_brief 3.2 (D3-21): a client joining an 8 km zone (BigZoneStreaming.streams) gets up to 180 s to make it: the host's auth timeout and both ends' ENet timeouts (32, 120 s, 180 s) while it loads, back to Net.ENET_TIMEOUT 15 s after it's in (LevelSwitch, a few lines in a shared net file) | the client was dropped mid-load and rejoined from scratch (the operations suite's late joiner, up to 10 tries; on CI it never got in) | the test raising timeouts itself, as armourdrive_test does, leaving players' late joins broken
+2026-10-25 | cg_brief 3.2: the operations suite's client waits for the host's door file (user://operations_test_door<tag>_<port>.txt) before joining | let in while the host's door was shut it was dropped and loaded the 8 km zone again each try | joining in a loop as the other two-process suites do
+2026-10-25 | cg_brief 3.3 (D4-1): the five operation types register through D3's Operations.register_type (hooks only, data in data/operations.json); each a mechanic node (OpInvasion, OpThrust, OpLanding, OpCrossing, OpTown) plus OpSupport under the zone's Operations node on every peer, records on the run (op_run "mech"), a "resume" hook for a loaded save | D3's API; one RPC path everywhere; one save | a script per type outside the zone
+2026-10-25 | cg_brief 3.3 (D4-2): offer rules: a type's region (beach landing coast fronts only, armoured thrust inland only, the rest any) and min_rep 30; the US posts the invasion, thrust and beach landing, Vessmark seizing a crossing and holding a town (D7's Vessmark stand-in retired) | 6.1, 6.4.2, 6.4.3 | tiers of standing per type
+2026-10-25 | cg_brief 3.3 (D4-3): an operation's rating counts the enemy sites in its rate_bands, its OOB and its counterattack waves (holding a town: waves and its mortar team only) | the ground it fights over; each still rates 5 | the whole 8 km zone's garrisons
+2026-10-25 | cg_brief 3.3 (D4-4): attached armour gets an allied driver and gunner (+ the Abrams' loader), the commander's hatch and troop seats left to players; it overwatches the company's task 300 m short on our side by default and takes the company's orders (Support > Operation); a player aboard takes its gun and gives it back; lost = the employer's loss | 6.1 with today's AI (no A9: F-296) | registering the crew with HighCommand (its SquadOrders can't drive a seated crew)
+2026-10-25 | cg_brief 3.3 (D4-5): allied fires are data/fire_support.json "allied_units" fired by FireSupport.server_allied_fire (no mission, no bill): the battlegroup's 81 mm from its mortar section's tubes (none once gone), its 105 mm battery and naval gunfire off the map; prep fires on each phase's enemy sites (never a bridge to take intact), the allied commander's fire_support_wanted (smoke for a breach), the company's call 3 rounds a unit every 120 s; never danger close | 6.1, F-288 | the company's own FireSupport units for free
+2026-10-25 | cg_brief 3.3 (D4-6): the phased invasion's full OOB per 6.4.1 (6 rifle squads, 4 Bradleys, 4 Abrams, a 2-tube mortar section, an ammo and a fuel truck 8 min behind as MaxxPros, the medevac as 2 company Dustoff calls on the employer, 2 Abrams attached); the Concord OOB waits for D6b (F-297) | the vehicles that exist | leaving trucks and medevac out
+2026-10-25 | cg_brief 3.3 (D4-7, F-292): trucks wait at the logistics point (the MSR 400 m short of the last phase line taken) and rearm or refuel (200 l) allied and attached vehicles within 50 m every 60 s; a type's "medevac" count of the company's Dustoff calls is flown on the employer (one line in Economy.server_pay_support) | the vehicles' own rearm/refuel API; nothing resupplies AI infantry yet | trucks that only drive about
+2026-10-25 | cg_brief 3.3 (D4-8): phase 4's bonus: the HQ's commander comes out at the HQ as PL STEEL begins; down or captive and not dead, with one of the company within 6 m, pays +15% of the phase | 6.4.1 "alive for a bonus" | an HVT person delivered to extraction
+2026-10-25 | cg_brief 3.3 (D4-9): the thrust's blocking positions are its phases' tasks, band 2's crossing passed between; the column (allied armour, mech platoon, the attached Bradleys) drives by road 30 m apart at 35 km/h, halts 280 m short of a position not clear, goes on when it's clear and every player is aboard (or after 90 s); mech squads dismount at a halt; 45 minutes from H-hour or half the column lost fails it | 6.4.3 | SquadDrivers' ConvoyColumn
+2026-10-25 | cg_brief 3.3 (D4-10): a bypass is the company's order: off-road 450 m to whichever side TerrainRoute.path_problem allows, the position counted passed, its 200 m left to the enemy behind the front | 6.4.3 | an automatic bypass
+2026-10-25 | cg_brief 3.3 (D4-11): F-284 (the ridge with two passes) stays open: 6.4.3 doesn't need it; the thrust's passes are band 2's crossings (the MSR bridge, the fords) | the doc's thrust runs the river band | building the ridge in ZoneTerrain now
+2026-10-25 | cg_brief 3.3 (D4-12, D4-13): the strip gets the type's own line and the attached/fires line, the debrief the type's notes; each mechanic's tick budget 0.5 ms (3x allowed) | 6.3's strip; debrief per type | a panel per type
+2026-10-25 | cg_brief 3.3 (D4-14): no hooks in Captain's files (side_command, operation_plan, hot_zone_policy, defence_plan, squad_ai, tactics, squad, level_switch): public API only (SideCommand.install/server_register/server_unregister/fire_support_wanted/picture, OperationPlan.taken, SquadOrders, HcOrder) (F-300) | the brief | a one-line hook in operation_plan.gd
+2026-10-25 | cg_brief 3.3 (D5-1, D5-2, D5-3): the beach landing starts at 04:30 (contract sky), H-hour at wave 1 ashore or 10 min in; wave 1 (2 company AAVs with the company aboard, 4 allied with squads) out of the stern gate from 20 s, wave 2 (2) 4 min later, lanes 70 m apart, 45 m up the sand, the AI dismounting there; prep fires at H-2 min on up to 4 known defences, smoke on both exits at H-30 s; exits 600 m apart (the company the left); fail on half of wave 1's AAVs lost afloat or the beachhead held by the enemy 60 s | 6.4.2 | spawning the company on the beach
+2026-10-25 | cg_brief 3.3 (D5-4): not built: the x4 time afloat (F-294) and troops at the AAV's open hatches (F-295) | host time_scale speeds every client's physics; the AAV spec has no FFV seats | both now
+2026-10-25 | cg_brief 3.3 (D5-5, D5-6, D5-7): seizing a crossing: 3 demo blocks under the middle span on a firing device, the firing point 160 m past the bridge, 60 m off the road; seen within 1 km by line of sight (600 m before its engineers are out) it blows in 90 s, a vehicle on the span at once; stopped by the engineers down, the wire cut at a marked point (3 m) or the firing point seized (12 m, no enemy within 40); the far bank a company task, the far checkpoint not required; a dawn start rolled half the time (F-299); blown: keep-intact fails, the armour goes by the ford; fail on both banks or the bridge and every ford held 60 s | 6.4.4 | always dawn; the checkpoint required
+2026-10-25 | cg_brief 3.3 (D5-8): holding a town: garrisons gone and cells within 700 m ours at the start, the company inserting on the city's ring street (OperationGen town_start_types), the allies "at" the town; 6 free pieces (sandbags, HESCO, wire) within 250 m of the centre in the 10-minute prep, placed with DefencePlacer's field mode, solid boxes on every peer, saved with the run (F-298) | 6.4.5's budget 6 | paid defences as zone modules
+2026-10-25 | cg_brief 3.3 (D5-9): a piece is seen when a live enemy within 450 m has a line of sight (every 5 s, 24 rays) or its picture has a contact on it; the counterattack's axis is the lowest-scored of 3 approaches 900 m out, 50 deg apart, scored by seen pieces and contacts in a 35 deg cone (+2 off its ground) | 6.4.5 "from its picture" | DefencePlan's own counterattack (3x seen CP or contain)
+2026-10-25 | cg_brief 3.3 (D5-10, D5-11, D5-12): 3 town waves at 0:30, 10:00, 20:00 (2 groups of 5; the second with DShK technicals and 4 enemy mortar rounds first), won when all are down to a quarter after 10 min or 30 min with the centre ours, lost when the enemy holds the centre 60 s; the beach (2 waves) and crossing (2) share it; the enemy mortar fires from 1,800 m back while its team stands; a type leads its waves itself (a SquadOrders under its mechanic) | 6.4.5; DefencePlan would garrison or contain a free group | registering waves with the hostile commander
+2026-10-25 | cg_brief 3.3 (D5-13): the AAV waves come out of the operation zone's own LHD (its stern gate, Lhd.launch_transform), not the walkable LhdLevel home; the company deploys as usual and starts seated in its AAVs; lhd_level.gd unchanged | one level per deployment | a level switch from the home's well deck mid-launch
+2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
+2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
+2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -1993,3 +2155,23 @@ for a second or so side-steps along the obstacle's normal (`get_slide_collision`
 as a player would. On cghath's side, separately: bake static props (the dummies) into the
 compound's navmesh and keep the agent radius at least the capsule's (each changes paths
 everywhere in the compound, so both want the full suite).
+
+## F-224: the co-op soak harness expects the pre-ready-up deploy and a shorter extraction
+
+Found on the v0.7.0 build's first soak (S2605, 2026-10-25, 10 min clean, 3 clients): the harness
+(claude/coop-join, written 2026-10-19) is behind the game it now runs on. Not a game fault: the
+bots joined (late join, leave and rejoin), a contract played with a revive and a confirmed
+extraction, no script errors, no persistent divergence past one 5 s inventory mark.
+
+- Cycle 1 gave up 1.5 s after kitting with "deploy: Waiting for: Player <id>": the briefing now
+  waits for every player's ready-up (FOB ready-up, 2026-10-14) and the bots hadn't readied; the
+  deployment then went ahead on its own at 45 s. The harness should ready each bot up
+  (BaseHub/briefing ready) and wait for all_ready before counting the deploy as failed.
+- Cycle 2 ran 550 s of a 600 s soak and ended "never got back to the base (extraction state 1)":
+  the extraction was gathered and confirmed, the flight home just outran the window. Either count
+  a confirmed extraction as the cycle's end, or make --minutes a per-cycle floor.
+- Shutdown noise: "Attempt to call RPC with unknown peer ID" from Soldier._set_carry_mode via
+  CompoundLevel._server_player_leaves when a carrying peer leaves last; harmless, worth a guard.
+
+Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
+B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md

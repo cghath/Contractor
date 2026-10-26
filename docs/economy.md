@@ -16,6 +16,57 @@ Three passes so far. Every number is Proposed (the Captain tunes them).
    to make money... good money but it needs to go with the flow of the game"): high command side
    jobs, captures and bounties, FOB businesses, the black market (docs/income.md). Next section.
 
+## The five operation types, 2026-10-25 (combined arms D4 and D5, cg_brief 3.3; Proposed)
+
+D4 and D5 post every type (docs/combined_arms.md 6.1): the US its phased invasion ($320,000 base),
+armoured thrust ($220,000, inland fronts) and beach landing ($280,000, coast fronts), Vessmark its
+seizing a crossing ($180,000) and holding a town ($160,000), so D7's stand-in Vessmark contract is
+gone. Each needs its employer at trusted (30). Rated by the ground it fights over and the waves it
+sends, every one still rates 5. On the optypes suite's board that came to $268,500 for a thrust,
+$241,500 for a crossing and $214,500 for holding a town (20% on signing, the rest by phase). The employer pays the company's first
+medevac calls on an operation and loses its own attached armour; the company pays nothing new.
+
+**The sim, re-run** (tools/economy_sim.gd, 40 campaigns per profile, seeds 1 and 101): no profile
+took an operation, the same as after D3 (careful and median stop at rating 3 and 4, and the sloppy
+company seldom reaches trusted). The day-35 means came out the same as D3's to the thousand:
+
+| Day 35, mean cash | After D3, seed 1 | After D4/D5, seed 1 | After D3, seed 101 | After D4/D5, seed 101 |
+|---|---|---|---|---|
+| Careful | $627k | $627k | $622k | $622k |
+| Median | $666k | $666k | $596k | $596k |
+| Sloppy | $113k (6 of 40 in debt) | $113k (6 of 40) | $61k (10 of 40) | $61k (10 of 40) |
+
+The targets hold: careful builds, the median grows and nobody goes broke, and sloppy play still
+bleeds (p10 -$65k and -$115k, its lowest cash below zero on average). Nothing was tuned.
+
+## Operation contracts and pay by phase, 2026-10-25 (combined arms D3, cg_brief 3.2; Proposed)
+
+A government employer's operation (docs/combined_arms.md 6.5; data/operations.json "pay") pays
+20% on signing and each phase's share of the rest as the phase is done, with that phase's bonuses
+and penalties. A phased invasion is $320,000 x the rating's difficulty_pay x the employer tier's
+pay_mult: rated 5 by its OOB, about $449,000 at the US's 1.15 tier, over 2 days plus travel. Only
+a company the employer trusts (30) gets one.
+
+**The sim** (tools/economy_sim.gd) plays an operation phase by phase through the real pay
+(`_play_operation`: each phase won with the profile's chance for the rating spread over the
+phases, a time round its limit, a few allied losses and asks answered). In 2 x 40 campaigns per
+profile (seeds 1 and 101), no profile took one. The rating is 5, careful and median take 3 and
+4 at most, and the sloppy company seldom gets to trusted with the US. So pay by phase doesn't
+move the curve.
+
+What did move is the war. D7's stand-in operation was an ordinary contract that careful companies
+took now and then. D3's real one is too big for them, so some wars go another way. The day-35
+means stay inside the spread between seeds:
+
+| Day 35, mean cash | Before D3, seed 1 | After, seed 1 | Before D3, seed 101 | After, seed 101 |
+|---|---|---|---|---|
+| Careful | $677k | $627k | $626k | $622k |
+| Median | $514k | $666k | $624k | $596k |
+| Sloppy | $24k (12 of 40 in debt) | $113k (6 of 40) | $18k (10 of 40) | $61k (10 of 40) |
+
+The targets hold: careful builds, the median grows and nobody goes broke, and sloppy play still
+bleeds (p10 negative, its lowest cash below zero on average). Nothing was tuned.
+
 ## The income streams, 2026-10-22 (all Proposed)
 
 **Targets** (Captain): good play earns well; the streams reward engagement, not grinding; normal

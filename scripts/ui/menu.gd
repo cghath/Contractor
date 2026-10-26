@@ -71,7 +71,9 @@ func _ready() -> void:
 	var box := UiKit.screen(self, 780.0)
 	box.add_child(UiKit.header("CONTRACTOR", "Co-op private military contracting. Host, join, or run the company's campaign.",
 		PackedStringArray(HELP), [["Tab / arrows", "Move"], ["Enter", "Press"]]))
-	box.add_child(UiKit.hint("v%s (gray box)" % ProjectSettings.get_setting("application/config/version", "dev"), true))
+	# Which build this is (BuildInfo: "B0367 · dev ec22a34", or "editor <branch> <commit>"),
+	# so players can tell they run the same one before joining each other.
+	box.add_child(UiKit.hint("%s · v%s (gray box)" % [BuildInfo.label(), ProjectSettings.get_setting("application/config/version", "dev")], true))
 	var columns := HFlowContainer.new()
 	columns.add_theme_constant_override(&"h_separation", UiKit.SPACE_L)
 	columns.add_theme_constant_override(&"v_separation", UiKit.SPACE_M)
@@ -128,6 +130,10 @@ func _ready() -> void:
 	UiKit.focus_first(box)  # keyboard: Tab/arrows and Enter work from the start
 	Net.joined.connect(hide)
 	Net.join_failed.connect(_on_join_failed)
+	Net.refused.connect(func(reason: String) -> void:
+		_status.text = reason
+		show())
+	Net.version_warning.connect(func(text: String) -> void: _status.text = text)
 
 
 func host() -> void:

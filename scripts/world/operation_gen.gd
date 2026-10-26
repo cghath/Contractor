@@ -372,6 +372,15 @@ static func generate(seed: int, op_type: String, covers: Array) -> Dictionary:
 		return [snappedf(p.x, 1.0), snappedf(p.y, 1.0)]
 	var insertion: Array = [edge_pt.call(l0), edge_pt.call(l0 + 1300.0), edge_pt.call(l0 - 1300.0)]
 	var extraction: Array = [edge_pt.call(l0 + 650.0), edge_pt.call(l0 - 650.0), edge_pt.call(l0 + 2200.0)]
+	# cg_brief 3.3 (D5, holding a town): the company is the town's new garrison, so it starts in it,
+	# on the city's ring street where the MSR comes in (else the town module's near side).
+	if op_type in (d.get("town_start_types", ["hold_town"]) as Array):
+		var in_at: Vector2 = city_entries[0] if not city_entries.is_empty() else (pos_of.call("town") as Vector2) - axis * 80.0
+		if in_at.is_finite():
+			var lft := Vector2(-axis.y, axis.x)
+			insertion = [[snappedf(in_at.x, 1.0), snappedf(in_at.y, 1.0)], [snappedf(in_at.x + lft.x * 25.0, 1.0), snappedf(in_at.y + lft.y * 25.0, 1.0)],
+				[snappedf(in_at.x - lft.x * 25.0, 1.0), snappedf(in_at.y - lft.y * 25.0, 1.0)]]
+			extraction = insertion.duplicate(true)
 
 	# Landmarks from the covered zones: their assets and ids (ZoneModules.landmark_kinds), placed in
 	# their bands by normalize (ZoneModules.place_landmarks, landmark_area); a depth target added

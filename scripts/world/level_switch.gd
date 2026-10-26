@@ -29,6 +29,12 @@ const LEVEL_SCENES := {
 }
 ## Long enough for a client to generate a zone (about a second) while connecting.
 const AUTH_TIMEOUT_S := 30.0
+## An 8 km operation zone (BigZoneStreaming.streams) holds a joining client's frames up for 10-60 s
+## while it makes the zone: its authentication may take LOAD_TIMEOUT's max, and both ends give
+## each other LOAD_TIMEOUT (ENet limit, min ms, max ms) until it's in and LOAD_SETTLE_S more, then
+## Net.ENET_TIMEOUT again (D3, cg_brief 3.2). Proposed.
+const LOAD_TIMEOUT := [32, 120000, 180000]
+const LOAD_SETTLE_S := 15.0
 
 
 func _ready() -> void:
@@ -66,6 +72,9 @@ func _on_peer_authenticating(id: int) -> void:
 		return  # gone meanwhile
 	var level := CompoundLevel.current(self)
 	var hello := {"info": level.level_info() if level else {"level": "compound"}, "campaign": BaseHub.campaign_running}
+	mp.auth_timeout = float(LOAD_TIMEOUT[2]) / 1000.0 if _big(hello.info) else AUTH_TIMEOUT_S
+	if _big(hello.info):
+		_load_timeout(id)
 	if mp.send_auth(id, var_to_bytes(hello)) == OK:
 		mp.complete_auth(id)
 
@@ -80,9 +89,32 @@ func _on_auth_data(id: int, data: PackedByteArray) -> void:
 		enet.get_peer(MultiplayerPeer.TARGET_PEER_SERVER).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
 	var hello: Variant = bytes_to_var(data)
 	if hello is Dictionary and hello.get("info") is Dictionary:
+		if _big(hello.info):
+			_load_timeout(MultiplayerPeer.TARGET_PEER_SERVER)
 		BaseHub.follow_host(bool(hello.get("campaign", false)))
 		load_level(get_parent(), hello.info)
 	(multiplayer as SceneMultiplayer).complete_auth(id)
+
+
+## Whether level `info` is one a client takes long to make (an 8 km operation zone).
+static func _big(info: Dictionary) -> bool:
+	return String(info.get("level", "")) == "zone" and BigZoneStreaming.streams(float((info.get("def", {}) as Dictionary).get("size_m", 0.0)))
+
+
+## Peer `id`'s ENet timeouts at LOAD_TIMEOUT while the zone loads; back at Net.ENET_TIMEOUT once
+## the other end is in (or the wait is over) and LOAD_SETTLE_S more.
+func _load_timeout(id: int) -> void:
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null or enet.get_peer(id) == null:
+		return
+	enet.get_peer(id).set_timeout(LOAD_TIMEOUT[0], LOAD_TIMEOUT[1], LOAD_TIMEOUT[2])
+	var until := Time.get_ticks_msec() + int(LOAD_TIMEOUT[2])
+	while is_inside_tree() and Time.get_ticks_msec() < until and multiplayer.multiplayer_peer == enet and not id in multiplayer.get_peers():
+		await get_tree().create_timer(1.0).timeout
+	if is_inside_tree():
+		await get_tree().create_timer(LOAD_SETTLE_S).timeout
+	if multiplayer.multiplayer_peer == enet and enet.get_peer(id):
+		enet.get_peer(id).set_timeout(Net.ENET_TIMEOUT[0], Net.ENET_TIMEOUT[1], Net.ENET_TIMEOUT[2])
 
 
 ## Makes `parent`'s level the one `info` names (level_info()), replacing the one there unless

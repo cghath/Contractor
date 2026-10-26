@@ -99,7 +99,7 @@ func _fit_height() -> void:
 	var font := _label.get_theme_font(&"font")
 	var fs := _label.get_theme_font_size(&"font_size")
 	var width := clampf(view.x * 0.3, 240.0, WIDTH) - get_theme_stylebox(&"panel").get_minimum_size().x
-	var room := maxf(view.y - 150.0, 200.0)  # the hint line and the corner margin below and above
+	var room := maxf(view.y - 150.0 - _above(), 200.0)  # the hint line and the corner margin below and above, and what's over it (the operation strip)
 	var lines := _label.text.split("
 ")
 	var used := 0.0
@@ -115,6 +115,22 @@ func _fit_height() -> void:
 		_label.text = "
 ".join(lines.slice(0, keep)) + "
 +%d more (%s: next)" % [lines.size() - keep, _key("objectives_next")]
+
+
+## The height of what shows over the panel in its zone (the operation strip, D3).
+func _above() -> float:
+	var parent := get_parent()
+	if parent == null:
+		return 0.0
+	var h := 0.0
+	for n in parent.get_children():
+		if n == self:
+			break
+		if n is Control and (n as Control).visible:
+			h += (n as Control).get_combined_minimum_size().y
+			if parent is BoxContainer:
+				h += float((parent as BoxContainer).get_theme_constant(&"separation"))
+	return h
 
 
 ## One objective's line: its state and text (Objectives.line), "(bonus)" or "(optional)" when it

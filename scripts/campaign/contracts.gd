@@ -339,7 +339,8 @@ func reinforcement_tuning(cid: String) -> Dictionary:
 	var first: Array = MissionRegistry.setting("reinforcement_first_wave_s", [420, 240])
 	var pairs: Array = MissionRegistry.setting("reinforcement_max_pairs", [2, 4])
 	var quality := float(force.quality)
-	var own_waves := bool(MissionRegistry.type_def(String(contract(cid).get("type", ""))).get("own_waves", false))  # MissionScenario sends this type's waves itself
+	var own_waves := bool(MissionRegistry.type_def(String(contract(cid).get("type", ""))).get("own_waves", false)) \
+		or Operations.is_operation(contract(cid))  # MissionScenario sends this type's waves itself (an operation's come by its front: Operations)
 	return {"first_wave_s": 1.0e9 if own_waves else lerpf(float(first[0]), float(first[1]), t), "max_pairs": roundi(lerpf(float(pairs[0]), float(pairs[1]), t)),
 		"first_pairs": 2 if int(force.count) >= 9 else 1,
 		"max_alive": mini(int(force.count) + MissionRegistry.setting_i("reinforcement_alive_extra", 8), MissionRegistry.setting_i("reinforcement_alive_max", 30)),
@@ -475,12 +476,14 @@ const OP_OFFER_DAYS := 4
 const OP_TITLES := {"vessmark": "Vessmark operation"}
 
 
-## The operations a belligerent's front posts (D7, until D3's operation contracts): one on each of
-## its fronts, once, from the belligerent itself and from each "ops_only" ally of its (Vessmark),
-## each only for an employer the company stands at trusted or better with. A stand-in operation
-## is a contract of one of the employer's "op_types" against the front's holder, one phase
-## ("op_phases"), "op_front" the zone (WorldSites waits on it and its result moves the front), up
-## OP_OFFER_DAYS. `posted` (zone ids) are fronts that had theirs already.
+## The operations a belligerent's front posts: one on each of its fronts, once, from the
+## belligerent itself and from each "ops_only" ally of its (Vessmark), each only for an employer the
+## company stands at trusted or better with. D3 (cg_brief 3.2): an employer with an operation type
+## on offer (factions.json "operation_types", data/operations.json "offer") posts a real operation
+## contract (Operations.make_offer: its 8 km zone, phases, OOBs, pay by phase); one without keeps
+## D7's stand-in, a contract of one of its "op_types" against the front's holder, one phase
+## ("op_phases"). Either way "op_front" is the zone (WorldSites waits on it and its result moves the
+## front), up OP_OFFER_DAYS. `posted` (zone ids) are fronts that had theirs already.
 static func operation_offers(rng: RandomNumberGenerator, today: int, posted: Array) -> Array:
 	var out: Array = []
 	var trusted := 30
@@ -501,6 +504,10 @@ static func operation_offers(rng: RandomNumberGenerator, today: int, posted: Arr
 			if Economy.reputation(employer) < trusted:
 				continue
 			var e := MissionRegistry.faction(employer)
+			var real := Operations.make_offer(rng, today, zid, side, target, employer)
+			if not real.is_empty():
+				out.append(real)
+				continue
 			var types: Array = e.get("op_types", ["raid"])
 			var offer := ContractGen.generate(rng, {"day": today, "source": "board", "zone_id": zid, "target": target, "employer": employer,
 				"type": String(types[rng.randi() % types.size()])})
@@ -651,10 +658,12 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 		why = Economy.work_problem(String(c.get("employer", "")))  # Hostile, or locked out (wave 6a)
 		if why == "":
 			why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
+		if why == "":
+			why = Operations.accept_problem(c)  # D3: operations need the employer at trusted
 	if why != "":
 		_notify(peer_id, why)
 		return why
-	var deal := ContractGen.deal(c, terms)
+	var deal := Operations.deal(c, terms) if Operations.is_operation(c) else ContractGen.deal(c, terms)  # (D3: 20% on signing, the rest by phase)
 	if String(c.get("in_zone", "")) != "":
 		# A hot zone's radio and village contracts are taken on the spot: nothing up front, all on completion
 		# (economy overhaul 2026-10-20: radioing for contract after contract kept 30% of each, and the
@@ -989,8 +998,9 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 	debrief["key"] = "%d:%d" % [int(s.get("tag", 0)), int(s.debriefs)]  # clients show each debrief once, across campaign resets
 	# Pay, fines and reputation.
 	for line: Dictionary in debrief.contracts:
-		if int(line.pay) > 0:
-			Economy.add_cash(int(line.pay), "Completion: %s" % line.title)
+		var owed := int(line.pay) - int(line.get("paid_at_phases", 0))  # (an operation's phases were paid as each was done: D3)
+		if owed > 0:
+			Economy.add_cash(owed, "Completion: %s" % line.title)
 	if int(debrief.fines) > 0:
 		Economy.add_cash(-int(debrief.fines), "Civilian fines (%d)" % int(debrief.civilians))
 	for line: Dictionary in debrief.contracts:
@@ -1011,8 +1021,8 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 		elif String(result.outcome) == "completed" and String(c.get("leader", "")) != "":
 			WorldSites.server_leader_down(String(c.get("target", "")), String(c.leader))  # the leader it named is taken, in any zone
 		debrief["bounties"] = int(debrief.get("bounties", 0)) + Bounties.server_contract_closed(c, result)  # claude/income: a leader taken pays his bounty
-		if String(c.get("op_front", "")) != "":  # D7: a US operation's result moves its front (6.6)
-			WorldSites.server_operation_ended(c, int(c.get("op_phases", 1)) if String(result.outcome) == "completed" else 0)
+		if String(c.get("op_front", "")) != "":  # D7: a US operation's result moves its front (6.6); D3's by the phases done
+			WorldSites.server_operation_ended(c, Operations.phases_done(c) if Operations.is_operation(c) else (int(c.get("op_phases", 1)) if String(result.outcome) == "completed" else 0))
 		war.append_array(war_lines(c, war_before, _war_snapshot(c)))
 	debrief["war"] = war
 	# What came home goes to the base. In a campaign the people bring their own gear home
@@ -1043,6 +1053,12 @@ func server_end_deployment(report: Dictionary, warn_assault := false) -> Diction
 ## isn't hot isn't looked up (WorldSites.site would add it).
 static func _war_snapshot(c: Dictionary) -> Dictionary:
 	var out := {"leaders": WorldSites.leaders_down(String(c.get("target", ""))).size()}
+	if Operations.is_operation(c):  # D3: the zones it covers (WorldSites.server_operation_ended moves them)
+		var covers := {}
+		for z: Variant in c.get("covers", []):
+			if WorldSites.is_war_zone(String(z)):
+				covers[String(z)] = WorldSites.holder_now(String(z))
+		out["covers"] = covers
 	var zid := String(c.get("zone_id", ""))
 	if String(c.get("zone_kind", "")) == "hot" and zid != "":
 		var site := WorldSites.site(zid)
@@ -1067,6 +1083,10 @@ static func war_lines(c: Dictionary, before: Dictionary, after: Dictionary) -> A
 			out.append("%s's grip on %s weakened: %d%% to %d%%." % [target, zone, roundi(float(before.grip) * 100.0), roundi(float(after.grip) * 100.0)])
 		if float(after.get("front", -1.0)) >= 0.0 and not is_equal_approx(float(after.front), float(before.get("front", -1.0))):
 			out.append("The front at %s moved: %d%% to %d%%." % [zone, roundi(float(before.get("front", 0.0)) * 100.0), roundi(float(after.front) * 100.0)])
+	var held: Dictionary = after.get("covers", {})
+	for z: String in held:
+		if String(held[z]) != String((before.get("covers", {}) as Dictionary).get(z, "")):
+			out.append("%s changed hands: now held by %s." % [RegionMap.zone_name(z), WorldSites.holder_name(String(held[z]))])
 	if String(c.get("op_front", "")) != "":
 		out.append("The operation's result moved its front (%s)." % String(c.op_front))
 	return out

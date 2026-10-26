@@ -173,5 +173,6 @@ fi
 	fi
 	[ -n "$notes" ] && { echo; echo "What to test:"; echo "$notes"; }
 } > "$dir/BUILD.txt"
+basename "$dir" > "$dir/build_label.txt"  # the game's build label (BuildInfo), even if the folder is renamed
 [ -n "$why" ] && exit 1
 finished=1

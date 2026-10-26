@@ -1051,10 +1051,15 @@ func _test_us_war() -> void:
 	var ops: Array = (Campaign.section(Contracts.SECTION).board as Array).filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == "cove_outpost")
 	var us_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "us_forces")
 	var vm_op: Array = ops.filter(func(c: Dictionary) -> bool: return String(c.employer) == "vessmark")
-	check(us_op.size() == 1 and vm_op.size() == 1 and String(us_op[0].target) == "ashen_banner" and String(us_op[0].title).begins_with("Joint operation: ")
-		and String(vm_op[0].title).begins_with("Vessmark operation: ") and String(vm_op[0].op_side) == "us_forces" and bool(us_op[0].operation)
-		and int(us_op[0].expires_day) == Economy.day() + Contracts.OP_OFFER_DAYS and String(us_op[0].type) in ["raid", "sabotage", "hvt_capture"],
-		"a trusted company gets the US front's operation, and Vessmark's beside it (%s)" % [ops.map(func(c: Dictionary) -> String: return "%s [%s]" % [c.title, c.employer])])
+	# D3 (cg_brief 3.2): the US's is a real operation contract (its 8 km zone, phases, pay by phase);
+	# D5 (cg_brief 3.3): Vessmark's beside it is a real operation of its own types (seizing a crossing,
+	# holding a town), D7's one-phase stand-in retired.
+	check(us_op.size() == 1 and vm_op.size() == 1 and String(us_op[0].target) == "ashen_banner" and Operations.is_operation(us_op[0])
+		and String(us_op[0].title).begins_with("Operation ") and String(us_op[0].op_type) in Operations.offered_types("us_forces", "cove_outpost")
+		and int(us_op[0].op_phases) == (us_op[0].phases as Array).size() and String(us_op[0].op_zone).begins_with(Operations.ZONE_PREFIX)
+		and Operations.is_operation(vm_op[0]) and String(vm_op[0].op_type) in ["seize_crossing", "hold_town"] and String(vm_op[0].op_side) == "us_forces" and bool(us_op[0].operation)
+		and int(us_op[0].expires_day) == Economy.day() + Contracts.OP_OFFER_DAYS,
+		"a trusted company gets the US front's operation contract, and Vessmark's beside it (%s)" % [ops.map(func(c: Dictionary) -> String: return "%s [%s]" % [c.title, c.employer])])
 	Contracts.server_refresh_board()
 	check((Campaign.section(Contracts.SECTION).board as Array).filter(func(c: Dictionary) -> bool: return String(c.get("op_front", "")) == "cove_outpost").size() == 2,
 		"once per front: the next refresh doesn't post it again")
@@ -1065,7 +1070,9 @@ func _test_us_war() -> void:
 		"while its operation is on the board the front waits (%.2f)" % float(WorldSites.front("cove_outpost").progress))
 	var us_before := WorldSites.strength("us_forces")
 	var banner_before := WorldSites.strength("ashen_banner")
-	WorldSites.server_operation_ended(us_op[0], 1)
+	var carried: Dictionary = us_op[0].duplicate(true)
+	carried["covers"] = ["cove_outpost"]  # (its other covered zones are the operations suite's; the Banner keeps landing_beach for the checks below)
+	WorldSites.server_operation_ended(carried, int(us_op[0].op_phases))
 	check(WorldSites.holder("cove_outpost") == "us_forces" and is_equal_approx(WorldSites.grip("cove_outpost"), WorldSites.OP_WIN_GRIP)
 		and not WorldSites.is_flashpoint("cove_outpost") and WorldSites.strength("us_forces") > us_before and WorldSites.strength("ashen_banner") < banner_before,
 		"the operation carried: Cove outpost is the US's at grip %.2f, the US up and the Banner down" % WorldSites.grip("cove_outpost"))
