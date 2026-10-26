@@ -6,6 +6,26 @@ companions on mounts and at posts (call 35), co-op death and the newcomer (calls
 settlement's politics (calls 28, 59; the council's rules are in survival_building.md §7).
 Written 2026-10-26. Inspired by RimWorld's colonists and the squad we already have.
 
+## Where the build is (2026-10-26, branch claude/survival-people)
+
+- **Phase B people built** (sections 1-6 and 8): `SurvivorPerson` (the one record in
+  `Survival.state()["people"]`), `Moods` (the moodlet table, breaks by traits), `SurvivorsLayer`
+  ("Survivors" on every survival zone: lone survivors placed by the seed, bodies in range, hiring,
+  companions, favours, grief, graves, the rise, the take-over), `CompanionAI` (autonomy and refusals
+  beside SquadAI), `TalkMenu` + `data/survival_lines.json` (the talk and lines by tag).
+- Suite `fallenpeople` (tests/fallenpeople_test.gd): R2644 PASS (fallenpeople alone); R2645 FLAKY at f2aabb93 (fallenpeople passed; survival flaked once on the base melee check "a block held a while just blocks", passed the rerun).
+- Proposed defaults (marked in code): 2-5 survivors a zone (+1 a village, up to 2), live within 90 m,
+  money wants $200-1,500 paid in cash items (roll $50, bundle $250, brick $2,500, no change), break
+  line 20 for 4 world hours then 25% an hour, rise after 180 s, burial 8 s with a shovel (etool) or
+  25 s by hand, a body left out 4 pressure a day, newcomer loyalty 20, take-over at mood 40 and
+  loyalty 40, refusal chance 0.95 - (loyalty + courage) / 250 (+0.1 under loyalty 30).
+- Left for later: settlers and the settlement's jobs (the "settler" status exists, nothing sets it),
+  captives, politics, romance and families, teaching, levelling (the RPG lane's skills are read
+  through `Rpg.skills_of` when it exists), the barter screen (Trade is a line), a raider group (phase
+  C), the take-over and newcomer screens (a message for now), a deserter's grudge acted on, roof
+  spots, companions crossing zones with the squad (they come along to whatever zone is hosted),
+  barricading doors, dressing for the weather, the "fetch" favour's item check beyond carrying it.
+
 Built on: `Hiring.candidate` and `Roster` (names, roles, skills), `SquadAI` and the orders
 (follow, move, hold, defend, assault, flank, regroup, fall back, release), `CivilianAI`,
 `PersonLook`, the context menu (what you look at decides the first options), the TTS barks and

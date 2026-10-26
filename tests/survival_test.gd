@@ -346,8 +346,10 @@ func _test_melee() -> void:
 	Melee.server_attack(player, {"windup": 0.6, "round_class": Vitals.PISTOL, "energy_j": 300.0, "parts": [Vitals.CHEST], "name": "knife"})
 	check(z.vitals.undead_pool < pool and not player.has_meta(&"melee_winding"), "the counter lands at once, twice as hard (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
 	Melee.server_block(player, false)
-	# A block held a while: a jolt gets through, no parry.
-	await _seconds(Melee.STAGGER_S + 0.1)
+	# A block held a while: a jolt gets through, no parry (once its stagger from the parry has passed:
+	# polled, a timer here ran short of the wall clock on slow frames: R2645).
+	while Melee.staggered(z):
+		await get_tree().process_frame
 	Melee.guard_of(player).block_at = Soldier._now() - 1.0
 	Melee._land(z, Melee.ZOMBIE_ATTACK, 1.0, Soldier._now())
 	check(not Melee.staggered(z), "a block held a while just blocks (no parry)")

@@ -1,0 +1,163 @@
+{
+	"_about": "Contractor: Fallen's people's lines (docs/survival_people.md section 5, call 54/76). A topic lists lines; a line's tags must all be the speaker's (TalkMenu.tags_of: status, mood band, scared/cocky, traits, want kind, disposition, grudge) and the most specific match wins, ties picked at random. Untagged lines are the fallback. {name} {first} {want} {zone} {background} {item} fill in. Short and plain: the TTS voices them later.",
+	"topics": {
+		"greet": [
+			{"text": "I'm {first}. That's all you need for now."},
+			{"text": "Name's {first}. I was a {background}, before."},
+			{"text": "Stay back. Please. I don't want any trouble.", "tags": ["scared"]},
+			{"text": "Don't come closer. I mean it. I'm just {first}.", "tags": ["scared", "wary"]},
+			{"text": "Look what crawled in. You lost, or just stupid?", "tags": ["cocky"]},
+			{"text": "{first}. And this is my patch, so talk fast.", "tags": ["cocky", "hostile"]},
+			{"text": "Oh thank god, a living face. I'm {first}.", "tags": ["optimist"]},
+			{"text": "{first}. Not that names matter much now.", "tags": ["gloomy"]},
+			{"text": "It's me, {first}. Who else would it be.", "tags": ["companion"]}
+		],
+		"warn": [
+			{"text": "That's close enough!"},
+			{"text": "Hands where I can see them!", "tags": ["hostile"]},
+			{"text": "Keep walking. I've got nothing for you.", "tags": ["wary"]},
+			{"text": "Please, just go past. Please.", "tags": ["scared"]}
+		],
+		"want": [
+			{"text": "You want me along? Then I want {want}."},
+			{"text": "Bring me {want} and I'm yours.", "tags": ["want_item"]},
+			{"text": "Cash still talks to me. {want}, and I come with you.", "tags": ["want_money"]},
+			{"text": "{want}. Do that for me and we'll talk.", "tags": ["want_favour"]},
+			{"text": "I just want {want}. Somewhere I can sleep.", "tags": ["want_place"]},
+			{"text": "Everything has a price. Mine's {want}.", "tags": ["want_money", "greedy"]},
+			{"text": "I'll come. I'd rather not be alone anymore.", "tags": ["companion"]}
+		],
+		"place": [
+			{"text": "{zone}? Quiet in the day. Don't trust the nights."},
+			{"text": "I came through {zone} on foot. The dead sit in the houses.", "tags": ["out_there"]},
+			{"text": "The church still had food last week. Maybe.", "tags": ["pious"]},
+			{"text": "Every place is the same now. Empty or full of them.", "tags": ["gloomy"]}
+		],
+		"trade": [
+			{"text": "Trade? Later. Nobody's set prices yet."},
+			{"text": "I'll trade when you've got something worth it.", "tags": ["greedy"]}
+		],
+		"recruit_yes": [
+			{"text": "Alright. I'm with you."},
+			{"text": "Deal. Don't make me regret it.", "tags": ["cocky"]},
+			{"text": "Thank you. Thank you. I'll pull my weight.", "tags": ["scared"]},
+			{"text": "Good. Let's get moving.", "tags": ["hard_worker"]}
+		],
+		"recruit_no": [
+			{"text": "Not yet. You know what I want."},
+			{"text": "Come back with {want}. Then we'll talk.", "tags": ["want_item"]},
+			{"text": "That's not {want}. Try again.", "tags": ["want_money"]},
+			{"text": "You haven't done it yet. I'd know.", "tags": ["want_favour"]},
+			{"text": "Where would I even sleep? Find a place first.", "tags": ["want_place"]},
+			{"text": "Not with you. Not after that.", "tags": ["grudge"]}
+		],
+		"gift": [
+			{"text": "For me? Thanks."},
+			{"text": "Huh. Didn't expect that.", "tags": ["cocky"]},
+			{"text": "God bless you.", "tags": ["pious"]}
+		],
+		"threaten_fold": [
+			{"text": "Okay, okay! Don't hurt me!"},
+			{"text": "Please! Take what you want!", "tags": ["scared"]}
+		],
+		"threaten_draw": [
+			{"text": "Try it. See what happens."},
+			{"text": "You picked the wrong one.", "tags": ["cocky"]}
+		],
+		"threaten_calm": [
+			{"text": "Put that down. Nobody needs to die today."}
+		],
+		"how_are_you": [
+			{"text": "I'm alright."},
+			{"text": "Good, actually. Feels like we've got a chance.", "tags": ["mood_high"]},
+			{"text": "Getting by.", "tags": ["mood_ok"]},
+			{"text": "Not great. I keep thinking about before.", "tags": ["mood_low"]},
+			{"text": "I can't do this much longer.", "tags": ["mood_broken"]},
+			{"text": "I'm starving, honestly.", "tags": ["hungry"]},
+			{"text": "Cold. So cold.", "tags": ["cold"]}
+		],
+		"think": [
+			{"text": "We're doing alright. Keep it quiet and keep moving."},
+			{"text": "We should push harder. They're slow.", "tags": ["cocky"]},
+			{"text": "We take too many chances.", "tags": ["timid"]},
+			{"text": "I trust you. Mostly.", "tags": ["loyal"]}
+		],
+		"hungry": [
+			{"text": "I'm out of food. Anyone got a tin?"},
+			{"text": "I need to eat something soon.", "tags": ["mood_low"]}
+		],
+		"thirsty": [
+			{"text": "I need water. I'm all out."}
+		],
+		"ate": [
+			{"text": "Eating something, give me a second."}
+		],
+		"spotted_dead": [
+			{"text": "Dead, close!"},
+			{"text": "One of them, there!", "tags": ["calm"]},
+			{"text": "Oh god, they're here!", "tags": ["scared"]}
+		],
+		"took_item": [
+			{"text": "Got {item}."},
+			{"text": "Mine now: {item}.", "tags": ["greedy"]}
+		],
+		"plan_dusk": [
+			{"text": "We should find somewhere before dark."},
+			{"text": "Getting dark. Let's get walls around us.", "tags": ["timid"]}
+		],
+		"plan_horde": [
+			{"text": "There's a horde out there. We need to go quiet."},
+			{"text": "That's a lot of them. Let's not be here.", "tags": ["scared"]}
+		],
+		"plan_idle": [
+			{"text": "I know a clinic two towns over. Might be worth it."},
+			{"text": "That smoke earlier. Could be a camp."},
+			{"text": "We need more water before tomorrow."}
+		],
+		"refuse_order": [
+			{"text": "No. Not in there. That's a horde."},
+			{"text": "You go if you want. I'm not walking into that.", "tags": ["cocky"]},
+			{"text": "I can't. I'm sorry, I can't.", "tags": ["scared"]},
+			{"text": "No. Not today.", "tags": ["mood_broken"]}
+		],
+		"refuse_again": [
+			{"text": "I said no."},
+			{"text": "Ask me a hundred times. Still no.", "tags": ["fickle"]}
+		],
+		"obey_grudging": [
+			{"text": "Fine. Fine! I'm going."},
+			{"text": "If you say so. I'm with you.", "tags": ["loyal"]}
+		],
+		"grief": [
+			{"text": "They didn't deserve that."},
+			{"text": "We should bury them. We owe them that."},
+			{"text": "I can't look at it.", "tags": ["squeamish"]}
+		],
+		"bury_thanks": [
+			{"text": "Thank you. They'd have wanted that."},
+			{"text": "Rest now.", "tags": ["pious"]}
+		],
+		"put_down": [
+			{"text": "That wasn't them anymore. It wasn't."}
+		],
+		"newcomer": [
+			{"text": "Who are you? Where's the one who led us?"},
+			{"text": "New face. We'll see.", "tags": ["cocky"]}
+		],
+		"take_over": [
+			{"text": "Then I'll lead. Follow me."}
+		],
+		"break_crying": [{"text": "I can't. I just need a minute. I can't."}],
+		"break_rage": [{"text": "I'm sick of this! Sick of all of it!"}],
+		"break_binge": [{"text": "Leave me alone. I'm having this."}],
+		"break_hiding": [{"text": "I'm not going out there. Not today."}],
+		"break_desertion": [{"text": "I'm done. Don't come after me."}],
+		"break_refusal": [{"text": "Don't ask me anything. I won't."}],
+		"favour_done": [
+			{"text": "You did it? Then I keep my word."}
+		],
+		"favour_marked": [
+			{"text": "I marked it on your map. Don't take forever."}
+		]
+	}
+}

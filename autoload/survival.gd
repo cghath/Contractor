@@ -187,6 +187,7 @@ func server_save() -> void:
 	if level is SurvivalLevel:
 		for s: Soldier in MapNodes.players(level):
 			_store_survivor(s)
+		_store_people(level)
 		GameState.save_zone()
 	Campaign.save_campaign()
 
@@ -353,6 +354,21 @@ func server_player_died(s: Soldier) -> void:
 	if not s.is_ai():
 		s._client_message.rpc_id(s.owner_peer(), "%s is dead. You are %s now." % [old_name, String(fresh.name)])
 	SessionLog.note("survival: %s died at (%.0f, %.0f); %d things left there; %s takes his place (generation %d)" % [old_name, at.x, at.z, entries.size(), String(fresh.name), int(fresh.generation)])
+	_people_on_death(s, old_name)
+
+
+## Host: the people's live bodies into their records (SurvivorsLayer, survival_people.md).
+func _store_people(level: Node) -> void:
+	var layer := level.get_node_or_null(^"Survivors") as SurvivorsLayer
+	if layer:
+		layer.server_store_all()
+
+
+## Host: a player's survivor died: his companions grieve; the newcomer is a stranger (SurvivorsLayer).
+func _people_on_death(s: Soldier, old_name: String) -> void:
+	var layer := SurvivorsLayer.find(s)
+	if layer:
+		layer.server_on_player_died(s, old_name)
 
 
 ## The survivor record of `s` in the save ("survivors"[profile]): name, generation, born_day.

@@ -6,8 +6,11 @@
   (claude/survival-metabolism) and the map (claude/survival-map) lanes merged. Survival, map and fallen suites
   PASS (R2631). **Slice build B2632**: B:\Contractoruilds\contractor-2026-10-26-020703-B2632-fallen-slice-a-1c5b622b.
 - **Phase B, 2026-10-26 ~02:55**: the building system (claude/survival-building) and the RPG layer (claude/survival-rpg)
-  MERGED; building + survival + rpg PASS (R2641). The people lane (claude/survival-people) is building; then a
+  MERGED; building + survival + rpg PASS (R2641). The people lane MERGED 2026-10-26 ~03:20 (below); next a
   phase B slice build, then the settlement's work and the council (survival_building.md 5-7) and phase C.
+- **Phase B people built on `claude/survival-people`** (survival_people.md sections 1-6 and 8: the Person
+  record, moods and breaks, lone survivors, hiring by wants, companions with CompanionAI, the talk menu, grief,
+  graves, the rise, the take-over): R2645 FLAKY (fallenpeople PASS, survival flaked once on a melee block check, passed the rerun); see survival_people.md's "Where the build is".
 - Known orange: survival's "the dead's bite winds up" flakes on first runs (R2627/R2629/R2631 rerun passes); the
   check now prints why.
 
