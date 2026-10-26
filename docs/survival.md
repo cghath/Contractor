@@ -113,6 +113,10 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 71 | Integrity | **Real load with cracks and a warning**: load and capacity per block, the ghost coloured by load before placing, cracking ~20 s before a fall; collapses are real voxel destruction and can kill. |
 | 72 | Ownership | **Who holds the place owns it**: no claim markers or locked ground; a group that drives you out takes your builds and you can take theirs; locks with keys or codes keep strangers out. |
 | 73 | Wear | **Slow wear, a maintenance job fixes it**: roofless wood rots in ~20 wet days, salt rust ~30 days, a weak roof fails under one heavy snow; a settler on the maintain job repairs from stock, or you do. |
+| 74 | Relationships | **Friendships, grudges and families, AND romance and new families**: friendships and grudges from time, fights, slights and gifts; families as met vote and grieve together; couples form over time (moodlets, a shared bunk, jealousy, breakups); children can be born in a long world and need care for years of world time. |
+| 75 | Mood breaks | **The full set, rare, trait-driven**: crying fit, rage, binge, hiding, desertion, refusal; needs mood under 20 for hours and rolls by traits; desertion takes some kit and makes a lone survivor with or without a grudge. |
+| 76 | Voice | **TTS lines by tags (chatty when safe, quiet when sneaking) with subtitles until recorded; a bigger, better TTS model will replace the current one** (the game can afford more RAM). |
+| 77 | Companion death | **Body and kit stay, grief until buried or burned (a burial mechanic), AND a companion killed by the dead rises** as a zombie in their kit; putting them down is its own moodlet; a group or the dead may reach the kit first. Emergent and dynamic. |
 
 ## Already in the code to build on
 
