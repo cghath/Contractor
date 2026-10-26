@@ -74,6 +74,8 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		out.append(talk.call("how", "How are you?", {}, ""))
 		out.append(talk.call("take_along", "Take along", {}, ""))
 		out.append(talk.call("who", "Who are you?", {}, InteractionMenu.MORE))
+		out.append(_gift_entry(actor, target, talk))  # bonds (call 74)
+		out.append(talk.call("settle_it", "Settle it (a feud)", {}, InteractionMenu.MORE))
 	elif menu_kind == KIND:
 		out.append(talk.call("who", "Who are you?", {}, ""))
 		out.append(talk.call("want", "What do you want?", {}, ""))
@@ -104,6 +106,8 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 				out.append(talk.call("no_words", "Not now", {}, InteractionMenu.MORE))
 			out.append(talk.call("think", "What do you think?", {}, InteractionMenu.MORE))
 			out.append(talk.call("settle", "Make a settler", {}, InteractionMenu.MORE))
+			out.append(_gift_entry(actor, target, talk))  # bonds (call 74)
+			out.append(talk.call("settle_it", "Settle it (a feud)", {}, InteractionMenu.MORE))
 	elif menu_kind == InteractionMenu.DEAD and Masking.is_dead_one(target):
 		out.append(talk.call("smear", "Smear its gore on you", {}, ""))  # (phase D masking: Masking)
 	elif menu_kind == InteractionMenu.DEAD:
@@ -116,6 +120,22 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 					cut.disabled = "You need a knife or a blade"
 				out.append(cut)
 	return out
+
+
+## The bond-aware "Gift" submenu (call 74): what `actor` has stowed, each a "gift" talk action.
+static func _gift_entry(actor: Soldier, target: Node, talk: Callable) -> Dictionary:
+	var gift := {"id": &"talk_gift", "label": "Gift", "target": target, "disabled": "", "items": [] as Array[Dictionary]}
+	for c: StringName in actor.inventory.search_containers():
+		var list: Array = actor.inventory.containers[c]
+		for i in list.size():
+			if (gift.items as Array).size() >= InteractionMenu.MAX_GIVE_ENTRIES:
+				break
+			var item := ItemDB.get_item(StringName(list[i].id))
+			if item:
+				(gift.items as Array).append(talk.call("gift", item.name, {"container": String(c), "index": i}, ""))
+	if (gift.items as Array).is_empty():
+		gift.disabled = "Nothing stowed to give"
+	return gift
 
 
 # --- Lines (host) ------------------------------------------------------------------------------
@@ -221,7 +241,7 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 	var extra := {}
 	if action in ["words", "no_words"]:  # (call 129: Faith's rite at a grave)
 		return Faith.server_words(layer, actor, rec, action == "words")
-	if Children.is_child_rec(rec) and action in ["recruit", "threaten", "trade", "take_along", "settle", "talk_down"]:
+	if Children.is_child_rec(rec) and action in ["recruit", "threaten", "trade", "take_along", "settle", "talk_down", "settle_it"]:
 		return ""  # (call 128: a child is never a companion, never threatened)
 	match action:
 		"come":  # an orphan comes along: a settler (call 128)
@@ -291,6 +311,30 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 			SurvivorPerson.change_opinion(rec, profile, GIFT_OPINION)
 			Moods.add(rec, "gift")
 			topic = "gift"
+		"gift":  # a companion or a settler (call 74: the bond with you)
+			if not String(rec.get("status", "")) in ["companion", "settler"]:
+				return ""
+			var gc := StringName(String(arg.get("container", "")))
+			var gi := int(arg.get("index", -1))
+			var glist: Array = actor.inventory.containers.get(gc, [])
+			if gi < 0 or gi >= glist.size():
+				return ""
+			var gitem := ItemDB.get_item(StringName(String(glist[gi].id)))
+			if Children.give_refused(rec, gitem):
+				var gno := line_for(rec, "child_no_weapon")
+				layer.say(target, gno)
+				return gno
+			var gentry: Dictionary = actor.inventory.remove_entry(gc, gi, 1)
+			if gentry.is_empty():
+				return ""
+			if target.inventory.take(StringName(gentry.id), 1, gentry.get("state", {})) < 1:
+				(rec.kit as Array).append({"id": String(gentry.id), "count": 1, "state": gentry.get("state", {})})
+			Relationships.on_gift(rec, profile, gitem)
+			topic = "gift"
+		"settle_it":  # mediate a feud (call 74)
+			var said_s := Relationships.server_mediate(actor, rec)
+			layer.say(target, said_s)
+			return said_s
 		"threaten":
 			SurvivorPerson.change_opinion(rec, profile, THREAT_OPINION)
 			Moods.add(rec, "threatened")
@@ -315,6 +359,8 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		"think":
 			topic = "think"
 		"talk_down":
+			if Relationships.free_talk(rec, profile):
+				rec.erase("talk_down_until")  # a close bond talks you down any time (call 74)
 			var busy := Nerve.server_talk_down(actor, rec) != ""
 			var said_n := Nerve.talk_line(rec, busy)
 			layer.say(target, said_n)

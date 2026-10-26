@@ -34,6 +34,8 @@ static func recipe(id: String) -> Dictionary:
 ## The stations `s` has at hand: "hands" always, "fire" with one within FIRE_M.
 static func stations_of(s: Soldier) -> Array:
 	var out := ["hands"]
+	if Gunsmith.near_bench(s):
+		out.append(Gunsmith.BENCH)  # the gunsmith bench (call 85)
 	var level := CompoundLevel.current(s)
 	if level and level.items:
 		for node in level.items.get_children():
@@ -114,6 +116,7 @@ static func _finish(s: Soldier, id: String) -> bool:
 	var state: Dictionary = (r.get("output_state", {}) as Dictionary).duplicate(true)
 	if bool(r.get("treat_water", false)):
 		state = Needs.treat_water(state)  # boiled: clean water (Needs)
+	state = Gunsmith.crafted_state(s, r, state)  # a made gun's quality, hand-loads (call 85)
 	var made := s.inventory.take(StringName(out[0]), int(out[1]), state)
 	if made < int(out[1]):
 		var level := CompoundLevel.current(s)

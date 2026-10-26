@@ -190,7 +190,7 @@ static func beds() -> int:
 
 
 static func free_beds() -> int:
-	return maxi(0, beds() - settlers().size())
+	return maxi(0, beds() - Relationships.beds_used(settlers()))  # (a couple shares a bunk: call 74)
 
 
 ## The size cap (call 28): beds, the food in stock for FOOD_DAYS, at most SIZE_MAX.
@@ -207,7 +207,7 @@ static func place_problem() -> String:
 ## Whether settler `rec` has a bed (the first `beds()` settlers to come do).
 static func has_bed(rec: Dictionary) -> bool:
 	var list := settlers()
-	var i := list.find(rec)
+	var i := Relationships.bed_slot(rec, list)  # (a couple shares a bunk: call 74)
 	return i >= 0 and i < beds()
 
 
@@ -578,6 +578,8 @@ func refresh() -> void:
 	d["lamps"] = int(counts.get("lamp", 0))
 	d["altars"] = int(counts.get("altar", 0))  # the chapel (Faith, call 129)
 	d["chapel_benches"] = int(counts.get("chapel_bench", 0))
+	d["gun_benches"] = int(counts.get(Gunsmith.BENCH, 0))  # the gunsmith (call 85)
+	d["gun_racks"] = int(counts.get(Gunsmith.RACK, 0))
 	d["defence_builds"] = snappedf(defence, 0.1)
 	d["store_kinds"] = kinds
 	Infrastructure.server_refresh(self, b)  # (phase D: power, what it runs, the lit lamps)
@@ -754,7 +756,7 @@ func server_hour(hod: int) -> void:
 				Moods.add(rec, "long_watch")
 			_job_moodlet(rec, "guard")
 		elif act == "work":
-			var job := SettlementJobs.work(self, rec, 1.0)
+			var job := Relationships.work(self, rec, 1.0)  # (rivals won't share a shift: call 74)
 			rec["job_now"] = job
 			if job != "idle":
 				_job_moodlet(rec, job)
@@ -771,6 +773,8 @@ func server_hour(hod: int) -> void:
 	Infrastructure.server_hour(self, hod)  # (phase D: batteries, a lit settlement's pull)
 	Children.settlement_hour(self, hod)  # the children's care (call 128)
 	Faith.settlement_hour(self, hod)  # grace, the vigil, the cultists' rites (call 129)
+	Relationships.settlement_hour(self, hod)  # bonds at home: shifts, arguments, brawls (call 74)
+	Gunsmith.settlement_hour(self, hod)  # the gunsmith's order, worked overnight (call 85)
 
 
 ## A meal (at a meal hour under EAT_BELOW, any hour under HUNGRY) and a drink from the stock:
@@ -939,6 +943,8 @@ func server_action(peer: int, action: String, args: Array) -> String:
 		"order_add":
 			if args.size() < 2:
 				return "Bad order"
+			if String(args[0]) == Gunsmith.ORDER:  # (call 85: the gunsmith's overnight order)
+				return Gunsmith.server_set_order(int(args[1]) > 0)
 			var o := WorkOrders.server_add(String(args[0]), int(args[1]), int(args[2]) if args.size() > 2 else 3, args[3] if args.size() > 3 and args[3] is Dictionary else {})
 			return "" if not o.is_empty() else "Can't order that"
 		"order_remove":

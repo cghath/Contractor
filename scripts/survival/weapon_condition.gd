@@ -85,7 +85,9 @@ static func server_blocked(s: Soldier, slot: StringName, weapon: ItemData) -> bo
 	if jammed(st):
 		_nag(s, "Jammed: R to clear it")
 		return true
-	if is_broken(st):
+	if improvised(weapon) and Gunsmith.server_improvised(s, slot, weapon, st):
+		return true  # a misfire (the round lost), or at 0% it blew (call 85: Gunsmith)
+	if is_broken(st) and not improvised(weapon):  # (a crude gun at 0% still goes bang, until it blows)
 		_nag(s, "It's broken: it needs a gun repair kit")
 		return true
 	if Wear.roll() < jam_chance(Wear.cond(st), weapon, bool(st.get("wet", false))):
@@ -119,6 +121,7 @@ static func on_shot(s: Soldier, slot: StringName, weapon: ItemData) -> void:
 		return
 	var st := Wear.slot_state_rw(s.inventory, slot)
 	Wear.set_cond(st, Wear.cond(st) - shot_wear(weapon, bool(st.get("wet", false))))
+	Gunsmith.on_shot(s, weapon, st)  # an oil-filter can wears out (call 85)
 
 
 static func shot_wear(weapon: ItemData, wet: bool) -> float:
@@ -356,4 +359,6 @@ static func words(item: ItemData, state: Dictionary) -> String:
 		out.append("%d%%" % roundi(c))
 	if bool(state.get("wet", false)):
 		out.append("wet")
+	if state.has("zeroed"):
+		out.append("zeroed")
 	return ", ".join(out)

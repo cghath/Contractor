@@ -129,6 +129,7 @@ static func people_lines() -> Array:
 		if String(rec.get("status", "")) == "dead":
 			parts.append("dead")
 		out.append("%s (%s): %s" % [who, String(rec.get("background", "?")), "; ".join(parts)])
+	out.append_array(Relationships.people_lines())  # bonds, a line a person (call 74)
 	out.append_array(Legacy.found_lines())  # the dead ones' letters, found on them, in their voice (call 130)
 	out.append_array(Letters.lines(CompoundLevel.current(Survival)))  # the dead's letters, read (call 130)
 	return out

@@ -2,6 +2,12 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Bonds and gunsmithing built on `claude/survival-bonds`** (calls 74, 85): bonds between every pair who spend time
+  together (shifts, danger, saves, arguments by traits, gifts, brawls; friends, rivals, enemies, partners who share a bunk
+  and grieve), rivals refusing shifts and voting apart, the players' bond deciding risky orders, Gift and Settle it in the
+  talk, the People tab; the gunsmith bench and armoury rack, strip and rebuild guns, bench recipes (spares, an oil-filter
+  suppressor, hand-loads, pipe shotgun, slam-fire, crude SMG) with quality by skill, improvised misfires and blow-ups, the
+  overnight gunsmith order; R2700 PASS (bonds, survival, fallenpeople, rpg, wear, weapons, settlement); see docs/survival_bonds.md.
 - **World events, loot states, drop-in co-op and the mod kit built on `claude/survival-events`** (calls 124-127):
   `WorldEvents` (supply drop, convoy, downed helicopter, bells, a burning town's glow, a storm's bridge), `LootStates`
   (picked over, hidden caches with clues, keys and the crowbar, refill where people pass), `CoopFallen` (newcomers at the

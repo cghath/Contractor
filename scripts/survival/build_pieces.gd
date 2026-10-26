@@ -127,12 +127,17 @@ const PIECES := {
 	"chapel_bench": {"name": "Chapel bench", "size": [4, 1, 1], "cost": [[&"planks", 3]], "tool": "hammer", "build_s": 5.0, "hp": 60.0, "solid": true, "look": "frame", "mat": "wood"},
 	"altar": {"name": "Altar", "size": [2, 2, 1], "cost": [[&"planks", 4], [&"candles", 1]], "tool": "hammer", "build_s": 8.0, "hp": 80.0, "solid": true, "look": "full", "mat": "wood"},
 	"grave_marker": {"name": "Grave marker", "size": [1, 2, 1], "cost": [[&"planks", 1]], "tool": "hammer", "build_s": 2.0, "hp": 30.0, "solid": false, "look": "panel", "mat": "wood"},
+	# Gunsmithing (call 85; Gunsmith; Proposed): the gunsmith bench (the bench recipes, stripping and
+	# rebuilding guns, zeroing) and the armoury rack (the gunsmith's overnight work order).
+	"gun_bench": {"name": "Gunsmith bench", "size": [4, 2, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 2], [&"machine_parts", 1]], "tool": "wrench", "build_s": 15.0, "hp": 140.0, "solid": true, "look": "frame", "mat": "scrap"},
+	"gun_rack": {"name": "Armoury rack", "size": [2, 3, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 6.0, "hp": 80.0, "solid": true, "look": "panel", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
 	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
 	"solar_panel", "battery_bank", "wind_turbine", "wiring", "fridge", "electric_fence", "power_tools", "water_pump",
 	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre",
-	"chapel_bench", "altar", "grave_marker"]
+	"chapel_bench", "altar", "grave_marker",
+	"gun_bench", "gun_rack"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"

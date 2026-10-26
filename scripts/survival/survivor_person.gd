@@ -16,7 +16,9 @@ extends RefCounted
 ## disposition (friendly | wary | hostile), zone, pos ([x, y, z]), home, status (STATUSES), and
 ## while dead: died_day, body_pos, killed_by_dead, rise_at, buried. A child (call 128, Children):
 ## child true, age under 16, family / guardian / orphan; status "taken" when the dead took them.
-## A cultist deserter (Faith): cult_deserter, cleansing, cleansed.
+## A cultist deserter (Faith): cult_deserter, cleansing, cleansed. Bonds (Relationships, call 74):
+## relations are kept symmetric there; partner (an id), close_h ({id: hours as close friends}),
+## widowed, carer (a child's), job_h / refused_h (the hour's shift), hurt and "bruises" wounds.
 
 const STATUSES := ["out_there", "companion", "settler", "captive", "dead", "player"]
 ## Traits (call 40): pairs that exclude each other, then singles. Proposed: 2-3 a person.

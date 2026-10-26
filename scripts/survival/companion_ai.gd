@@ -234,6 +234,14 @@ func refuses(order: int, point: Vector3) -> bool:
 	if not broke and not horde_near(point):
 		return false
 	var now := Soldier._now()
+	var lead := lead_profile()
+	if not broke and Relationships.follows_anywhere(rec, lead):
+		return false  # a close bond follows into worse odds (call 74)
+	if Relationships.refuses_risky(rec, lead):
+		_refused_at = now
+		layer.say(body, TalkMenu.line_for(rec, "refuse_order"))
+		SurvivorPerson.note(rec, "refused an order (no trust)")
+		return true  # too little trust for a risky order, loyal or not (call 74)
 	if now - _refused_at <= SECOND_ORDER_S:
 		if SurvivorPerson.is_loyal(rec):
 			_refused_at = -1000.0
@@ -251,6 +259,13 @@ func refuses(order: int, point: Vector3) -> bool:
 		SurvivorPerson.note(rec, "refused an order")
 		return true
 	return false
+
+
+## The profile of the player this companion follows (the squad's lead), else "".
+func lead_profile() -> String:
+	var brain := SquadAI.of(body)
+	var lead: Soldier = brain.squad.leader if brain and brain.squad and is_instance_valid(brain.squad.leader) else null
+	return Survival.profile_of(lead) if lead and not lead.is_ai() else ""
 
 
 ## The chance of saying no to a move into a horde (Proposed): high, less for the loyal and the

@@ -296,6 +296,8 @@ static func _call_global(cls: String, method: String, args: Array) -> Variant:
 ## Host: `s` did `what` on piece `id` (BuildPiece's menu through Builder): the phase D pieces'
 ## own actions. "?" when it isn't one of them.
 static func server_piece_act(b: Builder, s: Soldier, id: int, what: String) -> String:
+	if what.begins_with("gs_"):
+		return Gunsmith.server_bench_act(b, s, id, what)  # the gunsmith bench (call 85)
 	match what:
 		"reset_trap":
 			return Traps.server_reset(b, id)
@@ -308,6 +310,8 @@ static func server_piece_act(b: Builder, s: Soldier, id: int, what: String) -> S
 
 ## The phase D pieces' menu entries for BuildPiece (built pieces): [[id, label, what], ...].
 static func piece_menu(rec: Dictionary) -> Array:
+	if String(rec.get("k", "")) == Gunsmith.BENCH:
+		return Gunsmith.bench_menu(rec)  # the gunsmith bench (call 85)
 	match String(rec.get("k", "")):
 		"bear_trap":
 			return [[&"trap_reset", "Reset the trap", "reset_trap"]] if bool(rec.get("sprung", false)) else []
