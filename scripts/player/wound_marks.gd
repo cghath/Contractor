@@ -161,6 +161,9 @@ var _chunks: Array[Dictionary] = []  # brain on the ground: {"pos", "size", "col
 var _chunk_mesh: MultiMeshInstance3D
 var _stained: Array[BloodStain] = []  # what this body's blood has stained
 var skin: WoundSkin
+## Cosmetic dice (drips, spurts, splashes, smears): its own, never the global RNG the game's
+## real dice may be seeded from.
+var _fx := RandomNumberGenerator.new()
 var _skin_next := 0.0
 var _bruise_seen: Dictionary = {}  # bruise key -> when first seen here (its age)
 var _settle_at := 0  # the next ground cell _settle looks at
@@ -366,8 +369,8 @@ func _beat(spot: Dictionary, delta: float) -> void:
 		for i in SPURT_DROPS:
 			if _drips.size() >= MAX_DRIPS:
 				return
-			var spread := Vector3(randf_range(-0.2, 0.2), randf_range(-0.1, 0.25), randf_range(-0.2, 0.2))
-			_drips.append({"pos": from, "vel": (out + spread).normalized() * SPURT_MPS * strength * randf_range(0.6, 1.0),
+			var spread := Vector3(_fx.randf_range(-0.2, 0.2), _fx.randf_range(-0.1, 0.25), _fx.randf_range(-0.2, 0.2))
+			_drips.append({"pos": from, "vel": (out + spread).normalized() * SPURT_MPS * strength * _fx.randf_range(0.6, 1.0),
 				"floor": floor_y, "speck": true, "y0": from.y})
 
 
@@ -535,7 +538,7 @@ func _process(delta: float) -> void:
 	if total > 0.0:
 		_drip_timer -= delta
 		if _drip_timer <= 0.0:
-			_drip_timer = randf_range(0.6, 1.4) / (total * DRIPS_PER_L_MIN)
+			_drip_timer = _fx.randf_range(0.6, 1.4) / (total * DRIPS_PER_L_MIN)
 			_spawn_drip()
 		_smear_step()
 	else:
@@ -616,7 +619,7 @@ func _spawn_drip() -> void:
 	var bleeding := _spots.values().filter(func(s: Dictionary) -> bool: return s.flow > 0.0)
 	if bleeding.is_empty():
 		return
-	var spot: Dictionary = bleeding[randi() % bleeding.size()]
+	var spot: Dictionary = bleeding[_fx.randi() % bleeding.size()]
 	var bone := model.part_node(spot.part)
 	if bone == null:
 		return
@@ -626,7 +629,7 @@ func _spawn_drip() -> void:
 		return
 	var from: Vector3 = low
 	var floor_y := _floor_below(from) if is_inside_tree() else from.y - 2.5
-	_drips.append({"pos": from, "vel": Vector3(randf_range(-0.05, 0.05), 0.0, randf_range(-0.05, 0.05)), "floor": floor_y, "y0": from.y})
+	_drips.append({"pos": from, "vel": Vector3(_fx.randf_range(-0.05, 0.05), 0.0, _fx.randf_range(-0.05, 0.05)), "floor": floor_y, "y0": from.y})
 
 
 ## A round that went through throws a spray out of the exit: drops that fly on along the
@@ -777,8 +780,8 @@ func _fall_past(d: Dictionary, hit: Dictionary) -> void:
 ## A drop falling far splashes: a few specks round where it landed.
 func _splash(at: Vector3) -> void:
 	for i in SPLASH_SPECKS:
-		var a := randf() * TAU
-		var r := randf_range(0.03, 0.07)
+		var a := _fx.randf() * TAU
+		var r := _fx.randf_range(0.03, 0.07)
 		var p := at + Vector3(cos(a) * r, 0.0, sin(a) * r)
 		var ground: Variant = _ground_at(Vector2i(roundi(p.x / POOL_CELL), roundi(p.z / POOL_CELL)), at.y)
 		if ground != null:
@@ -893,7 +896,7 @@ func _add_pool(at: Vector3, speck := false) -> void:
 			elif is_inside_tree():
 				return  # a spill past an edge stops rather than hang in the air
 			var life: Vector2 = SPECK_LIFE_S if speck else POOL_LIFE_S
-			_pool[cell] = {"y": pos.y, "pos": pos, "n": n, "amount": 0, "until": _now() + randf_range(life.x, life.y)}
+			_pool[cell] = {"y": pos.y, "pos": pos, "n": n, "amount": 0, "until": _now() + _fx.randf_range(life.x, life.y)}
 		if _pool[cell].amount < (1 if speck else 2):
 			_pool[cell].amount += 1
 			if not speck:
@@ -907,7 +910,7 @@ func _add_pool(at: Vector3, speck := false) -> void:
 		for step: Vector2i in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			if Vector2(cell + step - centre).length() >= Vector2(cell - centre).length():
 				outward.append(step)
-		cell += outward[randi() % outward.size()]
+		cell += outward[_fx.randi() % outward.size()]
 
 
 ## Flat on ground whose normal is `n`.
@@ -1246,8 +1249,8 @@ static func _now() -> float:
 func _add_chunk(at: Vector3, size: float, normal := Vector3.UP) -> void:
 	if _chunks.size() >= MAX_CHUNKS:
 		_chunks.pop_front()
-	_chunks.append({"pos": at + normal * size * 0.3, "ground": at, "n": normal, "size": size, "colour": BRAIN_COLOUR if randf() < 0.65 else BRAIN_DARK,
-		"until": _now() + randf_range(CHUNK_LIFE_S.x, CHUNK_LIFE_S.y)})
+	_chunks.append({"pos": at + normal * size * 0.3, "ground": at, "n": normal, "size": size, "colour": BRAIN_COLOUR if _fx.randf() < 0.65 else BRAIN_DARK,
+		"until": _now() + _fx.randf_range(CHUNK_LIFE_S.x, CHUNK_LIFE_S.y)})
 	_redraw_chunks()
 
 
@@ -1310,7 +1313,7 @@ func _add_stain(at: Vector3, normal: Vector3, size: float, brain: bool) -> void:
 	if _stains.size() >= MAX_STAINS:
 		_stains.pop_front()
 	_stains.append({"pos": at + normal * 0.004, "normal": normal, "size": maxf(size * 2.2, CELL),
-		"colour": BRAIN_DARK if brain else FRESH_COLOUR, "until": _now() + randf_range(SPECK_LIFE_S.x, SPECK_LIFE_S.y)})
+		"colour": BRAIN_DARK if brain else FRESH_COLOUR, "until": _now() + _fx.randf_range(SPECK_LIFE_S.x, SPECK_LIFE_S.y)})
 	_redraw_stains()
 
 
@@ -1385,8 +1388,8 @@ func _smear_step() -> void:
 	if g.is_empty():
 		return
 	_smear.append({"pos": g.position, "ground": g.position, "n": g.normal, "dir": move / moved, "length": moved + 0.015,
-		"width": clampf(0.025 + total * 0.03, 0.025, 0.06), "colour": FRESH_COLOUR if randf() < 0.5 else BLOOD_COLOUR,
-		"until": _now() + randf_range(POOL_LIFE_S.x, POOL_LIFE_S.y)})
+		"width": clampf(0.025 + total * 0.03, 0.025, 0.06), "colour": FRESH_COLOUR if _fx.randf() < 0.5 else BLOOD_COLOUR,
+		"until": _now() + _fx.randf_range(POOL_LIFE_S.x, POOL_LIFE_S.y)})
 	_redraw_smear()
 
 
