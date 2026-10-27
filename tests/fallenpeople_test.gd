@@ -626,7 +626,7 @@ func _test_shelter_room() -> void:
 	var zz := Survival.server_spawn_zombie(level, level.ground_point(c + Vector3(-Settlement.radius() * 0.7, 0.0, 0.0)))
 	await _frames(2)
 	if not is_instance_valid(sb) or zz == null or not is_instance_valid(zz):
-		check(false, "the settler and the dead are up")
+		check(false, "the settler and the dead are up (settler %s, zombie %s)" % ["up" if is_instance_valid(sb) else "gone", "none" if zz == null else ("up" if is_instance_valid(zz) else "gone")])
 		return
 	Holding.settlement_tick(layer, Survival.zombies(level))
 	var brain := sb.get_node_or_null(NodePath(PeopleLayer.BRAIN)) as CivilianAI
