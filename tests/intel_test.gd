@@ -80,14 +80,19 @@ func _test_values() -> void:
 	for it: Dictionary in all:
 		var id := String(it.id)
 		var tags: Array = it.get("tags", [])
-		if p.has(id) or tags.any(func(t: String) -> bool: return WorldTrade.TAG_VALUE.has(t)) or Settlement.category_of(id) != "":
+		if tags.any(func(t: String) -> bool: return WorldTrade.TAG_VALUE.has(t)) or Settlement.category_of(id) != "":
 			continue
 		if (WorldTrade.prices().default_by_type as Dictionary).has(String(it.type)):
 			plain = id
 			break
+	# (Every item has a price since 2026-10-27: one is taken off the table for the check, then put back.)
+	var kept: Variant = p.get(plain)
+	p.erase(plain)
 	var by_type: Dictionary = WorldTrade.prices().default_by_type
 	check(plain != "" and is_equal_approx(WorldTrade.value(plain), float(by_type[String(ItemDB.get_item(StringName(plain)).type)])),
 		"an unpriced item goes by its type ($%.0f for %s)" % [WorldTrade.value(plain) if plain != "" else 0.0, plain])
+	if kept != null:
+		p[plain] = kept
 	check(WorldTrade.value("water_bottle", "desert") > WorldTrade.value("water_bottle"), "the region hook: water dearer in the desert ($%.0f vs $%.0f)" % [WorldTrade.value("water_bottle", "desert"), WorldTrade.value("water_bottle")])
 	var cash := WorldTrade.value("cash_roll")
 	check(cash >= 50.0 * (1.0 - WorldTrade.CASH_DRIFT) - 0.01 and cash <= 50.0 * (1.0 + WorldTrade.CASH_DRIFT) + 0.01, "cash is its face, drifted by the seed ($%.2f a roll)" % cash)
