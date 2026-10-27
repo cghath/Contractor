@@ -818,7 +818,7 @@ func _helmet_kit(piece: VoxelArmor, box: AABB) -> void:
 ## side, a double pistol mag pouch in front (its mags showing, as many as he carries for his
 ## sidearm, up to two; only with a sidearm) and a rolled-up dump pouch behind. Small gear.
 const BELT_POUCH := &"pouch_pistol_mag"
-const DUMP_POUCH := Vector3(0.12, 0.07, 0.045)
+const DUMP_POUCH := Vector3(0.13, 0.08, 0.03)
 
 
 func _set_belt() -> void:
@@ -857,9 +857,14 @@ func _set_belt() -> void:
 		pouch.name = "BeltMags"
 		pouch.transform = belt_spot(model.body, Vector3(sx * 0.085, y, -1.0), size, g)
 		_belt.add_child(pouch)
+	# The rolled dump pouch threads under the belt behind (Captain: the belt pouches looked off,
+	# a box standing clear of her seat): its top tucked up behind the belt, its back flat on the
+	# body below it.
 	var dump := Node3D.new()
 	dump.name = "DumpPouch"
-	dump.transform = belt_spot(model.body, Vector3(sx * 0.07, y - 0.03, 1.0), DUMP_POUCH, g)
+	var dump_y := VoxelArt.BELT_Y.x * 0.01 + 0.015 - DUMP_POUCH.y * 0.5
+	var seat := maxf(VoxelArt.torso_reach(model.body, dump_y, true), VoxelArt.torso_reach(model.body, dump_y - DUMP_POUCH.y * 0.4, true)) * g
+	dump.transform = Transform3D(Basis(Vector3.UP, PI), Vector3(sx * 0.06, dump_y, seat + DUMP_POUCH.z * 0.5))
 	dump.add_child(_part_box(DUMP_POUCH, Vector3.ZERO, cloth.darkened(0.1), render_layers))
 	dump.add_child(_part_box(Vector3(0.025, DUMP_POUCH.y + 0.004, 0.005), Vector3(0, 0, -DUMP_POUCH.z * 0.5 - 0.002), cloth.darkened(0.35), render_layers))  # its keeper strap
 	_belt.add_child(dump)
