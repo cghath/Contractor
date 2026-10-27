@@ -572,7 +572,7 @@ func _update_melee() -> void:
 		if _melee:
 			_melee.drop()
 		_melee_input()._update_dodge(Soldier._now())
-		if Input.is_action_just_pressed(&"quick_melee") and weapon != null and not nade_up and not placing:
+		if Input.is_action_just_pressed(&"quick_melee") and weapon != null and not nade_up and not placing 				and not Input.is_action_pressed(&"interact"):  # (on a pad R3 is self-interact while Y is held)
 			body._server_melee.rpc_id(1, "quick")
 	if _melee_input().try_silent_kill():
 		hud.flash("Silent kill")

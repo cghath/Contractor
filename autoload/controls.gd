@@ -136,6 +136,7 @@ const JOY_BUTTONS := {
 	&"interact": [JOY_BUTTON_Y],  # hold: the interaction menu, the right stick picks
 	&"give_up": [JOY_BUTTON_Y],  # downed, hold Y (the interaction menu is shut while down)
 	&"self_interact": [JOY_BUTTON_RIGHT_STICK],  # Y held, click the right stick: yourself
+	&"quick_melee": [JOY_BUTTON_RIGHT_STICK],  # click the right stick (Y not held): the butt shove (survival call 86)
 	&"lean_left": [JOY_BUTTON_LEFT_SHOULDER],
 	&"lean_right": [JOY_BUTTON_RIGHT_SHOULDER],
 	&"sprint": [JOY_BUTTON_LEFT_STICK],
