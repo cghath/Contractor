@@ -8,7 +8,9 @@ extends Node
 ## rumour lies and a scout's is true; groups near the players come live (bodies, the hostile on a
 ## squad of their own) and fold back; the catch-up moves the world within its bound, keeps the
 ## farm and the companions safe and reports it; each goal mode's state and win; two sims from one
-## seed agree; a far tick runs on a worker and lands.
+## seed agree; a far tick runs on a worker and lands; holding or fleeing (call 143): an unarmed far
+## household the dead find relocates and its place is left (signs when the zone is up again), an
+## armed one with a guard holds, a camp that can't hold against a horde relocates instead.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -32,12 +34,14 @@ func _ready() -> void:
 		_test_far_fight()
 		_test_pressure_and_hordes()
 		_test_capture_and_search()
+		_test_holding_sim()
 		_test_rumours()
 		_test_determinism()
 		await _test_live()
 		await _test_threaded_tick()
 		await _test_settlement_demand()
 		_test_catch_up()
+		_test_holding_zone_up()
 		_test_goal_modes()
 	_finish()
 
@@ -319,6 +323,98 @@ func _test_capture_and_search() -> void:
 	check(String(rec.status) == "dead" and m.pressure_of(c) > p0, "fed to the kept dead, the zone's pressure held high (%.0f)" % m.pressure_of(c))
 
 
+func _test_holding_sim() -> void:
+	print("Holding or fleeing, far (call 143)")
+	var m := _iso(31)
+	var z := _zone(m, 2)
+	var pl: Dictionary = m.zone(z).places[0]
+	var at := WorldModel._place_v(pl)
+	# An unarmed household of three found by the dead: they run, the place is left.
+	var fam: Array = []
+	for i in 3:
+		var r := m.new_person(m.rng_for("hh%d" % i), z, at + Vector2(i * 1.5, 0.0), {"child": true, "age": 8} if i == 2 else {})
+		r.status = "out_there"
+		r["family"] = "simfam"
+		r.kit = [{"id": "beans_tin", "count": 1}]
+		m.lone_group(r)
+		fam.append(r)
+	(fam[0] as Dictionary)["dead_find_test"] = true
+	Holding.sim_tick(m)
+	var ab: Dictionary = (m.w.get(Holding.KEY, {}) as Dictionary)
+	var e: Dictionary = ab.values()[0] if ab.size() == 1 else {}
+	var gone := fam.filter(func(r: Dictionary) -> bool: return String(r.status) == "out_there")
+	check(not e.is_empty() and String(e.zone) == z and String(e.state) == "abandoned" and not bool(e.signs), "an unarmed household found by the dead leaves its place (%s)" % String(e.get("text", "")))
+	check(gone.size() >= 2 and gone.all(func(r: Dictionary) -> bool: return String(r.get("refugee_from", "")) == String(e.get("key", "")) and (String(r.zone) != z or Vector2(float(r.pos[0]), float(r.pos[2])).distance_to(at) >= Holding.SAFE_FROM_M - 5.0)),
+		"they relocate, the child with them (to %s)" % String(e.get("where", "")))
+	check(Children.is_child_rec(fam[2]) and String((fam[2] as Dictionary).status) == "out_there", "the child is never the one caught")
+	check((m.w.events as Array).any(func(ev: Dictionary) -> bool: return String(ev.kind) == "abandoned" and String(ev.zone) == z) and not (m.zone(z).traces as Array).is_empty(),
+		"an event for the rumours, and the place keeps the traces (%s)" % String((m.zone(z).traces as Array)[-1].get("text", "")) if not (m.zone(z).traces as Array).is_empty() else "")
+	# An armed household with a guard holds.
+	var z2 := _zone(m, 2, [z])
+	var at2 := WorldModel._place_v(m.zone(z2).places[0])
+	var held: Array = []
+	for i in 2:
+		var r := m.new_person(m.rng_for("arm%d" % i), z2, at2 + Vector2(i * 1.5, 0.0))
+		r.status = "out_there"
+		r["family"] = "armfam"
+		r.kit = [{"id": "akm", "count": 1}] if i == 0 else [{"id": "beans_tin", "count": 1}]
+		if i == 0:
+			r["guard"] = true
+		m.lone_group(r)
+		held.append(r)
+	(held[0] as Dictionary)["dead_find_test"] = true
+	var n0 := ab.size()
+	Holding.sim_tick(m)
+	check(held.all(func(r: Dictionary) -> bool: return String(r.zone) == z2 and not r.has("refugee_from")) and (m.w.get(Holding.KEY, {}) as Dictionary).size() == n0,
+		"an armed household with a guard holds (strength %.1f against %.1f)" % [Holding.household_strength(held), Holding.SIM_STRAY_N * Holding.WALKER_THREAT])
+	# A settlers' camp a horde falls on, that can't hold it: they relocate instead of fighting it out.
+	var z3 := _zone(m, 2, [z, z2])
+	var pl3: Dictionary = m.zone(z3).places[0]
+	var s := _grp(m, "settlers", z3, 4, {"food": 10.0, "water": 10.0, "ammo": 0.0})
+	m.set_home(s, z3, pl3)
+	m.zone(z3).horde = {"n": 40, "since": m.tick()}
+	var size0 := WorldGroup.size(s)
+	WorldFights.horde_fight(m, s, z3)
+	check(String((s.goal as Dictionary).get("kind", "")) == "relocate" and (s.home as Dictionary).is_empty() and String(pl3.holder) == "" and pl3.has("abandoned"),
+		"a camp that can't hold against the horde is left: the group relocates to %s" % String((s.goal as Dictionary).get("zone", "")))
+	check(WorldGroup.size(s) >= size0 - 1 and (m.w.events as Array).any(func(ev: Dictionary) -> bool: return String(ev.kind) == "abandoned" and String(s.id) in (ev.groups as Array)),
+		"no fight to the end (%d of %d got away)" % [WorldGroup.size(s), size0])
+	WorldGoals.decide(m, s)
+	check(String((s.goal as Dictionary).get("kind", "")) == "relocate", "and they keep going (no second thoughts on the road)")
+	var to := String((s.goal as Dictionary).get("zone", ""))
+	_act_until_done(m, s, 40)
+	check(String(s.zone) == to and (m.w.events as Array).any(func(ev: Dictionary) -> bool: return String(ev.kind) == "relocated" and String(s.id) in (ev.groups as Array)),
+		"they come to %s%s" % [to, " and make camp" if not (s.home as Dictionary).is_empty() else ""])
+
+
+## The hosted zone's household the catch-up sent running: the zone loaded again shows the signs.
+func _test_holding_zone_up() -> void:
+	print("A household left while you were away (call 143)")
+	var layer := SurvivorsLayer.find(level)
+	check(layer != null and layer._started, "the zone's people layer is up")
+	if layer == null:
+		return
+	var zone := String(Survival.state().zone)
+	var p0 := level.ground_point(player.global_position + Vector3(160.0, 0.0, 120.0))
+	var a := layer.server_add_person(p0, {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "away_fam", "kit": []})
+	var b := layer.server_add_person(level.ground_point(p0 + Vector3(1.5, 0.0, 0.0)), {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "away_fam", "kit": []})
+	check(layer.body_of(String(a.id)) == null, "far from the player: records only")
+	a["dead_find_test"] = true
+	WorldSim.server_catch_up(1.0)
+	var key := String(a.get("refugee_from", b.get("refugee_from", "")))
+	var e := Holding.entry(key)
+	check(key != "" and String(e.get("zone", "")) == zone and String(e.get("state", "")) == "abandoned" and not bool(e.get("signs", true)),
+		"while you were away the dead found the unarmed household; they left (%s)" % String(e.get("text", "")))
+	var journal0 := (Survival.state().get("journal", []) as Array).size()
+	var n := Holding.server_zone_up(layer)
+	e = Holding.entry(key)
+	var lines := (Survival.state().get("journal", []) as Array).slice(journal0).map(func(j: Dictionary) -> String: return String(j.get("text", "")))
+	check(n >= 1 and bool(e.get("signs", false)) and "handwritten_note" in (e.get("left", []) as Array) and lines.any(func(t: String) -> bool: return t.contains("door stood open")),
+		"the zone up again: an empty place with signs of a hasty exit (%s)" % str(e.get("left", [])))
+	check(not [a, b].any(func(r: Dictionary) -> bool: return String(r.status) == "out_there" and String(r.zone) == zone and SurvivorPerson.pos_of(r).distance_to(p0) < 10.0),
+		"and nobody fought it out at home")
+
+
 func _test_rumours() -> void:
 	print("Rumours")
 	var m := _iso(19)
@@ -472,6 +568,10 @@ func _test_catch_up() -> void:
 	k.goal = {"kind": "raid", "zone": start, "place": "safehouse", "target": "player", "phase": "go", "since": 0, "work": 0}
 	WorldSim.people()["test_comp"] = {"id": "test_comp", "name": "Test Companion", "status": "companion", "zone": near, "pos": [0.0, 0.0, 0.0]}
 	var t0 := float(w.get("t", 0.0))
+	var ev0 := int(w.get("next_event", 0))
+	var lone := WorldSim.model().new_lone(start, Vector2(300.0, 300.0), RandomNumberGenerator.new(), "test")  # (something surely happens near the farm: the dead find a household there, call 143)
+	(WorldSim.people().get(String(lone.leader), {}) as Dictionary)["dead_find_test"] = true
+	(WorldSim.people().get(String(lone.leader), {}) as Dictionary)["kit"] = []
 	var day0 := Survival.day() + Survival.hour() / 24.0
 	var hours := WorldSim.server_catch_up(60.0)
 	w = WorldSim.section()
@@ -479,7 +579,12 @@ func _test_catch_up() -> void:
 	check(float(w.t) - t0 <= WorldSim.CATCH_UP_DAYS + 0.01 and float(w.t) - t0 >= WorldSim.CATCH_UP_DAYS - 0.02, "the world moved %.2f days" % (float(w.t) - t0))
 	check(Survival.day() + Survival.hour() / 24.0 > day0 + 1.9, "and the clock with it (day %d)" % Survival.day())
 	var report: Dictionary = w.get("away_report", {})
-	check(not (report.get("lines", []) as Array).is_empty(), "the report lists what happened near the farm: %s" % "; ".join(report.get("lines", [])))
+	var kinds := {}
+	for ev: Dictionary in w.get("events", []):
+		if int(ev.id) > ev0:
+			var ek := "%s%s" % [String(ev.kind), "*" if WorldSim.is_near(ev) else ""]
+			kinds[ek] = int(kinds.get(ek, 0)) + 1
+	check(not (report.get("lines", []) as Array).is_empty(), "the report lists what happened near the farm: %s (events: %s)" % ["; ".join(report.get("lines", [])), str(kinds)])
 	var journal: Array = Survival.state().get("journal", [])
 	check(journal.any(func(j: Dictionary) -> bool: return String(j.text).begins_with("While you were away")), "in the journal")
 	var raided := (w.events as Array).any(func(e: Dictionary) -> bool: return String(e.kind) == "raid" and "player" in (e.groups as Array))

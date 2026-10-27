@@ -377,6 +377,7 @@ func step(at: float) -> void:
 	sync_lone()
 	for z: String in _sorted(w.zones.keys()):
 		_zone_tick(z)
+	Holding.sim_tick(self)  # the dead at far households' doors: held, or left (call 143)
 	var t1 := Time.get_ticks_usec()
 	var t_decide := 0
 	for gid: String in _sorted(w.groups.keys()):

@@ -172,9 +172,9 @@ func _planning(view: Dictionary) -> void:
 
 func _council(view: Dictionary) -> void:
 	var votes: Array = view.get("votes", [])
-	if votes.is_empty():
-		return
 	var sec := UiKit.section("The council", _box)
+	sec.add_child(UiKit.button_row([UiKit.button("Abandon the farm", func() -> void: _act("abandon", []),
+		"Put it to the council: leave the farm to the dead and run (call 143)")]))
 	for v: Dictionary in votes:
 		var id := int(v.id)
 		sec.add_child(UiKit.text(String((v.question as Dictionary).get("text", "A question"))))

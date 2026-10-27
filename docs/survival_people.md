@@ -179,6 +179,57 @@ The council and leader challenge are in survival_building.md §7. People-side ru
 - **Relations with other settlements**: alliance (trade, warnings, a shared defence call),
   feud (raids, refusals), protection (you guard them for a share).
 
+## Holding or fleeing (call 143, branch claude/survival-flee)
+
+The Captain (2026-10-26): "NPCs should flee if zombies are attacking their area/settlement and they don't have
+weapons and have no guard etc. So the 3 person farmstead near my spawn should have seen all of its people leave since
+they had no weapons." Built in `Holding` (scripts/survival/holding.gd); every number Proposed.
+
+- **The judgement** (`Holding.judge`): a place's strength against its threat. Strength: an adult with a gun 1, melee
+  only 0.5, unarmed 0.2, a child 0; a guard (an armed adult with `guard` set; at the settlement a guard on watch) +1; a
+  world place's and group's defence x2; the settlement's defence builds 0.05 a point. Threat: 0.3 a head of the dead
+  within 30 m of home or of one of them (15 m for one idling past; never one lying up in a nest), a horde's crowd heads
+  the same. The threat outweighs them: the place breaks.
+- **A household** (`Holding.household_key`): who lives together: a `household` id, else a family (Children's
+  `family`), else a couple (Relationships' `partner`), else one alone. Children alone are Children's own running.
+- **Live** (`Holding.server_tick`, every SurvivorsLayer tick): a broken household runs. The unarmed and anyone whose
+  nerve breaks (nerve under 35 after the shake, courage under 25, timid) go at once; the armed cover the retreat 15 s
+  and follow. They take food and water, shout ("They're coming over the fence! Run!"; the cover: "Go! I'll hold them
+  here!") and run onto the nearest road (within 60 m, not toward the dead) and on to the nearest safe place they know
+  that isn't toward the dead or overrun: another household's home (60 m+), a world group's camp, the players' farm, the
+  edge of a village or town; else a crossing out of the zone (200 m worse than a place). The dead near them go after
+  the slowest (the oldest, the hurt). Arrived (or after 150 s running, where they are) they live there as refugees
+  (`refugee_from`); out of the zone they're lone survivors in the next one. Caught, they die or are bitten as before.
+- **The place left** (`Holding.places()`, in the world section under "abandoned"): things dropped in the hurry (2-4 of
+  tins, water, candles, matches) and a note ("They came over the fence and we couldn't hold it..."), the door open, a map
+  mark ("Abandoned: the Halvorsens"), a journal line ("The Halvorsens left their farm to the dead.") and a world event
+  ("abandoned") for the rumours. It's lootable; its people can reclaim it. Nothing is dropped inside the players' farm
+  (its settlers would haul it off).
+- **Live world camps** (WorldLive): a settlers' or scavengers' camp in the hosted zone judged by its bodies; broken,
+  the group relocates (as in the sim) and its people run for the crossing toward where it goes.
+- **The sim** (`Holding.sim_tick` from `WorldModel.step`, off the hosted zone and through the catch-up): the dead find a
+  far household 0.2 times a day at full density (x(1 + pressure/50); +1.5 a day with a horde in the zone): a stray pack
+  of 3, or a horde's heads up to 20. An unarmed household always runs (to another household's home 60 m+ off in the
+  zone, else a place in the quietest neighbouring zone), the slowest caught 15% of the time (never a child); an armed
+  one strong enough holds. A world group whose home a horde falls on runs instead of fighting it out when it can't
+  hold (`WorldFights.horde_fight` -> `Holding.group_holds`: the fight's own sums; no guns and no ammo never holds): its
+  home cleared and marked abandoned, 30% of its supplies left, goal "relocate" to the quietest neighbour, a new camp
+  there. The zone loaded again (`Holding.server_zone_up`): the people the sim moved there grounded, the places left
+  there get their signs and a journal line ("... The door stood open, things dropped in a hurry, a note.").
+- **The players' settlement** (`Holding.settlement_tick`): the dead within its radius + 20 m: unarmed settlers hide 3 m
+  behind a guard on shift or a player at home, else go to the shelter (a "shelter"/"safe_room" piece or a floor hatch,
+  else the farmhouse), never past 80% of the radius; the armed stand. Can't hold: a journal line once ("Everyone to
+  shelter!"). "Abandon the farm" (the settlement screen's council) puts it to a vote; carried, every settler runs as a
+  refugee of the farm and comes back (a settler again) when it's clear.
+- **Coming back** (`Holding.server_hour`, every world hour): a place clear of the dead (in the hosted zone: none within
+  45 m, the players cleared it or they wandered off; elsewhere: no horde and the zone's pressure under 30) for 1.5 days
+  gets its refugees back home ("The Halvorsens went back to their farm."). "It's clear now" (talk, on a refugee): true,
+  they go now and think 12 better of you; not, "That's not what I saw."
+- **Left out**: lone survivors' bodies are CivilianAI and never fight (holding means staying and hiding at home); the
+  doors are open doorways in the buildings (no door to leave open); a refugee household joining the household it ran to;
+  world groups taking refugees in as members; the players reclaiming an abandoned place as their own; a new "shelter"
+  build piece (the hook reads one when the building lane adds it).
+
 ## 10. Performance
 
 Moods tick per world hour per person, not per frame; the people list is read from the records.
