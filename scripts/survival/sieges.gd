@@ -241,7 +241,7 @@ func _siege_tick() -> void:
 	var sg := siege()
 	var night := DayNight.night_of(Survival.hour()) > 0.5
 	if sg.is_empty() or bool(sg.get("over", false)):
-		if night and Survival.pressure(level) >= SIEGE_AT and Survival.day() - int(sg.get("day", -99)) >= SIEGE_GAP_DAYS:
+		if night and FirstHour.horde_allowed() and Survival.pressure(level) >= SIEGE_AT and Survival.day() - int(sg.get("day", -99)) >= SIEGE_GAP_DAYS:
 			var p: Variant = Survival.pressure_point(level)
 			if p is Vector3 and (p as Vector3).distance_to(Settlement.pos()) <= SIEGE_NEAR_M:
 				server_start_siege()

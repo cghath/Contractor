@@ -529,6 +529,7 @@ func _test_stealth() -> void:
 	player.noise_at = -100.0
 	player.velocity = fwd * 4.0
 	player.movement.is_sprinting = true
+	player._noise_sent = -100.0  # (the ring's quarter-second gate: his own idle steps on the farm's ground may just have sent one)
 	Survival._footsteps(level)
 	check(is_equal_approx(player.noise_radius, Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player)), "a sprinting man's steps carry %.0f m in his clothes (%.0f)" % [Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player), player.noise_radius])
 	player.movement.is_sprinting = false
@@ -562,7 +563,11 @@ func _test_crowd_and_pressure() -> void:
 	var fwd := -player.global_basis.z
 	fwd.y = 0.0
 	fwd = fwd.normalized()
-	# Pressure: quiet, then shots raise it at the place; it decays with the hours.
+	# Pressure: quiet, then shots raise it at the place; it decays with the hours. (The raw mechanic,
+	# on a day after the first night: the first hour's density and noise rules are firsthour's.)
+	Survival.legacy_spawns = true
+	var day_was := Survival.day()
+	Survival.state()["day"] = maxi(day_was, 3)
 	Survival.state()["pressure"] = {}
 	check(Survival.pressure(level) == 0.0, "a quiet zone has no pressure")
 	var at := player.global_position + fwd * 30.0
@@ -596,6 +601,8 @@ func _test_crowd_and_pressure() -> void:
 	check(horde and int(Survival.state().get("hordes", 0)) == hordes + 1, "a horde of %d or more forms (%d; %d hordes so far)" % [ZoneDead.HORDE_N.x, crowd.horde_count(), int(Survival.state().get("hordes", 0))])
 	var walking := crowd.dead.filter(func(d: Dictionary) -> bool: return d.horde and (d.target as Vector2).distance_to(Vector2(player.global_position.x, player.global_position.z) + Vector2(fwd.x, fwd.z) * 300.0) < 2.0)
 	check(walking.size() >= ZoneDead.HORDE_N.x, "and it walks at the noise (%d heading there)" % walking.size())
+	Survival.legacy_spawns = false
+	Survival.state()["day"] = day_was
 	# The specials: kinds with their rules.
 	check(ZombieAI.KINDS.has("screamer") and ZombieAI.KINDS.has("crawler") and ZombieAI.KINDS.has("bloater") and ZombieAI.KINDS.has("hazmat"), "the four specials are kinds")
 	var city_rolls := {}

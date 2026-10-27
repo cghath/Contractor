@@ -230,6 +230,8 @@ func _access_tab() -> Control:
 	page.add_child(tension)
 	page.add_child(_toggle("Subtitles for every bark and voice line (with the speaker's name)", "access", "subtitles",
 		"A small line at the bottom: who said it and what."))
+	page.add_child(_toggle("Hints (a short tip with your key, the first time something comes up)", "access", "hints",
+		"Contractor: Fallen's control hints, once each; reread them in the journal's Field notes."))
 	return page.get_parent()
 
 
