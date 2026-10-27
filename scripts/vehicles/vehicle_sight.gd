@@ -79,7 +79,7 @@ func open(g: VehicleGunnery, p_seat: int) -> void:
 		channel = "day"
 	if channel == "day" and (s.get("day", []) as Array).is_empty():
 		channel = "thermal"
-	cull_mask = body.camera.cull_mask
+	cull_mask = body.camera.cull_mask & ~PlayerInput.LOCAL_BODY_LAYER  # (not your own body in the sight)
 	if not is_instance_valid(overlay) and body.player_input and body.player_input.hud:
 		overlay = VehicleSightOverlay.new()
 		body.player_input.hud.add_child(overlay)

@@ -27,6 +27,18 @@ trimmed, mono, faded, normalised; `m2` and `dshk` pitched down 20% and driven ha
 | mosin | Mosin-Nagant 91/30 | Mosin Nagant 7.62x54R (M_21P / M_26P; the library has only this one take, same as svd/pkm) |
 | springfield_hs | Springfield Heatseeker | Tikka Model T3 .30-06 (W_29P / W_24P): a modern bolt-action precision rifle, the real thematic match for this one (not a WWII rifle like the other folders) |
 
+## Footsteps: Fantozzi's Footsteps (Grass/Sand & Stone)
+
+`steps_soft_1..6.ogg` (the ground: every `step_<pace>`) and `steps_hard_1..6.ogg` (anything built:
+every `step_hard_<pace>`) are the twelve takes of **Fantozzi's Footsteps (Grass/Sand & Stone)**
+by Fantozzi, released under **CC0** (public domain; "Sand" sounds like grass or dirt, "Stone"
+like most hard floors), copied as they are (the OGG versions; L/R takes alternate). Each pace
+plays them at its own level (data/sounds.json "recording"). The kit's rattle with a step at a
+walk, jog or sprint (`kit_rattle`) is generated.
+
+- Source: https://opengameart.org/content/fantozzis-footsteps-grasssand-stone
+- License: https://creativecommons.org/publicdomain/zero/1.0/
+
 Everything else in the game's sound is generated in code (autoload/sfx.gd, data/sounds.json).
 
 ## Voices: Piper text-to-speech

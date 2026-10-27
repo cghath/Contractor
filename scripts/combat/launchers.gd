@@ -456,7 +456,10 @@ func _server_end(p: LauncherProjectile, res: Dictionary) -> void:
 		if vitals and not vitals.is_dead():
 			Harm.note_hit(body, shooter)
 			var part: StringName = (collider as Node).get_meta(&"body_part", Vitals.CHEST) if collider is Node else Vitals.CHEST
-			vitals.server_hit(part, {"round_class": Vitals.FULL_POWER, "position": pos, "direction": dir, "distance": p.travelled})
+			# A heavy rocket's own weight and speed (Captain, 2026-10-26: limbs stayed on): its energy
+			# goes with it, so a hit past Vitals.LETHAL_J tears what it hits.
+			var energy := 0.5 * float(p.data.get("mass_kg", 2.0)) * p.velocity.length_squared()
+			vitals.server_hit(part, {"round_class": Vitals.FULL_POWER, "position": pos, "direction": dir, "distance": p.travelled, "energy_j": energy})
 	elif res.has("expired"):
 		if p.data.get("self_destruct", false):
 			burst = Warheads.server_burst(lvl, p.warhead, pos, dir, null, shooter)

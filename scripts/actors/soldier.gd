@@ -53,6 +53,10 @@ const RECOIL_SETTLE := 0.6
 const SWAY_DEG := 0.06
 const SWAY_MOVE_MULT := 3.0
 const SWAY_TIRED_MULT := 1.5
+## The kit's weight in the aim (Captain, 2026-10-26: "load-based sway"): from SWAY_LOAD_KG.x up to
+## SWAY_LOAD_KG.y carried, the sway grows by up to SWAY_LOAD_MULT more. Proposed.
+const SWAY_LOAD_KG := Vector2(12.0, 40.0)
+const SWAY_LOAD_MULT := 0.6
 const BULKY_SPEED_MULT := 0.7
 const ITEM_MASK := 1 << 2
 ## Camo variants for players, picked from the peer id so every peer agrees. Never "urban": that's
@@ -807,12 +811,18 @@ static func ai_spread_deg(weapon: ItemData) -> float:
 
 ## A player's shot direction (Captain, P0362), worked out on the shooter's machine (co-op: the
 ## host trusts it): inside the half-angle spread_deg_now(), uniform over the cone's disc.
+## The weapon's inertia the camera doesn't show (PlayerInput: the gun trails a turn; x yaw, y
+## pitch, radians): the round goes where the gun points. Zero for the AI.
+var shot_lag := Vector2.ZERO
+
+
 func _spread_direction(weapon: ItemData) -> Vector3:
 	var spread := deg_to_rad(spread_deg_now(weapon))
-	var forward := -camera.global_basis.z
+	var aim := camera.global_basis * Basis.from_euler(Vector3(shot_lag.y, shot_lag.x, 0.0))
+	var forward := -aim.z
 	var angle := randf() * TAU
 	var amount := sqrt(randf()) * spread
-	var offset := camera.global_basis.x * cos(angle) + camera.global_basis.y * sin(angle)
+	var offset := aim.x * cos(angle) + aim.y * sin(angle)
 	return (forward + offset * tan(amount)).normalized()
 
 
@@ -846,6 +856,7 @@ func aim_sway_deg(weapon: ItemData) -> float:
 	var tired := 1.0 - clampf(minf(movement.stamina, movement.arm_stamina), 0.0, 1.0)  # out of breath, or tired arms
 	return SWAY_DEG * movement.spread_mult() * (1.0 + SWAY_MOVE_MULT * moving) * (1.0 + SWAY_TIRED_MULT * tired) \
 		* (1.0 + MovementRules.SPRINT_UNSTEADY_SWAY * movement.sprint_unsteady) \
+		* (1.0 + SWAY_LOAD_MULT * clampf(inverse_lerp(SWAY_LOAD_KG.x, SWAY_LOAD_KG.y, inventory.total_mass()), 0.0, 1.0)) \
 		* vitals.sway_mult(weapon.tags.has("rifle")) * GunAttachments.sway_mult(weapon, _state_of_weapon(weapon))
 
 

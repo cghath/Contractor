@@ -25,6 +25,12 @@ extends RefCounted
 const GIB_Z := 0.6
 const GIB_DIRECT_KG := 0.3
 const SEVER_Z := 0.55
+## A warhead's filling (GIB_DIRECT_KG or more: an RPG's, an AT4's) close enough to tear a limb off
+## kills outright first, so the dead rules apply (whole limbs, the head), and reaches further:
+## HEAVY_SEVER_Z and HEAVY_GIB_Z (Captain, 2026-10-26: men next to an RPG hit kept their limbs;
+## with a grenade's ranges a rocket a metre off cut nothing). Proposed.
+const HEAVY_SEVER_Z := 0.9
+const HEAVY_GIB_Z := 0.75
 const MANGLE_Z := 1.0
 const CHAR_Z := 1.6
 const PEPPER_SHARE := 0.5
@@ -224,11 +230,12 @@ static func server_vehicle_hit(body: Node3D, from: Vector3, speed: float) -> voi
 
 static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Vector3, kg3: float, frag_m: float) -> Array:
 	var com := _centre_of(body)
-	if com.distance_to(centre) / kg3 < GIB_Z and Throwables.clear_line(world, centre, com):
+	var heavy := kg3 >= pow(GIB_DIRECT_KG, 1.0 / 3.0) - 0.0001
+	var sever_z := HEAVY_SEVER_Z if heavy else SEVER_Z
+	if com.distance_to(centre) / kg3 < (HEAVY_GIB_Z if heavy else GIB_Z) and Throwables.clear_line(world, centre, com):
 		var gib := _gib(body, vitals, world, centre, kg3)
 		_add(vitals, gib)
 		return gib
-	var dead := vitals.is_dead()
 	var entries: Array = []
 	var parts := {}  # part -> [hitbox, nearest world point, scaled distance, clear line]
 	for hitbox in _hitboxes(body):
@@ -236,6 +243,9 @@ static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Ve
 		var p := _nearest(hitbox, centre)
 		var clear := Throwables.clear_line(world, centre, p) and _exposed(world, centre, p)
 		parts[part] = [hitbox, p, p.distance_to(centre) / kg3, clear]
+	if heavy and not vitals.is_dead() and CHAINS.any(func(c: Array) -> bool: return _in_reach(parts, c[0], sever_z) or _in_reach(parts, c[1], sever_z)):
+		vitals.server_kill()
+	var dead := vitals.is_dead()
 	var gone := {}
 	for part in BodyDeform.severed_parts(vitals):
 		gone[part] = true
@@ -246,8 +256,8 @@ static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Ve
 		var proximal: StringName = chain[1]
 		if gone.has(proximal) or gone.has(distal):
 			continue
-		var d_in := _in_reach(parts, distal, SEVER_Z)
-		var p_in := _in_reach(parts, proximal, SEVER_Z)
+		var d_in := _in_reach(parts, distal, sever_z)
+		var p_in := _in_reach(parts, proximal, sever_z)
 		if not d_in and not p_in:
 			continue
 		if dead:
@@ -259,7 +269,7 @@ static func _blast_body(body: Node3D, vitals: Vitals, world: World3D, centre: Ve
 		else:
 			entries.append({"k": "d", "p": String(proximal), "a": vec(_rest_point(parts, proximal)), "s": hash("%s%s" % [body.name, proximal]) % 100000})
 			amputate[proximal] = _rest_point(parts, proximal)
-	if dead and not gone.has(Vitals.HEAD) and (_in_reach(parts, Vitals.HEAD, SEVER_Z) or _in_reach(parts, Vitals.NECK, SEVER_Z * 0.8)):
+	if dead and not gone.has(Vitals.HEAD) and (_in_reach(parts, Vitals.HEAD, sever_z) or _in_reach(parts, Vitals.NECK, sever_z * 0.8)):
 		entries.append(_blast_sever(body, parts, Vitals.HEAD, centre, kg3))
 	# Torn craters, charring and the pepper, on what's still on the body: one charring and one
 	# pepper per drawn part (the torso's three hitboxes share one raster), its nearest hitbox's.

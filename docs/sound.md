@@ -29,7 +29,7 @@ our world** rather than photo-real; a real recording can replace any of them lat
 | `impact_dirt`, `impact_plate` (plates, vehicles), `impact_body` | `CompoundLevel.show_impact` (already on every peer) |
 | `explosion` (+ `_far`), `flashbang` | `CompoundLevel.show_explosion` / `show_flash` |
 | `reload`, `throw` | `Soldier._server_reload` / `_server_throw` -> `Sfx.server_play` |
-| `step`, `step_hard` | every peer, from how each soldier moves (no network); hard on structures and vehicles; quieter crouched |
+| `step_<pace>`, `step_hard_<pace>`, `kit_rattle` | every peer, from how each soldier moves (no network); hard on structures and vehicles; quieter crouched. The steps are CC0 recordings (`steps_soft_*`, `steps_hard_*`: every pace shares them through its "recording", at its own level); with a carrier or pack, a generated kit rattle plays with each step at a walk, jog or sprint, louder with more weight carried (`Sfx.kit_rattle_db`; Captain, 2026-10-26: steps sounded like generated percussion) |
 | `engine_mrap`, `engine_soft`, `engine_ifv`, `engine_mbt`, `engine_aircraft` | every peer: loops while someone drives; pitch and volume rise with speed; picked by the vehicle's `class` in data/vehicles.json |
 
 ## Adding or changing a sound

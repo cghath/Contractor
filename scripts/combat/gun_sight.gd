@@ -413,7 +413,7 @@ func _sync_scope_viewport(ring: float) -> void:
 		_scope_stale = true  # resized: repaints next frame, not this one
 	_scope_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var cam := body.camera
-	_scope_cam.cull_mask = cam.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER
+	_scope_cam.cull_mask = cam.cull_mask & ~PlayerInput.VIEW_MODEL_LAYER & ~PlayerInput.LOCAL_BODY_LAYER
 	_scope_cam.near = cam.near
 	_scope_cam.far = cam.far
 	_scope_cam.environment = cam.environment

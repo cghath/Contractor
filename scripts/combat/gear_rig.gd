@@ -226,6 +226,10 @@ var _straps_for := ""  # the pack and carrier they were built for
 var _tape: Node3D                 # the name tape on the carrier's loop panel
 var _armbands: Array[Node3D] = []  # the IFF armbands (_set_armbands), on the upper arms
 var _tape_key := ""              # carrier and text it shows
+var _belt: Node3D                 # the battle belt and its pouches (_set_belt)
+var _belt_key := ""
+var _ear_pro: Node3D              # a headset worn on the head (_set_ear_pro)
+var _ear_key := ""
 var _pack_sway := GearSway.make(PACK_SWAY[0], PACK_SWAY[1], PACK_SWAY[2], PACK_SWAY[3], PACK_SWAY[4], PACK_SWAY[5])
 var _pouch_sway := GearSway.make(POUCH_SWAY[0], POUCH_SWAY[1], POUCH_SWAY[2], POUCH_SWAY[3], POUCH_SWAY[4], POUCH_SWAY[5])
 var _pack_rest := Transform3D.IDENTITY  # the pack's place, unswung
@@ -391,8 +395,10 @@ func _rebuild() -> void:
 				piece.transform = carrier_fit(String(slot).trim_prefix("plate_")) * piece.transform
 			if slot != &"helmet":  # a plate sits inside the carrier's pocket, under its fabric
 				piece.set_cover(Color(VoxelArt.spec(model.variant).gear) if carrier else Color(0, 0, 0, 0))
+				piece.set_camo(model.variant if carrier else "")  # the pocket's camo print through its window
 			elif piece.item.stats.get("faction_color", false):
 				piece.set_cover(faction_armor_color())  # a helmet with "faction_color" (Ballistic/Bump/Heavy/LX-3) shows the wearer's side's colour
+				piece.set_camo(model.variant)  # in a cover of the side's camo (VoxelArmor.camo_cloth; not the LX-3)
 	var helmet: VoxelArmor = _armor.get(&"helmet")
 	model.set_hair_tucked(helmet != null and helmet_tucks_hair(helmet.item))
 	for slot: StringName in MOUNTS:
@@ -413,13 +419,15 @@ func _rebuild() -> void:
 	_set_pack_straps(pack)
 	_set_name_tape(carrier)
 	_set_armbands()
-	for small: Node in [_pouches, _straps, _tape] + _armbands:
+	_set_belt()
+	_set_ear_pro()
+	for small: Node in [_pouches, _straps, _tape, _belt, _ear_pro] + _armbands:
 		_small_detail(small)
 	_set_exo_pads()
 	_refresh_plate_damage()
 	_set_exo_frame()
 	# Inside a heavy exo, the pilot's body and kit don't show (ExoMech.hide_pilot): his head does.
-	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _gear.get(&"backpack", [&"", null])[1], _pouches, _straps, _tape]
+	var kit: Array = [_gear.get(&"vest", [&"", null])[1], _gear.get(&"sidearm", [&"", null])[1], _gear.get(&"backpack", [&"", null])[1], _pouches, _straps, _tape, _belt]
 	for slot: StringName in _armor:
 		if slot != &"helmet":
 			kit.append(_armor[slot])
@@ -481,7 +489,7 @@ func _set_pouches() -> void:
 	for p: Dictionary in points:
 		var att := inventory.attachment(StringName(p.id))
 		if not att.is_empty():
-			key += "|%s=%s%s" % [p.id, att.id, "+" if not att.get("held", []).is_empty() else ""]
+			key += "|%s=%s%d" % [p.id, att.id, held_units(att.get("held", []))]  # (redrawn as mags come and go)
 	if key == _pouch_key:
 		return
 	_pouch_key = key
@@ -504,7 +512,7 @@ func _set_pouches() -> void:
 		var bag := _pack_bag_size(p, item)  # an aid bag strapped on the pack: in the pack's cloth
 		var cloth := Color(VoxelArt.spec(model.variant).pack).darkened(0.08) if bag != Vector3.ZERO else gear
 		var node := LauncherRig.make_model(item, render_layers) if item.type == "launcher" \
-			else pouch_node(item, cloth, not att.get("held", []).is_empty(), render_layers, bag)
+			else pouch_node(item, cloth, not att.get("held", []).is_empty(), render_layers, bag, att.get("held", []))
 		node.name = String(p.id)
 		node.transform = spots[p.id]
 		_pouches.add_child(node)
@@ -755,14 +763,15 @@ func _set_armbands() -> void:
 ## The IFF marks on a worn helmet (model.iff): a square on the crown and a patch on the back,
 ## on the helmet piece itself, so they go with it.
 func _mark_helmet(piece: VoxelArmor) -> void:
-	if model.iff.is_empty():
-		return
 	var box := AABB()
 	for child: Node in piece.get_children():
 		if child is MeshInstance3D:
 			box = (child as MeshInstance3D).transform * (child as MeshInstance3D).get_aabb()
 			break
 	if box.size == Vector3.ZERO:
+		return
+	_helmet_kit(piece, box)
+	if model.iff.is_empty():
 		return
 	var colour: Color = model.iff[1]
 	var mid := box.get_center()
@@ -774,6 +783,150 @@ func _mark_helmet(piece: VoxelArmor) -> void:
 	piece.add_child(back)
 	_iff_detail(crown, colour)
 	_iff_detail(back, colour)
+
+
+## A high-cut helmet's kit (model realism pass, Captain 2026-10-26: "high-cut with kit"), on a
+## medium shell (VoxelArmor.HIGH_CUT) without a face guard: Velcro loop panels on its sides above
+## the rails, and a counterweight pouch low on the back, under the IFF patch, balancing the NVG
+## mount. Small gear (no shadow, faded past SMALL_GEAR_M); they aren't armour.
+const HELMET_POUCH := Vector3(0.1, 0.045, 0.028)
+const HELMET_VELCRO := Vector3(0.006, 0.035, 0.07)
+
+
+func _helmet_kit(piece: VoxelArmor, box: AABB) -> void:
+	var stats := piece.item.stats
+	if String(stats.get("tier", "")) != "medium" or bool(stats.get("face_guard", false)):
+		return
+	var cloth := Color(VoxelArt.spec(model.variant).gear)
+	var mid := box.get_center()
+	var kit: Array[MeshInstance3D] = []
+	var pouch := _part_box(HELMET_POUCH, Vector3(mid.x, box.position.y + 0.035, box.end.z - 0.012 + HELMET_POUCH.z * 0.5), cloth.darkened(0.15), render_layers)
+	kit.append(pouch)
+	kit.append(_part_box(Vector3(HELMET_POUCH.x, 0.01, 0.004), Vector3(mid.x, box.position.y + 0.052, box.end.z - 0.010 + HELMET_POUCH.z), cloth.darkened(0.35), render_layers))  # its flap's edge
+	for sx: float in [-1.0, 1.0]:
+		var x := mid.x + sx * (box.size.x * 0.5 * 0.97 + HELMET_VELCRO.x * 0.5 - 0.002)  # on the shell's side there
+		kit.append(_part_box(HELMET_VELCRO, Vector3(x, box.position.y + 0.092, mid.z + 0.01), cloth.darkened(0.3), render_layers))
+	for k: MeshInstance3D in kit:
+		k.name = "HelmetKit"
+		piece.add_child(k)
+		_small_detail(k)
+
+
+## The battle belt (loadout pass, Captain 2026-10-26: "a battle belt with a dump pouch and a
+## pistol mag or two", even without a carrier): on anyone in uniform carrying a gun, a padded
+## belt round the hips (VoxelArt "battle_belt", widened with his build) with, on the support
+## side, a double pistol mag pouch in front (its mags showing, as many as he carries for his
+## sidearm, up to two; only with a sidearm) and a rolled-up dump pouch behind. Small gear.
+const BELT_POUCH := &"pouch_pistol_mag"
+const DUMP_POUCH := Vector3(0.13, 0.08, 0.03)
+
+
+func _set_belt() -> void:
+	var primary: StringName = inventory.slots.get(&"primary", &"")
+	var sidearm_id: StringName = inventory.slots.get(&"sidearm", &"")
+	var armed := primary != &"" or sidearm_id != &""
+	var uniform := not (model.variant.begins_with(VoxelArt.CIV_PREFIX) or model.variant.begins_with("civp:") or model.variant == "dummy")
+	var sidearm: ItemData = ItemDB.get_item(sidearm_id) if sidearm_id != &"" else null
+	var mags := 0
+	if sidearm:
+		for id: String in sidearm.stats.get("accepts", []):
+			mags += inventory.count_of(StringName(id))
+	var key := "" if not (armed and uniform) else "%s|%s|%d|%s|%s" % [model.body, sidearm != null, mini(mags, 2), model.left_handed, model.variant]
+	if key == _belt_key:
+		return
+	_belt_key = key
+	if _belt:
+		_belt.queue_free()
+		_belt = null
+	if key == "":
+		return
+	_belt = Node3D.new()
+	_belt.name = "BattleBelt"
+	model.torso.add_child(_belt)
+	var g := model.girth("torso")
+	var ring := VoxelArt.instance(VoxelArt.body_part("battle_belt", model.body), model.variant, render_layers)
+	ring.scale = Vector3(g, 1.0, g)
+	_belt.add_child(ring)
+	var cloth := Color(VoxelArt.spec(model.variant).gear).darkened(0.12)
+	var sx := 1.0 if model.left_handed else -1.0  # the support side
+	var y := (VoxelArt.BELT_Y.x + VoxelArt.BELT_Y.y) * 0.005
+	if sidearm:
+		var item := ItemDB.get_item(BELT_POUCH)
+		var size := WorldItem.visual_size(item)
+		var pouch := pouch_node(item, cloth, mags > 0, render_layers, Vector3.ZERO, [{"id": &"", "count": mini(mags, 2)}] if mags > 0 else [])
+		pouch.name = "BeltMags"
+		pouch.transform = belt_spot(model.body, Vector3(sx * 0.085, y, -1.0), size, g)
+		_belt.add_child(pouch)
+	# The rolled dump pouch threads under the belt behind (Captain: the belt pouches looked off,
+	# a box standing clear of her seat): its top tucked up behind the belt, its back flat on the
+	# body below it.
+	var dump := Node3D.new()
+	dump.name = "DumpPouch"
+	var dump_y := VoxelArt.BELT_Y.x * 0.01 + 0.015 - DUMP_POUCH.y * 0.5
+	var seat := maxf(VoxelArt.torso_reach(model.body, dump_y, true), VoxelArt.torso_reach(model.body, dump_y - DUMP_POUCH.y * 0.4, true)) * g
+	dump.transform = Transform3D(Basis(Vector3.UP, PI), Vector3(sx * 0.06, dump_y, seat + DUMP_POUCH.z * 0.5))
+	dump.add_child(_part_box(DUMP_POUCH, Vector3.ZERO, cloth.darkened(0.1), render_layers))
+	dump.add_child(_part_box(Vector3(0.025, DUMP_POUCH.y + 0.004, 0.005), Vector3(0, 0, -DUMP_POUCH.z * 0.5 - 0.002), cloth.darkened(0.35), render_layers))  # its keeper strap
+	_belt.add_child(dump)
+
+
+## Torso-local transform of a thing of `size` hung on body type `body`'s battle belt at `at`: x
+## across and y up (metres), z -1 on its front, 1 on its back; its back on the belt's outside
+## (VoxelArt.belt_ring, its corners cut like the loft's), facing out, the belt widened `g`.
+static func belt_spot(body: String, at: Vector3, size: Vector3, g := 1.0) -> Transform3D:
+	var r := VoxelArt.belt_ring(body, clampf(at.y, VoxelArt.BELT_Y.x * 0.01, VoxelArt.BELT_Y.y * 0.01)) * Vector3(g, g, g)
+	var hd := (r.y + r.z) * 0.5
+	var cz := (r.z - r.y) * 0.5
+	var dx := absf(at.x) / r.x
+	var m := minf(1.0, 1.5 - dx)  # the loft's bevel (0.5) cuts the corners
+	var n := Vector2(0, signf(at.z))
+	if m < 1.0:
+		n = Vector2(signf(at.x) * hd, signf(at.z) * r.x).normalized()
+	var surface := Vector2(at.x, cz + signf(at.z) * hd * m)
+	var mid := surface + n * size.z * 0.5
+	return Transform3D(Basis(Vector3.UP, atan2(-n.x, -n.y)), Vector3(mid.x, at.y, mid.y))
+
+
+## Ear protection (Captain, 2026-10-26: "ear pro is wearable"): a headset or ear defenders
+## carried (an item tagged "hearing", not earplugs) is worn: a cup over each ear, and with no
+## helmet its band over the head; under a helmet the cups ride its rails. None under a heavy
+## helmet's ear covers or a face guard. Small gear on the head.
+const EAR_CUP := Vector3(0.035, 0.07, 0.06)
+const EAR_CUP_X := 0.118
+
+
+func _set_ear_pro() -> void:
+	var worn := &""
+	for id: StringName in [&"ear_comtac", &"ear_sordin", &"ear_protection"]:
+		if inventory.count_of(id) > 0:
+			worn = id
+			break
+	var helmet: VoxelArmor = _armor.get(&"helmet")
+	if helmet and (String(helmet.item.stats.get("tier", "")) == "heavy" or bool(helmet.item.stats.get("face_guard", false))):
+		worn = &""
+	var key := "%s|%s|%s" % [worn, helmet != null, model.body] if worn != &"" else ""
+	if key == _ear_key:
+		return
+	_ear_key = key
+	if _ear_pro:
+		_ear_pro.queue_free()
+		_ear_pro = null
+	if key == "":
+		return
+	_ear_pro = Node3D.new()
+	_ear_pro.name = "EarPro"
+	model.head.add_child(_ear_pro)
+	var shell := Color("2e2e29") if worn == &"ear_sordin" else Color("4a4a3c")
+	var x := EAR_CUP_X - (0.004 if model.body == VoxelArt.FEMALE else 0.0)
+	for sx: float in [-1.0, 1.0]:
+		_ear_pro.add_child(_part_box(EAR_CUP, Vector3(sx * x, 0.165, 0.012), shell, render_layers))
+		_ear_pro.add_child(_part_box(Vector3(0.008, 0.05, 0.045), Vector3(sx * (x - EAR_CUP.x * 0.5 - 0.003), 0.165, 0.012), Color("1b1b19"), render_layers))  # the cushion
+		if worn == &"ear_comtac":
+			_ear_pro.add_child(_part_box(Vector3(0.006, 0.006, 0.05), Vector3(sx * (x + EAR_CUP.x * 0.5), 0.15, -0.03), Color("1b1b19"), render_layers))  # the mic boom's stub
+		if helmet == null:
+			_ear_pro.add_child(_part_box(Vector3(0.016, 0.1, 0.03), Vector3(sx * (x - 0.008), 0.245, 0.012), shell, render_layers))  # the band's side
+	if helmet == null:
+		_ear_pro.add_child(_part_box(Vector3(x * 2.0 - 0.02, 0.016, 0.03), Vector3(0, 0.297, 0.012), shell, render_layers))  # over the top
 
 
 ## The name tape: the soldier's surname (CharacterModel.name_tape) in dark capitals on the
@@ -915,12 +1068,19 @@ static func point_transform(p: Dictionary, size: Vector3, scale := 1.0) -> Trans
 ## (Captain: tabs standing up off a top edge read as a glitch). An aid bag (aid_bag_parts) shows
 ## a red cross. Front is -Z. Used on the soldier and for item previews. `size`, when given,
 ## draws it that size instead of its own (an aid bag fitted to the pack it is strapped on).
-static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1, size := Vector3.ZERO) -> Node3D:
+static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1, size := Vector3.ZERO, held: Array = []) -> Node3D:
 	var root := Node3D.new()
-	for part: Array in pouch_parts(item, colour, full, size):
+	var tall := 0
+	for part: Array in pouch_parts(item, colour, full, size, held):
 		var box := _part_box(part[0], part[1], part[2], layers)
-		if part[3]:
+		if part[3]:  # each in a holder of its own, so every one keeps the name "Antenna"
 			box.name = "Antenna"
+			var holder := Node3D.new()
+			holder.name = "Tall%d" % tall
+			tall += 1
+			holder.add_child(box)
+			root.add_child(holder)
+			continue
 		root.add_child(box)
 	return root
 
@@ -928,10 +1088,12 @@ static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1, s
 ## The boxes pouch_node draws for `item` (`full`: with what is in it showing), pouch-local:
 ## [size, centre, colour, whether it is a radio's antenna (which stands up past whatever the
 ## pouch is on)].
-static func pouch_parts(item: ItemData, colour: Color, full: bool, drawn := Vector3.ZERO) -> Array:
+static func pouch_parts(item: ItemData, colour: Color, full: bool, drawn := Vector3.ZERO, held: Array = []) -> Array:
 	var size := drawn if drawn != Vector3.ZERO else WorldItem.visual_size(item)
 	if item.stats.get("attach", []).has("aid_bag"):
 		return aid_bag_parts(size, colour)
+	if mag_pouch(item):
+		return mag_pouch_parts(item, size, colour, held if not held.is_empty() else ([{"id": &"", "count": 99}] if full else []))
 	if item.id == &"knife" or item.stats.get("attach", []).has("knife") and not Inventory.is_pouch(item):
 		return [[Vector3(size.x, size.y * 0.62, size.z), Vector3(0, -size.y * 0.19, 0), colour.darkened(0.35), false],
 			[Vector3(size.x * 0.7, size.y * 0.38, size.z * 0.8), Vector3(0, size.y * 0.31, 0), Color("26241f"), false]]
@@ -948,12 +1110,62 @@ static func pouch_parts(item: ItemData, colour: Color, full: bool, drawn := Vect
 		[Vector3(size.x * 1.02, size.y * 0.28, size.z * 1.08), Vector3(0, size.y * 0.36, -size.z * 0.04), colour.darkened(0.25), false]]
 	if full and accepts.has("radio"):
 		parts.append([Vector3(0.008, 0.16, 0.008), Vector3(size.x * 0.3, size.y * 0.5 + 0.08, 0), Color("1d1d1b"), true])
+		# its handset's cable up out of the pouch to the push-to-talk clipped above it
+		parts.append([Vector3(0.006, 0.05, 0.006), Vector3(-size.x * 0.3, size.y * 0.5 + 0.025, -size.z * 0.15), Color("1d1d1b"), true])
+		parts.append([Vector3(0.032, 0.04, 0.016), Vector3(-size.x * 0.3, size.y * 0.5 + 0.068, -size.z * 0.15), Color("26261f"), true])
 	if full and accepts.has("type:medical"):
 		# pull tabs flat on the flap's face, inside its top edge
 		var tab_h := minf(0.02, size.y * 0.2)
 		for side in [-1.0, 1.0]:
 			parts.append([Vector3(0.014, tab_h, 0.005), Vector3(side * size.x * 0.32, size.y * 0.36, -size.z * 0.58 - 0.0025), MED_RED, false])
 	return parts
+
+
+## Whether `item` is a magazine pouch (it takes magazines, shell loaders or clips): mag_pouch_parts
+## draws it open-topped, what is in it showing.
+static func mag_pouch(item: ItemData) -> bool:
+	return Array(item.stats.get("accepts", [])).any(func(a: String) -> bool: return a.begins_with("mag_") or a.begins_with("clip_") or a.begins_with("loader_"))
+
+
+## How many units `held` (a pouch's contents) holds.
+static func held_units(held: Array) -> int:
+	var n := 0
+	for entry: Dictionary in held:
+		n += int(entry.get("count", 1))
+	return n
+
+
+## A magazine pouch, `size`, front -Z (loadout pass, Captain 2026-10-26: "show what's in each
+## pouch"): open-topped, a mag's top standing out of each of its "max_units" cells for every mag
+## it holds (`held`: its contents), brass showing on a loaded one and a shock-cord pull tab over
+## it; an empty cell is a dark mouth. Everything stays inside `size`, so the pouch fits the carrier
+## as before (pouch_extent).
+static func mag_pouch_parts(item: ItemData, size: Vector3, colour: Color, held: Array) -> Array:
+	var cells := maxi(1, int(item.stats.get("max_units", 1)))
+	var body_h := size.y * 0.78
+	var parts := [[Vector3(size.x, body_h, size.z), Vector3(0, -size.y * 0.5 + body_h * 0.5, 0), colour, false],
+		[Vector3(size.x, size.y * 0.07, size.z), Vector3(0, -size.y * 0.5 + body_h - size.y * 0.06, 0), colour.darkened(0.3), false]]  # the shock cord's band
+	var mags: Array = []  # [loaded] per mag shown
+	for entry: Dictionary in held:
+		for i in int(entry.get("count", 1)):
+			mags.append(int(entry.get("state", {}).get("rounds", 1)) > 0)
+	var w := size.x / cells
+	var top := -size.y * 0.5 + body_h
+	for i in cells:
+		var x := -size.x * 0.5 + w * (i + 0.5)
+		if i < mags.size():
+			var mag := Vector3(w * 0.72, size.y - body_h + 0.004, size.z * 0.6)
+			parts.append([mag, Vector3(x, size.y * 0.5 - mag.y * 0.5, 0), MAG_BLACK, false])
+			if mags[i]:
+				parts.append([Vector3(mag.x * 0.45, 0.005, mag.z * 0.45), Vector3(x, size.y * 0.5 - 0.0035, 0), Color("a8873f"), false])  # the top round
+			parts.append([Vector3(w * 0.4, 0.012, 0.005), Vector3(x, top + 0.004, -size.z * 0.5 + 0.0035), colour.darkened(0.45), false])  # pull tab
+		else:
+			parts.append([Vector3(w * 0.72, 0.004, size.z * 0.6), Vector3(x, top - 0.001, 0), colour.darkened(0.55), false])  # an empty mouth
+	return parts
+
+
+## A magazine's polymer, as it shows in a pouch.
+const MAG_BLACK := Color("23231f")
 
 
 ## A medic's aid bag, `size`, front -Z: the bag, a darker zipped lid band across its top, two
