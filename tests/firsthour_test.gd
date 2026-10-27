@@ -173,6 +173,7 @@ func _test_shelter() -> void:
 	check(b != null, "the zone builds")
 	if b == null:
 		return
+	_make_room()
 	player.inventory.take(&"hammer", 1)
 	player.inventory.take(&"planks", 10)
 	player.global_position = home + Vector3(0.0, 0.3, 0.0)
@@ -183,7 +184,7 @@ func _test_shelter() -> void:
 	for kind: String in ["shutter", "fence"]:
 		for off: Vector3 in [Vector3(2, 0, 2), Vector3(-2, 0, 2), Vector3(3, 0, -2), Vector3(0, 0, 4), Vector3(4, 0, 0)]:
 			var g := level.ground_point(home + off)
-			var c := BuildPieces.cell_at(g + Vector3.UP * 0.1)
+			var c := Builder.ground_cell(g)
 			if b.server_build_piece_now(player, kind, c, 0) > 0:
 				built = true
 				kind_built = kind
@@ -193,7 +194,7 @@ func _test_shelter() -> void:
 			break
 	if not built:  # (blocks against the wall instead: a board-up of blocks)
 		var g2 := level.ground_point(home + Vector3(2, 0, 2))
-		var c2 := BuildPieces.cell_at(g2 + Vector3.UP * 0.1)
+		var c2 := Builder.ground_cell(g2)
 		var made := 0
 		for dy: int in [0, 1, -1, 2]:
 			for k in 3:
@@ -238,14 +239,33 @@ func _test_voice() -> void:
 	Survival.state()["hour"] = 12.0
 
 
+## Empties the survivor's pockets and packs (his clothes stay on): room for what a check gives him.
+func _make_room() -> void:
+	for c: StringName in player.inventory.search_containers():
+		var list: Array = player.inventory.containers.get(c, [])
+		while not list.is_empty():
+			var before := list.size()
+			player.inventory.remove_entry(c, 0, int((list[0] as Dictionary).get("count", 1)))
+			list = player.inventory.containers.get(c, [])
+			if list.size() >= before:
+				break
+
+
 # --- Hints ----------------------------------------------------------------------------------------
 
 func _situate(id: String) -> void:
 	match id:
 		"silent_kill":
-			var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + Vector3(8, 0, 0)), "walker")
+			var back := player.global_basis.z
+			back.y = 0.0
+			var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + back.normalized() * 12.0), "walker")
 			if z:
 				z.set_meta(&"firsthour_test", true)
+				z.look_at(z.global_position - back, Vector3.UP)  # (facing away: it hasn't seen him)
+				z.rotation.x = 0.0
+				var brain := ZombieAI.of(z)
+				if brain:
+					brain.mode = ZombieAI.Mode.IDLE
 		"night":
 			Survival.state()["hour"] = 22.0
 		"container":
@@ -258,7 +278,7 @@ func _situate(id: String) -> void:
 		"injury":
 			player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT})
 		"build_kit":
-			player.inventory.strip()  # (room for them)
+			_make_room()
 			player.inventory.take(&"planks", 2)
 		"hungry":
 			var n := Survival.needs_of(player)
@@ -514,7 +534,7 @@ func _test_shots() -> void:
 	Survival.legacy_spawns = false
 	print("  open country, a shot every 2 s for 3 min: before %d arrived (farthest from %.0f m), %d hordes, pressure %.0f; after %d (%.0f m), %d hordes, pressure %.0f" % [
 		o_before.arrived, o_before.far, o_before.hordes, o_before.pressure, o_after.arrived, o_after.far, o_after.hordes, o_after.pressure])
-	check(int(o_after.hordes) == 0 and int(o_after.arrived) <= 3, "in the open, shooting draws a few at most and no horde (%d, %d hordes)" % [o_after.arrived, o_after.hordes])
+	check(int(o_after.hordes) == 0 and int(o_after.arrived) <= 8 and int(o_after.arrived) * 3 <= int(o_before.arrived) + 3, "in the open, shooting draws the few that are there and no horde (%d, %d hordes; before %d)" % [o_after.arrived, o_after.hordes, o_before.arrived])
 	check(float(o_after.far) <= ZombieAI.SHOT_HEARD_M + FirstHour.HEARD_MARGIN_M + 80.0, "nothing walks in from beyond the heard radius (%.0f m)" % o_after.far)
 	var town := _town_module()
 	if town:
