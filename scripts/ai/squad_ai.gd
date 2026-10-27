@@ -5702,7 +5702,13 @@ func _bark_state(contact: bool, weapon: ItemData, rounds: int, spare: int) -> vo
 
 ## Bounding in contact: "Moving!", and the battle buddy answers "Covering!".
 func _call_bound() -> void:
-	_callout(&"moving")
+	var callouts := Callouts.of(body)
+	if callouts:
+		callouts.say(body, &"moving", "", "", "", 0.0, _answer_bound)  # (the answer only once "Moving!" is heard)
+
+
+## The battle buddy's "Covering!" to this one's "Moving!" (Callouts.say's `then`).
+func _answer_bound() -> void:
 	var mate := buddy
 	var mate_ai := SquadAI.of(mate) if is_instance_valid(mate) and mate.vitals.is_up() else null
 	if mate_ai and not mate_ai.bounding:
