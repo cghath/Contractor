@@ -2,6 +2,11 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Loading magazines fixed on `claude/survival-magload`** (the Captain's base-game bug, shared inventory code): "Load
+  magazines" now shows whenever loose rounds and a magazine they fit are carried (greyed when they're full) instead of
+  hiding; "Load from loose rounds" and "Unload" (condition kept) on a magazine; rounds dropped on a magazine load it
+  instead of moving; R2743 PASS (logistics, survival; ui, wear and smoke passed in R2739 on the same code, whose logistics red was the test picking up the compound's own rounds and a client join timing out under load); see docs/survival_wear.md "Loose rounds into a magazine".
+
 - **Condition and wear 2 built on `claude/survival-wear2`** (calls 38, 43, 120-123, the left-out list): the AI's guns
   jam and get cleared (a bark), companions ask for and do their own cleaning, raiders' guns come used; loose rounds and
   shells carry condition into magazines and tubes (wet shells dud); suppressors wear, leak sound and break; hot hand-loads

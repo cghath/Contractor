@@ -11,6 +11,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Loading magazines (claude/survival-magload; the Captain's base-game bug report)
+
+- **Fixed** no way to load loose rounds into magazines in the base game: the "Load magazines" button and the right-click entry only appeared while a carried magazine of the rounds' calibre had room, and hid without a word otherwise (every magazine full after a Restock, or found rounds of another calibre: most loot is 7.62x39, 5.45 and 9x18 to the kits' 5.56 and 9mm). It now shows whenever loose rounds and a magazine they fit are both carried, greyed out with "Your 5.56 magazines are full" when there's no room; the host says the same.
+- **Fixed** loose rounds dragged onto a magazine moved into its container (the magazine seemed to be displaced): a drop on a magazine's tile now loads that magazine (the same timed job, `Soldier._server_load_mag_at`); another calibre or a full magazine is refused with a message and nothing moves. A magazine dropped on loose rounds moves as before.
+- **Added** "Load from loose rounds" on a magazine (fills that one) and "Unload" (its rounds back out loose, keeping their condition and hand-loaded share in survival; the magazine stays, empty). Unloading is instant (Proposed); a shotgun shell holder doesn't unload.
+
 ### Contractor: Fallen, condition and wear 2 (claude/survival-wear2)
 
 - **Added** the AI's guns wear and jam and they clear them (all Proposed; docs/survival_wear.md "Wear 2"): companions, settlers and raiders already fired through the player's `Soldier._server_fire`, but a jammed AI gun stayed jammed; now an AI clears its own jam (2 s and a "Jammed!" bark), a companion under 50% asks for a cleaning and cleans it with their own kit at the settlement, and raiders' guns spawn used (30-75%).
