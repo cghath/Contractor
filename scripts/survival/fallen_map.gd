@@ -40,7 +40,7 @@ const LINK := Color(0.45, 0.48, 0.42)
 const FRAME := Color(0.93, 0.69, 0.27)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
 const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3), "village": Color(0.6, 0.8, 1.0),
-	"told": Color(0.85, 0.72, 1.0), "radio": Color(0.55, 0.95, 0.85), "goal": Color(1.0, 0.6, 0.2)}
+	"told": Color(0.85, 0.72, 1.0), "radio": Color(0.55, 0.95, 0.85), "goal": Color(1.0, 0.6, 0.2), "abandoned": Color(0.7, 0.7, 0.68), "claimed": Color(0.5, 0.85, 0.6)}
 const HOVER_PX := 10.0
 ## Proposed: the political wash's colours by the holder's kind, and its strength.
 const KIND_COLOURS := {"settlers": Color(0.35, 0.8, 0.4), "raiders": Color(0.9, 0.25, 0.2), "scavengers": Color(0.9, 0.8, 0.3),

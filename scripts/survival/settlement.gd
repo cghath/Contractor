@@ -969,4 +969,6 @@ func server_action(peer: int, action: String, args: Array) -> String:
 				return Council.server_choose(int(args[0]), String(args[1]), Survival.profile_of(s))
 		"abandon":  # (call 143: put leaving the farm to the dead to the council)
 			return "" if Holding.server_ask_abandon() >= 0 else "No settlement"
+		"claim":  # (call 143: a place left to the dead claimed, its stock, safehouse, settlement: ClaimPost)
+			return Holding.server_claim_action(s, String(args[0]), String(args[1])) if args.size() >= 2 else "Bad claim"
 	return ""

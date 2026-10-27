@@ -11,7 +11,9 @@ extends Node
 ## gathers its child and runs (the place abandoned, a note left, the journal), its refugees come
 ## home when it's clear, "It's clear now" brings them back, and a settlement with no guard on shift
 ## sends its unarmed to shelter, not out; refugees join the household they reach, and at the
-## players' farm ask to stay (a council vote, or a player's yes); save and Continue keep the companions.
+## players' farm ask to stay (a council vote, or a player's yes); a place left to the dead is
+## claimed (not with the dead near or someone living there; what's left is the players'; its people
+## coming back ask to stay); save and Continue keep the companions.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -42,6 +44,7 @@ func _ready() -> void:
 		await _test_player_death_and_take_over()
 		await _test_holding()
 		await _test_refugees_join()
+		await _test_claim()
 		await _test_save_and_continue()
 	_finish()
 
@@ -523,6 +526,60 @@ func _test_refugees_join() -> void:
 	var said := Holding.server_let_stay(layer, player, ask, true)
 	check(said == Holding.STAY_YES and String(ask.status) == "settler" and String(Council.get_vote(vid).get("state", "")) == "done" and not ask.has("asks_stay"),
 		"a player's yes: they're settlers, the vote closed (%s)" % String(ask.status))
+	player.global_position = start + Vector3.UP * 0.2
+	await _frames(5)
+
+
+func _test_claim() -> void:
+	print("Claiming a place left to the dead (call 143)")
+	var start := player.global_position
+	var zone := String(Survival.state().zone)
+	var there := _near(Vector3(-45.0, 0.0, -35.0))
+	_clear_dead_near(there, 80.0)
+	var key := "h:test:claim"
+	var rr := layer.server_add_person(_near(Vector3(20.0, 0.0, -20.0)), {"traits": ["calm"], "want": {"kind": "place"}, "refugee_from": key, "kit": []})
+	Holding.save({"key": key, "zone": zone, "pos": Holding._arr(there), "ids": [String(rr.id)], "names": [String(rr.name)], "refugees": [String(rr.id)],
+		"state": "abandoned", "word": "farm", "text": "The Testers left their farm to the dead", "clear_since": Holding.NOT_CLEAR, "stock": {"food": 3.0, "water": 2.0}})
+	var z := Survival.server_spawn_zombie(level, level.ground_point(there + Vector3(12.0, 0.0, 0.0)))
+	await _frames(2)
+	check(z != null and Holding.claim_problem(layer, key) == "The dead are too close", "no claim with the dead within %.0f m (%s)" % [Holding.CLAIM_DEAD_M, Holding.claim_problem(layer, key)])
+	if z:
+		z.vitals.server_kill()
+	_clear_dead_near(there, 80.0)
+	await _frames(2)
+	var squat := layer.server_add_person(level.ground_point(there + Vector3(2.0, 0.0, 2.0)), {"traits": ["calm"], "want": {"kind": "place"}, "kit": []})
+	check(Holding.claim_problem(layer, key) == "Someone still lives here", "nor with someone living there")
+	SurvivorPerson.set_pos(squat, _near(Vector3(60.0, 0.0, 60.0)), "home")
+	player.global_position = level.ground_point(there + Vector3(3.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	await _frames(3)
+	var why := Holding.server_claim(layer, player, key)
+	var e := Holding.entry(key)
+	check(why == "" and String(e.get("state", "")) == "claimed" and String(e.get("owner", "")) == Survival.profile_of(player) and int((e.get("stores", {}) as Dictionary).get("beans_tin", 0)) == 3,
+		"claimed: %s is ours, what's left there ours (%s)" % [Holding.place_title(e), str(e.get("stores", {}))])
+	check(SurvivalMap.marks(zone).any(func(m: Dictionary) -> bool: return String(m.get("place", "")) == key and String(m.get("kind", "")) == "claimed"), "the map shows it as ours")
+	await _frames(3)
+	var post := ClaimPost.of(level, key)
+	check(post != null and post.kind == "claimed" and post.interaction_actions(player).any(func(a: Dictionary) -> bool: return a.id == &"claim_safehouse"),
+		"its post offers the safehouse and the settlement")
+	var beans0 := player.inventory.count_of(&"beans_tin")
+	var took := Holding.server_take_stock(layer, player, key)
+	check(took == "" and (Holding.entry(key).get("stores", {}) as Dictionary).is_empty() and player.inventory.count_of(&"beans_tin") >= beans0 + 1,
+		"and the player takes it (%d -> %d tins)" % [beans0, player.inventory.count_of(&"beans_tin")])
+	var votes0 := Council.open_votes().size()
+	check(Holding.server_make_settlement(key) == "" and Council.open_votes().size() == votes0 + 1, "making it the settlement is the council's question, never silent")
+	for v: Dictionary in Council.open_votes():
+		if String((v.question as Dictionary).get("kind", "")) == "move":
+			v["state"] = "done"  # (not moving the farm for the tests after)
+	# Its people come back when it's clear: they ask to stay.
+	e = Holding.entry(key)
+	e["clear_since"] = Holding._now_d() - Holding.RETURN_DAYS - 0.05
+	Holding.save(e)
+	Holding.server_hour(layer)
+	check(String(rr.get("asks_stay", "")) == key and String(Holding.entry(key).get("state", "")) == "claimed" and (Holding.entry(key).get("refugees", []) as Array).is_empty(),
+		"its people come back and ask to stay, not take it back")
+	var said := Holding.server_let_stay(layer, player, rr, true)
+	check(said == Holding.STAY_YES and String(rr.get("claimed_place", "")) == key and String(rr.get("refugee_from", "")) == "" and String(rr.id) in (Holding.entry(key).get("tenants", []) as Array),
+		"let them stay: they live there, at a place of ours")
 	player.global_position = start + Vector3.UP * 0.2
 	await _frames(5)
 

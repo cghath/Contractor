@@ -18,6 +18,7 @@ func _ready() -> void:
 	super._ready()
 	add_child(ZoneDead.new())  # the crowd tier of the dead (S3), the same path on every peer
 	add_child(SurvivalMap.new())  # what the survivors know: explored cells, known zones, marks
+	ClaimPost.install(self)  # posts at places left to the dead, to claim them (Holding, call 143)
 	add_child(SurvivorsLayer.new())  # the living: lone survivors, companions, graves (survival_people.md)
 	add_child(Nature.new())  # the wildlife, crows, trees, fire and regrowth (docs/survival_nature.md)
 	ModKit.activate()  # the mods on this peer too (items, zombie kinds: docs/fallen_modding.md)

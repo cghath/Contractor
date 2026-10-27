@@ -36,6 +36,11 @@ extends RefCounted
 ##   join_household), a world group's camp (members: take_in; a starving or hostile group turns
 ##   them away and they go on to the next safe place: group_refuses), the players' farm (they ask
 ##   to stay: server_ask_stay, a council vote or a player's yes in talk: server_let_stay).
+## - **Claiming** (server_claim, from a ClaimPost at the place): a place left to the dead (or an empty
+##   homestead a survivor comes near: server_find_empty) is the players' when nobody lives there
+##   and the dead aren't within CLAIM_DEAD_M: what's left there theirs (server_take_stock), the
+##   map's mark "Ours", the safehouse there if they like (server_make_safehouse), the settlement
+##   moved there by the council's vote (server_make_settlement). Its people coming back ask to stay.
 ## Every number here is Proposed.
 
 const KEY := "abandoned"
@@ -100,8 +105,22 @@ const STAY_LINES: Array[String] = ["We've nowhere else. Let us stay, we'll work.
 const REFUSED_LINES: Array[String] = ["They won't have us. We keep going.", "No room for us here. Come on."]
 const STAY_YES := "Thank you. You won't regret it."
 const STAY_NO := "Then we'll go. Good luck to you."
+## Claiming: no claim with the dead this near or anyone living within CLAIM_INSIDE_M; the claimer
+## within CLAIM_REACH_M; the world place under it within CLAIM_PLACE_M; a camp's supplies left
+## behind as things (STOCK_ITEMS, at most STOCK_MAX a kind); empty homesteads (EMPTY_TYPES) found
+## within EMPTY_SEEN_M of a survivor, looked for every EMPTY_CHECK_S.
+const CLAIM_DEAD_M := 30.0
+const CLAIM_INSIDE_M := 12.0
+const CLAIM_REACH_M := 10.0
+const CLAIM_PLACE_M := 40.0
+const STOCK_ITEMS := {"food": "beans_tin", "water": "water_bottle", "meds": "pressure_bandage", "fuel": "jerrycan", "wood": "planks", "scrap": "scrap_sheet"}
+const STOCK_MAX := 12
+const EMPTY_TYPES: Array[String] = ["farm", "farmland"]
+const EMPTY_SEEN_M := 60.0
+const EMPTY_CHECK_S := 5.0
 
 static var _chase_at := -1000.0
+static var _empty_at := -1000.0
 
 
 # --- The places left ----------------------------------------------------------------------------
@@ -311,6 +330,9 @@ static func server_tick(layer: SurvivorsLayer, dead: Array) -> void:
 		_judge_camps(layer, dead)
 	_tick_fleeing(layer, dead, now)
 	settlement_tick(layer, dead)
+	if now - _empty_at >= EMPTY_CHECK_S or now < _empty_at:
+		_empty_at = now
+		server_find_empty(layer)  # (empty homesteads a survivor comes near: places to claim)
 
 
 ## The threat at `at` (and about `bodies`): {"v", "n", "centre"}: the dead's bodies within HOLD_M,
@@ -405,7 +427,7 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 	save(e)
 	Survival._journal_line(text + ".")
 	_event(zone, "abandoned", text)
-	_mark(layer, home, "Abandoned: %s" % family_name(members))
+	_mark(layer, home, "Abandoned: %s" % family_name(members), key)
 	_chase_slowest(layer, Survival.zombies(layer.level))
 	SessionLog.note("survival: %s (%d) fled to %s" % [family_name(members), members.size(), String(dest.label)])
 	return e
@@ -584,8 +606,10 @@ static func _leave_behind(layer: SurvivorsLayer, home: Vector3, e: Dictionary, b
 	return left
 
 
-static func _mark(layer: SurvivorsLayer, at: Vector3, text: String) -> void:
-	SurvivalMap.server_add_mark(layer._zone(), at, text, "abandoned")
+static func _mark(layer: SurvivorsLayer, at: Vector3, text: String, key := "") -> void:
+	var m := SurvivalMap.server_add_mark(layer._zone(), at, text, "abandoned")
+	if key != "":
+		m["place"] = key  # (the claim post's: ClaimPost)
 	var map := SurvivalMap.of(layer.level)
 	if map:
 		map.server_changed()
@@ -1008,6 +1032,7 @@ static func _stay_answer(layer: SurvivorsLayer, rec: Dictionary, yes: bool, by: 
 		if where == "settlement":
 			_flee_on(layer, rec, {"from": _arr(Settlement.pos()), "key": String(rec.get("refugee_from", ""))}, "settlement")
 		else:
+			_turned_from_claimed(layer, rec)
 			var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
 			if b:
 				layer._set_known(b, rec)
@@ -1027,10 +1052,21 @@ static func _stay_answer(layer: SurvivorsLayer, rec: Dictionary, yes: bool, by: 
 
 ## Host: `rec` stays on at the place `key` the players claimed (call 143, gap 2): it's their home
 ## now, the players' place.
-static func _stay_at_claimed(_layer: SurvivorsLayer, rec: Dictionary, key: String) -> void:
+static func _stay_at_claimed(layer: SurvivorsLayer, rec: Dictionary, key: String) -> void:
 	rec.erase("refugee_from")
+	rec.erase("asks_from")
 	rec["claimed_place"] = key
-	SurvivorPerson.note(rec, "stayed on at a place the players hold")
+	var e := entry(key)
+	if not e.is_empty():
+		var t: Array = e.get("tenants", [])
+		if not String(rec.get("id", "")) in t:
+			t.append(String(rec.get("id", "")))
+		e["tenants"] = t
+		save(e)
+	SurvivorPerson.note(rec, "stayed on at %s, a place the players hold" % place_title(e))
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	if b:
+		layer._set_known(b, rec)
 
 
 # --- Live: a world group's camp (WorldLive) -----------------------------------------------------------
@@ -1082,7 +1118,7 @@ static func _judge_camps(layer: SurvivorsLayer, dead: Array) -> void:
 			layer.say(bodies[0], FLEE_LINES[absi(hash(gid)) % FLEE_LINES.size()])
 		var text := "%s left their %s to the dead" % [String(g.get("name", "A group")), place_word(String(pl.get("type", "")))]
 		Survival._journal_line(text + ".")
-		_mark(layer, home, "Abandoned: %s" % String(g.get("name", "")))
+		_mark(layer, home, "Abandoned: %s" % String(g.get("name", "")), "g:%s:%s" % [gid, String(h.get("place", ""))])
 
 
 # --- The sim (WorldModel.step, on the worker; no scene tree) -----------------------------------------
@@ -1281,8 +1317,12 @@ static func group_relocate(m: WorldModel, g: Dictionary, z: String, caught_roll 
 	if caught != "":
 		text += " (%s was caught)" % String((m.people.get(caught, {}) as Dictionary).get("name", "one"))
 		m.person_dies(caught, g, "caught by the dead as they ran", true, pl)
+	var stock := {}
 	for k: String in WorldGroup.SUPPLY_KEYS:
-		WorldGroup.add_supply(g, k, -WorldGroup.supply(g, k) * GROUP_LEAVE)
+		var amt := WorldGroup.supply(g, k) * GROUP_LEAVE
+		if amt > 0.0:
+			stock[k] = snappedf(amt, 0.01)  # (left behind: the players' if they claim it)
+		WorldGroup.add_supply(g, k, -amt)
 	if not pl.is_empty():
 		pl["abandoned"] = {"day": m.day(), "group": gid}
 	m.clear_home(g)
@@ -1292,7 +1332,7 @@ static func group_relocate(m: WorldModel, g: Dictionary, z: String, caught_roll 
 	(g.mood as Dictionary).fear = minf(1.0, float((g.mood as Dictionary).get("fear", 0.0)) + 0.2)
 	var e := {"key": key, "zone": z, "pos": [float(hp[0]), 0.0, float(hp[1])], "ids": (g.members as Array).duplicate(), "names": [], "text": text, "word": word,
 		"day": m.day(), "state": "abandoned", "refugees": [], "where": String(m.zone(to).get("name", to)), "signs": false, "door_open": true,
-		"clear_since": NOT_CLEAR, "by": "the dead", "group": gid, "y_unset": true}
+		"clear_since": NOT_CLEAR, "by": "the dead", "group": gid, "y_unset": true, "stock": stock}
 	if not m.w.get(KEY) is Dictionary:
 		m.w[KEY] = {}
 	(m.w[KEY] as Dictionary)[key] = e
@@ -1343,7 +1383,7 @@ static func server_zone_up(layer: SurvivorsLayer) -> int:
 		e["signs"] = true
 		save(e)
 		Survival._journal_line("%s. The door stood open, things dropped in a hurry, a note." % String(e.get("text", "Someone left their home to the dead")))
-		_mark(layer, at, "Abandoned")
+		_mark(layer, at, "Abandoned", key)
 		n += 1
 	return n
 
@@ -1523,7 +1563,7 @@ static func server_hour(layer: SurvivorsLayer) -> int:
 	var n := 0
 	for key: String in places().keys():
 		var e: Dictionary = places()[key]
-		if String(e.get("state", "")) != "abandoned" or (e.get("refugees", []) as Array).is_empty():
+		if not String(e.get("state", "")) in ["abandoned", "claimed"] or (e.get("refugees", []) as Array).is_empty():
 			continue
 		if not is_clear(layer, e):
 			if float(e.get("clear_since", NOT_CLEAR)) > NOT_CLEAR * 0.5:
@@ -1542,8 +1582,9 @@ static func server_hour(layer: SurvivorsLayer) -> int:
 ## Host: the refugees of place `key` go home (`by`: the player who told them it's clear). Returns how many.
 static func server_return(layer: SurvivorsLayer, key: String, by: Soldier = null) -> int:
 	var e := entry(key)
-	if e.is_empty() or String(e.get("state", "")) != "abandoned":
+	if e.is_empty() or not String(e.get("state", "")) in ["abandoned", "claimed"]:
 		return 0
+	var claimed := String(e.state) == "claimed"  # (the players' now: they come back and ask to stay)
 	var home := _v3(e.get("pos", []))
 	var hosted: bool = (layer.level != null and layer._zone() == String(e.zone)) if layer else false
 	if hosted and (bool(e.get("y_unset", false)) or is_zero_approx(home.y)):
@@ -1556,7 +1597,12 @@ static func server_return(layer: SurvivorsLayer, key: String, by: Soldier = null
 			continue
 		n += 1
 		i += 1
-		rec.erase("refugee_from")
+		if claimed:
+			rec["asks_from"] = _arr(SurvivorPerson.pos_of(rec, "home"))
+			rec["asks_stay"] = key
+			SurvivorPerson.note(rec, "came home and found it held by others")
+		else:
+			rec.erase("refugee_from")
 		var j: Dictionary = rec.get("joined", {})
 		if String(j.get("kind", "")) == "household":  # (they leave the household that took them in)
 			if String(j.get("old", "")) != "":
@@ -1598,6 +1644,13 @@ static func server_return(layer: SurvivorsLayer, key: String, by: Soldier = null
 			rec["y_unset"] = true
 		else:
 			rec.erase("y_unset")
+	if claimed:
+		e["refugees"] = []
+		e["asked_day"] = Survival.day()
+		save(e)
+		if n > 0:
+			Survival._journal_line("%s came back to %s and found it ours. They ask to stay." % [String(e.get("text", "")).get_slice(" left ", 0) if String(e.get("text", "")).contains(" left ") else "Its people", place_title(e)])
+		return n
 	e["state"] = "reclaimed"
 	e["back_day"] = Survival.day()
 	save(e)
@@ -1625,3 +1678,283 @@ static func server_clear_now(layer: SurvivorsLayer, actor: Soldier, rec: Diction
 		layer.say(body, CLEAR_YES)
 	server_return(layer, key, actor)
 	return CLEAR_YES
+
+
+# --- Claiming a place left to the dead (gap 2) ---------------------------------------------------------
+
+## Why the players can't claim the place `key` now ("" they can): not a place left (abandoned, or
+## an empty homestead), already theirs, the dead within CLAIM_DEAD_M, or someone living there
+## (a household's home within CLAIM_INSIDE_M, a group holding it again).
+static func claim_problem(layer: SurvivorsLayer, key: String) -> String:
+	var e := entry(key)
+	if e.is_empty():
+		return "Nothing to claim here"
+	var state := String(e.get("state", ""))
+	if state == "claimed":
+		return "It's already ours"
+	if not state in ["abandoned", "empty"]:
+		return "Its people came back"
+	var at := _v3(e.get("pos", []))
+	var zone := String(e.get("zone", ""))
+	if layer and layer.level and zone == layer._zone():
+		if _dead_near(Survival.zombies(layer.level), at, CLAIM_DEAD_M):
+			return "The dead are too close"
+		var crowd := ZoneDead.of(layer.level)
+		if crowd:
+			for d: Dictionary in crowd.dead:
+				if bool(d.get("alive", false)) and (d.pos as Vector2).distance_to(Vector2(at.x, at.z)) <= CLAIM_DEAD_M:
+					return "The dead are too close"
+	for r: Dictionary in SurvivorsLayer.records().values():
+		if String(r.get("status", "")) == "out_there" and String(r.get("zone", "")) == zone and not r.has("flee") \
+				and _flat(SurvivorPerson.pos_of(r, "home"), at) <= CLAIM_INSIDE_M:
+			return "Someone still lives here"
+	var pid := _claim_place_id(e)
+	if pid != "" and WorldSim.is_set_up():
+		var holder := WorldSim.holder_of(zone, pid)
+		if holder != "" and holder != "player" and holder != String(e.get("group", "-")):
+			return "Someone holds it now"
+	return ""
+
+
+## The world place under entry `e` (a group's camp: its place; else the nearest within CLAIM_PLACE_M).
+static func _claim_place_id(e: Dictionary) -> String:
+	var key := String(e.get("key", ""))
+	if key.begins_with("g:") and key.get_slice_count(":") >= 3:
+		return key.get_slice(":", 2)
+	if not WorldSim.is_set_up():
+		return ""
+	var at := _v3(e.get("pos", []))
+	var best := ""
+	var best_d := CLAIM_PLACE_M
+	var zd: Dictionary = (WorldSim.section().get("zones", {}) as Dictionary).get(String(e.get("zone", "")), {})
+	for pl: Dictionary in zd.get("places", []):
+		var d := WorldModel._place_v(pl).distance_to(Vector2(at.x, at.z))
+		if d < best_d:
+			best_d = d
+			best = String(pl.get("id", ""))
+	return best
+
+
+## Host: `actor` claims the place `key` (in reach, claim_problem clear): it's the players' (a
+## second home: "owner", the world place held by "player" so no group settles it), what's left
+## there theirs ("stores": a camp's supplies left behind as things; take them with server_take_stock),
+## the map's mark "Ours", a journal line. Returns why not ("" done).
+static func server_claim(layer: SurvivorsLayer, actor: Soldier, key: String) -> String:
+	var why := claim_problem(layer, key)
+	var e := entry(key)
+	if why == "" and actor and _flat(actor.global_position, _v3(e.get("pos", []))) > CLAIM_REACH_M:
+		why = "Too far"
+	if why != "":
+		return why
+	var title := place_title(e)
+	e["state"] = "claimed"
+	e["owner"] = Survival.profile_of(actor) if actor else "host"
+	e["claimed_day"] = Survival.day()
+	e["stores"] = stock_items(e.get("stock", {}))
+	save(e)
+	_world_hold(e, "player")
+	_retag_mark(layer, e, "claimed", "Ours: %s" % title)
+	Survival._journal_line("We claimed %s. It's ours now." % title)
+	_event(String(e.get("zone", "")), "claimed", "The newcomers claimed %s" % title)
+	return ""
+
+
+## "the Halvorsens' farm" for entry `e` (a place's own words), "an empty homestead".
+static func place_title(e: Dictionary) -> String:
+	if String(e.get("title", "")) != "":
+		return String(e.title)
+	var text := String(e.get("text", ""))
+	var word := String(e.get("word", "place"))
+	var who := text.get_slice(" left ", 0) if text.contains(" left ") else ""
+	if who == "":
+		return "the " + word
+	if who.begins_with("The "):
+		who = "the " + who.substr(4)
+	return "%s%s %s" % [who, "'" if who.ends_with("s") else "'s", word]
+
+
+## A camp's supplies left behind (`stock`: {"food": days, ...}) as things: STOCK_ITEMS each, at most
+## STOCK_MAX of a kind. {item id: count}.
+static func stock_items(stock: Variant) -> Dictionary:
+	var out := {}
+	if not stock is Dictionary:
+		return out
+	for k: String in (stock as Dictionary):
+		var id := String(STOCK_ITEMS.get(k, ""))
+		var n := clampi(roundi(float((stock as Dictionary)[k])), 0, STOCK_MAX)
+		if id != "" and n > 0 and ItemDB.get_item(StringName(id)) != null:
+			out[id] = int(out.get(id, 0)) + n
+	return out
+
+
+## Host: `actor` takes what's left at the claimed place `key` (what won't fit is put down by him).
+static func server_take_stock(layer: SurvivorsLayer, actor: Soldier, key: String) -> String:
+	var e := entry(key)
+	if String(e.get("state", "")) != "claimed":
+		return "It isn't ours"
+	if actor == null or _flat(actor.global_position, _v3(e.get("pos", []))) > CLAIM_REACH_M:
+		return "Too far"
+	var stores: Dictionary = e.get("stores", {})
+	if stores.is_empty():
+		return "Nothing left here"
+	for id: String in stores.keys():
+		var n := int(stores[id])
+		var got := actor.inventory.take(StringName(id), n)
+		if got < n and layer and layer.level:
+			layer.level.server_spawn_dropped(StringName(id), n - got, actor.global_position + Vector3.UP * 0.4)
+	e["stores"] = {}
+	save(e)
+	return ""
+
+
+## Host: the claimed place `key` is the safehouse now (where the survivors sleep and come back):
+## the safehouse mark moves there. Returns why not.
+static func server_make_safehouse(layer: SurvivorsLayer, key: String) -> String:
+	var e := entry(key)
+	if String(e.get("state", "")) != "claimed":
+		return "It isn't ours"
+	var safe := SurvivalMap.safehouse()
+	if safe.is_empty():
+		safe = SurvivalMap.server_add_mark(String(e.zone), _v3(e.get("pos", [])), "Safehouse", "safehouse")
+	safe["zone"] = String(e.zone)
+	safe["pos"] = (e.get("pos", [0.0, 0.0, 0.0]) as Array).duplicate()
+	safe["text"] = "Safehouse (%s)" % place_title(e)
+	safe.erase("auto")
+	_map_changed(layer)
+	Survival._journal_line("We'll sleep at %s now: it's our safehouse." % place_title(e))
+	return ""
+
+
+## Host: the claimed place `key` as the settlement: founded there when there's none, else the
+## council's question (a "move": never silently). Returns why not.
+static func server_make_settlement(key: String) -> String:
+	var e := entry(key)
+	if String(e.get("state", "")) != "claimed":
+		return "It isn't ours"
+	var at := _v3(e.get("pos", []))
+	if not Settlement.exists():
+		Settlement.server_found(String(e.zone), at)
+		Survival._journal_line("We made %s our settlement." % place_title(e))
+		return ""
+	if Settlement.zone() == String(e.zone) and _flat(Settlement.pos(), at) <= Settlement.radius():
+		return "It's the settlement already"
+	var id := Council.server_put({"kind": "move", "zone": String(e.zone), "pos": _arr(at), "text": "Move the settlement to %s?" % place_title(e)}, ["Move", "Stay"])
+	return "" if id >= 0 else "No council to ask"
+
+
+## Host: the world place under entry `e` held by `holder` ("player": no group settles or forages it).
+static func _world_hold(e: Dictionary, holder: String) -> void:
+	var pid := _claim_place_id(e)
+	var sim := WorldSim.get_sim()
+	if pid == "" or sim == null or not WorldSim.is_set_up():
+		return
+	var z := String(e.get("zone", ""))
+	sim.mutate(func(w: Dictionary) -> void:
+		var zd: Dictionary = (w.get("zones", {}) as Dictionary).get(z, {})
+		for pl: Dictionary in zd.get("places", []):
+			if String(pl.get("id", "")) == pid:
+				pl["holder"] = holder)
+
+
+## Host: the map mark for entry `e` (by its "place" key, else an "abandoned" one within 4 m) made
+## `kind` with `text` (added when there's none).
+static func _retag_mark(layer: SurvivorsLayer, e: Dictionary, kind: String, text: String) -> void:
+	var key := String(e.get("key", ""))
+	var at := _v3(e.get("pos", []))
+	var found := {}
+	for m: Variant in SurvivalMap.marks(String(e.get("zone", ""))):
+		if not m is Dictionary:
+			continue
+		var md: Dictionary = m
+		if String(md.get("place", "")) == key or (String(md.get("kind", "")) == "abandoned" and String(md.get("place", "")) == "" and SurvivalMap.mark_pos(md).distance_to(Vector2(at.x, at.z)) <= 4.0):
+			found = md
+			break
+	if found.is_empty():
+		found = SurvivalMap.server_add_mark(String(e.get("zone", "")), at, text, kind)
+	found["kind"] = kind
+	found["text"] = text
+	found["place"] = key
+	_map_changed(layer)
+
+
+static func _map_changed(layer: SurvivorsLayer) -> void:
+	var map: SurvivalMap = SurvivalMap.of(layer.level) if layer and layer.level else null
+	if map:
+		map.server_changed()
+
+
+## Host (Settlement.server_action "claim", from a ClaimPost): `actor` does `what` at place `key`
+## ("claim", "take", "safehouse", "settlement"); he's told how it went. Returns why not.
+static func server_claim_action(actor: Soldier, key: String, what: String) -> String:
+	var lvl: CompoundLevel = CompoundLevel.current(actor) if actor and actor.is_inside_tree() else null
+	var layer: SurvivorsLayer = SurvivorsLayer.find(lvl) if lvl else null
+	var why := "Can't do that"
+	var done := ""
+	match what:
+		"claim":
+			why = server_claim(layer, actor, key)
+			done = "It's ours now"
+		"take":
+			why = server_take_stock(layer, actor, key)
+			done = "You take what's left"
+		"safehouse":
+			why = server_make_safehouse(layer, key)
+			done = "Our safehouse now"
+		"settlement":
+			why = server_make_settlement(key)
+			done = "Put to the council" if Council.open_votes().any(func(v: Dictionary) -> bool: return String((v.question as Dictionary).get("kind", "")) == "move") else "Our settlement now"
+	if actor:
+		Survival._tell(actor, why if why != "" else done)
+	return why
+
+
+## Host, from server_tick (every EMPTY_CHECK_S): a homestead nobody holds (a world farm with no
+## holder, nobody living there, not the players' farm) a survivor comes near is found: an "empty"
+## place to claim, with its mark. Returns how many were found.
+static func server_find_empty(layer: SurvivorsLayer) -> int:
+	if not WorldSim.is_set_up() or layer == null or layer.level == null:
+		return 0
+	var zone := layer._zone()
+	var zd: Dictionary = (WorldSim.section().get("zones", {}) as Dictionary).get(zone, {})
+	var players := MapNodes.players(layer.level)
+	var n := 0
+	for pl: Dictionary in zd.get("places", []):
+		if not ZoneModules.base(String(pl.get("type", ""))) in EMPTY_TYPES or String(pl.get("holder", "")) != "":
+			continue
+		var key := "e:%s:%s" % [zone, String(pl.get("id", ""))]
+		if places().has(key):
+			continue
+		var p2 := WorldModel._place_v(pl)
+		var at := Vector3(p2.x, 0.0, p2.y)
+		if Settlement.exists() and Settlement.zone() == zone and _flat(at, Settlement.pos()) <= Settlement.radius() + CLAIM_INSIDE_M:
+			continue
+		if not players.any(func(p: Soldier) -> bool: return _flat(p.global_position, at) <= EMPTY_SEEN_M):
+			continue
+		if SurvivorsLayer.records().values().any(func(r: Dictionary) -> bool: return String(r.get("status", "")) == "out_there" and String(r.get("zone", "")) == zone \
+				and _flat(SurvivorPerson.pos_of(r, "home"), at) <= CLAIM_INSIDE_M * 2.0):
+			continue
+		at = layer.level.ground_point(at)
+		var e := {"key": key, "zone": zone, "pos": _arr(at), "ids": [], "names": [], "text": "", "title": "an empty homestead", "word": "farm",
+			"day": Survival.day(), "state": "empty", "refugees": [], "where": "", "signs": true, "door_open": false, "clear_since": NOT_CLEAR, "by": ""}
+		save(e)
+		var mark := SurvivalMap.server_add_mark(zone, at, "Empty homestead", "abandoned")
+		mark["place"] = key
+		_map_changed(layer)
+		n += 1
+	return n
+
+
+## Host: `rec` turned away from the place they came back to (it's the players' now): home again to
+## where they lived as refugees.
+static func _turned_from_claimed(layer: SurvivorsLayer, rec: Dictionary) -> void:
+	rec.erase("refugee_from")
+	if not rec.has("asks_from"):
+		return
+	var home := _v3(rec.asks_from)
+	rec.erase("asks_from")
+	SurvivorPerson.set_pos(rec, home, "home")
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	if b and b.vitals.is_up():
+		rec["flee"] = {"to": _arr(home), "kind": "home", "to_zone": "", "label": "home", "key": "", "since": Soldier._now(), "cover_until": 0.0,
+			"route": [_arr(home)], "leg": 0, "from": _arr(b.global_position)}
+		layer._set_known(b, rec)
