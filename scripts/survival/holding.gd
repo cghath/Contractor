@@ -372,7 +372,8 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 		_grab(rec, b)
 		rec["flee"] = {"to": _arr(dest.pos as Vector3), "kind": String(dest.kind), "to_zone": String(dest.get("to_zone", "")), "label": String(dest.label),
 			"key": key, "since": now, "cover_until": now + COVER_S if covers else 0.0, "route": route, "leg": 0, "from": _arr(from)}
-		rec["refugee_from"] = key
+		if String(rec.get("refugee_from", "")) == "" or entry(String(rec.refugee_from)).is_empty():
+			rec["refugee_from"] = key  # (running again from where they took refuge: home is still the first place)
 		Moods.add(rec, "lost_home", -10.0, 48.0)
 		SurvivorPerson.note(rec, "ran from the dead, leaving %s" % ("home" if word == "camp" else "the " + word))
 		if b and b.vitals.is_up():
@@ -494,7 +495,11 @@ static func _route(layer: SurvivorsLayer, home: Vector3, to: Vector3, from: Vect
 	var best := Vector2.INF
 	var best_d := ROAD_M
 	for r: Variant in def.get("roads", []):
-		var pts: Array = r if r is Array else []
+		var pts: Array = []
+		var raw: Variant = (r as Dictionary).get("points", []) if r is Dictionary else r
+		for q: Variant in (raw if raw is Array else []):
+			if q is Array and (q as Array).size() >= 2 and not (q as Array)[0] is String:
+				pts.append(q)
 		for i in pts.size() - 1:
 			var a: Array = pts[i]
 			var b: Array = pts[i + 1]

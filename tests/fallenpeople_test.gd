@@ -446,7 +446,7 @@ func _test_holding() -> void:
 	if zz:
 		zz.vitals.server_kill()
 	await _frames(2)
-	Holding.settlement_tick(layer, Survival.zombies(level))
+	Holding.settlement_tick(layer, [])
 	check(not se.has("sheltering"), "the dead gone, back about the day")
 	player.global_position = start + Vector3.UP * 0.2
 	await _frames(5)

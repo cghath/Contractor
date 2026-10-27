@@ -568,6 +568,7 @@ func _test_catch_up() -> void:
 	k.goal = {"kind": "raid", "zone": start, "place": "safehouse", "target": "player", "phase": "go", "since": 0, "work": 0}
 	WorldSim.people()["test_comp"] = {"id": "test_comp", "name": "Test Companion", "status": "companion", "zone": near, "pos": [0.0, 0.0, 0.0]}
 	var t0 := float(w.get("t", 0.0))
+	var ev0 := int(w.get("next_event", 0))
 	var day0 := Survival.day() + Survival.hour() / 24.0
 	var hours := WorldSim.server_catch_up(60.0)
 	w = WorldSim.section()
@@ -575,7 +576,12 @@ func _test_catch_up() -> void:
 	check(float(w.t) - t0 <= WorldSim.CATCH_UP_DAYS + 0.01 and float(w.t) - t0 >= WorldSim.CATCH_UP_DAYS - 0.02, "the world moved %.2f days" % (float(w.t) - t0))
 	check(Survival.day() + Survival.hour() / 24.0 > day0 + 1.9, "and the clock with it (day %d)" % Survival.day())
 	var report: Dictionary = w.get("away_report", {})
-	check(not (report.get("lines", []) as Array).is_empty(), "the report lists what happened near the farm: %s" % "; ".join(report.get("lines", [])))
+	var kinds := {}
+	for ev: Dictionary in w.get("events", []):
+		if int(ev.id) > ev0:
+			var k := "%s%s" % [String(ev.kind), "*" if WorldSim.is_near(ev) else ""]
+			kinds[k] = int(kinds.get(k, 0)) + 1
+	check(not (report.get("lines", []) as Array).is_empty(), "the report lists what happened near the farm: %s (events: %s)" % ["; ".join(report.get("lines", [])), str(kinds)])
 	var journal: Array = Survival.state().get("journal", [])
 	check(journal.any(func(j: Dictionary) -> bool: return String(j.text).begins_with("While you were away")), "in the journal")
 	var raided := (w.events as Array).any(func(e: Dictionary) -> bool: return String(e.kind) == "raid" and "player" in (e.groups as Array))
