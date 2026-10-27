@@ -43,6 +43,7 @@ func _ready() -> void:
 	await _test_heavy_and_crush()
 	await _test_hanging()
 	await _test_heads_and_marks()
+	await _test_rpg_near_miss()
 	await _test_gore_setting()
 	await _test_save_round_trip()
 	print("GORE TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -537,6 +538,20 @@ func _test_heavy_and_crush() -> void:
 	check(s.inventory.slots[&"helmet"] == &"" and helmets.size() == 1, "the helmet came off with the head, an item to pick up (%d near)" % helmets.size())
 
 
+## Captain, 2026-10-26: "arms and legs dont show they were blown off when someone was shot with
+## an RPG or AT4": a PG-7V bursting 0.8 m from a living man kills him and takes whole limbs.
+func _test_rpg_near_miss() -> void:
+	print("An RPG bursting beside a living man")
+	var s := _man("GoreRpgNear")
+	await _seconds(0.3)
+	var hip := _hitbox_point(s, Vitals.THIGH_R)
+	Warheads.server_burst(level, &"pg7v", hip + s.global_basis.x * 0.8 + Vector3.UP * 0.1, -s.global_basis.x, null, null)
+	await _seconds(0.5)
+	var deform := _deform(s)
+	var whole := deform.severed().filter(func(p: StringName) -> bool: return not p in deform.dangling())
+	check(s.vitals.is_dead() and not whole.is_empty(), "dead, and limbs torn off (%s, dead %s)" % [deform.severed(), s.vitals.is_dead()])
+
+
 ## Captain, 2026-10-21: "the first headshot doesnt leave a wound"; "theres no model for a neck
 ## which had its head severed by an rpg round. it carves a crater out in the body"; "blood marks
 ## on a body stay where a limb was after it dismembers when shooting with weapons".
@@ -566,6 +581,14 @@ func _test_heads_and_marks() -> void:
 		"an RPG on the head takes the head and only the head (%s), no gib, no crater in the torso (%d)" % [cut, torso_craters.size()])
 	check(neck is AABB and (neck as AABB).size.y > 0.03 and (neck as AABB).size.y < 0.1,
 		"a neck stump stands where it was (%.1f cm)" % ((neck as AABB).size.y * 100.0 if neck is AABB else -1.0))
+	# Captain, 2026-10-26: "when dismembered the neck stays where it was": the stump goes down with
+	# the body, on its collar, and the pulped head's face goes too.
+	await _wait_for(func() -> bool: return is_instance_valid(r.ragdoll) and r.ragdoll.frozen, 10.0)
+	var collar := r.model.torso.global_transform * CharacterModel.HEAD_PIVOT
+	var off := r.model.head.global_position.distance_to(collar)
+	var face_shown := r.model.face_rig != null and r.model.face_rig._parts.values().any(func(m: Variant) -> bool: return m is Node3D and is_instance_valid(m) and (m as Node3D).is_visible_in_tree())
+	check(is_instance_valid(r.ragdoll) and off < 0.05 and not face_shown,
+		"the neck's stump lies with the body, on its collar (%.2f m off), no face left floating (%s)" % [off, face_shown])
 	# Marks low on a thigh, then the thigh cut high: the marks past the cut go with it.
 	var m := _man("GoreMarks")
 	await _seconds(0.3)

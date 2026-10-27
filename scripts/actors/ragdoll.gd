@@ -514,6 +514,11 @@ func _bones() -> Dictionary:
 	for key: String in parts:
 		var g: Transform3D = (parts[key] as Node3D).global_transform
 		out[key] = inv * Transform3D(g.basis * scale, g.origin)
+	# The head cut off: its part is held where it was, but the neck's stump (drawn on the head's
+	# bone, BodyDeform) goes with the torso, on its collar (Captain, 2026-10-26: "the neck stays
+	# where it was").
+	if cut_away.has("head") and out.has("torso"):
+		out["head"] = (out["torso"] as Transform3D) * Transform3D(Basis(), CharacterModel.HEAD_PIVOT)
 	return out
 
 

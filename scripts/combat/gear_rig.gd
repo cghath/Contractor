@@ -1065,10 +1065,17 @@ static func point_transform(p: Dictionary, size: Vector3, scale := 1.0) -> Trans
 ## draws it that size instead of its own (an aid bag fitted to the pack it is strapped on).
 static func pouch_node(item: ItemData, colour: Color, full: bool, layers := 1, size := Vector3.ZERO, held: Array = []) -> Node3D:
 	var root := Node3D.new()
+	var tall := 0
 	for part: Array in pouch_parts(item, colour, full, size, held):
 		var box := _part_box(part[0], part[1], part[2], layers)
-		if part[3]:
+		if part[3]:  # each in a holder of its own, so every one keeps the name "Antenna"
 			box.name = "Antenna"
+			var holder := Node3D.new()
+			holder.name = "Tall%d" % tall
+			tall += 1
+			holder.add_child(box)
+			root.add_child(holder)
+			continue
 		root.add_child(box)
 	return root
 

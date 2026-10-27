@@ -849,6 +849,10 @@ func _done_work(pivot: Node3D, buffer: VoxelBuffer, out: Dictionary) -> void:
 		var piece_mesh: Mesh = mesher.build_mesh(p.buffer, [])
 		if piece_mesh and mi and not (p.hull as PackedVector3Array).is_empty():
 			_drop(StringName(p.part), pivot, mi, piece_mesh, p.hull)
+	# A head cut off with no piece to carry its face (pulped: a launcher's direct hit): the face
+	# goes all the same, not left floating over the stump (Captain, 2026-10-26).
+	if out.get("cut", false) and pivot == model.head and model.face_rig and not model.face_rig.head_off:
+		model.face_rig.head_severed(null)
 	if out.get("cut", false):
 		reshaped.emit()
 	_kick(pivot)
