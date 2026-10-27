@@ -69,6 +69,7 @@ func _ready() -> void:
 	await _test_expansion_guns()
 	await _test_reload_beats()
 	await _test_arm_hits()
+	await _test_leg_boxes()
 	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
@@ -530,6 +531,28 @@ func _test_reload_beats() -> void:
 ## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
 ## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
 ## the new one carried up and in, and the carrier locked back until the catch is slapped.
+## The legs' hitboxes follow the legs as drawn (the model pass's leftover, 2026-10-27), as the arms'
+## do: the drawn left thigh swung forward by hand, the boxes posed again, its box turns with it.
+func _test_leg_boxes() -> void:
+	print("Leg hitboxes follow the drawn legs")
+	var s := level.spawn_soldier({"name": "LegTarget", "faction": "hostile", "variant": "multicam",
+		"pos": player.global_position + Vector3(-6, 0, 6), "loadout": ["plate_carrier"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await _seconds(0.5)
+	s.model.set_process(false)
+	var thigh: Area3D = null
+	for a: Area3D in CharacterModel._posable_hitboxes(s):
+		if a.get_meta(&"body_part", &"") == Vitals.THIGH_L:
+			thigh = a
+	var before := thigh.transform.basis if thigh else Basis()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, 1.0), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var turned := (before.inverse() * thigh.transform.basis).get_euler().x if thigh else 0.0
+	check(thigh != null and absf(turned - 1.0) < 0.05, "the left thigh's box turns with the drawn thigh (%.2f rad of 1.00)" % turned)
+	s.model.set_process(true)
+	s.queue_free()
+
+
 ## Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems. i tried
 ## from both left and right sides"): rounds from the left, the right and the front at an aiming
 ## soldier's upper arms, forearms and hands. From the arm's own side the round must wound that
