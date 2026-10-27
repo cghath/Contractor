@@ -20,6 +20,8 @@ extends Node
 ##     --hot_win X     a hot-zone contract's win chance as a share of the profile's (default 0.92)
 ##     --hot_cap N     at most N contracts done per hot-zone deployment (default 0: no cap)
 ##     --op 0|1        also play the scripted expensive op (default 1; see _expensive_op)
+##     --hc N          high command men from the start: 0 (default, v0.7.1: none until hired) or
+##                     8 (the old Hawk 2 + Viper 3 with their fortnight of wages)
 ##     --income 0|1    the income streams (claude/income, docs/income.md; default 1): high command
 ##                     side jobs, captures sold to buyers, bounties, intel buyers, FOB businesses
 ##                     from the profile's "fob_day", black market trading. 0 plays the game as it
@@ -49,8 +51,9 @@ const SQUAD_OUT := 6  # heads deployed: 2 players + 4 AI squadmates
 const AI_OUT := 4
 const ROSTER_SIZE := 8
 const CHECKPOINTS := [0, 5, 10, 15, 20, 25, 30, 35]
-## The standing high command squads (Heroes.STANDING): two teams of four.
-const HC_MEN := 8
+## The standing high command squads (Heroes.STANDING): two teams of four, or none (--hc 0, the
+## default since v0.7.1, when a campaign starts with the slots open).
+var HC_MEN := 0
 
 ## Play profiles. Every number is an assumption about how a squad plays (stated in the proposal),
 ## not something read from the game.
@@ -154,6 +157,7 @@ func _ready() -> void:
 	_hot_win = float(args.get("hot_win", _hot_win))
 	_hot_cap = int(args.get("hot_cap", _hot_cap))
 	_income = String(args.get("income", "1")) != "0"
+	HC_MEN = int(args.get("hc", "0"))
 	Income.enabled = _income
 	var variants: Array = ["current", "proposed"] if String(args.get("variant", "both")) == "both" else [String(args.variant)]
 	var profiles: Array = PROFILES.keys() if String(args.get("profile", "all")) == "all" else [String(args.profile)]
@@ -250,8 +254,9 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 	var hc_wages := 0
 	for m: Dictionary in _hc:
 		hc_wages += int(m.wage)
-	Economy.add_cash(hc_wages * Heroes.START_WAGE_DAYS, "Standing squads: their first fortnight")  # as BaseHub
-	Heroes.seed_standing(Campaign.section(&"roster"), Economy.day(), hc_rng)  # the side jobs' squads (their wages are _hc's above)
+	if HC_MEN > 0:
+		Economy.add_cash(hc_wages * Heroes.START_WAGE_DAYS, "Standing squads: their first fortnight")  # as BaseHub
+		Heroes.seed_standing(Campaign.section(&"roster"), Economy.day(), hc_rng)  # the side jobs' squads (their wages are _hc's above)
 	FobBusiness.fob_override = 0  # no FOB until the profile's fob_day
 	_harvest("")
 	var start_day := Economy.day()
@@ -286,6 +291,7 @@ func _run_campaign(prof: Dictionary, campaign_seed: int, days: int, one_op := fa
 			Economy.advance_days(1, "waiting for work")
 			_harvest("")
 		else:
+			d["index"] = deploys.size()
 			deploys.append(d)
 		for cp: int in CHECKPOINTS:
 			if not cash_at.has(cp) and Economy.day() - start_day >= cp and cp > 0:
@@ -1045,6 +1051,15 @@ func _report(pname: String, v: String, runs: int, totals: Dictionary, cash_at: D
 	print("  economic net per deployment (all cash in and out, its days' wages and upkeep): mean %s, p10 %s, worst %s, %d%% negative" % [
 		_k(_mean(nets)), _k(_pct(nets, 0.1)), _k(_pct(nets, 0.0)), roundi(100.0 * neg_net / maxf(nets.size(), 1))])
 	print("  debrief 'net after expenses' as shown: mean %s, p10 %s, worst %s, %d%% negative" % [_k(_mean(shown)), _k(_pct(shown, 0.1)), _k(_pct(shown, 0.0)), roundi(100.0 * neg_shown / maxf(shown.size(), 1))])
+	# Starter work (v0.7.1, the Captain: "going negative on early starter missions is common").
+	var early: Array = deploys.filter(func(d: Dictionary) -> bool: return int(d.get("index", 99)) < 3).map(func(d: Dictionary) -> float: return float(d.econ_net))
+	print("  first 3 deployments: mean %s, p10 %s, %d%% negative" % [_k(_mean(early)), _k(_pct(early, 0.1)),
+		roundi(100.0 * early.filter(func(x: float) -> bool: return x < 0).size() / maxf(early.size(), 1))])
+	for r in range(1, 6):
+		var at: Array = deploys.filter(func(d: Dictionary) -> bool: return int(d.rating) == r and not d.hot).map(func(d: Dictionary) -> float: return float(d.econ_net))
+		if not at.is_empty():
+			print("  rated %d (contract zones, %d): mean %s, p10 %s, %d%% negative" % [r, at.size(), _k(_mean(at)), _k(_pct(at, 0.1)),
+				roundi(100.0 * at.filter(func(x: float) -> bool: return x < 0).size() / maxf(at.size(), 1))])
 	# Mean per-deployment line items.
 	var per := {}
 	for d: Dictionary in deploys:

@@ -4,9 +4,11 @@ extends RefCounted
 ## statics on the roster section, like Roster, so the host, tests and UI share one set of rules.
 ##
 ## A detachment is a standing high command squad the company keeps: a hero (its team leader)
-## and his men, with a callsign. The two standing ones (Hawk 2, Viper 3) come with every new
-## campaign (seed_standing) and deploy on every contract unless left at home; they're never
-## charged per deployment. Their members never fill the player squad's slots.
+## and his men, with a callsign. Since v0.7.1 (the Captain, 2026-10-26) a new campaign starts
+## with none: the slots stay open and the host hires one at the FOB (hire_squad, HIRE_FEE) up
+## to MAX_HIRED. A hired squad is "standing": it deploys on every contract unless left at home
+## and is never charged per deployment. Its members never fill the player squad's slots.
+## seed_standing (Hawk 2, Viper 3 at once) is kept for tests and BaseHub.standing_squads.
 ##
 ## roster["detachments"]: id -> {"id", "callsign", "leader": mid, "members": [mids], "standing":
 ## bool, "formed_day", "home": bool (left at home for the next deployment)}.
@@ -17,6 +19,15 @@ const STANDING := [
 	{"id": "d02", "callsign": "Hawk 2"},
 	{"id": "d03", "callsign": "Viper 3"},
 ]
+## The squads the host can hire, in order (the first two are STANDING's).
+const HIREABLE := [
+	{"id": "d02", "callsign": "Hawk 2"},
+	{"id": "d03", "callsign": "Viper 3"},
+	{"id": "d04", "callsign": "Raven 4"},
+	{"id": "d05", "callsign": "Cobra 5"},
+]
+## Sign-on for a hired squad of four (about Hiring.FEE_DAYS of their wages). Proposed.
+const HIRE_FEE := 12000
 ## Each standing team: leader, autorifleman, medic, rifleman (Roles.layout's first team).
 const TEAM_ROLES: Array[StringName] = [&"team_leader", &"autorifleman", &"medic", &"rifleman"]
 ## A hero's history before he joined: believable veterans (combined_arms.md 5.2: 4+ missions).
@@ -25,8 +36,9 @@ const MAN_MISSIONS := 2
 ## Start cash rises by this many days of the standing squads' wages (5.2). Proposed.
 const START_WAGE_DAYS := 14
 ## Extra squads by contract (5.1, question 4): rated 5 +1, hot zone +1, operation +1; cap 4 in
-## operations and 3 elsewhere. The standing two are the floor. Proposed.
+## operations and 3 elsewhere. The floor is two slots, filled only by squads the company hired. Proposed.
 const FLOOR := 2
+const MAX_HIRED := 4
 const CAP := 3
 const CAP_OPERATION := 4
 
@@ -62,40 +74,68 @@ static func detachment_members(data: Dictionary) -> Array[String]:
 	return out
 
 
-## New campaign: the two standing detachments of four, hired from `rng` (Hiring.candidate) with
-## their roles' kit, the leader a hero with history. Returns the new member ids.
+## The two standing detachments of four at once (tests, BaseHub.standing_squads), hired from
+## `rng` (Hiring.candidate) with their roles' kit, the leader a hero with history. Returns the new member ids.
 static func seed_standing(data: Dictionary, day: int, rng: RandomNumberGenerator) -> Array[String]:
 	var added: Array[String] = []
 	for spec: Dictionary in STANDING:
-		if detachments(data).has(String(spec.id)):
-			continue
-		var members: Array = []
-		for i in TEAM_ROLES.size():
-			var person := Hiring.candidate(rng)
-			person["role"] = String(TEAM_ROLES[i])
-			var missions := HERO_MISSIONS + rng.randi_range(0, 3) if i == 0 else MAN_MISSIONS + rng.randi_range(0, 3)
-			person["missions"] = missions
-			person["xp"] = missions * Roster.XP_PER_MISSION
-			if i == 0:
-				for s: String in ["nerve", "aim"]:
-					person.skills[s] = snappedf(clampf(float(person.skills[s]) + 0.12, 0.05, Roster.SKILL_MAX), 0.01)
-			var kit := Roles.kit(StringName(person.role))
-			person["gear"] = Roster.gear_for_kit(kit)
-			person["issued"] = kit.map(func(pair: Array) -> Array: return [String(pair[0]), int(pair[1])])
-			person.erase("fee")
-			person.erase("demand")
-			var mid := Roster.add_member(data, person, day)
-			var m := Roster.get_member(data, mid)
-			m["history"] = []
-			Roster.add_history(m, day, "Joined %s as %s, %d missions behind them" % [spec.callsign, Roles.display_name(StringName(person.role)), missions])
-			members.append(mid)
-			added.append(mid)
-		var leader := Roster.get_member(data, String(members[0]))
-		leader["hero"] = {"promoted_day": day, "rank": 1, "detachment": String(spec.id),
-			"command": command_skills(leader)}
-		Roster.add_history(leader, day, "Leads %s" % spec.callsign)
-		detachments(data)[String(spec.id)] = {"id": String(spec.id), "callsign": String(spec.callsign), "leader": String(members[0]),
-			"members": members, "standing": true, "formed_day": day, "home": false}
+		if not detachments(data).has(String(spec.id)):
+			added.append_array(_form(data, spec, day, rng))
+	return added
+
+
+## The next squad the host can hire ({} when MAX_HIRED are on the books).
+static func next_hire(data: Dictionary) -> Dictionary:
+	var living := 0
+	for d: Dictionary in detachments(data).values():
+		if int(strength(data, String(d.id)).total) > 0:
+			living += 1
+	if living >= MAX_HIRED:
+		return {}
+	for spec: Dictionary in HIREABLE:
+		if not detachments(data).has(String(spec.id)):
+			return spec
+	return {}
+
+
+## Hires the next squad of four (the caller has charged HIRE_FEE). Returns its id, or "".
+static func hire_squad(data: Dictionary, day: int, rng: RandomNumberGenerator) -> String:
+	var spec := next_hire(data)
+	if spec.is_empty():
+		return ""
+	_form(data, spec, day, rng)
+	return String(spec.id)
+
+
+static func _form(data: Dictionary, spec: Dictionary, day: int, rng: RandomNumberGenerator) -> Array[String]:
+	var added: Array[String] = []
+	var members: Array = []
+	for i in TEAM_ROLES.size():
+		var person := Hiring.candidate(rng)
+		person["role"] = String(TEAM_ROLES[i])
+		var missions := HERO_MISSIONS + rng.randi_range(0, 3) if i == 0 else MAN_MISSIONS + rng.randi_range(0, 3)
+		person["missions"] = missions
+		person["xp"] = missions * Roster.XP_PER_MISSION
+		if i == 0:
+			for s: String in ["nerve", "aim"]:
+				person.skills[s] = snappedf(clampf(float(person.skills[s]) + 0.12, 0.05, Roster.SKILL_MAX), 0.01)
+		var kit := Roles.kit(StringName(person.role))
+		person["gear"] = Roster.gear_for_kit(kit)
+		person["issued"] = kit.map(func(pair: Array) -> Array: return [String(pair[0]), int(pair[1])])
+		person.erase("fee")
+		person.erase("demand")
+		var mid := Roster.add_member(data, person, day)
+		var m := Roster.get_member(data, mid)
+		m["history"] = []
+		Roster.add_history(m, day, "Joined %s as %s, %d missions behind them" % [spec.callsign, Roles.display_name(StringName(person.role)), missions])
+		members.append(mid)
+		added.append(mid)
+	var leader := Roster.get_member(data, String(members[0]))
+	leader["hero"] = {"promoted_day": day, "rank": 1, "detachment": String(spec.id),
+		"command": command_skills(leader)}
+	Roster.add_history(leader, day, "Leads %s" % spec.callsign)
+	detachments(data)[String(spec.id)] = {"id": String(spec.id), "callsign": String(spec.callsign), "leader": String(members[0]),
+		"members": members, "standing": true, "formed_day": day, "home": false}
 	return added
 
 

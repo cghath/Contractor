@@ -275,15 +275,22 @@ func _build_memorial(rows: VBoxContainer, v: Dictionary) -> void:
 			", ".join(PackedStringArray(missing)), Fallen.DECLARE_DAYS]))
 
 
-## The high command squads on "Squad & deploy" (combined_arms.md 5.2): each standing squad
-## pre-picked, a checkbox to leave it at home, its callsign editable by the host.
+## The high command squads on "Squad & deploy" (combined_arms.md 5.2): each hired squad
+## pre-picked, a checkbox to leave it at home, its callsign editable by the host; a button to
+## hire the next one while there's an open slot.
 func _build_hc_squads(rows: VBoxContainer, roster: Dictionary, contract: Dictionary) -> void:
 	var dets: Dictionary = roster.get("detachments", {})
-	if dets.is_empty():
-		return
 	var allowed := int(contract.get("squads_max", Heroes.FLOOR))
 	var going := Heroes.deploying(roster.duplicate(true), allowed)
 	var box := UiKit.section("High command squads (%d of %d allowed on this contract)" % [going.size(), allowed], rows)
+	var spec := Heroes.next_hire(roster.duplicate(true))
+	if dets.is_empty():
+		box.add_child(UiKit.hint("None on the books: the slots are open. Hire a squad of four (a hero leader, an autorifleman, a medic, a rifleman) to command on deployments; they draw wages every day."))
+	if not spec.is_empty():
+		var hire := UiKit.button("Hire %s ($%d sign-on)" % [spec.callsign, Heroes.HIRE_FEE], func() -> void: BaseHub.request("hc_hire"),
+			"Four veterans with their kit; they deploy with the company on every contract unless left at home")
+		hire.disabled = not multiplayer.is_server()
+		box.add_child(UiKit.button_row([hire]))
 	var ids := dets.keys()
 	ids.sort()
 	for did: String in ids:

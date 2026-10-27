@@ -352,6 +352,17 @@ func _test_hiring() -> void:
 	check(BaseEconomy.funds() == Economy.cash() and Economy.cash() == MissionRegistry.setting_i("start_cash", 150000) + standing * Heroes.START_WAGE_DAYS,
 		"one bank: the base's funds are the economy's starting cash plus 14 days of the standing squads' wages ($%d)" % BaseEconomy.funds())
 	BaseHub.new_campaign(SEED)  # (the hires below start from an empty roster)
+	check(Heroes.detachments(BaseHub.roster()).is_empty() and Economy.cash() == MissionRegistry.setting_i("start_cash", 150000),
+		"v0.7.1: a new campaign has no high command squads, the slots open, and the plain start cash")
+	var before := Economy.cash()
+	check(BaseHub.server_hire_hc_squad() == "" and Economy.cash() == before - Heroes.HIRE_FEE, "the host hires one for $%d" % Heroes.HIRE_FEE)
+	var hired := Heroes.detachments(BaseHub.roster())
+	check(hired.size() == 1 and String(hired.d02.callsign) == "Hawk 2" and (hired.d02.members as Array).size() == 4 and bool(hired.d02.standing),
+		"the first hire is Hawk 2, four men, deploying like a standing squad")
+	for i in Heroes.MAX_HIRED - 1:
+		BaseHub.server_hire_hc_squad()
+	check(Heroes.detachments(BaseHub.roster()).size() == Heroes.MAX_HIRED and BaseHub.server_hire_hc_squad() != "", "at most %d on the books" % Heroes.MAX_HIRED)
+	BaseHub.new_campaign(SEED)
 	pool = Hiring.pool(BaseHub.hiring(), 1)
 	var ok := pool.all(func(c: Dictionary) -> bool:
 		return Roles.has(StringName(c.role)) and int(c.demand) > 0 and int(c.fee) == int(c.demand) * Hiring.FEE_DAYS \

@@ -547,7 +547,7 @@ func _blanket_shell(part: StringName) -> Array:
 	var span := _span(part)
 	var centre: Variant = null
 	var off := 0.02
-	var panel := 0.04
+	var panel := 0.06
 	if part == Vitals.CHEST:
 		span = Vector2(0.84, 1.44)
 		centre = Vector3.ZERO
@@ -560,10 +560,15 @@ func _blanket_shell(part: StringName) -> Array:
 		var probe := part
 		if part == Vitals.CHEST:
 			probe = Vitals.PELVIS if y < 1.0 else (Vitals.ABDOMEN if y < 1.18 else Vitals.CHEST)
-		for r: Array in _ring(probe, y, panel, centre):
-			var n: Vector3 = r[1]
-			var basis := _facing(n).rotated(n, rng.randf_range(-0.12, 0.12))
-			cells.append(_cell(r[0] + n * (off + rng.randf_range(0.0, 0.006)), Vector3(panel + 0.006, panel + 0.006, VOXEL), FOIL[rng.randi() % FOIL.size()], basis))
+		var ring := _ring(probe, y, panel, centre)
+		for i in ring.size():
+			var n: Vector3 = ring[i][1]
+			# One sheet, not tiles (v0.7.1, the Captain: "looks like chain mail"): panels square
+			# to the body, overlapping, the shade running in broad bands with a crease now and then.
+			var shade: Color = FOIL[1] if (i / 6 + int(y / panel / 3.0)) % 2 == 0 else FOIL[3]
+			if rng.randf() < 0.08:
+				shade = FOIL[0]  # a crease
+			cells.append(_cell(ring[i][0] + n * off, Vector3(panel * 1.35, panel * 1.15, VOXEL), shade, _facing(n)))
 		y += panel
 	return cells
 

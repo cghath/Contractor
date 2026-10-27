@@ -2059,6 +2059,8 @@ func _find_casualty() -> Soldier:
 		var s := n as Soldier
 		if s == null or s == body or not _cares_for(s) or not needs_help(s):
 			continue
+		if not s.vitals.downed and _next_task(s, false).is_empty():
+			continue  # conscious, and nothing this unit can do for him (v0.7.1: a player's "Medic!" stays fresh for MEDIC_CALL_S, so the medic came, ended care, came again every think: crouch/stand flapping, the "shaking")
 		if not _friendly() and (in_contact() or Soldier._now() - _last_contact < HOSTILE_CARE_HOT_S) 				and SquadAI.of(s) != null and SquadAI.of(s).squad != squad 				and not (_enemy_medic_free() and body.global_position.distance_to(s.global_position) <= HOSTILE_MEDIC_REACH_M):
 			continue  # the enemy in a fight: only its own team's casualties (a medic: anyone close)
 		# A player told one of us to treat him ("Treat me"): while that's fresh, that one goes
@@ -2074,8 +2076,6 @@ func _find_casualty() -> Soldier:
 		if carer == body:
 			return s
 		var hvt := Person.is_hvt(s)
-		if hvt and not s.vitals.downed and _next_task(s, false).is_empty():
-			continue  # nothing this unit can do for a conscious HVT
 		if carer != null:
 			var carer_ai := SquadAI.of(carer)
 			if hvt and _handoff_by_other(s):
@@ -2519,6 +2519,7 @@ func _care_treat(contact: bool) -> void:
 		if exposed and not _next_task(casualty, false).is_empty():
 			care = Care.GUARD  # the rest once in cover or quiet
 		else:
+			_skip[casualty.get_instance_id()] = now + REACH_SKIP_S  # (not straight back to him while his call is fresh)
 			_end_care()  # conscious and patched up as far as this unit can
 		return
 	if contact:

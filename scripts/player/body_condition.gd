@@ -58,6 +58,12 @@ uniform vec3 lip;
 uniform vec3 lip_shade;
 uniform vec3 hair;
 uniform vec3 eye;
+uniform vec3 camo[4];
+// Set per mesh (set_instance_shader_parameter): 1 on the head and the face's parts. Lips and
+// the mouth are only matched there (v0.7.1, the Captain: "people turning blue where they
+// aren't supposed to, including their uniform": the mouth colour, skin darkened 35%, sat within
+// the match of camo tones like 7d6447, so the uniform went blue with the lips).
+instance uniform float face_part = 0.0;
 
 varying vec3 local_pos;
 varying vec3 local_normal;
@@ -81,8 +87,10 @@ float value_noise(vec3 p) {
 		mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 
+// The palette's colours are exact (VoxelArt: no per-voxel jitter), so the match is tight: at
+// 0.03 the mouth colour caught camo and gear tones and the uniform went blue (v0.7.1).
 bool near(vec3 a, vec3 b) {
-	return distance(a, b) < 0.03;
+	return distance(a, b) < 0.012;
 }
 
 vec3 to_linear(vec3 c) {
@@ -95,8 +103,11 @@ void fragment() {
 	vec3 metres = cell * unit_m;
 	vec3 base = COLOR.rgb;
 	bool kept = near(base, hair) || near(base, eye);  // hair, brows and eyes never pale or blue
+	for (int i = 0; i < 4; i++) {
+		kept = kept || distance(base, camo[i]) < 0.012;  // nor the uniform's own camo
+	}
 	bool is_skin = !kept && (near(base, skin) || near(base, skin_shade));
-	bool is_lip = !kept && (near(base, mouth) || near(base, lip) || near(base, lip_shade));
+	bool is_lip = !kept && face_part > 0.5 && (near(base, mouth) || near(base, lip) || near(base, lip_shade));
 	vec3 col = base;
 	bool changed = false;
 	if (burn > 0.0) {
@@ -126,7 +137,7 @@ void fragment() {
 		changed = true;
 	} else if ((is_skin || is_lip) && pallor > 0.0) {
 		float grey = dot(col, vec3(0.3, 0.55, 0.15));
-		col = mix(col, vec3(grey * 0.95, grey * 0.97, grey * 1.04 + 0.02 * blue), pallor * 0.7);
+		col = mix(col, vec3(grey * 0.97, grey * 0.97, grey * 0.99), pallor * 0.7);  // ashen, never blue: only the lips go blue
 		changed = true;
 	}
 	if (!changed) {
@@ -212,11 +223,18 @@ func _set_overlay() -> void:
 			mesh.material_overlay = material  # (a face built since keeps its own scheme's)
 		if mesh not in _overlaid:
 			_overlaid.append(mesh)
+			mesh.set_instance_shader_parameter(&"face_part", 1.0 if _on_head(mesh) else 0.0)
 	for material: ShaderMaterial in _materials.values():
 		material.set_shader_parameter(&"burn", _burn)
 		material.set_shader_parameter(&"dressed", float(m.burn_dressings) / needed_dressings if needed_dressings > 0 else 0.0)
 		material.set_shader_parameter(&"pallor", _pallor)
 		material.set_shader_parameter(&"blue", 1.0 if _blue else 0.0)
+
+
+## Whether `mesh` hangs off the head part (its voxels, the face's moving parts).
+func _on_head(mesh: Node) -> bool:
+	var head := model.part_node(Vitals.HEAD)
+	return head != null and (mesh == head or head.is_ancestor_of(mesh))
 
 
 ## The colour scheme `mesh` was built in: its part pivot's (VoxelArt.instance, FaceRig: a face's
@@ -248,6 +266,13 @@ func _material_for(scheme: String) -> ShaderMaterial:
 	material.set_shader_parameter(&"lip_shade", _rgb(skin.lerp(Color("9a4a44"), 0.2)))
 	material.set_shader_parameter(&"hair", _rgb(Color(spec.get("hair", "3b2a1d"))))
 	material.set_shader_parameter(&"eye", _rgb(Color(spec.get("eye", "1c1c1c"))))
+	var camo := PackedVector3Array()
+	for c: Variant in spec.get("camo", []):
+		if camo.size() < 4 and _rgb(Color(String(c))).distance_to(_rgb(skin)) > 0.06:  # (a scheme whose camo is its skin, the test dummy's, keeps its skin)
+			camo.append(_rgb(Color(String(c))))
+	while camo.size() < 4:
+		camo.append(Vector3(-9, -9, -9))
+	material.set_shader_parameter(&"camo", camo)
 	material.set_shader_parameter(&"seed", float(hash(model.get_parent().name if model.get_parent() else model.name) % 1000) / 37.0)
 	material.set_shader_parameter(&"unit_m", VoxelArt.BODY_VOXEL / VoxelArt.BODY_SUB)
 	_materials[scheme] = material
