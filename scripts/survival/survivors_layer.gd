@@ -162,6 +162,8 @@ func _set_known(s: Soldier, rec: Dictionary) -> void:
 		info["rite"] = true
 	if bool(rec.get("cult_deserter", false)):
 		info["deserter"] = true
+	if String(rec.get("refugee_from", "")) != "" and String(rec.get("status", "")) == "out_there":  # (call 143: "It's clear now")
+		info["refugee"] = true
 	if HeliCrew.is_crew(rec):  # (the downed helicopter's crew: HeliCrew's talk entries)
 		info["crew"] = true
 		info["escort"] = bool(rec.get("heli_escort", false))
@@ -255,6 +257,7 @@ func _server_start() -> void:
 		placed[zone] = true
 		Survival.state()["people_placed"] = placed
 		server_place_zone(zone)
+	Holding.server_zone_up(self)  # people the sim moved here grounded; places left here get their signs (call 143)
 	var lead := _lead_player()
 	for id: String in records().keys():
 		var rec: Dictionary = records()[id]
@@ -562,6 +565,7 @@ func server_tick() -> void:
 			_check_rise(rec, now)
 	_tick_burials(now)
 	Children.server_tick(self, dead)  # children flee the dead, or are taken (call 128)
+	Holding.server_tick(self, dead)  # places held or abandoned to the dead, the fleeing, the settlement's shelter (call 143)
 	HeliCrew.server_tick(self)  # the downed crew: near, or brought to an enclave post
 
 
@@ -573,6 +577,7 @@ func server_hour() -> void:
 	var crowd := ZoneDead.of(level)
 	var horde := crowd != null and crowd.horde_count() > 0
 	Faith.server_hour(self)  # rites left unsaid lapse (call 129)
+	Holding.server_hour(self)  # refugees go home to places clear of the dead (call 143)
 	Relationships.server_hour(self, horde)  # bonds in the field, the players' bond, partners (call 74)
 	var zone := _zone()
 	for id: String in records().keys():

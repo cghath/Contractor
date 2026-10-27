@@ -132,6 +132,9 @@ static func horde_fight(m: WorldModel, g: Dictionary, z: String) -> void:
 		return
 	var rng := m.rng_for(String(g.id), "horde_fight")
 	var home := not (g.home as Dictionary).is_empty() and String((g.home as Dictionary).zone) == z
+	if home and not Holding.group_holds(m, g, int(horde.n)):
+		Holding.group_relocate(m, g, z)  # they can't hold it: they run instead of fighting it out (call 143)
+		return
 	var mine := WorldGroup.strength(g, m.people) * (1.0 + (float(g.get("defence", 0.0)) if home else 0.0))
 	var theirs := float(horde.n) * HORDE_STRENGTH_PER
 	var ratio := mine / maxf(mine + theirs, 0.01) + rng.randf_range(-ROLL, ROLL)

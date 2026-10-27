@@ -6,8 +6,11 @@ extends Node
 ## hungry gloomy one breaks into a desertion that makes a lone survivor again; a companion refuses
 ## a move into a horde and the loyal obey a second order; a grave eases the grief; a companion
 ## killed by the dead rises unless buried, and putting them down is a moodlet; after a player's
-## death the newcomer is a stranger, and taking over a companion swaps the record; save and
-## Continue keep the companions.
+## death the newcomer is a stranger, and taking over a companion swaps the record; holding or
+## fleeing (call 143): an armed household with a guard holds against the dead, an unarmed one
+## gathers its child and runs (the place abandoned, a note left, the journal), its refugees come
+## home when it's clear, "It's clear now" brings them back, and a settlement with no guard on shift
+## sends its unarmed to shelter, not out; save and Continue keep the companions.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -36,6 +39,7 @@ func _ready() -> void:
 		await _test_horde_refusal()
 		await _test_grief_grave_rise()
 		await _test_player_death_and_take_over()
+		await _test_holding()
 		await _test_save_and_continue()
 	_finish()
 
@@ -309,6 +313,143 @@ func _test_player_death_and_take_over() -> void:
 	check(not is_instance_valid(a) or a.is_queued_for_deletion(), "the companion's body is gone")
 	check(player.inventory.count_of(&"antibiotics") >= 1, "and their kit is his")
 	a_rec.erase("mood_forced")
+
+
+func _clear_dead_near(at: Vector3, r: float) -> void:
+	for z: Soldier in Survival.zombies(level):
+		if z.vitals.is_up() and z.global_position.distance_to(at) <= r:
+			z.vitals.server_kill()
+	var crowd := ZoneDead.of(level)
+	if crowd:
+		for d: Dictionary in crowd.dead:
+			if (d.pos as Vector2).distance_to(Vector2(at.x, at.z)) <= r:
+				d.alive = false
+
+
+func _test_holding() -> void:
+	print("Holding or fleeing (call 143)")
+	_clear_dead_near(player.global_position, 150.0)
+	await _frames(3)
+	var zone := String(Survival.state().zone)
+	# An armed household with a guard holds.
+	var home2 := _near(Vector3(-35.0, 0.0, 0.0))
+	var gu := layer.server_add_person(home2, {"traits": ["brave", "calm"], "want": {"kind": "place"}, "family": "hold_fam", "guard": true, "kit": [{"id": "akm", "count": 1}]})
+	var gw := layer.server_add_person(level.ground_point(home2 + Vector3(0.0, 0.0, 1.5)), {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "hold_fam", "kit": []})
+	var zs: Array[Soldier] = []
+	for i in 2:
+		var z := Survival.server_spawn_zombie(level, level.ground_point(home2 + Vector3(-9.0, 0.0, -2.0 + i * 4.0)))
+		if z:
+			zs.append(z)
+	await _frames(2)
+	var s2 := Holding.household_strength([gu, gw], layer)
+	Holding.server_tick(layer, Survival.zombies(level))
+	check(zs.size() == 2 and not gu.has("flee") and not gw.has("flee") and String(gu.get("refugee_from", "")) == "",
+		"an armed household with a guard holds (strength %.1f against %.1f)" % [s2, zs.size() * Holding.WALKER_THREAT])
+	for z: Soldier in zs:
+		z.vitals.server_kill()
+	await _frames(2)
+	# An unarmed household of three (two adults, their child) with the dead at the fence runs.
+	var home := _near(Vector3(0.0, 0.0, 35.0))
+	var ma := layer.server_add_person(home, {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "flee_fam", "age": 66, "kit": [{"id": "beans_tin", "count": 1}]})
+	var pa := layer.server_add_person(level.ground_point(home + Vector3(1.5, 0.0, 0.0)), {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "flee_fam", "age": 38, "kit": []})
+	var kid := Children.server_add_child(layer, level.ground_point(home + Vector3(-1.0, 0.0, 1.0)), {"family": "flee_fam", "guardian": String(ma.id), "age": 8})
+	var journal0 := (Survival.state().get("journal", []) as Array).size()
+	zs.clear()
+	for i in 2:
+		var z := Survival.server_spawn_zombie(level, level.ground_point(home + Vector3(-2.0 + i * 4.0, 0.0, 10.0)))
+		if z:
+			zs.append(z)
+	await _frames(2)
+	var s1 := Holding.household_strength([ma, pa, kid], layer)
+	var pb := layer.body_of(String(pa.id))
+	var mb := layer.body_of(String(ma.id))
+	Holding.server_tick(layer, Survival.zombies(level))
+	var key := String(ma.get("refugee_from", ""))
+	var e := Holding.entry(key)
+	check(zs.size() == 2 and ma.has("flee") and pa.has("flee") and kid.has("flee") and String(kid.get("refugee_from", "")) == key and key != "",
+		"an unarmed household (strength %.1f against %.1f) breaks: all three run, the child with them" % [s1, zs.size() * Holding.WALKER_THREAT])
+	var f: Dictionary = pa.get("flee", {})
+	var to := Holding._v3(f.get("to", []))
+	var dead_c := (zs[0].global_position + zs[-1].global_position) * 0.5 if not zs.is_empty() else home
+	var away := Vector2(home.x - dead_c.x, home.z - dead_c.z).normalized()
+	check(not f.is_empty() and Holding._bearing_toward(home, to, away) <= Holding.TOWARD_DEAD and (f.get("route", []) as Array).size() >= 1 and (kid.get("flee", {}) as Dictionary).get("to") == f.get("to"),
+		"away from the dead, by the road, to %s (%s)" % [String(f.get("label", "?")), String(f.get("kind", "?"))])
+	check(not e.is_empty() and String(e.state) == "abandoned" and "handwritten_note" in (e.get("left", []) as Array) and (e.get("left", []) as Array).size() >= 2,
+		"the place is abandoned: things dropped, a note (%s)" % str(e.get("left", [])))
+	var lines := (Survival.state().get("journal", []) as Array).slice(journal0).map(func(j: Dictionary) -> String: return String(j.get("text", "")))
+	check(lines.any(func(t: String) -> bool: return t.contains(" left their ") and t.contains("to the dead")), "the journal notes it: \"%s\"" % String(e.get("text", "")))
+	check(layer.said.slice(-6).any(func(d: Dictionary) -> bool: return String(d.text) in Holding.FLEE_LINES), "someone shouts a warning")
+	check(mb != null and zs.any(func(z: Soldier) -> bool: return ZombieAI.of(z) != null and ZombieAI.of(z).target == mb), "the dead go after the slowest (%s, %d)" % [String(ma.name), int(ma.age)])
+	var p0 := pb.global_position if pb else Vector3.ZERO
+	await _wait_for(func() -> bool: return pb == null or not is_instance_valid(pb) or pb.global_position.distance_to(p0) > 4.0, 6.0)
+	check(pb != null and (not is_instance_valid(pb) or pb.global_position.distance_to(p0) > 4.0), "and they're running")
+	for r: Dictionary in [ma, pa, kid]:
+		if r.has("flee") and String(r.status) == "out_there":
+			Holding.arrive(layer, r)
+	var alive := [ma, pa, kid].filter(func(r: Dictionary) -> bool: return String(r.status) == "out_there")
+	check(not alive.is_empty() and alive.all(func(r: Dictionary) -> bool: return not r.has("flee") and String(r.get("refugee_from", "")) == key),
+		"arrived, they're refugees where they ran (%s)" % String(Holding.entry(key).get("where", "")))
+	# Cleared: they come home after a day or so.
+	_clear_dead_near(home, 60.0)
+	await _frames(2)
+	Holding.server_hour(layer)
+	e = Holding.entry(key)
+	check(float(e.get("clear_since", -1.0)) >= 0.0 and String(e.state) == "abandoned", "the place is clear; they wait")
+	e["clear_since"] = Holding._now_d() - Holding.RETURN_DAYS - 0.05
+	Holding.save(e)
+	_clear_dead_near(home, 60.0)
+	var back := Holding.server_hour(layer)
+	check(back >= 1 and String(Holding.entry(key).state) == "reclaimed" and alive.all(func(r: Dictionary) -> bool: return String(r.get("refugee_from", "")) == "" and String(r.zone) == zone and SurvivorPerson.pos_of(r, "home").distance_to(home) < 4.0),
+		"%d came home when it was clear" % back)
+	# "It's clear now".
+	var there := _near(Vector3(25.0, 0.0, -25.0))
+	var key2 := "h:test:clear_now"
+	var rf := layer.server_add_person(_near(Vector3(1.5, 0.0, 1.5)), {"traits": ["calm"], "want": {"kind": "place"}, "refugee_from": key2})
+	Holding.save({"key": key2, "zone": zone, "pos": Holding._arr(there), "ids": [String(rf.id)], "names": [String(rf.name)], "refugees": [String(rf.id)],
+		"state": "abandoned", "word": "farm", "text": "%s left his farm to the dead" % String(rf.name), "clear_since": -1.0})
+	await _frames(2)
+	var rb := layer.body_of(String(rf.id))
+	if rb:
+		layer._set_known(rb, rf)
+	var acts: Array = []
+	if rb:
+		acts = TalkMenu.actions_for(player, rb, TalkMenu.KIND)
+	check(acts.any(func(a: Dictionary) -> bool: return a.id == &"talk_clear_now"), "a refugee can be told \"It's clear now\"")
+	_clear_dead_near(there, 60.0)
+	var op0 := SurvivorPerson.opinion_of(rf, Survival.profile_of(player))
+	var said := TalkMenu.server_talk(layer, player, rb, "clear_now") if rb else ""
+	check(said == Holding.CLEAR_YES and String(Holding.entry(key2).state) == "reclaimed" and SurvivorPerson.opinion_of(rf, Survival.profile_of(player)) > op0 and String(rf.get("refugee_from", "")) == "",
+		"told, they go home and think better of you (%.0f -> %.0f)" % [op0, SurvivorPerson.opinion_of(rf, Survival.profile_of(player))])
+	# The players' settlement: no guard on shift, the unarmed to shelter, not out.
+	await _wait_for(func() -> bool: return Settlement.exists(), 10.0)
+	if not Settlement.exists() or Settlement.zone() != zone:
+		check(false, "the farm is a settlement")
+		return
+	var c := Settlement.pos()
+	var se := layer.server_add_person(level.ground_point(c + Vector3(2.0, 0.0, 2.0)), {"traits": ["calm"], "want": {"kind": "place"}, "kit": []})
+	layer.server_settle(se)
+	se["jobs"] = ["haul"]
+	se["activity"] = "free"
+	var sb := layer.server_settler_body(se, true)
+	var start := player.global_position
+	player.global_position = level.ground_point(c + Vector3(Settlement.radius() + 45.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	var zz := Survival.server_spawn_zombie(level, level.ground_point(c + Vector3(-Settlement.radius() * 0.7, 0.0, 0.0)))
+	await _frames(2)
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	var brain: CivilianAI = (sb.get_node_or_null(NodePath(PeopleLayer.BRAIN)) as CivilianAI) if sb else null
+	check(String(se.get("sheltering", "")) == "shelter" and String(se.status) == "settler" and brain != null and brain._has_hide and Vector2(brain._hide.x, brain._hide.z).distance_to(Vector2(c.x, c.z)) <= Settlement.radius(),
+		"no guard and nobody home: the unarmed settler goes to the shelter, inside the settlement")
+	player.global_position = level.ground_point(c + Vector3(3.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	await _frames(2)
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	check(String(se.get("sheltering", "")) == "behind" and String(se.status) == "settler", "with a player home, they hide behind him")
+	if zz:
+		zz.vitals.server_kill()
+	await _frames(2)
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	check(not se.has("sheltering"), "the dead gone, back about the day")
+	player.global_position = start + Vector3.UP * 0.2
+	await _frames(5)
 
 
 func _test_save_and_continue() -> void:

@@ -49,7 +49,7 @@ const RUMOURED_STOCKS := 1500.0
 const DEFENCE_X := 0.1
 const JOURNAL_KINDS: Array[String] = ["fight", "raid", "demand", "horde", "horde_moved", "horde_attack", "capture", "fed", "settled", "group_gone",
 	"supply_drop", "burning", "bell", "broadcast", "hunt", "rescue", "turned", "split", "formed", "death", "arrived",
-	"convoy", "heli_down", "storm", "supply_taken", "convoy_ambushed", "convoy_robbed", "heli_recovered", "heli_lost", "fire_out"]
+	"convoy", "heli_down", "storm", "supply_taken", "convoy_ambushed", "convoy_robbed", "heli_recovered", "heli_lost", "fire_out", "abandoned", "returned"]
 
 ## Run the far step on a worker thread (false: inline; tests).
 var threaded := true

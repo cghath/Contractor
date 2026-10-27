@@ -17,7 +17,7 @@ extends RefCounted
 ## Proposed: the bonus a goal in progress keeps, and the noise each goal makes (0-1).
 const HYSTERESIS := 0.15
 const NOISE := {"forage": 0.1, "work": 0.05, "trade": 0.02, "settle": 0.15, "raid": 0.6, "defend": 0.05, "flee": 0.05,
-	"scout": 0.0, "recruit": 0.0, "search": 0.05, "capture": 0.1, "feed": 0.0, "hunt_player": 0.5, "rest": 0.0, "patrol": 0.1}
+	"scout": 0.0, "recruit": 0.0, "search": 0.05, "capture": 0.1, "feed": 0.0, "hunt_player": 0.5, "rest": 0.0, "patrol": 0.1, "relocate": 0.05}
 ## Proposed: how long each goal's work takes at its place (ticks).
 const WORK_TICKS := {"forage": 4, "work": 16, "defend": 8, "rest": 8, "patrol": 8}
 ## Proposed: an unscouted target's strength is guessed at UNKNOWN_X its size's worth.
@@ -37,6 +37,8 @@ static func decide(m: WorldModel, g: Dictionary) -> void:
 	var cur: Dictionary = g.get("goal", {})
 	if not cur.is_empty() and (String(cur.get("phase", "")) in ["demand", "wait", "attack"] or (String(cur.kind) == "raid" and String(cur.get("zone", "")) == String(g.zone))):
 		return  # (a raid under way, or at its target, runs to its end)
+	if String(cur.get("kind", "")) == "relocate":
+		return  # (running from the dead: they go till they're there, call 143)
 	var best := {}
 	var best_s := -INF
 	var rng := m.rng_for(String(g.id), "decide")
@@ -357,6 +359,9 @@ static func act(m: WorldModel, g: Dictionary) -> void:
 				m.add_trace(String(h.zone), String(h.place), "a camp left in a hurry, %s's" % String(g.name), [])
 				m.clear_home(g)
 			m.event(String(g.zone), "fled", [String(g.id)], "%s fled into %s" % [String(g.name), String(m.zone(String(g.zone)).get("name", g.zone))])
+			_done(g)
+		"relocate":  # (call 143: the place lost to the dead; a new home where they come to)
+			Holding.sim_relocated(m, g, to)
 			_done(g)
 		"scout":
 			_scout(m, g, goal)
