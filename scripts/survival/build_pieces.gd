@@ -143,6 +143,11 @@ const PIECES := {
 	# rebuilding guns, zeroing) and the armoury rack (the gunsmith's overnight work order).
 	"gun_bench": {"name": "Gunsmith bench", "size": [4, 2, 2], "cost": [[&"planks", 4], [&"scrap_sheet", 2], [&"machine_parts", 1]], "tool": "wrench", "build_s": 15.0, "hp": 140.0, "solid": true, "look": "frame", "mat": "scrap"},
 	"gun_rack": {"name": "Armoury rack", "size": [2, 3, 1], "cost": [[&"planks", 3], [&"scrap_sheet", 1]], "tool": "hammer", "build_s": 6.0, "hp": 80.0, "solid": true, "look": "panel", "mat": "wood"},
+	# Holding or fleeing (call 143; Holding; Proposed): a reinforced door for a safe room (heavy, and
+	# locks like any door) and the shelter marker: standing in a room walled round with a safe-room
+	# door, that room is where the settlers without a weapon go when the dead come (Holding.shelter_room).
+	"safe_room_door": {"name": "Safe room door", "size": [2, 4, 1], "cost": [[&"scrap_sheet", 4], [&"planks", 2]], "tool": "wrench", "build_s": 16.0, "hp": 600.0, "solid": true, "door": true, "look": "panel", "mat": "steel"},
+	"shelter": {"name": "Shelter marker", "size": [1, 1, 1], "cost": [[&"planks", 1]], "tool": "hammer", "build_s": 1.0, "hp": 20.0, "solid": false, "look": "slab", "mat": "wood"},
 }
 const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs", "ladder", "bunk", "stash", "workbench", "fence", "hesco", "wire",
 	"pile", "stove", "lookout", "farm_bed", "generator", "lamp", "map_table",
@@ -150,7 +155,8 @@ const PIECE_KEYS: Array[String] = ["door", "shutter", "hatch", "gate", "stairs",
 	"spike_pit", "bear_trap", "drawbridge", "corridor_marker", "lure_radio", "goat_stake", "pyre",
 	"chapel_bench", "altar", "grave_marker",
 	"smoker", "drying_rack", "cold_store", "ice_box", "fish_trap", "clinic_bed", "clinic_cabinet", "clinic_lamp",
-	"gun_bench", "gun_rack"]
+	"gun_bench", "gun_rack",
+	"safe_room_door", "shelter"]
 
 ## The key item a key lock hands out (Builder.server_door "lock_key"): its state names the lock.
 const KEY_ITEM := &"door_key"

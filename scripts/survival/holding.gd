@@ -25,8 +25,10 @@ extends RefCounted
 ##   horde falls on and which can't hold relocates (goal "relocate", WorldFights.horde_fight)
 ##   instead of fighting it out. The zone loaded again: the signs are laid (server_zone_up).
 ## - **The players' settlement** (settlement_tick): with the dead at the fence, unarmed settlers
-##   hide behind a guard on shift or a player at home, else go to the shelter (a shelter piece, a
-##   cellar hatch, else the farmhouse), never out; "Abandon" (a council question, server_ask_abandon)
+##   hide behind a guard on shift or a player at home, else go to the shelter (a shelter room: a
+##   "shelter" marker in a room walled round with a "safe_room_door", shelter_room; else a cellar
+##   hatch, else the farmhouse), never out; inside a shelter room with its door shut the dead pass
+##   them by (sheltered) till the door's broken down; "Abandon" (a council question, server_ask_abandon)
 ##   sends everyone away.
 ## - **Coming back** (server_hour): a place clear of the dead for RETURN_DAYS (the players cleared
 ##   it, or the dead wandered off: the zone quiet) gets its refugees back; "It's clear now" (TalkMenu)
@@ -79,8 +81,13 @@ const SIM_STRAY_N := 3
 const SIM_HORDE_CAP := 20
 const SIM_CAUGHT := 0.15
 const GROUP_LEAVE := 0.3
-## The players' settlement.
-const SHELTER_PIECES: Array[String] = ["shelter", "safe_room", "hatch"]
+## The players' settlement: the shelter's fallback after a shelter room (a floor hatch); a shelter
+## room (shelter_room) is closed within ROOM_SPAN cells of its marker, at most ROOM_MAX cells.
+const SHELTER_PIECES: Array[String] = ["hatch"]
+const SHELTER_MARK := "shelter"
+const SHELTER_DOOR := "safe_room_door"
+const ROOM_SPAN := 12
+const ROOM_MAX := 400
 const SETTLE_ALERT_M := 20.0
 const BEHIND_M := 3.0
 ## Coming back.
@@ -1406,6 +1413,9 @@ static func settlement_tick(layer: SurvivorsLayer, dead: Array) -> void:
 	if near.is_empty():
 		for rec: Dictionary in Settlement.settlers():
 			rec.erase("sheltering")
+			var sb := layer.body_of(String(rec.id))
+			if sb:
+				sb.remove_meta(&"sheltered")
 		Settlement.data().erase("breaking")
 		return
 	centre /= near.size()
@@ -1426,14 +1436,22 @@ static func settlement_tick(layer: SurvivorsLayer, dead: Array) -> void:
 			if p.vitals.is_up() and _flat(p.global_position, c) <= r + 10.0:
 				protector = p
 				break
-	var shelter := shelter_point(layer)
+	var room := settlement_shelter(layer)
+	var builder := Builder.find(layer)
+	var shelter: Vector3 = room.pos if not room.is_empty() else shelter_point(layer)
+	var hidden := false
 	for rec: Dictionary in Settlement.settlers():
 		var b := layer.body_of(String(rec.id))
+		if b:
+			b.remove_meta(&"sheltered")
 		var kit := Survival.kit_of(b.inventory) if b else (rec.get("kit", []) as Array)
 		if not Children.is_child_rec(rec) and arms_of(kit) != "":
 			continue  # (the armed stand)
 		var spot := shelter
-		var how := "shelter"
+		var how := "shelter_room" if not room.is_empty() else "shelter"
+		if how == "shelter_room" and protector == null and b and in_shelter(builder, room, b):
+			b.set_meta(&"sheltered", true)  # (behind the shut safe-room door: the dead pass them by)
+			hidden = true
 		if protector:
 			var back := protector.global_position - centre
 			back.y = 0.0
@@ -1450,6 +1468,13 @@ static func settlement_tick(layer: SurvivorsLayer, dead: Array) -> void:
 			brain.alarm(centre)
 			brain._hide = spot
 			brain._has_hide = true
+	if hidden and builder:  # (the dead nearby come to the door and batter at it: Sieges' push)
+		var door_at := builder.piece_pos(int(room.door))
+		for z: Soldier in near:
+			var ai := ZombieAI.of(z)
+			if ai and ai.mode in [ZombieAI.Mode.IDLE, ZombieAI.Mode.SEARCH]:
+				ai.mode = ZombieAI.Mode.INVESTIGATE
+				ai._set_goal(door_at)
 
 
 ## The settlement's strength against the dead: its settlers (by kit), a guard on watch, its
@@ -1462,7 +1487,8 @@ static func settlement_strength(layer: SurvivorsLayer) -> float:
 	return s + float(Settlement.data().get("defence_builds", 0.0)) * DEFENCE_PER
 
 
-## The settlement's shelter: a shelter piece (or a cellar hatch) within it, else the farmhouse.
+## The settlement's shelter after a shelter room (settlement_shelter): a cellar hatch within it,
+## else the farmhouse.
 static func shelter_point(layer: SurvivorsLayer) -> Vector3:
 	var c := Settlement.pos()
 	var b := Builder.find(layer)
@@ -1603,6 +1629,8 @@ static func server_return(layer: SurvivorsLayer, key: String, by: Soldier = null
 			SurvivorPerson.note(rec, "came home and found it held by others")
 		else:
 			rec.erase("refugee_from")
+			rec.erase("asks_stay")  # (they'd asked to stay where they ran: home instead)
+			rec.erase("stay_vote")
 		var j: Dictionary = rec.get("joined", {})
 		if String(j.get("kind", "")) == "household":  # (they leave the household that took them in)
 			if String(j.get("old", "")) != "":
@@ -1958,3 +1986,84 @@ static func _turned_from_claimed(layer: SurvivorsLayer, rec: Dictionary) -> void
 		rec["flee"] = {"to": _arr(home), "kind": "home", "to_zone": "", "label": "home", "key": "", "since": Soldier._now(), "cover_until": 0.0,
 			"route": [_arr(home)], "leg": 0, "from": _arr(b.global_position)}
 		layer._set_known(b, rec)
+
+
+# --- The shelter room (gap 3) -----------------------------------------------------------------------------
+
+## The room a "shelter" marker piece `id` stands in, when it's a shelter: closed round by walls
+## (built blocks, solid pieces, shut doors) a block up from its floor, no more than ROOM_SPAN cells
+## out, with a "safe_room_door" in its walls: {"id", "door" (the door piece), "cells" ({"x,z": true}),
+## "pos" (the marker), "y"}; {} when it isn't one (open somewhere, or no safe-room door).
+static func shelter_room(b: Builder, id: int) -> Dictionary:
+	var rec: Dictionary = b.pieces.get(id, {})
+	if rec.is_empty() or String(rec.get("k", "")) != SHELTER_MARK or not b.is_piece_built(id):
+		return {}
+	var base := Vector3i(int(rec.c[0]), int(rec.c[1]), int(rec.c[2]))
+	var start := Vector3i(base.x, base.y + 1, base.z)
+	if _room_wall(b, start):
+		return {}
+	var cells := {"%d,%d" % [start.x, start.z]: true}
+	var queue: Array[Vector3i] = [start]
+	var door := -1
+	var sides: Array[Vector3i] = [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]
+	while not queue.is_empty():
+		var c: Vector3i = queue.pop_back()
+		for side: Vector3i in sides:
+			var n := c + side
+			var k := "%d,%d" % [n.x, n.z]
+			if cells.has(k):
+				continue
+			var pid := b.piece_at(n)
+			if pid > 0 and String((b.pieces[pid] as Dictionary).get("k", "")) == SHELTER_DOOR and b.is_piece_built(pid):
+				door = pid
+				continue
+			if _room_wall(b, n):
+				continue
+			if absi(n.x - base.x) > ROOM_SPAN or absi(n.z - base.z) > ROOM_SPAN or cells.size() >= ROOM_MAX:
+				return {}  # (open to the outside)
+			cells[k] = true
+			queue.append(n)
+	if door < 0:
+		return {}
+	return {"id": id, "door": door, "cells": cells, "pos": b.piece_pos(id), "y": start.y}
+
+
+## Whether cell `c` closes a room: a built block, or a built solid piece (a door only shut).
+static func _room_wall(b: Builder, c: Vector3i) -> bool:
+	if b.is_built(c):
+		return true
+	var pid := b.piece_at(c)
+	if pid <= 0 or not b.is_piece_built(pid):
+		return false
+	var r: Dictionary = b.pieces[pid]
+	var def: Dictionary = BuildPieces.PIECES.get(String(r.get("k", "")), {})
+	return bool(def.get("solid", false)) and not (bool(def.get("door", false)) and bool(r.get("open", false)))
+
+
+## The settlement's shelter room (the first sound one within its radius), or {}.
+static func settlement_shelter(layer: SurvivorsLayer) -> Dictionary:
+	var b: Builder = Builder.find(layer) if layer else null
+	if b == null or not Settlement.exists():
+		return {}
+	var c := Settlement.pos()
+	for id: int in b.pieces:
+		if String((b.pieces[id] as Dictionary).get("k", "")) != SHELTER_MARK or _flat(b.piece_pos(id), c) > Settlement.radius():
+			continue
+		var room := shelter_room(b, id)
+		if not room.is_empty():
+			return room
+	return {}
+
+
+## Whether `s` is inside shelter `room` with its safe-room door there and shut.
+static func in_shelter(b: Builder, room: Dictionary, s: Node3D) -> bool:
+	if b == null or room.is_empty() or s == null or not b.pieces.has(int(room.door)) or bool((b.pieces[int(room.door)] as Dictionary).get("open", false)):
+		return false
+	var c := BuildPieces.cell_at(s.global_position + Vector3.UP * 0.3)
+	return (room.cells as Dictionary).has("%d,%d" % [c.x, c.z])
+
+
+## Whether the dead pass `s` by (ZombieAI): sheltered behind a shut safe-room door
+## (settlement_tick sets it; the door broken or open, it's gone).
+static func sheltered(s: Node) -> bool:
+	return s != null and s.has_meta(&"sheltered")

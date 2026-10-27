@@ -147,6 +147,9 @@ func _test_catalogue() -> void:
 				missing.append(pair[0])
 	check(missing.is_empty() and ItemDB.has_item(BuildPieces.KEY_ITEM), "every material, tool and piece cost is an item, materials stack (%s)" % [missing])
 	check(BuildPieces.block_cost("wood", "block") == [[&"planks", 5]] and BuildPieces.block_cost("wood", "slab") == [[&"planks", 1]], "a wood block costs 5 planks, a slab 1")
+	var srd: Dictionary = BuildPieces.PIECES.get("safe_room_door", {})
+	check(bool(srd.get("door", false)) and float(srd.get("hp", 0.0)) > float(BuildPieces.PIECES.door.hp) * 4.0 and BuildPieces.PIECE_KEYS.slice(-2) == ["safe_room_door", "shelter"],
+		"a safe-room door (a door, %.0f hp) and the shelter marker, last in the catalogue (call 143)" % float(srd.get("hp", 0.0)))
 
 
 func _test_place_and_work() -> void:
@@ -268,6 +271,7 @@ func _test_upgrade() -> void:
 	check(b.server_upgrade(player, c, "brick") == "", "wood to brick")
 	var paid := bricks - _count(&"brick")
 	check(paid == 3 and _count(&"planks") == planks, "it costs the difference: 3 bricks, not 4, and no wood back (%d)" % paid)
+	await _wait_for(func() -> bool: return b.material_at(BuildPieces.cell_centre(c)) == VoxelWorld.Mat.WOOD, 3.0)  # (its chunk's voxels rebuild a frame or so after)
 	check(b.material_at(BuildPieces.cell_centre(c)) == VoxelWorld.Mat.WOOD and b.is_built(c), "the wood block stands while it's upgraded")
 	b.server_work(player, c, 20.0)
 	check(String(b.blocks[c].m) == "brick" and not b.blocks[c].has("up"), "worked: it's brick")

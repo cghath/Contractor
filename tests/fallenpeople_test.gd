@@ -13,7 +13,9 @@ extends Node
 ## sends its unarmed to shelter, not out; refugees join the household they reach, and at the
 ## players' farm ask to stay (a council vote, or a player's yes); a place left to the dead is
 ## claimed (not with the dead near or someone living there; what's left is the players'; its people
-## coming back ask to stay); save and Continue keep the companions.
+## coming back ask to stay); a shelter room (a shelter marker walled in with a safe-room door) is
+## where the unarmed settlers go, the dead pass them by while the door holds and find them once it
+## breaks; save and Continue keep the companions.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -45,6 +47,7 @@ func _ready() -> void:
 		await _test_holding()
 		await _test_refugees_join()
 		await _test_claim()
+		await _test_shelter_room()
 		await _test_save_and_continue()
 	_finish()
 
@@ -580,6 +583,83 @@ func _test_claim() -> void:
 	var said := Holding.server_let_stay(layer, player, rr, true)
 	check(said == Holding.STAY_YES and String(rr.get("claimed_place", "")) == key and String(rr.get("refugee_from", "")) == "" and String(rr.id) in (Holding.entry(key).get("tenants", []) as Array),
 		"let them stay: they live there, at a place of ours")
+	player.global_position = start + Vector3.UP * 0.2
+	await _frames(5)
+
+
+func _test_shelter_room() -> void:
+	print("A shelter room at the settlement (call 143)")
+	if not Settlement.exists() or Settlement.zone() != String(Survival.state().zone):
+		check(false, "the farm is a settlement")
+		return
+	var start := player.global_position
+	var c := Settlement.pos()
+	var b := Builder.find(level)
+	check(b != null and BuildPieces.PIECES.has("safe_room_door") and BuildPieces.PIECES.has("shelter"), "the safe-room door and the shelter marker are build pieces")
+	if b == null:
+		return
+	_clear_dead_near(c, Settlement.radius() + 60.0)
+	# A room of 2 x 2 cells walled in brick, a safe-room door on one side, the marker inside.
+	var base := Builder.ground_cell(level.ground_point(c + Vector3(-8.0, 0.0, 6.0)))
+	var y := base.y + 1
+	var cells: Array[Vector3i] = []
+	for x in range(-1, 3):
+		for zz in range(-1, 3):
+			if (x in [0, 1] and zz in [0, 1]) or (zz == -1 and x in [0, 1]):
+				continue  # (the room, and the door's gap)
+			var cell := Vector3i(base.x + x, y, base.z + zz)
+			b._set_block(cell, {"m": "brick", "s": "block", "r": 0, "hp": 1.0, "prog": 1.0, "bp": false, "paid": true})
+			cells.append(cell)
+	var door := b._next_id
+	b._set_piece(door, {"k": "safe_room_door", "c": [base.x, base.y, base.z - 1], "r": 0, "hp": 600.0, "prog": 1.0, "bp": false, "paid": true, "open": false, "locked": false, "lock": {}})
+	var mark := b._next_id
+	b._set_piece(mark, {"k": "shelter", "c": [base.x, base.y, base.z], "r": 0, "hp": 20.0, "prog": 1.0, "bp": false, "paid": true, "open": false, "locked": false, "lock": {}})
+	var room := Holding.shelter_room(b, mark)
+	check(not room.is_empty() and int(room.get("door", -1)) == door and (room.get("cells", {}) as Dictionary).size() == 4, "a shelter marker walled in with a safe-room door is a shelter room (%d cells)" % (room.get("cells", {}) as Dictionary).size())
+	# An unarmed settler, nobody home, the dead at the fence: to the shelter room.
+	var se := layer.server_add_person(level.ground_point(c + Vector3(-2.0, 0.0, 3.0)), {"traits": ["calm"], "want": {"kind": "place"}, "kit": []})
+	layer.server_settle(se)
+	se["jobs"] = ["haul"]
+	se["activity"] = "free"
+	var sb := layer.server_settler_body(se, true)
+	player.global_position = level.ground_point(c + Vector3(Settlement.radius() + 45.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	var zz := Survival.server_spawn_zombie(level, level.ground_point(c + Vector3(-Settlement.radius() * 0.7, 0.0, 0.0)))
+	await _frames(2)
+	if not is_instance_valid(sb) or zz == null or not is_instance_valid(zz):
+		check(false, "the settler and the dead are up")
+		return
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	var brain := sb.get_node_or_null(NodePath(PeopleLayer.BRAIN)) as CivilianAI
+	var rp: Vector3 = room.get("pos", Vector3.ZERO)
+	check(String(se.get("sheltering", "")) == "shelter_room" and brain != null and brain._has_hide and Vector2(brain._hide.x, brain._hide.z).distance_to(Vector2(rp.x, rp.z)) < 1.0,
+		"the unarmed settler goes to the shelter room")
+	sb.global_position = rp
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	var ai := ZombieAI.of(zz)
+	check(Holding.sheltered(sb) and ai != null and Holding.sheltered(sb), "inside with the door shut, the dead pass them by")
+	if ai:
+		zz.global_position = level.ground_point(rp + Vector3(0.0, 0.0, -3.0))
+		ai.target = sb
+		ai.mode = ZombieAI.Mode.CHASE
+		ai.awareness = 1.0
+		ai._decide()
+		check(ai.target != sb and ai._spot().get("who") != sb, "one after them loses them behind the door (%s)" % ai.state_name())
+	# The door holds a while; broken down, they're found.
+	b.server_hit_piece(door, Sieges.PUSH_HP_S * 60.0)
+	sb.global_position = rp
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	check(b.pieces.has(door) and Holding.sheltered(sb), "a minute of one of the dead pushing and the door holds (%.0f hp)" % float((b.pieces.get(door, {}) as Dictionary).get("hp", 0.0)))
+	b.server_hit_piece(door, INF)
+	sb.global_position = rp
+	Holding.settlement_tick(layer, Survival.zombies(level))
+	check(not b.pieces.has(door) and not Holding.sheltered(sb) and Holding.shelter_room(b, mark).is_empty(), "broken down, they're exposed")
+	if is_instance_valid(zz):
+		zz.vitals.server_kill()
+	for cell: Vector3i in cells:
+		b._set_block(cell, {})
+	b._set_piece(mark, {})
+	await _frames(2)
+	Holding.settlement_tick(layer, [])
 	player.global_position = start + Vector3.UP * 0.2
 	await _frames(5)
 

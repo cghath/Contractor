@@ -223,6 +223,11 @@ func _physics_process(delta: float) -> void:
 
 func _decide() -> void:
 	var now := Soldier._now()
+	if is_instance_valid(target) and Holding.sheltered(target):
+		target = null  # (behind a shut safe-room door: lost to it; it searches where they were, and batters at the door)
+		if mode == Mode.CHASE:
+			mode = Mode.SEARCH
+			_search_until = now + SEARCH_S
 	var seen := _spot()  # {"who", "score"} or {}
 	var who: Soldier = seen.get("who") if not seen.is_empty() else null
 	var fed := false
@@ -327,8 +332,8 @@ func _spot() -> Dictionary:
 	var best_score := 0.0
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s):
-			continue  # (a child: never on screen; Children takes them when no adult's near)
+		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s) or Holding.sheltered(s):
+			continue  # (a child: never on screen; Children takes them when no adult's near; behind a shut safe-room door: Holding)
 		var r := reach * (LOW_SIGHT_MULT if s.movement and (s.movement.is_crouched() or s.movement.is_prone()) else 1.0) * Masking.sight_x(s, dark)
 		if is_instance_valid(target) and s == target:
 			r *= 1.5  # (one it's after is easier to keep in sight)
@@ -361,7 +366,7 @@ func _smell() -> Soldier:
 	var best_d := INF
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
-		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s):
+		if s == null or s.faction == INFECTED or not s.vitals.is_up() or s.is_queued_for_deletion() or Children.ignored_by_dead(s) or Holding.sheltered(s):
 			continue
 		var strength := s.smell_strength() * Masking.smell_x(s)  # (phase D: gore smeared on hides it)
 		if strength <= 0.0:
