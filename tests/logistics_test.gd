@@ -135,7 +135,8 @@ func _test_kit_loading() -> void:
 		level.spawn_item(pair[0], pair[1], player.global_position + Vector3(0, 0.5, -0.6), "kitload_" + String(pair[0]))
 		await _frames(5)
 		for n: Node in _ground(pair[0]):
-			player._server_interact.rpc_id(1, n.get_path())
+			if String(n.name) == "kitload_" + String(pair[0]):  # (not the compound's own rounds lying near)
+				player._server_interact.rpc_id(1, n.get_path())
 		await _frames(3)
 	check(inv.count_of(&"rounds_556") == 60 and inv.count_of(&"rounds_762x39") == 30, "loose 5.56 and 7.62x39 picked up off the ground")
 	var screen: InventoryScreen = player._hud.inventory_screen
