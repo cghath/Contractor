@@ -2,6 +2,11 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **Holding's gaps closed on `claude/survival-holding2`** (call 143): refugees join the household or camp they reach
+  (a starving or hostile camp turns them away) and ask to stay at the players' farm (a vote or "Let them stay"); a place
+  left to the dead (or an empty homestead) can be claimed at its post (not with the dead near or someone living there):
+  its stock, the safehouse, the settlement by vote, its people asking to stay; the "safe_room_door" and "shelter" pieces
+  make a shelter room the dead pass by till the door breaks; R2807 PASS (fallenpeople, worldsim, settlement, building, survival); see docs/survival_people.md "Holding or fleeing".
 - **Holding or fleeing built on `claude/survival-flee`** (call 143): people judge whether they can hold their place
   against the dead (`Holding`: guns, melee, a guard, walls against the dead near); an unarmed household runs with its
   children along the road to a safe place (a note and dropped things left, the journal, the rumours), the sim's far
@@ -350,7 +355,7 @@ Zomboid's needs, built our own way on Contractor's zones, bodies and squad AI.
 | 140 | Climbing rules for the dead | **Added 2026-10-26**: walkers can't climb or jump (a 1 m wall or a ladder stops them; they pile until the pile is a ramp); runners vault waist-high; crawlers squeeze under and through gaps; walls, platforms and roofs are real safety (phase B/C). |
 | 141 | Builds and the navmesh | **Added**: a requirement on the building lane: placed blocks and pieces update the navigation the dead and the living use within a second; the dead path round or push on them, never through; companions path over stairs and ladders (phase B follow-up). **Built 2026-10-26**. |
 | 142 | Accessibility and readability | **Added**: colour-blind-safe HUD tells (the ring, the eye, load colours with shapes), scalable text, a toggle for the tension audio, subtitles for every bark; checked at the 10 resolutions as the rest of the UI (phase D UI pass). Save migration across builds NOT taken now. **Built 2026-10-26**. |
-| 143 | Holding or fleeing | **Added 2026-10-26**: "NPCs should flee if zombies are attacking their area/settlement and they don't have weapons and have no guard etc. So the 3 person farmstead near my spawn should have seen all of its people leave since they had no weapons." People judge whether they can hold a place (arms, a guard, walls against the dead); those who can't take their children and what they can carry and run to a safe place, live and in the sim; the settlement's unarmed shelter inside; refugees come back when it's clear. **Built 2026-10-26** (docs/survival_people.md "Holding or fleeing"). |
+| 143 | Holding or fleeing | **Added 2026-10-26**: "NPCs should flee if zombies are attacking their area/settlement and they don't have weapons and have no guard etc. So the 3 person farmstead near my spawn should have seen all of its people leave since they had no weapons." People judge whether they can hold a place (arms, a guard, walls against the dead); those who can't take their children and what they can carry and run to a safe place, live and in the sim; the settlement's unarmed shelter inside; refugees come back when it's clear. **Built 2026-10-26** (docs/survival_people.md "Holding or fleeing"); **gaps closed 2026-10-27** (claude/survival-holding2: refugees join the place they reach, claiming abandoned places, the shelter room). |
 
 ## Already in the code to build on
 

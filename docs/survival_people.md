@@ -217,7 +217,7 @@ they had no weapons." Built in `Holding` (scripts/survival/holding.gd); every nu
   there. The zone loaded again (`Holding.server_zone_up`): the people the sim moved there grounded, the places left
   there get their signs and a journal line ("... The door stood open, things dropped in a hurry, a note.").
 - **The players' settlement** (`Holding.settlement_tick`): the dead within its radius + 20 m: unarmed settlers hide 3 m
-  behind a guard on shift or a player at home, else go to the shelter (a "shelter"/"safe_room" piece or a floor hatch,
+  behind a guard on shift or a player at home, else go to the shelter (a shelter room, below; else a floor hatch,
   else the farmhouse), never past 80% of the radius; the armed stand. Can't hold: a journal line once ("Everyone to
   shelter!"). "Abandon the farm" (the settlement screen's council) puts it to a vote; carried, every settler runs as a
   refugee of the farm and comes back (a settler again) when it's clear.
@@ -225,10 +225,35 @@ they had no weapons." Built in `Holding` (scripts/survival/holding.gd); every nu
   45 m, the players cleared it or they wandered off; elsewhere: no horde and the zone's pressure under 30) for 1.5 days
   gets its refugees back home ("The Halvorsens went back to their farm."). "It's clear now" (talk, on a refugee): true,
   they go now and think 12 better of you; not, "That's not what I saw."
+- **Joining the place they reach** (branch claude/survival-holding2; `Holding.join_on_arrival`, `sim_flee`): a fleeing
+  household that reaches another household joins it (one household: a shared `household` id, the old one kept in
+  `joined` and restored when they go home; the food and water they grabbed go into the head's kit; +15 bond to who took
+  them in, +5 back); at a world group's camp they become members (`take_in`: status grouped, +0.5 food and water a
+  head to its supplies, the body goes to WorldLive's) unless the group is hostile (raiders, cultists, the enclave, or a
+  relation of -10 or worse) or starving (under 1 day of food): then "They won't have us" and on to the next safe place
+  (at most 3 tried); at the players' farm they ask to stay ("Please. We ran from the dead. Can we stay?"): a council
+  take-in vote for the household, or a player's "Let them stay" / "Turn them away" in talk (yes: settlers; no: they go
+  on). The sim: a far household runs to another household's home and joins it, or to the neighbouring zone's camp
+  that takes it in (a starving or hostile one is passed over for a free place).
+- **Claiming a place** (`Holding.server_claim`, `ClaimPost`): a post by the door of every abandoned place (and of an
+  empty homestead, a world farm nobody holds, found when a survivor comes within 60 m) offers "Claim this place" when
+  nobody lives within 12 m and the dead aren't within 30 m. Claimed: the entry's state "claimed", its owner, the world
+  place held by "player" (no group settles or forages it), the map mark "Ours: the Halvorsens' farm", a journal line;
+  what a camp left (30% of its supplies) is the players' as things ("Take what's left here"); "Make this our safehouse"
+  moves the safehouse mark there (sleep and respawn); "Make this our settlement" founds it there when there's none,
+  else puts a move to the council (never silently). Its refugees, the place clear, come back and ask to stay instead of
+  taking it back (yes: they live there, the entry's tenants; no: back to where they were).
+- **The shelter room** (`Holding.shelter_room`, BuildPieces "safe_room_door" 600 hp lockable, "shelter" marker): a
+  shelter marker in a room closed by walls (blocks, solid pieces, shut doors, within 12 cells) with a safe-room door in
+  them is the settlement's shelter: the fallback goes there first, then a floor hatch, then the farmhouse. A settler
+  inside with the door shut is passed by the dead (`Holding.sheltered`: ZombieAI's sight, smell and a chase let go),
+  and the dead near come to the door and push at it (Sieges, 0.5 hp a second a head); broken, they're found.
 - **Left out**: lone survivors' bodies are CivilianAI and never fight (holding means staying and hiding at home); the
-  doors are open doorways in the buildings (no door to leave open); a refugee household joining the household it ran to;
-  world groups taking refugees in as members; the players reclaiming an abandoned place as their own; a new "shelter"
-  build piece (the hook reads one when the building lane adds it).
+  doors are open doorways in the buildings (no door to leave open); a far household reaching the players' farm in the
+  sim (the farm's zone is the hosted one); claimed places beyond the settlement have no jobs or stores of their own (a
+  second settlement needs the settlement system to hold more than one); empty homesteads are world farm places only
+  (not a household's home whose people all died); the shelter room is checked a block up from the marker's floor only
+  (one storey).
 
 ## 10. Performance
 

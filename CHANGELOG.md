@@ -11,6 +11,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, holding or fleeing 2 (claude/survival-holding2, call 143)
+
+- **Added** refugees join the place they reach (`Holding.join_on_arrival`, the sim's `sim_flee`): another household (one household, food shared, a bond), a world group's camp as members (refused by a starving or hostile group: on to the next safe place), the players' farm by asking to stay (a council take-in vote, or "Let them stay" / "Turn them away" in talk).
+- **Added** claiming a place left to the dead or an empty homestead at its post (`ClaimPost`, `Holding.server_claim`): not with the dead within 30 m or anyone living there; it's the players' (the map's "Ours", the world place held), a camp's left supplies to take, the safehouse there, the settlement moved there by the council's vote; its people coming back ask to stay.
+- **Added** build pieces "safe_room_door" (600 hp, a lockable door) and "shelter" (a marker): a marker in a room walled round with a safe-room door is the settlement's shelter; settlers inside with the door shut are passed by the dead until the door is broken (ZombieAI skips `Holding.sheltered`).
+- **Changed** the settlement's shelter fallback: a shelter room, then a floor hatch, then the farmhouse (a bare "shelter"/"safe_room" piece no longer counts); an abandoned settlement's people never run to the farm itself.
+
 ### Contractor: Fallen, holding or fleeing (claude/survival-flee, call 143)
 
 - **Added** people judge whether they can hold their place against the dead and abandon it when they can't (`Holding`; all Proposed; docs/survival_people.md "Holding or fleeing"): strength (a gun 1, melee 0.5, unarmed 0.2, a child 0; a guard +1; walls and defence builds) against the threat (0.3 a head of the dead within 30 m, half that for one idling past; a horde's heads too).
