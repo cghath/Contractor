@@ -16,6 +16,19 @@ Three passes so far. Every number is Proposed (the Captain tunes them).
    to make money... good money but it needs to go with the flow of the game"): high command side
    jobs, captures and bounties, FOB businesses, the black market (docs/income.md). Next section.
 
+## v0.7.1, 2026-10-27: no granted high command squads (the Captain)
+
+v0.7.0 playtest: "the eco is better but going negative on early starter missions is common".
+- No high command squads at the start (Heroes.hire_squad at the FOB, $12,000 sign-on, up to 4):
+  eight men's wages, field costs and casualties are gone from the first fortnight. Sim (20
+  campaigns, median): first 3 deployments negative 33% -> 17%, p10 -$33.4k -> -$14.8k; rated 1-2
+  negative 0% / 7%.
+- The debrief's net is the job's own (value less its costs); the company's running costs in its
+  days (wages, upkeep, loans) are a line of their own (`net_all` is both).
+- Lost-helicopter deductible by the briefed rating (`lost_by_rating`): $6,000 on a 1 to $15,000 on 4-5.
+- The game is easier overall now: careless play no longer loses on average (sloppy day 35 mean
+  ~$386k, was ~$113k). The Captain: "leave it easier". tools/economy_sim.gd `--hc 8` plays the old start.
+
 ## The five operation types, 2026-10-25 (combined arms D4 and D5, cg_brief 3.3; Proposed)
 
 D4 and D5 post every type (docs/combined_arms.md 6.1): the US its phased invasion ($320,000 base),
