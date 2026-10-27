@@ -104,6 +104,51 @@ const MOVE_WINDOW_S := 0.1
 ## Hips this low or lower (m, body space) walk as a crouch-walk: no extra hip drop, less lift.
 const CROUCH_GAIT_HIP := 0.65
 ## Prone crawl: the body moves this far a cycle, a knee drawn up and out each half.
+## The body carries weight (Captain, 2026-10-26: movement "connected, with real body dynamics",
+## Star Citizen on foot), drawn on every peer from how the body moves (_body_dynamics):
+## - Inertia: the upper body leans into a change of pace on a spring (LEAN_SPRING, LEAN_DAMP: it
+##   overshoots a little and settles), ACCEL_LEAN rad forward per m/s^2 speeding up (back braking:
+##   settling on a stop), SIDE_LEAN rad of roll per m/s^2 across, up to LEAN_MAX; the head stays level.
+## - The hips ride over the planted foot walking (WEIGHT_SHIFT m across, less at a run).
+## - A landing sinks the hips (LAND_SINK_PER_MPS m per m/s he came down at, up to LAND_SINK_MAX),
+##   knees taking it, sprung back up (SINK_SPRING, SINK_DAMP).
+## - Turning on the spot steps the feet round (TURN_STEP_RATE rad/s and up, at TURN_STEP_V
+##   m/s of stepping) instead of sliding them.
+## - Feet plant on the ground (FOOT_IK_*): each foot finds the ground under it (terrain, stairs, a
+##   slope) and the leg bends to it, the hips lowering to reach the lower foot; for bodies within
+##   FOOT_IK_RANGE_M of a camera, the ground looked for every frame they're drawn.
+## - Vaulting (climbing: SoldierMovement's mantle) draws the knees up and the body forward over it.
+## Visual only: hitboxes keep the pose (pose_hitboxes). Proposed numbers.
+const ACCEL_LEAN := 0.03
+const SIDE_LEAN := 0.02
+const LEAN_MAX := 0.16
+const LEAN_SPRING := 70.0
+const LEAN_DAMP := 0.5
+const WEIGHT_SHIFT := 0.022
+const LAND_SINK_PER_MPS := 0.025
+const LAND_SINK_MAX := 0.14
+const SINK_SPRING := 90.0
+const SINK_DAMP := 0.7
+const TURN_STEP_RATE := 1.2
+const TURN_STEP_V := 0.9
+const FOOT_IK_RANGE_M := 30.0
+const FOOT_IK_REACH := 0.35
+const FOOT_IK_EASE := 18.0
+const VAULT_THIGH := 1.0
+const VAULT_KNEE := 1.6
+const VAULT_LEAN := 0.35
+var _lean := Vector2.ZERO      # the spring's pitch (forward) and roll (to the right), radians
+var _lean_v := Vector2.ZERO
+var _move_prev := Vector3.ZERO
+var _sink := 0.0               # the hips' landing sink (m, down) and its rate
+var _sink_v := 0.0
+var _last_y := INF
+var _vy := 0.0
+var _last_yaw := INF
+var _yaw_rate := 0.0
+var _weight_x := 0.0           # the hips over the planted foot (root space, m), set by _walk
+var _foot_ground: Array[float] = [0.0, 0.0]  # each foot's ground off the body's floor (m), eased
+var _vault_w := 0.0
 const CRAWL_STRIDE := 0.55
 const CRAWL_KNEE := 1.3
 const CRAWL_THIGH := 0.6
@@ -1674,11 +1719,14 @@ func _process(frame_delta: float) -> void:
 		swing = _crawl(delta)
 	else:
 		swing = _walk(delta)
+	_body_dynamics(delta, still or prone)
 	_breath_t = fmod(_breath_t + delta * 2.0 * breath_rate, TAU * 64.0)
 	var torso_t := (_shown.torso as Transform3D).translated_local(Vector3(0, sin(_breath_t) * 0.003 * breath_depth, 0))  # breathing
 	if _gait_lean != 0.0 or swing != 0.0:
 		# Leaning into the pace, the shoulders turning a little against the stride.
 		torso_t.basis = torso_t.basis * Basis(Vector3.RIGHT, -_gait_lean) * Basis(Vector3.UP, -swing * 0.12)
+	if _lean.y != 0.0:
+		torso_t.basis = torso_t.basis * Basis(Vector3.BACK, -_lean.y)  # leaning into a turn or a sidestep
 	torso.transform = torso_t
 	if casualty:
 		# Limp: the head hangs (carried) or lolls back (dragged) with the body.
@@ -1694,7 +1742,7 @@ func _process(frame_delta: float) -> void:
 		# only pitch and yaw are set here (Captain, 2026-10-17: "woke up from being down, head
 		# sideways").
 		head.position = HEAD_PIVOT
-		head.rotation.z = 0.0
+		head.rotation.z = _lean.y  # (level with the world: the torso's roll undone)
 		head.rotation.y = -_twist_shown
 		hands_anchor.rotation.y = -_twist_shown
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown) - _gait_lean
@@ -1720,11 +1768,16 @@ func _process(frame_delta: float) -> void:
 func _walk(delta: float) -> float:
 	var v := _speed
 	var w := smoothstep(GAIT_IN.x, GAIT_IN.y, v)
-	_gait_w = w
 	var leg_l: Transform3D = _shown.leg_l
 	var leg_r: Transform3D = _shown.leg_r
 	var hip0 := leg_l.origin.y
 	var high := clampf((hip0 - CROUCH_GAIT_HIP) / 0.25, 0.0, 1.0)  # 0 crouched .. 1 standing
+	# Turning on the spot: the feet step round (TURN_STEP_*), not slide.
+	var turning := _speed < 0.3 and absf(_yaw_rate) > TURN_STEP_RATE
+	if turning:
+		v = maxf(v, TURN_STEP_V)
+		w = maxf(w, smoothstep(TURN_STEP_RATE, TURN_STEP_RATE * 2.0, absf(_yaw_rate)))
+	_gait_w = w
 	var duty := _gait_at(GAIT_DUTY, v)
 	var lift := _gait_at(GAIT_LIFT, v) * (0.5 + 0.5 * high)
 	var bob := (GAIT_BOB + GAIT_BOB_RUN * clampf(v / GAIT_SPEED[4], 0.0, 1.0)) * high
@@ -1745,6 +1798,7 @@ func _walk(delta: float) -> float:
 	_gait_lean = _gait_at(GAIT_LEAN, v) * w * high
 	var root: Transform3D = _shown.root
 	_root.transform = root.translated(Vector3(0, dy, 0))
+	_weight_x = -WEIGHT_SHIFT * (1.0 - run) * w * cos(TAU * (_gait_phase - duty * 0.5))  # over the planted foot
 	if w <= 0.0:
 		_leg_left.transform = leg_l
 		_leg_right.transform = leg_r
@@ -1755,6 +1809,8 @@ func _walk(delta: float) -> float:
 	var dir := root.basis.inverse() * _move
 	dir.y = 0.0
 	dir = dir.normalized() if dir.length() > 0.001 else Vector3.FORWARD
+	if turning and _speed < 0.1:
+		dir = Vector3(-signf(_yaw_rate), 0, 0)  # stepping round: the feet go the way it turns
 	# Strafing: the legs turn part way towards the movement (backwards: towards its reverse).
 	var turn := atan2(-dir.x, -dir.z)
 	if turn > PI * 0.5:
@@ -1794,6 +1850,107 @@ func _walk(delta: float) -> float:
 			_shin_right.transform = (_shown.knee_r as Transform3D).interpolate_with(knee, w)
 	# Arms swing against the legs: the right forward as the left foot lands.
 	return cos(TAU * _gait_phase) * _gait_at(GAIT_ARM, v) * w
+
+
+## The body's weight on top of the gait and pose (see ACCEL_LEAN and below): the upper body's
+## lean on its spring, the hips over the planted foot, a landing's sink, the feet on the ground
+## under them and the hips down to the lower one, a vault's tucked knees. `quiet`: lying, seated,
+## carried or down: none of it, eased away.
+func _body_dynamics(delta: float, quiet: bool) -> void:
+	if delta <= 0.0:
+		return
+	var y := global_position.y
+	_vy = (y - _last_y) / delta if _last_y != INF else 0.0
+	var fall := _vy_prev
+	var landed := fall < -2.5 and _vy > -0.6 and not quiet
+	_vy_prev = _vy
+	_last_y = y
+	var yaw := global_rotation.y
+	_yaw_rate = lerpf(_yaw_rate, wrapf(yaw - _last_yaw, -PI, PI) / delta if _last_yaw != INF else 0.0, minf(delta * 12.0, 1.0))
+	_last_yaw = yaw
+	# Inertia: lean into the change of pace, on a spring.
+	var accel := (_move - _move_prev) / delta
+	_move_prev = _move
+	var want := Vector2.ZERO
+	if not quiet:
+		want = Vector2(clampf(-accel.z * ACCEL_LEAN, -LEAN_MAX, LEAN_MAX), clampf(accel.x * SIDE_LEAN, -LEAN_MAX * 0.5, LEAN_MAX * 0.5))
+	var k := LEAN_SPRING
+	_lean_v += (k * (want - _lean) - 2.0 * LEAN_DAMP * sqrt(k) * _lean_v) * minf(delta, 0.05)
+	_lean += _lean_v * minf(delta, 0.05)
+	_lean = _lean.clamp(-Vector2.ONE * LEAN_MAX, Vector2.ONE * LEAN_MAX)
+	if not quiet:
+		_gait_lean += _lean.x
+	# A landing's sink, sprung back.
+	if landed:
+		_sink_v -= minf(-fall * LAND_SINK_PER_MPS, LAND_SINK_MAX) * sqrt(SINK_SPRING) * 1.8  # (peaks near that at this damping)
+	_sink_v += (-SINK_SPRING * _sink - 2.0 * SINK_DAMP * sqrt(SINK_SPRING) * _sink_v) * minf(delta, 0.05)
+	_sink = clampf(_sink + _sink_v * minf(delta, 0.05), -LAND_SINK_MAX, 0.05)
+	_vault_w = move_toward(_vault_w, 1.0 if climbing and not quiet else 0.0, delta * 5.0)
+	if quiet:
+		_weight_x = 0.0
+		_foot_ground = [0.0, 0.0]
+		return
+	# Feet on the ground under them, the hips down to the lower one.
+	var ground: Array[float] = [0.0, 0.0]
+	if _foot_ik_on():
+		for i in 2:
+			var foot := foot_position(i == 0)
+			var q := PhysicsRayQueryParameters3D.create(Vector3(foot.x, y + 0.6, foot.z), Vector3(foot.x, y - 0.6, foot.z), SoldierMovement.WORLD_MASK)
+			if get_parent() is CollisionObject3D:
+				q.exclude = [(get_parent() as CollisionObject3D).get_rid()]
+			var hit := get_world_3d().direct_space_state.intersect_ray(q)
+			ground[i] = clampf((hit.position as Vector3).y - y, -FOOT_IK_REACH, FOOT_IK_REACH) / body_scale() if not hit.is_empty() else 0.0
+	for i in 2:
+		_foot_ground[i] = lerpf(_foot_ground[i], ground[i], 1.0 - exp(-FOOT_IK_EASE * delta))
+	var hips := minf(minf(_foot_ground[0], _foot_ground[1]), 0.0) + _sink
+	var shift := Vector3(_weight_x, hips, 0.0)
+	if shift.length_squared() < 1e-8 and absf(_foot_ground[0]) < 0.002 and absf(_foot_ground[1]) < 0.002 and _vault_w <= 0.0:
+		return
+	_settle_legs(shift, [_foot_ground[0] - hips, _foot_ground[1] - hips])
+	if _vault_w > 0.0:
+		var t := smoothstep(0.0, 1.0, _vault_w)
+		for leg: Node3D in [_leg_left, _leg_right]:
+			leg.transform = Transform3D(leg.transform.basis * Basis(Vector3.RIGHT, VAULT_THIGH * t), leg.transform.origin)
+		for shin: Node3D in [_shin_left, _shin_right]:
+			shin.transform = shin.transform.interpolate_with(_knee(VAULT_KNEE), t)
+		_gait_lean += VAULT_LEAN * t
+
+
+## Moves the root by `shift` (model space) and re-bends each leg (two-bone, as _walk does) so its
+## foot stays where it was drawn, raised `lift[i]` (m, root space; left first): the hips move,
+## the feet stay planted.
+func _settle_legs(shift: Vector3, lift: Array) -> void:
+	_root.transform = _root.transform.translated(shift)
+	var to_root := _root.transform.basis.inverse()
+	for i in 2:
+		var leg := _leg_left if i == 0 else _leg_right
+		var shin := _shin_left if i == 0 else _shin_right
+		var foot := leg.transform * (shin.transform * Vector3(0, -(LEG_LENGTH - THIGH), 0))
+		foot += to_root * -shift + Vector3(0, float(lift[i]), 0)
+		var d := foot - leg.transform.origin
+		var hinge := leg.transform.basis.x  # the knee's hinge: the leg's turn (a strafe's) about the vertical
+		var yaw := Basis(Vector3.UP, atan2(-hinge.z, hinge.x))
+		var local := yaw.inverse() * d
+		var roll := atan2(local.x, -local.y)
+		var a := _leg_angles(Vector2(local.x, local.y).length(), -local.z)
+		leg.transform = Transform3D(yaw * Basis(Vector3.BACK, roll) * Basis(Vector3.RIGHT, a.x), leg.transform.origin)
+		shin.transform = _knee(a.y)
+
+
+## Whether this body's feet look for the ground (FOOT_IK_*): standing or walking, inside the
+## world, near a camera.
+func _foot_ik_on() -> bool:
+	if not is_inside_tree() or climbing or downed:
+		return false
+	if foot_ik_always:
+		return true
+	var cam := get_viewport().get_camera_3d()
+	return cam != null and cam.global_position.distance_squared_to(global_position) < FOOT_IK_RANGE_M * FOOT_IK_RANGE_M
+
+
+var _vy_prev := 0.0
+## Feet look for the ground whatever the distance to a camera (tests).
+var foot_ik_always := false
 
 
 ## Prone: a crawl, one knee drawn up and out each half cycle (CRAWL_*). Returns the free

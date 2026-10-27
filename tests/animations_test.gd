@@ -58,6 +58,7 @@ func _ready() -> void:
 	_test_seated_bones()
 	await _test_world_scale()
 	_test_locomotion()
+	await _test_body_dynamics()
 	_test_stance_and_carry()
 	await _test_view_low_ready()
 	await _test_carry()
@@ -210,6 +211,85 @@ func _test_locomotion() -> void:
 	var idle := _walk_model(stand, 0.0, Vector3.FORWARD, "male")
 	check(crawl.gait == CharacterModel.CRAWL and idle.gait == CharacterModel.IDLE and idle.weight == 0.0,
 		"prone it crawls (%s); stood still, idle (%s, cycle shown %.2f)" % [crawl.gait, idle.gait, idle.weight])
+
+
+## The body carries weight (Captain, 2026-10-26; CharacterModel._body_dynamics): setting off it
+## leans into the pace and braking it rocks back, landing from a fall the hips sink and spring
+## back, and turning on the spot the feet step round.
+func _test_body_dynamics() -> void:
+	print("The body carries weight")
+	var holder := Node3D.new()
+	holder.position = Vector3(440, 0, 440)
+	add_child(holder)
+	var model := CharacterModel.new()
+	model.lod = false
+	holder.add_child(model)
+	model.set_process(false)
+	var dt := 1.0 / 60.0
+	model.pose = SoldierMovement.pose_for(SoldierMovement.Stance.STAND_HIGH, 0, 0.0)
+	for i in 30:
+		model._process(dt)
+	var forward := 0.0
+	for i in 40:
+		holder.position += Vector3.FORWARD * minf(i / 25.0, 1.0) * 5.0 * dt
+		model._process(dt)
+		forward = maxf(forward, model._lean.x)
+	var back := 0.0
+	for i in 40:
+		holder.position += Vector3.FORWARD * maxf(1.0 - i / 15.0, 0.0) * 5.0 * dt
+		model._process(dt)
+		back = minf(back, model._lean.x)
+	check(forward > 0.03 and back < -0.02, "setting off it leans into the pace (%.2f rad), stopping it rocks back (%.2f)" % [forward, back])
+	for i in 60:
+		model._process(dt)
+	for i in 20:
+		holder.position.y -= 6.0 * dt
+		model._process(dt)
+	var sink := 0.0
+	for i in 20:
+		model._process(dt)
+		sink = minf(sink, model._sink)
+	for i in 90:
+		model._process(dt)
+	check(sink < -0.04 and absf(model._sink) < 0.01, "a landing sinks the hips (%.2f m) and they spring back (%.3f)" % [sink, model._sink])
+	var stepping := 0.0
+	for i in 30:
+		holder.rotate_y(3.0 * dt)
+		model._process(dt)
+		stepping = maxf(stepping, model.gait_weight())
+	check(stepping > 0.3, "turning on the spot the feet step round (cycle shown %.2f)" % stepping)
+	# A step 15 cm high under the left foot: that foot stands on it, the leg bending, the other on
+	# the floor (foot IK, near the camera).
+	model.foot_ik_always = true
+	holder.rotation = Vector3.ZERO
+	for i in 60:
+		model._process(dt)
+	var left := model.foot_position(true)
+	var base := left.y
+	var step := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	shape.shape = BoxShape3D.new()
+	(shape.shape as BoxShape3D).size = Vector3(0.12, 0.15, 0.16)
+	step.add_child(shape)
+	add_child(step)
+	step.global_position = Vector3(left.x - 0.03, holder.global_position.y + 0.075, left.z)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	for i in 40:
+		model._process(dt)
+	var on := model.foot_position(true).y - base
+	var off := model.foot_position(false).y - base
+	check(on > 0.1 and on < 0.2 and absf(off) < 0.03, "on a step the foot stands on it (%.2f m up), the other on the floor (%.2f m)" % [on, off])
+	step.queue_free()
+	# Vaulting (a mantle): the knees come up.
+	var knee_before := model.foot_position(false).y
+	model.climbing = true
+	for i in 30:
+		model._process(dt)
+	var knee_up := model.foot_position(false).y - knee_before
+	model.climbing = false
+	check(knee_up > 0.2, "vaulting the knees tuck up (a foot %.2f m higher)" % knee_up)
+	holder.queue_free()
 
 
 ## Walks a fresh model `speed` m/s along `dir` (its own space; it faces -Z) in `stance` for

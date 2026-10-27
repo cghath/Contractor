@@ -165,6 +165,73 @@ the tube ahead of it; AT4: the trigger and under the tube; MAAWS, SMAW: their tw
 folded grip; Javelin: the CLU's handles). A launcher with no entry keeps the placeholder. Render
 cases `rpg_m`, `at4_f` and `maaws_m` shoulder one (S2768, S2772: hand error under 1 cm).
 
+## Full-body first person and body dynamics (Captain, 2026-10-26)
+
+The Captain's calls:
+- **Hands and gun:** the body's own gun.
+- **Camera:** "head, stabilised" and "head, raw" mixed.
+- **Inertia:** real; it changes where rounds go.
+- **Motion:** realistic, with a comfort slider.
+
+What changed:
+
+- **Your own body in view** (`PlayerInput.LOCAL_BODY_LAYER`). Your body and kit draw on a layer
+  your camera shows, so looking down you see your legs, boots, carrier, pouches, arms and the gun
+  in them. Your head and everything on it (face, hair, helmet and its kit, ear pro) stay on
+  `LOCAL_ONLY_LAYER`, which your camera skips (`_hide_own_head`, re-applied every 0.25 s).
+  - The gun and arms are the body's own. The old view model now shows only a thrown grenade.
+  - Scope PiP, vehicle sights and vehicle vision skip your body.
+  - Hits still go to the same body others see.
+- **The camera rides the drawn head's eyes** (`PlayerInput._place_eye`, on
+  `RenderingServer.frame_pre_draw`, after the frame's animation).
+  - The eyes are 7 cm in front of the neck (`EYE_IN_HEAD`).
+  - The mix is 40% raw head and 60% head steadied over 0.12 s.
+  - It stays within 0.3 m of the body's eye point, which shots and AI still use.
+  - It is scaled by **Settings > Video > Camera motion** (0-100%), which replaces the head-bob
+    toggle; an old "off" reads as 0.
+  - Aimed, the eye sits 19 cm behind the sight of the gun in the body's hands.
+- **Weapon inertia is real.** The body's gun trails a turn (`CharacterModel.aim_lag`), and the
+  round leaves where it points: `Soldier.shot_lag`, the part the camera doesn't already show.
+  Aimed, the view rides the gun.
+- **The body carries weight** (`CharacterModel._body_dynamics`, every peer, visual only; Proposed
+  numbers):
+  - The upper body leans into a change of pace on a spring, up to 0.16 rad. It rocks back on a
+    stop and rolls into a sidestep, while the head stays level.
+  - Walking, the hips ride over the planted foot.
+  - A landing sinks the hips (knees bending) and springs back.
+  - Turning on the spot steps the feet round instead of sliding them.
+  - A mantle draws the knees up.
+- **Feet plant** (foot IK, for bodies within 30 m of a camera):
+  - Each foot finds the ground under it (terrain, stairs, slopes) and the leg bends to it.
+  - The hips lower to reach the lower foot.
+  - Legs are re-bent so planted feet stay where they were (`_settle_legs`).
+- **The camera follows the body.**
+  - Footfall dips and the landing spring stay as before, on top of the head's own bob, breathing
+    and landing sink.
+  - Aim sway now also grows with the weight carried (`Soldier.SWAY_LOAD_*`, up to 60% more at
+    40 kg).
+- **Checks:**
+  - `tools/model_render.tscn ... fp` renders each soldier's own view from his eyes (head
+    hidden), ahead and 40° and 70° down (S2790-S2794).
+  - `animations` "The body carries weight": a lean of 0.16 rad into a start and back on a stop,
+    a 9 cm landing sink that springs back, stepping turns, a foot on a 15 cm step with the other
+    on the floor, and knees up in a vault.
+
+Not done yet: a hand planted on the obstacle in a vault; leg hitboxes following the drawn legs
+(they keep the pose, as the gait always has).
+
+## Footsteps (Captain, 2026-10-26: "too much like basic percussion/generated")
+
+The steps are now CC0 recordings: **Fantozzi's Footsteps** (OpenGameArt; Sand takes for the
+ground, Stone takes for anything built), credited in `audio/sfx/CREDITS.md`. Every pace shares
+them through `data/sounds.json` "recording", each at its own level.
+
+On top of that, a generated **kit rattle** (mags, buckles and plates) plays with each step at a
+walk, jog or sprint when you wear a carrier or pack. It is louder with more weight and pace
+(`Sfx.kit_rattle_db`). The "42 Snow and Gravel Footsteps" pack was downloaded too, but it is
+FLAC only and is gravel under snow, so it isn't used. Both packs sit in
+`B:/Contractor-refs/footsteps-cc0`.
+
 ## Tests
 
 - R2753: smoke, wounds, gore, animations, devices and gameplay passed; armor failed 2 checks
@@ -177,3 +244,10 @@ cases `rpg_m`, `at4_f` and `maaws_m` shoulder one (S2768, S2772: hand error unde
   `1aa38406`), so they are not from this branch.
 - R2763: antiarmor passed with the launcher change; loadout failed the same 3 checks as on dev.
 - R2773: smoke passed on the final tree (`8d3b1121`). CI runs every suite on the pushed branch.
+- First person and footsteps:
+  - R2795: movement, attachments, weapons, interaction, exo, vehicles and smoke passed.
+    Animations' two first-person checks were then updated for the body's own arms.
+  - R2803: sound, animations and smoke passed.
+- Body dynamics:
+  - R2808, R2812: animations passed with the new dynamics and foot IK checks.
+  - R2813: animations, movement, attachments, gameplay, squad, perfcases and smoke passed.
