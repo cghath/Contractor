@@ -98,7 +98,21 @@ there, not a stream from forever away.
 Before/after, measured headless by the `firsthour` suite (simulated time: `_populate` every 2 s, the
 crowd stepped; `Survival.legacy_spawns` runs the old rules for "before"):
 
-RESULTS_PLACEHOLDER
+| Measure (simulated) | Before | After |
+|---|---|---|
+| Open country, 5 min walking a 120 m circle, day 1: new bodies about him | 7-17 (R2746-R2751) | 0-1 |
+| The same on day 7 | (as above) | 1-2 |
+| Round an AI farm (a lone survivor's home), 5 min: new bodies within 150 m of it | 4-16 | 0 |
+| Open country, a shot every 2 s for 3 min: bodies that arrived / hordes / pressure | 25-40 / 1 / 100 | 3-10 / 0 / ~41 |
+| ... the farthest a crowd head that arrived started from | 99-131 m (plus a horde put down 150-250 m off) | 122-132 m (the heard radius + 50 m) |
+| By a site nobody holds (compound_4, near the village), the same | 17-35 / 1 / 100 | 23-38 / 1 / 100 |
+
+The spawn survey (seed 5151, R2751): the farmstead's centre 21 m from him, he wakes 3 m from the
+farmhouse door; boxes within 120 m: pantry (a tin of meat, 2 beans, water, 3 rags), dresser (rags,
+a bandage, candles), tool chest in the barn (planks, ties, rags, sticks) and two of the zone's own
+valuables caches (loose pistol and rifle rounds, buckshot; work boots); on the ground: the note, the
+gift, the planks and hammer, the barn's crowbar, the zone's loose rounds and smoke grenades. No guns.
+Before this lane the spawn was a bare edge point 350 m from the nearest site.
 
 ## 7. Left out
 

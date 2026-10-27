@@ -8,7 +8,7 @@
   board up, day 2's radio survivor; journal + marks + small rewards), control hints once each with the player's own
   keys (Hints toggle, Field notes page), no horde on night 1 below High and the night pace ramped, the journal's Now
   and "?" landmarks, sparse open-country dead, quiet radius round the living's places, noise drawing only the near
-  dead; see docs/survival_firsthour.md.
+  dead; R2751 FLAKY (firsthour, intel, polish PASS; survival's stealth-kill check and fallenpeople's take-over flaked once, passed the reruns); see docs/survival_firsthour.md.
 - **Condition and wear 2 built on `claude/survival-wear2`** (calls 38, 43, 120-123, the left-out list): the AI's guns
   jam and get cleared (a bark), companions ask for and do their own cleaning, raiders' guns come used; loose rounds and
   shells carry condition into magazines and tubes (wet shells dud); suppressors wear, leak sound and break; hot hand-loads
