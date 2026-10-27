@@ -387,7 +387,7 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 	Survival._journal_line(text + ".")
 	_event(zone, "abandoned", text)
 	_mark(layer, home, "Abandoned: %s" % family_name(members))
-	_chase_slowest(layer, dead)
+	_chase_slowest(layer, Survival.zombies(layer.level))
 	SessionLog.note("survival: %s (%d) fled to %s" % [family_name(members), members.size(), String(dest.label)])
 	return e
 

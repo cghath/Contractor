@@ -11,6 +11,14 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, holding or fleeing (claude/survival-flee, call 143)
+
+- **Added** people judge whether they can hold their place against the dead and abandon it when they can't (`Holding`; all Proposed; docs/survival_people.md "Holding or fleeing"): strength (a gun 1, melee 0.5, unarmed 0.2, a child 0; a guard +1; walls and defence builds) against the threat (0.3 a head of the dead within 30 m, half that for one idling past; a horde's heads too).
+- **Added** live: a broken household (a family, a couple, one alone) runs: the unarmed and the nerve-broken at once, the armed cover the retreat 15 s; they grab food and water, shout ("They're coming over the fence! Run!"), take the nearest road away from the dead to another household, a world camp, the farm, a town's edge or out of the zone; the dead go after the slowest; arrived, they're refugees there. The place left: things dropped, a note, a map mark, a journal line ("The Halvorsens left their farm to the dead."), a world event for the rumours. A live world camp that breaks relocates.
+- **Added** the sim: the dead find far households now and then (0.2 a day at full density, 1.5 with a horde in the zone); the unarmed always run (to another household, else the quietest neighbouring zone), the armed with the strength hold; a camp a horde falls on that can't hold relocates (goal "relocate") instead of fighting it out. A zone loaded again shows the empty place's signs.
+- **Added** the players' settlement: with the dead at the fence, unarmed settlers hide behind a guard on shift or a player at home, else go to the shelter (a shelter piece or cellar hatch, else the farmhouse), never out; "Abandon the farm" is a council question on the settlement screen.
+- **Added** coming back: refugees go home when their place has been clear of the dead for 1.5 days; "It's clear now" (talk) brings them back at once for +12 opinion.
+
 ### Contractor: Fallen, condition and wear 2 (claude/survival-wear2)
 
 - **Added** the AI's guns wear and jam and they clear them (all Proposed; docs/survival_wear.md "Wear 2"): companions, settlers and raiders already fired through the player's `Soldier._server_fire`, but a jammed AI gun stayed jammed; now an AI clears its own jam (2 s and a "Jammed!" bark), a companion under 50% asks for a cleaning and cleans it with their own kit at the settlement, and raiders' guns spawn used (30-75%).
