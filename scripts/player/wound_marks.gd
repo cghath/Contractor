@@ -1,26 +1,29 @@
 class_name WoundMarks
 extends Node3D
-## The body's wounds drawn where they are. Up close (WoundSkin, within WoundSkin.RANGE_M) they are
-## painted into the body's own 0.5 cm voxels: each hole's dark core (a bigger, ragged one at an
-## exit), torn cloth or a raw rim round it, the blood that ran down the skin with gravity and
-## the soak spreading through the uniform with the blood lost there, wet while it bleeds and
-## drying brown after; bruises where armour stopped a round (gore records "b", BRUISE_*) and over
-## closed breaks. Further off, coarse 1 cm voxels of the same holes and blood stand in ("WoundMark"
-## on the part's bone, laid on the 0.5 cm body shape, BodyVolume.surface). Blood drips off the
-## lowest point and pools on the ground. Treated or held by a tourniquet, it stops; what treated it
-## covers the spot ("WoundDressing", laid on the skin): a pressure bandage (cream elastic wrap, its
-## pressure bar over the hole), packed gauze (white, bulging, its tail loose), a chest seal (a
-## square patch, dark border and valve) or a plain dressing. A casualty bleeding while dragged or
-## crawling smears a trail on the ground (SMEAR_*), and whoever works on a bleeding wound gets
-## blood on their hands (HAND_*). Blood that lands on someone else or on gear stains it
+## The body's wounds, all in the body's own voxels (Captain, 2026-10-27: wounds "must not add voxels
+## on top of the character model"): each hole is a real cavity BodyDeform carves along the round's
+## path (an entry going in, a bigger, torn exit blown out), and WoundSkin paints the rest into the
+## part's own 0.5 cm voxels, out to WoundSkin.RANGE_M: the cavity's walls showing what the round hit
+## (TISSUE_*), torn cloth or a raw rim round the hole, the blood that ran down with gravity as he
+## lay, the soak spreading through the uniform with the blood lost there, wet while it bleeds and
+## drying brown after, blood on a treater's hands and at a coughing casualty's mouth, bruises where
+## armour stopped a round (gore records "b", BRUISE_*) and over closed breaks. Blood leaves the body
+## as the medical model says it bleeds: drips off the lowest point of a slow bleed, spurts with the
+## heartbeat from an arterial one; they fall, land and pool on the ground. Treated, a wound stops;
+## what treated it is a thing put on the body, its own voxels laid on the skin ("WoundDressing", the
+## Captain's call): a pressure bandage (cream elastic wrap, its pressure bar over the hole), packed
+## gauze (white, bulging, its tail loose), a chest seal (a square patch, dark border and valve) or a
+## plain dressing, reddening if it's bled through. A casualty bleeding while dragged or crawling
+## smears a trail on the ground (SMEAR_*). Blood that lands on someone else or on gear stains it
 ## (BloodStain). Devices on the body (tourniquets, splints, lines and bags...) are BodyDevices',
 ## and what shows in the skin (burns, pallor, blue lips, shivering) BodyCondition's; both are
 ## made here.
 ##
-## Never floating (Captain, 2026-10-26: "blood to stop floating"): everything on the body is drawn
-## on its part's bone through the part's build (fit_of: a broad or slim build widens the mesh, and
-## the marks with it); what lands on the ground lies on the ground under each cell, tilted to it,
-## re-seated when the ground under it changes (_settle), and drops fall on until they meet it.
+## Never floating (Captain, 2026-10-26: "blood to stop floating"): what's on the body is in it or,
+## a dressing, laid on its part's bone through the part's build (fit_of: a broad or slim build
+## widens the mesh, and the dressing with it); what lands on the ground lies on the ground under
+## each cell, tilted to it, re-seated when the ground under it changes (_settle), and drops fall
+## on until they meet it.
 ##
 ## Positions come from the wounds' "at" and "out" (rest pose, Vitals.wound_list,
 ## replicated), and the flow from their replicated rates, so every peer draws the same
@@ -75,8 +78,6 @@ const FLOOR_LOOK_UP_M := 0.3
 const POOL_STEP := 0.15
 ## Things blood has stained (BloodStain), at most.
 const MAX_STAINED := 24
-## The coarse blood voxels draw from WoundSkin.RANGE_M (the painted skin nearer) to FAR_M.
-const FAR_M := 80.0
 ## Ground blood re-seated each EXPIRE_TICK_S (_settle): at most SETTLE_RAYS cells a tick, in turn;
 ## a cell whose ground moved more than SETTLE_SLACK falls to the new ground within SETTLE_DROP, or
 ## goes (the ground blown away under it).
@@ -147,7 +148,6 @@ var vitals: Vitals
 var body := ""  # the body type (BodyVolume.body_of): blood lies on that body's shape
 var _key := ""
 var _spots: Dictionary = {}  # spot key -> spot state (see _new_spot)
-var _bone_meshes: Dictionary = {}  # bone -> MultiMeshInstance3D (the coarse holes and blood)
 var _dress_meshes: Dictionary = {}  # bone -> MultiMeshInstance3D (dressings)
 var _dirty := false
 var _drips: Array[Dictionary] = []  # {"pos", "vel", "floor"} in world space
@@ -178,7 +178,6 @@ var _hand_blood := 0.0  # seconds of work in blood
 var _hand_cells: Array = [[], []]  # right, left: [rest point, size] each
 var _hand_until := 0.0
 var _hand_wet_until := 0.0
-var _hand_meshes: Array = [null, null]
 static var _material: StandardMaterial3D
 
 
@@ -243,6 +242,11 @@ func _rebuild() -> void:
 			spot.arterial = 0.0
 			spot.treated = false
 			spot.look = &""
+			spot.tissue = TISSUE_MUSCLE
+			spot.bone_t = -1.0
+			spot.path = Vector3.ZERO
+			spot.length = 0.0
+		_note_inside(spot, w)
 		if w.treated:
 			spot.treated = true
 		var look := _look_of(w)
@@ -269,6 +273,50 @@ func _rebuild() -> void:
 	_update_processing()
 
 
+## What the inside of a wound shows (WoundSkin paints the cavity's walls; the Captain's call: "what
+## was hit"): torn muscle always; bone shards where it broke a bone (BONE_T: how far along the path
+## the bone is); deeper in, the organ it hit (the medical model's wounds at this spot): a lung, the
+## heart, the brain, the bowel for an abdominal bleed, a dark clot round a torn vessel in the chest.
+const TISSUE_MUSCLE := 0
+const TISSUE_LUNG := 1
+const TISSUE_HEART := 2
+const TISSUE_BOWEL := 3
+const TISSUE_BRAIN := 4
+const TISSUE_CLOT := 5
+
+
+## Takes in what wound `w` (at `spot`) says the round did inside: its path, the organ, a broken bone.
+func _note_inside(spot: Dictionary, w: Dictionary) -> void:
+	var at: Vector3 = w.at
+	var end: Variant = w.get("out") if w.get("out") is Vector3 else w.get("end")
+	if end is Vector3 and Vector3(end).distance_to(at) > float(spot.length):
+		spot.path = (Vector3(end) - at).normalized()
+		spot.length = Vector3(end).distance_to(at)
+	var kind := String(w.kind)
+	var tissue := int(spot.tissue)
+	match kind:
+		"heart":
+			tissue = TISSUE_HEART
+		"chest":
+			tissue = TISSUE_HEART if tissue == TISSUE_HEART else TISSUE_LUNG
+		"internal":
+			if tissue == TISSUE_MUSCLE:
+				tissue = TISSUE_BOWEL if w.part in [Vitals.ABDOMEN, Vitals.PELVIS] else TISSUE_CLOT
+		"fracture", "rib":
+			var bone: Variant = BodyMap.BONES.get(StringName(w.get("name", "")))
+			if bone is Array and Vector3(spot.path) != Vector3.ZERO:
+				# Where along the path it passes the bone.
+				var a: Vector3 = bone[0]
+				var b: Vector3 = bone[1]
+				var q := Geometry3D.get_closest_points_between_segments(at, at + Vector3(spot.path) * maxf(float(spot.length), 0.1), a, b)
+				spot.bone_t = (q[0] as Vector3).distance_to(at)
+			elif float(spot.bone_t) < 0.0:
+				spot.bone_t = 0.02 if kind == "rib" else 0.04
+	if w.part in [Vitals.HEAD, Vitals.FACE] and kind in ["postmortem", "brain"] or StringName(w.get("name", "")) == &"brain":
+		tissue = TISSUE_BRAIN
+	spot.tissue = tissue
+
+
 ## The armour stops recorded on this body (Vitals.server_impact: gore "b" records).
 func bruise_records() -> Array:
 	if not is_instance_valid(vitals):
@@ -291,14 +339,18 @@ func paint_skin() -> void:
 		var flowing: bool = spot.flow > 0.0 and alive
 		var wet := 1.0 if flowing or float(spot.stopped) == INF else clampf(1.0 - (now - float(spot.stopped)) / WoundSkin.DRY_S, 0.0, 1.0)
 		var soak := WoundSkin.SOAK_BASE_M + WoundSkin.SOAK_PER_L * pow(lost, WoundSkin.SOAK_POWER)
-		for hole: Dictionary in spot.holes:
+		for hole: Dictionary in _holes_left(spot):
 			var salt := float(hash(hole.at) % 997) / 9.7
+			# The round's way in from this hole (out of it at an exit), for the cavity's walls.
+			var way: Vector3 = spot.path if Vector3(spot.path) != Vector3.ZERO else -Vector3(hole.n)
+			var inside := {"way": -way if hole.exit else way, "deep": maxf(float(spot.length), 0.04), "tissue": spot.tissue,
+				"bone_t": (float(spot.length) - float(spot.bone_t)) if hole.exit and float(spot.bone_t) >= 0.0 else float(spot.bone_t)}
 			var runs: Array = hole.runs
 			# The hole and its soak, sagging the way down is now, with the run in progress (the latest).
 			var latest: Dictionary = runs[-1] if not runs.is_empty() else {}
 			spots.append({"part": spot.part, "at": hole.at, "n": hole.n, "down": spot.down if latest.is_empty() else latest.dir,
 				"exit": hole.exit, "core": (EXIT_SIZE if hole.exit else ENTRY_SIZE) * 0.5, "soak": soak,
-				"trail": _run_length(latest, lost), "wet": wet, "salt": salt})
+				"trail": _run_length(latest, lost), "wet": wet, "salt": salt, "inside": inside})
 			for i in runs.size() - 1:  # runs from before he moved: where they ran then
 				spots.append({"part": spot.part, "at": hole.at, "n": hole.n, "down": runs[i].dir, "exit": false, "core": 0.0,
 					"soak": 0.0, "trail": _run_length(runs[i], lost), "wet": wet, "salt": salt + 3.1 * (i + 1)})
@@ -314,6 +366,8 @@ func paint_skin() -> void:
 			var at: Variant = _break_spot(w)
 			if at is Vector3:
 				bruises.append({"at": at, "r": BRUISE_BREAK_R, "s": 0.55, "age": _bruise_age("f%s%s" % [w.part, w.name])})
+	spots.append_array(_hand_spots())
+	spots.append_array(_mouth_spots())
 	skin.paint(spots, bruises, BodyDeform.gore_level() == "full")
 
 
@@ -402,7 +456,8 @@ func _new_spot(part: StringName, at: Vector3, out: Variant) -> Dictionary:
 	if out is Vector3:
 		holes.append(_new_hole(part, out, true, rng))
 	return {"part": part, "holes": holes, "flow": 0.0, "lost": 0.0, "treated": false, "look": &"", "made": 0, "rng": rng,
-		"down": Vector3.DOWN, "downed": false, "stopped": _now(), "arterial": 0.0, "beat": 0.0, "seep": 0.0, "dressed_lost": -1.0}  # stopped: when it stopped bleeding (INF while it bleeds)
+		"down": Vector3.DOWN, "downed": false, "stopped": _now(), "arterial": 0.0, "beat": 0.0, "seep": 0.0, "dressed_lost": -1.0,
+		"tissue": TISSUE_MUSCLE, "bone_t": -1.0, "path": Vector3.ZERO, "length": 0.0}  # stopped: when it stopped bleeding (INF while it bleeds)
 
 
 ## The dressing a treated wound shows (LOOKS), or &"" for none (a splinted bone, a rib).
@@ -993,64 +1048,51 @@ func _settle() -> void:
 		_redraw_chunks()
 
 
-## Everything on the body: holes, blood and dressings, one MultiMesh per bone.
-## BodyDeform cut a part through: its marks past the cut go (_redraw).
+## The dressings, one MultiMesh per bone; the wounds painted on the parts' meshes (WoundSkin).
+## BodyDeform carved or cut a part: the paint goes on its new mesh, none past a cut.
 func on_reshaped() -> void:
 	if is_instance_valid(model):
 		_redraw()
+		paint_skin()
 
 
 func _redraw() -> void:
 	_dirty = false
-	var per_bone := {}  # bone -> Array of [local position, size, colour(, basis)]: the coarse holes and blood
-	var dressed := {}  # bone -> the same, for dressings
-	var deform := model.get_node_or_null(^"BodyDeform") as BodyDeform
+	var dressed := {}  # bone -> Array of [local position, size, colour(, basis)]: dressings
 	for spot: Dictionary in _spots.values():
 		var bone := model.part_node(spot.part)
 		if bone == null:
 			continue
 		var pivot := BodyVolume.pivot_at(spot.part, body)
-		var cells: Array = per_bone.get(bone, [])
 		var dress: Array = dressed.get(bone, [])
-		# A part cut through: only the marks on what's left of it (none hang in the air where
-		# the limb was).
-		var left: Variant = deform.cut_bounds(BodyDeform._bone_part(spot.part)) if deform else null
-		if left is AABB:
-			var kept: Array[Dictionary] = []
-			for hole: Dictionary in spot.holes:
-				if (left as AABB).has_point(Vector3(hole.at) - pivot):
-					kept.append(hole)
-			if kept.is_empty():
-				per_bone[bone] = cells
-				dressed[bone] = dress
-				continue
-			spot = spot.duplicate()
-			spot.holes = kept
-		for hole: Dictionary in spot.holes:
-			for b: Array in hole.blood:
-				if left is AABB and not (left as AABB).has_point(b[0] - pivot):
-					continue  # a trail run on past the cut
-				cells.append([b[0] - pivot, b[1], DRIED_COLOUR if spot.flow <= 0.0 and spot.treated else b[2]])
+		for hole: Dictionary in _holes_left(spot):
 			if spot.treated and spot.look != &"":
 				if hole.get("dressed_as") != spot.look:  # built once: a redraw comes with each new blood cell
 					hole["dressed_as"] = spot.look
 					hole["dressing"] = _dressing(spot.part, hole, pivot, spot.look)
 				dress.append_array(_bloodied(spot, hole, pivot))
-			else:
-				for m: Array in hole.marks:
-					cells.append([m[0] - pivot, m[1], m[2]])
-		per_bone[bone] = cells
 		dressed[bone] = dress
-	_draw_on_bones(_bone_meshes, per_bone, "WoundMark", true)
-	_draw_on_bones(_dress_meshes, dressed, "WoundDressing", false)
+	_draw_on_bones(_dress_meshes, dressed, "WoundDressing")
+
+
+## `spot`'s holes still on the body: a part cut through keeps only those on what's left of it
+## (none hang in the air where the limb was).
+func _holes_left(spot: Dictionary) -> Array:
+	var deform := model.get_node_or_null(^"BodyDeform") as BodyDeform
+	var left: Variant = deform.cut_bounds(BodyDeform._bone_part(spot.part)) if deform else null
+	if not left is AABB:
+		return spot.holes
+	var pivot := BodyVolume.pivot_at(spot.part, body)
+	return spot.holes.filter(func(h: Dictionary) -> bool: return (left as AABB).has_point(Vector3(h.at) - pivot))
 
 
 ## Draws `per_bone` (bone -> cells) on each bone, in `meshes` (bone -> its MultiMeshInstance3D,
-## named `node_name`), widened with the part's build (fit_of). `far`: drawn only past the painted
-## skin's range (WoundSkin.RANGE_M), up to FAR_M.
-func _draw_on_bones(meshes: Dictionary, per_bone: Dictionary, node_name: String, far: bool) -> void:
-	for bone: Node3D in meshes.keys():
-		if not per_bone.has(bone) and is_instance_valid(meshes[bone]):
+## named `node_name`), widened with the part's build (fit_of).
+func _draw_on_bones(meshes: Dictionary, per_bone: Dictionary, node_name: String) -> void:
+	for bone: Variant in meshes.keys():
+		if not is_instance_valid(bone) or not is_instance_valid(meshes[bone]):
+			meshes.erase(bone)  # (its part went with a cut)
+		elif not per_bone.has(bone):
 			meshes[bone].multimesh.visible_instance_count = 0
 	for bone: Node3D in per_bone:
 		var cells: Array = per_bone[bone]
@@ -1064,9 +1106,6 @@ func _draw_on_bones(meshes: Dictionary, per_bone: Dictionary, node_name: String,
 			inst = _multimesh_instance(maxi(64, cells.size() * 2))
 			inst.name = node_name
 			inst.layers = model.render_layers
-			if far:
-				inst.visibility_range_begin = WoundSkin.RANGE_M
-				inst.visibility_range_end = FAR_M
 			bone.add_child(inst, true)
 			meshes[bone] = inst
 		inst.transform = Transform3D(fit_of(bone), Vector3.ZERO)
@@ -1084,8 +1123,8 @@ func _draw_on_bones(meshes: Dictionary, per_bone: Dictionary, node_name: String,
 ## Keeps what's drawn on the bones on the body as it's drawn now: the build's width (set after the
 ## marks, or changed), the hand's pose, a carved part's mesh.
 func _refit() -> void:
-	for meshes: Dictionary in [_bone_meshes, _dress_meshes]:
-		for bone: Node3D in meshes:
+	for meshes: Dictionary in [_dress_meshes]:
+		for bone: Variant in meshes:
 			if is_instance_valid(bone) and is_instance_valid(meshes[bone]):
 				(meshes[bone] as Node3D).transform = Transform3D(fit_of(bone), Vector3.ZERO)
 	if devices:
@@ -1496,50 +1535,73 @@ var _hand_drawn_models: Array = ["", ""]
 
 
 func _redraw_hands() -> void:
-	var wet := _now() < _hand_wet_until
 	_hand_drawn_models = _hand_models()
+	_hand_points = [_hand_rest_points(0), _hand_rest_points(1)]
+	paint_skin()
+
+
+var _hand_points: Array = [[], []]  # right, left: rest-pose points on the hand as drawn now
+
+
+## Where hand `i`'s blood is, rest pose, on the hand as it's drawn now (its pose's model).
+func _hand_rest_points(i: int) -> Array:
+	var part := Vitals.FOREARM_R if i == 0 else Vitals.FOREARM_L
+	var drawn := String(_hand_drawn_models[i])
+	var out: Array = []
+	for c: Array in _hand_cells[i]:
+		var dir: Vector3 = c[0]
+		var mid: Variant = BodyVolume.slab_centre(part, float(c[1]), body, drawn)
+		if not mid is Vector3:
+			continue  # (that bit of hand isn't there in this pose)
+		var on: Variant = BodyVolume.surface(part, mid, dir, 0.08, body, drawn)
+		if on is Vector3:
+			out.append(on)
+	return out
+
+
+## Blood on the hands, painted into them (WoundSkin): a smear at each of a few of its points,
+## wider the longer they worked in blood; wet, then dried.
+func _hand_spots() -> Array:
+	var out: Array = []
+	if _hand_blood <= 0.0:
+		return out
+	var wet := 1.0 if _now() < _hand_wet_until else 0.0
 	for i in 2:
+		var points: Array = _hand_points[i]
 		var part := Vitals.FOREARM_R if i == 0 else Vitals.FOREARM_L
-		var bone := model.part_node(part)
-		if bone == null:
-			continue
-		var inst: MultiMeshInstance3D = _hand_meshes[i]
-		var cells: Array = _hand_cells[i]
-		if inst == null or not is_instance_valid(inst):
-			if cells.is_empty():
-				continue
-			inst = _multimesh_instance(HAND_CELLS)
-			inst.name = "HandBlood"
-			inst.layers = model.render_layers
-			bone.add_child(inst, true)
-			_hand_meshes[i] = inst
-		inst.transform = Transform3D(fit_of(bone), Vector3.ZERO)
-		var pivot := BodyVolume.pivot_at(part, body)
-		var drawn := String(_hand_drawn_models[i])
-		var mm := inst.multimesh
-		var at := PackedVector3Array()
-		var n := 0
-		for j in cells.size():
-			var dir: Vector3 = cells[j][0]
-			var mid: Variant = BodyVolume.slab_centre(part, float(cells[j][1]), body, drawn)
-			if not mid is Vector3:
-				continue
-			var s: Variant = BodyVolume.surface(part, mid, dir, 0.08, body, drawn)
-			if not s is Vector3:
-				continue  # (that bit of hand isn't there in this pose)
-			var size: float = cells[j][2]
-			# A flat smear on the skin (0.4 cm thick), not a cube standing off it.
-			mm.set_instance_transform(n, Transform3D(BodyDevices._facing(dir) * Basis.from_scale(Vector3(size, size, 0.004)), Vector3(s) + dir * 0.002 - pivot))
-			mm.set_instance_color(n, (FRESH_COLOUR if j % 3 else BLOOD_COLOUR) if wet else DRIED_COLOUR)
-			at.append(Vector3(s) + dir * 0.002 - pivot)
-			n += 1
-		mm.visible_instance_count = n
-		inst.set_meta(&"cells", at)
+		var step := maxi(1, points.size() / 3)
+		for j in range(0, points.size(), step):
+			var p: Vector3 = points[j]
+			out.append({"part": part, "at": p, "n": _outward(part, p), "down": Vector3.DOWN, "exit": false, "core": 0.0,
+				"soak": clampf(0.008 + 0.0025 * (_hand_cells[i] as Array).size(), 0.008, 0.05), "trail": 0.0, "wet": wet,
+				"salt": float(j) * 1.7 + i})
+	return out
 
 
-## Where the hand blood is now, world (tests).
+## Blood at the mouth (coughing it up: blast lung, a lung filling, BodyCondition.mouth_blood):
+## on the lips and run from the corners down the chin, painted into the face.
+func _mouth_spots() -> Array:
+	if condition == null or not condition.mouth_blood():
+		return []
+	var pivot := BodyVolume.pivot_at(Vitals.HEAD, body)
+	var out: Array = []
+	for side: float in [-1.0, 0.0, 1.0]:
+		var q := Vector3(pivot.x + side * 0.026, pivot.y + 0.1, pivot.z)
+		var on: Variant = BodyVolume.surface(Vitals.FACE, q, Vector3.FORWARD, 0.2, body)
+		if on is Vector3:
+			out.append({"part": Vitals.FACE, "at": on, "n": Vector3.FORWARD, "down": Vector3.DOWN, "exit": false, "core": 0.0,
+				"soak": 0.012 if side == 0.0 else 0.006, "trail": 0.0 if side == 0.0 else (0.05 if side > 0.0 else 0.035), "wet": 1.0,
+				"salt": 11.0 + side})
+	return out
+
+
+## Where the hand blood is now, world (tests): its painted points.
 func hand_blood_points(right: bool) -> Array[Vector3]:
-	return drawn_cells(_hand_meshes[0 if right else 1])
+	var out: Array[Vector3] = []
+	var part := Vitals.FOREARM_R if right else Vitals.FOREARM_L
+	for p: Vector3 in _hand_points[0 if right else 1]:
+		out.append(to_world(part, p))
+	return out
 
 
 ## Where the cells `inst` draws are now, world: their centres (tests; a headless renderer keeps

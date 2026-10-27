@@ -1105,9 +1105,10 @@ func _test_ballistics_routing() -> void:
 		await get_tree().process_frame
 		if wound_marks.holes_on(Vitals.THIGH_R) >= 2:
 			break
-	var drawn: MultiMeshInstance3D = model.part_node(Vitals.THIGH_R).get_node_or_null(^"WoundMark")
-	check(wound_marks.holes_on(Vitals.THIGH_R) == 2 and drawn != null and drawn.multimesh.visible_instance_count >= 2,
-		"both holes are drawn on the thigh (%d holes, %d voxels)" % [wound_marks.holes_on(Vitals.THIGH_R), drawn.multimesh.visible_instance_count if drawn else 0])
+	var painted := wound_marks.skin.material_of(model.part_node(Vitals.THIGH_R))
+	var spots := int(painted.get_shader_parameter(&"spot_count")) if painted else 0
+	check(wound_marks.holes_on(Vitals.THIGH_R) == 2 and spots >= 2,
+		"both holes are painted on the thigh (%d holes, %d painted)" % [wound_marks.holes_on(Vitals.THIGH_R), spots])
 	# It bleeds: blood runs on the skin and pools on the ground under the leg.
 	for i in 120:
 		await get_tree().process_frame

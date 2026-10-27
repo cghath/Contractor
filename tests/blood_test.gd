@@ -47,6 +47,8 @@ func _ready() -> void:
 	await _test_runs_follow_gravity()
 	await _test_spurts()
 	await _test_seeping_dressing()
+	await _test_cavity()
+	await _test_inside()
 	GameState.delete_save()
 	BodyDeform.gore_override = ""
 	print("BLOOD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -147,6 +149,31 @@ func _worst(mi: MeshInstance3D, points: Array[Vector3]) -> float:
 	return worst
 
 
+## Where the wounds painted on `part`'s mesh are centred, world.
+func _painted_holes(s: Soldier, part: StringName) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var bone := s.model.part_node(part)
+	var mat := _marks(s).skin.material_of(bone)
+	var mi := _mesh(s, part)
+	if mat == null or mi == null:
+		return out
+	var a: PackedVector4Array = mat.get_shader_parameter(&"spot_a")
+	for i in int(mat.get_shader_parameter(&"spot_count")):
+		if a[i].w > 0.0:  # (a hole, not a run from before he moved)
+			out.append(mi.global_transform * Vector3(a[i].x, a[i].y, a[i].z))
+	return out
+
+
+## Anything drawn on top of `s`'s body for wounds and blood (Captain, 2026-10-27: none; dressings
+## and devices are things put on, not wounds).
+func _cubes_on(s: Soldier) -> Array:
+	var out := []
+	for node_name: String in ["WoundMark", "HandBlood", "MouthBlood", "BloodOn"]:
+		for n: Node in s.model.find_children(node_name, "", true, false):
+			out.append("%s/%s" % [n.get_parent().name, n.name])
+	return out
+
+
 func _marks(s: Soldier) -> WoundMarks:
 	return s.model.get_node(^"WoundMarks")
 
@@ -219,11 +246,11 @@ func _test_builds() -> void:
 		_wound(s, Vitals.THIGH_L, "venous", 0.8, &"", Vector3(-0.075, 0.62, -0.085))
 		await _seconds(1.5)
 		var chest_mi := _mesh(s, Vitals.CHEST)
-		var torso := s.model.part_node(Vitals.CHEST)
-		var cells := _cells(torso.get_node_or_null(^"WoundMark"))
-		var worst := _worst(chest_mi, cells)
-		check(not cells.is_empty() and worst < 0.008, "%s build (girth %.2f): the chest's blood and hole voxels lie on its skin (%d, worst %.1f mm off)"
-			% [["slim", "", "broad"][build], s.model.girth("torso"), cells.size(), worst * 1000.0])
+		var painted := _painted_holes(s, Vitals.CHEST)
+		var worst := _worst(chest_mi, painted)
+		check(not painted.is_empty() and worst < 0.012, "%s build (girth %.2f): the chest wound is painted where its crater is (%d, worst %.1f mm from what is left of the skin)"
+			% [["slim", "", "broad"][build], s.model.girth("torso"), painted.size(), worst * 1000.0])
+		check(_cubes_on(s).is_empty(), "nothing laid on top of the body for its wounds (%s)" % [_cubes_on(s)])
 		var drop_from: Array[Vector3] = []
 		for i in 6:
 			marks._spawn_drip()
@@ -249,9 +276,9 @@ func _test_lying() -> void:
 	CharacterModel.lay_down(s, s.model, true)
 	await _seconds(1.5)
 	var thigh := s.model.part_node(Vitals.THIGH_L)
-	var cells := _cells(thigh.get_node_or_null(^"WoundMark"))
-	var worst := _worst(_mesh(s, Vitals.THIGH_L), cells)
-	check(not cells.is_empty() and worst < 0.008, "lying down, the thigh's blood stays on the thigh (%d voxels, worst %.1f mm off)" % [cells.size(), worst * 1000.0])
+	var painted := _painted_holes(s, Vitals.THIGH_L)
+	var worst := _worst(_mesh(s, Vitals.THIGH_L), painted)
+	check(not painted.is_empty() and worst < 0.012, "lying down, the thigh's wound stays on the thigh (%d, worst %.1f mm off)" % [painted.size(), worst * 1000.0])
 	var skin_node := _marks(s).skin.drawn().get(thigh) as MeshInstance3D
 	check(skin_node != null and skin_node.get_parent() == _mesh(s, Vitals.THIGH_L) and skin_node.mesh == _mesh(s, Vitals.THIGH_L).mesh,
 		"its painted wound is the thigh's own mesh, moving with it")
@@ -592,6 +619,88 @@ func _test_seeping_dressing() -> void:
 	check(float(spot.seep) > 0.0 and seeped > clean + 5, "still bleeding under it: it reddens from the middle (%d cells, %.3f L through)" % [seeped, float(spot.seep)])
 	s.vitals.server_reset_health()
 	s.queue_free()
+	await _frames(3)
+
+
+# --- Real cavities (Captain, 2026-10-27) ---------------------------------------------------------
+
+## The raster voxel of `part` for rest-pose point `p` (as BodyDeform._queue maps it), or null.
+func _raster_at(s: Soldier, part: StringName, p: Vector3) -> Variant:
+	var deform := s.model.get_node(^"BodyDeform") as BodyDeform
+	var pivot := s.model.part_node(part)
+	var state: Dictionary = deform._parts.get(pivot, {})
+	var buffer: VoxelBuffer = state.get("buffer")
+	var mi := _mesh(s, part)
+	if buffer == null or mi == null:
+		return null
+	var wide := mi.scale / mi.scale.y
+	var q := ((p - BodyVolume.pivot_at(part)) * wide - mi.position) / mi.scale + Vector3.ONE
+	var c := Vector3i(roundi(q.x), roundi(q.y), roundi(q.z))
+	var size := buffer.get_size()
+	if c.x < 0 or c.y < 0 or c.z < 0 or c.x >= size.x or c.y >= size.y or c.z >= size.z:
+		return null
+	return buffer.get_voxel(c.x, c.y, c.z, VoxelBuffer.CHANNEL_COLOR)
+
+
+## A round along `dir` (rest pose) into `part` at rest point `at`: a real hit, as Ballistics lands it.
+func _shoot_through(s: Soldier, part: StringName, at: Vector3, dir: Vector3, depth := 0.2) -> void:
+	var hb := BlastGore._hitbox(s, part)
+	var world := hb.global_transform * at
+	s.vitals.server_hit(part, {"round_class": Vitals.INTERMEDIATE, "position": world, "direction": hb.global_basis * dir,
+		"hitbox": hb, "distance": 50.0, "channel_depth": depth, "energy_j": 1700.0})
+	await _seconds(1.5)  # carved on a worker thread, meshed on the main
+
+
+func _test_cavity() -> void:
+	print("A real cavity along the round's path")
+	var s := await _man(SPOT + Vector3(32, 0, 0))
+	# Angled through the left thigh: front-right to back-left.
+	var dir := Vector3(-0.35, 0.0, 1.0).normalized()
+	await _shoot_through(s, Vitals.THIGH_L, Vector3(-0.05, 0.62, -0.1), dir, 0.25)
+	var w: Array = s.vitals.wound_list().filter(func(x: Dictionary) -> bool: return x.part == Vitals.THIGH_L and x.get("at") is Vector3)
+	var at: Vector3 = w[0].at if not w.is_empty() else Vector3.ZERO
+	var out: Variant = w[0].get("out") if not w.is_empty() else null
+	var path := (Vector3(out) - at).normalized() if out is Vector3 else dir
+	var open := 0
+	for i in 8:  # the first 4 cm along the path, every half centimetre
+		var v: Variant = _raster_at(s, Vitals.THIGH_L, at + path * (0.005 + i * 0.005))
+		if v is int and int(v) == VoxelArt.C.EMPTY:
+			open += 1
+	check(not w.is_empty() and out is Vector3 and open >= 6, "the entry is a hole going in the way the round went (%d of the first 8 half-cm along it open)" % open)
+	var behind := 0
+	if out is Vector3:
+		for i in 6:
+			var v: Variant = _raster_at(s, Vitals.THIGH_L, Vector3(out) - path * (0.004 + i * 0.005))
+			if v is int and int(v) == VoxelArt.C.EMPTY:
+				behind += 1
+	check(behind >= 4, "the exit is blown out back along the path, bigger (%d of 6 open behind it)" % behind)
+	var hb := BlastGore._hitbox(s, Vitals.THIGH_L)
+	check(hb != null and hb.get_child_count() > 0 and (hb.get_child(0) as CollisionShape3D).shape is BoxShape3D, "the hitbox is as it was (a hole is only seen)")
+	s.vitals.server_reset_health()
+	s.queue_free()
+	await _frames(3)
+
+
+func _test_inside() -> void:
+	print("Inside the cavity: what the round hit")
+	var s := await _man(SPOT + Vector3(34, 0, 0))
+	await _shoot_through(s, Vitals.CHEST, Vector3(0.09, 1.3, -0.11), Vector3.BACK, 0.22)  # through the right lung
+	var marks := _marks(s)
+	var mat := marks.skin.material_of(s.model.part_node(Vitals.CHEST))
+	var j: PackedVector4Array = mat.get_shader_parameter(&"spot_j") if mat else PackedVector4Array()
+	var kinds: Array = s.vitals.wound_list().map(func(x: Dictionary) -> String: return String(x.kind))
+	var lung := j.size() > 0 and int(round(j[0].x)) == WoundMarks.TISSUE_LUNG and j[0].z > 0.0
+	check(lung, "a round through the lung shows lung inside (tissue %d; wounds %s)" % [int(round(j[0].x)) if j.size() > 0 else -1, kinds])
+	var t := await _man(SPOT + Vector3(36, 0, 0))
+	await _shoot_through(t, Vitals.THIGH_R, Vector3(0.075, 0.66, -0.1), Vector3.BACK, 0.2)  # through the femur
+	var tm := _marks(t).skin.material_of(t.model.part_node(Vitals.THIGH_R))
+	var tj: PackedVector4Array = tm.get_shader_parameter(&"spot_j") if tm else PackedVector4Array()
+	var broke: bool = t.vitals.wound_list().any(func(x: Dictionary) -> bool: return String(x.kind) == "fracture")
+	check(not broke or (tj.size() > 0 and tj[0].y > 0.0), "a broken femur shows bone in the wound (%s, bone at %.1f units)" % ["broken" if broke else "not broken this time", tj[0].y if tj.size() > 0 else -1.0])
+	check(tj.size() > 0 and int(round(tj[0].x)) == WoundMarks.TISSUE_MUSCLE, "a thigh shows torn muscle, no organ")
+	for x: Soldier in [s, t]:
+		x.vitals.server_reset_health()
+		x.queue_free()
 	await _frames(3)
 
 

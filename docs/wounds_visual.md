@@ -9,8 +9,29 @@ instead of floating or stacking on them.
 - Soak: spreads with the blood lost at the wound, and uncapped: a big bleed soaks on into the next
   part (thigh to shin, chest to belly). Blood still drips to the ground as before (reworked below).
 - Bruising: from closed breaks and round holes, and from armour stops (plate and helmet).
-- Detail range: 40 m. Past it the coarse blood voxels stand in (to 80 m).
+- Detail range: 40 m, then (2026-10-27, no voxels on top) painted out to 80 m on the far mesh.
 - Reduced gore: holes smaller, no torn flesh or cloth, trails shorter.
+
+## In the body, not on it (the Captain, 2026-10-27, through the 7.0 session)
+
+"Wounds must not add voxels on top of the character model"; each wound a real cavity along the
+round's path, an exit bigger and more torn; inside, what the medical model says was hit. Calls:
+
+- **Dressings, tourniquets, splints, lines stay objects** (their own voxels on the skin): they are
+  things put on the body. Everything else (holes, blood on the body, hands, mouth) is in the body's
+  voxels: no "WoundMark", "HandBlood" or "MouthBlood" cubes any more (a test checks none exist).
+- **The cavity.** BodyDeform carves (worker thread, in the part's own 0.5 cm raster, visual only;
+  hitboxes unchanged): the entry crater and a channel 5 cm in along the round's real path
+  (`CHANNEL_M`, `CHANNEL_R`), the exit crater blown out along the path (its middle 40% of its
+  radius back inside) and a wider 4 cm channel behind it. Only the first few cm (the Captain's call:
+  deeper can't be seen into a 1-2 cm hole).
+- **What's inside** (WoundSkin paints the cavity's walls from what WoundMarks takes from the
+  wounds at that spot, `TISSUE_*`): torn muscle (dark and bright red streaks) always; bone shards
+  at the depth the path passes a broken bone (`BodyMap.BONES`); past 3 cm, lung (pink), heart
+  (deep red), brain (grey-pink), bowel for an abdominal bleed (pale pink-tan), a dark clot round a
+  torn chest vessel. Reduced gore: dark, nothing shown.
+- **Range.** The paint draws on the fine mesh within its own range and on its 1 cm far stand-in
+  ("LodFar") past it, to 80 m (the Captain's call). Carved holes show at any range.
 
 ## How it works (the Captain, 2026-10-27: "more realistic in how it works"; all four picked)
 
@@ -36,8 +57,8 @@ instead of floating or stacking on them.
 
 | What | Where | How |
 |---|---|---|
-| Hole core, torn cloth / raw rim, trail, soak, bruises | `WoundSkin` (new) | The part's own mesh drawn again (`WoundSkin` child of the mesh) by a shader that recolours whole 0.5 cm voxels and discards the rest. Cannot float: it is the body's surface. Per mesh: 8 spots, 6 bruises. Within 40 m. |
-| Coarse holes and blood, 40-80 m | `WoundMarks` "WoundMark" | MultiMesh on the bone, widened with the build (`fit_of`). |
+| The hole itself, the channel along the path | `BodyDeform` | Carved out of the part's own raster (entry, channel, blown-out exit). |
+| Cavity walls, torn cloth / raw rim, runs, soak, bruises, hand and mouth blood | `WoundSkin` (new) | The part's own mesh (and its far stand-in) drawn again (`WoundSkin` child of the mesh) by a shader that recolours whole voxels and discards the rest. Cannot float: it is the body's surface. Per mesh: 12 spots, 6 bruises. To 80 m. |
 | Dressings | `WoundMarks` "WoundDressing" | MultiMesh on the bone; seals and trunk pads laid onto the skin cell by cell (`_conform`), limb dressings wrapped round the limb. |
 | Devices | `BodyDevices` | Unchanged look; widened with the build. |
 | Blood on people, gear, items | `BloodStain` (new) | The thing's mesh drawn again, its voxels under where drops fell recoloured (faces that look up the way the drop fell, in an 8 cm column under the hit, since colliders stand off the mesh). Wet red, drying brown, gone after 7 min. 12 stains a mesh, 24 things a bleeder. |
@@ -52,8 +73,8 @@ instead of floating or stacking on them.
 2. **Flat dressings on a curve.** The chest seal (10.5 cm square) and trunk pads were flat planes;
    their edges stood off the chest. Each cell now sits on the skin under it.
 3. **Hand blood on the wrong hand shape.** Laid on the relaxed hand's model; a gripping hand moved
-   away from it. Now laid on the model the hand is drawn with (`BodyVolume.surface(..., model)`),
-   redrawn when the pose changes. Cells are flat (0.4 cm), not cubes.
+   away from it. Now placed on the model the hand is drawn with (`BodyVolume.surface(..., model)`,
+   `slab_centre`), repainted when the pose changes, and painted into the hand (no cells).
 4. **Pools on slopes.** Flat cells at the drop's height, not the cell's: edges floated on a
    slope. Each cell now lies on the ground under its middle, tilted to its normal (smears and
    brain too).
@@ -72,10 +93,11 @@ bones; the ragdoll drives the same bones); marks past a cut (already dropped).
 
 ## Perf
 
-- Painted skin: one extra draw of each wounded part's mesh within 40 m (`visibility_range_end`,
-  capped by the part's own fine-LOD range), no shadows; uniforms updated at most every 0.3 s while
-  bleeding and every 10 s while drying.
-- Coarse marks only between 40 m and 80 m.
+- Painted skin: one extra draw of each wounded part's mesh (the fine one in its range, the far
+  stand-in past it, to 80 m), no shadows; uniforms updated at most every 0.3 s while bleeding and
+  every 10 s while drying. No MultiMesh cells on the body for wounds at all now.
+- Cavities: carved with the craters on BodyDeform's worker thread (a channel is ~7 small carves);
+  meshing stays at its MESH_PER_FRAME budget.
 - Stains: one extra draw per stained mesh within 40 m; capped as above.
 - Settling: 48 rays a body every 10 s.
 - Cosmetic dice (drips, spurts, splashes) use WoundMarks' own RNG, never the global one the game's

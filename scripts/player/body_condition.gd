@@ -22,8 +22,6 @@ const PALLOR_FROM := 0.85  # blood fraction where the skin starts to pale
 const PALLOR_FULL := 0.55
 const SHIVER_M := 0.0018
 const SHIVER_HZ := 13.0
-const MOUTH_BLOOD := [Color("7d130f"), Color("5a0c09"), Color("8e1a12")]
-const CELL := 0.005
 
 var model: CharacterModel
 var vitals: Vitals
@@ -37,7 +35,6 @@ var _shivering := false
 var _mouth_blood := false
 var _rest_positions: Dictionary = {}  # MeshInstance3D -> its position before shivering
 var _time := 0.0
-var _mouth_mesh: MultiMeshInstance3D
 var _mouth_drawn := false
 static var _shader: Shader
 
@@ -313,45 +310,15 @@ func body_meshes() -> Array[MeshInstance3D]:
 	return out
 
 
-## Blood at the mouth: on the lips and running from the corners down the chin.
+## Blood at the mouth: on the lips and running from the corners down the chin, painted into the
+## face by WoundMarks (its _mouth_spots; nothing laid on top of the face).
 func _draw_mouth() -> void:
 	if _mouth_blood == _mouth_drawn:
 		return
 	_mouth_drawn = _mouth_blood
-	if not _mouth_blood:
-		if _mouth_mesh:
-			_mouth_mesh.multimesh.visible_instance_count = 0
-		return
-	var head := model.part_node(Vitals.HEAD)
-	if head == null:
-		return
-	if _mouth_mesh == null or not is_instance_valid(_mouth_mesh):
-		_mouth_mesh = BodyDevices.multimesh_instance(32)
-		_mouth_mesh.name = "MouthBlood"
-		_mouth_mesh.layers = model.render_layers
-		head.add_child(_mouth_mesh, true)
-	var pivot := BodyVolume.pivot_at(Vitals.HEAD, body)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	var cells: Array = []
-	for i in 6:  # across the lips
-		var x := pivot.x + (i - 2.5) * CELL
-		cells.append(Vector3(x, pivot.y + 0.1 + (CELL if i % 2 == 0 else 0.0), 0.0))
-	for side: float in [-1.0, 1.0]:  # from the corners down the chin
-		var x := pivot.x + side * 0.028
-		for i in (8 if side > 0 else 5):
-			cells.append(Vector3(x + rng.randf_range(-0.003, 0.003), pivot.y + 0.1 - i * CELL, 0.0))
-	var mm := _mouth_mesh.multimesh
-	var n := 0
-	for c: Vector3 in cells:
-		var s: Variant = BodyVolume.surface(Vitals.FACE, Vector3(c.x, c.y, pivot.z), Vector3.FORWARD, 0.2, body)
-		if not s is Vector3 or n >= mm.instance_count:
-			continue
-		var p: Vector3 = Vector3(s) + Vector3.FORWARD * 0.002 - pivot
-		mm.set_instance_transform(n, Transform3D(Basis.from_scale(Vector3(CELL, CELL, CELL * 1.2)), p))
-		mm.set_instance_color(n, MOUTH_BLOOD[rng.randi() % MOUTH_BLOOD.size()])
-		n += 1
-	mm.visible_instance_count = n
+	var marks := get_parent() as WoundMarks
+	if marks:
+		marks.paint_skin()
 
 
 ## Shivering: the trunk, head and arms tremble a little, each out of step.

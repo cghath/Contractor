@@ -259,10 +259,12 @@ func _test_pallor_and_signs() -> void:
 	check(c.lips_blue() and "Blue lips" in casualty.vitals.signs(), "SpO2 80%: blue lips, as the sign says")
 	m.blast_lung = true
 	casualty.vitals._after_change(true)
-	var mouth: MultiMeshInstance3D = casualty.model.part_node(Vitals.HEAD).get_node_or_null(^"MouthBlood")
-	check(c.mouth_blood() and mouth != null and mouth.multimesh.visible_instance_count > 6, "coughing blood: blood at the mouth")
+	var head_paint := func() -> int:  # painted into the face (WoundSkin), nothing laid on top
+		var mat := _marks(casualty).skin.material_of(casualty.model.part_node(Vitals.HEAD))
+		return int(mat.get_shader_parameter(&"spot_count")) if mat and _marks(casualty).skin.drawn().has(casualty.model.part_node(Vitals.HEAD)) else 0
+	check(c.mouth_blood() and _marks(casualty)._mouth_spots().size() >= 2 and int(head_paint.call()) >= 2, "coughing blood: blood at the mouth and down the chin, painted on")
 	_reset(casualty)
-	check(not c.lips_blue() and not c.mouth_blood() and (mouth == null or mouth.multimesh.visible_instance_count == 0), "well again: gone")
+	check(not c.lips_blue() and not c.mouth_blood() and int(head_paint.call()) == 0, "well again: gone")
 	m.blood = 0.6
 	m.still_s = WoundModel.HYPOTHERMIA_STILL_S + 10.0
 	casualty.vitals._after_change(true)

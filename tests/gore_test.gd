@@ -575,9 +575,10 @@ func _test_heads_and_marks() -> void:
 	m.vitals.server_hit(Vitals.THIGH_L, {"round_class": Vitals.INTERMEDIATE, "position": low, "direction": m.global_basis.z, "hitbox": hb, "distance": 50.0, "channel_depth": 0.05})
 	await _seconds(0.3)
 	var thigh := m.model.part_node(Vitals.THIGH_L)
-	var drawn := func() -> int:
-		var mm := thigh.get_node_or_null(^"WoundMark") as MultiMeshInstance3D
-		return mm.multimesh.visible_instance_count if mm else 0
+	var drawn := func() -> int:  # wounds painted on the thigh (WoundSkin)
+		var marks_now := m.model.get_node(^"WoundMarks") as WoundMarks
+		var mat := marks_now.skin.material_of(thigh)
+		return int(mat.get_shader_parameter(&"spot_count")) if mat and marks_now.skin.drawn().has(thigh) else 0
 	var before: int = drawn.call()
 	var top: Array = BodyMap.PART_BOXES[Vitals.THIGH_L][0]
 	var high := (top[0] as Vector3) + Vector3(0, (top[1] as Vector3).y * 0.35, 0)

@@ -10,13 +10,22 @@ extends RefCounted
 ## there (no cap: a big bleed soaks on into the next part, Captain's call), wet red-black while it
 ## bleeds, drying brown over DRY_S once it stops. Bruises (armour stops and blunt injuries) go
 ## purple on bare skin only. Reduced gore: holes smaller, no torn flesh or cloth, shorter trails.
-## Drawn within RANGE_M of the view (Captain's call: 40 m); past that WoundMarks' coarse blood
-## voxels stand in.
+## Inside each cavity BodyDeform carved (the entry's channel, the blown-out exit) the walls show what
+## the round hit (WoundMarks' TISSUE_*): torn muscle, bone shards where it broke a bone, a lung, the
+## heart, the brain, the bowel. Nothing is laid on top of the body (Captain, 2026-10-27: wounds
+## "must not add voxels on top of the character model").
+## Drawn within RANGE_M of the view (the Captain's calls: 40 m, then out to 80 m on the part's far
+## stand-in mesh, VoxelArt's "LodFar", past the fine mesh's range).
 ##
 ## Spots and bruises are in the rest pose (BodyMap's frame), shared by every part, so a soak or a
 ## trail that runs past its own part goes onto the next part's mesh too.
 
-const RANGE_M := 40.0
+const RANGE_M := 80.0
+## How far round the path a cavity's walls are (m): an entry's channel, an exit's blown-out crater.
+const CAVITY_ENTRY_M := 0.015
+const CAVITY_EXIT_M := 0.03
+## Organ tissue shows this far in along the path (m), past the muscle.
+const ORGAN_FROM_M := 0.03
 const MAX_SPOTS := 12
 const MAX_BRUISES := 6
 ## How long a stopped bleed takes to dry from wet red-black to brown.
@@ -61,6 +70,11 @@ uniform vec4 spot_a[12];
 uniform vec4 spot_b[12];
 uniform vec4 spot_n[12];
 uniform vec4 spot_c[12];
+// The cavity: the way in along the round's path and how deep it goes; what's inside (tissue),
+// where along the path a broken bone is (< 0: none) and the cavity's radius.
+uniform vec4 spot_i[12];
+uniform vec4 spot_j[12];
+uniform float unit = 200.0;  // mesh units a metre
 uniform int barrier_count = 0;
 uniform float barrier_y[4];  // heights in this mesh's units (BARRIERS)
 uniform int bruise_count = 0;
@@ -104,6 +118,49 @@ void fragment() {
 	int mark = 0;  // 1 soak, 2 trail, 3 torn, 4 core
 	float soak = 0.0;
 	float wet = 0.0;
+	// Inside a cavity: what the round tore through, at the depth it's at.
+	bool in_cavity = false;
+	vec3 inside = vec3(0.0);
+	for (int i = 0; i < spot_count && !in_cavity; i++) {
+		vec4 ci = spot_i[i];
+		vec4 cj = spot_j[i];
+		if (cj.z <= 0.0) {
+			continue;
+		}
+		vec3 v = p - spot_a[i].xyz;
+		float t = dot(v, ci.xyz);
+		float lateral = length(v - ci.xyz * t);
+		if (t < 0.8 || t > ci.w - 1.0 || lateral > cj.z * (1.0 - 0.3 * clamp(t / max(ci.w, 0.001), 0.0, 1.0)) + 1.2) {
+			continue;
+		}
+		float streak = fract(dot(p, vec3(0.17, 0.61, 0.23)) * 0.5);
+		if (torn <= 0.0) {
+			inside = vec3(0.25, 0.04, 0.035) * (0.85 + speck * 0.3);  // reduced gore: dark, nothing shown
+		} else if (cj.y >= 0.0 && abs(t - cj.y) < 0.015 * unit && speck < 0.5) {
+			inside = speck < 0.25 ? vec3(0.90, 0.87, 0.78) : vec3(0.74, 0.69, 0.58);  // bone shards
+		} else if (cj.x > 0.5 && t > ORGAN_FROM * unit) {
+			int tissue = int(cj.x + 0.5);
+			if (tissue == 1) {
+				inside = speck < 0.5 ? vec3(0.80, 0.47, 0.47) : vec3(0.58, 0.24, 0.26);  // lung
+			} else if (tissue == 2) {
+				inside = speck < 0.5 ? vec3(0.42, 0.06, 0.06) : vec3(0.30, 0.03, 0.04);  // heart
+			} else if (tissue == 3) {
+				inside = speck < 0.5 ? vec3(0.83, 0.62, 0.55) : vec3(0.68, 0.44, 0.40);  // bowel
+			} else if (tissue == 4) {
+				inside = speck < 0.5 ? vec3(0.74, 0.60, 0.58) : vec3(0.56, 0.43, 0.43);  // brain
+			} else {
+				inside = vec3(0.22, 0.03, 0.03) * (0.85 + speck * 0.3);  // clotted round a torn vessel
+			}
+		} else {
+			inside = streak < 0.5 ? vec3(0.55, 0.10, 0.09) : vec3(0.33, 0.04, 0.04);  // torn muscle
+		}
+		in_cavity = true;
+	}
+	if (in_cavity) {
+		ALBEDO = to_linear(inside * (0.9 + 0.2 * hash(cell + 3.0)));
+		ROUGHNESS = 0.45;
+		SPECULAR = 0.35;
+	} else {
 	for (int i = 0; i < spot_count; i++) {
 		vec4 a = spot_a[i];
 		vec4 b = spot_b[i];
@@ -204,6 +261,7 @@ void fragment() {
 	ALBEDO = to_linear(col);
 	ROUGHNESS = mark == 0 ? 0.85 : mix(0.85, 0.55, wet);  // wet blood shines a little
 	SPECULAR = 0.35;
+	}
 }
 """
 
@@ -316,6 +374,10 @@ func _paint_bone(part: StringName, bone: Node3D, spots: Array, bruises: Array, f
 		return
 	var to_mesh := base_of(mi).affine_inverse()
 	_paint_mesh(bone, mi, to_mesh, part, spots, bruises, full)
+	# Past the fine mesh's range, its 1 cm stand-in (VoxelArt "LodFar") painted the same.
+	var far := bone.get_node_or_null(^"LodFar") as MeshInstance3D
+	if far and far.mesh:
+		_paint_mesh(far, far, far.transform.affine_inverse(), part, spots, bruises, full)
 	# The face's moving parts (FaceRig: lips, brows, eyelids) on the head's mesh: blood runs on
 	# over them as over the rest of the face.
 	for face: Node in mi.get_children():
@@ -325,7 +387,7 @@ func _paint_bone(part: StringName, bone: Node3D, spots: Array, bruises: Array, f
 
 
 func _hide(key: Node3D) -> void:
-	var skin: MeshInstance3D = _drawn.get(key)
+	var skin := _skin_of(key)
 	if skin and is_instance_valid(skin):
 		skin.visible = false
 
@@ -333,7 +395,7 @@ func _hide(key: Node3D) -> void:
 ## Paints `spots` and `bruises` on mesh `mi` (its skin kept under `key`), `to_mesh` taking a point
 ## in its part's bone space (rest pose, less the pivot) into the mesh's own.
 func _paint_mesh(key: Node3D, mi: MeshInstance3D, to_mesh: Transform3D, part: StringName, spots: Array, bruises: Array, full: bool) -> void:
-	var skin: MeshInstance3D = _drawn.get(key)
+	var skin := _skin_of(key)
 	if spots.is_empty() and bruises.is_empty():
 		_hide(key)
 		return
@@ -358,6 +420,8 @@ func _paint_mesh(key: Node3D, mi: MeshInstance3D, to_mesh: Transform3D, part: St
 	var b := PackedVector4Array()
 	var n := PackedVector4Array()
 	var c := PackedVector4Array()
+	var ci := PackedVector4Array()
+	var cj := PackedVector4Array()
 	for s: Dictionary in spots:
 		var at: Vector3 = to_mesh * (Vector3(s.at) - pivot)
 		var down: Vector3 = (to_mesh.basis * Vector3(s.down)).normalized()
@@ -369,8 +433,17 @@ func _paint_mesh(key: Node3D, mi: MeshInstance3D, to_mesh: Transform3D, part: St
 		b.append(Vector4(down.x, down.y, down.z, float(s.soak) * unit))
 		n.append(Vector4(out.x, out.y, out.z, behind * unit))
 		c.append(Vector4(trail * unit, float(s.wet), 1.0 if s.exit else 0.0, float(s.salt)))
+		var inside: Dictionary = s.get("inside", {})
+		if inside.is_empty() or bone_part(StringName(s.part)) != part:
+			ci.append(Vector4.ZERO)
+			cj.append(Vector4.ZERO)  # (a cavity only in its own part)
+		else:
+			var way: Vector3 = (to_mesh.basis * Vector3(inside.way)).normalized()
+			ci.append(Vector4(way.x, way.y, way.z, float(inside.deep) * unit))
+			var bone_t := float(inside.bone_t)
+			cj.append(Vector4(float(inside.tissue), bone_t * unit if bone_t >= 0.0 else -1.0, (CAVITY_EXIT_M if s.exit else CAVITY_ENTRY_M) * unit, 0.0))
 	while a.size() < MAX_SPOTS:
-		for arr: PackedVector4Array in [a, b, n, c]:
+		for arr: PackedVector4Array in [a, b, n, c, ci, cj]:
 			arr.append(Vector4.ZERO)
 	var ba := PackedVector4Array()
 	var bb := PackedVector4Array()
@@ -386,6 +459,9 @@ func _paint_mesh(key: Node3D, mi: MeshInstance3D, to_mesh: Transform3D, part: St
 	material.set_shader_parameter(&"spot_b", b)
 	material.set_shader_parameter(&"spot_n", n)
 	material.set_shader_parameter(&"spot_c", c)
+	material.set_shader_parameter(&"spot_i", ci)
+	material.set_shader_parameter(&"spot_j", cj)
+	material.set_shader_parameter(&"unit", unit)
 	material.set_shader_parameter(&"bruise_count", bruises.size())
 	material.set_shader_parameter(&"bruise_a", ba)
 	material.set_shader_parameter(&"bruise_b", bb)
@@ -408,16 +484,16 @@ func sync() -> bool:
 			_wanted.erase(bone)
 			continue
 		var mi := mesh_of(bone)
-		var skin: MeshInstance3D = _drawn.get(bone)
+		var skin := _skin_of(bone)
 		if mi != null and mi.mesh != null and (skin == null or not is_instance_valid(skin) or skin.get_parent() != mi):
 			again = true
-	for key: Node3D in _drawn.keys():
-		var skin: MeshInstance3D = _drawn[key]
-		if not is_instance_valid(key) or not is_instance_valid(skin):
+	for key: Variant in _drawn.keys():
+		var skin := _skin_of(key)
+		if not is_instance_valid(key) or skin == null:
 			_drawn.erase(key)
 			_materials.erase(key)
 			continue
-		var mi := key as MeshInstance3D if key is MeshInstance3D else mesh_of(key)
+		var mi: MeshInstance3D = key if key is MeshInstance3D else mesh_of(key)
 		if mi != null and skin.get_parent() == mi:
 			_sync(skin, mi)
 	return again
@@ -430,16 +506,25 @@ static func _sync(skin: MeshInstance3D, mi: MeshInstance3D) -> void:
 	var end := RANGE_M if mi.visibility_range_end <= 0.0 else minf(RANGE_M, mi.visibility_range_end)
 	if skin.visibility_range_end != end:
 		skin.visibility_range_end = end
+	if skin.visibility_range_begin != mi.visibility_range_begin:
+		skin.visibility_range_begin = mi.visibility_range_begin  # (the far stand-in's paint starts where it does)
 
 
 ## The painted skins now (tests): bone -> MeshInstance3D, visible ones only.
 func drawn() -> Dictionary:
 	var out := {}
-	for bone: Node3D in _drawn:
-		var skin: MeshInstance3D = _drawn[bone]
-		if is_instance_valid(skin) and skin.visible:
+	for bone: Variant in _drawn:
+		var skin := _skin_of(bone)
+		if is_instance_valid(bone) and skin != null and skin.visible:
 			out[bone] = skin
 	return out
+
+
+## The skin painted for `key` (a bone, a face part's or far stand-in's mesh), or null (none, or
+## freed with the mesh it was on: a far stand-in dropped when its part was carved).
+func _skin_of(key: Variant) -> MeshInstance3D:
+	var skin: Variant = _drawn.get(key)
+	return skin if is_instance_valid(skin) else null
 
 
 func material_of(bone: Node3D) -> ShaderMaterial:
@@ -455,7 +540,7 @@ func clear() -> void:
 func _new_material(bone: Node3D) -> ShaderMaterial:
 	if _shader == null:
 		_shader = Shader.new()
-		_shader.code = SHADER.replace("STRETCH", "%.2f" % STRETCH_DOWN).replace("SKIN_SOAK", "%.2f" % SKIN_SOAK).replace("BARRIER_PASS", "%.2f" % BARRIER_PASS)
+		_shader.code = SHADER.replace("STRETCH", "%.2f" % STRETCH_DOWN).replace("SKIN_SOAK", "%.2f" % SKIN_SOAK).replace("BARRIER_PASS", "%.2f" % BARRIER_PASS) 			.replace("ORGAN_FROM", "%.3f" % ORGAN_FROM_M)
 	var material := ShaderMaterial.new()
 	material.shader = _shader
 	var scheme := model.variant  # the scheme it was built in: its part's, a face's own palette (BodyCondition.scheme_of)

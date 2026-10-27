@@ -634,7 +634,7 @@ func _draw(cells: Dictionary) -> void:
 
 ## Keeps the devices widened with the body's build as it's drawn now (WoundMarks._refit).
 func refit() -> void:
-	for bone: Node3D in _bone_meshes:
+	for bone: Variant in _bone_meshes:
 		if is_instance_valid(bone) and is_instance_valid(_bone_meshes[bone]):
 			(_bone_meshes[bone] as Node3D).transform = Transform3D(WoundMarks.fit_of(bone), Vector3.ZERO)
 

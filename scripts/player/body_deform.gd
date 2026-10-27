@@ -48,6 +48,17 @@ extends Node
 const ENTRY_R := 2.4
 const EXIT_R := 4.6
 const JAG := 0.45
+## The wound channel along the round's real path (Captain, 2026-10-27: "each wound is a real
+## cavity ... along the round's real path"): from an entry, a hole CHANNEL_M deep and CHANNEL_R
+## voxels round, the way the round went in; at an exit, the crater blown out along the path, its
+## middle EXIT_BACK of its radius back inside, and a wider channel EXIT_CHANNEL_M back from it.
+## Only the first few cm are carved (the Captain's call: deeper can't be seen into); visual only,
+## hitboxes as they were.
+const CHANNEL_M := 0.05
+const CHANNEL_R := 1.3
+const EXIT_CHANNEL_M := 0.04
+const EXIT_CHANNEL_R := 1.9
+const EXIT_BACK := 0.4
 ## The torn-flesh rim round each crater, in voxels.
 const RIM := 1.6
 ## How far in from the skin a crater is centred (voxels): it bites into the part.
@@ -338,10 +349,12 @@ func _rebuild() -> void:
 		_done[key] = true
 		_score = score.duplicate()  # craters size to the damage so far (this round included)
 		var size := _crater_size(w, rc) * (DEAD_SIZE if dead else 1.0) * (1.0 + WIDEN * clampf(float(score.get(part, 0.0)) / _threshold(part, dead), 0.0, 1.0))
-		_queue(w.part, at, false, size)
 		var out: Variant = w.get("out")
+		var end: Variant = out if out is Vector3 else w.get("end")
+		var path: Variant = (Vector3(end) - Vector3(at)).normalized() if end is Vector3 and Vector3(end).distance_to(at) > 0.005 else null
+		_queue(w.part, at, false, size, path)
 		if out is Vector3:
-			_queue(w.part, out, true, size)
+			_queue(w.part, out, true, size, path)
 	_score = score
 	var gore := vitals.gore_list()
 	if not any and gore.is_empty():
@@ -641,7 +654,7 @@ static func _raster_dir(mi: MeshInstance3D, dir: Variant) -> Vector3:
 	return (mi.basis.inverse() * (dir as Vector3)).normalized()
 
 
-func _queue(part: StringName, at: Vector3, exit: bool, size: float) -> void:
+func _queue(part: StringName, at: Vector3, exit: bool, size: float, path: Variant = null) -> void:
 	var pivot := model.part_node(part)
 	var mi := _mesh_of(pivot)
 	if mi == null or not pivot.has_meta(&"voxel_model") or _gone(part):
@@ -658,7 +671,18 @@ func _queue(part: StringName, at: Vector3, exit: bool, size: float) -> void:
 	var centre := (p * wide - mi.position) / mi.scale + Vector3.ONE  # +1: the raster's mesher padding
 	var inward := -(mi.basis.inverse() * n).normalized()
 	(state.ys as Array).append(centre.y)
-	state.todo.append({"centre": centre + inward * SINK, "r": (EXIT_R if exit else ENTRY_R) * size, "salt": hash("%s%s%s" % [part, at, exit])})
+	var r := (EXIT_R if exit else ENTRY_R) * size
+	var job := {"centre": centre + inward * SINK, "r": r, "salt": hash("%s%s%s" % [part, at, exit])}
+	if path is Vector3:
+		# The round's way through, in the raster (a build's girth widens it as it widens the mesh).
+		var way := (mi.basis.inverse() * (Vector3(path) * wide)).normalized()
+		var vox := 1.0 / mi.scale.y  # raster voxels a metre
+		if exit:  # blown out along the path: its middle back inside, a wide channel behind it
+			job.centre = centre - way * r * EXIT_BACK
+			job["channel"] = [centre, -way, EXIT_CHANNEL_M * vox, EXIT_CHANNEL_R * size]
+		else:  # a hole going in the way the round went
+			job["channel"] = [centre, way, CHANNEL_M * vox, CHANNEL_R * size]
+	state.todo.append(job)
 	_kick(pivot)
 
 
@@ -799,6 +823,9 @@ static func _work(ref: WeakRef, pivot: Node3D, buffer: VoxelBuffer, prof: Packed
 				scorch(buffer, job.dir, float(job.char), int(job.salt), facing[key])
 		else:
 			carve(buffer, job.centre, float(job.r), int(job.salt), prof, kind, bone)
+			if job.has("channel"):
+				var ch: Array = job.channel
+				channel(buffer, ch[0], ch[1], float(ch[2]), float(ch[3]), int(job.salt), prof, kind, bone)
 	BodyDeform._deliver.call_deferred(ref, pivot, buffer, out)  # meshing goes through the renderer: main thread only
 
 
@@ -1174,6 +1201,19 @@ static func carve(buffer: VoxelBuffer, centre: Vector3, r: float, salt: int, pro
 					var deep := dist - edge < rim * 0.5
 					var colour := (VoxelArt.C.WOUND_DARK if deep else VoxelArt.C.WOUND) if prof.is_empty() else _wall(prof, x, y, z, kind, bone, deep)
 					buffer.set_voxel(colour, x, y, z, VoxelBuffer.CHANNEL_COLOR)
+	return removed
+
+
+## A wound channel in `buffer`: from `from` (voxels) along `dir` for `length` voxels, about `r`
+## round, its walls showing what's under them as a crater's do. Returns the voxels knocked out.
+static func channel(buffer: VoxelBuffer, from: Vector3, dir: Vector3, length: float, r: float, salt: int, prof := PackedFloat32Array(), kind := K_LIMB, bone := true) -> int:
+	var removed := 0
+	var t := 0.0
+	var i := 0
+	while t <= length:
+		removed += carve(buffer, from + dir * t, r * (1.0 - 0.25 * t / maxf(length, 0.001)), salt + i * 17, prof, kind, bone, 1.0)
+		t += 0.75
+		i += 1
 	return removed
 
 
