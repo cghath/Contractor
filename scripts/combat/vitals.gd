@@ -977,14 +977,50 @@ func _check_gunfire_cut(part: StringName, hit: Dictionary) -> void:
 ## Host only. A round that armor stopped still lands on `part` (impact: pain, stagger,
 ## winded, concussion, cracked ribs by range, a fatal head injury only where it would be
 ## real). Head and face are helmet stops; anything else is a plate or vest. `energy_j` is
-## the round's energy on arrival (Ballistics), or -1 if unknown.
-func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
+## the round's energy on arrival (Ballistics), or -1 if unknown. `at` (world), where the armour
+## took it: the skin under it bruises (_bruise).
+func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0, at: Variant = null) -> void:
 	if shielded:
 		return
 	_last_hit_at = Time.get_ticks_msec() / 1000.0
+	if at is Vector3:
+		_bruise(part, at, float(BRUISE_STRENGTH.get(round_class, 0.4)))
 	_model.add_impact(part, round_class, distance, energy_j)
 	last_cause = {"cause": "round stopped by armor (%s)" % round_class, "part": part, "distance": distance}
 	_after_change()
+
+
+## Bruises from armour stops (WoundMarks paints them on the skin, WoundSkin): a gore record
+## {"k": "b", "p" part, "a" rest-pose skin point, "s" strength 0..1} under where the round struck;
+## one within BRUISE_MERGE_M of an earlier one deepens that instead; MAX_BRUISES at most.
+const BRUISE_STRENGTH := {&"pistol": 0.35, &"intermediate": 0.6, &"full_power": 0.9, &"fragment": 0.3}
+const BRUISE_MERGE_M := 0.06
+const MAX_BRUISES := 10
+
+
+func _bruise(part: StringName, world: Vector3, strength: float) -> void:
+	var hitbox := BlastGore._hitbox(get_parent(), part) if get_parent() else null
+	if hitbox == null and part in [CHEST, ABDOMEN, PELVIS]:
+		hitbox = BlastGore._hitbox(get_parent(), TORSO)
+	if hitbox == null or not hitbox.is_inside_tree() or not BodyMap.PART_BOXES.has(part):
+		return
+	var rest: Vector3 = hitbox.global_transform.affine_inverse() * world
+	var g: Vector3 = hitbox.get_meta(&"girth", Vector3.ONE)
+	rest /= g  # (a broad build's trunk: back to the model's own proportions)
+	var body := BodyVolume.body_of(get_parent())
+	var skin: Variant = BodyVolume.surface(part, rest, WoundMarks._outward(part, rest), 0.12, body)
+	if skin is Vector3:
+		rest = skin
+	for e: Dictionary in _model.gore:
+		if String(e.get("k", "")) == "b" and StringName(e.get("p", "")) == part:
+			var was: Variant = BlastGore.to_vec(e.get("a"))
+			if was is Vector3 and (was as Vector3).distance_to(rest) < BRUISE_MERGE_M:
+				e["s"] = snappedf(minf(1.0, float(e.get("s", 0.0)) + strength * 0.5), 0.01)
+				return
+	var count := _model.gore.filter(func(e: Dictionary) -> bool: return String(e.get("k", "")) == "b").size()
+	if count >= MAX_BRUISES:
+		return
+	server_gore_add({"k": "b", "p": String(part), "a": BlastGore.vec(rest), "s": snappedf(strength, 0.01)}, false)
 
 
 ## Host only. Legacy damage (the debug K key and some tests): generic trauma that adds

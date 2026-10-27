@@ -238,7 +238,7 @@ static func soft_armor_stops(body: Node, part: StringName, threat: StringName, r
 		return false
 	var vitals := Vitals.find_on(body)
 	if vitals:
-		vitals.server_impact(torso_part, round_class, distance, energy_j)
+		vitals.server_impact(torso_part, round_class, distance, energy_j, position if position != Vector3.INF else null)
 	return true
 
 
@@ -333,7 +333,7 @@ func _server_after_stop(hit_position: Vector3, direction: Vector3, weapon: ItemD
 	var vitals: Vitals = Vitals.find_on(body) if body else null
 	if vitals == null:
 		return
-	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance))
+	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance), hit_position)
 	if ArmorRules.material(item) == ArmorRules.STEEL and not bool(item.stats.get("spall_coated", false)):
 		ArmorRules.server_spall(body, vitals, hit_position, direction, round_class)
 

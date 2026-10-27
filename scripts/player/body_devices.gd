@@ -623,12 +623,20 @@ func _draw(cells: Dictionary) -> void:
 			inst.layers = model.render_layers
 			bone.add_child(inst, true)
 			_bone_meshes[bone] = inst
+		inst.transform = Transform3D(WoundMarks.fit_of(bone), Vector3.ZERO)  # widened with the build, as the part is
 		var mm := inst.multimesh
 		for i in list.size():
 			var c: Array = list[i]
 			mm.set_instance_transform(i, Transform3D(Basis(c[3]) * Basis.from_scale(c[1]), c[0]))
 			mm.set_instance_color(i, c[2])
 		mm.visible_instance_count = list.size()
+
+
+## Keeps the devices widened with the body's build as it's drawn now (WoundMarks._refit).
+func refit() -> void:
+	for bone: Node3D in _bone_meshes:
+		if is_instance_valid(bone) and is_instance_valid(_bone_meshes[bone]):
+			(_bone_meshes[bone] as Node3D).transform = Transform3D(WoundMarks.fit_of(bone), Vector3.ZERO)
 
 
 ## The IV line from the bag's outlet to the site, sagging a little between them (world space,
@@ -641,8 +649,8 @@ func _process(_delta: float) -> void:
 	var to_bone := model.part_node(_line.to_part)
 	if from_bone == null or to_bone == null:
 		return
-	var a: Vector3 = from_bone.global_transform * (Vector3(_line.from) - BodyVolume.pivot_at(_line.from_part, body))
-	var b: Vector3 = to_bone.global_transform * (Vector3(_line.to) - BodyVolume.pivot_at(_line.to_part, body))
+	var a: Vector3 = from_bone.global_transform * (WoundMarks.fit_of(from_bone) * (Vector3(_line.from) - BodyVolume.pivot_at(_line.from_part, body)))
+	var b: Vector3 = to_bone.global_transform * (WoundMarks.fit_of(to_bone) * (Vector3(_line.to) - BodyVolume.pivot_at(_line.to_part, body)))
 	if _line_mesh == null:
 		_line_mesh = multimesh_instance(LINE_SEGMENTS)
 		_line_mesh.name = "IVLine"

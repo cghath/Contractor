@@ -373,7 +373,7 @@ static func _add_one(vitals: Vitals, e: Dictionary, publish: bool) -> void:
 	while list.size() >= MAX_ENTRIES:
 		var dropped := false
 		for i in list.size():
-			if String((list[i] as Dictionary).get("k", "")) in ["p", "h", "c"]:
+			if String((list[i] as Dictionary).get("k", "")) in ["b", "p", "h", "c"]:  # (a bruise first: only a look)
 				list.remove_at(i)
 				dropped = true
 				break
