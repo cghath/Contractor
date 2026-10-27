@@ -268,9 +268,15 @@ func _test_haul() -> void:
 	await _frames(3)
 	var scrap := Settlement.count("scrap_sheet")
 	Settlement.server_set_jobs(a_rec, ["haul"])
-	st.server_hour(10)
-	await _frames(2)
-	var still := get_tree().get_nodes_in_group(&"world_items").filter(func(w: Node) -> bool: return is_instance_valid(w) and String(w.get(&"uid")) == uid)
+	# The start farmstead has its own loose things about (tools, the note, food: docs/survival_firsthour.md) and a
+	# hauler carries HAUL_PER_H an hour, so the drop may take a second hour.
+	var still: Array = []
+	for h in 4:
+		st.server_hour(10 + h)
+		await _frames(2)
+		still = get_tree().get_nodes_in_group(&"world_items").filter(func(w: Node) -> bool: return is_instance_valid(w) and not w.is_queued_for_deletion() and String(w.get(&"uid")) == uid)
+		if still.is_empty():
+			break
 	check(Settlement.count("scrap_sheet") >= scrap + 2 and still.is_empty(), "the drop is carried into the stores (%d -> %d)" % [scrap, Settlement.count("scrap_sheet")])
 
 
