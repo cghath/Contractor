@@ -164,7 +164,7 @@ func _test_dead_and_children() -> void:
 	var had_body := lb != null
 	var z2 := Survival.server_spawn_zombie(level, level.ground_point(spot + Vector3(1.0, 0.0, 0.0)), "walker")
 	await _frames(2)
-	if had_body and z2:
+	if had_body and z2 and is_instance_valid(lb) and is_instance_valid(z2):  # (the live tick may have taken the child already)
 		z2.global_position = lb.global_position + Vector3(1.0, 0.0, 0.0)
 		Children.server_tick(layer, [z2])
 	await _frames(2)
@@ -173,7 +173,7 @@ func _test_dead_and_children() -> void:
 		"no adult within %.0f m: the child is taken, no body left (%s)" % [Children.ADULT_M, String(lone.status)])
 	check(journal.any(func(j: Dictionary) -> bool: return String(j.get("text", "")).contains("was taken")) and Moods.has(mate, "child_taken:" + String(lone.id)) and Moods.value_of(mate, "child_taken:" + String(lone.id)) <= -20.0,
 		"a journal line and a heavy moodlet for everyone")
-	if z2:
+	if z2 and is_instance_valid(z2):
 		z2.vitals.server_kill()
 
 
