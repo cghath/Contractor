@@ -491,6 +491,8 @@ func _clear_spawned() -> void:
 ## Measures the case `name` for MEASURE_S[name]: the player walks `walk` (points, at WALK_MPS)
 ## if any; adds a result.
 func _measure(name: String, walk: Array) -> void:
+	SquadAI.prof = {}
+	SquadAI.profiling = OS.get_environment("PERF_AI_PROF") != ""  # (PERF_AI_PROF=1: the AI's phases printed after each case)
 	_frames.clear()
 	_f60.clear()
 	_ticks_ms.clear()
@@ -590,6 +592,14 @@ func _measure(name: String, walk: Array) -> void:
 	for k: StringName in systems:
 		parts.append("%s %.2f" % [k, int(_costs[k]) / 1000.0 / n_frames])
 	print("perf: %s: FrameCost ms a frame: %s" % [name, ", ".join(parts)])
+	if SquadAI.profiling:
+		var phases := SquadAI.prof.keys()
+		phases.sort_custom(func(x: Variant, y: Variant) -> bool: return int(SquadAI.prof[x][0]) > int(SquadAI.prof[y][0]))
+		print("perf: %s: AI phases, ms a frame (calls, worst ms): %s" % [name, ", ".join(phases.slice(0, 14).map(func(k: Variant) -> String:
+			var e: Array = SquadAI.prof[k]
+			return "%s %.2f (%d, %.1f)" % [k, int(e[0]) / 1000.0 / n_frames, int(e[1]), int(e[2]) / 1000.0]))])
+		print("perf: %s: AI slot recomputes: %s" % [name, SquadAI.prof.keys().filter(func(k: Variant) -> bool: return String(k).begins_with("slots_")).map(func(k: Variant) -> String: return "%s %d" % [k, int(SquadAI.prof[k][0])])])
+		SquadAI.profiling = false
 	_hitches.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.ms > b.ms)
 	for h: Dictionary in _hitches.slice(0, 12):
 		print("perf: %s: hitch %.1f ms: %s" % [name, h.ms, h.why])
