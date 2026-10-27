@@ -807,12 +807,18 @@ static func ai_spread_deg(weapon: ItemData) -> float:
 
 ## A player's shot direction (Captain, P0362), worked out on the shooter's machine (co-op: the
 ## host trusts it): inside the half-angle spread_deg_now(), uniform over the cone's disc.
+## The weapon's inertia the camera doesn't show (PlayerInput: the gun trails a turn; x yaw, y
+## pitch, radians): the round goes where the gun points. Zero for the AI.
+var shot_lag := Vector2.ZERO
+
+
 func _spread_direction(weapon: ItemData) -> Vector3:
 	var spread := deg_to_rad(spread_deg_now(weapon))
-	var forward := -camera.global_basis.z
+	var aim := camera.global_basis * Basis.from_euler(Vector3(shot_lag.y, shot_lag.x, 0.0))
+	var forward := -aim.z
 	var angle := randf() * TAU
 	var amount := sqrt(randf()) * spread
-	var offset := camera.global_basis.x * cos(angle) + camera.global_basis.y * sin(angle)
+	var offset := aim.x * cos(angle) + aim.y * sin(angle)
 	return (forward + offset * tan(amount)).normalized()
 
 

@@ -33,7 +33,8 @@ const LIGHT := Vector3(-0.45, 0.75, -0.5)
 
 var out := "user://model_render"
 var px_per_m := PX_PER_M
-var crop := Vector2(-INF, INF)  # "crop=<lo>,<hi>": only that band of heights (m), e.g. the upper body
+var crop := Vector2(-INF, INF)
+var first_person := false  # "fp": also each soldier's own view from his eyes (head hidden), *_fp.png  # "crop=<lo>,<hi>": only that band of heights (m), e.g. the upper body
 
 
 func _ready() -> void:
@@ -48,7 +49,10 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	var only := args.slice(2)
 	for a: String in only.duplicate():
-		if a.begins_with("crop="):
+		if a == "fp":
+			first_person = true
+			only.erase(a)
+		elif a.begins_with("crop="):
 			var r := a.trim_prefix("crop=").split(",")
 			crop = Vector2(float(r[0]), float(r[1]))
 			only.erase(a)
@@ -60,6 +64,9 @@ func _ready() -> void:
 		var path := out.path_join("%s.png" % s[0])
 		sheet.save_png(path)
 		print("[render] wrote ", path)
+		if first_person:
+			var fp: Image = await _fp_sheet(root)
+			fp.save_png(out.path_join("%s_fp.png" % s[0]))
 		root.queue_free()
 		await get_tree().process_frame
 	print("[render] done")
@@ -109,15 +116,109 @@ func _dress(s: Array) -> Node3D:
 	return root
 
 
-## Every drawn triangle under `root`, world space, with its colours: [a, b, c, colour a, b, c].
-func _triangles(root: Node) -> Array:
+## First person (PlayerInput's full body): from the drawn head's eyes (PlayerInput.EYE_IN_HEAD),
+## its head and all on it left out, looking ahead, 40 and 70 degrees down; perspective, 80
+## degrees across.
+func _fp_sheet(root: Node3D) -> Image:
+	var model := root.get_node(^"Model") as CharacterModel
+	var skip := model.head
+	var w := 640
+	var h := 480
+	var sheet := Image.create(w * 3, h, false, Image.FORMAT_RGB8)
+	var fwd := -model.global_basis.z
+	for i in 3:
+		var pitch := deg_to_rad([0.0, -40.0, -70.0][i])
+		model.look_pitch = pitch  # the head (and its eyes) pitch down on the neck as in the game
+		for f in 30:
+			await get_tree().process_frame
+		var tris := _triangles(root, skip)
+		var eye := model.head.global_transform * PlayerInput.EYE_IN_HEAD
+		var basis := Basis.looking_at(fwd, Vector3.UP).rotated(model.global_basis.x.normalized(), pitch)
+		var img := _draw_persp(tris, Transform3D(basis, eye), w, h, deg_to_rad(80.0))
+		sheet.blit_rect(img, Rect2i(0, 0, w, h), Vector2i(i * w, 0))
+	return sheet
+
+
+func _draw_persp(tris: Array, cam: Transform3D, w: int, h: int, hfov: float) -> Image:
+	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.83, 0.85, 0.87))
+	var depth := PackedFloat32Array()
+	depth.resize(w * h)
+	depth.fill(INF)
+	var inv := cam.affine_inverse()
+	var f := (w * 0.5) / tan(hfov * 0.5)
+	var light := LIGHT.normalized()
+	for t: Array in tris:
+		var n := ((t[1] as Vector3) - (t[0] as Vector3)).cross((t[2] as Vector3) - (t[0] as Vector3))
+		if n.length_squared() < 1e-14:
+			continue
+		n = n.normalized()
+		var to_cam := (cam.origin - (t[0] as Vector3)).normalized()
+		if n.dot(to_cam) < 0.0:
+			n = -n
+		var shade := 0.5 + 0.5 * maxf(0.0, n.dot(light)) + 0.12 * maxf(0.0, n.dot(to_cam))
+		var col: Color = t[3]
+		col = Color(col.r * shade, col.g * shade, col.b * shade)
+		# Clipped to the near plane (z = -NEAR in the camera's space): 0, 1 or 2 triangles.
+		var poly := _clip_near([inv * (t[0] as Vector3), inv * (t[1] as Vector3), inv * (t[2] as Vector3)])
+		for k in range(1, poly.size() - 1):
+			_fill_persp(img, depth, poly[0], poly[k], poly[k + 1], col, w, h, f)
+	return img
+
+
+const NEAR := 0.03
+
+
+func _clip_near(pts: Array) -> Array:
+	var out: Array = []
+	for i in pts.size():
+		var a: Vector3 = pts[i]
+		var b: Vector3 = pts[(i + 1) % pts.size()]
+		var a_in := a.z <= -NEAR
+		var b_in := b.z <= -NEAR
+		if a_in:
+			out.append(a)
+		if a_in != b_in:
+			out.append(a.lerp(b, (-NEAR - a.z) / (b.z - a.z)))
+	return out
+
+
+func _fill_persp(img: Image, depth: PackedFloat32Array, a: Vector3, b: Vector3, c: Vector3, col: Color, w: int, h: int, f: float) -> void:
+	var p0 := Vector3(w * 0.5 + a.x / -a.z * f, h * 0.5 - a.y / -a.z * f, -a.z)
+	var p1 := Vector3(w * 0.5 + b.x / -b.z * f, h * 0.5 - b.y / -b.z * f, -b.z)
+	var p2 := Vector3(w * 0.5 + c.x / -c.z * f, h * 0.5 - c.y / -c.z * f, -c.z)
+	var area := (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x)
+	if absf(area) < 1e-9:
+		return
+	var x0 := maxi(0, int(floor(minf(p0.x, minf(p1.x, p2.x)))))
+	var x1 := mini(w - 1, int(ceil(maxf(p0.x, maxf(p1.x, p2.x)))))
+	var y0 := maxi(0, int(floor(minf(p0.y, minf(p1.y, p2.y)))))
+	var y1 := mini(h - 1, int(ceil(maxf(p0.y, maxf(p1.y, p2.y)))))
+	for y in range(y0, y1 + 1):
+		var py := y + 0.5
+		for x in range(x0, x1 + 1):
+			var px := x + 0.5
+			var w0 := ((p1.x - px) * (p2.y - py) - (p1.y - py) * (p2.x - px)) / area
+			var w1 := ((p2.x - px) * (p0.y - py) - (p2.y - py) * (p0.x - px)) / area
+			var w2 := 1.0 - w0 - w1
+			if w0 < -1e-4 or w1 < -1e-4 or w2 < -1e-4:
+				continue
+			var z := w0 * p0.z + w1 * p1.z + w2 * p2.z
+			var k := y * w + x
+			if z < depth[k]:
+				depth[k] = z
+				img.set_pixel(x, y, col)
+
+
+## Every drawn triangle under `root` (but not under `skip`), world space, with its colour.
+func _triangles(root: Node, skip: Node = null) -> Array:
 	var tris: Array = []
 	var stack: Array[Node] = [root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
 		if n is Node3D and not (n as Node3D).visible:
 			continue
-		if n.name == VoxelArt.FAR_LOD:
+		if n.name == VoxelArt.FAR_LOD or n == skip:
 			continue
 		for c in n.get_children():
 			stack.append(c)

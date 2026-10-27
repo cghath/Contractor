@@ -19,6 +19,7 @@ const TIPS := {
 	"shadows": "How sharp shadows are and how far out they're drawn. Higher costs more frame rate.",
 	"hfov": "How wide you see, across the screen. Wider shows more at the sides but makes far things smaller.",
 	"head_bob": "The view moves a little with your steps. Off keeps it steady.",
+	"camera_motion": "How much your view moves with your body in first person: steps, breathing, sway and landings. 100% is the head's own motion; turn it down if it makes you queasy. Others see your body move the same either way.",
 	"detail": "How far out the woods, rocks and scrub are drawn. Ultra draws the tree canopy to the horizon; High stops it at about 3 km and drops far soldiers' shadows; Medium and Low draw less far out for more frame rate. Up close they all look the same. Takes effect in the next zone.",
 	"gore": "How bodies show wounds: Full shows torn limbs, bone and blast damage; Reduced keeps the wounds and lost limbs without bone or gibs; Off draws bodies whole.",
 	"ui_scale": "Makes every menu and the HUD bigger or smaller, on top of the size the window picks by itself.",
@@ -172,7 +173,7 @@ func _video_tab() -> Control:
 	page.add_child(_choice("Anti-aliasing", "video", "antialiasing", GameSettings.ANTIALIASING))
 	page.add_child(_choice("Shadows", "video", "shadows", GameSettings.SHADOWS))
 	page.add_child(_slider("Field of view (across, 16:9)", "video", "hfov", func(v: float) -> String: return "%d deg" % roundi(v)))
-	page.add_child(_toggle("Head bob (the view moves with your steps)", "video", "head_bob"))
+	page.add_child(_slider("Camera motion (the view moves with your body)", "video", "camera_motion", func(v: float) -> String: return "%d%%" % roundi(v * 100.0)))
 	page.add_child(_choice("Scope picture-in-picture (magnified optics)", "video", "scope_pip", GameSettings.SCOPE_PIP))
 	page.add_child(_choice("Gore", "video", "gore", GameSettings.GORE))
 	page.add_child(_choice("World detail at distance", "video", "detail", GameSettings.DETAIL))

@@ -56,7 +56,7 @@ func _ready() -> void:
 	_test_replication_config()
 	_test_gear_sway()
 	_test_seated_bones()
-	_test_world_scale()
+	await _test_world_scale()
 	_test_locomotion()
 	_test_stance_and_carry()
 	await _test_view_low_ready()
@@ -175,7 +175,13 @@ func _test_world_scale() -> void:
 	check(absf(stand - 1.65) < 0.02 and stand / top > 0.9 and stand / top < 0.95 and stand < BuildingGen.DOOR_H - 0.3,
 		"standing eye %.2f m on a %.2f m man (%.0f%%; real 91-94%%), under a %.1f m door" % [stand, top, stand / top * 100.0, BuildingGen.DOOR_H])
 	check(crouch > 0.9 and crouch < 1.15 and prone > 0.2 and prone < 0.45, "crouched eye %.2f m, prone %.2f m" % [crouch, prone])
-	check(bool(GameSettings.DEFAULTS.video.head_bob) and player.camera.position.length() < 0.001, "head bob on by default (a settings toggle), the view still standing still (%s)" % player.camera.position)
+	# Full-body first person (2026-10-26): the view rides the drawn head's eyes (PlayerInput._place_eye,
+	# a few cm off the eye point), and standing still it stays still but for breathing.
+	var before := player.camera.position
+	await get_tree().create_timer(0.3).timeout
+	check(float(GameSettings.DEFAULTS.video.camera_motion) == 1.0 and player.camera.position.length() < PlayerInput.EYE_REACH_M
+		and player.camera.position.distance_to(before) < 0.006,
+		"camera motion full by default (a settings slider), the view still standing still (%s, then %s)" % [before, player.camera.position])
 	check(is_equal_approx(float(GameSettings.DEFAULTS.video.hfov), 90.0) and absf(GameSettings.vertical_fov(90.0) - 58.72) < 0.01
 		and absf(GameSettings.vertical_fov(112.33) - 80.0) < 0.05,
 		"the view: 90 deg across 16:9 by default, a %.1f deg vertical camera (the old 80 vertical was 112 across)" % GameSettings.vertical_fov(90.0))
@@ -1004,7 +1010,9 @@ func _test_medic_view() -> void:
 	var m := player.model
 	var input := player.get_node(^"PlayerInput") as PlayerInput
 	var forearm := m._forearm[0].get_child(0) as MeshInstance3D
-	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: the weapon in view, your own arms not")
+	# Full-body first person (2026-10-26): the arms and gun you see are the body's own, on its layer.
+	var seen := func() -> bool: return not player.view_model.visible and forearm.layers & PlayerInput.LOCAL_BODY_LAYER != 0 		and player.camera.cull_mask & PlayerInput.LOCAL_BODY_LAYER != 0
+	check(seen.call() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: your own arms and weapon in view (the body's), no view model")
 	m.server_treat(alpha, &"thigh_r", 3.0, &"tourniquet")
 	await _seconds(0.6)  # (the strap, in the hand)
 	var prop := m.held_prop(true)
@@ -1019,8 +1027,8 @@ func _test_medic_view() -> void:
 	check(m.treat_view_offset().y < -0.2 and input._medic_eye.length() > 0.2, "the eye down with the kneel (%.2f m)" % m.treat_view_offset().y)
 	m.action_net = {}
 	await _seconds(0.6)
-	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
-		"after: the weapon back, your arms off the camera, the eye back up")
+	check(seen.call() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
+		"after: your own arms and weapon back as the body's, the eye back up")
 	_place_player()
 
 

@@ -39,7 +39,7 @@ func _process(_delta: float) -> void:
 			_model.queue_free()
 			_model = null
 		if id != &"":
-			_model = make_model(ItemDB.get_item(id), 1 << 1 if soldier.is_local() else 1)
+			_model = make_model(ItemDB.get_item(id), PlayerInput.LOCAL_BODY_LAYER if soldier.is_local() else 1)  # yours: seen (full-body first person)
 			add_child(_model)
 	if _model == null:
 		_release()

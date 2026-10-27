@@ -521,8 +521,31 @@ static func is_step(id: StringName) -> bool:
 
 
 func _step(s: Soldier, volume_db: float) -> void:
-	var id := StringName("%s_%s" % ["step_hard" if hard_ground(s) else "step", step_pace(s)])
+	var pace := step_pace(s)
+	var id := StringName("%s_%s" % ["step_hard" if hard_ground(s) else "step", pace])
 	play_at(id, s.global_position, volume_db)
+	var kit := kit_rattle_db(s, pace)
+	if kit > -INF:
+		play_at(&"kit_rattle", s.global_position + Vector3.UP * 1.1, volume_db + kit)
+
+
+## The kit's rattle with a step (Captain, 2026-10-26: footsteps that sound real, recordings plus
+## a generated layer): mags, buckles and plates knocking in a carrier and pack, louder the more
+## he carries (KIT_RATTLE_KG: none under the first, full at the second) and the faster he goes
+## (KIT_RATTLE_PACE dB by pace; none crouched or slow). -INF: none (no carrier or pack).
+const KIT_RATTLE_KG := Vector2(6.0, 30.0)
+const KIT_RATTLE_PACE := {&"sprint": 0.0, &"jog": -4.0, &"walk": -10.0}
+
+
+static func kit_rattle_db(s: Soldier, pace: StringName) -> float:
+	if not KIT_RATTLE_PACE.has(pace) or s.inventory == null:
+		return -INF
+	if s.inventory.slots.get(&"vest", &"") == &"" and s.inventory.slots.get(&"backpack", &"") == &"":
+		return -INF
+	var carried := clampf(inverse_lerp(KIT_RATTLE_KG.x, KIT_RATTLE_KG.y, s.inventory.total_mass()), 0.0, 1.0)
+	if carried <= 0.0:
+		return -INF
+	return float(KIT_RATTLE_PACE[pace]) + linear_to_db(lerpf(0.35, 1.0, carried))
 
 
 ## Whether `pos` is under a roof (world geometry within ROOF_M above): indoors, with reverb.
@@ -674,6 +697,13 @@ static func _stride(s: Soldier) -> float:
 
 # --- Streams: files first, else generated ---------------------------------------------------
 
+## The name of `id`'s recordings in AUDIO_DIR: its "recording" (sounds sharing one set: every
+## footstep pace plays the same steps at its own level, Captain 2026-10-26), else its own id.
+static func recording_of(id: StringName) -> String:
+	var def: Dictionary = Sfx.defs.get(String(id), {}) if Sfx else {}
+	return String(def.get("recording", id))
+
+
 ## The streams for `id`: res://audio/sfx/<id>.ogg or <id>_1.ogg ... if present, else the
 ## generated placeholders from its "synth" recipe (built on worker threads at boot:
 ## _start_prebuild).
@@ -687,13 +717,14 @@ func streams(id: StringName) -> Array:
 			FrameCost.spent(&"sfx", started)
 			return _streams[id]
 	var out: Array = []
+	var files := recording_of(id)
 	for ext: String in [".ogg", ".wav"]:  # recordings (audio/sfx/CREDITS.md) over the generated placeholder
-		var single := AUDIO_DIR + String(id) + ext
+		var single := AUDIO_DIR + files + ext
 		if ResourceLoader.exists(single):
 			out.append(load(single))
 		var i := 1
-		while ResourceLoader.exists("%s%s_%d%s" % [AUDIO_DIR, id, i, ext]):
-			out.append(load("%s%s_%d%s" % [AUDIO_DIR, id, i, ext]))
+		while ResourceLoader.exists("%s%s_%d%s" % [AUDIO_DIR, files, i, ext]):
+			out.append(load("%s%s_%d%s" % [AUDIO_DIR, files, i, ext]))
 			i += 1
 	if out.is_empty():
 		var recipe: Dictionary = defs.get(String(id), {}).get("synth", {})
@@ -719,7 +750,8 @@ static func _synth_variants(id: String, recipe: Dictionary) -> Array:
 func _start_prebuild() -> void:
 	for id: String in defs:
 		var recipe: Dictionary = (defs[id] as Dictionary).get("synth", {})
-		if recipe.is_empty() or ResourceLoader.exists(AUDIO_DIR + id + ".ogg") or ResourceLoader.exists("%s%s_1.ogg" % [AUDIO_DIR, id]):
+		var files := recording_of(StringName(id))  # (recorded: no placeholder built)
+		if recipe.is_empty() or ResourceLoader.exists(AUDIO_DIR + files + ".ogg") or ResourceLoader.exists("%s%s_1.ogg" % [AUDIO_DIR, files]):
 			continue
 		_prebuild_ids.append(id)
 		_prebuild_recipes.append(recipe.duplicate(true))  # the workers' own copy

@@ -422,6 +422,9 @@ var _shout_until := -1.0
 var hold := Hold.NONE
 ## Head pitch in radians (positive looks up), set by the owner each frame.
 var look_pitch := 0.0
+## The weapon's inertia (PlayerInput, the local player's own: x yaw, y pitch, radians): the hands
+## and what's in them trail a turn by this much.
+var aim_lag := Vector2.ZERO
 ## Shouldering the weapon (Soldier.is_aiming, replicated): GearRig raises it from the ready.
 var aiming := false
 ## Shoots from the left shoulder (Soldier.left_handed): the hands and the weapon holds mirror.
@@ -1697,7 +1700,8 @@ func _process(frame_delta: float) -> void:
 		var lean := 0.0 if downed else _upper_body_pitch((_shown.root as Transform3D).basis * (_shown.torso as Transform3D).basis, _yaw_shown) - _gait_lean
 		_aim_w = move_toward(_aim_w, 1.0 if aiming and _held_weapon and is_instance_valid(_held) else 0.0, delta * 6.0)
 		head.rotation.x = clampf(look_pitch, -0.7, 0.7) * 0.8 - lean - AIM_HEAD_DIP * smoothstep(0.0, 1.0, _aim_w)
-		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean
+		hands_anchor.rotation.x = clampf(look_pitch, -0.8, 0.8) * 0.8 - lean + aim_lag.y
+		hands_anchor.rotation.y += aim_lag.x  # (the gun trails a turn: aim_lag)
 		if seated and not is_ffv():
 			# The rifle stands between the knees whichever way he looks; slumped, the head hangs.
 			hands_anchor.rotation.x = 0.0
