@@ -78,6 +78,21 @@ bones; the ragdoll drives the same bones); marks past a cut (already dropped).
 - Coarse marks only between 40 m and 80 m.
 - Stains: one extra draw per stained mesh within 40 m; capped as above.
 - Settling: 48 rays a body every 10 s.
+- Cosmetic dice (drips, spurts, splashes) use WoundMarks' own RNG, never the global one the game's
+  dice may be seeded from (the spurts shifted the wounds suite's seeded fragment rolls).
+- Measured (local, locked runner): R2814 at a703aac9, perfcases fight 24.3 / 40.9 ms average / 95th,
+  woods 10.7 / 21.0, drive 14.1 / 22.6, heli 18.5 / 33.0, all inside budget. R2810 (the same cases
+  over budget, woods 31.7 ms) ran beside another session's perfcases; these cases vary 6-52 ms run
+  to run on this machine.
+
+## Tests
+
+`tests/blood_test.gd` (new suite "blood", in tools/run_tests.sh and CI): one check per floating
+cause above, the painted look, face, bruises, reduced gore, and the four realism behaviours.
+`devices_test` also checks every drag-smear streak lies on the ground; `wounds_test`'s dummy has a
+floor now (its pool was 2.5 m below it in the air, which the old code allowed).
+Last full local run: R2810 (smoke, blood, devices, gore, armor, interaction, net, medical,
+casualty green) and R2814 (wounds, blood, devices, perfcases green).
 
 ## Hooks for model-realism (not edited here)
 
