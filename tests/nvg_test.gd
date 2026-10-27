@@ -79,6 +79,9 @@ func _run() -> void:
 		"lowered gen 2: restores 0.8, a 45 deg tube (%.2f)" % Nvg.restores(player))
 	view.update()
 	check(view.rect.visible, "his view goes green")
+	var mat := view.rect.material as ShaderMaterial
+	check(float(mat.get_shader_parameter(&"tube")) >= NvgView.FULL_SCREEN and is_equal_approx(float(mat.get_shader_parameter(&"gain")), 110.0),
+		"v0.7.1: the picture fills the screen, at the gen 2's own gain (%.0f)" % float(mat.get_shader_parameter(&"gain")))
 	var r := NvgView.tube_radius(45.0, 75.0)
 	check(r > 0.4 and r < 0.6 and NvgView.tube_radius(50.0, 75.0) > r, "the tube is narrower than the view, wider by generation (%.2f)" % r)
 	said = player.server_toggle_nvg()

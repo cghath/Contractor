@@ -222,8 +222,9 @@ func new_campaign(hiring_seed := -1) -> void:
 	Hiring.redraw(h, day())
 	Roster.members(roster())
 	Roster.players(roster())
-	# Two standing high command squads from the start (combined_arms.md 5.2), and 14 days of
-	# their wages on top of the start cash so the first fortnight isn't a trap.
+	# No high command squads from the start since v0.7.1 (the Captain, 2026-10-26: the slots stay
+	# open, the host hires one at the FOB). standing_squads (tests) seeds the old two, and 14 days
+	# of their wages on top of the start cash.
 	var standing_rng := RandomNumberGenerator.new()
 	standing_rng.seed = hash([int(h.seed), "standing"])
 	if standing_squads:
@@ -569,7 +570,7 @@ func base_level():
 static var base_zone_mode := -1
 ## A new campaign starts with the two standing high command squads (combined_arms.md 5.2).
 ## Suites about the roster's own mechanics (base_test's hiring and counts) turn it off.
-static var standing_squads := true
+static var standing_squads := false
 ## Whether a new campaign starts aboard the LHD (docs/lhd_home.md; ZoneControl.home): -1 yes except
 ## under a test scene (the suites keep their base, as base_zone_mode), 0 no (the FOB, as before), 1 yes.
 static var lhd_home_mode := -1
@@ -2511,6 +2512,21 @@ func server_set_company_squads(n: int) -> String:
 	return ""
 
 
+## Host: hires the next high command squad of four (Heroes.hire_squad) for Heroes.HIRE_FEE.
+## From v0.7.1 a campaign starts with none; this fills the open slots.
+func server_hire_hc_squad() -> String:
+	var spec := Heroes.next_hire(roster())
+	if spec.is_empty():
+		return "The company already keeps %d high command squads" % Heroes.MAX_HIRED
+	if not Economy.spend(Heroes.HIRE_FEE, "Hired %s (high command squad)" % spec.callsign):
+		return "Not enough cash: %s's sign-on is $%d" % [spec.callsign, Heroes.HIRE_FEE]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(hiring().get("seed", 0)), "hc", String(spec.id), day()])
+	Heroes.hire_squad(roster(), day(), rng)
+	_changed(&"roster")
+	return ""
+
+
 ## Hired guards (docs/linked_zones.md 1b / LZ-6: "hired guards who man the base while the squad is
 ## out (wages, part of the weekly bill)"): how many, up to MAX_GUARDS, each GUARD_DAILY_WAGE a day.
 ## They stand at the FOB's posts (BaseZoneLevel) and hold it off-screen (BaseAssault). Proposed.
@@ -3498,6 +3514,8 @@ func _server_request(action: String, args: Array) -> void:
 			"hc_home":
 				why = ("" if Heroes.set_home(roster(), String(args[0]), bool(args[1])) else "No such squad") if sender == 1 and args.size() >= 2 else "Only the host can do that"
 				_changed(&"roster")
+			"hc_hire":
+				why = server_hire_hc_squad() if sender == 1 else "Only the host can do that"
 			"hc_rename":
 				why = "" if sender == 1 and args.size() >= 2 and Heroes.rename(roster(), String(args[0]), String(args[1])) != "" else "Only the host can do that"
 				_changed(&"roster")

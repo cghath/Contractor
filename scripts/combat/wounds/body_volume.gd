@@ -93,11 +93,12 @@ static func body_of(node: Node) -> String:
 
 ## The skin under rest-pose `point` looking in along -`outward`: the first voxel of the
 ## part's whole model (so a trail runs on from chest to belly), or null if there is none
-## within `reach` of `point` (off the end of a limb).
-static func surface(part: StringName, point: Vector3, outward: Vector3, reach := 0.05, body := "") -> Variant:
+## within `reach` of `point` (off the end of a limb). `model`: the model the part is drawn as now
+## (a forearm's hand pose, CharacterModel's "voxel_model" meta), else its rest model.
+static func surface(part: StringName, point: Vector3, outward: Vector3, reach := 0.05, body := "", model := "") -> Variant:
 	if not PART_MODELS.has(part):
 		return null
-	var grid := _grid(part, body)
+	var grid := _grid(part, body, model if model != model_of(part, body) else "")
 	var step: float = grid.cell * STEP_SHARE
 	var from := point + outward * reach
 	var t := 0.0
@@ -107,6 +108,39 @@ static func surface(part: StringName, point: Vector3, outward: Vector3, reach :=
 			return p
 		t += step
 	return null
+
+
+## The middle of `part`'s voxels at rest-pose height `y` (a 1 cm slab), drawn as `model` (a hand's
+## pose) or its rest model; null where it has none. A posed hand isn't on the forearm's axis: what
+## lies on it is aimed at this.
+static func slab_centre(part: StringName, y: float, body := "", model := "") -> Variant:
+	if not PART_MODELS.has(part):
+		return null
+	var grid := _grid(part, body, model if model != model_of(part, body) else "")
+	var dims: Vector3i = grid.dims
+	var cell: float = grid.cell
+	var origin: Vector3 = grid.origin
+	if not grid.has("layers"):  # each layer's sum and count, made once per grid
+		var sums := PackedVector3Array()
+		var counts := PackedInt32Array()
+		sums.resize(dims.y)
+		counts.resize(dims.y)
+		var cells: PackedByteArray = grid.body
+		for z in dims.z:
+			for cy in dims.y:
+				for x in dims.x:
+					if cells[x + dims.x * (cy + dims.y * z)] == 1:
+						sums[cy] += origin + (Vector3(x, cy, z) + Vector3.ONE * 0.5) * cell
+						counts[cy] += 1
+		grid["layers"] = [sums, counts]
+	var sums: PackedVector3Array = grid.layers[0]
+	var counts: PackedInt32Array = grid.layers[1]
+	var sum := Vector3.ZERO
+	var n := 0
+	for cy in range(maxi(0, floori((y - 0.005 - origin.y) / cell)), mini(dims.y, ceili((y + 0.005 - origin.y) / cell))):
+		sum += sums[cy]
+		n += counts[cy]
+	return sum / n if n > 0 else null
 
 
 static func _solid(grid: Dictionary, cells: PackedByteArray, p: Vector3) -> bool:

@@ -128,11 +128,17 @@ static func _own_weapon(item: ItemData) -> bool:
 	return item.type == "weapon" and String(item.stats.get("model_style", "")) == "shotgun"
 
 
+## `item`'s own model (not VoxelArt's) as [mesh, metres per mesh unit, where its Shape's origin
+## is (cm), its size (cm)]: LauncherRig draws a launcher in the hands with the one on the ground.
+static func own_mesh(item: ItemData) -> Array:
+	return _mesh_for(item)
+
+
 static func _mesh_for(item: ItemData) -> Array:
 	if not _meshes.has(item.id):
 		var spec := _spec_for(item)
 		var buffer := VoxelArt._rasterize(spec, "multicam", String(item.id).hash())
-		_meshes[item.id] = [_get_mesher().build_mesh(buffer, []), float(spec.voxel)]
+		_meshes[item.id] = [_get_mesher().build_mesh(buffer, []), float(spec.voxel), spec.get("origin_cm", Vector3.ZERO), Vector3(spec.size) * float(spec.voxel) * 100.0]
 	return _meshes[item.id]
 
 
@@ -1399,4 +1405,4 @@ class Shape:
 		for box: Array in out:
 			box[0] -= lo
 			box[1] -= lo
-		return {"size": Vector3i(hi - lo), "voxel": res / 100.0, "sub": 1, "boxes": out}
+		return {"size": Vector3i(hi - lo), "voxel": res / 100.0, "sub": 1, "boxes": out, "origin_cm": lo * res}

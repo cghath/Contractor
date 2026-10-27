@@ -85,7 +85,7 @@ static var detail_override := {}
 
 const DEFAULTS := {
 	"video": {"window_mode": "windowed", "resolution": "1600x900", "vsync": true, "fps_cap": 0,
-		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true,
+		"render_scale": 1.0, "antialiasing": "msaa4_taa", "shadows": "medium", "hfov": 90.0, "ui_scale": 1.0, "head_bob": true, "camera_motion": 1.0,
 		"scope_pip": "medium", "gore": "full", "detail": "high"},
 	# infil_music: Captain, 2026-10-14, temporary (InfilMusic: Ride of the Valkyries on helicopter insertions).
 	"audio": {"master": 0.8, "effects": 1.0, "voice": 1.0, "music": 0.8, "mute_unfocused": false, "infil_music": true},
@@ -117,6 +117,7 @@ const DEFAULTS := {
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {
+	"camera_motion": [0.0, 1.0, 0.05],
 	"render_scale": [0.5, 2.0, 0.05], "hfov": [70.0, 120.0, 1.0], "ui_scale": [0.75, 2.0, 0.05],
 	"master": [0.0, 1.0, 0.01], "effects": [0.0, 1.0, 0.01], "voice": [0.0, 1.0, 0.01], "music": [0.0, 1.0, 0.01],
 	"mouse_sensitivity": [0.2, 3.0, 0.05], "aim_sensitivity": [0.2, 1.5, 0.05],
@@ -365,9 +366,20 @@ static func fov() -> float:
 	return float(get_value("video", "hfov"))
 
 
-## Whether the view bobs with the steps (docs/animation.md, "First person").
+## Whether the view bobs with the steps (docs/animation.md, "First person"): camera_motion above 0.
 static func head_bob() -> bool:
-	return bool(get_value("video", "head_bob"))
+	return camera_motion() > 0.0
+
+
+## How much the first-person view moves with the body (Captain, 2026-10-26: "realistic + comfort
+## slider"): 1 the head's own motion (steps, breathing, sway, landings), 0 a steady view. The body
+## moves the same for everyone else. An old "head_bob" off reads as 0.
+static func camera_motion() -> float:
+	_load()
+	var video: Dictionary = _values.get("video", {})
+	if not video.has("camera_motion") and video.has("head_bob"):
+		return 1.0 if bool(video.head_bob) else 0.0
+	return clampf(float(get_value("video", "camera_motion")), 0.0, 1.0)
 
 
 ## The scope picture's render size against the lens' size on screen (SCOPE_PIP_SCALE); 0 with

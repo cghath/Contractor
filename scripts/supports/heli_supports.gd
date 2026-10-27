@@ -494,7 +494,7 @@ func server_lost(kind: String) -> void:
 	if kind in KINDS:
 		airframes().erase(kind)  # its replacement is a fresh airframe
 		if not _lost.has(kind):
-			Economy.charge_run(roundi(Prices.lost_support_price(kind) * HeliUpgrades.lost_mult(kind)), "Lost helicopter (%s support): replacement" % kind)
+			Economy.charge_run(roundi(Prices.lost_support_price(kind, Contracts.deployment_rating()) * HeliUpgrades.lost_mult(kind)), "Lost helicopter (%s support): replacement" % kind)
 		_lost[kind] = true
 
 

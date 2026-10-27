@@ -87,6 +87,13 @@ static func restores(viewer: Node) -> float:
 	return clampf(float(mounted(_inv_of(viewer)).stats.get("restores", 0.0)), 0.0, 1.0)
 
 
+## The image intensifier's gain of `viewer`'s NVG (its stats' "gain", by generation; Proposed,
+## v0.7.1), `fallback` without one.
+static func gain_of(viewer: Node, fallback: float) -> float:
+	var item := mounted(_inv_of(viewer))
+	return float(item.stats.get("gain", fallback)) if item else fallback
+
+
 ## The tube's field of view (degrees) of `viewer`'s NVG (0 when it's not on).
 static func fov_of(viewer: Node) -> float:
 	return float(mounted(_inv_of(viewer)).stats.get("fov_deg", 40.0)) if is_on(viewer) else 0.0

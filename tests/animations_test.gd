@@ -56,8 +56,9 @@ func _ready() -> void:
 	_test_replication_config()
 	_test_gear_sway()
 	_test_seated_bones()
-	_test_world_scale()
+	await _test_world_scale()
 	_test_locomotion()
+	await _test_body_dynamics()
 	_test_stance_and_carry()
 	await _test_view_low_ready()
 	await _test_carry()
@@ -175,7 +176,13 @@ func _test_world_scale() -> void:
 	check(absf(stand - 1.65) < 0.02 and stand / top > 0.9 and stand / top < 0.95 and stand < BuildingGen.DOOR_H - 0.3,
 		"standing eye %.2f m on a %.2f m man (%.0f%%; real 91-94%%), under a %.1f m door" % [stand, top, stand / top * 100.0, BuildingGen.DOOR_H])
 	check(crouch > 0.9 and crouch < 1.15 and prone > 0.2 and prone < 0.45, "crouched eye %.2f m, prone %.2f m" % [crouch, prone])
-	check(bool(GameSettings.DEFAULTS.video.head_bob) and player.camera.position.length() < 0.001, "head bob on by default (a settings toggle), the view still standing still (%s)" % player.camera.position)
+	# Full-body first person (2026-10-26): the view rides the drawn head's eyes (PlayerInput._place_eye,
+	# a few cm off the eye point), and standing still it stays still but for breathing.
+	var before := player.camera.position
+	await get_tree().create_timer(0.3).timeout
+	check(float(GameSettings.DEFAULTS.video.camera_motion) == 1.0 and player.camera.position.length() < PlayerInput.EYE_REACH_M
+		and player.camera.position.distance_to(before) < 0.006,
+		"camera motion full by default (a settings slider), the view still standing still (%s, then %s)" % [before, player.camera.position])
 	check(is_equal_approx(float(GameSettings.DEFAULTS.video.hfov), 90.0) and absf(GameSettings.vertical_fov(90.0) - 58.72) < 0.01
 		and absf(GameSettings.vertical_fov(112.33) - 80.0) < 0.05,
 		"the view: 90 deg across 16:9 by default, a %.1f deg vertical camera (the old 80 vertical was 112 across)" % GameSettings.vertical_fov(90.0))
@@ -204,6 +211,93 @@ func _test_locomotion() -> void:
 	var idle := _walk_model(stand, 0.0, Vector3.FORWARD, "male")
 	check(crawl.gait == CharacterModel.CRAWL and idle.gait == CharacterModel.IDLE and idle.weight == 0.0,
 		"prone it crawls (%s); stood still, idle (%s, cycle shown %.2f)" % [crawl.gait, idle.gait, idle.weight])
+
+
+## The body carries weight (Captain, 2026-10-26; CharacterModel._body_dynamics): setting off it
+## leans into the pace and braking it rocks back, landing from a fall the hips sink and spring
+## back, and turning on the spot the feet step round.
+func _test_body_dynamics() -> void:
+	print("The body carries weight")
+	var holder := Node3D.new()
+	holder.position = Vector3(440, 0, 440)
+	add_child(holder)
+	var model := CharacterModel.new()
+	model.lod = false
+	holder.add_child(model)
+	model.set_process(false)
+	var dt := 1.0 / 60.0
+	model.pose = SoldierMovement.pose_for(SoldierMovement.Stance.STAND_HIGH, 0, 0.0)
+	for i in 30:
+		model._process(dt)
+	var forward := 0.0
+	for i in 40:
+		holder.position += Vector3.FORWARD * minf(i / 25.0, 1.0) * 5.0 * dt
+		model._process(dt)
+		forward = maxf(forward, model._lean.x)
+	var back := 0.0
+	for i in 40:
+		holder.position += Vector3.FORWARD * maxf(1.0 - i / 15.0, 0.0) * 5.0 * dt
+		model._process(dt)
+		back = minf(back, model._lean.x)
+	check(forward > 0.03 and back < -0.02, "setting off it leans into the pace (%.2f rad), stopping it rocks back (%.2f)" % [forward, back])
+	for i in 60:
+		model._process(dt)
+	for i in 20:
+		holder.position.y -= 6.0 * dt
+		model._process(dt)
+	var sink := 0.0
+	for i in 20:
+		model._process(dt)
+		sink = minf(sink, model._sink)
+	for i in 90:
+		model._process(dt)
+	check(sink < -0.04 and absf(model._sink) < 0.01, "a landing sinks the hips (%.2f m) and they spring back (%.3f)" % [sink, model._sink])
+	var stepping := 0.0
+	for i in 30:
+		holder.rotate_y(3.0 * dt)
+		model._process(dt)
+		stepping = maxf(stepping, model.gait_weight())
+	check(stepping > 0.3, "turning on the spot the feet step round (cycle shown %.2f)" % stepping)
+	# A step 15 cm high under the left foot: that foot stands on it, the leg bending, the other on
+	# the floor (foot IK, near the camera).
+	model.foot_ik_always = true
+	holder.rotation = Vector3.ZERO
+	for i in 60:
+		model._process(dt)
+	var left := model.foot_position(true)
+	var base := left.y
+	var step := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	shape.shape = BoxShape3D.new()
+	(shape.shape as BoxShape3D).size = Vector3(0.12, 0.15, 0.16)
+	step.add_child(shape)
+	add_child(step)
+	step.global_position = Vector3(left.x - 0.03, holder.global_position.y + 0.075, left.z)
+	var floor_body := StaticBody3D.new()  # the floor he stands on (the step's measured from it)
+	var floor_shape := CollisionShape3D.new()
+	floor_shape.shape = BoxShape3D.new()
+	(floor_shape.shape as BoxShape3D).size = Vector3(3, 0.1, 3)
+	floor_body.add_child(floor_shape)
+	add_child(floor_body)
+	floor_body.global_position = holder.global_position - Vector3(0, 0.05, 0)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	for i in 40:
+		model._process(dt)
+	var on := model.foot_position(true).y - base
+	var off := model.foot_position(false).y - base
+	check(on > 0.1 and on < 0.2 and absf(off) < 0.03, "on a step the foot stands on it (%.2f m up), the other on the floor (%.2f m)" % [on, off])
+	step.queue_free()
+	floor_body.queue_free()
+	# Vaulting (a mantle): the knees come up.
+	var knee_before := model.foot_position(false).y
+	model.climbing = true
+	for i in 30:
+		model._process(dt)
+	var knee_up := model.foot_position(false).y - knee_before
+	model.climbing = false
+	check(knee_up > 0.2, "vaulting the knees tuck up (a foot %.2f m higher)" % knee_up)
+	holder.queue_free()
 
 
 ## Walks a fresh model `speed` m/s along `dir` (its own space; it faces -Z) in `stance` for
@@ -1004,7 +1098,9 @@ func _test_medic_view() -> void:
 	var m := player.model
 	var input := player.get_node(^"PlayerInput") as PlayerInput
 	var forearm := m._forearm[0].get_child(0) as MeshInstance3D
-	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: the weapon in view, your own arms not")
+	# Full-body first person (2026-10-26): the arms and gun you see are the body's own, on its layer.
+	var seen := func() -> bool: return not player.view_model.visible and forearm.layers & PlayerInput.LOCAL_BODY_LAYER != 0 		and player.camera.cull_mask & PlayerInput.LOCAL_BODY_LAYER != 0
+	check(seen.call() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0, "before: your own arms and weapon in view (the body's), no view model")
 	m.server_treat(alpha, &"thigh_r", 3.0, &"tourniquet")
 	await _seconds(0.6)  # (the strap, in the hand)
 	var prop := m.held_prop(true)
@@ -1019,8 +1115,8 @@ func _test_medic_view() -> void:
 	check(m.treat_view_offset().y < -0.2 and input._medic_eye.length() > 0.2, "the eye down with the kneel (%.2f m)" % m.treat_view_offset().y)
 	m.action_net = {}
 	await _seconds(0.6)
-	check(player.view_model.visible and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
-		"after: the weapon back, your arms off the camera, the eye back up")
+	check(seen.call() and forearm.layers & CharacterModel.VIEW_HANDS_LAYER == 0 and m.treat_view_offset().length() < 0.02,
+		"after: your own arms and weapon back as the body's, the eye back up")
 	_place_player()
 
 

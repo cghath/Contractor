@@ -6,9 +6,9 @@ var impacts: Array[Dictionary] = []
 var hits: Array[Dictionary] = []
 
 
-func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0) -> void:
-	impacts.append({"part": part, "round_class": round_class, "distance": distance, "energy_j": energy_j})
-	super(part, round_class, distance, energy_j)
+func server_impact(part: StringName, round_class: StringName, distance: float, energy_j := -1.0, at: Variant = null) -> void:
+	impacts.append({"part": part, "round_class": round_class, "distance": distance, "energy_j": energy_j, "at": at})
+	super(part, round_class, distance, energy_j, at)
 
 
 func server_hit(part: StringName, hit: Dictionary) -> void:

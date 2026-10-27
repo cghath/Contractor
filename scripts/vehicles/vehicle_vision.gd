@@ -107,7 +107,7 @@ func open(v: Vehicle, p_seat: int) -> void:
 		seat = p_seat
 		_blocks = blocks_of(v, p_seat)
 		block = clampi(block, 0, maxi(_blocks.size() - 1, 0))
-	cull_mask = body.camera.cull_mask
+	cull_mask = body.camera.cull_mask & ~PlayerInput.LOCAL_BODY_LAYER  # (not your own body in the view)
 	up = true
 	place()
 	if not current and not VehicleSight.up_for(body):

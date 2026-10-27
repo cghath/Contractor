@@ -650,10 +650,13 @@ func _test_money_curve() -> void:
 	sim.free()
 	check(float(careful.end) > float(careful.start) + 20000.0, "careful play builds the company ($%.0fk -> $%.0fk in 14 days)" % [float(careful.start) / 1000.0, float(careful.end) / 1000.0])
 	check(float(median.end) > float(median.start) and int(median.broke) == 0, "normal play builds it too ($%.0fk -> $%.0fk in 21 days, %d broke)" % [float(median.start) / 1000.0, float(median.end) / 1000.0, int(median.broke)])
-	# (-$25k, was -$50k: with the sim's campaigns isolated, sloppy loses $36k here since the bounties
-	# and income streams, R2582; whether careless play should bleed more is the economy follow-up's)
-	check(float(sloppy.end) < float(sloppy.start) - 25000.0, "careless play goes negative ($%.0fk -> $%.0fk in 14 days, less loans)" % [float(sloppy.start) / 1000.0, float(sloppy.end) / 1000.0])
-	check(int(won.n) > 0 and float(won.net) < 0.0 and float(won.net) > -45000.0, "an expensive op that's won hurts (net $%.1fk)" % (float(won.net) / 1000.0))
+	# v0.7.1 (the Captain, 2026-10-27: "leave it easier"): with no high command squads granted at
+	# the start, careless play no longer loses money on average; it earns well under careful play,
+	# and a won expensive op earns little.
+	var careful_gain := float(careful.end) - float(careful.start)
+	var sloppy_gain := float(sloppy.end) - float(sloppy.start)
+	check(sloppy_gain < careful_gain * 0.8, "careless play earns less than careful ($%.0fk vs $%.0fk in 14 days, less loans)" % [sloppy_gain / 1000.0, careful_gain / 1000.0])
+	check(int(won.n) > 0 and float(won.net) < 45000.0 and float(won.net) > -45000.0 and float(lost.net) < float(won.net), "an expensive op that's won earns little (net $%.1fk), a failed one less" % (float(won.net) / 1000.0))
 	check(int(lost.n) > 0 and float(lost.cash_after) > 0.0 and float(lost.net) > -100000.0, "one that fails hurts more but isn't ruinous (net $%.1fk, $%.0fk left)" % [float(lost.net) / 1000.0, float(lost.cash_after) / 1000.0])
 
 
@@ -668,6 +671,8 @@ func _test_overhaul_numbers() -> void:
 	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 8000
 		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_price() == 3000 and Prices.respawn_max() == 6000,
 		"a lost helicopter's deductible $15,000, death benefit $8,000, respawns $3,000 +25% each up to $6,000")
+	check(Prices.lost_support_price("transport", 1) == 6000 and Prices.lost_support_price("transport", 2) == 8250 and Prices.lost_support_price("transport", 5) == 15000,
+		"v0.7.1: the deductible by the briefed rating: $6,000 on a 1, $8,250 on a 2, in full on a 5")
 	check(Prices.operations("per_head_day") == 550 and Prices.operations("hc_per_head_day") == 250 and Prices.operations("wounded_care") == 900
 		and Prices.support_price("insertion") == 6000 and Prices.support_price("resupply") == 10000 and Prices.support_price("extraction") == 12000,
 		"field costs $550 a head a day ($250 for the high command squads), treatment $900, a heli insertion $6,000, supports a little cheaper")
@@ -741,6 +746,9 @@ func _test_economy_balance() -> void:
 	check(bad_net < 0, "a disastrous one (2 KIA, a lost helicopter, supports, failed) loses money: $%d" % bad_net)
 	check(be.lines.any(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit")) and int(be.charge) < int(be.total),
 		"the expense lines list the death benefit and the run's own costs")
+	var billed := DebriefCalc.expenses({}, 2, [{"what": "Wages", "amount": 3000, "bill": true}, {"what": "Wages", "amount": 3000, "bill": true}, {"what": "Support call: resupply", "amount": 12000}])
+	check(int(billed.running) == 6000 and int(billed.total) - int(billed.running) == 12000,
+		"v0.7.1: the days' bills are the company's running costs, apart from the job's own expenses")
 	# Daily bills are listed per day and summed per kind in the debrief, and a bought respawn costs money.
 	Contracts.new_full_campaign(7, 500000)
 	Economy.take_run_expenses()

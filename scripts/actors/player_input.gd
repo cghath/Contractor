@@ -14,11 +14,10 @@ const BASE_FOV := 80.0
 ## 2026-10-14: aimed, the red dot still looked big; a little further from the eye).
 const HIP_VIEW := Vector3(0.14, -0.16, -0.38)
 ## First person on the move (docs/animation.md), in step with the drawn legs (CharacterModel's
-## gait): the view rides this share of the hips' bob and sways HEAD_SWAY (m) side to side a
-## cycle at a sprint (less slower; off with the "head_bob" setting, and while aiming); the
+## gait): the view rides the drawn head itself (_place_eye: its bob and sway are the body's;
+## GameSettings.camera_motion scales it, 0 a steady view); the
 ## weapon bobs WEAPON_BOB (m: across, down) at a sprint, and sprinting comes down and across
 ## by SPRINT_VIEW (m) and SPRINT_TILT (radians: muzzle down, turned in, canted).
-const HEAD_BOB := 0.8
 ## Weight in the view (Captain, 2026-10-20: movement "floaty / slidey", the camera feel): a dip
 ## on each footfall (FOOT_DIP m at a sprint, less slower: a quick drop, a slower rise); a dip
 ## on landing, LAND_DIP_PER_MPS for each m/s he came down at (up to LAND_DIP_MAX), sprung back
@@ -59,8 +58,8 @@ var _air_t := 0.0
 var _feel_pitch := 0.0
 var _last_fwd_speed := 0.0
 var _look_lag := Vector2.ZERO
+var _view_lag := Vector2.ZERO  # the lag the body's gun has now (x yaw, y pitch: radians)
 var _sprint_fov_w := 0.0
-const HEAD_SWAY := 0.008
 const WEAPON_BOB := Vector2(0.012, 0.012)
 const SPRINT_VIEW := Vector3(-0.03, -0.05, 0.05)
 const SPRINT_TILT := Vector3(-0.5, 0.35, 0.25)
@@ -101,6 +100,30 @@ const LOCAL_ONLY_LAYER := 1 << 1
 ## camera's mask): a tube optic's scope picture is a separate camera (GunSight PIP) that skips
 ## it, so the gun you're looking past doesn't show up huge and in the way of the magnified glass.
 const VIEW_MODEL_LAYER := 1 << 2
+## Full-body first person (Captain, 2026-10-26: "a true first-person full body ... the camera in
+## the head of the same model everyone sees", Star Citizen): your own body and kit draw on
+## LOCAL_BODY_LAYER, which your camera shows (looking down: legs, boots, the carrier and its
+## pouches, your arms and the gun in them), and your head and what's on it (face, hair, helmet,
+## ear pro) on LOCAL_ONLY_LAYER, which it doesn't (_hide_own_head). The weapon in your hands is
+## the body's own (the view model only shows a thrown grenade, _view_model_shown). Optics' scope
+## pictures and vehicle sights skip your body (GunSight, VehicleSight, VehicleVision).
+const LOCAL_BODY_LAYER := 1 << 3
+## The camera rides the drawn head's eyes (EYE_IN_HEAD, head-local: CharacterModel.EYE's height
+## over its HEAD_PIVOT, 7 cm forward of the neck where the eyes are, so the shoulders and collar
+## don't crowd the view), mixed (Captain: "head, stabilised" and "head, raw", "mixed well") as EYE_RAW_SHARE
+## of the raw head and the rest the head steadied over EYE_STEADY_S (the inner ear), at most
+## EYE_REACH_M off the body's own eye point (Soldier.head, which the shot origin and hits keep
+## using), all times GameSettings.camera_motion. Aiming a gun, the eye goes behind its sight on
+## the body's own gun (ADS_EYE back along the barrel), easing in at ADS_EASE.
+const EYE_IN_HEAD := Vector3(0, 0.19, -0.07)
+const EYE_RAW_SHARE := 0.4
+const EYE_STEADY_S := 0.12
+const EYE_REACH_M := 0.3
+const ADS_EASE := 9.0
+var _eye_slow := Vector3.ZERO  # the head's eye off the body's eye point, steadied (body space, m)
+var _cam_base := Vector3.ZERO  # the camera's place from the steps, landings and the medic's kneel
+var _ads_w := 0.0              # how far the eye has come behind the sight
+var _head_hide_t := 0.0
 ## Throwables in the order Shift+G cycles them (next_throwable): frag and flashbang always,
 ## then each smoke colour you carry, then the breaching charge if you carry one (G with it
 ## picked places it: Charges), then the demolitions you carry (Demolitions: G with a block,
@@ -238,8 +261,11 @@ func _ready() -> void:
 	set_muffled(false)  # a new local player starts hearing normally, whatever came before
 	body.camera.current = true
 	body.camera.cull_mask &= ~LOCAL_ONLY_LAYER
-	body.model.render_layers = LOCAL_ONLY_LAYER
-	body.gear.render_layers = LOCAL_ONLY_LAYER
+	body.camera.cull_mask |= LOCAL_BODY_LAYER
+	body.model.render_layers = LOCAL_BODY_LAYER  # your own body, seen (its head hidden: _hide_own_head)
+	body.gear.render_layers = LOCAL_BODY_LAYER
+	_hide_own_head()
+	RenderingServer.frame_pre_draw.connect(_place_eye)
 	hud = Hud.new()
 	hud.player = body
 	body.add_child(hud)
@@ -590,7 +616,7 @@ func _update_assist_line(delta: float) -> void:
 	assist_line.visible = assist_line.text != ""
 
 
-## The view and weapon move with the steps (HEAD_BOB, WEAPON_BOB), the weapon comes down to
+## The view and weapon move with the steps (footfall dips; the head's own bob: _place_eye; WEAPON_BOB), the weapon comes down to
 ## carry at a sprint (SPRINT_VIEW, SPRINT_TILT); none of it aimed.
 func _update_bob(delta: float) -> void:
 	var walking := body.is_on_floor() and body.vitals.is_up() and not is_instance_valid(body.vehicle) and body.carry_mode == &""
@@ -600,17 +626,78 @@ func _update_bob(delta: float) -> void:
 	_sprint_w = move_toward(_sprint_w, 1.0 if body.movement.is_sprinting and walking else (JOG_CARRY if jogging else 0.0), delta * 5.0)
 	_sprint_fov_w = move_toward(_sprint_fov_w, 1.0 if body.movement.is_sprinting and walking else 0.0, delta * 3.0)
 	var pace := clampf(body.model.gait_speed() / SoldierMovement.SPRINT_SPEED, 0.0, 1.0) * _bob_w
-	var phase := TAU * body.model.gait_phase()
 	_update_landing(minf(delta, 0.05))
 	_update_step_smooth(delta)
-	if GameSettings.head_bob():
+	var motion := GameSettings.camera_motion()
+	if motion > 0.0:
+		# The gait's bob and sway are the drawn head's own now (_place_eye); the footfalls' dip and
+		# the landing stay the view's.
 		var d := fposmod(body.model.gait_phase() * 2.0, 1.0) * FOOT_DIP_SHARP  # a footfall twice a stride
 		var dip := -FOOT_DIP * pace * d * exp(1.0 - d)
-		body.camera.position = Vector3(sin(phase) * HEAD_SWAY * pace, body.model.gait_bob() * HEAD_BOB * _bob_w + dip + _land_y + _step_y, 0.0)
+		body.camera.position = Vector3(0.0, (dip + _land_y) * motion + _step_y, 0.0)
 	else:
 		body.camera.position = Vector3(0.0, _step_y, 0.0)  # (steps are smoothed with head bob off too)
 	_medic_eye = body.head.basis.orthonormalized().inverse() * (body.model.treat_view_offset() * body.model.body_scale())
 	body.camera.position += _medic_eye  # down on a knee at the casualty, bent over the work
+	_cam_base = body.camera.position
+	_head_hide_t -= delta
+	if _head_hide_t <= 0.0:
+		_head_hide_t = 0.25
+		_hide_own_head()
+
+
+## Your own head and all on it out of your own view (LOCAL_ONLY_LAYER): face, hair, the helmet
+## and its kit, ear pro, wound marks; whatever is added there later is caught within a quarter
+## second.
+func _hide_own_head() -> void:
+	if body.model.head == null:
+		return
+	for v: Node in body.model.head.find_children("*", "VisualInstance3D", true, false):
+		(v as VisualInstance3D).layers = LOCAL_ONLY_LAYER
+
+
+## The camera in the drawn head's eyes and, aimed, behind the body's own sight (EYE_*, ADS_*):
+## after the frame's animation (RenderingServer.frame_pre_draw), on top of _cam_base.
+func _place_eye() -> void:
+	if not is_instance_valid(body) or not body.camera.current or body.model.head == null:
+		return
+	var delta := get_process_delta_time()
+	var on_foot := body.vitals.is_up() and not is_instance_valid(body.vehicle) and body.carry_mode == &"" \
+		and body.respawn_state != Soldier.RESPAWN_WAITING
+	var raw := Vector3.ZERO
+	if on_foot:
+		var drawn := body.model.head.global_transform * EYE_IN_HEAD
+		raw = body.global_basis.inverse() * (drawn - body.head.global_position)
+		raw -= body.model.treat_view_offset() * body.model.body_scale()  # (the medic's kneel: _cam_base has it)
+		raw = raw.limit_length(EYE_REACH_M)
+	_eye_slow = _eye_slow.lerp(raw, 1.0 - exp(-delta / EYE_STEADY_S))
+	var eye := _eye_slow.lerp(raw, EYE_RAW_SHARE) * GameSettings.camera_motion()
+	var pos := _cam_base + body.head.basis.orthonormalized().inverse() * eye
+	# Aimed: the eye behind the sight of the gun in the body's own hands.
+	var sight := _sight_eye()
+	_ads_w = move_toward(_ads_w, 1.0 if sight.is_finite() and body.is_aiming and on_foot else 0.0, delta * ADS_EASE)
+	if _ads_w > 0.0 and sight.is_finite():
+		pos = pos.lerp(body.head.global_transform.affine_inverse() * sight, smoothstep(0.0, 1.0, _ads_w))
+	body.camera.position = pos
+
+
+## Where the eye goes aimed (world): ADS_EYE back along the barrel from the sight of the gun in
+## the body's hands; INF with none.
+func _sight_eye() -> Vector3:
+	var held: Node3D = body.model.get(&"_held")
+	if not is_instance_valid(held) or not held.has_meta(&"voxel_model") or not body.model.get(&"_held_weapon"):
+		return Vector3.INF
+	var model := String(held.get_meta(&"voxel_model"))
+	if not (model.begins_with("rifle") or model.begins_with("pistol")):
+		return Vector3.INF
+	var eye := ADS_EYE_PISTOL if model.begins_with("pistol") else ADS_EYE
+	return held.global_transform * (VoxelArt.sight_point(model) - eye)
+
+
+## Whether the view model shows: only what the body doesn't draw in your hands (a thrown grenade);
+## the gun and arms you see are the body's own.
+func _view_model_shown() -> bool:
+	return body.view_model.get_node_or_null(^"HeldGrenade") != null
 
 
 ## The step-up smoothing (STEP_SMOOTH): a sudden small rise on the floor is taken back off the view
@@ -760,7 +847,7 @@ func _physics_process(delta: float) -> void:
 	# whole view is the glass, as before PiP, and the gun goes.
 	body.view_model.visible = body.carry_mode == &"" and not waiting and not treating \
 		and (not is_instance_valid(body.vehicle) or body.vehicle.ffv_seat(body)) \
-		and (GunSight.pip_on(body) or not GunSight.scoped(body))
+		and (GunSight.pip_on(body) or not GunSight.scoped(body)) and _view_model_shown()
 	_settle_recoil(delta)
 	_update_feel_pitch(delta)
 	_update_sway(delta)
@@ -770,6 +857,12 @@ func _physics_process(delta: float) -> void:
 	var side := -1.0 if body.left_handed else 1.0
 	_look_lag = _look_lag.lerp(Vector2.ZERO, 1.0 - exp(-LOOK_LAG_RETURN * delta))
 	var lag := _look_lag * (LOOK_LAG_AIMED if body.is_aiming else 1.0)  # the weapon trails the mouse
+	# Real (Captain, 2026-10-26: inertia changes where rounds go): the body's own gun trails it, and
+	# the round leaves where it points. Aimed, the view rides the gun (_update_sway), so only the
+	# lag the camera doesn't show yet goes on the shot (Soldier.shot_lag).
+	body.model.aim_lag = lag
+	body.shot_lag = lag * (1.0 - smoothstep(0.0, 1.0, _ads_w))
+	_view_lag = lag
 	body.view_model.rotation.x += lag.y
 	body.view_model.rotation.y = sway.x + SPRINT_TILT.y * side * _sprint_w + LOW_READY_TILT.y * side * _low_w + _reload_rot.y * side * _reload_w + lag.x
 	body.view_model.rotation.z = sway.y + SPRINT_TILT.z * side * _sprint_w + _reload_rot.z * side * _reload_w - lag.x * 0.5
@@ -1076,8 +1169,9 @@ func _update_sway(delta: float) -> void:
 	var k := minf(delta * 8.0, 1.0)
 	_cam_turn = _cam_turn.lerp(Vector2(sway.x + _feel_pitch, sway.y), k)
 	var gaze := gaze_turn(body.camera.position - _medic_eye)  # (the steps' moves, not the kneel)
-	body.camera.rotation.x = _cam_turn.x + gaze.x
-	body.camera.rotation.y = _cam_turn.y + gaze.y
+	var ads := smoothstep(0.0, 1.0, _ads_w)  # aimed: the view looks along the gun, lag and all
+	body.camera.rotation.x = _cam_turn.x + gaze.x + _view_lag.y * ads
+	body.camera.rotation.y = _cam_turn.y + gaze.y + _view_lag.x * ads
 
 
 ## The turn (pitch, yaw: radians) that keeps the eye, moved `offset` (m, head space) by the steps,

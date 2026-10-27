@@ -7,11 +7,23 @@ extends CanvasLayer
 ## player). Headless-safe: it's a ColorRect with a shader, nothing else.
 
 ## The tube's picture: a gain on the light (the image intensifier), its tint, and the grain.
-const GAIN := 3.0
+## v0.7.1 (the Captain: "pitch black, I can't see anything with the gen 2s"): the gain is the
+## NVG's own (its stats' "gain", by generation; Nvg.gain_of), far above the old flat 3, with
+## automatic brightness control as real tubes have: the gain backs off as the whole picture
+## brightens (ABC), so a lit street or a flare doesn't white it out. GAIN is the fallback.
+const GAIN := 60.0
+## ABC: the gain is divided by (1 + the picture's mean light x gain x ABC).
+const ABC := 1.5
+## Starlight the tube always finds: the darkest of nights isn't drawn black.
+const FLOOR := 0.035
 const TINT := Color(0.32, 1.0, 0.42)
 const GRAIN := 0.12
 ## Outside the tube: how much of the plain (unaided) view is still seen.
 const OUTSIDE := 0.18
+## v0.7.1 (the Captain: "we don't want NVGs to only illum a fraction of the screen ... puts
+## players at a disadvantage compared to the AI at night"): the picture fills the screen (a
+## radius past the corners, with a soft vignette at the edges) whatever the tube's field of view.
+const FULL_SCREEN := 2.4
 ## Flares bloom the tube (AI bar G-24; bloom()): standing in a flare's light washes the picture
 ## out by BLOOM_LIT x the light, a burning flare in the tube's view by up to BLOOM_SEEN more
 ## (straight at it, fading to the tube's edge and out to GLARE_M off). The shader lifts the
@@ -29,8 +41,14 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 """
 const SEEN_SCREEN := "texture(screen_tex, SCREEN_UV).rgb"
 const SEEN_TEXTURE := "texture(TEXTURE, UV).rgb"
+## The picture's mean light (for ABC): the screen copy's smallest mip; a scope's texture has no
+## mips, so its picture is taken as dark (full gain).
+const MEAN_SCREEN := "dot(textureLod(screen_tex, vec2(0.5), 10.0).rgb, vec3(0.299, 0.587, 0.114))"
+const MEAN_TEXTURE := "0.0"
 const SHADER := """
-uniform float gain = 3.0;
+uniform float gain = 60.0;
+uniform float abc = 1.5;
+uniform float floor_light = 0.035;
 uniform vec3 tint = vec3(0.32, 1.0, 0.42);
 uniform float grain = 0.12;
 uniform float tube = 0.6;     // the tube's radius, as a share of half the screen's height
@@ -45,14 +63,16 @@ float hash(vec2 p) {
 void fragment() {
 	vec3 seen = SEEN;
 	float lum = dot(seen, vec3(0.299, 0.587, 0.114));
-	float lit = 1.0 - exp(-lum * gain * (1.0 + bloom * 3.0));
+	float g = gain / (1.0 + MEAN * gain * abc);
+	float lit = 1.0 - exp(-lum * g * (1.0 + bloom * 3.0));
+	lit = max(lit, floor_light);
 	lit = mix(lit, 1.0, bloom * 0.55);
 	float noise = hash(floor(FRAGCOORD.xy * 0.75) + fract(TIME * 7.0) * 113.0) - 0.5;
 	lit = clamp(lit + noise * grain, 0.0, 1.0);
 	vec2 c = (SCREEN_UV - vec2(0.5)) * vec2(aspect, 1.0) * 2.0;
 	float r = length(c);
 	float inside = 1.0 - smoothstep(tube * 0.92, tube, r);
-	float vignette = 1.0 - 0.35 * smoothstep(tube * 0.4, tube, r);
+	float vignette = 1.0 - 0.35 * smoothstep(min(tube * 0.4, 1.1), min(tube, 2.1), r);
 	vec3 green = tint * lit * vignette;
 	COLOR = vec4(mix(seen * outside, green, inside), 1.0);
 }
@@ -71,7 +91,7 @@ func _init(p_body: Soldier = null) -> void:
 	rect.name = "NvgEffect"
 	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_material = _make_material(SHADER_HEAD + SHADER.replace("SEEN", SEEN_SCREEN))
+	_material = _make_material(SHADER_HEAD + SHADER.replace("SEEN", SEEN_SCREEN).replace("MEAN", MEAN_SCREEN))
 	rect.material = _material
 	add_child(rect)
 	rect.visible = false
@@ -83,6 +103,8 @@ static func _make_material(code: String) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.set_shader_parameter(&"gain", GAIN)
+	material.set_shader_parameter(&"abc", ABC)
+	material.set_shader_parameter(&"floor_light", FLOOR)
 	material.set_shader_parameter(&"tint", Vector3(TINT.r, TINT.g, TINT.b))
 	material.set_shader_parameter(&"grain", GRAIN)
 	material.set_shader_parameter(&"outside", OUTSIDE)
@@ -93,7 +115,7 @@ static func _make_material(code: String) -> ShaderMaterial:
 ## magnified optic's picture-in-picture (GunSight), which the HUD draws above this layer. Same
 ## gain, tint, grain and tube (set_view), with no copy of the screen.
 static func scope_material() -> ShaderMaterial:
-	return _make_material("shader_type canvas_item;\n" + SHADER.replace("SEEN", SEEN_TEXTURE))
+	return _make_material("shader_type canvas_item;\n" + SHADER.replace("SEEN", SEEN_TEXTURE).replace("MEAN", MEAN_TEXTURE))
 
 
 ## Points `material`'s tube at `body`'s NVG, sized against their real camera, over a screen
@@ -101,8 +123,8 @@ static func scope_material() -> ShaderMaterial:
 ## `at_least` (a share of half the screen's height: a scope's eyepiece held up to the goggles
 ## fills the tube, so its whole lens is seen through it).
 static func set_view(material: ShaderMaterial, body: Soldier, size: Vector2, at_least := 0.0) -> void:
-	var cam_fov := body.camera.fov if body.camera else 75.0
-	material.set_shader_parameter(&"tube", maxf(tube_radius(Nvg.fov_of(body), cam_fov), at_least))
+	material.set_shader_parameter(&"tube", maxf(FULL_SCREEN, at_least))
+	material.set_shader_parameter(&"gain", Nvg.gain_of(body, GAIN))
 	material.set_shader_parameter(&"aspect", size.x / size.y if size.y > 0.0 else 16.0 / 9.0)
 
 

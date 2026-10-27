@@ -259,10 +259,12 @@ func _test_pallor_and_signs() -> void:
 	check(c.lips_blue() and "Blue lips" in casualty.vitals.signs(), "SpO2 80%: blue lips, as the sign says")
 	m.blast_lung = true
 	casualty.vitals._after_change(true)
-	var mouth: MultiMeshInstance3D = casualty.model.part_node(Vitals.HEAD).get_node_or_null(^"MouthBlood")
-	check(c.mouth_blood() and mouth != null and mouth.multimesh.visible_instance_count > 6, "coughing blood: blood at the mouth")
+	var head_paint := func() -> int:  # painted into the face (WoundSkin), nothing laid on top
+		var mat := _marks(casualty).skin.material_of(casualty.model.part_node(Vitals.HEAD))
+		return int(mat.get_shader_parameter(&"spot_count")) if mat and _marks(casualty).skin.drawn().has(casualty.model.part_node(Vitals.HEAD)) else 0
+	check(c.mouth_blood() and _marks(casualty)._mouth_spots().size() >= 2 and int(head_paint.call()) >= 2, "coughing blood: blood at the mouth and down the chin, painted on")
 	_reset(casualty)
-	check(not c.lips_blue() and not c.mouth_blood() and (mouth == null or mouth.multimesh.visible_instance_count == 0), "well again: gone")
+	check(not c.lips_blue() and not c.mouth_blood() and int(head_paint.call()) == 0, "well again: gone")
 	m.blood = 0.6
 	m.still_s = WoundModel.HYPOTHERMIA_STILL_S + 10.0
 	casualty.vitals._after_change(true)
@@ -322,6 +324,13 @@ func _test_smear() -> void:
 		await get_tree().process_frame
 	var smeared := marks.smear_size() - before
 	check(smeared >= 25, "3 m dragged: a smear along the way (%d cells)" % smeared)
+	var off := 0
+	for c: Dictionary in marks._smear:
+		var q := PhysicsRayQueryParameters3D.create(Vector3(c.pos) + Vector3.UP * 0.2, Vector3(c.pos) + Vector3.DOWN * 0.2, 1)
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		if hit.is_empty() or absf(float(hit.position.y) - Vector3(c.pos).y) > 0.003:
+			off += 1
+	check(off == 0, "every streak lies on the ground under it (%d off it)" % off)
 	for i in 200:  # 10 m more
 		player.global_position += Vector3(0.05, 0, 0)
 		await get_tree().process_frame
@@ -362,9 +371,13 @@ func _on_part(s: Soldier, kind: StringName, part: StringName) -> void:
 		"%s on the %s (at %s, %d voxels on its bone)" % [kind, part, found[0].at if not found.is_empty() else "none", drawn.multimesh.visible_instance_count if drawn else 0])
 
 
+## The voxels drawn on `part`'s bone for its wounds: the coarse holes and blood, and the dressings.
 func _wound_voxels(s: Soldier, part: StringName) -> int:
-	var drawn: MultiMeshInstance3D = s.model.part_node(part).get_node_or_null(^"WoundMark")
-	return drawn.multimesh.visible_instance_count if drawn else 0
+	var n := 0
+	for node_name: String in ["WoundMark", "WoundDressing"]:
+		var drawn := s.model.part_node(part).get_node_or_null(node_name) as MultiMeshInstance3D
+		n += drawn.multimesh.visible_instance_count if drawn else 0
+	return n
 
 
 ## A wound added straight into the body's model at rest-pose point `at` (published at once).

@@ -117,7 +117,7 @@ static var _intact := {}
 
 ## The undamaged mesh of `p_item` under `p_cover` in `p_camo` (built once, then shared).
 static func intact_mesh(p_item: ItemData, p_cover := Color(0, 0, 0, 0), p_camo := "") -> Mesh:
-	if not bool(p_item.stats.get("camo", false)):
+	if not takes_camo(p_item):
 		p_camo = ""
 	var key := "%s|%s|%s" % [p_item.id, p_cover.to_html() if p_cover.a > 0.0 else "", p_camo]
 	if not _intact.has(key):
@@ -125,6 +125,22 @@ static func intact_mesh(p_item: ItemData, p_cover := Color(0, 0, 0, 0), p_camo :
 		_intact[key] = _get_mesher(p_item, p_cover, p_camo).build_mesh(paint_camo(_get_base(p_item).buffer, p_item, p_camo), [])
 		FrameCost.spent(&"armour", t)
 	return _intact[key]
+
+
+## Whether `p_item` can be shown in a uniform's camo (set_camo): a piece painted so ("camo"), or
+## one under cloth that is (camo_cloth).
+static func takes_camo(p_item: ItemData) -> bool:
+	return bool(p_item.stats.get("camo", false)) or camo_cloth(p_item)
+
+
+## A piece whose camo is cloth, not paint (model realism pass, Captain 2026-10-26: carriers in the
+## uniform's camo): a plate in a carrier's pocket shows the pocket's printed fabric through its
+## window, and a helmet in its side's colours ("faction_color") wears a camo cover; a face guard
+## helmet (LX-3) stays bare. Cloth takes the pattern's own colours, paint a shade darker.
+static func camo_cloth(p_item: ItemData) -> bool:
+	if p_item.slot in [&"plate_front", &"plate_back", &"plate_left", &"plate_right", &"plate", &"side_plate"]:
+		return true
+	return p_item.slot == &"helmet" and bool(p_item.stats.get("faction_color", false)) and not bool(p_item.stats.get("face_guard", false))
 
 
 ## Covers the plate with carrier fabric of `colour` (alpha 0 to show the bare plate).
@@ -155,7 +171,7 @@ func _remesh() -> void:
 ## in `variant`'s camo pattern (VoxelArt's own, so the plates match the uniform's), else
 ## `buffer` itself.
 static func paint_camo(buffer: VoxelBuffer, p_item: ItemData, variant: String) -> VoxelBuffer:
-	if variant == "" or not bool(p_item.stats.get("camo", false)):
+	if variant == "" or not takes_camo(p_item):
 		return buffer
 	var out := VoxelBuffer.new()
 	out.set_channel_depth(VoxelBuffer.CHANNEL_COLOR, VoxelBuffer.DEPTH_8_BIT)
@@ -238,7 +254,7 @@ static func soft_armor_stops(body: Node, part: StringName, threat: StringName, r
 		return false
 	var vitals := Vitals.find_on(body)
 	if vitals:
-		vitals.server_impact(torso_part, round_class, distance, energy_j)
+		vitals.server_impact(torso_part, round_class, distance, energy_j, position if position != Vector3.INF else null)
 	return true
 
 
@@ -333,7 +349,7 @@ func _server_after_stop(hit_position: Vector3, direction: Vector3, weapon: ItemD
 	var vitals: Vitals = Vitals.find_on(body) if body else null
 	if vitals == null:
 		return
-	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance))
+	vitals.server_impact(part_behind(hit_position), round_class, distance, Ballistics.energy_at(weapon, distance), hit_position)
 	if ArmorRules.material(item) == ArmorRules.STEEL and not bool(item.stats.get("spall_coated", false)):
 		ArmorRules.server_spall(body, vitals, hit_position, direction, round_class)
 
@@ -570,6 +586,10 @@ static func _get_base(p_item: ItemData) -> Dictionary:
 	return base
 
 
+## A medium helmet's high cut: how far (voxels) its sides arch up over the ears from the rim.
+const HIGH_CUT := 5.5
+
+
 ## Rounded-box shell (a superellipsoid, which fits a blocky head better than a sphere).
 ## The pivot is the centre of the dome's base, which sits at head-local y = 0.20 m.
 ## "face_guard" (the LX-3 helmet; Captain, 2026-10-16/17: "face protection with metal plates like
@@ -600,10 +620,15 @@ static func _helmet_shape(stats: Dictionary) -> Dictionary:
 			if guard:
 				v = _guard_dome_cell(d, r, v)
 			elif v == INTACT and tier == "medium":
-				if d.z < -r.z + 3.0 and absf(d.x) < 3.0 and d.y > r.y * 0.4 and d.y < r.y * 0.7:
+				# High-cut (model realism pass, Captain 2026-10-26): the sides arch up over the ears
+				# for a headset, HIGH_CUT voxels at the arch's middle.
+				var u := (d.z - r.z * 0.05) / (r.z * 0.42)
+				if absf(d.x) > r.x * 0.55 and absf(u) < 1.0 and d.y < HIGH_CUT * (1.0 - u * u):
+					v = EMPTY
+				elif d.z < -r.z + 3.0 and absf(d.x) < 3.5 and d.y > r.y * 0.35 and d.y < r.y * 0.7:
 					v = ACCENT  # NVG shroud
-				elif absf(d.x) > r.x - 3.0 and d.y > r.y * 0.2 and d.y < r.y * 0.35:
-					v = ACCENT  # side rails
+				elif absf(d.x) > r.x - 3.0 and d.y > HIGH_CUT and d.y < HIGH_CUT + 2.5 and absf(u) < 1.3:
+					v = ACCENT  # side rails, along the cut's top
 		elif guard:
 			v = _guard_ring_cell(d, th)
 		else:
@@ -787,14 +812,15 @@ static func _superellipse(v: Vector3) -> float:
 
 
 static func _get_mesher(p_item: ItemData, p_cover := Color(0, 0, 0, 0), p_camo := "") -> VoxelMesherCubes:
-	if not bool(p_item.stats.get("camo", false)):
+	if not takes_camo(p_item):
 		p_camo = ""
 	var key := String(p_item.id) + (p_cover.to_html(false) if p_cover.a > 0.0 else "") + ("|" + p_camo if p_camo != "" else "")
 	if not _meshers.has(key):
 		var colour := p_cover if p_cover.a > 0.0 else Color(p_item.stats.get("color", "4f5a45"))
 		# Camo paint on armour: the pattern's colours a shade darker than the cloth's (paint on
 		# steel and ceramic, not fabric), its panel seams darker again.
-		var pattern: Array = (VoxelArt.spec(p_camo).camo as Array).map(func(c: Variant) -> Color: return Color(c).darkened(0.12)) if p_camo != "" else []
+		var shade := 0.0 if camo_cloth(p_item) else 0.12
+		var pattern: Array = (VoxelArt.spec(p_camo).camo as Array).map(func(c: Variant) -> Color: return Color(c).darkened(shade)) if p_camo != "" else []
 		if not pattern.is_empty():
 			colour = pattern[0]
 		var palette := VoxelColorPalette.new()

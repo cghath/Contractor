@@ -547,7 +547,7 @@ func _blanket_shell(part: StringName) -> Array:
 	var span := _span(part)
 	var centre: Variant = null
 	var off := 0.02
-	var panel := 0.04
+	var panel := 0.06
 	if part == Vitals.CHEST:
 		span = Vector2(0.84, 1.44)
 		centre = Vector3.ZERO
@@ -560,10 +560,15 @@ func _blanket_shell(part: StringName) -> Array:
 		var probe := part
 		if part == Vitals.CHEST:
 			probe = Vitals.PELVIS if y < 1.0 else (Vitals.ABDOMEN if y < 1.18 else Vitals.CHEST)
-		for r: Array in _ring(probe, y, panel, centre):
-			var n: Vector3 = r[1]
-			var basis := _facing(n).rotated(n, rng.randf_range(-0.12, 0.12))
-			cells.append(_cell(r[0] + n * (off + rng.randf_range(0.0, 0.006)), Vector3(panel + 0.006, panel + 0.006, VOXEL), FOIL[rng.randi() % FOIL.size()], basis))
+		var ring := _ring(probe, y, panel, centre)
+		for i in ring.size():
+			var n: Vector3 = ring[i][1]
+			# One sheet, not tiles (v0.7.1, the Captain: "looks like chain mail"): panels square
+			# to the body, overlapping, the shade running in broad bands with a crease now and then.
+			var shade: Color = FOIL[1] if (i / 6 + int(y / panel / 3.0)) % 2 == 0 else FOIL[3]
+			if rng.randf() < 0.08:
+				shade = FOIL[0]  # a crease
+			cells.append(_cell(ring[i][0] + n * off, Vector3(panel * 1.35, panel * 1.15, VOXEL), shade, _facing(n)))
 		y += panel
 	return cells
 
@@ -618,12 +623,20 @@ func _draw(cells: Dictionary) -> void:
 			inst.layers = model.render_layers
 			bone.add_child(inst, true)
 			_bone_meshes[bone] = inst
+		inst.transform = Transform3D(WoundMarks.fit_of(bone), Vector3.ZERO)  # widened with the build, as the part is
 		var mm := inst.multimesh
 		for i in list.size():
 			var c: Array = list[i]
 			mm.set_instance_transform(i, Transform3D(Basis(c[3]) * Basis.from_scale(c[1]), c[0]))
 			mm.set_instance_color(i, c[2])
 		mm.visible_instance_count = list.size()
+
+
+## Keeps the devices widened with the body's build as it's drawn now (WoundMarks._refit).
+func refit() -> void:
+	for bone: Variant in _bone_meshes:
+		if is_instance_valid(bone) and is_instance_valid(_bone_meshes[bone]):
+			(_bone_meshes[bone] as Node3D).transform = Transform3D(WoundMarks.fit_of(bone), Vector3.ZERO)
 
 
 ## The IV line from the bag's outlet to the site, sagging a little between them (world space,
@@ -636,8 +649,8 @@ func _process(_delta: float) -> void:
 	var to_bone := model.part_node(_line.to_part)
 	if from_bone == null or to_bone == null:
 		return
-	var a: Vector3 = from_bone.global_transform * (Vector3(_line.from) - BodyVolume.pivot_at(_line.from_part, body))
-	var b: Vector3 = to_bone.global_transform * (Vector3(_line.to) - BodyVolume.pivot_at(_line.to_part, body))
+	var a: Vector3 = from_bone.global_transform * (WoundMarks.fit_of(from_bone) * (Vector3(_line.from) - BodyVolume.pivot_at(_line.from_part, body)))
+	var b: Vector3 = to_bone.global_transform * (WoundMarks.fit_of(to_bone) * (Vector3(_line.to) - BodyVolume.pivot_at(_line.to_part, body)))
 	if _line_mesh == null:
 		_line_mesh = multimesh_instance(LINE_SEGMENTS)
 		_line_mesh.name = "IVLine"

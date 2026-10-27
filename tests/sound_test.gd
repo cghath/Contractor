@@ -38,7 +38,9 @@ func _test_streams() -> void:
 	var bad := []
 	for id: String in Sfx.defs:
 		var options := Sfx.streams(StringName(id))
-		if ResourceLoader.exists(Sfx.AUDIO_DIR + id + ".wav") or ResourceLoader.exists(Sfx.AUDIO_DIR + id + ".ogg"):
+		var files := Sfx.recording_of(StringName(id))  # (footsteps share one set of recordings: "recording")
+		if ResourceLoader.exists(Sfx.AUDIO_DIR + files + ".wav") or ResourceLoader.exists(Sfx.AUDIO_DIR + files + ".ogg") \
+				or ResourceLoader.exists(Sfx.AUDIO_DIR + files + "_1.wav") or ResourceLoader.exists(Sfx.AUDIO_DIR + files + "_1.ogg"):
 			if options.is_empty():
 				bad.append(id)  # a recording (audio/sfx/CREDITS.md) that didn't load
 			continue

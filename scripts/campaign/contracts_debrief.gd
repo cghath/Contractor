@@ -135,8 +135,10 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 ## during the run and since: respawns, supports, lost helicopters, weekly bills) summed by
 ## what, plus the field costs per head and day, a death benefit per KIA and treatment per
 ## wounded squadmate (Prices.operations; with the report's "benefits_paid" the death benefits are
-## `run`'s own lines, one per man). Returns {"lines": [{"what", "amount", "charge"}],
-## "total", "charge"}: "charge" marks the lines still to take from the cash.
+## `run`'s own lines, one per man). Returns {"lines": [{"what", "amount", "charge", "running"}],
+## "total", "charge", "running"}: "charge" marks the lines still to take from the cash, "running"
+## the company's own running costs in those days (wages, upkeep, loan installments: the daily
+## bills), which it pays deployed or not (v0.7.1: they're shown apart from the job's net).
 static func expenses(report: Dictionary, days: int, run: Array, use_stocks := false) -> Dictionary:
 	var used := {}
 	var lines: Array = []
@@ -151,7 +153,8 @@ static func expenses(report: Dictionary, days: int, run: Array, use_stocks := fa
 			var label := what
 			if what != "Loan installments" and int(bill_days.get(what, 0)) > 0:
 				label = "%s (%d day%s)" % [what, int(bill_days[what]), "" if int(bill_days[what]) == 1 else "s"]
-			lines.append({"what": label, "amount": int(sums[what]), "charge": false})
+			var running := what == "Loan installments" or int(bill_days.get(what, 0)) > 0
+			lines.append({"what": label, "amount": int(sums[what]), "charge": false, "running": running})
 	var kia := 0
 	var wounded := 0
 	var heads: int = (report.get("extracted", []) as Array).size()
@@ -196,11 +199,14 @@ static func expenses(report: Dictionary, days: int, run: Array, use_stocks := fa
 		lines.append({"what": "Treatment (%d wounded)" % wounded, "amount": wounded * Prices.operations("wounded_care"), "charge": true})
 	var total := 0
 	var charge := 0
+	var running_total := 0
 	for l: Dictionary in lines:
 		total += int(l.amount)
 		if bool(l.charge):
 			charge += int(l.amount)
-	return {"lines": lines, "total": total, "charge": charge, "used": used}
+		if bool(l.get("running", false)):
+			running_total += int(l.amount)
+	return {"lines": lines, "total": total, "charge": charge, "running": running_total, "used": used}
 
 
 static func _add(rep: Dictionary, faction: String, delta: int) -> void:
@@ -267,7 +273,10 @@ static func summary(debrief: Dictionary) -> PackedStringArray:
 	for l: Dictionary in debrief.get("expenses", []):
 		out.append("Expense: %s: -$%s" % [l.what, money(l.amount)])
 	if debrief.has("expenses_total"):
-		out.append("Expenses: -$%s; net after expenses (before loot and salvage): $%s" % [money(debrief.expenses_total), money(debrief.get("net", 0))])
+		var running := int(debrief.get("running_total", 0))
+		out.append("Expenses: -$%s; the job's net after its expenses (before loot and salvage): $%s" % [money(int(debrief.expenses_total) - running), money(debrief.get("net", 0))])
+		if running != 0:
+			out.append("Company running costs these days (wages, upkeep, loans; paid deployed or not): -$%s" % money(running))
 	if int(debrief.get("civilians", 0)) > 0:
 		out.append("Civilian casualties: %d, fines -$%s" % [debrief.civilians, money(debrief.fines)])
 	out.append("Paid now: $%s (contract value $%s)" % [money(totals.get("paid_now", 0)), money(totals.get("contract_value", 0))])

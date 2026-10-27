@@ -267,10 +267,12 @@ static func head(digits: String, female: bool) -> Dictionary:
 		boxes.append(VoxelArt._fb(0, 0, 8.5, 22, 18.5, 15.5, C.EMPTY))
 		boxes.append(VoxelArt._fb(0, 0, 15.5, 22, 11.5, SIZE_F.z, C.EMPTY))
 	# The skull and neck.
-	var neck := 4.6 if female else 5.6
+	# (Model realism pass, 2026-10-26: a fitter neck, a soldier's, 12.4 cm across for him, 10 cm
+	# for her; it was 11.2 and 9.2 and read thin over the kit.)
+	var neck := 5.0 if female else 6.2
 	boxes.append(VoxelArt._loft(11, 13.5, [[0, neck, neck], [9, neck + 0.2, neck]], C.SKIN, 0.75))
 	if not female:
-		boxes.append(VoxelArt._fb(10.5, 3.0, 7.5, 11.5, 5.0, 8.5, C.SKIN))  # Adam's apple
+		boxes.append(VoxelArt._fb(10.5, 3.0, 13.5 - neck - 0.4, 11.5, 5.0, 13.5 - neck + 0.6, C.SKIN))  # Adam's apple
 	boxes.append(VoxelArt._loft(11, 13, _skull_keys(0.0, 0.0, female), C.SKIN, 0.55))
 	boxes.append_array(_face_columns(p))
 	# Ears: a helix, a lobe and the hollow inside, standing out from the skull's sides.
