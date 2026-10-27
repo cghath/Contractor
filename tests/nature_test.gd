@@ -110,8 +110,11 @@ func _test_flee() -> void:
 	Wildlife.forget()
 	Wildlife.zone_id = Nature.zone()
 	var me := player.global_position
-	var deer := Wildlife.add(level, "deer", me + Vector3(60, 0, 0), {"herd": 900})
-	var doe := Wildlife.add(level, "deer", me + Vector3(62, 0, 3), {"herd": 900})
+	# (A spot 60 m out with nobody else near: the settlement's people and the zone's dead are
+	# real threats a deer runs from, and Surv_p3 stood 40 m from the old fixed spot.)
+	var off := _clear_spot(me, 60.0, 50.0, 35.0)
+	var deer := Wildlife.add(level, "deer", me + off, {"herd": 900})
+	var doe := Wildlife.add(level, "deer", me + off + off.normalized().rotated(Vector3.UP, 0.6) * 3.6, {"herd": 900})
 	Wildlife.server_tick(level, 0.25)
 	check(String(deer.state) != "flee", "a deer 60 m off grazes on (%s)" % deer.state)
 	var d0 := (deer.pos as Vector2).distance_to(Vector2(me.x, me.z))
@@ -315,15 +318,22 @@ func _test_infected() -> void:
 	Wildlife.zone_id = Nature.zone()
 	check(InfectedAnimals.speed("feral_dog") > InfectedAnimals.MAN_SPRINT_MPS and InfectedAnimals.heard_m("feral_dog") < float(Survival.STEP_M.walk),
 		"it runs %.1f m/s (a man sprints %.0f), heard %.0f m off (a walking man %.0f)" % [InfectedAnimals.speed("feral_dog"), InfectedAnimals.MAN_SPRINT_MPS, InfectedAnimals.heard_m("feral_dog"), float(Survival.STEP_M.walk)])
+	# (It hunts the nearest of the living, and the survivors walk with him: he steps 80 m out into
+	# the open for this, away from them, and the dog starts 20 m off, inside its sight by night
+	# too (NIGHT_SEE_M 25). R2864: at his side it went for Surv_p3.)
+	var back := player.global_position
+	player.global_position = level.ground_point(player.global_position + _clear_spot(player.global_position, 80.0, 45.0, 0.0)) + Vector3.UP * 0.1
+	player.velocity = Vector3.ZERO
 	var me := Vector2(player.global_position.x, player.global_position.z)
-	var dog := Wildlife.add(level, "feral_dog", player.global_position + Vector3(25, 0, 0), {"infected": true})
+	var dog := Wildlife.add(level, "feral_dog", player.global_position + Vector3(20, 0, 0), {"infected": true})
 	var plain := Wildlife.add(level, "feral_dog", player.global_position + Vector3(140, 0, 0))
 	check(bool(dog.infected) and Wildlife.size_of(dog).y < Wildlife.size_of(plain).y and Wildlife.size_of(dog).y <= 0.5, "low: %.2f m high (a feral dog %.2f)" % [Wildlife.size_of(dog).y, Wildlife.size_of(plain).y])
 	var d0 := (dog.pos as Vector2).distance_to(me)
 	for i in 4:
 		Wildlife.server_tick(level, 0.25)
 	var d1 := (dog.pos as Vector2).distance_to(me)
-	check(String(dog.state) == "hunt" and d0 - d1 > InfectedAnimals.MAN_SPRINT_MPS, "it runs him down: %.0f m closer in a second" % (d0 - d1))
+	check(String(dog.state) == "hunt" and d0 - d1 > InfectedAnimals.MAN_SPRINT_MPS, "it runs him down: %.0f m closer in a second (%s)" % [d0 - d1, dog.state])
+	player.global_position = back
 	check(not InfectedAnimals.can_turn("deer") and not InfectedAnimals.turn(Wildlife.add(level, "deer", player.global_position + Vector3(200, 0, 0))), "a deer doesn't turn")
 	Wildlife.forget()
 	Wildlife.zone_id = Nature.zone()
@@ -436,7 +446,7 @@ func _test_trees() -> void:
 	player.inventory.release_hands()
 	player.inventory.take(&"axe", 1)
 	check(Wildlife.carries(player, "axe"), "a felling axe in hand")
-	var oak := _tree_of("oak")
+	var oak := _tree_of("oak", true)
 	var pine := _tree_of("pine")
 	check(oak >= 0, "an oak in the zone")
 	if oak < 0:
@@ -468,19 +478,46 @@ func _test_trees() -> void:
 	Survival.state()["day"] = 1
 
 
-func _tree_of(sp: String) -> int:
+## The nearest standing tree of `sp` to the settlement; `loud`: one outside the home's quiet
+## (FirstHour.in_quiet: noise there draws nothing, by the first hour's design) when there is one.
+func _tree_of(sp: String, loud := false) -> int:
+	if loud:
+		var open := _tree_of_where(sp, func(at: Vector3) -> bool: return not FirstHour.in_quiet(at))
+		if open >= 0:
+			return open
+	return _tree_of_where(sp, func(_at: Vector3) -> bool: return true)
+
+
+func _tree_of_where(sp: String, ok: Callable) -> int:
 	var best := -1
 	var best_d := INF
 	var home := Settlement.pos()
 	for i in level.scatter.items.size():
 		var item: Dictionary = level.scatter.items[i]
-		if int(item.kind) != ZoneScatter.Kind.TREE or item.has("felled") or Trees.species_of(item) != sp:
+		if int(item.kind) != ZoneScatter.Kind.TREE or item.has("felled") or Trees.species_of(item) != sp or not ok.call(item.pos as Vector3):
 			continue
 		var d := (item.pos as Vector3).distance_to(home)
 		if d < best_d:
 			best_d = d
 			best = i
 	return best
+
+
+## An offset `dist` from `from` (around the compass) with no one living but the player within
+## `living_m` of it and none of the dead within `dead_m`; the first tried if none is clear.
+func _clear_spot(from: Vector3, dist: float, living_m: float, dead_m: float) -> Vector3:
+	var ctx := Wildlife.context(level)
+	for k in 16:
+		var off := Vector3(dist, 0, 0).rotated(Vector3.UP, TAU * k / 16.0)
+		var at := Vector2(from.x + off.x, from.z + off.z)
+		var crowded := false
+		for row: Dictionary in ctx.living:
+			if row.s != player and (row.p as Vector2).distance_to(at) <= living_m:
+				crowded = true
+				break
+		if not crowded and (dead_m <= 0.0 or Wildlife.nearest_dead(ctx, at, dead_m) == Vector2.INF):
+			return off
+	return Vector3(dist, 0, 0)
 
 
 func _fell(index: int) -> float:
