@@ -108,7 +108,7 @@ const DEFAULTS := {
 	# Accessibility (call 142, Accessibility): the colour-blind-safe tells with shapes, the text
 	# scale over the shared theme, the barks' subtitles. (The tension audio's toggle is
 	# FallenAudio's own "tension_on".)
-	"access": {"colour_safe": false, "text_scale": 1.0, "subtitles": true},
+	"access": {"colour_safe": false, "text_scale": 1.0, "subtitles": true, "hints": true},
 	# The mission screens' last choices (claude/mission-ui, "the last choices remembered"): the
 	# board's negotiation terms and the contract picked, the briefing's drop and supports, the
 	# debrief's salvage sort.

@@ -7,6 +7,18 @@
   children along the road to a safe place (a note and dropped things left, the journal, the rumours), the sim's far
   households and camps the same, the settlement's unarmed go to shelter; refugees come home when it's clear, "It's
   clear now"; RUN_VERDICT; see docs/survival_people.md "Holding or fleeing".
+- **Loading magazines fixed on `claude/survival-magload`** (the Captain's base-game bug, shared inventory code): "Load
+  magazines" now shows whenever loose rounds and a magazine they fit are carried (greyed when they're full) instead of
+  hiding; "Load from loose rounds" and "Unload" (condition kept) on a magazine; rounds dropped on a magazine load it
+  instead of moving; R2743 PASS (logistics, survival; ui, wear and smoke passed in R2739 on the same code, whose logistics red was the test picking up the compound's own rounds and a client join timing out under load); see docs/survival_wear.md "Loose rounds into a magazine".
+
+- **The first hour built on `claude/survival-firsthour`** (the Captain's first playtest: no direction, didn't know
+  the controls, "at the spawn there is nothing", the dead too frequent in the wild and pulled by every shot): a real
+  start farmstead at the spawn (farmhouse, barn, well, pens, boxes), the first-day thread (water, a better weapon,
+  board up, day 2's radio survivor; journal + marks + small rewards), control hints once each with the player's own
+  keys (Hints toggle, Field notes page), no horde on night 1 below High and the night pace ramped, the journal's Now
+  and "?" landmarks, sparse open-country dead, quiet radius round the living's places, noise drawing only the near
+  dead; R2751 FLAKY (firsthour, intel, polish PASS; survival's stealth-kill check and fallenpeople's take-over flaked once, passed the reruns); see docs/survival_firsthour.md.
 - **Condition and wear 2 built on `claude/survival-wear2`** (calls 38, 43, 120-123, the left-out list): the AI's guns
   jam and get cleared (a bark), companions ask for and do their own cleaning, raiders' guns come used; loose rounds and
   shells carry condition into magazines and tubes (wet shells dud); suppressors wear, leak sound and break; hot hand-loads

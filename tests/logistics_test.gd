@@ -36,6 +36,7 @@ func _ready() -> void:
 	await _frames(30)
 	_test_loose_rounds()
 	_test_empty_mags_kept()
+	await _test_kit_loading()
 	await _test_loading()
 	_test_molle_rules()
 	await _test_molle_host()
@@ -108,6 +109,178 @@ func _test_empty_mags_kept() -> void:
 	check(inv.count_of(&"rounds_556") == 0 and inv.load_rounds(&"rounds_556", 5) == 0, "nothing left to load")
 	inv.free()
 
+
+
+## Captain, 2026-10-26: "no way to load loose rounds into magazines" in the base game, and rounds
+## dragged onto a magazine moved instead of loading. As he plays: the rifleman's kit, shots fired
+## and a reload through the host, loose rounds picked up off the ground. Found: the chain works
+## when the rounds fit a carried magazine with room; the button and the entry were hidden (not
+## greyed) when the magazines were full or the rounds another calibre (most found rounds are
+## 7.62x39, 5.45 and 9x18 to the kit's 5.56 and 9mm), and a drop on a magazine's tile was a drop
+## on its container.
+func _test_kit_loading() -> void:
+	print("Loading magazines with the role kit (Captain, 2026-10-26)")
+	var inv := player.inventory
+	inv.strip()
+	player.global_position = Vector3(0, 0.1, 18)
+	Roles.apply_kit(inv, Roles.RIFLEMAN)
+	await _frames(2)
+	for i in 10:
+		inv.consume_round(&"primary")
+	player._server_busy_until = 0.0
+	player._server_reload.rpc_id(1, &"primary")
+	await _seconds(3.0)
+	check(_all_mags(inv).has(20), "the reload put the part-used magazine back in the kit (%s)" % [_all_mags(inv)])
+	for pair: Array in [[&"rounds_556", 60], [&"rounds_762x39", 30]]:
+		level.spawn_item(pair[0], pair[1], player.global_position + Vector3(0, 0.5, -0.6), "kitload_" + String(pair[0]))
+		await _frames(5)
+		for n: Node in _ground(pair[0]):
+			if String(n.name) == "kitload_" + String(pair[0]):  # (not the compound's own rounds lying near)
+				player._server_interact.rpc_id(1, n.get_path())
+		await _frames(3)
+	check(inv.count_of(&"rounds_556") == 60 and inv.count_of(&"rounds_762x39") == 30, "loose 5.56 and 7.62x39 picked up off the ground")
+	var screen: InventoryScreen = player._hud.inventory_screen
+	screen._set_view(InventoryScreen.View.LOADOUT)
+	screen.visible = true
+	await _frames(2)
+	check(screen._loose_round_ids() == [&"rounds_556", &"rounds_762x39"] and inv.loadable_rounds(&"rounds_556") == 10 and not inv.has_magazines_for(&"rounds_762x39"),
+		"the screen finds both; 10 of the 5.56 fit, no magazine takes the 7.62x39 (%s)" % [screen._loose_round_ids()])
+	var buttons := _find_buttons(screen, "Load magazines")
+	check(buttons.size() == 1 and not buttons[0].disabled, "one Load magazines button, for the 5.56 (%d)" % buttons.size())
+	check("Load magazines" in _labels_at(screen, &"rounds_556", -1) and not "Load magazines" in _labels_at(screen, &"rounds_762x39", -1),
+		"right-click on the 5.56 offers Load magazines, on the 7.62x39 not")
+	if buttons.size() == 1:
+		buttons[0].pressed.emit()
+	await _wait_for(func() -> bool: return not player.loading_mags, 4.0)
+	check(_all_mags(inv) == [30, 30, 30, 30, 30, 30] and inv.count_of(&"rounds_556") == 50, "the button filled the part-used magazine (%s, %d loose)" % [_all_mags(inv), inv.count_of(&"rounds_556")])
+	screen._redraw()
+	buttons = _find_buttons(screen, "Load magazines")
+	check(buttons.size() == 1 and buttons[0].disabled and buttons[0].tooltip_text == "Your 5.56 magazines are full",
+		"with every magazine full it stays, greyed out: \"%s\"" % (buttons[0].tooltip_text if buttons.size() == 1 else "none"))
+	check("Load magazines" in _labels_at(screen, &"rounds_556", -1), "and the right-click entry stays (the host says they're full)")
+	player._server_load_mags.rpc_id(1, &"rounds_556")
+	await _frames(2)
+	check("magazines are full" in player._hud._message.text, "\"%s\"" % player._hud._message.text)
+
+	# One magazine: "Load from loose rounds" fills that one only.
+	inv.take(&"mag_556", 1, {"rounds": 10})
+	inv.take(&"mag_556", 1, {"rounds": 5})
+	screen._redraw()
+	check(not "Load from loose rounds" in _labels_at(screen, &"mag_556", 30), "a full magazine has no Load from loose rounds")
+	var five := _labels_and_actions(screen, &"mag_556", 5)
+	check("Load from loose rounds" in five.keys() and "Unload" in five.keys(), "a part-used magazine has Load from loose rounds and Unload (%s)" % [five.keys()])
+	if five.has("Load from loose rounds"):
+		var load_one: Callable = five["Load from loose rounds"]
+		load_one.call()
+	await _wait_for(func() -> bool: return not player.loading_mags, 7.0)
+	check(_all_mags(inv).count(10) == 1 and _all_mags(inv).count(5) == 0 and inv.count_of(&"rounds_556") == 25,
+		"it filled the 5-round magazine only; the 10-round one is untouched (%s, %d loose)" % [_all_mags(inv), inv.count_of(&"rounds_556")])
+
+	# Unload: the rounds come back out loose with their condition (survival wear).
+	inv.take(&"mag_556", 1, {"rounds": 12, Wear.KEY: 60.0})
+	await _frames(2)
+	var worn := _labels_and_actions(screen, &"mag_556", 12)
+	if worn.has("Unload"):
+		var unload: Callable = worn["Unload"]
+		unload.call()
+	await _frames(3)
+	var worn_loose := _loose_stacks(inv, &"rounds_556").filter(func(e: Dictionary) -> bool: return is_equal_approx(Wear.cond(e.get("state", {})), 60.0))
+	check(worn_loose.size() == 1 and int(worn_loose[0].count) == 12 and inv.count_of(&"rounds_556") == 37,
+		"Unload: 12 rounds back out loose at their condition 60 (%s)" % [_loose_stacks(inv, &"rounds_556")])
+	check(_all_mags(inv).count(0) == 1 and _all_mags(inv).count(12) == 0, "and the magazine stays, empty (%s)" % [_all_mags(inv)])
+
+	# Drag and drop: loose rounds onto a magazine's tile load it; nothing moves or swaps.
+	inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 1, "state": {"rounds": 2}})
+	var rounds_src := _src_of(inv, &"rounds_556", -1)
+	var mag_src := _src_of(inv, &"mag_556", 2)
+	var drop := screen.drop_action(rounds_src, InventoryScreen._drop_target_of(mag_src))
+	check(rounds_src.container != mag_src.container and drop.is_valid() and drop.get_method() == &"load_magazine_at",
+		"5.56 rounds dropped on the magazine in the pack load it (%s)" % drop.get_method())
+	check(screen.drop_action(mag_src, InventoryScreen._drop_target_of(rounds_src)).get_method() == &"_action", "a magazine dropped on loose rounds is a normal move")
+	var before_vest := _count_in(inv, &"vest", &"mag_556")
+	if drop.is_valid():
+		drop.call()
+	await _wait_for(func() -> bool: return not player.loading_mags, 8.0)
+	check(_mags_in(inv, &"backpack") == [30] and _count_in(inv, &"backpack", &"rounds_556") == 0 and _count_in(inv, &"vest", &"mag_556") == before_vest,
+		"the pack's magazine filled up, the rounds stayed where they were, nothing swapped (pack %s)" % [_mags_in(inv, &"backpack")])
+	inv.insert_entry(&"backpack", {"id": &"mag_556", "count": 1, "state": {"rounds": 3}})
+	var wrong := screen.drop_action(_src_of(inv, &"rounds_762x39", -1), InventoryScreen._drop_target_of(_src_of(inv, &"mag_556", 3)))
+	if wrong.is_valid():
+		wrong.call()
+	await _frames(3)
+	check(not player.loading_mags and _count_in(inv, &"backpack", &"rounds_762x39") == 0 and inv.count_of(&"rounds_762x39") == 30 and _all_mags(inv).has(3),
+		"7.62x39 dropped on a 5.56 magazine: refused, nothing moves (%s)" % [_mags_in(inv, &"backpack")])
+	check("doesn't take" in player._hud._message.text, "and says why: \"%s\"" % player._hud._message.text)
+	var full_drop := screen.drop_action(_src_of(inv, &"rounds_556", -1), InventoryScreen._drop_target_of(_src_of(inv, &"mag_556", 30)))
+	if full_drop.is_valid():
+		full_drop.call()
+	await _frames(3)
+	check(not player.loading_mags and "is full" in player._hud._message.text, "on a full magazine: \"%s\"" % player._hud._message.text)
+	screen.visible = false
+	inv.strip()
+
+
+## Rounds in each carried 5.56 magazine (pouches and all), sorted.
+func _all_mags(inv: Inventory) -> Array:
+	var out := []
+	for c: StringName in inv.search_containers():
+		out.append_array(_mags_in(inv, c))
+	out.sort()
+	return out
+
+
+func _mags_in(inv: Inventory, c: StringName) -> Array:
+	var out := []
+	for e: Dictionary in inv.containers.get(c, []):
+		if e.id == &"mag_556":
+			for k in int(e.count):
+				out.append(int(e.get("state", {}).get("rounds", 30)))
+	out.sort()
+	return out
+
+
+func _loose_stacks(inv: Inventory, id: StringName) -> Array:
+	var out := []
+	for c: StringName in inv.search_containers():
+		for e: Dictionary in inv.containers[c]:
+			if e.id == id:
+				out.append(e)
+	return out
+
+
+## The tile source of the first entry of `id` (a magazine holding `rounds`; -1 for any).
+func _src_of(inv: Inventory, id: StringName, rounds: int) -> Dictionary:
+	for c: StringName in inv.search_containers():
+		var list: Array = inv.containers[c]
+		for i in list.size():
+			if list[i].id == id and (rounds < 0 or int(list[i].get("state", {}).get("rounds", ItemDB.get_item(id).magazine_rounds())) == rounds):
+				return {"kind": "entry", "container": c, "index": i, "id": id}
+	return {}
+
+
+func _labels_and_actions(screen: InventoryScreen, id: StringName, rounds: int) -> Dictionary:
+	var out := {}
+	var src := _src_of(player.inventory, id, rounds)
+	if src.is_empty():
+		return out
+	for a: Array in screen._actions_for(src):
+		out[String(a[0])] = a[1]
+	return out
+
+
+func _labels_at(screen: InventoryScreen, id: StringName, rounds: int) -> Array:
+	return _labels_and_actions(screen, id, rounds).keys()
+
+
+func _find_buttons(node: Node, text: String) -> Array[Button]:
+	var out: Array[Button] = []
+	for child in node.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		if child is Button and (child as Button).text == text:
+			out.append(child as Button)
+		out.append_array(_find_buttons(child, text))
+	return out
 
 func _test_loading() -> void:
 	print("Loading magazines (timed host action)")

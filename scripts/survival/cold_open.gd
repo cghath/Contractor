@@ -49,8 +49,10 @@ static func server_begin(level: SurvivalLevel) -> void:
 	var weather: String = DAY_ONE_WEATHER[rng.randi() % DAY_ONE_WEATHER.size()]
 	var points := level.insertion_points()
 	var home := level.ground_point(points[0]) if not points.is_empty() else level.ground_point(Vector3.ZERO)
+	# The first-day thread (FirstHour): the well, the barn's tools, the planks; its postscript.
+	var ps := FirstHour.server_begin(level, home, gift)
 	# The note on the table, and what they left beside it.
-	var text := "%s\n\n- %s" % [String(author.line), String(author.who)]
+	var text := "%s\n\n- %s%s" % [String(author.line), String(author.who), ("\n\n" + ps) if ps != "" else ""]
 	level.server_spawn_dropped(&"handwritten_note", 1, home + Vector3(1.2, 0.5, 0.6), {"text": text})
 	var k := 0
 	for e: Array in gift:

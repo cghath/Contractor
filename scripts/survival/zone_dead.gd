@@ -116,6 +116,19 @@ func server_horde(at: Vector3, n: int) -> int:
 	return made
 
 
+## Host: a loud noise at `at` heard `radius` off: the crowd heads within it walk at it (only those:
+## a shot draws the dead that are there). Returns how many.
+func server_hear(at: Vector3, radius: float) -> int:
+	var to := Vector2(at.x, at.z)
+	var n := 0
+	for d: Dictionary in dead:
+		if bool(d.alive) and not d.has("to") and (d.pos as Vector2).distance_to(to) <= radius:
+			d.target = to + Vector2(_rng.randf_range(-4.0, 4.0), _rng.randf_range(-4.0, 4.0))
+			d.wait = 0.0
+			n += 1
+	return n
+
+
 ## How many stand in the crowd (alive).
 func count() -> int:
 	return dead.filter(func(d: Dictionary) -> bool: return d.alive).size()
@@ -150,11 +163,13 @@ func _physics_process(delta: float) -> void:
 					d.target = d.to  # (phase D: a siege's wave walks at the settlement: Sieges)
 				elif bool(d.horde) and pull != Vector2.INF and pressure >= Survival.HORDE_DISPERSE_AT:
 					d.target = pull
-				elif pull != Vector2.INF and pressure >= Survival.DRIFT_AT and pos.distance_to(pull) > 20.0:
+				elif pull != Vector2.INF and pressure >= Survival.DRIFT_AT and pos.distance_to(pull) > 20.0 and (Survival.legacy_spawns or pos.distance_to(pull) <= FirstHour.DRIFT_REACH_M):  # (only the near ones: docs/survival_firsthour.md)
 					d.target = pos + (pull - pos).normalized() * minf(DRIFT_M, pos.distance_to(pull))  # drifts toward the noise
 				else:
 					var a := _rng.randf() * TAU
 					d.target = pos + Vector2(cos(a), sin(a)) * _rng.randf_range(2.0, DRIFT_M)
+					if not Survival.legacy_spawns and FirstHour.in_quiet(d.target as Vector2) and not FirstHour.in_quiet(pos):
+						d.target = pos - Vector2(cos(a), sin(a)) * DRIFT_M  # (they keep off where the living hold a place)
 			continue
 		var to: Vector2 = (d.target as Vector2) - pos
 		var speed := (WALK_MPS if bool(d.horde) else DRIFT_MPS) * Seasons.dead_pace_mult()

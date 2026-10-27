@@ -297,7 +297,7 @@ func _do_action(a: Dictionary) -> void:
 				var p: Array = a.get("pos", [0.0, 0.0])
 				Survival._raise_pressure(level, Vector3(float(p[0]), 0.0, float(p[1])), float(a.amount))
 		"horde_enter":
-			if level and String(a.zone) == hosted_zone():
+			if level and String(a.zone) == hosted_zone() and FirstHour.horde_allowed():  # (none on the first night below High)
 				var at := Vector3.ZERO
 				for c: Dictionary in RegionMap.crossings(String(a.zone), level.def):
 					if String(c.to) == String(a.from):

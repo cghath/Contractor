@@ -81,7 +81,14 @@ tests set `Wear.force`). The host's tick (`Wear.server_tick`, from
 - **Loose rounds into a magazine** (`Inventory.load_rounds`, `AmmoCondition.mix_into`): the magazine keeps the mean
   condition by count (and the hand-loaded share, `handload`); a corroded box loads too (it used to be skipped, its
   count still counted) and the mix shows on inspection ("tarnished (70%)"). Loaded, the gun keeps the mean
-  (`ammo_cond`, `ammo_hl`); the magazine coming out keeps it. There's no separate "unload a magazine" action yet.
+  (`ammo_cond`, `ammo_hl`); the magazine coming out keeps it. **Unload** on a magazine (right-click;
+  `Inventory.unload_mag`, `claude/survival-magload`) puts its rounds back out loose with that mean condition and
+  hand-loaded share (`loose_of`: the loose item firing the same round); the magazine stays, empty. A shell holder (a
+  Saiga magazine, a speed loader) doesn't unload (its shell order). The inventory screen, both games: "Load magazines"
+  shows whenever loose rounds and a magazine they fit are carried (greyed, "Your 5.56 magazines are full", when there's
+  no room); "Load from loose rounds" on a magazine and loose rounds dropped on a magazine's tile fill that one
+  magazine (`Soldier._server_load_mag_at`, the same timed job); another calibre or a full magazine is refused and
+  nothing moves.
 - **Shotgun shells** (tag `shell`): found and weathered like any ammo; soaked (wading, lying in the rain) a shell is
   `wet` and fires as at most 30 (a swollen hull: about a 13% dud). Shell by shell or from a speed loader, the tube
   keeps its shells' mean (`AmmoCondition.tube_add`); tube guns now roll duds like the rest (`Soldier._server_fire`).

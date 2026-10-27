@@ -651,6 +651,7 @@ func _make_body_readout() -> void:
 	add_child(SettlementScreen.new())  # survival: the settlement screen (SettlementScreen.TOGGLE_KEY)
 	add_child(JournalScreen.new())  # survival: the journal (JournalScreen.TOGGLE_KEY)
 	add_child(TradeScreen.new())  # survival: the barter screen (the talk menu's Trade)
+	add_child(FieldHints.new())  # survival: a control hint, once each (FieldHints, docs/survival_firsthour.md)
 
 
 ## The small signs' text now (tests).

@@ -261,7 +261,10 @@ func _host_zone(main: Node, zone_id: String) -> bool:
 	running = true
 	state()["zone"] = zone_id
 	GameState.zone_id = zone_save(zone_id)
-	main.host_zone(def.duplicate(true), "survival")
+	var hosted := def.duplicate(true)
+	if zone_id == String(state().get("start_zone", "")):
+		hosted = FirstHour.farmstead(hosted, int(state().get("seed", 0)))  # the start: a real farmstead (docs/survival_firsthour.md)
+	main.host_zone(hosted, "survival")
 	return true
 
 
@@ -275,6 +278,7 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	running = true
 	_apply_sky(level)
 	_seed_crowd(level)
+	FirstHour.server_level_ready(level)  # the start farmstead's boxes (docs/survival_firsthour.md)
 	ColdOpen.server_begin(level)  # a new world's first hour (once)
 	Settlement.install(level)  # the settlement's work and council (Settlement, survival_building.md 5-7)
 	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
@@ -409,6 +413,7 @@ func _process(delta: float) -> void:
 		_tick = 0.0
 		server_tick_survivors(level, dt)
 		ColdOpen.server_tick(level as SurvivalLevel)
+		FirstHour.server_tick(level as SurvivalLevel)  # the first-day thread, landmarks visited, hints (docs/survival_firsthour.md)
 	_pop += delta
 	if _pop >= POP_TICK_S:
 		_pop = 0.0
@@ -600,6 +605,20 @@ func server_survivor_joined(s: Soldier) -> void:
 ## Proposed: how many of the dead are about a survivor (within SPAWN_MAX_M) by where he is: the
 ## open country, or a site of a ZoneModule type (by its base type, ZoneModules.base).
 const DEAD_NEAR := {"": 2, "village": 8, "town": 12, "city": 12, "compound": 6, "outpost": 4, "checkpoint": 4, "hq": 6, "qrf_base": 6, "farm": 4}
+## Proposed (the first hour, docs/survival_firsthour.md; the Captain: "the zombies come too
+## frequently out in the wild"): the open country keeps OPEN_DEAD about a survivor (OPEN_DEAD_LATE
+## from FirstHour.OPEN_LATE_DAY or a far zone), the start farmstead HOME_DEAD; a new one comes
+## about a moving survivor at most every OPEN_GAP_S simulated seconds in the open (shortened by
+## FirstHour.open_pace: the days, the zone's tier, the "dead" option), SITE_GAP_S at a site (towns
+## stay as they were). legacy_spawns: tests measure the numbers before.
+const OPEN_DEAD := 1
+const OPEN_DEAD_LATE := 2
+const HOME_DEAD := 1
+const OPEN_GAP_S := 150.0
+const SITE_GAP_S := 2.0
+var legacy_spawns := false
+var _pop_clock := 0.0  # simulated seconds of _populate (POP_TICK_S a call)
+var _last_spawn := {}  # survivor instance id -> _pop_clock when the last came about him
 const LIVE_CAP := 40
 const SPAWN_MIN_M := 45.0
 const SPAWN_MAX_M := 75.0
@@ -622,6 +641,13 @@ func dead_near(level: ZoneLevel, pos: Vector3) -> int:
 	var m := level.module_at(pos)
 	var base := ZoneModules.base(String(m.type)) if m else ""
 	var n := float(DEAD_NEAR.get(base, DEAD_NEAR.get("", 2))) * option_mult("dead") * WorldSim.dead_mult()
+	if not legacy_spawns:
+		if FirstHour.in_quiet(pos):
+			return 0  # (where the living hold a place: the Captain, "nearly non existent near AI farms")
+		if m and m.module_id == FirstHour.HOME_ID:
+			n = float(HOME_DEAD) * option_mult("dead")
+		elif base == "":
+			n = float(OPEN_DEAD_LATE if FirstHour.open_late() else OPEN_DEAD) * option_mult("dead") * WorldSim.dead_mult()
 	n *= DeadDecay.count_mult() * DeadNests.outside_mult(m)  # (the dead over time: more as the months go; by day a nest's sit inside)
 	return roundi(n * (1.0 - thinned(pos)))
 
@@ -693,17 +719,58 @@ func _populate(level: SurvivalLevel) -> void:
 				crowd.server_add(z.global_position, String(z.get_meta(&"zombie", "walker")), false, DeadDecay.carry(z))  # back into the far tier where it stood
 			z.queue_free()
 			live.erase(z)
+	_pop_clock += POP_TICK_S
 	if live.size() >= LIVE_CAP:
 		return
 	for p: Soldier in players:
 		var near := live.filter(func(z: Soldier) -> bool: return z.global_position.distance_to(p.global_position) <= SPAWN_MAX_M).size()
 		if near >= dead_near(level, p.global_position) or live.size() >= LIVE_CAP:
 			continue
+		if not legacy_spawns and _pop_clock - float(_last_spawn.get(p.get_instance_id(), -INF)) < spawn_gap(level, p.global_position):
+			continue  # (spacing: the open country's dead come seldom)
+		if not legacy_spawns and _area_full(level, p.global_position):
+			continue  # (an area's cap an hour: no stream)
 		var at: Variant = _spawn_spot(level, p, players)
 		if at is Vector3:
 			var z := server_spawn_zombie(level, at, roll_kind(level, at))
 			if z:
 				live.append(z)
+				_last_spawn[p.get_instance_id()] = _pop_clock
+				_area_count(p.global_position)
+
+
+var _area := {}  # cell key -> {"h": world hour index, "n": new dead this hour}
+
+
+## Whether the CELL_M area at `pos` has had its cap of new dead this world hour (FirstHour's
+## AREA_CAP_OPEN in the open; twice dead_near at a site).
+func _area_full(level: ZoneLevel, pos: Vector3) -> bool:
+	var rec: Dictionary = _area.get(_cell_key(pos), {})
+	var h := day() * 24 + floori(hour())
+	if rec.is_empty() or int(rec.get("h", -1)) != h:
+		return false
+	var m := level.module_at(pos) if level else null
+	var cap := FirstHour.AREA_CAP_OPEN if m == null else maxi(2, dead_near(level, pos) * 2)
+	return int(rec.get("n", 0)) >= cap
+
+
+func _area_count(pos: Vector3) -> void:
+	var key := _cell_key(pos)
+	var h := day() * 24 + floori(hour())
+	var rec: Dictionary = _area.get(key, {})
+	if int(rec.get("h", -1)) != h:
+		rec = {"h": h, "n": 0}
+	rec["n"] = int(rec.get("n", 0)) + 1
+	_area[key] = rec
+
+
+## Simulated seconds before the next of the dead may come about a survivor at `pos`: SITE_GAP_S at
+## a site, OPEN_GAP_S over FirstHour.open_pace in the open country.
+func spawn_gap(level: ZoneLevel, pos: Vector3) -> float:
+	var m := level.module_at(pos) if level else null
+	if m != null:
+		return SITE_GAP_S
+	return OPEN_GAP_S / maxf(FirstHour.open_pace(), 0.1)
 
 
 ## A navmesh spot SPAWN_MIN_M to SPAWN_MAX_M from `p`, at least SPAWN_MIN_M from every survivor
@@ -761,7 +828,11 @@ func server_noise(source: Node, pos: Vector3, radius: float, loud := ZombieAI.HE
 		return
 	if source is Soldier and not (source as Soldier).is_ai():
 		(source as Soldier).server_noise_made(radius)
-	_raise_pressure(level, pos, loud * clampf(radius / ZombieAI.SHOT_HEARD_M, 0.1, 1.0) * PRESSURE_PER_SHOT)
+	var share := 1.0 if legacy_spawns else FirstHour.noise_share(level as ZoneLevel, pos)  # (the population it can draw on: docs/survival_firsthour.md)
+	_raise_pressure(level, pos, loud * clampf(radius / ZombieAI.SHOT_HEARD_M, 0.1, 1.0) * PRESSURE_PER_SHOT * share)
+	var crowd := ZoneDead.of(level)
+	if crowd and not legacy_spawns and loud >= ZombieAI.HEAR_RUN:
+		crowd.server_hear(pos, radius + FirstHour.HEARD_MARGIN_M)  # the crowd that heard it comes, and only them
 	Mounts.on_noise(level, source, pos, radius, loud)  # a shot spooks the horses near it
 	Wildlife.server_noise(level, pos, radius, loud)  # and the wild animals run from it (docs/survival_nature.md)
 	for z: Soldier in zombies(level):
@@ -867,9 +938,9 @@ func _pressure_tick(level: SurvivalLevel, _delta: float) -> void:
 	if crowd == null:
 		return
 	var v := pressure(level)
-	if v >= HORDE_AT and Soldier._now() - _horde_at >= HORDE_COOLDOWN_S:
+	if v >= HORDE_AT and FirstHour.horde_allowed() and Soldier._now() - _horde_at >= HORDE_COOLDOWN_S:  # (none on the first night below High)
 		var point: Variant = pressure_point(level)
-		if point is Vector3:
+		if point is Vector3 and (legacy_spawns or FirstHour.horde_source_near(level, point)):  # (towns and nests feed hordes, not a field)
 			_horde_at = Soldier._now()
 			var n := randi_range(ZoneDead.HORDE_N.x, ZoneDead.HORDE_N.y)
 			var made := crowd.server_horde(point, n)
@@ -892,6 +963,8 @@ func _seed_crowd(level: SurvivalLevel) -> void:
 			var a := rng.randf() * TAU
 			var r := rng.randf_range(20.0, 60.0)
 			var at := m.global_position + Vector3(cos(a), 0.0, sin(a)) * r
+			if not legacy_spawns and FirstHour.in_quiet(at):
+				continue
 			crowd.server_add(level.ground_point(at), roll_kind(level, at, rng))
 
 
@@ -1081,6 +1154,22 @@ func _server_fieldwork(what: String, arg: String, at: Vector3) -> void:
 func _client_read_body(path: NodePath, body: Dictionary) -> void:
 	read_bodies[path] = body
 	body_changed.emit()
+
+
+## Host: hint `id` (FieldHints) for `s`'s owner, who shows it once per profile.
+func server_hint(s: Soldier, id: String) -> void:
+	if s.is_ai() or not s.is_inside_tree():
+		return
+	var peer := s.owner_peer()
+	if peer == multiplayer.get_unique_id():
+		FieldHints.client_show(id)
+	elif peer in multiplayer.get_peers():
+		_client_hint.rpc_id(peer, id)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _client_hint(id: String) -> void:
+	FieldHints.client_show(id)
 
 
 ## Host: a line for `s`'s owner (Soldier._client_message: the flash).

@@ -110,6 +110,8 @@ static func classify(me: Soldier, at: Vector3) -> Dictionary:
 		var g := livestock_near(lvl, at, TREE_PICK_M)
 		if g >= 0:
 			return {"kind": "livestock", "index": g, "sp": "goat", "name": "goat"}
+	if d <= WATER_LOOK_M and FirstHour.source_at(lvl, at) != "":  # the farm's well, a well or a trough (FirstHour)
+		return {"kind": "water", "body": "well", "frozen": Seasons.water_frozen()}
 	if d <= WATER_LOOK_M:
 		var body := water_at(lvl, at)
 		if body != "":
@@ -215,7 +217,10 @@ static func options(ctx: Dictionary) -> Array[Dictionary]:
 				out.append(_o("cut_ice", "Cut ice"))
 				out.append(_o("fish", "Fish through the ice"))
 			else:
-				out.append(_o("fish", "Fish"))
+				out.append(_o("drink", "Drink"))
+				out.append(_o("fill", "Fill a bottle"))
+				if String(ctx.get("body", "")) != "well":
+					out.append(_o("fish", "Fish"))
 		"wait":  # the ground's own (ContextResolver, call 136): waiting at a safe spot
 			for mode: String in SurvivalSleep.WAIT_MODES:
 				out.append(_o("wait", String(SurvivalSleep.WAIT_LABELS[mode]), mode))
@@ -256,6 +261,8 @@ static func server_request(s: Soldier, what: String, arg: String, at: Vector3) -
 			return server_cast(s)
 		"cut_ice":
 			return server_cut_ice(s)
+		"drink", "fill":
+			return server_water(s, what, at)
 		"set_snare":
 			return Wildlife.server_set_snare(s)
 		"wait":
@@ -273,6 +280,36 @@ static func server_request(s: Soldier, what: String, arg: String, at: Vector3) -
 				return "Get closer to the goat"
 			return server_milk(s, zoo.animals[i])
 	return "?"
+
+
+## Host: `s` drinks a litre at the water `at` (raw: its quality's sickness roll) or fills a bottle
+## (WaterWorks.server_fill); either does the first-day thread's water (FirstHour). "" or why not.
+static func server_water(s: Soldier, what: String, at: Vector3) -> String:
+	var lvl := CompoundLevel.current(s)
+	var spot := at if at.is_finite() else s.global_position
+	if Vector2(spot.x - s.global_position.x, spot.z - s.global_position.z).length() > WATER_LOOK_M:
+		return "Get closer to the water"
+	var source := FirstHour.source_at(lvl, spot)
+	if source == "":
+		source = water_at(lvl, spot)
+	if source == "":
+		return "No water there"
+	if source == "coast":
+		return "Sea water: it would make you sicker"
+	var q := FirstHour.quality(source, spot)
+	if q == "":
+		return "Frozen solid: cut the ice or melt snow" if source in WaterWorks.FREEZES else "There's no water there now"
+	var why := ""
+	if what == "fill":
+		why = WaterWorks.server_fill(s, source)
+	else:
+		var item := ItemDB.get_item(&"dirty_water_bottle")
+		if item == null or not Survival.server_eat(s, item, {"quality": q, "source": source}, &"water", 1.0):
+			why = "Can't drink now"
+	if why == "":
+		Survival._tell(s, "You fill a bottle (%s water)" % q if what == "fill" else "You drink (%s water)" % q)
+		FirstHour.server_on_water(s)
+	return why
 
 
 ## Why the animal `rec` (a ZoneAnimals goat, a tied goat's piece record) can't be milked now, or "".

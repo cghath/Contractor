@@ -502,10 +502,15 @@ func _redraw() -> void:
 		_view_buttons[v].set_pressed_no_signal(v == view)
 	_view_buttons[View.MOLLE].disabled = inv.attach_points().is_empty()  # a carrier's or a pack's points
 	_clear(_quick_box)
+	# Shown whenever loose rounds and a magazine they fit are both carried, greyed out while the
+	# magazines are full (Captain, 2026-10-26: no way to load them was found when it was hidden).
 	for id: StringName in _loose_round_ids():
-		if inv.loadable_rounds(id) > 0:
+		if inv.has_magazines_for(id):
+			var calibre := Inventory.calibre_of(ItemDB.get_item(id))
 			var b := _button("Load magazines", load_magazines.bind(id))
-			b.tooltip_text = "Load the %s magazines you carry from your loose %s" % [Inventory.calibre_of(ItemDB.get_item(id)), ItemDB.get_item(id).name]
+			b.disabled = inv.loadable_rounds(id) <= 0
+			b.tooltip_text = ("Your %s magazines are full" % calibre) if b.disabled \
+				else "Load the %s magazines you carry from your loose %s" % [calibre, ItemDB.get_item(id).name]
 			_quick_box.add_child(b)
 	_add_restock_button()
 	_redraw_containers()
@@ -788,8 +793,16 @@ func _actions_for(src: Dictionary) -> Array:
 				out.append(["Use", use])
 			if Consumables.is_consumable(item):  # eat, drink, take or a battery in (items expansion); the double-click one
 				out.insert(0, [Consumables.verb(item), _action.bind("consume", c, i, &"", &"")])
-			if Inventory.is_loose_rounds(item) and inv.loadable_rounds(item.id) > 0:
-				out.append(["Load magazines", load_magazines.bind(item.id)])
+			if Inventory.is_loose_rounds(item) and inv.has_magazines_for(item.id):
+				out.append(["Load magazines", load_magazines.bind(item.id)])  # (full ones: the host says so)
+			if _is_magazine(item):
+				var full := item.magazine_rounds()
+				var in_mag := int(list[i].get("state", {}).get("rounds", full))
+				var loose_id := inv.loose_for(item)
+				if in_mag < full and loose_id != &"":
+					out.append(["Load from loose rounds", load_magazine_at.bind(c, i, loose_id)])
+				if in_mag > 0 and not Shotguns.is_holder(item):
+					out.append(["Unload", _action.bind("unload_mag", c, i, &"", &"")])
 			if Inventory.is_pack(item):
 				var rolled: bool = list[i].get("state", {}).get("rolled", false)
 				out.append(["Unroll" if rolled else "Roll up", _action.bind("unroll_entry" if rolled else "roll_entry", c, i, &"", &"")])
@@ -873,6 +886,17 @@ func load_magazines(rounds_id: StringName) -> void:
 	player._server_load_mags.rpc_id(1, rounds_id)
 
 
+## "Load from loose rounds" on a magazine, or loose rounds dropped on it: the host fills that one
+## magazine from `rounds_id` (Soldier._server_load_mag_at), or says why not.
+func load_magazine_at(container: StringName, index: int, rounds_id: StringName) -> void:
+	player._server_load_mag_at.rpc_id(1, container, index, rounds_id)
+
+
+## A magazine, belt, clip or speed loader (loose rounds go in it), not loose rounds or a shell.
+static func _is_magazine(item: ItemData) -> bool:
+	return item != null and item.type == "ammo" and item.magazine_rounds() > 0 and not Inventory.is_loose_rounds(item)
+
+
 # --- Drag and drop --------------------------------------------------------------------------
 
 func _get_drag(_at: Vector2, src: Dictionary, tile: Control) -> Variant:
@@ -911,6 +935,11 @@ func drop_action(src: Dictionary, dst: Dictionary) -> Callable:
 			var i: int = src.index
 			match kind:
 				"container":
+					# Loose rounds dropped on a magazine's tile load that magazine (the host refuses
+					# another calibre or a full one, and nothing moves); never a move or a swap.
+					var onto: ItemData = ItemDB.get_item(StringName(dst.get("id", &""))) if StringName(dst.get("id", &"")) != &"" else null
+					if Inventory.is_loose_rounds(item) and _is_magazine(onto):
+						return load_magazine_at.bind(dst.container, int(dst.index), id)
 					if dst.container != c:
 						return _action.bind("move_entry", c, i, &"", dst.container)
 				"slot", "doll":
@@ -1035,7 +1064,7 @@ static func _drop_target_of(src: Dictionary) -> Dictionary:
 	match String(src.kind):
 		"slot": return {"kind": "slot", "slot": src.slot}
 		"point": return {"kind": "point", "point": src.point}
-		"entry": return {"kind": "container", "container": src.container}
+		"entry": return {"kind": "container", "container": src.container, "index": src.index, "id": src.id}  # (the tile's own entry: rounds dropped on a magazine)
 		"nearby": return {"kind": "nearby"}
 	return {"kind": "none"}
 
