@@ -273,6 +273,13 @@ func _test_body_dynamics() -> void:
 	step.add_child(shape)
 	add_child(step)
 	step.global_position = Vector3(left.x - 0.03, holder.global_position.y + 0.075, left.z)
+	var floor_body := StaticBody3D.new()  # the floor he stands on (the step's measured from it)
+	var floor_shape := CollisionShape3D.new()
+	floor_shape.shape = BoxShape3D.new()
+	(floor_shape.shape as BoxShape3D).size = Vector3(3, 0.1, 3)
+	floor_body.add_child(floor_shape)
+	add_child(floor_body)
+	floor_body.global_position = holder.global_position - Vector3(0, 0.05, 0)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	for i in 40:
@@ -281,6 +288,7 @@ func _test_body_dynamics() -> void:
 	var off := model.foot_position(false).y - base
 	check(on > 0.1 and on < 0.2 and absf(off) < 0.03, "on a step the foot stands on it (%.2f m up), the other on the floor (%.2f m)" % [on, off])
 	step.queue_free()
+	floor_body.queue_free()
 	# Vaulting (a mantle): the knees come up.
 	var knee_before := model.foot_position(false).y
 	model.climbing = true

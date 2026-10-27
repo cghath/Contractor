@@ -137,6 +137,10 @@ const FOOT_IK_EASE := 18.0
 const VAULT_THIGH := 1.0
 const VAULT_KNEE := 1.6
 const VAULT_LEAN := 0.35
+## Faster than this (m/s up or down, m/s^2 across) is a body placed, not moving: no landing, no lean.
+const PLACED_MPS := 20.0
+const FALL_MIN_S := 0.15
+const PLACED_ACCEL := 30.0
 var _lean := Vector2.ZERO      # the spring's pitch (forward) and roll (to the right), radians
 var _lean_v := Vector2.ZERO
 var _move_prev := Vector3.ZERO
@@ -1861,8 +1865,13 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 		return
 	var y := global_position.y
 	_vy = (y - _last_y) / delta if _last_y != INF else 0.0
+	if absf(_vy) > PLACED_MPS:
+		_vy = 0.0  # placed (a spawn, a teleport, a seat): not a fall
+	# A landing ends a real fall (FALL_MIN_S of coming down), not a body put down a little lower
+	# in one frame (a spawn, a teleport: one frame of a fast "fall").
 	var fall := _vy_prev
-	var landed := fall < -2.5 and _vy > -0.6 and not quiet
+	var landed := fall < -2.5 and _vy > -0.6 and _fall_t >= FALL_MIN_S and not quiet
+	_fall_t = _fall_t + delta if _vy < -1.0 else 0.0
 	_vy_prev = _vy
 	_last_y = y
 	var yaw := global_rotation.y
@@ -1871,6 +1880,8 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 	# Inertia: lean into the change of pace, on a spring.
 	var accel := (_move - _move_prev) / delta
 	_move_prev = _move
+	if accel.length() > PLACED_ACCEL:
+		accel = Vector3.ZERO  # placed or stopped dead by a teleport: no lean
 	var want := Vector2.ZERO
 	if not quiet:
 		want = Vector2(clampf(-accel.z * ACCEL_LEAN, -LEAN_MAX, LEAN_MAX), clampf(accel.x * SIDE_LEAN, -LEAN_MAX * 0.5, LEAN_MAX * 0.5))
@@ -1893,13 +1904,13 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 	# Feet on the ground under them, the hips down to the lower one.
 	var ground: Array[float] = [0.0, 0.0]
 	if _foot_ik_on():
-		for i in 2:
-			var foot := foot_position(i == 0)
-			var q := PhysicsRayQueryParameters3D.create(Vector3(foot.x, y + 0.6, foot.z), Vector3(foot.x, y - 0.6, foot.z), SoldierMovement.WORLD_MASK)
-			if get_parent() is CollisionObject3D:
-				q.exclude = [(get_parent() as CollisionObject3D).get_rid()]
-			var hit := get_world_3d().direct_space_state.intersect_ray(q)
-			ground[i] = clampf((hit.position as Vector3).y - y, -FOOT_IK_REACH, FOOT_IK_REACH) / body_scale() if not hit.is_empty() else 0.0
+		# Each foot's ground against the ground under the body's own middle, where it stands (not
+		# its origin, which can ride a few cm over the floor on its capsule): flat ground, none.
+		var under := _ground_at(global_position, y)
+		if is_finite(under):
+			for i in 2:
+				var at := _ground_at(foot_position(i == 0), y)
+				ground[i] = clampf(at - under, -FOOT_IK_REACH, FOOT_IK_REACH) / body_scale() if is_finite(at) else 0.0
 	for i in 2:
 		_foot_ground[i] = lerpf(_foot_ground[i], ground[i], 1.0 - exp(-FOOT_IK_EASE * delta))
 	var hips := minf(minf(_foot_ground[0], _foot_ground[1]), 0.0) + _sink
@@ -1937,6 +1948,16 @@ func _settle_legs(shift: Vector3, lift: Array) -> void:
 		shin.transform = _knee(a.y)
 
 
+## The ground's height (world) under `p`, looked for from 0.6 m over to 0.6 m under height `y`,
+## the body's own capsule skipped; INF with none.
+func _ground_at(p: Vector3, y: float) -> float:
+	var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, y + 0.6, p.z), Vector3(p.x, y - 0.6, p.z), SoldierMovement.WORLD_MASK)
+	if get_parent() is CollisionObject3D:
+		q.exclude = [(get_parent() as CollisionObject3D).get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return (hit.position as Vector3).y if not hit.is_empty() else INF
+
+
 ## Whether this body's feet look for the ground (FOOT_IK_*): standing or walking, inside the
 ## world, near a camera.
 func _foot_ik_on() -> bool:
@@ -1949,6 +1970,7 @@ func _foot_ik_on() -> bool:
 
 
 var _vy_prev := 0.0
+var _fall_t := 0.0  # how long it has been coming down (s)
 ## Feet look for the ground whatever the distance to a camera (tests).
 var foot_ik_always := false
 

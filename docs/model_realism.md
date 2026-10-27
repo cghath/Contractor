@@ -251,3 +251,15 @@ FLAC only and is gravel under snow, so it isn't used. Both packs sit in
 - Body dynamics:
   - R2808, R2812: animations passed with the new dynamics and foot IK checks.
   - R2813: animations, movement, attachments, gameplay, squad, perfcases and smoke passed.
+  - CI on `c65b5aa3` then failed exo ("into the thigh") and interaction ("shot through the hips").
+    Two causes:
+    - The foot IK measured ground against the body's origin, which rides a few cm over the floor,
+      so the hips dropped on flat ground. It now measures against the ground under the body's
+      middle.
+    - A body put down a little lower in one frame (a test's placement, a spawn) read as a fall
+      and a landing, sinking the hips while a round passed. A landing now needs 0.15 s of real
+      falling, and teleport-sized jumps are ignored.
+    The drawn body moves the plates, pads and arm hitboxes with it, which is why both showed up
+    in hit tests. Fixed and checked in R2835 (interaction, exo, animations passed). CI's roles,
+    vehiclehud, optypes and casualty failures also fail on dev or pass locally (R2815, R2817),
+    so they are flakes.
