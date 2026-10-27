@@ -149,6 +149,28 @@ and tier. The body parts keep their mesh count; their rasters grew by the collar
    carries its rocket's ½mv², so it tears what it hits past `Vitals.LETHAL_J`. `gore` checks both:
    the stump on the collar with no face left, and a PG-7V 0.8 m from a living man.
 
+## Launchers in the hands match the ground (Captain, 2026-10-26)
+
+Before: a launcher on the shoulder, slung, on a pack or in first person was a placeholder (a
+cylinder, a grip box and a sight box) while on the ground it was ItemArt's voxel model.
+
+After: `LauncherRig.make_model` draws the same ItemArt voxel model (`ItemArt.own_mesh`), turned
+upright where it lies on its side on the ground (RPG-7, MAAWS, SMAW: grips down) and centred on
+the tube's middle, everywhere: shouldered, slung, on a pack and in first person. `LauncherRig.HOLDS`
+gives each launcher, in its model's own centimetres, where it rests on the shoulder and where the
+firing and support hands go, so the IK hands close on the real grips (RPG-7: the pistol grip and
+the tube ahead of it; AT4: the trigger and under the tube; MAAWS, SMAW: their two grips; NLAW: the
+folded grip; Javelin: the CLU's handles). A launcher with no entry keeps the placeholder. Render
+cases `rpg_m`, `at4_f` and `maaws_m` shoulder one (S2768, S2772: hand error under 1 cm).
+
 ## Tests
 
-Listed in the commit messages and below as they run.
+- R2753: smoke, wounds, gore, animations, devices and gameplay passed; armor failed 2 checks
+  (radio PTT named apart from its antenna). Fixed.
+- R2756: gore, armor, antiarmor and smoke passed, including the new gore checks (the stump on the
+  collar 0.00 m off with no face left; a PG-7V 0.8 m off killed him and took his right thigh and
+  upper arm).
+- R2759: perfcases, wounds, animations, devices, gameplay, medical and casualty passed. loadout
+  failed 3 checks in "The 3D loadout editor". They fail the same on untouched dev (R2766,
+  `1aa38406`), so they are not from this branch.
+- R2763: antiarmor passed with the launcher change; loadout failed the same 3 checks as on dev.

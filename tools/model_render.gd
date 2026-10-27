@@ -7,7 +7,8 @@ extends Node
 ## Small gear past SMALL_GEAR_M and the far LOD never draw here (everything is at the camera).
 
 const PX_PER_M := 420.0
-## [name, body, role ("" none: the uniform alone), variant, (optional) more item ids to give]
+## [name, body, role ("" none: the uniform alone), variant, (optional) more item ids to give,
+## (optional) a launcher shouldered as LauncherRig holds it]
 const SOLDIERS := [
 	["uniform_m", "male", "", "multicam"],
 	["uniform_f", "female", "", "multicam"],
@@ -17,6 +18,9 @@ const SOLDIERS := [
 	["leader_f", "female", "team_leader", "desert"],
 	["gunner_m", "male", "autorifleman", "black"],
 	["headset_m", "male", "", "woodland", ["ear_comtac", "m17", "mag_9mm", "mag_9mm"]],
+	["rpg_m", "male", "", "urban", [], "rpg7"],
+	["at4_f", "female", "rifleman", "multicam", [], "at4"],
+	["maaws_m", "male", "", "desert", [], "maaws"],
 ]
 ## [label, view direction (camera into the scene), up]
 const VIEWS := [
@@ -86,11 +90,22 @@ func _dress(s: Array) -> Node3D:
 	for id: String in (s[4] if s.size() > 4 else []):
 		Roles.give(inventory, StringName(id), 1)
 	model.hold = CharacterModel.Hold.NONE
+	var tube: Node3D = null
+	var item: ItemData = ItemDB.get_item(StringName(s[5])) if s.size() > 5 else null
+	if item:
+		tube = LauncherRig.make_model(item)
+		root.add_child(tube)
 	for i in 40:
+		if tube:  # (as LauncherRig does, every frame)
+			var hold := LauncherRig.hold_points(item)
+			tube.global_transform = model.hands_anchor.global_transform * Transform3D(Basis.IDENTITY, LauncherRig.SHOULDER - hold[0])
+			model.set_held(tube, hold[1], hold[2])
 		await get_tree().process_frame
 	VoxelArt.finish_warm()
 	for i in 10:
 		await get_tree().process_frame
+	if s.size() > 5:
+		print("[render] %s held %s: hold %s, hand error %.3f m" % [s[0], s[5], LauncherRig.hold_points(ItemDB.get_item(StringName(s[5]))), model.hand_error()])
 	return root
 
 

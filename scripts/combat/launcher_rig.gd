@@ -2,8 +2,7 @@ class_name LauncherRig
 extends Node3D
 ## The launcher a soldier carries, drawn on every peer (wave 5, V2): slung across the back,
 ## or on the shoulder in both hands while it's the active weapon (active_slot "launcher",
-## replicated). Placeholder art: tubes and boxes by the launcher's size and calibre, until a
-## voxel launcher model arrives (Captain's art; swap make_model). Launchers keeps one on each
+## replicated). Drawn as its voxel model from the ground (ItemArt), held on its own grips (HOLDS). Launchers keeps one on each
 ## soldier that carries a launcher and frees it when they don't. The local player's own is on
 ## PlayerInput.LOCAL_ONLY_LAYER like the rest of their body; their first-person launcher is
 ## make_model on the view model (LauncherSight.view_node).
@@ -50,8 +49,9 @@ func _process(_delta: float) -> void:
 	var shouldered := up and soldier.active_slot == Launchers.SLOT and model.hands_anchor != null
 	var side := -1.0 if soldier.left_handed else 1.0
 	if shouldered:
-		global_transform = model.hands_anchor.global_transform * Transform3D(Basis.IDENTITY, SHOULDER * Vector3(side, 1, 1))
-		model.set_held(self, GRIP, SUPPORT)
+		var hold := hold_points(ItemDB.get_item(item_id))  # on the shoulder where it rests, the hands on its grips
+		global_transform = model.hands_anchor.global_transform * Transform3D(Basis.IDENTITY, SHOULDER * Vector3(side, 1, 1) - hold[0])
+		model.set_held(self, hold[1], hold[2])
 		_held = true
 	else:
 		_release()
@@ -72,18 +72,71 @@ func _exit_tree() -> void:
 	_release()
 
 
-## A placeholder model of `item` lying along -Z (the muzzle forward), centred: a tube of its
-## length and calibre in its colour, with a grip and sight box, and the warhead of an RPG-7.
+## How each launcher is held (Captain, 2026-10-26: "launchers need work too so their in hand
+## visuals match their on ground visuals"), in its ItemArt model's centimetres (muzzle at z 0,
+## along +z): [where along the tube it rests on the shoulder, the firing hand's grip, the support
+## hand, whether the model lies on its side (grips out to +x: turned upright, grips down)].
+const HOLDS := {
+	&"rpg7": [76.0, Vector3(6.5, 0, 65.75), Vector3(3.8, 0, 42.0), true],
+	&"at4": [80.0, Vector3(4.5, -1.5, 57.0), Vector3(0, -5.5, 34.0), false],
+	&"maaws": [72.0, Vector3(9.0, 0, 49.75), Vector3(9.0, 0, 23.75), true],
+	&"smaw": [58.0, Vector3(8.5, 0, 45.75), Vector3(8.5, 0, 27.75), true],
+	&"nlaw": [80.0, Vector3(0, -8.5, 63.5), Vector3(0, -7.5, 34.0), false],
+	&"javelin_clu": [92.0, Vector3(11.5, 14.0, 59.5), Vector3(-11.5, 14.0, 59.5), false],
+}
+
+
+## `item`'s model lying along -Z (the muzzle forward), its top up, centred on the tube's middle:
+## the voxel model it has on the ground (ItemArt), turned upright. A launcher with no hold yet
+## (HOLDS) gets the old placeholder: a tube of its length and calibre with a grip and sight box.
 static func make_model(item: ItemData, layers := 1) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Launcher"
 	if item == null:
 		return root
+	if HOLDS.has(item.id):
+		var entry := ItemArt.own_mesh(item)
+		var origin: Vector3 = entry[2]
+		var size: Vector3 = entry[3]
+		var mi := MeshInstance3D.new()
+		mi.mesh = entry[0]
+		mi.material_override = VoxelArt._get_material()
+		mi.layers = layers
+		var turn := _upright(item)
+		var mid := Vector3(0, 0, origin.z + size.z * 0.5)  # the tube's middle, on its axis
+		mi.transform = Transform3D(turn.scaled(Vector3.ONE * float(entry[1])), turn * ((origin - mid) * 0.01))
+		root.add_child(mi)
+		return root
+	return _placeholder(item, layers)
+
+
+## Its model turned upright (HOLDS: one lying on its side turns its grips down).
+static func _upright(item: ItemData) -> Basis:
+	return Basis(Vector3.BACK, -PI * 0.5) if bool(HOLDS[item.id][3]) else Basis.IDENTITY
+
+
+## A point on `item`'s model (its ItemArt centimetres) in make_model's space.
+static func model_point(item: ItemData, cm: Vector3) -> Vector3:
+	var entry := ItemArt.own_mesh(item)
+	var mid := Vector3(0, 0, (entry[2] as Vector3).z + (entry[3] as Vector3).z * 0.5)
+	return _upright(item) * ((cm - mid) * 0.01)
+
+
+## Where `item` rests on the shoulder, its firing hand and its support hand, in make_model's space.
+static func hold_points(item: ItemData) -> Array[Vector3]:
+	if item == null or not HOLDS.has(item.id):
+		return [Vector3.ZERO, GRIP, SUPPORT]
+	var h: Array = HOLDS[item.id]
+	return [model_point(item, Vector3(0, 0, float(h[0]))), model_point(item, h[1]), model_point(item, h[2])]
+
+
+static func _placeholder(item: ItemData, layers: int) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Launcher"
 	var size: Array = item.stats.get("size_m", [0.1, 0.1, 1.0])
 	var length := float(size[2])
 	var radius := maxf(float(item.stats.get("calibre_mm", 84)) / 2000.0 + 0.012, 0.03)
-	var colour: Color = {"at4": Color("6b6a3f"), "rpg7": Color("3b3a36"), "javelin_clu": Color("575c3e"),
-		"maaws": Color("4a4e47"), "nlaw": Color("5d6146"), "smaw": Color("4b5038")}.get(String(item.id), Color("55583f"))
+	var colour := Color("55583f")
 	var tube := CylinderMesh.new()
 	tube.top_radius = radius
 	tube.bottom_radius = radius
@@ -97,17 +150,8 @@ static func make_model(item: ItemData, layers := 1) -> Node3D:
 	root.add_child(_mesh(box, Vector3(0, -radius - 0.04, -0.12), Vector3.ZERO, layers))  # grip
 	var sight := BoxMesh.new()
 	sight.size = Vector3(0.05, 0.06, 0.12) if String(item.stats.get("sight", "iron")) != "iron" else Vector3(0.015, 0.04, 0.02)
-	if item.id == &"javelin_clu":
-		sight.size = Vector3(0.22, 0.16, 0.24)  # the command launch unit's box
 	sight.material = _material(colour.darkened(0.25))
-	root.add_child(_mesh(sight, Vector3(-radius - sight.size.x * 0.5 if item.id != &"javelin_clu" else -radius - 0.1, radius * 0.6, -0.05), Vector3.ZERO, layers))
-	if item.id == &"rpg7":
-		var head := CylinderMesh.new()
-		head.top_radius = 0.0
-		head.bottom_radius = 0.0425
-		head.height = 0.3
-		head.material = _material(Color("4d5a3a"))
-		root.add_child(_mesh(head, Vector3(0, 0, -length * 0.5 - 0.15), Vector3(-PI * 0.5, 0, 0), layers))
+	root.add_child(_mesh(sight, Vector3(-radius - sight.size.x * 0.5, radius * 0.6, -0.05), Vector3.ZERO, layers))
 	return root
 
 
