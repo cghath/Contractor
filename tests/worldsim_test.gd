@@ -569,6 +569,10 @@ func _test_catch_up() -> void:
 	WorldSim.people()["test_comp"] = {"id": "test_comp", "name": "Test Companion", "status": "companion", "zone": near, "pos": [0.0, 0.0, 0.0]}
 	var t0 := float(w.get("t", 0.0))
 	var ev0 := int(w.get("next_event", 0))
+	for r: Dictionary in WorldSim.people().values():  # (something surely happens near the farm: the dead find a household there, call 143)
+		if String(r.get("status", "")) == "out_there" and String(r.get("zone", "")) == start and not Children.is_child_rec(r):
+			r["dead_find_test"] = true
+			break
 	var day0 := Survival.day() + Survival.hour() / 24.0
 	var hours := WorldSim.server_catch_up(60.0)
 	w = WorldSim.section()

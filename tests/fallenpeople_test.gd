@@ -399,15 +399,19 @@ func _test_holding() -> void:
 	Holding.server_hour(layer)
 	e = Holding.entry(key)
 	check(float(e.get("clear_since", -1.0)) >= 0.0 and String(e.state) == "abandoned", "the place is clear; they wait")
+	_clear_dead_near(home, 60.0)
+	await _frames(2)
+	e = Holding.entry(key)
 	e["clear_since"] = Holding._now_d() - Holding.RETURN_DAYS - 0.05
 	Holding.save(e)
-	_clear_dead_near(home, 60.0)
 	var st0 := String(Holding.entry(key).get("state", ""))
+	var clear_now := Holding.is_clear(layer, Holding.entry(key))
 	var back := Holding.server_hour(layer)
 	if back == 0 and st0 != "abandoned":
 		print("  (the place was %s before the hour)" % st0)
 	check(back >= 1 and String(Holding.entry(key).state) == "reclaimed" and alive.all(func(r: Dictionary) -> bool: return String(r.get("refugee_from", "")) == "" and String(r.zone) == zone and SurvivorPerson.pos_of(r, "home").distance_to(home) < 4.0),
-		"%d came home when it was clear (%s)" % [back, str([ma, pa, kid].map(func(r: Dictionary) -> String: return "%s %s %s" % [String(r.status), String(r.get("refugee_from", "")) == key, String(r.zone) == zone]))])
+		"%d came home when it was clear (clear %s, refugees %s of %s, since %.2f now %.2f, %s)" % [back, clear_now, str(Holding.entry(key).get("refugees", [])), str([ma.id, pa.id, kid.id]),
+			float(Holding.entry(key).get("clear_since", -9.0)), Holding._now_d(), str([ma, pa, kid].map(func(r: Dictionary) -> String: return "%s %s %s" % [String(r.status), String(r.get("refugee_from", "")) == key, String(r.zone) == zone]))])
 	# "It's clear now".
 	var there := _near(Vector3(25.0, 0.0, -25.0))
 	var key2 := "h:test:clear_now"
