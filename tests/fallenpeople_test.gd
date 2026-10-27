@@ -328,6 +328,10 @@ func _clear_dead_near(at: Vector3, r: float) -> void:
 
 func _test_holding() -> void:
 	print("Holding or fleeing (call 143)")
+	var back_to := player.global_position
+	if Settlement.exists():  # (out in the fields, away from the players' farm)
+		player.global_position = level.ground_point(Settlement.pos() + Vector3(140.0, 0.0, 0.0)) + Vector3.UP * 0.2
+		await _frames(5)
 	_clear_dead_near(player.global_position, 150.0)
 	await _frames(3)
 	var zone := String(Survival.state().zone)
@@ -398,9 +402,12 @@ func _test_holding() -> void:
 	e["clear_since"] = Holding._now_d() - Holding.RETURN_DAYS - 0.05
 	Holding.save(e)
 	_clear_dead_near(home, 60.0)
+	var st0 := String(Holding.entry(key).get("state", ""))
 	var back := Holding.server_hour(layer)
+	if back == 0 and st0 != "abandoned":
+		print("  (the place was %s before the hour)" % st0)
 	check(back >= 1 and String(Holding.entry(key).state) == "reclaimed" and alive.all(func(r: Dictionary) -> bool: return String(r.get("refugee_from", "")) == "" and String(r.zone) == zone and SurvivorPerson.pos_of(r, "home").distance_to(home) < 4.0),
-		"%d came home when it was clear" % back)
+		"%d came home when it was clear (%s)" % [back, str([ma, pa, kid].map(func(r: Dictionary) -> String: return "%s %s %s" % [String(r.status), String(r.get("refugee_from", "")) == key, String(r.zone) == zone]))])
 	# "It's clear now".
 	var there := _near(Vector3(25.0, 0.0, -25.0))
 	var key2 := "h:test:clear_now"
@@ -420,6 +427,8 @@ func _test_holding() -> void:
 	var said := TalkMenu.server_talk(layer, player, rb, "clear_now") if rb else ""
 	check(said == Holding.CLEAR_YES and String(Holding.entry(key2).state) == "reclaimed" and SurvivorPerson.opinion_of(rf, Survival.profile_of(player)) > op0 and String(rf.get("refugee_from", "")) == "",
 		"told, they go home and think better of you (%.0f -> %.0f)" % [op0, SurvivorPerson.opinion_of(rf, Survival.profile_of(player))])
+	player.global_position = back_to + Vector3.UP * 0.2
+	await _frames(5)
 	# The players' settlement: no guard on shift, the unarmed to shelter, not out.
 	await _wait_for(func() -> bool: return Settlement.exists(), 10.0)
 	if not Settlement.exists() or Settlement.zone() != zone:

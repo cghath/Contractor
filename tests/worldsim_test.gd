@@ -579,8 +579,8 @@ func _test_catch_up() -> void:
 	var kinds := {}
 	for ev: Dictionary in w.get("events", []):
 		if int(ev.id) > ev0:
-			var k := "%s%s" % [String(ev.kind), "*" if WorldSim.is_near(ev) else ""]
-			kinds[k] = int(kinds.get(k, 0)) + 1
+			var ek := "%s%s" % [String(ev.kind), "*" if WorldSim.is_near(ev) else ""]
+			kinds[ek] = int(kinds.get(ek, 0)) + 1
 	check(not (report.get("lines", []) as Array).is_empty(), "the report lists what happened near the farm: %s (events: %s)" % ["; ".join(report.get("lines", [])), str(kinds)])
 	var journal: Array = Survival.state().get("journal", [])
 	check(journal.any(func(j: Dictionary) -> bool: return String(j.text).begins_with("While you were away")), "in the journal")

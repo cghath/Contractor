@@ -547,6 +547,8 @@ static func _leave_behind(layer: SurvivorsLayer, home: Vector3, e: Dictionary, b
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([String(e.key), "left"])
 	var left: Array = []
+	if Settlement.exists() and Settlement.zone() == layer._zone() and _flat(home, Settlement.pos()) <= Settlement.radius() + 10.0:
+		return left  # (inside the players' farm: nothing of theirs dropped for the settlers to haul off)
 	var pool := LEFT_ITEMS.filter(func(id: String) -> bool: return ItemDB.get_item(StringName(id)) != null)
 	for i in rng.randi_range(LEFT_N.x, LEFT_N.y):
 		if pool.is_empty():
