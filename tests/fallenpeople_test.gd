@@ -10,7 +10,8 @@ extends Node
 ## fleeing (call 143): an armed household with a guard holds against the dead, an unarmed one
 ## gathers its child and runs (the place abandoned, a note left, the journal), its refugees come
 ## home when it's clear, "It's clear now" brings them back, and a settlement with no guard on shift
-## sends its unarmed to shelter, not out; save and Continue keep the companions.
+## sends its unarmed to shelter, not out; refugees join the household they reach, and at the
+## players' farm ask to stay (a council vote, or a player's yes); save and Continue keep the companions.
 
 var failures := 0
 var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -40,6 +41,7 @@ func _ready() -> void:
 		await _test_grief_grave_rise()
 		await _test_player_death_and_take_over()
 		await _test_holding()
+		await _test_refugees_join()
 		await _test_save_and_continue()
 	_finish()
 
@@ -461,6 +463,66 @@ func _test_holding() -> void:
 	await _frames(2)
 	Holding.settlement_tick(layer, [])
 	check(not se.has("sheltering"), "the dead gone, back about the day")
+	player.global_position = start + Vector3.UP * 0.2
+	await _frames(5)
+
+
+## What `rec` carries of `id` (the body's, when it's up).
+func _kit_n(rec: Dictionary, id: String) -> int:
+	var b := layer.body_of(String(rec.id))
+	if b:
+		return b.inventory.count_of(StringName(id))
+	var n := 0
+	for e: Variant in rec.get("kit", []):
+		if e is Dictionary and String((e as Dictionary).get("id", "")) == id:
+			n += int((e as Dictionary).get("count", 1))
+	return n
+
+
+func _test_refugees_join() -> void:
+	print("Refugees join the place they reach (call 143)")
+	var start := player.global_position
+	# A fleeing family reaches another household and joins it.
+	var hh := _near(Vector3(-30.0, 0.0, 30.0))
+	_clear_dead_near(hh, 80.0)
+	var h1 := layer.server_add_person(hh, {"traits": ["calm", "kind"], "want": {"kind": "place"}, "family": "host_fam", "kit": []})
+	var h2 := layer.server_add_person(level.ground_point(hh + Vector3(1.5, 0.0, 0.0)), {"traits": ["calm"], "want": {"kind": "place"}, "family": "host_fam", "kit": []})
+	var rf := layer.server_add_person(level.ground_point(hh + Vector3(3.0, 0.0, 2.0)), {"traits": ["calm"], "want": {"kind": "place"}, "family": "ref_fam",
+		"kit": [{"id": "beans_tin", "count": 1}], "refugee_from": "h:test:joinfam"})
+	await _frames(2)
+	var hkey := Holding.household_key(h1)
+	var beans_h := _kit_n(h1, "beans_tin")
+	var beans_r := _kit_n(rf, "beans_tin")
+	rf["flee"] = {"to": Holding._arr(hh), "kind": "place", "label": "%s's place" % String(h1.get("first", "")), "key": "h:test:joinfam", "join": "h|" + hkey,
+		"since": Soldier._now(), "cover_until": 0.0, "route": [Holding._arr(hh)], "leg": 0, "from": Holding._arr(hh + Vector3(0.0, 0.0, 40.0))}
+	Holding.arrive(layer, rf)
+	check(Holding.household_key(rf) == Holding.household_key(h1) and Holding.household_key(h2) == Holding.household_key(h1) and String(rf.get("refugee_from", "")) == "h:test:joinfam",
+		"a fleeing household that reaches another joins it: one household now (%s)" % Holding.household_key(h1))
+	check(beans_r >= 1 and _kit_n(rf, "beans_tin") == beans_r - 1 and _kit_n(h1, "beans_tin") == beans_h + 1, "what they carried is shared (a tin into the household's stock)")
+	check(SurvivorPerson.relation(rf, String(h1.id)) >= Holding.TOOK_IN_REL and SurvivorPerson.relation(h1, String(rf.id)) > 0.0, "and they think well of who took them in")
+	# The players' farm: refugees ask to stay (a council vote, or a player's yes).
+	if not Settlement.exists() or Settlement.zone() != String(Survival.state().zone):
+		check(false, "the farm is a settlement")
+		return
+	var c := Settlement.pos()
+	_clear_dead_near(c, Settlement.radius() + 40.0)
+	player.global_position = level.ground_point(c + Vector3(6.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	await _frames(3)
+	var ask := layer.server_add_person(level.ground_point(c + Vector3(4.0, 0.0, -3.0)), {"traits": ["calm", "kind"], "want": {"kind": "place"}, "kit": [], "refugee_from": "h:test:askstay"})
+	await _frames(2)
+	ask["flee"] = {"to": Holding._arr(c), "kind": "place", "label": "the farm", "key": "h:test:askstay", "join": "settlement",
+		"since": Soldier._now(), "cover_until": 0.0, "route": [Holding._arr(c)], "leg": 0, "from": Holding._arr(c + Vector3(0.0, 0.0, 80.0))}
+	Holding.arrive(layer, ask)
+	var vid := int(ask.get("stay_vote", -1))
+	var v := Council.get_vote(vid)
+	check(String(ask.get("asks_stay", "")) == "settlement" and String(ask.status) == "out_there" and not v.is_empty() and String(v.get("state", "")) == "open"
+		and String(ask.id) in ((v.get("question", {}) as Dictionary).get("refugees", []) as Array), "refugees at the farm ask to stay: the council's question (%s)" % String((v.get("question", {}) as Dictionary).get("text", "")))
+	var ab := layer.body_of(String(ask.id))
+	var acts: Array = TalkMenu.actions_for(player, ab, TalkMenu.KIND) if ab else []
+	check(acts.any(func(a: Dictionary) -> bool: return a.id == &"talk_let_stay"), "and the talk offers \"Let them stay\"")
+	var said := Holding.server_let_stay(layer, player, ask, true)
+	check(said == Holding.STAY_YES and String(ask.status) == "settler" and String(Council.get_vote(vid).get("state", "")) == "done" and not ask.has("asks_stay"),
+		"a player's yes: they're settlers, the vote closed (%s)" % String(ask.status))
 	player.global_position = start + Vector3.UP * 0.2
 	await _frames(5)
 

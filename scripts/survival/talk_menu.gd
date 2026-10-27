@@ -80,6 +80,9 @@ static func actions_for(actor: Soldier, target: Node, menu_kind: StringName) -> 
 		if bool(info.get("crew", false)):  # the downed helicopter's crew: escort them home (HeliCrew)
 			out.append(talk.call("crew_come", "Come with me", {}, ""))
 		out.append(talk.call("who", "Who are you?", {}, ""))
+		if bool(info.get("asks_stay", false)):  # they ran here from the dead and ask to stay (Holding, call 143)
+			out.append(talk.call("let_stay", "Let them stay", {}, ""))
+			out.append(talk.call("turn_away", "Turn them away", {}, InteractionMenu.MORE))
 		if bool(info.get("refugee", false)):  # they left their place to the dead (Holding, call 143)
 			out.append(talk.call("clear_now", "It's clear now", {}, ""))
 		out.append(talk.call("want", "What do you want?", {}, ""))
@@ -258,6 +261,8 @@ static func server_talk(layer: SurvivorsLayer, actor: Soldier, target: Soldier, 
 		return Faith.server_words(layer, actor, rec, action == "words")
 	if action == "clear_now":  # (call 143: their place is clear, they can go home)
 		return Holding.server_clear_now(layer, actor, rec)
+	if action in ["let_stay", "turn_away"]:  # (call 143: refugees asking to stay)
+		return Holding.server_let_stay(layer, actor, rec, action == "let_stay")
 	if Children.is_child_rec(rec) and action in ["recruit", "threaten", "trade", "take_along", "settle", "talk_down", "settle_it"]:
 		return ""  # (call 128: a child is never a companion, never threatened)
 	match action:

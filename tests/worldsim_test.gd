@@ -385,6 +385,48 @@ func _test_holding_sim() -> void:
 	_act_until_done(m, s, 40)
 	check(String(s.zone) == to and (m.w.events as Array).any(func(ev: Dictionary) -> bool: return String(ev.kind) == "relocated" and String(s.id) in (ev.groups as Array)),
 		"they come to %s%s" % [to, " and make camp" if not (s.home as Dictionary).is_empty() else ""])
+	# Refugees reach a camp: it takes them in; a starving one turns them away (gap 1).
+	var z4 := _zone(m, 2, [z, z2, z3])
+	if z4 == "":
+		return
+	var to4 := WorldFights._quietest_link(m, z4)
+	var places4: Array = m.zone(to4).get("places", [])
+	if places4.is_empty():
+		check(false, "the next zone has places (%s)" % to4)
+		return
+	var cg := _grp(m, "settlers", to4, 3, {"food": 30.0, "water": 30.0})
+	m.set_home(cg, to4, places4[0])
+	var at4 := WorldModel._place_v(m.zone(z4).places[0])
+	var fam4: Array = []
+	for i in 2:
+		var r := m.new_person(m.rng_for("join%d" % i), z4, at4 + Vector2(i * 1.5, 0.0))
+		r.status = "out_there"
+		r["family"] = "joinfam"
+		r.kit = [{"id": "beans_tin", "count": 1}]
+		m.lone_group(r)
+		fam4.append(r)
+	Holding.sim_flee(m, fam4)
+	var took := fam4.filter(func(r: Dictionary) -> bool: return String(r.status) == WorldGroup.GROUPED and String(r.get("world_group", "")) != "" and String(r.id) in (m.group(String(r.world_group)).get("members", []) as Array))
+	var host := m.group(String((fam4[0] as Dictionary).get("world_group", "")))
+	check(took.size() == fam4.filter(func(r: Dictionary) -> bool: return String(r.status) != "dead").size() and not took.is_empty() and String(host.get("zone", "")) == to4,
+		"a household reaching a camp is taken in: members of %s (%d now)" % [String(host.get("name", "?")), WorldGroup.size(host)])
+	for pl4: Dictionary in places4:
+		var hg := m.group(String(pl4.get("holder", "")))
+		if not hg.is_empty():
+			hg.supplies["food"] = 0.0
+			hg.supplies["water"] = 0.0
+	var fam5: Array = []
+	for i in 2:
+		var r := m.new_person(m.rng_for("starve%d" % i), z4, at4 + Vector2(i * 1.5, 3.0))
+		r.status = "out_there"
+		r["family"] = "starvefam"
+		r.kit = []
+		m.lone_group(r)
+		fam5.append(r)
+	Holding.sim_flee(m, fam5)
+	var ran5 := fam5.filter(func(r: Dictionary) -> bool: return String(r.status) != "dead")
+	check(not ran5.is_empty() and ran5.all(func(r: Dictionary) -> bool: return String(r.status) == "out_there" and String(r.get("world_group", "")) == "" and String(r.zone) == to4),
+		"a starving camp turns them away: they find a place of their own in %s" % to4)
 
 
 ## The hosted zone's household the catch-up sent running: the zone loaded again shows the signs.

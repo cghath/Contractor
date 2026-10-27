@@ -31,6 +31,11 @@ extends RefCounted
 ## - **Coming back** (server_hour): a place clear of the dead for RETURN_DAYS (the players cleared
 ##   it, or the dead wandered off: the zone quiet) gets its refugees back; "It's clear now" (TalkMenu)
 ##   brings them back at once for standing.
+## - **Joining** (join_on_arrival, sim_flee): a fleeing household that reaches a held place joins
+##   it: another household (one household now, what they carried shared, a "took us in" bond:
+##   join_household), a world group's camp (members: take_in; a starving or hostile group turns
+##   them away and they go on to the next safe place: group_refuses), the players' farm (they ask
+##   to stay: server_ask_stay, a council vote or a player's yes in talk: server_let_stay).
 ## Every number here is Proposed.
 
 const KEY := "abandoned"
@@ -83,6 +88,18 @@ const FLEE_LINES: Array[String] = ["They're coming over the fence! Run!", "Get t
 const COVER_LINES: Array[String] = ["Go! I'll hold them here!", "Run! I'm right behind you!"]
 const CLEAR_YES := "Truly? Then we're going home. Thank you."
 const CLEAR_NO := "That's not what I saw. They're still there."
+## Joining: the bond a refugee feels for who took them in (and theirs back); a group turns refugees
+## away under this many days of food, or at this relation or worse; what one adds to its supplies.
+const TOOK_IN_REL := 15.0
+const HOST_REL := 5.0
+const REFUGE_FOOD_DAYS := 1.0
+const REFUGE_HOSTILE := -10.0
+const REFUGE_SUPPLY := 0.5
+const SKIP_MAX := 3
+const STAY_LINES: Array[String] = ["We've nowhere else. Let us stay, we'll work.", "Please. We ran from the dead. Can we stay?"]
+const REFUSED_LINES: Array[String] = ["They won't have us. We keep going.", "No room for us here. Come on."]
+const STAY_YES := "Thank you. You won't regret it."
+const STAY_NO := "Then we'll go. Good luck to you."
 
 static var _chase_at := -1000.0
 
@@ -372,7 +389,7 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 		var covers := not runs_at_once(rec, kit)
 		_grab(rec, b)
 		rec["flee"] = {"to": _arr(dest.pos as Vector3), "kind": String(dest.kind), "to_zone": String(dest.get("to_zone", "")), "label": String(dest.label),
-			"key": key, "since": now, "cover_until": now + COVER_S if covers else 0.0, "route": route, "leg": 0, "from": _arr(from)}
+			"key": key, "since": now, "cover_until": now + COVER_S if covers else 0.0, "route": route, "leg": 0, "from": _arr(from), "join": String(dest.get("join", ""))}
 		if String(rec.get("refugee_from", "")) == "" or entry(String(rec.refugee_from)).is_empty():
 			rec["refugee_from"] = key  # (running again from where they took refuge: home is still the first place)
 		Moods.add(rec, "lost_home", -10.0, 48.0)
@@ -397,7 +414,7 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 ## The nearest safe place `members` know from `home`, away from the dead at `from`: {"pos", "kind"
 ## ("place" | "edge"), "to_zone", "label"}. Another household's home, a world group's camp, the
 ## players' farm, a town's edge; else a crossing out of the zone (the one most away from the dead).
-static func safe_place(layer: SurvivorsLayer, home: Vector3, from: Vector3, members: Array) -> Dictionary:
+static func safe_place(layer: SurvivorsLayer, home: Vector3, from: Vector3, members: Array, skip: Array = []) -> Dictionary:
 	var zone := layer._zone()
 	var away := Vector2(home.x - from.x, home.z - from.z)
 	away = away.normalized() if away.length() > 0.1 else Vector2(1.0, 0.0)
@@ -411,16 +428,16 @@ static func safe_place(layer: SurvivorsLayer, home: Vector3, from: Vector3, memb
 		if k == mine or seen.has(k):
 			continue
 		seen[k] = true
-		cands.append({"pos": SurvivorPerson.pos_of(rec, "home"), "kind": "place", "label": "%s's place" % String(rec.get("first", rec.get("name", "someone")))})
+		cands.append({"pos": SurvivorPerson.pos_of(rec, "home"), "kind": "place", "label": "%s's place" % String(rec.get("first", rec.get("name", "someone"))), "join": "h|" + k})
 	if WorldSim.is_set_up():
 		for g: Dictionary in WorldSim.groups_in(zone):
 			var h: Dictionary = g.get("home", {})
 			if not bool(g.get("alive", false)) or String(g.get("kind", "")) in ["raiders", "cultists", "lone"] or h.is_empty() or String(h.get("zone", "")) != zone:
 				continue
 			var hp: Array = h.get("pos", [0.0, 0.0])
-			cands.append({"pos": layer.level.ground_point(Vector3(float(hp[0]), 0.0, float(hp[1]))), "kind": "place", "label": String(g.get("name", "a camp"))})
+			cands.append({"pos": layer.level.ground_point(Vector3(float(hp[0]), 0.0, float(hp[1]))), "kind": "place", "label": String(g.get("name", "a camp")), "join": "g|" + String(g.get("id", ""))})
 	if Settlement.exists() and Settlement.zone() == zone:
-		cands.append({"pos": Settlement.pos(), "kind": "place", "label": "the farm"})
+		cands.append({"pos": Settlement.pos(), "kind": "place", "label": "the farm", "join": "settlement"})
 	if layer.level.has_method(&"modules"):
 		for m: ZoneModule in layer.level.modules():
 			if not ZoneModules.base(String(m.type)) in ["village", "town"]:
@@ -435,7 +452,7 @@ static func safe_place(layer: SurvivorsLayer, home: Vector3, from: Vector3, memb
 	for c: Dictionary in cands:
 		var p: Vector3 = c.pos
 		var d := _flat(p, home)
-		if d < SAFE_FROM_M or _bearing_toward(home, p, away) > TOWARD_DEAD or _dead_near(dead, p, HOLD_M):
+		if String(c.get("join", "")) in skip or d < SAFE_FROM_M or _bearing_toward(home, p, away) > TOWARD_DEAD or _dead_near(dead, p, HOLD_M):
 			continue
 		if d < best_d:
 			best_d = d
@@ -706,6 +723,8 @@ static func arrive(layer: SurvivorsLayer, rec: Dictionary, at := Vector3.INF) ->
 			if b:
 				_set_home(b, to)
 			SurvivorPerson.note(rec, "took refuge at %s" % String(f.get("label", "a safe place")))
+			if not at.is_finite():
+				join_on_arrival(layer, rec, f)  # (they reached a held place: they join it, or ask to)
 	if kind != "home":
 		var e := entry(String(f.get("key", "")))
 		if not e.is_empty():
@@ -728,6 +747,290 @@ static func _edge_arrival(p: Vector3, layer: SurvivorsLayer) -> Vector2:
 	if absf(p.z) >= absf(p.x):
 		return Vector2(p.x, -signf(p.z) * (half - EDGE_IN_M))
 	return Vector2(-signf(p.x) * (half - EDGE_IN_M), p.z)
+
+
+# --- Joining the place they reach (gap 1) ------------------------------------------------------------
+
+## The household id a household key `hkey` shares when others join it (its own "household" when it
+## has one).
+static func hid_of(hkey: String) -> String:
+	return hkey.substr(2) if hkey.begins_with("h:") else "hh_" + hkey.replace(":", "_")
+
+
+## The people of household `hkey` (or already joined under its id) out there in `zone`, not running.
+static func household_members(people: Dictionary, zone: String, hkey: String) -> Array:
+	var hid := hid_of(hkey)
+	var out: Array = []
+	for id: String in WorldModel._sorted(people.keys()):
+		var r: Dictionary = people[id]
+		if String(r.get("status", "")) != "out_there" or String(r.get("zone", "")) != zone or r.has("flee"):
+			continue
+		if household_key(r) == hkey or String(r.get("household", "")) == hid:
+			out.append(r)
+	return out
+
+
+## `refugee` joins the household `hosts` (key `hkey`): one household now (a shared "household" id;
+## the old one kept in "joined" for going home), what they carried to eat and drink shared (into the
+## head's kit: the body's when `layer` has one), and a bond with who took them in. Returns whether.
+static func join_household(refugee: Dictionary, hosts: Array, hkey: String, layer: SurvivorsLayer = null) -> bool:
+	var rid := String(refugee.get("id", ""))
+	var others := hosts.filter(func(r: Dictionary) -> bool: return String(r.get("id", "")) != rid)
+	if others.is_empty() or _adults(others) == 0:
+		return false
+	var hid := hid_of(hkey)
+	for h: Dictionary in others:
+		if String(h.get("household", "")) == "":
+			h["household"] = hid
+	if not refugee.has("joined"):
+		refugee["joined"] = {"kind": "household", "old": String(refugee.get("household", ""))}
+	refugee["household"] = hid
+	_share_food(layer, refugee, head_of(others))
+	for h: Dictionary in others:
+		if Children.is_child_rec(h):
+			continue
+		SurvivorPerson.change_relation(refugee, String(h.id), TOOK_IN_REL)
+		SurvivorPerson.change_relation(h, rid, HOST_REL)
+	return true
+
+
+## What `from` carries to eat and drink (GRAB) goes to `to` (bodies' inventories when they're up).
+static func _share_food(layer: SurvivorsLayer, from: Dictionary, to: Dictionary) -> int:
+	var fb: Soldier = layer.body_of(String(from.get("id", ""))) if layer else null
+	var tb: Soldier = layer.body_of(String(to.get("id", ""))) if layer else null
+	var n := 0
+	for id: String in GRAB:
+		for _i in 4:
+			var had := false
+			if fb:
+				had = fb.inventory.remove_one(StringName(id))
+			else:
+				var kit: Array = from.get("kit", [])
+				for e: Variant in kit:
+					if e is Dictionary and String((e as Dictionary).get("id", "")) == id:
+						var left := int((e as Dictionary).get("count", 1)) - 1
+						if left <= 0:
+							kit.erase(e)
+						else:
+							(e as Dictionary)["count"] = left
+						had = true
+						break
+			if not had:
+				break
+			n += 1
+			if tb:
+				tb.inventory.take(StringName(id), 1)
+			else:
+				if not to.get("kit") is Array:
+					to["kit"] = []
+				(to.kit as Array).append({"id": id, "count": 1})
+	if fb:
+		from["kit"] = Survival.kit_of(fb.inventory)
+	if tb:
+		to["kit"] = Survival.kit_of(tb.inventory)
+	return n
+
+
+## Why world group `g` won't take `rec` in ("" it will): gone, hostile (raiders, cultists, the
+## enclave, or its relation to them REFUGE_HOSTILE or worse), or starving (REFUGE_FOOD_DAYS).
+static func group_refuses(g: Dictionary, rec: Dictionary) -> String:
+	if g.is_empty() or not bool(g.get("alive", false)) or String(g.get("kind", "")) == "lone":
+		return "gone"
+	if String(g.get("kind", "")) in ["raiders", "cultists", "enclave"] or WorldGroup.relation(g, "lone_" + String(rec.get("id", ""))) <= REFUGE_HOSTILE:
+		return "hostile"
+	if WorldGroup.days_of_food(g) < REFUGE_FOOD_DAYS:
+		return "starving"
+	return ""
+
+
+## `rec` becomes one of world group `g` (records only; the sim and the live side): a member (the
+## group bigger and, by its members, stronger), what they carried in its supplies. Safe to replay
+## on another copy of the group (the far step's).
+static func take_in(g: Dictionary, rec: Dictionary, day: float) -> void:
+	var pid := String(rec.get("id", ""))
+	rec["status"] = WorldGroup.GROUPED
+	rec["world_group"] = String(g.get("id", ""))
+	rec["joined"] = {"kind": "group", "group": String(g.get("id", ""))}
+	rec.erase("flee")
+	if not g.get("members") is Array:
+		g["members"] = []
+	if pid in (g.members as Array):
+		return
+	(g.members as Array).append(pid)
+	if not Children.is_child_rec(rec):
+		for k: String in ["food", "water"]:
+			WorldGroup.add_supply(g, k, REFUGE_SUPPLY)
+		rec["kit"] = (rec.get("kit", []) as Array).filter(func(e: Variant) -> bool: return not (e is Dictionary and String((e as Dictionary).get("id", "")) in GRAB))
+	if g.get("memory") is Array:
+		WorldGroup.remember(g, day, "refugees", "%s came to us running from the dead; we took them in" % String(rec.get("name", "someone")))
+
+
+## Host: `rec` reached the place `f` ran to: they join it (`f.join`: "h|<household key>", "g|<group
+## id>" or "settlement"). Returns what came of it: "household", "group", "refused", "asks" or "".
+static func join_on_arrival(layer: SurvivorsLayer, rec: Dictionary, f: Dictionary) -> String:
+	var join := String(f.get("join", ""))
+	if join.begins_with("h|"):
+		var hkey := join.substr(2)
+		var hosts := household_members(SurvivorsLayer.records(), String(rec.get("zone", "")), hkey)
+		var rkey := String(rec.get("refugee_from", ""))
+		var first := not hosts.any(func(h: Dictionary) -> bool: return rkey != "" and String(h.get("refugee_from", "")) == rkey)
+		if not join_household(rec, hosts, hkey, layer):
+			return ""
+		var fam := family_name(hosts.filter(func(h: Dictionary) -> bool: return String(h.get("refugee_from", "")) == "" or String(h.get("refugee_from", "")) != rkey))
+		SurvivorPerson.note(rec, "was taken in by %s" % fam)
+		if first:
+			Survival._journal_line("%s took in %s, running from the dead." % [fam.left(1).to_upper() + fam.substr(1), String(rec.get("name", "someone"))])
+		return "household"
+	if join.begins_with("g|"):
+		var gid := join.substr(2)
+		var g: Dictionary = WorldSim.group(gid) if WorldSim.is_set_up() else {}
+		var why := group_refuses(g, rec)
+		if why != "":
+			var b := layer.body_of(String(rec.get("id", "")))
+			if b and not Children.is_child_rec(rec):
+				layer.say(b, REFUSED_LINES[absi(hash([rec.get("id", ""), gid])) % REFUSED_LINES.size()])
+			SurvivorPerson.note(rec, "was turned away by %s (%s)" % [String(g.get("name", "a camp")), why])
+			_flee_on(layer, rec, f, join)
+			return "refused"
+		server_join_group(layer, rec, gid)
+		return "group"
+	if join == "settlement":
+		server_ask_stay(layer, rec, "settlement")
+		return "asks"
+	return ""
+
+
+## Host: turned away at the place `f` ran to (`join`), `rec` goes on to the next safe place (at
+## most SKIP_MAX places tried; then they stay where they are, refugees).
+static func _flee_on(layer: SurvivorsLayer, rec: Dictionary, f: Dictionary, join: String) -> void:
+	var skip: Array = (f.get("skip", []) as Array).duplicate()
+	skip.append(join)
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	if b == null or skip.size() > SKIP_MAX:
+		return
+	var here := b.global_position
+	var from := _v3(f.get("from", []))
+	var dest := safe_place(layer, here, from if from != Vector3.ZERO else here + Vector3.RIGHT, [rec], skip)
+	rec["flee"] = {"to": _arr(dest.pos as Vector3), "kind": String(dest.kind), "to_zone": String(dest.get("to_zone", "")), "label": String(dest.label),
+		"key": String(f.get("key", "")), "since": Soldier._now(), "cover_until": 0.0, "route": [_arr(dest.pos as Vector3)], "leg": 0,
+		"from": f.get("from", _arr(here)), "join": String(dest.get("join", "")), "skip": skip}
+	layer._set_known(b, rec)
+
+
+## Host: `rec` joins world group `gid` at its camp in the hosted zone: the body goes (the group's
+## people are WorldLive's), the record a member (take_in, on the world's copy and the far step's).
+static func server_join_group(layer: SurvivorsLayer, rec: Dictionary, gid: String) -> void:
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	if b:
+		layer._store(rec, b)
+		layer._forget(b)
+		b.queue_free()
+		layer._bodies.erase(String(rec.id))
+	var day := WorldSim.world_now()
+	var sim := WorldSim.get_sim()
+	if sim:
+		sim.mutate(func(w: Dictionary) -> void:
+			var g: Dictionary = (w.get("groups", {}) as Dictionary).get(gid, {})
+			if not g.is_empty():
+				take_in(g, rec, day))
+	var name := String(WorldSim.group(gid).get("name", "a camp"))
+	SurvivorPerson.note(rec, "joined %s" % name)
+	Survival._journal_line("%s took in %s, running from the dead." % [name.left(1).to_upper() + name.substr(1), String(rec.get("name", "someone"))])
+
+
+## Host: `rec` at `where` ("settlement", or a claimed place's key) asks to stay: a line, the flag
+## the talk reads ("Let them stay"), and at the farm the council's question (a take-in vote: one
+## for the household, the rest of them added as they come).
+static func server_ask_stay(layer: SurvivorsLayer, rec: Dictionary, where: String) -> void:
+	rec["asks_stay"] = where
+	SurvivorPerson.note(rec, "asked to stay")
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	if b and not Children.is_child_rec(rec):
+		layer.say(b, STAY_LINES[absi(hash(String(rec.get("id", "")))) % STAY_LINES.size()])
+	if b:
+		layer._set_known(b, rec)
+	if where != "settlement" or not Settlement.exists():
+		return
+	var key := String(rec.get("refugee_from", ""))
+	for v: Dictionary in Council.open_votes():
+		var q: Dictionary = v.question
+		if String(q.get("kind", "")) == "take_in" and q.has("refugees") and String(q.get("refugees_from", "-")) == key:
+			if not String(rec.id) in (q.refugees as Array):
+				(q.refugees as Array).append(String(rec.id))
+			rec["stay_vote"] = int(v.id)
+			return
+	var id := Council.server_put({"kind": "take_in", "people": [], "refugees": [String(rec.id)], "refugees_from": key,
+		"text": "Take in %s, running from the dead?" % String(rec.get("name", "someone"))}, ["Take them in", "Turn them away"],
+		func(result: String) -> void: _stay_voted(key, result == "Take them in"))
+	rec["stay_vote"] = id
+
+
+static func _stay_voted(key: String, yes: bool) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var lvl: CompoundLevel = CompoundLevel.current(tree.root) if tree else null
+	var layer: SurvivorsLayer = SurvivorsLayer.find(lvl) if lvl else null
+	for rec: Dictionary in SurvivorsLayer.records().values().duplicate():
+		if String(rec.get("asks_stay", "")) == "settlement" and String(rec.get("refugee_from", "")) == key and String(rec.get("status", "")) == "out_there":
+			_stay_answer(layer, rec, yes, null)
+
+
+## Host: a player's answer (`yes`) to `rec` asking to stay (TalkMenu "Let them stay" / "Turn them
+## away"): everyone of theirs asking with them gets it; an open vote on them is closed. Returns the line.
+static func server_let_stay(layer: SurvivorsLayer, actor: Soldier, rec: Dictionary, yes: bool) -> String:
+	var where := String(rec.get("asks_stay", ""))
+	if where == "" or String(rec.get("status", "")) != "out_there":
+		return ""
+	var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+	var vid := int(rec.get("stay_vote", -1))
+	var v: Dictionary = Council.get_vote(vid) if vid >= 0 else {}
+	if not v.is_empty() and String(v.get("state", "")) == "open":
+		v["state"] = "done"
+		v["result"] = String((v.options as Array)[0 if yes else 1])
+		v["done_h"] = Moods.now_h()
+		Council._callbacks.erase(vid)
+	var key := String(rec.get("refugee_from", ""))
+	var hkey := household_key(rec)
+	var line := STAY_YES if yes else STAY_NO
+	if b:
+		layer.say(b, line)
+	for r: Dictionary in SurvivorsLayer.records().values().duplicate():
+		if String(r.get("asks_stay", "")) == where and String(r.get("status", "")) == "out_there" and (r == rec or (key != "" and String(r.get("refugee_from", "")) == key) or household_key(r) == hkey):
+			_stay_answer(layer, r, yes, actor)
+	return line
+
+
+static func _stay_answer(layer: SurvivorsLayer, rec: Dictionary, yes: bool, by: Soldier) -> void:
+	var where := String(rec.get("asks_stay", ""))
+	rec.erase("asks_stay")
+	rec.erase("stay_vote")
+	if not yes:
+		SurvivorPerson.note(rec, "was turned away")
+		if where == "settlement":
+			_flee_on(layer, rec, {"from": _arr(Settlement.pos()), "key": String(rec.get("refugee_from", ""))}, "settlement")
+		else:
+			var b: Soldier = layer.body_of(String(rec.get("id", ""))) if layer else null
+			if b:
+				layer._set_known(b, rec)
+		return
+	if by:
+		SurvivorPerson.change_opinion(rec, Survival.profile_of(by), TalkMenu.JOIN_OPINION)
+	if where == "settlement":
+		rec.erase("refugee_from")
+		Moods.remove(rec, "lost_home")
+		if layer:
+			layer.server_settle(rec, by)
+		else:
+			Settlement.server_make_settler(rec, by)
+		return
+	_stay_at_claimed(layer, rec, where)
+
+
+## Host: `rec` stays on at the place `key` the players claimed (call 143, gap 2): it's their home
+## now, the players' place.
+static func _stay_at_claimed(_layer: SurvivorsLayer, rec: Dictionary, key: String) -> void:
+	rec.erase("refugee_from")
+	rec["claimed_place"] = key
+	SurvivorPerson.note(rec, "stayed on at a place the players hold")
 
 
 # --- Live: a world group's camp (WorldLive) -----------------------------------------------------------
@@ -849,6 +1152,8 @@ static func sim_flee(m: WorldModel, members: Array) -> Dictionary:
 	var to_y := 0.0
 	var label := ""
 	var best_d := INF
+	var host_key := ""
+	var host_g: Dictionary = {}
 	for pid: String in WorldModel._sorted(m.people.keys()):
 		var o: Dictionary = m.people[pid]
 		if String(o.get("status", "")) != "out_there" or String(o.get("zone", "")) != z or household_key(o) == hkey or Children.is_child_rec(o):
@@ -861,12 +1166,24 @@ static func sim_flee(m: WorldModel, members: Array) -> Dictionary:
 			to = p2
 			to_y = float(op[1]) if op.size() > 2 and not bool(o.get("y_unset", false)) else 0.0
 			label = "%s's place" % String(o.get("first", o.get("name", "someone")))
+			host_key = household_key(o)
 	if not to.is_finite():
 		to_zone = WorldFights._quietest_link(m, z)
 		var places: Array = m.zone(to_zone).get("places", [])
-		var pl: Dictionary = places[rng.randi_range(0, places.size() - 1)] if not places.is_empty() else {}
+		var free: Array = []
+		var camp: Dictionary = {}
+		for p: Dictionary in places:
+			var holder := String(p.get("holder", ""))
+			if holder == "":
+				free.append(p)
+			elif host_g.is_empty() and group_refuses(m.group(holder), head) == "":
+				host_g = m.group(holder)  # (a camp that takes them in; a starving or hostile one turns them away)
+				camp = p
+		var pool: Array = free if not free.is_empty() else places
+		var pl: Dictionary = camp if not camp.is_empty() else ((pool[rng.randi_range(0, pool.size() - 1)] as Dictionary) if not pool.is_empty() else {})
 		to = m._place_pos(pl, rng, 40.0) if not pl.is_empty() else Vector2.ZERO
-		label = String(m.zone(to_zone).get("name", to_zone))
+		label = String(host_g.get("name", "")) if not host_g.is_empty() else String(m.zone(to_zone).get("name", to_zone))
+	var hosts: Array = household_members(m.people, z, host_key) if host_key != "" and to_zone == z else []
 	var word := place_word(_sim_type_near(m, z, home))
 	var text := left_text(members, word)
 	var ids: Array = []
@@ -898,6 +1215,10 @@ static func sim_flee(m: WorldModel, members: Array) -> Dictionary:
 			for id: String in GRAB:
 				(rec.get("kit", []) as Array).append({"id": id, "count": 1})
 		m.note(rec, "ran from the dead, to %s" % label)
+		if not host_g.is_empty():
+			take_in(host_g, rec, m.now)  # (the camp they reached takes them in)
+		elif not hosts.is_empty() and join_household(rec, hosts, host_key):
+			m.note(rec, "was taken in by %s" % family_name(hosts))
 	var e := {"key": key, "zone": z, "pos": [home.x, home.y, home.z], "ids": ids, "names": names, "text": text, "word": word, "day": m.day(),
 		"state": "abandoned", "refugees": ids.filter(func(id: String) -> bool: return id != caught), "where": label, "signs": false, "door_open": true,
 		"clear_since": NOT_CLEAR, "by": "the dead", "y_unset": hp.size() < 3 or is_zero_approx(float(hp[1]))}
@@ -1150,7 +1471,7 @@ static func server_abandon_settlement() -> int:
 		var dead := Survival.zombies(layer.level)
 		if not dead.is_empty():
 			from = (dead[0] as Soldier).global_position
-		dest = safe_place(layer, Settlement.pos(), from, list)
+		dest = safe_place(layer, Settlement.pos(), from, list, ["settlement"])
 	for rec: Dictionary in list:
 		ids.append(String(rec.id))
 		rec["status"] = "out_there"
@@ -1236,6 +1557,13 @@ static func server_return(layer: SurvivorsLayer, key: String, by: Soldier = null
 		n += 1
 		i += 1
 		rec.erase("refugee_from")
+		var j: Dictionary = rec.get("joined", {})
+		if String(j.get("kind", "")) == "household":  # (they leave the household that took them in)
+			if String(j.get("old", "")) != "":
+				rec["household"] = String(j.old)
+			else:
+				rec.erase("household")
+			rec.erase("joined")
 		Moods.remove(rec, "lost_home")
 		Moods.add(rec, "home_again", 8.0, 24.0)
 		SurvivorPerson.note(rec, "went home")

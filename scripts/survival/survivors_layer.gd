@@ -164,6 +164,8 @@ func _set_known(s: Soldier, rec: Dictionary) -> void:
 		info["deserter"] = true
 	if String(rec.get("refugee_from", "")) != "" and String(rec.get("status", "")) == "out_there":  # (call 143: "It's clear now")
 		info["refugee"] = true
+	if String(rec.get("asks_stay", "")) != "" and String(rec.get("status", "")) == "out_there":  # (call 143: they ask to stay)
+		info["asks_stay"] = true
 	if HeliCrew.is_crew(rec):  # (the downed helicopter's crew: HeliCrew's talk entries)
 		info["crew"] = true
 		info["escort"] = bool(rec.get("heli_escort", false))
