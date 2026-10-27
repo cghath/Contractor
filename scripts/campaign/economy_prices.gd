@@ -113,8 +113,17 @@ static func support_kinds() -> Array:
 
 
 ## What a helicopter support lost this op costs to replace (0 for a kind with no helicopter).
-static func lost_support_price(kind: String) -> int:
-	return int((data().get("lost_supports", {}) as Dictionary).get(kind, 0))
+static func lost_support_price(kind: String, rated := 0) -> int:
+	var full := int((data().get("lost_supports", {}) as Dictionary).get(kind, 0))
+	return roundi(full * lost_rating_mult(rated))
+
+
+## v0.7.1 (the Captain: starter missions going negative; a lost helicopter's $15,000 was the
+## worst line of a rated 2): the deductible by the contract's briefed rating, "lost_by_rating"
+## (index = rating; 0 or unknown pays it in full). Proposed.
+static func lost_rating_mult(rated: int) -> float:
+	var by: Array = data().get("lost_by_rating", [])
+	return float(by[rated]) if rated > 0 and rated < by.size() else 1.0
 
 
 ## A deployment's running costs (data/prices.json "operations"): per_head_day, kia_benefit, wounded_care.

@@ -119,6 +119,15 @@ func deployment() -> Dictionary:
 	return _view().get("deployment", {})
 
 
+## The highest briefed rating among the deployment's contracts (0 with none: a raid, a zone
+## walked into).
+func deployment_rating() -> int:
+	var best := 0
+	for cid: Variant in deployment().get("cids", []):
+		best = maxi(best, int(contract(String(cid)).get("rated", 0)))
+	return best
+
+
 func is_deployed() -> bool:
 	return not deployment().is_empty()
 
@@ -1125,7 +1134,12 @@ func _pass_days(debrief: Dictionary, calc_report: Dictionary, report: Dictionary
 		Economy.add_cash(-int(spent.charge), "Deployment costs: %s" % debrief.zone_name)
 	debrief["expenses"] = spent.lines
 	debrief["expenses_total"] = spent.total
-	debrief["net"] = int(debrief.totals.contract_value) - int(spent.total)
+	# The job's own net (v0.7.1, the Captain: "going negative on early starter missions is
+	# common"): its value less what it cost; the company's running costs in its days (wages,
+	# upkeep, loans) are their own line, paid deployed or not. "net_all" is both together.
+	debrief["running_total"] = int(spent.running)
+	debrief["net"] = int(debrief.totals.contract_value) - (int(spent.total) - int(spent.running))
+	debrief["net_all"] = int(debrief.totals.contract_value) - int(spent.total)
 	SessionLog.note(debrief_log_line(debrief, report))
 	_commit()
 	_save()

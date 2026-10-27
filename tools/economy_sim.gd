@@ -555,7 +555,7 @@ func _deploy(prof: Dictionary) -> Dictionary:
 	for k: String in prof.supports:
 		if _rng.randf() < float(prof.supports[k]) * (1.5 if hot else 1.0):
 			if Economy.server_pay_support(k, cid) and Prices.lost_support_price(k) > 0 and _rng.randf() < float(prof.heli_loss):
-				Economy.charge_run(roundi(Prices.lost_support_price(k) * HeliUpgrades.lost_mult(k)), "Lost helicopter (%s support): replacement" % k)
+				Economy.charge_run(roundi(Prices.lost_support_price(k, Contracts.deployment_rating()) * HeliUpgrades.lost_mult(k)), "Lost helicopter (%s support): replacement" % k)
 	_harvest("")
 	var deaths := _count(prof, "deaths", float(prof.deaths) * (1.5 if hot else 1.0))
 	var free := int(RosterDeployment.FREE_RESPAWNS.get(kind, 4))

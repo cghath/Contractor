@@ -200,9 +200,13 @@ func _header(d: Dictionary) -> void:
 	stats.add_child(UiKit.stat("Deductions", "-$" + DebriefCalc.money(deductions(d))))
 	stats.add_child(UiKit.stat("Days", str(int(d.get("days", 0)))))
 	if d.has("expenses_total"):
-		stats.add_child(UiKit.stat("Expenses", "-$" + DebriefCalc.money(d.expenses_total)))
+		var running := int(d.get("running_total", 0))
+		stats.add_child(UiKit.stat("Job expenses", "-$" + DebriefCalc.money(int(d.expenses_total) - running)))
 		## Economy overhaul 2026-10-20: the contract's own result; loot and salvage sell later.
-		stats.add_child(UiKit.stat("Net (before loot)", "$" + DebriefCalc.money(d.get("net", 0))))
+		## v0.7.1: the job's net, the company's running costs apart.
+		stats.add_child(UiKit.stat("Job net (before loot)", "$" + DebriefCalc.money(d.get("net", 0))))
+		if running != 0:
+			stats.add_child(UiKit.stat("Running costs", "-$" + DebriefCalc.money(running)))
 	var sold_here: int = DebriefCalc.money_in(d).filter(func(l: Dictionary) -> bool: return String(l.what).ends_with(" sold")) \
 		.reduce(func(acc: int, l: Dictionary) -> int: return acc + int(l.amount), 0)
 	if sold_here > 0:
@@ -308,10 +312,14 @@ static func ledger_lines(d: Dictionary) -> Array:
 		out.append({"what": "Civilian fines", "amount": "-$" + DebriefCalc.money(d.fines), "tone": "bad",
 			"why": "%d civilian casualt%s" % [int(d.get("civilians", 0)), "y" if int(d.get("civilians", 0)) == 1 else "ies"]})
 	if d.has("expenses_total"):
-		out.append({"what": "Expenses", "amount": "-$" + DebriefCalc.money(d.expenses_total), "tone": "bad",
-			"why": "supports, respawns, field costs, treatment and the days' bills: see where the money went"})
-		out.append({"what": "Net (before loot and salvage)", "amount": "$" + DebriefCalc.money(d.get("net", 0)), "tone": "good" if int(d.get("net", 0)) >= 0 else "bad",
-			"why": "the contract's value less the expenses"})
+		var running := int(d.get("running_total", 0))
+		out.append({"what": "Job expenses", "amount": "-$" + DebriefCalc.money(int(d.expenses_total) - running), "tone": "bad",
+			"why": "supports, respawns, field costs, lost helicopters, treatment: see where the money went"})
+		out.append({"what": "Job net (before loot and salvage)", "amount": "$" + DebriefCalc.money(d.get("net", 0)), "tone": "good" if int(d.get("net", 0)) >= 0 else "bad",
+			"why": "the contract's value less what the job cost"})
+		if running != 0:
+			out.append({"what": "Company running costs (these days)", "amount": "-$" + DebriefCalc.money(running), "tone": "bad",
+				"why": "wages, upkeep and loans: paid every day, deployed or not"})
 	return out
 
 

@@ -668,6 +668,8 @@ func _test_overhaul_numbers() -> void:
 	check(Prices.lost_support_price("transport") == 15000 and Prices.lost_support_price("resupply") == 15000 and Prices.operations("kia_benefit") == 8000
 		and is_equal_approx(Prices.respawn_rise(), 0.25) and Prices.respawn_price() == 3000 and Prices.respawn_max() == 6000,
 		"a lost helicopter's deductible $15,000, death benefit $8,000, respawns $3,000 +25% each up to $6,000")
+	check(Prices.lost_support_price("transport", 1) == 6000 and Prices.lost_support_price("transport", 2) == 8250 and Prices.lost_support_price("transport", 5) == 15000,
+		"v0.7.1: the deductible by the briefed rating: $6,000 on a 1, $8,250 on a 2, in full on a 5")
 	check(Prices.operations("per_head_day") == 550 and Prices.operations("hc_per_head_day") == 250 and Prices.operations("wounded_care") == 900
 		and Prices.support_price("insertion") == 6000 and Prices.support_price("resupply") == 10000 and Prices.support_price("extraction") == 12000,
 		"field costs $550 a head a day ($250 for the high command squads), treatment $900, a heli insertion $6,000, supports a little cheaper")
@@ -741,6 +743,9 @@ func _test_economy_balance() -> void:
 	check(bad_net < 0, "a disastrous one (2 KIA, a lost helicopter, supports, failed) loses money: $%d" % bad_net)
 	check(be.lines.any(func(l: Dictionary) -> bool: return String(l.what).begins_with("Death benefit")) and int(be.charge) < int(be.total),
 		"the expense lines list the death benefit and the run's own costs")
+	var billed := DebriefCalc.expenses({}, 2, [{"what": "Wages", "amount": 3000, "bill": true}, {"what": "Wages", "amount": 3000, "bill": true}, {"what": "Support call: resupply", "amount": 12000}])
+	check(int(billed.running) == 6000 and int(billed.total) - int(billed.running) == 12000,
+		"v0.7.1: the days' bills are the company's running costs, apart from the job's own expenses")
 	# Daily bills are listed per day and summed per kind in the debrief, and a bought respawn costs money.
 	Contracts.new_full_campaign(7, 500000)
 	Economy.take_run_expenses()

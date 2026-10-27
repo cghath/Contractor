@@ -84,7 +84,9 @@ static func seed_standing(data: Dictionary, day: int, rng: RandomNumberGenerator
 	return added
 
 
-## The next squad the host can hire ({} when MAX_HIRED are on the books).
+## The next squad the host can hire ({} when MAX_HIRED are on the books). A squad wiped out (no
+## one left alive) frees its callsign: the next hire takes it up again (its dead keep their
+## history on the roster).
 static func next_hire(data: Dictionary) -> Dictionary:
 	var living := 0
 	for d: Dictionary in detachments(data).values():
@@ -93,7 +95,7 @@ static func next_hire(data: Dictionary) -> Dictionary:
 	if living >= MAX_HIRED:
 		return {}
 	for spec: Dictionary in HIREABLE:
-		if not detachments(data).has(String(spec.id)):
+		if not detachments(data).has(String(spec.id)) or int(strength(data, String(spec.id)).total) == 0:
 			return spec
 	return {}
 

@@ -362,6 +362,9 @@ func _test_hiring() -> void:
 	for i in Heroes.MAX_HIRED - 1:
 		BaseHub.server_hire_hc_squad()
 	check(Heroes.detachments(BaseHub.roster()).size() == Heroes.MAX_HIRED and BaseHub.server_hire_hc_squad() != "", "at most %d on the books" % Heroes.MAX_HIRED)
+	for mid: Variant in Heroes.get_detachment(BaseHub.roster(), "d03").members:
+		Roster.get_member(BaseHub.roster(), String(mid))["status"] = Roster.DEAD
+	check(String(Heroes.next_hire(BaseHub.roster()).get("id", "")) == "d03" and BaseHub.server_hire_hc_squad() == "" 		and int(Heroes.strength(BaseHub.roster(), "d03").total) == 4, "a squad wiped out frees its callsign: Viper 3 is hired again")
 	BaseHub.new_campaign(SEED)
 	pool = Hiring.pool(BaseHub.hiring(), 1)
 	var ok := pool.all(func(c: Dictionary) -> bool:
