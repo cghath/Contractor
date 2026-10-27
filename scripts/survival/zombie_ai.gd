@@ -181,7 +181,7 @@ func pace() -> float:
 	var night := DayNight.darkness_at(body.global_position) > 0.5 if body else false
 	var p := float(k.chase) if mode == Mode.CHASE else float(k.walk)
 	if not bool(k.sprint) or mode != Mode.CHASE:
-		p *= (NIGHT_WALK_MULT if night else 1.0) * Survival.dead_speed_mult()  # (the "dead" world option)
+		p *= (lerpf(1.0, NIGHT_WALK_MULT, FirstHour.night_bonus_share()) if night else 1.0) * Survival.dead_speed_mult()  # (the bonus ramps over the first two nights: FirstHour)  # (the "dead" world option)
 	return p * Seasons.dead_pace_mult() * DeadDecay.pace_mult(decay)  # (phase D: the seasons; the dead over time: its age)
 
 

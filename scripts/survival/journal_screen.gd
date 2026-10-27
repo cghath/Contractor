@@ -13,7 +13,8 @@ extends PanelContainer
 ## Proposed: 7 (6 is build mode; no letter is free on foot: controls.gd).
 const TOGGLE_KEY := KEY_7
 const TABS: Array = [["log", "Log"], ["people", "People"], ["places", "Places"], ["deadlines", "Deadlines"], ["trail", "The trail"],
-	["lineage", "Lineage"]]  # (the world's survivors in order: Legacy, call 130)
+	["lineage", "Lineage"],  # (the world's survivors in order: Legacy, call 130)
+	["notes", "Field notes"]]  # the control hints seen, to reread (FieldHints; docs/survival_firsthour.md)
 ## Proposed: the Log tab shows this many days back.
 const LOG_DAYS := 10
 
@@ -73,7 +74,7 @@ func show_view(v: Dictionary) -> void:
 ## Host: everything the tabs show, as lines: {"log": [{"day", "lines"}], "people", "places",
 ## "deadlines", "trail": [lines], "radio": {"repaired", "on", "last"}}.
 static func view() -> Dictionary:
-	return {"log": log_days(), "people": people_lines(), "places": place_lines(), "deadlines": deadline_lines(), "trail": trail_lines(),
+	return {"now": FirstHour.now_lines(), "log": log_days(), "people": people_lines(), "places": place_lines(), "deadlines": deadline_lines(), "trail": trail_lines(),
 		"lineage": Legacy.lineage_lines((Campaign.section(Survival.SURVIVORS) as Dictionary).get(BaseHub.profile(), {})),
 		"radio": {"repaired": bool(FallenRadio.data().repaired), "on": FallenRadio.is_on(), "last": String(FallenRadio.data().get("last", ""))}}
 
@@ -199,6 +200,15 @@ func refresh() -> void:
 	_box.add_child(row)
 	match tab:
 		"log":
+			var now_l: Array = (_view.get("now", []) as Array).duplicate()  # the front page: what now (FirstHour)
+			var me := MapNodes.local_player(self)
+			var unseen := FirstHour.unvisited_line(SurvivalMap.current_zone(), me.global_position) if me else ""
+			if unseen != "":
+				now_l.append(unseen)
+			if not now_l.is_empty():
+				_box.add_child(UiKit.heading("Now"))
+				for l: Variant in now_l:
+					_box.add_child(UiKit.text(String(l)))
 			var days: Array = _view.get("log", [])
 			if days.is_empty():
 				_box.add_child(UiKit.hint("Nothing written yet."))
@@ -216,10 +226,11 @@ func refresh() -> void:
 					var intel_l := Intel.get_intel()
 					if intel_l and letter.text.strip_edges() != "":
 						intel_l.request_letter(letter.text)))
-			var lines: Array = _view.get(tab, [])
+			var lines: Array = FieldHints.field_notes() if tab == "notes" else _view.get(tab, [])
 			if lines.is_empty():
 				_box.add_child(UiKit.hint({"people": "Nobody met yet.", "places": "No marks yet.", "deadlines": "No clocks running.",
-					"trail": "Nothing of the trail yet.", "lineage": "Nobody has died here yet."}.get(tab, "")))
+					"trail": "Nothing of the trail yet.", "lineage": "Nobody has died here yet.",
+					"notes": "Nothing noted yet: tips show once, as things come up."}.get(tab, "")))
 			for l: String in lines:
 				_box.add_child(UiKit.text(l))
 	var radio: Dictionary = _view.get("radio", {})

@@ -40,7 +40,7 @@ const LINK := Color(0.45, 0.48, 0.42)
 const FRAME := Color(0.93, 0.69, 0.27)
 const SELF_COLOUR := Color(0.2, 1.0, 1.0)
 const MARK_COLOURS := {"safehouse": Color(0.35, 0.9, 0.45), "note": Color(1.0, 0.85, 0.3), "camp": Color(0.95, 0.4, 0.3), "village": Color(0.6, 0.8, 1.0),
-	"told": Color(0.85, 0.72, 1.0), "radio": Color(0.55, 0.95, 0.85)}
+	"told": Color(0.85, 0.72, 1.0), "radio": Color(0.55, 0.95, 0.85), "goal": Color(1.0, 0.6, 0.2)}
 const HOVER_PX := 10.0
 ## Proposed: the political wash's colours by the holder's kind, and its strength.
 const KIND_COLOURS := {"settlers": Color(0.35, 0.8, 0.4), "raiders": Color(0.9, 0.25, 0.2), "scavengers": Color(0.9, 0.8, 0.3),
@@ -545,9 +545,10 @@ func _draw_landmarks(zone_id: String, font: Font, t: float) -> void:
 			continue
 		draw_colored_polygon(PackedVector2Array([at + Vector2(0, -6), at + Vector2(5, 4), at + Vector2(-5, 4)]), colour)
 		var p := at + Vector2(8, -4)
-		draw_string_outline(font, p, String(l.name), HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, Color(0, 0, 0, 0.7 * colour.a))
-		draw_string(font, p, String(l.name), HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
-		drawn_landmarks.append({"name": String(l.name), "at": at})
+		var label := String(l.name) if FirstHour.is_visited(zone_id, String(l.name)) else "?"  # unvisited: "?" (FirstHour)
+		draw_string_outline(font, p, label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, 3, Color(0, 0, 0, 0.7 * colour.a))
+		draw_string(font, p, label, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.FONT_SMALL, colour)
+		drawn_landmarks.append({"name": String(l.name), "label": label, "at": at})
 
 
 ## At the settlement's map table (host: MapTable.near): its reports over the map, and listed.
