@@ -113,8 +113,13 @@ bones; the ragdoll drives the same bones); marks past a cut (already dropped).
 cause above, the painted look, face, bruises, reduced gore, and the four realism behaviours.
 `devices_test` also checks every drag-smear streak lies on the ground; `wounds_test`'s dummy has a
 floor now (its pool was 2.5 m below it in the air, which the old code allowed).
-Last full local run: R2810 (smoke, blood, devices, gore, armor, interaction, net, medical,
-casualty green) and R2814 (wounds, blood, devices, perfcases green).
+`blood_test` also checks that nothing is laid on top of the body for wounds, the cavity is open along an
+angled path and blown back at the exit, the hitbox unchanged, and lung and bone show inside.
+Last full local run: R2818 (smoke, blood, devices, wounds, gore, armor, interaction, net, medical,
+casualty, perfcases: town 9.6, city 87.9, fight 40.4, woods 12.4, drive 7.7, heli 7.5 ms average,
+all in budget) and R2827 at e0d872e8 (smoke, blood, devices, wounds, gore). Headless runs never
+compile shaders: look at the shots for the paint (a shader that fails to compile paints nothing and
+no suite notices).
 
 ## Hooks for model-realism (not edited here)
 
