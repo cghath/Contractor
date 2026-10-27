@@ -1059,6 +1059,15 @@ func _test_ballistics_routing() -> void:
 	var dummy: TargetDummy = load("res://scenes/target_dummy.tscn").instantiate()
 	add_child(dummy)
 	dummy.respawn_seconds = 999.0
+	# A floor under it (layer 1, the world): blood lies on the ground, and with none under it a drop
+	# goes (it was laid 2.5 m down in the air: the floating blood, claude/wounds-blood).
+	var ground := StaticBody3D.new()
+	var ground_shape := CollisionShape3D.new()
+	ground_shape.shape = BoxShape3D.new()
+	(ground_shape.shape as BoxShape3D).size = Vector3(6, 0.2, 6)
+	ground.add_child(ground_shape)
+	ground.position = dummy.position + Vector3(0, -0.1, 0)
+	add_child(ground)
 	var shooter := StaticBody3D.new()
 	add_child(shooter)
 	var rifle := ItemDB.get_item(&"m4a1")

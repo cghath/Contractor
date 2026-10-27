@@ -49,10 +49,6 @@ vec3 to_linear(vec3 c) {
 	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 
-vec3 to_srgb(vec3 c) {
-	return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
-
 void fragment() {
 	vec3 cell = floor((local_pos - local_normal * 0.25 * grain) / grain);
 	vec3 p = (cell + 0.5) * grain;
@@ -81,11 +77,12 @@ void fragment() {
 	if (best <= 0.0) {
 		discard;
 	}
-	vec3 base = to_srgb(COLOR.rgb);
+	vec3 base = COLOR.rgb;
 	vec3 blood = mix(vec3(0.20, 0.09, 0.055), vec3(0.30, 0.03, 0.025), wet);
 	vec3 col = mix(base, blood, 0.55 + 0.4 * smoothstep(0.0, 0.5, best)) * (0.93 + hash(cell) * 0.14);
 	ALBEDO = to_linear(col);
-	ROUGHNESS = mix(0.8, 0.3, wet);
+	ROUGHNESS = mix(0.85, 0.55, wet);
+	SPECULAR = 0.35;
 }
 """
 

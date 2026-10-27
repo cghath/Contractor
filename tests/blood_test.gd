@@ -44,6 +44,9 @@ func _ready() -> void:
 	await _test_face()
 	await _test_bruises()
 	await _test_reduced()
+	await _test_runs_follow_gravity()
+	await _test_spurts()
+	await _test_seeping_dressing()
 	GameState.delete_save()
 	BodyDeform.gore_override = ""
 	print("BLOOD TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -494,6 +497,99 @@ func _test_reduced() -> void:
 	check(mat != null and float(mat.get_shader_parameter(&"torn")) == 0.0 and absf(a[0].w - WoundMarks.ENTRY_SIZE * 0.5 * WoundSkin.REDUCED_HOLE * unit) < 0.01,
 		"no torn flesh or cloth, the hole smaller")
 	BodyDeform.gore_override = "full"
+	s.vitals.server_reset_health()
+	s.queue_free()
+	await _frames(3)
+
+
+# --- How it works (Captain, 2026-10-27: "more realistic in how it works") -------------------------
+
+func _test_runs_follow_gravity() -> void:
+	print("Blood runs the way down is now")
+	var s := await _man(SPOT + Vector3(26, 0, 0))
+	var marks := _marks(s)
+	_wound(s, Vitals.THIGH_L, "venous", 0.8, &"", Vector3(-0.075, 0.62, -0.085))
+	await _seconds(1.0)
+	var hole: Dictionary = marks._spots.values()[0].holes[0]
+	var standing := (hole.runs as Array).size()
+	var low: Variant = marks._lowest_point(marks._spots.values()[0])
+	var hole_y := marks.to_world(Vitals.THIGH_L, hole.at).y
+	check(standing == 1 and low is Vector3 and (low as Vector3).y < hole_y - 0.03,
+		"standing: one run down the leg, and it drips from below the hole, where the blood gets to (%.2f m under it)" % [hole_y - (low as Vector3).y if low is Vector3 else -1.0])
+	var m: WoundModel = s.vitals._model
+	m.knockout_left = 120.0  # knocked out: he goes down (the ragdoll) and lies there
+	m.update_state(0.0)
+	s.vitals._after_change(true)
+	s.set_physics_process(true)
+	await _seconds(3.0)
+	var runs: Array = hole.runs
+	check(runs.size() >= 2 and runs.size() <= WoundMarks.MAX_RUNS and rad_to_deg(Vector3(runs[0].dir).angle_to(runs[-1].dir)) > WoundMarks.RUN_TURN_DEG and float(runs[0].to) >= 0.0,
+		"down on the ground: a new run the way down is now, the first left where it ran (%d runs, %.0f degrees apart)"
+		% [runs.size(), rad_to_deg(Vector3(runs[0].dir).angle_to(runs[-1].dir)) if runs.size() > 1 else 0.0])
+	var mat := marks.skin.material_of(s.model.part_node(Vitals.THIGH_L))
+	check(mat != null and int(mat.get_shader_parameter(&"spot_count")) >= 2, "both runs painted")
+	s.vitals.server_reset_health()
+	s.queue_free()
+	await _frames(3)
+
+
+func _test_spurts() -> void:
+	print("An arterial bleed spurts with the heartbeat")
+	var s := await _man(SPOT + Vector3(28, 0, 0))
+	var marks := _marks(s)
+	_wound(s, Vitals.THIGH_L, "arterial", 1.2, &"femoral_l", Vector3(-0.075, 0.62, -0.085))
+	var fast := 0
+	for i in 60:
+		await get_tree().process_frame
+		for d: Dictionary in marks._drips:
+			if Vector3(d.vel).length() > 0.8 and d.get("speck", false):
+				fast += 1
+	check(fast > 0, "jets of drops out of the hole (%d seen in the air)" % fast)
+	s.vitals._model.arrest = true
+	s.vitals._model.heart_rate = 0.0
+	await _seconds(0.3)
+	marks._drips.clear()
+	var after := 0
+	for i in 40:
+		await get_tree().process_frame
+		for d: Dictionary in marks._drips:
+			if Vector3(d.vel).length() > 0.8:
+				after += 1
+	check(after == 0, "the heart stopped: no more spurts (%d)" % after)
+	s.vitals.server_reset_health()
+	s.queue_free()
+	await _frames(3)
+
+
+func _test_seeping_dressing() -> void:
+	print("Blood through a dressing")
+	var s := await _man(SPOT + Vector3(30, 0, 0))
+	var marks := _marks(s)
+	var at := Vector3(0.25, 0.95, -0.05)
+	_wound(s, Vitals.FOREARM_R, "muscle", 0.3, &"", at)
+	await _seconds(1.0)
+	s.vitals.server_apply_treatment(&"pressure_bandage", Vitals.FOREARM_R)
+	await _frames(3)
+	var spot: Dictionary = marks._spots.values()[0]
+	var hole: Dictionary = spot.holes[0]
+	var pivot := BodyVolume.pivot_at(Vitals.FOREARM_R)
+	var bloody := func() -> int:
+		var n := 0
+		var plain: Array = hole.dressing
+		var now: Array = marks._bloodied(spot, hole, pivot)
+		for i in mini(plain.size(), now.size()):
+			if Color(now[i][2]) != Color(plain[i][2]):
+				n += 1
+		return n
+	var clean: int = bloody.call()
+	check(marks.dressing_on(Vitals.FOREARM_R) == &"bandage" and float(spot.seep) == 0.0, "bandaged and controlled: nothing comes through (%d bloodied at its edges)" % clean)
+	# A vein under it the bandage doesn't hold.
+	_wound(s, Vitals.FOREARM_R, "venous", 0.9, &"", at)
+	for sp: Dictionary in marks._spots.values():
+		sp.lost = maxf(float(sp.lost), 0.0)
+	await _seconds(2.0)
+	var seeped: int = bloody.call()
+	check(float(spot.seep) > 0.0 and seeped > clean + 5, "still bleeding under it: it reddens from the middle (%d cells, %.3f L through)" % [seeped, float(spot.seep)])
 	s.vitals.server_reset_health()
 	s.queue_free()
 	await _frames(3)

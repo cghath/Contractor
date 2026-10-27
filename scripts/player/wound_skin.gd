@@ -17,16 +17,18 @@ extends RefCounted
 ## trail that runs past its own part goes onto the next part's mesh too.
 
 const RANGE_M := 40.0
-const MAX_SPOTS := 8
+const MAX_SPOTS := 12
 const MAX_BRUISES := 6
 ## How long a stopped bleed takes to dry from wet red-black to brown.
 const DRY_S := 300.0
 ## Soak reach (m) for the blood lost at a spot (L): a graze's few mL a palm, a litre most of a
 ## trouser leg (it runs further down than across: STRETCH_DOWN, see the shader).
 const SOAK_BASE_M := 0.015
-const SOAK_PER_L := 0.30
+const SOAK_PER_L := 0.22
 const SOAK_POWER := 0.6
 const STRETCH_DOWN := 1.6
+## Bare skin doesn't soak like cloth: blood on it runs, and pools only this much round the hole.
+const SKIN_SOAK := 0.2
 ## The trail down the skin: TRAIL_BASE_M once it bleeds, longer with the blood lost.
 const TRAIL_BASE_M := 0.04
 const TRAIL_PER_L := 0.5
@@ -34,6 +36,10 @@ const TRAIL_MAX_M := 0.8
 ## A spot on the trunk soaks no further than this behind the hole's own plane (the back stays
 ## clean of a chest wound).
 const BEHIND_M := 0.1
+## Cloth wicking stops short at what doesn't soak it up: the belt, knee pads, boot tops (rest-pose
+## heights). A soak reaches past one only BARRIER_PASS as far.
+const BARRIERS := [1.0, 0.465, 0.4, 0.17]
+const BARRIER_PASS := 0.35
 ## Reduced gore: holes this much smaller, trails this much shorter.
 const REDUCED_HOLE := 0.7
 const REDUCED_TRAIL := 0.6
@@ -46,14 +52,17 @@ uniform vec3 skin;
 uniform vec3 skin_shade;
 uniform float seed = 0.0;
 uniform float torn = 1.0;
+uniform float bare = 0.0;  // 1 on the head: lips, stubble and all take blood as skin does
 uniform int spot_count = 0;
 // Per spot, in this mesh's own units (sub-voxels): centre and the hole's core radius (0: no
 // hole on this mesh); the way down and the soak's reach; the skin's outward and how far behind
 // it the soak goes; the trail's length, wetness (1 wet .. 0 dried), exit (1) and a salt.
-uniform vec4 spot_a[8];
-uniform vec4 spot_b[8];
-uniform vec4 spot_n[8];
-uniform vec4 spot_c[8];
+uniform vec4 spot_a[12];
+uniform vec4 spot_b[12];
+uniform vec4 spot_n[12];
+uniform vec4 spot_c[12];
+uniform int barrier_count = 0;
+uniform float barrier_y[4];  // heights in this mesh's units (BARRIERS)
 uniform int bruise_count = 0;
 // Per bruise: centre and radius; strength and age (0 fresh .. 1 old).
 uniform vec4 bruise_a[6];
@@ -86,15 +95,11 @@ vec3 to_linear(vec3 c) {
 	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 
-vec3 to_srgb(vec3 c) {
-	return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
-
 void fragment() {
 	vec3 cell = floor(local_pos - local_normal * 0.5);  // one colour per voxel
 	vec3 p = cell + 0.5;
-	vec3 base = to_srgb(COLOR.rgb);
-	bool is_skin = distance(base, skin) < 0.012 || distance(base, skin_shade) < 0.012;
+	vec3 base = COLOR.rgb;  // the palette's own colours (as BodyCondition reads them)
+	bool is_skin = bare > 0.5 || distance(base, skin) < 0.012 || distance(base, skin_shade) < 0.012;
 	float speck = hash(cell);
 	int mark = 0;  // 1 soak, 2 trail, 3 torn, 4 core
 	float soak = 0.0;
@@ -129,16 +134,30 @@ void fragment() {
 		// The trail: down from the hole, narrowing, a little wavy.
 		float width = 1.6 + 1.2 * (1.0 - clamp(along / max(c.x, 0.001), 0.0, 1.0)) + jitter * 0.8;
 		float wiggle = (value_noise(p * 0.25 + c.w) - 0.5) * 2.0;
-		if (along > 0.0 && along < c.x * (0.85 + 0.3 * value_noise(p * 0.5 + c.w)) && abs(lateral + wiggle) < width) {
+		if (along > 0.0 && along < c.x * (0.85 + 0.3 * value_noise(p * 0.5 + c.w)) && abs(lateral + wiggle) < width * (is_skin ? 0.7 : 1.0)) {
+			mark = max(mark, 2);
+			soak = 1.0;
+			wet = max(wet, c.y);
+			continue;
+		}
+		// On bare skin it runs in thin streams either side too, shorter.
+		if (is_skin && along > 0.0 && along < c.x * (0.45 + 0.3 * value_noise(p * 0.7 + c.w + 5.0)) && abs(lateral - 3.5 + wiggle * 0.6) < 0.9) {
 			mark = max(mark, 2);
 			soak = 1.0;
 			wet = max(wet, c.y);
 			continue;
 		}
 		// The soak: further down than across, its edge ragged.
-		float s = along > 0.0 ? along / STRETCH : along / 0.7;
+		float s = along > 0.0 ? along / STRETCH : along / 0.45;
 		float de = sqrt(lateral * lateral + s * s);
-		float reach = b.w * (0.72 + 0.56 * value_noise(p * 0.3 + c.w));
+		// Cloth wicks: fast near the hole, the wet edge ragged and slower further out; it stops
+		// short at the belt, knee pads and boot tops.
+		float reach = b.w * (is_skin ? SKIN_SOAK : 1.0) * (0.72 + 0.56 * value_noise(p * 0.3 + c.w));
+		for (int k = 0; k < barrier_count; k++) {
+			if ((p.y - barrier_y[k]) * (a.y - barrier_y[k]) < 0.0) {
+				reach *= BARRIER_PASS;
+			}
+		}
 		if (de < reach) {
 			mark = max(mark, 1);
 			soak = max(soak, 1.0 - de / reach);
@@ -157,9 +176,10 @@ void fragment() {
 			col = mix(vec3(0.20, 0.08, 0.05), vec3(0.24, 0.035, 0.025), wet);
 		}
 	} else if (mark > 0) {
-		float k = mark == 2 ? 0.9 : 0.45 + 0.5 * smoothstep(0.0, 0.6, soak);
+		// Darkest where it's soaked through (near the hole, the low side), lighter at the wet edge.
+		float k = mark == 2 ? 0.9 : 0.35 + 0.6 * smoothstep(0.0, 0.7, soak);
 		vec3 blood = is_skin ? mix(vec3(0.27, 0.07, 0.045), vec3(0.47, 0.06, 0.05), wet)
-			: mix(vec3(0.19, 0.09, 0.055), vec3(0.17, 0.025, 0.02), wet);
+			: mix(vec3(0.22, 0.11, 0.07), vec3(0.27, 0.035, 0.03), wet);  // dried brown .. wet maroon
 		col = mix(base, blood, k) * (0.94 + speck * 0.12);
 	} else if (is_skin) {
 		float bruise = 0.0;
@@ -175,13 +195,15 @@ void fragment() {
 		if (bruise <= 0.0) {
 			discard;
 		}
-		vec3 tint = mix(vec3(0.42, 0.20, 0.30), vec3(0.30, 0.22, 0.38), age);  // red-purple, then bluer
-		col = mix(base, tint, clamp(bruise * 1.4, 0.0, 0.75));
+		// Darker, redder skin; a little blue-grey as it ages (Captain, 2026-10-27: "too purple").
+		vec3 tint = mix(base * vec3(0.72, 0.52, 0.50), base * vec3(0.62, 0.55, 0.60), age);
+		col = mix(base, tint, clamp(bruise * 1.2, 0.0, 0.6));
 	} else {
 		discard;
 	}
 	ALBEDO = to_linear(col);
-	ROUGHNESS = mark == 0 ? 0.85 : mix(0.85, 0.35, wet);  // wet blood shines
+	ROUGHNESS = mark == 0 ? 0.85 : mix(0.85, 0.55, wet);  // wet blood shines a little
+	SPECULAR = 0.35;
 }
 """
 
@@ -201,6 +223,28 @@ func _init(p_model: CharacterModel, p_body: String) -> void:
 ## The parts a bone carries: one per bone, the one whose pivot and box stand for it.
 const BONE_PARTS: Array[StringName] = [&"head", &"chest", &"upper_arm_l", &"upper_arm_r", &"forearm_l", &"forearm_r",
 	&"thigh_l", &"thigh_r", &"shin_l", &"shin_r"]
+
+
+## Which bones a spot on each bone can soak or run on to: its own and those joined to it (a left
+## thigh's blood never crosses to the right leg).
+const JOINED := {
+	&"head": [&"chest"],
+	&"chest": [&"head", &"upper_arm_l", &"upper_arm_r", &"thigh_l", &"thigh_r"],
+	&"upper_arm_l": [&"chest", &"forearm_l"], &"upper_arm_r": [&"chest", &"forearm_r"],
+	&"forearm_l": [&"upper_arm_l"], &"forearm_r": [&"upper_arm_r"],
+	&"thigh_l": [&"chest", &"shin_l"], &"thigh_r": [&"chest", &"shin_r"],
+	&"shin_l": [&"thigh_l"], &"shin_r": [&"thigh_r"],
+}
+
+
+## The bone part (BONE_PARTS) body part `part` is drawn on.
+static func bone_part(part: StringName) -> StringName:
+	match BodyMap.segment_of(part):
+		&"torso":
+			return &"chest"
+		&"head":
+			return &"head"
+	return part
 
 
 ## Where each bone's mesh is in the rest pose (its part's box, the whole segment for the trunk
@@ -227,8 +271,11 @@ func paint(spots: Array, bruises: Array, full: bool) -> void:
 		var box := rest_box(part).grow(0.01)
 		var mine: Array = []
 		for s: Dictionary in spots:
+			var own := bone_part(StringName(s.part))
+			if own != part and part not in JOINED.get(own, []):
+				continue
 			var reach := reach_of(s)
-			if box.grow(reach).has_point(s.at):
+			if own == part or box.grow(reach).has_point(s.at):
 				mine.append(s)
 		# Its own holes first, then the biggest soaks from elsewhere.
 		mine.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -343,6 +390,12 @@ func _paint_mesh(key: Node3D, mi: MeshInstance3D, to_mesh: Transform3D, part: St
 	material.set_shader_parameter(&"bruise_a", ba)
 	material.set_shader_parameter(&"bruise_b", bb)
 	material.set_shader_parameter(&"torn", 1.0 if full else 0.0)
+	material.set_shader_parameter(&"bare", 1.0 if part == &"head" else 0.0)
+	var barriers := PackedFloat32Array()
+	for y: float in BARRIERS:
+		barriers.append((to_mesh * (Vector3(0.0, y, 0.0) - Vector3(0.0, pivot.y, 0.0))).y if part != &"head" else -1e6)
+	material.set_shader_parameter(&"barrier_count", barriers.size())
+	material.set_shader_parameter(&"barrier_y", barriers)
 
 
 ## Keeps a painted skin on its part's mesh as drawn now: the hand's pose swapped in, a carved
@@ -402,7 +455,7 @@ func clear() -> void:
 func _new_material(bone: Node3D) -> ShaderMaterial:
 	if _shader == null:
 		_shader = Shader.new()
-		_shader.code = SHADER.replace("STRETCH", "%.2f" % STRETCH_DOWN)
+		_shader.code = SHADER.replace("STRETCH", "%.2f" % STRETCH_DOWN).replace("SKIN_SOAK", "%.2f" % SKIN_SOAK).replace("BARRIER_PASS", "%.2f" % BARRIER_PASS)
 	var material := ShaderMaterial.new()
 	material.shader = _shader
 	var scheme := model.variant  # the scheme it was built in: its part's, a face's own palette (BodyCondition.scheme_of)

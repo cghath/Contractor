@@ -93,6 +93,28 @@ const BRUISE_STOP_R := 0.045
 const BRUISE_BREAK_R := 0.06
 ## The painted skin while it bleeds: repainted at most every SKIN_TICK_S.
 const SKIN_TICK_S := 0.3
+## Realism (Captain, 2026-10-27: "it needs to be more realistic in how it works"):
+## - Runs follow the way down as the body is now: when that turns more than RUN_TURN_DEG from the
+##   run in progress (he falls, is laid down, carried) a new run starts from the hole; the old one
+##   stays where it ran. MAX_RUNS a hole (the first and the latest kept).
+## - Arterial and junctional bleeds spurt with the heartbeat: SPURT_DROPS drops a beat, as fast
+##   as SPURT_MPS at full pressure (blood fraction PRESSURE_FROM down to PRESSURE_GONE: none).
+## - Drips leave from where the blood ends up: the lowest of the hole, the ends of its runs and the
+##   low edge of its soak.
+## - A dressing over a wound still bleeding under it reddens from the middle (SEEP_*), and one put
+##   on a bloody wound picks up blood at its edges (EDGE_*).
+const RUN_TURN_DEG := 35.0
+const MAX_RUNS := 3
+const SPURT_DROPS := 3
+const SPURT_MPS := 2.2
+const PRESSURE_FROM := 0.85
+const PRESSURE_GONE := 0.4
+const ARTERIAL_KINDS := ["arterial", "junctional"]
+const SEEP_BASE_M := 0.012
+const SEEP_PER_SQRT_L := 0.25
+const SEEP_MAX_M := 0.07
+const EDGE_FROM_L := 0.03
+const EDGE_SHARE := 0.35
 ## Dressing looks: a pressure bandage (Israeli style), packed gauze, a vented chest seal.
 const BANDAGE_COLOUR := Color("e3dcc4")
 const BANDAGE_WEAVE := Color("cfc6aa")
@@ -215,6 +237,7 @@ func _rebuild() -> void:
 		if not seen.has(spot_key):
 			seen[spot_key] = true
 			spot.flow = 0.0
+			spot.arterial = 0.0
 			spot.treated = false
 			spot.look = &""
 		if w.treated:
@@ -224,12 +247,15 @@ func _rebuild() -> void:
 			spot.look = look
 		if String(w.kind) in EXTERNAL_KINDS and not w.treated and not w.packed and not w.clamped:
 			spot.flow += float(w.rate) * (0.1 if w.tourniquet else 1.0)
+			if String(w.kind) in ARTERIAL_KINDS and not w.tourniquet:
+				spot.arterial += float(w.rate)
 	for spot_key: String in _spots.keys():
 		if not seen.has(spot_key):
 			_spots.erase(spot_key)  # healed or reset: the stain goes too
 	for spot: Dictionary in _spots.values():
-		if spot.treated:
-			spot.flow = 0.0
+		# (A dressing over a wound that still bleeds under it keeps bleeding: it seeps through.)
+		if spot.treated and float(spot.dressed_lost) < 0.0:
+			spot.dressed_lost = spot.lost  # how bloody it was when it was dressed
 		if spot.flow > 0.0:
 			spot.stopped = INF
 		elif float(spot.stopped) == INF:
@@ -262,13 +288,19 @@ func paint_skin() -> void:
 		var flowing: bool = spot.flow > 0.0 and alive
 		var wet := 1.0 if flowing or float(spot.stopped) == INF else clampf(1.0 - (now - float(spot.stopped)) / WoundSkin.DRY_S, 0.0, 1.0)
 		var soak := WoundSkin.SOAK_BASE_M + WoundSkin.SOAK_PER_L * pow(lost, WoundSkin.SOAK_POWER)
-		var trail := 0.0 if lost <= 0.0 else minf(WoundSkin.TRAIL_BASE_M + WoundSkin.TRAIL_PER_L * sqrt(lost), WoundSkin.TRAIL_MAX_M)
 		for hole: Dictionary in spot.holes:
-			spots.append({"part": spot.part, "at": hole.at, "n": hole.n, "down": spot.down, "exit": hole.exit,
-				"core": (EXIT_SIZE if hole.exit else ENTRY_SIZE) * 0.5, "soak": soak, "trail": trail, "wet": wet,
-				"salt": float(hash(hole.at) % 997) / 9.7})
-			# The skin round a hole bruises too (shows on bare skin past the soak).
-			bruises.append({"at": hole.at, "r": soak + 0.025, "s": 0.35, "age": 0.0})
+			var salt := float(hash(hole.at) % 997) / 9.7
+			var runs: Array = hole.runs
+			# The hole and its soak, sagging the way down is now, with the run in progress (the latest).
+			var latest: Dictionary = runs[-1] if not runs.is_empty() else {}
+			spots.append({"part": spot.part, "at": hole.at, "n": hole.n, "down": spot.down if latest.is_empty() else latest.dir,
+				"exit": hole.exit, "core": (EXIT_SIZE if hole.exit else ENTRY_SIZE) * 0.5, "soak": soak,
+				"trail": _run_length(latest, lost), "wet": wet, "salt": salt})
+			for i in runs.size() - 1:  # runs from before he moved: where they ran then
+				spots.append({"part": spot.part, "at": hole.at, "n": hole.n, "down": runs[i].dir, "exit": false, "core": 0.0,
+					"soak": 0.0, "trail": _run_length(runs[i], lost), "wet": wet, "salt": salt + 3.1 * (i + 1)})
+			# The skin right round a hole bruises a little (bare skin only).
+			bruises.append({"at": hole.at, "r": (EXIT_SIZE if hole.exit else ENTRY_SIZE) + 0.012, "s": 0.3, "age": 0.0})
 	for g: Dictionary in bruise_records():
 		var at: Variant = BlastGore.to_vec(g.get("a"))
 		if at is Vector3:
@@ -280,6 +312,63 @@ func paint_skin() -> void:
 			if at is Vector3:
 				bruises.append({"at": at, "r": BRUISE_BREAK_R, "s": 0.55, "age": _bruise_age("f%s%s" % [w.part, w.name])})
 	skin.paint(spots, bruises, BodyDeform.gore_level() == "full")
+
+
+## How far a run has got (m) from the blood lost while it ran (`lost` now, for the run in progress).
+static func _run_length(run: Dictionary, lost: float) -> float:
+	if run.is_empty():
+		return 0.0
+	var ran := (float(run.to) if float(run.to) >= 0.0 else lost) - float(run.from)
+	return 0.0 if ran <= 0.0 else minf(WoundSkin.TRAIL_BASE_M + WoundSkin.TRAIL_PER_L * sqrt(ran), WoundSkin.TRAIL_MAX_M)
+
+
+## Where `spot`'s blood gets to lowest in the world now (where it drips from): its holes, the ends
+## of their runs and the low edge of its soak, each on the skin of the part it reaches.
+func _lowest_point(spot: Dictionary) -> Variant:
+	var soak := WoundSkin.SOAK_BASE_M + WoundSkin.SOAK_PER_L * pow(float(spot.lost), WoundSkin.SOAK_POWER)
+	var best: Variant = null
+	for hole: Dictionary in spot.holes:
+		var ends: Array[Vector3] = [Vector3(hole.at)]
+		for run: Dictionary in hole.runs:
+			ends.append(Vector3(hole.at) + Vector3(run.dir) * _run_length(run, float(spot.lost)))
+		ends.append(Vector3(hole.at) + Vector3(spot.down) * soak * WoundSkin.STRETCH_DOWN * 0.8)
+		for p: Vector3 in ends:
+			var part: StringName = spot.part if WoundSkin.rest_box(spot.part).has_point(p) else BodyMap.part_at(p)
+			if WoundSkin.bone_part(part) != WoundSkin.bone_part(spot.part) and WoundSkin.bone_part(part) not in WoundSkin.JOINED.get(WoundSkin.bone_part(spot.part), []):
+				part = spot.part
+			var on: Variant = BodyVolume.surface(part, p, _outward(part, p), 0.06, body)
+			if not on is Vector3:
+				continue
+			var w := to_world(part, Vector3(on) + _outward(part, on) * 0.004)
+			if best == null or w.y < (best as Vector3).y:
+				best = w
+	return best
+
+
+## An arterial bleed's heartbeat: each beat a spurt of drops out of its holes, as hard as his
+## blood pressure (blood left) drives it; none once the heart stops.
+func _beat(spot: Dictionary, delta: float) -> void:
+	var rate := vitals.heart_rate() if is_instance_valid(vitals) else 0.0
+	if rate <= 0.0 or vitals._m().arrest:
+		return
+	spot.beat = float(spot.beat) - delta
+	if float(spot.beat) > 0.0:
+		return
+	spot.beat = 60.0 / rate
+	var pressure := clampf((vitals.blood_fraction() - PRESSURE_GONE) / (PRESSURE_FROM - PRESSURE_GONE), 0.0, 1.0)
+	if pressure <= 0.0 or not is_inside_tree():
+		return
+	var strength := pressure * clampf(float(spot.arterial) / 1.2, 0.3, 1.0)
+	for hole: Dictionary in spot.holes:
+		var from := to_world(spot.part, Vector3(hole.at) + Vector3(hole.n) * 0.008)
+		var out := (to_world(spot.part, Vector3(hole.at) + Vector3(hole.n)) - to_world(spot.part, hole.at)).normalized()
+		var floor_y := _floor_below(from)
+		for i in SPURT_DROPS:
+			if _drips.size() >= MAX_DRIPS:
+				return
+			var spread := Vector3(randf_range(-0.2, 0.2), randf_range(-0.1, 0.25), randf_range(-0.2, 0.2))
+			_drips.append({"pos": from, "vel": (out + spread).normalized() * SPURT_MPS * strength * randf_range(0.6, 1.0),
+				"floor": floor_y, "speck": true, "y0": from.y})
 
 
 ## How far a bruise first seen under `key` has turned (0 fresh .. 1).
@@ -310,7 +399,7 @@ func _new_spot(part: StringName, at: Vector3, out: Variant) -> Dictionary:
 	if out is Vector3:
 		holes.append(_new_hole(part, out, true, rng))
 	return {"part": part, "holes": holes, "flow": 0.0, "lost": 0.0, "treated": false, "look": &"", "made": 0, "rng": rng,
-		"down": Vector3.DOWN, "downed": false, "stopped": _now()}  # stopped: when it stopped bleeding (INF while it bleeds)
+		"down": Vector3.DOWN, "downed": false, "stopped": _now(), "arterial": 0.0, "beat": 0.0, "seep": 0.0, "dressed_lost": -1.0}  # stopped: when it stopped bleeding (INF while it bleeds)
 
 
 ## The dressing a treated wound shows (LOOKS), or &"" for none (a splinted bone, a rib).
@@ -341,7 +430,7 @@ func _new_hole(part: StringName, at: Vector3, exit: bool, rng: RandomNumberGener
 	var on_skin: Variant = BodyVolume.surface(part, at, n, 0.05, body)
 	var p: Vector3 = on_skin if on_skin is Vector3 else at
 	var hole := {"at": p, "n": n, "exit": exit, "head": p, "trail": 0, "done": false,
-		"marks": [], "blood": []}
+		"marks": [], "blood": [], "runs": []}  # runs: {"dir" (rest), "from", "to" (L lost; to -1 while it runs)}
 	# The hole: a dark core and a rim of torn, bloodied cloth (ragged and bigger at an exit).
 	var core := EXIT_SIZE if exit else ENTRY_SIZE
 	hole.marks.append([p + n * 0.004, Vector3.ONE * core, HOLE_COLOUR])
@@ -437,7 +526,12 @@ func _process(delta: float) -> void:
 			continue
 		total += spot.flow
 		spot.lost += spot.flow * delta / 60.0
+		if spot.treated:
+			spot.seep += spot.flow * delta / 60.0
+			_dirty = _dirty or Engine.get_process_frames() % 15 == 0  # the dressing reddening
 		_grow(spot)
+		if float(spot.arterial) > 0.0:
+			_beat(spot, delta)
 	if total > 0.0:
 		_drip_timer -= delta
 		if _drip_timer <= 0.0:
@@ -466,9 +560,17 @@ func _grow(spot: Dictionary) -> void:
 	if bone == null:
 		return
 	var down: Vector3 = (bone.global_basis.inverse() * Vector3.DOWN).normalized()
-	if not spot.downed:  # the way it runs, as it first bleeds (the painted trail's)
-		spot.downed = true
-		spot.down = down
+	# The soak sags the way down is now; each hole's run follows it, a new run when it turns.
+	spot.down = down if not spot.downed else Vector3(spot.down).lerp(down, 0.1).normalized()
+	spot.downed = true
+	for hole: Dictionary in spot.holes:
+		var runs: Array = hole.runs
+		if runs.is_empty() or rad_to_deg(Vector3(runs[-1].dir).angle_to(down)) > RUN_TURN_DEG:
+			if not runs.is_empty():
+				runs[-1].to = spot.lost
+			runs.append({"dir": down, "from": spot.lost, "to": -1.0})
+			if runs.size() > MAX_RUNS:
+				runs.remove_at(1)
 	var tries := 0
 	while spot.made < target and tries < 8:
 		tries += 1
@@ -518,14 +620,11 @@ func _spawn_drip() -> void:
 	var bone := model.part_node(spot.part)
 	if bone == null:
 		return
-	# From the lowest trail head in the world (where it runs off).
-	var from := Vector3.ZERO
-	var lowest := INF
-	for hole: Dictionary in spot.holes:
-		var p := to_world(spot.part, Vector3(hole.head) + _outward(spot.part, hole.head) * 0.004)
-		if p.y < lowest:
-			lowest = p.y
-			from = p
+	# From where its blood gets to lowest (fingertips, a boot heel, under a body lying down).
+	var low: Variant = _lowest_point(spot)
+	if not low is Vector3:
+		return
+	var from: Vector3 = low
 	var floor_y := _floor_below(from) if is_inside_tree() else from.y - 2.5
 	_drips.append({"pos": from, "vel": Vector3(randf_range(-0.05, 0.05), 0.0, randf_range(-0.05, 0.05)), "floor": floor_y, "y0": from.y})
 
@@ -933,7 +1032,7 @@ func _redraw() -> void:
 				if hole.get("dressed_as") != spot.look:  # built once: a redraw comes with each new blood cell
 					hole["dressed_as"] = spot.look
 					hole["dressing"] = _dressing(spot.part, hole, pivot, spot.look)
-				dress.append_array(hole.dressing)
+				dress.append_array(_bloodied(spot, hole, pivot))
 			else:
 				for m: Array in hole.marks:
 					cells.append([m[0] - pivot, m[1], m[2]])
@@ -990,6 +1089,39 @@ func _refit() -> void:
 		devices.refit()
 	if skin and skin.sync():
 		paint_skin()
+
+
+## The dressing over `hole` as bloodied now: from the middle out as far as the blood still coming
+## under it has seeped (SEEP_*), wet while it comes; and, put on a wound that had bled, blood at
+## its edges (EDGE_*), dry.
+func _bloodied(spot: Dictionary, hole: Dictionary, pivot: Vector3) -> Array:
+	var cells: Array = hole.dressing
+	var seep := float(spot.seep)
+	var edged := float(spot.dressed_lost) >= EDGE_FROM_L
+	if seep <= 0.0 and not edged:
+		return cells
+	var reach := minf(SEEP_BASE_M + SEEP_PER_SQRT_L * sqrt(seep), SEEP_MAX_M) if seep > 0.0 else 0.0
+	var at: Vector3 = Vector3(hole.at) - pivot
+	var far := 0.0
+	for c: Array in cells:
+		far = maxf(far, Vector3(c[0]).distance_to(at))
+	var out: Array = []
+	var wet: bool = spot.flow > 0.0
+	for c: Array in cells:
+		var d := Vector3(c[0]).distance_to(at)
+		var salt := float(hash(c[0]) % 1000) / 1000.0
+		var colour: Color = c[2]
+		if d < reach * (0.75 + 0.5 * salt):
+			colour = (FRESH_COLOUR if salt < 0.5 else BLOOD_COLOUR) if wet else DRIED_COLOUR
+		elif edged and d > far * 0.7 and salt < EDGE_SHARE:
+			colour = Color(c[2]).lerp(DRIED_COLOUR, 0.75)
+		else:
+			out.append(c)
+			continue
+		var cell := c.duplicate()
+		cell[2] = colour
+		out.append(cell)
+	return out
 
 
 ## What covers a treated hole (`look`, LOOKS): on a limb a wrap round it, on the trunk or head

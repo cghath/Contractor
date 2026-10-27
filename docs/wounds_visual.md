@@ -12,6 +12,26 @@ instead of floating or stacking on them.
 - Detail range: 40 m. Past it the coarse blood voxels stand in (to 80 m).
 - Reduced gore: holes smaller, no torn flesh or cloth, trails shorter.
 
+## How it works (the Captain, 2026-10-27: "more realistic in how it works"; all four picked)
+
+- **Gravity as he lies.** Each hole's blood runs the way down is now. When that turns more than
+  35 degrees (he falls, is laid down, carried), a new run starts from the hole and the old one
+  stays where it ran; 3 runs a hole at most (the first and the latest kept). The soak sags toward
+  the low side as it is now.
+- **Arterial spurts.** Arterial and junctional bleeds (not under a tourniquet) spurt with the
+  heartbeat: 4 drops a beat out along the skin's outward line, as fast as 3 m/s at full blood,
+  weaker as blood is lost (none under 40%), none once the heart stops. Drips leave from where
+  the blood gets to lowest (the ends of the runs, the low edge of the soak), not the hole.
+- **Cloth wicking.** Darkest where it's soaked through, lighter at the ragged wet edge; a soak
+  reaches past the belt, knee pads or boot tops only a third as far. Bare skin doesn't soak:
+  blood on it stays close to the wound and runs (the whole head counts as bare).
+- **Blood through dressings.** A dressing over a wound still bleeding under it (a bandaged
+  muscle wound over a vein it doesn't hold, a tourniquet's trickle) reddens from the middle out
+  with the blood through it, wet while it comes; one put on a wound that had bled 30 mL or more
+  shows dried blood at its edges.
+- **Bruises** are a darker, redder skin that greys a little with age ("too purple" before), a
+  small ring right round a hole and over closed breaks, and where armour stopped a round.
+
 ## What draws what
 
 | What | Where | How |
