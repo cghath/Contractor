@@ -11,6 +11,13 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the first hour (claude/survival-firsthour)
+
+- **Added** the start farmstead: a new world's start zone gets a farm landmark site near its first insertion point and wakes the survivor at the farmhouse door, with a well, a barn holding a melee weapon, planks and a hammer by the stove and three boxes rolled once (no guns) (all Proposed; docs/survival_firsthour.md).
+- **Added** the first-day thread: the note's postscript, journal lines and map marks for water (new Drink / Fill a bottle on the well or any water), a better weapon, boarding up the farmhouse and day 2's radio survivor; each completes by doing it and pays XP, nerve and an item.
+- **Added** contextual control hints once per profile with the player's own key bindings (silent kill, melee, night and Wait, boxes, loading magazines, injuries, companions, build mode, food and water), the Accessibility tab's Hints toggle and the journal's Field notes page; the journal's Log opens with Now (open goals, the nearest unvisited landmark); the map shows unvisited landmarks as "?".
+- **Changed** the first night below dead: High: no horde, siege or horde walking in until day 2's dawn; the dead's night pace bonus off on night 1, half on night 2.
+- **Changed** the dead's density: the open country keeps 1 about a survivor (2 from day 7 or far zones) with a new one at most every ~5 minutes of walking early on and a per-area hourly cap; none come within 150 m of a place the living hold; towns unchanged. A noise's pressure scales by the population near it (a town 1, the open 0.08, a quiet place 0), a shot pulls only the crowd within its heard radius, the crowd drifts in only from within 300 m and hordes form only by a town, village or nest.
 ### Contractor: Fallen, condition and wear 2 (claude/survival-wear2)
 
 - **Added** the AI's guns wear and jam and they clear them (all Proposed; docs/survival_wear.md "Wear 2"): companions, settlers and raiders already fired through the player's `Soldier._server_fire`, but a jammed AI gun stayed jammed; now an AI clears its own jam (2 s and a "Jammed!" bark), a companion under 50% asks for a cleaning and cleans it with their own kit at the settlement, and raiders' guns spawn used (30-75%).

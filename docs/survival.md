@@ -2,6 +2,13 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **The first hour built on `claude/survival-firsthour`** (the Captain's first playtest: no direction, didn't know
+  the controls, "at the spawn there is nothing", the dead too frequent in the wild and pulled by every shot): a real
+  start farmstead at the spawn (farmhouse, barn, well, pens, boxes), the first-day thread (water, a better weapon,
+  board up, day 2's radio survivor; journal + marks + small rewards), control hints once each with the player's own
+  keys (Hints toggle, Field notes page), no horde on night 1 below High and the night pace ramped, the journal's Now
+  and "?" landmarks, sparse open-country dead, quiet radius round the living's places, noise drawing only the near
+  dead; see docs/survival_firsthour.md.
 - **Condition and wear 2 built on `claude/survival-wear2`** (calls 38, 43, 120-123, the left-out list): the AI's guns
   jam and get cleared (a bark), companions ask for and do their own cleaning, raiders' guns come used; loose rounds and
   shells carry condition into magazines and tubes (wet shells dud); suppressors wear, leak sound and break; hot hand-loads

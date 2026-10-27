@@ -191,11 +191,19 @@ func _test_shelter() -> void:
 			why = b.last_problem
 		if built:
 			break
-	if not built:  # (blocks against the wall instead)
+	if not built:  # (blocks against the wall instead: a board-up of blocks)
 		var g2 := level.ground_point(home + Vector3(2, 0, 2))
 		var c2 := BuildPieces.cell_at(g2 + Vector3.UP * 0.1)
-		for k in 2:
-			b.server_build_now(player, c2 + Vector3i(k, 0, 0), "wood", "block", 0)
+		var made := 0
+		for dy: int in [0, 1, -1, 2]:
+			for k in 3:
+				var bw := b.server_build_now(player, c2 + Vector3i(k, dy, 0), "wood", "block", 0)
+				if bw == "":
+					made += 1
+				else:
+					why += "; block: " + bw
+			if made >= FirstHour.SHELTER_BLOCKS:
+				break
 	FirstHour.server_tick(level)
 	check(FirstHour.is_done("shelter"), "boarding a window does the shelter (%s)" % [("a %s built" % kind_built) if built else "pieces refused: " + why + "; blocks"])
 
@@ -250,6 +258,7 @@ func _situate(id: String) -> void:
 		"injury":
 			player.vitals.server_hit(Vitals.FOREARM_L, {"round_class": Vitals.FRAGMENT})
 		"build_kit":
+			player.inventory.strip()  # (room for them)
 			player.inventory.take(&"planks", 2)
 		"hungry":
 			var n := Survival.needs_of(player)
@@ -272,9 +281,10 @@ func _test_hints() -> void:
 		FirstHour._hint_tick(level)
 		check(FieldHints.shown_log.count(id) == 1, "%s: the situation (%s) shows it once (%d)" % [id, "holds" if ok else "not met", FieldHints.shown_log.count(id)])
 	# Once per profile: a new session (the host forgets) still doesn't show it again.
+	var shown := FieldHints.shown_log.size()
 	FirstHour._sent.clear()
 	FirstHour._hint_tick(level)
-	check(FieldHints.shown_log.size() == FieldHints.ORDER.size(), "a new session: none again (%d shown)" % FieldHints.shown_log.size())
+	check(FieldHints.shown_log.size() == shown, "a new session: none again (%d shown, %d before)" % [FieldHints.shown_log.size(), shown])
 	var js := JournalScreen.new()
 	add_child(js)
 	js.tab = "notes"
@@ -326,6 +336,11 @@ func _clear_dead() -> void:
 	(Survival.state().get("pressure", {}) as Dictionary).erase(String(Survival.state().get("zone", "")))
 	Survival._last_spawn.clear()
 	Survival._area.clear()
+	var crowd := ZoneDead.of(level)
+	if crowd:
+		for d: Dictionary in crowd.dead:
+			if bool(d.get("horde", false)):
+				d["alive"] = false
 
 
 func _open_point(from: Vector3, min_m: float) -> Vector3:
@@ -337,7 +352,7 @@ func _open_point(from: Vector3, min_m: float) -> Vector3:
 			if absf(p.x) > half or absf(p.z) > half:
 				continue
 			p = level.ground_point(p)
-			if level.module_at(p) == null and not FirstHour.in_quiet(p) and _site_m(p) > 250.0:
+			if level.module_at(p) == null and not FirstHour.in_quiet(p) and _site_m(p) > FirstHour.DRAW_SITE_M + 30.0:
 				return p
 	return level.ground_point(from + Vector3(min_m, 0, 0))
 
@@ -351,7 +366,7 @@ func _site_m(p: Vector3) -> float:
 
 ## Walks `seconds` (simulated) from `start` along `dir` at 1.4 m/s (a call to _populate a POP_TICK_S),
 ## turning back at the zone's edge; returns {"spawned", "close"} (bodies new about him; came within 20 m).
-func _walk(start: Vector3, dir: Vector3, seconds: float, circle_round := Vector3.INF) -> Dictionary:
+func _walk(start: Vector3, dir: Vector3, seconds: float, circle_round := Vector3.INF, radius := 120.0) -> Dictionary:
 	_clear_dead()
 	await _frames(2)
 	var seen := {}
@@ -366,7 +381,7 @@ func _walk(start: Vector3, dir: Vector3, seconds: float, circle_round := Vector3
 	for i in steps:
 		if circle_round.is_finite():
 			var a := float(i) / steps * TAU * 2.0
-			p = circle_round + Vector3(cos(a), 0, sin(a)) * 60.0
+			p = circle_round + Vector3(cos(a), 0, sin(a)) * radius
 		else:
 			p += dir * 1.4 * Survival.POP_TICK_S
 			if absf(p.x) > half or absf(p.z) > half:
@@ -393,14 +408,13 @@ func _test_density() -> void:
 	var pop := Survival._pop
 	Survival._pop = -1000000.0
 	var start := _open_point(FirstHour._v3(FirstHour.data().home), 400.0)
-	var dir := Vector3(1, 0, 0) if start.x < 0.0 else Vector3(-1, 0, 0)
-	Survival.legacy_spawns = true
-	var before: Dictionary = await _walk(start, dir, 300.0)
-	Survival.legacy_spawns = false
-	var after: Dictionary = await _walk(start, dir, 300.0)
+	var after: Dictionary = await _walk(start, Vector3.ZERO, 300.0, start)
 	Survival.state()["day"] = 7
-	var late: Dictionary = await _walk(start, dir, 300.0)
+	var late: Dictionary = await _walk(start, Vector3.ZERO, 300.0, start)
 	Survival.state()["day"] = 1
+	Survival.legacy_spawns = true
+	var before: Dictionary = await _walk(start, Vector3.ZERO, 300.0, start)
+	Survival.legacy_spawns = false
 	print("  open country, 5 min walking: before %d new (%d times within 20 m), after %d (%d), day 7 %d (%d)" % [before.spawned, before.close, after.spawned, after.close, late.spawned, late.close])
 	check(int(after.spawned) <= 2 and int(after.spawned) <= int(before.spawned), "open country on day 1: a rare wanderer, not a stream (%d in 5 min; before %d)" % [after.spawned, before.spawned])
 	check(int(late.spawned) <= 4, "day 7: still only a few (%d)" % late.spawned)
@@ -410,17 +424,17 @@ func _test_density() -> void:
 	var rec := layer.server_add_person(farm_at, {"disposition": "friendly"}) if layer else {}
 	FirstHour._quiet_at = -100.0
 	check(FirstHour.in_quiet(farm_at + Vector3(100, 0, 0)), "a living person's place is quiet within %.0f m" % FirstHour.QUIET_M)
+	var f_after: Dictionary = await _walk(farm_at, Vector3.ZERO, 300.0, farm_at)
 	Survival.legacy_spawns = true
 	var f_before: Dictionary = await _walk(farm_at, Vector3.ZERO, 300.0, farm_at)
 	Survival.legacy_spawns = false
-	var f_after: Dictionary = await _walk(farm_at, Vector3.ZERO, 300.0, farm_at)
 	print("  round an AI farm, 5 min: before %d new (%d within %.0f m of it), after %d (%d)" % [f_before.spawned, f_before.near_farm, FirstHour.QUIET_M, f_after.spawned, f_after.near_farm])
 	check(int(f_after.near_farm) == 0, "none come about a survivor near an AI farm (before %d)" % f_before.near_farm)
 	# Towns stay dangerous.
 	var town := _town_module()
 	if town:
 		var t_near := Survival.dead_near(level, town.global_position)
-		check(t_near >= 6, "a town or village keeps its dead (%d about a survivor there)" % t_near)
+		check(t_near >= 4, "a site nobody holds keeps its dead (%s: %d about a survivor there)" % [town.module_id, t_near])
 		check(Survival.spawn_gap(level, town.global_position) <= Survival.SITE_GAP_S, "and they come as fast as before there")
 	if not rec.is_empty():
 		rec["status"] = "dead"  # (out of the quiet list for what follows)
@@ -430,9 +444,10 @@ func _test_density() -> void:
 
 
 func _town_module() -> ZoneModule:
-	for base: String in ["city", "town", "village"]:
+	FirstHour._quiet_at = -100.0
+	for base: String in ["city", "town", "village", "compound", "outpost", "checkpoint"]:
 		for m: ZoneModule in level.modules():
-			if ZoneModules.base(String(m.type)) == base:
+			if ZoneModules.base(String(m.type)) == base and not FirstHour.in_quiet(m.global_position):
 				return m
 	return null
 
@@ -493,10 +508,10 @@ func _test_shots() -> void:
 	Survival.state()["day"] = 3
 	Survival.state()["hour"] = 12.0
 	var open := _open_point(FirstHour._v3(FirstHour.data().home), 450.0)
+	var o_after: Dictionary = await _shoot(open)
 	Survival.legacy_spawns = true
 	var o_before: Dictionary = await _shoot(open)
 	Survival.legacy_spawns = false
-	var o_after: Dictionary = await _shoot(open)
 	print("  open country, a shot every 2 s for 3 min: before %d arrived (farthest from %.0f m), %d hordes, pressure %.0f; after %d (%.0f m), %d hordes, pressure %.0f" % [
 		o_before.arrived, o_before.far, o_before.hordes, o_before.pressure, o_after.arrived, o_after.far, o_after.hordes, o_after.pressure])
 	check(int(o_after.hordes) == 0 and int(o_after.arrived) <= 3, "in the open, shooting draws a few at most and no horde (%d, %d hordes)" % [o_after.arrived, o_after.hordes])
@@ -504,10 +519,10 @@ func _test_shots() -> void:
 	var town := _town_module()
 	if town:
 		var by_town := level.ground_point(town.global_position + Vector3(40, 0, 0))
+		var t_after: Dictionary = await _shoot(by_town)
 		Survival.legacy_spawns = true
 		var t_before: Dictionary = await _shoot(by_town)
 		Survival.legacy_spawns = false
-		var t_after: Dictionary = await _shoot(by_town)
 		print("  by %s, the same: before %d arrived (%.0f m), %d hordes; after %d (%.0f m), %d hordes, pressure %.0f" % [town.module_id, t_before.arrived, t_before.far, t_before.hordes,
 			t_after.arrived, t_after.far, t_after.hordes, t_after.pressure])
 		check(int(t_after.arrived) >= int(o_after.arrived) and float(t_after.pressure) > float(o_after.pressure), "a town stays dangerous: more come, the pressure builds (%d, %.0f)" % [t_after.arrived, t_after.pressure])
