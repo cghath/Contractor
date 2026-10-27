@@ -6,7 +6,7 @@
   against the dead (`Holding`: guns, melee, a guard, walls against the dead near); an unarmed household runs with its
   children along the road to a safe place (a note and dropped things left, the journal, the rumours), the sim's far
   households and camps the same, the settlement's unarmed go to shelter; refugees come home when it's clear, "It's
-  clear now"; RUN_VERDICT; see docs/survival_people.md "Holding or fleeing".
+  clear now"; R2764 (fallenpeople, worldsim, children, survival, firsthour PASS; settlement's haul check red since the firsthour merge, a drop not carried into the stores, not this lane's); see docs/survival_people.md "Holding or fleeing".
 - **Loading magazines fixed on `claude/survival-magload`** (the Captain's base-game bug, shared inventory code): "Load
   magazines" now shows whenever loose rounds and a magazine they fit are carried (greyed when they're full) instead of
   hiding; "Load from loose rounds" and "Unload" (condition kept) on a magazine; rounds dropped on a magazine load it

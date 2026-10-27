@@ -203,7 +203,8 @@ they had no weapons." Built in `Holding` (scripts/survival/holding.gd); every nu
 - **The place left** (`Holding.places()`, in the world section under "abandoned"): things dropped in the hurry (2-4 of
   tins, water, candles, matches) and a note ("They came over the fence and we couldn't hold it..."), the door open, a map
   mark ("Abandoned: the Halvorsens"), a journal line ("The Halvorsens left their farm to the dead.") and a world event
-  ("abandoned") for the rumours. It's lootable; its people can reclaim it.
+  ("abandoned") for the rumours. It's lootable; its people can reclaim it. Nothing is dropped inside the players' farm
+  (its settlers would haul it off).
 - **Live world camps** (WorldLive): a settlers' or scavengers' camp in the hosted zone judged by its bodies; broken,
   the group relocates (as in the sim) and its people run for the crossing toward where it goes.
 - **The sim** (`Holding.sim_tick` from `WorldModel.step`, off the hosted zone and through the catch-up): the dead find a
