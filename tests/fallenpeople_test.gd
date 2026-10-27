@@ -398,7 +398,7 @@ func _test_holding() -> void:
 	await _frames(2)
 	Holding.server_hour(layer)
 	e = Holding.entry(key)
-	check(float(e.get("clear_since", -1.0)) >= 0.0 and String(e.state) == "abandoned", "the place is clear; they wait")
+	check(float(e.get("clear_since", Holding.NOT_CLEAR)) > Holding.NOT_CLEAR * 0.5 and String(e.state) == "abandoned", "the place is clear; they wait")
 	_clear_dead_near(home, 60.0)
 	await _frames(2)
 	e = Holding.entry(key)
@@ -417,7 +417,7 @@ func _test_holding() -> void:
 	var key2 := "h:test:clear_now"
 	var rf := layer.server_add_person(_near(Vector3(1.5, 0.0, 1.5)), {"traits": ["calm"], "want": {"kind": "place"}, "refugee_from": key2})
 	Holding.save({"key": key2, "zone": zone, "pos": Holding._arr(there), "ids": [String(rf.id)], "names": [String(rf.name)], "refugees": [String(rf.id)],
-		"state": "abandoned", "word": "farm", "text": "%s left his farm to the dead" % String(rf.name), "clear_since": -1.0})
+		"state": "abandoned", "word": "farm", "text": "%s left his farm to the dead" % String(rf.name), "clear_since": Holding.NOT_CLEAR})
 	await _frames(2)
 	var rb := layer.body_of(String(rf.id))
 	if rb:

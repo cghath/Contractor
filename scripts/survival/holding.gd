@@ -76,6 +76,7 @@ const BEHIND_M := 3.0
 ## Coming back.
 const CLEAR_M := 45.0
 const RETURN_DAYS := 1.5
+const NOT_CLEAR := -1.0e9  # (clear_since: not clear now; world time can be under RETURN_DAYS early on)
 const QUIET_PRESSURE := 30.0
 const CLEAR_OPINION := 12.0
 const FLEE_LINES: Array[String] = ["They're coming over the fence! Run!", "Get the kids! Go, go, go!", "We can't hold them! Run for the road!"]
@@ -90,7 +91,7 @@ static var _chase_at := -1000.0
 
 ## Every place left to the dead, by key: {"key", "zone", "pos" [x, y, z], "ids", "names", "text",
 ## "word", "day", "state" ("abandoned" | "reclaimed"), "refugees", "where", "signs", "door_open",
-## "clear_since" (world days, -1), "group"?, "left"?}. Kept in the world section (the sim writes it).
+## "clear_since" (world days; NOT_CLEAR when not clear), "group"?, "left"?}. Kept in the world section (the sim writes it).
 static func places() -> Dictionary:
 	var sec: Dictionary = WorldSim.section() if WorldSim.is_set_up() else Survival.state()
 	if not sec.get(KEY) is Dictionary:
@@ -382,7 +383,7 @@ static func server_break(layer: SurvivorsLayer, members: Array, home: Vector3, f
 				layer.say(b, (COVER_LINES if covers else FLEE_LINES)[absi(hash([id, key])) % (COVER_LINES if covers else FLEE_LINES).size()])
 				cried = true
 	var e := {"key": key, "zone": zone, "pos": _arr(home), "ids": ids, "names": names, "text": text, "word": word, "day": Survival.day(),
-		"state": "abandoned", "refugees": ids.duplicate(), "where": String(dest.label), "signs": true, "door_open": true, "clear_since": -1.0, "by": "the dead"}
+		"state": "abandoned", "refugees": ids.duplicate(), "where": String(dest.label), "signs": true, "door_open": true, "clear_since": NOT_CLEAR, "by": "the dead"}
 	e["left"] = _leave_behind(layer, home, e, String(head.get("first", head.get("name", ""))))
 	save(e)
 	Survival._journal_line(text + ".")
@@ -899,7 +900,7 @@ static func sim_flee(m: WorldModel, members: Array) -> Dictionary:
 		m.note(rec, "ran from the dead, to %s" % label)
 	var e := {"key": key, "zone": z, "pos": [home.x, home.y, home.z], "ids": ids, "names": names, "text": text, "word": word, "day": m.day(),
 		"state": "abandoned", "refugees": ids.filter(func(id: String) -> bool: return id != caught), "where": label, "signs": false, "door_open": true,
-		"clear_since": -1.0, "by": "the dead", "y_unset": hp.size() < 3 or is_zero_approx(float(hp[1]))}
+		"clear_since": NOT_CLEAR, "by": "the dead", "y_unset": hp.size() < 3 or is_zero_approx(float(hp[1]))}
 	if not m.w.get(KEY) is Dictionary:
 		m.w[KEY] = {}
 	(m.w[KEY] as Dictionary)[key] = e
@@ -970,7 +971,7 @@ static func group_relocate(m: WorldModel, g: Dictionary, z: String, caught_roll 
 	(g.mood as Dictionary).fear = minf(1.0, float((g.mood as Dictionary).get("fear", 0.0)) + 0.2)
 	var e := {"key": key, "zone": z, "pos": [float(hp[0]), 0.0, float(hp[1])], "ids": (g.members as Array).duplicate(), "names": [], "text": text, "word": word,
 		"day": m.day(), "state": "abandoned", "refugees": [], "where": String(m.zone(to).get("name", to)), "signs": false, "door_open": true,
-		"clear_since": -1.0, "by": "the dead", "group": gid, "y_unset": true}
+		"clear_since": NOT_CLEAR, "by": "the dead", "group": gid, "y_unset": true}
 	if not m.w.get(KEY) is Dictionary:
 		m.w[KEY] = {}
 	(m.w[KEY] as Dictionary)[key] = e
@@ -1166,7 +1167,7 @@ static func server_abandon_settlement() -> int:
 		SurvivorPerson.note(rec, "left the farm when it was abandoned")
 	save({"key": key, "zone": zone, "pos": _arr(Settlement.pos()), "ids": ids, "names": [], "text": "We left the farm to the dead", "word": "farm",
 		"day": Survival.day(), "state": "abandoned", "refugees": ids.duplicate(), "where": String(dest.get("label", "")), "signs": true, "door_open": true,
-		"clear_since": -1.0, "by": "the dead", "settlement": true})
+		"clear_since": NOT_CLEAR, "by": "the dead", "settlement": true})
 	Survival._journal_line("We left the farm to the dead. Everyone ran.")
 	return ids.size()
 
@@ -1204,11 +1205,11 @@ static func server_hour(layer: SurvivorsLayer) -> int:
 		if String(e.get("state", "")) != "abandoned" or (e.get("refugees", []) as Array).is_empty():
 			continue
 		if not is_clear(layer, e):
-			if float(e.get("clear_since", -1.0)) >= 0.0:
-				e["clear_since"] = -1.0
+			if float(e.get("clear_since", NOT_CLEAR)) > NOT_CLEAR * 0.5:
+				e["clear_since"] = NOT_CLEAR
 				save(e)
 			continue
-		if float(e.get("clear_since", -1.0)) < 0.0:
+		if float(e.get("clear_since", NOT_CLEAR)) <= NOT_CLEAR * 0.5:
 			e["clear_since"] = now
 			save(e)
 			continue
