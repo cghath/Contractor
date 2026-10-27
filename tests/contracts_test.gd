@@ -650,10 +650,13 @@ func _test_money_curve() -> void:
 	sim.free()
 	check(float(careful.end) > float(careful.start) + 20000.0, "careful play builds the company ($%.0fk -> $%.0fk in 14 days)" % [float(careful.start) / 1000.0, float(careful.end) / 1000.0])
 	check(float(median.end) > float(median.start) and int(median.broke) == 0, "normal play builds it too ($%.0fk -> $%.0fk in 21 days, %d broke)" % [float(median.start) / 1000.0, float(median.end) / 1000.0, int(median.broke)])
-	# (-$25k, was -$50k: with the sim's campaigns isolated, sloppy loses $36k here since the bounties
-	# and income streams, R2582; whether careless play should bleed more is the economy follow-up's)
-	check(float(sloppy.end) < float(sloppy.start) - 25000.0, "careless play goes negative ($%.0fk -> $%.0fk in 14 days, less loans)" % [float(sloppy.start) / 1000.0, float(sloppy.end) / 1000.0])
-	check(int(won.n) > 0 and float(won.net) < 0.0 and float(won.net) > -45000.0, "an expensive op that's won hurts (net $%.1fk)" % (float(won.net) / 1000.0))
+	# v0.7.1 (the Captain, 2026-10-27: "leave it easier"): with no high command squads granted at
+	# the start, careless play no longer loses money on average; it earns well under careful play,
+	# and a won expensive op earns little.
+	var careful_gain := float(careful.end) - float(careful.start)
+	var sloppy_gain := float(sloppy.end) - float(sloppy.start)
+	check(sloppy_gain < careful_gain * 0.8, "careless play earns less than careful ($%.0fk vs $%.0fk in 14 days, less loans)" % [sloppy_gain / 1000.0, careful_gain / 1000.0])
+	check(int(won.n) > 0 and float(won.net) < 45000.0 and float(won.net) > -45000.0 and float(lost.net) < float(won.net), "an expensive op that's won earns little (net $%.1fk), a failed one less" % (float(won.net) / 1000.0))
 	check(int(lost.n) > 0 and float(lost.cash_after) > 0.0 and float(lost.net) > -100000.0, "one that fails hurts more but isn't ruinous (net $%.1fk, $%.0fk left)" % [float(lost.net) / 1000.0, float(lost.cash_after) / 1000.0])
 
 
