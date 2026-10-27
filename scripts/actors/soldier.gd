@@ -1477,8 +1477,42 @@ func _server_load_mags(rounds_id: StringName) -> void:
 		return
 	var total := inventory.loadable_rounds(rounds_id)
 	if total <= 0:
-		_client_message.rpc_id(owner_peer(), "No %s magazines to load" % Inventory.calibre_of(item))
+		_client_message.rpc_id(owner_peer(), ("Your %s magazines are full" if inventory.has_magazines_for(rounds_id) else "No %s magazines to load") % Inventory.calibre_of(item))
 		return
+	_load_job(rounds_id, total, {})
+
+
+## Loads one magazine, the one at `container`/`index`, from loose `rounds_id` (the inventory
+## screen: rounds dropped on a magazine, or its "Load from loose rounds"): the same timed job as
+## _server_load_mags. Rounds of another calibre, or a full magazine, are refused and nothing
+## moves.
+@rpc("any_peer", "call_local", "reliable")
+func _server_load_mag_at(container: StringName, index: int, rounds_id: StringName) -> void:
+	if not _from_owner() or not vitals.is_up() or loading_mags or _now() < _server_busy_until - 0.1:
+		return
+	var item: ItemData = ItemDB.get_item(rounds_id) if ItemDB.has_item(rounds_id) else null
+	if not Inventory.is_loose_rounds(item) or inventory.count_of(rounds_id) <= 0:
+		_client_message.rpc_id(owner_peer(), "No loose rounds to load")
+		return
+	var target := inventory.mag_target(container, index)
+	if target.is_empty():
+		_client_message.rpc_id(owner_peer(), "That isn't a magazine")
+		return
+	var mag := ItemDB.get_item(target.id)
+	if not Inventory.takes_loose(mag, rounds_id):
+		_client_message.rpc_id(owner_peer(), Shotguns.why_not(mag, rounds_id) if Shotguns.is_holder(mag) and Inventory.calibre_of(mag) == Inventory.calibre_of(item)
+			else "%s doesn't take %s" % [mag.name, item.name])
+		return
+	var total := inventory.target_room(target, rounds_id)
+	if total <= 0:
+		_client_message.rpc_id(owner_peer(), "The %s is full" % mag.name)
+		return
+	_load_job(rounds_id, total, target)
+
+
+## The timed loading (_server_load_mags, _server_load_mag_at): `total` rounds of `rounds_id`,
+## into `target` only when it's set (Inventory.mag_target).
+func _load_job(rounds_id: StringName, total: int, target: Dictionary) -> void:
 	_load_run += 1
 	var run := _load_run
 	loading_mags = true
@@ -1497,7 +1531,7 @@ func _server_load_mags(rounds_id: StringName) -> void:
 			return
 		var due := mini(int((_now() - started) / LOAD_ROUND_S + 0.001), total) - loaded
 		if due > 0:
-			var n := inventory.load_rounds(rounds_id, due)
+			var n := inventory.load_rounds(rounds_id, due, target)
 			loaded += n
 			if n < due:
 				break  # out of rounds or magazines
@@ -1599,6 +1633,18 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			if index >= 0 and index < list.size():
 				var entry := inventory.remove_entry(container, index, list[index].count)
 				_server_spawn_in_front(entry.id, entry.count, entry.get("state", {}))
+		"unload_mag":
+			# A magazine's rounds back out as loose rounds, keeping their condition (Inventory.unload_mag).
+			if loading_mags:
+				_client_message.rpc_id(owner_peer(), "Busy loading magazines")
+				return
+			var got := inventory.unload_mag(container, index)
+			if got == -2:
+				_client_message.rpc_id(owner_peer(), "No room for the rounds")
+			elif got == 0:
+				_client_message.rpc_id(owner_peer(), "It's empty")
+			elif got > 0:
+				_client_message.rpc_id(owner_peer(), "Unloaded %d rounds" % got)
 		"move_entry":
 			# As much of the stack as fits goes (a mag pouch takes two of a stack of five).
 			var list: Array = inventory.containers.get(container, [])

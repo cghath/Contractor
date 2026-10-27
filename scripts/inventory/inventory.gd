@@ -578,24 +578,129 @@ func loadable_rounds(rounds_id: StringName) -> int:
 	for container in search_containers():
 		for entry: Dictionary in containers[container]:
 			var item := ItemDB.get_item(entry.id)
-			if item.magazine_rounds() > 0 and not is_loose_rounds(item) and calibre_of(item) == calibre_of(loose) \
-					and not (Shotguns.is_holder(item) and not Shotguns.takes(item, rounds_id)):
+			if takes_loose(item, rounds_id):
 				room += (item.magazine_rounds() - int(entry.get("state", {}).get("rounds", item.magazine_rounds()))) * int(entry.count)
 	return mini(room, count_of(rounds_id))
+
+
+## True for a magazine (a belt, a clip, a speed loader) loose `rounds_id` can be loaded into:
+## the same calibre, and a shell holder only for shells it takes (Shotguns.takes).
+static func takes_loose(mag: ItemData, rounds_id: StringName) -> bool:
+	var loose: ItemData = ItemDB.get_item(rounds_id) if ItemDB.has_item(rounds_id) else null
+	return mag != null and is_loose_rounds(loose) and mag.magazine_rounds() > 0 and not is_loose_rounds(mag) \
+			and calibre_of(mag) == calibre_of(loose) and not (Shotguns.is_holder(mag) and not Shotguns.takes(mag, rounds_id))
+
+
+## True when a carried magazine, full or not, takes loose `rounds_id`: the inventory screen
+## offers "Load magazines" then (greyed out while they're all full).
+func has_magazines_for(rounds_id: StringName) -> bool:
+	for container in search_containers():
+		for entry: Dictionary in containers[container]:
+			if takes_loose(ItemDB.get_item(entry.id), rounds_id):
+				return true
+	return false
+
+
+## The carried loose rounds `mag` takes (the first stack found), &"" if none.
+func loose_for(mag: ItemData) -> StringName:
+	for container in search_containers():
+		for entry: Dictionary in containers[container]:
+			if takes_loose(mag, StringName(entry.id)):
+				return StringName(entry.id)
+	return &""
+
+
+## The magazine entry at `container`/`index` as a load target for load_rounds:
+## {"container", "id", "rounds"}, or {} if it isn't a magazine. Magazines with the same rounds
+## are alike, so the target is whichever one has them (load_rounds keeps "rounds" up to date).
+func mag_target(container: StringName, index: int) -> Dictionary:
+	var list: Array = containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return {}
+	var mag := ItemDB.get_item(list[index].id)
+	if mag == null or mag.type != "ammo" or mag.magazine_rounds() <= 0 or is_loose_rounds(mag):
+		return {}
+	return {"container": container, "id": StringName(list[index].id), "rounds": int(list[index].get("state", {}).get("rounds", mag.magazine_rounds()))}
+
+
+## Rounds of the carried loose `rounds_id` that would go into the one magazine `target`
+## (mag_target).
+func target_room(target: Dictionary, rounds_id: StringName) -> int:
+	if target.is_empty() or not takes_loose(ItemDB.get_item(target.id), rounds_id) or _fullest_unfilled("", rounds_id, target).is_empty():
+		return 0
+	return mini(ItemDB.get_item(target.id).magazine_rounds() - int(target.rounds), count_of(rounds_id))
+
+
+## The loose rounds a magazine's rounds come out as when it's unloaded: the loose item firing
+## the same round, else the first of its calibre; &"" for none.
+static func loose_of(mag: ItemData) -> StringName:
+	var fallback: StringName = &""
+	for id: StringName in ItemDB.all_ids():
+		var item := ItemDB.get_item(id)
+		if is_loose_rounds(item) and calibre_of(item) == calibre_of(mag):
+			if String(item.stats.get("round", "")) == String(mag.stats.get("round", "?")):
+				return id
+			if fallback == &"":
+				fallback = id
+	return fallback
+
+
+## Host only. Empties one magazine of the entry at `container`/`index`: its rounds come out as
+## loose rounds (loose_of), stowed where they fit, keeping the rounds' condition and hand-loaded
+## share (survival wear: AmmoCondition); the magazine stays, empty. Returns the rounds taken out,
+## 0 for an empty magazine, -1 if it isn't one that unloads (a shotgun holder keeps its shell
+## order and is emptied by firing), -2 with no room for the rounds.
+func unload_mag(container: StringName, index: int) -> int:
+	var list: Array = containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return -1
+	var entry: Dictionary = list[index]
+	var mag := ItemDB.get_item(entry.id)
+	if mag == null or mag.type != "ammo" or mag.magazine_rounds() <= 0 or is_loose_rounds(mag) or Shotguns.is_holder(mag):
+		return -1
+	var old_state: Dictionary = entry.get("state", {})
+	var n := int(old_state.get("rounds", mag.magazine_rounds()))
+	var loose_id := loose_of(mag)
+	if loose_id == &"":
+		return -1
+	if n <= 0:
+		return 0
+	var loose := ItemDB.get_item(loose_id)
+	var loose_state := {}
+	AmmoCondition.mix_into(loose_state, 0, 100.0, 0.0, n, Wear.cond(old_state) * n, AmmoCondition.hl_of(old_state) * n)
+	var room := 0
+	for c in stow_order(loose):
+		room += room_for(c, loose, loose_state)
+	if room < n:
+		return -2
+	var empty: Dictionary = old_state.duplicate(true)
+	empty["rounds"] = 0
+	empty.erase(Wear.KEY)
+	empty.erase(AmmoCondition.HL)
+	entry.count = int(entry.count) - 1
+	if int(entry.count) <= 0:
+		list.remove_at(index)
+	_append(container, mag, 1, empty)
+	var got := take(loose_id, n, loose_state)
+	if got < n:
+		_append(container, loose, n - got, loose_state)  # (not seen: the room was counted)
+	_commit()
+	return n
 
 
 ## Host only. Puts up to `count` loose `rounds_id` into the carried magazines of the same
 ## calibre, fullest first (a part-used magazine before an empty one). A magazine that fills
 ## up rejoins the full ones. The rounds' condition goes in with them: the magazine keeps the
 ## mean by count (survival wear: AmmoCondition.mix_into). Returns how many rounds went in.
-func load_rounds(rounds_id: StringName, count := 1) -> int:
+## With `target` (mag_target) only that magazine is loaded, and its "rounds" kept up to date.
+func load_rounds(rounds_id: StringName, count := 1, target := {}) -> int:
 	var loose := ItemDB.get_item(rounds_id)
 	if not is_loose_rounds(loose) or count <= 0:
 		return 0
 	var loaded := 0
 	while loaded < count:
 		var have := count_of(rounds_id)
-		var best := _fullest_unfilled(calibre_of(loose), rounds_id)
+		var best := _fullest_unfilled(calibre_of(loose), rounds_id, target)
 		if have <= 0 or best.is_empty():
 			break
 		var list: Array = containers[best.container]
@@ -614,6 +719,8 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 			_append(best.container, mag, 1, old_state)
 			break
 		var rounds := int(best.rounds) + n
+		if not target.is_empty():
+			target["rounds"] = rounds
 		var state := {"rounds": rounds}
 		AmmoCondition.mix_into(state, int(best.rounds), Wear.cond(old_state), AmmoCondition.hl_of(old_state), n, got.y, got.z)
 		if Shotguns.is_holder(mag):
@@ -634,15 +741,21 @@ func load_rounds(rounds_id: StringName, count := 1) -> int:
 
 ## The part-used or empty magazine of `calibre` with the most rounds in it, as
 ## {"container", "index", "rounds"}, or {} if every one is full. A shell holder only when it takes
-## `loose` (a Saiga magazine refuses breaching rounds: Shotguns.takes).
-func _fullest_unfilled(calibre: String, loose: StringName = &"") -> Dictionary:
+## `loose` (a Saiga magazine refuses breaching rounds: Shotguns.takes). With `target`
+## (mag_target) only a magazine like it: in its container, its model, its rounds.
+func _fullest_unfilled(calibre: String, loose: StringName = &"", target := {}) -> Dictionary:
 	var best := {}
 	for container in search_containers():
+		if not target.is_empty() and container != target.container:
+			continue
 		var list: Array = containers[container]
 		for i in list.size():
 			var item := ItemDB.get_item(list[i].id)
 			var full := item.magazine_rounds()
-			if full <= 0 or is_loose_rounds(item) or calibre_of(item) != calibre:
+			if not target.is_empty():
+				if StringName(list[i].id) != target.id or int(list[i].get("state", {}).get("rounds", full)) != int(target.rounds) or not takes_loose(item, loose):
+					continue
+			elif full <= 0 or is_loose_rounds(item) or calibre_of(item) != calibre:
 				continue
 			if loose != &"" and Shotguns.is_holder(item) and not Shotguns.takes(item, loose):
 				continue
