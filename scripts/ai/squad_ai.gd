@@ -5707,12 +5707,29 @@ func _call_bound() -> void:
 		callouts.say(body, &"moving", "", "", "", 0.0, _answer_bound)  # (the answer only once "Moving!" is heard)
 
 
-## The battle buddy's "Covering!" to this one's "Moving!" (Callouts.say's `then`).
+## "Covering!" to this one's "Moving!" (Callouts.say's `then`): a buddy pair bounds together
+## while the fire team's other pair covers (the Captain, 2026-10-27), so the answer comes from the
+## nearest of the team's men not bounding, his buddy only when he isn't moving too.
 func _answer_bound() -> void:
-	var mate := buddy
-	var mate_ai := SquadAI.of(mate) if is_instance_valid(mate) and mate.vitals.is_up() else null
-	if mate_ai and not mate_ai.bounding:
-		mate_ai._callout(&"covering")
+	var best: SquadAI = null
+	var best_d := INF
+	if squad and body.fire_team >= 0:
+		for m: Soldier in squad.members():
+			if m == body or m.fire_team != body.fire_team or not m.vitals.is_up():
+				continue
+			var ai := SquadAI.of(m)
+			if ai == null or ai.bounding:
+				continue
+			var d := m.global_position.distance_to(body.global_position)
+			if d < best_d:
+				best_d = d
+				best = ai
+	if best == null and is_instance_valid(buddy) and buddy.vitals.is_up():
+		var mate_ai := SquadAI.of(buddy)
+		if mate_ai and not mate_ai.bounding:
+			best = mate_ai
+	if best:
+		best._callout(&"covering")
 
 
 # --- Steering -------------------------------------------------------------

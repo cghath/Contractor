@@ -686,13 +686,16 @@ func _test_callout_events() -> void:
 	await _wait_for(func() -> bool: return not _said(&"moving").is_empty(), 10.0)
 	var moving := _said(&"moving")
 	check(not moving.is_empty(), "bounding to cover: Moving! (%s)" % (moving[0].speaker if not moving.is_empty() else "nobody"))
+	# (A buddy pair bounds together and the fire team's other pair covers: the Captain, 2026-10-27.)
 	var answer := func() -> Array:
 		return _said(&"covering").filter(func(c: Dictionary) -> bool:
 			var mate := _ai(c.speaker)
-			return mate != null and mate.buddy != null and _said(&"moving").any(func(m: Dictionary) -> bool: return m.speaker == String(mate.buddy.name)))
+			return mate != null and mate.fire_team >= 0 and _said(&"moving").any(func(m: Dictionary) -> bool:
+				var mover := _ai(m.speaker)
+				return mover != null and mover.fire_team == mate.fire_team and float(m.get("time", 0.0)) <= float(c.get("time", 0.0))))
 	await _wait_for(func() -> bool: return not answer.call().is_empty(), 6.0)
 	var answered: Array = answer.call()
-	check(not answered.is_empty(), "and the mover's battle buddy answers Covering! (%s)" % (answered[0].speaker if not answered.is_empty() else _log()))
+	check(not answered.is_empty(), "and a man of the mover's fire team answers Covering! (%s)" % (answered[0].speaker if not answered.is_empty() else _log()))
 	_free(hostile)
 	# The contact fades before they may shoot again: squad contact lasts SQUAD_CONTACT_MEMORY_S
 	# (20 s), and a squadmate still in contact keeps talking, which can crowd out Reloading!.
