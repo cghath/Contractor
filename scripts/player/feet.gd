@@ -90,7 +90,10 @@ static func _shin_parts(style: StringName, female: bool) -> Array:
 	var C := VoxelArt.C
 	var k := 0.93 if female else 1.0  # her calf and ankle, slimmer
 	var out: Array = []
-	var knee_pad: Array = VoxelArt._fb(2.5, 36, 3.5, 11.5, 46, 6, C.PAD) if female else VoxelArt._b(2, 36, 3, 12, 46, 6, C.PAD)
+	# The calf behind the shin, and a knee pad shaped over the knee (model realism pass, 2026-10-26:
+	# a rounded cap, not a flat block) held on by a strap round the leg (VoxelArt.knee_pad).
+	out.append(VoxelArt.calf(female))
+	var knee_pad: Array = VoxelArt.knee_pad(female)
 	match style:
 		BOOTS:
 			# Trousers bloused over the boot's top, then the shaft round the lower leg up to a padded
@@ -113,7 +116,7 @@ static func _shin_parts(style: StringName, female: bool) -> Array:
 			out.append(VoxelArt._loft(7, 10, [[12, 4.7 * k, 5.1 * k], [15, 4.3 * k, 4.7 * k], [32, 5.4 * k, 6.0 * k], [46, 5.0 * k, 5.5 * k]], C.CAMO, 0.55))
 			out.append(VoxelArt._fp(0, 12, 0, 14, 13, 18, C.CAMO_A))
 			out.append(VoxelArt._loft(7, 10, [[5.5, 2.9 * k, 3.3 * k], [9, 2.9 * k, 3.4 * k], [13, 3.6 * k, 4.0 * k]], C.SKIN, 0.6))
-	out.append(knee_pad)
+	out.append_array(knee_pad)
 	return out
 
 
