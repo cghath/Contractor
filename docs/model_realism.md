@@ -31,8 +31,10 @@ Soldiers: `uniform_m`, `uniform_f` (no kit), `rifleman_m`, `rifleman_f`, `medic_
 `leader_f` (desert), `gunner_m` (black), `headset_m` (woodland, ComTac, sidearm, no helmet).
 
 - Before: **S2740** (dev at `1aa38406`).
-- Passes: S2741 (armour), S2742 (body), S2750 (all), S2752 (close-ups); the final sheets are
-  listed at the end.
+- Passes: S2741 (armour), S2742 (body), S2750 (all), S2752 (close-ups), S2768 and S2772
+  (launchers shouldered).
+- After: **S2775** (`8d3b1121`, every soldier above), beside S2740 in
+  `Contractor-test-logs/2026-10-26` and `2026-10-27`.
 
 ## Before and after
 
@@ -174,3 +176,4 @@ cases `rpg_m`, `at4_f` and `maaws_m` shoulder one (S2768, S2772: hand error unde
   failed 3 checks in "The 3D loadout editor". They fail the same on untouched dev (R2766,
   `1aa38406`), so they are not from this branch.
 - R2763: antiarmor passed with the launcher change; loadout failed the same 3 checks as on dev.
+- R2773: smoke passed on the final tree (`8d3b1121`). CI runs every suite on the pushed branch.
