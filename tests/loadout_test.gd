@@ -383,13 +383,16 @@ func _test_kits_at_hub(ids: Array, me: String) -> void:
 	var t := Loadouts.template_of(Roster.json_safe((level as BaseLevel).muster_soldier(mid).inventory.net_state))
 	t = Loadouts.set_mount(Loadouts.set_slot(t, &"helmet", "helmet"), &"helmet", "nvg", "nvg_gen3")
 	var price := BaseEconomy.item_price(&"nvg_gen3")
-	Economy.add_cash(price + 100, "test: an NVG")
+	# (v0.7.1: with no HC heroes granted, ids[0] is one of the squad in the quiet kit, and the draft
+	# buys a suppressor besides the NVG: the account gets exactly the shortfall, and $100 more)
+	var need := KitLibrary.shortfall([{"gear": Roster.json_safe((level as BaseLevel).muster_soldier(mid).inventory.net_state), "template": t}], (level as BaseLevel).server_collect_stash())
+	Economy.add_cash(int(need.cost) + 100, "test: an NVG")
 	before = _hub_units()
 	BaseHub.request("loadout", [mid, "template", {"template": t, "buy": true}])
 	await _frames(3)
 	var g: Dictionary = Roster.json_safe((level as BaseLevel).muster_soldier(mid).inventory.net_state)
 	check(GearMounts.on(ItemDB.get_item(&"helmet"), g.slot_state.get("helmet", {}), "nvg") == "nvg_gen3" and Economy.cash() == 100
-		and int(_hub_units().get("nvg_gen3", 0)) == int(before.get("nvg_gen3", 0)) + 1, "the editor's draft: the NVG bought ($%d) and on his helmet" % price)
+		and int(_hub_units().get("nvg_gen3", 0)) == int(before.get("nvg_gen3", 0)) + 1, "the editor's draft: the NVG bought ($%d) and on his helmet (on: %s, cash %d, units %d -> %d)" % [price, GearMounts.on(ItemDB.get_item(&"helmet"), g.slot_state.get("helmet", {}), "nvg"), Economy.cash(), int(before.get("nvg_gen3", 0)), int(_hub_units().get("nvg_gen3", 0))])
 	_notes.clear()
 	BaseHub.request("loadout", [me, "kit_delete", {"name": "Quiet rifleman"}])
 	await _frames(2)

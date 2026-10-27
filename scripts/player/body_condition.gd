@@ -268,8 +268,9 @@ func _material_for(scheme: String) -> ShaderMaterial:
 	material.set_shader_parameter(&"eye", _rgb(Color(spec.get("eye", "1c1c1c"))))
 	var camo := PackedVector3Array()
 	for c: Variant in spec.get("camo", []):
-		if camo.size() < 4 and _rgb(Color(String(c))).distance_to(_rgb(skin)) > 0.06:  # (a scheme whose camo is its skin, the test dummy's, keeps its skin)
-			camo.append(_rgb(Color(String(c))))
+		var tone: Color = c if c is Color else Color(str(c))  # (hex strings; a civilian scheme's are Colors)
+		if camo.size() < 4 and _rgb(tone).distance_to(_rgb(skin)) > 0.06:  # (a scheme whose camo is its skin, the test dummy's, keeps its skin)
+			camo.append(_rgb(tone))
 	while camo.size() < 4:
 		camo.append(Vector3(-9, -9, -9))
 	material.set_shader_parameter(&"camo", camo)
