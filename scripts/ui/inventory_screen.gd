@@ -803,6 +803,8 @@ func _actions_for(src: Dictionary) -> Array:
 					out.append(["Load from loose rounds", load_magazine_at.bind(c, i, loose_id)])
 				if in_mag > 0 and not Shotguns.is_holder(item):
 					out.append(["Unload", _action.bind("unload_mag", c, i, &"", &"")])
+			if Clothing.enabled() and ClothingWear.rags_of(list[i]) > 0:  # survival: a garment into rags (call 122)
+				out.append(["Tear into rags", _action.bind("tear_rags", c, i, &"", &"")])
 			if Inventory.is_pack(item):
 				var rolled: bool = list[i].get("state", {}).get("rolled", false)
 				out.append(["Unroll" if rolled else "Roll up", _action.bind("unroll_entry" if rolled else "roll_entry", c, i, &"", &"")])

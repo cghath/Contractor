@@ -1741,6 +1741,11 @@ func _server_inventory_action(action: String, container: StringName, index: int,
 			var used := ItemDB.get_item(StringName(list[index].id)) if index >= 0 and index < list.size() else null
 			var problem := Consumables.server_use(self, container, index)
 			_client_message.rpc_id(owner_peer(), problem if problem != "" or used == null else Consumables.done_text(used))
+		# Survival: a carried garment torn into rags (ClothingWear, call 122); timed, told when done.
+		"tear_rags":
+			var problem := ClothingWear.server_tear(self, container, index) if Clothing.enabled() else "You can't do that"
+			if problem != "":
+				_client_message.rpc_id(owner_peer(), problem)
 		# Grips, lights and lasers (wave 7 S3, GunAttachments): the entry at `container`/`index`
 		# onto the weapon in `slot` (what was on that mount goes into your containers), what's on
 		# mount `target` (underbarrel or side) of the weapon in `slot` off, or its light or laser

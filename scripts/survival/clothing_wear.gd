@@ -176,6 +176,59 @@ static func server_sew(s: Soldier, slot: StringName, instant := false) -> void:
 	Wear.timed(s, SEW_S, "Mending", done, instant)
 
 
+## Tearing a garment into rags (DayZ's emergency bandage; the rags feed the bandage, torch and needle
+## recipes): a carried cloth piece (not leather, not footwear) gives RAGS_PER_L a litre of it, by its
+## condition, at least one; TEAR_HAND_S by hand, TEAR_BLADE_S with a blade or knife. Proposed.
+const RAG := &"cloth_rag"
+const RAGS_PER_L := 3.0
+const RAGS_MAX := 6
+const TEAR_HAND_S := 8.0
+const TEAR_BLADE_S := 3.0
+
+
+## How many rags the carried entry `e` tears into (0: it can't be torn).
+static func rags_of(e: Dictionary) -> int:
+	var item := ItemDB.get_item(StringName(e.get("id", "")))
+	if not Clothing.is_clothing(item) or leather_good(item.id) or Clothing.slot_of(item) == &"feet":
+		return 0
+	var c := Wear.cond(e.get("state", {})) / 100.0
+	return clampi(floori(item.volume_l * RAGS_PER_L * c), 1, RAGS_MAX)
+
+
+## Why `s` can't tear the entry at `container`/`index`, or "".
+static func tear_problem(s: Soldier, container: StringName, index: int) -> String:
+	var list: Array = s.inventory.containers.get(container, [])
+	if index < 0 or index >= list.size():
+		return "Can't do that"
+	if rags_of(list[index]) == 0:
+		return "That won't tear into rags"
+	if Soldier._now() < s._server_busy_until - 0.1:
+		return "Busy"
+	return ""
+
+
+## Host: `s` tears the carried garment at `container`/`index` into rags. "" or why not.
+static func server_tear(s: Soldier, container: StringName, index: int, instant := false) -> String:
+	var why := tear_problem(s, container, index)
+	if why != "":
+		return why
+	var e: Dictionary = s.inventory.containers[container][index]
+	var id := StringName(e.id)
+	var n := rags_of(e)
+	var secs := TEAR_BLADE_S if Crafting.has_tool(s, ["tag:blade", "tag:knife"]) else TEAR_HAND_S
+	var done := func() -> void:
+		var list: Array = s.inventory.containers.get(container, [])
+		var at := index if index < list.size() and list[index] == e else list.find(e)
+		if at < 0:
+			return  # (moved or gone meanwhile)
+		s.inventory.remove_entry(container, at)
+		var got := s.inventory.take(RAG, n)
+		Rpg.xp(s, "fieldcraft", 1.0)
+		Wear.tell(s, "Torn into %d rags" % got + ("" if got == n else " (%d didn't fit)" % (n - got)))
+	Wear.timed(s, secs, "Tearing " + ItemDB.get_item(id).name.to_lower(), done, instant)
+	return ""
+
+
 static func words(c: float) -> String:
 	if c >= 99.5:
 		return ""

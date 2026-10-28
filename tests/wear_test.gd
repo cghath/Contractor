@@ -342,6 +342,22 @@ func _test_clothes() -> void:
 	check(float(n.get("sore_feet", 0.0)) == 0.0, "rest eases them")
 	if StringName(inv.slots.get(&"feet", &"")) != &"":
 		Wear.set_cond(Wear.slot_state_rw(inv, &"feet"), 100.0)
+	# A carried garment torn into rags; boots won't tear.
+	var into := &""
+	for k: StringName in inv.search_containers():
+		if inv.room_for(k, ItemDB.get_item(&"flannel_shirt"), {}) > 0:
+			into = k
+			break
+	check(into != &"", "room to carry a spare shirt (%s)" % into)
+	if into == &"":
+		return
+	inv.insert_entry(into, {"id": "flannel_shirt", "count": 1})
+	var shirt := _index_of(&"flannel_shirt")
+	var want := ClothingWear.rags_of(inv.containers[shirt[0]][shirt[1]])
+	check(ClothingWear.rags_of({"id": "work_boots"}) == 0 and ClothingWear.rags_of({"id": "leather_pouch"}) == 0, "boots and leather won't tear into rags")
+	var rags := inv.count_of(ClothingWear.RAG)
+	check(want >= 1 and ClothingWear.server_tear(player, shirt[0], shirt[1], true) == "" and inv.count_of(ClothingWear.RAG) == rags + want and _index_of(&"flannel_shirt")[0] == &"",
+		"a spare shirt torn into %d rags" % want)
 
 
 func _test_vehicle() -> void:
