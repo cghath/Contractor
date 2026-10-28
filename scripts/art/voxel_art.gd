@@ -354,7 +354,7 @@ static func hand_points(model: String) -> Dictionary:
 			grip = Vector3(1, 2.5, n - 2.5)
 			support = Vector3(-0.5, 2, n - 2.5)  # cupping the grip from the left
 		"melee":  # the hand at the handle's end; two-handed ones take the other hand further up
-			var two := model.get_slice(":", 1) in ["bat", "axe", "sledge", "spear"]
+			var two := model.get_slice(":", 1) in ["bat", "axe", "sledge", "spear", "bow"]
 			grip = Vector3(2, 2, 3.0)
 			support = Vector3(2, 2, 9.0) if two else Vector3(0.5, 1.5, 3.0)
 		_:
@@ -3107,6 +3107,12 @@ static func _melee(art: String, n: int) -> Dictionary:
 			boxes = [
 				_fb(1.7, 1.7, 0, 2.3, 2.3, nf - 6.0, C.WOOD),
 				_fb(1.9, 1.2, nf - 6.0, 2.1, 2.8, nf, C.METAL),  # the blade
+			]
+		"bow":  # (Archery) the stave held out along the arm, a wrapped grip, the string beside it
+			boxes = [
+				_fb(1.7, 1.7, 0, 2.3, 2.3, nf, C.WOOD),
+				_fb(1.4, 1.4, nf * 0.42, 2.6, 2.6, nf * 0.58, C.GEAR_DARK),  # the grip
+				_fb(0.2, 1.9, 0, 0.5, 2.1, nf, C.PAD),  # the string
 			]
 		_:  # pipe and anything else: a bar
 			boxes = [_fb(1.6, 1.6, 0, 2.4, 2.4, nf, C.GUN)]

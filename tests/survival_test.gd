@@ -478,6 +478,82 @@ func _test_melee_weapons() -> void:
 	player.select_weapon(&"primary")
 	player.set_pitch(0.0)
 	player.vitals.server_reset_health()
+	await _test_bow()
+
+
+## Bows (Archery): made at archery 0 (the recurve at 4), drawn and loosed; an arrow flies an arc
+## and wounds through the melee path (a full draw to the head drops a walker); a miss is often
+## found again; no arrows, no shot.
+func _test_bow() -> void:
+	print("Bows and arrows")
+	var bow := ItemDB.get_item(&"improvised_bow")
+	check(Archery.is_bow(bow) and bow.slot == &"primary" and VoxelArt.model_for(bow).begins_with("melee:bow:") and not VoxelArt.hand_points(VoxelArt.model_for(bow)).is_empty(),
+		"an improvised bow: a two-handed bow with a model and hand points (%s)" % VoxelArt.model_for(bow))
+	check(int(Crafting.recipe("improvised_bow").level) == 0 and int(Crafting.recipe("recurve_bow").level) == 4 and Crafting.recipe("arrows").output[0] == "arrow",
+		"made from sticks and rags by anyone; the recurve at archery 4; arrows from sticks and bone heads")
+	check(player.inventory.take(&"improvised_bow") == 1, "the bow into the primary slot")
+	player.select_weapon(&"primary")
+	while player.inventory.remove_one(Archery.ARROW):
+		pass
+	var eye := player.camera.global_position
+	var fwd := _clear_way(eye, 15.0)  # (a way with nothing in it: earlier tests' bodies, the farm, a rise)
+	check(Archery.server_loose(player, eye, fwd, 1.0).get("why", "") == "No arrows", "no arrows, no shot")
+	player.inventory.take(Archery.ARROW, 4)
+	check(Archery.server_loose(player, eye, fwd, 0.1).get("why", "") == "Not drawn" and player.inventory.count_of(Archery.ARROW) == 4, "barely drawn, it doesn't go")
+	# A miss into the ground a few metres off: found again (the roll forced).
+	Archery.force_keep_roll = 0.0
+	var dropped0 := _dropped(Archery.ARROW)
+	var miss := Archery.server_loose(player, eye, (fwd * 4.0 + Vector3.DOWN * 1.5).normalized(), 1.0)
+	check(String(miss.get("result", "")) == "world" and player.inventory.count_of(Archery.ARROW) == 3 and _dropped(Archery.ARROW) == dropped0 + 1,
+		"an arrow into the ground (%s, %.1f m off) lies there to pick up" % [miss.get("result", "?"), Vector3(miss.get("position", eye)).distance_to(eye)])
+	Archery.force_keep_roll = -1.0
+	# A walker 15 m off: the arc drops, so aim a little high; it strikes the body.
+	var z := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 15.0))
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var chest := z.global_position + Vector3.UP * 1.25
+	var flight_s := chest.distance_to(eye) / float(Archery.bow_of(bow).mps)
+	var aim := (chest + Vector3.UP * 0.5 * Archery.GRAVITY * flight_s * flight_s - eye).normalized()
+	var shot := Archery.server_loose(player, eye, aim, 1.0)
+	var at: Vector3 = shot.get("position", Vector3.ZERO)
+	check(String(shot.get("result", "")) == "body" and shot.get("victim") == z, "an arrow loosed at a walker %.1f m off strikes it (%s, %s, flew %.2f s; ended %.1f m off, %.1f m up from its feet)"
+		% [z.global_position.distance_to(player.global_position), shot.get("result", "?"), shot.get("part", "-"), float(shot.get("flight_s", 0.0)), at.distance_to(eye), at.y - z.global_position.y])
+	if z.vitals.is_up():
+		z.vitals.server_hit(Vitals.HEAD, {"round_class": &"pistol", "channel_depth": 0.1, "melee": "arrow", "energy_j": float(Archery.bow_of(bow).energy_j)})
+	check(z.vitals.is_dead(), "and a full-draw arrow to the head drops it")
+	z.queue_free()
+	player.inventory.unequip(&"primary")
+	while player.inventory.remove_one(Archery.ARROW):
+		pass
+	player.select_weapon(&"primary")
+
+
+## A level way from `eye` with a clear line to a man's head `m` metres out and to the ground 4 m out.
+func _clear_way(eye: Vector3, m: float) -> Vector3:
+	var space := player.get_world_3d().direct_space_state
+	var exclude: Array[RID] = [player.get_rid()]
+	for child in player.get_children():
+		if child is Area3D:
+			exclude.append(child.get_rid())
+	for i in 16:
+		var dir := Vector3.FORWARD.rotated(Vector3.UP, i * TAU / 16.0)
+		var far := level.ground_point(player.global_position + dir * m) + Vector3.UP * 1.6
+		var near := level.ground_point(player.global_position + dir * 4.0)
+		var q1 := PhysicsRayQueryParameters3D.create(eye, far, Archery.MASK, exclude)
+		q1.collide_with_areas = true
+		var q2 := PhysicsRayQueryParameters3D.create(eye, near + Vector3.UP * 0.3, Archery.MASK, exclude)
+		q2.collide_with_areas = true
+		if space.intersect_ray(q1).is_empty() and space.intersect_ray(q2).is_empty():
+			return dir
+	return -player.global_basis.z
+
+
+func _dropped(id: StringName) -> int:
+	var n := 0
+	for d: Dictionary in GameState.dropped.values():
+		if String(d.get("id", "")) == String(id):
+			n += int(d.get("count", 0))
+	return n
 
 
 func _test_stealth() -> void:

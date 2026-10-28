@@ -27,6 +27,10 @@ func _init(s: Soldier) -> void:
 ## Each frame the game has the mouse and a melee weapon is up.
 func update(hud: Node) -> void:
 	var now := Soldier._now()
+	if Archery.is_bow(body.active_weapon()):
+		_update_bow(hud, now)
+		_update_dodge(now)
+		return
 	if Input.is_action_just_pressed(&"fire"):
 		_fire_down_at = now
 		_heavy_sent = false
@@ -44,6 +48,34 @@ func update(hud: Node) -> void:
 	_update_dodge(now)
 	if hud and Input.is_action_just_pressed(&"fire") and body.movement and body.movement.stamina < 0.05:
 		hud.flash("Too tired to swing")
+
+
+## A bow up (Archery): fire held draws (full at Archery.draw_s), let go looses from the eye where
+## it looks. No block with a bow.
+func _update_bow(hud: Node, now: float) -> void:
+	if _blocking:
+		_blocking = false
+		body._server_melee.rpc_id(1, "block_off")
+	var bow := body.active_weapon()
+	if Input.is_action_just_pressed(&"fire"):
+		if body.inventory.count_of(Archery.ARROW) <= 0:
+			if hud:
+				hud.flash("No arrows")
+			return
+		_fire_down_at = now
+		_heavy_sent = false  # (here: "full draw" said)
+	if _fire_down_at < 0.0:
+		return
+	var draw := clampf((now - _fire_down_at) / Archery.draw_s(body, bow), 0.0, 1.0)
+	if draw >= 1.0 and not _heavy_sent:
+		_heavy_sent = true
+		if hud:
+			hud.flash("Full draw")
+	if Input.is_action_just_released(&"fire"):
+		var eye := body.camera.global_transform if body.camera else body.global_transform
+		body._server_loose.rpc_id(1, eye.origin, -eye.basis.z, draw)
+		_fire_down_at = -1.0
+		_heavy_sent = false
 
 
 ## A movement key tapped twice within DOUBLE_TAP_S: the sidestep or dodge that way (any weapon up).

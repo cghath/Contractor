@@ -1119,6 +1119,23 @@ func _server_melee(action: String) -> void:
 	MeleeWeapons.server_action(self, action)
 
 
+## Survival: an arrow loosed from the bow up (MeleeInput -> Archery.server_loose): from the eye,
+## which way, how far it was drawn (0..1).
+@rpc("any_peer", "call_local", "reliable")
+func _server_loose(origin: Vector3, direction: Vector3, draw: float) -> void:
+	if not _from_owner() or not vitals.is_up() or inventory.hands != &"" or respawn_state == RESPAWN_WAITING or is_instance_valid(vehicle):
+		return
+	if not usable_point(origin) or not usable_direction(direction) or origin.distance_to(global_position) > 3.0:
+		return
+	Archery.server_loose(self, origin, direction.normalized(), clampf(draw, 0.0, 1.0))
+
+
+## Every peer: draw the arrow this man loosed flying (Archery.show_flight).
+@rpc("authority", "call_local", "unreliable")
+func _client_arrow(origin: Vector3, velocity: Vector3, flight_s: float) -> void:
+	Archery.show_flight(self, origin, velocity, flight_s)
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void:
 	if not _from_owner() or not vitals.is_up() or inventory.hands != &"":
