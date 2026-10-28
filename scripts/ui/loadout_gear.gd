@@ -335,6 +335,9 @@ func _build_info() -> void:
 	for l: Variant in clothes:
 		lines.append(String(l))
 	lines.append("Clothes keep off %d%% of the cold; steps x%.2f" % [roundi(float(info.get("warmth", Clothing.inv_warmth(target.inventory))) * 100.0), Clothing.noise_of(target.inventory)])
+	var camo := Clothing.camo_words(Clothing.spot_factor(target.inventory, Spotting.preset_of(target)))
+	if camo != "":
+		lines.append("Camouflage here: " + camo)
 	lines.append("Carrying %.1f kg" % target.inventory.total_mass())
 	var lab := UiKit.text("\n".join(lines))
 	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

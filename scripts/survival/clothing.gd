@@ -245,6 +245,19 @@ static func spot_factor(inv: Inventory, preset: String) -> float:
 	return clampf(f, Spotting.CAMO_MIN, Spotting.CAMO_MAX)
 
 
+## Words for a spot_factor `f` (the gear editor's readout; SCUM shows camo with the clothes): "" for none.
+static func camo_words(f: float) -> String:
+	if f <= 0.0:
+		return ""
+	if f >= 1.2:
+		return "blends in well"
+	if f >= 1.0:
+		return "blends in a little"
+	if f >= 0.8:
+		return "stands out a little"
+	return "stands out"
+
+
 ## The factor on the dead's sight reach of `s` on `preset`'s ground (below 1 they see less far).
 static func dead_sight_x(s: Soldier, preset: String) -> float:
 	if not enabled() or s == null:

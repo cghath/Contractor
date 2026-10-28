@@ -217,6 +217,12 @@ func _test_fishing() -> void:
 	var smoked := ItemDB.get_item(&"smoked_fish")
 	check(raw != null and smoked != null and float(raw.stats.spoils_days) < float(smoked.stats.spoils_days) and float(raw.stats.spoils_days) <= 1.0
 		and Crafting.recipe("smoked_fish").size() > 0, "raw fish spoils in a day, smoked it keeps")
+	# A fresh survivor roasts the catch on a stick over a fire (cooking 0): no longer raw.
+	player.inventory.take(&"wood_stick")
+	var lv0 := Rpg.gate(player, "cooking", 0)
+	check(lv0 and int(Crafting.recipe("roast_fish").get("level", 9)) == 0 and Crafting.has_tool(player, Crafting.recipe("roast_fish").tool)
+		and not bool(ItemDB.get_item(&"roasted_fish").stats.raw) and not bool(ItemDB.get_item(&"roasted_meat").stats.raw),
+		"roasting fish and meat on a stick needs no cooking skill, and they're cooked")
 	_set_season("spring", 1)
 
 

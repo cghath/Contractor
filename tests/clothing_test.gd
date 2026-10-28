@@ -126,6 +126,7 @@ func _test_noise_camo_pockets() -> void:
 	var woods_a := Clothing.spot_factor(a, "temperate")
 	check(woods_b > 1.0 and woods_a < woods_b - 0.2, "camo: a hunting jacket blends into the woods (spot time x%.2f), a yellow rain jacket doesn't (x%.2f)" % [woods_b, woods_a])
 	check(Clothing.spot_factor(_inv(), "temperate") == 0.0, "camo: nothing seen worn leaves it to the body's look")
+	check(Clothing.camo_words(woods_b) == "blends in well" and Clothing.camo_words(woods_a) == "stands out", "camo in words: %s / %s" % [Clothing.camo_words(woods_b), Clothing.camo_words(woods_a)])
 	var c := _inv()
 	check(is_equal_approx(c.capacity(&"pockets"), Inventory.POCKETS_L), "bare pockets: %.1f L" % c.capacity(&"pockets"))
 	c.take(&"cargo_pants")
