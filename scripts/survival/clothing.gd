@@ -30,11 +30,15 @@ const WET_WARMTH_LOSS := 0.7
 const DRY_FIRE_MULT := 6.0
 const DRY_INDOORS_MULT := 1.5
 const FIRE_M := 3.0
-## Proposed: camouflage against the terrain for the living's sight (call 122; their sight reads
-## camo_mult later): a match hides you, a bright jacket shows you.
-const CAMO_MATCH := 0.8
-const CAMO_BRIGHT := 1.25
-const CAMO_DARK_NIGHT := 0.9
+## Camouflage (call 122): what's worn is what the eye sees. The living's spotting (Spotting.camo_of)
+## takes the outer top's and the trousers' own colours against the zone's ground, as it does a
+## civilian's clothes, and a patterned piece (CAMO_PATTERNS) breaks the outline up as a uniform does.
+## The dead see shape and movement more than colour (DayZ, SCUM): their reach takes the same factor
+## softened (DEAD_CAMO_POW) and kept in DEAD_CAMO_MIN..MAX. Proposed.
+const CAMO_PATTERNS: Array[String] = ["woodland", "desert", "snow", "urban"]
+const DEAD_CAMO_POW := 0.5
+const DEAD_CAMO_MIN := 0.85
+const DEAD_CAMO_MAX := 1.15
 ## A fresh survivor's clothes (Proposed): one of each row, by the survivor's seed.
 const STARTER := [["tshirt"], ["flannel_shirt", "hoodie", "denim_jacket"], ["jeans", "cargo_pants"], ["sneakers", "work_boots"]]
 
@@ -205,18 +209,8 @@ static func noise_of(inv: Inventory) -> float:
 	return clampf(m, 0.5, 2.0)
 
 
-## How visible `s` is to the living against `terrain` ("woodland", "desert", "snow", "urban"...):
-## the outer torso layer (or the mid, or the base) and the legs; a match hides (CAMO_MATCH each),
-## a bright one shows (CAMO_BRIGHT), "dark" helps a little at night. 1.0 is plain. For the
-## living's sight (phase D: their senses read it later).
-static func camo_mult(s: Soldier, terrain: String, night := false) -> float:
-	if s == null or s.inventory == null:
-		return 1.0
-	return camo_of(s.inventory, terrain, night)
-
-
-static func camo_of(inv: Inventory, terrain: String, night := false) -> float:
-	var m := 1.0
+## The pieces the eye sees most: the outermost torso layer worn and the trousers (either may be null).
+static func seen_pieces(inv: Inventory) -> Array[ItemData]:
 	var top: ItemData = null
 	for slot: StringName in TORSO_OUT_IN:
 		var id := StringName(inv.slots.get(slot, &""))
@@ -224,17 +218,41 @@ static func camo_of(inv: Inventory, terrain: String, night := false) -> float:
 			top = ItemDB.get_item(id)
 			break
 	var legs_id := StringName(inv.slots.get(&"legs", &""))
-	for it: ItemData in [top, ItemDB.get_item(legs_id) if legs_id != &"" else null]:
+	var legs: ItemData = ItemDB.get_item(legs_id) if legs_id != &"" and ItemDB.has_item(legs_id) else null
+	return [top, legs]
+
+
+## The factor on the time the living take to spot what `inv` wears on the ground of `preset`
+## (above 1 blends in, below 1 stands out; Spotting's colour model), or 0 when nothing seen is worn
+## (the body's own look decides then).
+static func spot_factor(inv: Inventory, preset: String) -> float:
+	if inv == null:
+		return 0.0
+	var hexes: Array[String] = []
+	var patterned := 0
+	for it: ItemData in seen_pieces(inv):
 		if it == null:
 			continue
-		var tag := String(it.stats.get("camo", "plain"))
-		if tag == terrain:
-			m *= CAMO_MATCH
-		elif tag == "bright":
-			m *= CAMO_BRIGHT
-		elif tag == "dark" and night:
-			m *= CAMO_DARK_NIGHT
-	return m
+		hexes.append(String(it.stats.get("colour", "#808080")))
+		if String(it.stats.get("camo", "plain")) in CAMO_PATTERNS:
+			patterned += 1
+	if hexes.is_empty():
+		return 0.0
+	var variant := (VoxelArt.CIV_PREFIX + hexes[0] + ":" + hexes[1]) if hexes.size() == 2 else ("civp:" + hexes[0])
+	var f := Spotting.camo(variant, preset)
+	# A pattern breaks the outline up: the uniform's breakup for each patterned piece of the two.
+	f *= lerpf(1.0, Spotting.CAMO_BREAKUP, patterned / float(hexes.size()))
+	return clampf(f, Spotting.CAMO_MIN, Spotting.CAMO_MAX)
+
+
+## The factor on the dead's sight reach of `s` on `preset`'s ground (below 1 they see less far).
+static func dead_sight_x(s: Soldier, preset: String) -> float:
+	if not enabled() or s == null:
+		return 1.0
+	var f := spot_factor(s.inventory, preset)
+	if f <= 0.0:
+		return 1.0
+	return clampf(pow(1.0 / f, DEAD_CAMO_POW), DEAD_CAMO_MIN, DEAD_CAMO_MAX)
 
 
 ## Litres the worn clothes' pockets add (Inventory.capacity of the pockets).

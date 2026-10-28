@@ -105,6 +105,16 @@ static var _camo_cache := {}  # "variant|preset" -> factor
 
 ## The camo factor for `variant` (a VoxelArt variant, or plain clothes: VoxelArt.CIV_PREFIX)
 ## on terrain preset `preset`.
+## `target`'s camo factor on `preset`: in a survival world what they wear decides (Clothing.spot_factor:
+## a hunting jacket in the woods, a yellow rain jacket anywhere), else their body's look.
+static func camo_of(target: Soldier, preset: String) -> float:
+	if Clothing.enabled() and target.inventory != null:
+		var f := Clothing.spot_factor(target.inventory, preset)
+		if f > 0.0:
+			return f
+	return camo(String(target.model.variant) if target.model else "", preset)
+
+
 static func camo(variant: String, preset: String) -> float:
 	var key := variant + "|" + preset
 	if not _camo_cache.has(key):
@@ -212,7 +222,7 @@ static func spot_seconds(observer: Soldier, target: Soldier, preset: String, com
 		s *= RUNNING
 	elif speed >= WALK_MPS:
 		s *= WALKING
-	s *= camo(String(target.model.variant) if target.model else "", preset)
+	s *= camo_of(target, preset)
 	s *= exp(foliage / FOLIAGE_M)
 	if suppressed:
 		s *= SUPPRESSED
