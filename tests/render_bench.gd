@@ -13,15 +13,20 @@ extends Node
 ## zone's densest wood). Never touches a real save.
 ## Safe to run while someone uses the PC (2026-10-31: an agent's run kept cghath's mouse inside its
 ## window): it does nothing unless BENCH_WINDOWED=1 is set (for a person to run on purpose, never an
-## agent's suite); its window is small (BENCH_SIZE, at the screen's corner), borderless, never takes
-## focus, and the mouse is let go every frame after every other script (the game captures it in
-## fifty-odd places: player input, menus, the HUD); it quits by itself after TIMEOUT_S.
+## agent's suite); its window sits at the screen's corner, borderless, never takes focus, and the
+## mouse is let go every frame after every other script (the game captures it in fifty-odd places:
+## player input, menus, the HUD); it quits by itself after TIMEOUT_S.
+## The window is the game's own size (the project's, 1600x900) unless BENCH_SIZE=WxH says
+## otherwise (e.g. BENCH_SIZE=1920x1080, or 640x360 for a small one out of the way). The GPU's
+## work in foliage (overdraw, fill) goes with the pixels, so every measure line says the size it
+## was taken at; compare GPU times only at the same size.
 
 const SETTLE_S := 5.0
 const MEASURE_S := 10.0
 ## The whole bench quits after this long, whatever is left (s).
 const TIMEOUT_S := 300.0
-const BENCH_SIZE := Vector2i(640, 360)
+
+var _size := Vector2i.ZERO
 
 var main: Node
 var level: ZoneLevel
@@ -39,8 +44,14 @@ func _ready() -> void:
 	win.set_flag(Window.FLAG_NO_FOCUS, true)
 	win.set_flag(Window.FLAG_BORDERLESS, true)
 	win.mode = Window.MODE_WINDOWED
-	win.size = BENCH_SIZE
+	_size = Vector2i(int(ProjectSettings.get_setting("display/window/size/viewport_width", 1600)),
+		int(ProjectSettings.get_setting("display/window/size/viewport_height", 900)))
+	var asked := OS.get_environment("BENCH_SIZE").to_lower().split("x")
+	if asked.size() == 2 and asked[0].is_valid_int() and asked[1].is_valid_int() and int(asked[0]) > 0 and int(asked[1]) > 0:
+		_size = Vector2i(int(asked[0]), int(asked[1]))
+	win.size = _size
 	win.position = Vector2i.ZERO
+	print("bench: window %dx%d (BENCH_SIZE=WxH to change it)" % [_size.x, _size.y])
 	process_priority = 1000000  # after every other script's _process: the mouse let go last
 	process_physics_priority = 1000000
 	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
@@ -306,8 +317,9 @@ func _measure(name: String) -> void:
 		if frame.size() % 300 == 0:
 			_census("measuring")
 	var n := maxf(frame.size(), 1)
-	print("bench: %s: %d frames, %.1f fps; frame %.2f ms (p95 %.2f); GPU %.2f ms (p95 %.2f); render CPU %.2f ms; draws %.0f (max %.0f); objects %.0f; primitives %.0fk; video mem %.0f MB"
-		% [name, frame.size(), frame.size() / MEASURE_S, _avg(frame), _pct(frame, 0.95), _avg(gpu), _pct(gpu, 0.95), _avg(cpu),
+	var px := get_window().size  # (the window as the OS gave it, which may differ from the size asked)
+	print("bench: %s at %dx%d: %d frames, %.1f fps; frame %.2f ms (p95 %.2f); GPU %.2f ms (p95 %.2f); render CPU %.2f ms; draws %.0f (max %.0f); objects %.0f; primitives %.0fk; video mem %.0f MB"
+		% [name, int(px.x), int(px.y), frame.size(), frame.size() / MEASURE_S, _avg(frame), _pct(frame, 0.95), _avg(gpu), _pct(gpu, 0.95), _avg(cpu),
 		_avg(draws), draws.max() if not draws.is_empty() else 0.0, objects / n, prims / n / 1000.0,
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0])
 	var subs: Array[String] = []

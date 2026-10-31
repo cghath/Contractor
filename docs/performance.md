@@ -281,6 +281,9 @@ town no errors, GPU under 20 ms (from 41.7 with no voxels at all: soldiers' far 
 should take most of the 20.6 + 15.2 ms), primitives under 3M, draws under 3000; menu unchanged
 (about 0.75 ms GPU); woods and fight no worse than v0.5.4 (woods 5.9 ms GPU). If Ultra (6 sites)
 still overflows, lower its cap; if High's town is still over 20 ms GPU, the split shows what's left.
+These numbers were taken at the game's own window size (the project's 1600x900); the bench opens at
+that size unless `BENCH_SIZE=WxH` says otherwise, and since 2026-10-31 every measure line names its
+size. GPU time in foliage and full-screen passes goes with the pixel count, so compare at one size.
 
 ## cghath's world content (perf/world-content, 2026-10-23)
 
@@ -396,46 +399,95 @@ parents, no sun shadows from thickets, scrub or ground cover). That pass also ga
 to every wooded normal preset, so `art/denser-copses` (ea4d575e, in dev's history) has nothing
 left to bring in.
 
-**How it was measured.** Headless only. A windowed run of `tests/render_bench.tscn` on this PC
-caught cghath's mouse while they were using the machine, so the bench now does nothing unless
-`BENCH_WINDOWED=1` is set and lets go of the mouse every frame (F-366: cghath runs it). The
-perfcases draw proxy is what the renderer would be given: geometry in view and in range,
-MultiMesh instances, triangles, and the shadow casters within the sun's reach. Until this pass it
-never counted the scatter: the headless renderer gives a MultiMesh no bounds, so every scatter
-cell sat at the zone's origin, out of its own range. It now places scatter nodes by their
-"centre" meta and follows visibility parents. The new **open** case is the woods case's walk
-and patrol on Kestrel Valley's most open ground, so woods minus open is what the trees cost.
+**How it was measured.** Two ways, and they disagree on the draws.
 
-Kestrel Valley (river_valley), at the draw proxy's peak (R0768, this PC):
+*Windowed, the real renderer (S0771).* One windowed run of `tests/render_bench.tscn` on this PC
+(RTX 4080 SUPER, Vulkan Forward+, the default High detail: far trees 3200 m, soldiers' shadows to
+80 m) measured open, woods and woods_in, then died in the forest case (exit 127) after it caught
+cghath's mouse while they were using the machine. Its window size isn't in the log (the bench
+didn't print it then); the bench now names its size on every measure line and opens at the
+game's own 1600x900 unless `BENCH_SIZE=WxH` says otherwise. It runs only with
+`BENCH_WINDOWED=1` and lets go of the mouse every frame, so agents don't run it (F-366). Each
+case hosts Kestrel Valley afresh and stands still 10 s; the frame is wall-clock with the whole
+game running (the squad, the zone's patrols and the sites streamed in).
 
-| | woods (densest wood, 62 trees in 64 m) | open ground |
+| S0771, Kestrel Valley | frame avg (p95) | GPU | render CPU | draws (max) | primitives | sites streamed in |
+|---|---|---|---|---|---|---|
+| open ground, 2 cells (64 m) from a tree, looking across the zone | 8.85 ms (16.25) | 0.69 ms | 0.72 ms | 646 (678) | 732k | none |
+| woods: the densest wood's west edge, looking in | 8.84 ms (15.18) | 0.68 ms | 0.56 ms | 377 (414) | 766k | compound_6 204 m, lm_office 231 m |
+| woods_in: that wood's middle, looking the same way | 10.13 ms (17.45) | 0.68 ms | 0.91 ms | **1036** (1077) | 836k | compound_6 166 m, lm_office 255 m |
+
+Inside the wood the renderer makes about 60% more draws than on open ground (+390) and 2.7x what
+it makes 40 m back at the wood's edge looking the same way (+660), for only 70-100k more
+primitives: many small draws. The frame is 1.3 ms longer than open ground's, the render thread
+0.2 ms. The GPU is 0.7 ms in all three: the frame is the CPU's. Where the extra draws come from
+isn't settled. The draw proxy (below) counts only 37 more vegetation draws in the woods than in
+the open and each shadow caster once, so the likely sources are what it can't see: the near tier's
+shadow casters drawn again in every sun cascade they overlap (inside the wood they are all round
+the camera, in the near cascades), or the site behind the wood (compound_6, 40 m nearer from the
+middle; a voxel site's blocks are drawn once per cascade too, voxel_world.gd MESH_BLOCK). The bench's
+BENCH_SPLIT=1 hides each of the level's parts in turn and would say which (F-366).
+
+*Headless, the draw proxy (perfcases).* What the renderer would be given: geometry in view and in
+range, MultiMesh instances, triangles, and the shadow casters within the sun's reach (each
+once). Until this pass it never counted the scatter: the headless renderer gives a MultiMesh no
+bounds, so every scatter cell sat at the zone's origin, out of its own range. It now places
+scatter nodes by their "centre" meta and follows visibility parents. The new **open** case is the
+woods case's walk on Kestrel Valley's most open ground. Its first version (R0768) kept the woods'
+patrol 60 m ahead: in the open it saw the squad and fought it (CASUALTY and INVESTIGATE at the end,
+a 57 ms AI tick and 4 hitches in 20 s), so its frame cost (10.38 ms against the woods' 8.68) said
+nothing about the trees. The patrol now stands 500 m to the side, out of the AI's sight
+(SquadAI.SIGHT_RANGE 300 m), and open is measured 30 s like the woods (R0776: the patrol on
+PATROL at the end as in the woods, 2 hitches, both a soldier model built, 71 ms).
+
+Kestrel Valley (river_valley), at the draw proxy's peak (this PC; perfcases' densest wood is
+another than the bench's: it keeps 250 m from the sites):
+
+| | woods (densest wood, 62 trees in 64 m), R0768 | open ground, R0768 (with the fight) |
 |---|---|---|
-| 60 Hz frame cost, avg / p95 (ms) | 8.68 / 12.75 | 10.38 / 14.35 (the AI sees each other and fights) |
 | everything drawn | 293 draws, 758k triangles | 255 draws, 695k triangles |
 | of which soldiers | 159 draws, 547k triangles | 159 draws, 547k triangles |
 | of which vegetation (scatter, both tiers) | **102 draws, 161k triangles** | 65 draws, 99k triangles |
 | shadow casters | 270 (707k triangles) | 233 (665k triangles) |
 | vegetation in the shadow pass | 40k triangles | 17k triangles |
 
-The woods add about 37 draws and 62k triangles to what open ground draws, and they cost no more
-CPU frame time. In the same view the soldiers are 3-4x the vegetation. In the woods, the near
-tier's thickets (36k) and grass tufts (40k) are the biggest shares, then scrub (24k) and crowns
-(20k). The forest suite, standing in temperate's densest copse (105 trees), counts 465 draws,
+With the open case's patrol out of sight and nobody fighting (R0776, the same PC, 30 s each):
+
+| R0776 | woods | open ground |
+|---|---|---|
+| 60 Hz frame cost, avg / p95 / p99 (ms) | 8.22 / 11.70 / 15.04 | 8.12 / 11.32 / 14.89 |
+| tick scripts / _process scripts (ms) | 4.25 / 3.55 | 4.11 / 3.60 |
+| hitches | 0 | 2 (4.0 a minute) |
+| everything drawn | 293 draws, 758k triangles | 103 draws, 170k triangles |
+| of which soldiers | 159 draws, 547k triangles (the patrol in view, 60 m on) | 7 draws, 21k triangles |
+| of which vegetation | 102 draws, 161k triangles | 65 draws, 99k triangles |
+
+Headless, the trees cost the CPU about 0.1 ms a frame (8.22 against 8.12 ms); the vegetation's own
+counts are as in R0768. The soldiers' share in the woods' view is the patrol standing in it, not
+the trees. This is the CPU side only: S0771's windowed frame inside the wood was 1.3 ms longer
+than open ground's, with the extra draws above.
+
+What the vegetation is given the renderer, counted once: about 37 draws and 62k triangles more in
+the woods than on open ground; in the woods' view the patrol's soldiers are 3-4x the vegetation. In the woods,
+the near tier's thickets (36k) and grass tufts (40k) are the biggest shares, then scrub (24k) and
+crowns (20k). The forest suite, standing in temperate's densest copse (105 trees), counts 465 draws,
 530k triangles and about 52k shadow triangles; the Experimental forest's densest copse runs a
-6.9 ms frame.
+6.9 ms frame (headless).
 
 **Cut in this pass:** far-tier trunks (past 200 m, a 0.3 m post) cast no sun shadow: 17 fewer
-shadow casters in the woods view (287 -> 270), 2.7k fewer shadow triangles (R0765 -> R0768).
-Nothing else from the list (per-tree meshes, no LOD or visibility ranges, shadows from every
-leaf, foliage overdraw, per-frame vegetation scripts) still applies: trees are MultiMeshes per
-cell with tiers and visibility ranges, thickets and scrub cast no shadow, the materials are
-opaque, and the scatter's _process costs nothing measurable (the grass carpet 0.13 ms a frame).
-What's left would change the look (F-367).
+shadow casters in the woods view (287 -> 270), 2.7k fewer shadow triangles (R0765 -> R0768). That
+does nothing for the extra draws inside the wood that S0771 shows (the far tier is past 200 m).
+From the usual list, these no longer apply: trees are MultiMeshes per cell with tiers and
+visibility ranges, thickets and scrub cast no shadow, the materials are opaque, and the scatter's
+_process costs nothing measurable (the grass carpet 0.13 ms a frame). Still open: the draws inside
+the wood (F-366, which wants the windowed split) and the cuts that would change the look (F-367).
+Captain's item 1 stays open.
 
-**Budgets** (Proposed, `DRAW_BUDGETS` in tests/perfcases_test.gd, about 1.5x the numbers above,
-no local slack since they're counts): woods 160 draws / 250k triangles / 65k shadow triangles of
-vegetation, open 100 / 150k / 50k. The frame budgets for open are the woods' own (18 / 26 ms,
-15 hitches a minute).
+**Budgets** (Proposed, `DRAW_BUDGETS` in tests/perfcases_test.gd, about 1.5x the proxy's numbers
+above, no local slack since they're counts): woods 160 draws / 250k triangles / 65k shadow
+triangles of vegetation, open 100 / 150k / 50k. They catch the vegetation getting heavier, not the
+per-cascade draws the proxy doesn't count. The frame budgets for open are the woods' own (18 /
+26 ms, 15 hitches a minute over 30 s).
 
 ## What's left
 

@@ -14,18 +14,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 ### Woods perf, measured again (perf/woods-copses, 2026-10-31)
 
 - Captain's queue item 1 ("frame goes 4 -> 10 ms in woods... Then denser copses"), measured
-  on dev (docs/performance.md, "Woods, 2026-10-31"). From Kestrel Valley's densest wood the
-  vegetation is 102 draws and 161k triangles, against 65 and 99k on its open ground; the
-  soldiers in the same view are 547k. The woods' frame costs no more than open ground's
-  (8.7 vs 10.4 ms, R0768). The denser copses were already on dev (ea4d575e; the wooded
-  presets since bbef7e05), so `art/denser-copses` has nothing left to merge.
+  on dev (docs/performance.md, "Woods, 2026-10-31"); still open. Windowed (S0771, the real
+  renderer): inside Kestrel Valley's densest wood 1036 draws, 836k primitives, a 10.13 ms
+  frame; on its open ground 646 draws, 732k, 8.85 ms; the GPU 0.7 ms in both. Where the
+  extra ~400 draws inside the wood come from isn't settled (F-366). Headless (the draw proxy,
+  R0768): the vegetation itself is 102 draws and 161k triangles in the woods against 65 and 99k
+  in the open; the patrol in the woods' view is 547k. With the open case's patrol out of sight
+  the trees cost the CPU about 0.1 ms a frame (8.22 vs 8.12 ms, R0776). The denser copses were already on dev
+  (ea4d575e; the wooded presets since bbef7e05), so `art/denser-copses` has nothing left to merge.
 - Far-tier trunks (past 200 m) no longer cast sun shadows (17 fewer shadow casters in the
   woods view).
-- perfcases: a new **open** case (the woods walk on open ground), and the draw proxy now
-  counts the scatter (it never did headless), triangles and shadow triangles, by shape.
-  Vegetation draw budgets for woods and open (Proposed).
-- The windowed render bench runs only with `BENCH_WINDOWED=1`. Its window is small, never takes
-  focus and never holds the mouse, and it quits within 5 minutes. New cases: woods_in, open, forest.
+- perfcases: a new **open** case (the woods walk on open ground, 30 s, its patrol out of sight
+  so nobody fights), and the draw proxy now counts the scatter (it never did headless),
+  triangles and shadow triangles, by shape. Vegetation draw budgets for woods and open (Proposed).
+- The windowed render bench runs only with `BENCH_WINDOWED=1`. Its window never takes focus or
+  holds the mouse, opens at the game's own 1600x900 (`BENCH_SIZE=WxH` to change it; every
+  measure line names its size), and it quits within 5 minutes. New cases: woods_in, open, forest.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

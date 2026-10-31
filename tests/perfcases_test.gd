@@ -15,8 +15,9 @@ extends Node
 ##          garrison, the zone ENGAGED (the QRF launches, gun teams man their guns);
 ##   woods  Kestrel Valley (river_valley: woods, a river, reeds): the squad walks through the
 ##          zone's densest wood and meets a hostile patrol there;
-##   open   Kestrel Valley: the same walk and patrol on the zone's most open ground, as far from any
-##          tree or thicket as it gets (the woods' baseline: woods minus open is what the trees cost);
+##   open   Kestrel Valley: the same walk on the zone's most open ground, as far from any tree or
+##          thicket as it gets, the patrol out of sight to the side (the woods' baseline, no fight:
+##          woods minus open is what the trees give the renderer and cost the CPU);
 ##   drive  Kestrel Valley: the player rides an AI-driven M-ATV along the roads across the zone;
 ##   heli   Kestrel Valley: the player rides a UH-60 contour-flying across the zone.
 ## The zone's visuals are built as on a player's machine (terrain levels, scatter cells, water,
@@ -42,8 +43,11 @@ extends Node
 ## case's average frame, 95th percentile and hitches a minute, with room for CI's slower runners.
 ## Never touches a real save.
 
-const MEASURE_S := {"town": 30.0, "city": 40.0, "fight": 40.0, "woods": 30.0, "open": 20.0, "drive": 45.0, "heli": 35.0}
+const MEASURE_S := {"town": 30.0, "city": 40.0, "fight": 40.0, "woods": 30.0, "open": 30.0, "drive": 45.0, "heli": 35.0}
 const ALL_CASES := ["town", "city", "fight", "woods", "open", "drive", "heli"]
+## The open case's patrol stands this far to the side of the walk, past the AI's sight
+## (SquadAI.SIGHT_RANGE, 300 m), so open is the woods' baseline without a fight (m; Proposed).
+const OPEN_PATROL_OFF_M := 500.0
 ## A frame this long is a hitch (under 30 fps for that frame).
 const HITCH_MS := 33.3
 ## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
@@ -324,16 +328,25 @@ func _case_open() -> void:
 
 
 ## The squad walks 140 m past `spot` (110 m before it to 30 m past) and an 8-man hostile patrol
-## waits 60 m on: the woods case, and the open case for comparison.
+## waits: 60 m on in the woods case (the trees hide the squad: the patrol rests, R0768); in the open
+## case, the woods' baseline, OPEN_PATROL_OFF_M off to the side, out of sight, so the same AI tick
+## and nobody fights (60 m on in the open it saw the squad: CASUALTY and INVESTIGATE, a 57 ms AI
+## tick and 4 hitches in 20 s, R0768, none of it the ground's cost).
 func _walk_with_patrol(name: String, spot: Vector3) -> void:
 	var dir := Vector3(1, 0, 0.3).normalized()
 	var start := level.ground_point(spot - dir * 110.0)
 	var end := level.ground_point(spot + dir * 30.0)
 	player.rotation.y = atan2(-dir.x, -dir.z)  # (the camera looks along the walk: the draw proxy's view)
 	await _settle_at(start, [])
+	var side := dir.cross(Vector3.UP)
+	var patrol_at := spot + dir * 60.0
+	if name == "open":  # (to the side nearer the zone's middle: inside the map)
+		var mid := level.map_area().get_center()
+		var toward := 1.0 if side.dot(Vector3(mid.x, 0, mid.y) - spot) >= 0.0 else -1.0
+		patrol_at = spot + side * toward * OPEN_PATROL_OFF_M
 	for i in 8:
 		level.spawn_soldier({"name": "Perf%sH%d" % [name.capitalize(), i], "faction": "hostile", "variant": "woodland",
-			"pos": level.ground_point(spot + dir * 60.0 + dir.cross(Vector3.UP) * (-14.0 + i * 4.0)),
+			"pos": level.ground_point(patrol_at + side * (-14.0 + i * 4.0)),
 			"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "mode": "aware", "guard": true})
 	await _measure(name, [start, end])
 

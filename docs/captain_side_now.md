@@ -90,10 +90,13 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 ## Next (Captain, 2026-10-14)
 
 1. Woods/render perf pass: frame goes 4 -> 10 ms in woods, up to 1.5k draws, 1.4M prims. Then
-   denser copses. **Done** (2026-10-22, bbef7e05: tiers, far blobs, no shadows from bushes, the
-   dense copses on every wooded preset; 2026-10-31, perf/woods-copses: measured again, woods and
-   open ground cases with vegetation draw budgets in perfcases; docs/performance.md, "Woods,
-   2026-10-31"). The GPU's own time still wants cghath's windowed bench (F-366).
+   denser copses. **Measured, still open** (2026-10-22, bbef7e05: tiers, far blobs, no shadows
+   from bushes, the dense copses on every wooded preset; 2026-10-31, perf/woods-copses: measured
+   again, woods and open ground cases with vegetation draw budgets in perfcases;
+   docs/performance.md, "Woods, 2026-10-31"). Windowed (S0771), inside the densest wood the
+   renderer makes about 60% more draws than on open ground (1036 against 646) and the frame is
+   1.3 ms longer (10.1 against 8.9 ms; the GPU 0.7 ms in both); where those draws come from is
+   F-366. The denser copses are already in.
 2. AI awareness leaks through compound walls; one zone-wide hostile squad (ai_bar_gaps
    G-02/G-03). Tied to the infil problems.
 3. Breaching charges make holes too small; add a "Breach and clear" team order through walls.
