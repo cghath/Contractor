@@ -18,6 +18,8 @@ var _header: Label
 var _offers: ItemList
 var _held: ItemList
 var _details: Label
+## Who holds each hot zone and how firmly (wave 6c).
+var _zones: Label
 ## The details' scroll area (P0-5: a long briefing ran the panel off a small window).
 var _details_scroll: ScrollContainer
 ## Offers / held and details side by side on a wide window, one above the other on a narrow one.
@@ -96,6 +98,9 @@ func _ready() -> void:
 	_held = UiKit.list(140.0)
 	_left.add_child(_held)
 	_held.item_selected.connect(func(i: int) -> void: _select(_held_ids[i], true))
+	_left.add_child(UiKit.heading("Hot zones: who holds them"))  # wave 6c: WorldSites, the faction war between deployments
+	_zones = UiKit.text("")
+	_left.add_child(_zones)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -217,6 +222,7 @@ func refresh() -> void:
 		_held_ids.append(String(c.cid))
 		_held.add_item("%s  [%s]" % [offer_line(c), String(c.state).to_upper()])
 		_held.set_item_tooltip(_held.item_count - 1, "[%s] %s" % [String(c.state).to_upper(), _tooltip(c)])
+	_zones.text = zones_text()
 	if _selected != "" and Contracts.contract(_selected).is_empty():
 		_selected = ""
 	_show_details()
@@ -324,6 +330,15 @@ func offer_count() -> int:
 
 func held_count() -> int:
 	return _held.item_count
+
+
+## The hot zones' holders and grip, one a line (wave 6c); a contested zone can fall to a rival.
+func zones_text() -> String:
+	var lines := PackedStringArray()
+	for r: Dictionary in Economy.world_sites():
+		lines.append(WorldSites.row_text(r))
+	return "
+".join(lines) if not lines.is_empty() else "No hot zones known yet"
 
 
 func header_text() -> String:

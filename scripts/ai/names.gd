@@ -179,10 +179,12 @@ const LOCAL_FIRST := {
 const HOSTAGE_NATIONS := [["US", 0.3], ["UK", 0.2], ["CA", 0.15], ["insurgent", 0.35]]
 
 
-## The nationality a faction's people are from (data/factions.json "nation"; the early game's
-## hostiles are insurgents).
-static func faction_nation(faction_id: String) -> String:
-	return String(MissionRegistry.faction(faction_id).get("nation", "insurgent"))
+## The nationality a faction's people are from: its kit's in that zone ("" = the zone being
+## played; the Eastern Concord Forces' are Russian, Iranian or Chinese by region, wave 6b), else
+## data/factions.json "nation" (the early game's hostiles are insurgents).
+static func faction_nation(faction_id: String, zone_id := "") -> String:
+	var by_kit := Kits.nation(Kits.kit_of(faction_id, zone_id))
+	return by_kit if by_kit != "" else String(MissionRegistry.faction(faction_id).get("nation", "insurgent"))
 
 
 ## The nationality of a region's own people (data/contracts.json regions' "nation").

@@ -97,13 +97,25 @@ func _test_generation() -> void:
 	check(a.size() == 6 and a == b, "the same seed gives the same board (%d offers)" % a.size())
 	check(a != c, "another seed gives another board")
 	var valid := true
+	var unsound := ""  # the first offer that isn't, and what's wrong with it
 	for o: Dictionary in a:
 		var zone := MissionRegistry.zone(o.zone_id)
 		var def := MissionRegistry.type_def(o.type)
-		valid = valid and int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated) and int(o.base_pay) > 0 \
-			and not (o.objectives as Array).is_empty() and ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and (String(o.module_id) != "" or def.has("scenario")) \
-			and o.employer in MissionRegistry.employers() and o.target in MissionRegistry.enemies() and o.zone_kind == zone.kind
-	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout")
+		var problems := PackedStringArray()
+		if not (int(o.rated) >= 1 and int(o.rated) <= 5 and int(o.true_rating) >= int(o.rated)):
+			problems.append("rating %s/%s" % [o.rated, o.true_rating])
+		if int(o.base_pay) <= 0 or (o.objectives as Array).is_empty():
+			problems.append("pay or objectives")
+		if not (ZoneModules.base(o.module) in MissionRegistry.type_modules(def) and ZoneModules.base(o.module) in zone.modules and (String(o.module_id) != "" or def.has("scenario"))):
+			problems.append("module %s (%s)" % [o.module, o.module_id])
+		if not o.employer in MissionRegistry.employers() or not o.target in MissionRegistry.enemies():
+			problems.append("employer %s, target %s" % [o.employer, o.target])
+		if o.zone_kind != zone.kind:
+			problems.append("zone kind %s vs %s" % [o.zone_kind, zone.kind])
+		if not problems.is_empty() and unsound == "":
+			unsound = " (%s %s in %s: %s)" % [o.type, o.get("cid", "?"), o.zone_id, ", ".join(problems)]
+		valid = valid and problems.is_empty()
+	check(valid, "every offer is sound: rating 1-5, the briefing never overstates, pay, objectives, a target module in the zone's layout" + unsound)
 	check(a[0].source == "safe" and int(a[0].rated) == 1 and not a[0].understated and a[0].zone_kind == "contract",
 		"the first is a cheap low-risk job (safety floor): rated %d, $%d" % [a[0].rated, a[0].base_pay])
 	check(not a.any(func(o: Dictionary) -> bool: return o.source == "fixer"), "no fixer work at neutral standing")
@@ -465,6 +477,19 @@ func _test_reputation_core() -> void:
 	Economy.server_nemesis_event(String(n.id), 0, true)
 	check(Economy.nemesis("black_ridge").is_empty() and String(Economy.server_raise_nemesis("black_ridge").name) != "",
 		"its leader dead, it's finished; a new one can rise in its place")
+	# Wave 6b call 4: the allied employers ripple together, and a save from before the
+	# placeholder army was renamed carries over (Campaign.load_campaign's migration).
+	var uk := Economy.reputation("uk_forces")
+	var ca := Economy.reputation("ca_forces")
+	Economy.change_reputation("us_forces", 20, "test")
+	check(Economy.reputation("uk_forces") == uk + 5 and Economy.reputation("ca_forces") == ca + 5,
+		"standing with the US ripples a quarter to the UK and Canada (%+d, %+d)" % [Economy.reputation("uk_forces") - uk, Economy.reputation("ca_forces") - ca])
+	var old_save := {"rep": {"federal_army": -35, "meridian": 4}, "heat": {"federal_army": 12.0},
+		"nemeses": [{"id": "N1", "faction": "federal_army"}], "pass_hot": {"holder": "federal_army", "grip": 0.5}}
+	check(MissionRegistry.migrate_faction_keys(old_save) and old_save.rep == {"eastern_concord": -35, "meridian": 4}
+		and old_save.heat == {"eastern_concord": 12.0} and old_save.nemeses[0].faction == "eastern_concord" and old_save.pass_hot.holder == "eastern_concord"
+		and not MissionRegistry.migrate_faction_keys(old_save),
+		"an old save's Federal Army standing, heat, nemesis and held zone move to the Eastern Concord Forces, once")
 
 
 ## Wave 6c: persistent world (a hot zone's holder and grip outlive a deployment) and the
@@ -486,7 +511,7 @@ func _test_world_sites() -> void:
 	WorldSites.server_advance_days(1, rng)
 	check(WorldSites.grip(zid) > WorldSites.START_GRIP - WorldSites.WIN_GRIP_HIT, "a quiet day repairs some of it back (%.2f)" % WorldSites.grip(zid))
 	# Push it to contested, with a known holder that has a real hostile rival (black_ridge's
-	# enemies include federal_army, the only other one that's also hostile-role), and keep it
+	# enemies include eastern_concord, the only other one that's also hostile-role), and keep it
 	# there (repair only gets one day's grace before the next contract would knock it down
 	# again) for up to 200 days: at 0.2/day, the faction war flipping it is a near-certainty.
 	# Checks the mechanism, not a coin flip.
@@ -533,42 +558,81 @@ func _test_nemesis_kill_attribution() -> void:
 	Economy.server_nemesis_event(String(n.id), 0, true)  # tidy up: done with this one too
 
 
-## Wave 6e: allied troops. Its own Squad instance (faction "friendly" beside the player's own):
-## Squad.members()/brains() must answer for it alone, never the player's squad or vice versa
-## (the fix this slice needed - members() used to be scoped by faction only). Standing, cost
-## and cooldown gate the call; move/hold/assault reuse Squad's own order plumbing.
+## Wave 6e: allied troops. Each element is its own Squad instance (faction "friendly" beside the
+## player's own): Squad.members()/brains() must answer for it alone, never the player's squad,
+## the other element, or vice versa. Standing sets how many at once (Trusted one, Allied two),
+## cost and a per-slot cooldown gate the call; elements wear their employer's kit; the rifle
+## squad and the MG + AT weapons team; the host's high command orders all or one (map orders).
 func _test_allied_troops() -> void:
-	print("Allied troops: its own squad, standing, cost, cooldown, and its orders")
+	print("Allied troops: elements, standing, kit, cost, cooldown, and the high command")
 	var allies := AlliedTroops.current(level)
 	check(allies != null, "installed on the level")
 	var own_before := level.squad_for(&"friendly").members().size()
 	check(allies.server_call(player) != "", "refused with no deployment to vouch for our standing")
-	# A fake deployment against an employer trusted enough (Trusted tier, rep >= 30).
+	# A fake deployment for a UK job, trusted enough (Trusted tier, rep >= 30).
 	var cs := Campaign.section(Contracts.SECTION)
 	var held_before: Array = cs.get("held", [])
 	var deployment_before: Dictionary = cs.get("deployment", {})
-	Economy.change_reputation("meridian", 40 - Economy.reputation("meridian"), "test", false)
-	cs.held = [{"cid": "TESTALLY1", "employer": "meridian"}]
+	var uk_before := Economy.reputation("uk_forces")
+	Economy.change_reputation("uk_forces", 40 - Economy.reputation("uk_forces"), "test", false)
+	cs.held = [{"cid": "TESTALLY1", "employer": "uk_forces"}]
 	cs.deployment = {"cids": ["TESTALLY1"]}
-	Economy.add_cash(Prices.support_price(AlliedTroops.PRICE_KIND) * 2, "test setup")  # whatever's left from earlier tests, cover the call for sure
+	Economy.add_cash(Prices.support_price(AlliedTroops.PRICE_KIND) * 4, "test setup")  # whatever's left from earlier tests, cover the calls for sure
 	var cash_before := Economy.cash()
+	check(allies.max_out() == 1, "Trusted lends one element at a time")
 	check(allies.server_call(player) == "", "Trusted standing, paid: the call goes through")
 	check(Economy.cash() < cash_before, "and it's not free (%d -> %d)" % [cash_before, Economy.cash()])
-	check(allies.is_out() and allies.squad.members().size() == AlliedTroops.SIZE, "an element of its own size is out (%d)" % allies.squad.members().size())
+	check(allies.is_out() and allies.squad.members().size() == AlliedTroops.SIZE, "a rifle squad of its own size is out (%d)" % allies.squad.members().size())
+	check(allies.squad.members().all(func(s: Soldier) -> bool: return _carries(s, &"l85a2") or _carries(s, &"m249") or _carries(s, &"at4")),
+		"lent by the UK, it carries UK kit (L85A2s, with its gunners and AT man)")
 	check(level.squad_for(&"friendly").members().size() == own_before, "the player's own squad still counts only its own (%d)" % level.squad_for(&"friendly").members().size())
-	check(allies.server_call(player) != "", "refused: already out")
+	check(allies.server_call(player, false, "weapons") != "", "refused: Trusted's one element is already out")
+	# Allied standing: a second element, the weapons team.
+	Economy.change_reputation("uk_forces", 75 - Economy.reputation("uk_forces"), "test", false)
+	check(allies.max_out() == 2 and allies.server_call(player, false, "weapons") == "", "Allied standing lends a second: the weapons team comes")
+	var first: Squad = allies.elements[0].squad
+	var team: Squad = allies.elements[1].squad
+	check(team.members().size() == 4 and team.members().any(func(s: Soldier) -> bool: return _carries(s, &"m240b"))
+		and first.members().size() == AlliedTroops.SIZE, "the weapons team is four with its M240B; the rifle squad still counts only its own")
+	check(allies.summary().size() == 2 and String(allies.summary()[1].label).contains("weapons team"), "the map summary lists both elements")
+	# The high command: only the host, all or one.
 	var far := player.global_position + Vector3(0, 0, -60)
-	allies.server_move(player, far)
-	var ally_ai := SquadAI.of(allies.squad.members()[0])
-	check(ally_ai.order == Squad.Order.MOVE and ally_ai._move_point.distance_to(far) < 10.0, "Move there sends the element, not the player's own squad")
+	var bot: Soldier = first.members()[0]
+	check(allies.server_order(bot, "move", far).contains("host"), "only the host commands them (%s)" % allies.server_order(bot, "move", far))
+	check(allies.server_order(player, "move", far) == "", "Move there: every element")
+	var ally_ai := SquadAI.of(first.members()[0])
+	var team_ai := SquadAI.of(team.members()[0])
+	check(ally_ai.order == Squad.Order.MOVE and ally_ai._move_point.distance_to(far) < 10.0 and team_ai.order == Squad.Order.MOVE,
+		"both elements go, not the player's own squad")
+	var near := player.global_position + Vector3(20, 0, 0)
+	check(allies.server_order(player, "defend", Vector3(near.x, 0.0, near.z), "2") == "", "a map order (at y 0) to element 2 alone")
+	check(SquadAI.of(team.members()[0])._move_point.distance_to(near) < 10.0 and SquadAI.of(first.members()[0])._move_point.distance_to(far) < 10.0,
+		"element 2 goes to defend there; element 1 keeps its own order")
+	allies.server_order(player, "follow", Vector3.ZERO, "1")
+	check(SquadAI.of(first.members()[0]).order == Squad.Order.FOLLOW, "Follow me: element 1 follows the host")
 	allies.server_hold(player)
-	check(SquadAI.of(allies.squad.members()[0]).order == Squad.Order.HOLD, "Hold stops it")
-	check(allies.server_release(player) == "", "Release sends it home")
+	check(SquadAI.of(first.members()[0]).order == Squad.Order.HOLD and SquadAI.of(team.members()[0]).order == Squad.Order.HOLD, "Hold stops every element")
+	check(allies.server_release(player, "2") == "" and allies.out().size() == 1 and allies.squad == first, "Release element 2: the rifle squad stays out")
+	check(allies.server_call(player, false, "weapons") != "", "and slot 2's cooldown refuses another straight away")
+	check(allies.server_release(player) == "", "Release the rest")
 	check(not allies.is_out() and allies.squad == null, "nothing's out any more")
 	check(allies.server_call(player) != "", "and the cooldown refuses another straight away")
+	# Meridian (a company, no troops of its own) lends the US kit.
+	check(AlliedTroops.kit_for("meridian") == "allied_us" and AlliedTroops.kit_for("ca_forces") == "allied_ca", "a company's ally lends US kit; Canada its own")
+	# Wave 6c's zone UI: every hot zone with its holder and grip, and the board shows them.
+	var rows := WorldSites.rows()
+	check(rows.size() == 5 and rows.all(func(r: Dictionary) -> bool: return String(r.holder) in MissionRegistry.enemies() and float(r.grip) > 0.0)
+		and Economy.world_sites().size() == 5 and WorldSites.row_text(rows[0]).contains("grip"),
+		"the board's hot zones: who holds each and how firmly (%s)" % WorldSites.row_text(rows[0]))
 	cs.held = held_before
 	cs.deployment = deployment_before
-	Economy.add_cash(cash_before - Economy.cash(), "test cleanup")  # the call's cost shouldn't ride into the next test
+	Economy.change_reputation("uk_forces", uk_before - Economy.reputation("uk_forces"), "test cleanup", false)
+	Economy.add_cash(cash_before - Economy.cash(), "test cleanup")  # the calls' cost shouldn't ride into the next test
+
+
+## Whether `s` wears or carries `id` (a slot or any container).
+static func _carries(s: Soldier, id: StringName) -> bool:
+	return s.inventory.slots.values().has(id) or s.inventory.count_of(id) > 0
 
 
 # --- The debrief ---------------------------------------------------------------------------

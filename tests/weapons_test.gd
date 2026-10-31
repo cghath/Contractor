@@ -242,12 +242,21 @@ func _test_fire_and_reload(id: String) -> void:
 
 
 ## Wave 6b (2026-10-18): each enemy faction fields its own kit (factions.json "kits"); Black
-## Ridge's and Vantage's come from their code tables unchanged; a regional army (Federal Army,
-## "eastern_army") from data, in its own camo.
+## Ridge's and Vantage's come from their code tables unchanged; the one conventional army (the
+## Eastern Concord Forces, call 4) from data, its kit by region: Russian inland, Iranian on the
+## coast, Chinese in the Old Quarter (a zone_kits override), each in its own camo.
 func _test_faction_kits() -> void:
 	print("Faction kits (wave 6b)")
-	check(Kits.kit_of("black_ridge") == Kits.INSURGENT and Kits.kit_of("vantage_group") == Kits.PMC and Kits.kit_of("federal_army") == "eastern_army",
-		"Black Ridge, Vantage and the Federal Army each have their kit")
+	check(Kits.kit_of("black_ridge") == Kits.INSURGENT and Kits.kit_of("vantage_group") == Kits.PMC and Kits.kit_of("eastern_concord", "none") == "concord_ru",
+		"Black Ridge, Vantage and the Eastern Concord Forces each have their kit")
+	check(Kits.kit_of("eastern_concord", "pinewood_ridge") == "concord_ru" and Kits.kit_of("eastern_concord", "harbour_yard") == "concord_ir"
+		and Kits.kit_of("eastern_concord", "city_hot") == "concord_cn",
+		"the Concord's kit goes by region (inland Russian, coast Iranian) and a zone override (Old Quarter Chinese)")
+	check(Names.faction_nation("eastern_concord", "harbour_yard") == "IR" and Names.faction_nation("eastern_concord", "city_hot") == "CN"
+		and Names.faction_nation("eastern_concord", "pinewood_ridge") == "RU" and Names.faction_nation("black_ridge", "harbour_yard") == "insurgent",
+		"its men (HVTs, nemeses) are named from the kit's nation; Black Ridge stays insurgent")
+	check(Kits.kit_of("federal_army", "none") == "concord_ru" and MissionRegistry.faction_name("federal_army") == "Eastern Concord Forces",
+		"the old placeholder id still resolves to the renamed faction")
 	var same := true
 	for i in 9:
 		same = same and Kits.loadout(Kits.INSURGENT, i) == CompoundLevel.hostile_loadout(i) and Kits.loadout(Kits.PMC, i, 3) == CompoundLevel.rival_pmc_loadout(i, 3)
@@ -255,18 +264,29 @@ func _test_faction_kits() -> void:
 	var guns := {}
 	var roles := {}
 	for i in 8:
-		var kit := Kits.loadout("eastern_army", i)
+		var kit := Kits.loadout("concord_ru", i)
 		check(kit.has("plate_carrier") and kit.has("plate_steel_l3") and kit.has("ifak"), "army kit %d: carrier, steel plate, IFAK" % i)
 		for g: String in ["ak74", "rpk", "pkm", "svd"]:
 			if kit.has(g):
 				guns[g] = true
-		if Kits.role("eastern_army", i) != "":
-			roles[Kits.role("eastern_army", i)] = true
-	check(guns.size() == 4 and roles.has("heavy_gunner") and roles.has("ammo_bearer") and Kits.variant("eastern_army") == "woodland",
-		"the army: AK-74s, an RPK, a PKM with its ammo bearer, an SVD, in woodland (%s)" % [guns.keys()])
+		if Kits.role("concord_ru", i) != "":
+			roles[Kits.role("concord_ru", i)] = true
+	check(guns.size() == 4 and roles.has("heavy_gunner") and roles.has("ammo_bearer") and roles.has("anti_tank") and Kits.variant("concord_ru") == "woodland",
+		"the army: AK-74s, an RPK, a PKM with its ammo bearer, an RPG, an SVD, in woodland (%s)" % [guns.keys()])
+	check(Kits.loadout("concord_ir", 0).has("akm") and Kits.variant("concord_ir") == "desert" and Kits.variant("concord_cn") == "urban",
+		"the coast kit carries AKMs in desert camo; the Old Quarter's is urban")
+	# Wave 6e: allied kits by employer, and the MG + AT weapons team as a named mix.
+	check(Kits.kit_of("us_forces") == "allied_us" and Kits.loadout("allied_uk", 0).has("l85a2") and Kits.loadout("allied_ca", 0).has("c8"),
+		"the allied employers dress their troops in their own kit (M4, L85A2, C8)")
+	var team := range(Kits.mix("allied_us", "weapons_team").size()).map(func(i: int) -> Array: return Kits.loadout("allied_us", i, 1, "weapons_team"))
+	check(team.size() == 4 and team.any(func(k: Array) -> bool: return k.has("m240b")) and team.filter(func(k: Array) -> bool: return k.has("at4")).size() == 2
+		and Kits.role("allied_us", 0, "weapons_team") == "heavy_gunner",
+		"a weapons team: an M240B gunner, his ammo bearer and two AT4s")
 	var captured := range(CompoundLevel.HOSTILE_MIX.size()).any(func(i: int) -> bool: return CompoundLevel.hostile_loadout(i).has("m4a1"))
 	check(captured, "the militia fields a captured M4 (a faction known to use AR-pattern rifles uses them)")
-	check("federal_army" in MissionRegistry.enemies(), "the Federal Army is a faction the squad can be hired against")
+	check("eastern_concord" in MissionRegistry.enemies(), "the Eastern Concord Forces are a faction the squad can be hired against")
+	check(["us_forces", "uk_forces", "ca_forces"].all(func(f: String) -> bool: return f in MissionRegistry.employers()),
+		"the US, UK and Canada hire the squad")
 
 
 func _test_hostile_kits() -> void:
