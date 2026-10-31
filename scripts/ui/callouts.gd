@@ -160,8 +160,9 @@ static func play(id: StringName, speaker: Node3D) -> AudioStreamPlayer3D:
 ## whole side: once anyone says it, nobody on that side says it again for `side_gap`
 ## seconds. Returns true if it was said now. A line held back by the speaker gap waits its
 ## turn (one per speaker, the newest wins) for up to PENDING_S; a repeat, or a speaker who
-## is down, says nothing.
-func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := "", side_gap := 0.0) -> bool:
+## is down, says nothing. `then` runs once the line is actually said (now, or when a held-back
+## one goes): a bound's "Covering!" follows its "Moving!", never alone.
+func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := "", side_gap := 0.0, then := Callable()) -> bool:
 	if not multiplayer.is_server() or speaker == null or not is_instance_valid(speaker) or not speaker.vitals.is_up():
 		return false
 	var now := Soldier._now()
@@ -175,9 +176,11 @@ func say(speaker: Soldier, id: StringName, text := "", key := "", side_key := ""
 	var line := text if text != "" else String(LINES.get(id, String(id)))
 	if (id not in URGENT and now - float(_last_by_speaker.get(who, -1000.0)) < SPEAKER_GAP_S) or not group_free(speaker, id, true):
 		_pending[who] = {"speaker": speaker, "id": id, "line": line, "repeat_key": repeat_key,
-			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S}
+			"shared": shared, "side_gap": side_gap, "until": now + PENDING_S, "then": then}
 		return false
 	_send(speaker, id, line, repeat_key, shared)
+	if then.is_valid():
+		then.call()
 	if speaker.faction == &"hostile":
 		server_vocal(speaker, id)  # the enemy is heard, in his own tongue (voiced_path), never subtitled
 	return true
@@ -197,6 +200,9 @@ func _process(_delta: float) -> void:
 		elif (p.id in URGENT or now - float(_last_by_speaker.get(who, -1000.0)) >= SPEAKER_GAP_S) and group_free(speaker, p.id):
 			_pending.erase(who)
 			_send(speaker, p.id, p.line, p.repeat_key, p.shared)
+			var then: Callable = p.get("then", Callable())
+			if then.is_valid():
+				then.call()
 
 
 func _send(speaker: Soldier, id: StringName, line: String, repeat_key: String, shared := "") -> void:

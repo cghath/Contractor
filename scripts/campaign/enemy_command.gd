@@ -393,7 +393,8 @@ func can_decide() -> bool:
 func _step_picture() -> void:
 	picture.comms_down = _comms_down()
 	picture.step(now())
-	var groups: Array = GroupBoard.squads_of(get_tree(), &"hostile")
+	var groups: Array = []  # (untyped: squads_of is Array[Squad], and a virtual squad's record is a Dictionary; appending one errored every tick and the board never saw them)
+	groups.append_array(GroupBoard.squads_of(get_tree(), &"hostile"))
 	var virtualizer := Virtualizer.of(self)
 	if virtualizer:
 		for r: Dictionary in virtualizer.virtual_records():

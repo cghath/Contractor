@@ -1694,8 +1694,8 @@ func _test_fire_discipline() -> void:
 	var far_off := ai._friendly_in_line(aim)
 	_place(bravo, origin + Vector3(1.5, 0, -3))
 	var near_off := ai._friendly_in_line(aim)
-	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m)" % [
-		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen])
+	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m) (prone %s, far %s, near %s)" % [
+		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen, prone, far_off, near_off])
 	_place(bravo, origin + Vector3(0, 0, -50))
 	check(ai._friendly_in_line(aim), "a squadmate 20 m past the target: rounds that miss fly on, no shot")
 	_place(bravo, origin + Vector3(0, 0, -90 - SquadAI.DOWNRANGE_M))

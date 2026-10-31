@@ -1612,6 +1612,9 @@ func follow_point(member: Soldier) -> Vector3:
 		return member.global_position  # G9: a hero leads; he never chases his own slot
 	var frame := Engine.get_physics_frames()
 	if not _slots_fresh(frame) or (not _slots.has(member) and frame != _slots_frame):
+		if SquadAI.profiling:
+			var why := "stale" if not _slots_fresh(frame) else "missing:%s:%s" % [member.is_ai(), member.vitals.is_up()]
+			SquadAI.prof["slots_" + why] = [int(SquadAI.prof.get("slots_" + why, [0, 0, 0])[0]) + 1, 0, 0]
 		_slots = _work_out_slots()
 		_slots_frame = frame
 		_slots_lead_at = leader.global_position
@@ -1626,16 +1629,23 @@ func follow_point(member: Soldier) -> Vector3:
 ## couple of ticks' walk (an AI squad's, with no player in it to watch it form, a few more), and
 ## turns with the lead once he has turned SLOTS_KEEP_DOT's worth (about 6 degrees).
 const SLOTS_KEEP_TICKS := 4
-const SLOTS_KEEP_TICKS_AI := 8
+const SLOTS_KEEP_TICKS_AI := 20
 const SLOTS_KEEP_M := 0.6
 const SLOTS_KEEP_DOT := 0.995
+## An AI squad's (no player in it to watch it form; perf, 2026-10-27: in the city case its
+## patrols' leads walked or turned past the tight limits nearly every tick, 1384 work-outs in 184
+## frames at ~1.25 ms each): its slots are kept while the lead is within SLOTS_KEEP_M_AI and has
+## turned under ~10 degrees.
+const SLOTS_KEEP_M_AI := 1.5
+const SLOTS_KEEP_DOT_AI := 0.985
 var _slots_lead_at := Vector3.INF
 var _slots_heading := Vector3.ZERO
 
 
 func _slots_fresh(frame: int) -> bool:
-	var keep := SLOTS_KEEP_TICKS if leader == null or not leader.is_ai() or is_player_squad() else SLOTS_KEEP_TICKS_AI
-	return _slots_frame >= 0 and frame - _slots_frame < keep and frame >= _slots_frame 		and leader.global_position.distance_to(_slots_lead_at) <= SLOTS_KEEP_M 		and (heading == _slots_heading or heading.dot(_slots_heading) >= SLOTS_KEEP_DOT)
+	var ai_only := leader != null and leader.is_ai() and not is_player_squad()
+	var keep := SLOTS_KEEP_TICKS_AI if ai_only else SLOTS_KEEP_TICKS
+	return _slots_frame >= 0 and frame - _slots_frame < keep and frame >= _slots_frame 		and leader.global_position.distance_to(_slots_lead_at) <= (SLOTS_KEEP_M_AI if ai_only else SLOTS_KEEP_M) 		and (heading == _slots_heading or heading.dot(_slots_heading) >= (SLOTS_KEEP_DOT_AI if ai_only else SLOTS_KEEP_DOT))
 
 
 ## The squad as it stands this frame, the lead and players too (who squadmates keep apart from,
