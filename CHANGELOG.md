@@ -11,6 +11,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, CI reds after the bows and roasting (fix/fallen-reds-oct31)
+
+- **Fixed** Roasted Meat and Roasted Fish had no uses lines: smoke's "every item has at least one uses line" and its tooltip check, and the mod kit's `validate.py --shipped` (fallenevents), were red on CI 41154628672. They now say how to eat them, what they give and that they're roasted on a stick at a fire with no skill.
+- **Fixed** the arrow's rarity was "common" though the loot tables only hold it in the rare homes bundle beside the recurve bow; it's "rare" now, the commonest tier that holds it (items.json's rule; loot was red on the same run).
+
 ### Contractor: Fallen, holding or fleeing 2 (claude/survival-holding2, call 143)
 
 - **Added** refugees join the place they reach (`Holding.join_on_arrival`, the sim's `sim_flee`): another household (one household, food shared, a bond), a world group's camp as members (refused by a starving or hostile group: on to the next safe place), the players' farm by asking to stay (a council take-in vote, or "Let them stay" / "Turn them away" in talk).
