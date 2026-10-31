@@ -1578,6 +1578,17 @@ func _release(s: Soldier) -> void:
 			brain.process_mode = Node.PROCESS_MODE_INHERIT
 
 
+## Leaving the scene with people still seated (a support helicopter gone off the map with a door
+## rider aboard, a test clearing up): they're let go, not left marked aboard with their AI off
+## (2026-10-17: an extraction's squadmate stranded that way, supports R1723).
+func _exit_tree() -> void:
+	for i in _seat_nodes.size():
+		var s := occupant(i)
+		if s != null and is_instance_valid(s) and not s.is_queued_for_deletion():
+			_seat_nodes[i] = null
+			_release(s)
+
+
 func _forget_death(s: Soldier) -> void:
 	var call: Variant = _died_calls.get(s.get_instance_id())
 	_died_calls.erase(s.get_instance_id())
