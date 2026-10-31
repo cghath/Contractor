@@ -2124,6 +2124,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Fallen CI reds (fix/fallen-reds-oct31): the arrow's rarity is "rare" (its only loot-table place is the rare homes bundle beside the recurve bow), and roasted meat and fish get uses lines like smoked meat's | items.json's own rule (rarity = the commonest tier that holds it) and every item needs uses (smoke, loot and the mod kit's validate.py were red on CI 41154628672) | loose arrows in a common table (a new loot-curve number, not a fix)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2176,15 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-310 (open, flaky once, Fallen): fallenpeople's shelter-room walker gone two frames after it spawned
+
+Found on fix/fallen-reds-oct31 (R0707, local, six suites at once): "A shelter room at the
+settlement" failed "the settler and the dead are up (settler up, zombie none)" though the log
+shows the walker spawned (Z50818_25); the next run (R0710) passed, and CI 41154628672 passed it.
+"none" is `zz == null`, which a walker freed within the two frames also reads as, so something
+took it away at 0.7 of the settlement's radius (the settlement's guards or the dead's own
+clean-up are the first places to look). Not chased: once, locally, under load. If it comes back
+on CI, spawn the walker after the settler body is up and check `is_instance_valid` alone.
+
+Location: tests/fallenpeople_test.gd (_test_shelter_room, the walker at -radius x 0.7).
