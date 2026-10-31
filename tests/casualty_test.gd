@@ -36,6 +36,11 @@ const SOAK_MIN_S := 200.0
 const STUCK_FAR_M := 5.0
 const STUCK_MOVE_M := 0.6
 const STUCK_WINDOW_S := 8
+## But one who walked STUCK_WALK_M or more in the window after a slot that itself moved
+## STUCK_FAR_M or more was chasing it round the lead's own loop (the route circles the
+## compound's building; the team's place swings as the lead turns) and came back by where he
+## was: not stuck (Echo, CI 41235918402). One running about while his slot stays put still is.
+const STUCK_WALK_M := 4.0
 
 var failures := 0
 var level: CompoundLevel
@@ -810,15 +815,21 @@ func _test_soak() -> void:
 			if placed:
 				history[who] = [s.global_position]  # (his window starts again once he's sent on)
 				list = history[who]
-			if not placed and list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
+			var walked_m := 0.0
+			for k in range(maxi(list.size() - 1 - STUCK_WINDOW_S, 0), list.size() - 1):
+				walked_m += _flat(list[k], list[k + 1])
+			var chased := walked_m >= STUCK_WALK_M and slot_list.size() > STUCK_WINDOW_S \
+				and _flat(slot_list[-1], slot_list[-1 - STUCK_WINDOW_S]) >= STUCK_FAR_M
+			if not placed and not chased and list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
 				var ai := brain
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
 					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])] \
 					+ "; on floor %s, holding %s, mantling %s, stance %d, up %s, busy %.1f s, facing %.0f deg, touching %s" % [s.is_on_floor(), s.movement.holding,
 					s.movement.mantling, s.movement.stance, s.vitals.is_up(), s._busy_until - Soldier._now(), rad_to_deg(s.rotation.y),
-					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))] 					+ "; slots %s, refit %s" % [(slots_seen[who] as Array).slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z]),
-					squad._refits.get(s.get_instance_id(), {})]
+					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))] \
+					+ "; slots %s, refit %s, walked %.1f m" % [slot_list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z]),
+					squad._refits.get(s.get_instance_id(), {}), walked_m]
 	var walked := _sim_s
 	await _seconds(12.0)  # let them settle in formation at the end
 	var settled := _squad().filter(func(s: Soldier) -> bool: return _flat(s.global_position, squad.follow_point(s)) > 4.0)
