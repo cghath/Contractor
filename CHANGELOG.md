@@ -48,7 +48,8 @@ every path and these were the leaks still open.
   (EngineNoise, all Proposed); through a wall or a hill half as far, as a shot. A listener suspects
   something over there (placed 10 m off per 100 m) and goes to look; a hostile's area stands to and
   he radios in "engines heard" (a look goes out; the last known position moves only when nothing
-  harder came in the last 2 min). It never tells anyone who's in it. Each vehicle sounds once a
+  harder came in the last 2 min, and always when an engine report set it, so it follows a
+  helicopter flying in). It never tells anyone who's in it. Each vehicle sounds once a
   second, not every frame, and casts at most 24 rays a time.
 - **Changed (AI), Captain 2026-10-31 (F-365):** reinforcement waves without an aim of their own
   head for the alert's last known position, not where the players are; with none yet they walk in
@@ -61,7 +62,8 @@ every path and these were the leaks still open.
   idling on the ground; an engine report and the last known position; waves to the last known
   position or the map's middle), and the review's minor points: positive controls for "seen 1" (all
   four counted once half spotted) and for the muffled shot (a hostile 8 m off hears it), the told-
-  squads check needs at least one, the drones' bodies are freed.
+  squads check needs at least one, the drones' bodies are freed. Engine after engine with nothing
+  harder in between: the second report moves the fix, and a fresh shot's fix still isn't moved.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

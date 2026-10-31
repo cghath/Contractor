@@ -636,6 +636,22 @@ func _test_engines() -> void:
 	alert._receive({"kind": Alert.ENGINE, "pos": src, "area": alert.area_of(src), "by": "test"})
 	check(kept.distance_to(hard) < 0.01 and (alert.lkp.pos as Vector3).distance_to(src) < 0.01,
 		"an engine report leaves a fresh last known position where it was, and moves one older than %.0f s" % Alert.ENGINE_LKP_AFTER_S)
+	# Engine after engine with nothing harder in between (a helicopter flying in): each newer one
+	# moves it; a shot then outranks them, and the next engine report leaves the shot's fix.
+	alert.lkp = {}
+	var first := level.ground_point(m.global_position + Vector3(70, 0, 40))
+	alert._receive({"kind": Alert.ENGINE, "pos": first, "area": alert.area_of(first), "by": "test"})
+	var at_first: Vector3 = alert.lkp.pos
+	alert.lkp.time = alert.now() - 5.0
+	alert._receive({"kind": Alert.ENGINE, "pos": src, "area": alert.area_of(src), "by": "test"})
+	var at_second: Vector3 = alert.lkp.pos
+	alert._receive({"kind": &"shot", "pos": hard, "area": alert.area_of(hard), "by": "test"})
+	alert.lkp.time = alert.now() - 5.0
+	alert._receive({"kind": Alert.ENGINE, "pos": first, "area": alert.area_of(first), "by": "test"})
+	check(at_first.distance_to(first) < 0.01 and at_second.distance_to(src) < 0.01
+			and (alert.lkp.pos as Vector3).distance_to(hard) < 0.01,
+		"a second engine report 5 s later moves an engine's fix (%.0f m), but not a shot's 5 s old (%.0f m off it)"
+			% [at_first.distance_to(at_second), (alert.lkp.pos as Vector3).distance_to(hard)])
 	alert.lkp = {}
 	alert._pending.clear()
 	alert._last_report.clear()

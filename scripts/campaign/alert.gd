@@ -13,7 +13,8 @@ extends Node
 ##   Hearing gives a rough direction, not who. Engines too (EngineNoise, Captain 2026-10-31,
 ##   F-365): a hostile who hears one of the squad's vehicles or helicopters stands to and reports
 ##   an "engine" there, as rough a fix as a shot's; it moves the last known position only when
-##   nothing harder (a contact, a shot, a blast, a body) came in the last ENGINE_LKP_AFTER_S.
+##   nothing harder (a contact, a shot, a blast, a body) came in the last ENGINE_LKP_AFTER_S
+##   (a newer engine report always moves one an engine set).
 ## - Check-ins: each garrisoned site radios in every CHECK_IN_S; a site with nobody left to
 ##   answer is missed, and the HQ hears of it CHECK_IN_CALL_S later.
 ## - Bodies: a hostile who comes within BODY_SPOT_M of a fallen comrade (in sight) reports it.
@@ -78,7 +79,7 @@ signal noise(kind: StringName, pos: Vector3, source: Node)
 
 var zone_state := State.NORMAL
 var areas := {}           # area id -> {"state", "contact" (last contact time), "since"}
-var lkp := {}             # {"pos": Vector3, "time": float}, or {} before any report
+var lkp := {}             # {"pos": Vector3, "time": float, "kind": its report's}, or {} before any report
 var reports: Array = []   # every report received, oldest first
 var comms_down := false
 var level: Node3D
@@ -234,9 +235,12 @@ func _receive(report: Dictionary, seen: Soldier = null) -> void:
 	var r := report.duplicate()
 	r["time"] = now()
 	reports.append(r)
+	# An engine fix gives way to a newer engine fix at once; a hard one (a contact, a shot, a blast,
+	# a body, or one with no "kind") only once it is ENGINE_LKP_AFTER_S old.
 	if r.kind in [&"contact", &"shot", &"blast", &"body"] \
-			or (r.kind == ENGINE and (lkp.is_empty() or float(r.time) - float(lkp.time) > ENGINE_LKP_AFTER_S)):
-		lkp = {"pos": r.pos, "time": r.time}
+			or (r.kind == ENGINE and (lkp.is_empty() or lkp.get("kind", &"") == ENGINE
+				or float(r.time) - float(lkp.time) > ENGINE_LKP_AFTER_S)):
+		lkp = {"pos": r.pos, "time": r.time, "kind": r.kind}
 	# Record the commander's picture before listeners react to this report. A first
 	# sighting must already be confirmed when the response asks permission to launch.
 	report_received.emit(r)
