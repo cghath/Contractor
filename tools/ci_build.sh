@@ -42,7 +42,12 @@ if [ -z "${CONTRACTOR_TEST_LOGS:-}" ] && [ -n "${GITHUB_ACTIONS:-}" ]; then expo
 # The build. make_build.sh prints the folder last; it fails loudly on its own.
 notes=""
 [ -n "${GITHUB_ACTIONS:-}" ] && notes="Built by GitHub Actions: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-made="$(VERSION="$version" bash tools/make_build.sh "$label" "$notes" | tee /dev/stderr | tail -n 1)"
+# (Its output goes to a file and is shown after: GitHub's Windows runners have no /dev/stderr.)
+code=0
+VERSION="$version" bash tools/make_build.sh "$label" "$notes" >"$out/make_build.log" 2>&1 || code=$?
+cat "$out/make_build.log"
+[ "$code" -eq 0 ] || exit "$code"
+made="$(tail -n 1 "$out/make_build.log")"
 dir="$(pwd)/$made"
 [ -f "$dir/contractor.pck" ] || { echo "ci_build: make_build.sh gave no build folder ($made)" >&2; exit 1; }
 name="$(basename "$dir")"

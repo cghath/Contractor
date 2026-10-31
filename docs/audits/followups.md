@@ -2124,6 +2124,12 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Release on tag (Captain's item 8, ci/release-on-tag): built on a Windows runner (windows-2025) with Contractor.exe from the Voxel Tools release template in the zip, and the Voxel Tools editor as its own release file (GodotVoxel-1.7-windows-editor.zip) for play.bat | the exe needs nothing installed, and Windows is the path make_build.sh already takes on a PC | a Linux runner exporting for Windows (cheaper, untried); the editor inside every build zip (+84 MB each)
+2026-10-31 | Shipping the engine: Godot (MIT), Voxel Tools (MIT) and its FastNoiseLite and FastNoise2 (MIT), lz4 (BSD-2-Clause), meshoptimizer (MIT) and SQLite (public domain) all allow redistribution with the notices kept; every zip carries licenses/ (the engine's written from the binary by tools/engine_licenses.gd, Voxel Tools' fetched from its v1.7 source at build time) | checked each license at the v1.7 tag | a download note only
+2026-10-31 | 0.x tags make a published pre-release (repository variable RELEASE_DRAFT=true makes drafts); a release already there (a publish_release.sh draft) only gets its files added or replaced, its notes and state left alone | the point is that testers get the build without anyone pressing Publish, and the pre-release flag says "playtest" on a public repo | drafts, as publish_release.sh makes (Captain, 2026-10-15)
+2026-10-31 | Release notes: CHANGELOG.md's "## [X.Y.Z]" (or "## [vX.Y.Z]") section, else the commits since the previous v* tag (first lines, cut at 200 characters, at most 150) | no tag so far got a CHANGELOG section; everything sits under Unreleased | the whole Unreleased section (5,700 lines, past GitHub's 125,000-character limit)
+2026-10-31 | Nightly: 04:17 UTC, dev is built when its tip has no unexpired artifact contractor-nightly-<sha10> (kept 14 days), Contractor.exe without the editor; a quiet dev is built again once the last one expires | the artifact's name is the state, nothing else to keep; one is always downloadable | compare with the last run's commit (scheduled runs' own commit is main's, not dev's)
+2026-10-31 | play.bat looks for the editor beside itself, in a GodotVoxel-1.7-windows-editor folder next to it (Explorer's "Extract all"), then Downloads\GodotVoxel_1.7; CONTRACTOR_GODOT still wins | testers unzip the release's editor into the build folder | CONTRACTOR_GODOT only
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2181,30 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-324 to F-326: releases and nightlies on GitHub (ci/release-on-tag, 2026-10-31)
+
+### F-324: the nightly and manual runs need release.yml and nightly.yml on main
+
+GitHub starts scheduled runs and `workflow_dispatch` (`gh workflow run`) only from the default
+branch's copy of a workflow, and `main` is about 1,570 commits behind `dev`. Until both files are
+on `main`, no nightly runs and neither workflow can be started by hand; a tag push works as soon
+as the tagged commit has release.yml (GitHub reads it from the tag). Whoever moves `main` next:
+bring `.github/workflows/release.yml` and `nightly.yml` (or all of `dev`). The nightly checks out
+`dev` itself, so `main`'s other files don't matter to it.
+
+### F-325: CI builds are all B0001, and BUILD.txt's export log points at the runner
+
+On the runner the logs parent is a fresh temp folder, so every CI build is test build B0001 in
+its folder name and build label, and BUILD.txt's "Export log:" names a path on the runner (the
+log itself is the run's `release-logs-*` / `nightly-logs-*` artifact; BUILD.txt's "What to test"
+names the run). Harmless (the version or commit tells builds apart); if it matters, seed
+run_counter.txt from `github.run_number`, or give CI builds their own letter.
+
+### F-326: Contractor.exe's export overwrites contractor.pck on Windows
+
+make_build.sh exports `contractor.pck`, then the Contractor.exe export writes `Contractor.pck`
+beside the exe, which on Windows' case-insensitive file system is the same file (the build
+folder shows `Contractor.pck`). Same pack, so play.bat and the exe both work; on a
+case-sensitive file system (a Linux export) there would be two copies. Older than this branch;
+seen while checking what a build holds.
