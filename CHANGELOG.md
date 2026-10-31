@@ -11,6 +11,56 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Vault hand plant, leg hitboxes and the SVD's own model on dev (feat/vault-legs-svd, 2026-10-31)
+
+The two leftover branches the handoff called "probably wanted", merged as they were
+(`claude/vault-legs`, 2026-10-27, and `claude/svd-model`, 2026-10-20, its own entry below).
+
+#### Added
+- **A vault plants the support hand on the obstacle.** The body finds the top it is climbing over
+  (one ray down ahead of the chest as the vault starts) and the support hand goes on it, palm
+  down, eased in and out with the vault; the firing hand keeps the gun. That's the left hand, or
+  the right for a left-handed shooter with a weapon (the branch always planted the left, which
+  took a left-hander's gun hand off the grip).
+
+#### Changed
+- **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet
+  planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
+  carried, so where a downed body lies and where it is reached are unchanged.
+  The pelvis box stays on the target pose's root while the legs' follow the drawn root: posing it
+  from the drawn root too (review) failed casualty's "nobody got stuck on the way" in three of
+  four runs, so it's left (F-374).
+
+#### Fixed
+- **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
+  running, started before the wall was blown, counted as the breach's own, so on a slow runner
+  the check ran on the old navmesh ("30.2 m round for 1.5 m", CI 41186733348). It now counts only
+  bakes that finish after the town reports the breach (tests only).
+- **A quick second mantle planted the hand on the first one's top** (review): the plant was only
+  cleared once the vault had eased all the way out, so a climb started before then kept the old
+  spot. It's cleared as each climb starts (`CharacterModel._was_climbing`).
+- **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
+  box ignores the drawn thigh (it lies as the body does). Local R0770 (smoke, weapons, animations,
+  Looting and the vault checks among them), R0774 (wounds, medical), and without the pelvis
+  change R0782 (casualty) and R0783 (smoke, weapons, animations) PASS.
+
+### SVD Dragunov's own model (2026-10-20: realistic weapons)
+
+#### Changed
+- **The SVD has a model of its own** (`model_style` "svd"). Before, it drew as a long AKM with a
+  30-round banana magazine. Now it has:
+  - a short, nearly straight 10-round magazine, 10 cm under the receiver, with its stamped rib;
+  - a skeletonised wooden thumbhole stock: the pistol grip forms the front of the hole, a bar
+    runs under it to the butt, and a cheek rest sits on the comb;
+  - a slim two-piece wooden handguard with vents, between metal rings;
+  - a long thin barrel with a slotted flash hider, and the front sight and bayonet lug behind it;
+  - an AK-style receiver: dust cover, right-side charging handle and carrier (they rack back
+    together), the long safety lever, the magazine release paddle;
+  - the optic's side rail on the left. A mounted optic still sits centred over the bore, as on
+    every rifle, but its mount clamps that rail. Under an optic the irons stay on the gun, below
+    the line of sight.
+- It still reloads like an AK (`Reloads.family`), with the same hand and sight points.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

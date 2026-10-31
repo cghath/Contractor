@@ -153,6 +153,18 @@ var _yaw_rate := 0.0
 var _weight_x := 0.0           # the hips over the planted foot (root space, m), set by _walk
 var _foot_ground: Array[float] = [0.0, 0.0]  # each foot's ground off the body's floor (m), eased
 var _vault_w := 0.0
+## A vault's hand plant (the model pass's leftover, 2026-10-27): the support hand (the left, or the
+## right for a left-handed shooter with a weapon) on the obstacle's top while climbing over it, palm
+## down, the firing hand keeping the gun. The top is found by the model
+## itself, one ray down ahead of the chest as the vault starts (the mantle's ledge is only known
+## to its owner), and kept in world space for the vault. INF: none found (a leap over nothing).
+var _plant := Vector3.INF
+var _plant_hand := 1
+var _was_climbing := false  # (the plant is looked for afresh as each climb starts)
+const PLANT_AHEAD_M := 0.5
+const PLANT_SIDE_M := 0.14
+const PLANT_MIN_M := 0.25  # the top between these above the feet
+const PLANT_MAX_M := 1.6
 const CRAWL_STRIDE := 0.55
 const CRAWL_KNEE := 1.3
 const CRAWL_THIGH := 0.6
@@ -886,11 +898,20 @@ func pose_hitboxes(body: Node3D) -> void:
 	if lod and not downed and _lod_shown_every > 1 and _lod_n != 0 and downed == _boxes_downed:
 		return
 	_boxes_downed = downed
-	var bones := with_shins(_target_bones(_carry_state()))
+	var carry := _carry_state()
+	var bones := with_shins(_target_bones(carry))
 	var rest := with_shins(rest_bones())
 	var deltas := {}
 	for key: String in ["torso", "head", "pelvis", "leg_l", "leg_r", "shin_l", "shin_r"]:
 		deltas[key] = transform * (bones.root as Transform3D) * (bones[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
+	if not downed and carry.is_empty() and _legs_drawn():
+		# The legs' hitboxes follow the legs as drawn (the model pass's leftover, 2026-10-27): the
+		# stride, the planted feet on a slope or a step, a vault's tucked knees, as the arms' do.
+		var root := _root.transform
+		var drawn := {"leg_l": _leg_left.transform, "leg_r": _leg_right.transform,
+			"shin_l": _leg_left.transform * _shin_left.transform, "shin_r": _leg_right.transform * _shin_right.transform}
+		for key: String in drawn:
+			deltas[key] = transform * root * (drawn[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
 	for area in _posable_hitboxes(body):
 		var bone := _bone_of(area)
 		var target: Transform3D
@@ -900,6 +921,12 @@ func pose_hitboxes(body: Node3D) -> void:
 			target = _arm_delta(area, bone) * _rest_of(area)
 		if not area.transform.is_equal_approx(target):
 			area.transform = target
+
+
+## Whether the legs are drawn this frame (inside the tree, posed by the gait or a crawl at least
+## once), so their hitboxes can follow them.
+func _legs_drawn() -> bool:
+	return is_inside_tree() and _leg_left != null and _leg_right != null and _shin_left != null and _shin_right != null and _arms_posed
 
 
 ## The arms' hitboxes follow the arms as drawn (Captain, 2026-10-21: "fingers and arms cant be hit"):
@@ -1897,6 +1924,14 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 	_sink_v += (-SINK_SPRING * _sink - 2.0 * SINK_DAMP * sqrt(SINK_SPRING) * _sink_v) * minf(delta, 0.05)
 	_sink = clampf(_sink + _sink_v * minf(delta, 0.05), -LAND_SINK_MAX, 0.05)
 	_vault_w = move_toward(_vault_w, 1.0 if climbing and not quiet else 0.0, delta * 5.0)
+	if climbing and not _was_climbing:
+		_plant = Vector3.INF  # a quick second mantle (the first's vault still easing out) finds its own top
+	_was_climbing = climbing
+	if climbing and not quiet and _plant == Vector3.INF and is_inside_tree():
+		_plant_hand = 0 if left_handed and _held_weapon else 1
+		_plant = _find_plant()
+	elif not climbing and _vault_w <= 0.0:
+		_plant = Vector3.INF
 	if quiet:
 		_weight_x = 0.0
 		_foot_ground = [0.0, 0.0]
@@ -1956,6 +1991,30 @@ func _ground_at(p: Vector3, y: float) -> float:
 		q.exclude = [(get_parent() as CollisionObject3D).get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	return (hit.position as Vector3).y if not hit.is_empty() else INF
+
+
+## Where the support hand (_plant_hand) goes on a vault: the obstacle's top ahead of the chest, a
+## hand's width to its side (world space), or INF when there's no top in reach (PLANT_MIN_M-PLANT_MAX_M up).
+func _find_plant() -> Vector3:
+	var fwd := -global_basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 1e-6:
+		return Vector3.INF
+	fwd = fwd.normalized()
+	var at := global_position + fwd * PLANT_AHEAD_M
+	var q := PhysicsRayQueryParameters3D.create(at + Vector3.UP * (PLANT_MAX_M + 0.2), at + Vector3.UP * PLANT_MIN_M, SoldierMovement.WORLD_MASK)
+	if get_parent() is CollisionObject3D:
+		q.exclude = [(get_parent() as CollisionObject3D).get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return Vector3.INF
+	var side := 1.0 if _plant_hand == 0 else -1.0
+	return (hit.position as Vector3) + Vector3.UP * 0.02 + global_basis.x.normalized() * PLANT_SIDE_M * side
+
+
+## The vault's hand plant now (world space; INF with none): tests.
+func vault_plant() -> Vector3:
+	return _plant
 
 
 ## Whether this body's feet look for the ground (FOOT_IK_*): standing or walking, inside the
@@ -2624,6 +2683,11 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 				continue
 			point = _upper[i].position + upper * (Vector3(0, -UPPER_ARM, 0) + fore * Vector3(0, -FOREARM, 0))
 		_reach_hand(i, _hand_from[i].lerp(point, w), _palm_want(i, key), delta)
+	if _vault_w > 0.0 and _plant != Vector3.INF:
+		# The support hand on the obstacle, eased in and out with the vault (the other keeps the gun).
+		var t := smoothstep(0.0, 1.0, _vault_w)
+		var held := torso.to_local(hand_position(_plant_hand == 0))
+		_reach_hand(_plant_hand, held.lerp(torso.to_local(_plant), t), (torso.global_basis.inverse() * Vector3.DOWN).normalized(), delta)
 	_arms_posed = true
 
 
