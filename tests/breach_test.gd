@@ -13,7 +13,9 @@ extends Node
 ##   building through its east wall, the team stacks on that wall, the one with the charge sets
 ##   it, backs off, it goes off with nobody in its blast, they go in through the hole once it's
 ##   on the navmesh and clear the building, every stage in order, and end inside; the client
-##   sees the charge, the blast, the hole and the team inside.
+##   sees the charge, the blast, the hole and the team inside;
+## - ordered on the player's own charge (nobody selected carries one), and he goes down before he
+##   sets it: they don't wait at the wall for ever, but go in by the building's door and clear it.
 ##   <godot> --headless --path . res://tests/breach_test.tscn
 ## The host starts the client itself (same scene, "-- --breach-join"). Exits with the number of
 ## failures.
@@ -73,6 +75,7 @@ func _ready() -> void:
 	await _test_house_wall()
 	await _test_targets()
 	await _test_order_with_client()
+	await _test_lead_down()
 	_finish()
 
 
@@ -241,22 +244,27 @@ func _test_targets() -> void:
 		return
 	_place(player, Vector3(0, 0.1, -26))
 	await _seconds(0.3)
-	var yard := squad.breach_target(player, SquadTactics.wall_at(player, Vector3(0, 1.0, -20)))
+	var perimeter := SquadTactics.wall_at(player, Vector3(0, 1.0, -20))
+	var yard := squad.breach_target(player, perimeter)
 	check(bool(yard.get("yard", false)) and (yard.rooms[0].corners as Array).size() == 4
-		and (yard.rooms[0].corners as Array).all(func(p: Vector3) -> bool: return p.z > -19.5),
+		and (yard.rooms[0].corners as Array).all(func(p: Vector3) -> bool: return p.z > -19.5)
+		and not SquadTactics.building_beyond(player.get_world_3d(), perimeter),
 		"the perimeter wall from outside: no building behind it, the yard past it (%s)" % [yard.get("rooms", [{}])[0].get("corners", [])])
 	_place(player, Vector3(10, 0.1, -8))
 	await _seconds(0.3)
 	var wall := SquadTactics.wall_at(player, EAST_WALL)
-	var got := {"b": {}}  # (a lambda can't set the function's locals)
-	await _wait_until(func() -> bool:
-		got.b = squad.breach_target(player, wall) if not wall.is_empty() else {}
-		return not (got.b as Dictionary).is_empty() and not bool(got.b.get("yard", false)), 5.0)
-	var b: Dictionary = got.b
+	# Asked once, on a cold cache, with the frame budget a player's machine has (review of
+	# 7b6d7576: a budgeted scan cut short came back as no building, and the wall as a yard's).
+	Buildings.forget()
+	Buildings.budget_always = true
+	var b: Dictionary = squad.breach_target(player, wall) if not wall.is_empty() else {}
+	Buildings.budget_always = false
 	check(not wall.is_empty() and (wall.face as Vector3).dot(Vector3.RIGHT) > 0.95 and absf((wall.at as Vector3).x - 5.0) < 0.1
-		and not b.is_empty() and not bool(b.get("yard", false)) and Buildings.contains(b, Vector3(0, 0.1, -8)),
-		"the main building's east wall, pointed at: its face (%s) and the building behind it (found %s, a yard %s, %d spots, centre %s)"
-		% [wall.get("face", Vector3.ZERO), not b.is_empty(), b.get("yard", false), (b.get("spots", []) as Array).size(), b.get("centre", Vector3.INF)])
+		and not b.is_empty() and not bool(b.get("yard", false)) and not b.has("refused") and Buildings.contains(b, Vector3(0, 0.1, -8)),
+		"the main building's east wall, pointed at (asked once, cold, budgeted): its face (%s) and the building behind it (found %s, a yard %s, %s, %d spots, centre %s)"
+		% [wall.get("face", Vector3.ZERO), not b.is_empty(), b.get("yard", false), b.get("refused", "not refused"), (b.get("spots", []) as Array).size(), b.get("centre", Vector3.INF)])
+	check(not wall.is_empty() and SquadTactics.building_beyond(player.get_world_3d(), wall) and SquadTactics.yard_beyond(player.get_world_3d(), wall).is_empty(),
+		"past that wall is a building's inside even with no lookup: never taken for a yard")
 	check(SquadTactics.wall_at(player, Vector3(9, 0.0, -8)).is_empty(), "the ground isn't a wall")
 	# An AI team east of the building (its door round on the south side) with a charge: through the wall.
 	var kits := _strip_charges(mates)
@@ -371,6 +379,59 @@ func _test_order_with_client() -> void:
 	check(cleared and inside.size() == mates.size(), "and the team ends inside the building, cleared (%d of %d)" % [inside.size(), mates.size()])
 	_done_watching.rpc()
 	await _end_client(pid, log_path)
+
+
+# --- The leader's own charge, and he goes down before he sets it ---------------------------
+
+## Review of 7b6d7576: nobody selected carries a charge but the player does, so the team stacks on
+## the wall and holds for his; he goes down before he sets it. They mustn't wait at the wall for
+## ever: with nobody else carrying one, in by the building's door, and the building cleared.
+const WEST_WALL := Vector3(-5.0, 1.2, -8.0)
+
+
+func _test_lead_down() -> void:
+	print("Breach and clear on the leader's own charge; he goes down before he sets it")
+	var squad := level.squad_for(&"friendly")
+	await _heal_squad()
+	var mates := _team(4)
+	if mates.size() < 4:
+		check(false, "four fit squadmates (%d)" % mates.size())
+		return
+	_strip_charges(mates)
+	while player.inventory.remove_one(Charges.ITEM):
+		pass
+	Roles.give(player.inventory, Charges.ITEM, 1)
+	_place(player, Vector3(-9, 0.1, -8))
+	for i in mates.size():
+		_place(mates[i].body, Vector3(-9.5, 0.1, -11.0 + i * 0.9))
+	await _seconds(0.5)
+	var names := PackedStringArray(mates.map(func(ai: SquadAI) -> String: return String(ai.body.name)))
+	var why := squad.order_command(player, "breach_clear", WEST_WALL, names)
+	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}  # (every one of them has the same op)
+	check(why == "" and not op.is_empty() and bool(op.get("wall", false)) and op.get("on") == player and String(op.get("door", "")) == "",
+		"ordered with only his charge: they stack on the west wall and hold for it (%s)" % why)
+	if op.is_empty():
+		return
+	# Down before he sets it: out cold (the wound model's own unconsciousness; Vitals.downed follows
+	# it every sim step, so setting the flag alone doesn't hold).
+	player.vitals.server_damage(70.0)
+	var down := await _wait_until(func() -> bool: return not player.vitals.is_up(), 5.0)
+	check(down, "he's out cold (%s)" % player.vitals.condition_text())
+	var handed := await _wait_until(func() -> bool: return not bool(op.get("wall", true)) or mates.all(func(ai: SquadAI) -> bool: return ai.ordered.is_empty()), 60.0)
+	player.vitals.server_reset_health()  # (back up, so nobody stays to treat him while they clear)
+	if not handed:
+		print("    op: ready %s of %d, first ready %.1f s ago, go_at %s, stages %s" % [op.ready, int(op.units), Soldier._now() - float(op.first_ready_at), op.go_at,
+			(op.get("stages", []) as Array).map(func(st: Dictionary) -> String: return String(st.name))])
+		for ai: SquadAI in mates:
+			print("    %s: care %d, tactic %s (same op %s), at %s, %.1f m from its stack spot" % [ai.body.name, ai.care, ai._tactic().get("kind", "-"),
+				is_same(ai._tactic().get("op"), op), ai.body.global_position, ai.body.global_position.distance_to(op.stack[int(ai.ordered.get("slot", 0))])])
+	check(handed and not bool(op.get("wall", true)) and not op.has("on") and (op.entrance.door as Vector3).z > -5.0,
+		"he's down: they don't wait at the wall for his charge, nobody else has one, so in by the door (wall %s, door at %s)"
+		% [op.get("wall", "?"), op.entrance.get("door", Vector3.INF)])
+	var cleared := await _wait_until(func() -> bool: return _stage_at(op, "clear") > 0.0, 90.0)
+	await _seconds(0.5)
+	var inside := mates.filter(func(ai: SquadAI) -> bool: return is_instance_valid(ai) and Buildings.contains(op.building, ai.body.global_position))
+	check(cleared and inside.size() == mates.size(), "and they clear the building and end inside it (%d of %d)" % [inside.size(), mates.size()])
 
 
 func _stage_at(op: Dictionary, stage: String) -> float:

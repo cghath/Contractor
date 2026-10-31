@@ -1371,7 +1371,9 @@ static func _wall_spot(space: PhysicsDirectSpaceState3D, p: Vector3, face: Vecto
 ## A wall with no building behind it (a compound's perimeter, a yard wall): what's past it, as a
 ## building of one "room" for breach_op: YARD_IN_M in past the wall, its corners fanned
 ## YARD_SPREAD_M either side and two further in, on the navmesh (the far side is baked though
-## nobody can reach it through the wall yet). {} if the navmesh has nothing there. Proposed.
+## nobody can reach it through the wall yet). {} if the navmesh has nothing there, or if it's
+## a building's inside by Buildings' own test (_indoors: an inside has navmesh too, so a
+## building lookup that missed it mustn't make it a yard). Proposed.
 const YARD_IN_M := 2.0
 const YARD_SPREAD_M := 1.6
 
@@ -1390,8 +1392,47 @@ static func yard_beyond(world: World3D, wall: Dictionary) -> Dictionary:
 			return {}
 		corners.append(p)
 	var mid := NavigationServer3D.map_get_closest_point(map, c)
+	var five: Array[Vector3] = [mid]
+	five.append_array(corners)
+	if _indoors(world, five) >= INDOORS_MIN:
+		return {}
 	return {"centre": mid, "spots": corners.duplicate(), "rooms": [{"spots": corners.duplicate(), "centre": mid, "corners": corners, "floor": 0}],
 		"floors": [], "entrances": [], "ports": [], "stairs": [], "yard": true}
+
+
+## Whether what's past `wall` is a building's inside, whether or not Buildings found one there
+## (F-322; review of 7b6d7576): INDOORS_MIN or more of the five spots yard_beyond takes (its
+## middle and corners, on the navmesh where it has them) pass Buildings.inside, the test its
+## scans make every inside spot pass (walls round it, or a hall's roof and walls further off).
+## A compound's yard is open along the wall both ways; the compound's main building has no
+## roof, so a roof alone can't tell. Proposed.
+const INDOORS_MIN := 3
+
+
+static func building_beyond(world: World3D, wall: Dictionary) -> bool:
+	var at: Vector3 = wall.at
+	var face: Vector3 = wall.face
+	var along := face.cross(Vector3.UP)
+	var c := at - face * (WALL_DEPTH_GUESS_M + YARD_IN_M)
+	var map := world.navigation_map
+	var five: Array[Vector3] = []
+	for off: Vector3 in [Vector3.ZERO, along * YARD_SPREAD_M, -along * YARD_SPREAD_M, along * YARD_SPREAD_M * 0.5 - face * 1.5, -along * YARD_SPREAD_M * 0.5 - face * 1.5]:
+		var want := c + off
+		var p := NavigationServer3D.map_get_closest_point(map, want)
+		five.append(p if Vector2(p.x - want.x, p.z - want.z).length() <= 0.8 else want + Vector3.DOWN * BREACH_CHARGE_Y)
+	return _indoors(world, five) >= INDOORS_MIN
+
+
+## How many of `spots` (on the navmesh, which floats a little over the floor) are inside a
+## building by Buildings.inside, probed from the floor under each as its scans probe theirs.
+static func _indoors(world: World3D, spots: Array[Vector3]) -> int:
+	var space := world.direct_space_state
+	var count := 0
+	for p: Vector3 in spots:
+		var down := space.intersect_ray(PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.3, p + Vector3.DOWN * 1.0, 1))
+		if Buildings.inside(world, (down.position as Vector3) if not down.is_empty() else p):
+			count += 1
+	return count
 
 
 ## Breach and clear's stages, in the order they happen ("stacking", "stacked", "charge_set",

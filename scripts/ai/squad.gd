@@ -889,11 +889,13 @@ func order_breach_clear(from: Soldier, point: Vector3, names := PackedStringArra
 		return "Nobody selected can"
 	var wall := SquadTactics.wall_at(from, point)
 	if wall.is_empty():
-		var b := Buildings.nearest(from, point, ORDER_BUILDING_M)
+		var b := Buildings.nearest(from, point, ORDER_BUILDING_M, true)  # (exact: warms order_clear's own lookup)
 		if b.is_empty():
 			return "Look at a wall or a door"
 		return order_clear(from, point, names, "charge")  # a doorway: the charge beside it
 	var b := breach_target(from, wall)
+	if b.has("refused"):
+		return String(b.refused)
 	if b.is_empty():
 		return "Nothing to clear past that wall"
 	var team := charge_first(units)
@@ -909,8 +911,7 @@ func order_breach_clear(from: Soldier, point: Vector3, names := PackedStringArra
 	op["breach"] = ""
 	if his:
 		op["on"] = from
-		op["on_breach"] = true
-		op.erase("charge_spot")
+		op["on_breach"] = true  # (his charge_spot stays: if he goes down, one of them may set it there)
 	else:
 		op.merge({"door": "charge", "breacher": 0, "breacher_ai": team[0]}, true)
 	var stealth := team.any(func(ai: SquadAI) -> bool: return ai.combat_mode == CombatMode.STEALTH)
@@ -931,14 +932,26 @@ func order_breach_clear(from: Soldier, point: Vector3, names := PackedStringArra
 
 ## What's past `wall` to clear: the building behind it (its nearest inside spot within
 ## BREACH_BEHIND_M of the far side), else the yard past it (SquadTactics.yard_beyond), else {}.
+## {"refused": why} when it's neither and the order shouldn't go ahead: a wall between two of a
+## building's rooms (both sides inside it) isn't a way in; and when no building was found but
+## the far side passes Buildings' own inside test (SquadTactics.building_beyond), the lookup
+## missed one (F-322), so the leader is told to try again rather than the team blowing in and
+## holding by the hole as if in a yard.
+## The lookup is exact (never cut short by Buildings' frame budget, as an AI's tick is): a
+## player's order is a one-off, and a cut-short scan comes back as no building at all.
 const BREACH_BEHIND_M := 2.5
 
 
 func breach_target(from: Soldier, wall: Dictionary) -> Dictionary:
 	var behind: Vector3 = (wall.at as Vector3) - (wall.face as Vector3) * (SquadTactics.WALL_DEPTH_GUESS_M + 0.8) + Vector3.DOWN * SquadTactics.BREACH_CHARGE_Y
-	var b := Buildings.nearest(from, behind, BREACH_BEHIND_M)
-	if not b.is_empty() and Buildings.distance_to(b, (wall.at as Vector3) + (wall.face as Vector3) * 1.0 + Vector3.DOWN * SquadTactics.BREACH_CHARGE_Y) > GRID_OUTSIDE_M:
-		return b  # (and the near side isn't inside it: a wall between two of its rooms isn't a way in)
+	var b := Buildings.nearest(from, behind, BREACH_BEHIND_M, true)
+	if not b.is_empty():
+		if Buildings.distance_to(b, (wall.at as Vector3) + (wall.face as Vector3) * 1.0 + Vector3.DOWN * SquadTactics.BREACH_CHARGE_Y) > GRID_OUTSIDE_M:
+			return b
+		return {"refused": "That wall's inside the building: point at an outside wall or a door"}
+	if SquadTactics.building_beyond(from.get_world_3d(), wall):
+		SessionLog.note("breach and clear: no building found past the wall at (%.1f, %.1f, %.1f), but it's walled in: not a yard" % [(wall.at as Vector3).x, (wall.at as Vector3).y, (wall.at as Vector3).z])
+		return {"refused": "Can't make out the building past that wall, try again"}
 	return SquadTactics.yard_beyond(from.get_world_3d(), wall)
 
 

@@ -41,6 +41,21 @@ clear' team order through walls" (F-317, F-318).
   before), the navmesh is rebaked through it; the yard and the AI team's choice; the order's stages
   in order, nobody in the blast, the team in through the hole and inside; a client process sees the
   charge, the blast, the hole and the team inside.
+- **Fixed (review):** a building lookup that missed (cut short by the frame's 4 ms scan budget
+  on a player's machine, or stale) no longer turns a building's wall into a yard's, where the team
+  blew it and held by the hole with no room-by-room clearing: the order's lookup is exact (never
+  budgeted, `Buildings.near`/`nearest`'s new `exact`), and a far side that passes Buildings' own
+  inside test with no building found is refused with "Can't make out the building past that wall,
+  try again" (`SquadTactics.building_beyond`; `yard_beyond` refuses it too). A wall between two of
+  a building's rooms is refused instead of being taken for a yard.
+- **Fixed (review):** on the leader's own charge, the team no longer waits at the wall for ever
+  when he goes down or leaves before it goes off (his charge's blast by the spot still counts;
+  else the next with a charge sets it, else the building's door: `SquadAI._wall_lead_lost`), or
+  when he goes in some other way (they follow him by the building's door nearest him:
+  `_wall_lead_went_in`).
+- **Changed (tests):** `breach` asks for the building behind the wall once, on a cold cache with
+  the frame budget on (the 5 s retry that hid the yard fallback is gone), and adds the leader
+  knocked out before he sets his own charge: in by the door, the building cleared, all four inside.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

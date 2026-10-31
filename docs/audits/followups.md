@@ -1793,12 +1793,19 @@ Buildings finds a breach as an entrance once the navmesh is rebaked through it, 
 happens to be nearest. Picking a fresh breach first (Charges.recent) would let "Clear" follow a
 player's own charge without the breach and clear order.
 
-### F-322 (open): the first building lookup behind a wall came back empty once
+### F-322 (guarded 2026-10-31, feat/breach-and-clear): the first building lookup behind a wall came back empty once
 In R0723 the `breach` suite's first `Squad.breach_target` on the main building's east wall (just
 after a lookup on the perimeter wall) found no building behind it, and the same call a minute
-later in the order found it; R0721 and R0724 found it first time. The test now asks again for up
-to 5 s. In a game an empty answer falls to the yard case (they blow the wall, go in and hold just
-inside instead of clearing room by room). Worth finding why `Buildings.nearest` missed it once.
+later in the order found it; R0721 and R0724 found it first time. In a game an empty answer fell
+to the yard case (they blew the wall, went in and held just inside instead of clearing room by
+room), and off headless it was common: `Buildings.near` is held to 4 ms a frame there, and a scan
+cut short with nothing cached comes back empty. Review of 7b6d7576: the order's lookup is now
+exact (`Buildings.nearest(..., exact)`, never budgeted: a player's order is a one-off), and an
+empty answer whose far side passes `Buildings.inside` (`SquadTactics.building_beyond`) is refused
+("try again") instead of becoming a yard. The test's 5 s retry is gone: it asks once, on a cold
+cache, budgeted as a player's machine is. Why the headless lookup missed once in R0723 is still
+not known (a guess: cells probed while the navmesh was being rebaked after the perimeter wall's
+hole, kept for CACHE_S); it can no longer send a team into a building as if into a yard.
 
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
@@ -2169,6 +2176,8 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | Breach and clear with nobody selected carrying a charge but the leader (a player) carrying one: they stack and hold for his charge, as a human breacher's Clear does; with none at all the order is refused | the leader can still make the hole himself | refuse unless an AI has one
 2026-10-31 | An AI team's own wall breach: only against a held building, with a charge in the entry team, out of Stealth, nobody inside who mustn't be hurt, and the door 6 m or more further than the facing wall (Proposed) | keeps today's door entries everywhere else (other suites rely on them) while not walking round under the defenders' guns | always breach the wall when a charge is carried
 2026-10-31 | Breach and clear through a wall with no building behind it (a compound perimeter): through and hold just inside, four spots 2-3.5 m in, fanned 1.6 m (Proposed) | the order says "through walls"; a yard has no rooms to clear | refuse it
+2026-10-31 | Breach and clear's building lookup behind the wall is exact (never cut short by Buildings' 4 ms frame budget); no building found but the far side walled in by Buildings' own inside test: refused "Can't make out the building past that wall, try again"; a wall with the building on both sides: refused | a player's order is one scan, once, and a wrong yard blows the wall and skips the clearing | a roof test alone (the compound's main building has no roof), or retrying the lookup over the next ticks
+2026-10-31 | Breach and clear on the leader's own charge, he goes down or leaves before it blows: his blast by the spot still counts, a charge still burning there is waited out, else the next with a charge sets it where he pointed, else the building's door; he goes in some other way: they follow by the building's door nearest him (a yard: in after the hole's 5 s wait) | the stack held at the wall for ever (review of 7b6d7576) | give the order up when he goes down
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

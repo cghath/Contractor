@@ -4066,6 +4066,9 @@ func _wall_breacher_lost(op: Dictionary) -> void:
 			op.breacher_ai = ai
 			op.breaching = false
 			op.erase("breach_from")
+			op.door = "charge"  # (the leader's own breach handed on: the team's from now)
+			op.erase("on")
+			op.erase("on_breach")
 			ai._callout(&"tactic", "I've got the charge!")
 			return
 	var b: Dictionary = op.building
@@ -4092,6 +4095,55 @@ func _wall_breacher_lost(op: Dictionary) -> void:
 	op.first_ready_at = INF
 	_callout(&"tactic", "No charge! Using the door!")
 	SessionLog.note("breach and clear: nobody left with a charge: in by the door at (%.1f, %.1f)" % [(e.door as Vector3).x, (e.door as Vector3).z])
+
+
+## A wall breach on the leader's own charge (Squad.order_breach_clear with nobody else carrying
+## one: op "on", no "door") and he's down or gone (left the game) with the stack up: if a charge
+## went off within LEAD_CHARGE_M of the spot since the stack formed (his, set before he went
+## down), that's the hole: in through it once it's open (_hole_open). While one still burns
+## there they hold. Otherwise the breach falls to one of them with a charge, else the
+## building's door, else it's given up (_wall_breacher_lost). Without this the stack waited at
+## the wall for a blast that never came (review of 7b6d7576).
+func _wall_lead_lost(op: Dictionary, now: float) -> void:
+	var door: Vector3 = op.entrance.door
+	var charges := Charges.of(body)
+	if charges:
+		var blast := charges.blast_near(door, LEAD_CHARGE_M, float(op.get("since", 0.0)))
+		if blast != Vector3.INF:
+			op.breached = true
+			op.entrance = (op.entrance as Dictionary).duplicate()
+			op.entrance.door = Vector3(blast.x, door.y, blast.z)  # in through the hole
+			op.blown_at = now
+			SquadTactics.note_stage(op, "blown")
+			op.go_at = now
+			_callout(&"tactic", "Moving in!")
+			return
+		for id: String in charges.records:
+			var at := charges.position_of(id)
+			if Vector2(at.x - door.x, at.z - door.z).length() <= LEAD_CHARGE_M:
+				return  # his charge still burning: hold clear of it
+	op.erase("on")
+	op.erase("on_breach")
+	SessionLog.note("breach and clear: the leader's down or gone before his charge: the team's breach now")
+	_wall_breacher_lost(op)
+
+
+## A wall breach on the leader's own charge, and he's gone in without a charge going off by the
+## spot (by a door, or through a hole of his own somewhere else): the stack follows him in by
+## the building's entrance nearest him instead of waiting at the wall for a blast (the navmesh
+## takes them whichever way is open). Past a yard wall (no entrances) the hole's wait starts
+## (blown_at: _hole_open goes after HOLE_NAV_WAIT_S whatever the navmesh says).
+func _wall_lead_went_in(op: Dictionary, at: Vector3, now: float) -> void:
+	var e := Buildings.entrance_near(op.building, at)
+	if e.is_empty():
+		op.blown_at = now
+		SessionLog.note("breach and clear: the leader's past the wall with no blast by the spot: after him")
+		return
+	op.wall = false
+	op.erase("charge_spot")
+	op.erase("step_m")
+	op.entrance = e
+	SessionLog.note("breach and clear: the leader went in without blowing the wall: after him by the door at (%.1f, %.1f)" % [(e.door as Vector3).x, (e.door as Vector3).z])
 
 
 ## The breach this unit's team would choose itself against a building the enemy holds (Captain:
@@ -4166,11 +4218,16 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			var at := (lead as Soldier).global_position
 			var past := Vector3(at.x - door.x, 0.0, at.z - door.z).dot(op.entrance.normal as Vector3)
 			if past < -CLEAR_ON_ME_M or Buildings.contains(op.building, at):
+				if bool(op.get("wall", false)) and not op.has("blown_at"):
+					_wall_lead_went_in(op, at, now)  # not through a hole by the spot: his way in, not the wall
 				op.go_at = now + SquadTactics.ENTRY_GAP_S  # he's in: after him
 				_callout(&"tactic", "Moving in!")
 			return
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
 			SquadTactics.note_stage(op, "stacked")
+			if bool(op.get("wall", false)) and String(op.get("door", "")) == "" and not op.has("blown_at"):
+				_wall_lead_lost(op, now)  # the wall was his to blow (op "on"), and he's down or gone
+				return
 			if String(op.get("door", "")) != "" and not op.get("breached", false):
 				if breacher_up(op):
 					if not bool(op.get("breaching", false)):
