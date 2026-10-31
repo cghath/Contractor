@@ -19,13 +19,16 @@ block the case doesn't wait for), while the rest were in at ~35 s. A player coul
 busy city: a block standing as its proxy for good, its garrison never spawned.
 
 - **Fixed (voxel worlds):** a build no longer waits forever on the voxel engine to load its area.
-  The engine loads a data block (all air) only while a VoxelViewer covers it, and keeps its own
-  count of which viewers cover which blocks; with a hundred-odd AI viewers coming and going that
-  count can lose a block, which then stays unloaded with nothing asking for it again. A build whose
+  The engine loads a data block (all air) only while a VoxelViewer covers it, by its own count of
+  which viewers cover which blocks, nearest viewer first; with a hundred-odd AI viewers coming and
+  going a far block waits behind everything nearer, or that count loses it and nothing asks for it
+  again. A build whose
   area has been short of blocks for `VoxelWorld.LOAD_WAIT_S` (5 s, Proposed) now puts the missing
   ones in itself, empty, as the generator makes them (`VoxelTerrain.try_set_block_data`, which
-  counts the viewers covering each); a block lost after stamping began makes the stamping start
-  over. The build also waits for its area out to whole mesh blocks and the voxel round them the
+  counts the viewers covering each), at most `FILL_BLOCKS_PER_FRAME` (512, Proposed) a frame; a
+  block lost after stamping began makes the stamping start over. On CI three blocks were still
+  missing most of their area at 5 s (city_4_2: 7053 of 7560 data blocks); with the fill all twenty
+  built, the twelve the case waits for in 23 s. The build also waits for its area out to whole mesh blocks and the voxel round them the
   mesher reads, so its meshes and collision can all be made.
 - **Changed (tests):** `ZoneModule.build_progress()` says why a module isn't ready, including a
   build that's done with its proxy still up (meshing or holding); `VoxelWorld.build_progress()`
@@ -33,8 +36,8 @@ busy city: a block standing as its proxy for good, its garrison never spawned.
   blocks it doesn't wait for that are still not ready. World: a build whose terrain never loads
   anything puts its blocks in and builds, its wall solid.
 - Runs: local R0742 (smoke, world), R0744 (perfcases city, city, virtualization), R0745 (townperf),
-  all PASS; CI perfcases green on 41186841331, 41191078478 and 41192039297, all 20 blocks built each
-  time (the fill wasn't needed on those runs, F-303).
+  all PASS; CI perfcases green on 41186841331, 41191078478, 41192039297 (all 20 blocks built, no
+  fill needed) and 41192561810 (three blocks filled, all 20 built).
 
 ### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
 

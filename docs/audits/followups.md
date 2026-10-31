@@ -1831,9 +1831,14 @@ build whose terrain never loads anything (loading turned off) builds, its wall s
 R0744 (perfcases city, all 20 blocks in at 23 s, no fill needed locally), R0745. CI: perfcases green
 three times on the same code (41186841331 at 3b7abd7, 41191078478 at 60e0f8d and its perfcases rerun
 41192039297), all 20 city blocks built each time (12 waited for in 31, 33 and 29 s) and the fill never
-needed; before, 6 of 13 runs lost a block (about one chance in six of three clean runs by luck), so
-the fill line is still to be seen on CI. If a block stalls again with "area loaded" in its note, it's
-not the area and F-303 reopens.
+needed; before, 6 of 13 runs lost a block. The fourth run (41192561810, 3e8904c, docs only) shows the
+area is what a block waits on: three blocks were still short at 5 s, city_4_2 7053 of its 7560 data
+blocks, city_2_0 6873 of 7200, city_1_1 2950 of 11648, and once the build put them in, all 20 built
+(the 12 waited for in 23.4 s). So at CI's 2-3 frames a second most of a far block's area is still
+queued at 5 s (its generate tasks rank by distance to the nearest viewer, F-338), and whether it
+would have been lost for good is now moot. All in one frame is a hitch, so the fill now puts in at
+most `FILL_BLOCKS_PER_FRAME` (512, Proposed) a frame and says how long it took. If a block stalls
+again with "area loaded" in its note, it's not the area and F-303 reopens.
 
 ### F-304 (note): the city's navigation never "settles" on CI
 The city case waits for its blocks and `ZoneNav.is_settled()`; on CI it reported "still baking (0
@@ -2212,6 +2217,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | dev reds: vehicles' spall-cone armour work 0.526 ms over its 0.5 ms locally (R0708, three suites at once on the PC) left alone | CI measured 0.418 on dev (41154617049): local load | give the check a local slack
 2026-10-31 | city stall (F-303): a build short of data blocks for 5 s puts them in itself, empty (LOAD_WAIT_S 5 s, Proposed), rather than a viewer of its own | a data-only viewer adds one more count to the same engine bookkeeping that loses blocks, and unloads the block when it goes; try_set_block_data counts the viewers really covering it and needs no node | a VoxelViewer on each building block; a longer SETTLE_MS
 2026-10-31 | city stall: the build waits for its area out to whole mesh blocks and the voxel round them, not just the structures' boxes | a missing block next to the structures leaves their meshes and collision unmade (proxy dropped after MESH_WAIT_S with holes in the collision); the engine loads the whole bounds anyway, so a normal build waits no longer | the boxes' area only
+2026-10-31 | city stall: the fill puts in at most 512 data blocks a frame (FILL_BLOCKS_PER_FRAME, Proposed) | CI had 7053 of a block's blocks to put in at 5 s; locally 144 took under 1 ms, so all at once could be tens of ms on a slow PC; 512 a frame is ~14 frames for the biggest | all at once; a smaller cap (slower at CI's 2-3 fps)
 2026-10-31 | city stall: a block lost mid-stamp restarts the stamping from the first box | its stamped voxels went with it; every box again in order comes out the same | re-stamping only the boxes in that block (more code, same result)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
