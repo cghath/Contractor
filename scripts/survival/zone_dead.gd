@@ -197,8 +197,10 @@ func _physics_process(delta: float) -> void:
 
 
 ## Host: crowd members within LIVE_M of a player become bodies (the live tier), while there's room.
+## Not round a player waiting to respawn (unseen where he fell, out of the fight: as
+## Survival._populate): they came alive about his companions there instead (F-382).
 func _convert(level: Node) -> void:
-	var players := MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up())
+	var players := MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up() and p.respawn_state != Soldier.RESPAWN_WAITING)
 	if players.is_empty():
 		return
 	var live := Survival.zombies(level).size()

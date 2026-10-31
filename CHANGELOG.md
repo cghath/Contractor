@@ -11,6 +11,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the flaky checks (fix/fallen-flakes)
+
+- **Fixed** the far-AI sleep (DynamicSim) switched any switched-off soldier near a player back on within its one-second tick, not only the ones it had put to sleep; it now wakes only its own (a "sim_asleep" meta). Survival's silent-kill check held its walker still that way and lost it to the tick inside the kill's two seconds (the walker came to, turned and saw him: CI 41154291237, 40365276612, 40374781651); a new check says the walker stays still (R0761 without the fix: woken). Shared file: the change belongs on dev too (F-380).
+- **Fixed** the crowd of the dead came alive round a player waiting to respawn (unseen where he fell), as `Survival._populate` already didn't: the walkers could reach his companion there and bite before fallenpeople's take-over (CI 40452846175, 40458714303). The test also clears the dead near the companion first, and its failure says the companion's status and body (F-382).
+- **Fixed** fallenpeople's shelter-room walker read "none" two frames after spawning (R0707): the test stood the player 113 m from it, past the 110 m at which `_populate` sends the far dead back into the crowd. He stands 88 m off now, still not home (F-310).
+- **Fixed** survival's arrow at a walker 15 m off: the clear way fell back to the way he faced (through the start farm) when nothing near him was clear, and the shot kept a full draw's random degree of spread (R0761 into the farm 10 m out, R0764 past the walker). The clear way now checks a hand either side of the chest too and looks from spots up to 36 m round him; the walker shot is loosed without spread (`Archery.no_spread`, tests only) (F-381).
+- **Changed** settlement's haul check works the hours the drop's place in the hauler's queue says (`SettlementJobs.haul_queue`, which `haul` now uses) instead of four hours flat, and names each hour's job (F-383). Its red "since the firsthour merge" was the one-hour version, fixed by 4f4b789e.
+- **Changed** survival's footsteps check reads the RPG layer's step factor as the game does; its flake ("carry 21 m ... (180)", CI 40374781651) was the ring's quarter-second gate, fixed by 7d880f82.
+
+### Contractor: Fallen, CI reds after the bows and roasting (fix/fallen-reds-oct31)
+
+- **Fixed** Roasted Meat and Roasted Fish had no uses lines: smoke's "every item has at least one uses line" and its tooltip check, and the mod kit's `validate.py --shipped` (fallenevents), were red on CI 41154628672. They now say how to eat them, what they give and that they're roasted on a stick at a fire with no skill.
+- **Fixed** the arrow's rarity was "common" though the loot tables only hold it in the rare homes bundle beside the recurve bow; it's "rare" now, the commonest tier that holds it (items.json's rule; loot was red on the same run).
+- **Fixed** survival's bow check picked a way that was clear only to a man's head and the near ground, so a full-draw arrow at the chest could clip the start farm's voxels (a fence-high wall) 10 m out (R0707 twice, R0710 once). The test's clear way now needs clear lines knee-high, chest-high and over the head as well; its failure names what the arrow hit. R0713 PASS.
+
 ### Contractor: Fallen, holding or fleeing 2 (claude/survival-holding2, call 143)
 
 - **Added** refugees join the place they reach (`Holding.join_on_arrival`, the sim's `sim_flee`): another household (one household, food shared, a bond), a world group's camp as members (refused by a starving or hostile group: on to the next safe place), the players' farm by asking to stay (a council take-in vote, or "Let them stay" / "Turn them away" in talk).

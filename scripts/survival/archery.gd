@@ -31,6 +31,9 @@ const STUCK_S := 2.0            # a drawn arrow stays where it struck this long
 
 ## Tests: the roll for keeping an arrow (0..1; -1 rolls).
 static var force_keep_roll := -1.0
+## Tests: no spread, the arrow leaves along the aim (a full draw's spread is a degree either way,
+## a quarter metre at 15 m: enough to pass a walker's side, F-381).
+static var no_spread := false
 
 
 static func is_bow(item: ItemData) -> bool:
@@ -75,7 +78,7 @@ static func server_loose(s: Soldier, origin: Vector3, dir: Vector3, draw: float)
 	var bow := s.active_weapon()
 	var b := bow_of(bow)
 	s.inventory.remove_one(ARROW)
-	var spread := deg_to_rad(float(b.get("spread_deg", 1.0)) * lerpf(1.5, 1.0, draw))
+	var spread := 0.0 if no_spread else deg_to_rad(float(b.get("spread_deg", 1.0)) * lerpf(1.5, 1.0, draw))
 	var jitter := Basis(Vector3.UP, randf_range(-spread, spread)) * Basis(s.global_basis.x, randf_range(-spread, spread))
 	var v := launch_velocity(bow, jitter * dir, draw)
 	var flight := _fly(s, origin, v)

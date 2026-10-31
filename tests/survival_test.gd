@@ -453,8 +453,13 @@ func _test_melee_weapons() -> void:
 	check(player._server_busy_until > Soldier._now() + 1.0, "it takes %.0f s with the hands on it" % MeleeWeapons.SILENT_KILL_S)
 	var killed_at := Soldier._now()
 	var quiet_dead := await _wait_for(func() -> bool: return quiet.vitals.is_dead(), MeleeWeapons.SILENT_KILL_S + 3.0)
-	check(quiet_dead and String(quiet.vitals.last_cause.get("cause", "")) == "head", "and the blade goes in quietly (%s after %.1f s; %.2f m apart; unaware %s)" % [
-		quiet.vitals.last_cause.get("cause", "still up"), Soldier._now() - killed_at, quiet.global_position.distance_to(player.global_position), ZombieAI.of(quiet).unaware() if ZombieAI.of(quiet) else "no brain"])
+	check(quiet_dead and String(quiet.vitals.last_cause.get("cause", "")) == "head", "and the blade goes in quietly (%s after %.1f s; %.2f m apart; unaware %s; held still %s)" % [
+		quiet.vitals.last_cause.get("cause", "still up"), Soldier._now() - killed_at, quiet.global_position.distance_to(player.global_position), ZombieAI.of(quiet).unaware() if ZombieAI.of(quiet) else "no brain",
+		quiet.process_mode == Node.PROCESS_MODE_DISABLED])
+	# (The far-AI sleep, DynamicSim, used to switch any switched-off soldier near a player back on within
+	# its one-second tick: the walker held still above came to inside the silent kill's two seconds,
+	# turned and saw him, and the kill was "seen" (F-380; CI 41154291237).)
+	check(quiet.process_mode == Node.PROCESS_MODE_DISABLED, "a walker held still stays still: the far-AI sleep wakes only what it put to sleep")
 	quiet.queue_free()
 	await get_tree().process_frame
 	# The shove with a gun up: a second bought.
@@ -495,8 +500,12 @@ func _test_bow() -> void:
 	player.select_weapon(&"primary")
 	while player.inventory.remove_one(Archery.ARROW):
 		pass
+	var stood := player.global_position
+	var fwd := _clear_way(15.0)  # (a way with nothing in it: earlier tests' bodies, the farm, a rise; he's moved to one)
 	var eye := player.camera.global_position
-	var fwd := _clear_way(eye, 15.0)  # (a way with nothing in it: earlier tests' bodies, the farm, a rise)
+	check(fwd != Vector3.ZERO, "a clear way to loose along, within %.0f m of where he stood (%.0f m off)" % [CLEAR_WAY_RINGS[-1], Vector2(player.global_position.x - stood.x, player.global_position.z - stood.z).length()])
+	if fwd == Vector3.ZERO:
+		fwd = -player.global_basis.z
 	check(Archery.server_loose(player, eye, fwd, 1.0).get("why", "") == "No arrows", "no arrows, no shot")
 	player.inventory.take(Archery.ARROW, 4)
 	check(Archery.server_loose(player, eye, fwd, 0.1).get("why", "") == "Not drawn" and player.inventory.count_of(Archery.ARROW) == 4, "barely drawn, it doesn't go")
@@ -514,38 +523,68 @@ func _test_bow() -> void:
 	var chest := z.global_position + Vector3.UP * 1.25
 	var flight_s := chest.distance_to(eye) / float(Archery.bow_of(bow).mps)
 	var aim := (chest + Vector3.UP * 0.5 * Archery.GRAVITY * flight_s * flight_s - eye).normalized()
+	Archery.no_spread = true  # (the spread's degree could carry it past his side: R0764, "ended 16.6 m off" in the farm behind him)
 	var shot := Archery.server_loose(player, eye, aim, 1.0)
+	Archery.no_spread = false
 	var at: Vector3 = shot.get("position", Vector3.ZERO)
-	check(String(shot.get("result", "")) == "body" and shot.get("victim") == z, "an arrow loosed at a walker %.1f m off strikes it (%s, %s, flew %.2f s; ended %.1f m off, %.1f m up from its feet)"
-		% [z.global_position.distance_to(player.global_position), shot.get("result", "?"), shot.get("part", "-"), float(shot.get("flight_s", 0.0)), at.distance_to(eye), at.y - z.global_position.y])
+	var hit_on: Object = shot.get("collider")
+	var hit_name := "-" if not is_instance_valid(hit_on) else ("%s %s" % [hit_on.get_class(), String((hit_on as Node).get_path()) if hit_on is Node else ""])
+	check(String(shot.get("result", "")) == "body" and shot.get("victim") == z, "an arrow loosed at a walker %.1f m off strikes it (%s, %s, flew %.2f s; ended %.1f m off, %.1f m up from its feet; hit %s)"
+		% [z.global_position.distance_to(player.global_position), shot.get("result", "?"), shot.get("part", "-"), float(shot.get("flight_s", 0.0)), at.distance_to(eye), at.y - z.global_position.y, hit_name])
 	if z.vitals.is_up():
 		z.vitals.server_hit(Vitals.HEAD, {"round_class": &"pistol", "channel_depth": 0.1, "melee": "arrow", "energy_j": float(Archery.bow_of(bow).energy_j)})
 	check(z.vitals.is_dead(), "and a full-draw arrow to the head drops it")
 	z.queue_free()
+	player.global_position = stood + Vector3.UP * 0.2
 	player.inventory.unequip(&"primary")
 	while player.inventory.remove_one(Archery.ARROW):
 		pass
 	player.select_weapon(&"primary")
 
 
-## A level way from `eye` with a clear line to a man's head `m` metres out and to the ground 4 m out.
-func _clear_way(eye: Vector3, m: float) -> Vector3:
+## Where _clear_way looks for a spot to loose from: where he stands, then rings round it (m).
+const CLEAR_WAY_RINGS: Array[float] = [0.0, 12.0, 24.0, 36.0]
+
+
+## A level way with clear lines from his eye to a man `m` metres out (knee-high to over his head,
+## and a hand either side of his chest: the arrow's arc and its spread lie between them, so a farm
+## fence under the head line can't catch it, R0707/R0710) and to the ground 4 m out. Tries 16 ways
+## from where he stands, then from spots on CLEAR_WAY_RINGS round it, and moves him to the first
+## spot that has one. ZERO when none has: it used to fall back to the way he faced, through the
+## start farm's walls or fences (R0761: "hit VoxelTerrain .../farm_home", 10.4 m out).
+func _clear_way(m: float) -> Vector3:
 	var space := player.get_world_3d().direct_space_state
 	var exclude: Array[RID] = [player.get_rid()]
 	for child in player.get_children():
 		if child is Area3D:
 			exclude.append(child.get_rid())
-	for i in 16:
-		var dir := Vector3.FORWARD.rotated(Vector3.UP, i * TAU / 16.0)
-		var far := level.ground_point(player.global_position + dir * m) + Vector3.UP * 1.6
-		var near := level.ground_point(player.global_position + dir * 4.0)
-		var q1 := PhysicsRayQueryParameters3D.create(eye, far, Archery.MASK, exclude)
-		q1.collide_with_areas = true
-		var q2 := PhysicsRayQueryParameters3D.create(eye, near + Vector3.UP * 0.3, Archery.MASK, exclude)
-		q2.collide_with_areas = true
-		if space.intersect_ray(q1).is_empty() and space.intersect_ray(q2).is_empty():
-			return dir
-	return -player.global_basis.z
+	var home := player.global_position
+	var eye_up := player.camera.global_position - home
+	var above := Vector3.UP * (home.y - level.ground_point(home).y)  # (he stands as high over the ground there as here)
+	for ring: float in CLEAR_WAY_RINGS:
+		for k in (1 if ring == 0.0 else 8):
+			var a := TAU * k / 8.0
+			var spot := home if ring == 0.0 else level.ground_point(home + Vector3(cos(a), 0.0, sin(a)) * ring) + above
+			var eye := spot + eye_up
+			for i in 16:
+				var dir := Vector3.FORWARD.rotated(Vector3.UP, i * TAU / 16.0)
+				var side := dir.cross(Vector3.UP) * 0.35
+				var ground := level.ground_point(spot + dir * m)
+				var near := level.ground_point(spot + dir * 4.0)
+				var clear := true
+				for to: Vector3 in [ground + Vector3.UP * 0.9, ground + Vector3.UP * 1.25, ground + Vector3.UP * 1.8,
+						ground + side + Vector3.UP * 1.25, ground - side + Vector3.UP * 1.25, near + Vector3.UP * 0.3]:
+					var q := PhysicsRayQueryParameters3D.create(eye, to, Archery.MASK, exclude)
+					q.collide_with_areas = true
+					clear = clear and space.intersect_ray(q).is_empty()
+					if not clear:
+						break
+				if clear:
+					if ring > 0.0:
+						player.global_position = spot
+						player.velocity = Vector3.ZERO
+					return dir
+	return Vector3.ZERO
 
 
 func _dropped(id: StringName) -> int:
@@ -607,7 +646,8 @@ func _test_stealth() -> void:
 	player.movement.is_sprinting = true
 	player._noise_sent = -100.0  # (the ring's quarter-second gate: his own idle steps on the farm's ground may just have sent one)
 	Survival._footsteps(level)
-	check(is_equal_approx(player.noise_radius, Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player)), "a sprinting man's steps carry %.0f m in his clothes (%.0f)" % [Survival.STEP_M.sprint * DayNight.hearing_x() * Clothing.noise_mult(player), player.noise_radius])
+	var sprint_m: float = Survival.STEP_M.sprint * DayNight.hearing_x() * Rpg.step_noise_mult(player) * Clothing.noise_mult(player)
+	check(is_equal_approx(player.noise_radius, sprint_m), "a sprinting man's steps carry %.0f m in his clothes (%.0f)" % [sprint_m, player.noise_radius])
 	player.movement.is_sprinting = false
 	player.velocity = Vector3.ZERO
 	# Smell: bleeding, he's smelt downwind within SMELL_M.

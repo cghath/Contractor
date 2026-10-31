@@ -2124,6 +2124,8 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Fallen CI reds (fix/fallen-reds-oct31): the arrow's rarity is "rare" (its only loot-table place is the rare homes bundle beside the recurve bow), and roasted meat and fish get uses lines like smoked meat's | items.json's own rule (rarity = the commonest tier that holds it) and every item needs uses (smoke, loot and the mod kit's validate.py were red on CI 41154628672) | loose arrows in a common table (a new loot-curve number, not a fix)
+2026-10-31 | Fallen flakes (fix/fallen-flakes): DynamicSim wakes only the soldiers it put to sleep (a meta), not any switched-off one near a player; the crowd doesn't come alive round a player waiting to respawn | both were the flakes' causes (F-380, F-382) and neither changes play: nothing in the game switches a soldier off but DynamicSim, and _populate already left waiting players out | fix only the tests (hold the dead still another way; clear the crowd in the take-over test)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2177,80 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-310 (fixed 2026-10-31, fix/fallen-flakes, Fallen): fallenpeople's shelter-room walker gone two frames after it spawned
+
+Found on fix/fallen-reds-oct31 (R0707, local, six suites at once): "A shelter room at the
+settlement" failed "the settler and the dead are up (settler up, zombie none)" though the log
+shows the walker spawned (Z50818_25); the next run (R0710) passed, and CI 41154628672 passed it.
+"none" is `zz == null`, which a walker freed within the two frames also reads as, so something
+took it away at 0.7 of the settlement's radius (the settlement's guards or the dead's own
+clean-up are the first places to look). Not chased: once, locally, under load. If it comes back
+on CI, spawn the walker after the settler body is up and check `is_instance_valid` alone.
+
+Location: tests/fallenpeople_test.gd (_test_shelter_room, the walker at -radius x 0.7).
+
+**Fixed (fix/fallen-flakes):** the test stood the player at r + 45 m east of the centre for
+"nobody home" and put the walker at 0.7 r west: 113 m apart, past Survival.DESPAWN_M (110), so
+the next `_populate` (every POP_TICK_S, 2 s) sent it back into the crowd whenever it fell inside
+the two frames before the check. A test race, not a game bug (far dead going back into the crowd
+is the rule). The player now stands at r + 20 m (still past Holding.settlement_tick's r + 10 m),
+88 m from the walker; `_test_holding`'s same setup too. The failure line now says "Z... gone" or
+"never spawned" instead of "none" for both.
+
+## F-380 (fixed 2026-10-31, fix/fallen-flakes, shared file): DynamicSim woke soldiers it hadn't put to sleep
+
+survival's "and the blade goes in quietly" flaked as "still up after 5.0 s; 0.60 m apart; unaware
+false" (CI 41154291237 on claude/survival-bows, CI 40365276612) and "6.20 m apart; unaware true"
+(CI 40374781651). The test freezes the walker (`process_mode = DISABLED`) and starts the 2 s
+silent kill; DynamicSim.server_tick (every second) read any switched-off AI soldier near a player
+as one of its own sleepers and switched it back on, so the walker came to, wandered, turned and
+saw him (or walked out of reach) inside the two seconds. Confirmed with a check after the kill:
+R0761 (the fix held back) "held still false", R0764 "held still true". DynamicSim now marks the
+soldiers it puts to sleep (`SLEEP_META`, "sim_asleep") and wakes only those; one switched off by
+anything else is left alone. Every suite that holds an AI still with `process_mode` had the same
+one-second window. **Shared file** (`scripts/world/dynamic_sim.gd`, and `virtualizer.gd`'s
+DROP_META): the same change belongs on dev.
+
+Location: scripts/world/dynamic_sim.gd (server_tick), scripts/world/virtualizer.gd (DROP_META),
+tests/survival_test.gd (_test_melee_weapons: "a walker held still stays still").
+
+## F-381 (fixed 2026-10-31, fix/fallen-flakes, Fallen): survival's arrow at a walker 15 m off missed
+
+Not on the handoff's list but in survival and red locally on the base tip: R0761 ("ended 10.4 m
+off ... hit VoxelTerrain .../farm_home", as R0707/R0710 before 75446b23) and R0764 ("flew 0.35 s;
+ended 16.6 m off": past the walker into the farm behind it). Two causes in the test: `_clear_way`
+fell back to the way he faced (through the start farm) when none of its 16 ways from where he stood
+was clear, and the shot kept the full draw's random spread (a degree either way, a quarter metre
+at 15 m, enough to pass a walker's side). The clear way now also checks a hand either side of the
+chest line, looks from spots on rings 12, 24 and 36 m round him and moves him to the first with
+a clear way (back after), and says so in a check; the walker shot is loosed with
+`Archery.no_spread` (a test switch beside `force_keep_roll`).
+
+Location: tests/survival_test.gd (_test_bow, _clear_way), scripts/survival/archery.gd (no_spread).
+
+## F-382 (fixed 2026-10-31, fix/fallen-flakes, Fallen): the crowd came alive round a player waiting to respawn
+
+fallenpeople's take-over failed "the player takes over the companion" (and the three checks after
+it) on CI 40452846175 and 40458714303 with walkers spawning every 2 s all through his 8 s respawn
+wait. ZoneDead._convert turned crowd heads within LIVE_M of any player who was up into bodies,
+including a player waiting to respawn (unseen where he fell, out of the fight), which
+Survival._populate already leaves out: the dead came alive round his companion standing there,
+could reach them and bite before the take-over (`server_take_over` refuses a body that isn't up).
+_convert now skips players waiting to respawn too; the test also clears the dead near the
+companion before he dies, and its failure line names the companion's status and body.
+
+Location: scripts/survival/zone_dead.gd (_convert), tests/fallenpeople_test.gd
+(_test_player_death_and_take_over).
+
+## F-383 (fixed 2026-10-31, fix/fallen-flakes, Fallen): settlement's haul check had four hours flat
+
+The handoff's "red since the firsthour merge" was the one-hour version (CI 40448994569 and
+40452846175, "(1 -> 1)" twice each): the start farmstead's own loose things filled the hauler's
+12-an-hour cap. 4f4b789e gave it four hours, which holds only while fewer than 48 things lie ahead
+of the drop. `SettlementJobs.haul_queue` now gives the hauler's order (haul uses it), and the test
+works the hours the drop's place in it says (R0764: 12 ahead, 2 hours) and names each hour's job.
+No failure on CI since 4f4b789e (scanned every Fallen run's survival, fallenpeople and settlement
+logs back to 2026-10-26).
+
+Location: scripts/survival/settlement_jobs.gd (haul, haul_queue), tests/settlement_test.gd (_test_haul).
