@@ -50,6 +50,9 @@ suite_timeout() {
 		# armourdrive: a river valley zone hosted, ~14 sections on its slab and in its river and on its
 		# bridges (A6), then a client process joins and checks the rolled, flooded and stalled vehicles.
 		armourdrive) echo $(( SUITE_TIMEOUT > 1080 ? SUITE_TIMEOUT : 1080 )) ;;
+		# botsjoin: two sessions hosted one after the other (a plain one, the campaign at the FOB),
+		# the soak bot started three times (each loads the level), joining and leaving each (R0718: 2.5 min).
+		botsjoin) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
 		# perfcases: five zones hosted and their visuals built, 20-45 s measured in each (perf pass).
 		perfcases) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		# invasion: an 8 km operation zone hosted with its visuals, three cases measured in it (the 6.2.3
@@ -67,7 +70,7 @@ suite_timeout() {
 }
 timeout_s="$SUITE_TIMEOUT"
 SUITES=("$@")
-[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch wounds armor exo mech movement mantle interaction roles medical devices blood logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes)
+[ ${#SUITES[@]} -eq 0 ] && SUITES=(smoke gameplay squad spacing net levelswitch botsjoin wounds armor exo mech movement mantle interaction roles medical devices blood logistics casualty materials animations scavenge contracts people map base world missions vehicles antiarmor armour maingun gunnery vehiclehud vehiclefx armourlog armourdrive session_log supports heliflight bay aav sound loop ui loadout weapons ballistics forest townperf markers pallets voice compass audit_fixes garrison daynight nvg attachments controller base_zone loot tutorial lhd_home story virtualization gore firesupport demolitions water landmarks perfcases high_command side_command requests context smokecloud props terrain city roads income invasion operations optypes)
 status=0
 finished=""
 keep_root="$(run_log_parent)"

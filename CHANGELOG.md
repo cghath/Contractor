@@ -11,6 +11,28 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Bots joining a human-hosted game (Captain's item 7, feat/bots-join-hosted)
+
+The soak bots' `--join` (2026-10-19) and the squad's slot rules were in the code but never run
+together; a new two-process suite does, and two gaps it and a read of the slot code found are
+fixed. Calls and follow-ups F-331 to F-333 in docs/audits/followups.md.
+
+- **Added (tests):** `botsjoin`: this process hosts as the build's menu does ("Play (host a
+  session)", then "Campaign: host at the base") and starts the soak bot (`tests/coop_soak.tscn
+  --soak-join`) as a second process. Alone, the human gets 7 AI squadmates; the bot (a medic)
+  takes team B's medic slot with the medic's kit and that slot's buddy, the AI medic leaves; it
+  walks to its place off the human; when it leaves an AI medic takes the slot back. At the FOB it
+  joins as its own main character with its kit once, readies up, keeps its gear on leaving (and
+  in the campaign save) and comes back in it, no second kit. In the default suites and CI.
+  `coop_soak.gd --soak-quit-file`: a join-mode bot leaves once that file exists.
+- **Changed (squad):** a squadmate lying down keeps his slot when a player joins: `Roles.assign`
+  takes slots to avoid (`rebalance_squad` passes the downed AI's), taken only when nothing else
+  fits. A medic joining while his team's medic is down takes the other medic slot (or a rifleman's
+  as medic) instead of making the casualty vanish from under whoever treats or carries him.
+- **Fixed (campaign):** a player leaving a plain session kept their profile in BaseHub, so they
+  came back as `<profile>_2`, and in a campaign hosted later in the same run as a new main
+  character without their gear. Profiles are forgotten on leaving and on each new host.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

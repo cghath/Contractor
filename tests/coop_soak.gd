@@ -100,6 +100,9 @@ var human := false
 ## contract or confirms an extraction (the human does). It quits at its duration, or when the
 ## host is gone for good.
 var join := false
+## Join mode: leaves the game (as at its duration) once this file exists (--soak-quit-file; the
+## botsjoin suite's host says when its bot goes).
+var quit_file := ""
 var _join_level := 0
 var _join_cycle := 0
 var _join_ready_at := -INF
@@ -150,6 +153,7 @@ func _ready() -> void:
 	late = "--soak-late" in args
 	human = "--soak-human" in args
 	join = "--soak-join" in args
+	quit_file = _arg(args, "--soak-quit-file", "")
 	wait_human_s = float(_arg(args, "--soak-wait-human", "600"))
 	_t0 = Recorder.now()
 	var peer_dir := run_dir.path_join("host" if role == "host" else "client%d" % bot)
@@ -1265,7 +1269,7 @@ func _client_main() -> void:
 ## "follow" behind the host's player (peer 1); "quit" past its duration. The cycle steps on each
 ## level change, so a phase's one-time work runs again in each new place.
 func _join_phase() -> Dictionary:
-	if Recorder.now() - _t0 > duration_s:
+	if Recorder.now() - _t0 > duration_s or (quit_file != "" and FileAccess.file_exists(quit_file)):
 		return {"quit": true}
 	var lvl := _level()
 	var id := lvl.get_instance_id() if lvl else 0

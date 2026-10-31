@@ -95,5 +95,6 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 4. Buy missing kit from inside the loadout editor.
 5. Full medic kit in the FOB starting stash? (open question)
 6. In-game tutorial.
-7. Bots joining a human-hosted game.
+7. Bots joining a human-hosted game. (Built: `tools/coop_soak.sh --join`, 2026-10-19; checked
+   in CI by the `botsjoin` suite since 2026-10-31, feat/bots-join-hosted; F-331 to F-333 left.)
 8. GitHub release workflow on tag.
