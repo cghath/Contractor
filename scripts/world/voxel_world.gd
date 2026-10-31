@@ -177,6 +177,22 @@ const BUILD_BUDGET_MS := 4.0
 ## perfcases, and a slow PC's city the same). Over ~12 fps it stays BUILD_BUDGET_MS. Proposed.
 const BUILD_FRAME_SHARE := 0.03
 const BUILD_BUDGET_MAX_MS := 12.0
+## The voxel engine loads a data block (all air: the generator makes none) only while a
+## VoxelViewer covers it, keeping its own count of who covers what, and ranks the loading by the
+## distance to the nearest viewer. With a hundred-odd AI viewers coming and going a far block can
+## wait behind everything nearer (on CI's city most of a block's area was still to load at 5 s) or
+## be lost from that count for good, and a build waiting on its area waited forever (F-303: one
+## city block a run never built on CI). A build whose area has been short of blocks LOAD_WAIT_S
+## puts the missing ones in itself, empty, as the generator would have (_fill_missing_blocks); a
+## block lost after stamping started takes its boxes with it, so the stamping starts over. Proposed.
+const LOAD_WAIT_S := 5.0
+var _area_short_since := -1.0  # Time (s) the build's area was first seen short of blocks, -1 while whole
+var _filled_blocks := 0  # data blocks the build put in itself (build_progress)
+var _to_fill: Array[Vector3i] = []  # the blocks this round of filling still has to put in
+var _fill_round := Vector3i.ZERO  # this round: missing at its start, put in, usec spent
+var _fill_failed := 0  # this round: try_set_block_data calls that put nothing in
+var _scan_at := -1  # this round's scan for missing blocks (_scan_missing): the next block, -1 while not scanning
+var _scan_found: Array[Vector3i] = []  # the missing blocks the scan has found so far
 var _pending: Array = []
 var _dirty: Array[AABB] = []  # host: carved voxel boxes not checked for breaches yet
 var _breached := {}           # host: Vector2i columns already reported as part of a gap
@@ -290,6 +306,122 @@ func is_built() -> bool:
 	return _built
 
 
+## How far the build has got, for a test's message: "built", or how many boxes are stamped and
+## whether the voxel engine has loaded the build's area yet (nothing is stamped till it has: how
+## many of its data blocks are missing), and how many blocks the build put in itself.
+func build_progress() -> String:
+	var filled := (", %d data blocks put in by the build" % _filled_blocks) if _filled_blocks > 0 else ""
+	if _built:
+		return "built" + filled
+	var area := "not loaded"
+	if _tool != null and not _structures.is_empty():
+		var missing := missing_blocks().size()
+		area = "loaded" if missing == 0 else "%d of %d data blocks not loaded" % [missing, _area_blocks().get_volume()]
+	return "building: %d of %d boxes stamped, area %s%s" % [_next_structure, _structures.size(), area, filled]
+
+
+## The build's time a frame (ms): BUILD_BUDGET_MS, or more on slow frames (BUILD_FRAME_SHARE).
+static func _build_budget_ms(delta: float) -> float:
+	return clampf(delta * 1000.0 * BUILD_FRAME_SHARE, BUILD_BUDGET_MS, BUILD_BUDGET_MAX_MS)
+
+
+## The voxels the build needs loaded (voxel units): the structures' area out to whole mesh blocks
+## and the voxel round them the mesher reads (so their meshes and collision can be made), inside
+## the terrain's bounds. Nothing is stamped till every data block of it is loaded.
+func _build_area() -> AABB:
+	return aligned(_structure_area, MESH_BLOCK).grow(1.0).intersection(terrain.bounds)
+
+
+## _build_area in data blocks, as the voxel engine counts it for is_area_editable.
+func _area_blocks() -> AABB:
+	var bs := float(terrain.get_data_block_size())
+	var area := _build_area()
+	var lo := (area.position / bs).floor()
+	return AABB(lo, (area.end / bs).ceil() - lo)
+
+
+## The data blocks of the build's area the voxel engine hasn't got loaded (block coordinates).
+func missing_blocks() -> Array[Vector3i]:
+	var out: Array[Vector3i] = []
+	var box := _area_blocks()
+	var lo := Vector3i(box.position)
+	var hi := Vector3i(box.end)
+	for z in range(lo.z, hi.z):
+		for y in range(lo.y, hi.y):
+			for x in range(lo.x, hi.x):
+				if not terrain.has_data_block(Vector3i(x, y, z)):
+					out.append(Vector3i(x, y, z))
+	return out
+
+
+## Puts the data blocks of the build's area the voxel engine hasn't loaded in itself, empty,
+## as the generator makes them (LOAD_WAIT_S), till the frame's build budget is spent (`until`,
+## usec: on CI's city most of a block's area, 7000-odd blocks at about 4 us each, was still to
+## load at 5 s); returns whether this round is done. The engine counts the viewers covering each one
+## (try_set_block_data), so they unload as any block does; a block no viewer covers stays out
+## (nobody is near enough for it to be loaded). The round's own scan for the missing blocks runs
+## in the same budget (_scan_missing), over as many frames as it takes.
+func _fill_missing_blocks(waited_s: float, until: int) -> bool:
+	var started := Time.get_ticks_usec()
+	if _to_fill.is_empty() and _scan_at < 0:
+		_scan_at = 0
+		_scan_found = []
+		_fill_round = Vector3i.ZERO
+		_fill_failed = 0
+	if _scan_at >= 0:
+		_scan_at = _scan_missing(_scan_at, until)
+		if _scan_at >= 0:
+			_fill_round.z += Time.get_ticks_usec() - started
+			FrameCost.spent(&"voxels", started)
+			return false
+		_to_fill = _scan_found
+		_scan_found = []
+		_fill_round.x = _to_fill.size()
+	var bs := terrain.get_data_block_size()
+	var n := 0
+	while not _to_fill.is_empty() and (n % 64 != 0 or Time.get_ticks_usec() < until):
+		var b: Vector3i = _to_fill.pop_back()
+		n += 1
+		if terrain.has_data_block(b):
+			continue  # the engine got there meanwhile
+		var empty := VoxelBuffer.new()  # (one each: the terrain keeps the buffer itself)
+		empty.create(bs, bs, bs)
+		if terrain.try_set_block_data(b, empty):
+			_fill_round.y += 1
+		else:
+			_fill_failed += 1  # (only tries that put nothing in count: not blocks the engine had loaded)
+			if _fill_round.y == 0 and _fill_failed >= 16:
+				_to_fill.clear()  # no viewer near (e.g. a client's compound before it joins): try again later
+	_fill_round.z += Time.get_ticks_usec() - started
+	FrameCost.spent(&"voxels", started)
+	if not _to_fill.is_empty():
+		return false
+	_filled_blocks += _fill_round.y
+	if _fill_round.y > 0:  # (none: no viewer near yet, e.g. a client's compound before it joins)
+		print("[world] %s: %d of %d data blocks of the build's area not loaded by the voxel engine in %.0f s; put in empty: %d in %.1f ms (the rest no viewer covers or had loaded)" % [
+			module_id if module_id != "" else String(name), _fill_round.x, _area_blocks().get_volume(), waited_s, _fill_round.y, _fill_round.z / 1000.0])
+	return true
+
+
+## Goes on with a fill round's scan for the data blocks of the build's area the voxel engine
+## hasn't got (as missing_blocks, into _scan_found) from block index `at` (x fastest, then y,
+## then z) till the frame's build budget is spent (`until`, usec): the index to go on from next
+## frame, -1 once the whole area is scanned. (A city block's area is 7000-odd blocks: the whole
+## scan in one frame ran outside the budget, every round.)
+@warning_ignore("integer_division")
+func _scan_missing(at: int, until: int) -> int:
+	var box := _area_blocks()
+	var lo := Vector3i(box.position)
+	var size := Vector3i(box.size)
+	var total := size.x * size.y * size.z
+	while at < total and (at % 256 != 0 or Time.get_ticks_usec() < until):
+		var b := lo + Vector3i(at % size.x, (at / size.x) % size.y, at / (size.x * size.y))
+		if not terrain.has_data_block(b):
+			_scan_found.append(b)
+		at += 1
+	return -1 if at >= total else at
+
+
 ## Whether every mesh block of the structures is meshed as its voxels now stand, and the voxel
 ## engine has no meshing or main-thread work (applying meshes and their collision) left queued:
 ## the collision is as the voxels are. (The engine's queues are every terrain's: a caller should
@@ -320,13 +452,31 @@ func _process(delta: float) -> void:
 		return
 	if _structures.is_empty():
 		return
-	# Blocks only exist once a VoxelViewer (on a player) has loaded them.
-	if not _tool.is_area_editable(_structure_area):
+	# Blocks only exist once a VoxelViewer (on a player) has loaded them, or the build put them in
+	# (LOAD_WAIT_S).
+	if not _tool.is_area_editable(_build_area()):
+		var now := Time.get_ticks_msec() / 1000.0
+		if _next_structure > 0:
+			print("[world] %s: a data block of the build's area went after %d of %d boxes were stamped; stamping again" % [
+				module_id if module_id != "" else String(name), _next_structure, _structures.size()])
+			_next_structure = 0  # its stamped voxels went with it (every box again, in order, comes out the same)
+		if _area_short_since < 0.0:
+			_area_short_since = now
+		elif now - _area_short_since >= LOAD_WAIT_S:
+			if _fill_missing_blocks(now - _area_short_since, Time.get_ticks_usec() + int(_build_budget_ms(delta) * 1000.0)):
+				_area_short_since = now  # (blocks no viewer covers: tried again after as long)
 		return
+	_area_short_since = -1.0
+	if not _to_fill.is_empty() or _scan_at >= 0:
+		# The area came whole partway through a fill round: what it put in counts, the rest of
+		# it goes (a later round scans afresh).
+		_filled_blocks += _fill_round.y
+		_to_fill.clear()
+		_scan_at = -1
+		_scan_found = []
 	_tool.mode = VoxelTool.MODE_SET
 	var started := Time.get_ticks_usec()
-	var budget_ms := clampf(delta * 1000.0 * BUILD_FRAME_SHARE, BUILD_BUDGET_MS, BUILD_BUDGET_MAX_MS)
-	var until := started + int(budget_ms * 1000.0)
+	var until := started + int(_build_budget_ms(delta) * 1000.0)
 	while _next_structure < _structures.size():
 		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]

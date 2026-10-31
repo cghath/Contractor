@@ -1248,8 +1248,13 @@ func _test_gun_team() -> void:
 		SquadAI.of(s).hold_fire = true
 	foe.vitals.died.connect(func() -> void: print("    (the gun team's foe died at %.1f s: %s)" % [Soldier._now(), foe.vitals.wound_list().map(func(w: Dictionary) -> String: return String(w.get("part", "?")))]))
 	await _wait_for(func() -> bool: return team.state == GunTeam.State.MANNED, 100.0)
+	# Only the man on the gun is let loose: the other's rifle holds until the gun has fired. The gun
+	# turns onto the foe and makes him out first (F-140), and in that second or two the assistant's
+	# rifle put a round through his head at 123 m ("fires on him (0 rounds)", foe dead: CI run
+	# 41154617049 on dev, 54ccc3d; can_go_down doesn't stop a head wound killing).
+	var on_gun: Soldier = team.gun.gunner() if is_instance_valid(team.gun) else null
 	for s: Soldier in [a, b]:
-		SquadAI.of(s).hold_fire = false
+		SquadAI.of(s).hold_fire = on_gun != null and s != on_gun
 	if team.state != GunTeam.State.MANNED:
 		print("    %s; gunner at %s (spot %s), %s" % [GunTeam.STATE_NAMES[team.state], a.global_position, team.spot, a.ai_status])
 	check(team.state == GunTeam.State.MANNED and is_instance_valid(team.gun) and team.gun.gunner() in [a, b],
@@ -1268,6 +1273,8 @@ func _test_gun_team() -> void:
 				pic.bft.values().filter(func(b: Dictionary) -> bool: return String(b.what) == "vehicle").map(func(b: Dictionary) -> String: return "%s %s" % [b.key, b.pos]) if pic else [],
 				foe.vitals.is_up(), g.made_out(foe) if g else false])
 		check(g != null and g.fired > 0, "and fires on him (%d rounds)" % (g.fired if g else 0))
+		for s: Soldier in [a, b]:
+			SquadAI.of(s).hold_fire = false
 		var dig := Digging.of(team.gun)
 		await _wait_for(func() -> bool: return team._dug, 5.0)
 		check(team._dug, "and digs in in front of the gun, or the ground there already covers it (%s)"

@@ -11,6 +11,78 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A city block that never built (fix/city-stall)
+
+F-303: on about every other CI run one of the city's twenty blocks never built in 180 s
+(city_0_3 on 40604654761, city_3_1 on 41154617049, city_4_2 on 41174369882; on green runs often a
+block the case doesn't wait for), while the rest were in at ~35 s. A player could hit the same in a
+busy city: a block standing as its proxy for good, its garrison never spawned.
+
+- **Fixed (voxel worlds):** a build no longer waits forever on the voxel engine to load its area.
+  The engine loads a data block (all air) only while a VoxelViewer covers it, by its own count of
+  which viewers cover which blocks, nearest viewer first; with a hundred-odd AI viewers coming and
+  going a far block waits behind everything nearer, or that count loses it and nothing asks for it
+  again. A build whose
+  area has been short of blocks for `VoxelWorld.LOAD_WAIT_S` (5 s, Proposed) now puts the missing
+  ones in itself, empty, as the generator makes them (`VoxelTerrain.try_set_block_data`, which
+  counts the viewers covering each), within the build's own time a frame (4-12 ms), giving up
+  till next time when no viewer covers them; a
+  block lost after stamping began makes the stamping start over. On CI three blocks were still
+  missing most of their area at 5 s (city_4_2: 7053 of 7560 data blocks); with the fill all twenty
+  built, the twelve the case waits for in 23 s. The build also waits for its area out to whole mesh blocks and the voxel round them the
+  mesher reads, so its meshes and collision can all be made.
+- **Changed (tests):** `ZoneModule.build_progress()` says why a module isn't ready, including a
+  build that's done with its proxy still up (meshing or holding); `VoxelWorld.build_progress()`
+  counts the data blocks not loaded and the ones the build put in. Perfcases prints both, the
+  blocks it doesn't wait for that are still not ready, and for a block not streamed in how far the
+  player is (F-340: once every city block streamed out mid-wait). World: a build whose terrain never loads
+  anything puts its blocks in and builds, its wall solid.
+- Runs: local R0742 (smoke, world), R0744 (perfcases city, city, virtualization), R0745 (townperf),
+  R0749 (smoke, world, perfcases city, city, on the time-budgeted fill), R0752 (perfcases city), all
+  PASS (R0751's perfcases failed on F-340, not this); CI perfcases green
+  on 41186841331, 41191078478, 41192039297 (all 20 blocks built, no fill needed), 41192561810 (three
+  blocks filled), 41193905455 (one filled at 512 a frame), 41195405767 (2cfd704, the fill in the
+  build's time a frame) and 41197962257 (724bc9a), all 20 built every time.
+- **Fixed (review):** the fill round's scan for missing data blocks runs inside the build's time
+  a frame too, over as many frames as it takes (`VoxelWorld._scan_missing`; it ran whole, outside
+  the budget, at every round's start); a round gives up only after 16 tries that put nothing in,
+  not 16 blocks looked at (the ones the engine had loaded meanwhile counted); and when the area
+  comes whole partway through a round, what the round put in is counted and the rest dropped
+  (it was left queued for the next round). World's never-loaded build waits a frame after it's
+  freed. Local R0760 (smoke, world PASS; perfcases city hit F-340, noted there), R0766
+  (perfcases city) PASS.
+
+### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
+
+Dev's last two CI runs (40604654761 at 6a52a7f: props, perfcases; 41154617049 at 54ccc3d, a
+docs-only commit on the same code: squad, vehicles, perfcases) against claude/dev-reds' green run
+of the very same commit (40602801148): the squad, vehicles and props reds were checks whose outcome
+hung on timing or on what the suite before it left behind, not on the code under test. Perfcases
+was not: a city block that never built is a real stall in the game, which this section only made
+visible (F-303; fixed under "A city block that never built", fix/city-stall). Roles passes on dev
+(41154617049).
+
+- **Fixed (tests, squad):** the fire-discipline check "1.5 m off the line" never put the shooter on
+  his feet. The fight before it can leave Alpha prone or crouched in combat mode, and from a prone
+  eye the line 3 m out runs at a prone man's chest height, so Bravo 1.5 m off was rightly in it.
+  Alpha now stands for it (as the muzzle check further down already did); the message gives the eye.
+- **Fixed (tests, vehicles):** the AI gun team: only the man on the gun is let loose once it's
+  manned; the other's rifle holds until the gun has fired. While the gun turned onto the foe and
+  made him out, the assistant's rifle put a round through his head at 123 m (can_go_down doesn't
+  stop a head wound killing), so "fires on him (0 rounds)".
+- **Fixed (tests, props):** the client's animal check: the host's animals stand still for the
+  comparison and a few packets go out before the host answers. A client that stalled a second or
+  two took the answer together with packets sent after it, the animals metres on ("worst 2.85 m").
+- **Fixed (vehicle HUD):** the night channel's shader left NvgView's MEAN unreplaced and failed to
+  compile on every vehicle HUD made ("Unknown identifier 'MEAN'"; every vehicle entered on CI).
+  `NvgView.screen_shader_code()` makes the screen version for both.
+- **Changed (tests, perfcases):** F-233 (a city block not built in 180 s on CI) reports what the
+  slow block is doing: every 30 s while waiting, and in the check, how many of its boxes are stamped
+  and whether the voxel engine has loaded its area yet (`VoxelWorld.build_progress`).
+- Runs: local R0708 (perfcases city PASS, vehicles' gun team fires; the spall-cone budget missed under
+  local load) and R0719 (smoke, squad, props PASS); CI 41173283134 green on 62ffcdc (gunnery's
+  buttoned-up spotting flaked once and passed its rerun, F-305).
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

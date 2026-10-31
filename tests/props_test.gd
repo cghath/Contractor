@@ -23,6 +23,8 @@ const RAY_SLACK := 2
 ## How far the client's animals may be from the host's when it asks (m: a dog's 1.4 m/s over a
 ## packet's gap and the trip).
 const ANIMAL_SLACK_M := 1.5
+## How long the host's animals stand still while the client compares (s; _ask_digest).
+const DIGEST_STILL_S := 10.0
 
 var failures := 0
 var level: ZoneLevel
@@ -621,7 +623,18 @@ func _test_animals() -> void:
 
 @rpc("any_peer", "reliable")
 func _ask_digest() -> void:
-	_reply_digest.rpc_id(multiplayer.get_remote_sender_id(), _digest())
+	var asker := multiplayer.get_remote_sender_id()
+	# The animals stand still for the comparison, and a few packets go out first: the client
+	# compares the reply with the last packet it has, and a client that stalls a second or two
+	# (CI, just in the zone) took the reply with packets sent after it, the animals by then
+	# metres on from where the reply had them ("worst 2.85 m off", CI run 40604654761 on dev,
+	# 6a52a7f; green on the same commit in 40602801148).
+	var zoo := level.scatter.get_node_or_null(^"Animals") as ZoneAnimals
+	if zoo:
+		for a: Dictionary in zoo.animals:
+			a.wait = maxf(float(a.wait), DIGEST_STILL_S)
+	await get_tree().create_timer(ZoneAnimals.SEND_S * 3.0).timeout
+	_reply_digest.rpc_id(asker, _digest())
 
 
 @rpc("authority", "reliable")
