@@ -18,7 +18,10 @@ extends Node
 ##   sets it: they don't wait at the wall for ever, but go in by the building's door and clear it;
 ## - a wall breach whose charge carriers all go down before the charge is set falls back to the
 ##   building's door, and the team restacks there before the door is breached (nobody works the
-##   new door from where he stood, even once the setter is back up).
+##   new door from where he stood, even once the setter is back up);
+## - squadmates in no breach order (F-373): a follower and a man holding, at the wall when the
+##   player sets a charge on it, step out of its blast on their side of the wall before it goes,
+##   nobody is hurt by it, and they go back to following and to the spot they hold after.
 ##   <godot> --headless --path . res://tests/breach_test.tscn
 ## The host starts the client itself (same scene, "-- --breach-join"). Exits with the number of
 ## failures.
@@ -80,6 +83,7 @@ func _ready() -> void:
 	await _test_order_with_client()
 	await _test_lead_down()
 	await _test_carriers_down()
+	await _test_bystanders()
 	_finish()
 
 
@@ -513,6 +517,97 @@ func _test_carriers_down() -> void:
 	check(went and is_finite(float(op.first_ready_at)) and float(op.first_ready_at) >= since and (ready.size() >= int(op.units) or waited) and ready.has(setter_slot),
 		"they restack by the door before it's breached, the setter with them (%d of %d ready, setter's slot %d ready %s, waited out %s)"
 		% [ready.size(), int(op.units), setter_slot, ready.has(setter_slot), waited])
+	await _heal_squad()
+
+
+# --- Squadmates in no breach order, at a wall a charge is set on ---------------------------
+
+## F-373 (Captain, 2026-10-31: yes): only the ordered team stood off from a charge; a follower or
+## a man holding by the wall stayed where he was while it burned. The player sets a charge on the
+## main building's north wall (untouched so far) with a follower and a man holding beside it: both
+## step out of its blast, on their side of the wall, before it goes; nobody is hurt by it; then
+## the follower follows again and the other goes back to the spot he holds.
+const NORTH_FACE := Vector3(0.0, 1.0, -12.0)
+
+
+func _test_bystanders() -> void:
+	print("Squadmates in no breach order step clear of a charge, then go back to it")
+	var squad := level.squad_for(&"friendly")
+	await _heal_squad()
+	var mates := _team(2)
+	if mates.size() < 2:
+		check(false, "two fit squadmates (%d)" % mates.size())
+		return
+	var n := Vector3(0, 0, -1)
+	var hit := level.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(NORTH_FACE + n * 2.0, NORTH_FACE - n * 0.5, 1))
+	check(not hit.is_empty() and (hit.normal as Vector3).dot(n) > 0.95, "the main building's north wall, its face to the north (%s)" % [hit.get("position", "not found")])
+	if hit.is_empty():
+		return
+	var spot: Vector3 = hit.position
+	while player.inventory.remove_one(Charges.ITEM):
+		pass
+	Roles.give(player.inventory, Charges.ITEM, 1)
+	squad.leader = player
+	_place(player, Vector3(0.0, 0.1, -16.5))  # (4.5 m out: clear of it himself)
+	var follower := mates[0]
+	var holder := mates[1]
+	follower.on_order(Squad.Order.FOLLOW, player.global_position)
+	_place(follower.body, spot + n * 0.7 + Vector3(-1.2, -0.9, 0.0))
+	_place(holder.body, spot + n * 0.7 + Vector3(1.2, -0.9, 0.0))
+	holder.on_order(Squad.Order.HOLD, holder.body.global_position)
+	var hold_at: Vector3 = holder._hold_point
+	await _seconds(1.0)  # (the holder settles on his spot; the follower may already be heading to his slot)
+	_place(follower.body, spot + n * 0.7 + Vector3(-1.2, -0.9, 0.0))
+	var friends: Array = level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and (s as Soldier).faction == &"friendly" and not s.is_queued_for_deletion())
+	friends.append(player)
+	var was_hurt := {}
+	for s: Soldier in friends:
+		was_hurt[s] = s.vitals.injury()
+	var charges := Charges.of(level)
+	var id := charges.server_place_at(player, Charges.surface_transform(spot, n, Vector3.UP))
+	var info: Dictionary = {}
+	for c: Dictionary in charges.burning():
+		if c.id == id:
+			info = c
+	var reach := SquadAI.charge_reach(info, spot + n) if not info.is_empty() else 0.0
+	var men: Array[SquadAI] = [follower, holder]
+	var started := men.map(func(ai: SquadAI) -> float: return SquadAI._flat_between(ai.body.global_position, spot))
+	check(id != "" and not info.is_empty() and info.wall.dot(n) > 0.95 and not bool(info.indoors) and StringName(info.faction) == player.faction
+		and is_equal_approx(reach, Squad.BLAST_SAFE_M) and started.all(func(d: float) -> bool: return d < reach),
+		"he sets it on the wall, both of them in its blast (%.1f and %.1f m from it; it reaches %.1f m their side, the ordered stack's stand-off)" % [started[0], started[1], reach])
+	if id == "" or info.is_empty():
+		return
+	# Every frame until it goes off: where each of them is, and never past the wall's face.
+	var seen := {"d": [INF, INF], "through": false, "statuses": []}
+	await _wait_until(func() -> bool:
+		if not charges.records.has(id):
+			return true
+		for i in men.size():
+			var p := men[i].body.global_position
+			seen.d[i] = SquadAI._flat_between(p, spot)
+			if (p - spot).dot(n) < 0.0:
+				seen.through = true
+			if not seen.statuses.has(men[i].body.ai_status):
+				seen.statuses.append(men[i].body.ai_status)
+		return false, MissionRegistry.setting_f("charge_fuse_s", 10.0) + 5.0)
+	await _physics_frames(2)
+	var blown := not charges.records.has(id)
+	var hurt := friends.filter(func(s: Soldier) -> bool: return is_instance_valid(s) and (s.vitals.deaf_left() > 0.0 or not s.vitals.is_up() or s.vitals.injury() > float(was_hurt[s]) + 0.001))
+	check(blown and (seen.d as Array).all(func(d: float) -> bool: return d > reach) and not seen.through,
+		"before it goes off both step out of its blast, on their side of the wall (%.1f and %.1f m from it, past %.1f m; through the wall: %s; %s)"
+		% [seen.d[0], seen.d[1], reach, seen.through, ", ".join(seen.statuses)])
+	check(blown and hurt.is_empty(), "nobody is hurt by it (%s)" % [", ".join(hurt.map(func(s: Soldier) -> String: return "%s: %s" % [s.name, s.vitals.condition_text()]))])
+	# Then back to what they were doing: following, and the spot he holds.
+	var following := func() -> bool:
+		var to := follower.destination()
+		var slot := squad.follow_point(follower.body)
+		return SquadAI._flat_between(to, slot) < 0.6 or (follower._halt_spot != null and SquadAI._flat_between(to, follower._halt_spot) < 0.6)
+	var back := await _wait_until(func() -> bool:
+		return (follower._clear_spot == null and holder._clear_spot == null and follower.order == Squad.Order.FOLLOW and follower.intent == SquadAI.Intent.FOLLOW
+			and following.call() and holder.order == Squad.Order.HOLD and holder.intent == SquadAI.Intent.HOLD and holder._flat_distance(hold_at) <= SquadAI.ARRIVE + 0.3), 20.0)
+	check(back, "then the follower follows again (to %s, %s) and the other is back on the spot he holds (%.1f m from it, %s)"
+		% [follower.destination(), follower.body.ai_status, holder._flat_distance(hold_at), holder.body.ai_status])
+	holder.on_order(Squad.Order.FOLLOW, player.global_position)
 	await _heal_squad()
 
 

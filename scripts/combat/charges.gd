@@ -72,6 +72,7 @@ var _next_id := 1
 var _due := {}  # host: id -> Time (s) it goes off
 var _last_pos := {}  # host: id -> where it was last seen (what it rode may be gone)
 var _placer := {}  # host: id -> who placed it (instance id, 0 for nobody)
+var _burning: Array[Dictionary] = []  # host: the ones burning on the world itself (burning())
 
 
 func _init() -> void:
@@ -183,6 +184,9 @@ func server_place_at(by: Soldier, xform: Transform3D, target: Node3D = null) -> 
 	var rec := {"id": id, "path": path, "xform": _pack(local), "world": _pack(xform), "fuse_s": fuse, "by": by.display_name() if by else ""}
 	_due[id] = _now() + fuse
 	_placer[id] = by.get_instance_id() if by else 0
+	if path == "":
+		_burning.append({"id": id, "pos": xform.origin, "wall": wall_normal(rec, true), "faction": by.faction if by else &"",
+			"indoors": Throwables.indoors(level.get_world_3d(), xform.origin + Vector3.UP * 0.25)})
 	print("[charges] %s placed by %s on %s (fuse %.0f s)" % [id, rec.by, path if path != "" else "the world", fuse])
 	_client_add.rpc(rec)
 	if by and not by.is_ai():
@@ -215,6 +219,10 @@ func _process(_delta: float) -> void:
 
 func _detonate(id: String) -> void:
 	_due.erase(id)
+	for i in _burning.size():
+		if _burning[i].id == id:
+			_burning.remove_at(i)
+			break
 	var pos := position_of(id)
 	_last_pos.erase(id)
 	var node := get_charge_node(id)
@@ -305,6 +313,16 @@ static func wall_depth(lvl: Node3D, pos: Vector3, normal: Vector3) -> float:
 	if hit.is_empty() or (hit.normal as Vector3).dot(n) > -0.5:
 		return -1.0
 	return maxf((pos - (hit.position as Vector3)).dot(n), 0.0)
+
+
+## Host: the charges burning now on the world itself (a wall, a doorway's side, the ground; not
+## one riding a person or a vehicle), as {"id", "pos", "wall" (its wall's outward normal, or
+## Vector3.ZERO off a wall: wall_normal), "faction" (its placer's, &"" for nobody's), "indoors"
+## (Throwables.indoors over it: its blast reaches further)}. Few burn at once, so the AI looks
+## them up here instead of anything scanning soldiers (SquadAI._keep_clear_of_charges, F-373).
+## The list itself: read it, don't change it.
+func burning() -> Array[Dictionary]:
+	return _burning
 
 
 ## Host: where a charge went off within `radius_m` of `point` (flat) since `since`, placed by the

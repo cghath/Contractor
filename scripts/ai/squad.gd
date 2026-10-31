@@ -859,8 +859,11 @@ func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := 
 	return ""
 
 
-## A charge's stack stands CHARGE_STANDOFF_M further along the wall, clear of the blast.
+## A charge's stack stands CHARGE_STANDOFF_M further along the wall, clear of the blast. The op
+## is marked "stood_off": its own charge's stand-off is the op's (SquadAI._keep_clear_of_charges
+## leaves its men to it).
 static func stand_off(op: Dictionary) -> void:
+	op["stood_off"] = true
 	var door: Vector3 = op.entrance.door
 	for i in (op.stack as Array).size():
 		var away := Vector3((op.stack[i] as Vector3).x - door.x, 0.0, (op.stack[i] as Vector3).z - door.z)

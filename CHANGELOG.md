@@ -66,6 +66,20 @@ clear' team order through walls" (F-317, F-318).
   the way to the wall, in by the door, all four restacked (the setter, back up, with them) before
   it's breached (R0757 PASS; without the fix it fails, R0758). Followers outside the order
   still aren't moved off the wall (F-373).
+- **Added (AI):** squadmates in no breach order (following, holding, covering, on another tactic
+  or fighting) step clear of a burning charge their own side set, on a wall or by a door, the
+  player's or an AI breacher's, and go back to what they were doing once it has gone off (F-373,
+  Captain, 2026-10-31: yes). A man in its blast, or headed into it, goes to the nearest spot out
+  of it on his side of its wall (never through it, nor round the building to get there): the
+  ordered stack's own stand-off on the face it was set on (`Squad.BLAST_SAFE_M`, 3 m), its full
+  radius behind the wall, radius or fragments off a wall, doubled indoors; one already clear but
+  headed in waits where he is. His order isn't changed, only where he walks meanwhile. The live
+  charges are looked up (`Charges.burning`, a handful at most) four times a second, so squads
+  with none near pay an empty check; a breach team keeps its own stand-off (`Squad.stand_off` marks
+  the op), and a man treating someone (or himself) stays at it (`SquadAI._keep_clear_of_charges`,
+  Proposed consts). `breach` adds it: a follower and a man holding beside the main building's north
+  wall when the player sets a charge on it step out of its blast before it goes, nobody is hurt,
+  and they follow and hold again after (R0801; squad, roles, demolitions R0804).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

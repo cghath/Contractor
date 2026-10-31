@@ -1280,6 +1280,8 @@ func status_text() -> String:
 	var no_shot := _no_shot_text()
 	if no_shot != "":
 		return no_shot
+	if _clear_spot != null:
+		return "Clear of a charge" if _flat_distance(_clear_spot) <= ARRIVE + 0.3 else "Getting clear of a charge"
 	var who := _name_of(casualty)
 	match intent:
 		Intent.CASUALTY:
@@ -1561,6 +1563,7 @@ func _act() -> void:
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	if _holding_ambush():
 		_hold_ambush()  # (F-140: a road ambush keeps its spots until it's sprung)
+	_keep_clear_of_charges()  # (F-373: out of a burning charge's blast, then back to it)
 	_apply_combat_mode()
 	if _care_prone and intent != Intent.HEAL:
 		_care_prone = false
@@ -5921,6 +5924,179 @@ func _answer_bound() -> void:
 			best = mate_ai
 	if best:
 		best._callout(&"covering")
+
+
+# --- Clear of a burning charge ----------------------------------------------
+
+## Out of a burning charge's blast (F-373; Captain, 2026-10-31: yes): a man not in the breach
+## order the charge belongs to (following, holding, covering, on a tactic or fighting: the rest
+## of the squad) who stands in the blast of a charge his own side set (a player's, an AI
+## breacher's), or is headed into it, goes to the nearest spot clear of it on his own side of its
+## wall (never through it), and back to what he was doing once it has gone off: his order is
+## untouched, only where he walks meanwhile. Already clear but headed in, he waits where he is.
+## The blast is the one the ordered team's stand-off keeps clear of (Squad.BLAST_SAFE_M on the
+## charge's side of a wall), its full radius behind the wall, and the radius and its fragments for
+## one off a wall; indoors the radius doubles (Throwables._frag). The charges are looked up
+## (Charges.burning: a handful at most) every CHARGE_CHECK_S, so a squad with none burning pays
+## an empty check. Host only (the AI runs there; clients see him walk). A man treating someone
+## (or himself) stays at it, and a breach team keeps its own stand-off (Squad.stand_off's
+## "stood_off" op). Proposed.
+const CHARGE_CHECK_S := 0.25
+## The blast's margin past its reach (Squad.BLAST_SAFE_M's).
+const CHARGE_MARGIN_M := 0.5
+## A charge more than this above or below him is on another floor.
+const CHARGE_FLOOR_M := 3.0
+## His spot is this far past the blast's edge, and past ARRIVE (he stops that short of it).
+const CHARGE_CLEAR_PAST_M := 0.4
+## A breach op's own charge: within this of its door (where the hole is cut) or its charge's spot.
+const CHARGE_OWN_M := CHARGE_ALONG_M + 1.5
+## His way there no longer than this share of the straight line, plus CHARGE_DETOUR_M: not round
+## the building to its far side.
+const CHARGE_DETOUR_SHARE := 2.0
+const CHARGE_DETOUR_M := 3.0
+var _charges: Charges
+var _charge_cd := 0.0
+var _clear_of := ""  # the charge he's keeping clear of
+var _clear_spot: Variant = null  # where he waits for it (Vector3), or null
+
+
+func _keep_clear_of_charges() -> void:
+	_charge_cd -= get_physics_process_delta_time()
+	if _charge_cd <= 0.0:
+		_charge_cd = CHARGE_CHECK_S
+		_check_charges()
+	if _clear_spot != null:
+		_go(_clear_spot, true)
+
+
+func _check_charges() -> void:
+	if _charges == null or not is_instance_valid(_charges):
+		_charges = Charges.of(body)
+	if _charges == null or _charges.burning().is_empty() or not body.is_ai() or body.vitals.is_dying() or intent in [Intent.CASUALTY, Intent.HEAL]:
+		_end_charge_clear()
+		return
+	var mine: Array[Dictionary] = []
+	for c: Dictionary in _charges.burning():
+		if StringName(c.faction) != &"" and StringName(c.faction) == body.faction and not _breach_keeps_clear(c):
+			mine.append(c)
+	if _clear_spot != null and mine.any(func(c: Dictionary) -> bool: return String(c.id) == _clear_of) and not _in_any_blast(mine, _clear_spot):
+		return  # still burning, and his spot's still clear
+	var from := body.global_position
+	var threat := {}
+	for c in mine:
+		if in_charge_blast(c, from) or (_has_destination and in_charge_blast(c, _destination)):
+			threat = c
+			break
+	if threat.is_empty():
+		_end_charge_clear()
+		return
+	var spot: Variant = from if not _in_any_blast(mine, from) else _charge_clear_spot(threat, mine)
+	if spot == null:
+		_charge_cd = 1.0  # nowhere clear found from here: look again in a second
+		return
+	if _clear_spot == null:
+		_stop_digging()
+		print("[charge] %s keeps clear of %s: to (%.1f, %.1f), %.1f m from it" % [body.name, threat.id, (spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, threat.pos)])
+	_clear_of = String(threat.id)
+	_clear_spot = spot
+
+
+## Done keeping clear (the charge has gone off, or he's to stay at what he's doing): back to it.
+func _end_charge_clear() -> void:
+	if _clear_spot == null:
+		return
+	if _has_destination and _destination == _clear_spot:
+		_has_destination = false  # (his intent's own way, if it has one, is set again next frame)
+	_clear_spot = null
+	_clear_of = ""
+
+
+## Whether `c` (Charges.burning) is the charge of the breach op he's in, whose stack stands off
+## from it on its own (Squad.stand_off).
+func _breach_keeps_clear(c: Dictionary) -> bool:
+	var t := _tactic()
+	if StringName(t.get("kind", &"")) != &"clear":
+		return false
+	var op: Dictionary = t.get("op", {})
+	if not bool(op.get("stood_off", false)):
+		return false
+	if String(op.get("charge_id", "")) == String(c.id):
+		return true
+	var at: Vector3 = c.pos
+	if op.has("entrance") and _flat_between(op.entrance.door, at) <= CHARGE_OWN_M:
+		return true
+	return op.has("charge_spot") and _flat_between(op.charge_spot.at, at) <= CHARGE_OWN_M
+
+
+## How far charge `c`'s blast reaches towards `p` (flat, from the charge): Squad.BLAST_SAFE_M on
+## the face it was set on (the ordered stack's own stand-off), the whole overpressure radius
+## behind its wall, the radius or its fragments' (the further) off a wall; the radius doubles
+## indoors (Throwables._frag).
+static func charge_reach(c: Dictionary, p: Vector3) -> float:
+	var mult := Throwables.BLAST_INDOOR_MULT if bool(c.indoors) else 1.0
+	var wall: Vector3 = c.wall
+	if wall == Vector3.ZERO:
+		return maxf(WoundModel.BLAST_RADIUS * mult, Throwables.FRAG_RADIUS) + CHARGE_MARGIN_M
+	if (p - (c.pos as Vector3)).dot(wall) >= 0.0:
+		return Squad.BLAST_SAFE_M + WoundModel.BLAST_RADIUS * Throwables.FACING_BLAST_SHARE * (mult - 1.0)
+	return WoundModel.BLAST_RADIUS * mult + CHARGE_MARGIN_M
+
+
+static func in_charge_blast(c: Dictionary, p: Vector3) -> bool:
+	var at: Vector3 = c.pos
+	return absf(p.y - at.y) < CHARGE_FLOOR_M and _flat_between(p, at) < charge_reach(c, p)
+
+
+static func _in_any_blast(charges: Array[Dictionary], p: Vector3) -> bool:
+	return charges.any(func(c: Dictionary) -> bool: return in_charge_blast(c, p))
+
+
+## The nearest spot (by his way there) clear of every charge in `mine`, out of `c`'s blast on his
+## own side of its wall: straight away from it, along the wall either way, or out from it, each
+## past its reach (charge_reach, ARRIVE and CHARGE_CLEAR_PAST_M) on the navmesh, by a way that
+## doesn't go round to the wall's far side; null if none.
+func _charge_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
+	var at: Vector3 = c.pos
+	var from := body.global_position
+	var wall: Vector3 = c.wall
+	var side := Vector3.ZERO
+	if wall != Vector3.ZERO:
+		side = wall if (from - at).dot(wall) >= 0.0 else -wall
+	var reach := charge_reach(c, from) + ARRIVE + CHARGE_CLEAR_PAST_M
+	var away := Vector3(from.x - at.x, 0.0, from.z - at.z)
+	if away.length() < 0.1:
+		away = side if side != Vector3.ZERO else body.global_basis.z
+	away = Vector3(away.x, 0.0, away.z).normalized()
+	var dirs: Array[Vector3] = [away]
+	if side != Vector3.ZERO:
+		var along := side.cross(Vector3.UP).normalized()
+		if along.dot(away) < 0.0:
+			along = -along
+		dirs.append_array([along, (along + side).normalized(), side, (side - along).normalized(), -along])
+	else:
+		for k in range(1, 8):
+			dirs.append(away.rotated(Vector3.UP, k * PI / 4.0))
+	var map := body.get_world_3d().navigation_map
+	var best: Variant = null
+	var best_m := INF
+	for dir in dirs:
+		if side != Vector3.ZERO and dir.dot(side) < -0.01:
+			continue
+		var p := NavigationServer3D.map_get_closest_point(map, Vector3(at.x, from.y, at.z) + dir * reach)
+		if absf(p.y - from.y) > FLOOR_DY_M or _flat_between(p, at) < reach - CHARGE_CLEAR_PAST_M or _in_any_blast(mine, p):
+			continue
+		if side != Vector3.ZERO and (p - at).dot(side) < 0.1:
+			continue  # never through the wall
+		var path := NavigationServer3D.map_get_path(map, from, p, true)
+		if path.is_empty() or _flat_between(path[path.size() - 1], p) > 0.5:
+			continue
+		var m := _flat_between(from, path[0])
+		for i in range(1, path.size()):
+			m += path[i - 1].distance_to(path[i])
+		if m <= _flat_between(from, p) * CHARGE_DETOUR_SHARE + CHARGE_DETOUR_M and m < best_m:
+			best = p
+			best_m = m
+	return best
 
 
 # --- Steering -------------------------------------------------------------
