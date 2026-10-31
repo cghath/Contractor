@@ -123,6 +123,17 @@ const SLOT_STACK_M := 1.5
 const TRAIL_STEP_M := 1.0
 const TRAIL_MAX := 90
 const TRAIL_JUMP_M := 6.0
+## The trail never doubles back on itself (F-400): the lead coming back within TRAIL_LOOP_M of
+## a point he walked (out to a dead end and back, round a block to where he was) cuts the loop
+## from that point on, so the trail lies on the ground once. A doubled-back trail lay over itself,
+## and _refit's trail picks (each kept SLOT_APART_MULT apart from the others) could leap along it: a
+## point on the way back is as close to a slot on the way out as to its neighbours, so a pick
+## searched on past the whole loop, and came back when that cleared. casualty's soak walks
+## (0, 0) -> (0, -8) -> (0, 2); a man far behind ran 20 m out and back in 8 s, ending where he
+## began ("stuck"; CI 41220310370, R0781). The last TRAIL_LOOP_SKIP points (the last few
+## metres) are always that close and never count. Proposed numbers.
+const TRAIL_LOOP_M := 1.5
+const TRAIL_LOOP_SKIP := 3
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -1865,7 +1876,8 @@ static func _near_any(p: Vector3, points: Array[Vector3], within: float) -> bool
 	return false
 
 
-## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX).
+## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX), with
+## any loop he walks cut out (TRAIL_LOOP_M).
 func _update_trail() -> void:
 	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
 		return
@@ -1877,6 +1889,11 @@ func _update_trail() -> void:
 			_trail.clear()
 		elif d < TRAIL_STEP_M:
 			return
+	for i in range(_trail.size() - TRAIL_LOOP_SKIP):
+		var p := _trail[i]
+		if _flat(p, at) < TRAIL_LOOP_M and absf(p.y - at.y) < TRAIL_LOOP_M:
+			_trail.resize(i)  # back where he was: the loop since goes
+			break
 	_trail.append(at)
 	if _trail.size() > TRAIL_MAX:
 		_trail.remove_at(0)

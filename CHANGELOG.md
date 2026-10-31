@@ -26,10 +26,14 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 #### Changed
 - **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet
   planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
-  carried, so where a downed body lies and where it is reached are unchanged.
-  The pelvis box stays on the target pose's root while the legs' follow the drawn root: posing it
-  from the drawn root too (review) failed casualty's "nobody got stuck on the way" in three of
-  four runs, so it's left (F-374).
+  carried, so where a downed body lies and where it is reached are unchanged. The pelvis box
+  follows the same drawn root, so the thighs' boxes hang from it (F-374, Captain: "yes, fix
+  followers").
+- **The squad's trail of the lead cuts out any loop he walks** (F-400): coming back within 1.5 m of
+  where he walked (out to a dead end and back), everything since goes, so the trail lies on the
+  ground once. A slot picked back along a doubled-back trail could leap past the doubled part and
+  back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck; it was why
+  the pelvis change looked like it broke followers).
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -40,7 +44,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   cleared once the vault had eased all the way out, so a climb started before then kept the old
   spot. It's cleared as each climb starts (`CharacterModel._was_climbing`).
 - **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
-  box ignores the drawn thigh (it lies as the body does). Local R0770 (smoke, weapons, animations,
+  box ignores the drawn thigh (it lies as the body does), that an up body is never "carried", and
+  that an up body carrying someone keeps the carry pose's boxes too (the carry guard on its own).
+  casualty's stuck line prints the man's slot each second and his refit pick. Local R0770 (smoke, weapons, animations,
   Looting and the vault checks among them), R0774 (wounds, medical), and without the pelvis
   change R0782 (casualty) and R0783 (smoke, weapons, animations) PASS.
 

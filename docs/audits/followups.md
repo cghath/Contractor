@@ -1801,17 +1801,44 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
-## F-374 (open): the pelvis hitbox and the legs' boxes hang from different roots
+### F-374 (fixed, F-400): the pelvis hitbox and the legs' boxes hang from different roots
 Since feat/vault-legs-svd the legs' hitboxes follow the legs as drawn (`CharacterModel.pose_hitboxes`,
 from the drawn `_root`: the landing's sink, the hips settled over the feet on a slope or step),
-while the pelvis, torso and head boxes follow the target pose's root, so at the hip the thigh
-boxes can sit a few cm off the pelvis box. Posing the pelvis from the drawn root too (review of
+while the pelvis, torso and head boxes followed the target pose's root, so at the hip the thigh
+boxes could sit a few cm off the pelvis box. Posing the pelvis from the drawn root too (review of
 that branch) kept weapons, animations, wounds and medical green (R0770, R0774), but casualty's
 "nobody got stuck on the way" failed in three of four runs with it (CI 41220310370, attempts 1 and
-2; local R0781: a follower running a loop near the lead, not mantling, touching nothing; it passed
-on the PR run 41220315144) and passed without it (R0782). How a pelvis Area3D moves a follower's path isn't known (something in the
-AI reading hitbox areas: the friendly-in-the-line checks or spacing are the guesses), so it's left
-on the target root until that's understood.
+2; local R0781; it passed on the PR run 41220315144) and passed without it (R0782).
+Captain, 2026-10-31: "yes, fix followers". The pelvis is on the drawn root again (while the legs'
+boxes follow the drawn legs: up and in no carry state). No path from a hitbox to a follower was
+found (F-400 has the search); the failing man in all three runs was running a loop, not stuck,
+and that's fixed in the squad's trail (F-400).
+
+### F-400 (fixed): a follower far behind ran loops on the lead's doubled-back trail
+Found on feat/vault-legs-svd (2026-10-31) chasing F-374. Location: [squad.gd](../../scripts/ai/squad.gd)
+`_update_trail`, read by `_refit`'s trail picks and the team place's fallback.
+
+The hitboxes can't reach a follower's path: every one sits alone on layer 2 ("hitboxes", monitoring
+off, mask 0, the soldier.tscn Areas being the only nodes with a "body_part" meta); the soldier's own
+capsule is on 16 with mask 17, and no movement, step-up, mantle, room or vault probe, squad wall ray,
+navigation bake or AI line check has layer 2 in its mask or `collide_with_areas` set (those that do
+are rounds, blasts, throws, blood drops, the player's pick/tag rays and the command menu). Nothing in
+the AI reads the pelvis box's place (aim_point and body_point use the chest). The run's real time was
+the same either way (93 s for 257 s simulated, R0781 and R0782).
+
+What the three failures were: a follower far behind (Charlie in R0781, Foxtrot and Golf on CI) ran
+about 20 m through the compound in the check's 8 s window, at up to 5.6 m/s and turning faster than
+the 3 m/s lead walks, and ended within 0.6 m of where the window began, so the check (net movement)
+called him stuck: his slot had jumped and jumped back. His slot each time lay on the lead's trail
+through the compound, 25-37 m back along it (Golf's at (-0.55, -6.0) with the lead at (7.7, 23.9)),
+where a `_refit` trail pick puts it, and the soak's route walks out and back over itself ((0, 0) -> (0, -8) ->
+(0, 2), and on through the north gate). A doubled-back trail lies over itself, so a trail point on
+the way back is about as close to a slot on the way out as its neighbours are, and a pick that must
+keep SLOT_APART_MULT of the gap from every other slot searches on past the whole doubled section; when that clears
+it comes back. Fix: the trail cuts any loop the lead walks (`TRAIL_LOOP_M`: back within 1.5 m of a
+point, everything since goes; the last 3 points never count), so it lies on the ground once. The
+soak's stuck line now prints the man's slot each second and his refit pick, so a recurrence says
+which slot logic moved.
 
 ## Calls made for the Captain
 
@@ -2143,6 +2170,10 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | feat/vault-legs-svd: townperf's breach-and-seam red on CI 41186733348 (same wall as the local pass R0746, rebaked (1, 1)) read as a test race, not the merge: a fight's rebake started before the carves counted as the breach's own and ended the wait before BREACH_CHECK_S reported the breach; the test now counts only rebakes after VoxelWorld.breached (tests/townperf_test.gd only) | the diff feeds nothing into the nav bake; 45 rebakes run during the fight | rerun until green and leave the race in
 2026-10-31 | feat/vault-legs-svd: the vault hand plant (review minor) goes on the support hand, not always the left: the right for a left-handed shooter holding a weapon (CharacterModel's own lefty rule, `left_handed and _held_weapon`), mirrored to that side; animations gets a left-handed vault check | the left hand is a left-hander's firing hand, so the gun came off the grip, and CLAUDE.md names left-handed settings as a known hazard | leave it as a review note
 2026-10-31 | vault legs (review): the pelvis hitbox stays on the target pose's root (the legs' boxes on the drawn root), the mismatch logged as F-374 | posing it from the drawn root kept weapons, animations, wounds and medical green (R0770, R0774) but casualty's "nobody got stuck on the way" failed in three of four runs with it (CI 41220310370 twice, R0781; passed on the PR run 41220315144) and passed without it (R0782) | keep it and call casualty a flake
+Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the drawn hips and find why casualty's soak broke with it)
+2026-10-31 | vault legs: the pelvis hitbox goes on the drawn root (with the legs' boxes: up, in no carry state), as Captain said | no path from a hitbox Area to a follower's movement or path exists (F-400 lists what was searched); the soak's failures were a man running loops after a jumping slot | keep it on the target root
+2026-10-31 | squad trail (F-400): the lead's trail cuts any loop he walks (back within TRAIL_LOOP_M 1.5 m of a point, Proposed; the last TRAIL_LOOP_SKIP 3 points never count) | a doubled-back trail lies over itself, so _refit's trail picks (kept SLOT_APART_MULT of the gap from every slot) could leap past the doubled section and back; the three failing soak runs were each a man far behind running a 20 m loop | widen casualty's stuck check to ignore loops (it would hide the wobble, not fix it)
+2026-10-31 | weapons' leg-box check: the carried half stays downed (a carried body is always downed: _carry_state drops CARRIED/DRAGGED otherwise, now checked) and the carry guard is tested on its own with an up body carrying someone (CARRY) | setting downed false with CARRIED would only test that _carry_state drops it | leave a note only
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
