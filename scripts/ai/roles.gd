@@ -203,9 +203,12 @@ static func assign(choices: Array, current: Array = [], current_roles: Array = [
 						best = s
 				if best >= 0:
 					break
-			if best < 0:  # only medic slots left (more players than slots allow)
+			# Only medic slots left (more players than slots allow). Last pass only: an avoided
+			# slot of their own role, or an avoided non-medic slot, comes before a standing
+			# medic's slot, so every team keeps its medic (roles.json).
+			if best < 0 and pass_ == 1:
 				for s in slots.size():
-					if not taken[s] and not off.has(s):
+					if not taken[s]:
 						best = s
 						break
 			if best < 0:

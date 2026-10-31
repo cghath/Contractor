@@ -149,6 +149,10 @@ func _test_assignment() -> void:
 	check(kept_down.slots[0] == 7, "a player keeps their own slot whatever the avoid list says")
 	var last_resort := Roles.assign([&"rifleman"], [], [], [0, 1, 2, 3, 4, 5, 6, 7])
 	check(last_resort.slots[0] == 6, "with every slot to avoid, the role's own slot as before (%s)" % [last_resort.slots])
+	var medic_spared := Roles.assign([&"team_leader", &"autorifleman", &"grenadier", &"rifleman"], [0, 1, 2, -1],
+		[&"team_leader", &"autorifleman", &"grenadier", &""], [4, 5, 6])
+	check(medic_spared.slots[3] == 6 and medic_spared.roles[3] == Roles.MEDIC and medic_spared.roles[7] == Roles.MEDIC,
+		"a rifleman joining with every other non-medic slot taken or down takes the downed rifleman's slot, never a standing medic's (%s)" % [medic_spared.slots])
 
 
 func _test_menu_picker() -> void:

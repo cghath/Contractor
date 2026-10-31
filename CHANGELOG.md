@@ -29,6 +29,9 @@ fixed. Calls and follow-ups F-331 to F-333 in docs/audits/followups.md.
   takes slots to avoid (`rebalance_squad` passes the downed AI's), taken only when nothing else
   fits. A medic joining while his team's medic is down takes the other medic slot (or a rifleman's
   as medic) instead of making the casualty vanish from under whoever treats or carries him.
+  A joiner never takes a standing medic's slot to spare a downed man's: the "only medic slots
+  left" fallback waits for the last pass, so a rifleman joining with every other non-medic slot
+  taken or down takes the downed rifleman's slot and both medics stay (review fix, roles_test).
 - **Fixed (campaign):** a player leaving a plain session kept their profile in BaseHub, so they
   came back as `<profile>_2`, and in a campaign hosted later in the same run as a new main
   character without their gear. Profiles are forgotten on leaving and on each new host.
