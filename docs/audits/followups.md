@@ -1828,7 +1828,12 @@ data blocks ... put in empty` line; a block lost after stamping began restarts t
 area runs out to whole mesh blocks and the voxel the mesher reads round them, so a missing block
 next to the structures can't hold back their meshes and collision either. The world suite checks a
 build whose terrain never loads anything (loading turned off) builds, its wall solid. Local R0742,
-R0744 (perfcases city, all 20 blocks in at 23 s, no fill needed locally), R0745; CI below.
+R0744 (perfcases city, all 20 blocks in at 23 s, no fill needed locally), R0745. CI: perfcases green
+three times on the same code (41186841331 at 3b7abd7, 41191078478 at 60e0f8d and its perfcases rerun
+41192039297), all 20 city blocks built each time (12 waited for in 31, 33 and 29 s) and the fill never
+needed; before, 6 of 13 runs lost a block (about one chance in six of three clean runs by luck), so
+the fill line is still to be seen on CI. If a block stalls again with "area loaded" in its note, it's
+not the area and F-303 reopens.
 
 ### F-304 (note): the city's navigation never "settles" on CI
 The city case waits for its blocks and `ZoneNav.is_settled()`; on CI it reported "still baking (0

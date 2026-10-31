@@ -32,6 +32,9 @@ busy city: a block standing as its proxy for good, its garrison never spawned.
   counts the data blocks not loaded and the ones the build put in. Perfcases prints both, and the
   blocks it doesn't wait for that are still not ready. World: a build whose terrain never loads
   anything puts its blocks in and builds, its wall solid.
+- Runs: local R0742 (smoke, world), R0744 (perfcases city, city, virtualization), R0745 (townperf),
+  all PASS; CI perfcases green on 41186841331, 41191078478 and 41192039297, all 20 blocks built each
+  time (the fill wasn't needed on those runs, F-303).
 
 ### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
 
