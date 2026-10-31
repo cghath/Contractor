@@ -20,7 +20,10 @@ every path and these were the leaks still open.
 - **Added (tests):** `awareness` (tests/awareness_test.gd, in run_tests.sh's default list and CI):
   the squad still behind the compound's wall by its garrison for 20 s, out of every line (checked),
   and nobody there or anywhere in the zone learns of them (awareness, targets, suspicions, threats,
-  every squad's picture, the alert); footsteps through the wall carry only as far as G-29 allows;
+  every squad's picture, the alert); footsteps through the wall carry only as far as G-29 allows
+  (a listener of the test's own just inside the wall: in plain footstep reach but past the muffled
+  one he must not hear him, within it he must, so the check fails with the muffle gone or with
+  footsteps never crossing a wall; the garrison alone stood too far off to test it);
   one of them seen, only the compound stands to and the zone and other squads hear of it by radio
   after the report delay, only squads within Alert.NET_SHARE_M, x3 with the mast down, never if
   the reporter is cut down first; a suppressed shot behind the wall; a recon drone.
@@ -35,7 +38,9 @@ every path and these were the leaks still open.
   follows only what each area has reported (F-361).
 - **Fixed (AI):** the enemy's recon drone flew straight to the squad wherever it was and saw it
   through roofs: it flies to where the net last heard of the squad, follows only those it has a
-  clear line to, and keeps to where it last saw them for 30 s (F-362).
+  clear line to, and keeps to where it last saw them for 30 s (F-362). It flies straight there and
+  then circles by its own flying time, not the wall clock (a test flying it in one go held a single
+  point on the circle, and on CI a hill or house there hid the squad: missions "0 reports").
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

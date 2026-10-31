@@ -265,33 +265,85 @@ func _test_hidden(post: GarrisonPost) -> void:
 
 
 ## G-29: walking there, he's heard through the wall only as close as footsteps carry through one.
+## The garrison stands further off than plain footstep reach (R0767: none within 12 m), so a
+## listener of the test's own (a hostile in a squad of his own, standing still) is put just inside
+## the wall: first in plain reach but beyond the muffled one, where he must not hear him; then
+## within the muffled reach, where he must. So the check fails with the muffle gone, and with
+## footsteps never carrying through a wall.
 func _test_footsteps() -> void:
 	print("Footsteps through the wall")
 	var reach := Spotting.STEPS_WALK_M * DayNight.hearing_x()
 	var muffled := reach * SquadAI.WALL_STEPS_MULT
 	var world := player.get_world_3d()
+	var sq := Squad.new()
+	sq.name = "Listener"
+	sq.faction = &"hostile"
+	sq.patrol = []
+	level.add_child(sq)
+	var ear := level.spawn_soldier({"name": "Listener0", "faction": "hostile", "variant": "urban",
+		"pos": level.ground_point(m.global_position), "loadout": ["akm", "mag_762"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	ear.set_physics_process(false)  # he stands where he's put
+	var ear_ai := SquadAI.of(ear)
+	ear_ai.squad = sq
+	ear_ai.hold_fire = true
+	await get_tree().physics_frame
+	var far: Variant = await _place_behind_wall(ear, muffled + 1.2, reach - 1.2)
+	check(far != null, "a listener inside the wall, %.1f-%.1f m from him, with no line to him (%s m)" % [muffled + 1.2, reach - 1.2, far])
 	player.velocity = along * (Spotting.WALK_MPS + 1.0)  # walking (its physics is off: he stays put)
 	var band := {}  # in plain reach but behind the wall: must not hear
 	var heard_far: Array[String] = []
 	var deadline := Time.get_ticks_msec() + 6000
-	while Time.get_ticks_msec() < deadline:
+	while far != null and Time.get_ticks_msec() < deadline:
 		await get_tree().create_timer(0.5).timeout
 		for h in _hostiles():
 			var d := h.global_position.distance_to(player.global_position)
-			var lined := Throwables.clear_line(world, h.camera.global_position, player.aim_point())
+			var lined := Throwables.clear_line(world, h.camera.global_position, player.aim_point()) or SquadAI.of(h).can_see(player)
 			if lined or d <= muffled + 0.5:
 				continue
 			if d <= reach:
 				band[h.name] = true
 			if float(SquadAI.of(h)._aware.get(player.get_instance_id(), 0.0)) > 0.0 and heard_far.size() < 4:
 				heard_far.append("%s at %.1f m" % [h.name, d])
+	check(band.has(ear.name) and heard_far.is_empty(), "walking behind the wall: nobody further than %.1f m hears him through it (%d within %.1f-%.0f m of him, behind the wall: %s; %s)" \
+		% [muffled, band.size(), muffled, reach, ", ".join(band.keys()), ", ".join(heard_far) if not heard_far.is_empty() else "none heard"])
+	var near: Variant = await _place_behind_wall(ear, 1.5, muffled - 1.0)
+	var heard := false
+	if near != null:
+		heard = await _wait_for(func() -> bool: return float(ear_ai._aware.get(player.get_instance_id(), 0.0)) > 0.0, 6.0)
+	check(near != null and heard, "but within %.1f m, still behind the wall, he's heard (the listener %s m off, %s)" \
+		% [muffled, near, "heard him" if heard else "heard nothing"])
 	player.velocity = Vector3.ZERO
-	check(heard_far.is_empty(), "walking behind the wall: nobody further than %.1f m hears him through it (%d of the garrison within %.0f m, behind the wall; %s)" \
-		% [muffled, band.size(), reach, ", ".join(heard_far) if not heard_far.is_empty() else "none heard"])
+	ear.queue_free()
+	sq.queue_free()
+	await get_tree().physics_frame
 	for h in _hostiles():  # (whoever heard him close by forgets, for what follows)
 		SquadAI.of(h)._aware.erase(player.get_instance_id())
 		if SquadAI.of(h).squad:
 			SquadAI.of(h).squad.known.erase(player.get_instance_id())
+
+
+## Puts `h` just inside the compound's wall, `lo`-`hi` m from the player, on level ground with the
+## wall between them (no clear ray eye to chest, and SquadAI.can_see says no). How far off he
+## ended up, or null.
+func _place_behind_wall(h: Soldier, lo: float, hi: float) -> Variant:
+	var into := m.global_position - spot
+	into.y = 0.0
+	into = into.normalized()
+	var world := h.get_world_3d()
+	var ai := SquadAI.of(h)
+	for step: float in [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 2.0]:
+		for side: float in [0.0, 2.0, -2.0, 4.0, -4.0, 6.0, -6.0]:
+			var p := level.ground_point(player.global_position + into * step + along * side)
+			var d := p.distance_to(player.global_position)
+			if d < lo or d > hi or absf(p.y - player.global_position.y) > 0.8:
+				continue
+			h.global_position = p
+			h.velocity = Vector3.ZERO
+			await get_tree().physics_frame
+			if not Throwables.clear_line(world, h.camera.global_position, player.aim_point()) and not ai.can_see(player):
+				ai._aware.erase(player.get_instance_id())
+				return snappedf(h.global_position.distance_to(player.global_position), 0.1)
+	return null
 
 
 ## One of them seen: the compound stands to; the zone hears of it by radio only.
@@ -462,18 +514,23 @@ func _test_drone() -> void:
 		"one steps out into the open: it reports him, one man seen (%s)" % (got[-1] if not got.is_empty() else "none"))
 	drones.drones.erase(id)
 	# Told of them somewhere else, it searches there, not over the squad (back under the roof: a
-	# drone passing over that saw him would rightly stay with him).
+	# drone passing over that saw him would rightly stay with him, so it comes up beyond that spot).
+	# The spot is well away from the rest of the squad, parked out in the open at (300, 300+): it
+	# was 65 m from them, the drone rightly found them there and circled them, and how near the spot
+	# that left it hung on the orbit's angle (CI run 41219512393: 126 m, a fail; R0767: 44 m).
 	player.global_position = m.to_global(inside[0] + Vector3.UP * 0.05)
-	var away := level.ground_point(m.global_position + Vector3(350, 0, 350))
+	var away := level.ground_point(m.global_position + Vector3(-350, 0, 350))
 	alert.lkp = {"pos": away, "time": alert.now()}
-	var id2 := drones.server_launch(m.global_position + Vector3(-200, 0, 0))
+	var id2 := drones.server_launch(m.global_position + Vector3(-600, 0, 350))
+	var saw := false
 	for k in 60:
 		drones.server_fly(id2, 1.0)
+		saw = saw or not (drones.drones[id2].get("seen", []) as Array).is_empty()
 	var d2: Dictionary = drones.drones[id2]
 	var to_lkp := Vector2(d2.pos.x - away.x, d2.pos.z - away.z).length()
 	var to_squad := Vector2(d2.pos.x - player.global_position.x, d2.pos.z - player.global_position.z).length()
-	check(to_lkp <= EnemyDrones.ORBIT_M + 20.0 and to_squad > EnemyDrones.SEE_M,
-		"sent with a last known position 500 m off, it circles there (%.0f m from it), not over the squad (%.0f m)" % [to_lkp, to_squad])
+	check(to_lkp <= EnemyDrones.ORBIT_M + 20.0 and to_squad > EnemyDrones.SEE_M and not saw,
+		"sent with a last known position 500 m off, it circles there (%.0f m from it), not over the squad (%.0f m; saw them: %s)" % [to_lkp, to_squad, saw])
 	drones.drones.erase(id2)
 
 

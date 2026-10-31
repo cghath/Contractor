@@ -2129,6 +2129,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | AI awareness (F-361): the zone follows each area's reported ("net") state; an area still stands to at once on what its own men perceive | news travels by radio only (Alert's own rule) | dropping local stand-tos
 2026-10-31 | AI awareness (F-362): a recon drone flies to Alert's last known position, follows only men it has a line to (looks every 1 s, LOOK_S), keeps to where it last saw them 30 s (FIX_KEEP_S), Proposed; with nothing known it hangs over home | no homing on the squad | flying to the squad as before
 2026-10-31 | AI awareness: vehicles blocking sight (F-363) and the two in-fight true-position counts (F-364) left open, not fixed in fix/ai-awareness-walls | each touches vehicle or garrison suites beyond the task | fixing them in the same branch
+2026-10-31 | AI awareness (F-362 follow-up): a recon drone flies straight to the point it searches and only circles it once within ORBIT_M + 15 m (STATION_M, Proposed), its angle by its own flying time, not the wall clock | the same flight every time, in tests flown in one go too (CI run 41219512393 held one blocked point: "0 reports") | the wall-clock angle, or a looser test
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2190,7 +2191,9 @@ squad was read again on dev 54ccc3d and checked by the new `awareness` suite
 (tests/awareness_test.gd). Already right, with the check that shows it: sight (SquadAI.can_see is
 one ray, eyes to the chest, on layer 1: voxel walls, building shells, props and the module proxies
 all block it; smoke too; night and NVGs go through Spotting) and footsteps through a wall (G-29):
-awareness "hidden" and "footsteps"; a garrison's site squad keeps what it knows to itself, and the
+awareness "hidden" and "footsteps" (a hostile of the test's own put inside the wall, first past the
+muffled reach where he must not hear, then within it where he must: the garrison alone stood
+beyond footstep reach, so the first version of that check proved nothing); a garrison's site squad keeps what it knows to itself, and the
 zone and other squads learn of a contact only by Alert's report, after its delay, x3 with the mast
 down, never if the reporter dies first, and only squads within NET_SHARE_M (awareness "seen");
 incoming fire (G-03) and heard shots (G-28): squad_test; bodies (Alert._scan_bodies needs a line);
@@ -2220,7 +2223,10 @@ alarm) the moment any other report, say a shot in the field, reached the net. Ea
 `EnemyDrones` flew each drone to the squad's true centre and reported anyone within SEE_M, roof or
 not. It flies to Alert's last known position, follows only men it has a clear line to (every
 LOOK_S), and keeps to where it last saw them for FIX_KEEP_S (both Proposed). missions_test's drone
-check now gives the net a fix by the player first.
+check now gives the net a fix by the player first. Its orbit went by the wall clock, so a test
+flying 40 steps at once held one point on the circle, and on CI (run 41219512393) a line from that
+point to the player was blocked: "0 reports". It now flies straight to the point and, once within
+ORBIT_M + STATION_M (15 m, Proposed), circles it by its own flying time.
 
 ### F-363 (open): vehicles don't block the AI's sight
 `can_see`, `Squad.sees` and `Throwables.clear_line` look on layer 1 only; a live vehicle is on

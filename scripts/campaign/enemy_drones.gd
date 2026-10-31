@@ -35,12 +35,15 @@ const SYNC_S := 0.2
 ## How often (s) a drone looks for the squad, and how long it keeps to where it last saw one.
 const LOOK_S := 1.0
 const FIX_KEEP_S := 30.0
+## Within ORBIT_M + this of where it searches it's on station and starts to circle (Proposed).
+const STATION_M := 15.0
 
 ## Tests and dev tools: false stops launches (server_launch still works).
 static var enabled := true
 ## Host: id -> {"pos": Vector3, "home": Vector3, "launched", "hits", "state" ("out", "home",
 ## "falling", "gone"), "next_report", "seen_once", "body": StaticBody3D, and once it has looked:
-## "look_in", "seen" (the squad it has in sight), "fix" (where it last saw them), "fix_age"}.
+## "look_in", "seen" (the squad it has in sight), "fix" (where it last saw them), "fix_age",
+## "orbit" (its angle round the point it searches, radians)}.
 var drones := {}
 ## Every peer: id -> its visual.
 var _shown := {}
@@ -152,7 +155,12 @@ func server_fly(id: int, delta: float) -> void:
 				_search(d, pos, squad, delta)
 				var c := _search_point(d, level)
 				if c.is_finite():
-					var a := Soldier._now() * SPEED_MS / ORBIT_M + id
+					# Straight there, then round it at its own pace, by its own flying time (it went
+					# by the wall clock, so steps flown at once all aimed at one point on the circle,
+					# and from there a hill or a house could hide the squad for good).
+					var on_station := Vector2(pos.x - c.x, pos.z - c.z).length() <= ORBIT_M + STATION_M
+					d.orbit = float(d.get("orbit", id)) + (SPEED_MS / ORBIT_M * delta if on_station else 0.0)
+					var a := float(d.orbit)
 					goal = _air(c + Vector3(cos(a), 0.0, sin(a)) * ORBIT_M)
 			var to := goal - pos
 			pos += to.normalized() * minf(to.length(), SPEED_MS * delta) if to.length() > 0.01 else Vector3.ZERO
@@ -177,7 +185,8 @@ func _search(d: Dictionary, pos: Vector3, squad: Array[Soldier], delta: float) -
 	var seen: Array[Soldier] = []
 	var sum := Vector3.ZERO
 	for s: Soldier in squad:
-		if Vector2(s.global_position.x - pos.x, s.global_position.z - pos.z).length() <= SEE_M 				and Throwables.clear_line(s.get_world_3d(), pos, s.aim_point()):
+		if Vector2(s.global_position.x - pos.x, s.global_position.z - pos.z).length() <= SEE_M \
+				and Throwables.clear_line(s.get_world_3d(), pos, s.aim_point()):
 			seen.append(s)
 			sum += s.global_position
 	d.seen = seen
