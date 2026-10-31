@@ -95,7 +95,7 @@ const RIDE_ARRIVE_M := 15.0
 ## At most this long spawning a frame (PeopleLayer's budget); at least one man a frame.
 const SPAWN_BUDGET_MS := 4.0
 ## Metas that aren't the man's own (the brain's, the sleep's).
-const DROP_META: Array[StringName] = [&"start_gear", &"start_states", &"sim_settle", &"sim_brain_off"]
+const DROP_META: Array[StringName] = [&"start_gear", &"start_states", &"sim_settle", &"sim_brain_off", &"sim_asleep"]
 const SIDE_KINDS: Array[String] = ["patrol", "roam", "hunters", "pair", "qrf", "task_force", "probe", "skirmish", "garrison", "withdraw", "allied"]
 
 ## Tests: false and nothing goes virtual or comes back by itself (server_virtualize, server_wake

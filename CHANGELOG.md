@@ -11,6 +11,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### DynamicSim wakes only its own sleepers (fix/dynamicsim-sleepers, from Fallen's #45)
+
+- **Fixed** the far-AI sleep (DynamicSim) switched any switched-off AI soldier near a player back on within its one-second tick, not only the ones it had put to sleep; it now marks its own ("sim_asleep", which the virtualizer's snap drops like its other metas) and wakes only those. Brought over unchanged from Fallen's #45 (fix/fallen-flakes, b4c0e5d5), where it was survival's silent-kill flake, at Captain's yes (2026-10-31). It only matters for code that switches soldiers off (the tests holding a man still with `process_mode`), not play: nothing in the game switches a soldier off but DynamicSim (F-380).
+- **Added (tests):** virtualization checks that a man near a player switched off by the test stays off across three DynamicSim ticks, that DynamicSim's own sleepers still wake as a player comes near, and that a sleeper that goes virtual comes back without the mark.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

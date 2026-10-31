@@ -5,7 +5,8 @@ extends Node
 ## profiles at war fight off-screen and leave real bodies; nothing comes back where a player can
 ## see it (except inside FORCE_M); the high command, the spawn budget, the alert's check-ins and
 ## the garrison counts still count virtual men; a garrison goes virtual at its posts when its module
-## streams out and comes back with it; and the zone save keeps every profile and gives them back.
+## streams out and comes back with it; the zone save keeps every profile and gives them back; and
+## DynamicSim wakes only the men it put to sleep, which come back from a profile without its mark.
 ##   <voxel godot exe> --headless --path . res://tests/virtualization_test.tscn
 ## Exits with the number of failures.
 
@@ -63,6 +64,7 @@ func _ready() -> void:
 	await _test_capacity()
 	await _test_rides()
 	await _test_allied_and_caps()
+	await _test_dynamic_sim_sleepers()
 	_finish()
 
 
@@ -710,3 +712,88 @@ func _test_allied_and_caps() -> void:
 	bzs.queue_free()
 	_drop(far)
 	await _frames(2)
+
+
+# --- DynamicSim's own sleepers (F-380, from Fallen's #45) --------------------------------------
+
+## DynamicSim wakes only the men it put to sleep (DynamicSim.SLEEP_META): one switched off by
+## anything else (a test holding him still) stays off however near a player is, one it put to sleep
+## still wakes as a player comes near, and a sleeper that goes virtual comes back without the mark
+## (Virtualizer.DROP_META). DynamicSim's own tick is held and driven by hand.
+func _test_dynamic_sim_sleepers() -> void:
+	print("DynamicSim: only its own sleepers wake")
+	var sim := DynamicSim.of(level)
+	check(sim != null, "a zone has its DynamicSim")
+	if sim == null:
+		return
+	var sim_mode := sim.process_mode
+	sim.process_mode = Node.PROCESS_MODE_DISABLED
+	var home := level.insertion_points()[0]
+	_put_player(home)
+	# A man near the player, switched off by the test: not DynamicSim's to wake.
+	var held_team := _team(1, _away(40.0, 1.1))
+	var held := held_team.soldiers[0] as Soldier
+	held.process_mode = Node.PROCESS_MODE_DISABLED
+	for k in 3:
+		sim.server_tick()
+		await _frames(2)
+	check(held.process_mode == Node.PROCESS_MODE_DISABLED and not held.has_meta(DynamicSim.SLEEP_META),
+		"a man %.0f m from a player, switched off by something else, stays off across 3 DynamicSim ticks (F-380)" % Virtualizer._flat(held.global_position, player.global_position))
+	_drop(held_team)
+	# A team far from every player: DynamicSim settles it, then puts it to sleep (marked).
+	var team := _team(2, _away(DynamicSim.SLEEP_M + 250.0, 2.3))
+	await _frames(10)
+	var slept := await _sim_until(sim, team, true, 8.0)
+	var s0 := team.soldiers[0] as Soldier
+	check(slept, "far from every player DynamicSim puts the team to sleep and marks it (%s)" % _sim_state(team))
+	# A player comes near: the sleepers wake.
+	_put_player(s0.global_position + Vector3(60.0, 0.0, 0.0))
+	sim.server_tick()
+	check(_sim_done(team, false),
+		"a player comes within %.0f m: DynamicSim's own sleepers wake, the mark gone (%s)" % [DynamicSim.WAKE_M, _sim_state(team)])
+	# Asleep again, it goes virtual and comes back: without DynamicSim's mark, awake.
+	_put_player(home)
+	slept = await _sim_until(sim, team, true, 8.0)
+	check(slept and v.server_virtualize(team, true), "asleep again (%s), the team goes virtual" % _sim_state(team))
+	await _wake(team)
+	check(_sim_done(team, false),
+		"back from the profile, its men don't carry %s (Virtualizer.DROP_META) and are awake (%s)" % [DynamicSim.SLEEP_META, _sim_state(team)])
+	_drop(team)
+	_put_player(home)
+	sim.process_mode = sim_mode
+	await _frames(2)
+
+
+## DynamicSim ticked by hand every half second until every man of `record` is asleep and marked
+## (`asleep`) or awake and unmarked, at most `seconds`.
+func _sim_until(sim: DynamicSim, record: Dictionary, asleep: bool, seconds: float) -> bool:
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000)
+	while not _sim_done(record, asleep) and Time.get_ticks_msec() < deadline:
+		sim.server_tick()
+		await get_tree().create_timer(0.5).timeout
+	return _sim_done(record, asleep)
+
+
+## Every man of `record` there, and asleep and marked (`asleep`) or awake and unmarked.
+func _sim_done(record: Dictionary, asleep: bool) -> bool:
+	if (record.soldiers as Array).is_empty():
+		return false
+	for s: Variant in record.soldiers:
+		if not is_instance_valid(s):
+			return false
+		var m := s as Soldier
+		if (m.process_mode == Node.PROCESS_MODE_DISABLED) != asleep or m.has_meta(DynamicSim.SLEEP_META) != asleep:
+			return false
+	return true
+
+
+## Each man of `record`: off or on, marked or not, settling, and how far from the player.
+func _sim_state(record: Dictionary) -> String:
+	var out: Array[String] = []
+	for s: Variant in record.soldiers:
+		if not is_instance_valid(s):
+			continue
+		var m := s as Soldier
+		out.append("%s %s%s%s %.0f m" % [m.name, "off" if m.process_mode == Node.PROCESS_MODE_DISABLED else "on", " marked" if m.has_meta(DynamicSim.SLEEP_META) else "",
+			" settling" if m.has_meta(DynamicSim.SETTLE_META) else "", Virtualizer._flat(m.global_position, player.global_position)])
+	return ", ".join(out)
