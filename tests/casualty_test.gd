@@ -768,6 +768,7 @@ func _test_soak() -> void:
 	_place(player, Vector3(0, 0.1, 22))
 	var squad := level.squad_for(&"friendly")
 	var history := {}  # name -> Array of positions, one per simulated second
+	var slots_seen := {}  # name -> Array of his slots (follow_point), one per simulated second
 	var stuck := {}
 	var fell := {}
 	var died := {}
@@ -794,6 +795,9 @@ func _test_soak() -> void:
 			var list: Array = history.get(who, [])
 			list.append(s.global_position)
 			history[who] = list
+			var slot_list: Array = slots_seen.get(who, [])
+			slot_list.append(squad.follow_point(s))
+			slots_seen[who] = slot_list
 			var far := _flat(s.global_position, squad.follow_point(s))
 			worst[who] = maxf(float(worst.get(who, 0.0)), far)
 			# A man standing at the place a follow-in clear gives him (Squad._tick_follow_in: the lead
@@ -813,7 +817,8 @@ func _test_soak() -> void:
 					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])] \
 					+ "; on floor %s, holding %s, mantling %s, stance %d, up %s, busy %.1f s, facing %.0f deg, touching %s" % [s.is_on_floor(), s.movement.holding,
 					s.movement.mantling, s.movement.stance, s.vitals.is_up(), s._busy_until - Soldier._now(), rad_to_deg(s.rotation.y),
-					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))]
+					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))] 					+ "; slots %s, refit %s" % [(slots_seen[who] as Array).slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z]),
+					squad._refits.get(s.get_instance_id(), {})]
 	var walked := _sim_s
 	await _seconds(12.0)  # let them settle in formation at the end
 	var settled := _squad().filter(func(s: Soldier) -> bool: return _flat(s.global_position, squad.follow_point(s)) > 4.0)
