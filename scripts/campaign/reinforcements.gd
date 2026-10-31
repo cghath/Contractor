@@ -3,12 +3,17 @@ extends Node
 ## The reinforcement timer (repo, locked): it runs from the start of each contract, and the
 ## hostile response escalates the longer the squad stays. Waves of hostile fire teams walk
 ## in from beyond the map's edges, out of sight of the players, and hunt toward where the
-## players are; each wave comes sooner than the last and is bigger, up to a cap. There is no
-## timer on screen: players read it from the activity.
+## enemy last knew the players to be (Captain, 2026-10-31, F-365: the level's Alert's last known
+## position, as hot zones' waves do; it used to be where the players really were); each wave comes
+## sooner than the last and is bigger, up to a cap. There is no timer on screen: players read it
+## from the activity. With no last known position yet a wave walks in to the middle of the map and
+## searches round it (SEARCH_RING_M), and is pointed at the last known position once there is one.
+## A level with no Alert at all (the plain compound, the base, the ranges: no enemy picture to go
+## on) still sends its waves to the players.
 ##
 ## Host only (the soldiers it spawns replicate like any AI). The waves use the level's own
 ## spawning (spawn_soldier, the hostile loadout and SquadAI); each wave is a hostile Squad of
-## its own whose patrol route leads to the players.
+## its own whose patrol route leads to where it hunts (`_goal`).
 ##
 ## Tuning (all proposed), overridable per contract (Briefing contract "reinforcements"):
 ##   "first_wave_s": the first wave arrives this long after the start;
@@ -61,8 +66,12 @@ var scale := 1.0
 ## How many spots along the map's edges are tried for a wave; the one furthest from every
 ## player wins.
 const EDGE_TRIES := 24
-## Each wave's route is pointed at the players again this often (seconds).
+## Each wave's route is pointed at its goal again this often (seconds).
 const RETARGET_S := 30.0
+## A wave hunting a spot walks a ring this wide round it; one searching (no last known position
+## yet: the middle of the map) a wider one. Proposed.
+const RING_M := 12.0
+const SEARCH_RING_M := 40.0
 const PAIR_SPACING_M := 1.6
 ## A spawn or route point this close to the navigation mesh is moved onto it.
 const NAV_SNAP_M := 2.0
@@ -77,7 +86,8 @@ var params: Dictionary = DEFAULTS.duplicate()
 var waves: Array[Dictionary] = []
 ## Hot zones: waves come only from server_send, never on the timer.
 var driven := false
-## Where waves head (returns a Vector3, or Vector3.INF for "stay put"); unset: the players.
+## Where waves head (returns a Vector3, or Vector3.INF for "stay put"); unset: the level's
+## Alert's last known position (`_goal`).
 var aim := Callable()
 ## Driven waves: how long after it set out (by `clock`) a wave keeps being pointed at `aim`;
 ## after that it keeps its last route (holds round the last spot it was sent to). INF: always.
@@ -222,7 +232,9 @@ func _send_wave(index: int, origin := Vector3.INF, extra_pairs := 0, cap := -1, 
 	record.squad = squad
 	var loadout: Variant = level.get(&"HOSTILE_LOADOUT")
 	var soldiers: Array = []
-	var across := (Vector3(edge.x, 0, edge.z) - _players_centre(level)).normalized().cross(Vector3.UP)
+	var goal := _goal(level, target)
+	var toward: Vector3 = goal[0] if not goal.is_empty() else _map_centre(level)
+	var across := (Vector3(edge.x, 0, edge.z) - Vector3(toward.x, 0, toward.z)).normalized().cross(Vector3.UP)
 	for i in size:
 		var offset := across * PAIR_SPACING_M * (i - (size - 1) / 2.0)
 		var kit_id := Kits.kit_of(enemy_faction)  # Black Ridge's, Vantage's or a regional army's (wave 6b)
@@ -295,24 +307,41 @@ static func _perimeter_point(rect: Rect2, t: float) -> Vector2:
 	return Vector2(rect.position.x, rect.end.y - d)
 
 
-## A wave's patrol leads from where it came in to its aim (the players, or in a hot zone the
-## last known position) and round it.
+## A wave's patrol leads from where it came in to its goal (`_goal`) and round it.
 func _route(squad: Squad, level: Node, from: Vector3, target := Vector3.INF) -> void:
-	var centre := _players_centre(level)
-	if target.is_finite():
-		centre = target  # an objective's wave: it goes for the objective
-	elif aim.is_valid():
-		centre = aim.call()
-		if not centre.is_finite():
-			return  # nothing to go on: they keep the route they have
+	var goal := _goal(level, target)
+	if goal.is_empty():
+		return  # nothing to go on: they keep the route they have
+	var centre: Vector3 = goal[0]
 	var route: Array[Vector3] = []
 	var half := centre.lerp(from, 0.5)
 	route.append(_on_ground(half))
 	route.append(_on_ground(centre))
 	for k in 3:
 		var a := TAU * (k / 3.0) + randf() * 0.5
-		route.append(_on_ground(centre + Vector3(cos(a), 0.0, sin(a)) * 12.0))
+		route.append(_on_ground(centre + Vector3(cos(a), 0.0, sin(a)) * float(goal[1])))
 	squad.patrol = route
+
+
+## Where a wave hunts now, as [centre, ring (m)], or [] to keep the route it has:
+## - `target` (an objective's wave: MissionScenario's holds and rescues) whatever else is known;
+## - `aim` if set (a zone's EnemyResponse: the last known position; INF, nothing yet: keep it);
+## - else the level's Alert's last known position (F-365, Captain 2026-10-31: not where the players
+##   really are), or with none yet the middle of the map, searched round SEARCH_RING_M;
+## - a level with no Alert (no enemy picture at all): the players, as before.
+func _goal(level: Node, target := Vector3.INF) -> Array:
+	if target.is_finite():
+		return [target, RING_M]
+	if aim.is_valid():
+		var at: Vector3 = aim.call()
+		return [at, RING_M] if at.is_finite() else []
+	var alert := level.get_node_or_null(^"Alert") as Alert
+	if alert == null:
+		return [_players_centre(level), RING_M]
+	var lk := alert.last_known()
+	if lk.is_empty():
+		return [_map_centre(level), SEARCH_RING_M]
+	return [lk.pos as Vector3, RING_M]
 
 
 ## Host: `wave` waits at `point` (a push's rally point, EnemyResponse) instead of heading in;
@@ -359,12 +388,17 @@ func _retarget_waves() -> void:
 func _players_centre(level: Node) -> Vector3:
 	var players := MapNodes.players(self)
 	if players.is_empty():
-		var area: Rect2 = level.call(&"map_area")
-		return Vector3(area.get_center().x, 0.0, area.get_center().y)
+		return _map_centre(level)
 	var sum := Vector3.ZERO
 	for p in players:
 		sum += p.global_position
 	return sum / players.size()
+
+
+## The middle of the level's map area (on the ground's datum: _on_ground puts it down).
+func _map_centre(level: Node) -> Vector3:
+	var area: Rect2 = level.call(&"map_area")
+	return Vector3(area.get_center().x, 0.0, area.get_center().y)
 
 
 ## On the ground at `pos`, moved onto the navigation mesh if it's right by it. Beyond the

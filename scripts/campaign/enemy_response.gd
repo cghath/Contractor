@@ -46,7 +46,7 @@ const QRF_TURNOUT_S := 180.0
 const LOOK_S := 600.0
 const LOOK_POINTS := 2
 const LOOK_RING_M := 30.0
-const LOOK_KINDS: Array[StringName] = [&"shot", &"blast", &"body", &"missed_checkin", &"signal"]
+const LOOK_KINDS: Array[StringName] = [&"shot", &"blast", &"body", &"missed_checkin", &"signal", &"engine"]
 ## Trackers (Captain, 2026-10-18, inspired by S.O.G. Prairie Fire's): a hunter team, or a patrol
 ## out on a look, that comes within TRACK_PICKUP_M of the squad's trail (SquadTrail) no older than
 ## TRACK_COLD_S picks it up, fires TRACK_SIGNAL_SHOTS into the air (a "signal" report on the net:

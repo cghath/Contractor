@@ -399,6 +399,7 @@ var _gun_seat := -1
 var _aim_send_left := 0.0
 var _aim_sent := Vector2(INF, INF)
 var _moving := {}  # host: soldier instance id -> {"to": seat, "at": when he's there} (A3: timed seat moves)
+var _engine_noise_left := randf() * EngineNoise.EMIT_S  # host: till its engine next sounds to the other side (F-365)
 
 
 ## A new vehicle of `model` (VehicleArt.MODELS, with numbers in data/vehicles.json), ready
@@ -1969,6 +1970,10 @@ func _server_step(delta: float) -> void:
 		bay.server_step(delta)
 	if turret and not wrecked:
 		turret.step(delta)
+	_engine_noise_left -= delta
+	if _engine_noise_left <= 0.0:
+		_engine_noise_left = EngineNoise.EMIT_S
+		EngineNoise.server_emit(self)  # engines are heard (Captain, 2026-10-31): every EMIT_S, not every frame
 	_pose_left -= delta
 	if _pose_left <= 0.0:
 		_pose_left = 1.0 / POSE_HZ

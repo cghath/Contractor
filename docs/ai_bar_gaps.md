@@ -614,7 +614,9 @@ Where Contractor already beats the bar, checked at `fc98665`:
 - **News travels by radio.** `Alert` (`alert.gd`): a hostile reacts to what he sees; the zone only
   learns when he radios it, slower once the mast is down; check-ins, bodies found, states that cool
   slowly. LAMBS, VCOM and Arma share at once. (G-02 leaked around it until a squad per site,
-  2026-10-19; the last leaks, F-359 to F-362, were closed 2026-10-31: tests/awareness_test.gd.)
+  2026-10-19; the last leaks, F-359 to F-362, were closed 2026-10-31: tests/awareness_test.gd.
+  Engines are heard too since then, Captain's call: `EngineNoise`, by kind and state, the shots'
+  wall rule; reinforcement waves go for the last known position, F-365.)
 - **A real contact drill.** A base of fire that always keeps the autorifleman (`elements`), a
   maneuver element on the side the enemy sees least of (`flank_route` scores two points per side,
   the mid point and the end, not the whole route), checked on the navmesh, with "no flank"

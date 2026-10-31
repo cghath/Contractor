@@ -16,6 +16,12 @@ extends Node3D
 ##   report takes Alert.COMMS_DOWN_MULT longer; a reporter cut down first takes it with him.
 ## - Heard: a suppressed shot behind the wall carries half as far to the alert through it (F-359,
 ##   as SquadAI's own hearing: G-29).
+## - Engines (F-365, Captain 2026-10-31: "engines are heard"): an M-ATV idling outside the wall is
+##   heard from EngineNoise's reach in the open, not beyond it, and through the wall only within
+##   half of it; a helicopter flying is heard from its own (longer) reach. The listener suspects
+##   something over there and the alert gets an "engine" report; nobody learns who rides in it.
+## - Waves (F-365): reinforcements without an aim of their own go for the alert's last known
+##   position, not the squad, and search the middle of the map before there is one.
 ## - From the air: a recon drone goes where the net last heard of the squad, not to the squad, and
 ##   doesn't see them under a roof (F-362).
 
@@ -116,6 +122,8 @@ func _run() -> void:
 	await _test_footsteps()
 	await _test_seen(post)
 	_test_heard()
+	await _test_engines()
+	_test_waves()
 	_test_drone()
 
 
@@ -389,6 +397,16 @@ func _test_seen(post: GarrisonPost) -> void:
 	check(delay <= base * Alert.REPORT_UNDER_FIRE_MULT + 0.1 and delay >= base - 0.6,
 		"his report is on its way: %.0f s (discipline %.2f: %.0f s, x%.1f under fire)" % [delay, float(SquadAI.of(by).discipline), base, Alert.REPORT_UNDER_FIRE_MULT])
 	check(int(first.report.get("seen", 0)) == 1, "it counts the one man he saw, not the three behind the wall (seen %d)" % int(first.report.get("seen", 0)))
+	# The positive control: with all of them half spotted he counts them all (so "seen 1" above isn't
+	# just the floor of one with everyone filtered out).
+	var by_ai := SquadAI.of(by)
+	var kept_aware: Dictionary = by_ai._aware.duplicate()
+	var near_spot := men.filter(func(f: Soldier) -> bool: return f.vitals.is_up() and f.global_position.distance_to(where) <= Alert.SEEN_GROUP_M)
+	for f: Soldier in men:
+		by_ai._aware[f.get_instance_id()] = Spotting.SUSPECT
+	var all_seen := int(alert._seen_at(where, by).get("seen", 0))
+	by_ai._aware = kept_aware
+	check(near_spot.size() >= 2 and all_seen == near_spot.size(), "and with all of them half spotted he counts all %d (seen %d)" % [near_spot.size(), all_seen])
 	var compound_state := alert.state_of("compound")
 	var others := alert.areas.keys().filter(func(k: String) -> bool: return k != "compound" and alert.state_of(k) != Alert.State.NORMAL)
 	check(compound_state == Alert.State.ENGAGED and alert.zone_state == Alert.State.NORMAL and others.is_empty(),
@@ -427,7 +445,7 @@ func _test_seen(post: GarrisonPost) -> void:
 			near_told += 1 if knows else 0
 		elif knows:
 			far_told.append(String(sq.name))
-	check(near_told == near_all and far_told.is_empty(), "the squads within %d m of it are told (%d of %d), none further (%s)" % [int(Alert.NET_SHARE_M), near_told, near_all, far_told])
+	check(near_all > 0 and near_told == near_all and far_told.is_empty(), "the squads within %d m of it are told (%d of %d), none further (%s)" % [int(Alert.NET_SHARE_M), near_told, near_all, far_told])
 	# The mast down: the next report takes COMMS_DOWN_MULT longer.
 	var other: Soldier = null
 	for h in post.alive():
@@ -480,7 +498,231 @@ func _test_heard() -> void:
 	var wrong: Array = alert._pending.filter(func(p: Dictionary) -> bool: return band.has(String(p.report.by)))
 	check(wrong.is_empty(), "nobody %.0f-%.0f m off with a wall between hears it (%d of them; %d hear it nearer or in the open)" \
 		% [reach * SquadAI.WALL_SHOT_MULT, reach, band.size(), alert._pending.size()])
+	# Positive controls: everyone within half the reach, or within it with a clear line, does hear it;
+	# and one of them 8 m from a second shot certainly does.
+	var hearers: Array[String] = []
+	for h in _hostiles():
+		var d := h.global_position.distance_to(at)
+		if d <= reach * SquadAI.WALL_SHOT_MULT or (d <= reach and Throwables.clear_line(world, at + Vector3.UP * 0.3, h.camera.global_position)):
+			hearers.append(String(h.name))
+	var deaf := hearers.filter(func(n: String) -> bool: return not alert._pending.any(func(p: Dictionary) -> bool: return String(p.report.by) == n))
+	check(deaf.is_empty(), "those within %.0f m of it, or within %.0f m with a clear line, hear it (%d of %d; %s)" \
+		% [reach * SquadAI.WALL_SHOT_MULT, reach, hearers.size() - deaf.size(), hearers.size(), ", ".join(deaf) if not deaf.is_empty() else "all"])
 	alert._pending.clear()
+	alert._last_report.clear()
+	var h0: Soldier = _hostiles()[0] if not _hostiles().is_empty() else null
+	if h0:
+		Alert.server_noise(player, h0.global_position + Vector3(8.0, 1.5, 0.0), Alert.SHOT, true)
+	check(h0 != null and alert._pending.any(func(p: Dictionary) -> bool: return p.by == h0 and p.report.kind == Alert.SHOT),
+		"and %s, 8 m from a second one, hears it and will report it" % (h0.name if h0 else "a hostile"))
+	alert._pending.clear()
+	alert._last_report.clear()
+
+
+## F-365 part 2 (Captain, 2026-10-31: "engines are heard"): an M-ATV with a driver in, idling just
+## outside the wall, and a helicopter flying. A listener of the test's own (a hostile in a squad of
+## his own, standing still) hears the M-ATV within EngineNoise's idle reach in the open and not
+## beyond it, and through the wall only within half of it (SquadAI.WALL_SHOT_MULT, as a shot); he
+## hears the helicopter flying from further off than it carries idling on the ground. A heard
+## engine is a suspicion over there and an "engine" report to the alert, roughly placed; nobody's
+## awareness of anyone rises. The vehicles' own physics is off (frozen, no _server_step), so only
+## the test's EngineNoise.server_emit calls sound them.
+func _test_engines() -> void:
+	print("Engines heard")
+	var layer := VehicleLayer.of(level)
+	check(layer != null, "the zone has its vehicle layer")
+	if layer == null:
+		return
+	var into := m.global_position - spot
+	into.y = 0.0
+	into = into.normalized()
+	var at := level.ground_point(spot - into * 6.0)
+	var matv := layer.server_spawn("matv", Transform3D(Basis.looking_at(along, Vector3.UP), at + Vector3.UP * 0.4), "", &"player", "aw_matv")
+	var heli := layer.server_spawn("uh60", Transform3D(Basis(), m.global_position + Vector3(0, 200, 0)), "", &"player", "aw_heli") as Helicopter
+	var driver := level.spawn_soldier({"name": "AwDriver", "faction": "friendly", "variant": "woodland", "pos": at + Vector3(0, 0.2, 3.0), "loadout": [],
+		"combat": 0.5, "discipline": 0.5, "guard": false})
+	var sq := Squad.new()
+	sq.name = "EngineEar"
+	sq.faction = &"hostile"
+	sq.patrol = []
+	level.add_child(sq)
+	var ear := level.spawn_soldier({"name": "EngineEar0", "faction": "hostile", "variant": "urban",
+		"pos": level.ground_point(m.global_position), "loadout": ["akm", "mag_762"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	check(matv != null and heli != null and driver != null and ear != null, "an M-ATV outside the wall, a UH-60, a driver and a listener")
+	if matv == null or heli == null or driver == null or ear == null:
+		for n: Node in [matv, heli, driver, ear, sq]:
+			if is_instance_valid(n):
+				n.queue_free()
+		return
+	for v: Vehicle in [matv, heli]:
+		v.set_physics_process(false)  # (no _server_step: only the test sounds it)
+		v.freeze = true
+	ear.set_physics_process(false)
+	var ear_ai := SquadAI.of(ear)
+	ear_ai.squad = sq
+	ear_ai.process_mode = Node.PROCESS_MODE_DISABLED  # (his eyes off: what he learns here is by ear only)
+	if SquadAI.of(driver):
+		SquadAI.of(driver).process_mode = Node.PROCESS_MODE_DISABLED
+	await get_tree().physics_frame
+	var silent := EngineNoise.reach_of(matv)
+	var seated := matv.server_enter(driver, matv.driver_seat())
+	await get_tree().physics_frame
+	var idle := EngineNoise.reach_of(matv)
+	var want := EngineNoise.reach(Vehicle.WHEELED, false)
+	check(silent == 0.0 and seated and idle == want and EngineNoise.reach(Vehicle.WHEELED, true) > idle,
+		"nobody at the wheel it's silent (%.0f m); a driver in, standing, it idles: heard to %.0f m (%.0f m under way)" % [silent, idle, EngineNoise.reach(Vehicle.WHEELED, true)])
+	var src := matv.global_position + Vector3.UP * EngineNoise.SOURCE_UP_M
+	var world := matv.get_world_3d()
+	var muffled := want * SquadAI.WALL_SHOT_MULT
+	# In the open, away from the compound: within the reach heard, beyond it not.
+	var open_near: Variant = await _place_ear(ear, src, -into, want * 0.6, want - 3.0, true)
+	var got := _emit(matv, ear)
+	check(open_near != null and got.heard and got.report, "in the open, %s m from it with a clear line, he hears it and will report an engine" % open_near)
+	if got.heard:
+		var flat := Vector2(ear_ai._suspect_pos.x - src.x, ear_ai._suspect_pos.z - src.z).length()
+		var d := ear.global_position.distance_to(src)
+		check(flat <= EngineNoise.ERROR_PER_100M * d / 100.0 + 0.5 and ear_ai._aware.is_empty() and sq.known.is_empty(),
+			"a suspicion over there (%.1f m from it, at most %.1f), no awareness of anyone (%d) and nobody in his squad's picture (%d)" \
+			% [flat, EngineNoise.ERROR_PER_100M * d / 100.0, ear_ai._aware.size(), sq.known.size()])
+	var open_far: Variant = await _place_ear(ear, src, -into, want + 3.0, want + 15.0, true)
+	got = _emit(matv, ear)
+	check(open_far != null and not got.heard and not got.report, "beyond its reach (%s m) he doesn't" % open_far)
+	# Behind the wall: past half the reach not heard, within it heard.
+	var walled_far: Variant = await _place_ear(ear, src, into, muffled + 1.5, want - 1.5, false)
+	got = _emit(matv, ear)
+	check(walled_far != null and not got.heard and not got.report,
+		"inside the wall %s m from it (%.0f-%.0f m), no line to it: he doesn't hear it through the wall" % [walled_far, muffled, want])
+	var walled_near: Variant = await _place_ear(ear, src, into, 6.0, muffled - 1.5, false)
+	got = _emit(matv, ear)
+	check(walled_near != null and got.heard and got.report, "within %.0f m (%s m), still behind the wall, he does" % [muffled, walled_near])
+	# The helicopter: flying it carries further than it does idling on the ground.
+	ear.global_position = level.ground_point(m.to_global(Vector3(0, 0, 6)))  # (out in the courtyard)
+	var flying := EngineNoise.reach(Vehicle.HELICOPTER, true)
+	var landed := EngineNoise.reach(Vehicle.HELICOPTER, false)
+	var off := (flying + landed) * 0.5
+	var eye := ear.camera.global_position
+	var high := Vector3.INF
+	for k in 12:
+		var a := TAU * k / 12.0
+		var p := eye + Vector3(cos(a) * off, 0.0, sin(a) * off)
+		p.y = level.ground_point(p).y + 150.0
+		if Throwables.clear_line(world, p + Vector3.UP * EngineNoise.SOURCE_UP_M, eye):
+			high = p
+			break
+	check(high.is_finite(), "a spot %.0f m off, 150 m up, with a clear line down to him" % off)
+	if high.is_finite():
+		heli.global_position = high
+		heli._rpm = Helicopter.ROTOR_RPM
+		heli.mode = Helicopter.Mode.FLYING
+		var fly_reach := EngineNoise.reach_of(heli)
+		got = _emit(heli, ear)
+		var under := Vector2(ear_ai._suspect_pos.x - high.x, ear_ai._suspect_pos.z - high.z).length()
+		var bound := EngineNoise.ERROR_PER_100M * ear.global_position.distance_to(high + Vector3.UP * EngineNoise.SOURCE_UP_M) / 100.0 + 0.5
+		check(fly_reach == flying and got.heard and got.report and under <= bound,
+			"a helicopter flying %.0f m off (it carries %.0f m) is heard, placed under it (%.0f m off)" % [ear.global_position.distance_to(high), fly_reach, under])
+		heli.mode = Helicopter.Mode.LANDED
+		var land_reach := EngineNoise.reach_of(heli)
+		got = _emit(heli, ear)
+		check(land_reach == landed and not got.heard and not got.report,
+			"the same one with its rotors turning on the ground (%.0f m) isn't, from there" % land_reach)
+		heli.mode = Helicopter.Mode.PARKED
+		heli._rpm = 0.0
+	# The alert's last known position: a heard engine moves it only when nothing harder is fresh.
+	var hard := level.ground_point(m.global_position + Vector3(0, 0, 90))
+	alert.lkp = {"pos": hard, "time": alert.now()}
+	alert._receive({"kind": Alert.ENGINE, "pos": src, "area": alert.area_of(src), "by": "test"})
+	var kept: Vector3 = alert.lkp.pos
+	alert.lkp.time = alert.now() - Alert.ENGINE_LKP_AFTER_S - 1.0
+	alert._receive({"kind": Alert.ENGINE, "pos": src, "area": alert.area_of(src), "by": "test"})
+	check(kept.distance_to(hard) < 0.01 and (alert.lkp.pos as Vector3).distance_to(src) < 0.01,
+		"an engine report leaves a fresh last known position where it was, and moves one older than %.0f s" % Alert.ENGINE_LKP_AFTER_S)
+	alert.lkp = {}
+	alert._pending.clear()
+	alert._last_report.clear()
+	matv.server_exit(driver)
+	await get_tree().physics_frame
+	for n: Node in [matv, heli, driver, ear, sq]:
+		if is_instance_valid(n):
+			n.queue_free()
+	EngineNoise._quiet_until.clear()
+	await get_tree().physics_frame
+
+
+## One emission of `v`'s engine, fresh (nobody's rehear gap, no report on the way): whether `ear`
+## heard it ({"heard"}) and whether he'll report it to the alert ({"report"}).
+func _emit(v: Vehicle, ear: Soldier) -> Dictionary:
+	EngineNoise._quiet_until.clear()
+	alert._pending.clear()
+	alert._last_report.clear()
+	SquadAI.of(ear)._suspect_at = -1000.0
+	var heard := EngineNoise.server_emit(v).has(ear) and SquadAI.of(ear)._suspect_at > -1000.0
+	var report := alert._pending.any(func(p: Dictionary) -> bool: return p.by == ear and p.report.kind == Alert.ENGINE)
+	return {"heard": heard, "report": report}
+
+
+## Puts `h` `lo`-`hi` m (feet to `src`) out from `src` along `dir` (and a little to the sides):
+## `open` with a clear line from `src` to his ears, else with none. How far off he ended up, or null.
+func _place_ear(h: Soldier, src: Vector3, dir: Vector3, lo: float, hi: float, open: bool) -> Variant:
+	var world := h.get_world_3d()
+	var step := lo
+	while step <= hi + 0.01:
+		for side: float in [0.0, 3.0, -3.0, 6.0, -6.0]:
+			var p := level.ground_point(src + dir * step + along * side)
+			var d := p.distance_to(src)
+			if d < lo or d > hi:
+				continue
+			h.global_position = p
+			h.velocity = Vector3.ZERO
+			await get_tree().physics_frame
+			if Throwables.clear_line(world, src, h.camera.global_position) == open:
+				return snappedf(h.global_position.distance_to(src), 0.1)
+		step += 2.0
+	return null
+
+
+## F-365 part 1 (Captain, 2026-10-31): waves hunt where the enemy last knew the squad to be. The
+## zone's reinforcements with no aim of their own (as a zone whose timer sends its waves would be)
+## head for the alert's last known position, not the squad; with none yet they walk in to the
+## middle of the map and search round it; with EnemyResponse's aim (hot zones) and nothing known a
+## wave still keeps the route it has.
+func _test_waves() -> void:
+	print("Reinforcement waves go for the last known position")
+	var r := MapNodes.reinforcements(level)
+	check(r != null, "the zone has its reinforcements")
+	if r == null:
+		return
+	var kept_aim := r.aim
+	var kept_driven := r.driven
+	r.aim = Callable()
+	r.driven = false
+	var sq := Squad.new()
+	sq.name = "TestWave"
+	sq.faction = &"hostile"
+	sq.patrol = []
+	level.add_child(sq)
+	var from := level.ground_point(m.global_position + Vector3(400, 0, -300))
+	var lk := level.ground_point(m.global_position + Vector3(-250, 0, 150))
+	alert.lkp = {"pos": lk, "time": alert.now()}
+	r._route(sq, level, from)
+	var c: Vector3 = sq.patrol[1] if sq.patrol.size() >= 2 else Vector3.INF
+	var to_lk := Vector2(c.x - lk.x, c.z - lk.z).length()
+	var to_squad := Vector2(c.x - player.global_position.x, c.z - player.global_position.z).length()
+	check(to_lk < 3.0 and to_squad > 100.0, "with a last known position its route leads there (%.1f m from it), not to the squad (%.0f m from them)" % [to_lk, to_squad])
+	alert.lkp = {}
+	r._route(sq, level, from)
+	var mid := level.map_area().get_center()
+	c = sq.patrol[1] if sq.patrol.size() >= 3 else Vector3.INF
+	var to_mid := Vector2(c.x - mid.x, c.z - mid.y).length()
+	var ring := Vector2(sq.patrol[2].x - c.x, sq.patrol[2].z - c.z).length() if sq.patrol.size() >= 3 else 0.0
+	check(to_mid < 3.0 and ring > Reinforcements.SEARCH_RING_M - 3.0,
+		"with none yet it walks in to the middle of the map (%.1f m from it) and searches %.0f m round it (the squad %.0f m from there)" \
+		% [to_mid, ring, Vector2(mid.x - player.global_position.x, mid.y - player.global_position.z).length()])
+	r.aim = kept_aim
+	r.driven = kept_driven
+	var before: Array[Vector3] = sq.patrol.duplicate()
+	r._route(sq, level, from)
+	check(r.aim.is_valid() and sq.patrol == before, "with the zone's own aim (EnemyResponse) and nothing known, a wave keeps the route it has")
+	sq.queue_free()
 
 
 ## F-362: a recon drone goes where the net last heard of the squad and doesn't see through a roof.
@@ -512,6 +754,7 @@ func _test_drone() -> void:
 	var got := alert.reports.slice(reports)
 	check(not got.is_empty() and String(got[-1].by) == "drone" and int(got[-1].get("seen", 0)) == 1,
 		"one steps out into the open: it reports him, one man seen (%s)" % (got[-1] if not got.is_empty() else "none"))
+	drones._free_body(drones.drones[id])
 	drones.drones.erase(id)
 	# Told of them somewhere else, it searches there, not over the squad (back under the roof: a
 	# drone passing over that saw him would rightly stay with him, so it comes up beyond that spot).
@@ -531,6 +774,7 @@ func _test_drone() -> void:
 	var to_squad := Vector2(d2.pos.x - player.global_position.x, d2.pos.z - player.global_position.z).length()
 	check(to_lkp <= EnemyDrones.ORBIT_M + 20.0 and to_squad > EnemyDrones.SEE_M and not saw,
 		"sent with a last known position 500 m off, it circles there (%.0f m from it), not over the squad (%.0f m; saw them: %s)" % [to_lkp, to_squad, saw])
+	drones._free_body(drones.drones[id2])
 	drones.drones.erase(id2)
 
 

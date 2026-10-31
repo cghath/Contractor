@@ -41,6 +41,27 @@ every path and these were the leaks still open.
   clear line to, and keeps to where it last saw them for 30 s (F-362). It flies straight there and
   then circles by its own flying time, not the wall clock (a test flying it in one go held a single
   point on the circle, and on CI a hill or house there hid the squad: missions "0 reports").
+- **Changed (AI), Captain 2026-10-31 (F-365):** engines are heard. A vehicle's or helicopter's
+  running engine, crewed by players or AI, is a noise to the other side's AI and (for the squad's)
+  to the alert: an M-ATV or technical idling carries 40 m and 150 m under way, an AAV, Bradley or
+  Abrams 100 m and 300 m, a helicopter 300 m with its rotors turning on the ground and 600 m flying
+  (EngineNoise, all Proposed); through a wall or a hill half as far, as a shot. A listener suspects
+  something over there (placed 10 m off per 100 m) and goes to look; a hostile's area stands to and
+  he radios in "engines heard" (a look goes out; the last known position moves only when nothing
+  harder came in the last 2 min). It never tells anyone who's in it. Each vehicle sounds once a
+  second, not every frame, and casts at most 24 rays a time.
+- **Changed (AI), Captain 2026-10-31 (F-365):** reinforcement waves without an aim of their own
+  head for the alert's last known position, not where the players are; with none yet they walk in
+  to the middle of the map and search 40 m round it (SEARCH_RING_M, Proposed). Hot zones are as
+  they were (EnemyResponse's aim). Levels with no alert (the plain compound, the base, the ranges)
+  still send waves to the players. Every zone's waves were already driven by EnemyResponse, so no
+  zone's timer sends waves today (F-387, a question for Captain).
+- **Tests:** awareness checks both (an M-ATV heard in the open within its reach and not beyond, not
+  through the wall past half of it, within that yes; a helicopter flying heard from 473 m, not when
+  idling on the ground; an engine report and the last known position; waves to the last known
+  position or the map's middle), and the review's minor points: positive controls for "seen 1" (all
+  four counted once half spotted) and for the muffled shot (a hostile 8 m off hears it), the told-
+  squads check needs at least one, the drones' bodies are freed.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

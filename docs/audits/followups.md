@@ -2130,6 +2130,15 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | AI awareness (F-362): a recon drone flies to Alert's last known position, follows only men it has a line to (looks every 1 s, LOOK_S), keeps to where it last saw them 30 s (FIX_KEEP_S), Proposed; with nothing known it hangs over home | no homing on the squad | flying to the squad as before
 2026-10-31 | AI awareness: vehicles blocking sight (F-363) and the two in-fight true-position counts (F-364) left open, not fixed in fix/ai-awareness-walls | each touches vehicle or garrison suites beyond the task | fixing them in the same branch
 2026-10-31 | AI awareness (F-362 follow-up): a recon drone flies straight to the point it searches and only circles it once within ORBIT_M + 15 m (STATION_M, Proposed), its angle by its own flying time, not the wall clock | the same flight every time, in tests flown in one go too (CI run 41219512393 held one blocked point: "0 reports") | the wall-clock angle, or a looser test
+Captain, 2026-10-31: F-365 part 1, yes: in zones that aren't hot, reinforcement waves head for the alert's last known position of the players (as hot zones do), not their true position
+Captain, 2026-10-31: F-365 part 2, yes: engines are heard; vehicles and helicopters (player-crewed and AI, on the host) count as noise for the Alert and for SquadAI's hearing, with the shots' wall rule, throttled, raising suspicion toward the noise without giving away positions
+Captain, 2026-10-31: fix/ai-awareness-walls question 3, blasts losing half their alert range without a clear line (Alert.server_noise's wall rule covers blasts as well as shots): accepted as is
+2026-10-31 | Waves (F-365): a wave with no aim of its own and no last known position yet walks in to the middle of the map and searches SEARCH_RING_M (40 m, Proposed) round it, pointed at the last known position at the next retarget (RETARGET_S) once there is one; a level with no Alert at all keeps sending waves to the players | the enemy knows nothing yet, so it searches where contracts mostly are; an Alert-less level has no enemy picture to go on | holding at the edge until reported; the players' true position
+2026-10-31 | Engines (F-365): EngineNoise.REACH_M, Proposed: wheeled 40 m idle / 150 m under way (over 1.5 m/s), tracked 100 / 300 m, helicopter 300 m rotors turning on the ground / 600 m flying; one table for the Alert and SquadAI, half through a wall or hill (SquadAI.WALL_SHOT_MULT) | engines are quieter than shots (Alert 600 m), a helicopter carries furthest | a shorter AI reach as for shots (200 of 600 m)
+2026-10-31 | Engines (F-365): each vehicle sounds every EMIT_S (1 s) on its own clock from Vehicle._server_step; a listener is left alone REHEAR_S (4 s) after hearing one, RECHECK_S (3 s) after a wall stopped it, and an emission casts at most MAX_RAYS (24), the rest next time | engines are continuous: no rays per hostile per frame | every frame, or a ray every time
+2026-10-31 | Engines (F-365): a heard engine is SquadAI.hear_sound at a point ERROR_PER_100M (10 m per 100 m) off under it (a helicopter: the ground under it), never awareness or a squad picture; a hostile also files an "engine" Alert report (raises his area to SUSPICIOUS, EnemyResponse sends a look, radio chatter "engines heard"); it moves the last known position only when the last one is older than ENGINE_LKP_AFTER_S (120 s) | suspicion toward the noise, not positions; a contact or shot outranks a passing helicopter | no last known position from engines; the shot's rule (always)
+2026-10-31 | Engines (F-365): an engine's side is its driver's faction, else the vehicle's (a helicopter: its own); a hostile hears the squad's side's, the squad's AI a hostile's, nobody his own side's or a civilian's, and nobody the vehicle he rides in | as shots, where a hostile knows his own people | everyone hears every engine
+2026-10-31 | F-387: no zone's reinforcement timer sends waves (EnemyResponse drives every zone since 4914e97 and regular zones have no QRF base): left as it is and asked | bringing timer waves back into every regular zone is a design change of its own | EnemyResponse driving only zones with a QRF base
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2243,7 +2252,30 @@ Both only once in a fight. Using the post's or the shooter's squad picture (Squa
 is the fix; garrison_test's "the garrison breaks" check gives the garrison 5 s to count six men it
 may not have spotted yet, so it would want a longer wait.
 
-### F-365 (question for Captain): what still knows where the players are by design
+### F-365 (answered by Captain, 2026-10-31; done): what still knew where the players are by design
 Reinforcements in a zone that isn't hot (the locked timer, "hunt toward where the players are")
-route each wave to the players' true centre; hot zones aim at Alert's last known position. And no
-hostile hears a vehicle or a helicopter at all (an infil lands unheard). Both are design calls.
+routed each wave to the players' true centre; hot zones aim at Alert's last known position. And no
+hostile heard a vehicle or a helicopter at all (an infil landed unheard). Both were design calls.
+Captain, 2026-10-31: yes to both. `Reinforcements._goal`: a wave without an aim of its own goes
+for the level's Alert's last known position, and with none yet walks in to the middle of the map
+and searches SEARCH_RING_M round it; a level with no Alert keeps the players (see F-387 for where
+the timer really runs). `EngineNoise` (scripts/ai/engine_noise.gd): engines are heard by the other
+side's AI (SquadAI.hear_sound: a suspicion, no awareness) and, for the squad's, by the alert (an
+"engine" report), with REACH_M by kind and state and the shots' wall rule; each vehicle sounds every
+EMIT_S from Vehicle._server_step. Blasts keeping half their alert range without a clear line
+(the PR's question 3): Captain accepted it as is. Checked in awareness "Engines heard" and
+"Reinforcement waves go for the last known position".
+
+### F-387 (question for Captain): no zone's reinforcement timer sends waves
+Since 4914e97 (2026-10-16, roads and patrols for regular zones) every `ZoneLevel` has an
+`EnemyResponse`, and its `_ready` sets `Reinforcements.driven` (the timer sends nothing; waves come
+only from `server_send`) and `aim` (the last known position) in every zone, not only hot ones. A
+regular contract zone has no "qrf_base", so `_launch_qrf` never sends either: regular zones get no
+reinforcement waves at all, only MissionScenario's objective waves (holds, crew rescues). So the
+F-365 change (waves to the last known position) only bites where the timer runs with an Alert,
+which today is nowhere; the waves that really went for the players' true position were on levels
+with no Alert (the plain compound, the base, the LHD, the vehicle range), which keep it (no enemy
+picture there to go on). If regular zones should have timer waves again, `EnemyResponse` could set
+`driven` only where the zone has a QRF base; the timer's max_alive then counts every hostile in the
+zone (`capped_alive` when not driven), which a garrisoned zone may already fill, so it would want
+the driven count too. Not changed here: it brings waves back into every regular zone.

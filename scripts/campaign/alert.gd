@@ -10,7 +10,10 @@ extends Node
 ## - Sound: an unsuppressed shot is heard to SHOT_HEARD_M, a suppressed one to
 ##   SUPPRESSED_HEARD_M, a blast to BLAST_HEARD_M; through a wall or a building's shell (no clear
 ##   line to his ears) half as far (SquadAI.WALL_SHOT_MULT, as the AI's own hearing: G-29).
-##   Hearing gives a rough direction, not who.
+##   Hearing gives a rough direction, not who. Engines too (EngineNoise, Captain 2026-10-31,
+##   F-365): a hostile who hears one of the squad's vehicles or helicopters stands to and reports
+##   an "engine" there, as rough a fix as a shot's; it moves the last known position only when
+##   nothing harder (a contact, a shot, a blast, a body) came in the last ENGINE_LKP_AFTER_S.
 ## - Check-ins: each garrisoned site radios in every CHECK_IN_S; a site with nobody left to
 ##   answer is missed, and the HQ hears of it CHECK_IN_CALL_S later.
 ## - Bodies: a hostile who comes within BODY_SPOT_M of a fallen comrade (in sight) reports it.
@@ -30,9 +33,10 @@ enum State { NORMAL, SUSPICIOUS, ALERTED, ENGAGED }
 const STATE_NAMES: Array[String] = ["normal", "suspicious", "alerted", "engaged"]
 const SHOT := &"shot"
 const BLAST := &"blast"
+const ENGINE := &"engine"
 ## Report kinds and the state each raises its area to (the zone follows its worst area).
 const RAISES := {&"shot": State.SUSPICIOUS, &"blast": State.ALERTED, &"contact": State.ENGAGED,
-	&"body": State.ALERTED, &"missed_checkin": State.ALERTED}
+	&"body": State.ALERTED, &"missed_checkin": State.ALERTED, &"engine": State.SUSPICIOUS}
 
 const SHOT_HEARD_M := 600.0
 ## A contact report counts the squad within this of what was seen (EnemyCommand's fog).
@@ -53,6 +57,9 @@ const ALERTED_COOL_S := 5400.0
 ## The last known position's uncertainty: grows this fast (m/s) up to LKP_MAX_M.
 const LKP_GROWTH_MPS := 1.5
 const LKP_MAX_M := 600.0
+## A heard engine moves the last known position only when the last one is older than this (a
+## contact, a shot, a blast or a body outranks a passing helicopter). Proposed.
+const ENGINE_LKP_AFTER_S := 120.0
 ## A point further than this from every site is "field".
 const AREA_REACH_M := 400.0
 const FIELD := "field"
@@ -128,6 +135,14 @@ static func server_noise(source: Node, pos: Vector3, kind: StringName, suppresse
 		if d > heard * SquadAI.WALL_SHOT_MULT and world and not Throwables.clear_line(world, pos + Vector3.UP * 0.3, s.camera.global_position):
 			continue  # through a wall it carries half as far (G-29; it carried right through, F-359)
 		alert._perceive(s, kind, pos)
+
+
+## `listener` (a hostile) heard one of the squad's engines at about `pos` (EngineNoise, which has
+## placed it roughly and applied the wall rule): he stands to and will report it.
+static func server_engine(listener: Soldier, pos: Vector3) -> void:
+	var alert := of(listener)
+	if alert and alert.multiplayer.is_server() and listener.faction == &"hostile":
+		alert._perceive(listener, ENGINE, pos)
 
 
 ## `observer` (a hostile) sees one of the squad at `pos`.
@@ -219,7 +234,8 @@ func _receive(report: Dictionary, seen: Soldier = null) -> void:
 	var r := report.duplicate()
 	r["time"] = now()
 	reports.append(r)
-	if r.kind in [&"contact", &"shot", &"blast", &"body"]:
+	if r.kind in [&"contact", &"shot", &"blast", &"body"] \
+			or (r.kind == ENGINE and (lkp.is_empty() or float(r.time) - float(lkp.time) > ENGINE_LKP_AFTER_S)):
 		lkp = {"pos": r.pos, "time": r.time}
 	# Record the commander's picture before listeners react to this report. A first
 	# sighting must already be confirmed when the response asks permission to launch.
