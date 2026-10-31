@@ -51,6 +51,7 @@ static func resolve(ctx: Dictionary) -> Array[Dictionary]:
 			for d: String in ctx.get("doors", ["kick", "open"]):
 				out.append(_o("breach_" + d, "Breach: %s" % DOOR_LABELS.get(d, d), "squad", {"cmd": "clear:" + d, "point": true}))
 			out.append(_o("clear", "Clear", "squad", {"cmd": "clear", "point": true}))
+			out.append(_o("breach_clear", "Breach and clear (through this wall)", "squad", {"cmd": "breach_clear", "point": true}))
 			if bool(ctx.get("armour_paired", false)):
 				out.append(_o("engage_building", "Armour: engage the building", "request", {"kind": "armour"}))
 		"casualty":

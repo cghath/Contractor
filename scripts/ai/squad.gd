@@ -49,7 +49,7 @@ const CLUSTER_M := 10.0
 ## crosshair ("suppress:known" suppresses the densest known cluster instead).
 ## "Climb into the HX-1" looks for a parked suit this far from each unit (m).
 const EXO_FIND_M := 80.0
-const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "take_cover", "fall_back", "climb", "flank", "assault"]
+const TACTIC_COMMANDS: Array[String] = ["suppress", "bound", "garrison", "clear", "clear_town", "breach_clear", "take_cover", "fall_back", "climb", "flank", "assault"]
 
 ## Spawn positions in the leader's space (x right, +z behind), per formation (the squad's
 ## first places; following uses formation slots, follow_point).
@@ -868,6 +868,132 @@ static func stand_off(op: Dictionary) -> void:
 			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * CHARGE_STANDOFF_M
 
 
+## "Breach and clear" (Captain's list 2026-10-14, item 3: "add a 'Breach and clear' team order
+## through walls"; F-318; command menu Move > Clear > 4, the building's context menu, voice
+## "breach and clear"): the named units stack along the wall `from` points at (SquadTactics.wall_at
+## on `point`), the one with a breaching charge (a breacher first) sets it where he pointed, the
+## stack holds clear of its blast while it burns (stand_off: none of them within BLAST_SAFE_M),
+## it blows a hole a soldier in kit walks through (Charges), and once the hole is on the navmesh
+## they go in through it with the clearance's CQB (pair by pair, room by room, nearest the hole
+## first; a flashbang first on the usual rules, _bang_plan) and hold inside. Pointing at a doorway
+## (no wall there) it's the building's own door: the charge goes on the wall beside it, as
+## "clear:charge" does. A wall with no building behind it (a compound's perimeter) opens into the
+## yard past it (SquadTactics.yard_beyond): they go through and hold just inside. Nobody selected
+## with a charge but `from` (a player) carrying one: they stack and hold for his own charge by
+## the spot (as a human breacher's Clear), then in. An AI team takes this way in of its own
+## against a held building whose door is round the far side (SquadTactics._clear, wall_breach_for).
+func order_breach_clear(from: Soldier, point: Vector3, names := PackedStringArray()) -> String:
+	leader = from
+	var units := _able(names)
+	if units.is_empty():
+		return "Nobody selected can"
+	var wall := SquadTactics.wall_at(from, point)
+	if wall.is_empty():
+		var b := Buildings.nearest(from, point, ORDER_BUILDING_M, true)  # (exact: warms order_clear's own lookup)
+		if b.is_empty():
+			return "Look at a wall or a door"
+		return order_clear(from, point, names, "charge")  # a doorway: the charge beside it
+	var b := breach_target(from, wall)
+	if b.has("refused"):
+		return String(b.refused)
+	if b.is_empty():
+		return "Nothing to clear past that wall"
+	var team := charge_first(units)
+	var his := team.is_empty() and not from.is_ai() and Vitals.has_item(from.inventory, Charges.ITEM)
+	if team.is_empty() and not his:
+		return "Nobody selected has a breaching charge"
+	if his:
+		team = units
+	var op := SquadTactics.breach_op(b, team, wall)
+	if op.is_empty():
+		return "No way to stack on that wall"
+	op["since"] = Soldier._now()
+	op["breach"] = ""
+	if his:
+		op["on"] = from
+		op["on_breach"] = true  # (his charge_spot stays: if he goes down, one of them may set it there)
+	else:
+		op.merge({"door": "charge", "breacher": 0, "breacher_ai": team[0]}, true)
+	var stealth := team.any(func(ai: SquadAI) -> bool: return ai.combat_mode == CombatMode.STEALTH)
+	op.merge(_bang_plan(b, team, "", stealth, enemy_inside(b), -1 if his else 0), true)
+	if bool(b.get("yard", false)):
+		op.merge({"bang": "", "bang_by": -1}, true)  # (no bang into the open)
+	stand_off(op)
+	for i in team.size():
+		team[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
+	_town_op = op
+	_town_units = team.size()
+	team[0]._callout(&"tactic", "Stacking on the wall!" if not his else "Stacking on the wall. Your charge.")
+	SessionLog.note("breach and clear: %d of %s's squad stack on the wall at (%.1f, %.1f, %.1f)%s, %s sets the charge" % [team.size(), from.log_name(),
+		(wall.at as Vector3).x, (wall.at as Vector3).y, (wall.at as Vector3).z, " (a yard past it)" if bool(b.get("yard", false)) else "",
+		from.log_name() if his else String(team[0].body.name)])
+	return ""
+
+
+## What's past `wall` to clear: the building behind it (its nearest inside spot within
+## BREACH_BEHIND_M of the far side), else the yard past it (SquadTactics.yard_beyond), else {}.
+## {"refused": why} when it's neither and the order shouldn't go ahead: a wall between two of a
+## building's rooms (both sides inside it) isn't a way in; and when no building was found but
+## the far side passes Buildings' own inside test (SquadTactics.building_beyond), the lookup
+## missed one (F-322), so the leader is told to try again rather than the team blowing in and
+## holding by the hole as if in a yard.
+## The lookup is exact (never cut short by Buildings' frame budget, as an AI's tick is): a
+## player's order is a one-off, and a cut-short scan comes back as no building at all.
+const BREACH_BEHIND_M := 2.5
+
+
+func breach_target(from: Soldier, wall: Dictionary) -> Dictionary:
+	var behind: Vector3 = (wall.at as Vector3) - (wall.face as Vector3) * (SquadTactics.WALL_DEPTH_GUESS_M + 0.8) + Vector3.DOWN * SquadTactics.BREACH_CHARGE_Y
+	var b := Buildings.nearest(from, behind, BREACH_BEHIND_M, true)
+	if not b.is_empty():
+		if Buildings.distance_to(b, (wall.at as Vector3) + (wall.face as Vector3) * 1.0 + Vector3.DOWN * SquadTactics.BREACH_CHARGE_Y) > GRID_OUTSIDE_M:
+			return b
+		return {"refused": "That wall's inside the building: point at an outside wall or a door"}
+	if SquadTactics.building_beyond(from.get_world_3d(), wall):
+		SessionLog.note("breach and clear: no building found past the wall at (%.1f, %.1f, %.1f), but it's walled in: not a yard" % [(wall.at as Vector3).x, (wall.at as Vector3).y, (wall.at as Vector3).z])
+		return {"refused": "Can't make out the building past that wall, try again"}
+	return SquadTactics.yard_beyond(from.get_world_3d(), wall)
+
+
+## A spot this far from a building's nearest inside spot is outside it.
+const GRID_OUTSIDE_M := 0.8
+
+
+## `units` with the one who sets the charge first: the first breacher up who carries a breaching
+## charge, else the first in `units` who does; [] if none of them carries one.
+static func charge_first(units: Array) -> Array[SquadAI]:
+	var out: Array[SquadAI] = []
+	out.assign(units)
+	var pick := -1
+	for i in out.size():
+		if Vitals.has_item(out[i].body.inventory, Charges.ITEM) and (pick < 0 or (out[i].body.role == Roles.BREACHER and out[pick].body.role != Roles.BREACHER)):
+			pick = i
+	if pick < 0:
+		return []
+	var him: SquadAI = out[pick]
+	out.remove_at(pick)
+	out.push_front(him)
+	return out
+
+
+## The breach plan of an AI team's own wall breach (SquadTactics._clear): op from
+## SquadTactics.breach_op on `b` with `team` (charge_first), the charge's setter first.
+func plan_wall_breach(op: Dictionary, b: Dictionary, team: Array) -> void:
+	op["since"] = Soldier._now()
+	op["breach"] = ""
+	op.merge({"door": "charge", "breacher": 0, "breacher_ai": team[0]}, true)
+	var stealth := team.any(func(ai: SquadAI) -> bool: return ai.combat_mode == CombatMode.STEALTH)
+	op.merge(_bang_plan(b, team, "", stealth, enemy_inside(b), 0), true)
+	stand_off(op)
+
+
+## How far from the charge the stack must stand while it burns: its blast on the placer's side
+## of the wall (Throwables._frag: no fragments that side, overpressure out to its share of the
+## blast radius) and a margin. The stack's stand-off (CHARGE_STANDOFF_M along the wall past
+## STACK_FIRST_M) keeps them past it.
+const BLAST_SAFE_M := WoundModel.BLAST_RADIUS * Throwables.FACING_BLAST_SHARE + 0.5
+
+
 ## Clearing a town (Captain, 2026-10-16: "an order for clearing towns so they move building by
 ## building down the street"): the buildings within TOWN_RADIUS_M of the point, nearest-next
 ## from the squad, cleared one after another the same way (stack, breach, in); the next starts
@@ -1078,6 +1204,9 @@ func order_command(from: Soldier, cmd: String, point: Vector3, names := PackedSt
 			return order_clear(from, point, names, arg)
 		"clear_town":
 			return order_clear_town(from, point, names, arg)
+		"breach_clear":
+			_town.clear()
+			return order_breach_clear(from, point, names)
 		"take_cover":
 			return order_take_cover(from, names)
 		"fall_back":

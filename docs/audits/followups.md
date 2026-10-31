@@ -1765,6 +1765,60 @@ navigation's map synchronous or not (R0588, R0589). Each block stamps BUILD_BUDG
 frame while ~100 garrison men spawn and think, and CI runs that at 2-3 frames a second. Worth a
 look: stamping off the main thread, or a budget shared by the blocks building at once.
 
+### F-317 (done 2026-10-31, feat/breach-and-clear): breaching holes too small
+Captain's list 2026-10-14, item 3. The doorway cut (8364ee1, 2026-10-21) had already replaced the
+round carve, at 1.3 x 2.2 m picked by eye, cut from the ground outside only. Now
+[charges.gd](../../scripts/combat/charges.gd) sizes it from the soldier's capsule, his kit and a
+margin (1.5 x 2.25 m, Proposed consts) and cuts it from the lower of the two floors either side up
+to the higher one plus that height (`hole_floors`, `wall_depth`). The `breach` suite sweeps a
+capsule the size of a soldier in kit through holes in the compound's concrete wall and a generated
+stone house's wall.
+
+### F-318 (done 2026-10-31, feat/breach-and-clear): "Breach and clear" through walls
+`Squad.order_breach_clear` (menu Move > Clear > 4, context menu, voice), `SquadTactics.breach_op`,
+`wall_at`, `wall_toward`, `yard_beyond`, `wall_breach_for` (an AI team's own), and in SquadAI
+`_watch_breach`, `_hole_open`, `_wall_breacher_lost`. Squad AI and tactics files, which were
+Captain's Claude's and are now cghath's: the changes are additive (a wall op carries `"wall"`;
+every other clearance's path is unchanged except `clear_op`'s two new optional arguments).
+
+### F-319 (open): a breach and clear's stack can stand past the building's corner
+The stack stands off 3 m further along the wall from the charge (`Squad.stand_off`, as for every
+charge). On a short wall that puts the last of four round the corner, out of sight of the hole;
+they still go in on time. A stand-off that keeps to the wall's length (or one side out from it)
+would look tidier.
+
+### F-320 (open): a hole opened by anyone's charge isn't a way in for a squad's own clearance yet
+Buildings finds a breach as an entrance once the navmesh is rebaked through it, but the clearance
+(`clear_op`) uses the entrance nearest the team, so a hole a player blew is used only when it
+happens to be nearest. Picking a fresh breach first (Charges.recent) would let "Clear" follow a
+player's own charge without the breach and clear order.
+
+### F-322 (guarded 2026-10-31, feat/breach-and-clear): the first building lookup behind a wall came back empty once
+In R0723 the `breach` suite's first `Squad.breach_target` on the main building's east wall (just
+after a lookup on the perimeter wall) found no building behind it, and the same call a minute
+later in the order found it; R0721 and R0724 found it first time. In a game an empty answer fell
+to the yard case (they blew the wall, went in and held just inside instead of clearing room by
+room), and off headless it was common: `Buildings.near` is held to 4 ms a frame there, and a scan
+cut short with nothing cached comes back empty. Review of 7b6d7576: the order's lookup is now
+exact (`Buildings.nearest(..., exact)`, never budgeted: a player's order is a one-off), and an
+empty answer whose far side passes `Buildings.inside` (`SquadTactics.building_beyond`) is refused
+("try again") instead of becoming a yard. The test's 5 s retry is gone: it asks once, on a cold
+cache, budgeted as a player's machine is. Why the headless lookup missed once in R0723 is still
+not known (a guess: cells probed while the navmesh was being rebaked after the perimeter wall's
+hole, kept for CACHE_S); it can no longer send a team into a building as if into a yard.
+
+### F-373 (open): a charge's stand-off moves the ordered team only, not followers at the wall
+`Squad.stand_off` moves the stack's spots 3 m along the wall from the charge, but squadmates
+not in the order (following the leader, or holding) who happen to stand by the wall stay where
+they are while it burns; nothing in the AI keeps clear of a live charge (no `Charges` lookup
+outside the stack's own beats). A small fix isn't there: it needs every follower's spot (or
+`_go` itself) to step out of a burning charge's BLAST_SAFE_M, which touches follow, hold and
+cover for every squad. Left for now (review of feat/breach-and-clear; F-319's neighbourhood).
+
+### F-321 (note): breach and clear in Stealth
+In Stealth the stack still sets the charge (it's the order) but puts no bang through
+(`_bang_plan`). Nothing quiets the blast; a quiet wall breach (cutting through) isn't modelled.
+
 ## F-195 to F-197: combined arms D1's hints in the world files (notes, nothing to fix)
 
 Branch `claude/ca-d1-operation-zones` (docs/combined_arms.md 6.2, phase D1: operation zones of
@@ -2124,6 +2178,15 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Breach hole (F-317): sized from the soldier: 2 x (capsule 0.3 + kit 0.2 + edge 0.25) = 1.5 m wide, 1.8 + 0.2 helmet/NVG + 0.25 = 2.25 m high, cut from the lower floor either side of the wall up to the higher plus that (Proposed consts in Charges) | Captain's "holes too small"; a soldier in kit walks through without snagging on ragged voxels or a raised floor | keep 1.3 x 2.2 picked by eye
+2026-10-31 | "Breach and clear" (F-318) replaces Move > Clear > 4 "blow a way in (charge)" in the command menu; at a doorway it does what that did; voice "breach and clear" moves from the flashbang clear to it ("bang and clear", "flash and clear" stay on the flashbang) | the Clear menu had no free key; the new order covers the old one | a new submenu, or another key layer
+2026-10-31 | Breach and clear: the stack waits until the hole is on the navmesh (a path through it at most 2 m longer than straight), at most 5 s after the blast, then the bang (flashbang on the usual rules) and in (Proposed) | going at once walked them round to the door before the rebake landed, and a bang thrown at once could bounce off the old collider | a fixed delay
+2026-10-31 | Breach and clear with nobody selected carrying a charge but the leader (a player) carrying one: they stack and hold for his charge, as a human breacher's Clear does; with none at all the order is refused | the leader can still make the hole himself | refuse unless an AI has one
+2026-10-31 | An AI team's own wall breach: only against a held building, with a charge in the entry team, out of Stealth, nobody inside who mustn't be hurt, and the door 6 m or more further than the facing wall (Proposed) | keeps today's door entries everywhere else (other suites rely on them) while not walking round under the defenders' guns | always breach the wall when a charge is carried
+2026-10-31 | Breach and clear through a wall with no building behind it (a compound perimeter): through and hold just inside, four spots 2-3.5 m in, fanned 1.6 m (Proposed) | the order says "through walls"; a yard has no rooms to clear | refuse it
+2026-10-31 | Breach and clear's building lookup behind the wall is exact (never cut short by Buildings' 4 ms frame budget); no building found but the far side walled in by Buildings' own inside test: refused "Can't make out the building past that wall, try again"; a wall with the building on both sides: refused | a player's order is one scan, once, and a wrong yard blows the wall and skips the clearing | a roof test alone (the compound's main building has no roof), or retrying the lookup over the next ticks
+2026-10-31 | Breach and clear on the leader's own charge, he goes down or leaves before it blows: his blast by the spot still counts, a charge still burning there is waited out, else the next with a charge sets it where he pointed, else the building's door; he goes in some other way: they follow by the building's door nearest him (a yard: in after the hole's 5 s wait) | the stack held at the wall for ever (review of 7b6d7576) | give the order up when he goes down
+2026-10-31 | Breach and clear's door fallback (every charge carrier down, or the setter out of charges at the wall) ends the setter's work at the wall (`op.breaching` off, `breach_from` gone): the team restacks by the door and its breach waits for the stack; the stand-off for followers not in the order is left (F-373) | the setter worked the new door from where he stood and the team went before restacking (review of feat/breach-and-clear) | hand the door to the setter as the team's breacher (a kick) without restacking
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
