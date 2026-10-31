@@ -527,10 +527,6 @@ func _test_reload_beats() -> void:
 		"third person, near: the charging handle went back %.2f m, the cover up %.2f rad, and the weapon's whole again after" % [seen.bolt3, seen.cover3])
 
 
-## Feel round 2 (2026-10-20): an AI's reload drawn in third person as first person plays it.
-## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
-## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
-## the new one carried up and in, and the carrier locked back until the catch is slapped.
 ## The legs' hitboxes follow the legs as drawn (the model pass's leftover, 2026-10-27), as the arms'
 ## do: the drawn left thigh swung forward by hand, the boxes posed again, its box turns with it.
 func _test_leg_boxes() -> void:
@@ -624,6 +620,10 @@ func _test_arm_hits() -> void:
 	await _frames(2)
 
 
+## Feel round 2 (2026-10-20): an AI's reload drawn in third person as first person plays it.
+## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
+## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
+## the new one carried up and in, and the carrier locked back until the catch is slapped.
 func _test_third_person_reload() -> void:
 	print("Third person: an AI's empty M4 reload")
 	var s := level.spawn_soldier({"name": "WpnReloader", "faction": "hostile", "variant": "urban",
