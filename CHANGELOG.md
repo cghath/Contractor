@@ -26,6 +26,12 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
   carried, so where a downed body lies and where it is reached are unchanged.
 
+#### Fixed
+- **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
+  running, started before the wall was blown, counted as the breach's own, so on a slow runner
+  the check ran on the old navmesh ("30.2 m round for 1.5 m", CI 41186733348). It now counts only
+  bakes that finish after the town reports the breach (tests only).
+
 ### SVD Dragunov's own model (2026-10-20: realistic weapons)
 
 #### Changed

@@ -2128,6 +2128,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | feat/vault-legs-svd: the SVD's items.json conflict keeps dev's entry (the "dmr" tag, "rare" rarity) and changes only model_style "ak" -> "svd" | dev's data is newer; the branch changed nothing else there | take the branch's line whole
 2026-10-31 | feat/vault-legs-svd: the SVD-S keeps the AK model (F-345) | a folding tube stock, not the SVD's thumbhole; the "svd" style would draw the wrong stock | give it "svd" for the magazine and handguard
 2026-10-31 | feat/vault-legs-svd: claude/vault-legs merged as it was | its leg hitboxes follow the drawn legs only while up and not carried (downed bodies, body_point and reach unchanged), and the hand plant uses dev's own mantle flag (`climbing`) and WORLD_MASK | only the hand plant, keeping the legs' boxes on the rest pose
+2026-10-31 | feat/vault-legs-svd: townperf's breach-and-seam red on CI 41186733348 (same wall as the local pass R0746, rebaked (1, 1)) read as a test race, not the merge: a fight's rebake started before the carves counted as the breach's own and ended the wait before BREACH_CHECK_S reported the breach; the test now counts only rebakes after VoxelWorld.breached (tests/townperf_test.gd only) | the diff feeds nothing into the nav bake; 45 rebakes run during the fight | rerun until green and leave the race in
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

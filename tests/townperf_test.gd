@@ -315,9 +315,19 @@ func _check_breach_and_proxy_seams(nav: ZoneNav, town: ZoneModule) -> void:
 	var w: Dictionary = walls[walls.size() / 2]
 	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(w.a + Vector3.UP, w.b + Vector3.UP, Throwables.WORLD_MASK))
 	var at: Vector3 = hit.position
-	var rebakes := {}  # chunk -> rebakes since the breach
+	var rebakes := {}  # chunk -> rebakes since the breach was reported
 	var built_rebakes := {}  # chunk -> rebakes once the town's voxels were built again
+	# Only bakes that finish after the town reported the breach count: the fight leaves rebakes
+	# running (45 in its 900 ticks, R0746), and one started before the carves finishes with the
+	# wall still whole. Counted, it let the wait below end before the breach's own rebake (the
+	# VoxelWorld checks its carves every BREACH_CHECK_S) on CI's slower runner (41186733348:
+	# "both rebaked (1, 1)", the path 30.2 m round). ZoneNav.watch connected first, so the
+	# breach's rebake is asked for (or queued behind the running one) before this sees it.
+	var reported := {"breach": false}
+	town.voxel_world.breached.connect(func(_gap: AABB) -> void: reported.breach = true)
 	var count := func(c: Vector2i) -> void:
+		if not reported.breach:
+			return
 		rebakes[c] = int(rebakes.get(c, 0)) + 1
 		if town.voxel_world and town.voxel_world.is_built():
 			built_rebakes[c] = int(built_rebakes.get(c, 0)) + 1
