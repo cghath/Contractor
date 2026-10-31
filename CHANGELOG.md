@@ -11,6 +11,37 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Breaching holes a soldier fits through, and "Breach and clear" through walls (feat/breach-and-clear)
+
+Captain's list 2026-10-14, item 3: "breaching charges make holes too small; add a 'Breach and
+clear' team order through walls" (F-317, F-318).
+
+- **Changed (charges):** a wall charge's hole is sized from the soldier who goes through it: his
+  capsule (0.3 m round, 1.8 m tall), his kit (0.2 m each side, 0.2 m over the helmet) and 0.25 m
+  of ragged edge each side: 1.5 m wide and 2.25 m high (was 1.3 x 2.2), all Proposed
+  (`Charges.SOLDIER_R`, `KIT_M`, `HEAD_KIT_M`, `SNAG_M`). It's cut from the lower of the floors
+  either side of the wall up to the higher one plus that height (`Charges.hole_floors`,
+  `wall_depth`), so a building's floor above the street or a slope under the wall no longer
+  leaves a low hole or a sill inside.
+- **Added (squad):** "Breach and clear" (Command menu Move > Clear > 4, replacing "blow a way in
+  (charge)"; the building's context menu; voice "breach and clear", "breach the wall", "blow the
+  wall"): the team stacks along the wall the leader points at, the one with a breaching charge (a
+  breacher first) sets it there, the stack holds clear of its blast, it blows, and once the hole
+  is on the navmesh they put a flashbang through on the usual rules and go in with the clearance's
+  CQB, rooms nearest the hole first, and hold inside. At a doorway it's the door's charge breach; a
+  wall with no building behind it opens into the yard past it; nobody selected with a charge but
+  the leader carrying one: they stack and hold for his. If the setter goes down, the next with a
+  charge takes it on, else they use the building's door (`Squad.order_breach_clear`,
+  `SquadTactics.breach_op`, `SquadAI._hole_open`, `_wall_breacher_lost`).
+- **Added (AI):** an AI team clearing a held building whose door is round the far side (6 m or more
+  further than the wall facing them, Proposed) with a charge among them blows its own way in
+  through that wall (`SquadTactics.wall_breach_for`).
+- **Added (tests):** new suite `breach` (in tools/run_tests.sh and CI): the hole passes a soldier
+  in kit through the compound's concrete wall and a generated stone house's wall (and didn't
+  before), the navmesh is rebaked through it; the yard and the AI team's choice; the order's stages
+  in order, nobody in the blast, the team in through the hole and inside; a client process sees the
+  charge, the blast, the hole and the team inside.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

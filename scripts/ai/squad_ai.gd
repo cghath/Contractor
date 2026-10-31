@@ -3745,12 +3745,15 @@ func _set_charge(op: Dictionary, spot: Dictionary) -> float:
 		return 0.0
 	var at: Vector3 = spot.at
 	var face: Vector3 = spot.face
-	if charges.server_place_at(body, Charges.surface_transform(at, face, Vector3.UP)) == "":
+	var id := charges.server_place_at(body, Charges.surface_transform(at, face, Vector3.UP))
+	if id == "":
 		return 0.0
 	var door: Vector3 = op.entrance.door
 	op.entrance = (op.entrance as Dictionary).duplicate()  # (the building's own entrance stays where it is)
 	op.entrance.door = Vector3(at.x, door.y, at.z) + face * 0.3  # in through the new hole
 	op.charge_at = at
+	op.charge_id = id
+	SquadTactics.note_stage(op, "charge_set")
 	return MissionRegistry.setting_f("charge_fuse_s", 10.0) + 0.8
 
 
@@ -3888,6 +3891,9 @@ func _work_door(op: Dictionary, now: float) -> void:
 			_callout(&"tactic", "Breaching! Charge set!")
 			_breach_done(op, now, fuse)
 			return
+		if bool(op.get("wall", false)):
+			_wall_breacher_lost(op)  # a wall can't be kicked in: the next with a charge sets it
+			return
 		how = "kick"  # none left (or no place for it): kick it in
 		op.door = how
 	var spot := NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, door + normal * DOOR_SPOT_M)
@@ -3951,7 +3957,9 @@ func _breach_done(op: Dictionary, now: float, wait: float) -> void:
 	op.breaching = false
 	op.breached = true
 	var bang := String(op.get("bang", ""))
-	if bang != "" and int(op.get("bang_by", -1)) >= 0:
+	if bool(op.get("wall", false)):
+		op.go_at = now + wait  # then the hole's gate (_hole_open) times the bang and the go
+	elif bang != "" and int(op.get("bang_by", -1)) >= 0:
 		op.bang_at = now + wait + BANG_AFTER_S
 		op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
 	else:
@@ -3984,6 +3992,106 @@ func _lead_breached(op: Dictionary, lead: Soldier) -> bool:
 	var w := lead.active_weapon()
 	var shotgun := (w != null and "shotgun" in w.tags) or Shotguns.key_of(lead) != null  # (his Skeleton Key too)
 	return lead.last_shot_at >= since and shotgun and lead.last_shot_to.distance_to(door + Vector3.UP * 1.0) <= LEAD_SHOT_M
+
+
+## Breach and clear (Squad.order_breach_clear, SquadTactics.breach_op; F-318), host: once the
+## charge is set, any of the stack notes the beats as they come: the setter back at his place in
+## the stack before it goes ("backed_off"), and the charge gone off ("blown", which starts the
+## hole's clock: _hole_open).
+func _watch_breach(op: Dictionary, slot: int, now: float) -> void:
+	if not op.has("charge_id") or op.has("blown_at"):
+		return
+	var charges := Charges.of(body)
+	if charges == null or not charges.records.has(String(op.charge_id)):
+		op.blown_at = now
+		SquadTactics.note_stage(op, "blown")
+		return
+	if slot == int(op.get("breacher", -1)) and _flat_distance(op.stack[slot]) <= SquadTactics.STACK_READY_M:
+		SquadTactics.note_stage(op, "backed_off")
+
+
+## The stack goes in through its hole once the hole is on the navmesh (the host rebakes round a
+## breach: NavBuilder, ZoneNav), so nobody walks round to the building's door instead: when a
+## path from just outside the hole to the step inside it runs through it (no more than
+## HOLE_PATH_SLACK_M longer than straight), or HOLE_NAV_WAIT_S after the blast whatever the
+## navmesh says. Then the bang through it (if the plan has one) and in after it, ENTRY_GAP_S
+## apart. Checked every HOLE_CHECK_S. Proposed.
+const HOLE_NAV_WAIT_S := 5.0
+const HOLE_PATH_SLACK_M := 2.0
+const HOLE_CHECK_S := 0.25
+
+
+func _hole_open(op: Dictionary, now: float) -> bool:
+	if bool(op.get("hole_ok", false)):
+		return true
+	if not op.has("blown_at") or now < float(op.get("hole_checked_at", -INF)) + HOLE_CHECK_S:
+		return false
+	op.hole_checked_at = now
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	var step := door - normal * float(op.get("step_m", DOORWAY_STEP_M))
+	var map := body.get_world_3d().navigation_map
+	var from := NavigationServer3D.map_get_closest_point(map, door + normal * 0.8)
+	var to := NavigationServer3D.map_get_closest_point(map, step)
+	var path := NavigationServer3D.map_get_path(map, from, to, true)
+	var length := 0.0
+	for i in range(1, path.size()):
+		length += path[i - 1].distance_to(path[i])
+	var through := path.size() >= 2 and path[-1].distance_to(to) < 0.5 and to.distance_to(step) < 0.8 and length <= from.distance_to(to) + HOLE_PATH_SLACK_M
+	if not through and now - float(op.blown_at) < HOLE_NAV_WAIT_S:
+		return false
+	op.hole_ok = true
+	SquadTactics.note_stage(op, "hole_open")
+	if not through:
+		SessionLog.note("breach and clear: the hole isn't on the navmesh %.0f s after the blast; in anyway" % HOLE_NAV_WAIT_S)
+	var bang := String(op.get("bang", ""))
+	if bang != "" and int(op.get("bang_by", -1)) >= 0 and not op.has("bang_at"):
+		op.bang_at = now + BANG_AFTER_S
+		op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
+	else:
+		op.go_at = now
+	_callout(&"tactic", "Moving in!")
+	return true
+
+
+## A wall breach's charge setter is down, or has none left to set: the next of the stack who
+## carries one takes it on (he goes to the wall from his place); with nobody, the team goes in
+## by the building's own nearest door instead (a clearance as Clear's, the bang its breach), or,
+## past a wall with no building behind it, gives it up.
+func _wall_breacher_lost(op: Dictionary) -> void:
+	var units := _op_units(op)
+	for ai: SquadAI in units:
+		if ai != op.get("breacher_ai") and Vitals.has_item(ai.body.inventory, BREACH_ITEMS["charge"]):
+			op.breacher = int(ai._tactic().get("slot", 0))
+			op.breacher_ai = ai
+			op.breaching = false
+			op.erase("breach_from")
+			ai._callout(&"tactic", "I've got the charge!")
+			return
+	var b: Dictionary = op.building
+	var e := Buildings.entrance_near(b, op.entrance.door as Vector3)
+	if e.is_empty() or units.is_empty():
+		for ai: SquadAI in units:
+			ai._tactic_done(ai._tactic())
+		_callout(&"tactic", "No charge to breach with!")
+		SessionLog.note("breach and clear: nobody left with a charge, no door either: given up")
+		return
+	op.wall = false
+	op.erase("charge_spot")
+	op.erase("step_m")
+	op.entrance = e
+	op.door = ""
+	op.breach = op.get("bang", "")
+	var map := body.get_world_3d().navigation_map
+	var side := 1.0 if (body.global_position - (e.door as Vector3)).dot((e.normal as Vector3).cross(Vector3.UP)) >= 0.0 else -1.0
+	var stack: Array[Vector3] = []
+	for i in (op.stack as Array).size():
+		stack.append(SquadTactics.stack_spot(b, e, map, side, i, stack))
+	op.stack = stack
+	op.ready = {}
+	op.first_ready_at = INF
+	_callout(&"tactic", "No charge! Using the door!")
+	SessionLog.note("breach and clear: nobody left with a charge: in by the door at (%.1f, %.1f)" % [(e.door as Vector3).x, (e.door as Vector3).z])
 
 
 ## The breach this unit's team would choose itself against a building the enemy holds (Captain:
@@ -4037,9 +4145,16 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			# breacher: until his breach (then the bang, then in), or until he goes in.
 			if (op.ready as Dictionary).size() >= int(op.units) and not bool(op.get("told", false)):
 				op.told = true
+				SquadTactics.note_stage(op, "stacked")
 				_callout(&"tactic", "Stacked up. Your breach." if bool(op.get("on_breach", false)) else "Stacked up. On you.")
 			if bool(op.get("on_breach", false)) and not bool(op.get("breached", false)) and _lead_breached(op, lead as Soldier):
 				op.breached = true
+				if bool(op.get("wall", false)):
+					op.blown_at = now  # his charge through the wall: in once the hole's open (_hole_open)
+					SquadTactics.note_stage(op, "blown")
+					op.go_at = now
+					_callout(&"tactic", "Moving in!")
+					return
 				var bang := String(op.get("bang", ""))
 				if bang != "" and int(op.get("bang_by", -1)) >= 0:
 					op.bang_at = now + BANG_AFTER_S
@@ -4055,11 +4170,15 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 				_callout(&"tactic", "Moving in!")
 			return
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
+			SquadTactics.note_stage(op, "stacked")
 			if String(op.get("door", "")) != "" and not op.get("breached", false):
 				if breacher_up(op):
 					if not bool(op.get("breaching", false)):
 						op.breaching = true  # the breacher works the door (_work_door); the rest hold
 						op.breach_from = now
+					return
+				if bool(op.get("wall", false)):
+					_wall_breacher_lost(op)
 					return
 				op.door = ""  # he's down: in their own way
 				op.breach = op.get("bang", "")
@@ -4073,6 +4192,12 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			op.go_at = now + wait
 			_callout(&"tactic", "Breaching!" if wait > 0.0 else "Going in!")
 		return
+	if bool(op.get("wall", false)):
+		_watch_breach(op, slot, now)
+		if now >= float(op.go_at) and not _hole_open(op, now):
+			_has_destination = false
+			_face(door)
+			return
 	if now < float(op.go_at) + slot * SquadTactics.ENTRY_GAP_S:
 		if now < float(op.go_at) and _flat_distance(op.stack[slot]) > SquadTactics.STACK_READY_M:
 			_go(op.stack[slot], true)  # the breacher, back from the doorway (or the charge) to his place
@@ -4094,11 +4219,12 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 	var through: Dictionary = op.get("through", {})
 	op["through"] = through
 	if level == 0 and not through.has(slot):
-		var inside: Vector3 = (op.entrance.door as Vector3) - (op.entrance.normal as Vector3) * DOORWAY_STEP_M
+		var inside: Vector3 = (op.entrance.door as Vector3) - (op.entrance.normal as Vector3) * float(op.get("step_m", DOORWAY_STEP_M))
 		if _flat_distance(inside) > ARRIVE + 0.2 and _flat_distance(corner) > _flat_between(inside, corner):
 			_go(inside, true)
 			return
 		through[slot] = true
+		SquadTactics.note_stage(op, "through")
 	if _flat_distance(corner) > ARRIVE + 0.3:
 		_go(corner, true)
 		return
@@ -4132,6 +4258,8 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			op.floor_of[slot] = level + 1
 		return
 	op.done[slot] = true
+	if (op.done as Dictionary).size() >= int(op.units):
+		SquadTactics.note_stage(op, "clear")
 	if not ordered.is_empty():
 		if (op.done as Dictionary).size() >= int(op.units) and not bool(op.get("called", false)):
 			op.called = true

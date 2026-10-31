@@ -36,9 +36,24 @@ const SIZE := Vector3(0.22, 0.06, 0.14)
 ## BREACH_DEPTH_M deep (VoxelWorld.server_breach); its blast rounds the edges off above that
 ## floor only, and the ground isn't cratered. One set higher than BREACH_HIGH_M over the floor
 ## cuts the hole round itself instead. On the ground (or anything else) its crater is CRATER_M.
+##
+## The hole's size (Captain's list 2026-10-14, item 3: "breaching charges make holes too small";
+## F-317): sized from the soldier who goes through it, not picked by eye. His capsule
+## (scenes/soldier.tscn: SOLDIER_R round, SOLDIER_H tall) plus his kit (KIT_M each side at the
+## shoulders: a plate carrier's pouches, a ruck's sides, a rifle held low; HEAD_KIT_M over the
+## helmet: its NVG mount), plus SNAG_M of ragged voxel edge and walking off the middle on every
+## side but the floor: 1.5 m wide and 2.25 m high (it was 1.3 x 2.2). It's cut from the lower of
+## the floors either side of the wall up to the higher one plus that height (a building's floor
+## stands above the street, or a slope runs under the wall: floor_y, hole_floors), so it's as
+## high from the floor inside as from the ground outside. All Proposed.
 const WALL_NORMAL_Y := 0.5
-const BREACH_W_M := 1.3
-const BREACH_H_M := 2.2
+const SOLDIER_R := 0.3
+const SOLDIER_H := 1.8
+const KIT_M := 0.2
+const HEAD_KIT_M := 0.2
+const SNAG_M := 0.25
+const BREACH_W_M := 2.0 * (SOLDIER_R + KIT_M + SNAG_M)
+const BREACH_H_M := SOLDIER_H + HEAD_KIT_M + SNAG_M
 const BREACH_DEPTH_M := 1.2
 const BREACH_HIGH_M := 1.9
 const CRATER_M := 0.4
@@ -218,10 +233,13 @@ func _detonate(id: String) -> void:
 	Throwables.server_detonate(lvl, "frag", pos, &"", CHARGE_TNT_KG, false, wall)
 	var radius := MissionRegistry.setting_f("charge_radius_m", 1.6)
 	if wall != Vector3.ZERO:
-		var floor_y := floor_under(lvl, pos, wall)
+		var floors := hole_floors(lvl, pos, wall)
+		var floor_y: float = floors.x
+		var high := BREACH_H_M + (floors.y - floors.x)  # as high over the higher floor as over the lower
 		if pos.y - floor_y > BREACH_HIGH_M:
 			floor_y = pos.y - BREACH_H_M * 0.5
-		lvl.server_breach(pos, wall, floor_y, BREACH_W_M, BREACH_H_M, BREACH_DEPTH_M)
+			high = BREACH_H_M
+		lvl.server_breach(pos, wall, floor_y, BREACH_W_M, high, BREACH_DEPTH_M)
 		lvl.server_blast(pos, minf(radius, maxf(pos.y - floor_y, 0.2)), 0.0)  # ragged edges, nothing below the floor, no crater
 	else:
 		lvl.server_blast(pos, radius, CRATER_M)
@@ -255,6 +273,38 @@ static func floor_under(lvl: Node3D, pos: Vector3, normal: Vector3) -> float:
 	if hit.is_empty():
 		return pos.y - 1.0
 	return minf((hit.position as Vector3).y, pos.y - 0.1)
+
+
+## The floors either side of the wall a charge at `pos` sits on (`normal` its outer face), as
+## Vector2(lower, higher): the ground at its foot outside (floor_under) and the floor behind it,
+## straight down from just past the wall's inner face (wall_depth); with no inner face found
+## within BREACH_DEPTH_M (a wall thicker than that, or the far side solid), the outside one twice.
+## Never above the charge.
+static func hole_floors(lvl: Node3D, pos: Vector3, normal: Vector3) -> Vector2:
+	var outside := floor_under(lvl, pos, normal)
+	var depth := wall_depth(lvl, pos, normal)
+	if depth < 0.0:
+		return Vector2(outside, outside)
+	var from := pos - normal * (depth + 0.35) + Vector3.UP * 0.1
+	var hit := lvl.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 4.0, 1))
+	if hit.is_empty():
+		return Vector2(outside, outside)
+	var inside := minf((hit.position as Vector3).y, pos.y - 0.1)
+	return Vector2(minf(outside, inside), maxf(outside, inside))
+
+
+## How thick the wall a charge at `pos` sits on is (`normal` its outer face): from the charge to
+## its inner face, found from behind it (a level ray back out from BREACH_DEPTH_M in); -1 when no
+## inner face is found that close (a ray that starts inside something solid finds nothing).
+static func wall_depth(lvl: Node3D, pos: Vector3, normal: Vector3) -> float:
+	var n := Vector3(normal.x, 0.0, normal.z).normalized()
+	var from := pos - n * (BREACH_DEPTH_M + 0.1)
+	var query := PhysicsRayQueryParameters3D.create(from, pos + n * 0.02, 1)
+	query.hit_back_faces = false
+	var hit := lvl.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty() or (hit.normal as Vector3).dot(n) > -0.5:
+		return -1.0
+	return maxf((pos - (hit.position as Vector3)).dot(n), 0.0)
 
 
 ## Host: where a charge went off within `radius_m` of `point` (flat) since `since`, placed by the

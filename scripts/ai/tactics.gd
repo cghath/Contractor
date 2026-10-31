@@ -705,7 +705,11 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 				entry.append(ai)
 		entry = Squad.breacher_first(entry)  # a breacher first at the door, and he makes the way in
 		var op := clear_op(b, entry) if not entry.is_empty() else {}
-		if not op.is_empty():
+		var through_wall := wall_breach_for(b, entry, op)
+		if not through_wall.is_empty():
+			op = through_wall  # their own way in, through the wall facing them (entry reordered: the charge's setter first)
+			print("[tactics] %s: %s blow a way in through the wall at (%.0f, %.0f)" % [squad.name, _names(entry), op.entrance.door.x, op.entrance.door.z])
+		elif not op.is_empty():
 			op["breach"] = SquadAI.preferred_breach(entry)
 			var bp := squad.breach_plan(b, entry, "auto")
 			if not bp.is_empty():
@@ -733,6 +737,44 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 			first._callout(&"tactic", "Clear!")
 			mark_cleared(first, op.entrance.door)
 		print("[tactics] %s: building clear" % squad.name)
+
+
+## An AI team's own breach and clear (F-318; Squad.order_breach_clear is the order): against the
+## held building, with a breaching charge among the entry team, out of Stealth and with nobody
+## inside who mustn't be hurt, when the nearest door (`door_op`'s, from clear_op) is round the
+## far side, WALL_BREACH_DETOUR_M or more further from the team than the wall facing them, they
+## blow their own way in through that wall instead of walking round under the defenders' guns.
+## Returns that op (breach_op, its plan on it; `entry` reordered with the charge's setter first),
+## {} otherwise. Proposed.
+const WALL_BREACH_DETOUR_M := 6.0
+
+
+func wall_breach_for(b: Dictionary, entry: Array[SquadAI], door_op: Dictionary) -> Dictionary:
+	if entry.is_empty() or bool(b.get("yard", false)):
+		return {}
+	var team := Squad.charge_first(entry)
+	if team.is_empty() or team.any(func(ai: SquadAI) -> bool: return ai.combat_mode == Squad.CombatMode.STEALTH) or squad.noncombatant_inside(b):
+		return {}
+	var from := Vector3.ZERO
+	for ai: SquadAI in team:
+		from += ai.body.global_position
+	from /= team.size()
+	var wall := wall_toward(team[0].body.get_world_3d(), b, from)
+	if wall.is_empty():
+		return {}
+	var door_d := INF
+	if not door_op.is_empty():
+		var outside: Vector3 = door_op.entrance.outside
+		door_d = Vector2(outside.x - from.x, outside.z - from.z).length()
+	var wall_d := Vector2((wall.at as Vector3).x - from.x, (wall.at as Vector3).z - from.z).length()
+	if door_d - wall_d < WALL_BREACH_DETOUR_M:
+		return {}
+	var op := breach_op(b, team, wall)
+	if op.is_empty():
+		return {}
+	squad.plan_wall_breach(op, b, team)
+	entry.assign(team)
+	return op
 
 
 # --- The reels' drills (docs/ai_tactics.md) ------------------------------------------------------
@@ -1173,14 +1215,16 @@ static func garrison_tasks(b: Dictionary, units: Array, threat: Vector3) -> Dict
 ## floor's "floor_done" (at their corner there; "floor_go" when the next floor's turn comes),
 ## and "done" (at their corner on the last floor). "rooms": the first floor's corners. {} if
 ## the building has no way in.
-static func clear_op(b: Dictionary, units: Array) -> Dictionary:
+## `entrance` (a breach and clear's hole to be: breach_op) stands in for the building's own nearest
+## entrance; with `first_near` finite, the ground floor's rooms are taken nearest it first.
+static func clear_op(b: Dictionary, units: Array, entrance := {}, first_near := Vector3.INF) -> Dictionary:
 	if units.is_empty() or b.get("rooms", []).is_empty():
 		return {}
 	var from := Vector3.ZERO
 	for ai: SquadAI in units:
 		from += ai.body.global_position
 	from /= units.size()
-	var e := Buildings.entrance_near(b, from)
+	var e := Buildings.entrance_near(b, from) if entrance.is_empty() else entrance
 	if e.is_empty():
 		return {}
 	var normal: Vector3 = e.normal
@@ -1197,6 +1241,11 @@ static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 			per_floor.append(f.rooms)
 	if per_floor.is_empty():
 		per_floor.append(range(b.rooms.size()))
+	if first_near.is_finite():
+		var nearest_first: Array = (per_floor[0] as Array).duplicate()
+		nearest_first.sort_custom(func(i: int, j: int) -> bool:
+			return (b.rooms[i].centre as Vector3).distance_to(first_near) < (b.rooms[j].centre as Vector3).distance_to(first_near))
+		per_floor[0] = nearest_first
 	var floors: Array = []
 	for list: Array in per_floor:
 		var corners: Array[Vector3] = []
@@ -1213,6 +1262,150 @@ static func clear_op(b: Dictionary, units: Array) -> Dictionary:
 	return {"building": b, "entrance": e, "stack": stack, "rooms": floors[0], "floors": floors, "units": units.size(),
 		"ready": {}, "first_ready_at": INF, "go_at": INF, "done": {}, "floor_of": {}, "floor_done": floor_done,
 		"floor_first": floor_go.duplicate(), "floor_go": floor_go}
+
+
+## Breach and clear (Captain's list 2026-10-14, item 3: "add a 'Breach and clear' team order
+## through walls"; F-318): a clearance (clear_op) whose way in is a hole the team blows in a wall,
+## `wall` ({"at": a point on the wall's outer face, "face": its outward normal}; wall_at,
+## wall_toward). Its entrance is the wall's foot there ("door" just off the face, "normal" the
+## face, "inside" past the wall), so the stack forms along that wall (stack_spot; then stood off
+## from the charge: Squad.stand_off) and the rooms nearest the hole are taken first. The op
+## carries "wall": true, "charge_spot" (the charge goes where he pointed: SquadAI._work_door) and
+## "step_m", how far in from the hole each man steps before his corner (the wall's thickness and
+## a stride, not a doorway's DOORWAY_STEP_M). `b` may be a yard (yard_beyond). {} with no rooms.
+## Proposed.
+const BREACH_STEP_PAST_M := 0.7
+const WALL_DEPTH_GUESS_M := 0.4
+
+
+static func breach_op(b: Dictionary, units: Array, wall: Dictionary) -> Dictionary:
+	if units.is_empty() or wall.is_empty():
+		return {}
+	var body := (units[0] as SquadAI).body
+	var at: Vector3 = wall.at
+	var face: Vector3 = wall.face
+	var lvl := CompoundLevel.current(body) as Node3D
+	var depth := Charges.wall_depth(lvl, at, face) if lvl else -1.0
+	if depth < 0.0:
+		depth = WALL_DEPTH_GUESS_M
+	var map := body.get_world_3d().navigation_map
+	var foot := NavigationServer3D.map_get_closest_point(map, at + face * 0.6)
+	var door := Vector3(at.x, foot.y, at.z) + face * 0.3
+	var e := {"door": door, "inside": door - face * (0.3 + depth + BREACH_STEP_PAST_M), "outside": door + face * Buildings.OUTSIDE_M,
+		"normal": face, "wall": true}
+	var op := clear_op(b, units, e, at - face * (depth + 1.0))
+	if op.is_empty():
+		return {}
+	op["wall"] = true
+	op["charge_spot"] = {"at": at, "face": face}
+	op["step_m"] = 0.3 + depth + BREACH_STEP_PAST_M
+	op["stages"] = []
+	note_stage(op, "stacking")
+	return op
+
+
+## The wall a leader points at: `point` (on the voxels, from his crosshair) on a wall's face seen
+## from `from` ({"at", "face"}: the face's outward normal, level), or {} if it isn't on a wall
+## (the ground, a roof, a doorway's open air). The charge goes on BREACH_CHARGE_Y over the
+## ground at the wall's foot wherever on the wall he points (a charge set by hand sits about
+## there). Proposed.
+const BREACH_CHARGE_Y := 1.0
+
+
+static func wall_at(from: Soldier, point: Vector3) -> Dictionary:
+	if from == null or not from.is_inside_tree() or not point.is_finite():
+		return {}
+	var space := from.get_world_3d().direct_space_state
+	var eye := from.camera.global_position if from.camera else from.global_position + Vector3.UP * 1.6
+	var dir := point - eye
+	if dir.length() < 0.05:
+		return {}
+	dir = dir.normalized()
+	var query := PhysicsRayQueryParameters3D.create(point - dir * 0.5, point + dir * 0.5, 1)
+	query.hit_back_faces = false
+	var hit := space.intersect_ray(query)
+	if hit.is_empty() or absf((hit.normal as Vector3).y) >= Charges.WALL_NORMAL_Y:
+		return {}
+	var face := Vector3((hit.normal as Vector3).x, 0.0, (hit.normal as Vector3).z).normalized()
+	return _wall_spot(space, hit.position, face)
+
+
+## The wall of building `b` facing `from` (a point outside it: the team): the outer face where a
+## level ray from `from`'s side meets the wall in front of `b`'s ground-floor spot nearest `from`
+## ({"at", "face"}), {} if none is found within WALL_PROBE_M (another wall, or open ground).
+const WALL_PROBE_M := 5.0
+
+
+static func wall_toward(world: World3D, b: Dictionary, from: Vector3) -> Dictionary:
+	var best := Vector3.INF
+	var floors: Array = b.get("floors", [])
+	var spots: Array = (floors[0].spots as Array) if not floors.is_empty() else b.get("spots", [])
+	for s: Vector3 in spots:
+		if not best.is_finite() or Vector2(s.x - from.x, s.z - from.z).length() < Vector2(best.x - from.x, best.z - from.z).length():
+			best = s
+	if not best.is_finite():
+		return {}
+	var dir := Vector3(best.x - from.x, 0.0, best.z - from.z)
+	if dir.length() < 0.5:
+		return {}
+	dir = dir.normalized()
+	var to := best + Vector3.UP * BREACH_CHARGE_Y
+	var space := world.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(to - dir * WALL_PROBE_M, to, 1)
+	query.hit_back_faces = false
+	var hit := space.intersect_ray(query)
+	if hit.is_empty() or absf((hit.normal as Vector3).y) >= Charges.WALL_NORMAL_Y or (hit.normal as Vector3).dot(dir) > -0.5:
+		return {}
+	return _wall_spot(space, hit.position, Vector3((hit.normal as Vector3).x, 0.0, (hit.normal as Vector3).z).normalized())
+
+
+## A charge's spot on the wall face at `p` (`face` outward): BREACH_CHARGE_Y over the ground at
+## its foot (as Charges.floor_under finds it).
+static func _wall_spot(space: PhysicsDirectSpaceState3D, p: Vector3, face: Vector3) -> Dictionary:
+	var from := p + face * 0.35 + Vector3.UP * 0.1
+	var down := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 4.0, 1))
+	var ground := (down.position as Vector3).y if not down.is_empty() else p.y - BREACH_CHARGE_Y
+	return {"at": Vector3(p.x, ground + BREACH_CHARGE_Y, p.z), "face": face}
+
+
+## A wall with no building behind it (a compound's perimeter, a yard wall): what's past it, as a
+## building of one "room" for breach_op: YARD_IN_M in past the wall, its corners fanned
+## YARD_SPREAD_M either side and two further in, on the navmesh (the far side is baked though
+## nobody can reach it through the wall yet). {} if the navmesh has nothing there. Proposed.
+const YARD_IN_M := 2.0
+const YARD_SPREAD_M := 1.6
+
+
+static func yard_beyond(world: World3D, wall: Dictionary) -> Dictionary:
+	var at: Vector3 = wall.at
+	var face: Vector3 = wall.face
+	var along := face.cross(Vector3.UP)
+	var map := world.navigation_map
+	var c := at - face * (WALL_DEPTH_GUESS_M + YARD_IN_M)
+	var corners: Array[Vector3] = []
+	for off: Vector3 in [along * YARD_SPREAD_M, -along * YARD_SPREAD_M, along * YARD_SPREAD_M * 0.5 - face * 1.5, -along * YARD_SPREAD_M * 0.5 - face * 1.5]:
+		var want := c + off
+		var p := NavigationServer3D.map_get_closest_point(map, want)
+		if Vector2(p.x - want.x, p.z - want.z).length() > 0.8 or (p - at).dot(face) > -0.2:
+			return {}
+		corners.append(p)
+	var mid := NavigationServer3D.map_get_closest_point(map, c)
+	return {"centre": mid, "spots": corners.duplicate(), "rooms": [{"spots": corners.duplicate(), "centre": mid, "corners": corners, "floor": 0}],
+		"floors": [], "entrances": [], "ports": [], "stairs": [], "yard": true}
+
+
+## Breach and clear's stages, in the order they happen ("stacking", "stacked", "charge_set",
+## "backed_off", "blown", "hole_open", "through", "clear"): each noted once on the op ("stages",
+## with when), and in the session log. Only on a breach and clear's op (one with "stages").
+static func note_stage(op: Dictionary, stage: String) -> void:
+	if not op.has("stages"):
+		return
+	var stages: Array = op.stages
+	for s: Dictionary in stages:
+		if s.name == stage:
+			return
+	stages.append({"name": stage, "at": Soldier._now()})
+	SessionLog.note("breach and clear: %s" % stage)
 
 
 ## Stack spot `i` beside entrance `e` of building `b` (STACK_OUT_TRIES): outside it, on the
