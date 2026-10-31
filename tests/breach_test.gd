@@ -111,10 +111,28 @@ func _snag(spot: Vector3, n: Vector3, floor_y: float, out_m := 1.0, in_m := 1.2)
 	while d >= -in_m:
 		var p := Vector3(spot.x, floor_y + 0.1 + shape.height * 0.5, spot.z) + n * d
 		q.transform = Transform3D(Basis.IDENTITY, p)
-		if not space.intersect_shape(q, 1).is_empty():
-			return "%.1f m %s the face" % [absf(d), "out from" if d >= 0.0 else "in past"]
+		var hits := space.intersect_shape(q, 1)
+		if not hits.is_empty():
+			var what: Object = hits[0].get("collider")
+			return "%.1f m %s the face, on %s" % [absf(d), "out from" if d >= 0.0 else "in past", (what as Node).name if what is Node else "?"]
 		d -= 0.1
 	return ""
+
+
+## The sweep through a fresh hole (_snag) once the voxels' colliders have caught up with the cut:
+## the rays that find it open (_open_at) can come clear a few frames before the collider of a
+## chunk further in is rebuilt on a slow machine (CI run 41181174649, twice: touched 0.9 m in past
+## a stone house's face; never locally). A hole that's really too small still fails after
+## SNAG_SETTLE_S.
+const SNAG_SETTLE_S := 3.0
+
+
+func _snag_after(spot: Vector3, n: Vector3, floor_y: float) -> String:
+	var got := {"at": ""}  # (a lambda can't set the function's locals)
+	await _wait_until(func() -> bool:
+		got.at = _snag(spot, n, floor_y)
+		return got.at == "", SNAG_SETTLE_S)
+	return got.at
 
 
 ## A charge set by nobody at `spot` on the wall (outer face `n`), fired at once.
@@ -154,7 +172,7 @@ func _test_compound_wall() -> void:
 	await _blow(spot, n)
 	var open := await _wait_until(func() -> bool: return _open_at(spot, n, floors.y), 8.0)
 	await _physics_frames(3)
-	var after := _snag(spot, n, floors.y)
+	var after := await _snag_after(spot, n, floors.y)
 	check(before != "" and open and after == "",
 		"a soldier in kit is stopped by the wall before (at %s) and walks through the hole after without touching it (%s)" % [before, after if after != "" else "nothing touched"])
 	await _wait_until(func() -> bool: return nav.bakes > bakes and not nav.is_rebaking() and nav.map_caught_up(), 10.0)
@@ -225,7 +243,7 @@ func _test_house_wall() -> void:
 	var open := await _wait_until(func() -> bool: return _open_at(spot, n, floors.x), 8.0)
 	await _physics_frames(3)
 	level.voxel_world = compound_world
-	var after := _snag(spot, n, floors.y)
+	var after := await _snag_after(spot, n, floors.y)
 	check(depth > 0.3 and depth < 0.55, "its wall is found %.2f m thick (stone: %.2f m)" % [depth, float(BuildingGen.STYLES.stone.t)])
 	check(before != "" and open and after == "",
 		"a soldier in kit is stopped by it before (at %s) and walks through the hole after without touching it (%s)" % [before, after if after != "" else "nothing touched"])
