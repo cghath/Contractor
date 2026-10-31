@@ -15,8 +15,6 @@
 name: Nightly build
 
 on:
-  push:
-    branches: ["ci/release-on-tag"] # TEMPORARY: a try before this file is on main; removed before merging
   schedule:
     - cron: "17 4 * * *" # 04:17 UTC, after the evening's pushes on both sides
   workflow_dispatch:

@@ -29,7 +29,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    branches: ["ci/release-on-tag"] # TEMPORARY: a dry run before this file is on main; removed before merging
   workflow_dispatch:
     inputs:
       tag:

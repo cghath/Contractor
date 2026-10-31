@@ -34,6 +34,14 @@ Captain's open item 8, plus a nightly so there's something to play between versi
   and in a `GodotVoxel-1.7-windows-editor` folder next to it before `Downloads\GodotVoxel_1.7`,
   and its error names the download; BUILD.txt names the tag (GITHUB_REF_NAME) when the
   checkout has no branch.
+- **Checked:** both workflows on this branch through a temporary push trigger (since removed):
+  release dry run 41172521882 (2 min; 44 MB zip with Contractor.exe, notes from the commits
+  since v0.7.1) and nightly 41172521906 (artifact contractor-nightly-c683ff5f89); the CI-built
+  Contractor.exe started headless here and ran 300 frames with no errors. Locally: B0709 PASS
+  (tools/ci_build.sh with the editor zip), smoke R0712 PASS. Not run for real: the publish step
+  (no tag was pushed; its script ran against an inert gh double: create with --verify-tag and
+  --prerelease, upload --clobber to an existing draft, stop on a failed read), the schedule and
+  manual runs (they start only from main, F-324).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
