@@ -35,7 +35,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck, which is how
   the pelvis change looked like it broke followers). The cut never joins the trail through a wall
   (review: along a wall, in at a gate and back along its inside, the two faces lie within 1.5 m),
-  and keeps the point it cuts back to.
+  and keeps the point it cuts back to. And a man's slot back along the trail, crowded by the
+  others, slides along the trail to the nearest clear spot instead of being picked afresh, which
+  could swing it 20 m back and forward again (a man ran a 25 m loop after it, CI 41243628687).
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left

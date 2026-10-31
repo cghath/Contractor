@@ -1865,7 +1865,16 @@ picks and the team place's blocked-place fallback trust as walked ground (Captai
 rule: no slot across a wall). The cut now needs no wall between the near point and the lead
 (`_wall_between`, one ray per candidate point) and keeps the near point, so the joining segment
 is the short one just checked; spacing's "Trail" checks walk the lead out and back on a line and
-along the compound's south wall, in at the gate and back inside it. Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
+along the compound's south wall, in at the gate and back inside it.
+
+The narrowed check then caught a real loop on CI (41243628687, the PR run on cee1fc7b): Golf,
+7.1 m off his slot at the window's start, ran 25 m out and back in 8 s after a trail pick (refit
+"trail", s 38.4) swinging between about 38 and 60 m back along the lead's trail through the
+compound. Not a doubled trail this time but crowding: a held trail pick that stopped keeping
+SLOT_APART_MULT of the gap from the others was searched for afresh from about as far back as the
+slot was, which on a single-file trail shared by a team could land 20 m further back and come
+forward again the next second. A crowded trail pick now slides to the nearest clear point along
+the trail first (`TRAIL_SLIDE_M`, 12 m either way, nearer the lead first, Proposed). Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
 41220310370 twice, 41235918402, R0781; passed 41220315144, 41235916435, R0793) against 3 of 3
 passes without it on this branch (41227859540, 41227862154, R0782) and every casualty job sampled
 on other branches today. With no path from the box to the AI, and the soak seeded (casualty's
@@ -2213,6 +2222,7 @@ Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the d
 2026-10-31 | casualty soak (tests only): "stuck" no longer counts a man who walked 4 m or more (STUCK_WALK_M) after a slot that moved 5 m or more (STUCK_FAR_M) in the 8 s window | CI 41235918402's Echo walked ~30 m after a formation slot swinging 24 m round the building's corner and came back past his start; net movement alone called him stuck | count every loop as stuck (it flags men doing as told)
 2026-10-31 | casualty soak (review): the "chased" let-off narrowed to a man who walked 4 m or more and ended the window 5 m (STUCK_FAR_M) or more nearer his slot than he began it | the lead never stops in the soak, so "his slot moved 5 m" held for nearly everyone and switched loop detection off; closing on the slot is progress a loop can't fake, and it still lets off Echo (CI 41235918402, ~19 m -> 8 m) | revert to the strict check (Echo's run is a real false alarm), or measure the slot against the lead (formation slots sit still in the lead's frame, but the follow-in stack and refits don't)
 2026-10-31 | casualty soak: "stuck" also needs him more than STUCK_FAR_M off his slot at the window's start, not only its end | R0815's Bravo was 4.6 m off his slot until it leapt 29 m out past the gate (the team's place inside the wall resolving once the lead turned along its outside) and was on his way 3 s later; a man who stays stuck or keeps looping is caught a window later | count him (he wasn't stuck for the window; the strict check flags this too)
+2026-10-31 | squad trail picks: a held trail pick crowded out slides to the nearest clear trail point (up to TRAIL_SLIDE_M 12 m either way, Proposed) before a fresh search | CI 41243628687's Golf ran a 25 m loop after a trail pick swinging between 38 and 60 m back; the fresh search restarts from the flat distance to his slot and skips past every crowded stretch | call it casualty's known "stuck on the way" flake
 2026-10-31 | squad trail (review): the loop cut needs no wall between the near point and the lead, and keeps that point (resize(i + 1)) | a wall's two faces lie within TRAIL_LOOP_M, so the cut joined the trail through it and trail picks trusted it; one ray only for a candidate point within 1.5 m | drop the loop cut (it fixed the soak's leaping trail slot)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
