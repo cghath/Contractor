@@ -1813,6 +1813,23 @@ perfcases now prints, every 30 s while it waits and in the check, how many of th
 are stamped and whether its area is loaded (`VoxelWorld.build_progress`), so the next red says which.
 If it's the area: a data-only VoxelViewer on the block while it builds would load it first.
 
+**Fixed on fix/city-stall (2026-10-31), F-338 to F-341.** From the code: a block whose
+"voxel structures built" never comes is either waiting on `is_area_editable` or not processing;
+nothing stops a VoxelWorld's `_process` before it's built (`set_process(false)` only runs after),
+and the "Area not editable" warning `do_box` gives was in none of the logs, so it's the area: a data
+block of it the voxel engine never loaded. Not a busy queue that would have caught up: the engine
+loads data blocks by a count of which viewers cover each one (`VoxelTerrain::process_viewers`), and
+the green runs often lost a block too, one the case doesn't wait for (41176426334, 41181174649,
+41177486393's rerun: 19 of 20 built). How it loses one is the engine's (F-338). The build no longer
+depends on it: after `VoxelWorld.LOAD_WAIT_S` (5 s, Proposed) short of blocks, it puts the missing
+ones in itself, empty as the generator makes them (`VoxelTerrain.try_set_block_data`, which counts
+the viewers covering each so they unload like any other), and prints a `[world] <module>: N of M
+data blocks ... put in empty` line; a block lost after stamping began restarts the stamping. Its
+area runs out to whole mesh blocks and the voxel the mesher reads round them, so a missing block
+next to the structures can't hold back their meshes and collision either. The world suite checks a
+build whose terrain never loads anything (loading turned off) builds, its wall solid. Local R0742,
+R0744 (perfcases city, all 20 blocks in at 23 s, no fill needed locally), R0745; CI below.
+
 ### F-304 (note): the city's navigation never "settles" on CI
 The city case waits for its blocks and `ZoneNav.is_settled()`; on CI it reported "still baking (0
 chunks queued)" at 180 s on both the green and the red runs (rebakes held or waiting while ~100 AI
@@ -1827,6 +1844,38 @@ Turned out is the expected 4.5 s; buttoned up was 58x, not 2.5x, two physics fra
 `Spotting.spot_seconds` (OFF_VIEW 3 if the commander's body yaw went with the turret, the dark
 with his NVG no longer counting inside, the target's stance). Worth printing those factors in the
 check's message the next time it's touched. Nothing in this branch reaches spotting.
+
+### F-338 (open, upstream, Voxel Tools): how VoxelTerrain loses a data block
+F-303's fix works round it; the engine itself still can. In Voxel Tools 1.7's
+`terrain/fixed_lod/voxel_terrain.cpp`, `process_viewer_data_box_change` does `return` (meant as
+`continue`) in "Cancel missing blocks" when a block leaving a viewer's box is neither loaded nor
+loading: the rest of that viewer's unviews and all of its new blocks are skipped while its box is
+taken as moved, so the counts drift and a later unview can take a block to zero that other viewers
+still cover; it unloads, and none of them asks for it again. Also every task's priority is the
+distance to the nearest viewer (16 m steps) with no ageing, so a far block's generate tasks wait
+behind every nearer meshing task. A 100-viewer churn bench round one world (viewers moving, a third
+of a viewer replaced a frame, teleports; 90 s, 8000 replacements) lost nothing locally, so which of
+the two bit on CI isn't proven; the next CI red with the fill line will at least say how many blocks
+were missing. Worth reporting upstream (and fixing in our custom build when it's next rebuilt).
+
+### F-339 (open): a block lost after a module is built takes its voxels with it
+F-303's fill only runs while a VoxelWorld builds. If the engine unloads a data block of a built
+module (F-338) while viewers still cover it, its stamped walls and every edit in it are gone till the
+module streams out and in again: `is_area_readable` turns false there (rounds and sight lines see
+nothing), the old mesh and collision may stay. Not seen in any log yet. A built world could check its
+area now and then (`missing_blocks`, a few thousand `has_data_block` calls) and rebuild what's lost
+from its base boxes and edit log, as a stream-in does.
+
+### F-340 (note, feat/bots-join-hosted): the whole city never streamed in once
+41177486393 (fce1373, attempt 1): the city case printed no build and no garrison at all, all 12
+blocks "not streamed in" in 180 s, the navigation settled; passed on the rerun. Not F-303 (nothing
+was even made): ZoneLevel streams modules in round `stream_focus()`, so the player or the focus was
+somewhere else then. That branch changes how players join; its owner should look first.
+
+### F-341 (note): perfcases' city keeps losing blocks it doesn't wait for
+The case waits for the 12 blocks within 140 m of its start; F-303's stall hit the other 8 as often
+(19 of 20 built on green runs). Perfcases now prints every streamed block that isn't ready at the end
+of the wait ("not waited for"), so a fill or a stall there shows in the log.
 
 ## Calls made for the Captain
 
@@ -2156,6 +2205,9 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | dev reds: props' client animal check: the host stops its animals (wait 10 s) and sends three packets before it answers (test only) | the answer and later packets came in together after a client stall, so the client's animals were seconds ahead of the host's answer; ANIMAL_SLACK_M stays 1.5 | raise the slack to cover a stall
 2026-10-31 | dev reds: perfcases' city wait (SETTLE_MS 180 s) and budgets not raised; the check and a note every 30 s now say how far a slow block got and whether its voxel area is loaded (F-303) | the same commit had all 12 blocks in at 35.4 s on CI (40602801148) and two of 20 never built in 180 s (41154617049): a stall, not a slow build, so more time wouldn't fix it | a longer wait
 2026-10-31 | dev reds: vehicles' spall-cone armour work 0.526 ms over its 0.5 ms locally (R0708, three suites at once on the PC) left alone | CI measured 0.418 on dev (41154617049): local load | give the check a local slack
+2026-10-31 | city stall (F-303): a build short of data blocks for 5 s puts them in itself, empty (LOAD_WAIT_S 5 s, Proposed), rather than a viewer of its own | a data-only viewer adds one more count to the same engine bookkeeping that loses blocks, and unloads the block when it goes; try_set_block_data counts the viewers really covering it and needs no node | a VoxelViewer on each building block; a longer SETTLE_MS
+2026-10-31 | city stall: the build waits for its area out to whole mesh blocks and the voxel round them, not just the structures' boxes | a missing block next to the structures leaves their meshes and collision unmade (proxy dropped after MESH_WAIT_S with holes in the collision); the engine loads the whole bounds anyway, so a normal build waits no longer | the boxes' area only
+2026-10-31 | city stall: a block lost mid-stamp restarts the stamping from the first box | its stamped voxels went with it; every box again in order comes out the same | re-stamping only the boxes in that block (more code, same result)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
