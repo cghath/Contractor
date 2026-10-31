@@ -2124,6 +2124,10 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | feat/vault-legs-svd: claude/svd-model merged although the 2026-10-25 integration note quotes the Captain "needs to stay here for now" for it | the 2026-10-30 handoff lists it as "probably wanted" and cheeno_tasks.md says the model hold is over; dev still drew the SVD as a long AKM | leave it off until the Captain says again
+2026-10-31 | feat/vault-legs-svd: the SVD's items.json conflict keeps dev's entry (the "dmr" tag, "rare" rarity) and changes only model_style "ak" -> "svd" | dev's data is newer; the branch changed nothing else there | take the branch's line whole
+2026-10-31 | feat/vault-legs-svd: the SVD-S keeps the AK model (F-345) | a folding tube stock, not the SVD's thumbhole; the "svd" style would draw the wrong stock | give it "svd" for the magazine and handguard
+2026-10-31 | feat/vault-legs-svd: claude/vault-legs merged as it was | its leg hitboxes follow the drawn legs only while up and not carried (downed bodies, body_point and reach unchanged), and the hand plant uses dev's own mantle flag (`climbing`) and WORLD_MASK | only the hand plant, keeping the legs' boxes on the rest pose
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2179,11 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-345 (note, cghath's models): the SVD-S still draws as a long AKM
+
+`claude/svd-model` (merged on feat/vault-legs-svd, 2026-10-31) gave the SVD its own model
+(`VoxelArt._rifle_svd`, model_style "svd"). The SVD-S (`svds` in data/items.json, 1.02 m) still has
+model_style "ak": an AKM's banana magazine and straight wooden stock. A real SVD-S has the SVD's
+10-round magazine and handguard with a folding tubular stock and a separate pistol grip; it wants a
+`_rifle_svd` variant (a `folding` flag) rather than the thumbhole one.
