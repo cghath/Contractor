@@ -32,7 +32,7 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 - **The squad's trail of the lead cuts out any loop he walks** (F-400): coming back within 1.5 m of
   where he walked (out to a dead end and back), everything since goes, so the trail lies on the
   ground once. A slot picked back along a doubled-back trail could leap past the doubled part and
-  back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck; it was why
+  back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck, which is how
   the pelvis change looked like it broke followers).
 
 #### Fixed
@@ -46,7 +46,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 - **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
   box ignores the drawn thigh (it lies as the body does), that an up body is never "carried", and
   that an up body carrying someone keeps the carry pose's boxes too (the carry guard on its own).
-  casualty's stuck line prints the man's slot each second and his refit pick. Local R0770 (smoke, weapons, animations,
+  casualty's soak no longer calls a man stuck who walked 4 m or more after a slot that itself
+  moved 5 m or more (following it round the lead's loop, CI 41235918402); its stuck line prints
+  his slot each second, his refit pick and how far he walked. Local R0770 (smoke, weapons, animations,
   Looting and the vault checks among them), R0774 (wounds, medical), and without the pelvis
   change R0782 (casualty) and R0783 (smoke, weapons, animations) PASS.
 

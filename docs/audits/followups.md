@@ -1811,8 +1811,9 @@ that branch) kept weapons, animations, wounds and medical green (R0770, R0774), 
 2; local R0781; it passed on the PR run 41220315144) and passed without it (R0782).
 Captain, 2026-10-31: "yes, fix followers". The pelvis is on the drawn root again (while the legs'
 boxes follow the drawn legs: up and in no carry state). No path from a hitbox to a follower was
-found (F-400 has the search); the failing man in all three runs was running a loop, not stuck,
-and that's fixed in the squad's trail (F-400).
+found (F-400 has the search); the failing man in every run was running a loop, not stuck: the
+squad's trail no longer doubles back, and the soak's check lets off a man chasing a slot that
+moved (F-400).
 
 ### F-400 (fixed): a follower far behind ran loops on the lead's doubled-back trail
 Found on feat/vault-legs-svd (2026-10-31) chasing F-374. Location: [squad.gd](../../scripts/ai/squad.gd)
@@ -1837,8 +1838,21 @@ the way back is about as close to a slot on the way out as its neighbours are, a
 keep SLOT_APART_MULT of the gap from every other slot searches on past the whole doubled section; when that clears
 it comes back. Fix: the trail cuts any loop the lead walks (`TRAIL_LOOP_M`: back within 1.5 m of a
 point, everything since goes; the last 3 points never count), so it lies on the ground once. The
-soak's stuck line now prints the man's slot each second and his refit pick, so a recurrence says
-which slot logic moved.
+soak's stuck line now prints the man's slot each second, his refit pick and how far he walked.
+
+A fourth failure came with that print (the PR run on the pelvis commit, CI 41235918402): Echo
+walked about 30 m in the window round the east side of the compound after his formation slot (no
+refit) as it swung 24 m with the lead turning the building's corner ((14, -14) -> (14, 8) ->
+(0, 0)), and a follow-in stack then sent him back past where he had been. That's following, not
+being stuck, so the check (tests only) now lets off a man who walked STUCK_WALK_M (4 m) or more
+after a slot that itself moved STUCK_FAR_M or more in the window; one pushing on the spot (F-08,
+F-190) or running about while his slot stays put (the in-and-out flip SIDE_HOLD_S fixed) is still
+stuck. Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
+41220310370 twice, 41235918402, R0781; passed 41220315144, 41235916435, R0793) against 3 of 3
+passes without it on this branch (41227859540, 41227862154, R0782) and every casualty job sampled
+on other branches today. With no path from the box to the AI, and the soak seeded (casualty's
+dead-check calls seed(4242) just before it) but driven by real-time AI timers, the guess is that
+each tree walks its own near-repeatable trajectory; the loops themselves are what's fixed here.
 
 ## Calls made for the Captain
 
@@ -2174,6 +2188,7 @@ Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the d
 2026-10-31 | vault legs: the pelvis hitbox goes on the drawn root (with the legs' boxes: up, in no carry state), as Captain said | no path from a hitbox Area to a follower's movement or path exists (F-400 lists what was searched); the soak's failures were a man running loops after a jumping slot | keep it on the target root
 2026-10-31 | squad trail (F-400): the lead's trail cuts any loop he walks (back within TRAIL_LOOP_M 1.5 m of a point, Proposed; the last TRAIL_LOOP_SKIP 3 points never count) | a doubled-back trail lies over itself, so _refit's trail picks (kept SLOT_APART_MULT of the gap from every slot) could leap past the doubled section and back; the three failing soak runs were each a man far behind running a 20 m loop | widen casualty's stuck check to ignore loops (it would hide the wobble, not fix it)
 2026-10-31 | weapons' leg-box check: the carried half stays downed (a carried body is always downed: _carry_state drops CARRIED/DRAGGED otherwise, now checked) and the carry guard is tested on its own with an up body carrying someone (CARRY) | setting downed false with CARRIED would only test that _carry_state drops it | leave a note only
+2026-10-31 | casualty soak (tests only): "stuck" no longer counts a man who walked 4 m or more (STUCK_WALK_M) after a slot that moved 5 m or more (STUCK_FAR_M) in the 8 s window | CI 41235918402's Echo walked ~30 m after a formation slot swinging 24 m round the building's corner and came back past his start; net movement alone called him stuck | count every loop as stuck (it flags men doing as told)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
