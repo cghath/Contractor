@@ -11,11 +11,13 @@
 # parts MIT, BSD-2-Clause or public domain: shipping the editor and the template is allowed with
 # the notices, which every zip carries (licenses/).
 #
-# 0.x tags make a pre-release, published at once so testers can get it (set the repository
-# variable RELEASE_DRAFT to true to make drafts instead). A release that's already there (a
-# draft tools/publish_release.sh made, say) gets the files added or replaced; its notes and its
-# draft or public state stay as they are. This workflow never makes or moves a tag
-# (gh release create --verify-tag).
+# The release is a DRAFT (Captain's rule, 2026-10-15, as tools/publish_release.sh makes them:
+# "Nothing goes public until someone presses Publish on the draft"); 0.x tags are marked
+# pre-release too. Only setting the repository variable RELEASE_DRAFT to false publishes at once.
+# A release that's already there (a draft tools/publish_release.sh made, say) gets the files
+# added or replaced; its notes and its draft or public state stay as they are, so
+# publish_release.sh can still add a local build to the draft this makes. This workflow never
+# makes or moves a tag (gh release create --verify-tag).
 #
 # A manual run (Actions tab or `gh workflow run release.yml`, once this file is on the default
 # branch): "tag" builds an existing tag; "publish" makes or updates its release; without
@@ -162,7 +164,8 @@ jobs:
           else
             flags=()
             case "$TAG" in v0.*) flags+=(--prerelease) ;; esac
-            [ "$DRAFT" = true ] && flags+=(--draft)
+            # A draft unless RELEASE_DRAFT is exactly "false" (unset, empty or anything else: draft).
+            [ "$DRAFT" = false ] || flags+=(--draft)
             gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "Contractor $TAG" --notes-file "$NOTES" "${flags[@]}"
             echo "::notice title=release::made the release $TAG ${flags[*]}"

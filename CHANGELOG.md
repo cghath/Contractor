@@ -20,9 +20,11 @@ Captain's open item 8, plus a nightly so there's something to play between versi
   (Contractor.exe from the Voxel Tools release template, the pack, the launchers, BUILD.txt,
   GET_GODOT.txt, licenses/), BUILD.txt, and the Voxel Tools editor with its licenses
   (GodotVoxel-1.7-windows-editor.zip), notes from the version's CHANGELOG section (or the
-  commits since the last tag). 0.x tags are published pre-releases (repository variable
-  `RELEASE_DRAFT=true` for drafts); an existing release only gets its files replaced; it never
-  makes a tag. A manual run without "publish" is a dry run kept as an artifact.
+  commits since the last tag). The release is a draft, marked pre-release for 0.x tags, until
+  someone presses Publish (Captain's rule for releases, as `tools/publish_release.sh` makes
+  them; repository variable `RELEASE_DRAFT=false` publishes at once); an existing release only
+  gets its files replaced, so publish_release.sh can still add a local build; it never makes a
+  tag. A manual run without "publish" is a dry run kept as an artifact.
 - **Added (CI):** `.github/workflows/nightly.yml`: every night at 04:17 UTC, dev's tip is built
   unless it already has a nightly; the build folder is the artifact `contractor-nightly-<commit>`,
   kept 14 days. Manual runs take a branch and "force".
@@ -42,6 +44,16 @@ Captain's open item 8, plus a nightly so there's something to play between versi
   (no tag was pushed; its script ran against an inert gh double: create with --verify-tag and
   --prerelease, upload --clobber to an existing draft, stop on a failed read), the schedule and
   manual runs (they start only from main, F-324).
+- **Fixed (review):** `tools/release_notes.sh` died with no output (SIGPIPE under pipefail)
+  whenever a version's CHANGELOG section had older sections after it, which is every release
+  but the first: awk stopped reading while `git show` was still writing 400 KB. It now reads
+  the file whole and awk reads to the end. New check `tools/test_release_notes.sh` (a throwaway
+  repo with 600 KB after the section, a section past GitHub's limit, no section, no
+  CHANGELOG.md), run by tests.yml's runner job beside the publish check: S0725 PASS, and S0726
+  FAIL with the old script. play.bat's editor lookup missed a space between two candidates, so
+  `<build>\godot.windows.editor.x86_64.exe\godot.windows.editor.x86_64.exe` (Explorer's Extract
+  All of Zylann's zip) was never found; checked in cmd with that folder (found now, Downloads
+  before). Releases are drafts by default (above), no longer published pre-releases.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

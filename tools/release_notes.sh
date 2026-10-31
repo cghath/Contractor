@@ -26,13 +26,17 @@ Voxel Tools' licenses are in the zip's \`licenses\` folder.
 EOF
 
 # The section: from its heading to the next "## [" heading (or the link list at the end).
-section="$(git show "$ref:CHANGELOG.md" 2>/dev/null | awk -v v="$version" '
+# CHANGELOG.md is read whole first and awk reads it to the end (no early exit): under pipefail,
+# awk stopping while `git show` was still writing 400 KB killed the script with SIGPIPE (exit
+# 255, no notes) for any section with older ones after it. No CHANGELOG.md at <ref>: no section.
+log="$(git show "$ref:CHANGELOG.md" 2>/dev/null || true)"
+section="$(awk -v v="$version" '
 	BEGIN { a = "## [" v "]"; b = "## [v" v "]" }
+	done { next }
 	index($0, a) == 1 || index($0, b) == 1 { on = 1; print; next }
-	on && /^## \[/ { exit }
-	on && /^\[[^]]+\]: / { exit }
+	on && (/^## \[/ || /^\[[^]]+\]: /) { on = 0; done = 1; next }
 	on { print }
-')"
+' <<<"$log")"
 if [ -n "$section" ]; then
 	# Release notes stop at 125,000 characters on GitHub; a long section is cut with a pointer.
 	if [ "${#section}" -gt 100000 ]; then

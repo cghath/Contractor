@@ -54,9 +54,11 @@ For cghath and cghath's agent. dev now holds everything below. Please base new w
   "Contractor v0.x.y": the build zip, `BUILD.txt`, and `GodotVoxel-1.7-windows-editor.zip` (the
   editor play.bat runs; unzipped into the build folder, play.bat finds it). The notes are the
   version's `## [0.x.y]` section of CHANGELOG.md (`tools/release_notes.sh`), else the commits
-  since the last tag. 0.x tags make a published pre-release; set the repository variable
-  `RELEASE_DRAFT=true` for drafts. A release that's already there (a draft from
-  `tools/publish_release.sh`) only gets its files added or replaced. It never makes a tag.
+  since the last tag. The release is a **draft** (pre-release for 0.x tags): nothing goes public
+  until someone presses Publish on it (the rule `tools/publish_release.sh` keeps; set the
+  repository variable `RELEASE_DRAFT=false` to publish at once). A release that's already there
+  (a draft from `tools/publish_release.sh`) only gets its files added or replaced, and
+  publish_release.sh can add a local build to CI's draft. It never makes a tag.
 - **Nightly** (`.github/workflows/nightly.yml`): 04:17 UTC, builds dev when dev's tip has no
   nightly yet; the build folder is the run's artifact `contractor-nightly-<commit>` for 14 days
   (Actions > Nightly build > the run > Artifacts). No editor in it: Contractor.exe needs none.

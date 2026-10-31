@@ -123,7 +123,7 @@ rem Extra arguments go to the game, e.g.  play.bat -- --host   or   play.bat -- 
 setlocal
 set "EXE=godot.windows.editor.x86_64.exe"
 set "GODOT=%CONTRACTOR_GODOT%"
-if not defined GODOT for %%G in ("%~dp0%EXE%" "%~dp0GodotVoxel-1.7-windows-editor\%EXE%" "%~dp0%EXE%\%EXE%""%USERPROFILE%\Downloads\GodotVoxel_1.7\%EXE%") do if not defined GODOT if exist "%%~G" if not exist "%%~G\" set "GODOT=%%~G"
+if not defined GODOT for %%G in ("%~dp0%EXE%" "%~dp0GodotVoxel-1.7-windows-editor\%EXE%" "%~dp0%EXE%\%EXE%" "%USERPROFILE%\Downloads\GodotVoxel_1.7\%EXE%") do if not defined GODOT if exist "%%~G" if not exist "%%~G\" set "GODOT=%%~G"
 if not defined GODOT set "GODOT=%USERPROFILE%\Downloads\GodotVoxel_1.7\%EXE%"
 if not exist "%GODOT%" (
 	echo Could not find the Voxel Tools build of Godot at:
