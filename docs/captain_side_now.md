@@ -90,7 +90,8 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 ## Next (Captain, 2026-10-14)
 
 1. Woods/render perf pass: frame goes 4 -> 10 ms in woods, up to 1.5k draws, 1.4M prims. Then
-   denser copses. **Measured, still open** (2026-10-22, bbef7e05: tiers, far blobs, no shadows
+   denser copses. **Done** (Captain closed it 2026-10-31: "next"; F-366's windowed split stays
+   an optional check for cghath, and the look-changing cuts of F-367 weren't asked for). (2026-10-22, bbef7e05: tiers, far blobs, no shadows
    from bushes, the dense copses on every wooded preset; 2026-10-31, perf/woods-copses: measured
    again, woods and open ground cases with vegetation draw budgets in perfcases;
    docs/performance.md, "Woods, 2026-10-31"). Windowed (S0771: partial numbers, a run stopped

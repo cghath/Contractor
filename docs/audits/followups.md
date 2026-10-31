@@ -2184,6 +2184,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | Woods perf, review: the bench's window is the game's own 1600x900 again, BENCH_SIZE=WxH to change it, its size on every measure line (it was always 640x360) | foliage's GPU work goes with the pixels and the older bench numbers were at the normal size | 640x360 by default with an opt-in for full size
 2026-10-31 | Woods perf, review: perfcases' open case measures 30 s (was 20) with its 8-man patrol 500 m to the side (OPEN_PATROL_OFF_M, Proposed; past SquadAI.SIGHT_RANGE), hostile and the same size as the woods' | 60 m ahead in the open it fought the squad (a 57 ms AI tick, 12 hitches a minute, R0768), so open measured the fight, not the ground, and sat 3 hitches from its budget | a hitch budget of its own with room
 2026-10-31 | Woods perf, review: Captain's item 1 marked "measured, still open" in captain_side_now.md, not Done | the windowed run S0771's partial numbers (stopped early) show +60% draws inside the wood (1036 against 646) that nothing here explains or cuts | Done, with F-366 for the GPU side
+2026-10-31 | Captain closed queue item 1 ("next") on the woods numbers in docs/performance.md; captain_side_now.md marks it Done | the frame cost is gone (0.1 ms headless, +1.3 ms windowed inside the densest wood, GPU 0.7 ms) | keep it open until the F-366 split; F-366 stays an optional check and F-367's shadow-reach cut wasn't asked for, so it isn't made
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
