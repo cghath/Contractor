@@ -47,6 +47,10 @@ jobs:
         run: bash tools/test_publish_release.sh
         env:
           CONTRACTOR_TEST_LOGS: ${{ runner.temp }}/contractor-test-logs
+      - name: Check release notes
+        run: bash tools/test_release_notes.sh
+        env:
+          CONTRACTOR_TEST_LOGS: ${{ runner.temp }}/contractor-test-logs
       - name: Keep runner and publishing logs
         if: always()
         uses: actions/upload-artifact@v4
