@@ -289,14 +289,29 @@ func _test_body_dynamics() -> void:
 	check(on > 0.1 and on < 0.2 and absf(off) < 0.03, "on a step the foot stands on it (%.2f m up), the other on the floor (%.2f m)" % [on, off])
 	step.queue_free()
 	floor_body.queue_free()
-	# Vaulting (a mantle): the knees come up.
+	# Vaulting (a mantle) over a wall 0.9 m high ahead: the knees come up and the left hand goes
+	# on its top (the model pass's leftover, 2026-10-27).
+	var wall := StaticBody3D.new()
+	var wall_shape := CollisionShape3D.new()
+	wall_shape.shape = BoxShape3D.new()
+	(wall_shape.shape as BoxShape3D).size = Vector3(1.6, 0.9, 0.3)
+	wall.add_child(wall_shape)
+	add_child(wall)
+	wall.global_position = holder.global_position + Vector3(0, 0.45, -0.55)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	var knee_before := model.foot_position(false).y
 	model.climbing = true
 	for i in 30:
 		model._process(dt)
 	var knee_up := model.foot_position(false).y - knee_before
+	var plant := model.vault_plant()
+	var palm := model.hand_position(false)
 	model.climbing = false
 	check(knee_up > 0.2, "vaulting the knees tuck up (a foot %.2f m higher)" % knee_up)
+	check(plant != Vector3.INF and absf(plant.y - (holder.global_position.y + 0.92)) < 0.05 and palm.distance_to(plant) < 0.12,
+		"and the left hand goes on the wall's top (%s, the palm %.2f m from it)" % [plant, palm.distance_to(plant) if plant != Vector3.INF else -1.0])
+	wall.queue_free()
 	holder.queue_free()
 
 
