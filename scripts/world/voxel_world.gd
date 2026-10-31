@@ -186,9 +186,6 @@ const BUILD_BUDGET_MAX_MS := 12.0
 ## puts the missing ones in itself, empty, as the generator would have (_fill_missing_blocks); a
 ## block lost after stamping started takes its boxes with it, so the stamping starts over. Proposed.
 const LOAD_WAIT_S := 5.0
-## At most this many blocks are put in a frame: on CI's city most of a block's area (7000-odd data
-## blocks) was still to load at 5 s, and all in one frame is a hitch. Proposed.
-const FILL_BLOCKS_PER_FRAME := 512
 var _area_short_since := -1.0  # Time (s) the build's area was first seen short of blocks, -1 while whole
 var _filled_blocks := 0  # data blocks the build put in itself (build_progress)
 var _to_fill: Array[Vector3i] = []  # the blocks this round of filling still has to put in
@@ -320,6 +317,11 @@ func build_progress() -> String:
 	return "building: %d of %d boxes stamped, area %s%s" % [_next_structure, _structures.size(), area, filled]
 
 
+## The build's time a frame (ms): BUILD_BUDGET_MS, or more on slow frames (BUILD_FRAME_SHARE).
+static func _build_budget_ms(delta: float) -> float:
+	return clampf(delta * 1000.0 * BUILD_FRAME_SHARE, BUILD_BUDGET_MS, BUILD_BUDGET_MAX_MS)
+
+
 ## The voxels the build needs loaded (voxel units): the structures' area out to whole mesh blocks
 ## and the voxel round them the mesher reads (so their meshes and collision can be made), inside
 ## the terrain's bounds. Nothing is stamped till every data block of it is loaded.
@@ -350,18 +352,19 @@ func missing_blocks() -> Array[Vector3i]:
 
 
 ## Puts the data blocks of the build's area the voxel engine hasn't loaded in itself, empty,
-## as the generator makes them (LOAD_WAIT_S), at most FILL_BLOCKS_PER_FRAME a call; returns
-## whether this round is done. The engine counts the viewers covering each one
+## as the generator makes them (LOAD_WAIT_S), till the frame's build budget is spent (`until`,
+## usec: on CI's city most of a block's area, 7000-odd blocks at about 4 us each, was still to
+## load at 5 s); returns whether this round is done. The engine counts the viewers covering each one
 ## (try_set_block_data), so they unload as any block does; a block no viewer covers stays out
 ## (nobody is near enough for it to be loaded).
-func _fill_missing_blocks(waited_s: float) -> bool:
+func _fill_missing_blocks(waited_s: float, until: int) -> bool:
 	var started := Time.get_ticks_usec()
 	if _to_fill.is_empty():
 		_to_fill = missing_blocks()
 		_fill_round = Vector3i(_to_fill.size(), 0, 0)
 	var bs := terrain.get_data_block_size()
 	var n := 0
-	while not _to_fill.is_empty() and n < FILL_BLOCKS_PER_FRAME:
+	while not _to_fill.is_empty() and (n % 64 != 0 or Time.get_ticks_usec() < until):
 		var b: Vector3i = _to_fill.pop_back()
 		n += 1
 		if terrain.has_data_block(b):
@@ -422,14 +425,13 @@ func _process(delta: float) -> void:
 		if _area_short_since < 0.0:
 			_area_short_since = now
 		elif now - _area_short_since >= LOAD_WAIT_S:
-			if _fill_missing_blocks(now - _area_short_since):
+			if _fill_missing_blocks(now - _area_short_since, Time.get_ticks_usec() + int(_build_budget_ms(delta) * 1000.0)):
 				_area_short_since = now  # (blocks no viewer covers: tried again after as long)
 		return
 	_area_short_since = -1.0
 	_tool.mode = VoxelTool.MODE_SET
 	var started := Time.get_ticks_usec()
-	var budget_ms := clampf(delta * 1000.0 * BUILD_FRAME_SHARE, BUILD_BUDGET_MS, BUILD_BUDGET_MAX_MS)
-	var until := started + int(budget_ms * 1000.0)
+	var until := started + int(_build_budget_ms(delta) * 1000.0)
 	while _next_structure < _structures.size():
 		var s: Array = _structures[_next_structure]
 		_tool.value = s[2]
