@@ -160,6 +160,7 @@ var _vault_w := 0.0
 ## to its owner), and kept in world space for the vault. INF: none found (a leap over nothing).
 var _plant := Vector3.INF
 var _plant_hand := 1
+var _was_climbing := false  # (the plant is looked for afresh as each climb starts)
 const PLANT_AHEAD_M := 0.5
 const PLANT_SIDE_M := 0.14
 const PLANT_MIN_M := 0.25  # the top between these above the feet
@@ -911,6 +912,9 @@ func pose_hitboxes(body: Node3D) -> void:
 			"shin_l": _leg_left.transform * _shin_left.transform, "shin_r": _leg_right.transform * _shin_right.transform}
 		for key: String in drawn:
 			deltas[key] = transform * root * (drawn[key] as Transform3D) * (rest[key] as Transform3D).affine_inverse()
+		# The pelvis from the same drawn root (its sink and the hips settled over the feet), so the
+		# thighs' boxes hang from it rather than from where the target pose has the hips.
+		deltas["pelvis"] = transform * root * (bones.pelvis as Transform3D) * (rest.pelvis as Transform3D).affine_inverse()
 	for area in _posable_hitboxes(body):
 		var bone := _bone_of(area)
 		var target: Transform3D
@@ -1923,6 +1927,9 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 	_sink_v += (-SINK_SPRING * _sink - 2.0 * SINK_DAMP * sqrt(SINK_SPRING) * _sink_v) * minf(delta, 0.05)
 	_sink = clampf(_sink + _sink_v * minf(delta, 0.05), -LAND_SINK_MAX, 0.05)
 	_vault_w = move_toward(_vault_w, 1.0 if climbing and not quiet else 0.0, delta * 5.0)
+	if climbing and not _was_climbing:
+		_plant = Vector3.INF  # a quick second mantle (the first's vault still easing out) finds its own top
+	_was_climbing = climbing
 	if climbing and not quiet and _plant == Vector3.INF and is_inside_tree():
 		_plant_hand = 0 if left_handed and _held_weapon else 1
 		_plant = _find_plant()

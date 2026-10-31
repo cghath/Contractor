@@ -555,6 +555,22 @@ func _test_leg_boxes() -> void:
 	s.model.pose_hitboxes(s)
 	var turned := (before.inverse() * thigh.transform.basis).get_euler().x if thigh else 0.0
 	check(thigh != null and absf(turned - 1.0) < 0.05, "the left thigh's box turns with the drawn thigh (%.2f rad of 1.00)" % turned)
+	# Downed, or carried, the boxes lie as the body does (its pose: CLAUDE.md's body rules), not
+	# as the legs were last drawn standing: swinging the drawn thigh moves nothing.
+	CharacterModel.lay_down(s, s.model, true)
+	var lying := thigh.transform if thigh else Transform3D()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, 0.7), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var downed_still := thigh != null and thigh.transform.is_equal_approx(lying)
+	s.model.carry_net = {"mode": CharacterModel.CARRIED, "with": String(player.get_path())}
+	s.model.pose_hitboxes(s)
+	var carried := thigh.transform if thigh else Transform3D()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, -0.7), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var carried_still := thigh != null and not s.model._carry_state().is_empty() and thigh.transform.is_equal_approx(carried)
+	check(downed_still and carried_still, "downed (still %s) or carried (still %s), the left thigh's box ignores the drawn thigh" % [downed_still, carried_still])
+	s.model.carry_net = {}
+	CharacterModel.lay_down(s, s.model, false)
 	s.model.set_process(true)
 	s.queue_free()
 

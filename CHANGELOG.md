@@ -27,12 +27,22 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 - **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet
   planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
   carried, so where a downed body lies and where it is reached are unchanged.
+- **The pelvis hitbox hangs from the drawn hips too** (review): while the legs' boxes follow the
+  drawn legs, the pelvis box is posed from the same drawn root (the landing's sink, the hips
+  settled over the feet) instead of the target pose's, so the thighs' boxes hang from it. The torso
+  and head stay on the target pose.
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
   running, started before the wall was blown, counted as the breach's own, so on a slow runner
   the check ran on the old navmesh ("30.2 m round for 1.5 m", CI 41186733348). It now counts only
   bakes that finish after the town reports the breach (tests only).
+- **A quick second mantle planted the hand on the first one's top** (review): the plant was only
+  cleared once the vault had eased all the way out, so a climb started before then kept the old
+  spot. It's cleared as each climb starts (`CharacterModel._was_climbing`).
+- **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
+  box ignores the drawn thigh (it lies as the body does). Local R0770 (smoke, weapons, animations,
+  Looting and the vault checks among them), R0774 (wounds, medical) PASS.
 
 ### SVD Dragunov's own model (2026-10-20: realistic weapons)
 
