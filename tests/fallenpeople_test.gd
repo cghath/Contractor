@@ -307,6 +307,13 @@ func _test_player_death_and_take_over() -> void:
 	a_rec["mood_forced"] = 70.0
 	a_rec.loyalty = 70.0
 	SurvivorPerson.change_opinion(a_rec, profile, 50.0)
+	# No dead about through his respawn wait (Soldier.respawn_delay_s, 8 s): the companion stands
+	# alone by where he fell, and the crowd's heads near him used to turn into walkers round his
+	# unseen body (ZoneDead._convert, F-382) that could reach them and bite before the take-over
+	# (CI 40452846175, 40458714303: "the player takes over the companion" with walkers spawning
+	# all through the wait).
+	var a0 := layer.body_of(String(a_rec.id))
+	_clear_dead_near(a0.global_position if a0 else player.global_position, 120.0)
 	player.server_end_spawn_protection()
 	player.vitals.server_kill()
 	await _wait_for(func() -> bool: return player.respawn_state != Soldier.RESPAWN_WAITING and player.vitals.is_up(), 25.0)
@@ -315,12 +322,23 @@ func _test_player_death_and_take_over() -> void:
 	check(Moods.has(a_rec, "friend_died:" + profile), "who grieves the one who led them")
 	check(String(a_rec.get("take_over_ok", "")) == profile, "and was willing to be taken over")
 	var a := layer.body_of(String(a_rec.id))
-	check(layer.server_take_over(player, String(a_rec.id)), "the player takes over the companion")
+	var a_was := "%s, body %s" % [a_rec.get("status", "?"), "none" if a == null else ("up" if a.vitals.is_up() else ("down" if not a.vitals.is_dead() else "dead"))]
+	check(layer.server_take_over(player, String(a_rec.id)), "the player takes over the companion (%s)" % a_was)
 	await _frames(3)
 	check(Survival.survivor_name(player) == String(a_rec.name) and String(a_rec.status) == "player", "the record swaps: he's %s now" % Survival.survivor_name(player))
 	check(not is_instance_valid(a) or a.is_queued_for_deletion(), "the companion's body is gone")
 	check(player.inventory.count_of(&"antibiotics") >= 1, "and their kit is his")
 	a_rec.erase("mood_forced")
+
+
+## How far east of the settlement's centre the player stands for "nobody home": past
+## Holding.settlement_tick's r + 10 m, yet near enough that the walker the test puts down at 0.7 r
+## west stays inside Survival.DESPAWN_M of him. At r + 45 it was 113 m off, and _populate (every
+## POP_TICK_S) sent it back into the crowd whenever its tick fell in the two frames before the
+## check (F-310: "zombie none").
+func _away_m() -> float:
+	var r := Settlement.radius()
+	return minf(r + 20.0, Survival.DESPAWN_M - r * 0.7 - 10.0)
 
 
 func _clear_dead_near(at: Vector3, r: float) -> void:
@@ -453,7 +471,7 @@ func _test_holding() -> void:
 	se["activity"] = "free"
 	var sb := layer.server_settler_body(se, true)
 	var start := player.global_position
-	player.global_position = level.ground_point(c + Vector3(Settlement.radius() + 45.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	player.global_position = level.ground_point(c + Vector3(_away_m(), 0.0, 0.0)) + Vector3.UP * 0.2
 	var zz := Survival.server_spawn_zombie(level, level.ground_point(c + Vector3(-Settlement.radius() * 0.7, 0.0, 0.0)))
 	await _frames(2)
 	Holding.settlement_tick(layer, Survival.zombies(level))
@@ -622,11 +640,12 @@ func _test_shelter_room() -> void:
 	se["jobs"] = ["haul"]
 	se["activity"] = "free"
 	var sb := layer.server_settler_body(se, true)
-	player.global_position = level.ground_point(c + Vector3(Settlement.radius() + 45.0, 0.0, 0.0)) + Vector3.UP * 0.2
+	player.global_position = level.ground_point(c + Vector3(_away_m(), 0.0, 0.0)) + Vector3.UP * 0.2
 	var zz := Survival.server_spawn_zombie(level, level.ground_point(c + Vector3(-Settlement.radius() * 0.7, 0.0, 0.0)))
+	var zname := String(zz.name) if zz else ""  # (a freed one reads == null too: F-310)
 	await _frames(2)
-	if not is_instance_valid(sb) or zz == null or not is_instance_valid(zz):
-		check(false, "the settler and the dead are up (settler %s, zombie %s)" % ["up" if is_instance_valid(sb) else "gone", "none" if zz == null else ("up" if is_instance_valid(zz) else "gone")])
+	if not is_instance_valid(sb) or not is_instance_valid(zz):
+		check(false, "the settler and the dead are up (settler %s, zombie %s)" % ["up" if is_instance_valid(sb) else "gone", ("%s gone" % zname) if zname != "" else "never spawned"])
 		return
 	Holding.settlement_tick(layer, Survival.zombies(level))
 	var brain := sb.get_node_or_null(NodePath(PeopleLayer.BRAIN)) as CivilianAI

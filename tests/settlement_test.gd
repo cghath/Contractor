@@ -269,15 +269,26 @@ func _test_haul() -> void:
 	var scrap := Settlement.count("scrap_sheet")
 	Settlement.server_set_jobs(a_rec, ["haul"])
 	# The start farmstead has its own loose things about (tools, the note, food: docs/survival_firsthour.md) and a
-	# hauler carries HAUL_PER_H an hour, so the drop may take a second hour.
+	# hauler carries HAUL_PER_H an hour in SettlementJobs.haul_queue's order, so the drop comes in the hour its place
+	# in that queue says. (Four hours flat ran out whenever more than 47 things lay ahead of it.)
+	var queue := SettlementJobs.haul_queue(st)
+	var place := -1
+	for i in queue.size():
+		if String(queue[i].uid) == uid:
+			place = i
+			break
+	check(place >= 0, "the drop lies in the settlement, for the hauler (%d things ahead of it)" % place)
+	var hours := floori(float(place) / SettlementJobs.HAUL_PER_H) + 1
 	var still: Array = []
-	for h in 4:
+	var did: Array[String] = []
+	for h in hours:
 		st.server_hour(10 + h)
+		did.append(String(a_rec.get("job_now", "")))
 		await _frames(2)
 		still = get_tree().get_nodes_in_group(&"world_items").filter(func(w: Node) -> bool: return is_instance_valid(w) and not w.is_queued_for_deletion() and String(w.get(&"uid")) == uid)
 		if still.is_empty():
 			break
-	check(Settlement.count("scrap_sheet") >= scrap + 2 and still.is_empty(), "the drop is carried into the stores (%d -> %d)" % [scrap, Settlement.count("scrap_sheet")])
+	check(Settlement.count("scrap_sheet") >= scrap + 2 and still.is_empty(), "the drop is carried into the stores in %d hour(s) (%d -> %d; the hauler: %s)" % [hours, scrap, Settlement.count("scrap_sheet"), did])
 
 
 func _test_guard() -> void:

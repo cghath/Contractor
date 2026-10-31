@@ -30,6 +30,10 @@ const STILL_MPS := 0.3
 const SETTLE_S := 1.5
 const SETTLE_META := &"sim_settle"
 const BRAIN_META := &"sim_brain_off"
+## Set on a soldier this put to sleep: only those it wakes. One switched off by anything else (a
+## test holding one of the dead still, a cutscene) stays off (F-380: it woke the survival test's
+## frozen walker inside the silent kill's two seconds, which turned round and saw him).
+const SLEEP_META := &"sim_asleep"
 
 ## Host: how many sleep now (SessionLog's perf line).
 var asleep := 0
@@ -71,6 +75,10 @@ func server_tick() -> void:
 		if s == null or s.is_queued_for_deletion():
 			continue
 		var sleeping := s.process_mode == Node.PROCESS_MODE_DISABLED
+		if sleeping != s.has_meta(SLEEP_META):
+			if sleeping:
+				continue  # switched off by something else: not ours to wake
+			s.remove_meta(SLEEP_META)  # (switched back on by something else)
 		var want := should_sleep(s, players, sleeping or s.has_meta(SETTLE_META))
 		if want and not sleeping:
 			if not s.has_meta(SETTLE_META):
@@ -78,10 +86,12 @@ func server_tick() -> void:
 			elif Soldier._now() - float(s.get_meta(SETTLE_META)) >= SETTLE_S:
 				s.remove_meta(SETTLE_META)
 				s.process_mode = Node.PROCESS_MODE_DISABLED
+				s.set_meta(SLEEP_META, true)
 				sleeping = true
 		elif not want:
 			if sleeping:
 				s.process_mode = Node.PROCESS_MODE_INHERIT
+				s.remove_meta(SLEEP_META)
 			if sleeping or s.has_meta(SETTLE_META):
 				_wake_brain(s)
 		if want and sleeping:
