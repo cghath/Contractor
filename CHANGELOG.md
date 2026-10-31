@@ -33,7 +33,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   where he walked (out to a dead end and back), everything since goes, so the trail lies on the
   ground once. A slot picked back along a doubled-back trail could leap past the doubled part and
   back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck, which is how
-  the pelvis change looked like it broke followers).
+  the pelvis change looked like it broke followers). The cut never joins the trail through a wall
+  (review: along a wall, in at a gate and back along its inside, the two faces lie within 1.5 m),
+  and keeps the point it cuts back to.
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -46,9 +48,13 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 - **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
   box ignores the drawn thigh (it lies as the body does), that an up body is never "carried", and
   that an up body carrying someone keeps the carry pose's boxes too (the carry guard on its own).
-  casualty's soak no longer calls a man stuck who walked 4 m or more after a slot that itself
-  moved 5 m or more (following it round the lead's loop, CI 41235918402); its stuck line prints
-  his slot each second, his refit pick and how far he walked. Local R0770 (smoke, weapons,
+  casualty's soak no longer calls a man stuck who walked 4 m or more and ended the window 5 m or
+  more nearer his slot than he began it (getting there round the lead's loop, CI 41235918402; at
+  first any man whose slot moved 5 m was let off, which with the lead always walking hid every
+  loop, review); its stuck line prints his slot each second, his refit pick, how far he walked
+  and how far off his slot he began. spacing's new "Trail" checks walk the lead out and back on a
+  line (the trail lies on the ground once) and in at the compound's gate and back along the
+  inside of its wall (no stretch crosses the wall). Local R0770 (smoke, weapons,
   animations, Looting and the vault checks among them) and R0774 (wounds, medical); with the
   pelvis on the drawn root and the trail fix R0796 (smoke, weapons, casualty), R0805 (smoke,
   animations, wounds, medical, spacing, casualty) and R0808 (casualty) PASS.

@@ -53,6 +53,7 @@ func _ready() -> void:
 	if OS.get_environment("SPACING_ONLY") != "wall":
 		await _test_long_follow()
 	await _test_wall_follow()
+	await _test_trail_loops()
 	GameState.delete_save()
 	print("SPACING TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -398,6 +399,57 @@ func _clear_contact() -> void:
 	var squad := level.squad_for(&"friendly")
 	squad.engaged_at = -1000.0
 	squad.known.clear()
+
+
+## The lead's trail cuts the loops he walks (Squad._update_trail, F-400), but never through a
+## wall (review): walked out and back on one line in the open, the trail lies on the ground once
+## (no two points further apart in it than TRAIL_LOOP_SKIP lie within TRAIL_LOOP_M) and ends
+## where he turned back to; walked along the outside of the compound's south wall, in at the
+## gate and back along its inside face (half a metre off each face: 1.3 m apart, inside
+## TRAIL_LOOP_M), no stretch of the trail crosses the wall. The lead is set down every half
+## metre and the trail updated by hand, so no physics frame moves anything in between.
+func _test_trail_loops() -> void:
+	print("Trail: the lead's trail cuts the loops he walks, never through a wall")
+	var squad := level.squad_for(&"friendly")
+	var walk := func(points: Array[Vector3]) -> void:
+		squad.set(&"_trail", PackedVector3Array())
+		for k in range(1, points.size()):
+			var from := points[k - 1]
+			var to := points[k]
+			var steps := maxi(ceili(_flat(from, to) / 0.5), 1)
+			for n in range(1 if k > 1 else 0, steps + 1):
+				player.global_position = from.lerp(to, float(n) / steps)
+				squad._update_trail()
+	var doubled := func(trail: PackedVector3Array) -> String:
+		for i in trail.size():
+			for j in range(i + Squad.TRAIL_LOOP_SKIP + 1, trail.size()):
+				if _flat(trail[i], trail[j]) < Squad.TRAIL_LOOP_M and not squad._wall_between(trail[i], trail[j]):
+					return "%s and %s" % [trail[i], trail[j]]
+		return ""
+	var out_and_back: Array[Vector3] = [Vector3(0, 0.1, 30), Vector3(0, 0.1, 40), Vector3(0, 0.1, 34)]
+	walk.call(out_and_back)
+	var trail: PackedVector3Array = squad.get(&"_trail")
+	var reach := 0.0
+	for p in trail:
+		reach = maxf(reach, p.z)
+	var twice: String = doubled.call(trail)
+	check(twice == "", "out 10 m and back 6 m on one line, the trail lies on the ground once (%d points%s)" % [trail.size(), "; doubled at " + twice if twice != "" else ""])
+	check(reach < 34.0 + Squad.TRAIL_LOOP_M, "and ends where the lead turned back to (reaches z %.1f, lead at 34)" % reach)
+	var h := CompoundLevel.COMPOUND_HALF
+	var t := CompoundLevel.WALL_THICKNESS
+	var along_wall: Array[Vector3] = [Vector3(8, 0.1, h + 0.5), Vector3(0, 0.1, h + 0.5), Vector3(0, 0.1, h - t - 0.5), Vector3(8, 0.1, h - t - 0.5)]
+	walk.call(along_wall)
+	trail = squad.get(&"_trail")
+	var through := ""
+	for i in range(1, trail.size()):
+		if squad._wall_between(trail[i - 1], trail[i]):
+			through = "%s to %s" % [trail[i - 1], trail[i]]
+			break
+	check(trail.size() >= 2 and through == "", "along the south wall, in at the gate and back inside it, no stretch of the trail crosses the wall (%d points%s)" % [trail.size(), "; through it " + through if through != "" else ""])
+	twice = doubled.call(trail)
+	check(twice == "", "and it doesn't lie over itself where no wall parts it (%s)" % (twice if twice != "" else "none"))
+	squad.set(&"_trail", PackedVector3Array())
+	_place(player, Vector3(0, 0.1, 30))
 
 
 func _place(s: Soldier, pos: Vector3) -> void:

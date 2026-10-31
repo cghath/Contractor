@@ -131,7 +131,11 @@ const TRAIL_JUMP_M := 6.0
 ## searched on past the whole loop, and came back when that cleared. casualty's soak walks
 ## (0, 0) -> (0, -8) -> (0, 2); a man far behind ran 20 m out and back in 8 s, ending where he
 ## began ("stuck"; CI 41220310370, R0781). The last TRAIL_LOOP_SKIP points (the last few
-## metres) are always that close and never count. Proposed numbers.
+## metres) are always that close and never count. The cut keeps the near point and only joins
+## it to where the lead stands when no wall is between (review): walking along a wall, in at a
+## gate and back along its other face, the two sides lie TRAIL_LOOP_M apart, and a cut there
+## would join the trail through the wall, which every trail pick trusts as walked ground.
+## Proposed numbers.
 const TRAIL_LOOP_M := 1.5
 const TRAIL_LOOP_SKIP := 3
 const HEADING_BLEND := 0.5
@@ -1877,7 +1881,7 @@ static func _near_any(p: Vector3, points: Array[Vector3], within: float) -> bool
 
 
 ## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX), with
-## any loop he walks cut out (TRAIL_LOOP_M).
+## any loop he walks cut out (TRAIL_LOOP_M) where nothing stands between its ends.
 func _update_trail() -> void:
 	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
 		return
@@ -1891,8 +1895,8 @@ func _update_trail() -> void:
 			return
 	for i in range(_trail.size() - TRAIL_LOOP_SKIP):
 		var p := _trail[i]
-		if _flat(p, at) < TRAIL_LOOP_M and absf(p.y - at.y) < TRAIL_LOOP_M:
-			_trail.resize(i)  # back where he was: the loop since goes
+		if _flat(p, at) < TRAIL_LOOP_M and absf(p.y - at.y) < TRAIL_LOOP_M and not _wall_between(p, at):
+			_trail.resize(i + 1)  # back where he was: the loop since goes (p to here: short, no wall)
 			break
 	_trail.append(at)
 	if _trail.size() > TRAIL_MAX:

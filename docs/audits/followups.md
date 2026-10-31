@@ -1845,10 +1845,22 @@ A fourth failure came with that print (the PR run on the pelvis commit, CI 41235
 walked about 30 m in the window round the east side of the compound after his formation slot (no
 refit) as it swung 24 m with the lead turning the building's corner ((14, -14) -> (14, 8) ->
 (0, 0)), and a follow-in stack then sent him back past where he had been. That's following, not
-being stuck, so the check (tests only) now lets off a man who walked STUCK_WALK_M (4 m) or more
-after a slot that itself moved STUCK_FAR_M or more in the window; one pushing on the spot (F-08,
-F-190) or running about while his slot stays put (the in-and-out flip SIDE_HOLD_S fixed) is still
-stuck. Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
+being stuck. The check first let off a man who walked STUCK_WALK_M (4 m) after a slot that moved
+STUCK_FAR_M in the window; review showed that switched loop detection off for nearly the whole soak
+(the lead never stops, so nearly every slot moves 5 m in 8 s, and the in-and-out flip's slot moved
+too), so it now lets off only a man who walked 4 m and ended the window 5 m or more nearer his
+slot than he began it (Echo: about 19 m off at the start, 8 m at the end). A man looping out and
+back while he gets no nearer, or pushing on the spot (F-08, F-190), is stuck. R0805 and R0808
+ran with the loose check; R0796 is a pass of the strict one.
+
+Review also found the loop cut could join the trail through a wall: walking along a wall, in at a
+gate and back along its inside face, the two sides lie within TRAIL_LOOP_M, and the cut dropped
+the near point and joined the one before it to the lead, a segment nobody walked, which the trail
+picks and the team place's blocked-place fallback trust as walked ground (Captain's 2026-10-14
+rule: no slot across a wall). The cut now needs no wall between the near point and the lead
+(`_wall_between`, one ray per candidate point) and keeps the near point, so the joining segment
+is the short one just checked; spacing's "Trail" checks walk the lead out and back on a line and
+along the compound's south wall, in at the gate and back inside it. Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
 41220310370 twice, 41235918402, R0781; passed 41220315144, 41235916435, R0793) against 3 of 3
 passes without it on this branch (41227859540, 41227862154, R0782) and every casualty job sampled
 on other branches today. With no path from the box to the AI, and the soak seeded (casualty's
@@ -2194,6 +2206,8 @@ Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the d
 2026-10-31 | squad trail (F-400): the lead's trail cuts any loop he walks (back within TRAIL_LOOP_M 1.5 m of a point, Proposed; the last TRAIL_LOOP_SKIP 3 points never count) | a doubled-back trail lies over itself, so _refit's trail picks (kept SLOT_APART_MULT of the gap from every slot) could leap past the doubled section and back; the three failing soak runs were each a man far behind running a 20 m loop | widen casualty's stuck check to ignore loops (it would hide the wobble, not fix it)
 2026-10-31 | weapons' leg-box check: the carried half stays downed (a carried body is always downed: _carry_state drops CARRIED/DRAGGED otherwise, now checked) and the carry guard is tested on its own with an up body carrying someone (CARRY) | setting downed false with CARRIED would only test that _carry_state drops it | leave a note only
 2026-10-31 | casualty soak (tests only): "stuck" no longer counts a man who walked 4 m or more (STUCK_WALK_M) after a slot that moved 5 m or more (STUCK_FAR_M) in the 8 s window | CI 41235918402's Echo walked ~30 m after a formation slot swinging 24 m round the building's corner and came back past his start; net movement alone called him stuck | count every loop as stuck (it flags men doing as told)
+2026-10-31 | casualty soak (review): the "chased" let-off narrowed to a man who walked 4 m or more and ended the window 5 m (STUCK_FAR_M) or more nearer his slot than he began it | the lead never stops in the soak, so "his slot moved 5 m" held for nearly everyone and switched loop detection off; closing on the slot is progress a loop can't fake, and it still lets off Echo (CI 41235918402, ~19 m -> 8 m) | revert to the strict check (Echo's run is a real false alarm), or measure the slot against the lead (formation slots sit still in the lead's frame, but the follow-in stack and refits don't)
+2026-10-31 | squad trail (review): the loop cut needs no wall between the near point and the lead, and keeps that point (resize(i + 1)) | a wall's two faces lie within TRAIL_LOOP_M, so the cut joined the trail through it and trail picks trusted it; one ray only for a candidate point within 1.5 m | drop the loop cut (it fixed the soak's leaping trail slot)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
