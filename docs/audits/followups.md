@@ -2187,3 +2187,14 @@ B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oc
 model_style "ak": an AKM's banana magazine and straight wooden stock. A real SVD-S has the SVD's
 10-round magazine and handguard with a folding tubular stock and a separate pistol grip; it wants a
 `_rifle_svd` variant (a `folding` flag) rather than the thumbhole one.
+
+## F-346 (open, animations): the dragger's hands miss the casualty's shoulder straps locally
+
+`tests/animations_test.gd` `_test_drag`: "dragger's right/left hand on the casualty's shoulder
+strap" fails locally on dev itself (R0743 at 54ccc3d0: 6.6 and 7.1 cm off, over HAND_TOLERANCE)
+and on feat/vault-legs-svd (R0738: 6.5/7.0, R0740: 5.8 ok/6.3), while dev's CI (41154617049)
+passes animations. Older runs on this PC put it at 2.9-5.7 cm, so the drag pose sits near the edge
+and the PC's load tips it over. Not from the vault-legs merge: the dragger's leg boxes stay on the
+target pose while it drags (carry not empty) and the hand plant needs a vault. Wants a look at where
+the strap points and the dragger's reach meet (CharacterModel.STRAP_POINTS, the drag pose's bend),
+not a wider tolerance.
