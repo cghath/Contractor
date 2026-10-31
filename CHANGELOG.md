@@ -25,18 +25,21 @@ busy city: a block standing as its proxy for good, its garrison never spawned.
   again. A build whose
   area has been short of blocks for `VoxelWorld.LOAD_WAIT_S` (5 s, Proposed) now puts the missing
   ones in itself, empty, as the generator makes them (`VoxelTerrain.try_set_block_data`, which
-  counts the viewers covering each), within the build's own time a frame (4-12 ms); a
+  counts the viewers covering each), within the build's own time a frame (4-12 ms), giving up
+  till next time when no viewer covers them; a
   block lost after stamping began makes the stamping start over. On CI three blocks were still
   missing most of their area at 5 s (city_4_2: 7053 of 7560 data blocks); with the fill all twenty
   built, the twelve the case waits for in 23 s. The build also waits for its area out to whole mesh blocks and the voxel round them the
   mesher reads, so its meshes and collision can all be made.
 - **Changed (tests):** `ZoneModule.build_progress()` says why a module isn't ready, including a
   build that's done with its proxy still up (meshing or holding); `VoxelWorld.build_progress()`
-  counts the data blocks not loaded and the ones the build put in. Perfcases prints both, and the
-  blocks it doesn't wait for that are still not ready. World: a build whose terrain never loads
+  counts the data blocks not loaded and the ones the build put in. Perfcases prints both, the
+  blocks it doesn't wait for that are still not ready, and for a block not streamed in how far the
+  player is (F-340: once every city block streamed out mid-wait). World: a build whose terrain never loads
   anything puts its blocks in and builds, its wall solid.
 - Runs: local R0742 (smoke, world), R0744 (perfcases city, city, virtualization), R0745 (townperf),
-  R0749 (smoke, world, perfcases city, city, on the time-budgeted fill), all PASS; CI perfcases green
+  R0749 (smoke, world, perfcases city, city, on the time-budgeted fill), R0752 (perfcases city), all
+  PASS (R0751's perfcases failed on F-340, not this); CI perfcases green
   on 41186841331, 41191078478, 41192039297 (all 20 blocks built, no fill needed), 41192561810 (three
   blocks filled) and 41193905455 (one filled at 512 a frame), all 20 built every time.
 

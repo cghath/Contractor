@@ -373,6 +373,8 @@ func _fill_missing_blocks(waited_s: float, until: int) -> bool:
 		empty.create(bs, bs, bs)
 		if terrain.try_set_block_data(b, empty):
 			_fill_round.y += 1
+		elif _fill_round.y == 0 and n >= 16:
+			_to_fill.clear()  # no viewer near (e.g. a client's compound before it joins): try again later
 	_fill_round.z += Time.get_ticks_usec() - started
 	FrameCost.spent(&"voxels", started)
 	if not _to_fill.is_empty():

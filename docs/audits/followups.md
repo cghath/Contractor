@@ -1839,7 +1839,9 @@ queued at 5 s (its generate tasks rank by distance to the nearest viewer, F-338)
 would have been lost for good is now moot. On 41193905455 (7f0f33a) city_3_0 was short 7706 of
 8100 at 5 s, put in in 30 ms all told (about 4 us a block) and the case was ready in 22.5 s; that
 commit put in at most 512 a frame, about 5 s at CI's frame rate, so the fill now runs within the
-build's own time a frame (`_build_budget_ms`, 4-12 ms, the stamping's budget) instead. If a block stalls
+build's own time a frame (`_build_budget_ms`, 4-12 ms, the stamping's budget) instead, and gives a
+round up after 16 tries put nothing in (no viewer covers the area, e.g. a client's compound before
+it joins: before, every 5 s it made and threw away a buffer for each of its 3136 blocks). If a block stalls
 again with "area loaded" in its note, it's not the area and F-303 reopens.
 
 ### F-304 (note): the city's navigation never "settles" on CI
@@ -1878,16 +1880,32 @@ nothing), the old mesh and collision may stay. Not seen in any log yet. A built 
 area now and then (`missing_blocks`, a few thousand `has_data_block` calls) and rebuild what's lost
 from its base boxes and edit log, as a stream-in does.
 
-### F-340 (note, feat/bots-join-hosted): the whole city never streamed in once
-41177486393 (fce1373, attempt 1): the city case printed no build and no garrison at all, all 12
-blocks "not streamed in" in 180 s, the navigation settled; passed on the rerun. Not F-303 (nothing
-was even made): ZoneLevel streams modules in round `stream_focus()`, so the player or the focus was
-somewhere else then. That branch changes how players join; its owner should look first.
+### F-340 (open): perfcases' city blocks all streamed out (or never in) during the wait
+41177486393 (feat/bots-join-hosted, fce1373, attempt 1): the city case printed no build and no
+garrison at all, all 12 blocks "not streamed in" in 180 s; passed on the rerun. Then locally on
+fix/city-stall, R0751 (PERF_CASES=city, the city case first after hosting): all 20 blocks built and
+the 12 ready at 23 s, then while it waited for the navigation every garrison went virtual and every
+block streamed out by 51 s, so the checks at 180 s failed; the same code passed on R0744, R0748,
+R0749 and R0752. Not F-303 (the builds were done). ZoneLevel streams a module out only when it's
+past STREAM_OUT_M from every `stream_focus()` point, and the player always counts, so the player was
+moved or wasn't under `players` then; nothing in the scripts reparents a Soldier. Perfcases now says,
+for a block not streamed in, how far the player is and whether he's the same node (`_progress`), so
+the next one says which.
 
 ### F-341 (note): perfcases' city keeps losing blocks it doesn't wait for
 The case waits for the 12 blocks within 140 m of its start; F-303's stall hit the other 8 as often
 (19 of 20 built on green runs). Perfcases now prints every streamed block that isn't ready at the end
 of the wait ("not waited for"), so a fill or a stall there shows in the log.
+
+### F-342 (note, cghath's armour lane): vehiclehud's hit-card setting check hangs on the shot's outcome
+"the setting: off none; my shots only mine; every hit any; my shots and hits on me: a hit on my tank"
+failed on fix/city-stall's CI twice running (41193905455 at 7f0f33a, 41195405767 at 2cfd704) and
+passed on the rerun (41195405767 attempt 2), locally (R0750, R0751) and on every other branch's runs
+that day. On both reds the m791 shot just before ("my shot: the card for 6 s") came out
+"[mobility, knocked out]"; on the greens "[mobility]". The setting check's hits then land on a
+knocked-out tank, and one of its five card states comes out differently. Nothing in vehicles or the
+HUD changed on this branch; the check should put the tank back (or use a fresh one) before the
+setting part, and its message could say which of the five failed.
 
 ## Calls made for the Captain
 

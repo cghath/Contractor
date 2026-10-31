@@ -411,7 +411,7 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 			next_note += 30000
 			for m: ZoneModule in wait_for:
 				if not m.is_ready():
-					print("perf: at %d s %s: %s" % [(Time.get_ticks_msec() - t0) / 1000, m.module_id, m.build_progress()])
+					print("perf: at %d s %s: %s" % [(Time.get_ticks_msec() - t0) / 1000, m.module_id, _progress(m)])
 		if ready and ready_s < 0.0:
 			ready_s = (Time.get_ticks_msec() - t0) / 1000.0
 		if ready and (nav == null or nav.is_settled()):
@@ -419,7 +419,7 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 	print("perf: the case's %d modules ready after %s, the navigation %s" % [wait_for.size(), ("%.1f s" % ready_s) if ready_s >= 0.0 else "-",
 		"settled" if nav == null or nav.is_settled() else "still baking (%d chunks queued)" % nav._queue.size()])
 	for m: ZoneModule in wait_for:
-		check(m.is_ready(), "%s streamed in (%.0f s; %s)" % [m.module_id, (Time.get_ticks_msec() - t0) / 1000.0, m.build_progress()])
+		check(m.is_ready(), "%s streamed in (%.0f s; %s)" % [m.module_id, (Time.get_ticks_msec() - t0) / 1000.0, _progress(m)])
 	for m: ZoneModule in level.modules():  # (F-303: a block the case doesn't wait for can stall too)
 		if m.is_streamed() and not m.is_ready() and not m in wait_for:
 			print("perf: %s, not waited for: %s" % [m.module_id, m.build_progress()])
@@ -427,6 +427,16 @@ func _settle_at(at: Vector3, wait_for: Array, place := true) -> void:
 		if p.has_method(&"build_near"):
 			p.build_near(at, 1000)
 	await _seconds(4.0)
+
+
+## A module's build_progress, and when it isn't streamed in, how far the player is from it (and
+## whether he's still the one in the tree): F-340, a city case whose blocks all streamed out.
+func _progress(m: ZoneModule) -> String:
+	if m.is_streamed():
+		return m.build_progress()
+	var p := level.players.get_node_or_null(^"1") as Soldier
+	return "not streamed in; the player %s" % ("gone" if p == null else "%.0f m off at %s%s" % [
+		m.distance_to(p.global_position), p.global_position.snapped(Vector3.ONE), "" if p == player else " (a new one)"])
 
 
 func _seconds(s: float) -> void:
