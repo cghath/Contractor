@@ -991,8 +991,8 @@ func _test_hot_zone_ops() -> void:
 	# A QRF base taken out: "you hit their QRF, now hit the HQ".
 	var base: ZoneModule = null
 	for m: ZoneModule in level.modules():
-		if m.type == "qrf_base" and not sites.has(m.module_id):
-			base = m  # one the tests before took out is taken out again here
+		if m.type == "qrf_base" and (base == null or not sites.has(m.module_id)):
+			base = m  # one the tests before took out is taken out again here; one no live contract holds, if there is one
 	if base:
 		ops._seen.erase(base.module_id)
 	if base == null:

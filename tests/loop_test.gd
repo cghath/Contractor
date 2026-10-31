@@ -974,9 +974,9 @@ func _heli_insert(squad: Array) -> bool:
 	check(HeliRoute.path_ratio(line) <= 1.6 and HeliRoute.max_turn_deg(line) <= 120.0,
 		"its route: %.2f times the straight line, at most %.0f degrees of turn before the hook" % [HeliRoute.path_ratio(line), HeliRoute.max_turn_deg(line)])
 	var drawn := MapView.insertion_routes(level)
-	check(not drawn.is_empty() and (drawn[0].points as PackedVector2Array).size() == line.size()
+	check(not drawn.is_empty() and (drawn[0].points as PackedVector2Array).size() == (point.get("route", []) as Array).size() + 1  # the briefing's plan, not what is left of the flight (c.route shrinks as it flies)
 		and (drawn[0].points as PackedVector2Array)[0].distance_to(Vector2(start.x, start.z)) < 1.0,
-		"the map draws its way in: entry, the point it comes in low by, the LZ (%s)" % [drawn[0].points if not drawn.is_empty() else "nothing"])
+		"the map draws its way in: entry, the point it comes in low by, the LZ (%s; started (%.0f, %.0f), route %s)" % [drawn[0].points if not drawn.is_empty() else "nothing", start.x, start.z, c.route])
 	var first_dir := Vector2.ZERO
 	var reversal := 0.0
 	var flown := 0.0
