@@ -11,6 +11,30 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Releases on tag and a nightly build (ci/release-on-tag)
+
+Captain's open item 8, plus a nightly so there's something to play between version builds.
+
+- **Added (CI):** `.github/workflows/release.yml`: a pushed `v*` tag builds that commit on a
+  Windows runner and makes the GitHub release "Contractor <tag>" with the build zip
+  (Contractor.exe from the Voxel Tools release template, the pack, the launchers, BUILD.txt,
+  GET_GODOT.txt, licenses/), BUILD.txt, and the Voxel Tools editor with its licenses
+  (GodotVoxel-1.7-windows-editor.zip), notes from the version's CHANGELOG section (or the
+  commits since the last tag). 0.x tags are published pre-releases (repository variable
+  `RELEASE_DRAFT=true` for drafts); an existing release only gets its files replaced; it never
+  makes a tag. A manual run without "publish" is a dry run kept as an artifact.
+- **Added (CI):** `.github/workflows/nightly.yml`: every night at 04:17 UTC, dev's tip is built
+  unless it already has a nightly; the build folder is the artifact `contractor-nightly-<commit>`,
+  kept 14 days. Manual runs take a branch and "force".
+- **Added (tools):** `tools/ci_build.sh` (make_build.sh plus the engine's and Voxel Tools'
+  licenses, GET_GODOT.txt, the zip and the editor zip; runs the same on a PC),
+  `tools/release_notes.sh`, `tools/engine_licenses.gd` (the running engine's license notices,
+  from the binary).
+- **Changed (tools, make_build.sh):** play.bat looks for the Voxel Tools editor beside itself
+  and in a `GodotVoxel-1.7-windows-editor` folder next to it before `Downloads\GodotVoxel_1.7`,
+  and its error names the download; BUILD.txt names the tag (GITHUB_REF_NAME) when the
+  checkout has no branch.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

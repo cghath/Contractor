@@ -1,0 +1,194 @@
+# A GitHub release for every pushed version tag (Captain's open item 8, "GitHub release
+# workflow on tag"): push v0.7.2 and this exports the build at that tag with tools/ci_build.sh
+# (tools/make_build.sh's folder: contractor.pck, Contractor.exe from the Voxel Tools release
+# template, play.bat and the other launchers, BUILD.txt; plus the engine's and Voxel Tools'
+# licenses and GET_GODOT.txt), zips it and makes the release "Contractor v0.7.2" with
+#   contractor-v0.7.2-B0001-<sha>.zip       the build (Contractor.exe needs nothing installed)
+#   BUILD.txt                               which commit, how to play
+#   GodotVoxel-1.7-windows-editor.zip       the Voxel Tools editor play.bat runs, with its licenses
+# and the version's CHANGELOG.md section as its notes (tools/release_notes.sh; the commits since
+# the last tag when CHANGELOG.md has none yet). Godot and Voxel Tools are MIT, their bundled
+# parts MIT, BSD-2-Clause or public domain: shipping the editor and the template is allowed with
+# the notices, which every zip carries (licenses/).
+#
+# 0.x tags make a pre-release, published at once so testers can get it (set the repository
+# variable RELEASE_DRAFT to true to make drafts instead). A release that's already there (a
+# draft tools/publish_release.sh made, say) gets the files added or replaced; its notes and its
+# draft or public state stay as they are. This workflow never makes or moves a tag
+# (gh release create --verify-tag).
+#
+# A manual run (Actions tab or `gh workflow run release.yml`, once this file is on the default
+# branch): "tag" builds an existing tag; "publish" makes or updates its release; without
+# "publish" (or without a tag: the branch it's run on) it's a dry run that keeps the zip, notes
+# and BUILD.txt as a workflow artifact for 14 days instead.
+#
+# Runs on Windows (the build is for Windows, and it's the same path make_build.sh takes on a PC);
+# runner pinned like tests.yml's.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["ci/release-on-tag"] # TEMPORARY: a dry run before this file is on main; removed before merging
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing v* tag to build (empty: the branch this runs on, as a dry run)"
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Make or update the GitHub release for that tag (off: a dry run, the build kept as a workflow artifact)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  VOXEL_RELEASE: v1.7
+
+jobs:
+  release:
+    name: build and release
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # What to build and whether to publish: a pushed tag always publishes; a manual run only
+      # with "publish" and a tag.
+      - name: Pick the tag
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: |
+          tag="${INPUT_TAG:-}"
+          [ -n "$tag" ] || { [ "$REF_TYPE" = tag ] && tag="$REF_NAME"; } || true
+          case "$tag" in
+            "") ;;
+            v[0-9]*) ;;
+            *) echo "::error title=tag::'$tag' isn't a version tag (v0.7.2)"; exit 1 ;;
+          esac
+          publish=false
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then publish=true; fi
+          if [ "$EVENT" = workflow_dispatch ] && [ "$INPUT_PUBLISH" = true ]; then
+            [ -n "$tag" ] || { echo "::error title=publish::publishing needs a tag"; exit 1; }
+            publish=true
+          fi
+          if [ -n "$tag" ]; then ref="refs/tags/$tag"; else ref="$GITHUB_SHA"; fi
+          echo "tag '$tag', ref $ref, publish $publish"
+          { echo "tag=$tag"; echo "ref=$ref"; echo "publish=$publish"; } >> "$GITHUB_OUTPUT"
+
+      # The whole history and the tags: release notes read the commits since the last tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pick.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Cache the Voxel Tools editor and template
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-voxel
+          key: godot-voxel-windows-${{ env.VOXEL_RELEASE }}
+
+      - name: Download the Voxel Tools editor and template
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-voxel/template_release
+          base="https://github.com/Zylann/godot_voxel/releases/download/${VOXEL_RELEASE}"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/editor.zip" "$base/godot.windows.editor.x86_64.exe.zip"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/template.zip" "$base/godot.windows.template_release.x86_64.exe.zip"
+          7z x -y -bso0 -o"$(cygpath -w ~/godot-voxel)" "$RUNNER_TEMP/editor.zip"
+          7z x -y -bso0 -o"$(cygpath -w ~/godot-voxel/template_release)" "$RUNNER_TEMP/template.zip"
+
+      - name: Find the editor and template
+        run: |
+          bin="$(find ~/godot-voxel -maxdepth 2 -type f -name 'godot.windows.editor.x86_64.exe' | head -n1)"
+          tpl="$(find ~/godot-voxel/template_release -type f -name 'godot.windows.template_release.x86_64.exe' | head -n1)"
+          test -n "$bin" || { echo "::error::no editor in the release zip"; exit 1; }
+          test -n "$tpl" || { echo "::error::no release template in the release zip"; exit 1; }
+          echo "GODOT=$bin" >> "$GITHUB_ENV"
+          echo "CONTRACTOR_TEMPLATE=$tpl" >> "$GITHUB_ENV"
+          "$bin" --headless --version
+
+      # The logs parent (export log, B number) is a temp folder on the runner, kept below as
+      # an artifact. Without a tag, a dry run named 0.0.0-dryrun.
+      - name: Build
+        id: build
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          export CONTRACTOR_TEST_LOGS="$(cygpath -u "$RUNNER_TEMP")/contractor-test-logs"
+          out="$(cygpath -u "$RUNNER_TEMP")/release"
+          version="${TAG#v}"
+          [ -n "$version" ] || version="0.0.0-dryrun"
+          bash tools/ci_build.sh "$out" "release v$version" --version "$version" --with-editor
+          bash tools/release_notes.sh "v$version" HEAD > "$out/notes.md"
+          # BUILD.txt beside the zip: a release file of its own, and one folder for the artifact.
+          dir="$(sed -n 's/^dir=//p' "$GITHUB_OUTPUT" | tail -n 1)"
+          cp "$dir/BUILD.txt" "$out/BUILD.txt"
+          echo "notes=$(cygpath -m "$out/notes.md")" >> "$GITHUB_OUTPUT"
+          echo "build_txt=$(cygpath -m "$out/BUILD.txt")" >> "$GITHUB_OUTPUT"
+          cat "$out/notes.md" | head -n 40
+
+      - name: Make or update the release
+        if: steps.pick.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pick.outputs.tag }}
+          ZIP: ${{ steps.build.outputs.zip }}
+          EDITOR_ZIP: ${{ steps.build.outputs.editor_zip }}
+          BUILD_TXT: ${{ steps.build.outputs.build_txt }}
+          NOTES: ${{ steps.build.outputs.notes }}
+          DRAFT: ${{ vars.RELEASE_DRAFT }}
+        run: |
+          files=("$ZIP" "$BUILD_TXT" "$EDITOR_ZIP")
+          # Read failures stop here, before anything is changed (as in tools/publish_release.sh).
+          state="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft --jq ".[] | select(.tagName == \"$TAG\") | .isDraft")"
+          if [ -n "$state" ]; then
+            gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "::notice title=release::$TAG was already there (draft: $state): its files were added or replaced; its notes and state are as they were"
+          else
+            flags=()
+            case "$TAG" in v0.*) flags+=(--prerelease) ;; esac
+            [ "$DRAFT" = true ] && flags+=(--draft)
+            gh release create "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Contractor $TAG" --notes-file "$NOTES" "${flags[@]}"
+            echo "::notice title=release::made the release $TAG ${flags[*]}"
+          fi
+
+      # A dry run keeps what the release would have had.
+      - name: Keep the dry run's build
+        if: steps.pick.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dryrun-${{ steps.build.outputs.name }}
+          path: |
+            ${{ steps.build.outputs.zip }}
+            ${{ steps.build.outputs.notes }}
+            ${{ steps.build.outputs.build_txt }}
+          retention-days: 14
+          overwrite: true
+
+      - name: Keep the build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-logs-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/contractor-test-logs
+            ${{ runner.temp }}/release/*.log
+          retention-days: 14
+          if-no-files-found: warn

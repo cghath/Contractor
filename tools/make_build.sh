@@ -116,16 +116,20 @@ if ! export_step "pack" --export-pack "Windows Desktop" "$dir/contractor.pck" ||
 fi
 cat > "$dir/play.bat" <<'BAT'
 @echo off
-rem Plays this build. Needs the Voxel Tools 1.7 build of Godot (see the README).
-rem Set CONTRACTOR_GODOT to its path if it isn't in the default place.
+rem Plays this build. Needs the Voxel Tools 1.7 build of Godot (see the README or GET_GODOT.txt).
+rem Looks for it beside this file (or unzipped into a folder here), then in Downloads\GodotVoxel_1.7;
+rem set CONTRACTOR_GODOT to its path if it's somewhere else.
 rem Extra arguments go to the game, e.g.  play.bat -- --host   or   play.bat -- --join 127.0.0.1
 setlocal
+set "EXE=godot.windows.editor.x86_64.exe"
 set "GODOT=%CONTRACTOR_GODOT%"
-if not defined GODOT set "GODOT=%USERPROFILE%\Downloads\GodotVoxel_1.7\godot.windows.editor.x86_64.exe"
+if not defined GODOT for %%G in ("%~dp0%EXE%" "%~dp0GodotVoxel-1.7-windows-editor\%EXE%" "%~dp0%EXE%\%EXE%""%USERPROFILE%\Downloads\GodotVoxel_1.7\%EXE%") do if not defined GODOT if exist "%%~G" if not exist "%%~G\" set "GODOT=%%~G"
+if not defined GODOT set "GODOT=%USERPROFILE%\Downloads\GodotVoxel_1.7\%EXE%"
 if not exist "%GODOT%" (
 	echo Could not find the Voxel Tools build of Godot at:
 	echo   %GODOT%
-	echo Set CONTRACTOR_GODOT to the full path of godot.windows.editor.x86_64.exe and try again.
+	echo Put %EXE% beside play.bat, or set CONTRACTOR_GODOT to its full path, and try again.
+	echo Download: https://github.com/Zylann/godot_voxel/releases/tag/v1.7  ^(godot.windows.editor.x86_64.exe.zip^)
 	pause
 	exit /b 1
 )
@@ -162,7 +166,10 @@ fi
 	else
 		echo "Contractor test build $id: $label"
 	fi
-	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $(git branch --show-current 2>/dev/null || echo unknown), commit $sha$(git diff --quiet HEAD -- . ':!builds' 2>/dev/null || echo ' plus uncommitted changes')"
+	branch="$(git branch --show-current 2>/dev/null || true)"
+	# A tag's checkout on CI has no branch: name the tag (or the ref) instead.
+	[ -n "$branch" ] || branch="${GITHUB_REF_NAME:-unknown}"
+	echo "Built $(date '+%Y-%m-%d %H:%M') from branch $branch, commit $sha$(git diff --quiet HEAD -- . ':!builds' 2>/dev/null || echo ' plus uncommitted changes')"
 	echo "Export log: $log"
 	echo
 	if [ -s "$dir/Contractor.exe" ]; then

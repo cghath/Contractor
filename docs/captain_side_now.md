@@ -47,6 +47,29 @@ For cghath and cghath's agent. dev now holds everything below. Please base new w
 
 ## Builds
 
+**On GitHub (2026-10-31): a release for every version tag, and a nightly build of dev.**
+- **Release** (`.github/workflows/release.yml`): push a tag `v0.x.y` and a Windows runner builds
+  that commit with `tools/ci_build.sh` (make_build.sh's folder with `Contractor.exe` from the
+  Voxel Tools release template, plus `licenses/` and `GET_GODOT.txt`), then makes the release
+  "Contractor v0.x.y": the build zip, `BUILD.txt`, and `GodotVoxel-1.7-windows-editor.zip` (the
+  editor play.bat runs; unzipped into the build folder, play.bat finds it). The notes are the
+  version's `## [0.x.y]` section of CHANGELOG.md (`tools/release_notes.sh`), else the commits
+  since the last tag. 0.x tags make a published pre-release; set the repository variable
+  `RELEASE_DRAFT=true` for drafts. A release that's already there (a draft from
+  `tools/publish_release.sh`) only gets its files added or replaced. It never makes a tag.
+- **Nightly** (`.github/workflows/nightly.yml`): 04:17 UTC, builds dev when dev's tip has no
+  nightly yet; the build folder is the run's artifact `contractor-nightly-<commit>` for 14 days
+  (Actions > Nightly build > the run > Artifacts). No editor in it: Contractor.exe needs none.
+- **Licenses:** Godot and Voxel Tools are MIT; Voxel Tools' bundled FastNoiseLite and FastNoise2
+  (MIT), lz4 (BSD-2-Clause), meshoptimizer (MIT) and SQLite (public domain) all allow
+  redistribution with their notices, which every zip carries (`licenses/`: the engine's written
+  from the binary by `tools/engine_licenses.gd`, Voxel Tools' fetched from its v1.7 source).
+- **Manual runs and schedules start only from the default branch (`main`)**: until both files
+  are on `main`, the nightly doesn't run and `gh workflow run` can't start either. A tag push
+  works as soon as the tagged commit has release.yml. Dry run by hand once they're on `main`:
+  `gh workflow run release.yml --ref dev` (no tag: the build and notes kept as an artifact).
+  The same build on a PC: `GODOT=... tools/ci_build.sh <out dir> <label> --version 0.x.y`.
+
 Build names are now `v0.MINOR.PATCH`: `VERSION=v0.4.2 tools/make_build.sh`. Each build is a merge
 commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 
