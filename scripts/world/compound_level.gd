@@ -956,7 +956,15 @@ func rebalance_squad() -> void:
 		choices.append(player_roles[h.name.to_int()])
 		current.append(h.squad_slot)
 		current_roles.append(h.role)
-	var plan := Roles.assign(choices, current, current_roles)
+	# A squadmate lying down (out cold, dying) keeps his slot while another fits a player who
+	# needs one: taking it would free his body, wounds and all, from under whoever is treating,
+	# dragging or carrying him (bots joining a human-hosted game, Captain's item 7).
+	var avoid: Array = []
+	if _ai_ready:
+		for s: Soldier in _squad_ai():
+			if s.squad_slot >= 0 and not s.vitals.is_up() and not s.is_queued_for_deletion():
+				avoid.append(s.squad_slot)
+	var plan := Roles.assign(choices, current, current_roles, avoid)
 	var slot_roles: Array = plan.roles
 	var layout := Roles.layout()
 	var everyone := {}  # slot -> Soldier

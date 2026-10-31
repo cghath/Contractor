@@ -145,6 +145,7 @@ func _ready() -> void:
 	Net.peer_joined.connect(_on_peer_joined)
 	Net.peer_left.connect(_on_peer_left)
 	Net.session_ended.connect(_on_session_ended)
+	Net.hosted.connect(func() -> void: _profiles.clear())  # a new session: nobody's profile is taken yet
 	Campaign.changed.connect(func(_name: StringName) -> void: _queue_broadcast())
 	People.civilian_casualty.connect(RebelSupport.on_civilian_casualty)  # the locals remember (rebel support)
 	Contracts.contract_closed.connect(RebelSupport.on_contract_closed)  # their own jobs done (part 3)
@@ -1584,7 +1585,12 @@ func server_clear_ready() -> void:
 ## Host: a player leaving keeps what they stand up in (on their main character, or their
 ## stand-in); one leaving while down leaves it on their body (CompoundLevel).
 func _on_peer_left(id: int) -> void:
-	if not multiplayer.is_server() or not campaign_running:
+	if not multiplayer.is_server():
+		return
+	if not campaign_running:
+		# (A plain session keeps the profiles too: the one who left came back as "<profile>_2",
+		# and in a campaign hosted later in the same run as a new main character, their gear gone.)
+		_profiles.erase(id)
 		return
 	var lvl := level()
 	var p: Soldier = lvl.players.get_node_or_null(str(id)) as Soldier if lvl else null

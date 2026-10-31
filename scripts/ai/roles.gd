@@ -144,9 +144,11 @@ static func buddy_slot(slot: int) -> int:
 ## first); `current` is each player's slot so far (-1 for none) and `current_roles` the role
 ## they play in it now. A player keeps their slot when it is their pick's slot, or when they
 ## hold a converted non-medic slot and their pick hasn't changed, so other players joining,
-## leaving or switching roles never move them. Returns {"slots": Array[int] (one per
-## player), "roles": Array[StringName] (one per slot, after any conversions)}.
-static func assign(choices: Array, current: Array = [], current_roles: Array = []) -> Dictionary:
+## leaving or switching roles never move them. `avoid`: slots a player who needs a slot takes
+## only when nothing else is free (a squadmate lying down in it: one joining doesn't make him
+## vanish, CompoundLevel.rebalance_squad). Returns {"slots": Array[int] (one per player),
+## "roles": Array[StringName] (one per slot, after any conversions)}.
+static func assign(choices: Array, current: Array = [], current_roles: Array = [], avoid: Array = []) -> Dictionary:
 	var slots := layout()
 	var roles: Array[StringName] = []
 	for s: Dictionary in slots:
@@ -172,39 +174,48 @@ static func assign(choices: Array, current: Array = [], current_roles: Array = [
 			result[i] = held
 			taken[held] = true
 			roles[held] = wants[i]
-	# Then the first free slot with their role, on the team with fewer players.
-	for i in wants.size():
-		if result[i] >= 0:
-			continue
-		var best := -1
-		for s in slots.size():
-			if taken[s] or slots[s].role != wants[i]:
+	# Then a free slot, first leaving out the slots to avoid (with nothing else left, those too).
+	for pass_ in 2:
+		var off: Array = avoid if pass_ == 0 else []
+		# The first free slot with their role, on the team with fewer players.
+		for i in wants.size():
+			if result[i] >= 0:
 				continue
-			if best < 0 or _players_on(result, slots, slots[s].team) < _players_on(result, slots, slots[best].team):
-				best = s
-		if best >= 0:
-			result[i] = best
-			taken[best] = true
-	# No slot left for their role: a free non-medic slot takes it on.
-	for i in wants.size():
-		if result[i] >= 0:
-			continue
-		var best := -1
-		for role in CONVERT_ORDER:
-			for s in range(slots.size() - 1, -1, -1):
-				if taken[s] or slots[s].role != role:
+			var best := -1
+			for s in slots.size():
+				if taken[s] or off.has(s) or slots[s].role != wants[i]:
 					continue
 				if best < 0 or _players_on(result, slots, slots[s].team) < _players_on(result, slots, slots[best].team):
 					best = s
 			if best >= 0:
-				break
-		if best < 0:
-			best = taken.find(false)  # only medic slots left (more players than slots allow)
-		if best < 0:
-			continue
-		result[i] = best
-		taken[best] = true
-		roles[best] = wants[i]
+				result[i] = best
+				taken[best] = true
+		# No slot left for their role: a free non-medic slot takes it on.
+		for i in wants.size():
+			if result[i] >= 0:
+				continue
+			var best := -1
+			for role in CONVERT_ORDER:
+				for s in range(slots.size() - 1, -1, -1):
+					if taken[s] or off.has(s) or slots[s].role != role:
+						continue
+					if best < 0 or _players_on(result, slots, slots[s].team) < _players_on(result, slots, slots[best].team):
+						best = s
+				if best >= 0:
+					break
+			# Only medic slots left (more players than slots allow). Last pass only: an avoided
+			# slot of their own role, or an avoided non-medic slot, comes before a standing
+			# medic's slot, so every team keeps its medic (roles.json).
+			if best < 0 and pass_ == 1:
+				for s in slots.size():
+					if not taken[s]:
+						best = s
+						break
+			if best < 0:
+				continue
+			result[i] = best
+			taken[best] = true
+			roles[best] = wants[i]
 	return {"slots": result, "roles": roles}
 
 

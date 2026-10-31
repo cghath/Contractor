@@ -230,6 +230,27 @@ func _test_roster() -> void:
 	level.rebalance_squad()
 	await _frames(2)
 	check(_squad().size() == 7, "when they leave, AI fills the slot again (%d)" % _squad().size())
+	# Bots joining a human-hosted game (Captain's item 7): a medic joining while team B's medic
+	# lies out cold takes team A's medic slot, and the casualty stays where he lies.
+	var golf := _ai("Golf")
+	golf.vitals.server_damage(70.0)
+	await _frames(2)
+	var medic: Soldier = load("res://scenes/soldier.tscn").instantiate()
+	medic.name = "3"
+	medic.position = Vector3(-6, 0.1, 30)
+	level.players.add_child(medic)
+	level.player_roles[3] = Roles.MEDIC
+	level.rebalance_squad()
+	await _frames(2)
+	check(not golf.vitals.is_up() and _ai("Golf") == golf and golf.squad_slot == 7 and medic.squad_slot == 3 and _ai("Charlie") == null,
+		"a medic joining while Golf (team B's medic) is down takes Charlie's slot instead; Golf stays where he lies (slot %d, Golf %s)" % [medic.squad_slot, golf.vitals.condition_text()])
+	medic.queue_free()
+	level.player_roles.erase(3)
+	golf.vitals.server_reset_health()
+	await _frames(1)
+	level.rebalance_squad()
+	await _frames(2)
+	check(_squad().size() == 7 and _ai("Charlie") != null and _ai("Charlie").role == Roles.MEDIC, "and when they leave, a medic fills Charlie's slot again (%d)" % _squad().size())
 
 
 func _test_command_menu() -> void:

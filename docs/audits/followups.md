@@ -2124,6 +2124,14 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Captain's item 7 ("bots joining a human-hosted game") is the co-op soak bots joining a game a person hosts (tools/coop_soak.sh --join, built 2026-10-19 from his 2026-10-14 ask) and the squad rule under it (AI fills what players don't, a joiner takes an AI's slot, a leaver's slot goes back to AI). Both were in the code; built: the two-process botsjoin suite that runs them together, and the two gaps it and a read of rebalance_squad found (next two lines) | commit 92a371ef quotes the ask word for word; squad_test checked the slots in one process only, nothing ran the --join bot | a new bot-client mode or a new slot system
+2026-10-31 | A squadmate lying down (out cold, dying) keeps his slot when a player joins: Roles.assign's new `avoid` (CompoundLevel.rebalance_squad passes the downed AI's slots) sends a joiner to another slot that fits (a medic to the other team's medic slot, else a rifleman's slot taken on as medic), his own only when nothing else is free | the old take-over freed the casualty, wounds and all, from under the medic treating or the man carrying him (nothing teleports) | the joiner waiting outside the squad until he's up or dead
+2026-10-31 | A joiner still takes a slot by its AI leaving the session and the player coming in at the spawn or last crossing in their own kit (linked_zones.md 5, the late-join rule), not in that squadmate's body where he stands (F-331) | keeps the late-join, spawn and body rules as they are | an in-place body hand-off
+2026-10-31 | BaseHub forgets a leaving player's profile in a plain session too (only a campaign did), and a newly hosted session starts with none taken | a bot that left a plain session came back as "soak_bot1_2", and in a campaign hosted later in the same run as a brand-new main character, its gear not found | clearing them only when a client's session ends
+2026-10-31 | Roles.assign's 'only medic slots left' fallback runs in the last pass only, so with `avoid` a joiner takes an avoided slot of his own role (or an avoided non-medic slot) before a standing medic's slot: every team keeps its medic (roles.json), and a downed man's slot is the lesser harm, the 'last resort' the avoid rule already meant | review of feat/bots-join-hosted: players TL/AR/GR in 0-2, AI 4-6 down, a rifleman joining took Charlie's medic slot 3 and nothing rebalances when the casualties get up; roles_test case added | leave the fallback in both passes, or rebalance again when a casualty gets up
+2026-10-31 | Each soak bot (tests/coop_soak.gd, host or client) reads and saves its own settings file in its run folder (`<run>/client<N>/settings.cfg`, reset to the defaults at start), shoots right-handed and keeps the get-out key at its default, pinned and never saved (as animations_test pins the hand); the botsjoin host pins the same (F-332 done) | a bot beside a player's game on the same PC played with that player's handedness and controls, and botsjoin starts one in every local run; Handedness and ControlOptions read settings.cfg directly, so `GameSettings.use_file` alone wouldn't cover the hand | a file per tag in user:// as the suites do (shared by every run with that tag, not kept with the run's logs)
+2026-10-31 | tools/run_tests.sh exports CONTRACTOR_RUN_LOGS (the run's kept folder, a Windows path through cygpath; empty when nothing is kept) and botsjoin writes its bot's engine logs there (`botsjoin-bot_run<N>.log`), printing the last 40 lines of the bot's log on any bot failure | docs/debugging.md: every run's logs are kept with the run, and CI uploads that folder, so a bot failure on CI can be read; the bot's own logs were in user:// and lost on CI | only print the bot log's tail on failure
+2026-10-31 | The join-mode bot posts its place as it sees it (slot, role, fire team as replicated, and the name of whoever it sees in its buddy slot) in its status file, and botsjoin checks it matches the host's after the take-over and after a rejoin (F-352) | Soldier.buddy is host-only, so the client-side "buddy" is the living soldier of its side in Roles.buddy_slot(its slot): what the squad HUD can know | replicating Soldier.buddy itself (no client reads it today)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2183,56 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-331 to F-333: bots joining a human-hosted game (Captain's item 7, feat/bots-join-hosted)
+
+The botsjoin suite (tests/botsjoin_test.gd) hosts the way the build's menu does and starts the
+soak bot (`tests/coop_soak.tscn --soak-join`) as a second process: AI fill, a bot taking an AI's
+slot with that role's kit and buddy, following the human, the slot back to AI when it leaves; in
+the campaign, the FOB join and ready-up, gear kept on leaving (and in the save) and brought back
+on rejoining with no second kit. R0718 PASS. What it left open:
+
+### F-331 (open, design, cghath): a joiner takes the slot, not the squadmate's body
+A player joining mid-fight takes an AI's slot by that AI leaving the session wherever he is and
+the player coming in at the spawn (the compound) or the last crossing (a zone), in their own kit
+(linked_zones.md 5). Arma-style join-in-progress would put the player in that squadmate's body
+where it stands, with its kit. That changes the late-join rule, spawns and (in a campaign) whose
+gear is whose, so it's a call for cghath, not a fix. Since this branch a downed squadmate is never
+the one taken while another slot fits (Roles.assign `avoid`). Files: compound_level.gd
+(rebalance_squad, _remove_squadmate), base_hub.gd (server_squadmate_leaving).
+
+### F-332 (done 2026-10-31, PR #41 follow-ups): the soak bots run on this PC's settings.cfg
+Done: each bot uses `<run>/client<N>/settings.cfg` (or `host/`), reset to the defaults, with
+the hand and the get-out key pinned (Handedness and ControlOptions read settings.cfg directly,
+so `use_file` alone missed them); the botsjoin host pins them too. Calls made, 2026-10-31.
+The finding as written:
+tests/coop_soak.gd never calls `GameSettings.use_file`, unlike every suite, so bots joining a game
+on the same PC (`coop_soak.sh --join 127.0.0.1`) play with that player's handedness and controls
+(CLAUDE.md: a left-handed settings.cfg once broke the pistol draw) and could write to it. A
+per-bot test file (`soak_bot<N>_settings.cfg`) in `_ready` would keep them apart.
+
+### F-333 (open, test coverage): the --join bots in a deployment
+botsjoin covers the FOB (ready-up) and the plain session (follow). The bots' briefing ready-up,
+following the human into a zone, boarding with them and the extraction (coop_soak.gd `_join_tick`,
+`_follow_tick`) only run in a manual `coop_soak.sh --join` soak. A deployment in CI is minutes of
+zone generation; a short contract zone in the suite, or a periodic soak run, would cover it.
+
+## F-352 to F-358: PR #41 review follow-ups (feat/bots-join-hosted)
+
+From the PR's review: F-332 is done (above); botsjoin checks every bot log (the campaign's first
+leave too), joins, leaves and joins again in a plain session (the same "soak_bot1", the same
+slot), fails readably when no AI refills the slot, kills its bot if it times out, keeps the
+bot's engine logs in the run's log folder and prints their tail on a failure;
+tools/run_tests.sh lists botsjoin among the two-process suites.
+
+### F-352 (done): the client sees its own place
+The join-mode bot posts its slot, role, fire team and whoever it sees in its buddy slot
+(coop_soak.gd `_post_place`, status "place"); botsjoin checks the host has the same after the
+take-over and after the rejoin. Soldier.buddy is host-only; the client's buddy is the soldier
+in `Roles.buddy_slot` of its slot.
+
+### F-353 (open, test coverage): the place check at the FOB and in a campaign deployment
+The place check runs in the plain session only. At the FOB a joiner's slot comes from the
+campaign roster (BaseHub), and in a deployment from the zone's squad; checking the bot's posted
+place there too would cover the campaign's slot hand-out end to end (cheap at the FOB; a
+deployment is F-333).

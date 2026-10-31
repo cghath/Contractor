@@ -139,6 +139,20 @@ func _test_assignment() -> void:
 		"a rifleman joining doesn't move the marksman out of the converted slot (%s)" % [three.slots])
 	var medic_kept := Roles.assign([&"rifleman"], [3], [&"rifleman"])
 	check(medic_kept.slots[0] != 3 and medic_kept.roles[3] == Roles.MEDIC, "a non-medic never keeps a medic slot")
+	# Slots to avoid (a squadmate lying down in them): taken only when nothing else is free.
+	var past_down := Roles.assign([&"team_leader", &"medic"], [0, -1], [&"team_leader", &""], [7])
+	check(past_down.slots[1] == 3, "a medic joining while team B's medic is down takes team A's medic slot (%s)" % [past_down.slots])
+	var both_down := Roles.assign([&"team_leader", &"medic"], [0, -1], [&"team_leader", &""], [3, 7])
+	check(both_down.slots[1] not in [3, 7] and both_down.roles[both_down.slots[1]] == Roles.MEDIC and both_down.roles[3] == Roles.MEDIC and both_down.roles[7] == Roles.MEDIC,
+		"both medics down: the joining medic takes a rifleman's slot on as a medic (%s)" % [both_down.slots])
+	var kept_down := Roles.assign([&"medic"], [7], [&"medic"], [7])
+	check(kept_down.slots[0] == 7, "a player keeps their own slot whatever the avoid list says")
+	var last_resort := Roles.assign([&"rifleman"], [], [], [0, 1, 2, 3, 4, 5, 6, 7])
+	check(last_resort.slots[0] == 6, "with every slot to avoid, the role's own slot as before (%s)" % [last_resort.slots])
+	var medic_spared := Roles.assign([&"team_leader", &"autorifleman", &"grenadier", &"rifleman"], [0, 1, 2, -1],
+		[&"team_leader", &"autorifleman", &"grenadier", &""], [4, 5, 6])
+	check(medic_spared.slots[3] == 6 and medic_spared.roles[3] == Roles.MEDIC and medic_spared.roles[7] == Roles.MEDIC,
+		"a rifleman joining with every other non-medic slot taken or down takes the downed rifleman's slot, never a standing medic's (%s)" % [medic_spared.slots])
 
 
 func _test_menu_picker() -> void:
