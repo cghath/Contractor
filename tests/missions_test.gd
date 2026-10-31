@@ -1638,6 +1638,7 @@ func _test_enemy_drones() -> void:
 	check(drones != null and alert != null, "a hot zone has them")
 	if drones == null or alert == null:
 		return
+	alert.lkp = {"pos": player.global_position + Vector3(20, 0, 10), "time": alert.now()}  # it goes where the net last heard of the squad (F-362), not to the squad
 	var id := drones.server_launch(player.global_position + Vector3(300, 0, 0))
 	check(id > 0 and drones.drones[id].pos.y > player.global_position.y + 30.0, "a drone goes up, high over the ground")
 	var reports := alert.reports.size()
@@ -1645,7 +1646,7 @@ func _test_enemy_drones() -> void:
 		drones.server_fly(id, 1.0)
 	check(Vector2(drones.drones[id].pos.x - player.global_position.x, drones.drones[id].pos.z - player.global_position.z).length() <= EnemyDrones.SEE_M
 		and alert.reports.size() > reports and String(alert.reports[-1].get("by", "")) == "drone",
-		"it flies to the squad and reports it to the enemy's net (%d reports)" % (alert.reports.size() - reports))
+		"it flies to where the net last heard of the squad, sees it there and reports it (%d reports)" % (alert.reports.size() - reports))
 	var body: Node = drones.drones[id].body
 	check(body != null and body.has_meta(&"on_bullet"), "it can be shot (a body rounds hit)")
 	for k in EnemyDrones.HITS:

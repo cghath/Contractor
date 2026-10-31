@@ -2,10 +2,13 @@ class_name EnemyDrones
 extends Node
 ## Wave 6: the enemy's recon drones and the jammer. In a hot zone, once the enemy is alerted
 ## (Pressure tier MIN_TIER or more), its HQ (else any site) sends a small quadcopter up every
-## GAP_S: ALT_M over the ground, it flies to the squad and orbits it, and every REPORT_S it sees
-## any of the squad within SEE_M it reports them to the enemy's net (Alert._receive, a "contact":
-## the last known position moves there, QRFs and hunters get a fresh fix). Its battery lasts
-## ENDURANCE_S, then it goes home.
+## GAP_S: ALT_M over the ground, it flies to where the enemy last heard of the squad (Alert's last
+## known position) and orbits there; once it has any of the squad in sight (within SEE_M, a clear
+## line from its camera: a roof or a wall in the way hides them) it follows them, for FIX_KEEP_S
+## after it last saw one. Every REPORT_S it sees any of them it reports them to the enemy's net
+## (Alert._receive, a "contact": the last known position moves there, QRFs and hunters get a fresh
+## fix). It used to fly straight to the squad wherever it was and see through roofs (F-362). Its
+## battery lasts ENDURANCE_S, then it goes home.
 ##
 ## Dealt with by shooting it (HITS rounds bring it down: Ballistics calls its body's "on_bullet"
 ## meta) or with a jammer (data/items.json "jammer", carried by any of the squad up within JAM_M:
@@ -29,11 +32,15 @@ const JAM_M := 150.0
 const HITS := 2
 const FALL_MS := 12.0
 const SYNC_S := 0.2
+## How often (s) a drone looks for the squad, and how long it keeps to where it last saw one.
+const LOOK_S := 1.0
+const FIX_KEEP_S := 30.0
 
 ## Tests and dev tools: false stops launches (server_launch still works).
 static var enabled := true
 ## Host: id -> {"pos": Vector3, "home": Vector3, "launched", "hits", "state" ("out", "home",
-## "falling", "gone"), "next_report", "seen_once", "body": StaticBody3D}.
+## "falling", "gone"), "next_report", "seen_once", "body": StaticBody3D, and once it has looked:
+## "look_in", "seen" (the squad it has in sight), "fix" (where it last saw them), "fix_age"}.
 var drones := {}
 ## Every peer: id -> its visual.
 var _shown := {}
@@ -118,8 +125,8 @@ func server_launch(from := Vector3.INF) -> int:
 	return id
 
 
-## Host: drone `id` flies `delta` seconds: to the squad and round it, home when its battery's
-## low, down when jammed or shot.
+## Host: drone `id` flies `delta` seconds: to where it saw the squad, else to the enemy's last
+## known position, and round it; home when its battery's low, down when jammed or shot.
 func server_fly(id: int, delta: float) -> void:
 	var d: Dictionary = drones[id]
 	var level := CompoundLevel.current(self)
@@ -141,34 +148,64 @@ func server_fly(id: int, delta: float) -> void:
 				d.state = "falling"
 				Contracts._notify_all("Jammer: the drone's link is cut. It's coming down.")
 			var goal: Vector3 = d.home
-			if String(d.state) == "out" and not squad.is_empty():
-				var c := Vector3.ZERO
-				for s: Soldier in squad:
-					c += s.global_position
-				c /= squad.size()
-				var a := Soldier._now() * SPEED_MS / ORBIT_M + id
-				goal = _air(c + Vector3(cos(a), 0.0, sin(a)) * ORBIT_M)
+			if String(d.state) == "out":
+				_search(d, pos, squad, delta)
+				var c := _search_point(d, level)
+				if c.is_finite():
+					var a := Soldier._now() * SPEED_MS / ORBIT_M + id
+					goal = _air(c + Vector3(cos(a), 0.0, sin(a)) * ORBIT_M)
 			var to := goal - pos
 			pos += to.normalized() * minf(to.length(), SPEED_MS * delta) if to.length() > 0.01 else Vector3.ZERO
 			if String(d.state) == "home" and pos.distance_to(d.home) < 3.0:
 				d.state = "gone"
 				_free_body(d)
 			elif String(d.state) == "out":
-				_look(id, d, pos, squad, level)
+				_look(id, d, pos, level)
 	d.pos = pos
 	if is_instance_valid(d.get("body")):
 		(d.body as Node3D).global_position = pos
 
 
-func _look(id: int, d: Dictionary, pos: Vector3, squad: Array[Soldier], level: Node) -> void:
+## Every LOOK_S: which of `squad` drone `d` at `pos` has in sight ("seen"), and where it saw
+## them ("fix", kept FIX_KEEP_S).
+func _search(d: Dictionary, pos: Vector3, squad: Array[Soldier], delta: float) -> void:
+	d.fix_age = float(d.get("fix_age", INF)) + delta
+	d.look_in = float(d.get("look_in", 0.0)) - delta
+	if float(d.look_in) > 0.0:
+		return
+	d.look_in = LOOK_S
+	var seen: Array[Soldier] = []
+	var sum := Vector3.ZERO
+	for s: Soldier in squad:
+		if Vector2(s.global_position.x - pos.x, s.global_position.z - pos.z).length() <= SEE_M 				and Throwables.clear_line(s.get_world_3d(), pos, s.aim_point()):
+			seen.append(s)
+			sum += s.global_position
+	d.seen = seen
+	if not seen.is_empty():
+		d.fix = sum / seen.size()
+		d.fix_age = 0.0
+
+
+## Where drone `d` searches: where it last saw the squad (FIX_KEEP_S), else the enemy's last
+## known position, else nowhere (Vector3.INF: it hangs over home).
+func _search_point(d: Dictionary, level: Node) -> Vector3:
+	if d.has("fix") and float(d.get("fix_age", INF)) <= FIX_KEEP_S:
+		return d.fix
+	var alert := Alert.of(level)
+	var known := alert.last_known() if alert else {}
+	return known.pos if not known.is_empty() else Vector3.INF
+
+
+func _look(id: int, d: Dictionary, pos: Vector3, level: Node) -> void:
 	if Soldier._now() < float(d.next_report):
 		return
-	for s: Soldier in squad:
-		if Vector2(s.global_position.x - pos.x, s.global_position.z - pos.z).length() <= SEE_M:
+	for v: Variant in d.get("seen", []):
+		var s: Soldier = v as Soldier if is_instance_valid(v) else null
+		if s and s.vitals.is_up():
 			d.next_report = Soldier._now() + REPORT_S
 			var alert := Alert.of(level)
 			if alert:
-				var seen := alert._seen_at(s.global_position)
+				var seen := alert._seen_at(s.global_position, null, pos)
 				alert._receive({"kind": &"contact", "pos": s.global_position, "area": alert.area_of(s.global_position), "by": "drone",
 					"seen": int(seen.seen), "exo": int(seen.exo)})
 			if not bool(d.seen_once):
