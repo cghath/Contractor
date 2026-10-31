@@ -48,9 +48,10 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   that an up body carrying someone keeps the carry pose's boxes too (the carry guard on its own).
   casualty's soak no longer calls a man stuck who walked 4 m or more after a slot that itself
   moved 5 m or more (following it round the lead's loop, CI 41235918402); its stuck line prints
-  his slot each second, his refit pick and how far he walked. Local R0770 (smoke, weapons, animations,
-  Looting and the vault checks among them), R0774 (wounds, medical), and without the pelvis
-  change R0782 (casualty) and R0783 (smoke, weapons, animations) PASS.
+  his slot each second, his refit pick and how far he walked. Local R0770 (smoke, weapons,
+  animations, Looting and the vault checks among them) and R0774 (wounds, medical); with the
+  pelvis on the drawn root and the trail fix R0796 (smoke, weapons, casualty), R0805 (smoke,
+  animations, wounds, medical, spacing, casualty) and R0808 (casualty) PASS.
 
 ### SVD Dragunov's own model (2026-10-20: realistic weapons)
 

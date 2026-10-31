@@ -571,8 +571,8 @@ func _test_leg_boxes() -> void:
 	s.model.pose_hitboxes(s)
 	var carried_still := thigh != null and not s.model._carry_state().is_empty() and thigh.transform.is_equal_approx(carried)
 	check(downed_still and carried_still, "downed (still %s) or carried (still %s), the left thigh's box ignores the drawn thigh" % [downed_still, carried_still])
-	# The carry guard on its own: up, not downed, carrying someone (the one carry state an up body
-	# has), the boxes keep the carry pose too, whatever the drawn thigh does.
+	# The carry guard on its own: up, not downed, carrying someone (an up body's carry states are
+	# the carrier's, CARRY and DRAG), the boxes keep the carry pose too, whatever the drawn thigh does.
 	CharacterModel.lay_down(s, s.model, false)
 	var up_carried := s.model._carry_state().is_empty()
 	s.model.carry_net = {"mode": CharacterModel.CARRY, "with": String(player.get_path())}

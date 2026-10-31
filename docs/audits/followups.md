@@ -1832,11 +1832,12 @@ about 20 m through the compound in the check's 8 s window, at up to 5.6 m/s and 
 the 3 m/s lead walks, and ended within 0.6 m of where the window began, so the check (net movement)
 called him stuck: his slot had jumped and jumped back. His slot each time lay on the lead's trail
 through the compound, 25-37 m back along it (Golf's at (-0.55, -6.0) with the lead at (7.7, 23.9)),
-where a `_refit` trail pick puts it, and the soak's route walks out and back over itself ((0, 0) -> (0, -8) ->
-(0, 2), and on through the north gate). A doubled-back trail lies over itself, so a trail point on
-the way back is about as close to a slot on the way out as its neighbours are, and a pick that must
-keep SLOT_APART_MULT of the gap from every other slot searches on past the whole doubled section; when that clears
-it comes back. Fix: the trail cuts any loop the lead walks (`TRAIL_LOOP_M`: back within 1.5 m of a
+where a `_refit` trail pick puts it, and the soak's route walks out and back over itself
+((0, 0) -> (0, -8) -> (0, 2), and on through the north gate). A doubled-back trail lies over
+itself, so a trail point on the way back is about as close to a slot on the way out as its
+neighbours are, and a pick that must keep SLOT_APART_MULT of the gap from every other slot can
+search on past the whole doubled section, and come back when that clears (which fits the jumps;
+the refit kind wasn't printed in those runs). Fix: the trail cuts any loop the lead walks (`TRAIL_LOOP_M`: back within 1.5 m of a
 point, everything since goes; the last 3 points never count), so it lies on the ground once. The
 soak's stuck line now prints the man's slot each second, his refit pick and how far he walked.
 
@@ -1853,6 +1854,10 @@ passes without it on this branch (41227859540, 41227862154, R0782) and every cas
 on other branches today. With no path from the box to the AI, and the soak seeded (casualty's
 dead-check calls seed(4242) just before it) but driven by real-time AI timers, the guess is that
 each tree walks its own near-repeatable trajectory; the loops themselves are what's fixed here.
+With the trail fix (and the pelvis on the drawn root) casualty passed R0796, R0805 and R0808, and
+R0805 also passed animations (Looting, "takes its ragdoll along", standing up where the ragdoll
+lay, respawning, and the drag straps this time), wounds, medical and spacing; R0796 smoke and
+weapons.
 
 ## Calls made for the Captain
 
