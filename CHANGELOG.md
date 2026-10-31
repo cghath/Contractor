@@ -51,7 +51,8 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   casualty's soak no longer calls a man stuck who walked 4 m or more and ended the window 5 m or
   more nearer his slot than he began it (getting there round the lead's loop, CI 41235918402; at
   first any man whose slot moved 5 m was let off, which with the lead always walking hid every
-  loop, review); its stuck line prints his slot each second, his refit pick, how far he walked
+  loop, review), nor one who was within 5 m of his slot when the window began (his slot had
+  just leapt away, R0815); its stuck line prints his slot each second, his refit pick, how far he walked
   and how far off his slot he began. spacing's new "Trail" checks walk the lead out and back on a
   line (the trail lies on the ground once) and in at the compound's gate and back along the
   inside of its wall (no stretch crosses the wall). Local R0770 (smoke, weapons,
