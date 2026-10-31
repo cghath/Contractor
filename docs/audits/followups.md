@@ -1819,6 +1819,15 @@ chunks queued)" at 180 s on both the green and the red runs (rebakes held or wai
 move), so the case always waits the full SETTLE_MS before measuring. Locally it settled at 107 s
 (R0708). Harmless to the verdict; it makes the suite ~2.5 min longer on CI.
 
+### F-305 (note, cghath's armour lane): gunnery's buttoned-up spotting check flaked once
+"Spotting: 4.5 s turned out, 261.7 s buttoned up through the front block (x2.5)" on
+fix/dev-reds-oct31's CI (41173283134, 62ffcdc; passed on the rerun, attempt 2, and on dev's own runs).
+Turned out is the expected 4.5 s; buttoned up was 58x, not 2.5x, two physics frames later, and
+`VehicleHatches.spot_x` is only ever 1, 2.5 or INF, so the other 23x came from the rest of
+`Spotting.spot_seconds` (OFF_VIEW 3 if the commander's body yaw went with the turret, the dark
+with his NVG no longer counting inside, the target's stance). Worth printing those factors in the
+check's message the next time it's touched. Nothing in this branch reaches spotting.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.

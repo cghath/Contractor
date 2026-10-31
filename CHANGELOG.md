@@ -36,6 +36,9 @@ timing or on what the suite before it left behind, not on the code under test. R
 - **Changed (tests, perfcases):** F-233 (a city block not built in 180 s on CI) reports what the
   slow block is doing: every 30 s while waiting, and in the check, how many of its boxes are stamped
   and whether the voxel engine has loaded its area yet (`VoxelWorld.build_progress`).
+- Runs: local R0708 (perfcases city PASS, vehicles' gun team fires; the spall-cone budget missed under
+  local load) and R0719 (smoke, squad, props PASS); CI 41173283134 green on 62ffcdc (gunnery's
+  buttoned-up spotting flaked once and passed its rerun, F-305).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
