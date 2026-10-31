@@ -11,6 +11,35 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
+
+Dev's last two CI runs (40604654761 at 6a52a7f: props, perfcases; 41154617049 at 54ccc3d, a
+docs-only commit on the same code: squad, vehicles, perfcases) against claude/dev-reds' green run
+of the very same commit (40602801148): every one of these reds was a check whose outcome hung on
+timing or on what the suite before it left behind, not on the code under test. Roles passes on dev
+(41154617049).
+
+- **Fixed (tests, squad):** the fire-discipline check "1.5 m off the line" never put the shooter on
+  his feet. The fight before it can leave Alpha prone or crouched in combat mode, and from a prone
+  eye the line 3 m out runs at a prone man's chest height, so Bravo 1.5 m off was rightly in it.
+  Alpha now stands for it (as the muzzle check further down already did); the message gives the eye.
+- **Fixed (tests, vehicles):** the AI gun team: only the man on the gun is let loose once it's
+  manned; the other's rifle holds until the gun has fired. While the gun turned onto the foe and
+  made him out, the assistant's rifle put a round through his head at 123 m (can_go_down doesn't
+  stop a head wound killing), so "fires on him (0 rounds)".
+- **Fixed (tests, props):** the client's animal check: the host's animals stand still for the
+  comparison and a few packets go out before the host answers. A client that stalled a second or
+  two took the answer together with packets sent after it, the animals metres on ("worst 2.85 m").
+- **Fixed (vehicle HUD):** the night channel's shader left NvgView's MEAN unreplaced and failed to
+  compile on every vehicle HUD made ("Unknown identifier 'MEAN'"; every vehicle entered on CI).
+  `NvgView.screen_shader_code()` makes the screen version for both.
+- **Changed (tests, perfcases):** F-233 (a city block not built in 180 s on CI) reports what the
+  slow block is doing: every 30 s while waiting, and in the check, how many of its boxes are stamped
+  and whether the voxel engine has loaded its area yet (`VoxelWorld.build_progress`).
+- Runs: local R0708 (perfcases city PASS, vehicles' gun team fires; the spall-cone budget missed under
+  local load) and R0719 (smoke, squad, props PASS); CI 41173283134 green on 62ffcdc (gunnery's
+  buttoned-up spotting flaked once and passed its rerun, F-305).
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
