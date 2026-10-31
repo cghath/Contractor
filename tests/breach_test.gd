@@ -15,7 +15,10 @@ extends Node
 ##   on the navmesh and clear the building, every stage in order, and end inside; the client
 ##   sees the charge, the blast, the hole and the team inside;
 ## - ordered on the player's own charge (nobody selected carries one), and he goes down before he
-##   sets it: they don't wait at the wall for ever, but go in by the building's door and clear it.
+##   sets it: they don't wait at the wall for ever, but go in by the building's door and clear it;
+## - a wall breach whose charge carriers all go down before the charge is set falls back to the
+##   building's door, and the team restacks there before the door is breached (nobody works the
+##   new door from where he stood, even once the setter is back up).
 ##   <godot> --headless --path . res://tests/breach_test.tscn
 ## The host starts the client itself (same scene, "-- --breach-join"). Exits with the number of
 ## failures.
@@ -76,6 +79,7 @@ func _ready() -> void:
 	await _test_targets()
 	await _test_order_with_client()
 	await _test_lead_down()
+	await _test_carriers_down()
 	_finish()
 
 
@@ -454,6 +458,62 @@ func _test_lead_down() -> void:
 	await _seconds(0.5)
 	var inside := mates.filter(func(ai: SquadAI) -> bool: return is_instance_valid(ai) and Buildings.contains(op.building, ai.body.global_position))
 	check(cleared and inside.size() == mates.size(), "and they clear the building and end inside it (%d of %d)" % [inside.size(), mates.size()])
+
+
+# --- Every charge carrier down before the charge is set ------------------------------------
+
+## Review of feat/breach-and-clear: the door fallback (SquadAI._wall_breacher_lost) left the op
+## "breaching", so the setter (back up, or out of charges at the wall) worked the new door from
+## where he stood and the team went before it had restacked. Two of four carry a charge; the
+## setter is on his way to the wall when both go down: in by the door, everyone at his new place
+## in the stack before it's breached, the setter (woken) with them.
+func _test_carriers_down() -> void:
+	print("Breach and clear: every charge carrier down before the charge is set")
+	var squad := level.squad_for(&"friendly")
+	await _heal_squad()
+	var mates := _team(4)
+	if mates.size() < 4:
+		check(false, "four fit squadmates (%d)" % mates.size())
+		return
+	_strip_charges(mates)
+	while player.inventory.remove_one(Charges.ITEM):
+		pass
+	Roles.give(mates[0].body.inventory, Charges.ITEM, 1)
+	Roles.give(mates[1].body.inventory, Charges.ITEM, 1)
+	_place(player, Vector3(-12, 0.1, -16))
+	for i in mates.size():
+		_place(mates[i].body, Vector3(-9.5, 0.1, -11.0 + i * 0.9))
+	await _seconds(0.5)
+	var names := PackedStringArray(mates.map(func(ai: SquadAI) -> String: return String(ai.body.name)))
+	var why := squad.order_command(player, "breach_clear", WEST_WALL, names)
+	var op: Dictionary = mates[0].ordered.get("op", {}) if why == "" else {}
+	var carriers: Array[SquadAI] = [mates[0], mates[1]]
+	check(why == "" and not op.is_empty() and bool(op.get("wall", false)) and String(op.get("door", "")) == "charge" and carriers.has(op.get("breacher_ai")),
+		"ordered with two charges among them: they stack on the west wall, a carrier to set it (%s)" % why)
+	if op.is_empty():
+		return
+	var setting := await _wait_until(func() -> bool: return bool(op.get("breaching", false)), 60.0)
+	var setter: SquadAI = op.get("breacher_ai")
+	for ai: SquadAI in carriers:
+		ai.body.vitals.server_damage(70.0)
+	var down := await _wait_until(func() -> bool: return carriers.all(func(ai: SquadAI) -> bool: return not ai.body.vitals.is_up()), 5.0)
+	check(setting and down and not op.has("charge_id"), "the setter's on his way to the wall when both carriers go down, his charge not yet set (down %s)" % down)
+	var fell_back := await _wait_until(func() -> bool: return not bool(op.get("wall", true)), 30.0)
+	var since := Soldier._now()
+	check(fell_back and String(op.get("door", "?")) == "" and not bool(op.get("breaching", true)) and not op.has("breach_from") and (op.entrance.door as Vector3).z > -5.0,
+		"nobody left with a charge: in by the door (at %s), and nobody's working it yet (breaching %s)" % [op.entrance.get("door", Vector3.INF), op.get("breaching", "?")])
+	for ai: SquadAI in carriers:
+		ai.body.vitals.server_reset_health()  # (back up: the setter mustn't go for the door on his own)
+	# The door's breach (go_at) only once they've restacked by it: every one of them ready at his
+	# new place, or the stack's wait out since the first was.
+	var went := await _wait_until(func() -> bool: return is_finite(float(op.go_at)), 60.0)
+	var ready: Dictionary = op.ready
+	var waited := Soldier._now() - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S - 0.1
+	var setter_slot := int(setter._tactic().get("slot", -1)) if is_instance_valid(setter) else -1
+	check(went and is_finite(float(op.first_ready_at)) and float(op.first_ready_at) >= since and (ready.size() >= int(op.units) or waited) and ready.has(setter_slot),
+		"they restack by the door before it's breached, the setter with them (%d of %d ready, setter's slot %d ready %s, waited out %s)"
+		% [ready.size(), int(op.units), setter_slot, ready.has(setter_slot), waited])
+	await _heal_squad()
 
 
 func _stage_at(op: Dictionary, stage: String) -> float:

@@ -1807,6 +1807,14 @@ cache, budgeted as a player's machine is. Why the headless lookup missed once in
 not known (a guess: cells probed while the navmesh was being rebaked after the perimeter wall's
 hole, kept for CACHE_S); it can no longer send a team into a building as if into a yard.
 
+### F-373 (open): a charge's stand-off moves the ordered team only, not followers at the wall
+`Squad.stand_off` moves the stack's spots 3 m along the wall from the charge, but squadmates
+not in the order (following the leader, or holding) who happen to stand by the wall stay where
+they are while it burns; nothing in the AI keeps clear of a live charge (no `Charges` lookup
+outside the stack's own beats). A small fix isn't there: it needs every follower's spot (or
+`_go` itself) to step out of a burning charge's BLAST_SAFE_M, which touches follow, hold and
+cover for every squad. Left for now (review of feat/breach-and-clear; F-319's neighbourhood).
+
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
 (`_bang_plan`). Nothing quiets the blast; a quiet wall breach (cutting through) isn't modelled.
@@ -2178,6 +2186,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | Breach and clear through a wall with no building behind it (a compound perimeter): through and hold just inside, four spots 2-3.5 m in, fanned 1.6 m (Proposed) | the order says "through walls"; a yard has no rooms to clear | refuse it
 2026-10-31 | Breach and clear's building lookup behind the wall is exact (never cut short by Buildings' 4 ms frame budget); no building found but the far side walled in by Buildings' own inside test: refused "Can't make out the building past that wall, try again"; a wall with the building on both sides: refused | a player's order is one scan, once, and a wrong yard blows the wall and skips the clearing | a roof test alone (the compound's main building has no roof), or retrying the lookup over the next ticks
 2026-10-31 | Breach and clear on the leader's own charge, he goes down or leaves before it blows: his blast by the spot still counts, a charge still burning there is waited out, else the next with a charge sets it where he pointed, else the building's door; he goes in some other way: they follow by the building's door nearest him (a yard: in after the hole's 5 s wait) | the stack held at the wall for ever (review of 7b6d7576) | give the order up when he goes down
+2026-10-31 | Breach and clear's door fallback (every charge carrier down, or the setter out of charges at the wall) ends the setter's work at the wall (`op.breaching` off, `breach_from` gone): the team restacks by the door and its breach waits for the stack; the stand-off for followers not in the order is left (F-373) | the setter worked the new door from where he stood and the team went before restacking (review of feat/breach-and-clear) | hand the door to the setter as the team's breacher (a kick) without restacking
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

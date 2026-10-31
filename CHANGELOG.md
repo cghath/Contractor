@@ -59,6 +59,13 @@ clear' team order through walls" (F-317, F-318).
   The sweep through a fresh hole ends just past the wall's inner face (it ran 1.2 m in whatever
   the wall, into the room, and on CI met something 1 m inside a stone house, its furniture standing
   against the walls), waits up to 3 s for the voxel colliders to catch up, and names what it hit.
+- **Fixed (review):** when every charge carrier is down (or the setter has none left at the
+  wall) and the team falls back to the building's door, the setter no longer works the new door
+  from where he stood: the op stops "breaching" (`SquadAI._wall_breacher_lost`), so the team
+  restacks by the door and its breach waits for the stack. `breach` adds it: two carriers down on
+  the way to the wall, in by the door, all four restacked (the setter, back up, with them) before
+  it's breached (R0757 PASS; without the fix it fails, R0758). Followers outside the order
+  still aren't moved off the wall (F-373).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

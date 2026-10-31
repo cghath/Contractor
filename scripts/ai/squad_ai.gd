@@ -4085,6 +4085,12 @@ func _wall_breacher_lost(op: Dictionary) -> void:
 	op.entrance = e
 	op.door = ""
 	op.breach = op.get("bang", "")
+	# Nobody works the door alone: the setter (out of charges at the wall, or back up after going
+	# down) restacks with the rest, and the door's breach waits for the stack (_tactic_clear).
+	# Left "breaching", he went to the new door from where he stood and the team went before
+	# it had restacked (review of feat/breach-and-clear).
+	op.breaching = false
+	op.erase("breach_from")
 	var map := body.get_world_3d().navigation_map
 	var side := 1.0 if (body.global_position - (e.door as Vector3)).dot((e.normal as Vector3).cross(Vector3.UP)) >= 0.0 else -1.0
 	var stack: Array[Vector3] = []
