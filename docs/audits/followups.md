@@ -2176,3 +2176,15 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-310 (open, flaky once, Fallen): fallenpeople's shelter-room walker gone two frames after it spawned
+
+Found on fix/fallen-reds-oct31 (R0707, local, six suites at once): "A shelter room at the
+settlement" failed "the settler and the dead are up (settler up, zombie none)" though the log
+shows the walker spawned (Z50818_25); the next run (R0710) passed, and CI 41154628672 passed it.
+"none" is `zz == null`, which a walker freed within the two frames also reads as, so something
+took it away at 0.7 of the settlement's radius (the settlement's guards or the dead's own
+clean-up are the first places to look). Not chased: once, locally, under load. If it comes back
+on CI, spawn the walker after the settler body is up and check `is_instance_valid` alone.
+
+Location: tests/fallenpeople_test.gd (_test_shelter_room, the walker at -radius x 0.7).

@@ -516,8 +516,10 @@ func _test_bow() -> void:
 	var aim := (chest + Vector3.UP * 0.5 * Archery.GRAVITY * flight_s * flight_s - eye).normalized()
 	var shot := Archery.server_loose(player, eye, aim, 1.0)
 	var at: Vector3 = shot.get("position", Vector3.ZERO)
-	check(String(shot.get("result", "")) == "body" and shot.get("victim") == z, "an arrow loosed at a walker %.1f m off strikes it (%s, %s, flew %.2f s; ended %.1f m off, %.1f m up from its feet)"
-		% [z.global_position.distance_to(player.global_position), shot.get("result", "?"), shot.get("part", "-"), float(shot.get("flight_s", 0.0)), at.distance_to(eye), at.y - z.global_position.y])
+	var hit_on: Object = shot.get("collider")
+	var hit_name := "-" if not is_instance_valid(hit_on) else ("%s %s" % [hit_on.get_class(), String((hit_on as Node).get_path()) if hit_on is Node else ""])
+	check(String(shot.get("result", "")) == "body" and shot.get("victim") == z, "an arrow loosed at a walker %.1f m off strikes it (%s, %s, flew %.2f s; ended %.1f m off, %.1f m up from its feet; hit %s)"
+		% [z.global_position.distance_to(player.global_position), shot.get("result", "?"), shot.get("part", "-"), float(shot.get("flight_s", 0.0)), at.distance_to(eye), at.y - z.global_position.y, hit_name])
 	if z.vitals.is_up():
 		z.vitals.server_hit(Vitals.HEAD, {"round_class": &"pistol", "channel_depth": 0.1, "melee": "arrow", "energy_j": float(Archery.bow_of(bow).energy_j)})
 	check(z.vitals.is_dead(), "and a full-draw arrow to the head drops it")
@@ -528,7 +530,9 @@ func _test_bow() -> void:
 	player.select_weapon(&"primary")
 
 
-## A level way from `eye` with a clear line to a man's head `m` metres out and to the ground 4 m out.
+## A level way from `eye` with clear lines to a man `m` metres out (knee-high to over his head:
+## the arrow's arc and its spread lie between them, so a farm fence under the head line can't
+## catch it, R0707/R0710) and to the ground 4 m out.
 func _clear_way(eye: Vector3, m: float) -> Vector3:
 	var space := player.get_world_3d().direct_space_state
 	var exclude: Array[RID] = [player.get_rid()]
@@ -537,13 +541,14 @@ func _clear_way(eye: Vector3, m: float) -> Vector3:
 			exclude.append(child.get_rid())
 	for i in 16:
 		var dir := Vector3.FORWARD.rotated(Vector3.UP, i * TAU / 16.0)
-		var far := level.ground_point(player.global_position + dir * m) + Vector3.UP * 1.6
+		var ground := level.ground_point(player.global_position + dir * m)
 		var near := level.ground_point(player.global_position + dir * 4.0)
-		var q1 := PhysicsRayQueryParameters3D.create(eye, far, Archery.MASK, exclude)
-		q1.collide_with_areas = true
-		var q2 := PhysicsRayQueryParameters3D.create(eye, near + Vector3.UP * 0.3, Archery.MASK, exclude)
-		q2.collide_with_areas = true
-		if space.intersect_ray(q1).is_empty() and space.intersect_ray(q2).is_empty():
+		var clear := true
+		for to: Vector3 in [ground + Vector3.UP * 0.9, ground + Vector3.UP * 1.25, ground + Vector3.UP * 1.8, near + Vector3.UP * 0.3]:
+			var q := PhysicsRayQueryParameters3D.create(eye, to, Archery.MASK, exclude)
+			q.collide_with_areas = true
+			clear = clear and space.intersect_ray(q).is_empty()
+		if clear:
 			return dir
 	return -player.global_basis.z
 
