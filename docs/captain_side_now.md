@@ -93,7 +93,8 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
    denser copses. **Measured, still open** (2026-10-22, bbef7e05: tiers, far blobs, no shadows
    from bushes, the dense copses on every wooded preset; 2026-10-31, perf/woods-copses: measured
    again, woods and open ground cases with vegetation draw budgets in perfcases;
-   docs/performance.md, "Woods, 2026-10-31"). Windowed (S0771), inside the densest wood the
+   docs/performance.md, "Woods, 2026-10-31"). Windowed (S0771: partial numbers, a run stopped
+   early, not a finished measurement), inside the densest wood the
    renderer makes about 60% more draws than on open ground (1036 against 646) and the frame is
    1.3 ms longer (10.1 against 8.9 ms; the GPU 0.7 ms in both); where those draws come from is
    F-366. The denser copses are already in.

@@ -401,23 +401,26 @@ left to bring in.
 
 **How it was measured.** Two ways, and they disagree on the draws.
 
-*Windowed, the real renderer (S0771).* One windowed run of `tests/render_bench.tscn` on this PC
-(RTX 4080 SUPER, Vulkan Forward+, the default High detail: far trees 3200 m, soldiers' shadows to
-80 m) measured open, woods and woods_in, then died in the forest case (exit 127) after it caught
-cghath's mouse while they were using the machine. Its window size isn't in the log (the bench
-didn't print it then); the bench now names its size on every measure line and opens at the
-game's own 1600x900 unless `BENCH_SIZE=WxH` says otherwise. It runs only with
-`BENCH_WINDOWED=1` and lets go of the mouse every frame, so agents don't run it (F-366). Each
-case hosts Kestrel Valley afresh and stands still 10 s; the frame is wall-clock with the whole
-game running (the squad, the zone's patrols and the sites streamed in).
+*Windowed, the real renderer (S0771): partial numbers from a run that was stopped early, not a
+finished measurement.* An agent's windowed run of `tests/render_bench.tscn` on this PC (RTX 4080
+SUPER, Vulkan Forward+, the default High detail: far trees 3200 m, soldiers' shadows to 80 m)
+locked cghath's mouse inside its window while they were using the machine, and the coordinator
+killed it (exit 127) during the forest case. Before that it printed one 10 s measure line each
+for open, woods and woods_in: one sample each, never repeated, at a window size the log doesn't
+give (the bench didn't print it then). Read them as a pointer, not as numbers to budget on. Agents
+no longer launch any windowed Godot; the bench is for cghath to run by hand (F-366). It runs only
+with `BENCH_WINDOWED=1`, lets go of the mouse every frame, opens at the game's own 1600x900 unless
+`BENCH_SIZE=WxH` says otherwise and names its size on every measure line. Each case hosts Kestrel
+Valley afresh and stands still 10 s; the frame is wall-clock with the whole game running (the
+squad, the zone's patrols and the sites streamed in).
 
-| S0771, Kestrel Valley | frame avg (p95) | GPU | render CPU | draws (max) | primitives | sites streamed in |
+| S0771 (partial, stopped early), Kestrel Valley | frame avg (p95) | GPU | render CPU | draws (max) | primitives | sites streamed in |
 |---|---|---|---|---|---|---|
 | open ground, 2 cells (64 m) from a tree, looking across the zone | 8.85 ms (16.25) | 0.69 ms | 0.72 ms | 646 (678) | 732k | none |
 | woods: the densest wood's west edge, looking in | 8.84 ms (15.18) | 0.68 ms | 0.56 ms | 377 (414) | 766k | compound_6 204 m, lm_office 231 m |
 | woods_in: that wood's middle, looking the same way | 10.13 ms (17.45) | 0.68 ms | 0.91 ms | **1036** (1077) | 836k | compound_6 166 m, lm_office 255 m |
 
-Inside the wood the renderer makes about 60% more draws than on open ground (+390) and 2.7x what
+In these partial numbers, inside the wood the renderer makes about 60% more draws than on open ground (+390) and 2.7x what
 it makes 40 m back at the wood's edge looking the same way (+660), for only 70-100k more
 primitives: many small draws. The frame is 1.3 ms longer than open ground's, the render thread
 0.2 ms. The GPU is 0.7 ms in all three: the frame is the CPU's. Where the extra draws come from
@@ -464,8 +467,8 @@ With the open case's patrol out of sight and nobody fighting (R0776, the same PC
 
 Headless, the trees cost the CPU about 0.1 ms a frame (8.22 against 8.12 ms); the vegetation's own
 counts are as in R0768. The soldiers' share in the woods' view is the patrol standing in it, not
-the trees. This is the CPU side only: S0771's windowed frame inside the wood was 1.3 ms longer
-than open ground's, with the extra draws above.
+the trees. This is the CPU side only: in S0771's partial windowed numbers (a run stopped early)
+the frame inside the wood was 1.3 ms longer than open ground's, with the extra draws above.
 
 What the vegetation is given the renderer, counted once: about 37 draws and 62k triangles more in
 the woods than on open ground; in the woods' view the patrol's soldiers are 3-4x the vegetation. In the woods,
@@ -476,7 +479,8 @@ crowns (20k). The forest suite, standing in temperate's densest copse (105 trees
 
 **Cut in this pass:** far-tier trunks (past 200 m, a 0.3 m post) cast no sun shadow: 17 fewer
 shadow casters in the woods view (287 -> 270), 2.7k fewer shadow triangles (R0765 -> R0768). That
-does nothing for the extra draws inside the wood that S0771 shows (the far tier is past 200 m).
+does nothing for the extra draws inside the wood that S0771's partial numbers show (the far tier
+is past 200 m).
 From the usual list, these no longer apply: trees are MultiMeshes per cell with tiers and
 visibility ranges, thickets and scrub cast no shadow, the materials are opaque, and the scatter's
 _process costs nothing measurable (the grass carpet 0.13 ms a frame). Still open: the draws inside

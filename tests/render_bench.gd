@@ -13,7 +13,7 @@ extends Node
 ## zone's densest wood). Never touches a real save.
 ## Safe to run while someone uses the PC (2026-10-31: an agent's run kept cghath's mouse inside its
 ## window): it does nothing unless BENCH_WINDOWED=1 is set (for a person to run on purpose, never an
-## agent's suite); its window sits at the screen's corner, borderless, never takes focus, and the
+## agent's suite: agents launch no windowed Godot at all, coordinator's rule after S0771); its window sits at the screen's corner, borderless, never takes focus, and the
 ## mouse is let go every frame after every other script (the game captures it in fifty-odd places:
 ## player input, menus, the HUD); it quits by itself after TIMEOUT_S.
 ## The window is the game's own size (the project's, 1600x900) unless BENCH_SIZE=WxH says

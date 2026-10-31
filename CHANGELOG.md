@@ -15,8 +15,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 - Captain's queue item 1 ("frame goes 4 -> 10 ms in woods... Then denser copses"), measured
   on dev (docs/performance.md, "Woods, 2026-10-31"); still open. Windowed (S0771, the real
-  renderer): inside Kestrel Valley's densest wood 1036 draws, 836k primitives, a 10.13 ms
-  frame; on its open ground 646 draws, 732k, 8.85 ms; the GPU 0.7 ms in both. Where the
+  renderer; partial numbers from a run that was stopped early, one 10 s sample a case): inside
+  Kestrel Valley's densest wood 1036 draws, 836k primitives, a 10.13 ms frame; on its open
+  ground 646 draws, 732k, 8.85 ms; the GPU 0.7 ms in both. Where the
   extra ~400 draws inside the wood come from isn't settled (F-366). Headless (the draw proxy,
   R0768): the vegetation itself is 102 draws and 161k triangles in the woods against 65 and 99k
   in the open; the patrol in the woods' view is 547k. With the open case's patrol out of sight
