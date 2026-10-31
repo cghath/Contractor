@@ -11,6 +11,28 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Woods perf, measured again (perf/woods-copses, 2026-10-31)
+
+- Captain's queue item 1 ("frame goes 4 -> 10 ms in woods... Then denser copses"), measured
+  on dev (docs/performance.md, "Woods, 2026-10-31"); Captain closed it on these numbers
+  (2026-10-31). F-366's windowed split stays an optional check. Windowed (S0771, the real
+  renderer; partial numbers from a run that was stopped early, one 10 s sample a case): inside
+  Kestrel Valley's densest wood 1036 draws, 836k primitives, a 10.13 ms frame; on its open
+  ground 646 draws, 732k, 8.85 ms; the GPU 0.7 ms in both. Where the
+  extra ~400 draws inside the wood come from isn't settled (F-366). Headless (the draw proxy,
+  R0768): the vegetation itself is 102 draws and 161k triangles in the woods against 65 and 99k
+  in the open; the patrol in the woods' view is 547k. With the open case's patrol out of sight
+  the trees cost the CPU about 0.1 ms a frame (8.22 vs 8.12 ms, R0776). The denser copses were already on dev
+  (ea4d575e; the wooded presets since bbef7e05), so `art/denser-copses` has nothing left to merge.
+- Far-tier trunks (past 200 m) no longer cast sun shadows (17 fewer shadow casters in the
+  woods view).
+- perfcases: a new **open** case (the woods walk on open ground, 30 s, its patrol out of sight
+  so nobody fights), and the draw proxy now counts the scatter (it never did headless),
+  triangles and shadow triangles, by shape. Vegetation draw budgets for woods and open (Proposed).
+- The windowed render bench runs only with `BENCH_WINDOWED=1`. Its window never takes focus or
+  holds the mouse, opens at the game's own 1600x900 (`BENCH_SIZE=WxH` to change it; every
+  measure line names its size), and it quits within 5 minutes. New cases: woods_in, open, forest.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

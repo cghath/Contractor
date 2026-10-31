@@ -15,6 +15,9 @@ extends Node
 ##          garrison, the zone ENGAGED (the QRF launches, gun teams man their guns);
 ##   woods  Kestrel Valley (river_valley: woods, a river, reeds): the squad walks through the
 ##          zone's densest wood and meets a hostile patrol there;
+##   open   Kestrel Valley: the same walk on the zone's most open ground, as far from any tree or
+##          thicket as it gets, the patrol out of sight to the side (the woods' baseline, no fight:
+##          woods minus open is what the trees give the renderer and cost the CPU);
 ##   drive  Kestrel Valley: the player rides an AI-driven M-ATV along the roads across the zone;
 ##   heli   Kestrel Valley: the player rides a UH-60 contour-flying across the zone.
 ## The zone's visuals are built as on a player's machine (terrain levels, scatter cells, water,
@@ -31,15 +34,20 @@ extends Node
 ## and the HITCHES: every single tick or _process pass over HITCH_MS and over HITCH_MEDIANS times
 ## the case's median one, with what it went on (FrameCost systems, nodes added, soldiers spawned,
 ## the slowest script with PERF_PROFILE=1). Also the draw proxy: geometry instances and MultiMesh
-## instances in view range, and the shadow casters among them.
+## instances in view range, their triangles, and the shadow casters among them and theirs (the
+## renderer is the dummy, so these are what it would be given, not timed; woods and open have
+## budgets on them, DRAW_BUDGETS).
 ## PERF_PROFILE=1 also times every script's _physics_process and _process by script (slower).
 ##
 ## Budgets (Proposed, 2026-10-22; docs/performance.md has the numbers before and after): each
 ## case's average frame, 95th percentile and hitches a minute, with room for CI's slower runners.
 ## Never touches a real save.
 
-const MEASURE_S := {"town": 30.0, "city": 40.0, "fight": 40.0, "woods": 30.0, "drive": 45.0, "heli": 35.0}
-const ALL_CASES := ["town", "city", "fight", "woods", "drive", "heli"]
+const MEASURE_S := {"town": 30.0, "city": 40.0, "fight": 40.0, "woods": 30.0, "open": 30.0, "drive": 45.0, "heli": 35.0}
+const ALL_CASES := ["town", "city", "fight", "woods", "open", "drive", "heli"]
+## The open case's patrol stands this far to the side of the walk, past the AI's sight
+## (SquadAI.SIGHT_RANGE, 300 m), so open is the woods' baseline without a fight (m; Proposed).
+const OPEN_PATROL_OFF_M := 500.0
 ## A frame this long is a hitch (under 30 fps for that frame).
 const HITCH_MS := 33.3
 ## ...and this many times the case's median tick or _process pass (a spike, not the load itself).
@@ -66,8 +74,20 @@ const BUDGETS := {
 	"city": {"avg": 200.0, "p95": 300.0, "hitches_min": 60.0},
 	"fight": {"avg": 100.0, "p95": 170.0, "hitches_min": 140.0},
 	"woods": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
+	"open": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},  # the woods' baseline, the woods' budgets (woods perf pass, 2026-10-31)
 	"drive": {"avg": 18.0, "p95": 26.0, "hitches_min": 15.0},
 	"heli": {"avg": 18.0, "p95": 30.0, "hitches_min": 15.0},
+}
+## Woods perf pass (Captain's queue item 1, 2026-10-14: "frame goes 4 -> 10 ms in woods, up to
+## 1.5k draws, 1.4M prims. Then denser copses"; 2026-10-31): what the vegetation gives the renderer at
+## the draw proxy's peak, so CI catches the woods getting heavy again (the renderer is the dummy:
+## counted, not timed; the same on every machine, so no LOCAL_SLACK). The scatter's draws (near and
+## far tiers, canopy blobs; the grass carpet has no bounds headless), its triangles in view, and its
+## shadow casters' triangles.
+## Proposed, about 1.5x the pass's own numbers (docs/performance.md, "Woods, 2026-10-31").
+const DRAW_BUDGETS := {
+	"woods": {"scatter_draws": 160, "scatter_tris": 250000, "scatter_shadow_tris": 65000},
+	"open": {"scatter_draws": 100, "scatter_tris": 150000, "scatter_shadow_tris": 50000},
 }
 ## Off CI (a shared machine: other sessions' suites, a game being played) the budgets get this
 ## much room: a busy local run measured 2.5-3x a quiet one (R2431 against R2425). CI's runners
@@ -198,6 +218,12 @@ func _ready() -> void:
 			check(r.avg <= b.avg * k, "%s: average frame %.2f ms (Proposed budget %.1f)" % [r.name, r.avg, b.avg * k])
 			check(r.p95 <= b.p95 * k, "%s: 95th percentile frame %.2f ms (Proposed budget %.1f)" % [r.name, r.p95, b.p95 * k])
 			check(r.hitches_min <= b.hitches_min * k, "%s: %.1f hitches a minute over %.0f ms (Proposed budget %.0f)" % [r.name, r.hitches_min, HITCH_MS, b.hitches_min * k])
+			if DRAW_BUDGETS.has(r.name):
+				var db: Dictionary = DRAW_BUDGETS[r.name]
+				var v := _scatter_totals(r.draw)
+				check(v.draws > 0 and v.draws <= int(db.scatter_draws) and v.tris <= int(db.scatter_tris) and v.shadow_tris <= int(db.scatter_shadow_tris),
+					"%s: the vegetation gives the renderer %d draws, %.0fk triangles in view, %.0fk in the shadow pass (Proposed budgets %d / %.0fk / %.0fk)"
+					% [r.name, v.draws, v.tris / 1000.0, v.shadow_tris / 1000.0, int(db.scatter_draws), int(db.scatter_tris) / 1000.0, int(db.scatter_shadow_tris) / 1000.0])
 	Campaign.reset_campaign()
 	GameState.delete_save()
 	print("PERFCASES TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
@@ -285,15 +311,44 @@ func _case_woods() -> void:
 	check(spot != Vector3.INF, "kestrel_valley has woods away from its sites")
 	if spot == Vector3.INF:
 		return
+	await _walk_with_patrol("woods", spot)
+
+
+## The woods' walk somewhere else (the open ground: the zone's 64 m cell furthest from every tree
+## and thicket, away from its sites and edge).
+func _case_open() -> void:
+	if not await _host("kestrel_valley"):
+		return
+	_clear_spawned()
+	var spot := _most_open()
+	check(spot != Vector3.INF, "kestrel_valley has open ground away from its sites")
+	if spot == Vector3.INF:
+		return
+	await _walk_with_patrol("open", spot)
+
+
+## The squad walks 140 m past `spot` (110 m before it to 30 m past) and an 8-man hostile patrol
+## waits: 60 m on in the woods case (the trees hide the squad: the patrol rests, R0768); in the open
+## case, the woods' baseline, OPEN_PATROL_OFF_M off to the side, out of sight, so the same AI tick
+## and nobody fights (60 m on in the open it saw the squad: CASUALTY and INVESTIGATE, a 57 ms AI
+## tick and 4 hitches in 20 s, R0768, none of it the ground's cost).
+func _walk_with_patrol(name: String, spot: Vector3) -> void:
 	var dir := Vector3(1, 0, 0.3).normalized()
 	var start := level.ground_point(spot - dir * 110.0)
 	var end := level.ground_point(spot + dir * 30.0)
+	player.rotation.y = atan2(-dir.x, -dir.z)  # (the camera looks along the walk: the draw proxy's view)
 	await _settle_at(start, [])
+	var side := dir.cross(Vector3.UP)
+	var patrol_at := spot + dir * 60.0
+	if name == "open":  # (to the side nearer the zone's middle: inside the map)
+		var mid := level.map_area().get_center()
+		var toward := 1.0 if side.dot(Vector3(mid.x, 0, mid.y) - spot) >= 0.0 else -1.0
+		patrol_at = spot + side * toward * OPEN_PATROL_OFF_M
 	for i in 8:
-		level.spawn_soldier({"name": "PerfWoodsH%d" % i, "faction": "hostile", "variant": "woodland",
-			"pos": level.ground_point(spot + dir * 60.0 + dir.cross(Vector3.UP) * (-14.0 + i * 4.0)),
+		level.spawn_soldier({"name": "Perf%sH%d" % [name.capitalize(), i], "faction": "hostile", "variant": "woodland",
+			"pos": level.ground_point(patrol_at + side * (-14.0 + i * 4.0)),
 			"loadout": CompoundLevel.HOSTILE_LOADOUT, "combat": 0.45, "discipline": 0.5, "mode": "aware", "guard": true})
-	await _measure("woods", [start, end])
+	await _measure(name, [start, end])
 
 
 func _case_drive() -> void:
@@ -452,6 +507,32 @@ func _densest_wood() -> Vector3:
 	return Vector3((best.x + 0.5) * 64.0, 0, (best.y + 0.5) * 64.0) if best_n > 0 else Vector3.INF
 
 
+## The middle of the zone's 64 m cell furthest from every tree and thicket (in cells, Chebyshev),
+## at least 250 m from every site and 200 m in from the edge.
+func _most_open() -> Vector3:
+	var wooded := {}
+	for item: Dictionary in level.scatter.items:
+		if int(item.kind) in [ZoneScatter.Kind.TREE, ZoneScatter.Kind.THICKET]:
+			var p: Vector3 = item.pos
+			wooded[Vector2i(floori(p.x / 64.0), floori(p.z / 64.0))] = true
+	var area := level.map_area().grow(-200.0)
+	var best := Vector3.INF
+	var best_d := -1
+	for cz in range(ceili(area.position.y / 64.0), floori(area.end.y / 64.0)):
+		for cx in range(ceili(area.position.x / 64.0), floori(area.end.x / 64.0)):
+			var centre := Vector3((cx + 0.5) * 64.0, 0, (cz + 0.5) * 64.0)
+			var d := 99
+			for k: Vector2i in wooded:
+				d = mini(d, maxi(absi(k.x - cx), absi(k.y - cz)))
+				if d <= best_d:
+					break
+			if d > best_d and level.modules().all(func(m: ZoneModule) -> bool: return m.distance_to(centre) > 250.0):
+				best_d = d
+				best = centre
+	print("perf: most open ground %s: %d cells of 64 m from the nearest tree or thicket" % [best, best_d])
+	return best
+
+
 ## A long drive by road across the zone: between the two sites furthest apart (RoadRoute), or
 ## straight across.
 func _long_route() -> PackedVector3Array:
@@ -582,7 +663,7 @@ func _measure(name: String, walk: Array) -> void:
 	var r := {"name": name, "avg": _avg(_f60), "p95": _pct(_f60, 0.95), "p99": _pct(_f60, 0.99),
 		"worst": _f60.max() if not _f60.is_empty() else 0.0, "wall": _avg(_frames), "scripts": _avg(_scripts_ms), "engine": _avg(_engine_ms),
 		"process": _avg(_proc_ms), "nav": _nav_ms / n_frames, "hitches": _hitches.size(), "hitches_min": _hitches.size() * 60.0 / secs,
-		"ai": live, "asleep": asleep, "draws": _draw_text(_draw)}
+		"ai": live, "asleep": asleep, "draws": _draw_text(_draw), "draw": _draw.duplicate()}
 	results.append(r)
 	print("perf: %s: %d tick frames; 60 Hz frame cost avg %.2f ms, p95 %.2f, p99 %.2f, worst %.1f; wall frame avg %.1f; tick scripts %.2f, engine step %.2f; process scripts %.2f; nav %.2f; AI %d (asleep %d)"
 		% [name, _frames.size(), r.avg, r.p95, r.p99, r.worst, r.wall, r.scripts, r.engine, r.process, r.nav, live, asleep])
@@ -604,6 +685,10 @@ func _measure(name: String, walk: Array) -> void:
 	for h: Dictionary in _hitches.slice(0, 12):
 		print("perf: %s: hitch %.1f ms: %s" % [name, h.ms, h.why])
 	print("perf: %s: draw proxy peak: %s" % [name, r.draws])
+	var shapes: Dictionary = _draw.get("scatter_by", {})
+	var shape_keys := shapes.keys()
+	shape_keys.sort_custom(func(a: String, b: String) -> bool: return int(shapes[a]) > int(shapes[b]))
+	print("perf: %s: the scatter's triangles at that peak, by shape: %s" % [name, ", ".join(shape_keys.map(func(k: String) -> String: return "%s %.1fk" % [k, int(shapes[k]) / 1000.0]))])
 	if _profile:
 		var keys := _by_script.keys()
 		keys.sort_custom(func(a: String, b: String) -> bool: return int(_by_script[a]) > int(_by_script[b]))
@@ -801,8 +886,12 @@ func _run_profiled(physics: bool) -> void:
 # --- the draw proxy ----------------------------------------------------------------------------
 
 ## What the renderer would draw from the camera: geometry instances in view range and in the
-## frustum (MultiMeshes count as one draw and their instances apart), and the shadow casters among
-## them within the sun's shadow distance. Keeps the peak.
+## frustum (MultiMeshes count as one draw and their instances apart), their triangles, and the
+## shadow casters among them within the sun's shadow distance and theirs. Keeps the peak (by draws).
+## The headless renderer gives a MultiMesh no bounds, so a scatter node is placed by its "centre"
+## meta (its cell's or block's middle; ZoneScatter) and hidden while its visibility parent shows
+## (woods perf pass, 2026-10-31: before, the scatter was never counted: every cell sat at the
+## zone's origin, out of its range).
 func _sample_draws() -> void:
 	if camera == null or not is_instance_valid(camera):
 		return
@@ -815,8 +904,12 @@ func _sample_draws() -> void:
 			sun_m = maxf(sun_m, light.directional_shadow_max_distance)
 	var draws := 0
 	var by := {}  # what draws, by kind (_draw_kind)
+	var tris_by := {}
+	var scatter_by := {}  # the scatter's triangles in view by its shape (its node's group key), shadow pass apart
 	var instances := 0
+	var tris := 0
 	var shadow_draws := 0
+	var shadow_tris := 0
 	var lights := 0
 	var shadow_lights := 0
 	var stack: Array[Node] = [level]
@@ -834,37 +927,128 @@ func _sample_draws() -> void:
 		var g := n as GeometryInstance3D
 		if g == null or not g.is_visible_in_tree():
 			continue
-		var box := g.get_aabb()
-		var world_box := g.global_transform * box
-		var d := world_box.get_center().distance_to(cam) - world_box.size.length() * 0.5
-		if g.visibility_range_end > 0.0 and d > g.visibility_range_end:
+		var sphere := _bounds(g)
+		var centre: Vector3 = sphere[0]
+		var r: float = sphere[1]
+		var d := centre.distance_to(cam) - r
+		if not _in_range(g, cam):
 			continue
-		if g.visibility_range_begin > 0.0 and world_box.get_center().distance_to(cam) < g.visibility_range_begin:
-			continue  # (a nearer level of detail draws there)
 		if d > camera.far:
 			continue
 		var in_view := true
 		for p: Plane in planes:
-			var c := world_box.get_center()
-			var r := world_box.size.length() * 0.5
-			if p.distance_to(c) > r:
+			if p.distance_to(centre) > r:
 				in_view = false
 				break
+		var t := _tris_of(g)
 		var casts := g.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF and sun_m > 0.0 and d < sun_m
+		var shape := _scatter_shape(g)
 		if casts:
 			shadow_draws += 1  # (the sun's cascades see round the camera, not just its frustum)
+			shadow_tris += t
+			if shape != "":
+				scatter_by["shadow " + shape] = int(scatter_by.get("shadow " + shape, 0)) + t
 		if not in_view:
 			continue
 		draws += 1
+		tris += t
 		var kind := _draw_kind(g)
 		by[kind] = int(by.get(kind, 0)) + 1
+		tris_by[kind] = int(tris_by.get(kind, 0)) + t
+		if shape != "":
+			scatter_by[shape] = int(scatter_by.get(shape, 0)) + t
 		if g is MultiMeshInstance3D and (g as MultiMeshInstance3D).multimesh:
 			var mm := (g as MultiMeshInstance3D).multimesh
 			instances += mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
 		else:
 			instances += 1
 	if draws > int(_draw.get("draws", 0)):
-		_draw = {"draws": draws, "instances": instances, "shadow_draws": shadow_draws, "lights": lights, "shadow_lights": shadow_lights, "sun_m": sun_m, "by": by}
+		_draw = {"draws": draws, "instances": instances, "tris": tris, "shadow_draws": shadow_draws, "shadow_tris": shadow_tris,
+			"lights": lights, "shadow_lights": shadow_lights, "sun_m": sun_m, "by": by, "tris_by": tris_by, "scatter_by": scatter_by}
+
+
+## A geometry instance's bounds as [centre, radius]: a scatter node's "centre" meta and its cell's
+## (or far block's) half diagonal, else its world AABB's.
+func _bounds(g: GeometryInstance3D) -> Array:
+	if g.has_meta(&"centre"):
+		var cell := ZoneScatter.CELL_M * (ZoneScatter.FAR_BLOCK if String(g.name).begins_with("Far_") else 1)
+		return [g.get_meta(&"centre") as Vector3, cell * 0.71]
+	var box := g.global_transform * g.get_aabb()
+	return [box.get_center(), box.size.length() * 0.5]
+
+
+## Whether `g` shows from `cam` by its visibility range (from its bounds' middle, as the renderer
+## measures it) and its visibility parent's (a node is hidden while its parent shows).
+func _in_range(g: GeometryInstance3D, cam: Vector3) -> bool:
+	var sphere := _bounds(g)
+	var to_mid := (sphere[0] as Vector3).distance_to(cam)
+	var near_edge := to_mid - float(sphere[1])
+	if g.visibility_range_end > 0.0 and (near_edge if not g.has_meta(&"centre") else to_mid) > g.visibility_range_end:
+		return false
+	if g.visibility_range_begin > 0.0 and to_mid < g.visibility_range_begin:
+		return false  # (a nearer level of detail draws there)
+	if not g.visibility_parent.is_empty():
+		var parent := g.get_node_or_null(g.visibility_parent) as GeometryInstance3D
+		if parent and _in_range(parent, cam):
+			return false
+	return true
+
+
+## The scatter's share of a draw proxy peak (_sample_draws): {"draws", "tris", "shadow_tris"}
+## (its vegetation, rocks and ground cover: "scatter" and "scatter_far"; the props apart).
+func _scatter_totals(d: Dictionary) -> Dictionary:
+	var by: Dictionary = d.get("by", {})
+	var tris_by: Dictionary = d.get("tris_by", {})
+	var shadow := 0
+	var shapes: Dictionary = d.get("scatter_by", {})
+	for k: String in shapes:
+		if k.begins_with("shadow ") and not k.begins_with("shadow lib"):
+			shadow += int(shapes[k])
+	return {"draws": int(by.get("scatter", 0)) + int(by.get("scatter_far", 0)),
+		"tris": int(tris_by.get("scatter", 0)) + int(tris_by.get("scatter_far", 0)), "shadow_tris": shadow}
+
+
+## A scatter node's shape ("crown", "trunk_lod", "Far" for the canopy blobs, "GrassCarpet"...), or "".
+func _scatter_shape(g: GeometryInstance3D) -> String:
+	if not g.get_parent() is ZoneScatter:
+		return ""
+	var nm := String(g.name)
+	if nm.begins_with("Scatter_"):
+		var key := nm.split("_", true, 3)[3] if nm.count("_") >= 3 else nm
+		return "lib" if key.begins_with("lib") else {"0": "rock", "1": "scrub"}.get(key, key)
+	return nm.get_slice("_", 0)
+
+
+var _mesh_tris := {}  # Mesh -> its triangles (_tris_of)
+
+
+## The triangles `g` draws: its mesh's (every surface's indices, else vertices, over 3) times its
+## MultiMesh's instances.
+func _tris_of(g: GeometryInstance3D) -> int:
+	var mesh: Mesh = null
+	var times := 1
+	if g is MultiMeshInstance3D and (g as MultiMeshInstance3D).multimesh:
+		var mm := (g as MultiMeshInstance3D).multimesh
+		mesh = mm.mesh
+		times = mm.visible_instance_count if mm.visible_instance_count >= 0 else mm.instance_count
+	elif g is MeshInstance3D:
+		mesh = (g as MeshInstance3D).mesh
+	if mesh == null:
+		return 0
+	if not _mesh_tris.has(mesh):
+		var n := 0
+		var am := mesh as ArrayMesh
+		if am:
+			for i in am.get_surface_count():
+				var idx := am.surface_get_array_index_len(i)
+				n += (idx if idx > 0 else am.surface_get_array_len(i)) / 3
+		else:
+			for i in mesh.get_surface_count():
+				var arrays := mesh.surface_get_arrays(i)
+				var ia: Variant = arrays[Mesh.ARRAY_INDEX]
+				n += ((ia as PackedInt32Array).size() if ia != null and (ia as PackedInt32Array).size() > 0 else (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3
+		_mesh_tris[mesh] = n
+	return int(_mesh_tris[mesh]) * times
 
 
 func _draw_text(d: Dictionary) -> String:
@@ -874,9 +1058,11 @@ func _draw_text(d: Dictionary) -> String:
 	var kinds := by.keys()
 	kinds.sort_custom(func(a: String, b: String) -> bool: return int(by[a]) > int(by[b]))
 	var parts: Array[String] = []
+	var tris_by: Dictionary = d.get("tris_by", {})
 	for k: String in kinds.slice(0, 6):
-		parts.append("%s %d" % [k, by[k]])
-	return "%d draws (%d instances; %s), %d shadow casters (sun %.0f m), %d lights (%d with shadows)" % [d.draws, d.instances, ", ".join(parts), d.shadow_draws, d.sun_m, d.lights, d.shadow_lights]
+		parts.append("%s %d (%.0fk tris)" % [k, by[k], int(tris_by.get(k, 0)) / 1000.0])
+	return "%d draws (%d instances, %.0fk triangles; %s), %d shadow casters (%.0fk triangles; sun %.0f m), %d lights (%d with shadows)" % [
+		d.draws, d.instances, int(d.get("tris", 0)) / 1000.0, ", ".join(parts), d.shadow_draws, int(d.get("shadow_tris", 0)) / 1000.0, d.sun_m, d.lights, d.shadow_lights]
 
 
 ## What a geometry instance belongs to, for the draw proxy's breakdown.

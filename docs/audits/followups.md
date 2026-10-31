@@ -1801,6 +1801,59 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-366: the extra draws inside the wood, and the forest case, from a windowed bench
+
+Location: [render_bench.gd](../../tests/render_bench.gd), [zone_scatter.gd](../../scripts/world/zone_scatter.gd)
+(near tier, `_build_cell`). Found on perf/woods-copses (2026-10-31). Supersedes F-221.
+
+The windowed bench run S0771 (the real renderer; docs/performance.md, "Woods, 2026-10-31") gave
+partial numbers before it was stopped early (it locked cghath's mouse and the coordinator killed
+it): one 10 s sample each of open, woods and woods_in, the GPU 0.7 ms in all three, so the frame
+looks like the CPU's. Not a finished measurement; a full run should confirm. What it leaves open:
+- **Where the extra draws inside the wood come from.** woods_in (the densest wood's middle) makes
+  1036 draws against open ground's 646, and 377 at the same wood's edge 40 m back looking the same
+  way, for only 70-100k more primitives; its frame is 1.3 ms longer than open's. The headless draw
+  proxy counts only 37 more vegetation draws in the woods and each shadow caster once, so the
+  suspects are what it can't see: the near tier's shadow casters (crowns, trunks, conifers to 200 m)
+  drawn again in every sun cascade they overlap, all round the camera inside the wood; or the site
+  behind it (compound_6, 166 m from the middle against 204 m from the edge; voxel blocks are drawn
+  per cascade too).
+- **The forest case** (the Experimental forest's densest wood) never finished in S0771 (killed
+  mid-measure, exit 127): no windowed numbers for the densest woods yet.
+
+The bench runs only with BENCH_WINDOWED=1 and only by hand: agents launch no windowed Godot at all
+(coordinator's rule, 2026-10-31, after S0771). Its window is
+the game's own 1600x900 unless BENCH_SIZE=WxH says otherwise, never takes focus, lets go of the
+mouse every frame, and quits within 5 minutes. S0771's window size wasn't logged; the bench now
+names it on every measure line.
+
+Suggested, for cghath, from a worktree of perf/woods-copses or dev, when the PC is free:
+
+    BENCH_WINDOWED=1 BENCH_SPLIT=1 CONTRACTOR_TEST_TAG=bench "$GODOT" --path . res://tests/render_bench.tscn -- --cases=open,woods,woods_in,forest
+
+The split lines hide each of the level's parts in turn (the scatter, each site, the soldiers...) and
+say how many draws each was. If the scatter is most of woods_in's extra, try its near tier's trees
+casting shadows only in the first cascades (or a shorter shadow reach for them than the sun's
+320 m) and compare draws and the look; if it's compound_6, the woods are cheap and the item is done.
+
+## F-367: woods cuts that would change the look
+
+Location: [zone_scatter.gd](../../scripts/world/zone_scatter.gd) `LOD_M`, `_build_cell`,
+`_lod_meshes`. Found on perf/woods-copses (2026-10-31).
+
+What's left of the vegetation's cost (R0768, Kestrel Valley's densest wood: 102 draws, 161k
+triangles) can't be cut without a visible change, and agents can't look at a frame on this PC:
+- thickets and scrub in the near tier draw their full 152-triangle shape out to LOD_M (200 m): a
+  middle tier from about 100 m (the 38-triangle stand-in) would cut about 40k of the 60k;
+- the far tier is a MultiMesh per kind per cell (about 8 a cell): grouping it per 2x2 block like the
+  canopy blobs would cut its draws about 4x, but the near/far handover would then go by block, not
+  by cell (the forest suite's "drawn exactly once" check);
+- grass tufts in the near tier (40-50k) out to SEE_TUFT_M (140 m).
+The draw proxy also can't see the grass carpet (no bounds headless).
+
+Suggested: once F-366's split says what the draws inside the wood are, try the middle tier for
+thickets and scrub in a test build and compare screenshots at 80-200 m.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2177,14 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | Woods perf (perf/woods-copses): far-tier trunks (past LOD_M, 200 m) cast no sun shadow; crowns' stand-ins keep theirs | a 0.3 m post past 200 m is under a pixel and so is its shadow, but it cost a shadow draw a cell | keep every far-tier tree part's shadow
+2026-10-31 | Woods perf: vegetation draw budgets in perfcases, woods 160 draws / 250k triangles / 65k shadow triangles, open 100 / 150k / 50k (Proposed, ~1.5x R0768), no local slack | counts are the same on every machine, so CI catches the woods getting heavy without a GPU | frame budgets only (they never saw the scatter)
+2026-10-31 | Woods perf: art/denser-copses not merged: nothing left on it (ea4d575e is in dev; bbef7e05 gave the dense copses to the wooded presets on 2026-10-22); marsh, badlands, salt flats, desert wadi and city keep round 4's copses as bbef7e05 chose | the denser copses are already in, inside the new budgets | a merge of a branch 986 behind for no change
+2026-10-31 | Woods perf: the windowed render bench runs only with BENCH_WINDOWED=1 and never holds the mouse or focus (borderless, 5 min at most); agents measure headless | an agent's run caught cghath's mouse | agents run the bench when the PC seems free
+2026-10-31 | Woods perf, review: the bench's window is the game's own 1600x900 again, BENCH_SIZE=WxH to change it, its size on every measure line (it was always 640x360) | foliage's GPU work goes with the pixels and the older bench numbers were at the normal size | 640x360 by default with an opt-in for full size
+2026-10-31 | Woods perf, review: perfcases' open case measures 30 s (was 20) with its 8-man patrol 500 m to the side (OPEN_PATROL_OFF_M, Proposed; past SquadAI.SIGHT_RANGE), hostile and the same size as the woods' | 60 m ahead in the open it fought the squad (a 57 ms AI tick, 12 hitches a minute, R0768), so open measured the fight, not the ground, and sat 3 hitches from its budget | a hitch budget of its own with room
+2026-10-31 | Woods perf, review: Captain's item 1 marked "measured, still open" in captain_side_now.md, not Done | the windowed run S0771's partial numbers (stopped early) show +60% draws inside the wood (1036 against 646) that nothing here explains or cuts | Done, with F-366 for the GPU side
+2026-10-31 | Captain closed queue item 1 ("next") on the woods numbers in docs/performance.md; captain_side_now.md marks it Done | the frame cost is gone (0.1 ms headless, +1.3 ms windowed inside the densest wood, GPU 0.7 ms) | keep it open until the F-366 split; F-366 stays an optional check and F-367's shadow-reach cut wasn't asked for, so it isn't made
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

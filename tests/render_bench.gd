@@ -5,13 +5,28 @@ extends Node
 ## the GPU's and the render thread's time per frame (RenderingServer.viewport_get_measured_render_time_*),
 ## fps, draw calls, objects and primitives in the frame, video memory, and every SubViewport still
 ## rendering (what it is, its size, its update mode).
-##   <voxel godot exe> --path . res://tests/render_bench.tscn [-- --cases=menu,town,woods,fight]
+##   <voxel godot exe> --path . res://tests/render_bench.tscn [-- --cases=menu,town,woods,fight,woods_in,open,forest]
 ## Prints "bench:" lines. Cases: menu (the main menu up), town (Old Quarter, looking into its biggest
 ## town from its edge), woods (Kestrel Valley's densest wood), fight (Black Ridge, the biggest
-## garrison 140 m off, the zone engaged). Never touches a real save.
+## garrison 140 m off, the zone engaged); and, for the woods perf pass, woods_in (inside that wood),
+## open (Kestrel Valley's open ground, the woods' baseline) and forest (the Experimental forest test
+## zone's densest wood). Never touches a real save.
+## Safe to run while someone uses the PC (2026-10-31: an agent's run kept cghath's mouse inside its
+## window): it does nothing unless BENCH_WINDOWED=1 is set (for a person to run on purpose, never an
+## agent's suite: agents launch no windowed Godot at all, coordinator's rule after S0771); its window sits at the screen's corner, borderless, never takes focus, and the
+## mouse is let go every frame after every other script (the game captures it in fifty-odd places:
+## player input, menus, the HUD); it quits by itself after TIMEOUT_S.
+## The window is the game's own size (the project's, 1600x900) unless BENCH_SIZE=WxH says
+## otherwise (e.g. BENCH_SIZE=1920x1080, or 640x360 for a small one out of the way). The GPU's
+## work in foliage (overdraw, fill) goes with the pixels, so every measure line says the size it
+## was taken at; compare GPU times only at the same size.
 
 const SETTLE_S := 5.0
 const MEASURE_S := 10.0
+## The whole bench quits after this long, whatever is left (s).
+const TIMEOUT_S := 300.0
+
+var _size := Vector2i.ZERO
 
 var main: Node
 var level: ZoneLevel
@@ -20,6 +35,25 @@ var _vp := RID()
 
 
 func _ready() -> void:
+	if OS.get_environment("BENCH_WINDOWED") != "1":
+		print("bench: not run: set BENCH_WINDOWED=1 to run the windowed bench on purpose (it opens a window)")
+		get_tree().quit(0)
+		return
+	_let_go()
+	var win := get_window()
+	win.set_flag(Window.FLAG_NO_FOCUS, true)
+	win.set_flag(Window.FLAG_BORDERLESS, true)
+	win.mode = Window.MODE_WINDOWED
+	_size = Vector2i(int(ProjectSettings.get_setting("display/window/size/viewport_width", 1600)),
+		int(ProjectSettings.get_setting("display/window/size/viewport_height", 900)))
+	var asked := OS.get_environment("BENCH_SIZE").to_lower().split("x")
+	if asked.size() == 2 and asked[0].is_valid_int() and asked[1].is_valid_int() and int(asked[0]) > 0 and int(asked[1]) > 0:
+		_size = Vector2i(int(asked[0]), int(asked[1]))
+	win.size = _size
+	win.position = Vector2i.ZERO
+	print("bench: window %dx%d (BENCH_SIZE=WxH to change it)" % [_size.x, _size.y])
+	process_priority = 1000000  # after every other script's _process: the mouse let go last
+	process_physics_priority = 1000000
 	var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 	GameState.zone_id = "test_render_bench" + tag
 	Campaign.campaign_id = "test_render_bench_campaign" + tag
@@ -36,7 +70,7 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--cases="):
 			cases = Array(a.trim_prefix("--cases=").split(","))
-	get_tree().create_timer(60.0 + cases.size() * 120.0, true, false, true).timeout.connect(func() -> void:
+	get_tree().create_timer(minf(TIMEOUT_S, 60.0 + cases.size() * 120.0), true, false, true).timeout.connect(func() -> void:
 		print("bench: TIMED OUT")
 		get_tree().quit(99))
 	_vp = get_viewport().get_viewport_rid()
@@ -51,6 +85,24 @@ func _ready() -> void:
 	Campaign.reset_campaign()
 	GameState.delete_save()
 	get_tree().quit(0)
+
+
+## The mouse free and the window unfocusable, every frame (after the game's own scripts).
+func _process(_delta: float) -> void:
+	_let_go()
+
+
+func _physics_process(_delta: float) -> void:
+	_let_go()
+
+
+func _input(_event: InputEvent) -> void:
+	_let_go()
+
+
+func _let_go() -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _uncap() -> void:
@@ -81,6 +133,64 @@ func _case_town() -> void:
 func _case_woods() -> void:
 	if not await _host("kestrel_valley"):
 		return
+	var spot := _densest_wood()
+	await _stand(level.ground_point(spot - Vector3(40, 0, 0)), spot, [])
+	await _measure("woods")
+
+
+## Inside Kestrel Valley's densest wood, at its middle, looking along it (the woods perf pass:
+## the trees all round, near tier everywhere).
+func _case_woods_in() -> void:
+	if not await _host("kestrel_valley"):
+		return
+	var spot := _densest_wood()
+	await _stand(level.ground_point(spot), spot + Vector3(60, 0, 0), [])
+	await _measure("woods_in")
+
+
+## Kestrel Valley's open ground: the 64 m cell farthest from any tree or thicket (away from the
+## zone's edge and its sites), looking across the zone's middle. The woods' baseline.
+func _case_open() -> void:
+	if not await _host("kestrel_valley"):
+		return
+	var area := level.map_area().grow(-250.0)
+	var trees := {}
+	for item: Dictionary in level.scatter.items:
+		if int(item.kind) in [ZoneScatter.Kind.TREE, ZoneScatter.Kind.THICKET]:
+			var p: Vector3 = item.pos
+			trees[Vector2i(floori(p.x / 64.0), floori(p.z / 64.0))] = true
+	var best := Vector3.INF
+	var best_d := -1
+	for cx in range(floori(area.position.x / 64.0), floori(area.end.x / 64.0)):
+		for cz in range(floori(area.position.y / 64.0), floori(area.end.y / 64.0)):
+			var centre := Vector3((cx + 0.5) * 64.0, 0, (cz + 0.5) * 64.0)
+			if not level.modules().all(func(m: ZoneModule) -> bool: return m.distance_to(centre) > 150.0):
+				continue
+			var d := 99
+			for k: Vector2i in trees:
+				d = mini(d, maxi(absi(k.x - cx), absi(k.y - cz)))
+				if d <= best_d:
+					break
+			if d > best_d:
+				best_d = d
+				best = centre
+	print("bench: open ground %s: %d cells (64 m) from the nearest tree" % [best, best_d])
+	var mid := level.map_area().get_center()
+	await _stand(level.ground_point(best), Vector3(mid.x, 0, mid.y), [])
+	await _measure("open")
+
+
+## The Experimental forest test zone (forest_experimental: the densest woods), in its densest wood.
+func _case_forest() -> void:
+	if not await _host("forest_experimental"):
+		return
+	var spot := _densest_wood()
+	await _stand(level.ground_point(spot), spot + Vector3(60, 0, 0), [])
+	await _measure("forest")
+
+
+## The middle of the 64 m cell with the most trees (away from the sites and the zone's edge).
+func _densest_wood() -> Vector3:
 	var cells := {}
 	var best := Vector2i.ZERO
 	var best_n := 0
@@ -93,9 +203,8 @@ func _case_woods() -> void:
 		if cells[c] > best_n:
 			best = c
 			best_n = cells[c]
-	var spot := Vector3((best.x + 0.5) * 64.0, 0, (best.y + 0.5) * 64.0)
-	await _stand(level.ground_point(spot - Vector3(40, 0, 0)), spot, [])
-	await _measure("woods")
+	print("bench: densest wood %s: %d trees in 64 m" % [best, best_n])
+	return Vector3((best.x + 0.5) * 64.0, 0, (best.y + 0.5) * 64.0)
 
 
 func _case_fight() -> void:
@@ -120,6 +229,8 @@ func _case_fight() -> void:
 ## Hosts `zone_id` (the first by the menu's way, the rest by a level switch). True once the player is in.
 func _host(zone_id: String) -> bool:
 	var def := MissionRegistry.zone_def(zone_id)
+	if def.is_empty():
+		def = ZoneDef.get_def(zone_id)  # a test zone off the board (forest_experimental)
 	if _hosted == "":
 		main.host_zone(def)
 	else:
@@ -206,8 +317,9 @@ func _measure(name: String) -> void:
 		if frame.size() % 300 == 0:
 			_census("measuring")
 	var n := maxf(frame.size(), 1)
-	print("bench: %s: %d frames, %.1f fps; frame %.2f ms (p95 %.2f); GPU %.2f ms (p95 %.2f); render CPU %.2f ms; draws %.0f (max %.0f); objects %.0f; primitives %.0fk; video mem %.0f MB"
-		% [name, frame.size(), frame.size() / MEASURE_S, _avg(frame), _pct(frame, 0.95), _avg(gpu), _pct(gpu, 0.95), _avg(cpu),
+	var px := get_window().size  # (the window as the OS gave it, which may differ from the size asked)
+	print("bench: %s at %dx%d: %d frames, %.1f fps; frame %.2f ms (p95 %.2f); GPU %.2f ms (p95 %.2f); render CPU %.2f ms; draws %.0f (max %.0f); objects %.0f; primitives %.0fk; video mem %.0f MB"
+		% [name, int(px.x), int(px.y), frame.size(), frame.size() / MEASURE_S, _avg(frame), _pct(frame, 0.95), _avg(gpu), _pct(gpu, 0.95), _avg(cpu),
 		_avg(draws), draws.max() if not draws.is_empty() else 0.0, objects / n, prims / n / 1000.0,
 		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0])
 	var subs: Array[String] = []

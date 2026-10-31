@@ -79,7 +79,9 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 
 - `fix/self-tourniquet`: in progress. Wounded AI put on their own tourniquet; casualty flake
   ("under fire, he puts his own tourniquet on at once") still shows up sometimes.
-- `art/denser-copses`: held for the woods perf pass. The forest test zone already uses its code.
+- `art/denser-copses`: all of it is on dev (its one commit, ea4d575e, is in dev's history; the
+  wooded normal presets got the dense copses with the woods perf pass, bbef7e05, 2026-10-22).
+  Nothing left on the branch (checked 2026-10-31, perf/woods-copses).
 - `feat/squad-comms`: WIP, paused. Bots talk like players.
 - `test/coop-fakehuman-checks`, `test/coop-soak`: co-op soak harness.
 - `docs/high-command`, `docs/ai-bar-gaps`: proposals awaiting the Captain (also on dev as
@@ -88,7 +90,15 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 ## Next (Captain, 2026-10-14)
 
 1. Woods/render perf pass: frame goes 4 -> 10 ms in woods, up to 1.5k draws, 1.4M prims. Then
-   denser copses.
+   denser copses. **Done** (Captain closed it 2026-10-31: "next"; F-366's windowed split stays
+   an optional check for cghath, and the look-changing cuts of F-367 weren't asked for). (2026-10-22, bbef7e05: tiers, far blobs, no shadows
+   from bushes, the dense copses on every wooded preset; 2026-10-31, perf/woods-copses: measured
+   again, woods and open ground cases with vegetation draw budgets in perfcases;
+   docs/performance.md, "Woods, 2026-10-31"). Windowed (S0771: partial numbers, a run stopped
+   early, not a finished measurement), inside the densest wood the
+   renderer makes about 60% more draws than on open ground (1036 against 646) and the frame is
+   1.3 ms longer (10.1 against 8.9 ms; the GPU 0.7 ms in both); where those draws come from is
+   F-366. The denser copses are already in.
 2. AI awareness leaks through compound walls; one zone-wide hostile squad (ai_bar_gaps
    G-02/G-03). Tied to the infil problems.
 3. Breaching charges make holes too small; add a "Breach and clear" team order through walls.
