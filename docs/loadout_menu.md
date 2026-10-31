@@ -47,7 +47,8 @@ add/remove units, fill ammo, medic kit, role kit) and `rebuild` over several peo
 
 Client asks, host applies (BaseHub.request): `request("loadout", [who, op, params])`.
 `who` is a member id or `player:<key>`. A player may change their own kit and any AI squadmate's,
-never another player's (they can give to another player). Ops: `slot`, `optic`, `add`,
+never another player's (they can give to another player). Ops: `slot`, `optic` (both take
+`buy: true`: buy the item if the stash lacks it, see Buying), `add`,
 `remove`, `give`, `fill_ammo`, `medic_kit`, `role_kit`, `copy_kit`, `save`, `standing_role`,
 `copy_standing`, `restock`, `sync` (read the muster line's gear into the roster for the view).
 The answer comes back as the usual note; the roster and stash broadcast with the view.
@@ -55,7 +56,24 @@ The answer comes back as the usual note; the roster and stash broadcast with the
 Buying (2026-10-15): an edit the stash can't fill writes `edit_missing` on the roster entry; the
 Kit column then shows "Buy missing (N items, $X)" (and one button per item), disabled with the
 reason when cash is short. Op `buy_missing` [params `id` optional] buys at shop prices through
-Economy.server_buy and redoes the edit. The armory lays the stash out in category bands
+Economy.server_buy and redoes the edit.
+
+Buying from the pickers (2026-10-31, Captain's "Next" item 4, branch feat/loadout-buy, from
+6062b8a8 on claude/loadout-buy-direct-7330b2): the Swap and Optic pickers also list what the
+stash has none of (not even on its carriers' pouches) that the company can buy today, as
+"Buy: name ($price)". The list and prices are the view's `catalog` (the host's
+`BaseEconomy.shop_catalog`: the base shop less `not_for_sale` and `allied_only`, plus an allied
+quartermaster's items at today's standing, at the best price), so every peer shows what the
+host will charge. A "Company cash $X" hint sits over the worn slots; an entry the cash doesn't
+cover is greyed out with "have $X". Choosing one sends `slot` / `optic` with `buy: true`; the
+host (`BaseHub._server_buy_picked`) works out whether the edit can draw it (KitLibrary.shortfall
+over the hub's stash), and if not buys exactly that item through Economy.server_buy (the
+company's account, into the armory) and makes the edit, which then draws it: one request buys,
+stocks and equips. Not enough cash (or not sold): refused with the reason, nothing bought,
+moved or written down as missing. The wallet is the company's (Economy cash, the same account
+that owns the stash); a client's purchase runs on the host and reaches everyone, late joiners
+included, through the base view (funds, stash, roster gear); the campaign save holds all three.
+The armory lays the stash out in category bands
 (BaseArmory.BANDS); deliveries and returns take the next free slot of their band.
 
 ## Numbers (Proposed)

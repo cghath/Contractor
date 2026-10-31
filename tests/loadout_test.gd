@@ -7,7 +7,10 @@ extends Node
 ## through BaseHub.request conserve the armory's items and the kits together, a saved standing
 ## loadout is what Restock refills to, a role preset with a short stash says what's missing, a
 ## player can't change another player's kit, the screen fits every window size and UI scale,
-## and a client's requests go through the host (a second process joins the hub).
+## and a client's requests go through the host (a second process joins the hub). Buying from
+## the pickers (feat/loadout-buy): what the stash lacks is offered at its price, refused with
+## nothing changed when cash is short, else bought and worn; the client buys from its own picker
+## through the host, sees the host's purchase on joining, and a save and reload keeps both.
 ##
 ## The client is this scene again with `-- --join 127.0.0.1 --log <path>`; it writes its checks
 ## to the log the host prints. Exits with the number of failures.
@@ -27,6 +30,8 @@ var tag := OS.get_environment("CONTRACTOR_TEST_TAG")
 var level: CompoundLevel
 var _log: FileAccess
 var _notes: Array = []
+## The helmet the client bought from its picker (the host reads it off the client's body).
+var _client_bought := ""
 
 
 ## The tree this test started in: a client's scene can be taken out of it near the end (the
@@ -335,10 +340,133 @@ func _test_session() -> void:
 		"buying fills the shortfall (%d IVs on him) and takes the money (%d left of %d)" % [bought, Economy.cash(), cost])
 	await _test_kits_at_hub(ids, me)
 	await _test_3d(me)
+	var bought_helmet: String = await _test_picker_buy(String(ids[0]))
 	# The host can't change another player's kit (a client is peer 2 here).
 	check(BaseHub.server_loadout(2, me, "add", {"id": "smoke_grenade"}).contains("their own kit"), "a client's request on the host's kit is refused")
 	await _test_fit(ids)
-	await _test_client(ids)
+	await _test_client(ids, bought_helmet)
+	# Save and load keep what the pickers bought: the squadmate's helmet, the client's, the cash.
+	print("A picker purchase survives a save and reload")
+	var cash := Economy.cash()
+	var was_saved := BaseHub.server_save()
+	Campaign.load_campaign()
+	var helmet_after := String(BaseHub.member(String(ids[0])).get("gear", {}).get("slots", {}).get("helmet", ""))
+	check(was_saved and bought_helmet != "" and helmet_after == bought_helmet and Economy.cash() == cash,
+		"after a save and reload %s still wears the bought %s and the cash is $%d (%s, $%d)" % [BaseHub.member(String(ids[0])).get("callsign", "?"), bought_helmet, cash, helmet_after, Economy.cash()])
+	var client_after := String(BaseHub.roster().get("players", {}).get(CLIENT_KEY, {}).get("gear", {}).get("slots", {}).get("helmet", ""))
+	check(client_after != "" and client_after == _client_bought, "and the client's bought helmet is on its record (%s, bought %s)" % [client_after, _client_bought])
+
+
+## Buying from the loadout menu's pickers (Captain's "Next" item 4, "buy missing kit from inside
+## the loadout editor"): the Swap picker lists a helmet the stash has none of with its price;
+## a dollar short it's greyed out and the host refuses it with nothing changed; with the cash,
+## choosing it buys it (the shop's price, company money), into the stash and onto him. The
+## Optic picker buys the same way. Returns the helmet bought ("" if none could be tried).
+func _test_picker_buy(mid: String) -> String:
+	print("Buying from the loadout menu's pickers")
+	var base := level as BaseLevel
+	var s := base.muster_soldier(mid)
+	var frame := Control.new()
+	add_child(frame)
+	frame.size = Vector2(1920, 1080)
+	var screen := LoadoutScreen.new()
+	frame.add_child(screen)
+	await _frames(2)
+	screen.select(mid)
+	await _frames(2)
+	var picker := screen.find_child("Swap_helmet", true, false) as OptionButton
+	var buy_id := ""
+	var wearing := String(Roster.json_safe(s.inventory.net_state).slots.get("helmet", ""))
+	if picker:
+		for i in picker.item_count:
+			var v := String(picker.get_item_metadata(i))
+			if v.begins_with(LoadoutScreen.BUY) and v.trim_prefix(LoadoutScreen.BUY) != wearing:
+				buy_id = v.trim_prefix(LoadoutScreen.BUY)
+				break
+	var price := BaseEconomy.item_price(StringName(buy_id)) if buy_id != "" else 0
+	check(buy_id != "" and price > 0 and int(BaseArmory.counts(base.server_collect_stash()).get(buy_id, 0)) == 0
+		and int(LoadoutScreen.buyable_prices(BaseHub.view).get(buy_id, 0)) == price,
+		"the helmet picker offers %s, which the stash has none of, at the shop's price ($%d)" % [buy_id, price])
+	if buy_id == "":
+		screen.close()
+		frame.queue_free()
+		return ""
+	var entry := func() -> int:
+		var p := screen.find_child("Swap_helmet", true, false) as OptionButton
+		for i in (p.item_count if p else 0):
+			if String(p.get_item_metadata(i)) == LoadoutScreen.BUY + buy_id:
+				return i
+		return -1
+	# A dollar short: greyed out, and the host refuses it (as from a stale menu) with nothing changed.
+	Economy.add_cash(-Economy.cash(), "test: broke")
+	Economy.add_cash(price - 1, "test: a dollar short")
+	await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", -1)) == price - 1, 5.0)
+	screen.refresh()
+	picker = screen.find_child("Swap_helmet", true, false) as OptionButton
+	var i_short: int = entry.call()
+	check(i_short > 0 and picker.is_item_disabled(i_short) and picker.get_item_text(i_short).contains("$%s" % DebriefCalc.money(price)),
+		"a dollar short it's greyed out with its price and the cash (%s)" % [picker.get_item_text(i_short) if i_short > 0 else "missing"])
+	var units := _hub_units()
+	var gear: Dictionary = Roster.json_safe(s.inventory.net_state)
+	var missing_before: Dictionary = BaseHub.member(mid).get("edit_missing", {}).duplicate()
+	_notes.clear()
+	BaseHub.request("loadout", [mid, "slot", {"slot": "helmet", "id": buy_id, "buy": true}])
+	await _frames(3)
+	check(not _notes.is_empty() and String(_notes.back()).contains("Not enough cash") and Economy.cash() == price - 1
+		and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and BaseHub.member(mid).get("edit_missing", {}) == missing_before,
+		"and the host refuses it: nothing spent, bought, moved or written down as missing (%s)" % [_notes])
+	# With the cash: choosing it in the picker buys it and puts it on.
+	Economy.add_cash(51, "test: enough, and $50 over")
+	await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", -1)) == price + 50, 5.0)
+	screen.refresh()
+	picker = screen.find_child("Swap_helmet", true, false) as OptionButton
+	var i_buy: int = entry.call()
+	check(i_buy > 0 and not picker.is_item_disabled(i_buy) and picker.get_item_text(i_buy) == "Buy: %s ($%s)" % [ItemDB.get_item(StringName(buy_id)).name, DebriefCalc.money(price)],
+		"with the cash it reads \"%s\"" % [picker.get_item_text(i_buy) if i_buy > 0 else "missing"])
+	_notes.clear()
+	if i_buy > 0:
+		picker.item_selected.emit(i_buy)  # the player chooses it
+	await _frames(4)
+	var after := _hub_units()
+	var diff := {}
+	for id: String in after:
+		if int(after[id]) != int(units.get(id, 0)):
+			diff[id] = int(after[id]) - int(units.get(id, 0))
+	gear = Roster.json_safe(s.inventory.net_state)
+	check(String(gear.slots.get("helmet", "")) == buy_id and Economy.cash() == 50 and diff == {buy_id: 1}
+		and String(BaseHub.member(mid).gear.slots.get("helmet", "")) == buy_id and not _notes.is_empty() and String(_notes.back()).contains("bought"),
+		"choosing it bought one ($%d, $%d left), and he wears it; nothing else came or went (%s; %s)" % [price, Economy.cash(), diff, _notes])
+	await _wait_until(func() -> bool:
+		var seen := String(BaseHub.view.get("roster", {}).get("members", {}).get(mid, {}).get("gear", {}).get("slots", {}).get("helmet", ""))
+		return seen == buy_id and int(BaseHub.view.get("funds", -1)) == 50, 5.0)
+	check(String(BaseHub.view.roster.members[mid].gear.slots.get("helmet", "")) == buy_id and int(BaseHub.view.funds) == 50,
+		"the view every peer gets shows it on him and the cash left")
+	# An optic the stash lacks, on his primary, the same way.
+	Economy.add_cash(5000, "test: an optic")
+	await _frames(3)
+	screen.refresh()
+	var optics := screen.find_child("Optic_primary", true, false) as OptionButton
+	var optic_id := ""
+	for i in (optics.item_count if optics else 0):
+		var v := String(optics.get_item_metadata(i))
+		if v.begins_with(LoadoutScreen.BUY) and not optics.is_item_disabled(i):
+			optic_id = v.trim_prefix(LoadoutScreen.BUY)
+			units = _hub_units()
+			var cash := Economy.cash()
+			optics.item_selected.emit(i)
+			await _frames(4)
+			gear = Roster.json_safe(s.inventory.net_state)
+			var on := Optics.mounted(ItemDB.get_item(StringName(String(gear.slots.get("primary", "")))), gear.slot_state.get("primary", {}))
+			check(on != null and String(on.id) == optic_id and Economy.cash() == cash - BaseEconomy.item_price(StringName(optic_id))
+				and int(_hub_units().get(optic_id, 0)) == int(units.get(optic_id, 0)) + 1,
+				"the optic picker buys %s the same way and mounts it (%s)" % [optic_id, on.id if on else "none"])
+			break
+	if optic_id == "":
+		print("  (no rail gun or no optic for sale: the optic purchase isn't tried)")
+	screen.close()
+	frame.queue_free()
+	await _frames(2)
+	return buy_id
 
 
 ## Saved kits at the hub (claude/loadout-3d): save, apply to the squad with buy missing, the
@@ -402,7 +530,25 @@ func _test_kits_at_hub(ids: Array, me: String) -> void:
 ## The 3D loadout editor and the 3D armory at the hub (claude/loadout-3d): the model wears the
 ## draft, slots are markers on it, picking fits, undo, an unowned item's Buy now, Apply through
 ## the host, a kit saved from the editor; the armory's shelves, its panel, buy, Fit on me.
+## The editor remembers its last person in user:// (LoadoutEditor.SETTINGS), which every run on
+## a machine shares (a run that left it on a squadmate failed the next one's "on your own
+## soldier", R0802): it starts from none here and the file is put back as it was afterwards.
 func _test_3d(me: String) -> void:
+	var path := ProjectSettings.globalize_path(LoadoutEditor.SETTINGS)
+	var kept := FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+	await _test_3d_editor(me)
+	if kept != "":
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if f:
+			f.store_string(kept)
+			f.close()
+	elif FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+
+func _test_3d_editor(me: String) -> void:
 	print("The 3D loadout editor")
 	Economy.add_cash(50000, "test: the 3D editor")
 	var editor := BaseHub.open_loadout_3d()
@@ -554,13 +700,17 @@ func _test_fit(ids: Array) -> void:
 
 # --- A client ----------------------------------------------------------------------------------
 
-func _test_client(ids: Array) -> void:
+func _test_client(ids: Array, bought_helmet := "") -> void:
 	print("A client's loadout requests go through the host")
 	var log_path := ProjectSettings.globalize_path("user://loadout_test_client%s.log" % tag)
 	if FileAccess.file_exists(log_path):
 		DirAccess.remove_absolute(log_path)
+	# The client joins after the host's picker purchase (a late joiner: the view brings it) and
+	# buys a helmet for itself from its own picker, through the host, on the company's account.
+	Economy.add_cash(maxi(0, 20000 - Economy.cash()), "test: the client's purchase")
+	var cash_before := Economy.cash()
 	var args := ["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/loadout_test.tscn", "--", "--join", "127.0.0.1",
-		"--log", log_path, "--member", String(ids[2])]
+		"--log", log_path, "--member", String(ids[2]), "--bought-by", String(ids[0]), "--bought", bought_helmet if bought_helmet != "" else "-"]
 	var before := {}
 	var started := Time.get_ticks_msec()
 	var pid := OS.create_process(OS.get_executable_path(), args)
@@ -591,7 +741,15 @@ func _test_client(ids: Array) -> void:
 	check(Roster.json_safe(host_body.inventory.net_state) == host_gear, "the host's kit is untouched by the client's request on it")
 	if s:
 		check(int(Roster.gear_counts(Roster.json_safe(s.inventory.net_state)).get("mag_556", 0)) >= mags_before, "the client's Fill ammo on a squadmate went through the host")
-	check(_hub_units() == before, "and nothing was made or lost on the way")
+	var after := _hub_units()
+	var diff := {}
+	for id: String in after:
+		if int(after[id]) != int(before.get(id, 0)):
+			diff[id] = int(after[id]) - int(before.get(id, 0))
+	_client_bought = String(Roster.json_safe(client_body.inventory.net_state).slots.get("helmet", "")) if client_body else ""
+	var paid := BaseEconomy.item_price(StringName(_client_bought)) if _client_bought != "" else -1
+	check(_client_bought != "" and diff == {_client_bought: 1} and Economy.cash() == cash_before - paid,
+		"the client's picker purchase: one %s bought on the company's account ($%d of $%d) and on the client's body; nothing else made or lost (%s)" % [_client_bought, paid, cash_before, diff])
 	var deadline := Time.get_ticks_msec() + 30000
 	while pid > 0 and OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
 		await _seconds(0.25)
@@ -642,6 +800,44 @@ func _run_client() -> void:
 	BaseHub.request("loadout", [mid, "fill_ammo", {}])
 	var answered := await _wait_until(func() -> bool: return not notes.is_empty(), 15.0)
 	check(answered and String(notes[0]).contains("ammo filled"), "Fill ammo on a squadmate is answered by the host (%s)" % [notes])
+	# A late joiner sees the host's earlier picker purchase: the view brings it.
+	var bought := args[args.find("--bought") + 1]
+	var bought_by := args[args.find("--bought-by") + 1]
+	if bought != "-":
+		check(String(BaseHub.view.get("roster", {}).get("members", {}).get(bought_by, {}).get("gear", {}).get("slots", {}).get("helmet", "")) == bought,
+			"joining later, it sees the helmet the host bought from the picker on that squadmate (%s)" % bought)
+	# Its own picker: a helmet the stash has none of, bought through the host on the company's account.
+	var frame := Control.new()
+	add_child(frame)
+	frame.size = Vector2(1920, 1080)
+	var screen := LoadoutScreen.new()
+	frame.add_child(screen)
+	await _frames(2)
+	screen.select("player:" + CLIENT_KEY)
+	await _frames(2)
+	var picker := screen.find_child("Swap_helmet", true, false) as OptionButton
+	var buy_id := ""
+	var pick := -1
+	var wearing := String(Roster.json_safe(body.inventory.net_state).slots.get("helmet", "")) if body else ""
+	for i in (picker.item_count if picker else 0):
+		var v := String(picker.get_item_metadata(i))
+		if v.begins_with(LoadoutScreen.BUY) and not picker.is_item_disabled(i) and v.trim_prefix(LoadoutScreen.BUY) != wearing:
+			buy_id = v.trim_prefix(LoadoutScreen.BUY)
+			pick = i
+			break
+	var price := int(LoadoutScreen.buyable_prices(BaseHub.view).get(buy_id, 0))
+	var funds := int(BaseHub.view.get("funds", 0))
+	check(pick > 0 and price > 0, "its helmet picker offers %s at $%d (cash $%d in its view)" % [buy_id, price, funds])
+	notes.clear()
+	if pick > 0:
+		picker.item_selected.emit(pick)
+	var worn := await _wait_until(func() -> bool:
+		return body != null and String(Roster.json_safe(body.inventory.net_state).slots.get("helmet", "")) == buy_id, 15.0)
+	var paid := await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", 0)) == funds - price, 15.0)
+	check(pick > 0 and worn and paid and notes.any(func(t: String) -> bool: return t.contains("bought")),
+		"choosing it: the host bought it and put it on its body, and its view shows $%d less (%s)" % [price, notes])
+	screen.close()
+	frame.queue_free()
 	_say(CLIENT_DONE)
 	await _seconds(1.0)
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])

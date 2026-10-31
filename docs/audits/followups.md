@@ -2124,6 +2124,13 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+Captain, 2026-10-31: "Buy missing kit from inside the loadout editor" (captain_side_now.md "Next" item 4) is next.
+2026-10-31 | feat/loadout-buy: 6062b8a8 cherry-picked as is (it applied cleanly to dev), then reworked: the pickers' buy list and prices come from the base view's `catalog` (the host's BaseEconomy.shop_catalog) instead of the local Prices.shop_items + item_price | on a client the local list missed allied-quartermaster items and could disagree with what the host charges | keeping 6062b8a8's local lookup
+2026-10-31 | feat/loadout-buy: choosing a "Buy:" entry buys and equips in one request (op slot/optic with buy: true) with no confirm dialog; the entry itself shows "Buy:" and the price, and a cash hint sits over the slots | the task's "choosing one buys it"; the 3D editor's Buy now and the old Buy missing don't ask either | an ask-first dialog like Sell's (F-404)
+2026-10-31 | feat/loadout-buy: the host buys only the picked item, and only when the edit can't draw one from the hub's stash (KitLibrary.shortfall), so the charge is always the price shown; anything else the edit is short of still goes to edit_missing / Buy missing | the charge matches the label | buying the edit's whole shortfall (could charge more than shown)
+2026-10-31 | feat/loadout-buy: the wallet is the company's account (Economy cash), whoever asks; a client's purchase is host-authoritative (BaseHub.request) and reaches everyone through the base view | the company owns the stash and there is no per-player money in the game | per-player wallets (none exist)
+2026-10-31 | feat/loadout-buy: an item the stash holds only inside a carrier's or pack's pouches isn't offered to buy (the edit draws it); unaffordable entries are greyed out, not hidden | no charge for what the stash has; you see what more cash would buy | hiding unaffordable items
+2026-10-31 | feat/loadout-buy: the 3D loadout editor (claude/loadout-3d, on dev) keeps its draft flow (pick fits in the draft, Buy now into the stash, Apply with Buy missing); only the paper-doll menu's pickers buy on pick | the 3D editor is draft-then-apply by design; buying on pick there would bypass its undo | buy-and-apply on pick in the 3D editor too (F-405)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2182,25 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-404 to F-405: buying from the loadout menu's pickers (feat/loadout-buy, 2026-10-31)
+
+### F-404 (open, Proposed): an ask-first for picker purchases
+Choosing a "Buy:" entry in the paper-doll menu's Swap / Optic pickers spends company money at
+once (the entry shows "Buy:" and the price). Selling asks first (UiKit.confirm); buying doesn't,
+like the 3D editor's Buy now. If a misclick in a drop-down turns out to cost players money in
+play, wrap the BUY branch of the pickers' callbacks in `scripts/campaign/loadout_screen.gd`
+(`_build_doll`) in a UiKit.confirm.
+
+### F-405 (open): the 3D loadout editor still buys in two steps
+`scripts/ui/loadout_editor.gd` offers unowned items with their price; picking one fits it in the
+draft and shows Buy now (into the stash), and Apply with Buy missing buys the draft's shortfall.
+It doesn't buy and fit in one choice the way the paper-doll menu's pickers now do. Left as is on
+purpose (its draft and undo); revisit if players expect the same one-step buy there.
+
+### F-406 (done in feat/loadout-buy): the loadout suite's 3D editor checks read a shared user:// file
+LoadoutEditor remembers its last person in `user://loadout_editor.cfg`, which every local run
+on a machine (and the game itself) shares. A run that left it on a squadmate (`m0001`) made the
+next one open the editor there and fail "on your own soldier", "the draft starts as what he
+wears" and the Apply check (R0802; CI starts clean, so it never showed there).
+`tests/loadout_test.gd` `_test_3d` now starts with no file and puts the old one back after.

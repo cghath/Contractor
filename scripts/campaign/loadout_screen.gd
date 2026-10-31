@@ -33,11 +33,14 @@ const RATIOS := [1.0, 2.0, 1.4]
 const POLL_S := 0.5
 ## A row's item picture (logical px).
 const ICON := 36
+## A picker value that buys the item (BUY + id) rather than drawing it from the stash.
+const BUY := "buy:"
 ## The stash's sorts: [id, label].
 const SORTS := [["name", "Sort: name"], ["count", "Sort: most first"], ["weight", "Sort: heaviest first"], ["value", "Sort: most valuable"]]
 const HELP := [
 	"Pick a person on the left; the middle shows what they wear and carry, the right what the company's stash holds.",
 	"Wear, Mount and +1 move an item from the stash onto them; -1 and Take off put it back. Or drag a stash row onto the Kit column, or a kit row onto the Stash column.",
+	"The Swap and Optic pickers also list what the stash has none of, as \"Buy: name ($price)\": picking one buys it with company money and puts it on (greyed out when cash is short).",
 	"Quick kit fills ammo, a medic kit or a whole role kit from the stash. The standing loadout is what Restock refills them to after a deployment.",
 	"Search, filter and sort the stash from the boxes over it. Hover any row for what the item is and does.",
 	"Sell sells one item to the shop for the price shown (it asks first). Other players set their own kit; you can give them items.",
@@ -274,9 +277,16 @@ func _build_doll(p: Dictionary) -> void:
 		_build_buy(who)
 	var stash: Array = BaseHub.view.get("stash", [])
 	var have := BaseArmory.counts(stash)
-	var _buyable := _buyable_prices() if editable else {}
-	# Worn: each slot with what the stash has for it.
+	var funds := int(BaseHub.view.get("funds", 0))
+	var buyable := buyable_prices(BaseHub.view) if editable else {}
+	var inside := BaseArmory.contents_counts(stash)  # in the stash's carriers and packs: drawn, not bought
+	var for_sale := _sorted(buyable.keys()).filter(func(sid: String) -> bool: return not inside.has(sid))
+	# Worn: each slot with what the stash has for it, and what the shop sells that it hasn't.
 	doll_box.add_child(UiKit.heading("Worn"))
+	if not buyable.is_empty():
+		var cash := UiKit.hint("Company cash $%s. \"Buy:\" in a picker is what the stash has none of: picking one buys it at the price shown and puts it on." % DebriefCalc.money(funds))
+		cash.name = "BuyHint"
+		doll_box.add_child(cash)
 	var slots: Dictionary = gear.get("slots", {})
 	var slot_state: Dictionary = gear.get("slot_state", {})
 	var carrier := ItemDB.get_item(StringName(String(slots.get("vest", ""))))
@@ -301,29 +311,33 @@ func _build_doll(p: Dictionary) -> void:
 				var it := ItemDB.get_item(StringName(sid))
 				if Loadouts.fits_slot(it, slot) and sid != id:
 					choices.append(["%s (x%d)" % [it.name, int(have[sid])], sid])
-			for sid: String in _sorted(_buyable.keys()):
+			for sid: String in for_sale:
 				if have.has(sid) or sid == id:
 					continue
-				var it := ItemDB.get_item(StringName(sid))
-				if Loadouts.fits_slot(it, slot):
-					choices.append(["%s ($%d)" % [it.name, int(_buyable[sid])], sid])
+				if Loadouts.fits_slot(ItemDB.get_item(StringName(sid)), slot):
+					choices.append(buy_choice(sid, int(buyable[sid]), funds))
 			if choices.size() > 1:
 				var s := slot
 				row.get_meta(&"controls").add_child(_picker("Swap_" + String(slot), choices, func(v: String) -> void:
-					ask("slot", {"slot": String(s), "id": "" if v == "-" else v})))
+					if v.begins_with(BUY):
+						ask("slot", {"slot": String(s), "id": v.trim_prefix(BUY), "buy": true})
+					else:
+						ask("slot", {"slot": String(s), "id": "" if v == "-" else v})))
 			if item and Optics.has_rail(item):
 				var optics: Array = [["Optic...", ""], ["Irons (optic to stash)", "-"]]
 				for sid: String in _sorted(have.keys()):
 					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
 						optics.append(["%s (x%d)" % [ItemDB.get_item(StringName(sid)).name, int(have[sid])], sid])
-				for sid: String in _sorted(_buyable.keys()):
-					if have.has(sid):
-						continue
-					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
-						optics.append(["%s ($%d)" % [ItemDB.get_item(StringName(sid)).name, int(_buyable[sid])], sid])
+				var on := Optics.mounted(item, slot_state.get(String(slot), {}))
+				for sid: String in for_sale:
+					if not have.has(sid) and not (on and String(on.id) == sid) and Optics.is_optic(ItemDB.get_item(StringName(sid))):
+						optics.append(buy_choice(sid, int(buyable[sid]), funds))
 				var s2 := slot
 				row.get_meta(&"controls").add_child(_picker("Optic_" + String(slot), optics, func(v: String) -> void:
-					ask("optic", {"slot": String(s2), "id": "" if v == "-" else v})))
+					if v.begins_with(BUY):
+						ask("optic", {"slot": String(s2), "id": v.trim_prefix(BUY), "buy": true})
+					else:
+						ask("optic", {"slot": String(s2), "id": "" if v == "-" else v})))
 		doll_box.add_child(row)
 	# Carried, by group.
 	var carried := Roster.gear_counts(gear)
@@ -706,9 +720,12 @@ func _picker(node_name: String, choices: Array, on_pick: Callable) -> OptionButt
 	for c: Array in choices:
 		picker.add_item(String(c[0]))
 		picker.set_item_metadata(picker.item_count - 1, String(c[1]))
-		var id := String(c[1])
+		var id := String(c[1]).trim_prefix(BUY)
 		if ItemDB.has_item(StringName(id)):
 			picker.set_item_tooltip(picker.item_count - 1, item_tooltip(id))
+		if c.size() > 2 and bool(c[2]):
+			picker.set_item_disabled(picker.item_count - 1, true)
+			picker.set_item_tooltip(picker.item_count - 1, "Not enough cash\n" + item_tooltip(id))
 	picker.select(0)
 	picker.item_selected.connect(func(i: int) -> void:
 		var v := String(picker.get_item_metadata(i))
@@ -723,13 +740,24 @@ static func _name(id: String) -> String:
 	return item.name if item else id
 
 
-## Every item id the shop sells (excludes not_for_sale, same as the shop screen), to id's price:
-## catalog items the stash has none of, so a picker can offer them to buy, not just top up.
-static func _buyable_prices() -> Dictionary:
+## Every item id the company can buy, to its price, from base view `v`'s "catalog" (the host's
+## BaseEconomy.shop_catalog: the base shop less not_for_sale and allied_only, plus what an allied
+## quartermaster sells at today's standing, at the best price), so a picker can offer what the
+## stash has none of at the price the host will charge, on every peer.
+static func buyable_prices(v: Dictionary) -> Dictionary:
 	var out := {}
-	for id: StringName in Prices.shop_items():
-		out[String(id)] = BaseEconomy.item_price(id)
+	for e: Variant in v.get("catalog", []):
+		if e is Dictionary and int(e.get("price", 0)) > 0 and ItemDB.has_item(StringName(String(e.get("id", "")))):
+			out[String(e.id)] = int(e.price)
 	return out
+
+
+## A picker entry that buys `id` for `price` (value BUY + id), disabled with what the company
+## has when `funds` fall short (the host refuses it too).
+static func buy_choice(id: String, price: int, funds: int) -> Array:
+	if funds < price:
+		return ["Buy: %s ($%s, have $%s)" % [_name(id), DebriefCalc.money(price), DebriefCalc.money(funds)], BUY + id, true]
+	return ["Buy: %s ($%s)" % [_name(id), DebriefCalc.money(price)], BUY + id]
 
 
 static func _sorted(ids: Array) -> Array:

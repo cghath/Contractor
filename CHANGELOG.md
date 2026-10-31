@@ -11,6 +11,23 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Buy missing kit from the loadout menu's pickers (feat/loadout-buy)
+
+Captain's "Next" item 4 (docs/captain_side_now.md), from Noah's 6062b8a8 on
+claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left out).
+
+- **Added (loadout):** the loadout menu's Swap and Optic pickers list what the stash has none of
+  as "Buy: name ($price)", greyed out with the cash you have when it doesn't cover it, under a
+  "Company cash $X" hint. Choosing one buys it at the shop's price (or an allied
+  quartermaster's better deal) with company money, into the stash, and puts it on, in one
+  request; short of cash the host refuses and nothing changes. Ops `slot` / `optic` take
+  `buy: true` (`BaseHub._server_buy_picked`). Prices come from the host's catalog in the base
+  view, so a client shows what the host charges.
+- **Tests (loadout):** buying from the helmet picker (price shown, a dollar short greyed out and
+  refused with nothing spent, moved or marked missing; then bought, worn, the view updated), the
+  optic picker, a client's purchase from its own picker through the host on the company's
+  account, a late joiner seeing the host's purchase, and a save and reload keeping both.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
