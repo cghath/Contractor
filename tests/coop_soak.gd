@@ -161,6 +161,18 @@ func _ready() -> void:
 	# The harness stops this process by its pid (tools/coop_soak.sh, taskkill) if it outlives the run.
 	FileAccess.open(peer_dir.path_join("pid"), FileAccess.WRITE).store_string(str(OS.get_process_id()))
 	_log = FileAccess.open(peer_dir.path_join("bot.log"), FileAccess.WRITE)
+	# Never this PC's own settings (F-332): a bot can run beside a player's game on the same
+	# machine (coop_soak.sh --join, the botsjoin suite in every local run). Each reads and saves a
+	# settings file of its own in its run folder, at the defaults, shoots right-handed and keeps
+	# the get-out key at its default whatever the player's settings.cfg says (a left-handed one
+	# broke the pistol draw, CLAUDE.md); those two are pinned, never saved (animations_test does
+	# the same).
+	GameSettings.use_file(peer_dir.path_join("settings.cfg"))
+	GameSettings.reset_all()
+	Handedness._left = false
+	Handedness._loaded = true
+	ControlOptions._get_out = ControlOptions.GET_OUT_DEFAULT
+	ControlOptions._loaded = true
 	recorder = Recorder.new()
 	recorder.name = "Recorder"
 	recorder.out_dir = peer_dir
@@ -1237,6 +1249,7 @@ func _client_main() -> void:
 			break
 		if join:
 			_join_tick()
+			_post_place()
 		if _rejoining:
 			continue
 		if not _online():
@@ -1293,6 +1306,33 @@ func _join_tick() -> void:
 	var briefing := MapNodes.briefing(_level()) if _level() else null
 	if briefing and briefing.is_open():
 		briefing.request_set_ready(true)
+
+
+## Join mode: this bot's place in the squad as it sees it (its slot, role and fire team as the
+## host replicates them, and whoever it sees in its buddy's slot), posted in its status ("place")
+## whenever it changes: the botsjoin suite's host checks it sees the same (F-352).
+func _post_place() -> void:
+	var me := _me()
+	if me == null:
+		return
+	var place := {"slot": me.squad_slot, "role": String(me.role), "team": me.fire_team, "buddy": _buddy_seen(me)}
+	if place != _status.get("place", {}):
+		_post_status({"place": place})
+		_say("my place: slot %d, %s, team %d, buddy %s" % [me.squad_slot, me.role, me.fire_team, place["buddy"] if place["buddy"] != "" else "none"])
+
+
+## The name of the living soldier on `me`'s side this peer sees in `me`'s buddy slot (a player or
+## an AI squadmate), or "" (Soldier.buddy is the host's alone; slots are replicated, ServerSync).
+func _buddy_seen(me: Soldier) -> String:
+	if me.squad_slot < 0 or _level() == null:
+		return ""
+	var want := Roles.buddy_slot(me.squad_slot)
+	for parent: Node in [_level().players, _level().ai]:
+		for n: Node in parent.get_children():
+			var s := n as Soldier
+			if s and s != me and s.squad_slot == want and s.faction == me.faction and not s.vitals.is_dead() and not s.is_queued_for_deletion():
+				return String(s.name)
+	return ""
 
 
 func _join() -> bool:

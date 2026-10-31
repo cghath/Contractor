@@ -3,6 +3,9 @@
 #   GODOT="$HOME/Downloads/GodotVoxel_1.7/godot.windows.editor.x86_64.exe" tools/run_tests.sh
 # With arguments, runs only those suites:  tools/run_tests.sh smoke gameplay
 # Suites are tests/<name>_test.tscn; "net", "levelswitch", "world", "vehicles", "supports", "aav", "props", "operations" and "optypes" are two-process host/client tests.
+# "botsjoin" is two-process too, but runs as one suite: it hosts and starts its second process
+# itself (the soak bot, tests/coop_soak.tscn --soak-join), whose logs it keeps beside its own
+# (CONTRACTOR_RUN_LOGS, below).
 # Parallel runs (separate worktrees) should set CONTRACTOR_TEST_TAG (keeps test saves apart)
 # and CONTRACTOR_PORT (keeps the net test's port apart).
 #
@@ -87,6 +90,13 @@ fi
 # The logs go straight into the kept folder; with none, into a temp folder that goes at the end.
 logs="$keep"
 [ -z "$logs" ] && logs="$(mktemp -d)"
+# The kept folder, for a suite that keeps the logs of processes it starts itself (botsjoin's
+# bot) beside its own; a path the engine reads on Windows too (cygpath). Empty when none is kept.
+CONTRACTOR_RUN_LOGS=""
+if [ -n "$keep" ]; then
+	CONTRACTOR_RUN_LOGS="$(cygpath -m "$keep" 2>/dev/null || echo "$keep")"
+fi
+export CONTRACTOR_RUN_LOGS
 # The kept folder never goes: it's renamed PASS or FAIL.
 keep_logs() {
 	if [ -n "$keep" ]; then

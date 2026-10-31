@@ -35,6 +35,16 @@ fixed. Calls and follow-ups F-331 to F-333 in docs/audits/followups.md.
 - **Fixed (campaign):** a player leaving a plain session kept their profile in BaseHub, so they
   came back as `<profile>_2`, and in a campaign hosted later in the same run as a new main
   character without their gear. Profiles are forgotten on leaving and on each new host.
+- **Fixed (test tools):** the soak bots (`tests/coop_soak.gd`) ran on this PC's own
+  `settings.cfg`, and botsjoin starts one in every local run: each bot now reads and saves its
+  own settings file in its run folder, at the defaults, right-handed with the get-out key at its
+  default (pinned, never saved); the botsjoin host pins the same (F-332).
+- **Added (tests):** botsjoin joins, leaves and joins the bot again in a plain session (the same
+  player, `soak_bot1`, not a second profile; the same slot); the bot posts its place as it sees
+  it (slot, role, team, buddy) and the host checks it sees the same (F-352); every bot run's log
+  is checked (the campaign's first too), kept in the run's log folder (`CONTRACTOR_RUN_LOGS`,
+  exported by `tools/run_tests.sh`) and its tail printed on a failure; a missing AI refill fails
+  readably; a timed-out test kills its bot.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
