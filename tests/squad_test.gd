@@ -1679,9 +1679,15 @@ func _test_fire_discipline() -> void:
 	var bravo := _standing_mate([alpha])  # (whoever the fights so far left up and on his feet)
 	var ai := SquadAI.of(alpha)
 	var saved := [alpha.global_transform, bravo.global_transform]
+	# The shooter on his feet too: the clearances below are a standing man's line. The fight
+	# before this one can leave Alpha crouched or prone in combat mode, and from a prone eye the
+	# line 3 m out runs at a prone man's chest height, so Bravo 1.5 m off counted as in it (CI
+	# run 41154617049 on dev, 54ccc3d; green on the same code in 40602801148).
 	bravo.want_stance = SoldierMovement.Stance.PRONE
-	var prone := await _wait_until(func() -> bool: return bravo.movement.is_prone(), 4.0)
-	await _seconds(0.5)  # the hit boxes follow the pose down
+	alpha.want_stance = SoldierMovement.Stance.STAND_HIGH
+	var prone := await _wait_until(func() -> bool:
+		return bravo.movement.is_prone() and alpha.movement.stance == SoldierMovement.Stance.STAND_HIGH, 4.0)
+	await _seconds(0.5)  # the hit boxes follow the pose down, the head rises to its standing eye
 	var origin := Vector3(300, 50.1, 300)  # up and away from everyone: only Bravo near the lines
 	alpha.global_transform = Transform3D(Basis.IDENTITY, origin)  # faces -z
 	var eye := alpha.camera.global_position
@@ -1694,8 +1700,8 @@ func _test_fire_discipline() -> void:
 	var far_off := ai._friendly_in_line(aim)
 	_place(bravo, origin + Vector3(1.5, 0, -3))
 	var near_off := ai._friendly_in_line(aim)
-	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m) (prone %s, far %s, near %s)" % [
-		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen, prone, far_off, near_off])
+	check(prone and far_off and not near_off, "1.5 m off the line: in it 25 m out (clearance %.1f m), clear 3 m out (%.1f m) (prone and standing %s, far %s, near %s, eye %.2f m)" % [
+		SquadAI.FRIENDLY_CLEARANCE + 25.0 * widen, SquadAI.FRIENDLY_CLEARANCE + 3.0 * widen, prone, far_off, near_off, eye.y - origin.y])
 	_place(bravo, origin + Vector3(0, 0, -50))
 	check(ai._friendly_in_line(aim), "a squadmate 20 m past the target: rounds that miss fly on, no shot")
 	_place(bravo, origin + Vector3(0, 0, -90 - SquadAI.DOWNRANGE_M))

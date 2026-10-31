@@ -290,6 +290,15 @@ func is_built() -> bool:
 	return _built
 
 
+## How far the build has got, for a test's message: "built", or how many boxes are stamped and
+## whether the voxel engine has loaded the structures' area yet (nothing is stamped till it has).
+func build_progress() -> String:
+	if _built:
+		return "built"
+	var loaded := _tool != null and not _structures.is_empty() and _tool.is_area_editable(_structure_area)
+	return "building: %d of %d boxes stamped, area %s" % [_next_structure, _structures.size(), "loaded" if loaded else "not loaded"]
+
+
 ## Whether every mesh block of the structures is meshed as its voxels now stand, and the voxel
 ## engine has no meshing or main-thread work (applying meshes and their collision) left queued:
 ## the collision is as the voxels are. (The engine's queues are every terrain's: a caller should

@@ -91,10 +91,15 @@ func _init(p_body: Soldier = null) -> void:
 	rect.name = "NvgEffect"
 	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_material = _make_material(SHADER_HEAD + SHADER.replace("SEEN", SEEN_SCREEN).replace("MEAN", MEAN_SCREEN))
+	_material = _make_material(screen_shader_code())
 	rect.material = _material
 	add_child(rect)
 	rect.visible = false
+
+
+## The intensifier over the screen behind it (this view, and the vehicle HUD's night channel).
+static func screen_shader_code() -> String:
+	return SHADER_HEAD + SHADER.replace("SEEN", SEEN_SCREEN).replace("MEAN", MEAN_SCREEN)
 
 
 static func _make_material(code: String) -> ShaderMaterial:

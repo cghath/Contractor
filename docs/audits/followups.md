@@ -1801,6 +1801,24 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+### F-303 (open): a city block that never builds on CI (F-233, new evidence)
+F-233 took the city's blocks to be slow to stamp at CI's 2-3 frames a second. On 6a52a7f's own green
+CI run (40602801148) all 12 blocks the case waits for were in at 35.4 s; on dev's run of the same code
+(41154617049, 54ccc3d, docs only) two of the city's 20 blocks never printed "voxel structures built" in
+the whole 180 s (city_3_1 one of them; 40604654761 the same with city_0_3), at the same frame cost. A
+block that is 35 s on one run and never on the next looks stalled, not slow: most likely
+`VoxelWorld._process` waiting on `is_area_editable` for a structure area the voxel engine hasn't
+loaded (~100 AI viewers on the host keep its load queue busy), since nothing is stamped till it is.
+perfcases now prints, every 30 s while it waits and in the check, how many of the slow block's boxes
+are stamped and whether its area is loaded (`VoxelWorld.build_progress`), so the next red says which.
+If it's the area: a data-only VoxelViewer on the block while it builds would load it first.
+
+### F-304 (note): the city's navigation never "settles" on CI
+The city case waits for its blocks and `ZoneNav.is_settled()`; on CI it reported "still baking (0
+chunks queued)" at 180 s on both the green and the red runs (rebakes held or waiting while ~100 AI
+move), so the case always waits the full SETTLE_MS before measuring. Locally it settled at 107 s
+(R0708). Harmless to the verdict; it makes the suite ~2.5 min longer on CI.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2142,11 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | dev reds (fix/dev-reds-oct31): squad's "1.5 m off the line" was the test's fault, not the AI's: the shooter now stands for it (a prone shooter's line 3 m out is at a prone man's chest, so he's rightly in it); the clearances stay | the check assumed a standing eye it never set up, and the same code passed on 40602801148 | widen the clearance or move Bravo further off
+2026-10-31 | dev reds: vehicles' AI gun team: the man not on the gun holds fire until the gun has fired (test only) | the assistant's rifle killed the foe with a head shot while the gun turned onto him and made him out (F-140); the gun's own behaviour is right | make the foe unkillable (no such switch in Vitals) or slow the rifles
+2026-10-31 | dev reds: props' client animal check: the host stops its animals (wait 10 s) and sends three packets before it answers (test only) | the answer and later packets came in together after a client stall, so the client's animals were seconds ahead of the host's answer; ANIMAL_SLACK_M stays 1.5 | raise the slack to cover a stall
+2026-10-31 | dev reds: perfcases' city wait (SETTLE_MS 180 s) and budgets not raised; the check and a note every 30 s now say how far a slow block got and whether its voxel area is loaded (F-303) | the same commit had all 12 blocks in at 35.4 s on CI (40602801148) and two of 20 never built in 180 s (41154617049): a stall, not a slow build, so more time wouldn't fix it | a longer wait
+2026-10-31 | dev reds: vehicles' spall-cone armour work 0.526 ms over its 0.5 ms locally (R0708, three suites at once on the PC) left alone | CI measured 0.418 on dev (41154617049): local load | give the check a local slack
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

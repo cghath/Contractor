@@ -101,7 +101,7 @@ func _init(p_hud: Hud = null) -> void:
 	_night = ColorRect.new()
 	_night.name = "NightChannel"
 	_night.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_night_material = NvgView._make_material(NvgView.SHADER_HEAD + NvgView.SHADER.replace("SEEN", NvgView.SEEN_SCREEN))
+	_night_material = NvgView._make_material(NvgView.screen_shader_code())  # (its MEAN too: left in, the shader failed to compile)
 	_night_material.set_shader_parameter(&"tube", 8.0)  # (the whole glass: the slit masks it)
 	_night_material.set_shader_parameter(&"outside", 1.0)
 	_night.material = _night_material
