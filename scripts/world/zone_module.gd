@@ -112,6 +112,17 @@ func is_ready() -> bool:
 	return voxel_world != null and voxel_world.is_built() and not _proxy_up
 
 
+## Why it isn't ready yet, for a test's message: not streamed in, the voxels' build
+## (VoxelWorld.build_progress), or built with the proxy still up (waiting on the meshes).
+func build_progress() -> String:
+	if voxel_world == null:
+		return "not streamed in"
+	var progress := voxel_world.build_progress()
+	if voxel_world.is_built() and _proxy_up:
+		progress += ", proxy still up (%s)" % ("meshing" if not voxel_world.is_meshed() else "holding")
+	return progress
+
+
 ## Makes the voxels (the type's boxes, then `log` from the start, then whatever the zone sends
 ## as it comes). `sink`: the host's edit sink (VoxelWorld.edit_sink), none on a client.
 func stream_in(log: Array, sink: Callable) -> void:

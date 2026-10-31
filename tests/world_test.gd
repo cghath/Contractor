@@ -97,6 +97,7 @@ func _run_host(wait_for_client: bool) -> void:
 	player.set_physics_process(false)
 	await _test_generation(mem_before)
 	await _test_streaming()
+	await _test_unloaded_area()
 	await _test_edits()
 	await _test_shot_in_module()
 	await _test_loot_and_care()
@@ -319,6 +320,35 @@ func _test_edits() -> void:
 	m = await _go_to_module("compound")
 	check(m.voxel_world.holes_through(m.to_global(SHED_WALL)) == 1 and m.voxel_world.marks_near(m.to_global(Vector3(-2.95, 1.35, -4.0)), 0.05) == 1,
 		"back again: rebuilt with the bullet holes and the mark")
+
+
+## F-303: a build whose area the voxel engine never loads (here: loading turned off on its
+## terrain; on CI, the engine's count of viewers losing a block among a city's hundred-odd AI)
+## puts the missing data blocks in itself after VoxelWorld.LOAD_WAIT_S and builds: its voxels
+## there, their collision in.
+func _test_unloaded_area() -> void:
+	print("A build whose area the voxel engine never loads")
+	var world := VoxelWorld.new()
+	world.name = "NeverLoaded"
+	world.bounds = AABB(Vector3(-60, -8, -60), Vector3(120, 56, 120))
+	world.add_box_m(Vector3(-1, 0, -0.3), Vector3(1, 2, 0.3), VoxelWorld.Mat.CONCRETE)
+	level.add_child(world)
+	world.global_position = player.global_position + Vector3(6, 0, 0)
+	world.terrain.set_automatic_loading_enabled(false)
+	await get_tree().create_timer(1.0).timeout
+	var waiting := not world.is_built() and world.missing_blocks().size() > 0
+	var built := await _wait_for(func() -> bool: return world.is_built(), VoxelWorld.LOAD_WAIT_S + 5.0)
+	var space := player.get_world_3d().direct_space_state
+	var hit := {}
+	var deadline := Time.get_ticks_msec() + 5000
+	while built and hit.is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+		hit = space.intersect_ray(PhysicsRayQueryParameters3D.create(world.to_global(Vector3(0, 1, 3)), world.to_global(Vector3(0, 1, -3)), 1))
+	check(waiting and built and world.material_at(world.to_global(Vector3(0, 1, 0))) == VoxelWorld.Mat.CONCRETE
+		and not hit.is_empty() and VoxelWorld.find_on(hit.collider) == world,
+		"a build whose voxel area never loads (%s at 1 s) puts the blocks in itself and builds: %s, its wall there and solid" % [
+		"waiting" if waiting else "not waiting", world.build_progress()])
+	world.queue_free()
 
 
 ## Soldiers in modules take rounds as in the compound: through a plank wall, and through a

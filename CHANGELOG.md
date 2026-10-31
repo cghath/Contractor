@@ -11,12 +11,36 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### A city block that never built (fix/city-stall)
+
+F-303: on about every other CI run one of the city's twenty blocks never built in 180 s
+(city_0_3 on 40604654761, city_3_1 on 41154617049, city_4_2 on 41174369882; on green runs often a
+block the case doesn't wait for), while the rest were in at ~35 s. A player could hit the same in a
+busy city: a block standing as its proxy for good, its garrison never spawned.
+
+- **Fixed (voxel worlds):** a build no longer waits forever on the voxel engine to load its area.
+  The engine loads a data block (all air) only while a VoxelViewer covers it, and keeps its own
+  count of which viewers cover which blocks; with a hundred-odd AI viewers coming and going that
+  count can lose a block, which then stays unloaded with nothing asking for it again. A build whose
+  area has been short of blocks for `VoxelWorld.LOAD_WAIT_S` (5 s, Proposed) now puts the missing
+  ones in itself, empty, as the generator makes them (`VoxelTerrain.try_set_block_data`, which
+  counts the viewers covering each); a block lost after stamping began makes the stamping start
+  over. The build also waits for its area out to whole mesh blocks and the voxel round them the
+  mesher reads, so its meshes and collision can all be made.
+- **Changed (tests):** `ZoneModule.build_progress()` says why a module isn't ready, including a
+  build that's done with its proxy still up (meshing or holding); `VoxelWorld.build_progress()`
+  counts the data blocks not loaded and the ones the build put in. Perfcases prints both, and the
+  blocks it doesn't wait for that are still not ready. World: a build whose terrain never loads
+  anything puts its blocks in and builds, its wall solid.
+
 ### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
 
 Dev's last two CI runs (40604654761 at 6a52a7f: props, perfcases; 41154617049 at 54ccc3d, a
 docs-only commit on the same code: squad, vehicles, perfcases) against claude/dev-reds' green run
-of the very same commit (40602801148): every one of these reds was a check whose outcome hung on
-timing or on what the suite before it left behind, not on the code under test. Roles passes on dev
+of the very same commit (40602801148): the squad, vehicles and props reds were checks whose outcome
+hung on timing or on what the suite before it left behind, not on the code under test. Perfcases
+was not: a city block that never built is a real stall in the game, which this section only made
+visible (F-303; fixed under "A city block that never built", fix/city-stall). Roles passes on dev
 (41154617049).
 
 - **Fixed (tests, squad):** the fire-discipline check "1.5 m off the line" never put the shooter on
