@@ -11,6 +11,22 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Woods perf, measured again (perf/woods-copses, 2026-10-31)
+
+- Captain's queue item 1 ("frame goes 4 -> 10 ms in woods... Then denser copses"), measured
+  on dev (docs/performance.md, "Woods, 2026-10-31"). From Kestrel Valley's densest wood the
+  vegetation is 102 draws and 161k triangles, against 65 and 99k on its open ground; the
+  soldiers in the same view are 547k. The woods' frame costs no more than open ground's
+  (8.7 vs 10.4 ms, R0768). The denser copses were already on dev (ea4d575e; the wooded
+  presets since bbef7e05), so `art/denser-copses` has nothing left to merge.
+- Far-tier trunks (past 200 m) no longer cast sun shadows (17 fewer shadow casters in the
+  woods view).
+- perfcases: a new **open** case (the woods walk on open ground), and the draw proxy now
+  counts the scatter (it never did headless), triangles and shadow triangles, by shape.
+  Vegetation draw budgets for woods and open (Proposed).
+- The windowed render bench runs only with `BENCH_WINDOWED=1`. Its window is small, never takes
+  focus and never holds the mouse, and it quits within 5 minutes. New cases: woods_in, open, forest.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

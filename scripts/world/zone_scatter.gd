@@ -2068,7 +2068,10 @@ func _build_cell(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> voi
 		else:
 			node.visibility_range_end = _range_of(key)
 			node.visibility_range_end_margin = 20.0
-		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket", "wire", "thicket_lod", "scrub_lod"]))  # keys mix Kind values and names
+		# No sun shadow from the far tier's trunks either (woods perf pass, 2026-10-31): past LOD_M a
+		# 0.3 m post is under a pixel and so is its shadow in the sun's far cascade, but it was a shadow
+		# draw a cell inside the shadow reach. The crowns' stand-ins keep theirs (their shade reads).
+		var shade: bool = not ((key is int and key == Kind.SCRUB) or (key is String and key in ["tuft", "pebble", "thicket", "wire", "thicket_lod", "scrub_lod", "trunk_lod"]))  # keys mix Kind values and names
 		if key is String and String(key).begins_with(LIBRARY):
 			shade = bool(PropArt.shape(String(key).trim_prefix(LIBRARY).get_slice("#", 0)).shadow)
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

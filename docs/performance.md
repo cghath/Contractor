@@ -271,9 +271,9 @@ The fixes (branch claude/render-perf), all under Video, "World detail at distanc
 From the branch's worktree (import first, headless), then windowed, one at a time:
 
     GODOT=".../godot.windows.editor.x86_64.exe"; export CONTRACTOR_PORT=24731 CONTRACTOR_TEST_TAG=bench
-    "$GODOT" --path . res://tests/render_bench.tscn                                   # menu, town, woods, fight at High
-    BENCH_DETAIL=ultra "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town  # the cap at Ultra (6)
-    BENCH_SPLIT=1 "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town       # what's left, by owner
+    BENCH_WINDOWED=1 "$GODOT" --path . res://tests/render_bench.tscn                  # menu, town, woods, fight at High
+    BENCH_WINDOWED=1 BENCH_DETAIL=ultra "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town  # the cap at Ultra (6)
+    BENCH_WINDOWED=1 BENCH_SPLIT=1 "$GODOT" --path . res://tests/render_bench.tscn -- --cases=town  # what's left, by owner
 
 Read: `grep -c "Element limit" <log>` must be 0 in every case and level. The "census" lines show
 how many sites streamed in (at most the cap). Expected at High against v0.5.4 (78dc9a17), Proposed:
@@ -385,6 +385,57 @@ camera). What made it run (docs/combined_arms.md D2-1 to D2-13): collision on de
 player, vehicle and soldier, built a little every frame; the terrain drawn as far tiles and rings
 instead of every chunk's levels up front; the scatter's cover streamed and its drawn cells freed;
 far drawing; live caps.
+
+## Woods, 2026-10-31 (perf/woods-copses)
+
+Captain's "Next" item 1 (2026-10-14): "frame goes 4 -> 10 ms in woods, up to 1.5k draws, 1.4M
+prims. Then denser copses." Those were windowed numbers from before the woods perf pass of
+2026-10-22 (bbef7e05, queue item 1.8: each cell in a near tier of full shapes to 200 m and a far
+tier of low-poly stand-ins, far canopy blobs in 2x2-cell blocks as the far tier's visibility
+parents, no sun shadows from thickets, scrub or ground cover). That pass also gave the dense copses
+to every wooded normal preset, so `art/denser-copses` (ea4d575e, in dev's history) has nothing
+left to bring in.
+
+**How it was measured.** Headless only. A windowed run of `tests/render_bench.tscn` on this PC
+caught cghath's mouse while they were using the machine, so the bench now does nothing unless
+`BENCH_WINDOWED=1` is set and lets go of the mouse every frame (F-366: cghath runs it). The
+perfcases draw proxy is what the renderer would be given: geometry in view and in range,
+MultiMesh instances, triangles, and the shadow casters within the sun's reach. Until this pass it
+never counted the scatter: the headless renderer gives a MultiMesh no bounds, so every scatter
+cell sat at the zone's origin, out of its own range. It now places scatter nodes by their
+"centre" meta and follows visibility parents. The new **open** case is the woods case's walk
+and patrol on Kestrel Valley's most open ground, so woods minus open is what the trees cost.
+
+Kestrel Valley (river_valley), at the draw proxy's peak (R0768, this PC):
+
+| | woods (densest wood, 62 trees in 64 m) | open ground |
+|---|---|---|
+| 60 Hz frame cost, avg / p95 (ms) | 8.68 / 12.75 | 10.38 / 14.35 (the AI sees each other and fights) |
+| everything drawn | 293 draws, 758k triangles | 255 draws, 695k triangles |
+| of which soldiers | 159 draws, 547k triangles | 159 draws, 547k triangles |
+| of which vegetation (scatter, both tiers) | **102 draws, 161k triangles** | 65 draws, 99k triangles |
+| shadow casters | 270 (707k triangles) | 233 (665k triangles) |
+| vegetation in the shadow pass | 40k triangles | 17k triangles |
+
+The woods add about 37 draws and 62k triangles to what open ground draws, and they cost no more
+CPU frame time. In the same view the soldiers are 3-4x the vegetation. In the woods, the near
+tier's thickets (36k) and grass tufts (40k) are the biggest shares, then scrub (24k) and crowns
+(20k). The forest suite, standing in temperate's densest copse (105 trees), counts 465 draws,
+530k triangles and about 52k shadow triangles; the Experimental forest's densest copse runs a
+6.9 ms frame.
+
+**Cut in this pass:** far-tier trunks (past 200 m, a 0.3 m post) cast no sun shadow: 17 fewer
+shadow casters in the woods view (287 -> 270), 2.7k fewer shadow triangles (R0765 -> R0768).
+Nothing else from the list (per-tree meshes, no LOD or visibility ranges, shadows from every
+leaf, foliage overdraw, per-frame vegetation scripts) still applies: trees are MultiMeshes per
+cell with tiers and visibility ranges, thickets and scrub cast no shadow, the materials are
+opaque, and the scatter's _process costs nothing measurable (the grass carpet 0.13 ms a frame).
+What's left would change the look (F-367).
+
+**Budgets** (Proposed, `DRAW_BUDGETS` in tests/perfcases_test.gd, about 1.5x the numbers above,
+no local slack since they're counts): woods 160 draws / 250k triangles / 65k shadow triangles of
+vegetation, open 100 / 150k / 50k. The frame budgets for open are the woods' own (18 / 26 ms,
+15 hitches a minute).
 
 ## What's left
 
