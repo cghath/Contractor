@@ -349,6 +349,7 @@ func _test_unloaded_area() -> void:
 		"a build whose voxel area never loads (%s at 1 s) puts the blocks in itself and builds: %s, its wall there and solid" % [
 		"waiting" if waiting else "not waiting", world.build_progress()])
 	world.queue_free()
+	await get_tree().process_frame  # (gone before the next test looks at the level's worlds)
 
 
 ## Soldiers in modules take rounds as in the compound: through a plank wall, and through a

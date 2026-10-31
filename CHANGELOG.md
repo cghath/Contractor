@@ -41,7 +41,16 @@ busy city: a block standing as its proxy for good, its garrison never spawned.
   R0749 (smoke, world, perfcases city, city, on the time-budgeted fill), R0752 (perfcases city), all
   PASS (R0751's perfcases failed on F-340, not this); CI perfcases green
   on 41186841331, 41191078478, 41192039297 (all 20 blocks built, no fill needed), 41192561810 (three
-  blocks filled) and 41193905455 (one filled at 512 a frame), all 20 built every time.
+  blocks filled), 41193905455 (one filled at 512 a frame), 41195405767 (2cfd704, the fill in the
+  build's time a frame) and 41197962257 (724bc9a), all 20 built every time.
+- **Fixed (review):** the fill round's scan for missing data blocks runs inside the build's time
+  a frame too, over as many frames as it takes (`VoxelWorld._scan_missing`; it ran whole, outside
+  the budget, at every round's start); a round gives up only after 16 tries that put nothing in,
+  not 16 blocks looked at (the ones the engine had loaded meanwhile counted); and when the area
+  comes whole partway through a round, what the round put in is counted and the rest dropped
+  (it was left queued for the next round). World's never-loaded build waits a frame after it's
+  freed. Local R0760 (smoke, world PASS; perfcases city hit F-340, noted there), R0766
+  (perfcases city) PASS.
 
 ### Dev's CI reds of 2026-10-27 to 31 (fix/dev-reds-oct31)
 

@@ -1801,7 +1801,7 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
-### F-303 (open): a city block that never builds on CI (F-233, new evidence)
+### F-303 (worked round in the game; engine cause open, F-338/F-339): a city block that never builds on CI (F-233, new evidence)
 F-233 took the city's blocks to be slow to stamp at CI's 2-3 frames a second. On 6a52a7f's own green
 CI run (40602801148) all 12 blocks the case waits for were in at 35.4 s; on dev's run of the same code
 (41154617049, 54ccc3d, docs only) two of the city's 20 blocks never printed "voxel structures built" in
@@ -1843,6 +1843,11 @@ build's own time a frame (`_build_budget_ms`, 4-12 ms, the stamping's budget) in
 round up after 16 tries put nothing in (no viewer covers the area, e.g. a client's compound before
 it joins: before, every 5 s it made and threw away a buffer for each of its 3136 blocks). If a block stalls
 again with "area loaded" in its note, it's not the area and F-303 reopens.
+
+Worked round in the game; engine cause open (F-338/F-339). Review of fix/city-stall: the
+round's `missing_blocks()` scan now runs inside the build's budget too (`_scan_missing`, resumed
+next frame), the give-up counts only failed `try_set_block_data` calls, and a round cut short by
+the area coming whole counts what it put in and drops the rest.
 
 ### F-304 (note): the city's navigation never "settles" on CI
 The city case waits for its blocks and `ZoneNav.is_settled()`; on CI it reported "still baking (0
@@ -1891,6 +1896,12 @@ past STREAM_OUT_M from every `stream_focus()` point, and the player always count
 moved or wasn't under `players` then; nothing in the scripts reparents a Soldier. Perfcases now says,
 for a block not streamed in, how far the player is and whether he's the same node (`_progress`), so
 the next one says which.
+R0760 (lo-city on fix/city-stall, review fixes, PERF_CASES=city): it did, the same node every
+time: the case's 12 blocks were ready at 26.2 s, and from the 55 s note on the player stood at
+(-2004, 1, 1328), 1.7-1.9 km off, with his physics and vitals off (the case moves him) and no
+GroundGuard line. That's far out at the zone's west side, most likely its player spawn
+(`ZoneLevel.player_spawn`, by the insertion point): something put the host's own player back on
+his spawn mid-case. Who is still open.
 
 ### F-341 (note): perfcases' city keeps losing blocks it doesn't wait for
 The case waits for the 12 blocks within 140 m of its start; F-303's stall hit the other 8 as often
@@ -2239,6 +2250,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | city stall: the build waits for its area out to whole mesh blocks and the voxel round them, not just the structures' boxes | a missing block next to the structures leaves their meshes and collision unmade (proxy dropped after MESH_WAIT_S with holes in the collision); the engine loads the whole bounds anyway, so a normal build waits no longer | the boxes' area only
 2026-10-31 | city stall: the fill runs within the build's time a frame (the stamping's 4-12 ms), not all at once | CI had 7706 of a block's data blocks to put in at 5 s, 30 ms all told (~4 us each): one frame that long is a hitch on a player's PC, while a fixed 512 a frame (tried on 7f0f33a) took ~5 s at CI's 2-3 fps | all at once; a fixed count a frame
 2026-10-31 | city stall: a block lost mid-stamp restarts the stamping from the first box | its stamped voxels went with it; every box again in order comes out the same | re-stamping only the boxes in that block (more code, same result)
+2026-10-31 | city stall (review): the fill round's missing-block scan resumes across frames inside the build's budget (256 has_data_block calls between clock checks) rather than keeping the last round's count; the give-up stays at 16 failed try_set_block_data calls | a resumable scan is exact each round, while a kept count goes stale as the engine loads blocks; 16 failures with none put in is the same test the round had, minus the blocks the engine had loaded | reuse the previous round's list
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
