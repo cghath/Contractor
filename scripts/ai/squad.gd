@@ -138,6 +138,14 @@ const TRAIL_JUMP_M := 6.0
 ## Proposed numbers.
 const TRAIL_LOOP_M := 1.5
 const TRAIL_LOOP_SKIP := 3
+## A man's trail pick that no longer keeps clear of the others slides to the nearest clear point
+## along the trail, up to TRAIL_SLIDE_M either way, before a pick is searched for afresh from
+## about as far back as his slot (F-400, review). The fresh search, kept SLOT_APART_MULT of the
+## gap from every other slot on a single-file trail, could land 20 m further back, and the next
+## second come forward again as the others moved: Golf's slot on CI 41243628687 swung between
+## about 38 and 60 m back along the lead's trail through the compound, and he ran 25 m out and
+## back in 8 s. Proposed number.
+const TRAIL_SLIDE_M := 12.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -1835,7 +1843,8 @@ func _human_heading(who: Soldier, fallback: Vector3) -> Vector3:
 ## line if nothing stands between it and where the team forms (`e.base`), else the first point
 ## back along the lead's trail from about as far back as the slot was, clear of the lead, the
 ## players and the other slots. Each man keeps his last pick while it still does, so a slot
-## doesn't hop between the two. Past the trail's end (the lead has only just set off): the near
+## doesn't hop between the two, and a trail pick crowded out slides along the trail to the
+## nearest clear point first (TRAIL_SLIDE_M). Past the trail's end (the lead has only just set off): the near
 ## side of the wall, as before, but never on the lead.
 func _refit(e: Dictionary, right: Vector3, fwd: Vector3, people: Array[Vector3], taken: Array[Vector3]) -> Vector3:
 	var who: Soldier = e.who
@@ -1850,9 +1859,18 @@ func _refit(e: Dictionary, right: Vector3, fwd: Vector3, people: Array[Vector3],
 	var mirrored := want - right * (2.0 * side)
 	var mirror_ok := bool(e.blocked) and absf(side) > 0.5
 	if String(was.get("kind", "")) == "trail":
-		var held: Variant = _trail_point(float(was.s))
+		var held_s := float(was.s)
+		var held: Variant = _trail_point(held_s)
 		if held != null and ok.call(held):
 			return held
+		var slide := TRAIL_STEP_M  # crowded: the nearest clear point along the trail, nearer the lead first
+		while slide <= TRAIL_SLIDE_M:
+			for at_s: float in [held_s - slide, held_s + slide]:
+				var p: Variant = _trail_point(at_s) if at_s >= apart else null
+				if p != null and ok.call(p):
+					_refits[id] = {"kind": "trail", "s": at_s}
+					return p
+			slide += TRAIL_STEP_M
 	if mirror_ok and ok.call(mirrored) and not _wall_between(base, mirrored):
 		_refits[id] = {"kind": "mirror"}
 		return mirrored
