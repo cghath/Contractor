@@ -892,7 +892,9 @@ func _server_fire(origin: Vector3, direction: Vector3, slot: StringName) -> void
 	var every := int(weapon.stats.get("tracer_every", TRACER_EVERY))
 	var tracer := every > 0 and _rounds_fired % every == 0
 	var kind: int = (Tracer.Kind.GREEN if faction == &"hostile" else Tracer.Kind.RED) if tracer else Tracer.Kind.BALL
-	CompoundLevel.current(self).show_tracer.rpc(muzzle, round_point, suppressed, kind)  # and sees it (Tracer)
+	var path: Variant = result.get("path")
+	var points: PackedVector3Array = path if path is PackedVector3Array else PackedVector3Array([muzzle, round_point])
+	CompoundLevel.current(self).show_tracer.rpc(points, suppressed, kind)  # and sees it (Tracer), along the real curve
 	PeopleLayer.server_noise(self, origin)  # people nearby hear it (wave 4)
 	if faction != &"hostile":
 		Alert.server_noise(self, origin, Alert.SHOT, suppressed)  # hot zones: the enemy hears it (4B part 3)

@@ -63,8 +63,11 @@ const DRAG_G7: Array[Vector2] = [Vector2(0.0, 0.120), Vector2(0.7, 0.120), Vecto
 static var _rounds: Dictionary = {}  # round id -> entry of rounds.json
 
 
-## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
-static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
+## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects. Appends
+## each gravity-stepped sample (the muzzle, then the end of every clear segment) to `points`,
+## the round's real curved path for Tracer to draw (fire() adds the final stop to it).
+static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData, points: PackedVector3Array) -> Dictionary:
+	points.append(origin)
 	var space := shooter.get_world_3d().direct_space_state
 	var exclude: Array[RID] = [shooter.get_rid()]
 	for child in shooter.get_children():
@@ -92,6 +95,7 @@ static func _trace(shooter: CollisionObject3D, origin: Vector3, direction: Vecto
 		var hit := space.intersect_ray(query)
 		if hit.is_empty():
 			path += seg_start.distance_to(to)
+			points.append(to)
 			if path >= RANGE:
 				break
 			velocity = step[1]
@@ -434,10 +438,15 @@ static func _result(kind: String, hit: Dictionary) -> Dictionary:
 	return {"result": kind, "position": hit.position, "normal": hit.normal}
 
 
-## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal"} for effects.
+## Returns {"result": "none"|"plate"|"body"|"world", "position", "normal", "path"} for effects.
+## "path" is the round's real gravity-curved flight, muzzle to its final stop (Tracer.spawn).
 ## Rounds that pass close to AI soldiers on the other side suppress them.
 static func fire(shooter: CollisionObject3D, origin: Vector3, direction: Vector3, weapon: ItemData) -> Dictionary:
-	var result := _trace(shooter, origin, direction, weapon)
+	var points := PackedVector3Array()
+	var result := _trace(shooter, origin, direction, weapon, points)
+	if points.is_empty() or points[points.size() - 1] != result.position:
+		points.append(result.position)
+	result["path"] = points
 	report_near_misses(shooter, origin, result.position)
 	return result
 

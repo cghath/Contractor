@@ -514,13 +514,13 @@ func _restore_bodies() -> void:
 		vehicles.server_restore()
 
 
-## Host only. A visible tracer streak from `origin` to `end` on every peer (Captain, 2026-10-16:
-## "we dont have tracers or bullets that can be seen in game yet"). Purely cosmetic (Sfx.
-## server_shot already carries the sound); suppressed shots get a faint one, not none, since the
-## round still flies even if the bang is quiet.
+## Host only. A visible tracer streak along the round's real curved path on every peer
+## (Captain, 2026-10-16: "we dont have tracers or bullets that can be seen in game yet"). Purely
+## cosmetic (Sfx.server_shot already carries the sound); suppressed shots get a faint one, not
+## none, since the round still flies even if the bang is quiet.
 @rpc("authority", "call_local", "unreliable")
-func show_tracer(origin: Vector3, end: Vector3, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
-	Tracer.spawn(self, origin, end, suppressed, kind)
+func show_tracer(points: PackedVector3Array, suppressed: bool, kind: int = Tracer.Kind.RED) -> void:
+	Tracer.spawn(self, points, suppressed, kind)
 
 
 @rpc("authority", "call_local", "unreliable")
