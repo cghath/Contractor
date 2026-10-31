@@ -1801,6 +1801,18 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-374 (open): the pelvis hitbox and the legs' boxes hang from different roots
+Since feat/vault-legs-svd the legs' hitboxes follow the legs as drawn (`CharacterModel.pose_hitboxes`,
+from the drawn `_root`: the landing's sink, the hips settled over the feet on a slope or step),
+while the pelvis, torso and head boxes follow the target pose's root, so at the hip the thigh
+boxes can sit a few cm off the pelvis box. Posing the pelvis from the drawn root too (review of
+that branch) kept weapons, animations, wounds and medical green (R0770, R0774), but casualty's
+"nobody got stuck on the way" failed in three of four runs with it (CI 41220310370, attempts 1 and
+2; local R0781: a follower running a loop near the lead, not mantling, touching nothing; it passed
+on the PR run 41220315144) and passed without it (R0782). How a pelvis Area3D moves a follower's path isn't known (something in the
+AI reading hitbox areas: the friendly-in-the-line checks or spacing are the guesses), so it's left
+on the target root until that's understood.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2130,7 +2142,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-31 | feat/vault-legs-svd: claude/vault-legs merged as it was | its leg hitboxes follow the drawn legs only while up and not carried (downed bodies, body_point and reach unchanged), and the hand plant uses dev's own mantle flag (`climbing`) and WORLD_MASK | only the hand plant, keeping the legs' boxes on the rest pose
 2026-10-31 | feat/vault-legs-svd: townperf's breach-and-seam red on CI 41186733348 (same wall as the local pass R0746, rebaked (1, 1)) read as a test race, not the merge: a fight's rebake started before the carves counted as the breach's own and ended the wait before BREACH_CHECK_S reported the breach; the test now counts only rebakes after VoxelWorld.breached (tests/townperf_test.gd only) | the diff feeds nothing into the nav bake; 45 rebakes run during the fight | rerun until green and leave the race in
 2026-10-31 | feat/vault-legs-svd: the vault hand plant (review minor) goes on the support hand, not always the left: the right for a left-handed shooter holding a weapon (CharacterModel's own lefty rule, `left_handed and _held_weapon`), mirrored to that side; animations gets a left-handed vault check | the left hand is a left-hander's firing hand, so the gun came off the grip, and CLAUDE.md names left-handed settings as a known hazard | leave it as a review note
-2026-10-31 | vault legs (review): the pelvis hitbox is posed from the drawn root while the legs' boxes follow the drawn legs (torso and head stay on the target pose) | the thighs' boxes hung from the drawn hips while the pelvis box sat where the target pose had them, a gap or overlap at the hip on a landing's sink or a slope; the hitbox suites stayed green with it | leave the pelvis on the target root
+2026-10-31 | vault legs (review): the pelvis hitbox stays on the target pose's root (the legs' boxes on the drawn root), the mismatch logged as F-374 | posing it from the drawn root kept weapons, animations, wounds and medical green (R0770, R0774) but casualty's "nobody got stuck on the way" failed in three of four runs with it (CI 41220310370 twice, R0781; passed on the PR run 41220315144) and passed without it (R0782) | keep it and call casualty a flake
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

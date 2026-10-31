@@ -27,10 +27,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 - **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet
   planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
   carried, so where a downed body lies and where it is reached are unchanged.
-- **The pelvis hitbox hangs from the drawn hips too** (review): while the legs' boxes follow the
-  drawn legs, the pelvis box is posed from the same drawn root (the landing's sink, the hips
-  settled over the feet) instead of the target pose's, so the thighs' boxes hang from it. The torso
-  and head stay on the target pose.
+  The pelvis box stays on the target pose's root while the legs' follow the drawn root: posing it
+  from the drawn root too (review) failed casualty's "nobody got stuck on the way" in three of
+  four runs, so it's left (F-374).
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -42,7 +41,8 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   spot. It's cleared as each climb starts (`CharacterModel._was_climbing`).
 - **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
   box ignores the drawn thigh (it lies as the body does). Local R0770 (smoke, weapons, animations,
-  Looting and the vault checks among them), R0774 (wounds, medical) PASS.
+  Looting and the vault checks among them), R0774 (wounds, medical), and without the pelvis
+  change R0782 (casualty) and R0783 (smoke, weapons, animations) PASS.
 
 ### SVD Dragunov's own model (2026-10-20: realistic weapons)
 
