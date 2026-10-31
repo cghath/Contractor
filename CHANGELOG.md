@@ -17,9 +17,11 @@ The two leftover branches the handoff called "probably wanted", merged as they w
 (`claude/vault-legs`, 2026-10-27, and `claude/svd-model`, 2026-10-20, its own entry below).
 
 #### Added
-- **A vault plants the left hand on the obstacle.** The body finds the top it is climbing over
-  (one ray down ahead of the chest as the vault starts) and the left hand goes on it, palm down,
-  eased in and out with the vault; the right hand keeps the gun.
+- **A vault plants the support hand on the obstacle.** The body finds the top it is climbing over
+  (one ray down ahead of the chest as the vault starts) and the support hand goes on it, palm
+  down, eased in and out with the vault; the firing hand keeps the gun. That's the left hand, or
+  the right for a left-handed shooter with a weapon (the branch always planted the left, which
+  took a left-hander's gun hand off the grip).
 
 #### Changed
 - **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet

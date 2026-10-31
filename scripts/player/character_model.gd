@@ -153,11 +153,13 @@ var _yaw_rate := 0.0
 var _weight_x := 0.0           # the hips over the planted foot (root space, m), set by _walk
 var _foot_ground: Array[float] = [0.0, 0.0]  # each foot's ground off the body's floor (m), eased
 var _vault_w := 0.0
-## A vault's hand plant (the model pass's leftover, 2026-10-27): the left hand on the obstacle's top
-## while climbing over it, palm down, the right keeping the gun. The top is found by the model
+## A vault's hand plant (the model pass's leftover, 2026-10-27): the support hand (the left, or the
+## right for a left-handed shooter with a weapon) on the obstacle's top while climbing over it, palm
+## down, the firing hand keeping the gun. The top is found by the model
 ## itself, one ray down ahead of the chest as the vault starts (the mantle's ledge is only known
 ## to its owner), and kept in world space for the vault. INF: none found (a leap over nothing).
 var _plant := Vector3.INF
+var _plant_hand := 1
 const PLANT_AHEAD_M := 0.5
 const PLANT_SIDE_M := 0.14
 const PLANT_MIN_M := 0.25  # the top between these above the feet
@@ -1922,6 +1924,7 @@ func _body_dynamics(delta: float, quiet: bool) -> void:
 	_sink = clampf(_sink + _sink_v * minf(delta, 0.05), -LAND_SINK_MAX, 0.05)
 	_vault_w = move_toward(_vault_w, 1.0 if climbing and not quiet else 0.0, delta * 5.0)
 	if climbing and not quiet and _plant == Vector3.INF and is_inside_tree():
+		_plant_hand = 0 if left_handed and _held_weapon else 1
 		_plant = _find_plant()
 	elif not climbing and _vault_w <= 0.0:
 		_plant = Vector3.INF
@@ -1986,8 +1989,8 @@ func _ground_at(p: Vector3, y: float) -> float:
 	return (hit.position as Vector3).y if not hit.is_empty() else INF
 
 
-## Where the left hand goes on a vault: the obstacle's top ahead of the chest, a hand's width to
-## the left (world space), or INF when there's no top in reach (PLANT_MIN_M-PLANT_MAX_M up).
+## Where the support hand (_plant_hand) goes on a vault: the obstacle's top ahead of the chest, a
+## hand's width to its side (world space), or INF when there's no top in reach (PLANT_MIN_M-PLANT_MAX_M up).
 func _find_plant() -> Vector3:
 	var fwd := -global_basis.z
 	fwd.y = 0.0
@@ -2001,7 +2004,8 @@ func _find_plant() -> Vector3:
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():
 		return Vector3.INF
-	return (hit.position as Vector3) + Vector3.UP * 0.02 - global_basis.x.normalized() * PLANT_SIDE_M
+	var side := 1.0 if _plant_hand == 0 else -1.0
+	return (hit.position as Vector3) + Vector3.UP * 0.02 + global_basis.x.normalized() * PLANT_SIDE_M * side
 
 
 ## The vault's hand plant now (world space; INF with none): tests.
@@ -2676,10 +2680,10 @@ func _update_arms(delta: float, carry: Dictionary, swing: float) -> void:
 			point = _upper[i].position + upper * (Vector3(0, -UPPER_ARM, 0) + fore * Vector3(0, -FOREARM, 0))
 		_reach_hand(i, _hand_from[i].lerp(point, w), _palm_want(i, key), delta)
 	if _vault_w > 0.0 and _plant != Vector3.INF:
-		# The left hand on the obstacle, eased in and out with the vault (the right keeps the gun).
+		# The support hand on the obstacle, eased in and out with the vault (the other keeps the gun).
 		var t := smoothstep(0.0, 1.0, _vault_w)
-		var held := torso.to_local(hand_position(false))
-		_reach_hand(1, held.lerp(torso.to_local(_plant), t), (torso.global_basis.inverse() * Vector3.DOWN).normalized(), delta)
+		var held := torso.to_local(hand_position(_plant_hand == 0))
+		_reach_hand(_plant_hand, held.lerp(torso.to_local(_plant), t), (torso.global_basis.inverse() * Vector3.DOWN).normalized(), delta)
 	_arms_posed = true
 
 
