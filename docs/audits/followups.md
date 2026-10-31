@@ -2124,6 +2124,12 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | AI awareness (F-359): the alert's hearing through a wall carries SquadAI.WALL_SHOT_MULT (half) as far, as the AI's own does | one rule for both hearings (G-29) | a separate Proposed muffle for the alert
+2026-10-31 | AI awareness (F-360): a contact report counts the squad men the reporter has as his target, half spotted (Spotting.SUSPECT) or in sight; a drone those it has a line to | the report says what he saw | everyone within 25 m, as before
+2026-10-31 | AI awareness (F-361): the zone follows each area's reported ("net") state; an area still stands to at once on what its own men perceive | news travels by radio only (Alert's own rule) | dropping local stand-tos
+2026-10-31 | AI awareness (F-362): a recon drone flies to Alert's last known position, follows only men it has a line to (looks every 1 s, LOOK_S), keeps to where it last saw them 30 s (FIX_KEEP_S), Proposed; with nothing known it hangs over home | no homing on the squad | flying to the squad as before
+2026-10-31 | AI awareness: vehicles blocking sight (F-363) and the two in-fight true-position counts (F-364) left open, not fixed in fix/ai-awareness-walls | each touches vehicle or garrison suites beyond the task | fixing them in the same branch
+2026-10-31 | AI awareness (F-362 follow-up): a recon drone flies straight to the point it searches and only circles it once within ORBIT_M + 15 m (STATION_M, Proposed), its angle by its own flying time, not the wall clock | the same flight every time, in tests flown in one go too (CI run 41219512393 held one blocked point: "0 reports") | the wall-clock angle, or a looser test
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2181,69 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-359 to F-365: what the enemy can know of the squad (fix/ai-awareness-walls)
+
+Captain's "Next" item 2 (2026-10-14): "AI awareness leaks through compound walls; one zone-wide
+hostile squad (ai_bar_gaps G-02/G-03). Tied to the infil problems." G-02 (a squad per site), G-03,
+G-28 and G-29 were done on 2026-10-19. Every path by which a hostile or the zone can learn of the
+squad was read again on dev 54ccc3d and checked by the new `awareness` suite
+(tests/awareness_test.gd). Already right, with the check that shows it: sight (SquadAI.can_see is
+one ray, eyes to the chest, on layer 1: voxel walls, building shells, props and the module proxies
+all block it; smoke too; night and NVGs go through Spotting) and footsteps through a wall (G-29):
+awareness "hidden" and "footsteps" (a hostile of the test's own put inside the wall, first past the
+muffled reach where he must not hear, then within it where he must: the garrison alone stood
+beyond footstep reach, so the first version of that check proved nothing); a garrison's site squad keeps what it knows to itself, and the
+zone and other squads learn of a contact only by Alert's report, after its delay, x3 with the mast
+down, never if the reporter dies first, and only squads within NET_SHARE_M (awareness "seen");
+incoming fire (G-03) and heard shots (G-28): squad_test; bodies (Alert._scan_bodies needs a line);
+virtual groups (they fight other profiles only, never the squad).
+
+### F-359 (fixed): the alert heard through walls
+`Alert.server_noise` used straight distances (600 m a shot, 80 m suppressed, 1200 m a blast), so a
+suppressed shot inside a building was heard and reported by anyone within 80 m behind walls, though
+the AI's own hearing (SquadAI.server_heard_shot) had halved it through a wall since G-29. It now
+uses the same rule (SquadAI.WALL_SHOT_MULT: one ray for a listener past half the reach).
+
+### F-360 (fixed): a contact report counted the men behind the wall
+`Alert._seen_at` counted every one of the squad within SEEN_GROUP_M of the man seen, so EnemyCommand
+heard of four when one stepped into view and three stood behind the wall. It counts those the
+reporter has as his target, has half spotted (Spotting.SUSPECT) or can see; a drone those it has a
+line to. And when it reached the net, `_share_contact` told the squads within NET_SHARE_M of whoever
+of the squad stood nearest the spot by then (the awareness suite: a man still behind the wall, never
+seen); it names the man the reporter had as his target, the nearest only when there was none.
+
+### F-361 (fixed): a contact not yet radioed rode in on another report
+`Alert._raise` set the zone to its worst area, local stand-tos included: a compound that stood to on
+a contact its man hadn't radioed yet sent the zone straight to ENGAGED (QRF, chatter, Pressure's
+alarm) the moment any other report, say a shot in the field, reached the net. Each area keeps a
+"net" state (what has been reported from it) and the zone follows that.
+
+### F-362 (fixed): the recon drone homed on the squad and saw through roofs
+`EnemyDrones` flew each drone to the squad's true centre and reported anyone within SEE_M, roof or
+not. It flies to Alert's last known position, follows only men it has a clear line to (every
+LOOK_S), and keeps to where it last saw them for FIX_KEEP_S (both Proposed). missions_test's drone
+check now gives the net a fix by the player first. Its orbit went by the wall clock, so a test
+flying 40 steps at once held one point on the circle, and on CI (run 41219512393) a line from that
+point to the player was blocked: "0 reports". It now flies straight to the point and, once within
+ORBIT_M + STATION_M (15 m, Proposed), circles it by its own flying time.
+
+### F-363 (open): vehicles don't block the AI's sight
+`can_see`, `Squad.sees` and `Throwables.clear_line` look on layer 1 only; a live vehicle is on
+Vehicle.LAYER, so a hostile sees (and spots) the squad straight through a parked MRAP or truck
+(wrecks and scatter props are on layer 1 and do block). Adding Vehicle.LAYER needs the target's and
+the viewer's own vehicle left out of the ray, and touches every vehicle and gunnery check, so it
+wants its own branch and those suites.
+
+### F-364 (open): two in-fight reads of the squad's true positions
+`GarrisonPost._foes_near` counts the squad's men within RECKON_M of a sprung post (and the garrison
+flees from their true centre) whether it knows of them or not; `LauncherAI.group_behind_cover`
+counts every enemy within GROUP_M of its target, seen or not, before an RPG goes into their cover.
+Both only once in a fight. Using the post's or the shooter's squad picture (Squad.enemy_picture)
+is the fix; garrison_test's "the garrison breaks" check gives the garrison 5 s to count six men it
+may not have spotted yet, so it would want a longer wait.
+
+### F-365 (question for Captain): what still knows where the players are by design
+Reinforcements in a zone that isn't hot (the locked timer, "hunt toward where the players are")
+route each wave to the players' true centre; hot zones aim at Alert's last known position. And no
+hostile hears a vehicle or a helicopter at all (an infil lands unheard). Both are design calls.
