@@ -56,8 +56,9 @@ clear' team order through walls" (F-317, F-318).
 - **Changed (tests):** `breach` asks for the building behind the wall once, on a cold cache with
   the frame budget on (the 5 s retry that hid the yard fallback is gone), and adds the leader
   knocked out before he sets his own charge: in by the door, the building cleared, all four inside.
-  The sweep through a fresh hole waits up to 3 s for the voxel colliders to catch up with the cut
-  and names what it touched (CI touched 0.9 m inside a stone house's hole twice; never locally).
+  The sweep through a fresh hole ends just past the wall's inner face (it ran 1.2 m in whatever
+  the wall, into the room, and on CI met something 1 m inside a stone house, its furniture standing
+  against the walls), waits up to 3 s for the voxel colliders to catch up, and names what it hit.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
