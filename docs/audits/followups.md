@@ -2140,6 +2140,9 @@ Captain, 2026-10-31: fix/ai-awareness-walls question 3, blasts losing half their
 2026-10-31 | Engines (F-365): an engine's side is its driver's faction, else the vehicle's (a helicopter: its own); a hostile hears the squad's side's, the squad's AI a hostile's, nobody his own side's or a civilian's, and nobody the vehicle he rides in | as shots, where a hostile knows his own people | everyone hears every engine
 2026-10-31 | F-387: no zone's reinforcement timer sends waves (EnemyResponse drives every zone since 4914e97 and regular zones have no QRF base): left as it is and asked | bringing timer waves back into every regular zone is a design change of its own | EnemyResponse driving only zones with a QRF base
 2026-10-31 | Engines (F-365, review of 5f4c676): the last known position records the kind of report that set it; an engine report moves one an engine set at once (a helicopter flying in keeps it under the helicopter) and a contact, shot, blast or body fix only once that is ENGINE_LKP_AFTER_S old (a fix with no kind counts as hard) | the rule compared with the time of the last move of any kind, so the first engine report froze it for 2 min where the helicopter was first heard, up to 600 m from where it landed | a separate _hard_lkp_at time (same rule, but tests and code that set lkp directly would bypass it)
+Captain, 2026-11-02: F-387 (bring timer reinforcement waves back to regular zones, aimed at the last known position): "no for now"; F-387 stays open as a note
+Captain, 2026-11-02: a shorter AI range for engines, as shots have (Alert 600 m, AI 200 m): "no its fine"; EngineNoise.REACH_M stays one table for the Alert and the AI
+2026-11-03 | Engines (F-365, review of 127da29): EngineNoise's quiet gaps (REHEAR_S, RECHECK_S) are kept per listener and vehicle, and dropped when the level changes (the first emission in a new level) | a gap keyed by listener only let a wall-blocked far helicopter keep a hostile from hearing a truck idling 5 m off | the gap only for listeners who need a ray (a near engine then sounds to the same man every second)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2267,7 +2270,7 @@ EMIT_S from Vehicle._server_step. Blasts keeping half their alert range without 
 (the PR's question 3): Captain accepted it as is. Checked in awareness "Engines heard" and
 "Reinforcement waves go for the last known position".
 
-### F-387 (question for Captain): no zone's reinforcement timer sends waves
+### F-387 (open, a note; Captain, 2026-11-02: "no for now"): no zone's reinforcement timer sends waves
 Since 4914e97 (2026-10-16, roads and patrols for regular zones) every `ZoneLevel` has an
 `EnemyResponse`, and its `_ready` sets `Reinforcements.driven` (the timer sends nothing; waves come
 only from `server_send`) and `aim` (the last known position) in every zone, not only hot ones. A
@@ -2280,3 +2283,5 @@ picture there to go on). If regular zones should have timer waves again, `EnemyR
 `driven` only where the zone has a QRF base; the timer's max_alive then counts every hostile in the
 zone (`capped_alive` when not driven), which a garrisoned zone may already fill, so it would want
 the driven count too. Not changed here: it brings waves back into every regular zone.
+Captain, 2026-11-02: "no for now". Left as it is; kept open as a note for when regular zones
+should get timer waves again.

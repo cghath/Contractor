@@ -56,7 +56,12 @@ every path and these were the leaks still open.
   to the middle of the map and search 40 m round it (SEARCH_RING_M, Proposed). Hot zones are as
   they were (EnemyResponse's aim). Levels with no alert (the plain compound, the base, the ranges)
   still send waves to the players. Every zone's waves were already driven by EnemyResponse, so no
-  zone's timer sends waves today (F-387, a question for Captain).
+  zone's timer sends waves today (F-387: Captain, 2026-11-02, "no for now"; left as it is).
+- **Fixed (AI), review of F-365:** a listener's quiet gaps after hearing an engine (or being shut
+  out of one by a wall) were his alone, so a helicopter he couldn't hear through a hill kept him
+  from hearing a truck idling 5 m away for 3 s: each gap is now one listener's and one vehicle's,
+  and they are dropped when a new level comes up. Engines keep the shots' reach for the AI (Captain,
+  2026-11-02: "no its fine"). A crashing helicopter still counts as flying while its rotors turn.
 - **Tests:** awareness checks both (an M-ATV heard in the open within its reach and not beyond, not
   through the wall past half of it, within that yes; a helicopter flying heard from 473 m, not when
   idling on the ground; an engine report and the last known position; waves to the last known
@@ -64,6 +69,10 @@ every path and these were the leaks still open.
   four counted once half spotted) and for the muffled shot (a hostile 8 m off hears it), the told-
   squads check needs at least one, the drones' bodies are freed. Engine after engine with nothing
   harder in between: the second report moves the fix, and a fresh shot's fix still isn't moved.
+  The M-ATV with its physics on sounds by itself (Vehicle._server_step) and a hostile near it hears
+  it within a second; a helicopter's quiet gap doesn't silence the M-ATV; with a hostile at the
+  wheel the hostile listener doesn't hear it, a squad AI by the wall does, and one of the squad
+  riding in it doesn't.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

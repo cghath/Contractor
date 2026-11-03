@@ -5,9 +5,10 @@ extends RefCounted
 ## helicopter infil or a vehicle coming up can be heard.
 ##
 ## - Reach by kind and state (REACH_M): idle (a driver in, standing; rotors turning on the ground)
-##   or under way (driving faster than MOVING_MS; flying). Through a wall, a building's shell or a
-##   hill (no clear line from the engine to his ears) half as far, as a shot
-##   (SquadAI.WALL_SHOT_MULT, G-29).
+##   or under way (driving faster than MOVING_MS; flying). A helicopter crashing (autorotating or
+##   falling, Helicopter.is_airborne) counts as flying while its rotors still turn; a wreck is
+##   silent. Through a wall, a building's shell or a hill (no clear line from the engine to his
+##   ears) half as far, as a shot (SquadAI.WALL_SHOT_MULT, G-29).
 ## - Who hears it: the AI of the other side (a hostile hears the squad's engines, the squad's AI a
 ##   hostile's; nobody hears his own side's, nor a civilian's). Each listener suspects something
 ##   over there and goes to look (SquadAI.hear_sound, ERROR_PER_100M off): no awareness of anyone,
@@ -15,9 +16,11 @@ extends RefCounted
 ##   it in (Alert.server_engine: an "engine" report, rough as a shot's).
 ## - Cheap: engines run on and on, so each vehicle sounds every EMIT_S (Vehicle._server_step, on
 ##   its own clock so they spread out), never every frame. A listener within the muffled reach
-##   needs no ray; one beyond it, one ray. One who heard an engine is left alone for REHEAR_S, one
-##   with a wall in the way for RECHECK_S, and no emission casts more than MAX_RAYS (the rest get
-##   their turn next time).
+##   needs no ray; one beyond it, one ray. One who heard an engine is left alone by that engine
+##   for REHEAR_S, one with a wall in the way of it for RECHECK_S (each gap is his and that
+##   vehicle's: a helicopter he can't hear through a hill doesn't keep him from hearing a truck
+##   idling beside him), and no emission casts more than MAX_RAYS (the rest get their turn next
+##   time).
 ## Host only. All numbers Proposed.
 
 const EMIT_S := 1.0
@@ -38,8 +41,11 @@ const REACH_M := {
 ## The engine sounds from this high on the vehicle (the ray's start).
 const SOURCE_UP_M := 1.0
 
-## Listener instance id -> until when he isn't checked again.
+## Vehicle instance id -> {listener instance id -> until when that vehicle doesn't check him
+## again}. Emptied when a new level comes up (_level_id).
 static var _quiet_until := {}
+## The level the gaps are for (its instance id): another level's start drops them all.
+static var _level_id := 0
 
 
 ## How far `kind`'s engine carries, idle or `under_way`.
@@ -90,6 +96,15 @@ static func server_emit(v: Vehicle) -> Array[Soldier]:
 	var world := v.get_world_3d()
 	var alert := Alert.of(v) if side == &"friendly" else null
 	var now := Soldier._now()
+	var lvl := CompoundLevel.current(v)
+	var lvl_id := lvl.get_instance_id() if lvl else 0
+	if lvl_id != _level_id:
+		_quiet_until.clear()  # a new level: the last one's gaps mean nothing here
+		_level_id = lvl_id
+	var vid := v.get_instance_id()
+	if not _quiet_until.has(vid):
+		_quiet_until[vid] = {}
+	var quiet: Dictionary = _quiet_until[vid]
 	var rays := 0
 	for n in v.get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
@@ -100,7 +115,7 @@ static func server_emit(v: Vehicle) -> Array[Soldier]:
 		if d > r:
 			continue
 		var id := s.get_instance_id()
-		if now < float(_quiet_until.get(id, -INF)):
+		if now < float(quiet.get(id, -INF)):
 			continue
 		var ai := SquadAI.of(s)
 		if ai == null:
@@ -110,9 +125,9 @@ static func server_emit(v: Vehicle) -> Array[Soldier]:
 				continue  # next time
 			rays += 1
 			if not Throwables.clear_line(world, src, s.camera.global_position):
-				_quiet_until[id] = now + RECHECK_S
+				quiet[id] = now + RECHECK_S
 				continue  # through a wall it carries half as far, as a shot (G-29)
-		_quiet_until[id] = now + REHEAR_S
+		quiet[id] = now + REHEAR_S
 		var error := ERROR_PER_100M * d / 100.0
 		var angle := randf() * TAU
 		var heard_at := under + Vector3(cos(angle), 0.0, sin(angle)) * error * sqrt(randf())  # a disc
@@ -120,8 +135,12 @@ static func server_emit(v: Vehicle) -> Array[Soldier]:
 		if alert and s.faction == &"hostile":
 			Alert.server_engine(s, heard_at)
 		out.append(s)
-	if _quiet_until.size() > 512:
+	if quiet.size() > 256:
+		for k: int in quiet.keys():
+			if float(quiet[k]) < now:
+				quiet.erase(k)
+	if _quiet_until.size() > 64:
 		for k: int in _quiet_until.keys():
-			if float(_quiet_until[k]) < now:
-				_quiet_until.erase(k)
+			if not is_instance_id_valid(k):
+				_quiet_until.erase(k)  # vehicles gone (wrecks cleared, a support flown off)
 	return out
