@@ -3214,7 +3214,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 			var id := String(p.get("id", ""))
 			if not slot in Loadouts.DOLL_SLOTS or (id != "" and not Loadouts.fits_slot(ItemDB.get_item(StringName(id)), slot)):
 				return "That doesn't go there"
-			t = Loadouts.set_slot(t, slot, id)
+			t = _from_own_kit(lvl, a, Loadouts.set_slot(t, slot, id), id)
 			what = "%s: %s" % [Loadouts.SLOT_NAMES[slot], ItemDB.get_item(StringName(id)).name if id != "" else "back to the stash"]
 			if bool(p.get("buy", false)) and id != "":
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
@@ -3226,7 +3226,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 			var id := String(p.get("id", ""))
 			if not slot in Inventory.WEAPON_SLOTS or (id != "" and not Optics.is_optic(ItemDB.get_item(StringName(id)))):
 				return "That isn't an optic"
-			t = Loadouts.set_optic(t, slot, id)
+			t = _from_own_kit(lvl, a, Loadouts.set_optic(t, slot, id), id)
 			what = "%s on the %s" % [ItemDB.get_item(StringName(id)).name if id != "" else "Irons", String(Loadouts.SLOT_NAMES[slot]).to_lower()]
 			if bool(p.get("buy", false)) and id != "":
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
@@ -3240,7 +3240,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 			var holder := ItemDB.get_item(StringName(String(t.slots.get(String(slot), ""))))
 			if holder == null or (id != "" and not GearMounts.fits(holder, mount, ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null)):
 				return "That doesn't go there"
-			t = Loadouts.set_mount(t, slot, mount, id)
+			t = _from_own_kit(lvl, a, Loadouts.set_mount(t, slot, mount, id), id)
 			what = "%s: %s" % [GearMounts.NAMES.get(mount, mount), ItemDB.get_item(StringName(id)).name if id != "" else "off"]
 			if bool(p.get("buy", false)) and id != "":
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
@@ -3262,7 +3262,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 			var id := String(p.get("id", ""))
 			if point == "" or (id != "" and not (ItemDB.has_item(StringName(id)) and Inventory.is_attachable(ItemDB.get_item(StringName(id))))):
 				return "That doesn't go there"
-			t = Loadouts.set_point(t, point, id)
+			t = _from_own_kit(lvl, a, Loadouts.set_point(t, point, id), id)
 			what = ("%s on a MOLLE point" % ItemDB.get_item(StringName(id)).name) if id != "" else "MOLLE point emptied"
 			if bool(p.get("buy", false)) and id != "":
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
@@ -3358,6 +3358,20 @@ func _loadout_apply(lvl, people: Array) -> PackedStringArray:
 static func _person_gear(a: Dictionary) -> Dictionary:
 	var s: Soldier = a.get("soldier")
 	return Roster.json_safe(s.inventory.net_state if s else a.person.get("gear", {}))
+
+
+## Host: `t` (a's template after an edit that puts `id` on a slot, gun or point) with the unit it
+## needs taken from what he carries loose (pack, pockets, carrier, pouches) when the stash can't
+## supply it: the paper doll's "name (carried)" choice is a swap from his own kit. Left in his
+## pack too, the template asked for one more than he owned: the build put it on and listed the
+## pack's copy as missing, so Buy missing offered a second one (review of 91f13def). "" ids, and
+## edits the stash covers, come back as they are; never touches a worn slot or a mount.
+func _from_own_kit(lvl, a: Dictionary, t: Dictionary, id: String) -> Dictionary:
+	if id == "" or int(Loadouts.take_loose(t, id, 1).removed) <= 0:
+		return t
+	var short := KitLibrary.shortfall([{"gear": _person_gear(a), "template": t}], lvl.server_collect_stash())
+	var n := int(short.missing.get(id, 0))
+	return Loadouts.take_loose(t, id, n).template if n > 0 else t
 
 
 ## Host: buys what the stash lacks to put `jobs` ([{"gear", "template"}]) on everyone at once

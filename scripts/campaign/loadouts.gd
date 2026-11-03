@@ -184,12 +184,9 @@ static func add_units(t: Dictionary, id: String, n: int) -> Dictionary:
 ## Up to `n` fewer of `id` (from the pack, pockets and carrier first, then the pouches; a pouch
 ## taken off leaves what it held in the carrier). Returns {"template", "removed"}.
 static func remove_units(t: Dictionary, id: String, n: int) -> Dictionary:
-	var out := _copy(t)
-	var left := n
-	for c: String in ["backpack", "pockets", "vest"]:
-		left -= _take_from(out.containers.get(c, []), id, left)
-	for point: String in out.molle.keys():
-		left -= _take_from(out.molle[point].held, id, left)
+	var loose := take_loose(t, id, n)
+	var out: Dictionary = loose.template
+	var left := n - int(loose.removed)
 	for point: String in out.molle.keys():
 		if left > 0 and String(out.molle[point].id) == id:
 			for it: Dictionary in out.molle[point].held:
@@ -200,6 +197,18 @@ static func remove_units(t: Dictionary, id: String, n: int) -> Dictionary:
 		if left > 0 and String(out.slots[slot]) == id:
 			out = set_slot(out, StringName(slot), "")
 			left -= 1
+	return {"template": out, "removed": n - left}
+
+
+## Up to `n` fewer of `id` from what's loose: in the pack, pockets and carrier, then in the
+## pouches. Never a worn slot, a mount or a pouch on its point. Returns {"template", "removed"}.
+static func take_loose(t: Dictionary, id: String, n: int) -> Dictionary:
+	var out := _copy(t)
+	var left := n
+	for c: String in ["backpack", "pockets", "vest"]:
+		left -= _take_from(out.containers.get(c, []), id, left)
+	for point: String in out.molle.keys():
+		left -= _take_from(out.molle[point].held, id, left)
 	return {"template": out, "removed": n - left}
 
 

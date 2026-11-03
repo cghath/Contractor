@@ -42,7 +42,8 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   stash ("Missing from the stash: Rifle Suppressor" after a Fill ammo).
 - **Fixed (loadout):** a purchase buys exactly one, so it always costs the price shown; it
   gives one note, not two (`Economy.server_buy` takes `quiet`); an item you carry is offered as
-  "(carried)", not "Buy:".
+  "(carried)", not "Buy:", and choosing it moves your own copy (pack, pouch) onto the slot or gun
+  instead of asking for a second one, listing it missing and offering to buy it.
 - **Tests (loadout, ui):** the question shows and Cancel buys nothing; "Don't ask again" skips
   it and is saved; the 3D editor buys and fits in one step, the client's through the host; the
   NVG moves to a bought helmet; the suites use their own settings and editor files, never the

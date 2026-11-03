@@ -88,7 +88,9 @@ Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
   the answer is the purchase's one note ("Helmet: X (bought for $Y)"; Economy's own notice is
   kept quiet for loadout purchases, Buy missing included).
 - What the person **carries** (a spare optic in a pouch, a helmet in the pack) is offered as
-  "name (carried)", a normal swap from their own kit, never as "Buy:".
+  "name (carried)", a normal swap from their own kit, never as "Buy:". Choosing it moves that
+  copy: the host's slot, optic, mount and point ops take the unit from what he carries loose
+  when the stash has none (`BaseHub._from_own_kit`), so nothing is listed missing after.
 - A helmet bought or swapped in takes the old one's NVG along when it fits (any mount the
   template keeps: `Loadouts.rebuild` takes it off his holder first, so whichever unit the build
   draws gets it; F-420). Before, the NVG stayed on the old helmet in the stash and was listed

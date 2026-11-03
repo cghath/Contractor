@@ -565,6 +565,29 @@ func _test_picker_buy(mid: String) -> String:
 			var carried := int(Roster.gear_counts(Roster.json_safe(s.inventory.net_state)).get(spare, 0))
 			check(carried >= 1 and int(BaseArmory.counts(base.server_collect_stash()).get(spare, 0)) == 0 and label.contains("(carried)")
 				and not (LoadoutScreen.BUY + spare) in values, "a %s he carries is offered as \"%s\", not to buy" % [spare, label])
+			# Choosing it is a plain swap from his own kit: mounted, one fewer loose, nothing
+			# charged, bought or written down as missing (review of 91f13def: the pack's copy stayed
+			# in the template and was listed missing, so Buy missing offered a second one).
+			var i_carried := values.find(spare)
+			if i_carried > 0:
+				units = _hub_units()
+				var cash := Economy.cash()
+				var loose_before := int(Loadouts.take_loose(Loadouts.template_of(Roster.json_safe(s.inventory.net_state)), spare, 99).removed)
+				_notes.clear()
+				optics.item_selected.emit(i_carried)
+				await _frames(1)
+				var asked := screen.find_child("Confirm", false, false) != null
+				await _frames(3)
+				gear = Roster.json_safe(s.inventory.net_state)
+				var on := Optics.mounted(ItemDB.get_item(StringName(String(gear.slots.get("primary", "")))), gear.slot_state.get("primary", {}))
+				var loose_after := int(Loadouts.take_loose(Loadouts.template_of(gear), spare, 99).removed)
+				var missing: Dictionary = BaseHub.member(mid).get("edit_missing", {})
+				check(not asked and on != null and String(on.id) == spare and loose_after == loose_before - 1 and missing.is_empty()
+					and _notes.size() == 1 and not String(_notes[0]).contains("Missing") and Economy.cash() == cash and _hub_units() == units,
+					"choosing the carried %s mounts it from his own kit: one fewer loose (%d -> %d), no question, nothing charged, bought or missing (%s, missing %s)" % [
+						spare, loose_before, loose_after, _notes, missing])
+			else:
+				check(false, "the carried %s is in the optic picker" % spare)
 	# The question back on from the screen's own tick, saved.
 	screen.refresh()
 	var ask_tick := screen.find_child("AskBuy", true, false) as CheckBox
