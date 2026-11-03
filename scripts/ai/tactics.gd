@@ -713,9 +713,9 @@ func _clear(units: Array[SquadAI], aim: Vector3, id: String, now: float) -> void
 			op["breach"] = SquadAI.preferred_breach(entry)
 			var bp := squad.breach_plan(b, entry, "auto")
 			if not bp.is_empty():
-				Squad.apply_plan(op, bp)
+				Squad.apply_plan(op, bp, entry[0].body.get_world_3d())
 			elif op.breach == "charge":
-				Squad.stand_off(op)
+				Squad.stand_off(op, entry[0].body.get_world_3d())
 		plan = {"base": base, "entry": entry, "op": op}
 		if not op.is_empty():
 			print("[tactics] %s: %s stack at (%.0f, %.0f) to clear %d room(s), %s cover" % [squad.name, _names(entry),

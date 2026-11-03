@@ -186,7 +186,7 @@ func server_place_at(by: Soldier, xform: Transform3D, target: Node3D = null) -> 
 	_placer[id] = by.get_instance_id() if by else 0
 	if path == "":
 		_burning.append({"id": id, "pos": xform.origin, "wall": wall_normal(rec, true), "faction": by.faction if by else &"",
-			"indoors": Throwables.indoors(level.get_world_3d(), xform.origin + Vector3.UP * 0.25)})
+			"indoors": Throwables.indoors(level.get_world_3d(), xform.origin + Vector3.UP * 0.25), "goes_at": _due[id]})
 	print("[charges] %s placed by %s on %s (fuse %.0f s)" % [id, rec.by, path if path != "" else "the world", fuse])
 	_client_add.rpc(rec)
 	if by and not by.is_ai():
@@ -318,10 +318,15 @@ static func wall_depth(lvl: Node3D, pos: Vector3, normal: Vector3) -> float:
 ## Host: the charges burning now on the world itself (a wall, a doorway's side, the ground; not
 ## one riding a person or a vehicle), as {"id", "pos", "wall" (its wall's outward normal, or
 ## Vector3.ZERO off a wall: wall_normal), "faction" (its placer's, &"" for nobody's), "indoors"
-## (Throwables.indoors over it: its blast reaches further)}. Few burn at once, so the AI looks
-## them up here instead of anything scanning soldiers (SquadAI._keep_clear_of_charges, F-373).
-## The list itself: read it, don't change it.
+## (Throwables.indoors over it: its blast reaches further), "goes_at" (Soldier._now() when its
+## fuse ends)}. Only charges with a fuse running (_due): a roadside IED, which waits with none
+## (RoadsideIeds takes it off _due), and a disarmed one drop out of it here. Few burn at once, so
+## the AI looks them up here instead of anything scanning soldiers
+## (SquadAI._keep_clear_of_charges, F-373). The list itself: read it, don't change it.
 func burning() -> Array[Dictionary]:
+	for i in range(_burning.size() - 1, -1, -1):
+		if not _due.has(String(_burning[i].id)):
+			_burning.remove_at(i)
 	return _burning
 
 

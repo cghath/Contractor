@@ -80,6 +80,28 @@ clear' team order through walls" (F-317, F-318).
   Proposed consts). `breach` adds it: a follower and a man holding beside the main building's north
   wall when the player sets a charge on it step out of its blast before it goes, nobody is hurt,
   and they follow and hold again after (R0801; squad, roles, demolitions R0804).
+- **Added (AI):** a medic (or anyone giving care) whose downed casualty lies in a burning charge's
+  blast drags him clear of it (F-397, Captain, 2026-11-02: "drag him clear asap"): he stops
+  treating, takes hold of him, drags him to the nearest spot out of it on their side of its wall
+  (chosen as a bystander's is, far enough that the casualty trailing behind is clear too), puts
+  him down there and treats him again. With the fuse too short to get there he still drags him
+  as far as he gets; on his way to such a casualty he goes in only with time for the drag left
+  on the fuse, else he waits clear and goes once it has gone off. A man treating himself steps
+  clear first and treats himself there; a casualty still on his feet walks clear himself
+  (`SquadAI._care_clear_of_charges`, `_drag_clear_of`, Proposed consts).
+- **Changed (squad):** under a roof (something solid within 4 m over the charge) a charge's blast
+  reaches 5 m on its face, past the stack's 4.1 m: the breach stack's stand-off now goes that
+  much further along the wall there (`Squad.BLAST_SAFE_INDOOR_M`, 5.5 m with its margin;
+  `Squad.stand_off` given the world), F-396, Captain, 2026-11-02: yes.
+- **Fixed (review):** `Charges.burning()` lists only charges with a fuse running (a roadside IED
+  waiting with none, or a disarmed one, no longer sits in it); the door fallback of a wall breach
+  drops the op's "stood_off" for the door's new stack; each AI's first charge check is staggered
+  by its instance id, so a whole squad doesn't path-query in one frame.
+- **Changed (tests):** `breach`'s bystanders case now really tests the follower (the leader stands
+  1.5 m off the wall until the charge is set, and both men must go through "Getting clear of a
+  charge"), and adds a medic treating a downed man beside a wall a charge is set on (dragged out,
+  nobody hurt, treated again) and a breach under a roof (the stack past the indoor reach, nobody
+  in the blast).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

@@ -1289,7 +1289,7 @@ func status_text() -> String:
 				Care.REACH:
 					return "Covering %s" % who if _suppressing else "Going to %s" % who
 				Care.DRAG:
-					return "Dragging %s to cover" % who
+					return ("Dragging %s clear of a charge" if _charge_drag != "" else "Dragging %s to cover") % who
 				Care.TREAT:
 					if _treat_until < 0.0 and is_instance_valid(casualty) and casualty.vitals.downed:
 						return "Watching over %s" % who
@@ -1352,6 +1352,9 @@ func _setup() -> void:
 	# frames for good: a random start spreads them out (research 2026-10-13 B2.6).
 	_scan_cd = randf() * SCAN_S
 	_think_cd = randf() * THINK_S
+	# The same for the charge check's path queries (only when one burns): by instance id, so a
+	# squad's men look in different frames of CHARGE_CHECK_S (review of feat/breach-and-clear).
+	_charge_cd = CHARGE_CHECK_S * float(posmod(get_instance_id(), 16)) / 16.0
 	_ready_done = true
 	_pass_through_squadmates()
 
@@ -2294,14 +2297,17 @@ func _do_care() -> void:
 		Care.REACH:
 			_care_reach(contact)
 		Care.DRAG:
+			# (Clear of a charge, F-397: no contact to lose, so only no headway stops the drag.)
 			if body.carrying != casualty:
 				care = Care.TREAT
-			elif _has_cover and not _at_cover() and not _drag_stalled(contact):
+				_charge_drag = ""
+			elif _has_cover and not _at_cover() and not _drag_stalled(contact or _charge_drag != ""):
 				_go(_cover_point, false)
 			else:
 				_has_destination = false
 				body.server_put_down()
 				care = Care.TREAT
+				_charge_drag = ""
 		Care.TREAT:
 			_care_treat(contact)
 		Care.GUARD:
@@ -2419,6 +2425,8 @@ func _care_reach(contact: bool, handoff := false) -> void:
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
+	if _clear_spot != null:
+		_reach_progress_at = Soldier._now()  # waiting clear of a charge by him isn't being stuck (F-397)
 	var exposed := contact and casualty.vitals.downed and not _sheltered(casualty)
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
@@ -2704,6 +2712,7 @@ func _end_care() -> void:
 	casualty = null
 	care = Care.NONE
 	_has_cover = false
+	_charge_drag = ""
 	wants_medic = false
 	wanted.clear()
 
@@ -3207,6 +3216,13 @@ func _self_task() -> Dictionary:
 
 func _do_self_care() -> void:
 	_has_destination = false
+	if _clear_spot != null and _flat_distance(_clear_spot) > ARRIVE + 0.3:
+		# Out of a burning charge's blast first (F-397; Captain, 2026-11-02), on his feet
+		# (_keep_clear_of_charges walks him there): he treats himself once he's clear.
+		if _care_prone:
+			_care_prone = false
+			body.want_stance = stance_order
+		return
 	body.want_crouch = true
 	var task := _self_task()
 	# Out in the open under fire he gets down where he is to put his tourniquet on: running
@@ -4100,6 +4116,8 @@ func _wall_breacher_lost(op: Dictionary) -> void:
 	for i in (op.stack as Array).size():
 		stack.append(SquadTactics.stack_spot(b, e, map, side, i, stack))
 	op.stack = stack
+	op.erase("stood_off")  # (the door's stack stands by the doorway, off no charge of its own: any charge burning there is stepped clear of as anyone's)
+	op.erase("charge_indoors")
 	op.ready = {}
 	op.first_ready_at = INF
 	_callout(&"tactic", "No charge! Using the door!")
@@ -5938,9 +5956,11 @@ func _answer_bound() -> void:
 ## charge's side of a wall), its full radius behind the wall, and the radius and its fragments for
 ## one off a wall; indoors the radius doubles (Throwables._frag). The charges are looked up
 ## (Charges.burning: a handful at most) every CHARGE_CHECK_S, so a squad with none burning pays
-## an empty check. Host only (the AI runs there; clients see him walk). A man treating someone
-## (or himself) stays at it, and a breach team keeps its own stand-off (Squad.stand_off's
-## "stood_off" op). Proposed.
+## an empty check. Host only (the AI runs there; clients see him walk). A breach team keeps its
+## own stand-off (Squad.stand_off's "stood_off" op). A man treating himself steps clear first and
+## treats himself once there; a man looking after a casualty in the blast drags him out of it
+## and treats him there (F-397; Captain, 2026-11-02: "drag him clear asap": _care_clear_of_charges).
+## Proposed.
 const CHARGE_CHECK_S := 0.25
 ## The blast's margin past its reach (Squad.BLAST_SAFE_M's).
 const CHARGE_MARGIN_M := 0.5
@@ -5954,10 +5974,21 @@ const CHARGE_OWN_M := CHARGE_ALONG_M + 1.5
 ## the building to its far side.
 const CHARGE_DETOUR_SHARE := 2.0
 const CHARGE_DETOUR_M := 3.0
+## A casualty dragged clear lies Soldier.DRAG_OFFSET (1 m) behind his carer, towards the charge,
+## and the drag ends within ARRIVE + 0.4 of its spot (_at_cover): the carer's spot is this much
+## further out (1 + 0.4 + 0.4 m), so the casualty ends clear of it too.
+const CHARGE_DRAG_PAST_M := 1.8
+## On his way to a casualty in a burning charge's blast, a carer goes on in to drag him out only
+## with CHARGE_GO_IN_S of its fuse left past his way to him at CHARGE_GO_MPS (a grab and ~5 m
+## of a drag at Soldier.DRAG_SPEED_MULT); with less he waits clear of it, and goes to him once
+## it has gone off.
+const CHARGE_GO_IN_S := 5.0
+const CHARGE_GO_MPS := 3.6
 var _charges: Charges
 var _charge_cd := 0.0
 var _clear_of := ""  # the charge he's keeping clear of
 var _clear_spot: Variant = null  # where he waits for it (Vector3), or null
+var _charge_drag := ""  # the charge he's dragging his casualty clear of ("" for none: Care.DRAG's cover_point is that spot)
 
 
 func _keep_clear_of_charges() -> void:
@@ -5972,13 +6003,18 @@ func _keep_clear_of_charges() -> void:
 func _check_charges() -> void:
 	if _charges == null or not is_instance_valid(_charges):
 		_charges = Charges.of(body)
-	if _charges == null or _charges.burning().is_empty() or not body.is_ai() or body.vitals.is_dying() or intent in [Intent.CASUALTY, Intent.HEAL]:
+	if _charges == null or _charges.burning().is_empty() or not body.is_ai() or body.vitals.is_dying():
 		_end_charge_clear()
+		_end_charge_drag()
 		return
 	var mine: Array[Dictionary] = []
 	for c: Dictionary in _charges.burning():
 		if StringName(c.faction) != &"" and StringName(c.faction) == body.faction and not _breach_keeps_clear(c):
 			mine.append(c)
+	if intent == Intent.CASUALTY and _care_clear_of_charges(mine):
+		_end_charge_clear()
+		return
+	_end_charge_drag()
 	if _clear_spot != null and mine.any(func(c: Dictionary) -> bool: return String(c.id) == _clear_of) and not _in_any_blast(mine, _clear_spot):
 		return  # still burning, and his spot's still clear
 	var from := body.global_position
@@ -5996,6 +6032,8 @@ func _check_charges() -> void:
 		return
 	if _clear_spot == null:
 		_stop_digging()
+		if _treat_until >= 0.0 and _treat_target == body:
+			_drop_treatment()  # his own item's cut short as he walks off (Soldier._timed_care: "you moved"): again once clear
 		print("[charge] %s keeps clear of %s: to (%.1f, %.1f), %.1f m from it" % [body.name, threat.id, (spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, threat.pos)])
 	_clear_of = String(threat.id)
 	_clear_spot = spot
@@ -6009,6 +6047,89 @@ func _end_charge_clear() -> void:
 		_has_destination = false  # (his intent's own way, if it has one, is set again next frame)
 	_clear_spot = null
 	_clear_of = ""
+
+
+## Casualty care by a burning charge (F-397; Captain, 2026-11-02: "drag him clear asap"): with
+## his casualty (or himself, beside him) in one of `mine`'s blasts, a carer with him (treating,
+## guarding, watching over him, or dragging him to cover that lies in it) stops treating, takes
+## hold of him and drags him out of it to the nearest spot clear of it on their side of its wall
+## (_charge_clear_spot, as a bystander's, CHARGE_DRAG_PAST_M further for the casualty trailing
+## behind), puts him down there and treats him again (Care.DRAG, then TREAT, as a drag to cover).
+## With the fuse too short to get there, he still drags him as far as he gets: he never leaves
+## him in it. On his way to such a casualty he goes on in with time for it (CHARGE_GO_IN_S),
+## else he waits clear of it as anyone does and goes to him once it has gone off. Carrying him
+## on the shoulder, recovering a body, on his way to a casualty clear of every blast, or with a
+## casualty still on his feet (he walks clear himself; one dying can't be dragged: Soldier._movable,
+## F-412), he steps clear as anyone does (false). True while his care minds the charges itself
+## (nothing for the step-clear to do).
+func _care_clear_of_charges(mine: Array[Dictionary]) -> bool:
+	if not is_instance_valid(casualty) or casualty.vitals.is_dead() or casualty.vitals.is_up() or care in [Care.NONE, Care.BODY] \
+			or (care == Care.CARRY and body.carrying == casualty):
+		return false
+	var at := casualty.body_point()
+	if care == Care.REACH:
+		var left_for := CHARGE_GO_IN_S + _flat_distance(at) / CHARGE_GO_MPS
+		var now := Soldier._now()
+		return mine.any(func(c: Dictionary) -> bool: return in_charge_blast(c, at) and float(c.get("goes_at", INF)) - now >= left_for)
+	if _charge_drag != "":
+		if care == Care.DRAG and mine.any(func(c: Dictionary) -> bool: return String(c.id) == _charge_drag):
+			return true  # still dragging him clear of it
+		_end_charge_drag()
+	# (Where he lies is his body_point, the ragdoll's chest; the blast itself is measured to his
+	# capsule (Throwables.body_point), which can lie a little off it: either in it counts.)
+	var threat := {}
+	for c in mine:
+		if in_charge_blast(c, at) or in_charge_blast(c, casualty.global_position) or in_charge_blast(c, body.global_position) \
+				or (care == Care.DRAG and _has_cover and in_charge_blast(c, _cover_point)):
+			threat = c
+			break
+	if not threat.is_empty() and not _drag_clear_of(threat, mine):
+		_charge_cd = 1.0  # can't take him out of it from here (yet): look again in a second
+	return true
+
+
+## Takes hold of `casualty` (if he isn't dragging him already) and drags him clear of charge `c`
+## (_care_clear_of_charges). False if he can't: someone else has him or is treating him (never
+## lifted from under another's hands: P0164), or there's no spot clear of it to drag him to.
+func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> bool:
+	if is_instance_valid(casualty.carried_by) and casualty.carried_by != body:
+		return false
+	if casualty.vitals.is_healing() and not (_treat_until >= 0.0 and _treat_target == casualty):
+		return false
+	var spot: Variant = _charge_clear_spot(c, mine, CHARGE_DRAG_PAST_M)
+	if spot == null:
+		return false
+	if body.carrying != casualty:
+		if not body.server_pick_up_body(casualty, Soldier.DRAG):
+			return false
+	elif body.carry_mode != Soldier.DRAG:
+		body._set_carry_mode(Soldier.DRAG, &"grab")
+	if _treat_until >= 0.0:
+		_drop_treatment()  # his item's cut short as he takes hold (Soldier._timed_care: "they were moved"), not failed
+	_cover_point = spot
+	_has_cover = true
+	care = Care.DRAG
+	_charge_drag = String(c.id)
+	_start_drag_watch()
+	print("[charge] %s drags %s clear of %s: to (%.1f, %.1f), %.1f m from it, %.1f s left" % [body.name, casualty.name, c.id,
+		(spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, c.pos), float(c.get("goes_at", 0.0)) - Soldier._now()])
+	return true
+
+
+## Done dragging clear of a charge (it has gone off, or he's no longer at it): he puts the
+## casualty down where he is and sees to him (Care.DRAG with no cover to go to).
+func _end_charge_drag() -> void:
+	if _charge_drag == "":
+		return
+	_charge_drag = ""
+	if care == Care.DRAG:
+		_has_cover = false
+
+
+## Forgets the item he's applying (it's being cut short on purpose): not counted as failed.
+func _drop_treatment() -> void:
+	_treat_until = -1.0
+	_treat_key = ""
 
 
 ## Whether `c` (Charges.burning) is the charge of the breach op he's in, whose stack stands off
@@ -6038,7 +6159,7 @@ static func charge_reach(c: Dictionary, p: Vector3) -> float:
 	if wall == Vector3.ZERO:
 		return maxf(WoundModel.BLAST_RADIUS * mult, Throwables.FRAG_RADIUS) + CHARGE_MARGIN_M
 	if (p - (c.pos as Vector3)).dot(wall) >= 0.0:
-		return Squad.BLAST_SAFE_M + WoundModel.BLAST_RADIUS * Throwables.FACING_BLAST_SHARE * (mult - 1.0)
+		return Squad.BLAST_SAFE_INDOOR_M if bool(c.indoors) else Squad.BLAST_SAFE_M
 	return WoundModel.BLAST_RADIUS * mult + CHARGE_MARGIN_M
 
 
@@ -6053,16 +6174,16 @@ static func _in_any_blast(charges: Array[Dictionary], p: Vector3) -> bool:
 
 ## The nearest spot (by his way there) clear of every charge in `mine`, out of `c`'s blast on his
 ## own side of its wall: straight away from it, along the wall either way, or out from it, each
-## past its reach (charge_reach, ARRIVE and CHARGE_CLEAR_PAST_M) on the navmesh, by a way that
-## doesn't go round to the wall's far side; null if none.
-func _charge_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
+## past its reach (charge_reach, ARRIVE, CHARGE_CLEAR_PAST_M and `past`) on the navmesh, by a way
+## that doesn't go round to the wall's far side; null if none.
+func _charge_clear_spot(c: Dictionary, mine: Array[Dictionary], past := 0.0) -> Variant:
 	var at: Vector3 = c.pos
 	var from := body.global_position
 	var wall: Vector3 = c.wall
 	var side := Vector3.ZERO
 	if wall != Vector3.ZERO:
 		side = wall if (from - at).dot(wall) >= 0.0 else -wall
-	var reach := charge_reach(c, from) + ARRIVE + CHARGE_CLEAR_PAST_M
+	var reach := charge_reach(c, from) + ARRIVE + CHARGE_CLEAR_PAST_M + past
 	var away := Vector3(from.x - at.x, 0.0, from.z - at.z)
 	if away.length() < 0.1:
 		away = side if side != Vector3.ZERO else body.global_basis.z

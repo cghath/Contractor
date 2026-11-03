@@ -490,11 +490,12 @@ static func breacher_first(units: Array) -> Array[SquadAI]:
 
 
 ## Puts breach plan `plan` on clearance `op` (the plan's door and bang take over from its
-## "breach", which stays for if the breacher goes down); a charge's stack stands off from it.
-static func apply_plan(op: Dictionary, plan: Dictionary) -> void:
+## "breach", which stays for if the breacher goes down); a charge's stack stands off from it
+## (further under a roof: stand_off's `world`).
+static func apply_plan(op: Dictionary, plan: Dictionary, world: World3D = null) -> void:
 	op.merge(plan, true)
 	if String(op.get("door", "")) == "charge":
-		stand_off(op)
+		stand_off(op, world)
 
 
 ## The AI brains of this squad's living soldiers, in members() order. Only those whose
@@ -847,9 +848,9 @@ func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := 
 	op["since"] = Soldier._now()
 	var bp := breach_plan(b, units, breach) if plan else {}
 	if not bp.is_empty():
-		apply_plan(op, bp)
+		apply_plan(op, bp, units[0].body.get_world_3d())
 	elif breach == "charge":
-		stand_off(op)
+		stand_off(op, units[0].body.get_world_3d())
 	elif breach == "" and plan and bang_wanted(b):
 		op.merge(entry_bang(units), true)  # an open doorway into a hot building: a bang in first (G-14)
 	for i in units.size():
@@ -861,14 +862,21 @@ func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := 
 
 ## A charge's stack stands CHARGE_STANDOFF_M further along the wall, clear of the blast. The op
 ## is marked "stood_off": its own charge's stand-off is the op's (SquadAI._keep_clear_of_charges
-## leaves its men to it).
-static func stand_off(op: Dictionary) -> void:
+## leaves its men to it). Under a roof (`world` given: Throwables.indoors over where the charge
+## goes, a wall op's charge_spot or the doorway's wall at a charge's height) the blast reaches
+## BLAST_SAFE_INDOOR_M on its face, and the stack stands that much further off again (F-396;
+## Captain, 2026-11-02: yes); the op's "charge_indoors" says which.
+static func stand_off(op: Dictionary, world: World3D = null) -> void:
 	op["stood_off"] = true
 	var door: Vector3 = op.entrance.door
+	var at: Vector3 = (op.charge_spot.at as Vector3) if op.has("charge_spot") else door + Vector3.UP * 1.0  # (SquadAI._charge_spot's height)
+	var indoors := world != null and Throwables.indoors(world, at + Vector3.UP * 0.25)  # (as Charges marks a burning one)
+	op["charge_indoors"] = indoors
+	var along := CHARGE_STANDOFF_M + (BLAST_SAFE_INDOOR_M - BLAST_SAFE_M if indoors else 0.0)
 	for i in (op.stack as Array).size():
 		var away := Vector3((op.stack[i] as Vector3).x - door.x, 0.0, (op.stack[i] as Vector3).z - door.z)
 		if away.length() > 0.05:
-			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * CHARGE_STANDOFF_M
+			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * along
 
 
 ## "Breach and clear" (Captain's list 2026-10-14, item 3: "add a 'Breach and clear' team order
@@ -921,7 +929,7 @@ func order_breach_clear(from: Soldier, point: Vector3, names := PackedStringArra
 	op.merge(_bang_plan(b, team, "", stealth, enemy_inside(b), -1 if his else 0), true)
 	if bool(b.get("yard", false)):
 		op.merge({"bang": "", "bang_by": -1}, true)  # (no bang into the open)
-	stand_off(op)
+	stand_off(op, from.get_world_3d())
 	for i in team.size():
 		team[i].give_tactic({"kind": &"clear", "op": op, "slot": i})
 	_town_op = op
@@ -987,14 +995,17 @@ func plan_wall_breach(op: Dictionary, b: Dictionary, team: Array) -> void:
 	op.merge({"door": "charge", "breacher": 0, "breacher_ai": team[0]}, true)
 	var stealth := team.any(func(ai: SquadAI) -> bool: return ai.combat_mode == CombatMode.STEALTH)
 	op.merge(_bang_plan(b, team, "", stealth, enemy_inside(b), 0), true)
-	stand_off(op)
+	stand_off(op, (team[0] as SquadAI).body.get_world_3d())
 
 
 ## How far from the charge the stack must stand while it burns: its blast on the placer's side
 ## of the wall (Throwables._frag: no fragments that side, overpressure out to its share of the
 ## blast radius) and a margin. The stack's stand-off (CHARGE_STANDOFF_M along the wall past
-## STACK_FIRST_M) keeps them past it.
+## STACK_FIRST_M) keeps them past it; under a roof, BLAST_SAFE_INDOOR_M.
 const BLAST_SAFE_M := WoundModel.BLAST_RADIUS * Throwables.FACING_BLAST_SHARE + 0.5
+## The same under a roof (Throwables.indoors over the charge: _frag doubles the radius), 5.5 m:
+## the stack's stand-off goes this much further along the wall (stand_off; F-396). Proposed.
+const BLAST_SAFE_INDOOR_M := WoundModel.BLAST_RADIUS * Throwables.BLAST_INDOOR_MULT * Throwables.FACING_BLAST_SHARE + 0.5
 
 
 ## Clearing a town (Captain, 2026-10-16: "an order for clearing towns so they move building by
