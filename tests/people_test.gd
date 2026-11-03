@@ -89,6 +89,7 @@ func _ready() -> void:
 	await _test_friendly_hvt()
 	await _test_intel()
 	await _test_radio_report()
+	await _test_surrender_unset_brain()
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
@@ -515,6 +516,31 @@ func _test_radio_report() -> void:
 	check(layer.server_report(player, Vector3(30, 0, -60)).has("why"), "nobody there: nothing to report")
 	s1.queue_free()
 	s2.queue_free()
+
+
+## The surrender check asks every hostile's brain whether his morale is broken, also a brain
+## that hasn't set up yet (spawned this frame, or seated aboard with its brain off: its body still
+## null). Loop CI 41244551690: a script error in SquadAI.morale_broken from two such reinforcements.
+func _test_surrender_unset_brain() -> void:
+	print("Surrender check, a brain not set up yet")
+	var fresh := _soldier("Fresh", &"hostile", Vector3(-35, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, false)  # brain off from the start
+	_place(player, Vector3(-35, 0.1, -20))
+	check(SquadAI.of(fresh) != null and SquadAI.of(fresh).body == null and not SquadAI.of(fresh).broken(),
+		"his brain hasn't set up (no body yet) and isn't broken")
+	check(layer.surrender_reason(fresh) == "", "unhurt, he fights on (no script error)")
+	PeopleLayer.surrender_enabled = true
+	layer._check_surrenders()  # the host's tick, in the same frame
+	PeopleLayer.surrender_enabled = false
+	check(not Person.is_captive(fresh), "and the host's surrender tick passes over him")
+	fresh.vitals.server_damage(45.0)
+	await _frames(3)
+	check(SquadAI.of(fresh).body == null and layer.surrender_reason(fresh) == "badly hurt and alone",
+		"badly hurt, alone and seen, brain still off: he would give up all the same (%s)" % layer.surrender_reason(fresh))
+	var gone := _soldier("Gone", &"hostile", Vector3(-33, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, false)
+	gone.queue_free()
+	check(layer.surrender_reason(gone) == "", "freed this frame: the surrender check passes over him")
+	fresh.queue_free()
+	await _frames(3)
 
 
 ## A badly hurt, isolated hostile who sees the squad gives up: drops his weapon, nobody

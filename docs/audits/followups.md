@@ -2124,6 +2124,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-11-03 | fix/surrender-freed-body: a SquadAI not set up yet (body null: spawned this frame, or seated with its brain off) counts as not broken, and its morale thresholds read the parent's side; the guard sits in SquadAI.broken(), so every caller is covered (PeopleLayer.surrender_reason is the only one outside squad_ai.gd, and PeopleLayer keeps no list of brains) | the loop's script error (CI 41244551690) came from two fresh reinforcements, not a freed body: a brain is its body's child, and the check already skips bodies queued for deletion | skipping hostiles with an unset brain in PeopleLayer (would stop a badly hurt man aboard from giving up, which he could before) (F-429)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2176,13 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-429: a badly hurt hostile seated aboard can be picked to surrender in his seat
+
+Found with fix/surrender-freed-body (2026-11-03). PeopleLayer.surrender_reason doesn't look at
+`vehicle`: a hostile seated aboard (brain off) who is badly hurt, alone and seen by the squad
+gets "badly hurt and alone", and server_surrender then frees his SquadAI, unequips his weapons
+in front of him and gives him a captive's brain while he is still in the seat. Not seen in a
+run; unchecked whether the seat lets go of him or the captive's brain copes with being seated.
+Either skip seated men in surrender_reason or have server_surrender take him out of the seat
+first. Not fixed here (the task was the null-body script error only).

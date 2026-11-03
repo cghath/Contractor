@@ -11,6 +11,16 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Surrender check on a brain not set up yet (fix/surrender-freed-body)
+
+- The host's surrender check asks every hostile whether his morale is broken, and a SquadAI that
+  hadn't set up yet (spawned that frame, or seated aboard with its brain off since it spawned)
+  has no body, so `SquadAI.morale_broken` hit a null body: the loop suite's script error after
+  "LOOP TEST PASSED" (CI 41244551690, two pressure reinforcements). `SquadAI.broken()` is now
+  false until the brain has set up, and `morale_shaken()`/`morale_broken()` read the side from
+  the parent before then, as `_doctrine_id()` already did. People suite: "Surrender check, a
+  brain not set up yet" (failed with the old code, R0823; passes, R0826).
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

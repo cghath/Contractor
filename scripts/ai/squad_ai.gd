@@ -3151,8 +3151,11 @@ func _update_morale(dt: float) -> void:
 			_fall_back_point = null
 
 
+## Morale broken. A brain that hasn't set up yet (spawned this frame, or seated aboard with its
+## brain off since it spawned: body still null) hasn't been shaken: PeopleLayer's surrender check
+## asks every hostile (loop CI 41244551690: two reinforcements, script error in morale_broken).
 func broken() -> bool:
-	return morale < morale_broken()
+	return _ready_done and morale < morale_broken()
 
 
 ## Falls back (Intent.FALL_BACK): to cover FALL_BACK_M away from the threat (a friendly: toward
@@ -5496,11 +5499,17 @@ func _aim_error_deg(seen_foe: bool) -> float:
 
 ## Where this unit's morale counts as shaken (aim suffers) and broken: its doctrine's (G-15).
 func morale_shaken() -> float:
-	return MORALE_SHAKEN * Doctrine.factor(_doctrine_id(), "morale_shaken", body.faction)
+	return MORALE_SHAKEN * Doctrine.factor(_doctrine_id(), "morale_shaken", _side())
 
 
 func morale_broken() -> float:
-	return MORALE_BROKEN * Doctrine.factor(_doctrine_id(), "morale_broken", body.faction)
+	return MORALE_BROKEN * Doctrine.factor(_doctrine_id(), "morale_broken", _side())
+
+
+## His side, also when asked before _setup (the parent's, as _doctrine_id does).
+func _side() -> StringName:
+	var me := body if body else get_parent() as Soldier
+	return me.faction if me else &"hostile"
 
 
 ## The half-angle (radians) this unit's next rounds may stray by: the weapon's spread plus
