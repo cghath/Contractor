@@ -256,7 +256,7 @@ static func role_template(role: StringName) -> Dictionary:
 static func rebuild(people: Array, pool: Array) -> Array:
 	for p: Dictionary in people:
 		var own := Inventory.new()
-		own.net_state = GameState.from_json(p.gear)
+		own.net_state = GameState.from_json(_loosen_mounts(p.gear, p.template, pool))
 		# Unpacked: what's on and in their own carrier, pack and pouches goes in loose. Left
 		# packed, it could only be drawn with that same carrier, and a rebuild that drew another
 		# (the stash's, with more pouches) left the medic's own IVs locked in his (R0976).
@@ -269,6 +269,40 @@ static func rebuild(people: Array, pool: Array) -> Array:
 	var out: Array = []
 	for p: Dictionary in people:
 		out.append(Restock.build(p.template, pool))
+	return out
+
+
+## `gear` (JSON-safe) with each mount that template `t` names on the same slot (a helmet's NVG,
+## a gun's suppressor or grip; set_slot keeps the ones that fit a new holder) taken off the
+## holder and into `pool` loose, so the build can draw it for whichever holder it puts there.
+## Left on, it went into the pool on the old holder: a helmet swapped or bought came without its
+## NVG, the NVG went back to the stash on the old helmet and was listed missing (a buy charged for
+## it; F-420), and the same when the build drew the stash's unit of an unchanged gun over his own
+## (his suppressor and grip "missing", R0829). Only a mount the template names the same item on.
+static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dictionary:
+	var wanted: Dictionary = t.get("mounts", {})
+	if wanted.is_empty():
+		return gear
+	var out := gear
+	var copied := false
+	var slots: Dictionary = gear.get("slots", {})
+	for slot: Variant in slots:
+		var id := String(slots[slot])
+		var want: Dictionary = wanted.get(String(slot), {})
+		if id == "" or want.is_empty():
+			continue
+		var holder := ItemDB.get_item(StringName(id))
+		var state: Dictionary = (out.get("slot_state", {}) as Dictionary).get(slot, {}).duplicate(true)
+		for m: String in GearMounts.of(holder, state):
+			if String(want.get(m, "")) != GearMounts.on(holder, state, m):
+				continue
+			if not copied:
+				out = gear.duplicate(true)
+				copied = true
+			var entry := GearMounts.entry_on(holder, state, m)
+			BaseArmory.add(pool, StringName(String(entry.id)), 1, entry.get("state", {}))
+			state = GearMounts.with(holder, state, m, {})
+			out.slot_state[slot] = state
 	return out
 
 

@@ -556,19 +556,23 @@ func _lend(faction: String, amount: int, what: String) -> int:
 
 
 ## Host: buys `count` of `item_id` from the base shop for the company. They go to
-## purchase_sink, or the base inbox. Returns whether it went through.
-func server_buy(item_id: StringName, count := 1, peer_id := 1) -> bool:
+## purchase_sink, or the base inbox. Returns whether it went through. `quiet`: no notice to the
+## buyer (the loadout menu's purchases answer in their own note: one note a purchase).
+func server_buy(item_id: StringName, count := 1, peer_id := 1, quiet := false) -> bool:
 	if count <= 0 or not Quartermaster.sells(item_id):
-		_notify(peer_id, "The shop doesn't sell that")
+		if not quiet:
+			_notify(peer_id, "The shop doesn't sell that")
 		return false
 	var total := Quartermaster.price(item_id) * count  # the base shop's, or an allied quartermaster's better deal (wave 6)
 	if not spend(total, "Bought %d x %s" % [count, ItemDB.get_item(item_id).name]):
-		_notify(peer_id, "Not enough cash for %s ($%s)" % [ItemDB.get_item(item_id).name, DebriefCalc.money(total)])
+		if not quiet:
+			_notify(peer_id, "Not enough cash for %s ($%s)" % [ItemDB.get_item(item_id).name, DebriefCalc.money(total)])
 		return false
 	if not (purchase_sink.is_valid() and purchase_sink.call(item_id, count, peer_id)):
 		bank_items([{"id": String(item_id), "count": count}], "")
 	purchased.emit(item_id, count, peer_id)
-	_notify(peer_id, "Bought %d x %s for $%s" % [count, ItemDB.get_item(item_id).name, DebriefCalc.money(total)])
+	if not quiet:
+		_notify(peer_id, "Bought %d x %s for $%s" % [count, ItemDB.get_item(item_id).name, DebriefCalc.money(total)])
 	return true
 
 

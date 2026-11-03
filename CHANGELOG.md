@@ -27,6 +27,26 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   refused with nothing spent, moved or marked missing; then bought, worn, the view updated), the
   optic picker, a client's purchase from its own picker through the host on the company's
   account, a late joiner seeing the host's purchase, and a save and reload keeping both.
+- **Changed (loadout, Captain 2026-11-02, F-404):** a purchase from a picker asks first: the
+  item, its price and the cash left after; Cancel buys nothing. "Don't ask again" turns that off
+  (a player setting in your own settings.cfg); the "Ask before buying" tick by the cash, or
+  Settings, Controls, Menus, turns it back on.
+- **Changed (loadout, Captain 2026-11-02, F-405):** the 3D loadout editor buys and fits an item
+  you don't own in one pick too (same host ops with `buy`, same price, same question); its draft
+  and undo stay for everything else. New host op `point` (a pouch on a MOLLE point); `mount`
+  and `add` take `buy`.
+- **Fixed (loadout, F-420):** buying or swapping a helmet moves its NVG onto the new helmet
+  when it fits (likewise a gun's suppressor or grip onto its new gun), instead of leaving it on
+  the old one in the stash and listing it missing; and a loadout change that drew the stash's
+  copy of the same gun or helmet no longer leaves your suppressor, grip or NVG on yours in the
+  stash ("Missing from the stash: Rifle Suppressor" after a Fill ammo).
+- **Fixed (loadout):** a purchase buys exactly one, so it always costs the price shown; it
+  gives one note, not two (`Economy.server_buy` takes `quiet`); an item you carry is offered as
+  "(carried)", not "Buy:".
+- **Tests (loadout, ui):** the question shows and Cancel buys nothing; "Don't ask again" skips
+  it and is saved; the 3D editor buys and fits in one step, the client's through the host; the
+  NVG moves to a bought helmet; the suites use their own settings and editor files, never the
+  player's (F-406).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

@@ -47,8 +47,8 @@ add/remove units, fill ammo, medic kit, role kit) and `rebuild` over several peo
 
 Client asks, host applies (BaseHub.request): `request("loadout", [who, op, params])`.
 `who` is a member id or `player:<key>`. A player may change their own kit and any AI squadmate's,
-never another player's (they can give to another player). Ops: `slot`, `optic` (both take
-`buy: true`: buy the item if the stash lacks it, see Buying), `add`,
+never another player's (they can give to another player). Ops: `slot`, `optic`, `mount`, `point` (all four take
+`buy: true`: buy the item if the stash lacks it, see Buying), `add` (`buy: true` adds one and buys it),
 `remove`, `give`, `fill_ammo`, `medic_kit`, `role_kit`, `copy_kit`, `save`, `standing_role`,
 `copy_standing`, `restock`, `sync` (read the muster line's gear into the roster for the view).
 The answer comes back as the usual note; the roster and stash broadcast with the view.
@@ -73,6 +73,26 @@ stocks and equips. Not enough cash (or not sold): refused with the reason, nothi
 moved or written down as missing. The wallet is the company's (Economy cash, the same account
 that owns the stash); a client's purchase runs on the host and reaches everyone, late joiners
 included, through the base view (funds, stash, roster gear); the campaign save holds all three.
+
+Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
+- **It asks first** (F-404, "not always but yes"): choosing a "Buy:" entry opens a confirm
+  (`LoadoutScreen.ask_buy`: the item, its price, the company's cash and what's left after);
+  Cancel buys nothing. Its **Don't ask again** tick, with the Buy, turns the question off: a
+  player setting (`GameSettings` "loadout" "confirm_buy", default on) in the player's own
+  settings.cfg. The **Ask before buying** tick under the cash hint (and in the 3D editor's slot
+  panel) and Settings, Controls, Menus turn it back on.
+- **The 3D editor buys and fits in one step too** (F-405): the same host ops with `buy: true`
+  (and `mount`, `point`, `add` for its other markers), the same price and the same question;
+  its draft and undo stay for everything else (docs/loadout_3d.md).
+- The host buys **one** unit, whatever else the edit lacks, so the charge is the label's price;
+  the answer is the purchase's one note ("Helmet: X (bought for $Y)"; Economy's own notice is
+  kept quiet for loadout purchases, Buy missing included).
+- What the person **carries** (a spare optic in a pouch, a helmet in the pack) is offered as
+  "name (carried)", a normal swap from their own kit, never as "Buy:".
+- A helmet bought or swapped in takes the old one's NVG along when it fits (any mount the
+  template keeps: `Loadouts.rebuild` takes it off his holder first, so whichever unit the build
+  draws gets it; F-420). Before, the NVG stayed on the old helmet in the stash and was listed
+  missing, and a change that drew the stash's copy of his gun left his suppressor on his own.
 The armory lays the stash out in category bands
 (BaseArmory.BANDS); deliveries and returns take the next free slot of their band.
 

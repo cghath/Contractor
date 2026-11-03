@@ -2131,6 +2131,13 @@ Captain, 2026-10-31: "Buy missing kit from inside the loadout editor" (captain_s
 2026-10-31 | feat/loadout-buy: the wallet is the company's account (Economy cash), whoever asks; a client's purchase is host-authoritative (BaseHub.request) and reaches everyone through the base view | the company owns the stash and there is no per-player money in the game | per-player wallets (none exist)
 2026-10-31 | feat/loadout-buy: an item the stash holds only inside a carrier's or pack's pouches isn't offered to buy (the edit draws it); unaffordable entries are greyed out, not hidden | no charge for what the stash has; you see what more cash would buy | hiding unaffordable items
 2026-10-31 | feat/loadout-buy: the 3D loadout editor (claude/loadout-3d, on dev) keeps its draft flow (pick fits in the draft, Buy now into the stash, Apply with Buy missing); only the paper-doll menu's pickers buy on pick | the 3D editor is draft-then-apply by design; buying on pick there would bypass its undo | buy-and-apply on pick in the 3D editor too (F-405)
+Captain, 2026-11-02: F-404, should a picker purchase ask first: "not always but yes". F-405, should the 3D loadout editor also buy and fit in one step: "yes".
+2026-11-02 | feat/loadout-buy (F-404): a purchase asks first by default (UiKit.confirm like Sell's, green Buy button: item, price, cash, cash left after); "Don't ask again" takes effect only with Buy (Cancel forgets the tick) and is a player setting (GameSettings "loadout" "confirm_buy") in the player's own settings.cfg; it's turned back on from an "Ask before buying" tick by the cash (paper doll and 3D editor) and Settings, Controls, Menus | "not always but yes": asked by default, off for whoever doesn't want it, and easy to find again | a per-campaign or host-wide setting; a tick that saves on Cancel too
+2026-11-02 | feat/loadout-buy (F-405): the 3D editor's pick of an unowned item buys and fits it in one step through the marker's own host op (slot, mount, new point, add) with buy: true on what he wears, not through a whole-draft template; the draft gets the same edit and keeps its other changes; unaffordable, or on a holder the draft has but he doesn't wear yet, it stays a draft with Buy now | "keep its draft/undo for everything else": a template op would apply the other draft edits too | sending the whole draft with buy_one
+2026-11-02 | feat/loadout-buy: Cancel on the buy question leaves the draft as it was (the item isn't put in it); planning a kit with unowned items still works through a saved kit, or with too little cash | "Cancel buys nothing", and a pick that's half done is confusing | Cancel = draft only
+2026-11-02 | feat/loadout-buy (review): the host buys one unit per picker or 3D purchase whatever else the edit lacks (the rest goes to edit_missing as usual); the answer carries the purchase ("Helmet: X (bought for $Y)") and Economy.server_buy's own notice is kept quiet (new quiet arg) for every loadout-menu purchase, Buy missing included | one note per purchase, the charge equals the label | buying the edit's whole shortfall
+2026-11-02 | feat/loadout-buy (review): an item the person carries (in pockets, pouches or pack) and the stash lacks is offered as "name (carried)", a plain swap from their own kit | no "Buy:" label for something no one pays for | hiding it
+2026-11-02 | feat/loadout-buy (F-420): every mount the template keeps (helmet NVG; gun muzzle, underbarrel, side, choke) is taken off his holder before the rebuild, so whichever holder the build draws (a new helmet, or the stash's unit of the same gun) gets it; optics on a gun swap left as they are (F-421, a question) | the NVG case is plainly a bug, and only loosening the replaced holder's left the same-id case (R0829) | loosening only replaced holders; moving optics too
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2185,22 +2192,53 @@ B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oc
 
 ## F-404 to F-405: buying from the loadout menu's pickers (feat/loadout-buy, 2026-10-31)
 
-### F-404 (open, Proposed): an ask-first for picker purchases
-Choosing a "Buy:" entry in the paper-doll menu's Swap / Optic pickers spends company money at
-once (the entry shows "Buy:" and the price). Selling asks first (UiKit.confirm); buying doesn't,
-like the 3D editor's Buy now. If a misclick in a drop-down turns out to cost players money in
-play, wrap the BUY branch of the pickers' callbacks in `scripts/campaign/loadout_screen.gd`
-(`_build_doll`) in a UiKit.confirm.
+### F-404 (done in feat/loadout-buy, 2026-11-02): an ask-first for picker purchases
+Choosing a "Buy:" entry in the paper-doll menu's Swap / Optic pickers spent company money at
+once. Captain, 2026-11-02: "not always but yes". Now it asks first (`LoadoutScreen.ask_buy`, a
+UiKit.confirm like Sell's: the item, its price, the cash and what's left after; Cancel buys
+nothing), with a "Don't ask again" tick that turns it off (GameSettings "loadout"
+"confirm_buy", the player's own settings.cfg); the "Ask before buying" tick by the cash, the 3D
+editor's slot panel and Settings, Controls, Menus turn it back on.
 
-### F-405 (open): the 3D loadout editor still buys in two steps
-`scripts/ui/loadout_editor.gd` offers unowned items with their price; picking one fits it in the
-draft and shows Buy now (into the stash), and Apply with Buy missing buys the draft's shortfall.
-It doesn't buy and fit in one choice the way the paper-doll menu's pickers now do. Left as is on
-purpose (its draft and undo); revisit if players expect the same one-step buy there.
+### F-405 (done in feat/loadout-buy, 2026-11-02): the 3D loadout editor buys in two steps
+`scripts/ui/loadout_editor.gd` fitted an unowned pick in the draft with Buy now (into the stash)
+and Apply / Buy missing. Captain, 2026-11-02: "yes" (buy and fit in one step). Now picking an
+unowned item asks (as F-404) and sends the marker's host op with `buy: true` (`slot`, `mount`,
+the new `point`, `add`), the pickers' `BaseHub._server_buy_picked` and price; the draft gets
+the same edit and keeps its other changes and undo. Unaffordable, or on a holder the draft has
+but he doesn't wear yet: draft and Buy now as before.
 
 ### F-406 (done in feat/loadout-buy): the loadout suite's 3D editor checks read a shared user:// file
 LoadoutEditor remembers its last person in `user://loadout_editor.cfg`, which every local run
 on a machine (and the game itself) shares. A run that left it on a squadmate (`m0001`) made the
 next one open the editor there and fail "on your own soldier", "the draft starts as what he
 wears" and the Apply check (R0802; CI starts clean, so it never showed there).
-`tests/loadout_test.gd` `_test_3d` now starts with no file and puts the old one back after.
+2026-11-02 (review): the first fix deleted the player's real file and wrote it back after, so a
+crash mid-run lost it. Now the editor reads `LoadoutEditor.settings_path()`, which in a dev
+build (DevTools.on()) can point at a test's own file (`LoadoutEditor.use_file`);
+`tests/loadout_test.gd` (host and client) and `tests/ui_test.gd` use their own and never touch
+the real one (the loadout suite checks it's unchanged). The buy question's setting likewise
+goes to the test's own settings.cfg (GameSettings.use_file).
+
+## F-420 to F-421: helmet mounts on a swap (feat/loadout-buy review, 2026-11-02)
+
+### F-420 (done in feat/loadout-buy): a swapped or bought helmet left the NVG on the old one
+Pre-dates the branch (the 3D editor's mounts, claude/loadout-3d). `Loadouts.set_slot` keeps a
+mount that fits the new holder in the template, but `Loadouts.rebuild` put the person's old
+helmet into the pool with the NVG still mounted, so `Restock.build` found no loose NVG to draw:
+the new helmet came without it, the NVG went back to the stash on the old helmet, and the edit
+listed it missing (a Buy missing would have charged for a second one). The same happened with
+the holder unchanged whenever the build drew the stash's unit of it over his own (a stash M4
+over his suppressed one: "Missing from the stash: Rifle Suppressor" on an unrelated Fill ammo,
+and his helmet with its NVG left in the stash after an Apply; R0829). Now `rebuild` first takes
+off each mount the template names the same item on (`Loadouts._loosen_mounts`: helmets' NVG,
+guns' muzzle, underbarrel, side, choke) and puts it in the pool loose, so whichever holder is
+drawn gets it. An NVG comes back raised (as `Restock` always fits one). Checked in loadout
+(rules, the picker purchase of a helmet, the 3D editor's Apply).
+
+### F-421 (open, question): a gun swapped for another doesn't take its optic along either
+The same mechanism for optics: `set_slot` keeps the optic asked for when the new gun has a
+rail, but the old gun goes into the pool with the optic on it, so the new gun keeps its own (or
+irons) and the optic is listed missing. Not changed: some guns come with their own scope
+(`stats.optic`), and moving the old optic over would put, say, an M4's red dot on an M110 and
+its scope in the stash. Which should win: the optic the player had, or the new gun's own?

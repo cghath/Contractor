@@ -38,6 +38,7 @@ const TIPS := {
 	"stick_invert_y": "Stick forward looks down instead of up.",
 	"objective_markers": "Diamonds over where the current objective is, with how far it is. Off: only the hint line under the objectives.",
 	"objectives_expanded": "Show every objective in the top-right list, or only the one you're on.",
+	"confirm_buy": "Buying an item from a loadout picker or the 3D loadout editor asks first, with the price and the cash left after. Off: one pick buys it.",
 }
 
 var _tabs: TabContainer
@@ -280,6 +281,11 @@ func _controls_tab() -> Control:
 		page.add_child(box)
 	if not Assists.can_set():
 		page.add_child(UiKit.hint("Set by the host for this session."))
+	# The loadout menus' purchases (F-404; the loadout screens have the same tick).
+	page.add_child(UiKit.heading("Menus"))
+	var ask := _toggle("Ask before buying kit in the loadout menus", "loadout", "confirm_buy")
+	ask.name = "ConfirmBuy"
+	page.add_child(ask)
 	return page.get_parent()
 
 

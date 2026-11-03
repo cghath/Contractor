@@ -3220,7 +3220,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
 				if bought.begins_with("!"):
 					return bought.substr(1)
-				what = what if bought == "" else "%s; %s" % [bought, what]
+				what += bought
 		"optic":
 			var slot := StringName(String(p.get("slot", "")))
 			var id := String(p.get("id", ""))
@@ -3232,7 +3232,7 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 				var bought := _server_buy_picked(lvl, sender, a, t, id)
 				if bought.begins_with("!"):
 					return bought.substr(1)
-				what = what if bought == "" else "%s; %s" % [bought, what]
+				what += bought
 		"mount":
 			var slot := StringName(String(p.get("slot", "")))
 			var mount := String(p.get("mount", ""))
@@ -3242,6 +3242,11 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 				return "That doesn't go there"
 			t = Loadouts.set_mount(t, slot, mount, id)
 			what = "%s: %s" % [GearMounts.NAMES.get(mount, mount), ItemDB.get_item(StringName(id)).name if id != "" else "off"]
+			if bool(p.get("buy", false)) and id != "":
+				var bought := _server_buy_picked(lvl, sender, a, t, id)
+				if bought.begins_with("!"):
+					return bought.substr(1)
+				what += bought
 		"template":
 			# The 3D editor's whole draft at once (LoadoutEditor), buying what the stash lacks first when asked.
 			t = KitLibrary.clean_template(p.get("template", {}))
@@ -3251,6 +3256,19 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 					return bought.substr(1)
 				what = bought
 			what = "kit fitted" if what == "" else what + ", kit fitted"
+		"point":
+			# The 3D editor's MOLLE point (Loadouts.set_point): a pouch on it, or "" to take it off.
+			var point := String(p.get("point", ""))
+			var id := String(p.get("id", ""))
+			if point == "" or (id != "" and not (ItemDB.has_item(StringName(id)) and Inventory.is_attachable(ItemDB.get_item(StringName(id))))):
+				return "That doesn't go there"
+			t = Loadouts.set_point(t, point, id)
+			what = ("%s on a MOLLE point" % ItemDB.get_item(StringName(id)).name) if id != "" else "MOLLE point emptied"
+			if bool(p.get("buy", false)) and id != "":
+				var bought := _server_buy_picked(lvl, sender, a, t, id)
+				if bought.begins_with("!"):
+					return bought.substr(1)
+				what += bought
 		"add", "remove", "give":
 			var id := String(p.get("id", ""))
 			var n := clampi(int(p.get("count", 1)), 1, 50)
@@ -3258,8 +3276,16 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 				return "No such item"
 			var item_name := ItemDB.get_item(StringName(id)).name
 			if op == "add":
+				var buy := bool(p.get("buy", false))
+				if buy:
+					n = 1  # bought from the 3D editor's pockets picker: one, at the price it showed
 				t = Loadouts.add_units(t, id, n)
 				what = "+%d %s" % [n, item_name]
+				if buy:
+					var bought := _server_buy_picked(lvl, sender, a, t, id)
+					if bought.begins_with("!"):
+						return bought.substr(1)
+					what += bought
 			else:
 				var took := Loadouts.remove_units(t, id, n)
 				if int(took.removed) <= 0:
@@ -3345,31 +3371,33 @@ func _server_buy_shortfall(lvl, sender: int, jobs: Array) -> String:
 		return "!Not enough cash: $%d needed, $%d in the account" % [int(short.cost), BaseEconomy.funds()]
 	for id: String in short.missing:
 		if not id in short.unbuyable:
-			Economy.server_buy(StringName(id), int(short.missing[id]), sender)
+			Economy.server_buy(StringName(id), int(short.missing[id]), sender, true)
 	return "bought %d items for $%d" % [int(short.units), int(short.cost)]
 
 
 ## Host: the loadout menu's picker bought what it offered at a price (op "slot" or "optic" with
-## "buy"; Captain's "Next" item 4, "buy missing kit from inside the loadout editor"). If putting
-## `id` on `a` (their edited template `t`) can't draw it from the stash, it is bought at the
+## "buy"; Captain's "Next" item 4, "buy missing kit from inside the loadout editor"), or the 3D
+## editor's one-step buy (ops "slot", "mount", "point", "add" with "buy"; F-405). If putting
+## `id` on `a` (their edited template `t`) can't draw it from the stash, one is bought at the
 ## shop's price (the base shop's, or a quartermaster's better deal: Economy.server_buy) with the
-## company's money, into the stash, and the edit then draws it. Only `id` is bought, so the
-## charge is the price the picker showed. "" when the stash had one after all (nothing charged),
-## "bought the <item> for $X", or "!" + why not (not sold, not enough cash: nothing changes).
+## company's money, into the stash, and the edit then draws it. Only one `id` is ever bought, so
+## the charge is the price the picker showed (anything else the edit lacks is named missing as
+## usual). "" when the stash had one after all (nothing charged), " (bought for $X)" to add to
+## the answer (the purchase's one note: Economy's own is kept quiet), or "!" + why not (not
+## sold, not enough cash: nothing changes).
 func _server_buy_picked(lvl, sender: int, a: Dictionary, t: Dictionary, id: String) -> String:
 	var item := ItemDB.get_item(StringName(id))
 	var short := KitLibrary.shortfall([{"gear": _person_gear(a), "template": t}], lvl.server_collect_stash())
-	var n := int(short.missing.get(id, 0))
-	if n <= 0:
+	if int(short.missing.get(id, 0)) <= 0:
 		return ""
-	var price := BaseEconomy.item_price(StringName(id)) * n
+	var price := BaseEconomy.item_price(StringName(id))
 	if price <= 0:
 		return "!The shop doesn't sell the %s" % item.name
 	if BaseEconomy.funds() < price:
 		return "!Not enough cash for the %s: $%s needed, $%s in the account" % [item.name, DebriefCalc.money(price), DebriefCalc.money(BaseEconomy.funds())]
-	if not Economy.server_buy(StringName(id), n, sender):
+	if not Economy.server_buy(StringName(id), 1, sender, true):
 		return "!Couldn't buy the %s" % item.name
-	return "bought the %s for $%s" % [item.name, DebriefCalc.money(price)]
+	return " (bought for $%s)" % DebriefCalc.money(price)
 
 
 ## Host: the saved-kit ops (KitLibrary, KIT_OPS). `a` is the one asking's own person here.
@@ -3785,7 +3813,7 @@ func _server_buy_missing(lvl, sender: int, a: Dictionary, only_id := "") -> Stri
 		return "Not enough cash: $%d needed" % int(price.cost)
 	for id: String in want:
 		if id not in price.unbuyable:
-			Economy.server_buy(StringName(id), int(want[id]), sender)
+			Economy.server_buy(StringName(id), int(want[id]), sender, true)
 	a["template"] = _edit_wants[a.who]
 	var lines := _loadout_apply(lvl, [a])
 	return "%s: bought %d items for $%d%s" % [a.name, int(price.units), int(price.cost), (". " + lines[0]) if lines[0] != "" else ""]

@@ -32,6 +32,11 @@ var _log: FileAccess
 var _notes: Array = []
 ## The helmet the client bought from its picker (the host reads it off the client's body).
 var _client_bought := ""
+## This run's own settings.cfg and loadout_editor.cfg (never the player's).
+var _settings_path := ""
+var _editor_path := ""
+## Economy's notices (a picker purchase answers in one note: BaseHub's, none of these).
+var _econ_notes: Array = []
 
 
 ## The tree this test started in: a client's scene can be taken out of it near the end (the
@@ -47,6 +52,17 @@ func _ready() -> void:
 	_tree.create_timer(420.0).timeout.connect(func() -> void:
 		_say("LOADOUT TEST FAILED (timed out)")
 		_tree.quit(99))
+	# Never the player's own settings.cfg (the buy confirm's "Don't ask again") or
+	# user://loadout_editor.cfg (F-406): files of this run's own, fresh, removed at the end.
+	var side := "_client" if "--join" in OS.get_cmdline_user_args() else ""
+	_settings_path = OS.get_user_data_dir().path_join("test_loadout_settings%s%s.cfg" % [tag, side])
+	_editor_path = OS.get_user_data_dir().path_join("test_loadout_editor%s%s.cfg" % [tag, side])
+	for path: String in [_settings_path, _editor_path]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+	GameSettings.use_file(_settings_path)
+	LoadoutEditor.use_file(_editor_path)
+	Economy.notice.connect(func(t: String) -> void: _econ_notes.append(t))
 	if "--join" in OS.get_cmdline_user_args():
 		await _run_client()
 		return
@@ -57,8 +73,18 @@ func _ready() -> void:
 	GameState.zone_id = "test_loadout" + tag
 	GameState.delete_save()
 	BaseHub.delete_test_campaign_files()
+	_own_files_off()
 	print("LOADOUT TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
+
+
+## Back to the player's own settings files, and this run's removed.
+func _own_files_off() -> void:
+	GameSettings.use_file("")
+	LoadoutEditor.use_file("")
+	for path: String in [_settings_path, _editor_path]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
 
 
 func check(condition: bool, what: String) -> void:
@@ -180,6 +206,20 @@ func _test_kit_rules(rifleman: Dictionary) -> void:
 	var res2: Dictionary = Loadouts.rebuild([{"gear": res.gear, "template": bare}], pool2)[0]
 	check(String(Suppressors.mounted_id(gun, res2.gear.slot_state.get("primary", {}))) == "" and int(Loadouts.units(pool2, []).get("suppressor_rifle", 0)) == 1
 		and Loadouts.units(pool2, [res2.gear]) == before, "taking the suppressor off leaves it in the stash")
+	# F-420: a helmet swapped for another takes its NVG along when it fits (set_slot keeps the
+	# mount); before, the NVG stayed on the old helmet in the stash and was listed missing.
+	var heavy := ItemDB.get_item(&"helmet_heavy")
+	var pool3 := pool.duplicate(true)
+	var with_nvg: Dictionary = res.gear
+	var before3 := Loadouts.units(pool3, [with_nvg])
+	var swap := Loadouts.set_slot(Restock.template_of(with_nvg), &"helmet", "helmet_heavy")
+	var res3: Dictionary = Loadouts.rebuild([{"gear": with_nvg, "template": swap}], pool3)[0]
+	var old_bare := pool3.all(func(e: Dictionary) -> bool:
+		return String(e.id) != "helmet" or GearMounts.on(ItemDB.get_item(&"helmet"), e.get("state", {}), "nvg") == "")
+	check(String(res3.gear.slots.get("helmet", "")) == "helmet_heavy" and GearMounts.on(heavy, res3.gear.slot_state.get("helmet", {}), "nvg") == "nvg_gen2"
+		and res3.missing.is_empty() and old_bare and Loadouts.units(pool3, [res3.gear]) == before3,
+		"swapping the helmet moves its NVG onto the new one: nothing missing, the old helmet bare in the stash (%s, missing %s)" % [
+			GearMounts.of(heavy, res3.gear.slot_state.get("helmet", {})), res3.missing])
 	var points: Array = ItemDB.get_item(StringName(String(t.slots.vest))).stats.get("molle", [])
 	var free := ""
 	for p: Dictionary in points:
@@ -366,6 +406,15 @@ func _test_picker_buy(mid: String) -> String:
 	print("Buying from the loadout menu's pickers")
 	var base := level as BaseLevel
 	var s := base.muster_soldier(mid)
+	# An NVG on his helmet (the kits check left one there; else one from the stash): a bought
+	# helmet must take it along (F-420).
+	var nvg_of := func() -> String:
+		var g: Dictionary = Roster.json_safe(s.inventory.net_state)
+		return GearMounts.on(ItemDB.get_item(StringName(String(g.slots.get("helmet", "")))), g.slot_state.get("helmet", {}), "nvg")
+	if nvg_of.call() == "":
+		BaseHub.request("loadout", [mid, "mount", {"slot": "helmet", "mount": "nvg", "id": "nvg_gen2"}])
+		await _frames(3)
+	var nvg: String = nvg_of.call()
 	var frame := Control.new()
 	add_child(frame)
 	frame.size = Vector2(1920, 1080)
@@ -423,19 +472,45 @@ func _test_picker_buy(mid: String) -> String:
 	var i_buy: int = entry.call()
 	check(i_buy > 0 and not picker.is_item_disabled(i_buy) and picker.get_item_text(i_buy) == "Buy: %s ($%s)" % [ItemDB.get_item(StringName(buy_id)).name, DebriefCalc.money(price)],
 		"with the cash it reads \"%s\"" % [picker.get_item_text(i_buy) if i_buy > 0 else "missing"])
+	# F-404 (Captain, 2026-11-02: "not always but yes"): choosing it asks first; Cancel buys nothing.
 	_notes.clear()
 	if i_buy > 0:
 		picker.item_selected.emit(i_buy)  # the player chooses it
+	await _frames(2)
+	var old_helmet := String(gear.slots.get("helmet", ""))
+	var question := _answer_confirm(screen, "Cancel")
+	await _frames(3)
+	check(question.contains(ItemDB.get_item(StringName(buy_id)).name) and question.contains("$" + DebriefCalc.money(price)) and question.contains("$50 left after")
+		and Economy.cash() == price + 50 and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and _notes.is_empty(),
+		"choosing it asks first (\"%s\"), and Cancel buys nothing" % question)
+	# Again, with "Don't ask again" ticked: bought, worn, and the setting saved.
+	_notes.clear()
+	_econ_notes.clear()
+	picker = screen.find_child("Swap_helmet", true, false) as OptionButton
+	i_buy = entry.call()
+	if i_buy > 0:
+		picker.item_selected.emit(i_buy)
+	await _frames(2)
+	question = _answer_confirm(screen, "Ok", true)
 	await _frames(4)
-	var after := _hub_units()
-	var diff := {}
-	for id: String in after:
-		if int(after[id]) != int(units.get(id, 0)):
-			diff[id] = int(after[id]) - int(units.get(id, 0))
+	var diff := _diff(units, _hub_units())
 	gear = Roster.json_safe(s.inventory.net_state)
-	check(String(gear.slots.get("helmet", "")) == buy_id and Economy.cash() == 50 and diff == {buy_id: 1}
-		and String(BaseHub.member(mid).gear.slots.get("helmet", "")) == buy_id and not _notes.is_empty() and String(_notes.back()).contains("bought"),
-		"choosing it bought one ($%d, $%d left), and he wears it; nothing else came or went (%s; %s)" % [price, Economy.cash(), diff, _notes])
+	check(question != "" and String(gear.slots.get("helmet", "")) == buy_id and Economy.cash() == 50 and diff == {buy_id: 1}
+		and String(BaseHub.member(mid).gear.slots.get("helmet", "")) == buy_id,
+		"Buy: one bought ($%d, $%d left), and he wears it; nothing else came or went (%s)" % [price, Economy.cash(), diff])
+	check(_notes.size() == 1 and String(_notes[0]).contains("bought for $%s" % DebriefCalc.money(price)) and _econ_notes.is_empty(),
+		"one note for the purchase (%s; shop notices %s)" % [_notes, _econ_notes])
+	var cfg := ConfigFile.new()
+	cfg.load(GameSettings.settings_path())
+	check(not LoadoutScreen.confirm_buy_on() and GameSettings.settings_path() == _settings_path and cfg.get_value("loadout", "confirm_buy", true) == false,
+		"\"Don't ask again\" turned the question off, saved in the (test's own) settings file")
+	# F-420: his NVG went onto the bought helmet; the old helmet is in the stash bare.
+	var stash_now: Array = base.server_collect_stash()
+	var old_bare := stash_now.all(func(e: Dictionary) -> bool:
+		return String(e.id) != old_helmet or GearMounts.on(ItemDB.get_item(StringName(old_helmet)), e.get("state", {}), "nvg") == "")
+	check(nvg != "" and nvg_of.call() == nvg and old_bare and not BaseHub.member(mid).get("edit_missing", {}).has(nvg),
+		"his %s moved onto the bought %s, the old %s went to the stash bare, nothing written down as missing (on it %s, old bare %s, missing %s)" % [
+			nvg, buy_id, old_helmet, nvg_of.call(), old_bare, BaseHub.member(mid).get("edit_missing", {})])
 	await _wait_until(func() -> bool:
 		var seen := String(BaseHub.view.get("roster", {}).get("members", {}).get(mid, {}).get("gear", {}).get("slots", {}).get("helmet", ""))
 		return seen == buy_id and int(BaseHub.view.get("funds", -1)) == 50, 5.0)
@@ -454,15 +529,51 @@ func _test_picker_buy(mid: String) -> String:
 			units = _hub_units()
 			var cash := Economy.cash()
 			optics.item_selected.emit(i)
-			await _frames(4)
+			await _frames(1)
+			var asked := screen.find_child("Confirm", false, false) != null
+			await _frames(3)
 			gear = Roster.json_safe(s.inventory.net_state)
 			var on := Optics.mounted(ItemDB.get_item(StringName(String(gear.slots.get("primary", "")))), gear.slot_state.get("primary", {}))
-			check(on != null and String(on.id) == optic_id and Economy.cash() == cash - BaseEconomy.item_price(StringName(optic_id))
+			check(not asked and on != null and String(on.id) == optic_id and Economy.cash() == cash - BaseEconomy.item_price(StringName(optic_id))
 				and int(_hub_units().get(optic_id, 0)) == int(units.get(optic_id, 0)) + 1,
-				"the optic picker buys %s the same way and mounts it (%s)" % [optic_id, on.id if on else "none"])
+				"the optic picker buys %s the same way and mounts it, without asking now (%s)" % [optic_id, on.id if on else "none"])
 			break
 	if optic_id == "":
 		print("  (no rail gun or no optic for sale: the optic purchase isn't tried)")
+	else:
+		# An optic he carries (none in the stash) is his to swap in, not "Buy:" (review of c881a939).
+		var spare := ""
+		for e: Dictionary in BaseEconomy.shop_catalog():
+			var oid := String(e.id)
+			if spare == "" and oid != optic_id and Optics.is_optic(ItemDB.get_item(StringName(oid))) and int(e.price) <= Economy.cash():
+				spare = oid
+		if spare != "":
+			var in_stash := int(BaseArmory.counts(base.server_collect_stash()).get(spare, 0))
+			if in_stash == 0:
+				BaseHub.server_buy(StringName(spare), 1)
+				in_stash = 1
+			BaseHub.request("loadout", [mid, "add", {"id": spare, "count": in_stash}])
+			await _frames(3)
+			screen.refresh()
+			optics = screen.find_child("Optic_primary", true, false) as OptionButton
+			var values: Array = []
+			var label := ""
+			for i in (optics.item_count if optics else 0):
+				values.append(String(optics.get_item_metadata(i)))
+				if String(optics.get_item_metadata(i)) == spare:
+					label = optics.get_item_text(i)
+			var carried := int(Roster.gear_counts(Roster.json_safe(s.inventory.net_state)).get(spare, 0))
+			check(carried >= 1 and int(BaseArmory.counts(base.server_collect_stash()).get(spare, 0)) == 0 and label.contains("(carried)")
+				and not (LoadoutScreen.BUY + spare) in values, "a %s he carries is offered as \"%s\", not to buy" % [spare, label])
+	# The question back on from the screen's own tick, saved.
+	screen.refresh()
+	var ask_tick := screen.find_child("AskBuy", true, false) as CheckBox
+	if ask_tick:
+		ask_tick.button_pressed = true
+	var cfg2 := ConfigFile.new()
+	cfg2.load(GameSettings.settings_path())
+	check(ask_tick != null and LoadoutScreen.confirm_buy_on() and cfg2.get_value("loadout", "confirm_buy", false) == true,
+		"the \"Ask before buying\" tick by the cash turns the question back on, saved")
 	screen.close()
 	frame.queue_free()
 	await _frames(2)
@@ -532,20 +643,15 @@ func _test_kits_at_hub(ids: Array, me: String) -> void:
 ## the host, a kit saved from the editor; the armory's shelves, its panel, buy, Fit on me.
 ## The editor remembers its last person in user:// (LoadoutEditor.SETTINGS), which every run on
 ## a machine shares (a run that left it on a squadmate failed the next one's "on your own
-## soldier", R0802): it starts from none here and the file is put back as it was afterwards.
+## soldier", R0802). F-406: this run's editor reads and writes its own file
+## (LoadoutEditor.use_file, set in _ready; dev builds only), never the player's.
 func _test_3d(me: String) -> void:
-	var path := ProjectSettings.globalize_path(LoadoutEditor.SETTINGS)
-	var kept := FileAccess.get_file_as_string(path) if FileAccess.file_exists(path) else ""
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
+	var real := ProjectSettings.globalize_path(LoadoutEditor.SETTINGS)
+	var kept := FileAccess.get_file_as_string(real) if FileAccess.file_exists(real) else "<none>"
 	await _test_3d_editor(me)
-	if kept != "":
-		var f := FileAccess.open(path, FileAccess.WRITE)
-		if f:
-			f.store_string(kept)
-			f.close()
-	elif FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
+	check(LoadoutEditor.settings_path() == _editor_path and FileAccess.file_exists(_editor_path)
+		and (FileAccess.get_file_as_string(real) if FileAccess.file_exists(real) else "<none>") == kept,
+		"the editor kept its picks in the test's own file; the player's user://loadout_editor.cfg is untouched (F-406)")
 
 
 func _test_3d_editor(me: String) -> void:
@@ -572,30 +678,90 @@ func _test_3d_editor(me: String) -> void:
 	editor.pick_slot("slot:helmet")
 	check(editor.choices("slot:helmet").has("helmet_heavy") and editor.choices("slot:helmet").all(func(id: String) -> bool: return ItemDB.get_item(StringName(id)).slot == &"helmet"),
 		"the helmet's picker lists helmets only (%d)" % editor.choices("slot:helmet").size())
-	editor.choose("helmet_heavy")
+	var try_on := ""
+	for id: String in editor.choices("slot:helmet"):
+		if try_on == "" and editor.owned(id) > 0 and id != String(editor.worn.slots.get("helmet", "")):
+			try_on = id  # one the company owns (an unowned one would be bought: below)
+	editor.choose(try_on)
 	await _frames(1)
-	check(String(editor.draft.slots.get("helmet", "")) == "helmet_heavy" and String(editor.preview.inventory.slots.get(&"helmet", &"")) == "helmet_heavy" and editor.dirty(),
-		"picking puts it on the model at once, as a draft")
+	check(try_on != "" and String(editor.draft.slots.get("helmet", "")) == try_on and String(editor.preview.inventory.slots.get(&"helmet", &"")) == try_on and editor.dirty(),
+		"picking an owned %s puts it on the model at once, as a draft" % try_on)
 	editor.undo()
-	check(String(editor.draft.slots.get("helmet", "")) != "helmet_heavy" and not editor.dirty(), "Ctrl+Z takes it back")
-	var unowned := "nvg_gen3" if editor.owned("nvg_gen3") <= 0 else "nvg_gen1"
-	editor.choose("helmet")
+	check(String(editor.draft.slots.get("helmet", "")) != try_on and not editor.dirty(), "Ctrl+Z takes it back")
+	# F-405: an unowned item is bought and fitted in one step, asking first (this run's settings
+	# start with the question on). His helmet first, so the NVG mount is on what he wears.
+	if String(editor.worn.slots.get("helmet", "")) == "":
+		editor.pick_slot("slot:helmet")
+		editor.choose("helmet")
+		editor.apply_draft()
+		await _wait_until(func() -> bool: return String(editor.worn.slots.get("helmet", "")) != "", 6.0)
+	var nvg_on := func() -> String:
+		var hg: Dictionary = Roster.json_safe(host.inventory.net_state)
+		return GearMounts.on(ItemDB.get_item(StringName(String(hg.slots.get("helmet", "")))), hg.slot_state.get("helmet", {}), "nvg")
+	var unowned := ""
+	for id: String in ["nvg_gen3", "nvg_gen1", "nvg_gen2"]:
+		if unowned == "" and editor.owned(id) <= 0 and id != nvg_on.call():
+			unowned = id
+	var price := LoadoutEditor.price_of(unowned)
 	editor.pick_slot("mount:helmet:nvg")
-	editor.choose(unowned)
-	await _frames(1)
-	var buy_now := editor.find_child("BuyNow", true, false) as Button
-	check(buy_now != null and not buy_now.disabled and buy_now.text.contains("$%d" % BaseEconomy.item_price(StringName(unowned))),
-		"an unowned NVG on the helmet offers Buy now at its price (%s)" % [buy_now.text if buy_now else "none"])
-	check(int(editor.short.get("units", 0)) > 0 and editor.buy_button.text.contains("$%d" % int(editor.short.cost)), "Buy missing shows what the draft lacks ($%d)" % int(editor.short.get("cost", 0)))
+	var draft_was: int = hash(editor.draft)
 	var cash := Economy.cash()
-	buy_now.pressed.emit()
-	await _wait_until(func() -> bool: return editor.owned(unowned) == 1, 6.0)
-	check(Economy.cash() == cash - BaseEconomy.item_price(StringName(unowned)) and editor.owned(unowned) == 1, "Buy now bought it into the stash (cash $%d to $%d)" % [cash, Economy.cash()])
+	var units := _hub_units()
+	editor.choose(unowned)
+	await _frames(2)
+	var box := editor.find_child("Confirm", false, false)
+	var question := ""
+	for l: Node in (box.find_children("*", "Label", true, false) if box else []):
+		question += (l as Label).text + " "
+	check(box != null and question.contains(ItemDB.get_item(StringName(unowned)).name) and question.contains("$" + DebriefCalc.money(price))
+		and question.contains("$%s left after" % DebriefCalc.money(cash - price)),
+		"picking an unowned NVG asks first, with its price and the cash left after (%s)" % question.strip_edges())
+	if box:
+		(box.find_child("Cancel", true, false) as Button).pressed.emit()
+	await _frames(3)
+	check(Economy.cash() == cash and _hub_units() == units and hash(editor.draft) == draft_was and editor.find_child("Confirm", false, false) == null
+		and nvg_on.call() != unowned, "Cancel buys nothing and leaves the draft as it was")
+	_notes.clear()
+	_econ_notes.clear()
+	editor.choose(unowned)
+	await _frames(2)
+	box = editor.find_child("Confirm", false, false)
+	if box:
+		(box.find_child("Ok", true, false) as Button).pressed.emit()
+	var fitted := await _wait_until(func() -> bool: return nvg_on.call() == unowned and not editor.dirty(), 6.0)
+	var diff := _diff(units, _hub_units())
+	check(fitted and Economy.cash() == cash - price and diff == {unowned: 1} and not editor.dirty(),
+		"Buy: one bought ($%d, $%d left) and on his helmet in one step, no Apply; the draft is what he wears (%s)" % [price, Economy.cash(), diff])
+	check(_notes.size() == 1 and String(_notes[0]).contains("bought for") and _econ_notes.is_empty(),
+		"one note for the purchase (%s; shop notices %s)" % [_notes, _econ_notes])
+	# Can't afford it: it stays in the draft with Buy now greyed out, nothing bought.
+	var other := ""
+	for id: String in ["nvg_gen1", "nvg_gen2", "nvg_gen3"]:
+		if other == "" and editor.owned(id) <= 0:
+			other = id
+	if other != "":
+		var funds_kept := Economy.cash()
+		Economy.add_cash(-funds_kept, "test: broke")
+		await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", -1)) == 0, 5.0)
+		units = _hub_units()
+		editor.choose(other)
+		await _frames(2)
+		var buy_now := editor.find_child("BuyNow", true, false) as Button
+		check(editor.find_child("Confirm", false, false) == null and buy_now != null and buy_now.disabled and String(editor.draft.get("mounts", {}).get("helmet", {}).get("nvg", "")) == other
+			and _hub_units() == units, "with no cash an unowned NVG goes in the draft only, Buy now greyed out (%s)" % [buy_now.text if buy_now else "none"])
+		editor.revert_draft()
+		Economy.add_cash(funds_kept, "test: cash back")
+		await _frames(2)
+	# The rest of the draft still waits for Apply.
+	editor.pick_slot("pockets")
+	editor.choose("smoke_grenade")
+	var smokes := int(Roster.gear_counts(Roster.json_safe(host.inventory.net_state)).get("smoke_grenade", 0))
+	check(editor.dirty(), "an owned pick is a draft until Apply")
 	editor.apply_draft()
 	await _frames(4)
-	var g: Dictionary = Roster.json_safe(host.inventory.net_state)
-	check(GearMounts.on(ItemDB.get_item(StringName(String(g.slots.get("helmet", "")))), g.slot_state.get("helmet", {}), "nvg") == unowned and not editor.dirty(),
-		"Apply fits the draft through the host: the NVG is on his helmet, and the draft is what he wears")
+	check(int(Roster.gear_counts(Roster.json_safe(host.inventory.net_state)).get("smoke_grenade", 0)) == smokes + 1 and not editor.dirty() and nvg_on.call() == unowned,
+		"Apply fits the draft through the host: one more smoke (%d of %d), the NVG still on (%s), and the draft is what he wears (dirty %s)" % [
+		int(Roster.gear_counts(Roster.json_safe(host.inventory.net_state)).get("smoke_grenade", 0)), smokes + 1, nvg_on.call(), editor.dirty()])
 	editor.save_kit("Editor kit")
 	await _frames(2)
 	check("Editor kit" in KitLibrary.names(BaseHub.roster()), "a kit saved from the editor is on the roster")
@@ -741,15 +907,20 @@ func _test_client(ids: Array, bought_helmet := "") -> void:
 	check(Roster.json_safe(host_body.inventory.net_state) == host_gear, "the host's kit is untouched by the client's request on it")
 	if s:
 		check(int(Roster.gear_counts(Roster.json_safe(s.inventory.net_state)).get("mag_556", 0)) >= mags_before, "the client's Fill ammo on a squadmate went through the host")
-	var after := _hub_units()
-	var diff := {}
-	for id: String in after:
-		if int(after[id]) != int(before.get(id, 0)):
-			diff[id] = int(after[id]) - int(before.get(id, 0))
+	var diff := _diff(before, _hub_units())
 	_client_bought = String(Roster.json_safe(client_body.inventory.net_state).slots.get("helmet", "")) if client_body else ""
 	var paid := BaseEconomy.item_price(StringName(_client_bought)) if _client_bought != "" else -1
-	check(_client_bought != "" and diff == {_client_bought: 1} and Economy.cash() == cash_before - paid,
-		"the client's picker purchase: one %s bought on the company's account ($%d of $%d) and on the client's body; nothing else made or lost (%s)" % [_client_bought, paid, cash_before, diff])
+	# And one item from its 3D editor (F-405), bought and fitted in one step through the host.
+	var in_3d := ""
+	for id: String in diff:
+		if id != _client_bought and int(diff[id]) == 1:
+			in_3d = id
+	var paid_3d := BaseEconomy.item_price(StringName(in_3d)) if in_3d != "" else -1
+	var on_client := Loadouts.units([], [Roster.json_safe(client_body.inventory.net_state)]) if client_body else {}
+	check(_client_bought != "" and in_3d != "" and diff == {_client_bought: 1, in_3d: 1} and Economy.cash() == cash_before - paid - paid_3d
+		and int(on_client.get(in_3d, 0)) >= 1,
+		"the client's purchases: one %s from its picker and one %s from its 3D editor, on the company's account ($%d + $%d of $%d) and on the client's body; nothing else made or lost (%s)" % [
+			_client_bought, in_3d, paid, paid_3d, cash_before, diff])
 	var deadline := Time.get_ticks_msec() + 30000
 	while pid > 0 and OS.is_process_running(pid) and Time.get_ticks_msec() < deadline:
 		await _seconds(0.25)
@@ -829,24 +1000,85 @@ func _run_client() -> void:
 	var funds := int(BaseHub.view.get("funds", 0))
 	check(pick > 0 and price > 0, "its helmet picker offers %s at $%d (cash $%d in its view)" % [buy_id, price, funds])
 	notes.clear()
+	_econ_notes.clear()
 	if pick > 0:
 		picker.item_selected.emit(pick)
+	await _frames(2)
+	var question := _answer_confirm(screen, "Ok")  # its own settings: the question is on
 	var worn := await _wait_until(func() -> bool:
 		return body != null and String(Roster.json_safe(body.inventory.net_state).slots.get("helmet", "")) == buy_id, 15.0)
 	var paid := await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", 0)) == funds - price, 15.0)
-	check(pick > 0 and worn and paid and notes.any(func(t: String) -> bool: return t.contains("bought")),
-		"choosing it: the host bought it and put it on its body, and its view shows $%d less (%s)" % [price, notes])
+	await _seconds(0.5)
+	check(pick > 0 and question != "" and worn and paid and notes.size() == 1 and String(notes[0]).contains("bought for") and _econ_notes.is_empty(),
+		"choosing it asks, then the host bought it and put it on its body, its view shows $%d less, one note (%s; shop notices %s)" % [price, notes, _econ_notes])
 	screen.close()
 	frame.queue_free()
+	await _frames(2)
+	# Its 3D editor (F-405): something it doesn't own, bought and fitted in one step through the host.
+	var editor := BaseHub.open_loadout_3d()
+	await _frames(3)
+	var funds2 := int(BaseHub.view.get("funds", 0))
+	var key := ""
+	var id3 := ""
+	for k: String in ["mount:helmet:nvg", "slot:sidearm", "slot:launcher", "slot:backpack"]:
+		if editor == null or id3 != "" or not editor.on_worn(k):
+			continue
+		for id: String in editor.choices(k):
+			var p := LoadoutEditor.price_of(id)
+			if id3 == "" and editor.owned(id) <= 0 and p > 0 and p <= funds2:
+				key = k
+				id3 = id
+	var price3 := LoadoutEditor.price_of(id3) if id3 != "" else 0
+	var units_of := func() -> int: return int(Loadouts.units([], [Roster.json_safe(body.inventory.net_state)]).get(id3, 0)) if body and id3 != "" else 0
+	var had3: int = units_of.call()
+	if id3 != "":
+		editor.pick_slot(key)
+		editor.choose(id3)
+		await _frames(2)
+		question = _answer_confirm(editor, "Ok")
+	var fitted := await _wait_until(func() -> bool: return id3 != "" and units_of.call() == had3 + 1 and int(BaseHub.view.get("funds", 0)) == funds2 - price3, 15.0)
+	var settled := await _wait_until(func() -> bool: return editor != null and not editor.dirty(), 5.0)
+	check(editor != null and question != "" and fitted and settled,
+		"its 3D editor bought %s ($%d) on %s and fitted it through the host in one step; the draft is what it wears" % [id3, price3, key])
+	if editor:
+		editor.close()
 	_say(CLIENT_DONE)
 	await _seconds(1.0)
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
+	_own_files_off()
 	_log.close()
 	Net.leave()
 	_tree.quit(failures)
 
 
 # --- Bits --------------------------------------------------------------------------------------
+
+## What changed between two unit counts (_hub_units): {id: after - before}, changed ones only.
+func _diff(before: Dictionary, after: Dictionary) -> Dictionary:
+	var out := {}
+	for id: String in after:
+		if int(after[id]) != int(before.get(id, 0)):
+			out[id] = int(after[id]) - int(before.get(id, 0))
+	for id: String in before:
+		if not after.has(id) and int(before[id]) != 0:
+			out[id] = -int(before[id])
+	return out
+
+
+## The loadout confirm box over `screen` (UiKit.confirm, "Confirm"), answered: "Ok" or "Cancel".
+## Returns its question (the labels' text), "" when none was up.
+func _answer_confirm(screen: Node, button: String, tick := false) -> String:
+	var box := screen.find_child("Confirm", false, false)
+	if box == null:
+		return ""
+	var question := ""
+	for l: Node in box.find_children("*", "Label", true, false):
+		question += (l as Label).text + " "
+	if tick:
+		(box.find_child("DontAsk", true, false) as CheckBox).button_pressed = true
+	(box.find_child(button, true, false) as Button).pressed.emit()
+	return question.strip_edges()
+
 
 func _cheapest(pool: Array) -> Dictionary:
 	var best: Dictionary = pool[0]

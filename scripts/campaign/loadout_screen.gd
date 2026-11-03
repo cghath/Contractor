@@ -40,7 +40,7 @@ const SORTS := [["name", "Sort: name"], ["count", "Sort: most first"], ["weight"
 const HELP := [
 	"Pick a person on the left; the middle shows what they wear and carry, the right what the company's stash holds.",
 	"Wear, Mount and +1 move an item from the stash onto them; -1 and Take off put it back. Or drag a stash row onto the Kit column, or a kit row onto the Stash column.",
-	"The Swap and Optic pickers also list what the stash has none of, as \"Buy: name ($price)\": picking one buys it with company money and puts it on (greyed out when cash is short).",
+	"The Swap and Optic pickers also list what the stash has none of, as \"Buy: name ($price)\": picking one buys it with company money and puts it on (greyed out when cash is short). It asks first, with the cash left after; \"Don't ask again\" stops that, and the \"Ask before buying\" tick by the cash (or Settings, Controls) brings it back.",
 	"Quick kit fills ammo, a medic kit or a whole role kit from the stash. The standing loadout is what Restock refills them to after a deployment.",
 	"Search, filter and sort the stash from the boxes over it. Hover any row for what the item is and does.",
 	"Sell sells one item to the shop for the price shown (it asks first). Other players set their own kit; you can give them items.",
@@ -280,15 +280,26 @@ func _build_doll(p: Dictionary) -> void:
 	var funds := int(BaseHub.view.get("funds", 0))
 	var buyable := buyable_prices(BaseHub.view) if editable else {}
 	var inside := BaseArmory.contents_counts(stash)  # in the stash's carriers and packs: drawn, not bought
-	var for_sale := _sorted(buyable.keys()).filter(func(sid: String) -> bool: return not inside.has(sid))
+	var slots: Dictionary = gear.get("slots", {})
+	var slot_state: Dictionary = gear.get("slot_state", {})
+	# What they carry besides what they wear (pockets, pouches, pack): a swap draws it from their
+	# own kit, so it's offered as theirs, never as "Buy:" (no charge for what they have).
+	var carried := Roster.gear_counts(gear)
+	for slot: Variant in slots:
+		var worn := String(slots[slot])
+		if worn != "" and carried.has(worn):
+			carried[worn] = int(carried[worn]) - 1
+			if int(carried[worn]) <= 0:
+				carried.erase(worn)
+	var for_sale := _sorted(buyable.keys()).filter(func(sid: String) -> bool: return not inside.has(sid) and not carried.has(sid))
 	# Worn: each slot with what the stash has for it, and what the shop sells that it hasn't.
 	doll_box.add_child(UiKit.heading("Worn"))
 	if not buyable.is_empty():
-		var cash := UiKit.hint("Company cash $%s. \"Buy:\" in a picker is what the stash has none of: picking one buys it at the price shown and puts it on." % DebriefCalc.money(funds))
+		var cash := UiKit.hint("Company cash $%s. \"Buy:\" in a picker is what the stash has none of: picking one buys it at the price shown and puts it on%s." % [
+			DebriefCalc.money(funds), " (it asks first)" if confirm_buy_on() else ""])
 		cash.name = "BuyHint"
 		doll_box.add_child(cash)
-	var slots: Dictionary = gear.get("slots", {})
-	var slot_state: Dictionary = gear.get("slot_state", {})
+		doll_box.add_child(ask_buy_tick())
 	var carrier := ItemDB.get_item(StringName(String(slots.get("vest", ""))))
 	var pockets: Array = carrier.stats.get("plate_slots", []) if carrier else []
 	for slot in Loadouts.DOLL_SLOTS:
@@ -311,6 +322,9 @@ func _build_doll(p: Dictionary) -> void:
 				var it := ItemDB.get_item(StringName(sid))
 				if Loadouts.fits_slot(it, slot) and sid != id:
 					choices.append(["%s (x%d)" % [it.name, int(have[sid])], sid])
+			for sid: String in _sorted(carried.keys()):
+				if not have.has(sid) and sid != id and Loadouts.fits_slot(ItemDB.get_item(StringName(sid)), slot):
+					choices.append(["%s (carried)" % _name(sid), sid])
 			for sid: String in for_sale:
 				if have.has(sid) or sid == id:
 					continue
@@ -320,7 +334,8 @@ func _build_doll(p: Dictionary) -> void:
 				var s := slot
 				row.get_meta(&"controls").add_child(_picker("Swap_" + String(slot), choices, func(v: String) -> void:
 					if v.begins_with(BUY):
-						ask("slot", {"slot": String(s), "id": v.trim_prefix(BUY), "buy": true})
+						var bid := v.trim_prefix(BUY)
+						ask_buy(self, bid, int(buyable.get(bid, 0)), funds, func() -> void: ask("slot", {"slot": String(s), "id": bid, "buy": true}))
 					else:
 						ask("slot", {"slot": String(s), "id": "" if v == "-" else v})))
 			if item and Optics.has_rail(item):
@@ -328,6 +343,9 @@ func _build_doll(p: Dictionary) -> void:
 				for sid: String in _sorted(have.keys()):
 					if Optics.is_optic(ItemDB.get_item(StringName(sid))):
 						optics.append(["%s (x%d)" % [ItemDB.get_item(StringName(sid)).name, int(have[sid])], sid])
+				for sid: String in _sorted(carried.keys()):
+					if not have.has(sid) and Optics.is_optic(ItemDB.get_item(StringName(sid))):
+						optics.append(["%s (carried)" % _name(sid), sid])
 				var on := Optics.mounted(item, slot_state.get(String(slot), {}))
 				for sid: String in for_sale:
 					if not have.has(sid) and not (on and String(on.id) == sid) and Optics.is_optic(ItemDB.get_item(StringName(sid))):
@@ -335,18 +353,12 @@ func _build_doll(p: Dictionary) -> void:
 				var s2 := slot
 				row.get_meta(&"controls").add_child(_picker("Optic_" + String(slot), optics, func(v: String) -> void:
 					if v.begins_with(BUY):
-						ask("optic", {"slot": String(s2), "id": v.trim_prefix(BUY), "buy": true})
+						var bid := v.trim_prefix(BUY)
+						ask_buy(self, bid, int(buyable.get(bid, 0)), funds, func() -> void: ask("optic", {"slot": String(s2), "id": bid, "buy": true}))
 					else:
 						ask("optic", {"slot": String(s2), "id": "" if v == "-" else v})))
 		doll_box.add_child(row)
-	# Carried, by group.
-	var carried := Roster.gear_counts(gear)
-	for slot: Variant in slots:
-		var worn := String(slots[slot])
-		if worn != "" and carried.has(worn):
-			carried[worn] = int(carried[worn]) - 1
-			if int(carried[worn]) <= 0:
-				carried.erase(worn)
+	# Carried, by group (`carried`, above).
 	var others: Array = people().filter(func(o: Dictionary) -> bool: return o.who != who)
 	for group in Loadouts.GROUPS:
 		var ids: Array = _sorted(carried.keys()).filter(func(id: String) -> bool: return Loadouts.group_of(ItemDB.get_item(StringName(id))) == group)
@@ -758,6 +770,44 @@ static func buy_choice(id: String, price: int, funds: int) -> Array:
 	if funds < price:
 		return ["Buy: %s ($%s, have $%s)" % [_name(id), DebriefCalc.money(price), DebriefCalc.money(funds)], BUY + id, true]
 	return ["Buy: %s ($%s)" % [_name(id), DebriefCalc.money(price)], BUY + id]
+
+
+## Whether a purchase from the loadout menus asks first (GameSettings "loadout" "confirm_buy").
+static func confirm_buy_on() -> bool:
+	return bool(GameSettings.get_value("loadout", "confirm_buy"))
+
+
+## Buys `id` for `price` (`buy` sends the request), asking first in a box over `parent` unless
+## the player has said not to (Captain, 2026-11-02, F-404: "not always but yes"): the item, its
+## price, the company's cash and what's left after; Cancel buys nothing. Its "Don't ask again"
+## tick, with the Buy, turns the setting off (the player's own settings.cfg); the "Ask before
+## buying" tick (ask_buy_tick) and Settings, Controls, Menus turn it back on. The paper doll's
+## pickers and the 3D editor both ask here.
+static func ask_buy(parent: Node, id: String, price: int, funds: int, buy: Callable) -> void:
+	if not confirm_buy_on():
+		buy.call()
+		return
+	var tick := CheckBox.new()
+	tick.name = "DontAsk"
+	tick.text = "Don't ask again"
+	tick.tooltip_text = "Buy on one pick from now on (the \"Ask before buying\" tick or Settings, Controls brings the question back)"
+	UiKit.confirm(parent, "Buy one %s for $%s of company money and fit it now? The company has $%s: $%s left after." % [
+		_name(id), DebriefCalc.money(price), DebriefCalc.money(funds), DebriefCalc.money(funds - price)],
+		"Buy for $%s" % DebriefCalc.money(price), func() -> void:
+			if tick.button_pressed:
+				GameSettings.set_value("loadout", "confirm_buy", false)
+			buy.call(), false, tick)
+
+
+## The "Ask before buying" tick by the cash in the loadout screens (the setting ask_buy reads).
+static func ask_buy_tick() -> CheckBox:
+	var tick := CheckBox.new()
+	tick.name = "AskBuy"
+	tick.text = "Ask before buying"
+	tick.tooltip_text = "A purchase from a picker asks first, with the price and the cash left after"
+	tick.button_pressed = confirm_buy_on()
+	tick.toggled.connect(func(on: bool) -> void: GameSettings.set_value("loadout", "confirm_buy", on))
+	return tick
 
 
 static func _sorted(ids: Array) -> Array:

@@ -31,6 +31,7 @@ var _report := {}
 func _ready() -> void:
 	GameSettings.use_file(OS.get_user_data_dir().path_join("test_ui_settings%s.cfg" % tag))  # never the player's
 	GameSettings.reset_all()
+	LoadoutEditor.use_file(OS.get_user_data_dir().path_join("test_ui_loadout_editor%s.cfg" % tag))  # nor his user://loadout_editor.cfg (F-406)
 	Campaign.campaign_id = "test_ui" + tag  # never touch a real save
 	_vp = SubViewport.new()
 	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -235,6 +236,9 @@ func _ready() -> void:
 	_summary()
 	GameSettings.reset_all()
 	GameSettings.use_file("")
+	if FileAccess.file_exists(LoadoutEditor.settings_path()) and LoadoutEditor.settings_path() != LoadoutEditor.SETTINGS:
+		DirAccess.remove_absolute(LoadoutEditor.settings_path())
+	LoadoutEditor.use_file("")
 	GameState.delete_save()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	print("UI TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
