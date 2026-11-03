@@ -146,6 +146,21 @@ const TRAIL_LOOP_SKIP := 3
 ## about 38 and 60 m back along the lead's trail through the compound, and he ran 25 m out and
 ## back in 8 s. Proposed number.
 const TRAIL_SLIDE_M := 12.0
+## A fire team's place let go from its blocked-place fallback (held on the lead's trail, or on
+## the other side) travels to where it belongs instead of leaping there (_place_on_way; Captain,
+## 2026-11-02: "yes"): R0815's Bravo team, its place inside the compound wall and so held on the
+## lead's trail back through the gate, had it leap 29 m out past the gate the moment the lead
+## turned along the wall's outside and the place came clear. It moves PLACE_CATCHUP_MPS faster
+## than the lead walks, straight at its place when no wall stands between them, else along a
+## navigation path (one per team, asked again only when its end is PLACE_REPATH_M off the place
+## and PLACE_REPATH_S has gone), so it goes round by the gate, never through the wall. On its
+## way PLACE_TRAVEL_MAX_S, or with no update for PLACE_STALE_S (or the lead jumping, as for the
+## trail), it is there at once, as before. Proposed numbers (game seconds).
+const PLACE_CATCHUP_MPS := 3.0
+const PLACE_REPATH_M := 6.0
+const PLACE_REPATH_S := 1.0
+const PLACE_TRAVEL_MAX_S := 20.0
+const PLACE_STALE_S := 1.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -185,6 +200,7 @@ var _slots_frame := -1
 var _sides := {}  # slot key -> {"pulled", "since"} (_blocked)
 var _trail := PackedVector3Array()  # the lead's trail, oldest first (_update_trail)
 var _refits := {}  # soldier instance id -> his last re-pick {"kind": "mirror"/"trail", "s": metres back}
+var _places := {}  # fire team -> where its place stands now (_place_on_way)
 ## Hostile squads: points to walk between when nothing is happening.
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
@@ -1744,7 +1760,8 @@ func _work_out_slots() -> Dictionary:
 				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
 					origin = other
 					mirror = -mirror
-			if _blocked(leader.global_position, origin, "team%d" % t):
+			var held := _blocked(leader.global_position, origin, "team%d" % t)
+			if held:
 				# Its place is across a wall: the other side if that's clear, else back on the
 				# lead's trail about as far as the place is behind him.
 				var flip := leader.global_position - right * place.x - fwd * place.z
@@ -1754,6 +1771,7 @@ func _work_out_slots() -> Dictionary:
 				else:
 					var back: Variant = _trail_point(maxf(place.z, place.length() * 0.5))
 					origin = back if back != null else _pulled(leader.global_position, origin)
+			origin = _place_on_way(t, origin, held, map)  # let go of the fallback: it travels there
 		if t != lead_team:
 			for s: Soldier in list:
 				if s.vitals.is_up():
@@ -1826,6 +1844,51 @@ func _work_out_slots() -> Dictionary:
 		out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
 	out.erase(leader)
 	return out
+
+
+## Where fire team `t`'s place stands this working-out, `want` being where it belongs now and
+## `held` whether that's the blocked-place fallback (PLACE_CATCHUP_MPS): held, it's there at once
+## (never left across a wall from the lead); let go, it travels from where it stood, by the
+## lead's own walk since the last working-out plus PLACE_CATCHUP_MPS a second, straight while no
+## wall stands between, else along its navigation path, until it's there.
+func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
+	var frame := Engine.get_physics_frames()
+	var lead := leader.global_position
+	var was: Dictionary = _places.get(t, {})
+	_places[t] = {"at": want, "goal": want, "held": held, "way": false, "frame": frame, "lead": lead,
+		"path": PackedVector3Array(), "since": 0.0, "asked": -INF}
+	if held or was.is_empty() or not (bool(was.held) or bool(was.way)) or not map.is_valid():
+		return want
+	var dt := float(frame - int(was.frame)) / Engine.physics_ticks_per_second * Engine.time_scale
+	var since := float(was.since) + dt
+	var walked := _flat(lead, was.lead)
+	if dt < 0.0 or dt > PLACE_STALE_S or walked > TRAIL_JUMP_M or since > PLACE_TRAVEL_MAX_S:
+		return want
+	var at: Vector3 = was.at
+	var left := walked + PLACE_CATCHUP_MPS * dt
+	if _flat(at, want) <= left:
+		return want  # there
+	var path: PackedVector3Array = was.path
+	var asked := float(was.asked)
+	if not _wall_between(at, want):
+		path = PackedVector3Array([want])  # in the open: straight at it
+	elif (path.is_empty() or _flat(path[path.size() - 1], want) > PLACE_REPATH_M) and since - asked >= PLACE_REPATH_S:
+		path = NavigationServer3D.map_get_path(map, at, want, true)
+		asked = since
+	while left > 0.0 and not path.is_empty():
+		var d := _flat(at, path[0])
+		if d <= left:
+			at = path[0]
+			left -= d
+			path.remove_at(0)
+		else:
+			at = at.lerp(path[0], left / d)
+			left = 0.0
+	# (No path round, or its end left behind: it waits where it is, never through the wall, until
+	# a path is asked for again or PLACE_TRAVEL_MAX_S.)
+	_places[t] = {"at": at, "goal": want, "held": false, "way": true, "frame": frame, "lead": lead,
+		"path": path, "since": since, "asked": asked}
+	return at
 
 
 ## The way a human team leader is heading: his horizontal velocity when he's moving, else the

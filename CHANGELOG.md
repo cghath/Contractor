@@ -38,6 +38,12 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   and keeps the point it cuts back to. And a man's slot back along the trail, crowded by the
   others, slides along the trail to the nearest clear spot instead of being picked afresh, which
   could swing it 20 m back and forward again (a man ran a 25 m loop after it, CI 41243628687).
+- **A fire team's place moves out from behind a wall gradually** (F-416, Captain: "yes"). Held
+  back on the lead's trail while its place lay across a wall, the second team's place leapt there
+  the moment it came clear: 29 m out past the compound's gate as the lead turned along the outside
+  of its wall, every man's slot with it. It now travels there at the lead's pace plus 3 m/s,
+  straight across open ground, else along a navigation path round by the gate (one query when it's
+  let go), never through the wall. Being held back still happens at once.
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -57,7 +63,10 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   just leapt away, R0815); its stuck line prints his slot each second, his refit pick, how far he walked
   and how far off his slot he began. spacing's new "Trail" checks walk the lead out and back on a
   line (the trail lies on the ground once) and in at the compound's gate and back along the
-  inside of its wall (no stretch crosses the wall). Local R0770 (smoke, weapons,
+  inside of its wall (no stretch crosses the wall), and its "Team place" checks walk the lead out
+  of the gate and along the wall's outside (the place, let go, never outruns the lead by more than
+  3 m/s nor crosses a wall, and gets there). weapons' leg-box check also sinks the drawn hips 6 cm
+  and sees the pelvis box go down with them. Local R0770 (smoke, weapons,
   animations, Looting and the vault checks among them) and R0774 (wounds, medical); with the
   pelvis on the drawn root and the trail fix R0796 (smoke, weapons, casualty), R0805 (smoke,
   animations, wounds, medical, spacing, casualty) and R0808 (casualty) PASS.

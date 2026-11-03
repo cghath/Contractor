@@ -555,6 +555,23 @@ func _test_leg_boxes() -> void:
 	s.model.pose_hitboxes(s)
 	var turned := (before.inverse() * thigh.transform.basis).get_euler().x if thigh else 0.0
 	check(thigh != null and absf(turned - 1.0) < 0.05, "the left thigh's box turns with the drawn thigh (%.2f rad of 1.00)" % turned)
+	# The pelvis box hangs from the drawn root too (F-374): the drawn hips sunk a few cm (a landing's
+	# sink), the boxes posed again, the pelvis box goes down with them, as the thigh's does.
+	var pelvis: Area3D = null
+	for a: Area3D in CharacterModel._posable_hitboxes(s):
+		if a.get_meta(&"body_part", &"") == Vitals.PELVIS:
+			pelvis = a
+	var hips_at := pelvis.position if pelvis else Vector3.ZERO
+	var thigh_at := thigh.position if thigh else Vector3.ZERO
+	var root_was: Transform3D = s.model._root.transform
+	s.model._root.position.y -= 0.06
+	s.model.pose_hitboxes(s)
+	var sank := (pelvis.position - hips_at).y if pelvis else 0.0
+	var thigh_sank := (thigh.position - thigh_at).y if thigh else 0.0
+	check(pelvis != null and absf(sank + 0.06) < 0.01 and absf(sank - thigh_sank) < 0.01,
+		"the pelvis box follows the drawn root: the hips sunk 6 cm, it went down %.1f cm (the thigh's %.1f)" % [-sank * 100.0, -thigh_sank * 100.0])
+	s.model._root.transform = root_was
+	s.model.pose_hitboxes(s)
 	# Downed, or carried, the boxes lie as the body does (its pose: CLAUDE.md's body rules), not
 	# as the legs were last drawn standing: swinging the drawn thigh moves nothing.
 	CharacterModel.lay_down(s, s.model, true)

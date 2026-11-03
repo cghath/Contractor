@@ -1801,7 +1801,7 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
-### F-374 (fixed, F-400): the pelvis hitbox and the legs' boxes hang from different roots
+## F-374 (fixed, F-400): the pelvis hitbox and the legs' boxes hang from different roots
 Since feat/vault-legs-svd the legs' hitboxes follow the legs as drawn (`CharacterModel.pose_hitboxes`,
 from the drawn `_root`: the landing's sink, the hips settled over the feet on a slope or step),
 while the pelvis, torso and head boxes followed the target pose's root, so at the hip the thigh
@@ -1813,9 +1813,10 @@ Captain, 2026-10-31: "yes, fix followers". The pelvis is on the drawn root again
 boxes follow the drawn legs: up and in no carry state). No path from a hitbox to a follower was
 found (F-400 has the search); the failing man in every run was running a loop, not stuck: the
 squad's trail no longer doubles back, and the soak's check lets off a man chasing a slot that
-moved (F-400).
+moved (F-400). weapons' `_test_leg_boxes` proves it (review, 2026-11-02): the drawn `_root` sunk
+6 cm, the boxes posed again, the pelvis box goes down 6 cm with the thigh's.
 
-### F-400 (fixed): a follower far behind ran loops on the lead's doubled-back trail
+## F-400 (fixed): a follower far behind ran loops on the lead's doubled-back trail
 Found on feat/vault-legs-svd (2026-10-31) chasing F-374. Location: [squad.gd](../../scripts/ai/squad.gd)
 `_update_trail`, read by `_refit`'s trail picks and the team place's fallback.
 
@@ -1884,6 +1885,32 @@ With the trail fix (and the pelvis on the drawn root) casualty passed R0796, R08
 R0805 also passed animations (Looting, "takes its ragdoll along", standing up where the ragdoll
 lay, respawning, and the drag straps this time), wounds, medical and spacing; R0796 smoke and
 weapons.
+
+## F-416 (fixed): a fire team's place leapt ~29 m when its blocked-place fallback let go
+Found on feat/vault-legs-svd (R0815, Bravo; F-400 above). Location: [squad.gd](../../scripts/ai/squad.gd)
+`_work_out_slots` (the second team's place) and `_place_on_way`.
+
+A team whose place lies across a wall from the lead has it held back on the lead's trail (or on
+the other side). Out of the compound's south gate and along the outside of its south wall, the
+second team's place lay inside the wall, so it was held on the lead's trail back through the gate;
+as the lead turned along the wall the place came clear outside, and the place and every slot of
+the team leapt there, 29 m in one working-out (R0815's Bravo, 4.6 m off his slot, was suddenly
+far off it). Captain, 2026-11-02: "yes", move it out gradually. Let go, the place now travels from
+where it stood: the lead's own walk plus PLACE_CATCHUP_MPS (3 m/s, Proposed) a second, straight
+while no wall stands between it and where it belongs, else along a navigation path (one query per
+team when it's let go, asked again only when the path's end is 6 m off the place, at most once a
+second), so it goes out round by the gate. Being held back stays at once (a slot is never left
+across a wall from the lead). spacing's "Team place" walks that route and samples every
+working-out of the slots.
+
+## F-417 (open, note): the team's men swap sides at once when the other-side fallback lets go
+Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`. When a team's place is across a
+wall and the mirror across the lead (`flip`) is clear, the team forms there with its shape mirrored
+(`mirror = -mirror`). Since F-416 the place travels back when that lets go, but the mirror goes back
+at once, so each man's slot swaps to the other side of the travelling place (the wedge's last man
+about 22 m at normal spacing, 34 m at wide). The trail fallback (R0815's case) doesn't mirror. Worth a
+look: keep the fallback's mirror until the place is there, then turn the shape over man by man, or
+blend each man's offset the same way the place travels.
 
 ## Calls made for the Captain
 
@@ -2224,6 +2251,9 @@ Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the d
 2026-10-31 | casualty soak: "stuck" also needs him more than STUCK_FAR_M off his slot at the window's start, not only its end | R0815's Bravo was 4.6 m off his slot until it leapt 29 m out past the gate (the team's place inside the wall resolving once the lead turned along its outside) and was on his way 3 s later; a man who stays stuck or keeps looping is caught a window later | count him (he wasn't stuck for the window; the strict check flags this too)
 2026-10-31 | squad trail picks: a held trail pick crowded out slides to the nearest clear trail point (up to TRAIL_SLIDE_M 12 m either way, Proposed) before a fresh search | CI 41243628687's Golf ran a 25 m loop after a trail pick swinging between 38 and 60 m back; the fresh search restarts from the flat distance to his slot and skips past every crowded stretch | call it casualty's known "stuck on the way" flake
 2026-10-31 | squad trail (review): the loop cut needs no wall between the near point and the lead, and keeps that point (resize(i + 1)) | a wall's two faces lie within TRAIL_LOOP_M, so the cut joined the trail through it and trail picks trusted it; one ray only for a candidate point within 1.5 m | drop the loop cut (it fixed the soak's leaping trail slot)
+Captain, 2026-11-02: "yes" (#44: move a team's formation place out gradually when its across-the-wall fallback lets go, rather than leaping ~29 m past the gate)
+2026-11-02 | squad (F-416): a team's place let go from its fallback travels at the lead's walk plus PLACE_CATCHUP_MPS 3 m/s (Proposed), straight when no wall is between, else along one navigation path per team (asked again only when its end is PLACE_REPATH_M 6 m off and PLACE_REPATH_S 1 s has gone); being held back stays instant; PLACE_TRAVEL_MAX_S 20 s, PLACE_STALE_S 1 s or a lead jump put it there at once | relative to the lead it always closes (a fixed m/s would never catch a sprinting lead); a path only when a wall is between keeps it to one query per release, no per-man or per-frame paths; held back at once keeps Captain's 2026-10-14 rule (no slot across a wall from the lead) | blend every man's slot each frame (a ray per man) or move the place gradually in both directions
+2026-11-02 | squad (F-417): the team's men's mirror still flips at once when the other-side fallback lets go, logged not fixed | the task's leap was the trail fallback's (no mirror), and either fix (hold the mirror until arrival, or blend each man) moves a jump elsewhere or costs per man | fix it here
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
