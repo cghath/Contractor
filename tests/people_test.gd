@@ -89,6 +89,8 @@ func _ready() -> void:
 	await _test_friendly_hvt()
 	await _test_intel()
 	await _test_radio_report()
+	await _test_surrender_unset_brain()
+	await _test_surrender_seated()
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
@@ -515,6 +517,73 @@ func _test_radio_report() -> void:
 	check(layer.server_report(player, Vector3(30, 0, -60)).has("why"), "nobody there: nothing to report")
 	s1.queue_free()
 	s2.queue_free()
+
+
+## The surrender check asks every hostile's brain whether his morale is broken, also a brain
+## that hasn't set up yet (spawned this frame, or seated aboard with its brain off: its body still
+## null). Loop CI 41244551690: a script error in SquadAI.morale_broken from two such reinforcements.
+func _test_surrender_unset_brain() -> void:
+	print("Surrender check, a brain not set up yet")
+	var fresh := _soldier("Fresh", &"hostile", Vector3(-35, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, false)  # brain off from the start
+	_place(player, Vector3(-35, 0.1, -20))
+	check(SquadAI.of(fresh) != null and SquadAI.of(fresh).body == null and not SquadAI.of(fresh).broken(),
+		"his brain hasn't set up (no body yet) and isn't broken")
+	check(layer.surrender_reason(fresh) == "", "unhurt, he fights on (no script error)")
+	PeopleLayer.surrender_enabled = true
+	layer._check_surrenders([fresh])  # the host's tick, in the same frame (only him: nobody left from earlier sections)
+	PeopleLayer.surrender_enabled = false
+	check(not Person.is_captive(fresh), "and the host's surrender tick passes over him")
+	fresh.vitals.server_damage(45.0)
+	await _frames(3)
+	check(SquadAI.of(fresh).body == null and layer.surrender_reason(fresh) == "badly hurt and alone",
+		"badly hurt, alone and seen, brain still off: he would give up all the same (%s)" % layer.surrender_reason(fresh))
+	var gone := _soldier("Gone", &"hostile", Vector3(-33, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, false)
+	gone.queue_free()
+	check(layer.surrender_reason(gone) == "", "queued for deletion this frame: passed over (the queued-body skip, not the brain guard)")
+	fresh.queue_free()
+	await _frames(3)
+
+
+## Captain, 2026-11-06 (F-429): a hostile seated in a vehicle never surrenders in his seat ("nah
+## screw him lol. he die either way"). Badly hurt, alone and seen in a technical's seat: never
+## picked, over many forced checks. Out of the seat, the same man gives up.
+func _test_surrender_seated() -> void:
+	print("Surrender, seated in a vehicle")
+	var vl := level.get_node(^"Vehicles") as VehicleLayer
+	var tech := vl.server_spawn("technical", Transform3D(Basis(), Vector3(-38, 0.3, -32)), "", &"hostile", "surrender_seated_tech")
+	var rider := _soldier("Rider", &"hostile", Vector3(-33, 0.1, -32), CompoundLevel.HOSTILE_LOADOUT, false)
+	SquadAI.of(rider).hold_fire = true
+	_place(player, Vector3(-36, 0.1, -20))
+	await _frames(3)
+	check(tech != null, "a technical spawned")
+	if tech == null:
+		rider.queue_free()
+		await _frames(3)
+		return
+	var entered := tech.server_enter(rider)
+	check(entered and Vehicle.ride_of(rider) == tech, "a hostile seated in a technical")
+	rider.vitals.server_damage(45.0)
+	await _frames(3)
+	var hurt := rider.vitals.pain() >= PeopleLayer.SURRENDER_PAIN or rider.vitals.blood_fraction() <= PeopleLayer.SURRENDER_BLOOD or rider.vitals.injury() >= PeopleLayer.SURRENDER_INJURY
+	check(rider.vitals.is_up() and hurt and Squad.sees(rider, player) and Vehicle.ride_of(rider) == tech,
+		"badly hurt, up and seen from his seat (pain %.2f, blood %.2f)" % [rider.vitals.pain(), rider.vitals.blood_fraction()])
+	check(layer.surrender_reason(rider) == "", "seated: no reason to give up (%s)" % layer.surrender_reason(rider))
+	for i in 100:
+		layer._check_surrenders([rider])
+	check(not Person.is_captive(rider) and SquadAI.of(rider) != null, "100 forced surrender checks: he never gives up in his seat")
+	tech.server_exit(rider)
+	SquadAI.of(rider).process_mode = Node.PROCESS_MODE_DISABLED  # out, his brain stays off as before
+	await _frames(3)
+	check(Vehicle.ride_of(rider) == null and layer.surrender_reason(rider) == "badly hurt and alone",
+		"out of the seat: he would give up (%s)" % layer.surrender_reason(rider))
+	var tries := 0
+	while not Person.is_captive(rider) and tries < 100:
+		layer._check_surrenders([rider])
+		tries += 1
+	check(Person.is_captive(rider), "and he does (forced check %d)" % tries)
+	rider.queue_free()
+	tech.queue_free()
+	await _frames(3)
 
 
 ## A badly hurt, isolated hostile who sees the squad gives up: drops his weapon, nobody
