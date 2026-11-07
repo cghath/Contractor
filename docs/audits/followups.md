@@ -1903,14 +1903,44 @@ second), so it goes out round by the gate. Being held back stays at once (a slot
 across a wall from the lead). spacing's "Team place" walks that route and samples every
 working-out of the slots.
 
-## F-417 (open, note): the team's men swap sides at once when the other-side fallback lets go
-Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`. When a team's place is across a
-wall and the mirror across the lead (`flip`) is clear, the team forms there with its shape mirrored
-(`mirror = -mirror`). Since F-416 the place travels back when that lets go, but the mirror goes back
-at once, so each man's slot swaps to the other side of the travelling place (the wedge's last man
-about 22 m at normal spacing, 34 m at wide). The trail fallback (R0815's case) doesn't mirror. Worth a
-look: keep the fallback's mirror until the place is there, then turn the shape over man by man, or
-blend each man's offset the same way the place travels.
+## F-417 (fixed): the team's men swap sides at once when the other-side fallback lets go
+Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`, `_slot_on_way`. When a team's
+place is across a wall and the mirror across the lead (`flip`) is clear, the team forms there with
+its shape mirrored (`mirror = -mirror`). Since F-416 the place travels back when that lets go, but
+the mirror goes back at once, so each man's slot swaps to the other side of the travelling place
+(the wedge's last man about 22 m at normal spacing, 34 m at wide). The trail fallback (R0815's case)
+doesn't mirror. Captain, 2026-11-06: "yes", blend them across too.
+
+Each man of a team other than the lead's now has his slot kept (`Squad._ways`): on a fallback (his
+team's place held, or his own slot picked again by `_refit`) it's there at once, as the place is;
+let go of one, and while his team's place is on its way, it travels from where it stood by the
+lead's walk plus SLOT_CATCHUP_MPS (6 m/s, Proposed: twice the place's, so a slot carried by the
+travelling place still closes) a second, straight while no wall stands between, else toward where
+his team forms, else (no straight way at all) there at once. One ray a man a working-out while on
+his way (two when walled), none otherwise, no paths. This also covers the review's refit case: a
+trail pick going straight back to his slot when its block cleared. spacing's new "Team place, other
+side" walks the lead east along the outside of the north wall (the team mirrored out north) and
+north away from the corner: the men, let go 24 m from their slots, step at most 0.0 m past the rate,
+never across a wall, and get there (R0847); with `_slot_on_way` off the same walk swaps Foxtrot's
+slot 23.8 m in one working-out and Golf's across the east wall, and "Team place"'s men's check sees
+Golf's refit leap 26 m (R0850).
+
+## F-437 (open, note): the lead's own team's slots still leap when a refit lets go
+Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`. `_slot_on_way` (F-417) only
+travels the slots of teams other than the lead's: those are the ones on a travelling place, and
+far enough out for a fallback to swing them 20 m or more. A man of the lead's own team whose slot
+was picked again (beside a wall, on the lead) still goes straight back to it when it clears, a few
+metres at most since the team forms on the lead. Also, the slots are kept apart (`taken`,
+SLOT_STACK_M) by where they belong, not by where a travelling slot stands, so two can pass close
+for a second on their way. Neither showed in spacing or casualty; worth a look if a playtest sees it.
+
+## F-438 (open, note): the place and slots travel in real seconds
+Location: [squad.gd](../../scripts/ai/squad.gd) `_place_on_way`, `_slot_on_way`. Their time is
+`Soldier._now()` now (review), as every other squad timing (SIDE_HOLD_S and the rest), so
+PLACE_CATCHUP_MPS and SLOT_CATCHUP_MPS are metres per real second: the same in play, but in a test
+run at 3x (spacing, casualty's soak) they close a third as fast in game time (the lead's walk is
+counted in game metres, so a slot still never falls further behind). A test that waits on a slot
+getting there waits in real time (spacing's team place walks wait until nothing is on its way).
 
 ## Calls made for the Captain
 
@@ -2254,6 +2284,14 @@ Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the d
 Captain, 2026-11-02: "yes" (#44: move a team's formation place out gradually when its across-the-wall fallback lets go, rather than leaping ~29 m past the gate)
 2026-11-02 | squad (F-416): a team's place let go from its fallback travels at the lead's walk plus PLACE_CATCHUP_MPS 3 m/s (Proposed), straight when no wall is between, else along one navigation path per team (asked again only when its end is PLACE_REPATH_M 6 m off and PLACE_REPATH_S 1 s has gone); being held back stays instant; PLACE_TRAVEL_MAX_S 20 s, PLACE_STALE_S 1 s or a lead jump put it there at once | relative to the lead it always closes (a fixed m/s would never catch a sprinting lead); a path only when a wall is between keeps it to one query per release, no per-man or per-frame paths; held back at once keeps Captain's 2026-10-14 rule (no slot across a wall from the lead) | blend every man's slot each frame (a ray per man) or move the place gradually in both directions
 2026-11-02 | squad (F-417): the team's men's mirror still flips at once when the other-side fallback lets go, logged not fixed | the task's leap was the trail fallback's (no mirror), and either fix (hold the mirror until arrival, or blend each man) moves a jump elsewhere or costs per man | fix it here
+Captain, 2026-11-06: "yes" (#44, F-417: when a team held on the other side of the lead is let go, blend its men's slots across too, small cost per man)
+Captain, 2026-11-06: "yes" (#44: a team's place catching up at the lead's pace plus 3 m/s, 8-10 s round a gate, is OK; PLACE_CATCHUP_MPS stays, still marked Proposed)
+2026-11-06 | squad (F-417): another team's man's slot, let go of a fallback (his team's place held, or his slot picked again) and while his team's place is on its way, travels at the lead's walk plus SLOT_CATCHUP_MPS 6 m/s (Proposed), straight, else toward where his team forms, else at once; onto a fallback stays at once | one world-space rate per man covers the mirror swap and a refit's trail pick going back alike, needs no per-man path, one ray a man only while on his way; twice the place's rate so a slot riding the travelling place still closes on it | blend the mirror scalar per team (no cost, but it squeezes every man onto the centre line half way and leaves the refit leap), or hold the mirror until the place is there (the swap still at once, just later)
+2026-11-06 | squad (F-417): with no straight way to his slot or to where his team forms, a travelling slot is there at once | Captain's 2026-10-14 rule (no slot left across a wall from the lead) outranks a gradual move; waiting where it is could leave a man going round for a slot behind a wall | wait like the place does (up to PLACE_TRAVEL_MAX_S)
+2026-11-06 | squad (review): a team's place whose navigation path is walked out within PLACE_REPATH_M of where it belongs, a wall ray still hitting (a low wall, its place off the navmesh past it), is there at once | no path goes nearer, and it sat there asking again each second for up to PLACE_TRAVEL_MAX_S 20 s; only once a path was asked and used up, so the first let-go never jumps a wall | travel straight through the low wall
+2026-11-06 | squad (review): the place's (and slots') time is Soldier._now(), as the rest of the squad's, not physics frames scaled by time_scale | consistent with SIDE_HOLD_S and every other squad timer; in play identical; at a test's 3x they close a third as fast in game time (F-438) | keep game seconds for these two only
+2026-11-06 | squad (review): _places drops a team gone or now the lead's, _ways a man gone or in the lead's team, each working-out | no stale travel state when teams change; a dictionary sweep of a few keys | prune on squad change only
+2026-11-06 | spacing (review): SPACING_ONLY "place" runs only the team place checks, "wall" from the wall follow on, any other value every check | a typo or new value used to skip the long follow and run part of the set | keep "" as the only full run
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

@@ -43,7 +43,16 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   the moment it came clear: 29 m out past the compound's gate as the lead turned along the outside
   of its wall, every man's slot with it. It now travels there at the lead's pace plus 3 m/s,
   straight across open ground, else along a navigation path round by the gate (one query when it's
-  let go), never through the wall. Being held back still happens at once.
+  let go), never through the wall. Being held back still happens at once. Captain OK'd the
+  lead's pace plus 3 m/s (2026-11-06).
+- **A fire team's men move across gradually too** (F-417, Captain: "yes"). A team held on the
+  lead's other side forms there mirrored; when that let go, each man's slot swapped sides of the
+  travelling place at once (the wedge's last man 22 m at normal spacing, 34 m at wide). Now each
+  man's slot, let go of a fallback (his team's place held, or his own slot picked again beside a
+  wall, whose trail pick went straight back to his slot when it cleared), travels there at the
+  lead's pace plus 6 m/s, straight, else by where his team forms, never through a wall, and keeps
+  with his travelling place. A place whose path ends by a low wall it can't get past is there at
+  once rather than waiting up to 20 s.
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -65,7 +74,11 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   line (the trail lies on the ground once) and in at the compound's gate and back along the
   inside of its wall (no stretch crosses the wall), and its "Team place" checks walk the lead out
   of the gate and along the wall's outside (the place, let go, never outruns the lead by more than
-  3 m/s nor crosses a wall, and gets there). weapons' leg-box check also sinks the drawn hips 6 cm
+  3 m/s nor crosses a wall, and gets there; its men's slots never step past the lead's walk plus
+  6 m/s and a man's gap), and "Team place, other side" walks the lead along the north wall's
+  outside and away from its corner (each man's slot, let go of the mirrored side, turns back over
+  within the rate, never across a wall). `SPACING_ONLY=place` runs only those; any value but
+  "wall" and "place" runs every check. weapons' leg-box check also sinks the drawn hips 6 cm
   and sees the pelvis box go down with them. Local R0770 (smoke, weapons,
   animations, Looting and the vault checks among them) and R0774 (wounds, medical); with the
   pelvis on the drawn root and the trail fix R0796 (smoke, weapons, casualty), R0805 (smoke,
