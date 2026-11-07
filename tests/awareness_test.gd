@@ -677,15 +677,48 @@ func _test_engines() -> void:
 	check(self_near != null and ear_ai._suspect_at > -1000.0 and by_ear <= EngineNoise.ERROR_PER_100M * ear_d / 100.0 + 0.5,
 		"its physics on, it sounds by itself: %s m off, he hears it %.2f s in (every %.0f s), %.1f m from it" \
 		% [self_near, waited, EngineNoise.EMIT_S, by_ear])
-	# Each quiet gap is the listener's and that one engine's: shut out of a helicopter beyond a
-	# hill (RECHECK_S), he still hears the M-ATV idling beside him.
+	# Each quiet gap is the listener's and that one engine's: a helicopter flying past its muffled
+	# reach with the compound between it and him shuts him out (server_emit sets his RECHECK_S gap
+	# itself), and he still hears the M-ATV idling beside him. Keyed per listener only, that gap
+	# would silence the M-ATV too.
 	EngineNoise._quiet_until.clear()
-	var no_heli := {}
-	no_heli[ear.get_instance_id()] = Soldier._now() + EngineNoise.RECHECK_S
-	EngineNoise._quiet_until[heli.get_instance_id()] = no_heli
+	var heli_muffled := flying * SquadAI.WALL_SHOT_MULT
+	var hidden := Vector3.INF
+	var ear_eye := ear.camera.global_position
+	for far_m: float in [heli_muffled + 40.0, heli_muffled + 100.0, heli_muffled + 160.0, flying - 60.0]:
+		for side: float in [0.0, 15.0, -15.0, 30.0, -30.0]:
+			var p := src + into * far_m + along * side
+			p.y = level.ground_point(p).y + 3.0
+			var d := ear.global_position.distance_to(p + Vector3.UP * EngineNoise.SOURCE_UP_M)
+			if d > heli_muffled + 5.0 and d < flying - 5.0 \
+					and not Throwables.clear_line(world, p + Vector3.UP * EngineNoise.SOURCE_UP_M, ear_eye):
+				hidden = p
+				break
+		if hidden.is_finite():
+			break
+	var heli_gap := -INF
+	var heli_heard := true
+	if hidden.is_finite():
+		heli.global_position = hidden
+		heli._rpm = Helicopter.ROTOR_RPM
+		heli.mode = Helicopter.Mode.FLYING
+		var others := {}  # (everyone else left alone: the zone's men don't hear it, nor use up its MAX_RAYS before him)
+		for n in get_tree().get_nodes_in_group(&"combatants"):
+			if n != ear:
+				others[n.get_instance_id()] = Soldier._now() + 60.0
+		EngineNoise._quiet_until[heli.get_instance_id()] = others
+		ear_ai._suspect_at = -1000.0
+		heli_heard = EngineNoise.server_emit(heli).has(ear) or ear_ai._suspect_at > -1000.0
+		var heli_quiet: Dictionary = EngineNoise._quiet_until.get(heli.get_instance_id(), {})
+		heli_gap = float(heli_quiet.get(ear.get_instance_id(), -INF)) - Soldier._now()
+		heli.mode = Helicopter.Mode.PARKED
+		heli._rpm = 0.0
+	check(hidden.is_finite() and not heli_heard and heli_gap > 0.0,
+		"a helicopter flying %.0f m off (past %.0f m), the compound between: he doesn't hear it and it leaves him alone %.1f s" \
+		% [ear.global_position.distance_to(hidden) if hidden.is_finite() else -1.0, heli_muffled, heli_gap])
 	ear_ai._suspect_at = -1000.0
-	check(EngineNoise.server_emit(matv).has(ear) and ear_ai._suspect_at > -1000.0,
-		"a wall between him and a helicopter (its recheck gap) doesn't keep him from hearing the M-ATV %.0f m off" % ear_d)
+	check(heli_gap > 0.0 and EngineNoise.server_emit(matv).has(ear) and ear_ai._suspect_at > -1000.0,
+		"that gap doesn't keep him from hearing the M-ATV %.0f m off" % ear_d)
 	alert._pending.clear()
 	alert._last_report.clear()
 	# Sides: a hostile at the wheel makes it a hostile engine. The hostile listener doesn't hear his
@@ -697,6 +730,9 @@ func _test_engines() -> void:
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": true})
 	var rider := level.spawn_soldier({"name": "AwRider", "faction": "friendly", "variant": "woodland", "pos": at + Vector3(0, 0.2, 3.0),
 		"loadout": [], "combat": 0.5, "discipline": 0.5, "guard": false})
+	for s: Soldier in [hdriver, rider]:
+		if s and SquadAI.of(s):
+			SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED  # (as the other test actors: only server_emit moves them)
 	var back := -1
 	for k in matv.seat_count():
 		if matv.seat_kind(k) == Vehicle.PASSENGER:
@@ -730,8 +766,6 @@ func _test_engines() -> void:
 		"%s of the squad, %.0f m off by the wall, hears it" % [mate.name if mate else "nobody", mate_d])
 	check(aboard and rider_d <= hostile_reach and not heard_by.has(rider) and SquadAI.of(rider)._suspect_at <= -1000.0,
 		"the one riding in it (%.0f m from its engine) doesn't" % rider_d)
-	check(not alert._pending.any(func(p: Dictionary) -> bool: return p.report.kind == Alert.ENGINE),
-		"and a hostile engine is no report to the hostile alert")
 	if mate_ai:
 		mate_ai._suspect_at = kept_at
 		mate_ai._suspect_pos = kept_pos

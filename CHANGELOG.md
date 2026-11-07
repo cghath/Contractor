@@ -60,7 +60,9 @@ every path and these were the leaks still open.
 - **Fixed (AI), review of F-365:** a listener's quiet gaps after hearing an engine (or being shut
   out of one by a wall) were his alone, so a helicopter he couldn't hear through a hill kept him
   from hearing a truck idling 5 m away for 3 s: each gap is now one listener's and one vehicle's,
-  and they are dropped when a new level comes up. Engines keep the shots' reach for the AI (Captain,
+  so a listener hears every engine near him (each once every 4 s, REHEAR_S), not one at a time,
+  and they are dropped when a new level comes up (belt and braces: a gone vehicle's or man's
+  instance id never comes back). Engines keep the shots' reach for the AI (Captain,
   2026-11-02: "no its fine"). A crashing helicopter still counts as flying while its rotors turn.
 - **Tests:** awareness checks both (an M-ATV heard in the open within its reach and not beyond, not
   through the wall past half of it, within that yes; a helicopter flying heard from 473 m, not when
@@ -70,9 +72,12 @@ every path and these were the leaks still open.
   squads check needs at least one, the drones' bodies are freed. Engine after engine with nothing
   harder in between: the second report moves the fix, and a fresh shot's fix still isn't moved.
   The M-ATV with its physics on sounds by itself (Vehicle._server_step) and a hostile near it hears
-  it within a second; a helicopter's quiet gap doesn't silence the M-ATV; with a hostile at the
-  wheel the hostile listener doesn't hear it, a squad AI by the wall does, and one of the squad
-  riding in it doesn't.
+  it within a second; a helicopter flying past its muffled reach with the compound between is shut
+  out (EngineNoise sets his gap for it itself) and that doesn't silence the M-ATV (the check fails
+  with the gaps keyed per listener only); with a hostile at the wheel the hostile listener doesn't
+  hear it, a squad AI by the wall does, and one of the squad riding in it doesn't. The hostile
+  driver's and the rider's AI are off, as the other test actors'; the "no report to the hostile
+  alert" check, which couldn't fail on its own, is gone.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

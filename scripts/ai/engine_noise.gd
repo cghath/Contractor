@@ -99,7 +99,9 @@ static func server_emit(v: Vehicle) -> Array[Soldier]:
 	var lvl := CompoundLevel.current(v)
 	var lvl_id := lvl.get_instance_id() if lvl else 0
 	if lvl_id != _level_id:
-		_quiet_until.clear()  # a new level: the last one's gaps mean nothing here
+		# A new level: the last one's gaps mean nothing here. Belt and braces: its vehicles and men
+		# are gone and an instance id never comes back, so no stale gap could match anyway.
+		_quiet_until.clear()
 		_level_id = lvl_id
 	var vid := v.get_instance_id()
 	if not _quiet_until.has(vid):
