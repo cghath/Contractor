@@ -332,6 +332,8 @@ func report_line(r: Dictionary) -> String:
 			return "%s: shots heard, %s." % [cs, where]
 		&"blast":
 			return "%s: explosion, %s." % [cs, where]
+		&"engine":
+			return "%s: engines heard, %s." % [cs, where]
 		&"contact":
 			return "%s: contact, %s! Engaging." % [cs, where]
 		&"body":

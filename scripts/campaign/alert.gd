@@ -8,13 +8,22 @@ extends Node
 ##   REPORT_DELAY_S (by his discipline; longer under fire; COMMS_DOWN_MULT slower once the comms
 ##   site's mast is down). Killed or downed before then, the report dies with him.
 ## - Sound: an unsuppressed shot is heard to SHOT_HEARD_M, a suppressed one to
-##   SUPPRESSED_HEARD_M, a blast to BLAST_HEARD_M. Hearing gives a rough direction, not who.
+##   SUPPRESSED_HEARD_M, a blast to BLAST_HEARD_M; through a wall or a building's shell (no clear
+##   line to his ears) half as far (SquadAI.WALL_SHOT_MULT, as the AI's own hearing: G-29).
+##   Hearing gives a rough direction, not who. Engines too (EngineNoise, Captain 2026-10-31,
+##   F-365): a hostile who hears one of the squad's vehicles or helicopters stands to and reports
+##   an "engine" there, as rough a fix as a shot's; it moves the last known position only when
+##   nothing harder (a contact, a shot, a blast, a body) came in the last ENGINE_LKP_AFTER_S
+##   (a newer engine report always moves one an engine set).
 ## - Check-ins: each garrisoned site radios in every CHECK_IN_S; a site with nobody left to
 ##   answer is missed, and the HQ hears of it CHECK_IN_CALL_S later.
 ## - Bodies: a hostile who comes within BODY_SPOT_M of a fallen comrade (in sight) reports it.
 ## - The enemy works from a last known position (lkp) whose uncertainty grows with time.
 ## - States, per area (a site, or the open ground) and for the zone: NORMAL (routine), SUSPICIOUS
 ##   (stand-to), ALERTED (posts manned, QRF on standby), ENGAGED (the QRF launches: stage 3).
+##   An area stands to on what its own men perceive; the zone follows only what reached the net
+##   (each area's "net" state: a contact seen but not yet radioed doesn't ride in on someone
+##   else's report of a shot).
 ##   Cooldown is slow: ENGAGED to ALERTED after ENGAGED_COOL_S without contact, ALERTED to
 ##   SUSPICIOUS after ALERTED_COOL_S; once alerted, a zone doesn't relax below SUSPICIOUS.
 ## - Hostiles' combat modes follow their area's state (SAFE, AWARE, COMBAT).
@@ -25,9 +34,10 @@ enum State { NORMAL, SUSPICIOUS, ALERTED, ENGAGED }
 const STATE_NAMES: Array[String] = ["normal", "suspicious", "alerted", "engaged"]
 const SHOT := &"shot"
 const BLAST := &"blast"
+const ENGINE := &"engine"
 ## Report kinds and the state each raises its area to (the zone follows its worst area).
 const RAISES := {&"shot": State.SUSPICIOUS, &"blast": State.ALERTED, &"contact": State.ENGAGED,
-	&"body": State.ALERTED, &"missed_checkin": State.ALERTED}
+	&"body": State.ALERTED, &"missed_checkin": State.ALERTED, &"engine": State.SUSPICIOUS}
 
 const SHOT_HEARD_M := 600.0
 ## A contact report counts the squad within this of what was seen (EnemyCommand's fog).
@@ -48,6 +58,9 @@ const ALERTED_COOL_S := 5400.0
 ## The last known position's uncertainty: grows this fast (m/s) up to LKP_MAX_M.
 const LKP_GROWTH_MPS := 1.5
 const LKP_MAX_M := 600.0
+## A heard engine moves the last known position only when the last one is older than this (a
+## contact, a shot, a blast or a body outranks a passing helicopter). Proposed.
+const ENGINE_LKP_AFTER_S := 120.0
 ## A point further than this from every site is "field".
 const AREA_REACH_M := 400.0
 const FIELD := "field"
@@ -66,7 +79,7 @@ signal noise(kind: StringName, pos: Vector3, source: Node)
 
 var zone_state := State.NORMAL
 var areas := {}           # area id -> {"state", "contact" (last contact time), "since"}
-var lkp := {}             # {"pos": Vector3, "time": float}, or {} before any report
+var lkp := {}             # {"pos": Vector3, "time": float, "kind": its report's}, or {} before any report
 var reports: Array = []   # every report received, oldest first
 var comms_down := false
 var level: Node3D
@@ -113,9 +126,24 @@ static func server_noise(source: Node, pos: Vector3, kind: StringName, suppresse
 		return
 	alert.noise.emit(kind, pos, source)
 	var heard := BLAST_HEARD_M if kind == BLAST else (SUPPRESSED_HEARD_M if suppressed else SHOT_HEARD_M)
+	var world := alert.level.get_world_3d() if alert.level else null
 	for s: Soldier in alert._hostiles():
-		if s != source and s.global_position.distance_to(pos) <= heard:
-			alert._perceive(s, kind, pos)
+		if s == source:
+			continue
+		var d := s.global_position.distance_to(pos)
+		if d > heard:
+			continue
+		if d > heard * SquadAI.WALL_SHOT_MULT and world and not Throwables.clear_line(world, pos + Vector3.UP * 0.3, s.camera.global_position):
+			continue  # through a wall it carries half as far (G-29; it carried right through, F-359)
+		alert._perceive(s, kind, pos)
+
+
+## `listener` (a hostile) heard one of the squad's engines at about `pos` (EngineNoise, which has
+## placed it roughly and applied the wall rule): he stands to and will report it.
+static func server_engine(listener: Soldier, pos: Vector3) -> void:
+	var alert := of(listener)
+	if alert and alert.multiplayer.is_server() and listener.faction == &"hostile":
+		alert._perceive(listener, ENGINE, pos)
 
 
 ## `observer` (a hostile) sees one of the squad at `pos`.
@@ -143,19 +171,28 @@ func _perceive(s: Soldier, kind: StringName, pos: Vector3) -> void:
 		delay *= COMMS_DOWN_MULT
 	var report := {"kind": kind, "pos": pos, "area": area, "by": String(s.name)}
 	if kind == &"contact":
-		report.merge(_seen_at(pos))
-	_pending.append({"by": s, "due": now() + delay, "report": report})
+		report.merge(_seen_at(pos, s))
+	var ai_seen: Soldier = ai.target if ai and kind == &"contact" and is_instance_valid(ai.target) else null
+	_pending.append({"by": s, "due": now() + delay, "report": report, "seen": ai_seen})  # (who he saw: the net is told of him)
 
 
 ## What a contact report says it saw at `pos` (EnemyCommand's fog): how many of the squad
 ## (players and squad AI) up within SEEN_GROUP_M, and how many of those in a working exo frame.
-func _seen_at(pos: Vector3) -> Dictionary:
+## With `by` (the hostile reporting) only those he has in sight or half spotted (Spotting.SUSPECT);
+## with `eye` (a drone's camera) only those it has a clear line to. Never fewer than one. (It used
+## to count the men behind the wall too, F-360.)
+func _seen_at(pos: Vector3, by: Soldier = null, eye := Vector3.INF) -> Dictionary:
 	var men := 0
 	var exo := 0
 	var squad := MapNodes.players(self)
 	squad.append_array(MapNodes.squad_ai(self))
+	var ai := SquadAI.of(by) if by else null
 	for p: Soldier in squad:
 		if p.vitals.is_up() and p.global_position.distance_to(pos) <= SEEN_GROUP_M:
+			if ai and ai.body and ai.target != p and float(ai._aware.get(p.get_instance_id(), 0.0)) < Spotting.SUSPECT and not ai.can_see(p):
+				continue  # out of his sight
+			if eye.is_finite() and not Throwables.clear_line(p.get_world_3d(), eye, p.aim_point()):
+				continue
 			men += 1
 			if ExoFrame.working(p.inventory):
 				exo += 1
@@ -177,7 +214,7 @@ func _tick(force_scan: bool) -> void:
 			_pending.erase(p)  # he never got it out
 		elif t >= float(p.due):
 			_pending.erase(p)
-			_receive(p.report)
+			_receive(p.report, p.get("seen") as Soldier if is_instance_valid(p.get("seen")) else null)
 	for o: Dictionary in _overdue.duplicate():
 		if t >= float(o.due):
 			_overdue.erase(o)
@@ -193,28 +230,33 @@ func _tick(force_scan: bool) -> void:
 
 
 ## A report reached the net: the last known position moves there and its area (and so the
-## zone) rises.
-func _receive(report: Dictionary) -> void:
+## zone) rises. `seen`: the man a contact report is about, if the reporter had him as his target.
+func _receive(report: Dictionary, seen: Soldier = null) -> void:
 	var r := report.duplicate()
 	r["time"] = now()
 	reports.append(r)
-	if r.kind in [&"contact", &"shot", &"blast", &"body"]:
-		lkp = {"pos": r.pos, "time": r.time}
+	# An engine fix gives way to a newer engine fix at once; a hard one (a contact, a shot, a blast,
+	# a body, or one with no "kind") only once it is ENGINE_LKP_AFTER_S old.
+	if r.kind in [&"contact", &"shot", &"blast", &"body"] \
+			or (r.kind == ENGINE and (lkp.is_empty() or lkp.get("kind", &"") == ENGINE
+				or float(r.time) - float(lkp.time) > ENGINE_LKP_AFTER_S)):
+		lkp = {"pos": r.pos, "time": r.time, "kind": r.kind}
 	# Record the commander's picture before listeners react to this report. A first
 	# sighting must already be confirmed when the response asks permission to launch.
 	report_received.emit(r)
 	if r.kind == &"contact":
-		_share_contact(r.pos)
+		_share_contact(r.pos, seen)
 	_raise(String(r.area), int(RAISES.get(r.kind, State.SUSPICIOUS)), r.kind == &"contact", true)
 	reported.emit(r)
 
 
 ## A contact report on the net (G-02): every hostile squad with a man within NET_SHARE_M of it
-## now knows of the nearest of the company there, as heard (a rough fix, not a sighting).
+## now knows of the man seen (`seen`; else the nearest of the company there, not one who has
+## since come nearer from behind a wall, F-360), as heard (a rough fix, not a sighting).
 const NET_SHARE_M := 500.0
-func _share_contact(pos: Vector3) -> void:
-	var who: Soldier = null
-	var best := SEEN_GROUP_M
+func _share_contact(pos: Vector3, seen: Soldier = null) -> void:
+	var who: Soldier = seen if seen and seen.vitals.is_up() else null
+	var best := SEEN_GROUP_M if who == null else -1.0
 	var company := MapNodes.players(self)
 	company.append_array(MapNodes.squad_ai(self))
 	for p: Soldier in company:
@@ -234,7 +276,7 @@ func _share_contact(pos: Vector3) -> void:
 ## `area` rises to `to` (and its hostiles take up the mode); with `on_net` (a report that reached
 ## the radio net) the zone follows its worst area.
 func _raise(area: String, to: int, contact := false, on_net := true) -> void:
-	var a: Dictionary = areas.get(area, {"state": State.NORMAL, "contact": -INF, "since": now()})
+	var a: Dictionary = areas.get(area, {"state": State.NORMAL, "net": State.NORMAL, "contact": -INF, "since": now()})
 	if contact or to == State.ENGAGED:
 		a.contact = now()
 	if to > int(a.state):
@@ -243,16 +285,24 @@ func _raise(area: String, to: int, contact := false, on_net := true) -> void:
 		areas[area] = a
 		state_changed.emit(area, to)
 		_apply_modes(area)
+	if on_net:
+		a.net = maxi(int(a.get("net", State.NORMAL)), to)  # what the net knows of it (it used to read the local state too, F-361)
 	areas[area] = a
 	if not on_net:
 		return
-	var worst := State.NORMAL
-	for k: String in areas:
-		worst = maxi(worst, int(areas[k].state))
+	var worst := _net_worst()
 	if worst > zone_state:
 		zone_state = worst
 		state_changed.emit("zone", zone_state)
 		_apply_modes("")
+
+
+## The worst state the net knows of in any area (the zone rises to it).
+func _net_worst() -> int:
+	var worst := State.NORMAL
+	for k: String in areas:
+		worst = maxi(worst, int((areas[k] as Dictionary).get("net", State.NORMAL)))
+	return worst
 
 
 ## Slow cooldown: ENGAGED to ALERTED, ALERTED to SUSPICIOUS; never below SUSPICIOUS once raised.
@@ -270,11 +320,10 @@ func _cool_down(t: float) -> void:
 			a.since = t
 		if int(a.state) != was:
 			changed = true
+			a.net = mini(int(a.get("net", State.NORMAL)), int(a.state))
 			state_changed.emit(k, int(a.state))
 	if changed:
-		var worst := State.NORMAL
-		for k: String in areas:
-			worst = maxi(worst, int(areas[k].state))
+		var worst := _net_worst()
 		if worst < zone_state and maxi(worst, State.SUSPICIOUS) != zone_state:
 			zone_state = maxi(worst, State.SUSPICIOUS)  # cooling only lowers: the zone rises by reports alone
 			state_changed.emit("zone", zone_state)

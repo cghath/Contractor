@@ -11,6 +11,74 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### AI awareness through walls (fix/ai-awareness-walls)
+
+Captain's "Next" item 2 (2026-10-14: "AI awareness leaks through compound walls; one zone-wide
+hostile squad"). G-02, G-03, G-28 and G-29 were already done on 2026-10-19; a new suite checks
+every path and these were the leaks still open.
+
+- **Added (tests):** `awareness` (tests/awareness_test.gd, in run_tests.sh's default list and CI):
+  the squad still behind the compound's wall by its garrison for 20 s, out of every line (checked),
+  and nobody there or anywhere in the zone learns of them (awareness, targets, suspicions, threats,
+  every squad's picture, the alert); footsteps through the wall carry only as far as G-29 allows
+  (a listener of the test's own just inside the wall: in plain footstep reach but past the muffled
+  one he must not hear him, within it he must, so the check fails with the muffle gone or with
+  footsteps never crossing a wall; the garrison alone stood too far off to test it);
+  one of them seen, only the compound stands to and the zone and other squads hear of it by radio
+  after the report delay, only squads within Alert.NET_SHARE_M, x3 with the mast down, never if
+  the reporter is cut down first; a suppressed shot behind the wall; a recon drone.
+- **Fixed (AI):** the alert heard shots and blasts straight through walls: through a wall or a
+  building's shell they now carry half as far, as the AI's own hearing does (F-359).
+- **Fixed (AI):** a contact report counted every one of the squad within 25 m of the man seen,
+  including the ones behind the wall: it counts those the reporter has in sight or half spotted
+  (and, for a drone, those it has a line to); the squads it tells are told of the man seen, not
+  whoever stands nearest the spot when it lands (F-360).
+- **Fixed (AI):** an area standing to on a contact its men hadn't radioed in yet pushed the whole
+  zone to "engaged" as soon as any other report (a shot elsewhere) reached the net: the zone now
+  follows only what each area has reported (F-361).
+- **Fixed (AI):** the enemy's recon drone flew straight to the squad wherever it was and saw it
+  through roofs: it flies to where the net last heard of the squad, follows only those it has a
+  clear line to, and keeps to where it last saw them for 30 s (F-362). It flies straight there and
+  then circles by its own flying time, not the wall clock (a test flying it in one go held a single
+  point on the circle, and on CI a hill or house there hid the squad: missions "0 reports").
+- **Changed (AI), Captain 2026-10-31 (F-365):** engines are heard. A vehicle's or helicopter's
+  running engine, crewed by players or AI, is a noise to the other side's AI and (for the squad's)
+  to the alert: an M-ATV or technical idling carries 40 m and 150 m under way, an AAV, Bradley or
+  Abrams 100 m and 300 m, a helicopter 300 m with its rotors turning on the ground and 600 m flying
+  (EngineNoise, all Proposed); through a wall or a hill half as far, as a shot. A listener suspects
+  something over there (placed 10 m off per 100 m) and goes to look; a hostile's area stands to and
+  he radios in "engines heard" (a look goes out; the last known position moves only when nothing
+  harder came in the last 2 min, and always when an engine report set it, so it follows a
+  helicopter flying in). It never tells anyone who's in it. Each vehicle sounds once a
+  second, not every frame, and casts at most 24 rays a time.
+- **Changed (AI), Captain 2026-10-31 (F-365):** reinforcement waves without an aim of their own
+  head for the alert's last known position, not where the players are; with none yet they walk in
+  to the middle of the map and search 40 m round it (SEARCH_RING_M, Proposed). Hot zones are as
+  they were (EnemyResponse's aim). Levels with no alert (the plain compound, the base, the ranges)
+  still send waves to the players. Every zone's waves were already driven by EnemyResponse, so no
+  zone's timer sends waves today (F-387: Captain, 2026-11-02, "no for now"; left as it is).
+- **Fixed (AI), review of F-365:** a listener's quiet gaps after hearing an engine (or being shut
+  out of one by a wall) were his alone, so a helicopter he couldn't hear through a hill kept him
+  from hearing a truck idling 5 m away for 3 s: each gap is now one listener's and one vehicle's,
+  so a listener hears every engine near him (each once every 4 s, REHEAR_S), not one at a time,
+  and they are dropped when a new level comes up (belt and braces: a gone vehicle's or man's
+  instance id never comes back). Engines keep the shots' reach for the AI (Captain,
+  2026-11-02: "no its fine"). A crashing helicopter still counts as flying while its rotors turn.
+- **Tests:** awareness checks both (an M-ATV heard in the open within its reach and not beyond, not
+  through the wall past half of it, within that yes; a helicopter flying heard from 473 m, not when
+  idling on the ground; an engine report and the last known position; waves to the last known
+  position or the map's middle), and the review's minor points: positive controls for "seen 1" (all
+  four counted once half spotted) and for the muffled shot (a hostile 8 m off hears it), the told-
+  squads check needs at least one, the drones' bodies are freed. Engine after engine with nothing
+  harder in between: the second report moves the fix, and a fresh shot's fix still isn't moved.
+  The M-ATV with its physics on sounds by itself (Vehicle._server_step) and a hostile near it hears
+  it within a second; a helicopter flying past its muffled reach with the compound between is shut
+  out (EngineNoise sets his gap for it itself) and that doesn't silence the M-ATV (the check fails
+  with the gaps keyed per listener only); with a hostile at the wheel the hostile listener doesn't
+  hear it, a squad AI by the wall does, and one of the squad riding in it doesn't. The hostile
+  driver's and the rider's AI are off, as the other test actors'; the "no report to the hostile
+  alert" check, which couldn't fail on its own, is gone.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
