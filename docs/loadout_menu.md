@@ -47,7 +47,8 @@ add/remove units, fill ammo, medic kit, role kit) and `rebuild` over several peo
 
 Client asks, host applies (BaseHub.request): `request("loadout", [who, op, params])`.
 `who` is a member id or `player:<key>`. A player may change their own kit and any AI squadmate's,
-never another player's (they can give to another player). Ops: `slot`, `optic`, `add`,
+never another player's (they can give to another player). Ops: `slot`, `optic`, `mount`, `point` (all four take
+`buy: true`: buy the item if the stash lacks it, see Buying), `add` (`buy: true` adds one and buys it),
 `remove`, `give`, `fill_ammo`, `medic_kit`, `role_kit`, `copy_kit`, `save`, `standing_role`,
 `copy_standing`, `restock`, `sync` (read the muster line's gear into the roster for the view).
 The answer comes back as the usual note; the roster and stash broadcast with the view.
@@ -55,7 +56,56 @@ The answer comes back as the usual note; the roster and stash broadcast with the
 Buying (2026-10-15): an edit the stash can't fill writes `edit_missing` on the roster entry; the
 Kit column then shows "Buy missing (N items, $X)" (and one button per item), disabled with the
 reason when cash is short. Op `buy_missing` [params `id` optional] buys at shop prices through
-Economy.server_buy and redoes the edit. The armory lays the stash out in category bands
+Economy.server_buy and redoes the edit.
+
+Buying from the pickers (2026-10-31, Captain's "Next" item 4, branch feat/loadout-buy, from
+6062b8a8 on claude/loadout-buy-direct-7330b2): the Swap and Optic pickers also list what the
+stash has none of (not even on its carriers' pouches) that the company can buy today, as
+"Buy: name ($price)". The list and prices are the view's `catalog` (the host's
+`BaseEconomy.shop_catalog`: the base shop less `not_for_sale` and `allied_only`, plus an allied
+quartermaster's items at today's standing, at the best price), so every peer shows what the
+host will charge. A "Company cash $X" hint sits over the worn slots; an entry the cash doesn't
+cover is greyed out with "have $X". Choosing one sends `slot` / `optic` with `buy: true`; the
+host (`BaseHub._server_buy_picked`) works out whether the edit can draw it (KitLibrary.shortfall
+over the hub's stash), and if not buys exactly that item through Economy.server_buy (the
+company's account, into the armory) and makes the edit, which then draws it: one request buys,
+stocks and equips. Not enough cash (or not sold): refused with the reason, nothing bought,
+moved or written down as missing. The wallet is the company's (Economy cash, the same account
+that owns the stash); a client's purchase runs on the host and reaches everyone, late joiners
+included, through the base view (funds, stash, roster gear); the campaign save holds all three.
+
+Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
+- **It asks first** (F-404, "not always but yes"): choosing a "Buy:" entry opens a confirm
+  (`LoadoutScreen.ask_buy`: the item, its price, the company's cash and what's left after);
+  Cancel buys nothing. Its **Don't ask again** tick, with the Buy, turns the question off: a
+  player setting (`GameSettings` "loadout" "confirm_buy", default on) in the player's own
+  settings.cfg. The **Ask before buying** tick under the cash hint (and in the 3D editor's slot
+  panel) and Settings, Controls, Menus turn it back on.
+- **The 3D editor buys and fits in one step too** (F-405): the same host ops with `buy: true`
+  (and `mount`, `point`, `add` for its other markers), the same price and the same question;
+  its draft and undo stay for everything else (docs/loadout_3d.md).
+- The host buys **one** unit, whatever else the edit lacks, so the charge is the label's price;
+  the answer is the purchase's one note ("Helmet: X (bought for $Y)"; Economy's own notice is
+  kept quiet for loadout purchases, Buy missing included).
+- What the person **carries** (a spare optic in a pouch, a helmet in the pack) is offered as
+  "name (carried)", a normal swap from their own kit, never as "Buy:". Choosing it moves that
+  copy: the host's slot, optic, mount and point ops take the unit from what he carries loose
+  when the stash has none (`BaseHub._from_own_kit`), so nothing is listed missing after.
+- A helmet bought or swapped in takes the old one's NVG along when it fits (any mount the
+  template keeps: `Loadouts.rebuild` takes it off his holder first, so whichever unit the build
+  draws gets it; F-420). Before, the NVG stayed on the old helmet in the stash and was listed
+  missing, and a change that drew the stash's copy of his gun left his suppressor on his own.
+- **A gun swapped for another and its optic** (Captain, 2026-11-06, F-421: "varies. if you go
+  from ar to sniper yes, M4 to HK416 yes"): a sniper rifle or DMR with a scope of its own (tags
+  in `Loadouts.OWN_SCOPE_TAGS`, "sniper" and "dmr", Proposed: the M110, SVD, SR-25, Mk 12,
+  Mosin...) keeps its own scope, and the optic he had fitted goes to the stash loose; any other
+  gun (M4 to HK416) takes the optic he had along (`Loadouts.swapped_optic`). The old gun's own
+  optic stays on it when the new gun doesn't take it or comes with the same one (a stock M4 to
+  an HK416: the M4 goes back plain, its dot on), and a sniper's own scope stays on the
+  sniper when he swaps back to a rifle (that gets its own). Irons on the old gun: the new one
+  comes with its own. `Loadouts.rebuild` takes the optic off the old gun first so the build can
+  draw it; nothing is listed missing.
+The armory lays the stash out in category bands
 (BaseArmory.BANDS); deliveries and returns take the next free slot of their band.
 
 ## Numbers (Proposed)

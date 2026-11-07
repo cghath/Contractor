@@ -110,6 +110,9 @@ const DEFAULTS := {
 	# debrief's salvage sort.
 	"mission_ui": {"board_terms": {}, "board_pick": "", "briefing_drop": "", "briefing_approach": -2, "briefing_supports": [],
 		"debrief_sort": "value"},
+	# The loadout menus (feat/loadout-buy; Captain, 2026-11-02, F-404: "not always but yes"): a
+	# purchase from the paper doll's pickers or the 3D editor asks first, until "Don't ask again".
+	"loadout": {"confirm_buy": true},
 }
 ## Ranges for the sliders: [min, max, step].
 const RANGES := {

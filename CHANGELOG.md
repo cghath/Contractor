@@ -11,6 +11,58 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Buy missing kit from the loadout menu's pickers (feat/loadout-buy)
+
+Captain's "Next" item 4 (docs/captain_side_now.md), from Noah's 6062b8a8 on
+claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left out).
+
+- **Added (loadout):** the loadout menu's Swap and Optic pickers list what the stash has none of
+  as "Buy: name ($price)", greyed out with the cash you have when it doesn't cover it, under a
+  "Company cash $X" hint. Choosing one buys it at the shop's price (or an allied
+  quartermaster's better deal) with company money, into the stash, and puts it on, in one
+  request; short of cash the host refuses and nothing changes. Ops `slot` / `optic` take
+  `buy: true` (`BaseHub._server_buy_picked`). Prices come from the host's catalog in the base
+  view, so a client shows what the host charges.
+- **Tests (loadout):** buying from the helmet picker (price shown, a dollar short greyed out and
+  refused with nothing spent, moved or marked missing; then bought, worn, the view updated), the
+  optic picker, a client's purchase from its own picker through the host on the company's
+  account, a late joiner seeing the host's purchase, and a save and reload keeping both.
+- **Changed (loadout, Captain 2026-11-02, F-404):** a purchase from a picker asks first: the
+  item, its price and the cash left after; Cancel buys nothing. "Don't ask again" turns that off
+  (a player setting in your own settings.cfg); the "Ask before buying" tick by the cash, or
+  Settings, Controls, Menus, turns it back on.
+- **Changed (loadout, Captain 2026-11-02, F-405):** the 3D loadout editor buys and fits an item
+  you don't own in one pick too (same host ops with `buy`, same price, same question); its draft
+  and undo stay for everything else. New host op `point` (a pouch on a MOLLE point); `mount`
+  and `add` take `buy`.
+- **Fixed (loadout, F-420):** buying or swapping a helmet moves its NVG onto the new helmet
+  when it fits (likewise a gun's suppressor or grip onto its new gun), instead of leaving it on
+  the old one in the stash and listing it missing; and a loadout change that drew the stash's
+  copy of the same gun or helmet no longer leaves your suppressor, grip or NVG on yours in the
+  stash ("Missing from the stash: Rifle Suppressor" after a Fill ammo).
+- **Fixed (loadout):** a purchase buys exactly one, so it always costs the price shown; it
+  gives one note, not two (`Economy.server_buy` takes `quiet`); an item you carry is offered as
+  "(carried)", not "Buy:", and choosing it moves your own copy (pack, pouch) onto the slot or gun
+  instead of asking for a second one, listing it missing and offering to buy it.
+- **Tests (loadout, ui):** the question shows and Cancel buys nothing; "Don't ask again" skips
+  it and is saved; the 3D editor buys and fits in one step, the client's through the host; the
+  NVG moves to a bought helmet; the suites use their own settings and editor files, never the
+  player's (F-406).
+- **Changed (loadout, Captain 2026-11-06, F-421):** swapping guns: a sniper rifle or DMR keeps
+  its own scope and the optic you had fitted goes to the stash loose (not left on the old gun and
+  listed missing); any other gun (M4 to HK416) takes your optic along. A sniper's scope stays on
+  it when you swap back to a rifle, and a stock M4 swapped for an HK416 (both with a red dot)
+  goes back to the stash plain, its dot on. `Loadouts.OWN_SCOPE_TAGS` ("sniper", "dmr"; Proposed).
+- **Fixed (loadout, review):** the 3D editor's "Ask before buying" tick follows "Don't ask
+  again" at once; a one-step buy the host refuses leaves the draft as it was and the close
+  warning right; a plate pocket buys in one step only on the carrier you wear; the host's
+  `point` op refuses a point you don't wear or a pouch that doesn't fit it; a mount taken off
+  for a rebuild stacks with the stash's (decoded like the rest of the kit).
+- **Tests (loadout):** an M4 with a T-2 to an HK416 (the dot moves over) and to an M110 / SVD
+  (its own scope, the T-2 loose in the stash, nothing missing), in the rules, on the host and from
+  a client; a stock M4 to an HK416 (the M4 plain in the stash, no loose dot); the refused
+  one-step buy, the tick, the plate pocket and the point op.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

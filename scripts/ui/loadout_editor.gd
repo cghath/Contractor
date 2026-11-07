@@ -9,7 +9,11 @@ extends Control
 ## (helmet and its NVG mount, carrier, plate pockets, every MOLLE point, pack, guns with their
 ## rails and muzzle, pockets). Click one: it lights up and the picker on the right lists
 ## everything that fits there, owned or not, the unowned ones with their price. Picking puts it
-## on him at once (the draft); one that isn't owned also offers "Buy now" for its price.
+## on him at once (the draft). One that isn't owned is bought and fitted in one step, like the
+## paper doll's pickers (Captain, 2026-11-02, F-405: the same host ops with "buy", the same
+## price, asking first unless told not to: LoadoutScreen.ask_buy); only when the company can't
+## afford it, or it goes on a holder the draft has but he doesn't wear yet, does it stay in the
+## draft with "Buy now" for its price.
 ##
 ## Changes are a draft until Apply (Enter): the draft is rebuilt from the stash through the host
 ## (BaseHub "loadout" "template"), so the existing rules all hold (litres, kg, two-handed bulky
@@ -25,6 +29,8 @@ extends Control
 signal closed
 
 const SETTINGS := "user://loadout_editor.cfg"
+## A test's own file in place of SETTINGS (use_file), as an Engine meta like GameSettings'.
+const PATH_META := &"loadout_editor_settings_path"
 const UNDO_MAX := 60
 ## The preview's share of the width against the side panel.
 const PREVIEW_SHARE := 1.6
@@ -35,6 +41,7 @@ const HELP := [
 	"Drag the soldier to turn him, use the wheel to zoom, and 1-5 to focus the head, torso, legs, weapons or the whole body.",
 	"Click a marker on him to pick that slot. The list on the right shows everything that fits: what the company owns, and what it can buy with its price.",
 	"Picking puts it on him straight away as a draft. Apply (Enter) fits the draft from the stash; Buy missing (B) buys what the stash lacks and applies it.",
+	"Picking something the company doesn't own buys it and fits it at once, with company money (it asks first; \"Don't ask again\" stops that, the \"Ask before buying\" tick brings it back).",
 	"Save the draft as a named kit (Ctrl+S). Apply a kit to anyone in the squad, a fire team, a role or a high command squad; Buy missing there totals what all of them lack.",
 	"Ctrl+Z undoes a change, R goes back to what he wears now. The stats show weight, litres, protection, ammo and how much the load slows him.",
 ]
@@ -133,6 +140,7 @@ func _ready() -> void:
 	pick_section.add_child(UiKit.search_field("Search what fits...", func(t: String) -> void:
 		picker_query = t.strip_edges().to_lower()
 		_build_picker()))
+	pick_section.add_child(LoadoutScreen.ask_buy_tick())
 	offer_box = VBoxContainer.new()
 	offer_box.name = "Offer"
 	pick_section.add_child(offer_box)
@@ -431,14 +439,15 @@ func _build_picker() -> void:
 		off.name = "PickNone"
 		picker_list.add_child(off)
 	var funds := int(BaseHub.view.get("funds", 0))
+	var catalog := LoadoutScreen.buyable_prices(BaseHub.view)
 	var shown := 0
 	for id: String in choices(slot_key):
 		if picker_query != "" and not UiKit.matches(_name(id), picker_query):
 			continue
 		var have := owned(id)
-		var price := BaseEconomy.item_price(StringName(id))
+		var price := int(catalog.get(id, BaseEconomy.item_price(StringName(id))))
 		var text := "%s   %s" % [_name(id), ("owned %d" % have) if have > 0 else ("$%d, not owned" % price)]
-		var b := UiKit.button(text, choose.bind(id), LoadoutScreen.item_tooltip(id) + ("" if have > 0 else "\nNot owned: picking it offers to buy it ($%d; cash $%d)" % [price, funds]))
+		var b := UiKit.button(text, choose.bind(id), LoadoutScreen.item_tooltip(id) + ("" if have > 0 else "\nNot owned: picking it buys it and fits it ($%d; cash $%d)" % [price, funds]))
 		b.name = "Pick_" + id
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		if have <= 0:
@@ -449,9 +458,11 @@ func _build_picker() -> void:
 		picker_list.add_child(UiKit.hint("Nothing the company owns or can buy fits here%s." % (" that matches the search" if picker_query != "" else "")))
 
 
-## The draft with `id` on the picked slot ("" empties it). An item the company doesn't own goes
-## on too, and the offer to buy it shows over the list.
-func choose(id: String) -> void:
+## The draft with `id` on the picked slot ("" empties it). An item the company doesn't own is
+## bought and fitted in one step (buy_and_fit, after LoadoutScreen.ask_buy's question; F-405)
+## when the company can afford it and it goes on what he wears; else (or with `buy` false: the
+## armory's Fit on me, a try-on) it goes in the draft and the offer to buy it shows over the list.
+func choose(id: String, buy := true) -> void:
 	if slot_key == "":
 		return
 	var parts := slot_key.split(":")
@@ -465,14 +476,80 @@ func choose(id: String) -> void:
 			next = Loadouts.set_point(draft, parts[1], id)
 		"pockets":
 			next = Loadouts.add_units(draft, id, 1) if id != "" else draft
+	var price := price_of(id) if id != "" else 0
+	var funds := int(BaseHub.view.get("funds", 0))
+	if buy and id != "" and owned(id) <= 0 and price > 0 and funds >= price and on_worn(slot_key):
+		var key := slot_key
+		LoadoutScreen.ask_buy(self, id, price, funds, func() -> void: buy_and_fit(key, id, next))
+		return
 	_offer = id if id != "" and owned(id) <= 0 else ""
 	edit(next)
 	_say("%s%s" % [slot_label(slot_key), "" if _offer == "" else ": not owned, Buy now or Buy missing [B]"])
 
 
+## Whether marker `key`'s edit can be made on what he wears now (the host's ops edit that): a
+## slot or the pockets always; a plate pocket when the draft's carrier is the one he wears (a
+## plate for a carrier only in the draft would go in his own carrier's pocket, or nowhere); a
+## mount when the draft's holder is the one he wears; a MOLLE point when the draft's carrier and
+## pack are his.
+func on_worn(key: String) -> bool:
+	var parts := key.split(":")
+	match parts[0]:
+		"slot":
+			if parts[1].begins_with("plate_"):
+				return String(draft.slots.get("vest", "")) == String(worn.get("slots", {}).get("vest", ""))
+		"mount":
+			var holder := String(draft.slots.get(parts[1], ""))
+			return holder != "" and holder == String(worn.get("slots", {}).get(parts[1], ""))
+		"point":
+			for s: String in ["vest", "backpack"]:
+				if String(draft.slots.get(s, "")) != String(worn.get("slots", {}).get(s, "")):
+					return false
+	return true
+
+
+## The one-step buy (F-405): the host buys one `id` with company money (BaseHub
+## _server_buy_picked, the paper doll pickers' op and price) and fits it on marker `key` of what he
+## wears. A draft with other changes gets the same edit (`next`) and keeps them (undo, Apply); one
+## with none is left as it is and follows what he wears once the host has fitted it (_on_view), so
+## a purchase the host refuses (the cash spent meanwhile) leaves it clean and the close warning
+## right, with no _applied_pending waiting on a change that never comes (review of 4bcfe79f).
+func buy_and_fit(key: String, id: String, next: Dictionary) -> void:
+	var parts := key.split(":")
+	var op := ""
+	var params := {"id": id, "buy": true}
+	match parts[0]:
+		"slot":
+			op = "slot"
+			params["slot"] = parts[1]
+		"mount":
+			op = "mount"
+			params["slot"] = parts[1]
+			params["mount"] = parts[2]
+		"point":
+			op = "point"
+			params["point"] = parts[1]
+		"pockets":
+			op = "add"
+			params["count"] = 1
+	if op == "":
+		return
+	_offer = ""
+	if dirty():
+		edit(next)
+	_say("Buying %s for $%s and fitting it..." % [_name(id), DebriefCalc.money(price_of(id))])
+	BaseHub.request("loadout", [who, op, params])  # (on the host the answer can come back at once)
+
+
+## What the company pays for one `id`: the host's catalog in the view (what the paper doll's
+## pickers show and the host charges), else this machine's shop price.
+static func price_of(id: String) -> int:
+	return int(LoadoutScreen.buyable_prices(BaseHub.view).get(id, BaseEconomy.item_price(StringName(id))))
+
+
 ## The "Buy now" offer for `id`: its price and the cash, one click.
 func _build_offer(id: String) -> void:
-	var price := BaseEconomy.item_price(StringName(id))
+	var price := price_of(id)
 	var funds := int(BaseHub.view.get("funds", 0))
 	offer_box.add_child(UiKit.warn("%s isn't owned: $%d (cash $%d)." % [_name(id), price, funds]))
 	var buy := UiKit.accent_button("Buy now: $%d" % price, buy_one.bind(id), "Buy one into the stash; Apply then fits it")
@@ -516,7 +593,8 @@ func _build_carried() -> void:
 
 ## Puts `id` on the model as a draft where it goes (the armory's "Fit on me"): its slot, a plate
 ## pocket, a rail or muzzle of the primary (else the sidearm), the helmet's mount, a free MOLLE
-## point it fits, or else carried. Picks that slot, so the picker and the buy offer show.
+## point it fits, or else carried. Picks that slot, so the picker and the buy offer show. A
+## try-on: nothing is bought here (choose with buy false), even what the company doesn't own.
 func fit_item(id: String) -> void:
 	var item := ItemDB.get_item(StringName(id)) if ItemDB.has_item(StringName(id)) else null
 	if item == null:
@@ -544,7 +622,7 @@ func fit_item(id: String) -> void:
 		if point != &"":
 			key = "point:" + String(point)
 	pick_slot(key)
-	choose(id)
+	choose(id, false)
 
 
 # --- Stats ------------------------------------------------------------------------------------
@@ -718,7 +796,7 @@ func _send_draft(buy: bool) -> void:
 	BaseHub.request("loadout", [who, "template", {"template": t, "buy": buy}])
 	var cfg := _cfg()
 	cfg.set_value("last_applied", who, t)
-	cfg.save(SETTINGS)
+	cfg.save(settings_path())
 	_applied_pending = true
 	_say("Fitting the kit%s..." % (" after buying what's missing" if buy else ""))
 
@@ -775,8 +853,23 @@ func close() -> void:
 
 func _cfg() -> ConfigFile:
 	var cfg := ConfigFile.new()
-	cfg.load(SETTINGS)
+	cfg.load(settings_path())
 	return cfg
+
+
+## Where the editor remembers its picks: SETTINGS, or a test's own file (use_file) in a dev
+## build (DevTools.on()), so a test never reads or overwrites the player's (F-406).
+static func settings_path() -> String:
+	return String(Engine.get_meta(PATH_META, SETTINGS)) if DevTools.on() else SETTINGS
+
+
+## Reads and saves the editor's picks at `p` from now on (a test; dev builds only); "" for SETTINGS.
+static func use_file(p: String) -> void:
+	if p == "":
+		if Engine.has_meta(PATH_META):
+			Engine.remove_meta(PATH_META)
+	else:
+		Engine.set_meta(PATH_META, p)
 
 
 func _load_settings() -> void:
@@ -795,7 +888,7 @@ func _save_settings() -> void:
 	cfg.set_value("editor", "kit", kit_selected)
 	cfg.set_value("editor", "target", target_selected)
 	cfg.set_value("editor", "region", preview.region)
-	cfg.save(SETTINGS)
+	cfg.save(settings_path())
 
 
 func _fill_people() -> void:

@@ -671,8 +671,9 @@ static func hotkey(b: Button, key: Key, context: Node = null, shift := false) ->
 
 ## Asks before something that can't be undone: a modal box over `parent` (a Control filling
 ## its window, or a CanvasLayer) with `question`, Cancel and `ok_label` (red when `danger`).
-## Enter confirms, Esc cancels. Returns the box (it frees itself when answered).
-static func confirm(parent: Node, question: String, ok_label: String, on_ok: Callable, danger := true) -> Control:
+## Enter confirms, Esc cancels. `extra` (optional) goes under the question, over the buttons (the
+## loadout menus' "Don't ask again" tick). Returns the box (it frees itself when answered).
+static func confirm(parent: Node, question: String, ok_label: String, on_ok: Callable, danger := true, extra: Control = null) -> Control:
 	var overlay := ConfirmBox.new()
 	overlay.name = "Confirm"
 	overlay.on_ok = on_ok
@@ -692,6 +693,8 @@ static func confirm(parent: Node, question: String, ok_label: String, on_ok: Cal
 	fit_width(box, 420.0)
 	box.add_child(heading("Are you sure?"))
 	box.add_child(text(question))
+	if extra:
+		box.add_child(extra)
 	var cancel := button("Cancel", overlay.answer.bind(false), "Keep it (Esc)")
 	cancel.name = "Cancel"
 	var ok := danger_button(ok_label, overlay.answer.bind(true), "%s (Enter)" % ok_label) if danger \

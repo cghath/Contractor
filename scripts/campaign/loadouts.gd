@@ -28,6 +28,10 @@ const SLOT_NAMES := {&"primary": "Primary", &"sidearm": "Sidearm", &"launcher": 
 const MEDIC_POUCHES: Array[String] = ["aid_bag", "pouch_sustainment"]
 ## A MOLLE entry's point id when it has none yet: Restock.build hangs it on a free point it fits.
 const NEW_POINT := "+"
+## Guns of these kinds (their tags) come with a scope of their own and keep it when swapped in for
+## another gun; any other gun takes the optic the old one had (keeps_own_optic, set_slot). Captain,
+## 2026-11-06, F-421: "varies. if you go from ar to sniper yes, M4 to HK416 yes" (Proposed).
+const OWN_SCOPE_TAGS: Array[String] = ["sniper", "dmr"]
 
 
 static func group_of(item: ItemData) -> String:
@@ -73,7 +77,7 @@ static func template_of(gear: Dictionary) -> Dictionary:
 
 ## `slot` holds `id` ("": empty, back to the stash). A carrier or pack taken off takes its
 ## points and what's in it to the stash too (a carrier its plates); a gun swapped for another
-## with a rail keeps the optic asked for.
+## with a rail takes the old one's optic along (swapped_optic: a sniper's own scope wins).
 static func set_slot(t: Dictionary, slot: StringName, id: String) -> Dictionary:
 	var out := _copy(t)
 	var old := String(out.slots.get(String(slot), ""))
@@ -93,6 +97,8 @@ static func set_slot(t: Dictionary, slot: StringName, id: String) -> Dictionary:
 	var item := ItemDB.get_item(StringName(id))
 	if item == null or not Optics.has_rail(item):
 		out.optics.erase(String(slot))
+	elif old != "" and old != id and out.optics.has(String(slot)):
+		out.optics[String(slot)] = swapped_optic(ItemDB.get_item(StringName(old)), item, String(out.optics[String(slot)]))
 	if old != id and out.has("mounts"):
 		var kept := {}
 		for m: String in out.mounts.get(String(slot), {}):
@@ -100,6 +106,28 @@ static func set_slot(t: Dictionary, slot: StringName, id: String) -> Dictionary:
 				kept[m] = out.mounts[String(slot)][m]
 		out.mounts[String(slot)] = kept
 	return out
+
+
+## Whether `gun` comes with a scope it keeps when swapped in (a sniper rifle or a DMR with its
+## own optic: OWN_SCOPE_TAGS).
+static func keeps_own_optic(gun: ItemData) -> bool:
+	if not Optics.has_rail(gun) or String(gun.stats.get("optic", "")) == "":
+		return false
+	return OWN_SCOPE_TAGS.any(func(tag: String) -> bool: return tag in gun.tags)
+
+
+## The optic `new_gun` (with a rail) wears when it's swapped in for `old_gun`, which wore
+## `optic` ("" irons): Captain's F-421 rule. Its own when it keeps its own scope (an M4's red dot
+## never goes on an M110 or SVD), when the old gun had none, or when what the old one wore was a
+## sniper's own scope (it stays on the sniper, not on an M4); else the old one's optic moves over
+## (an M4's dot to an HK416). Loadouts.rebuild takes it off the old gun so the build can draw it.
+static func swapped_optic(old_gun: ItemData, new_gun: ItemData, optic: String) -> String:
+	var own := String(new_gun.stats.get("optic", ""))
+	if keeps_own_optic(new_gun) or optic == "":
+		return own
+	if keeps_own_optic(old_gun) and optic == String(old_gun.stats.get("optic", "")):
+		return own
+	return optic
 
 
 ## The holder in `slot` (a gun, the helmet) carries `id` on `mount` ("" takes it off; GearMounts).
@@ -184,12 +212,9 @@ static func add_units(t: Dictionary, id: String, n: int) -> Dictionary:
 ## Up to `n` fewer of `id` (from the pack, pockets and carrier first, then the pouches; a pouch
 ## taken off leaves what it held in the carrier). Returns {"template", "removed"}.
 static func remove_units(t: Dictionary, id: String, n: int) -> Dictionary:
-	var out := _copy(t)
-	var left := n
-	for c: String in ["backpack", "pockets", "vest"]:
-		left -= _take_from(out.containers.get(c, []), id, left)
-	for point: String in out.molle.keys():
-		left -= _take_from(out.molle[point].held, id, left)
+	var loose := take_loose(t, id, n)
+	var out: Dictionary = loose.template
+	var left := n - int(loose.removed)
 	for point: String in out.molle.keys():
 		if left > 0 and String(out.molle[point].id) == id:
 			for it: Dictionary in out.molle[point].held:
@@ -200,6 +225,18 @@ static func remove_units(t: Dictionary, id: String, n: int) -> Dictionary:
 		if left > 0 and String(out.slots[slot]) == id:
 			out = set_slot(out, StringName(slot), "")
 			left -= 1
+	return {"template": out, "removed": n - left}
+
+
+## Up to `n` fewer of `id` from what's loose: in the pack, pockets and carrier, then in the
+## pouches. Never a worn slot, a mount or a pouch on its point. Returns {"template", "removed"}.
+static func take_loose(t: Dictionary, id: String, n: int) -> Dictionary:
+	var out := _copy(t)
+	var left := n
+	for c: String in ["backpack", "pockets", "vest"]:
+		left -= _take_from(out.containers.get(c, []), id, left)
+	for point: String in out.molle.keys():
+		left -= _take_from(out.molle[point].held, id, left)
 	return {"template": out, "removed": n - left}
 
 
@@ -256,7 +293,7 @@ static func role_template(role: StringName) -> Dictionary:
 static func rebuild(people: Array, pool: Array) -> Array:
 	for p: Dictionary in people:
 		var own := Inventory.new()
-		own.net_state = GameState.from_json(p.gear)
+		own.net_state = GameState.from_json(_loosen_mounts(p.gear, p.template, pool))
 		# Unpacked: what's on and in their own carrier, pack and pouches goes in loose. Left
 		# packed, it could only be drawn with that same carrier, and a rebuild that drew another
 		# (the stash's, with more pouches) left the medic's own IVs locked in his (R0976).
@@ -269,6 +306,66 @@ static func rebuild(people: Array, pool: Array) -> Array:
 	var out: Array = []
 	for p: Dictionary in people:
 		out.append(Restock.build(p.template, pool))
+	return out
+
+
+## `gear` (JSON-safe) with each mount that template `t` names on the same slot (a helmet's NVG,
+## a gun's suppressor or grip; set_slot keeps the ones that fit a new holder) taken off the
+## holder and into `pool` loose, so the build can draw it for whichever holder it puts there.
+## Left on, it went into the pool on the old holder: a helmet swapped or bought came without its
+## NVG, the NVG went back to the stash on the old helmet and was listed missing (a buy charged for
+## it; F-420), and the same when the build drew the stash's unit of an unchanged gun over his own
+## (his suppressor and grip "missing", R0829). Only a mount the template names the same item on.
+## A gun swapped for another (F-421) leaves its optic in the pool loose too: the one the template
+## moves over to the new gun (swapped_optic), and one he fitted that the new gun doesn't take (it
+## goes to the stash loose, not on the old gun); the old gun's own optic stays on it unless it
+## moves over to a gun that doesn't come with that same optic (an M4's own dot to an HK416 stays:
+## the HK416 comes with one). A gun taken off (slot emptied) keeps its optic. The same gun kept
+## needs none of this: Restock.draw picks the unit with the optic asked for.
+## A mount's state is decoded as the rest of his kit is (GameState.from_json), so it stacks and
+## compares with the stash's entries by value.
+static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dictionary:
+	var wanted: Dictionary = t.get("mounts", {})
+	var want_slots: Dictionary = t.get("slots", {})
+	var want_optics: Dictionary = t.get("optics", {})
+	var out := gear
+	var copied := false
+	var slots: Dictionary = gear.get("slots", {})
+	for slot: Variant in slots:
+		var id := String(slots[slot])
+		if id == "":
+			continue
+		var holder := ItemDB.get_item(StringName(id))
+		var want: Dictionary = wanted.get(String(slot), {})
+		var state: Dictionary = (out.get("slot_state", {}) as Dictionary).get(slot, {}).duplicate(true)
+		var changed := false
+		for m: String in GearMounts.of(holder, state):
+			if want.is_empty() or String(want.get(m, "")) != GearMounts.on(holder, state, m):
+				continue
+			var entry := GearMounts.entry_on(holder, state, m)
+			BaseArmory.add(pool, StringName(String(entry.id)), 1, GameState.from_json(entry.get("state", {})))
+			state = GearMounts.with(holder, state, m, {})
+			changed = true
+		# The optic, only on a gun swapped for another (not one taken off: it goes to the stash as
+		# it is). One he fitted always comes off; the old gun's own only when it moves over to a new
+		# gun that doesn't come with that same optic (an M4's own dot stays on it for an HK416,
+		# which has its own dot: else a bare M4 and a stray dot in the stash; review of 4bcfe79f).
+		var on := String(Optics.mounted_id(holder, state))
+		var new_id := String(want_slots.get(String(slot), id))
+		var new_gun := ItemDB.get_item(StringName(new_id)) if new_id != "" and ItemDB.has_item(StringName(new_id)) else null
+		var want_optic := String(want_optics.get(String(slot), ""))
+		if on != "" and new_gun != null and new_id != id and (on != String(holder.stats.get("optic", ""))
+				or (want_optic == on and want_optic != String(new_gun.stats.get("optic", "")))):
+			BaseArmory.add(pool, StringName(on), 1)
+			state = Optics.with_optic(holder, state, &"")
+			changed = true
+		if changed:
+			if not copied:
+				out = gear.duplicate(true)
+				copied = true
+			if not out.has("slot_state"):
+				out["slot_state"] = {}
+			out.slot_state[slot] = state
 	return out
 
 
