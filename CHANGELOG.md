@@ -20,6 +20,12 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   false until the brain has set up, and `morale_shaken()`/`morale_broken()` read the side from
   the parent before then, as `_doctrine_id()` already did. People suite: "Surrender check, a
   brain not set up yet" (failed with the old code, R0823; passes, R0826).
+- A hostile seated in a vehicle (any seat, tripod guns and mortars too) never surrenders in his
+  seat (Captain, 2026-11-06, F-429): `PeopleLayer.surrender_reason` skips him; out of the seat he
+  can. People suite "Surrender, seated in a vehicle": badly hurt, alone and seen in a technical,
+  100 forced checks and he never gives up; out of it, he does. The suite's forced checks now look
+  only at its own men (`_check_surrenders` takes an optional list), and the "freed this frame"
+  check is named for what it is (a queued body, skipped as before).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

@@ -90,6 +90,7 @@ func _ready() -> void:
 	await _test_intel()
 	await _test_radio_report()
 	await _test_surrender_unset_brain()
+	await _test_surrender_seated()
 	await _test_surrender()
 	await _test_scavenge_intel()
 	await _test_escort()
@@ -529,7 +530,7 @@ func _test_surrender_unset_brain() -> void:
 		"his brain hasn't set up (no body yet) and isn't broken")
 	check(layer.surrender_reason(fresh) == "", "unhurt, he fights on (no script error)")
 	PeopleLayer.surrender_enabled = true
-	layer._check_surrenders()  # the host's tick, in the same frame
+	layer._check_surrenders([fresh])  # the host's tick, in the same frame (only him: nobody left from earlier sections)
 	PeopleLayer.surrender_enabled = false
 	check(not Person.is_captive(fresh), "and the host's surrender tick passes over him")
 	fresh.vitals.server_damage(45.0)
@@ -538,8 +539,44 @@ func _test_surrender_unset_brain() -> void:
 		"badly hurt, alone and seen, brain still off: he would give up all the same (%s)" % layer.surrender_reason(fresh))
 	var gone := _soldier("Gone", &"hostile", Vector3(-33, 0.1, -30), CompoundLevel.HOSTILE_LOADOUT, false)
 	gone.queue_free()
-	check(layer.surrender_reason(gone) == "", "freed this frame: the surrender check passes over him")
+	check(layer.surrender_reason(gone) == "", "queued for deletion this frame: passed over (the queued-body skip, not the brain guard)")
 	fresh.queue_free()
+	await _frames(3)
+
+
+## Captain, 2026-11-06 (F-429): a hostile seated in a vehicle never surrenders in his seat ("nah
+## screw him lol. he die either way"). Badly hurt, alone and seen in a technical's seat: never
+## picked, over many forced checks. Out of the seat, the same man gives up.
+func _test_surrender_seated() -> void:
+	print("Surrender, seated in a vehicle")
+	var vl := level.get_node(^"Vehicles") as VehicleLayer
+	var tech := vl.server_spawn("technical", Transform3D(Basis(), Vector3(-38, 0.3, -32)), "", &"hostile", "surrender_seated_tech")
+	var rider := _soldier("Rider", &"hostile", Vector3(-33, 0.1, -32), CompoundLevel.HOSTILE_LOADOUT, false)
+	SquadAI.of(rider).hold_fire = true
+	_place(player, Vector3(-36, 0.1, -20))
+	await _frames(3)
+	check(tech != null and tech.server_enter(rider) and Vehicle.ride_of(rider) == tech, "a hostile seated in a technical")
+	rider.vitals.server_damage(45.0)
+	await _frames(3)
+	var hurt := rider.vitals.pain() >= PeopleLayer.SURRENDER_PAIN or rider.vitals.blood_fraction() <= PeopleLayer.SURRENDER_BLOOD or rider.vitals.injury() >= PeopleLayer.SURRENDER_INJURY
+	check(rider.vitals.is_up() and hurt and Squad.sees(rider, player) and Vehicle.ride_of(rider) == tech,
+		"badly hurt, up and seen from his seat (pain %.2f, blood %.2f)" % [rider.vitals.pain(), rider.vitals.blood_fraction()])
+	check(layer.surrender_reason(rider) == "", "seated: no reason to give up (%s)" % layer.surrender_reason(rider))
+	for i in 100:
+		layer._check_surrenders([rider])
+	check(not Person.is_captive(rider) and SquadAI.of(rider) != null, "100 forced surrender checks: he never gives up in his seat")
+	tech.server_exit(rider)
+	SquadAI.of(rider).process_mode = Node.PROCESS_MODE_DISABLED  # out, his brain stays off as before
+	await _frames(3)
+	check(Vehicle.ride_of(rider) == null and layer.surrender_reason(rider) == "badly hurt and alone",
+		"out of the seat: he would give up (%s)" % layer.surrender_reason(rider))
+	var tries := 0
+	while not Person.is_captive(rider) and tries < 100:
+		layer._check_surrenders([rider])
+		tries += 1
+	check(Person.is_captive(rider), "and he does (forced check %d)" % tries)
+	rider.queue_free()
+	tech.queue_free()
 	await _frames(3)
 
 
