@@ -3262,6 +3262,13 @@ func server_loadout(sender: int, who: String, op: String, p: Dictionary) -> Stri
 			var id := String(p.get("id", ""))
 			if point == "" or (id != "" and not (ItemDB.has_item(StringName(id)) and Inventory.is_attachable(ItemDB.get_item(StringName(id))))):
 				return "That doesn't go there"
+			# A point on the carrier or pack he wears, and a pouch of a type it takes (a stale or
+			# hand-made request named a point he hasn't got, and the build hung it anywhere).
+			var at := s.inventory.attach_point(StringName(point))
+			if at.is_empty():
+				return "Nothing %s wears has that point" % a.name
+			if id != "" and not Inventory.point_types(at).any(func(ty: String) -> bool: return ty in ItemDB.get_item(StringName(id)).stats.get("attach", [])):
+				return "The %s doesn't fit that point" % ItemDB.get_item(StringName(id)).name
 			t = _from_own_kit(lvl, a, Loadouts.set_point(t, point, id), id)
 			what = ("%s on a MOLLE point" % ItemDB.get_item(StringName(id)).name) if id != "" else "MOLLE point emptied"
 			if bool(p.get("buy", false)) and id != "":

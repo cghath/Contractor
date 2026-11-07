@@ -18,7 +18,7 @@ extends Node
 const SEED := 5151
 ## Items the test stash holds besides the starting stash.
 const EXTRA_STASH := [["smoke_grenade", 4], ["m110", 1], ["mag_762", 6], ["optic_holo", 2], ["helmet_heavy", 1], ["mag_9mm", 4], ["m17", 1],
-	["suppressor_rifle", 1], ["grip_vertical", 1], ["nvg_gen2", 1], ["pouch_mag_double", 2]]
+	["suppressor_rifle", 1], ["grip_vertical", 1], ["nvg_gen2", 1], ["pouch_mag_double", 2], ["hk416", 1], ["svd", 1], ["optic_t2", 2]]
 const CLIENT_DONE := "CLIENT LOADOUT CHECKS DONE"
 const CLIENT_KEY := "loadout_client"
 const FIT_SIZES: Array[Vector2i] = [Vector2i(1280, 720), Vector2i(1366, 768), Vector2i(1600, 900), Vector2i(1920, 1080), Vector2i(2560, 1440),
@@ -220,6 +220,7 @@ func _test_kit_rules(rifleman: Dictionary) -> void:
 		and res3.missing.is_empty() and old_bare and Loadouts.units(pool3, [res3.gear]) == before3,
 		"swapping the helmet moves its NVG onto the new one: nothing missing, the old helmet bare in the stash (%s, missing %s)" % [
 			GearMounts.of(heavy, res3.gear.slot_state.get("helmet", {})), res3.missing])
+	_test_gun_swap_rules(rifleman)
 	var points: Array = ItemDB.get_item(StringName(String(t.slots.vest))).stats.get("molle", [])
 	var free := ""
 	for p: Dictionary in points:
@@ -383,6 +384,7 @@ func _test_session() -> void:
 	var bought_helmet: String = await _test_picker_buy(String(ids[0]))
 	# The host can't change another player's kit (a client is peer 2 here).
 	check(BaseHub.server_loadout(2, me, "add", {"id": "smoke_grenade"}).contains("their own kit"), "a client's request on the host's kit is refused")
+	_test_gun_swap(ids)
 	await _test_fit(ids)
 	await _test_client(ids, bought_helmet)
 	# Save and load keep what the pickers bought: the squadmate's helmet, the client's, the cash.
@@ -395,6 +397,53 @@ func _test_session() -> void:
 		"after a save and reload %s still wears the bought %s and the cash is $%d (%s, $%d)" % [BaseHub.member(String(ids[0])).get("callsign", "?"), bought_helmet, cash, helmet_after, Economy.cash()])
 	var client_after := String(BaseHub.roster().get("players", {}).get(CLIENT_KEY, {}).get("gear", {}).get("slots", {}).get("helmet", ""))
 	check(client_after != "" and client_after == _client_bought, "and the client's bought helmet is on its record (%s, bought %s)" % [client_after, _client_bought])
+
+
+## The host's swap of a squadmate's gun (F-421, the "slot" op): his M4 with a T-2 red dot to an
+## HK416 takes the dot along; to an SVD the SVD keeps its own scope and the T-2 goes to the stash
+## loose; nothing is listed missing, made or lost. And the "point" op refuses a point he hasn't got
+## or a pouch that doesn't fit it (review of 4bcfe79f).
+func _test_gun_swap(ids: Array) -> void:
+	print("The host swaps a squadmate's gun, and its optic (F-421)")
+	var base := level as BaseLevel
+	var who := ""
+	for m: String in ids:
+		var b := base.muster_soldier(m)
+		if who == "" and m != String(ids[2]) and b and String(Roster.json_safe(b.inventory.net_state).slots.get("primary", "")) == "m4a1":
+			who = m
+	if who == "":
+		who = String(ids[1])
+		BaseHub.server_loadout(1, who, "slot", {"slot": "primary", "id": "m4a1"})
+	var s := base.muster_soldier(who)
+	var primary := func() -> String:
+		var g: Dictionary = Roster.json_safe(s.inventory.net_state)
+		var id := String(g.slots.get("primary", ""))
+		return "%s+%s" % [id, Optics.mounted_id(ItemDB.get_item(StringName(id)), g.get("slot_state", {}).get("primary", {}))] if id != "" else ""
+	var loose := func() -> int:
+		return base.server_collect_stash().filter(func(e: Dictionary) -> bool: return String(e.id) == "optic_t2").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var said := BaseHub.server_loadout(1, who, "optic", {"slot": "primary", "id": "optic_t2"})
+	check(primary.call() == "m4a1+optic_t2", "%s's M4 gets a T-2 red dot (%s)" % [s.name, said])
+	var units := _hub_units()
+	said = BaseHub.server_loadout(1, who, "slot", {"slot": "primary", "id": "hk416"})
+	check(primary.call() == "hk416+optic_t2" and not said.contains("Missing") and _hub_units() == units and not BaseHub.member(who).has("edit_missing"),
+		"to an HK416: the T-2 moves over, nothing missing, made or lost (%s)" % said)
+	var loose_before: int = loose.call()
+	said = BaseHub.server_loadout(1, who, "slot", {"slot": "primary", "id": "svd"})
+	check(primary.call() == "svd+optic_prism_4x" and int(loose.call()) == loose_before + 1 and not said.contains("Missing") and _hub_units() == units
+		and not BaseHub.member(who).has("edit_missing"),
+		"to an SVD: it keeps its own scope, the T-2 goes to the stash loose, nothing listed missing (%s; loose T-2 %d -> %d)" % [said, loose_before, loose.call()])
+	said = BaseHub.server_loadout(1, who, "slot", {"slot": "primary", "id": "m4a1"})
+	check(primary.call() == "m4a1+optic_red_dot" and not said.contains("Missing") and _hub_units() == units,
+		"and back to an M4: its own red dot, the scope stays on the SVD in the stash (%s)" % said)
+	# The 3D editor's point op on the host: only a point he wears, only a pouch that fits it.
+	var odd := ""
+	for p: Dictionary in s.inventory.attach_points():
+		if odd == "" and not Inventory.point_types(p).any(func(ty: String) -> bool: return ty in ItemDB.get_item(&"aid_bag").stats.get("attach", [])):
+			odd = String(p.id)
+	var nope := BaseHub.server_loadout(1, who, "point", {"point": "no_such_point", "id": "pouch_mag_double"})
+	var wrong := BaseHub.server_loadout(1, who, "point", {"point": odd, "id": "aid_bag"}) if odd != "" else ""
+	check(nope.contains("has that point") and (odd == "" or wrong.contains("doesn't fit")) and _hub_units() == units,
+		"a point he hasn't got, or an aid bag on his %s point: refused, nothing changed (%s; %s)" % [odd, nope, wrong])
 
 
 ## Buying from the loadout menu's pickers (Captain's "Next" item 4, "buy missing kit from inside
@@ -711,6 +760,12 @@ func _test_3d_editor(me: String) -> void:
 		"picking an owned %s puts it on the model at once, as a draft" % try_on)
 	editor.undo()
 	check(String(editor.draft.slots.get("helmet", "")) != try_on and not editor.dirty(), "Ctrl+Z takes it back")
+	# A plate pocket is "on what he wears" only while the draft's carrier is his (review of 4bcfe79f).
+	var plates_worn := editor.on_worn("slot:plate_front")
+	editor.edit(Loadouts.set_slot(editor.draft, &"vest", ""))
+	check(plates_worn and not editor.on_worn("slot:plate_front") and editor.on_worn("slot:helmet"),
+		"a plate pocket buys in one step only on the carrier he wears, not on a draft without it")
+	editor.revert_draft()
 	# F-405: an unowned item is bought and fitted in one step, asking first (this run's settings
 	# start with the question on). His helmet first, so the NVG mount is on what he wears.
 	if String(editor.worn.slots.get("helmet", "")) == "":
@@ -744,13 +799,38 @@ func _test_3d_editor(me: String) -> void:
 	await _frames(3)
 	check(Economy.cash() == cash and _hub_units() == units and hash(editor.draft) == draft_was and editor.find_child("Confirm", false, false) == null
 		and nvg_on.call() != unowned, "Cancel buys nothing and leaves the draft as it was")
+	# The host refuses it (the cash spent while the question was up): nothing bought, the draft
+	# still what he wears and nothing left waiting for a change (review of 4bcfe79f).
+	editor.choose(unowned)
+	await _frames(2)
+	box = editor.find_child("Confirm", false, false)
+	var asked := box != null  # (read now: Ok frees the box, and a freed one compares equal to null)
+	Economy.add_cash(-cash, "test: spent meanwhile")
+	_notes.clear()
+	if box:
+		(box.find_child("Ok", true, false) as Button).pressed.emit()
+	await _frames(3)
+	var refused := {"asked": asked, "cash 0": Economy.cash() == 0, "units": _diff(units, _hub_units()), "clean": not editor.dirty(),
+		"pending": editor._applied_pending, "nvg on": nvg_on.call()}
+	check(refused.asked and refused["cash 0"] and (refused.units as Dictionary).is_empty() and refused.clean and not refused.pending and refused["nvg on"] != unowned
+		and _notes.any(func(t: String) -> bool: return t.contains("Not enough cash")),
+		"a purchase the host refuses: nothing bought, the draft still clean, nothing pending (%s; %s)" % [refused, _notes])
+	Economy.add_cash(cash, "test: cash back")
+	await _wait_until(func() -> bool: return int(BaseHub.view.get("funds", -1)) == cash, 5.0)
 	_notes.clear()
 	_econ_notes.clear()
 	editor.choose(unowned)
 	await _frames(2)
 	box = editor.find_child("Confirm", false, false)
 	if box:
+		(box.find_child("DontAsk", true, false) as CheckBox).button_pressed = true
 		(box.find_child("Ok", true, false) as Button).pressed.emit()
+	var ask_tick := editor.find_child("AskBuy", true, false) as CheckBox
+	check(ask_tick != null and not ask_tick.button_pressed and not LoadoutScreen.confirm_buy_on(),
+		"\"Don't ask again\" there unticks the editor's own \"Ask before buying\" (review of 4bcfe79f)")
+	if ask_tick:
+		ask_tick.button_pressed = true
+	check(LoadoutScreen.confirm_buy_on(), "and that tick turns the question back on")
 	var fitted := await _wait_until(func() -> bool: return nvg_on.call() == unowned and not editor.dirty(), 6.0)
 	var diff := _diff(units, _hub_units())
 	check(fitted and Economy.cash() == cash - price and diff == {unowned: 1} and not editor.dirty(),
@@ -957,6 +1037,64 @@ func _test_client(ids: Array, bought_helmet := "") -> void:
 	check(code == 0, "the client's checks pass (exit %d)" % code)
 
 
+## F-421 (Captain, 2026-11-06: "varies. if you go from ar to sniper yes, M4 to HK416 yes"): a
+## gun swapped for another takes the optic he fitted along, unless the new one is a sniper or DMR
+## with a scope of its own (Loadouts.OWN_SCOPE_TAGS): that stays on, his goes to the stash loose.
+func _test_gun_swap_rules(rifleman: Dictionary) -> void:
+	print("A gun swapped for another, and its optic (F-421)")
+	var pool := _stash()
+	var dotted: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_optic(Loadouts.template_of(rifleman), &"primary", "optic_t2")}], pool)[0].gear
+	var optic_of := func(gear: Dictionary) -> String:
+		var id := String(gear.slots.get("primary", ""))
+		return "%s+%s" % [id, Optics.mounted_id(ItemDB.get_item(StringName(id)), gear.get("slot_state", {}).get("primary", {}))] if id != "" else ""
+	var loose_t2 := func(p: Array) -> int:
+		return p.filter(func(e: Dictionary) -> bool: return String(e.id) == "optic_t2").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var gun_has_t2 := func(p: Array) -> bool:
+		return p.any(func(e: Dictionary) -> bool:
+			var g := ItemDB.get_item(StringName(String(e.id)))
+			return Optics.has_rail(g) and Optics.mounted_id(g, e.get("state", {})) == &"optic_t2")
+	check(optic_of.call(dotted) == "m4a1+optic_t2", "his M4 with a T-2 red dot (%s)" % optic_of.call(dotted))
+	var t := Loadouts.template_of(dotted)
+	check(String(Loadouts.set_slot(t, &"primary", "hk416").optics.primary) == "optic_t2" and String(Loadouts.set_slot(t, &"primary", "m110").optics.primary) == "optic_dmr_3_5_10"
+		and String(Loadouts.set_slot(t, &"primary", "svd").optics.primary) == "optic_prism_4x" and Loadouts.keeps_own_optic(ItemDB.get_item(&"m110"))
+		and not Loadouts.keeps_own_optic(ItemDB.get_item(&"hk416")), "the template: the T-2 asked for on an HK416, an M110 or SVD its own scope")
+	for to: String in ["hk416", "m110", "svd"]:
+		var p := pool.duplicate(true)
+		var before := Loadouts.units(p, [dotted])
+		var loose: int = loose_t2.call(p)
+		var res: Dictionary = Loadouts.rebuild([{"gear": dotted, "template": Loadouts.set_slot(t, &"primary", to)}], p)[0]
+		var gun := ItemDB.get_item(StringName(to))
+		var want := "optic_t2" if to == "hk416" else String(gun.stats.optic)
+		check(optic_of.call(res.gear) == to + "+" + want and res.missing.is_empty() and Loadouts.units(p, [res.gear]) == before and not gun_has_t2.call(p)
+			and int(loose_t2.call(p)) == loose + (0 if to == "hk416" else 1),
+			"M4 with the T-2 to the %s: it wears %s, nothing missing or made, the T-2 %s (missing %s)" % [
+				gun.name, optic_of.call(res.gear), "moved over" if to == "hk416" else "in the stash loose, not on the M4", res.missing])
+		if to == "m110":
+			# And back: the M4 comes with its own dot; the M110 keeps its scope in the stash.
+			var res2: Dictionary = Loadouts.rebuild([{"gear": res.gear, "template": Loadouts.set_slot(Loadouts.template_of(res.gear), &"primary", "m4a1")}], p)[0]
+			var scoped := p.any(func(e: Dictionary) -> bool:
+				return String(e.id) == "m110" and Optics.mounted_id(gun, e.get("state", {})) == &"optic_dmr_3_5_10")
+			check(optic_of.call(res2.gear) == "m4a1+optic_red_dot" and res2.missing.is_empty() and scoped and Loadouts.units(p, [res2.gear]) == before,
+				"and back to an M4: its own red dot, the scope stays on the M110 (%s, missing %s)" % [optic_of.call(res2.gear), res2.missing])
+	# A stock M4 (its own red dot) to an HK416, which comes with the same dot: the M4 goes back
+	# plain with its dot on, no stray loose dot (review of 4bcfe79f: it went in bare, irons, and
+	# its dot loose, while the stash's HK416 came with its own).
+	var sp := pool.duplicate(true)
+	var stock_before := Loadouts.units(sp, [rifleman])
+	var dots := func(p: Array) -> int:
+		return p.filter(func(e: Dictionary) -> bool: return String(e.id) == "optic_red_dot").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var dots_before: int = dots.call(sp)
+	var stock: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_slot(Loadouts.template_of(rifleman), &"primary", "hk416")}], sp)[0]
+	var m4 := ItemDB.get_item(&"m4a1")
+	var plain_m4s := sp.filter(func(e: Dictionary) -> bool: return String(e.id) == "m4a1")
+	var bare := plain_m4s.filter(func(e: Dictionary) -> bool:
+		return (e.get("state", {}) as Dictionary).has(Optics.STATE_KEY) or Optics.mounted_id(m4, e.get("state", {})) != &"optic_red_dot")
+	check(optic_of.call(rifleman) == "m4a1+optic_red_dot" and optic_of.call(stock.gear) == "hk416+optic_red_dot" and stock.missing.is_empty()
+		and Loadouts.units(sp, [stock.gear]) == stock_before and not plain_m4s.is_empty() and bare.is_empty() and int(dots.call(sp)) == dots_before,
+		"a stock M4 to an HK416: its own dot stays on the M4 in the stash, no loose dot, nothing missing, made or lost (%s; M4s %s; loose dots %d -> %d)" % [
+			optic_of.call(stock.gear), plain_m4s, dots_before, dots.call(sp)])
+
+
 ## Client process: joins the hub, asks the host for a smoke on itself, Fill ammo on a squadmate,
 ## and to change the host's kit (refused); writes its checks to --log.
 func _run_client() -> void:
@@ -1065,6 +1203,34 @@ func _run_client() -> void:
 		"its 3D editor bought %s ($%d) on %s and fitted it through the host in one step; the draft is what it wears" % [id3, price3, key])
 	if editor:
 		editor.close()
+	await _frames(2)
+	# F-421 through the host: its M4 with a T-2 to an HK416 (the dot moves over), then to an SVD
+	# (its own scope stays on, the T-2 goes to the stash loose); nothing listed missing.
+	var gun_of := func() -> String:
+		var g: Dictionary = Roster.json_safe(body.inventory.net_state) if body else {}
+		var id := String(g.get("slots", {}).get("primary", ""))
+		return "%s+%s" % [id, Optics.mounted_id(ItemDB.get_item(StringName(id)), g.get("slot_state", {}).get("primary", {}))] if id != "" else ""
+	var loose_t2 := func() -> int:
+		return (BaseHub.view.get("stash", []) as Array).filter(func(e: Dictionary) -> bool: return String(e.id) == "optic_t2").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var me_key := "player:" + CLIENT_KEY
+	if not String(gun_of.call()).begins_with("m4a1+"):
+		BaseHub.request("loadout", [me_key, "slot", {"slot": "primary", "id": "m4a1"}])
+		await _wait_until(func() -> bool: return String(gun_of.call()).begins_with("m4a1+"), 15.0)
+	BaseHub.request("loadout", [me_key, "optic", {"slot": "primary", "id": "optic_t2"}])
+	var dotted := await _wait_until(func() -> bool: return gun_of.call() == "m4a1+optic_t2", 15.0)
+	await _seconds(0.5)
+	notes.clear()
+	BaseHub.request("loadout", [me_key, "slot", {"slot": "primary", "id": "hk416"}])
+	var moved := await _wait_until(func() -> bool: return gun_of.call() == "hk416+optic_t2" and not notes.is_empty(), 15.0)
+	check(dotted and moved and not notes.any(func(t: String) -> bool: return t.contains("Missing")),
+		"its M4 with a T-2 to an HK416 through the host: the T-2 moved over, nothing missing (%s, %s)" % [gun_of.call(), notes])
+	await _seconds(0.5)
+	var loose_was: int = loose_t2.call()
+	notes.clear()
+	BaseHub.request("loadout", [me_key, "slot", {"slot": "primary", "id": "svd"}])
+	var scoped := await _wait_until(func() -> bool: return gun_of.call() == "svd+optic_prism_4x" and not notes.is_empty() and int(loose_t2.call()) == loose_was + 1, 15.0)
+	check(scoped and not notes.any(func(t: String) -> bool: return t.contains("Missing")),
+		"then to an SVD: its own scope, the T-2 in the stash loose (%d -> %d in its view), nothing missing (%s, %s)" % [loose_was, loose_t2.call(), gun_of.call(), notes])
 	_say(CLIENT_DONE)
 	await _seconds(1.0)
 	_say("CLIENT %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])

@@ -796,6 +796,10 @@ static func ask_buy(parent: Node, id: String, price: int, funds: int, buy: Calla
 		"Buy for $%s" % DebriefCalc.money(price), func() -> void:
 			if tick.button_pressed:
 				GameSettings.set_value("loadout", "confirm_buy", false)
+				# The "Ask before buying" ticks on show follow (the 3D editor's is built once).
+				if is_instance_valid(parent):
+					for t: Node in parent.find_children("AskBuy", "CheckBox", true, false):
+						(t as CheckBox).set_pressed_no_signal(false)
 			buy.call(), false, tick)
 
 

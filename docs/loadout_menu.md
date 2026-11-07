@@ -95,6 +95,16 @@ Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
   template keeps: `Loadouts.rebuild` takes it off his holder first, so whichever unit the build
   draws gets it; F-420). Before, the NVG stayed on the old helmet in the stash and was listed
   missing, and a change that drew the stash's copy of his gun left his suppressor on his own.
+- **A gun swapped for another and its optic** (Captain, 2026-11-06, F-421: "varies. if you go
+  from ar to sniper yes, M4 to HK416 yes"): a sniper rifle or DMR with a scope of its own (tags
+  in `Loadouts.OWN_SCOPE_TAGS`, "sniper" and "dmr", Proposed: the M110, SVD, SR-25, Mk 12,
+  Mosin...) keeps its own scope, and the optic he had fitted goes to the stash loose; any other
+  gun (M4 to HK416) takes the optic he had along (`Loadouts.swapped_optic`). The old gun's own
+  optic stays on it when the new gun doesn't take it or comes with the same one (a stock M4 to
+  an HK416: the M4 goes back plain, its dot on), and a sniper's own scope stays on the
+  sniper when he swaps back to a rifle (that gets its own). Irons on the old gun: the new one
+  comes with its own. `Loadouts.rebuild` takes the optic off the old gun first so the build can
+  draw it; nothing is listed missing.
 The armory lays the stash out in category bands
 (BaseArmory.BANDS); deliveries and returns take the next free slot of their band.
 

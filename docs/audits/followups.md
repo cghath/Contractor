@@ -2139,6 +2139,12 @@ Captain, 2026-11-02: F-404, should a picker purchase ask first: "not always but 
 2026-11-02 | feat/loadout-buy (review): an item the person carries (in pockets, pouches or pack) and the stash lacks is offered as "name (carried)", a plain swap from their own kit | no "Buy:" label for something no one pays for | hiding it
 2026-11-02 | feat/loadout-buy (F-420): every mount the template keeps (helmet NVG; gun muzzle, underbarrel, side, choke) is taken off his holder before the rebuild, so whichever holder the build draws (a new helmet, or the stash's unit of the same gun) gets it; optics on a gun swap left as they are (F-421, a question) | the NVG case is plainly a bug, and only loosening the replaced holder's left the same-id case (R0829) | loosening only replaced holders; moving optics too
 2026-11-03 | feat/loadout-buy (review of 91f13def): the host's slot, optic, mount and point ops take the unit they put on from what he carries loose (pack, pockets, carrier, pouches; BaseHub._from_own_kit, Loadouts.take_loose) whenever the stash can't supply it, so a "(carried)" choice is a real swap: his copy moves, nothing is listed missing and Buy missing offers nothing | decided on the host from the edit's shortfall, not by a flag from the menu, so a stale menu or the 3D editor gets the same rule; the stash's copy still wins when there is one (as before) | a from_kit flag on the "(carried)" choice only
+Captain, 2026-11-06: F-421, swapping guns, keep the player's optic or take the new gun's own scope: "varies. if you go from ar to sniper yes, M4 to HK416 yes". The 3D editor's Cancel on the buy question leaving the item out of the draft: "ill check it".
+2026-11-06 | feat/loadout-buy (F-421): read as: a gun with a scope of its own that's a sniper rifle or DMR (tags "sniper" or "dmr" in data/items.json, Loadouts.OWN_SCOPE_TAGS, Proposed) keeps it and the optic he had fitted goes to the stash loose; any other gun (M4 to HK416, same class) takes his optic along (every rail gun takes any optic, so it always fits) | every rifle in the data names an own optic ("optic": the M4 and HK416 a red dot too), so "has its own optic" can't tell an AR from a sniper; the tags already say which are precision rifles | a magnification threshold on the new gun's own optic (would count the M27's 4x prism as a sniper's scope); a new per-gun data flag
+2026-11-06 | feat/loadout-buy (F-421): swapping back from a sniper to a rifle leaves the sniper's own scope on it and the rifle comes with its own; a gun swapped in after irons comes with its own optic; the old gun's own optic (an M4's dot when the new gun keeps its scope) stays on it in the stash, only one he fitted comes off loose | "ar to sniper yes" read the other way round: a DMR scope shouldn't end up on an M4; a plain stash gun stacks with the others | moving whatever was on the old gun every time
+2026-11-06 | feat/loadout-buy (review of 4bcfe79f): a one-step buy from the 3D editor with a clean draft leaves the draft alone and lets it follow what he wears when the host has fitted it (no _applied_pending); with other draft changes the draft gets the edit as before | a refused buy (cash spent meanwhile) then leaves nothing pending and the close warning right, with no way to read a refusal from the note needed | clearing _applied_pending when a note that isn't a success comes back
+2026-11-06 | feat/loadout-buy (F-405): the 3D editor's Cancel on the buy question still leaves the item out of the draft, as before; logged as an open question under F-405 until Captain has checked it | Captain: "ill check it" | putting it in the draft unbought on Cancel; a new F-id
+2026-11-07 | feat/loadout-buy (F-421, review of the uncommitted round): the old gun's own optic comes off for the rebuild only when it moves over to a new gun that doesn't come with that same optic; one he fitted always does; nothing comes off a gun taken off (slot emptied) | a stock M4 to an HK416 (both own a red dot) left a bare M4 (irons, no longer stacking with plain M4s) and a stray loose dot, while the stash's HK416 came with its own; an emptied slot isn't a swap, so the gun goes to the stash as it was | loosening only fitted optics (an own dot moving to a gun with another own optic would then be listed missing)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2208,6 +2214,11 @@ unowned item asks (as F-404) and sends the marker's host op with `buy: true` (`s
 the new `point`, `add`), the pickers' `BaseHub._server_buy_picked` and price; the draft gets
 the same edit and keeps its other changes and undo. Unaffordable, or on a holder the draft has
 but he doesn't wear yet: draft and Buy now as before.
+Open (question, 2026-11-06): Cancel on the buy question buys nothing and leaves the item out of
+the draft, so it isn't on the model either; the other choice is to put it in the draft unbought
+(the old draft-then-Buy-now flow) so a kit can be planned around it. Captain, 2026-11-06: "ill
+check it". Unchanged until he has (`scripts/ui/loadout_editor.gd`, `choose`, the
+`LoadoutScreen.ask_buy` call).
 
 ### F-406 (done in feat/loadout-buy): the loadout suite's 3D editor checks read a shared user:// file
 LoadoutEditor remembers its last person in `user://loadout_editor.cfg`, which every local run
@@ -2236,10 +2247,23 @@ off each mount the template names the same item on (`Loadouts._loosen_mounts`: h
 guns' muzzle, underbarrel, side, choke) and puts it in the pool loose, so whichever holder is
 drawn gets it. An NVG comes back raised (as `Restock` always fits one). Checked in loadout
 (rules, the picker purchase of a helmet, the 3D editor's Apply).
+In a team rebuild (a kit applied to several people, Give, Copy kit) every loosened mount is in
+the one pool before anyone is drawn, so it can go to whoever is drawn first who asks for that
+item: who ends up short (listed missing) can move from one person to another, never the total.
 
-### F-421 (open, question): a gun swapped for another doesn't take its optic along either
+### F-421 (done in feat/loadout-buy, 2026-11-06): a gun swapped for another doesn't take its optic along either
 The same mechanism for optics: `set_slot` keeps the optic asked for when the new gun has a
 rail, but the old gun goes into the pool with the optic on it, so the new gun keeps its own (or
 irons) and the optic is listed missing. Not changed: some guns come with their own scope
 (`stats.optic`), and moving the old optic over would put, say, an M4's red dot on an M110 and
 its scope in the stash. Which should win: the optic the player had, or the new gun's own?
+Captain, 2026-11-06: "varies. if you go from ar to sniper yes, M4 to HK416 yes". Now a sniper
+rifle or DMR with its own scope (`Loadouts.OWN_SCOPE_TAGS`, "sniper"/"dmr", Proposed) keeps it
+and the optic he fitted goes to the stash loose; any other gun takes his optic along
+(`Loadouts.swapped_optic`, set_slot). `Loadouts._loosen_mounts` takes the optic off the old gun
+before the rebuild when it's one he fitted (it moves over, or goes to the stash loose), and the
+old gun's own optic only when it moves over to a gun that doesn't come with that same one: a
+stock M4 to an HK416 (both with a red dot) leaves the M4 plain in the stash with its dot on, as
+before (review of 4bcfe79f: the first cut took the M4's dot off too, a bare M4 and a stray dot).
+A gun taken off (slot emptied) keeps its optic. Checked in loadout (rules, the host's slot op, a
+client's).

@@ -488,11 +488,16 @@ func choose(id: String, buy := true) -> void:
 
 
 ## Whether marker `key`'s edit can be made on what he wears now (the host's ops edit that): a
-## slot or the pockets always; a mount when the draft's holder is the one he wears; a MOLLE point
-## when the draft's carrier and pack are his.
+## slot or the pockets always; a plate pocket when the draft's carrier is the one he wears (a
+## plate for a carrier only in the draft would go in his own carrier's pocket, or nowhere); a
+## mount when the draft's holder is the one he wears; a MOLLE point when the draft's carrier and
+## pack are his.
 func on_worn(key: String) -> bool:
 	var parts := key.split(":")
 	match parts[0]:
+		"slot":
+			if parts[1].begins_with("plate_"):
+				return String(draft.slots.get("vest", "")) == String(worn.get("slots", {}).get("vest", ""))
 		"mount":
 			var holder := String(draft.slots.get(parts[1], ""))
 			return holder != "" and holder == String(worn.get("slots", {}).get(parts[1], ""))
@@ -505,8 +510,10 @@ func on_worn(key: String) -> bool:
 
 ## The one-step buy (F-405): the host buys one `id` with company money (BaseHub
 ## _server_buy_picked, the paper doll pickers' op and price) and fits it on marker `key` of what he
-## wears; the draft gets the same edit (`next`) and, if it had no other changes, becomes what he
-## wears once the host has fitted it. The draft's other changes stay a draft (undo, Apply).
+## wears. A draft with other changes gets the same edit (`next`) and keeps them (undo, Apply); one
+## with none is left as it is and follows what he wears once the host has fitted it (_on_view), so
+## a purchase the host refuses (the cash spent meanwhile) leaves it clean and the close warning
+## right, with no _applied_pending waiting on a change that never comes (review of 4bcfe79f).
 func buy_and_fit(key: String, id: String, next: Dictionary) -> void:
 	var parts := key.split(":")
 	var op := ""
@@ -527,11 +534,9 @@ func buy_and_fit(key: String, id: String, next: Dictionary) -> void:
 			params["count"] = 1
 	if op == "":
 		return
-	var was_clean := not dirty()
 	_offer = ""
-	edit(next)
-	if was_clean:
-		_applied_pending = true
+	if dirty():
+		edit(next)
 	_say("Buying %s for $%s and fitting it..." % [_name(id), DebriefCalc.money(price_of(id))])
 	BaseHub.request("loadout", [who, op, params])  # (on the host the answer can come back at once)
 

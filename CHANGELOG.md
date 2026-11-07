@@ -48,6 +48,20 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   it and is saved; the 3D editor buys and fits in one step, the client's through the host; the
   NVG moves to a bought helmet; the suites use their own settings and editor files, never the
   player's (F-406).
+- **Changed (loadout, Captain 2026-11-06, F-421):** swapping guns: a sniper rifle or DMR keeps
+  its own scope and the optic you had fitted goes to the stash loose (not left on the old gun and
+  listed missing); any other gun (M4 to HK416) takes your optic along. A sniper's scope stays on
+  it when you swap back to a rifle, and a stock M4 swapped for an HK416 (both with a red dot)
+  goes back to the stash plain, its dot on. `Loadouts.OWN_SCOPE_TAGS` ("sniper", "dmr"; Proposed).
+- **Fixed (loadout, review):** the 3D editor's "Ask before buying" tick follows "Don't ask
+  again" at once; a one-step buy the host refuses leaves the draft as it was and the close
+  warning right; a plate pocket buys in one step only on the carrier you wear; the host's
+  `point` op refuses a point you don't wear or a pouch that doesn't fit it; a mount taken off
+  for a rebuild stacks with the stash's (decoded like the rest of the kit).
+- **Tests (loadout):** an M4 with a T-2 to an HK416 (the dot moves over) and to an M110 / SVD
+  (its own scope, the T-2 loose in the stash, nothing missing), in the rules, on the host and from
+  a client; a stock M4 to an HK416 (the M4 plain in the stash, no loose dot); the refused
+  one-step buy, the tick, the plate pocket and the point op.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
