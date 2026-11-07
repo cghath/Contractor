@@ -123,6 +123,56 @@ const SLOT_STACK_M := 1.5
 const TRAIL_STEP_M := 1.0
 const TRAIL_MAX := 90
 const TRAIL_JUMP_M := 6.0
+## The trail never doubles back on itself (F-400): the lead coming back within TRAIL_LOOP_M of
+## a point he walked (out to a dead end and back, round a block to where he was) cuts the loop
+## from that point on, so the trail lies on the ground once. A doubled-back trail lay over itself,
+## and _refit's trail picks (each kept SLOT_APART_MULT apart from the others) could leap along it: a
+## point on the way back is as close to a slot on the way out as to its neighbours, so a pick
+## searched on past the whole loop, and came back when that cleared. casualty's soak walks
+## (0, 0) -> (0, -8) -> (0, 2); a man far behind ran 20 m out and back in 8 s, ending where he
+## began ("stuck"; CI 41220310370, R0781). The last TRAIL_LOOP_SKIP points (the last few
+## metres) are always that close and never count. The cut keeps the near point and only joins
+## it to where the lead stands when no wall is between (review): walking along a wall, in at a
+## gate and back along its other face, the two sides lie TRAIL_LOOP_M apart, and a cut there
+## would join the trail through the wall, which every trail pick trusts as walked ground.
+## Proposed numbers.
+const TRAIL_LOOP_M := 1.5
+const TRAIL_LOOP_SKIP := 3
+## A man's trail pick that no longer keeps clear of the others slides to the nearest clear point
+## along the trail, up to TRAIL_SLIDE_M either way, before a pick is searched for afresh from
+## about as far back as his slot (F-400, review). The fresh search, kept SLOT_APART_MULT of the
+## gap from every other slot on a single-file trail, could land 20 m further back, and the next
+## second come forward again as the others moved: Golf's slot on CI 41243628687 swung between
+## about 38 and 60 m back along the lead's trail through the compound, and he ran 25 m out and
+## back in 8 s. Proposed number.
+const TRAIL_SLIDE_M := 12.0
+## A fire team's place let go from its blocked-place fallback (held on the lead's trail, or on
+## the other side) travels to where it belongs instead of leaping there (_place_on_way; Captain,
+## 2026-11-02: "yes"): R0815's Bravo team, its place inside the compound wall and so held on the
+## lead's trail back through the gate, had it leap 29 m out past the gate the moment the lead
+## turned along the wall's outside and the place came clear. It moves PLACE_CATCHUP_MPS faster
+## than the lead walks, straight at its place when no wall stands between them, else along a
+## navigation path (one per team, asked again only when its end is PLACE_REPATH_M off the place
+## and PLACE_REPATH_S has gone), so it goes round by the gate, never through the wall. On its
+## way PLACE_TRAVEL_MAX_S, or with no update for PLACE_STALE_S (or the lead jumping, as for the
+## trail), it is there at once, as before. Proposed numbers (Soldier._now() seconds, as the rest
+## of the squad's timings); Captain, 2026-11-06, OK'd the lead's pace plus 3 m/s.
+const PLACE_CATCHUP_MPS := 3.0
+const PLACE_REPATH_M := 6.0
+const PLACE_REPATH_S := 1.0
+const PLACE_TRAVEL_MAX_S := 20.0
+const PLACE_STALE_S := 1.0
+## A man's slot in a fire team other than the lead's, let go from a fallback (his team's place
+## held across a wall, or his own slot picked again by _refit), travels to where it belongs the
+## same way (_slot_on_way; F-417, Captain, 2026-11-06: "yes"): the other-side fallback forms the
+## team mirrored, and when it let go each man's slot swapped sides of the travelling place at
+## once (the wedge's last man 22 m at normal spacing, 34 m at wide), and a refit's trail pick
+## went straight back to its slot when its block cleared. It moves the lead's walk plus
+## SLOT_CATCHUP_MPS a second (twice the place's, so a slot carried by the travelling place still
+## closes), and keeps to that while his team's place is on its way. Straight while no wall stands
+## between, else toward where his team forms, else (no straight way either) there at once: one
+## ray, sometimes two, a man while on his way and none otherwise, no paths. Proposed number.
+const SLOT_CATCHUP_MPS := 6.0
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -162,6 +212,8 @@ var _slots_frame := -1
 var _sides := {}  # slot key -> {"pulled", "since"} (_blocked)
 var _trail := PackedVector3Array()  # the lead's trail, oldest first (_update_trail)
 var _refits := {}  # soldier instance id -> his last re-pick {"kind": "mirror"/"trail", "s": metres back}
+var _places := {}  # fire team -> where its place stands now (_place_on_way)
+var _ways := {}  # soldier instance id -> where his slot stands now, another team's man (_slot_on_way)
 ## Hostile squads: points to walk between when nothing is happening.
 var patrol: Array[Vector3] = []
 ## When a member was last fired upon (Soldier._now() seconds).
@@ -1708,6 +1760,8 @@ func _work_out_slots() -> Dictionary:
 		var mirror := 1.0
 		var origin := leader.global_position
 		var guide: Soldier = null
+		var held := false  # its place held back across a wall from where it belongs (the fallback)
+		var placed := t != lead_team  # it forms on its place (not on a team leader)
 		if t != lead_team:
 			var place := team_offset(String(lead_r.formation), float(lead_r.man), float(lead_r.team), lead_count)
 			place.z += others.find(t) * float(lead_r.team) * 0.8  # a third team (more players' AI) further back
@@ -1721,7 +1775,8 @@ func _work_out_slots() -> Dictionary:
 				if _flat(NavigationServer3D.map_get_closest_point(map, other), other) < _flat(NavigationServer3D.map_get_closest_point(map, origin), origin):
 					origin = other
 					mirror = -mirror
-			if _blocked(leader.global_position, origin, "team%d" % t):
+			held = _blocked(leader.global_position, origin, "team%d" % t)
+			if held:
 				# Its place is across a wall: the other side if that's clear, else back on the
 				# lead's trail about as far as the place is behind him.
 				var flip := leader.global_position - right * place.x - fwd * place.z
@@ -1731,6 +1786,7 @@ func _work_out_slots() -> Dictionary:
 				else:
 					var back: Variant = _trail_point(maxf(place.z, place.length() * 0.5))
 					origin = back if back != null else _pulled(leader.global_position, origin)
+			origin = _place_on_way(t, origin, held, map)  # let go of the fallback: it travels there
 		if t != lead_team:
 			for s: Soldier in list:
 				if s.vitals.is_up():
@@ -1743,6 +1799,8 @@ func _work_out_slots() -> Dictionary:
 			# moves (or faces), wherever the squad lead is.
 			origin = guide.global_position
 			mirror = 1.0
+			held = false
+			placed = false
 			t_fwd = _human_heading(guide, fwd)
 			t_right = t_fwd.cross(Vector3.UP).normalized()
 		elif guide != null and t != lead_team:
@@ -1753,8 +1811,11 @@ func _work_out_slots() -> Dictionary:
 			if ordered and ordered.intent in [SquadAI.Intent.MOVE_TO, SquadAI.Intent.HOLD]:
 				origin = guide.global_position
 				mirror = 1.0
+				held = false
+				placed = false
 				t_fwd = _human_heading(guide, fwd)
 				t_right = t_fwd.cross(Vector3.UP).normalized()
+		var carried := placed and bool((_places.get(t, {}) as Dictionary).get("way", false))  # its place on its way
 		var guide_k := list.find(guide)
 		var guide_ai := SquadAI.of(guide) if guide and guide.is_ai() else null
 		# The team forms on its own leader while he's with it (following, off his place by more
@@ -1778,7 +1839,7 @@ func _work_out_slots() -> Dictionary:
 				base = guide.global_position if on_guide and k != guide_k else origin
 			var want := base + t_right * local.x - t_fwd * local.z
 			slots.append({"who": s, "base": base, "want": want, "gap": gap, "blocked": _blocked(base, want, s),
-				"right": t_right, "fwd": t_fwd})
+				"right": t_right, "fwd": t_fwd, "team": t, "held": held, "carried": carried})
 	# The lead and the players stand where they stand: nobody's slot on them.
 	var people: Array[Vector3] = [leader.global_position]
 	for s in everyone:
@@ -1798,11 +1859,117 @@ func _work_out_slots() -> Dictionary:
 		var p := _refit(e, e.right, e.fwd, people, taken)
 		taken.append(p)
 		out[e.who] = p
+		e.held = true  # (picked again: a fallback too, there at once)
 	for s: Soldier in out:
 		var p: Vector3 = out[s]
 		out[s] = NavigationServer3D.map_get_closest_point(map, p) if map.is_valid() else p
+	# Another team's man let go from a fallback: his slot travels there too (F-417).
+	var seen := {}
+	for e: Dictionary in slots:
+		var who: Soldier = e.who
+		if int(e.team) == lead_team or not out.has(who) or not who.is_ai():
+			continue
+		seen[who.get_instance_id()] = true
+		out[who] = _slot_on_way(who, out[who], e.base, bool(e.held), bool(e.carried), map)
+	for id: int in _ways.keys():
+		if not seen.has(id):
+			_ways.erase(id)  # (gone, or in the lead's team now)
+	for t: int in _places.keys():
+		if t == lead_team or not teams.has(t):
+			_places.erase(t)  # (review: a team gone, or the lead's own now)
 	out.erase(leader)
 	return out
+
+
+## Where fire team `t`'s place stands this working-out, `want` being where it belongs now and
+## `held` whether that's the blocked-place fallback (PLACE_CATCHUP_MPS): held, it's there at once
+## (never left across a wall from the lead); let go, it travels from where it stood, by the
+## lead's own walk since the last working-out plus PLACE_CATCHUP_MPS a second, straight while no
+## wall stands between, else along its navigation path, until it's there.
+func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
+	var frame := Engine.get_physics_frames()
+	var now := Soldier._now()
+	var lead := leader.global_position
+	var was: Dictionary = _places.get(t, {})
+	_places[t] = {"at": want, "goal": want, "held": held, "way": false, "frame": frame, "now": now, "lead": lead,
+		"path": PackedVector3Array(), "since": 0.0, "asked": -INF}
+	if held or was.is_empty() or not (bool(was.held) or bool(was.way)) or not map.is_valid():
+		return want
+	var dt := now - float(was.now)
+	var since := float(was.since) + dt
+	var walked := _flat(lead, was.lead)
+	if dt < 0.0 or dt > PLACE_STALE_S or walked > TRAIL_JUMP_M or since > PLACE_TRAVEL_MAX_S:
+		return want
+	var at: Vector3 = was.at
+	var left := walked + PLACE_CATCHUP_MPS * dt
+	if _flat(at, want) <= left:
+		return want  # there
+	var path: PackedVector3Array = was.path
+	var asked := float(was.asked)
+	if not _wall_between(at, want):
+		path = PackedVector3Array([want])  # in the open: straight at it
+	elif path.is_empty() and asked > -INF and _flat(at, want) <= PLACE_REPATH_M:
+		# Its path walked out by where it belongs and a wall still between (a low one, the place
+		# off the navigation mesh past it): no path goes nearer, so it's there (review), rather
+		# than waiting out PLACE_TRAVEL_MAX_S.
+		return want
+	elif (path.is_empty() or _flat(path[path.size() - 1], want) > PLACE_REPATH_M) and since - asked >= PLACE_REPATH_S:
+		path = NavigationServer3D.map_get_path(map, at, want, true)
+		asked = since
+	while left > 0.0 and not path.is_empty():
+		var d := _flat(at, path[0])
+		if d <= left:
+			at = path[0]
+			left -= d
+			path.remove_at(0)
+		else:
+			at = at.lerp(path[0], left / d)
+			left = 0.0
+	# (No path round, or its end left behind: it waits where it is, never through the wall, until
+	# a path is asked for again or PLACE_TRAVEL_MAX_S.)
+	_places[t] = {"at": at, "goal": want, "held": false, "way": true, "frame": frame, "now": now, "lead": lead,
+		"path": path, "since": since, "asked": asked}
+	return at
+
+
+## Where another team's man `who`'s slot stands this working-out (SLOT_CATCHUP_MPS), `want`
+## being where it belongs now, `base` where his team forms and `fell` whether `want` is a
+## fallback (his team's place held, or his slot picked again): a fallback is there at once, as
+## the place's is (never left across a wall from the lead). Let go of one, or while his team's
+## place is on its way (`carried`), it travels from where it stood by the lead's walk plus
+## SLOT_CATCHUP_MPS a second: straight while no wall stands between, else toward `base` while
+## nothing stands between it and that, else it's there at once. So the other-side fallback's
+## mirrored shape turns back over gradually, man by man, and no slot leaps when a refit lets go.
+func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carried: bool, map: RID) -> Vector3:
+	var id := who.get_instance_id()
+	var frame := Engine.get_physics_frames()
+	var now := Soldier._now()
+	var lead := leader.global_position
+	var was: Dictionary = _ways.get(id, {})
+	_ways[id] = {"at": want, "goal": want, "fell": fell, "way": false, "frame": frame, "now": now, "lead": lead, "since": 0.0}
+	if fell or was.is_empty() or not (bool(was.fell) or bool(was.way)):
+		return want
+	var dt := now - float(was.now)
+	var since := float(was.since) + dt
+	var walked := _flat(lead, was.lead)
+	if dt < 0.0 or dt > PLACE_STALE_S or walked > TRAIL_JUMP_M or since > PLACE_TRAVEL_MAX_S:
+		return want
+	var at: Vector3 = was.at
+	var left := walked + SLOT_CATCHUP_MPS * dt
+	var d := _flat(at, want)
+	if d <= left:
+		at = want  # there
+	elif not _wall_between(at, want):
+		at = at.lerp(want, left / d)
+	elif _flat(at, base) > 0.5 and not _wall_between(at, base):
+		at = at.lerp(base, minf(left / _flat(at, base), 1.0))  # round the wall's end, by where his team forms
+	else:
+		return want  # no straight way: there at once, as before
+	if at != want and map.is_valid():
+		at = NavigationServer3D.map_get_closest_point(map, at)
+	_ways[id] = {"at": at, "goal": want, "fell": false, "way": at != want or carried, "frame": frame, "now": now,
+		"lead": lead, "since": since}
+	return at
 
 
 ## The way a human team leader is heading: his horizontal velocity when he's moving, else the
@@ -1820,7 +1987,8 @@ func _human_heading(who: Soldier, fallback: Vector3) -> Vector3:
 ## line if nothing stands between it and where the team forms (`e.base`), else the first point
 ## back along the lead's trail from about as far back as the slot was, clear of the lead, the
 ## players and the other slots. Each man keeps his last pick while it still does, so a slot
-## doesn't hop between the two. Past the trail's end (the lead has only just set off): the near
+## doesn't hop between the two, and a trail pick crowded out slides along the trail to the
+## nearest clear point first (TRAIL_SLIDE_M). Past the trail's end (the lead has only just set off): the near
 ## side of the wall, as before, but never on the lead.
 func _refit(e: Dictionary, right: Vector3, fwd: Vector3, people: Array[Vector3], taken: Array[Vector3]) -> Vector3:
 	var who: Soldier = e.who
@@ -1835,9 +2003,18 @@ func _refit(e: Dictionary, right: Vector3, fwd: Vector3, people: Array[Vector3],
 	var mirrored := want - right * (2.0 * side)
 	var mirror_ok := bool(e.blocked) and absf(side) > 0.5
 	if String(was.get("kind", "")) == "trail":
-		var held: Variant = _trail_point(float(was.s))
+		var held_s := float(was.s)
+		var held: Variant = _trail_point(held_s)
 		if held != null and ok.call(held):
 			return held
+		var slide := TRAIL_STEP_M  # crowded: the nearest clear point along the trail, nearer the lead first
+		while slide <= TRAIL_SLIDE_M:
+			for at_s: float in [held_s - slide, held_s + slide]:
+				var p: Variant = _trail_point(at_s) if at_s >= apart else null
+				if p != null and ok.call(p):
+					_refits[id] = {"kind": "trail", "s": at_s}
+					return p
+			slide += TRAIL_STEP_M
 	if mirror_ok and ok.call(mirrored) and not _wall_between(base, mirrored):
 		_refits[id] = {"kind": "mirror"}
 		return mirrored
@@ -1865,7 +2042,8 @@ static func _near_any(p: Vector3, points: Array[Vector3], within: float) -> bool
 	return false
 
 
-## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX).
+## The lead's trail: where he has walked, a point each TRAIL_STEP_M (the last TRAIL_MAX), with
+## any loop he walks cut out (TRAIL_LOOP_M) where nothing stands between its ends.
 func _update_trail() -> void:
 	if leader == null or not is_instance_valid(leader) or not leader.is_inside_tree():
 		return
@@ -1877,6 +2055,11 @@ func _update_trail() -> void:
 			_trail.clear()
 		elif d < TRAIL_STEP_M:
 			return
+	for i in range(_trail.size() - TRAIL_LOOP_SKIP):
+		var p := _trail[i]
+		if _flat(p, at) < TRAIL_LOOP_M and absf(p.y - at.y) < TRAIL_LOOP_M and not _wall_between(p, at):
+			_trail.resize(i + 1)  # back where he was: the loop since goes (p to here: short, no wall)
+			break
 	_trail.append(at)
 	if _trail.size() > TRAIL_MAX:
 		_trail.remove_at(0)

@@ -1801,6 +1801,147 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-374 (fixed, F-400): the pelvis hitbox and the legs' boxes hang from different roots
+Since feat/vault-legs-svd the legs' hitboxes follow the legs as drawn (`CharacterModel.pose_hitboxes`,
+from the drawn `_root`: the landing's sink, the hips settled over the feet on a slope or step),
+while the pelvis, torso and head boxes followed the target pose's root, so at the hip the thigh
+boxes could sit a few cm off the pelvis box. Posing the pelvis from the drawn root too (review of
+that branch) kept weapons, animations, wounds and medical green (R0770, R0774), but casualty's
+"nobody got stuck on the way" failed in three of four runs with it (CI 41220310370, attempts 1 and
+2; local R0781; it passed on the PR run 41220315144) and passed without it (R0782).
+Captain, 2026-10-31: "yes, fix followers". The pelvis is on the drawn root again (while the legs'
+boxes follow the drawn legs: up and in no carry state). No path from a hitbox to a follower was
+found (F-400 has the search); the failing man in every run was running a loop, not stuck: the
+squad's trail no longer doubles back, and the soak's check lets off a man chasing a slot that
+moved (F-400). weapons' `_test_leg_boxes` proves it (review, 2026-11-02): the drawn `_root` sunk
+6 cm, the boxes posed again, the pelvis box goes down 6 cm with the thigh's.
+
+## F-400 (fixed): a follower far behind ran loops on the lead's doubled-back trail
+Found on feat/vault-legs-svd (2026-10-31) chasing F-374. Location: [squad.gd](../../scripts/ai/squad.gd)
+`_update_trail`, read by `_refit`'s trail picks and the team place's fallback.
+
+The hitboxes can't reach a follower's path: every one sits alone on layer 2 ("hitboxes", monitoring
+off, mask 0, the soldier.tscn Areas being the only nodes with a "body_part" meta); the soldier's own
+capsule is on 16 with mask 17, and no movement, step-up, mantle, room or vault probe, squad wall ray,
+navigation bake or AI line check has layer 2 in its mask or `collide_with_areas` set (those that do
+are rounds, blasts, throws, blood drops, the player's pick/tag rays and the command menu). Nothing in
+the AI reads the pelvis box's place (aim_point and body_point use the chest). The run's real time was
+the same either way (93 s for 257 s simulated, R0781 and R0782).
+
+What the three failures were: a follower far behind (Charlie in R0781, Foxtrot and Golf on CI) ran
+about 20 m through the compound in the check's 8 s window, at up to 5.6 m/s and turning faster than
+the 3 m/s lead walks, and ended within 0.6 m of where the window began, so the check (net movement)
+called him stuck: his slot had jumped and jumped back. His slot each time lay on the lead's trail
+through the compound, 25-37 m back along it (Golf's at (-0.55, -6.0) with the lead at (7.7, 23.9)),
+where a `_refit` trail pick puts it, and the soak's route walks out and back over itself
+((0, 0) -> (0, -8) -> (0, 2), and on through the north gate). A doubled-back trail lies over
+itself, so a trail point on the way back is about as close to a slot on the way out as its
+neighbours are, and a pick that must keep SLOT_APART_MULT of the gap from every other slot can
+search on past the whole doubled section, and come back when that clears (which fits the jumps;
+the refit kind wasn't printed in those runs). Fix: the trail cuts any loop the lead walks (`TRAIL_LOOP_M`: back within 1.5 m of a
+point, everything since goes; the last 3 points never count), so it lies on the ground once. The
+soak's stuck line now prints the man's slot each second, his refit pick and how far he walked.
+
+A fourth failure came with that print (the PR run on the pelvis commit, CI 41235918402): Echo
+walked about 30 m in the window round the east side of the compound after his formation slot (no
+refit) as it swung 24 m with the lead turning the building's corner ((14, -14) -> (14, 8) ->
+(0, 0)), and a follow-in stack then sent him back past where he had been. That's following, not
+being stuck. The check first let off a man who walked STUCK_WALK_M (4 m) after a slot that moved
+STUCK_FAR_M in the window; review showed that switched loop detection off for nearly the whole soak
+(the lead never stops, so nearly every slot moves 5 m in 8 s, and the in-and-out flip's slot moved
+too), so it now lets off only a man who walked 4 m and ended the window 5 m or more nearer his
+slot than he began it (Echo: about 19 m off at the start, 8 m at the end). And a man is stuck
+only if he was more than STUCK_FAR_M off his slot at both ends of the window: R0815 failed on
+Bravo, 4.6 m off a slot held back on the lead's trail while his team's place lay inside the
+compound wall, which leapt 29 m out past the gate as the lead turned along the wall's outside;
+3 s later he was on his way (5.4 m/s, a 17-point path), back by where he had been 8 s before. A
+man looping out and back while he gets no nearer, or pushing on the spot (F-08, F-190), is
+stuck, at worst a window later. R0805 and R0808 ran with the loose check; R0796 is a pass of the
+strict one.
+
+Review also found the loop cut could join the trail through a wall: walking along a wall, in at a
+gate and back along its inside face, the two sides lie within TRAIL_LOOP_M, and the cut dropped
+the near point and joined the one before it to the lead, a segment nobody walked, which the trail
+picks and the team place's blocked-place fallback trust as walked ground (Captain's 2026-10-14
+rule: no slot across a wall). The cut now needs no wall between the near point and the lead
+(`_wall_between`, one ray per candidate point) and keeps the near point, so the joining segment
+is the short one just checked; spacing's "Trail" checks walk the lead out and back on a line and
+along the compound's south wall, in at the gate and back inside it.
+
+The narrowed check then caught a real loop on CI (41243628687, the PR run on cee1fc7b): Golf,
+7.1 m off his slot at the window's start, ran 25 m out and back in 8 s after a trail pick (refit
+"trail", s 38.4) swinging between about 38 and 60 m back along the lead's trail through the
+compound. Not a doubled trail this time but crowding: a held trail pick that stopped keeping
+SLOT_APART_MULT of the gap from the others was searched for afresh from about as far back as the
+slot was, which on a single-file trail shared by a team could land 20 m further back and come
+forward again the next second. A crowded trail pick now slides to the nearest clear point along
+the trail first (`TRAIL_SLIDE_M`, 12 m either way, nearer the lead first, Proposed). Not explained: with the pelvis on the drawn root the soak failed 4 of 7 runs (CI
+41220310370 twice, 41235918402, R0781; passed 41220315144, 41235916435, R0793) against 3 of 3
+passes without it on this branch (41227859540, 41227862154, R0782) and every casualty job sampled
+on other branches today. With no path from the box to the AI, and the soak seeded (casualty's
+dead-check calls seed(4242) just before it) but driven by real-time AI timers, the guess is that
+each tree walks its own near-repeatable trajectory; the loops themselves are what's fixed here.
+With the trail fix (and the pelvis on the drawn root) casualty passed R0796, R0805 and R0808, and
+R0805 also passed animations (Looting, "takes its ragdoll along", standing up where the ragdoll
+lay, respawning, and the drag straps this time), wounds, medical and spacing; R0796 smoke and
+weapons.
+
+## F-416 (fixed): a fire team's place leapt ~29 m when its blocked-place fallback let go
+Found on feat/vault-legs-svd (R0815, Bravo; F-400 above). Location: [squad.gd](../../scripts/ai/squad.gd)
+`_work_out_slots` (the second team's place) and `_place_on_way`.
+
+A team whose place lies across a wall from the lead has it held back on the lead's trail (or on
+the other side). Out of the compound's south gate and along the outside of its south wall, the
+second team's place lay inside the wall, so it was held on the lead's trail back through the gate;
+as the lead turned along the wall the place came clear outside, and the place and every slot of
+the team leapt there, 29 m in one working-out (R0815's Bravo, 4.6 m off his slot, was suddenly
+far off it). Captain, 2026-11-02: "yes", move it out gradually. Let go, the place now travels from
+where it stood: the lead's own walk plus PLACE_CATCHUP_MPS (3 m/s, Proposed) a second, straight
+while no wall stands between it and where it belongs, else along a navigation path (one query per
+team when it's let go, asked again only when the path's end is 6 m off the place, at most once a
+second), so it goes out round by the gate. Being held back stays at once (a slot is never left
+across a wall from the lead). spacing's "Team place" walks that route and samples every
+working-out of the slots.
+
+## F-417 (fixed): the team's men swap sides at once when the other-side fallback lets go
+Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`, `_slot_on_way`. When a team's
+place is across a wall and the mirror across the lead (`flip`) is clear, the team forms there with
+its shape mirrored (`mirror = -mirror`). Since F-416 the place travels back when that lets go, but
+the mirror goes back at once, so each man's slot swaps to the other side of the travelling place
+(the wedge's last man about 22 m at normal spacing, 34 m at wide). The trail fallback (R0815's case)
+doesn't mirror. Captain, 2026-11-06: "yes", blend them across too.
+
+Each man of a team other than the lead's now has his slot kept (`Squad._ways`): on a fallback (his
+team's place held, or his own slot picked again by `_refit`) it's there at once, as the place is;
+let go of one, and while his team's place is on its way, it travels from where it stood by the
+lead's walk plus SLOT_CATCHUP_MPS (6 m/s, Proposed: twice the place's, so a slot carried by the
+travelling place still closes) a second, straight while no wall stands between, else toward where
+his team forms, else (no straight way at all) there at once. One ray a man a working-out while on
+his way (two when walled), none otherwise, no paths. This also covers the review's refit case: a
+trail pick going straight back to his slot when its block cleared. spacing's new "Team place, other
+side" walks the lead east along the outside of the north wall (the team mirrored out north) and
+north away from the corner: the men, let go 24 m from their slots, step at most 0.0 m past the rate,
+never across a wall, and get there (R0847); with `_slot_on_way` off the same walk swaps Foxtrot's
+slot 23.8 m in one working-out and Golf's across the east wall, and "Team place"'s men's check sees
+Golf's refit leap 26 m (R0850).
+
+## F-437 (open, note): the lead's own team's slots still leap when a refit lets go
+Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`. `_slot_on_way` (F-417) only
+travels the slots of teams other than the lead's: those are the ones on a travelling place, and
+far enough out for a fallback to swing them 20 m or more. A man of the lead's own team whose slot
+was picked again (beside a wall, on the lead) still goes straight back to it when it clears, a few
+metres at most since the team forms on the lead. Also, the slots are kept apart (`taken`,
+SLOT_STACK_M) by where they belong, not by where a travelling slot stands, so two can pass close
+for a second on their way. Neither showed in spacing or casualty; worth a look if a playtest sees it.
+
+## F-438 (open, note): the place and slots travel in real seconds
+Location: [squad.gd](../../scripts/ai/squad.gd) `_place_on_way`, `_slot_on_way`. Their time is
+`Soldier._now()` now (review), as every other squad timing (SIDE_HOLD_S and the rest), so
+PLACE_CATCHUP_MPS and SLOT_CATCHUP_MPS are metres per real second: the same in play, but in a test
+run at 3x (spacing, casualty's soak) they close a third as fast in game time (the lead's walk is
+counted in game metres, so a slot still never falls further behind). A test that waits on a slot
+getting there waits in real time (spacing's team place walks wait until nothing is on its way).
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2265,33 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-10-31 | feat/vault-legs-svd: claude/svd-model merged although the 2026-10-25 integration note quotes the Captain "needs to stay here for now" for it | the 2026-10-30 handoff lists it as "probably wanted" and cheeno_tasks.md says the model hold is over; dev still drew the SVD as a long AKM | leave it off until the Captain says again
+2026-10-31 | feat/vault-legs-svd: the SVD's items.json conflict keeps dev's entry (the "dmr" tag, "rare" rarity) and changes only model_style "ak" -> "svd" | dev's data is newer; the branch changed nothing else there | take the branch's line whole
+2026-10-31 | feat/vault-legs-svd: the SVD-S keeps the AK model (F-345) | a folding tube stock, not the SVD's thumbhole; the "svd" style would draw the wrong stock | give it "svd" for the magazine and handguard
+2026-10-31 | feat/vault-legs-svd: claude/vault-legs merged as it was | its leg hitboxes follow the drawn legs only while up and not carried (downed bodies, body_point and reach unchanged), and the hand plant uses dev's own mantle flag (`climbing`) and WORLD_MASK | only the hand plant, keeping the legs' boxes on the rest pose
+2026-10-31 | feat/vault-legs-svd: townperf's breach-and-seam red on CI 41186733348 (same wall as the local pass R0746, rebaked (1, 1)) read as a test race, not the merge: a fight's rebake started before the carves counted as the breach's own and ended the wait before BREACH_CHECK_S reported the breach; the test now counts only rebakes after VoxelWorld.breached (tests/townperf_test.gd only) | the diff feeds nothing into the nav bake; 45 rebakes run during the fight | rerun until green and leave the race in
+2026-10-31 | feat/vault-legs-svd: the vault hand plant (review minor) goes on the support hand, not always the left: the right for a left-handed shooter holding a weapon (CharacterModel's own lefty rule, `left_handed and _held_weapon`), mirrored to that side; animations gets a left-handed vault check | the left hand is a left-hander's firing hand, so the gun came off the grip, and CLAUDE.md names left-handed settings as a known hazard | leave it as a review note
+2026-10-31 | vault legs (review): the pelvis hitbox stays on the target pose's root (the legs' boxes on the drawn root), the mismatch logged as F-374 | posing it from the drawn root kept weapons, animations, wounds and medical green (R0770, R0774) but casualty's "nobody got stuck on the way" failed in three of four runs with it (CI 41220310370 twice, R0781; passed on the PR run 41220315144) and passed without it (R0782) | keep it and call casualty a flake
+Captain, 2026-10-31: "yes, fix followers" (F-374: put the pelvis hitbox on the drawn hips and find why casualty's soak broke with it)
+2026-10-31 | vault legs: the pelvis hitbox goes on the drawn root (with the legs' boxes: up, in no carry state), as Captain said | no path from a hitbox Area to a follower's movement or path exists (F-400 lists what was searched); the soak's failures were a man running loops after a jumping slot | keep it on the target root
+2026-10-31 | squad trail (F-400): the lead's trail cuts any loop he walks (back within TRAIL_LOOP_M 1.5 m of a point, Proposed; the last TRAIL_LOOP_SKIP 3 points never count) | a doubled-back trail lies over itself, so _refit's trail picks (kept SLOT_APART_MULT of the gap from every slot) could leap past the doubled section and back; the three failing soak runs were each a man far behind running a 20 m loop | widen casualty's stuck check to ignore loops (it would hide the wobble, not fix it)
+2026-10-31 | weapons' leg-box check: the carried half stays downed (a carried body is always downed: _carry_state drops CARRIED/DRAGGED otherwise, now checked) and the carry guard is tested on its own with an up body carrying someone (CARRY) | setting downed false with CARRIED would only test that _carry_state drops it | leave a note only
+2026-10-31 | casualty soak (tests only): "stuck" no longer counts a man who walked 4 m or more (STUCK_WALK_M) after a slot that moved 5 m or more (STUCK_FAR_M) in the 8 s window | CI 41235918402's Echo walked ~30 m after a formation slot swinging 24 m round the building's corner and came back past his start; net movement alone called him stuck | count every loop as stuck (it flags men doing as told)
+2026-10-31 | casualty soak (review): the "chased" let-off narrowed to a man who walked 4 m or more and ended the window 5 m (STUCK_FAR_M) or more nearer his slot than he began it | the lead never stops in the soak, so "his slot moved 5 m" held for nearly everyone and switched loop detection off; closing on the slot is progress a loop can't fake, and it still lets off Echo (CI 41235918402, ~19 m -> 8 m) | revert to the strict check (Echo's run is a real false alarm), or measure the slot against the lead (formation slots sit still in the lead's frame, but the follow-in stack and refits don't)
+2026-10-31 | casualty soak: "stuck" also needs him more than STUCK_FAR_M off his slot at the window's start, not only its end | R0815's Bravo was 4.6 m off his slot until it leapt 29 m out past the gate (the team's place inside the wall resolving once the lead turned along its outside) and was on his way 3 s later; a man who stays stuck or keeps looping is caught a window later | count him (he wasn't stuck for the window; the strict check flags this too)
+2026-10-31 | squad trail picks: a held trail pick crowded out slides to the nearest clear trail point (up to TRAIL_SLIDE_M 12 m either way, Proposed) before a fresh search | CI 41243628687's Golf ran a 25 m loop after a trail pick swinging between 38 and 60 m back; the fresh search restarts from the flat distance to his slot and skips past every crowded stretch | call it casualty's known "stuck on the way" flake
+2026-10-31 | squad trail (review): the loop cut needs no wall between the near point and the lead, and keeps that point (resize(i + 1)) | a wall's two faces lie within TRAIL_LOOP_M, so the cut joined the trail through it and trail picks trusted it; one ray only for a candidate point within 1.5 m | drop the loop cut (it fixed the soak's leaping trail slot)
+Captain, 2026-11-02: "yes" (#44: move a team's formation place out gradually when its across-the-wall fallback lets go, rather than leaping ~29 m past the gate)
+2026-11-02 | squad (F-416): a team's place let go from its fallback travels at the lead's walk plus PLACE_CATCHUP_MPS 3 m/s (Proposed), straight when no wall is between, else along one navigation path per team (asked again only when its end is PLACE_REPATH_M 6 m off and PLACE_REPATH_S 1 s has gone); being held back stays instant; PLACE_TRAVEL_MAX_S 20 s, PLACE_STALE_S 1 s or a lead jump put it there at once | relative to the lead it always closes (a fixed m/s would never catch a sprinting lead); a path only when a wall is between keeps it to one query per release, no per-man or per-frame paths; held back at once keeps Captain's 2026-10-14 rule (no slot across a wall from the lead) | blend every man's slot each frame (a ray per man) or move the place gradually in both directions
+2026-11-02 | squad (F-417): the team's men's mirror still flips at once when the other-side fallback lets go, logged not fixed | the task's leap was the trail fallback's (no mirror), and either fix (hold the mirror until arrival, or blend each man) moves a jump elsewhere or costs per man | fix it here
+Captain, 2026-11-06: "yes" (#44, F-417: when a team held on the other side of the lead is let go, blend its men's slots across too, small cost per man)
+Captain, 2026-11-06: "yes" (#44: a team's place catching up at the lead's pace plus 3 m/s, 8-10 s round a gate, is OK; PLACE_CATCHUP_MPS stays, still marked Proposed)
+2026-11-06 | squad (F-417): another team's man's slot, let go of a fallback (his team's place held, or his slot picked again) and while his team's place is on its way, travels at the lead's walk plus SLOT_CATCHUP_MPS 6 m/s (Proposed), straight, else toward where his team forms, else at once; onto a fallback stays at once | one world-space rate per man covers the mirror swap and a refit's trail pick going back alike, needs no per-man path, one ray a man only while on his way; twice the place's rate so a slot riding the travelling place still closes on it | blend the mirror scalar per team (no cost, but it squeezes every man onto the centre line half way and leaves the refit leap), or hold the mirror until the place is there (the swap still at once, just later)
+2026-11-06 | squad (F-417): with no straight way to his slot or to where his team forms, a travelling slot is there at once | Captain's 2026-10-14 rule (no slot left across a wall from the lead) outranks a gradual move; waiting where it is could leave a man going round for a slot behind a wall | wait like the place does (up to PLACE_TRAVEL_MAX_S)
+2026-11-06 | squad (review): a team's place whose navigation path is walked out within PLACE_REPATH_M of where it belongs, a wall ray still hitting (a low wall, its place off the navmesh past it), is there at once | no path goes nearer, and it sat there asking again each second for up to PLACE_TRAVEL_MAX_S 20 s; only once a path was asked and used up, so the first let-go never jumps a wall | travel straight through the low wall
+2026-11-06 | squad (review): the place's (and slots') time is Soldier._now(), as the rest of the squad's, not physics frames scaled by time_scale | consistent with SIDE_HOLD_S and every other squad timer; in play identical; at a test's 3x they close a third as fast in game time (F-438) | keep game seconds for these two only
+2026-11-06 | squad (review): _places drops a team gone or now the lead's, _ways a man gone or in the lead's team, each working-out | no stale travel state when teams change; a dictionary sweep of a few keys | prune on squad change only
+2026-11-06 | spacing (review): SPACING_ONLY "place" runs only the team place checks, "wall" from the wall follow on, any other value every check | a typo or new value used to skip the long follow and run part of the set | keep "" as the only full run
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2175,3 +2343,22 @@ extraction, no script errors, no persistent divergence past one 5 s inventory ma
 
 Location: tests/coop_soak.gd (the host's cycle checks), tools/coop_soak.sh. Report:
 B:/Contractor-test-logs/2026-10-25/S2605-231428-FAIL-coop-soak-v070-integrate-oct25-37ff24ca/report.md
+
+## F-345 (note, cghath's models): the SVD-S still draws as a long AKM
+
+`claude/svd-model` (merged on feat/vault-legs-svd, 2026-10-31) gave the SVD its own model
+(`VoxelArt._rifle_svd`, model_style "svd"). The SVD-S (`svds` in data/items.json, 1.02 m) still has
+model_style "ak": an AKM's banana magazine and straight wooden stock. A real SVD-S has the SVD's
+10-round magazine and handguard with a folding tubular stock and a separate pistol grip; it wants a
+`_rifle_svd` variant (a `folding` flag) rather than the thumbhole one.
+
+## F-346 (open, animations): the dragger's hands miss the casualty's shoulder straps locally
+
+`tests/animations_test.gd` `_test_drag`: "dragger's right/left hand on the casualty's shoulder
+strap" fails locally on dev itself (R0743 at 54ccc3d0: 6.6 and 7.1 cm off, over HAND_TOLERANCE)
+and on feat/vault-legs-svd (R0738: 6.5/7.0, R0740: 5.8 ok/6.3), while dev's CI (41154617049)
+passes animations. Older runs on this PC put it at 2.9-5.7 cm, so the drag pose sits near the edge
+and the PC's load tips it over. Not from the vault-legs merge: the dragger's leg boxes stay on the
+target pose while it drags (carry not empty) and the hand plant needs a vault. Wants a look at where
+the strap points and the dragger's reach meet (CharacterModel.STRAP_POINTS, the drag pose's bend),
+not a wider tolerance.

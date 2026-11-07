@@ -31,11 +31,25 @@ const SOAK_LAPS := 2
 const LEADER_SPEED := 3.0
 const SOAK_SCALE := 3.0
 const SOAK_MIN_S := 200.0
-## A squadmate further than this from its formation spot that moved less than STUCK_MOVE_M in
-## STUCK_WINDOW_S simulated seconds is stuck.
+## A squadmate further than this from its formation spot at both ends of STUCK_WINDOW_S simulated
+## seconds, that moved less than STUCK_MOVE_M between them, is stuck. One near his slot at the
+## window's start hasn't been stuck for it (Bravo, R0815: 4.6 m off a slot held back on the
+## lead's trail while the team's place was inside the compound wall, which leapt 29 m out past
+## the gate when the lead turned along its outside; 3 s later he was on his way, back by where he
+## had been 8 s before). A man who stays stuck, or keeps looping, is caught a window later.
 const STUCK_FAR_M := 5.0
 const STUCK_MOVE_M := 0.6
 const STUCK_WINDOW_S := 8
+## But one who walked STUCK_WALK_M or more in the window and ended it STUCK_FAR_M or more nearer
+## his slot than he began it was getting there, round the route's own loop, and only came back
+## by where he was: not stuck (Echo, CI 41235918402: 30 m round the building after a slot that
+## swung 24 m as the lead turned its corner, then sent back to stack up at its door; about 19 m
+## off his slot at the window's start, 8 m at its end). Only a man who closed on his slot is let
+## off (review): a slot that moved isn't enough, as the lead never stops in the soak and nearly
+## every slot moves that far in a window. One pushing on the spot (F-08, F-190), or running out
+## and back while he gets no nearer (the in-and-out flip SIDE_HOLD_S fixed, a slot leaping
+## along a doubled-back trail, F-400), still is.
+const STUCK_WALK_M := 4.0
 
 var failures := 0
 var level: CompoundLevel
@@ -768,6 +782,8 @@ func _test_soak() -> void:
 	_place(player, Vector3(0, 0.1, 22))
 	var squad := level.squad_for(&"friendly")
 	var history := {}  # name -> Array of positions, one per simulated second
+	var slots_seen := {}  # name -> Array of his slots (follow_point), one per simulated second
+	var fars := {}  # name -> Array of how far he was off his slot, one per entry in his history
 	var stuck := {}
 	var fell := {}
 	var died := {}
@@ -794,8 +810,14 @@ func _test_soak() -> void:
 			var list: Array = history.get(who, [])
 			list.append(s.global_position)
 			history[who] = list
+			var slot_list: Array = slots_seen.get(who, [])
+			slot_list.append(squad.follow_point(s))
+			slots_seen[who] = slot_list
 			var far := _flat(s.global_position, squad.follow_point(s))
 			worst[who] = maxf(float(worst.get(who, 0.0)), far)
+			var far_list: Array = fars.get(who, [])
+			far_list.append(far)
+			fars[who] = far_list
 			# A man standing at the place a follow-in clear gives him (Squad._tick_follow_in: the lead
 			# walked into a building; stacked at the door, or waiting his turn to go in) isn't stuck:
 			# he's where he was sent, and the op ends once the lead is FOLLOW_IN_LEAVE_M off, after
@@ -806,14 +828,23 @@ func _test_soak() -> void:
 			if placed:
 				history[who] = [s.global_position]  # (his window starts again once he's sent on)
 				list = history[who]
-			if not placed and list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
+				fars[who] = [far]
+				far_list = fars[who]
+			var walked_m := 0.0
+			for k in range(maxi(list.size() - 1 - STUCK_WINDOW_S, 0), list.size() - 1):
+				walked_m += _flat(list[k], list[k + 1])
+			var far_then := float(far_list[-1 - STUCK_WINDOW_S]) if far_list.size() > STUCK_WINDOW_S else far
+			var closed := walked_m >= STUCK_WALK_M and far_then - far >= STUCK_FAR_M
+			if not placed and not closed and list.size() > STUCK_WINDOW_S and far > STUCK_FAR_M and far_then > STUCK_FAR_M and _flat(list[-1], list[-1 - STUCK_WINDOW_S]) < STUCK_MOVE_M:
 				var ai := brain
 				stuck[who] = "%s at %s (%s) slot %s dest %s path %d/%d next %s input %s vel %s lead %s" % [who, s.global_position, s.ai_status, squad.follow_point(s),
 					ai._destination, ai._path_index, ai._path.size(), ai._path[ai._path_index] if ai._path_index < ai._path.size() else Vector3.INF,
 					s.move_input, s.velocity, player.global_position] + " path %s; last %s" % [ai._path, list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z])] \
 					+ "; on floor %s, holding %s, mantling %s, stance %d, up %s, busy %.1f s, facing %.0f deg, touching %s" % [s.is_on_floor(), s.movement.holding,
 					s.movement.mantling, s.movement.stance, s.vitals.is_up(), s._busy_until - Soldier._now(), rad_to_deg(s.rotation.y),
-					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))]
+					range(s.get_slide_collision_count()).map(func(i: int) -> String: return str(s.get_slide_collision(i).get_collider()))] \
+					+ "; slots %s, refit %s, walked %.1f m, %.1f m off his slot at the window's start" % [slot_list.slice(-STUCK_WINDOW_S).map(func(v: Vector3) -> String: return "(%.1f, %.1f)" % [v.x, v.z]),
+					squad._refits.get(s.get_instance_id(), {}), walked_m, far_then]
 	var walked := _sim_s
 	await _seconds(12.0)  # let them settle in formation at the end
 	var settled := _squad().filter(func(s: Soldier) -> bool: return _flat(s.global_position, squad.follow_point(s)) > 4.0)

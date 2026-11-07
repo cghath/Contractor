@@ -69,6 +69,7 @@ func _ready() -> void:
 	await _test_expansion_guns()
 	await _test_reload_beats()
 	await _test_arm_hits()
+	await _test_leg_boxes()
 	await _test_third_person_reload()
 	await _test_hostile_kits()
 	_test_faction_kits()
@@ -181,6 +182,16 @@ func _test_models() -> void:
 	# Heatseeker (modern precision chassis, "chassis_bolt") have their own silhouettes too.
 	check(VoxelArt.model_for(ItemDB.get_item(&"mosin9130")).contains(":mosin:"), "the Mosin-Nagant has its own silhouette")
 	check(VoxelArt.model_for(ItemDB.get_item(&"springfield_hs")).contains(":chassis_bolt:"), "the Springfield Heatseeker has its own silhouette")
+	# The SVD (2026-10-20: it drew as a long AKM with a 30-round banana): its own model, a short,
+	# straight 10-round magazine about 10 cm under the receiver; it still reloads like an AK.
+	var svd := VoxelArt.model_for(ItemDB.get_item(&"svd"))
+	var svd_mag: Array = VoxelArt._part_box(VoxelArt._spec(svd), VoxelArt.MAG_TAG)
+	var ak_mag: Array = VoxelArt._part_box(VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(&"akm"))), VoxelArt.MAG_TAG)
+	var svd_long := ((svd_mag[1] as Vector3).z - (svd_mag[0] as Vector3).z) * VoxelArt.VOXEL_SIZE
+	var ak_long := ((ak_mag[1] as Vector3).z - (ak_mag[0] as Vector3).z) * VoxelArt.VOXEL_SIZE
+	check(svd.contains(":svd:") and not svd.contains(":ak:") and svd_long < 0.11 and svd_long < ak_long * 0.6
+		and Reloads.family(ItemDB.get_item(&"svd")) == Reloads.AK,
+		"the SVD has its own silhouette, a short straight magazine (%.0f cm front to back, an AKM's %.0f), an AK's reload (%s)" % [svd_long * 100.0, ak_long * 100.0, svd])
 	check(ItemDB.get_item(&"mosin9130").stats.get("fire_modes", []) == ["bolt"] and ItemDB.get_item(&"springfield_hs").stats.get("fire_modes", []) == ["bolt"],
 		"both bolt-action snipers only cycle between shots")
 	check(VoxelArt.model_for(ItemDB.get_item(&"akm")).contains(":irons:") and VoxelArt.model_for(ItemDB.get_item(&"pkm")).contains(":irons:"),
@@ -281,7 +292,7 @@ func _test_reloads() -> void:
 			fams[id] = Reloads.family(ItemDB.get_item(id))
 	check(fams.get(&"m4a1") == Reloads.AR and fams.get(&"akm") == Reloads.AK and fams.get(&"l85a2") == Reloads.BULLPUP
 		and fams.get(&"pkm") == Reloads.BELT and fams.get(&"m249") == Reloads.BELT, "families: AR, AK, the L85 a bullpup, belt-feds (%s)" % fams)
-	for id: StringName in [&"m4a1", &"akm", &"l85a2", &"pkm", &"m249"]:
+	for id: StringName in [&"m4a1", &"akm", &"l85a2", &"pkm", &"m249", &"svd"]:
 		var model := VoxelArt.model_for(ItemDB.get_item(id))
 		var whole := (VoxelArt._spec(model).boxes as Array).size()
 		var mag := (VoxelArt._spec(VoxelArt.MAG + model).boxes as Array).size()
@@ -310,7 +321,7 @@ func _test_reloads() -> void:
 func _test_weapon_detail() -> void:
 	print("Weapon detail: moving parts, beats (2026-10-20)")
 	var want := {&"m4a1": ["bolt"], &"hk416": ["bolt"], &"c8": ["bolt"], &"l85a2": ["bolt"], &"akm": ["bolt"],
-		&"pkm": ["bolt", "cover"], &"m249": ["bolt", "cover"], &"m240b": ["bolt", "cover"], &"mosin9130": ["bolt"], &"springfield_hs": ["bolt"]}
+		&"pkm": ["bolt", "cover"], &"m249": ["bolt", "cover"], &"m240b": ["bolt", "cover"], &"mosin9130": ["bolt"], &"springfield_hs": ["bolt"], &"svd": ["bolt"]}
 	for id: StringName in want:
 		var model := VoxelArt.model_for(ItemDB.get_item(id))
 		var parts := VoxelArt.moving_parts(model)
@@ -328,7 +339,7 @@ func _test_weapon_detail() -> void:
 	var pk_belt: Array = VoxelArt._part_box(pk_spec, VoxelArt.BELT_TAG)
 	check(((pk_box[0] as Vector3).x + (pk_box[1] as Vector3).x) * 0.5 > 1.5 and (pk_belt[1] as Vector3).x >= 3.0,
 		"a realistic PKM (Captain, 2026-10-20): its box hangs on the right and the belt feeds in from the right")
-	for g: Array in [[&"m4a1", 0.17], [&"hk416", 0.17], [&"akm", 0.18], [&"l85a2", 0.14]]:
+	for g: Array in [[&"m4a1", 0.17], [&"hk416", 0.17], [&"akm", 0.18], [&"l85a2", 0.14], [&"svd", 0.11]]:
 		var box: Array = VoxelArt._part_box(VoxelArt._spec(VoxelArt.model_for(ItemDB.get_item(g[0]))), VoxelArt.MAG_TAG)
 		var tall := ((box[1] as Vector3).y - (box[0] as Vector3).y) * VoxelArt.VOXEL_SIZE
 		check(tall >= float(g[1]), "%s's magazine is full length: %.0f cm (a real one's about %.0f)" % [g[0], tall * 100.0, float(g[1]) * 100.0 + 1.0])
@@ -526,10 +537,74 @@ func _test_reload_beats() -> void:
 		"third person, near: the charging handle went back %.2f m, the cover up %.2f rad, and the weapon's whole again after" % [seen.bolt3, seen.cover3])
 
 
-## Feel round 2 (2026-10-20): an AI's reload drawn in third person as first person plays it.
-## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
-## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
-## the new one carried up and in, and the carrier locked back until the catch is slapped.
+## The legs' hitboxes follow the legs as drawn (the model pass's leftover, 2026-10-27), as the arms'
+## do: the drawn left thigh swung forward by hand, the boxes posed again, its box turns with it.
+func _test_leg_boxes() -> void:
+	print("Leg hitboxes follow the drawn legs")
+	var s := level.spawn_soldier({"name": "LegTarget", "faction": "hostile", "variant": "multicam",
+		"pos": player.global_position + Vector3(-6, 0, 6), "loadout": ["plate_carrier"], "combat": 0.5, "discipline": 0.5, "guard": true})
+	SquadAI.of(s).process_mode = Node.PROCESS_MODE_DISABLED
+	await _seconds(0.5)
+	s.model.set_process(false)
+	var thigh: Area3D = null
+	for a: Area3D in CharacterModel._posable_hitboxes(s):
+		if a.get_meta(&"body_part", &"") == Vitals.THIGH_L:
+			thigh = a
+	var before := thigh.transform.basis if thigh else Basis()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, 1.0), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var turned := (before.inverse() * thigh.transform.basis).get_euler().x if thigh else 0.0
+	check(thigh != null and absf(turned - 1.0) < 0.05, "the left thigh's box turns with the drawn thigh (%.2f rad of 1.00)" % turned)
+	# The pelvis box hangs from the drawn root too (F-374): the drawn hips sunk a few cm (a landing's
+	# sink), the boxes posed again, the pelvis box goes down with them, as the thigh's does.
+	var pelvis: Area3D = null
+	for a: Area3D in CharacterModel._posable_hitboxes(s):
+		if a.get_meta(&"body_part", &"") == Vitals.PELVIS:
+			pelvis = a
+	var hips_at := pelvis.position if pelvis else Vector3.ZERO
+	var thigh_at := thigh.position if thigh else Vector3.ZERO
+	var root_was: Transform3D = s.model._root.transform
+	s.model._root.position.y -= 0.06
+	s.model.pose_hitboxes(s)
+	var sank := (pelvis.position - hips_at).y if pelvis else 0.0
+	var thigh_sank := (thigh.position - thigh_at).y if thigh else 0.0
+	check(pelvis != null and absf(sank + 0.06) < 0.01 and absf(sank - thigh_sank) < 0.01,
+		"the pelvis box follows the drawn root: the hips sunk 6 cm, it went down %.1f cm (the thigh's %.1f)" % [-sank * 100.0, -thigh_sank * 100.0])
+	s.model._root.transform = root_was
+	s.model.pose_hitboxes(s)
+	# Downed, or carried, the boxes lie as the body does (its pose: CLAUDE.md's body rules), not
+	# as the legs were last drawn standing: swinging the drawn thigh moves nothing.
+	CharacterModel.lay_down(s, s.model, true)
+	var lying := thigh.transform if thigh else Transform3D()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, 0.7), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var downed_still := thigh != null and thigh.transform.is_equal_approx(lying)
+	# A carried (or dragged) body is always a downed one: _carry_state drops CARRIED and DRAGGED
+	# unless he's down, so for him the downed guard is the one that holds.
+	s.model.carry_net = {"mode": CharacterModel.CARRIED, "with": String(player.get_path())}
+	s.model.pose_hitboxes(s)
+	var carried := thigh.transform if thigh else Transform3D()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, -0.7), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var carried_still := thigh != null and not s.model._carry_state().is_empty() and thigh.transform.is_equal_approx(carried)
+	check(downed_still and carried_still, "downed (still %s) or carried (still %s), the left thigh's box ignores the drawn thigh" % [downed_still, carried_still])
+	# The carry guard on its own: up, not downed, carrying someone (an up body's carry states are
+	# the carrier's, CARRY and DRAG), the boxes keep the carry pose too, whatever the drawn thigh does.
+	CharacterModel.lay_down(s, s.model, false)
+	var up_carried := s.model._carry_state().is_empty()
+	s.model.carry_net = {"mode": CharacterModel.CARRY, "with": String(player.get_path())}
+	s.model.pose_hitboxes(s)
+	var carrying := thigh.transform if thigh else Transform3D()
+	s.model._leg_left.transform = Transform3D(s.model._leg_left.transform.basis * Basis(Vector3.RIGHT, 0.7), s.model._leg_left.transform.origin)
+	s.model.pose_hitboxes(s)
+	var carrying_still := thigh != null and not s.model.downed and not s.model._carry_state().is_empty() and thigh.transform.is_equal_approx(carrying)
+	check(up_carried and carrying_still, "an up body is never 'carried' (%s); carrying, the left thigh's box ignores the drawn thigh too (%s)" % [up_carried, carrying_still])
+	s.model.carry_net = {}
+	CharacterModel.lay_down(s, s.model, false)
+	s.model.set_process(true)
+	s.queue_free()
+
+
 ## Arms and hands take hits (Captain, 2026-10-21: "fingers and arms cant be hit it seems. i tried
 ## from both left and right sides"): rounds from the left, the right and the front at an aiming
 ## soldier's upper arms, forearms and hands. From the arm's own side the round must wound that
@@ -601,6 +676,10 @@ func _test_arm_hits() -> void:
 	await _frames(2)
 
 
+## Feel round 2 (2026-10-20): an AI's reload drawn in third person as first person plays it.
+## The host's _reload_began gives every peer the weapon, the empty flag and the length; from
+## them the model follows the keys: the weapon's own pose, the empty magazine falling free and
+## the new one carried up and in, and the carrier locked back until the catch is slapped.
 func _test_third_person_reload() -> void:
 	print("Third person: an AI's empty M4 reload")
 	var s := level.spawn_soldier({"name": "WpnReloader", "faction": "hostile", "variant": "urban",
