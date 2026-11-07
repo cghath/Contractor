@@ -592,6 +592,8 @@ func forget_stale() -> void:
 ## troops, their own Squad beside the player's) doesn't answer for each other's.
 func members() -> Array[Soldier]:
 	var out: Array[Soldier] = []
+	if not is_inside_tree():
+		return out  # taken out of the level (or not in it yet): no men to find (F-450)
 	for n in get_tree().get_nodes_in_group(&"combatants"):
 		var s := n as Soldier
 		if s and s.is_ai() and s.faction == faction and not s.is_queued_for_deletion() and not s.vitals.is_dead():
