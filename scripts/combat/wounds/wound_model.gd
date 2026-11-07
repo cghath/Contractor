@@ -1708,6 +1708,8 @@ func reset() -> void:
 	unconscious = false
 	arrest = false
 	dead = false
+	dying = false  # (F-433: a body reset while dying, or down with its blood gone, stayed dying DYING_CLEAR_S more)
+	_dying_clear_s = 0.0
 	arrest_left = 0.0
 	concussion_left = 0.0
 	knockout_left = 0.0

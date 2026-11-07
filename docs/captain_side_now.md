@@ -92,6 +92,7 @@ commit on `integrate/v0.4.0` (v0.3.x on `integrate/oct15`); tag `v0.4.2` exists.
 2. AI awareness leaks through compound walls; one zone-wide hostile squad (ai_bar_gaps
    G-02/G-03). Tied to the infil problems.
 3. Breaching charges make holes too small; add a "Breach and clear" team order through walls.
+   (Built on `feat/breach-and-clear`, 2026-10-31: F-317, F-318.)
 4. Buy missing kit from inside the loadout editor.
 5. Full medic kit in the FOB starting stash? (open question)
 6. In-game tutorial.

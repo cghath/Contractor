@@ -170,8 +170,10 @@ static var budget_always := false
 
 ## The buildings with an inside spot within `radius` of `centre` (see the class notes).
 ## Cached per world and level: another level at the same coordinates (the next zone, a
-## second world) never gets this one's buildings.
-static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := true) -> Array:
+## second world) never gets this one's buildings. `exact`: never cut short by the frame's budget
+## (FRAME_BUDGET_USEC), for a player's one-off order whose answer can't wait for the next tick
+## (Squad.breach_target: an empty answer there would be taken as "no building behind that wall").
+static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := true, exact := false) -> Array:
 	if from == null or not from.is_inside_tree():
 		return []
 	if NavigationServer3D.map_get_iteration_id(from.get_world_3d().navigation_map) == 0:
@@ -200,7 +202,7 @@ static func near(from: Node3D, centre: Vector3, radius := SCAN_M, details := tru
 	if frame != _budget_frame:
 		_budget_frame = frame
 		_budget_used = 0
-	var budgeted := budget_always or DisplayServer.get_name() != "headless"
+	var budgeted := not exact and (budget_always or DisplayServer.get_name() != "headless")
 	if _budget_used >= FRAME_BUDGET_USEC and budgeted:
 		return hit.list if not hit.is_empty() else []  # over this frame's budget: what it knew
 	_cache.erase(key)  # an expired answer: the fresh one goes in last (most recently used), not in its old slot
@@ -264,10 +266,11 @@ static func at(from: Node3D, point: Vector3) -> Dictionary:
 
 
 ## The building whose nearest inside spot is closest to `point`, within `max_m` ({} for none).
-static func nearest(from: Node3D, point: Vector3, max_m: float) -> Dictionary:
+## `exact`: as near's.
+static func nearest(from: Node3D, point: Vector3, max_m: float, exact := false) -> Dictionary:
 	var best := {}
 	var best_d := max_m
-	for b: Dictionary in near(from, point, maxf(max_m + 4.0, SCAN_M)):
+	for b: Dictionary in near(from, point, maxf(max_m + 4.0, SCAN_M), true, exact):
 		var d := distance_to(b, point)
 		if d <= best_d:
 			best = b
