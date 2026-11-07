@@ -11,6 +11,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Two CI flakes (fix/ci-flakes-nov, F-450, F-451)
+
+- **Fixed:** the friendly side's feed no longer reads a squad that has left the level while its
+  men are still in it for that frame (operations: "Cannot call method 'get_nodes_in_group' on a
+  null value" in Squad.members via GroupBoard and SideIntel). GroupBoard lists and boards only
+  squads inside the tree, and Squad.members() finds nobody for one outside it. The operations
+  suite now feeds the board in that frame and checks the old groups leave it.
+- **Fixed (tests):** weapons' choke check measures the 870's pattern over 8 shells open and 8
+  choked (every pellet's mean angle off the aim, the same under-0.6x bar) instead of one open
+  shell's widest pellet, which came in under the bar about 1 run in 200.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

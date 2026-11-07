@@ -1801,6 +1801,40 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-450 and F-451: two CI flakes (fixed on fix/ci-flakes-nov, 2026-11-07)
+
+### F-450 (done): the side's feed on a squad out of the tree (operations, script error)
+CI push run 41656701387 attempt 1 (feat/vault-legs-svd f700555a), operations host: "Cannot call
+method 'get_nodes_in_group' on a null value" in Squad.members, from GroupBoard.row_for via
+SideIntel.server_feed. The suite's save/load step takes the old Operations node out of the tree
+(its OOB squads are its children) and queue-frees the men, who stay in the tree and in
+"combatants" until the end of the frame. When SideIntel's 1 s feed fell in that frame,
+GroupBoard.squads_of found the squads through the men's brains (valid, but outside the tree) and
+members() called get_tree() on null. The same happens in play whenever a squad's owner is taken
+out before its men go. Now squads_of lists only squads inside the tree, GroupBoard.refresh skips a
+live Squad out of it (so its row leaves, also for a SideCommand's cached group list), and
+members() returns nobody out of the tree. The operations suite feeds the board in that frame and
+checks the old groups are gone (it fails, with the script error, without the guards).
+
+### F-451 (done): the choke check in weapons was a coin with a 1-in-200 bad side
+weapons "choked, the pattern's widest pellet is N degrees off the aim, against M open" compared
+the widest of 4 choked shells (36 pellets, capped near 0.72 deg) with the widest of 1 open shell
+(9 pellets), needing under 0.6x: the open shell's widest came in under 1.2 deg about 1 run in 200
+(1.13 on two CI runs). It now fires 8 shells each way through the real fire path and compares
+every pellet's mean angle off the aim (open ~1.07 deg, choked ~0.48): the same 0.6 bar, now ~5
+standard deviations clear, and with the choke ignored the check fails every time.
+
+### F-452 (open, seen once locally): operations "a few men a frame (at most 4)"
+R0849 (this branch, 3 test slots busy) failed the run-start check "a few men a frame (at most 4),
+within the live caps (22 soldiers, 8 vehicles)": the bar is spawn_men_frame + 1 = 3. The suite
+counts every child entering level.ai in a process frame, not only Operations' spawn jobs
+(_spawn_step runs once a frame, 2 men at most), so another spawner's men in the same frame (a
+vehicle's gunner from AavGunner.attach, the enemy's response or the Virtualizer bringing a group
+in) can push it over. Earlier local logs: at most 2 (13 runs), 3 (2 runs); never 4 before. Not
+from F-450's change (it only skips squads out of the tree, which errored before). Ask: count only
+the men with an "op_group" meta in the check, or let Operations' budget take the other spawners'
+men into account.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2158,8 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-11-07 | F-450: a squad out of the tree is skipped where the side's lists are made (GroupBoard.squads_of, GroupBoard.refresh: its row leaves at once) and Squad.members() returns nobody for it | the squad's owner can leave the tree a frame before its men are freed (the operations flake), and other callers of members() shouldn't crash on it either | freeing the men before taking the owner out (fixes only the one path), or a null check in row_for alone
+2026-11-07 | F-451: weapons' choke check compares the mean pellet angle over 8 shells open and 8 choked (PATTERN_SHELLS, the same 0.6 bar), not one open shell's widest pellet against four choked shells' | ~5 standard deviations clear, and it still fails every time with the choke ignored; 16 shells cost about a second | a seeded RNG (proves one draw only), or a looser bar (proves less)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

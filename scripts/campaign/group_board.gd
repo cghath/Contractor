@@ -138,8 +138,8 @@ func refresh(groups: Array, now: float, meta := {}) -> void:
 	var seen := {}
 	for g: Variant in groups:
 		var id := group_id(g)
-		if id == "":
-			continue
+		if id == "" or (g is Squad and not (g as Squad).is_inside_tree()):
+			continue  # (a live squad out of the tree leaves: a commander's cached list can still hold one; F-450)
 		seen[id] = true
 		var row: Dictionary = rows.get(id, {})
 		if not row.is_empty() and now - float(row.sitrep_at) < sitrep_s:
@@ -282,7 +282,9 @@ func total_cp() -> float:
 	return cp
 
 
-## Every live Squad of `faction` with someone in it (from the combatants).
+## Every live Squad of `faction` with someone in it (from the combatants). Only squads inside
+## the tree: a squad taken out (its owner removed, its men queued to go this frame) still has
+## brains pointing at it, and Squad.members() can't look it up (F-450).
 static func squads_of(tree: SceneTree, faction: StringName) -> Array[Squad]:
 	var out: Array[Squad] = []
 	var seen := {}
@@ -291,7 +293,7 @@ static func squads_of(tree: SceneTree, faction: StringName) -> Array[Squad]:
 		if s == null or not s.is_ai() or s.faction != faction:
 			continue
 		var brain := SquadAI.of(s)
-		if brain and brain.squad and is_instance_valid(brain.squad) and not seen.has(brain.squad):
+		if brain and brain.squad and is_instance_valid(brain.squad) and brain.squad.is_inside_tree() and not seen.has(brain.squad):
 			seen[brain.squad] = true
 			out.append(brain.squad)
 	return out

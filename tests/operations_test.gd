@@ -513,6 +513,11 @@ func _test_save_load() -> void:
 		and (after.oob as Array).size() == (before.oob as Array).size() and int(after.paid) == int(before.paid),
 		"the contract's run came back as saved: phase %d, %s on the clock, $%s paid, %d OOB groups" % [int(after.phase) + 1, Operations.clock_text(float(after.clock_s)), DebriefCalc.money(after.paid), (after.oob as Array).size()])
 	# A fresh level would make a fresh node: the old one and what it put in the world go.
+	var intel := SideIntel.of(level)
+	var old_squads: Array[Squad] = []
+	for r: Dictionary in ops.records.values():
+		if is_instance_valid(r.get("squad")) and (r.squad as Squad).faction == &"friendly":
+			old_squads.append(r.squad)
 	for r: Dictionary in ops.records.values():
 		for s: Variant in r.get("soldiers", []):
 			if is_instance_valid(s):
@@ -524,6 +529,16 @@ func _test_save_load() -> void:
 		if is_instance_valid(n):
 			n.get_parent().remove_child(n)
 			n.queue_free()
+	# F-450 (the CI flake): the side's feed ran in this frame, between the squads leaving the tree
+	# and their men's frees, and Squad.members() called get_tree() on a squad out of it. A feed now,
+	# every sitrep due: no script error, and the squads gone from the list and the board.
+	for id: String in intel.board.rows:
+		intel.board.rows[id].sitrep_at = -INF
+	intel.server_feed()
+	var listed := GroupBoard.squads_of(get_tree(), &"friendly")
+	var left := old_squads.filter(func(sq: Squad) -> bool: return listed.has(sq) or intel.board.rows.has(GroupBoard.group_id(sq)))
+	check(not old_squads.is_empty() and left.is_empty(),
+		"the old node's %d friendly groups, out of the tree with their men still in it, leave the side's list and board at once (left: %d)" % [old_squads.size(), left.size()])
 	await _frames(3)
 	Operations.install(level, level.def)
 	ops = Operations.of(level)

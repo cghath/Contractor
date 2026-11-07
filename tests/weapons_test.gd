@@ -30,7 +30,10 @@ const GUNS := {
 const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10, "mag_762": 20}
 ## Guns fired and reloaded for real on the host player.
 const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs", "scar_h"]
-const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
+## Shells fired each way (open, choked) to measure the 870's pattern (F-451): 72 pellets a side,
+## the choked mean (0.45 of open) clears the 0.6 bar by ~5 standard deviations.
+const PATTERN_SHELLS := 8
+const OPFOR: Array[String] =["akm", "ak74", "rpk", "pkm", "svd"]
 ## Items expansion (2026-10-20): every gun it added, fired and reloaded for real (_test_expansion_guns).
 const EXPANSION_GUNS: Array[String] = ["glock19", "beretta_m9", "cz75", "makarov_pm", "tt33", "fn57", "glock18c", "usp45", "mp5", "mp5sd", "mp7", "uzi", "vityaz", "p90", "ump45", "rem870", "mossberg590", "m1014", "saiga12", "sig_mcx", "scar_l", "g36c", "aug_a3", "tavor_x95", "ak12", "akms", "ak105", "amd65", "vz58", "mk12", "sr25", "m14_ebr", "g3a3", "fal", "l1a1", "rpd", "negev", "mg3", "m60e4", "lee_enfield", "sks"]
 
@@ -1066,16 +1069,10 @@ func _test_shotgun() -> void:
 		player._server_busy_until = 0.0
 		player._server_next_shot = 0.0
 		player._server_fire.rpc_id(1, player.camera.global_position, dir, &"primary")
-	var widest := func() -> float:
-		var w := 0.0
-		for d: Vector3 in Shotguns.last_dirs:
-			w = maxf(w, rad_to_deg(d.angle_to(Vector3(1, 0, 0))))
-		return w
 	shoot.call(Vector3(1, 0, 0))
 	await _frames(2)
 	var on_wall := Shotguns.last_results.filter(func(res: Dictionary) -> bool:
 		return String(res.get("result", "")) == "world" and (res.position as Vector3).x > 15.8)
-	var open_w: float = widest.call()
 	check(Shotguns.last_results.size() == 9 and on_wall.size() >= 7 and inv.rounds_in(&"primary") == 5,
 		"standard buck: 9 pellets, %d on the walls 6 m off, one shell gone" % on_wall.size())
 	# Hi-brass: twelve pellets, a little wider.
@@ -1084,22 +1081,17 @@ func _test_shotgun() -> void:
 	shoot.call(Vector3(1, 0, 0))
 	await _frames(2)
 	check(Shotguns.last_results.size() == 12, "hi-brass: 12 pellets (%d)" % Shotguns.last_results.size())
-	# The choke: the same shell, a pattern under half as wide.
+	# The choke: the same shell, a pattern under half as wide. Measured over PATTERN_SHELLS shells
+	# each way, every pellet's angle off the aim averaged (F-451: one open shell's widest pellet
+	# against four choked shells' widest came in under the bar about 1 run in 200, 1.13 open on CI).
+	var loose: Dictionary = await _shotgun_pattern(PATTERN_SHELLS)
 	inv.take(&"choke_870")
 	check(GunAttachments.mount_carried(inv, &"choke_870") and GunAttachments.mounted_id(gun, inv.state_of(&"primary"), GunAttachments.CHOKE) == &"choke_870",
 		"the choke goes on the 870")
-	var tight := 0.0
-	var loose := 0.0
-	for i in 4:
-		var st := inv.state_of(&"primary").duplicate(true)
-		st["rounds"] = 1
-		st["tube"] = [String(Shotguns.STANDARD)]
-		inv.set_slot_state(&"primary", st)
-		shoot.call(Vector3(1, 0, 0))
-		await _frames(1)
-		tight = maxf(tight, widest.call())
-	loose = open_w
-	check(tight < loose * 0.6, "choked, the pattern's widest pellet is %.2f degrees off the aim, against %.2f open" % [tight, loose])
+	var tight: Dictionary = await _shotgun_pattern(PATTERN_SHELLS)
+	check(int(loose.pellets) == PATTERN_SHELLS * 9 and int(tight.pellets) == PATTERN_SHELLS * 9 and float(tight.mean) < float(loose.mean) * 0.6,
+		"choked, the pattern's pellets are %.2f degrees off the aim on average over %d shells (widest %.2f), against %.2f open (widest %.2f): x%.2f"
+		% [tight.mean, PATTERN_SHELLS, tight.widest, loose.mean, loose.widest, float(tight.mean) / maxf(float(loose.mean), 0.001)])
 	GunAttachments.server_remove(inv, &"primary", GunAttachments.CHOKE)
 	# Breaching rounds: the 870 won't take them, and says why.
 	inv.set_slot_state(&"primary", {"rounds": 0, "tube": []})
@@ -1282,6 +1274,34 @@ func _test_shotgun() -> void:
 		and kit.count_of(&"round_40mm_he") >= 6 and kit.count_of(&"round_40mm_smoke") >= 1, "the grenadier's kit: an M320 on his M4, 40 mm HE and smoke")
 	kit.queue_free()
 	player.global_position = Vector3(0, 0.1, 24)
+
+
+## The host player's 12 gauge in hand, aimed down +x: `shells` standard shells fired one at a
+## time through the real fire path. {"mean": every pellet's angle off the aim averaged (degrees),
+## "widest", "pellets": how many were counted (a shot the host turned down counts none)}.
+func _shotgun_pattern(shells: int) -> Dictionary:
+	var inv := player.inventory
+	var sum := 0.0
+	var widest := 0.0
+	var pellets := 0
+	for i in shells:
+		var st := inv.state_of(&"primary").duplicate(true)
+		st["rounds"] = 1
+		st["tube"] = [String(Shotguns.STANDARD)]
+		inv.set_slot_state(&"primary", st)
+		Shotguns.last_dirs = []
+		player._server_busy_until = 0.0
+		player._server_next_shot = 0.0
+		player._server_fire.rpc_id(1, player.camera.global_position, Vector3(1, 0, 0), &"primary")
+		await _frames(1)
+		if inv.rounds_in(&"primary") != 0:
+			continue
+		for d: Vector3 in Shotguns.last_dirs:
+			var a := rad_to_deg(d.angle_to(Vector3(1, 0, 0)))
+			sum += a
+			widest = maxf(widest, a)
+			pellets += 1
+	return {"mean": sum / maxi(pellets, 1), "widest": widest, "pellets": pellets}
 
 
 func _dummy(pos: Vector3) -> TargetDummy:
