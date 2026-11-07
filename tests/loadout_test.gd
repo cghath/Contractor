@@ -1093,6 +1093,21 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 		and Loadouts.units(sp, [stock.gear]) == stock_before and not plain_m4s.is_empty() and bare.is_empty() and int(dots.call(sp)) == dots_before,
 		"a stock M4 to an HK416: its own dot stays on the M4 in the stash, no loose dot, nothing missing, made or lost (%s; M4s %s; loose dots %d -> %d)" % [
 			optic_of.call(stock.gear), plain_m4s, dots_before, dots.call(sp)])
+	# And when the stash's only HK416 is bare (irons): the M4's own dot moves over, so nothing is
+	# listed missing; the M4 goes back bare (round 6 review, F-421; Loadouts._comes_with).
+	var hk := ItemDB.get_item(&"hk416")
+	var bp := pool.duplicate(true)
+	for e: Dictionary in bp:
+		if String(e.id) == "hk416":
+			e["state"] = Optics.with_optic(hk, e.get("state", {}), &"")
+	var bare_before := Loadouts.units(bp, [rifleman])
+	var bare_dots: int = dots.call(bp)
+	var onto_bare: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_slot(Loadouts.template_of(rifleman), &"primary", "hk416")}], bp)[0]
+	var bare_m4 := bp.any(func(e: Dictionary) -> bool: return String(e.id) == "m4a1" and Optics.mounted_id(m4, e.get("state", {})) == &"")
+	check(bp.any(func(e: Dictionary) -> bool: return String(e.id) == "hk416") == false and optic_of.call(onto_bare.gear) == "hk416+optic_red_dot"
+		and onto_bare.missing.is_empty() and Loadouts.units(bp, [onto_bare.gear]) == bare_before and bare_m4 and int(dots.call(bp)) == bare_dots,
+		"a stock M4 to the stash's bare HK416: the M4's dot moves over, the M4 goes back bare, nothing missing, made or lost (%s, missing %s; loose dots %d -> %d)" % [
+			optic_of.call(onto_bare.gear), onto_bare.missing, bare_dots, dots.call(bp)])
 
 
 ## Client process: joins the hub, asks the host for a smoke on itself, Fill ammo on a squadmate,

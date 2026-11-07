@@ -52,7 +52,12 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   its own scope and the optic you had fitted goes to the stash loose (not left on the old gun and
   listed missing); any other gun (M4 to HK416) takes your optic along. A sniper's scope stays on
   it when you swap back to a rifle, and a stock M4 swapped for an HK416 (both with a red dot)
-  goes back to the stash plain, its dot on. `Loadouts.OWN_SCOPE_TAGS` ("sniper", "dmr"; Proposed).
+  goes back to the stash plain, its dot on. `Loadouts.OWN_SCOPE_TAGS` ("sniper", "dmr"; Captain
+  2026-11-07: "yes"). The M27 (its own 4x prism, tagged neither) takes your optic for now (F-465,
+  asked).
+- **Fixed (loadout, F-421, review):** a stock M4 swapped for an HK416 when the stash's HK416s are
+  all bare (irons) moves the M4's dot over instead of listing the red dot missing; the M4 goes
+  back bare (`Loadouts._comes_with`).
 - **Fixed (loadout, review):** the 3D editor's "Ask before buying" tick follows "Don't ask
   again" at once; a one-step buy the host refuses leaves the draft as it was and the close
   warning right; a plate pocket buys in one step only on the carrier you wear; the host's
@@ -61,7 +66,8 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
 - **Tests (loadout):** an M4 with a T-2 to an HK416 (the dot moves over) and to an M110 / SVD
   (its own scope, the T-2 loose in the stash, nothing missing), in the rules, on the host and from
   a client; a stock M4 to an HK416 (the M4 plain in the stash, no loose dot); the refused
-  one-step buy, the tick, the plate pocket and the point op.
+  one-step buy, the tick, the plate pocket and the point op; a stock M4 to a bare HK416 (the dot
+  moves over, nothing missing, made or lost).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

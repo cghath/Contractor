@@ -782,7 +782,8 @@ static func confirm_buy_on() -> bool:
 ## price, the company's cash and what's left after; Cancel buys nothing. Its "Don't ask again"
 ## tick, with the Buy, turns the setting off (the player's own settings.cfg); the "Ask before
 ## buying" tick (ask_buy_tick) and Settings, Controls, Menus turn it back on. The paper doll's
-## pickers and the 3D editor both ask here.
+## pickers and the 3D editor both ask here. The ticks that follow are found by name: a CheckBox
+## named "AskBuy" (as ask_buy_tick names it) anywhere under `parent`; one named otherwise won't.
 static func ask_buy(parent: Node, id: String, price: int, funds: int, buy: Callable) -> void:
 	if not confirm_buy_on():
 		buy.call()

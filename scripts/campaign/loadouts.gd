@@ -30,7 +30,9 @@ const MEDIC_POUCHES: Array[String] = ["aid_bag", "pouch_sustainment"]
 const NEW_POINT := "+"
 ## Guns of these kinds (their tags) come with a scope of their own and keep it when swapped in for
 ## another gun; any other gun takes the optic the old one had (keeps_own_optic, set_slot). Captain,
-## 2026-11-06, F-421: "varies. if you go from ar to sniper yes, M4 to HK416 yes" (Proposed).
+## 2026-11-06, F-421: "varies. if you go from ar to sniper yes, M4 to HK416 yes"; and 2026-11-07,
+## asked whether these tags decide it: "yes". The M27 (a stock 4x prism, tagged neither) takes
+## the old gun's optic like any rifle: whether it should be a "dmr" is still asked.
 const OWN_SCOPE_TAGS: Array[String] = ["sniper", "dmr"]
 
 
@@ -320,8 +322,9 @@ static func rebuild(people: Array, pool: Array) -> Array:
 ## moves over to the new gun (swapped_optic), and one he fitted that the new gun doesn't take (it
 ## goes to the stash loose, not on the old gun); the old gun's own optic stays on it unless it
 ## moves over to a gun that doesn't come with that same optic (an M4's own dot to an HK416 stays:
-## the HK416 comes with one). A gun taken off (slot emptied) keeps its optic. The same gun kept
-## needs none of this: Restock.draw picks the unit with the optic asked for.
+## the HK416 comes with one, unless every HK416 the build can draw has lost its dot: _comes_with).
+## A gun taken off (slot emptied) keeps its optic. The same gun kept needs none of this:
+## Restock.draw picks the unit with the optic asked for.
 ## A mount's state is decoded as the rest of his kit is (GameState.from_json), so it stacks and
 ## compares with the stash's entries by value.
 static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dictionary:
@@ -349,13 +352,14 @@ static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dict
 		# The optic, only on a gun swapped for another (not one taken off: it goes to the stash as
 		# it is). One he fitted always comes off; the old gun's own only when it moves over to a new
 		# gun that doesn't come with that same optic (an M4's own dot stays on it for an HK416,
-		# which has its own dot: else a bare M4 and a stray dot in the stash; review of 4bcfe79f).
+		# which has its own dot: else a bare M4 and a stray dot in the stash; review of 4bcfe79f),
+		# or whose units here have all lost it (_comes_with: a bare HK416, F-421).
 		var on := String(Optics.mounted_id(holder, state))
 		var new_id := String(want_slots.get(String(slot), id))
 		var new_gun := ItemDB.get_item(StringName(new_id)) if new_id != "" and ItemDB.has_item(StringName(new_id)) else null
 		var want_optic := String(want_optics.get(String(slot), ""))
-		if on != "" and new_gun != null and new_id != id and (on != String(holder.stats.get("optic", ""))
-				or (want_optic == on and want_optic != String(new_gun.stats.get("optic", "")))):
+		if on != "" and new_gun != null and new_id != id \
+				and (on != String(holder.stats.get("optic", "")) or (want_optic == on and not _comes_with(new_gun, on, pool, gear))):
 			BaseArmory.add(pool, StringName(on), 1)
 			state = Optics.with_optic(holder, state, &"")
 			changed = true
@@ -367,6 +371,23 @@ static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dict
 				out["slot_state"] = {}
 			out.slot_state[slot] = state
 	return out
+
+
+## Whether the build can draw a unit of `gun` already wearing `optic` as its own (its stock
+## optic): one in `pool` or loose in `gear`'s containers. False when its own is another optic, or
+## when every unit there has lost it (a bare HK416 in the stash: the M4's own dot then moves over,
+## else the build draws the bare one and lists the dot missing; F-421). When there's no unit of
+## `gun` at all it's true: the gun is missing, and the dot stays on the old gun. In a team rebuild
+## another person may be drawn that unit first (F-420: who's short can move, never the total).
+static func _comes_with(gun: ItemData, optic: String, pool: Array, gear: Dictionary) -> bool:
+	if optic != String(gun.stats.get("optic", "")):
+		return false
+	var units: Array = pool.duplicate()
+	for c: Variant in gear.get("containers", {}):
+		units.append_array(gear.containers[c])
+	units = units.filter(func(e: Dictionary) -> bool: return String(e.get("id", "")) == String(gun.id) and int(e.get("count", 1)) > 0)
+	return units.is_empty() or units.any(func(e: Dictionary) -> bool:
+		return String(Optics.mounted_id(gun, GameState.from_json(e.get("state", {})))) == optic)
 
 
 ## What a change left out, in Restock's words: "Missing from the stash: ..., No room for: ..."
