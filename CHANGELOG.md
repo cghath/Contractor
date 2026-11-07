@@ -96,12 +96,39 @@ clear' team order through walls" (F-317, F-318).
 - **Fixed (review):** `Charges.burning()` lists only charges with a fuse running (a roadside IED
   waiting with none, or a disarmed one, no longer sits in it); the door fallback of a wall breach
   drops the op's "stood_off" for the door's new stack; each AI's first charge check is staggered
-  by its instance id, so a whole squad doesn't path-query in one frame.
-- **Changed (tests):** `breach`'s bystanders case now really tests the follower (the leader stands
-  1.5 m off the wall until the charge is set, and both men must go through "Getting clear of a
-  charge"), and adds a medic treating a downed man beside a wall a charge is set on (dragged out,
-  nobody hurt, treated again) and a breach under a roof (the stack past the indoor reach, nobody
-  in the blast).
+  at random (as its scan is), so a whole squad doesn't path-query in one frame.
+- **Changed (tests):** `breach`'s bystanders case now checks that the follower himself steps clear
+  (he stands in the blast beside the leader, who is 1.5 m off the wall until the charge is set;
+  his place behind the leader lies outside it, about 5.4 m off, so both men must go through
+  "Getting clear of a charge"), and adds a medic treating a downed man beside a wall a charge is
+  set on (dragged out, nobody hurt, treated again) and a breach under a roof (the stack past the
+  indoor reach, nobody in the blast).
+- **Added (medical):** a squadmate down dying (conscious, crawling at most) can be dragged as a
+  downed one is, by a player (Drag in the interaction menu) or the AI, though not carried on the
+  shoulder (F-412, Captain, 2026-11-06: "make him draggable"). Held, his own crawl doesn't move
+  him: the host moves him and a player's machine stands still between its updates; he's drawn as
+  a dragged casualty on every peer, late joiners too. Back on his feet he's let go; out cold or
+  dead he's held on as any body is; a dying man drags nobody himself, and a dragger going down
+  dying lets go (`Soldier._movable`, `is_held`).
+- **Changed (AI):** a medic drags a dying casualty clear of a burning charge too, not just a
+  downed one. A carer who can't start the drag (someone else is mid-item on him, no clear spot,
+  his hands full) steps clear himself once under 2 s of the fuse are left and he isn't holding
+  him; one with him but too far off to take hold goes in only with time for the drag, as on his
+  way to him; stepping clear he starts no item on the way. The drag's spot is 0.5 m further out
+  (`CHARGE_DRAG_PAST_M` 2.3 m), so the casualty ends past the reach with room to spare (review).
+- **Fixed (squad):** a door charge that has to go on the stack's own side of a doorway (no wall on
+  the far side, by a corner) left the stack's first man 2.1 m from it; the stack now stands off
+  from where the charge really goes (F-413, Captain, 2026-11-06: yes). The indoor push (F-396)
+  looks over the charge's spot, not the doorway, whose lintel counted as a roof and pushed every
+  door stack 2.5 m on, past a small building's corner (`Squad.stand_off`, `SquadAI.door_charge_spot`).
+- **Fixed (medical):** a body reset (`Vitals.server_reset_health`) while dying, or while down with
+  its blood gone, stayed dying 4 s more: forced prone, no shooting, and now draggable and held
+  (`WoundModel.reset` clears it; F-433).
+- **Changed (tests):** interaction "Dragging a dying man" (a player and the AI drag him, not carry
+  him; his own crawl and momentum don't move him while held; let go he crawls; back on his feet
+  he's let go, out cold or dead he's held; a dying man drags nobody), animations (a dying man
+  dragged, from carry_net alone, as a late joiner sees him), and breach (the medic drags a dying
+  man clear of a charge; a door charge's stand-off by a corner and under no roof).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

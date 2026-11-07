@@ -51,6 +51,7 @@ func _ready() -> void:
 	await _test_signs()
 	await _test_carry_and_drag()
 	await _test_human_casualty()
+	await _test_drag_dying()
 	await _test_give_item()
 	await _test_self_actions()
 	await _test_menu()
@@ -345,6 +346,140 @@ func _test_human_casualty() -> void:
 	check(bravo.carry_mode == Soldier.DRAG and pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05, "and dragged")
 	bravo._server_release_body.rpc_id(1)
 	check(player.carried_by == null and bravo.carrying == null and player.collision_layer == Soldier.BODY_LAYER, "and put down")
+	player.vitals.server_reset_health()
+	player.carried_by_pos = null
+	_place_player()
+
+
+## Conscious but dying (Vitals.is_dying: 30% of his blood gone, still bleeding slowly).
+func _make_dying(s: Soldier) -> void:
+	s.vitals.server_reset_health()
+	s.vitals.server_add_wound(Vitals.THIGH_L, "venous", 0.03)
+	s.vitals._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
+	s.vitals._model.update_state(0.1)
+
+
+## F-412 (Captain, 2026-11-06: "make him draggable"): a squadmate down dying (conscious, crawling
+## at most) can be dragged as a downed one is, by a player and by the AI, not carried; held, his
+## own movement doesn't move him; back on his feet he's let go, and if he goes down or dies he's
+## held on as any downed or dead body is; let go, he crawls again.
+func _test_drag_dying() -> void:
+	print("Dragging a dying man")
+	_place_player()
+	alpha.global_position = SPOT + Vector3(0, 0, -1.5)
+	_make_dying(alpha)
+	await _frames(2)
+	check(alpha.vitals.is_dying() and alpha.vitals.is_up(), "Alpha is down dying, conscious (%s)" % alpha.vitals.condition_text())
+	var ids := _ids(player, alpha)
+	check(ids.has(&"drag") and _action(player, alpha, &"drag").disabled == "" and not ids.has(&"carry") and not ids.has(&"put_down"),
+		"the menu on him offers Drag, not Carry (%s)" % [ids])
+	player._server_carry_body.rpc_id(1, alpha.get_path())
+	check(player.carrying == null and alpha.carried_by == null, "he can't be carried on the shoulder")
+	player._server_drag_body.rpc_id(1, alpha.get_path())
+	check(player.carrying == alpha and player.carry_mode == Soldier.DRAG and alpha.carried_by == player and alpha.collision_layer == 0
+		and alpha.model.carry_net.get("mode") == CharacterModel.DRAGGED and alpha.is_held(),
+		"a player takes hold of him and drags him (carrying %s, mode %s)" % [player.carrying, player.carry_mode])
+	check(_ids(player, alpha)[0] == &"put_down" and not _ids(player, alpha).has(&"drag"), "the menu on him: Release first, no Drag (%s)" % [_ids(player, alpha)])
+	_end_carry_phase(player)
+	# His own crawl (as his AI would ask) doesn't move him while he's held: he goes where he's dragged.
+	alpha.move_input = Vector2(0.0, 1.0)
+	var off := 0.0
+	for i in 20:
+		player.global_position += Vector3(0, 0, -0.05)
+		alpha.move_input = Vector2(0.0, 1.0)
+		await get_tree().physics_frame
+		await get_tree().process_frame  # (once that physics step has run)
+		off = maxf(off, alpha.global_position.distance_to(player.carry_transform().origin))
+	check(off < 0.08 and alpha.vitals.is_dying(), "he comes along behind you, his own crawl going nowhere (at most %.2f m off the drag)" % off)
+	check(alpha.model.downed and alpha.model.carry_shown().get("mode") == CharacterModel.DRAGGED, "drawn as a dragged casualty")
+	# Let go, the same crawl moves him.
+	InteractionMenu.perform(player, _action(player, alpha, &"put_down"))
+	check(player.carrying == null and alpha.carried_by == null and alpha.collision_layer == Soldier.BODY_LAYER and alpha.model.carry_net.is_empty(),
+		"Release lets go of him, and he collides again")
+	var from := alpha.global_position
+	for i in 90:
+		alpha.move_input = Vector2(0.0, 1.0)
+		await get_tree().physics_frame
+	alpha.move_input = Vector2.ZERO
+	check(_flat(alpha.global_position, from) > 0.08, "let go, he crawls again (%.2f m in 1.5 s)" % _flat(alpha.global_position, from))
+
+	# Back on his feet (treated): let go.
+	_place_player()
+	alpha.global_position = SPOT + Vector3(0, 0, -1.2)
+	await _frames(2)
+	player._server_drag_body.rpc_id(1, alpha.get_path())
+	_end_carry_phase(player)
+	alpha.vitals.server_reset_health()
+	_end_carry_phase(player)  # (the host's update for a player)
+	check(not alpha.vitals.is_dying() and player.carrying == null and alpha.carried_by == null and alpha.model.carry_net.is_empty()
+		and alpha.collision_layer == Soldier.BODY_LAYER, "back on his feet, he's let go")
+	# Down (out cold) while dragged: held on, as a downed body is.
+	_make_dying(alpha)
+	await _frames(2)
+	player._server_drag_body.rpc_id(1, alpha.get_path())
+	_end_carry_phase(player)
+	alpha.vitals.server_damage(500.0)
+	_end_carry_phase(player)
+	await _frames(3)
+	check(alpha.vitals.downed and player.carrying == alpha and alpha.carried_by == player and alpha.model.carry_net.get("mode") == CharacterModel.DRAGGED
+		and not is_instance_valid(alpha.ragdoll), "he goes out cold while dragged: still held, no ragdoll (carrying %s)" % player.carrying)
+	player._server_release_body.rpc_id(1)
+	alpha.vitals.server_reset_health()
+	await _frames(2)
+
+	# The AI drags him too, not carries him; and a dying man drags nobody himself.
+	_make_dying(alpha)
+	alpha.global_position = SPOT + Vector3(2.0, 0, -1.0)
+	bravo.global_position = SPOT + Vector3(2.0, 0, 0.0)
+	await _frames(2)
+	check(not bravo.server_pick_up_body(alpha, Soldier.CARRY) and bravo.server_pick_up_body(alpha, Soldier.DRAG) and bravo.carry_mode == Soldier.DRAG
+		and alpha.carried_by == bravo, "an AI squadmate drags him (server_pick_up_body), and can't carry him")
+	_end_carry_phase(bravo)
+	bravo.global_position += Vector3(0, 0, -1.0)
+	off = 0.0
+	for i in 10:
+		alpha.move_input = Vector2(0.0, 1.0)
+		await get_tree().physics_frame
+		await get_tree().process_frame
+		off = maxf(off, alpha.global_position.distance_to(bravo.carry_transform().origin))
+	check(off < 0.08, "and he comes along behind the AI too (at most %.2f m off)" % off)
+	# Dies while dragged: held on, as a dead body is.
+	bravo.release_carried()
+	var charlie := _spawn_ai("Charlie", &"friendly", alpha.global_position + Vector3(1.0, 0, 0), ["m4a1"])
+	_make_dying(charlie)
+	await _frames(2)
+	check(charlie.vitals.is_dying() and not charlie.server_pick_up_body(alpha, Soldier.DRAG) and alpha.carried_by == null,
+		"a dying man drags nobody himself")
+	check(bravo.server_pick_up_body(charlie, Soldier.DRAG), "the AI takes hold of another dying man")
+	_end_carry_phase(bravo)
+	charlie.vitals.server_kill()
+	bravo._update_carried(0.0)
+	check(charlie.vitals.is_dead() and bravo.carrying == charlie and charlie.carried_by == bravo, "he dies while dragged: still held, as a body")
+	bravo.release_carried()
+	charlie.queue_free()
+	alpha.vitals.server_reset_health()
+	alpha.move_input = Vector2.ZERO
+
+	# A dying player, dragged by an AI: the host moves him; his own momentum doesn't.
+	_place_player()
+	_make_dying(player)
+	bravo.global_position = player.global_position + Vector3(1.0, 0, 0)
+	await _frames(2)
+	check(player.vitals.is_dying() and InteractionMenu.actions_for(bravo, player).any(func(a: Dictionary) -> bool: return a.id == &"drag"),
+		"a squadmate can drag a dying player")
+	bravo._server_drag_body.rpc_id(1, player.get_path())
+	_end_carry_phase(bravo)
+	await _frames(3)
+	var pos: Variant = player.carried_by_pos
+	check(bravo.carrying == player and pos is Vector3 and (pos as Vector3).distance_to(bravo.carry_transform().origin) < 0.05,
+		"dragged by Bravo: the host sends him where he's dragged")
+	for i in 5:
+		player.velocity = Vector3(0, 0, -3.0)  # (his own crawl's momentum)
+		player._physics_process(1.0 / 60.0)
+	check(player.global_position.distance_to(bravo.carry_transform().origin) < 0.05 and player.velocity == Vector3.ZERO,
+		"his body follows the drag, not his own movement (%.2f m off it)" % player.global_position.distance_to(bravo.carry_transform().origin))
+	bravo._server_release_body.rpc_id(1)
+	check(player.carried_by == null and bravo.carrying == null and not player.is_held() and player.collision_layer == Soldier.BODY_LAYER, "and let go")
 	player.vitals.server_reset_health()
 	player.carried_by_pos = null
 	_place_player()

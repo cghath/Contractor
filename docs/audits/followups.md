@@ -1861,21 +1861,40 @@ stops early only on no headway for DRAG_STUCK_S, as a drag to cover does. On his
 casualty he goes in only with CHARGE_GO_IN_S (5 s) plus his way there at 3.6 m/s left on the
 fuse, else he waits clear as anyone does and goes once it has gone off. A man treating himself
 steps clear first (his item dropped) and treats himself once there. A casualty still on his feet
-walks clear himself and his carer steps clear as anyone does. What's left: F-411, F-412.
+walks clear himself and his carer steps clear as anyone does. What's left: F-411, F-412 (done
+2026-11-06: a dying casualty is dragged clear too).
 
 ### F-411 (note): a casualty someone else is treating isn't dragged clear
 A carer never lifts a casualty from under another's hands (P0164: it cut the Captain's IV short),
 so with a player (or another AI, mid-item) treating the casualty in a charge's blast, the AI carer
 doesn't drag him: he stays at him and looks again every second, and drags him once the other's
 item is done. The player treating him is in the blast himself and sees the charge.
+Review of round 5: with under CHARGE_SELF_CLEAR_S (2 s) of the fuse left and not holding the
+casualty, the carer who can't start the drag (this, no spot clear of it, or the pick-up refused)
+now steps clear himself; with him but too far off to take hold, he goes in to him only with
+CHARGE_GO_IN_S plus his way there left, as on his way to him.
 
-### F-412 (question for Captain): a dying casualty in a charge's blast
+### F-412 (answered by Captain, 2026-11-06; done): a dying casualty in a charge's blast
 A conscious but dying man (`Vitals.is_dying`: on the ground, crawling at most) can't be dragged
 (`Soldier._movable`: only someone down, dead or cuffed is), and F-373's step-clear leaves the
 dying out (he stays where he went down). So his carer steps clear as anyone does and he stays in
 it. Either let a dying man be dragged (as a downed one), or have him crawl clear himself.
+Captain, 2026-11-06: "make him draggable". Done: `Soldier._movable(other, mode)` lets a dying man
+be dragged (DRAG only: not carried on the shoulder), by a player (the interaction menu's Drag on
+a squadmate down dying, `can_drag_dying`; Release on him once held) and by the AI
+(`server_pick_up_body`). Held, his own movement doesn't move him: an AI's `_ai_physics` puts him
+where he's dragged, a player's own machine takes the host's position and otherwise stands still
+(`_physics_process`, `is_held()` from the replicated carry_net), so his crawl never fights the
+drag. He's drawn as a dragged casualty on every peer, a late joiner's too (the downed pose while
+`is_held()`; `_process`), and isn't smoothed meanwhile. Back on his feet (treated) he's let go
+(`_update_carried`); if he goes out cold or dies he's held on, as any downed or dead body is; the
+dragger letting go, going down or going down dying himself lets go. A dying man moves nobody
+himself. `SquadAI._care_clear_of_charges` now drags a dying casualty clear of a charge as it
+does a downed one (a dying man's own item on himself doesn't stop it: it's cut short). Tests:
+interaction "Dragging a dying man", animations (from carry_net alone), breach (the medic drags a
+dying man clear of a charge on the east wall).
 
-### F-413 (open): a door charge set on the stack's own side
+### F-413 (answered by Captain, 2026-11-06; done): a door charge set on the stack's own side
 `SquadAI._charge_spot` puts a door's charge CHARGE_ALONG_M (2 m) along the wall on the far side
 of the doorway from the stack, else, with no wall there (a doorway at a corner), on the stack's
 side. There the stack's first man (STACK_FIRST_M + CHARGE_STANDOFF_M, 4.1 m from the doorway)
@@ -1883,6 +1902,36 @@ stands about 2.1 m from the charge, inside its 3 m face reach even in the open: 
 is worked out before the charge's spot is known. A fix: stand off from the spot on that side
 (move the stack CHARGE_ALONG_M further when `_charge_spot` picks the stack's side). Seen reading
 the code for F-396, not in a run.
+Captain, 2026-11-06: yes. Done: `Squad.stand_off(op, world)` works a door op's charge spot out
+ahead (`SquadAI.door_charge_spot`, the same probe `_charge_spot` makes when the charge is set)
+and moves each man further along by however far the charge lies on his side of the doorway (2 m
+by a corner, nothing past it), so the first man stands about 4.4 m from it. The indoor push of
+F-396 now samples where the charge really goes (as Charges marks a burning one), not the
+doorway, whose lintel counted as a roof and pushed every door stack 2.5 m further, past a small
+building's corner (review of round 5). breach "A door charge: the stack stands off from where it
+really goes" lays stacks out on the main building's south face.
+
+### F-431 (note): the AI drags a dying man clear of a charge, not to cover under fire
+F-412 lets anyone drag a dying man, and the AI does it to get him out of a charge's blast; its
+drag to cover under fire (`SquadAI._care_reach`'s `exposed`, with the smoke and the suppressing
+that go with it) is still for an unconscious casualty only, so a dying man in the open under
+fire is treated where he lies, as before. Widening `exposed` to the dying changes casualty care
+in every firefight (casualty, roles), so it's left for Captain's word.
+
+### F-432 (note): the interaction menu's Release on a dragged body is host-only
+`InteractionMenu._moved_by` reads `Soldier.carried_by`, which only the host has, so a client
+player looking at the body he drags gets no Put down/Release on it (he still has it on himself,
+Left Ctrl + Left Alt). The same goes for the new entry on a dying squadmate. Reading carry_net's
+"with" (replicated) instead would fix both. Seen reading the code for F-412, not in a run.
+
+### F-433 (done 2026-11-07, feat/breach-and-clear): a body reset while dying stayed dying 4 s
+`WoundModel.reset()` (Vitals.server_reset_health: a revive in a test or a debug heal, a body
+reset for a respawn) cleared the blood and every wound but not `dying`, so a man reset while
+dying, or while down with his blood gone (dying_now holds under the downed flag too), stayed
+`Vitals.is_dying()` until DYING_CLEAR_S had passed: forced prone, no shooting. It showed once a
+dying man could be dragged (F-412): interaction's "a body that gets up is let go" reset a downed
+Alpha and he stayed draggable, still held (R0848). reset() now clears `dying` and its clock. A
+player who died had it cleared already (update_state clears it on the dead).
 
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
@@ -2266,9 +2315,20 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-11-02 | F-397: a carer whose downed casualty (by his ragdoll's chest or his capsule) or who himself is in a burning charge's blast drags him to the nearest spot clear of it on their side of its wall, chosen as a bystander's (`_charge_clear_spot`) 1.8 m further out (the casualty trails 1 m behind and the drag ends within ARRIVE + 0.4 of its spot), then treats him there; his item in hand is dropped, not counted as failed (Proposed, `SquadAI.CHARGE_DRAG_PAST_M`) | the existing drag (Care.DRAG) and the bystanders' spot, so the casualty ends clear and the treatment picks up as after a drag to cover | carry him on the shoulder (a 1.6 s lift against a 0.7 s grab, and a carry is faster only past ~3 m), or a fixed spot 5 m off
 2026-11-02 | F-397: the fuse too short for the drag to finish: he still drags him as far as he gets and never lets go to save himself; the drag stops early only on no headway for DRAG_STUCK_S (8 s), as a drag to cover does (being out of contact doesn't stop it) | Captain: "drag him clear asap"; every metre counts against the blast's falloff | let go and step clear alone when the fuse is short (leaves the casualty in it)
 2026-11-02 | F-397: a carer still on his way to a casualty in a blast goes in only with 5 s plus his way there at 3.6 m/s left on the fuse, else he waits clear as anyone does, his reach's give-up clock held meanwhile, and goes to him once it has gone off (Proposed, `CHARGE_GO_IN_S`, `CHARGE_GO_MPS`) | a grab and ~5 m of drag at 1.26 m/s is ~4.7 s; walking in with less puts two men in the blast | always go in, or never go in to a casualty in a blast
-2026-11-02 | F-397: a man treating himself steps clear first (his item dropped, on his feet if he'd gone prone for it) and treats himself once at his spot; a casualty still on his feet walks clear himself and his carer steps clear as anyone does; one someone else is treating isn't lifted from under them (F-411); a dying one can't be dragged and his carer steps clear (F-412) | Captain: "a man treating himself steps clear first" (task); a conscious man moves himself; P0164 (lifting cut an IV short) | drag a conscious casualty too (Soldier._movable doesn't allow it)
+2026-11-02 | F-397: a man treating himself steps clear first (his item dropped, on his feet if he'd gone prone for it) and treats himself once at his spot (Proposed: the task asked for it, not a Captain call; corrected in review of round 5); a casualty still on his feet walks clear himself and his carer steps clear as anyone does; one someone else is treating isn't lifted from under them (F-411); a dying one can't be dragged and his carer steps clear (F-412, since answered) | a man on his feet can walk out of it himself, then treat himself; a conscious man moves himself; P0164 (lifting cut an IV short) | stay at his own item in the blast; drag a conscious casualty too (Soldier._movable doesn't allow it)
 2026-11-02 | F-396: the breach stack's stand-off goes 2.5 m further along the wall (to 6.6 m) when something solid lies within 4 m over the charge's spot (`Squad.stand_off(op, world)`; `Squad.BLAST_SAFE_INDOOR_M` 5.5 m, Proposed) | the blast's face reach doubles there (Throwables._frag); the same reach the bystanders keep | keep the face blast at the open-air share indoors (changes the blast for everyone)
 2026-11-02 | Review minors: `Charges.burning()` drops a charge with no fuse running (`_due`) as it's read; the door fallback erases the op's "stood_off"; each AI's first charge check waits 0..0.25 s by its instance id (posmod 16) | an IED waits unfused and a disarmed one is taken off `_due` only (RoadsideIeds); the door's stack isn't stood off from anything; randf() as the scan's start would do too, but an id spreads a squad evenly and repeats | prune in RoadsideIeds itself (a second place to keep in step)
+2026-11-06 | Captain, 2026-11-06: F-412, a dying casualty (conscious, crawling) in a blast: "make him draggable"; F-413, a door charge on the stack's own side: the stack stands off from it too, "yes" | Captain's answers on #42 | -
+2026-11-06 | F-412: a dying man can be dragged, not carried on the shoulder (`Soldier._movable(other, mode)`: DRAG only) | the answer was "draggable"; a conscious man on a shoulder is a lift he'd fight and a carry he doesn't need to get out of a blast | carry him as well (a 1.6 s lift)
+2026-11-06 | F-412: held, a dying man's own movement doesn't move him: the AI's body goes where it's dragged, a player's machine takes the host's position and otherwise stands still (`is_held()`, from carry_net, so it holds on the owner and a late joiner too) | host-authoritative, as a downed player's drag already is; no tug-of-war between the drag and his crawl | let him crawl and pull the dragger (no model for it)
+2026-11-06 | F-412: a dragged dying man who goes out cold or dies is held on (as any downed or dead body is); back on his feet (treated) he's let go; the dragger going down, or going down dying himself, lets go; a dying man moves nobody himself | out cold or dead he's the body a drag is for, and letting go would drop him back in a blast; up again he walks; a man on the ground crawling can't drag another | let go on every change of state (the task's wording; the AI would then grab him again, 0.7 s, inside the blast)
+2026-11-06 | F-412: the AI drags a dying man clear of a charge as a downed one (F-397), and lifts him even while his own item on himself runs (cut short, not failed); its drag to cover under fire stays for the unconscious only (F-431) | a casualty's own item isn't "another's hands" (P0164 was a player's IV on someone else); widening the cover drag changes every firefight's casualty care | widen the cover drag too
+2026-11-06 | F-412: the interaction menu offers Drag on a squadmate down dying (Release first once he's held), greyed for a dragger who is dying himself ("You're in no state to", as the host says) | the menu kind for a squadmate on his feet (SQUADMATE) had no Drag; the host refuses the same | a separate menu kind for the dying
+2026-11-06 | F-413: a door op's stand-off works its charge spot out ahead with the same probe the setter uses (`SquadAI.door_charge_spot`) and moves each man on by however far the charge lies on his side of the doorway; F-396's indoor sample is now over the charge where Charges puts it, not over the doorway | stands off from where it really goes, nothing to keep in step; a doorway's own lintel read as a roof and pushed every door stack 2.5 m further | a flat CHARGE_ALONG_M more whenever the far side has no wall; the indoor push for wall ops only
+2026-11-06 | Review of round 5: a carer who can't start the drag (someone else has him or is mid-item, no clear spot, the pick-up refused) stays by him until 2 s of the fuse are left, then, not holding him, steps clear himself (Proposed, `SquadAI.CHARGE_SELF_CLEAR_S`); with him but out of reach to take hold, he goes in only with time for it (CHARGE_GO_IN_S, as on his way to him); stepping clear he drops his item and starts none on the way | waiting on someone else's item to the last puts a second man in the blast; the reach check was only on the way in | stay by him to the end (F-411 as it was)
+2026-11-06 | Review of round 5: CHARGE_DRAG_PAST_M 1.8 -> 2.3 m (Proposed): the dragged casualty's ragdoll ended 0.3 m past the reach | 0.5 m for where he comes to lie off the drag's line | assert against the face blast without the margin instead
+2026-11-06 | Review of round 5: each AI's first charge check is staggered with randf() * CHARGE_CHECK_S, as _scan_cd is | the reviewer's call; the same spread, one way of doing it in the file | keep the instance id (posmod 16)
+2026-11-07 | F-433: `WoundModel.reset()` clears `dying` (and its clock) with everything else | a reset body is a fresh one; left set, a man reset from down stayed draggable and held, and couldn't shoot, for 4 s | clear it in the tests only
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

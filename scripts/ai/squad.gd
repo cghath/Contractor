@@ -862,21 +862,32 @@ func _start_clear(b: Dictionary, units: Array[SquadAI], breach: String, plan := 
 
 ## A charge's stack stands CHARGE_STANDOFF_M further along the wall, clear of the blast. The op
 ## is marked "stood_off": its own charge's stand-off is the op's (SquadAI._keep_clear_of_charges
-## leaves its men to it). Under a roof (`world` given: Throwables.indoors over where the charge
-## goes, a wall op's charge_spot or the doorway's wall at a charge's height) the blast reaches
-## BLAST_SAFE_INDOOR_M on its face, and the stack stands that much further off again (F-396;
-## Captain, 2026-11-02: yes); the op's "charge_indoors" says which.
+## leaves its men to it). `world` given, it stands off from where the charge really goes: a wall
+## op's charge_spot, or where a door op's will go (SquadAI.door_charge_spot: beside the doorway on
+## the far side from the stack, else, with no wall there, on the stack's own side, and then the
+## stack stands that much further along: F-413, Captain, 2026-11-06: yes). Under a roof there
+## (Throwables.indoors over the charge, as Charges marks a burning one; not over the doorway,
+## whose lintel is no roof) the blast reaches BLAST_SAFE_INDOOR_M on its face, and the stack stands
+## that much further off again (F-396; Captain, 2026-11-02: yes); the op's "charge_indoors" says which.
 static func stand_off(op: Dictionary, world: World3D = null) -> void:
 	op["stood_off"] = true
 	var door: Vector3 = op.entrance.door
-	var at: Vector3 = (op.charge_spot.at as Vector3) if op.has("charge_spot") else door + Vector3.UP * 1.0  # (SquadAI._charge_spot's height)
-	var indoors := world != null and Throwables.indoors(world, at + Vector3.UP * 0.25)  # (as Charges marks a burning one)
+	var spot: Dictionary = op.charge_spot if op.has("charge_spot") else {}
+	if spot.is_empty() and world != null and not (op.stack as Array).is_empty():
+		spot = SquadAI.door_charge_spot(op, world.direct_space_state)
+	var indoors := false
+	var at := door
+	if not spot.is_empty():
+		at = spot.at
+		var placed := Charges.surface_transform(at, spot.face, Vector3.UP).origin  # (where Charges puts it)
+		indoors = world != null and Throwables.indoors(world, placed + Vector3.UP * 0.25)
 	op["charge_indoors"] = indoors
 	var along := CHARGE_STANDOFF_M + (BLAST_SAFE_INDOOR_M - BLAST_SAFE_M if indoors else 0.0)
 	for i in (op.stack as Array).size():
 		var away := Vector3((op.stack[i] as Vector3).x - door.x, 0.0, (op.stack[i] as Vector3).z - door.z)
 		if away.length() > 0.05:
-			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * along
+			var ahead := maxf(Vector3(at.x - door.x, 0.0, at.z - door.z).dot(away.normalized()), 0.0)  # (the charge on their side of the doorway)
+			op.stack[i] = (op.stack[i] as Vector3) + away.normalized() * (along + ahead)
 
 
 ## "Breach and clear" (Captain's list 2026-10-14, item 3: "add a 'Breach and clear' team order
