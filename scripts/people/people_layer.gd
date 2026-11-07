@@ -843,14 +843,18 @@ func _check_surrenders(among: Array = []) -> void:
 	var men: Array = among if not among.is_empty() else Array(get_tree().get_nodes_in_group(&"combatants"))
 	for n in men:
 		var s := n as Soldier
-		if s and surrender_reason(s) != "" and _rng.randf() < SURRENDER_CHANCE:
-			server_surrender(s, surrender_reason(s))
+		if s == null:
+			continue
+		var why := surrender_reason(s)  # once per man: it walks every combatant and checks sight
+		if why != "" and _rng.randf() < SURRENDER_CHANCE:
+			server_surrender(s, why)
 
 
 ## Why hostile soldier `s` would give up now ("" if he wouldn't): badly hurt or his morale
 ## broken (SquadAI.MORALE_BROKEN; queue 17 part 4), alone and seen. Never while he sits in a
 ## vehicle's seat (any Vehicle: a truck, a helicopter, a tripod gun): Captain, 2026-11-06 (F-429),
-## "nah screw him lol. he die either way". Out of the seat he can.
+## "nah screw him lol. he die either way"; tripod guns and mortars too, Captain, 2026-11-07 ("ok").
+## Out of the seat he can.
 func surrender_reason(s: Soldier) -> String:
 	if s.faction != Person.HOSTILE or not s.vitals.is_up() or s.is_queued_for_deletion() or SquadAI.of(s) == null or Person.is_captive(s):
 		return ""

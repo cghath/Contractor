@@ -555,7 +555,13 @@ func _test_surrender_seated() -> void:
 	SquadAI.of(rider).hold_fire = true
 	_place(player, Vector3(-36, 0.1, -20))
 	await _frames(3)
-	check(tech != null and tech.server_enter(rider) and Vehicle.ride_of(rider) == tech, "a hostile seated in a technical")
+	check(tech != null, "a technical spawned")
+	if tech == null:
+		rider.queue_free()
+		await _frames(3)
+		return
+	var entered := tech.server_enter(rider)
+	check(entered and Vehicle.ride_of(rider) == tech, "a hostile seated in a technical")
 	rider.vitals.server_damage(45.0)
 	await _frames(3)
 	var hurt := rider.vitals.pain() >= PeopleLayer.SURRENDER_PAIN or rider.vitals.blood_fraction() <= PeopleLayer.SURRENDER_BLOOD or rider.vitals.injury() >= PeopleLayer.SURRENDER_INJURY

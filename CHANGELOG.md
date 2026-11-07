@@ -26,6 +26,9 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   100 forced checks and he never gives up; out of it, he does. The suite's forced checks now look
   only at its own men (`_check_surrenders` takes an optional list), and the "freed this frame"
   check is named for what it is (a queued body, skipped as before).
+- Captain, 2026-11-07: "ok" to tripod guns and mortars counting as seats (a man on one doesn't
+  surrender). Review tidy-ups: `_check_surrenders` asks `surrender_reason` once per man, and the
+  seated test spawns the technical, checks it, and only then seats the man.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
