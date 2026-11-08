@@ -822,7 +822,7 @@ func _test_march_and_roads() -> void:
 		for shape: String in style.get("hulks", {}):
 			if not shape in style_hulks:
 				style_hulks.append(shape)
-	check(style_hulks.size() >= 3, "the styles name their hulks (%s)" % style_hulks)
+	check(style_hulks.size() >= 3, "the styles name their hulks (%s)" % [style_hulks])
 	var hulk_items: Array = [{"shape": "car_sedan", "pos": Vector3(1.0, 0.0, 2.0)}, {"pos": Vector3(3.0, 0.0, 4.0)}]
 	for s: String in style_hulks:
 		hulk_items.append({"shape": s, "pos": Vector3(7.0, 0.0, 9.0)})
