@@ -13,6 +13,9 @@ extends Node
 
 ## How much faster than real time the walk runs, and the lead's pace (a walk).
 const SCALE := 3.0
+## The most a team's base may be credited for walking, as a speed (a sprint and a margin; kept
+## apart from Squad.BASE_WALK_MAX_MPS on purpose, so raising that one fails _men_steps).
+const BASE_WALK_CAP_MPS := 7.5
 const LEADER_SPEED := 2.0
 ## Closer than this two squadmates, two samples (seconds) running, count as stacked.
 const STACK_M := 1.5
@@ -59,6 +62,7 @@ func _ready() -> void:
 		await _test_wall_follow()
 		await _test_trail_loops()
 	_test_slot_way_rules()
+	await _test_slot_out_of_sight()
 	await _test_place_on_way()
 	await _test_mirror_on_way()
 	GameState.delete_save()
@@ -482,15 +486,16 @@ func _test_place_on_way() -> void:
 	# Its men's slots (review): each one let go from a fallback (the team's place held, or his own
 	# slot picked again, a trail pick going back to his slot when its block clears) keeps to the
 	# lead's walk plus SLOT_CATCHUP_MPS a second too, within a metre (as the mirror walk's check;
-	# it was a man's gap, 8 m, before round 6's review, and R0847 saw 0.1 m). A step the "no
-	# straight way: there at once" rule made is counted apart, not held to the rate: that rule is
-	# Captain's open question (F-417) and can leap a slot left behind the gate (R0880, F-463).
-	var m := _men_steps(squad, seen.men, true)
-	print("    its men: %d steps let go, %d on a fallback (there at once); worst %.2f m over the rate (%s); %d across a wall; %d at once with no straight way (furthest %.1f m, %s)" % [
-		m.steps, m.at_once, m.worst, m.worst_at, m.walls, m.jumps, m.jump_max, m.jump_at])
+	# it was a man's gap, 8 m, before round 6's review, and R0847 saw 0.1 m). That holds for a slot
+	# left behind the gate by its place too: it goes on to where it last headed (R0880's 19 m leap
+	# out past the gate, F-463).
+	var m := _men_steps(squad, seen.men)
+	print("    its men: %d steps let go, %d on a fallback (there at once); worst %.2f m over the rate (%s); %d across a wall; longest out of sight of slot and team %.1f s" % [
+		m.steps, m.at_once, m.worst, m.worst_at, m.walls, m.blind_s])
 	check(int(m.steps) > 0 and float(m.worst) <= 1.0,
 		"its men's slots, let go, never step further than the lead's walk plus %.0f m/s (worst %.2f m over, %s)" % [Squad.SLOT_CATCHUP_MPS, m.worst, m.worst_at])
-	check(bool(m.jumps_home), "and one with no straight way is on his slot at once, not left across a wall (%d)" % m.jumps)
+	check(float(m.blind_s) <= Squad.PLACE_TRAVEL_MAX_S and bool(m.arrived),
+		"none is out of sight of both his slot and his team for longer than %.0f s (longest %.1f s), and each gets there" % [Squad.PLACE_TRAVEL_MAX_S, m.blind_s])
 	_ways_settled(squad, "outside the wall")
 	_ways_end(squad)
 
@@ -532,7 +537,8 @@ func _test_mirror_on_way() -> void:
 
 ## Squad._slot_on_way's credit, called by hand in one frame on open ground south of the compound
 ## (nothing works the slots out in between): a slot on its way is credited his team's base's move
-## when it outpaces the lead (a sprinting team leader, F-461), but not a base that jumped.
+## when it outpaces the lead (a sprinting team leader, F-461), but not a base that moved faster
+## than a man can (a switch of source, however short).
 func _test_slot_way_rules() -> void:
 	print("A slot on its way: keeps up with a sprinting team leader")
 	var squad := level.squad_for(&"friendly")
@@ -559,11 +565,75 @@ func _test_slot_way_rules() -> void:
 	var still: float = _flat(a, step.call(a, want, b, b))
 	var ran: float = _flat(a, step.call(a, want, b, b + Vector3(sprint, 0, 0)))
 	var jumped: float = _flat(a, step.call(a, want, b, b + Vector3(15, 0, 0)))
+	var hopped: float = _flat(a, step.call(a, want, b, b + Vector3(3, 0, 0)))  # under TRAIL_JUMP_M, far over a sprint
 	var rate := Squad.SLOT_CATCHUP_MPS * dt
-	print("    a step in %.1f s: %.2f m with the base still, %.2f m with it sprinting, %.2f m with it jumping 15 m" % [dt, still, ran, jumped])
+	print("    a step in %.1f s: %.2f m with the base still, %.2f m with it sprinting, %.2f m with it jumping 15 m, %.2f m with it hopping 3 m" % [dt, still, ran, jumped, hopped])
 	check(ran >= sprint + rate - 0.02 and ran <= sprint + rate + 0.05 and absf(still - rate) <= 0.05,
 		"his team's base sprinting %.2f m, his slot steps that plus %.2f m (%.2f m), not only the lead's walk (%.2f m)" % [sprint, rate, ran, still])
 	check(absf(jumped - rate) <= 0.05, "a base that jumped 15 m earns nothing (%.2f m)" % jumped)
+	check(absf(hopped - rate) <= 0.05, "nor one that hopped 3 m in %.1f s, faster than a man can (%.2f m)" % [dt, hopped])
+	ways.erase(id)
+
+
+## "No straight way" (Captain, 2026-11-08: "your call", F-417, F-463), called by hand in one frame
+## inside the compound's south wall: a slot with its goal and its team's base both across the wall
+## carries on to the last point it headed for (`aim`), but is there at once on reaching it with
+## nothing in sight, with no such point, or after PLACE_TRAVEL_MAX_S on its way. That bounds how
+## long it's left across a wall from its goal, which the 2026-10-14 rule otherwise forbids.
+func _test_slot_out_of_sight() -> void:
+	print("A slot out of sight of its goal and team: carries on to where it last headed, for a limited time")
+	var squad := level.squad_for(&"friendly")
+	var who: Soldier = null
+	for s: Soldier in _squad():
+		if who == null and s.is_ai() and s.fire_team >= 0 and s.fire_team != _lead_team():
+			who = s
+	if who == null:
+		check(false, "a man of the second team to test with")
+		return
+	_place(player, Vector3(0, 0.1, 30))
+	await get_tree().physics_frame
+	var id := who.get_instance_id()
+	var ways: Dictionary = squad.get(&"_ways")
+	var dt := 0.1
+	var h := CompoundLevel.COMPOUND_HALF
+	var at := Vector3(10, 0.1, h - 3)  # inside the south wall
+	var want := Vector3(10, 0.1, h + 4)  # outside it
+	var base := Vector3(12, 0.1, h + 4)
+	var aim := Vector3(4, 0.1, h - 3)  # along the inside of the wall, towards the gate
+	check(squad._wall_between(at, want) and squad._wall_between(at, base) and not squad._wall_between(at, aim),
+		"the wall stands between the slot and both its goal and its team's base, and not between it and the point it last headed for")
+	var step := func(from: Vector3, last: Vector3, since: float) -> Vector3:
+		ways[id] = {"at": from, "goal": want, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+			"lead": player.global_position, "base": base, "aim": last, "since": since}
+		return squad._slot_on_way(who, want, base, false, false, RID())
+	var rate := Squad.SLOT_CATCHUP_MPS * dt
+	var on: Vector3 = step.call(at, aim, 0.0)
+	var was_way := bool(ways[id].way)
+	check(was_way and absf(_flat(at, on) - rate) <= 0.05 and _flat(on, aim) < _flat(at, aim),
+		"it carries on towards that point at its rate (%.2f m in %.1f s), not there at once" % [_flat(at, on), dt])
+	var late: Vector3 = step.call(at, aim, Squad.PLACE_TRAVEL_MAX_S - 1.0)
+	check(_flat(late, want) > 1.0 and bool(ways[id].way), "still does a second before PLACE_TRAVEL_MAX_S is up (%.1f m from its goal)" % _flat(late, want))
+	var over: Vector3 = step.call(at, aim, Squad.PLACE_TRAVEL_MAX_S)
+	check(_flat(over, want) <= 0.01 and not bool(ways[id].way), "and past PLACE_TRAVEL_MAX_S on its way it's there at once (%.1f m off)" % _flat(over, want))
+	var reached: Vector3 = step.call(aim + Vector3(0.3, 0, 0), aim, 0.0)
+	check(_flat(reached, want) <= 0.01 and not bool(ways[id].way), "there at the point it headed for, with nothing in sight still, it's there at once (%.1f m off)" % _flat(reached, want))
+	var none: Vector3 = step.call(at, Vector3.INF, 0.0)
+	check(_flat(none, want) <= 0.01, "and with no such point it's there at once (%.1f m off)" % _flat(none, want))
+	# Right by the wall the navigation mesh stops short: a step towards that point stays on the
+	# straight line all the same (pulled aside, R0886's sight line through the gate grazed a post).
+	var map: RID = who.get_world_3d().navigation_map
+	var edge := Vector3(10, 0.1, h - 0.45)
+	var edge_aim := Vector3(4, 0.1, h - 0.45)
+	var pulled := NavigationServer3D.map_get_closest_point(map, edge.lerp(edge_aim, 0.1))
+	ways[id] = {"at": edge, "goal": want, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+		"lead": player.global_position, "base": base, "aim": edge_aim, "since": 0.0}
+	var kept: Vector3 = squad._slot_on_way(who, want, base, false, false, map)
+	check(_flat(pulled, edge.lerp(edge_aim, 0.1)) > 0.03 and absf(kept.z - edge.z) <= 0.01 and kept.x < edge.x,
+		"on its way to that point it keeps to the straight line, not pulled onto the navigation mesh (%.2f m off the line; the mesh is %.2f m off)" % [absf(kept.z - edge.z), _flat(pulled, edge.lerp(edge_aim, 0.1))])
+	var near := want + Vector3(0.2, 0, 0)
+	var arrived: Vector3 = step.call(near, aim, 0.0)
+	check(_flat(arrived, want) <= 0.01 and (ways[id].aim as Vector3).is_equal_approx(want),
+		"a slot that gets there drops the old point for its goal (%s), no stale aim" % ways[id].aim)
 	ways.erase(id)
 
 
@@ -633,7 +703,7 @@ func _record_ways(squad: Squad, route: PackedVector3Array) -> Dictionary:
 			var list: Array = men[s]
 			if list.is_empty() or int(list[list.size() - 1].frame) != int(w.frame):
 				list.append({"frame": w.frame, "now": w.now, "at": at, "goal": w.goal, "fell": w.fell, "way": w.way, "lead": w.lead,
-					"base": w.base, "jump": w.get("jump", false)})
+					"base": w.base})
 		still = still + 1 if _route_index >= _route.size() and not going else 0
 	return {"places": places, "men": men}
 
@@ -674,14 +744,12 @@ func _place_steps(squad: Squad, seen: Dictionary) -> Dictionary:
 
 
 ## The men's slots' steps let go of a fallback or on their way (onto a fallback is at once):
-## how far any went past the lead's walk plus SLOT_CATCHUP_MPS a second, and across a wall. With
-## `jumps_apart`, a step made by _slot_on_way's "no straight way: there at once" rule (Captain's
-## open question, F-417) is counted in "jumps" instead, and "jumps_home" says each ended on its goal.
-func _men_steps(squad: Squad, seen: Dictionary, jumps_apart := false) -> Dictionary:
-	var jumps := 0
-	var jump_max := 0.0
-	var jump_at := "none"
-	var jumps_home := true
+## how far any went past the lead's walk plus SLOT_CATCHUP_MPS a second, and across a wall, and
+## ("blind_s") the longest any stood on his way with a wall to both his slot and his team's base.
+## His team's base's move is credited only up to BASE_WALK_CAP_MPS, this test's own number, so a
+## switch of source the code wrongly took for a walk shows up as over the rate.
+func _men_steps(squad: Squad, seen: Dictionary) -> Dictionary:
+	var blind_s := 0.0
 	var worst := -INF
 	var worst_at := "none"
 	var through := ""
@@ -692,27 +760,27 @@ func _men_steps(squad: Squad, seen: Dictionary, jumps_apart := false) -> Diction
 	var arrived := true
 	for s: Soldier in seen:
 		var list: Array = seen[s]
+		var blind := 0.0
 		for i in range(1, list.size()):
 			var a: Dictionary = list[i - 1]
 			var b: Dictionary = list[i]
+			if bool(b.way) and not bool(b.fell) and squad._wall_between(b.at, b.goal) and squad._wall_between(b.at, b.base):
+				blind += float(b.now) - float(a.now)
+				blind_s = maxf(blind_s, blind)
+			else:
+				blind = 0.0
 			if bool(b.fell):
 				if _flat(a.at, b.at) > 0.01:
 					at_once += 1
 				continue
 			if not (bool(a.fell) or bool(a.way)):
 				continue
-			if jumps_apart and bool(b.jump):
-				jumps += 1
-				jumps_home = jumps_home and _flat(b.at, b.goal) <= 0.1
-				if _flat(a.at, b.at) > jump_max:
-					jump_max = _flat(a.at, b.at)
-					jump_at = "%s %s to %s" % [s.name, a.at, b.at]
-				continue
 			steps += 1
+			var dt := float(b.now) - float(a.now)
 			var walked := _flat(a.lead, b.lead)
-			if _flat(a.base, b.base) <= Squad.TRAIL_JUMP_M:
+			if _flat(a.base, b.base) <= BASE_WALK_CAP_MPS * dt:
 				walked = maxf(walked, _flat(a.base, b.base))  # his team's base outpacing the lead (F-461)
-			var over := _flat(a.at, b.at) - walked - Squad.SLOT_CATCHUP_MPS * (float(b.now) - float(a.now))
+			var over := _flat(a.at, b.at) - walked - Squad.SLOT_CATCHUP_MPS * dt
 			if over > worst:
 				worst = over
 				worst_at = "%s %.1f m, %s to %s" % [s.name, _flat(a.at, b.at), a.at, b.at]
@@ -724,7 +792,7 @@ func _men_steps(squad: Squad, seen: Dictionary, jumps_apart := false) -> Diction
 				far = maxf(far, _flat(b.at, b.goal))
 		arrived = arrived and not bool(list[list.size() - 1].way)
 	return {"worst": worst, "worst_at": worst_at, "through": through, "walls": walls, "steps": steps, "at_once": at_once,
-		"far": far, "arrived": arrived, "jumps": jumps, "jump_max": jump_max, "jump_at": jump_at, "jumps_home": jumps_home}
+		"far": far, "arrived": arrived, "blind_s": blind_s}
 
 
 func _ways_settled(squad: Squad, where: String) -> void:

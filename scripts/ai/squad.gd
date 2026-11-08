@@ -167,12 +167,18 @@ const PLACE_STALE_S := 1.0
 ## same way (_slot_on_way; F-417, Captain, 2026-11-06: "yes"): the other-side fallback forms the
 ## team mirrored, and when it let go each man's slot swapped sides of the travelling place at
 ## once (the wedge's last man 22 m at normal spacing, 34 m at wide), and a refit's trail pick
-## went straight back to its slot when its block cleared. It moves the lead's walk plus
-## SLOT_CATCHUP_MPS a second (twice the place's, so a slot carried by the travelling place still
-## closes), and keeps to that while his team's place is on its way. Straight while no wall stands
-## between, else toward where his team forms, else (no straight way either) there at once: one
-## ray, sometimes two, a man while on his way and none otherwise, no paths. Proposed number.
+## went straight back to its slot when its block cleared. It moves the lead's walk, or his team's
+## base's own move when that's more (F-461), and SLOT_CATCHUP_MPS a second on top of that (twice
+## the place's, so a slot carried by the travelling place still closes), and keeps to that while
+## his team's place is on its way. Straight while no wall stands between, else toward where his
+## team forms, else on to the last point it headed for with nothing between (F-463), else (no
+## straight way from there either) there at once: one ray, at most three, a man while on his way
+## and none otherwise, no paths. Proposed number.
 const SLOT_CATCHUP_MPS := 6.0
+## The fastest a team's base can walk (a sprint, SoldierMovement.SPRINT_SPEED, and a margin): a
+## base that moved faster than this since the last working-out switched source (from the team's
+## place to its leader, or back) and earns a travelling slot no walk (F-461). Proposed number.
+const BASE_WALK_MAX_MPS := 7.5
 const HEADING_BLEND := 0.5
 
 @export var faction := &"friendly"
@@ -1940,9 +1946,12 @@ func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
 ## place is on its way (`carried`), it travels from where it stood by the lead's walk (or, when
 ## more, his team's base's own move: a team leader it forms on sprinting, F-461) plus
 ## SLOT_CATCHUP_MPS a second: straight while no wall stands between, else toward `base` while
-## nothing stands between it and that, else it's there at once (the rule Captain asked to have
-## explained, still open: F-417, F-463). So the other-side fallback's mirrored shape turns back
-## over gradually, man by man, and no slot leaps when a refit lets go.
+## nothing stands between it and that, else on to the last point it headed for with nothing
+## between (`aim`; Captain, 2026-11-08: "your call", F-463), and only there, with still nothing in
+## sight, it's there at once. All of it within PLACE_TRAVEL_MAX_S, so a slot is out of sight of
+## its goal and base for a limited time only (the 2026-10-14 rule, bent that far on purpose). So
+## the other-side fallback's mirrored shape turns back over gradually, man by man, and no slot
+## leaps when a refit lets go.
 ## (On its way it isn't kept clear of the lead, the players or the other slots: F-437.)
 func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carried: bool, map: RID) -> Vector3:
 	var id := who.get_instance_id()
@@ -1962,29 +1971,39 @@ func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carrie
 		return want
 	# A team forming on its own leader (human, or AI sent somewhere) goes at his pace, which can be
 	# a sprint past the lead's walk: his team's base's move is credited when it's more (F-461). A
-	# base that jumped (from the team's place to its leader, or back) walked nothing and earns nothing.
+	# base that moved faster than a man can (from the team's place to its leader, or back, however
+	# short the hop) walked nothing and earns nothing.
 	var moved := _flat(base, was.get("base", base))
-	if moved <= TRAIL_JUMP_M:
+	if moved <= BASE_WALK_MAX_MPS * dt:
 		walked = maxf(walked, moved)
 	var at: Vector3 = was.at
+	var aim: Vector3 = was.get("aim", Vector3.INF)  # the last point it headed for with nothing between
 	var left := walked + SLOT_CATCHUP_MPS * dt
 	var d := _flat(at, want)
+	var heading_on := false  # on to `aim`, neither its slot nor its team in sight
 	if d <= left:
 		at = want  # there
+		aim = want
 	elif not _wall_between(at, want):
+		aim = want
 		at = at.lerp(want, left / d)
 	elif _flat(at, base) > 0.5 and not _wall_between(at, base):
+		aim = base
 		at = at.lerp(base, minf(left / _flat(at, base), 1.0))  # round the wall's end, by where his team forms
+	elif aim != Vector3.INF and _flat(at, aim) > 0.5 and not _wall_between(at, aim):
+		# Neither in sight now (his team's place has gone on through a gate along its path and
+		# turned): on to where it last headed, the way that place went, before giving up (R0880:
+		# the slot left inside the compound wall leapt 19 m out past the gate). Kept on the straight
+		# line, not pulled onto the navigation mesh: pulled aside a few cm, a sight line through
+		# a gate grazes the post and the slot jumps long before it gets there (R0886, R0895).
+		at = at.lerp(aim, minf(left / _flat(at, aim), 1.0))
+		heading_on = true
 	else:
-		# No straight way: there at once, as before. Left as it is while Captain's question on it
-		# is open (F-417); it can leap a slot left behind a gate by its place (R0880, F-463).
-		# ("jump" is kept only for spacing's checks, which count these apart.)
-		_ways[id]["jump"] = true
-		return want
-	if at != want and map.is_valid():
+		return want  # no straight way from here either: there at once
+	if at != want and map.is_valid() and not heading_on:
 		at = NavigationServer3D.map_get_closest_point(map, at)
 	_ways[id] = {"at": at, "goal": want, "fell": false, "way": at != want or carried, "frame": frame, "now": now,
-		"lead": lead, "base": base, "since": since}
+		"lead": lead, "base": base, "aim": aim, "since": since}
 	return at
 
 

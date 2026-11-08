@@ -1925,20 +1925,15 @@ never across a wall, and get there (R0847); with `_slot_on_way` off the same wal
 slot 23.8 m in one working-out and Golf's across the east wall, and "Team place"'s men's check sees
 Golf's refit leap 26 m (R0850).
 
-Captain, 2026-11-07, OK'd SLOT_CATCHUP_MPS (6 m/s); it stays marked Proposed. Still open (Captain
-asked for it explained, not yet answered, so the rule stands as it is): with no straight way from
-where a travelling slot stands to his slot, nor to where his team forms (a wall across both rays),
-the slot is there at once, a jump, rather than waiting where it is as the place does. The reason
-is his 2026-10-14 rule: a slot is never left across a wall from the lead, and a slot waiting with
-walls on both sides could leave a man going round for a spot nobody would choose; the cost is that
-in that one case the man's slot still leaps. It didn't show at R0847, but it did under load at
-R0880: a slot left inside the compound behind its place, which had gone out through the gate and
-turned, leapt 19.3 m out across the wall (F-463). Two other ways, either a few lines: wait up to
-PLACE_TRAVEL_MAX_S where it is, as the place does; or carry on to the last point it was heading
-for with nothing between, and only jump if nothing is in sight from there either (tried for
-R0880's leap and taken back out until he answers, F-463). spacing's "Team place" men's check
-counts this rule's jumps apart rather than hold them to the rate, so it doesn't decide the
-question for him.
+Captain, 2026-11-07, OK'd SLOT_CATCHUP_MPS (6 m/s); it stays marked Proposed. Closed, decided
+(Captain, 2026-11-08: "your call"; the call and its reasons are under F-463): with no straight way
+from where a travelling slot stands to his slot, nor to where his team forms (a wall across both
+rays), the slot carries on to the last point it was heading for with nothing between (`aim`), and
+is there at once only on reaching that point with still nothing in sight, or when it has no such
+point, and never later than PLACE_TRAVEL_MAX_S on its way. Until then it was there at once from
+the start of that case. This knowingly bends his 2026-10-14 rule (a slot is never left across a
+wall from the lead) for that bounded time. The other way offered was to wait up to
+PLACE_TRAVEL_MAX_S where it is, as the place does.
 
 ## F-437 (open, note): the lead's own team's slots still leap when a refit lets go
 Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`. `_slot_on_way` (F-417) only
@@ -1980,10 +1975,13 @@ its own leader (a human team leader, or an AI one the lead sent somewhere) goes 
 a sprint (6.5 m/s) is faster than the lead's walk plus 6 m/s when the lead stands still or walks
 slowly, so the slot could fall behind the very man it forms on. `_ways` now keeps where his team
 forms (`base`), and the walk credited is the lead's or the base's own move since the last
-working-out, whichever is more; a base that moved more than TRAIL_JUMP_M (from the team's place to
-its leader, or back) is a switch, not a walk, and earns nothing. spacing's "A slot on its way"
-calls the travel by hand: in 0.1 s, a base sprinting 0.65 m gives a 1.25 m step (0.6 m with it
-still), and one jumping 15 m gives 0.6 m. spacing's men's checks credit the base the same way.
+working-out, whichever is more, and SLOT_CATCHUP_MPS goes on top of that; a base that moved faster
+than BASE_WALK_MAX_MPS (7.5 m/s, a sprint and a margin, Proposed; from the team's place to its
+leader, or back) is a switch, not a walk, and earns nothing. It was TRAIL_JUMP_M at first, which
+let a switch of under 6 m through as a walk (round 7's review). spacing's "A slot on its way" calls
+the travel by hand: in 0.1 s, a base sprinting 0.65 m gives a 1.25 m step (0.6 m with it still),
+and one jumping 15 m or hopping 3 m gives 0.6 m. spacing's men's checks bound the base's credit by
+their own 7.5 m/s, apart from the code's, so a bogus credit shows up as over the rate.
 
 ## F-462 (open, note): the no-ground mirror flip still swaps a team's men at once
 Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`, the "No ground there" branch.
@@ -1999,7 +1997,7 @@ fallback for `_place_on_way` and the men alike, so it travels back the same way;
 since it's outside the review's items and changes when a team that stands on real ground counts as
 held.
 
-## F-463 (open, note): a slot left behind the gate by its travelling place leaps out past it
+## F-463 (closed: decided): a slot left behind the gate by its travelling place leapt out past it
 Found tightening spacing's "Team place" men's check (round 6's review). Location:
 [squad.gd](../../scripts/ai/squad.gd) `_slot_on_way`. The PR's tip failed it under this machine's
 load (R0880; it passed at R0852 earlier in the day): Echo's slot, on its way inside the compound
@@ -2007,20 +2005,36 @@ behind his team's place, leapt 19.3 m out past the south gate and across the wal
 working-out. The place travels out along a navigation path round by the gate; the slot only goes
 straight, at its slot or at where his team forms, and once the place was through and had turned
 along the outside of the wall neither was in sight from inside, so F-417's "no straight way:
-there at once" rule fired. That is the rule Captain asked to have explained, still open (F-417's
-note), and the task was to leave it alone until he answers, so it stands as it was.
+there at once" rule fired. That is the rule Captain asked to have explained (F-417).
 
-A fix was built and taken back out (review): the slot remembered the last point it headed for
-with nothing between (`aim`) and, with neither in sight, went on there before jumping. With it
-"Team place" passed on the loaded machine (R0882, R0883: 0.00 m over the rate, none across a
-wall), but it changes what the rule does in exactly its own case: the slot waits on its way to
-`aim`, across the wall from its slot, instead of being there at once, which is a behaviour change,
-not the rule "firing later". It's one of the ways offered to Captain under F-417. Meanwhile
-`_slot_on_way` marks such a jump ("jump" in `_ways`, kept for the test), and spacing's "Team
-place" men's check counts those apart (how many, the furthest) and only checks each ends on its
-slot; every other step is held to 1 m over the rate. R0884 (smoke, spacing, squad, casualty) PASS
-with it: the same leap again (Echo, 19.2 m, (4.9, 10.1) to (-0.6, 28.5)), counted apart, and the
-other 499 steps 0.00 m over the rate, none across a wall. Why load brings it out isn't pinned down; the
+A fix was built and taken back out while his question was open (review): the slot remembered the
+last point it headed for with nothing between (`aim`) and, with neither in sight, went on there
+before jumping. With it "Team place" passed on the loaded machine (R0882, R0883: 0.00 m over the
+rate, none across a wall); without it R0884 saw the same leap again (Echo, 19.2 m, (4.9, 10.1) to
+(-0.6, 28.5)).
+
+Captain, 2026-11-08: "your call". Called by cghath's coordinator: `aim` is back, so a slot carries
+on to that point and jumps only if it reaches it and still sees nothing, never later than
+PLACE_TRAVEL_MAX_S on its way. The reasons: the jump does happen (19 m out through the south gate,
+R0880, R0884), it left men chasing leapt slots (casualty soak "stuck" in R0863, R0868, R0878), and
+this version passed when tried (R0882, R0883). The "there" branch also sets `aim = want`, so a
+slot can't keep a stale aim (review).
+
+Restored as it was, it still leapt: R0886 failed on Echo's 17.9 m, and R0895 and R0896 (jumps
+counted apart for the look) did the same 17.8 m, each after 0.2 s heading for `aim`. Printing the
+steps showed why (R0895): `aim` lay 17 m off through the gate, the step to it was pulled onto the
+navigation mesh like any other, and pulled aside a few cm the sight line grazed the gate's post,
+so the slot "lost" a point it hadn't reached. The step to `aim` now keeps to its straight line,
+unpulled, which is what the call asks for. R0899, R0900, R0902: no jumps, 0.11 m over the rate at
+most, none across a wall (Echo out through the gate, out of sight of slot and team for 1.5 and
+1.6 s in the first two; never out of sight in R0902).
+
+It bends the 2026-10-14 rule on purpose, so spacing bounds it: "Team place" holds every step to
+1 m over the rate again, with no jumps counted apart, and no man may be out of sight of both his
+slot and his team for longer than PLACE_TRAVEL_MAX_S; "A slot out of sight" calls the rule by hand
+behind the south wall (carries on, there at once past the time limit, at the point with nothing
+in sight, or with no point; right by the wall its step stays on the line, the mesh 0.3 m off). Why
+load brought the earlier leap out isn't pinned down; the
 travel being in real seconds while the walk is in game time (F-438) is the likely link, since a
 loaded machine changes how far the place and the slot get per game metre walked.
 
@@ -2381,6 +2395,9 @@ Captain, 2026-11-07: "yes" (#44, F-417: the men's slots catching up at the lead'
 2026-11-07 | squad (F-463, review): the `aim` carry-on taken back out; with no straight way a travelling slot is there at once again, as before, marked "jump" for spacing, and spacing's "Team place" men's check counts those jumps apart (each must end on its slot) while holding every other step to 1 m over the rate | the task said to leave Captain's open "no straight way" rule alone, and `aim` changed it in its own case (a slot left across the wall heading for `aim` rather than there at once); R0880's 19.3 m leap is logged as F-463 and offered under F-417 as one of his options | keep `aim` and ask him before merge, or relax the men's check back to a man's gap (8 m) for every step
 2026-11-07 | spacing (review): "Team place"'s men's check allows 1 m over the rate, not a man's gap (8 m), as the mirror walk's; the men's rate credits the team's base like the code | R0847 saw 0.1 m over; a whole gap would have passed half a refit leap | keep the gap
 2026-11-07 | squad (F-462): the no-ground mirror flip ("No ground there" in _work_out_slots) still swaps a team's place and men at once, logged not fixed | it isn't a fallback, so making it travel changes when a team on real ground counts as held, outside the review's items; never reached in spacing (the test navmesh has no edge the formation meets) | mark it a fallback for _place_on_way and _slot_on_way now
+Captain, 2026-11-08: "your call" (#44, F-417, F-463: the "no straight way, there at once" rule). Called by cghath's coordinator: a slot with neither its goal nor its team's base in sight carries on to the last point it headed for with nothing between (`aim`), and jumps only if it reaches that point and still sees nothing, never later than PLACE_TRAVEL_MAX_S | the jump does happen (19 m through the south gate, R0880, R0884), left men chasing leapt slots (casualty soak "stuck", R0863, R0868, R0878), and this passed when tried (R0882, R0883); spacing now bounds the time out of sight | alternative: wait up to PLACE_TRAVEL_MAX_S where it is, as the place does; or keep the jump
+2026-11-08 | squad (F-463): a travelling slot's step towards `aim` isn't pulled onto the navigation mesh | pulled aside a few cm the sight line through the gate grazed its post and the slot jumped 17.8 m before reaching `aim` (R0886, R0895, R0896; none in R0899, R0900, R0902); a few steps at most off the mesh by a few cm, and only the slot, the man still paths | alternative: stop re-checking the ray once heading for `aim`, which could walk the slot through a post
+2026-11-08 | squad (F-461, review): a team's base's move is credited to a travelling slot only up to BASE_WALK_MAX_MPS 7.5 m/s (Proposed: a sprint and a margin), not by TRAIL_JUMP_M | a switch of source under 6 m (the team's place to its leader, close by) was credited as a walk; a speed is one comparison and needs no new state; spacing's men's check bounds it with its own number | alternative: store which source the base came from in `_ways` and credit nothing when it changes
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
