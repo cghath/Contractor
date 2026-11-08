@@ -557,6 +557,25 @@ func _test_from_replicated_state() -> void:
 	hostile.vitals.server_reset_health()
 	await _seconds(0.5)
 	check(hostile.model.transform.is_equal_approx(hostile.model.base_transform()) and not hostile.model.downed, "cleared, both stand again")
+	# Conscious but dying, dragged (F-412; Captain, 2026-11-06: "make him draggable"): a late joiner
+	# has carry_net alone and draws him as any dragged casualty, though he's up and crawled a moment ago.
+	hostile.vitals.server_add_wound(Vitals.THIGH_L, "venous", 0.03)
+	hostile.vitals._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
+	hostile.vitals._model.update_state(0.1)
+	hostile._dying_moved_at = Soldier._now()  # (just crawled: not lying still yet)
+	await _frames(2)
+	check(hostile.vitals.is_dying() and hostile.vitals.is_up() and not hostile.model.downed, "a dying man who just crawled: not in the downed pose")
+	bravo.model.carry_net = {"mode": CharacterModel.DRAG, "with": String(hostile.get_path())}
+	hostile.model.carry_net = {"mode": CharacterModel.DRAGGED, "with": String(bravo.get_path())}
+	await _seconds(0.7)
+	strap = hostile.model.torso.to_global(CharacterModel.STRAP_POINTS[0])
+	check(hostile.model.downed and hostile.model.carry_shown().get("mode") == CharacterModel.DRAGGED and bravo.model.hand_position(true).distance_to(strap) < HAND_TOLERANCE,
+		"dragged while dying, from carry_net alone: drawn as a dragged casualty, the dragger's hand on his strap (%.1f cm off)"
+		% (bravo.model.hand_position(true).distance_to(strap) * 100.0))
+	hostile.model.carry_net = {}
+	bravo.model.carry_net = {}
+	hostile.vitals.server_reset_health()
+	await _seconds(0.5)
 
 
 func _test_human_casualty() -> void:

@@ -202,6 +202,7 @@ const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
 const ARRIVE := 0.7
+const AT_COVER_M := ARRIVE + 0.4  # at his cover spot this close (_at_cover)
 ## Digging in (dig phase 4, Captain 2026-10-19: "AI dig in", and "they dont bore down when they
 ## build cover in front of them"): a friendly soldier holding a spot, out of contact, for
 ## DIG_IN_AFTER_S builds cover in front of it (Digging.COVER) up to AI_COVER_TO_M (kneeling
@@ -1280,6 +1281,8 @@ func status_text() -> String:
 	var no_shot := _no_shot_text()
 	if no_shot != "":
 		return no_shot
+	if _clear_spot != null:
+		return "Clear of a charge" if _flat_distance(_clear_spot) <= ARRIVE + 0.3 else "Getting clear of a charge"
 	var who := _name_of(casualty)
 	match intent:
 		Intent.CASUALTY:
@@ -1287,7 +1290,7 @@ func status_text() -> String:
 				Care.REACH:
 					return "Covering %s" % who if _suppressing else "Going to %s" % who
 				Care.DRAG:
-					return "Dragging %s to cover" % who
+					return ("Dragging %s clear of a charge" if _charge_drag != "" else "Dragging %s to cover") % who
 				Care.TREAT:
 					if _treat_until < 0.0 and is_instance_valid(casualty) and casualty.vitals.downed:
 						return "Watching over %s" % who
@@ -1350,6 +1353,9 @@ func _setup() -> void:
 	# frames for good: a random start spreads them out (research 2026-10-13 B2.6).
 	_scan_cd = randf() * SCAN_S
 	_think_cd = randf() * THINK_S
+	# The same for the charge check's path queries (only when one burns), so a squad's men look in
+	# different frames of CHARGE_CHECK_S (review of feat/breach-and-clear).
+	_charge_cd = randf() * CHARGE_CHECK_S
 	_ready_done = true
 	_pass_through_squadmates()
 
@@ -1561,6 +1567,7 @@ func _act() -> void:
 	_keep_to_fire_spot()  # a base of fire with no line of fire: to where it has one
 	if _holding_ambush():
 		_hold_ambush()  # (F-140: a road ambush keeps its spots until it's sprung)
+	_keep_clear_of_charges()  # (F-373: out of a burning charge's blast, then back to it)
 	_apply_combat_mode()
 	if _care_prone and intent != Intent.HEAL:
 		_care_prone = false
@@ -2291,14 +2298,17 @@ func _do_care() -> void:
 		Care.REACH:
 			_care_reach(contact)
 		Care.DRAG:
+			# (Clear of a charge, F-397: no contact to lose, so only no headway stops the drag.)
 			if body.carrying != casualty:
 				care = Care.TREAT
-			elif _has_cover and not _at_cover() and not _drag_stalled(contact):
+				_charge_drag = ""
+			elif _has_cover and not _at_cover() and not _drag_stalled(contact or _charge_drag != ""):
 				_go(_cover_point, false)
 			else:
 				_has_destination = false
 				body.server_put_down()
 				care = Care.TREAT
+				_charge_drag = ""
 		Care.TREAT:
 			_care_treat(contact)
 		Care.GUARD:
@@ -2416,7 +2426,11 @@ func _care_reach(contact: bool, handoff := false) -> void:
 	if body.carrying == casualty:
 		care = Care.CARRY
 		return
-	var exposed := contact and casualty.vitals.downed and not _sheltered(casualty)
+	if _clear_spot != null:
+		_reach_progress_at = Soldier._now()  # waiting clear of a charge by him isn't being stuck (F-397)
+	# Down in the open: out cold, or conscious but dying (on the ground, crawling at most; F-431,
+	# Captain, 2026-11-07: "yesm"): the same smoke, suppressing and drag to cover for either.
+	var exposed := contact and (casualty.vitals.downed or casualty.vitals.is_dying()) and not _sheltered(casualty)
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
 			_smoke_used = true  # nothing to screen them with
@@ -2437,10 +2451,12 @@ func _care_reach(contact: bool, handoff := false) -> void:
 	if handoff:
 		casualty.care_by = body
 		_clear_handoff(casualty)
-	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
-	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
+	# (Never lift someone another is treating: it cut the Captain's IV short, P0164. A dying man's
+	# own item on himself is cut short: _treated_by_another, _cut_own_item.)
+	if exposed and not is_instance_valid(casualty.carried_by) and not _treated_by_another(casualty):
 		var spot: Variant = find_drag_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
+			_cut_own_item(casualty)
 			_cover_point = spot
 			_has_cover = true
 			care = Care.DRAG
@@ -2503,6 +2519,8 @@ func _care_treat(contact: bool) -> void:
 	if _flat_distance(casualty.body_point()) > CASUALTY_REACH + 1.0:
 		_start_reach()  # a conscious casualty moved, or the body slid
 		return
+	if _clear_spot != null:
+		return  # stepping clear of a charge (_keep_clear_of_charges walks him): no item started on the way
 	_has_destination = false
 	body.want_crouch = true
 	_face(casualty.body_point())
@@ -2701,6 +2719,7 @@ func _end_care() -> void:
 	casualty = null
 	care = Care.NONE
 	_has_cover = false
+	_charge_drag = ""
 	wants_medic = false
 	wanted.clear()
 
@@ -3092,7 +3111,8 @@ func _finish_treatment() -> void:
 
 ## Under cover from the last known threat, lying down.
 func _sheltered(c: Soldier) -> bool:
-	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, c.global_position + Vector3.UP * 0.4)
+	var lies := c.body_point() + Vector3.UP * (0.2 if is_instance_valid(c.ragdoll) else 0.4)  # (where he lies: a ragdoll's chest, off its capsule)
+	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, lies)
 
 
 func _face(point: Vector3) -> void:
@@ -3204,6 +3224,15 @@ func _self_task() -> Dictionary:
 
 func _do_self_care() -> void:
 	_has_destination = false
+	if body.is_held():
+		return  # dragged (dying: F-412, F-431): he goes where he's taken and starts nothing on the way; his carer sees to him there
+	if _clear_spot != null and _flat_distance(_clear_spot) > ARRIVE + 0.3:
+		# Out of a burning charge's blast first (F-397; Captain, 2026-11-02), on his feet
+		# (_keep_clear_of_charges walks him there): he treats himself once he's clear.
+		if _care_prone:
+			_care_prone = false
+			body.want_stance = stance_order
+		return
 	body.want_crouch = true
 	var task := _self_task()
 	# Out in the open under fire he gets down where he is to put his tourniquet on: running
@@ -3237,7 +3266,7 @@ func _being_treated() -> bool:
 	if not is_instance_valid(carer) or not carer.vitals.is_up():
 		return false
 	var ai := SquadAI.of(carer)
-	return ai != null and ai.casualty == body and ai.care in [Care.REACH, Care.TREAT] \
+	return ai != null and ai.casualty == body and ai.care in [Care.REACH, Care.TREAT, Care.DRAG] \
 		and _flat_distance(carer.global_position) <= BEING_TREATED_M
 
 
@@ -3745,12 +3774,15 @@ func _set_charge(op: Dictionary, spot: Dictionary) -> float:
 		return 0.0
 	var at: Vector3 = spot.at
 	var face: Vector3 = spot.face
-	if charges.server_place_at(body, Charges.surface_transform(at, face, Vector3.UP)) == "":
+	var id := charges.server_place_at(body, Charges.surface_transform(at, face, Vector3.UP))
+	if id == "":
 		return 0.0
 	var door: Vector3 = op.entrance.door
 	op.entrance = (op.entrance as Dictionary).duplicate()  # (the building's own entrance stays where it is)
 	op.entrance.door = Vector3(at.x, door.y, at.z) + face * 0.3  # in through the new hole
 	op.charge_at = at
+	op.charge_id = id
+	SquadTactics.note_stage(op, "charge_set")
 	return MissionRegistry.setting_f("charge_fuse_s", 10.0) + 0.8
 
 
@@ -3758,11 +3790,19 @@ func _set_charge(op: Dictionary, spot: Dictionary) -> float:
 func _charge_spot(op: Dictionary) -> Dictionary:
 	if op.has("charge_spot"):
 		return op.charge_spot
+	var spot := door_charge_spot(op, body.get_world_3d().direct_space_state)
+	op.charge_spot = spot
+	return spot
+
+
+## Where a door op's charge goes (_charge_spot, which keeps it on the op): the wall CHARGE_ALONG_M
+## from the doorway on the far side from the stack, else on the stack's side. Squad.stand_off
+## works it out ahead too, to stand off from where it really goes (F-413).
+static func door_charge_spot(op: Dictionary, space: PhysicsDirectSpaceState3D) -> Dictionary:
 	var door: Vector3 = op.entrance.door
 	var normal: Vector3 = op.entrance.normal
 	var to_stack := Vector3((op.stack[0] as Vector3).x - door.x, 0.0, (op.stack[0] as Vector3).z - door.z)
 	to_stack = to_stack.normalized() if to_stack.length() > 0.05 else normal.cross(Vector3.UP)
-	var space := body.get_world_3d().direct_space_state
 	var spot := {"at": door - to_stack * CHARGE_ALONG_M + Vector3.UP * 1.0, "face": normal}
 	for along: Vector3 in [-to_stack, to_stack]:
 		var probe := door + along * CHARGE_ALONG_M + Vector3.UP * 1.0
@@ -3770,7 +3810,6 @@ func _charge_spot(op: Dictionary) -> Dictionary:
 		if not hit.is_empty() and absf((hit.normal as Vector3).y) < Charges.WALL_NORMAL_Y:
 			spot = {"at": hit.position, "face": Vector3((hit.normal as Vector3).x, 0.0, (hit.normal as Vector3).z).normalized()}
 			break
-	op.charge_spot = spot
 	return spot
 
 
@@ -3888,6 +3927,9 @@ func _work_door(op: Dictionary, now: float) -> void:
 			_callout(&"tactic", "Breaching! Charge set!")
 			_breach_done(op, now, fuse)
 			return
+		if bool(op.get("wall", false)):
+			_wall_breacher_lost(op)  # a wall can't be kicked in: the next with a charge sets it
+			return
 		how = "kick"  # none left (or no place for it): kick it in
 		op.door = how
 	var spot := NavigationServer3D.map_get_closest_point(body.get_world_3d().navigation_map, door + normal * DOOR_SPOT_M)
@@ -3951,7 +3993,9 @@ func _breach_done(op: Dictionary, now: float, wait: float) -> void:
 	op.breaching = false
 	op.breached = true
 	var bang := String(op.get("bang", ""))
-	if bang != "" and int(op.get("bang_by", -1)) >= 0:
+	if bool(op.get("wall", false)):
+		op.go_at = now + wait  # then the hole's gate (_hole_open) times the bang and the go
+	elif bang != "" and int(op.get("bang_by", -1)) >= 0:
 		op.bang_at = now + wait + BANG_AFTER_S
 		op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
 	else:
@@ -3984,6 +4028,166 @@ func _lead_breached(op: Dictionary, lead: Soldier) -> bool:
 	var w := lead.active_weapon()
 	var shotgun := (w != null and "shotgun" in w.tags) or Shotguns.key_of(lead) != null  # (his Skeleton Key too)
 	return lead.last_shot_at >= since and shotgun and lead.last_shot_to.distance_to(door + Vector3.UP * 1.0) <= LEAD_SHOT_M
+
+
+## Breach and clear (Squad.order_breach_clear, SquadTactics.breach_op; F-318), host: once the
+## charge is set, any of the stack notes the beats as they come: the setter back at his place in
+## the stack before it goes ("backed_off"), and the charge gone off ("blown", which starts the
+## hole's clock: _hole_open).
+func _watch_breach(op: Dictionary, slot: int, now: float) -> void:
+	if not op.has("charge_id") or op.has("blown_at"):
+		return
+	var charges := Charges.of(body)
+	if charges == null or not charges.records.has(String(op.charge_id)):
+		op.blown_at = now
+		SquadTactics.note_stage(op, "blown")
+		return
+	if slot == int(op.get("breacher", -1)) and _flat_distance(op.stack[slot]) <= SquadTactics.STACK_READY_M:
+		SquadTactics.note_stage(op, "backed_off")
+
+
+## The stack goes in through its hole once the hole is on the navmesh (the host rebakes round a
+## breach: NavBuilder, ZoneNav), so nobody walks round to the building's door instead: when a
+## path from just outside the hole to the step inside it runs through it (no more than
+## HOLE_PATH_SLACK_M longer than straight), or HOLE_NAV_WAIT_S after the blast whatever the
+## navmesh says. Then the bang through it (if the plan has one) and in after it, ENTRY_GAP_S
+## apart. Checked every HOLE_CHECK_S. Proposed.
+const HOLE_NAV_WAIT_S := 5.0
+const HOLE_PATH_SLACK_M := 2.0
+const HOLE_CHECK_S := 0.25
+
+
+func _hole_open(op: Dictionary, now: float) -> bool:
+	if bool(op.get("hole_ok", false)):
+		return true
+	if not op.has("blown_at") or now < float(op.get("hole_checked_at", -INF)) + HOLE_CHECK_S:
+		return false
+	op.hole_checked_at = now
+	var door: Vector3 = op.entrance.door
+	var normal: Vector3 = op.entrance.normal
+	var step := door - normal * float(op.get("step_m", DOORWAY_STEP_M))
+	var map := body.get_world_3d().navigation_map
+	var from := NavigationServer3D.map_get_closest_point(map, door + normal * 0.8)
+	var to := NavigationServer3D.map_get_closest_point(map, step)
+	var path := NavigationServer3D.map_get_path(map, from, to, true)
+	var length := 0.0
+	for i in range(1, path.size()):
+		length += path[i - 1].distance_to(path[i])
+	var through := path.size() >= 2 and path[-1].distance_to(to) < 0.5 and to.distance_to(step) < 0.8 and length <= from.distance_to(to) + HOLE_PATH_SLACK_M
+	if not through and now - float(op.blown_at) < HOLE_NAV_WAIT_S:
+		return false
+	op.hole_ok = true
+	SquadTactics.note_stage(op, "hole_open")
+	if not through:
+		SessionLog.note("breach and clear: the hole isn't on the navmesh %.0f s after the blast; in anyway" % HOLE_NAV_WAIT_S)
+	var bang := String(op.get("bang", ""))
+	if bang != "" and int(op.get("bang_by", -1)) >= 0 and not op.has("bang_at"):
+		op.bang_at = now + BANG_AFTER_S
+		op.go_at = float(op.bang_at) + float(BREACH_WAIT_S.get(bang, 2.0))
+	else:
+		op.go_at = now
+	_callout(&"tactic", "Moving in!")
+	return true
+
+
+## A wall breach's charge setter is down, or has none left to set: the next of the stack who
+## carries one takes it on (he goes to the wall from his place); with nobody, the team goes in
+## by the building's own nearest door instead (a clearance as Clear's, the bang its breach), or,
+## past a wall with no building behind it, gives it up.
+func _wall_breacher_lost(op: Dictionary) -> void:
+	var units := _op_units(op)
+	for ai: SquadAI in units:
+		if ai != op.get("breacher_ai") and Vitals.has_item(ai.body.inventory, BREACH_ITEMS["charge"]):
+			op.breacher = int(ai._tactic().get("slot", 0))
+			op.breacher_ai = ai
+			op.breaching = false
+			op.erase("breach_from")
+			op.door = "charge"  # (the leader's own breach handed on: the team's from now)
+			op.erase("on")
+			op.erase("on_breach")
+			ai._callout(&"tactic", "I've got the charge!")
+			return
+	var b: Dictionary = op.building
+	var e := Buildings.entrance_near(b, op.entrance.door as Vector3)
+	if e.is_empty() or units.is_empty():
+		for ai: SquadAI in units:
+			ai._tactic_done(ai._tactic())
+		_callout(&"tactic", "No charge to breach with!")
+		SessionLog.note("breach and clear: nobody left with a charge, no door either: given up")
+		return
+	op.wall = false
+	op.erase("charge_spot")
+	op.erase("step_m")
+	op.entrance = e
+	op.door = ""
+	op.breach = op.get("bang", "")
+	# Nobody works the door alone: the setter (out of charges at the wall, or back up after going
+	# down) restacks with the rest, and the door's breach waits for the stack (_tactic_clear).
+	# Left "breaching", he went to the new door from where he stood and the team went before
+	# it had restacked (review of feat/breach-and-clear).
+	op.breaching = false
+	op.erase("breach_from")
+	var map := body.get_world_3d().navigation_map
+	var side := 1.0 if (body.global_position - (e.door as Vector3)).dot((e.normal as Vector3).cross(Vector3.UP)) >= 0.0 else -1.0
+	var stack: Array[Vector3] = []
+	for i in (op.stack as Array).size():
+		stack.append(SquadTactics.stack_spot(b, e, map, side, i, stack))
+	op.stack = stack
+	op.erase("stood_off")  # (the door's stack stands by the doorway, off no charge of its own: any charge burning there is stepped clear of as anyone's)
+	op.erase("charge_indoors")
+	op.ready = {}
+	op.first_ready_at = INF
+	_callout(&"tactic", "No charge! Using the door!")
+	SessionLog.note("breach and clear: nobody left with a charge: in by the door at (%.1f, %.1f)" % [(e.door as Vector3).x, (e.door as Vector3).z])
+
+
+## A wall breach on the leader's own charge (Squad.order_breach_clear with nobody else carrying
+## one: op "on", no "door") and he's down or gone (left the game) with the stack up: if a charge
+## went off within LEAD_CHARGE_M of the spot since the stack formed (his, set before he went
+## down), that's the hole: in through it once it's open (_hole_open). While one still burns
+## there they hold. Otherwise the breach falls to one of them with a charge, else the
+## building's door, else it's given up (_wall_breacher_lost). Without this the stack waited at
+## the wall for a blast that never came (review of 7b6d7576).
+func _wall_lead_lost(op: Dictionary, now: float) -> void:
+	var door: Vector3 = op.entrance.door
+	var charges := Charges.of(body)
+	if charges:
+		var blast := charges.blast_near(door, LEAD_CHARGE_M, float(op.get("since", 0.0)))
+		if blast != Vector3.INF:
+			op.breached = true
+			op.entrance = (op.entrance as Dictionary).duplicate()
+			op.entrance.door = Vector3(blast.x, door.y, blast.z)  # in through the hole
+			op.blown_at = now
+			SquadTactics.note_stage(op, "blown")
+			op.go_at = now
+			_callout(&"tactic", "Moving in!")
+			return
+		for id: String in charges.records:
+			var at := charges.position_of(id)
+			if Vector2(at.x - door.x, at.z - door.z).length() <= LEAD_CHARGE_M:
+				return  # his charge still burning: hold clear of it
+	op.erase("on")
+	op.erase("on_breach")
+	SessionLog.note("breach and clear: the leader's down or gone before his charge: the team's breach now")
+	_wall_breacher_lost(op)
+
+
+## A wall breach on the leader's own charge, and he's gone in without a charge going off by the
+## spot (by a door, or through a hole of his own somewhere else): the stack follows him in by
+## the building's entrance nearest him instead of waiting at the wall for a blast (the navmesh
+## takes them whichever way is open). Past a yard wall (no entrances) the hole's wait starts
+## (blown_at: _hole_open goes after HOLE_NAV_WAIT_S whatever the navmesh says).
+func _wall_lead_went_in(op: Dictionary, at: Vector3, now: float) -> void:
+	var e := Buildings.entrance_near(op.building, at)
+	if e.is_empty():
+		op.blown_at = now
+		SessionLog.note("breach and clear: the leader's past the wall with no blast by the spot: after him")
+		return
+	op.wall = false
+	op.erase("charge_spot")
+	op.erase("step_m")
+	op.entrance = e
+	SessionLog.note("breach and clear: the leader went in without blowing the wall: after him by the door at (%.1f, %.1f)" % [(e.door as Vector3).x, (e.door as Vector3).z])
 
 
 ## The breach this unit's team would choose itself against a building the enemy holds (Captain:
@@ -4037,9 +4241,16 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			# breacher: until his breach (then the bang, then in), or until he goes in.
 			if (op.ready as Dictionary).size() >= int(op.units) and not bool(op.get("told", false)):
 				op.told = true
+				SquadTactics.note_stage(op, "stacked")
 				_callout(&"tactic", "Stacked up. Your breach." if bool(op.get("on_breach", false)) else "Stacked up. On you.")
 			if bool(op.get("on_breach", false)) and not bool(op.get("breached", false)) and _lead_breached(op, lead as Soldier):
 				op.breached = true
+				if bool(op.get("wall", false)):
+					op.blown_at = now  # his charge through the wall: in once the hole's open (_hole_open)
+					SquadTactics.note_stage(op, "blown")
+					op.go_at = now
+					_callout(&"tactic", "Moving in!")
+					return
 				var bang := String(op.get("bang", ""))
 				if bang != "" and int(op.get("bang_by", -1)) >= 0:
 					op.bang_at = now + BANG_AFTER_S
@@ -4051,15 +4262,24 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			var at := (lead as Soldier).global_position
 			var past := Vector3(at.x - door.x, 0.0, at.z - door.z).dot(op.entrance.normal as Vector3)
 			if past < -CLEAR_ON_ME_M or Buildings.contains(op.building, at):
+				if bool(op.get("wall", false)) and not op.has("blown_at"):
+					_wall_lead_went_in(op, at, now)  # not through a hole by the spot: his way in, not the wall
 				op.go_at = now + SquadTactics.ENTRY_GAP_S  # he's in: after him
 				_callout(&"tactic", "Moving in!")
 			return
 		if (op.ready as Dictionary).size() >= int(op.units) or now - float(op.first_ready_at) >= SquadTactics.STACK_WAIT_S:
+			SquadTactics.note_stage(op, "stacked")
+			if bool(op.get("wall", false)) and String(op.get("door", "")) == "" and not op.has("blown_at"):
+				_wall_lead_lost(op, now)  # the wall was his to blow (op "on"), and he's down or gone
+				return
 			if String(op.get("door", "")) != "" and not op.get("breached", false):
 				if breacher_up(op):
 					if not bool(op.get("breaching", false)):
 						op.breaching = true  # the breacher works the door (_work_door); the rest hold
 						op.breach_from = now
+					return
+				if bool(op.get("wall", false)):
+					_wall_breacher_lost(op)
 					return
 				op.door = ""  # he's down: in their own way
 				op.breach = op.get("bang", "")
@@ -4073,6 +4293,12 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			op.go_at = now + wait
 			_callout(&"tactic", "Breaching!" if wait > 0.0 else "Going in!")
 		return
+	if bool(op.get("wall", false)):
+		_watch_breach(op, slot, now)
+		if now >= float(op.go_at) and not _hole_open(op, now):
+			_has_destination = false
+			_face(door)
+			return
 	if now < float(op.go_at) + slot * SquadTactics.ENTRY_GAP_S:
 		if now < float(op.go_at) and _flat_distance(op.stack[slot]) > SquadTactics.STACK_READY_M:
 			_go(op.stack[slot], true)  # the breacher, back from the doorway (or the charge) to his place
@@ -4094,11 +4320,12 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 	var through: Dictionary = op.get("through", {})
 	op["through"] = through
 	if level == 0 and not through.has(slot):
-		var inside: Vector3 = (op.entrance.door as Vector3) - (op.entrance.normal as Vector3) * DOORWAY_STEP_M
+		var inside: Vector3 = (op.entrance.door as Vector3) - (op.entrance.normal as Vector3) * float(op.get("step_m", DOORWAY_STEP_M))
 		if _flat_distance(inside) > ARRIVE + 0.2 and _flat_distance(corner) > _flat_between(inside, corner):
 			_go(inside, true)
 			return
 		through[slot] = true
+		SquadTactics.note_stage(op, "through")
 	if _flat_distance(corner) > ARRIVE + 0.3:
 		_go(corner, true)
 		return
@@ -4132,6 +4359,8 @@ func _tactic_clear(t: Dictionary, now: float) -> void:
 			op.floor_of[slot] = level + 1
 		return
 	op.done[slot] = true
+	if (op.done as Dictionary).size() >= int(op.units):
+		SquadTactics.note_stage(op, "clear")
 	if not ordered.is_empty():
 		if (op.done as Dictionary).size() >= int(op.units) and not bool(op.get("called", false)):
 			op.called = true
@@ -4922,7 +5151,10 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 ## Where to drag a casualty to (Captain, 2026-10-17: they "drag illogical ways"): not a firing
 ## position (find_cover likes low cover you can shoot over, and doesn't mind the way there) but
 ## the nearest spot that hides someone lying down from the threat, away from it rather than
-## toward it or across its line, with the way there clear enough to drag along.
+## toward it or across its line, with the way there clear enough to drag along. The spot is where
+## the carer stops; the casualty ends behind him on the way there, and has to be hidden there
+## too (F-456, Captain 2026-11-08: _hidden_when_dragged). Only with no such spot in reach, the
+## nearest that hides just the spot itself: he's still dragged closer to cover.
 func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 	var map := body.get_world_3d().navigation_map
 	var world := body.get_world_3d()
@@ -4931,6 +5163,8 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 	to_threat = to_threat.normalized() if to_threat.length() > 0.1 else Vector3.ZERO
 	var best: Variant = null
 	var best_score := INF
+	var short: Variant = null  # the best spot where he'd lie just short of the cover
+	var short_score := INF
 	for ring in COVER_RINGS:
 		if ring > leash + 0.1:
 			break
@@ -4953,10 +5187,41 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 			var score := length
 			if to_threat != Vector3.ZERO and way.length() > 0.1:
 				score += maxf(way.normalized().dot(to_threat), 0.0) * 6.0  # toward the shooter: worse
-			if score < best_score:
+			if score < best_score and _hidden_when_dragged(world, path):
 				best = q
 				best_score = score
-	return best
+			elif score < short_score:
+				short = q
+				short_score = score
+	return best if best != null else short
+
+
+## How much further from his carer than Soldier.DRAG_OFFSET a man out cold comes to lie once let
+## go: his ragdoll's chest (R0921: 1.7 m from his carer). Proposed.
+const DRAG_RAGDOLL_TRAIL_M := 0.7
+
+
+## Whether a casualty dragged along `path` lies out of the threat's sight once the carer has got
+## there: he trails Soldier.DRAG_OFFSET behind his carer, who stops at the path's end or up to
+## AT_COVER_M short of it (_at_cover), and a man out cold lies DRAG_RAGDOLL_TRAIL_M further back
+## still. A drag cut short before that (_drag_stalled) isn't judged.
+func _hidden_when_dragged(world: World3D, path: PackedVector3Array) -> bool:
+	var trail := Soldier.DRAG_OFFSET.length()
+	for back: float in [trail, trail + AT_COVER_M, trail + AT_COVER_M + DRAG_RAGDOLL_TRAIL_M]:
+		if Throwables.clear_line(world, body.threat_pos + Vector3.UP * 1.5, _back_along(path, back) + Vector3.UP * 0.35):
+			return false
+	return true
+
+
+## The point `back` metres short of `path`'s end, along it (its start if it's shorter).
+static func _back_along(path: PackedVector3Array, back: float) -> Vector3:
+	var left := back
+	for i in range(path.size() - 1, 0, -1):
+		var leg := path[i].distance_to(path[i - 1])
+		if leg >= left:
+			return path[i].lerp(path[i - 1], left / leg)
+		left -= leg
+	return path[0]
 
 
 func _cover_protects(point: Vector3) -> bool:
@@ -5008,7 +5273,7 @@ func _drag_stalled(contact: bool) -> bool:
 
 
 func _at_cover() -> bool:
-	return _has_cover and _flat_distance(_cover_point) <= ARRIVE + 0.4
+	return _has_cover and _flat_distance(_cover_point) <= AT_COVER_M
 
 
 func _buddy_bounding() -> bool:
@@ -5730,6 +5995,376 @@ func _answer_bound() -> void:
 			best = mate_ai
 	if best:
 		best._callout(&"covering")
+
+
+# --- Clear of a burning charge ----------------------------------------------
+
+## Out of a burning charge's blast (F-373; Captain, 2026-10-31: yes): a man not in the breach
+## order the charge belongs to (following, holding, covering, on a tactic or fighting: the rest
+## of the squad) who stands in the blast of a charge his own side set (a player's, an AI
+## breacher's), or is headed into it, goes to the nearest spot clear of it on his own side of its
+## wall (never through it), and back to what he was doing once it has gone off: his order is
+## untouched, only where he walks meanwhile. Already clear but headed in, he waits where he is.
+## The blast is the one the ordered team's stand-off keeps clear of (Squad.BLAST_SAFE_M on the
+## charge's side of a wall), its full radius behind the wall, and the radius and its fragments for
+## one off a wall; indoors the radius doubles (Throwables._frag). The charges are looked up
+## (Charges.burning: a handful at most) every CHARGE_CHECK_S, so a squad with none burning pays
+## an empty check. Host only (the AI runs there; clients see him walk). A breach team keeps its
+## own stand-off (Squad.stand_off's "stood_off" op). A man treating himself steps clear first and
+## treats himself once there; a man looking after a casualty in the blast drags him out of it
+## and treats him there (F-397; Captain, 2026-11-02: "drag him clear asap": _care_clear_of_charges).
+## Proposed.
+const CHARGE_CHECK_S := 0.25
+## The blast's margin past its reach (Squad.BLAST_SAFE_M's).
+const CHARGE_MARGIN_M := 0.5
+## A charge more than this above or below him is on another floor.
+const CHARGE_FLOOR_M := 3.0
+## His spot is this far past the blast's edge, and past ARRIVE (he stops that short of it).
+const CHARGE_CLEAR_PAST_M := 0.4
+## A breach op's own charge: within this of its door (where the hole is cut) or its charge's spot.
+const CHARGE_OWN_M := CHARGE_ALONG_M + 1.5
+## His way there no longer than this share of the straight line, plus CHARGE_DETOUR_M: not round
+## the building to its far side.
+const CHARGE_DETOUR_SHARE := 2.0
+const CHARGE_DETOUR_M := 3.0
+## A casualty dragged clear lies Soldier.DRAG_OFFSET (1 m) behind his carer, towards the charge,
+## and the drag ends within AT_COVER_M (0.7 + 0.4 m) of its spot (_at_cover). The spot's distance
+## already holds ARRIVE (0.7 m, _charge_clear_spot), so the carer's spot goes this much further
+## out: 1 m for the offset, 0.4 m for the rest of AT_COVER_M, 0.5 m for where he comes to lie off
+## the drag's line once let go (his ragdoll's chest; review of feat/breach-and-clear: 1.8 m left
+## him 0.3 m past the reach), and 0.4 m to spare. So he ends at least 0.4 m past charge_reach
+## (a spot that comes out CHARGE_CLEAR_PAST_M short on the navmesh), 0.8 m otherwise (F-472).
+const CHARGE_DRAG_PAST_M := 2.3
+## On his way to a casualty in a burning charge's blast, a carer goes on in to drag him out only
+## with CHARGE_GO_IN_S of its fuse left past his way to him at CHARGE_GO_MPS (a grab and ~5 m
+## of a drag at Soldier.DRAG_SPEED_MULT); with less he waits clear of it, and goes to him once
+## it has gone off. The same when he's with him but too far off to take hold (his reach is
+## Soldier.REVIVE_RANGE): he goes in to him only with time for it.
+const CHARGE_GO_IN_S := 5.0
+const CHARGE_GO_MPS := 3.6
+## A carer who can't start the drag (someone else has the casualty or is mid-item on him, no
+## spot clear of it, his hands full) stays by him and tries again, until this little of the fuse
+## is left: then, not holding him, he steps clear himself (review of feat/breach-and-clear).
+const CHARGE_SELF_CLEAR_S := 2.0
+## A blocked carer's spot to drag his casualty to (_drag_clear_spot) is kept this long for the
+## same charge, while he's within CHARGE_SPOT_KEEP_M of where it was worked out from (review of
+## feat/breach-and-clear, round 6). Proposed.
+const CHARGE_SPOT_KEEP_S := 1.0
+const CHARGE_SPOT_KEEP_M := 0.5
+var _charges: Charges
+var _charge_cd := 0.0
+var _clear_of := ""  # the charge he's keeping clear of
+var _clear_spot: Variant = null  # where he waits for it (Vector3), or null
+var _charge_drag := ""  # the charge he's dragging his casualty clear of ("" for none: Care.DRAG's cover_point is that spot)
+var _drag_spot: Variant = null  # _drag_clear_spot's last (Vector3 or null), for charge _drag_spot_for, from _drag_spot_from at _drag_spot_at
+var _drag_spot_for := ""
+var _drag_spot_from := Vector3.ZERO
+var _drag_spot_at := -INF
+
+
+func _keep_clear_of_charges() -> void:
+	_charge_cd -= get_physics_process_delta_time()
+	if _charge_cd <= 0.0:
+		_charge_cd = CHARGE_CHECK_S
+		_check_charges()
+	if _clear_spot != null:
+		_go(_clear_spot, true)
+
+
+func _check_charges() -> void:
+	if _charges == null or not is_instance_valid(_charges):
+		_charges = Charges.of(body)
+	if _charges == null or _charges.burning().is_empty() or not body.is_ai() or body.vitals.is_dying():
+		_end_charge_clear()
+		_end_charge_drag()
+		return
+	var mine: Array[Dictionary] = []
+	for c: Dictionary in _charges.burning():
+		if StringName(c.faction) != &"" and StringName(c.faction) == body.faction and not _breach_keeps_clear(c):
+			mine.append(c)
+	if intent == Intent.CASUALTY and _care_clear_of_charges(mine):
+		_end_charge_clear()
+		return
+	_end_charge_drag()
+	if _clear_spot != null and mine.any(func(c: Dictionary) -> bool: return String(c.id) == _clear_of) and not _in_any_blast(mine, _clear_spot):
+		return  # still burning, and his spot's still clear
+	var from := body.global_position
+	var threat := {}
+	for c in mine:
+		if in_charge_blast(c, from) or (_has_destination and in_charge_blast(c, _destination)):
+			threat = c
+			break
+	if threat.is_empty():
+		_end_charge_clear()
+		return
+	var spot: Variant = from if not _in_any_blast(mine, from) else _charge_clear_spot(threat, mine)
+	if spot == null:
+		_charge_cd = 1.0  # nowhere clear found from here: look again in a second
+		return
+	if _clear_spot == null:
+		_stop_digging()
+		if _treat_until >= 0.0:
+			_drop_treatment()  # his item (on himself or his casualty) is cut short as he walks off (Soldier._timed_care: "you moved"): again once clear
+		print("[charge] %s keeps clear of %s: to (%.1f, %.1f), %.1f m from it" % [body.name, threat.id, (spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, threat.pos)])
+	_clear_of = String(threat.id)
+	_clear_spot = spot
+
+
+## Done keeping clear (the charge has gone off, or he's to stay at what he's doing): back to it.
+func _end_charge_clear() -> void:
+	if _clear_spot == null:
+		return
+	if _has_destination and _destination == _clear_spot:
+		_has_destination = false  # (his intent's own way, if it has one, is set again next frame)
+	_clear_spot = null
+	_clear_of = ""
+
+
+## Casualty care by a burning charge (F-397; Captain, 2026-11-02: "drag him clear asap"): with
+## his casualty (or himself, beside him) in one of `mine`'s blasts, a carer with him (treating,
+## guarding, watching over him, or dragging him to cover that lies in it) stops treating, takes
+## hold of him and drags him out of it to the nearest spot clear of it on their side of its wall
+## (_charge_clear_spot, as a bystander's, CHARGE_DRAG_PAST_M further for the casualty trailing
+## behind), puts him down there and treats him again (Care.DRAG, then TREAT, as a drag to cover).
+## With the fuse too short to get there, he still drags him as far as he gets: he never leaves
+## him in it. On his way to such a casualty, or with him but too far off to take hold, he goes
+## (on) in with time for it (CHARGE_GO_IN_S), else he waits clear of it as anyone does and goes to
+## him once it has gone off. Unable to start the drag for anything else (_drag_clear_of), he
+## stays by him and tries again until CHARGE_SELF_CLEAR_S of the fuse is left, then steps clear
+## himself. A casualty conscious but dying is dragged as a downed one is (F-412; Captain,
+## 2026-11-06: "make him draggable": Soldier._movable). Carrying him on the shoulder, recovering
+## a body, on his way to a casualty clear of every blast, or with a casualty still on his feet
+## (he walks clear himself), he steps clear as anyone does (false). True while his care minds
+## the charges itself (nothing for the step-clear to do).
+func _care_clear_of_charges(mine: Array[Dictionary]) -> bool:
+	if not is_instance_valid(casualty) or casualty.vitals.is_dead() or (casualty.vitals.is_up() and not casualty.vitals.is_dying()) \
+			or care in [Care.NONE, Care.BODY] or (care == Care.CARRY and body.carrying == casualty):
+		return false
+	var at := casualty.body_point()
+	if care == Care.REACH:
+		return _time_to_go_in(mine, at)
+	if _charge_drag != "":
+		if care == Care.DRAG and mine.any(func(c: Dictionary) -> bool: return String(c.id) == _charge_drag):
+			return true  # still dragging him clear of it
+		_end_charge_drag()
+	# (Where he lies is his body_point, the ragdoll's chest; the blast itself is measured to his
+	# capsule (Throwables.body_point), which can lie a little off it: either in it counts.)
+	var threat := {}
+	for c in mine:
+		if in_charge_blast(c, at) or in_charge_blast(c, casualty.global_position) or in_charge_blast(c, body.global_position) \
+				or (care == Care.DRAG and _has_cover and in_charge_blast(c, _cover_point)):
+			threat = c
+			break
+	if threat.is_empty():
+		return true
+	var why := _drag_clear_of(threat, mine)
+	if why == "":
+		return true
+	if why == "reach":
+		# With him but too far off to take hold (guarding him, or treating him from an arm's length
+		# off): in to him as on his way to him, only with time for it (review of feat/breach-and-clear).
+		if not _time_to_go_in(mine, at):
+			return false
+		if _treat_until >= 0.0:
+			_drop_treatment()  # (cut short as he moves in: "you moved")
+		_start_reach()
+		return true
+	var left := _fuse_left(threat)
+	if left < CHARGE_SELF_CLEAR_S and body.carrying != casualty:
+		return false  # no time left to get him out: he steps clear himself (review of feat/breach-and-clear)
+	_charge_cd = clampf(left - CHARGE_SELF_CLEAR_S, CHARGE_CHECK_S, 1.0)  # can't take him out of it yet: look again
+	return true
+
+
+## Seconds until charge `c` (Charges.burning) goes off.
+static func _fuse_left(c: Dictionary) -> float:
+	return float(c.get("goes_at", INF)) - Soldier._now()
+
+
+## A carer going in to his casualty at `at` in one of `mine`'s blasts has time to drag him out:
+## CHARGE_GO_IN_S of its fuse left past his way there at CHARGE_GO_MPS.
+func _time_to_go_in(mine: Array[Dictionary], at: Vector3) -> bool:
+	var left_for := CHARGE_GO_IN_S + _flat_distance(at) / CHARGE_GO_MPS
+	return mine.any(func(c: Dictionary) -> bool: return in_charge_blast(c, at) and _fuse_left(c) >= left_for)
+
+
+## Takes hold of `casualty` (if he isn't dragging him already) and drags him clear of charge `c`
+## (_care_clear_of_charges). "" once he does, else why not: "reach" (he's too far off to take
+## hold), or someone else has him or is mid-item on him (never lifted from under another's hands:
+## P0164; only a casualty's own item on himself is cut short: _treated_by_another), there's no
+## spot clear of it to drag him to, or the pick-up is refused (his own hands full).
+func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> String:
+	if is_instance_valid(casualty.carried_by) and casualty.carried_by != body:
+		return "held"
+	if _treated_by_another(casualty):
+		return "treated"
+	var spot: Variant = _drag_clear_spot(c, mine)
+	if spot == null:
+		return "spot"
+	if body.carrying != casualty:
+		if casualty.body_point().distance_to(body.global_position) > Soldier.REVIVE_RANGE:
+			return "reach"
+		if not body.server_pick_up_body(casualty, Soldier.DRAG):
+			return "refused"
+	elif body.carry_mode != Soldier.DRAG:
+		body._set_carry_mode(Soldier.DRAG, &"grab")
+	if _treat_until >= 0.0:
+		_drop_treatment()  # his item's cut short as he takes hold (Soldier._timed_care: "they were moved"), not failed
+	_cut_own_item(casualty)
+	_cover_point = spot
+	_has_cover = true
+	care = Care.DRAG
+	_charge_drag = String(c.id)
+	_start_drag_watch()
+	print("[charge] %s drags %s clear of %s: to (%.1f, %.1f), %.1f m from it, %.1f s left" % [body.name, casualty.name, c.id,
+		(spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, c.pos), _fuse_left(c)])
+	return ""
+
+
+## Where _drag_clear_of drags his casualty to from here, clear of charge `c`
+## (_charge_clear_spot, CHARGE_DRAG_PAST_M further): the last one worked out for the same charge
+## from about here is kept CHARGE_SPOT_KEEP_S, so a carer who can't start the drag yet and looks
+## again every CHARGE_CHECK_S near the end of the fuse doesn't make its path queries each time.
+## The key leaves out `mine` and the casualty: the spot is worked out from the carer's own place
+## and never reads the casualty, and `mine` only changes when another charge is lit, which the
+## next look (CHARGE_SPOT_KEEP_S on at most) picks up.
+func _drag_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
+	var now := Soldier._now()
+	if _drag_spot_for == String(c.id) and now - _drag_spot_at < CHARGE_SPOT_KEEP_S \
+			and _flat_between(_drag_spot_from, body.global_position) <= CHARGE_SPOT_KEEP_M:
+		return _drag_spot
+	_drag_spot = _charge_clear_spot(c, mine, CHARGE_DRAG_PAST_M)
+	_drag_spot_for = String(c.id)
+	_drag_spot_at = now
+	_drag_spot_from = body.global_position
+	return _drag_spot
+
+
+## Someone other than `c` himself (and this carer) is mid-item on `c` (Soldier.treated_by): he's
+## never lifted from under their hands (P0164: it cut the Captain's IV short). His own item on
+## himself doesn't count: it's cut short as he's taken hold of (_cut_own_item). An item that takes
+## no claim (a tourniquet coming off) counts as another's unless it's this carer's or his own.
+func _treated_by_another(c: Soldier) -> bool:
+	var hands := c.treated_by()
+	if hands.any(func(s: Soldier) -> bool: return s != c and s != body):
+		return true  # (read first: is_healing is one timer a body, wrong with items overlapping)
+	if not hands.is_empty() or not c.vitals.is_healing():
+		return false
+	var his := SquadAI.of(c)
+	return not (_treat_until >= 0.0 and _treat_target == c) and not (his != null and his._treat_until >= 0.0 and his._treat_target == c)
+
+
+## `c` (a casualty being taken hold of) was treating himself: his AI forgets the item (cut short
+## on purpose, not counted as failed); his own hands stop as the drag starts (Soldier._timed_care:
+## "you're being dragged").
+static func _cut_own_item(c: Soldier) -> void:
+	var his := SquadAI.of(c)
+	if his != null and his._treat_until >= 0.0 and his._treat_target == c:
+		his._drop_treatment()
+
+
+## Done dragging clear of a charge (it has gone off, or he's no longer at it): he puts the
+## casualty down where he is and sees to him (Care.DRAG with no cover to go to).
+func _end_charge_drag() -> void:
+	if _charge_drag == "":
+		return
+	_charge_drag = ""
+	if care == Care.DRAG:
+		_has_cover = false
+
+
+## Forgets the item he's applying (it's being cut short on purpose): not counted as failed.
+func _drop_treatment() -> void:
+	_treat_until = -1.0
+	_treat_key = ""
+
+
+## Whether `c` (Charges.burning) is the charge of the breach op he's in, whose stack stands off
+## from it on its own (Squad.stand_off).
+func _breach_keeps_clear(c: Dictionary) -> bool:
+	var t := _tactic()
+	if StringName(t.get("kind", &"")) != &"clear":
+		return false
+	var op: Dictionary = t.get("op", {})
+	if not bool(op.get("stood_off", false)):
+		return false
+	if String(op.get("charge_id", "")) == String(c.id):
+		return true
+	var at: Vector3 = c.pos
+	if op.has("entrance") and _flat_between(op.entrance.door, at) <= CHARGE_OWN_M:
+		return true
+	return op.has("charge_spot") and _flat_between(op.charge_spot.at, at) <= CHARGE_OWN_M
+
+
+## How far charge `c`'s blast reaches towards `p` (flat, from the charge): Squad.BLAST_SAFE_M on
+## the face it was set on (the ordered stack's own stand-off), the whole overpressure radius
+## behind its wall, the radius or its fragments' (the further) off a wall; the radius doubles
+## indoors (Throwables._frag).
+static func charge_reach(c: Dictionary, p: Vector3) -> float:
+	var mult := Throwables.BLAST_INDOOR_MULT if bool(c.indoors) else 1.0
+	var wall: Vector3 = c.wall
+	if wall == Vector3.ZERO:
+		return maxf(WoundModel.BLAST_RADIUS * mult, Throwables.FRAG_RADIUS) + CHARGE_MARGIN_M
+	if (p - (c.pos as Vector3)).dot(wall) >= 0.0:
+		return Squad.BLAST_SAFE_INDOOR_M if bool(c.indoors) else Squad.BLAST_SAFE_M
+	return WoundModel.BLAST_RADIUS * mult + CHARGE_MARGIN_M
+
+
+static func in_charge_blast(c: Dictionary, p: Vector3) -> bool:
+	var at: Vector3 = c.pos
+	return absf(p.y - at.y) < CHARGE_FLOOR_M and _flat_between(p, at) < charge_reach(c, p)
+
+
+static func _in_any_blast(charges: Array[Dictionary], p: Vector3) -> bool:
+	return charges.any(func(c: Dictionary) -> bool: return in_charge_blast(c, p))
+
+
+## The nearest spot (by his way there) clear of every charge in `mine`, out of `c`'s blast on his
+## own side of its wall: straight away from it, along the wall either way, or out from it, each
+## past its reach (charge_reach, ARRIVE, CHARGE_CLEAR_PAST_M and `past`) on the navmesh, by a way
+## that doesn't go round to the wall's far side; null if none.
+func _charge_clear_spot(c: Dictionary, mine: Array[Dictionary], past := 0.0) -> Variant:
+	var at: Vector3 = c.pos
+	var from := body.global_position
+	var wall: Vector3 = c.wall
+	var side := Vector3.ZERO
+	if wall != Vector3.ZERO:
+		side = wall if (from - at).dot(wall) >= 0.0 else -wall
+	var reach := charge_reach(c, from) + ARRIVE + CHARGE_CLEAR_PAST_M + past
+	var away := Vector3(from.x - at.x, 0.0, from.z - at.z)
+	if away.length() < 0.1:
+		away = side if side != Vector3.ZERO else body.global_basis.z
+	away = Vector3(away.x, 0.0, away.z).normalized()
+	var dirs: Array[Vector3] = [away]
+	if side != Vector3.ZERO:
+		var along := side.cross(Vector3.UP).normalized()
+		if along.dot(away) < 0.0:
+			along = -along
+		dirs.append_array([along, (along + side).normalized(), side, (side - along).normalized(), -along])
+	else:
+		for k in range(1, 8):
+			dirs.append(away.rotated(Vector3.UP, k * PI / 4.0))
+	var map := body.get_world_3d().navigation_map
+	var best: Variant = null
+	var best_m := INF
+	for dir in dirs:
+		if side != Vector3.ZERO and dir.dot(side) < -0.01:
+			continue
+		var p := NavigationServer3D.map_get_closest_point(map, Vector3(at.x, from.y, at.z) + dir * reach)
+		if absf(p.y - from.y) > FLOOR_DY_M or _flat_between(p, at) < reach - CHARGE_CLEAR_PAST_M or _in_any_blast(mine, p):
+			continue
+		if side != Vector3.ZERO and (p - at).dot(side) < 0.1:
+			continue  # never through the wall
+		var path := NavigationServer3D.map_get_path(map, from, p, true)
+		if path.is_empty() or _flat_between(path[path.size() - 1], p) > 0.5:
+			continue
+		var m := _flat_between(from, path[0])
+		for i in range(1, path.size()):
+			m += path[i - 1].distance_to(path[i])
+		if m <= _flat_between(from, p) * CHARGE_DETOUR_SHARE + CHARGE_DETOUR_M and m < best_m:
+			best = p
+			best_m = m
+	return best
 
 
 # --- Steering -------------------------------------------------------------

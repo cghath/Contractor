@@ -477,7 +477,7 @@ func _on_synced() -> void:
 ## or a ragdoll: the body is placed by something else.
 func _smooths() -> bool:
 	return (not is_ai() or not multiplayer.is_server()) and not is_multiplayer_authority() and owner_connected() and vitals.is_up() \
-			and not is_instance_valid(vehicle) and not is_instance_valid(carried_by) and not is_instance_valid(ragdoll)
+			and not is_instance_valid(vehicle) and not is_instance_valid(carried_by) and not is_instance_valid(ragdoll) and not is_held()
 
 
 ## Every frame: offsets the model from the body to where the smoother says the body was a
@@ -565,11 +565,14 @@ func _process(_delta: float) -> void:
 	if not is_ai():
 		_apply_respawn_state()
 	# Dying (Vitals.is_dying): lying in the downed pose, writhing, when he isn't crawling; crawling
-	# shows prone (DYING_STILL_S of stillness first, so it doesn't flicker between the two).
+	# shows prone (DYING_STILL_S of stillness first, so it doesn't flicker between the two). Dragged
+	# (F-412), he's drawn as a dragged casualty is (CharacterModel's DRAGGED pose wants the downed
+	# one), from carry_net on every peer, a late joiner's too.
 	var dying := vitals.is_dying()
-	if dying and model.gait_speed() > 0.12:
+	var held := is_held()
+	if dying and model.gait_speed() > 0.12 and not held:
 		_dying_moved_at = _now()
-	CharacterModel.lay_down(self, model, not vitals.is_up() or (dying and _now() - _dying_moved_at >= DYING_STILL_S))
+	CharacterModel.lay_down(self, model, not vitals.is_up() or (dying and (held or _now() - _dying_moved_at >= DYING_STILL_S)))
 	_dying_sounds(dying)
 	if collision_layer != 0 and is_ai() and vitals.is_dead():
 		collision_layer = 0  # a dead body lies where it fell and doesn't block anyone
@@ -602,12 +605,20 @@ func _physics_process(delta: float) -> void:
 		_drain_nvg(delta)  # a lowered NVG's battery (wave 7, S2)
 	if not is_local():
 		return
-	if not vitals.is_up() and carried_by_pos != null:
+	var held := is_held()
+	if carried_by_pos != null and (not vitals.is_up() or held):
 		# Being dragged or carried: the host tells us where we are.
 		global_position = carried_by_pos
 		velocity = Vector3.ZERO
 		carried_by_pos = null
 		return
+	if held and vitals.is_up():
+		# Dying and dragged (F-412): the host moves us (between its updates we stay put); our own
+		# crawl doesn't fight the drag. Let go, we crawl again.
+		velocity = Vector3.ZERO
+		return
+	if vitals.is_up():
+		carried_by_pos = null  # (one that came in after we were let go)
 	if is_instance_valid(vehicle):
 		velocity = Vector3.ZERO
 		return  # riding: the seat moves the body (Vehicle)
@@ -673,7 +684,7 @@ func _ai_physics(delta: float) -> void:
 	suppression = move_toward(suppression, 0.0, delta * 0.25)
 	if is_reloading and _now() >= _busy_until:
 		is_reloading = false
-	if (not vitals.is_up() or carriable_while_up) and is_instance_valid(carried_by):
+	if is_instance_valid(carried_by) and _movable(self, carried_by.carry_mode):
 		if carried_by.carry_holds():
 			global_transform = carried_by.carry_transform()
 		velocity = Vector3.ZERO
@@ -722,8 +733,9 @@ func carry_holds() -> bool:
 func _update_carried(delta: float) -> void:
 	if carrying == null:
 		return
-	if not is_instance_valid(carrying) or not _movable(carrying) or carrying.carried_by != self or not vitals.is_up():
-		release_carried()
+	if not is_instance_valid(carrying) or not _movable(carrying, carry_mode) or carrying.carried_by != self or not vitals.is_up() \
+			or vitals.is_dying():
+		release_carried()  # (a dying man dragged who's back on his feet is let go; one who goes down or dies is held on)
 		return
 	_carry_phase_left -= delta  # game time, like the animation it ends
 	if _carry_phase != &"" and _carry_phase_left <= 0.0:
@@ -743,11 +755,12 @@ func _update_carried(delta: float) -> void:
 
 
 ## Host only. Picks up (CARRY) or takes hold of (DRAG) a downed body within `reach`.
-## Dead bodies can be carried and dragged too.
+## Dead bodies can be carried and dragged too, and a dying man dragged (_movable). A dying man
+## moves nobody himself (he's on the ground, crawling at most).
 func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -> bool:
-	if other == null or other == self or other.is_queued_for_deletion() or not _movable(other):
+	if other == null or other == self or other.is_queued_for_deletion() or not _movable(other, mode):
 		return false
-	if carrying != null or inventory.hands != &"" or not vitals.is_up():
+	if carrying != null or inventory.hands != &"" or not vitals.is_up() or vitals.is_dying():
 		return false
 	if other.body_point().distance_to(global_position) > reach:
 		return false
@@ -760,9 +773,21 @@ func server_pick_up_body(other: Soldier, mode := CARRY, reach := REVIVE_RANGE) -
 	return true
 
 
-## A body that can be carried or dragged: down or dead, or a cuffed captive (People).
-static func _movable(other: Soldier) -> bool:
-	return not other.vitals.is_up() or other.carriable_while_up
+## A body that can be moved `mode` (CARRY or DRAG; &"" for either way): down or dead, or a cuffed
+## captive (People). One conscious but dying (Vitals.is_dying: on the ground, crawling at most) can
+## be dragged, not carried (F-412; Captain, 2026-11-06: "make him draggable"): held, his own
+## crawl doesn't move him (_physics_process, _ai_physics); back on his feet he's let go
+## (_update_carried), and if he goes down or dies he's held on, as any downed or dead body is.
+static func _movable(other: Soldier, mode := &"") -> bool:
+	if not other.vitals.is_up() or other.carriable_while_up:
+		return true
+	return mode == DRAG and other.vitals.is_dying()
+
+
+## Every peer: someone carries or drags this body now (carry_net, replicated, so a late joiner
+## knows too; the host's carried_by says who).
+func is_held() -> bool:
+	return StringName(model.carry_net.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED]
 
 
 ## Host only. Puts down whoever this soldier carries, the way a squadmate would: off the
@@ -2107,6 +2132,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool,
 		why = "You have no %s" % item.name
 	elif target == self and Vitals.needs_other_hands(item_id):
 		why = "Someone else has to place that"
+	elif target == self and is_instance_valid(carried_by):
+		why = "You're being dragged" if carried_by.carry_mode == DRAG else "You're being carried"  # (it would be cut short at once)
 	elif is_ai() and item.stats.get("medic_only", false) and role != Roles.MEDIC:
 		why = "Only a medic does that"
 	else:
@@ -2161,6 +2188,21 @@ static func care_key(item_id: StringName, part: StringName) -> String:
 	return "%s@%s" % [item_id, part]
 
 
+## Host: who is busy with an item on this body now (_care_claims), its own hands too when it's
+## treating itself. A carer about to lift it reads this (SquadAI._treated_by_another: never from
+## under another's hands, P0164).
+func treated_by() -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	var prefix := "%d:" % vitals.get_instance_id()
+	for claim: String in _care_claims.keys():
+		if not claim.begins_with(prefix):
+			continue
+		var holder := instance_from_id(int(_care_claims[claim])) as Soldier
+		if holder != null and holder.is_inside_tree() and holder._is_busy() and not out.has(holder):
+			out.append(holder)
+	return out
+
+
 ## Host: whether another soldier is busy with the treatment `claim` names (one that has gone,
 ## or is no longer busy, doesn't hold it).
 func _care_taken(claim: String) -> bool:
@@ -2206,6 +2248,11 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 			why = "you went down"
 		elif not is_instance_valid(target) or not is_instance_valid(other) or other.is_dead():
 			why = "the casualty is gone"
+		elif target == self and is_instance_valid(carried_by) and carried_by.get_instance_id() != carrier:
+			# Treating yourself, dying, and someone takes hold of you (F-412, F-431): say so, not
+			# just "you moved" (review of feat/breach-and-clear, round 6).
+			why = "you're being dragged" if carried_by.carry_mode == DRAG else "you're being carried"
+			detail = " by " + carried_by.log_name()
 		elif global_position.distance_to(my_start) > TREAT_MOVE_M:
 			why = "you moved"
 			detail = " %.1f m" % global_position.distance_to(my_start)
@@ -2457,14 +2504,16 @@ func _server_move_body(path: NodePath, mode: StringName) -> void:
 	if not _from_owner() or not vitals.is_up():
 		return
 	var other := get_node_or_null(path) as Soldier
-	if other == null or other == self or not _movable(other):
-		return  # a downed or a dead body (or a cuffed captive)
+	if other == null or other == self or not _movable(other, mode):
+		return  # a downed or a dead body (or a cuffed captive), or a dying man to drag
 	if carrying == other:
 		if mode != carry_mode and _carry_phase != &"lower":
 			_set_carry_mode(mode, &"lift" if mode == CARRY else &"grab")
 		return
 	var why := ""
-	if carrying != null:
+	if vitals.is_dying():
+		why = "You're in no state to"
+	elif carrying != null:
 		why = "You're already moving someone"
 	elif inventory.hands != &"":
 		why = "Your hands are full"

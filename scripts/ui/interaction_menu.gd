@@ -138,8 +138,11 @@ const ACTIONS := {
 		{"id": &"drag", "label": "Drag", "needs": &"can_drag", "request": &"_server_drag_body", "with": &"target"},
 	],
 	SQUADMATE: [
+		{"id": &"put_down", "label": "Put down", "needs": &"moving_body", "request": &"_server_release_body", "with": &"none"},
 		{"id": &"give_item", "label": "Give item", "submenu": &"stowed_items", "request": &"_server_give_item", "with": &"target_entry"},
 		{"id": &"treat", "label": "Treat", "needs": &"treatable", "submenu": &"treatments"},
+		# Conscious but dying, he can be dragged (F-412; Captain, 2026-11-06: "make him draggable").
+		{"id": &"drag", "label": "Drag", "needs": &"can_drag_dying", "request": &"_server_drag_body", "with": &"target"},
 		{"id": &"check_condition", "label": "Check wounds", "needs": &"wounded", "show": &"condition"},
 		# The squadmate orders it lacked (combined_arms.md 5.5): the command menu's own, for him.
 		{"id": &"sq_follow", "label": "Follow me", "needs": &"my_squadmate", "squad": "follow"},
@@ -370,7 +373,7 @@ static func _group_member(action: Dictionary) -> Dictionary:
 ## point offers zip-cuff and search), the dead, dummies, items and the body you're carrying
 ## or dragging (its point offers Release / Put down first) keep a single point.
 static func has_regions(actor: Soldier, target: Node) -> bool:
-	if target is Soldier and target != actor and (target as Soldier).carried_by == actor:
+	if _moved_by(target, actor):
 		return false
 	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF, PERSON]
 
@@ -446,6 +449,10 @@ static func _check(need: StringName, actor: Soldier, target: Node) -> String:
 			return _move_check(actor, target, Soldier.CARRY)
 		&"can_drag":
 			return _move_check(actor, target, Soldier.DRAG)
+		&"can_drag_dying":  # a squadmate on his feet in the menu's eyes, but down dying (Soldier._movable)
+			if not (target is Soldier and (target as Soldier).vitals.is_dying()):
+				return _HIDE
+			return _move_check(actor, target, Soldier.DRAG)
 		&"moving_body":  # on yourself, or the body you're moving (not every body you look at)
 			return "" if actor.carry_mode != &"" and (target == actor or _moved_by(target, actor)) else _HIDE
 		&"follow_order", &"stop_order", &"cover_order":
@@ -514,25 +521,38 @@ static func _move_check(actor: Soldier, target: Node, mode: StringName) -> Strin
 		return _HIDE
 	if _moved_by(target, actor):
 		return _HIDE if actor.carry_mode == mode else ""
+	if actor.vitals.is_dying():
+		return "You're in no state to"  # (as the host says: Soldier._server_move_body)
 	if actor.carry_mode != &"":
 		return "You're already moving someone"
 	return "" if actor.inventory.hands == &"" else "Your hands are full"
 
 
-## `target` is the body `actor` carries or drags.
+## `target` is the body `actor` carries or drags. From the replicated carry_net (either side's),
+## so it holds on a client too, where the host-only carried_by is never set (F-432): there the
+## menu on the body you drag hid Put down/Release and greyed Drag ("already moving someone").
 static func _moved_by(target: Node, actor: Soldier) -> bool:
-	return target is Soldier and target != actor and (target as Soldier).carried_by == actor
+	if not target is Soldier or target == actor:
+		return false
+	var body := target as Soldier
+	if body.carried_by == actor:
+		return true  # (the host)
+	var mine := actor.model.carry_net
+	if StringName(mine.get("mode", &"")) in [CharacterModel.CARRY, CharacterModel.DRAG] and String(mine.get("with", "")) == String(body.get_path()):
+		return true
+	var his := body.model.carry_net
+	return StringName(his.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED] and String(his.get("with", "")) == String(actor.get_path())
 
 
 ## A person's orders (Follow me, Stop, Get in cover): as the people rules allow
 ## (Person.menu_check "leadable" and "led"), but not the order they're already following
 ## (Follow me to someone following you, Get in cover to someone in cover) and none while
-## someone carries them.
+## someone carries or drags them (is_held: carry_net, as a client has it too, F-471).
 static func _order_check(need: StringName, actor: Soldier, target: Node) -> String:
 	var why := Person.menu_check(&"led" if need == &"stop_order" else &"leadable", actor, target)
 	if why != "":
 		return why
-	if target is Soldier and is_instance_valid((target as Soldier).carried_by):
+	if target is Soldier and (target as Soldier).is_held():
 		return _HIDE
 	var st := Person.state(target)
 	match need:
@@ -894,9 +914,8 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 	for node: Node in candidates:
 		if node == actor or not node is Node3D or node.is_queued_for_deletion():
 			continue
-		var mover: Node = (node as Soldier).carried_by if node is Soldier else null
-		if is_instance_valid(mover) and mover != actor:
-			continue  # on someone else's shoulder or being dragged by them (yours: Release / Put down)
+		if node is Soldier and (node as Soldier).is_held() and not _moved_by(node, actor):
+			continue  # on someone else's shoulder or being dragged by them (yours: Release / Put down); carry_net, so on a client too
 		var at := action_point(node as Node3D)
 		var to := at - eye
 		if to.length() > REACH or forward.angle_to(to) > deg_to_rad(VIEW_CONE_DEG) or camera.is_position_behind(at):

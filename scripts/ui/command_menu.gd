@@ -38,7 +38,9 @@ const MENU := {
 				{"key": "1", "label": "That building (no bang; a breacher makes the way in)", "cmd": "clear", "point": true},
 				{"key": "2", "label": "That building, flashbang first", "cmd": "clear:flash", "point": true},
 				{"key": "3", "label": "That building, frag first", "cmd": "clear:frag", "point": true},
-				{"key": "4", "label": "That building, blow a way in (charge)", "cmd": "clear:charge", "point": true},
+				## Breach and clear (Captain's list 2026-10-14, item 3; Squad.order_breach_clear): through the
+				## wall you look at (at a doorway, the charge beside it, as "clear:charge" did here).
+				{"key": "4", "label": "Breach and clear: blow the wall you look at, in through it", "cmd": "breach_clear", "point": true},
 				{"key": "5", "label": "The town there, building by building", "cmd": "clear_town", "point": true},
 				{"key": "6", "label": "The town there, flashbangs", "cmd": "clear_town:flash", "point": true},
 				{"key": "7", "label": "That building, on me (they stack, you lead in)", "cmd": "clear:onme", "point": true},

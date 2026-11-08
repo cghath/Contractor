@@ -11,6 +11,161 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Breaching holes a soldier fits through, and "Breach and clear" through walls (feat/breach-and-clear)
+
+Captain's list 2026-10-14, item 3: "breaching charges make holes too small; add a 'Breach and
+clear' team order through walls" (F-317, F-318).
+
+- **Fixed (AI):** a casualty dragged to cover ends in the cover, not 1 m short of it behind his
+  carer: `SquadAI.find_drag_cover` judges a spot by where he'll lie along the way there (F-456),
+  a man out cold by where his ragdoll comes to rest, 0.7 m further back (Proposed,
+  `DRAG_RAGDOLL_TRAIL_M`). Every drag to cover.
+- **Fixed (buildings):** a wall under a porch, an overhang or a roof slab can be breached from
+  outside; it was now and then refused as "inside the building". Under a roof, only walls the roof
+  runs out to close a hall in (`Buildings._hall_wall`, F-457), so a porch's spots aren't inside
+  (the 20 s scan cache decided whether a scan saw the roof). A wall between two rooms is still refused.
+- **Fixed (menu):** on a client the body you drag gets the host's single Release point, and a body
+  someone else drags gets no point (carry_net, not the host's `carried_by`). Follow me, Stop and
+  Get in cover aren't offered for someone being carried on a client either (F-471).
+- **Fixed (AI):** a carer about to lift a man reads who holds a claim on him before the man's one
+  healing timer, which overlapping items make wrong.
+- **Changed (charges):** a wall charge's hole is sized from the soldier who goes through it: his
+  capsule (0.3 m round, 1.8 m tall), his kit (0.2 m each side, 0.2 m over the helmet) and 0.25 m
+  of ragged edge each side: 1.5 m wide and 2.25 m high (was 1.3 x 2.2), all Proposed
+  (`Charges.SOLDIER_R`, `KIT_M`, `HEAD_KIT_M`, `SNAG_M`). It's cut from the lower of the floors
+  either side of the wall up to the higher one plus that height (`Charges.hole_floors`,
+  `wall_depth`), so a building's floor above the street or a slope under the wall no longer
+  leaves a low hole or a sill inside.
+- **Added (squad):** "Breach and clear" (Command menu Move > Clear > 4, replacing "blow a way in
+  (charge)"; the building's context menu; voice "breach and clear", "breach the wall", "blow the
+  wall"): the team stacks along the wall the leader points at, the one with a breaching charge (a
+  breacher first) sets it there, the stack holds clear of its blast, it blows, and once the hole
+  is on the navmesh they put a flashbang through on the usual rules and go in with the clearance's
+  CQB, rooms nearest the hole first, and hold inside. At a doorway it's the door's charge breach; a
+  wall with no building behind it opens into the yard past it; nobody selected with a charge but
+  the leader carrying one: they stack and hold for his. If the setter goes down, the next with a
+  charge takes it on, else they use the building's door (`Squad.order_breach_clear`,
+  `SquadTactics.breach_op`, `SquadAI._hole_open`, `_wall_breacher_lost`).
+- **Added (AI):** an AI team clearing a held building whose door is round the far side (6 m or more
+  further than the wall facing them, Proposed) with a charge among them blows its own way in
+  through that wall (`SquadTactics.wall_breach_for`).
+- **Added (tests):** new suite `breach` (in tools/run_tests.sh and CI): the hole passes a soldier
+  in kit through the compound's concrete wall and a generated stone house's wall (and didn't
+  before), the navmesh is rebaked through it; the yard and the AI team's choice; the order's stages
+  in order, nobody in the blast, the team in through the hole and inside; a client process sees the
+  charge, the blast, the hole and the team inside.
+- **Fixed (review):** a building lookup that missed (cut short by the frame's 4 ms scan budget
+  on a player's machine, or stale) no longer turns a building's wall into a yard's, where the team
+  blew it and held by the hole with no room-by-room clearing: the order's lookup is exact (never
+  budgeted, `Buildings.near`/`nearest`'s new `exact`), and a far side that passes Buildings' own
+  inside test with no building found is refused with "Can't make out the building past that wall,
+  try again" (`SquadTactics.building_beyond`; `yard_beyond` refuses it too). A wall between two of
+  a building's rooms is refused instead of being taken for a yard.
+- **Fixed (review):** on the leader's own charge, the team no longer waits at the wall for ever
+  when he goes down or leaves before it goes off (his charge's blast by the spot still counts;
+  else the next with a charge sets it, else the building's door: `SquadAI._wall_lead_lost`), or
+  when he goes in some other way (they follow him by the building's door nearest him:
+  `_wall_lead_went_in`).
+- **Changed (tests):** `breach` asks for the building behind the wall once, on a cold cache with
+  the frame budget on (the 5 s retry that hid the yard fallback is gone), and adds the leader
+  knocked out before he sets his own charge: in by the door, the building cleared, all four inside.
+  The sweep through a fresh hole ends just past the wall's inner face (it ran 1.2 m in whatever
+  the wall, into the room, and on CI met something 1 m inside a stone house, its furniture standing
+  against the walls), waits up to 3 s for the voxel colliders to catch up, and names what it hit.
+- **Fixed (review):** when every charge carrier is down (or the setter has none left at the
+  wall) and the team falls back to the building's door, the setter no longer works the new door
+  from where he stood: the op stops "breaching" (`SquadAI._wall_breacher_lost`), so the team
+  restacks by the door and its breach waits for the stack. `breach` adds it: two carriers down on
+  the way to the wall, in by the door, all four restacked (the setter, back up, with them) before
+  it's breached (R0757 PASS; without the fix it fails, R0758). Followers outside the order
+  still aren't moved off the wall (F-373).
+- **Added (AI):** squadmates in no breach order (following, holding, covering, on another tactic
+  or fighting) step clear of a burning charge their own side set, on a wall or by a door, the
+  player's or an AI breacher's, and go back to what they were doing once it has gone off (F-373,
+  Captain, 2026-10-31: yes). A man in its blast, or headed into it, goes to the nearest spot out
+  of it on his side of its wall (never through it, nor round the building to get there): the
+  ordered stack's own stand-off on the face it was set on (`Squad.BLAST_SAFE_M`, 3 m), its full
+  radius behind the wall, radius or fragments off a wall, doubled indoors; one already clear but
+  headed in waits where he is. His order isn't changed, only where he walks meanwhile. The live
+  charges are looked up (`Charges.burning`, a handful at most) four times a second, so squads
+  with none near pay an empty check; a breach team keeps its own stand-off (`Squad.stand_off` marks
+  the op), and a man treating someone (or himself) stays at it (`SquadAI._keep_clear_of_charges`,
+  Proposed consts). `breach` adds it: a follower and a man holding beside the main building's north
+  wall when the player sets a charge on it step out of its blast before it goes, nobody is hurt,
+  and they follow and hold again after (R0801; squad, roles, demolitions R0804).
+- **Added (AI):** a medic (or anyone giving care) whose downed casualty lies in a burning charge's
+  blast drags him clear of it (F-397, Captain, 2026-11-02: "drag him clear asap"): he stops
+  treating, takes hold of him, drags him to the nearest spot out of it on their side of its wall
+  (chosen as a bystander's is, far enough that the casualty trailing behind is clear too), puts
+  him down there and treats him again. With the fuse too short to get there he still drags him
+  as far as he gets; on his way to such a casualty he goes in only with time for the drag left
+  on the fuse, else he waits clear and goes once it has gone off. A man treating himself steps
+  clear first and treats himself there; a casualty still on his feet walks clear himself
+  (`SquadAI._care_clear_of_charges`, `_drag_clear_of`, Proposed consts).
+- **Changed (squad):** under a roof (something solid within 4 m over the charge) a charge's blast
+  reaches 5 m on its face, past the stack's 4.1 m: the breach stack's stand-off now goes that
+  much further along the wall there (`Squad.BLAST_SAFE_INDOOR_M`, 5.5 m with its margin;
+  `Squad.stand_off` given the world), F-396, Captain, 2026-11-02: yes.
+- **Fixed (review):** `Charges.burning()` lists only charges with a fuse running (a roadside IED
+  waiting with none, or a disarmed one, no longer sits in it); the door fallback of a wall breach
+  drops the op's "stood_off" for the door's new stack; each AI's first charge check is staggered
+  at random (as its scan is), so a whole squad doesn't path-query in one frame.
+- **Changed (tests):** `breach`'s bystanders case now checks that the follower himself steps clear
+  (he stands in the blast beside the leader, who is 1.5 m off the wall until the charge is set;
+  his place behind the leader lies outside it, about 5.4 m off, so both men must go through
+  "Getting clear of a charge"), and adds a medic treating a downed man beside a wall a charge is
+  set on (dragged out, nobody hurt, treated again) and a breach under a roof (the stack past the
+  indoor reach, nobody in the blast).
+- **Added (medical):** a squadmate down dying (conscious, crawling at most) can be dragged as a
+  downed one is, by a player (Drag in the interaction menu) or the AI, though not carried on the
+  shoulder (F-412, Captain, 2026-11-06: "make him draggable"). Held, his own crawl doesn't move
+  him: the host moves him and a player's machine stands still between its updates; he's drawn as
+  a dragged casualty on every peer, late joiners too. Back on his feet he's let go; out cold or
+  dead he's held on as any body is; a dying man drags nobody himself, and a dragger going down
+  dying lets go (`Soldier._movable`, `is_held`).
+- **Changed (AI):** a medic drags a dying casualty clear of a burning charge too, not just a
+  downed one. A carer who can't start the drag (someone else is mid-item on him, no clear spot,
+  his hands full) steps clear himself once under 2 s of the fuse are left and he isn't holding
+  him; one with him but too far off to take hold goes in only with time for the drag, as on his
+  way to him; stepping clear he starts no item on the way. The drag's spot is 0.5 m further out
+  (`CHARGE_DRAG_PAST_M` 2.3 m), so the casualty ends past the reach with room to spare (review).
+- **Fixed (squad):** a door charge that has to go on the stack's own side of a doorway (no wall on
+  the far side, by a corner) left the stack's first man 2.1 m from it; the stack now stands off
+  from where the charge really goes (F-413, Captain, 2026-11-06: yes). The indoor push (F-396)
+  looks over the charge's spot, not the doorway, whose lintel counted as a roof and pushed every
+  door stack 2.5 m on, past a small building's corner (`Squad.stand_off`, `SquadAI.door_charge_spot`).
+- **Fixed (medical):** a body reset (`Vitals.server_reset_health`) while dying, or while down with
+  its blood gone, stayed dying 4 s more: forced prone, no shooting, and now draggable and held
+  (`WoundModel.reset` clears it; F-433).
+- **Changed (tests):** interaction "Dragging a dying man" (a player and the AI drag him, not carry
+  him; his own crawl and momentum don't move him while held; let go he crawls; back on his feet
+  he's let go, out cold or dead he's held; a dying man drags nobody), animations (a dying man
+  dragged, from carry_net alone, as a late joiner sees him), and breach (the medic drags a dying
+  man clear of a charge; a door charge's stand-off by a corner and under no roof).
+- **Changed (AI):** under fire, a squadmate down dying (conscious, crawling at most) in the open is
+  dragged to cover as one out cold is, with the same smoke and suppressing on the way in, then
+  treated there (F-431, Captain, 2026-11-07: "yesm"); before, he was treated where he lay. Held,
+  he stops crawling and starts nothing of his own; an item he had going on himself is cut short
+  (not counted as failed) and his carer takes over at cover. A carer still never lifts a casualty
+  from under someone else's hands: only the casualty's own item on himself is cut short, never
+  another carer's or a player's (`SquadAI._treated_by_another`, `Soldier.treated_by`; review).
+- **Fixed (medical):** a player treating himself who gets dragged is told "Treatment interrupted:
+  you're being dragged", not "you moved", and can't start an item on himself while he's held
+  ("You're being dragged") (review).
+- **Fixed (interaction):** on a client, the menu on the body you drag or carry now offers Put
+  down/Release and the other way of moving it, as on the host, instead of hiding Release and
+  greying Drag "already moving someone": it reads the replicated carry_net, not the host-only
+  `carried_by` (F-432; downed and dying bodies alike).
+- **Changed (AI):** a carer who can't start dragging his casualty clear of a charge yet keeps the
+  spot he'd drag him to for 1 s (`CHARGE_SPOT_KEEP_S`, Proposed), not working it out (path
+  queries) four times a second near the end of the fuse (review).
+- **Changed (tests):** casualty "Under fire: a squadmate down dying in the open is dragged to
+  cover, then treated"; interaction checks the menu from a client's replicated state (dragging a
+  dying man, and one out cold), runs the dying player's "doesn't move while held" over 30 real
+  physics frames with the move key down (it fails with the held branch taken out), and checks the
+  "being dragged" note; breach gives the dying man his medical kit back afterwards. casualty gets
+  780 s in `tools/run_tests.sh` (it took 470 s of its 480 s with three suites on the machine).
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's
