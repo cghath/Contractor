@@ -11,6 +11,114 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Vault hand plant, leg hitboxes and the SVD's own model on dev (feat/vault-legs-svd, 2026-10-31)
+
+The two leftover branches the handoff called "probably wanted", merged as they were
+(`claude/vault-legs`, 2026-10-27, and `claude/svd-model`, 2026-10-20, its own entry below).
+
+#### Added
+- **A vault plants the support hand on the obstacle.** The body finds the top it is climbing over
+  (one ray down ahead of the chest as the vault starts) and the support hand goes on it, palm
+  down, eased in and out with the vault; the firing hand keeps the gun. That's the left hand, or
+  the right for a left-handed shooter with a weapon (the branch always planted the left, which
+  took a left-hander's gun hand off the grip).
+
+#### Changed
+- **The legs' hitboxes follow the legs as drawn**, as the arms' already did: the stride, feet
+  planted on a slope or a step, a vault's tucked knees. Only while the body is up and not being
+  carried, so where a downed body lies and where it is reached are unchanged. The pelvis box
+  follows the same drawn root, so the thighs' boxes hang from it (F-374, Captain: "yes, fix
+  followers").
+- **The squad's trail of the lead cuts out any loop he walks** (F-400): coming back within 1.5 m of
+  where he walked (out to a dead end and back), everything since goes, so the trail lies on the
+  ground once. A slot picked back along a doubled-back trail could leap past the doubled part and
+  back, and a man far behind ran 20 m loops after it (casualty's soak called him stuck, which is how
+  the pelvis change looked like it broke followers). The cut never joins the trail through a wall
+  (review: along a wall, in at a gate and back along its inside, the two faces lie within 1.5 m),
+  and keeps the point it cuts back to. And a man's slot back along the trail, crowded by the
+  others, slides along the trail to the nearest clear spot instead of being picked afresh, which
+  could swing it 20 m back and forward again (a man ran a 25 m loop after it, CI 41243628687).
+- **A fire team's place moves out from behind a wall gradually** (F-416, Captain: "yes"). Held
+  back on the lead's trail while its place lay across a wall, the second team's place leapt there
+  the moment it came clear: 29 m out past the compound's gate as the lead turned along the outside
+  of its wall, every man's slot with it. It now travels there at the lead's pace plus 3 m/s,
+  straight across open ground, else along a navigation path round by the gate (one query when it's
+  let go), never through the wall. Being held back still happens at once. Captain OK'd the
+  lead's pace plus 3 m/s (2026-11-06).
+- **A fire team's men move across gradually too** (F-417, Captain: "yes"). A team held on the
+  lead's other side forms there mirrored; when that let go, each man's slot swapped sides of the
+  travelling place at once (the wedge's last man 22 m at normal spacing, 34 m at wide). Now each
+  man's slot, let go of a fallback (his team's place held, or his own slot picked again beside a
+  wall, whose trail pick went straight back to his slot when it cleared), travels there at the
+  lead's pace plus 6 m/s, straight, else by where his team forms, never through a wall, and keeps
+  with his travelling place. A place whose path ends by a low wall it can't get past is there at
+  once rather than waiting up to 20 s. Captain OK'd the men's 6 m/s (2026-11-07).
+- **A travelling slot keeps up with a sprinting team leader** (F-461, review). It was credited
+  only the squad lead's walk, so a team forming on its own leader (a player, or an AI leader sent
+  somewhere) sprinting at 6.5 m/s could trail him; it now goes at whichever is faster, the lead's
+  walk or the team's own base's move, and the 6 m/s on top of that (a base moving faster than a man
+  can, 7.5 m/s, Proposed: from the place to the leader, earns nothing). Keeping a travelling slot
+  clear of the lead and the other slots was tried and left out (F-437): it can only slow a slot in
+  a gateway.
+- **A man's slot no longer leaps out through a gate after his team's place** (F-417, F-463;
+  Captain: "your call"). The place goes out round by the gate along a path; a slot inside the wall
+  following it straight lost sight of it once it had turned outside, and leapt 19 m across the
+  wall to where it belonged. It now carries on to the last point it was heading for, the way the
+  place went, and is there at once only if nothing is in sight from there either, and never later
+  than the 20 s a place may travel. A point only counts as last headed for if the slot still sees
+  it after its step is pulled onto the navigation mesh (review).
+
+#### Fixed
+- **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
+  running, started before the wall was blown, counted as the breach's own, so on a slow runner
+  the check ran on the old navmesh ("30.2 m round for 1.5 m", CI 41186733348). It now counts only
+  bakes that finish after the town reports the breach (tests only).
+- **A quick second mantle planted the hand on the first one's top** (review): the plant was only
+  cleared once the vault had eased all the way out, so a climb started before then kept the old
+  spot. It's cleared as each climb starts (`CharacterModel._was_climbing`).
+- **Tests (review):** weapons' leg-box check adds that a downed body's, and a carried one's, thigh
+  box ignores the drawn thigh (it lies as the body does), that an up body is never "carried", and
+  that an up body carrying someone keeps the carry pose's boxes too (the carry guard on its own).
+  casualty's soak no longer calls a man stuck who walked 4 m or more and ended the window 5 m or
+  more nearer his slot than he began it (getting there round the lead's loop, CI 41235918402; at
+  first any man whose slot moved 5 m was let off, which with the lead always walking hid every
+  loop, review), nor one who was within 5 m of his slot when the window began (his slot had
+  just leapt away, R0815); its stuck line prints his slot each second, his refit pick, how far he walked
+  and how far off his slot he began. spacing's new "Trail" checks walk the lead out and back on a
+  line (the trail lies on the ground once) and in at the compound's gate and back along the
+  inside of its wall (no stretch crosses the wall), and its "Team place" checks walk the lead out
+  of the gate and along the wall's outside (the place, let go, never outruns the lead by more than
+  3 m/s nor crosses a wall, and gets there; its men's slots never step more than 1 m past the
+  lead's walk, or their team's base's, plus 6 m/s; it allowed a man's gap until round 6's review;
+  none is out of sight of both his slot and his team for longer than 20 s, F-463),
+  a new "A slot on its way" check calls the travel by hand (a sprinting team base is kept up with,
+  a jumping or hopping one isn't credited), "A slot out of sight" calls the no-straight-way rule by
+  hand behind the south wall, and "Team place, other side" walks the lead along the north wall's
+  outside and away from its corner (each man's slot, let go of the mirrored side, turns back over
+  within the rate, never across a wall). `SPACING_ONLY=place` runs only those; any value but
+  "wall" and "place" runs every check. weapons' leg-box check also sinks the drawn hips 6 cm
+  and sees the pelvis box go down with them. Local R0770 (smoke, weapons,
+  animations, Looting and the vault checks among them) and R0774 (wounds, medical); with the
+  pelvis on the drawn root and the trail fix R0796 (smoke, weapons, casualty), R0805 (smoke,
+  animations, wounds, medical, spacing, casualty) and R0808 (casualty) PASS.
+
+### SVD Dragunov's own model (2026-10-20: realistic weapons)
+
+#### Changed
+- **The SVD has a model of its own** (`model_style` "svd"). Before, it drew as a long AKM with a
+  30-round banana magazine. Now it has:
+  - a short, nearly straight 10-round magazine, 10 cm under the receiver, with its stamped rib;
+  - a skeletonised wooden thumbhole stock: the pistol grip forms the front of the hole, a bar
+    runs under it to the butt, and a cheek rest sits on the comb;
+  - a slim two-piece wooden handguard with vents, between metal rings;
+  - a long thin barrel with a slotted flash hider, and the front sight and bayonet lug behind it;
+  - an AK-style receiver: dust cover, right-side charging handle and carrier (they rack back
+    together), the long safety lever, the magazine release paddle;
+  - the optic's side rail on the left. A mounted optic still sits centred over the bore, as on
+    every rifle, but its mount clamps that rail. Under an optic the irons stay on the gun, below
+    the line of sight.
+- It still reloads like an AK (`Reloads.family`), with the same hand and sight points.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

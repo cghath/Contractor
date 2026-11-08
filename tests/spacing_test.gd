@@ -13,6 +13,12 @@ extends Node
 
 ## How much faster than real time the walk runs, and the lead's pace (a walk).
 const SCALE := 3.0
+## The fastest _men_steps lets a team's base be credited for walking, in metres a real second (a
+## sprint and a margin). Its own number, not Squad.BASE_WALK_MAX_MPS, so that a base switch the
+## code took for a walk shows up as over the rate if the run has one and a slot spends it. The
+## code's bound itself is pinned by "A slot on its way", by hand: at SCALE a sprint reads as a
+## switch to both, so the long follow never relies on it (F-461).
+const BASE_WALK_CAP_MPS := 7.5
 const LEADER_SPEED := 2.0
 ## Closer than this two squadmates, two samples (seconds) running, count as stacked.
 const STACK_M := 1.5
@@ -50,9 +56,18 @@ func _ready() -> void:
 	_place(player, Vector3(0, 0.1, 30))
 	await _seconds(1.0)
 	_clear_contact()
-	if OS.get_environment("SPACING_ONLY") != "wall":
+	# SPACING_ONLY "wall": from the wall follow on; "place": the team place checks only; anything
+	# else (or unset): every check.
+	var only := OS.get_environment("SPACING_ONLY")
+	if only not in ["wall", "place"]:
 		await _test_long_follow()
-	await _test_wall_follow()
+	if only != "place":
+		await _test_wall_follow()
+		await _test_trail_loops()
+	_test_slot_way_rules()
+	await _test_slot_out_of_sight()
+	await _test_place_on_way()
+	await _test_mirror_on_way()
 	GameState.delete_save()
 	print("SPACING TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -398,6 +413,433 @@ func _clear_contact() -> void:
 	var squad := level.squad_for(&"friendly")
 	squad.engaged_at = -1000.0
 	squad.known.clear()
+
+
+## The lead's trail cuts the loops he walks (Squad._update_trail, F-400), but never through a
+## wall (review): walked out and back on one line in the open, the trail lies on the ground once
+## (no two points further apart in it than TRAIL_LOOP_SKIP lie within TRAIL_LOOP_M) and ends
+## where he turned back to; walked along the outside of the compound's south wall, in at the
+## gate and back along its inside face (half a metre off each face: 1.3 m apart, inside
+## TRAIL_LOOP_M), no stretch of the trail crosses the wall. The lead is set down every half
+## metre and the trail updated by hand, so no physics frame moves anything in between.
+func _test_trail_loops() -> void:
+	print("Trail: the lead's trail cuts the loops he walks, never through a wall")
+	var squad := level.squad_for(&"friendly")
+	var walk := func(points: Array[Vector3]) -> void:
+		squad.set(&"_trail", PackedVector3Array())
+		for k in range(1, points.size()):
+			var from := points[k - 1]
+			var to := points[k]
+			var steps := maxi(ceili(_flat(from, to) / 0.5), 1)
+			for n in range(1 if k > 1 else 0, steps + 1):
+				player.global_position = from.lerp(to, float(n) / steps)
+				squad._update_trail()
+	var doubled := func(trail: PackedVector3Array) -> String:
+		for i in trail.size():
+			for j in range(i + Squad.TRAIL_LOOP_SKIP + 1, trail.size()):
+				if _flat(trail[i], trail[j]) < Squad.TRAIL_LOOP_M and not squad._wall_between(trail[i], trail[j]):
+					return "%s and %s" % [trail[i], trail[j]]
+		return ""
+	var out_and_back: Array[Vector3] = [Vector3(0, 0.1, 30), Vector3(0, 0.1, 40), Vector3(0, 0.1, 34)]
+	walk.call(out_and_back)
+	var trail: PackedVector3Array = squad.get(&"_trail")
+	var reach := 0.0
+	for p in trail:
+		reach = maxf(reach, p.z)
+	var twice: String = doubled.call(trail)
+	check(twice == "", "out 10 m and back 6 m on one line, the trail lies on the ground once (%d points%s)" % [trail.size(), "; doubled at " + twice if twice != "" else ""])
+	check(reach < 34.0 + Squad.TRAIL_LOOP_M, "and ends where the lead turned back to (reaches z %.1f, lead at 34)" % reach)
+	var h := CompoundLevel.COMPOUND_HALF
+	var t := CompoundLevel.WALL_THICKNESS
+	var along_wall: Array[Vector3] = [Vector3(8, 0.1, h + 0.5), Vector3(0, 0.1, h + 0.5), Vector3(0, 0.1, h - t - 0.5), Vector3(8, 0.1, h - t - 0.5)]
+	walk.call(along_wall)
+	trail = squad.get(&"_trail")
+	var through := ""
+	for i in range(1, trail.size()):
+		if squad._wall_between(trail[i - 1], trail[i]):
+			through = "%s to %s" % [trail[i - 1], trail[i]]
+			break
+	check(trail.size() >= 2 and through == "", "along the south wall, in at the gate and back inside it, no stretch of the trail crosses the wall (%d points%s)" % [trail.size(), "; through it " + through if through != "" else ""])
+	twice = doubled.call(trail)
+	check(twice == "", "and it doesn't lie over itself where no wall parts it (%s)" % (twice if twice != "" else "none"))
+	squad.set(&"_trail", PackedVector3Array())
+	_place(player, Vector3(0, 0.1, 30))
+
+
+## A fire team's place let go from its blocked-place fallback travels there (Squad._place_on_way;
+## Captain, 2026-11-02): the lead walks up the compound, out at the south gate and east along the
+## outside of the south wall, in a wedge at normal spacing, so the second team's place lies inside
+## the wall (held back on his trail through the gate) until his turn brings it out past the gate,
+## where R0815's Bravo had it leap 29 m. Every working-out of the slots is sampled: let go, the place
+## never moves further than the lead walked plus PLACE_CATCHUP_MPS a second, nor across a wall, and
+## gets where it belongs, and its men's slots keep to theirs (SLOT_CATCHUP_MPS); then the squad is
+## with its slots.
+func _test_place_on_way() -> void:
+	print("Team place: let go from behind the wall, it travels out round by the gate, no leap")
+	var squad := level.squad_for(&"friendly")
+	await _ways_start(squad, Vector3(5, 0.1, -2), Vector3(0, 0, 1))  # facing +z, up the compound to the gate
+	var seen := await _record_ways(squad, PackedVector3Array([Vector3(5, 0, 14), Vector3(0, 0, 17), Vector3(0, 0, 22.5), Vector3(22, 0, 22.5)]))
+	var p := _place_steps(squad, seen.places)
+	print("    %d working-outs let go; furthest %.1f m on its way; in a second at most %.1f m past the lead's walk" % [p.steps, p.way_max, p.worst_s])
+	check(float(p.way_max) > 10.0, "the team's place was let go from behind the wall with more than 10 m to go (%.1f m), not leapt there" % p.way_max)
+	check(float(p.worst) <= 0.05 and float(p.worst_s) <= Squad.PLACE_CATCHUP_MPS + 0.05,
+		"let go, it never moves faster than the lead's walk plus %.0f m/s (worst step %.2f m over; %.1f m in a second past the lead's walk)" % [Squad.PLACE_CATCHUP_MPS, p.worst, p.worst_s])
+	check(p.through == "", "and never across a wall between two working-outs (%s)" % (p.through if p.through != "" else "none"))
+	check(not (seen.places as Dictionary).is_empty() and bool(p.arrived), "and gets to its place (%d teams)" % (seen.places as Dictionary).size())
+	# Its men's slots (review): each one let go from a fallback (the team's place held, or his own
+	# slot picked again, a trail pick going back to his slot when its block clears) keeps to the
+	# lead's walk plus SLOT_CATCHUP_MPS a second too, within a metre (as the mirror walk's check;
+	# it was a man's gap, 8 m, before round 6's review, and R0847 saw 0.1 m). That holds for a slot
+	# left behind the gate by its place too: it goes on to where it last headed (R0880's 19 m leap
+	# out past the gate, F-463).
+	var m := _men_steps(squad, seen.men)
+	print("    its men: %d steps let go, %d on a fallback (there at once); worst %.2f m over the rate (%s); %d across a wall; longest out of sight of slot and team %.1f s" % [
+		m.steps, m.at_once, m.worst, m.worst_at, m.walls, m.blind_s])
+	check(int(m.steps) > 0 and float(m.worst) <= 1.0,
+		"its men's slots, let go, never step further than the lead's walk plus %.0f m/s (worst %.2f m over, %s)" % [Squad.SLOT_CATCHUP_MPS, m.worst, m.worst_at])
+	check(float(m.blind_s) <= Squad.PLACE_TRAVEL_MAX_S and bool(m.arrived),
+		"none is out of sight of both his slot and his team for longer than %.0f s (longest %.1f s), and each gets there" % [Squad.PLACE_TRAVEL_MAX_S, m.blind_s])
+	_ways_settled(squad, "outside the wall")
+	_ways_end(squad)
+
+
+## The other-side fallback let go (F-417; Captain, 2026-11-06: "yes"): the lead walks east along the
+## outside of the compound's north wall in a wedge at normal spacing, so the second team's place
+## (back and to his right) lies inside the wall and the team forms mirrored on his other side, out
+## north; past the corner he turns north, away from the compound, and the place comes clear east of
+## it. Its men's slots must turn back over gradually: none steps further than the lead's walk plus
+## SLOT_CATCHUP_MPS a second (where the old mirror flip swapped the wedge's last man 22 m at once),
+## none across a wall, and each gets there.
+func _test_mirror_on_way() -> void:
+	print("Team place, other side: let go, its men's slots turn back over gradually, no side swap at once")
+	var squad := level.squad_for(&"friendly")
+	var h := CompoundLevel.COMPOUND_HALF
+	await _ways_start(squad, Vector3(-6, 0.1, -h - 1.5), Vector3(1, 0, 0))  # facing +x, along the north wall's outside
+	var start := {}
+	var places: Dictionary = squad.get(&"_places")
+	for t: int in places:
+		if t != _lead_team():
+			start = places[t]
+	var mirrored := not start.is_empty() and bool(start.held) and (start.at as Vector3).z < player.global_position.z - 5.0
+	check(mirrored, "at the start the team's place is held on the lead's other side, out north (%s)" % (start.get("at", "none")))
+	var seen := await _record_ways(squad, PackedVector3Array([Vector3(h + 6, 0, -h - 1.5), Vector3(h + 6, 0, -h - 30)]))
+	var p := _place_steps(squad, seen.places)
+	var m := _men_steps(squad, seen.men)
+	print("    place: %d working-outs let go, furthest %.1f m on its way; its men: %d steps let go, %d on a fallback (there at once), furthest %.1f m from his slot on his way, worst %.2f m over the rate (%s)" % [
+		p.steps, p.way_max, m.steps, m.at_once, m.far, m.worst, m.worst_at])
+	check(int(p.steps) > 0 and float(p.worst) <= 0.05 and p.through == "" and bool(p.arrived),
+		"the place, let go, travels back to the lead's right within the lead's walk plus %.0f m/s (worst %.2f m over), never across a wall, and gets there" % [Squad.PLACE_CATCHUP_MPS, p.worst])
+	check(float(m.far) > 10.0, "a man's slot was let go with more than 10 m to go (%.1f m): turned over, not swapped at once" % m.far)
+	check(int(m.steps) > 0 and float(m.worst) <= 1.0,
+		"let go, no man's slot steps further than the lead's walk plus %.0f m/s (worst %.2f m over, %s)" % [Squad.SLOT_CATCHUP_MPS, m.worst, m.worst_at])
+	check(int(m.walls) == 0, "and none across a wall between two working-outs (%s)" % (m.through if m.through != "" else "none"))
+	check(bool(m.arrived), "and each gets to his slot")
+	_ways_settled(squad, "north of the compound")
+	_ways_end(squad)
+
+
+## Squad._slot_on_way's credit, called by hand in one frame on open ground south of the compound
+## (nothing works the slots out in between): a slot on its way is credited his team's base's move
+## when it outpaces the lead (a sprinting team leader, F-461), but not a base that moved faster
+## than a man can (a switch of source, however short).
+func _test_slot_way_rules() -> void:
+	print("A slot on its way: keeps up with a sprinting team leader")
+	var squad := level.squad_for(&"friendly")
+	var who: Soldier = null
+	for s: Soldier in _squad():
+		if who == null and s.is_ai() and s.fire_team >= 0 and s.fire_team != _lead_team():
+			who = s
+	if who == null:
+		check(false, "a man of the second team to test with")
+		return
+	_place(player, Vector3(0, 0.1, 30))  # south of the compound, open ground all round
+	var id := who.get_instance_id()
+	var ways: Dictionary = squad.get(&"_ways")
+	var lead := player.global_position
+	var dt := 0.1
+	var step := func(at: Vector3, want: Vector3, base_was: Vector3, base: Vector3) -> Vector3:
+		ways[id] = {"at": at, "goal": want, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+			"lead": player.global_position, "base": base_was, "since": 0.0}
+		return squad._slot_on_way(who, want, base, false, false, RID())
+	var a := lead + Vector3(-20, 0, 10)
+	var want := lead + Vector3(20, 0, 10)
+	var b := lead + Vector3(0, 0, 6)
+	var sprint := 6.5 * dt  # a team leader sprinting
+	var still: float = _flat(a, step.call(a, want, b, b))
+	var ran: float = _flat(a, step.call(a, want, b, b + Vector3(sprint, 0, 0)))
+	var jumped: float = _flat(a, step.call(a, want, b, b + Vector3(15, 0, 0)))
+	var hopped: float = _flat(a, step.call(a, want, b, b + Vector3(3, 0, 0)))  # under TRAIL_JUMP_M, far over a sprint
+	var rate := Squad.SLOT_CATCHUP_MPS * dt
+	print("    a step in %.1f s: %.2f m with the base still, %.2f m with it sprinting, %.2f m with it jumping 15 m, %.2f m with it hopping 3 m" % [dt, still, ran, jumped, hopped])
+	check(ran >= sprint + rate - 0.02 and ran <= sprint + rate + 0.05 and absf(still - rate) <= 0.05,
+		"his team's base sprinting %.2f m, his slot steps that plus %.2f m (%.2f m), not only the lead's walk (%.2f m)" % [sprint, rate, ran, still])
+	check(absf(jumped - rate) <= 0.05, "a base that jumped 15 m earns nothing (%.2f m)" % jumped)
+	check(absf(hopped - rate) <= 0.05, "nor one that hopped 3 m in %.1f s, faster than a man can (%.2f m)" % [dt, hopped])
+	ways.erase(id)
+
+
+## "No straight way" (Captain, 2026-11-08: "your call", F-417, F-463), called by hand in one frame
+## inside the compound's south wall: a slot with its goal and its team's base both across the wall
+## carries on to the last point it headed for (`aim`), but is there at once on reaching it with
+## nothing in sight, with no such point, or after PLACE_TRAVEL_MAX_S on its way. That bounds how
+## long it's left across a wall from its goal, which the 2026-10-14 rule otherwise forbids.
+func _test_slot_out_of_sight() -> void:
+	print("A slot out of sight of its goal and team: carries on to where it last headed, for a limited time")
+	var squad := level.squad_for(&"friendly")
+	var who: Soldier = null
+	for s: Soldier in _squad():
+		if who == null and s.is_ai() and s.fire_team >= 0 and s.fire_team != _lead_team():
+			who = s
+	if who == null:
+		check(false, "a man of the second team to test with")
+		return
+	_place(player, Vector3(0, 0.1, 30))
+	await get_tree().physics_frame
+	var id := who.get_instance_id()
+	var ways: Dictionary = squad.get(&"_ways")
+	var dt := 0.1
+	var h := CompoundLevel.COMPOUND_HALF
+	var at := Vector3(10, 0.1, h - 3)  # inside the south wall
+	var want := Vector3(10, 0.1, h + 4)  # outside it
+	var base := Vector3(12, 0.1, h + 4)
+	var aim := Vector3(4, 0.1, h - 3)  # along the inside of the wall, towards the gate
+	check(squad._wall_between(at, want) and squad._wall_between(at, base) and not squad._wall_between(at, aim),
+		"the wall stands between the slot and both its goal and its team's base, and not between it and the point it last headed for")
+	var step := func(from: Vector3, last: Vector3, since: float) -> Vector3:
+		ways[id] = {"at": from, "goal": want, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+			"lead": player.global_position, "base": base, "aim": last, "since": since}
+		return squad._slot_on_way(who, want, base, false, false, RID())
+	var rate := Squad.SLOT_CATCHUP_MPS * dt
+	var on: Vector3 = step.call(at, aim, 0.0)
+	var was_way := bool(ways[id].way)
+	check(was_way and absf(_flat(at, on) - rate) <= 0.05 and _flat(on, aim) < _flat(at, aim),
+		"it carries on towards that point at its rate (%.2f m in %.1f s), not there at once" % [_flat(at, on), dt])
+	var late: Vector3 = step.call(at, aim, Squad.PLACE_TRAVEL_MAX_S - 1.0)
+	check(_flat(late, want) > 1.0 and bool(ways[id].way), "still does a second before PLACE_TRAVEL_MAX_S is up (%.1f m from its goal)" % _flat(late, want))
+	var over: Vector3 = step.call(at, aim, Squad.PLACE_TRAVEL_MAX_S)
+	check(_flat(over, want) <= 0.01 and not bool(ways[id].way), "and past PLACE_TRAVEL_MAX_S on its way it's there at once (%.1f m off)" % _flat(over, want))
+	var reached: Vector3 = step.call(aim + Vector3(0.3, 0, 0), aim, 0.0)
+	check(_flat(reached, want) <= 0.01 and not bool(ways[id].way), "there at the point it headed for, with nothing in sight still, it's there at once (%.1f m off)" % _flat(reached, want))
+	var none: Vector3 = step.call(at, Vector3.INF, 0.0)
+	check(_flat(none, want) <= 0.01, "and with no such point it's there at once (%.1f m off)" % _flat(none, want))
+	# Right by the wall the navigation mesh stops short: a step towards that point stays on the
+	# straight line all the same (pulled aside, R0886's sight line through the gate grazed a post).
+	var map: RID = who.get_world_3d().navigation_map
+	var edge := Vector3(10, 0.1, h - 0.45)
+	var edge_aim := Vector3(4, 0.1, h - 0.45)
+	var pulled := NavigationServer3D.map_get_closest_point(map, edge.lerp(edge_aim, 0.1))
+	ways[id] = {"at": edge, "goal": want, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+		"lead": player.global_position, "base": base, "aim": edge_aim, "since": 0.0}
+	var kept: Vector3 = squad._slot_on_way(who, want, base, false, false, map)
+	check(_flat(pulled, edge.lerp(edge_aim, 0.1)) > 0.03 and absf(kept.z - edge.z) <= 0.01 and kept.x < edge.x,
+		"on its way to that point it keeps to the straight line, not pulled onto the navigation mesh (%.2f m off the line; the mesh is %.2f m off)" % [absf(kept.z - edge.z), _flat(pulled, edge.lerp(edge_aim, 0.1))])
+	# A step pulled onto the mesh takes a new point only if it still sees it from there: a post
+	# that hides the point from the pulled step, and not along the straight line, leaves the old one.
+	var sighted := Vector3(4, 0.1, edge.z)
+	var pulled_z := NavigationServer3D.map_get_closest_point(map, edge.lerp(sighted, rate / _flat(edge, sighted))).z
+	var post := StaticBody3D.new()
+	post.collision_layer = SquadAI.WORLD_MASK
+	var post_shape := CollisionShape3D.new()
+	var post_box := BoxShape3D.new()
+	post_box.size = Vector3(0.5, 3.0, 2.0)
+	post_shape.shape = post_box
+	post.add_child(post_shape)
+	level.add_child(post)
+	post.global_position = Vector3(8.25, 1.5, edge.z - 0.012 - 1.0)  # its near face just off the straight line
+	await get_tree().physics_frame
+	var old_aim := edge + Vector3(0, 0, -3)
+	var sighted_step := func() -> void:
+		ways[id] = {"at": edge, "goal": sighted, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+			"lead": player.global_position, "base": base, "aim": old_aim, "since": 0.0}
+		squad._slot_on_way(who, sighted, base, false, false, map)
+	sighted_step.call()
+	var aim_hidden: Vector3 = ways[id].aim
+	var straight_clear: bool = not squad._wall_between(edge, sighted)
+	post.free()
+	await get_tree().physics_frame
+	sighted_step.call()
+	var aim_clear: Vector3 = ways[id].aim
+	check(straight_clear and pulled_z < edge.z - 0.03 and aim_hidden.is_equal_approx(old_aim) and aim_clear.is_equal_approx(sighted),
+		"a point the step pulled onto the mesh no longer sees isn't taken up (kept %s), and one it still sees is (%s; pulled %.2f m)" % [aim_hidden, aim_clear, edge.z - pulled_z])
+	var near := want + Vector3(0.2, 0, 0)
+	var arrived: Vector3 = step.call(near, aim, 0.0)
+	check(_flat(arrived, want) <= 0.01 and (ways[id].aim as Vector3).is_equal_approx(want),
+		"a slot that gets there drops the old point for its goal (%s), no stale aim" % ways[id].aim)
+	ways.erase(id)
+
+
+func _lead_team() -> int:
+	return player.fire_team if player.fire_team >= 0 else 0
+
+
+## A fresh walk for the team-place checks: a normal wedge, the lead at `start` heading `fwd`, no
+## trail or places from before, every man on his slot.
+func _ways_start(squad: Squad, start: Vector3, fwd: Vector3) -> void:
+	squad.formation = "wedge"
+	squad.spacing = "normal"
+	Engine.physics_ticks_per_second = roundi(60 * SCALE)
+	Engine.time_scale = SCALE
+	_route = PackedVector3Array()
+	_place(player, start)
+	player.rotation.y = atan2(-fwd.x, -fwd.z)
+	squad.heading = fwd
+	squad._heading_from = start
+	squad.set(&"_trail", PackedVector3Array())
+	squad.set(&"_places", {})
+	squad.set(&"_ways", {})
+	await _frames(2)
+	for s: Soldier in _squad():
+		if s.vitals.is_up():
+			_place(s, squad.follow_point(s) + Vector3.UP * 0.1)
+	await _seconds(2.0)
+
+
+## Walks the lead along `route`, sampling every working-out of the slots: each other team's place
+## (Squad._places) and each of its men's follow_point with his slot's state (Squad._ways), until the
+## route is done and nothing has been on its way for 6 s (at most 120 s).
+## {"places": {team: [entry]}, "men": {Soldier: [{"frame", "now", "at", "goal", "fell", "way", "lead", "base"}]}}
+func _record_ways(squad: Squad, route: PackedVector3Array) -> Dictionary:
+	_sim_s = 0.0
+	_paused_until = -1.0
+	_route = route
+	_route_index = 0
+	var places := {}
+	var men := {}
+	var lead_team := _lead_team()
+	var still := 0  # physics frames since the route ended with nothing on its way
+	var frames := 0
+	while still < 6 * 60 * SCALE and frames < 120 * 60 * SCALE:
+		await get_tree().physics_frame
+		frames += 1
+		var going := false
+		var now_places: Dictionary = squad.get(&"_places")
+		for t: int in now_places:
+			var e: Dictionary = now_places[t]
+			going = going or bool(e.way)
+			if not places.has(t):
+				places[t] = []
+			var list: Array = places[t]
+			if list.is_empty() or int(list[list.size() - 1].frame) != int(e.frame):
+				list.append({"frame": e.frame, "now": e.now, "at": e.at, "goal": e.goal, "held": e.held, "way": e.way, "lead": e.lead})
+		for s: Soldier in _squad():
+			if not s.is_ai() or not s.vitals.is_up() or s.fire_team < 0 or s.fire_team == lead_team:
+				continue
+			var at := squad.follow_point(s)
+			var w: Dictionary = (squad.get(&"_ways") as Dictionary).get(s.get_instance_id(), {})
+			if w.is_empty():
+				continue
+			going = going or bool(w.way)
+			if not men.has(s):
+				men[s] = []
+			var list: Array = men[s]
+			if list.is_empty() or int(list[list.size() - 1].frame) != int(w.frame):
+				list.append({"frame": w.frame, "now": w.now, "at": at, "goal": w.goal, "fell": w.fell, "way": w.way, "lead": w.lead,
+					"base": w.base})
+		still = still + 1 if _route_index >= _route.size() and not going else 0
+	return {"places": places, "men": men}
+
+
+## The team places' steps let go (held back is there at once, on this side of the wall: _blocked's
+## rule): how far any went past the lead's walk plus PLACE_CATCHUP_MPS a second.
+func _place_steps(squad: Squad, seen: Dictionary) -> Dictionary:
+	var worst := -INF  # how far a step went past what the rate allows
+	var worst_s := 0.0  # the furthest the place went in a second past the lead's walk, let go
+	var through := ""
+	var way_max := 0.0
+	var arrived := true
+	var steps := 0
+	for t: int in seen:
+		var list: Array = seen[t]
+		for i in range(1, list.size()):
+			var a: Dictionary = list[i - 1]
+			var b: Dictionary = list[i]
+			if bool(b.held):
+				continue
+			steps += 1
+			var allowed := _flat(a.lead, b.lead) + Squad.PLACE_CATCHUP_MPS * (float(b.now) - float(a.now))
+			worst = maxf(worst, _flat(a.at, b.at) - allowed)
+			if through == "" and squad._wall_between(a.at, b.at):
+				through = "%s to %s" % [a.at, b.at]
+			if bool(b.way):
+				way_max = maxf(way_max, _flat(b.at, b.goal))
+			var j := i  # a second on from a, while it's let go
+			while j + 1 < list.size() and not bool(list[j + 1].held) and float(list[j + 1].now) - float(a.now) <= 1.0:
+				j += 1
+			var walked := 0.0
+			for k in range(i, j + 1):
+				walked += _flat(list[k - 1].lead, list[k].lead)
+			worst_s = maxf(worst_s, _flat(a.at, list[j].at) - walked)
+		var last: Dictionary = list[list.size() - 1]
+		arrived = arrived and not bool(last.way)
+	return {"worst": worst, "worst_s": worst_s, "through": through, "way_max": way_max, "arrived": arrived, "steps": steps}
+
+
+## The men's slots' steps let go of a fallback or on their way (onto a fallback is at once):
+## how far any went past the lead's walk plus SLOT_CATCHUP_MPS a second, and across a wall, and
+## ("blind_s") the longest any stood on his way with a wall to both his slot and his team's base.
+## His team's base's move is credited only up to BASE_WALK_CAP_MPS, this test's own number, so a
+## switch of source the code wrongly took for a walk shows up as over the rate.
+func _men_steps(squad: Squad, seen: Dictionary) -> Dictionary:
+	var blind_s := 0.0
+	var worst := -INF
+	var worst_at := "none"
+	var through := ""
+	var walls := 0
+	var steps := 0
+	var at_once := 0
+	var far := 0.0
+	var arrived := true
+	for s: Soldier in seen:
+		var list: Array = seen[s]
+		var blind := 0.0
+		for i in range(1, list.size()):
+			var a: Dictionary = list[i - 1]
+			var b: Dictionary = list[i]
+			if bool(b.way) and not bool(b.fell) and squad._wall_between(b.at, b.goal) and squad._wall_between(b.at, b.base):
+				blind += float(b.now) - float(a.now)
+				blind_s = maxf(blind_s, blind)
+			else:
+				blind = 0.0
+			if bool(b.fell):
+				if _flat(a.at, b.at) > 0.01:
+					at_once += 1
+				continue
+			if not (bool(a.fell) or bool(a.way)):
+				continue
+			steps += 1
+			var dt := float(b.now) - float(a.now)
+			var walked := _flat(a.lead, b.lead)
+			if _flat(a.base, b.base) <= BASE_WALK_CAP_MPS * dt:
+				walked = maxf(walked, _flat(a.base, b.base))  # his team's base outpacing the lead (F-461)
+			var over := _flat(a.at, b.at) - walked - Squad.SLOT_CATCHUP_MPS * dt
+			if over > worst:
+				worst = over
+				worst_at = "%s %.1f m, %s to %s" % [s.name, _flat(a.at, b.at), a.at, b.at]
+			if squad._wall_between(a.at, b.at):
+				walls += 1
+				if through == "":
+					through = "%s %s to %s" % [s.name, a.at, b.at]
+			if bool(b.way):
+				far = maxf(far, _flat(b.at, b.goal))
+		arrived = arrived and not bool(list[list.size() - 1].way)
+	return {"worst": worst, "worst_at": worst_at, "through": through, "walls": walls, "steps": steps, "at_once": at_once,
+		"far": far, "arrived": arrived, "blind_s": blind_s}
+
+
+func _ways_settled(squad: Squad, where: String) -> void:
+	var behind := PackedStringArray()
+	for s: Soldier in _squad():
+		if s.vitals.is_up() and _flat(s.global_position, squad.follow_point(s)) > SETTLING_M:
+			behind.append("%s %.0f m off: %s" % [s.name, _flat(s.global_position, squad.follow_point(s)), SquadAI.of(s).status_text()])
+	check(behind.is_empty(), "then the squad is with its slots %s (%s)" % [where, ", ".join(behind) if not behind.is_empty() else "all"])
+
+
+func _ways_end(squad: Squad) -> void:
+	Engine.time_scale = 1.0
+	Engine.physics_ticks_per_second = 60
+	_route = PackedVector3Array()
+	squad.formation = Squad.DYNAMIC
+	squad.spacing = Squad.DYNAMIC
 
 
 func _place(s: Soldier, pos: Vector3) -> void:

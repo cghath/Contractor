@@ -988,6 +988,7 @@ static func _spec_build(model: String) -> Dictionary:
 			var out: Dictionary
 			match _rifle_style(model):
 				"ak": out = _rifle_ak(arg, art)
+				"svd": out = _rifle_svd(arg, art)
 				"pk": out = _rifle_pkm(arg, art)
 				"m240": out = _rifle_m240(arg, art)
 				"m249": out = _rifle_m249(arg, art)
@@ -1790,6 +1791,7 @@ static func reload_points(model: String) -> Dictionary:
 			out["cover"] = Vector3((lo.x + hi.x) * 0.5, hi.y + 0.3, lerpf(lo.z, hi.z, 0.75))
 		match _rifle_style(model):
 			"ak": out["bolt"] = Vector3(2.75, 8.4 + b, z.call(0.5625))      # the charging handle's knob, right
+			"svd": out["bolt"] = Vector3(2.75, 8.5 + b, z.call(0.5825))     # its charging handle's knob, right
 			"bullpup":
 				out["bolt"] = Vector3(2.5, 8.5 + b, z.call(0.5))           # the cocking handle, right
 				out["catch"] = Vector3(0.5, 7.4 + b, z.call(0.76))         # the bolt release plunger, upper left
@@ -1831,7 +1833,7 @@ static func part_motion(model: String) -> Dictionary:
 		out.travel = 0.025  # a slide locked back
 		return out
 	match _rifle_style(model):
-		"ak": out.travel = 0.1
+		"ak", "svd": out.travel = 0.1
 		"bullpup": out.travel = 0.08
 		"pk", "m240", "m249": out.travel = 0.12
 		"mosin", "chassis_bolt":
@@ -2243,6 +2245,96 @@ static func _rifle_ak(length: int, art := IRONS) -> Dictionary:
 		_fb(1.25, 5.25, f.call(0.6), 1.75, 5.8, f.call(0.625), C.GUN_LIGHT),              # magazine release paddle, behind the magazine
 		_fb(1.25, 9.0, f.call(0.76), 1.75, 9.5, f.call(0.775), C.GUN_LIGHT),              # the dust cover's latch button, at the back
 	]}
+
+
+## The SVD Dragunov, learned from the real rifle (Captain, 2026-10-20: realistic weapons; it drew
+## as a long AKM with a 30-round banana): a slotted flash hider on a long thin barrel, the front
+## sight and bayonet lug just behind it, a gas block, a slim two-piece wooden handguard with
+## vents, an AK-style receiver (dust cover, right-side charging handle, the long safety lever)
+## with the PSO-1's side rail on its left, a short straight 10-round magazine 10 cm under the
+## receiver, and a skeletonised wooden thumbhole stock: the pistol grip is the hole's front, a
+## bar under it back to the butt, a cheek rest on the comb. An optic still sits centred over the
+## bore (Optics has no per-weapon offset), its mount clamped to the left rail. The AK's frame
+## points (hand_points, butt_point, sight_point, its irons) and its reload.
+static func _rifle_svd(length: int, art := IRONS) -> Dictionary:
+	var n := maxi(length, 20)
+	var f := func(t: float) -> float: return n * t
+	var rear := sight_back(IRONS, n) - AK_REAR_FORWARD  # the rear sight leaf (ak_iron_boxes)
+	var sight: Array
+	if art == IRONS:
+		sight = ak_iron_boxes(n)
+	else:
+		# The irons stay on the gun, below the optic's line: the front sight block and the leaf laid
+		# flat. The optic's mount clamps the left rail and bridges over the receiver under it.
+		var back := sight_back(art, n)
+		var z0 := maxf(f.call(0.56), back - optic_length(art))
+		var z1 := minf(f.call(0.67), back + 2.0)
+		sight = optic_boxes(art, back) + optic_mount(art, n, 9.6) + [
+			_fb(0.25, 7.75, z0, 0.5, RAIL_Y, z1, C.GUN),                                  # the mount's clamp, on the left rail
+			_fb(0.25, 9.6, z0, 2.1, RAIL_Y, z1, C.GUN),                                   # its bridge over the receiver
+			_fb(0.0, 8.25, z0 + 1.0, 0.25, 8.75, z0 + 2.0, C.GUN_LIGHT),                   # its clamp lever
+			_fb(1.0, 8.0, f.call(0.06), 2.0, 9.75, f.call(0.06) + 0.5, C.GUN),           # front sight block
+			_fb(1.0, 9.75, rear - 1.0, 2.0, 10.25, rear + 1.0, C.GUN),                    # rear sight leaf, laid flat
+		]
+	var boxes := sight + [
+		_fb(1.25, 8.25, 0, 1.75, 8.75, f.call(0.56), C.GUN),                    # long thin barrel, into the receiver
+		_fb(1.0, 7.9, 0, 2.0, 9.1, 3.5, C.GUN),                                 # flash hider: a tube 7 cm long,
+		_fb(1.25, 8.25, 0, 1.75, 8.75, 3.0, C.EMPTY),                           # hollow to its back wall,
+		_fb(1.0, 8.25, 0.5, 1.25, 8.75, 3.0, C.EMPTY),                          # its slots, left, right and top
+		_fb(1.75, 8.25, 0.5, 2.0, 8.75, 3.0, C.EMPTY),
+		_fb(1.25, 8.75, 0.5, 1.75, 9.1, 3.0, C.EMPTY),
+		_fb(1.25, 7.25, f.call(0.06), 1.75, 8.25, f.call(0.06) + 1.0, C.GUN),  # bayonet lug, under the front sight
+		_fb(1.15, 8.0, f.call(0.285), 1.85, 9.9, f.call(0.315), C.GUN),         # gas block
+		_fb(0.75, 7.0, f.call(0.315), 2.25, 9.75, f.call(0.33), C.GUN),         # the handguard's front ring
+		_fb(0.6, 7.0, f.call(0.33), 2.4, 8.75, f.call(0.515), C.WOOD),          # two-piece wooden handguard: the lower,
+		_fb(0.6, 7.0, f.call(0.33), 2.4, 7.35, f.call(0.515), C.WOOD_DARK),
+		_fb(0.75, 8.75, f.call(0.33), 2.25, 9.75, f.call(0.515), C.WOOD),       # the slimmer upper over the gas tube
+		_fb(0.65, 7.0, f.call(0.515), 2.35, 9.75, f.call(0.53), C.GUN),         # its rear ring, on the receiver
+		_fb(0.7, 7.0, f.call(0.53), 2.3, 9.6, f.call(0.78), C.GUN),             # receiver and dust cover
+		_fb(0.75, 5.8, f.call(0.535), 2.25, 7.0, f.call(0.7), C.GUN),
+		_fb(0.45, 7.75, f.call(0.55), 0.7, 8.75, f.call(0.7), C.GUN_LIGHT),     # the optic's side rail, on the left
+		_fb(1.0, 5.8, f.call(0.55), 2.0, 6.6, f.call(0.615), C.EMPTY),          # the well
+		_fbm(0.9, 3.0, f.call(0.545), 2.1, 6.6, f.call(0.615), C.GUN),           # 10-round magazine: short and nearly
+		_fbm(0.9, 1.3, f.call(0.54), 2.1, 3.0, f.call(0.61), C.GUN),             # straight, 10 cm under the receiver
+		_fbm(0.8, 1.6, f.call(0.565), 2.2, 5.6, f.call(0.585), C.GUN),           # its stamped rib
+		_fbm(0.85, 0.8, f.call(0.535), 2.15, 1.3, f.call(0.61), C.GUN_LIGHT),    # floorplate
+		_fb(1.25, 5.25, f.call(0.615), 1.75, 5.8, f.call(0.63), C.GUN_LIGHT),   # magazine release paddle, behind it
+		_fb(1.25, 4.4, f.call(0.63), 1.75, 5.8, f.call(0.64), C.GUN),           # trigger guard
+		_fb(1.25, 4.4, f.call(0.63), 1.75, 4.8, f.call(0.68), C.GUN),
+		_fb(1.25, 4.9, f.call(0.655), 1.75, 5.8, f.call(0.665), C.GUN_LIGHT),   # trigger
+		# The thumbhole stock: the pistol grip, raked back, is the hole's front; a bar runs from its
+		# foot to the butt and the comb from the receiver, with a cheek rest on it.
+		_fb(0.9, 4.4, f.call(0.68), 2.1, 7.0, f.call(0.735), C.WOOD),           # pistol grip
+		_fb(0.9, 3.0, f.call(0.69), 2.1, 4.4, f.call(0.745), C.WOOD),
+		_fb(0.9, 1.0, f.call(0.7), 2.1, 3.0, f.call(0.755), C.WOOD),
+		_fb(0.8, 1.0, f.call(0.72), 2.2, 3.0, f.call(0.9), C.WOOD),             # the bar under the hole
+		_fb(0.8, 7.0, f.call(0.77), 2.2, 9.0, f.call(0.9), C.WOOD),             # comb
+		_fb(0.6, 9.0, f.call(0.8), 2.2, 9.8, f.call(0.92), C.WOOD_DARK),        # cheek rest, on the comb's left
+		_fb(0.8, 1.0, f.call(0.9), 2.2, 9.0, n, C.WOOD),                        # butt
+		_fb(0.8, 1.0, f.call(0.72), 2.2, 1.35, n, C.WOOD_DARK),                 # the stock's underside
+		_fb(0.75, 0.8, n - 0.5, 2.25, 9.2, n, C.GUN),                           # butt plate
+		# The action (AK-style): the ejection port on the right, the carrier in it and its charging
+		# handle ahead of it (BOLT_TAG: they rack back together), the long safety lever over the
+		# handle's slot and the dust cover's latch button.
+		_fb(1.75, 8.0, f.call(0.59), 2.25, 9.0, f.call(0.69), C.EMPTY),                   # ejection port, right
+		_fbt(1.75, 8.0, f.call(0.59), 2.0, 9.0, f.call(0.635), C.GUN_LIGHT, BOLT_TAG),    # the bolt carrier's front in it
+		_fbt(2.25, 8.25, f.call(0.57), 2.75, 8.75, f.call(0.59), C.GUN, BOLT_TAG),        # charging handle: its stem
+		_fbt(2.5, 8.0, f.call(0.565), 3.0, 9.0, f.call(0.6), C.GUN_LIGHT, BOLT_TAG),      # and its knob
+		_fb(2.25, 7.5, f.call(0.61), 2.5, 8.0, f.call(0.76), C.GUN),                      # safety lever, along the right side
+		_fb(2.25, 7.25, f.call(0.74), 2.6, 8.0, f.call(0.775), C.GUN),                    # its pivot, at the receiver's back
+		_fb(2.25, 7.25, f.call(0.61), 2.6, 7.75, f.call(0.63), C.GUN_LIGHT),              # its finger tab, at the front
+		_fb(1.25, 9.0, f.call(0.78), 1.75, 9.5, f.call(0.795), C.GUN_LIGHT),              # the dust cover's latch button
+	]
+	# The handguard's vents, both pieces, both sides: cut in, dark inside.
+	for k in 4:
+		var z: float = f.call(0.35) + k * n * 0.04
+		boxes.append_array([
+			_fb(0.5, 7.5, z, 0.75, 8.25, z + 1.25, C.EMPTY), _fbp(0.75, 7.5, z, 1.0, 8.25, z + 1.25, C.GUN),
+			_fb(2.25, 7.5, z, 2.5, 8.25, z + 1.25, C.EMPTY), _fbp(2.0, 7.5, z, 2.25, 8.25, z + 1.25, C.GUN),
+			_fb(0.75, 9.0, z, 1.0, 9.5, z + 1.0, C.EMPTY), _fbp(1.0, 9.0, z, 1.25, 9.5, z + 1.0, C.GUN),
+			_fb(2.0, 9.0, z, 2.25, 9.5, z + 1.0, C.EMPTY), _fbp(1.75, 9.0, z, 2.0, 9.5, z + 1.0, C.GUN),
+		])
+	return {"size": Vector3i(3, 13, n), "sub": 4, "boxes": boxes}
 
 
 ## A belt-fed's visible belt (BELT_TAG: it comes off with the box): up the receiver's side (the
