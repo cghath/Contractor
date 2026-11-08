@@ -669,6 +669,8 @@ func server_accept(cid: String, terms: Dictionary, peer_id := 1, over_cap := fal
 			why = ContractGen.terms_problem(terms, Economy.reputation(String(c.employer)))
 		if why == "":
 			why = Operations.accept_problem(c)  # D3: operations need the employer at trusted
+		if why == "":
+			why = Staging.board_problem(c)  # D8: the staging FOB's board is local
 	if why != "":
 		_notify(peer_id, why)
 		return why

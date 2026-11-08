@@ -20,6 +20,8 @@ const EXTRA_STASH := [["m17", 1], ["burn_dressing", 3]]
 const CLIENT_HUB_DONE := "HUB CHECKS DONE"
 ## ...and once it has looked at the zone (the host extracts then).
 const CLIENT_ZONE_DONE := "ZONE CHECKS DONE"
+## ...and once it has seen the company staged (D8).
+const CLIENT_STAGING := "STAGING SEEN"
 ## The zone the test deploys to (its save is the campaign's: BaseHub.zone_save_id).
 const ZONE := "test_base_zone"
 
@@ -927,7 +929,20 @@ func _start_client(ids: Array, stash_counts: Dictionary) -> Dictionary:
 		await _seconds(0.25)
 	check(Roster.ids(BaseHub.roster()).size() == ids.size() + 1, "the host hired who the client asked for (%d on the books)" % Roster.ids(BaseHub.roster()).size())
 	check(77 not in BaseHub.ready_peers(), "a player joining resets the FOB ready-up")
+	await _test_staging_seen(ids, log_path)
 	return {"pid": pid, "log": log_path}
+
+
+## D8: the host's staging reaches a client (the base screen's view), and is gone from it when the
+## company leaves.
+func _test_staging_seen(ids: Array, log_path: String) -> void:
+	var s := Campaign.section(Staging.SECTION)
+	s.merge({"host": "us_forces", "zone": "fob_halberd", "since_day": BaseHub.day(), "vehicles": [], "squad": ids.duplicate(), "employer": "", "deployments": 0, "evict": ""}, true)
+	BaseHub._changed_all()
+	var seen := await _wait_until(func() -> bool: return FileAccess.get_file_as_string(log_path).contains(CLIENT_STAGING), 20.0)
+	check(seen, "the client saw the company staged")
+	s.clear()
+	BaseHub._changed_all()
 
 
 ## Waits for the client to finish following the deployment and prints what it checked.
@@ -942,7 +957,7 @@ func _finish_client(client: Dictionary) -> void:
 	var code := OS.get_process_exit_code(pid) if pid > 0 else -1
 	if FileAccess.file_exists(client.log):
 		for line in FileAccess.get_file_as_string(client.log).split("\n"):
-			if line.strip_edges() != "" and line.strip_edges() not in [CLIENT_HUB_DONE, CLIENT_ZONE_DONE]:
+			if line.strip_edges() != "" and line.strip_edges() not in [CLIENT_HUB_DONE, CLIENT_ZONE_DONE, CLIENT_STAGING]:
 				print("  (client) " + line.strip_edges())
 	check(code == 0, "the client's checks pass (exit %d)" % code)
 
@@ -990,6 +1005,12 @@ func _run_client() -> void:
 	var readied := await _wait_until(func() -> bool: return BaseHub.is_ready(me) and BaseHub.all_ready(), 10.0)
 	check(readied, "its Ready goes through the host and comes back in the view")
 	_say(CLIENT_HUB_DONE)
+	var staged := await _wait_until(Staging.active, 20.0)
+	check(staged and Staging.zone() == "fob_halberd" and Staging.host() == "us_forces", "D8: the client sees the company staged at FOB Halberd")
+	check(Quartermaster.price(&"mag_556") == roundi(Prices.price_of(&"mag_556") * 1.25) and not Quartermaster.sells(&"m4a1"), "and its shop is the staging FOB's terminal, on the client too")
+	check(Staging.refuses("hire") and not Staging.has_member("nobody"), "and what isn't there")
+	_say(CLIENT_STAGING)
+	check(await _wait_until(func() -> bool: return not Staging.active(), 20.0), "and leaving it, home again")
 	# Captain, 2026-10-14: a client sat on the debrief when the host moved on into the next zone
 	# and couldn't leave it. A debrief left open here closes when the client follows.
 	var debrief: Object = Contracts.show_debrief()

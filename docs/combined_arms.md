@@ -2717,6 +2717,16 @@ Captain described.
 - The staging zone is a `ZoneLevel` with the host's FOB module and the company's corner, loaded
   like the base zone (`BaseZoneLevel` is the template).
 
+### 8.6 As built (D8)
+
+Built: `Staging` (quotes, access, the section, rent, eviction, flight prices), `StagingLevel` and
+`scenes/levels/staging.tscn` (the corner), the options at the ops desk and on the board, the
+briefing's way in over the crossing, the resupply terminal, the motor pool's bill, misconduct, the
+war taking a staging FOB. Not built: see F-487 to F-490 in docs/audits/followups.md (UK, Canada
+and Vessmark as hosts; the tent's stabilise on live wounds; driving a parked vehicle out; the
+assault on Halberd as a live event rather than a defend job). The calls made are under "Calls
+made" there, marked D8.
+
 ## 9. Build plan
 
 ### 9.1 Rules for every phase

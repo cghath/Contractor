@@ -83,11 +83,15 @@ static func allied_only(item_id: StringName) -> bool:
 
 ## Whether the company can buy `item_id` today: the base shop, or a quartermaster.
 static func sells(item_id: StringName) -> bool:
+	if Staging.active():
+		return Staging.sells(item_id)  # D8: the staging FOB's resupply terminal instead
 	return Prices.for_sale(item_id) or not best_deal(item_id).is_empty()
 
 
 ## What one `item_id` costs the company today (0: nobody sells it to us).
 static func price(item_id: StringName) -> int:
+	if Staging.active():
+		return Staging.item_price(item_id) if Staging.sells(item_id) else 0
 	var deal := best_deal(item_id)
 	var base := Prices.price_of(item_id) if Prices.for_sale(item_id) else 0
 	if deal.is_empty():
@@ -108,6 +112,8 @@ static func seller_text(item_id: StringName) -> String:
 ## Everything the company can buy today (the base shop plus what quartermasters add), sorted
 ## like Prices.shop_items().
 static func catalog() -> Array[StringName]:
+	if Staging.active():
+		return Prices.shop_items().filter(Staging.sells)
 	var out := Prices.shop_items()
 	for id: StringName in ItemDB.all_ids():
 		if not id in out and allied_only(id) and not best_deal(id).is_empty():

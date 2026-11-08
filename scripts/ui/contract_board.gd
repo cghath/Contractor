@@ -275,6 +275,8 @@ func refresh() -> void:
 	_offer_ids.clear()
 	_offers.clear()
 	for c: Dictionary in Contracts.board():
+		if Staging.board_problem(c) != "":
+			continue  # D8: the staging FOB's board only has work within reach of it
 		_offer_ids.append(String(c.cid))
 		_offers.add_item(offer_line(c))
 		_offers.set_item_tooltip(_offers.item_count - 1, _tooltip(c))  # the whole line (cut with "..." when narrow) and the brief
@@ -386,6 +388,9 @@ func _show_details() -> void:
 		lines.append("Deploy by day %d" % int(c.get("deadline_day", 0)))
 	else:
 		lines.append("Offer open until day %d" % int(c.expires_day))
+	if String(c.get("in_zone", "")) == "":  # D8: how the squad gets there, and what each way costs
+		for o: Dictionary in Staging.options(c):
+			lines.append("Getting there: " + Staging.option_text(o))
 	_details.text = "\n".join(lines)
 	_update_deal()
 

@@ -94,7 +94,7 @@ func _wait_for(condition: Callable, seconds: float) -> bool:
 func _site_types() -> Array[String]:
 	var out: Array[String] = []
 	for t: String in ZoneModules.TYPES:
-		if t != "fob":
+		if t != "fob" and t != StagingLevel.TYPE:  # ours or a friend's: no enemy loot
 			out.append(t)
 	return out
 
@@ -284,6 +284,7 @@ func _test_site_rolls() -> void:
 	check(not town.is_empty() and town.all(func(b: Dictionary) -> bool: return _fits(b.items, String(b.table), String(b.tier))),
 		"a generated town still gets boxes by its loot spots, on the fallback table (%d)" % town.size())
 	check(WorldValuables.site_plan("fob", "zone|fob", true).is_empty(), "the company's own FOB gets none")
+	check(WorldValuables.site_plan(StagingLevel.TYPE, "zone|staging", true).is_empty(), "nor does the corner it rents at a friendly FOB")
 
 
 func _test_rarity() -> void:

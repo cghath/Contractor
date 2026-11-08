@@ -339,9 +339,10 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 	var cid := _contract_for_support()
 	var budget_before := int(Contracts.contract(cid).get("support_left", 0)) if cid != "" else 0
 	var paid := false
+	var price := Staging.call_price(kind, Staging.zone_of(lvl))  # D8: a flight by the links it flies; refuelling at the staging FOB
 	if not _free():
-		if not Economy.server_pay_support(kind, cid):
-			return "Can't pay for the %s ($%s)" % [kind, DebriefCalc.money(Economy.support_price(kind))]
+		if not Economy.server_pay_support(kind, cid, price):
+			return "Can't pay for the %s ($%s)" % [kind, DebriefCalc.money(price)]
 		paid = true
 	if kind == "extraction" and extraction and not extraction.is_active():
 		extraction.server_begin({})  # dev, outside a deployment: open extraction to end
@@ -350,7 +351,7 @@ func server_call(kind: String, caller: Soldier, arg: String, point: Vector3) -> 
 		if is_instance_valid(call.heli):
 			call.server_dismiss()
 		if paid:
-			_refund(kind, cid, budget_before)
+			_refund(kind, cid, budget_before, price)
 		return "No helicopter could take off"
 	calls.append(call)
 	_cooldown_until[kind] = Soldier._now() + cooldown_s(kind)
@@ -387,7 +388,7 @@ static func server_insert(from: Node, at: Vector2, via: Variant = null, objectiv
 		return false
 	node.calls.append(call)
 	var cids: Array = Contracts.deployment().get("cids", [])
-	Economy.server_pay_insertion(String(cids[0]) if not cids.is_empty() else "")
+	Economy.server_pay_insertion(String(cids[0]) if not cids.is_empty() else "", Staging.call_price("insertion", Staging.zone_of(node.level())))  # D8
 	return true
 
 
@@ -525,8 +526,8 @@ func _free() -> bool:
 
 ## Host: gives back what server_pay_support took for `kind` (a call that couldn't launch): the
 ## support budget it drew from contract `cid` (which had `budget_before` left), the rest as cash.
-static func _refund(kind: String, cid: String, budget_before: int) -> void:
-	var price := Economy.support_price(kind)
+static func _refund(kind: String, cid: String, budget_before: int, flown := -1) -> void:
+	var price := flown if flown >= 0 else Economy.support_price(kind)
 	var from_budget := 0
 	if cid != "":
 		from_budget = clampi(budget_before - int(Contracts.contract(cid).get("support_left", 0)), 0, price)

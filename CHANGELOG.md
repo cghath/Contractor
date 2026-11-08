@@ -11,6 +11,26 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Staging from a friendly FOB (combined arms D8, feat/d8-staging)
+
+- **Added:** the company can rent a corner of a friendly base (FOB Halberd, or a US-held zone with
+  an HQ site) and run contracts within 2 region links from it. The ops desk and the board show each
+  way of reaching a contract with its cost and days; the rent ($6,000 a deployment, $1,500 a day,
+  Proposed in data/prices.json) goes down at allied standing and on the host's own contracts.
+  The corner has a resupply terminal (ammo, medical, batteries, fuel, spares at +25%), cots, two
+  parking spots and a radio desk; no armory, stash, hiring or workshop. Going home takes the usual
+  travel. (`Staging`, `StagingLevel`.)
+- **Changed:** helicopter insertion and extraction flights now cost $3,000 + $1,200 a region link
+  from wherever the company is, instead of a flat price; a zone off the region map keeps the flat one.
+- **Added:** below trusted with the host, or after killing one of its men, the company is ordered
+  out at the end of the deployment (vehicles $5,000 home); friendly fire and looting the host's
+  dead or vehicles cost standing; a zone that flips takes the corner and what's parked there.
+  Shooting a body someone else already killed costs nothing.
+- **Fixed:** US garrisons and patrols (D7) never came up in a real campaign: `UsField.install` looked
+  the zone up by its save id.
+- **Fixed:** a blast that finished a man was noted against its shooter only after he had died, so
+  whatever reads who killed him at the moment of death saw the hit before it (`Warheads`).
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

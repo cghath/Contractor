@@ -299,8 +299,8 @@ static func server_people(level: CompoundLevel, centre: Vector3, d: Dictionary, 
 		var before := vitals.wound_list().size()
 		var was_up := vitals.is_up()
 		if dist <= blast_r:
+			Harm.note_hit(body, shooter)  # before the blast, which can finish him: he dies with the shooter on record
 			vitals.server_blast(dist, blast_r, Throwables.has_ear_pro(body))
-			Harm.note_hit(body, shooter)
 		if thermo and dist <= blast_r * THERMO_BURN_SHARE and not sheltered:
 			vitals.server_burn(lerpf(BURN.x, BURN.y, 1.0 - dist / (blast_r * THERMO_BURN_SHARE)))
 		if dist <= lethal_r and not sheltered:
@@ -518,8 +518,8 @@ static func server_backblast(level: CompoundLevel, shooter: Node3D, rear: Vector
 			continue
 		if not Throwables.clear_line(world, rear, point):
 			continue  # a wall or cover between
+		Harm.note_hit(body, shooter)  # as above
 		vitals.server_blast(dist * WoundModel.BLAST_RADIUS / maxf(injury_m, 0.01), WoundModel.BLAST_RADIUS, Throwables.has_ear_pro(body))
-		Harm.note_hit(body, shooter)
 		if dist <= lethal_m:
 			var closeness := 1.0 - dist / maxf(lethal_m, 0.01)
 			vitals.server_burn(lerpf(BURN.x, BURN.y, closeness))

@@ -18,7 +18,7 @@ extends RefCounted
 ## radio mast on a steel lattice behind HESCO: destroyed, enemy reports slow down).
 ## "fob" is the company's own (BaseFob.module_boxes: the base zone, docs/linked_zones.md LZ-1): no
 ## garrison, loot or named points.
-const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms", "fob"]
+const TYPES: Array[String] = ["compound", "outpost", "village", "checkpoint", "hq", "qrf_base", "comms", "fob", "staging"]
 
 ## Half the footprint in metres (x, z): the pad under it and its voxel bounds.
 ## (Static vars, not consts: a generated town ("town#<seed>", BuildingGen.town) adds its own
@@ -32,6 +32,7 @@ static var HALF := {
 	"qrf_base": Vector2(17.0, 13.0),
 	"comms": Vector2(9.0, 9.0),
 	"fob": BaseFob.MODULE_HALF,
+	"staging": StagingLevel.HALF,
 }
 ## Voxel bounds reach this far above the ground (m) and this far below it.
 const TOP_M := 4.8
@@ -632,6 +633,8 @@ static func boxes(type: String) -> Array:
 				_cache[type] = _comms()
 			"fob":
 				_cache[type] = BaseFob.module_boxes()
+			"staging":
+				_cache[type] = StagingLevel.corner_boxes()
 			_ when type.begins_with("fob_") and has_type(type):
 				var spec := type.trim_prefix("fob_")
 				_cache[type] = BaseFob.defence_boxes(spec.get_slice("@", 0), spec.get_slice("@", 1) if "@" in spec else "n")

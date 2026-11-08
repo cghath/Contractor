@@ -131,6 +131,8 @@ static func problem(id: String) -> String:
 		return "Written off"
 	if today() < int(e.get("ready_day", 0)):
 		return "In the workshop until day %d" % int(e.ready_day)
+	if Staging.active() and not id in Staging.vehicles():
+		return "At the company's FOB"  # D8: only what came along to the staging FOB
 	return ""
 
 
@@ -284,6 +286,13 @@ static func _module_bill(e: Dictionary) -> Dictionary:
 	return {"cost": roundi(cost), "damage": clampf(cost / maxf(value * maxf(total, 0.0001), 1.0), 0.0, 1.0), "fob": fob, "tiles": tiles}
 
 
+## Whether vehicle `id` has a module destroyed past what a field mechanic fixes (D8: not the staging
+## FOB's work).
+static func destroyed_module(id: String) -> bool:
+	var e := _find(id)
+	return not e.is_empty() and VehicleSpecs.spec(String(e.model)).has("modules") and bool(_module_bill(e).fob)
+
+
 ## How much vehicle `id` is damaged, 0 (whole) to 1 (written off): its hit zones' wear, weighted
 ## (A8: a model with modules, the module bill's share of its value).
 static func damage_of(id: String) -> float:
@@ -325,8 +334,8 @@ static func repair_quote(id: String) -> Dictionary:
 		cost += int(cfg.get("battery_price", 800))
 		days = maxi(days, 1)
 	var fuel_l := maxf(float(spec.get("fuel_l", 0.0)) - float(rec.get("fuel", spec.get("fuel_l", 0.0))), 0.0)
-	cost += roundi(fuel_l * float(cfg.get("fuel_price", 2)))
-	var parts := parts_for(cost)
+	cost = Staging.repair_bill(cost, fuel_l) if Staging.active() else cost + roundi(fuel_l * float(cfg.get("fuel_price", 2)))  # D8: their mechanics, their fuel
+	var parts := {"credit": 0, "use": []} if Staging.active() else parts_for(cost)  # (D8: the stash, and its spare parts, are at home)
 	return {"cost": cost - int(parts.credit), "days": days, "damage": damage, "fuel_l": fuel_l, "parts_credit": int(parts.credit), "parts": parts.use}
 
 
@@ -362,6 +371,10 @@ static func server_repair(id: String) -> String:
 		return "It's out on a deployment"
 	if bool((e.record as Dictionary).get("wrecked", false)):
 		return "Written off"
+	if Staging.active() and id not in Staging.vehicles():
+		return "It's at the company's FOB"
+	if Staging.active() and destroyed_module(id):
+		return "Their mechanics fix damaged modules, nothing destroyed: it needs the company's workshop"
 	var quote := repair_quote(id)
 	if int(quote.cost) <= 0 and int(quote.days) <= 0:
 		return "Nothing to repair"
@@ -463,6 +476,8 @@ static func package_problem(id: String, pkg: String, fit := true) -> String:
 	var e := _find(id)
 	if e.is_empty():
 		return "Not in the motor pool"
+	if Staging.active():
+		return "No workshop at the staging FOB"  # (D8)
 	var defs: Dictionary = VehicleSpecs.spec(String(e.model)).get("packages", {})
 	if not defs.has(pkg):
 		return "That doesn't fit a %s" % String(e.name)

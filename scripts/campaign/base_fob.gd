@@ -334,10 +334,10 @@ func server_show_roster() -> void:
 	var wanted := BaseHub.muster_ids()
 	for mid: String in _muster.keys():
 		if mid not in wanted or not is_instance_valid(_muster[mid]):
-			var s: Soldier = _muster[mid]
+			var s: Variant = _muster[mid]  # (untyped: a freed one can't be assigned to a Soldier)
 			if is_instance_valid(s):
-				BaseHub.server_store_member_gear(mid, s.inventory.net_state)
-				s.queue_free()
+				BaseHub.server_store_member_gear(mid, (s as Soldier).inventory.net_state)
+				(s as Soldier).queue_free()
 			_muster.erase(mid)
 	var per_row := int(lay("muster_per_row", MUSTER_PER_ROW))
 	for i in mini(wanted.size(), int(lay("muster_max", MUSTER_MAX))):
@@ -365,15 +365,15 @@ func server_show_roster() -> void:
 func server_read_muster_gear() -> Dictionary:
 	var out := {}
 	for mid: String in _muster:
-		var s: Soldier = _muster[mid]
-		if is_instance_valid(s) and not s.is_queued_for_deletion():
-			out[mid] = s.inventory.net_state.duplicate(true)
+		var s: Variant = _muster[mid]  # (untyped: a freed one can't be assigned to a Soldier)
+		if is_instance_valid(s) and not (s as Soldier).is_queued_for_deletion():
+			out[mid] = (s as Soldier).inventory.net_state.duplicate(true)
 	return out
 
 
 func muster_soldier(mid: String) -> Soldier:
-	var s: Soldier = _muster.get(mid)
-	return s if is_instance_valid(s) else null
+	var s: Variant = _muster.get(mid)
+	return s as Soldier if is_instance_valid(s) else null
 
 
 # --- The voxels ---------------------------------------------------------------------------
