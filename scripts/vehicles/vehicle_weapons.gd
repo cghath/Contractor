@@ -196,7 +196,8 @@ static func layout(spec: Dictionary) -> Array:
 			"muzzle": VehicleSpecs.vec(w.get("muzzle"), Vector3.ZERO), "modules": w.get("modules", []), "sights": w.get("sights", []),
 			"legacy": legacy, "racks": w.get("racks", []), "stowage": w.get("stowage", []), "ready": w.get("ready", 0),
 			"loader_seat": int(w.get("loader_seat", -1)), "commander_seat": int(w.get("commander_seat", -1)),
-			"battlecarry": String(w.get("battlecarry", "")), "hatch": String(w.get("hatch", "")), "remote": String(w.get("remote_package", ""))})
+			"battlecarry": String(w.get("battlecarry", "")), "hatch": String(w.get("hatch", "")), "remote": String(w.get("remote_package", "")),
+			"auto_s": float(g.get("autoload_s", 0.0))})
 	return out
 
 
@@ -218,7 +219,8 @@ static func short_name(id: String) -> String:
 		return "-"
 	if id == "m919":
 		return "AP (M919)"
-	return String(SHORT.get(String(Shells.shell(id).get("kind", "")), id.to_upper()))
+	var row := Shells.shell(id)
+	return String(row.get("short", SHORT.get(String(row.get("kind", "")), id.to_upper())))
 
 
 # --- Queries (every peer) -----------------------------------------------------------------------
@@ -315,7 +317,7 @@ func busy_loading(s: Node) -> bool:
 	for m: Dictionary in mounts:
 		if String(m.kind) == CANNON:
 			var st: Dictionary = state[m.id]
-			if String(st.cy) in ["load", "short", "unload", "restock"] and int(st.by) == seat and seat != int(m.loader_seat):
+			if String(st.cy) in ["load", "short", "unload", "restock"] and int(st.by) == seat and seat != int(m.loader_seat) and float(m.auto_s) <= 0.0:
 				return true
 	return false
 
@@ -324,6 +326,8 @@ func busy_loading(s: Node) -> bool:
 ## one, short-crewed 15; a damaged breech x1.5.
 func load_time(m: Dictionary, seat: int, s: Soldier) -> float:
 	var slow := BREECH_SLOW if _module_damaged(m, "breech") else 1.0
+	if float(m.auto_s) > 0.0:
+		return float(m.auto_s) * slow  # D6b: the T-72B3's autoloader, whoever is at the gun (2.7.3)
 	if seat != int(m.loader_seat):
 		return SHORT_LOAD_S * slow
 	if s and not s.is_ai():
@@ -554,7 +558,8 @@ func _cannon_step(m: Dictionary, now: float) -> void:
 		return
 	# Between fights, the loader restocks the bustle from the hull (or when told, or the gun's
 	# empty with nothing left in the bustle).
-	var ai_loader := _able_at(int(m.loader_seat))
+	var restock_seat := int(m.commander_seat) if float(m.auto_s) > 0.0 else int(m.loader_seat)
+	var ai_loader := _able_at(restock_seat)
 	var bustle := String((m.racks as Array)[0]) if not (m.racks as Array).is_empty() else ""
 	var dry := String(st.l) == "" and bustle != "" and rack_total(bustle) == 0
 	if ai_loader and (int(st.rs) > 0 or (ai_loader.is_ai() and (_quiet(now) or dry))) and _turret_front():
@@ -563,7 +568,7 @@ func _cannon_step(m: Dictionary, now: float) -> void:
 			if sid != "":
 				_take_from(String(_stowage_rack(m, sid)), sid)
 				st.cy = "restock"
-				st.by = int(m.loader_seat)
+				st.by = restock_seat
 				st.am = sid
 				st.t0 = now
 				st.end = now + RESTOCK_S

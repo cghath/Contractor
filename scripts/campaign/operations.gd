@@ -219,7 +219,7 @@ static func make_offer(rng: RandomNumberGenerator, today: int, zone_id: String, 
 	var second: Array = names.get("second", ["LANCE"])
 	var codename := "%s %s" % [first[roll.randi() % first.size()], second[roll.randi() % second.size()]]
 	# The enemy: its OOB's men and the sites' garrisons; rated as any contract.
-	var oob := enemy_oob(zdef, op_type, roll)
+	var oob := enemy_oob(zdef, op_type, roll, String(c.get("target", "")))
 	var count := 0
 	var threats: Array = []
 	for e: Dictionary in oob:
@@ -433,8 +433,11 @@ static func task_templates(phases: Array, k: int, _zdef := {}) -> Array:
 
 
 ## The enemy OOB of an operation of `op_type` in `zdef`: one entry per group with a place.
-static func enemy_oob(zdef: Dictionary, op_type: String, roll: RandomNumberGenerator) -> Array:
-	return _oob(zdef, type_def(op_type).get("enemy_oob", []), "hostile", roll)
+## `target` (combined arms D6b, F-297): a faction the type names under "enemy_oob_by" fields its
+## own order of battle (the Concord's BMP-2s and T-72B3s).
+static func enemy_oob(zdef: Dictionary, op_type: String, roll: RandomNumberGenerator, target := "") -> Array:
+	var def := type_def(op_type)
+	return _oob(zdef, (def.get("enemy_oob_by", {}) as Dictionary).get(target, def.get("enemy_oob", [])), "hostile", roll)
 
 
 static func friendly_oob(zdef: Dictionary, op_type: String, roll: RandomNumberGenerator) -> Array:

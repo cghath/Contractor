@@ -21,6 +21,8 @@ const TICK_S := 0.25
 const ARRIVE_M := 15.0
 ## Tests: force (1) or forbid (0) vehicle QRFs; -1 uses data's share.
 static var share_override := -1.0
+## Tests: the side that rides (D6b's FactionVehicles) when the level has no EnemyResponse.
+static var faction_override := ""
 
 ## Host: [{"vehicle", "soldiers", "aim", "dismount" (point), "started", "progress_at",
 ## "progress_pos", "hit", "out" (dismounted)}].
@@ -74,7 +76,12 @@ func _mount(base: Node3D, gate: Vector3, aim: Vector3, soldiers: Array) -> bool:
 	if layer == null:
 		return false
 	var men: Array = soldiers.filter(func(s: Variant) -> bool: return is_instance_valid(s) and (s as Soldier).vitals.is_up() and Vehicle.ride_of(s as Soldier) == null)
-	var models: Array = _cfg.get("models", ["technical_dshk"])
+	# D6b: the faction's own (FactionVehicles): a patrol has no base; a QRF by the Pressure tier.
+	var response := EnemyResponse.of(lvl)
+	var side: Variant = response.enemy_faction if response else faction_override
+	var models := FactionVehicles.models(side, "qrf" if base else "patrol", response._tier() if response else 0)
+	if models.is_empty():
+		models = _cfg.get("models", ["technical_dshk"])
 	var toward := flat.normalized()
 	var out := Vector3(gate.x - base.global_position.x, 0.0, gate.z - base.global_position.z).normalized() if base else -toward
 	if out.length() < 0.5:
@@ -91,13 +98,18 @@ func _mount(base: Node3D, gate: Vector3, aim: Vector3, soldiers: Array) -> bool:
 		var spot: Variant = _clear_spot(lvl, model, gate, out, k)
 		if spot == null:
 			break
-		var v := layer.server_spawn(model, Transform3D(Basis.looking_at(toward, Vector3.UP), spot), String(_cfg.get("scheme", "")), &"hostile", "")
+		var scheme := FactionVehicles.scheme(side, model)
+		var v := layer.server_spawn(model, Transform3D(Basis.looking_at(toward, Vector3.UP), spot), scheme if scheme != "" else String(_cfg.get("scheme", "")), &"hostile", "")
 		if v == null:
 			break
+		var kit := FactionVehicles.packages(side, model, response._tier() if response else 0)
+		if not kit.is_empty() and v.logistics:
+			v.logistics.server_set_packages(kit)
 		v.set_meta(&"qrf", "inbound")
 		v.set_meta(&"no_save", true)
 		for c: Array in _cfg.get("cargo", []):
-			v.cargo_hold.take(StringName(String(c[0])), int(c[1]) if c.size() > 1 else 1)
+			if String(VehicleSpecs.gun(String((v.spec.get("gun", {}) as Dictionary).get("weapon", ""))).get("feed", "")) == String(c[0]):
+				v.cargo_hold.take(StringName(String(c[0])), int(c[1]) if c.size() > 1 else 1)  # (D6b: the gun's own belts)
 		var riders: Array = []
 		for i in _seat_order(v):
 			if men.is_empty():

@@ -27,6 +27,12 @@ const SCHEMES := {
 	"white": {"paint": "d8d6cf", "marking": "8a2a22"},
 	"tan": {"paint": "c4ae86", "marking": "4a3b2a"},
 	"red": {"paint": "8e2b23", "marking": "d8d6cf"},
+	"concord": {"paint": "4d5a3a", "marking": "e8e8e0"},
+	"concord_desert": {"paint": "a08e68", "marking": "2a2e22"},
+	"banner": {"paint": "6a5a3e", "marking": "15130f"},
+	"rust": {"paint": "6b4a30", "marking": "ccc2a8"},
+	"black": {"paint": "191b1e", "marking": "6e7278"},
+	"highland": {"paint": "55583f", "marking": "c9b98f"},
 }
 ## Models and the schemes they come in (the first is the default).
 const MODELS := {
@@ -50,6 +56,17 @@ const MODELS := {
 	"technical_zpu": ["red", "white", "tan"],
 	"bradley": ["desert", "od"],
 	"abrams": ["desert", "od"],
+	# Combined arms D6a (VehicleArtFoes): the other side's armour and the trucks.
+	"t72b3": ["concord", "concord_desert"],
+	"bmp2": ["concord", "concord_desert"],
+	"btr82a": ["concord", "concord_desert"],
+	"mtlb": ["concord", "concord_desert", "highland"],
+	"hemtt_cargo": ["desert", "od"],
+	"m978": ["desert", "od"],
+	"hemtt_ammo": ["desert", "od"],
+	"kestrel_rhino": ["rust", "tan"],
+	"armoured_suv": ["white", "black", "tan"],
+	"maxxpro_captured": ["banner", "tan"],
 }
 
 static var _meshes := {}  # "model|scheme" -> Mesh
@@ -204,6 +221,9 @@ static func _shape_for(model: String) -> Canvas:
 		"mortar_2b14": return _mortar(0.082, 1.2)
 		"bradley": return _bradley()
 		"abrams": return _abrams()
+	var foe := VehicleArtFoes.shape(model)  # combined arms D6a
+	if foe != null:
+		return foe
 	if model.begins_with("technical_"):
 		return _technical(model.trim_prefix("technical_"))
 	push_error("VehicleArt: unknown model '%s'" % model)
@@ -1598,8 +1618,9 @@ static func _abrams() -> Canvas:
 ## tall armoured cab-and-troop box whose lower sides fold in to the V-hull, thick armoured
 ## windows, 1.1 m tyres under square arches, side steps and fuel tank, the rear door with its
 ## step and spare tyre, and a roof turret with the gun-protection kit and an M2.
-static func _maxxpro() -> Canvas:
-	var c := Canvas.new(Vector3i(56, 70, 132), 0.05)
+## `width` (voxels) leaves room beside the hull (the captured one's slat cage, VehicleArtFoes).
+static func _maxxpro(width := 56) -> Canvas:
+	var c := Canvas.new(Vector3i(width, 70, 132), 0.05)
 	# V-hull under the box.
 	var y := 0.48
 	while y < 1.05:

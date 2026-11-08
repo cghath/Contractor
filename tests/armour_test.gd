@@ -50,7 +50,7 @@ const ROWS := [
 	["PG-7VR", "pg7vr", false, ["no", "no", {"": "pen", "tusk2": "no"}, "pen", "pen", {"": "pen", "busk3": "~"}, "pen", "pen", "no", "pen", "pen"]],
 	["AT4", "at4_heat", false, ["no", "no", {"": "pen", "tusk1": "tile"}, "pen", "tile", "tile", "pen", "pen", "no", "tile", "pen"]],
 	["Javelin (top)", "javelin", true, ["pen", "pen", "pen", "pen", "pen", "pen", "pen", "pen", "pen", "pen", "pen"]],
-	["M2 M33", "m33", false, ["no", "no", "no", "no", "no", "no", "no", {"": "no", "close": "~"}, "no", "no", "~"]],
+	["M2 M33", "m33", false, ["no", "no", "no", "no", "no", "no", "no", {"": "no", "close": "~"}, "no", "no", "no"]],
 	["Mk19 HEDP", "m430a1", false, ["no", "no", "no", "~", "no", "no", "no", "pen", "no", "no", "~"]],
 ]
 const HEAD_RANGE_M := 500.0
@@ -534,7 +534,7 @@ func _test_stanag() -> void:
 	var wrong := PackedStringArray()
 	var rows := PackedStringArray()
 	var proofs := 0
-	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro"]:
+	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro", "t72b3", "bmp2", "btr82a", "mtlb", "kestrel_rhino", "armoured_suv"]:
 		var spec := VehicleSpecs.spec(model)
 		var sets: Array = [[]]
 		for id: String in (spec.get("packages", {}) as Dictionary):
@@ -575,7 +575,7 @@ func _test_stanag() -> void:
 					wrong.append("%s mine %s held, rated %s" % [label, next, stored])
 			rows.append("%s: KE %s (front %d, side %d, rear %d), artillery %d, mine %s" % [label, ArmourStandards.ke_overall(r.ke), int(r.ke.front), int(r.ke.side), int(r.ke.rear), art, ArmourStandards.mine_text(r.mine)])
 	print("    ", "\n    ".join(rows))
-	check(wrong.is_empty(), "%d ratings (5 models and their packages) proven from the plates and belly in %d checks (wrong: %s)" % [rows.size(), proofs, ", ".join(wrong)])
+	check(wrong.is_empty(), "%d ratings (11 models and their packages) proven from the plates and belly in %d checks (wrong: %s)" % [rows.size(), proofs, ", ".join(wrong)])
 	# The brief's proposed ratings hold.
 	var matv := VehicleSpecs.spec("matv")
 	var maxxpro := VehicleSpecs.spec("maxxpro")
@@ -589,7 +589,7 @@ func _test_stanag() -> void:
 	# Above the plates: KE level 1's rifle rounds (and the rest of small arms) stay on
 	# VehicleDamage's tiers in game (call 79); every rated crew zone stops them there too.
 	var leaks := PackedStringArray()
-	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro"]:
+	for model: String in ["abrams", "bradley", "aav7", "matv", "maxxpro", "t72b3", "bmp2", "btr82a", "mtlb", "kestrel_rhino", "armoured_suv"]:
 		var spec := VehicleSpecs.spec(model)
 		for z: Dictionary in spec.get("zones", []):
 			if String(z.zone) != "crew":
@@ -704,6 +704,15 @@ func _test_module_layouts() -> void:
 			"radio", "driver_vision", "structure"],
 		"matv": ["engine", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "fuel_tank", "ext_gun", "radio", "spare_wheel", "structure"],
 		"maxxpro": ["engine", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "fuel_tank", "ext_gun", "radio", "spare_wheel", "structure"],
+		"t72b3": ["engine", "transmission", "track_l", "track_r", "fuel_tank_fl", "fuel_tank_fr", "fuel_tank_rear", "ammo_carousel", "ammo_rack_hull",
+			"breech", "barrel", "gunner_sight", "aux_sight", "fcs", "commander_sight", "traverse", "elevation", "radio", "driver_vision", "smoke_l", "smoke_r", "ext_gun_commander", "structure"],
+		"bmp2": ["engine", "transmission", "track_l", "track_r", "fuel_tank_door_l", "fuel_tank_door_r", "ready_30", "rack_konkurs", "atgm_launcher", "breech",
+			"barrel", "gunner_sight", "aux_sight", "fcs", "commander_sight", "traverse", "elevation", "radio", "driver_vision", "smoke_l", "smoke_r", "structure"],
+		"btr82a": ["engine", "transmission", "waterjet", "wheel_1l", "wheel_4r", "fuel_tank_l", "fuel_tank_r", "ready_30", "breech", "barrel", "gunner_sight", "aux_sight", "fcs",
+			"commander_sight", "traverse", "elevation", "radio", "driver_vision", "smoke_l", "smoke_r", "structure"],
+		"mtlb": ["engine", "transmission", "track_l", "track_r", "fuel_tank", "fuel_tank_r", "ext_gun", "radio", "driver_vision", "structure"],
+		"kestrel_rhino": ["engine", "wheel_fl", "wheel_rr", "ext_gun", "radio", "fuel_tank", "structure"],
+		"armoured_suv": ["engine", "wheel_fl", "wheel_rr", "ext_gun", "fuel_tank", "structure"],
 	}
 	var problems := PackedStringArray()
 	for model: String in want:
@@ -732,7 +741,7 @@ func _test_module_layouts() -> void:
 		var gun_seat := int((spec.get("gun", {}) as Dictionary).get("seat", -1))
 		if not VehicleModules.armed(mods, gun_seat):
 			problems.append("%s: no armament modules on its gun seat %d" % [model, gun_seat])
-	check(problems.is_empty(), "the Abrams, Bradley, AAV-7, M-ATV and MaxxPro have the doc's modules inside their hulls, one crew station a seat, their guns' modules (%s)" % ", ".join(problems))
+	check(problems.is_empty(), "the Abrams, Bradley, AAV-7, M-ATV, MaxxPro and the D6b vehicles have the doc's modules inside their hulls, one crew station a seat, their guns' modules (%s)" % ", ".join(problems))
 	var abrams := VehicleModules.layout(VehicleSpecs.spec("abrams"))
 	var by_id := {}
 	for m: Dictionary in abrams:
