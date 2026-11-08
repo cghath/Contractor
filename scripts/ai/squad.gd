@@ -1940,9 +1940,9 @@ func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
 ## place is on its way (`carried`), it travels from where it stood by the lead's walk (or, when
 ## more, his team's base's own move: a team leader it forms on sprinting, F-461) plus
 ## SLOT_CATCHUP_MPS a second: straight while no wall stands between, else toward `base` while
-## nothing stands between it and that, else on to the last point it headed for that way (F-463),
-## else it's there at once. So the other-side fallback's mirrored shape turns back over
-## gradually, man by man, and no slot leaps when a refit lets go.
+## nothing stands between it and that, else it's there at once (the rule Captain asked to have
+## explained, still open: F-417, F-463). So the other-side fallback's mirrored shape turns back
+## over gradually, man by man, and no slot leaps when a refit lets go.
 ## (On its way it isn't kept clear of the lead, the players or the other slots: F-437.)
 func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carried: bool, map: RID) -> Vector3:
 	var id := who.get_instance_id()
@@ -1967,28 +1967,24 @@ func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carrie
 	if moved <= TRAIL_JUMP_M:
 		walked = maxf(walked, moved)
 	var at: Vector3 = was.at
-	var aim: Vector3 = was.get("aim", Vector3.INF)  # the last point it headed for with nothing between
 	var left := walked + SLOT_CATCHUP_MPS * dt
 	var d := _flat(at, want)
 	if d <= left:
 		at = want  # there
 	elif not _wall_between(at, want):
-		aim = want
 		at = at.lerp(want, left / d)
 	elif _flat(at, base) > 0.5 and not _wall_between(at, base):
-		aim = base
 		at = at.lerp(base, minf(left / _flat(at, base), 1.0))  # round the wall's end, by where his team forms
-	elif aim != Vector3.INF and _flat(at, aim) > 0.5 and not _wall_between(at, aim):
-		# Neither in sight now (his team's place has gone on through a gate along its path and
-		# turned): on to where it last headed, the way that place went, before giving up (R0880:
-		# the slot left inside the compound wall leapt 19 m out past the gate).
-		at = at.lerp(aim, minf(left / _flat(at, aim), 1.0))
 	else:
-		return want  # no straight way: there at once, as before
+		# No straight way: there at once, as before. Left as it is while Captain's question on it
+		# is open (F-417); it can leap a slot left behind a gate by its place (R0880, F-463).
+		# ("jump" is kept only for spacing's checks, which count these apart.)
+		_ways[id]["jump"] = true
+		return want
 	if at != want and map.is_valid():
 		at = NavigationServer3D.map_get_closest_point(map, at)
 	_ways[id] = {"at": at, "goal": want, "fell": false, "way": at != want or carried, "frame": frame, "now": now,
-		"lead": lead, "base": base, "aim": aim, "since": since}
+		"lead": lead, "base": base, "since": since}
 	return at
 
 

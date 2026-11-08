@@ -482,11 +482,15 @@ func _test_place_on_way() -> void:
 	# Its men's slots (review): each one let go from a fallback (the team's place held, or his own
 	# slot picked again, a trail pick going back to his slot when its block clears) keeps to the
 	# lead's walk plus SLOT_CATCHUP_MPS a second too, within a metre (as the mirror walk's check;
-	# it was a man's gap, 8 m, before round 6's review, and R0847 saw 0.1 m).
-	var m := _men_steps(squad, seen.men)
-	print("    its men: %d steps let go, %d on a fallback (there at once); worst %.2f m over the rate (%s); %d across a wall" % [m.steps, m.at_once, m.worst, m.worst_at, m.walls])
+	# it was a man's gap, 8 m, before round 6's review, and R0847 saw 0.1 m). A step the "no
+	# straight way: there at once" rule made is counted apart, not held to the rate: that rule is
+	# Captain's open question (F-417) and can leap a slot left behind the gate (R0880, F-463).
+	var m := _men_steps(squad, seen.men, true)
+	print("    its men: %d steps let go, %d on a fallback (there at once); worst %.2f m over the rate (%s); %d across a wall; %d at once with no straight way (furthest %.1f m, %s)" % [
+		m.steps, m.at_once, m.worst, m.worst_at, m.walls, m.jumps, m.jump_max, m.jump_at])
 	check(int(m.steps) > 0 and float(m.worst) <= 1.0,
 		"its men's slots, let go, never step further than the lead's walk plus %.0f m/s (worst %.2f m over, %s)" % [Squad.SLOT_CATCHUP_MPS, m.worst, m.worst_at])
+	check(bool(m.jumps_home), "and one with no straight way is on his slot at once, not left across a wall (%d)" % m.jumps)
 	_ways_settled(squad, "outside the wall")
 	_ways_end(squad)
 
@@ -629,7 +633,7 @@ func _record_ways(squad: Squad, route: PackedVector3Array) -> Dictionary:
 			var list: Array = men[s]
 			if list.is_empty() or int(list[list.size() - 1].frame) != int(w.frame):
 				list.append({"frame": w.frame, "now": w.now, "at": at, "goal": w.goal, "fell": w.fell, "way": w.way, "lead": w.lead,
-					"base": w.base})
+					"base": w.base, "jump": w.get("jump", false)})
 		still = still + 1 if _route_index >= _route.size() and not going else 0
 	return {"places": places, "men": men}
 
@@ -670,8 +674,14 @@ func _place_steps(squad: Squad, seen: Dictionary) -> Dictionary:
 
 
 ## The men's slots' steps let go of a fallback or on their way (onto a fallback is at once):
-## how far any went past the lead's walk plus SLOT_CATCHUP_MPS a second, and across a wall.
-func _men_steps(squad: Squad, seen: Dictionary) -> Dictionary:
+## how far any went past the lead's walk plus SLOT_CATCHUP_MPS a second, and across a wall. With
+## `jumps_apart`, a step made by _slot_on_way's "no straight way: there at once" rule (Captain's
+## open question, F-417) is counted in "jumps" instead, and "jumps_home" says each ended on its goal.
+func _men_steps(squad: Squad, seen: Dictionary, jumps_apart := false) -> Dictionary:
+	var jumps := 0
+	var jump_max := 0.0
+	var jump_at := "none"
+	var jumps_home := true
 	var worst := -INF
 	var worst_at := "none"
 	var through := ""
@@ -691,6 +701,13 @@ func _men_steps(squad: Squad, seen: Dictionary) -> Dictionary:
 				continue
 			if not (bool(a.fell) or bool(a.way)):
 				continue
+			if jumps_apart and bool(b.jump):
+				jumps += 1
+				jumps_home = jumps_home and _flat(b.at, b.goal) <= 0.1
+				if _flat(a.at, b.at) > jump_max:
+					jump_max = _flat(a.at, b.at)
+					jump_at = "%s %s to %s" % [s.name, a.at, b.at]
+				continue
 			steps += 1
 			var walked := _flat(a.lead, b.lead)
 			if _flat(a.base, b.base) <= Squad.TRAIL_JUMP_M:
@@ -707,7 +724,7 @@ func _men_steps(squad: Squad, seen: Dictionary) -> Dictionary:
 				far = maxf(far, _flat(b.at, b.goal))
 		arrived = arrived and not bool(list[list.size() - 1].way)
 	return {"worst": worst, "worst_at": worst_at, "through": through, "walls": walls, "steps": steps, "at_once": at_once,
-		"far": far, "arrived": arrived}
+		"far": far, "arrived": arrived, "jumps": jumps, "jump_max": jump_max, "jump_at": jump_at, "jumps_home": jumps_home}
 
 
 func _ways_settled(squad: Squad, where: String) -> void:

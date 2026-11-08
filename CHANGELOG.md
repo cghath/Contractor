@@ -59,11 +59,6 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   walk or the team's own base's move (a base jumping more than 6 m, from the place to the leader,
   earns nothing). Keeping a travelling slot clear of the lead and the other slots was tried and
   left out (F-437): it can only slow a slot in a gateway.
-- **A man's slot no longer leaps out through a gate after his team's place** (F-463). The place
-  goes out round by the gate along a path; a slot inside the wall following it straight lost
-  sight of it once it had turned outside, and leapt 19 m across the wall to where it belonged.
-  It now carries on to the last point it was heading for, the way the place went, and only gives
-  up and jumps if nothing is in sight from there either.
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
@@ -86,7 +81,9 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   inside of its wall (no stretch crosses the wall), and its "Team place" checks walk the lead out
   of the gate and along the wall's outside (the place, let go, never outruns the lead by more than
   3 m/s nor crosses a wall, and gets there; its men's slots never step more than 1 m past the
-  lead's walk, or their team's base's, plus 6 m/s; it allowed a man's gap until round 6's review),
+  lead's walk, or their team's base's, plus 6 m/s; it allowed a man's gap until round 6's review;
+  a slot with no straight way to its slot nor its team, there at once, is counted apart while
+  Captain's question on that rule is open, F-463),
   a new "A slot on its way" check calls the travel by hand (a sprinting team base is kept up with,
   a jumping one isn't credited), and "Team place, other side" walks the lead along the north wall's
   outside and away from its corner (each man's slot, let go of the mirrored side, turns back over
