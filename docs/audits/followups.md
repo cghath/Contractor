@@ -1959,7 +1959,11 @@ stays a navmesh point the carer walks to, so nothing is aimed past the cover int
 it. Every drag to cover changes, men out cold too. With no such spot in reach it falls back to
 the nearest that hides the spot only. `_sheltered` reads where he lies (`body_point()`, not the
 capsule). casualty's check is real again (R0889: 7.2 m, sheltered, one drag, "Dragging Reed to
-cover, Treating Reed", no "Guarding": the double drag of R0870 didn't happen). What was noted:
+cover, Treating Reed", no "Guarding": the double drag of R0870 didn't happen). The man out cold
+needed a third sample: the engagement scene's new check failed (R0921: 7.2 m, not sheltered, 1.7 m
+from his carer) because a ragdoll's chest lies about 0.5 m past its capsule, away from the carer,
+and the capsule 1.2 m from him. `_hidden_when_dragged` now also asks at `DRAG_RAGDOLL_TRAIL_M`
+(0.7 m, Proposed) past the furthest point (R0940: sheltered). What was noted:
 
 `SquadAI.find_drag_cover` picks a spot that hides someone lying there from the threat, and the
 carer drags until he is at it (`_at_cover`) or stalls; the casualty trails `Soldier.DRAG_OFFSET`
@@ -2003,15 +2007,19 @@ The F-457 rule needs the walls round a spot to be past the roof. An alcove (roof
 under the same roof, open only to the front) keeps three ways open at most and stays inside, so
 the wall at its back is refused as an interior wall. No generated building has one today.
 
-### F-471 (note): `_order_check` still reads host-only carried_by
-`InteractionMenu._order_check` hides Follow me / Stop / Get in cover for someone being carried by
-`carried_by`, which a client never has: on a client they stay offered. `Soldier.is_held()` would do;
-not in round 7's list, so left.
+### F-471 (done 2026-11-08, feat/breach-and-clear): `_order_check` read host-only carried_by
+`InteractionMenu._order_check` hid Follow me / Stop / Get in cover for someone being carried by
+`carried_by`, which a client never has: on a client they stayed offered. It reads
+`Soldier.is_held()` now (carry_net, any carrier's). people checks it with `carried_by` left out.
 
-### F-472 (note): CHARGE_DRAG_PAST_M's comment counts ARRIVE as 0.4
-Its comment reads "1 + 0.4 + 0.4 m", but `ARRIVE` is 0.7, so the carer can stop 1.1 m short of the
-spot, not 0.8 m. The 2.3 m has passed its checks; the margin past the blast is 0.3 m thinner than
-it says. Not changed here.
+### F-472 (done 2026-11-08, feat/breach-and-clear): CHARGE_DRAG_PAST_M's comment counted ARRIVE as 0.4
+Its comment read "1 + 0.4 + 0.4 m", but `ARRIVE` is 0.7, so the carer can stop 1.1 m short of the
+spot, not 0.8 m. The comment is corrected; the number stays. `_charge_clear_spot` already puts
+ARRIVE into the spot's distance, so of `AT_COVER_M` only 0.4 m is left to make up: 1 m (offset) +
+0.4 m + 0.5 m (ragdoll) = 1.9 m, and 2.3 m leaves 0.4 m to spare even with the spot
+`CHARGE_CLEAR_PAST_M` short on the navmesh. Measured: past a 3.0 m reach his ragdoll lay at 3.8 m
+in R0848, R0879, R0885, R0889 and R0903 (carer 5.4 to 5.5 m), and that reach is itself 0.5 m past
+the blast (`Squad.BLAST_SAFE_M`).
 
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
@@ -2055,9 +2063,6 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 
 ## Calls made for the Captain
 
-- Captain, 2026-11-08: F-456 "yes": a casualty dragged to cover ends in the cover. Call: judged the spot by where he'll lie (`_hidden_when_dragged`) rather than aiming 1 m past it, since a point past the spot can be off the navmesh or back in the open; no fully hidden spot in reach falls back to the old choice rather than treating him where he lay.
-- Captain, 2026-11-08: F-457 "fix": a wall under a porch, overhang or roof slab can be breached from outside. Call: fixed the hall rule in `Buildings` (walls count only with the roof running out to them, `HALL_WALL_ROOF_M` 0.5 m, Proposed) rather than special-casing `Squad.breach_target`, so garrisons and clears stop reading porches as rooms too.
-- `_sheltered` measures to `body_point()`, where he lies, not the capsule (F-456). Alternative: leave it on the capsule, which can be metres off for a ragdoll.
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
 2026-10-21 | Deep water: players swim (1.1 m/s, 0.5 under a full load, head out, hands busy, the current carries them, no drowning); the AI never routes into it (deep water is off its navigation mesh) and crosses on bridges and fords | Arma 3, the realism bar, has men swim, and rivers that block outright read as more map edges | an invisible wall at deep water, or drowning with a breath meter
@@ -2421,6 +2426,12 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-11-07 | Review of round 6 (F-432): `InteractionMenu._moved_by` reads the host's `carried_by`, else either side's replicated carry_net | works on every peer, the host unchanged | carry_net only (the host sets both at once anyway)
 2026-11-07 | Review of round 6: a blocked carer's drag-clear spot is kept 1 s for the same charge while he's within 0.5 m of where it was worked out (Proposed, `SquadAI.CHARGE_SPOT_KEEP_S`, `CHARGE_SPOT_KEEP_M`) | at most one set of path queries a second instead of four, and never a spot worked out from somewhere else | a slower look-again near the end of the fuse (it would start the drag later)
 2026-11-07 | Review of round 6: breach's `_test_medic_drag(dying=true)` puts the man's medical kit back as it was (each entry into its own container) on every way out of the scene | later scenes get the squad as it was | give him a fresh IFAK
+2026-11-08 | Captain, 2026-11-08: F-456 "yes": a casualty dragged to cover ends in the cover; the spot is judged by where he'll lie (`_hidden_when_dragged`), and with no fully hidden spot in reach the old choice stands | a point past the spot can be off the navmesh or back in the open | aim the drag 1 m past the spot
+2026-11-08 | Captain, 2026-11-08: F-457 "fix": a wall under a porch, overhang or roof slab can be breached from outside; a wall closes a hall in only with the roof running out to it (`Buildings._hall_wall`, `HALL_WALL_ROOF_M` 0.5 m, Proposed) | garrisons and clears stop reading porches as rooms too | special-case `Squad.breach_target`
+2026-11-08 | `_sheltered` measures to `body_point()`, where he lies, not the capsule (F-456) | a ragdoll can lie metres off its capsule | leave it on the capsule
+2026-11-08 | F-471: `_order_check` reads `Soldier.is_held()` | it hides the orders for anyone being carried, and a client has carry_net | `_moved_by`, which only knows the actor's own drag
+2026-11-08 | F-472: `CHARGE_DRAG_PAST_M` stays 2.3 m, only its comment changes | the spot's distance already holds ARRIVE, so he ends 0.4 m past `charge_reach` at worst, 0.8 m as measured, and that reach is 0.5 m past the blast | raise it, at the price of a longer drag against the fuse
+2026-11-08 | F-456, review of round 7: `_hidden_when_dragged` also judges where a ragdoll comes to lie, `DRAG_RAGDOLL_TRAIL_M` 0.7 m further back (Proposed) | a man out cold ended in sight of the threat where a conscious one wouldn't (R0921) | only the test's dying man checked, and say why the man out cold can't be
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

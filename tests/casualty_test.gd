@@ -1080,6 +1080,9 @@ func _test_engagement() -> void:
 		TOURNIQUET_WITHIN_S, seen.status.keys(), his[&"tourniquet"], delta.inventory.medical_count(&"tourniquet"), counts[&"tourniquet"], golf.inventory.medical_count(&"tourniquet")])
 	check(golf.inventory.count_of(&"smoke_grenade") < counts[&"smoke_grenade"] and _said(sent_from, "Golf", &"smoke_out"), "Golf throws smoke between him and the threat")
 	check(seen.drag, "and drags him out of the line of fire")
+	# (F-456: into the cover, as the dying man in _test_dying_to_cover; he's been put down to be treated.)
+	check(not is_instance_valid(delta.carried_by) and SquadAI.of(golf)._sheltered(delta),
+		"to cover: out of the threat's sight where he lies (lying %.1f m from where he fell; Golf %.1f m from him)" % [_flat(delta.body_point(), Vector3(-3, 0, 15)), _flat(golf.global_position, delta.body_point())])
 	check(not other_open_at_tq.is_empty() and other_open_at_tq[0] > 0, "massive bleeding first: his other wounds wait for the tourniquet (%s open)" % [other_open_at_tq])
 	# Read now: the callout log keeps only its last Callouts.LOG_SIZE lines, and the squad's
 	# chatter through the rest of the scene pushes these early ones out.

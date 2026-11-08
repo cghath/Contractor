@@ -368,8 +368,36 @@ func _test_inside_rule() -> void:
 	check(not inner.is_empty() and String(refused.get("refused", "")).contains("inside the building"),
 		"a wall between two of its rooms is still refused (%s)" % refused.get("refused", "not refused: %d spots" % (refused.get("spots", []) as Array).size()))
 	partition.queue_free()
+	# The same in a hall: the yard roofed over, its spots too open for inside()'s PROBE_M walls, so
+	# the spot before this partition is only inside by the walls the roof runs out to (_hall_wall).
+	var roof := _box_at(Vector3(42.0, 0.2, 42.0), Vector3(0.0, 3.6, 0.0))
+	var hall_partition := _box_at(Vector3(0.3, 3.0, 12.0), Vector3(12.15, 1.5, 8.0))
 	await _physics_frames(2)
 	Buildings.forget()
+	_place(player, Vector3(9, 0.1, 8))
+	await _seconds(0.3)
+	var front := Vector3(11, 0, 8)
+	var open := _ways_open(world, front)
+	check(open > Buildings.MAX_OPEN and Buildings.inside(world, front),
+		"a spot in a hall is inside by the hall's walls alone (%d of %d ways open at %.0f m)" % [open, Buildings.PROBE_DIRS, Buildings.PROBE_M])
+	var hall_wall := SquadTactics.wall_at(player, Vector3(12, 1.2, 8))
+	var in_hall: Dictionary = squad.breach_target(player, hall_wall) if not hall_wall.is_empty() else {}
+	check(not hall_wall.is_empty() and String(in_hall.get("refused", "")).contains("inside the building"),
+		"a partition in a hall is refused too (%s)" % in_hall.get("refused", "not refused: %d spots" % (in_hall.get("spots", []) as Array).size()))
+	roof.queue_free()
+	hall_partition.queue_free()
+	await _physics_frames(2)
+	Buildings.forget()
+
+
+## How many of Buildings' probes from spot `q` find no wall within PROBE_M (inside()'s first test).
+func _ways_open(world: World3D, q: Vector3) -> int:
+	var eye := q + Vector3.UP * Buildings.PROBE_HEIGHT
+	var open := 0
+	for k in Buildings.PROBE_DIRS:
+		if not Buildings._wall_within(world, eye, Buildings._dir(k), Buildings.PROBE_M):
+			open += 1
+	return open
 
 
 ## A static box of `size` on the world's layer, centred at `at`.

@@ -5196,12 +5196,18 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 	return best if best != null else short
 
 
-## Whether a casualty dragged along `path` lies out of the threat's sight wherever the drag can
-## end: he trails Soldier.DRAG_OFFSET behind his carer, who stops at the path's end or up to
-## AT_COVER_M short of it (_at_cover).
+## How much further from his carer than Soldier.DRAG_OFFSET a man out cold comes to lie once let
+## go: his ragdoll's chest (R0921: 1.7 m from his carer). Proposed.
+const DRAG_RAGDOLL_TRAIL_M := 0.7
+
+
+## Whether a casualty dragged along `path` lies out of the threat's sight once the carer has got
+## there: he trails Soldier.DRAG_OFFSET behind his carer, who stops at the path's end or up to
+## AT_COVER_M short of it (_at_cover), and a man out cold lies DRAG_RAGDOLL_TRAIL_M further back
+## still. A drag cut short before that (_drag_stalled) isn't judged.
 func _hidden_when_dragged(world: World3D, path: PackedVector3Array) -> bool:
 	var trail := Soldier.DRAG_OFFSET.length()
-	for back: float in [trail, trail + AT_COVER_M]:
+	for back: float in [trail, trail + AT_COVER_M, trail + AT_COVER_M + DRAG_RAGDOLL_TRAIL_M]:
 		if Throwables.clear_line(world, body.threat_pos + Vector3.UP * 1.5, _back_along(path, back) + Vector3.UP * 0.35):
 			return false
 	return true
@@ -6022,10 +6028,12 @@ const CHARGE_OWN_M := CHARGE_ALONG_M + 1.5
 const CHARGE_DETOUR_SHARE := 2.0
 const CHARGE_DETOUR_M := 3.0
 ## A casualty dragged clear lies Soldier.DRAG_OFFSET (1 m) behind his carer, towards the charge,
-## and the drag ends within ARRIVE + 0.4 of its spot (_at_cover): the carer's spot is this much
-## further out (1 + 0.4 + 0.4 m), so the casualty ends clear of it too, plus 0.5 m for where he
-## comes to lie off the drag's line once let go (his ragdoll's chest; review of
-## feat/breach-and-clear: 1.8 m left him 0.3 m past the reach).
+## and the drag ends within AT_COVER_M (0.7 + 0.4 m) of its spot (_at_cover). The spot's distance
+## already holds ARRIVE (0.7 m, _charge_clear_spot), so the carer's spot goes this much further
+## out: 1 m for the offset, 0.4 m for the rest of AT_COVER_M, 0.5 m for where he comes to lie off
+## the drag's line once let go (his ragdoll's chest; review of feat/breach-and-clear: 1.8 m left
+## him 0.3 m past the reach), and 0.4 m to spare. So he ends at least 0.4 m past charge_reach
+## (a spot that comes out CHARGE_CLEAR_PAST_M short on the navmesh), 0.8 m otherwise (F-472).
 const CHARGE_DRAG_PAST_M := 2.3
 ## On his way to a casualty in a burning charge's blast, a carer goes on in to drag him out only
 ## with CHARGE_GO_IN_S of its fuse left past his way to him at CHARGE_GO_MPS (a grab and ~5 m

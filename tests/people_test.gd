@@ -360,6 +360,10 @@ func _test_hostile_hvt() -> void:
 	var on_shoulder := _ids(player, hvt)
 	check(not on_shoulder.is_empty() and on_shoulder[0] == &"put_down" and not &"lead" in on_shoulder and not &"cover" in on_shoulder,
 		"carrying him, his menu has Put down first and no orders (%s)" % [on_shoulder])
+	hvt.carried_by = null  # (a client's view: only the host has it, carry_net says the rest; F-471)
+	var client_sees := _ids(player, hvt)
+	hvt.carried_by = player
+	check(not &"lead" in client_sees and not &"cover" in client_sees, "the same on a client: no orders for a man being carried (%s)" % [client_sees])
 	player._server_release_body.rpc_id(1)
 	await _frames(3)
 	_end_carry_phase(player)  # lowered off the shoulder

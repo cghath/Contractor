@@ -547,12 +547,12 @@ static func _moved_by(target: Node, actor: Soldier) -> bool:
 ## A person's orders (Follow me, Stop, Get in cover): as the people rules allow
 ## (Person.menu_check "leadable" and "led"), but not the order they're already following
 ## (Follow me to someone following you, Get in cover to someone in cover) and none while
-## someone carries them.
+## someone carries or drags them (is_held: carry_net, as a client has it too, F-471).
 static func _order_check(need: StringName, actor: Soldier, target: Node) -> String:
 	var why := Person.menu_check(&"led" if need == &"stop_order" else &"leadable", actor, target)
 	if why != "":
 		return why
-	if target is Soldier and is_instance_valid((target as Soldier).carried_by):
+	if target is Soldier and (target as Soldier).is_held():
 		return _HIDE
 	var st := Person.state(target)
 	match need:
