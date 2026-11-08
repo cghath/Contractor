@@ -24,8 +24,18 @@ paper-doll menu (`LoadoutScreen`) stays for now: it still has give-to-a-squadmat
   `point:<attach point id>` (every carrier and pack MOLLE point) and `pockets`. The whole-body
   view shows only the main ones; a focused region shows its own.
 - **Picker**: every item that fits the picked slot, owned or for sale (`BaseEconomy.item_price`
-  > 0), owned first. Unowned rows show their price; picking one fits it in the draft and shows
-  a **Buy now: $X** offer (price, cash) that buys one into the stash (`BaseHub` "buy").
+  > 0), owned first. Unowned rows show their price (the host's catalog in the view). Picking
+  one **buys and fits it in one step** (Captain, 2026-11-02, F-405), like the paper doll's
+  pickers: it asks first (`LoadoutScreen.ask_buy`: the item, its price, the cash left after;
+  Cancel backs out (nothing bought, the draft as it was); "Don't ask again" turns that off, the panel's "Ask before buying" tick
+  or Settings, Controls, Menus turns it back on), then sends the host op for that marker on
+  what he wears with `buy: true` (`slot`, `mount`, `point`, or `add` for the pockets), which
+  buys exactly one through `BaseHub._server_buy_picked` (company money, the price shown) and
+  fits it. The draft gets the same edit; a draft with no other changes becomes what he wears,
+  one with other changes keeps them for Apply (undo as before). Only when the company can't
+  afford it, or it goes on a holder the draft has but he doesn't wear yet (a mount, a MOLLE
+  point), does it stay in the draft with a **Buy now: $X** offer that buys one into the stash
+  (`BaseHub` "buy").
 - **Draft**: edits are `Loadouts` template edits (`set_slot`, `set_mount`, `set_point`,
   `add_units`, `remove_units`, `fill_ammo`, `medic_kit`) kept on an undo stack (60). The model
   wears the draft as if the stash had all of it (`dressed()`). **Apply** (Enter) sends the
@@ -79,7 +89,10 @@ so the conservation checks see them.
 - `loadout_test`: mounts and points conserve units; kits save, clean, resolve targets and total
   the shortfall; at the hub kit_apply with buy (a dollar short refused, then exactly the
   shortfall bought), the editor's template op with buy; the editor's markers, picker, undo,
-  Buy now, Apply, kit save; the armory's shelves, pointing, Buy, Fit on me.
+  the one-step buy (asks, Cancel buys nothing, then bought and on him with no Apply; a client's
+  through the host), Buy now when cash is short, Apply, kit save; the armory's shelves,
+  pointing, Buy, Fit on me. The editor's remembered picks go to the test's own file
+  (`LoadoutEditor.use_file`, dev builds only; F-406), never the player's.
 - `base_test`: the armory's buy is the shop's; saved kits survive a save and reload.
 - `ui_test`: both screens fit at the ten window sizes and four UI scales.
 

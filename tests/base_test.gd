@@ -48,6 +48,7 @@ func _ready() -> void:
 	BaseHub.delete_test_campaign_files()  # whatever a run cut short left behind
 	_test_stash_and_saves()
 	_test_damaged_saves()
+	_test_unfit_mount_on_load()
 	_test_archive()
 	_test_squad_count()
 	_test_hiring()
@@ -216,6 +217,30 @@ func _test_damaged_saves() -> void:
 	check(notes == ["Campaign saved"] and int(JSON.parse_string(FileAccess.get_file_as_string(path)).sections.base.sentinel) == 999,
 		"once it can be written it saves and says so")
 	BaseHub.note.disconnect(on_note)
+	_wipe_campaign_files()
+
+
+## F-478: a save from before the M27 was tagged "dmr" can hold an M320 on one, which no longer
+## fits. Loading it puts each such M320 in the stash loose, its grenade in, from the stash's M27s
+## and from what people wear.
+func _test_unfit_mount_on_load() -> void:
+	print("A save with an M320 left on an M27 (F-478)")
+	_wipe_campaign_files()
+	BaseHub.new_campaign(SEED)
+	var ub := String(GunAttachments.UNDERBARREL)
+	var m27 := ItemDB.get_item(&"m27")
+	var raw: Dictionary = Roster.json_safe(GunAttachments.with_mounted(m27.default_state(), GunAttachments.UNDERBARREL, &"m320", {"round": "m406"}))
+	var had := BaseArmory.count_of(BaseHub.stash(), &"m320")
+	BaseHub.stash().append({"id": "m27", "count": 1, "state": raw.duplicate(true)})
+	Roster.main_character(BaseHub.roster(), "unfit_test")["gear"] = {"slots": {"primary": "m27"}, "slot_state": {"primary": raw.duplicate(true)}, "containers": {}}
+	check(BaseHub.server_save(), "a campaign with an M320 left on two M27s saves")
+	BaseHub.load_or_new()
+	var worn: Dictionary = Roster.main_character(BaseHub.roster(), "unfit_test").gear
+	var loaded_ones := BaseHub.stash().filter(func(e: Dictionary) -> bool: return String(e.id) == "m320" and String(e.get("state", {}).get("round", "")) == "m406")
+	var stash_27s := BaseHub.stash().filter(func(e: Dictionary) -> bool: return String(e.id) == "m27")
+	check(BaseArmory.count_of(BaseHub.stash(), &"m320") == had + 2 and loaded_ones.size() == 2 and not (worn.slot_state.primary as Dictionary).has(ub) and String(worn.slots.primary) == "m27"
+		and not stash_27s.is_empty() and stash_27s.all(func(e: Dictionary) -> bool: return not (e.get("state", {}) as Dictionary).has(ub)),
+		"loading takes both off into the stash loose with their grenades, the M27s kept (M320s %d -> %d)" % [had, BaseArmory.count_of(BaseHub.stash(), &"m320")])
 	_wipe_campaign_files()
 
 
