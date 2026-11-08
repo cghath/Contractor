@@ -1982,6 +1982,10 @@ let a switch of under 6 m through as a walk (round 7's review). spacing's "A slo
 the travel by hand: in 0.1 s, a base sprinting 0.65 m gives a 1.25 m step (0.6 m with it still),
 and one jumping 15 m or hopping 3 m gives 0.6 m. spacing's men's checks bound the base's credit by
 their own 7.5 m/s, apart from the code's, so a bogus credit shows up as over the rate.
+`moved` is game metres and `dt` real seconds (`Soldier._now()`, F-438), the same thing in play, but
+at spacing's 3x a sprinting base is 19.5 m a real second, reads as a switch and earns nothing: in
+that test the credit is exercised only by the by-hand check ("A slot on its way"), not the long
+follow.
 
 ## F-462 (open, note): the no-ground mirror flip still swaps a team's men at once
 Location: [squad.gd](../../scripts/ai/squad.gd) `_work_out_slots`, the "No ground there" branch.
@@ -2028,6 +2032,12 @@ so the slot "lost" a point it hadn't reached. The step to `aim` now keeps to its
 unpulled, which is what the call asks for. R0899, R0900, R0902: no jumps, 0.11 m over the rate at
 most, none across a wall (Echo out through the gate, out of sight of slot and team for 1.5 and
 1.6 s in the first two; never out of sight in R0902).
+
+Round 8's review: the step that takes up a new `aim` (its slot or his team's base, in sight from
+the previous `at`) was still pulled onto the mesh, so the first look at it next time could graze
+the same way and leap. `aim` is now set only if the pulled step still sees it; else the point
+before it stands. Spacing's "A slot out of sight" pins it with a post hiding the point from the
+pulled step alone.
 
 It bends the 2026-10-14 rule on purpose, so spacing bounds it: "Team place" holds every step to
 1 m over the rate again, with no jumps counted apart, and no man may be out of sight of both his
@@ -2396,8 +2406,9 @@ Captain, 2026-11-07: "yes" (#44, F-417: the men's slots catching up at the lead'
 2026-11-07 | spacing (review): "Team place"'s men's check allows 1 m over the rate, not a man's gap (8 m), as the mirror walk's; the men's rate credits the team's base like the code | R0847 saw 0.1 m over; a whole gap would have passed half a refit leap | keep the gap
 2026-11-07 | squad (F-462): the no-ground mirror flip ("No ground there" in _work_out_slots) still swaps a team's place and men at once, logged not fixed | it isn't a fallback, so making it travel changes when a team on real ground counts as held, outside the review's items; never reached in spacing (the test navmesh has no edge the formation meets) | mark it a fallback for _place_on_way and _slot_on_way now
 Captain, 2026-11-08: "your call" (#44, F-417, F-463: the "no straight way, there at once" rule). Called by cghath's coordinator: a slot with neither its goal nor its team's base in sight carries on to the last point it headed for with nothing between (`aim`), and jumps only if it reaches that point and still sees nothing, never later than PLACE_TRAVEL_MAX_S | the jump does happen (19 m through the south gate, R0880, R0884), left men chasing leapt slots (casualty soak "stuck", R0863, R0868, R0878), and this passed when tried (R0882, R0883); spacing now bounds the time out of sight | alternative: wait up to PLACE_TRAVEL_MAX_S where it is, as the place does; or keep the jump
-2026-11-08 | squad (F-463): a travelling slot's step towards `aim` isn't pulled onto the navigation mesh | pulled aside a few cm the sight line through the gate grazed its post and the slot jumped 17.8 m before reaching `aim` (R0886, R0895, R0896; none in R0899, R0900, R0902); a few steps at most off the mesh by a few cm, and only the slot, the man still paths | alternative: stop re-checking the ray once heading for `aim`, which could walk the slot through a post
+2026-11-08 | squad (F-463): a travelling slot's step towards `aim` isn't pulled onto the navigation mesh | pulled aside a few cm the sight line through the gate grazed its post and the slot jumped 17.8 m before reaching `aim` (R0886, R0895, R0896; none in R0899, R0900, R0902); `heading_on` skips the pull for the whole leg to `aim` (up to 17 m in R0895), so the slot can be off the mesh all that way, but only the slot, the man still paths | alternative: stop re-checking the ray once heading for `aim`, which could walk the slot through a post
 2026-11-08 | squad (F-461, review): a team's base's move is credited to a travelling slot only up to BASE_WALK_MAX_MPS 7.5 m/s (Proposed: a sprint and a margin), not by TRAIL_JUMP_M | a switch of source under 6 m (the team's place to its leader, close by) was credited as a walk; a speed is one comparison and needs no new state; spacing's men's check bounds it with its own number | alternative: store which source the base came from in `_ways` and credit nothing when it changes
+2026-11-08 | squad (F-463, round 8 review): a travelling slot takes up a new `aim` only if the step's end, pulled onto the navigation mesh, still sees it; else the point before it stands | the point was seen from the previous `at`, so a pull of a few cm could graze a post on the first look at it and leap the ~18 m F-463 is about; one ray more a step, still at most three a man | alternative: leave the step that sets `aim` unpulled too (more of the slot off the mesh, on every step of an ordinary walk)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

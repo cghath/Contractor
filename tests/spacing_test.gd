@@ -13,8 +13,11 @@ extends Node
 
 ## How much faster than real time the walk runs, and the lead's pace (a walk).
 const SCALE := 3.0
-## The most a team's base may be credited for walking, as a speed (a sprint and a margin; kept
-## apart from Squad.BASE_WALK_MAX_MPS on purpose, so raising that one fails _men_steps).
+## The fastest _men_steps lets a team's base be credited for walking, in metres a real second (a
+## sprint and a margin). Its own number, not Squad.BASE_WALK_MAX_MPS, so that a base switch the
+## code took for a walk shows up as over the rate if the run has one and a slot spends it. The
+## code's bound itself is pinned by "A slot on its way", by hand: at SCALE a sprint reads as a
+## switch to both, so the long follow never relies on it (F-461).
 const BASE_WALK_CAP_MPS := 7.5
 const LEADER_SPEED := 2.0
 ## Closer than this two squadmates, two samples (seconds) running, count as stacked.
@@ -630,6 +633,34 @@ func _test_slot_out_of_sight() -> void:
 	var kept: Vector3 = squad._slot_on_way(who, want, base, false, false, map)
 	check(_flat(pulled, edge.lerp(edge_aim, 0.1)) > 0.03 and absf(kept.z - edge.z) <= 0.01 and kept.x < edge.x,
 		"on its way to that point it keeps to the straight line, not pulled onto the navigation mesh (%.2f m off the line; the mesh is %.2f m off)" % [absf(kept.z - edge.z), _flat(pulled, edge.lerp(edge_aim, 0.1))])
+	# A step pulled onto the mesh takes a new point only if it still sees it from there: a post
+	# that hides the point from the pulled step, and not along the straight line, leaves the old one.
+	var sighted := Vector3(4, 0.1, edge.z)
+	var pulled_z := NavigationServer3D.map_get_closest_point(map, edge.lerp(sighted, rate / _flat(edge, sighted))).z
+	var post := StaticBody3D.new()
+	post.collision_layer = SquadAI.WORLD_MASK
+	var post_shape := CollisionShape3D.new()
+	var post_box := BoxShape3D.new()
+	post_box.size = Vector3(0.5, 3.0, 2.0)
+	post_shape.shape = post_box
+	post.add_child(post_shape)
+	level.add_child(post)
+	post.global_position = Vector3(8.25, 1.5, edge.z - 0.012 - 1.0)  # its near face just off the straight line
+	await get_tree().physics_frame
+	var old_aim := edge + Vector3(0, 0, -3)
+	var sighted_step := func() -> void:
+		ways[id] = {"at": edge, "goal": sighted, "fell": false, "way": true, "frame": 0, "now": Soldier._now() - dt,
+			"lead": player.global_position, "base": base, "aim": old_aim, "since": 0.0}
+		squad._slot_on_way(who, sighted, base, false, false, map)
+	sighted_step.call()
+	var aim_hidden: Vector3 = ways[id].aim
+	var straight_clear: bool = not squad._wall_between(edge, sighted)
+	post.free()
+	await get_tree().physics_frame
+	sighted_step.call()
+	var aim_clear: Vector3 = ways[id].aim
+	check(straight_clear and pulled_z < edge.z - 0.03 and aim_hidden.is_equal_approx(old_aim) and aim_clear.is_equal_approx(sighted),
+		"a point the step pulled onto the mesh no longer sees isn't taken up (kept %s), and one it still sees is (%s; pulled %.2f m)" % [aim_hidden, aim_clear, edge.z - pulled_z])
 	var near := want + Vector3(0.2, 0, 0)
 	var arrived: Vector3 = step.call(near, aim, 0.0)
 	check(_flat(arrived, want) <= 0.01 and (ways[id].aim as Vector3).is_equal_approx(want),

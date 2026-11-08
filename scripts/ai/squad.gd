@@ -1981,14 +1981,15 @@ func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carrie
 	var left := walked + SLOT_CATCHUP_MPS * dt
 	var d := _flat(at, want)
 	var heading_on := false  # on to `aim`, neither its slot nor its team in sight
+	var seen := Vector3.INF  # the point this step heads for with nothing between
 	if d <= left:
 		at = want  # there
 		aim = want
 	elif not _wall_between(at, want):
-		aim = want
+		seen = want
 		at = at.lerp(want, left / d)
 	elif _flat(at, base) > 0.5 and not _wall_between(at, base):
-		aim = base
+		seen = base
 		at = at.lerp(base, minf(left / _flat(at, base), 1.0))  # round the wall's end, by where his team forms
 	elif aim != Vector3.INF and _flat(at, aim) > 0.5 and not _wall_between(at, aim):
 		# Neither in sight now (his team's place has gone on through a gate along its path and
@@ -2002,6 +2003,11 @@ func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carrie
 		return want  # no straight way from here either: there at once
 	if at != want and map.is_valid() and not heading_on:
 		at = NavigationServer3D.map_get_closest_point(map, at)
+	# `seen` was in sight from before the step: it's only worth heading on to if it still is from
+	# where the step ended, pulled onto the mesh (else the first look at it next time can graze a
+	# gate's post and the slot leaps; the point before it stands meanwhile).
+	if seen != Vector3.INF and not _wall_between(at, seen):
+		aim = seen
 	_ways[id] = {"at": at, "goal": want, "fell": false, "way": at != want or carried, "frame": frame, "now": now,
 		"lead": lead, "base": base, "aim": aim, "since": since}
 	return at

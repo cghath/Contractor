@@ -65,7 +65,8 @@ The two leftover branches the handoff called "probably wanted", merged as they w
   following it straight lost sight of it once it had turned outside, and leapt 19 m across the
   wall to where it belonged. It now carries on to the last point it was heading for, the way the
   place went, and is there at once only if nothing is in sight from there either, and never later
-  than the 20 s a place may travel.
+  than the 20 s a place may travel. A point only counts as last headed for if the slot still sees
+  it after its step is pulled onto the navigation mesh (review).
 
 #### Fixed
 - **townperf's breach check waited on a stale navigation bake.** A rebake the fight had left
