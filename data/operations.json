@@ -48,9 +48,16 @@
 				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 6, "callsign": "Hammer", "kit": "allied_us"},
 				{"kind": "armour_section", "groups": 2, "vehicles": ["abrams", "abrams"], "crew": 4, "men": 0, "callsign": "Iron", "kit": "allied_us", "reserve": true},
 				{"kind": "mortar_section", "groups": 1, "vehicles": ["mortar_m224", "mortar_m224"], "crew": 2, "men": 0, "callsign": "Mortar", "kit": "allied_us"},
-				{"kind": "transport", "groups": 1, "vehicles": ["maxxpro"], "crew": 2, "men": 0, "callsign": "Anvil", "kit": "allied_us", "logistics": "ammo", "wave": 8},
-				{"kind": "transport", "groups": 1, "vehicles": ["maxxpro"], "crew": 2, "men": 0, "callsign": "Bowser", "kit": "allied_us", "logistics": "fuel", "wave": 8}
+				{"kind": "transport", "groups": 1, "vehicles": ["hemtt_ammo"], "crew": 2, "men": 0, "callsign": "Anvil", "kit": "allied_us", "logistics": "ammo", "wave": 8},
+				{"kind": "transport", "groups": 1, "vehicles": ["m978"], "crew": 2, "men": 0, "callsign": "Bowser", "kit": "allied_us", "logistics": "fuel", "wave": 8}
 			],
+			"enemy_oob_by": {"eastern_concord": [
+				{"kind": "rifle_squad", "groups": [3, 4], "men": 4, "bands": ["outposts", "crossing", "town"], "callsign": "Roamer", "kit": "rifles"},
+				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bmp2", "bmp2", "btr82a"], "crew": 3, "men": 6, "at": {"band": "depth", "types": ["qrf_base"], "max": 2}, "callsign": "Rider", "kit": "rifles"},
+				{"kind": "at_team", "groups": [2, 3], "men": 3, "bands": ["crossing", "town"], "callsign": "Spear", "kit": "at"},
+				{"kind": "gun_team", "groups": 2, "men": 3, "bands": ["crossing", "town"], "callsign": "Anvil", "kit": "mg"},
+				{"kind": "armour_section", "groups": 1, "vehicles": ["t72b3", "t72b3", "t72b3"], "crew": 3, "men": 0, "at": {"site": "@hq"}, "callsign": "Hornet", "kit": "rifles", "reserve": true}
+			]},
 			"enemy_oob": [
 				{"kind": "rifle_squad", "groups": [3, 4], "men": 4, "bands": ["outposts", "crossing", "town"], "callsign": "Roamer", "kit": "rifles"},
 				{"kind": "qrf", "groups": 2, "vehicles": ["technical"], "crew": 2, "men": 4, "at": {"band": "depth", "types": ["qrf_base"], "max": 2}, "callsign": "Rider", "kit": "rifles"},
@@ -82,8 +89,14 @@
 			"friendly_oob": [
 				{"kind": "armour_section", "groups": 2, "vehicles": ["abrams", "abrams"], "crew": 4, "men": 0, "callsign": "Iron", "kit": "allied_us"},
 				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bradley", "bradley"], "crew": 3, "men": 6, "callsign": "Hammer", "kit": "allied_us"},
-				{"kind": "transport", "groups": 1, "vehicles": ["maxxpro"], "crew": 2, "men": 0, "callsign": "Bowser", "kit": "allied_us", "logistics": "fuel", "wave": 10}
+				{"kind": "transport", "groups": 1, "vehicles": ["m978"], "crew": 2, "men": 0, "callsign": "Bowser", "kit": "allied_us", "logistics": "fuel", "wave": 10}
 			],
+			"enemy_oob_by": {"eastern_concord": [
+				{"kind": "armour_section", "groups": 2, "vehicles": ["t72b3", "t72b3"], "crew": 3, "men": 0, "bands": ["crossing", "town"], "callsign": "Hornet", "kit": "rifles"},
+				{"kind": "mech_infantry", "groups": 2, "vehicles": ["bmp2", "bmp2"], "crew": 3, "men": 6, "bands": ["outposts", "crossing"], "callsign": "Rider", "kit": "rifles"},
+				{"kind": "at_team", "groups": [2, 3], "men": 3, "bands": ["crossing", "town"], "callsign": "Spear", "kit": "at"},
+				{"kind": "weapons_team", "groups": 1, "men": 3, "at": {"site": "@hq"}, "callsign": "Mortar", "kit": "rifles"}
+			]},
 			"enemy_oob": [
 				{"kind": "at_team", "groups": [3, 4], "men": 3, "bands": ["outposts", "town"], "callsign": "Spear", "kit": "at"},
 				{"kind": "rifle_squad", "groups": 2, "men": 4, "bands": ["outposts", "town"], "callsign": "Ambush", "kit": "rifles"},

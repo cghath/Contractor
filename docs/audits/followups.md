@@ -1801,6 +1801,47 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-496 to F-503: combined arms D6a/D6b follow-ups (feat/enemy-armour, cg_brief 4.1, 4.2)
+
+### F-496 (open): the T-72B3's 9M119M flies as a shell
+The 2A46M fires 9M119M from the carousel through ShellFlight (a 400 m/s unguided shell with the
+missile's tandem warhead), not the laser-beam-rider it is. Needs a guided-from-the-breech path in
+VehicleWeapons (the ATGM mounts' raise and rail don't fit a gun). The readout says "ATGM".
+
+### F-497 (open): the rest of 7.1's "where light armour appears"
+Not built with D6b's tables: mounted patrols on the roads as their own groups at Suspicious and up,
+the parked and crewed armed vehicle at checkpoints, the "armor" contract threat spawning vehicles
+from the holder's list, skirmish teams riding in at tier 2 and up, the Bradley and technicals for
+sale. VehicleQrf (patrols and QRFs), MissionScenario (convoys, parks) and Operations
+("enemy_oob_by") read the tables already; the rest wants the same FactionVehicles calls.
+
+### F-498 (open, with F-242): AI crews fire only the coax on the new vehicles
+AavGunner fires the vehicle's `gun` (the PKT coax); the T-72B3's 2A46M, the BMP-2's and BTR-82A's
+autocannons and the Konkurs wait for A9's CrewGunner, as the Abrams' and Bradley's do. Players at
+those guns have them whole. The MT-LB's PKT, the rhino's M2, the SUV's PKM and the captured
+MaxxPro's DShK are their `gun`s, so those are the AI's already.
+
+### F-499 (open): cabin interiors for the new vehicles
+VehicleInteriors furnishes the captured MaxxPro (the MaxxPro's cab) and no other new model; the SUV,
+the HEMTT and rhino cabs have solid tinted glass (P.GLASS) until someone draws their seats and windows
+(7.2: "only where crews sit visibly").
+
+### F-500 (open): MT-LB with ZU-23, and the technicals' real guns
+7.1's "MT-LB with ZU-23" needs the 23 mm as a mounted gun (F-244: the five technical guns); the MT-LB
+carries its PKT for now and the Concord's table lists it plain.
+
+### F-501 (open): the Kontakt bricks stay drawn after firing, and K-1 on the BMP-2
+A fired tile is gone from the armour (ArmourModel's META_TILES, every peer) but VehicleHull has no
+REMOVE op (2.4.4), so the voxels stay. BMP-2 Kontakt-1 (the tier 3 package, 2.4.5) is plate and tile data
+only: F-274's "packages drawn on the model".
+
+### F-502 (open): the D6a look needs a person's eyes
+Tested by measurement only (tests/enemyarmour_test: sizes, voxel counts, connectivity, every part where it's drawn): nobody has
+looked. vehicle_shots (doc 9.2) on the RTX 4060 when Captain isn't gaming, then a tweak pass.
+
+### F-503 (open): the Concord's Pressure-tier rides in other spawners
+VehicleQrf reads the zone's EnemyResponse tier for its table's by_tier; MissionScenario's convoys and parks read tier 0 (a zone's Pressure isn't a contract's). Worth a by-contract tier if a convoy should change with it.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2165,23 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-11-08 | cg_brief 4.1 (D6a): the new models live in VehicleArtFoes (scripts/art/vehicle_art_foes.gd), named by VehicleArt.MODELS and _shape_for; the rest of VehicleArt is unchanged but for a width on _maxxpro | a 2,000-line file and open branches near it | one bigger VehicleArt
+2026-11-08 | cg_brief 4.1: model ids t72b3, bmp2, btr82a, mtlb, hemtt_cargo, m978, hemtt_ammo, kestrel_rhino, armoured_suv, maxxpro_captured; the M978 keeps that id so A8's tanker numbers work | data/vehicle_drive.json and vehicle_logistics.json already used those | hemtt_tanker
+2026-11-08 | cg_brief 4.1: the rhino has 6 firing ports a side drawn, 6 shooters seated (three a side), a roof turret with an M2; the SUV's roof gun is a PKM on a pintle (seat 3 of 4) | 7.1's description; the doc says "an MG out of the sunroof" | a mounted M2
+2026-11-08 | cg_brief 4.2 (D6b): the T-72B3 is base plates plus Kontakt-5 tiles (the default fit, no package): base CE 880 so TOW-2A's "~" holds (doc call 91); Kontakt-1 on the skirts' front half to z 1.5 so the plate's centre has it | the doc's 2.4.2 with call 91 | a separate K-5 package
+2026-11-08 | cg_brief 4.2: the T-72B3's side plate isn't spaced (spaced_mm left off): 600 CE M830A1 must beat 120 + 400 CE with a Kontakt-1 brick (doc call 78) | a spaced figure read 522 under the brick | spaced skirts at 400 mm
+2026-11-08 | cg_brief 4.2: the BMP-2 front's "M2 M33" cell reads "no" (doc call 91 said so): the table and the test changed | 35 mm KE and 24 mm the M33's best | thinning the front
+2026-11-08 | cg_brief 4.2: BTR-82A and MT-LB rear 9 mm (doc 8) so level 1's ball is stopped there; the BTR-82A's roof 7 mm and its plates give STANAG KE 1 all round | KE 0 at the rear of a real APC read wrong | the doc's 8 and a KE 0 rear
+2026-11-08 | cg_brief 4.2: STANAG levels from the plates by the proofs: T-72B3 6/4/4 art 6 mine 2a/1; BMP-2 2/2/2 art 3 mine 1 (its 12 mm roof caps front KE at 2 at 30 degrees); BTR-82A and MT-LB 1/1/1 art 2 mine 1; rhino 1/1/1 art 2 mine 0; SUV 0 art 2 mine 0; HEMTTs 0 | rated as the plates fall (armour_test proves them) | doc-guessed numbers
+2026-11-08 | cg_brief 4.2: the T-72B3's 2A46M loads by an autoloader, a gun with "autoload_s" (7.5 s, no loader seat): the gunner or commander stays on his sight, the commander restocks the carousel between fights | 2.7.3; the smallest change to VehicleWeapons's cycles | the commander as a pretend loader
+2026-11-08 | cg_brief 4.2: the 9M119M fires through the gun as a shell (400 m/s, unguided, F-496) | a guided breech path is its own job; the gunner still has his round | leaving it out
+2026-11-08 | cg_brief 4.2: the HEMTTs are unarmoured soft-zone trucks with no authored modules (VehicleModules builds them from zones, rated STANAG 0); M978's cistern is a fuel zone | public HEMTTs are soft; the doc lists no armour | plates and a ring-mounted M2
+2026-11-08 | cg_brief 4.2: factions' "vehicles" tables per 7.1 (FactionVehicles reads them, every list Proposed); a faction with no table keeps the old model (the caller's fallback); schemes per faction (Vantage black, the Front's MT-LB its own) | 7.1 | code lists per faction
+2026-11-08 | cg_brief 4.2: a QRF's table lists only technicals with a gun that fires (DShK): the doc's ZU-23, SPG-9, ZPU and rocket technicals have "gun": {} until F-244 (F-500), so they stay in the parks; Black Ridge keeps its sites' own parks | an unarmed QRF truck is no threat and changes what the zones send | the doc's lists now
+2026-11-08 | cg_brief 4.2: a demolition block placed on a plated hull takes 0.6 of its engine (Vehicle.CHARGE_ENGINE, Proposed): two stop it. | a park of the Concord's BMPs is a sabotage target (2 kg HE alone does nothing to the plates) | a park of soft vehicles only
+2026-11-08 | cg_brief 4.2: hooks kept small: VehicleQrf (the zone's faction and Pressure tier for patrols and QRFs), MissionScenario (convoys and parks by contract target), Operations.enemy_oob's target ("enemy_oob_by"), and the Concord's BMP-2s get Kontakt-1 at tier 3 through VehicleQrf; the rest of 7.1 is F-497 | the task: keep it small | wiring the armor threat and checkpoints too
+2026-11-08 | cg_brief 4.2: US convoys and the invasion's supply trucks are HEMTTs (hemtt_cargo, hemtt_ammo, m978) in place of the MaxxPro stand-ins (F-297) | they're in data now; data/operations.json and factions.json only | leaving the stand-ins
+2026-11-08 | cg_brief 4.1, 4.2: the new suite enemyarmour tests the art by measurement (dimensions, connected voxels, parts, seats and muzzles); its look is F-502, a person's job (no windowed Godot) | the task's rule | screenshots
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

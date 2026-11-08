@@ -5,7 +5,14 @@
 		"m242": {"name": "M242 Bushmaster 25 mm", "kind": "autocannon", "feeds": {"ap": ["m919", "m791"], "he": ["m792"]}, "box": {"ap": 70, "he": 230}, "rates_rpm": {"single": 0, "low": 100, "high": 200}, "spread_mil": 0.6, "sound": "m242"},
 		"tow_launcher": {"name": "TOW-2A launcher", "kind": "atgm", "missile": "tow2a", "ready_max": 2, "spread_mil": 0.0, "sound": "tow_launch"},
 		"m240_pintle": {"sound": "m240", "name": "M240 (loader's)", "round": "762x51_m80", "rpm": 650, "spread_deg": 0.35, "feed": "rounds_762", "load": 200, "kind": "mg"},
-		"m2_cupola": {"sound": "m2", "name": "M2 .50 cal (commander's)", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg", "load": 2, "kind": "mg"}
+		"m2_cupola": {"sound": "m2", "name": "M2 .50 cal (commander's)", "round": "50bmg_m33", "rpm": 550, "spread_deg": 0.3, "feed": "belt_50bmg", "load": 2, "kind": "mg"},
+		"2a46m": {"name": "2A46M-5 125 mm", "kind": "cannon", "ammo": ["3bm42", "3bk29m", "3of26", "9m119m"], "spread_mil": 0.25, "sound": "m256", "autoload_s": 7.5},
+		"2a42": {"name": "2A42 30 mm", "kind": "autocannon", "feeds": {"ap": ["3ubr8"], "he": ["3uof8"]}, "box": {"ap": 160, "he": 340}, "rates_rpm": {"single": 0, "low": 300, "high": 550}, "spread_mil": 0.8, "sound": "m242"},
+		"2a72": {"name": "2A72 30 mm", "kind": "autocannon", "feeds": {"ap": ["3ubr8"], "he": ["3uof8"]}, "box": {"ap": 120, "he": 180}, "rates_rpm": {"single": 0, "low": 150, "high": 330}, "spread_mil": 0.9, "sound": "m242"},
+		"konkurs_launcher": {"name": "9P135M Konkurs-M launcher", "kind": "atgm", "missile": "konkurs_m", "ready_max": 1, "spread_mil": 0.0, "sound": "tow_launch"},
+		"pkt": {"sound": "pkm", "name": "PKT 7.62 mm", "round": "762x54r_lps", "rpm": 750, "spread_deg": 0.25, "feed": "rounds_762x54r", "load": 800, "kind": "mg"},
+		"pkm_mount": {"sound": "pkm", "name": "PKM (pintle)", "round": "762x54r_lps", "rpm": 650, "spread_deg": 0.55, "feed": "rounds_762x54r", "load": 400, "kind": "mg"},
+		"nsvt_cupola": {"sound": "dshk", "name": "NSVT 12.7 mm (commander's)", "round": "50bmg_m33", "rpm": 700, "spread_deg": 0.35, "feed": "belt_127x108", "load": 2, "kind": "mg"}
 	},
 	"models": {
 		"abrams": {
@@ -59,6 +66,59 @@
 			},
 			"roof_hatch": {"at": [0.5, 2.55, 2.0], "stance": "stand"},
 			"racks": {"ready_25": {"m791": 70, "m792": 230}, "rack_25": {"m791": 200, "m792": 400}, "rack_tow": {"tow2a": 5}},
+			"switch_s": {"turret": 3.0, "driver": 10.0, "troop": 6.0, "front_deg": 0.0}
+		},
+		"t72b3": {
+			"turret": {"pivot": [0.0, 1.36, 0.63], "radius": 1.75, "top": 3.1, "gun": {"trunnion": [1.82, -0.4], "box": [-0.2, 1.62, -4.85, 0.2, 2.0, -0.55], "colours": ["paint", "paint_dark"]}, "elevation_deg": [-6, 14], "traverse_dps": 40, "elevation_dps": 20},
+			"weapons": [
+				{"id": "main", "gun": "2a46m", "seat": 1, "turret": "main", "muzzle": [0.0, 1.82, -4.78], "modules": ["breech", "barrel"], "sights": ["gunner_sight", "aux_sight"], "racks": ["ammo_carousel"], "stowage": ["ammo_rack_hull"], "commander_seat": 2, "battlecarry": "3bm42"},
+				{"id": "coax", "gun": "pkt", "seat": 1, "turret": "main", "legacy": true, "sights": ["gunner_sight", "aux_sight"]},
+				{"id": "commander_nsvt", "gun": "nsvt_cupola", "seat": 2, "turret": "cupola", "muzzle": [0.5, 2.54, -0.32], "modules": ["ext_gun_commander"], "hatch": "out"}
+			],
+			"optics": [
+				{"id": "sosna", "name": "Sosna-U", "seat": 1, "role": "primary", "module": "gunner_sight", "head": [-0.5, 2.22, -0.05], "day": [3, 12], "thermal": [3, 12], "lrf_m": [200, 7500], "lrf_err_m": 5.0, "stab": true},
+				{"id": "1a40", "name": "TPN4 sight", "seat": 1, "role": "aux", "module": "aux_sight", "head": [-0.25, 1.92, -0.45], "day": [8], "stadia": true},
+				{"id": "tkn3", "name": "TKN-3", "seat": 2, "role": "commander", "module": "commander_sight", "head": [0.5, 2.32, 0.78], "day": [5]}
+			],
+			"fire_control": {"module": "fcs", "err_mil": 0.15, "damaged_x": 3.0, "battlesight_m": {"apfsds": 1800, "heat": 1000, "he": 1000, "tandem_heat": 1000}},
+			"stab": {"base_mil": 0.12, "k_mil": 0.05, "rough_rads": 0.35, "max_kmh": 40.0},
+			"hatches": {"0": {"out": {"at": [0.0, 1.85, -0.45], "stance": "stand"}, "vision": [[0, 100]]}, "2": {"out": {"at": [0.5, 2.85, 1.05], "stance": "stand"}, "vision": [[0, 30], [60, 30], [120, 30], [180, 30], [240, 30], [300, 30]]}},
+			"racks": {"ammo_carousel": {"3bm42": 10, "3bk29m": 5, "3of26": 5, "9m119m": 2}, "ammo_rack_hull": {"3bm42": 8, "3bk29m": 6, "3of26": 6}},
+			"switch_s": {"turret": 3.0, "driver": 10.0, "front_deg": 15.0}
+		},
+		"bmp2": {
+			"turret": {"pivot": [0.0, 1.72, -0.35], "radius": 1.02, "top": 3.1, "gun": {"trunnion": [2.05, -1.28], "box": [-0.1, 1.95, -3.78, 0.1, 2.15, -1.28], "colours": ["gun"]}, "elevation_deg": [-5, 75], "traverse_dps": 40, "elevation_dps": 35},
+			"weapons": [
+				{"id": "main", "gun": "2a42", "seat": 1, "turret": "main", "muzzle": [0.0, 2.05, -3.72], "modules": ["breech", "barrel"], "sights": ["gunner_sight", "aux_sight"], "ready": "ready_30", "stowage": [], "commander_seat": 2},
+				{"id": "coax", "gun": "pkt", "seat": 1, "turret": "main", "legacy": true, "sights": ["gunner_sight", "aux_sight"]},
+				{"id": "tow", "gun": "konkurs_launcher", "seat": 1, "turret": "ring", "muzzle": [0.0, 2.52, -0.95], "modules": ["atgm_launcher"], "sights": ["gunner_sight", "aux_sight"], "stowage": ["rack_konkurs"], "ready": 1, "commander_seat": 2}
+			],
+			"optics": [
+				{"id": "bpk", "name": "BPK-1-42", "seat": 1, "role": "primary", "module": "gunner_sight", "head": [-0.29, 2.42, -0.8], "day": [6], "lrf_m": [], "stab": false},
+				{"id": "pzu8", "name": "PZU-8", "seat": 1, "role": "aux", "module": "aux_sight", "head": [-0.18, 2.2, -0.95], "day": [1.2], "stadia": true},
+				{"id": "tkn3b", "name": "TKN-3B", "seat": 2, "role": "commander", "module": "commander_sight", "head": [0.38, 2.45, -0.2], "day": [5]}
+			],
+			"fire_control": {"module": "fcs", "err_mil": 0.5, "damaged_x": 3.0, "battlesight_m": {"apds": 800, "hei": 800, "tandem_heat": 1000}},
+			"stab": {"base_mil": 0.3, "k_mil": 0.1, "rough_rads": 0.35, "max_kmh": 25.0},
+			"hatches": {"0": {"out": {"at": [-0.72, 2.0, -1.35], "stance": "stand"}, "vision": [[0, 100]]}, "2": {"out": {"at": [0.38, 2.95, -0.1], "stance": "stand"}, "vision": [[0, 30], [60, 30], [120, 30], [180, 30], [240, 30], [300, 30]]}},
+			"roof_hatch": {"at": [0.0, 2.2, 0.6], "stance": "stand"},
+			"racks": {"ready_30": {"3ubr8": 160, "3uof8": 340}, "rack_konkurs": {"konkurs_m": 4}},
+			"switch_s": {"turret": 3.0, "driver": 10.0, "troop": 6.0, "front_deg": 0.0}
+		},
+		"btr82a": {
+			"turret": {"pivot": [0.0, 1.99, -1.0], "radius": 0.95, "top": 3.1, "gun": {"trunnion": [2.28, -1.55], "box": [-0.1, 2.18, -4.2, 0.1, 2.38, -1.55], "colours": ["gun"]}, "elevation_deg": [-5, 70], "traverse_dps": 45, "elevation_dps": 35},
+			"weapons": [
+				{"id": "main", "gun": "2a72", "seat": 2, "turret": "main", "muzzle": [0.0, 2.28, -4.18], "modules": ["breech", "barrel"], "sights": ["gunner_sight", "aux_sight"], "ready": "ready_30", "stowage": []},
+				{"id": "coax", "gun": "pkt", "seat": 2, "turret": "main", "legacy": true, "sights": ["gunner_sight", "aux_sight"]}
+			],
+			"optics": [
+				{"id": "tkn", "name": "TKN-4GA", "seat": 2, "role": "primary", "module": "gunner_sight", "head": [-0.27, 2.62, -1.2], "day": [4, 8], "thermal": [4], "lrf_m": [200, 3000], "lrf_err_m": 5.0, "stab": true},
+				{"id": "1pz", "name": "1PZ-9", "seat": 2, "role": "aux", "module": "aux_sight", "head": [-0.17, 2.42, -1.4], "day": [1.2], "stadia": true}
+			],
+			"fire_control": {"module": "fcs", "err_mil": 0.2, "damaged_x": 3.0, "battlesight_m": {"apds": 800, "hei": 800}},
+			"stab": {"base_mil": 0.15, "k_mil": 0.06, "rough_rads": 0.35, "max_kmh": 35.0},
+			"hatches": {"0": {"out": {"at": [-0.5, 2.4, -2.05], "stance": "stand"}, "vision": [[0, 100]]}, "1": {"out": {"at": [0.5, 2.4, -2.05], "stance": "stand"}, "vision": [[0, 100], [90, 60], [270, 60]]}},
+			"racks": {"ready_30": {"3ubr8": 120, "3uof8": 180}},
 			"switch_s": {"turret": 3.0, "driver": 10.0, "troop": 6.0, "front_deg": 0.0}
 		}
 	}

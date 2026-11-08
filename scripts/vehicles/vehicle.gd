@@ -69,6 +69,8 @@ extends RigidBody3D
 ## into like a wall). Not the living (layer 5): a soldier's capsule is kinematic, so a 12 t
 ## truck would stop dead against it; a shape query ahead of the hull finds soldiers in the way
 ## instead: pushed aside at any speed (_push_aside), run over at speed (_run_over).
+## How much of the engine's health a block placed on a plated hull takes (Proposed; D6b, server_explosion).
+const CHARGE_ENGINE := 0.6
 const LAYER := 1 << 6
 const MASK := 1 | Ragdoll.LAYER | LAYER  # world, ragdolls, vehicles
 const GROUP := &"vehicles"
@@ -2494,6 +2496,10 @@ func blocks_fragment(at: Vector3, to: Vector3) -> bool:
 ## Host: a charge that rode this vehicle went off at `pos` (Charges' hook): a 2 kg block's blast.
 func server_explosion(pos: Vector3, _kind: String = "") -> void:
 	server_take_hit({"kind": HE, "position": pos, "direction": (global_transform * center_of_mass - pos).normalized(), "blast_kg": 2.0, "shooter": null})
+	# D6b: a placed block on a plated hull (a park of the Concord's BMPs is a sabotage target; its
+	# armour shrugs off the blast): two of them on the deck stop the engine (CHARGE_ENGINE, Proposed).
+	if _kind == "breaching_charge" and modules and modules.authored and not wrecked:
+		modules.server_set("engine", maxf(modules.health_of("engine") - CHARGE_ENGINE, 0.0))
 
 
 func _carve_for(hit_kind: StringName, res: Dictionary, local: Vector3, hit: Dictionary) -> void:

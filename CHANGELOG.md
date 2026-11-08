@@ -11,6 +11,21 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Enemy armour (combined arms D6a and D6b: cg_brief 4.1, 4.2)
+
+The other side's vehicles exist now: the T-72B3, BMP-2, BTR-82A, MT-LB, the HEMTT in three bodies
+(M977 cargo, M978 tanker, the ammunition truck), the Kestrel rhino truck, the armoured SUV and the
+Ashen Banner's captured MaxxPro, built as voxel models from their real dimensions like every other
+vehicle (scripts/art/vehicle_art_foes.gd, VehicleArt). They have their plates, modules, guns and STANAG 4569
+levels in data (vehicle_armour, vehicle_modules, vehicle_weapons, vehicle_drive, vehicle_fx), the T-72B3
+loads from an autoloader (7.5 s, no loader seat) and its carousel is what blows the turret off; the BMP-2 has
+its 2A42, PKT coax and Konkurs-M, the BTR-82A its 2A72. Each hostile faction has a table of what it fields
+(data/factions.json "vehicles", read by FactionVehicles): patrols and QRFs that ride (VehicleQrf), convoys and
+vehicle parks (MissionScenario). The operations' enemy can be the Concord with BMP-2s and T-72B3s ("enemy_oob_by"), and the
+US convoys and an invasion's ammunition and fuel trucks are HEMTTs, not stand-in MaxxPros. tests/enemyarmour_test: every model
+measured against the real vehicle, seats, muzzles, plates and tiles where they're drawn, parked level, driven,
+fired, saved and loaded and seen by a late joiner. The look still needs a person's eyes.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

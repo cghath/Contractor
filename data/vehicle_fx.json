@@ -28,6 +28,30 @@
 				"racks": {"ready_mk19": {"pop_kg": 0.05}, "rack_mk19": {"pop_kg": 0.05}, "ready_m2": {"pop_kg": 0.01}, "rack_m2": {"pop_kg": 0.01}},
 				"sounds": {"engine": "engine_ifv", "tracks": "tracks_heavy"}
 			}
+		},
+		"t72b3": {
+			"fx": {"racks": {"ammo_carousel": {"big": true, "pop_kg": 0.3}, "ammo_rack_hull": {"big": true, "pop_kg": 0.3}}, "dischargers": {"name": "902B", "tubes": 6, "per_salvo": 3, "angles_deg": [4.0, 16.0, 28.0], "stowed": 6, "modules": ["smoke_l", "smoke_r"], "at": [[-1.0, 1.85, 0.25], [1.0, 1.85, 0.25]], "range_m": 30.0, "reload_s": 10.0}, "sounds": {"engine": "engine_mbt", "tracks": "tracks_heavy"}}
+		},
+		"bmp2": {
+			"fx": {"racks": {"rack_konkurs": {"big": true, "pop_kg": 0.3}, "ready_30": {"pop_kg": 0.05}}, "dischargers": {"name": "902V", "tubes": 3, "per_salvo": 1, "angles_deg": [5.0], "stowed": 3, "modules": ["smoke_l", "smoke_r"], "at": [[-0.72, 2.1, -0.77], [0.72, 2.1, -0.77]], "range_m": 30.0, "reload_s": 10.0}, "sounds": {"engine": "engine_ifv", "tracks": "tracks_heavy"}}
+		},
+		"btr82a": {
+			"fx": {"racks": {"ready_30": {"pop_kg": 0.05}}, "dischargers": {"name": "902V", "tubes": 3, "per_salvo": 1, "angles_deg": [5.0], "stowed": 3, "modules": ["smoke_l", "smoke_r"], "at": [[-0.62, 2.24, -1.22], [0.62, 2.24, -1.22]], "range_m": 30.0, "reload_s": 10.0}, "sounds": {"engine": "engine_ifv"}}
+		},
+		"mtlb": {
+			"fx": {"sounds": {"engine": "engine_ifv", "tracks": "tracks_heavy"}}
+		},
+		"hemtt_cargo": {
+			"fx": {"sounds": {"engine": "engine_mrap"}}
+		},
+		"m978": {
+			"fx": {"sounds": {"engine": "engine_mrap"}}
+		},
+		"hemtt_ammo": {
+			"fx": {"sounds": {"engine": "engine_mrap"}}
+		},
+		"kestrel_rhino": {
+			"fx": {"sounds": {"engine": "engine_mrap"}}
 		}
 	}
 }

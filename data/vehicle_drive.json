@@ -27,9 +27,15 @@
 		"aav7": {"com": [0.0, 1.15, 0.0], "power_kw": 390, "roof_m": 2.64, "waterline_m": 1.5, "ground_kpa": 57, "belted": "none"},
 		"bradley": {"com": [0.0, 1.05, 0.0], "power_kw": 450, "ford_m": 1.0, "roof_m": 2.0, "ground_kpa": 76, "belted": "none"},
 		"abrams": {"com": [0.0, 0.95, 0.6], "power_kw": 1120, "ford_m": 1.2, "roof_m": 1.5, "ground_kpa": 103, "belted": "none"},
-		"t72b3": {"power_kw": 840, "ford_m": 1.2, "ground_kpa": 90, "belted": "none"},
-		"bmp2": {"power_kw": 220, "swim_kmh": 7, "ground_kpa": 64, "belted": "none"},
-		"btr82a": {"power_kw": 220, "swim_kmh": 10, "ground_kpa": 260, "belted": "none"},
-		"mtlb": {"power_kw": 175, "swim_kmh": 5, "ground_kpa": 46, "belted": "none"}
+		"t72b3": {"com": [0.0, 0.85, 1.2], "power_kw": 840, "ford_m": 1.2, "roof_m": 1.35, "ground_kpa": 90, "belted": "none"},
+		"bmp2": {"com": [0.0, 0.95, 0.3], "power_kw": 220, "swim_kmh": 7, "roof_m": 1.72, "waterline_m": 1.05, "ground_kpa": 64, "belted": "none"},
+		"btr82a": {"com": [0.0, 1.1, 0.3], "power_kw": 220, "swim_kmh": 10, "roof_m": 1.95, "waterline_m": 1.2, "ground_kpa": 260, "belted": "none"},
+		"mtlb": {"com": [0.0, 0.88, 0.0], "power_kw": 175, "swim_kmh": 5, "roof_m": 1.6, "waterline_m": 0.95, "ground_kpa": 46, "belted": "none"},
+		"hemtt_cargo": {"com": [0.0, 1.45, -0.5], "power_kw": 330, "ford_m": 1.2, "roof_m": 2.84, "ground_kpa": 380, "belted": "none"},
+		"m978": {"com": [0.0, 1.6, 0.3], "power_kw": 330, "ford_m": 1.2, "roof_m": 2.84, "ground_kpa": 400, "belted": "none"},
+		"hemtt_ammo": {"com": [0.0, 1.5, 0.0], "power_kw": 330, "ford_m": 1.2, "roof_m": 2.84, "ground_kpa": 420, "belted": "none"},
+		"kestrel_rhino": {"com": [0.0, 1.55, -0.1], "power_kw": 300, "ford_m": 0.8, "roof_m": 3.05, "ground_kpa": 400, "belted": "none"},
+		"armoured_suv": {"com": [0.0, 0.9, 0.0], "power_kw": 265, "ford_m": 0.5, "roof_m": 1.86, "ground_kpa": 240, "belted": "all_but_gunner"},
+		"maxxpro_captured": {"com": [0.0, 1.35, 0.0], "power_kw": 280, "ford_m": 0.9, "roof_m": 2.92, "ground_kpa": 330, "belted": "all_but_gunner"}
 	}
 }

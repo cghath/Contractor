@@ -362,12 +362,13 @@ func _convoy_spawn(run: Dictionary, o: Dictionary) -> void:
 	var escorts := int(p.get("escorts", 1))
 	var models: Array = []
 	var front := ceili(escorts / 2.0)
+	var side: Variant = Contracts.enemy_force(String(o.cid)).get("target", "")  # D6b: the target's own vehicles (FactionVehicles)
 	for i in front:
-		models.append([ESCORT_MODEL, false])
+		models.append([FactionVehicles.pick(side, "convoy_escort", i, ESCORT_MODEL), false])
 	for i in trucks:
-		models.append([CARGO_MODEL, true])
+		models.append([FactionVehicles.pick(side, "convoy_cargo", i, CARGO_MODEL), true])
 	for i in escorts - front:
-		models.append([ESCORT_MODEL, false])
+		models.append([FactionVehicles.pick(side, "convoy_escort", front + i, ESCORT_MODEL), false])
 	var fwd := (route[1] - route[0])
 	fwd.y = 0.0
 	fwd = fwd.normalized()
@@ -382,7 +383,7 @@ func _convoy_spawn(run: Dictionary, o: Dictionary) -> void:
 	for i in models.size():
 		var model: String = models[i][0]
 		var at := _ground(route[0] - fwd * SPACING_M * i)
-		var v := layer.server_spawn(model, Transform3D(Basis.looking_at(fwd, Vector3.UP), at), "", &"hostile", "")
+		var v := layer.server_spawn(model, Transform3D(Basis.looking_at(fwd, Vector3.UP), at), FactionVehicles.scheme(side, model), &"hostile", "")
 		if v == null:
 			continue
 		v.set_meta(&"no_save", true)
@@ -785,7 +786,8 @@ func _on_park_live(_cid: String, objectives: Array) -> void:
 func _park_begin(o: Dictionary) -> void:
 	var p: Dictionary = o.params
 	var layer := level.get_node_or_null(^"Vehicles") as VehicleLayer
-	var models: Array = p.get("vehicles", [])
+	var side: Variant = Contracts.enemy_force(String(o.cid)).get("target", "")
+	var models: Array = FactionVehicles.park(side, (p.get("vehicles", []) as Array).size(), p.get("vehicles", []))  # D6b
 	if layer == null or models.is_empty():
 		return
 	if (p.get("ids", []) as Array).size() != models.size():
@@ -802,7 +804,7 @@ func _park_begin(o: Dictionary) -> void:
 		if ids[i] in down:
 			continue  # out of action already (a wreck comes back with the zone save)
 		var at := _ground(centre + across * spacing * (i - (ids.size() - 1) * 0.5)) + Vector3.UP * 0.2
-		entries.append({"id": String(ids[i]), "model": String(models[i]), "pos": at, "yaw": yaw, "faction": "hostile"})
+		entries.append({"id": String(ids[i]), "model": String(models[i]), "scheme": FactionVehicles.scheme(side, String(models[i])), "pos": at, "yaw": yaw, "faction": "hostile"})
 	layer.server_place_parked(entries)
 	for id: Variant in ids:
 		var v := layer.find(String(id))

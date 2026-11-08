@@ -740,7 +740,7 @@ on the angle or the range; "tile" is stopped by a tile and penetrates through a 
 | PG-7VR | no | no | pen (TUSK II: no) | pen | pen | pen (BUSK III: ~) | pen | pen | no | pen | pen |
 | AT4 | no | no | pen (TUSK: tile) | pen | tile | tile | pen | pen | no | tile | pen |
 | Javelin (top) | pen | pen | pen | pen | pen | pen | pen | pen | pen | pen | pen |
-| M2 M33 | no | no | no | no | no | no | no | no (100 m: ~) | no | no | ~ |
+| M2 M33 | no | no | no | no | no | no | no | no (100 m: ~) | no | no | no |
 | Mk19 HEDP | no | no | no | ~ | no | no | no | pen | no | no | ~ |
 
 **Built in A1** (`tests/armour_test.gd`, `_test_table`): every cell above is asserted from
@@ -809,7 +809,17 @@ standard's: 1-4 all round, 5-6 the front's):
 | Technicals (every variant) | 0 | 0 | 0 |
 | UH-60M, Petrel, Razorback, AH-1Z, mortars, tripods | not rated (STANAG 4569 rates land vehicles) | | |
 
-The T-72B3, BMP-2, BTR-82A and MT-LB get theirs with their data in phase D6b (cg_brief 4.2).
+The T-72B3, BMP-2, BTR-82A, MT-LB, rhino truck and armoured SUV (cg_brief 4.2, D6b), proved from
+their plates by tests/armour_test.gd as the rest are:
+
+| Vehicle | KE front / side / rear (overall) | Artillery | Mine (wheel/belly) |
+|---|---|---|---|
+| T-72B3 (Kontakt-5, as the Concord fields it) | 6 / 4 / 4 (4); the front is above STANAG: RHAe figures as 2.4.2 | 6 | 2a/1 |
+| BMP-2 | 2 / 2 / 2 (2): its 12 mm roof at 30 degrees caps the front's level | 3 | 1 |
+| BTR-82A, MT-LB | 1 / 1 / 1 (1) | 2 | 1 |
+| Kestrel rhino truck | 1 / 1 / 1 (1): improvised, rated as its plates fall | 2 | 0 |
+| Armoured SUV | 0: 8 mm stops 7.62x39 ball, not SS109 at 30 m | 2 | 0 |
+| HEMTT cargo, M978, ammunition | 0: soft trucks | 0 | 0 |
 
 **Personal armour, NIJ 0101.07** (Ballistics.LEVELS): HG1 (9 mm FMJ at 398 m/s, .357 Magnum at
 436), HG2 (9 mm at 448, .44 Magnum at 436), RF1 (7.62x51 M80 at 847, 7.62x39 MSC at 732, 5.56
@@ -2595,6 +2605,16 @@ armour in operations (6.1). The **Salvage Union** sells used technicals ($25,000
 tile groups), BMP-2, BTR-82A, MT-LB, the HEMTT in three bodies (cargo, M978 tanker, ammo), the
 Kestrel rhino truck, the Saltline armoured SUV, and the captured MaxxPro as a scheme. Interiors
 only where crews sit visibly (`VehicleInteriors`).
+
+**Built in D6a/D6b** (cg_brief queue items 4.1, 4.2; branch `feat/enemy-armour`):
+`VehicleArtFoes` (scripts/art/vehicle_art_foes.gd) draws the models named above in VehicleArt's way: T-72B3
+(with the Kontakt-5 and Kontakt-1 bricks), BMP-2, BTR-82A, MT-LB, the HEMTT in three bodies (ids hemtt_cargo,
+m978, hemtt_ammo), the Kestrel rhino truck and the armoured SUV, and the captured MaxxPro (`maxxpro_captured`,
+slat kept, the DShK in the turret, the "banner" scheme). Their plates, tiles and STANAG ratings are in data/vehicle_armour.json,
+modules in vehicle_modules.json, guns (2A46M with its autoloader, 2A42, 2A72, PKT, the Konkurs-M launcher) in vehicle_weapons.json, smoke and sounds in
+vehicle_fx.json, driving numbers in vehicle_drive.json; each hostile faction has its `vehicles` table (data/factions.json, `FactionVehicles`),
+read by `VehicleQrf`, `MissionScenario` and `Operations.enemy_oob` (the Concord's own OOB: "enemy_oob_by"). The rest of "where light armour appears" is F-497;
+the AI's guns are F-242 and F-498; interiors F-499; the look F-502. tests/enemyarmour_test.gd.
 
 ### 7.3 US forces in the living war
 

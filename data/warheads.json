@@ -78,7 +78,7 @@
 			"arming_m": 25.0, "speed_mps": 80.0, "motor": {"delay_s": 0.1, "burn_s": 1.5, "to_mps": 300.0}, "max_s": 20.0, "mass_kg": 26.0, "range_m": 5500,
 			"fuze": {"kind": "tandem", "graze_deg": 80}, "module_dmg": 420, "spall": {"count": 28, "cone_deg": 20}},
 		{"id": "9m119m", "name": "9M119M gun-launched tandem HEAT (125 mm)", "kind": "tandem_heat", "calibre_mm": 125, "penetration_mm": 850, "blast_kg": 2.0, "frag_m": 8.0, "frag_wounds": [1, 4],
-			"arming_m": 25.0, "speed_mps": 400.0, "max_s": 17.0, "mass_kg": 17.2, "range_m": 5000,
+			"arming_m": 25.0, "speed_mps": 400.0, "muzzle_mps": 400.0, "drag": 0.00015, "short": "ATGM", "max_s": 17.0, "mass_kg": 17.2, "range_m": 5000,
 			"fuze": {"kind": "tandem", "graze_deg": 80}, "module_dmg": 280, "spall": {"count": 22, "cone_deg": 20}}
 	]
 }

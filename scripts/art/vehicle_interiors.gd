@@ -64,6 +64,8 @@ static func furnish(model: String, c: VehicleArt.Canvas) -> void:
 ## Which body a model is drawn on: technicals are pickups ("hilux" or "lc79", as
 ## VehicleArt._technical picks).
 static func _body_of(model: String) -> String:
+	if model == "maxxpro_captured":
+		return "maxxpro"  # (combined arms D6a: the captured one's cab is the MaxxPro's)
 	if model == "technical":
 		return "hilux"
 	if model.begins_with("technical_"):
