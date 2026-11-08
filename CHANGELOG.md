@@ -78,6 +78,10 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   and at every rebuild and restock (`GearMounts.shed_unfit`, F-478). Checked in loadout and base.
 - **Confirmed (loadout):** Cancel on the buy question backs out of the whole action in both
   loadout screens (Captain, 2026-11-08, F-405); the code already did, and the suite now holds it.
+- **Fixed (loadout test):** the Cancel check read its picker after a view update had rebuilt the
+  columns and freed it (a script error on PR run 42475980955, whose save-and-reload failure
+  followed from it); the game was right, and the suite now forces that rebuild. The check on the
+  picker going back to its prompt can now fail, and Esc on the buy question is covered.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

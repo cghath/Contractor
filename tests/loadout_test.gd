@@ -525,16 +525,39 @@ func _test_picker_buy(mid: String) -> String:
 	# F-404 (Captain, 2026-11-02: "not always but yes"): choosing it asks first. Cancel backs out of
 	# the whole action (F-405, 2026-11-08), even with "Don't ask again" ticked.
 	_notes.clear()
+	var on_prompt := false
 	if i_buy > 0:
+		picker.select(i_buy)  # an OptionButton is already on the entry when it tells anyone
 		picker.item_selected.emit(i_buy)  # the player chooses it
+		on_prompt = picker.selected == 0
 	await _frames(2)
+	# Any view update rebuilds the columns, pickers and all, whenever it comes (on PR run 42475980955
+	# one freed `picker` before the check below read it). The question lies over them and stays.
+	screen.refresh()
+	await _frames(1)
 	var old_helmet := String(gear.slots.get("helmet", ""))
 	var question := _answer_confirm(screen, "Cancel", true)
 	await _frames(3)
 	check(question.contains(ItemDB.get_item(StringName(buy_id)).name) and question.contains("$" + DebriefCalc.money(price)) and question.contains("$50 left after")
 		and Economy.cash() == price + 50 and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and _notes.is_empty()
-		and screen.find_child("Confirm", false, false) == null and picker.selected == 0 and LoadoutScreen.confirm_buy_on(),
+		and screen.find_child("Confirm", false, false) == null and on_prompt and LoadoutScreen.confirm_buy_on(),
 		"choosing it asks first (\"%s\"), and Cancel backs out: no cash, stash or kit change, the picker back on its prompt, the question still on" % question)
+	# Esc on the question is Cancel too (ConfirmBox._input), and only the question goes: the screen
+	# under it, which Esc closes otherwise, stays open.
+	picker = screen.find_child("Swap_helmet", true, false) as OptionButton
+	i_buy = entry.call()
+	if i_buy > 0:
+		picker.item_selected.emit(i_buy)
+	await _frames(2)
+	var esc_asked := screen.find_child("Confirm", false, false) != null
+	var esc := InputEventAction.new()
+	esc.action = &"pause"
+	esc.pressed = true
+	get_viewport().push_input(esc)
+	await _frames(3)
+	check(esc_asked and is_instance_valid(screen) and not screen.is_queued_for_deletion() and screen.find_child("Confirm", false, false) == null
+		and Economy.cash() == price + 50 and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and _notes.is_empty() and LoadoutScreen.confirm_buy_on(),
+		"Esc on the question backs out the same way, and the screen under it stays open")
 	# Again, with "Don't ask again" ticked: bought, worn, and the setting saved.
 	_notes.clear()
 	_econ_notes.clear()
