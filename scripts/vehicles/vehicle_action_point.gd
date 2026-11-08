@@ -113,6 +113,8 @@ static func report(v: Vehicle) -> String:
 	if v.kind != Vehicle.STATIC:
 		if not (v.battery_ok if v.multiplayer.is_server() else bool(v.net_state.get("battery", true))):
 			lines.append("Battery: dead")
+		if bool(v.net_state.get("flat", false)):
+			lines.append("Tyres: a flat (a Tyre Patch Kit would do)")  # survival wear
 		lines.append("Fuel: %d of %d L" % [roundi(v.fuel_litres()), roundi(float(v.spec.get("fuel_l", 0.0)))])
 	var hold := v.cargo() as VehicleCargo
 	if hold:

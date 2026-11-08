@@ -464,8 +464,8 @@ func _our_vehicles(from: Soldier, squad: Squad) -> Array[Vehicle]:
 	var mine := Vehicle.ride_of(from)
 	var out: Array[Vehicle] = []
 	for v: Vehicle in layer().vehicles():
-		if v.wrecked or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] or not v.can_drive() or DriveContact.is_disabled(v):
-			continue
+		if v.wrecked or v.kind in [Vehicle.HELICOPTER, Vehicle.STATIC] or not v.can_drive() or DriveContact.is_disabled(v) or v.has_meta(&"fallen_convoy"):
+			continue  # (a Fallen convoy's isn't ours to board: taking it is robbery, FallenConvoy)
 		var d := v.driver()
 		if d and d.is_ai() and d not in members:
 			continue  # an element's, or the enemy's

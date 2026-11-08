@@ -19,9 +19,20 @@ to the farmhouse's front door, outside (`FirstHour.farmstead`, applied in `Survi
 the start zone, the same every time from the world seed). Three boxes are rolled once (a pantry
 shelf and a dresser in the house, a tool chest in the barn: food, water, cloth, bandages, planks,
 ties; the first roll thinned by FoundLoot, so they feel picked at but aren't empty; no guns). The
-barn holds the thread's melee weapon; planks and a hammer lie by the stove. Left out: a vehicle
-wreck to strip at the farm (the cold open's "wreck on the road" roll is still the only one) and a
+barn holds the thread's melee weapon; planks and a hammer lie by the stove. Left out: a
 ploughed field of its own (the terrain's fields are where they fall).
+
+**The old pickup** (the Captain's first-hour notes: a wreck at the farm; call 31: "every vehicle
+starts a wreck"). A plain pickup (`technical_bare`, the technical's truck with no gun; in
+data/mounts.json so the campaign's lists never see it) stands in the yard, in the spot farthest from
+the door that touches no building or prop (`FirstHour._truck_spot`), id `farm_truck`: the zone save
+brings it back as it was left (`server_zone_hosted`, a world from before it gets it too). It has a
+dead battery, a dry tank, a flat, and a tired engine (60%); **Check vehicle** at any of its points
+says so on every peer (the flat is in `net_state` now). A **Vehicle Battery** (uncommon: workshops,
+garages, the cold open's wreck on the road when that's rolled), a **jerrycan** (common) and a **Tyre
+Patch Kit** (homes, or made from an inner tube), all from the world and none at the farm, and it
+runs: the service point's menu and Use the patch, as any vehicle. It's a goal from the first wake
+(map mark, Now, the note's postscript) and pays mechanics 40 XP and nerve.
 
 Measured headless (`firsthour`, the survey prints everything within 120 m): see section 6.
 
@@ -35,6 +46,7 @@ is a journal line and a map mark (kind "goal"), completes by doing it and pays a
 | Water | Drink or Fill a bottle at the well (the contextual menu on the well, any well/trough prop, or any river/lake) | fieldcraft 30 XP, nerve +8, 2 purification tablets |
 | A better weapon | Any non-knife melee weapon carried (the barn's crowbar/machete/hatchet, or the note's gift) | melee 30 XP, nerve +8, a whetstone |
 | Shelter | A shutter, door, gate, hatch or fence built within 20 m of the farmhouse, or 2 blocks | building 40 XP, nerve +10, a tin |
+| Get the old pickup running | The farm's pickup can start and has no flat (section 1): a battery, fuel and a tyre patch from the world | mechanics 40 XP, nerve +12 |
 | The voice (day 2, from 09:00) | The lone survivor the farm's old set picked up (want: a bed with walls), placed by a landmark 150-450 m out and marked, recruited | fieldcraft 20 XP, nerve +12 |
 
 Nothing forces the order; ignoring it costs nothing. Water is new on the contextual menu: **Drink**
@@ -116,7 +128,7 @@ Before this lane the spawn was a bare edge point 350 m from the nearest site.
 
 ## 7. Left out
 
-A vehicle wreck at the farm; a field of its own; roads as a place the dead gather (the open-country
+A field of its own; roads as a place the dead gather (the open-country
 rule treats a road like the open); "where people died" as a pull on the dead beyond the bodies
 that rise; hordes from towns and nests on their own clock (they still come from sustained noise in
 or by a town); "days survived" is the world's day, not this survivor's.

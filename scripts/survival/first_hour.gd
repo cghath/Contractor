@@ -28,13 +28,14 @@ extends RefCounted
 ## "goals": {id: {"open", "done", "day"}}, "voice_pid"}. Host-side, static. Every number Proposed.
 
 const KEY := "first_hour"
-const GOALS: Array[String] = ["water", "weapon", "shelter", "voice"]
+const GOALS: Array[String] = ["water", "weapon", "shelter", "truck", "voice"]
 const TITLES := {"water": "Water", "weapon": "Something better than the knife", "shelter": "Board up the farmhouse",
-	"voice": "The voice on the radio"}
+	"truck": "Get the old pickup running", "voice": "The voice on the radio"}
 ## What each open goal says on the journal's front page.
 const TODO := {"water": "Drink or fill a bottle at the well in the yard (look at it, %s)",
 	"weapon": "The barn (or the shed) has tools: find a real weapon",
 	"shelter": "Board up the farmhouse before dark: planks and a hammer by the stove (%s build mode)",
+	"truck": "The pickup in the yard: look it over (Check vehicle). It wants a battery, fuel and a patch for the flat",
 	"voice": "Someone answered on the old set: find them near %s"}
 ## What doing it pays (XP line and amount, nerve steadied, an item) and the journal line.
 const REWARDS := {
@@ -44,6 +45,8 @@ const REWARDS := {
 		"line": "Found something with reach. A whetstone was in the shed too."},
 	"shelter": {"xp": ["building", 40.0], "nerve": 10.0, "item": ["canned_meat", 1],
 		"line": "Boarded up. It won't stop a crowd but it'll stop one. Found a tin behind the old boards."},
+	"truck": {"xp": ["mechanics", 40.0], "nerve": 12.0, "item": [],
+		"line": "The old pickup caught on the third try. It's loud, and everything for a mile will hear it, but it runs."},
 	"voice": {"xp": ["fieldcraft", 20.0], "nerve": 12.0, "item": [],
 		"line": "Not alone any more. %s is with us."},
 }
@@ -91,6 +94,19 @@ const FARM_BOXES: Array = [
 	{"uid": "farm_toolbox", "label": "Tool chest", "where": "barn", "at": [1.5, 0.0, 0.0],
 		"items": [["planks", 3], ["cable_ties", 2], ["cloth_rag", 2], ["wood_stick", 2]]},
 ]
+## The farm's old pickup (the Captain's first-hour notes: a wreck at the farm; call 31: "every
+## vehicle starts a wreck (battery, fuel, tyre...)"): in the yard, its id stable so the zone save
+## brings it back as it was left; a dead battery, a dry tank, a flat, a tired engine. Look it over
+## with Check vehicle, fit a Vehicle Battery and a Tyre Patch Kit and pour in a jerrycan, all from
+## the world (none are at the farm), and it runs: the "truck" goal. Proposed.
+const TRUCK_ID := "farm_truck"
+const TRUCK_MODEL := "technical_bare"
+const TRUCK_SCHEME := "tan"
+const TRUCK_ENGINE := 0.6
+## Clear of everything by this, and this far from the door he wakes at (m).
+const TRUCK_HALF := Vector2(1.6, 3.4)
+const TRUCK_FROM_DOOR_M := 4.5
+
 ## Proposed (the Captain, 2026-10-26: "zombies should be nearly non existent out in the wild and
 ## near AI farms"): the open country's pace of the dead by the days (OPEN_RAMP: [from day, share of
 ## the full pace]) and the zone's tier (+OPEN_TIER_STEP a tier); from OPEN_LATE_DAY (or a zone
@@ -159,9 +175,44 @@ static func farmstead(def: Dictionary, world_seed: int) -> Dictionary:
 	var door := centre + Vector2(out3.x, out3.z)
 	ins[0] = [snappedf(door.x, 0.1), snappedf(door.y, 0.1)]
 	def["insertion"] = ins
+	var truck := centre + _truck_spot(site, Vector2(out3.x, out3.z))
 	def["farmstead"] = {"pos": [centre.x, centre.y], "door": [door.x, door.y], "inside": [centre.x + in3.x, centre.y + in3.z],
-		"well": [centre.x + well.x, centre.y + well.y], "barn": [centre.x + barn.x, centre.y + barn.z], "seed": seed_v}
+		"well": [centre.x + well.x, centre.y + well.y], "barn": [centre.x + barn.x, centre.y + barn.z], "truck": [truck.x, truck.y], "seed": seed_v}
 	return def
+
+
+## A clear place for the pickup in the yard (x, z from the site's middle), nose north: the spot in
+## the yard farthest from the door that touches no building or prop; off the yard's end if none.
+static func _truck_spot(site: Dictionary, door: Vector2) -> Vector2:
+	var yards: Array = site.get("streets", [])
+	var yard: Rect2 = yards[0] if not yards.is_empty() else Rect2(-3.0, -6.0, 9.0, 14.0)
+	var blocked: Array[Rect2] = []
+	for b: Dictionary in site.get("buildings", []):
+		var sz: Vector2 = (b.data as Dictionary).size
+		if int(b.turn) % 2 == 1:
+			sz = Vector2(sz.y, sz.x)
+		var o: Vector3 = b.origin
+		blocked.append(Rect2(o.x - sz.x * 0.5, o.z - sz.y * 0.5, sz.x, sz.y))
+	for box: Array in site.get("boxes", []):
+		if box.size() >= 2 and box[0] is Vector3 and box[1] is Vector3:
+			var lo: Vector3 = box[0]
+			var hi: Vector3 = box[1]
+			blocked.append(Rect2(lo.x, lo.z, hi.x - lo.x, hi.z - lo.z))
+	var best := Vector2(yard.get_center().x, yard.end.y + TRUCK_HALF.y + 2.0)
+	var best_d := -1.0
+	var x := yard.position.x + TRUCK_HALF.x
+	while x <= yard.end.x - TRUCK_HALF.x:
+		var z := yard.position.y + TRUCK_HALF.y
+		while z <= yard.end.y - TRUCK_HALF.y:
+			var spot := Vector2(x, z)
+			var area := Rect2(spot - TRUCK_HALF, TRUCK_HALF * 2.0)
+			var d := spot.distance_to(door)
+			if d >= TRUCK_FROM_DOOR_M and d > best_d and not blocked.any(func(r: Rect2) -> bool: return r.intersects(area)):
+				best_d = d
+				best = spot
+			z += 1.0
+		x += 1.0
+	return best
 
 
 ## The hosted level's farmstead record ({} outside the start zone or without one).
@@ -331,6 +382,7 @@ static func server_begin(level: SurvivalLevel, home: Vector3, gift: Array) -> St
 	var shed := (barn_v as Vector3) if barn_v is Vector3 else _shed_spot(level, home, rng)
 	var inside_v: Variant = farm_point(level, "inside")
 	var stove := (inside_v as Vector3) if inside_v is Vector3 else home
+	var has_truck := farm_point(level, "truck") is Vector3
 	var gift_ids: Array[String] = []
 	for e: Array in gift:
 		gift_ids.append(String(e[0]))
@@ -353,8 +405,54 @@ static func server_begin(level: SurvivalLevel, home: Vector3, gift: Array) -> St
 	SurvivalMap.server_add_mark(zone, shed, "The barn (tools)" if barn_v is Vector3 else "The shed (tools)", "goal")
 	SurvivalMap.server_add_mark(zone, home + Vector3(0.0, 0.0, 3.0), "Board up the farmhouse", "goal")
 	Survival._journal_line("Three things before dark, the way the note has it: water from the well, something better than this knife from the shed, and boards over the windows.")
+	if has_truck:
+		_truck_goal(zone, level)
 	SessionLog.note("survival: first hour: well %s (%s), shed %s with %s" % [str(well), "a well" if well_v != null else "fallback", str(shed), weapon])
-	return "P.S. The well in the yard still draws. Tools in the %s. Planks by the stove: board the windows before dark, they come at night." % ("barn" if barn_v is Vector3 else "shed up the track")
+	return "P.S. The well in the yard still draws. Tools in the %s. Planks by the stove: board the windows before dark, they come at night.%s" % ["barn" if barn_v is Vector3 else "shed up the track",
+		" The old pickup in the yard ran last autumn: find it a battery, some fuel and a patch for the flat and it might again." if has_truck else ""]
+
+
+## The "truck" goal open, its mark on the map, a line in the journal (once).
+static func _truck_goal(zone: String, level: SurvivalLevel) -> void:
+	var goals: Dictionary = data().get("goals", {})
+	if goals.has("truck"):
+		return
+	goals["truck"] = {"open": true, "done": false}
+	var at: Variant = farm_point(level, "truck")
+	if at is Vector3:
+		SurvivalMap.server_add_mark(zone, at, "The old pickup", "goal")
+	Survival._journal_line("The pickup in the yard hasn't moved since autumn. A battery, fuel and a tyre patch would change that.")
+
+
+## Host, the zone's save is in (SurvivalLevel._on_hosted): the farm's pickup, broken down the first
+## time; after that as the zone save has it (VehicleLayer.server_place_parked).
+static func server_zone_hosted(level: SurvivalLevel) -> void:
+	var layer := VehicleLayer.of(level)
+	var at: Variant = farm_point(level, "truck")
+	if layer == null or not at is Vector3:
+		return
+	var fresh := layer.server_place_parked([{"id": TRUCK_ID, "model": TRUCK_MODEL, "scheme": TRUCK_SCHEME, "pos": at, "yaw": 0.0}])
+	for v: Vehicle in fresh:
+		v.server_set_fuel(0.0)
+		v.server_set_battery(false)
+		v.server_set_zone(Vehicle.ZONE_ENGINE, TRUCK_ENGINE)
+		var w := VehicleWear.of(v)
+		w["tyres"] = 40.0
+		w["battery"] = 0.0
+		VehicleWear.set_flat(v, true)
+	if data().has("goals"):
+		_truck_goal(String(Survival.state().get("zone", "")), level)  # (a world from before the pickup)
+
+
+## The farm's pickup when it's in this level, else null.
+static func truck(level: Node) -> Vehicle:
+	var layer := VehicleLayer.of(level)
+	return layer.find(TRUCK_ID) if layer else null
+
+
+## Whether the pickup would start and roll: nothing left that stops it, the flat patched too.
+static func truck_running(v: Vehicle) -> bool:
+	return v != null and v.can_drive() and not VehicleWear.flat(v)
 
 
 ## The nearest well, cistern, trough or windpump prop within WELL_FIND_M of `home`, or null.
@@ -531,6 +629,8 @@ static func server_tick(level: SurvivalLevel) -> void:
 				server_complete(level, "weapon", p)
 		if is_open("shelter") and shelter_built(level):
 			server_complete(level, "shelter")
+		if is_open("truck") and truck_running(truck(level)):
+			server_complete(level, "truck")
 		if not bool(goal("voice").get("open", false)) and not is_done("voice") and (Survival.day() > VOICE_DAY or (Survival.day() == VOICE_DAY and Survival.hour() >= VOICE_HOUR)):
 			server_start_voice(level)
 		if is_open("voice"):

@@ -1,6 +1,25 @@
 {
 	"_note": "Contractor: Fallen's mounts (docs/survival_mounts.md): horses, bicycles and horse carts as Vehicles of kind \"mount\" (Mount). Read by VehicleSpecs like data/vehicles.json's models, kept apart so the campaign's vehicle lists (armour ratings, motor pool) never see them. \"mount\" holds the Mount's own numbers. Everything Proposed.",
 	"models": {
+		"technical_bare": {
+			"_note": "The farm's old pickup (FirstHour): the technical's truck, no gun (VehicleArt._technical draws none for an unknown weapon). Here so the campaign's lists never see it.",
+			"base": "technical", "name": "Pickup truck", "gun": {},
+			"seats": [
+				{"name": "Driver", "kind": "driver", "at": [-0.4, 1.4, -0.2], "stance": "sit", "exit": "left"},
+				{"name": "Passenger", "kind": "passenger", "at": [0.4, 1.4, -0.2], "stance": "sit", "exit": "right"},
+				{"name": "Bed left", "kind": "passenger", "at": [-0.6, 1.75, 0.7], "stance": "sit", "exit": "left", "open": true},
+				{"name": "Bed right", "kind": "passenger", "at": [0.6, 1.75, 0.7], "stance": "sit", "exit": "right", "open": true},
+				{"name": "Bed rear", "kind": "passenger", "at": [0.6, 1.75, 2.25], "stance": "sit", "exit": "rear", "open": true}
+			],
+			"points": [
+				{"kind": "door", "at": [-1.15, 1.2, -0.35], "seats": [0]},
+				{"kind": "door", "at": [1.15, 1.2, -0.35], "seats": [1]},
+				{"kind": "door", "at": [-1.15, 1.4, 1.5], "seats": [2, 4]},
+				{"kind": "door", "at": [1.15, 1.4, 1.5], "seats": [3, 4]},
+				{"kind": "cargo", "at": [0.0, 1.3, 2.85]},
+				{"kind": "service", "at": [0.0, 1.1, -2.9]}
+			]
+		},
 		"horse": {
 			"name": "Horse", "kind": "mount", "class": "soft", "mass_kg": 500, "com": [0.0, 1.2, 0.0],
 			"top_speed_kmh": 43, "reverse_kmh": 3, "accel_ms2": 3.0, "brake_ms2": 5.0, "steer_deg": 0,

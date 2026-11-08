@@ -2,7 +2,7 @@
 
 Lane `claude/survival-events` (calls 124-126; the mod kit, call 127, is docs/fallen_modding.md).
 Suite: `fallenevents` (tests/fallenevents_test.gd); R2688 PASS (fallenevents, survival, worldsim, loot); the live convoy and the
-crew's reward (lane `claude/survival-convoy`, sections 1b-1c): R2718 PASS (fallenevents, survival, worldsim, enclave, mounts). Every number below is **Proposed**.
+crew's reward (lane `claude/survival-convoy`, sections 1b-1c): R2718 PASS (fallenevents, survival, worldsim, enclave, mounts); convoys that drive and cross zones (feat/fallen-convoy-drive): R0956 PASS (smoke, fallenevents), R0955 (firsthour, worldsim PASS), R0937 (survival PASS), R0930 (mounts PASS). Every number below is **Proposed**.
 
 ## 1. World events (call 124): `WorldEvents`, data/survival_events.json
 
@@ -31,30 +31,63 @@ Hooks: `WorldModel._world_event` and `step` (roll, tick), `WorldSim._after_step`
 ### 1b. The live convoy: `FallenConvoy` (scripts/survival/fallen_convoy.gd), data/survival_convoy.json
 
 - **The column**: `WorldEvents.server_live` brings an open convoy in the hosted zone in as a node `Convoy_<id>` under
-  the level, on the zone's main road (the longest laid road of `ZoneRoads.segments()`, 80 m at least), in at one end
-  (by the event's id) and along it to the other at the road's length over the window left (enclave 2-5 m/s, carts
-  1.5-3). Enclave: an M-ATV (the cargo) and a technical, 4 guards (M4s, an AKM); trader: two carts and a horse, 2 guards
-  (AKMs). A driver a vehicle and the trader: 5-7 people. The cargo is the lead vehicle's real hold (`enclave_cargo` /
-  `trader_cargo` rolled by the event's id). The vehicles are frozen and set along the road each frame (no VehicleAI);
-  the people ride pinned beside them while it moves. The guards and drivers are a friendly-faction squad of their own
-  (hc_id `convoy_<id>`): they shoot the dead and never the players.
+  the level, on the road: `ConvoyRoad` finds the way along the laid roads (split at their junctions, shortest by length)
+  from the road in at the edge it came through (`ZoneRoads.exits()`: the first zone of its way, the exit farthest from
+  the one it leaves by) to the road out toward the zone it's bound for; no way through, the zone's longest laid road (80
+  m at least), in at one end by the event's id. It goes along it at the way's length over the window left (enclave 2-5
+  m/s, carts 1.5-3). Enclave: an M-ATV (the cargo) and a technical, 4 guards (M4s, an AKM); trader: two carts and a horse,
+  2 guards (AKMs). A driver a vehicle and the trader: 5-7 people. The cargo is the lead vehicle's real hold (`enclave_cargo`
+  / `trader_cargo` rolled by the event's id, or what it carried in from the last zone). The guards and drivers are a
+  friendly-faction squad of their own (hc_id `convoy_<id>`): they shoot the dead and never the players.
+- **Riding**: everyone rides in or on the vehicles while it moves: a driver at each wheel, the guards in the passenger
+  seats (open ones first, so they're seen on the technical's bed), the enclave's quartermaster's man in a seat; the
+  trader of a cart train walks beside his cart. A seated man's AI is off, like any rider's.
+- **Driving (motor columns, `"drive": true`)**: with a player within `drive_near_m` (350) each truck drives for real,
+  `VehicleAI.steer_to` on the road's next 70 m, given every `THINK_S` (0.25 s); the lead at the column's speed, crawling
+  (1.5 m/s) for a straggler 2.5 gaps back; the one behind by `ConvoyColumn.follow_speed` on the gap along the road. Out of
+  sight of every player it slides as the carts do: frozen, set along the road each physics step, so nothing far from
+  anyone can fall through unstreamed ground and it costs no wheel rays. **Carts and the horse always slide**: a Mount's
+  drive is a scripted glide anyway, and these carts have no horse in the shafts (Mount.can_drive is false without one).
+- **Stretches with no road**: where two laid roads meet only at a site (a compound's walls between them), there's nothing
+  to drive: `ConvoyRoad` costs a site 250 m in and out, so it goes round by junctions when there's a way, and the column
+  slides across what's left, from 25 m short of it to 25 m past. A truck there has no road to be on.
+- **Recovery, so a world event can't hang**: a truck 12 s with less than 2.5 m gained, 14 m off the road, overturned,
+  fallen through or unable to drive goes back to sliding on the road for 10 s, then drives again, 3 times a column
+  vehicle; after that it slides out its road. `until` + 6 h always ends it, however it's held up.
 - **Halts**: a vehicle (a wreck) or a `convoy_blocks` node (a barricade) on the road within 14 m ahead: they get down,
-  and after 8 s push it 9 m off the road, then mount up; the dead within 22 m of the lead: they fight until none are near;
-  raiders within 110 m. Its noise every 3 s (`Survival.server_noise`: 70 m truck, 35 m carts) brings the dead and the
-  zone's pressure as a shot's would, scaled.
+  and after 8 s push it 9 m off the road, then walk back and mount up (`mount_s`, 12 s, is the most it waits; those near
+  their vehicle get in at once); the dead within 22 m of the lead: they fight until none are near; raiders within 110 m;
+  someone not of the column at one of its wheels ("wheel"): it holds until he gets out or drives off. Its noise every 3 s
+  (`Survival.server_noise`: 70 m truck, 35 m carts) brings the dead and the zone's pressure as a shot's would, scaled.
+  A vehicle wrecked or left with nobody to drive it drops out of the column (a wreck ahead then halts the rest); its seats
+  are dealt again; a driver shot dead is replaced by the next man aboard.
 - **Hailing**: a player up and not aiming within 18 m: it holds while someone stays within 30 m (120 s at most), the
   trader (a world person: meta `world_person`, record status `convoy`, his kit the `*_stock` roll) answers the talk
   menu's Trade (the barter screen); an enclave convoy's record carries `min_standing` 10 (`Barter.trader_problem`:
   "They only deal with friends of the enclave").
-- **Robbing**: a player's hit on one of its people or anything taken from its cargo: its people turn hostile and fight,
-  `WorldEvents.server_convoy_robbed` (outcome robbed, the owner -30, a `convoy_robbed` event naming the player, the
-  companions' memory).
+- **Robbing**: a player's hit on one of its people, anything taken from its cargo, or **driving off in one of its
+  vehicles** (a stranger at the wheel, a player or a man he told to drive, and the vehicle gone 6 m from where he sat down):
+  its people get out and turn hostile and fight, `WorldEvents.server_convoy_robbed` (outcome robbed, the owner -30, a
+  `convoy_robbed` event naming the player, the companions' memory); its vehicles are let go, kept with the zone like any
+  other. A passenger steals nothing, and neither does someone who sits at the wheel and gets out again. Taken with no
+  crime: a vehicle given away (`FallenConvoy.server_give_vehicle`; nothing in the game gives one yet, the barter has no
+  vehicles) and any vehicle left when all its people are dead by other hands (the column ends `lost`, a line on the radio).
+  The players' own "mount up" and squad drivers leave a convoy's vehicles alone.
 - **The ambush**: `WorldEvents.ambush_group` (raiders in reach at 35%; the live roll is kept as `ambush_by`, the far tick
   honours it). Live: at 35% of the road 3-5 raiders (hostile, a squad of their own) come out 90 m up the road either
   side; the guards all down: `convoy_ambushed` and the column is lost; the raiders all down: it goes on.
-- **The end**: the far edge reached (or the window 6 h over): `convoy_passed`, its bodies and vehicles gone. The record
-  keeps `live` (the far tick leaves a live column alone; the level going clears it and saves `s`, how far it got) and
-  `s`. No road: the wagon cache as before (`FallenConvoy.force_no_road` for tests).
+- **The end, and on into the next zone**: the far edge reached (or the window 6 h over): it crosses into the zone it's
+  bound for (`legs`: 3 zones in all, a link not back the way it came, another if the crossing's closed by a storm) in the
+  world sim (`r.crossing` {`from`, `to`, `arrive`}, `cross_h` 2 h away), an event on the radio; at the end of its way
+  `convoy_passed`. A column that never comes live crosses at its window's end the same way (after the ambush roll and the
+  settlers' trade). On arrival (`WorldEvents._convoy_arrives`, a far tick) it takes a new place and a fresh 6 h window, a
+  new ambush roll, the zone's pressure up. **If the players are hosted there it arrives as a live convoy**, in at the edge
+  it crossed by, the record's `carry` deciding what comes: who's alive (their crew index, the same people by name),
+  which vehicles and their condition (fuel, damage, no carved look), the cargo as it was and the trader's stock
+  (alive and wounded are the same to it: the road heals nobody but it doesn't kill them either). The record keeps `s`,
+  `live` (the far tick leaves a live column alone; `live` left in a save for a zone not hosted is treated as stale), and
+  everything above saves with the world section, including mid-crossing. No road: the wagon cache as before
+  (`FallenConvoy.force_no_road` for tests).
 
 ### 1c. The downed crew's reward: `HeliCrew` (scripts/survival/heli_crew.gd), data/survival_convoy.json "crew"
 
@@ -109,9 +142,8 @@ Hooks: `WorldModel._world_event` and `step` (roll, tick), `WorldSim._after_step`
 
 ## 4. Left out / later
 
-- The convoy steering on its own (VehicleAI / SquadDrivers following the road with real physics): it's kinematic on
-  the road; guards on foot beside it rather than seated in the vehicles; a column crossing into the next zone (it ends
-  at the edge); players boarding or driving off its vehicles isn't treated as robbery yet.
+- Carts drawn by their horses under real steering (they slide on the road: a Mount's drive is scripted and a column's
+  carts have no horse in the shafts); a guard on a technical's gun (it stays empty, they fight on foot).
 - Dog tags as an item (the tags are carried on the profile); the pickup by radio is instant (no truck drives in).
 - A player-dropped bell piece.
 - The joiner's own survivor picker (a client message) and a joiner's own profile key (S5).

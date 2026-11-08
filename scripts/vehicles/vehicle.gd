@@ -2421,7 +2421,7 @@ func _publish_state(now := false) -> void:
 		zones_out[String(z)] = snappedf(float(_zones[z]), 0.001)
 	net_state = {"seats": seats_out, "zones": zones_out, "fuel": snappedf(fuel, 0.1), "burning": snappedf(burning_s, 0.1),
 		"wrecked": wrecked, "battery": battery_ok, "salvaged": salvaged, "lost": _lost, "bay": bay != null and bay.open, "ropes": ropes_out,
-		"speed": snappedf(linear_velocity.dot(-global_basis.z), 0.1) if is_inside_tree() else 0.0}
+		"speed": snappedf(linear_velocity.dot(-global_basis.z), 0.1) if is_inside_tree() else 0.0, "flat": VehicleWear.flat(self)}  # (survival wear: Check vehicle reads it on every peer)
 
 
 # --- Damage (host) ----------------------------------------------------------------------------
@@ -3428,6 +3428,9 @@ func to_save() -> Dictionary:
 		"pos": [p.x, p.y, p.z], "rot": [q.x, q.y, q.z, q.w], "zones": zones_out, "fuel": fuel, "burning": burning_s,
 		"battery": battery_ok, "salvaged": salvaged, "leak": _leak, "carves": net_carves.duplicate(true),
 		"cargo": cargo_hold.net_state.duplicate(true) if cargo_hold else {}, "bodies": _body_uids(), "modules": modules.to_save()}
+	if has_meta(VehicleWear.META):  # survival wear (a flat, the parts, the fuel's age)
+		out["wear"] = (get_meta(VehicleWear.META) as Dictionary).duplicate()
+		(out.wear as Dictionary).erase("stall_until")  # (a moment of this session's clock)
 	if weapons:
 		out["weapons"] = weapons.to_save()  # A3
 	if gunnery:
@@ -3505,6 +3508,8 @@ func from_save(data: Dictionary) -> void:
 	salvaged = bool(data.get("salvaged", false))
 	_leak = maxf(float(data.get("leak", 0.0)), 0.0)
 	_lost = wrecked or burning_s > 0.0
+	if data.get("wear") is Dictionary:
+		set_meta(VehicleWear.META, (data.wear as Dictionary).duplicate())  # survival wear
 	net_carves = (GameState.from_json(data.get("carves", [])) as Array) if data.has("carves") else []
 	modules.from_save(data.get("modules", {}) if data.get("modules") is Dictionary else {}, zones_in)  # A2 (an older save: from its zones)
 	if weapons:

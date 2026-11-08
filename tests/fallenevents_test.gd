@@ -25,7 +25,7 @@ var start := ""
 
 
 func _ready() -> void:
-	get_tree().create_timer(380.0).timeout.connect(func() -> void:
+	get_tree().create_timer(540.0).timeout.connect(func() -> void:
 		print("FALLENEVENTS TEST FAILED (timed out)")
 		get_tree().quit(99))
 	main = load("res://scenes/main.tscn").instantiate()
@@ -36,7 +36,7 @@ func _ready() -> void:
 		_test_supply_drop()
 		_test_live_drop()
 		_test_other_events()
-		_test_live_convoy()
+		await _test_live_convoy()
 		_test_convoy_robbed_and_ambush()
 		_test_convoy_no_road()
 		_test_crew_home()
@@ -150,6 +150,7 @@ func _test_other_events() -> void:
 	check(not c.is_empty() and String(c.get("to", "")) != "" and String(c.get("column", "")) in ["enclave", "trader"], "a %s column moves through %s toward %s" % [c.get("column", "?"), road, c.get("to", "?")])
 	var raid := iso.new_group("raiders", road, Vector2.ZERO, iso.rng_for("test_raiders", "made"), 5)
 	raid.kind = "raiders"
+	c["leg"] = int(FallenConvoy.num("legs", 3.0)) - 1  # (its last zone: it ends here)
 	iso.now = float(c.get("until", iso.now)) + 0.01
 	WorldEvents.tick(iso)
 	check(String(c.get("state", "")) == "done" and String(c.get("outcome", "")) in ["ambushed", "passed"], "its window ends: %s" % String(c.get("outcome", "")))
@@ -285,11 +286,347 @@ func _test_live_convoy() -> void:
 		sim.server_change_relation(gid, 20.0)
 		check(Barter.trader_problem(qrec) == "", "and sells to a friend of the enclave (standing 20)")
 		sim.server_change_relation(gid, rel - 20.0)
-	# It reaches the far edge: through, gone.
+	# It reaches the far edge with no legs left: through, gone.
+	r["leg"] = int(FallenConvoy.num("legs", 3.0)) - 1
 	c.s = c.length - 1.0
 	c.server_step(1.0)
 	check(String(r.get("outcome", "")) == "passed" and String(r.state) == "done" and c.is_queued_for_deletion() and not WorldSim.people().has(c.trader_id),
-		"at the far edge it's through (%s) and leaves the zone" % String(r.get("outcome", "")))
+		"at the far edge at the end of its way it's through (%s) and leaves the zone" % String(r.get("outcome", "")))
+	_test_convoy_road_maths()
+	await _test_convoy_seats()
+	await _test_convoy_drives()
+	await _test_driving_off_is_robbery()
+	await _test_convoy_crossing()
+
+
+## The way through a zone: joined at junctions, by way of a site only when it must, and the
+## stretch across a site is one the column doesn't try to drive.
+func _test_convoy_road_maths() -> void:
+	print("The way through a zone")
+	var line := func(a: Vector3, b: Vector3, n: int) -> PackedVector3Array:
+		var out := PackedVector3Array()
+		for i in n + 1:
+			out.append(a.lerp(b, float(i) / n))
+		return out
+	# A straight run east through a site at 500, against a way round by a junction 700 m long.
+	var west := {"id": 0, "points": line.call(Vector3(0.0, 0.0, 0.0), Vector3(490.0, 0.0, 0.0), 100), "a": {"site": "", "junction": -1, "crossing": "w"}, "b": {"site": "fort", "junction": -1, "crossing": ""}}
+	var east := {"id": 1, "points": line.call(Vector3(520.0, 0.0, 0.0), Vector3(1000.0, 0.0, 0.0), 100), "a": {"site": "fort", "junction": -1, "crossing": ""}, "b": {"site": "", "junction": -1, "crossing": "e"}}
+	var round_w := {"id": 2, "points": line.call(Vector3(200.0, 0.0, 0.0), Vector3(500.0, 0.0, 300.0), 30), "a": {"site": "", "junction": 0, "crossing": ""}, "b": {"site": "", "junction": 1, "crossing": ""}}
+	var round_e := {"id": 3, "points": line.call(Vector3(500.0, 0.0, 300.0), Vector3(800.0, 0.0, 0.0), 30), "a": {"site": "", "junction": 1, "crossing": ""}, "b": {"site": "", "junction": 2, "crossing": ""}}
+	var js := [{"pos": Vector3(200.0, 0.0, 0.0), "roads": [0, 2]}, {"pos": Vector3(500.0, 0.0, 300.0), "roads": [2, 3]}, {"pos": Vector3(800.0, 0.0, 0.0), "roads": [1, 3]}]
+	var way := ConvoyRoad.route([west, east, round_w, round_e], js, Vector3(0.0, 0.0, 0.0), 0, Vector3(1000.0, 0.0, 0.0), 1)
+	check(way.size() > 10 and way[0].distance_to(Vector3.ZERO) < 1.0 and way[way.size() - 1].distance_to(Vector3(1000.0, 0.0, 0.0)) < 1.0, "it runs from one end to the other in order (%d points)" % way.size())
+	var by_junction := false
+	for p: Vector3 in way:
+		if p.z > 100.0:
+			by_junction = true
+	check(by_junction, "it goes round by the junctions rather than through the site")
+	var only_site := ConvoyRoad.route([west, east], [], Vector3(0.0, 0.0, 0.0), 0, Vector3(1000.0, 0.0, 0.0), 1)
+	check(only_site.size() > 10, "with no way round it goes by the site")
+	var f := FallenConvoy.new()
+	f.path = only_site
+	f.measure_road()
+	check(f.in_gap(505.0) and f.in_gap(480.0) and f.in_gap(540.0) and not f.in_gap(100.0) and not f.in_gap(900.0), "and the stretch across the site, and its approaches, aren't driven")
+	f.free()
+
+
+## The people ride in or on the vehicles, drivers at the wheel, on the host as a joiner is told.
+func _test_convoy_seats() -> void:
+	print("Riding, not walking beside")
+	_clear_road()
+	for column: String in ["trader", "enclave"]:
+		var c := _live_convoy(column)
+		if c == null:
+			check(false, "a %s column" % column)
+			continue
+		var r := c.rec
+		await get_tree().physics_frame
+		var aboard := 0
+		for p: Soldier in c.people:
+			if Vehicle.ride_of(p) != null:
+				aboard += 1
+		check(aboard == c.people.size() and c.vehicles.all(func(v: Vehicle) -> bool: return v.driver() != null and v.driver() in c.people),
+			"%s column: all %d of its people ride, a driver at each wheel" % [column, c.people.size()])
+		var lead_v := c.vehicles[0]
+		var seated_paths: Array = lead_v.net_state.get("seats", [])
+		check(lead_v.driver() != null and String(seated_paths[lead_v.driver_seat()]).contains(String(lead_v.driver().name)), "what a joiner is sent seats the driver (%s)" % String(seated_paths[lead_v.driver_seat()]))
+		check(not c.guards.is_empty() and c.guards.all(func(g: Soldier) -> bool: return Vehicle.ride_of(g) != null and Vehicle.ride_of(g).seat_kind(Vehicle.ride_of(g).seat_of(g)) == Vehicle.PASSENGER),
+			"the guards in the passenger seats")
+		check(column != "enclave" or (c.trader != null and Vehicle.ride_of(c.trader) != null), "the enclave's man rides too")
+		c.server_despawn()
+		r.state = "done"
+		await get_tree().process_frame
+
+
+## An enclave column really drives: on real wheels (real frames), in order, seats kept, halts and
+## goes on; a truck thrown off the road comes back by the kinematic fallback.
+func _test_convoy_drives() -> void:
+	print("A motor column really drives")
+	_clear_road()
+	FallenConvoy.force_drive = true
+	var m := WorldSim.model()
+	var r := WorldEvents.begin(m, "convoy", start, {"column": "enclave"})
+	if r.is_empty():
+		check(false, "a column")
+		FallenConvoy.force_drive = false
+		return
+	r["ambush_by"] = "-"
+	r["manual"] = false
+	WorldEvents.server_live(level)
+	var c := FallenConvoy.of_event(level, int(r.id))
+	if c == null:
+		check(false, "a live column")
+		FallenConvoy.force_drive = false
+		return
+	c.hail_ok = false
+	var s0 := c.s
+	await _frames_until(func() -> bool: return c.s > s0 + 12.0, 22.0)
+	var lv := c.vehicles[0] if not c.vehicles.is_empty() else null
+	print("  driven %.1f m in, state %s, speed %.1f, recoveries %d" % [c.s - s0, c.state, lv.forward_speed() if lv else 0.0, c.recoveries])
+	check(lv != null and c.is_driven(lv) and not lv.freeze and is_instance_valid(lv.ai), "the trucks are on their wheels under VehicleAI (no freeze)")
+	check(c.s > s0 + 12.0, "it drives down the road (%.1f -> %.1f m)" % [s0, c.s])
+	check(c.recoveries == 0, "with no recovery needed (%d)" % c.recoveries)
+	if lv:
+		check(c.along_of(lv.global_position)[1] < 6.0, "the lead on the road (%.1f m off)" % c.along_of(lv.global_position)[1])
+		var a := c.along_of(lv.global_position)[0]
+		var b := c.along_of(c.vehicles[1].global_position)[0] if c.vehicles.size() > 1 else -INF
+		check(c.vehicles.size() < 2 or (a > b + 4.0), "the column keeps order (%.1f ahead of %.1f)" % [a, b])
+		check(not lv.net_pose.is_empty() and Vector3(lv.net_pose[1], lv.net_pose[2], lv.net_pose[3]).distance_to(lv.global_position) < 4.0, "the pose every peer follows is the driven truck's")
+		var driver := lv.driver()
+		check(driver != null and driver.global_position.distance_to(lv.global_position) < 4.0, "the driver rides with it")
+	# A wreck on the road: they stop, get down, clear it, mount up, go on.
+	var at := c.point_at(c.s + 11.0)
+	var wreck := VehicleLayer.of(level).server_spawn("technical", Transform3D(Basis(), at + Vector3.UP * 0.3), "", &"player")
+	if wreck:
+		wreck.set_meta(&"no_save", true)
+	await _frames_until(func() -> bool: return c.state == "halted", 4.0)
+	check(c.state == "halted" and c.why == "wreck" and not c.riding and c.people.all(func(p: Soldier) -> bool: return not is_instance_valid(p) or Vehicle.ride_of(p) == null),
+		"a wreck ahead: it halts and everyone gets down (%s %s)" % [c.state, c.why])
+	await _frames_until(func() -> bool: return lv == null or absf(lv.forward_speed()) < 0.6, 6.0)
+	check(lv != null and absf(lv.forward_speed()) < 0.9, "the trucks brake to a stop")
+	await _frames_until(func() -> bool: return c.state == "moving" and c.riding, FallenConvoy.num("clear_s", 8.0) + FallenConvoy.num("mount_s", 12.0) + 6.0)
+	check(c.state == "moving" and c.riding and wreck != null and wreck.has_meta(&"convoy_cleared") and c.people.all(func(p: Soldier) -> bool: return not is_instance_valid(p) or not p.vitals.is_up() or Vehicle.ride_of(p) != null),
+		"it's cleared; they mount up and go on (%s %s, %s, cleared %s, %d m the farthest from its truck)" % [c.state, c.why, "riding" if c.riding else "on foot", str(wreck.has_meta(&"convoy_cleared")) if wreck else "?",
+			c.people.reduce(func(acc: float, p: Soldier) -> float: return maxf(acc, p.global_position.distance_to(lv.global_position)) if is_instance_valid(p) and lv else acc, 0.0)])
+	if wreck:
+		wreck.queue_free()
+	var s1 := c.s
+	await _frames_until(func() -> bool: return c.s > s1 + 5.0, 12.0)
+	check(c.s > s1 + 5.0, "and drives again (%.1f -> %.1f m)" % [s1, c.s])
+	# A truck thrown off the road: it's put back and the column doesn't hang.
+	if lv:
+		var before := c.recoveries
+		lv.global_position += Vector3(40.0, 4.0, 40.0)
+		await _frames_until(func() -> bool: return c.recoveries > before, 3.0)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		check(c.recoveries > before and lv.freeze and c.along_of(lv.global_position)[1] < 2.0, "a truck thrown off the road is put back on it, sliding (%.1f m off)" % c.along_of(lv.global_position)[1])
+		await _frames_until(func() -> bool: return not lv.freeze, FallenConvoy.num("recover_s", 10.0) + 3.0)
+		check(not lv.freeze and c.is_driven(lv), "then it drives on")
+	FallenConvoy.force_drive = false
+	c.server_despawn()
+	r.state = "done"
+	await get_tree().process_frame
+
+
+## Waits for real physics frames until `cond` holds or `secs` pass.
+func _frames_until(cond: Callable, secs: float) -> void:
+	var t := Time.get_ticks_msec()
+	while not bool(cond.call()) and Time.get_ticks_msec() - t < int(secs * 1000.0):
+		await get_tree().physics_frame
+
+
+func _test_driving_off_is_robbery() -> void:
+	print("Driving off in a convoy vehicle")
+	var player_at := player.global_position
+	_clear_road()
+	var gid := String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
+	var column := "enclave" if gid != "" else "trader"
+	var c := _live_convoy(column)
+	if c == null:
+		check(false, "a column")
+		return
+	var r := c.rec
+	var v := c.vehicles[0]
+	var rel0 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+	c.server_hail(player)
+	check(c.state == "hailed" and v.driver() == null, "hailed, its driver's out: the wheel is free (%s)" % str(v.driver()))
+	# A passenger is no thief.
+	var seat_p := v._first_free_passenger()
+	check(seat_p >= 0 and v.server_enter(player, seat_p), "a player climbs in as a passenger")
+	c.server_step(0.25)
+	check(c.state == "hailed" and c.why == "", "a passenger's no thief (%s)" % c.state)
+	v.server_exit(player)
+	# Sitting at the wheel holds it but steals nothing; getting out again ends it.
+	var at := v.global_position
+	check(v.server_enter(player, v.driver_seat()), "a player gets behind the wheel")
+	c.server_step(0.25)
+	check(c.state == "halted" and c.why == "wheel" and String(r.state) == "open", "a stranger at the wheel holds the column, no robbery yet (%s %s)" % [c.state, c.why])
+	v.server_exit(player)
+	c.server_step(0.25)
+	check(c._taken.is_empty() and String(r.state) == "open", "he gets out again: nothing happened")
+	# Driving off is robbery.
+	c.server_hail(player)
+	check(v.server_enter(player, v.driver_seat()), "he gets back behind the wheel")
+	c.server_step(0.25)
+	var ground := level.ground_point(v.global_position + Vector3(12.0, 0.0, 0.0))
+	v.global_position = ground + Vector3.UP * 0.3
+	c.server_step(0.25)
+	var rel1 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+	check(c.state == "hostile" and String(r.get("outcome", "")) == "robbed" and c.people[0].faction == &"hostile", "driving off in it is robbery: the column turns (%s)" % c.state)
+	check(gid == "" or rel1 <= rel0 - 25.0, "the owner's standing falls (%.0f -> %.0f)" % [rel0, rel1])
+	var ev := (WorldSim.section().events as Array).filter(func(x: Dictionary) -> bool: return String(x.kind) == "convoy_robbed" and int(x.id) > int(r.id) and String(x.get("actor", "")) == Survival.profile_of(player))
+	check(not ev.is_empty(), "a world event names him")
+	check(not v.freeze and not v.has_meta(&"no_save") and not v.has_meta(&"fallen_convoy") and c.people.all(func(p: Soldier) -> bool: return Vehicle.ride_of(p) == null),
+		"the vehicle is his now and saved with the zone; its people got out to fight")
+	v.server_exit(player)
+	c.server_despawn()
+	await get_tree().process_frame
+	# A vehicle given: nobody's to rob.
+	var g := _live_convoy("enclave" if gid != "" else "trader")
+	if g:
+		var gr := g.rec
+		var gv := g.vehicles[g.vehicles.size() - 1]
+		check(g.server_give_vehicle(gv), "a vehicle given away leaves the column")
+		check(gv not in g.vehicles and not gv.has_meta(&"fallen_convoy") and not gv.has_meta(&"no_save") and not gv.freeze, "it's nobody's, unfrozen, saved like any")
+		gv.server_enter(player, gv.driver_seat())
+		g.server_step(0.25)
+		gv.global_position += Vector3(30.0, 0.0, 0.0)
+		g.server_step(0.25)
+		check(String(gr.state) == "open" and g.state != "hostile", "driving off in it is no robbery (%s)" % g.state)
+		gv.server_exit(player)
+		gv.queue_free()
+		g.server_despawn()
+		gr.state = "done"
+		await get_tree().process_frame
+	# Left when its crew all died (not at the players' hands): free to take.
+	var d := _live_convoy("enclave" if gid != "" else "trader")
+	if d:
+		var dr := d.rec
+		var rel2 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+		for p: Soldier in d.people:
+			p.vitals.server_kill()
+		d.server_step(0.25)
+		check(d.state == "lost" and String(dr.get("outcome", "")) == "lost", "its people all dead on the road, it's over (%s, %s)" % [d.state, String(dr.get("outcome", ""))])
+		var dv := d.vehicles[0]
+		check(not dv.has_meta(&"fallen_convoy") and not dv.freeze, "its vehicle is left for whoever comes by")
+		dv.server_enter(player, dv.driver_seat())
+		dv.global_position += Vector3(30.0, 0.0, 0.0)
+		d.server_step(0.25)
+		var rel3 := WorldGroup.relation(WorldSim.group(gid), "player") if gid != "" else 0.0
+		check(String(dr.get("outcome", "")) == "lost" and is_equal_approx(rel2, rel3), "taking it is no crime (%.0f -> %.0f)" % [rel2, rel3])
+		dv.server_exit(player)
+		for vv: Vehicle in d.vehicles:
+			if is_instance_valid(vv):
+				vv.queue_free()
+		d.server_despawn()
+		await get_tree().process_frame
+	player.global_position = player_at  # (he's been hopping in and out of vehicles moved by hand: back where the later checks expect him)
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+
+
+func _test_convoy_crossing() -> void:
+	print("On into the next zone")
+	_clear_road()
+	var gid := String((WorldSim.section().goal as Dictionary).get("evac_group", ""))
+	var column := "enclave" if gid != "" else "trader"
+	# Bound for a linked zone: the road it takes ends at that edge, and it came in at another.
+	var c := _live_convoy(column)
+	if c == null:
+		check(false, "a column")
+		return
+	var r := c.rec
+	var to := String(r.get("to", ""))
+	var roads := ZoneRoads.of(level)
+	var exit_to: Dictionary = {}
+	for e: Dictionary in roads.exits():
+		if String(e.get("to", "")) == to:
+			exit_to = e
+	if not exit_to.is_empty():
+		var far := c.path[c.path.size() - 1]
+		check(far.distance_to(exit_to.edge) < 40.0, "its road ends at the edge toward %s (%.0f m off)" % [to, far.distance_to(exit_to.edge)])
+	# One guard falls; the cargo is noted; then the far edge.
+	var dead := c.guards[0]
+	dead.vitals.server_kill()
+	c.server_step(0.25)
+	var cargo_before: Array = []
+	for e: Dictionary in c.cargo_vehicle.cargo_hold.entries():
+		cargo_before.append([String(e.id), int(e.get("count", 1))])
+	cargo_before.sort()
+	var stock_before: Array = (WorldSim.people().get(c.trader_id, {}) as Dictionary).get("kit", [])
+	var survivors := FallenConvoy._alive(c.people)
+	c.s = c.length - 1.0
+	c.server_step(1.0)
+	check(c.is_queued_for_deletion() and String(r.state) == "open" and String(r.get("outcome", "")) == "" and r.has("crossing"), "at the zone's edge it goes on: open, crossing to %s" % str(r.get("crossing", {})))
+	var cc: Dictionary = r.get("crossing", {})
+	check(String(cc.get("to", "")) == to and String(cc.get("from", "")) == start and float(cc.get("arrive", 0.0)) > WorldSim.world_now(), "to the next zone along the road")
+	check(((r.get("carry", {}) as Dictionary).get("crew", []) as Array).size() == survivors and survivors == c.people.size() - 1, "only the living carry over (%d)" % survivors)
+	WorldEvents.server_live(level)
+	await get_tree().process_frame
+	check(FallenConvoy.of_event(level, int(r.id)) == null, "a column crossing isn't live here")
+	# A save mid-crossing: the world section through JSON (as the game's save), and on.
+	Survival.state()[WorldSim.KEY] = GameState.from_json(JSON.parse_string(JSON.stringify(WorldSim.section())))
+	var r2 := WorldEvents.record(WorldSim.section(), int(r.id))
+	check(r2.has("crossing") and ((r2.get("carry", {}) as Dictionary).get("crew", []) as Array).size() == survivors, "a save mid-crossing keeps it")
+	var m := WorldSim.model()
+	WorldEvents.tick(m)
+	check(r2.has("crossing"), "the crossing takes its time")
+	m.now = float(cc.get("arrive", 0.0)) + 0.001
+	WorldEvents.tick(m)
+	check(not r2.has("crossing") and String(r2.zone) == to and String(r2.from) == start and String(r2.state) == "open" and int(r2.leg) == 1, "the far tick brings it into %s (%s)" % [to, String(r2.zone)])
+	check((WorldSim.section().events as Array).any(func(x: Dictionary) -> bool: return String(x.kind) == "convoy" and String(x.zone) == to and String(x.text).contains("came into")), "an event says so")
+	r2.state = "done"
+	# Into the zone being played: a live convoy, with what it carried.
+	var z2 := _near_zone()
+	var m2 := WorldSim.model()
+	var r3 := WorldEvents.begin(m2, "convoy", z2, {"column": column, "to": start})
+	r3["ambush_by"] = "-"
+	r3["manual"] = true
+	r3["carry"] = {"crew": [0, 1, 3, 5], "vehicles": [{"i": 0, "cond": {"fuel": 42.0}}, {"i": 1, "cond": {}}], "cargo": [{"id": "canned_meat", "count": 7}, {"id": "jerrycan", "count": 2}], "trader": true, "stock": [{"id": "water_bottle", "count": 3}]}
+	check(WorldEvents._convoy_cross(m2, r3) and r3.has("crossing"), "a column in the next zone bound for this one")
+	m2.now = float(r3.crossing.arrive) + 0.001
+	WorldEvents.tick(m2)
+	check(String(r3.zone) == start, "it comes into the zone being played")
+	r3["manual"] = true
+	r3["ambush_by"] = "-"
+	WorldEvents.server_live(level)
+	var live := FallenConvoy.of_event(level, int(r3.id))
+	check(live != null, "and arrives as a live convoy")
+	if live:
+		live.hail_ok = false
+		live.server_step(0.1)
+		check(live.people.size() == 4, "with its survivors (%d)" % live.people.size())
+		check(live.vehicles.size() == 2 and is_equal_approx(live.vehicles[0].fuel_litres(), 42.0), "its vehicles as they were (%.0f L)" % live.vehicles[0].fuel_litres())
+		var hold := live.cargo_vehicle.cargo_hold.entries()
+		var meat := hold.filter(func(e: Dictionary) -> bool: return String(e.id) == "canned_meat").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0) as int
+		var fuel_cans := hold.filter(func(e: Dictionary) -> bool: return String(e.id) == "jerrycan").reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0) as int
+		check(meat == 7 and fuel_cans == 2 and hold.all(func(e: Dictionary) -> bool: return String(e.id) in ["canned_meat", "jerrycan"]), "and its cargo, not a fresh roll (%s)" % str(hold))
+		check(((WorldSim.people().get(live.trader_id, {}) as Dictionary).get("kit", []) as Array).size() == 1, "and the trader's stock")
+		var exit_from: Dictionary = {}
+		for e: Dictionary in roads.exits():
+			if String(e.get("to", "")) == z2:
+				exit_from = e
+		if not exit_from.is_empty():
+			check(live.path[0].distance_to(exit_from.edge) < 40.0, "in at the edge it crossed by (%.0f m off)" % live.path[0].distance_to(exit_from.edge))
+		# The worker's copy replaces the section: the column follows the record, not a stale one.
+		Survival.state()[WorldSim.KEY] = WorldSim.section().duplicate(true)
+		live.server_step(0.1)
+		check(is_same(live.rec, WorldEvents.record(WorldSim.section(), int(r3.id))), "it keeps to the world's record across a far step")
+		live.rec["leg"] = int(FallenConvoy.num("legs", 3.0)) - 1
+		live.s = live.length - 1.0
+		live.server_step(1.0)
+		var r4 := WorldEvents.record(WorldSim.section(), int(r3.id))
+		check(String(r4.get("outcome", "")) == "passed" and String(r4.get("state", "")) == "done", "at its last zone's far edge it's through, on the record (%s)" % String(r4.get("outcome", "")))
+	# The far tick's own crossing: no column live.
+	var m3 := WorldSim.model()
+	var r5 := WorldEvents.begin(m3, "convoy", z2, {"column": "trader", "to": start})
+	r5["ambush_by"] = "-"
+	m3.now = float(r5.until) + 0.001
+	WorldEvents.tick(m3)
+	check(r5.has("crossing") and String(r5.state) == "open", "off the map, its window over, it crosses too")
+	r5.state = "done"
+	r5.erase("crossing")
 
 
 func _test_convoy_robbed_and_ambush() -> void:

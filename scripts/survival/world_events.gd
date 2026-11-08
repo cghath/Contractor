@@ -13,9 +13,12 @@ extends RefCounted
 ##   player: the enclave's standing drops a little, it was theirs).
 ## - convoy: an enclave or trader column moving along the road through a zone with 3+ links (the
 ##   MSR) toward the next; at the window's end raiders in reach may ambush it (their supplies up,
-##   the enclave's grudge), else it passes and the settlers it passed traded with it; hosted, a live
-##   column on the zone's main road (FallenConvoy: vehicles, guards, a trader, its cargo, halts,
-##   hails, robbery, a live ambush), or the column's wagon (a cache) where the zone has no road.
+##   the enclave's grudge), else the settlers it passed traded with it and it crosses into the next
+##   zone (FallenConvoy's "legs" zones in all; r.crossing {"from", "to", "arrive"}), a fresh window
+##   and a new roll there, and at the end of its way it has passed; hosted, a live column on the
+##   road (FallenConvoy: vehicles, guards, a trader, its cargo, halts, hails, robbery, a live
+##   ambush, on into the next zone with what's left of it: r.carry), or the column's wagon (a cache)
+##   where the zone has no road.
 ## - heli_down: a wreck at a place (a cache when hosted) and its crew as lone survivors beside it;
 ##   the enclave asks for them back (a broadcast); the players can bring them home (HeliCrew: "Come
 ##   with me", delivered at a post or by a radio pickup, the enclave's reward); at the window's end
@@ -298,7 +301,10 @@ static func tick(m: WorldModel) -> void:
 					if not place.is_empty():
 						place["richness"] = 1.0
 			"convoy":
-				if m.now >= float(r.until) and not bool(r.get("live", false)):  # (a live column ends itself: FallenConvoy)
+				if r.has("crossing"):
+					if m.now >= float((r.crossing as Dictionary).get("arrive", m.now)):
+						_convoy_arrives(m, r, def, fill)
+				elif m.now >= float(r.until) and not (bool(r.get("live", false)) and String(r.zone) == m.hosted):  # (a live column ends itself: FallenConvoy; "live" left in a save for another zone is stale)
 					_resolve_convoy(m, r, def, fill)
 			"heli_down":
 				if m.now >= float(r.until):
@@ -381,7 +387,72 @@ static func _resolve_convoy(m: WorldModel, r: Dictionary, def: Dictionary, fill:
 			for k: String in ["food", "water"]:
 				if k in WorldGroup.SUPPLY_KEYS:
 					WorldGroup.add_supply(sg, k, float(def.get("trade_share", 0.5)) * WorldGroup.size(sg))
+	if _convoy_cross(m, r):
+		m.event(String(r.zone), "convoy", [], String(def.get("crossing", "")).format(fill), String(r.place))
+		return
 	_end(m, r, "passed", "convoy_passed", String(def.get("passed", "")).format(fill), [])
+
+
+## Whether convoy `r` goes on into another zone, and if so the crossing written on its record
+## (worker-safe): {"from", "to", "arrive"}: to its `to` zone (its crossing closed: another link, not
+## back the way it came) while it has legs left (FallenConvoy's "legs": zones in all).
+static func _convoy_cross(m: WorldModel, r: Dictionary) -> bool:
+	if int(r.get("leg", 0)) + 1 >= int(FallenConvoy.num("legs", 3.0)):
+		return false
+	var z := String(r.zone)
+	var ways: Array = [String(r.get("to", ""))]
+	for l: String in m.zone(z).get("links", []):
+		if l != String(r.get("from", "")) and not l in ways:
+			ways.append(l)
+	for to: String in ways:
+		if to != "" and m.zones().has(to) and m.crossing_open(z, to):
+			r["to"] = to
+			r["crossing"] = {"from": z, "to": to, "arrive": snappedf(m.now + FallenConvoy.num("cross_h", 2.0) / 24.0, 0.0001)}
+			r["live"] = false
+			return true
+	return false
+
+
+## The crossing's over (worker-safe): convoy `r` comes into its next zone: a place there, a fresh
+## window, the road on (to a link not back the way it came, while it has legs left), an event, the
+## zone's pressure; a new ambush roll. Its carry stays; server_live brings it in if that's the
+## hosted zone.
+static func _convoy_arrives(m: WorldModel, r: Dictionary, def: Dictionary, fill: Dictionary) -> void:
+	var c: Dictionary = r.crossing
+	var z := String(c.get("to", r.zone))
+	var from := String(c.get("from", r.zone))
+	r.erase("crossing")
+	r["zone"] = z
+	r["from"] = from
+	r["leg"] = int(r.get("leg", 0)) + 1
+	r["s"] = 0.0
+	r["until"] = snappedf(m.now + float(def.get("window_h", 6.0)) / 24.0, 0.0001)
+	for k: String in ["ambush_by", "ambush_spawned", "hailed_out", "live", "live_spawned"]:
+		r.erase(k)
+	var zd := m.zone(z)
+	var rng := m.rng_for("convoy%d" % int(r.get("id", 0)), "arrive%d" % int(r.leg))
+	var places: Array = zd.get("places", [])
+	var place: Dictionary = places[rng.randi_range(0, places.size() - 1)] if not places.is_empty() else {}
+	r["place"] = String(place.get("id", ""))
+	var links: Array = (zd.get("links", []) as Array).filter(func(l: String) -> bool: return m.zones().has(l) and l != from)
+	r["to"] = String(links[rng.randi_range(0, links.size() - 1)]) if not links.is_empty() and int(r.leg) + 1 < int(FallenConvoy.num("legs", 3.0)) else ""
+	if float(def.get("pressure", 0.0)) > 0.0:
+		m.raise_pressure(z, float(def.get("pressure", 0.0)), WorldModel._place_v(place))
+	fill["zone"] = String(zd.get("name", z))
+	fill["from"] = String(m.zone(from).get("name", from))
+	m.event(z, "convoy", [], String(def.get("arrived", "")).format(fill), String(r.place))
+
+
+## Host: live convoy `r` reached the end of its road here: on into its next zone. Whether it goes
+## (else it's through: FallenConvoy ends it).
+static func server_convoy_cross(r: Dictionary) -> bool:
+	var m := WorldSim.model()
+	if not _convoy_cross(m, r):
+		return false
+	var def := kind_def("convoy")
+	var fill := {"column": String(r.get("column", "")), "zone": RegionMap.zone_name(String(r.zone)), "to": RegionMap.zone_name(String(r.to))}
+	FallenStory.event(String(r.zone), "convoy", [], String(def.get("crossing", "")).format(fill), String(r.get("place", "")))
+	return true
 
 
 # --- The main thread: the live zone ---------------------------------------------------------------
@@ -412,7 +483,7 @@ static func server_live(level: Node) -> void:
 	var done: Dictionary = _live.get(level.get_instance_id(), {})
 	_live[level.get_instance_id()] = done
 	for r: Dictionary in records(WorldSim.section()).values():
-		if String(r.zone) != zone or done.has(int(r.id)):
+		if String(r.zone) != zone or done.has(int(r.id)) or r.has("crossing"):
 			continue
 		var is_open := String(r.state) == "open"
 		if not is_open and not bool(r.get("spawned", false)):

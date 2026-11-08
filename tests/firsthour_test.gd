@@ -38,6 +38,7 @@ func _ready() -> void:
 		Wear.tick_off = true
 		await _test_spawn()
 		_test_thread()
+		await _test_truck()
 		await _test_water_weapon()
 		await _test_shelter()
 		await _test_voice()
@@ -122,7 +123,64 @@ func _test_thread() -> void:
 			note = true
 	check(note, "the note on the table carries the postscript")
 	var lines := FirstHour.now_lines()
-	check(lines.size() == 3 and String(lines[0]).contains(FieldHints.key_name("context")), "the journal's Now lists the three, with the real keys (%s)" % str(lines))
+	check(lines.size() == 4 and String(lines[0]).contains(FieldHints.key_name("context")), "the journal's Now lists the three and the pickup, with the real keys (%s)" % str(lines))
+
+
+## The farm's old pickup: there, broken, looked over, got running with what the world has; the
+## goal completes; it comes back from the zone save as it was left, not broken afresh.
+func _test_truck() -> void:
+	print("The old pickup at the farm")
+	var v := FirstHour.truck(level)
+	check(v != null, "the farm has its pickup")
+	if v == null:
+		return
+	check(v.model == FirstHour.TRUCK_MODEL and not v.has_meta(&"no_save"), "a plain pickup (%s), kept with the zone" % v.model)
+	check(FirstHour.is_open("truck"), "getting it running is a goal from the first wake")
+	var at := player.global_position
+	check(v.global_position.distance_to(at) <= 60.0, "it's in the yard by the door (%.0f m)" % v.global_position.distance_to(at))
+	for i in 40:
+		await get_tree().physics_frame
+	var ground := level.ground_point(v.global_position)
+	check(absf(v.global_position.y - ground.y) < 1.2 and v.global_basis.y.y > 0.9 and v.global_position.distance_to(Vector3(float((FirstHour.farm_of(level).truck as Array)[0]), v.global_position.y, float((FirstHour.farm_of(level).truck as Array)[1]))) < 2.0,
+		"and it stands there on its wheels, clear of the buildings (%.2f m above the ground, up %.2f)" % [v.global_position.y - ground.y, v.global_basis.y.y])
+	check(not v.can_drive() and not v.battery_ok and v.fuel_litres() <= 0.0 and VehicleWear.flat(v), "broken down: a dead battery, a dry tank, a flat")
+	var words := VehicleActionPoint.report(v)
+	check(words.contains("Battery: dead") and words.contains("Tyres: a flat") and words.contains("Fuel: 0 of"), "looking it over says what's wrong on every peer (%s)" % words.replace("\n", "; "))
+	check(not bool(v.net_state.get("battery", true)) and bool(v.net_state.get("flat", false)), "the battery and the flat are in what every peer is sent")
+	FirstHour.server_tick(level)
+	check(FirstHour.is_open("truck"), "and it isn't done by itself")
+	var inv := player.inventory
+	inv.unequip(&"backpack")
+	inv.put_on(&"backpack", &"pack_ruck_70")  # (a jerrycan is 22 L: it wants a real pack, found like the rest)
+	check(inv.take(&"vehicle_battery", 1) == 1 and inv.take(&"jerrycan", 1) == 1 and inv.take(&"tyre_patch", 1) == 1, "the parts, as found in the world")
+	check(VehicleService.repair_problem(v, player, &"battery", &"vehicle_battery") == "", "the battery fits")
+	VehicleService.finish(v, player, "repair", &"battery", &"vehicle_battery")
+	check(v.battery_ok, "a new battery in")
+	FirstHour.server_tick(level)
+	check(FirstHour.is_open("truck"), "still not done: no fuel")
+	check(VehicleService.refuel_from_cans(v, player).begins_with("Refuelled") and v.fuel_litres() > 0.0, "a jerrycan poured in (%.0f L)" % v.fuel_litres())
+	check(v.can_drive() and VehicleWear.flat(v), "it would start now, on a flat")
+	FirstHour.server_tick(level)
+	check(FirstHour.is_open("truck"), "still not done: the flat")
+	# The zone save keeps a flat through a reload (a bare Vehicle.to_save used not to).
+	var saved := v.to_save()
+	check(bool((saved.get("wear", {}) as Dictionary).get("flat", false)) and float(saved.get("fuel", 0.0)) > 0.0 and bool(saved.get("battery", false)), "the zone's save has what's been done and the flat still to do")
+	VehicleWear.server_patch(player, v, true)
+	check(not VehicleWear.flat(v) and not bool(v.net_state.get("flat", true)), "the flat patched")
+	FirstHour.server_tick(level)
+	check(FirstHour.is_done("truck"), "it runs: the goal's done")
+	check(_journal_has("caught on the third try"), "and the journal says so")
+	GameState.save_zone()
+	var rec: Dictionary = {}
+	for r: Dictionary in GameState.vehicles:
+		if String(r.get("id", "")) == FirstHour.TRUCK_ID:
+			rec = r
+	check(not rec.is_empty() and bool(rec.get("battery", false)) and float(rec.get("fuel", 0.0)) > 0.0 and not bool((rec.get("wear", {}) as Dictionary).get("flat", true)), "the zone save keeps it as it was left")
+	v.queue_free()
+	await get_tree().process_frame
+	FirstHour.server_zone_hosted(level)
+	var again := FirstHour.truck(level)
+	check(again != null and again != v and again.battery_ok and again.fuel_litres() > 0.0 and not VehicleWear.flat(again) and FirstHour.truck_running(again), "coming back to the zone it's running, not broken afresh")
 
 
 func _test_water_weapon() -> void:

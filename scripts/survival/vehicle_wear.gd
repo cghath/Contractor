@@ -182,6 +182,7 @@ static func farrier(st: Node) -> Vehicle:
 
 static func set_flat(v: Vehicle, on: bool) -> void:
 	of(v)["flat"] = on
+	v._publish_state(true)
 	if on:
 		var d := v.driver()
 		if d:
@@ -244,6 +245,7 @@ static func server_patch(s: Soldier, v: Vehicle, instant := false) -> void:
 		var w := of(v)
 		w["flat"] = false
 		w["tyres"] = maxf(float(w.tyres), 20.0)
+		v._publish_state(true)
 		Rpg.xp(s, "mechanics", 4.0)
 		Wear.tell(s, "Tyre patched")
 	Wear.timed(s, secs, "Patching the tyre", done, instant)

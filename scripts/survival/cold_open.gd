@@ -78,7 +78,7 @@ static func server_begin(level: SurvivalLevel) -> void:
 			thing_note = "The well water is brown. It will want boiling."
 		"wreck_with_part":
 			var wreck := home + Vector3(cos(rng.randf() * TAU), 0.0, sin(rng.randf() * TAU)).normalized() * WRECK_M
-			var part := &"car_battery" if ItemDB.get_item(&"car_battery") != null else &"wrench_set"
+			var part := &"vehicle_battery" if ItemDB.get_item(&"vehicle_battery") != null else &"wrench_set"  # (what the farm's pickup needs: FirstHour)
 			level.server_spawn_dropped(part, 1, level.ground_point(wreck) + Vector3.UP * 0.5)
 			_add_mark(String(st.get("zone", "")), level.ground_point(wreck), "A wreck on the road", "wreck")
 			thing_note = "There's a wreck on the road with something still in it."

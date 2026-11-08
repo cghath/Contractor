@@ -60,6 +60,7 @@ func _on_hosted() -> void:
 	set_meta(&"fallen_hosted", true)  # (the zone's save is in: WorldEvents may put its pieces out now)
 	if Survival.running or Survival.world != "":
 		LootStates.server_zone_hosted(self)
+		FirstHour.server_zone_hosted(self)  # the farm's old pickup
 		WorldEvents.server_live(self)  # world events open here: a drop's crate, a wreck, a wagon, a bell, a fire
 
 

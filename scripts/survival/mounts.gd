@@ -197,8 +197,8 @@ func _free_mounts(at: Vector3) -> Array[Mount]:
 	var out: Array[Mount] = []
 	var layer := VehicleLayer.of(level)
 	for m: Mount in all(level):
-		if m.wrecked or m.global_position.distance_to(at) > MOUNT_UP_M or m.ride_block() != "":
-			continue
+		if m.wrecked or m.global_position.distance_to(at) > MOUNT_UP_M or m.ride_block() != "" or m.has_meta(&"fallen_convoy"):
+			continue  # (a convoy's beasts aren't free for the taking: FallenConvoy)
 		if m.mount_type == Mount.CART and m.horse() == null:
 			continue
 		if m.mount_type != Mount.CART and (m.rider() != null or (layer and layer.boarding_to(m) > 0)):
