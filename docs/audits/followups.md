@@ -2009,6 +2009,8 @@ unchanged; it just fires later, after the slot has followed its team through the
 past the one at `aim` (only while neither is in sight), no paths. Why load brings it out isn't
 pinned down; the travel being in real seconds while the walk is in game time (F-438) is the likely
 link, since a loaded machine changes how far the place and the slot get per game metre walked.
+With it, R0882 (smoke, spacing, squad, casualty) and R0883 (spacing, casualty) PASS on the same
+loaded machine, "Team place"'s men 0.00 m over the rate and none across a wall.
 
 ## Calls made for the Captain
 
