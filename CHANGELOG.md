@@ -25,8 +25,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 - **Added:** below trusted with the host, or after killing one of its men, the company is ordered
   out at the end of the deployment (vehicles $5,000 home); friendly fire and looting the host's
   dead or vehicles cost standing; a zone that flips takes the corner and what's parked there.
+  Shooting a body someone else already killed costs nothing.
 - **Fixed:** US garrisons and patrols (D7) never came up in a real campaign: `UsField.install` looked
   the zone up by its save id.
+- **Fixed:** a blast that finished a man was noted against its shooter only after he had died, so
+  whatever reads who killed him at the moment of death saw the hit before it (`Warheads`).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

@@ -548,18 +548,16 @@ static func _is_hosts(node: Node) -> bool:
 
 
 ## Host (Harm's record of a hit): the company's fire hit one of the host's men: the standing pays,
-## once a man, and if he dies of it the company is out.
+## once a man, and if he dies of it the company is out. Every Harm.note_hit comes before the hit
+## lands, so a man already dead here is a corpse being shot: nothing (someone else killed him).
 static func server_note_harm(victim: Node, info: Dictionary) -> void:
 	var s := victim as Soldier
-	if s == null or not _is_hosts(s) or not Harm.by_company(info):
+	if s == null or s.vitals.is_dead() or not _is_hosts(s) or not Harm.by_company(info):
 		return
 	if not s.has_meta(&"staging_hit"):
 		s.set_meta(&"staging_hit", true)
 		Economy.change_reputation(host(), c_i("rep_friendly_fire", -10), "friendly fire on the host's troops")
-		if not s.vitals.is_dead():
-			s.vitals.died.connect(_host_man_died.bind(s), CONNECT_ONE_SHOT)
-	if s.vitals.is_dead():
-		server_evict("one of its men was killed by the company's fire")
+		s.vitals.died.connect(_host_man_died.bind(s), CONNECT_ONE_SHOT)
 
 
 static func _host_man_died(s: Soldier) -> void:

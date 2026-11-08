@@ -2172,6 +2172,7 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 - 2026-11-08 | D8: an eviction with no deployment running takes effect at once, the $5,000 only if vehicles are parked there, and no travel days are charged | "at the end of the current deployment" has nothing to wait for | waiting for the next deployment
 - 2026-11-08 | D8: friendly fire costs -10 once per host soldier and looting -15 once per body or vehicle, only while staged with that host | a burst shouldn't be -40; the rule is about the host's hospitality | counting every hit, or at all times
 - 2026-11-08 | D8: UsField.install reads the zone from the level's def, not GameState.zone_id | in a campaign that's the save id, so the D7 garrisons never came up (F-486) | leaving D7 as it was and staging at an empty base
+- 2026-11-08 | D8 review: a company hit on a host soldier who's already dead counts for nothing, and Warheads' blast and backblast note the shooter before the blast instead of after, so "noted before it lands" holds at every caller and a blast kill still evicts | without the swap, a blast that finishes a man would be read as a corpse hit (the reviewer's fix alone loses that eviction); it also gives the died handlers the right shooter | keeping the dead check in Staging only
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
