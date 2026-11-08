@@ -2,6 +2,13 @@
 
 ## Where the build is (2026-10-26 ~09:25 CDT)
 
+- **The flaky checks chased on `fix/fallen-flakes`** (2026-10-31; docs/audits/followups.md F-310, F-380 to F-383): the
+  stealth-kill flake was the far-AI sleep (DynamicSim) waking the test's held-still walker (it now wakes only what it put
+  to sleep); the take-over's was the crowd coming alive round a player waiting to respawn, by his companion (not any
+  more); the shelter walker's was the test standing him past the despawn range; the haul check's four hours now come from
+  the drop's place in the hauler's queue; the footsteps flake was already fixed by 7d880f82; and the arrow check (red
+  locally on the base) no longer falls back to a blocked way or keeps the spread.
+  R0769 PASS (smoke, survival, fallenpeople, settlement, firsthour, deadtime); R0761 showed the walker woken without the fix.
 - **Holding's gaps closed on `claude/survival-holding2`** (call 143): refugees join the household or camp they reach
   (a starving or hostile camp turns them away) and ask to stay at the players' farm (a vote or "Let them stay"); a place
   left to the dead (or an empty homestead) can be claimed at its post (not with the dead near or someone living there):

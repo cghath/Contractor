@@ -290,27 +290,37 @@ static func repair_some(st: Settlement, hours: float) -> int:
 	return n
 
 
-## Host: up to HAUL_PER_H items lying in the radius (WorldItem) carried into the stores.
+## Host: up to HAUL_PER_H items lying in the radius (WorldItem) carried into the stores, in
+## haul_queue's order.
 static func haul(st: Settlement, hours: float) -> bool:
 	if not st.hosted():
 		return false
-	var c := Settlement.pos()
-	var r := Settlement.radius()
 	var cap := HAUL_PER_H * maxi(1, roundi(hours))
 	var moved := 0
-	for node in st.get_tree().get_nodes_in_group(&"world_items"):
+	for wi: WorldItem in haul_queue(st):
 		if moved >= cap:
 			break
-		var wi := node as WorldItem
-		if wi == null or wi.is_queued_for_deletion() or wi.global_position.distance_to(c) > r or wi.item_id in Crafting.FIRE_ITEMS:
-			continue
-		if ItemDB.get_item(wi.item_id) == null:
-			continue
 		st.server_put(String(wi.item_id), wi.count, wi.state)
 		GameState.item_taken(wi.uid)
 		wi.queue_free()
 		moved += 1
 	return moved > 0 or Masking.server_bury_some(st, hours)  # (phase D: the dead's bodies buried)
+
+
+## What a hauler would carry in, first to last: the items lying in the radius (not a lit fire or a
+## chemlight, nor anything the item table doesn't know).
+static func haul_queue(st: Settlement) -> Array[WorldItem]:
+	var out: Array[WorldItem] = []
+	var c := Settlement.pos()
+	var r := Settlement.radius()
+	for node in st.get_tree().get_nodes_in_group(&"world_items"):
+		var wi := node as WorldItem
+		if wi == null or wi.is_queued_for_deletion() or wi.global_position.distance_to(c) > r or wi.item_id in Crafting.FIRE_ITEMS:
+			continue
+		if ItemDB.get_item(wi.item_id) == null:
+			continue
+		out.append(wi)
+	return out
 
 
 static func generator(_st: Settlement, hours: float) -> bool:
