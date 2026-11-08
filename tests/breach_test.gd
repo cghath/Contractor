@@ -687,8 +687,9 @@ func _test_medic_drag(face := MEDIC_FACE, n := Vector3(-1, 0, 0), dying := false
 	man.vitals.server_add_wound(Vitals.THIGH_L, "venous", 0.03)
 	man.vitals.server_add_wound(Vitals.FOREARM_R, "venous", 0.02)
 	man.vitals.server_add_wound(Vitals.UPPER_ARM_L, "venous", 0.02)
+	var kit: Array[Dictionary] = []
 	if dying:
-		_strip_medical(man)
+		kit = _strip_medical(man)
 		man.vitals._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
 		man.vitals._model.update_state(0.1)
 		SquadAI.of(man)._medic_called_at = Soldier._now()
@@ -700,6 +701,7 @@ func _test_medic_drag(face := MEDIC_FACE, n := Vector3(-1, 0, 0), dying := false
 		% [man.name, medic.body.name, why, medic.body.ai_status, down, medic.care, medic.intent, medic.casualty.name if is_instance_valid(medic.casualty) else "none"])
 	if not treating:
 		man.vitals.server_reset_health()
+		_restore_medical(man, kit)
 		await _heal_squad()
 		return
 	var friends: Array = level.ai.get_children().filter(func(s: Node) -> bool: return s is Soldier and (s as Soldier).faction == &"friendly" and not s.is_queued_for_deletion())
@@ -719,6 +721,7 @@ func _test_medic_drag(face := MEDIC_FACE, n := Vector3(-1, 0, 0), dying := false
 		"the player sets a charge on the wall beside them, both in its blast (%.1f and %.1f m from it; it reaches %.1f m)" % [started[0], started[1], reach])
 	if id == "" or info.is_empty():
 		man.vitals.server_reset_health()
+		_restore_medical(man, kit)
 		await _heal_squad()
 		return
 	var seen := {"man": INF, "capsule": INF, "medic": INF, "through": false, "statuses": [], "held_dying": false}
@@ -753,6 +756,13 @@ func _test_medic_drag(face := MEDIC_FACE, n := Vector3(-1, 0, 0), dying := false
 	check(again and medic._flat_distance(man.body_point()) <= SquadAI.CASUALTY_REACH + 1.0,
 		"then he treats him again where he put him down (%s, %.1f m from him)" % [medic.body.ai_status, medic._flat_distance(man.body_point())])
 	man.vitals.server_reset_health()
+	if dying:
+		var before := kit.size()
+		_restore_medical(man, kit)
+		var kit_now := _strip_medical(man)  # (counted, then put back again)
+		var back := kit_now.size()
+		_restore_medical(man, kit_now)
+		check(back == before and before > 0,"and he gets his medical kit back for the scenes after this (%d of %d)" % [back, before])
 	await _heal_squad()
 
 
@@ -1047,13 +1057,27 @@ func _strip_charges(mates: Array[SquadAI]) -> Dictionary:
 
 
 ## Takes every medical item off `s` (he can't treat himself: he calls for a medic).
-func _strip_medical(s: Soldier) -> void:
+## Takes every medical item off `s`; returns what it took ({container, entry}s), for
+## _restore_medical to put back afterwards (the scenes after this one want his kit: review of
+## feat/breach-and-clear, round 6).
+func _strip_medical(s: Soldier) -> Array[Dictionary]:
+	var took: Array[Dictionary] = []
 	for container: StringName in s.inventory.containers:
-		for entry: Dictionary in (s.inventory.containers[container] as Array).duplicate():
+		var list: Array = s.inventory.containers[container]
+		for i in range(list.size() - 1, -1, -1):
+			var entry: Dictionary = list[i]
 			var id := StringName(String(entry.get("id", "")))
 			if ItemDB.has_item(id) and ItemDB.get_item(id).type == "medical":
-				while s.inventory.remove_one(id):
-					pass
+				took.append({"container": container, "entry": entry.duplicate(true)})
+				s.inventory.remove_entry(container, i, int(entry.get("count", 1)))
+	return took
+
+
+func _restore_medical(s: Soldier, took: Array[Dictionary]) -> void:
+	for t: Dictionary in took:
+		var entry: Dictionary = t.entry
+		if not s.inventory.insert_entry(t.container, entry):
+			s.inventory.take(StringName(entry.id), int(entry.count), entry.get("state", {}))
 
 
 func _heal_squad() -> void:

@@ -2132,6 +2132,8 @@ func _treat(target: Node3D, item_id: StringName, part: StringName, rushed: bool,
 		why = "You have no %s" % item.name
 	elif target == self and Vitals.needs_other_hands(item_id):
 		why = "Someone else has to place that"
+	elif target == self and is_instance_valid(carried_by):
+		why = "You're being dragged" if carried_by.carry_mode == DRAG else "You're being carried"  # (it would be cut short at once)
 	elif is_ai() and item.stats.get("medic_only", false) and role != Roles.MEDIC:
 		why = "Only a medic does that"
 	else:
@@ -2186,6 +2188,21 @@ static func care_key(item_id: StringName, part: StringName) -> String:
 	return "%s@%s" % [item_id, part]
 
 
+## Host: who is busy with an item on this body now (_care_claims), its own hands too when it's
+## treating itself. A carer about to lift it reads this (SquadAI._treated_by_another: never from
+## under another's hands, P0164).
+func treated_by() -> Array[Soldier]:
+	var out: Array[Soldier] = []
+	var prefix := "%d:" % vitals.get_instance_id()
+	for claim: String in _care_claims.keys():
+		if not claim.begins_with(prefix):
+			continue
+		var holder := instance_from_id(int(_care_claims[claim])) as Soldier
+		if holder != null and holder.is_inside_tree() and holder._is_busy() and not out.has(holder):
+			out.append(holder)
+	return out
+
+
 ## Host: whether another soldier is busy with the treatment `claim` names (one that has gone,
 ## or is no longer busy, doesn't hold it).
 func _care_taken(claim: String) -> bool:
@@ -2231,6 +2248,11 @@ func _timed_care(target: Node3D, other: Vitals, seconds: float, label: String, p
 			why = "you went down"
 		elif not is_instance_valid(target) or not is_instance_valid(other) or other.is_dead():
 			why = "the casualty is gone"
+		elif target == self and is_instance_valid(carried_by) and carried_by.get_instance_id() != carrier:
+			# Treating yourself, dying, and someone takes hold of you (F-412, F-431): say so, not
+			# just "you moved" (review of feat/breach-and-clear, round 6).
+			why = "you're being dragged" if carried_by.carry_mode == DRAG else "you're being carried"
+			detail = " by " + carried_by.log_name()
 		elif global_position.distance_to(my_start) > TREAT_MOVE_M:
 			why = "you moved"
 			detail = " %.1f m" % global_position.distance_to(my_start)

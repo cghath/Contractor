@@ -1893,6 +1893,8 @@ himself. `SquadAI._care_clear_of_charges` now drags a dying casualty clear of a 
 does a downed one (a dying man's own item on himself doesn't stop it: it's cut short). Tests:
 interaction "Dragging a dying man", animations (from carry_net alone), breach (the medic drags a
 dying man clear of a charge on the east wall).
+Follow-up, Captain, 2026-11-07: "yes" to a dying man who goes out cold or dies while dragged
+staying held (the round 5 call): answered, nothing changes.
 
 ### F-413 (answered by Captain, 2026-11-06; done): a door charge set on the stack's own side
 `SquadAI._charge_spot` puts a door's charge CHARGE_ALONG_M (2 m) along the wall on the far side
@@ -1911,18 +1913,34 @@ doorway, whose lintel counted as a roof and pushed every door stack 2.5 m furthe
 building's corner (review of round 5). breach "A door charge: the stack stands off from where it
 really goes" lays stacks out on the main building's south face.
 
-### F-431 (note): the AI drags a dying man clear of a charge, not to cover under fire
+### F-431 (answered by Captain, 2026-11-07; done): the AI drags a dying man clear of a charge, not to cover under fire
 F-412 lets anyone drag a dying man, and the AI does it to get him out of a charge's blast; its
 drag to cover under fire (`SquadAI._care_reach`'s `exposed`, with the smoke and the suppressing
 that go with it) is still for an unconscious casualty only, so a dying man in the open under
 fire is treated where he lies, as before. Widening `exposed` to the dying changes casualty care
 in every firefight (casualty, roles), so it's left for Captain's word.
+Captain, 2026-11-07: "yesm". Done: `exposed` covers a casualty down dying as one out cold (the
+same smoke, suppressing, `find_drag_cover` and Care.DRAG, reach still to `body_point()`, all on
+the host). The dying man himself, held, stops crawling (F-412's held branches) and starts nothing
+of his own (`_do_self_care` waits while `is_held()`; a carer dragging him counts as being treated,
+so he doesn't call for a medic either); an item he had going on himself is cut short as he's taken
+hold of (`_cut_own_item`: his AI drops it, not counted as failed; his own hands stop with
+"you're being dragged"), and his carer treats him at cover. Never from under someone else's
+hands: `_treated_by_another` reads who holds a care claim on him (`Soldier.treated_by`), so only
+the casualty's own item is cut (review of round 6; the same check guards the drag clear of a
+charge). Test: casualty "Under fire: a squadmate down dying in the open is dragged to cover,
+then treated".
 
-### F-432 (note): the interaction menu's Release on a dragged body is host-only
+### F-432 (done 2026-11-07, feat/breach-and-clear): the interaction menu's Release on a dragged body is host-only
 `InteractionMenu._moved_by` reads `Soldier.carried_by`, which only the host has, so a client
 player looking at the body he drags gets no Put down/Release on it (he still has it on himself,
 Left Ctrl + Left Alt). The same goes for the new entry on a dying squadmate. Reading carry_net's
 "with" (replicated) instead would fix both. Seen reading the code for F-412, not in a run.
+Done (review of round 6): `_moved_by` takes the host's `carried_by` or either side's carry_net
+(the carrier's "with" naming the body, or the body's naming the carrier), so on a client the menu
+on the body you move has Put down/Release and the other way of moving it, and no Drag greyed
+"You're already moving someone", for a downed body and a dying one alike. interaction checks
+the menu from a client's replicated state (no `carried_by`) for both.
 
 ### F-433 (done 2026-11-07, feat/breach-and-clear): a body reset while dying stayed dying 4 s
 `WoundModel.reset()` (Vitals.server_reset_health: a revive in a test or a debug heal, a body
@@ -1932,6 +1950,17 @@ dying, or while down with his blood gone (dying_now holds under the downed flag 
 dying man could be dragged (F-412): interaction's "a body that gets up is let go" reset a downed
 Alpha and he stayed draggable, still held (R0848). reset() now clears `dying` and its clock. A
 player who died had it cleared already (update_state clears it on the dead).
+
+### F-456 (note): a casualty dragged to cover can end in sight of the threat
+`SquadAI.find_drag_cover` picks a spot that hides someone lying there from the threat, and the
+carer drags until he is at it (`_at_cover`) or stalls; the casualty trails `Soldier.DRAG_OFFSET`
+(1 m) behind him, towards where they came from, so he can end just outside the cover. Seen once
+in casualty's new dying-man scene (R0870: Delta dragged 7.7 m, then not sheltered; his medic
+guarded him under fire, `_care_exposed`, and once he slid out of reach dragged him on again,
+3.9 m, before treating him); in R0865 and R0872 the same scene ended sheltered. It's the same
+for a man out cold (the engagement scene only checks that he's dragged). A fix would be to aim
+the drag DRAG_OFFSET past the spot, away from the threat, or to judge the spot by where the
+casualty will lie; it changes every firefight's drags, so it's left for Captain's word.
 
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
@@ -2329,6 +2358,14 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-11-06 | Review of round 5: CHARGE_DRAG_PAST_M 1.8 -> 2.3 m (Proposed): the dragged casualty's ragdoll ended 0.3 m past the reach | 0.5 m for where he comes to lie off the drag's line | assert against the face blast without the margin instead
 2026-11-06 | Review of round 5: each AI's first charge check is staggered with randf() * CHARGE_CHECK_S, as _scan_cd is | the reviewer's call; the same spread, one way of doing it in the file | keep the instance id (posmod 16)
 2026-11-07 | F-433: `WoundModel.reset()` clears `dying` (and its clock) with everything else | a reset body is a fresh one; left set, a man reset from down stayed draggable and held, and couldn't shoot, for 4 s | clear it in the tests only
+2026-11-07 | Captain, 2026-11-07: F-431, the AI's drag to cover under fire for a dying man too: "yesm"; F-412's follow-up, a dying man who goes out cold or dies while dragged stays held: "yes" | Captain's answers on #42 | -
+2026-11-07 | F-431: a dying casualty down in the open under fire gets everything an unconscious one does on the medic's way in and at him (smoke, suppressing while pinned, the drag to cover within 10 m), not only the drag | Captain's "same path and rules"; one `exposed` for both keeps them in step | the drag alone, treating him in the open when no smoke was thrown
+2026-11-07 | F-431: held, a dying man's AI starts no item of his own (`_do_self_care` waits while `is_held()`), counts a carer dragging him as being treated (no "Medic!" meanwhile), and an item he had going on himself is cut short as he's taken hold of (his AI drops it uncounted; his hands stop with "you're being dragged") | an item started on the move is lost anyway ("you moved"); his carer treats him at cover | let him go on with his own tourniquet while dragged
+2026-11-07 | Review of round 6: whether someone else is mid-item on a casualty comes from the care claims (`Soldier.treated_by`: the busy soldiers holding a claim on him); a carer lifts him only when nobody but the casualty himself (or the carer) holds one; an item that takes no claim (a tourniquet coming off) counts as someone else's unless it's the carer's or the casualty's own | `is_healing()` says only that someone is treating, not who, so "he treats himself" let a carer lift him from under a medic mid-item too (P0164) | give Vitals a list of treaters
+2026-11-07 | Review of round 6: a player treating himself who's taken hold of is told "Treatment interrupted: you're being dragged" (or carried), checked before "you moved"; held, he can't start an item on himself ("You're being dragged") | it says what happened; an item started while dragged would be lost at once | only the clearer message
+2026-11-07 | Review of round 6 (F-432): `InteractionMenu._moved_by` reads the host's `carried_by`, else either side's replicated carry_net | works on every peer, the host unchanged | carry_net only (the host sets both at once anyway)
+2026-11-07 | Review of round 6: a blocked carer's drag-clear spot is kept 1 s for the same charge while he's within 0.5 m of where it was worked out (Proposed, `SquadAI.CHARGE_SPOT_KEEP_S`, `CHARGE_SPOT_KEEP_M`) | at most one set of path queries a second instead of four, and never a spot worked out from somewhere else | a slower look-again near the end of the fuse (it would start the drag later)
+2026-11-07 | Review of round 6: breach's `_test_medic_drag(dying=true)` puts the man's medical kit back as it was (each entry into its own container) on every way out of the scene | later scenes get the squad as it was | give him a fresh IFAK
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

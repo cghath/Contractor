@@ -380,6 +380,8 @@ func _test_drag_dying() -> void:
 		and alpha.model.carry_net.get("mode") == CharacterModel.DRAGGED and alpha.is_held(),
 		"a player takes hold of him and drags him (carrying %s, mode %s)" % [player.carrying, player.carry_mode])
 	check(_ids(player, alpha)[0] == &"put_down" and not _ids(player, alpha).has(&"drag"), "the menu on him: Release first, no Drag (%s)" % [_ids(player, alpha)])
+	check(_client_ids(player, alpha) == _ids(player, alpha),
+		"the same on a client, from carry_net alone (F-432: not Drag greyed \"already moving someone\"; %s)" % [_client_ids(player, alpha)])
 	_end_carry_phase(player)
 	# His own crawl (as his AI would ask) doesn't move him while he's held: he goes where he's dragged.
 	alpha.move_input = Vector2(0.0, 1.0)
@@ -423,6 +425,9 @@ func _test_drag_dying() -> void:
 	await _frames(3)
 	check(alpha.vitals.downed and player.carrying == alpha and alpha.carried_by == player and alpha.model.carry_net.get("mode") == CharacterModel.DRAGGED
 		and not is_instance_valid(alpha.ragdoll), "he goes out cold while dragged: still held, no ragdoll (carrying %s)" % player.carrying)
+	var cold := _client_ids(player, alpha)
+	check(cold.size() > 0 and cold[0] == &"put_down" and not cold.has(&"drag") and cold.has(&"carry") and _client_action(player, alpha, &"carry").disabled == "",
+		"out cold and dragged, on a client too (F-432): Release first, Carry to lift him, no Drag (%s)" % [cold])
 	player._server_release_body.rpc_id(1)
 	alpha.vitals.server_reset_health()
 	await _frames(2)
@@ -460,14 +465,42 @@ func _test_drag_dying() -> void:
 	alpha.vitals.server_reset_health()
 	alpha.move_input = Vector2.ZERO
 
-	# A dying player, dragged by an AI: the host moves him; his own momentum doesn't.
+	# A dying player treating himself, dragged by an AI: his item stops, and he's told why (review
+	# of feat/breach-and-clear, round 6: not only "you moved"). The host moves him; his own crawl
+	# doesn't, also where no position comes from the host: here, through the take-hold, real
+	# physics frames with the move key down and his momentum on (as between the host's updates
+	# on a client).
 	_place_player()
 	_make_dying(player)
+	player.carried_by_pos = null
 	bravo.global_position = player.global_position + Vector3(1.0, 0, 0)
 	await _frames(2)
 	check(player.vitals.is_dying() and InteractionMenu.actions_for(bravo, player).any(func(a: Dictionary) -> bool: return a.id == &"drag"),
 		"a squadmate can drag a dying player")
+	player.inventory.take(&"pressure_bandage")
+	player._server_treat.rpc_id(1, player.get_path(), &"pressure_bandage", Vitals.THIGH_L)
+	await _frames(2)
+	var self_care := player.vitals.is_healing()
+	var held_at := player.global_position
 	bravo._server_drag_body.rpc_id(1, player.get_path())
+	player.set_physics_process(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED  # (the keys move a player only with the mouse captured)
+	Input.action_press(&"move_forward")
+	var drift := 0.0
+	var in_grab := true
+	for i in 30:
+		player.velocity = Vector3(0, 0, -3.0)  # (his own crawl's momentum)
+		await get_tree().physics_frame
+		in_grab = in_grab and bravo._carry_phase == &"grab"
+		drift = maxf(drift, _flat(player.global_position, held_at))
+	Input.action_release(&"move_forward")
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	player.set_physics_process(false)
+	check(in_grab and drift < 0.02, "taken hold of, his own crawl doesn't move him: 30 physics frames, the move key down, no position from the host (%.2f m)" % drift)
+	var told: String = player.player_input.hud._message.text
+	check(self_care and not player.vitals.is_healing() and told.contains("being dragged"),
+		"treating himself, the drag stops his item and he's told so (treating %s; \"%s\")" % [self_care, told])
+	player.inventory.remove_one(&"pressure_bandage")
 	_end_carry_phase(bravo)
 	await _frames(3)
 	var pos: Variant = player.carried_by_pos
@@ -932,6 +965,24 @@ func _spawn_item(id: StringName, pos: Vector3) -> WorldItem:
 		if item.item_id == id and not item.is_queued_for_deletion() and (best == null or item.global_position.distance_to(pos) < best.global_position.distance_to(pos)):
 			best = item
 	return best
+
+
+## The menu `actor` gets on `target` as a client has it: carried_by is the host's alone (a client
+## has carry_net and, his own, carry_mode), so it's left out for the look.
+func _client_ids(actor: Soldier, target: Soldier) -> Array[StringName]:
+	var held := target.carried_by
+	target.carried_by = null
+	var ids := _ids(actor, target)
+	target.carried_by = held
+	return ids
+
+
+func _client_action(actor: Soldier, target: Soldier, id: StringName) -> Dictionary:
+	var held := target.carried_by
+	target.carried_by = null
+	var a := _action(actor, target, id)
+	target.carried_by = held
+	return a
 
 
 func _ids(actor: Soldier, target: Node) -> Array[StringName]:

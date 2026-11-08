@@ -55,7 +55,7 @@ func _ready() -> void:
 	Soldier.spawn_protect_s = 0.0  # protection have their own checks in gameplay and missions)
 	GameState.delete_save()
 	CompoundLevel.spawn_ai = true
-	get_tree().create_timer(600.0, true, false, true).timeout.connect(func() -> void:
+	get_tree().create_timer(750.0, true, false, true).timeout.connect(func() -> void:
 		print("CASUALTY TEST FAILED (timed out)")
 		get_tree().quit(99))
 	add_child(load("res://scenes/main.tscn").instantiate())
@@ -95,6 +95,7 @@ func _ready() -> void:
 	await _test_downed_player()
 	await _test_player_asks_medic()
 	await _test_ragdolls()
+	await _test_dying_to_cover()  # (last: its smoke screens the rescue checks of _test_no_feeding, and its kit and firefight change who answers later calls)
 	GameState.delete_save()
 	print("CASUALTY TEST %s (%d failures)" % ["PASSED" if failures == 0 else "FAILED", failures])
 	get_tree().quit(failures)
@@ -900,6 +901,66 @@ func _test_self_tourniquet() -> void:
 
 # --- Engagement ---------------------------------------------------------------
 
+## F-431 (Captain, 2026-11-07: "yesm"): a squadmate down dying (conscious, crawling at most) in
+## the open under fire is dragged to cover as one out cold is (SquadAI._care_reach), still
+## dying and still bleeding on the way, then treated there. Nothing of his own to treat himself
+## with: he calls for a medic.
+func _test_dying_to_cover() -> void:
+	print("Under fire: a squadmate down dying in the open is dragged to cover, then treated")
+	_clear_contact()
+	_place(player, ENGAGEMENT_LEAD)
+	var delta := _ai("Delta")
+	var golf := _ai("Golf")
+	delta.vitals.server_reset_health()
+	var free := await _wait_until(func() -> bool: return _caring().is_empty(), 20.0)
+	check(free, "nobody is still busy with a casualty from the scene before (%s)" % [_caring()])
+	var kit := _strip_medical(delta)
+	_threat = Vector3(-3, 1.5, 0)
+	_hold_fire(true)
+	_firing = true
+	await _seconds(0.6)
+	_place(delta, Vector3(-3, 0.1, 15))
+	_place(golf, ENGAGEMENT_MEDIC)
+	await _until_on_floor(delta)
+	delta.vitals.server_add_wound(Vitals.THIGH_L, "venous", 0.03)
+	delta.vitals._model.blood = 1.0 - WoundModel.DYING_LOST - 0.02
+	delta.vitals._model.update_state(0.1)
+	var lay := delta.body_point()
+	check(delta.vitals.is_dying() and delta.vitals.is_up() and not SquadAI.of(golf)._sheltered(delta),
+		"Delta is down dying in the open, conscious, under fire (%s)" % delta.vitals.condition_text())
+	var seen := {"carer": null, "dying": true, "bleeding": true, "statuses": []}
+	var dragged := await _wait_until(func() -> bool:
+		var carer := delta.carried_by
+		if is_instance_valid(carer) and carer.carry_mode == Soldier.DRAG:
+			if seen.carer == null:
+				seen.bleeding = delta.vitals.bleed_rate() > 0.0  # (not treated where he lay first)
+			seen.carer = carer
+			seen.dying = seen.dying and delta.vitals.is_dying()
+		if seen.carer != null and not seen.statuses.has((seen.carer as Soldier).ai_status):
+			seen.statuses.append((seen.carer as Soldier).ai_status)
+		return seen.carer != null and not is_instance_valid(delta.carried_by), 25.0)
+	var carer: Soldier = seen.carer
+	var put := delta.body_point()
+	check(dragged and seen.dying and seen.bleeding,
+		"a medic drags him out of the line of fire still dying, before treating him (%s; %s; Golf: %s)" % [_name(carer), ", ".join(seen.statuses), _care_of(golf)])
+	# (As _test_engagement's drag of a man out cold: where the drag ends is find_drag_cover's and
+	# _drag_stalled's business; under fire his carer may drag him on again before the rest.)
+	check(dragged and _flat(put, lay) > 1.5,
+		"towards cover: put down %.1f m from where he lay (out of the threat's sight there: %s)" % [_flat(put, lay),
+		SquadAI.of(carer)._sheltered(delta) if carer else false])
+	var treated := await _wait_until(func() -> bool: return delta.vitals.bleed_rate() <= 0.0, 40.0)
+	check(treated and carer != null and SquadAI.of(carer).casualty == delta and not is_instance_valid(delta.carried_by) and _flat(delta.body_point(), lay) > 1.5,
+		"then treated out of the open by his carer: his bleed stopped (%.1f m from where he lay; %s; %s)" % [_flat(delta.body_point(), lay),
+		delta.vitals.condition_text(), _care_of(carer) if carer else "nobody"])
+	_firing = false
+	_hold_fire(false)
+	await _out_of_contact()
+	delta.vitals.server_reset_health()
+	_restore_medical(delta, kit)
+	_place(player, Vector3(0, 0.1, 22))
+	await _seconds(2.0)
+
+
 func _test_no_feeding() -> void:
 	print("No feeding: nobody follows a rescuer into the same fire")
 	_clear_contact()
@@ -1394,6 +1455,28 @@ func _test_player_asks_medic() -> void:
 
 
 # --- Helpers ----------------------------------------------------------------------
+
+## Takes every medical item off `s`; returns what it took ({container, entry}s) for
+## _restore_medical.
+func _strip_medical(s: Soldier) -> Array[Dictionary]:
+	var took: Array[Dictionary] = []
+	for container: StringName in s.inventory.containers:
+		var list: Array = s.inventory.containers[container]
+		for i in range(list.size() - 1, -1, -1):
+			var entry: Dictionary = list[i]
+			var id := StringName(String(entry.get("id", "")))
+			if ItemDB.has_item(id) and ItemDB.get_item(id).type == "medical":
+				took.append({"container": container, "entry": entry.duplicate(true)})
+				s.inventory.remove_entry(container, i, int(entry.get("count", 1)))
+	return took
+
+
+func _restore_medical(s: Soldier, took: Array[Dictionary]) -> void:
+	for t: Dictionary in took:
+		var entry: Dictionary = t.entry
+		if not s.inventory.insert_entry(t.container, entry):
+			s.inventory.take(StringName(entry.id), int(entry.count), entry.get("state", {}))
+
 
 ## A rifle round straight through the right femoral artery (BodyMap rest pose), with seeded dice.
 func _shoot_femoral(s: Soldier, seed_value: int) -> void:

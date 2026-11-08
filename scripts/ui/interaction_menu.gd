@@ -528,9 +528,20 @@ static func _move_check(actor: Soldier, target: Node, mode: StringName) -> Strin
 	return "" if actor.inventory.hands == &"" else "Your hands are full"
 
 
-## `target` is the body `actor` carries or drags.
+## `target` is the body `actor` carries or drags. From the replicated carry_net (either side's),
+## so it holds on a client too, where the host-only carried_by is never set (F-432): there the
+## menu on the body you drag hid Put down/Release and greyed Drag ("already moving someone").
 static func _moved_by(target: Node, actor: Soldier) -> bool:
-	return target is Soldier and target != actor and (target as Soldier).carried_by == actor
+	if not target is Soldier or target == actor:
+		return false
+	var body := target as Soldier
+	if body.carried_by == actor:
+		return true  # (the host)
+	var mine := actor.model.carry_net
+	if StringName(mine.get("mode", &"")) in [CharacterModel.CARRY, CharacterModel.DRAG] and String(mine.get("with", "")) == String(body.get_path()):
+		return true
+	var his := body.model.carry_net
+	return StringName(his.get("mode", &"")) in [CharacterModel.CARRIED, CharacterModel.DRAGGED] and String(his.get("with", "")) == String(actor.get_path())
 
 
 ## A person's orders (Follow me, Stop, Get in cover): as the people rules allow

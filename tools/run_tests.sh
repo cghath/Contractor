@@ -53,6 +53,9 @@ suite_timeout() {
 		# breach: the host's hole and target checks, then a client process joins (up to 150 s on a busy
 		# runner) and watches a whole breach and clear (stack, a 10 s fuse, the rebake, the entry).
 		breach) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
+		# casualty: ~25 staged scenes, a soak lapping the compound and two firefights (a man out cold,
+		# one down dying, F-431): 470 s with three suites running on the machine (R0865).
+		casualty) echo $(( SUITE_TIMEOUT > 780 ? SUITE_TIMEOUT : 780 )) ;;
 		# perfcases: five zones hosted and their visuals built, 20-45 s measured in each (perf pass).
 		perfcases) echo $(( SUITE_TIMEOUT > 1200 ? SUITE_TIMEOUT : 1200 )) ;;
 		# invasion: an 8 km operation zone hosted with its visuals, three cases measured in it (the 6.2.3

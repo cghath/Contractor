@@ -129,6 +129,29 @@ clear' team order through walls" (F-317, F-318).
   he's let go, out cold or dead he's held; a dying man drags nobody), animations (a dying man
   dragged, from carry_net alone, as a late joiner sees him), and breach (the medic drags a dying
   man clear of a charge; a door charge's stand-off by a corner and under no roof).
+- **Changed (AI):** under fire, a squadmate down dying (conscious, crawling at most) in the open is
+  dragged to cover as one out cold is, with the same smoke and suppressing on the way in, then
+  treated there (F-431, Captain, 2026-11-07: "yesm"); before, he was treated where he lay. Held,
+  he stops crawling and starts nothing of his own; an item he had going on himself is cut short
+  (not counted as failed) and his carer takes over at cover. A carer still never lifts a casualty
+  from under someone else's hands: only the casualty's own item on himself is cut short, never
+  another carer's or a player's (`SquadAI._treated_by_another`, `Soldier.treated_by`; review).
+- **Fixed (medical):** a player treating himself who gets dragged is told "Treatment interrupted:
+  you're being dragged", not "you moved", and can't start an item on himself while he's held
+  ("You're being dragged") (review).
+- **Fixed (interaction):** on a client, the menu on the body you drag or carry now offers Put
+  down/Release and the other way of moving it, as on the host, instead of hiding Release and
+  greying Drag "already moving someone": it reads the replicated carry_net, not the host-only
+  `carried_by` (F-432; downed and dying bodies alike).
+- **Changed (AI):** a carer who can't start dragging his casualty clear of a charge yet keeps the
+  spot he'd drag him to for 1 s (`CHARGE_SPOT_KEEP_S`, Proposed), not working it out (path
+  queries) four times a second near the end of the fuse (review).
+- **Changed (tests):** casualty "Under fire: a squadmate down dying in the open is dragged to
+  cover, then treated"; interaction checks the menu from a client's replicated state (dragging a
+  dying man, and one out cold), runs the dying player's "doesn't move while held" over 30 real
+  physics frames with the move key down (it fails with the held branch taken out), and checks the
+  "being dragged" note; breach gives the dying man his medical kit back afterwards. casualty gets
+  780 s in `tools/run_tests.sh` (it took 470 s of its 480 s with three suites on the machine).
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

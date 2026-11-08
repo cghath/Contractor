@@ -2427,7 +2427,9 @@ func _care_reach(contact: bool, handoff := false) -> void:
 		return
 	if _clear_spot != null:
 		_reach_progress_at = Soldier._now()  # waiting clear of a charge by him isn't being stuck (F-397)
-	var exposed := contact and casualty.vitals.downed and not _sheltered(casualty)
+	# Down in the open: out cold, or conscious but dying (on the ground, crawling at most; F-431,
+	# Captain, 2026-11-07: "yesm"): the same smoke, suppressing and drag to cover for either.
+	var exposed := contact and (casualty.vitals.downed or casualty.vitals.is_dying()) and not _sheltered(casualty)
 	if exposed and not _smoke_used and d <= SMOKE_RANGE_M:
 		if body.inventory.count_of(SCREEN_SMOKE) <= 0:
 			_smoke_used = true  # nothing to screen them with
@@ -2448,10 +2450,12 @@ func _care_reach(contact: bool, handoff := false) -> void:
 	if handoff:
 		casualty.care_by = body
 		_clear_handoff(casualty)
-	# (Never lift someone another is treating: it cut the Captain's IV short, P0164.)
-	if exposed and not is_instance_valid(casualty.carried_by) and not casualty.vitals.is_healing():
+	# (Never lift someone another is treating: it cut the Captain's IV short, P0164. A dying man's
+	# own item on himself is cut short: _treated_by_another, _cut_own_item.)
+	if exposed and not is_instance_valid(casualty.carried_by) and not _treated_by_another(casualty):
 		var spot: Variant = find_drag_cover(body.global_position, 10.0)
 		if spot != null and body.server_pick_up_body(casualty, Soldier.DRAG):
+			_cut_own_item(casualty)
 			_cover_point = spot
 			_has_cover = true
 			care = Care.DRAG
@@ -3218,6 +3222,8 @@ func _self_task() -> Dictionary:
 
 func _do_self_care() -> void:
 	_has_destination = false
+	if body.is_held():
+		return  # dragged (dying: F-412, F-431): he goes where he's taken and starts nothing on the way; his carer sees to him there
 	if _clear_spot != null and _flat_distance(_clear_spot) > ARRIVE + 0.3:
 		# Out of a burning charge's blast first (F-397; Captain, 2026-11-02), on his feet
 		# (_keep_clear_of_charges walks him there): he treats himself once he's clear.
@@ -3258,7 +3264,7 @@ func _being_treated() -> bool:
 	if not is_instance_valid(carer) or not carer.vitals.is_up():
 		return false
 	var ai := SquadAI.of(carer)
-	return ai != null and ai.casualty == body and ai.care in [Care.REACH, Care.TREAT] \
+	return ai != null and ai.casualty == body and ai.care in [Care.REACH, Care.TREAT, Care.DRAG] \
 		and _flat_distance(carer.global_position) <= BEING_TREATED_M
 
 
@@ -6000,11 +6006,20 @@ const CHARGE_GO_MPS := 3.6
 ## spot clear of it, his hands full) stays by him and tries again, until this little of the fuse
 ## is left: then, not holding him, he steps clear himself (review of feat/breach-and-clear).
 const CHARGE_SELF_CLEAR_S := 2.0
+## A blocked carer's spot to drag his casualty to (_drag_clear_spot) is kept this long for the
+## same charge, while he's within CHARGE_SPOT_KEEP_M of where it was worked out from (review of
+## feat/breach-and-clear, round 6). Proposed.
+const CHARGE_SPOT_KEEP_S := 1.0
+const CHARGE_SPOT_KEEP_M := 0.5
 var _charges: Charges
 var _charge_cd := 0.0
 var _clear_of := ""  # the charge he's keeping clear of
 var _clear_spot: Variant = null  # where he waits for it (Vector3), or null
 var _charge_drag := ""  # the charge he's dragging his casualty clear of ("" for none: Care.DRAG's cover_point is that spot)
+var _drag_spot: Variant = null  # _drag_clear_spot's last (Vector3 or null), for charge _drag_spot_for, from _drag_spot_from at _drag_spot_at
+var _drag_spot_for := ""
+var _drag_spot_from := Vector3.ZERO
+var _drag_spot_at := -INF
 
 
 func _keep_clear_of_charges() -> void:
@@ -6135,17 +6150,15 @@ func _time_to_go_in(mine: Array[Dictionary], at: Vector3) -> bool:
 
 ## Takes hold of `casualty` (if he isn't dragging him already) and drags him clear of charge `c`
 ## (_care_clear_of_charges). "" once he does, else why not: "reach" (he's too far off to take
-## hold), or someone else has him or is treating him (never lifted from under another's hands:
-## P0164; a casualty's own item on himself is cut short), there's no spot clear of it to drag him
-## to, or the pick-up is refused (his own hands full).
+## hold), or someone else has him or is mid-item on him (never lifted from under another's hands:
+## P0164; only a casualty's own item on himself is cut short: _treated_by_another), there's no
+## spot clear of it to drag him to, or the pick-up is refused (his own hands full).
 func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> String:
 	if is_instance_valid(casualty.carried_by) and casualty.carried_by != body:
 		return "held"
-	var his := SquadAI.of(casualty)
-	var treats_himself := his != null and his._treat_until >= 0.0 and his._treat_target == casualty
-	if casualty.vitals.is_healing() and not (_treat_until >= 0.0 and _treat_target == casualty) and not treats_himself:
+	if _treated_by_another(casualty):
 		return "treated"
-	var spot: Variant = _charge_clear_spot(c, mine, CHARGE_DRAG_PAST_M)
+	var spot: Variant = _drag_clear_spot(c, mine)
 	if spot == null:
 		return "spot"
 	if body.carrying != casualty:
@@ -6157,8 +6170,7 @@ func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> String:
 		body._set_carry_mode(Soldier.DRAG, &"grab")
 	if _treat_until >= 0.0:
 		_drop_treatment()  # his item's cut short as he takes hold (Soldier._timed_care: "they were moved"), not failed
-	if treats_himself:
-		his._drop_treatment()  # (the dying man's own item: "you moved")
+	_cut_own_item(casualty)
 	_cover_point = spot
 	_has_cover = true
 	care = Care.DRAG
@@ -6167,6 +6179,45 @@ func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> String:
 	print("[charge] %s drags %s clear of %s: to (%.1f, %.1f), %.1f m from it, %.1f s left" % [body.name, casualty.name, c.id,
 		(spot as Vector3).x, (spot as Vector3).z, _flat_between(spot, c.pos), _fuse_left(c)])
 	return ""
+
+
+## Where _drag_clear_of drags his casualty to from here, clear of charge `c`
+## (_charge_clear_spot, CHARGE_DRAG_PAST_M further): the last one worked out for the same charge
+## from about here is kept CHARGE_SPOT_KEEP_S, so a carer who can't start the drag yet and looks
+## again every CHARGE_CHECK_S near the end of the fuse doesn't make its path queries each time.
+func _drag_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
+	var now := Soldier._now()
+	if _drag_spot_for == String(c.id) and now - _drag_spot_at < CHARGE_SPOT_KEEP_S \
+			and _flat_between(_drag_spot_from, body.global_position) <= CHARGE_SPOT_KEEP_M:
+		return _drag_spot
+	_drag_spot = _charge_clear_spot(c, mine, CHARGE_DRAG_PAST_M)
+	_drag_spot_for = String(c.id)
+	_drag_spot_at = now
+	_drag_spot_from = body.global_position
+	return _drag_spot
+
+
+## Someone other than `c` himself (and this carer) is mid-item on `c` (Soldier.treated_by): he's
+## never lifted from under their hands (P0164: it cut the Captain's IV short). His own item on
+## himself doesn't count: it's cut short as he's taken hold of (_cut_own_item). An item that takes
+## no claim (a tourniquet coming off) counts as another's unless it's this carer's or his own.
+func _treated_by_another(c: Soldier) -> bool:
+	if not c.vitals.is_healing():
+		return false
+	var hands := c.treated_by()
+	if hands.is_empty():
+		var his := SquadAI.of(c)
+		return not (_treat_until >= 0.0 and _treat_target == c) and not (his != null and his._treat_until >= 0.0 and his._treat_target == c)
+	return hands.any(func(s: Soldier) -> bool: return s != c and s != body)
+
+
+## `c` (a casualty being taken hold of) was treating himself: his AI forgets the item (cut short
+## on purpose, not counted as failed); his own hands stop as the drag starts (Soldier._timed_care:
+## "you're being dragged").
+static func _cut_own_item(c: Soldier) -> void:
+	var his := SquadAI.of(c)
+	if his != null and his._treat_until >= 0.0 and his._treat_target == c:
+		his._drop_treatment()
 
 
 ## Done dragging clear of a charge (it has gone off, or he's no longer at it): he puts the
