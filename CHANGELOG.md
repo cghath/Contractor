@@ -11,6 +11,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Contractor: Fallen, the dead on their own clock and the roads (feat/fallen-hordes)
+
+- **Added** hordes on their own clock (`HordeClock`): towns and nests send the dead out on a schedule whatever the noise, more often the more they have to send (their towns and nests, the zone's density, the season, the "living world" option). Far away a clock horde walks the map in the world sim, in the same zone record the far hordes use, and groups in its way meet it; near a played zone the host warns first (a journal line, a message, distant groans from its bearing on every peer, two world hours ahead), then ZoneDead marches it in from its town, nest or the crossing, at least 300 m from anyone, at the settlement or a player. Below High none on the first night (day 2's 06:00), as the noise's. Saved with the world; a horde caught on the ground walks again on Continue.
+- **Added** roads as a place the dead gather (`RoadDead`): some of a zone's crowd (40%, Proposed) drift to the nearest road and linger on it, chosen on the crowd's own between-moves budget (no per-frame path queries), thickest on the asphalt, near towns and round the hulks left on the road; the zone seeds its roads at the start too (within ZoneDead's cap, with room for a horde), and the journal says so once, the first time a player stands on a road with them strung along it. The start farm's own road and the quiet places are kept clear.
+
 ### Contractor: Fallen, the flaky checks (fix/fallen-flakes)
 
 - **Fixed** the far-AI sleep (DynamicSim) switched any switched-off soldier near a player back on within its one-second tick, not only the ones it had put to sleep; it now wakes only its own (a "sim_asleep" meta). Survival's silent-kill check held its walker still that way and lost it to the tick inside the kill's two seconds (the walker came to, turned and saw him: CI 41154291237, 40365276612, 40374781651); a new check says the walker stays still (R0761 without the fix: woken). Shared file: the change belongs on dev too (F-380).

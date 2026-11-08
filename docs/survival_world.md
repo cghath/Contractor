@@ -216,6 +216,31 @@ never crosses into another zone unless that zone's pressure is higher than its o
 crossing is on its path (so a settlement next door to a loud city is at risk, a quiet one across
 the map is not).
 
+**Hordes on their own clock** (`HordeClock`, Proposed): towns and nests send the dead out on a
+schedule, whatever the noise. Each zone has a due tick (`clock_due`, far ticks), rolled in the far
+step from its rate: `BASE_PER_DAY` x its sources (a town 2, a village 1, its nests 0.6 per 10
+heads while they stand) x its type's density x how many of its dead are left x the season (spring
+1.2, autumn 1.1, summer 1, winter 0.5) x the "living world" option; at most 1 a day. When it falls
+due and the zone has no horde (and the first night is over: `FirstHour`, not below High on day 1
+or before 06:00 day 2), a horde of 20-45 (x the "dead" option x its density) sets out in the zone's
+`horde` record with `"clock": true`, walking link to link (1-3 hops, 3 world hours each, the louder
+neighbour and the players' zone likelier), then breaks up as any other. Far away it stays in the
+sim and groups in its way meet it (`WorldFights`). Near a played zone it's real: the host warns
+first (a journal line, a message, distant groans from its bearing on every peer, `WARN_TICKS` = 2
+world hours ahead), then ZoneDead marches it in: from its town/nest or the crossing, at least 300
+m from anyone, walked at the settlement or a player. Marching heads don't thin until they arrive.
+All of it (the due ticks, the walking hordes) is the world section's, so it saves, and a horde
+caught on the ground at a save walks again on Continue (warned).
+
+**Roads** (`RoadDead`, Proposed): some of a zone's crowd (40%) drift to the nearest road and linger
+on it, chosen when a head's wait ends (the crowd's own budget: no per-frame queries), so walking
+the road means walking past them while the fields stay near empty. The draw is by road (asphalt
+1, street 0.85, dirt 0.45), nearer a town (up to x2) or a hulk on it (x2.5). Anchors every 40 m,
+none on the start farm's own stretch or a quiet place; capped per spot. On top of that the zone
+seeds its roads at level start (scaled by the days and the months), within ZoneDead.CAP with room
+left for a horde; bodies come only by the crowd's usual conversion under LIVE_CAP. The journal
+tells the players once, the first time one stands on a road with heads strung along it.
+
 **Senses and awareness** (call 29, 33): on the live zombies (ZombieAI): sight, sound, smell, the
 visible awareness states. The crowd tier (S3, ZoneDead) uses the cell pressure only.
 

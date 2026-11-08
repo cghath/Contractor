@@ -31,6 +31,7 @@ func _ready() -> void:
 		await _test_melee_weapons()
 		await _test_stealth()
 		await _test_crowd_and_pressure()
+		_test_march_and_roads()
 		await _test_map()
 		await _test_death()
 		await _test_save_and_continue()
@@ -766,6 +767,94 @@ func _test_crowd_and_pressure() -> void:
 	Survival._horde_at = -10000.0
 	crowd.dead.clear()
 	player.vitals.server_reset_health()
+
+
+## Hordes on the clock, on the ground, and roads as a place the dead gather (HordeClock, RoadDead):
+## the crowd is stepped by hand, simulated time, far from the player.
+func _test_march_and_roads() -> void:
+	print("Marching hordes and the road's dead")
+	var crowd := ZoneDead.of(level)
+	if crowd == null:
+		return
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	crowd.dead.clear()
+	Survival.state()["pressure"] = {}
+	var far := player.global_position + fwd * 400.0 + fwd.cross(Vector3.UP) * 400.0
+	var near := far + fwd * 60.0
+	var made := crowd.server_march(far, near, 30)
+	check(made == 30 and crowd.horde_count() == 30, "a marching horde of 30 is put down (%d)" % made)
+	for i in 4:
+		crowd._thin_horde()
+	check(crowd.horde_count() == 30, "and with no noise at all it doesn't thin while it marches (%d)" % crowd.horde_count())
+	for i in 200:
+		crowd._physics_process(1.0)
+	var there := crowd.dead.filter(func(d: Dictionary) -> bool: return bool(d.horde) and not d.has("march"))
+	check(there.size() >= 20, "it gets where it was bound and stops marching (%d arrived)" % there.size())
+	var before_thin := crowd.horde_count()
+	crowd._thin_horde()
+	check(crowd.horde_count() == before_thin - 1, "arrived, with nothing to hold it, it thins out (%d)" % crowd.horde_count())
+	crowd.server_warn(far, 60.0)
+	check(crowd.warned(), "the warning is in the air")
+	var g := Soundscape.groans({"me": Vector2.ZERO, "crowd": [], "horde": true, "horde_dir": Vector2.RIGHT})
+	check(float(g.vol) > 0.0 and (g.dir as Vector2) == Vector2.RIGHT and float(g.dist) > 100.0, "and with none near, the groans come from where it's coming (%s)" % g)
+	crowd._warn_until = -1.0
+
+	# The anchors: the bigger road and a town draw more; a hulk on the road more again.
+	var rd := RoadDead.new()
+	rd._add(Vector2(1000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.dirt), [], PackedVector2Array())
+	rd._add(Vector2(2000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.asphalt), [], PackedVector2Array())
+	rd._add(Vector2(3000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.asphalt), [[Vector2(3100.0, 0.0), "town"]], PackedVector2Array())
+	rd._add(Vector2(4000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.asphalt), [], PackedVector2Array([Vector2(4010.0, 0.0)]))
+	check(rd.weights[1] > rd.weights[0] and rd.weights[2] > rd.weights[1] and rd.weights[3] >= rd.weights[1] * RoadDead.WRECK_X * 0.99, "asphalt draws more than dirt, a town more, a wreck more again (%s)" % rd.weights)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	check(rd.pick(Vector2(1001.0, 0.0), rng) == 0 and rd.pick(Vector2(50000.0, 0.0), rng) == -1, "a head takes the road near it, not one a long way off")
+	rd.used[0] = rd.cap_of(0)
+	check(rd.pick(Vector2(1001.0, 0.0), rng) == -1, "a spot full up takes no more")
+
+	var real: RoadDead = crowd.roads
+	check(real != null, "the zone's roads are ready for the dead")
+	if real != null and real.anchors.size() > 0:
+		var stride := real.anchors[0].distance_to(real.anchors[1]) if real.anchors.size() > 1 else 0.0
+		check(real.anchors.size() >= 4 and stride > 5.0, "anchors strung along the roads (%d)" % real.anchors.size())
+		# Heads take to the nearest road: one 40 m off a road, far from the player, ends up on it and stays.
+		var at := -1
+		for i in real.anchors.size():
+			if Vector2(player.global_position.x, player.global_position.z).distance_to(real.anchors[i]) > 250.0:
+				at = i
+				break
+		if at >= 0:
+			var anchor := real.anchors[at]
+			crowd.dead.clear()
+			real.used.fill(0)
+			var off := anchor + real.along[at].orthogonal() * 40.0
+			var g3 := level.ground_point(Vector3(off.x, 0.0, off.y))
+			check(crowd.server_add(g3, "walker"), "a head off the road")
+			var d: Dictionary = crowd.dead[crowd.dead.size() - 1]
+			d.road_on = true
+			d.wait = 0.01
+			for i in 400:
+				crowd._physics_process(1.0)
+			var dist := (d.pos as Vector2).distance_to(real.anchors[int(d.get("anchor", at))])
+			check(d.has("anchor") and dist <= RoadDead.LINGER_M + 14.0, "it drifts to the road and lingers on it (%.1f m from its spot)" % dist)
+			var after := (d.pos as Vector2)
+			for i in 100:
+				crowd._physics_process(1.0)
+			check((d.pos as Vector2).distance_to(real.anchors[int(d.anchor)]) <= RoadDead.LINGER_M + 14.0 and after != Vector2.INF, "and keeps to its stretch")
+			# Seeded on the road, within the crowd's cap, and only some of it.
+			crowd.dead.clear()
+			real.used.fill(0)
+			var r2 := RandomNumberGenerator.new()
+			r2.seed = 5
+			var seeded := real.seed_heads(level, crowd, r2)
+			check(seeded > 0 and seeded <= RoadDead.SEED_MAX, "the road's own dead are seeded (%d)" % seeded)
+			var on := crowd.dead.filter(func(h: Dictionary) -> bool: return h.has("anchor"))
+			var near_road := on.all(func(h: Dictionary) -> bool: return (h.pos as Vector2).distance_to(real.anchors[int(h.anchor)]) <= 12.0)
+			check(on.size() == seeded and near_road, "and stand at their spots along the road")
+	crowd.dead.clear()
+	Survival.state()["pressure"] = {}
 
 
 ## The map (phase A step 7, calls 37 and 45): known zones, explored cells, marks that age,

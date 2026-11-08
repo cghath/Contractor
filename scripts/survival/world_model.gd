@@ -72,6 +72,8 @@ var new_events: Array = []
 var profile: Variant = null
 ## Clear-the-map and evac multipliers (WorldSim.goal_state): the dead's refill speed.
 var refill_mult := 1.0
+## HordeClock.options() when hordes run on their own clock (WorldSim); empty turns it off.
+var clock := {}
 
 
 func _init(p_w: Dictionary, p_people: Dictionary, p_pressure: Dictionary, p_seed: int) -> void:
@@ -592,11 +594,12 @@ func raise_pressure(zone_id: String, amount: float, at := Vector2.ZERO) -> void:
 
 ## The zone's dead: refill toward full (not in zones held by the players' standing presence in
 ## clear-the-map), a far horde at HORDE_AT that walks the gradient (crossing only into a zone
-## louder than its own) and breaks up under DISPERSE_AT.
+## louder than its own) and breaks up under DISPERSE_AT; and the clock's own (HordeClock).
 func _zone_tick(z: String) -> void:
 	var zd: Dictionary = w.zones[z]
 	if not bool(zd.get("held_by_player", false)):
 		zd.dead = snappedf(minf(1.0, float(zd.get("dead", 1.0)) + refill_mult / (REFILL_DAYS * TICKS_PER_DAY)), 0.0001)
+	HordeClock.tick(self, z)
 	if z == hosted:
 		return  # (the hosted zone's hordes are Survival's and ZoneDead's)
 	var p := pressure_of(z)
@@ -607,6 +610,11 @@ func _zone_tick(z: String) -> void:
 			var n := roundi(rng.randi_range(HORDE_N.x, HORDE_N.y) * clampf(float(zd.dead), 0.3, 1.0))
 			zd.horde = {"n": n, "since": tick()}
 			event(z, "horde", [], "a horde of the dead is gathering in %s" % String(zd.get("name", z)))
+		return
+	if bool(horde.get("clock", false)):  # (on its own clock: it needs no noise to keep walking)
+		HordeClock.walk(self, z, horde)
+		if not (zd.get("horde", {}) as Dictionary).is_empty():
+			WorldFights.horde_on_groups(self, z)
 		return
 	if p < DISPERSE_AT:
 		horde.n = int(horde.n) - maxi(1, int(horde.n) / 5)
