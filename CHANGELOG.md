@@ -24,6 +24,11 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
   "shot through the hips" comes from behind (his forearm could take it from the front), casualty's "needs help without
   asking" waits out a squad still engaged from earlier in the suite (and says why if it fails),
   and the net client's join loop guards a level with no players node yet.
+- **Fixed:** on any load, a beach landing lost every allied squad an AAV had already brought in,
+  landed ones too (F-481). They now come back at the beach, on their own AAV's lane.
+- **Fixed:** an AAV lost in the well deck before its riders started no longer leaves its squad
+  waiting for ever (F-512), and a tank or AAV freed mid-spawn no longer stalls the spawn jobs
+  behind it with a script error (F-511). A player who joins while the AAVs are boarding is seated.
 
 ### Two CI flakes (fix/ci-flakes-nov, F-450, F-451)
 

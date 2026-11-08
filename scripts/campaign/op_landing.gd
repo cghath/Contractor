@@ -30,6 +30,7 @@ extends OpBase
 
 const TICK_S := 0.5
 const BOARDING := "boarding"  # an AAV's state in the well deck while its crew and squad come out
+const RETURN_WAVE_BACK_M := 15.0  # Proposed: a squad brought back on a load (F-481) stands this much further up the sand per wave, so a wave 2 squad doesn't land on a wave 1 squad in the same lane
 
 var _tick_left := 0.0
 var _aav := {}  # host: aav id -> Vehicle
@@ -77,6 +78,7 @@ func start() -> void:
 					_aav[String(a.id)] = v
 				elif String(a.state) == "afloat":
 					a.state = "landed"  # (a loaded save after the AAVs went: they're ashore)
+		_hand_back_carried()
 	var lvl := level()
 	if lvl:
 		var players: Node = lvl.get(&"players")
@@ -192,17 +194,29 @@ func spawn_step() -> bool:
 	while not _boarding.is_empty():
 		var job: Dictionary = _boarding[0]
 		var a: Dictionary = job.a
-		var v := job.v as Vehicle
-		if not is_instance_valid(v) or v.is_queued_for_deletion() or String(a.state) != BOARDING:
+		if not is_instance_valid(job.v) or not is_instance_valid(job.squad) or (job.v as Vehicle).is_queued_for_deletion() or String(a.state) != BOARDING:
 			_boarding.pop_front()  # (lost in the well deck: _on_aav_lost said so)
-			if job.allied != null:
-				ops._finish_job({"entry": job.entry, "squad": job.allied, "vehicles": [], "made": job.made})
+			_abandon(job)
 			continue
+		var v := job.v as Vehicle
 		if not _board_step(job, v):
 			return true
 		_boarding.pop_front()
 		_set_off(a, v)
 	return false
+
+
+## An AAV lost in the well deck: its squad's entry is finished (whoever had come out goes to the
+## commander; if nobody had, the squad is gone with its AAV) and its crew's squad goes if nobody
+## came out to belong to it, as OpSupport's does.
+func _abandon(job: Dictionary) -> void:
+	var e := _entry_of(job.a)
+	if is_instance_valid(job.allied):
+		ops._finish_job({"entry": job.entry, "squad": job.allied, "vehicles": [], "made": job.made})
+	elif not e.is_empty() and String(e.state) in [Operations.PENDING, "spawning"]:
+		e.state = "gone"
+	if int(job.n) == 0 and is_instance_valid(job.squad):
+		(job.squad as Squad).queue_free()
 
 
 ## One AAV's men, as many as the frame's budget allows. True once they're all aboard.
@@ -260,6 +274,7 @@ func _set_off(a: Dictionary, v: Vehicle) -> void:
 	SessionLog.note("operation %s: %s (wave %d, %s) out of the well deck, swimming for %s" % [ops.cid, String(a.id), int(a.wave), String(a.role), grid_ref(swim[2])])
 	if waves().find(a) == 0:
 		say("Gator 1: wave 1 is out of the well deck. %d minutes to the beach." % maxi(roundi(v.global_position.distance_to(swim[2]) / 3.6 / 60.0), 1))
+	_refresh()
 
 
 func num_s(key: String, fallback: String) -> String:
@@ -284,10 +299,7 @@ func _company() -> Array[Soldier]:
 ## Allied OOB entry `a.entry`'s squad starts coming out aboard its AAV (Operations' spawner's men,
 ## its commander's): spawn_step brings them, on the shared budget.
 func _board_allied(job: Dictionary) -> void:
-	var e: Dictionary = {}
-	for x: Dictionary in run().get("oob", []):
-		if String(x.id) == String(job.a.entry):
-			e = x
+	var e := _entry_of(job.a)
 	if e.is_empty() or String(e.state) != Operations.PENDING:
 		return
 	e.state = "spawning"
@@ -299,7 +311,37 @@ func _board_allied(job: Dictionary) -> void:
 	job.allied = squad
 
 
-## A player who comes in while wave 1 is still afloat gets a seat in a company AAV.
+## AAV `a`'s squad's OOB entry, {} if it carries none.
+func _entry_of(a: Dictionary) -> Dictionary:
+	if String(a.entry) != "":
+		for x: Dictionary in run().get("oob", []):
+			if String(x.id) == String(a.entry):
+				return x
+	return {}
+
+
+## A loaded save: a squad whose AAV had left the well deck has nothing to come in by any more (the
+## AAV wasn't saved; one still to launch takes its squad as ever), and Operations won't bring out a
+## "by_type" group. So it's Operations' now: on the sand of its own lane round the beach exit, at
+## once, and from then on where it stands, as any allied group after a load (F-481). Whoever is left
+## of it: Operations' save counted its men, and a squad wiped out in the water is "gone" already.
+func _hand_back_carried() -> void:
+	var terrain := _terrain()
+	var inland := num("landing", "beach_in_m", 45.0)
+	for a: Dictionary in waves():
+		var e := _entry_of(a)
+		if e.is_empty() or not String(a.state) in ["afloat", "landed", "lost"] or String(e.state) != Operations.PENDING or not bool(e.get("by_type", false)):
+			continue
+		var at := lane_target(a)
+		if terrain:
+			at = terrain.shore_point(at, inland + RETURN_WAVE_BACK_M * (int(a.wave) - 1))
+		e.erase("by_type")
+		e["wave_s"] = 0.0
+		e["pos"] = [snappedf(at.x, 1.0), snappedf(at.z, 1.0)]
+		SessionLog.note("operation %s: %s's squad %s back at %s after the load" % [ops.cid, String(a.id), String(e.callsign), grid_ref(at)])
+
+
+## A player who comes in while wave 1 is boarding or afloat gets a seat in a company AAV.
 func _on_player(n: Node) -> void:
 	if not _host():
 		return
@@ -312,8 +354,8 @@ func _seat_player(n: Node) -> void:
 		return
 	for a: Dictionary in waves():
 		var v := aav_of(String(a.id))
-		if v and String(a.role) == "company" and String(a.state) == "afloat" and v.server_enter(s, -1):
-			SessionLog.note("operation %s: %s seated in %s afloat" % [ops.cid, s.name, String(a.id)])
+		if v and String(a.role) == "company" and String(a.state) in ["afloat", BOARDING] and v.server_enter(s, -1):
+			SessionLog.note("operation %s: %s seated in %s %s" % [ops.cid, s.name, String(a.id), String(a.state)])
 			return
 
 

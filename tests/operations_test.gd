@@ -555,7 +555,8 @@ func _test_save_load() -> void:
 	check(ops.friendly != null and ops.friendly.groups.size() >= 1 and (ops.plan.phases() as Array).size() == 4, "under a commander again (%d groups)" % ops.friendly.groups.size())
 	# F-469: the attached Abrams' crews land beside the reloaded run's own men, on one budget.
 	var sup := ops.get_node_or_null(OpSupport.NODE_NAME) as OpSupport
-	await _wait_for(func() -> bool: return sup != null and sup.attached().all(func(e: Dictionary) -> bool: return String(e.state) in ["live", "lost"]), 30.0)
+	var crewed: bool = await _wait_for(func() -> bool: return sup != null and sup.attached().all(func(e: Dictionary) -> bool: return String(e.state) in ["live", "lost"]), 30.0)
+	check(crewed, "the attached armour's crews are out again after the load (%s)" % [sup.attached().map(func(e: Dictionary) -> String: return String(e.state)) if sup else "no support"])
 	var most := 0
 	for f: int in _spawn_frames:
 		most = maxi(most, int(_spawn_frames[f]))

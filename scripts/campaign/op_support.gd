@@ -316,13 +316,13 @@ func spawn_step() -> bool:
 	while not _crewing.is_empty():
 		var job: Dictionary = _crewing[0]
 		var e: Dictionary = job.e
+		if not is_instance_valid(job.v) or not is_instance_valid(job.squad) or (job.v as Vehicle).is_queued_for_deletion() or String(e.state) != SPAWNING:
+			_crewing.pop_front()  # (lost before its crew was aboard: _on_attached_lost said so)
+			if int(job.i) == 0 and is_instance_valid(job.squad):
+				(job.squad as Squad).queue_free()  # (nobody came out to belong to it)
+			continue
 		var v := job.v as Vehicle
 		var squad := job.squad as Squad
-		if not is_instance_valid(v) or v.is_queued_for_deletion() or String(e.state) != SPAWNING:
-			_crewing.pop_front()  # (lost before its crew was aboard: _on_attached_lost said so)
-			if int(job.i) == 0:
-				squad.queue_free()  # (nobody came out to belong to it)
-			continue
 		while not (job.wants as Array).is_empty():
 			if ops.spawn_men_left() <= 0:
 				return true

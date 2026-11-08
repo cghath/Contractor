@@ -71,6 +71,7 @@ var _hosted := false
 var _client_in := false
 var _client_left := false
 var _acks := {}
+var _carried := {}  # F-481: how an AAV stood at the save (afloat, landed) -> its id
 var _host_digest := {}
 var _war := []  # [sites, war]: the war as the offers left it
 
@@ -873,6 +874,23 @@ func _save_load(t: String) -> void:
 			var aboard := v.occupants().filter(func(s: Soldier) -> bool: return s.has_meta(&"op_allied") and not s.has_meta(&"vehicle_crew")).size() if v else -1
 			check(String(a.state) == "afloat" and v != null and _crew_of(v) == 2 and aboard == int(e.men) and String(e.state) == "live",
 				"an AAV saved half boarded launches again with its crew and its whole squad, no more (%s, crew %d, %d of %d aboard, its squad %s)" % [a.state, _crew_of(v), aboard, int(e.men), e.state])
+			# F-481: the squads whose AAVs were afloat or on the beach at the save.
+			for was: String in _carried:
+				var b: Dictionary = la.waves().filter(func(x: Dictionary) -> bool: return String(x.id) == String(_carried[was]))[0]
+				var ce: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(b.entry))[0]
+				await _wait_for(func() -> bool: return String(ce.state) == "live", 30.0)
+				var men := (ops.records.get(String(ce.id), {}).get("soldiers", []) as Array).filter(func(s: Variant) -> bool: return is_instance_valid(s))
+				var ashore := men.size() > 0 and men.all(func(s: Soldier) -> bool: return level.terrain.height_at(s.global_position.x, s.global_position.z) > level.terrain.water_height(s.global_position.x, s.global_position.z))
+				var off := Vector2(float(ce.pos[0]) - la.beachhead().x, float(ce.pos[1]) - la.beachhead().z).length()
+				check(String(ce.state) == "live" and men.size() == int(ce.men) and ashore and off < 400.0 and String(b.state) in ["landed", "lost"],
+					"a squad whose AAV was %s at the save comes back on the beach (%s, %d of %d men, %.0f m from the exit, ashore: %s)" % [was, ce.state, men.size(), int(ce.men), off, ashore])
+
+
+## A node freed already (`as` on one is a script error).
+func _freed_node() -> Node:
+	var n := Node.new()
+	n.free()
+	return n
 
 
 ## Men of `v`'s crew in the whole world (its seats or not: none lost, none twice).
@@ -908,6 +926,13 @@ func _part_spawned(t: String) -> String:
 			await _frames(3)
 			check(String(e.state) == "live" and _crew_of(v) == 3 and v.occupants().size() == 3, "and in real frames, on the budget (%s, %d aboard in 3 frames)" % [e.state, v.occupants().size()])
 			v = fresh.call()
+			var job: Dictionary = sup._crewing.back()  # (F-511: a tank freed before its crew came out: no script error, its squad goes)
+			var freed_squad := job.squad as Squad
+			v.queue_free()
+			job.v = _freed_node()
+			sup.spawn_step()
+			check(sup._crewing.is_empty() and freed_squad.is_queued_for_deletion(), "a tank freed before its crew came out: no job left waiting, its squad freed (%d)" % sup._crewing.size())
+			v = fresh.call()
 			ops._men_frame = -1
 			sup.spawn_step()
 			check(String(e.state) == OpSupport.SPAWNING and v.occupants().size() == per, "%d of its crew out this frame, the rest to come (%s, %d aboard)" % [per, e.state, v.occupants().size()])
@@ -918,6 +943,34 @@ func _part_spawned(t: String) -> String:
 			if picks.is_empty():
 				check(false, "an allied AAV to catch half boarded")
 				return ""
+			if picks.size() < 3:
+				check(false, "three allied AAVs to try (%d)" % picks.size())
+				return ""
+			# F-511, F-512: an AAV freed in the well deck before its riders started: its squad's entry done, its crew's squad gone, no script error.
+			var early: Dictionary = picks[2]
+			var early_e: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(early.entry))[0]
+			early.state = Operations.PENDING
+			early.erase("vid")
+			early_e.state = Operations.PENDING
+			la._launch(early)
+			var early_job: Dictionary = la._boarding.back()
+			var early_squad := early_job.squad as Squad
+			la.aav_of(String(early.id)).queue_free()
+			early_job.v = _freed_node()
+			la.spawn_step()
+			check(String(early_e.state) == "gone" and early_squad.is_queued_for_deletion() and la._boarding.is_empty(),
+				"an AAV lost before its riders started: its squad's entry done (%s), its crew's squad freed (%s), nothing left waiting (%d)" % [early_e.state, early_squad.is_queued_for_deletion(), la._boarding.size()])
+			# F-481: two squads already brought in, their AAVs afloat and on the beach at the save.
+			_carried.clear()
+			for k: int in 2:
+				var was := "afloat" if k == 0 else "landed"
+				var b: Dictionary = picks[k + 1]
+				var be: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(b.entry))[0]
+				b.state = was
+				b["vid"] = "aav_gone_in_the_save"
+				be.state = "live"
+				ops.records.erase(String(be.id))
+				_carried[was] = String(b.id)
 			var a: Dictionary = picks[0]
 			var entry: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(a.entry))[0]
 			a.state = Operations.PENDING
