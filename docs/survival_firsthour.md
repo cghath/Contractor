@@ -116,7 +116,8 @@ Before this lane the spawn was a bare edge point 350 m from the nearest site.
 
 ## 7. Left out
 
-A vehicle wreck at the farm; a field of its own; roads as a place the dead gather (the open-country
-rule treats a road like the open); "where people died" as a pull on the dead beyond the bodies
-that rise; hordes from towns and nests on their own clock (they still come from sustained noise in
-or by a town); "days survived" is the world's day, not this survivor's.
+A vehicle wreck at the farm; a field of its own; "where people died" as a pull on the dead beyond
+the bodies that rise; "days survived" is the world's day, not this survivor's. Roads as a place the
+dead gather and hordes on their own clock are built now (docs/survival_world.md section 5,
+`RoadDead`, `HordeClock`): the first night stays soft (no clock horde before day 2's 06:00 below
+High), and the start farm's own road is kept clear of the road's dead.

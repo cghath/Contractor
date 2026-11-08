@@ -113,4 +113,6 @@ static func groans(ctx: Dictionary) -> Dictionary:
 	var vol := clampf(weight / GROAN_FULL_N, 0.0, 1.0) * 0.8
 	if bool(ctx.get("horde", false)):
 		vol = minf(vol + HORDE_GROAN, 1.0)
-	return {"vol": vol, "dir": sum.normalized() if sum.length() > 0.001 else Vector2.ZERO, "dist": dist / weight if weight > 0.0 else 0.0}
+	var bearing := sum.normalized() if sum.length() > 0.001 else (ctx.get("horde_dir", Vector2.ZERO) as Vector2)  # (none near yet: from where the horde is coming, far off)
+	var out_m := dist / weight if weight > 0.0 else (GROAN_M * 0.8 if ctx.has("horde_dir") else 0.0)
+	return {"vol": vol, "dir": bearing, "dist": out_m}

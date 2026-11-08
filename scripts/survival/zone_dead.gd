@@ -18,6 +18,10 @@ extends Node3D
 ## DeadDecay, its stage: stage_of) and what it was ("origin": DeadDress), rolled where it's put
 ## down, and a nest's heads its "nest" (DeadNests, ticked from here: in by day, out at dusk); a
 ## head that becomes a body keeps all three.
+##
+## Marching (HordeClock, hordes on their own clock): server_march puts a horde down far off and walks
+## it at a point ("march"); it doesn't thin until it's there. Roads (RoadDead): the heads with
+## "road_on" take to the nearest road and linger on it, chosen on the wait's budget below.
 
 const CAP := 400
 const SEND_S := 0.5
@@ -32,9 +36,16 @@ const THIN_S := 20.0
 const SEE_M := 220.0
 const WAIT_S := Vector2(3.0, 12.0)
 const CONVERT_TICK_S := 1.0
+## Proposed: a marching horde's spread about where it's bound, and how near counts as there.
+const MARCH_SPREAD_M := 25.0
+const MARCH_DONE_M := 10.0
 
-var dead: Array[Dictionary] = []  # {"pos": Vector2, "face", "kind", "alive", "target": Vector2, "wait", "horde", "show", "show_face", "turned", "origin", "nest"?}
+var dead: Array[Dictionary] = []  # {"pos": Vector2, "face", "kind", "alive", "target": Vector2, "wait", "horde", "show", "show_face", "turned", "origin", "nest"?, "march"?: Vector2, "road_on"?, "anchor"?}
 var horde_until := -1.0
+var roads: RoadDead = null  # (host: RoadDead.server_level_ready)
+## Every peer: a horde is coming from here (server_warn; the soundscape's distant groans).
+var warn_point := Vector2.INF
+var _warn_until := -1.0
 var sent := 0
 var received := 0
 var _terrain: ZoneTerrain
@@ -55,6 +66,8 @@ func _ready() -> void:
 	var level := get_parent() as ZoneLevel
 	_terrain = level.terrain if level else null
 	_rng.seed = hash("dead|" + String(get_parent().name))
+	if not multiplayer.is_server():
+		(func() -> void: _ask_warn.rpc_id(1)).call_deferred()  # (a horde warned of before we joined: its groans)
 	if DisplayServer.get_name() != "headless":
 		for kind: String in ["walker", "runner", "screamer", "crawler", "bloater", "hazmat"]:
 			var multi := MultiMesh.new()
@@ -81,6 +94,8 @@ func server_add(pos: Vector3, kind := "walker", horde := false, extra := {}) -> 
 	d.origin = String(extra.origin) if extra.has("origin") else DeadDress.roll_at(get_parent(), pos, _rng, kind)
 	if String(extra.get("nest", "")) != "":
 		d.nest = String(extra.nest)
+	if roads and not horde and not d.has("nest") and _rng.randf() < RoadDead.SHARE:
+		d.road_on = true  # (some of the dead take to the road: RoadDead)
 	dead.append(d)
 	return true
 
@@ -114,6 +129,47 @@ func server_horde(at: Vector3, n: int) -> int:
 			made += 1
 	horde_until = Soldier._now() + 600.0
 	return made
+
+
+## Host: a horde on the march (HordeClock): `n` of the crowd put down about `from` (HordeClock.SPREAD_M),
+## walking at `to`, which they keep doing, noise or none, until they get there. Returns how many.
+func server_march(from: Vector3, to: Vector3, n: int) -> int:
+	var made := 0
+	var goal := Vector2(to.x, to.z)
+	for i in n:
+		var pos := from + Vector3(_rng.randf_range(-HordeClock.SPREAD_M, HordeClock.SPREAD_M), 0.0, _rng.randf_range(-HordeClock.SPREAD_M, HordeClock.SPREAD_M))
+		var kind := "runner" if _rng.randf() < 0.1 else "walker"
+		if server_add(pos, kind, true):
+			var d: Dictionary = dead[dead.size() - 1]
+			d.march = goal + Vector2(_rng.randf_range(-MARCH_SPREAD_M, MARCH_SPREAD_M), _rng.randf_range(-MARCH_SPREAD_M, MARCH_SPREAD_M))
+			d.target = d.march
+			d.wait = _rng.randf_range(0.0, 6.0)  # (a straggling line, not a block)
+			made += 1
+	horde_until = Soldier._now() + 600.0
+	return made
+
+
+## Host: a horde is coming from `at` for `seconds`: the distant groans on every peer (Soundscape).
+func server_warn(at: Vector3, seconds: float) -> void:
+	_warned.rpc(at.x, at.z, seconds)
+
+
+@rpc("authority", "call_local", "reliable")
+func _warned(x: float, z: float, seconds: float) -> void:
+	warn_point = Vector2(x, z)
+	_warn_until = _time + seconds
+
+
+## Host: a late joiner, its level up, asks for a warning still in the air.
+@rpc("any_peer", "call_remote", "reliable")
+func _ask_warn() -> void:
+	if multiplayer.is_server() and warned():
+		_warned.rpc_id(multiplayer.get_remote_sender_id(), warn_point.x, warn_point.y, _warn_until - _time)
+
+
+## Whether a warned horde's distant groans are still in the air (Soundscape).
+func warned() -> bool:
+	return _warn_until > _time and warn_point != Vector2.INF
 
 
 ## Host: a loud noise at `at` heard `radius` off: the crowd heads within it walk at it (only those:
@@ -161,15 +217,24 @@ func _physics_process(delta: float) -> void:
 			if float(d.wait) <= 0.0:
 				if d.has("to"):
 					d.target = d.to  # (phase D: a siege's wave walks at the settlement: Sieges)
+				elif d.has("march"):  # (a horde on the clock walks on to where it's bound, noise or none: HordeClock)
+					if pos.distance_to(d.march as Vector2) <= MARCH_DONE_M:
+						d.erase("march")
+					else:
+						d.target = d.march
 				elif bool(d.horde) and pull != Vector2.INF and pressure >= Survival.HORDE_DISPERSE_AT:
 					d.target = pull
 				elif pull != Vector2.INF and pressure >= Survival.DRIFT_AT and pos.distance_to(pull) > 20.0 and (Survival.legacy_spawns or pos.distance_to(pull) <= FirstHour.DRIFT_REACH_M):  # (only the near ones: docs/survival_firsthour.md)
 					d.target = pos + (pull - pos).normalized() * minf(DRIFT_M, pos.distance_to(pull))  # drifts toward the noise
 				else:
-					var a := _rng.randf() * TAU
-					d.target = pos + Vector2(cos(a), sin(a)) * _rng.randf_range(2.0, DRIFT_M)
-					if not Survival.legacy_spawns and FirstHour.in_quiet(d.target as Vector2) and not FirstHour.in_quiet(pos):
-						d.target = pos - Vector2(cos(a), sin(a)) * DRIFT_M  # (they keep off where the living hold a place)
+					var road := roads.idle_target(d, pos, _rng) if roads and bool(d.get("road_on", false)) else Vector2.INF  # (the wait is the crowd's budget: no per-frame road queries)
+					if road != Vector2.INF:
+						d.target = road
+					else:
+						var a := _rng.randf() * TAU
+						d.target = pos + Vector2(cos(a), sin(a)) * _rng.randf_range(2.0, DRIFT_M)
+						if not Survival.legacy_spawns and FirstHour.in_quiet(d.target as Vector2) and not FirstHour.in_quiet(pos):
+							d.target = pos - Vector2(cos(a), sin(a)) * DRIFT_M  # (they keep off where the living hold a place)
 			continue
 		var to: Vector2 = (d.target as Vector2) - pos
 		var speed := (WALK_MPS if bool(d.horde) else DRIFT_MPS) * Seasons.dead_pace_mult()
@@ -184,6 +249,8 @@ func _physics_process(delta: float) -> void:
 	if _convert_in <= 0.0:
 		_convert_in = CONVERT_TICK_S
 		_convert(level)
+		if roads:
+			RoadDead.server_tell(level, self)  # (once a world: the roads hold the dead)
 	_thin_in -= delta
 	if _thin_in <= 0.0:
 		_thin_in = THIN_S
@@ -222,8 +289,12 @@ func _convert(level: Node) -> void:
 					var brain := ZombieAI.of(z)
 					if brain:
 						var point: Variant = Survival.pressure_point(level)
-						if point is Vector3:
+						if d.has("march"):
+							brain.hear(Vector3((d.march as Vector2).x, y, (d.march as Vector2).y), ZombieAI.HEAR_RUN)  # (it was walking somewhere: HordeClock)
+						elif point is Vector3:
 							brain.hear(point, ZombieAI.HEAR_RUN)
+				if roads:
+					roads.release(d)
 				live += 1
 				dead.remove_at(i)
 				continue
@@ -233,7 +304,7 @@ func _convert(level: Node) -> void:
 ## Host: a horde that has nothing to go to thins out, a head at a time (back into the zone's quiet).
 func _thin_horde() -> void:
 	for i in dead.size():
-		if bool(dead[i].horde) and dead[i].alive:
+		if bool(dead[i].horde) and dead[i].alive and (not dead[i].has("march") or bool(dead[i].get("frozen", false))):  # (one still walking somewhere doesn't thin, one frozen on the way does: HordeClock)
 			dead.remove_at(i)
 			return
 

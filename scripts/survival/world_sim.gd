@@ -111,6 +111,7 @@ static func model() -> WorldModel:
 	m.hosted = hosted_zone()
 	m.player = player_info()
 	m.refill_mult = refill_mult()
+	m.clock = HordeClock.options()
 	return m
 
 
@@ -221,6 +222,7 @@ func server_far_tick(at: float) -> void:
 	_job.hosted = hosted_zone()
 	_job.player = player_info()
 	_job.refill_mult = refill_mult()
+	_job.clock = HordeClock.options()
 	_job.w["t"] = at
 	_job.w["wall"] = Time.get_unix_time_from_system()
 	_pending.clear()
@@ -283,6 +285,7 @@ func _after_step(m: WorldModel) -> void:
 			Survival._journal_line(_cap(String(e.text)) + ".")
 	_update_held()
 	_check_goal()
+	HordeClock.server_after_step(m)  # (how much of the hosted zone's nests still stands)
 	Politics.server_after_step(m)  # (phase D: allies' warnings)
 	WorldEvents.server_after_step(m)  # (world events: the live zone's pieces, the sky's glow; docs/survival_events.md)
 
@@ -296,8 +299,16 @@ func _do_action(a: Dictionary) -> void:
 			if level and String(a.zone) == hosted_zone():
 				var p: Array = a.get("pos", [0.0, 0.0])
 				Survival._raise_pressure(level, Vector3(float(p[0]), 0.0, float(p[1])), float(a.amount))
+		"horde_warn":
+			if level and String(a.zone) == hosted_zone():  # (the clock's fair warning: HordeClock)
+				HordeClock.server_warn(level, a)
+		"horde_rise":
+			if level and String(a.zone) == hosted_zone() and FirstHour.horde_allowed():
+				HordeClock.server_rise(level, a)
 		"horde_enter":
-			if level and String(a.zone) == hosted_zone() and FirstHour.horde_allowed():  # (none on the first night below High)
+			if level and String(a.zone) == hosted_zone() and FirstHour.horde_allowed() and bool(a.get("clock", false)):  # (a horde on its own clock: marches)
+				HordeClock.server_rise(level, a)
+			elif level and String(a.zone) == hosted_zone() and FirstHour.horde_allowed():  # (none on the first night below High)
 				var at := Vector3.ZERO
 				for c: Dictionary in RegionMap.crossings(String(a.zone), level.def):
 					if String(c.to) == String(a.from):
