@@ -440,6 +440,12 @@ func _test_hits() -> void:
 	await _seconds(1.0)
 	check(tank.modules.health_of("structure") >= h0 * 0.97, "a 25 mm HEI on the T-72B3's turret front is nothing (structure %.0f%%)" % [100.0 * tank.modules.health_of("structure") / maxf(h0, 0.001)])
 	await _clear(tank, [])
+	var ifv := await _spawn("bmp2", Vector3(-360, RIG_Y, 40), 0.0, &"hostile")
+	ifv.server_explosion(ifv.global_position + Vector3.UP * 1.8, "breaching_charge")
+	check(ifv.can_drive(), "one demolition block on a BMP-2's deck doesn't stop its engine")
+	ifv.server_explosion(ifv.global_position + Vector3.UP * 1.8, "breaching_charge")
+	check(not ifv.can_drive(), "a second one does (a park of them is a sabotage target)")
+	await _clear(ifv, [])
 
 
 func _test_qrf() -> void:
