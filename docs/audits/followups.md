@@ -1801,6 +1801,109 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+## F-450 and F-451: two CI flakes (fixed on fix/ci-flakes-nov, 2026-11-07)
+
+### F-450 (done): the side's feed on a squad out of the tree (operations, script error)
+CI push run 41656701387 attempt 1 (feat/vault-legs-svd f700555a), operations host: "Cannot call
+method 'get_nodes_in_group' on a null value" in Squad.members, from GroupBoard.row_for via
+SideIntel.server_feed. The suite's save/load step takes the old Operations node out of the tree
+(its OOB squads are its children) and queue-frees the men, who stay in the tree and in
+"combatants" until the end of the frame. When SideIntel's 1 s feed fell in that frame,
+GroupBoard.squads_of found the squads through the men's brains (valid, but outside the tree) and
+members() called get_tree() on null. The same happens in play whenever a squad's owner is taken
+out before its men go. Now squads_of lists only squads inside the tree, GroupBoard.refresh skips a
+live Squad out of it (so its row leaves, also for a SideCommand's cached group list), and
+members() returns nobody out of the tree. The operations suite feeds the board in that frame and
+checks the old groups are gone (it fails, with the script error, without the guards).
+
+### F-451 (done): the choke check in weapons was a coin with a 1-in-200 bad side
+weapons "choked, the pattern's widest pellet is N degrees off the aim, against M open" compared
+the widest of 4 choked shells (36 pellets, capped near 0.72 deg) with the widest of 1 open shell
+(9 pellets), needing under 0.6x: the open shell's widest came in under 1.2 deg about 1 run in 200
+(1.13 on two CI runs). It now fires 8 shells each way through the real fire path and compares
+every pellet's mean angle off the aim (open ~1.07 deg, choked ~0.48): the same 0.6 bar, now ~5
+standard deviations clear, and with the choke ignored the check fails every time.
+
+### F-452 (closed 2026-11-08, Captain's yes to the narrow fix; F-467, F-468): operations "a few men a frame (at most 4)"
+R0849 (this branch, 3 test slots busy) failed the run-start check "a few men a frame (at most 4),
+within the live caps (22 soldiers, 8 vehicles)": the bar is spawn_men_frame + 1 = 3. The suite
+counts every child entering level.ai in a process frame, not only Operations' spawn jobs
+(_spawn_step runs once a frame, 2 men at most), so another spawner's men in the same frame (a
+vehicle's gunner from AavGunner.attach, the enemy's response or the Virtualizer bringing a group
+in) can push it over. Earlier local logs: at most 2 (13 runs), 3 (2 runs); never 4 before. Not
+from F-450's change (it only skips squads out of the tree, which errored before). Ask: count only
+the men with an "op_group" meta in the check, or let Operations' budget take the other spawners'
+men into account.
+
+### F-467 (done 2026-11-08): OpSupport spawned a whole crew in one frame beside Operations' own men
+OpSupport._spawn_attached brought an attached tank's 3-man crew out in one frame, right after
+Operations._spawn_step's up to 2: 4 or 5 men in that frame against the suite's bar of 3 (the F-452
+flake). Now one budget per process frame (data/operations.json run.spawn_men_frame, D3-12),
+counted in Operations._spawn_man and read through Operations.spawn_men_left(), is shared by
+Operations, OpSupport and OpLanding: the tank comes first (state "spawning"), the crew boards over
+the next frames (OpBase.spawn_step, called each frame ahead of Operations' spawner), and it goes
+"live" once they're aboard. A save caught mid-way brings it out again from nothing (optypes checks
+a tank half crewed). Enemy response, Virtualizer, garrisons and reinforcements are not on the
+budget, on purpose.
+
+### F-468 (done 2026-11-08): OpLanding spawned about 10 men in one frame per AAV
+_launch brought the crew and the whole allied squad out with the AAV. Now on the F-467 budget: the
+AAV waits in the well deck (state "boarding") until its crew and squad are aboard and only then
+swims (Captain, 2026-11-08), so it can't leave half boarded. A save caught mid-way launches it
+again from nothing, its squad's OOB entry pending again (optypes checks an AAV half boarded: crew
+2 and the whole squad, no more). Operations.server_advance, the tests' clock, has no frames in it:
+optypes turns on advance_brings_men (behind DevTools.on()) so each tick brings its part-spawned men
+out; the operations suite doesn't, so its frame check sees the real budget.
+
+### F-469 (done, one note left): operations didn't look at the frames after a load
+The check "after the load too, a few men a frame" now covers the frames the reloaded run's men and
+the attached Abrams come back in (same bar as the run-start check, which is unchanged). Note only:
+the first soldier or vehicle of a kind costs 150-1041 ms to spawn headless (the F-452 logging);
+likely the test machine's shader and resource work, not the budget's to fix.
+
+### F-481 (done 2026-11-08): a load lost every allied squad an AAV had brought in
+Worse than this note first said: not only the AAVs afloat. On any load Operations puts every OOB
+entry not "gone" back to pending (operations.gd `_try_start`), and `_due` refuses a "by_type" one,
+so a squad whose AAV had already left the well deck never came back, landed ones too, even one long
+ashore and fighting. Only an AAV still to launch (or half boarded) brought its squad out again. Now
+OpLanding hands those entries to Operations on a load: no longer by_type, due at once, on the sand of
+their AAV's lane round the beach exit; after that they come back where they stand, as any allied
+group. See "Calls made for the Captain". Tested in optypes' save and load (an AAV afloat, one landed).
+
+### F-482 (done 2026-11-08): interaction "shot through the hips (body, through: false)"
+Not the tissue-reach roll (a 5.56 reaches 0.28 m at least, the hips here are about 0.2 m deep). The
+shot came from the front a hand's breadth off the centre line, and his relaxed right forearm is
+sometimes across that line: logged in R0910 and R0912, the round met the forearm first, a 5-15 mm
+graze with no exit, and left the body there (F-485), so no wound went through. R0911, the same code,
+met the abdomen and passed. The check now shoots from behind, where no arm can be in the way.
+
+### F-483 (done 2026-11-08): casualty "with nothing to treat it himself, he needs help without asking"
+player_wants_care only sends a squadmate unasked out of a firefight, and Squad.is_engaged() stays
+true for ENGAGED_S (20 s) after any member was last fired on or hurt by something earlier in the
+suite: the failing CI log shows the squad's tactic going to "no contact" just after the check.
+With the squad engaged it fails every time (local run in the commit message). The check now waits
+out the engagement before the wound, and its message says what was needed and whether the squad
+was engaged, so a failure can be read from the log.
+
+### F-484 (done 2026-11-08): net_test.gd:405, `level.players` null on the client during the join wait
+A slow join reached the wait loop before the client's level had its @onready players node. The
+loop now guards it.
+
+### F-485 (open): a round that clips a forearm is done with that body
+Ballistics excludes every hitbox of a body once a round has crossed any part of it ("out of this
+body: it doesn't hit him twice"), so a round that grazes a hanging forearm flies on through the hips
+behind it without touching them. Seen as F-482. Ballistics is shared by every shot in the game and
+the fix (skip only the part it crossed, and let hits on the same body sum) changes wounds a little
+everywhere, so left alone.
+
+### F-511 (done 2026-11-08): a spawn job's `as` ran before its validity guard
+OpSupport.spawn_step and OpLanding.spawn_step cast `job.v as Vehicle` (and `job.squad as Squad`) before
+checking they were still valid, and `as` on a freed object is a script error: the step stops there
+every frame and every later job stalls behind it. They check `is_instance_valid` first now.
+
+### F-512 (done 2026-11-08): an AAV lost before its riders started
+It left its allied entry pending for ever and its crew's squad behind. See "Calls made for the Captain".
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2227,16 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+2026-11-07 | F-450: a squad out of the tree is skipped where the side's lists are made (GroupBoard.squads_of, GroupBoard.refresh: its row leaves at once) and Squad.members() returns nobody for it | the squad's owner can leave the tree a frame before its men are freed (the operations flake), and other callers of members() shouldn't crash on it either | freeing the men before taking the owner out (fixes only the one path), or a null check in row_for alone
+2026-11-07 | F-451: weapons' choke check compares the mean pellet angle over 8 shells open and 8 choked (PATTERN_SHELLS, the same 0.6 bar), not one open shell's widest pellet against four choked shells' | ~5 standard deviations clear, and it still fails every time with the choke ignored; 16 shells cost about a second | a seeded RNG (proves one draw only), or a looser bar (proves less)
+Captain, 2026-11-08: yes to F-452's narrow fix: one per-frame man budget shared by Operations, OpSupport and OpLanding only, and the check in tests/operations_test.gd stays as it is.
+Captain, 2026-11-08: yes to the beach landing's AAVs waiting for their squad: an AAV stays in the well deck until its allied squad is aboard.
+2026-11-08 | F-467/F-468: Operations counts men in _spawn_man and every spawner reads spawn_men_left(); carried-over men go first each frame (ahead of the OOB's next group), so a tank isn't left crewless while the company comes out; the vehicle itself isn't counted against the men (at most one a tick, as before) | a tank's crew is out 2-3 frames after it | a queue owned by Operations with callbacks, more machinery for three spawners
+2026-11-08 | F-468: a part-spawned AAV or tank is simply started again on load (no crew or squad progress saved) | nothing to lose or double, and the vehicle isn't saved anyway | saving how many were out
+2026-11-08 | F-482: interaction's through-and-through shot comes from behind, not from the front | the flake was his forearm in the way of a line a hand's breadth off centre (R0910, R0912), and no arm reaches behind him | aiming on the centre line (his hands can still come in front), or changing Ballistics (F-485)
+2026-11-08 | F-483: casualty waits out Squad.is_engaged (up to ENGAGED_S + 5 s) before the "unasked" wound rather than clearing engaged_at | the check's premise is really met, and the extra wait only happens when the squad was in fact engaged | setting engaged_at by hand
+2026-11-08 | F-481: on a load, an allied squad whose AAV had left the well deck (afloat, landed, or lost since) stops being "by_type" and comes back through Operations on the sand of its own lane round the beach exit, with whoever the save counted, wave 2 15 m further up the sand (`OpLanding.RETURN_WAVE_BACK_M`, Proposed); an AAV turned "landed" by the load still doesn't count as wave 1 on the beach, so before H-hour they wait for it | the AAVs aren't saved and Operations won't bring out a by_type group, so every one of those squads, landed ones too, was lost on any load; the beach is ground the allies already hold and where the AAV would have put them | relaunching the AAV (it swims the whole way again, and a squad long ashore goes back to sea), or where they stood at the save (the afloat ones are at sea)
+2026-11-08 | F-512: an AAV lost in the well deck before its riders started finishes its squad's entry as "gone" (lost with its AAV) and frees its crew's squad if nobody had come out; a crew that had come out keeps its squad, as after any AAV lost later | the entry would otherwise stay pending for ever and count as a live allied group | handing the squad to Operations to walk in from the LHD
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

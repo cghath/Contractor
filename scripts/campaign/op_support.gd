@@ -9,7 +9,8 @@ extends OpBase
 ##   allied crew (a driver and a gunner, and a loader on the Abrams: the commander's seat, and the
 ##   Bradley's troop seats, are left for players to climb into). Until A9's crews they use what the
 ##   AI has today: their drivers drive by road (SquadDrivers), their gunners fire the coax
-##   (AavGunner). Their orders are the company's (Support > Operation > Attached armour): follow the
+##   (AavGunner). The vehicle comes first, its crew over the next frames on Operations' budget of
+##   men a frame (F-467). Their orders are the company's (Support > Operation > Attached armour): follow the
 ##   company's task (the default: overwatch "overwatch_short_m" short of the task's objective on our
 ##   side, moving up as each phase begins), move there, hold, follow me; a player aboard can take the
 ##   gun from the AI gunner and give it back. A vehicle lost is the employer's loss (no indemnity),
@@ -38,9 +39,11 @@ const MOVE := "move"
 const HOLD := "hold"
 const FOLLOW := "follow"
 const COLUMN := "column"  # OpThrust drives it
+const SPAWNING := "spawning"  # an entry's state while its crew comes out
 
 var _tick_left := 0.0
 var _vehicles := {}  # host: attached id -> Vehicle
+var _crewing: Array = []  # host: attached vehicles with their crew still to come out ({"e", "v", "squad", "wants", "i", "at"}: spawn_step)
 var _reseat: Array = []  # host: {"ai", "vehicle", "seat", "until"}
 var _called := {}  # host: unit -> when the company last called it
 
@@ -90,8 +93,8 @@ func start() -> void:
 				return "%s (%s)" % [e.callsign, VehicleSpecs.spec(String(e.model)).get("name", e.model)]))))
 	else:
 		for e: Dictionary in m.attached:
-			if String(e.state) == "live":
-				e.state = Operations.PENDING  # (a loaded save: they come back where they were)
+			if String(e.state) in ["live", SPAWNING]:
+				e.state = Operations.PENDING  # (a loaded save: they come back where they were, a part-crewed one from nothing)
 	if ops.friendly and not ops.friendly.fire_support_wanted.is_connected(_on_friendly_fires):
 		ops.friendly.fire_support_wanted.connect(_on_friendly_fires)
 	if ops.hostile and not ops.hostile.fire_support_wanted.is_connected(_on_hostile_fires):
@@ -269,7 +272,7 @@ func _attached_step() -> void:
 		match String(e.state):
 			Operations.PENDING:
 				if not spawned and not BigZoneStreaming.at_cap(level(), true):
-					_spawn_attached(e)  # (one a tick: a few men a frame, as Operations' own spawner, D3-12)
+					_spawn_attached(e)  # (one a tick, its crew on Operations' shared budget of men a frame, D3-12: spawn_step)
 					spawned = true
 			"live":
 				var v := vehicle_of(String(e.id))
@@ -296,31 +299,51 @@ func _spawn_attached(e: Dictionary) -> void:
 	v.set_meta(&"no_save", true)
 	v.set_meta(ATTACHED_META, String(e.id))
 	_vehicles[String(e.id)] = v
+	AavGunner.attach(v)
+	v.destroyed.connect(_on_attached_lost.bind(String(e.id)))
 	var squad := Squad.new()
 	squad.name = ops._fresh_name(String(e.callsign))
 	squad.faction = &"friendly"
 	squad.callsign = String(e.callsign)
 	ops.add_child(squad)
-	var entry := {"side": "friendly", "kit": String(e.kit)}
-	var i := 0
-	for want: Variant in e.crew:
-		var seat := _seat_of_kind(v, StringName(String(want)))
-		if seat < 0:
+	e.state = SPAWNING  # (live once its crew is aboard; a save now brings it out again from nothing)
+	_crewing.append({"e": e, "v": v, "squad": squad, "wants": (e.crew as Array).duplicate(), "i": 0, "at": at})
+
+
+## Host, every frame: the tanks' crews come out on Operations' shared budget, the tank first (out
+## in _spawn_attached) and each man boarding as he comes, as Operations._spawn_one does.
+func spawn_step() -> bool:
+	while not _crewing.is_empty():
+		var job: Dictionary = _crewing[0]
+		var e: Dictionary = job.e
+		if not is_instance_valid(job.v) or not is_instance_valid(job.squad) or (job.v as Vehicle).is_queued_for_deletion() or String(e.state) != SPAWNING:
+			_crewing.pop_front()  # (lost before its crew was aboard: _on_attached_lost said so)
+			if int(job.i) == 0 and is_instance_valid(job.squad):
+				(job.squad as Squad).queue_free()  # (nobody came out to belong to it)
 			continue
-		var s := ops._spawn_man(entry, squad, i, v.global_position + Vector3.UP * 3.0)
-		i += 1
-		if s == null:
-			continue
-		s.set_meta(&"vehicle_crew", v.vehicle_id)
-		s.set_meta(&"op_allied", true)
-		v.server_enter(s, seat)
-	squad.leader = squad.members()[0] if not squad.members().is_empty() else null
-	AavGunner.attach(v)
-	v.destroyed.connect(_on_attached_lost.bind(String(e.id)))
-	e.state = "live"
-	e["vid"] = v.vehicle_id
-	e["moved_for"] = -1
-	SessionLog.note("operation %s: attached %s (%s) out at %s" % [ops.cid, String(e.callsign), String(e.model), grid_ref(at)])
+		var v := job.v as Vehicle
+		var squad := job.squad as Squad
+		while not (job.wants as Array).is_empty():
+			if ops.spawn_men_left() <= 0:
+				return true
+			var seat := _seat_of_kind(v, StringName(String((job.wants as Array).pop_front())))
+			if seat < 0:
+				continue
+			var s := ops._spawn_man({"side": "friendly", "kit": String(e.kit)}, squad, int(job.i), v.global_position + Vector3.UP * 3.0)
+			job.i = int(job.i) + 1
+			if s == null:
+				continue
+			s.set_meta(&"vehicle_crew", v.vehicle_id)
+			s.set_meta(&"op_allied", true)
+			v.server_enter(s, seat)
+		_crewing.pop_front()
+		squad.leader = squad.members()[0] if not squad.members().is_empty() else null
+		e.state = "live"
+		e["vid"] = v.vehicle_id
+		e["moved_for"] = -1
+		SessionLog.note("operation %s: attached %s (%s) out at %s" % [ops.cid, String(e.callsign), String(e.model), grid_ref(job.at)])
+		_refresh_state()
+	return false
 
 
 static func _seat_of_kind(v: Vehicle, kind: StringName) -> int:

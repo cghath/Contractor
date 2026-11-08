@@ -11,6 +11,36 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Spawning a few men a frame, everywhere the operation does it (fix/ci-flakes-nov, F-452, F-467 to F-469)
+
+- **Changed:** one budget of men a frame (`run.spawn_men_frame`) is shared by Operations, the
+  attached armour and the beach landing. An attached tank's crew and an AAV's men now come out
+  over a few frames, the vehicle first, instead of all in one frame beside the company's own men
+  (a 45-60 ms hitch at H-hour and after a load; about 10 men a frame on the landing).
+- **Changed:** an AAV waits in the well deck until its crew and its allied squad are aboard, so it
+  never swims off half boarded (the Captain, 2026-11-08). A save caught mid-way brings the tank or
+  AAV out again from nothing: no man lost or doubled.
+- **Fixed (tests):** the operations suite also looks at the frames after a load. Interaction's
+  "shot through the hips" comes from behind (his forearm could take it from the front), casualty's "needs help without
+  asking" waits out a squad still engaged from earlier in the suite (and says why if it fails),
+  and the net client's join loop guards a level with no players node yet.
+- **Fixed:** on any load, a beach landing lost every allied squad an AAV had already brought in,
+  landed ones too (F-481). They now come back at the beach, on their own AAV's lane.
+- **Fixed:** an AAV lost in the well deck before its riders started no longer leaves its squad
+  waiting for ever (F-512), and a tank or AAV freed mid-spawn no longer stalls the spawn jobs
+  behind it with a script error (F-511). A player who joins while the AAVs are boarding is seated.
+
+### Two CI flakes (fix/ci-flakes-nov, F-450, F-451)
+
+- **Fixed:** the friendly side's feed no longer reads a squad that has left the level while its
+  men are still in it for that frame (operations: "Cannot call method 'get_nodes_in_group' on a
+  null value" in Squad.members via GroupBoard and SideIntel). GroupBoard lists and boards only
+  squads inside the tree, and Squad.members() finds nobody for one outside it. The operations
+  suite now feeds the board in that frame and checks the old groups leave it.
+- **Fixed (tests):** weapons' choke check measures the 870's pattern over 8 shells open and 8
+  choked (every pellet's mean angle off the aim, the same under-0.6x bar) instead of one open
+  shell's widest pellet, which came in under the bar about 1 run in 200.
+
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 
 Every branch with work not yet on dev, merged on integrate/cg-oct24 (v0.6.1) at the Captain's

@@ -92,6 +92,11 @@ var _front_left := 0.0
 var _sync_left := 0.0
 var _save_left := 0.0
 var _spawning: Array[Dictionary] = []  # {"entry", "men": [spec], "vehicles": [model], "squad", "made": []}
+## Tests that fast-forward with server_advance and look at crews at once (optypes; behind DevTools.on()):
+## each tick brings out what it part-spawned. Left off, the men come out over real frames, as in play.
+var advance_brings_men := false
+var _men_frame := -1  # the process frame _men_this_frame counts (spawn_men_left)
+var _men_this_frame := 0
 var _front_marker := 0
 var _front_marker_rev := -1
 var _seize := {}     # oid -> seconds held
@@ -878,6 +883,7 @@ func _process(delta: float) -> void:
 		return
 	if cid == "":
 		return
+	_spawn_carried()  # (first: a tank with its crew half out, an AAV half boarded, ahead of the OOB's next group)
 	_spawn_step()
 	_tick_left -= delta
 	if _tick_left > 0.0:
@@ -892,6 +898,8 @@ func server_advance(seconds: float) -> void:
 	var left := seconds
 	while left > 0.0:
 		server_tick(minf(step, left))
+		if advance_brings_men and DevTools.on():
+			_spawn_carried_out()
 		left -= step
 
 
@@ -1349,6 +1357,42 @@ func _lost_vehicles(run: Dictionary) -> void:
 
 # --- OOB spawning by the front -----------------------------------------------------------------------------
 
+## Host: how many more men may come out this process frame, of the one budget ("spawn_men_frame",
+## D3-12) that Operations' own spawner, OpSupport's attached crews and OpLanding's AAVs share (all
+## three spawn through _spawn_man, which counts them). What they can't bring out now they carry
+## over to the next frame (OpBase.spawn_step).
+func spawn_men_left() -> int:
+	_spawn_frame_roll()
+	return maxi(maxi(int(knob("run", "spawn_men_frame", 2.0)), 1) - _men_this_frame, 0)
+
+
+func _spawn_frame_roll() -> void:
+	var f := Engine.get_process_frames()
+	if f != _men_frame:
+		_men_frame = f
+		_men_this_frame = 0
+
+
+## Host, every frame: what the support and the type's mechanic have part-spawned comes on out, on
+## the shared budget. True while one of them still has men to bring out.
+func _spawn_carried() -> bool:
+	var more := false
+	for n: String in [OpSupport.NODE_NAME, OpTypes.MECHANIC]:
+		var m := get_node_or_null(n) as OpBase
+		if m and m.spawn_step():
+			more = true
+	return more
+
+
+## server_advance with advance_brings_men: no frames pass inside it, so what a tick started comes
+## out before the next one (the tests' clock skips the frames a crew takes in play).
+func _spawn_carried_out() -> void:
+	for guard in 256:
+		_men_frame = -1  # (each pass a frame's worth)
+		if not _spawn_carried():
+			return
+
+
 ## Host, every frame: the OOB groups due come out (friendly ones at H-hour and their wave, at the
 ## start; enemy ones once a player is near but not too near and none can see where they'd stand),
 ## a few men a frame, while the live caps allow.
@@ -1368,8 +1412,7 @@ func _spawn_step() -> void:
 	if BigZoneStreaming.at_cap(_level, false):
 		return
 	var job: Dictionary = _spawning[0]
-	var per := maxi(int(knob("run", "spawn_men_frame", 2.0)), 1)
-	for k in per:
+	for k in spawn_men_left():
 		if not _spawn_one(job):
 			_spawning.pop_front()
 			_finish_job(job)
@@ -1465,6 +1508,8 @@ func _spawn_one(job: Dictionary) -> bool:
 
 
 func _spawn_man(e: Dictionary, squad: Squad, i: int, at: Vector3) -> Soldier:
+	_spawn_frame_roll()
+	_men_this_frame += 1
 	var pos := _ground(at)
 	var name := "%s_%d" % [String(squad.name), i + 1]
 	if String(e.side) == "friendly":

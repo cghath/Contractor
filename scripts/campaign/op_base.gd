@@ -47,6 +47,12 @@ func _host() -> bool:
 	return not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
 
 
+## Host, every frame (Operations._spawn_carried, before its own spawner): men this mechanic has part
+## spawned come on out, as many as Operations.spawn_men_left() allows. True while there are more.
+func spawn_step() -> bool:
+	return false
+
+
 func op_type() -> String:
 	return String(ops.def.get("op_type", "")) if ops else ""
 

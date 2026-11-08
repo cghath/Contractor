@@ -402,7 +402,7 @@ func _run_client() -> void:
 	var deadline := Time.get_ticks_msec() + 20000
 	var me: Soldier
 	while Time.get_ticks_msec() < deadline:
-		me = level.players.get_node_or_null(str(multiplayer.get_unique_id()))
+		me = level.players.get_node_or_null(str(multiplayer.get_unique_id())) if is_instance_valid(level) and level.players else null  # (F-484: not there yet on a slow join)
 		if me and me.inventory.slots[&"primary"] == &"m4a1":
 			break
 		await get_tree().process_frame
