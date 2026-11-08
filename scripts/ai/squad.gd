@@ -1891,6 +1891,7 @@ func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
 	var now := Soldier._now()
 	var lead := leader.global_position
 	var was: Dictionary = _places.get(t, {})
+	# ("frame" is kept only for spacing's checks, which sample one entry a working-out.)
 	_places[t] = {"at": want, "goal": want, "held": held, "way": false, "frame": frame, "now": now, "lead": lead,
 		"path": PackedVector3Array(), "since": 0.0, "asked": -INF}
 	if held or was.is_empty() or not (bool(was.held) or bool(was.way)) or not map.is_valid():
@@ -1936,17 +1937,22 @@ func _place_on_way(t: int, want: Vector3, held: bool, map: RID) -> Vector3:
 ## being where it belongs now, `base` where his team forms and `fell` whether `want` is a
 ## fallback (his team's place held, or his slot picked again): a fallback is there at once, as
 ## the place's is (never left across a wall from the lead). Let go of one, or while his team's
-## place is on its way (`carried`), it travels from where it stood by the lead's walk plus
+## place is on its way (`carried`), it travels from where it stood by the lead's walk (or, when
+## more, his team's base's own move: a team leader it forms on sprinting, F-461) plus
 ## SLOT_CATCHUP_MPS a second: straight while no wall stands between, else toward `base` while
-## nothing stands between it and that, else it's there at once. So the other-side fallback's
-## mirrored shape turns back over gradually, man by man, and no slot leaps when a refit lets go.
+## nothing stands between it and that, else on to the last point it headed for that way (F-463),
+## else it's there at once. So the other-side fallback's mirrored shape turns back over
+## gradually, man by man, and no slot leaps when a refit lets go.
+## (On its way it isn't kept clear of the lead, the players or the other slots: F-437.)
 func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carried: bool, map: RID) -> Vector3:
 	var id := who.get_instance_id()
 	var frame := Engine.get_physics_frames()
 	var now := Soldier._now()
 	var lead := leader.global_position
 	var was: Dictionary = _ways.get(id, {})
-	_ways[id] = {"at": want, "goal": want, "fell": fell, "way": false, "frame": frame, "now": now, "lead": lead, "since": 0.0}
+	# ("frame" is kept only for spacing's checks, which sample one entry a working-out.)
+	_ways[id] = {"at": want, "goal": want, "fell": fell, "way": false, "frame": frame, "now": now, "lead": lead,
+		"base": base, "since": 0.0}
 	if fell or was.is_empty() or not (bool(was.fell) or bool(was.way)):
 		return want
 	var dt := now - float(was.now)
@@ -1954,21 +1960,35 @@ func _slot_on_way(who: Soldier, want: Vector3, base: Vector3, fell: bool, carrie
 	var walked := _flat(lead, was.lead)
 	if dt < 0.0 or dt > PLACE_STALE_S or walked > TRAIL_JUMP_M or since > PLACE_TRAVEL_MAX_S:
 		return want
+	# A team forming on its own leader (human, or AI sent somewhere) goes at his pace, which can be
+	# a sprint past the lead's walk: his team's base's move is credited when it's more (F-461). A
+	# base that jumped (from the team's place to its leader, or back) walked nothing and earns nothing.
+	var moved := _flat(base, was.get("base", base))
+	if moved <= TRAIL_JUMP_M:
+		walked = maxf(walked, moved)
 	var at: Vector3 = was.at
+	var aim: Vector3 = was.get("aim", Vector3.INF)  # the last point it headed for with nothing between
 	var left := walked + SLOT_CATCHUP_MPS * dt
 	var d := _flat(at, want)
 	if d <= left:
 		at = want  # there
 	elif not _wall_between(at, want):
+		aim = want
 		at = at.lerp(want, left / d)
 	elif _flat(at, base) > 0.5 and not _wall_between(at, base):
+		aim = base
 		at = at.lerp(base, minf(left / _flat(at, base), 1.0))  # round the wall's end, by where his team forms
+	elif aim != Vector3.INF and _flat(at, aim) > 0.5 and not _wall_between(at, aim):
+		# Neither in sight now (his team's place has gone on through a gate along its path and
+		# turned): on to where it last headed, the way that place went, before giving up (R0880:
+		# the slot left inside the compound wall leapt 19 m out past the gate).
+		at = at.lerp(aim, minf(left / _flat(at, aim), 1.0))
 	else:
 		return want  # no straight way: there at once, as before
 	if at != want and map.is_valid():
 		at = NavigationServer3D.map_get_closest_point(map, at)
 	_ways[id] = {"at": at, "goal": want, "fell": false, "way": at != want or carried, "frame": frame, "now": now,
-		"lead": lead, "since": since}
+		"lead": lead, "base": base, "aim": aim, "since": since}
 	return at
 
 
