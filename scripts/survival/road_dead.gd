@@ -16,7 +16,7 @@ const CELL_M := 64.0
 ## Near a town or village (metres) the draw rises, up to this extra at its edge.
 const TOWN_M := 350.0
 const TOWN_X := {"town": 1.0, "village": 0.5}
-## Round a hulk on the road (ZoneScatter.road_hulks) the draw is this many times the road's.
+## Round a hulk on the road (hulks_of: the scatter's) the draw is this many times the road's.
 const WRECK_M := 30.0
 const WRECK_X := 2.5
 ## Share of the crowd that takes to the road, how far a head looks for one, and how far it shuffles
@@ -68,11 +68,7 @@ static func build(level: ZoneLevel) -> RoadDead:
 	var zr := ZoneRoads.of(level)
 	if zr == null or zr.net == null:
 		return null
-	var hulks := PackedVector2Array()  # (the burnt-out hulks the scatter laid: any near a road is one to gather at)
-	if level.scatter:
-		for item: Dictionary in level.scatter.items:
-			if item.has("shape") and String(item.shape).begins_with("hulk"):
-				hulks.append(Vector2((item.pos as Vector3).x, (item.pos as Vector3).z))
+	var hulks := hulks_of(level.scatter.items) if level.scatter else PackedVector2Array()
 	var sites: Array = []
 	for m: ZoneModule in level.modules():
 		var base := ZoneModules.base(String(m.type))
@@ -97,6 +93,15 @@ static func build(level: ZoneLevel) -> RoadDead:
 			var dir := Vector2(b.x - a.x, b.z - a.z).normalized()
 			rd._add(at, dir, x, sites, hulks)
 	return rd
+
+
+## The burnt-out hulks among the scatter's `items` (x, z): any near a road is one to gather at.
+static func hulks_of(items: Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for item: Dictionary in items:
+		if item.has("shape") and String(item.shape).begins_with("hulk"):
+			out.append(Vector2((item.pos as Vector3).x, (item.pos as Vector3).z))
+	return out
 
 
 func _add(at: Vector2, dir: Vector2, x: float, sites: Array, hulks: PackedVector2Array) -> void:
@@ -183,7 +188,15 @@ func seed_heads(level: SurvivalLevel, crowd: ZoneDead, rng: RandomNumberGenerato
 	var made := 0
 	var room := mini(SEED_MAX, ZoneDead.CAP - SEED_ROOM - crowd.dead.size())
 	var pace := FirstHour.open_pace() * DeadDecay.count_mult()
+	var order: Array[int] = []  # (a seeded shuffle: when the room runs out it isn't the later roads that go empty)
 	for i in anchors.size():
+		order.append(i)
+	for k in range(order.size() - 1, 0, -1):
+		var j := rng.randi_range(0, k)
+		var t := order[k]
+		order[k] = order[j]
+		order[j] = t
+	for i: int in order:
 		if made >= room:
 			break
 		var at := Vector3(anchors[i].x, 0.0, anchors[i].y)

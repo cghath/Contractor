@@ -179,6 +179,11 @@ static func _hosted(m: WorldModel, z: String, zd: Dictionary, horde: Dictionary)
 static func walk(m: WorldModel, z: String, horde: Dictionary) -> void:
 	var zd: Dictionary = m.zones()[z]
 	var to := String(horde.get("to", ""))
+	if to != "" and not m.crossing_open(z, to):  # (the bridge went while it walked: it turns back and picks again, the hop unspent)
+		to = ""
+		horde.to = ""
+		horde.warned = false
+		horde.hops = int(horde.get("hops", 0)) + 1
 	if to == "":
 		if int(horde.get("hops", 0)) <= 0:
 			horde.erase("clock")
@@ -243,30 +248,83 @@ static func server_warn(level: SurvivalLevel, a: Dictionary) -> void:
 	Survival._journal_line(text + ".")
 	for p: Soldier in MapNodes.players(level):
 		Survival._tell(p, text)
+	var seconds := float(WARN_TICKS) * WorldModel.TICK_MIN / 1440.0 * Survival.DAY_MIN * 60.0
+	var now := WorldSim.world_now()
+	var spot := _new_spot(level, a)  # (fixed here: the groans' bearing is where it will appear)
+	spot["day"] = now
+	spot["groan_until"] = now + seconds / (Survival.DAY_MIN * 60.0)
+	var warns := _warns()
+	for key: String in warns.keys():
+		if now - float((warns[key] as Dictionary).get("day", 0.0)) > OUT_KEEP_DAYS:
+			warns.erase(key)  # (one that never came: its bridge went, or the players left)
+	warns[_spot_key(a)] = spot
 	var crowd := ZoneDead.of(level)
 	if crowd:
-		crowd.server_warn(_start_point(level, a), float(WARN_TICKS) * WorldModel.TICK_MIN / 1440.0 * Survival.DAY_MIN * 60.0)
+		crowd.server_warn(Vector3(float(spot.x), 0.0, float(spot.z)), seconds)
 	SessionLog.note("survival world: warned of a horde of %d (%s)" % [int(a.get("n", 0)), text])
 
 
 ## Host: a clock horde goes live (actions "horde_enter" with "clock", "horde_rise"): `a.n` of the
-## crowd put down at its source and walked at where the people are. Returns the heads made.
+## crowd put down where the warning said and walked at where the people were then. Returns the heads
+## made (fewer than asked with the crowd at ZoneDead.CAP: noted, the rest are lost).
 static func server_rise(level: SurvivalLevel, a: Dictionary) -> int:
 	var crowd := ZoneDead.of(level)
 	if crowd == null:
 		return 0
-	var rng := RandomNumberGenerator.new()
-	rng.seed = hash([WorldSim.world_seed(), String(a.zone), WorldSim.world_now(), "horde_rise"])
-	var from := level.ground_point(_start_point(level, a))
-	var to := _march_point(level, rng)
-	var made := crowd.server_march(from, to, int(a.get("n", 0)))
+	var spot := _take_spot(level, a)
+	if spot.is_empty():
+		spot = _new_spot(level, a)
+	var from := level.ground_point(Vector3(float(spot.x), 0.0, float(spot.z)))
+	var to := Vector3(float(spot.tx), 0.0, float(spot.tz))
+	var n := int(a.get("n", 0))
+	var made := crowd.server_march(from, to, n)
 	SessionLog.note("survival world: a horde of %d on the clock walks at (%.0f, %.0f) from (%.0f, %.0f)" % [made, to.x, to.z, from.x, from.z])
+	if made < n:
+		SessionLog.note("survival world: the crowd is full: %d of a horde of %d on the clock never came (ZoneDead.CAP %d)" % [n - made, n, ZoneDead.CAP])
 	return made
 
 
+## The fixed spots of the warnings out (saved with the world): source key -> {"zone", "x", "z",
+## "tx", "tz", "day", "groan_until"}.
+static func _warns() -> Dictionary:
+	var st := Survival.state()
+	if not st.get("horde_warns") is Dictionary:
+		st["horde_warns"] = {}
+	return st["horde_warns"]
+
+
+static func _spot_key(a: Dictionary) -> String:
+	return "%s|%s|%s" % [String(a.get("zone", "")), String(a.get("from", "")), String(a.get("place", ""))]
+
+
+## A new spot for `a`: where it's bound and where it starts, clear of that and of the players.
+static func _new_spot(level: SurvivalLevel, a: Dictionary) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([WorldSim.world_seed(), String(a.get("zone", "")), WorldSim.world_now(), "horde_spot"])
+	var to := _march_point(level, rng)
+	var from := _start_point(level, a, to)
+	return {"zone": String(a.get("zone", "")), "x": from.x, "z": from.z, "tx": to.x, "tz": to.z}
+
+
+## The warning's spot for `a`, taken ({} when there was none, it's another zone's, or a player has
+## walked onto it since: the horde isn't to appear on top of him).
+static func _take_spot(level: SurvivalLevel, a: Dictionary) -> Dictionary:
+	var warns := _warns()
+	var spot: Dictionary = warns.get(_spot_key(a), {})
+	warns.erase(_spot_key(a))
+	if spot.is_empty() or String(spot.get("zone", "")) != String(a.get("zone", "")):
+		return {}
+	var at := Vector2(float(spot.x), float(spot.z))
+	for p: Soldier in MapNodes.players(level):
+		if p.vitals.is_up() and Vector2(p.global_position.x, p.global_position.z).distance_to(at) <= ZoneDead.LIVE_M + SPREAD_M:
+			return {}
+	return spot
+
+
 ## Where a clock horde is put down: its source place or the crossing it comes by, else the site
-## farthest from the players; never within START_MIN_M of one if anywhere is farther.
-static func _start_point(level: ZoneLevel, a: Dictionary) -> Vector3:
+## farthest from the players and from where it's bound (`march`); never within START_MIN_M of either
+## if anywhere is farther.
+static func _start_point(level: ZoneLevel, a: Dictionary, march: Vector3) -> Vector3:
 	var picks: Array[Vector3] = []
 	var from := String(a.get("from", ""))
 	if from != "":
@@ -285,7 +343,7 @@ static func _start_point(level: ZoneLevel, a: Dictionary) -> Vector3:
 	var best := picks[0]
 	var best_d := -1.0
 	for at: Vector3 in picks:
-		var d := INF
+		var d := Vector2(march.x - at.x, march.z - at.z).length()
 		for p: Soldier in players:
 			d = minf(d, Vector2(p.global_position.x - at.x, p.global_position.z - at.z).length())
 		if d >= START_MIN_M:
@@ -339,17 +397,22 @@ static func server_note_out(level: SurvivalLevel) -> void:
 	var crowd := ZoneDead.of(level)
 	if zd.is_empty() or crowd == null:
 		return
-	var n := crowd.dead.filter(func(d: Dictionary) -> bool: return bool(d.alive) and d.has("march")).size()
+	var n := crowd.dead.filter(func(d: Dictionary) -> bool: return bool(d.alive) and d.has("march") and not bool(d.get("frozen", false))).size()
 	if n > 0:
 		zd["horde_out"] = {"n": n, "day": WorldSim.world_now()}
 	else:
 		zd.erase("horde_out")
 
 
-## Host, the level up (Survival.server_level_ready, after the world's set up): a horde saved on the
-## ground walks again, warned.
+## Host, the level up (Survival.server_level_ready, after the world's set up): the groans of a
+## warning still running at the save, and a horde saved on the ground walks again, warned.
 static func server_level_ready(level: SurvivalLevel) -> void:
 	var zone := WorldSim.hosted_zone()
+	var crowd := ZoneDead.of(level)
+	var now := WorldSim.world_now()
+	for rec: Dictionary in _warns().values():
+		if crowd and String(rec.get("zone", "")) == zone and float(rec.get("groan_until", 0.0)) > now:
+			crowd.server_warn(Vector3(float(rec.x), 0.0, float(rec.z)), (float(rec.groan_until) - now) * Survival.DAY_MIN * 60.0)
 	var zd: Dictionary = (WorldSim.section().get("zones", {}) as Dictionary).get(zone, {})
 	var out: Dictionary = zd.get("horde_out", {})
 	if out.is_empty():

@@ -800,6 +800,14 @@ func _test_march_and_roads() -> void:
 	var g := Soundscape.groans({"me": Vector2.ZERO, "crowd": [], "horde": true, "horde_dir": Vector2.RIGHT})
 	check(float(g.vol) > 0.0 and (g.dir as Vector2) == Vector2.RIGHT and float(g.dist) > 100.0, "and with none near, the groans come from where it's coming (%s)" % g)
 	crowd._warn_until = -1.0
+	# Frozen on the march: it thins as any frozen horde head does (or the zone stays "in a horde" all frost).
+	crowd.dead.clear()
+	crowd.server_march(far, near, 3)
+	for d: Dictionary in crowd.dead:
+		d["frozen"] = true
+	for i in 3:
+		crowd._thin_horde()
+	check(crowd.horde_count() == 0, "a horde frozen on the march thins out with the frost (%d)" % crowd.horde_count())
 
 	# The anchors: the bigger road and a town draw more; a hulk on the road more again.
 	var rd := RoadDead.new()
@@ -808,6 +816,19 @@ func _test_march_and_roads() -> void:
 	rd._add(Vector2(3000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.asphalt), [[Vector2(3100.0, 0.0), "town"]], PackedVector2Array())
 	rd._add(Vector2(4000.0, 0.0), Vector2.RIGHT, float(RoadDead.ROAD_X.asphalt), [], PackedVector2Array([Vector2(4010.0, 0.0)]))
 	check(rd.weights[1] > rd.weights[0] and rd.weights[2] > rd.weights[1] and rd.weights[3] >= rd.weights[1] * RoadDead.WRECK_X * 0.99, "asphalt draws more than dirt, a town more, a wreck more again (%s)" % rd.weights)
+	var style_hulks: Array = []  # (the shape names the scatter really uses: data/props.json's "hulks")
+	var props: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(ZoneProps.DATA_PATH))
+	for style: Dictionary in (props.styles as Dictionary).values():
+		for shape: String in style.get("hulks", {}):
+			if not shape in style_hulks:
+				style_hulks.append(shape)
+	check(style_hulks.size() >= 3, "the styles name their hulks (%s)" % style_hulks)
+	var hulk_items: Array = [{"shape": "car_sedan", "pos": Vector3(1.0, 0.0, 2.0)}, {"pos": Vector3(3.0, 0.0, 4.0)}]
+	for s: String in style_hulks:
+		hulk_items.append({"shape": s, "pos": Vector3(7.0, 0.0, 9.0)})
+	var found := RoadDead.hulks_of(hulk_items)
+	check(found.size() == style_hulks.size() and found[0] == Vector2(7.0, 9.0), "the scatter's own hulk shapes are found, and only those (%d)" % found.size())
+	check(not RoadDead.hulks_of(level.scatter.items).is_empty(), "and this zone's roadside has some (%d)" % RoadDead.hulks_of(level.scatter.items).size())
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
 	check(rd.pick(Vector2(1001.0, 0.0), rng) == 0 and rd.pick(Vector2(50000.0, 0.0), rng) == -1, "a head takes the road near it, not one a long way off")
@@ -839,10 +860,11 @@ func _test_march_and_roads() -> void:
 				crowd._physics_process(1.0)
 			var dist := (d.pos as Vector2).distance_to(real.anchors[int(d.get("anchor", at))])
 			check(d.has("anchor") and dist <= RoadDead.LINGER_M + 14.0, "it drifts to the road and lingers on it (%.1f m from its spot)" % dist)
+			var spot := int(d.anchor)
 			var after := (d.pos as Vector2)
 			for i in 100:
 				crowd._physics_process(1.0)
-			check((d.pos as Vector2).distance_to(real.anchors[int(d.anchor)]) <= RoadDead.LINGER_M + 14.0 and after != Vector2.INF, "and keeps to its stretch")
+			check(int(d.anchor) == spot and (d.pos as Vector2) != after and (d.pos as Vector2).distance_to(real.anchors[spot]) <= RoadDead.LINGER_M + 14.0, "and keeps shuffling about its own stretch")
 			# Seeded on the road, within the crowd's cap, and only some of it.
 			crowd.dead.clear()
 			real.used.fill(0)
@@ -853,6 +875,34 @@ func _test_march_and_roads() -> void:
 			var on := crowd.dead.filter(func(h: Dictionary) -> bool: return h.has("anchor"))
 			var near_road := on.all(func(h: Dictionary) -> bool: return (h.pos as Vector2).distance_to(real.anchors[int(h.anchor)]) <= 12.0)
 			check(on.size() == seeded and near_road, "and stand at their spots along the road")
+			# SEED_ROOM stays free however full the crowd is.
+			crowd.dead.clear()
+			real.used.fill(0)
+			var r3 := RandomNumberGenerator.new()
+			r3.seed = 6
+			var keep := far + fwd * 900.0
+			for i in ZoneDead.CAP - RoadDead.SEED_ROOM - 3:
+				crowd.server_add(keep, "walker")
+			var few := real.seed_heads(level, crowd, r3)
+			check(few <= 3 and crowd.dead.size() <= ZoneDead.CAP - RoadDead.SEED_ROOM, "the road's dead leave room for a horde under the cap (%d more, %d of %d)" % [few, crowd.dead.size(), ZoneDead.CAP])
+		# The real anchors: none near the start farm, none where the living hold a place.
+		for m: ZoneModule in level.modules():
+			if m.module_id == FirstHour.HOME_ID:
+				var home := Vector2(m.global_position.x, m.global_position.z)
+				var nearest := INF
+				for a: Vector2 in real.anchors:
+					nearest = minf(nearest, a.distance_to(home))
+				check(nearest >= RoadDead.START_CLEAR_M, "the start farm's stretch is clear of the road's dead (nearest spot %.0f m)" % nearest)
+		var quiet_at := real.anchors[real.anchors.size() / 2]
+		FirstHour._quiet_at = Time.get_ticks_msec() / 1000.0 + 1000.0
+		FirstHour._quiet.clear()
+		FirstHour._quiet.append(quiet_at)
+		var rebuilt := RoadDead.build(level)
+		FirstHour._quiet_at = -100.0
+		var q_nearest := INF
+		for a: Vector2 in rebuilt.anchors:
+			q_nearest = minf(q_nearest, a.distance_to(quiet_at))
+		check(rebuilt.anchors.size() < real.anchors.size() and q_nearest > FirstHour.QUIET_M, "and none where the living hold a place (nearest %.0f m of %.0f)" % [q_nearest, FirstHour.QUIET_M])
 	crowd.dead.clear()
 	Survival.state()["pressure"] = {}
 
@@ -962,6 +1012,15 @@ func _test_death() -> void:
 func _test_save_and_continue() -> void:
 	print("Save and continue")
 	Survival.state()["day"] = 3
+	# A horde warned of and on the ground at the save.
+	var zone := String(Survival.state().get("zone", ""))
+	var crowd0 := ZoneDead.of(level)
+	var fwd0 := -player.global_basis.z
+	crowd0.dead.clear()
+	(WorldSim.section().zones[zone] as Dictionary)["horde"] = {}
+	HordeClock.server_warn(level, {"zone": zone, "from": "", "place": "", "n": 12})
+	check(crowd0.warned(), "a warning in the air at the save")
+	crowd0.server_march(player.global_position + fwd0 * 500.0, player.global_position + fwd0 * 400.0, 12)
 	Survival.server_save()
 	var name := Survival.world
 	check(Campaign.has_save(), "the world saves (%s)" % Campaign.save_path())
@@ -973,6 +1032,12 @@ func _test_save_and_continue() -> void:
 	level = SurvivalLevel.of(self)
 	check(Survival.day() == 3 and level != null, "where it was left: day %d" % Survival.day())
 	await _wait_for(func() -> bool: return level != null and level.players.get_node_or_null(^"1") != null, 20.0)
+	var zd: Dictionary = WorldSim.section().zones.get(zone, {})
+	var crowd1 := ZoneDead.of(level)
+	check(int((zd.get("horde", {}) as Dictionary).get("n", 0)) == 12 and bool((zd.get("horde", {}) as Dictionary).get("clock", false)) and not zd.has("horde_out"),
+		"the horde on the ground at the save walks again on Continue (%s)" % zd.get("horde", {}))
+	check(crowd1 != null and crowd1.warned(), "and its groans are still in the air")
+	zd["horde"] = {}
 
 
 func _index_of(s: Soldier, id: StringName) -> Array:

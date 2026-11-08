@@ -228,9 +228,13 @@ neighbour and the players' zone likelier), then breaks up as any other. Far away
 sim and groups in its way meet it (`WorldFights`). Near a played zone it's real: the host warns
 first (a journal line, a message, distant groans from its bearing on every peer, `WARN_TICKS` = 2
 world hours ahead), then ZoneDead marches it in: from its town/nest or the crossing, at least 300
-m from anyone, walked at the settlement or a player. Marching heads don't thin until they arrive.
-All of it (the due ticks, the walking hordes) is the world section's, so it saves, and a horde
-caught on the ground at a save walks again on Continue (warned).
+m from anyone and from where it's bound, walked at the settlement or a player. Where it starts and
+where it's bound are fixed when the warning goes out, so the groans' bearing is where it appears
+(picked again only if a player has walked onto the spot). Marching heads don't thin until they
+arrive, unless frozen on the way. A horde whose next crossing is blown while it walks turns back
+and picks another way. All of it (the due ticks, the walking hordes, the warnings out) saves with
+the world, and a horde caught on the ground at a save walks again on Continue (warned); a warning
+still in the air reaches late joiners and survives Continue.
 
 **Roads** (`RoadDead`, Proposed): some of a zone's crowd (40%) drift to the nearest road and linger
 on it, chosen when a head's wait ends (the crowd's own budget: no per-frame queries), so walking

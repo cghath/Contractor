@@ -42,7 +42,7 @@ const MARCH_DONE_M := 10.0
 
 var dead: Array[Dictionary] = []  # {"pos": Vector2, "face", "kind", "alive", "target": Vector2, "wait", "horde", "show", "show_face", "turned", "origin", "nest"?, "march"?: Vector2, "road_on"?, "anchor"?}
 var horde_until := -1.0
-var roads: RoadDead = null  # (host: RoadDead.server_build)
+var roads: RoadDead = null  # (host: RoadDead.server_level_ready)
 ## Every peer: a horde is coming from here (server_warn; the soundscape's distant groans).
 var warn_point := Vector2.INF
 var _warn_until := -1.0
@@ -66,6 +66,8 @@ func _ready() -> void:
 	var level := get_parent() as ZoneLevel
 	_terrain = level.terrain if level else null
 	_rng.seed = hash("dead|" + String(get_parent().name))
+	if not multiplayer.is_server():
+		(func() -> void: _ask_warn.rpc_id(1)).call_deferred()  # (a horde warned of before we joined: its groans)
 	if DisplayServer.get_name() != "headless":
 		for kind: String in ["walker", "runner", "screamer", "crawler", "bloater", "hazmat"]:
 			var multi := MultiMesh.new()
@@ -156,6 +158,13 @@ func server_warn(at: Vector3, seconds: float) -> void:
 func _warned(x: float, z: float, seconds: float) -> void:
 	warn_point = Vector2(x, z)
 	_warn_until = _time + seconds
+
+
+## Host: a late joiner, its level up, asks for a warning still in the air.
+@rpc("any_peer", "call_remote", "reliable")
+func _ask_warn() -> void:
+	if multiplayer.is_server() and warned():
+		_warned.rpc_id(multiplayer.get_remote_sender_id(), warn_point.x, warn_point.y, _warn_until - _time)
 
 
 ## Whether a warned horde's distant groans are still in the air (Soundscape).
@@ -295,7 +304,7 @@ func _convert(level: Node) -> void:
 ## Host: a horde that has nothing to go to thins out, a head at a time (back into the zone's quiet).
 func _thin_horde() -> void:
 	for i in dead.size():
-		if bool(dead[i].horde) and dead[i].alive and not dead[i].has("march"):  # (one still walking somewhere doesn't thin: HordeClock)
+		if bool(dead[i].horde) and dead[i].alive and (not dead[i].has("march") or bool(dead[i].get("frozen", false))):  # (one still walking somewhere doesn't thin, one frozen on the way does: HordeClock)
 			dead.remove_at(i)
 			return
 

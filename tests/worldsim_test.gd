@@ -349,6 +349,37 @@ func _test_horde_clock() -> void:
 		rose = rose or m3.actions.any(func(act: Dictionary) -> bool: return String(act.kind) == "horde_rise" and String(act.place) == "t")
 	check(rose and (m3.zone(h).horde as Dictionary).is_empty(), "then it comes out of the town (a real horde for the zone)")
 
+	# The first roll waits out the soft first night (exactly: the same seed, soft and not).
+	var soft := _iso(35)
+	var hard := _iso(35)
+	soft.clock = {"world_x": 1.0, "size_x": 1.0, "soft": true}
+	hard.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	soft.now = 1.25
+	hard.now = 1.25
+	var at := soft.now + WorldModel.TICK_MIN / 1440.0
+	soft.step(at)
+	hard.step(at)
+	var gate := ceili((HordeClock.SOFT_END_DAY - at) * WorldModel.TICKS_PER_DAY)
+	var zs := WorldModel._sorted(soft.zones().keys())
+	check(zs.all(func(zid: String) -> bool: return int(soft.zone(zid).clock_due) - int(hard.zone(zid).clock_due) == gate),
+		"the first roll is held past the soft first night (%d ticks more than at High)" % gate)
+
+	# A bridge blown while it walks: it doesn't arrive, turns back and picks again, the hop unspent.
+	var mb2 := _iso(36)
+	mb2.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	var ba := _zone(mb2, 2)
+	var bb := String(mb2.zone(ba).links[0])
+	mb2.zone(ba).horde = {"n": 30, "since": 0, "clock": true, "hops": 1, "to": bb, "arrive": mb2.tick() + 2, "warned": true, "place": ""}
+	(mb2.w as Dictionary)["crossings"] = {WorldModel.crossing_key(ba, bb): "blown"}
+	var bt := mb2.now
+	for i in 4:
+		bt += WorldModel.TICK_MIN / 1440.0
+		mb2.step(bt)
+	var bh: Dictionary = mb2.zone(ba).horde
+	check((mb2.zone(bb).horde as Dictionary).is_empty(), "a bridge blown while it walks: it doesn't cross")
+	check(not bh.is_empty() and String(bh.get("to", "")) != bb and not bool(bh.get("warned", true)) and int(bh.get("hops", -1)) == 1 and String(bh.get("to", "")) != "",
+		"it picks another way, the warning reset, its hop not wasted (%s)" % bh)
+
 	# A due zone with a horde already keeps the one; a rolled gap is by the seed.
 	var ma := _iso(77)
 	var mb := _iso(77)
@@ -367,7 +398,7 @@ func _test_horde_clock() -> void:
 		if bool((ma.zone(zid).horde as Dictionary).get("clock", false)):
 			hordes += 1
 	check(same, "two sims from one seed agree on the clock (%d walking now)" % hordes)
-	check(ma.zones().values().any(func(zd: Dictionary) -> bool: return int(zd.get("clock_due", -1)) > ma.tick() or zd.has("clock_due")), "every zone has a clock")
+	check(ma.zones().values().all(func(zd: Dictionary) -> bool: return int(zd.get("clock_due", -1)) > ma.tick()), "every zone's clock is running, its next one still to come")
 
 	# Save and load: the world section round-trips (Campaign saves it as JSON; ints come back floats).
 	var copy: Dictionary = JSON.parse_string(JSON.stringify(ma.w, "", true, true))
@@ -391,6 +422,7 @@ func _test_horde_clock() -> void:
 ## The host's side of it, in the hosted zone: the warning, a real horde far from the player, and one
 ## caught on the ground at a save walking again.
 func _test_horde_clock_live() -> void:
+	var d0_march := func(heads: Array) -> Vector2: return (heads[0] as Dictionary).march
 	var crowd := ZoneDead.of(level)
 	var zone := WorldSim.hosted_zone()
 	var zd: Dictionary = WorldSim.section().zones[zone]
@@ -409,6 +441,36 @@ func _test_horde_clock_live() -> void:
 	for d: Dictionary in marching:
 		nearest = minf(nearest, (d.pos as Vector2).distance_to(me))
 	check(nearest >= HordeClock.START_MIN_M - HordeClock.SPREAD_M * 1.5, "well away from anyone (%.0f m at the nearest)" % nearest)
+	var centre := Vector2.ZERO
+	for d: Dictionary in marching:
+		centre += (d.pos as Vector2) / marching.size()
+	check(centre.distance_to(crowd.warn_point) <= HordeClock.SPREAD_M, "it appears where the groans said it was (%.0f m off the warning's bearing point)" % centre.distance_to(crowd.warn_point))
+	check((d0_march.call(marching) as Vector2).distance_to(crowd.warn_point) >= HordeClock.START_MIN_M - ZoneDead.MARCH_SPREAD_M * 1.5, "and not on top of where it's bound")
+
+	# A start point on where it's bound is passed over for one clear of it.
+	var mods := level.modules()
+	if mods.size() >= 2:
+		var bound: Vector3 = mods[0].global_position
+		var pick := HordeClock._start_point(level, {"zone": zone, "from": "", "place": mods[0].module_id}, bound)
+		var d2 := Vector2(pick.x - bound.x, pick.z - bound.z).length()
+		var somewhere := mods.any(func(m: ZoneModule) -> bool:
+			var g := Vector2(m.global_position.x, m.global_position.z)
+			return g.distance_to(Vector2(bound.x, bound.z)) >= HordeClock.START_MIN_M and g.distance_to(me) >= HordeClock.START_MIN_M)
+		check(somewhere and d2 >= HordeClock.START_MIN_M, "a source on the point it's bound for is passed over (%.0f m)" % d2)
+
+	# The clock branch of "horde_enter", live: warned from the neighbour, in at the same place.
+	crowd.dead.clear()
+	var from := String(zd.links[0])
+	sim._do_action({"kind": "horde_warn", "zone": zone, "from": from, "place": "", "n": 15})
+	var said := crowd.warn_point
+	sim._do_action({"kind": "horde_enter", "zone": zone, "from": from, "n": 15, "clock": true})
+	var came := crowd.dead.filter(func(d: Dictionary) -> bool: return d.has("march"))
+	var c2 := Vector2.ZERO
+	for d: Dictionary in came:
+		c2 += (d.pos as Vector2) / maxf(1.0, came.size())
+	check(came.size() == 15 and c2.distance_to(said) <= HordeClock.SPREAD_M, "a horde walking in comes on the march, where it was warned of (%d, %.0f m off)" % [came.size(), c2.distance_to(said)])
+	crowd.dead.clear()
+	sim._do_action({"kind": "horde_rise", "zone": zone, "from": "", "place": "", "n": 20})
 	HordeClock.server_note_out(level)
 	check(int((zd.get("horde_out", {}) as Dictionary).get("n", 0)) == 20, "a save counts it on the ground")
 	crowd.dead.clear()
