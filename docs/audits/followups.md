@@ -2151,6 +2151,7 @@ Captain, 2026-11-07: F-421, the sniper/dmr tag rule (Loadouts.OWN_SCOPE_TAGS) de
 Captain, 2026-11-08: F-465, tag the M27 "dmr" so it keeps its own 4x prism on a gun swap: "yes". F-405, Cancel on the buy question: "cancelling an action would be a good addition".
 2026-11-08 | feat/loadout-buy (F-465, F-478): the M27 tagged "dmr" with nothing else changed, though the tag also takes the M320 and Skeleton Key off it and makes the group board call its carrier a sniper; flagged as F-478 for Captain, weapons_test's M320 list follows | his answer was to the tag, and a DMR not taking an M320 is the existing rule; the fix if he wants the M320 kept is small | a new tag or an exception for the M27 alone, unasked
 2026-11-08 | feat/loadout-buy (F-405): "cancelling an action would be a good addition" read as: Cancel backs out of the whole action (no draft entry, no purchase, no money moved, draft and close warning as they were), not "in the draft unbought"; both loadout screens already did that, so no game code changed and the suite now checks it | Captain's words; flagged to him in the report | putting the item in the draft unbought on Cancel
+2026-11-08 | feat/loadout-buy (F-478, review of 51175577): the M27 stays tagged "dmr" as Captain said, and an attachment left on a gun that no longer takes it is swept into the stash loose with its own state on campaign load and at every rebuild and restock (`GearMounts.shed_unfit`) | without it an M320 on an M27 vanished silently (R0906), and his answer was to the tag | a separate own-scope tag for the M27, which would undo the side effects but is his F-478 choice
 2026-11-08 | feat/loadout-buy (round 7 review): `Loadouts._comes_with` doesn't count his worn slots, noted in its comment: a gun fits only its own slot (the one being swapped), so a second unit on him can only be carried, which is counted | the case asked about can't happen in play | scanning worn slots with code nothing can reach
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
@@ -2301,8 +2302,13 @@ loose. Asked of Captain again on 2026-11-07. Captain, 2026-11-08: "yes"; tagged 
 Everything that reads the tag: `Loadouts.OWN_SCOPE_TAGS` (the point of F-465); the M320 and the
 Skeleton Key's `not_fits` lists (`data/items.json`, read by `GunAttachments.fits`), so the M27 no
 longer takes either; and `GroupBoard.soldier_kind`, so a man seen carrying one is reported as a
-sniper. An M320 already on an M27 goes to the stash loose at his next loadout rebuild, none is
-lost. Nothing else reads it: AI kits don't use the M27 (the "dmr" in `data/factions.json` is a
+sniper. An M320 or Key already on an M27 would have been lost silently: the state still names it
+but `GunAttachments.mounted_id` returns nothing once it doesn't fit, so no rebuild, detach, count
+or label saw it, and a template with a grip wrote over it (review of 51175577; R0906 failed on
+it). `GearMounts.shed_unfit` now takes it off into the stash loose, its grenade or shells in, when
+a campaign loads (stash and everyone's kit) and at every rebuild and restock, so none is lost
+(loadout, base). Nothing else reads the tag: AI kits don't use the M27 (the "dmr" in `data/factions.json` is a
 kit name), prices go by id, and no gun stat depends on it. `tests/weapons_test.gd` moved the M27
 from the M320's "yes" list to its "no" list. If Captain wants the M320 kept on it: an exception in
-`GunAttachments.fits`, or a tag of its own for keeping the scope.
+`GunAttachments.fits`, or a tag of its own for keeping the scope. The sweep is general (any
+attachment on a gun that stopped taking it), so it stays useful either way.

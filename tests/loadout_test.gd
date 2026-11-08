@@ -221,6 +221,7 @@ func _test_kit_rules(rifleman: Dictionary) -> void:
 		"swapping the helmet moves its NVG onto the new one: nothing missing, the old helmet bare in the stash (%s, missing %s)" % [
 			GearMounts.of(heavy, res3.gear.slot_state.get("helmet", {})), res3.missing])
 	_test_gun_swap_rules(rifleman)
+	_test_unfit_mounts(rifleman)
 	var points: Array = ItemDB.get_item(StringName(String(t.slots.vest))).stats.get("molle", [])
 	var free := ""
 	for p: Dictionary in points:
@@ -1130,6 +1131,60 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 		and onto_bare.missing.is_empty() and Loadouts.units(bp, [onto_bare.gear]) == bare_before and bare_m4 and int(dots.call(bp)) == bare_dots,
 		"a stock M4 to the stash's bare HK416: the M4's dot moves over, the M4 goes back bare, nothing missing, made or lost (%s, missing %s; loose dots %d -> %d)" % [
 			optic_of.call(onto_bare.gear), onto_bare.missing, bare_dots, dots.call(bp)])
+
+
+## F-478: an attachment on a gun that has since stopped taking it (an M320 or Skeleton Key on an
+## M27, from before it was tagged "dmr") is still in the gun's raw state, where nothing else sees
+## it. The rebuild takes it off into the stash loose with its own state; nothing is lost.
+func _test_unfit_mounts(rifleman: Dictionary) -> void:
+	print("An attachment the gun no longer takes (F-478)")
+	var m27 := ItemDB.get_item(&"m27")
+	var ub := String(GunAttachments.UNDERBARREL)
+	var loaded := GunAttachments.with_mounted(m27.default_state(), GunAttachments.UNDERBARREL, &"m320", {"round": "m406"})
+	var keyed := GunAttachments.with_mounted(m27.default_state(), GunAttachments.UNDERBARREL, &"skeleton_key", {"rounds": 2})
+	var loose := func(p: Array, id: String) -> int:
+		return p.filter(func(e: Dictionary) -> bool: return String(e.id) == id).reduce(func(n: int, e: Dictionary) -> int: return n + int(e.count), 0)
+	var round_on := func(p: Array) -> bool:
+		return p.any(func(e: Dictionary) -> bool: return String(e.id) == "m320" and String(e.get("state", {}).get("round", "")) == "m406")
+	var raw_27 := func(p: Array) -> bool:
+		return p.any(func(e: Dictionary) -> bool: return String(e.id) == "m27" and (e.get("state", {}) as Dictionary).has(ub))
+	check(not GunAttachments.fits(m27, ItemDB.get_item(&"m320")) and GunAttachments.mounted_id(m27, loaded, GunAttachments.UNDERBARREL) == &"" and String(loaded.get(ub, "")) == "m320",
+		"an M320 left on an M27 is still in its state, and nothing reads it")
+	# Worn, nothing named on the slot.
+	var worn := rifleman.duplicate(true)
+	worn.slots["primary"] = "m27"
+	worn.slot_state["primary"] = loaded.duplicate(true)
+	var pool := _stash()
+	var had: int = loose.call(pool, "m320")
+	var res: Dictionary = Loadouts.rebuild([{"gear": worn, "template": Loadouts.template_of(worn)}], pool)[0]
+	check(int(loose.call(pool, "m320")) == had + 1 and round_on.call(pool) and not (res.gear.slot_state.get("primary", {}) as Dictionary).has(ub) and String(res.gear.slots.get("primary", "")) == "m27",
+		"worn, a rebuild puts the M320 in the stash loose with its grenade in, off the M27 he keeps (%d -> %d)" % [had, loose.call(pool, "m320")])
+	# The template names a grip for that mount: writing it used to overwrite the M320.
+	pool = _stash()
+	BaseArmory.add(pool, &"grip_vertical", 1)
+	had = loose.call(pool, "m320")
+	res = Loadouts.rebuild([{"gear": worn, "template": Loadouts.set_mount(Loadouts.template_of(worn), &"primary", ub, "grip_vertical")}], pool)[0]
+	check(int(loose.call(pool, "m320")) == had + 1 and round_on.call(pool) and GearMounts.on(m27, res.gear.slot_state.get("primary", {}), ub) == "grip_vertical",
+		"a grip asked for on that mount goes on and the M320 still ends up in the stash (%d -> %d, on it %s)" % [had, loose.call(pool, "m320"), GearMounts.of(m27, res.gear.slot_state.get("primary", {}))])
+	# In the stash, drawn by a swap to the M27, and a Key in his pack.
+	pool = _stash()
+	pool.append({"id": "m27", "count": 1, "state": Roster.json_safe(loaded)})
+	had = loose.call(pool, "m320")
+	var packed := rifleman.duplicate(true)
+	var keys: int = loose.call(pool, "skeleton_key")
+	(packed.containers["backpack"] as Array).append({"id": "m27", "count": 1, "state": Roster.json_safe(keyed)})
+	res = Loadouts.rebuild([{"gear": packed, "template": Loadouts.set_slot(Loadouts.template_of(rifleman), &"primary", "m27")}], pool)[0]
+	check(int(loose.call(pool, "m320")) == had + 1 and int(loose.call(pool, "skeleton_key")) == keys + 1 and not raw_27.call(pool)
+		and not (res.gear.slot_state.get("primary", {}) as Dictionary).has(ub),
+		"on a stash M27 and on one in his pack: both come off, the M320 (%d -> %d) and the Key (%d -> %d)" % [had, loose.call(pool, "m320"), keys, loose.call(pool, "skeleton_key")])
+	# Left alone where it still fits.
+	pool = _stash()
+	var m4 := ItemDB.get_item(&"m4a1")
+	var good := GunAttachments.with_mounted(m4.default_state(), GunAttachments.UNDERBARREL, &"m320", {"round": "m406"})
+	pool.append({"id": "m4a1", "count": 1, "state": Roster.json_safe(good)})
+	had = loose.call(pool, "m320")
+	Loadouts.rebuild([{"gear": {}, "template": Loadouts.role_template(Roles.RIFLEMAN)}], pool)
+	check(int(loose.call(pool, "m320")) == had, "an M320 on an M4, which takes one, stays on it (%d -> %d)" % [had, loose.call(pool, "m320")])
 
 
 ## Client process: joins the hub, asks the host for a smoke on itself, Fill ammo on a squadmate,

@@ -293,9 +293,10 @@ static func role_template(role: StringName) -> Dictionary:
 ## order (Restock.build). Returns one Restock.build result each ("gear", "missing", "no_room",
 ## ...). Nothing is made or lost: the units in the pool and the gears before are the ones after.
 static func rebuild(people: Array, pool: Array) -> Array:
+	GearMounts.shed_unfit(pool, [])
 	for p: Dictionary in people:
 		var own := Inventory.new()
-		own.net_state = GameState.from_json(_loosen_mounts(p.gear, p.template, pool))
+		own.net_state = GameState.from_json(_loosen_mounts(GearMounts.without_unfit(p.gear, pool), p.template, pool))
 		# Unpacked: what's on and in their own carrier, pack and pouches goes in loose. Left
 		# packed, it could only be drawn with that same carrier, and a rebuild that drew another
 		# (the stash's, with more pouches) left the medic's own IVs locked in his (R0976).

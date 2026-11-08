@@ -109,3 +109,79 @@ static func with(holder: ItemData, state: Dictionary, mount: String, entry: Dict
 		"optic":
 			return Optics.with_optic(holder, state, StringName(id))
 	return GunAttachments.with_mounted(state, StringName(mount), StringName(id), own)
+
+
+## The attachment mounts of `holder` whose raw `state` names an attachment it no longer takes
+## (an M320 on an M27 from before it was tagged "dmr", F-478). GunAttachments.mounted_id, and so
+## on, of, entry_on and the detach, see nothing there, so nothing else can ever take it off.
+static func unfit_mounts(holder: ItemData, state: Dictionary) -> Array[StringName]:
+	var out: Array[StringName] = []
+	if holder == null or holder.type != "weapon":
+		return out
+	for m: StringName in GunAttachments.MOUNTS:
+		var id := StringName(String(state.get(String(m), "")))
+		if id != &"" and ItemDB.has_item(id) and GunAttachments.mount_of(ItemDB.get_item(id)) == m and GunAttachments.mounted_id(holder, state, m) == &"":
+			out.append(m)
+	return out
+
+
+## Every attachment on a gun that no longer takes it, in `pool` (stash entries) and `gears`
+## (Inventory.net_states), worn, stowed or packed in a carrier or pack, taken off into `pool` loose
+## with its own state (both changed in place). Returns how many came off. Run on the save when a
+## campaign loads and on the kits and pool of a rebuild or restock, so none is lost (F-478).
+static func shed_unfit(pool: Array, gears: Array) -> int:
+	var found := 0
+	for e: Dictionary in pool.duplicate():
+		var n := _shed(e, pool, 1)
+		found += n
+		if n > 0 and ItemDB.has_item(StringName(String(e.id))):
+			pool.erase(e)  # back in by BaseArmory.add: a gun now as it came can stack again
+			BaseArmory.add(pool, StringName(String(e.id)), int(e.get("count", 1)), GameState.from_json(e.get("state", {})))
+	for gear: Dictionary in gears:
+		found += _shed_gear(gear, pool)
+	return found
+
+
+## `gear` with what's unfit on it in `pool` (a copy if there was any; `gear` itself isn't touched).
+static func without_unfit(gear: Dictionary, pool: Array) -> Dictionary:
+	var out := gear.duplicate(true)
+	return out if _shed_gear(out, pool) > 0 else gear
+
+
+static func _shed_gear(gear: Dictionary, pool: Array) -> int:
+	var found := 0
+	var slot_state: Dictionary = gear.get("slot_state", {})
+	for slot: Variant in gear.get("slots", {}):
+		var worn := {"id": String(gear.slots[slot]), "count": 1, "state": slot_state.get(slot, {})}
+		var n := _shed(worn, pool, 1)
+		if n > 0:
+			slot_state[slot] = worn.state
+			found += n
+	for c: Variant in gear.get("containers", {}):
+		for e: Dictionary in gear.containers[c]:
+			found += _shed(e, pool, 1)
+	return found
+
+
+## What's unfit on entry `e` (`times` of it: it may be inside a stack) and on any gun inside it.
+static func _shed(e: Dictionary, pool: Array, times: int) -> int:
+	var state: Dictionary = e.get("state", {})
+	if state.is_empty():
+		return 0
+	var id := StringName(String(e.get("id", "")))
+	var n := times * int(e.get("count", 1))
+	var found := 0
+	for m: StringName in unfit_mounts(ItemDB.get_item(id) if ItemDB.has_item(id) else null, state):
+		BaseArmory.add(pool, StringName(String(state[String(m)])), n, GameState.from_json(GunAttachments.mounted_state(state, m)))
+		state = GunAttachments.with_mounted(state, m, &"")
+		found += n
+	var molle: Dictionary = state.get("molle", {})
+	for point: Variant in molle:
+		found += _shed(molle[point], pool, n)
+		for h: Dictionary in molle[point].get("held", []):
+			found += _shed(h, pool, n)
+	for h: Dictionary in state.get("held", []):
+		found += _shed(h, pool, n)
+	if found > 0:
+		e["state"] = state
+	return found

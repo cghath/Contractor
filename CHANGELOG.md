@@ -73,6 +73,9 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
 - **Changed (loadout):** the M27 is tagged "dmr" (Captain, 2026-11-08, F-465), so it keeps its
   own 4x prism on a gun swap. The tag also means it no longer takes the M320 or the Skeleton
   Key, as no DMR does, and the group board reports a man carrying one as a sniper (F-478).
+- **Fixed (loadout, review):** an M320 or Skeleton Key left on an M27 from before that tag no
+  longer vanishes: it goes to the stash loose, its grenade or shells in, when a campaign loads
+  and at every rebuild and restock (`GearMounts.shed_unfit`, F-478). Checked in loadout and base.
 - **Confirmed (loadout):** Cancel on the buy question backs out of the whole action in both
   loadout screens (Captain, 2026-11-08, F-405); the code already did, and the suite now holds it.
 

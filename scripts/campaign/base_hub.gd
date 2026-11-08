@@ -244,6 +244,10 @@ func load_or_new() -> void:
 		var renamed := Roster.rename_numbered_callsigns(roster())
 		if renamed > 0:
 			SessionLog.note("roster: %d numbered callsign(s) renamed (no \"Saint 2\"s)" % renamed)
+		var people: Array = Roster.members(roster()).values() + Roster.players(roster()).values()
+		var freed := GearMounts.shed_unfit(stash(), people.map(func(p: Dictionary) -> Dictionary: return p.get("gear", {})))
+		if freed > 0:
+			SessionLog.note("stash: %d attachment(s) off guns that no longer take them, now loose in the stash (F-478)" % freed)
 	_host_notice = Campaign.load_notice
 	if not loaded and Campaign.last_load == Campaign.Loaded.UNREADABLE:
 		set_aside_zone_saves()
@@ -3051,6 +3055,7 @@ func _restock_bodies(lvl, people: Array, medic_needs: Array[Dictionary] = []) ->
 		for e: Dictionary in own.strip():
 			BaseArmory.add(pool, StringName(e.id), int(e.count), e.get("state", {}))
 		own.free()
+	GearMounts.shed_unfit(pool, [])  # (the build would write over one on a mount it fills)
 	var wants: Array[Dictionary] = []
 	var at := {}  # people index -> its place in wants
 	for medics: bool in [true, false]:
