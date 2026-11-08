@@ -267,6 +267,8 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 	supports = []
 	plan = {}
 	zone = Briefing.edge_insertions(zone, MapNodes.area_of(self))
+	if real_zone:
+		_add_costs_and_staging()
 	var points := insertion_points()
 	insertion_id = String(points[0].get("id", "")) if not points.is_empty() else ""
 	for point: Dictionary in points:  # the default: walking in at the edge (the first on foot)
@@ -282,6 +284,21 @@ func server_open(p_contract: Dictionary, p_zone: Dictionary) -> void:
 			if p.size() >= 2:
 				markers.server_report_enemy(Vector2(float(p[0]), float(p[1])), String(enemy.get("text", "")))
 	_broadcast()
+
+
+## Host: what a flight costs on each helicopter point, and while staged the way in over the
+## crossing from the FOB, first (combined arms D8: "from the staging FOB"; on foot, no flight).
+func _add_costs_and_staging() -> void:
+	var id := String(zone.get("id", ""))
+	var points: Array = zone.get("insertion_points", [])
+	for point: Dictionary in points:
+		if String(point.get("method", "foot")) == HELI:
+			point["cost"] = Staging.call_price("insertion", id)
+	var level := MapNodes.level_of(self)
+	var from := Staging.insertion_point(level.get(&"def") if level and level.get(&"def") is Dictionary else {})
+	if not from.is_empty():
+		points.push_front(from)
+	zone["insertion_points"] = points
 
 
 ## Host only. Closes the briefing without starting (back to no deployment).
@@ -416,6 +433,10 @@ static func edge_insertions(p_zone: Dictionary, area: Rect2) -> Dictionary:
 ## at the edge, helicopter further in).
 static func method_text(point: Dictionary) -> String:
 	var method := String(point.get("method", "foot"))
+	if bool(point.get("staging", false)):
+		return "drive or walk, no flight"
+	if method == HELI and point.has("cost"):
+		return "Black Hawk, $%s" % DebriefCalc.money(int(point.cost))
 	return "Black Hawk" if method == HELI else "on foot, zone edge" if method == "foot" else method
 
 

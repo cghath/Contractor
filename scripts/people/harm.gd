@@ -27,6 +27,7 @@ static func note_hit(victim: Node, attacker: Node) -> void:
 	info["at"] = Soldier._now()
 	victim.set_meta(META, info)
 	Deconfliction.note_hit(victim, attacker)  # friendly on friendly: an incident (combined_arms 4.5)
+	Staging.server_note_harm(victim, info)  # D8: the host's men, at the host's mercy
 	var hurt := victim as Soldier
 	if hurt and hurt.vitals and not hurt.vitals.is_dead():  # a cry when hit, a scream now and then (Callouts.server_vocal)
 		var callouts := Callouts.of(hurt)

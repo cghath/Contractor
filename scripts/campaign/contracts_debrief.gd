@@ -101,7 +101,7 @@ static func compute(contracts: Array, objectives: Array, civilians: int, report:
 		totals.clawback += int(line.clawback)
 		if civilians > 0:
 			_add(rep, employer, civilians * int(S.call("civilian_rep_employer")))
-		days = maxi(days, int(c.get("days", 1)) + int(MissionRegistry.region(String(c.get("region", ""))).get("travel_days", 0)))
+		days = maxi(days, int(c.get("days", 1)) + Staging.travel_days(c))
 		lines.append(line)
 	totals.fines = civilians * int(S.call("civilian_fine"))
 	totals.paid_now = totals.completion + totals.bonuses - totals.fines - totals.clawback

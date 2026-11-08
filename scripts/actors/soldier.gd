@@ -3198,6 +3198,7 @@ func _server_loot_open(path: NodePath) -> void:
 		return
 	var secs := 0.0 if _loot_searched.has(target.get_instance_id()) else loot_search_seconds(target)
 	_loot_node = target
+	Staging.server_note_loot(target)  # D8: looting the staging FOB's host
 	_loot_ready_at = _now() + secs
 	if target is Soldier and secs > 0.0:
 		model.server_loot(target as Soldier)  # kneeling at the body

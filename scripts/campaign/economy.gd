@@ -258,6 +258,8 @@ func change_reputation(faction: String, delta: int, why := "", ripple := true) -
 		for enemy: String in MissionRegistry.enemies_of(faction):
 			change_reputation(enemy, -int(delta * float(rules.get("ripple_enemy", 0.0))), "", false)
 	_commit()
+	if delta < 0:
+		Staging.server_check_standing()  # D8: below trusted with the host, the company has to go
 
 
 ## Host: the squad worked for `faction` today (a contract signed or settled): its reputation
@@ -431,6 +433,7 @@ func advance_days(days: int, reason := "") -> void:
 		_cool_heat()
 	WorldSites.server_advance_days(days)  # wave 6c: the faction war and site repair/reoccupation
 	Income.server_advance_days(days)  # claude/income: side jobs come back, businesses pay, markets move
+	Staging.server_advance_days(days)  # D8: the staging FOB's rent, and what the war did to it
 	if reason != "":
 		print("[economy] %d day%s pass (%s): day %d" % [days, "" if days == 1 else "s", reason, int(s.day)])
 	_commit()
@@ -594,10 +597,11 @@ func server_repair(item_id: StringName, item_state: Dictionary) -> Dictionary:
 
 ## Host: pays for a support call ("resupply", "transport", "aav", "extraction"): from the
 ## contract's negotiated support budget first, the rest from cash. Returns whether it's paid.
-func server_pay_support(kind: String, cid := "") -> bool:
+## `flown` (>= 0): what this call costs where it's flown (Staging.call_price), else the flat price.
+func server_pay_support(kind: String, cid := "", flown := -1) -> bool:
 	if OpSupport.employer_pays(kind):
 		return true  # (cg_brief 3.3, F-292: an operation's battlegroup flies its own Dustoff for the company)
-	var price := Prices.support_price(kind)
+	var price := flown if flown >= 0 else Prices.support_price(kind)
 	if price <= 0:
 		return false
 	var from_budget := Contracts.server_draw_support(cid, price) if cid != "" else 0
@@ -617,10 +621,11 @@ func server_pay_support(kind: String, cid := "") -> bool:
 
 ## Host: a helicopter insertion's price (prices.json supports "insertion"; economy pass
 ## 2026-10-22, Proposed): paid like a support call (the contract's support budget, FOB stocks,
-## cash), and on credit when none of them covers it: the squad is already aboard.
-func server_pay_insertion(cid := "") -> void:
-	var price := Prices.support_price("insertion")
-	if price <= 0 or server_pay_support("insertion", cid):
+## cash), and on credit when none of them covers it: the squad is already aboard. `flown` (>= 0):
+## the flight's price over the region links flown (Staging.call_price, combined arms D8).
+func server_pay_insertion(cid := "", flown := -1) -> void:
+	var price := flown if flown >= 0 else Prices.support_price("insertion")
+	if price <= 0 or server_pay_support("insertion", cid, price):
 		return
 	charge_run(price, "Support call: insertion (on credit)")
 

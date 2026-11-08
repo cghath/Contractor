@@ -21,6 +21,10 @@ var _left_zone := ""
 
 
 func _ready() -> void:
+	if "--staging-log" in OS.get_cmdline_user_args():
+		var args := OS.get_cmdline_user_args()
+		await _run_staging_client(args[args.find("--staging-log") + 1])
+		return
 	GameState.zone_id = "test_base_lz1" + tag
 	Campaign.campaign_id = "test_base_lz1" + tag  # never touch a real save
 	get_tree().create_timer(800.0).timeout.connect(func() -> void:
@@ -142,6 +146,107 @@ func _run() -> void:
 	await _test_assault_warning()
 	await _test_airframes()
 	await _test_crossings()
+	await _test_staging_level()
+
+
+## D8 (docs/combined_arms.md 8): the company stages at FOB Halberd: the corner in the zone, a late
+## joiner in it, out over the crossing into Cove outpost and back, and home.
+func _test_staging_level() -> void:
+	print("Staging at FOB Halberd (D8)")
+	await _wait_until(func() -> bool: return BaseHub.in_base() and not BaseHub.switch_pending(), 30.0)
+	Economy.change_reputation("us_forces", 40 - Economy.reputation("us_forces"), "test")
+	Economy.add_cash(100000, "test setup")
+	var def := StagingLevel.def_at("fob_halberd")
+	var corner: Array = (def.modules as Array).filter(func(m: Dictionary) -> bool: return String(m.id) == StagingLevel.MODULE_ID)
+	check(corner.size() == 1 and not (def.crossings as Array).is_empty(), "the zone's def gets the corner, and keeps its crossings")
+	var clash := false
+	var rect := ZoneModules.pad_rect(StagingLevel.TYPE, Vector2(float(corner[0].pos[0]), float(corner[0].pos[1])))
+	for m: Dictionary in def.modules:
+		if String(m.id) != StagingLevel.MODULE_ID and ZoneModules.pad_rect(String(m.type), Vector2(float(m.pos[0]), float(m.pos[1]))).intersects(rect):
+			clash = true
+	check(not clash, "clear of every site")
+	var stash_before: Variant = Roster.json_safe(BaseHub.stash())
+	var why := BaseHub.server_stage("fob_halberd")
+	check(why == "" and Staging.active(), "staged (%s)" % why)
+	await _wait_until(func() -> bool: return CompoundLevel.current(self) is StagingLevel and not BaseHub.switch_pending(), 40.0)
+	var lvl := CompoundLevel.current(self) as StagingLevel
+	check(lvl != null and lvl.is_base() and GameState.zone_id == BaseHub.zone_save_id("staging_fob_halberd"), "the company's at FOB Halberd, in its own save (%s)" % GameState.zone_id)
+	if lvl == null:
+		return
+	var kinds: Array = lvl.fob.get_children().filter(func(n: Node) -> bool: return n is BaseTerminal).map(func(n: Node) -> StringName: return (n as BaseTerminal).kind)
+	check(&"ops" in kinds and &"shop" in kinds and &"medbay" in kinds and &"motor_pool" in kinds and not &"hiring" in kinds and not &"armory" in kinds and not &"stores" in kinds, "the corner's terminals: no armory, hiring or stores (%s)" % [kinds])
+	await _wait_until(func() -> bool: return lvl.players.get_node_or_null(^"1") != null, 10.0)
+	var me := lvl.players.get_node_or_null(^"1") as Soldier
+	check(me != null and lvl.fob.holds(me.global_position), "the player comes in inside the corner")
+	check(UsField.of(lvl) != null and bool(UsField.of(lvl).p.get("base", false)), "the host's own garrison is there (UsField)")
+	check(lvl.server_collect_stash() == stash_before and Roster.json_safe(BaseHub.stash()) == stash_before, "the company's stash is at home, untouched")
+	Economy.server_buy(&"mag_556", 2)
+	await get_tree().create_timer(0.3).timeout
+	var bought := lvl.items.get_children().filter(func(n: Node) -> bool: return n is WorldItem and (n as WorldItem).item_id == &"mag_556" and lvl.fob.holds((n as WorldItem).global_position))
+	check(bought.size() == 1 and Roster.json_safe(BaseHub.stash()) == stash_before, "bought ammo is laid out by the crates, not added to the stash")
+	check(Staging.refuses("guards") and Staging.refuses("restock"), "no guards, no restock from the stash here")
+	await _test_staging_late_joiner()
+	var extraction := MapNodes.extraction(lvl)
+	check(extraction != null and extraction.is_active(), "its crossings are open")
+	why = BaseHub.server_cross_from_base("cove_outpost", RegionMap.crossing_id("fob_halberd"))
+	check(why == "", "out over the crossing into Cove outpost (%s)" % why)
+	await _wait_until(func() -> bool:
+		var l := CompoundLevel.current(self) as ZoneLevel
+		return l != null and String(l.def.id) == "cove_outpost" and not BaseHub.switch_pending(), 40.0)
+	var zone := CompoundLevel.current(self) as ZoneLevel
+	check(zone != null and zone.def.has(Staging.RESPAWN_KEY), "bought respawns come over the crossing from the FOB")
+	var e := MapNodes.extraction(zone)
+	var over := e.points.filter(func(p: Dictionary) -> bool: return String(p.get("to", "")) == "fob_halberd") if e else []
+	check(not over.is_empty() and not e.crossing_on(over[0]), "the crossing back to the FOB ends the deployment, it doesn't walk on")
+	BaseHub.server_end_deployment([])
+	await _wait_until(func() -> bool: return CompoundLevel.current(self) is StagingLevel and not BaseHub.switch_pending(), 40.0)
+	check(CompoundLevel.current(self) is StagingLevel, "back at the staging FOB, not home")
+	check(BaseHub.server_stage("fob_halberd") != "", "one staging FOB at a time")
+	var day0 := BaseHub.day()
+	why = BaseHub.server_stage_home()
+	check(why == "" and not Staging.active() and BaseHub.day() == day0 + 1, "going home: the usual travel (%s, %d days)" % [why, BaseHub.day() - day0])
+	await _wait_until(func() -> bool: return BaseHub.in_base() and not (CompoundLevel.current(self) is StagingLevel) and not BaseHub.switch_pending(), 40.0)
+	check(not (CompoundLevel.current(self) is StagingLevel), "and home")
+
+
+## A client joins while the company is at the staging FOB: it plays the same level, corner and all.
+func _test_staging_late_joiner() -> void:
+	var log_path := ProjectSettings.globalize_path("user://base_zone_staging_client%s.log" % OS.get_environment("CONTRACTOR_TEST_TAG"))
+	if FileAccess.file_exists(log_path):
+		DirAccess.remove_absolute(log_path)
+	var pid := OS.create_process(OS.get_executable_path(), ["--headless", "--path", ProjectSettings.globalize_path("res://"), "res://tests/base_zone_test.tscn", "--", "--join", "127.0.0.1", "--staging-log", log_path])
+	check(pid > 0, "a client process joins late")
+	await _wait_until(func() -> bool: return FileAccess.file_exists(log_path) and FileAccess.get_file_as_string(log_path).contains("DONE"), 180.0)
+	var text := FileAccess.get_file_as_string(log_path) if FileAccess.file_exists(log_path) else ""
+	for line: String in text.split("\n"):
+		if line.strip_edges() != "" and line.strip_edges() != "DONE":
+			print("  (client) " + line)
+	check(text.contains("DONE") and not text.contains("FAIL"), "the late joiner plays the staging FOB too")
+	if OS.is_process_running(pid):
+		OS.kill(pid)
+	await get_tree().create_timer(1.0).timeout
+
+
+## Client process (--staging-log): joins, checks the staging level as the host has it, and reports.
+func _run_staging_client(log_path: String) -> void:
+	var f := FileAccess.open(log_path, FileAccess.WRITE)
+	var say := func(ok: bool, what: String) -> void:
+		f.store_line("  [%s] %s" % ["ok" if ok else "FAIL", what])
+		f.flush()
+	add_child(load("res://scenes/main.tscn").instantiate())
+	await get_tree().process_frame
+	var there := await _wait_until(func() -> bool: return CompoundLevel.current(self) is StagingLevel and BaseHub.campaign_running, 150.0)
+	say.call(there, "the plain Join follows the host to the staging FOB (level %s, campaign %s, connected %s)" % [
+		CompoundLevel.current(self).level_info().get("level", "?") if CompoundLevel.current(self) else "none", BaseHub.campaign_running, multiplayer.has_multiplayer_peer()])
+	var lvl := CompoundLevel.current(self) as StagingLevel
+	if lvl:
+		var seen := await _wait_until(func() -> bool: return Staging.active(), 20.0)
+		say.call(seen and Staging.zone() == "fob_halberd", "and knows it's staged there (%s)" % Staging.zone())
+		var kinds: Array = lvl.fob.get_children().filter(func(n: Node) -> bool: return n is BaseTerminal).map(func(n: Node) -> StringName: return (n as BaseTerminal).kind)
+		say.call(&"ops" in kinds and not &"armory" in kinds, "with the corner's terminals, as the host's")
+	f.store_line("DONE")
+	f.flush()
+	get_tree().quit(0)
 
 
 ## LZ-2: every zone on the region grid, linked to 2-4 neighbours both ways, a crossing on the

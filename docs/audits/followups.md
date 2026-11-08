@@ -1801,6 +1801,42 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 "zones" by id), the def's own `landmarks` list (an operation's fallback depth target) and its
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
+### F-486 (open, world): `GameState.zone_id` read as a war zone id
+
+In a campaign `GameState.zone_id` is the zone's save (`<campaign>__<zone>`, BaseHub.zone_save_id),
+but `ZoneLevel._zone_enemy`, `_zone_attacker`, `module_faction`, `difficulty_scale` and FactionFlags
+look it up as a plain zone id in the war's section and the held contracts, so in a real campaign
+none of them finds anything. D8 fixed only the same mistake in `UsField.install` (the D7 garrisons
+and patrols never came up in a campaign, only in the suites that host a bare zone id). The rest
+wants `String(def.id)` the same way; left alone because it changes which faction's men every zone
+fields.
+
+### F-487 (open, D8): UK, Canada and Vessmark as hosts
+
+8.1 has them host only inside US operations, at the operation's start-edge FOB. Nothing builds a
+friendly FOB at an operation's start edge yet, so `Staging.host_of` offers only the US (Halberd,
+and held zones with an HQ site).
+
+### F-488 (open, D8): the tent's "stabilise" on live wounds
+
+8.2 has the tent treat wounds to stable with at most 2 units of blood a man. At a base wounds are
+days to sit out, not live wounds (RosterDeployment.resolve), so there's nothing to treat on the way
+in; what's built is that the medbay's "days sooner" isn't offered. A man shot inside the corner
+stays as he is until someone treats him.
+
+### F-489 (open, D8): parked vehicles are props
+
+The two parked vehicles are props in the corner (StagingLevel), and come to a deployment through
+the briefing's pool support, at the insertion point. Getting in one at the corner and driving it
+over the crossing would need live vehicles there whose state survives the level (the motor pool's
+record is only written back at extraction).
+
+### F-490 (open, D8): the assault on Halberd is a contract
+
+8.4 has a Banner assault on Halberd as "a live defend event the company can join". It's built as a
+defend job on the board (`Staging._offer_defence`), played like any defend contract in the Halberd
+zone, not as an attack that comes in live while the squad stands in the corner.
+
 ## Calls made for the Captain
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
@@ -2124,6 +2160,18 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-10-25 | cg_brief 3.3 (D5-14): the crossing's phase 3 limit 18 min (its hold is 10 min, stopped while the enemy is within 200 m) | the hold is the phase | 12 min
 2026-10-25 | cg_brief 3.3: the economy sim re-run after D4/D5 (seeds 1 and 101, 40 campaigns each): no profile takes an operation, day-35 means as after D3 (careful $627k/$622k, median $666k/$596k, sloppy $113k/$61k with 6 and 10 of 40 in debt); nothing tuned (docs/economy.md) | the targets hold as they are | tuning the operations' pay to make them reachable
 2026-10-25 | cg_brief 3.3 (D4-15): a switch into an 8 km zone gives every end LevelSwitch.LOAD_TIMEOUT from its start until the client has the level + 15 s (BaseHub._hold_timeouts, shared file, a few lines; F-302) | the clients were dropped while the host made the zone | the test raising its own timeouts
+
+- 2026-11-08 | D8: insertion and extraction both cost $3,000 + $1,200 a region link each way, as 8.3 says, replacing the flat $6,000 and $12,000 on any zone on the region map (off the map, the flat price) | the doc's table is built on it; a 3-link job's flights go from $18,000 to $13,200 | keeping extraction at the economy pass's $12,000 and charging only the insertion by links
+- 2026-11-08 | D8: from the LHD every coast zone is 1 link, and each zone inland one more | 8.3's "3 links from the LHD" needs a distance from a ship the region map doesn't hold | a fixed link count per region
+- 2026-11-08 | D8: rent is $6,000 for every deployment run from the FOB (the first paid on moving in) and $1,500 for each day that passes staged; the allied x0.7 and the host's-own-contract x0.5 stack (x0.35) | 8.3 lists them as separate multipliers | the better of the two, or $6,000 once a stay
+- 2026-11-08 | D8: a staged contract takes its days + 1 of travel (its region's up to 2 otherwise) and the move in costs no days, so a quote is rent for days + 1 | matches 8.3's table (2 days' rent, 1 travel day against 2) | a day to get to the FOB on top
+- 2026-11-08 | D8: the 40% off helicopter supports is for resupply, transport, medevac and cargo on a zone of region "inland"; insertion and extraction are priced from the FOB instead, with no second discount | they're already much cheaper from next door | discounting everything flown while staged
+- 2026-11-08 | D8: the first two ready motor-pool vehicles go along by themselves | no extra screen on a one-click move | a picker
+- 2026-11-08 | D8: the staging zone is the host's zone with a 30 x 30 m "staging" module on the first clear side of its HQ site, saved as staging_<zone> (never the contract zone's save) | Halberd and US outposts have no wire module to put a corner in; its own save keeps a staged company's leavings out of the zone if it's fought over later | a corner cut into the HQ module
+- 2026-11-08 | D8: bought respawns come in at the crossing from the FOB (first respawn candidate) and supports from that side | a contract zone is a separate level; the FOB can't be in it | respawning at the briefing's insertion as today
+- 2026-11-08 | D8: an eviction with no deployment running takes effect at once, the $5,000 only if vehicles are parked there, and no travel days are charged | "at the end of the current deployment" has nothing to wait for | waiting for the next deployment
+- 2026-11-08 | D8: friendly fire costs -10 once per host soldier and looting -15 once per body or vehicle, only while staged with that host | a burst shouldn't be -40; the rule is about the host's hospitality | counting every hit, or at all times
+- 2026-11-08 | D8: UsField.install reads the zone from the level's def, not GameState.zone_id | in a campaign that's the save id, so the D7 garrisons never came up (F-486) | leaving D7 as it was and staging at an empty base
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 

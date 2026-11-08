@@ -76,6 +76,7 @@ func _ready() -> void:
 	await _frames(20)
 	await _test_nemesis_kill_attribution()
 	await _test_allied_troops()
+	_test_staging()
 	await _test_live_objectives()
 	await _test_objective_helper()
 	_test_ammo_readout()
@@ -1158,6 +1159,198 @@ func _test_us_war() -> void:
 	Campaign.section(WorldSites.SECTION).clear()
 	Campaign.section(WorldSites.WAR).clear()
 	Campaign.section(ZoneControl.SECTION).clear()
+
+
+## D8 (docs/combined_arms.md 8): staging from a friendly FOB and what a flight costs. Numbers from
+## the doc's own table: an inland contract 3 links from the LHD, a US FOB next door.
+func _test_staging() -> void:
+	print("Staging from a friendly FOB (D8)")
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	Campaign.section(Staging.SECTION).clear()
+	var control := Campaign.section(ZoneControl.SECTION)
+	control.clear()
+	control["home"] = ZoneControl.HOME_LHD
+	ZoneControl.invalidate_maps()
+	_set_rep("us_forces", 30)
+	# The US holds Kestrel Valley (an HQ site), next door to Red Gulch, 3 links from the LHD.
+	var held := WorldSites.site("kestrel_valley")
+	held.holder = "us_forces"
+	WorldSites.site("fob_halberd")
+	var inland := {"cid": "x1", "zone_id": "red_gulch", "region": "inland", "employer": "meridian", "days": 1}
+	var coast := {"cid": "x2", "zone_id": "cove_outpost", "region": "coast", "employer": "meridian", "days": 1}
+	check(Staging.home_links("red_gulch") == 3 and Staging.home_links("cove_outpost") == 1, "links from the LHD: Red Gulch 3, Cove outpost 1 (%d, %d)" % [Staging.home_links("red_gulch"), Staging.home_links("cove_outpost")])
+	check(Staging.flight_price("red_gulch") == 6600 and Staging.flight_price("cove_outpost") == 4200 and Staging.flight_price("not_on_the_map") == -1,
+		"a flight: $3,000 + $1,200 a link ($%d, $%d)" % [Staging.flight_price("red_gulch"), Staging.flight_price("cove_outpost")])
+	check(Staging.call_price("insertion", "red_gulch") == 6600 and Staging.call_price("extraction", "red_gulch") == 6600 and Staging.call_price("extraction", "") == Prices.support_price("extraction")
+		and Staging.call_price("resupply", "red_gulch") == Prices.support_price("resupply"),
+		"insertion and extraction by the links; off the map, and the other supports, the flat price")
+	# Quotes (8.3).
+	var ways := Staging.options(inland)
+	check(ways.size() == 2 and String(ways[0].key) == "home" and int(ways[0].cost) == 13200 and String(ways[1].zone) == "kestrel_valley" and int(ways[1].cost) == 9000
+		and bool(ways[1].ground) and int(ways[1].flights) == 0, "the doc's table: flown $13,200, staged next door $9,000 and no flights (%s)" % [ways])
+	check(int(ways[0].days) == 3 and int(ways[1].days) == 2, "and a day less travelling (%d against %d)" % [int(ways[0].days), int(ways[1].days)])
+	var near: Dictionary = Staging.quote("fob_halberd", coast)
+	check(int(Staging.options(coast)[0].cost) == 8400 and int(near.cost) == 9000 and int(near.cost) > int(Staging.options(coast)[0].cost),
+		"a coast contract 1 link from the LHD is cheaper flown ($8,400 against $9,000)")
+	var hop: Dictionary = Staging.quote("fob_halberd", {"zone_id": "wadi_farm", "region": "inland", "employer": "meridian", "days": 1})
+	check(int(hop.links) == 2 and not bool(hop.ground) and int(hop.flights) == 2 * 5400, "two links from the FOB: a helicopter hop, flights priced from it (%s)" % [hop])
+	check(not bool(Staging.quote("kestrel_valley", {"zone_id": "compound_01", "region": "coast", "employer": "meridian", "days": 1}).ok), "a contract past 2 links from the FOB can't be run from it")
+	# Access by rep (8.4), the multipliers (8.3).
+	_set_rep("us_forces", 29)
+	check(Staging.access_problem("fob_halberd") != "" and not bool(Staging.quote("fob_halberd", coast).ok), "below trusted: no rent (%s)" % Staging.access_problem("fob_halberd"))
+	_set_rep("us_forces", 30)
+	check(Staging.access_problem("fob_halberd") == "" and Staging.access_problem("cove_outpost") != "" and Staging.access_problem("wadi_farm") != "", "trusted: FOB Halberd rents; a zone the US doesn't hold doesn't")
+	check(Staging.host_of("kestrel_valley") == "us_forces" and Staging.host_of("harrow_fields") == "" , "a US-held zone with an HQ site hosts; others don't")
+	check(Staging.rent_deployment("us_forces") == 6000 and Staging.rent_day("us_forces") == 1500 and Staging.rent_deployment("us_forces", "us_forces") == 3000, "trusted: full rent, half on the host's own contract")
+	_set_rep("us_forces", 70)
+	check(Staging.rent_deployment("us_forces") == 4200 and Staging.rent_day("us_forces") == 1050 and Staging.rent_deployment("us_forces", "us_forces") == 2100, "allied: x0.7, and x0.5 on top for the host's own")
+	_set_rep("us_forces", 60)  # (a few days pass below: it decays, and this is about the rent, not the standing)
+	# Moving in: the rent, the state, what the place offers.
+	Economy.add_cash(200000, "test setup")
+	MotorPool._s()
+	var vehicles_before := MotorPool.list().size()
+	for i in 3:
+		MotorPool.add("matv")
+	var cash := Economy.cash()
+	var why := Staging.server_begin("kestrel_valley", inland, ["m1"])
+	check(why == "" and Staging.active() and Staging.zone() == "kestrel_valley" and Staging.host() == "us_forces" and Economy.cash() == cash - 6000,
+		"rented: $6,000 now (%s, $%d)" % [why, cash - Economy.cash()])
+	check(Staging.vehicles().size() == 2 and MotorPool.list().size() == vehicles_before + 3, "two vehicles come along, at most (%d)" % Staging.vehicles().size())
+	var left := ""
+	for v: Dictionary in MotorPool.list():
+		if not String(v.id) in Staging.vehicles() and left == "":
+			left = String(v.id)
+	check(left != "" and MotorPool.problem(left) != "" and MotorPool.problem(String(Staging.vehicles()[0])) == "", "the one left behind can't come to a deployment from here (%s)" % MotorPool.problem(left))
+	check(Staging.has_member("m1") and not Staging.has_member("m2") and Staging.refuses("hire") and Staging.refuses("medbay") and not Staging.refuses("deploy"), "who came along, and what isn't here")
+	check(Staging.begin_problem("fob_halberd", coast) != "", "one staging FOB at a time")
+	check(Staging.board_problem(inland) == "" and Staging.board_problem({"zone_id": "compound_01"}) != "", "the board has only work within 2 links")
+	var far := _make_offer("clear_compound", "compound_01")
+	check(Contracts.server_accept(far, {"pay": 0, "salvage": 0, "support": 0}) != "" and not Contracts.contract(far).is_empty(), "and won't sign one past it")
+	check(Staging.travel_days(inland) == 1 and Staging.travel_days({"zone_id": "compound_01", "region": "inland"}) == 2, "a day's travel from the FOB (inland's 2 cut); a job out of its reach keeps the usual")
+	check(Quartermaster.sells(&"mag_556") and Quartermaster.sells(&"ifak") and Quartermaster.sells(&"repair_kit") and not Quartermaster.sells(&"m4a1") and not Quartermaster.sells(&"plate_carrier"),
+		"resupply: ammo, medical, spares; no weapons or armour")
+	check(Quartermaster.price(&"mag_556") == roundi(Prices.price_of(&"mag_556") * 1.25), "at the shop's price +25%%")
+	check(Staging.call_price("insertion", "red_gulch") == 4200 and Staging.call_price("extraction", "red_gulch") == 4200, "flights go from the FOB now: one link, $4,200")
+	check(Staging.call_price("resupply", "red_gulch") == roundi(Prices.support_price("resupply") * 0.6) and Staging.call_price("resupply", "cove_outpost") == Prices.support_price("resupply"),
+		"helicopter supports refuel there: inland calls 40%% less; the coast's as ever")
+	check(Staging.repair_bill(10000, 10.0) == 15030, "their mechanics: +50%%, fuel at $3 a litre")
+	var mine := Staging.insertion_point(MissionRegistry.zone_def("red_gulch"))
+	check(bool(mine.get("staging", false)) and Briefing.method_text(mine).contains("no flight"), "the briefing gets the way in over the crossing (%s)" % [mine])
+	check(Staging.insertion_point(MissionRegistry.zone_def("cove_outpost")).is_empty(), "not from a zone with no crossing to the FOB")
+	var stamped := Staging.stamp_level({"level": "zone", "def": MissionRegistry.zone_def("red_gulch")})
+	check(stamped.def.has(Staging.RESPAWN_KEY) and String(stamped.def.fob_side) == "west", "the deployment's supports and bought respawns come from the FOB's side (%s)" % [stamped.def.get("fob_side", "")])
+	# Rent by the day (8.3), the deployment's rent, the host's own job.
+	var paid_rent := func() -> int:
+		var sum := 0
+		for e: Dictionary in Economy.ledger():
+			if String(e.what).begins_with("Staging rent"):
+				sum -= int(e.amount)
+		return sum
+	var before: int = paid_rent.call()
+	Economy.advance_days(3, "test")
+	check(paid_rent.call() - before == 4500, "three days staged: $4,500 ($%d)" % (paid_rent.call() - before))
+	Staging.server_on_deploy(inland)
+	check(paid_rent.call() - before == 4500, "the deployment that moved it here is paid already")
+	Staging.server_on_deploy({"zone_id": "red_gulch", "employer": "us_forces"})
+	check(paid_rent.call() - before == 7500, "the next pays its rent, the host's own job at half ($%d)" % (paid_rent.call() - before - 4500))
+	before = paid_rent.call()
+	Economy.advance_days(1, "test")
+	check(paid_rent.call() - before == 750, "and its days at half ($%d)" % (paid_rent.call() - before))
+	Staging.server_after_deployment()
+	before = paid_rent.call()
+	Economy.advance_days(1, "test")
+	check(paid_rent.call() - before == 1500, "the job done, the full day again ($%d)" % (paid_rent.call() - before))
+	check(int(Staging._s().get("since_day", 0)) > 0 and int(Staging._s().get("rent_paid", 0)) > 0, "the books say so (rent paid $%d)" % int(Staging._s().get("rent_paid", 0)))
+	# The insertion charge.
+	Economy.take_run_expenses()
+	cash = Economy.cash()
+	Economy.server_pay_insertion("", Staging.call_price("insertion", "red_gulch"))
+	check(Economy.cash() == cash - 4200, "the insertion is paid by the links flown ($%d)" % (cash - Economy.cash()))
+	check((Economy.take_run_expenses() as Array).any(func(e: Dictionary) -> bool: return int(e.amount) == 4200), "and shows in the debrief's expenses")
+	cash = Economy.cash()
+	Economy.server_pay_insertion("")
+	check(Economy.cash() == cash - Prices.support_price("insertion"), "a flat one where no links are known")
+	# Saves round-trip; an old save has no section.
+	Campaign.save_campaign()
+	var saved_zone := Staging.zone()
+	var saved_vehicles := Staging.vehicles()
+	Campaign.section(Staging.SECTION).clear()
+	check(not Staging.active(), "nothing staged in a save from before D8 (no section)")
+	check(Campaign.load_campaign() and Staging.zone() == saved_zone and Staging.vehicles() == saved_vehicles and Staging.host() == "us_forces", "a save and load keeps the corner (%s)" % Staging.zone())
+	var v0 := Staging.view({})
+	check(String(v0.state.zone) == saved_zone and String(v0.name) == RegionMap.zone_name(saved_zone) and (v0.models as Array).size() == 2, "every peer's view has it")
+	# Eviction: below trusted, at the end of a deployment, vehicles $5,000 home.
+	var roster := BaseHub.roster()
+	roster["deployment"] = {"active": true, "squad": [], "zone_id": "red_gulch"}
+	_set_rep("us_forces", 32)
+	Economy.change_reputation("us_forces", -5, "test")
+	check(Staging.active() and Staging.evicting(), "below trusted mid-deployment: ordered out, but it finishes the job")
+	cash = Economy.cash()
+	roster["deployment"] = {}
+	Staging.server_after_deployment()
+	check(not Staging.active() and Economy.cash() == cash - 5000, "at its end: gone, and $5,000 to move the vehicles home ($%d)" % (cash - Economy.cash()))
+	check(MotorPool.problem(left) == "", "and every vehicle is at the company's FOB again")
+	# With none running it goes at once. Then misconduct and the host's dead.
+	_set_rep("us_forces", 45)
+	check(Staging.server_begin("kestrel_valley", inland, []) == "", "rented again")
+	Economy.change_reputation("us_forces", -20, "test")
+	check(not Staging.active(), "below trusted with no deployment: out at once")
+	_set_rep("us_forces", 60)
+	Staging.server_begin("kestrel_valley", inland, [])
+	var us := _hostile("USMisconduct", Vector3(40.0, 0.0, 40.0))
+	us.set_meta(&"faction_id", "us_forces")
+	var rep := Economy.reputation("us_forces")
+	Staging.server_note_harm(us, {"company": true})
+	Staging.server_note_harm(us, {"company": true})
+	check(Economy.reputation("us_forces") == rep - 10, "friendly fire on the host's man: -10, once a man (%d)" % (Economy.reputation("us_forces") - rep))
+	rep = Economy.reputation("us_forces")
+	Staging.server_note_loot(us)
+	Staging.server_note_loot(us)
+	check(Economy.reputation("us_forces") == rep - 15, "looting his body: -15, once (%d)" % (Economy.reputation("us_forces") - rep))
+	var other := _hostile("USOther", Vector3(44.0, 0.0, 40.0))
+	other.set_meta(&"faction_id", "us_forces")
+	Staging.server_note_harm(other, {"company": false})
+	check(not other.has_meta(&"staging_hit"), "not the company's fire: nothing")
+	rep = Economy.reputation("us_forces")
+	us.set_meta(Harm.META, {"company": true, "at": 0.0})
+	Staging._host_man_died(us)
+	check(not Staging.active(), "one of his men killed by the company: out")
+	# The war takes it away; a parked vehicle goes with it.
+	_set_rep("us_forces", 60)
+	Staging.server_begin("kestrel_valley", inland, [])
+	var kept := MotorPool._find(String(Staging.vehicles()[0]))
+	kept["out"] = "red_gulch"  # out with the squad
+	var parked := String(Staging.vehicles()[1])
+	WorldSites.site("kestrel_valley").holder = "kestrel"
+	Staging.server_advance_days(1)
+	check(not Staging.active() and MotorPool.entry(parked).is_empty() and not MotorPool.entry(String(kept.id)).is_empty(), "the zone flips: the corner's gone, what's parked with it, what's out with the squad isn't")
+	kept["out"] = ""
+	WorldSites.site("kestrel_valley").holder = "us_forces"
+	# Halberd can be attacked while staged there: a defend job on the board.
+	_set_rep("us_forces", 60)
+	check(Staging.server_begin("fob_halberd", coast, []) == "", "staged at FOB Halberd")
+	WorldSites.site("fob_halberd")["front"] = {"by": "ashen_banner", "since": int(WorldSites._war().get("day", 0)), "progress": 0.1}
+	Staging._offer_defence()
+	var cid := String(Staging._s().get("defend_cid", ""))
+	var job := Contracts.contract(cid)
+	check(cid != "" and bool(job.get("staging_defend", false)) and String(job.get("zone_id", "")) == "fob_halberd" and String(job.get("employer", "")) == "us_forces", "the Banner at the gate: a defend job at Halberd (%s)" % cid)
+	Staging._offer_defence()
+	check(String(Staging._s().get("defend_cid", "")) == cid, "one at a time")
+	rep = Economy.reputation("us_forces")
+	Staging.on_contract_closed(job, "completed")
+	check(Economy.reputation("us_forces") == rep + 3 and String(Staging._s().get("defend_cid", "")) == "", "held: +3 with the US")
+	WorldSites.site("fob_halberd").erase("front")
+	cash = Economy.cash()
+	var days := Staging.server_leave()
+	check(days == 1 and not Staging.active() and Economy.cash() == cash, "going home: the usual travel (%d day), no bill for the leaving" % days)
+	# Tidy for the sections after this one.
+	Campaign.section(Staging.SECTION).clear()
+	Campaign.section(WorldSites.SECTION).clear()
+	Campaign.section(WorldSites.WAR).clear()
+	Campaign.section(ZoneControl.SECTION).clear()
+	ZoneControl.invalidate_maps()
+	_set_rep("us_forces", 0)
 
 
 func _set_rep(faction: String, value: int) -> void:

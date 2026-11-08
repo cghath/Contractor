@@ -339,7 +339,7 @@ func required() -> Dictionary:
 ## Whether `point` is a crossing on into another zone during a deployment (not home to the base).
 func crossing_on(point: Dictionary) -> bool:
 	return String(point.get("source", "")) == "crossing" and String(point.get("to", "")) != RegionMap.BASE \
-		and BaseHub.deployment_running() and not BaseHub.in_base()
+		and String(point.get("to", "")) != Staging.zone() and BaseHub.deployment_running() and not BaseHub.in_base()  # (into the staging zone: home, D8)
 
 
 static func can_leave_behind(s: Soldier) -> bool:

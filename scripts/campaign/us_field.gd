@@ -75,13 +75,21 @@ static func of(from: Node) -> UsField:
 static func install(level: Node) -> void:
 	if level == null or not level.multiplayer.is_server() or level.get_node_or_null(NODE_NAME) != null:
 		return
-	var plan_ := plan(GameState.zone_id)
+	var plan_ := plan(_zone_of(level))
 	if plan_.is_empty():
 		return
 	var node := UsField.new()
 	node.name = NODE_NAME
 	node.p = plan_
 	level.add_child(node)
+
+
+## The zone id `level` plays: its def's (in a campaign GameState.zone_id is the zone's save, with
+## the campaign's name in front, and nothing in the war's section or on the map answers to that).
+static func _zone_of(level: Node) -> String:
+	var def: Variant = level.get(&"def") if level else null
+	var id := String((def as Dictionary).get("id", "")) if def is Dictionary else ""
+	return id if MissionRegistry.zone(id).is_empty() == false else GameState.zone_id
 
 
 # --- The plan (pure) --------------------------------------------------------------------------
@@ -184,8 +192,10 @@ static func server_garrison(level: Node, module: ZoneModule) -> bool:
 ## Whether `module` holds a US garrison: the HQ site of a held zone (every site at its base), not
 ## one a held contract here is about.
 func is_site(module: ZoneModule) -> bool:
+	if ZoneModules.base(module.type) == StagingLevel.TYPE:
+		return false  # D8: the company's corner
 	for c: Dictionary in Contracts.held():
-		if String(c.get("zone_id", "")) == GameState.zone_id and String(c.get("module_id", "")) == module.module_id:
+		if String(c.get("zone_id", "")) == _zone_of(get_parent()) and String(c.get("module_id", "")) == module.module_id:
 			return false
 	if bool(p.get("base", false)):
 		return true
@@ -325,6 +335,8 @@ func _column(kind: String, list: Array, start: Vector3, path: PackedVector3Array
 		if lvl.has_method(&"ground_point"):
 			at = lvl.call(&"ground_point", at)
 		var v := layer.server_spawn(String(list[i]), Transform3D(Basis.looking_at(fwd, Vector3.UP), at + Vector3.UP * 0.3), "", &"friendly", "")
+		if v:
+			v.set_meta(&"host_side", String(p.side))  # (D8: looting it costs standing with its side)
 		if v == null:
 			continue
 		v.set_meta(&"no_save", true)

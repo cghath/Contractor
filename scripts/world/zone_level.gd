@@ -271,6 +271,8 @@ func _points(list: Array) -> Array[Vector3]:
 ## point the briefing chose, the zone's other insertion points, then its extraction points.
 func respawn_candidates() -> Array[Vector3]:
 	var out: Array[Vector3] = []
+	if def.has(Staging.RESPAWN_KEY):  # D8: bought respawns come over from the staging FOB
+		add_respawn_candidate(out, ground_point(Vector3(float(def[Staging.RESPAWN_KEY][0]), 0.0, float(def[Staging.RESPAWN_KEY][1]))))
 	var briefing := MapNodes.briefing(self)
 	if briefing:
 		add_respawn_candidate(out, briefing.insertion().get("pos", []))

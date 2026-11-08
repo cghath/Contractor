@@ -148,6 +148,11 @@ static func _local_sites(seed: int) -> Array:
 
 func _ready() -> void:
 	super._ready()
+	_make_fob()
+
+
+## The FOB in its module, its helipad and its assault (StagingLevel: a corner instead).
+func _make_fob() -> void:
 	var m := get_module("fob")
 	fob = BaseFob.make(self, m.global_position if m else Vector3.ZERO, true)
 	# Supports come and go from the helipad here (docs/linked_zones.md section 4, LZ-3).

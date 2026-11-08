@@ -155,6 +155,7 @@ func _ready() -> void:
 	Contracts.contract_closed.connect(ZoneControl.on_contract_closed)  # a seize-and-hold won moves home (docs/lhd_home.md)
 	Economy.day_advanced.connect(ZoneControl.on_day_advanced)  # the liaison's offer comes back
 	Contracts.contract_closed.connect(FobBusiness.on_contract_closed)  # claude/income: a business's protection job done (or not)
+	Contracts.contract_closed.connect(Staging.on_contract_closed)  # D8: an assault on the staging FOB held
 	Contracts.contract_closed.connect(BlackMarket.on_contract_closed)  # claude/income: the last job's region opens its market
 	Contracts.contract_closed.connect(Story.on_contract_closed)  # a story contract done moves the story on (docs/story.md)
 	Economy.day_advanced.connect(Story.on_day_advanced)  # a failed story contract comes back; an act opens
@@ -363,7 +364,7 @@ func zone_save_id(zone_id: String) -> String:
 
 
 func base_zone_id() -> String:
-	return zone_save_id("fob")
+	return zone_save_id("staging_" + Staging.zone() if Staging.active() else "fob")
 
 
 ## Whatever a new campaign in Campaign.campaign_id's name would otherwise load: the old save
@@ -490,7 +491,7 @@ func begin_prep(contract: Dictionary, zone_kind := RosterDeployment.CONTRACT, zo
 	prep["level"] = level_info.duplicate(true)
 	_prune_prep_squad()
 	if (prep.squad as Array).is_empty():
-		prep["squad"] = RosterDeployment.auto_squad(roster(), SQUAD_SIZE - _player_count())
+		prep["squad"] = RosterDeployment.auto_squad(roster(), SQUAD_SIZE - _player_count()).filter(Staging.has_member)
 	_changed(&"base")
 
 
@@ -504,6 +505,8 @@ func begin_prep_contract(cid: String) -> String:
 		return "No such contract held"
 	if RosterDeployment.is_running(roster()):
 		return "A deployment is already running"
+	if Staging.board_problem(c) != "":
+		return Staging.board_problem(c)
 	var zone_id := String(c.get("zone_id", ""))
 	begin_prep(ContractGen.public_view(c), String(c.get("zone_kind", RosterDeployment.CONTRACT)), zone_id, "", contract_level_info(c))
 	return ""
@@ -538,7 +541,7 @@ func _on_contract_accepted(cid: String) -> void:
 
 ## The member ids standing at the hub's muster line: everyone available, in hiring order.
 func muster_ids() -> Array[String]:
-	return Roster.available_ids(roster())
+	return Roster.available_ids(roster()).filter(Staging.has_member)
 
 
 ## Host: a member's gear is now `net_state` (read back from their body).
@@ -624,6 +627,11 @@ func home_is_lhd() -> bool:
 func base_info() -> Dictionary:
 	var arrive := _next_arrival
 	_next_arrival = ""
+	if Staging.active():  # D8: the corner of a friendly FOB is where the company is
+		var at := StagingLevel.def_at(Staging.zone())
+		if arrive != "":
+			at["arrive"] = arrive
+		return {"level": "staging", "def": at}
 	if home_is_lhd():
 		return {"level": "lhd"}
 	if base_as_zone():
@@ -1024,7 +1032,7 @@ func _travel_wounds(s: Soldier) -> void:
 ## the crossing together is the ready-up. Returns "" or why not.
 func server_cross_from_base(to: String, to_crossing: String) -> String:
 	var def := MissionRegistry.zone_def(to)
-	if def.is_empty():
+	if def.is_empty() and not (to == RegionMap.BASE and Staging.active()):
 		return "Nothing lies that way"
 	var prep := _prep()
 	var contract: Dictionary = prep.get("contract", {})
@@ -1032,6 +1040,8 @@ func server_cross_from_base(to: String, to_crossing: String) -> String:
 	if contract.is_empty() or String(contract.get("zone_id", "")) != to:
 		options["no_contract"] = true
 		options["zone_kind"] = RosterDeployment.RAID  # out without a contract: a raid (LZ-4)
+	if to == RegionMap.BASE and Staging.active():
+		return server_stage_home()  # (the crossing that leads home from a staging FOB beside it)
 	var arrive := _arrive_def(def, to, to_crossing)
 	options["level"] = {"level": "zone", "def": arrive}
 	if not contract.is_empty() and String(contract.get("zone_id", "")) == to:
@@ -1368,7 +1378,7 @@ func _show_loading(kind: String) -> void:
 	var shade := UiKit.dim(0.94)
 	UiKit.apply(shade)
 	_loading.add_child(shade)
-	var label := UiKit.title("Loading %s..." % {"base": "the base", "zone": "the zone", "base_zone": "the base", "lhd": "the LHD"}.get(kind, "the level"))
+	var label := UiKit.title("Loading %s..." % {"base": "the base", "zone": "the zone", "base_zone": "the base", "lhd": "the LHD", "staging": "the staging FOB"}.get(kind, "the level"))
 	label.name = "Label"
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1779,6 +1789,8 @@ func server_deploy(options := {}) -> String:
 	if zone_id == "":
 		zone_id = DEFAULT_ZONE_ID
 	_before_deploy = Campaign.snapshot()  # before anything of the deployment is written
+	Staging.server_on_deploy(contract)  # D8: from the staging FOB, its rent and its side of the zone
+	info = Staging.stamp_level(info)
 	var squad: Array = options.get("squad", prep.get("squad", []))
 	squad = squad.slice(0, maxi(SQUAD_SIZE - _player_count(), 0))
 	var stand_ins := _pick_stand_ins(squad)
@@ -2239,6 +2251,7 @@ func server_end_deployment(extracted: Array, return_to_base := true, advance_day
 	GameState.save_zone()  # the zone keeps its bodies, loot and damage
 	if advance_days:
 		server_advance_days(int(RosterDeployment.DAYS.get(report.zone_kind, 1)))
+	Staging.server_after_deployment()  # D8: an eviction takes effect now
 	_changed_all()
 	if not Campaign.save_campaign():
 		note.emit(save_note(false))  # the host's player hears it (audit A1-04)
@@ -2474,7 +2487,7 @@ func _on_day_advanced(today: int, days: int) -> void:
 			server_pay_death_benefit(mid, "missing %d days, declared dead" % Fallen.DECLARE_DAYS)
 	Hiring.refresh_if_due(hiring(), today)
 	# (a debrief's days: the squad was out, unless the host headed home first: server_assault_choice)
-	BaseAssault.server_day_passed(_squad_home_for_assault or not RosterDeployment.is_running(roster()))
+	BaseAssault.server_day_passed((_squad_home_for_assault or not RosterDeployment.is_running(roster())) and not Staging.active())
 	var week := today / maxi(MissionRegistry.setting_i("week_days", 7), 1)
 	var last := int(base().get("rebel_week", week - 1))
 	if week > last:
@@ -2655,6 +2668,38 @@ func server_raid_by_air(zone_id: String) -> String:
 	return why
 
 
+## Host (the ops desk, combined arms D8): the squad and its vehicles move to the friendly FOB in
+## zone `at`, the corner rented for the contract in prep. Returns "" or why not.
+func server_stage(at: String) -> String:
+	if RosterDeployment.is_running(roster()):
+		return "A deployment is already running"
+	if not all_ready():
+		return WAITING_FOR + ", ".join(PackedStringArray(not_ready_names()))
+	_read_back_base()
+	var why := Staging.server_begin(at, prep_contract(), _prep().squad)
+	if why != "":
+		return why
+	_ready_peers.clear()
+	_changed_all()
+	server_switch_level(base_info(), base_zone_id())
+	return ""
+
+
+## Host (the ops desk, a crossing that leads home): the company leaves the staging FOB. The usual
+## travel passes on the way, with no rent on it. Returns "" or why not.
+func server_stage_home() -> String:
+	if RosterDeployment.is_running(roster()):
+		return "A deployment is already running"
+	var days := Staging.server_leave()
+	if days < 0:
+		return "The company isn't staged anywhere"
+	_prune_prep_squad()
+	server_advance_days(days, "travelling home from the staging FOB")
+	_changed_all()
+	server_switch_level(base_info(), base_zone_id())
+	return ""
+
+
 ## Host (the ops desk): the company keeps `n` guards.
 func server_set_guards(n: int) -> String:
 	if n > max_guards():
@@ -2824,6 +2869,8 @@ func server_pick(mid: String, in_squad: bool) -> String:
 	elif mid not in squad:
 		if not Roster.is_available(member(mid)):
 			return "They can't deploy now"
+		if not Staging.has_member(mid):
+			return "%s is at the company's FOB" % String(member(mid).callsign)
 		if Heroes.in_detachment(roster(), mid):
 			return "They deploy with their high command squad"
 		if squad.size() >= SQUAD_SIZE - 1:
@@ -2839,7 +2886,7 @@ func server_pick(mid: String, in_squad: bool) -> String:
 ## Returns whether anyone was taken out.
 func _prune_prep_squad() -> bool:
 	var squad: Array = _prep().squad
-	var gone := squad.filter(func(mid: Variant) -> bool: return not Roster.is_available(member(String(mid))) or Heroes.in_detachment(roster(), String(mid)))
+	var gone := squad.filter(func(mid: Variant) -> bool: return not Roster.is_available(member(String(mid))) or Heroes.in_detachment(roster(), String(mid)) or not Staging.has_member(String(mid)))
 	for mid: Variant in gone:
 		squad.erase(mid)
 	return not gone.is_empty()
@@ -3473,7 +3520,9 @@ func _server_request(action: String, args: Array) -> void:
 	var needs: int = {"hire": 1, "release": 1, "medbay": 1, "pick": 2, "role": 2, "buy": 1, "prep": 1, "ready": 1, "loadout": 3, "certify_hx1": 1}.get(action, 0)
 	if args.size() < needs:
 		why = "Bad request"
-	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad"] and sender != 1:
+	elif Staging.refuses(action):
+		why = Staging.NO_SERVICE
+	elif action in ["deploy", "rest", "release", "save", "prep", "restock_squad", "stage", "stage_home"] and sender != 1:
 		why = "Only the host can do that"  # the company's big decisions are the host's
 	elif action == "income":
 		why = Income.server_request(String(args[0]) if not args.is_empty() else "", args.slice(1), sender if sender != 0 else 1)  # side work: from anywhere (Income checks)
@@ -3521,6 +3570,10 @@ func _server_request(action: String, args: Array) -> void:
 				_changed(&"roster")
 			"guards":
 				why = server_set_guards(int(args[0]) if not args.is_empty() else 0) if sender == 1 else "Only the host can do that"
+			"stage":
+				why = server_stage(String(args[0])) if not args.is_empty() else "Bad request"
+			"stage_home":
+				why = server_stage_home()
 			"deploy":
 				why = server_deploy()
 			"prep":
@@ -3572,6 +3625,7 @@ func build_view() -> Dictionary:
 		"company_squads": company_squads(), "max_squads": int(BaseFob.TIERS[fob_tier()].squads),
 		"home": ZoneControl.home(), "zone_control": ZoneControl.view(),  # docs/lhd_home.md
 		"pool_models": MotorPool.view().map(func(v: Dictionary) -> String: return String(v.model)),  # the LHD's vehicle park
+		"staging": Staging.view(prep_contract()),  # D8: the corner the company rents, and the quotes for the contract in prep
 	}
 
 

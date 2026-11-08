@@ -331,6 +331,9 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		rows.add_child(UiKit.text("Deployed to %s (%s zone). Respawns used %d of %d free." % [dep.get("zone_id", "?"), dep.get("zone_kind", "contract"),
 			int(dep.get("respawns_used", 0)), int(dep.get("respawns_free", 0))]))
 		return
+	var staged := Staging.active()
+	if staged:
+		_build_staged(rows, v.get("staging", {}))
 	var job := UiKit.section("Contract", rows)
 	job.add_child(UiKit.text(String(contract.get("name", contract.get("title", ""))) + " (" + ContractGen.clawback_text(contract) + ")" if not contract.is_empty()
 		else "None in prep: prep one from the contract board to deploy."))
@@ -340,6 +343,7 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 			prep_button.disabled = not multiplayer.is_server()  # the host preps
 			job.add_child(_line("Held: %s (deploy by day %d)" % [c.title, int(c.deadline_day)], [prep_button]))
 	job.add_child(UiKit.button_row([UiKit.button("Contract board", _open_board)]))
+	_build_insertion_options(job, v.get("staging", {}))
 	var debrief: Dictionary = roster.get("last_debrief", {})
 	if not debrief.is_empty():
 		job.add_child(UiKit.hint("Last deployment: %d back, %d MIA, %d KIA, %d respawns (%d bought)" % [debrief.get("extracted", []).size(),
@@ -431,6 +435,8 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 		map.queue_redraw())
 	raid.add_child(UiKit.hint("Region map: walk between linked zones through their crossings (2 h a link)."))
 	raid.add_child(map)
+	if staged:
+		return  # (the locals' upgrades, the base's defences and the restock are at home; only what the squad brought is here)
 	# The locals (rebel support, docs/rebel_support.md): their backing per region and what it unlocks.
 	var locals := UiKit.section("The locals (rebel support)", rows)
 	for r: Dictionary in v.get("rebels", []):
@@ -501,6 +507,33 @@ func _build_squad(rows: VBoxContainer, v: Dictionary) -> void:
 	go.add_child(UiKit.button_row([_loadouts_button()]))
 
 
+## Combined arms D8: what the company rents and how long it stays, and the way home.
+func _build_staged(rows: VBoxContainer, s: Dictionary) -> void:
+	var box := UiKit.section("Staged at %s" % String(s.get("name", "")), rows)
+	var state: Dictionary = s.get("state", {})
+	box.add_child(UiKit.text("Rented from %s since day %d: $%s a day. Contracts within %d region links are on the board; no armory, stash, hiring or workshop." % [
+		String(s.get("host_name", "")), int(state.get("since_day", 0)), DebriefCalc.money(int(s.get("rent_day", 0))), Staging.c_i("reach_links", 2)]))
+	if String(state.get("evict", "")) != "":
+		box.add_child(UiKit.warn("Ordered out: %s. The company leaves after the deployment." % String(state.evict)))
+	var home := UiKit.button("Go home (%d day%s travel)" % [int(s.get("home_days", 0)), "" if int(s.get("home_days", 0)) == 1 else "s"], func() -> void: BaseHub.request("stage_home"), "Leave the corner; what's parked here goes home with the company")
+	home.disabled = not multiplayer.is_server()
+	box.add_child(UiKit.button_row([home]))
+
+
+## Combined arms D8: the ways of reaching the contract in prep and what each costs (8.1 step 1): a
+## button for each friendly FOB the company can rent from.
+func _build_insertion_options(job: VBoxContainer, s: Dictionary) -> void:
+	for o: Dictionary in s.get("options", []):
+		if String(o.get("key", "")) == "home":
+			job.add_child(UiKit.hint(Staging.option_text(o)))
+			continue
+		var at := String(o.get("zone", ""))
+		var stage := UiKit.button(Staging.option_text(o), func() -> void: BaseHub.request("stage", [at]), "Rent a corner of the base for the deployment: the squad and up to %d vehicles go there, and the contract is run from it" % Staging.c_i("parking", 2))
+		stage.disabled = not multiplayer.is_server() or not bool(o.get("ok", true))
+		stage.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		job.add_child(stage)
+
+
 ## S0743 (restock left the medic short silently): what someone's last restock couldn't give
 ## them (Roster.restock_short_of), under their row until a restock fills them (deploying
 ## without it keeps it: Roster.record_loadout).
@@ -564,6 +597,9 @@ func _build_roster(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 func _build_hiring(rows: VBoxContainer, v: Dictionary) -> void:
+	if Staging.active():
+		rows.add_child(UiKit.text("No hiring at the staging FOB. The hiring board is at the company's own base."))
+		return
 	var pool: Array = v.get("hiring", {}).get("pool", [])
 	rows.add_child(UiKit.hint("The board turns over every %d days (last on day %d)." % [Hiring.REFRESH_DAYS, int(v.get("hiring", {}).get("refreshed_day", 1))]))
 	if pool.is_empty():
@@ -578,6 +614,8 @@ func _build_hiring(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 func _build_medbay(rows: VBoxContainer, v: Dictionary) -> void:
+	if Staging.active():
+		rows.add_child(UiKit.hint("A tent with cots: rest and basic care, no surgery. Nobody here gets anyone back sooner; the recovering heal with the days."))
 	var roster: Dictionary = v.get("roster", {})
 	var anyone := false
 	var people := []
@@ -592,7 +630,9 @@ func _build_medbay(rows: VBoxContainer, v: Dictionary) -> void:
 		anyone = true
 		var quote := Roster.medbay_quote(person)
 		var extra: Array = []
-		if quote.is_empty():
+		if Staging.active():
+			pass  # (no treatment for days sooner here)
+		elif quote.is_empty():
 			extra.append(UiKit.hint("treated"))
 		else:
 			var who := String(p[0])
@@ -612,7 +652,8 @@ func _build_medbay(rows: VBoxContainer, v: Dictionary) -> void:
 ## type filter and support call prices, a row per item with its ItemInfo tooltip, bought through
 ## the host (BaseHub.request "buy", delivered to the armory counter).
 func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
-	rows.add_child(UiKit.hint("Bought items are delivered to the armory counter. Hover an item for what it is and how it's used."))
+	rows.add_child(UiKit.hint("Bought items are delivered to the armory counter. Hover an item for what it is and how it's used." if not Staging.active()
+		else "The host's resupply terminal: ammo, medical, batteries, fuel and vehicle spares at +%d%%, laid out by the crates. No weapons, armour or gear here." % roundi((Staging.c_f("resupply_mult", 1.25) - 1.0) * 100.0)))
 	var filter := OptionButton.new()
 	for type in SHOP_TYPES:
 		filter.add_item("Everything" if type == "" else type.capitalize())
@@ -680,6 +721,9 @@ func _build_shop(rows: VBoxContainer, v: Dictionary) -> void:
 
 
 func _build_armory(rows: VBoxContainer, v: Dictionary) -> void:
+	if Staging.active():
+		rows.add_child(UiKit.text("No armory at the staging FOB: only what the squad brought. The company's stash stays at its own base."))
+		return
 	rows.add_child(UiKit.text("The company stash lies in the armory: pick up what you need, drop what you bring back. Anything left in the base counts."))
 	rows.add_child(UiKit.button_row([_loadouts_button()]))
 	_add_item_lines(UiKit.section("In the stash", rows), BaseArmory.counts(v.get("stash", [])))
@@ -721,6 +765,9 @@ const AWAY_FROM_POOL := "Service is booked at the motor pool's sign"
 ## a Service button that books it into the workshop (MotorPoolNode.request_repair; the host
 ## checks the asker is at the motor pool terminal, which only the base has).
 func _build_motor_pool(rows: VBoxContainer) -> void:
+	if Staging.active():
+		rows.add_child(UiKit.hint("Parked at the staging FOB: %d of %d spots. Their mechanics fix damaged modules for the motor pool's price +%d%% and fill the tank at $%d a litre; nothing destroyed." % [
+			Staging.vehicles().size(), Staging.c_i("parking", 2), roundi((Staging.c_f("repair_mult", 1.5) - 1.0) * 100.0), Staging.c_i("fuel_price", 3)]))
 	rows.add_child(UiKit.hint("The company's vehicles. Take one on a deployment from the briefing's supports; one left in a zone or destroyed there is gone from the pool. Service is booked at the motor pool's sign."))
 	# Wave 6 call #1: allied quartermasters sell MRAPs from Trusted (Quartermaster.vehicle_deals).
 	var buy := UiKit.section("Buy vehicles (allied quartermasters)", rows)
@@ -830,6 +877,9 @@ func _build_air_wing(rows: VBoxContainer) -> void:
 ## supplies, medical), what they do, drawing ammo/supplies/medical into the armory stash, and
 ## the tagged lots waiting in storage (sell for the better price, gift, or keep as stocks).
 func _build_stores(rows: VBoxContainer) -> void:
+	if Staging.active():
+		rows.add_child(UiKit.text("The company's stocks are at its own base."))
+		return
 	rows.add_child(UiKit.hint("Stocks from pallets kept at the FOB. Fuel and parts cover part of support calls and repairs automatically; ammo, supplies and medical can be drawn into the armory stash."))
 	for kind: String in Pallets.stock_kinds():
 		var n := Economy.stock(kind)
