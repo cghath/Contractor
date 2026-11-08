@@ -1962,6 +1962,20 @@ for a man out cold (the engagement scene only checks that he's dragged). A fix w
 the drag DRAG_OFFSET past the spot, away from the threat, or to judge the spot by where the
 casualty will lie; it changes every firefight's drags, so it's left for Captain's word.
 
+### F-457 (note): breach's roof scene is now and then refused as "inside the building"
+breach "Breach and clear under a roof" puts a 2.4 m slab (a porch roof) over the main building's
+west wall and orders a breach there. Now and then the order comes back "That wall's inside the
+building: point at an outside wall or a door" (`Squad.breach_target`: the spot 1 m out from the
+wall reads as within GRID_OUTSIDE_M of the building's inside): the PR run of ca75b55e (CI
+42431860951, the push run 42431858613 of the same code passed), and twice in local runs while
+F-396 was built (R0828, R0834). Not touched by this branch's later rounds. A guess, not yet
+checked: `Buildings` caches its scans for CACHE_S (20 s), so whether the scan behind the wall
+already holds the test's slab depends on when that building was last scanned; scanned with the
+slab, the roofed spot outside the wall, walled on one side, may count as inside (`Buildings`'
+hall rule). If so it's a game matter too: a wall under a porch or an overhang can't be breached.
+To check: `Buildings.forget()` after the slab goes in (it should then fail every time), then
+either a narrower slab in the test or the hall rule asking for walls on more than one side.
+
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
 (`_bang_plan`). Nothing quiets the blast; a quiet wall breach (cutting through) isn't modelled.
