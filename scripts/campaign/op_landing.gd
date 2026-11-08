@@ -6,7 +6,9 @@ extends OpBase
 ## contract's "hour"), H-hour comes when wave 1's first AAV is on the beach, or at lead_s.
 ##
 ## - The company starts in its AAVs in the LHD's well deck: as the run starts, wave 1's AAVs come
-##   out of the stern gate one after another (Lhd.launch_transform, "stern_step_m" apart): the
+##   out of the stern gate one after another (Lhd.launch_transform, "stern_step_m" apart), each
+##   waiting in the well deck until its men are aboard (they come out on Operations' budget of men a
+##   frame, F-468; Captain, 2026-11-08: an AAV never leaves half boarded): the
 ##   company's "company_aavs" with an allied crew (driver and gunner), the players and the company's
 ##   own men seated in the back (a player joining before the beach is seated too), and "allied_aavs"
 ##   with the friendly OOB's wave-0 rifle squads aboard ("carrier": "aav"). Wave 2 ("wave2_aavs",
@@ -27,10 +29,12 @@ extends OpBase
 ## (the FFV positions: F-295). Numbers in data/operations.json "beach_landing" "landing", Proposed.
 
 const TICK_S := 0.5
+const BOARDING := "boarding"  # an AAV's state in the well deck while its crew and squad come out
 
 var _tick_left := 0.0
 var _aav := {}  # host: aav id -> Vehicle
 var _spawn_queue: Array = []
+var _boarding: Array = []  # host: AAVs in the well deck with men still to come out (spawn_step): {"a", "v", "squad", "seats", "n", "riders", "entry", "allied", "i", "made"}
 
 
 func start() -> void:
@@ -63,6 +67,9 @@ func start() -> void:
 		m["smoke"] = false
 	else:
 		for a: Dictionary in m.waves_aav:
+			if String(a.state) == BOARDING:
+				a.state = Operations.PENDING  # (a loaded save: half boarded, it comes out again from nothing; Operations has its squad's entry pending again)
+				a.erase("vid")
 			if String(a.state) in ["afloat", "landed"] and String(a.get("vid", "")) != "":
 				var layer := VehicleLayer.of(self)
 				var v := layer.find(String(a.vid)) if layer else null
@@ -166,33 +173,86 @@ func _launch(a: Dictionary) -> void:
 	v.set_meta(&"op_aav", String(a.id))
 	_aav[String(a.id)] = v
 	a["vid"] = v.vehicle_id
-	a.state = "afloat"
+	a.state = BOARDING  # (it waits in the well deck for its men: Captain, 2026-11-08)
+	AavGunner.attach(v)
+	v.destroyed.connect(_on_aav_lost.bind(String(a.id)))
 	# The crew: an allied driver and gunner.
 	var squad := Squad.new()
 	squad.name = ops._fresh_name("AAV")
 	squad.faction = &"friendly"
 	squad.callsign = "Gator %d" % (waves().find(a) + 1)
 	ops.add_child(squad)
-	var gun := int(v.spec.get("gun", {}).get("seat", -1))
-	var n := 0
-	for seat in [OpSupport._seat_of_kind_any(v, Vehicle.DRIVER), gun]:
-		if seat < 0:
+	var seats: Array = [OpSupport._seat_of_kind_any(v, Vehicle.DRIVER), int(v.spec.get("gun", {}).get("seat", -1))].filter(func(n: int) -> bool: return n >= 0)
+	_boarding.append({"a": a, "v": v, "squad": squad, "seats": seats, "n": 0, "riders": false, "entry": {}, "allied": null, "i": 0, "made": []})
+
+
+## Host, every frame: the AAVs' men come out on Operations' shared budget, the AAV first (out in
+## _launch), its crew, then who rides; it leaves the well deck once they're all aboard.
+func spawn_step() -> bool:
+	while not _boarding.is_empty():
+		var job: Dictionary = _boarding[0]
+		var a: Dictionary = job.a
+		var v := job.v as Vehicle
+		if not is_instance_valid(v) or v.is_queued_for_deletion() or String(a.state) != BOARDING:
+			_boarding.pop_front()  # (lost in the well deck: _on_aav_lost said so)
+			if job.allied != null:
+				ops._finish_job({"entry": job.entry, "squad": job.allied, "vehicles": [], "made": job.made})
 			continue
-		var s := ops._spawn_man({"side": "friendly", "kit": ""}, squad, n, v.global_position + Vector3.UP * 3.0)
-		n += 1
+		if not _board_step(job, v):
+			return true
+		_boarding.pop_front()
+		_set_off(a, v)
+	return false
+
+
+## One AAV's men, as many as the frame's budget allows. True once they're all aboard.
+func _board_step(job: Dictionary, v: Vehicle) -> bool:
+	var a: Dictionary = job.a
+	while int(job.n) < (job.seats as Array).size():
+		if ops.spawn_men_left() <= 0:
+			return false
+		var s := ops._spawn_man({"side": "friendly", "kit": ""}, job.squad, int(job.n), v.global_position + Vector3.UP * 3.0)
+		var seat: int = job.seats[job.n]
+		job.n = int(job.n) + 1
 		if s:
 			s.set_meta(&"vehicle_crew", v.vehicle_id)
 			s.set_meta(&"op_allied", true)
 			v.server_enter(s, seat)
-	AavGunner.attach(v)
-	v.destroyed.connect(_on_aav_lost.bind(String(a.id)))
-	# Who rides: the company (players first) or an allied squad.
-	if String(a.role) == "company":
-		for s: Soldier in _company():
-			if Vehicle.ride_of(s) == null:
-				v.server_enter(s, -1)
-	elif String(a.entry) != "":
-		_board_allied(a, v)
+	# Who rides: the company (players first; they're here already) or an allied squad.
+	if not bool(job.riders):
+		job.riders = true
+		if String(a.role) == "company":
+			for s: Soldier in _company():
+				if Vehicle.ride_of(s) == null:
+					v.server_enter(s, -1)
+		elif String(a.entry) != "":
+			_board_allied(job)
+	if job.allied == null:
+		return true
+	var e: Dictionary = job.entry
+	while int(job.i) < int(e.men):
+		if ops.spawn_men_left() <= 0:
+			return false
+		var i := int(job.i)
+		job.i = i + 1
+		var s := ops._spawn_man(e, job.allied, i, v.global_position + Vector3.UP * 3.0 + Vector3.RIGHT * i)
+		if s == null:
+			continue
+		s.set_meta(&"op_group", String(e.id))
+		s.set_meta(&"op_allied", true)
+		v.server_enter(s, -1)
+		(job.made as Array).append(s)
+	ops._finish_job({"entry": e, "squad": job.allied, "vehicles": [], "made": job.made})
+	return true
+
+
+## All aboard: out of the stern gate and round the hull for its lane.
+func _set_off(a: Dictionary, v: Vehicle) -> void:
+	var lhd := Lhd.of(self)
+	var terrain := _terrain()
+	if lhd == null or terrain == null:
+		return
+	a.state = "afloat"
 	var swim := PackedVector3Array([lhd.approach_point(v.global_position), terrain.shore_point(lane_target(a), -num("landing", "beach_out_m", 40.0)),
 		terrain.shore_point(lane_target(a), num("landing", "beach_in_m", 45.0))])
 	v.server_follow_path(swim)
@@ -221,11 +281,12 @@ func _company() -> Array[Soldier]:
 	return out
 
 
-## Allied OOB entry `a.entry`'s squad comes out aboard `v` (Operations' spawner's men, its commander's).
-func _board_allied(a: Dictionary, v: Vehicle) -> void:
+## Allied OOB entry `a.entry`'s squad starts coming out aboard its AAV (Operations' spawner's men,
+## its commander's): spawn_step brings them, on the shared budget.
+func _board_allied(job: Dictionary) -> void:
 	var e: Dictionary = {}
 	for x: Dictionary in run().get("oob", []):
-		if String(x.id) == String(a.entry):
+		if String(x.id) == String(job.a.entry):
 			e = x
 	if e.is_empty() or String(e.state) != Operations.PENDING:
 		return
@@ -234,16 +295,8 @@ func _board_allied(a: Dictionary, v: Vehicle) -> void:
 	squad.name = ops._fresh_name(String(e.callsign))
 	squad.faction = &"friendly"
 	ops.add_child(squad)
-	var made: Array = []
-	for i in int(e.men):
-		var s := ops._spawn_man(e, squad, i, v.global_position + Vector3.UP * 3.0 + Vector3.RIGHT * i)
-		if s == null:
-			continue
-		s.set_meta(&"op_group", String(e.id))
-		s.set_meta(&"op_allied", true)
-		v.server_enter(s, -1)
-		made.append(s)
-	ops._finish_job({"entry": e, "squad": squad, "vehicles": [], "made": made})
+	job.entry = e
+	job.allied = squad
 
 
 ## A player who comes in while wave 1 is still afloat gets a seat in a company AAV.
@@ -269,7 +322,7 @@ func _on_aav_lost(_v: Vehicle, id: String) -> void:
 	for a: Dictionary in waves():
 		if String(a.id) != id:
 			continue
-		var afloat := String(a.state) == "afloat"
+		var afloat := String(a.state) in ["afloat", BOARDING]
 		a.state = "lost"
 		if afloat and int(a.wave) == 1:
 			m["lost_afloat"] = int(m.get("lost_afloat", 0)) + 1

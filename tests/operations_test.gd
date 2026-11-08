@@ -532,14 +532,17 @@ func _test_save_load() -> void:
 	# F-450 (the CI flake): the side's feed ran in this frame, between the squads leaving the tree
 	# and their men's frees, and Squad.members() called get_tree() on a squad out of it. A feed now,
 	# every sitrep due: no script error, and the squads gone from the list and the board.
-	for id: String in intel.board.rows:
-		intel.board.rows[id].sitrep_at = -INF
-	intel.server_feed()
+	check(intel != null, "the zone has the side's feed (SideIntel)")
+	if intel:
+		for id: String in intel.board.rows:
+			intel.board.rows[id].sitrep_at = -INF
+		intel.server_feed()
 	var listed := GroupBoard.squads_of(get_tree(), &"friendly")
-	var left := old_squads.filter(func(sq: Squad) -> bool: return listed.has(sq) or intel.board.rows.has(GroupBoard.group_id(sq)))
+	var left := old_squads.filter(func(sq: Squad) -> bool: return listed.has(sq) or (intel != null and intel.board.rows.has(GroupBoard.group_id(sq))))
 	check(not old_squads.is_empty() and left.is_empty(),
 		"the old node's %d friendly groups, out of the tree with their men still in it, leave the side's list and board at once (left: %d)" % [old_squads.size(), left.size()])
 	await _frames(3)
+	_spawn_frames.clear()  # (F-469: the frames the reloaded run's men come back in, below)
 	Operations.install(level, level.def)
 	ops = Operations.of(level)
 	await _wait_for(func() -> bool: return ops != null and ops.active(), 10.0)
@@ -550,6 +553,13 @@ func _test_save_load() -> void:
 		"its allied groups come back where they were, by the same rules")
 	await _wait_for(func() -> bool: return ops.friendly.groups.size() >= 1, 60.0)
 	check(ops.friendly != null and ops.friendly.groups.size() >= 1 and (ops.plan.phases() as Array).size() == 4, "under a commander again (%d groups)" % ops.friendly.groups.size())
+	# F-469: the attached Abrams' crews land beside the reloaded run's own men, on one budget.
+	var sup := ops.get_node_or_null(OpSupport.NODE_NAME) as OpSupport
+	await _wait_for(func() -> bool: return sup != null and sup.attached().all(func(e: Dictionary) -> bool: return String(e.state) in ["live", "lost"]), 30.0)
+	var most := 0
+	for f: int in _spawn_frames:
+		most = maxi(most, int(_spawn_frames[f]))
+	check(most >= 1 and most <= int(Operations.knob("run", "spawn_men_frame", 2.0)) + 1, "after the load too, a few men a frame (at most %d)" % most)
 
 
 ## Phase 3 stalls on time: at side_command.json phase_fail_share x its limit with its town not taken.

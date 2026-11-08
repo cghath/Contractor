@@ -11,6 +11,20 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 
 ## [Unreleased]
 
+### Spawning a few men a frame, everywhere the operation does it (fix/ci-flakes-nov, F-452, F-467 to F-469)
+
+- **Changed:** one budget of men a frame (`run.spawn_men_frame`) is shared by Operations, the
+  attached armour and the beach landing. An attached tank's crew and an AAV's men now come out
+  over a few frames, the vehicle first, instead of all in one frame beside the company's own men
+  (a 45-60 ms hitch at H-hour and after a load; about 10 men a frame on the landing).
+- **Changed:** an AAV waits in the well deck until its crew and its allied squad are aboard, so it
+  never swims off half boarded (the Captain, 2026-11-08). A save caught mid-way brings the tank or
+  AAV out again from nothing: no man lost or doubled.
+- **Fixed (tests):** the operations suite also looks at the frames after a load. Interaction's
+  "shot through the hips" comes from behind (his forearm could take it from the front), casualty's "needs help without
+  asking" waits out a squad still engaged from earlier in the suite (and says why if it fails),
+  and the net client's join loop guards a level with no players node yet.
+
 ### Two CI flakes (fix/ci-flakes-nov, F-450, F-451)
 
 - **Fixed:** the friendly side's feed no longer reads a squad that has left the level while its

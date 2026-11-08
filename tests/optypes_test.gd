@@ -332,6 +332,8 @@ func _begin(t: String) -> bool:
 	player.set_physics_process(false)
 	player.vitals.process_mode = Node.PROCESS_MODE_DISABLED
 	ops = Operations.of(level)
+	if ops:
+		ops.advance_brings_men = true  # (this suite's clock skips frames, and it looks at crews at once)
 	await _wait_for(func() -> bool: return ops != null and ops.active(), 30.0)
 	check(ops != null and ops.active() and ops.get_node_or_null(OpTypes.MECHANIC) != null and ops.get_node_or_null(OpSupport.NODE_NAME) != null,
 		"its run is on, with its own mechanic (%s) and the support every type has" % (ops.get_node(OpTypes.MECHANIC).get_script().get_global_name() if ops and ops.get_node_or_null(OpTypes.MECHANIC) else "none"))
@@ -797,6 +799,7 @@ func _test_budgets(t: String) -> void:
 ## A save mid-operation and a load: the run and its mechanics' records come back; a new run
 ## picks the mechanics up where they were.
 func _save_load(t: String) -> void:
+	var caught := await _part_spawned(t)  # (F-467, F-468: the save catches it mid-way)
 	ops.server_save_state()
 	var before: Dictionary = (_run().get("mech", {}) as Dictionary).duplicate(true)
 	check(Campaign.save_campaign() and Campaign.load_campaign(), "%s: the campaign saves and loads mid-operation" % t)
@@ -820,6 +823,12 @@ func _save_load(t: String) -> void:
 			if Vehicle.ride_of(player) == v:
 				v.server_exit(player)
 			v.queue_free()
+	if t == "beach_landing" and caught != "":
+		var half := (_mech() as OpLanding).aav_of(caught)
+		if half:
+			for s: Soldier in half.occupants():
+				s.queue_free()
+			half.queue_free()
 	for r: Dictionary in ops.records.values():
 		for s: Variant in r.get("soldiers", []):
 			if is_instance_valid(s):
@@ -834,6 +843,8 @@ func _save_load(t: String) -> void:
 	await _frames(3)
 	Operations.install(level, level.def)
 	ops = Operations.of(level)
+	if ops:
+		ops.advance_brings_men = true  # (this suite's clock skips frames, and it looks at crews at once)
 	await _wait_for(func() -> bool: return ops != null and ops.active(), 15.0)
 	ops.server_advance(5.0)
 	var back := _mech()
@@ -842,6 +853,9 @@ func _save_load(t: String) -> void:
 	match t:
 		"phased_invasion":
 			check(_sup().attached().all(func(e: Dictionary) -> bool: return String(e.state) in ["live", "lost"]), "the attached armour comes back out where it was")
+			var v := _sup().vehicle_of(caught)
+			var crew := _crew_of(v)
+			check(v != null and crew == 3, "a tank saved with its crew half out comes back with its whole crew, no more (%d, 3 wanted)" % crew)
 		"armoured_thrust":
 			check(_sup().attached().all(func(e: Dictionary) -> bool: return String(e.state) in [Operations.PENDING, "live", "lost"]) and _mech().mine().has("bypassed"),
 				"its attached armour and its column's record come back")
@@ -852,6 +866,72 @@ func _save_load(t: String) -> void:
 			check(String((back as OpCrossing).mine().state) == OpCrossing.BLOWN, "the bridge's demolition as it was (blown)")
 		"beach_landing":
 			check((back as OpLanding).waves().size() == 5, "its AAV waves' record as it was")
+			var la := back as OpLanding
+			var a: Dictionary = la.waves().filter(func(x: Dictionary) -> bool: return String(x.id) == caught)[0]
+			var v := la.aav_of(caught)
+			var e: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(a.entry))[0]
+			var aboard := v.occupants().filter(func(s: Soldier) -> bool: return s.has_meta(&"op_allied") and not s.has_meta(&"vehicle_crew")).size() if v else -1
+			check(String(a.state) == "afloat" and v != null and _crew_of(v) == 2 and aboard == int(e.men) and String(e.state) == "live",
+				"an AAV saved half boarded launches again with its crew and its whole squad, no more (%s, crew %d, %d of %d aboard, its squad %s)" % [a.state, _crew_of(v), aboard, int(e.men), e.state])
+
+
+## Men of `v`'s crew in the whole world (its seats or not: none lost, none twice).
+func _crew_of(v: Vehicle) -> int:
+	if v == null:
+		return -1
+	return get_tree().get_nodes_in_group(&"combatants").filter(func(n: Node) -> bool: return (n as Soldier) != null and not n.is_queued_for_deletion() and String(n.get_meta(&"vehicle_crew", "")) == v.vehicle_id).size()
+
+
+## F-467, F-468: one budget of men a frame, what's over carried to the next frames. An attached tank
+## comes out and its crew over the real frames that follow, and a tank (phased_invasion) or an AAV
+## (beach_landing) is left mid-way for the save: its id, "" for the other types.
+func _part_spawned(t: String) -> String:
+	var per := int(Operations.knob("run", "spawn_men_frame", 2.0))
+	match t:
+		"phased_invasion":
+			var sup := _sup()
+			var e: Dictionary = sup.attached()[0]
+			var fresh := func() -> Vehicle:  # (its old tank and crew gone; out again, no men yet)
+				var old := sup.vehicle_of(String(e.id))
+				if old:
+					for s: Soldier in old.occupants():
+						s.queue_free()
+					old.queue_free()
+				e.state = Operations.PENDING
+				sup._spawn_attached(e)
+				return sup.vehicle_of(String(e.id))
+			var v: Vehicle = fresh.call()
+			check(v != null and String(e.state) == OpSupport.SPAWNING and v.occupants().is_empty(), "an attached tank comes out first, its crew after it (%s, %d aboard)" % [e.state, v.occupants().size() if v else -1])
+			ops.server_advance(2.0)  # (a tick that finds it crewless, its crew carried over: nothing leans on one)
+			check(String(e.state) == "live" and _crew_of(v) == 3, "the tick and its carried-over crew: all aboard, live (%s, %d)" % [e.state, _crew_of(v)])
+			v = fresh.call()
+			await _frames(3)
+			check(String(e.state) == "live" and _crew_of(v) == 3 and v.occupants().size() == 3, "and in real frames, on the budget (%s, %d aboard in 3 frames)" % [e.state, v.occupants().size()])
+			v = fresh.call()
+			ops._men_frame = -1
+			sup.spawn_step()
+			check(String(e.state) == OpSupport.SPAWNING and v.occupants().size() == per, "%d of its crew out this frame, the rest to come (%s, %d aboard)" % [per, e.state, v.occupants().size()])
+			return String(e.id)
+		"beach_landing":
+			var la := _mech() as OpLanding
+			var picks := la.waves().filter(func(x: Dictionary) -> bool: return String(x.role) == "allied" and String(x.entry) != "")
+			if picks.is_empty():
+				check(false, "an allied AAV to catch half boarded")
+				return ""
+			var a: Dictionary = picks[0]
+			var entry: Dictionary = _run().oob.filter(func(x: Dictionary) -> bool: return String(x.id) == String(a.entry))[0]
+			a.state = Operations.PENDING
+			a.erase("vid")
+			entry.state = Operations.PENDING
+			la._launch(a)
+			var v := la.aav_of(String(a.id))
+			for pass_n in 2:
+				ops._men_frame = -1
+				la.spawn_step()
+			check(v != null and String(a.state) == OpLanding.BOARDING and v.occupants().size() == 2 * per and not (is_instance_valid(v.ai) and v.ai.active) and String(entry.state) == "spawning",
+				"an AAV takes its men aboard over the frames, waiting in the well deck (%s, %d aboard)" % [a.state, v.occupants().size() if v else -1])
+			return String(a.id)
+	return ""
 
 
 func _debrief_and_war(t: String) -> void:

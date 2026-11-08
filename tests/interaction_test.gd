@@ -898,7 +898,7 @@ func _test_downed_enemy() -> void:
 	var ground := SPOT.y - 0.1  # the compound's yard
 	var shooter := StaticBody3D.new()
 	add_child(shooter)
-	shooter.global_position = hostile.global_transform * Vector3(0.1, 1.0, -6.0)
+	shooter.global_position = hostile.global_transform * Vector3(0.1, 1.0, 1.5)  # (from just behind: F-482, from the front his hanging forearm can take it)
 	var aim := (hostile.global_transform * Vector3(0.1, 1.0, 0.0) - shooter.global_position).normalized()
 	var shot := Ballistics.fire(shooter, shooter.global_position, aim, ItemDB.get_item(&"m4a1"))
 	shooter.queue_free()

@@ -1368,9 +1368,12 @@ func _test_player_asks_medic() -> void:
 		while player.inventory.count_of(id) > 0 and player.inventory.remove_one(id):
 			pass
 	player.medic_asked_at = -1000.0
+	# F-483: unasked is only out of a firefight (player_wants_care), and the squad counts as engaged
+	# for ENGAGED_S after any member was last fired on or hurt, by whatever this suite did before.
+	await _wait_until(func() -> bool: return not squad.is_engaged(), Squad.ENGAGED_S + 5.0)
 	player.vitals.server_hit(Vitals.UPPER_ARM_R, {"round_class": Vitals.PISTOL})
 	await _seconds(0.3)
-	check(SquadAI.needs_help(player), "with nothing to treat it himself, he needs help without asking")
+	check(SquadAI.needs_help(player), "with nothing to treat it himself, he needs help without asking (%s; engaged: %s)" % [_kinds(player.vitals.care_needed()), squad.is_engaged()])
 	helped = await _wait_until(func() -> bool: return player.vitals.care_needed().is_empty(), 40.0)
 	check(helped, "and they come on their own")
 	# Treat me: the one selected comes.

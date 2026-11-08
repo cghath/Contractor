@@ -30,12 +30,12 @@ const GUNS := {
 const CAPACITY := {"mag_762x39": 30, "mag_545": 30, "mag_rpk40": 40, "mag_svd": 10, "belt_762x54r": 100, "box_556": 200, "belt_762x51": 100, "clip_762x54r": 5, "mag_65cm": 10, "mag_762": 20}
 ## Guns fired and reloaded for real on the host player.
 const FIRED: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd", "m249", "m240b", "mosin9130", "springfield_hs", "scar_h"]
+const OPFOR: Array[String] = ["akm", "ak74", "rpk", "pkm", "svd"]
+## Items expansion (2026-10-20): every gun it added, fired and reloaded for real (_test_expansion_guns).
+const EXPANSION_GUNS: Array[String] = ["glock19", "beretta_m9", "cz75", "makarov_pm", "tt33", "fn57", "glock18c", "usp45", "mp5", "mp5sd", "mp7", "uzi", "vityaz", "p90", "ump45", "rem870", "mossberg590", "m1014", "saiga12", "sig_mcx", "scar_l", "g36c", "aug_a3", "tavor_x95", "ak12", "akms", "ak105", "amd65", "vz58", "mk12", "sr25", "m14_ebr", "g3a3", "fal", "l1a1", "rpd", "negev", "mg3", "m60e4", "lee_enfield", "sks"]
 ## Shells fired each way (open, choked) to measure the 870's pattern (F-451): 72 pellets a side,
 ## the choked mean (0.45 of open) clears the 0.6 bar by ~5 standard deviations.
 const PATTERN_SHELLS := 8
-const OPFOR: Array[String] =["akm", "ak74", "rpk", "pkm", "svd"]
-## Items expansion (2026-10-20): every gun it added, fired and reloaded for real (_test_expansion_guns).
-const EXPANSION_GUNS: Array[String] = ["glock19", "beretta_m9", "cz75", "makarov_pm", "tt33", "fn57", "glock18c", "usp45", "mp5", "mp5sd", "mp7", "uzi", "vityaz", "p90", "ump45", "rem870", "mossberg590", "m1014", "saiga12", "sig_mcx", "scar_l", "g36c", "aug_a3", "tavor_x95", "ak12", "akms", "ak105", "amd65", "vz58", "mk12", "sr25", "m14_ebr", "g3a3", "fal", "l1a1", "rpd", "negev", "mg3", "m60e4", "lee_enfield", "sks"]
 
 var failures := 0
 var level: CompoundLevel
