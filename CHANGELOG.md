@@ -16,6 +16,17 @@ Entry types: **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **S
 Captain's list 2026-10-14, item 3: "breaching charges make holes too small; add a 'Breach and
 clear' team order through walls" (F-317, F-318).
 
+- **Fixed (AI):** a casualty dragged to cover ends in the cover, not 1 m short of it behind his
+  carer: `SquadAI.find_drag_cover` judges a spot by where he'll lie along the way there (F-456).
+  Every drag to cover, men out cold too.
+- **Fixed (buildings):** a wall under a porch, an overhang or a roof slab can be breached from
+  outside; it was now and then refused as "inside the building". Under a roof, only walls the roof
+  runs out to close a hall in (`Buildings._hall_wall`, F-457), so a porch's spots aren't inside
+  (the 20 s scan cache decided whether a scan saw the roof). A wall between two rooms is still refused.
+- **Fixed (menu):** on a client the body you drag gets the host's single Release point, and a body
+  someone else drags gets no point (carry_net, not the host's `carried_by`).
+- **Fixed (AI):** a carer about to lift a man reads who holds a claim on him before the man's one
+  healing timer, which overlapping items make wrong.
 - **Changed (charges):** a wall charge's hole is sized from the soldier who goes through it: his
   capsule (0.3 m round, 1.8 m tall), his kit (0.2 m each side, 0.2 m over the helmet) and 0.25 m
   of ragged edge each side: 1.5 m wide and 2.25 m high (was 1.3 x 2.2), all Proposed

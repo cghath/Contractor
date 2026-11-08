@@ -1951,7 +1951,16 @@ dying man could be dragged (F-412): interaction's "a body that gets up is let go
 Alpha and he stayed draggable, still held (R0848). reset() now clears `dying` and its clock. A
 player who died had it cleared already (update_state clears it on the dead).
 
-### F-456 (note): a casualty dragged to cover can end in sight of the threat
+### F-456 (done 2026-11-08, feat/breach-and-clear): a casualty dragged to cover can end in sight of the threat
+Captain, 2026-11-08: "yes". `find_drag_cover` now judges a spot by where the casualty will lie:
+1 m and 2.1 m back along the carer's way there (his trail, and his trail with the carer stopping
+`AT_COVER_M` short) must both be out of the threat's sight (`_hidden_when_dragged`). The spot
+stays a navmesh point the carer walks to, so nothing is aimed past the cover into the open beyond
+it. Every drag to cover changes, men out cold too. With no such spot in reach it falls back to
+the nearest that hides the spot only. `_sheltered` reads where he lies (`body_point()`, not the
+capsule). casualty's check is real again (R0889: 7.2 m, sheltered, one drag, "Dragging Reed to
+cover, Treating Reed", no "Guarding": the double drag of R0870 didn't happen). What was noted:
+
 `SquadAI.find_drag_cover` picks a spot that hides someone lying there from the threat, and the
 carer drags until he is at it (`_at_cover`) or stalls; the casualty trails `Soldier.DRAG_OFFSET`
 (1 m) behind him, towards where they came from, so he can end just outside the cover. Seen once
@@ -1962,7 +1971,20 @@ for a man out cold (the engagement scene only checks that he's dragged). A fix w
 the drag DRAG_OFFSET past the spot, away from the threat, or to judge the spot by where the
 casualty will lie; it changes every firefight's drags, so it's left for Captain's word.
 
-### F-457 (note): breach's roof scene is now and then refused as "inside the building"
+### F-457 (done 2026-11-08, feat/breach-and-clear): breach's roof scene is now and then refused as "inside the building"
+Captain, 2026-11-08: "fix". Checked first (R0885, a run with prints in the scene): the guess below
+was right about the flake and the real fault is the hall rule. In the same frame the order was
+accepted on the cell probes as they stood (made 15.2 s before the slab, no spots in the four cells
+under it), refused after `Buildings.forget()` (each of those cells now one inside spot), and
+accepted again after forget with the slab's collision off. So the 20 s cache only decided whether
+the scan saw the slab. Those cells count as inside through `_hall_inside`: more than two of their
+12 m rays are open, so the F-162 hall rule applied, the slab made them "roofed", and the
+compound's perimeter 11 to 20 m away across the open yard closed them in (one way in eight open).
+Now a wall closes a hall in only if the roof runs out to it (`Buildings._hall_wall`, still roofed
+`HALL_WALL_ROOF_M` short of it). The game's rule changed, the test's slab didn't; the scene now
+forgets the cache so it always sees the slab. breach gained "What's an outside wall" (porch wall
+allowed, interior wall refused); landmarks' F-162 halls still read as inside (R0889). What was noted:
+
 breach "Breach and clear under a roof" puts a 2.4 m slab (a porch roof) over the main building's
 west wall and orders a breach there. Now and then the order comes back "That wall's inside the
 building: point at an outside wall or a door" (`Squad.breach_target`: the spot 1 m out from the
@@ -1975,6 +1997,21 @@ slab, the roofed spot outside the wall, walled on one side, may count as inside 
 hall rule). If so it's a game matter too: a wall under a porch or an overhang can't be breached.
 To check: `Buildings.forget()` after the slab goes in (it should then fail every time), then
 either a narrower slab in the test or the hall rule asking for walls on more than one side.
+
+### F-470 (note): a recessed porch walled on both sides still reads as inside
+The F-457 rule needs the walls round a spot to be past the roof. An alcove (roofed, its side walls
+under the same roof, open only to the front) keeps three ways open at most and stays inside, so
+the wall at its back is refused as an interior wall. No generated building has one today.
+
+### F-471 (note): `_order_check` still reads host-only carried_by
+`InteractionMenu._order_check` hides Follow me / Stop / Get in cover for someone being carried by
+`carried_by`, which a client never has: on a client they stay offered. `Soldier.is_held()` would do;
+not in round 7's list, so left.
+
+### F-472 (note): CHARGE_DRAG_PAST_M's comment counts ARRIVE as 0.4
+Its comment reads "1 + 0.4 + 0.4 m", but `ARRIVE` is 0.7, so the carer can stop 1.1 m short of the
+spot, not 0.8 m. The 2.3 m has passed its checks; the margin past the blast is 0.3 m thinner than
+it says. Not changed here.
 
 ### F-321 (note): breach and clear in Stealth
 In Stealth the stack still sets the charge (it's the order) but puts no bang through
@@ -2017,6 +2054,10 @@ old draw, unchanged); `landmark_kinds` also reads the zones in the def's `covers
 `landmark_max` (8 for an operation; the data's contract and hot maxima otherwise).
 
 ## Calls made for the Captain
+
+- Captain, 2026-11-08: F-456 "yes": a casualty dragged to cover ends in the cover. Call: judged the spot by where he'll lie (`_hidden_when_dragged`) rather than aiming 1 m past it, since a point past the spot can be off the navmesh or back in the open; no fully hidden spot in reach falls back to the old choice rather than treating him where he lay.
+- Captain, 2026-11-08: F-457 "fix": a wall under a porch, overhang or roof slab can be breached from outside. Call: fixed the hall rule in `Buildings` (walls count only with the roof running out to them, `HALL_WALL_ROOF_M` 0.5 m, Proposed) rather than special-casing `Squad.breach_target`, so garrisons and clears stop reading porches as rooms too.
+- `_sheltered` measures to `body_point()`, where he lies, not the capsule (F-456). Alternative: leave it on the capsule, which can be metres off for a ragdoll.
 
 One line each, newest last (docs/cg_brief.md, rule zero): date | what was decided | why | the alternative.
 2026-10-21 | Deep water: players swim (1.1 m/s, 0.5 under a full load, head out, hands busy, the current carries them, no drowning); the AI never routes into it (deep water is off its navigation mesh) and crosses on bridges and fords | Arma 3, the realism bar, has men swim, and rivers that block outright read as more map edges | an invisible wall at deep water, or drowning with a breath meter

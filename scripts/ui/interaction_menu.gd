@@ -373,7 +373,7 @@ static func _group_member(action: Dictionary) -> Dictionary:
 ## point offers zip-cuff and search), the dead, dummies, items and the body you're carrying
 ## or dragging (its point offers Release / Put down first) keep a single point.
 static func has_regions(actor: Soldier, target: Node) -> bool:
-	if target is Soldier and target != actor and (target as Soldier).carried_by == actor:
+	if _moved_by(target, actor):
 		return false
 	return target is Soldier and not _is_enemy(actor, target) and target_kind(actor, target) in [DOWNED, SQUADMATE, SELF, PERSON]
 
@@ -914,9 +914,8 @@ static func _single_points(actor: Soldier, camera: Camera3D) -> Array[Dictionary
 	for node: Node in candidates:
 		if node == actor or not node is Node3D or node.is_queued_for_deletion():
 			continue
-		var mover: Node = (node as Soldier).carried_by if node is Soldier else null
-		if is_instance_valid(mover) and mover != actor:
-			continue  # on someone else's shoulder or being dragged by them (yours: Release / Put down)
+		if node is Soldier and (node as Soldier).is_held() and not _moved_by(node, actor):
+			continue  # on someone else's shoulder or being dragged by them (yours: Release / Put down); carry_net, so on a client too
 		var at := action_point(node as Node3D)
 		var to := at - eye
 		if to.length() > REACH or forward.angle_to(to) > deg_to_rad(VIEW_CONE_DEG) or camera.is_position_behind(at):

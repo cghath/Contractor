@@ -89,6 +89,7 @@ func _ready() -> void:
 	await _test_compound_wall()
 	await _test_house_wall()
 	await _test_targets()
+	await _test_inside_rule()
 	await _test_order_with_client()
 	await _test_lead_down()
 	await _test_carriers_down()
@@ -333,6 +334,56 @@ func _test_targets() -> void:
 	for ai: SquadAI in mates:
 		if int(kits.get(ai, 0)) > 0:
 			Roles.give(ai.body.inventory, Charges.ITEM, int(kits[ai]))
+
+
+# --- What counts as an outside wall ---------------------------------------------------------
+
+## F-457 (Captain, 2026-11-08: "fix"): a roof over a building's outer side doesn't make its spots
+## inside: the walls round a porch stand across the yard, and no roof runs out to them
+## (Buildings._hall_wall), so the wall under it can be breached. A wall between two of a building's
+## rooms is still refused.
+func _test_inside_rule() -> void:
+	print("What's an outside wall: under a porch, and between two rooms")
+	var squad := level.squad_for(&"friendly")
+	var world := level.get_world_3d()
+	var porch := _box_at(Vector3(2.4, 0.2, 4.0), Vector3(WEST_WALL.x - 1.2, 3.0, WEST_WALL.z))
+	await _physics_frames(2)
+	Buildings.forget()
+	_place(player, Vector3(-11, 0.1, -8))
+	await _seconds(0.3)
+	var west := SquadTactics.wall_at(player, WEST_WALL)
+	var b: Dictionary = squad.breach_target(player, west) if not west.is_empty() else {}
+	check(not Buildings.inside(world, Vector3(-5.5, 0, -7.5)) and Buildings.inside(world, Vector3(-3.5, 0, -7.5)),
+		"a spot under the porch isn't inside; one in the room is")
+	check(not b.is_empty() and not b.has("refused") and not bool(b.get("yard", false)) and Buildings.contains(b, Vector3(-2, 0.1, -8)),
+		"the wall under a porch can be breached from outside: the building behind it (%s, %d spots)" % [b.get("refused", "not refused"), (b.get("spots", []) as Array).size()])
+	porch.queue_free()
+	var partition := _box_at(Vector3(0.3, 3.0, 8.0), Vector3(0.15, 1.5, -8.0))
+	await _physics_frames(2)
+	Buildings.forget()
+	_place(player, Vector3(-3, 0.1, -8))
+	await _seconds(0.3)
+	var inner := SquadTactics.wall_at(player, Vector3(0, 1.2, -8))
+	var refused: Dictionary = squad.breach_target(player, inner) if not inner.is_empty() else {}
+	check(not inner.is_empty() and String(refused.get("refused", "")).contains("inside the building"),
+		"a wall between two of its rooms is still refused (%s)" % refused.get("refused", "not refused: %d spots" % (refused.get("spots", []) as Array).size()))
+	partition.queue_free()
+	await _physics_frames(2)
+	Buildings.forget()
+
+
+## A static box of `size` on the world's layer, centred at `at`.
+func _box_at(size: Vector3, at: Vector3) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+	level.add_child(body)
+	body.global_position = at
+	return body
 
 
 # --- The order, with a client watching ------------------------------------------------------
@@ -841,6 +892,7 @@ func _test_roof_stand_off() -> void:
 	level.add_child(roof)
 	roof.global_position = Vector3(WEST_WALL.x - 1.0, 3.0, WEST_WALL.z)  # (over the wall's face too, where the charge sits)
 	await _physics_frames(2)
+	Buildings.forget()  # (F-457: every scan sees the slab, whenever its cells were last probed)
 	_strip_charges(mates)
 	while player.inventory.remove_one(Charges.ITEM):
 		pass

@@ -202,6 +202,7 @@ const SUPPRESSED := 0.5
 const PINNED := 0.85
 const HYSTERESIS := 0.1
 const ARRIVE := 0.7
+const AT_COVER_M := ARRIVE + 0.4  # at his cover spot this close (_at_cover)
 ## Digging in (dig phase 4, Captain 2026-10-19: "AI dig in", and "they dont bore down when they
 ## build cover in front of them"): a friendly soldier holding a spot, out of contact, for
 ## DIG_IN_AFTER_S builds cover in front of it (Digging.COVER) up to AI_COVER_TO_M (kneeling
@@ -3110,7 +3111,8 @@ func _finish_treatment() -> void:
 
 ## Under cover from the last known threat, lying down.
 func _sheltered(c: Soldier) -> bool:
-	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, c.global_position + Vector3.UP * 0.4)
+	var lies := c.body_point() + Vector3.UP * (0.2 if is_instance_valid(c.ragdoll) else 0.4)  # (where he lies: a ragdoll's chest, off its capsule)
+	return not Throwables.clear_line(body.get_world_3d(), body.threat_pos + Vector3.UP * 1.5, lies)
 
 
 func _face(point: Vector3) -> void:
@@ -5149,7 +5151,10 @@ func find_cover(anchor: Vector3, leash: float) -> Variant:
 ## Where to drag a casualty to (Captain, 2026-10-17: they "drag illogical ways"): not a firing
 ## position (find_cover likes low cover you can shoot over, and doesn't mind the way there) but
 ## the nearest spot that hides someone lying down from the threat, away from it rather than
-## toward it or across its line, with the way there clear enough to drag along.
+## toward it or across its line, with the way there clear enough to drag along. The spot is where
+## the carer stops; the casualty ends behind him on the way there, and has to be hidden there
+## too (F-456, Captain 2026-11-08: _hidden_when_dragged). Only with no such spot in reach, the
+## nearest that hides just the spot itself: he's still dragged closer to cover.
 func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 	var map := body.get_world_3d().navigation_map
 	var world := body.get_world_3d()
@@ -5158,6 +5163,8 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 	to_threat = to_threat.normalized() if to_threat.length() > 0.1 else Vector3.ZERO
 	var best: Variant = null
 	var best_score := INF
+	var short: Variant = null  # the best spot where he'd lie just short of the cover
+	var short_score := INF
 	for ring in COVER_RINGS:
 		if ring > leash + 0.1:
 			break
@@ -5180,10 +5187,35 @@ func find_drag_cover(anchor: Vector3, leash: float) -> Variant:
 			var score := length
 			if to_threat != Vector3.ZERO and way.length() > 0.1:
 				score += maxf(way.normalized().dot(to_threat), 0.0) * 6.0  # toward the shooter: worse
-			if score < best_score:
+			if score < best_score and _hidden_when_dragged(world, path):
 				best = q
 				best_score = score
-	return best
+			elif score < short_score:
+				short = q
+				short_score = score
+	return best if best != null else short
+
+
+## Whether a casualty dragged along `path` lies out of the threat's sight wherever the drag can
+## end: he trails Soldier.DRAG_OFFSET behind his carer, who stops at the path's end or up to
+## AT_COVER_M short of it (_at_cover).
+func _hidden_when_dragged(world: World3D, path: PackedVector3Array) -> bool:
+	var trail := Soldier.DRAG_OFFSET.length()
+	for back: float in [trail, trail + AT_COVER_M]:
+		if Throwables.clear_line(world, body.threat_pos + Vector3.UP * 1.5, _back_along(path, back) + Vector3.UP * 0.35):
+			return false
+	return true
+
+
+## The point `back` metres short of `path`'s end, along it (its start if it's shorter).
+static func _back_along(path: PackedVector3Array, back: float) -> Vector3:
+	var left := back
+	for i in range(path.size() - 1, 0, -1):
+		var leg := path[i].distance_to(path[i - 1])
+		if leg >= left:
+			return path[i].lerp(path[i - 1], left / leg)
+		left -= leg
+	return path[0]
 
 
 func _cover_protects(point: Vector3) -> bool:
@@ -5235,7 +5267,7 @@ func _drag_stalled(contact: bool) -> bool:
 
 
 func _at_cover() -> bool:
-	return _has_cover and _flat_distance(_cover_point) <= ARRIVE + 0.4
+	return _has_cover and _flat_distance(_cover_point) <= AT_COVER_M
 
 
 func _buddy_bounding() -> bool:
@@ -6185,6 +6217,9 @@ func _drag_clear_of(c: Dictionary, mine: Array[Dictionary]) -> String:
 ## (_charge_clear_spot, CHARGE_DRAG_PAST_M further): the last one worked out for the same charge
 ## from about here is kept CHARGE_SPOT_KEEP_S, so a carer who can't start the drag yet and looks
 ## again every CHARGE_CHECK_S near the end of the fuse doesn't make its path queries each time.
+## The key leaves out `mine` and the casualty: the spot is worked out from the carer's own place
+## and never reads the casualty, and `mine` only changes when another charge is lit, which the
+## next look (CHARGE_SPOT_KEEP_S on at most) picks up.
 func _drag_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
 	var now := Soldier._now()
 	if _drag_spot_for == String(c.id) and now - _drag_spot_at < CHARGE_SPOT_KEEP_S \
@@ -6202,13 +6237,13 @@ func _drag_clear_spot(c: Dictionary, mine: Array[Dictionary]) -> Variant:
 ## himself doesn't count: it's cut short as he's taken hold of (_cut_own_item). An item that takes
 ## no claim (a tourniquet coming off) counts as another's unless it's this carer's or his own.
 func _treated_by_another(c: Soldier) -> bool:
-	if not c.vitals.is_healing():
-		return false
 	var hands := c.treated_by()
-	if hands.is_empty():
-		var his := SquadAI.of(c)
-		return not (_treat_until >= 0.0 and _treat_target == c) and not (his != null and his._treat_until >= 0.0 and his._treat_target == c)
-	return hands.any(func(s: Soldier) -> bool: return s != c and s != body)
+	if hands.any(func(s: Soldier) -> bool: return s != c and s != body):
+		return true  # (read first: is_healing is one timer a body, wrong with items overlapping)
+	if not hands.is_empty() or not c.vitals.is_healing():
+		return false
+	var his := SquadAI.of(c)
+	return not (_treat_until >= 0.0 and _treat_target == c) and not (his != null and his._treat_until >= 0.0 and his._treat_target == c)
 
 
 ## `c` (a casualty being taken hold of) was treating himself: his AI forgets the item (cut short

@@ -8,7 +8,8 @@ extends RefCounted
 ##   (below a window's sill, so only doorways and breaches let them out), at most
 ##   MAX_OPEN reach PROBE_M without meeting a wall, and never two opposite ones (a gap between
 ##   two buildings is no room). Under a roof (a hangar's or a factory's hall, F-162) the rays
-##   reach HALL_PROBE_M and HALL_MAX_OPEN may be open. Ground rising under a ray isn't a wall (hilly zones). Inside
+##   reach HALL_PROBE_M and HALL_MAX_OPEN may be open, counting only walls the roof runs out to
+##   (HALL_WALL_ROOF_M). Ground rising under a ray isn't a wall (hilly zones). Inside
 ##   spots next to each other make one building.
 ## - Floors (audit follow-up F-01): every walkable surface over each grid cell counts, from
 ##   SCAN_DOWN_M below the query to SCAN_UP_M above it (found by casting down through the
@@ -54,6 +55,10 @@ const ROOF_UP_M := 12.0
 const HALL_PROBE_M := 26.0
 const HALL_MAX_OPEN := 3
 const ROOF_NORMAL_Y := -0.5
+## A wall closes a hall in only with the roof running out to it: still roofed this far short of
+## the wall. A porch or an overhang roofs a spot too, but the walls round it (a compound's
+## perimeter, the houses over the street) stand across open ground (F-457). Proposed.
+const HALL_WALL_ROOF_M := 0.5
 ## A hit counts as a wall when its surface is this close to upright (normal.y below it).
 const WALL_NORMAL_Y := 0.5
 ## Fewer inside spots than this is a nook, not a building.
@@ -752,11 +757,17 @@ static func _hall_inside(world: World3D, q: Vector3, eye: Vector3) -> bool:
 		return false
 	var open: Array[int] = []
 	for k in PROBE_DIRS:
-		if not _wall_within(world, eye, _dir(k), HALL_PROBE_M):
+		if not _hall_wall(world, eye, _dir(k)):
 			open.append(k)
 			if open.size() > HALL_MAX_OPEN:
 				return false
 	return not _opposite(open)
+
+
+## A wall of a hall along `dir` from `eye`: within HALL_PROBE_M and under the roof (HALL_WALL_ROOF_M).
+static func _hall_wall(world: World3D, eye: Vector3, dir: Vector3) -> bool:
+	var m := _wall_m(world, eye, dir, HALL_PROBE_M)
+	return m < INF and roofed(world, eye + dir * maxf(m - HALL_WALL_ROOF_M, 0.0) + Vector3.DOWN * PROBE_HEIGHT)
 
 
 ## Whether two of the open ways `open` are opposite (a gap between buildings).

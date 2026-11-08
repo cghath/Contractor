@@ -943,11 +943,10 @@ func _test_dying_to_cover() -> void:
 	var put := delta.body_point()
 	check(dragged and seen.dying and seen.bleeding,
 		"a medic drags him out of the line of fire still dying, before treating him (%s; %s; Golf: %s)" % [_name(carer), ", ".join(seen.statuses), _care_of(golf)])
-	# (As _test_engagement's drag of a man out cold: where the drag ends is find_drag_cover's and
-	# _drag_stalled's business; under fire his carer may drag him on again before the rest.)
-	check(dragged and _flat(put, lay) > 1.5,
-		"towards cover: put down %.1f m from where he lay (out of the threat's sight there: %s)" % [_flat(put, lay),
-		SquadAI.of(carer)._sheltered(delta) if carer else false])
+	# (F-456, Captain 2026-11-08: "yes": he ends in the cover, not 1 m short of it behind his carer.)
+	check(dragged and _flat(put, lay) > 1.5 and SquadAI.of(carer)._sheltered(delta),
+		"to cover: put down %.1f m from where he lay, out of the threat's sight where he lies (%s; his carer %.1f m from him)" % [_flat(put, lay),
+		SquadAI.of(carer)._sheltered(delta) if carer else false, _flat(carer.global_position, put) if carer else -1.0])
 	var treated := await _wait_until(func() -> bool: return delta.vitals.bleed_rate() <= 0.0, 40.0)
 	check(treated and carer != null and SquadAI.of(carer).casualty == delta and not is_instance_valid(delta.carried_by) and _flat(delta.body_point(), lay) > 1.5,
 		"then treated out of the open by his carer: his bleed stopped (%.1f m from where he lay; %s; %s)" % [_flat(delta.body_point(), lay),

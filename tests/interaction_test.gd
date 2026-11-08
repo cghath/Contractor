@@ -440,6 +440,21 @@ func _test_drag_dying() -> void:
 	check(not bravo.server_pick_up_body(alpha, Soldier.CARRY) and bravo.server_pick_up_body(alpha, Soldier.DRAG) and bravo.carry_mode == Soldier.DRAG
 		and alpha.carried_by == bravo, "an AI squadmate drags him (server_pick_up_body), and can't carry him")
 	_end_carry_phase(bravo)
+	# Someone else's drag: no point on the body for the player, on a client too (carry_net alone).
+	var bravo_was := bravo.global_position
+	var player_was := player.global_position
+	_place_player()
+	player.head.rotation.x = -0.5
+	bravo.rotation = Vector3.ZERO
+	bravo.global_position = SPOT + Vector3(0, 0, -2.5)
+	await _frames(3)
+	var theirs := InteractionMenu.collect_points(player, player.camera).filter(func(p: Dictionary) -> bool: return p.target == alpha)
+	check(alpha.is_held() and theirs.is_empty() and _client_points(player, alpha).is_empty(),
+		"a body someone else drags has no point for you, on a client too (review of feat/breach-and-clear, round 7; %d, %d)" % [theirs.size(), _client_points(player, alpha).size()])
+	player.global_position = player_was
+	player.head.rotation = Vector3.ZERO
+	bravo.global_position = bravo_was
+	await _frames(2)
 	bravo.global_position += Vector3(0, 0, -1.0)
 	off = 0.0
 	for i in 10:
@@ -455,6 +470,20 @@ func _test_drag_dying() -> void:
 	await _frames(2)
 	check(charlie.vitals.is_dying() and not charlie.server_pick_up_body(alpha, Soldier.DRAG) and alpha.carried_by == null,
 		"a dying man drags nobody himself")
+	# Someone holding a claim on him decides, not his one is_healing timer: overlapping items make
+	# that timer wrong (review of feat/breach-and-clear, round 7; P0164).
+	SquadAI.of(bravo).body = bravo  # (his AI is switched off here: _spawn_ai, so it never set this up)
+	var claim := "%d:bf8" % charlie.vitals.get_instance_id()
+	var hands := func(who: Soldier) -> bool:
+		Soldier._care_claims[claim] = who.get_instance_id()
+		who._server_busy_until = Soldier._now() + 5.0
+		var out: bool = SquadAI.of(bravo)._treated_by_another(charlie)
+		who._server_busy_until = 0.0
+		Soldier._care_claims.erase(claim)
+		return out
+	var read := [charlie.vitals.is_healing(), hands.call(alpha), hands.call(bravo), hands.call(charlie)]
+	check(read == [false, true, false, false],
+		"a carer doesn't lift a man from under another's item, with his healing timer out too; his own or the man's own claim doesn't stop him (healing, another's, the carer's, his own: %s)" % [read])
 	check(bravo.server_pick_up_body(charlie, Soldier.DRAG), "the AI takes hold of another dying man")
 	_end_carry_phase(bravo)
 	charlie.vitals.server_kill()
@@ -968,13 +997,26 @@ func _spawn_item(id: StringName, pos: Vector3) -> WorldItem:
 
 
 ## The menu `actor` gets on `target` as a client has it: carried_by is the host's alone (a client
-## has carry_net and, his own, carry_mode), so it's left out for the look.
+## has carry_net and, his own, carry_mode), so it's left out for the look. A body laid out in
+## body points there (InteractionMenu.has_regions) gets &"(body points)" on the end, so comparing
+## this with the host's _ids for a body with a single point checks the layout too.
 func _client_ids(actor: Soldier, target: Soldier) -> Array[StringName]:
 	var held := target.carried_by
 	target.carried_by = null
 	var ids := _ids(actor, target)
+	if InteractionMenu.has_regions(actor, target):
+		ids.append(&"(body points)")
 	target.carried_by = held
 	return ids
+
+
+## The points `actor` gets on `target` as a client has them (carried_by left out, as _client_ids).
+func _client_points(actor: Soldier, target: Soldier) -> Array:
+	var held := target.carried_by
+	target.carried_by = null
+	var points := InteractionMenu.collect_points(actor, actor.camera).filter(func(p: Dictionary) -> bool: return p.target == target)
+	target.carried_by = held
+	return points
 
 
 func _client_action(actor: Soldier, target: Soldier, id: StringName) -> Dictionary:
