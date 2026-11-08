@@ -521,17 +521,19 @@ func _test_picker_buy(mid: String) -> String:
 	var i_buy: int = entry.call()
 	check(i_buy > 0 and not picker.is_item_disabled(i_buy) and picker.get_item_text(i_buy) == "Buy: %s ($%s)" % [ItemDB.get_item(StringName(buy_id)).name, DebriefCalc.money(price)],
 		"with the cash it reads \"%s\"" % [picker.get_item_text(i_buy) if i_buy > 0 else "missing"])
-	# F-404 (Captain, 2026-11-02: "not always but yes"): choosing it asks first; Cancel buys nothing.
+	# F-404 (Captain, 2026-11-02: "not always but yes"): choosing it asks first. Cancel backs out of
+	# the whole action (F-405, 2026-11-08), even with "Don't ask again" ticked.
 	_notes.clear()
 	if i_buy > 0:
 		picker.item_selected.emit(i_buy)  # the player chooses it
 	await _frames(2)
 	var old_helmet := String(gear.slots.get("helmet", ""))
-	var question := _answer_confirm(screen, "Cancel")
+	var question := _answer_confirm(screen, "Cancel", true)
 	await _frames(3)
 	check(question.contains(ItemDB.get_item(StringName(buy_id)).name) and question.contains("$" + DebriefCalc.money(price)) and question.contains("$50 left after")
-		and Economy.cash() == price + 50 and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and _notes.is_empty(),
-		"choosing it asks first (\"%s\"), and Cancel buys nothing" % question)
+		and Economy.cash() == price + 50 and _hub_units() == units and Roster.json_safe(s.inventory.net_state) == gear and _notes.is_empty()
+		and screen.find_child("Confirm", false, false) == null and picker.selected == 0 and LoadoutScreen.confirm_buy_on(),
+		"choosing it asks first (\"%s\"), and Cancel backs out: no cash, stash or kit change, the picker back on its prompt, the question still on" % question)
 	# Again, with "Don't ask again" ticked: bought, worn, and the setting saved.
 	_notes.clear()
 	_econ_notes.clear()
@@ -783,6 +785,8 @@ func _test_3d_editor(me: String) -> void:
 	var price := LoadoutEditor.price_of(unowned)
 	editor.pick_slot("mount:helmet:nvg")
 	var draft_was: int = hash(editor.draft)
+	var dirty_was: bool = editor.dirty()
+	var undo_was: int = editor.undo_stack.size()
 	var cash := Economy.cash()
 	var units := _hub_units()
 	editor.choose(unowned)
@@ -798,7 +802,22 @@ func _test_3d_editor(me: String) -> void:
 		(box.find_child("Cancel", true, false) as Button).pressed.emit()
 	await _frames(3)
 	check(Economy.cash() == cash and _hub_units() == units and hash(editor.draft) == draft_was and editor.find_child("Confirm", false, false) == null
-		and nvg_on.call() != unowned, "Cancel buys nothing and leaves the draft as it was")
+		and nvg_on.call() != unowned and editor.dirty() == dirty_was and editor.undo_stack.size() == undo_was and editor._offer == "",
+		"Cancel backs out (F-405): nothing bought, the draft, its undo and the close warning as they were, no buy offer")
+	# With other changes in the draft: they stay, and so does the close warning.
+	editor.edit(Loadouts.add_units(editor.draft, "smoke_grenade", 1))
+	var edited: int = hash(editor.draft)
+	var undo_edited: int = editor.undo_stack.size()
+	editor.choose(unowned)
+	await _frames(2)
+	box = editor.find_child("Confirm", false, false)
+	var asked_edited := box != null
+	if box:
+		(box.find_child("Cancel", true, false) as Button).pressed.emit()
+	await _frames(3)
+	check(asked_edited and Economy.cash() == cash and _hub_units() == units and hash(editor.draft) == edited and editor.undo_stack.size() == undo_edited and editor.dirty()
+		and nvg_on.call() != unowned, "and Cancel with other changes in the draft keeps them, the close warning too, and buys nothing")
+	editor.undo()
 	# The host refuses it (the cash spent while the question was up): nothing bought, the draft
 	# still what he wears and nothing left waiting for a change (review of 4bcfe79f).
 	editor.choose(unowned)
@@ -1043,6 +1062,7 @@ func _test_client(ids: Array, bought_helmet := "") -> void:
 func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 	print("A gun swapped for another, and its optic (F-421)")
 	var pool := _stash()
+	BaseArmory.add(pool, &"m27", 1)
 	var dotted: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_optic(Loadouts.template_of(rifleman), &"primary", "optic_t2")}], pool)[0].gear
 	var optic_of := func(gear: Dictionary) -> String:
 		var id := String(gear.slots.get("primary", ""))
@@ -1057,8 +1077,9 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 	var t := Loadouts.template_of(dotted)
 	check(String(Loadouts.set_slot(t, &"primary", "hk416").optics.primary) == "optic_t2" and String(Loadouts.set_slot(t, &"primary", "m110").optics.primary) == "optic_dmr_3_5_10"
 		and String(Loadouts.set_slot(t, &"primary", "svd").optics.primary) == "optic_prism_4x" and Loadouts.keeps_own_optic(ItemDB.get_item(&"m110"))
-		and not Loadouts.keeps_own_optic(ItemDB.get_item(&"hk416")), "the template: the T-2 asked for on an HK416, an M110 or SVD its own scope")
-	for to: String in ["hk416", "m110", "svd"]:
+		and String(Loadouts.set_slot(t, &"primary", "m27").optics.primary) == "optic_prism_4x" and Loadouts.keeps_own_optic(ItemDB.get_item(&"m27"))
+		and not Loadouts.keeps_own_optic(ItemDB.get_item(&"hk416")), "the template: the T-2 asked for on an HK416, an M110, SVD or M27 (F-465) its own scope")
+	for to: String in ["hk416", "m110", "svd", "m27"]:
 		var p := pool.duplicate(true)
 		var before := Loadouts.units(p, [dotted])
 		var loose: int = loose_t2.call(p)
@@ -1069,13 +1090,13 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 			and int(loose_t2.call(p)) == loose + (0 if to == "hk416" else 1),
 			"M4 with the T-2 to the %s: it wears %s, nothing missing or made, the T-2 %s (missing %s)" % [
 				gun.name, optic_of.call(res.gear), "moved over" if to == "hk416" else "in the stash loose, not on the M4", res.missing])
-		if to == "m110":
-			# And back: the M4 comes with its own dot; the M110 keeps its scope in the stash.
+		if to in ["m110", "m27"]:
+			# And back: the M4 comes with its own dot; the M110 or M27 keeps its scope in the stash.
 			var res2: Dictionary = Loadouts.rebuild([{"gear": res.gear, "template": Loadouts.set_slot(Loadouts.template_of(res.gear), &"primary", "m4a1")}], p)[0]
 			var scoped := p.any(func(e: Dictionary) -> bool:
-				return String(e.id) == "m110" and Optics.mounted_id(gun, e.get("state", {})) == &"optic_dmr_3_5_10")
+				return String(e.id) == to and String(Optics.mounted_id(gun, e.get("state", {}))) == String(gun.stats.optic))
 			check(optic_of.call(res2.gear) == "m4a1+optic_red_dot" and res2.missing.is_empty() and scoped and Loadouts.units(p, [res2.gear]) == before,
-				"and back to an M4: its own red dot, the scope stays on the M110 (%s, missing %s)" % [optic_of.call(res2.gear), res2.missing])
+				"and back to an M4: its own red dot, the scope stays on the %s (%s, missing %s)" % [gun.name, optic_of.call(res2.gear), res2.missing])
 	# A stock M4 (its own red dot) to an HK416, which comes with the same dot: the M4 goes back
 	# plain with its dot on, no stray loose dot (review of 4bcfe79f: it went in bare, irons, and
 	# its dot loose, while the stash's HK416 came with its own).
@@ -1093,7 +1114,7 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 		and Loadouts.units(sp, [stock.gear]) == stock_before and not plain_m4s.is_empty() and bare.is_empty() and int(dots.call(sp)) == dots_before,
 		"a stock M4 to an HK416: its own dot stays on the M4 in the stash, no loose dot, nothing missing, made or lost (%s; M4s %s; loose dots %d -> %d)" % [
 			optic_of.call(stock.gear), plain_m4s, dots_before, dots.call(sp)])
-	# And when the stash's only HK416 is bare (irons): the M4's own dot moves over, so nothing is
+	# And when every HK416 in the stash is bare (irons): the M4's own dot moves over, so nothing is
 	# listed missing; the M4 goes back bare (round 6 review, F-421; Loadouts._comes_with).
 	var hk := ItemDB.get_item(&"hk416")
 	var bp := pool.duplicate(true)
@@ -1102,9 +1123,10 @@ func _test_gun_swap_rules(rifleman: Dictionary) -> void:
 			e["state"] = Optics.with_optic(hk, e.get("state", {}), &"")
 	var bare_before := Loadouts.units(bp, [rifleman])
 	var bare_dots: int = dots.call(bp)
+	var hks_before := int(Loadouts.units(bp, []).get("hk416", 0))
 	var onto_bare: Dictionary = Loadouts.rebuild([{"gear": rifleman, "template": Loadouts.set_slot(Loadouts.template_of(rifleman), &"primary", "hk416")}], bp)[0]
 	var bare_m4 := bp.any(func(e: Dictionary) -> bool: return String(e.id) == "m4a1" and Optics.mounted_id(m4, e.get("state", {})) == &"")
-	check(bp.any(func(e: Dictionary) -> bool: return String(e.id) == "hk416") == false and optic_of.call(onto_bare.gear) == "hk416+optic_red_dot"
+	check(int(Loadouts.units(bp, []).get("hk416", 0)) == hks_before - 1 and optic_of.call(onto_bare.gear) == "hk416+optic_red_dot"
 		and onto_bare.missing.is_empty() and Loadouts.units(bp, [onto_bare.gear]) == bare_before and bare_m4 and int(dots.call(bp)) == bare_dots,
 		"a stock M4 to the stash's bare HK416: the M4's dot moves over, the M4 goes back bare, nothing missing, made or lost (%s, missing %s; loose dots %d -> %d)" % [
 			optic_of.call(onto_bare.gear), onto_bare.missing, bare_dots, dots.call(bp)])

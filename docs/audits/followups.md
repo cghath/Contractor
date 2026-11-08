@@ -2148,6 +2148,10 @@ Captain, 2026-11-06: F-421, swapping guns, keep the player's optic or take the n
 Captain, 2026-11-07: F-421, the sniper/dmr tag rule (Loadouts.OWN_SCOPE_TAGS) deciding who keeps its own scope: "yes". Whether the M27 (stock 4x prism, not tagged) should be tagged dmr: asked again, still open (F-465).
 2026-11-07 | feat/loadout-buy (F-421, round 6 review): the old gun's own optic also comes off for the rebuild when no unit of the new gun the build can draw (pool, or loose in his kit) still wears its stock optic (Loadouts._comes_with): a stock M4 to the stash's bare HK416 now moves the dot over (the M4 goes back bare) instead of listing the dot missing; with no unit of the new gun at all the dot stays on the M4 | cheap (one scan of the pool when the two stock optics match) and it ends a "missing" that a Buy missing would charge for | buying a dot; leaving it as a known edge case
 2026-11-07 | feat/loadout-buy (F-465): the M27 left untagged (it takes his optic on a swap) while Captain's answer on tagging it "dmr" is open | asked again, not answered | tagging it now
+Captain, 2026-11-08: F-465, tag the M27 "dmr" so it keeps its own 4x prism on a gun swap: "yes". F-405, Cancel on the buy question: "cancelling an action would be a good addition".
+2026-11-08 | feat/loadout-buy (F-465, F-478): the M27 tagged "dmr" with nothing else changed, though the tag also takes the M320 and Skeleton Key off it and makes the group board call its carrier a sniper; flagged as F-478 for Captain, weapons_test's M320 list follows | his answer was to the tag, and a DMR not taking an M320 is the existing rule; the fix if he wants the M320 kept is small | a new tag or an exception for the M27 alone, unasked
+2026-11-08 | feat/loadout-buy (F-405): "cancelling an action would be a good addition" read as: Cancel backs out of the whole action (no draft entry, no purchase, no money moved, draft and close warning as they were), not "in the draft unbought"; both loadout screens already did that, so no game code changed and the suite now checks it | Captain's words; flagged to him in the report | putting the item in the draft unbought on Cancel
+2026-11-08 | feat/loadout-buy (round 7 review): `Loadouts._comes_with` doesn't count his worn slots, noted in its comment: a gun fits only its own slot (the one being swapped), so a second unit on him can only be carried, which is counted | the case asked about can't happen in play | scanning worn slots with code nothing can reach
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2217,11 +2221,12 @@ unowned item asks (as F-404) and sends the marker's host op with `buy: true` (`s
 the new `point`, `add`), the pickers' `BaseHub._server_buy_picked` and price; the draft gets
 the same edit and keeps its other changes and undo. Unaffordable, or on a holder the draft has
 but he doesn't wear yet: draft and Buy now as before.
-Open (question, 2026-11-06): Cancel on the buy question buys nothing and leaves the item out of
-the draft, so it isn't on the model either; the other choice is to put it in the draft unbought
-(the old draft-then-Buy-now flow) so a kit can be planned around it. Captain, 2026-11-06: "ill
-check it". Unchanged until he has (`scripts/ui/loadout_editor.gd`, `choose`, the
-`LoadoutScreen.ask_buy` call).
+Cancel on the buy question (asked 2026-11-06, whether it should put the item in the draft
+unbought; Captain: "ill check it"). Captain, 2026-11-08: "cancelling an action would be a good
+addition". Read as: Cancel backs out of the whole action, so the item stays out of the draft,
+nothing is bought, no money moves and the draft and the close warning stay as they were. Both
+loadout screens already did this; checked in loadout (2D and 3D, with and without other draft
+changes). With "Ask before buying" off there's no question and so no Cancel, as before.
 
 ### F-406 (done in feat/loadout-buy): the loadout suite's 3D editor checks read a shared user:// file
 LoadoutEditor remembers its last person in `user://loadout_editor.cfg`, which every local run
@@ -2280,12 +2285,24 @@ Buy missing would have charged for one). Now `_loosen_mounts` also takes the old
 optic off when no unit of the new gun in the pool or loose in his kit still wears its stock
 optic (`Loadouts._comes_with`): the dot moves over, the M4 goes back bare, nothing is missing.
 With no unit of the new gun at all the dot stays on the old gun (the gun is listed missing
-anyway). In a team rebuild a stocked unit another person is drawn first doesn't count (F-420).
+anyway). In a team rebuild a later person's kit isn't in the pool yet, so a stocked unit on him
+doesn't count, and another person may be drawn one that does first (F-420). His worn slots
+aren't counted because a gun only goes in its own slot, the one being swapped.
 Checked in loadout (rules).
 
-## F-465: the M27, a DMR or a rifle on a gun swap? (feat/loadout-buy, 2026-11-07; open)
+## F-465: the M27, a DMR or a rifle on a gun swap? (feat/loadout-buy, 2026-11-07; done 2026-11-08)
 The M27 comes with a 4x prism (`stats.optic` `optic_prism_4x`) but isn't tagged "sniper" or
 "dmr", so on a swap it takes the optic the old gun had (an M4's red dot or a T-2), and its own
 prism stays off it; tagged "dmr" it would keep its prism and his optic would go to the stash
-loose. Asked of Captain again on 2026-11-07; not changed until he answers (one tag in
-`data/items.json`).
+loose. Asked of Captain again on 2026-11-07. Captain, 2026-11-08: "yes"; tagged "dmr" in
+`data/items.json`, checked in loadout (rules, there and back). What else the tag does: F-478.
+
+## F-478: tagging the M27 "dmr" does more than keep its prism (feat/loadout-buy, 2026-11-08; question)
+Everything that reads the tag: `Loadouts.OWN_SCOPE_TAGS` (the point of F-465); the M320 and the
+Skeleton Key's `not_fits` lists (`data/items.json`, read by `GunAttachments.fits`), so the M27 no
+longer takes either; and `GroupBoard.soldier_kind`, so a man seen carrying one is reported as a
+sniper. An M320 already on an M27 goes to the stash loose at his next loadout rebuild, none is
+lost. Nothing else reads it: AI kits don't use the M27 (the "dmr" in `data/factions.json` is a
+kit name), prices go by id, and no gun stat depends on it. `tests/weapons_test.gd` moved the M27
+from the M320's "yes" list to its "no" list. If Captain wants the M320 kept on it: an exception in
+`GunAttachments.fits`, or a tag of its own for keeping the scope.

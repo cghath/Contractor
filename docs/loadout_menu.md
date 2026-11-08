@@ -77,7 +77,7 @@ included, through the base view (funds, stash, roster gear); the campaign save h
 Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
 - **It asks first** (F-404, "not always but yes"): choosing a "Buy:" entry opens a confirm
   (`LoadoutScreen.ask_buy`: the item, its price, the company's cash and what's left after);
-  Cancel buys nothing. Its **Don't ask again** tick, with the Buy, turns the question off: a
+  Cancel backs out of the whole action. Its **Don't ask again** tick, with the Buy, turns the question off: a
   player setting (`GameSettings` "loadout" "confirm_buy", default on) in the player's own
   settings.cfg. The **Ask before buying** tick under the cash hint (and in the 3D editor's slot
   panel) and Settings, Controls, Menus turn it back on.
@@ -97,7 +97,7 @@ Follow-ups (2026-11-02, Captain's answers to F-404 and F-405):
   missing, and a change that drew the stash's copy of his gun left his suppressor on his own.
 - **A gun swapped for another and its optic** (Captain, 2026-11-06, F-421: "varies. if you go
   from ar to sniper yes, M4 to HK416 yes"): a sniper rifle or DMR with a scope of its own (tags
-  in `Loadouts.OWN_SCOPE_TAGS`, "sniper" and "dmr", Proposed: the M110, SVD, SR-25, Mk 12,
+  in `Loadouts.OWN_SCOPE_TAGS`, "sniper" and "dmr": the M110, M27, SVD, SR-25, Mk 12,
   Mosin...) keeps its own scope, and the optic he had fitted goes to the stash loose; any other
   gun (M4 to HK416) takes the optic he had along (`Loadouts.swapped_optic`). The old gun's own
   optic stays on it when the new gun doesn't take it or comes with the same one (a stock M4 to

@@ -779,8 +779,9 @@ static func confirm_buy_on() -> bool:
 
 ## Buys `id` for `price` (`buy` sends the request), asking first in a box over `parent` unless
 ## the player has said not to (Captain, 2026-11-02, F-404: "not always but yes"): the item, its
-## price, the company's cash and what's left after; Cancel buys nothing. Its "Don't ask again"
-## tick, with the Buy, turns the setting off (the player's own settings.cfg); the "Ask before
+## price, the company's cash and what's left after. Cancel (or Esc) backs out of the whole action
+## (Captain, 2026-11-08, F-405): nothing bought or fitted, no draft change, `buy` never called, and
+## its tick ignored. Its "Don't ask again" tick, with the Buy, turns the setting off (the player's own settings.cfg); the "Ask before
 ## buying" tick (ask_buy_tick) and Settings, Controls, Menus turn it back on. The paper doll's
 ## pickers and the 3D editor both ask here. The ticks that follow are found by name: a CheckBox
 ## named "AskBuy" (as ask_buy_tick names it) anywhere under `parent`; one named otherwise won't.

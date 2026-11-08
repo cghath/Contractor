@@ -27,7 +27,7 @@ paper-doll menu (`LoadoutScreen`) stays for now: it still has give-to-a-squadmat
   > 0), owned first. Unowned rows show their price (the host's catalog in the view). Picking
   one **buys and fits it in one step** (Captain, 2026-11-02, F-405), like the paper doll's
   pickers: it asks first (`LoadoutScreen.ask_buy`: the item, its price, the cash left after;
-  Cancel buys nothing; "Don't ask again" turns that off, the panel's "Ask before buying" tick
+  Cancel backs out (nothing bought, the draft as it was); "Don't ask again" turns that off, the panel's "Ask before buying" tick
   or Settings, Controls, Menus turns it back on), then sends the host op for that marker on
   what he wears with `buy: true` (`slot`, `mount`, `point`, or `add` for the pockets), which
   buys exactly one through `BaseHub._server_buy_picked` (company money, the price shown) and

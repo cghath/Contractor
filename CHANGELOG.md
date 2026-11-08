@@ -67,7 +67,14 @@ claude/loadout-buy-direct-7330b2 (cherry-picked; that branch's WIP b73cc6f6 left
   (its own scope, the T-2 loose in the stash, nothing missing), in the rules, on the host and from
   a client; a stock M4 to an HK416 (the M4 plain in the stash, no loose dot); the refused
   one-step buy, the tick, the plate pocket and the point op; a stock M4 to a bare HK416 (the dot
-  moves over, nothing missing, made or lost).
+  moves over, nothing missing, made or lost), in the rules. Also the M27 on a swap, there and
+  back; Cancel on the buy question in both loadout screens (cash, stash, kit, draft, undo and
+  the close warning untouched, with and without other changes in the draft).
+- **Changed (loadout):** the M27 is tagged "dmr" (Captain, 2026-11-08, F-465), so it keeps its
+  own 4x prism on a gun swap. The tag also means it no longer takes the M320 or the Skeleton
+  Key, as no DMR does, and the group board reports a man carrying one as a sniper (F-478).
+- **Confirmed (loadout):** Cancel on the buy question backs out of the whole action in both
+  loadout screens (Captain, 2026-11-08, F-405); the code already did, and the suite now holds it.
 
 ### Everything merged for one test build (integrate/oct25, v0.7.0)
 

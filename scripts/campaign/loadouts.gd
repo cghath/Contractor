@@ -31,8 +31,8 @@ const NEW_POINT := "+"
 ## Guns of these kinds (their tags) come with a scope of their own and keep it when swapped in for
 ## another gun; any other gun takes the optic the old one had (keeps_own_optic, set_slot). Captain,
 ## 2026-11-06, F-421: "varies. if you go from ar to sniper yes, M4 to HK416 yes"; and 2026-11-07,
-## asked whether these tags decide it: "yes". The M27 (a stock 4x prism, tagged neither) takes
-## the old gun's optic like any rifle: whether it should be a "dmr" is still asked.
+## asked whether these tags decide it: "yes". The M27 (a stock 4x prism) is tagged "dmr" so it
+## keeps its prism (2026-11-08, F-465: "yes"; the tag's other effects are F-478).
 const OWN_SCOPE_TAGS: Array[String] = ["sniper", "dmr"]
 
 
@@ -377,8 +377,11 @@ static func _loosen_mounts(gear: Dictionary, t: Dictionary, pool: Array) -> Dict
 ## optic): one in `pool` or loose in `gear`'s containers. False when its own is another optic, or
 ## when every unit there has lost it (a bare HK416 in the stash: the M4's own dot then moves over,
 ## else the build draws the bare one and lists the dot missing; F-421). When there's no unit of
-## `gun` at all it's true: the gun is missing, and the dot stays on the old gun. In a team rebuild
-## another person may be drawn that unit first (F-420: who's short can move, never the total).
+## `gun` at all it's true: the gun is missing, and the dot stays on the old gun. His worn slots
+## don't need counting: a gun only goes in its own slot, which is the one being swapped, so a
+## second unit on him can only be carried. In a team rebuild the people are freed into the pool
+## in order, so a later person's kit isn't in it yet and his units don't count, and another
+## person may be drawn a unit that does first (F-420: who's short can move, never the total).
 static func _comes_with(gun: ItemData, optic: String, pool: Array, gear: Dictionary) -> bool:
 	if optic != String(gun.stats.get("optic", "")):
 		return false

@@ -934,10 +934,10 @@ func _test_shotgun_data() -> void:
 	var choked := GunAttachments.with_mounted(gun.default_state(), GunAttachments.CHOKE, &"choke_870")
 	check(Shotguns.spread_mult(gun, choked) < 0.6 and Shotguns.spread_mult(gun, gun.default_state()) == 1.0, "a choke narrows the pattern to %.2f of its width" % Shotguns.spread_mult(gun, choked))
 	# The M320 and the Key: every railed assault rifle, carbine and battle rifle (the AK-12 too, no
-	# GP-25 yet), never an SMG, shotgun, machine gun, sniper rifle or DMR.
+	# GP-25 yet), never an SMG, shotgun, machine gun, sniper rifle or DMR (the M27 is one: F-478).
 	var m320 := ItemDB.get_item(&"m320")
-	var yes: Array[StringName] = [&"m4a1", &"mk18", &"m16a4", &"c7", &"c8", &"m27", &"hk416", &"l85a2", &"sig_mcx", &"scar_l", &"scar_h", &"g36c", &"aug_a3", &"tavor_x95", &"g3a3", &"fal", &"ak12"]
-	var no: Array[StringName] = [&"mp5", &"p90", &"ump45", &"rem870", &"mossberg590", &"m1014", &"m249", &"m240b", &"negev", &"svd", &"svds", &"m110", &"mk12", &"sr25", &"m14_ebr", &"mosin9130", &"springfield_hs", &"akm", &"ak74"]
+	var yes: Array[StringName] = [&"m4a1", &"mk18", &"m16a4", &"c7", &"c8", &"hk416", &"l85a2", &"sig_mcx", &"scar_l", &"scar_h", &"g36c", &"aug_a3", &"tavor_x95", &"g3a3", &"fal", &"ak12"]
+	var no: Array[StringName] = [&"mp5", &"p90", &"ump45", &"rem870", &"mossberg590", &"m1014", &"m249", &"m240b", &"negev", &"svd", &"svds", &"m110", &"mk12", &"sr25", &"m14_ebr", &"m27", &"mosin9130", &"springfield_hs", &"akm", &"ak74"]
 	var wrong: Array = []
 	for id in yes:
 		if not GunAttachments.fits(ItemDB.get_item(id), m320) or not GunAttachments.fits(ItemDB.get_item(id), key):

@@ -460,8 +460,9 @@ func _build_picker() -> void:
 
 ## The draft with `id` on the picked slot ("" empties it). An item the company doesn't own is
 ## bought and fitted in one step (buy_and_fit, after LoadoutScreen.ask_buy's question; F-405)
-## when the company can afford it and it goes on what he wears; else (or with `buy` false: the
-## armory's Fit on me, a try-on) it goes in the draft and the offer to buy it shows over the list.
+## when the company can afford it and it goes on what he wears (Cancel there leaves the draft as
+## it was, F-405); else (or with `buy` false: the armory's Fit on me, a try-on) it goes in the
+## draft and the offer to buy it shows over the list.
 func choose(id: String, buy := true) -> void:
 	if slot_key == "":
 		return
