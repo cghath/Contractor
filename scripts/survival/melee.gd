@@ -180,6 +180,14 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	if mult < 0.5:
 		hit["superficial"] = true
 	victim.vitals.server_hit(part, hit)
+	if attack.has("kind") and victim.vitals.undead and victim.vitals.is_up():
+		var g := guard_of(victim)  # a weapon's blow on one of the dead (MeleeWeapons.HIT_STAGGER_S)
+		if bool(attack.get("heavy", false)):
+			g.stagger_until = maxf(float(g.stagger_until), Soldier._now() + MeleeWeapons.HIT_STAGGER_S)  # a heavy rocks it back
+		elif victim.has_meta(&"melee_winding"):
+			# a light one spoils the lunge it's winding (staggered at its landing), no more: spammed stabs don't lock it down
+			g.stagger_until = maxf(float(g.stagger_until), float(victim.get_meta(&"melee_winding")) + 0.05)
+	_feedback(attacker, victim, part, dir)
 	ClothingWear.on_hit(victim, part)  # the blow tears what covers it (call 122)
 	if String(attack.get("name", "")) == "bite":
 		Body.on_bitten(victim, part)  # the fever clock (phase D)
@@ -189,6 +197,32 @@ static func _hit(attacker: Soldier, victim: Soldier, attack: Dictionary, mult: f
 	SessionLog.note("melee: %s's %s on %s (%s, x%.1f)" % [attacker.log_name(), String(attack.get("name", "blow")), victim.log_name(), part, mult])
 
 
+## A blow that landed, seen and heard (player report 2026-11-10, "I can't tell I'm hitting
+## something"): the guns' flesh impact (CompoundLevel.show_impact "body": its sound and red mark)
+## where it struck, and a small camera jolt for a player who struck it.
+const HIT_SHAKE := 0.18
+
+
+static func _feedback(attacker: Soldier, victim: Soldier, part: StringName, dir: Vector3) -> void:
+	var level := CompoundLevel.current(attacker)
+	if level:
+		var at := head_point(victim) if part in Vitals.UNDEAD_KILL_PARTS else victim.aim_point()
+		level.show_impact.rpc(at - dir * 0.15, -dir, "body")
+	if not attacker.is_ai():
+		attacker._client_shake.rpc_id(attacker.owner_peer(), HIT_SHAKE)
+
+
+## The middle of `s`'s head hitbox, wherever its stance put it (a crawler's is near the ground);
+## head height over its origin when it has none.
+static func head_point(s: Soldier) -> Vector3:
+	for child in s.get_children():
+		if child is Area3D and child.get_meta(&"body_part", &"") == Vitals.HEAD:
+			for shape in child.get_children():
+				if shape is CollisionShape3D:
+					return (shape as Node3D).global_position
+	return s.global_position + Vector3.UP * 1.62
+
+
 static func _note(s: Soldier, what: String) -> void:
 	if not s.is_ai():
 		s._client_message.rpc_id(s.owner_peer(), what.capitalize())
@@ -196,7 +230,7 @@ static func _note(s: Soldier, what: String) -> void:
 
 const SHOVE_STAGGER_S := 0.6
 const SWING_HEARD_M := 8.0
-const HEAD_LOOK_DOT := 0.985  # looking within ~10 degrees of the head's centre
+const HEAD_LOOK_DOT := 0.97  # looking within ~14 degrees of the head's centre (Proposed; was 0.985, ~10)
 
 
 ## Where a player's swing lands: the head when his view is on it (a heavy there drops a walker:
@@ -204,8 +238,7 @@ const HEAD_LOOK_DOT := 0.985  # looking within ~10 degrees of the head's centre
 static func _part_for(attacker: Soldier, victim: Soldier, rolled: StringName) -> StringName:
 	if attacker.camera == null:
 		return rolled
-	var head := victim.global_position + Vector3.UP * 1.62
-	var to := (head - attacker.camera.global_position).normalized()
+	var to := (head_point(victim) - attacker.camera.global_position).normalized()  # (its head hitbox: a crawler's or a hunched one's isn't at 1.62 m)
 	return Vitals.HEAD if (-attacker.camera.global_basis.z).dot(to) >= HEAD_LOOK_DOT else rolled
 
 

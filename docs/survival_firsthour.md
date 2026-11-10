@@ -96,7 +96,17 @@ there, not a stream from forever away.
   or two zones out), and a new one at most every 150 simulated seconds over the open pace (0.5 on
   days 1-2, 0.75 on days 3-6, 1 from 7; +0.25 a zone tier; times the "dead" option): one every ~5
   minutes of walking on day 1, every ~2.5 from day 7. A cap of 2 new a 64 m area a world hour.
-- **The start farmstead**: 1 about him, at the open country's spacing.
+- **The start farmstead**: 1 about him, at the open country's spacing. None of the dead within
+  `FirstHour.START_SAFE_M` (120 m) of its centre when he wakes: the crowd isn't seeded there
+  (`Survival._seed_crowd`; the road's dead keep `RoadDead.START_CLEAR_M` 260 m off) and no new one
+  comes there for the first `START_SAFE_H` (2) world hours of day 1 (`Survival._spawn_spot`); later
+  they may wander in. The cold open's barn walker is the scripted one: at the farm's barn, at least
+  `ColdOpen.BARN_M` off the door, dormant till it sees or hears him.
+- **Never at his elbow**: one of the crowd nearer than `Survival.SPAWN_MIN_M` (45 m) to a living
+  player doesn't become a body there; it's moved out to 47-60 m (behind everyone where it can be) and
+  comes alive there (`ZoneDead._too_close`/`_push_off`). It used to happen on a respawn: the bodies
+  round where he fell went back into the crowd while he waited and came alive at his elbow. A nest's
+  heads pouring out of its door are the exception.
 - **Quiet places**: within 150 m of a lone survivor's home or a living world group's home or held
   place in the zone, none come about a survivor, the crowd isn't seeded, and the crowd's idle drift
   turns away from it (sieges, hordes and noise still bring them).

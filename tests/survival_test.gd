@@ -252,10 +252,51 @@ func _test_metabolism() -> void:
 	player.vitals.server_reset_health()
 
 
+## Moves the player to open ground off the farm's buildings, inside the navmesh (it reaches ~80 m
+## from the farm, R2923), with nothing between him and where the sight checks put the dead (12 and
+## 30 m ahead, on the navmesh so they can reach him): at the farm door the farm's layout decided
+## whether a wall stood in the way (the module snapped to ZoneDef.GRID_M moved it, R2918-R2921).
+func _to_open_ground() -> void:
+	var farm := FirstHour.farm_of(level)
+	var c := Vector3(float(farm.pos[0]), 0.0, float(farm.pos[1])) if farm.get("pos") is Array else player.global_position
+	var fwd := -player.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var map := level.get_world_3d().navigation_map
+	var world := level.get_world_3d()
+	var on_mesh := func(p: Vector3) -> bool: return NavigationServer3D.map_get_closest_point(map, p).distance_to(p) <= 1.5
+	var off_nav := 0
+	var blocked := 0
+	for r: float in [30.0, 45.0, 60.0, 75.0]:
+		for k in 16:
+			var a := k * TAU / 16.0
+			var spot := level.ground_point(c + Vector3(cos(a), 0.0, sin(a)) * r)
+			var ahead: Array = [12.0, 30.0].map(func(d: float) -> Vector3: return level.ground_point(spot + fwd * d))
+			if not on_mesh.call(spot) or not ahead.all(func(p: Vector3) -> bool: return on_mesh.call(p)):
+				off_nav += 1
+				continue
+			var eye := spot + Vector3.UP * 1.6
+			if not ahead.all(func(p: Vector3) -> bool: return Throwables.clear_line(world, eye, p + Vector3.UP * 1.4)):
+				blocked += 1
+				continue
+			player.global_position = spot + Vector3.UP * 0.2
+			player.velocity = Vector3.ZERO
+			print("  (open ground %.0f m off the farm)" % r)
+			await get_tree().physics_frame
+			return
+	print("  (no open ground found round the farm: the sight checks run where he stands; %d off the navmesh, %d with a line blocked)" % [off_nav, blocked])
+
+
 func _test_dead() -> void:
 	print("The dead")
+	await _to_open_ground()
 	player.server_end_spawn_protection()
+	# (past day 1's grace at the start farm: FirstHour.START_SAFE_H keeps new dead off it, and the navmesh
+	# doesn't reach past START_SAFE_M, so in it none could come; firsthour_test checks the grace itself)
+	var hour_was := Survival.hour()
+	Survival.state()["hour"] = Survival.START_HOUR + FirstHour.START_SAFE_H + 0.1
 	await _wait_for(func() -> bool: return not Survival.zombies(level).is_empty(), 12.0)
+	Survival.state()["hour"] = hour_was
 	var near := Survival.zombies(level)
 	check(not near.is_empty() and near.all(func(z: Soldier) -> bool: return z.global_position.distance_to(player.global_position) >= Survival.SPAWN_MIN_M - 8.0),
 		"the dead come about a survivor, out of reach and out of sight (%d; want %d here)" % [near.size(), Survival.dead_near(level, player.global_position)])
@@ -344,7 +385,7 @@ func _test_melee() -> void:
 		Melee.guard_of(player), Melee.guard_of(z), wounds, player.vitals.wound_list().size()])
 	check(Soldier._now() < float(Melee.guard_of(player).counter_until), "and the parry opens a counter")
 	var pool := z.vitals.undead_pool
-	Melee.server_attack(player, {"windup": 0.6, "round_class": Vitals.PISTOL, "energy_j": 300.0, "parts": [Vitals.CHEST], "name": "knife"})
+	Melee.server_attack(player, {"windup": 0.6, "round_class": Vitals.PISTOL, "energy_j": 150.0, "parts": [Vitals.CHEST], "name": "knife"})  # (doubled: 6 of a walker's 12 at UNDEAD_BODY_PTS_PER_J; the test needs it standing)
 	check(z.vitals.undead_pool < pool and not player.has_meta(&"melee_winding"), "the counter lands at once, twice as hard (pool %.1f -> %.1f)" % [pool, z.vitals.undead_pool])
 	Melee.server_block(player, false)
 	# A block held a while: a jolt gets through, no parry (once its stagger from the parry has passed:
@@ -441,6 +482,46 @@ func _test_melee_weapons() -> void:
 	await _seconds(0.1)
 	check(z.vitals.is_dead(), "a heavy to the head drops it (%s)" % z.vitals.last_cause.get("cause", "still up"))
 	z.queue_free()
+	await get_tree().process_frame
+	# What a weapon's blow does to one of the dead (Captain, 2026-11-10): a heavy staggers it; a light
+	# only spoils a lunge already winding, so stabs spammed at an idle one don't lock it down.
+	var st := Survival.server_spawn_zombie(level, level.ground_point(player.global_position + fwd * 1.3))
+	await get_tree().physics_frame
+	st.process_mode = Node.PROCESS_MODE_DISABLED
+	place.call(st, 1.3, false)
+	player.set_pitch(-0.6)  # (eyes on its chest: the body, not the head)
+	await get_tree().physics_frame
+	Melee._hit(player, st, MeleeWeapons.profile(bat, false), 1.0)
+	check(not Melee.staggered(st), "a light blow on an idle one doesn't stagger it")
+	st.vitals.undead_pool = Vitals.UNDEAD_POOL
+	var lunge_lands := Soldier._now() + 0.4
+	st.set_meta(&"melee_winding", lunge_lands)
+	Melee._hit(player, st, MeleeWeapons.profile(bat, false), 1.0)
+	var until := float(Melee.guard_of(st).stagger_until)
+	check(Melee.staggered(st) and until > lunge_lands and until < lunge_lands + 0.2, "a light one into its lunge spoils the bite, no longer (staggered to %.2f s past the landing)" % (until - lunge_lands))
+	st.remove_meta(&"melee_winding")
+	Melee.guard_of(st).stagger_until = -1.0
+	st.vitals.undead_pool = Vitals.UNDEAD_POOL
+	Melee._hit(player, st, MeleeWeapons.profile(bat, true), 1.0)
+	until = float(Melee.guard_of(st).stagger_until)
+	check(st.vitals.is_up() and until >= Soldier._now() + MeleeWeapons.HIT_STAGGER_S - 0.05, "a heavy staggers it (%.2f s)" % (until - Soldier._now()))
+	# Out of stamina: a heavy asked for comes out a light one; a light still goes out, free, weaker.
+	Melee.guard_of(st).stagger_until = -1.0
+	st.vitals.undead_pool = Vitals.UNDEAD_POOL
+	player.remove_meta(Melee.GUARD)
+	player.movement.stamina = 0.0
+	var asked := Soldier._now()
+	MeleeWeapons.server_action(player, "heavy")
+	var tired_land := float(player.get_meta(&"melee_winding", -1.0))
+	var light_windup := float(MeleeWeapons.profile(bat, false).windup)
+	check(tired_land > 0.0 and absf(tired_land - asked - light_windup) < 0.05 and player.movement.stamina <= 0.0,
+		"spent, a heavy comes out a light one, free (windup %.2f s, a light's %.2f; stamina %.2f)" % [tired_land - asked, light_windup, player.movement.stamina])
+	while player.has_meta(&"melee_winding") and Soldier._now() < tired_land + 2.0:
+		await get_tree().process_frame
+	await _seconds(0.1)
+	check(st.vitals.undead_pool < Vitals.UNDEAD_POOL, "and it still lands (pool %.1f -> %.1f)" % [Vitals.UNDEAD_POOL, st.vitals.undead_pool])
+	player.movement.stamina = 1.0
+	st.queue_free()
 	await get_tree().process_frame
 	# The silent kill: behind an unaware one with a blade (the starter knife on the rig counts).
 	player.set_pitch(0.0)
@@ -711,13 +792,24 @@ func _test_crowd_and_pressure() -> void:
 	# A horde: pressure at the threshold puts dozens of the crowd down round the point and walks them at it.
 	var hordes := int(Survival.state().get("hordes", 0))
 	Survival._horde_at = -10000.0
+	# (cleared again right before the shots: whatever the zone raised in the seconds since (bodies, flies,
+	# the world sim) pulls the one pressure point off them, and the horde rightly walks at the blend, R2926)
+	if not Survival._pressure_rec(level).is_empty():
+		print("  (pressure crept in before the shots: %s)" % Survival._pressure_rec(level))
+	Survival.state()["pressure"] = {}
 	for i in 14:
 		Survival.server_noise(player, player.global_position + fwd * 300.0, ZombieAI.SHOT_HEARD_M)
 	check(Survival.pressure(level) >= Survival.HORDE_AT, "fourteen shots take the pressure to the horde line (%.0f)" % Survival.pressure(level))
 	var horde := await _wait_for(func() -> bool: return crowd.horde_count() >= ZoneDead.HORDE_N.x, 3.0)
 	check(horde and int(Survival.state().get("hordes", 0)) == hordes + 1, "a horde of %d or more forms (%d; %d hordes so far)" % [ZoneDead.HORDE_N.x, crowd.horde_count(), int(Survival.state().get("hordes", 0))])
 	var walking := crowd.dead.filter(func(d: Dictionary) -> bool: return d.horde and (d.target as Vector2).distance_to(Vector2(player.global_position.x, player.global_position.z) + Vector2(fwd.x, fwd.z) * 300.0) < 2.0)
-	check(walking.size() >= ZoneDead.HORDE_N.x, "and it walks at the noise (%d heading there)" % walking.size())
+	var noise_at := Vector2(player.global_position.x, player.global_position.z) + Vector2(fwd.x, fwd.z) * 300.0
+	var aims := {}  # (where the horde's heads are headed, to the metre, and how many each)
+	for d: Dictionary in crowd.dead:
+		if d.horde:
+			var t: Vector2 = (d.target as Vector2).round()
+			aims[t] = int(aims.get(t, 0)) + 1
+	check(walking.size() >= ZoneDead.HORDE_N.x, "and it walks at the noise (%d heading there; the noise at %s, the pressure point %s; the horde heads for %s)" % [walking.size(), noise_at.round(), Survival.pressure_point(level), aims])
 	Survival.legacy_spawns = false
 	Survival.state()["day"] = day_was
 	# The specials: kinds with their rules.

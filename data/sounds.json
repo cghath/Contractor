@@ -117,7 +117,7 @@
 			"synth": {"length": 0.28, "peak": 0.55, "variants": 8, "crack": {"amp": 0.1, "decay": 400}, "tail": {"amp": 0.12, "decay": 14, "lowpass": 0.15, "attack": 0.02}, "rustle": {"amp": 0.18, "from": 0.0, "to": 0.26, "lowpass": 0.15}, "highpass": 0.2}},
 		"engine_mrap": {"range_m": 220, "unit_size": 12, "volume_db": -4, "engine": true,
 			"synth": {"length": 1.0, "loop": true, "peak": 0.7, "hum": {"hz": 31, "harmonics": [1.0, 0.65, 0.45, 0.3, 0.2], "amp": 0.6, "wobble": 0.3, "wobble_hz": 7}, "tail": {"amp": 0.5, "decay": 0, "lowpass": 0.05}}},
-		"engine_soft": {"range_m": 160, "unit_size": 8, "volume_db": -6, "engine": true,
+		"engine_soft": {"range_m": 120, "unit_size": 4, "volume_db": -6, "engine": true, "_note": "Fallen playtest 2026-11-10: the pickup carried too far (was range 160, unit 8: 6 dB quieter at any distance past the cab now)",
 			"synth": {"length": 1.0, "loop": true, "peak": 0.6, "hum": {"hz": 47, "harmonics": [1.0, 0.5, 0.35, 0.2], "amp": 0.6, "wobble": 0.2, "wobble_hz": 9}, "tail": {"amp": 0.35, "decay": 0, "lowpass": 0.08}}},
 		"engine_ifv": {"range_m": 300, "unit_size": 16, "volume_db": -2, "engine": true,
 			"synth": {"length": 1.0, "loop": true, "peak": 0.75, "hum": {"hz": 24, "harmonics": [1.0, 0.75, 0.55, 0.4, 0.3, 0.2], "amp": 0.6, "wobble": 0.35, "wobble_hz": 6}, "tail": {"amp": 0.6, "decay": 0, "lowpass": 0.04}, "clicks": [[0.0, 0.35], [0.125, 0.3], [0.25, 0.35], [0.375, 0.3], [0.5, 0.35], [0.625, 0.3], [0.75, 0.35], [0.875, 0.3]]}},
@@ -174,6 +174,10 @@
 		"smoke_discharge": {"_note": "A7 (F-249): the smoke dischargers firing a salvo", "range_m": 400, "unit_size": 20, "volume_db": 2,
 			"synth": {"length": 0.6, "peak": 0.9, "clicks": [[0.0, 1.0], [0.05, 0.8]], "body": {"amp": 0.8, "from_hz": 140, "to_hz": 70, "decay": 18}, "tail": {"amp": 0.4, "decay": 8, "lowpass": 0.1}}},
 		"tracks_heavy": {"_note": "A7 (2.10.5, F-260): tracks clattering under a tracked vehicle (a loop, louder with speed: Sfx)", "range_m": 250, "unit_size": 14, "volume_db": -2,
-			"synth": {"length": 1.0, "loop": true, "peak": 0.6, "clicks": [[0.0, 0.6], [0.0625, 0.45], [0.125, 0.6], [0.1875, 0.45], [0.25, 0.6], [0.3125, 0.45], [0.375, 0.6], [0.4375, 0.45], [0.5, 0.6], [0.5625, 0.45], [0.625, 0.6], [0.6875, 0.45], [0.75, 0.6], [0.8125, 0.45], [0.875, 0.6], [0.9375, 0.45]], "rustle": {"amp": 0.4, "from": 0.0, "to": 1.0, "lowpass": 0.3}}}
+			"synth": {"length": 1.0, "loop": true, "peak": 0.6, "clicks": [[0.0, 0.6], [0.0625, 0.45], [0.125, 0.6], [0.1875, 0.45], [0.25, 0.6], [0.3125, 0.45], [0.375, 0.6], [0.4375, 0.45], [0.5, 0.6], [0.5625, 0.45], [0.625, 0.6], [0.6875, 0.45], [0.75, 0.6], [0.8125, 0.45], [0.875, 0.6], [0.9375, 0.45]], "rustle": {"amp": 0.4, "from": 0.0, "to": 1.0, "lowpass": 0.3}}},
+		"zombie_groan": {"_note": "Fallen: one of the dead groaning (ZombieAI: turning alert, the chase, now and then idle); FallenSynth's groan voice", "range_m": 60, "unit_size": 3, "volume_db": -4, "pitch_spread": 0.15,
+			"synth": {"fallen": "groan", "variants": 4}},
+		"zombie_scream": {"_note": "Fallen: a screamer's scream (ZombieAI, the zone hears it: SCREAM_M)", "range_m": 300, "travels": true, "unit_size": 12, "volume_db": 2, "pitch": 1.9, "pitch_spread": 0.1,
+			"synth": {"fallen": "groan", "variants": 2}}
 	}
 }

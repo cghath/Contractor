@@ -69,7 +69,11 @@ static func server_begin(level: SurvivalLevel) -> void:
 	match thing:
 		"walker_in_barn":
 			var barn := home + Vector3(cos(rng.randf() * TAU), 0.0, sin(rng.randf() * TAU)).normalized() * BARN_M
-			var z := Survival.server_spawn_zombie(level, level.ground_point(barn), "walker")
+			var farm_barn: Variant = FirstHour.farm_point(level, "barn")  # (the farmstead's real barn, when it's far enough off the door)
+			if farm_barn is Vector3 and (farm_barn as Vector3).distance_to(home) >= BARN_M:
+				barn = farm_barn
+			# (scripted: dormant, it stands in the barn till it sees or hears him: a moment to take it in)
+			var z := Survival.server_spawn_zombie(level, level.ground_point(barn), "walker", {"dormant": true})
 			if z:
 				z.set_meta(&"cold_open", "barn")
 			thing_note = "Something moves in the barn."

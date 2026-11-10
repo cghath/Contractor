@@ -148,7 +148,9 @@ static func farmstead(def: Dictionary, world_seed: int) -> Dictionary:
 	var inward := (-p0).normalized() if p0.length() > 1.0 else Vector2(0, -1)
 	var centre := Vector2.INF
 	for k in 8:
-		var c := p0 + inward * (FARM_IN_M + maxf(half.x, half.y) + k * 30.0)
+		# On ZoneDef's module grid: normalize (main.host_zone) snaps every module's pos to GRID_M, so a
+		# centre off it moved the farm metres from its door, well, barn and truck (the pickup in the house).
+		var c := (p0 + inward * (FARM_IN_M + maxf(half.x, half.y) + k * 30.0)).snapped(Vector2(ZoneDef.GRID_M, ZoneDef.GRID_M))
 		var clear := true
 		for m: Dictionary in mods:
 			var mp: Array = m.get("pos", [0.0, 0.0])
@@ -156,7 +158,7 @@ static func farmstead(def: Dictionary, world_seed: int) -> Dictionary:
 				clear = false
 				break
 		if clear:
-			centre = c.snapped(Vector2(1.0, 1.0))
+			centre = c
 			break
 	if centre == Vector2.INF:
 		return def
@@ -318,6 +320,30 @@ static func in_quiet(pos: Variant) -> bool:
 		if q.distance_to(at) <= QUIET_M:
 			return true
 	return false
+
+
+## Proposed (the player: "zombies immediately around the starter farm" at a new world's start): the
+## start farmstead's centre has none of the dead within START_SAFE_M when he wakes. The crowd isn't
+## seeded there (Survival._seed_crowd; the road's dead keep RoadDead.START_CLEAR_M off), and for the
+## first START_SAFE_H world hours of day 1 no new one comes there (Survival._spawn_spot). Later they
+## may wander in. The cold open's barn walker is the one scripted exception (ColdOpen: dormant).
+const START_SAFE_M := 120.0
+const START_SAFE_H := 2.0
+
+
+## Whether `pos` (Vector3, or Vector2 x/z) is within START_SAFE_M of `level`'s start farmstead.
+static func in_start_safe(level: Node, pos: Variant) -> bool:
+	var f := farm_of(level)
+	if not f.get("pos") is Array:
+		return false
+	var at := Vector2((pos as Vector3).x, (pos as Vector3).z) if pos is Vector3 else (pos as Vector2)
+	var c: Array = f.pos
+	return Vector2(float(c[0]), float(c[1])).distance_to(at) <= START_SAFE_M
+
+
+## Whether the start farmstead is still in its wake-up grace (day 1, the first START_SAFE_H hours).
+static func start_safe_now() -> bool:
+	return Survival.day() <= 1 and Survival.hour() < Survival.START_HOUR + START_SAFE_H
 
 
 static func data() -> Dictionary:

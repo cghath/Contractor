@@ -17,7 +17,21 @@ extends RefCounted
 
 const HEAVY_HOLD_S := 0.35      # fire held this long winds up a heavy instead of a light
 const HEAD_ONE_HIT_J := 250.0   # a melee hit to the head at least this hard drops a walker outright
-const HEAD_LIGHT_SHARE := 0.45  # a lighter one takes this share of the pool (two or three kill)
+const HEAD_LIGHT_SHARE := 0.5   # a lighter one takes this share of the pool (two kill a walker; was 0.45: three)
+## Proposed (player report 2026-11-10, "stupid hard to kill zombies with the knife"): a melee blow
+## to one of the dead's body takes energy_j * this off its pool (Vitals' undead branch), not the
+## gunfire curve (round_damage: a 120 J knife scored 0.016 of a walker's 12, ~750 stabs). A knife
+## light 2.4 (five to drop a walker), its heavy ~5 (three), a sledge light ~6 (two).
+const UNDEAD_BODY_PTS_PER_J := 0.02
+## Proposed: a weapon's reach_m is from the swinger's body; Melee.target_in_front measures centre
+## to centre, so the body's width is added (the knife's 1.2 m reached 0.6 m past touching, short of
+## the dead's own bite from 1.5-1.6 m: they bit you where your knife couldn't reach them).
+const BODY_REACH_M := 0.45
+## One of the dead hit by a weapon (Melee._hit; Captain, 2026-11-10): a heavy staggers it this long;
+## a light only spoils a lunge already winding (Melee.server_attack checks staggered at the landing),
+## so a stab timed into its windup (knife 0.22 s against its 0.55 s) saves the bite, but stabs
+## spammed at an idle one don't lock it down.
+const HIT_STAGGER_S := 0.6
 const SILENT_KILL_S := 2.0
 const SILENT_KILL_M := 1.4
 const QUICK := {"windup": 0.25, "heavy": false, "kind": "blunt", "round_class": &"pistol", "depth": 0.02, "energy_j": 90.0,
@@ -50,9 +64,19 @@ static func profile(item: ItemData, heavy: bool) -> Dictionary:
 		"energy_j": float(swing.get("energy_j", 300.0 if heavy else 140.0)),
 		"parts": [&"chest", &"upper_arm_l", &"upper_arm_r", &"forearm_l", &"forearm_r", &"neck"],
 		"name": "%s %s" % [item.name.to_lower(), "heavy" if heavy else "swing"],
-		"reach": float(m.get("reach_m", 1.4)),
+		"reach": float(m.get("reach_m", 1.4)) + BODY_REACH_M,
 		"stamina": float(swing.get("stamina", 0.18 if heavy else 0.07)),
 	}
+
+
+## Out of stamina (Captain, 2026-11-10): no heavy swings, and a light one still goes out but lands
+## this much as hard.
+const TIRED_LIGHT_MULT := 0.75
+
+
+## Whether `s` has the stamina for swing `prof` (Melee.server_attack's own cost).
+static func _can_pay(s: Soldier, prof: Dictionary) -> bool:
+	return s.movement == null or s.movement.stamina >= float(prof.get("stamina", 0.0)) * Rpg.melee_stamina_mult(s)
 
 
 ## Host: the owner asked for `action` with whatever he holds (Soldier._server_melee).
@@ -63,7 +87,15 @@ static func server_action(s: Soldier, action: String) -> void:
 			if not is_melee(weapon):
 				return
 			var heavy := action == "heavy" and Rpg.can(s, "heavy_swing")  # the heavy swing from melee 2 (survival_rpg.md section 1)
-			Melee.server_attack(s, profile(weapon, heavy), WeaponCondition.server_swing(s))  # a dull blade hits softer (call 120)
+			var prof := profile(weapon, heavy)
+			var mult := WeaponCondition.server_swing(s)  # a dull blade hits softer (call 120)
+			if heavy and not _can_pay(s, prof):
+				prof = profile(weapon, false)  # too tired for a heavy: it comes out a light one
+				Melee._note(s, "too tired for a heavy")
+			if not _can_pay(s, prof):
+				prof["stamina"] = 0.0  # spent: a light one still goes out, weaker (Captain, 2026-11-10)
+				mult *= TIRED_LIGHT_MULT
+			Melee.server_attack(s, prof, mult)
 		"block_on":
 			Melee.server_block(s, true)
 		"block_off":

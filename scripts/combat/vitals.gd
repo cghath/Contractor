@@ -834,6 +834,8 @@ func server_hit(part: StringName, hit: Dictionary) -> void:
 			var armoured := String(get_parent().get_meta(&"zombie", "walker")) == "hazmat" and part not in UNDEAD_KILL_PARTS  # a hazmat one's suit (ZombieAI.KINDS)
 			if melee_light:
 				undead_pool -= UNDEAD_POOL * MeleeWeapons.HEAD_LIGHT_SHARE
+			elif hit.has("melee") and part not in UNDEAD_KILL_PARTS:
+				undead_pool -= float(hit.get("energy_j", 0.0)) * MeleeWeapons.UNDEAD_BODY_PTS_PER_J * (0.25 if armoured else 1.0) * DeadDecay.limb_mult(get_parent(), part)  # a blade or club to the body: by the blow, not the gunfire curve
 			else:
 				undead_pool -= round_damage(round_class, float(hit.get("energy_j", 0.0)), bool(hit.get("pellet", false))) * (0.25 if armoured else 1.0) * DeadDecay.limb_mult(get_parent(), part)  # (an old one's limbs come apart)
 			if (part in UNDEAD_KILL_PARTS and not melee_light) or undead_pool <= 0.0:

@@ -112,6 +112,9 @@ var goal := Vector3.INF
 var awareness := 0.0
 var aware_of: Soldier  # who it's becoming aware of (ALERT), or null
 var groaned_at := -100.0
+var _moan_next := 0.0  # when it next groans unprompted (_moan)
+## Between its unprompted groans (s; a third as long while it chases). Proposed.
+const MOAN_GAP_S := Vector2(9.0, 24.0)
 var _path := PackedVector3Array()
 var _path_index := 0
 ## The navigation map's iteration the path was asked on, and when (call 141: a build placed or
@@ -286,6 +289,7 @@ func _decide() -> void:
 			if is_instance_valid(aware_of):
 				_set_goal(aware_of.global_position)
 			_search_until = now + SEARCH_S
+	_moan(now)
 	# What each state does.
 	under_ledge = false
 	if mode == Mode.CHASE and is_instance_valid(target):
@@ -400,6 +404,31 @@ func _groan(now: float) -> void:
 		Survival.server_noise(body, body.global_position, SCREAM_M, HEAR_SHOT)
 		Survival._raise_pressure(CompoundLevel.current(body), body.global_position, SCREAM_PRESSURE)
 		SessionLog.note("survival: %s screams" % body.log_name())
+		_voice(&"zombie_scream")
+		return
+	_voice(&"zombie_groan")
+
+
+## Plays one of its sounds (Sfx: data/sounds.json) from its head on every peer. Nothing else
+## voiced the dead: the groan above was only a meta for the soundscape (2026-11-10 playtest:
+## "zombies make no sounds at all").
+func _voice(id: StringName) -> void:
+	_moan_next = Soldier._now() + _rng.randf_range(MOAN_GAP_S.x, MOAN_GAP_S.y)
+	if is_instance_valid(Sfx):
+		Sfx.server_play(id, body.global_position + Vector3.UP * 1.5)
+
+
+## Now and then a groan with nothing to say it (not lying up in a nest): the dead aren't silent
+## while they shamble, and a chasing one keeps it up.
+func _moan(now: float) -> void:
+	if _moan_next <= 0.0:
+		_moan_next = now + _rng.randf_range(0.0, MOAN_GAP_S.y)  # (the first spread out: not every one at once as a zone loads)
+		return
+	if dormant or now < _moan_next:
+		return
+	_voice(&"zombie_groan")
+	if mode == Mode.CHASE:
+		_moan_next = now + _rng.randf_range(MOAN_GAP_S.x, MOAN_GAP_S.y) * 0.4
 
 
 ## The dead about this one join the chase.

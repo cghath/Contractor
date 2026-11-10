@@ -279,6 +279,10 @@ func _convert(level: Node) -> void:
 			continue
 		var pos: Vector2 = d.pos
 		var near := players.any(func(p: Soldier) -> bool: return Vector2(p.global_position.x, p.global_position.z).distance_to(pos) <= LIVE_M)
+		if near and live < Survival.LIVE_CAP and _too_close(d, pos, players):
+			_push_off(d, players)  # (never a body at his elbow: it comes alive next tick, out where it's fair)
+			i += 1
+			continue
 		if near and live < Survival.LIVE_CAP:
 			var y := _terrain.height_at(pos.x, pos.y) if _terrain else 0.0
 			var z := Survival.server_spawn_zombie(level, Vector3(pos.x, y, pos.y), String(d.kind), carry(d))
@@ -299,6 +303,57 @@ func _convert(level: Node) -> void:
 				dead.remove_at(i)
 				continue
 		i += 1
+
+
+## Whether head `d` at `pos` is nearer than Survival.SPAWN_MIN_M to a living player, so it mustn't
+## become a body there: a head usually comes alive at LIVE_M as it walks in, so one this near was
+## there when he appeared (a new world, a respawn: the bodies round where he fell went back into the
+## crowd while he waited), or was held back by LIVE_CAP. A nest's heads pouring out of its door
+## (DeadNests: "to") are the scripted exception: he's at the door and sees them come.
+func _too_close(d: Dictionary, pos: Vector2, players: Array) -> bool:
+	if d.has("nest") and d.has("to"):
+		return false
+	return players.any(func(p: Soldier) -> bool: return Vector2(p.global_position.x, p.global_position.z).distance_to(pos) < Survival.SPAWN_MIN_M)
+
+
+## Host: head `d` moved off to SPAWN_MIN_M .. +PUSH_SPREAD_M from every living player, away from the
+## nearest and, where a try allows, behind every player (Survival._in_view); it comes alive there
+## (or walks back in, at LIVE_M) on a later tick.
+const PUSH_SPREAD_M := 15.0
+
+
+func _push_off(d: Dictionary, players: Array) -> void:
+	var pos: Vector2 = d.pos
+	var nearest: Soldier = null
+	var best := INF
+	for p: Soldier in players:
+		var dd := Vector2(p.global_position.x, p.global_position.z).distance_to(pos)
+		if dd < best:
+			best = dd
+			nearest = p
+	var from := Vector2(nearest.global_position.x, nearest.global_position.z)
+	var a0 := atan2((pos - from).y, (pos - from).x) if pos.distance_to(from) > 0.5 else _rng.randf() * TAU
+	var fallback := Vector2.INF
+	for k in 12:
+		var a := a0 + (0.0 if k == 0 else _rng.randf_range(-PI, PI))
+		var at := from + Vector2(cos(a), sin(a)) * _rng.randf_range(Survival.SPAWN_MIN_M + 2.0, Survival.SPAWN_MIN_M + PUSH_SPREAD_M)
+		if players.any(func(p: Soldier) -> bool: return Vector2(p.global_position.x, p.global_position.z).distance_to(at) < Survival.SPAWN_MIN_M):
+			continue
+		if fallback == Vector2.INF:
+			fallback = at
+		if players.any(func(p: Soldier) -> bool: return Survival._in_view(p, Vector3(at.x, 0.0, at.y))):
+			continue
+		fallback = at
+		break
+	if fallback == Vector2.INF:
+		fallback = from + Vector2(cos(a0), sin(a0)) * (Survival.SPAWN_MIN_M + PUSH_SPREAD_M)
+	d.pos = fallback
+	d.target = fallback
+	d.show = fallback
+	d.wait = _rng.randf_range(WAIT_S.x, WAIT_S.y)
+	if roads:
+		roads.release(d)
+		d.erase("anchor")
 
 
 ## Host: a horde that has nothing to go to thins out, a head at a time (back into the zone's quiet).

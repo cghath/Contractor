@@ -362,7 +362,7 @@
 		 "uses": ["Pick it up and the journal keeps what it says", "What it says is in its state (ItemInfo shows the first line)"]},
 		{"id": "combat_knife", "name": "Combat Knife", "type": "weapon", "slot": "sidearm", "volume_l": 0.3, "mass_kg": 0.3, "tags": ["melee", "blade", "knife"],
 		 "stats": {"rarity": "common", "short": "Combat", "size_m": [0.05, 0.1, 0.28], "melee": {"kind": "blade", "reach_m": 1.2, "art": "knife", "length_m": 0.28,
-		  "light": {"windup": 0.22, "energy_j": 120, "stamina": 0.05}, "heavy": {"windup": 0.45, "energy_j": 220, "stamina": 0.12}}},
+		  "light": {"windup": 0.22, "energy_j": 120, "stamina": 0.05}, "heavy": {"windup": 0.45, "energy_j": 260, "stamina": 0.12}}},
 		 "desc": "A fixed-blade fighting knife: quiet, quick, short. The silent kill from behind at any skill.",
 		 "uses": ["Sidearm slot; 2 brings it up", "Left mouse: a swing; hold it: a heavy (slower, breaks a guard, one to the head drops a walker)", "Right mouse: block; raised just as a blow lands, it parries (the dead stagger, your next swing is instant and twice as hard)", "Double-tap a movement key: sidestep or dodge that way", "Ctrl behind an unaware zombie with a blade: the silent kill"]},
 		{"id": "machete", "name": "Machete", "type": "weapon", "slot": "sidearm", "volume_l": 1.2, "mass_kg": 0.7, "tags": ["melee", "blade"],

@@ -787,6 +787,8 @@ func _spawn_spot(level: SurvivalLevel, p: Soldier, players: Array) -> Variant:
 		var at := NavigationServer3D.map_get_closest_point(map, want)
 		if at.distance_to(want) > 8.0:
 			continue
+		if not legacy_spawns and FirstHour.start_safe_now() and FirstHour.in_start_safe(level, at):
+			continue  # (the start farm is clear when he wakes: FirstHour.START_SAFE_M)
 		var ok := true
 		for q: Soldier in players:
 			if q.global_position.distance_to(at) < SPAWN_MIN_M or (_in_view(q, at) and Throwables.clear_line(level.get_world_3d(), q.global_position + Vector3.UP * 1.6, at + Vector3.UP * 1.4)):
@@ -966,8 +968,8 @@ func _seed_crowd(level: SurvivalLevel) -> void:
 			var a := rng.randf() * TAU
 			var r := rng.randf_range(20.0, 60.0)
 			var at := m.global_position + Vector3(cos(a), 0.0, sin(a)) * r
-			if not legacy_spawns and FirstHour.in_quiet(at):
-				continue
+			if not legacy_spawns and (FirstHour.in_quiet(at) or FirstHour.in_start_safe(level, at)):
+				continue  # (none where the living hold a place, nor round the start farm he wakes at)
 			crowd.server_add(level.ground_point(at), roll_kind(level, at, rng))
 
 

@@ -100,6 +100,29 @@ func _test_spawn() -> void:
 	for l: Dictionary in Landmarks.of(String(Survival.state().get("zone", ""))):
 		lms.append("%s %.0f m" % [String(l.name), (l.pos as Vector2).distance_to(Vector2(at.x, at.z))])
 	print("  landmarks: %s" % ", ".join(lms))
+	# The start farm is clear of the dead when he wakes (FirstHour.START_SAFE_M; the barn walker the scripted one).
+	var crowd := ZoneDead.of(level)
+	var heads := crowd.dead.filter(func(d: Dictionary) -> bool: return bool(d.alive) and FirstHour.in_start_safe(level, d.pos as Vector2)).size() if crowd else -1
+	var bodies := Survival.zombies(level).filter(func(z: Soldier) -> bool: return not z.has_meta(&"cold_open") and FirstHour.in_start_safe(level, z.global_position))
+	check(heads == 0 and bodies.is_empty(), "none of the dead within %.0f m of the farm on waking (%d of the crowd, %d bodies)" % [FirstHour.START_SAFE_M, heads, bodies.size()])
+	for z: Soldier in Survival.zombies(level):
+		if z.has_meta(&"cold_open"):
+			var brain := ZombieAI.of(z)
+			check(brain != null and brain.dormant and z.global_position.distance_to(at) >= ColdOpen.BARN_M - 1.0, "the barn's walker stands dormant %.0f m off" % z.global_position.distance_to(at))
+	# One of the crowd at his elbow (as when he respawns where the dead were) comes alive out at a fair distance.
+	if crowd:
+		var before := Survival.zombies(level)
+		crowd.server_add(at + Vector3(3.0, 0.0, 0.0), "walker")
+		crowd._convert(level)
+		crowd._convert(level)
+		var made := Survival.zombies(level).filter(func(z: Soldier) -> bool: return not before.has(z))
+		var nearest := INF
+		for z: Soldier in made:
+			nearest = minf(nearest, z.global_position.distance_to(at))
+		check(made.size() == 1 and nearest >= Survival.SPAWN_MIN_M, "a head 3 m off him doesn't come alive there (%d made, %.0f m off)" % [made.size(), nearest])
+		for z: Soldier in made:
+			z.queue_free()
+		await _frames(2)
 
 
 # --- The thread -----------------------------------------------------------------------------------
@@ -143,6 +166,27 @@ func _test_truck() -> void:
 	var ground := level.ground_point(v.global_position)
 	check(absf(v.global_position.y - ground.y) < 1.2 and v.global_basis.y.y > 0.9 and v.global_position.distance_to(Vector3(float((FirstHour.farm_of(level).truck as Array)[0]), v.global_position.y, float((FirstHour.farm_of(level).truck as Array)[1]))) < 2.0,
 		"and it stands there on its wheels, clear of the buildings (%.2f m above the ground, up %.2f)" % [v.global_position.y - ground.y, v.global_basis.y.y])
+	# Its footprint against the farm's buildings where the module really stands (ZoneDef snaps a
+	# module to its grid: a farmstead off it put the pickup inside the farmhouse).
+	var farm := FirstHour.farm_of(level)
+	var home: ZoneModule = null
+	for m: ZoneModule in level.modules():
+		if m.module_id == FirstHour.HOME_ID:
+			home = m
+	check(home != null and absf(home.global_position.x - float(farm.pos[0])) < 0.01 and absf(home.global_position.z - float(farm.pos[1])) < 0.01,
+		"the farm module stands where the farmstead says (%s, %s)" % [home.global_position if home else null, farm.get("pos")])
+	if home != null:
+		var area := Rect2(Vector2(v.global_position.x, v.global_position.z) - FirstHour.TRUCK_HALF, FirstHour.TRUCK_HALF * 2.0)
+		var site := BuildingGen.site("farm", int(farm.seed), BuildingGen.INTACT, 0)
+		var hits := PackedStringArray()
+		for b: Dictionary in site.buildings:
+			var sz: Vector2 = (b.data as Dictionary).size
+			if int(b.turn) % 2 == 1:
+				sz = Vector2(sz.y, sz.x)
+			var o: Vector3 = (b.origin as Vector3) + home.global_position
+			if Rect2(o.x - sz.x * 0.5, o.z - sz.y * 0.5, sz.x, sz.y).intersects(area):
+				hits.append(String(b.type))
+		check(hits.is_empty(), "its footprint touches no farm building (%s)" % ", ".join(hits))
 	check(not v.can_drive() and not v.battery_ok and v.fuel_litres() <= 0.0 and VehicleWear.flat(v), "broken down: a dead battery, a dry tank, a flat")
 	var words := VehicleActionPoint.report(v)
 	check(words.contains("Battery: dead") and words.contains("Tyres: a flat") and words.contains("Fuel: 0 of"), "looking it over says what's wrong on every peer (%s)" % words.replace("\n", "; "))

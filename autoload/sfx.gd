@@ -390,7 +390,7 @@ func _start(id: StringName, pos: Vector3, volume_db: float) -> void:
 	p.max_distance = float(def.get("range_m", 100.0))
 	p.volume_db = float(def.get("volume_db", 0.0)) + volume_db
 	var spread := float(def.get("pitch_spread", 0.06))
-	p.pitch_scale = 1.0 + randf_range(-spread, spread)
+	p.pitch_scale = float(def.get("pitch", 1.0)) + randf_range(-spread, spread)
 	p.play()
 
 
@@ -590,6 +590,18 @@ func engine_id(v: Vehicle) -> StringName:
 	return &"engine_ifv" if v.kind == Vehicle.TRACKED else &"engine_mrap"
 
 
+## Whether `v`'s engine could turn over at all: fuel in the tank (a model that takes any), a
+## battery, an engine left. Sitting in a dead vehicle (Fallen's farm pickup: no fuel, no
+## battery) is silent, not a running engine. A helicopter's rotors are its own (engine_running).
+func engine_can_run(v: Vehicle) -> bool:
+	if v.kind == Vehicle.HELICOPTER:
+		return true
+	if float(v.spec.get("fuel_l", 0.0)) > 0.0 and v.fuel_litres() <= 0.0:
+		return false
+	var battery := v.battery_ok if multiplayer.is_server() else bool(v.net_state.get("battery", true))
+	return battery and v.zone_health(Vehicle.ZONE_ENGINE) > 0.0
+
+
 ## Engines run while someone drives and the vehicle isn't wrecked, within the sound's range of
 ## the listener; pitch and volume rise with speed, measured from movement (every peer).
 func _update_engines(ear: Vector3, delta: float) -> void:
@@ -601,7 +613,7 @@ func _update_engines(ear: Vector3, delta: float) -> void:
 		var key := v.get_instance_id()
 		var id := engine_id(v)
 		var def: Dictionary = defs.get(String(id), {})
-		var running := not v.wrecked and v.engine_running() and v.global_position.distance_to(ear) <= float(def.get("range_m", 200.0))
+		var running := not v.wrecked and v.engine_running() and engine_can_run(v) and v.global_position.distance_to(ear) <= float(def.get("range_m", 200.0))
 		if not running:
 			continue
 		var e: Dictionary = _engines.get(key, {})
@@ -738,7 +750,10 @@ func streams(id: StringName) -> Array:
 static func _synth_variants(id: String, recipe: Dictionary) -> Array:
 	var out: Array = []
 	for v in int(recipe.get("variants", SYNTH_VARIANTS)):
-		out.append(synth(recipe, hash(id) + v * 7919))
+		if recipe.has("fallen"):  # a voice FallenSynth makes (the dead's groan): "fallen": its name
+			out.append(FallenSynth.groan(hash(id) + v * 7919))
+		else:
+			out.append(synth(recipe, hash(id) + v * 7919))
 	return out
 
 
