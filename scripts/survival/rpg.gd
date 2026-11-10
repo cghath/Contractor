@@ -501,7 +501,8 @@ static func server_tick(s: Soldier, dt: float, dead: Array) -> void:
 			s.remove_meta(&"rpg_at")
 		return
 	var at := s.global_position
-	var was: Variant = s.get_meta(&"rpg_at", null)
+	# get_meta's default can't be null (Godot treats it as "no default" and errors), so check first.
+	var was: Variant = s.get_meta(&"rpg_at") if s.has_meta(&"rpg_at") else null
 	s.set_meta(&"rpg_at", at)
 	var moved := 0.0
 	if was is Vector3:

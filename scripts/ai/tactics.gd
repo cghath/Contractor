@@ -922,7 +922,7 @@ func _break_contact(units: Array[SquadAI], enemy: Vector3, aim: Vector3, id: Str
 ## squad and within 200 m, else BD3_BACK_M straight back.
 func _break_rally(threat: Vector3) -> Vector3:
 	var c: Vector3 = situation.centre
-	var rally: Variant = squad.get_meta(&"rally", null)
+	var rally: Variant = squad.get_meta(&"rally") if squad.has_meta(&"rally") else null
 	if rally is Vector3 and (rally as Vector3).distance_to(threat) > c.distance_to(threat) + 10.0 and (rally as Vector3).distance_to(c) <= 200.0:
 		return rally
 	var away := c - threat
