@@ -232,7 +232,9 @@ func gather() -> Dictionary:
 				heads.append(p)
 			if bool(d.get("horde", false)):
 				horde_m = minf(horde_m, dist)
-		ctx["horde"] = crowd.horde_count() > 0
+		ctx["horde"] = crowd.horde_count() > 0 or crowd.warned()
+		if crowd.warned() and crowd.warn_point.distance_to(me2) > 1.0:
+			ctx["horde_dir"] = (crowd.warn_point - me2).normalized()  # (a horde on the way: the distant groans come from there)
 	ctx["crowd"] = heads
 	ctx["horde_m"] = horde_m
 	var now := float(ctx.now)

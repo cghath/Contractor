@@ -282,6 +282,8 @@ func server_level_ready(level: SurvivalLevel) -> void:
 	ColdOpen.server_begin(level)  # a new world's first hour (once)
 	Settlement.install(level)  # the settlement's work and council (Settlement, survival_building.md 5-7)
 	_world_level_ready(level)  # the world sim set up, its live groups (WorldSim, WorldLive)
+	RoadDead.server_level_ready(level)  # the road's dead (RoadDead)
+	HordeClock.server_level_ready(level)  # a horde saved on the ground walks again
 	Mounts.install(level)  # horses, bicycles, carts (Mounts, docs/survival_mounts.md)
 	Sieges.install(level)  # raids and sieges on the builds, traps, lures, the bodies (phase D: docs/survival_seasons.md)
 	Seasons.server_update(level)  # the season's weather and the dead's frost
@@ -297,6 +299,7 @@ func server_save() -> void:
 			_store_survivor(s)
 		_store_people(level)
 		GameState.save_zone()
+		HordeClock.server_note_out(level)  # (a horde on the march walks again on Continue)
 	Campaign.save_campaign()
 
 

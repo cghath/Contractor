@@ -33,6 +33,7 @@ func _ready() -> void:
 		_test_raid_and_demand()
 		_test_far_fight()
 		_test_pressure_and_hordes()
+		_test_horde_clock()
 		_test_capture_and_search()
 		_test_holding_sim()
 		_test_rumours()
@@ -248,6 +249,239 @@ func _test_far_fight() -> void:
 	check(WorldGroup.relation(s, String(k.id)) <= -50.0 or not bool(s.alive), "the attacked remember it")
 	var dead_rec: Dictionary = dead[0] if not dead.is_empty() else {}
 	check(String(dead_rec.get("zone", "")) == z and dead_rec.has("body_pos"), "a dead record lies where it happened")
+
+
+## Hordes on their own clock (HordeClock): the rate by the source, the first night's softness, a
+## far horde walking on with no noise, a warning before it reaches the hosted zone, determinism, a
+## JSON round trip of the world section.
+func _test_horde_clock() -> void:
+	print("Hordes on their own clock")
+	var big := {"type": "town", "dead": 1.0, "places": [{"type": "town"}, {"type": "town"}, {"type": "church"}]}
+	var small := {"type": "farmland", "dead": 1.0, "places": [{"type": "village"}]}
+	var none := {"type": "hills", "dead": 1.0, "places": [{"type": "compound"}]}
+	var rb := HordeClock.rate(big, "summer", 1.0)
+	var rs := HordeClock.rate(small, "summer", 1.0)
+	check(rb > 0.0 and rs > 0.0 and rb > rs * 2.0, "a big town sends more often than a farm's village (%.3f vs %.3f a day)" % [rb, rs])
+	check(HordeClock.rate(none, "summer", 1.0) == 0.0, "a place with no town or nest sends none")
+	check(HordeClock.rate(big, "winter", 1.0) < rb and HordeClock.rate(big, "spring", 1.0) > rb, "fewer in winter, more in spring")
+	check(HordeClock.rate(big, "summer", 1.5) > rb and HordeClock.rate(big, "summer", 0.6) < rb, "the living-world option scales it")
+	var cleared := big.duplicate(true)
+	cleared["nests_left"] = 0.0
+	check(HordeClock.rate(cleared, "summer", 1.0) < rb and HordeClock.rate(cleared, "summer", 1.0) > 0.0, "a cleared nest sends less; the towns still send")
+	var empty := big.duplicate(true)
+	empty["dead"] = 0.0
+	check(HordeClock.rate(empty, "summer", 1.0) == 0.0, "a zone emptied of its dead sends none")
+
+	# The first night: nothing below High, whatever's due.
+	var m1 := _iso(31)
+	m1.clock = {"world_x": 1.0, "size_x": 1.0, "soft": true}
+	m1.now = 1.5
+	var z := _zone(m1, 2)
+	m1.zone(z).places = [{"id": "t", "type": "town", "pos": [0.0, 0.0], "defence": 0.3, "richness": 1.0, "looted": -100.0, "holder": ""}]
+	m1.zone(z)["clock_due"] = 0
+	m1.step(m1.now + WorldModel.TICK_MIN / 1440.0)
+	check((m1.zone(z).horde as Dictionary).is_empty(), "nothing on the clock on the first night (soft)")
+	m1.zone(z)["clock_due"] = 0
+	m1.clock.soft = false
+	m1.step(m1.now + WorldModel.TICK_MIN / 1440.0)
+	var h1: Dictionary = m1.zone(z).horde
+	check(bool(h1.get("clock", false)) and int(h1.get("n", 0)) >= HordeClock.MIN_N and String(h1.get("place", "")) == "t",
+		"High keeps the hard first night: it sets out, from its town (%d)" % int(h1.get("n", 0)))
+	check((m1.w.events as Array).any(func(e: Dictionary) -> bool: return String(e.kind) == "horde" and String(e.zone) == z), "and it's an event")
+
+	# Far away: it walks on with no noise, to a neighbour, and drops the clock with its hops gone.
+	var n1 := int(h1.n)
+	var left_home := false
+	var to := ""
+	for i in HordeClock.WALK_TICKS + 2:
+		m1.step(m1.now + WorldModel.TICK_MIN / 1440.0)
+		for nb: String in m1.zone(z).links:
+			if int((m1.zone(nb).horde as Dictionary).get("n", 0)) == n1 and bool((m1.zone(nb).horde as Dictionary).get("clock", false)):
+				left_home = true
+				to = nb
+		if left_home:
+			break
+	check(left_home and (m1.zone(z).horde as Dictionary).is_empty(), "with the zone silent it still walks on, whole, to %s (%d)" % [to, n1])
+	check(m1.pressure_of(to) < WorldModel.DISPERSE_AT, "no noise was needed (pressure %.0f)" % m1.pressure_of(to))
+	var h2: Dictionary = m1.zone(to).horde
+	h2.hops = 0
+	h2.to = ""
+	m1.step(m1.now + WorldModel.TICK_MIN / 1440.0)
+	check(not bool((m1.zone(to).horde as Dictionary).get("clock", false)), "out of hops it's the noise's: no clock, it can break up")
+
+	# Near a played zone: warned first, WARN_TICKS before it arrives.
+	var m2 := _iso(32)
+	m2.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	var a := _zone(m2, 2)
+	var b := String(m2.zone(a).links[0])
+	m2.hosted = b
+	for nb: String in m2.zone(a).links:
+		if nb != b:
+			m2.zone(nb).horde = {"n": 9, "since": 0}  # (so its one way on is the hosted zone)
+	m2.zone(a).horde = {"n": 40, "since": 0, "clock": true, "hops": 1, "to": "", "arrive": 0, "warned": false, "place": ""}
+	var warned_at := -1
+	var entered_at := -1
+	var entered: Dictionary = {}
+	for i in HordeClock.WALK_TICKS + HordeClock.WARN_TICKS + 4:
+		m2.step(m2.now + WorldModel.TICK_MIN / 1440.0)
+		for act: Dictionary in m2.actions:
+			if String(act.kind) == "horde_warn" and warned_at < 0:
+				warned_at = i
+			if String(act.kind) == "horde_enter" and entered_at < 0:
+				entered_at = i
+				entered = act
+	check(warned_at >= 0 and entered_at >= 0 and entered_at - warned_at >= HordeClock.WARN_TICKS, "warned first, %d ticks ahead (Proposed %d)" % [entered_at - warned_at, HordeClock.WARN_TICKS])
+	check(String(entered.get("from", "")) == a and bool(entered.get("clock", false)) and int(entered.get("n", 0)) == 40, "then walks in from the crossing, on the march")
+	check((m2.zone(a).horde as Dictionary).is_empty() and (m2.zone(b).horde as Dictionary).is_empty(), "the sim hands it to the zone (no record left)")
+
+	# A town in the played zone itself: a warning, then it rises.
+	var m3 := _iso(33)
+	m3.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	var h := _zone(m3, 1)
+	m3.hosted = h
+	m3.zone(h).places = [{"id": "t", "type": "town", "pos": [0.0, 0.0], "defence": 0.3, "richness": 1.0, "looted": -100.0, "holder": ""}]
+	m3.zone(h)["clock_due"] = 0
+	m3.step(m3.now + WorldModel.TICK_MIN / 1440.0)
+	check(m3.actions.any(func(act: Dictionary) -> bool: return String(act.kind) == "horde_warn" and String(act.place) == "t"), "the played zone's own town: warned, its place named")
+	var rose := false
+	for i in HordeClock.WARN_TICKS + 1:
+		m3.step(m3.now + WorldModel.TICK_MIN / 1440.0)
+		rose = rose or m3.actions.any(func(act: Dictionary) -> bool: return String(act.kind) == "horde_rise" and String(act.place) == "t")
+	check(rose and (m3.zone(h).horde as Dictionary).is_empty(), "then it comes out of the town (a real horde for the zone)")
+
+	# The first roll waits out the soft first night (exactly: the same seed, soft and not).
+	var soft := _iso(35)
+	var hard := _iso(35)
+	soft.clock = {"world_x": 1.0, "size_x": 1.0, "soft": true}
+	hard.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	soft.now = 1.25
+	hard.now = 1.25
+	var at := soft.now + WorldModel.TICK_MIN / 1440.0
+	soft.step(at)
+	hard.step(at)
+	var gate := ceili((HordeClock.SOFT_END_DAY - at) * WorldModel.TICKS_PER_DAY)
+	var zs := WorldModel._sorted(soft.zones().keys())
+	check(zs.all(func(zid: String) -> bool: return int(soft.zone(zid).clock_due) - int(hard.zone(zid).clock_due) == gate),
+		"the first roll is held past the soft first night (%d ticks more than at High)" % gate)
+
+	# A bridge blown while it walks: it doesn't arrive, turns back and picks again, the hop unspent.
+	var mb2 := _iso(36)
+	mb2.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	var ba := _zone(mb2, 2)
+	var bb := String(mb2.zone(ba).links[0])
+	mb2.zone(ba).horde = {"n": 30, "since": 0, "clock": true, "hops": 1, "to": bb, "arrive": mb2.tick() + 2, "warned": true, "place": ""}
+	(mb2.w as Dictionary)["crossings"] = {WorldModel.crossing_key(ba, bb): "blown"}
+	var bt := mb2.now
+	for i in 4:
+		bt += WorldModel.TICK_MIN / 1440.0
+		mb2.step(bt)
+	var bh: Dictionary = mb2.zone(ba).horde
+	check((mb2.zone(bb).horde as Dictionary).is_empty(), "a bridge blown while it walks: it doesn't cross")
+	check(not bh.is_empty() and String(bh.get("to", "")) != bb and not bool(bh.get("warned", true)) and int(bh.get("hops", -1)) == 1 and String(bh.get("to", "")) != "",
+		"it picks another way, the warning reset, its hop not wasted (%s)" % bh)
+
+	# A due zone with a horde already keeps the one; a rolled gap is by the seed.
+	var ma := _iso(77)
+	var mb := _iso(77)
+	ma.clock = {"world_x": 1.0, "size_x": 1.0, "soft": false}
+	mb.clock = ma.clock.duplicate()
+	var ta := ma.now
+	for i in 200:
+		ta += WorldModel.TICK_MIN / 1440.0
+		ma.step(ta)
+		mb.step(ta)
+	var same := true
+	var hordes := 0
+	for zid: String in ma.zones():
+		same = same and int(ma.zone(zid).get("clock_due", -1)) == int(mb.zone(zid).get("clock_due", -1)) \
+			and str(ma.zone(zid).horde) == str(mb.zone(zid).horde)
+		if bool((ma.zone(zid).horde as Dictionary).get("clock", false)):
+			hordes += 1
+	check(same, "two sims from one seed agree on the clock (%d walking now)" % hordes)
+	check(ma.zones().values().all(func(zd: Dictionary) -> bool: return int(zd.get("clock_due", -1)) > ma.tick()), "every zone's clock is running, its next one still to come")
+
+	# Save and load: the world section round-trips (Campaign saves it as JSON; ints come back floats).
+	var copy: Dictionary = JSON.parse_string(JSON.stringify(ma.w, "", true, true))
+	var mc := WorldModel.new(copy, {}, {}, ma.world_seed)
+	mc.now = ma.now
+	mc.clock = ma.clock.duplicate()
+	mc.player = ma.player
+	var ok := true
+	for i in 60:
+		ta += WorldModel.TICK_MIN / 1440.0
+		ma.step(ta)
+		mc.step(ta)
+	for zid: String in ma.zones():
+		ok = ok and int(ma.zone(zid).get("clock_due", -1)) == int(mc.zone(zid).get("clock_due", -1)) \
+			and (ma.zone(zid).horde as Dictionary).is_empty() == (mc.zone(zid).horde as Dictionary).is_empty() \
+			and int((ma.zone(zid).horde as Dictionary).get("n", 0)) == int((mc.zone(zid).horde as Dictionary).get("n", 0))
+	check(ok, "the clock and its hordes survive the save's JSON")
+	_test_horde_clock_live()
+
+
+## The host's side of it, in the hosted zone: the warning, a real horde far from the player, and one
+## caught on the ground at a save walking again.
+func _test_horde_clock_live() -> void:
+	var d0_march := func(heads: Array) -> Vector2: return (heads[0] as Dictionary).march
+	var crowd := ZoneDead.of(level)
+	var zone := WorldSim.hosted_zone()
+	var zd: Dictionary = WorldSim.section().zones[zone]
+	var day_was := Survival.day()
+	Survival.state()["day"] = maxi(day_was, 3)
+	crowd.dead.clear()
+	sim._do_action({"kind": "horde_warn", "zone": zone, "from": "", "place": "", "n": 20})
+	var line := String(((Survival.state().get("journal", []) as Array).back() as Dictionary).get("text", ""))
+	check(crowd.warned() and line.contains("dead"), "the warning: groans in the air and the journal says so (\"%s\")" % line)
+	check(crowd.dead.is_empty(), "nothing on the ground yet: that's what the warning is for")
+	sim._do_action({"kind": "horde_rise", "zone": zone, "from": "", "place": "", "n": 20})
+	var me := Vector2(player.global_position.x, player.global_position.z)
+	var marching := crowd.dead.filter(func(d: Dictionary) -> bool: return d.has("march"))
+	check(marching.size() == 20 and crowd.horde_count() == 20, "then a real horde is on the ground, marching (%d)" % marching.size())
+	var nearest := INF
+	for d: Dictionary in marching:
+		nearest = minf(nearest, (d.pos as Vector2).distance_to(me))
+	check(nearest >= HordeClock.START_MIN_M - HordeClock.SPREAD_M * 1.5, "well away from anyone (%.0f m at the nearest)" % nearest)
+	var centre := Vector2.ZERO
+	for d: Dictionary in marching:
+		centre += (d.pos as Vector2) / marching.size()
+	check(centre.distance_to(crowd.warn_point) <= HordeClock.SPREAD_M, "it appears where the groans said it was (%.0f m off the warning's bearing point)" % centre.distance_to(crowd.warn_point))
+	check((d0_march.call(marching) as Vector2).distance_to(crowd.warn_point) >= HordeClock.START_MIN_M - ZoneDead.MARCH_SPREAD_M * 1.5, "and not on top of where it's bound")
+
+	# A start point on where it's bound is passed over for one clear of it.
+	var mods := level.modules()
+	if mods.size() >= 2:
+		var bound: Vector3 = mods[0].global_position
+		var pick := HordeClock._start_point(level, {"zone": zone, "from": "", "place": mods[0].module_id}, bound)
+		var d2 := Vector2(pick.x - bound.x, pick.z - bound.z).length()
+		var somewhere := mods.any(func(m: ZoneModule) -> bool:
+			var g := Vector2(m.global_position.x, m.global_position.z)
+			return g.distance_to(Vector2(bound.x, bound.z)) >= HordeClock.START_MIN_M and g.distance_to(me) >= HordeClock.START_MIN_M)
+		check(somewhere and d2 >= HordeClock.START_MIN_M, "a source on the point it's bound for is passed over (%.0f m)" % d2)
+
+	# The clock branch of "horde_enter", live: warned from the neighbour, in at the same place.
+	crowd.dead.clear()
+	var from := String(zd.links[0])
+	sim._do_action({"kind": "horde_warn", "zone": zone, "from": from, "place": "", "n": 15})
+	var said := crowd.warn_point
+	sim._do_action({"kind": "horde_enter", "zone": zone, "from": from, "n": 15, "clock": true})
+	var came := crowd.dead.filter(func(d: Dictionary) -> bool: return d.has("march"))
+	var c2 := Vector2.ZERO
+	for d: Dictionary in came:
+		c2 += (d.pos as Vector2) / maxf(1.0, came.size())
+	check(came.size() == 15 and c2.distance_to(said) <= HordeClock.SPREAD_M, "a horde walking in comes on the march, where it was warned of (%d, %.0f m off)" % [came.size(), c2.distance_to(said)])
+	crowd.dead.clear()
+	sim._do_action({"kind": "horde_rise", "zone": zone, "from": "", "place": "", "n": 20})
+	HordeClock.server_note_out(level)
+	check(int((zd.get("horde_out", {}) as Dictionary).get("n", 0)) == 20, "a save counts it on the ground")
+	crowd.dead.clear()
+	zd.horde = {}
+	HordeClock.server_level_ready(level)
+	check(bool((zd.horde as Dictionary).get("clock", false)) and int(zd.horde.n) == 20 and not zd.has("horde_out"), "and on Continue it walks again")
+	HordeClock.server_note_out(level)
+	check(not zd.has("horde_out"), "with none on the ground a save counts none")
+	zd.horde = {}
+	crowd._warn_until = -1.0
+	Survival.state()["day"] = day_was
 
 
 func _test_pressure_and_hordes() -> void:
