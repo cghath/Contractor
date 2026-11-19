@@ -365,6 +365,7 @@ func _build() -> void:
 	_board_all()
 	_place_all()
 	_write_carry()
+	_stick()  # ("live" onto a far step out on the worker too: else its result lacks it, and the far tick resolves a column still driving here)
 	SessionLog.note("survival convoy: %s column live (%d vehicles, %d people%s) on a %.0f m road at %.1f m/s" % [column, vehicles.size(), people.size() + (1 if trader else 0), ", came through from %s" % String(rec.from) if rec.has("from") else "", length, speed])
 
 
@@ -685,6 +686,18 @@ func _drop_vehicle(i: int) -> void:
 	if v == cargo_vehicle:
 		cargo_vehicle = vehicles[0] if not vehicles.is_empty() else null
 		_cargo_n = _cargo_count()
+	# The walkers beside the trucks hold a vehicle index: the ones after `i` moved up one, and those
+	# beside `i` walk by the truck that took its place (else they're pinned by the wrong one).
+	for key: int in _places:
+		var pl: Array = _places[key]
+		if int(pl[0]) > i:
+			pl[0] = int(pl[0]) - 1
+		elif int(pl[0]) == i:
+			pl[0] = mini(i, maxi(vehicles.size() - 1, 0))
+	# The record now, not at the next CARRY_S: _release took the truck off no_save, so a zone save
+	# before then would keep it with the zone AND in the carry, and Continue would spawn it twice.
+	_write_carry()
+	_stick()
 
 
 ## `v` is nobody's now: unfrozen, stopped, saved with the zone like any other.

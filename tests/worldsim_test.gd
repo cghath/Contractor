@@ -479,6 +479,12 @@ func _test_horde_clock_live() -> void:
 	check(bool((zd.horde as Dictionary).get("clock", false)) and int(zd.horde.n) == 20 and not zd.has("horde_out"), "and on Continue it walks again")
 	HordeClock.server_note_out(level)
 	check(not zd.has("horde_out"), "with none on the ground a save counts none")
+	# A second horde set out in the zone while the first still marched: on Continue the saved heads
+	# join it, not vanish (they used to be dropped whenever zd.horde wasn't empty).
+	zd["horde_out"] = {"n": 7, "day": WorldSim.world_now()}
+	zd.horde = {"n": 5, "since": 0, "clock": true, "hops": 1, "to": "", "arrive": 0, "warned": true, "place": ""}
+	HordeClock.server_level_ready(level)
+	check(int(zd.horde.n) == 12 and not zd.has("horde_out"), "a saved horde joins the one already out on Continue (%d of 12)" % int(zd.horde.n))
 	zd.horde = {}
 	crowd._warn_until = -1.0
 	Survival.state()["day"] = day_was

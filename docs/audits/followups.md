@@ -2153,6 +2153,8 @@ One line each, newest last (docs/cg_brief.md, rule zero): date | what was decide
 2026-11-08 | A clock horde's start and where it's bound are both fixed when the warning goes out (Survival.state()["horde_warns"], saved), so the groans point at where it appears and stepping off that line after a warning works; picked again only if a player now stands within LIVE_M + 30 m of the start | a fixed line is the fair warning; the exception stops it appearing on top of someone who walked to the groans | always use the warned spot, or pick the bound point at the rise
 2026-11-08 | A horde whose crossing is blown mid-hop turns back and picks again with the hop refunded (the warning, if one went out, stays in the journal) | a blown bridge shouldn't cost it its walk | lose the hop
 2026-11-08 | A frozen marching head thins with the frost as any frozen horde head does (its march kept for the thaw), and isn't counted at a save | or the zone reads "in a horde" for a whole frost | erase its march on freezing, which would need a change in Seasons
+2026-11-19 | A horde saved on the march, on Continue into a zone where another horde has set out since, joins that one (the heads add up) | WorldModel's meeting hordes already add up; the saved heads shouldn't vanish on a reload | keep the two apart (a second horde record the far tick doesn't have)
+2026-11-19 | With no player in the fight (all down, or waiting to respawn), a clock horde walks at where the players lie; with no player in the zone at all it rises and mills where it rose | the dead go where the living were, never off to the map's origin | hold the rise and re-queue it (a new action path in WorldSim for a case that lasts seconds)
 
 ## F-08: a squadmate pushing into something the navmesh doesn't know stays stuck
 
@@ -2281,3 +2283,39 @@ No failure on CI since 4f4b789e (scanned every Fallen run's survival, fallenpeop
 logs back to 2026-10-26).
 
 Location: scripts/survival/settlement_jobs.gd (haul, haul_queue), tests/settlement_test.gd (_test_haul).
+
+## F-530 (fixed 2026-11-19, fallen/nov10-playtest, Fallen): review of cghath's hordes (e6bc6b6a, 6409348f)
+
+- A horde saved on the march vanished on Continue when another horde had set out in the zone since
+  (server_level_ready returned on a non-empty zd.horde). The saved heads now join it.
+- With every player down or waiting to respawn, `_march_point` gave Vector3.ZERO and the horde
+  marched at the map's origin; with no site, `_start_point` put it down there. Now it walks at where
+  the players lie, mills where it rose with nobody in the zone, and a zone with nowhere to rise from
+  notes it and puts nothing down. "In the fight" is now the F-382 rule (up and not waiting to
+  respawn) everywhere in HordeClock.
+- `server_note_out` and `server_level_ready` wrote straight into WorldSim.section(); a far step out
+  on the worker would replace the section and lose the write. Both go through WorldSim.mutate now.
+- survival's road block could skip itself (no anchors, no anchor past 250 m, no start farm) and still
+  pass. Each skip is now a failing check.
+- Open (not changed): a small zone with no site START_MIN_M from everyone takes the farthest one,
+  which can be inside the crowd's live range; the groans run on real seconds while the arrival runs
+  on far ticks (sleep can end the march before the groans).
+
+Location: scripts/survival/horde_clock.gd, tests/worldsim_test.gd (_test_march), tests/survival_test.gd (_test_march_and_roads).
+
+## F-531 (fixed 2026-11-19, fallen/nov10-playtest, Fallen): review of cghath's convoys (1b599aba)
+
+- `_build` set rec.live without `_stick()`: with a far step out on the worker when the zone was
+  hosted, the step's result lacked "live" and the far tick could resolve a column still driving
+  (two outcomes, two crossings). `_build` sticks the record now.
+- `_drop_vehicle` released a truck to the zone's save but the carry was rewritten only every
+  CARRY_S: a save in between kept the truck in both, and Continue spawned it twice. The carry is
+  written and stuck as the truck leaves the column.
+- `_places` held vehicle indexes that `_drop_vehicle` didn't shift: walkers were pinned by the
+  wrong truck. They shift now; those beside the dropped truck walk by the one that took its place.
+- Open (not changed): the farm pickup can spawn inside a player's wall in a world from before it
+  (`_truck_spot` only avoids the site's own things); with hordes on the roads, a zombie within
+  `dead_block_m` halts a column, so convoys may stall often (the 6 h timeout still ends it); the
+  vehicles suite's armour budget miss (0.52 vs 0.5 ms) wasn't re-run.
+
+Location: scripts/survival/fallen_convoy.gd (_build, _drop_vehicle).

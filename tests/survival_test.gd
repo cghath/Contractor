@@ -929,6 +929,8 @@ func _test_march_and_roads() -> void:
 
 	var real: RoadDead = crowd.roads
 	check(real != null, "the zone's roads are ready for the dead")
+	# (fails, not skips: with no anchors every road check below would quietly not run)
+	check(real != null and real.anchors.size() > 0, "the roads have anchors for the dead (%d)" % (real.anchors.size() if real != null else 0))
 	if real != null and real.anchors.size() > 0:
 		var stride := real.anchors[0].distance_to(real.anchors[1]) if real.anchors.size() > 1 else 0.0
 		check(real.anchors.size() >= 4 and stride > 5.0, "anchors strung along the roads (%d)" % real.anchors.size())
@@ -938,6 +940,7 @@ func _test_march_and_roads() -> void:
 			if Vector2(player.global_position.x, player.global_position.z).distance_to(real.anchors[i]) > 250.0:
 				at = i
 				break
+		check(at >= 0, "an anchor past 250 m of the player to test the drift on (%d anchors)" % real.anchors.size())
 		if at >= 0:
 			var anchor := real.anchors[at]
 			crowd.dead.clear()
@@ -978,6 +981,8 @@ func _test_march_and_roads() -> void:
 			var few := real.seed_heads(level, crowd, r3)
 			check(few <= 3 and crowd.dead.size() <= ZoneDead.CAP - RoadDead.SEED_ROOM, "the road's dead leave room for a horde under the cap (%d more, %d of %d)" % [few, crowd.dead.size(), ZoneDead.CAP])
 		# The real anchors: none near the start farm, none where the living hold a place.
+		var has_home := level.modules().any(func(m: ZoneModule) -> bool: return m.module_id == FirstHour.HOME_ID)
+		check(has_home, "the start farm is in this zone (for its clear stretch of road)")
 		for m: ZoneModule in level.modules():
 			if m.module_id == FirstHour.HOME_ID:
 				var home := Vector2(m.global_position.x, m.global_position.z)

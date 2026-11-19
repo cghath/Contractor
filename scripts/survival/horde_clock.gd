@@ -251,6 +251,9 @@ static func server_warn(level: SurvivalLevel, a: Dictionary) -> void:
 	var seconds := float(WARN_TICKS) * WorldModel.TICK_MIN / 1440.0 * Survival.DAY_MIN * 60.0
 	var now := WorldSim.world_now()
 	var spot := _new_spot(level, a)  # (fixed here: the groans' bearing is where it will appear)
+	if spot.is_empty():
+		SessionLog.note("survival world: a horde warning with nowhere in %s to rise from (no site, no crossing)" % String(a.get("zone", "")))
+		return
 	spot["day"] = now
 	spot["groan_until"] = now + seconds / (Survival.DAY_MIN * 60.0)
 	var warns := _warns()
@@ -274,6 +277,9 @@ static func server_rise(level: SurvivalLevel, a: Dictionary) -> int:
 	var spot := _take_spot(level, a)
 	if spot.is_empty():
 		spot = _new_spot(level, a)
+	if spot.is_empty():
+		SessionLog.note("survival world: a horde of %d on the clock had nowhere in %s to rise from" % [int(a.get("n", 0)), String(a.get("zone", ""))])
+		return 0
 	var from := level.ground_point(Vector3(float(spot.x), 0.0, float(spot.z)))
 	var to := Vector3(float(spot.tx), 0.0, float(spot.tz))
 	var n := int(a.get("n", 0))
@@ -303,6 +309,10 @@ static func _new_spot(level: SurvivalLevel, a: Dictionary) -> Dictionary:
 	rng.seed = hash([WorldSim.world_seed(), String(a.get("zone", "")), WorldSim.world_now(), "horde_spot"])
 	var to := _march_point(level, rng)
 	var from := _start_point(level, a, to)
+	if from == Vector3.INF:
+		return {}
+	if to == Vector3.INF:
+		to = from  # (nobody to walk at: it rises and mills where it is, not off to the map's origin)
 	return {"zone": String(a.get("zone", "")), "x": from.x, "z": from.z, "tx": to.x, "tz": to.z}
 
 
@@ -315,8 +325,8 @@ static func _take_spot(level: SurvivalLevel, a: Dictionary) -> Dictionary:
 	if spot.is_empty() or String(spot.get("zone", "")) != String(a.get("zone", "")):
 		return {}
 	var at := Vector2(float(spot.x), float(spot.z))
-	for p: Soldier in MapNodes.players(level):
-		if p.vitals.is_up() and Vector2(p.global_position.x, p.global_position.z).distance_to(at) <= ZoneDead.LIVE_M + SPREAD_M:
+	for p: Soldier in _in_play(level):
+		if Vector2(p.global_position.x, p.global_position.z).distance_to(at) <= ZoneDead.LIVE_M + SPREAD_M:
 			return {}
 	return spot
 
@@ -338,8 +348,8 @@ static func _start_point(level: ZoneLevel, a: Dictionary, march: Vector3) -> Vec
 		else:
 			picks.append(m.global_position)
 	if picks.is_empty():
-		return Vector3.ZERO
-	var players := MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up())
+		return Vector3.INF  # (no site and no crossing: nowhere to put it down; _new_spot gives up)
+	var players := _in_play(level)
 	var best := picks[0]
 	var best_d := -1.0
 	for at: Vector3 in picks:
@@ -359,11 +369,29 @@ static func _march_point(level: SurvivalLevel, rng: RandomNumberGenerator) -> Ve
 	var st := Settlement.find(level)
 	if st != null and st.hosted():
 		return Settlement.pos()
-	var players := MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up())
+	var players := _in_play(level)
 	if players.is_empty():
-		return Vector3.ZERO
+		players = MapNodes.players(level)  # (all down or waiting to respawn: the dead still walk at where the living lie)
+	if players.is_empty():
+		return Vector3.INF  # (nobody in the zone: nothing to walk at; _new_spot has it stand where it rose)
 	var p: Soldier = players[rng.randi_range(0, players.size() - 1)]
-	return p.global_position + Vector3(rng.randf_range(-30.0, 30.0), 0.0, rng.randf_range(-30.0, 30.0))
+	return p.body_point() + Vector3(rng.randf_range(-30.0, 30.0), 0.0, rng.randf_range(-30.0, 30.0))
+
+
+## The players in the fight: up, and not lying unseen waiting to respawn (health is reset before the
+## respawn wait, so is_up() alone counts him: the same rule as Survival._populate and ZoneDead._convert, F-382).
+static func _in_play(level: Node) -> Array:
+	return MapNodes.players(level).filter(func(p: Soldier) -> bool: return p.vitals.is_up() and p.respawn_state != Soldier.RESPAWN_WAITING)
+
+
+## `fn` (taking the world section) through the sim's mutate, so a far step out on the worker gets it
+## too; with no sim (a bare test), straight onto the section.
+static func _mutate(fn: Callable) -> void:
+	var sim := WorldSim.get_sim()
+	if sim:
+		sim.mutate(fn)
+	else:
+		fn.call(WorldSim.section())
 
 
 static func _place_words(level: ZoneLevel, place: String) -> String:
@@ -393,15 +421,21 @@ static func server_after_step(m: WorldModel) -> void:
 ## save and Continue doesn't lose them (server_level_ready walks them again).
 static func server_note_out(level: SurvivalLevel) -> void:
 	var zone := WorldSim.hosted_zone()
-	var zd: Dictionary = (WorldSim.section().get("zones", {}) as Dictionary).get(zone, {})
 	var crowd := ZoneDead.of(level)
-	if zd.is_empty() or crowd == null:
+	if crowd == null or ((WorldSim.section().get("zones", {}) as Dictionary).get(zone, {}) as Dictionary).is_empty():
 		return
 	var n := crowd.dead.filter(func(d: Dictionary) -> bool: return bool(d.alive) and d.has("march") and not bool(d.get("frozen", false))).size()
-	if n > 0:
-		zd["horde_out"] = {"n": n, "day": WorldSim.world_now()}
-	else:
-		zd.erase("horde_out")
+	var day := WorldSim.world_now()
+	# Through mutate: written straight into section(), a far step out on the worker would land
+	# after and replace the whole world section, and the count would be lost.
+	_mutate(func(w: Dictionary) -> void:
+		var zd: Dictionary = (w.get("zones", {}) as Dictionary).get(zone, {})
+		if zd.is_empty():
+			return
+		if n > 0:
+			zd["horde_out"] = {"n": n, "day": day}
+		else:
+			zd.erase("horde_out"))
 
 
 ## Host, the level up (Survival.server_level_ready, after the world's set up): the groans of a
@@ -417,8 +451,21 @@ static func server_level_ready(level: SurvivalLevel) -> void:
 	var out: Dictionary = zd.get("horde_out", {})
 	if out.is_empty():
 		return
-	zd.erase("horde_out")
-	if WorldSim.world_now() - float(out.get("day", 0.0)) > OUT_KEEP_DAYS or not (zd.get("horde", {}) as Dictionary).is_empty():
-		return
-	zd.horde = {"n": int(out.get("n", 0)), "since": int(WorldSim.section().get("tick", 0)), "clock": true, "hops": 1, "to": "", "arrive": 0, "warned": false, "place": ""}
-	SessionLog.note("survival world: a saved horde of %d walks again in %s" % [int(out.get("n", 0)), level.def.get("id", "")])
+	var stale := WorldSim.world_now() - float(out.get("day", 0.0)) > OUT_KEEP_DAYS
+	var tick := int(WorldSim.section().get("tick", 0))
+	var joined := not (zd.get("horde", {}) as Dictionary).is_empty()
+	_mutate(func(w: Dictionary) -> void:  # (through mutate, as server_note_out)
+		var z: Dictionary = (w.get("zones", {}) as Dictionary).get(zone, {})
+		var o: Dictionary = z.get("horde_out", {})
+		z.erase("horde_out")
+		if o.is_empty() or stale:
+			return
+		var there: Dictionary = z.get("horde", {})
+		if there.is_empty():
+			z.horde = {"n": int(o.get("n", 0)), "since": tick, "clock": true, "hops": 1, "to": "", "arrive": 0, "warned": false, "place": ""}
+		else:
+			# Another horde already set out here (warned while this one marched): the saved heads
+			# join it rather than vanish, as two hordes meeting do in WorldModel.
+			there.n = int(there.get("n", 0)) + int(o.get("n", 0)))
+	if not stale:
+		SessionLog.note("survival world: a saved horde of %d walks again in %s%s" % [int(out.get("n", 0)), level.def.get("id", ""), " (joins the horde already out)" if joined else ""])
