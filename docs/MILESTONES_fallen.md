@@ -54,7 +54,7 @@ Goal: the playtest slice (farm, one town, nights 1-7, one season, one horde type
 - Convoys stalling on road dead (`followups.md:2317-2318`). Owner: Cheeno.
 - Needs and medical (the wound model is Captain's). Owner: Captain.
 - Wear and jams, building, clothing, hands, RPG, events, deadtime, nature (`docs/survival_*.md`). Owner: Cheeno.
-- Seasons shown on the terrain (art Blocker 2). The snow line, crops by season and orchard crowns already exist in `scripts/world/zone_features.gd`; Contractor's campaign passes its season (`base_hub.gd:1108`) but Fallen's survival zone never does, so Fallen always draws the default season. Step 1: pass `Survival.season()` into the zone def and fix any suite that assumed the default terrain. Step 2 (Captain picks the scope): ground and grass tint by season, wild trees bare in winter, falling leaves, frozen water. Owner: Cheeno (code), Captain (signs off the look in screenshots of all four seasons).
+- Seasons shown on the terrain (art Blocker 2). The snow line, crops by season and orchard crowns already exist in `scripts/world/zone_features.gd`; Contractor's campaign passes its season (`base_hub.gd:1108`) but Fallen's survival zone never does, so Fallen always draws the default season. Step 1: pass `Survival.season()` into the zone def and fix any suite that assumed the default terrain. Step 2, the full seasonal look (Captain, 2026-11-21): ground and grass tint by season, wild trees bare in winter and turning in autumn, falling leaves, snow cover, frozen water. Owner: Cheeno (code), Captain (signs off the look in screenshots of all four seasons).
 
 Exit criteria:
 - The four follow-ups fixed, each with a test.
@@ -62,7 +62,7 @@ Exit criteria:
 - No "Proposed" numbers in the listed survival files.
 - One non-builder plays nights 1-7; notes via /feedback.
 
-Risk: the gate recommended leaving the sim alone until outsiders had played the first hour; Captain decided otherwise (every system reaches the bar before the first outside session), so M3 follows straight on. The cost: the first outside notes arrive late, after every system is tuned. Step 2 of seasons is unscoped until Captain picks it.
+Risk: the gate recommended leaving the sim alone until outsiders had played the first hour; Captain decided otherwise (every system reaches the bar before the first outside session), so M3 follows straight on. The cost: the first outside notes arrive late, after every system is tuned. The full seasonal look touches the ground shader, scatter and water, so it needs its own plan and a frame-time check.
 
 ## M3: People, world and the remaining systems (Size L)
 
