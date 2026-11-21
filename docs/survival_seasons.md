@@ -26,11 +26,23 @@ faction_low, faction_high, lost_challenge, siege_survived, raided.
 - The car alarm has no wreck interaction yet (`Lures.server_car_alarm` is the API for the vehicles lane's menu).
 - Bridges are blown and repaired through the API (`Infrastructure.server_blow_bridge`, the bridge project);
   a demolitions charge on a real bridge in a zone isn't bound to it; roads cleared are a flag only.
-- The zone def doesn't carry the season to the terrain yet (ZoneFeatures' snow and crops by season):
-  one line in `Survival._host_zone` (`def["season"] = season()`), held back to keep the other suites' terrain.
 - Raiders' orders stay WorldLive's (attack the nearest player); support by fire and the breach are
   rules on top, not SquadAI orders of their own; a vehicle through a gate is later.
 - The dam has no place in the zone (a project record with a flag); the enclave wanting it is a world event only.
 - Weather fronts and the barometer (call 91), seasonal fauna (103), wild edibles (105), spreading fire (107).
 - The body lane reads: `Survival.season()`, `Seasons.thirst_mult/spoil_mult/water_frozen/temperature_c`,
   `Infrastructure.fridge_on/pump_on/water_works_on`, the `gore_until`/`gore_at` metas.
+
+## The season on the land (plans/fallen-seasons.md, 2026-11-21)
+
+| Area | Where | What |
+|---|---|---|
+| Wiring | `Survival._host_zone` | The hosted def carries `season()`: ZoneFeatures' crops, orchards and the mountain snow line follow the world's season (they're geometry: a new season shows on the next zone load). |
+| Live look | `SeasonLook` (tables), `SeasonLive` (a node on every peer's SurvivalLevel) | The host's season tick (`Seasons.server_update`) sets the season and its day; clients get it by RPC (a late joiner asks). The look blends over 20 s when the season or day changes mid-visit. Every number Proposed. |
+| Ground | `zone_ground.gdshader` `season_tint`, `season_dry`, `season_snow` | Tint and straw by season; lowland snow (`SeasonLook.snow`: a 0.3 dusting on winter day 1, white days 2-7, thinning to half by day 10) on open flat ground, thin on the roads. |
+| Snow underfoot | `ZoneFeatures.slow_at`, `lowland_snow_at`, `ZoneTerrain.ground_at` | 0.15 walking slow (Captain) on open, unpacked lowland snow; the footsteps are snow there. The mountain presets keep their own snow (0.25). |
+| Trees and grass | `season_foliage.gdshader`, `ZoneScatter.set_season_look` | Broadleaf crowns recoloured (spring green, autumn rust and ochre), thinned to twigs and shrunk when bare (winter); far blobs tinted and shrunk; grass recoloured and flattened in winter. Conifers keep theirs. Bare crowns hide no one (`leaf_cover` scales their spotting cover: Captain). |
+| Ice | `ZoneWater.set_ice`, `SeasonLook.ice` | Winter day 2 to the season's end: streams, ponds and lakes freeze (rivers keep running). A collider at the ice's top, no wading or current, the AI's ground lifted to the ice and its chunks rebaked at the freeze and the thaw (Captain: everyone walks on it). Anyone on it at the thaw is in the water. |
+| Leaves | `SeasonLive` FallingLeaves | Autumn: falling leaves round the camera by how many broadleaf trees stand within 25 m (none in the open); display only. |
+
+Checks: `seasons` ("The season on the land"), `water` ("Ice"). Screenshots and frame time: `tests/fallen_season_shots.tscn`.
