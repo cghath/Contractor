@@ -503,7 +503,9 @@ func _test_ice() -> void:
 	level.nav.refresh()
 	await _wait_for(func() -> bool: return level.nav.is_settled(), 40.0)
 	var map := level.get_world_3d().navigation_map
-	var open_len := _path_len(NavigationServer3D.map_get_path(map, a, e, true))
+	var open_path := NavigationServer3D.map_get_path(map, a, e, true)
+	var open_len := _path_len(open_path)
+	var bakes0 := level.nav.bakes
 	water.set_ice(true)
 	check(water.ice_on and water.get_node_or_null(^"Ice") != null and water.depth_at(c.x, c.y) == 0.0 and water.flow_at(c.x, c.y) == Vector3.ZERO,
 		"the pond freezes: its collider in, no depth or current over it")
@@ -515,8 +517,14 @@ func _test_ice() -> void:
 	var over := false
 	for q in ice_path:
 		over = over or Vector2(q.x, q.z).distance_to(c) < r * 0.5
-	check(ice_path.size() >= 2 and ice_path[ice_path.size() - 1].distance_to(e) < 4.0 and over and ice_len < open_len - 4.0,
-		"the AI's way crosses the ice (%.0f m, through the middle %s) where it went round the water (%.0f m)" % [ice_len, over, open_len])
+	var straight := a.distance_to(e)
+	var top0 := water.ice_height_at(c.x, c.y)
+	var near := NavigationServer3D.map_get_closest_point(map, Vector3(c.x, top0 + 0.3, c.y))
+	print("  (ice: pond r %.1f, depth %.2f at the middle, ice top %.2f; %d ice triangles here; %d rebakes; the navigation's nearest point to the middle %s, %.2f m off)" % [r,
+		top0 + ZoneWater.ICE_DROP_M - level.terrain.height_at(c.x, c.y), top0, water.ice_faces_in(Rect2(c.x - r, c.y - r, r * 2.0, r * 2.0)).size() / 3,
+		level.nav.bakes - bakes0, near, near.distance_to(Vector3(c.x, top0, c.y))])
+	check(ice_path.size() >= 2 and ice_path[ice_path.size() - 1].distance_to(e) < 4.0 and over and ice_len < straight * 1.15,
+		"the AI's way crosses the ice: %.0f m (the straight line %.0f), through the middle %s; with open water it was %.0f m" % [ice_len, straight, over, open_len])
 	var top := water.ice_height_at(c.x, c.y)
 	var walker := _soldier(Vector3(c.x - r * 0.4, top + 0.05, c.y), "Skater")
 	_face(walker, Vector2(1, 0))
@@ -539,8 +547,12 @@ func _test_ice() -> void:
 		"the thaw: the ice gone, he's in the water (wet %.2f, swimming %s)" % [walker.movement.wet, walker.movement.swimming])
 	await _wait_for(func() -> bool: return level.nav.is_settled() and not level.nav.is_rebaking(), 40.0)
 	await _frames(4)
-	var thaw_len := _path_len(NavigationServer3D.map_get_path(map, a, e, true))
-	check(thaw_len > ice_len + 4.0, "after the thaw the way goes round again (%.0f m, on the ice %.0f m)" % [thaw_len, ice_len])
+	var thaw_path := NavigationServer3D.map_get_path(map, a, e, true)
+	var thaw_len := _path_len(thaw_path)
+	var thaw_over := false
+	for q in thaw_path:
+		thaw_over = thaw_over or Vector2(q.x, q.z).distance_to(c) < r * 0.3
+	check(not thaw_over and absf(thaw_len - open_len) < 3.0, "after the thaw the way keeps off the deep middle again (%.0f m, as before the freeze %.0f m)" % [thaw_len, open_len])
 	walker.queue_free()
 	await _frames(2)
 

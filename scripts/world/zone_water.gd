@@ -120,7 +120,8 @@ var _frozen := {}
 ## The season's ice, live (SeasonLive.ice_changed -> set_ice; plans/fallen-seasons.md, Captain's
 ## call C: everyone walks on it). Streams, ponds and lakes freeze; rivers keep running (too big and
 ## too fast to bear weight, Proposed). While it holds those bodies are ice: no wading, no current,
-## a collider at the surface, and the navigation's way over it (nav_faces_in).
+## a collider at the surface, and the navigation walks it (ZoneTerrain.triangles_in lifts the ground
+## under it to the ice's top; too_deep lets it in).
 var ice_on := false
 var _ice_faces := {}  # body index -> PackedVector3Array: its surface as triangles, ICE_DROP_M down
 var _ice_body: StaticBody3D
@@ -1094,7 +1095,7 @@ func too_deep(p: Vector3, q: Vector3, r: Vector3) -> bool:
 	for v: Vector3 in [p, q, r]:
 		var idx := clampi(roundi((v.x + _half) / ZoneTerrain.CELL_M), 0, n - 1) + clampi(roundi((v.z + _half) / ZoneTerrain.CELL_M), 0, n - 1) * n
 		var wet: Variant = _wet.get(idx)
-		if wet != null:
+		if wet != null and not (ice_on and iced(int((wet as Vector3).y))):  # (frozen: walked on, ZoneTerrain.triangles_in)
 			best = maxf(best, (wet as Vector3).x)
 	return best - (p.y + q.y + r.y) / 3.0 > NAV_WATER_M
 
@@ -1117,10 +1118,7 @@ func shore_weight(i: int, j: int) -> float:
 
 ## The navigation faces of the bridges standing in `area` (ZoneNav bakes them with the ground).
 func nav_faces_in(area: Rect2) -> PackedVector3Array:
-	var out := bridges.nav_faces_in(area) if bridges else PackedVector3Array()
-	if ice_on:
-		out.append_array(ice_faces_in(area))  # the way over the ice (Captain's call C)
-	return out
+	return bridges.nav_faces_in(area) if bridges else PackedVector3Array()
 
 
 ## Whether body `bi` freezes with the season (a stream, pond or lake; not a river, and not one
@@ -1159,6 +1157,13 @@ func _ice_faces_all() -> Dictionary:
 			var faces := mesh.get_faces()
 			for k in faces.size():
 				faces[k] = faces[k] + Vector3(0.0, -ICE_DROP_M, 0.0) + position
+			for k in range(0, faces.size(), 3):
+				# Every triangle facing up (the navigation's bake takes a face's winding for which
+				# side is ground: one facing down is a ceiling, not a floor).
+				if (faces[k + 1] - faces[k]).cross(faces[k + 2] - faces[k]).y > 0.0:
+					var swap := faces[k + 1]
+					faces[k + 1] = faces[k + 2]
+					faces[k + 2] = swap
 			_ice_faces[bi] = faces
 	return _ice_faces
 

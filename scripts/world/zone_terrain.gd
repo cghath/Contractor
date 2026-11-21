@@ -594,6 +594,14 @@ func triangles_in(area: Rect2) -> PackedVector3Array:
 			var b := _vertex(i + 1, j)
 			var c := _vertex(i + 1, j + 1)
 			var d := _vertex(i, j + 1)
+			if water and water.ice_on:
+				# The season's ice (plans/fallen-seasons.md): the ground under a frozen body is walked at
+				# the ice's top, one surface from bank to bank (an ice sheet over the bed would leave
+				# the shallow rim under a ceiling and a ledge at its edge: an island).
+				a.y = maxf(a.y, water.ice_height_at(a.x, a.z))
+				b.y = maxf(b.y, water.ice_height_at(b.x, b.z))
+				c.y = maxf(c.y, water.ice_height_at(c.x, c.z))
+				d.y = maxf(d.y, water.ice_height_at(d.x, d.z))
 			if sea_side >= 0 and maxf(maxf(a.y, b.y), maxf(c.y, d.y)) < sea_level - NAV_WATER_M:
 				continue  # too deep to walk: not part of the navigation mesh
 			if water:

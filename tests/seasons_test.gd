@@ -179,37 +179,43 @@ func _piece(kind: String, c: Vector3i) -> int:
 ## live on the ground, grass, trees, snow and water.
 func _test_land() -> void:
 	print("The season on the land")
-	_set_season("spring")
-	Seasons.server_update(level)
+	# The calendar is put back as found at the end. The season jumps below go to SeasonLive only:
+	# through Seasons.server_update they'd turn the world sim's year too (and winter -> spring is
+	# the thaw, a horde at the walls), which the raid checks after this read.
+	var was_season := Survival.option("season")
+	var was_day := Survival.day()
+	var was_last := String(Seasons.rec().get("last", ""))
+	Seasons.server_update(level)  # (the season as the earlier checks left it: the host's tick feeds SeasonLive)
 	var live := SeasonLive.of(level)
 	check(level.def.get("season") == "spring" and level.terrain.features.season == "spring",
-		"the hosted zone def carries the world's season to the terrain (%s, features %s)" % [level.def.get("season"), level.terrain.features.season])
-	check(live != null and String(live.target.get("season", "")) == "spring", "the level has its SeasonLive, in spring (%s)" % (live.target if live else "none"))
+		"the hosted zone def carries the world's season (it woke in spring) to the terrain (%s, features %s)" % [level.def.get("season"), level.terrain.features.season])
+	check(live != null and String(live.target.get("season", "")) == Survival.season() and int(live.target.get("day", 0)) == Seasons.day_in_season(),
+		"the level has its SeasonLive, fed by the host's season tick (%s; the world: %s day %d)" % [live.target if live else "none", Survival.season(), Seasons.day_in_season()])
 	if live == null:
 		return
 	# An open, flat point (no road, no water) to measure the snow on.
 	var open := Vector2.INF
 	var p0 := player.global_position
-	for ring: float in [6.0, 14.0, 24.0, 36.0, 50.0, 70.0]:
+	for ring: float in [6.0, 14.0, 24.0, 36.0, 50.0, 70.0, 95.0, 130.0]:
 		for k in 24:
 			var x := p0.x + cos(TAU * k / 24.0) * ring
 			var z := p0.z + sin(TAU * k / 24.0) * ring
-			if level.terrain.normal_at(x, z).y > 0.97 and level.terrain.road_weight(x, z) == 0.0 					and (level.terrain.water == null or level.terrain.water.depth_at(x, z) == 0.0):
+			# Off the roads and pads (trodden: no snow slows anyone there) and out of the water.
+			var clear := level.terrain.road_weight(x, z) == 0.0 and level.terrain.features.pad_distance(Vector2(x, z)) > 10.0
+			if clear and level.terrain.normal_at(x, z).y > 0.97 and (level.terrain.water == null or level.terrain.water.depth_at(x, z) == 0.0):
 				open = Vector2(x, z)
 				break
 		if open != Vector2.INF:
 			break
-	check(open != Vector2.INF, "an open flat point to measure the snow on (%s)" % open)
-	var pace_summer := level.terrain.features.slow_at(open.x, open.y) if open != Vector2.INF else 1.0
+	check(open != Vector2.INF, "an open flat point off the pads and roads to measure the snow on (%s)" % open)
 	# Summer: no snow, leaves full.
-	_set_season("summer", 11)
-	Seasons.server_update(level)
+	live.server_set("summer", 1)  # (the land only: the world sim is left alone)
 	live.finish_blend()
+	var pace_summer := level.terrain.features.slow_at(open.x, open.y) if open != Vector2.INF else 1.0
 	check(level.terrain.season_snow == 0.0 and is_equal_approx(level.scatter.leaf_cover, 1.0), "summer: no lowland snow, the crowns in full leaf")
 	var cover_summer := _wood_cover()
 	# Winter day 3: snow lying white, the woods bare, the water frozen.
-	_set_season("winter", 33)
-	Seasons.server_update(level)
+	live.server_set("winter", 3)  # (the land only: the world sim is left alone)
 	live.finish_blend()
 	check(String(live.target.season) == "winter" and int(live.target.day) == 3, "the host's season turned: SeasonLive's target is winter day 3 (%s)" % live.target)
 	check(is_equal_approx(level.terrain.season_snow, 1.0), "winter day 3: the snow lies white (%.2f)" % level.terrain.season_snow)
@@ -238,30 +244,32 @@ func _test_land() -> void:
 	if iced >= 0:
 		check(w.ice_on and w.get_node_or_null(^"Ice") != null, "the water froze: ice on, its collider in")
 		var faces := w.ice_faces_in(Rect2(-100000, -100000, 200000, 200000))
-		check(faces.size() >= 3, "the ice gives the navigation a way over it (%d triangles)" % (faces.size() / 3))
+		check(faces.size() >= 3, "the ice has its surface to stand on (%d triangles)" % (faces.size() / 3))
 		var mid := (faces[0] + faces[1] + faces[2]) / 3.0
 		check(w.depth_at(mid.x, mid.z) == 0.0 and w.ice_height_at(mid.x, mid.z) > -INF, "on the ice no one wades (depth %.2f, ice top %.2f)" % [w.depth_at(mid.x, mid.z), w.ice_height_at(mid.x, mid.z)])
 	else:
 		print("  [skip] this zone has no stream, pond or lake to freeze (water_test covers the ice)")
 	# Autumn: turning, leaves falling where the woods are.
-	_set_season("autumn", 21)
-	Seasons.server_update(level)
+	live.server_set("autumn", 1)  # (the land only: the world sim is left alone)
 	live.finish_blend()
 	check(not live.ice and (w == null or not w.ice_on) and level.terrain.season_snow == 0.0, "autumn: no ice, no snow")
 	if open != Vector2.INF:
 		check(level.terrain.ground_at(open.x, open.y) != &"snow", "autumn: the snow footsteps gone with the snow (%s)" % level.terrain.ground_at(open.x, open.y))
 	check(SeasonLook.colours(live.look, "crown").size() == 5 and is_equal_approx(level.scatter.leaf_cover, 0.7), "autumn: five turning crown colours, the crowns thinning (%.2f)" % level.scatter.leaf_cover)
 	# A live blend: halfway from autumn into winter the snow is coming in.
-	_set_season("winter", 33)
-	Seasons.server_update(level)
+	live.server_set("winter", 3)  # (the land only: the world sim is left alone)
 	for i in 30:
 		await get_tree().process_frame
 	check(level.terrain.season_snow > 0.0 and level.terrain.season_snow < 1.0, "mid-blend into winter: the snow coming in (%.3f)" % level.terrain.season_snow)
 	live.finish_blend()
-	_set_season("spring")
-	Seasons.server_update(level)
+	live.server_set("autumn", 1)  # (the land only: the world sim is left alone)
 	live.finish_blend()
-	check(not live.ice and (w == null or not w.ice_on), "spring: the ice gone")
+	check(not live.ice and (w == null or not w.ice_on), "back to autumn: the ice gone")
+	Survival.server_set_options({"season": was_season})
+	Survival.state()["day"] = was_day
+	Seasons.rec()["last"] = was_last
+	live.server_set(Survival.season(), Seasons.day_in_season())
+	live.finish_blend()
 
 
 ## Metres of foliage on a line through the nearest broadleaf crown to the player, at its middle
