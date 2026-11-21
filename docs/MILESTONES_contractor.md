@@ -29,14 +29,14 @@ Risk: `loadout` has been red in 14 of 16 runs; flakes can hide real regressions.
 
 Goal: one contract, start to finish, in the full game, with body compensation in place.
 
-- Body compensation: heart rate rising with blood loss, and clotting. Owner: unassigned (Captain decision 5 requires it; no owner named). Must land before the playtest.
+- Body compensation: heart rate rising with blood loss, and clotting. Owner: Captain (the wound model is his). Must land before the playtest.
 - Squad slot leap F-463 (on `feat/vault-legs-svd`); tune SLOT_CATCHUP_MPS and BASE_WALK_MAX_MPS by play. Owner: Cheeno.
 - Forearm clip ends the shot, F-485 (`fix/ci-flakes-nov`). Owner: Cheeno.
 - Breach and clear order; tune DRAG_RAGDOLL_TRAIL_M (`feat/breach-and-clear`). Owner: Cheeno.
 - Surrender and freed bodies (`fix/surrender-freed-body`); loadout buy (`feat/loadout-buy`). Owner: Cheeno.
-- Campaign camera yaw and ADS offset, if M0 confirms them. Owner: unassigned.
-- STYLE.md, written from the M0 screenshots; re-judge art Majors 3-6. Owner: unassigned.
-- Hit kick and noise shake, after tester feedback. Owner: unassigned.
+- Campaign camera yaw and ADS offset, if M0 confirms them. Owner: Cheeno.
+- STYLE.md, written from the M0 screenshots; re-judge art Majors 3-6. Owner: Captain.
+- Hit kick and noise shake, after tester feedback. Owner: Captain.
 - First playtest: one contract by Cheeno and friends; notes and session RPT go through /feedback.
 
 Exit criteria:
@@ -53,9 +53,9 @@ Goal: the rest of the built game reaches the bar before v1.
 
 - Enemy armour, `feat/enemy-armour`: CHARGE_ENGINE 0.6 tuned by play; F-496 (the 9M119M flies as a shell; AI crews fire only the coax). Owner: Cheeno.
 - AAV landing with AAVs afloat, F-481. Owner: Cheeno.
-- Helicopters, Blackhawk resupply and transport, extraction calls. Owner: unassigned.
-- Economy: `feat/economy-balance` is 495 commits behind and stale; rebase or rebuild is a Captain call. Owner: unassigned.
-- Factions and territory shift. Owner: unassigned.
+- Helicopters, Blackhawk resupply and transport, extraction calls. Owner: Cheeno.
+- Economy: `feat/economy-balance` is 495 commits behind and stale; rebase or rebuild is a Captain call. Owner: Cheeno, once Captain picks.
+- Factions and territory shift. Owner: Cheeno.
 - Woods render perf, `perf/woods-copses`: frame-time check. Owner: Cheeno.
 - Bots joining a human-hosted game, `feat/bots-join-hosted`. Owner: Cheeno. Co-op is a bonus under Captain decision 2.
 
@@ -72,7 +72,7 @@ Risk: second-system bloat as new vehicle and support ideas arrive. Economy rebas
 Goal: the full game on the shipped commit, with an invite-only test group.
 
 - Security minors 1-8 from cheeno_next.md section 4. Owner: Cheeno. Captain decides whether base money actions become host-only.
-- Pad and Ctrl/Alt rebinding, and a keyboard-free tutorial path (UX Majors 3-4). In for v1: "no cuts" keeps every system, and rebinding finishes the controls rather than adding a feature (call made 2026-11-20; Captain can overrule). Owner: unassigned.
+- Pad and Ctrl/Alt rebinding, and a keyboard-free tutorial path (UX Majors 3-4). In for v1: "no cuts" keeps every system, and rebinding finishes the controls rather than adding a feature (call made 2026-11-20; Captain can overrule). Owner: Cheeno.
 - Final tuning pass on all remaining "Proposed" numbers. Owner: Cheeno.
 - Invite text states solo first, co-op welcome. Owner: Captain.
 

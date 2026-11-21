@@ -32,9 +32,9 @@ Goal: melee and zombies read clearly, and the first fight is fun by Captain's de
 
 - Melee swing animation and windup tell (`melee.gd:7` claims the arm goes back; no code animates it). Zombie 0.55 s lunge needs a visible tell. Owner: Captain (timings by feel).
 - Knife and body numbers from the 11-10 handoff (UNDEAD_BODY_PTS_PER_J, HIT_STAGGER_S, head share, knife energy) tuned by play; label any new value "Proposed" until then. Owner: Captain.
-- Hit sounds, shake, input latency and zombie audio (polish Majors 2-5), after the swing lands. Owner: unassigned.
-- Gun feel: define "fun" in Captain's words (open question 3 in VISION_fallen.md). Owner: Captain.
-- Hint timing and text scale (UX Majors 2-4) judged on Captain's replay. Owner: unassigned.
+- Hit sounds, shake, input latency and zombie audio (polish Majors 2-5), after the swing lands. Owner: Captain (feel), Cheeno wires the audio.
+- Gun feel and melee judged against Captain's definition of fun (VISION_fallen.md decision 7): more interactive, more intense. Every change answers: does the player get more to do in the fight, or is the fight harder to get out of? Owner: Captain.
+- Hint timing and text scale (UX Majors 2-4) judged on Captain's replay. Owner: Cheeno (fix), Captain (judges).
 
 Exit criteria:
 - Swing and lunge tells visible in a screen recording; Captain signs off.
@@ -52,8 +52,9 @@ Goal: the playtest slice (farm, one town, nights 1-7, one season, one horde type
 - Groans vs far-tick timing (`followups.md:2301-2302`). Owner: Cheeno.
 - Farm pickup inside a player wall in old worlds (`followups.md:2316-2317`). Owner: Cheeno.
 - Convoys stalling on road dead (`followups.md:2317-2318`). Owner: Cheeno.
-- Wear and jams, needs and medical, building, clothing, hands, RPG, events, deadtime, nature (`docs/survival_*.md`). Owner: unassigned.
-- Seasons drawn on terrain for the slice (art Blocker 2). Owner: unassigned. Captain open question 2.
+- Needs and medical (the wound model is Captain's). Owner: Captain.
+- Wear and jams, building, clothing, hands, RPG, events, deadtime, nature (`docs/survival_*.md`). Owner: Cheeno.
+- Seasons shown on the terrain (art Blocker 2). The snow line, crops by season and orchard crowns already exist in `scripts/world/zone_features.gd`; Contractor's campaign passes its season (`base_hub.gd:1108`) but Fallen's survival zone never does, so Fallen always draws the default season. Step 1: pass `Survival.season()` into the zone def and fix any suite that assumed the default terrain. Step 2 (Captain picks the scope): ground and grass tint by season, wild trees bare in winter, falling leaves, frozen water. Owner: Cheeno (code), Captain (signs off the look in screenshots of all four seasons).
 
 Exit criteria:
 - The four follow-ups fixed, each with a test.
@@ -61,17 +62,17 @@ Exit criteria:
 - No "Proposed" numbers in the listed survival files.
 - One non-builder plays nights 1-7; notes via /feedback.
 
-Risk: the gate recommended leaving the sim alone until outsiders had played the first hour; Captain decided otherwise (every system reaches the bar before the first outside session), so M3 follows straight on. The cost: the first outside notes arrive late, after every system is tuned. Seasons on terrain is unscoped (Captain's open question 2).
+Risk: the gate recommended leaving the sim alone until outsiders had played the first hour; Captain decided otherwise (every system reaches the bar before the first outside session), so M3 follows straight on. The cost: the first outside notes arrive late, after every system is tuned. Step 2 of seasons is unscoped until Captain picks it.
 
 ## M3: People, world and the remaining systems (Size L)
 
 Goal: every frozen system reaches the bar before v1.
 
-- Children; horses and farriers; mounts (`survival_children.md`, `survival_mounts.md`). Owner: unassigned.
-- Gunsmithing, tanning, clothing (`survival_hands.md`, `survival_clothing.md`). Owner: unassigned.
-- Bonds, people, mind, intel, enclave, settlement with a vote (`survival_bonds.md`, `survival_people.md`, `survival_mind.md`, `survival_intel.md`, `survival_enclave.md`). Owner: unassigned.
-- World sim and polish (`survival_world.md`, `survival_polish.md`). Owner: unassigned.
-- Co-op: does the invite include it (Captain open question 1). Owner: Captain.
+- Children; horses and farriers; mounts (`survival_children.md`, `survival_mounts.md`). Owner: Cheeno.
+- Gunsmithing, tanning, clothing (`survival_hands.md`, `survival_clothing.md`). Owner: Cheeno.
+- Bonds, people, mind, intel, enclave, settlement with a vote (`survival_bonds.md`, `survival_people.md`, `survival_mind.md`, `survival_intel.md`, `survival_enclave.md`). Owner: Cheeno.
+- World sim and polish (`survival_world.md`, `survival_polish.md`). Owner: Cheeno.
+- Co-op: not in the invite (Captain, 2026-11-21). It stays in the build; no co-op exit criteria for v1.
 
 Exit criteria:
 - Each system's suite green three runs on one commit.
@@ -86,7 +87,7 @@ Goal: Cheeno and friends play the full game on the shipped commit, starting from
 
 - Security minors: join password, RPC rate limits, marker caps, settlement order caps, mod value bounds, mods-are-data-only line in `docs/fallen_modding.md`. Owner: Cheeno.
 - Release build from a tag. Owner: Cheeno.
-- Invite text (solo first, co-op if Captain's open question 1 says so; no store). Owner: Captain.
+- Invite text (solo only, no store). Owner: Captain.
 
 Exit criteria:
 - Full-suite CI green on the shipped commit, three runs.

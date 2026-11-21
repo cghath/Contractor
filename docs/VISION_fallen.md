@@ -51,8 +51,11 @@ v1 is a free, invite-only closed playtest, no store. **Everything stays in v1**:
 4. **All at once:** every system (children, horses, gunsmithing, seasons, settlement, the world sim, not just the first hour) reaches the bar before the first outside session.
 5. **Playtesters are Cheeno and friends:** people who didn't build what they're testing. Informal, but every session leaves notes (and the session log) that go through `/feedback`.
 
+## Captain's decisions (2026-11-21)
+
+6. **The playtest invite is solo only.** Co-op stays in the build but is not offered to testers, since no Fallen co-op run exists yet.
+7. **"Fun" means more interactive and more intense.** A fight is fun when the player keeps making choices during it (not only before it) and the pressure rises while they do. This is the test for melee, gun feel and every M1 change: does it give the player more to do in the fight, or make the fight harder to get out of?
+
 ## Still open for Captain
 
-1. Does the playtest invite include co-op, given no Fallen co-op run exists yet?
-2. How should the seasons, not yet drawn on the terrain, reach the bar?
-3. What counts as "fun" for melee and gun feel, in your words?
+1. How the seasons get shown on the terrain (options in MILESTONES_fallen.md, M2).
