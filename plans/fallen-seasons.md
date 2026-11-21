@@ -103,3 +103,16 @@ commit, and a `WIP fallen-seasons: step N` commit.
 ## Progress
 
 - 2026-11-21: research done, plan drafted.
+- 2026-11-21: built (steps 1-7, 9, 10). Suites R2977 (13dcd875's code): smoke, survival, worldsim,
+  firsthour (one flake on its silent_kill hint, passed the rerun; clean in R2940), world, water,
+  nature, fallenevents, terrain, hands pass; seasons fails only "a spike pit and wire", which fails
+  on the base commit too (R2935, a6064f8b). New checks: seasons "The season on the land" (R2937),
+  water "Ice" (R2939: the AI crosses a frozen pond 54 m straight where it went 62 m round).
+- Step 8, frame time (S2963, summer and winter alternated live in one process, medians of 720
+  frames, the machine busy with another game): Kestrel wood GPU 16.85 -> 16.41 ms, farm 5.60 ->
+  5.89; wadi_farm wood 19.84 -> 19.12, farm 33.30 -> 33.41. Winter within 5% everywhere (Kestrel's
+  farm right at it, +0.29 ms). Separate runs per season (S2941, S2946, S2957) were noise from the
+  machine's load and are not a measure.
+- Step 9, shots: S2966 (wadi_farm, the start zone: desert_wadi, no water; kestrel_valley for the ice).
+- Open for Captain: winter's bare crowns read as pale dotted spheres (frosted more than twiggy);
+  the start zone is a desert wadi that now gets full lowland snow (call B said every map).
