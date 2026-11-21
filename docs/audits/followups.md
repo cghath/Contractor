@@ -2319,3 +2319,4 @@ Location: scripts/survival/horde_clock.gd, tests/worldsim_test.gd (_test_march),
   vehicles suite's armour budget miss (0.52 vs 0.5 ms) wasn't re-run.
 
 Location: scripts/survival/fallen_convoy.gd (_build, _drop_vehicle).
+2026-11-21 | Fallen seasons (plans/fallen-seasons.md), Captain's calls: winter's bare broadleaf woods stop hiding people (trunks and conifers still do); lowland winter snow slows walking 0.15 (Proposed; mountains keep 0.25) and leaves tracks; frozen water is walkable by players, the dead and the AI (nav rebaked at freeze and thaw); the look changes live mid-visit (crops, orchards and the mountain snow line on the next zone load) | the seasons should change how the land plays, not only how it looks | looks only; ice for players only; the season fixed per zone load

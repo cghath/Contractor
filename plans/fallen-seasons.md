@@ -35,25 +35,46 @@ commit, and a `WIP fallen-seasons: step N` commit.
    terrain gets the season pinned in its setup (`"season": "summer"` in its new-world options) with a
    comment saying why, never a loosened check. *Verify:* the suites green; a `seasons_test` check that a
    winter world's hosted def carries "winter" and `ZoneFeatures.season` on the host and a client is "winter".
-2. **One season source for the look.** A small static `SeasonLook` (`scripts/world/season_look.gd`): per
-   season, the ground tint, grass colours, wild-crown colours (or bare), snow cover, ice, leaves rate. All
-   tables Proposed, read by the steps below, so tuning lives in one place. *Verify:* parse clean in smoke.
+2. **One season source for the look, live (call D).** A small static `SeasonLook`
+   (`scripts/world/season_look.gd`): per season, the ground tint, grass colours, wild-crown colours (or
+   bare), snow cover, ice, leaves rate. All tables Proposed, so tuning lives in one place. A `SeasonLive`
+   node on the zone holds the season shown now; the host sets it from `Survival.season()` when the season
+   turns (Seasons already ticks it) and sends it to clients (one reliable RPC, and in the late-join state);
+   it emits `changed(season)`, and steps 3-7 listen and update in place, blending over 20 s (Proposed) so
+   nothing pops. Geometry from the def's season (crops, orchards, the mountain snow line) stays as loaded
+   until the next zone load, because rebuilding fields mid-visit is a voxel rebuild; called out to Captain.
+   `ZoneFeatures.season` (and the checksum) keep the def's season; the live season lives beside it.
+   *Verify:* a seasons_test check that a host and a client both see `changed("winter")` within 2 s of
+   the host's season turning; parse clean in smoke.
 3. **Ground and grass tint.** A `season_tint` (vec3 multiply) and `season_dry` (0-1, toward `dry_colour`)
    uniform in `zone_ground.gdshader`, set in `ZoneTerrain.ground_material()`; the grass carpet and tufts
    take their colours through `SeasonLook` (spring fresh green, summer as now, autumn straw, winter dead
-   brown-grey). Proposed values in the table. *Verify:* terrain/nature suites; shots of each season.
+   brown-grey). Proposed values in the table. Live: shader uniforms and the carpet's instance colours
+   are set again on `changed`. *Verify:* terrain/nature suites; shots of each season.
 4. **Wild trees.** Broadleaf crowns take `SeasonLook` colours (autumn: a mix of rust, ochre and the summer
    green; spring: a lighter green). Winter: broadleaf crowns are not drawn (trunks and a thin branch mesh
    stay; conifers keep theirs) and **stop counting as foliage for spotting** (see call A). Far canopy blobs
-   follow (bare winter: blob tinted grey-brown and thinned to 40%). *Verify:* a check that a winter zone has
+   follow (bare winter: blob tinted grey-brown and thinned to 40%). Live: crown instance colours are
+   rewritten on `changed` (a crown shader `leaf` uniform 0-1 shrinks crowns to bare over the blend, no
+   MultiMesh rebuild), and the spotting index (`_foliage`) gets a per-season flag on broadleaf crowns
+   rather than a rebuild. *Verify:* a check that a winter zone has
    0 broadleaf crown instances and `foliage_between` through a bare wood is lower than summer; shots.
-5. **Snow cover.** In winter every preset gets snow (`SNOW_DEFAULTS` with the winter line), so the existing
-   snow look, drifts and tracks apply off the snow presets too. Movement slow per call B. Late winter
-   (days 8-10) thins the cover toward the spring line. *Verify:* a check that `snow_strength() > 0` and
-   `snow_at` > 0.5 on open ground in a temperate winter zone; summer 0; the movement check per call B.
-6. **Frozen water.** `ice` uniform (0-1) in `water_surface.gdshader`: grey-white, matte, cracks, no ripple
-   or foam, set from `Seasons.water_frozen()` at zone load. Walking per call C. *Verify:* a water_test
-   check per call C; shots of a frozen pond and stream.
+5. **Snow cover, live.** The snow presets bake snow into vertex colours, which can't change mid-visit, so
+   lowland winter snow is a shader layer instead: a `season_snow` uniform (0-1) in `zone_ground.gdshader`
+   whitening open, flat ground with drift noise (less under trees, none on roads' cores), blended live by
+   `SeasonLive`. `ZoneFeatures.snow_at` adds the live cover on presets without their own snow, so the
+   walking slow is 0.15 (call B, Proposed) and tracks print; the mountain presets keep 0.25. Late winter
+   (days 8-10) thins the cover. *Verify:* checks that a temperate winter zone has `snow_at` > 0.5 on open
+   ground and summer 0, and that walking pace on that ground drops by ~15%.
+6. **Frozen water, walkable by everyone (call C).** `ice` uniform (0-1) in `water_surface.gdshader`:
+   grey-white, matte, cracks, no ripple or foam, blended live from `Seasons.water_frozen()`. When water
+   freezes, the water bodies get a walkable ice collider at the surface, wading and swimming stop there,
+   and `NavBuilder` rebakes the chunks the water covers (its background rebakes, `nav_builder.gd`) so the
+   dead and the AI path across; the thaw takes the ice away and rebakes again (anyone on it at the thaw
+   drops into the water). First research step: how deep water is kept off the nav mesh today. Hard frost
+   froze heads stand still already; this only opens the paths. *Verify:* water_test checks: a player walks
+   across a frozen pond at walking pace and doesn't swim; an AI routes across a frozen stream where it
+   went round in summer; after the thaw it goes round again; rebakes and their time in FrameCost.
 7. **Falling leaves.** A second particle box in `DayNight` like the rain: autumn only, emitting by how
    wooded the camera's surroundings are (the scatter's foliage near the camera, sampled once a second),
    ~120 leaves max, slow tumbling quads in the autumn crown colours; off under `Settings` low particles.
@@ -67,17 +88,17 @@ commit, and a `WIP fallen-seasons: step N` commit.
 10. **Docs.** `docs/survival_seasons.md` (the line about the held-back season goes), calls in
     `docs/audits/followups.md`, PROGRESS. Push the branch, CI green on it.
 
-## Calls for Captain (gameplay, not only looks)
+## Captain's calls (2026-11-21)
 
-- **A. Bare trees and hiding:** leafless broadleaf woods in winter stop hiding people (only trunks and
-  conifers block sight), so winter woods are more open. Proposed: yes.
-- **B. Snow and movement:** snow cover slows walking (the existing `slow` 0.25 of the snow presets) and
-  leaves tracks. Proposed: yes, 0.15 slow off the mountain presets (shallower lowland snow).
-- **C. Ice:** frozen ponds and streams can be walked on by players and the dead (AI crosses on them only
-  where its navigation already allows; deep water stays off the nav mesh). Proposed: visual + walkable for
-  players, nav unchanged this pass.
-- **D. When the look changes:** the zone's season is fixed when the zone loads (a new season shows on the
-  next zone load or sleep-through), not live mid-visit. Proposed: on load (live re-tint is a later pass).
+- **A. Bare trees and hiding:** yes. Leafless broadleaf woods in winter stop hiding people (trunks and
+  conifers still block sight).
+- **B. Snow and movement:** yes. Lowland winter snow slows walking by 0.15 (Proposed) and leaves tracks;
+  the mountain presets keep 0.25.
+- **C. Ice:** everyone walks on it. Players, the dead and the AI cross frozen water, and the nav mesh is
+  rebaked at the freeze and the thaw.
+- **D. When the look changes:** live, mid-visit. Tint, grass, crowns, snow, ice and leaves blend in place
+  when the season turns. Crops, orchards and the mountain snow line are geometry and follow on the next
+  zone load (needs Captain's OK on this split).
 
 ## Progress
 
