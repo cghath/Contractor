@@ -117,6 +117,13 @@ var _wet := {}
 ## The same for frozen water (_ice), and the frozen bodies' indices.
 var _ice := {}
 var _frozen := {}
+## The season's ice, live (SeasonLive.ice_changed -> set_ice; plans/fallen-seasons.md, Captain's
+## call C: everyone walks on it). Streams, ponds and lakes freeze; rivers keep running (too big and
+## too fast to bear weight, Proposed). While it holds those bodies are ice: no wading, no current,
+## a collider at the surface, and the navigation's way over it (nav_faces_in).
+var ice_on := false
+var _ice_faces := {}  # body index -> PackedVector3Array: its surface as triangles, ICE_DROP_M down
+var _ice_body: StaticBody3D
 var _mask := PackedByteArray()  # 1 where a body's water lies (later bodies only cut deeper there)
 var _shore := PackedByteArray()  # 0..255: how much the ground is a wet bank (ZoneTerrain colours)
 var _keep := PackedFloat32Array()  # the pad keep weight on a KEEP_STEP_M grid
@@ -1024,7 +1031,7 @@ func surface_at(x: float, z: float) -> float:
 	var best := -INF
 	for idx: int in [k, k + 1, k + n, k + n + 1]:
 		var v: Variant = _wet.get(idx)
-		if v != null:
+		if v != null and not (ice_on and iced(int((v as Vector3).y))):
 			best = maxf(best, (v as Vector3).x)
 	return best
 
@@ -1056,7 +1063,7 @@ func flow_at(x: float, z: float) -> Vector3:
 		return Vector3.ZERO
 	var v: Vector3 = _wet[idx]
 	var b: Dictionary = bodies[int(v.y)]
-	if String(b.kind) == "lake":
+	if String(b.kind) == "lake" or (ice_on and iced(int(v.y))):
 		return Vector3.ZERO
 	var t := tangent(b, v.z) * float(b.down) * float(b.flow_ms)
 	return Vector3(t.x, 0.0, t.y)
@@ -1110,7 +1117,135 @@ func shore_weight(i: int, j: int) -> float:
 
 ## The navigation faces of the bridges standing in `area` (ZoneNav bakes them with the ground).
 func nav_faces_in(area: Rect2) -> PackedVector3Array:
-	return bridges.nav_faces_in(area) if bridges else PackedVector3Array()
+	var out := bridges.nav_faces_in(area) if bridges else PackedVector3Array()
+	if ice_on:
+		out.append_array(ice_faces_in(area))  # the way over the ice (Captain's call C)
+	return out
+
+
+## Whether body `bi` freezes with the season (a stream, pond or lake; not a river, and not one
+## frozen for good by its preset: that is dry ground already).
+func iced(bi: int) -> bool:
+	if bi < 0 or bi >= bodies.size():
+		return false
+	var b: Dictionary = bodies[bi]
+	return String(b.kind) != "river" and not b.get("frozen", false)
+
+
+## The ice's triangles within `area` (whole triangles whose middle is in it), at the ice's height.
+func ice_faces_in(area: Rect2) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for bi: int in _ice_faces_all():
+		var faces: PackedVector3Array = _ice_faces[bi]
+		for k in range(0, faces.size(), 3):
+			var mid := (faces[k] + faces[k + 1] + faces[k + 2]) / 3.0
+			if area.has_point(Vector2(mid.x, mid.z)):
+				out.append(faces[k])
+				out.append(faces[k + 1])
+				out.append(faces[k + 2])
+	return out
+
+
+## The surface of every body that freezes, as triangles ICE_DROP_M down (made once).
+func _ice_faces_all() -> Dictionary:
+	if _ice_faces.is_empty():
+		for bi in bodies.size():
+			if not iced(bi):
+				continue
+			var b: Dictionary = bodies[bi]
+			var mesh := _lake_mesh(b) if String(b.kind) == "lake" else _line_mesh(b)
+			if mesh == null:
+				continue
+			var faces := mesh.get_faces()
+			for k in faces.size():
+				faces[k] = faces[k] + Vector3(0.0, -ICE_DROP_M, 0.0) + position
+			_ice_faces[bi] = faces
+	return _ice_faces
+
+
+## The ice's top at (x, z) while it holds (-INF where there's none): spawns and ground points stand on it.
+func ice_height_at(x: float, z: float) -> float:
+	if not ice_on:
+		return -INF
+	var n := terrain.points
+	var i := clampi(roundi((x + _half) / ZoneTerrain.CELL_M), 0, n - 1)
+	var j := clampi(roundi((z + _half) / ZoneTerrain.CELL_M), 0, n - 1)
+	var v: Variant = _wet.get(i + j * n)
+	if v == null or not iced(int((v as Vector3).y)):
+		return -INF
+	return (v as Vector3).x - ICE_DROP_M
+
+
+## The rectangles the freezing bodies cover (the navigation rebakes these at the freeze and thaw).
+func ice_rects() -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	for bi: int in _ice_faces_all():
+		var faces: PackedVector3Array = _ice_faces[bi]
+		var r := Rect2(Vector2(faces[0].x, faces[0].z), Vector2.ZERO)
+		for f in faces:
+			r = r.expand(Vector2(f.x, f.z))
+		out.append(r.grow(2.0))
+	return out
+
+
+## The ice comes (`on`) or goes, every peer (SeasonLive): the collider at its surface, the surfaces'
+## look; the host's navigation rebakes over it (ZoneLevel.nav). Anyone on the ice at the thaw goes
+## into the water. Idempotent.
+func set_ice(on: bool) -> void:
+	if on == ice_on:
+		return
+	ice_on = on
+	if on:
+		_ice_body = StaticBody3D.new()
+		_ice_body.name = "Ice"
+		_ice_body.collision_layer = 1
+		for bi: int in _ice_faces_all():
+			var shape := ConcavePolygonShape3D.new()
+			shape.set_faces(_ice_faces[bi])
+			var col := CollisionShape3D.new()
+			col.shape = shape
+			_ice_body.add_child(col)
+		add_child(_ice_body)
+		_ice_body.global_transform = Transform3D.IDENTITY  # (the faces are in world space)
+	elif _ice_body:
+		_ice_body.queue_free()
+		_ice_body = null
+	_ice_look(on)
+	var level := get_parent()
+	while level and not level is ZoneLevel:
+		level = level.get_parent()
+	if level and (level as ZoneLevel).nav and multiplayer.is_server():
+		for r in ice_rects():
+			(level as ZoneLevel).nav.rebake_rect(r)
+
+
+## The surfaces of the bodies that freeze: ice (pale, glossy, a touch down) or water again.
+func _ice_look(on: bool) -> void:
+	if not _built_visuals:
+		return
+	for bi in bodies.size():
+		if not iced(bi):
+			continue
+		var node := get_node_or_null("Surface_%d" % bi) as MeshInstance3D
+		if node == null:
+			continue
+		if not node.has_meta(&"water_mat"):
+			node.set_meta(&"water_mat", node.material_override)
+		node.material_override = _ice_material() if on else node.get_meta(&"water_mat")
+		node.position.y = -ICE_DROP_M if on else 0.0
+
+
+var _ice_mat: StandardMaterial3D
+
+
+## Ice (frozen water, as the snow preset's): a pale, glossy sheet.
+func _ice_material() -> StandardMaterial3D:
+	if _ice_mat == null:
+		_ice_mat = StandardMaterial3D.new()
+		_ice_mat.albedo_color = Color("c9dbe4")
+		_ice_mat.roughness = 0.12
+		_ice_mat.metallic_specular = 0.7
+	return _ice_mat
 
 
 ## Host: a blast at `pos` (ZoneLevel.server_blast): bridges near it take damage.
@@ -1170,6 +1305,8 @@ func build_visuals() -> void:
 			node.position.y = -ICE_DROP_M
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(node)
+	if ice_on:
+		_ice_look(true)  # (the ice came before the visuals were built)
 	var reeds := _reeds()
 	if reeds:
 		add_child(reeds)

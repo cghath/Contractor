@@ -835,6 +835,22 @@ func ground_material() -> ShaderMaterial:
 	return m
 
 
+## The season's look, live (SeasonLive.look_changed; plans/fallen-seasons.md): the ground's tint,
+## straw and lowland snow. `season_snow` is kept for ZoneFeatures' pace and footsteps.
+var season_snow := 0.0
+
+
+func set_season_look(look: Dictionary) -> void:
+	season_snow = float(look.get("snow", 0.0))
+	if _material == null:
+		return
+	_material.set_shader_parameter(&"season_tint", Color(String(look.get("tint", "ffffff"))))
+	_material.set_shader_parameter(&"season_dry", float(look.get("dry", 0.0)))
+	# Lowland snow only where the preset has none of its own (the mountains keep their baked snow).
+	var own := features != null and features.snow_strength() > 0.0
+	_material.set_shader_parameter(&"season_snow", 0.0 if own else season_snow)
+
+
 ## The finest level for the chunks nearest `pos`, at most `budget` of them; returns how
 ## many it built.
 func build_near(pos: Vector3, budget: int) -> int:
@@ -1327,6 +1343,9 @@ func ground_at(x: float, z: float) -> StringName:
 	if k == 255:
 		k = maxi(GROUND_KINDS.find(_ground_kind(i, j)), 0)
 		_ground[i + j * points] = k
+	# The season's lowland snow, live (not memoised: it comes and goes) over open ground.
+	if season_snow > 0.4 and features and GROUND_KINDS[k] in [&"grass", &"dirt", &"mud", &"sand", &"gravel"] and features.lowland_snow_at(x, z) > 0.4:
+		return &"snow"
 	return GROUND_KINDS[k]
 
 

@@ -254,6 +254,15 @@ var _far := {}  # cell -> MultiMesh of far blobs (built in build_visuals)
 # TREE_GAP_M square (_crowded), and the noise that ragged the woods' outlines.
 var _half := 0.0
 var _crowns: Array[Color] = []
+## The season, live (set_season_look; plans/fallen-seasons.md): how much of a broadleaf crown is
+## there (1 full, 0 bare), which scales its cover for spotting (foliage_between), and the materials
+## the broadleaf crowns, the far blobs and the grass draw with (season_foliage.gdshader).
+var leaf_cover := 1.0
+var _season_look := {}
+var _crown_mat: ShaderMaterial
+var _far_mat: ShaderMaterial
+var _grass_mat: ShaderMaterial
+const SEASON_FOLIAGE := preload("res://scripts/world/season_foliage.gdshader")
 var _scrubs: Array[Color] = []
 var _scrub_lo := 0.6
 var _scrub_hi := 1.5
@@ -1189,6 +1198,9 @@ func boxes_in(area: Rect2) -> Array[AABB]:
 ## walked them all (cghath's queue item 1.8).
 const FINE_M := 16.0
 const FOLIAGE_FIELDS := 6
+## The foliage row's last field: 1 scrub (drawn only to SEE_SCRUB_M), FOLIAGE_BROADLEAF a broadleaf
+## crown (its cover scaled by leaf_cover: bare in winter), 0 anything else.
+const FOLIAGE_BROADLEAF := 2.0
 
 
 ## Indexes the layout by FINE_M square: the foliage's cylinders, as foliage_between measures them
@@ -1216,7 +1228,7 @@ func _index_fine() -> void:
 		if not rows.has(g):
 			rows[g] = []
 		(rows[g] as Array).append_array([p.x, p.z, r, p.y + (0.0 if bush else size.y * CROWN_LOW),
-			p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH)), 1.0 if kind == Kind.SCRUB else 0.0])
+			p.y + size.y * (SCRUB_TOP if bush else (CONIFER_HIGH if conifer else CROWN_HIGH)), 1.0 if kind == Kind.SCRUB else (FOLIAGE_BROADLEAF if _broadleaf(item) else 0.0)])
 	_foliage = {}
 	for g: Vector2i in rows:
 		_foliage[g] = PackedFloat64Array(rows[g])
@@ -1339,8 +1351,11 @@ func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3, enough := INF) -
 		for i in range(0, row.size(), FOLIAGE_FIELDS):
 			var cx := row[i] - from.x
 			var cz := row[i + 1] - from.z
-			if row[i + 5] > 0.5 and cx * cx + cz * cz > far2:
+			if row[i + 5] == 1.0 and cx * cx + cz * cz > far2:
 				continue  # as in foliage_between
+			var leaf := leaf_cover if row[i + 5] == FOLIAGE_BROADLEAF else 1.0
+			if leaf <= 0.0:
+				continue
 			var t := clampf((cx * mx + cz * mz) / m2, 0.0, 1.0)
 			var ex := cx - mx * t
 			var ez := cz - mz * t
@@ -1348,9 +1363,9 @@ func foliage_least(from: Vector3, to_a: Vector3, to_b: Vector3, enough := INF) -
 			if ex * ex + ez * ez >= reach * reach:
 				continue
 			if a_on:
-				a += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], ax, az, a2, from.y, a_dy, a_len)
+				a += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], ax, az, a2, from.y, a_dy, a_len) * leaf
 			if b_on:
-				b += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], bx, bz, b2, from.y, b_dy, b_len)
+				b += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], bx, bz, b2, from.y, b_dy, b_len) * leaf
 		if a >= enough and b >= enough:
 			break
 	if _terrain and _terrain.features:
@@ -1387,14 +1402,17 @@ func foliage_between(from: Vector3, to: Vector3) -> float:
 		for i in range(0, row.size(), FOLIAGE_FIELDS):
 			var cx := row[i] - from.x
 			var cz := row[i + 1] - from.z
-			if row[i + 5] > 0.5 and cx * cx + cz * cz > far2:
+			if row[i + 5] == 1.0 and cx * cx + cz * cz > far2:
+				continue
+			var leaf := leaf_cover if row[i + 5] == FOLIAGE_BROADLEAF else 1.0
+			if leaf <= 0.0:
 				continue
 			var t := clampf((cx * fx + cz * fz) / flen2, 0.0, 1.0)
 			var ex := cx - fx * t
 			var ez := cz - fz * t
 			if ex * ex + ez * ez >= row[i + 2] * row[i + 2]:
 				continue  # (clear of the line: _span would say 0)
-			total += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], fx, fz, flen2, from.y, dy, length)
+			total += _span(cx, cz, row[i + 2], row[i + 3], row[i + 4], fx, fz, flen2, from.y, dy, length) * leaf
 	return total
 
 
@@ -1446,7 +1464,7 @@ func foliage_between_slow(from: Vector3, to: Vector3) -> float:
 					t0 = maxf(t0, minf(ta, tb))
 					t1 = minf(t1, maxf(ta, tb))
 				if t1 > t0:
-					total += (t1 - t0) * length
+					total += (t1 - t0) * length * (leaf_cover if _broadleaf(item) else 1.0)
 	return total
 
 
@@ -1821,12 +1839,102 @@ func build_visuals() -> void:
 	var colours: Dictionary = _spec.get("colours", {})
 	_meshes = _shared_meshes(String(colours.get("trunk", "4f3e2c")))
 	_material = _shared_material_once()
+	_season_materials(colours)
 	_build_far()
 	set_process(true)
 	if int(_spec.get("tufts_per_km2", 0)) > 0:  # grass near the camera (GrassCarpet), where this ground has tufts at all
 		var carpet := GrassCarpet.new()
-		carpet.setup(self, _terrain, _meshes["tuft"], _material, _colours(colours.get("tuft", colours.get("scrub", ["6f7040"]))))
+		carpet.setup(self, _terrain, _meshes["tuft"], _grass_mat, _colours(colours.get("tuft", colours.get("scrub", ["6f7040"]))))
 		add_child(carpet)
+
+
+## The season's materials (season_foliage.gdshader), one set a scatter: the broadleaf crowns (near:
+## thinned to twigs when bare), the far blobs (tinted and shrunk, never thinned: the far shapes
+## would shimmer) and the grass (recoloured, flattened in winter). Until a look comes they draw
+## as _material does.
+func _season_materials(colours: Dictionary) -> void:
+	var crown_mean := _mean(_crowns)
+	_crown_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.72, 1.0, 1.0)
+	_far_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.6, 0.0, 1.0)
+	_grass_mat = _foliage_mat(_mean(_colours(colours.get("tuft", colours.get("scrub", ["6f7040"])))), Vector3.ZERO, 0.55, 0.0, 0.0)
+	if not _season_look.is_empty():
+		set_season_look(_season_look)  # (the look came before the visuals were built)
+
+
+static func _foliage_mat(mean: Color, pivot: Vector3, min_scale: float, thin: float, bare_tint: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = SEASON_FOLIAGE
+	m.set_shader_parameter(&"preset_mean", mean)
+	m.set_shader_parameter(&"pivot", pivot)
+	m.set_shader_parameter(&"min_scale", min_scale)
+	m.set_shader_parameter(&"thin", thin)
+	m.set_shader_parameter(&"bare_tint", bare_tint)
+	return m
+
+
+static func _mean(list: Array[Color]) -> Color:
+	if list.is_empty():
+		return Color("46602f")
+	var c := Color(0, 0, 0, 0)
+	for k in list:
+		c += k
+	c /= float(list.size())
+	c.a = 1.0
+	return c
+
+
+## The material a cell's MultiMesh of `key` draws with: the season's for broadleaf crowns and
+## grass tufts, else the shared one.
+func _material_for(key: Variant) -> Material:
+	if key is String and _crown_mat and String(key) in ["crown", "crown_lod"]:
+		return _crown_mat
+	if key is String and _grass_mat and String(key) == "tuft":
+		return _grass_mat
+	return _material
+
+
+## Whether `item` is a standing broadleaf tree (its crown bare in winter), as _item_parts draws it.
+func _broadleaf(item: Dictionary) -> bool:
+	if int(item.kind) != Kind.TREE or item.has("felled"):
+		return false
+	return not (bool(item.conifer) if item.has("conifer") else _is_conifer(item))
+
+
+## How many standing broadleaf trees' crowns are within `r` of `pos` (on the ground plane; the
+## falling leaves' density, SeasonLive). Walks the fine index.
+func broadleaf_near(pos: Vector3, r: float) -> int:
+	if _indexed != items.size():
+		_index_fine()
+	var count := 0
+	for row: PackedFloat64Array in _foliage_rows(pos.x - r, pos.z, pos.x + r, pos.z, r):
+		for i in range(0, row.size(), FOLIAGE_FIELDS):
+			if row[i + 5] == FOLIAGE_BROADLEAF and Vector2(row[i] - pos.x, row[i + 1] - pos.z).length_squared() < r * r:
+				count += 1
+	return count
+
+
+## The season's look, live (SeasonLive.look_changed): the crowns' and grass's colours and leaf,
+## and the crowns' cover for spotting.
+func set_season_look(look: Dictionary) -> void:
+	_season_look = look
+	leaf_cover = clampf(float(look.get("leaf", 1.0)), 0.0, 1.0)
+	_apply_look(_crown_mat, look, "crown", leaf_cover)
+	_apply_look(_far_mat, look, "crown", leaf_cover)
+	_apply_look(_grass_mat, look, "grass", leaf_cover)
+
+
+static func _apply_look(m: ShaderMaterial, look: Dictionary, key: String, leaf: float) -> void:
+	if m == null:
+		return
+	var pal := SeasonLook.colours(look, key)
+	var mix := float(look.get(key + "_mix", 1.0 if not pal.is_empty() else 0.0))
+	var arr := PackedColorArray()
+	for k in 5:
+		arr.append(pal[k % pal.size()] if not pal.is_empty() else Color.WHITE)
+	m.set_shader_parameter(&"palette", arr)
+	m.set_shader_parameter(&"palette_n", clampi(pal.size(), 1, 5))
+	m.set_shader_parameter(&"colour_mix", mix)
+	m.set_shader_parameter(&"leaf", leaf)
 
 
 ## The material every scatter MultiMesh draws with, made once a game (Captain, 2026-10-14:
@@ -2051,7 +2159,7 @@ func _build_cell(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> voi
 		node.name = "Scatter_%d_%d_%s" % [cell.x, cell.y, str(key)]
 		node.set_meta(&"centre", centre)
 		node.multimesh = part[1]
-		node.material_override = _material
+		node.material_override = _material_for(key)
 		if tier == Tier.NEAR and LOD_KEYS.has(key):
 			node.visibility_range_end = LOD_M
 			node.visibility_range_end_margin = LOD_MARGIN_M
@@ -2295,7 +2403,7 @@ func _build_far() -> void:
 		var centre := Vector3(-half + (block.x + 0.5) * block_m, 0.0, -half + (block.y + 0.5) * block_m)
 		node.set_meta(&"centre", centre)
 		node.multimesh = kept[block]
-		node.material_override = _material
+		node.material_override = _far_mat if _far_mat else _material
 		node.visibility_range_begin = SEE_TREE_M * float(GameSettings.detail().scatter) - 10.0  # (where the trees stop, by the detail setting)
 		node.visibility_range_begin_margin = 20.0
 		var far_m := float(GameSettings.detail().far_trees_m)  # the detail setting (perf pass; "ultra": to the horizon)

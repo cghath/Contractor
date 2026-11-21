@@ -30,6 +30,12 @@ uniform float crust_strength = 0.0;
 uniform float track_strength = 0.0;
 uniform vec3 road_colour : source_color = vec3(0.064, 0.063, 0.058);
 uniform vec3 track_colour : source_color = vec3(0.17, 0.13, 0.08);
+// The season, live (SeasonLive, plans/fallen-seasons.md): a tint over the land, how far it is pulled
+// to straw (dry_colour), and lowland snow (0-1) lying on open, flat ground, set as the season turns.
+uniform vec3 season_tint : source_color = vec3(1.0);
+uniform float season_dry = 0.0;
+uniform float season_snow = 0.0;
+uniform vec3 season_snow_colour : source_color = vec3(0.89, 0.91, 0.93);
 
 varying vec3 w_pos;
 varying vec3 w_nrm;
@@ -195,6 +201,23 @@ void fragment() {
 	float voxel_near = 1.0 - smoothstep(6.0, 12.0, dist);
 	if (voxel_near > 0.0) {
 		col *= mix(1.0, 1.0 + (hash12(floor(p / 0.1) + 17.0) - 0.5) * 0.08, voxel_near);  // the 10 cm voxel grid up close
+	}
+
+	// The season: off the roads, the land pulled toward straw and tinted (winter grey, autumn warm).
+	vec3 season_col = mix(col, dry_colour * mix(0.88, 1.05, mid), season_dry * 0.6) * season_tint;
+	col = mix(col, season_col, 1.0 - roadness);
+	if (season_snow > 0.0) {
+		// Lowland snow: it lies first in the drift hollows and spreads as season_snow rises (a thin
+		// dusting at 0.3, white at 1); off steep ground (the rock below takes that) and thin on the
+		// roads' cores, where wheels and feet wear it to slush.
+		float s_drift = vnoise(q / 9.0 + 2.0) * 0.6 + vnoise(p / 2.3) * 0.4;
+		float s_level = 1.0 - season_snow;
+		float s_cover = smoothstep(s_level - 0.2, s_level + 0.05, s_drift * 0.85 + grain * 0.15);
+		s_cover *= smoothstep(0.30, 0.14, 1.0 - clamp(w_nrm.y, 0.0, 1.0));
+		s_cover *= 1.0 - roadness * 0.7;
+		vec3 s_col = season_snow_colour * mix(0.88, 1.02, s_drift) * mix(1.0, mix(0.96, 1.03, grain), close);
+		s_col *= 1.0 + step(0.985, hash12(floor(p / 0.1) + 3.0)) * speck_near * 0.25;  // the glint
+		col = mix(col, s_col, s_cover);
 	}
 
 	if (snow_strength > 0.0) {

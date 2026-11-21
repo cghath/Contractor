@@ -195,6 +195,8 @@ func ground_point(pos: Vector3) -> Vector3:
 	var h := terrain.height_at(pos.x, pos.z)
 	if roads and roads.net:
 		h = maxf(h, roads.surface_at(pos.x, pos.z))  # on a road: its surface (it stands a little over the graded ground)
+	if terrain.water and terrain.water.ice_on:
+		h = maxf(h, terrain.water.ice_height_at(pos.x, pos.z))  # on the season's ice (plans/fallen-seasons.md)
 	return Vector3(pos.x, h + 0.1, pos.z)
 
 

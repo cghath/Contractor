@@ -76,6 +76,7 @@ func _ready() -> void:
 	await _test_demolition()
 	await _test_fire_support()
 	await _test_nav_after_drop()
+	await _test_ice()
 	_test_save_and_join()
 	await _test_cost(def)
 	_finish()
@@ -475,6 +476,80 @@ func _test_nav_over_bridge() -> void:
 				on_deck = true
 	check(path.size() >= 2 and path[path.size() - 1].distance_to(ends[1]) < 4.0 and on_deck and deepest < ZoneWater.NAV_WATER_M,
 		"the navigation routes across the river over the %s (%d points, ends %.1f m from the far end, on the deck %s, deepest water on the way %.2f m), not through the deep water beside it" % [ZoneBridges.TYPES[b.type].name, path.size(), path[path.size() - 1].distance_to(ends[1]) if path.size() > 0 else -1.0, on_deck, maxf(deepest, 0.0)])
+
+
+## The season's ice (plans/fallen-seasons.md, Captain's call C: everyone walks on it): a pond
+## freezes, a man walks across it at a walking pace and doesn't wade or swim, the navigation routes
+## over it where it went round, and at the thaw the ice goes, he's in the water, and the way goes
+## round again.
+func _test_ice() -> void:
+	print("Ice")
+	var bi := -1
+	for k in water.bodies.size():
+		if String(water.bodies[k].kind) == "lake" and water.iced(k):
+			bi = k
+			break
+	check(bi >= 0, "a pond to freeze")
+	if bi < 0:
+		return
+	var pond: Dictionary = water.bodies[bi]
+	var c: Vector2 = pond.centre
+	var r := float(pond.r)
+	var player := level.players.get_node(^"1") as Soldier
+	player.global_position = level.ground_point(Vector3(c.x + r + 6.0, 0, c.y))  # the navigation bakes round him
+	player.velocity = Vector3.ZERO
+	var a := level.ground_point(Vector3(c.x - r - 8.0, 0, c.y))
+	var e := level.ground_point(Vector3(c.x + r + 8.0, 0, c.y))
+	level.nav.refresh()
+	await _wait_for(func() -> bool: return level.nav.is_settled(), 40.0)
+	var map := level.get_world_3d().navigation_map
+	var open_len := _path_len(NavigationServer3D.map_get_path(map, a, e, true))
+	water.set_ice(true)
+	check(water.ice_on and water.get_node_or_null(^"Ice") != null and water.depth_at(c.x, c.y) == 0.0 and water.flow_at(c.x, c.y) == Vector3.ZERO,
+		"the pond freezes: its collider in, no depth or current over it")
+	await _frames(2)
+	await _wait_for(func() -> bool: return level.nav.is_settled() and not level.nav.is_rebaking(), 40.0)
+	await _frames(4)
+	var ice_path := NavigationServer3D.map_get_path(map, a, e, true)
+	var ice_len := _path_len(ice_path)
+	var over := false
+	for q in ice_path:
+		over = over or Vector2(q.x, q.z).distance_to(c) < r * 0.5
+	check(ice_path.size() >= 2 and ice_path[ice_path.size() - 1].distance_to(e) < 4.0 and over and ice_len < open_len - 4.0,
+		"the AI's way crosses the ice (%.0f m, through the middle %s) where it went round the water (%.0f m)" % [ice_len, over, open_len])
+	var top := water.ice_height_at(c.x, c.y)
+	var walker := _soldier(Vector3(c.x - r * 0.4, top + 0.05, c.y), "Skater")
+	_face(walker, Vector2(1, 0))
+	await _frames(20)
+	var p0 := walker.global_position
+	walker.move_input = Vector2(0, -1)
+	var lowest := INF
+	var wet := 0.0
+	for f in 120:
+		await get_tree().physics_frame
+		lowest = minf(lowest, walker.global_position.y)
+		wet = maxf(wet, walker.movement.wet)
+	var went := Vector2(walker.global_position.x - p0.x, walker.global_position.z - p0.z).length()
+	check(lowest > top - 0.15 and wet == 0.0 and not walker.movement.swimming and went > 2.0,
+		"on the ice he walks (%.1f m in 2 s), stands on it (lowest %.2f m over its top) and never wades" % [went, lowest - top])
+	walker.move_input = Vector2.ZERO
+	water.set_ice(false)
+	await _frames(60)
+	check(not water.ice_on and water.get_node_or_null(^"Ice") == null and (walker.movement.wet > 0.3 or walker.movement.swimming),
+		"the thaw: the ice gone, he's in the water (wet %.2f, swimming %s)" % [walker.movement.wet, walker.movement.swimming])
+	await _wait_for(func() -> bool: return level.nav.is_settled() and not level.nav.is_rebaking(), 40.0)
+	await _frames(4)
+	var thaw_len := _path_len(NavigationServer3D.map_get_path(map, a, e, true))
+	check(thaw_len > ice_len + 4.0, "after the thaw the way goes round again (%.0f m, on the ice %.0f m)" % [thaw_len, ice_len])
+	walker.queue_free()
+	await _frames(2)
+
+
+static func _path_len(path: PackedVector3Array) -> float:
+	var m := 0.0
+	for k in range(1, path.size()):
+		m += path[k - 1].distance_to(path[k])
+	return m if path.size() >= 2 else INF
 
 
 func _test_vehicle_bridge() -> void:

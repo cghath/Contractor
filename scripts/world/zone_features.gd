@@ -141,6 +141,7 @@ var _roads: Array = []  # [Vector2, Vector2]
 var _keep_cells := {}  # Vector2i -> [pad indices, road indices]
 var _cut := PackedByteArray()  # 0..255: how deep in a gully or ditch each height point is
 var _slow := PackedByteArray()  # memo per height point: 255 - not yet, else the pace kept x 254
+var _open := PackedByteArray()  # memo per height point for lowland snow (_open_idx): 255 - not yet, else 0-254
 var _wet_known := false  # finish() ran: the water is there to keep the fields off
 var _marsh := {}
 var _snow := {}
@@ -202,6 +203,7 @@ func _generate(def: Dictionary) -> void:
 	if not _marsh.is_empty() or not _snow.is_empty():
 		_slow.resize(terrain.points * terrain.points)
 		_slow.fill(255)
+	_open = PackedByteArray()  # (lowland snow's memo: made again on first ask)
 	carve_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 
@@ -561,27 +563,64 @@ func snow_at(x: float, z: float) -> float:
 
 
 ## The share of his pace a man on foot keeps at (x, z): soft marsh ground and snow slow him
-## (marsh "slow", snow "slow"; packed snow on the roads and tracks doesn't). Memoised per height
-## point (Wading.ground_mult asks every physics step).
+## (marsh "slow", snow "slow"; packed snow on the roads and tracks doesn't), and on presets with no
+## snow of their own the season's lowland snow (ZoneTerrain.season_snow, live; SeasonLook
+## LOWLAND_SNOW_SLOW) on open ground. Memoised per height point (Wading.ground_mult asks every
+## physics step); the live snow is a multiplier over the memo, so a new season needs no rebuild.
 func slow_at(x: float, z: float) -> float:
-	if _slow.is_empty():
-		return 1.0
 	var n := terrain.points
 	var i := clampi(roundi((x + _half) / ZoneTerrain.CELL_M), 0, n - 1)
 	var j := clampi(roundi((z + _half) / ZoneTerrain.CELL_M), 0, n - 1)
 	var idx := i + j * n
-	var v := _slow[idx]
+	var m := 1.0
+	if not _slow.is_empty():
+		var v := _slow[idx]
+		if v == 255:
+			var px := i * ZoneTerrain.CELL_M - _half
+			var pz := j * ZoneTerrain.CELL_M - _half
+			var b := 1.0
+			if not _marsh.is_empty():
+				b *= 1.0 - float(_marsh.slow) * soft_at(px, pz)
+			if not _snow.is_empty():
+				var packed := _packed_at(px, pz)
+				b *= 1.0 - float(_snow.slow) * snow_at(px, pz) * (1.0 - packed)
+			v = clampi(roundi(b * 254.0), 0, 254)
+			_slow[idx] = v
+		m = float(v) / 254.0
+	if _snow.is_empty() and terrain.season_snow > 0.0:
+		m *= 1.0 - SeasonLook.LOWLAND_SNOW_SLOW * terrain.season_snow * _open_idx(i, j, idx)
+	return m
+
+
+## How much of the season's lowland snow lies at (x, z) now (0-1): ZoneTerrain.season_snow on open,
+## flat, unpacked ground; 0 on presets with snow of their own (snow_at is theirs). The ground
+## shader breaks it into drifts the eye sees; this is its average, for the pace and the footsteps.
+func lowland_snow_at(x: float, z: float) -> float:
+	if not _snow.is_empty() or terrain.season_snow <= 0.0:
+		return 0.0
+	var n := terrain.points
+	var i := clampi(roundi((x + _half) / ZoneTerrain.CELL_M), 0, n - 1)
+	var j := clampi(roundi((z + _half) / ZoneTerrain.CELL_M), 0, n - 1)
+	return terrain.season_snow * _open_idx(i, j, i + j * n)
+
+
+## Packed ground (roads, tracks, round the pads), where snow is trodden and slows no one: 0-1.
+func _packed_at(px: float, pz: float) -> float:
+	return maxf(terrain.road_weight(px, pz), 1.0 - smoothstep(2.0, 8.0, pad_distance(Vector2(px, pz))))
+
+
+## Memo per height point: how open the ground is to lowland snow (flat, unpacked), 0-1.
+func _open_idx(i: int, j: int, idx: int) -> float:
+	if _open.is_empty():
+		_open.resize(terrain.points * terrain.points)
+		_open.fill(255)
+	var v := _open[idx]
 	if v == 255:
 		var px := i * ZoneTerrain.CELL_M - _half
 		var pz := j * ZoneTerrain.CELL_M - _half
-		var m := 1.0
-		if not _marsh.is_empty():
-			m *= 1.0 - float(_marsh.slow) * soft_at(px, pz)
-		if not _snow.is_empty():
-			var packed := maxf(terrain.road_weight(px, pz), 1.0 - smoothstep(2.0, 8.0, pad_distance(Vector2(px, pz))))
-			m *= 1.0 - float(_snow.slow) * snow_at(px, pz) * (1.0 - packed)
-		v = clampi(roundi(m * 254.0), 0, 254)
-		_slow[idx] = v
+		var o := smoothstep(0.70, 0.86, terrain.normal_at(px, pz).y) * (1.0 - _packed_at(px, pz))
+		v = clampi(roundi(o * 254.0), 0, 254)
+		_open[idx] = v
 	return float(v) / 254.0
 
 

@@ -262,6 +262,10 @@ func _host_zone(main: Node, zone_id: String) -> bool:
 	state()["zone"] = zone_id
 	GameState.zone_id = zone_save(zone_id)
 	var hosted := def.duplicate(true)
+	# The world's season to the terrain (ZoneFeatures: crops, orchards, the snow line;
+	# plans/fallen-seasons.md). Without it ZoneFeatures draws Season.DEFAULT (summer) whatever
+	# the world's season is.
+	hosted["season"] = season()
 	if zone_id == String(state().get("start_zone", "")):
 		hosted = FirstHour.farmstead(hosted, int(state().get("seed", 0)))  # the start: a real farmstead (docs/survival_firsthour.md)
 	main.host_zone(hosted, "survival")
@@ -403,6 +407,8 @@ func _process(delta: float) -> void:
 	var here := CompoundLevel.current(self)
 	if here is SurvivalLevel and here.get_node_or_null(FallenAudio.NODE_NAME) == null:
 		FallenAudio.install(here)  # the soundscape, tension and music, every peer (docs/survival_audio.md)
+	if here is SurvivalLevel and here.get_node_or_null(SeasonLive.NODE_NAME) == null:
+		SeasonLive.install(here)  # the season on the land, live (plans/fallen-seasons.md), every peer
 	if not running or not multiplayer.is_server():
 		return
 	var level := CompoundLevel.current(self)

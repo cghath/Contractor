@@ -269,6 +269,8 @@ static func server_update(level: Node) -> void:
 		if last != "":
 			Survival._journal_line(String({"spring": "The snow's going: spring.", "summer": "Summer: the days are long and hot.",
 				"autumn": "Autumn: the leaves are turning and the nights drawing in.", "winter": "Winter's here."}.get(now, "")))
+	if level != null:
+		SeasonLive.install(level).server_set(now, day_in_season())  # the land's look, live (plans/fallen-seasons.md)
 	var slot := Survival.day() * (24 / WEATHER_SLOT_H) + floori(Survival.hour() / WEATHER_SLOT_H)
 	if not r.has("slot") or Survival.day() <= 1:
 		r["slot"] = slot  # (day one's weather is the cold open's: ColdOpen)
