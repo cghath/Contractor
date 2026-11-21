@@ -108,8 +108,8 @@ func _test_hitboxes(level: ZoneLevel, scatter: ZoneScatter) -> void:
 	var drawn_points := func(item: Dictionary) -> PackedVector3Array:
 		var out := PackedVector3Array()
 		for part: Array in scatter.visual_parts(item):
-			if part[0] is String and part[0] in ["crown", "conifer"]:
-				continue  # leaves: no collision
+			if part[0] is String and part[0] in ["crown", "conifer", "branches"]:
+				continue  # leaves, and a bare tree's limbs (plans/fallen-seasons.md): no collision
 			if not verts.has(part[0]):
 				var mesh: Mesh = meshes.get(part[0])
 				if mesh == null:  # a library prop's (the props suite checks those shape by shape)

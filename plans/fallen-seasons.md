@@ -116,3 +116,7 @@ commit, and a `WIP fallen-seasons: step N` commit.
 - Step 9, shots: S2966 (wadi_farm, the start zone: desert_wadi, no water; kestrel_valley for the ice).
 - Open for Captain: winter's bare crowns read as pale dotted spheres (frosted more than twiggy);
   the start zone is a desert wadi that now gets full lowland snow (call B said every map).
+- 2026-11-21, bare trees (Captain asked): limbs mesh (ZoneScatter._branch_mesh) shown when bare, the
+  crown a twig haze. R2990: seasons (only the old spike-pit check fails), forest, smoke, terrain,
+  nature pass. Frame time S3002 (alternating, a quiet machine): Kestrel wood GPU 3.70 -> 3.56 ms,
+  farm 4.49 -> 4.55; wadi_farm wood 3.35 -> 3.44, farm 3.83 -> 3.88. Shots S2991.

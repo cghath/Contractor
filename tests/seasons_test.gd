@@ -228,6 +228,32 @@ func _test_land() -> void:
 		var kind := level.terrain.ground_at(open.x, open.y)
 		check(kind == &"snow", "the ground there is snow underfoot (%s)" % kind)
 	check(level.scatter.leaf_cover == 0.0, "winter: the broadleaf crowns are bare")
+	# A bare tree shows its limbs (ZoneScatter._branch_mesh): every broadleaf tree has them, no conifer;
+	# they stay inside the crown's space and are cheap.
+	var sc := level.scatter
+	var broad := -1
+	var conif := -1
+	for i in sc.items.size():
+		var it: Dictionary = sc.items[i]
+		if int(it.kind) != ZoneScatter.Kind.TREE or it.has("felled"):
+			continue
+		if sc._broadleaf(it) and broad < 0:
+			broad = i
+		elif not sc._broadleaf(it) and conif < 0:
+			conif = i
+	var keys := func(i: int) -> Array:
+		return sc.visual_parts(sc.items[i]).map(func(part: Array) -> Variant: return part[0]) if i >= 0 else []
+	check(broad >= 0 and "branches" in keys.call(broad) and (conif < 0 or not "branches" in keys.call(conif)),
+		"a broadleaf tree is drawn with its limbs, a conifer without (%s / %s)" % [keys.call(broad), keys.call(conif)])
+	var limbs: Mesh = sc._shared_meshes("4f3e2c")["branches"]
+	var lv: PackedVector3Array = limbs.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var reach := 0.0
+	var high := 0.0
+	for v in lv:
+		reach = maxf(reach, Vector2(v.x, v.z).length())
+		high = maxf(high, v.y)
+	check(lv.size() / 3 <= 260 and reach <= ZoneScatter.CROWN_R * 1.25 and high <= 4.95,
+		"the limbs: %d triangles, out to %.2f m and up to %.2f m (the crown's %.1f m round, 4.9 m up)" % [lv.size() / 3, reach, high, ZoneScatter.CROWN_R])
 	var cover_winter := _wood_cover()
 	if cover_summer.x > 0.0:
 		check(cover_winter.x < cover_summer.x * 0.5, "a line through a broadleaf crown: %.2f m of foliage in summer, %.2f bare in winter" % [cover_summer.x, cover_winter.x])

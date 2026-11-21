@@ -51,10 +51,11 @@ void fragment() {
 		c = mix(c, palette[k] * shade, colour_mix);
 	}
 	if (leaf < 1.0) {
-		// Bare: the crown goes to twig colour and, near, thins (a third of it left at leaf 0).
+		// Bare: the crown goes to twig colour and, near, thins to a faint haze round the limbs
+		// (ZoneScatter's branches mesh carries the shape: a fifth of the crown is left at leaf 0).
 		float bare = 1.0 - leaf;
 		c = mix(c, bare_colour * shade, bare * 0.85 * bare_tint);
-		if (thin > 0.0 && bayer4(FRAGCOORD.xy) > mix(1.0, 0.55, bare)) {
+		if (thin > 0.0 && bayer4(FRAGCOORD.xy) > mix(1.0, 0.22, bare)) {
 			discard;
 		}
 	}

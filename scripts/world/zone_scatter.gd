@@ -263,6 +263,9 @@ var _crown_mat: ShaderMaterial
 var _far_mat: ShaderMaterial
 var _grass_mat: ShaderMaterial
 var _bush_mat: ShaderMaterial
+## The cells' "branches" nodes (shown while the crowns are below BRANCHES_FROM_LEAF of full leaf).
+var _branch_nodes: Array[Node3D] = []
+const BRANCHES_FROM_LEAF := 0.99
 const SEASON_FOLIAGE := preload("res://scripts/world/season_foliage.gdshader")
 var _scrubs: Array[Color] = []
 var _scrub_lo := 0.6
@@ -1855,7 +1858,7 @@ func build_visuals() -> void:
 ## as _material does.
 func _season_materials(colours: Dictionary) -> void:
 	var crown_mean := _mean(_crowns)
-	_crown_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.72, 1.0, 1.0)
+	_crown_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.85, 1.0, 1.0)  # (bare: a twig haze just round the limbs' ends)
 	_far_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.6, 0.0, 1.0)
 	_grass_mat = _foliage_mat(_mean(_colours(colours.get("tuft", colours.get("scrub", ["6f7040"])))), Vector3.ZERO, 0.55, 0.0, 0.0)
 	_bush_mat = _foliage_mat(_mean(_scrubs), Vector3.ZERO, 1.0, 0.0, 0.0)  # (recoloured only: shape and cover kept)
@@ -1924,6 +1927,12 @@ func broadleaf_near(pos: Vector3, r: float) -> int:
 func set_season_look(look: Dictionary) -> void:
 	_season_look = look
 	leaf_cover = clampf(float(look.get("leaf", 1.0)), 0.0, 1.0)
+	var bare := leaf_cover < BRANCHES_FROM_LEAF
+	for k in range(_branch_nodes.size() - 1, -1, -1):
+		if not is_instance_valid(_branch_nodes[k]):
+			_branch_nodes.remove_at(k)  # (a cell dropped or drawn again)
+		else:
+			_branch_nodes[k].visible = bare
 	_apply_look(_crown_mat, look, "crown", leaf_cover)
 	_apply_look(_far_mat, look, "crown", leaf_cover)
 	_apply_look(_grass_mat, look, "grass", leaf_cover)
@@ -1977,9 +1986,11 @@ func _shared_meshes(trunk_hex: String) -> Dictionary:
 	if not _shapes.has(trunk_key):
 		_shapes[trunk_key] = _trunk_mesh(Color(trunk_hex))
 		_shapes["trunk_lod:" + trunk_hex] = _trunk_lod_mesh(Color(trunk_hex))
+		_shapes["branches:" + trunk_hex] = _branch_mesh(Color(trunk_hex))
 	var out := _shapes.duplicate()
 	out["trunk"] = _shapes[trunk_key]
 	out["trunk_lod"] = _shapes["trunk_lod:" + trunk_hex]
+	out["branches"] = _shapes["branches:" + trunk_hex]
 	return out
 
 
@@ -2188,6 +2199,9 @@ func _build_cell(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> voi
 			shade = bool(PropArt.shape(String(key).trim_prefix(LIBRARY).get_slice("#", 0)).shadow)
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shade else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		node.set_meta(&"tier", tier)
+		if key is String and key == "branches":
+			node.visible = leaf_cover < BRANCHES_FROM_LEAF  # (summer: not drawn at all)
+			_branch_nodes.append(node)
 		add_child(node)
 		if on_demand:
 			(_cell_nodes.get_or_add(at, []) as Array).append(node)
@@ -2241,7 +2255,7 @@ const SEE_WIRE_M := 700.0
 const WIRE_W := 0.03
 const WIRE_SAG := 0.03
 const WIRE_SEGMENTS := 6
-const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M,
+const _RANGES := {Kind.ROCK: SEE_ROCK_M, Kind.SCRUB: SEE_SCRUB_M, "thicket": SEE_TREE_M, "trunk": SEE_TREE_M, "crown": SEE_TREE_M, "branches": LOD_M,
 	"conifer": SEE_TREE_M, "tuft": SEE_TUFT_M, "pebble": SEE_PEBBLE_M, "outcrop": SEE_OUTCROP_M,
 	"prop_crates": SEE_ROCK_M, "prop_drums": SEE_ROCK_M, "prop_debris": SEE_ROCK_M, "prop_wall": SEE_ROCK_M, "prop_wreck": SEE_ROCK_M, "prop_mound": SEE_ROCK_M}
 
@@ -2257,6 +2271,9 @@ func _cell_parts(cell: Vector2i, tier := Tier.FAR, cover: Variant = null) -> Arr
 			if LOD_KEYS.has(key):
 				if tier == Tier.FAR:
 					key = LOD_KEYS[key]
+			elif key is String and key == "branches":
+				if tier == Tier.FAR:
+					continue  # (near only: past LOD_M the limbs are under a pixel; the far crowns are tinted bare)
 			elif tier == Tier.NEAR:
 				continue
 			if not groups.has(key):
@@ -2359,8 +2376,12 @@ func visual_parts(item: Dictionary) -> Array:
 		Kind.TREE:
 			if item.has("felled"):
 				return [["trunk", Transform3D(basis.scaled(Vector3(size.x, size.y * STUMP_SHARE, size.z)), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE]]  # (a stump: Trees)
-			return [["trunk", Transform3D(basis.scaled(size), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE],
-				["conifer" if (bool(item.conifer) if item.has("conifer") else _is_conifer(item)) else "crown", xf, item.colour]]
+			var conifer := bool(item.conifer) if item.has("conifer") else _is_conifer(item)
+			var tree_parts := [["trunk", Transform3D(basis.scaled(size), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE],
+				["conifer" if conifer else "crown", xf, item.colour]]
+			if not conifer:
+				tree_parts.append(["branches", Transform3D(basis.scaled(size), p - Vector3(0, TRUNK_SINK, 0)), Color.WHITE])  # (seen when bare: _branch_mesh)
+			return tree_parts
 	return []
 
 
@@ -2916,6 +2937,59 @@ func _crown_mesh() -> ArrayMesh:
 	_tier(st, -0.45, -0.62, 3.25, 3.85, 0.42, 0.55, Color.WHITE, BOTTOM)
 	_tier(st, -0.45, -0.62, 3.85, 4.4, 0.55, 0.25, Color.WHITE, TOP)
 	return st.commit()
+
+
+## A broadleaf tree's limbs, seen in winter when its crown is bare (Captain, 2026-11-21: the bare
+## trees read as frosted balls), in the trunk's space (the crown spans 2.0 to 4.9 m up, CROWN_R
+## round): the leader up the middle and BRANCH_LIMBS main limbs leaving the trunk's top at 30-52
+## degrees from upright, each bending upward over two lengths and forking near its end, the way an
+## oak's or an ash's scaffold limbs do; square bars, the bark's colour (232 triangles).
+const BRANCH_LIMBS := 5
+
+
+func _branch_mesh(colour: Color) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var bark := colour / SIDE_SHADE
+	var top := Vector3(0.0, TRUNK_TALL - 0.35, 0.0)
+	# The leader: on up the middle, leaning a little, two forks at its head.
+	var lead := Vector3(0.06, 3.55, 0.04)
+	var head := Vector3(-0.04, 4.55, 0.08)
+	_limb(st, top, lead, TRUNK_TOP_R * 0.75, 0.06, bark)
+	_limb(st, lead, head, 0.06, 0.022, bark)
+	_limb(st, lead, lead + Vector3(0.45, 0.6, -0.2), 0.035, 0.015, bark)
+	_limb(st, lead, lead + Vector3(-0.35, 0.55, 0.35), 0.035, 0.015, bark)
+	for k in BRANCH_LIMBS:
+		var yaw := TAU * k / BRANCH_LIMBS + 0.35 * sin(k * 2.3)
+		var out := Vector3(cos(yaw), 0.0, sin(yaw))
+		var side := Vector3(-out.z, 0.0, out.x)
+		var lean := deg_to_rad(30.0 + 22.0 * (0.5 + 0.5 * sin(k * 1.7 + 0.4)))  # from upright
+		var start := top + Vector3(0.0, 0.12 * (k % 3), 0.0)
+		var elbow := start + (out * sin(lean) + Vector3.UP * cos(lean)) * 1.0
+		var tip := elbow + (out * sin(lean * 0.55) + Vector3.UP * cos(lean * 0.55)) * 0.8
+		_limb(st, start, elbow, 0.075, 0.05, bark)
+		_limb(st, elbow, tip, 0.05, 0.02, bark)
+		# Forks: two from the elbow, out and up to either side; one twig at the tip, to alternate sides.
+		for sgn: float in [-1.0, 1.0]:
+			_limb(st, elbow, elbow + out * 0.3 + side * sgn * 0.25 + Vector3.UP * 0.45, 0.032, 0.012, bark)
+		var tw := 1.0 if k % 2 == 0 else -1.0
+		_limb(st, tip, tip + out * 0.1 + side * tw * 0.16 + Vector3.UP * 0.26, 0.016, 0.008, bark)
+	return st.commit()
+
+
+## A square bar from `a` to `b`, `ra` thick at a (half-width, m) tapering to `rb`, no caps.
+func _limb(st: SurfaceTool, a: Vector3, b: Vector3, ra: float, rb: float, colour: Color) -> void:
+	var axis := (b - a).normalized()
+	var u := axis.cross(Vector3.UP if absf(axis.y) < 0.95 else Vector3.RIGHT).normalized()
+	var v := axis.cross(u).normalized()
+	var ring_a: Array[Vector3] = [a + (u + v) * ra, a + (u - v) * ra, a + (-u - v) * ra, a + (-u + v) * ra]
+	var ring_b: Array[Vector3] = [b + (u + v) * rb, b + (u - v) * rb, b + (-u - v) * rb, b + (-u + v) * rb]
+	var mid := (a + b) * 0.5
+	for i in 4:
+		var j := (i + 1) % 4
+		var n := ((ring_a[i] + ring_a[j]) * 0.5 - a).normalized()
+		var shade := 0.82 + 0.18 * clampf(n.y * 0.5 + 0.5, 0.0, 1.0)  # (lit from above, as the crowns)
+		_face(st, [ring_a[i], ring_a[j], ring_b[j], ring_b[i]], mid, colour * shade)
 
 
 ## A conifer: three stacked tiers, each narrower, from 2 m up to 4.9 m. (Each top is inside the
