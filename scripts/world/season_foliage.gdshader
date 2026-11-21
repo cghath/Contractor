@@ -4,8 +4,9 @@
 // - colour_mix pulls each instance toward one colour of the season's palette (picked by the
 //   instance), keeping the mesh's own shading (its brightness over the preset's mean colour);
 // - leaf (1 full, 0 bare) shrinks the crown toward pivot (the trunk's top) to min_scale and thins
-//   it to a lattice of twigs in bare_colour (discard on a 12 cm world grid, steady as the camera
-//   moves, so the far shapes don't shimmer); the grass's leaf flattens it toward the ground instead.
+//   it to a haze of twigs in bare_colour (a screen-space 4x4 ordered dither: at pixel scale it reads
+//   as see-through, as a bare wood does; a world-space grid read as a checkerboard, S2941); the
+//   grass's leaf flattens it toward the ground instead.
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
@@ -18,15 +19,16 @@ uniform vec3 pivot = vec3(0.0, 2.6, 0.0);
 uniform float min_scale = 0.72;
 uniform float thin = 1.0;  // 1: thin to twigs when bare (near crowns); 0: no discard (far blobs, grass)
 uniform float bare_tint = 1.0;  // 1: bare goes to bare_colour (crowns, far blobs); 0: not (grass)
-uniform vec3 bare_colour : source_color = vec3(0.36, 0.32, 0.27);
+uniform vec3 bare_colour : source_color = vec3(0.31, 0.27, 0.24);  // dark grey-brown twigs (lighter read as frost)
 
 varying float v_pick;
-varying vec3 v_world;
 
-float hash13(vec3 p) {
-	p = fract(p * 0.1031);
-	p += dot(p, p.zyx + 31.32);
-	return fract((p.x + p.y) * p.z);
+// The 4x4 Bayer threshold at a pixel (0..1).
+float bayer4(vec2 px) {
+	ivec2 q = ivec2(mod(px, 4.0));
+	int i = q.x + q.y * 4;
+	int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+	return (float(m[i]) + 0.5) / 16.0;
 }
 
 vec3 to_linear(vec3 c) {
@@ -37,7 +39,6 @@ void vertex() {
 	float s = mix(min_scale, 1.0, clamp(leaf, 0.0, 1.0));
 	VERTEX = pivot + (VERTEX - pivot) * s;
 	v_pick = fract(sin(float(INSTANCE_ID) * 12.9898) * 43758.5453);
-	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
@@ -53,7 +54,7 @@ void fragment() {
 		// Bare: the crown goes to twig colour and, near, thins (a third of it left at leaf 0).
 		float bare = 1.0 - leaf;
 		c = mix(c, bare_colour * shade, bare * 0.85 * bare_tint);
-		if (thin > 0.0 && hash13(floor(v_world / 0.12)) > mix(1.0, 0.34, bare)) {
+		if (thin > 0.0 && bayer4(FRAGCOORD.xy) > mix(1.0, 0.55, bare)) {
 			discard;
 		}
 	}

@@ -1241,6 +1241,14 @@ func _ice_look(on: bool) -> void:
 
 
 var _ice_mat: StandardMaterial3D
+var _reed_mat: ShaderMaterial
+var _season_look := {}
+
+
+## The season's look on the reed beds (SeasonLive.look_changed).
+func set_season_look(look: Dictionary) -> void:
+	_season_look = look
+	ZoneScatter._apply_look(_reed_mat, look, "reeds", 1.0)
 
 
 ## Ice (frozen water, as the snow preset's): a pale, glossy sheet.
@@ -1422,10 +1430,16 @@ func _reeds() -> Node3D:
 			cells[key] = []
 		(cells[key] as Array).append(k)
 	var mesh := reed_mesh()
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.vertex_color_is_srgb = true
-	mat.roughness = 1.0
+	# The season's material (ZoneScatter's foliage shader): recoloured by set_season_look, dead
+	# straw in winter; drawn as before until a look comes.
+	var reed_mean := Color(0, 0, 0)
+	for c: Color in palette:
+		reed_mean += c / float(palette.size())
+	reed_mean.a = 1.0
+	var mat := ZoneScatter._foliage_mat(reed_mean, Vector3.ZERO, 1.0, 0.0, 0.0)
+	_reed_mat = mat
+	if not _season_look.is_empty():
+		set_season_look(_season_look)
 	var holder := Node3D.new()
 	holder.name = "Reeds"
 	for key: Vector2i in cells:

@@ -221,6 +221,8 @@ func _on_look(l: Dictionary) -> void:
 		lvl.terrain.set_season_look(l)
 	if lvl.scatter and lvl.scatter.has_method(&"set_season_look"):
 		lvl.scatter.set_season_look(l)
+	if lvl.terrain and lvl.terrain.water:
+		lvl.terrain.water.set_season_look(l)  # (the reed beds)
 
 
 ## Every peer: the ice comes or goes on the level's water (walkable, the nav rebaked).

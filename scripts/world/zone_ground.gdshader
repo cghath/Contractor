@@ -35,7 +35,7 @@ uniform vec3 track_colour : source_color = vec3(0.17, 0.13, 0.08);
 uniform vec3 season_tint : source_color = vec3(1.0);
 uniform float season_dry = 0.0;
 uniform float season_snow = 0.0;
-uniform vec3 season_snow_colour : source_color = vec3(0.89, 0.91, 0.93);
+uniform vec3 season_snow_colour : source_color = vec3(0.80, 0.83, 0.87);  // (not paper white: lit, it still reads white)
 
 varying vec3 w_pos;
 varying vec3 w_nrm;
@@ -215,7 +215,9 @@ void fragment() {
 		float s_cover = smoothstep(s_level - 0.2, s_level + 0.05, s_drift * 0.85 + grain * 0.15);
 		s_cover *= smoothstep(0.30, 0.14, 1.0 - clamp(w_nrm.y, 0.0, 1.0));
 		s_cover *= 1.0 - roadness * 0.7;
-		vec3 s_col = season_snow_colour * mix(0.88, 1.02, s_drift) * mix(1.0, mix(0.96, 1.03, grain), close);
+		// Drifts and hollows: the wind-packed crests a touch brighter, the hollows blue-grey in shade.
+		vec3 s_col = season_snow_colour * mix(vec3(0.80, 0.83, 0.90), vec3(1.03), s_drift) * mix(1.0, mix(0.95, 1.03, grain), close);
+		s_col *= mix(0.94, 1.02, macro);
 		s_col *= 1.0 + step(0.985, hash12(floor(p / 0.1) + 3.0)) * speck_near * 0.25;  // the glint
 		col = mix(col, s_col, s_cover);
 	}

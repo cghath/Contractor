@@ -7,16 +7,21 @@ extends RefCounted
 ## Colours are sRGB hex. "tint" multiplies the ground's colour, "dry" pulls it toward the ground
 ## shader's dry_colour (straw), "grass" replaces the grass carpet's and tufts' colours, "crown" the
 ## broadleaf crowns' (conifers keep the preset's), "leaf" is how much of a broadleaf crown is
-## there (1 full, 0 bare: winter), "leaves" how many falling leaves per second near woods.
+## there (1 full, 0 bare: winter), "leaves" how many falling leaves per second near woods, "bush"
+## the scrub's and thickets' colours (they keep their shape and cover: a leafless hedge still hides a
+## man) and "reeds" the reed beds' (dead straw in winter).
 
 const LOOKS := {
 	"spring": {"tint": "f2f7e8", "dry": 0.0, "grass": ["5f7d35", "6a8a3c", "57712f"],
-		"crown": ["6f9440", "7a9e48", "64883a"], "leaf": 0.85, "leaves": 0.0},
-	"summer": {"tint": "ffffff", "dry": 0.1, "grass": [], "crown": [], "leaf": 1.0, "leaves": 0.0},
+		"crown": ["6f9440", "7a9e48", "64883a"], "leaf": 0.85, "leaves": 0.0,
+		"bush": ["5f7a38", "6a8240", "566e32"], "reeds": ["6f8a3e", "7d9046", "64803a"]},
+	"summer": {"tint": "ffffff", "dry": 0.1, "grass": [], "crown": [], "leaf": 1.0, "leaves": 0.0, "bush": [], "reeds": []},
 	"autumn": {"tint": "f4ead8", "dry": 0.45, "grass": ["8a7f4a", "7c7444", "93804c"],
-		"crown": ["9a5a26", "b07a2e", "8a7a32", "6e7230", "a0442a"], "leaf": 0.7, "leaves": 40.0},
+		"crown": ["9a5a26", "b07a2e", "8a7a32", "6e7230", "a0442a"], "leaf": 0.7, "leaves": 40.0,
+		"bush": ["7a6a3a", "6e6a3c", "856c3a"], "reeds": ["9a8a56", "a08f5a", "8c7e4e"]},
 	"winter": {"tint": "d8d6d0", "dry": 0.6, "grass": ["6f6a58", "66604f", "777162"],
-		"crown": ["5e5244", "6a5a48"], "leaf": 0.0, "leaves": 0.0},
+		"crown": ["5e5244", "6a5a48"], "leaf": 0.0, "leaves": 0.0,
+		"bush": ["5a5240", "625a46", "54503e"], "reeds": ["b8a878", "a8986a", "c2b384"]},
 }
 ## How long the land takes to change when the season turns mid-visit (s).
 const BLEND_S := 20.0

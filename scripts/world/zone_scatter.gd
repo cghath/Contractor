@@ -262,6 +262,7 @@ var _season_look := {}
 var _crown_mat: ShaderMaterial
 var _far_mat: ShaderMaterial
 var _grass_mat: ShaderMaterial
+var _bush_mat: ShaderMaterial
 const SEASON_FOLIAGE := preload("res://scripts/world/season_foliage.gdshader")
 var _scrubs: Array[Color] = []
 var _scrub_lo := 0.6
@@ -1857,6 +1858,7 @@ func _season_materials(colours: Dictionary) -> void:
 	_crown_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.72, 1.0, 1.0)
 	_far_mat = _foliage_mat(crown_mean, Vector3(0.0, 2.6, 0.0), 0.6, 0.0, 1.0)
 	_grass_mat = _foliage_mat(_mean(_colours(colours.get("tuft", colours.get("scrub", ["6f7040"])))), Vector3.ZERO, 0.55, 0.0, 0.0)
+	_bush_mat = _foliage_mat(_mean(_scrubs), Vector3.ZERO, 1.0, 0.0, 0.0)  # (recoloured only: shape and cover kept)
 	if not _season_look.is_empty():
 		set_season_look(_season_look)  # (the look came before the visuals were built)
 
@@ -1886,10 +1888,14 @@ static func _mean(list: Array[Color]) -> Color:
 ## The material a cell's MultiMesh of `key` draws with: the season's for broadleaf crowns and
 ## grass tufts, else the shared one.
 func _material_for(key: Variant) -> Material:
-	if key is String and _crown_mat and String(key) in ["crown", "crown_lod"]:
-		return _crown_mat
+	if key is String and _crown_mat and String(key) == "crown":
+		return _crown_mat  # (near: thinned to twigs when bare)
+	if key is String and _far_mat and String(key) == "crown_lod":
+		return _far_mat  # (past LOD_M: tinted and shrunk, no discard: it kept the GPU's early depth test off for every far crown)
 	if key is String and _grass_mat and String(key) == "tuft":
 		return _grass_mat
+	if _bush_mat and ((key is int and key == Kind.SCRUB) or (key is String and String(key) in ["thicket", "thicket_lod", "scrub_lod"])):
+		return _bush_mat
 	return _material
 
 
@@ -1921,6 +1927,7 @@ func set_season_look(look: Dictionary) -> void:
 	_apply_look(_crown_mat, look, "crown", leaf_cover)
 	_apply_look(_far_mat, look, "crown", leaf_cover)
 	_apply_look(_grass_mat, look, "grass", leaf_cover)
+	_apply_look(_bush_mat, look, "bush", 1.0)
 
 
 static func _apply_look(m: ShaderMaterial, look: Dictionary, key: String, leaf: float) -> void:

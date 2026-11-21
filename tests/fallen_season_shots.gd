@@ -1,7 +1,7 @@
 extends Node
 ## Fallen's seasons on the land (plans/fallen-seasons.md, steps 8 and 9), in the real renderer
 ## (needs a window, not --headless; the window never takes focus):
-##   <voxel godot exe> --path . res://tests/fallen_season_shots.tscn -- <season> <output folder>
+##   <voxel godot exe> --path . res://tests/fallen_season_shots.tscn -- <season> <output folder> [zone id]
 ## Hosts Fallen's start zone (Survival.start_zone(), the zone def as Survival hosts it, its season
 ## set) with the season shown by SeasonLive, and saves <season>_<view>.png for four views: the farm
 ## (over the fields), a wood's edge (the most broadleaf trees together near the start), a pond or
@@ -9,10 +9,17 @@ extends Node
 ## each view it then times FRAMES frames with vsync off and prints one line:
 ##   [frametime] <season> <view>: avg <ms> worst <ms> draws <n> prims <n>
 ## Run once per season (four processes: a fresh zone each); keep the output as an S run
-## (docs/debugging.md). The frame times compare seasons on one machine, one run to the next.
+## (docs/debugging.md).
+## Season "perf" instead: no pictures; at the wood and the farm views, summer and winter shown in
+## turn (SeasonLive, live) PERF_ROUNDS times, PERF_FRAMES frames each, and one line a view:
+##   [perf] <zone> <view>: summer gpu <ms> cpu <ms> | winter gpu <ms> cpu <ms> (medians)
+## Alternating in one process cancels out whatever else the machine is doing (a game running
+## beside it moves both seasons alike); separate runs a season apart don't.
 
 const DAY := {"spring": 5, "summer": 5, "autumn": 5, "winter": 4}
 const FRAMES := 240
+const PERF_ROUNDS := 8
+const PERF_FRAMES := 90
 
 var level: ZoneLevel
 var camera: Camera3D
@@ -31,9 +38,9 @@ func _ready() -> void:
 	PeopleLayer.populate = false
 	add_child(load("res://scenes/main.tscn").instantiate())
 	await get_tree().process_frame
-	var zone := Survival.start_zone()
+	var zone := String(args[2]) if args.size() > 2 else Survival.start_zone()  # (another zone: one with water, for the ice)
 	var def := MissionRegistry.zone_def(zone).duplicate(true)
-	def["season"] = season
+	def["season"] = "summer" if season == "perf" else season
 	$Main.host_zone(ZoneDef.normalize(def))
 	level = CompoundLevel.current(self) as ZoneLevel
 	while level.players.get_node_or_null(^"1") == null:
@@ -42,6 +49,9 @@ func _ready() -> void:
 	player.set_physics_process(false)
 	player._hud.visible = false
 	var live := SeasonLive.install(level)
+	var perf := season == "perf"
+	if perf:
+		season = "summer"
 	live.server_set(season, int(DAY[season]))
 	live.finish_blend()
 	camera = Camera3D.new()
@@ -53,6 +63,10 @@ func _ready() -> void:
 	print("[shots] %s: zone %s (%s), day %d of the season, snow %.2f, leaf %.2f, ice %s, %d scatter items" % [season, zone, String(level.def.get("terrain", "")),
 		int(DAY[season]), t.season_snow, level.scatter.leaf_cover, live.ice, level.scatter.total()])
 	var ins := level.insertion_points()[0]
+	if perf:
+		await _perf(live, ins)
+		get_tree().quit()
+		return
 	# The farm: from 35 m up past the start, toward the middle of the zone (its fields and woods).
 	var toward := Vector3(-ins.x, 0, -ins.z).normalized()
 	var farm_from := ins + Vector3(0, 35.0, 0) - toward * 20.0
@@ -90,6 +104,53 @@ func _ready() -> void:
 	get_tree().quit()
 
 
+## Summer and winter in turn at the wood's edge and over the farm: medians of the GPU's render time
+## and the frame time.
+func _perf(live: SeasonLive, ins: Vector3) -> void:
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	var t := level.terrain
+	var views := {}
+	var wood := _wood_near(ins)
+	if wood != Vector3.INF:
+		var off := (ins - wood).normalized() * 30.0
+		off.y = 0.0
+		var from := wood + off
+		from.y = t.height_at(from.x, from.z) + 1.8
+		views["wood"] = [from, wood + Vector3(0, 4.0, 0)]
+	var toward := Vector3(-ins.x, 0, -ins.z).normalized()
+	views["farm"] = [ins + Vector3(0, 35.0, 0) - toward * 20.0, ins + toward * 160.0]
+	for view: String in views:
+		camera.global_position = views[view][0]
+		camera.look_at(views[view][1])
+		level.terrain.build_near(camera.global_position, 64)
+		level.scatter.build_near(camera.global_position, 64)
+		var gpu := {"summer": [], "winter": []}
+		var cpu := {"summer": [], "winter": []}
+		for k in PERF_ROUNDS:
+			for s: String in ["summer", "winter"]:
+				live.server_set(s, int(DAY[s]))
+				live.finish_blend()
+				for i in 20:
+					await get_tree().process_frame  # (settle: the uniforms in, the frame after)
+				var last := Time.get_ticks_usec()
+				for i in PERF_FRAMES:
+					await get_tree().process_frame
+					var now := Time.get_ticks_usec()
+					(cpu[s] as Array).append((now - last) / 1000.0)
+					last = now
+					(gpu[s] as Array).append(RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid()))
+		print("[perf] %s %s: summer gpu %.2f cpu %.2f | winter gpu %.2f cpu %.2f (medians of %d frames each)" % [String(level.def.get("id", "zone")), view,
+			_median(gpu.summer), _median(cpu.summer), _median(gpu.winter), _median(cpu.winter), PERF_ROUNDS * PERF_FRAMES])
+
+
+static func _median(list: Array) -> float:
+	if list.is_empty():
+		return 0.0
+	var l := list.duplicate()
+	l.sort()
+	return float(l[l.size() / 2])
+
+
 ## The broadleaf tree within 400 m of `near` with the most broadleaf trees within 20 m of it.
 func _wood_near(near: Vector3) -> Vector3:
 	var sc := level.scatter
@@ -117,7 +178,7 @@ func _view(out: String, view: String, from: Vector3, to: Vector3) -> void:
 	for i in 30:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	var path := out.path_join("%s_%s.png" % [season, view])
+	var path := out.path_join("%s_%s_%s.png" % [String(level.def.get("id", "zone")), season, view])
 	get_viewport().get_texture().get_image().save_png(path)
 	print("[shots] saved %s" % path)
 	var total := 0.0
@@ -134,4 +195,4 @@ func _view(out: String, view: String, from: Vector3, to: Vector3) -> void:
 		worst = maxf(worst, ms)
 		draws = maxi(draws, RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
 		prims = maxi(prims, RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME))
-	print("[frametime] %s %s: avg %.2f worst %.2f draws %d prims %d" % [season, view, total / FRAMES, worst, draws, prims])
+	print("[frametime] %s %s %s: avg %.2f worst %.2f draws %d prims %d" % [String(level.def.get("id", "zone")), season, view, total / FRAMES, worst, draws, prims])
