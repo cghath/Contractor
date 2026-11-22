@@ -1,7 +1,7 @@
 # Fallen: the seasons on the terrain (M2, art gate Blocker 2)
 
 Branch `feat/fallen-seasons` (from `fallen/nov10-playtest` a6064f8b). Owner: Cheeno (code); Captain signs off
-the look. Status: **draft, waiting for Captain's OK**. Every new number is **Proposed**.
+the look. Status: **built; look signed off by Captain 2026-11-21**. Every new number is **Proposed**.
 
 ## What exists (research, 2026-11-21)
 
@@ -120,3 +120,6 @@ commit, and a `WIP fallen-seasons: step N` commit.
   crown a twig haze. R2990: seasons (only the old spike-pit check fails), forest, smoke, terrain,
   nature pass. Frame time S3002 (alternating, a quiet machine): Kestrel wood GPU 3.70 -> 3.56 ms,
   farm 4.49 -> 4.55; wadi_farm wood 3.35 -> 3.44, farm 3.83 -> 3.88. Shots S2991.
+- 2026-11-21: **Captain signed off the four seasons** (shots S2966 and S2991). Still open: the desert
+  wadi getting full lowland snow (call B said every map; not raised again at sign-off), the old
+  spike-pit check (Cheeno), merging to dev (Captain's go and green CI).
