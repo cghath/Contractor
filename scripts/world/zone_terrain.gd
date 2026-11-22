@@ -849,7 +849,9 @@ var season_snow := 0.0
 
 
 func set_season_look(look: Dictionary) -> void:
-	season_snow = float(look.get("snow", 0.0))
+	# A preset with "lowland_snow": false (the desert wadi; Captain, 2026-11-22) never gets the
+	# season's lowland snow: no white ground, no snow slow, no snow footing. Tint and straw still apply.
+	season_snow = float(look.get("snow", 0.0)) if bool(preset.get("lowland_snow", true)) else 0.0
 	if _material == null:
 		return
 	_material.set_shader_parameter(&"season_tint", Color(String(look.get("tint", "ffffff"))))

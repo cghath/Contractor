@@ -218,6 +218,19 @@ func _test_land() -> void:
 	live.server_set("winter", 3)  # (the land only: the world sim is left alone)
 	live.finish_blend()
 	check(String(live.target.season) == "winter" and int(live.target.day) == 3, "the host's season turned: SeasonLive's target is winter day 3 (%s)" % live.target)
+	# A desert preset ("lowland_snow": false; Captain, 2026-11-22) stays bare in winter: no white,
+	# no snow slow, no snow underfoot. The start zone is the desert wadi, so this runs here.
+	var was_preset := level.terrain.preset
+	if not bool(was_preset.get("lowland_snow", true)):
+		var dry_pace := level.terrain.features.slow_at(open.x, open.y) if open != Vector2.INF else 1.0
+		var dry_kind := level.terrain.ground_at(open.x, open.y) if open != Vector2.INF else &""
+		check(level.terrain.season_snow == 0.0 and is_equal_approx(dry_pace, pace_summer) and dry_kind != &"snow",
+			"winter on %s: no lowland snow (%.2f), the summer pace (%.2f of it), no snow underfoot (%s)" % [level.terrain.preset_id,
+			level.terrain.season_snow, dry_pace / pace_summer, dry_kind])
+		# The rest measures the snow itself: this zone with its desert flag lifted for the checks.
+		level.terrain.preset = was_preset.duplicate()
+		level.terrain.preset["lowland_snow"] = true
+		level.terrain.set_season_look(live.look)
 	check(is_equal_approx(level.terrain.season_snow, 1.0), "winter day 3: the snow lies white (%.2f)" % level.terrain.season_snow)
 	if open != Vector2.INF:
 		var lying := level.terrain.features.lowland_snow_at(open.x, open.y)
@@ -291,6 +304,7 @@ func _test_land() -> void:
 	live.server_set("autumn", 1)  # (the land only: the world sim is left alone)
 	live.finish_blend()
 	check(not live.ice and (w == null or not w.ice_on), "back to autumn: the ice gone")
+	level.terrain.preset = was_preset
 	Survival.server_set_options({"season": was_season})
 	Survival.state()["day"] = was_day
 	Seasons.rec()["last"] = was_last

@@ -87,6 +87,7 @@
 		},
 		"desert_wadi": {
 			"name": "Desert wadi",
+			"lowland_snow": false,
 			"features": {"gullies": {"count": [2, 4]}},
 			"land": {"relief_scale": 0.85, "wavelength_m": 560, "octaves": 4, "gain": 0.44, "ridge": 0.2, "detail_m": 3.2, "detail_wavelength_m": 150},
 			"wadi": {"count": 2, "width_m": 55, "depth_m": 8.0, "meander_m": 140, "berm_m": 2.0},

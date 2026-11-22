@@ -78,6 +78,8 @@ static func _mix(id: String) -> Dictionary:
 		for part: Variant in (out.water as Dictionary).values():
 			if part is Dictionary:
 				(part as Dictionary).erase("frozen")  # no ice without the snow
+	if near.has("lowland_snow"):
+		out["lowland_snow"] = near.lowland_snow  # (the nearer half's climate: a desert half stays bare)
 	_mixed[id] = out
 	return out
 

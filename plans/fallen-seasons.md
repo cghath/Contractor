@@ -123,3 +123,7 @@ commit, and a `WIP fallen-seasons: step N` commit.
 - 2026-11-21: **Captain signed off the four seasons** (shots S2966 and S2991). Still open: the desert
   wadi getting full lowland snow (call B said every map; not raised again at sign-off), the old
   spike-pit check (Cheeno), merging to dev (Captain's go and green CI).
+- 2026-11-22: **Captain: keep snow off the desert wadi.** `"lowland_snow": false` on the desert_wadi
+  preset (carried into mixed presets from the nearer half); `ZoneTerrain.set_season_look` zeroes
+  `season_snow` there, so no white ground, snow slow or snow footsteps. Seasons check "winter on
+  desert_wadi" (R3006); R3006: terrain, smoke, survival pass, seasons fails only the old spike-pit check.
