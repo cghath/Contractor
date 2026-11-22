@@ -127,3 +127,5 @@ commit, and a `WIP fallen-seasons: step N` commit.
   preset (carried into mixed presets from the nearer half); `ZoneTerrain.set_season_look` zeroes
   `season_snow` there, so no white ground, snow slow or snow footsteps. Seasons check "winter on
   desert_wadi" (R3006); R3006: terrain, smoke, survival pass, seasons fails only the old spike-pit check.
+- 2026-11-22: Captain: salt flats and badlands too (`"lowland_snow": false`). R3007: terrain, smoke pass;
+  seasons fails only the old spike-pit check; its new check finds the three dry presets bare.

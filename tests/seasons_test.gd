@@ -221,6 +221,10 @@ func _test_land() -> void:
 	# A desert preset ("lowland_snow": false; Captain, 2026-11-22) stays bare in winter: no white,
 	# no snow slow, no snow underfoot. The start zone is the desert wadi, so this runs here.
 	var was_preset := level.terrain.preset
+	var bare: Array = ["desert_wadi", "salt_flats", "badlands"].filter(func(id: String) -> bool:
+		return not bool(TerrainPresets.get_preset(id).get("lowland_snow", true)))
+	check(bare.size() == 3 and bool(TerrainPresets.get_preset("temperate").get("lowland_snow", true)),
+		"the dry presets get no lowland snow, the temperate one does (%s)" % [bare])
 	if not bool(was_preset.get("lowland_snow", true)):
 		var dry_pace := level.terrain.features.slow_at(open.x, open.y) if open != Vector2.INF else 1.0
 		var dry_kind := level.terrain.ground_at(open.x, open.y) if open != Vector2.INF else &""
