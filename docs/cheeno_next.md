@@ -1,4 +1,4 @@
-# Cheeno's next list: Contractor and Contractor: Fallen (2026-11-20)
+# Cheeno's next list: Contractor and Contractor: Fallen (2026-11-20, updated 2026-11-23)
 
 Cheeno, this is the list from the 2026-11-20 gate. The gate was a NO-GO for outside playtesters on both games, because nobody has played them since the last reports and the care scores are 6/10 (Contractor) and 6.5/10 (Fallen). Everything below is yours unless it sits under "Not yours (Captain's)". Work the must-fixes in order, and make the calls yourself as the handoff says; log them in docs/audits/followups.md and mark any new numbers Proposed.
 
@@ -60,7 +60,26 @@ Fallen follow-ups from the 19 Nov review (`docs/audits/followups.md`, F-530 and 
 - Farm pickup inside a player wall in old worlds: `_truck_spot` only avoids the site's own things (followups.md:2316-2317).
 - Convoys stalling on road dead: a zombie within `dead_block_m` halts a column (followups.md:2317-2318). The 6 h timeout still ends it.
 
-## 4. When there's time
+## 4. Milestone work (owners set 2026-11-21)
+
+After the must-fixes, these are yours. The full plan, with exit criteria, is in `docs/MILESTONES_contractor.md` and `docs/MILESTONES_fallen.md`; Captain's goals for both games are in `docs/VISION_contractor.md` and `docs/VISION_fallen.md`. Read the four pillars in each vision before adding anything: every change should serve one.
+
+Contractor:
+- M1: campaign camera yaw and ADS offset, once Captain's M0 contract confirms them.
+- M2: helicopters, Blackhawk resupply and transport, extraction calls; factions and territory shift; the economy (rebase or rebuild `feat/economy-balance`, after Captain picks which).
+- M3: pad and Ctrl/Alt rebinding and a keyboard-free tutorial path; the final tuning pass on every remaining "Proposed" number.
+
+Fallen:
+- M1: wire the hit sounds and zombie audio once Captain sets the feel; fix hint timing and text scale (Captain judges on a replay). Captain's test for fun (decision 7): more interactive, more intense.
+- M2: wear and jams, building, clothing, hands, RPG, events, deadtime, nature.
+- M3: children, horses, farriers and mounts; gunsmithing and tanning; bonds, people, mind, intel, enclave and settlement; the world sim and polish.
+- M4: the security minors in section 5, and a release build from a tag. The playtest invite is solo only (Captain, 2026-11-21), so co-op needs no v1 work.
+
+Seasons (`feat/fallen-seasons`, latest `cc61fe7f`): Captain's session is building the full seasonal look (snow, bare and turning trees, ground tint, ice you can walk on). Plan: `plans/fallen-seasons.md` on that branch. Your part:
+- Review the branch when Captain's session says it's done; your review is the sign-off before it merges into `fallen/nov10-playtest`.
+- The spike-pit check failed in run R3007. The season session reports it as an older failure, not caused by its changes; that is not yet confirmed. Confirm on `fallen/nov10-playtest` and fix it.
+
+## 5. When there's time
 
 These are the security minors. The test group is invited, not public, so they wait until the must-fixes are done.
 
@@ -78,3 +97,4 @@ These are the security minors. The test group is invited, not public, so they wa
 - Contractor must-fix 4: play one 20-minute contract on current dev, capture fresh screenshots (soldier, day/dusk/rain, HUD, inventory, map), and check the campaign camera's 45-degree yaw and ADS offset (`B2897` check).
 - Fallen must-fix 2: melee swing animation and windup tell (`melee.gd:7`); Captain sets the timings by feel.
 - Fallen must-fix 3: rebuild from committed HEAD, play the first hour with screen recording, and capture the first Fallen screenshot set.
+- From the 2026-11-21 owners: body compensation (heart rate and clotting), Fallen needs and medical, STYLE.md and the art re-judge, hit kick and shake feel, and the sign-off on the four-season screenshots.
